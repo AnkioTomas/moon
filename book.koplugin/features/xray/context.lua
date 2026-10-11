@@ -1,0 +1,181 @@
+--[[--
+X-Ray 阅读上下文：当前可见页 + 本章开头到当前页之前的正文（过长保留末尾）。
+
+@module koplugin.book.features.xray.context
+--]]
+
+local Text = require("utils.text")
+
+local Context = {}
+
+local PRIOR_TEXT_LIMIT = 24000
+local VISIBLE_TEXT_LIMIT = 12000
+
+--- 取阅读会话维护的当前页码。
+---@return integer
+local function currentPage()
+    local session = require("reader.session").current()
+    return session and session.page or 0
+end
+
+--- 取某页正文：getTextBoxes 优先，退回 getPageText；结果可能是字符串或嵌套词框表。
+---@param ui table|nil ReaderUI
+---@param page integer|nil
+---@return string 取不到时空串
+local function pageText(ui, page)
+    local document = ui and ui.document
+    if not document or not page or page < 1 then return "" end
+    local boxes
+    if document.getTextBoxes then
+        local ok, result = pcall(document.getTextBoxes, document, page)
+        if ok then boxes = result end
+    end
+    if not boxes and document.getPageText then
+        local ok, result = pcall(document.getPageText, document, page)
+        if ok then boxes = result end
+    end
+    if type(boxes) == "string" then
+        return Text.trim(Text.normalizeNewlines(boxes))
+    end
+    local parts = {}
+    --- 递归收集词框里的文本（word / text 字段优先），最多下探 5 层防环。
+    ---@param depth integer
+    local function walk(value, depth)
+        if depth > 5 then return end
+        if type(value) == "string" then
+            if value ~= "" then parts[#parts + 1] = value end
+        elseif type(value) == "table" then
+            if type(value.word) == "string" then
+                parts[#parts + 1] = value.word
+            elseif type(value.text) == "string" then
+                parts[#parts + 1] = value.text
+            else
+                for index, item in ipairs(value) do walk(item, depth + 1) end
+            end
+        end
+    end
+    walk(boxes, 0)
+    return Text.trim(Text.normalizeNewlines(table.concat(parts, " ")))
+end
+
+---@param s string
+---@param max_bytes integer
+---@return string
+local function tailUtf8(s, max_bytes)
+    if #s <= max_bytes then
+        return s
+    end
+    local start = math.max(1, #s - max_bytes)
+    while start <= #s do
+        local piece = s:sub(start)
+        if #piece <= max_bytes and Text.isValidUtf8(piece) then
+            return piece
+        end
+        start = start + 1
+    end
+    return Text.truncateUtf8(s, max_bytes)
+end
+
+--- 当前可见页正文与页码；滚动文档按屏幕坐标取字。
+---@param ui table|nil
+---@param page integer|nil 分页文档的页码，缺省取阅读会话页码
+---@return string|nil, integer
+function Context.visibleText(ui, page)
+    if not ui then return nil, 0 end
+    local document = ui.document
+    if not document then return nil, 0 end
+    page = page or currentPage()
+    local text
+    if ui.rolling and document.getTextFromPositions then
+        local view = ui.view
+        local dimen = view and view.dimen
+        local width = dimen and dimen.w
+        local height = dimen and dimen.h
+        if not width or not height then
+            local screen = require("device").screen
+            width, height = screen:getWidth(), screen:getHeight()
+        end
+        local ok, result = pcall(document.getTextFromPositions, document,
+            { x = 0, y = 0 }, { x = width, y = height }, true)
+        text = ok and result and result.text or nil
+    else
+        text = pageText(ui, page)
+    end
+    text = Text.trim(Text.normalizeNewlines(text))
+    if text == "" then return nil, page end
+    return Text.truncateUtf8(text, VISIBLE_TEXT_LIMIT), page
+end
+
+--- 本章起始页；没有目录（如单章文件）时为 1。
+---@param ui table
+---@param page integer
+---@return integer
+local function chapterStart(ui, page)
+    local toc = ui.toc
+    if not toc or not toc.getPreviousChapter then return 1 end
+    if toc:isChapterStart(page) then return page end
+    return toc:getPreviousChapter(page) or 1
+end
+
+--- 本章开头到当前页之前的正文（不含当前页），超过 limit 字节保留末尾。
+---@param ui table
+---@param end_page integer
+---@param limit integer|nil 缺省 PRIOR_TEXT_LIMIT
+---@return string
+function Context.priorText(ui, end_page, limit)
+    limit = limit or PRIOR_TEXT_LIMIT
+    local start_page = chapterStart(ui, end_page)
+    if end_page <= start_page then
+        return ""
+    end
+    local document = ui.document
+    -- CRE 没有逐页取字接口，只能按两页起点的 xpointer 取区间文本。
+    if ui.rolling and document.getPageXPointer then
+        local ok, text = pcall(function()
+            return document:getTextFromXPointers(
+                document:getPageXPointer(start_page), document:getPageXPointer(end_page))
+        end)
+        text = ok and Text.trim(Text.normalizeNewlines(text)) or ""
+        return tailUtf8(text, limit)
+    end
+    local parts = {}
+    local total = 0
+    for page = end_page - 1, start_page, -1 do
+        local text = pageText(ui, page)
+        if text ~= "" then
+            local room = limit - total
+            if #text > room then
+                text = tailUtf8(text, room)
+            end
+            if text ~= "" then
+                table.insert(parts, 1, text)
+                total = total + #text
+            end
+            if total >= limit then
+                break
+            end
+        end
+    end
+    return table.concat(parts, "\n\n")
+end
+
+--- 组装 X-Ray 分析上下文。
+---@param ui table
+---@param prior_limit integer|nil 前文字节上限，缺省 PRIOR_TEXT_LIMIT
+---@return { current_page: string, prior_text: string, page: integer }
+function Context.forAnalysis(ui, prior_limit)
+    local page = currentPage()
+    local visible, visible_page = Context.visibleText(ui)
+    if visible_page and visible_page > 0 then
+        page = visible_page
+    end
+    return {
+        current_page = visible or pageText(ui, page),
+        prior_text = Context.priorText(ui, page, prior_limit),
+        page = page,
+    }
+end
+
+Context.currentPage = currentPage
+
+return Context

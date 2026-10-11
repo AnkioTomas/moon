@@ -44,6 +44,11 @@ package.preload["http.request"] = function()
             cb(canned_res, canned_err)
             return { cancel = function() end }
         end,
+        download = function(opts, _dest, cb)
+            captured[#captured + 1] = opts
+            cb(canned_res == nil and canned_err == nil, canned_err, canned_res)
+            return { cancel = function() end }
+        end,
     }
 end
 package.loaded["http.request"] = nil
@@ -190,7 +195,7 @@ do
     Assert.len(entries, 0)
 end
 
--- ── listAsync：网络错误透传 ──────────────────────────────
+-- ── listAsync：网络错误点明是连不上 WebDAV ────────────────
 do
     local dav = Webdav.new({ url = "http://example.com/dav/" })
     canned_res = nil
@@ -201,7 +206,7 @@ do
         entries, err = e, er
     end)
     Assert.is_nil(entries)
-    Assert.eq(err, "boom")
+    Assert.eq(err, "无法连接 WebDAV 服务器：boom")
     canned_err = nil
 end
 
@@ -218,12 +223,35 @@ do
         return err
     end
 
-    Assert.eq(listErr(401), "认证失败，请检查用户名或密码")
-    Assert.eq(listErr(403), "认证失败，请检查用户名或密码")
-    Assert.eq(listErr(500), "HTTP 500")
-    Assert.eq(listErr("404"), "HTTP 404")
+    Assert.eq(listErr(401), "WebDAV 认证失败：用户名或密码错误")
+    Assert.eq(listErr(403), "WebDAV 没有权限：该账号无法读写这个目录")
+    Assert.eq(listErr("404"), "WebDAV 路径不存在：请检查地址和目录")
+    Assert.eq(listErr(507), "WebDAV 空间不足")
+    Assert.eq(listErr(500), "WebDAV 服务器出错（HTTP 500）")
+    Assert.eq(listErr(400), "WebDAV 请求失败（HTTP 400）")
     -- 非数字状态码
-    Assert.eq(listErr("nope"), "请求失败: nope")
+    Assert.eq(listErr("nope"), "WebDAV 请求失败：nope")
+end
+
+-- ── getAsync：状态码 / 连不上 / 本地写盘失败分开报 ─────────
+do
+    local dav = Webdav.new({ url = "http://example.com/dav/" })
+    local function get(res, err)
+        canned_res, canned_err = res, err
+        local out = {}
+        dav:getAsync("a.epub", "/tmp/a.epub", nil, function(ok, e, code) out = { ok, e, code } end)
+        return out
+    end
+    local r = get({ code = 403 }, "HTTP 403")
+    Assert.is_nil(r[1])
+    Assert.eq(r[2], "WebDAV 没有权限：该账号无法读写这个目录")
+    Assert.eq(r[3], 403)
+    r = get({}, "connection refused")
+    Assert.eq(r[2], "无法连接 WebDAV 服务器：connection refused")
+    Assert.is_nil(r[3])
+    r = get({ code = 200 }, "No space left on device")
+    Assert.eq(r[2], "No space left on device", "收到 2xx 后写盘失败不是 WebDAV 的问题")
+    canned_res, canned_err = nil, nil
 end
 
 -- ── putFileAsync：PUT 文件内容与 Basic 凭据 ───────────────

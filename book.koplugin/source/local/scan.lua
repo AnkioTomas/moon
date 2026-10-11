@@ -1,0 +1,529 @@
+--[[--
+本地源：本地书库目录扫盘、导入、移动、排版替换、单本索引。
+遍历与解析在子进程（workers.job），落库在主进程；子进程不碰 sqlite。
+函数首参即 LocalClient，由 source.local.client 装配为方法。
+
+@module koplugin.book.source.local.scan
+--]]
+
+local lfs = require("libs/libkoreader-lfs")
+local util = require("util")
+local Text = require("utils.text")
+local _ = require("gettext")
+local T = require("ffi/util").template
+local Job = require("workers.job")
+local Perf = require("utils.perf")
+local Common = require("source.local.common")
+
+local SOURCE_ID = Common.SOURCE_ID
+local defer, isBookFile, rootPath, coverPath = Common.defer, Common.isBookFile, Common.rootPath, Common.coverPath
+local moveBookArtifacts, ensureCover = Common.moveBookArtifacts, Common.ensureCover
+local parseBookProps, scanFiles = Common.parseBookProps, Common.scanFiles
+
+local Scan = {}
+
+--- 自动扫描节流间隔（秒）：桌面反复打开不重复扫盘
+local AUTO_SCAN_INTERVAL = 60
+
+--- 从文件名解析标题与作者（引擎解析失败时的兜底，保证扫到的书都入库）。
+--- 支持格式："作者 - 书名.ext" / "书名 - 作者.ext" / "书名.ext"
+---@param filename string
+---@return string title, string|nil authors
+local function parseFilename(filename)
+    local name = filename:gsub("%.[^.]+$", "")
+    name = Text.trim(name:gsub("[%[%(].-[%]%)]", ""))
+    -- "作者 - 书名"（含空格的分隔符优先）
+    local a, b = name:match("^(.+)%s+%-%s+(.+)$")
+    if a and b then
+        return b, a
+    end
+    -- "书名 - 作者"（无空格分隔符）
+    a, b = name:match("^(.+)%-(.+)$")
+    if a and b then
+        return a, b
+    end
+    return name, nil
+end
+
+--- 扫盘的进程边界：
+---   子进程只做文件系统 / 渲染引擎重活（遍历、md5、解析元数据、落封面），**不碰 sqlite**——
+---   utils.db 禁止子进程访问库（fork 会继承父进程的连接句柄）。
+---   主进程在 fork 前查好「已入库且标题非空」的行交给子进程判断是否要解析，
+---   子进程返回扫描产物列表，主进程收齐后落库。
+
+--- 主进程：扫盘解析过的行（有 md5 且有书名），按 stable_id（即路径）索引；
+--- 另附全部行（含残缺行与墓碑）的内容 md5，供子进程识别同路径换了文件。
+---@return table<string, Book> known, table<string, string> digests
+local function knownBooks()
+    local BookDB = require("book.books_db")
+    local rows = BookDB.getMany(SOURCE_ID, BookDB.stableIdsBySource(SOURCE_ID))
+    local digests = {}
+    for stable_id, row in pairs(rows) do
+        digests[stable_id] = row.md5
+        -- md5 只由扫盘/入库写入，有它就说明按当前内容解析过；作者/简介缺失多半是书本身没有，
+        -- 按缺字段判定会让每次扫盘重开几乎所有书。无 md5 的身份行（开书时登记）照常解析补齐。
+        if not row.md5 or type(row.title) ~= "string" or row.title == "" then
+            rows[stable_id] = nil
+        end
+    end
+    return rows, digests
+end
+
+--- 子进程：算 md5；已入库且内容没变的书只补缺失封面，否则解析元数据（引擎失败回退文件名）。
+--- 同路径内容变了（删书后拷入同名新书 / 覆盖上传）标 changed 并删掉旧封面，按新书重新提取。
+--- 引擎段错误 pcall 接不住，子进程直接死：打开文档前后各报一次 progress（path / false），
+--- 父进程据此认出致死的书，下一轮放进 skip 只按文件名入库。
+---@param f table 扫描产物 { name, path, category, series }
+---@param known table<string, Book>
+---@param digests table<string, string> 库内各路径的内容 md5
+---@param skip table<string, boolean> 曾让子进程崩溃的书，不再打开
+---@param tried table<string, boolean> 本会话已为补封面打开过的书（本身没封面的书不必每轮重开）
+---@param progress fun(value: string|false)
+---@return table f 原表，补上 md5/changed/cover_tried，需解析时再补 title/authors/intro
+local function parseFile(f, known, digests, skip, tried, progress)
+    local open = not skip[f.path]
+    f.md5 = util.partialMD5(f.path)
+    local old = digests[f.path]
+    f.changed = f.md5 ~= nil and old ~= nil and old ~= f.md5
+    if f.changed then
+        os.remove(coverPath(f.path))
+    elseif known[f.path] then
+        if open and not tried[f.path] and lfs.attributes(coverPath(f.path), "mode") ~= "file" then
+            f.cover_tried = true
+            progress(f.path)
+            ensureCover(f.path)
+            progress(false)
+        end
+        return f
+    end
+    local props = {}
+    if open then
+        f.cover_tried = true
+        progress(f.path)
+        props = parseBookProps(f.path) or {}
+        progress(false)
+    end
+    f.title, f.authors, f.intro = props.title, props.authors, props.intro
+    if not f.title or f.title == "" then
+        f.title, f.authors = parseFilename(f.name)
+    end
+    return f
+end
+
+--- 主进程：把子进程解析结果写入 books 表。
+--- 已入库且内容未变的行只恢复书架成员（changed 行按新解析结果重写）；未命中时按内容 md5 找旧行——旧文件已不在盘上且新路径无任何行
+--- （known 不含元数据残缺行与墓碑）才算移动/改名，原地换 stable_id（身份以 md5 为准，不当新书），
+--- category/series 随新位置刷新；同内容副本并存时各自成书，否则改名会撞主键让整次扫盘失败。
+---@param files table[] parseFile 产物
+---@param known table<string, Book>
+---@param full_snapshot boolean|nil
+---@return boolean
+local function commitFiles(files, known, full_snapshot)
+    local BookDB = require("book.books_db")
+    for _idx, f in ipairs(files) do
+        local cached = known[f.path]
+        local moved
+        if not cached then
+            local by_md5 = f.md5 and BookDB.getByMd5(SOURCE_ID, f.md5)
+            if by_md5 and by_md5.stable_id ~= f.path
+                and not lfs.attributes(by_md5.stable_id, "mode")
+                and not BookDB.get(SOURCE_ID, f.path) then
+                if not BookDB.renameStableId(
+                    SOURCE_ID, by_md5.stable_id, f.path, f.category, f.series
+                ) then
+                    return false
+                end
+                moveBookArtifacts(by_md5.stable_id, f.path)
+                moved = by_md5
+            end
+        end
+        if full_snapshot then
+            f.source_id = SOURCE_ID
+            f.stable_id = f.path
+            f.deleted = 0
+        end
+        if cached and not f.changed then
+            if not full_snapshot and (tonumber(cached.deleted) or 0) ~= 0
+                and not BookDB.setLibraryMembership(SOURCE_ID, f.path, true) then
+                return false
+            end
+        -- knownBooks 只把解析过的行交给 worker；移动过来的旧行也会
+        -- 在这里用本次解析结果补齐。不要把“已存在”误当成“无需更新”。
+        -- 换了内容的行即便走快照也要本地可信写入：reconcile 对脏行保留旧书名。
+        elseif (f.changed or not full_snapshot) and not BookDB.upsert({
+            source_id = SOURCE_ID, stable_id = f.path, md5 = f.md5,
+            title = f.title, authors = f.authors, intro = f.intro,
+            category = f.category, series = f.series,
+            inserted_at = moved and moved.inserted_at or os.time(), path = f.path,
+        }) then
+            return false
+        end
+        if f.changed then
+            require("ui.themes.widgets.image").invalidate(coverPath(f.path))
+        end
+    end
+    return not full_snapshot
+        or BookDB.reconcile(SOURCE_ID, files, { clear_missing_paths = true })
+end
+
+--- 扫盘任务：遍历与解析在子进程，落库在主进程，cancel 杀子进程。
+--- 子进程死在某本书的引擎里时跳过它重扫（每轮至少多跳一本，必然收敛），本会话内不再打开它；
+--- 其余失败照常回调，库里是旧数据，照查，不让 UI 空转。
+--- 子进程 progress 两种帧：`{ i, n, name }` 是逐本计数；路径 / false 是开文档前后的崩溃探针。
+---@param self LocalClient
+---@param cb fun(ok: boolean, err: string|nil)
+---@param report fun(text: string, done: integer|nil, total: integer|nil)|nil
+---@return { cancel: fun() }
+local function scanJob(self, cb, report)
+    report = report or function() end
+    local root = rootPath(self.cfg)
+    local known, digests = knownBooks()
+    local job
+    local started_at = Perf.now()
+    -- 崩溃记录跨轮保留：入库后缺封面还会被补提，不记住的话每轮扫盘都要再崩一次、整轮重来
+    self._crashed = self._crashed or {}
+    self._cover_tried = self._cover_tried or {}
+    local skip, tried = self._crashed, self._cover_tried
+    local function start()
+        local opening, count
+        report(_("正在扫描书库…"))
+        job = Job.run(function(progress)
+            local files = scanFiles(root)
+            for i = 1, #files do
+                progress({ i, #files, files[i].name })
+                files[i] = parseFile(files[i], known, digests, skip, tried, progress)
+            end
+            return files
+        end, {
+            name = "local.scan",
+            kind = "medium",
+            on_progress = function(value)
+                if type(value) == "table" then
+                    count = value
+                    report(T(_("正在检查 %1"), value[3]), value[1], value[2])
+                    return
+                end
+                opening = value or nil
+                if opening and count then
+                    report(T(_("正在解析 %1"), count[3]), count[1], count[2])
+                end
+            end,
+            on_done = function(files)
+                for _idx, f in ipairs(files or {}) do
+                    if f.cover_tried then tried[f.path] = true end
+                end
+                if commitFiles(files or {}, known, true) then
+                    require("utils.log").dbg("book.perf local.scan", Perf.elapsedMs(started_at), "ms",
+                        "files", files and #files or 0)
+                    cb(true)
+                else
+                    require("utils.log").warn("book local scan commit failed")
+                    cb(false, "failed to commit local scan")
+                end
+            end,
+            on_failed = function(err)
+                if opening and not skip[opening] then
+                    require("utils.log").warn("book local scan crashed; skip", opening, err)
+                    skip[opening] = true
+                    return start()
+                end
+                require("utils.log").warn("book local scan failed", err)
+                cb(false, err or "local scan failed")
+            end,
+        })
+    end
+    start()
+    return { cancel = function()
+            job:cancel()
+        end }
+end
+
+--- 把外部文件收进书库根目录并单本入库（不重扫）。
+--- 防重名加 " (n)"；os.rename 失败（跨设备）退化为流式复制，失败不留半截文件。
+---@param temp_path string
+---@param filename string
+---@param cb fun(ok: boolean|nil, err: any)
+---@return { cancel: fun() }|nil
+---@param self LocalClient
+function Scan.importAsync(self, temp_path, filename, cb)
+    local ok, path_err = self:validatePath()
+    if not ok then
+        cb(nil, path_err)
+        return nil
+    end
+    local root = rootPath(self.cfg)
+    filename = tostring(filename or ""):gsub("[/\\]", "_")
+    if filename == "" then
+        cb(nil, _("无效文件名"))
+        return nil
+    end
+    local stem, ext = filename:match("^(.*)(%.[^.]*)$")
+    stem, ext = stem or filename, ext or ""
+    local target, n = root .. "/" .. filename, 2
+    while lfs.attributes(target) do
+        target = string.format("%s/%s (%d)%s", root, stem, n, ext)
+        n = n + 1
+    end
+    local moved = os.rename(temp_path, target)
+    if not moved then
+        local input, copy_err = io.open(temp_path, "rb")
+        local output
+        if input then
+            output, copy_err = io.open(target, "wb")
+        end
+        if not input or not output then
+            if input then input:close() end
+            pcall(os.remove, target)
+            cb(nil, tostring(copy_err))
+            return nil
+        end
+        while true do
+            local chunk = input:read(64 * 1024)
+            if not chunk then break end
+            local written, write_err = output:write(chunk)
+            if not written then
+                input:close()
+                output:close()
+                pcall(os.remove, target)
+                cb(nil, tostring(write_err))
+                return nil
+            end
+        end
+        input:close()
+        output:close()
+    end
+    return self:indexOneAsync(target, cb)
+end
+
+--- 手动改分类/系列 = 移动文件：分类是一级目录、系列是二级目录（无分类则系列无意义，丢弃）。
+--- stable_id 即文件绝对路径，移动后跟着变；书籍相关身份经 renameStableId 迁移，
+--- 封面缓存与 KOReader 的 .sdr 目录（阅读进度/书签/笔记）改名跟随。
+--- 编辑对话框保存时同步调用 renameStableId 写库；FS 操作不另起子进程。
+---@param stable_id string 当前文件绝对路径
+---@param category string|nil
+---@param series string|nil
+---@return string|nil, string|nil err
+---@param self LocalClient
+function Scan.moveBook(self, stable_id, category, series)
+    local root = rootPath(self.cfg)
+    if root == "" then
+        return nil, _("未配置本地路径")
+    end
+    local filename = type(stable_id) == "string" and stable_id:match("([^/]+)$")
+    if not filename then
+        return nil, _("无效路径")
+    end
+    --- 单级目录名：去空白；含路径分隔符或以 . 开头（隐藏目录/逃逸书库根）拒绝。
+    ---@return string|nil, boolean|nil
+    local function dirName(s)
+        s = Text.trim(type(s) == "string" and s or "")
+        if s == "" then
+            return nil
+        end
+        if s:find("[/\\]") or s:sub(1, 1) == "." then
+            return nil, true
+        end
+        return s
+    end
+    local cat, bad_cat = dirName(category)
+    local ser, bad_ser = dirName(series)
+    if bad_cat or bad_ser then
+        return nil, _("目录名不能含斜杠或以点开头")
+    end
+    if not cat then
+        ser = nil
+    end
+    local dir = root
+    if cat then
+        dir = dir .. "/" .. cat
+    end
+    if ser then
+        dir = dir .. "/" .. ser
+    end
+    local new_path = dir .. "/" .. filename
+    if new_path == stable_id then
+        return stable_id
+    end
+    if lfs.attributes(new_path) then
+        return nil, _("目标位置已有同名文件：") .. filename
+    end
+    -- lfs.mkdir 不递归，逐级建；目录已存在会失败，忽略（os.rename 会做最终裁决）
+    if cat then
+        lfs.mkdir(root .. "/" .. cat)
+    end
+    if ser then
+        lfs.mkdir(dir)
+    end
+    local moved, move_err = os.rename(stable_id, new_path)
+    if not moved then
+        return nil, _("移动失败：") .. tostring(move_err)
+    end
+    local artifacts_ok, artifacts_err = moveBookArtifacts(stable_id, new_path)
+    if not artifacts_ok then
+        moveBookArtifacts(new_path, stable_id)
+        os.rename(new_path, stable_id)
+        return nil, _("移动失败：") .. tostring(artifacts_err)
+    end
+    if not require("book.books_db").renameStableId(SOURCE_ID, stable_id, new_path, cat, ser) then
+        moveBookArtifacts(new_path, stable_id)
+        os.rename(new_path, stable_id)
+        return nil, _("更新书籍身份失败")
+    end
+    return new_path
+end
+
+--- 用转换后的临时 EPUB 替换本地原书。
+--- 新文件使用原文件名的 .epub 扩展名；原书、封面、.sdr 和数据库身份一起迁移。
+--- 目标 EPUB 已存在或任一步骤失败时拒绝操作，避免覆盖另一册书。
+---@param temp_path string 转换器生成的临时 EPUB
+---@param stable_id string 原书绝对路径
+---@return string|nil new_stable_id, string|nil err
+---@param self LocalClient
+function Scan.replaceBook(self, temp_path, stable_id)
+    local ok, path_err = self:validatePath()
+    if not ok then
+        return nil, path_err
+    end
+    if type(temp_path) ~= "string" or temp_path == ""
+        or type(stable_id) ~= "string" or stable_id == ""
+    then
+        return nil, _("无效路径")
+    end
+    local root = rootPath(self.cfg)
+    if stable_id ~= root and stable_id:sub(1, #root + 1) ~= root .. "/" then
+        return nil, _("原书不在书库目录内")
+    end
+    local new_path = stable_id:gsub("%.[^./]+$", ".epub")
+    if new_path == stable_id then
+        return nil, _("原书已经是 EPUB")
+    end
+    local taken = lfs.attributes(new_path) and new_path
+        or lfs.attributes(new_path .. ".sdr") and new_path .. ".sdr"
+    if taken then
+        return nil, _("目标位置已有同名文件：") .. taken:match("([^/]+)$")
+    end
+
+    local backup = stable_id .. ".moon-reflow-backup"
+    if lfs.attributes(backup) then
+        return nil, _("存在未完成的排版替换，请清理后重试")
+    end
+    local moved, move_err = os.rename(stable_id, backup)
+    if not moved then
+        return nil, _("暂存原书失败：") .. tostring(move_err)
+    end
+    local created, create_err = os.rename(temp_path, new_path)
+    if not created then
+        os.rename(backup, stable_id)
+        return nil, _("放置转换文件失败：") .. tostring(create_err)
+    end
+
+    local BookDB = require("book.books_db")
+    local row = BookDB.get(SOURCE_ID, stable_id)
+    local category, series = row and row.category, row and row.series
+    if not BookDB.renameStableId(SOURCE_ID, stable_id, new_path, category, series) then
+        os.remove(new_path)
+        os.rename(backup, stable_id)
+        return nil, _("更新书籍身份失败")
+    end
+
+    if not os.remove(backup) then
+        BookDB.renameStableId(SOURCE_ID, new_path, stable_id, category, series)
+        os.remove(new_path)
+        os.rename(backup, stable_id)
+        return nil, _("删除原书失败")
+    end
+    local digest_ok, digest = pcall(util.partialMD5, new_path)
+    if row and digest_ok and type(digest) == "string" and digest ~= "" then
+        local updated = {}
+        for key, value in pairs(row) do updated[key] = value end
+        updated.source_id = SOURCE_ID
+        updated.stable_id = new_path
+        updated.path = new_path
+        updated.md5 = digest
+        BookDB.upsert(updated)
+    end
+    moveBookArtifacts(stable_id, new_path)
+    return new_path
+end
+
+--- 单文件入库（不扫盘、不清失效）。同步解析在子进程跑。
+--- 导入落根目录，category/series 恒为 nil（与扫盘根层语义一致）。
+---@param path string 绝对路径（即 stable_id）
+---@param cb fun(ok: boolean|nil, err: any)
+---@return { cancel: fun() }|nil
+---@param self LocalClient
+function Scan.indexOneAsync(self, path, cb)
+    if type(path) ~= "string" or path == "" then
+        return defer(cb, nil, _("无效路径"))
+    end
+    local name = path:match("([^/]+)$") or path
+    if not isBookFile(name) then
+        return defer(cb, nil, _("不支持的文件格式"))
+    end
+    local known, digests = knownBooks()
+    local job = Job.run(function(progress)
+        return parseFile({ name = name, path = path }, known, digests, {}, {}, progress)
+    end, {
+        name = "local.index",
+        kind = "light",
+        on_done = function(f)
+            if commitFiles({ f }, known) then
+                cb(true)
+            else
+                cb(nil, "failed to commit local book")
+            end
+        end,
+        on_failed = function(err)
+            require("utils.log").warn("book local index failed", err)
+            cb(nil, err)
+        end,
+    })
+    return { cancel = function()
+            job:cancel()
+        end }
+end
+
+--- 强制扫盘写库（不查询）。供 syncBooksAsync(force) 使用。
+---@param cb fun(ok: boolean, err: any)
+---@param report fun(text: string, done: integer|nil, total: integer|nil)|nil 真实步骤上报
+---@return { cancel: fun() }|nil
+---@param self LocalClient
+function Scan.scanAsync(self, cb, report)
+    if self:isWebdav() then
+        return self:scanWebdavAsync(cb, { refresh = true, on_progress = report })
+    end
+    local ok, err = self:validatePath()
+    if not ok then
+        return defer(cb, false, err)
+    end
+    return scanJob(self, cb, report)
+end
+
+--- 打开桌面时的自动扫描（节流 AUTO_SCAN_INTERVAL 秒）：扫盘写库 + 清失效。
+---@param cb fun(scanned: boolean, err: string|nil, skipped: boolean|nil)
+---@param report fun(text: string, done: integer|nil, total: integer|nil)|nil 真实步骤上报
+---@return { cancel: fun() }|nil
+---@param self LocalClient
+function Scan.autoScanAsync(self, cb, report)
+    local path_ok, path_err = self:validatePath()
+    if not path_ok then
+        cb(false, path_err)
+        return nil
+    end
+    if self:isWebdav() then
+        return self:scanWebdavAsync(cb, { on_progress = report })
+    end
+    if not self._auto_scan then
+        -- 门闩：窗口内再调返回 nil
+        self._auto_scan = require("utils.timing").throttle(function()
+            return true
+        end, AUTO_SCAN_INTERVAL)
+    end
+    if not self._auto_scan() then
+        cb(false, nil, true)
+        return nil
+    end
+    return scanJob(self, cb, report)
+end
+
+return Scan

@@ -1,0 +1,110 @@
+--[[--
+锁屏语句面板：白底 panel + 共享 Quote Widget。
+
+@module koplugin.book.features.lockscreen.components.quote_panel
+--]]
+
+local Blitbuffer = require("ffi/blitbuffer")
+local Layout = require("features.lockscreen.layout")
+local Text = require("utils.text")
+
+local M = {}
+
+--- 长文先降字号，最小字号仍超高时按 UTF-8 边界截断加省略号。
+---@param text string
+---@param width number
+---@param size number 起始字号
+---@param min_size number
+---@param max_h number
+---@return string text, number size, number text_h
+function M.fit(text, width, size, min_size, max_h)
+    local Render = require("features.lockscreen.render")
+    local text_h = Render.measureText(text, width, size, true)
+    while text_h > max_h and size > min_size do
+        size = size - 2
+        text_h = Render.measureText(text, width, size, true)
+    end
+    if text_h <= max_h then return text, size, text_h end
+    local low, high, fitted = 0, #text, ""
+    while low <= high do
+        local mid = math.floor((low + high) / 2)
+        local candidate = Text.truncateUtf8(text, mid) .. "…"
+        local height = Render.measureText(candidate, width, size, true)
+        if height <= max_h then
+            fitted, text_h, low = candidate, height, mid + 1
+        else
+            high = mid - 1
+        end
+    end
+    return fitted, size, text_h
+end
+
+--- 绘制正文和出处（共享 UI 组件）。
+---@param text string
+---@param source string
+---@param position string
+---@param wide boolean
+---@return table[]
+function M.blocks(text, source, position, wide)
+    -- 延迟加载：避免 lockscreen 注册表 require 时拉进 KOReader Widget。
+    local Quote = require("features.lockscreen.components.quote")
+    local sw, sh = Layout.portraitSize()
+    local rect = Layout.panel({
+        position = position,
+        wide = wide,
+        screen_w = sw,
+        screen_h = sh,
+    })
+    local text_w = rect.text_w
+    -- 极端长文在最小字号仍放不下时截断，不能覆盖出处。
+    local font_size, text_h
+    text, font_size, text_h = M.fit(text, text_w, wide and 34 or 30, 22, math.floor(sh * 0.55))
+
+    local line_em = 0.35
+    local line_px = math.max(1, math.floor((1 + line_em) * font_size + 0.5))
+    local lines = math.max(2, math.ceil(text_h / line_px))
+    local quote_opts = {
+        body_size = font_size,
+        attr_size = 16,
+        lines = lines,
+        line_em = line_em,
+        pad_x = 0,
+        gap_attr = math.max(14, rect.pad),
+    }
+    local content_h = Quote.contentHeight(quote_opts)
+    local panel_h = math.max(
+        math.floor(sh * 0.32),
+        rect.pad * 2 + content_h
+    )
+    panel_h = math.min(panel_h, math.floor(sh * 0.88))
+    rect = Layout.panel({
+        position = position,
+        wide = wide,
+        height = panel_h,
+        screen_w = sw,
+        screen_h = sh,
+    })
+
+    local inner_h = math.max(1, rect.h - rect.pad * 2)
+    quote_opts.data = { text = text, source = source }
+    quote_opts.width = text_w
+    quote_opts.height = inner_h
+    local widget = Quote:new(quote_opts):build()
+
+    return {
+        {
+            kind = "panel", x = rect.x, y = rect.y, width = rect.w, height = rect.h,
+            radius = rect.radius, shadow = 2, color = Blitbuffer.COLOR_WHITE,
+        },
+        {
+            kind = "widget",
+            widget = widget,
+            x = rect.text_x,
+            y = rect.y + rect.pad,
+            width = text_w,
+            height = inner_h,
+        },
+    }
+end
+
+return M

@@ -11,123 +11,76 @@ local _ = require("gettext")
 local SOURCE_ID = "copymanga"
 local Setting = {}
 
----@param plugin table|nil
-local function editBaseUrl(plugin)
-    local UIManager = require("ui/uimanager")
-    local InputDialog = require("ui/widget/inputdialog")
+local function editBaseUrl()
     local settings = require("utils.settings")
     local cfg = settings.getSource(SOURCE_ID)
-    local dialog
-    dialog = InputDialog:new{
+    require("ui.themes.widgets.input"):new{
         title = _("站点地址"),
-        input = Client.normalizeBaseUrl(cfg.base_url),
-        input_hint = Client.DEFAULT_BASE_URL,
-        buttons = {{
-            { text = _("取消"), id = "close", callback = function() UIManager:close(dialog) end },
-            {
-                text = _("保存"),
-                callback = function()
-                    cfg.base_url = Client.normalizeBaseUrl(dialog:getInputText())
-                    settings.saveSource(SOURCE_ID, cfg)
-                    require("source.registry").afterAuthChanged(plugin)
-                    UIManager:close(dialog)
-                end,
-            },
-        }},
-    }
-    UIManager:show(dialog)
-    dialog:onShowKeyboard()
+        fields = { { text = Client.normalizeBaseUrl(cfg.base_url), hint = Client.DEFAULT_BASE_URL } },
+        ok_text = _("保存"),
+        callback = function(value)
+            cfg.base_url = Client.normalizeBaseUrl(value)
+            settings.saveSource(SOURCE_ID, cfg)
+            require("source.registry").reload()
+        end,
+    }:show()
 end
 
----@param plugin table|nil
 ---@param username string
 ---@param password string
-local function doLogin(plugin, username, password)
+local function doLogin(username, password)
     local Auth = require("source.copymanga.auth")
     local NetworkMgr = require("ui/network/manager")
-    local UIManager = require("ui/uimanager")
-    local InfoMessage = require("ui/widget/infomessage")
+    local Toast = require("ui.themes.widgets.toast")
     NetworkMgr:runWhenOnline(function()
-        local waiting = InfoMessage:new{ text = _("正在登录…") }
-        UIManager:show(waiting)
+        local waiting = Toast:new{ text = _("正在登录…") }
+        waiting:show()
         Auth.loginAsync(username, password, function(ok, err)
-            UIManager:close(waiting)
+            waiting:close()
             if not ok then
-                UIManager:show(InfoMessage:new{
-                    text = err or _("登录失败"),
-                    timeout = 3,
-                })
+                Toast:new{ text = err or _("登录失败"), timeout = 3 }:show()
                 return
             end
-            UIManager:show(InfoMessage:new{
-                text = _("登录成功"),
-                timeout = 2,
-            })
-            require("source.registry").afterAuthChanged(plugin)
+            Toast:new{ text = _("登录成功"), timeout = 2 }:show()
+            require("source.registry").reload()
         end)
     end)
 end
 
----@param plugin table|nil
-local function showLogin(plugin)
+local function showLogin()
     local Auth = require("source.copymanga.auth")
-    local UIManager = require("ui/uimanager")
-    local MultiInputDialog = require("ui/widget/multiinputdialog")
     local username, password = Auth.credentials()
     if not username then
         local cfg = require("utils.settings").getSource(SOURCE_ID)
         username = tostring(cfg.username or "")
         password = ""
     end
-
-    local dialog
-    dialog = MultiInputDialog:new{
+    require("ui.themes.widgets.input"):new{
         title = _("拷贝漫画账号"),
         fields = {
-            {
-                text = username,
-                hint = _("账号"),
-            },
-            {
-                text = password,
-                hint = _("密码"),
-                text_type = "password",
-            },
+            { text = username, hint = _("账号") },
+            { text = password, hint = _("密码"), text_type = "password" },
         },
-        buttons = {{
-            {
-                text = _("取消"),
-                id = "close",
-                callback = function() UIManager:close(dialog) end,
-            },
-            {
-                text = _("登录"),
-                callback = function()
-                    local values = dialog:getFields()
-                    UIManager:close(dialog)
-                    doLogin(plugin, values[1] or "", values[2] or "")
-                end,
-            },
-        }},
-    }
-    UIManager:show(dialog)
-    dialog:onShowKeyboard()
+        ok_text = _("登录"),
+        callback = function(user, pass) doLogin(user, pass) end,
+    }:show()
 end
 
----@param plugin table|nil
 ---@return table[]
-function Setting.rows(plugin)
+function Setting.rows()
     local Auth = require("source.copymanga.auth")
     local rows = {
         function(iw)
             local cfg = require("utils.settings").getSource(SOURCE_ID)
-            return require("ui.components.settingrow").build(iw, {
+            return require("ui.themes.widgets.row").widget({
+    width = iw,
+    chevron = true,
                 kind = "nav",
                 icon = "dns",
                 title = _("站点地址"),
                 status = Client.normalizeBaseUrl(cfg.base_url),
                 status_on = true,
-                callback = function() editBaseUrl(plugin) end,
+                callback = function() editBaseUrl() end,
             })
         end,
         function(iw)
@@ -137,33 +90,36 @@ function Setting.rows(plugin)
             else
                 status, status_on = _("未登录 · 点此登录"), false
             end
-            return require("ui.components.settingrow").build(iw, {
+            return require("ui.themes.widgets.row").widget({
+    width = iw,
+    chevron = true,
                 kind = "nav",
                 icon = "account_circle",
                 title = _("拷贝漫画账号"),
                 status = status,
                 status_on = status_on,
-                callback = function() showLogin(plugin) end,
+                callback = function() showLogin() end,
             })
         end,
     }
     if not Auth.hasSession() then return rows end
     rows[#rows + 1] = function(iw)
-        return require("ui.components.settingrow").build(iw, {
+        return require("ui.themes.widgets.row").widget({
+    width = iw,
+    chevron = false,
             kind = "action",
             icon = "logout",
             title = _("退出登录"),
             callback = function()
-                local UIManager = require("ui/uimanager")
-                UIManager:show(require("ui/widget/confirmbox"):new{
+                require("ui.themes.widgets.confirm"):new{
                     text = _("确定退出拷贝漫画账号？"),
                     ok_text = _("退出登录"),
                     ok_callback = function()
                         Auth.clearSession()
-                        UIManager:show(require("ui/widget/infomessage"):new{ text = _("已退出登录"), timeout = 2 })
-                        require("source.registry").afterAuthChanged(plugin)
+                        require("ui.themes.widgets.toast"):new{ text = _("已退出登录"), timeout = 2 }:show()
+                        require("source.registry").reload()
                     end,
-                })
+                }:show()
             end,
         })
     end

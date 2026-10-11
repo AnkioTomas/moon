@@ -18,24 +18,29 @@ features/
     └── init.lua    -- feature 入口，导出钩子
 ```
 
-每个 feature 一个目录，入口固定为 `init.lua`，模块名为 `features.<name>.init`。
+每个 feature 一个目录，入口固定为 `init.lua`，模块名为 `features.<name>`。
 KOReader 只把 `plugin_root/?.lua` 加进 `package.path`，不会解析 `?/init.lua`，所以 `.init` 不能省。
 feature 内部的其它文件用完整模块名引用，例如 `require("features.<name>.ui")`。
 
 ## 钩子
 
 钩子是 feature 模块上的普通函数（点号定义，不是方法），全部可选，用不到就不写。
-参数统一为插件实例 `plugin`（`BookPlugin`）。
+参数只有插件实例 `plugin`（`BookPlugin`）。
 
 | 钩子 | 时机 | main.lua 位置 |
 |---|---|---|
 | `onCreate(plugin)` | 插件实例初始化 | `BookPlugin:init` |
-| `onPause(plugin)` | 设备休眠前 | `BookPlugin:onSuspend` |
+| `onSuspend(plugin)` | 设备休眠前 | `BookPlugin:onSuspend` |
 | `onResume(plugin)` | 设备唤醒后 | `BookPlugin:onResume` |
-| `onDestroy(plugin)` | KOReader 退出 | `BookPlugin:onExit` |
+| `onExit(plugin)` | KOReader 退出 | `BookPlugin:onExit` |
+
+钩子名就是 KOReader 事件名（`onCreate` 除外），main.lua 同名转发，不另起别名。
 
 需要的上下文自己从 `plugin` 取：`plugin.ui`（FileManager 或 ReaderUI）、`plugin.path`（插件根目录）、
-`plugin.ui.document`（是否在阅读器里）。
+`plugin.ui.document`（有值 = 阅读器侧）。别用 `plugin.desktop` 分侧：那是桌面窗口，文件管理器侧也常为 nil。
+
+KOReader 事件（Dispatcher 动作、广播）写进模块的 `events` 表，键是不带 `on` 的事件名，
+值是 `fn(plugin, ...)`，`...` 为事件原参数；返回 true 即已处理。不要往插件实例上挂 `onXxx` 方法。
 
 ## 必须知道的行为
 
@@ -75,7 +80,7 @@ return Example
 
 ## 从旧写法迁移
 
-对 `main.lua` 里现有的 `require("xxx.init").onCreate()` 模块，一次迁一个：
+对 `main.lua` 里现有的 `require("xxx").onCreate()` 模块，一次迁一个：
 
 1. 把目录移到 `features/<name>/`，全仓库改 require 路径（统一点号风格，斜杠和点号会注册成两个模块实例）。
 2. 签名统一为 `onCreate(plugin)`：原来接 `self.ui` 的改取 `plugin.ui`，接 `{ plugin_root = self.path }` 的改取 `plugin.path`。
@@ -84,7 +89,7 @@ return Example
 
 ## 不属于这里
 
-阅读会话（`ui/reader/session`）、后台任务（`workers/tasks`）、脏同步（`book/sync`）、源事件（`emitToSource`）
+阅读会话（`reader/session`）、后台任务（`workers/tasks`）、源生命周期（`SourceBase:onCreate` / `onNetworkConnected` 等，main 转发）
 是核心编排：有返回值、有调用顺序约束，或需要额外参数，继续在 `main.lua` 里显式调用。
 
 ## 模板

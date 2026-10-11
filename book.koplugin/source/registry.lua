@@ -39,6 +39,12 @@ local _active_id = nil
 ---@type table<SourceId, BookSource>
 local _resolved = {}
 
+--- 持久化的活跃源 id（common.active_source）；未配置时为 "local"。
+---@return SourceId
+function Registry.activeId()
+    return MoonSettings.get("source").active_source or "local"
+end
+
 --- 只取 meta，不构造 Source 实例
 ---@param id SourceId
 ---@return BookSourceMeta|nil
@@ -59,7 +65,7 @@ end
 ---@return BookSourceMeta[]
 function Registry.list()
     local out = {}
-    for _, id in ipairs(ORDER) do
+    for _idx, id in ipairs(ORDER) do
         local meta = Registry.meta(id)
         if meta then
             out[#out + 1] = meta
@@ -73,10 +79,10 @@ end
 ---@param id SourceId
 ---@return boolean
 function Registry.isEnabled(id)
-    if id == MoonSettings.activeSourceId() then
+    if id == Registry.activeId() then
         return true
     end
-    local enabled = MoonSettings.get().enabled_sources
+    local enabled = MoonSettings.get("source").enabled_sources
     if type(enabled) ~= "table" then
         return true
     end
@@ -87,7 +93,7 @@ end
 ---@return BookSourceMeta[]
 function Registry.listEnabled()
     local out = {}
-    for _, meta in ipairs(Registry.list()) do
+    for _idx, meta in ipairs(Registry.list()) do
         if Registry.isEnabled(meta.id) then
             out[#out + 1] = meta
         end
@@ -104,14 +110,14 @@ function Registry.setEnabled(id, on)
     if not FACTORIES[id] then
         return false, T(_("未知数据源: %1"), id)
     end
-    if not on and id == MoonSettings.activeSourceId() then
+    if not on and id == Registry.activeId() then
         return false, _("不能禁用当前使用的数据源")
     end
-    local common = MoonSettings.get()
+    local common = MoonSettings.get("source")
     local enabled = common.enabled_sources
     if type(enabled) ~= "table" then
         enabled = {}
-        for _, known in ipairs(ORDER) do
+        for _idx, known in ipairs(ORDER) do
             enabled[known] = true
         end
     else
@@ -123,7 +129,7 @@ function Registry.setEnabled(id, on)
     end
     enabled[id] = on and true or false
     common.enabled_sources = enabled
-    MoonSettings.save(common)
+    MoonSettings.save("source")
     return true
 end
 
@@ -143,7 +149,8 @@ function Registry.create(id)
     if not mod or not mod.new then
         return nil, T(_("数据源加载失败: %1"), id)
     end
-    return mod.new()
+    local source = mod.new()
+    return source
 end
 
 --- 关闭源实例；close 抛错只记日志，不能打断替换/失效流程。
@@ -169,13 +176,16 @@ function Registry.invalidate()
     end
 end
 
---- 登录态变更后作废源实例，并通知插件刷新桌面。
----@param plugin table|nil
-function Registry.afterAuthChanged(plugin)
+--- 源配置变了（换源、混合模式、书城开关、OPDS 地址等）：广播 SourceChanged，由桌面重建各页。
+--- 同步广播到整个窗口栈；桌面没开时没人处理，本来就无事可做。
+function Registry.notifyChanged()
+    require("ui/uimanager"):broadcastEvent(require("ui/event"):new("SourceChanged"))
+end
+
+--- 登录态或连接配置变了：作废源实例（下次 current() 按新配置重建），再通知桌面。
+function Registry.reload()
     Registry.invalidate()
-    if plugin and plugin.onSourceChanged then
-        plugin:onSourceChanged()
-    end
+    Registry.notifyChanged()
 end
 
 --- 原子替换活跃源
@@ -210,7 +220,7 @@ end
 --- 当前活跃源；不做 fallback。未加载则按配置创建一次。
 ---@return BookSource|nil, string|nil
 function Registry.current()
-    local id = MoonSettings.activeSourceId()
+    local id = Registry.activeId()
     if _active and _active_id == id then
         return _active
     end
@@ -250,9 +260,9 @@ function Registry.setActive(id)
     if not candidate then
         return nil, err
     end
-    local common = MoonSettings.get()
+    local common = MoonSettings.get("source")
     common.active_source = id
-    MoonSettings.save(common)
+    MoonSettings.save("source")
     Registry.activate(candidate, id)
     logger.info("book.source setActive", id)
     return candidate

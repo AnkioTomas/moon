@@ -1,5 +1,5 @@
 --[[--
-features.lockscreen.background：背景模式与必应/摸鱼日报缓存。
+features.lockscreen.background：背景模式；必应/摸鱼日报图交给 online。
 
 @module tests.features.lockscreen.background_spec
 --]]
@@ -9,17 +9,22 @@ local Assert = require("support.assert")
 
 local settings = { lock_screen_background = "none", lock_screen_asset_cache = {} }
 local files = {}
-local download
-local download_count = 0
-local download_valid = true
-local online = true
 local original_date = os.date
 os.date = function() return "2020-01-02" end
+
+local bing_path = "/tmp/moon-online-cache/bing.jpg"
+local myrl_path = "/tmp/moon-online-cache/myrl.png"
+local bing_ready = false
+local myrl_ready = false
+local bing_ensures = 0
+local myrl_ensures = 0
 
 package.preload["utils.paths"] = function()
     return {
         screensaverDir = function() return "/tmp/moon-screensaver" end,
         ensureScreensaverDir = function() end,
+        onlineCacheDir = function() return "/tmp/moon-online-cache" end,
+        ensureOnlineCache = function() end,
     }
 end
 package.preload["utils.settings"] = function()
@@ -54,25 +59,45 @@ package.preload["ui/renderimage"] = function()
         end,
     }
 end
-package.preload["ui/network/manager"] = function()
-    return { isOnline = function() return online end }
-end
-package.preload["http.request"] = function()
+package.preload["online.bing"] = function()
     return {
-        download = function(opts, dest, cb)
-            download = { url = opts.url, dest = dest }
-            download_count = download_count + 1
-            files[dest] = { mode = "file", size = 64, valid = download_valid }
-            -- background does os.rename(tmp, cached)
-            local real_rename = os.rename
-            os.rename = function(a, b)
-                files[b] = files[a]
-                files[a] = nil
-                return true
+        imageFile = function() return bing_path end,
+        imagePath = function() return bing_ready and bing_path or nil end,
+        imageReady = function() return bing_ready end,
+        ensureImage = function(_, cb)
+            bing_ensures = bing_ensures + 1
+            if bing_ready then
+                cb(bing_path)
+                return
             end
-            cb(true)
-            os.rename = real_rename
-            return { cancel = function() end }
+            files[bing_path] = { mode = "file", size = 64, valid = true }
+            bing_ready = true
+            cb(bing_path)
+        end,
+        invalidateImage = function()
+            bing_ready = false
+            files[bing_path] = nil
+        end,
+    }
+end
+package.preload["online.myrl"] = function()
+    return {
+        imageFile = function() return myrl_path end,
+        imagePath = function() return myrl_ready and myrl_path or nil end,
+        imageReady = function() return myrl_ready end,
+        ensureImage = function(_, cb)
+            myrl_ensures = myrl_ensures + 1
+            if myrl_ready then
+                cb(myrl_path)
+                return
+            end
+            files[myrl_path] = { mode = "file", size = 64, valid = true }
+            myrl_ready = true
+            cb(myrl_path)
+        end,
+        invalidateImage = function()
+            myrl_ready = false
+            files[myrl_path] = nil
         end,
     }
 end
@@ -99,17 +124,10 @@ local function resourcePath(mode)
 end
 local screen_dir = require("utils.paths").screensaverDir()
 local folder_dir = screen_dir .. "/wallpapers"
-local myrl_path = "/tmp/moon-screensaver/myrl.png"
-local myrl = Background.daily{
-    id = "myrl",
-    path = function() return myrl_path end,
-    request = function()
-        return { url = "https://api.ankio.net/myrl", method = "GET", timeout = 60 }
-    end,
-}
 
 Assert.is_false(Background.validMode("myrl"))
 Assert.is_false(Background.validMode("nope"))
+Assert.eq(resourcePath("bing"), bing_path)
 
 settings.lock_screen_background = "none"
 local got
@@ -142,61 +160,31 @@ Background.ensure(background("cover"), function(path) got = path end)
 Assert.is_nil(got)
 
 settings.lock_screen_background = "bing"
-settings.lock_screen_asset_cache.bing = { day = "1999-01-01" }
-download = nil
+bing_ready = false
+bing_ensures = 0
 Background.ensure(background("bing"), function(path) got = path end)
-Assert.not_nil(download)
-Assert.is_true(tostring(download.url):find("bing", 1, true) ~= nil)
-Assert.eq(got, resourcePath("bing"))
+Assert.eq(bing_ensures, 1)
+Assert.eq(got, bing_path)
+Assert.is_true(Background.isFresh(background("bing")))
 
-settings.lock_screen_background = "bing"
-settings.lock_screen_asset_cache.myrl = { day = "1999-01-01" }
-download = nil
+local myrl = {
+    id = "myrl",
+    path = function() return myrl_path end,
+    endpoint = "myrl",
+    network = true,
+}
+myrl_ready = false
+myrl_ensures = 0
 Background.ensure(myrl, function(path) got = path end)
-Assert.not_nil(download)
-Assert.is_true(tostring(download.url):find("myrl", 1, true) ~= nil)
+Assert.eq(myrl_ensures, 1)
 Assert.eq(got, myrl_path)
 
--- 下载返回足够大的错误内容或损坏图片时不能记成当天成功；下一次
--- ensure 必须再次发起请求，而不是被错误的日期标记短路。
-settings.lock_screen_background = "bing"
-settings.lock_screen_asset_cache.bing = nil
-files[resourcePath("bing")] = nil
-download_valid = false
-download_count = 0
-got = "sentinel"
-local invalid_error
-Background.ensure(background("bing"), function(path, err)
-    got, invalid_error = path, err
-end)
-Assert.is_nil(got)
-Assert.not_nil(invalid_error)
-Assert.is_nil(settings.lock_screen_asset_cache.bing)
-Assert.eq(download_count, 1)
-
-download_valid = true
-got = nil
-Background.ensure(background("bing"), function(path, err)
-    got, invalid_error = path, err
-end)
-Assert.eq(got, resourcePath("bing"))
-Assert.is_nil(invalid_error)
-Assert.eq(download_count, 2)
-Assert.eq(settings.lock_screen_asset_cache.bing.day, "2020-01-02")
-
--- 网络背景没有旧图时不能把纯白 compose 图标记成当天成功。
-settings.lock_screen_background = "bing"
-settings.lock_screen_asset_cache.bing = nil
-files[resourcePath("bing")] = nil
-online = false
-local background_error
-got = "sentinel"
-Background.ensure(background("bing"), function(path, err)
-    got, background_error = path, err
-end)
-Assert.is_nil(got)
-Assert.not_nil(background_error)
-online = true
+Background.invalidate(background("bing"))
+Assert.is_false(Background.isFresh(background("bing")))
+bing_ensures = 0
+Background.ensure(background("bing"), function(path) got = path end)
+Assert.eq(bing_ensures, 1)
+Assert.eq(got, bing_path)
 
 -- folder：空目录
 settings.lock_screen_background = "folder"
@@ -219,21 +207,5 @@ local first = got
 Background.ensure(background("folder"), function(path) got = path end)
 Assert.eq(got, first)
 Assert.eq(settings.lock_screen_asset_cache.folder.path, first)
-
--- 任意新 ID 都能复用同一套每日资源生命周期，不依赖具体主体名称。
-local custom_daily_path = "/tmp/moon-screensaver/new-style.png"
-local custom_daily = Background.daily{
-    id = "new-style",
-    path = function() return custom_daily_path end,
-    request = function()
-        return { url = "https://example.test/new-style" }
-    end,
-}
-settings.lock_screen_asset_cache["new-style"] = { day = "1999-01-01" }
-files[custom_daily_path] = nil
-download_valid = true
-Background.ensure(custom_daily, function(path) got = path end)
-Assert.eq(got, custom_daily_path)
-Assert.eq(settings.lock_screen_asset_cache["new-style"].day, "2020-01-02")
 
 os.date = original_date

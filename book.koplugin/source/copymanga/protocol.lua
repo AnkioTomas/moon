@@ -43,7 +43,7 @@ function Protocol.chapterImages(wire)
     end
     table.sort(pages, function(a, b) return a.order < b.order end)
     local images = {}
-    for _, page in ipairs(pages) do
+    for _idx, page in ipairs(pages) do
         images[#images + 1] = page.url
     end
     if #images == 0 then return nil, "chapter images empty" end

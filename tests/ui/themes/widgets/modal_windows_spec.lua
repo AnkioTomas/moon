@@ -77,7 +77,7 @@ Assert.is_true(tasks:handleEvent({ handler = "onTapModal", args = { nil, Kit.tap
 Assert.eq(Kit.closed[#Kit.closed], tasks, "点空白收起")
 
 -- 搜刮结果：整屏页，不画遮罩
-local Results = require("scrape.results")
+local Results = require("desktop.detail.scrape.results")
 local results = Results:new{ results = { { title = "书", author = "人", cover_url = "" } }, source = "douban" }
 assertModal(results)
 Assert.eq(results.panel_x, 0)

@@ -12,18 +12,18 @@ local Tpl = {}
 
 ---@param plugin BookPlugin
 function Tpl.onCreate(plugin)
-    logger.dbg("feature tpl create", plugin.ui and plugin.ui.document and "reader" or "filemanager")
+    logger.dbg("feature tpl create", plugin.ui.document and "reader" or "desktop")
 end
 
-function Tpl.onPause()
-    logger.dbg("feature tpl pause")
+function Tpl.onSuspend()
+    logger.dbg("feature tpl suspend")
 end
 
 function Tpl.onResume()
     logger.dbg("feature tpl resume")
 end
 
-function Tpl.onDestroy()
+function Tpl.onExit()
     logger.dbg("feature tpl destroy")
 end
 

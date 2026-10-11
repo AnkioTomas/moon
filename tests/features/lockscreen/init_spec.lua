@@ -56,33 +56,55 @@ package.preload["ui/renderimage"] = function()
     }
 end
 
-package.preload["http.request"] = function()
+local function stubOnlineImage(name, ext)
+    local ready = false
+    local path
     return {
-        download = function(opts, dest, cb)
-            last_download.url = opts and opts.url
-            last_download.dest = dest
-            local f = assert(io.open(dest, "wb"))
-            f:write(PNG8)
-            f:close()
+        imageFile = function()
+            path = path or (require("utils.paths").onlineCacheDir() .. "/" .. name .. "." .. ext)
+            return path
+        end,
+        imagePath = function(self)
+            return ready and self:imageFile() or nil
+        end,
+        imageReady = function()
+            return ready
+        end,
+        ensureImage = function(self, cb)
+            path = self:imageFile()
+            require("utils.paths").ensureOnlineCache()
+            last_download.url = "https://api.ankio.net/" .. name
+            last_download.dest = path
+            local file = assert(io.open(path, "wb"))
+            file:write(PNG8)
+            file:close()
+            ready = true
             local job = { cancel = function() end }
             require("ui/uimanager"):nextTick(function()
-                cb(true)
+                cb(path)
             end)
             return job
         end,
-        get = function(_url, _opts, cb)
-            require("ui/uimanager"):nextTick(function()
-                cb('{"hitokoto":"测试一言","from":"出处","from_who":"作者"}')
-            end)
-            return { cancel = function() end }
+        invalidateImage = function(self)
+            ready = false
+            os.remove(self:imageFile())
         end,
     }
+end
+package.preload["online.bing"] = function()
+    return stubOnlineImage("bing", "jpg")
+end
+package.preload["online.myrl"] = function()
+    return stubOnlineImage("myrl", "png")
 end
 
 local online = true
 package.preload["ui/network/manager"] = function()
     return {
         isOnline = function()
+            return online
+        end,
+        isConnected = function()
             return online
         end,
     }
@@ -118,7 +140,8 @@ _G.G_reader_settings = {
     delSetting = function(_, k) saved[k] = nil end,
 }
 
-package.loaded["http.request"] = nil
+package.loaded["online.bing"] = nil
+package.loaded["online.myrl"] = nil
 package.loaded["ui/network/manager"] = nil
 package.loaded["features.lockscreen.background"] = nil
 package.loaded["features.lockscreen.compose"] = nil
@@ -174,7 +197,10 @@ local function cleanup()
     for k, v in pairs(prev) do conf[k] = v end
     MoonSettings.save("features.lockscreen")
     pcall(os.remove, compose_path)
-    pcall(os.remove, require("utils.paths").screensaverDir() .. "/myrl.png")
+    pcall(os.remove, require("utils.paths").onlineCacheDir() .. "/myrl.png")
+    pcall(os.remove, require("utils.paths").onlineCacheDir() .. "/myrl.json")
+    pcall(os.remove, require("utils.paths").onlineCacheDir() .. "/bing.jpg")
+    pcall(os.remove, require("utils.paths").onlineCacheDir() .. "/bing.json")
     pcall(os.remove, cover_a)
     pcall(os.remove, cover_b)
     _G.G_reader_settings = previous_settings
@@ -257,27 +283,24 @@ local ok_run, err_run = pcall(function()
     Stubs.flush()
     Assert.is_true(render_writes > 0)
 
-    -- myrl 主体触网；日报不再是独立背景。
+    -- myrl 主体触网；日报不再是独立背景。图归 online。
     Settings.setBackgroundMode("bing")
     Settings.setComponent("myrl")
     Assert.eq(Compose.plan().background_mode, "bing")
     Assert.eq(Compose.plan().asset.id, "myrl")
-    conf.lock_screen_asset_cache.myrl = nil
-    MoonSettings.save("features.lockscreen")
-    pcall(os.remove, require("utils.paths").screensaverDir() .. "/myrl.png")
+    local myrl_img = require("utils.paths").onlineCacheDir() .. "/myrl.png"
+    require("online.myrl"):invalidateImage()
     last_download.url = nil
     LockScreen.refresh(function(ok) refreshed = ok end)
     Stubs.flush()
     Assert.is_true(refreshed)
     Assert.not_nil(last_download.url)
     Assert.is_true(tostring(last_download.url):find("myrl", 1, true) ~= nil)
-    Assert.eq(saved.screensaver_document_cover,
-        require("utils.paths").screensaverDir() .. "/myrl.png")
+    Assert.eq(saved.screensaver_document_cover, myrl_img)
     Assert.eq(saved.screensaver_document_cover ~= compose_path, true)
 
-    -- 即使组合图已经是当天版本，日报下载标记过期也必须再次请求。
-    conf.lock_screen_asset_cache.myrl = { day = "1999-01-01" }
-    MoonSettings.save("features.lockscreen")
+    -- 图丢了必须再下，即使组合日标记还在。
+    require("online.myrl"):invalidateImage()
     last_download.url = nil
     LockScreen.refresh(function(ok) refreshed = ok end)
     Stubs.flush()

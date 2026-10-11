@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<!-- 文件管理页（静态路由；逻辑在 /file.js，共享函数在 /js.js，配置经 /api/config） -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>文件管理 - 远程管理</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="file-page">
+<main class="file-main">
+<nav class="explorer-nav" aria-label="目录导航">
+<a class="explorer-home" href="/" aria-label="返回远程管理">
+<img src="/logo.jpg" alt="" width="28" height="28"><span>文件管理</span>
+</a>
+<button type="button" id="back" title="后退" aria-label="后退" disabled>←</button>
+<button type="button" id="parent" title="上一级" aria-label="上一级" disabled>↑</button>
+<button type="button" id="refresh" title="刷新" aria-label="刷新">↻</button>
+<div class="address-bar">
+<span aria-hidden="true">▰</span>
+<div id="path" class="path" aria-live="polite"></div>
+</div>
+<span class="titlebar-credit">Ankio · <a href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net</a></span>
+</nav>
+
+<div class="explorer-shell">
+<aside class="explorer-sidebar">
+<div class="sidebar-title">此阅读器</div>
+<div id="quick" class="quick-list"></div>
+</aside>
+
+<section class="explorer-content" aria-labelledby="list-title">
+<div id="dropzone" class="drop-overlay" hidden>
+<strong>释放以上传</strong>
+<span>文件和文件夹将上传到当前目录</span>
+</div>
+<div class="command-bar" role="toolbar" aria-label="文件操作">
+<button type="button" id="pickfile">＋ 上传文件</button>
+<button type="button" id="pickfolder">▰ 上传文件夹</button>
+<button type="button" id="mk">新建文件夹</button>
+<input type="file" id="file" multiple hidden>
+<input type="file" id="folder" webkitdirectory directory multiple hidden>
+<span class="command-spacer"></span>
+<span id="count" class="count-badge">0 项</span>
+</div>
+<h1 id="list-title" class="visually-hidden">目录内容</h1>
+<div class="table-wrap">
+<table>
+<thead>
+<tr><th scope="col">名称</th><th scope="col">大小</th><th scope="col">修改时间</th><th scope="col" class="ops-head">操作</th></tr>
+</thead>
+<tbody id="list"></tbody>
+</table>
+<div id="preview" class="preview" aria-label="图片预览"></div>
+</div>
+<pre id="log" class="log status-log" aria-live="polite"></pre>
+</section>
+</div>
+</main>
+
+<div id="ov" class="overlay" hidden>
+<div id="dlg" class="dialog" role="dialog" aria-modal="true" aria-labelledby="dt">
+<h2 id="dt"></h2>
+<p id="dm"></p>
+<label id="dilabel" class="visually-hidden" for="di">输入</label>
+<input id="di" type="text" hidden>
+<div class="btns">
+<button type="button" id="dc">取消</button>
+<button type="button" id="dk" class="primary">确定</button>
+</div>
+</div>
+</div>
+
+<script src="/js.js"></script>
+<script src="/file.js"></script>
+</body>
+</html>

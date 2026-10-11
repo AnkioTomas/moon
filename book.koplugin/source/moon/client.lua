@@ -130,88 +130,49 @@ function Client:_jsonAsync(method, path, opts, cb)
         body = encoded
     end
 
-    local cancelled = false
-    local cache_job
-    local request_job
-
-    --- 真正发起 HTTP 请求并解析 JSON 回包。
-    --- 传输错误、非 JSON、401 与业务 code≠200 都归一成 cb(nil, err)；成功才写缓存。
-    local function doRequest()
-        if cancelled then
-            return
-        end
-        request_job = Request.request({
+    --- 传输错误、非 JSON、401 与业务 code≠200 都归一成 done(nil, err)。
+    return Cache.fetch(cache_key, cache_ttl, function(done)
+        return Request.request({
             url = url,
             method = method,
             headers = headers,
             body = body,
             timeout = 30,
         }, function(res, req_err)
-            if cancelled then
-                return
-            end
             if req_err then
                 logger.info("book HTTP request error:", path, req_err)
-                cb(nil, req_err)
+                done(nil, req_err)
                 return
             end
             local response = assert(res)
             local code = tonumber(response.code)
             if not code then
-                cb(nil, T(_("请求失败: %1"), tostring(response.code)))
+                done(nil, T(_("请求失败: %1"), tostring(response.code)))
                 return
             end
             local raw = Text.stripBom(response.body or "")
             local ok, data = pcall(JSON.decode, raw)
             if not ok or type(data) ~= "table" then
-                cb(nil, T(_("响应不是 JSON (HTTP %1) %2"), tostring(code), (raw:gsub("%s+", " ")):sub(1, 120)))
+                done(nil, T(_("响应不是 JSON (HTTP %1) %2"), tostring(code), (raw:gsub("%s+", " ")):sub(1, 120)))
                 return
             end
             if code == 401 or data.code == 401 then
-                cb(nil, data.msg or _("令牌无效或未登录"))
+                done(nil, data.msg or _("令牌无效或未登录"))
                 return
             end
             -- 非 2xx 一律失败。服务端 5xx/4xx 的错误页有时也是 JSON 且不带业务
             -- code 字段，只看 data.code 会把它当成功，上报类调用据此清掉脏标记。
             if code < 200 or code >= 300 then
-                cb(nil, data.msg or T(_("请求失败 (HTTP %1)"), tostring(code)))
+                done(nil, data.msg or T(_("请求失败 (HTTP %1)"), tostring(code)))
                 return
             end
             if data.code and data.code ~= 200 then
-                cb(nil, data.msg or T(_("错误码 %1"), tostring(data.code)))
+                done(nil, data.msg or T(_("错误码 %1"), tostring(data.code)))
                 return
             end
-            if cache_key then
-                Cache.set(cache_key, data, cache_ttl)
-            end
-            cb(data)
+            done(data)
         end)
-    end
-
-    if cache_key then
-        cache_job = Cache.getAsync(cache_key, function(hit)
-            if cancelled then
-                return
-            end
-            if hit ~= nil then
-                cb(hit)
-                return
-            end
-            doRequest()
-        end)
-    else
-        doRequest()
-    end
-
-    return { cancel = function()
-            cancelled = true
-            if cache_job then
-                cache_job.cancel()
-            end
-            if request_job then
-                request_job.cancel()
-            end
-        end }
+    end, cb)
 end
 
 --- 拉取书架列表（缓存 5 分钟）。
@@ -278,7 +239,7 @@ end
 function Client:updateProgressAsync(body, cb)
     return self:_jsonAsync("POST", "/index/book/progressUpdate", { body = body or {} }, function(res, err)
         if res then
-            Request.clearCache("/index/book/list")
+            Cache.clear("/index/book/list")
         end
         cb(res, err)
     end)
@@ -299,7 +260,7 @@ function Client:deleteBooksAsync(filenames, cb)
         body = { filenames = encoded },
     }, function(res, err)
         if res then
-            Request.clearCache("/index/book/list")
+            Cache.clear("/index/book/list")
         end
         cb(res, err)
     end)

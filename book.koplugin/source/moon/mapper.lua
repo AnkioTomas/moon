@@ -79,7 +79,7 @@ function Mapper.list(wire)
     local list = wire.data or wire.list or wire.books or {}
     local out = {}
     if type(list) == "table" then
-        for _, row in ipairs(list) do
+        for _idx, row in ipairs(list) do
             local b = Mapper.book(row)
             if b then
                 out[#out + 1] = b

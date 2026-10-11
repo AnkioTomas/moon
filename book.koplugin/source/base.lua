@@ -6,8 +6,7 @@
 书架：远端快照 reconcile（pulled）+ 本地脏成员经 add/delete 上行（pushed）。
 本地删除只标 deleted；同步时推云端真删。
 全量同步：本地优先 push，再 pull。进度 pull 仅开书（冲突让用户选）；笔记有网即推、开书再拉。
-脏 progress/notes/stats 的网络恢复重试由 book.sync.retryDirtyAsync 单通道负责，
-本类 onEvent("network_connected") 不重复推脏。
+网络恢复由本源 onNetworkConnected 只推自己的脏行：书架、笔记、统计，进度最后。
 
 @module koplugin.book.source.base
 --]]
@@ -26,13 +25,9 @@
 --- 能力是用户可用功能，不是「模块里有没有函数」。
 --- 仅保留 UI 实际读取的开关；Source 基础契约和阅读形态不放在能力表中。
 ---@class SourceCapabilities
----@field search boolean 图书馆关键词搜索（BookListOpts.search）
----@field refresh boolean 支持手动强制重扫书库（本地源；opts.force）
----@field scrape boolean 支持把外部元数据写入本地书籍记录（仅 local 为 true；wechat/moon 明确 false）
----@field edit boolean 支持编辑展示元信息（仅 local 为 true；wechat/moon 明确 false）
----@field insight boolean 阅读洞察 / 统计页（readingInsightAsync）
+---@field scrape boolean 支持把外部元数据写入本地书籍记录（仅 local 为 true）
+---@field edit boolean 支持编辑展示元信息（仅 local 为 true）
 ---@field stats_pull boolean 是否从远端拉取阅读统计并写入本地 reading_stats（各源自决映射与替换策略）
----@field cacheAllChaptersAsync fun(identity: BookIdentity, on_progress: function|nil, cb: function)|nil 章节模式全本缓存
 
 --- 图书馆筛选项与分类索引。
 ---@class BookFiltersResult
@@ -111,7 +106,11 @@
 ---@field id SourceId|nil 源标识
 ---@field name string|nil 展示名
 ---@field type BookSourceType 阅读形态
----@field onEvent fun(self: BookSource, event: string, payload: table|nil)|nil 生命周期事件（见 source.base 注释）
+---@field onCreate fun(self: BookSource, plugin: BookPlugin) 插件 init
+---@field onSuspend fun(self: BookSource, plugin: BookPlugin) 休眠前
+---@field onResume fun(self: BookSource, plugin: BookPlugin) 唤醒后
+---@field onExit fun(self: BookSource, plugin: BookPlugin) KOReader 退出
+---@field onEvent fun(self: BookSource, event: string, payload: table|nil) 业务事件（见 SourceBase:onEvent）
 ---@field capabilities fun(self: BookSource): SourceCapabilities 能力表
 ---@field configured fun(self: BookSource): boolean 是否已配置到可请求
 ---@field clearCaches fun(self: BookSource) 清空源侧缓存
@@ -125,7 +124,6 @@
 ---@field syncStatsAsync fun(self: BookSource, opts: { dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛统计
 ---@field deleteBookAsync fun(self: BookSource, identity: BookIdentity, cb: fun(ok: boolean, err: string|nil)): table|nil 删除源拥有的书籍（在线源应同步云端）
 ---@field listLibraryAsync fun(self: BookSource, opts: BookListOpts|nil, cb: fun(data: BookListResult|nil, err: string|nil)): table|nil 图书馆列表
----@field recentBooksAsync fun(self: BookSource, limit: number|nil, cb: fun(data: BookListResult|nil, err: string|nil)): table|nil 最近阅读（默认读本地库）
 ---@field filtersAsync fun(self: BookSource, cb: fun(data: BookFiltersResult|nil, err: string|nil)): table|nil 筛选项
 ---@field readingInsightAsync fun(self: BookSource, cb: fun(data: BookInsightResult|nil, err: string|nil)): table|nil 阅读洞察
 ---@field getDetailAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: Book|nil, err: string|nil)): table|nil 书籍详情
@@ -155,11 +153,8 @@ local SourceCapabilities = {}
 ---@return SourceCapabilities
 function SourceCapabilities.defaults()
     return {
-        search = false,
-        refresh = false,
         scrape = false,
         edit = false,
-        insight = false,
         stats_pull = false,
     }
 end
@@ -168,41 +163,26 @@ end
 ---@param source BookSource|nil
 ---@return boolean
 function SourceCapabilities.supportsStatsPull(source)
-    if not source or type(source.capabilities) ~= "function" then
-        return false
-    end
-    return source:capabilities().stats_pull == true
+    return source ~= nil and source:capabilities().stats_pull == true
 end
 
---- 源是否允许刮削（UI 与 scrape 模块统一入口）。
+--- 源是否允许刮削（UI 与 desktop.detail.scrape 统一入口）。
 ---@param source BookSource|nil
 ---@return boolean
 function SourceCapabilities.supportsScrape(source)
-    if not source or type(source.capabilities) ~= "function" then
-        return false
-    end
-    return source:capabilities().scrape == true
+    return source ~= nil and source:capabilities().scrape == true
 end
 
 --- 源是否允许编辑展示元信息（UI 统一入口）。
 ---@param source BookSource|nil
 ---@return boolean
 function SourceCapabilities.supportsEdit(source)
-    if not source or type(source.capabilities) ~= "function" then
-        return false
-    end
-    return source:capabilities().edit == true
+    return source ~= nil and source:capabilities().edit == true
 end
 
 ---@class SourceBase : BookSource
----@field _books_refresh_at number|nil 最近一次书架同步完成时间
----@field _stats_refresh_at number|nil 最近一次统计同步尝试时间
 local SourceBase = {}
 SourceBase.__index = SourceBase
-
--- 首页重新可见时允许检查一次书架；具体同步和网络缓存由各源决定。
-local BOOKS_REFRESH_INTERVAL = 5 * 60
-local STATS_REFRESH_INTERVAL = 5 * 60
 
 --- 返回默认全 false 能力集。
 ---@return SourceCapabilities
@@ -233,180 +213,71 @@ function SourceBase:deleteBookAsync(_identity, cb)
     return nil
 end
 
---- 书架同步落地：清桌面在飞标记，按结果刷新图书馆 / 首页。被新一轮取代的旧结果丢弃。
----@param self SourceBase
----@param desktop table
----@param request table 发起时的请求令牌
----@param result SyncResult|nil
----@param err any
-local function onBooksSynced(self, desktop, request, result, err)
-    if desktop._books_sync_request ~= request then
-        logger.dbg("book shelf refresh result dropped", self.id, "stale")
-        return
-    end
-    desktop._books_sync_cancel = nil
-    desktop._books_sync_pending = false
-    desktop:onEvent("books_sync_done")
-    if desktop.lifecycle.state == "Destroy" or desktop.source ~= self then return end
-    if not result then
-        logger.warn("book shelf sync failed", self.id, err)
-        if desktop.tab == "library" and desktop.library then
-            desktop.library.state = { books = {}, err = err or _("同步失败") }
-            desktop:updateView()
-        end
-        return
-    end
-    -- 源自己的节流命中表示本地数据未变，不要无意义重建整页。
-    if result.skipped then
-        logger.dbg("book shelf refresh done", self.id, "skipped", result.reason or "")
-        return
-    end
-    logger.dbg("book shelf refresh done", self.id,
-        "pulled", tonumber(result.pulled) or 0,
-        "pushed", tonumber(result.pushed) or 0,
-        "hidden", tonumber(result.hidden) or 0)
-    self._books_refresh_at = os.time()
-    if desktop.library then desktop.library.state = nil end
-    -- 计数全 0 = 本地书架未变。非 0 也可能只是全量对账，首页组件自己比对显示数据再决定重建。
-    if (tonumber(result.pulled) or 0) + (tonumber(result.pushed) or 0) + (tonumber(result.hidden) or 0) > 0 then
-        desktop:onEvent("shelf_changed")
-    end
-    if desktop.tab == "library" then desktop:updateView() end
-end
+-- 插件生命周期（名字即 KOReader 事件名）：main.lua 转发给所有启用源（混合模式下都在用），参数为插件实例，默认空操作；要不要响应由源自己判断。
+-- 旧书的属主源可能不是当前源，阅读期收尾走 reader/session，不靠这里。
 
---- 插件生命周期事件通知。桌面打开默认后台同步书架，各源可追加行为。
---- 事件清单：
----   reader_open     — Reader 实例创建（Reader 侧插件 init）
----   document_close  — 关闭文档
----   chapter_changed — 按章会话开读章节（含首章），payload = { identity, position }
----   fm_open         — FileManager 主界面显示
----   desktop_open    — 月读桌面打开并可见，payload = Desktop 实例
----   desktop_resume  — 月读桌面从休眠恢复，payload = Desktop 实例
----   home_open       — 用户进入首页；源侧按节流策略检查书架
----   library_refresh_request — 用户在图书馆点击刷新，要求源强制刷新书架
----   suspend         — 设备休眠前（有打开文档时）
----   network_connected — 网络恢复（脏重试由 Sync.retryDirtyAsync 负责，基类不重复推）
----   page_changed    — 翻页（仅源身份书籍），payload = { identity, page, total_pages, percent }
----   book_meta_changed — 编辑 / 刮削已写库，payload = { identity, cover }（cover=封面换过）；
----     有远端的源立即上行这本书（local WebDAV 写书目条目 + 传封面），基类空操作
----   book_info_request — 阅读面板详情页请求书籍信息，payload = { identity, book, refresh }
----     （源可拉最新详情写 Store.rememberMany 后调 refresh() 重绘面板；基类空操作即可）
-local function syncDesktopBooks(self, desktop, opts)
-    if type(desktop) ~= "table" or desktop.lifecycle.state == "Destroy" then return end
-    if desktop._books_sync_pending and not (opts and opts.force) then
-        logger.dbg("book shelf refresh skipped", self.id, "pending")
-        return
+---@param _plugin BookPlugin
+function SourceBase:onCreate(_plugin) end
+
+---@param _plugin BookPlugin
+function SourceBase:onSuspend(_plugin) end
+
+---@param _plugin BookPlugin
+function SourceBase:onResume(_plugin) end
+
+---@param _plugin BookPlugin
+function SourceBase:onExit(_plugin) end
+
+--- 网络恢复：只推本源脏行。进度放在统计之后——微信时长上报会写云端位置，最后落地的必须是精确进度。
+--- 书架没有脏行就不调用，避免走成全量 pull。某一域失败不影响后面的域。
+---@param _plugin BookPlugin
+function SourceBase:onNetworkConnected(_plugin)
+    local id = self.id
+    local steps = {}
+    if #require("book.books_db").unsynced(id) > 0 then
+        steps[#steps + 1] = function(cb)
+            return self:syncBooksAsync({ dirty_only = true }, cb)
+        end
     end
-    if desktop._books_sync_cancel and desktop._books_sync_cancel.cancel then
-        logger.dbg("book shelf refresh cancel previous", self.id)
-        desktop._books_sync_cancel:cancel()
+    if #require("book.note_db").unsynced(id) > 0 then
+        steps[#steps + 1] = function(cb)
+            return self:syncNotesAsync({ dirty_only = true }, cb)
+        end
     end
-    logger.dbg("book shelf refresh start", self.id, opts and opts.force and "forced" or "background")
-    desktop._books_sync_pending = true
-    local request = {}
-    desktop._books_sync_request = request
-    local function run(report, finish)
-        return self:syncBooksAsync({
-            force = opts and opts.force,
-            on_progress = function(text, done, total)
-                if desktop._books_sync_request ~= request then return end
-                report(text, done, total)
-                desktop:onEvent("books_sync_progress", { text = text, done = done, total = total })
-            end,
-        }, function(result, err)
-            finish({ ok = result ~= nil, err = err })
-            onBooksSynced(self, desktop, request, result, err)
+    if #require("book.stats_db").unsyncedBySource(id) > 0 then
+        steps[#steps + 1] = function(cb)
+            return self:syncStatsAsync({ dirty_only = true }, cb)
+        end
+    end
+    if #require("book.progress_db").unsynced(id) > 0 then
+        steps[#steps + 1] = function(cb)
+            return self:syncProgressAsync({ dirty_only = true }, cb)
+        end
+    end
+    local index = 1
+    local function nextStep()
+        local step = steps[index]
+        if not step then return end
+        index = index + 1
+        step(function(result, err)
+            if not result then logger.warn("book dirty sync failed", id, err) end
+            nextStep()
         end)
     end
-    local noop = function() end
-    -- 手动刷新进后台任务列表（可见、离开页面也继续）；自动后台同步不上列表，免得每次回首页顶栏都闪。
-    -- 队列满时退回直接跑。
-    local job = opts and opts.force and require("workers.tasks").enqueue{
-        key = "books\0" .. tostring(self.id),
-        lane = "sync",
-        label = _("同步书架"),
-        title = self.name,
-        run = run,
-    } or run(noop, noop)
-    -- 某些源会同步回调；避免把已完成的 job 句柄残留到桌面状态。
-    if desktop._books_sync_request == request and desktop._books_sync_pending then
-        desktop._books_sync_cancel = job
-    end
+    nextStep()
 end
 
---- 后台双向同步统计；成功后作废依赖本地 reading_stats 的桌面缓存。
----@param self SourceBase
----@param desktop table
----@param opts { force?: boolean }|nil
-local function syncDesktopStats(self, desktop, opts)
-    local can_pull = SourceCapabilities.supportsStatsPull(self)
-    local can_push = type(self.pushStatsAsync) == "function"
-    if not can_pull and not can_push then return end
-    if desktop._stats_sync_pending then
-        logger.dbg("book stats sync skipped", self.id, "pending")
-        return
-    end
-    if not (opts and opts.force) and self._stats_refresh_at
-        and os.time() - self._stats_refresh_at < STATS_REFRESH_INTERVAL then
-        logger.dbg("book stats sync skipped", self.id, "throttled")
-        return
-    end
-    logger.dbg("book stats sync start", self.id)
-    self._stats_refresh_at = os.time()
-    desktop._stats_sync_pending = true
-    local request = {}
-    desktop._stats_sync_request = request
-    local job = self:syncStatsAsync(nil, function(result, err)
-        if desktop._stats_sync_request ~= request then return end
-        desktop._stats_sync_cancel = nil
-        desktop._stats_sync_pending = false
-        if desktop.lifecycle.state == "Destroy" or desktop.source ~= self then return end
-        if not result then
-            logger.warn("book stats sync failed", self.id, err)
-            return
-        end
-        logger.dbg("book stats sync done", self.id,
-            "pulled", tonumber(result.pulled) or 0,
-            "pushed", tonumber(result.pushed) or 0)
-        if not result.skipped and (tonumber(result.pulled) or 0) + (tonumber(result.pushed) or 0) > 0 then
-            if desktop.insight then
-                desktop.insight.state = nil
-                desktop.insight.loaded = false
-            end
-            desktop:onEvent("stats_changed")
-            if desktop.tab == "insight" then desktop:updateView() end
-        end
-    end)
-    if desktop._stats_sync_request == request and desktop._stats_sync_pending then
-        desktop._stats_sync_cancel = job
-    end
-end
-
----@param event string 事件名
----@param payload table|nil 事件载荷，含义随事件而定
-function SourceBase:onEvent(event, payload)
-    if type(payload) ~= "table" then return end
-    if self.configured and not self:configured() then return end
-    local desktop = payload
-    if event == "home_open" or event == "desktop_resume" then
-        syncDesktopStats(self, desktop)
-        if self._books_refresh_at and os.time() - self._books_refresh_at < BOOKS_REFRESH_INTERVAL then
-            logger.dbg("book shelf refresh skipped", self.id, "throttled")
-            return
-        end
-        syncDesktopBooks(self, desktop)
-        return
-    end
-    if event == "library_refresh_request" then
-        syncDesktopStats(self, desktop, { force = true })
-        syncDesktopBooks(self, desktop, { force = true })
-        return
-    end
-    if event ~= "desktop_open" then return end
-    -- 书架同步在后台进行：首页先读本地数据，成功后由回调刷新封面和元数据。
-    syncDesktopStats(self, desktop)
-    syncDesktopBooks(self, desktop)
-end
+--- 业务事件，调用方直接对属主源调用；基类空操作，源按需覆盖。事件清单：
+---   page_changed      — 翻页（仅源身份书籍），payload = { identity, page, total_pages, percent }
+---   chapter_changed   — 按章会话开读章节（含首章），payload = { identity, position }
+---   book_meta_changed — 编辑 / 刮削已写库，payload = { identity, cover }（cover=封面换过）；
+---     有远端的源立即上行这本书（local WebDAV 写书目条目 + 传封面）
+---   book_info_request — 阅读面板详情页请求书籍信息，payload = { identity, book, refresh }
+---     （源可拉最新详情写 Store.rememberMany 后调 refresh() 重绘面板）
+--- 桌面打开 / 图书馆刷新的书架与统计同步不走这里，见 desktop.sync。
+---@param _event string 事件名
+---@param _payload table|nil 事件载荷，含义随事件而定
+function SourceBase:onEvent(_event, _payload) end
 
 --- 默认书架同步：无远端书架。远端源覆盖，local 覆盖为扫盘。
 ---@param _opts { force?: boolean }|nil
@@ -443,14 +314,6 @@ end
 ---@return table
 function SourceBase:syncStatsAsync(opts, cb)
     return require("book.stats").syncAsync(self, opts, cb)
-end
-
---- 最近阅读：仅按本地阅读进度更新时间排序（book.catalog）。
----@param limit number|nil
----@param cb fun(data: BookListResult|nil, err: string|nil)
----@return table|nil
-function SourceBase:recentBooksAsync(limit, cb)
-    return require("book.catalog").recentBooksAsync(self.id, limit, cb)
 end
 
 --- 图书馆查询始终读取本地 catalog。
