@@ -93,17 +93,6 @@ package.preload["book.catalog"] = function()
             local data = books or {}
             return { data = data, count = tonumber(count) or #data }
         end,
-        listLibraryAsync = function(source_id, opts, cb)
-            rec.catalog_source = source_id
-            rec.catalog_opts = opts
-            cb({ data = { { stable_id = "local-a.epub", percent = 42 } }, count = 1 })
-            return { cancel = function() end }
-        end,
-        filtersAsync = function(source_id, cb)
-            rec.catalog_source = source_id
-            cb({ data = { category_counts = { { category = "小说", count = 2 } } } })
-            return { cancel = function() end }
-        end,
     }
 end
 
@@ -261,6 +250,7 @@ do
     rec.list_wire = { data = { { filename = "a.epub", title = "A" } }, count = 1 }
     local result
     src:syncBooksAsync(nil, function(value) result = value end)
+    require("support.stubs").flush()
     Assert.eq(rec.query.page, 1)
     Assert.eq(rec.query.pageSize, 200)
     Assert.eq(rec.query.search, "")
@@ -293,7 +283,7 @@ do
     require("support.stubs").flush()
     Assert.eq(rec.download_count, 1)
     Assert.eq(rec.download_id, "library/a.epub")
-    Assert.eq(rec.download_path, path .. ".part")
+    Assert.eq(rec.download_path, path, "Request.download 自己写 .part，不再套一层")
     -- 一个不可关的进度框：标题是书名，按字节推进，结束关掉。
     Assert.eq(#Themed.made, made + 1)
     local dialog = Themed.last("progress_dialog")
@@ -331,15 +321,24 @@ do
         stable_id = "library/a.epub",
         book = { title = "旧缓存" },
     }, nil, function(p) opened = p end)
+    Assert.is_nil(opened, "缓存命中也在下一拍回调，调用方先拿到句柄")
+    require("support.stubs").flush()
     Assert.is_nil(rec.download_count)
     Assert.eq(opened, registered_path)
     os.remove(registered_path)
 
     resetRec()
     opened = nil
+    local job = src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p)
+        opened = p
+    end)
+    job.cancel()
+    require("support.stubs").flush()
+    Assert.is_nil(opened, "取消后不回调")
     src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p)
         opened = p
     end)
+    require("support.stubs").flush()
     Assert.is_nil(rec.download_count)
     Assert.eq(opened, path)
 
@@ -351,7 +350,7 @@ do
     src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p) second = p end)
     require("support.stubs").flush()
     Assert.eq(rec.download_count, 1)
-    local file = assert(io.open(path .. ".part", "wb"))
+    local file = assert(io.open(path, "wb"))
     file:write("PK\003\004book")
     file:close()
     rec.download_done(true)
@@ -368,37 +367,7 @@ do
     require("support.stubs").flush()
     Assert.is_nil(opened)
     Assert.eq(open_err, "下载文件校验失败")
-    Assert.is_nil(lfs.attributes(path .. ".part"))
-end
-
--- 书架查询：所有参数原样交给本地 catalog，不触发 Moon HTTP client。
-do
-    resetRec()
-    local result
-    local opts = {
-        page = 3,
-        page_size = 10,
-        search = "科幻",
-        series = "s",
-        category = "c",
-    }
-    src:listLibraryAsync(opts, function(r) result = r end)
-    Assert.is_nil(rec.query)
-    Assert.eq(rec.catalog_source, "moon")
-    Assert.eq(rec.catalog_opts, opts)
-    Assert.eq(result.count, 1)
-    Assert.eq(result.data[1].stable_id, "local-a.epub")
-    Assert.eq(result.data[1].percent, 42)
-end
-
--- 筛选项同样只来自本地 catalog。
-do
-    resetRec()
-    local result
-    src:filtersAsync(function(r) result = r end)
-    Assert.is_nil(rec.filters_wire)
-    Assert.eq(rec.catalog_source, "moon")
-    Assert.eq(result.data.category_counts[1].category, "小说")
+    Assert.is_nil(lfs.attributes(path), "校验失败的文件要删掉")
 end
 
 -- onEvent：阅读生命周期由 session 处理；这里只响应用户统计同步请求
@@ -416,59 +385,41 @@ do
     Assert.eq(sync.push_calls, 0)
 end
 
--- getProgressAsync：wire 表 → ProgressPosition（percent/100、chapter_idx、locator）
+-- getProgressAsync：/book/progress 的 data → ProgressPosition（percent/100、spine、locator 空串归 nil）
 do
     resetRec()
-    rec.progress_wire = { data = { percent = 42, chapter_idx = 3, locator = "ptr" } }
+    rec.progress_wire = {
+        code = 200, data = { percent = 30, spine = 5, page = 9, offset = 0, locator = "", timestamp = 0 },
+    }
     local pos, err
     src:getProgressAsync({ stable_id = "a.epub" }, function(p, e) pos, err = p, e end)
     Assert.is_nil(err)
     Assert.eq(rec.progress_id, "a.epub")
-    Assert.eq(pos.fraction, 0.42)
-    Assert.eq(pos.chapter_idx, 3)
-    Assert.eq(pos.locator, "ptr")
-end
-
--- getProgressAsync：data 为纯数字（百分数）也映射为 fraction
-do
-    resetRec()
-    rec.progress_wire = { data = 55 }
-    local pos
-    src:getProgressAsync({ stable_id = "a.epub" }, function(p) pos = p end)
-    Assert.eq(pos.fraction, 0.55)
-
-    -- 服务端 /book/progress 回吐的是 spine 键，且 locator 过期时为空串
-    rec.progress_wire = { data = { percent = 30, spine = 5, locator = "", page = 9 } }
-    src:getProgressAsync({ stable_id = "a.epub" }, function(p) pos = p end)
     Assert.eq(pos.fraction, 0.3)
     Assert.eq(pos.chapter_idx, 5)
     Assert.eq(pos.page, 9)
     Assert.is_nil(pos.locator, "空串应归一成 nil")
 end
 
+-- 云端没有进度（data 为 null）：meta.empty，不报错
 do
     resetRec()
-    rec.progress_wire = { code = 200, data = nil }
-    local pos, meta
-    src:getProgressAsync({ stable_id = "a.epub" }, function(p, _, m) pos, meta = p, m end)
+    rec.progress_wire = { code = 200 }
+    local pos, err, meta
+    src:getProgressAsync({ stable_id = "a.epub" }, function(p, e, m) pos, err, meta = p, e, m end)
     Assert.is_nil(pos)
+    Assert.is_nil(err)
     Assert.is_true(meta.empty)
 end
 
--- getProgressAsync：拉取失败透传错误；wire 无法映射时报「进度为空」
+-- 拉取失败透传错误
 do
     resetRec()
-    rec.progress_err = { message = "无进度" }
+    rec.progress_err = "无进度"
     local pos, err
     src:getProgressAsync({ stable_id = "a.epub" }, function(p, e) pos, err = p, e end)
     Assert.is_nil(pos)
     Assert.eq(err, "无进度")
-
-    rec.progress_wire = "garbage"
-    rec.progress_err = nil
-    src:getProgressAsync({ stable_id = "a.epub" }, function(p, e) pos, err = p, e end)
-    Assert.is_nil(pos)
-    Assert.eq(err, "进度为空")
 end
 
 -- putProgressAsync：fraction 钳制、spine/percent 组装
@@ -569,9 +520,12 @@ do
     Assert.eq(rows.rows[2].duration, 30)
 end
 
--- 长按删除：本地先标删，已连网时顺手跑 dirty_only 同步推云端真删并撕墓碑
+-- 长按删除：本地先标删，已连网时顺手入队推脏（同源只留一条）；推脏的书架域推云端真删并撕墓碑
 do
     resetRec()
+    local enqueued = {}
+    package.loaded["workers.tasks"] = { enqueue = function(spec) enqueued[#enqueued + 1] = spec.key; return spec end }
+    src.configured = function() return true end
     local ok, err
     src:deleteBookAsync({ source_id = "moon", stable_id = "a.epub" }, function(success, e)
         ok, err = success, e
@@ -580,21 +534,25 @@ do
     Assert.is_true(ok)
     Assert.is_nil(err)
     Assert.eq(rec.marked_deleted.stable_id, "a.epub")
+    Assert.eq(enqueued[1], "dirty\0moon")
+    src:syncBooksAsync({ dirty_only = true }, function() end)
+    require("support.stubs").flush()
     Assert.eq(rec.delete_books[1], "a.epub")
     Assert.eq(rec.removed.stable_id, "a.epub")
-end
 
--- 离线删除：只落本地墓碑并立即回调成功，不发请求、不撕墓碑
-do
+    -- 离线删除：只落本地墓碑并立即回调成功，不入队、不发请求、不撕墓碑
     resetRec()
+    enqueued = {}
     rec.offline = true
-    local ok
     src:deleteBookAsync({ source_id = "moon", stable_id = "a.epub" }, function(success) ok = success end)
     require("support.stubs").flush()
     Assert.is_true(ok)
     Assert.eq(rec.marked_deleted.stable_id, "a.epub")
+    Assert.len(enqueued, 0)
     Assert.is_nil(rec.delete_books)
     Assert.is_nil(rec.removed)
+    package.loaded["workers.tasks"] = nil
+    src.configured = nil
 end
 
 -- 还原 preload/loaded，避免影响本文件之后的用例

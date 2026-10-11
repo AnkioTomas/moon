@@ -20,14 +20,13 @@ local md5 = require("ffi/sha2").md5
 ---@field base_url string
 ---@field token string
 local Client = {}
+Client.__index = Client
 
 --- 构造 Moon HTTP 客户端。
 ---@param o { base_url: string|nil, token: string|nil }|table|nil
 ---@return MoonClient
 function Client:new(o)
-    o = o or {}
-    setmetatable(o, self)
-    self.__index = self
+    o = setmetatable(o or {}, self)
     o.base_url = Text.rtrimSlashes(o.base_url or "")
     o.token = o.token or ""
     return o
@@ -99,8 +98,7 @@ function Client:_jsonAsync(method, path, opts, cb)
         cb(nil, cfg_err)
         return nil
     end
-    method = string.upper(method or "GET")
-    local cache_ttl = tonumber(opts.cache_ttl) or 0
+    local cache_ttl = opts.cache_ttl or 0
     local cache_key
     if method == "GET" and cache_ttl > 0 then
         local cache_scope = md5(self.token)
@@ -181,7 +179,7 @@ end
 ---@return { cancel: fun() }|nil
 function Client:listBooksAsync(query, cb)
     return self:_jsonAsync("GET", "/index/book/list", {
-        query = query or {},
+        query = query,
         cache_ttl = 5 * 60,
     }, cb)
 end
@@ -191,7 +189,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:syncStatsAsync(body, cb)
-    return self:_jsonAsync("POST", "/index/stats/import", { body = body or {}, json = true }, cb)
+    return self:_jsonAsync("POST", "/index/stats/import", { body = body, json = true }, cb)
 end
 
 --- 拉取账户全部阅读事实（不缓存）。
@@ -207,7 +205,7 @@ end
 ---@return { cancel: fun() }|nil
 function Client:syncAnnotationsAsync(body, cb)
     return self:_jsonAsync("POST", "/index/stats/annotations", {
-        body = body or {},
+        body = body,
         json = true,
     }, cb)
 end
@@ -237,7 +235,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:updateProgressAsync(body, cb)
-    return self:_jsonAsync("POST", "/index/book/progressUpdate", { body = body or {} }, function(res, err)
+    return self:_jsonAsync("POST", "/index/book/progressUpdate", { body = body }, function(res, err)
         if res then
             Cache.clear("/index/book/list")
         end
@@ -251,13 +249,8 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:deleteBooksAsync(filenames, cb)
-    local ok, encoded = pcall(JSON.encode, filenames or {})
-    if not ok or type(encoded) ~= "string" then
-        cb(nil, _("JSON 编码失败"))
-        return nil
-    end
     return self:_jsonAsync("POST", "/index/book/delete", {
-        body = { filenames = encoded },
+        body = { filenames = JSON.encode(filenames) },
     }, function(res, err)
         if res then
             Cache.clear("/index/book/list")
@@ -268,17 +261,16 @@ end
 
 --- Download without blocking the UI on LuaSocket.
 ---@param filename string
----@param temp_path string
+---@param dest string
 ---@param on_progress fun(bytes: number, total: number|nil)|nil
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return { cancel: fun() }|nil
-function Client:downloadBookAsync(filename, temp_path, on_progress, cb)
+function Client:downloadBookAsync(filename, dest, on_progress, cb)
     local url, cfg_err = self:_url("/index/book/file", { filename = filename })
     if not url then
         cb(false, cfg_err)
         return nil
     end
-    pcall(os.remove, temp_path)
     return Request.download({
         url = url,
         method = "GET",
@@ -289,15 +281,14 @@ function Client:downloadBookAsync(filename, temp_path, on_progress, cb)
         },
         timeout = 120,
         on_progress = on_progress,
-    }, temp_path, function(ok, err)
+    }, dest, function(ok, err)
         if not ok then
-            pcall(os.remove, temp_path)
             cb(false, err)
             return
         end
-        local attr = require("libs/libkoreader-lfs").attributes(temp_path)
+        local attr = require("libs/libkoreader-lfs").attributes(dest)
         if not attr or not attr.size or attr.size <= 0 then
-            pcall(os.remove, temp_path)
+            os.remove(dest)
             cb(false, _("下载文件为空"))
             return
         end
