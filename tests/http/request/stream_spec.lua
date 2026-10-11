@@ -65,6 +65,7 @@ do
         first = { code = 302 },
         second = { code = 200, length = "2" },
         empty = { code = 302, length = "0" },
+        missing = { code = 404, length = "3" },
     }
     local first_hop = "first"
     package.preload["turbo.httputil"] = function()
@@ -93,12 +94,14 @@ do
             self.payload = data
             self:_finalize_request()
         end
+        -- 与 turbo 一致：跟随跳转时不收尾；否则在 finalize 里同步唤醒等待中的协程并交出响应。
         function methods:_finalize_request()
             local code = self.response_headers:get_status_code()
             if code == 302 and self.kwargs.allow_redirects then
                 self.redirect = self.redirect + 1
-                self:_handle_headers("second")
+                return self:_handle_headers("second")
             end
+            assert(coroutine.resume(self.future.co, { code = code }))
         end
         local function newClient()
             local client = setmetatable({ redirect = 0 }, { __index = methods })
@@ -118,10 +121,11 @@ do
                 closed = function() return false end,
                 close = function() end,
             }
+            -- 响应在协程让出之后才到（start 由 ioloop 桩在 yield 后调用）。
             function client:fetch(_, opts)
                 self.kwargs = opts
-                self:_handle_headers(first_hop)
-                return { code = 200 }
+                self.future = { start = function() self:_handle_headers(first_hop) end }
+                return self.future
             end
             return client
         end
@@ -134,9 +138,8 @@ do
                             local co = coroutine.create(fn)
                             local ok, future = coroutine.resume(co)
                             if not ok then error(future) end
-                            if coroutine.status(co) == "suspended" then
-                                assert(coroutine.resume(co, future))
-                            end
+                            future.co = co
+                            future.start()
                         end,
                     }
                 end,
@@ -173,7 +176,25 @@ do
     })
     Assert.eq(empty_err, "HTTP 302")
 
-    for _, name in ipairs({ "turbo", "turbo.httputil", "turbo.structs.buffer" }) do
+    -- 404 带错误页 body：必须报错，不能把错误页当成功下载（WebDAV 开书曾把 404 页存成书）。
+    first_hop = "missing"
+    local missing_err, missing_chunks = "unset", {}
+    Request.stream({ url = "https://example.test/gone.azw3" }, {
+        on_data = function(chunk) missing_chunks[#missing_chunks + 1] = chunk end,
+        on_done = function(err) missing_err = err end,
+    })
+    Assert.eq(missing_err, "HTTP 404")
+
+    local dest = require("support.config").dir() .. "/stream-404.azw3"
+    os.remove(dest)
+    local dl_ok, dl_err
+    Request.download({ url = "https://example.test/gone.azw3" }, dest, function(ok, err) dl_ok, dl_err = ok, err end)
+    Assert.is_false(dl_ok)
+    Assert.eq(dl_err, "HTTP 404")
+    Assert.is_nil(io.open(dest, "rb"), "错误页不落盘")
+    Assert.is_nil(io.open(dest .. ".part", "rb"))
+
+    for _idx, name in ipairs({ "turbo", "turbo.httputil", "turbo.structs.buffer" }) do
         package.preload[name] = nil
         package.loaded[name] = nil
     end
