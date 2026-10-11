@@ -402,13 +402,55 @@ Assert.is_true(dirtied(page))
 page:close()
 stats.summary, stats.daily = nil, {}
 
--- Hero 副文案带属主源名（混合模式同屏多源时可读）。
+-- Hero 下方信息条：图标 + 文字一行排开，带属主源名（混合模式同屏多源时可读）。
 resolved = { id = "wechat" }
 Detail.open(desktop, "library", {
-    source_id = "wechat", stable_id = "b1", title = "书", category = "科幻", series = "三体",
+    source_id = "wechat", stable_id = "b1", title = "书", category = "科幻,硬科幻", series = "三体",
 })
-Assert.eq(hero_opts.opts.subtitle, "微信读书 · 科幻 · 三体")
+local texts_w = Kit.texts(desktop.detail)
+Assert.contains(texts_w, "微信读书")
+Assert.contains(texts_w, "科幻 · 硬科幻")
+Assert.contains(texts_w, "三体")
+Assert.contains(texts_w, "source", "图标走主题 Icon")
+for _idx, text in ipairs(texts_w) do
+    Assert.is_true(text ~= "folder" and text ~= "article", "章节源没有文件项：" .. text)
+end
+Assert.eq(hero_opts.opts.title_lines, 3)
+Assert.is_true(hero_opts.opts.show_desc, "图书馆简介在 Hero 右栏")
+Assert.is_nil(hero_opts.opts.on_info_tap, "无简介时右栏同封面")
 Assert.eq(hero_opts.source.id, "wechat")
+desktop.detail:close()
+
+-- 整本书文件：格式、大小、加入日期、文件名；点 Hero 右栏看简介全文。
+resolved = local_src
+local added = os.time({ year = 2026, month = 9, day = 1, hour = 12 })
+Detail.open(desktop, "library", {
+    source_id = "local", stable_id = "/books/长书.epub", path = "/books/长书.epub", title = "长书",
+    filesize = 2048, inserted_at = added, intro = "全文简介",
+})
+texts_w = Kit.texts(desktop.detail)
+Assert.contains(texts_w, "local")
+Assert.contains(texts_w, "EPUB")
+Assert.contains(texts_w, require("util").getFriendlySize(2048))
+Assert.contains(texts_w, "2026-09-01 加入")
+Assert.contains(texts_w, "长书.epub")
+Assert.contains(texts_w, "暂无阅读记录")
+desktop.detail[1]:paintTo(Kit.canvas(), 0, 0)
+hero_opts.opts.on_info_tap()
+Assert.eq(Themed.last("text_viewer").title, "长书")
+Assert.eq(Themed.last("text_viewer").text, "全文简介")
+desktop.detail:close()
+
+-- 一行放不下：从放不下的那项起整项隐藏，不折行。
+Detail.open(desktop, "library", {
+    source_id = "local", stable_id = "/books/长书.epub", path = "/books/长书.epub", title = "长书",
+    filesize = 2048, series = string.rep("系", 60),
+})
+texts_w = Kit.texts(desktop.detail)
+Assert.contains(texts_w, "EPUB")
+for _idx, text in ipairs(texts_w) do
+    Assert.is_true(text ~= string.rep("系", 60) and text ~= "长书.epub", "超宽项及其后各项隐藏：" .. text)
+end
 desktop.detail:close()
 
 -- 书城：补拉完整详情，关窗时取消在飞请求；底栏只有「加入书库」，简介直下。
