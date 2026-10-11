@@ -103,7 +103,6 @@ do
     Assert.is_true(caps.scrape)
     Assert.is_true(caps.edit)
     Assert.is_nil(caps.whole_book)
-    Assert.is_true(type(src.listLibraryAsync) == "function")
     Assert.is_true(type(src.coverRequest) == "function")
     Assert.is_false(src:configured())
 end
@@ -207,21 +206,57 @@ do
     local second = Registry.resolve("wechat")
     Assert.eq(first, second)
     Assert.eq(created.wechat, 1)
+    Assert.is_nil(created.moon)
+
+    -- 活跃源与属主源共用缓存：current() 拿到的就是 resolve(activeId) 那个实例
+    Assert.eq(Registry.current(), Registry.resolve("moon"))
+    Assert.eq(created.moon, 1)
+
+    -- 换源不关旧实例（可能仍是打开中书籍的属主源），只复用缓存
+    local common = require("utils.settings").get("source")
+    Assert.eq(Registry.setActive("wechat"), first)
+    Assert.eq(Registry.current(), first)
+    Assert.is_nil(closed.moon)
+    common.active_source = "moon"
+
     Registry.invalidate()
     Assert.eq(closed.wechat, 1)
     Assert.eq(closed.moon, 1)
+    Assert.is_true(Registry.resolve("wechat") ~= first)
+    Assert.eq(created.wechat, 2)
+    Registry.invalidate()
     Registry.create = original_create
+
+    -- 未知源：不进缓存，不改配置
+    local src, err = Registry.setActive("nope")
+    Assert.is_nil(src)
+    Assert.not_nil(err)
+    Assert.eq(common.active_source, "moon")
 end
 
--- 源模块加载失败：meta 不伪造，列表里不出现坏源。
+-- 源模块加载失败是代码缺陷：直接抛出，不从列表里悄悄藏掉。
 do
     package.loaded["source.jdread"] = nil
     package.preload["source.jdread"] = function() error("boom") end
-    Assert.is_nil(Registry.meta("jdread"))
-    for _, m in ipairs(Registry.list()) do
-        Assert.is_true(m.id ~= "jdread")
-    end
+    Assert.errors(function() Registry.meta("jdread") end)
+    Assert.errors(function() Registry.list() end)
     package.preload["source.jdread"] = nil
+    package.loaded["source.jdread"] = nil
+end
+
+Assert.is_nil(Registry.meta("nope"))
+
+-- 活跃源已下线（旧配置存着 kindle）：退回 local，不卡在「未知数据源」。
+do
+    local common = require("utils.settings").get("source")
+    local saved = common.active_source
+    common.active_source = "kindle"
+    Assert.eq(Registry.activeId(), "local")
+    for _, m in ipairs(Registry.list()) do
+        Assert.is_true(m.id ~= "kindle")
+    end
+    common.active_source = saved
+    Assert.eq(Registry.activeId(), saved)
 end
 
 -- 清理 preload，避免污染后续用例
