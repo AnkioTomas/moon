@@ -100,6 +100,24 @@ do
     Assert.eq(Text.xmlDecode(Text.xmlEscape([[<a x="&">]])), [[<a x="&">]])
 end
 
+-- ── stripHtml ─────────────────────────────
+do
+    -- 块级标签与原有换行保留为分段，行内空白折叠，空行丢弃
+    Assert.eq(Text.stripHtml("<p>你好<br/>世界</p><DIV>!</DIV>"), "你好\n世界\n!")
+    Assert.eq(Text.stripHtml("  a  \t b \r\n\n  c  "), "a b\nc")
+    Assert.eq(Text.stripHtml("<b>粗</b><i>斜</i>"), "粗 斜")
+    -- 实体解码，&nbsp; 视为空格
+    Assert.eq(Text.stripHtml("a&amp;b&nbsp;&lt;c&gt;"), "a&b")
+    Assert.eq(Text.stripHtml("x &amp;lt; y"), "x &lt; y")
+    -- 转义过的 HTML 再剥一层
+    Assert.eq(Text.stripHtml("&lt;b&gt;粗&lt;/b&gt;体"), "粗 体")
+    Assert.eq(Text.stripHtml("<![CDATA[<i>斜</i>]]>"), "斜")
+    -- 注释、script、style 整块丢弃（大小写不敏感）
+    Assert.eq(Text.stripHtml("a<!-- x -->b<SCRIPT>alert(1)</script>c<style>p{}</Style>d"), "a b c d")
+    Assert.eq(Text.stripHtml(""), "")
+    Assert.eq(Text.stripHtml(nil), "")
+end
+
 -- ── urlEncode / urlDecode ─────────────────────────────
 do
     Assert.eq(Text.urlEncode("a b&中"), "a%20b%26%E4%B8%AD")

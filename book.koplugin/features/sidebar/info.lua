@@ -40,7 +40,7 @@ function Info.book(snapshot)
     book.source_id, book.stable_id = identity.source_id, identity.stable_id
     book.title = book.title or props.display_title
     book.authors = book.authors or props.authors
-    book.intro = book.intro or (props.description and require("util").htmlToPlainTextIfHtml(props.description))
+    book.intro = book.intro or (props.description and require("utils.text").stripHtml(props.description))
     book.percent = snapshot.percent
     return book
 end

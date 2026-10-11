@@ -1,5 +1,5 @@
 --[[--
-文字处理工具：trim / 斜杠修剪 / 路径包含判定 / BOM 与换行规范化 / XML 转义与实体解码 / URL 与 form 编码 / 纯文本段落化。
+文字处理工具：trim / 斜杠修剪 / 路径包含判定 / BOM 与换行规范化 / XML 转义与实体解码 / HTML 转纯文本 / URL 与 form 编码 / 纯文本段落化。
 
 纯 Lua，零 KOReader 依赖（离线测试直接 require）。
 
@@ -194,6 +194,40 @@ function Text.xmlDecode(s)
         :gsub("&quot;", '"')
         :gsub("&apos;", "'")
         :gsub("&amp;", "&"))
+end
+
+local BLOCK_TAGS = {
+    br = true, p = true, div = true, li = true, tr = true, blockquote = true,
+    h1 = true, h2 = true, h3 = true, h4 = true, h5 = true, h6 = true,
+}
+
+--- 去 CDATA 外壳、注释、script/style 整块；块级标签换成换行，其余标签换成空格。
+---@param s string
+---@return string
+local function dropTags(s)
+    return (s:gsub("<!%[CDATA%[(.-)%]%]>", "%1")
+        :gsub("<!%-%-.-%-%->", " ")
+        :gsub("<[sS][cC][rR][iI][pP][tT].-</[sS][cC][rR][iI][pP][tT]%s*>", " ")
+        :gsub("<[sS][tT][yY][lL][eE].-</[sS][tT][yY][lL][eE]%s*>", " ")
+        :gsub("<%s*/?%s*(%w*)[^>]*>", function(name)
+            return BLOCK_TAGS[name:lower()] and "\n" or " "
+        end))
+end
+
+--- HTML → 纯文本：剥标签（块级标签与原有换行保留为分段）、解码实体（含 &nbsp;），实体里转义过的 HTML 再剥一层；
+--- 每行折叠空白并去首尾空白，丢弃空行。
+---@param s string|nil
+---@return string
+function Text.stripHtml(s)
+    s = Text.xmlDecode(dropTags(Text.normalizeNewlines(s))):gsub("&nbsp;", " ")
+    local lines = {}
+    for line in dropTags(s):gmatch("[^\n]+") do
+        line = Text.trim((line:gsub("%s+", " ")))
+        if line ~= "" then
+            lines[#lines + 1] = line
+        end
+    end
+    return table.concat(lines, "\n")
 end
 
 --- URL 编码（RFC 3986 unreserved 保留，其余 %XX 大写）。

@@ -10,6 +10,7 @@ Moon wire → 领域对象
 
 local Progress = require("book.progress")
 local Catalog = require("book.catalog")
+local Text = require("utils.text")
 
 local Mapper = {}
 
@@ -32,7 +33,7 @@ function Mapper.book(row)
         series = row.series,
         cover = row.coverUrl,
     }
-    if row.description ~= "" then book.intro = row.description end
+    if row.description ~= "" then book.intro = Text.stripHtml(row.description) end
     return book
 end
 

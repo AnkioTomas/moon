@@ -138,7 +138,7 @@ local function parseBlock(block, query)
 
     local intro = block:match("<p>([^<]+)</p>")
     if intro then
-        intro = trim(Text.xmlDecode(intro))
+        intro = Text.stripHtml(intro)
     end
 
     return {

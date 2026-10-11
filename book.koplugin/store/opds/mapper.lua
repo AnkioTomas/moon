@@ -102,22 +102,23 @@ local function parseAttrs(attrs)
     return out
 end
 
---- 元素正文 → 纯文本：去 CDATA、标签（xhtml 内联与转义后的 html 两层）并折叠空白。
----@param body string|nil
----@return string
-local function plain(body)
-    local s = tostring(body or ""):gsub("<!%[CDATA%[(.-)%]%]>", "%1"):gsub("<[^>]+>", " ")
-    s = Text.xmlDecode(s):gsub("<[^>]+>", " "):gsub("%s+", " ")
-    return Text.trim(s)
+--- 首个同名元素的纯文本（保留分段）；空则 nil。
+---@param xml string
+---@param name string
+---@return string|nil
+local function elementText(xml, name)
+    local el = elements(xml, name)[1]
+    local s = el and Text.stripHtml(el.body)
+    return s ~= "" and s or nil
 end
 
+--- 同 elementText，但压成单行（标题、作者、id）。
 ---@param xml string
 ---@param name string
 ---@return string|nil
 local function firstText(xml, name)
-    local el = elements(xml, name)[1]
-    local s = el and plain(el.body)
-    return s ~= "" and s or nil
+    local s = elementText(xml, name)
+    return s and (s:gsub("\n", " "))
 end
 
 ---@param xml string
@@ -229,7 +230,7 @@ local function entry(xml, base)
         title = title,
         authors = authors,
         categories = categories,
-        intro = firstText(xml, "summary") or firstText(xml, "content"),
+        intro = elementText(xml, "summary") or elementText(xml, "content"),
         cover = cover,
     }, best)
 end
@@ -294,7 +295,7 @@ local function publication(p, base)
         title = localized(m.title),
         authors = names(m.author),
         categories = names(m.subject),
-        intro = m.description and plain(localized(m.description)) or nil,
+        intro = m.description and Text.stripHtml(localized(m.description)) or nil,
         cover = cover,
     }, best)
 end
