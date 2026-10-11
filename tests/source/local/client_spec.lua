@@ -10,6 +10,7 @@ local Stubs = require("support.stubs")
 -- a.epub.sdr 模拟 KOReader 边车目录：扫盘不当下钻，moveBook 时跟随书籍迁移
 local DENIED_DIRS = {}
 local COVERS = {}
+local MTIMES = {} -- 路径 → 修改时间（默认 0）：模拟文件被改过
 local TREE = {
     ["/books"] = { "a.epub", "a.epub.sdr", ".moon", ".hidden", "sub", "note.md", "old.cbr", "x.lit" },
     ["/books/a.epub.sdr"] = { "metadata.epub.lua" },
@@ -54,7 +55,7 @@ package.preload["libs/libkoreader-lfs"] = function()
                 for dir, entries in pairs(TREE) do
                     for _, name in ipairs(entries) do
                         if dir .. "/" .. name == path then
-                            attr = { mode = "file", size = 10, modification = 0 }
+                            attr = { mode = "file", size = 10, modification = MTIMES[path] or 0 }
                             break
                         end
                     end
@@ -86,6 +87,25 @@ package.preload["utils.paths"] = function()
         end,
         coverPath = function(stable_id, id)
             return "/data/.moon/cache/" .. tostring(id) .. "/image/" .. tostring(stable_id) .. ".png"
+        end,
+    }
+end
+
+-- local_scan 表：内存假实现，跨 Client 实例保留（= 重启后库还在）
+local scan_rows = {}
+package.preload["source.local.scan_db"] = function()
+    return {
+        all = function()
+            local out = {}
+            for path, row in pairs(scan_rows) do out[path] = { fp = row.fp, md5 = row.md5, cover = row.cover } end
+            return out
+        end,
+        save = function(_, files)
+            scan_rows = {}
+            for _, f in ipairs(files) do
+                scan_rows[f.path] = { fp = f.fp, md5 = f.md5, cover = f.cover_tried == true }
+            end
+            return true
         end,
     }
 end
@@ -183,7 +203,7 @@ package.preload["book.books_db"] = function()
         stableIdsByMd5 = function(source_id, md5)
             local out = {}
             for _, row in pairs(db_rows) do
-                if row.source_id == source_id and row.md5 == md5 then
+                if row.source_id == source_id and row.md5 == md5 and (row.deleted or 0) == 0 then
                     out[#out + 1] = row.stable_id
                 end
             end
@@ -254,6 +274,12 @@ package.preload["book.books_db"] = function()
             end
             return true
         end,
+        markSyncedMany = function(source_id, stable_ids)
+            for _, stable_id in ipairs(stable_ids) do
+                db_rows[rowKey(source_id, stable_id)].sync_status = 1
+            end
+            return true
+        end,
     }
 end
 for _, name in ipairs({
@@ -262,6 +288,7 @@ for _, name in ipairs({
     "document/documentregistry",
     "utils.task",
     "book.books_db",
+    "source.local.scan_db",
     "source.local.client",
 }) do
     package.loaded[name] = nil
@@ -305,6 +332,7 @@ local function reset()
     removed_files = {}
     CRASH_AT = {}
     job_runs = 0
+    scan_rows = {}
 end
 
 -- ── 子目录列不出来：整次扫盘失败，不按残缺快照 reconcile 软删其中的书 ──────
@@ -355,6 +383,7 @@ do
     Assert.eq(a.path, "/books/a.epub")
     Assert.is_nil(a.category)
     Assert.is_nil(a.series)
+    Assert.eq(a.sync_status, 1, "扫到即确认，文件被外部删掉后下轮才会下架")
     local cpdf = db_rows[rowKey("local", "/books/sub/c.pdf")]
     Assert.eq(cpdf.category, "sub")
     Assert.is_nil(cpdf.series)
@@ -489,14 +518,29 @@ do
     Assert.len(renames, 0)
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 0)
 
+    -- 旧行是墓碑（用户删过的书）：同内容新文件当新书入库，不收编墓碑复活旧书的进度笔记
+    reset()
+    digests = { ["/books/a.epub"] = "m" }
+    db_rows[rowKey("local", "/books/deleted.epub")] = {
+        source_id = "local", stable_id = "/books/deleted.epub", md5 = "m", title = "删过", deleted = 1,
+    }
+    Assert.is_true(scan())
+    Assert.len(renames, 0)
+    Assert.eq(db_rows[rowKey("local", "/books/deleted.epub")].deleted, 1)
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 0)
+
     util.partialMD5 = real_md5
 end
 
--- ── 元数据缓存命中：重扫跳过解析；缺封面的书每个会话只补提一次 ──────
+-- ── 增量扫盘：文件指纹（大小:修改时间）没变就不重算 md5、不重开文档；盘与库一致整轮不写库 ──────
 do
     local util = require("util")
     local real_md5 = util.partialMD5
-    util.partialMD5 = function(path) return "md5:" .. path end
+    local hashed = {}
+    util.partialMD5 = function(path)
+        hashed[#hashed + 1] = path
+        return "md5:" .. path
+    end
 
     reset()
     local c = Client.new({ path = "/books" })
@@ -504,27 +548,52 @@ do
     Stubs.flush()
     Assert.len(opened, 5)
     Assert.eq(props_read, 5)
+    Assert.len(hashed, 6)
     db_rows[rowKey("local", "/books/a.epub")].percent = 42
 
-    -- 同一会话：解析时已试过封面，不再为补封面重开
-    opened = {}
-    upserts = {}
-    dirs_scanned = {}
-    c:scanAsync(function() end)
+    -- 同一会话再扫：不算 md5、不开文档、不写库
+    opened, upserts, removed, hashed, dirs_scanned = {}, {}, {}, {}, {}
+    local ok
+    c:scanAsync(function(v) ok = v end)
     Stubs.flush()
+    Assert.is_true(ok)
     Assert.is_true(#dirs_scanned > 0)
+    Assert.len(hashed, 0)
     Assert.len(opened, 0)
     Assert.eq(props_read, 5)
-    Assert.len(upserts, 6) -- 缓存命中不重解析，但完整快照仍批量恢复书架成员
+    Assert.len(upserts, 0, "盘与库一致：不 reconcile")
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].percent, 42)
 
-    -- 新会话（重启后新实例）：缺封面的已入库书补提一次，不重解析元数据；封面已缓存的不开
-    COVERS["/data/.moon/cache/local/image//books/a.epub.png"] = true
+    -- 重启（新实例读回索引）：本身没封面的书不再为补封面重开，md5 也不重算
     c = Client.new({ path = "/books" })
-    opened = {}
-    covers_saved = {}
     c:scanAsync(function() end)
     Stubs.flush()
+    Assert.len(opened, 0)
+    Assert.len(hashed, 0)
+
+    -- 改过一本（修改时间变了）：只重算它的 md5；内容没变就仍不开文档
+    MTIMES["/books/sub/c.pdf"] = 99
+    c:scanAsync(function() end)
+    Stubs.flush()
+    Assert.eq(table.concat(hashed, ","), "/books/sub/c.pdf")
+    Assert.len(opened, 0)
+    MTIMES = {}
+
+    -- 库里的书被外部下架（或盘上少了一本）：不一致就照常整轮写库
+    db_rows[rowKey("local", "/books/a.epub")].deleted = 1
+    c:scanAsync(function() end)
+    Stubs.flush()
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 0)
+    Assert.len(upserts, 6)
+
+    -- 索引丢了：退回旧行为，缺封面的书补提一次，元数据不重解析
+    scan_rows = {}
+    COVERS["/data/.moon/cache/local/image//books/a.epub.png"] = true
+    c = Client.new({ path = "/books" })
+    opened, covers_saved, hashed = {}, {}, {}
+    c:scanAsync(function() end)
+    Stubs.flush()
+    Assert.len(hashed, 6)
     Assert.len(opened, 4)
     Assert.is_false(hasValue(opened, "/books/a.epub"))
     Assert.eq(props_read, 5)
@@ -744,20 +813,23 @@ do
     Assert.eq(renamed[2][2], "/books/a (2).epub")
     Assert.not_nil(db_rows[rowKey("local", "/books/a (2).epub")])
 
-    -- 未配置路径：直接报错，不碰文件
+    -- 未配置路径：报错（下一帧回调），不碰文件
     ok, err = true, nil
     Client.new({}):importAsync("/tmp/dl.epub", "x.epub", function(o, e)
         ok, err = o, e
     end)
+    Assert.is_true(ok, "失败也不得同步回调")
+    Stubs.flush()
     Assert.is_nil(ok)
     Assert.not_nil(err)
     Assert.eq(#renamed, 2)
 
-    -- 空文件名：消毒前即为空，同步报错
+    -- 空文件名：消毒前即为空，报错
     ok, err = true, nil
     Client.new({ path = "/books" }):importAsync("/tmp/dl.epub", "", function(o, e)
         ok, err = o, e
     end)
+    Stubs.flush()
     Assert.is_nil(ok)
     Assert.eq(err, "无效文件名")
 
@@ -971,40 +1043,6 @@ do
     os.rename, os.remove = real_rename, real_remove
 end
 
-do
-    reset()
-    local c = Client.new({ path = "/books" })
-    now = 5000
-    local scanned
-    c:autoScanAsync(function(s)
-        scanned = s
-    end)
-    Stubs.flush()
-    Assert.is_true(scanned)
-    Assert.is_true(#dirs_scanned > 0)
-
-    -- 节流期内：不扫盘
-    now = 5030
-    dirs_scanned = {}
-    scanned = nil
-    c:autoScanAsync(function(s)
-        scanned = s
-    end)
-    Stubs.flush()
-    Assert.is_false(scanned)
-    Assert.len(dirs_scanned, 0)
-
-    -- 过期：重扫
-    now = 5061
-    dirs_scanned = {}
-    c:autoScanAsync(function(s)
-        scanned = s
-    end)
-    Stubs.flush()
-    Assert.is_true(scanned)
-    Assert.is_true(#dirs_scanned > 0)
-end
-
 -- ── cachedCoverPath：冒号调用约定（源门面以 self._client:cachedCoverPath 调用）──
 do
     reset()
@@ -1034,6 +1072,7 @@ for _, name in ipairs({
     "document/documentregistry",
     "utils.task",
     "book.books_db",
+    "source.local.scan_db",
     "source.local.client",
 }) do
     package.preload[name] = nil

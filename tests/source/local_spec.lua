@@ -6,8 +6,6 @@ package.preload["gettext"] = function()
     return function(text) return text end
 end
 
-package.preload["source.base"] = function() return {} end
-
 local cfg = {}
 local pushes = {}
 local webdav_opened = {}

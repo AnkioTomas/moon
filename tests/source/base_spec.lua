@@ -1,6 +1,6 @@
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
---[[-- source.base：插件生命周期与业务事件默认空操作，不起任何同步。 --]]
+--[[-- source.base：业务事件默认空操作，不起任何同步；源没有插件生命周期钩子。 --]]
 
 local Assert = require("support.assert")
 
@@ -17,8 +17,8 @@ local source = setmetatable({
     syncStatsAsync = function() calls = calls + 1 end,
 }, { __index = SourceBase })
 
-for _idx, hook in ipairs({ "onCreate", "onSuspend", "onResume", "onExit" }) do
-    Assert.is_nil(source[hook](source, {}))
+for _idx, hook in ipairs({ "onCreate", "onSuspend", "onResume", "onNetworkConnected", "onExit" }) do
+    Assert.is_nil(source[hook], hook)
 end
 for _idx, event in ipairs({ "page_changed", "chapter_changed", "book_meta_changed", "desktop_open" }) do
     Assert.is_nil(source:onEvent(event, { identity = { stable_id = "a" } }))
