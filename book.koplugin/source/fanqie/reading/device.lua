@@ -10,6 +10,7 @@ local Request = require("http.request")
 local Aes = require("crypto.aes")
 local logger = require("utils.log")
 local bit = require("bit")
+local _ = require("gettext")
 
 local Device = {}
 
@@ -69,7 +70,7 @@ function Device.normalize(src)
         return nil
     end
     local out = Device.newLocalProfile()
-    for k, v in pairs(PROFILE_TEMPLATE) do
+    for k in pairs(PROFILE_TEMPLATE) do
         if profile[k] ~= nil and tostring(profile[k]) ~= "" then
             out[k] = tostring(profile[k])
         end
@@ -213,7 +214,12 @@ function Device.registerAsync(settings, cb)
     }, function(res, err)
         -- turbo 超时仍返回 res 表，错误在 err；只看 res 会变成「HTTP nil」。
         if err or not res then
-            cb(nil, err or "device_register 请求失败（请放行 log.snssdk.com）")
+            local text = tostring(err or "")
+            if text:find("refused", 1, true) or text:find("Could not connect", 1, true) then
+                cb(nil, _("番茄正文需要注册设备，当前网络拦了 log.snssdk.com"))
+                return
+            end
+            cb(nil, err or _("番茄设备注册失败，请放行 log.snssdk.com"))
             return
         end
         local code = tonumber(res.code)

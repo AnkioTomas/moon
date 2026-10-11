@@ -192,3 +192,22 @@ end)
 Stubs.flush()
 Assert.eq(timed, "Request timed out after 20 secs")
 Assert.is_nil(state.saved)
+
+-- Kindle 出网拦 log.snssdk.com：英文原句换成能看懂的中文
+state.cfg = {}
+state.saved = nil
+settings = Settings:new()
+state.request_impl = function(_, cb)
+    require("ui/uimanager"):nextTick(function()
+        cb(nil, "Could not connect: connection refused")
+    end)
+    return { cancel = function() end }
+end
+local blocked
+Device.registerAsync(settings, function(device, err)
+    blocked = err
+    Assert.is_nil(device)
+end)
+Stubs.flush()
+Assert.eq(blocked, "番茄正文需要注册设备，当前网络拦了 log.snssdk.com")
+Assert.is_nil(state.saved)
