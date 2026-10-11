@@ -5,7 +5,7 @@ KOReader 会为 FileManager 和 Reader 各建一个插件实例；
 关书后 FM 侧实例才是开桌面的宿主。
 
 本文件只做接线：init 时挂 KOReader 外壳（菜单 / 手势 / 启动项在 menu.lua，开机自动开桌面在
-Desktop.autoOpen），其余是生命周期转发：阅读会话 / 所有启用源 / online.onNetworkConnected / features / 后台任务。
+Desktop.autoOpen），其余是生命周期转发：阅读会话 / 启用源推脏行 / online.onNetworkConnected / features / 后台任务。
 业务规则在 book/、reader/session、source/。
 
 @module koplugin.book
@@ -51,13 +51,13 @@ end
 
 -- ── 插件生命周期 ─────────────────
 
---- 插件生命周期转给所有启用源：混合模式下它们都在用，要不要响应由源自己判断；加载失败的源跳过。
----@param plugin BookPlugin
----@param hook "onCreate"|"onSuspend"|"onResume"|"onNetworkConnected"|"onExit"
-local function emitSource(plugin, hook)
+--- 有网时让有脏行的启用源推脏行（混合模式下它们都在用）；没脏行的源不建实例，加载失败的源跳过。
+local function pushDirty()
+    if not require("ui/network/manager"):isConnected() then return end
+    local SourceBase = require("source.base")
     for _idx, meta in ipairs(SourceRegistry.listEnabled()) do
-        local source = SourceRegistry.resolve(meta.id)
-        if source then Guard.call("source " .. meta.id .. "." .. hook, source[hook], source, plugin) end
+        local source = SourceBase.hasDirty(meta.id) and SourceRegistry.resolve(meta.id)
+        if source and source:configured() then source:pushDirty() end
     end
 end
 
@@ -73,7 +73,7 @@ local function init(self)
     logger.info("book plugin init", self.ui.document and "reader" or "filemanager")
     require("ui.fonts").onCreate()
     Menu.onCreate(self)
-    emitSource(self, "onCreate")
+    Guard.call("sources.pushDirty", pushDirty)
     Guard.call("online.onNetworkConnected", Online.onNetworkConnected, self)
     Features.emit("onCreate", self)
 end
@@ -84,7 +84,6 @@ function BookPlugin:onSuspend()
     logger.info("book lifecycle suspend")
     Guard.call("tasks.onSuspend", Tasks.onSuspend)
     Guard.call("session.onSuspend", Session.onSuspend, self)
-    emitSource(self, "onSuspend")
     Features.emit("onSuspend", self)
     logger.flush()
 end
@@ -94,7 +93,7 @@ function BookPlugin:onResume()
     logger.info("book lifecycle resume")
     Guard.call("tasks.onResume", Tasks.onResume)
     Guard.call("session.onResume", Session.onResume, self)
-    emitSource(self, "onResume")
+    Guard.call("sources.pushDirty", pushDirty)
     Features.emit("onResume", self)
 end
 
@@ -102,7 +101,7 @@ end
 function BookPlugin:onNetworkConnected()
     logger.info("book lifecycle network_connected")
     Guard.call("tasks.onNetworkConnected", Tasks.onNetworkConnected)
-    emitSource(self, "onNetworkConnected")
+    Guard.call("sources.pushDirty", pushDirty)
     Guard.call("online.onNetworkConnected", Online.onNetworkConnected, self)
     Features.emit("onNetworkConnected", self)
 end
@@ -110,7 +109,6 @@ end
 --- 退出：停更新任务、远程服务；桌面在窗口栈上时自行收 Exit。
 function BookPlugin:onExit()
     logger.info("book plugin exit")
-    emitSource(self, "onExit")
     Features.emit("onExit", self)
     logger.flush()
 end
