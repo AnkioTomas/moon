@@ -138,13 +138,33 @@ do
     Assert.eq(toc[3].page, 7)
 end
 
+-- 缓存残缺（清缓存中断删了 HTML / info.json 坏了）：当未命中重建，不能永久打不开
+do
+    local dir = cache_root .. "/v1_kf8"
+    os.remove(dir .. "/book.html")
+    local doc = open("kf8")
+    Assert.is_nil(doc.azw.dir, "HTML 缺失不算命中")
+    Assert.is_true(doc:loadDocument())
+    Assert.eq(calls, 2)
+    Assert.is_true(exists(dir .. "/book.html"))
+
+    local f = assert(io.open(dir .. "/info.json", "wb"))
+    f:write("{broken")
+    f:close()
+    doc = open("kf8")
+    Assert.is_nil(doc.azw.dir, "info.json 坏了不算命中")
+    Assert.is_true(doc:loadDocument())
+    Assert.eq(calls, 3)
+    Assert.eq(open("kf8").azw.dir, dir, "重建后恢复命中")
+end
+
 -- MOBI6 / 合并文件：记下不走重建，CREngine 直读原文件，其余走 CREngine 默认
 do
     loads = {}
     local doc = open("mobi6", { version = 6 })
-    Assert.eq(calls, 1, "探头认出非独立 KF8，打开时不解析")
+    Assert.eq(calls, 3, "探头认出非独立 KF8，打开时不解析")
     doc:loadDocument(false)
-    Assert.eq(calls, 2)
+    Assert.eq(calls, 4)
     Assert.is_nil(doc.azw.html)
     Assert.eq(loads[1].path, root .. "/mobi6.azw3")
     Assert.is_true(loads[1].only_metadata)
@@ -153,7 +173,7 @@ do
     Assert.is_nil(doc:getProps().authors)
     Assert.eq(doc:getCoverPageImage(), "cre-cover")
     open("mobi6"):loadDocument()
-    Assert.eq(calls, 2, "直读结论同样缓存")
+    Assert.eq(calls, 4, "直读结论同样缓存")
 end
 
 -- 重建失败（DRM）：元数据照常可取；完整加载返回 false，清掉半成品，下次仍会重试
@@ -165,7 +185,7 @@ do
     Assert.is_false(exists(cache_root .. "/v1_drm.part"))
     Assert.is_false(exists(cache_root .. "/v1_drm"))
     Assert.is_false(open("drm"):loadDocument())
-    Assert.eq(calls, 4)
+    Assert.eq(calls, 6)
 end
 
 -- 结构损坏（不是 BOOKMOBI）：打开即失败，同 DocumentRegistry 的「无法打开」

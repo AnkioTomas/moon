@@ -17,6 +17,7 @@ local Fixture = {}
 
 local SKEL1 = '<html><head><link href="kindle:flow:0001?mime=text/css" rel="stylesheet"/></head><body aid="0"></body></html>'
 local FRAG1 = '<p>第一章 开头 Hello Hello Hello</p><img src="kindle:embed:0001?mime=image/jpeg"/>'
+    .. '<div style="background:url(kindle:embed:0001?mime=image/jpeg); color:red">bg</div>'
 local SKEL2 = '<html><head></head><body aid="1"></body></html>'
 local FRAG2 = '<p>第二章 <a href="kindle:pos:fid:0000:off:0000000000">回到开头</a></p>'
 local CSS = 'p { text-indent: 2em; } .bg { background: url(kindle:embed:0001?mime=image/jpeg); }'
@@ -153,7 +154,7 @@ function Fixture.write(path, opts)
     local fdst = "FDST" .. be32(12) .. be32(2) .. be32(0) .. be32(#flow0) .. be32(#flow0) .. be32(#text)
 
     -- 记录序号：0 头 1 正文 2-3 SKEL 4-6 DIV 7-9 NCX 10 FDST 11 图片 12 非图片
-    local header = be16(compression) .. be16(0) .. be32(#text) .. be16(1) .. be16(4096)
+    local header = be16(compression) .. be16(0) .. be32(opts.text_length or #text) .. be16(1) .. be16(4096)
         .. be16(opts.encryption or 0) .. be16(0)
     header = put(header, 16, "MOBI" .. be32(0x108 - 16))
     header = put(header, 36, be32(version))
