@@ -267,8 +267,10 @@ VALUES (?,?,1,?,0)
 ON CONFLICT(source_id, stable_id) DO UPDATE SET
   fraction=1,
   sync_status=0,
-  updated_at=excluded.updated_at;]],
-        source_id, stable_id, os.time()) ~= nil
+  updated_at=MAX(excluded.updated_at, pending_progress.updated_at + 1);]],
+        -- 修订号是 markSynced 的乐观锁，撞上在飞推送的那一版会被误标已同步。
+        -- book.progress 顶层 require 本模块，只能在这里延迟加载。
+        source_id, stable_id, require("book.progress").nextRevision()) ~= nil
 end
 
 --- 书改名 / 收编时由 books_db 调用。

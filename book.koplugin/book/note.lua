@@ -289,6 +289,7 @@ function Note.syncAsync(source, opts, cb)
         end
         queue.running = true
         next_task.job = runSyncAsync(next_task.source, next_task.opts, function(result, err)
+            next_task.done = true
             queue.running = false
             if not next_task.cancelled and next_task.cb then next_task.cb(result, err) end
             startNext()
@@ -296,6 +297,8 @@ function Note.syncAsync(source, opts, cb)
     end
     startNext()
     return { cancel = function()
+            -- 已结束的任务不再碰队列：此时 queue 可能已换成新的、或正跑着别的任务。
+            if task.done then return end
             task.cancelled = true
             if task.job and task.job.cancel then
                 task.job:cancel()

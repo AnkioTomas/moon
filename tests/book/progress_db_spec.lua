@@ -407,8 +407,12 @@ do
     Assert.is_true(q ~= nil)
     Assert.is_true(q.sql:find("fraction=1", 1, true) ~= nil)
     Assert.is_true(q.sql:find("sync_status=0", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("updated_at=MAX(excluded.updated_at, pending_progress.updated_at + 1)", 1, true) ~= nil,
+        "修订号不能倒退或撞上在飞推送的那一版")
     Assert.eq(q.args[1], "moon")
     Assert.eq(q.args[2], "b1")
+    local Progress = require("book.progress")
+    Assert.eq(q.args[3], Progress.last_revision, "修订号走 Progress.nextRevision")
 
     DbBase.close()
     clearMods()

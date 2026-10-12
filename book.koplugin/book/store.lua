@@ -245,7 +245,7 @@ function Store.identityFor(path)
     return nil
 end
 
---- 打开时确保身份：能解析则补登记打开记录；
+--- 打开时确保身份：能解析则把 books.path 指向这次打开的文件；
 --- .moon 内未知文件返回 nil（必须从月读桌面打开）；
 --- .moon 外未入库文件一律当本地书登记（统计/进度挂到 local 源）。
 --- 返回的身份附带属主源实例（source 字段，可能为 nil）：身份属于哪个源就用哪个源实例
@@ -257,7 +257,7 @@ function Store.ensureIdentity(path)
     local id = Store.identityFor(path)
     if id then
         id.source = registry.resolve(id.source_id)
-        -- 路径已在库里（chapters/books.path 命中），只需刷新打开时间
+        -- 路径已在库里；章节文件可能绕过桌面（KOReader 历史）打开，books.path 跟到这一章
         if not BookDB.touchPath(id.source_id, id.stable_id, path) then
             logger.warn("book identity touch failed", id.source_id, id.stable_id, path)
         end

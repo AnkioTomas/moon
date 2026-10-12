@@ -188,10 +188,16 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
         end
     end
     local BookDB = require("book.books_db")
+    -- 全部历史的（天，书）可达上千行，书却只有几十本：按书查一次，否则 UI 线程上逐行查库。
+    local metas, fractions = {}, {}
     local function appendBook(day, b)
         if day and type(b.stable_id) == "string" and b.stable_id ~= "" then
             local sid = b.source_id or source_id
-            local meta = type(sid) == "string" and BookDB.get(sid, b.stable_id) or nil
+            local key = tostring(sid) .. "\0" .. b.stable_id
+            if metas[key] == nil then
+                metas[key] = type(sid) == "string" and BookDB.get(sid, b.stable_id) or false
+            end
+            local meta = metas[key] or nil
             local max_total = tonumber(b.max_total_pages) or 0
             local percent = 0
             if max_total > 0 then
@@ -201,9 +207,12 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
                 end
             elseif type(sid) == "string" then
                 -- 只有云端时长的那天没有页坐标，退回当前阅读进度
-                local progress = require("book.progress_db").get(sid, b.stable_id)
-                if progress then
-                    percent = math.floor((tonumber(progress.fraction) or 0) * 100 + 0.5)
+                if fractions[key] == nil then
+                    local progress = require("book.progress_db").get(sid, b.stable_id)
+                    fractions[key] = progress and tonumber(progress.fraction) or false
+                end
+                if fractions[key] then
+                    percent = math.floor(fractions[key] * 100 + 0.5)
                 end
             end
             local title = meta and meta.title or nil
