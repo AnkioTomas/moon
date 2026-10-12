@@ -423,10 +423,8 @@ function Scan.replaceBook(self, temp_path, stable_id)
     if new_path == stable_id then
         return nil, _("原书已经是 EPUB")
     end
-    local taken = lfs.attributes(new_path) and new_path
-        or lfs.attributes(new_path .. ".sdr") and new_path .. ".sdr"
-    if taken then
-        return nil, _("目标位置已有同名文件：") .. taken:match("([^/]+)$")
+    if lfs.attributes(new_path) then
+        return nil, _("目标位置已有同名文件：") .. new_path:match("([^/]+)$")
     end
 
     local backup = stable_id .. ".moon-reflow-backup"

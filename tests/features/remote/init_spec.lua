@@ -266,6 +266,47 @@ do
     links = {}
 end
 
+-- 删书与 KOReader 文件管理器一致：文件连 .sdr / 阅读历史 / 收藏一起清，目录清其下的历史与收藏；
+-- 删链接、删失败都不碰 KOReader 状态。
+do
+    local log = {}
+    package.loaded["book.sidecar"] = { remove = function(path) log[#log + 1] = "sidecar:" .. path end }
+    package.loaded["readhistory"] = { folderDeleted = function(_, path) log[#log + 1] = "history:" .. path end }
+    package.loaded["readcollection"] = {
+        removeItemsByPath = function(_, path) log[#log + 1] = "collection:" .. path end,
+    }
+    local lfs = require("libs/libkoreader-lfs")
+    lfs.dir = function() return function() return nil end, nil end
+    lfs.rmdir = function() return true end
+    local original_remove = os.remove
+    os.remove = function() return true end
+
+    local pdf = book .. "/shelf/crop.pdf"
+    dirs[book .. "/shelf"] = true
+    files[pdf] = true
+    local ok, err
+    server_opts.handlers.delete(pdf, function(a, b) ok, err = a, b end)
+    Assert.is_true(ok, err)
+    Assert.eq(log[1], "sidecar:" .. pdf)
+
+    local folder = book .. "/series"
+    dirs[folder] = true
+    server_opts.handlers.delete(folder, function(a, b) ok, err = a, b end)
+    Assert.is_true(ok, err)
+    Assert.eq(log[2], "history:" .. folder)
+    Assert.eq(log[3], "collection:" .. folder)
+
+    links[book .. "/alias.pdf"] = pdf
+    server_opts.handlers.delete(book .. "/alias.pdf", function(a, b) ok, err = a, b end)
+    links = {}
+    Assert.is_true(ok, err)
+    os.remove = function() return nil, "busy" end
+    server_opts.handlers.delete(pdf, function(a, b) ok, err = a, b end)
+    Assert.is_nil(ok)
+    Assert.len(log, 3, "删链接、删失败不清 KOReader 状态")
+    os.remove = original_remove
+end
+
 Remote.stop()
 
 return true

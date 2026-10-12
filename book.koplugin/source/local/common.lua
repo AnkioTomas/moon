@@ -202,29 +202,15 @@ local function moveCover(old_id, new_id)
     end
 end
 
---- .sdr 按物理路径寻址，装着 KOReader 进度与高亮，失败要报给调用方。
----@param old_path string
----@param new_path string
----@return boolean ok, string|nil err
-local function moveSdr(old_path, new_path)
-    local old_sdr = old_path .. ".sdr"
-    if lfs.attributes(old_sdr, "mode") == "directory" then
-        local ok, err = os.rename(old_sdr, new_path .. ".sdr")
-        if not ok then
-            require("utils.log").warn("book local sdr move failed", old_sdr, err)
-            return false, err
-        end
-    end
-    return true
-end
-
---- 纯本地书 stable_id 即路径：封面与 .sdr 一起迁。
+--- 纯本地书 stable_id 即路径：封面与 KOReader 的 .sdr（进度与高亮）一起迁，.sdr 搬不动要报给调用方。
 ---@param old_path string
 ---@param new_path string
 ---@return boolean ok, string|nil err
 local function moveBookArtifacts(old_path, new_path)
     moveCover(old_path, new_path)
-    return moveSdr(old_path, new_path)
+    local ok, err = require("book.sidecar").move(old_path, new_path)
+    if not ok then require("utils.log").warn("book local sdr move failed", old_path, err) end
+    return ok, err
 end
 
 --- 从已打开的文档提取封面并落盘为 PNG；封面缓存独立于 books 元数据缓存。
@@ -434,7 +420,6 @@ return {
     eachAsync = eachAsync,
     coverPath = coverPath,
     moveCover = moveCover,
-    moveSdr = moveSdr,
     moveBookArtifacts = moveBookArtifacts,
     ensureCover = ensureCover,
     parseBookProps = parseBookProps,

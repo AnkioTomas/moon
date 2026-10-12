@@ -34,6 +34,9 @@ package.preload["book.store"] = function()
         return true
     end }
 end
+package.preload["book.sidecar"] = function()
+    return { remove = function(path) rec.sidecar = path end }
+end
 package.preload["book.books_db"] = function()
     return { remove = function(source_id, stable_id)
         rec.removed = { source_id, stable_id }
@@ -77,6 +80,7 @@ do
     Assert.is_false(exists(path))
     Assert.eq(rec.marked[2], path)
     Assert.eq(rec.removed[2], path)
+    Assert.eq(rec.sidecar, path, "连 KOReader 的 .sdr / 阅读历史一起清")
 end
 
 -- 原文件已被外部删掉：同样算确认，照常标删并撕墓碑
@@ -89,6 +93,7 @@ do
     Assert.is_true(ok)
     Assert.eq(rec.marked[2], path)
     Assert.eq(rec.removed[2], path)
+    Assert.eq(rec.sidecar, path, "文件已不在也照清 .sdr")
 end
 
 -- 原文件在但删不掉（这里用非空目录模拟）：失败且库里什么都不动
@@ -104,6 +109,7 @@ do
     Assert.not_nil(err)
     Assert.is_nil(rec.marked)
     Assert.is_nil(rec.removed)
+    Assert.is_nil(rec.sidecar, "删不掉就不碰 KOReader 状态")
     os.remove(stuck .. "/x")
     os.remove(stuck)
 end
@@ -118,6 +124,7 @@ do
     Stubs.flush()
     Assert.is_true(ok)
     Assert.is_false(exists(dir .. "/云.epub"))
+    Assert.eq(rec.sidecar, dir .. "/云.epub", "本地镜像的 .sdr 一起清")
     Assert.eq(rec.marked[2], "webdav://云.epub")
     Assert.is_nil(rec.removed, "远端没确认前不撕墓碑")
     Assert.len(enqueued, 0)
