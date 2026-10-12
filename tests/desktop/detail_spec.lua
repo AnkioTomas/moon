@@ -130,7 +130,7 @@ Assert.eq(ids(tools), "download,unread,delete")
 Assert.eq(primary.text, "开始阅读")
 read_book.cached = true
 tools = Detail.actionPlan(read_book, chapter_src)
-Assert.eq(ids(tools), "clear_cache,unread,delete")
+Assert.eq(ids(tools), "download,clear_cache,unread,delete", "章节源已缓存仍可继续缓存后面的章")
 
 -- 整本书源：没登记文件给下载（WebDAV / moon 未下载），离线副本在 cache 内给清理，已在本地书库目录两者都没有
 local online_book_src = setmetatable({ id = "moon", type = "book" }, SourceDefaults)
@@ -241,8 +241,8 @@ clear_result = { true }
 -- 全本缓存：入队跟随，进度来自源回调；同书在缓存时再入队拒绝、清理缓存拒绝。
 resolved = chapter_src
 local cache_calls = {}
-chapter_src.cacheAllChaptersAsync = function(_self, identity, progress, cb)
-    cache_calls[#cache_calls + 1] = { identity = identity, cb = cb }
+chapter_src.cacheAllChaptersAsync = function(_self, identity, progress, cb, range)
+    cache_calls[#cache_calls + 1] = { identity = identity, cb = cb, range = range }
     progress(3, 35)
     return { cancel = function() end }
 end
@@ -266,14 +266,49 @@ Assert.eq(cache_job.state, "retry_wait")
 cache_job.cancel()
 page:cacheAllChapters()
 cache_calls[2].cb(false, 30, "网络错误", 35, 5)
-Assert.eq(Themed.last("toast").text, "全本缓存部分完成：30 / 35 章，5 章失败\n网络错误")
+Assert.eq(Themed.last("toast").text, "缓存部分完成：30 / 35 章，5 章失败\n网络错误")
 page:cacheAllChapters()
 cache_calls[3].cb(true, 35, nil, 35, 0)
-Assert.eq(Themed.last("toast").text, "全本缓存完成：35 / 35 章")
+Assert.eq(Themed.last("toast").text, "缓存完成：35 / 35 章")
+Assert.is_nil(cache_calls[3].range, "缺省全本")
 Assert.is_nil(require("workers.tasks").get("cache\0wechat\0w2"))
 page:clearCache()
 Themed.last("confirm").ok_callback()
 Assert.eq(cleared[2], "w2", "缓存结束后可清理")
+
+-- 选择缓存范围：起点取本地进度；全本不带 range，到结尾不带 count，往后 N 章带 count。
+local pending = { chapter_idx = 7, fraction = 0.2 }
+package.loaded["book.progress_db"] = { get = function() return pending end }
+local function pickCache(row, col)
+    page:chooseCacheRange()
+    local sheet = Themed.last("sheet")
+    Assert.eq(sheet.title, "缓存章节")
+    local item = sheet.items[row]
+    if col then item = item.buttons[col] end
+    item.callback()
+    local call = cache_calls[#cache_calls]
+    call.cb(true, 1, nil, 1, 0)
+    return call.range, item.text
+end
+local range, label = pickCache(1)
+Assert.eq(label, "全本缓存")
+Assert.is_nil(range)
+range, label = pickCache(2)
+Assert.eq(label, "从当前进度缓存到结尾")
+Assert.eq(range.chapter_idx, 7)
+Assert.eq(range.fraction, 0.2)
+Assert.is_nil(range.count)
+for _idx, case in ipairs({ { 3, 1, 10 }, { 3, 2, 20 }, { 4, 1, 50 }, { 4, 2, 100 } }) do
+    range, label = pickCache(case[1], case[2])
+    Assert.eq(label, "往后 " .. case[3] .. " 章")
+    Assert.eq(range.chapter_idx, 7)
+    Assert.eq(range.count, case[3])
+end
+pending = nil
+range = pickCache(3, 1)
+Assert.is_nil(range.chapter_idx, "无进度：从第 1 章起")
+Assert.eq(range.count, 10)
+package.loaded["book.progress_db"] = nil
 resolved = nil
 
 -- 整本下载：离线直接提示；在线入队，走属主源 openBookAsync 只落盘不开书，成功通知书架已变。

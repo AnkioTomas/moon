@@ -381,18 +381,20 @@ function Source:putProgressAsync(identity, pos, cb)
         end }
 end
 
---- 缓存整本漫画；已落盘章节自动跳过，章与章之间留间隔以免打爆接口。
+--- 缓存漫画章节（全本或 range 指定的一段）；已落盘章节自动跳过，章与章之间留间隔以免打爆接口。
 ---@param identity BookIdentity
 ---@param on_progress fun(done: integer, total: integer)|nil
 ---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
+---@param range ChapterCacheRange|nil 缺省全本
 ---@return { cancel: fun() }
-function Source:cacheAllChaptersAsync(identity, on_progress, cb)
+function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
     local cancelled, active = false, nil
     active = self:loadTocAsync(identity, function(toc, err)
         if cancelled then return end
         if not toc then cb(false, 0, err, 0, 0); return end
+        local from_idx, count = require("source.chapter").cacheRange(toc, range)
         active = require("source.copymanga.chapter").prefetchAsync(
-            self._client, identity, toc, 0, #toc,
+            self._client, identity, toc, from_idx, count,
             {
                 progress = on_progress,
                 interval_seconds = 1.5,

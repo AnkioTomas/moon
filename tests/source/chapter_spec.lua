@@ -348,6 +348,21 @@ Assert.not_nil(offline_stats[4])
 Assert.eq(network.waited, 0)
 network.connected = true
 
+-- 缓存范围：nil 全本；起点取 chapter_idx，其次按 fraction 折算，越界夹到目录内；count 缺省到结尾。
+local ten = {}
+for i = 1, 10 do ten[i] = { title = "第" .. i .. "章" } end
+local function span(toc, range) return table.concat({ Chapter.cacheRange(toc, range) }, ",") end
+Assert.eq(span(ten, nil), "0,10")
+Assert.eq(span(ten, {}), "0,10", "无进度从第 1 章到结尾")
+Assert.eq(span(ten, { chapter_idx = 4 }), "3,7", "含当前章")
+Assert.eq(span(ten, { chapter_idx = 4, count = 3 }), "3,3")
+Assert.eq(span(ten, { chapter_idx = 4, fraction = 0.9 }), "3,7", "chapter_idx 优先于 fraction")
+Assert.eq(span(ten, { fraction = 0.35, count = 20 }), "3,20", "count 超出由 prefetchAsync 夹到目录尾")
+Assert.eq(span(ten, { fraction = 1 }), "9,1")
+Assert.eq(span(ten, { chapter_idx = 99 }), "9,1")
+Assert.eq(span(ten, { chapter_idx = 0 }), "0,10")
+Assert.eq(span({}, { chapter_idx = 3 }), "0,0", "空目录")
+
 for name in lfs.dir(tmp) do
     if name ~= "." and name ~= ".." then os.remove(tmp .. "/" .. name) end
 end

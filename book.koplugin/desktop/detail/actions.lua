@@ -20,18 +20,18 @@ local function cacheKey(book)
     return "cache\0" .. book.source_id .. "\0" .. book.stable_id
 end
 
---- 全本缓存结果提示：成功 / 部分完成 / 失败。
+--- 章节缓存结果提示：成功 / 部分完成 / 失败。
 ---@param result { ok: boolean, cached: integer, total: integer, failed: integer, err: string|nil }
 local function notifyCached(result)
     local text
     if result.ok then
-        text = _("全本缓存完成：") .. result.cached .. " / " .. result.total .. _(" 章")
+        text = _("缓存完成：") .. result.cached .. " / " .. result.total .. _(" 章")
     elseif result.total > 0 then
-        text = _("全本缓存部分完成：") .. result.cached .. " / " .. result.total .. _(" 章")
+        text = _("缓存部分完成：") .. result.cached .. " / " .. result.total .. _(" 章")
         if result.failed > 0 then text = text .. "，" .. result.failed .. _(" 章失败") end
         if result.err then text = text .. "\n" .. result.err end
     else
-        text = result.err or _("全本缓存失败")
+        text = result.err or _("缓存失败")
     end
     Toast:new{ text = text, timeout = 5 }:show()
 end
@@ -44,8 +44,33 @@ function Detail:openBook()
     if plugin then require("desktop.open").book(plugin, b) end
 end
 
---- 缓存章节模式整本正文：入队并前台显示进度（同一本书已在缓存时拒绝并提示）。
-function Detail:cacheAllChapters()
+--- 选择缓存范围：全本 / 当前进度到结尾 / 当前进度往后 N 章（当前章取本地进度，无进度即第 1 章）。
+function Detail:chooseCacheRange()
+    if self.closed then return end
+    local book = self.book
+    local pos = require("book.progress_db").get(book.source_id, book.stable_id) or {}
+    local function from(count)
+        return function()
+            self:cacheAllChapters({ chapter_idx = pos.chapter_idx, fraction = pos.fraction, count = count })
+        end
+    end
+    local function ahead(count)
+        return { text = T(_("往后 %1 章"), count), callback = from(count) }
+    end
+    require("ui.themes.widgets.sheet"):new{
+        title = _("缓存章节"),
+        items = {
+            { text = _("全本缓存"), callback = function() self:cacheAllChapters() end },
+            { text = _("从当前进度缓存到结尾"), callback = from(nil) },
+            { buttons = { ahead(10), ahead(20) } },
+            { buttons = { ahead(50), ahead(100) } },
+        },
+    }:show()
+end
+
+--- 缓存章节正文：入队并前台显示进度（同一本书已在缓存时拒绝并提示）。
+---@param range ChapterCacheRange|nil 缺省全本
+function Detail:cacheAllChapters(range)
     if self.closed then return end
     local book = self.book
     local source = bookOwnerSource(book, self.source)
@@ -67,7 +92,7 @@ function Detail:cacheAllChapters()
                 report(nil, cached, total)
             end, function(ok, cached, err, total, failed)
                 done({ ok = ok, cached = cached, total = total, failed = failed, err = err })
-            end)
+            end, range)
         end,
     }
 end
@@ -238,15 +263,17 @@ function Detail.actionPlan(book, owner)
         tools[#tools + 1] = { id = "scrape", icon = "search", text = _("刮削") }
     end
     local can_read = owner ~= nil and (owner.type == "book" or owner.type == "chapter")
-    -- 下载与清理缓存互斥：已离线到 cache 只给清理，章节源未下完只给下载，整本书源没登记文件给下载；
-    -- 本地原书（path 即文件本身）两者都没有
-    if can_read and Store.isCached(book) then
-        tools[#tools + 1] = { id = "clear_cache", icon = "cleaning_services", text = _("清理缓存") }
-    elseif can_read and owner.type == "chapter" and type(owner.cacheAllChaptersAsync) == "function" then
+    -- 章节源能缓存就一直给下载（「已下载」只看当前章起连续，缓存一段后后面仍可能要缓存），
+    -- 已离线到 cache 再给清理；整本书源下载与清理互斥；本地原书（path 即文件本身）两者都没有
+    local cached = can_read and Store.isCached(book)
+    if can_read and owner.type == "chapter" and type(owner.cacheAllChaptersAsync) == "function" then
         tools[#tools + 1] = { id = "download", icon = "download", text = _("下载") }
-    elseif can_read and owner.type == "book" and book.source_id and book.stable_id
+    elseif can_read and not cached and owner.type == "book" and book.source_id and book.stable_id
         and not require("book.books_db").isDownloaded(book.source_id, book.stable_id, false) then
         tools[#tools + 1] = { id = "download_book", icon = "download", text = _("下载") }
+    end
+    if cached then
+        tools[#tools + 1] = { id = "clear_cache", icon = "cleaning_services", text = _("清理缓存") }
     end
     if book.source_id and book.stable_id then
         if tonumber(book.read_state) == 1 then
