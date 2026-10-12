@@ -276,11 +276,12 @@ end
 
 --- 桌面所有事件的入口，经 guard 隔离：页面里的 bug 弹错误页，不带崩 KOReader。
 --- 已销毁的桌面可能还在窗口栈上（Exit 广播只 destroy 不关窗），事件一律放行给下层。
----@param event table KOReader 事件
+--- 原始输入可能不是 Event、没有 handler，见 Modal:handleEvent。
+---@param event table|string KOReader 事件
 ---@return boolean|nil
 function Desktop:handleEvent(event)
     if self.closed then return end
-    return Guard.call("desktop " .. event.handler, route, self, event)
+    return Guard.call("desktop " .. tostring(event.handler or event), route, self, event)
 end
 
 --- 墨水屏控制器异步读帧缓冲：上一次刷新还没读完就整页重画，会被读成半帧（封面连续落定时满屏错乱）。
