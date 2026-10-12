@@ -9,7 +9,7 @@ X-Ray 开关决定页数、借用原生菜单（尺寸压进侧栏、改挂 show
 local Assert = require("support.assert")
 
 local state = {
-    sidebar = { sidebar_gesture = "edge" },
+    sidebar = { sidebar_gesture = "edge", sidebar_hidden_tabs = {} },
     xray = { book_xray_enabled = true },
     snapshot = nil,
     shown = {},
@@ -113,8 +113,11 @@ end
 package.preload["ui.themes.widgets.mask"] = function()
     return { new = function(_, opts) return { mesh = true, dimen = opts.dimen } end }
 end
-package.preload["ui.themes.widgets.pager"] = function()
-    return { widget = function(o) return { strip = o } end }
+package.preload["ui.themes.widgets.tabbar"] = function()
+    return {
+        height = function() return 41 end,
+        widget = function(o) return { strip = o } end,
+    }
 end
 package.preload["utils.settings"] = function()
     return { get = function(owner) return state[owner:match("[^.]+$")] end }
@@ -229,11 +232,11 @@ Assert.is_false(swipe("east", 200), "中间右滑仍是原生上一页")
 Assert.is_true(swipe("east", 60))
 Assert.len(state.shown, 1)
 
-state.sidebar = { sidebar_gesture = "full" }
+state.sidebar = { sidebar_gesture = "full", sidebar_hidden_tabs = {} }
 Assert.is_true(swipe("east", 500))
 Assert.len(state.shown, 2)
 
-state.sidebar = { sidebar_gesture = "off" }
+state.sidebar = { sidebar_gesture = "off", sidebar_hidden_tabs = {} }
 Assert.is_false(swipe("east", 10))
 Assert.len(state.shown, 2)
 
@@ -395,6 +398,43 @@ local other = Sidebar:new{ ui = ui, snapshot = state.snapshot }
 other:onSwipeSidebar(nil, { direction = "west", pos = { x = 580, y = 10 } })
 Assert.eq(state.closed[#state.closed], other)
 Assert.eq(other.tab, 1)
+
+-- 底栏图标：每页一格、当前页高亮，点哪格直达哪页，不经过中间页。
+do
+    local jump = Sidebar:new{ ui = ui, snapshot = state.snapshot }
+    local strip = jump[1][2][1][2].strip
+    Assert.eq(strip.width, 510)
+    Assert.eq(strip.active, "info")
+    Assert.len(strip.tabs, 5)
+    Assert.eq(strip.tabs[5].id, "ticket")
+    Assert.eq(strip.tabs[5].icon, "confirmation_number")
+    local opened, tickets = #state.opened, #state.tickets
+    strip.on_tab("ticket")
+    Assert.eq(jump.tab, 5)
+    Assert.len(state.opened, opened, "跳过目录 / 书摘，不借它们的菜单")
+    Assert.len(state.tickets, tickets + 1)
+    Assert.eq(jump[1][2][1][2].strip.active, "ticket")
+    jump:onClose()
+end
+
+-- 用户隐藏的页不出现，顺序不变；条件页不满足时也不出现；全空退回书籍页。
+do
+    state.sidebar.sidebar_hidden_tabs = { "toc", "ticket" }
+    local trimmed = Sidebar:new{ ui = ui, snapshot = state.snapshot }
+    Assert.eq(table.concat(trimmed.tabs, ","), "info,notes,xray")
+    local strip = trimmed[1][2][1][2].strip
+    Assert.len(strip.tabs, 3)
+    Assert.eq(strip.tabs[3].id, "xray")
+
+    state.sidebar.sidebar_hidden_tabs = { "info", "toc", "font", "notes", "ticket" }
+    state.xray = { book_xray_enabled = false }
+    local fallback = Sidebar:new{ ui = ui, snapshot = state.snapshot }
+    Assert.eq(table.concat(fallback.tabs, ","), "info", "只剩不可用的 X-Ray：退回书籍页")
+    Assert.eq(fallback[1][2][1][2].strip.tabs[1].id, "info")
+
+    state.sidebar.sidebar_hidden_tabs = {}
+    state.xray = { book_xray_enabled = true }
+end
 
 -- onCreate 登记手势，事件由 events 接住；非阅读实例不处理
 do

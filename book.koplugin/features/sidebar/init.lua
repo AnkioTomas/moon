@@ -1,6 +1,7 @@
 --[[--
 阅读页左侧栏：书籍 / 目录 / 阅读字体 / 书摘 / X-Ray / 阅读票根，右侧网状遮罩压暗正文。
 阅读字体仅在文档支持换字体时出现，复用字体选择器菜单。
+页面清单与顺序在 setting.lua 的 TABS；用户隐藏的页记在 sidebar_hidden_tabs。
 书籍页右上角关闭按钮退出本书；票根页复用锁屏票根并可分享。
 
 目录、书摘、X-Ray、字体不自己画：借用各自原有入口弹出的全屏列表（KOReader 原生目录的折叠/搜索、
@@ -10,7 +11,7 @@
   - 阅读页右滑，范围由设置 sidebar_gesture（settings/sidebar.lua）决定：
     edge（缺省）左缘起手右滑 / full 任意位置右滑（顶替原生「右滑上一页」）/ off 关闭；
   - Dispatcher 动作 book_reader_sidebar，可在 KOReader 手势管理里绑任意手势。
-书籍页左右滑切页（列表页的左右滑归 Menu 翻页），底栏切页；点遮罩、返回键或菜单关闭键关闭。
+书籍页左右滑切页（列表页的左右滑归 Menu 翻页），底栏图标直达各页；点遮罩、返回键或菜单关闭键关闭。
 
 @module koplugin.book.features.sidebar.init
 --]]
@@ -29,10 +30,11 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local Box = require("ui.themes.widgets.box")
 local Mask = require("ui.themes.widgets.mask")
 local Modal = require("ui.themes.widgets.modal")
-local Pager = require("ui.themes.widgets.pager")
+local Tabbar = require("ui.themes.widgets.tabbar")
 local Text = require("ui.themes.widgets.text")
 local Theme = require("ui.themes")
 local MoonSettings = require("utils.settings")
+local Setting = require("features.sidebar.setting")
 local _ = require("gettext")
 
 --- 左缘起手区占屏宽比例。
@@ -43,7 +45,8 @@ local PANEL_RATIO = 0.85
 ---@class BookReaderSidebar : BookThemeModal
 ---@field ui table ReaderUI
 ---@field snapshot ReaderSessionSnapshot
----@field tabs string[]
+---@field tabs string[] 显示的页 id，顺序同 Setting.TABS
+---@field bar_tabs table[] 与 tabs 一一对应的页定义，交给底栏
 ---@field tab integer
 ---@field menus table<string, table|false> 借来的 Menu；false = 入口没弹 Menu
 ---@field native_closes fun()[] 借来菜单的原 close_callback，侧栏关闭时各调一次做原生清理
@@ -56,13 +59,10 @@ local Sidebar = Modal:extend{
     mask = false,
 }
 
-local TITLES = {
-    info = _("书籍"),
-    toc = _("目录"),
-    font = _("阅读字体"),
-    notes = _("书摘"),
-    xray = _("X-Ray"),
-    ticket = _("阅读票根"),
+--- 按条件出现的页：字体页要文档能换字体，X-Ray 页要功能开着。
+local AVAILABLE = {
+    font = function(ui) return require("ui.fonts.reader").supports(ui) end,
+    xray = function() return MoonSettings.get("features.xray").book_xray_enabled end,
 }
 
 --- 各列表页的原有入口（与快捷面板同一条路径，整书 / 连续章节的分流都在入口内部）。
@@ -142,15 +142,19 @@ end
 function Sidebar:init()
     Modal.init(self)
     self.panel_w = math.floor(self.dimen.w * PANEL_RATIO)
-    self.tabs = { "info", "toc" }
-    if require("ui.fonts.reader").supports(self.ui) then
-        self.tabs[#self.tabs + 1] = "font"
+    local hidden = Setting.hiddenTabs(MoonSettings.get("features.sidebar"))
+    self.tabs, self.bar_tabs = {}, {}
+    for _idx, tab in ipairs(Setting.TABS) do
+        local available = AVAILABLE[tab.id]
+        if not hidden[tab.id] and (not available or available(self.ui)) then
+            self.tabs[#self.tabs + 1] = tab.id
+            self.bar_tabs[#self.bar_tabs + 1] = tab
+        end
     end
-    self.tabs[#self.tabs + 1] = "notes"
-    if MoonSettings.get("features.xray").book_xray_enabled then
-        self.tabs[#self.tabs + 1] = "xray"
+    -- 设置页不让全隐藏，但只留了条件页、条件又不满足时会空：退回书籍页
+    if #self.tabs == 0 then
+        self.tabs, self.bar_tabs = { "info" }, { Setting.TABS[1] }
     end
-    self.tabs[#self.tabs + 1] = "ticket"
     self.tab = 1
     self.menus = {}
     self.native_closes = {}
@@ -244,9 +248,7 @@ function Sidebar:render()
     local h = self.dimen.h
     local id = self.tabs[self.tab]
     local t = Theme.current()
-    local rule_h = Theme.px(t.row.divider)
-    local band_h = Theme.px(t.control.height)
-    local body_h = h - band_h - rule_h
+    local body_h = h - Tabbar.height()
     local surface = { bg = t.color.page }
     local body
     if id == "info" then
@@ -296,17 +298,15 @@ function Sidebar:render()
     local panel = VerticalGroup:new{
         align = "left",
         body,
-        LineWidget:new{
-            dimen = Geom:new{ w = self.panel_w, h = rule_h },
-            background = Blitbuffer.Color8(t.color.rule),
-        },
-        Pager.widget({
+        Tabbar.widget({
             width = self.panel_w,
-            page = self.tab,
-            pages = #self.tabs,
-            title = TITLES[id],
-            on_prev = function() self:goTab(self.tab - 1) end,
-            on_next = function() self:goTab(self.tab + 1) end,
+            active = id,
+            tabs = self.bar_tabs,
+            on_tab = function(tab_id)
+                for index, other in ipairs(self.tabs) do
+                    if other == tab_id then self:goTab(index) end
+                end
+            end,
         }),
     }
     self:setPanel(OverlapGroup:new{

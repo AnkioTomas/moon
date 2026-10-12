@@ -211,7 +211,7 @@ local expected = {
     { title = "阅读快捷面板", id = "feature:panel:reader" },
     { title = "阅读页顶栏", id = "feature:bars:top" },
     { title = "阅读页底栏", id = "feature:bars:bottom" },
-    { title = "侧栏手势", id = "feature:sidebar:main" },
+    { title = "阅读侧栏", id = "feature:sidebar:main" },
     { title = "翻页动画", id = "feature:animation:main" },
     { title = "月读词典", id = "feature:dictionary:main" },
     { title = "百度百科", id = "feature:baike:main" },
