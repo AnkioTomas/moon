@@ -459,14 +459,15 @@ function BookDB.touchPath(source_id, stable_id, path)
     ) ~= nil
 end
 
---- 登记了物理路径的行（本地源除外：它的 path 即 stable_id，由扫盘负责）。
+--- 登记了物理路径的行。纯本地书除外：它的 path 即 stable_id，由扫盘负责；
+--- WebDAV 书（同属 local 源）的 path 是下载副本，照样校验。
 ---@param source_id string|string[]
 ---@return { source_id: string, stable_id: string, path: string }[]
 function BookDB.pathsBySource(source_id)
     local where, args = DB.sourceClause("source_id", source_id)
     local result, nrows = DB.query(
         "SELECT source_id, stable_id, path FROM books WHERE " .. where
-            .. " AND source_id<>'local' AND path IS NOT NULL AND path<>'';",
+            .. " AND NOT (source_id='local' AND path=stable_id) AND path IS NOT NULL AND path<>'';",
         unpack(args)
     )
     local out = {}
@@ -491,20 +492,6 @@ function BookDB.clearPaths(rows)
         end
         return true
     end) == true
-end
-
---- 物理路径只属于一个身份：本源已登记的路径，从其他源的行上撤掉。
---- 用于外部插件共管的文件（如 kindle.koplugin 缓存）先被当成 local 书登记、后归属本源的情况。
----@param source_id string
----@return boolean
-function BookDB.releaseForeignPaths(source_id)
-    return DB.exec(
-        [[UPDATE books SET path=NULL
-          WHERE source_id<>? AND path IN
-            (SELECT path FROM books WHERE source_id=? AND path IS NOT NULL);]],
-        source_id,
-        source_id
-    ) ~= nil
 end
 
 --- 手动标记已读/未读。
@@ -562,14 +549,14 @@ function BookDB.clearPathsUnder(dir)
     ) ~= nil
 end
 
---- 按 (source_id, md5) 列出已入库行的 stable_id。
+--- 按 (source_id, md5) 列出在架行的 stable_id（不含墓碑：删掉的书不能被同内容的新文件收编复活）。
 --- 同内容副本可以并存，由调用方挑真正被移走的那一行。
 ---@param source_id string
 ---@param md5 string
 ---@return string[]
 function BookDB.stableIdsByMd5(source_id, md5)
     return stringColumn([[SELECT stable_id FROM books
-          WHERE source_id=? AND md5=?
+          WHERE source_id=? AND md5=? AND deleted=0
           ORDER BY inserted_at ASC, stable_id ASC;]], source_id, md5)
 end
 
@@ -667,6 +654,19 @@ end
 function BookDB.markSynced(source_id, stable_id)
     return DB.exec([[UPDATE books SET sync_status=1
         WHERE source_id=? AND stable_id=?;]], source_id, stable_id) ~= nil
+end
+
+--- 批量清脏（单事务）。
+---@param source_id string
+---@param stable_ids string[]
+---@return boolean
+function BookDB.markSyncedMany(source_id, stable_ids)
+    return DB.transaction(function()
+        for _idx, stable_id in ipairs(stable_ids) do
+            if not BookDB.markSynced(source_id, stable_id) then return nil end
+        end
+        return true
+    end) ~= nil
 end
 
 --- 已下载条件（唯一口径）：章节源从当前阅读章（pending_progress.chapter_idx，无则第 1 章）起，

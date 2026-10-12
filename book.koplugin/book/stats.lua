@@ -130,6 +130,7 @@ function Stats.pull(source, done)
         end
         local saved = StatsDB.replaceSynced(source.id, replace, rows)
         if saved then
+            if result.commit then result.commit() end
             saved.skipped = saved.skipped + invalid
             saved.failed = 0
             if done then done(true, saved) end
@@ -174,7 +175,11 @@ function Stats.syncAsync(source, opts, cb)
     --- 拉取远端统计后终结同步；dirty_only 路径只推不拉。
     local function pull()
         if cancelled then return end
-        if not can_pull or opts.dirty_only then finish(result); return end
+        if not can_pull or opts.dirty_only then
+            result.push_error = push_error
+            finish(result)
+            return
+        end
         current_job = Stats.pull(source, function(ok, pulled)
             current_job = nil
             if cancelled then return end

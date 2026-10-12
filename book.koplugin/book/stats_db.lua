@@ -352,6 +352,16 @@ function StatsDB.replaceSynced(source_id, replace, rows)
                 source_id
             ) ~= nil
         end
+        if replace and replace.mode == "synced_books" then
+            for _idx, stable_id in ipairs(replace.stable_ids or {}) do
+                if not DB.exec(
+                    [[DELETE FROM reading_stats WHERE source_id=? AND stable_id=? AND sync_status=1
+                        AND record_type IN ('page','page_rollup');]],
+                    source_id, stable_id
+                ) then return false end
+            end
+            return true
+        end
         if replace and type(replace.ranges) == "table" then
             for _idx, range in ipairs(replace.ranges) do
                 if not deleteSyntheticInRange(

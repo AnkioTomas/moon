@@ -11,6 +11,10 @@ reading_stats 提供统计。
 @module koplugin.book.book.catalog
 --]]
 
+--- 图书馆筛选项与分类索引。
+---@class BookFiltersResult
+---@field data { category_counts: { category: string, count: integer }[]|nil, series_counts: { series: string, count: integer }[]|nil, read_counts: { status: string, count: integer }[]|nil, downloaded_count: integer|nil, source_counts: { source_id: string, name: string, count: integer }[]|nil }|nil
+
 --- 图书馆 / 书城列表查询参数。
 --- 未使用的筛选项传 nil 或空串；源不支持的项可忽略。
 ---@class BookListOpts
