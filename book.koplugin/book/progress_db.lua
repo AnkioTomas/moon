@@ -5,6 +5,8 @@
 不变量：
   - upsertRemote 的 keep_dirty 必须在落库前判定，本地脏行整行跳过；冲突交给开书时用户选择，禁止静默抹平。
   - markSynced 靠 updated_at 乐观锁，推送期间又更新过的行不会被误标已同步。
+  - synced 是最近一次与云端一致的位置（推送成功 / 远端落库时写入，本地保存不动）：
+    开书拉到的云端位置和它一致，说明云端没被别的设备改过，不算冲突。
   - 进度写到 100% 调 BookDB.markReadAutomatically（books 自动标已读）；建表时对已读完的行回填一次。
 books_db 调用：markFinished（手动已读补 100% 待上传进度）、moveIdentity（迁身份）。
 
@@ -25,6 +27,7 @@ books_db 调用：markFinished（手动已读补 100% 待上传进度）、moveI
 ---@field extra table|nil 源私有定位字段（JSON 落库），如微信 chapter_uid
 ---@field updated_at integer 更新时间戳
 ---@field sync_status integer 0=待同步，1=已同步
+---@field synced ProgressPosition|nil 最近一次与云端一致的位置；旧行为 nil
 
 local DB = require("utils.db")
 local JSON = require("json")
@@ -39,12 +42,20 @@ CREATE TABLE IF NOT EXISTS pending_progress (
   source_id TEXT NOT NULL, stable_id TEXT NOT NULL, fraction REAL NOT NULL,
   chapter_idx INTEGER, chapter_title TEXT, chapter_fraction REAL,
   page INTEGER, total_pages INTEGER, locator TEXT, extra TEXT,
-  updated_at INTEGER NOT NULL, sync_status INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL, sync_status INTEGER NOT NULL DEFAULT 0, synced TEXT,
   PRIMARY KEY (source_id, stable_id)
 );
 CREATE INDEX IF NOT EXISTS idx_pending_progress_recent
   ON pending_progress(source_id, updated_at DESC);
 ]]) then return false end
+    local columns, ncols = DB.query("PRAGMA table_info(pending_progress);")
+    local has_synced = false
+    for i = 1, ncols do
+        if columns[2][i] == "synced" then has_synced = true end
+    end
+    if not has_synced and not DB.exec("ALTER TABLE pending_progress ADD COLUMN synced TEXT;") then
+        return false
+    end
     -- 旧库回填：read_state 列加入前已读完的书。
     local result, nrows = DB.query("SELECT source_id, stable_id FROM pending_progress WHERE fraction>=1;")
     for i = 1, nrows do
@@ -53,7 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_pending_progress_recent
     return true
 end)
 
-local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, extra, updated_at, sync_status"
+local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, extra, updated_at, sync_status, synced"
 
 ---@return integer|nil
 local function positiveInt(value)
@@ -80,12 +91,24 @@ local function encodeExtra(extra)
 end
 
 ---@return table|nil
-local function decodeExtra(payload)
-    local ok, extra = pcall(JSON.decode, payload)
+local function decodeJson(payload)
+    local ok, value = pcall(JSON.decode, payload)
     if not ok then
         return nil
     end
-    return extra
+    return value
+end
+
+--- 冲突判断只用得到的坐标，存进 synced 列。
+---@param pos ProgressPosition
+---@return string
+local function encodeSynced(pos)
+    return JSON.encode({
+        fraction = tonumber(pos.fraction),
+        chapter_idx = pos.chapter_idx,
+        chapter_fraction = pos.chapter_fraction,
+        locator = pos.locator,
+    })
 end
 
 --- 三种写入只差同步状态与「是否允许覆盖脏版本」，SQL 其余部分完全相同。
@@ -111,8 +134,8 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
     if not DB.exec(
         [[INSERT INTO pending_progress
             (source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction,
-             page, total_pages, locator, extra, updated_at, sync_status)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+             page, total_pages, locator, extra, updated_at, sync_status, synced)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             fraction=excluded.fraction,
             chapter_idx=excluded.chapter_idx,
@@ -123,11 +146,13 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
             locator=excluded.locator,
             extra=excluded.extra,
             updated_at=MAX(excluded.updated_at, pending_progress.updated_at),
-            sync_status=excluded.sync_status;]],
+            sync_status=excluded.sync_status,
+            synced=COALESCE(excluded.synced, pending_progress.synced);]],
         source_id, stable_id, fraction, pos.chapter_idx, pos.chapter_title, pos.chapter_fraction,
         positiveInt(pos.page), positiveInt(pos.total_pages),
         pos.locator, extra,
-        tonumber(pos.updated_at) or (status == 0 and os.time() or 0), status
+        tonumber(pos.updated_at) or (status == 0 and os.time() or 0), status,
+        status == 1 and encodeSynced(pos) or nil
     ) then
         return false
     end
@@ -166,7 +191,7 @@ end
 --- COLUMNS 顺序的位置参数 → PendingProgress
 ---@return PendingProgress|nil
 local function toProgress(source, stable, fraction, chapter_idx, chapter_title, chapter_fraction,
-                          page, total_pages, locator, extra, updated_at, sync_status)
+                          page, total_pages, locator, extra, updated_at, sync_status, synced)
     if not source then
         return nil
     end
@@ -180,9 +205,10 @@ local function toProgress(source, stable, fraction, chapter_idx, chapter_title, 
         page = tonumber(page),
         total_pages = tonumber(total_pages),
         locator = locator,
-        extra = decodeExtra(extra),
+        extra = decodeJson(extra),
         updated_at = tonumber(updated_at) or 0,
         sync_status = tonumber(sync_status) or 0,
+        synced = decodeJson(synced),
     }
 end
 
@@ -204,8 +230,8 @@ local function rows(result, nrows)
     local out = {}
     for i = 1, nrows do
         local row = {}
-        for c = 1, 12 do row[c] = result[c][i] end
-        out[i] = toProgress(unpack(row, 1, 12))
+        for c = 1, 13 do row[c] = result[c][i] end
+        out[i] = toProgress(unpack(row, 1, 13))
     end
     return out
 end
@@ -244,11 +270,13 @@ end
 ---@param source_id string
 ---@param stable_id string
 ---@param updated_at number
+---@param pos ProgressPosition 推上去的位置，记为与云端一致的位置
 ---@return boolean 命中该修订号的行才算确认；期间被改写过返回 false
-function ProgressDB.markSynced(source_id, stable_id, updated_at)
+function ProgressDB.markSynced(source_id, stable_id, updated_at, pos)
     return DB.exec(
-        [[UPDATE pending_progress SET sync_status=1
+        [[UPDATE pending_progress SET sync_status=1, synced=?
           WHERE source_id=? AND stable_id=? AND updated_at=?;]],
+        encodeSynced(pos),
         source_id,
         stable_id,
         updated_at

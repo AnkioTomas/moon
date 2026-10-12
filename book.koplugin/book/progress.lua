@@ -159,7 +159,8 @@ local function syncOnce(source, opts, cb)
 
         local row = ProgressDB.get(source.id, identity.stable_id)
         if row and row.sync_status == 0 then
-            current_job = source:putProgressAsync(identity, Progress.rowPosition(row), function(ok, err)
+            local pos = Progress.rowPosition(row)
+            current_job = source:putProgressAsync(identity, pos, function(ok, err)
                 current_job = nil
                 if cancelled then return end
                 if ok ~= true then
@@ -173,7 +174,7 @@ local function syncOnce(source, opts, cb)
                     return
                 end
                 -- 按推送时的修订号确认：推送期间写入的新版本保持脏
-                if not ProgressDB.markSynced(source.id, identity.stable_id, row.updated_at) then
+                if not ProgressDB.markSynced(source.id, identity.stable_id, row.updated_at, pos) then
                     logger.warn("book.progress confirm failed", identity.stable_id)
                     finish(nil, "progress confirm failed")
                     return

@@ -11,6 +11,7 @@ local shown = {}
 local synced = {}
 local upserted = {}
 local remote_upserted = {}
+local adopted = {}
 local pulled = 0
 local pending_row
 local goto_calls = {}
@@ -80,7 +81,7 @@ package.preload["book.progress_db"] = function()
             remote_upserted[#remote_upserted + 1] = pos
             return true
         end,
-        adoptRemote = function() return true end,
+        adoptRemote = function(_, _, pos) adopted[#adopted + 1] = pos; return true end,
     }
 end
 
@@ -124,13 +125,13 @@ UIManager:show({ probe = true })
 Assert.len(shown, 1, "uimanager show 应被测试桩捕获")
 shown = {}
 
--- 章序号不一致 → 弹窗，不先 sync
+-- 本地有未推改动、云端也不是上次同步的位置，章序号不一致 → 弹窗，不先 sync
 Progress.clearConflicts()
 pending_row = {
     fraction = 0.4,
     chapter_idx = 3,
     chapter_fraction = 0.1,
-    sync_status = 1,
+    sync_status = 0,
 }
 Progress.pull(snapshot())
 Stubs.flush()
@@ -241,7 +242,7 @@ pending_row = {
     fraction = 0.41,
     chapter_idx = 3,
     chapter_fraction = 0.09,
-    sync_status = 1,
+    sync_status = 0,
 }
 source.getProgressAsync = function(_, _, cb)
     cb({ fraction = 0.4, chapter_idx = 3 })
@@ -268,7 +269,7 @@ pending_row = {
     fraction = 0.4,
     chapter_idx = 3,
     chapter_fraction = 0.1,
-    sync_status = 1,
+    sync_status = 0,
 }
 source.getProgressAsync = function(_, _, cb)
     cb({ fraction = 0.6, chapter_fraction = 0.25 })
@@ -296,6 +297,56 @@ Assert.len(goto_calls, 1)
 Assert.len(shown, 2, "切章失败应弹提示")
 Assert.matches(shown[2].text, "失败")
 
+-- 按「上次同步时的云端位置」判断谁动过：只有两边都动过才弹窗。
+source.getProgressAsync = function(_, _, cb)
+    cb({ fraction = 0.8, chapter_idx = 5, chapter_fraction = 0.2 })
+    return { cancel = function() end }
+end
+local base = { fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.1 }
+local function pullWith(row)
+    Progress.clearConflicts()
+    shown, synced, adopted, goto_calls = {}, {}, {}, {}
+    pending_row = row
+    Progress.pull(snapshot())
+    Stubs.flush()
+end
+
+-- 云端仍是本机上次推上去的位置，本地新读的还没推：静默推送，不弹窗、不跳转。
+source.getProgressAsync = function(_, _, cb)
+    cb({ fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.1 })
+    return { cancel = function() end }
+end
+pullWith({ fraction = 0.6, chapter_idx = 4, chapter_fraction = 0.3, sync_status = 0, synced = base })
+Assert.eq(#shown, 0, "云端是自己的旧进度不算冲突")
+Assert.eq(synced[1], "b1", "应把本地新进度推上去")
+Assert.is_true(synced.dirty_only)
+Assert.len(adopted, 0, "不能用旧云端覆盖本地")
+
+-- 本地自上次同步没动过，云端被别的设备读到别处：静默跟云端，提示跳到哪里。
+source.getProgressAsync = function(_, _, cb)
+    cb({ fraction = 0.8, chapter_idx = 5, chapter_fraction = 0.2 })
+    return { cancel = function() end }
+end
+pullWith({ fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.1, sync_status = 1, synced = base })
+Assert.len(adopted, 1, "本地没改动时直接采用云端")
+Assert.eq(adopted[1].chapter_idx, 5)
+Assert.len(goto_calls, 1, "应跳到云端所在章")
+Assert.eq(goto_calls[1].idx, 5)
+Assert.len(synced, 0)
+Assert.len(shown, 1, "只有跳转提示，没有冲突框")
+Assert.matches(shown[1].text, "已跳转")
+
+-- 旧库的已同步行没有基准：本地没改动，同样跟云端。
+pullWith({ fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.1, sync_status = 1 })
+Assert.len(adopted, 1)
+
+-- 两边都动过：本地有未推改动，云端也不是上次同步的位置 → 弹窗。
+pullWith({ fraction = 0.6, chapter_idx = 4, chapter_fraction = 0.3, sync_status = 0, synced = base })
+Assert.len(shown, 1)
+Assert.matches(shown[1].text, "要从哪里继续读")
+Assert.len(adopted, 0)
+Assert.len(synced, 0)
+
 -- 拉失败只记日志，不弹窗：离线开缓存书必须能继续读
 Progress.clearConflicts()
 shown = {}
@@ -312,7 +363,7 @@ local net = true
 package.loaded["ui/network/manager"] = { isConnected = function() return net end }
 Progress.clearConflicts()
 shown, goto_calls = {}, {}
-pending_row = { fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.1, sync_status = 1 }
+pending_row = { fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.1, sync_status = 0 }
 source.getProgressAsync = function(_, _, cb)
     pulled = pulled + 1
     cb({ fraction = 0.8, chapter_idx = 8, chapter_fraction = 0.2 })

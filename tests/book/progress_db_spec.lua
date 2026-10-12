@@ -148,7 +148,7 @@ do
     -- sync_status 是绑定参数（第 12 个），不再拼进 SQL
     Assert.is_true(q.sql:find("sync_status=excluded.sync_status", 1, true) ~= nil)
     Assert.is_true(q.sql:find("updated_at=MAX(excluded.updated_at, pending_progress.updated_at)", 1, true) ~= nil)
-    Assert.eq(q.argc, 12)
+    Assert.eq(q.argc, 13)
     Assert.eq(q.args[12], 0)
     Assert.eq(q.args[1], "moon")
     Assert.eq(q.args[2], "book'1")
@@ -181,7 +181,7 @@ do
     Assert.is_true(ProgressDB.upsert("moon", "b2", { fraction = 0.1, page = 0, total_pages = -1 }))
     q = calls[#calls]
     Assert.is_true(q.sql:find("INSERT INTO pending_progress", 1, true) ~= nil)
-    Assert.eq(q.argc, 12)
+    Assert.eq(q.argc, 13)
     Assert.eq(q.args[4], nil)
     Assert.eq(q.args[5], nil)
     Assert.eq(q.args[6], nil)
@@ -195,6 +195,7 @@ do
 
     Assert.is_true(ProgressDB.upsert("moon", "b3", { fraction = 0.2, updated_at = 1234 }))
     Assert.eq(calls[#calls].args[11], 1234)
+    Assert.is_nil(calls[#calls].args[13], "本地保存不写基准")
 
     DbBase.close()
     clearMods()
@@ -227,6 +228,9 @@ do
     local q = calls[#calls]
     Assert.is_true(q.sql:find("INSERT INTO pending_progress", 1, true) ~= nil)
     Assert.eq(q.args[12], 1)
+    Assert.eq(require("json").decode(q.args[13]).fraction, 0.2, "采用云端即记为与云端一致的位置")
+    Assert.is_true(q.sql:find("synced=COALESCE(excluded.synced, pending_progress.synced)", 1, true) ~= nil,
+        "本地保存不能抹掉基准")
 
     DbBase.close()
     clearMods()
@@ -258,6 +262,7 @@ do
                 { nil, nil }, { nil, nil }, { nil, nil }, { nil, nil },
                 { 2000, 1000 },
                 { 1, 1 },
+                { nil, nil },
             }, 2
         end,
     })
@@ -285,15 +290,20 @@ do
     local connection, calls = makeConn()
     local DbBase, ProgressDB = loadProgress(connection)
 
-    Assert.is_true(ProgressDB.markSynced("moon", "a'); DROP TABLE pending_progress;--", 1234))
+    Assert.is_true(ProgressDB.markSynced("moon", "a'); DROP TABLE pending_progress;--", 1234,
+        { fraction = 0.5, chapter_idx = 2, page = 9 }))
     Assert.eq(calls[#calls].sql, "SELECT changes();")
     local q = calls[#calls - 1]
-    Assert.is_true(q.sql:find("UPDATE pending_progress SET sync_status=1", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("UPDATE pending_progress SET sync_status=1, synced=?", 1, true) ~= nil)
     Assert.is_true(q.sql:find("source_id=? AND stable_id=? AND updated_at=?", 1, true) ~= nil)
-    Assert.eq(q.argc, 3)
-    Assert.eq(q.args[1], "moon")
-    Assert.eq(q.args[2], "a'); DROP TABLE pending_progress;--")
-    Assert.eq(q.args[3], 1234)
+    Assert.eq(q.argc, 4)
+    local synced = require("json").decode(q.args[1])
+    Assert.eq(synced.fraction, 0.5)
+    Assert.eq(synced.chapter_idx, 2)
+    Assert.is_nil(synced.page, "基准只存冲突判断用得到的坐标")
+    Assert.eq(q.args[2], "moon")
+    Assert.eq(q.args[3], "a'); DROP TABLE pending_progress;--")
+    Assert.eq(q.args[4], 1234)
     Assert.is_false(q.sql:find("DROP TABLE", 1, true) ~= nil)
 
     local before = #calls
@@ -308,7 +318,7 @@ do
     local connection = makeConn({ changes = function() return 0 end })
     local DbBase, ProgressDB = loadProgress(connection)
 
-    Assert.is_false(ProgressDB.markSynced("moon", "a.epub", 1234))
+    Assert.is_false(ProgressDB.markSynced("moon", "a.epub", 1234, { fraction = 0.5 }))
 
     DbBase.close()
     clearMods()
@@ -331,6 +341,7 @@ do
                 { '{"chapter_uid":42}', "not json" },
                 { 1000, 2000 },
                 { 0, 1 },
+                { '{"fraction":0.5,"chapter_idx":3}', nil },
             }, 2
         end,
     })
@@ -350,6 +361,8 @@ do
     Assert.eq(rows[1].extra.chapter_uid, 42)
     Assert.eq(rows[1].updated_at, 1000)
     Assert.eq(rows[1].sync_status, 0)
+    Assert.eq(rows[1].synced.chapter_idx, 3)
+    Assert.is_nil(rows[2].synced) -- 旧行没有基准
     Assert.eq(rows[2].fraction, 0.75) -- 字符串 fraction 被 tonumber
     Assert.is_nil(rows[2].chapter_idx) -- NULL 保持 nil，不变成 0
     Assert.is_nil(rows[2].chapter_title)
@@ -376,7 +389,7 @@ do
             return {
                 { "moon" }, { "queued.epub" }, { 0.3 },
                 { nil }, { nil }, { nil }, { nil }, { nil }, { nil }, { nil },
-                { 99 }, { 0 },
+                { 99 }, { 0 }, { nil },
             }, 1
         end,
     })
