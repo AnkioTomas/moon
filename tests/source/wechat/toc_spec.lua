@@ -44,7 +44,7 @@ end
 do
     -- payload 是目录数组（与 Mapper.chapters 输出一致），按数组索引定位。
     store["b2"] = { payload = [[
-        [{"idx":1,"source_idx":2,"uid":"u1","toc_version":2},{"idx":2,"source_idx":4,"uid":"u2"}]
+        [{"idx":1,"source_idx":2,"uid":"u1","toc_version":3},{"idx":2,"source_idx":4,"uid":"u2"}]
     ]], at = now }
     Assert.eq(Toc.uid("wechat", "b2", 1), "u1")
     Assert.eq(Toc.uid("wechat", "b2", 2), "u2")

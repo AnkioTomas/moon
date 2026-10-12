@@ -222,6 +222,14 @@ function Mapper.shelfList(shelf, on_cover)
     return Catalog.listResult(books)
 end
 
+--- 章名已以「第…章」开头（序号部分不含空白、不超过 8 个汉字）。
+---@param title string
+---@return boolean
+local function numbered(title)
+    local head = title:match("^第(.-)章")
+    return head ~= nil and #head <= 24 and not head:find("%s")
+end
+
 --- 章节列表 wire → BookChapter[]。
 ---@param data table
 ---@param bookId string
@@ -278,10 +286,15 @@ function Mapper.chapters(data, bookId)
     table.sort(chapters, function(a, b)
         return (tonumber(a.source_idx) or 0) < (tonumber(b.source_idx) or 0)
     end)
+    -- 网文（format=txt）的章名不带序号，微信客户端按 chapterIdx 拼「第 N 章」；出版书原样。
+    local txt = type(entry.book) == "table" and entry.book.format == "txt"
     for i, ch in ipairs(chapters) do
         ch.idx = i
+        local number = "第" .. (ch.source_idx or tostring(i)) .. "章"
         if ch.title == "" then
-            ch.title = "第" .. (ch.source_idx or tostring(i)) .. "章"
+            ch.title = number
+        elseif txt and not numbered(ch.title) then
+            ch.title = number .. " " .. ch.title
         end
     end
     if #chapters == 0 then

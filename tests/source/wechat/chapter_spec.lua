@@ -135,9 +135,12 @@ do
     Assert.eq(payload.document, expected)
 
     txt = true
-    Chapter.fetchContentAsync("book", { uid = "c2", title = "第二章" }, function(p) payload = p end)
+    Chapter.fetchContentAsync("book", { uid = "c2", title = "第2章 想<整>我" }, function(p) payload = p end)
     txt = false
     Assert.is_nil(payload.document)
+    -- TXT 正文不带章名：章首补 h1（转义），EPUB 原文自带标题不补。
+    local heading = "<h1>第2章 想&lt;整&gt;我</h1>"
+    Assert.eq(payload.html:sub(1, #heading), heading)
     Assert.is_true(payload.html:find("<p>", 1, true) ~= nil)
 end
 

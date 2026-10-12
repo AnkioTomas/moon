@@ -94,9 +94,31 @@ do
     Assert.eq(chapters[1].depth, 1)
     Assert.eq(chapters[1].anchors[1].title, "第一章")
     Assert.eq(chapters[1].anchors[1].depth, 2)
-    Assert.eq(chapters[1].toc_version, 2)
-    Assert.eq(chapters[2].title, "二")
+    Assert.eq(chapters[1].toc_version, 3)
+    Assert.eq(chapters[2].title, "二", "出版书（epub）章名原样")
     Assert.eq(chapters[2].depth, 2)
+end
+
+do
+    -- 网文（book.format=txt，chapterInfos 实测字段）：按 chapterIdx 补「第 N 章」，已带序号的不重复补，空章名只留序号。
+    local chapters = Mapper.chapters({
+        data = {
+            {
+                bookId = "820954",
+                book = { bookId = "820954", format = "txt" },
+                updated = {
+                    { chapterIdx = 1, chapterUid = 1, title = "万年之后", wordCount = 1290 },
+                    { chapterIdx = 2, chapterUid = 2, title = "第二章 想整我？", wordCount = 1430 },
+                    { chapterIdx = 3, chapterUid = 3, title = "第一次见面", wordCount = 10 },
+                    { chapterIdx = 4, chapterUid = 4, title = "", wordCount = 10 },
+                    { chapterIdx = 5, chapterUid = 5, title = "第12章", wordCount = 10 },
+                },
+            },
+        },
+    }, "820954")
+    local titles = {}
+    for i, ch in ipairs(chapters) do titles[i] = ch.title end
+    Assert.eq(table.concat(titles, "|"), "第1章 万年之后|第二章 想整我？|第3章 第一次见面|第4章|第12章")
 end
 
 do

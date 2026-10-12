@@ -202,7 +202,8 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
             return
         end
         if format == "txt" then
-            cb({ title = title, html = html })
+            -- TXT 正文不含章名（EPUB 原文自带标题），补一个，翻到新章才看得到章名。
+            cb({ title = title, html = "<h1>" .. Text.xmlEscape(title) .. "</h1>" .. html })
             return
         end
         asset_job = Assets.localizeAsync(bookId, chapter, html, reader_url, function(done)
