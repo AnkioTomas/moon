@@ -5,12 +5,18 @@
 local Assert = require("support.assert")
 
 local shown, closed, ticks = {}, {}, {}
+local restarted = 0
 package.preload["ui/uimanager"] = function()
     return {
         show = function(_, widget) shown[#shown + 1] = widget end,
         close = function(_, widget) closed[#closed + 1] = widget end,
         nextTick = function(_, fn) ticks[#ticks + 1] = fn end,
+        restartKOReader = function() restarted = restarted + 1 end,
     }
+end
+local connected = true
+package.preload["ui/network/manager"] = function()
+    return { isConnected = function() return connected end }
 end
 local function flush()
     while #ticks > 0 do table.remove(ticks, 1)() end
@@ -37,6 +43,9 @@ package.preload["ui.themes.widgets.progress_dialog"] = function()
                 self.progress = done
                 self.progress_max = total
             end
+            function opts:set(text, percent)
+                self.status, self.percent = text, percent
+            end
             return opts
         end,
     }
@@ -45,11 +54,13 @@ package.preload["device"] = function()
     return { screen = { getHeight = function() return 800 end } }
 end
 package.preload["json"] = function() return { decode = function(value) return value end } end
-local check_cb, download_cb, download_opts
+local check_cb, download_cb, download_opts, download_handle
 local probes = {}
+local gets = 0
 package.preload["http.request"] = function()
     return {
         get = function(_, _, cb)
+            gets = gets + 1
             check_cb = cb
             return { cancel = function() end }
         end,
@@ -66,7 +77,8 @@ package.preload["http.request"] = function()
         download = function(opts, _, cb)
             download_opts = opts
             download_cb = cb
-            return { cancel = function() end }
+            download_handle = { cancel = function(self) self.cancelled = true end }
+            return download_handle
         end,
     }
 end
@@ -242,11 +254,12 @@ Assert.eq(shown[3].progress_max, 4096)
 
 -- 镜像给的包校验不过：回落直连重下。
 download_cb(true)
+Assert.eq(closed[3], shown[3])
 job_opts.on_failed("install.lua:1: update checksum mismatch")
 Assert.eq(download_opts.url, direct)
 download_cb(false, "network failed")
-Assert.eq(closed[3], shown[3])
-Assert.matches(shown[4].text, "network failed")
+Assert.eq(closed[#closed], shown[4])
+Assert.eq(shown[5].text, "月读更新失败：network failed")
 
 -- 探测全部失败：直接走直连。
 local parsed_update = check(update_release)
@@ -274,5 +287,69 @@ download_cb(true)
 job_opts.on_failed("install.lua:1: cannot back up current plugin")
 Assert.is_false(install_ok)
 Assert.matches(install_err, "cannot back up")
+
+-- 下载地址不是字符串：当无效资产，不在回调里抛错。
+bad = release("v1.2.4")
+bad.assets[1].browser_download_url = 42
+Assert.matches(select(2, check(bad)), "plugin archive")
+
+--- 手动检查 → 确认安装，返回下载进度窗。
+local function startFromPrompt()
+    shown, closed, probes, download_opts = {}, {}, {}, nil
+    Update.manualCheck("/plugins/book.koplugin")
+    check_cb(update_release)
+    shown[2].buttons[2].callback()
+    local dialog = shown[3]
+    probes[1].handlers.on_headers(200, headers(4096))
+    flush()
+    return dialog
+end
+
+-- 下载中可取消：只关窗、取消下载，不回调；之后可以再查。
+local downloading = startFromPrompt()
+Assert.is_false(downloading.dismissable)
+downloading.on_cancel()
+Assert.is_true(download_handle.cancelled)
+Assert.is_nil(select(2, check(update_release)))
+
+-- 下载完换成不可关闭、没有取消的安装窗；装好直接重启，没有「稍后」。
+downloading = startFromPrompt()
+download_cb(true)
+Assert.eq(closed[#closed], downloading)
+local installing = shown[#shown]
+Assert.eq(installing.title, "正在安装月读更新…")
+Assert.is_false(installing.dismissable)
+Assert.is_nil(installing.on_cancel)
+job_opts.on_done()
+Assert.eq(installing.status, "更新完成，正在重启 KOReader…")
+Assert.eq(restarted, 0)
+flush()
+Assert.eq(restarted, 1)
+
+-- 直连包校验不过：提示中文原因，不带堆栈。
+downloading = startFromPrompt()
+download_cb(true)
+job_opts.on_failed("update checksum mismatch\nstack traceback:\n\tinstall.lua:61")
+Assert.eq(shown[#shown].text, "月读更新失败：更新包校验失败，请稍后再试")
+
+-- 忙时手动检查：提示中文原因。
+shown = {}
+Update.check(function() end)
+local pending_check = check_cb
+Update.manualCheck("/plugins/book.koplugin")
+Assert.eq(shown[#shown].text, "检查更新失败：正在检查或安装更新，请稍候")
+pending_check(update_release)
+
+-- 自动检查：没连网不发请求；连上后照常查。
+local settings = require("utils.settings").get("features.update")
+settings.auto_update_check, settings.update_last_checked_at = true, 0
+connected = false
+local before = gets
+Update.autoCheck("/plugins/book.koplugin")
+Assert.eq(gets, before)
+connected = true
+Update.autoCheck("/plugins/book.koplugin")
+Assert.eq(gets, before + 1)
+check_cb(release("v1.2.3"))
 
 return true

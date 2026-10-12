@@ -115,7 +115,8 @@ local function parseRelease(body)
     local zip_name = "book.koplugin-" .. tag .. ".zip"
     local zip
     for _idx, asset in ipairs(release.assets or {}) do
-        if asset.name == zip_name and asset.browser_download_url:match(ASSET_PREFIX) then zip = asset end
+        local url = asset.browser_download_url
+        if asset.name == zip_name and type(url) == "string" and url:match(ASSET_PREFIX) then zip = asset end
     end
     if not zip then return nil, "release has no plugin archive" end
     local digest = (zip.digest or ""):match("^sha256:(" .. ("%x"):rep(64) .. ")$")
@@ -200,11 +201,12 @@ end
 
 --- 从 url 下载并在子进程里装包；镜像下载失败或校验不过时回落直连重来一次。
 ---@param done fun(ok: boolean, err: any) 已负责清 _job
-local function installFrom(url, release, plugin_root, done, on_progress)
+---@param on_installing fun()|nil 下载完、开始换目录：此后不能再取消
+local function installFrom(url, release, plugin_root, done, on_progress, on_installing)
     local function fail(err)
         if url == release.url then return done(false, err) end
         logger.warn("book.update mirror failed", url, err)
-        installFrom(release.url, release, plugin_root, done, on_progress)
+        installFrom(release.url, release, plugin_root, done, on_progress, on_installing)
     end
     Paths.ensureDir(Paths.root())
     local archive = Paths.root() .. "/plugin-update.zip"
@@ -217,9 +219,10 @@ local function installFrom(url, release, plugin_root, done, on_progress)
         on_progress = on_progress,
     }, archive, function(ok, err)
         if not ok then return fail(err) end
+        if on_installing then on_installing() end
         Update._job = Job.run(function()
             local installed, install_err = Install.run(archive, plugin_root, release.sha256)
-            if not installed then error(install_err) end
+            if not installed then error(install_err, 0) end
         end, {
             name = "plugin.update",
             kind = "heavy",
@@ -245,44 +248,72 @@ end
 ---@param plugin_root string 当前插件目录
 ---@param cb fun(ok: boolean, err: any)
 ---@param on_progress fun(bytes: number)|nil
-function Update.install(release, plugin_root, cb, on_progress)
+---@param on_installing fun()|nil 下载完、开始换目录：此后不能再取消
+function Update.install(release, plugin_root, cb, on_progress, on_installing)
     if Update._job then return cb(false, "busy") end
     local function done(ok, err)
         Update._job = nil
         cb(ok, err)
     end
     Update._job = pickDownloadUrl(release, function(url)
-        installFrom(url, release, plugin_root, done, on_progress)
+        installFrom(url, release, plugin_root, done, on_progress, on_installing)
     end)
 end
 
-local function promptRestart()
-    require("ui.themes.widgets.confirm"):new{
-        text = _("月读已更新，重启 KOReader 后生效。"),
-        ok_text = _("立即重启"),
-        cancel_text = _("稍后"),
-        ok_callback = function() UIManager:restartKOReader() end,
-    }:show()
+--- 取消在途的检查 / 下载，不回调。换目录的子进程只有退出时才会被杀。
+function Update.cancel()
+    if Update._job then Update._job:cancel() end
+    Update._job = nil
 end
 
-local function startInstall(release, plugin_root)
-    local size = release.size
-    local loading = require("ui.themes.widgets.progress_dialog"):new{
-        title = _("正在下载月读更新…"),
+Update.onExit = Update.cancel
+
+--- 已知错误码 → 用户文案；子进程错误带堆栈，只取首行。
+---@param err any
+---@return string
+local function errorText(err)
+    local text = tostring(err)
+    local known = {
+        { "^busy$", _("正在检查或安装更新，请稍候") },
+        { "^invalid release", _("更新信息无效，请稍后再试") },
+        { "^release has no", _("新版本缺少插件包，请稍后再试") },
+        { "update checksum mismatch", _("更新包校验失败，请稍后再试") },
+        { "download too large", _("更新包过大，已中止下载") },
     }
-    loading:show()
+    for _idx, entry in ipairs(known) do
+        if text:find(entry[1]) then return entry[2] end
+    end
+    return text:match("[^\n]*")
+end
+
+--- 下载可取消；进入换目录后换成不可关闭的安装窗。装好立即重启：
+--- 新文件已就位，旧模块还在内存里，再跑插件代码就会延迟加载到新版文件、新旧混跑。
+local function startInstall(release, plugin_root)
+    local ProgressDialog = require("ui.themes.widgets.progress_dialog")
+    local size = release.size
+    local dialog = ProgressDialog:new{
+        title = _("正在下载月读更新…"),
+        dismissable = false,
+        on_cancel = Update.cancel,
+    }
+    dialog:show()
     Update.install(release, plugin_root, function(ok, err)
-        loading:close()
         if ok then
-            promptRestart()
-        else
-            require("ui.themes.widgets.toast"):new{
-                text = T(_("月读更新失败：%1"), tostring(err)),
-                timeout = 5,
-            }:show()
+            dialog:set(_("更新完成，正在重启 KOReader…"), 100)
+            UIManager:nextTick(function() UIManager:restartKOReader() end)
+            return
         end
+        dialog:close()
+        require("ui.themes.widgets.toast"):new{
+            text = T(_("月读更新失败：%1"), errorText(err)),
+            timeout = 5,
+        }:show()
     end, function(bytes)
-        if size and size > 0 then loading:bytes(bytes, size) end
+        if size and size > 0 then dialog:bytes(bytes, size) end
+    end, function()
+        dialog:close()
+        dialog = ProgressDialog:new{ title = _("正在安装月读更新…"), dismissable = false }
+        dialog:show()
     end)
 end
 
@@ -321,7 +352,7 @@ function Update.manualCheck(plugin_root)
         loading:close()
         if err then
             Toast:new{
-                text = T(_("检查更新失败：%1"), tostring(err)),
+                text = T(_("检查更新失败：%1"), errorText(err)),
                 timeout = 4,
             }:show()
         elseif release then
@@ -338,21 +369,17 @@ function Update.manualCheck(plugin_root)
     end)
 end
 
---- 按 24 小时间隔静默检查；只有发现新版本才弹窗。
+--- 按 24 小时间隔静默检查；只有发现新版本才弹窗。没连网不发请求，等下次唤醒。
 ---@param plugin_root string
 function Update.autoCheck(plugin_root)
     local settings = MoonSettings.get("features.update")
     if not settings.auto_update_check then return end
     if os.time() - settings.update_last_checked_at < CHECK_INTERVAL then return end
+    if not require("ui/network/manager"):isConnected() then return end
     Update.check(function(release)
         if not release then return end
         if release.available then promptInstall(release, plugin_root) end
     end)
-end
-
-function Update.onExit()
-    if Update._job then Update._job:cancel() end
-    Update._job = nil
 end
 
 return Update
