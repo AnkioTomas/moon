@@ -17,6 +17,9 @@ local Opds = {}
 -- 顺着 rel="next" 最多拉这么多页凑满一屏结果，防止服务端 next 链成环或过长。
 local MAX_PAGES = 10
 
+-- 文件名单段上限 255 字节，留出扩展名、下载的 .part 与导入重名的 " (n)"。
+local MAX_STEM_BYTES = 200
+
 --- 用当前持久化配置创建一次性客户端。
 ---@return OpdsClient
 local function client()
@@ -122,7 +125,8 @@ end
 local function safeFilename(book)
     local title = tostring(book.title or _("未知书名")):gsub("[/\\?%%*:|\"<>%c]", "_")
     local author = tostring(book.authors or ""):gsub("[/\\?%%*:|\"<>%c]", "_")
-    local stem = author ~= "" and (title .. " - " .. author) or title
+    local stem = title .. " - " .. author
+    if author == "" or #stem > MAX_STEM_BYTES then stem = Text.truncateUtf8(title, MAX_STEM_BYTES) end
     return stem .. "." .. book.format
 end
 
