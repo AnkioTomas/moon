@@ -14,12 +14,11 @@
 ```text
 source/
 ├── base.lua            契约；联网后只推本源脏行
-├── registry.lua        工厂表、单活跃源、按身份解析属主源
+├── registry.lua        源 id 清单、实例缓存、活跃 / 启用配置
 ├── shelf.lua           有 add/remove 书架 API 的双向同步（微信、京东）
 ├── chapter.lua         按章源的落盘：目录、正文、预取、全本缓存
 ├── toc.lua             books.toc 的读缓存（键含 source_id）
 ├── assets.lua          章节远程图落地（源注入 download，这里不碰鉴权）
-├── cache_queue.lua     全本缓存入 workers.tasks（kind = cache）
 └── <id>/
     ├── init.lua        必需。门面：meta / new / 覆盖自己支持的方法
     ├── setting.lua     可选。设置入口（open / rows / rowStatus …），设置页按这个文件名找
@@ -56,7 +55,7 @@ source/
 | 统计 | 有 `pushStatsAsync` 才推；`capabilities.stats_pull` 才拉 | 缺哪边就跳哪边 |
 
 进度 pull 只在开书，冲突 ≥1% 让用户选一次。笔记有网即推，开书再拉。关书 progress / notes / stats 一律 `dirty_only`（只推不拉）。
-断网留下的脏行由源自己的 `onNetworkConnected` 推：书架、笔记、统计，进度最后。没有脏行的域不调用。
+断网或推送失败留下的脏行由 `pushDirty` 推（main 在启动、唤醒、联网时触发，作为后台任务入队、失败退避重试）：书架、笔记、统计，进度最后。没有脏行的域不调用。
 
 书架的共同形状：远端快照 `book.store.reconcile`（pulled）+ 本地独有成员上行（pushed）。本地删除先标 `deleted`，推成功再撕墓碑。
 
@@ -75,15 +74,15 @@ source/
 
 ### 注册表
 
-`registry.lua` 的 `FACTORIES` 是唯一登记处，不扫目录。`ORDER` 是选择器顺序：本地、Kindle、其余在线源。
+`registry.lua` 的 `IDS` 是唯一登记处，不扫目录，顺序即选择器顺序：本地、其余在线源。
 
-- 同时只有一个活跃源（`common.active_source`）。`current()` 不做静默 fallback。
-- `resolve(id)` 按书的 `source_id` 取属主：对得上活跃源就复用，否则建一个非活跃实例，不改用户当前选择。
-- `meta()` 返回 `nil` 的源不出现在列表里。Kindle 没装 `kindle.koplugin` 就是这样。
+- 每个 id 一个缓存实例；活跃源只是配置 id（`common.active_source`），`current()` 就是 `resolve(activeId())`，不做静默 fallback；存的 id 已下线（如 kindle）时 `activeId()` 退回 local。
+- `resolve(id)` 按书的 `source_id` 取属主实例，不改用户当前选择。
+- 源模块加载失败直接抛出，不从列表里藏掉。
 - `common.enabled_sources == nil` 表示全开。活跃源禁止禁用。
 - 登录态或连接配置变了走 `Registry.reload()`：关掉旧实例，广播 `SourceChanged`。
 
-插件生命周期 `onCreate` / `onSuspend` / `onResume` / `onNetworkConnected` / `onExit` 由 main 转给**所有启用源**。
+源没有插件生命周期钩子；main 只在启动、唤醒、联网时对有脏行且已配置的启用源调 `pushDirty`。
 业务事件没有中转层，调用方直接 `source:onEvent`，基类全部空操作：
 
 | 事件 | 谁发 | 谁覆盖 |
@@ -91,7 +90,6 @@ source/
 | `page_changed` | 阅读会话 | wechat（每 30 秒推时长） |
 | `chapter_changed` | 按章会话开章 | wechat（进入阅读） |
 | `book_meta_changed` | 编辑 / 刮削已写库 | local（WebDAV 上行这本书） |
-| `book_info_request` | 阅读面板要详情 | 按需 |
 
 桌面打开、换源、图书馆刷新时的书架与统计同步不经过源事件，由 `desktop/sync.lua` 直接调 `syncBooksAsync` / `syncStatsAsync`：
 `Sync.open` 后台同步（统计 5 分钟节流），`Sync.refresh` 强制同步并把书架任务放进任务队列。源未配置时，后台打开静默跳过，手动刷新会提示，源有 `setting.open` 时附带「立即设置」按钮。
@@ -101,9 +99,9 @@ source/
 
 1. `source/<id>/init.lua`：`meta()` + `new()`，继承 `SourceBase`，只覆盖自己真有的方法。模块名仍是 `source.<id>`。
 2. 需要设置页就加 `source/<id>/setting.lua`；配置走 `utils.settings.getSource(id)`。协议、映射、登录怎么拆文件按源的实际复杂度来，不照抄别的源。
-3. 在 `registry.lua` 的 `FACTORIES` 和 `ORDER` 各加一行。
+3. 在 `registry.lua` 的 `IDS` 加一项。
 4. `type = "chapter"` 的开书、预取、全本缓存走 `source.chapter`，目录缓存直接 require `source.toc`。只有源自己有目录逻辑时才建 `<id>/toc.lua`（如 wechat 的格式版本判断），不建一行转发。
-5. 书架若是标准的拉快照 + add / remove，用 `source.shelf`：`Shelf.syncAsync(self, remote, …)` / `Shelf.deleteAsync(self, remote, …)`，`remote` 由源自己传，提供 `shelfSyncAsync` / `addToShelfAsync` / `removeFromShelfAsync`。协议对不上就在门面里写，别硬套。
+5. 书架若是标准的拉快照 + add / remove，用 `source.shelf`：`Shelf.syncAsync(self.id, remote, to_books, opts, cb)`，`remote` 由源自己传，提供 `shelfSyncAsync` / `addToShelfAsync` / `removeFromShelfAsync`。协议对不上就在门面里写，别硬套；但推墓碑一律用 `Shelf.pushDeletes(self.id, remove_one, report, cb)`，源只给「远端删一本」，不再自己写串行循环。
 6. 文案走 gettext。模块顶部不要 require KOReader UI（`UIManager`、`NetworkMgr`），函数内再加载。
 
 测试放 `tests/source/<id>/`。
@@ -116,28 +114,21 @@ source/
 
 | 域 | 纯目录 | WebDAV |
 |---|---|---|
-| 书架 | 扫盘写 `books`。`dirty_only` 跳过 | 扫远端 + `books.sync` 对账 |
+| 书架 | 扫盘写 `books`。`dirty_only` 跳过 | 扫远端 + `books.sync` 对账。`dirty_only` 推删除并回写书目改动 |
 | 进度 / 笔记 / 统计 | skipped | 走 `.Moon+/` 下的进度、笔记、统计文件 |
 | 删除 | 删文件并删库行 | 删远端，本地留墓碑直到对账完成 |
+| 推脏 `pushDirty` | 不入队（没有远端，脏行推不出去） | 照常入队 |
 
 `scrape` / `edit` 只有这个源为 true。改分类/系列 = 移动文件（`stable_id` 跟着变）；WebDAV 下分类只是元数据，不搬文件。
 书城导入走 `importBookAsync`。转换替换走 `replaceBookAsync`。
 
 `local/client.lua` 只管配置、路径和方法装配，实现按职责拆开：`scan.lua`（本地目录扫盘 / 导入 / 移动 / 排版替换）、`webdav.lua`（books.sync 同步流水线、按需下载、删除、单本上行、远端替换、连通性测试）、`remote_data.lua`（`.Moon+/` 下的进度、统计、笔记文件）、`common.lua`（共享原语：路径与边车寻址、文件读写、目录遍历、元数据与封面解析）。子模块函数首参即 `self`，在 `client.lua` 末尾逐个赋给 `Client`；子模块之间不互相 require。
 
-### kindle — Kindle 书库（`book`）
-
-只在装了 `kindle.koplugin` 的 Kindle 上存在，否则 `meta()` 返回 nil。
-
-书架 = `cc.db` 全量快照 reconcile。`stable_id` 是 kindle.koplugin 的书目 id（`cc:<uuid>`）。
-MOBI / AZW3 直接打开原文件；KFX 复用它的转换缓存，未命中则子进程转换。
-没有远端。进度、笔记、统计不实现。和 Kindle 阅读器的位置互通是 kindle.koplugin 自己的事。
-
 ### moon — 月读服务（`book`）
 
 Bearer Token。整本文件下载到书籍工作目录，扩展名从 `stable_id` 认，认不出就当 epub。
 
-书架：分页拉全量，先推本地待删，再 reconcile。**没有加书 API**，所以只有 list / delete，本地新加的书推不上去。
+书架：分页拉全量，先推本地待删（`Shelf.pushDeletes`），再 reconcile。**没有加书 API**，所以只有 list / delete，本地新加的书推不上去。
 进度、笔记、统计都双向。统计 pull 是账户级 `page_stat` 快照，入库前按 replace 策略清掉已同步行，避免和本地页记录双计。
 
 ### wechat — 微信读书（`chapter`）
@@ -170,8 +161,7 @@ Bearer Token。整本文件下载到书籍工作目录，扩展名从 `stable_id
 cookie + 设备 uuid。协议签名和章节下载 AES 在 `protocol.lua`（`e.m.jd.com`）。
 
 书架用 `source.shelf`，和微信同一套。进度双向。没有笔记，没有统计拉取（`stats_pull = false`，也没有 `pushStatsAsync`）。
-目录只认下载协议版本 2（`indexes`）和 3（`type` + `ids`）。旧 cread 目录（版本 1）当场作废重拉。
-章节 CBZ 按章节 uuid 命名（`<uuid>.cbz`），不按连续章号：目录是各分组拼起来的，默认组更新后其它组章号整体后移。
+目录只认下载协议版本 5（EPUB 按文件成章，`indexes`；同文件锚点小节挂 `anchors`）和 3（网文，`type` + `ids`）。其余版本当场作废重拉。
 未购买且非试读章节下载返回 `result_code = 101`。
 
 ### copymanga — 拷贝漫画（`chapter`）
@@ -181,6 +171,7 @@ App API `COPY/3.0.0`，`/api/v3/*`。默认 host `api.copy202601.com`。token �
 书架不是 add/remove，是收藏列表。删除 = 先查 `comic_id` 再 `setCollect(false)`，所以不用 `Shelf.syncAsync`，只把这两步当「删一本」交给 `Shelf.pushDeletes`。没有加架上行。
 `dirty_only` 只推取消收藏。进度双向。没有笔记和统计。
 一章是一组图片 URL（`protocol.lua` 把低清 `.c800x.` 换成 `.c1500x.`），不是 HTML 正文。
+章节 CBZ 按章节 uuid 命名（`<uuid>.cbz`），不按连续章号：目录是各分组拼起来的，默认组更新后其它组章号整体后移。
 
 ### fanqie — 番茄小说（`chapter`）
 
