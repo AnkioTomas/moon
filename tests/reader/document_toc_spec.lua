@@ -62,3 +62,17 @@ do
     Assert.eq(DocumentToc.chapterFraction(ui), 5 / 9)
     ui.document.getXPointer = nil
 end
+
+-- 章内页码：第几页从 1 数，本章页数用 ReaderToc 的口径；首章之前没有章内页码。
+do
+    ui.toc.getChapterPagesDone = function(_, page) return page >= 10 and page - 10 or nil end
+    ui.toc.getChapterPageCount = function() return 10 end
+    state.page = 10
+    local page, count = DocumentToc.chapterPages(ui)
+    Assert.eq(page, 1, "章首页是第 1 页")
+    Assert.eq(count, 10)
+    state.page = 15
+    Assert.eq(DocumentToc.chapterPages(ui), 6)
+    state.page = 5
+    Assert.is_nil(DocumentToc.chapterPages(ui))
+end
