@@ -404,15 +404,28 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
     }:show()
 end
 
+---@param text string
+local function toast(text)
+    require("ui.themes.widgets.toast"):new{ text = text, timeout = 2 }:show()
+end
+
 --- 开书后拉远端进度并与当前阅读位置对比；冲突时弹窗，一致则直接收敛。
 --- syncProgressAsync 只推不拉；本函数是进度 pull 的唯一入口。
+--- manual（快捷面板手动拉取）：本次会话问过的冲突也再问一次，离线 / 无记录 / 失败 / 一致都提示。
 ---@param snapshot ReaderSessionSnapshot
-function ReaderProgress.pull(snapshot)
+---@param opts { manual?: boolean }|nil
+function ReaderProgress.pull(snapshot, opts)
     local id = snapshot and snapshot.identity
     if not id then return end
     local source = id.source
     if not source or type(source.getProgressAsync) ~= "function" then
         return
+    end
+    local manual = opts and opts.manual
+    local tell = manual and toast or function() end
+    if manual then
+        if not require("ui/network/manager"):isConnected() then return toast(_("网络不可用，请先连接 Wi-Fi")) end
+        ReaderProgress.asked_conflicts[id.source_id .. "\31" .. id.stable_id] = nil
     end
     logger.dbg("book.progress reader pull start", id.source_id, id.stable_id,
         id.chapter_idx or "book")
@@ -423,12 +436,12 @@ function ReaderProgress.pull(snapshot)
         end
         if type(meta) == "table" and meta.empty then
             logger.dbg("book.progress reader pull empty", id.source_id, id.stable_id)
-            return
+            return tell(_("云端没有这本书的进度"))
         end
         if not remote_pos then
             -- 离线开缓存书是正常路径；拉不到云端进度只记日志，不能打断阅读。
             logger.warn("book.progress reader pull failed", id.source_id, id.stable_id, err)
-            return
+            return tell(T(_("拉取进度失败：%1"), tostring(err or "")))
         end
         local local_position = localProgressForPull(id, snapshot)
         if progressDiffers(local_position, remote_pos, id, snapshot) then
@@ -436,6 +449,7 @@ function ReaderProgress.pull(snapshot)
             askProgressConflict(id, snapshot, local_position, remote_pos)
             return
         end
+        tell(_("本地与云端进度一致"))
         local row = ProgressDB.get(id.source_id, id.stable_id)
         if row and row.sync_status == 0 then
             -- 本地脏版本与云端基本一致时只推不拉；上面已经拿到了最新远端，
@@ -452,6 +466,22 @@ function ReaderProgress.pull(snapshot)
             return
         end
         logger.dbg("book.progress reader pull done", id.source_id, id.stable_id, "matched")
+    end)
+end
+
+--- 快捷面板手动推送：先把当前位置落本地（标脏），再推给属主源。
+--- 离线照样落本地，联网后由脏行推送收敛。
+---@param snapshot ReaderSessionSnapshot
+function ReaderProgress.push(snapshot)
+    local id = snapshot.identity
+    ReaderProgress.save(snapshot, function(ok)
+        if not ok then return toast(_("进度保存失败")) end
+        if not require("ui/network/manager"):isConnected() then
+            return toast(_("已保存到本地，联网后自动同步"))
+        end
+        id.source:syncProgressAsync({ identity = id }, function(result, err)
+            toast(result and _("进度已推送") or T(_("推送进度失败：%1"), tostring(err or "")))
+        end)
     end)
 end
 
