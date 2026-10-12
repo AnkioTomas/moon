@@ -7,10 +7,14 @@ features.lockscreen.background：背景模式；必应/摸鱼日报图交给 onl
 
 local Assert = require("support.assert")
 
-local settings = { lock_screen_background = "none", lock_screen_asset_cache = {} }
+local settings = { lock_screen_background = "none" }
 local files = {}
 local original_date = os.date
-os.date = function() return "2020-01-02" end
+local today = { year = 2020, month = 1, day = 2 }
+os.date = function(fmt)
+    if fmt == "*t" then return { year = today.year, month = today.month, day = today.day } end
+    return string.format("%04d-%02d-%02d", today.year, today.month, today.day)
+end
 
 local bing_path = "/tmp/moon-online-cache/bing.jpg"
 local myrl_path = "/tmp/moon-online-cache/myrl.png"
@@ -188,24 +192,47 @@ Assert.eq(got, bing_path)
 
 -- folder：空目录
 settings.lock_screen_background = "folder"
-settings.lock_screen_asset_cache.folder = nil
 files[folder_dir] = { mode = "directory", modification = 1 }
 files[folder_dir .. "/__dir__"] = { ".", ".." }
 got = "sentinel"
 Background.ensure(background("folder"), function(path) got = path end)
 Assert.is_nil(got)
 
--- folder：按日复用
+-- folder：同一天固定一张，第二天换下一张，不落盘任何状态
 local wall = folder_dir .. "/a.png"
 files[folder_dir] = { mode = "directory", modification = 2 }
-files[folder_dir .. "/__dir__"] = { ".", "..", "a.png", "b.jpg" }
+files[folder_dir .. "/__dir__"] = { ".", "..", "a.png", "b.jpg", "notes.txt" }
 files[wall] = { mode = "file", size = 64 }
 files[folder_dir .. "/b.jpg"] = { mode = "file", size = 64 }
+files[folder_dir .. "/notes.txt"] = { mode = "file", size = 64 }
 Background.ensure(background("folder"), function(path) got = path end)
-Assert.not_nil(got)
 local first = got
+Assert.is_true(first == wall or first == folder_dir .. "/b.jpg", "只挑图片")
 Background.ensure(background("folder"), function(path) got = path end)
 Assert.eq(got, first)
-Assert.eq(settings.lock_screen_asset_cache.folder.path, first)
+today.day = 3
+Background.ensure(background("folder"), function(path) got = path end)
+Assert.is_true(got ~= first, "隔天轮换")
+today.day = 2
+Assert.is_nil(settings.lock_screen_asset_cache)
+
+-- 用户选的文件夹 / 自定义图优先于默认位置
+local picked = "/mnt/us/wallpapers"
+settings.lock_screen_folder = picked
+files[picked] = { mode = "directory", modification = 1 }
+files[picked .. "/__dir__"] = { "x.png" }
+files[picked .. "/x.png"] = { mode = "file", size = 64 }
+Assert.eq(Background.folder(), picked)
+Background.ensure(background("folder"), function(path) got = path end)
+Assert.eq(got, picked .. "/x.png")
+settings.lock_screen_folder = nil
+Assert.eq(Background.folder(), folder_dir)
+
+Assert.eq(Background.customImage(), screen_dir .. "/custom.png", "没选过用升级前的位置")
+settings.lock_screen_custom_image = "/mnt/us/me.jpg"
+files["/mnt/us/me.jpg"] = { mode = "file", size = 64 }
+Background.ensure(background("custom"), function(path) got = path end)
+Assert.eq(got, "/mnt/us/me.jpg")
+settings.lock_screen_custom_image = nil
 
 os.date = original_date

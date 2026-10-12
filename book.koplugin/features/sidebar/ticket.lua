@@ -40,13 +40,11 @@ function Ticket.new(snapshot, on_ready)
     local Session = require("reader.session")
     local book = require("features.sidebar.info").book(snapshot)
     local self = setmetatable({ path = Paths.screensaverDir() .. "/ticket.png", ready = false }, Ticket)
-    local sw, sh = Layout.portraitSize()
+    local _w, sh = Layout.portraitSize()
     self.blocks = Receipt.blocks(Layout.panel{
         position = "center-center",
         wide = true,
         height = math.floor(sh * Receipt.preferred_height),
-        screen_w = sw,
-        screen_h = sh,
     }, Current.snapshot{
         source_id = book.source_id,
         stable_id = book.stable_id,

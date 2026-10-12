@@ -84,6 +84,19 @@ local ok_run, err_run = pcall(function()
     Assert.is_nil(MoonSettings.get("features.lockscreen").lock_screen_day)
     Assert.eq(Settings.revision(), rev + 1)
     MoonSettings.get("features.lockscreen").lock_screen_poster_style = previous_style
+
+    -- 选图 / 选文件夹同样作废旧图，下次生成按新路径。
+    local conf = MoonSettings.get("features.lockscreen")
+    local previous_image, previous_folder = conf.lock_screen_custom_image, conf.lock_screen_folder
+    conf.lock_screen_day = "stale"
+    Settings.setCustomImage("/mnt/us/me.png")
+    Assert.eq(conf.lock_screen_custom_image, "/mnt/us/me.png")
+    Assert.is_nil(conf.lock_screen_day)
+    conf.lock_screen_day = "stale"
+    Settings.setFolder("/mnt/us/walls")
+    Assert.eq(conf.lock_screen_folder, "/mnt/us/walls")
+    Assert.is_nil(conf.lock_screen_day)
+    conf.lock_screen_custom_image, conf.lock_screen_folder = previous_image, previous_folder
     MoonSettings.save("features.lockscreen")
 end)
 

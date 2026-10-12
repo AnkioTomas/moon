@@ -4,31 +4,23 @@
 @module koplugin.book.features.lockscreen.components.message
 --]]
 
-local MoonSettings = require("utils.settings")
+local Settings = require("features.lockscreen.settings")
 local QuotePanel = require("features.lockscreen.components.quote_panel")
-local U = require("features.lockscreen.components.util")
 local _ = require("gettext")
 
 local M = {
     id = "message",
     label = _("自定义留言"),
     layout = "quote",
-    cache_key = function()
-        return MoonSettings.get("features.lockscreen").lock_screen_custom_message or ""
-    end,
+    cache_key = Settings.customMessage,
 }
 
--- 自定义留言沿用 quote 布局，空文本回退到公共默认句子。
---- 留言不需要网络请求，生成时直接读取当前配置。
+--- 留言不需要网络请求，生成时直接读取当前配置；空留言回退到公共默认句子。
 ---@param position string
 ---@param wide boolean
 ---@return table[]
 function M.blocks(position, wide)
-    local text = MoonSettings.get("features.lockscreen").lock_screen_custom_message
-    if type(text) ~= "string" or text:match("^%s*$") then
-        text = U.FALLBACK_MESSAGE
-    end
-    return QuotePanel.blocks(text, _("留言"), position, wide)
+    return QuotePanel.blocks(Settings.customMessage(), _("留言"), position, wide)
 end
 
 return M

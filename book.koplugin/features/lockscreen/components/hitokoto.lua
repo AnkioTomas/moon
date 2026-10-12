@@ -18,21 +18,13 @@ local M = {
     end,
 }
 
---- 由公共语句面板负责排版，本组件只转发文本和出处。
+--- 未过期缓存优先；没有就用当天回退句，避免墨水屏空白。
 ---@param position string
 ---@param wide boolean
----@param text string
----@param source string
 ---@return table[]
-function M.blocks(position, wide, text, source)
-    return QuotePanel.blocks(text, source, position, wide)
-end
-
---- 未过期缓存优先；没有就用当天回退句，避免墨水屏空白。
----@param cb fun(text: string, source: string)
-function M.ensureText(cb)
+function M.blocks(position, wide)
     local data = Hitokoto:current() or Hitokoto.fallback()
-    cb(data.text, data.source or "")
+    return QuotePanel.blocks(data.text, data.source or "", position, wide)
 end
 
 return M

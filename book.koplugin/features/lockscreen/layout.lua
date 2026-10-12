@@ -55,37 +55,17 @@ function M.label(position)
     return (POSITION_BY_ID[position] or POSITION_BY_ID["center-center"]).label
 end
 
---- 将位置字符串拆成垂直和水平两个方向；非法部分回到居中。
----@param position string|nil
----@return string vertical, string horizontal
-function M.parsePosition(position)
-    local vertical, horizontal = tostring(position or "center-center"):match("^(%w+)%-(%w+)$")
-    vertical = vertical or "center"
-    horizontal = horizontal or "center"
-    if vertical ~= "top" and vertical ~= "bottom" then
-        vertical = "center"
-    end
-    if horizontal ~= "left" and horizontal ~= "right" then
-        horizontal = "center"
-    end
-    return vertical, horizontal
-end
-
---- 计算主体面板矩形。
+--- 计算主体面板矩形；画布固定为竖屏尺寸。
 --- 所有普通主体共用边距、内边距和圆角，避免各自漂移。
----@param opts { position: string|nil, wide: boolean|nil, height: number|nil, screen_w: number|nil, screen_h: number|nil }
----@return { x: number, y: number, w: number, h: number, pad: number, text_x: number, text_w: number, radius: number, wide: boolean }
+---@param opts { position: string|nil, wide: boolean|nil, height: number|nil }
+---@return { x: number, y: number, w: number, h: number, pad: number, text_x: number, text_w: number, radius: number }
 function M.panel(opts)
-    opts = opts or {}
-    local w = opts.screen_w
-    local h = opts.screen_h
-    if not w or not h then
-        w, h = M.portraitSize()
-    end
+    local w, h = M.portraitSize()
     local wide = opts.wide ~= false
     local margin = math.floor(w * 0.07)
     local panel_w = wide and (w - margin * 2) or math.floor(w * 0.5)
-    local vertical, horizontal = M.parsePosition(opts.position)
+    -- 位置缺省居中；合法值已由 validPosition 把关，「center」两侧都落到居中分支。
+    local vertical, horizontal = (opts.position or "center-center"):match("^(%a+)%-(%a+)$")
     local panel_h = opts.height
     if not panel_h then
         panel_h = wide and math.floor(h * 0.72) or math.floor(h * 0.55)

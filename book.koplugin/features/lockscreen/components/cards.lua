@@ -52,7 +52,7 @@ end
 ---@return table[]
 function M.empty(rect)
     return U.emptyBlocks(Layout.panel({
-        wide = true, height = math.floor(rect.h * 0.3), screen_w = rect.w, screen_h = rect.h,
+        wide = true, height = math.floor(rect.h * 0.3),
     }), _("当前阅读"), _("当前没有正在阅读的书籍"))
 end
 

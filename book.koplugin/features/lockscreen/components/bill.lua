@@ -80,21 +80,13 @@ function M.data()
     local period = settings.lock_screen_bill_period or "7d"
     local start_ts, end_ts = billRange(period)
     local source_id = Library.activeSourceId()
-    local summary, books
-    if type(source_id) == "string" and source_id ~= "" or type(source_id) == "table" and #source_id > 0 then
-        ---@cast source_id string|string[]
-        summary = StatsDB.periodSummary(source_id, start_ts, end_ts)
-        books = StatsDB.periodBooks(source_id, start_ts, end_ts, 5)
-    else
-        summary = { total_seconds = 0, book_count = 0, pages = 0 }
-        books = {}
-    end
+    ---@cast source_id string|string[]
     return {
         period = period,
         start_ts = start_ts,
         end_ts = end_ts,
-        summary = summary,
-        books = books,
+        summary = StatsDB.periodSummary(source_id, start_ts, end_ts),
+        books = StatsDB.periodBooks(source_id, start_ts, end_ts, 5),
     }
 end
 
@@ -122,14 +114,14 @@ end
 ---@return table[]
 function M.blocks(rect)
     local bill = M.data()
-    local summary = bill.summary or {}
+    local summary = bill.summary
     local inset = math.floor(rect.w * 0.08)
     local paper_x = rect.x + inset
     local paper_w = rect.w - inset * 2
     local paper_y, paper_h = rect.y, rect.h
     local pad = math.max(18, rect.pad)
     local inner_x, inner_w = paper_x + pad, paper_w - pad * 2
-    local number = os.date("%Y%m%d", (bill.end_ts or os.time()) - 1)
+    local number = os.date("%Y%m%d", bill.end_ts - 1)
     ---@cast number string
     local logo_size = math.max(54, math.floor(paper_h * 0.072))
     local brand_x = inner_x + logo_size + math.floor(pad * 0.6)
@@ -175,8 +167,8 @@ function M.blocks(rect)
         },
         {
             text = M.periodLabel(bill.period) .. "  "
-                .. os.date("%Y.%m.%d", bill.start_ts or os.time()) .. " - "
-                .. os.date("%Y.%m.%d", (bill.end_ts or os.time()) - 1),
+                .. os.date("%Y.%m.%d", bill.start_ts) .. " - "
+                .. os.date("%Y.%m.%d", bill.end_ts - 1),
             x = inner_x, y = paper_y + math.floor(paper_h * 0.175),
             width = inner_w, size = 12, align = "center", box = false, color = U.MUTED,
         },
@@ -201,7 +193,7 @@ function M.blocks(rect)
 
     local row_y = paper_y + math.floor(paper_h * 0.29)
     local row_h = math.floor(paper_h * 0.073)
-    local books = bill.books or {}
+    local books = bill.books
     if #books == 0 then
         blocks[#blocks + 1] = {
             text = _("本周期暂无阅读记录"),
@@ -210,7 +202,6 @@ function M.blocks(rect)
         }
     else
         for i, book in ipairs(books) do
-            if i > 5 then break end
             local title, title_size = Title.fitSingleLine(
                 string.format("%02d  %s", i, book.title or book.stable_id or ""),
                 math.floor(inner_w * 0.58), 14, 10,
