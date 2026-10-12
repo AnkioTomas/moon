@@ -100,7 +100,6 @@ local current_profile
 package.preload["features.ime.registry"] = function()
     current_profile = {
         id = "pinyin",
-        commit_space = true,
         mapKey = function(key)
             if type(key) == "string" and key:match("^%a$") then
                 key = key:lower()
@@ -338,6 +337,9 @@ do
     Assert.eq(#kb.layout[1], 1, "FocusManager 布局里整行一个部件")
     Assert.is_true(type(strip.dimen.copy) == "function", "DPad 确认键会 dimen:copy()，必须是 Geom")
     Assert.eq(strip.nav_w, 60, "◀▶ 宽度取自被顶掉的键")
+    newKeyboard()
+    Assert.eq(#zh_keys, 2, "连续 init 只保留一行候选行")
+    Assert.is_nil(zh_keys[2]._ime_bar)
     Assert.eq(strip.budget, 480, "预算 = 7 槽 + 空档的原宽之和")
     Assert.eq(strip.gap, 2, "缝宽取自 keyboard.key_padding")
     Assert.eq(rowLabels(kb)[1], "◀")
@@ -403,7 +405,6 @@ do
     local roots = { o = "人", n = "弓" }
     current_profile = {
         id = "cangjie",
-        commit_space = true,
         labels = roots,
         mapKey = function(key)
             key = type(key) == "string" and key:lower() or nil

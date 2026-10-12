@@ -262,7 +262,6 @@ local current_profile
 package.preload["features.ime.registry"] = function()
     current_profile = {
         id = "pinyin",
-        commit_space = true,
         mapKey = function(key)
             if type(key) == "string" and key:match("^%a$") then
                 key = key:lower()
@@ -397,7 +396,6 @@ do
     local pinyin_profile = current_profile
     current_profile = {
         id = "cangjie",
-        commit_space = true,
         labels = { q = "手", a = "日" },
         show_codes = true,
         mapKey = pinyin_profile.mapKey,
@@ -410,7 +408,6 @@ do
 
     current_profile = {
         id = "wubi",
-        commit_space = true,
         labels = { q = "金" },
         show_codes = true,
         mapKey = pinyin_profile.mapKey,
@@ -432,7 +429,6 @@ do
     }
     current_profile = {
         id = "zhuyin",
-        commit_space = true,
         labels = labels,
         mapKey = function(key)
             local value = labels[key]

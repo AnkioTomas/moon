@@ -8,6 +8,7 @@
 
 local lfs = require("libs/libkoreader-lfs")
 local Paths = require("utils.paths")
+local logger = require("utils.log")
 
 local MAX_CANDIDATES = 21
 
@@ -30,10 +31,8 @@ end
 ---@return table|nil
 function Dictionary:open()
     if self.conn then return self.conn end
-    local path = Paths.imeDictPath(self.id)
-    local attr = lfs.attributes(path)
-    if not attr or attr.mode ~= "file" or (attr.size or 0) == 0 then return nil end
-    local opened, conn = pcall(require("lua-ljsqlite3/init").open, path, "ro")
+    if not self:fileExists() then return nil end
+    local opened, conn = pcall(require("lua-ljsqlite3/init").open, Paths.imeDictPath(self.id), "ro")
     if not opened or not conn then return nil end
     local valid = pcall(function()
         local stmt = assert(conn:prepare("SELECT v FROM meta WHERE k = 'schema_version'"))
@@ -92,9 +91,9 @@ end
 ---@param code string
 ---@return string[]
 function Dictionary:lookup(code)
-    if type(code) ~= "string" or code == "" or not self:open() then return {} end
+    if not self:open() then return {} end
     local words, seen = {}, {}
-    local ok = pcall(function()
+    local ok, err = pcall(function()
         local exact = self:fetch("exact",
             "SELECT text FROM entries WHERE code = ?"
                 .. " ORDER BY weight DESC, source_order LIMIT " .. MAX_CANDIDATES,
@@ -119,6 +118,7 @@ function Dictionary:lookup(code)
         end
     end)
     if not ok then
+        logger.warn("book ime dict lookup failed", self.id, err)
         for _sql_name, stmt in pairs(self.statements or {}) do
             pcall(function() stmt:clearbind():reset() end)
         end

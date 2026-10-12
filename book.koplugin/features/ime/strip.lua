@@ -45,7 +45,7 @@ end
 --- 释放各 cell 里 TextWidget 占的 xtext C 内存（重建 cells 与销毁时都要调）。
 function Strip:free()
     for _idx, cell in ipairs(self.cells or {}) do
-        if cell.tw and cell.tw.free then
+        if cell.tw then
             cell.tw:free() -- xtext 的 C 内存，主动释放不等 gc
         end
     end
