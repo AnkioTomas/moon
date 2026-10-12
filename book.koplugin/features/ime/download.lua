@@ -116,13 +116,10 @@ local function syncTmpManifest(manifest, method)
     if lfs.attributes(tmpDir(method), "mode") ~= "directory" and not lfs.mkdir(tmpDir(method)) then
         return false, "cannot create dictionary temp directory"
     end
-    local ok, encoded = pcall(JSON.encode, {
+    local encoded = JSON.encode({
         built_at = manifest.built_at,
         raw_sha256 = manifest.raw_sha256,
     })
-    if not ok then
-        return false, tostring(encoded)
-    end
     local write_file, open_err = io.open(path, "wb")
     if not write_file then
         return false, open_err or "cannot write dictionary manifest"
@@ -209,12 +206,6 @@ end
 ---@param on_progress fun(stage: string, done: number|nil, total: number|nil, idx: number|nil, count: number|nil)|nil
 function M.ensure(method, cb, on_progress)
     cb = cb or function() end
-    if method ~= "pinyin" and method ~= "wubi"
-        and method ~= "cangjie" and method ~= "zhuyin"
-    then
-        cb(false, "unsupported input method")
-        return
-    end
     if M._downloading then
         cb(false, "already downloading")
         return
@@ -231,14 +222,9 @@ function M.ensure(method, cb, on_progress)
             on_progress(...)
         end
     end
-    local done_called = false
-    --- 收尾：解掉在飞标记并回调，只生效一次（多条失败路径可能都调到）。
+    --- 收尾：解掉在飞标记并回调。
     ---@param ok boolean
     local function done(ok, err)
-        if done_called then
-            return
-        end
-        done_called = true
         M._downloading = false
         if ok then
             logger.dbg("book ime dict download done", method, Perf.elapsedMs(started_at), "ms")
@@ -291,7 +277,7 @@ downloadParts = function(method, base_url, manifest, idx, dest, done, report, do
     end
     local part = parts[idx]
     if partComplete(part, method) then
-        local size = tonumber(part.size) or 0
+        local size = tonumber(part.size)
         report("part", done_bytes + size, total, idx, #parts)
         downloadParts(method, base_url, manifest, idx + 1, dest, done, report, done_bytes + size, total)
         return
@@ -318,7 +304,7 @@ downloadParts = function(method, base_url, manifest, idx, dest, done, report, do
             return
         end
         downloadParts(method, base_url, manifest, idx + 1, dest, done, report,
-            done_bytes + (tonumber(part.size) or 0), total)
+            done_bytes + tonumber(part.size), total)
     end)
 end
 
@@ -341,15 +327,9 @@ assembleInJob = function(method, manifest, dest, done, report)
         end,
         on_done = function()
             cleanupTmp(method)
-            local attr = lfs.attributes(dest)
-            if not attr or attr.mode ~= "file" or (attr.size or 0) == 0 then
-                done(false, "dictionary file missing: " .. dest)
-                return
-            end
             require("features.ime.registry").reset(method)
             local c = MoonSettings.get("features.ime")
             c.ime_dict_built_at[method] = manifest.built_at
-            c.ime_dict_sha256[method] = manifest.raw_sha256
             MoonSettings.save("features.ime", c)
             logger.info("book ime dict installed:", method, manifest.tag, manifest.entries)
             done(true)

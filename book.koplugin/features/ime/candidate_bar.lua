@@ -23,7 +23,6 @@ local Bar = {
     _profile = nil,
     lookup = {
         code = "",
-        tokens = {},
         preedit = {},
         pages = {},
         page = 1,
@@ -60,8 +59,8 @@ end
 
 --- 把光标前 count 个字符整体换成 chars。
 --- InputText 没有批量替换 API。候选提交若循环 delChar，会让每个拼音字母都
---- free/init 一遍 TextBoxWidget；Kindle 上这比查词慢得多。真实 InputText 直接
---- 改 charlist 后只重排一次；非标准输入框保留原来的兼容路径。
+--- free/init 一遍 TextBoxWidget；Kindle 上这比查词慢得多。直接改 charlist
+--- 后只重排一次（调用方已经过 codeAtCursor，charlist/charpos 必然存在）。
 ---@param inputbox table InputText 实例
 ---@param count number 待替换的字符数（已输入的拼音码长度）
 ---@param chars string 替换成的词
@@ -71,16 +70,6 @@ local function rawReplaceBeforeCursor(inputbox, count, chars)
             or inputbox.isTextEditable and not inputbox:isTextEditable(true) then
         return false
     end
-    if type(inputbox.charlist) ~= "table"
-            or type(inputbox.charpos) ~= "number"
-            or type(inputbox.initTextBox) ~= "function" then
-        for _ = 1, count do
-            rawDelChar(inputbox)
-        end
-        rawAddChars(inputbox, chars)
-        return true
-    end
-
     local start_pos = inputbox.charpos - count
     if start_pos < 1 then
         return false
@@ -99,33 +88,20 @@ local function rawReplaceBeforeCursor(inputbox, count, chars)
     return true
 end
 
---- 候选行随 want 插入/摘除 zh_CN 布局数据（幂等）。
+--- 在 zh_CN 布局数据首部插入候选行。调用前 applyKeyboardLabels 已把布局恢复成
+--- 不含候选行的基线，所以这里只管插入。
 --- 必须在 VirtualKeyboard:init 读 keys 之前调用——键盘高度按行数算。
 --- 行内空键数量决定 addKeys 的基准键宽。建出来的首行随后
 --- 被 Strip 整条顶掉，这些键只是占位。
----@param want boolean 候选行是否应存在
 ---@param columns number 普通布局 10，完整注音布局 11
-local function syncRow(want, columns)
-    if not (want or package.loaded[ZH_MODULE]) then
-        return
-    end
-    local keys = require(ZH_MODULE).keys
-    if type(keys) ~= "table" then
-        return
-    end
-    if keys[1] and keys[1]._ime_bar == true then
-        table.remove(keys, 1)
-    end
-    if not want then
-        return
-    end
+local function insertBarRow(columns)
     local row = { _ime_bar = true }
     for i = 1, columns do
         row[i] = { label = "", width = 1.0 }
     end
     row[1].label = "◀"
     row[columns].label = "▶"
-    table.insert(keys, 1, row)
+    table.insert(require(ZH_MODULE).keys, 1, row)
 end
 
 local keyboard_baseline
@@ -225,7 +201,6 @@ local function clearCode()
     end
     Bar.lookup.job = nil
     Bar.lookup.code = ""
-    Bar.lookup.tokens = {}
     Bar.lookup.preedit = {}
     Bar.lookup.pages = {}
     Bar.lookup.page = 1
@@ -443,10 +418,12 @@ end
 ---@param ... any 透传给原方法
 local function wrappedInit(self, ...)
     Bar._profile = Registry.current()
-    Bar._want = not not (Bar._enabled() and Registry.isAvailable(Bar._profile)
-        and not (self.inputbox and self.inputbox.input_type == "number"))
+    Bar._want = Bar._enabled() and Registry.isAvailable(Bar._profile)
+        and not (self.inputbox and self.inputbox.input_type == "number")
     applyKeyboardLabels(Bar._want and Bar._profile or nil)
-    syncRow(Bar._want, Bar._profile.id == "zhuyin" and 11 or 10)
+    if Bar._want then
+        insertBarRow(Bar._profile.id == "zhuyin" and 11 or 10)
+    end
     clearCode()
     orig_init(self, ...)
 end
@@ -467,18 +444,17 @@ local function wrappedAddChar(self, key)
     if Bar.lookup.code ~= "" and not codeAtCursor(self.inputbox) then
         clearCode()
     end
-    local token, display = Bar._profile.mapKey(key)
-    if token then
-        Bar.lookup.tokens[#Bar.lookup.tokens + 1] = token
-        Bar.lookup.preedit[#Bar.lookup.preedit + 1] = display
-        Bar.lookup.code = table.concat(Bar.lookup.tokens)
-        rawAddChars(self.inputbox, display)
+    local char = Bar._profile.mapKey(key)
+    if char then
+        Bar.lookup.preedit[#Bar.lookup.preedit + 1] = char
+        Bar.lookup.code = table.concat(Bar.lookup.preedit)
+        rawAddChars(self.inputbox, char)
         showCodeOnly()
         refresh()
         requestLookup(self, Bar.lookup.code)
         return
     end
-    if Bar._profile.commit_space and key == " " and Bar.lookup.code ~= "" then
+    if key == " " and Bar.lookup.code ~= "" then
         local first = Bar.lookup.pages[1] and Bar.lookup.pages[1][1]
         local committed = first and commit(first)
         refresh()
@@ -507,9 +483,8 @@ local function wrappedDelChar(self)
             redraw()
             return orig_delChar(self)
         end
-        table.remove(Bar.lookup.tokens)
         table.remove(Bar.lookup.preedit)
-        Bar.lookup.code = table.concat(Bar.lookup.tokens)
+        Bar.lookup.code = table.concat(Bar.lookup.preedit)
         rawDelChar(self.inputbox)
         showCodeOnly()
         refresh()

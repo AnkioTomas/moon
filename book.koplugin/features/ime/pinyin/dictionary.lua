@@ -20,6 +20,8 @@ schema（tools/build_pinyin_dict.py 生成）：
 @module koplugin.book.features.ime.pinyin.dictionary
 --]]
 
+local logger = require("utils.log")
+
 local M = require("features.ime.table_dictionary"):new("pinyin", "2")
 
 local MAX_CANDI = 21 -- 候选栏约 3 页，多了也翻不到
@@ -165,7 +167,7 @@ end
 ---@param code string 连写拼音（纯小写）
 ---@return string[]
 function M:lookup(code)
-    if type(code) ~= "string" or not code:match("^[a-z]+$") then
+    if not code:match("^[a-z]+$") then
         return {}
     end
     if not self:open() then
@@ -177,7 +179,7 @@ function M:lookup(code)
     end
 
     local out = {}
-    local ok = pcall(function()
+    local ok, err = pcall(function()
         if kind == "exact" then
             out = self:fetch("exact", SQL_EXACT, code)
             return
@@ -200,6 +202,7 @@ function M:lookup(code)
     end)
     if not ok then
         -- 查询异常后语句可能停在 SQLITE_ROW；重置缓存语句，下一次输入仍可正常查词。
+        logger.warn("book ime dict lookup failed", self.id, err)
         for _sql_name, stmt in pairs(self.statements or {}) do
             pcall(function()
                 stmt:clearbind():reset()

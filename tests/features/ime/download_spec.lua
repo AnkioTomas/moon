@@ -25,7 +25,7 @@ package.preload["datastorage"] = function()
 end
 
 -- settings 不碰真实配置文件：内存表 mock（download 读写 manifest built_at）
-local fake_settings = { ime_dict_built_at = {}, ime_dict_sha256 = {} }
+local fake_settings = { ime_dict_built_at = {} }
 package.preload["utils.settings"] = function()
     return {
         get = function(name)
@@ -232,7 +232,6 @@ local ok_run, err_run = pcall(function()
 
     -- manifest built_at 是本地词库版本，供下次更新比较。
     Assert.eq(MoonSettings.get("features.ime").ime_dict_built_at.pinyin, manifest.built_at)
-    Assert.eq(MoonSettings.get("features.ime").ime_dict_sha256.pinyin, raw_sha)
 
     -- 临时目录已清理
     Assert.is_nil(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/ime_pinyin_dict.dl"))
@@ -255,10 +254,8 @@ local ok_run, err_run = pcall(function()
     Assert.eq(repaired_file:read("*a"), raw)
     repaired_file:close()
 
-    -- built_at 未变时只检查 manifest，不重复下载或拼接词库；
-    -- SHA 只是下载完整性记录，不能作为用户可见版本。
+    -- built_at 未变时只检查 manifest，不重复下载或拼接词库。
     local downloads_before = #downloads
-    fake_settings.ime_dict_sha256 = { pinyin = "stale-sha" }
     local done_again, ok_again
     Download.ensure("pinyin", function(ok)
         done_again = true
@@ -302,7 +299,6 @@ local ok_run, err_run = pcall(function()
     Assert.eq(wubi_file:read("*a"), raw)
     wubi_file:close()
     Assert.eq(fake_settings.ime_dict_built_at.wubi, manifest.built_at)
-    Assert.eq(fake_settings.ime_dict_sha256.wubi, raw_sha)
     os.remove(wubi_dest)
 end)
 

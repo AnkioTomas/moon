@@ -29,25 +29,6 @@ local function hintRow(width, text)
 end
 
 ---@param desktop BookDesktop
-local function pickInputMethod(desktop)
-    local IME = require("features.ime")
-    local items = {}
-    for _idx, method in ipairs(IME.layouts()) do
-        items[#items + 1] = { text = method.label, value = method.id }
-    end
-    require("ui.themes.widgets.list"):new{
-        title = _("键盘布局"),
-        items = items,
-        current = IME.layout(),
-        centered = true,
-        on_select = function(id)
-            IME.setLayout(id)
-            desktop:updateView()
-        end,
-    }:show()
-end
-
----@param desktop BookDesktop
 ---@param enable_after boolean|nil
 local function download(desktop, enable_after)
     local IME = require("features.ime")
@@ -70,7 +51,7 @@ local function download(desktop, enable_after)
         on_done = function(result)
             Toast:new{
                 text = result.ok and _("输入法词库已就绪")
-                    or T(_("下载失败: %1"), tostring(result.err or "未知错误")),
+                    or T(_("下载失败: %1"), tostring(result.err or _("未知错误"))),
                 timeout = 2,
             }:show()
             if result.ok and enable_after then IME.setEnabled(true) end
@@ -87,6 +68,29 @@ local function confirmDownload(desktop, enable_after)
         text = _("新词库可能需要新版插件支持。是否继续下载？"),
         ok_text = _("继续下载"),
         ok_callback = function() download(desktop, enable_after) end,
+    }:show()
+end
+
+--- 已启用时切到词库未下载的布局，直接提示下载；否则候选栏会静默退回原生键盘。
+---@param desktop BookDesktop
+local function pickInputMethod(desktop)
+    local IME = require("features.ime")
+    local items = {}
+    for _idx, method in ipairs(IME.layouts()) do
+        items[#items + 1] = { text = method.label, value = method.id }
+    end
+    require("ui.themes.widgets.list"):new{
+        title = _("键盘布局"),
+        items = items,
+        current = IME.layout(),
+        centered = true,
+        on_select = function(id)
+            IME.setLayout(id)
+            desktop:updateView()
+            if IME.isEnabled() and not require("features.ime.registry").isAvailable(id) then
+                confirmDownload(desktop)
+            end
+        end,
     }:show()
 end
 
@@ -163,12 +167,11 @@ end
 local Setting = {}
 
 -- pinyin_enabled 是总开关（键名沿用拼音时代）；ime_layout 取 registry 的方法 id；
--- ime_dict_built_at / ime_dict_sha256 按方法记已装词库的版本与校验值。
+-- ime_dict_built_at 按词库记已装版本。
 Setting.defaults = {
     pinyin_enabled = false,
     ime_layout = "pinyin",
     ime_dict_built_at = {},
-    ime_dict_sha256 = {},
 }
 
 ---@param desktop BookDesktop

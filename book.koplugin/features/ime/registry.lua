@@ -43,18 +43,14 @@ local XIAOHE = {
     z = "ou", x = "ia", c = "ao", v = "zh", b = "in", n = "iao", m = "ian",
 }
 
+-- mapKey(key: string) → 写进输入框的预编辑字符，同时也是词库码；非本方法按键返回 nil。
 local function letterKey(key)
-    if type(key) ~= "string" or not key:match("^%a$") then return nil end
-    key = key:lower()
-    return key, key
+    if not key:match("^%a$") then return nil end
+    return key:lower()
 end
 
 local function mappedKey(map, key)
-    if type(key) ~= "string" then return nil end
-    local normalized = #key == 1 and key:lower() or key
-    local symbol = map[normalized]
-    if not symbol then return nil end
-    return symbol, symbol
+    return map[#key == 1 and key:lower() or key]
 end
 
 local METHODS = {
@@ -62,14 +58,12 @@ local METHODS = {
         id = "pinyin",
         dictionary = "pinyin",
         label = _("拼音"),
-        commit_space = true,
         mapKey = letterKey,
     },
     xiaohe = {
         id = "xiaohe",
         dictionary = "pinyin",
         label = _("小鹤双拼"),
-        commit_space = true,
         labels = XIAOHE,
         show_codes = true,
         mapKey = letterKey,
@@ -79,7 +73,6 @@ local METHODS = {
         id = "wubi",
         dictionary = "wubi",
         label = _("五笔"),
-        commit_space = true,
         labels = WUBI,
         show_codes = true,
         mapKey = letterKey,
@@ -88,7 +81,6 @@ local METHODS = {
         id = "cangjie",
         dictionary = "cangjie",
         label = _("仓颉"),
-        commit_space = true,
         labels = CANGJIE,
         show_codes = true,
         mapKey = letterKey,
@@ -97,7 +89,6 @@ local METHODS = {
         id = "zhuyin",
         dictionary = "zhuyin",
         label = _("注音"),
-        commit_space = true,
         labels = ZHUYIN,
         mapKey = function(key) return mappedKey(ZHUYIN, key) end,
     },
