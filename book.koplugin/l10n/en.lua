@@ -968,7 +968,6 @@ Current version: ",
     ["该 OPDS 目录不支持搜索"] = "This OPDS catalog does not support search",
     ["胶囊卡片"] = "Capsule cards",
     ["极简"] = "Minimal",
-    ["封面卡片"] = "Cover cards",
     ["暂无"] = "N/A",
 
     -- 书库刷新进度

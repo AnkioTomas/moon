@@ -1,5 +1,5 @@
 --[[--
-锁屏主体：海报墙。
+锁屏背景：海报墙。书库封面自绘铺满整屏，主体组件照常叠在上面。
 
 风格：
 - vertical（竖屏排版，默认）：错层墙，单数列整体上移半张海报（可探出顶边），
@@ -8,7 +8,7 @@
 - slant_left / slant_right：标准网格整面倾斜；先画进离屏大图，再三次剪切旋转贴到画布。
 所有风格都铺满整屏，书不够时循环补位。
 
-@module koplugin.book.features.lockscreen.components.poster
+@module koplugin.book.features.lockscreen.poster
 --]]
 
 local Catalog = require("book.catalog")
@@ -21,13 +21,7 @@ local U = require("features.lockscreen.components.util")
 local DEFAULT_STYLE = "vertical"
 local SLANT = math.rad(12)
 
-local M = {
-    id = "poster",
-    label = _("海报墙"),
-    supports_position = false,
-    full_screen = true,
-    asset = { id = "none" },
-}
+local M = {}
 
 --- 取当前源的书并按 stable_id 去重；最近打开的优先，不足再补全量书库。
 ---@param limit number

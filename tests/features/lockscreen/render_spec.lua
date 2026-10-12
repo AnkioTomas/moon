@@ -21,6 +21,7 @@ local buffer_types = {}
 local rounded_paints = 0
 local lightens = {}
 local text_log
+local paint_order
 
 local function buffer()
     return {
@@ -35,6 +36,7 @@ local function buffer()
             text_log.blit = { x = x, y = y, color = color }
         end,
         copy = function()
+            if paint_order then paint_order[#paint_order + 1] = "snapshot" end
             return { free = function() snapshot_frees = snapshot_frees + 1 end }
         end,
         writePNG = function(_, path)
@@ -179,6 +181,23 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(cutout_blits > 0)
     Assert.eq(snapshot_frees, 1)
     Assert.eq(canvas_frees, 1)
+
+    -- 自绘背景（海报墙）先于快照画上：缺口挖出的是海报墙，不是白底；铺底块同样释放。
+    reset()
+    paint_order = {}
+    local wall_frees = 0
+    local wall = {
+        getSize = function() return { w = 100, h = 200 } end,
+        paintTo = function() paint_order[#paint_order + 1] = "wall" end,
+        free = function() wall_frees = wall_frees + 1 end,
+    }
+    ok, err = Render.write("/tmp/compose.png", { blocks = { { kind = "widget", widget = wall, x = 0, y = 0 } } }, {
+        { kind = "cutout_circle", x = 10, y = 50, radius = 6 },
+    })
+    Assert.is_true(ok, tostring(err))
+    Assert.eq(table.concat(paint_order, ","), "wall,snapshot")
+    Assert.eq(wall_frees, 1)
+    paint_order = nil
 
     -- 静态图片块由渲染层创建并在绘制后立即释放。
     reset()

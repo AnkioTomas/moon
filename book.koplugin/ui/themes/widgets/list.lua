@@ -111,9 +111,12 @@ function List:onSwipeList(_arg, ges)
 end
 
 --- 重画：嵌在别的窗口里时刷所在窗口。
+--- 居中面板变矮时连底下窗口一起重画：网纹遮罩不盖底，只刷自己会把旧面板留在新面板外面。
 function List:refresh()
+    local old_h = self[1] and self[1]:getSize().h
     self:rebuild()
-    UIManager:setDirty(self.show_parent or self, "ui")
+    local shrunk = self.centered and old_h and self[1]:getSize().h < old_h
+    UIManager:setDirty(shrunk and "all" or self.show_parent or self, "ui")
 end
 
 ---@return integer
@@ -198,7 +201,12 @@ function List:rebuild()
     })
     if self.centered then
         local body = VerticalGroup:new{ align = "left", rows }
-        if pager then body[#body + 1] = pager end
+        if pager then
+            -- 末页不满也补成整页高，翻页时面板和翻页条不跳位置。
+            local missing = first + self.per_page - math.min(#self.items, first + self.per_page)
+            body[#body + 1] = VerticalSpan:new{ width = missing * self.pitch }
+            body[#body + 1] = pager
+        end
         self:setDialog{ title = self.title, body = body }
         return
     end

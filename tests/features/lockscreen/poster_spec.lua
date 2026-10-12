@@ -1,7 +1,7 @@
 --[[--
 lockscreen 海报墙：各风格铺满整屏、循环补位，倾斜走三次剪切旋转。
 
-@module tests.features.lockscreen.components.poster_spec
+@module tests.features.lockscreen.poster_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
@@ -39,9 +39,9 @@ package.preload["book.catalog"] = function()
     }
 end
 
-package.loaded["features.lockscreen.components.poster"] = nil
+package.loaded["features.lockscreen.poster"] = nil
 
-local Poster = require("features.lockscreen.components.poster")
+local Poster = require("features.lockscreen.poster")
 local conf = require("utils.settings").get("features.lockscreen")
 conf.lock_screen_poster_style = nil
 

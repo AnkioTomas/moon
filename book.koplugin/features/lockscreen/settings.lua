@@ -115,6 +115,24 @@ function M.customMessage()
     return type(message) == "string" and Text.trim(message) ~= "" and message or U.FALLBACK_MESSAGE
 end
 
+-- 背景与主体拆开前，这些主体自带背景（无视用户选的背景）：搬成等价的「背景, 主体」。
+local SPLIT = {
+    myrl = { "myrl", "none" },
+    poster = { "poster", "none" },
+    cover_card = { "cover", "capsule" },
+    minimal = { "none", "minimal" },
+}
+
+--- 一次性迁移旧主体设置；lock_screen_split 标记已迁移，之后用户给极简另选背景不再被改回。
+function M.migrate()
+    local c = MoonSettings.get("features.lockscreen")
+    if c.lock_screen_split then return end
+    local pair = SPLIT[c.lock_screen_component]
+    if pair then c.lock_screen_background, c.lock_screen_component = pair[1], pair[2] end
+    c.lock_screen_split = true
+    MoonSettings.save("features.lockscreen")
+end
+
 --- 切换锁屏模式；切到 compose 时顺手把非法的主体/背景/位置纠回默认值。
 ---@param mode string "compose" 以外一律视为交还 KOReader
 function M.setMode(mode)
@@ -176,7 +194,7 @@ end
 --- 设置海报墙风格；非法值忽略。
 ---@param style string
 function M.setPosterStyle(style)
-    if require("features.lockscreen.components.poster").validStyle(style) then save("lock_screen_poster_style", style) end
+    if require("features.lockscreen.poster").validStyle(style) then save("lock_screen_poster_style", style) end
 end
 
 --- 设置自定义背景图路径（PathChooser 选出的真实文件）。

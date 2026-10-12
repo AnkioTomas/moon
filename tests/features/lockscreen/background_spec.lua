@@ -129,7 +129,13 @@ end
 local screen_dir = require("utils.paths").screensaverDir()
 local folder_dir = screen_dir .. "/wallpapers"
 
-Assert.is_false(Background.validMode("myrl"))
+-- 整屏铺底的都是背景：日报整图缩进不裁，海报墙自绘铺底。
+Assert.is_true(Background.validMode("myrl"))
+Assert.is_true(background("myrl").contain)
+Assert.is_true(Background.validMode("poster"))
+Assert.eq(type(background("poster").blocks), "function")
+Assert.is_nil(resourcePath("poster"))
+Assert.is_false(Background.validMode("cover_card"))
 Assert.is_false(Background.validMode("nope"))
 Assert.eq(resourcePath("bing"), bing_path)
 
@@ -171,12 +177,7 @@ Assert.eq(bing_ensures, 1)
 Assert.eq(got, bing_path)
 Assert.is_true(Background.isFresh(background("bing")))
 
-local myrl = {
-    id = "myrl",
-    path = function() return myrl_path end,
-    endpoint = "myrl",
-    network = true,
-}
+local myrl = background("myrl")
 myrl_ready = false
 myrl_ensures = 0
 Background.ensure(myrl, function(path) got = path end)

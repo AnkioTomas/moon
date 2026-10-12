@@ -53,7 +53,7 @@ end
 package.preload["apps/filemanager/filemanagerutil"] = function()
     return { getHomeFolder = function() return "/home" end }
 end
-package.preload["features.lockscreen.components.poster"] = function()
+package.preload["features.lockscreen.poster"] = function()
     return {
         style = function() return "vertical" end,
         styleLabel = function() return "竖屏排版" end,
@@ -98,7 +98,7 @@ local desktop = {
 }
 
 local rows = Lockscreen:rows(desktop)
-Assert.len(rows, 3, "非海报主体没有「海报风格」行")
+Assert.len(rows, 3, "非海报墙背景没有「海报风格」行")
 rows[2]({}).callback()
 local popup = Themed.last("list")
 Assert.not_nil(popup)
@@ -122,11 +122,11 @@ desktop.settings_overlay = nil
 refresh_cb(false, "boom")
 Assert.eq(log[#log], "show:生成失败: boom")
 
--- 海报墙主体：多一行「海报风格」，选中后写配置并走同一条刷新链路。
-component_id = "poster"
+-- 海报墙背景：背景下面多一行「海报风格」，选中后写配置并走同一条刷新链路。
+background_mode = "poster"
 local poster_rows = Lockscreen:rows(desktop)
 Assert.len(poster_rows, 4)
-local style_row = poster_rows[4]({})
+local style_row = poster_rows[3]({})
 Assert.eq(style_row.title, "海报风格")
 Assert.eq(style_row.status, "竖屏排版")
 style_row.callback()

@@ -1,8 +1,8 @@
 --[[--
 锁屏图片资源管理。
 
-本地背景（自定义 / 封面 / 文件夹）在这里解析。必应 / 摸鱼日报图归 online，
-这里只读路径、问 ensureImage。
+本地背景（自定义 / 封面 / 文件夹）在这里解析；海报墙自绘。必应 / 摸鱼日报图归 online，
+这里只读路径、问 ensureImage。整屏铺底的都是背景，主体组件只画在背景之上。
 
 @module koplugin.book.features.lockscreen.background
 --]]
@@ -93,6 +93,8 @@ local function folderPick()
     return files[day % #files + 1]
 end
 
+-- 背景描述：path 给图（contain 整图缩进，缺省铺满裁切），blocks 给自绘铺底，
+-- endpoint 是 online 的在线图，cache_key 是 path 之外让组合图失效的内容摘要。
 local BACKGROUNDS = {
     bing = {
         id = "bing",
@@ -101,15 +103,30 @@ local BACKGROUNDS = {
         endpoint = "bing",
         network = true,
     },
+    myrl = {
+        id = "myrl",
+        label = _("摸鱼日报"),
+        path = function() return require("online.myrl"):imageFile() end,
+        endpoint = "myrl",
+        network = true,
+        -- 日报是一整张长图，裁掉就缺内容。
+        contain = true,
+    },
     custom = { id = "custom", label = _("自定义"), path = M.customImage },
     cover = { id = "cover", label = _("当前阅读书籍封面"), path = coverPath },
     folder = { id = "folder", label = _("文件夹壁纸"), path = folderPick },
+    poster = {
+        id = "poster",
+        label = _("海报墙"),
+        blocks = function(rect) return require("features.lockscreen.poster").blocks(rect) end,
+        cache_key = function() return require("features.lockscreen.poster").cache_key() end,
+    },
     none = { id = "none", label = _("无") },
 }
 
-local BACKGROUND_IDS = { "custom", "bing", "cover", "folder", "none" }
+local BACKGROUND_IDS = { "custom", "bing", "myrl", "cover", "folder", "poster", "none" }
 
---- 判断背景设置值是否合法；主体资源不属于背景设置项。
+--- 判断背景设置值是否合法。
 ---@param mode string|nil
 ---@return boolean
 function M.validMode(mode)

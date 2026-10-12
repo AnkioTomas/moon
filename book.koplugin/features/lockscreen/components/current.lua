@@ -132,12 +132,10 @@ function M.blocks(rect)
     local inner_x = rect.x + pad
     local text_x = inner_x + cover_w + pad
     local text_w = math.max(1, rect.x + rect.w - pad - text_x)
-    local lines = 2
-    if book.authors and book.authors ~= "" then lines = lines + 1 end
-    if chapter ~= "" then lines = lines + 1 end
-    local text_h = lines * 22 + 8
-    local body_h = math.max(cover_h, text_h)
-    local card_h = body_h + inset_v * 2
+    -- 文字高度实测后才知道卡多高：先在 y=0 排，定下卡片位置再整体下移。
+    local head, head_h = U.bookHead(book, _("章节") .. " · " .. chapter, text_x, 0, text_w)
+    local bar_gap = 6
+    local card_h = math.max(cover_h, head_h + bar_gap + 8) + inset_v * 2
     local y = rect.y + math.max(0, math.floor((rect.h - card_h) / 2))
     local content_y = y + inset_v
     local blocks = {
@@ -146,27 +144,12 @@ function M.blocks(rect)
             radius = rect.radius, shadow = 2, color = require("ffi/blitbuffer").COLOR_WHITE,
         },
         U.coverBlock(book, inner_x, content_y, cover_w, cover_h),
-        {
-            text = book.title or "", x = text_x, y = content_y, width = text_w,
-            size = 18, bold = true, box = false,
-        },
     }
-    local ty = content_y + 24
-    if book.authors and book.authors ~= "" then
-        blocks[#blocks + 1] = {
-            text = book.authors, x = text_x, y = ty, width = text_w,
-            size = 14, box = false, color = U.MUTED,
-        }
-        ty = ty + 20
+    for _idx, block in ipairs(head) do
+        block.y = block.y + content_y
+        blocks[#blocks + 1] = block
     end
-    if chapter ~= "" then
-        blocks[#blocks + 1] = {
-            text = _("章节") .. " · " .. chapter, x = text_x, y = ty, width = text_w,
-            size = 14, box = false, color = U.MUTED,
-        }
-        ty = ty + 22
-    end
-    local bar = U.progressBlocks(text_x, ty, text_w, book.percent)
+    local bar = U.progressBlocks(text_x, content_y + head_h + bar_gap, text_w, book.percent)
     for _idx, block in ipairs(bar) do blocks[#blocks + 1] = block end
     return blocks
 end

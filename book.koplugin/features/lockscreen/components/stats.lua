@@ -102,19 +102,10 @@ function M.blocks(rect)
             radius = rect.radius, shadow = 2, color = Blitbuffer.COLOR_WHITE,
         },
         U.coverBlock(book, inner_x, hero_y, cover_w, hero_h),
-        {
-            text = book.title or "", x = text_x, y = hero_y, width = text_w,
-            size = 18, bold = true, box = false,
-        },
-        {
-            text = book.authors or "", x = text_x, y = hero_y + 26, width = text_w,
-            size = 14, box = false, color = U.MUTED,
-        },
-        {
-            text = subtitle or "", x = text_x, y = hero_y + 48, width = text_w,
-            size = 14, box = false, color = U.MUTED,
-        },
     }
+    for _idx, block in ipairs((U.bookHead(book, subtitle, text_x, hero_y, text_w))) do
+        blocks[#blocks + 1] = block
+    end
     local progress = U.progressBlocks(inner_x, progress_y, inner_w, pct)
     for _idx, block in ipairs(progress) do blocks[#blocks + 1] = block end
     local tail = {
