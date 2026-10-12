@@ -158,7 +158,7 @@ function Sheet:paginate()
     for i = 1, #self.items do
         local h = self:card(i):getSize().h
         if i > first then h = h + self:gap() end
-        if i > first and used + h > self.body_h then
+        if used > 0 and used + h > self.body_h then
             pages[#pages + 1] = { first, i - 1 }
             first, used = i, 0
             h = self:card(i):getSize().h
