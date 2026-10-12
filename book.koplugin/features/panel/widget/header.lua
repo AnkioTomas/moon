@@ -40,11 +40,7 @@ local function bookTexts()
     local subtitle = ""
     local idx = Session.chapterIndex()
     if idx and toc then
-        subtitle = string.format(_("第 %d/%d 章"), idx, #toc)
-        local chapter_title = Session.chapterTitle()
-        if chapter_title then
-            subtitle = chapter_title
-        end
+        subtitle = Session.chapterTitle() or string.format(_("第 %d/%d 章"), idx, #toc)
     elseif identity and identity.book and identity.book.author then
         subtitle = identity.book.author
     end

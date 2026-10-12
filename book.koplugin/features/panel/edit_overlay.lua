@@ -35,8 +35,6 @@ local _ = require("gettext")
 
 ---@class BookQuickPanelEditOverlay
 ---@field wrap fun(widget: table, meta: BookQuickPanelEditMeta, handlers: BookQuickPanelEditHandlers): table
----@field doneRow fun(width: number, on_tap: fun()): table
----@field addRow fun(width: number, on_tap: fun()): table
 ---@field showAddDialog fun(options: BookQuickPanelEditAddOption[], on_pick: fun(id: string)): nil
 local Edit = {}
 
@@ -114,22 +112,6 @@ function Edit.wrap(widget, meta, handlers)
         return false
     end
     return overlay
-end
-
---- 「完成」行：退出现场编辑。
----@param width number 行宽，单位像素
----@param on_tap fun() 点击回调
----@return table
-function Edit.doneRow(width, on_tap)
-    return Button:new{ text = _("完成"), width = width, callback = on_tap }
-end
-
---- 「添加动作」行：打开未启用动作列表。
----@param width number 行宽，单位像素
----@param on_tap fun() 点击回调
----@return table
-function Edit.addRow(width, on_tap)
-    return Button:new{ text = _("添加动作"), width = width, callback = on_tap }
 end
 
 --- 从未启用动作里挑选要添加的项。

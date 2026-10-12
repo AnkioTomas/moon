@@ -67,21 +67,24 @@ package.preload["features.panel.widget.slider"] = function()
 end
 
 local wraps, dones, adds = 0, 0, 0
+local last_handlers
 package.preload["features.panel.edit_overlay"] = function()
     return {
-        wrap = function(button, meta)
+        wrap = function(button, meta, handlers)
             wraps = wraps + 1
+            last_handlers = handlers
             return { wrapped = true, id = meta.id, index = meta.index, button = button }
         end,
-        doneRow = function(_, on_tap)
-            dones = dones + 1
-            return { kind = "done", on_tap = on_tap }
-        end,
-        addRow = function(_, on_tap)
-            adds = adds + 1
-            return { kind = "add", on_tap = on_tap }
-        end,
         showAddDialog = function() end,
+    }
+end
+package.preload["ui.themes.widgets.button"] = function()
+    return {
+        new = function(_, opts)
+            if opts.text == "完成" then dones = dones + 1 end
+            if opts.text == "添加动作" then adds = adds + 1 end
+            return opts
+        end,
     }
 end
 
@@ -91,8 +94,8 @@ local entered = false
 local body = Body:new{
     width = 300,
     actions = {
-        { id = "night", title = "夜间", icon = "dark_mode", enabled = true },
-        { id = "wifi", title = "Wi-Fi", icon = "wifi", enabled = true },
+        { id = "night", title = "夜间", icon = "dark_mode" },
+        { id = "wifi", title = "Wi-Fi", icon = "wifi" },
     },
     sliders = { { kind = "brightness", title = "亮度", value = 40 } },
     on_action = function() end,
@@ -110,8 +113,8 @@ local editing = Body:new{
     width = 300,
     editing = true,
     actions = {
-        { id = "night", title = "夜间", icon = "dark_mode", enabled = true },
-        { id = "wifi", title = "Wi-Fi", icon = "wifi", enabled = true },
+        { id = "night", title = "夜间", icon = "dark_mode" },
+        { id = "wifi", title = "Wi-Fi", icon = "wifi" },
     },
     sliders = { { kind = "brightness", title = "亮度", value = 40 } },
     on_exit_edit = function() end,
@@ -123,5 +126,26 @@ Assert.eq(wraps, 2)
 Assert.eq(dones, 1)
 Assert.eq(adds, 1)
 Assert.is_nil(editing.ges_events)
+
+-- 前移 / 后移按可见顺序找邻居：完整启用列表里可能夹着当前不可用的项，不能交给 ±1。
+local swaps = {}
+Body:new{
+    width = 300,
+    editing = true,
+    actions = {
+        { id = "night", title = "夜间", icon = "dark_mode" },
+        { id = "rotate", title = "旋转", icon = "rotate" },
+        { id = "suspend", title = "休眠", icon = "mode_standby" },
+    },
+    on_exit_edit = function() end,
+    on_move = function(id, other) swaps[#swaps + 1] = id .. ">" .. other end,
+    on_disable = function() end,
+    addable = function() return {} end,
+}
+Assert.eq(adds, 1, "没有可添加项时不出「添加动作」")
+last_handlers.on_move("rotate", -1)
+last_handlers.on_move("rotate", 1)
+Assert.eq(swaps[1], "rotate>night")
+Assert.eq(swaps[2], "rotate>suspend")
 
 return true

@@ -158,10 +158,8 @@ package.preload["features.animation"] = function()
 end
 package.preload["features.panel.settings"] = function()
     return {
-        desktopEnabledCount = function() return 3 end,
-        readerEnabledCount = function() return 2 end,
-        desktopRows = function() return {} end,
-        readerRows = function() return {} end,
+        enabledCount = function(scope) return scope == "desktop" and 3 or 2 end,
+        rows = function() return {} end,
         preview = function() return { dimen = { h = 20 } } end,
     }
 end

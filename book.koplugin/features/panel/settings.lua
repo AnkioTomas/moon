@@ -10,10 +10,9 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 
 ---@class BookQuickPanelSettings
----@field desktopEnabledCount fun(): number
----@field readerEnabledCount fun(): number
----@field desktopRows fun(desktop: table): BookQuickPanelSettingRowFactory[]
----@field readerRows fun(desktop: table): BookQuickPanelSettingRowFactory[]
+---@field enabledCount fun(scope: "desktop"|"reader"): number
+---@field rows fun(scope: "desktop"|"reader", desktop: table): BookQuickPanelSettingRowFactory[]
+---@field preview fun(scope: "desktop"|"reader", width: number): table
 
 local QuickPanel = {}
 
@@ -67,57 +66,45 @@ end
 local function optionRows(desktop, options)
     local rows = {}
     for _idx, option in ipairs(options) do
-        local current = option
         --- 设置页把每项配置为按当前宽度构建的行工厂。
         ---@param iw number
         ---@return table
         rows[#rows + 1] = function(iw)
             local status
-            if not current.available then
+            if not option.available then
                 status = _("当前设备不可用")
-            elseif current.enabled then
-                status = T(_("第 %1 位"), current.position)
+            elseif option.enabled then
+                status = T(_("第 %1 位"), option.position)
             else
                 status = _("关闭")
             end
             return Row.widget({
                 width = iw,
-                kind = "nav", icon = current.icon, title = current.title,
-                status = status, status_on = current.enabled and current.available,
+                kind = "nav", icon = option.icon, title = option.title,
+                status = status, status_on = option.enabled and option.available,
                 -- 设备不可用的动作不可配置，避免「启用后不可见」的假状态。
-                chevron = current.available,
+                chevron = option.available,
                 --- 点击整行打开该动作的配置对话框。
-                callback = current.available and function() configure(desktop, current) end or nil,
+                callback = option.available and function() configure(desktop, option) end or nil,
             })
         end
     end
     return rows
 end
 
---- 当前启用的桌面快捷动作数。
+--- 当前启用的快捷动作数。
+---@param scope "desktop"|"reader"
 ---@return number
-function QuickPanel.desktopEnabledCount()
-    return DesktopPanel.enabledCount()
+function QuickPanel.enabledCount(scope)
+    return PANELS[scope].enabledCount()
 end
 
---- 当前启用的阅读快捷动作数。
----@return number
-function QuickPanel.readerEnabledCount()
-    return ReaderPanel.enabledCount()
-end
-
---- 生成桌面快捷面板设置行。
+--- 生成快捷面板设置行。
+---@param scope "desktop"|"reader"
 ---@param desktop table
 ---@return BookQuickPanelSettingRowFactory[]
-function QuickPanel.desktopRows(desktop)
-    return optionRows(desktop, DesktopPanel.options())
-end
-
---- 生成阅读快捷面板设置行。
----@param desktop table
----@return BookQuickPanelSettingRowFactory[]
-function QuickPanel.readerRows(desktop)
-    return optionRows(desktop, ReaderPanel.options())
+function QuickPanel.rows(scope, desktop)
+    return optionRows(desktop, PANELS[scope].options())
 end
 
 --- 已启用动作的图标横条；不实例化面板主体。

@@ -26,21 +26,21 @@ function Setting.entries(desktop)
         {
             id = "desktop", group = "desktop", order = 30,
             icon = "dashboard_customize", title = _("桌面快捷面板"), subtitle = _("面板开关与顺序"),
-            status = T(_("已启用 %1 项"), QuickPanel.desktopEnabledCount()), status_on = true,
+            status = T(_("已启用 %1 项"), QuickPanel.enabledCount("desktop")), status_on = true,
             page = {
                 title = _("桌面快捷面板"),
                 preview = function(width) return QuickPanel.preview("desktop", width) end,
-                sections = function() return {{ title = _("桌面"), rows = QuickPanel.desktopRows(desktop) }} end,
+                sections = function() return {{ title = _("桌面"), rows = QuickPanel.rows("desktop", desktop) }} end,
             },
         },
         {
             id = "reader", group = "reader", order = 30,
             icon = "dashboard_customize", title = _("阅读快捷面板"), subtitle = _("面板按钮与顺序"),
-            status = T(_("已启用 %1 项"), QuickPanel.readerEnabledCount()), status_on = true,
+            status = T(_("已启用 %1 项"), QuickPanel.enabledCount("reader")), status_on = true,
             page = {
                 title = _("阅读快捷面板"),
                 preview = function(width) return QuickPanel.preview("reader", width) end,
-                sections = function() return {{ title = _("阅读"), rows = QuickPanel.readerRows(desktop) }} end,
+                sections = function() return {{ title = _("阅读"), rows = QuickPanel.rows("reader", desktop) }} end,
             },
         },
     }

@@ -73,6 +73,15 @@ Assert.eq(saved.quick_panel_actions[1], "night")
 Assert.eq(saved.quick_panel_actions[2], "rotate")
 Assert.eq(saved.quick_panel_actions[3], "wifi")
 
+-- 面板编辑按 id 互换：wifi 不可用、在面板里看不见，rotate 前移应直接换到 night 前面。
+saved.quick_panel_actions = { "night", "wifi", "rotate" }
+DesktopPanel.swap("rotate", "night")
+Assert.eq(saved.quick_panel_actions[1], "rotate")
+Assert.eq(saved.quick_panel_actions[2], "wifi")
+Assert.eq(saved.quick_panel_actions[3], "night")
+DesktopPanel.swap("rotate", "missing")
+Assert.eq(saved.quick_panel_actions[1], "rotate", "不在列表里的 id 不改动")
+
 local function findOption(id)
     for _, option in ipairs(DesktopPanel.options()) do
         if option.id == id then return option end

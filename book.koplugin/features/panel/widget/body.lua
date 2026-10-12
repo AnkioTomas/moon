@@ -13,9 +13,11 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 
 local ActionButton = require("features.panel.widget.button")
+local Button = require("ui.themes.widgets.button")
 local Edit = require("features.panel.edit_overlay")
 local SliderRow = require("features.panel.widget.slider")
 local Theme = require("ui.themes")
+local _ = require("gettext")
 
 local MIN_TILE_WIDTH = 72
 local MAX_COLUMNS = 8
@@ -32,19 +34,12 @@ local function columnCount(avail_w, count, gap)
 end
 
 --- 快捷面板主体：可包含书籍头、动作网格和灯光滑杆。
----@class BookQuickPanelBodyAction
----@field id string 动作标识
----@field title string 展示标题
----@field icon string Material 图标名
----@field active boolean|nil 是否高亮为激活态
----@field enabled boolean|nil 为假时点击被吞掉
-
 ---@class BookQuickPanelBody : WidgetContainer
 ---@field width number 内容区宽度，单位像素
 ---@field height number|nil 可选固定高度
 ---@field gap number 网格间距，单位像素
 ---@field tile_h number 动作按钮高度，单位像素
----@field actions BookQuickPanelBodyAction[] 当前启用的动作列表
+---@field actions BookQuickPanelMenuItem[] 当前启用且可用的动作（可见顺序）
 ---@field sliders BookQuickPanelSlider[] 灯光滑杆；编辑态不展示
 ---@field header table|nil 可选头部（阅读面板书名行）
 ---@field editing boolean|nil 为真时进入现场编辑叠层
@@ -52,7 +47,7 @@ end
 ---@field on_level fun(kind: string, fraction: number): boolean|nil 滑杆回调
 ---@field on_enter_edit fun()|nil 长按进入编辑
 ---@field on_exit_edit fun()|nil 「完成」退出编辑
----@field on_move fun(id: string, delta: number)|nil 前移/后移
+---@field on_move fun(id: string, other_id: string)|nil 与可见的前 / 后邻居互换
 ---@field on_disable fun(id: string)|nil 停用动作
 ---@field on_add fun(id: string)|nil 启用并追加动作
 ---@field addable (fun(): BookQuickPanelEditAddOption[])|nil 可添加动作列表工厂
@@ -82,8 +77,15 @@ function Body:updateView()
     local editing = self.editing == true
     local columns = columnCount(self.width, math.max(1, #actions), self.gap)
     local tile_w = math.floor((self.width - self.gap * (columns - 1)) / columns)
+    local position = {}
+    for i, action in ipairs(actions) do position[action.id] = i end
     ---@type BookQuickPanelEditHandlers
-    local handlers = { on_move = self.on_move, on_disable = self.on_disable }
+    local handlers = {
+        on_move = function(id, delta)
+            self.on_move(id, actions[position[id] + delta].id)
+        end,
+        on_disable = self.on_disable,
+    }
 
     local group = VerticalGroup:new{ align = "left" }
     if self.header then
@@ -109,7 +111,6 @@ function Body:updateView()
             title = action.title,
             icon = action.icon,
             active = action.active,
-            enabled = action.enabled,
             on_action = self.on_action,
             on_hold = (not editing and self.on_enter_edit) and function()
                 self.on_enter_edit()
@@ -130,19 +131,15 @@ function Body:updateView()
     if row then table.insert(group, row) end
 
     if editing then
-        local addable = self.addable and self.addable() or {}
+        local addable = self.addable()
         if #addable > 0 then
             table.insert(group, VerticalSpan:new{ width = Theme.px(8) })
-            table.insert(group, Edit.addRow(self.width, function()
-                Edit.showAddDialog(addable, function(id)
-                    if self.on_add then self.on_add(id) end
-                end)
-            end))
+            table.insert(group, Button:new{ text = _("添加动作"), width = self.width, callback = function()
+                Edit.showAddDialog(addable, self.on_add)
+            end })
         end
         table.insert(group, VerticalSpan:new{ width = Theme.px(8) })
-        table.insert(group, Edit.doneRow(self.width, function()
-            if self.on_exit_edit then self.on_exit_edit() end
-        end))
+        table.insert(group, Button:new{ text = _("完成"), width = self.width, callback = self.on_exit_edit })
     elseif #sliders > 0 then
         table.insert(group, VerticalSpan:new{ width = Theme.px(10) })
         for _idx, slider in ipairs(sliders) do
