@@ -15,5 +15,6 @@
 | [`base`](base.md) | 基类契约、onEvent、默认本地查询 |
 | [`chapter`](chapter.md) | 按章落盘 / 目录缓存 / 选章 / 预取 |
 | [`sources`](sources.md) | 各已注册源的形态与能力 |
+| [`external`](external.md) | 第三方书源：以独立 KOReader 插件发布 |
 
 Z-Library 在 [`../zlib/`](../zlib/README.md)，不是 BookSource。

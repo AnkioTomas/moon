@@ -78,13 +78,9 @@ end
 
 事件只有 `chapter_changed` / `page_changed` / `book_meta_changed` / `book_info_request`，基类全部空操作，清单与载荷见 `SourceBase:onEvent` 注释。
 
-### 默认本地查询（可不覆盖）
+### 本地查询
 
-```lua
-source:listLibraryAsync(opts, cb)
-source:filtersAsync(cb)
-source:readingInsightAsync(cb)
-```
+书库列表、筛选项、阅读洞察只读本地库，不经源：直接调 `book.catalog` 的 `listLibraryAsync(source_id, opts, cb)` / `filtersAsync(source_id, cb)` / `readingInsightAsync(source_id, cb)`。
 
 ### 异步约定
 
@@ -92,8 +88,11 @@ source:readingInsightAsync(cb)
 -- 所有 XxxAsync 可取消时：
 return { cancel = function() cancelled = true; job:cancel() end }
 
--- 不支持：
-return SourceBase.syncBooksAsync(self, opts, cb)  -- 内部 skipped
+-- 命中缓存 / 当场失败也必须下一帧回调（返回可取消句柄）：
+return SourceBase.defer(cb, cached)
+
+-- 不支持的同步域：
+return SourceBase.skipped(cb, "reason")
 ```
 
 取消后不回调；源回调里不碰桌面，过期结果的丢弃由 `desktop/sync.lua` 按请求令牌处理。
@@ -101,4 +100,4 @@ return SourceBase.syncBooksAsync(self, opts, cb)  -- 内部 skipped
 ### 注意
 
 - `capabilities` 是「用户能用的功能」，不是「模块里有没有函数」。UI 用 `SourceCapabilities.supportsScrape/Edit/StatsPull`。
-- 默认 `deleteBookAsync` 会 nextTick 返回「不支持」；要删书请覆盖。
+- 默认 `deleteBookAsync` 本地优先删除（清缓存 + 墓碑，已连网顺手 `pushDirty`）；源只补自己的内存缓存清理。

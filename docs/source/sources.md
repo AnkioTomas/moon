@@ -17,7 +17,7 @@
 
 ## 能力字段（UI 实际读取）
 
-见 `Source:capabilities()` / `SourceCapabilities.defaults()`：
+见 `Source:capabilities()`（基类默认全 false）：
 
 | 字段 | 含义 |
 |---|---|

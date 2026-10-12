@@ -74,12 +74,13 @@ source/
 
 ### 注册表
 
-`registry.lua` 的 `IDS` 是唯一登记处，不扫目录，顺序即选择器顺序：本地、其余在线源。
+内置源登记在 `registry.lua` 的 `BUILTIN`，不扫 `source/` 目录，顺序即选择器顺序：本地、其余在线源。
+第三方源由已启用 KOReader 插件根目录的 `moon_source.lua` 登记，排在内置源之后（契约见 `docs/source/external.md`，示例 `examples/moonsource-demo.koplugin/`）。
 
 - 每个 id 一个缓存实例；活跃源只是配置 id（`common.active_source`），`current()` 就是 `resolve(activeId())`，不做静默 fallback；存的 id 已下线（如 kindle）时 `activeId()` 退回 local。
 - `resolve(id)` 按书的 `source_id` 取属主实例，不改用户当前选择。
 - 源模块加载失败直接抛出，不从列表里藏掉。
-- `common.enabled_sources == nil` 表示全开。活跃源禁止禁用。
+- `common.enabled_sources == nil` 表示全开；集合里没有的 id（后装的源）也算启用，只有显式 `false` 是禁用。活跃源禁止禁用。
 - 登录态或连接配置变了走 `Registry.reload()`：关掉旧实例，广播 `SourceChanged`。
 
 源没有插件生命周期钩子；main 只在启动、唤醒、联网时对有脏行且已配置的启用源调 `pushDirty`。
@@ -101,7 +102,7 @@ source/
 
 1. `source/<id>/init.lua`：`meta()` + `new()`，继承 `SourceBase`，只覆盖自己真有的方法。模块名仍是 `source.<id>`。
 2. 需要设置页就加 `source/<id>/setting.lua`；配置走 `utils.settings.getSource(id)`。协议、映射、登录怎么拆文件按源的实际复杂度来，不照抄别的源。
-3. 在 `registry.lua` 的 `IDS` 加一项。
+3. 在 `registry.lua` 的 `BUILTIN` 加一项。
 4. `type = "chapter"` 的开书、预取、全本缓存走 `source.chapter`，目录缓存直接 require `source.toc`。只有源自己有目录逻辑时才建 `<id>/toc.lua`（如 wechat 的格式版本判断），不建一行转发。
 5. 书架若是标准的拉快照 + add / remove，用 `source.shelf`：`Shelf.syncAsync(self.id, remote, to_books, opts, cb)`，`remote` 由源自己传，提供 `shelfSyncAsync` / `addToShelfAsync` / `removeFromShelfAsync`。协议对不上就在门面里写，别硬套；但推墓碑一律用 `Shelf.pushDeletes(self.id, remove_one, report, cb)`，源只给「远端删一本」，不再自己写串行循环。
 6. 文案走 gettext。模块顶部不要 require KOReader UI（`UIManager`、`NetworkMgr`），函数内再加载。
