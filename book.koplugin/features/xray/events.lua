@@ -11,4 +11,7 @@ return {
     book_identity_changed = function(source_id, old_stable_id, new_stable_id, merge)
         return DB.moveIdentity("xray_entities", source_id, old_stable_id, new_stable_id, merge)
     end,
+    book_removed = function(source_id, stable_id)
+        return DB.removeIdentity("xray_entities", source_id, stable_id)
+    end,
 }
