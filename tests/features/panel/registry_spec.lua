@@ -37,7 +37,7 @@ Assert.eq(Registry.get("remote").scope, "desktop")
 Assert.eq(Registry.get("remote").icon, "dns")
 -- feature 自己的开关经 features/<name>/panel.lua 追加在内置项之后，按目录名顺序。
 Assert.eq(table.concat(desktop, ",", #DESKTOP + 1), "autolight,remote")
-Assert.eq(table.concat(reader, ","), table.concat(READER, ",") .. ",page_turn,reflow,wechat_reviews_link,xray,xray_refresh")
+Assert.eq(table.concat(reader, ","), table.concat(READER, ",") .. ",page_turn,reflow,wechat_reviews_link,bilingual,xray,xray_refresh")
 Assert.eq(Registry.get("page_turn").scope, "reader")
 Assert.is_nil(Registry.get("missing"))
 

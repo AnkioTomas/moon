@@ -83,7 +83,7 @@ package.preload["utils.settings"] = function()
     }
 end
 
-local registered_module
+local registered_modules = {}
 local bars_installed_on
 -- install 是点号定义（首参就是 ui）：stub 必须按真身的约定校验，
 -- 否则 reader.lua 写成 bars:install(ui) 也照样绿——真机上第二本书起底栏劫持全失效。
@@ -134,11 +134,12 @@ local ui = {
     },
     view = {
         registerViewModule = function(_, name, module)
-            registered_module = { name = name, module = module }
+            registered_modules[name] = module
         end,
         registerTouchZones = function() end,
         footer = {},
     },
+    registerTouchZones = function() end,
 }
 local plugin = { ui = ui }
 
@@ -156,7 +157,8 @@ Assert.is_false(PanelReader.executeAction("missing", ui))
 
 Reader.onCreate(plugin)
 Assert.eq(native_ui, ui)
-Assert.eq(registered_module.name, "book_bars")
+Assert.not_nil(registered_modules.book_bars)
+Assert.not_nil(registered_modules.book_page_marks)
 Assert.eq(bars_installed_on, ui, "install 的首参必须是 ReaderUI，不能是模块自己")
 Assert.eq(sidebar_installed_on, ui, "阅读页必须安装侧栏手势")
 Assert.is_nil(ui._zones, "不应注册覆盖原生菜单的触摸区")

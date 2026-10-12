@@ -20,7 +20,7 @@
 | [`ai/`](ai/README.md) | OpenAI 兼容门面 |
 | [`xray/`](xray/README.md) | 阅读实体（仅本地） |
 | [`dictionary/`](dictionary/README.md) | StarDict 接管 |
-| [`translate/`](translate/README.md) | Edge 翻译 |
+| [`translate/`](translate/README.md) | Edge 翻译、整书双语对照 |
 | [`baike/`](baike/README.md) | 百度百科 |
 | [`scrape/`](scrape/README.md) | 元数据刮削（`desktop/detail/scrape/`） |
 | [`convert/`](convert/README.md) | TXT/HTML/MOBI → EPUB |

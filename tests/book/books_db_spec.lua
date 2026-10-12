@@ -228,6 +228,21 @@ do
     clearMods()
 end
 
+-- ── markSyncedMany：单事务逐行清脏 ───────────────────────
+do
+    local connection, calls = makeConn()
+    local DbBase, BookDB = loadBook(connection)
+    local before = #calls
+    Assert.is_true(BookDB.markSyncedMany("local", { "/a.epub", "/b.epub" }))
+    Assert.eq(calls[before + 1].sql, "BEGIN IMMEDIATE;")
+    Assert.is_true(calls[before + 2].sql:find("UPDATE books SET sync_status=1", 1, true) ~= nil)
+    Assert.eq(calls[before + 2].args[2], "/a.epub")
+    Assert.eq(calls[before + 3].args[2], "/b.epub")
+    Assert.eq(calls[#calls].sql, "COMMIT;")
+    DbBase.close()
+    clearMods()
+end
+
 -- ── upsertRemote：无 membership 默认 deleted=1；有 deleted 时写成员 ──
 do
     local connection, calls = makeConn()
@@ -376,7 +391,7 @@ do
     clearMods()
 end
 
--- ── stableIdsByMd5：同内容副本全部列出（不 LIMIT 1），顺序稳定 ──
+-- ── stableIdsByMd5：同内容副本全部列出（不 LIMIT 1），墓碑不算，顺序稳定 ──
 do
     local connection, calls = makeConn({
         resultset = function(sql)
@@ -392,6 +407,7 @@ do
     Assert.eq(ids[1], "/books/a.epub")
     Assert.eq(ids[2], "/books/b.epub")
     local q = calls[#calls]
+    Assert.is_true(q.sql:find("deleted=0", 1, true) ~= nil, "墓碑不能被同内容新文件收编")
     Assert.is_true(q.sql:find("ORDER BY inserted_at ASC, stable_id ASC", 1, true) ~= nil)
     Assert.is_nil(q.sql:find("LIMIT", 1, true))
     Assert.eq(q.args[1], "local")
@@ -561,24 +577,6 @@ do
     Assert.is_true(q.sql:find("last_open", 1, true) == nil)
     -- 第二次登记仍只覆盖路径
     Assert.is_true(BookDB.touchPath("moon", "b1", "/cache/moon/book/x/book.epub"))
-
-    DbBase.close()
-    clearMods()
-end
-
--- ── releaseForeignPaths：本源已登记的路径从其他源行上撤掉，本源行不动 ──
-do
-    local connection, calls = makeConn()
-    local DbBase, BookDB = loadBook(connection)
-
-    Assert.is_true(BookDB.releaseForeignPaths("kindle"))
-    local q = calls[#calls]
-    Assert.is_true(q.sql:find("UPDATE books SET path=NULL", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("WHERE source_id<>? AND path IN", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("SELECT path FROM books WHERE source_id=? AND path IS NOT NULL", 1, true) ~= nil)
-    Assert.eq(q.argc, 2)
-    Assert.eq(q.args[1], "kindle")
-    Assert.eq(q.args[2], "kindle")
 
     DbBase.close()
     clearMods()

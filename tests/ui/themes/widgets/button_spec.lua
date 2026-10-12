@@ -100,6 +100,16 @@ Assert.eq(row:getSize().h, Row.height(true) + 2)
 local disabled = Row.widget({ width = 300, title = "x", enabled = false, callback = function() end })
 Assert.len(Kit.taps(disabled), 0)
 
+-- 开关行：toggle 给出「开/关」状态，有 callback 也不画箭头。
+local function chevrons(w)
+    return #Kit.find(w, function(c) return c.text == "chevron_right" end)
+end
+Assert.eq(chevrons(Row.widget({ width = 300, title = "x", callback = function() end })), 1)
+local on = Row.widget({ width = 300, title = "x", toggle = true, callback = function() end })
+Assert.contains(Kit.texts(on), "开")
+Assert.eq(chevrons(on), 0)
+Assert.contains(Kit.texts(Row.widget({ width = 300, title = "x", toggle = false })), "关")
+
 -- soft：row.divider=0 不画线，标题栏也没有线。
 Kit.use("soft")
 local plain = Row.widget({ width = 300, title = "x" })
