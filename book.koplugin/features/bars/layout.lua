@@ -33,6 +33,7 @@ local DEFAULT_ALIGN = {
     page = "left",
     percent = "right",
     chapter_idx = "right",
+    chapter_page = "right",
     remaining = "right",
     clock = "right",
     battery = "right",
@@ -90,18 +91,21 @@ local function sanitize(which, raw)
     return out
 end
 
---- 默认布局。
----@param which string
----@return table
-function Layout.defaults(which)
-    return copyLayout(DEFAULTS[which])
-end
+--- 按落盘原表缓存清洗结果；绘制热路径每帧都读，原表换了（Layout.set）才重洗。
+---@type table<string, { raw: table|nil, layout: table }>
+local cleaned = {}
 
---- 当前布局。
+--- 当前布局；返回共享表，调用方只读，要改先 copyLayout。
 ---@param which string
 ---@return table
 function Layout.get(which)
-    return sanitize(which, MoonSettings.get("features.bars")[KEY[which]])
+    local raw = MoonSettings.get("features.bars")[KEY[which]]
+    local hit = cleaned[which]
+    if not hit or hit.raw ~= raw then
+        hit = { raw = raw, layout = sanitize(which, raw) }
+        cleaned[which] = hit
+    end
+    return hit.layout
 end
 
 --- 写入布局。
@@ -129,6 +133,19 @@ function Layout.setReplace(which, on)
     MoonSettings.save("features.bars", bars)
 end
 
+--- 组件是否带图标（顶栏、底栏共用）。
+---@return boolean
+function Layout.icons()
+    return MoonSettings.get("features.bars").book_reader_bar_icons
+end
+
+---@param on boolean
+function Layout.setIcons(on)
+    local bars = MoonSettings.get("features.bars")
+    bars.book_reader_bar_icons = on
+    MoonSettings.save("features.bars", bars)
+end
+
 --- 组件在布局里的下标；不在返回 nil。
 ---@param layout table
 ---@param id string
@@ -139,14 +156,6 @@ local function indexOf(layout, id)
             return i
         end
     end
-end
-
---- 组件是否在布局里。
----@param which string
----@param id string
----@return boolean
-function Layout.enabled(which, id)
-    return indexOf(Layout.get(which), id) ~= nil
 end
 
 --- 组件位置与对齐；未启用返回 nil。
@@ -167,7 +176,7 @@ end
 ---@param which string
 ---@param id string
 function Layout.toggle(which, id)
-    local layout = Layout.get(which)
+    local layout = copyLayout(Layout.get(which))
     local index = indexOf(layout, id)
     if index then
         table.remove(layout, index)
@@ -186,7 +195,7 @@ end
 ---@param id string
 ---@param delta number
 function Layout.move(which, id, delta)
-    local layout = Layout.get(which)
+    local layout = copyLayout(Layout.get(which))
     local index = indexOf(layout, id)
     if not index then
         return
@@ -207,7 +216,7 @@ function Layout.setAlign(which, id, align)
     if align ~= "left" and align ~= "right" then
         return
     end
-    local layout = Layout.get(which)
+    local layout = copyLayout(Layout.get(which))
     local index = indexOf(layout, id)
     if index then
         layout[index].align = align

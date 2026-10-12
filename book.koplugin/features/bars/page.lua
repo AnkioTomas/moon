@@ -157,6 +157,23 @@ function ReaderBar:page(desktop, which)
                             end,
                         })
                     end,
+                    function(iw)
+                        local icons_on = Layout.icons()
+                        return Row.widget({
+                            width = iw,
+                            chevron = false,
+                            kind = "toggle",
+                            icon = "category",
+                            title = _("组件图标"),
+                            subtitle = _("电量、Wi-Fi、亮度等随状态换图标；顶栏底栏共用"),
+                            status = icons_on and _("开") or _("关"),
+                            status_on = icons_on,
+                            callback = function()
+                                Layout.setIcons(not icons_on)
+                                refresh(desktop)
+                            end,
+                        })
+                    end,
                 },
             },
             {

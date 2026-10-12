@@ -54,11 +54,11 @@ local top = Layout.get("top")
 Assert.eq(top[1].id, "chapter")
 Assert.eq(top[1].align, "left")
 Assert.eq(top[2].id, "clock")
-Assert.is_true(Layout.enabled("top", "clock"))
-Assert.is_false(Layout.enabled("top", "percent"))
+Assert.not_nil(Layout.slot("top", "clock"))
+Assert.is_nil(Layout.slot("top", "percent"))
 
 Layout.toggle("top", "percent")
-Assert.is_true(Layout.enabled("top", "percent"))
+Assert.not_nil(Layout.slot("top", "percent"))
 local index, align = Layout.slot("top", "percent")
 Assert.eq(index, 3)
 Assert.eq(align, "right")
@@ -70,7 +70,7 @@ Layout.move("top", "percent", -1)
 Assert.eq(Layout.get("top")[2].id, "percent")
 
 Layout.toggle("top", "clock")
-Assert.is_false(Layout.enabled("top", "clock"))
+Assert.is_nil(Layout.slot("top", "clock"))
 
 store.book_reader_top_bar_layout = {
     { id = "nope", align = "left" },
