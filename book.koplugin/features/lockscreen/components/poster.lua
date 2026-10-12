@@ -206,7 +206,18 @@ function M.style()
     local style = MoonSettings.get("features.lockscreen").lock_screen_poster_style
     return STYLE_BY_ID[style] and style or DEFAULT_STYLE
 end
-M.cache_key = M.style
+
+local SHELF_LIMIT = 128
+
+--- 风格、书单或封面到位情况变化才重画；书单摘要成 md5，免得把上百个 id 写进设置。
+---@return string
+function M.cache_key()
+    local parts = {}
+    for _idx, book in ipairs(books(SHELF_LIMIT)) do
+        parts[#parts + 1] = (book.source_id or "") .. "\0" .. book.stable_id .. (book.cover and "+" or "-")
+    end
+    return M.style() .. ":" .. require("ffi/sha2").md5(table.concat(parts, "\n"))
+end
 
 --- 风格的设置页选项。
 ---@return {text: string, value: string}[]
@@ -231,7 +242,7 @@ end
 function M.blocks(rect)
     local w = math.max(1, tonumber(rect.w) or 1)
     local h = math.max(1, tonumber(rect.h) or 1)
-    local shelf = books(128)
+    local shelf = books(SHELF_LIMIT)
     if #shelf == 0 then
         return {{
             text = _("书库暂无书籍"),

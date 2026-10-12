@@ -93,6 +93,22 @@ function M.book(with_stats)
     return with_stats and withStats(book) or book
 end
 
+--- 组合图缓存键：当前书、位置、封面与近 7 日统计任一变化都要重画。
+--- 依赖当前书的主体（统计 / 票根 / 卡片）共用这一个键，别各写一份漏字段。
+---@return string
+function M.cache_key()
+    local book = M.book(true)
+    if not book then return "none" end
+    local parts = {
+        book.source_id or "", book.stable_id, book.percent, book.page,
+        book.chapter_idx or "", book.cover or "", book.total_seconds,
+    }
+    for _idx, bucket in ipairs(book.buckets) do
+        parts[#parts + 1] = bucket.key .. "," .. bucket.seconds .. "," .. bucket.pages
+    end
+    return table.concat(parts, ":")
+end
+
 --- 指定书的带统计快照（阅读页侧栏票根用：书跟阅读身份走，不取「当前源最近在读」）。
 ---@param fields table source_id/stable_id/title/authors/percent/page/total_pages/chapter_*
 ---@return table

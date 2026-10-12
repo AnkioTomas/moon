@@ -21,6 +21,7 @@ local rows = {
     },
 }
 local stats_sources = {}
+local today_seconds = 60
 
 package.preload["book.catalog"] = function()
     return {
@@ -60,7 +61,7 @@ end
 package.preload["features.lockscreen.components.util"] = function()
     return {
         dayStart = function() return 100000 end,
-        dayBuckets = function() return { { key = "today" } } end,
+        dayBuckets = function() return { { key = "today", seconds = today_seconds, pages = 3 } } end,
     }
 end
 
@@ -124,3 +125,19 @@ rows = {}
 recent_source = nil
 Assert.is_nil(Current.book())
 Assert.eq(recent_source, "wechat")
+
+-- 组合图缓存键：进度、页码、今日阅读、换书任一变化都要重画；没有书时是固定键。
+Assert.eq(Current.cache_key(), "none")
+rows = {
+    { source_id = "wechat", stable_id = "reading", title = "Reading", percent = 30, page = 5 },
+}
+local key = Current.cache_key()
+Assert.eq(Current.cache_key(), key, "同一状态键稳定，才能缓存命中")
+rows[1].percent = 31
+Assert.is_true(Current.cache_key() ~= key, "进度变了")
+key = Current.cache_key()
+rows[1].page = 6
+Assert.is_true(Current.cache_key() ~= key, "页码变了")
+key = Current.cache_key()
+today_seconds = 120
+Assert.is_true(Current.cache_key() ~= key, "今日阅读时长变了")

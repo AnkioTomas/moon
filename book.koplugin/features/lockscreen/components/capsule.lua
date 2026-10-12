@@ -12,6 +12,7 @@ local M = {
     label = _("胶囊卡片"),
     supports_position = false,
     full_screen = true,
+    cache_key = require("features.lockscreen.components.current").cache_key,
 }
 
 ---@param rect table 全屏矩形

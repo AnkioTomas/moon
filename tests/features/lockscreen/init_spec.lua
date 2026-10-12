@@ -132,6 +132,14 @@ package.preload["features.lockscreen.render"] = function()
     }
 end
 
+local setup_seen = {}
+local Screensaver = {
+    setup = function(_self, event)
+        setup_seen[#setup_seen + 1] = { event = event, writes = render_writes }
+    end,
+}
+package.preload["ui/screensaver"] = function() return Screensaver end
+
 local saved = {}
 local previous_settings = _G.G_reader_settings
 _G.G_reader_settings = {
@@ -325,6 +333,24 @@ local ok_run, err_run = pcall(function()
     Stubs.flush()
     Assert.is_true(refreshed)
     Assert.is_true(render_writes > 0)
+
+    -- KOReader 先 Screensaver:setup 再发 Suspend：钩子必须在原生 setup 读设置前把图生成好，
+    -- 否则锁屏永远显示上一轮的内容；内容没变时命中缓存不重画；关机 / 重启画面不生成。
+    LockScreen.onCreate()
+    LockScreen.onCreate()
+    Stubs.flush()
+    render_writes = 0
+    current_cover = cover_a
+    Screensaver:setup()
+    Assert.len(setup_seen, 1, "钩子只装一次")
+    Assert.eq(setup_seen[1].writes, 1, "原生 setup 之前已经重画")
+    Assert.eq(saved.screensaver_document_cover, compose_path)
+    Screensaver:setup()
+    Assert.eq(setup_seen[2].writes, 1, "内容没变：缓存命中，不重画")
+    current_cover = cover_b
+    Screensaver:setup("poweroff")
+    Assert.eq(setup_seen[3].event, "poweroff")
+    Assert.eq(setup_seen[3].writes, 1, "关机画面不生成锁屏图")
 
     -- 在飞生成期间改配置：旧任务作废，新请求必须重开，不能被 already_running 吞掉。
     local Background = require("features.lockscreen.background")

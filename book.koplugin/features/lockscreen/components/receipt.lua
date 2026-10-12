@@ -31,22 +31,7 @@ local function todayStats(book)
     return { seconds = 0, pages = 0 }
 end
 
---- 当前书、进度或今日统计变化时使同日组合缓存失效。
----@return string
-function M.cache_key()
-    local book = Current.book(true)
-    if not book then return "none" end
-    local today = todayStats(book)
-    return table.concat({
-        tostring(book.source_id or ""),
-        tostring(book.stable_id or ""),
-        tostring(book.percent or 0),
-        tostring(book.page or 0),
-        tostring(book.total_seconds or 0),
-        tostring(today.seconds or 0),
-        tostring(today.pages or 0),
-    }, ":")
-end
+M.cache_key = Current.cache_key
 
 --- 根据已有累计时长与进度估算剩余时长；样本不足时不显示假精度。
 ---@param book table

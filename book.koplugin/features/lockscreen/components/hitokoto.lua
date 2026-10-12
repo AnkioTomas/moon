@@ -13,6 +13,9 @@ local M = {
     label = _("一言"),
     needs_network = true,
     layout = "quote",
+    cache_key = function()
+        return (Hitokoto:current() or Hitokoto.fallback()).text
+    end,
 }
 
 --- 由公共语句面板负责排版，本组件只转发文本和出处。

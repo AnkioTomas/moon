@@ -24,25 +24,13 @@ function M.dayKey()
     return day
 end
 
---- 只做文件层检查；网络资源还需要经过 isValidImage 的解码检查。
+--- 只做文件层检查；在线图由 online 校验文件头，合成时解码失败再经 invalidate 重下。
 ---@param path string|nil
 ---@return boolean
 local function fileOk(path)
     if type(path) ~= "string" or path == "" then return false end
     local attr = lfs.attributes(path)
     return attr ~= nil and attr.mode == "file" and (attr.size or 0) > 8
-end
-
---- 真实解码图片，拒绝 HTML、JSON 和损坏的图片文件。
----@param path string|nil
----@return boolean
-function M.isValidImage(path)
-    if not fileOk(path) then return false end
-    local RenderImage = require("ui/renderimage")
-    local decoded, image = pcall(RenderImage.renderImageFile, RenderImage, path, false, 1, 1)
-    if not decoded or not image then return false end
-    image:free()
-    return true
 end
 
 --- 解析资源描述中的路径；path 可以是字符串或无参函数。

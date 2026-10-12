@@ -23,6 +23,8 @@ local M = {
     supports_position = false,
     full_screen = true,
     uses_background = false,
+    -- 含轮换高亮，每次锁屏都换一句：键每秒都变，等于不缓存。
+    cache_key = os.time,
 }
 
 ---@param rect table 全屏矩形

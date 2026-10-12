@@ -12,7 +12,7 @@ local revision = 0
 
 --- 当前生效的主体配置；位置和宽窄是否可改由它的能力位决定。
 local function component()
-    return require("features.lockscreen.compose").plan().component
+    return require("features.lockscreen.compose").component()
 end
 
 --- 接管前的 screensaver_* 快照存放键（照 pinyin 的布局快照做法）。

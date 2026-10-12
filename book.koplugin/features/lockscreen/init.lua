@@ -1,10 +1,12 @@
 --[[--
 锁屏组合图生命周期：生成、接管和宿主事件。
 
+KOReader 先 Screensaver:setup/show 再广播 Suspend，所以锁屏图在 setup 读设置之前生成；
+内容没变时缓存命中零开销，变了就当场重画，锁屏显示的永远是此刻的状态。
+
 @module koplugin.book.features.lockscreen
 --]]
 
-local Job = require("workers.job")
 local Compose = require("features.lockscreen.compose")
 local Settings = require("features.lockscreen.settings")
 local MoonSettings = require("utils.settings")
@@ -81,42 +83,37 @@ function M.running()
     return job ~= nil
 end
 
---- 唤醒后补一次刷新（跨天或书籍变化时换图）。
-function M.onResume()
-    Job.run(function() M.refresh(nil, false, "resume") end, {
-        name = "features.lockscreen.resume",
-        kind = "instant",
-    })
+--- 锁屏前同步刷新：Screensaver:setup 读 screensaver_document_cover 之前图必须已经就位。
+--- 带 event 的调用是关机 / 重启画面，不是锁屏。在线资源未就绪时异步生成，本次沿用旧图。
+local function hookScreensaver()
+    local Screensaver = require("ui/screensaver")
+    if Screensaver._book_lockscreen_hooked then return end
+    Screensaver._book_lockscreen_hooked = true
+    local native_setup = Screensaver.setup
+    Screensaver.setup = function(self, event, ...)
+        if event == nil then
+            require("ui.guard").call("lockscreen.suspend", M.refresh, nil, false, "suspend")
+        end
+        return native_setup(self, event, ...)
+    end
 end
 
---- 插件启动：先用有效缓存立刻接管，再后台强制重生成一次。
+--- 插件启动：缓存失效时先撤下旧图（别让上次的配置冒充），下一帧补生成。
 function M.onCreate()
+    hookScreensaver()
     if not Settings.isCompose() then
         logger.dbg("book.lockscreen onCreate skipped", "mode_disabled")
         return
     end
-    local plan = Compose.plan()
-    if Compose.cacheValid(plan) then
-        Settings.applyCover(plan.output_path)
-        logger.dbg("book.lockscreen onCreate cache", plan.output_path)
-    else
+    if not Compose.cacheValid(Compose.plan()) then
         Settings.clearCover()
-        logger.dbg("book.lockscreen onCreate cache", "invalid")
     end
-    Job.run(function() M.refresh(nil, true, "onCreate") end, {
-        name = "features.lockscreen.onCreate",
-        kind = "instant",
-    })
+    require("ui/uimanager"):nextTick(function() M.refresh(nil, false, "onCreate") end)
 end
 
---- 休眠前强制刷新锁屏图。
-function M.onSuspend()
-    M.refresh(nil, true, "suspend")
-end
-
---- 网络恢复后强制重画（必应 / 摸鱼日报可能刚变得可下）。
+--- 网络恢复：必应 / 摸鱼日报 / 一言可能刚就绪；内容没变就是缓存命中。
 function M.onNetworkConnected()
-    M.refresh(nil, true, "network_connected")
+    M.refresh(nil, false, "network_connected")
 end
 
 return M
