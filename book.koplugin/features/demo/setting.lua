@@ -33,7 +33,7 @@ Feature 设置模板。复制本目录后按需改 `defaults` / `entries`；既�
 
 本模板返回空列表，扫描到也不会出现在设置页。
 
-@module koplugin.book.features.tpl.setting
+@module koplugin.book.features.demo.setting
 --]]
 
 local Setting = {}

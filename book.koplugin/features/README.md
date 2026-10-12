@@ -52,7 +52,7 @@ KOReader 事件（Dispatcher 动作、广播）写进模块的 `events` 表，�
 
 ## 新增 feature
 
-1. 复制 `tpl/` 为 `<name>/`，删掉用不到的钩子。
+1. 复制 `demo/` 为 `<name>/`，删掉用不到的钩子。
 2. 在 `features/init.lua` 的 `list` 里按需要的位置加入 `"<name>"`。
 3. 测试放在 `tests/features/<name>/`，与本目录镜像。
 
@@ -94,5 +94,4 @@ return Example
 
 ## 模板
 
-`tpl/` 是示范 feature，四个钩子只打 debug 日志，目前登记在 `list` 里用于验证链路。
-迁移第一个真实 feature 时把它从 `list` 移除即可。
+`demo/` 是示范 feature，四个钩子只打 debug 日志；不登记在 `list` 里，打包时剔除。
