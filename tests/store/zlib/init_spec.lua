@@ -108,6 +108,17 @@ Assert.eq(imported[2], "下载书 - 作者.epub")
 Assert.is_true(installed[1])
 Assert.eq(installed[3], "下载书 - 作者.epub")
 
+-- 文件名超长：书名加作者超限去掉作者，书名本身超限按字符边界截断。
+local function installName(title, authors)
+    Zlib.installAsync(source, { source_id = "zlib", stable_id = "12:hash12", title = title,
+        authors = authors, format = "epub" }, nil, function() end)
+    return imported[2]
+end
+Assert.eq(installName(("书"):rep(60), ("作"):rep(20)), ("书"):rep(60) .. ".epub")
+Assert.eq(installName(("书"):rep(100), "作者"), ("书"):rep(66) .. ".epub")
+Assert.eq(installName(("书"):rep(100), nil), ("书"):rep(66) .. ".epub")
+Assert.eq(installName(("书"):rep(30), ("作"):rep(10)), ("书"):rep(30) .. " - " .. ("作"):rep(10) .. ".epub")
+
 -- 取消发生在导入阶段时，必须取消导入任务并删除下载临时文件。
 local original_remove = os.remove
 local removed

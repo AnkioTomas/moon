@@ -150,6 +150,14 @@ Assert.eq(imported[1], sandbox .. "/书_名 - 作者.epub")
 Assert.is_true(installed[1])
 Assert.eq(installed[3], "书_名 - 作者.epub")
 
+-- 文件名超长：书名加作者超限去掉作者，书名本身超限按字符边界截断。
+Opds.installAsync(source, { source_id = "opds", stable_id = "id2", title = ("书"):rep(60),
+    authors = ("作"):rep(20), download = "http://nas/dl/2", format = "epub" }, nil, function() end)
+Assert.eq(imported[2], ("书"):rep(60) .. ".epub")
+Opds.installAsync(source, { source_id = "opds", stable_id = "id3", title = ("书"):rep(100),
+    authors = "作者", download = "http://nas/dl/3", format = "epub" }, nil, function() end)
+Assert.eq(imported[2], ("书"):rep(66) .. ".epub")
+
 -- 服务端回 200 登录页：不导入，删临时文件。
 imported = nil
 fake.payload = "  <!DOCTYPE html><html>"

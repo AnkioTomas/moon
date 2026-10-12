@@ -8,10 +8,14 @@
 local Client = require("store.zlib.client")
 local Mapper = require("store.zlib.mapper")
 local Paths = require("utils.paths")
+local Text = require("utils.text")
 local logger = require("utils.log")
 local _ = require("gettext")
 
 local Zlib = {}
+
+-- 文件名单段上限 255 字节，留出扩展名、下载的 .part 与导入重名的 " (n)"。
+local MAX_STEM_BYTES = 200
 
 -- KOReader 界面语言代码 -> Z-Library 搜索语言键。
 local STORE_LANGUAGES = {
@@ -102,7 +106,8 @@ local function safeFilename(book)
     local author = tostring(book.authors or ""):gsub("[/\\?%%*:|\"<>%c]", "_")
     local ext = tostring(book.format or "epub"):lower():gsub("[^%w]", "")
     if ext == "" or #ext > 8 then ext = "epub" end
-    local stem = author ~= "" and (title .. " - " .. author) or title
+    local stem = title .. " - " .. author
+    if author == "" or #stem > MAX_STEM_BYTES then stem = Text.truncateUtf8(title, MAX_STEM_BYTES) end
     return stem .. "." .. ext
 end
 
