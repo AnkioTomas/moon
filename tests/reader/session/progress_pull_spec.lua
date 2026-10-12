@@ -307,6 +307,74 @@ Progress.pull(snapshot())
 Stubs.flush()
 Assert.eq(#shown, 0, "进度拉取失败不应打断阅读")
 
+-- 手动拉取（快捷面板）：本会话问过的冲突再问一次；无记录 / 失败 / 一致 / 离线都提示。
+local net = true
+package.loaded["ui/network/manager"] = { isConnected = function() return net end }
+Progress.clearConflicts()
+shown, goto_calls = {}, {}
+pending_row = { fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.1, sync_status = 1 }
+source.getProgressAsync = function(_, _, cb)
+    pulled = pulled + 1
+    cb({ fraction = 0.8, chapter_idx = 8, chapter_fraction = 0.2 })
+    return { cancel = function() end }
+end
+Progress.pull(snapshot())
+Stubs.flush()
+Progress.pull(snapshot())
+Stubs.flush()
+Assert.len(shown, 1, "自动拉取每会话只问一次")
+Progress.pull(snapshot(), { manual = true })
+Stubs.flush()
+Assert.len(shown, 2, "手动拉取重新询问")
+Assert.matches(shown[2].text, "云端")
+
+local function lastText()
+    Stubs.flush()
+    return shown[#shown].text
+end
+source.getProgressAsync = function(_, _, cb)
+    cb({ fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.1 })
+    return { cancel = function() end }
+end
+Progress.pull(snapshot(), { manual = true })
+Assert.eq(lastText(), "本地与云端进度一致")
+source.getProgressAsync = function(_, _, cb)
+    cb(nil, nil, { empty = true })
+    return { cancel = function() end }
+end
+Progress.pull(snapshot(), { manual = true })
+Assert.eq(lastText(), "云端没有这本书的进度")
+source.getProgressAsync = function(_, _, cb)
+    cb(nil, "boom")
+    return { cancel = function() end }
+end
+Progress.pull(snapshot(), { manual = true })
+Assert.eq(lastText(), "拉取进度失败：boom")
+net = false
+pulled = 0
+Progress.pull(snapshot(), { manual = true })
+Assert.matches(lastText(), "网络不可用")
+Assert.eq(pulled, 0)
+
+-- 手动推送：先落本地（标脏），在线时推这一本；离线只落本地；失败提示原因。
+upserted, synced = {}, {}
+Progress.push(snapshot())
+Assert.eq(lastText(), "已保存到本地，联网后自动同步")
+Assert.len(upserted, 1)
+Assert.len(synced, 0)
+net = true
+Progress.push(snapshot())
+Assert.eq(lastText(), "进度已推送")
+Assert.eq(synced[1], "b1")
+Assert.is_nil(synced.dirty_only, "手动推送失败要报错，不走只推脏行的静默模式")
+source.syncProgressAsync = function(_, _, cb)
+    cb(nil, "denied")
+    return { cancel = function() end }
+end
+Progress.push(snapshot())
+Assert.eq(lastText(), "推送进度失败：denied")
+package.loaded["ui/network/manager"] = nil
+
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",
     "reader.session.toc", "reader.session", "logger",

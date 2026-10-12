@@ -19,7 +19,7 @@ local DESKTOP_ORDER = {
     "night", "wifi", "rotate", "refresh", "screenshot", "frontlight", "suspend",
 }
 local READER_ORDER = {
-    "toc", "font", "highlights", "bookorbit",
+    "toc", "font", "highlights", "bookorbit", "push_progress", "pull_progress",
 }
 
 local builtins = {}
