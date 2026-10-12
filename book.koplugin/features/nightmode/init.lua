@@ -255,7 +255,7 @@ end
 function NightMode.setLight(on)
     local conf = MoonSettings.get("features.nightmode")
     conf.auto_light = on
-    MoonSettings.save("features.nightmode", conf)
+    MoonSettings.save("features.nightmode")
     NightMode.applyLight()
 end
 
@@ -284,7 +284,7 @@ end
 function NightMode.setMode(mode)
     local conf = MoonSettings.get("features.nightmode")
     conf.auto_night = mode
-    MoonSettings.save("features.nightmode", conf)
+    MoonSettings.save("features.nightmode")
     last = nil
     NightMode.tick()
 end
@@ -292,7 +292,6 @@ end
 --- 经天气接口取经纬度与当地时区并落盘（时区取不到时清掉，回落设备时区）。天气地点留空时按 IP。
 --- 已有未过期缓存就当场结束（无坐标算失败）；离线直接失败（任务离线只排队不通知）；否则 ensure。
 ---@param cb fun(ok: boolean, city: string|nil)
----@return { cancel: fun() }
 function NightMode.locate(cb)
     local Weather = require("online.weather")
     Weather.city = Text.trim(MoonSettings.get("desktop.pages.home").home_weather_city)
@@ -301,30 +300,18 @@ function NightMode.locate(cb)
         local conf = MoonSettings.get("features.nightmode")
         conf.auto_night_lat, conf.auto_night_lon = wx.latitude, wx.longitude
         conf.auto_night_tz = NightMode.siteTz(wx.sunrise, os.date("*t").yday, wx.latitude, wx.longitude)
-        MoonSettings.save("features.nightmode", conf)
+        MoonSettings.save("features.nightmode")
         cb(true, wx.city)
     end
     local cached = Weather:current()
-    if cached then
-        finish(cached)
-        return { cancel = function() end }
-    end
-    if not require("ui/network/manager"):isConnected() then
-        cb(false)
-        return { cancel = function() end }
-    end
-    local alive = true
+    if cached then return finish(cached) end
+    if not require("ui/network/manager"):isConnected() then return cb(false) end
     local function once(data)
         Weather:unwatch(once)
-        if not alive then return end
         finish(data)
     end
     Weather:watch(once)
     Weather:ensure()
-    return { cancel = function()
-        alive = false
-        Weather:unwatch(once)
-    end }
 end
 
 -- ── 生命周期（Features 钩子）───────────────────────
