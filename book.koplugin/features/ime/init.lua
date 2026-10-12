@@ -117,9 +117,8 @@ end
 ---@param cb fun(ok: boolean, err: any)|nil
 ---@param on_progress fun(stage: string, done: number|nil, total: number|nil, idx: number|nil, count: number|nil)|nil
 function IME.downloadDict(cb, on_progress)
-    local NetworkMgr = require("ui/network/manager")
     cb = cb or function() end
-    if not NetworkMgr:isOnline() then
+    if not require("ui/network/manager"):isConnected() then
         cb(false, _("网络不可用，请先连接 Wi-Fi"))
         return
     end
