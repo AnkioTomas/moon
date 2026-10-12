@@ -308,22 +308,6 @@ local function applyChosenPos(ui, id, pos, pct, show_msg)
     end
 end
 
---- 按章模式：从远端进度推算章内比例。
----@param pos ProgressPosition
----@param chapter_idx integer|nil
----@param toc_count integer
----@return number
-local function remoteWithin(pos, chapter_idx, toc_count)
-    local within = pos.chapter_fraction
-    if within ~= nil then
-        return within
-    end
-    if toc_count <= 0 then
-        return 0
-    end
-    return withinFromFraction(pos.fraction, toc_count, pos.chapter_idx or chapter_idx) or 0
-end
-
 --- 当前阅读位置与 freshly pulled 远端进度是否冲突（≥1%）。
 ---@param local_pos ProgressPosition|nil
 ---@param remote_pos ProgressPosition
@@ -346,8 +330,13 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot)
             if local_idx ~= remote_idx then
                 return true
             end
-            local local_within = local_pos.chapter_fraction or 0
-            return math.abs(local_within - remoteWithin(remote_pos, remote_idx, count)) >= 0.01
+            -- 云端只记到章（京东 / 拷贝漫画等不回章内位置）：同章即一致，以本地章内位置为准。
+            -- 拿全书比例反推只会落在章首，每次开书都假冲突。
+            local remote_within = remote_pos.chapter_fraction
+            if remote_within == nil then
+                return false
+            end
+            return math.abs((local_pos.chapter_fraction or 0) - remote_within) >= 0.01
         end
     end
     local local_frac = local_pos and local_pos.fraction or 0
@@ -454,6 +443,10 @@ function ReaderProgress.pull(snapshot)
             if source.syncProgressAsync then
                 source:syncProgressAsync({ identity = id, dirty_only = true }, function() end)
             end
+        elseif remote_pos.chapter_fraction == nil and chapterToc(snapshot) then
+            -- 云端只记到章：落库会把本地章内位置冲成章首，保留本地。
+            logger.dbg("book.progress reader pull done", id.source_id, id.stable_id, "chapter only")
+            return
         elseif not ProgressDB.upsertRemote(id.source_id, id.stable_id, remote_pos) then
             logger.warn("book.progress save remote failed", id.stable_id)
             return
