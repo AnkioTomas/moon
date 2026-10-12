@@ -147,6 +147,14 @@ function Input:onSwitchFocus(input)
     input:onShowKeyboard()
 end
 
+--- 有方向键的设备上 InputText 点按后会把 parent 当 FocusManager 查焦点坐标；
+--- 本面板焦点由 onSwitchFocus 管，没有焦点网格，返回 nil 即跳过。
+---@param _input table InputText
+---@return nil
+function Input:getFocusableWidgetXY(_input)
+    return nil
+end
+
 ---@param arg any
 ---@param ges table
 ---@return boolean

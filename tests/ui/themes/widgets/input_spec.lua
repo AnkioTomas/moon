@@ -29,6 +29,8 @@ Assert.eq(b.text_type, "password")
 Assert.eq(b.height, 60)
 Assert.is_true(b.scroll)
 Assert.eq(a.parent, dialog)
+-- 有方向键的设备（含模拟器）点字段后 InputText 会调 parent:getFocusableWidgetXY，缺了即抛错。
+Assert.is_nil(dialog:getFocusableWidgetXY(a))
 -- soft 控件无边，输入框仍至少描 1px、底色用页面色（InputText 文本区是白底）。
 Assert.eq(dialog.frames[1].style.border, 1)
 Assert.eq(dialog.frames[1].style.bg, 0xFF)
