@@ -26,8 +26,8 @@ local function showToc(ctx)
         end
         return
     end
-    require("reader.chapter_toc").show(toc, session.chapterIndex(), function(idx)
-        session.gotoChapter(idx)
+    require("reader.chapter_toc").show(toc, session.chapterIndex(), function(idx, anchor)
+        session.gotoChapter(idx, anchor and anchor.id and { xpointer = "#" .. anchor.id })
     end)
 end
 

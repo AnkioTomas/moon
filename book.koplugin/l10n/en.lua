@@ -393,7 +393,6 @@ return {
     ["无法读取文本文件"] = "Cannot read text file",
     ["无法读取漫画图片"] = "Cannot read comic image",
     ["无法预检远端划线"] = "Cannot check remote highlights",
-    ["无登录信息"] = "No login info",
     ["无章节"] = "No chapters",
     ["无系列"] = "No series",
     ["无阅读统计数据"] = "No reading stats yet",

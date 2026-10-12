@@ -340,6 +340,16 @@ do
     Assert.eq(calls.prefetch.from_idx, 1)
     Assert.eq(calls.prefetch.count, 3)
 
+    -- 本章：无定位点不重开；带定位点（目录锚点 / 笔记）原地跳转
+    local events = {}
+    plugin.ui.handleEvent = function(_, ev) events[#events + 1] = ev end
+    Assert.is_false(Session.gotoChapter(1))
+    Assert.is_true(Session.gotoChapter(1, { xpointer = "#id_3" }))
+    Assert.eq(opened, 0)
+    Assert.len(events, 1)
+    Assert.eq(events[1].handler, "onGotoXPointer")
+    Assert.eq(events[1].args[1], "#id_3")
+
     local ChapterMode = require("reader.session.chapter")
     Assert.is_false(ChapterMode.onChapterBoundary(Session.current(), -1), "首章不能继续向前")
     Assert.is_true(ChapterMode.onChapterBoundary(Session.current(), 1), "章末触发下一章")

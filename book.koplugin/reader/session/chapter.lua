@@ -326,7 +326,10 @@ function Chapter.gotoChapter(session, idx, opts)
         return false
     end
     if current_idx and idx == current_idx then
-        return false
+        local xpointer = opts and opts.xpointer
+        if not xpointer then return false end
+        session.ui:handleEvent(require("ui/event"):new("GotoXPointer", xpointer, xpointer))
+        return true
     end
     requestChapter(chapter, idx, opts or {})
     return true
