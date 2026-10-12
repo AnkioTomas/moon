@@ -136,7 +136,7 @@ for i = 1, #config do
 end
 
 -- 源设置模块：没有文件即没有；模块自身抛错必须冒出来。
-Assert.is_nil(src.loadSetting("kindle"))
+Assert.is_nil(src.loadSetting("nosuch"))
 package.preload["source.broken.setting"] = function() error("boom") end
 Assert.errors(function() src.loadSetting("broken") end, "boom")
 

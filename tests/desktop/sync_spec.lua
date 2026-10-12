@@ -17,6 +17,8 @@ package.preload["desktop.pages.setting.source"] = function()
 end
 local Themed = require("support.theme_stubs")
 Themed.install()
+local connected = true
+package.loaded["ui/network/manager"] = { isConnected = function() return connected end }
 
 local Sync = require("desktop.sync")
 local SourceBase = require("source.base")
@@ -100,9 +102,10 @@ end
 Sync.open(desktop)
 Assert.eq(refreshes, 2)
 
--- 书架同步失败：本地书架不动；后台同步不提示，手动刷新才提示。
+-- 书架同步失败：本地书架不动；后台同步离线不提示，手动刷新才提示。
 desktop.tab = "library"
 Themed.made = {}
+connected = false
 local updates_before = view_updates
 Sync.open(desktop)
 Assert.is_nil(Themed.last("toast"), "后台同步离线失败不打扰")
@@ -110,6 +113,49 @@ Assert.eq(view_updates, updates_before, "失败不重建图书馆")
 Sync.refresh(desktop)
 Assert.eq(Themed.last("toast").text, "offline")
 desktop.tab = "home"
+connected = true
+
+-- 联网时后台同步失败（如 WebDAV 密码错）：提示一次，同一条错误不再重复；干净成功后再出错重新提示。
+do
+    local fail = "WebDAV 认证失败：用户名或密码错误"
+    local function toasts()
+        local n = 0
+        for _idx, made in ipairs(Themed.made) do if made.kind == "toast" then n = n + 1 end end
+        return n
+    end
+    source.syncBooksAsync = function(_, _, cb)
+        cb(nil, fail)
+        return { cancel = function() end }
+    end
+    Themed.made = {}
+    Sync.open(desktop)
+    Assert.eq(Themed.last("toast").text, fail)
+    Sync.open(desktop)
+    Assert.eq(toasts(), 1, "同一条错误只提示一次")
+    Sync.refresh(desktop)
+    Assert.eq(toasts(), 2, "手动刷新照样提示")
+
+    -- 有本地改动没推上去（push_error）同一规则。
+    source.syncBooksAsync = function(_, _, cb)
+        cb({ skipped = true, push_error = "WebDAV 没有权限：该账号无法读写这个目录" })
+        return { cancel = function() end }
+    end
+    Sync.open(desktop)
+    Assert.eq(Themed.last("toast").text, "WebDAV 没有权限：该账号无法读写这个目录")
+    Assert.eq(toasts(), 3)
+
+    source.syncBooksAsync = function(_, _, cb)
+        cb({ skipped = true })
+        return { cancel = function() end }
+    end
+    Sync.open(desktop)
+    source.syncBooksAsync = function(_, _, cb)
+        cb(nil, fail)
+        return { cancel = function() end }
+    end
+    Sync.open(desktop)
+    Assert.eq(toasts(), 4, "恢复后再坏要重新提示")
+end
 
 -- 书架对账计数全 0：不重建首页。
 source.syncBooksAsync = function(_, _, cb)

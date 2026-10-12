@@ -1,5 +1,5 @@
 --[[--
-desktop.pages.insight：经源读本地洞察（不联网、不同步远端）；主题翻页条按页名切三页；
+desktop.pages.insight：按当前源读本地洞察（不联网、不同步远端）；主题翻页条按页名切三页；
 日历点日期跳当日书单；书单点书进详情，缺行 Toast 提示。
 
 @module tests.desktop.pages.insight_spec
@@ -18,10 +18,19 @@ local Geom = require("ui/geometry")
 package.preload["book.stats"] = function() error("统计页面不得直接同步远端") end
 package.preload["ui/network/manager"] = function() error("统计页面不得依赖 NetworkMgr") end
 package.preload["book.store"] = function() error("统计页面不得经 Store 拉远端") end
--- 只放行纯格式化函数，其余 catalog 访问（读库）一律报错。
+-- 只放行格式化与本地洞察聚合，其余 catalog 访问一律报错。
+local insight_reads, insight_source_id = 0, nil
+local payload
 package.preload["book.catalog"] = function()
-    return setmetatable({ formatDuration = function(s) return s .. "s" end }, {
-        __index = function(_, key) error("统计页面不得绕过源直接读 catalog: " .. key) end,
+    return setmetatable({
+        formatDuration = function(s) return s .. "s" end,
+        readingInsightAsync = function(source_id, cb)
+            insight_reads, insight_source_id = insight_reads + 1, source_id
+            cb({ data = payload })
+            return { cancel = function() end }
+        end,
+    }, {
+        __index = function(_, key) error("统计页面只读本地洞察聚合，不得访问 catalog." .. key) end,
     })
 end
 local chart_opts
@@ -61,8 +70,8 @@ local function has(root, text)
 end
 
 local today = os.date("%Y-%m-%d")
-local insight_reads, view_updates = 0, 0
-local payload = {
+local view_updates = 0
+payload = {
     has_data = true,
     total = { has_data = true, total_text = "12小时", last7_text = "3小时" },
     calendar = {
@@ -75,14 +84,7 @@ local payload = {
         },
     },
 }
-local source = {
-    id = "wechat",
-    readingInsightAsync = function(_, cb)
-        insight_reads = insight_reads + 1
-        cb({ data = payload })
-        return { cancel = function() end }
-    end,
-}
+local source = { id = "wechat" }
 local desktop = {
     tab = "insight",
     source = source,
@@ -97,9 +99,10 @@ function desktop:updateView()
     self.view = insight:updateView()
 end
 
--- 首帧是加载占位；nextTick 里经源读洞察并重建（Kit 的 nextTick 同步，重建先于占位返回）。
+-- 首帧是加载占位；nextTick 里按当前源读本地洞察并重建（Kit 的 nextTick 同步，重建先于占位返回）。
 Assert.is_true(has(insight:updateView(), "加载统计…"))
 Assert.eq(insight_reads, 1)
+Assert.eq(insight_source_id, "wechat")
 Assert.is_true(insight.state ~= nil)
 Assert.is_nil(insight.fetch_cancel, "同步回调不留句柄")
 Assert.eq(view_updates, 1)
