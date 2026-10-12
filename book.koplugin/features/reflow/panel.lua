@@ -26,14 +26,8 @@ function Panel.actions()
             return require("features.reflow").canReflow(identity)
         end,
         --- 先预览章节目录，确认后再转换替换。
-        ---@param ctx BookQuickPanelContext
-        run = function(ctx)
-            local session = require("reader.session").current()
-            local identity = session and session.identity
-            if not identity then
-                return
-            end
-            require("features.reflow").startFromReader(ctx.ui, identity)
+        run = function()
+            require("features.reflow").startFromReader(require("reader.session").current().identity)
         end,
     }}
 end
