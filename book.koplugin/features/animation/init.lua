@@ -72,8 +72,9 @@ local _startup_checked = false
 --- fdroid Android 把 userpatch 干成 no-op，补丁写了也不会被加载。
 ---@return string|nil 不支持原因；支持时返回 nil
 local function unsupportedReason()
+    -- 只有 Android 版 KOReader 带 android 模块，require 失败即非 Android
     local ok, android = pcall(require, "android")
-    if ok and type(android) == "table" and android.prop and android.prop.flavor == "fdroid" then
+    if ok and android.prop.flavor == "fdroid" then
         return "fdroid Android does not load user patches"
     end
     return nil
@@ -172,7 +173,7 @@ function PageTurnAnimation.checkStartup()
         -- 插件升级后运行时补丁内容可能已变，isApplied 只看文件在不在；重装是幂等的。
         local res = Manager.install(PageTurnAnimation.patch_dir)
         if not res.ok then
-            require("ui.themes.widgets.toast"):new{ text = T(_("翻页动画补丁更新失败：%1"), tostring(res.err or "")), timeout = 3 }:show()
+            require("ui.themes.widgets.toast"):new{ text = T(_("翻页动画补丁更新失败：%1"), res.err), timeout = 3 }:show()
         elseif res.changed then
             PageTurnAnimation.promptRestart()
         end
@@ -195,7 +196,7 @@ function PageTurnAnimation.checkStartup()
                 forceFullRefreshNever()
                 PageTurnAnimation.promptRestart()
             else
-                require("ui.themes.widgets.toast"):new{ text = T(_("重新安装失败：%1"), tostring(res.err or "")), timeout = 3 }:show()
+                require("ui.themes.widgets.toast"):new{ text = T(_("重新安装失败：%1"), res.err), timeout = 3 }:show()
             end
         end,
     }:show()
@@ -206,10 +207,7 @@ end
 function PageTurnAnimation.onCreate(plugin)
     PageTurnAnimation.patch_dir = plugin.path .. "/features/animation/patches"
     require("ui/uimanager"):nextTick(function()
-        local ok, err = pcall(PageTurnAnimation.checkStartup)
-        if not ok then
-            require("utils.log").warn("book patch page_turn_animation check failed:", err)
-        end
+        require("ui.guard").call("animation.checkStartup", PageTurnAnimation.checkStartup)
     end)
 end
 
