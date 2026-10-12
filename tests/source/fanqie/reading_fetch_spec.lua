@@ -226,3 +226,31 @@ Assert.is_nil(row)
 Assert.eq(fetch_err, "Request timed out after 20 secs")
 Assert.eq(#state.urls, 1)
 Assert.matches(state.urls[1], "registerkey")
+
+-- 设备已缓存时取消：句柄必须落到在飞的 registerkey 上，而不是 ensureAsync 的空句柄
+local held_cancels = 0
+package.preload["http.request"] = function()
+    return {
+        ok = function() return true end,
+        header = function() return nil end,
+        request = function()
+            return { cancel = function() held_cancels = held_cancels + 1 end }
+        end,
+    }
+end
+package.loaded["http.request"] = nil
+package.loaded["source.fanqie.reading"] = nil
+Reading = require("source.fanqie.reading")
+local delivered = false
+local handle = Reading.fetchAsync(Settings:new(), "99", "1", function() delivered = true end)
+Stubs.flush()
+handle.cancel()
+Assert.eq(held_cancels, 1)
+Assert.is_false(delivered)
+
+-- 非法 ID：下一帧回错误，不在 fetchAsync 返回前同步回调
+local id_err
+Reading.fetchAsync(Settings:new(), "abc", "1", function(_data, err) id_err = err end)
+Assert.is_nil(id_err)
+Stubs.flush()
+Assert.eq(id_err, "章节 ID 无效")

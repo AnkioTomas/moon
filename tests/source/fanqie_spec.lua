@@ -17,7 +17,9 @@ local function drain()
     while #queue > 0 do table.remove(queue, 1)() end
 end
 
-package.preload["source.base"] = function() return {} end
+package.loaded["source.base"] = nil
+local progress_wire = { data = {} }
+local put_args, put_wire = nil, { code = 0 }
 package.preload["source.fanqie.settings"] = function()
     return {
         new = function()
@@ -69,7 +71,14 @@ package.preload["source.fanqie.client"] = function()
                 end,
                 fetchReadProgressAsync = function(_, cb)
                     require("ui/uimanager"):nextTick(function()
-                        cb({ data = {} })
+                        cb(progress_wire)
+                    end)
+                    return { cancel = function() end }
+                end,
+                updateReadProgressAsync = function(_, book_id, item_id, index, progress, cb)
+                    put_args = { book_id = book_id, item_id = item_id, index = index, progress = progress }
+                    require("ui/uimanager"):nextTick(function()
+                        cb(put_wire)
                     end)
                     return { cancel = function() end }
                 end,
@@ -96,6 +105,9 @@ package.preload["book.books_db"] = function()
             stored = books
             return true, 0
         end,
+        get = function(_source_id, stable_id)
+            return stored and stored[1] and stored[1].stable_id == stable_id and stored[1] or nil
+        end,
     }
 end
 
@@ -104,6 +116,11 @@ local toc_writable = true
 package.preload["source.toc"] = function()
     return {
         read = function() return toc end,
+        index = function(_source_id, _stable_id, uid)
+            for _idx, ch in ipairs(toc or {}) do
+                if ch.uid == uid then return ch.idx end
+            end
+        end,
         put = function(_, _, v)
             if not toc_writable then return false end
             toc = v
@@ -215,7 +232,72 @@ end
 do
     local result
     src:syncBooksAsync({ dirty_only = true }, function(r) result = r end)
+    Assert.is_nil(result)
     drain()
     Assert.is_true(result.skipped)
     Assert.eq(result.pushed, 0)
+end
+
+-- 封面走基类：查书库 cover（同步书架时写入的手机 CDN 地址）
+Assert.matches(src:coverRequest(ref).url, "p6%-novel%.byteimg%.com")
+
+-- 进度拉取：云端 item_id → 章节序号；read_progress 是万分比；全书比例按目录换算
+toc = {
+    { idx = 1, uid = "a" }, { idx = 2, uid = "b" }, { idx = 3, uid = "c" }, { idx = 4, uid = "d" },
+}
+do
+    progress_wire = { code = 0, data = {
+        { book_id = "other", item_id = "a" },
+        { book_id = ref.stable_id, item_id = "c", read_progress = 5000 },
+    } }
+    local pos, err
+    src:getProgressAsync(ref, function(p, e) pos, err = p, e end)
+    drain()
+    Assert.is_nil(err)
+    Assert.eq(pos.chapter_idx, 3)
+    Assert.eq(pos.chapter_fraction, 0.5)
+    Assert.eq(pos.fraction, 0.625)
+    Assert.eq(pos.extra.chapter_uid, "c")
+
+    -- 章节不在目录 / 云端没这本书：空进度，不是错误
+    progress_wire.data[2].item_id = "gone"
+    local meta
+    src:getProgressAsync(ref, function(p, e, m) pos, err, meta = p, e, m end)
+    drain()
+    Assert.is_nil(pos)
+    Assert.is_nil(err)
+    Assert.is_true(meta.empty)
+    progress_wire = { code = 0, data = {} }
+    meta = nil
+    src:getProgressAsync(ref, function(p, e, m) pos, err, meta = p, e, m end)
+    drain()
+    Assert.is_true(meta.empty)
+end
+
+-- 进度上传：章节序号 → uid + 0 起 index，章内比例夹到 [0, 1]
+do
+    local ok, err
+    src:putProgressAsync(ref, { chapter_idx = 2, chapter_fraction = 1.5 }, function(r, e) ok, err = r, e end)
+    drain()
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(put_args.book_id, ref.stable_id)
+    Assert.eq(put_args.item_id, "b")
+    Assert.eq(put_args.index, 1)
+    Assert.eq(put_args.progress, 1)
+
+    -- 没有章节位置：不发请求，直接报错
+    put_args = nil
+    src:putProgressAsync(ref, { fraction = 0.3 }, function(r, e) ok, err = r, e end)
+    drain()
+    Assert.is_nil(ok)
+    Assert.eq(err, "缺少番茄章节位置")
+    Assert.is_nil(put_args)
+
+    -- 业务码非 0：上传失败
+    put_wire = { code = 1001 }
+    src:putProgressAsync(ref, { chapter_idx = 1 }, function(r, e) ok, err = r, e end)
+    drain()
+    Assert.is_nil(ok)
+    Assert.eq(err, "番茄进度上传失败")
 end

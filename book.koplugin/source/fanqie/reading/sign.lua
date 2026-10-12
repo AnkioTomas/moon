@@ -129,8 +129,6 @@ local function build_ladon_hash_table(md5hex_ascii)
     local buffer_b8 = temp[2]
     -- drop first two; keep as queue
     local queue = { temp[3], temp[4] }
-    local parts = { table_buf:sub(1, 8) } -- will rebuild
-    -- rebuild table as byte array
     local bytes = { table_buf:byte(1, #table_buf) }
     for i = 0, 0x21 do
         local x9 = buffer_b0
@@ -161,11 +159,8 @@ function Sign.encrypt_ladon(khronos, random4)
     random4 = random4 or urandom(4)
     assert(#random4 == 4)
     local keygen = random4 .. tostring(AID)
-    local md5hex = md5(keygen) -- hex string from ffi/sha2?
-    -- ffi/sha2.md5 returns hex by default in KOReader
-    if #md5hex == 32 and not md5hex:find("[^%x]") then
-        -- hex ascii
-    else
+    local md5hex = md5(keygen)
+    if #md5hex ~= 32 or md5hex:find("[^%x]") then
         md5hex = Aes.to_hex(md5hex)
     end
     local table_ = build_ladon_hash_table(md5hex)
@@ -191,16 +186,8 @@ local function simon_key_expansion(key4)
     for i = 5, 72 do
         local tmp = bit.bxor(ror64(key[i - 1], 3), key[i - 3])
         tmp = bit.bxor(tmp, ror64(tmp, 1))
+        -- key 下标从 1 起：Lua 的 i=5 对应参考实现的第 4 个轮密钥，z 序列位为 (i-5)%62。
         local bit_i = bit.band(bit.rshift(SIMON_Z, (i - 5) % 62), u64(1))
-        -- Python: bit = 1 if (Z & (1 << ((i-4)%62))) else 0; i starts at 4
-        -- our i is 1-based word index; Python i=4 → key[4], ((4-4)%62)=0
-        -- Lua i=5 → corresponds to Python i=4
-        local py_i = i - 1 -- 0-based? Python: for i in range(4, 72): key[i]
-        -- In Python key[0..3] init, then i=4..71
-        -- Our key[1..4] init, i=5..72 where key[i] = Python key[i-1]
-        -- Python bit: (i - 4) % 62 for i in 4..71
-        local shift = (i - 5) % 62 -- when i=5 → 0 = Python (4-4)%62
-        bit_i = bit.band(bit.rshift(SIMON_Z, shift), u64(1))
         local not_prev = bit.bnot(key[i - 4])
         key[i] = bit.bxor(bit.bxor(bit.bxor(not_prev, tmp), bit_i), u64(3))
     end
@@ -270,7 +257,7 @@ end
 local function u32_shl(v, n)
     -- bit.lshift 对 >2^30 的值会按有符号 32 位溢出；用乘法保 uint32。
     v = bit.band(v, 0xffffffff)
-    for _ = 1, n do
+    for _step = 1, n do
         v = bit.band(v * 2, 0xffffffff)
     end
     return v

@@ -24,6 +24,8 @@ Client.__index = Client
 
 local DEFAULT_TIMEOUT = 15
 local SHELF_CACHE_TTL = 5 * 60
+-- 书架逐本拉详情的并发上限：一次全发会被风控。
+local DETAIL_LIMIT = 4
 local SHELF_CACHE = {}
 
 local AUTH_ERROR_CODES = {
@@ -301,10 +303,14 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
 
         -- web multidetail 无作者；手机端 multi-detail 现已空响应。
         -- 用 /api/book/info 拿书名/作者，封面走手机 CDN（thumb_uri 稳定、不签名过期）。
-        local pending = #shelf_book_ids
-        local by_id = {}
-        -- 拿不到详情的书（下架/失效）不进列表：reconcile 软删不标脏，不会推云端删除，恢复后重新上架。
+        -- 接口答了但无详情 = 下架/失效，不进列表（reconcile 软删不标脏，恢复后重新上架）；
+        -- 请求本身失败则整次失败：剔掉会把书从本地书架藏起来。
+        local by_id, next_idx, active, failed = {}, 0, 0, nil
         local function finish()
+            if failed then
+                cb(nil, failed)
+                return
+            end
             local detail_list = {}
             for _idx, book_id in ipairs(shelf_book_ids) do
                 local row = by_id[book_id]
@@ -317,29 +323,41 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
             cb(result)
         end
 
-        for _idx, book_id in ipairs(shelf_book_ids) do
-            detail_jobs[book_id] = jsonAsync(self, "GET", FanQie.book_info_url(book_id), nil, nil, function(info, info_err)
-                if cancelled then return end
-                if type(info) == "table" and type(info.data) == "table"
-                    and (info.code == nil or tonumber(info.code) == 0)
-                then
-                    local d = info.data
-                    by_id[book_id] = {
-                        book_id = book_id,
-                        book_name = d.bookName or d.book_name or d.title,
-                        author_name = d.authorName or d.author_name or d.author or "",
-                        abstract = d.abstract or d.description or "",
-                        thumb_url = FanQie.mobileCover(d.thumbUri or d.thumb_uri or d.thumbUrl),
-                    }
-                else
-                    logger.warn("fanqie book info", book_id, info_err or businessError(info, "invalid"))
-                end
-                pending = pending - 1
-                if pending <= 0 then
-                    finish()
-                end
-            end)
+        local pump
+        local function onInfo(book_id, info, info_err)
+            detail_jobs[book_id] = nil
+            active = active - 1
+            if cancelled then return end
+            if not info then
+                failed = failed or info_err or "番茄书籍详情请求失败"
+            elseif type(info.data) == "table" and (info.code == nil or tonumber(info.code) == 0) then
+                local d = info.data
+                by_id[book_id] = {
+                    book_id = book_id,
+                    book_name = d.bookName or d.book_name or d.title,
+                    author_name = d.authorName or d.author_name or d.author or "",
+                    abstract = d.abstract or d.description or "",
+                    thumb_url = FanQie.mobileCover(d.thumbUri or d.thumb_uri or d.thumbUrl),
+                }
+            else
+                logger.warn("fanqie book info", book_id, businessError(info, "invalid"))
+            end
+            if active == 0 and (failed or next_idx >= #shelf_book_ids) then
+                finish()
+            else
+                pump()
+            end
         end
+        pump = function()
+            while not failed and active < DETAIL_LIMIT and next_idx < #shelf_book_ids do
+                next_idx = next_idx + 1
+                local book_id = shelf_book_ids[next_idx]
+                active = active + 1
+                detail_jobs[book_id] = jsonAsync(self, "GET", FanQie.book_info_url(book_id), nil, nil,
+                    function(info, info_err) onInfo(book_id, info, info_err) end)
+            end
+        end
+        pump()
     end)
     return handle
 end

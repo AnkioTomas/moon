@@ -63,7 +63,7 @@ end
 
 ---@param settings FanqieSettings
 ---@param plugin table 提供 showBusy/closeBusy
-function QRLogin:new(settings, plugin)
+function QRLogin.new(_class, settings, plugin)
     local self = setmetatable({}, QRLogin)
     self.settings = settings
     self.plugin = plugin

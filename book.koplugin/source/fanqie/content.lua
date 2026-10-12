@@ -69,87 +69,34 @@ function Content.decode_pua_content(content)
 end
 
 
---- 大整数 ID 按 %.0f 输出，避免 tostring 给出科学计数法。
-local function to_precise_id(value)
-    if type(value) == "number" then
-        return string.format("%.0f", value)
-    end
-    return tostring(value)
-end
-
-local ID_KEYS = { itemId = true, item_id = true, bookId = true, book_id = true }
-
--- 递归处理chapter中的ID字段，转为字符串
-local function fix_chapter_ids(chapter)
-    if type(chapter) ~= "table" then return chapter end
-    local fixed = {}
-    for k, v in pairs(chapter) do
-        fixed[k] = ID_KEYS[k] and to_precise_id(v) or v
-    end
-    return fixed
-end
-
-function Content.normalize_chapters(payload, book_id)
-    local records = payload
-    if type(payload) == "table" and payload.data then
-        records = payload.data
-    end
+--- 官方目录 /api/reader/directory/detail 的 data → 平铺章节行。
+--- ID 一律是字符串（19 位，超出 double 精度，数字形态无法还原）。
+--- 优先 chapterListWithVolume（二维：卷 → 章），其次 chapterList，最后只有 allItemIds 时按序号起标题。
+---@param payload table|nil 完整回包
+---@return table[]
+function Content.normalize_chapters(payload)
+    local records = type(payload) == "table" and payload.data
     if type(records) ~= "table" then
         return {}
     end
-    -- Official API returns chapterListWithVolume as a 2D array:
-    -- [[chapter1, chapter2, ...], [chapter101, ...]]
-    -- Each volume is directly an array of chapters, not an object with chapterList property
-    if type(records.chapterListWithVolume) == "table" then
-        local flattened = {}
-        for _idx, volume in ipairs(records.chapterListWithVolume) do
-            if type(volume) == "table" then
-                for _idx, ch in ipairs(volume) do
-                    if type(ch) == "table" and ch.itemId then
-                        table.insert(flattened, fix_chapter_ids(ch))
-                    end
-                end
+    local out = {}
+    for _idx, volume in ipairs(records.chapterListWithVolume or {}) do
+        for _ch_idx, ch in ipairs(type(volume) == "table" and volume or {}) do
+            if type(ch) == "table" and ch.itemId then
+                out[#out + 1] = ch
             end
         end
-        if #flattened > 0 then
-            return flattened
-        end
     end
-    -- Direct chapter list fields (official + third-party variants)
-    if type(records.chapterList) == "table" then
-        local out = {}
-        for _idx, ch in ipairs(records.chapterList) do
-            table.insert(out, fix_chapter_ids(ch))
-        end
+    if #out > 0 then
         return out
     end
-    -- Try extracting chapters from allItemIds if chapterListWithVolume/chapterList is empty
-    if type(records.allItemIds) == "table" and #records.allItemIds > 0 then
-        local chapters = {}
-        for i, item_id in ipairs(records.allItemIds) do
-            table.insert(chapters, {
-                itemId = to_precise_id(item_id),
-                title = "第" .. tostring(i) .. "章",
-                index = i - 1,
-            })
-        end
-        return chapters
+    if type(records.chapterList) == "table" then
+        return records.chapterList
     end
-    if records.bookId or records.updated then
-        records = { records }
+    for i, item_id in ipairs(records.allItemIds or {}) do
+        out[#out + 1] = { itemId = tostring(item_id), title = "第" .. i .. "章" }
     end
-    for _idx, record in ipairs(records) do
-        if tostring(record.bookId or "") == tostring(book_id) then
-            local list = record.updated or record.chapterInfos or record.chapters
-                or record.item_list or record.list or record.chapterList or {}
-            local out = {}
-            for _idx, ch in ipairs(list) do
-                table.insert(out, fix_chapter_ids(ch))
-            end
-            return out
-        end
-    end
-    return records
+    return out
 end
 
 function Content.readable_chapters(chapters)

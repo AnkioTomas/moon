@@ -128,7 +128,7 @@ function Crypto.maybe_decompress(data, compress_status)
         local ok2, zlib = pcall(require, "ffi/zlib")
         if ok2 and zlib and is_zlib then
             local buflen = math.max(#data * 8, 64)
-            for _ = 1, 6 do
+            for _attempt = 1, 6 do
                 local ok3, out = pcall(zlib.zlib_uncompress, data, buflen)
                 if ok3 and out then return out end
                 buflen = buflen * 2

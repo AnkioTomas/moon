@@ -32,19 +32,14 @@ end
 
 --- 带设备签名的 reading API 请求：build_body 非 nil 时以 JSON POST。
 --- 传输失败、非 2xx、空响应、非 JSON、业务 code≠0 或 data 非表都归一成 cb(nil, err)。
----@param settings FanqieSettings
+---@param device table Device.ensureAsync 给出的设备身份
 ---@param name string 接口名，用作错误文案前缀
 ---@param path string
 ---@param build_query fun(device: table, ts_ms: number): table
 ---@param build_body (fun(device: table): string)|nil
 ---@param cb fun(data: table|nil, err: string|nil) data 为完整回包
 ---@return CancelHandle
-local function signedAsync(settings, name, path, build_query, build_body, cb)
-    local device = Device.get(settings)
-    if not device then
-        cb(nil, "无设备身份")
-        return { cancel = function() end }
-    end
+local function signedAsync(device, name, path, build_query, build_body, cb)
     local ts_ms = os.time() * 1000 + (math.random(0, 999))
     local qs = Crypto.encode_query(build_query(device, ts_ms))
     local headers = Crypto.build_unsigned_headers(device, ts_ms)
@@ -96,11 +91,11 @@ local function signedAsync(settings, name, path, build_query, build_body, cb)
     end)
 end
 
----@param settings FanqieSettings
+---@param device table
 ---@param cb fun(v1_key: string|nil, err: string|nil)
 ---@return CancelHandle
-local function registerKeyAsync(settings, cb)
-    return signedAsync(settings, "registerkey", Crypto.REGISTERKEY_PATH, Crypto.build_common_query, function(device)
+local function registerKeyAsync(device, cb)
+    return signedAsync(device, "registerkey", Crypto.REGISTERKEY_PATH, Crypto.build_common_query, function(device)
         return JSON.encode({
             content = Crypto.build_register_content(device.device_id, 0),
             keyver = 1,
@@ -123,17 +118,17 @@ local function registerKeyAsync(settings, cb)
     end)
 end
 
----@param settings FanqieSettings
+---@param device table
 ---@param book_id string
 ---@param item_id string
 ---@param v1_key string
 ---@param cb fun(row: table|nil, err: string|nil)
 ---@return CancelHandle
-local function batchFullAsync(settings, book_id, item_id, v1_key, cb)
-    local function query(device, ts_ms)
-        return Crypto.build_batch_full_query(device, book_id, { item_id }, ts_ms)
+local function batchFullAsync(device, book_id, item_id, v1_key, cb)
+    local function query(dev, ts_ms)
+        return Crypto.build_batch_full_query(dev, book_id, { item_id }, ts_ms)
     end
-    return signedAsync(settings, "batch_full", Crypto.BATCH_FULL_PATH, query, nil, function(data, err)
+    return signedAsync(device, "batch_full", Crypto.BATCH_FULL_PATH, query, nil, function(data, err)
         if not data then
             cb(nil, err)
             return
@@ -173,8 +168,7 @@ end
 function Reading.fetchAsync(settings, book_id, item_id, cb)
     book_id, item_id = tostring(book_id or ""), tostring(item_id or "")
     if not book_id:match("^%d+$") or not item_id:match("^%d+$") then
-        cb(nil, "章节 ID 无效")
-        return { cancel = function() end }
+        return require("source.base").defer(cb, nil, "章节 ID 无效")
     end
     local cancelled = false
     local job
@@ -190,14 +184,14 @@ function Reading.fetchAsync(settings, book_id, item_id, cb)
             cb(nil, device_err or "设备身份注册失败")
             return
         end
-        job = registerKeyAsync(settings, function(v1_key, err)
+        job = registerKeyAsync(device, function(v1_key, err)
             if cancelled then return end
             if not v1_key then
                 cb(nil, err or "registerkey 失败")
                 return
             end
             logger.dbg("fanqie reading v1_key ok")
-            job = batchFullAsync(settings, book_id, item_id, v1_key, function(row, batch_err)
+            job = batchFullAsync(device, book_id, item_id, v1_key, function(row, batch_err)
                 if cancelled then return end
                 cb(row, batch_err)
             end)

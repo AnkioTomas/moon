@@ -251,15 +251,15 @@ function Device.registerAsync(settings, cb)
     end)
 end
 
---- 已有身份直接返回；否则异步注册。
+--- 已有身份下一帧返回；否则异步注册。
+--- 命中也必须异步：调用方在回调里换上后续请求的句柄，同步回调后再返回的句柄会把它覆盖掉。
 ---@param settings FanqieSettings
 ---@param cb fun(device: table|nil, err: string|nil)
 ---@return CancelHandle
 function Device.ensureAsync(settings, cb)
     local cached = Device.get(settings)
     if cached then
-        cb(cached)
-        return { cancel = function() end }
+        return require("source.base").defer(cb, cached)
     end
     return Device.registerAsync(settings, cb)
 end

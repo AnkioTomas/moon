@@ -19,17 +19,18 @@ local Source = setmetatable({}, { __index = Base })
 Source.__index = Source
 
 function M.meta()
-    return { id = "fanqie", name = "番茄小说", type = "chapter" }
+    return { id = "fanqie", name = _("番茄小说"), type = "chapter" }
 end
 
 function M.new()
     local Settings = require("source.fanqie.settings")
     local Client = require("source.fanqie.client")
     local settings = Settings:new()
+    local meta = M.meta()
     return setmetatable({
-        id = "fanqie",
-        name = "番茄小说",
-        type = "chapter",
+        id = meta.id,
+        name = meta.name,
+        type = meta.type,
         settings = settings,
         client = Client:new(settings),
     }, Source)
@@ -63,9 +64,9 @@ end
 ---@return string
 local function errMsg(err)
     if type(err) == "table" then
-        return tostring(err.message or err.err or "番茄请求失败")
+        return tostring(err.message or err.err or _("番茄请求失败"))
     end
-    return tostring(err or "番茄请求失败")
+    return tostring(err or _("番茄请求失败"))
 end
 
 ---@param opts { force?: boolean, dirty_only?: boolean, on_progress?: fun(text: string|nil, done: integer|nil, total: integer|nil) }|nil
@@ -75,17 +76,10 @@ function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
     -- 番茄暂无书架删/加推送；dirty_only 不得全量 pull。
     if opts.dirty_only then
-        require("ui/uimanager"):nextTick(function()
-            cb({
-                pulled = 0, pushed = 0, hidden = 0, conflicts = 0,
-                skipped = true, reason = "no dirty shelf push",
-            })
-        end)
-        return { cancel = function() end }
+        return Base.skipped(cb, "no dirty shelf push")
     end
     if not self:configured() then
-        cb(nil, "请在数据源设置中扫码登录番茄小说")
-        return { cancel = function() end }
+        return Base.defer(cb, nil, _("请在数据源设置中扫码登录番茄小说"))
     end
 
     local report = opts.on_progress or function(...) end
@@ -99,7 +93,7 @@ function Source:syncBooksAsync(opts, cb)
         end
         local rows = wire.data and wire.data.detail_list
         if type(rows) ~= "table" then
-            cb(nil, "番茄书架响应不完整，保留本地书架")
+            cb(nil, _("番茄书架响应不完整，保留本地书架"))
             return
         end
         require("utils.paths").ensureLayout("fanqie")
@@ -107,13 +101,12 @@ function Source:syncBooksAsync(opts, cb)
         for _idx, row in ipairs(rows) do
             local id = row.book_id or row.bookId or row.id
             if id then
-                local title = row.book_name or row.title or row.name or "未知"
                 books[#books + 1] = {
                     source_id = "fanqie",
                     stable_id = tostring(id),
-                    title = title,
+                    title = row.book_name or row.title or row.name,
                     authors = row.author_name or row.author or "",
-                    intro = row.description or row.desc or row.abstract or "",
+                    intro = require("utils.text").stripHtml(row.description or row.desc or row.abstract),
                     cover = row.thumb_url or row.coverUrl or row.cover or row.cover_url,
                 }
             end
@@ -125,22 +118,8 @@ function Source:syncBooksAsync(opts, cb)
     return h
 end
 
-function Source:coverRequest(identity)
-    local book = identity.book or require("book.books_db").get(self.id, identity.stable_id)
-    if book and type(book.cover) == "string" and book.cover:match("^https?://") then
-        return { url = book.cover }
-    end
-    return nil, "暂无封面"
-end
-
 function Source:getDetailAsync(identity, cb)
-    local cancelled = false
-    require("ui/uimanager"):nextTick(function()
-        if not cancelled then
-            cb(identity.book or require("book.books_db").get(self.id, identity.stable_id))
-        end
-    end)
-    return { cancel = function() cancelled = true end }
+    return Base.defer(cb, identity.book or require("book.books_db").get(self.id, identity.stable_id))
 end
 
 function Source:loadTocAsync(identity, cb)
@@ -148,11 +127,7 @@ function Source:loadTocAsync(identity, cb)
     local Content = require("source.fanqie.content")
     local cached = Toc.read(self.id, identity.stable_id)
     if cached and #cached > 0 then
-        local cancelled = false
-        require("ui/uimanager"):nextTick(function()
-            if not cancelled then cb(cached) end
-        end)
-        return { cancel = function() cancelled = true end }
+        return Base.defer(cb, cached)
     end
     local h = handle()
     h.job = self.client:fetchChapterDirectoryAsync(identity.stable_id, function(wire, err)
@@ -161,8 +136,7 @@ function Source:loadTocAsync(identity, cb)
             cb(nil, errMsg(err))
             return
         end
-        local rows = Content.readable_chapters(
-            Content.normalize_chapters(wire, identity.stable_id))
+        local rows = Content.readable_chapters(Content.normalize_chapters(wire))
         local toc = {}
         for _idx, row in ipairs(rows) do
             local uid = row.itemId or row.item_id
@@ -175,7 +149,7 @@ function Source:loadTocAsync(identity, cb)
             end
         end
         if #toc == 0 then
-            cb(nil, "番茄目录为空")
+            cb(nil, _("番茄目录为空"))
             return
         end
         if not Toc.put(self.id, identity.stable_id, toc) then
@@ -294,7 +268,7 @@ function Source:putProgressAsync(identity, pos, cb)
         local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
         local chapter = idx and toc[idx]
         if not chapter then
-            cb(nil, "缺少番茄章节位置")
+            cb(nil, _("缺少番茄章节位置"))
             return
         end
         h.job = self.client:updateReadProgressAsync(
@@ -303,7 +277,7 @@ function Source:putProgressAsync(identity, pos, cb)
             function(wire, reason)
                 if h.cancelled then return end
                 if not wire or tonumber(wire.code or 0) ~= 0 then
-                    cb(nil, reason and errMsg(reason) or "番茄进度上传失败")
+                    cb(nil, reason and errMsg(reason) or _("番茄进度上传失败"))
                     return
                 end
                 cb(true)
