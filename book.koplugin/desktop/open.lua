@@ -103,10 +103,14 @@ function Open.book(plugin, book, on_done)
         book = book,
     }
     local started_at = Perf.now()
-    Open.pending_job = source:openBookAsync(identity, nil, function(path, open_err)
+    Open.pending_job = source:openBookAsync(identity, nil, function(path, open_err, meta)
         if generation ~= Open.generation then return end
         Open.pending_job = nil
         logger.dbg("book.perf open.source", Perf.elapsedMs(started_at), "ms", book.source_id, path ~= nil)
+        if meta and meta.handled then
+            done(true)
+            return
+        end
         if not path then
             Toast:new{ text = open_err or _("无法打开书籍") }:show()
             done(false)
