@@ -197,7 +197,7 @@ local desktop = {
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 27)
+Assert.len(built_rows, 28)
 Assert.eq(table.concat(section_titles, ","), "书库,桌面,阅读,系统,维护")
 
 local expected = {
@@ -221,6 +221,7 @@ local expected = {
     { title = "网络", id = "network" },
     { title = "中文输入法增强", id = "feature:ime:main" },
     { title = "远程管理", id = "feature:remote:main" },
+    { title = "锁屏密码", id = "feature:passcode:main" },
 }
 local pages = {}
 local nav = 1
