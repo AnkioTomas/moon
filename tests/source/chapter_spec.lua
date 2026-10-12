@@ -119,6 +119,24 @@ Assert.eq(assert(io.open(path, "rb")):read("*a"), DOC)
 Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, function(p) path = p end)
 Assert.len(fetched, 1)
 
+-- 进程外落盘（重启后、内存判定缓存为空）的本地化 HTML 也直接复用。
+local restored = io.open(tmp .. "/3.html", "wb")
+restored:write('<!DOCTYPE html><html><body><img src="images/a.png"/></body></html>')
+restored:close()
+Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 3 }, ops, function(p) path = p end)
+Assert.eq(path, tmp .. "/3.html")
+Assert.len(fetched, 1)
+
+-- 旧版本落盘的纯文本试读片段不算缓存，必须重拉。
+local trial = io.open(tmp .. "/3.html", "wb")
+trial:write("二月春风，柳色初青。...")
+trial:close()
+Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 3 }, ops, function(p) path = p end)
+Assert.eq(fetched[#fetched], 3)
+Assert.len(fetched, 2)
+table.remove(fetched)
+os.remove(tmp .. "/3.html")
+
 -- 缓存 HTML 仍含远程 img 时必须重新拉取并内联。
 local stale = io.open(tmp .. "/2.html", "wb")
 stale:write('<!DOCTYPE html><html><body><img src="https://res.weread.qq.com/wrepub/x.png"/></body></html>')
