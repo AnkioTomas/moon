@@ -120,11 +120,19 @@ CREATE TABLE IF NOT EXISTS books (
             WHERE inserted_at=0 AND fetched_at>0;]]) then
             return false
         end
+        -- 同理书架成员在 in_library；deleted 列刚补上（默认 1）时取反迁过来，否则整架消失。
+        -- deleted 已存在的库不能再迁：之后的删除只记在 deleted 上，in_library 已过时。
+        if present.in_library and not present.deleted and not DB.exec(
+            [[UPDATE books SET deleted=CASE WHEN in_library=1 THEN 0 ELSE 1 END;]]) then
+            return false
+        end
     end
+    -- 旧库的 idx_books_library 建在 in_library 上，同名 IF NOT EXISTS 不会重建。
     return DB.exec([[
+DROP INDEX IF EXISTS idx_books_library;
 CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(source_id, md5);
 CREATE INDEX IF NOT EXISTS idx_books_path ON books(path);
-CREATE INDEX IF NOT EXISTS idx_books_library ON books(source_id, deleted, stable_id);
+CREATE INDEX IF NOT EXISTS idx_books_library_v2 ON books(source_id, deleted, stable_id);
 CREATE INDEX IF NOT EXISTS idx_books_sync ON books(source_id, sync_status);
 ]]) ~= nil
 end)
@@ -178,7 +186,7 @@ function BookDB.upsertRemote(row)
     if row.deleted ~= nil then
         deleted = (row.deleted == true or tonumber(row.deleted) == 1) and 1 or 0
     end
-    local now = tonumber(row.inserted_at) or os.time()
+    local now = deleted == 0 and (tonumber(row.inserted_at) or os.time()) or 0
     return DB.exec(
         [[INSERT INTO books (
             source_id, stable_id, md5, title, authors, category,

@@ -444,6 +444,31 @@ do
     Stubs.flush()
     Assert.eq(#callbacks, 1, "第一轮确认后第二轮不应重复上传干净快照")
     Assert.eq(completed, 2)
+
+    -- 已结束任务的句柄迟到 cancel，不能放行同源的下一轮并发。
+    rows["serial:book.epub:0"].sync_status = 0
+    rows["serial:book.epub:0"].updated_at = 300
+    local done_handle = Note.syncAsync(serial, opts, function() end)
+    Stubs.flush()
+    callbacks[2]({ code = 200 })
+    Stubs.flush()
+    rows["serial:book.epub:0"].sync_status = 0
+    rows["serial:book.epub:0"].updated_at = 400
+    Note.syncAsync(serial, opts, function() end)
+    Stubs.flush()
+    Assert.eq(#callbacks, 3)
+    done_handle.cancel()
+    rows["serial:other.epub:0"] = {
+        source_id = "serial", stable_id = "other.epub", chapter_idx = 0,
+        payload = JSON.encode({ { datetime = "2026-09-05", page = "/x" } }),
+        updated_at = 500, sync_status = 0,
+    }
+    Note.syncAsync(serial, {
+        identity = { source_id = "serial", stable_id = "other.epub", source = serial },
+        dirty_only = true,
+    }, function() end)
+    Stubs.flush()
+    Assert.eq(#callbacks, 3, "第三轮仍在飞，第四轮必须排队")
 end
 
 _G.G_reader_settings = previous_settings
