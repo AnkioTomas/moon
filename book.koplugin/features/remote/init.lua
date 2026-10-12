@@ -585,12 +585,25 @@ local function deleteRecursive(path)
     return purge(entry)
 end
 
+--- 删除后按 KOReader 文件管理器的规则清 KOReader 记的状态（文件：.sdr、阅读历史、收藏；
+--- 目录：其下书籍的历史、收藏与不在书旁的 .sdr）。文件列表隐藏了 .sdr，这里不清就成了删不掉的孤儿。
+--- 类型要在删之前取：删完就分不出是文件还是目录。阅读历史只在主进程，不能放进子进程。
 ---@param path string
 ---@param cb fun(ok: boolean|nil, err: any)
 local function deleteRecursiveAsync(path, cb)
+    local entry = newPath(path)
+    local mode = entry and require("libs/libkoreader-lfs").symlinkattributes(entry, "mode")
     runFilesystem("remote-delete", function()
         return deleteRecursive(path)
-    end, cb)
+    end, function(ok, err)
+        if ok and mode == "file" then
+            require("book.sidecar").remove(entry)
+        elseif ok and mode == "directory" then
+            require("readhistory"):folderDeleted(entry)
+            require("readcollection"):removeItemsByPath(entry)
+        end
+        cb(ok, err)
+    end)
 end
 
 local MAX_ARCHIVE_ENTRIES = 10000

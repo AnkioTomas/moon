@@ -74,13 +74,17 @@ end
 
 --- 删除。WebDAV 书：删本地镜像后走基类本地优先删除，远端文件与书目条目由下一轮同步的 pushDeletes 推删。
 --- 纯本地书：原书文件就是“远端”，删掉它即确认，随后标删并立即撕墓碑。
+--- 两种书删掉的本地文件都连带清 KOReader 记的 .sdr、阅读历史与收藏。
 ---@param identity BookIdentity
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return { cancel: fun() }
 function Source:deleteBookAsync(identity, cb)
     local stable_id = identity.stable_id
+    local Sidecar = require("book.sidecar")
     if Client.isRemote(stable_id) then
-        os.remove(self._client:webdavBookRoot() .. "/" .. require("source.local.common").remoteRelativePath(stable_id))
+        local mirror = self._client:webdavBookRoot() .. "/" .. require("source.local.common").remoteRelativePath(stable_id)
+        os.remove(mirror)
+        Sidecar.remove(mirror)
         return SourceBase.deleteBookAsync(self, identity, cb)
     end
     -- 文件已被外部删掉同样算确认，否则这本书永远删不掉。
@@ -88,6 +92,7 @@ function Source:deleteBookAsync(identity, cb)
         or not require("book.store").markDeleted(self.id, stable_id) then
         return SourceBase.defer(cb, false, _("删除本书失败"))
     end
+    Sidecar.remove(stable_id)
     -- 原书已删、书已从书架消失，对用户就是删成了；撕不掉的墓碑只是库里残留，不报失败。
     if not require("book.books_db").remove(self.id, stable_id) then
         require("utils.log").warn("book local tombstone remove failed", stable_id)

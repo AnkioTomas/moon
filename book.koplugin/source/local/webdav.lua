@@ -19,7 +19,7 @@ local fetchText, putText = Common.fetchText, Common.putText
 local remoteStableId, remoteRelativePath = Common.remoteStableId, Common.remoteRelativePath
 local sidecarKey, stem, readFile, writeFile, field = Common.sidecarKey, Common.stem, Common.readFile, Common.writeFile, Common.field
 local decodeProgress, eachAsync, coverPath = Common.decodeProgress, Common.eachAsync, Common.coverPath
-local moveCover, moveSdr, safeRel = Common.moveCover, Common.moveSdr, Common.safeRel
+local moveCover, safeRel = Common.moveCover, Common.safeRel
 local parseBookProps, scanFiles = Common.parseBookProps, Common.scanFiles
 local moonPath, coverRemotePath = Common.moonPath, Common.coverRemotePath
 local progressRemotePath, notesRemotePath = Common.progressRemotePath, Common.notesRemotePath
@@ -967,7 +967,7 @@ function Webdav.replaceWebdavAsync(self, temp_path, stable_id, cb)
         end
         os.remove(old_path)
         moveCover(stable_id, new_id)
-        local sdr_ok, sdr_err = moveSdr(old_path, new_path)
+        local sdr_ok, sdr_err = require("book.sidecar").move(old_path, new_path)
         if not sdr_ok then require("utils.log").warn("book webdav replace sdr move failed", old_path, sdr_err) end
         -- 远端进度 / 笔记边车按文件名寻址，旧名的随原书删掉；本地已同步的那份要标脏重推到新名下。
         local ProgressDB, NoteDB = require("book.progress_db"), require("book.note_db")

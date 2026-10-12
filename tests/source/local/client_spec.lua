@@ -7,13 +7,13 @@ local Stubs = require("support.stubs")
 
 -- 虚拟目录树：.moon（插件配置/缓存）与 .hidden 都不该被扫进书库
 -- sub 是第 2 层（分类）；sub/deep 是第 3 层（系列）；x4 是第 4 层，按约定不识别；bad.epub 模拟引擎解析失败
--- a.epub.sdr 模拟 KOReader 边车目录：扫盘不当下钻，moveBook 时跟随书籍迁移
+-- a.sdr 模拟 KOReader 边车目录（a.epub → a.sdr）：扫盘不当下钻；moveBook 时的迁移见 book.sidecar 桩
 local DENIED_DIRS = {}
 local COVERS = {}
 local MTIMES = {} -- 路径 → 修改时间（默认 0）：模拟文件被改过
 local TREE = {
-    ["/books"] = { "a.epub", "a.epub.sdr", ".moon", ".hidden", "sub", "note.md", "old.cbr", "x.lit" },
-    ["/books/a.epub.sdr"] = { "metadata.epub.lua" },
+    ["/books"] = { "a.epub", "a.sdr", ".moon", ".hidden", "sub", "note.md", "old.cbr", "x.lit" },
+    ["/books/a.sdr"] = { "metadata.epub.lua" },
     ["/books/.moon"] = { "cache" },
     ["/books/.moon/cache"] = { "cached.epub" },
     ["/books/.hidden"] = { "b.epub" },
@@ -23,7 +23,7 @@ local TREE = {
 }
 local DIRS = {
     ["/books"] = true,
-    ["/books/a.epub.sdr"] = true,
+    ["/books/a.sdr"] = true,
     ["/books/.moon"] = true,
     ["/books/.moon/cache"] = true,
     ["/books/.hidden"] = true,
@@ -72,6 +72,18 @@ package.preload["libs/libkoreader-lfs"] = function()
             return attr
         end,
         mkdir = function()
+            return true
+        end,
+    }
+end
+
+-- KOReader 按路径记的状态（.sdr / 阅读历史 / 收藏）由 book.sidecar 负责，这里只记调用；sidecar_fail 模拟 .sdr 搬不动
+local sidecar_moves, sidecar_fail = {}, nil
+package.preload["book.sidecar"] = function()
+    return {
+        move = function(old_path, new_path)
+            sidecar_moves[#sidecar_moves + 1] = { old_path, new_path }
+            if sidecar_fail then return false, sidecar_fail end
             return true
         end,
     }
@@ -371,8 +383,8 @@ do
     Assert.is_nil(db_rows[rowKey("local", "/books/sub/deep/x4/f.epub")])
     Assert.is_false(hasValue(dirs_scanned, "/books/sub/deep/x4"))
     -- KOReader .sdr 边车目录不下钻、不入库
-    Assert.is_false(hasValue(dirs_scanned, "/books/a.epub.sdr"))
-    Assert.is_nil(db_rows[rowKey("local", "/books/a.epub.sdr/metadata.epub.lua")])
+    Assert.is_false(hasValue(dirs_scanned, "/books/a.sdr"))
+    Assert.is_nil(db_rows[rowKey("local", "/books/a.sdr/metadata.epub.lua")])
     -- 白名单外与隐藏项不入库
     Assert.is_nil(db_rows[rowKey("local", "/books/old.cbr")])
     Assert.is_nil(db_rows[rowKey("local", "/books/.hidden/b.epub")])
@@ -894,11 +906,11 @@ do
     local new_id, err = c:moveBook("/books/a.epub", "科幻", "三部曲")
     Assert.is_nil(err)
     Assert.eq(new_id, "/books/科幻/三部曲/a.epub")
-    Assert.eq(#renamed, 2)
+    Assert.eq(#renamed, 1)
     Assert.eq(renamed[1][1], "/books/a.epub")
     Assert.eq(renamed[1][2], "/books/科幻/三部曲/a.epub")
-    Assert.eq(renamed[2][1], "/books/a.epub.sdr")
-    Assert.eq(renamed[2][2], "/books/科幻/三部曲/a.epub.sdr")
+    Assert.eq(sidecar_moves[#sidecar_moves][1], "/books/a.epub")
+    Assert.eq(sidecar_moves[#sidecar_moves][2], "/books/科幻/三部曲/a.epub")
     Assert.eq(#renames, 1)
     Assert.eq(renames[1][2], "/books/a.epub")
     Assert.eq(renames[1][3], "/books/科幻/三部曲/a.epub")
@@ -946,7 +958,6 @@ do
     Assert.not_nil(err)
 
     -- 身份迁移失败：书移回原处，报错而不是返回新路径
-    -- （虚拟目录树不随 os.rename 变化，新位置的 .sdr 在桩里不存在，回迁只剩书本身）
     local BookDB = require("book.books_db")
     local real_rename_id = BookDB.renameStableId
     BookDB.renameStableId = function() return false end
@@ -960,12 +971,9 @@ do
     -- .sdr 移动失败：书移回原处，不改库
     local before_renames_id = #renames
     before_files = #renamed
-    os.rename = function(from, to)
-        renamed[#renamed + 1] = { from, to }
-        if from:sub(-4) == ".sdr" then return nil, "busy" end
-        return true
-    end
+    sidecar_fail = "busy"
     new_id, err = c:moveBook("/books/a.epub", "科幻", nil)
+    sidecar_fail = nil
     Assert.is_nil(new_id)
     Assert.matches(err, "busy")
     Assert.eq(#renames, before_renames_id)

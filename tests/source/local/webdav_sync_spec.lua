@@ -1034,9 +1034,13 @@ do
     books = {}
 end
 
--- 排版替换：新 EPUB 传到同目录，书目条目原位改名（其余字段保留），本地文件/身份/.sdr 跟着换，
--- 远端原书与边车删掉。书目写成之前失败，撤掉已传的新文件，两边保持原样。
+-- 排版替换：新 EPUB 传到同目录，书目条目原位改名（其余字段保留），本地文件/身份跟着换、KOReader 状态交给
+-- book.sidecar 迁移，远端原书与边车删掉。书目写成之前失败，撤掉已传的新文件，两边保持原样。
 do
+    local sidecar_moves = {}
+    package.loaded["book.sidecar"] = {
+        move = function(from, to) sidecar_moves[#sidecar_moves + 1] = { from, to }; return true end,
+    }
     local L = require("support.config").dir() .. "/webdav-reflow"
     local function write(path, data)
         Paths.ensureDir(path:match("(.+)/[^/]+$"))
@@ -1045,12 +1049,10 @@ do
         f:close()
     end
     local old_path, new_path, temp = L .. "/A/书.txt", L .. "/A/书.epub", L .. "/A/书.epub.moon-reflow"
-    for _, p in ipairs({ old_path, new_path, temp, old_path .. ".sdr/meta.lua", new_path .. ".sdr/meta.lua",
-        old_path .. ".sdr", new_path .. ".sdr" }) do
+    for _, p in ipairs({ old_path, new_path, temp }) do
         os.remove(p)
     end
     write(old_path, "txt")
-    write(old_path .. ".sdr/meta.lua", "return {}")
     local function reset(dav)
         books = { ["webdav://A/书.txt"] = { stable_id = "webdav://A/书.txt", title = "书", deleted = 0,
             sync_status = 1, path = old_path } }
@@ -1112,7 +1114,8 @@ do
     Assert.eq(readFile(new_path), "epub")
     Assert.is_nil(readFile(old_path))
     Assert.is_nil(readFile(temp))
-    Assert.eq(readFile(new_path .. ".sdr/meta.lua"), "return {}", ".sdr 跟着新文件走")
+    Assert.eq(sidecar_moves[#sidecar_moves][1], old_path, "KOReader 状态跟着新文件走")
+    Assert.eq(sidecar_moves[#sidecar_moves][2], new_path)
     Assert.eq(dav.files[ROOT .. "/A/书.epub"].data, "epub")
     Assert.is_nil(dav.files[ROOT .. "/A/书.txt"])
     Assert.is_nil(dav.files[ROOT .. "/.Moon+/Cache/书.txt.po"])
