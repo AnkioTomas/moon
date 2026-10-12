@@ -66,7 +66,7 @@ function Library:showFilter()
     local source = self.desktop.source
     if not source then return end
     if self.filter_cancel then self.filter_cancel:cancel(); self.filter_cancel = nil end
-    self.filter_cancel = source:filtersAsync(function(res, err)
+    self.filter_cancel = require("book.catalog").filtersAsync(source.id, function(res, err)
         self.filter_cancel = nil
         if self.desktop.closed or self.desktop.tab ~= "library"
             or self.desktop.source ~= source then return end
@@ -182,7 +182,7 @@ function Library:build(ctx, state, opts)
     end
     if not opts.search_only then
         actions[#actions + 1] = { "refresh", _("刷新"), function() self:rescan() end }
-        if ctx.source and ctx.source.filtersAsync then
+        if ctx.source then
             actions[#actions + 1] = { "filter_list", _("筛选"), function() self:showFilter() end }
         end
     end
@@ -261,11 +261,7 @@ function Library:fetch()
     local source = self.desktop.source
     local f = self.filter
     if not source then done({}, _("当前数据源不可用")); return end
-    if not source.listLibraryAsync then
-        done({}, _("当前数据源不支持书库"))
-        return
-    end
-    self.fetch_cancel = source:listLibraryAsync({
+    self.fetch_cancel = require("book.catalog").listLibraryAsync(source.id, {
         page = self.page,
         page_size = self.page_size,
         search = f.search or "",

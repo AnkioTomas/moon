@@ -1,7 +1,7 @@
 --[[--
 统计页入口：经当前源读本地洞察，打开书籍详情，分发三页 UI。
 
-不发起网络请求。读路径走 SourceBase:readingInsightAsync（catalog 聚合库）；
+不发起网络请求。读路径直查 book.catalog.readingInsightAsync（聚合本地库）；
 远端写入只由源侧 syncStatsAsync 完成。
 
 UI 页面按需加载：
@@ -169,7 +169,7 @@ function Insight:fetch()
     end
 
     local running = true
-    local job = source:readingInsightAsync(function(res, err)
+    local job = require("book.catalog").readingInsightAsync(source.id, function(res, err)
         running = false
         if desktop.closed or desktop.source ~= source then
             self.fetch_cancel = nil

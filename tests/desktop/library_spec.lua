@@ -41,9 +41,17 @@ local opened_book, open_done
 package.preload["desktop.open"] = function()
     return { book = function(_, book, done) opened_book, open_done = book, done end }
 end
-package.preload["book.catalog"] = function()
-    return { libraryScope = function(id) return { id, "extra" } end }
-end
+local requested, listed_source_id
+local catalog = {
+    libraryScope = function(id) return { id, "extra" } end,
+    filtersAsync = function(_, cb) cb({ data = {} }) end,
+    listLibraryAsync = function(source_id, opts, cb)
+        listed_source_id, requested = source_id, opts
+        cb({ data = {}, count = 0 })
+        return { cancel = function() end }
+    end,
+}
+package.preload["book.catalog"] = function() return catalog end
 local verifies = {}
 package.preload["book.store"] = function()
     return {
@@ -67,16 +75,7 @@ CoverCell.denseCoverMetrics = function() return 40, 40, 60, 1, 0, 0, 86 end
 local Library = require("desktop.pages.library")
 
 local view_updates = 0
-local requested
-local source = {
-    id = "moon",
-    filtersAsync = function(_, cb) cb({ data = {} }) end,
-    listLibraryAsync = function(_, opts, cb)
-        requested = opts
-        cb({ data = {}, count = 0 })
-        return { cancel = function() end }
-    end,
-}
+local source = { id = "moon" }
 local desktop = {
     plugin = {},
     dimen = { w = 600 },
@@ -152,6 +151,7 @@ Assert.contains(Kit.texts(library:build(ctx, { books = {}, err = "断网" }, {})
 -- 请求参数：搜索、筛选、排序全部透传。
 library.filter = { search = "书" }
 library:fetch()
+Assert.eq(listed_source_id, "moon")
 Assert.eq(requested.search, "书")
 Assert.eq(requested.sort, "recent_added")
 library.filter = { search = "书", category = "科幻", series = "系列一", read_status = "unread", downloaded = true }
@@ -197,9 +197,9 @@ library.page = 3
 library:onEvent("shelf_changed")
 Assert.is_nil(library.state)
 Assert.eq(library.page, 3)
-local real_list = source.listLibraryAsync
+local real_list = catalog.listLibraryAsync
 local pages_asked = {}
-source.listLibraryAsync = function(_, opts, cb)
+catalog.listLibraryAsync = function(_, opts, cb)
     pages_asked[#pages_asked + 1] = opts.page
     cb({ data = {}, count = 1 })
     return { cancel = function() end }
@@ -209,7 +209,7 @@ library:fetch()
 Assert.eq(library.page, 1)
 Assert.eq(pages_asked[1], 5)
 Assert.eq(pages_asked[2], 1)
-source.listLibraryAsync = real_list
+catalog.listLibraryAsync = real_list
 
 -- 桌面已销毁：updateView 排队的补拉不能再发请求。
 requested = nil

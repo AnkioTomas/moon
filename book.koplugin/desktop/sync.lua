@@ -18,8 +18,24 @@ local STATS_REFRESH_INTERVAL = 5 * 60
 ---@type table<string, number> 源 id → 最近一次统计同步尝试时间
 local stats_at = {}
 
+---@type table<string, string> 源 id → 已提示过的书架同步错误；同步干净成功后清掉
+local reported = {}
+
+--- 书架同步出错的提示：手动刷新每次都提示；后台同步只在联网时提示（离线失败是常态），
+--- 同一源同一条错误本次运行只提示一次，免得每次打开桌面都弹。err 为 nil 表示这轮干净成功。
+---@param source BookSource
+---@param force boolean|nil
+---@param err any
+local function report(source, force, err)
+    if not err then reported[source.id] = nil; return end
+    err = tostring(err)
+    if not force and (reported[source.id] == err or not require("ui/network/manager"):isConnected()) then return end
+    reported[source.id] = err
+    require("ui.themes.widgets.toast"):new{ text = err }:show()
+end
+
 --- 书架同步落地：清桌面在飞标记，按结果刷新图书馆 / 首页。被新一轮取代的旧结果丢弃。
---- 失败不动本地书架（本地是唯一真相）；只有手动刷新才提示，后台同步离线失败是常态。
+--- 失败不动本地书架（本地是唯一真相），只按 report 的规则提示。
 ---@param desktop table
 ---@param source BookSource
 ---@param request table 发起时的请求令牌
@@ -36,11 +52,10 @@ local function onBooksSynced(desktop, source, request, force, result, err)
     if desktop.closed or desktop.source ~= source then return end
     if not result then
         logger.warn("book shelf sync failed", source.id, err)
-        if force then
-            require("ui.themes.widgets.toast"):new{ text = err or _("同步失败") }:show()
-        end
+        report(source, force, err or _("同步失败"))
         return
     end
+    report(source, force, result.push_error)
     -- 源自己的节流命中表示本地数据未变，不要无意义重建整页。
     if result.skipped then
         logger.dbg("book shelf refresh done", source.id, "skipped", result.reason or "")

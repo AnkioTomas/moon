@@ -23,7 +23,7 @@ function Source.displayName(active_name)
     return active_name or SourceRegistry.activeId() or _("未知源")
 end
 
---- 取某个源的 setting 模块；源不一定带（kindle 没有）。
+--- 取某个源的 setting 模块；源不一定带。
 --- 只按「找不到文件」判断没有：模块自身抛错必须冒出来，不能被当成没有设置页。
 ---@param id string 源标识
 ---@return table|nil
