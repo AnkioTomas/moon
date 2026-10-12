@@ -173,10 +173,11 @@ function Modal:paintTo(bb, x, y)
 end
 
 --- 弹窗内全部点按 / 按键的入口，经 guard 隔离；出错这次事件算已处理，不漏到下层窗口。
----@param event table KOReader 事件
+--- UIManager 的 __default__ 会把没登记的原始输入（如模拟器的电源键松开）原样发来，可能不是 Event、没有 handler。
+---@param event table|string KOReader 事件
 ---@return boolean|nil
 function Modal:handleEvent(event)
-    local ok, handled = Guard.call("modal " .. event.handler, function()
+    local ok, handled = Guard.call("modal " .. tostring(event.handler or event), function()
         return true, InputContainer.handleEvent(self, event)
     end)
     if not ok then return true end
