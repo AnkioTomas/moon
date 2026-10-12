@@ -22,6 +22,10 @@ package.preload["utils.paths"] = function()
         sanitizeSourceId = function(id) return id end,
     }
 end
+package.loaded["utils.settings"] = nil
+package.preload["utils.settings"] = function()
+    return { getSource = function() return {} end }
+end
 for _, name in ipairs({ "utils.db", "book.stats_db", "source.wechat.stats" }) do package.loaded[name] = nil end
 
 local Base = require("utils.db")
