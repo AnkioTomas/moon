@@ -16,26 +16,8 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 local Text = require("utils.text")
 
+--- 入口的 ui 是 ReaderUI 或 FileManager，两者都挂着 ReaderDictionary（ui.dictionary）。
 local Dictionary = {}
-
---- 词典目录属于 KOReader 数据目录，不属于 ReaderUI 生命周期。
---- 桌面没有打开阅读器时构造最小上下文；下次 ReaderDictionary.init 会重新扫描目录。
----@param ui table|nil ReaderUI
----@return table|nil
-local function dictionaryContext(ui)
-    if ui and ui.dictionary and ui.dictionary.data_dir then
-        return ui.dictionary
-    end
-    local data_dir = G_defaults and G_defaults:readSetting("STARDICT_DATA_DIR")
-        or os.getenv("STARDICT_DATA_DIR")
-        or require("datastorage"):getDataDir() .. "/data/dict"
-    if type(data_dir) ~= "string" or data_dir == "" then return nil end
-    return {
-        data_dir = data_dir,
-        dicts_disabled = G_reader_settings and G_reader_settings.readSetting
-            and G_reader_settings:readSetting("dicts_disabled", {}) or {},
-    }
-end
 
 --- 弹一条自动消失的提示。
 ---@param text string 提示文案
@@ -65,13 +47,12 @@ local function managedId(dictionary, path)
 end
 
 --- 弹出已安装字典列表，可切换当前字典或删除本插件装的字典。
----@param ui table|nil ReaderUI 实例
+---@param ui table ReaderUI / FileManager
 ---@param changed_callback function|nil
 function Dictionary.manage(ui, changed_callback)
-    local dictionary = dictionaryContext(ui)
-    if not dictionary or not dictionary.data_dir then info(_("字典模块不可用")); return end
+    local dictionary = ui.dictionary
     local Manager = require("features.dictionary.manager")
-    local paths = Manager.installed(dictionary.data_dir)
+    local paths = Manager.list(dictionary.data_dir)
     if #paths == 0 then info(_("尚未安装字典")); return end
     local items = {}
     table.sort(paths, function(a, b) return bookName(a) < bookName(b) end)
@@ -123,11 +104,10 @@ function Dictionary.manage(ui, changed_callback)
 end
 
 --- 下载安装一本字典（资源下载任务，前台显示进度，可转后台），成功后刷新并设为当前。
----@param ui table|nil ReaderUI 实例
+---@param ui table ReaderUI / FileManager
 ---@param item table 目录项，含 id / name / size
 local function install(ui, item)
-    local dictionary = dictionaryContext(ui)
-    if not dictionary or not dictionary.data_dir then info(_("字典模块不可用")); return end
+    local dictionary = ui.dictionary
     local Manager = require("features.dictionary.manager")
     require("workers.ui.task_dialog").start{
         key = "dict\0" .. item.id,
@@ -143,7 +123,7 @@ local function install(ui, item)
         on_done = function(result)
             if not result.ok then info(T(_("字典安装失败：%1"), tostring(result.err))); return end
             Manager.refresh(dictionary)
-            local installed = Manager.installed(dictionary.data_dir)
+            local installed = Manager.list(dictionary.data_dir)
             local prefix = dictionary.data_dir .. "/book-" .. item.id .. "/"
             for index = 1, #installed do
                 local path = installed[index]
@@ -176,16 +156,14 @@ local function langLabel(lang, fallback)
 end
 
 --- 按语言弹出某一组词典下载列表。
----@param ui table|nil
+---@param ui table ReaderUI / FileManager
 ---@param lang_name string
 ---@param items table[]
 local function downloadLang(ui, lang_name, items)
-    local dictionary = dictionaryContext(ui)
     local rows = {}
     for index = 1, #items do
         local item = items[index]
-        local installed = dictionary and dictionary.data_dir
-            and require("features.dictionary.manager").isInstalled(dictionary.data_dir, item.id)
+        local installed = require("features.dictionary.manager").isInstalled(ui.dictionary.data_dir, item.id)
         rows[#rows + 1] = {
             text = item.name,
             mandatory = installed and _("已安装") or string.format("%.1f MB", item.size / 1048576),
@@ -208,7 +186,7 @@ local function downloadLang(ui, lang_name, items)
 end
 
 --- 拉取远程目录并按语言分组弹出下载列表。
----@param ui table|nil
+---@param ui table ReaderUI / FileManager
 function Dictionary.download(ui)
     require("ui/network/manager"):runWhenOnline(function()
         local loading = Toast:new{ text = _("正在获取字典目录…") }
@@ -261,14 +239,12 @@ function Dictionary.download(ui)
 end
 
 --- 查词弹窗内切换词典：选中后激活并重查当前词（对齐翻译切语言）。
----@param ui table|nil ReaderUI
+---@param ui table ReaderUI / FileManager
 ---@param opts { word: string|nil, current_name: string|nil, close_window: fun()|nil }
 function Dictionary.pick(ui, opts)
-    opts = opts or {}
-    local dictionary = ui and ui.dictionary
-    if not dictionary or not dictionary.data_dir then info(_("字典模块不可用")); return end
+    local dictionary = ui.dictionary
     local Manager = require("features.dictionary.manager")
-    local paths = Manager.installed(dictionary.data_dir)
+    local paths = Manager.list(dictionary.data_dir)
     if #paths == 0 then
         info(_("尚未安装字典"))
         Dictionary.download(ui)

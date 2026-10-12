@@ -10,9 +10,12 @@ local Setting = {}
 
 Setting.defaults = { dictionary_enabled = true }
 
----@return table|nil
-local function readerUi()
+--- 桌面开在文件管理器上（阅读器已关），它也挂着一份 ReaderDictionary；
+--- 必须用真实实例，安装 / 切换后才能刷新 KOReader 的词典缓存与 sdcv 参数。
+---@return table
+local function hostUi()
     return require("apps/reader/readerui").instance
+        or require("apps/filemanager/filemanager").instance
 end
 
 ---@param desktop BookDesktop
@@ -62,7 +65,7 @@ function Setting.entries(desktop)
                                 icon = "cloud_download",
                                 title = _("下载词典"),
                                 callback = function()
-                                    require("features.dictionary.ui").download(readerUi())
+                                    require("features.dictionary.ui").download(hostUi())
                                 end,
                             })
                         end
@@ -74,7 +77,7 @@ function Setting.entries(desktop)
                                 icon = "settings",
                                 title = _("管理词典"),
                                 callback = function()
-                                    require("features.dictionary.ui").manage(readerUi())
+                                    require("features.dictionary.ui").manage(hostUi())
                                 end,
                             })
                         end

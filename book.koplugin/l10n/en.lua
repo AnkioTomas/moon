@@ -249,7 +249,6 @@ return {
     ["字典安装失败：%1"] = "Dictionary installation failed: %1",
     ["字典已删除"] = "Dictionary deleted",
     ["字典已安装并切换"] = "Dictionary installed and selected",
-    ["字典模块不可用"] = "Dictionary module unavailable",
     ["存在未完成的排版替换，请清理后重试"] = "An unfinished layout replacement exists; clean it up and try again",
     ["完成"] = "Done",
     ["宽屏"] = "Wide",

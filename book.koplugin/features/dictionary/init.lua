@@ -78,14 +78,11 @@ function DictInit.onCreate()
     local DictQuickLookup = require("ui/widget/dictquicklookup")
     local native_on_tap = DictQuickLookup.onTap
     local native_change = DictQuickLookup.changeDictionary
-    -- 标题追加 ▼，提示可点按切换（对齐翻译语言按钮）。
+    -- 标题追加 ▼，提示可点按切换（对齐翻译语言按钮）；原生每次都会重设 displaydictname。
     DictQuickLookup.changeDictionary = function(self, index, skip_update)
-        if not self.results or not self.results[index] then return end
+        if not self.results[index] then return end
         native_change(self, index, true)
-        if DictInit.isEnabled() and not self.is_wiki
-            and type(self.displaydictname) == "string"
-            and self.displaydictname ~= ""
-            and not self.displaydictname:find("▼", 1, true) then
+        if DictInit.isEnabled() and not self.is_wiki then
             self.displaydictname = self.displaydictname .. " ▼"
         end
         if not skip_update then
@@ -95,8 +92,6 @@ function DictInit.onCreate()
     -- 点标题栏：切词典并重查当前词（关闭时回退原生「偏好词典」切换）。
     DictQuickLookup.onTap = function(self, arg, ges_ev)
         if DictInit.isEnabled() and not self.is_wiki
-            and self.dict_title and self.dict_title.dimen
-            and ges_ev and ges_ev.pos and ges_ev.pos.intersectWith
             and ges_ev.pos:intersectWith(self.dict_title.dimen) then
             require("features.dictionary.ui").pick(self.ui, {
                 word = self.word,
