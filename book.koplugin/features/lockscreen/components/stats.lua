@@ -161,8 +161,6 @@ function M.blocks(rect)
         y = chart_y,
         width = inner_w,
         height = chart_h,
-        label_color = U.DIM,
-        label_mode = "all",
         bar_cap_ratio = 0.18,
     })
 

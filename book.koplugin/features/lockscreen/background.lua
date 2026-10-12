@@ -11,7 +11,6 @@ local lfs = require("libs/libkoreader-lfs")
 local Image = require("utils.image")
 local Paths = require("utils.paths")
 local MoonSettings = require("utils.settings")
-local Layout = require("features.lockscreen.layout")
 local _ = require("gettext")
 
 local M = {}
@@ -28,33 +27,30 @@ end
 ---@param path string|nil
 ---@return boolean
 local function fileOk(path)
-    if type(path) ~= "string" or path == "" then return false end
+    if not path then return false end
     local attr = lfs.attributes(path)
     return attr ~= nil and attr.mode == "file" and (attr.size or 0) > 8
 end
 
---- 解析资源描述中的路径；path 可以是字符串或无参函数。
+--- 解析资源描述中的路径；path 是无参函数，没有 path 的资源（none）返回 nil。
 ---@param asset table
 ---@return string|nil
 function M.resolve(asset)
-    if type(asset.path) == "function" then return asset.path() end
-    return asset.path
+    return asset.path and asset.path()
 end
 
-local asset_cache
---- 返回锁屏资源的统一缓存表。
----
---- 每日标记和文件夹选择都放在同一个动态表中；新增资源不需要再改设置
---- 模块登记一个新的顶层键。
----@return table
-local function assetCache()
-    if asset_cache then return asset_cache end
-    local settings = MoonSettings.get("features.lockscreen")
-    if type(settings.lock_screen_asset_cache) ~= "table" then
-        settings.lock_screen_asset_cache = {}
-    end
-    asset_cache = settings.lock_screen_asset_cache
-    return asset_cache
+--- 用户选的自定义图；没选过用 .moon/screensaver/custom.png（升级前的唯一位置）。
+---@return string
+function M.customImage()
+    return MoonSettings.get("features.lockscreen").lock_screen_custom_image
+        or Paths.screensaverDir() .. "/custom.png"
+end
+
+--- 用户选的壁纸文件夹；没选过用 .moon/screensaver/wallpapers（升级前的唯一位置）。
+---@return string
+function M.folder()
+    return MoonSettings.get("features.lockscreen").lock_screen_folder
+        or Paths.screensaverDir() .. "/wallpapers"
 end
 
 --- 返回当前阅读书籍的本地封面。
@@ -65,51 +61,36 @@ local function coverPath()
     return fileOk(path) and path or nil
 end
 
---- 文件夹壁纸目录。
-local FOLDER_DIR = Paths.screensaverDir() .. "/wallpapers"
-
 local folder_cache = {}
 
---- 目录未变化时复用已排序的图片路径；修改目录后自动重新扫描。
----@return table|nil
-local function folderFiles()
-    local attr = lfs.attributes(FOLDER_DIR)
-    if not attr or attr.mode ~= "directory" then
-        folder_cache = {}
-        return nil
-    end
-    local signature = attr.modification or attr.change or attr.size or attr
-    if folder_cache.signature == signature and folder_cache.files then
+--- 目录及其修改时间未变时复用已排序的图片路径。
+---@param dir string
+---@return string[]
+local function folderFiles(dir)
+    local modification = lfs.attributes(dir, "modification")
+    if not modification then return {} end
+    if folder_cache.dir == dir and folder_cache.modification == modification then
         return folder_cache.files
     end
-
     local files = {}
-    for name in lfs.dir(FOLDER_DIR) do
-        if Image.suffix(name) then
-            local path = FOLDER_DIR .. "/" .. name
-            if fileOk(path) then files[#files + 1] = path end
-        end
+    for name in lfs.dir(dir) do
+        local path = dir .. "/" .. name
+        if Image.suffix(name) and fileOk(path) then files[#files + 1] = path end
     end
     table.sort(files)
-    folder_cache = { signature = signature, files = files }
+    folder_cache = { dir = dir, modification = modification, files = files }
     return files
 end
 
---- 扫描文件夹并按日复用一张稳定图片。
+--- 按日期依次轮换文件夹里的图：同一天固定一张，不落盘任何状态。
 ---@return string|nil
 local function folderPick()
-    local cache = assetCache()
-    local day = M.dayKey()
-    local entry = cache.folder
-    if type(entry) == "table" and entry.day == day and fileOk(entry.path) then
-        return entry.path
-    end
-    local files = folderFiles()
-    if not files or #files == 0 then return nil end
-    local pick = files[(os.time() % #files) + 1]
-    cache.folder = { day = day, path = pick }
-    MoonSettings.save("features.lockscreen")
-    return pick
+    local files = folderFiles(M.folder())
+    if #files == 0 then return nil end
+    local t = os.date("*t")
+    ---@cast t osdate
+    local day = math.floor(os.time{ year = t.year, month = t.month, day = t.day, hour = 12 } / 86400)
+    return files[day % #files + 1]
 end
 
 local BACKGROUNDS = {
@@ -120,11 +101,7 @@ local BACKGROUNDS = {
         endpoint = "bing",
         network = true,
     },
-    custom = {
-        id = "custom",
-        label = _("自定义"),
-        path = function() return Paths.screensaverDir() .. "/custom.png" end,
-    },
+    custom = { id = "custom", label = _("自定义"), path = M.customImage },
     cover = { id = "cover", label = _("当前阅读书籍封面"), path = coverPath },
     folder = { id = "folder", label = _("文件夹壁纸"), path = folderPick },
     none = { id = "none", label = _("无") },
@@ -158,21 +135,9 @@ end
 function M.options()
     local options = {}
     for _idx, id in ipairs(BACKGROUND_IDS) do
-        local background = BACKGROUNDS[id]
-        options[#options + 1] = { text = background.label, value = id }
+        options[#options + 1] = { text = BACKGROUNDS[id].label, value = id }
     end
     return options
-end
-
---- 设置页副标题：告诉用户自定义图和文件夹壁纸该放哪里。
----@param mode string
----@return string|nil 其余背景无提示
-function M.hint(mode)
-    if mode == "custom" then
-        local w, h = Layout.portraitSize()
-        return string.format(".moon/screensaver/custom.png · %d × %d", w, h)
-    end
-    return mode == "folder" and ".moon/screensaver/wallpapers/" or nil
 end
 
 --- 在线图看 online 是否已拿到今天的文件；本地资源没有过期。
@@ -195,10 +160,6 @@ end
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return table|nil
 function M.ensure(asset, cb)
-    if asset.id == "none" then
-        cb(nil)
-        return nil
-    end
     if asset.endpoint then
         return require("online." .. asset.endpoint):ensureImage(cb)
     end

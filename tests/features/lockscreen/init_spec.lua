@@ -180,21 +180,9 @@ local Compose = require("features.lockscreen.compose")
 local compose_path = Paths.screensaverDir() .. "/compose.png"
 
 local conf = MoonSettings.get("features.lockscreen")
-local previous_asset_cache = {}
-for key, value in pairs(conf.lock_screen_asset_cache or {}) do
-    if type(value) == "table" then
-        previous_asset_cache[key] = {}
-        for nested_key, nested_value in pairs(value) do
-            previous_asset_cache[key][nested_key] = nested_value
-        end
-    else
-        previous_asset_cache[key] = value
-    end
-end
 local prev = {
     lock_screen = conf.lock_screen,
     lock_screen_day = conf.lock_screen_day,
-    lock_screen_asset_cache = previous_asset_cache,
     lock_screen_background = conf.lock_screen_background,
     lock_screen_component = conf.lock_screen_component,
     lock_screen_position = conf.lock_screen_position,

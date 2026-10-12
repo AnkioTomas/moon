@@ -2,6 +2,7 @@
 @module koplugin.book.features.lockscreen.page
 --]]
 
+local lfs = require("libs/libkoreader-lfs")
 local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
 local Input = require("ui.themes.widgets.input")
@@ -16,6 +17,7 @@ local Components = require("features.lockscreen.components.base")
 local Layout = require("features.lockscreen.layout")
 local Bill = require("features.lockscreen.components.bill")
 local Poster = require("features.lockscreen.components.poster")
+local Image = require("utils.image")
 local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -57,6 +59,59 @@ local function refreshAfterChange(desktop)
     end
 end
 
+--- 导航行；opts 即 Row.widget 参数（宽度在绘制时补上）。
+---@param opts table
+---@return fun(iw: number): table
+local function navRow(opts)
+    return function(iw)
+        opts.width, opts.kind = iw, "nav"
+        return Row.widget(opts)
+    end
+end
+
+--- 单选行：点开列表，选中新值写配置并重出图。
+---@param desktop table
+---@param opts { icon: string, title: string, status: string, items: table[], current: string, apply: fun(value: string) }
+---@return fun(iw: number): table
+local function choiceRow(desktop, opts)
+    return navRow{
+        icon = opts.icon, title = opts.title, status = opts.status,
+        callback = function()
+            List:new{
+                title = opts.title, items = opts.items, current = opts.current, centered = true,
+                on_select = function(value)
+                    if not value or value == opts.current then return end
+                    opts.apply(value)
+                    refreshAfterChange(desktop)
+                end,
+            }:show()
+        end,
+    }
+end
+
+--- 用 KOReader 的路径选择器选图片（is_file）或文件夹，长按条目确认。
+---@param desktop table
+---@param current string 当前路径；所在目录不存在时从主目录开始
+---@param is_file boolean
+---@param apply fun(path: string)
+local function choosePath(desktop, current, is_file, apply)
+    local dir = is_file and current:match("^(.*)/") or current
+    if lfs.attributes(dir, "mode") ~= "directory" then
+        dir = require("apps/filemanager/filemanagerutil").getHomeFolder()
+    end
+    UIManager:show(require("ui/widget/pathchooser"):new{
+        select_file = is_file,
+        select_directory = not is_file,
+        show_files = is_file,
+        file_filter = is_file and function(name) return Image.suffix(name) ~= nil end or nil,
+        path = dir,
+        onConfirm = function(path)
+            apply(path)
+            refreshAfterChange(desktop)
+        end,
+    })
+end
+
 --- 弹输入框编辑锁屏自定义留言，保存后立刻重出图。
 ---@param desktop table 桌面实例
 local function editMessage(desktop)
@@ -79,8 +134,7 @@ local function generatedPath()
         return nil
     end
     local path = Compose.plan().output_path
-    local attr = type(path) == "string" and path ~= "" and require("libs/libkoreader-lfs").attributes(path)
-    if not attr or attr.mode ~= "file" or attr.size < 8 then
+    if not path or (lfs.attributes(path, "size") or 0) < 8 then
         return nil
     end
     return path
@@ -93,8 +147,7 @@ function Lockscreen:rows(desktop)
     local rows = {
         function(iw)
             return Row.widget({
-    width = iw,
-    chevron = false,
+                width = iw, chevron = false,
                 kind = "toggle", icon = "wallpaper", title = _("替代系统锁屏"),
                 status = enabled and _("开") or _("关"), status_on = enabled,
                 callback = function()
@@ -113,187 +166,82 @@ function Lockscreen:rows(desktop)
     end
 
     local plan = Compose.plan()
-    local component_config = plan.component
-    local component = component_config.id
-    if component_config.uses_background ~= false then
-        rows[#rows + 1] = function(iw)
-            local background = plan.background_mode
-            return Row.widget({
-    width = iw,
-    chevron = true,
-                kind = "nav", icon = "image", title = _("背景"),
-                status = Background.label(background),
-                subtitle = Background.hint(background),
-                callback = function()
-                    List:new{
-                        title = _("背景"),
-                        items = Background.options(),
-                        current = background, centered = true,
-                        on_select = function(value)
-                            if not value or value == background then return end
-                            Settings.setBackgroundMode(value)
-                            refreshAfterChange(desktop)
-                        end,
-                    }:show()
-                end,
-            })
-        end
-    end
-
-    rows[#rows + 1] = function(iw)
-        local label = _("无")
-        for _idx, item in ipairs(Components.options()) do
-            if item.value == component then
-                label = item.text
-                break
-            end
-        end
-        return Row.widget({
-    width = iw,
-    chevron = true,
-            kind = "nav", icon = "widgets", title = _("主体组件"),
-            status = label,
-            callback = function()
-                List:new{
-                    title = _("主体组件"),
-                    items = Components.options(),
-                    current = component, centered = true,
-                    on_select = function(value)
-                        if not value or value == component then return end
-                        Settings.setComponent(value)
-                        refreshAfterChange(desktop)
-                    end,
-                }:show()
-            end,
+    local component = plan.component
+    if component.uses_background ~= false then
+        local background = plan.background_mode
+        rows[#rows + 1] = choiceRow(desktop, {
+            icon = "image", title = _("背景"), status = Background.label(background),
+            items = Background.options(), current = background, apply = Settings.setBackgroundMode,
         })
+        if background == "custom" then
+            local path = Background.customImage()
+            local w, h = Layout.portraitSize()
+            rows[#rows + 1] = navRow{
+                icon = "image", title = _("选择图片"),
+                subtitle = string.format("%s · %d × %d", path, w, h),
+                callback = function() choosePath(desktop, path, true, Settings.setCustomImage) end,
+            }
+        elseif background == "folder" then
+            local path = Background.folder()
+            rows[#rows + 1] = navRow{
+                icon = "folder", title = _("选择文件夹"), subtitle = path,
+                callback = function() choosePath(desktop, path, false, Settings.setFolder) end,
+            }
+        end
     end
 
-    if component_config and component_config.supports_position ~= false then
-        rows[#rows + 1] = function(iw)
-            local position = plan.position
-            return Row.widget({
-    width = iw,
-    chevron = true,
-                kind = "nav", icon = "open_in_full", title = _("主体位置"),
-                status = Layout.label(position),
-                callback = function()
-                    List:new{
-                        title = _("主体位置"), items = Layout.options(), current = position,
-                        centered = true,
-                        on_select = function(value)
-                            if not value or value == position then return end
-                            Settings.setPosition(value)
-                            refreshAfterChange(desktop)
-                        end,
-                    }:show()
-                end,
-            })
-        end
+    local component_label = _("无")
+    for _idx, item in ipairs(Components.options()) do
+        if item.value == component.id then component_label = item.text end
+    end
+    rows[#rows + 1] = choiceRow(desktop, {
+        icon = "widgets", title = _("主体组件"), status = component_label,
+        items = Components.options(), current = component.id, apply = Settings.setComponent,
+    })
 
+    if component.supports_position ~= false then
+        rows[#rows + 1] = choiceRow(desktop, {
+            icon = "open_in_full", title = _("主体位置"), status = Layout.label(plan.position),
+            items = Layout.options(), current = plan.position, apply = Settings.setPosition,
+        })
         if plan.supports_narrow then
-            rows[#rows + 1] = function(iw)
-                local wide = plan.wide
-                return Row.widget({
-    width = iw,
-    chevron = true,
-                    kind = "nav", icon = "aspect_ratio", title = _("主体形态"),
-                    status = wide and _("宽屏") or _("窄屏"),
-                    callback = function()
-                        List:new{
-                            title = _("主体形态"),
-                            items = {
-                                { text = _("宽屏"), value = "wide" },
-                                { text = _("窄屏"), value = "narrow" },
-                            },
-                            current = wide and "wide" or "narrow",
-                            centered = true,
-                            on_select = function(value)
-                                if not value then return end
-                                local next_wide = value == "wide"
-                                if next_wide == wide then return end
-                                Settings.setWide(next_wide)
-                                refreshAfterChange(desktop)
-                            end,
-                        }:show()
-                    end,
-                })
-            end
-        end
-    end
-
-    if component == "bill" then
-        rows[#rows + 1] = function(iw)
-            local period = Settings.billPeriod()
-            return Row.widget({
-    width = iw,
-    chevron = true,
-                kind = "nav", icon = "date_range", title = _("账单周期"),
-                status = Bill.periodLabel(period),
-                callback = function()
-                    List:new{
-                        title = _("账单周期"),
-                        items = Bill.periodOptions(),
-                        current = period, centered = true,
-                        on_select = function(value)
-                            if not value or value == period then return end
-                            Settings.setBillPeriod(value)
-                            refreshAfterChange(desktop)
-                        end,
-                    }:show()
-                end,
+            rows[#rows + 1] = choiceRow(desktop, {
+                icon = "aspect_ratio", title = _("主体形态"), status = plan.wide and _("宽屏") or _("窄屏"),
+                items = { { text = _("宽屏"), value = "wide" }, { text = _("窄屏"), value = "narrow" } },
+                current = plan.wide and "wide" or "narrow",
+                apply = function(value) Settings.setWide(value == "wide") end,
             })
         end
     end
 
-    if component == "poster" then
-        rows[#rows + 1] = function(iw)
-            local style = Poster.style()
-            return Row.widget({
-    width = iw,
-    chevron = true,
-                kind = "nav", icon = "view_module", title = _("海报风格"),
-                status = Poster.styleLabel(style),
-                callback = function()
-                    List:new{
-                        title = _("海报风格"),
-                        items = Poster.styleOptions(),
-                        current = style, centered = true,
-                        on_select = function(value)
-                            if not value or value == style then return end
-                            Settings.setPosterStyle(value)
-                            refreshAfterChange(desktop)
-                        end,
-                    }:show()
-                end,
-            })
-        end
-    end
-
-    if component == "message" then
-        rows[#rows + 1] = function(iw)
-            local text = Settings.customMessage()
-            local preview = Text.truncateUtf8(text, 18)
-            if preview ~= text then preview = preview .. "…" end
-            return Row.widget({
-    width = iw,
-    chevron = true,
-                kind = "nav", icon = "chat", title = _("自定义留言"),
-                status = preview,
-                callback = function() editMessage(desktop) end,
-            })
-        end
+    if component.id == "bill" then
+        local period = Settings.billPeriod()
+        rows[#rows + 1] = choiceRow(desktop, {
+            icon = "date_range", title = _("账单周期"), status = Bill.periodLabel(period),
+            items = Bill.periodOptions(), current = period, apply = Settings.setBillPeriod,
+        })
+    elseif component.id == "poster" then
+        local style = Poster.style()
+        rows[#rows + 1] = choiceRow(desktop, {
+            icon = "view_module", title = _("海报风格"), status = Poster.styleLabel(style),
+            items = Poster.styleOptions(), current = style, apply = Settings.setPosterStyle,
+        })
+    elseif component.id == "message" then
+        local text = Settings.customMessage()
+        local preview = Text.truncateUtf8(text, 18)
+        rows[#rows + 1] = navRow{
+            icon = "chat", title = _("自定义留言"),
+            status = preview ~= text and preview .. "…" or preview,
+            callback = function() editMessage(desktop) end,
+        }
     end
 
     local path = generatedPath()
     if path then
-        rows[#rows + 1] = function(iw)
-            return Row.widget({
-    width = iw,
-    chevron = true,
-                kind = "nav", icon = "share", title = _("分享锁屏图"),
-                callback = function() require("features.remote.screenshot").share(path) end,
-            })
-        end
+        rows[#rows + 1] = navRow{
+            icon = "share", title = _("分享锁屏图"),
+            callback = function() require("features.remote.screenshot").share(path) end,
+        }
     end
 
     return rows
@@ -306,7 +254,7 @@ local function showFullscreen(path)
     local Theme = require("ui.themes")
     local Box = require("ui.themes.widgets.box")
     local Modal = require("ui.themes.widgets.modal")
-    local pw, ph = require("features.lockscreen.layout").portraitSize()
+    local pw, ph = Layout.portraitSize()
     local viewer = Modal:new{
         mask = false,
         close_on_tap = true,
@@ -351,7 +299,7 @@ function Lockscreen.preview(width)
     local tap = require("ui.widgets.book").tappable(width, preview_h, function()
         showFullscreen(path)
     end)
-    local pw, ph = require("features.lockscreen.layout").portraitSize()
+    local pw, ph = Layout.portraitSize()
     tap[1] = Overlay.previewBox(width, CenterContainer:new{
         dimen = Geom:new{ w = inner_w, h = inner_h },
         -- 不给 width/height：否则控件是整框，夜间模式整框反色，两侧留白变成白条。

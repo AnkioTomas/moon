@@ -107,11 +107,10 @@ end
 ---@param component table
 ---@param position string
 ---@param wide boolean
----@param data table|nil
 ---@return table[]
-local function buildBlocks(component, position, wide, data)
+local function buildBlocks(component, position, wide)
     if component.layout == "quote" then
-        return component.blocks(position, wide, data and data.text or "", data and data.source or "")
+        return component.blocks(position, wide)
     end
     local sw, sh = Layout.portraitSize()
     if component.full_screen then
@@ -121,97 +120,36 @@ local function buildBlocks(component, position, wide, data)
         position = position,
         wide = wide,
         height = preferredHeight(component, sh),
-        screen_w = sw,
-        screen_h = sh,
     })
     return component.blocks(rect)
 end
 
---- 并行准备资源和异步文案，二者都完成后才写入组合图。
----
---- 返回值是可取消任务；本地背景和同步主体会直接在本次调用中完成。
+--- 背景就绪后合成；direct 资源直接用原图。
+--- 返回值是可取消任务；本地背景在本次调用中同步完成，返回 nil。
 ---@param plan table
----@param cb fun(ok: boolean, err: any, output_path: string|nil)
+---@param cb fun(ok: boolean, err: any, output_path: string|nil) output_path 仅 direct 资源给出
 ---@return table|nil
 function M.build(plan, cb)
-    local cancelled = false
-    local finished = false
+    local cancelled, done = false, false
     local asset_job
-    local text_job
-    local blocks
-
-    local function freeBlocks()
-        for _idx, block in ipairs(blocks or {}) do
-            if block.widget and block.widget.free then block.widget:free() end
-        end
-        blocks = nil
-    end
-    local job = { cancel = function()
-        cancelled = true
-        if asset_job and asset_job.cancel then asset_job:cancel() end
-        if text_job and text_job.cancel then text_job:cancel() end
-        freeBlocks()
-    end }
-
-    --- 回调一次即封口：已取消或已回调过都不再触发 cb。
-    ---@param ok boolean
-    ---@param output_path string|nil direct 资源时为原图路径，否则 nil（用 compose.png）
-    local function finish(ok, err, output_path)
-        if cancelled or finished then return end
-        finished = true
-        cb(ok, err, output_path)
-    end
-
-    local component = plan.component
-    local asset_error, asset_path, text_data
-    local asset_ready = false
-    -- direct 资源不经 compose.png，拉取文案纯属无效工作。
-    local text_ready = plan.asset.direct or type(component.ensureText) ~= "function"
-
-    local function renderWhenReady()
-        if cancelled or finished or not asset_ready then return end
-        if asset_error then
-            finish(false, asset_error)
-            return
-        end
-        if plan.asset.direct then
-            finish(true, nil, asset_path)
-            return
-        end
-        if not text_ready then return end
-        blocks = buildBlocks(component, plan.position, plan.wide, text_data)
-        if cancelled or finished then return end
-        Paths.ensureScreensaverDir()
-        local Render = require("features.lockscreen.render")
-        local ok, err = Render.write(COMPOSE_PATH, asset_path, blocks)
-        blocks = nil
-        if not ok and asset_path and tostring(err):find("cannot decode background", 1, true) then
+    asset_job = Background.ensure(plan.asset, function(path, err)
+        if cancelled then return end
+        done = true
+        if err then return cb(false, err) end
+        if plan.asset.direct then return cb(true, nil, path) end
+        -- 建块与写盘同步完成，中途不会被取消；块里的 widget 由 Render.write 释放。
+        local blocks = buildBlocks(plan.component, plan.position, plan.wide)
+        local ok, render_err = require("features.lockscreen.render").write(COMPOSE_PATH, path, blocks)
+        if not ok and path and tostring(render_err):find("cannot decode background", 1, true) then
             Background.invalidate(plan.asset)
         end
-        finish(ok, err, nil)
-    end
-
-    --- 背景资源就绪后，直接检查是否已具备生成条件。
-    ---@param path string|nil 背景图本地路径
-    local function onAsset(path, err)
-        if cancelled then return end
-        asset_error = err
-        asset_path = path
-        asset_ready = true
-        renderWhenReady()
-    end
-    asset_job = Background.ensure(plan.asset, onAsset)
-
-    if finished then return nil end
-    if not text_ready then
-        text_job = component.ensureText(function(text, source)
-            if cancelled then return end
-            text_data = { text = text, source = source }
-            text_ready = true
-            renderWhenReady()
-        end)
-    end
-    return finished and nil or job
+        cb(ok, render_err)
+    end)
+    if done then return nil end
+    return { cancel = function()
+        cancelled = true
+        if asset_job then asset_job:cancel() end
+    end }
 end
 
 return M

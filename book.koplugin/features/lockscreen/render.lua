@@ -218,7 +218,7 @@ local function lightenRounded(bb, x, y, width, height, radius, by)
     bb:lightenRect(x, y + radius, width, height - radius * 2, by)
 end
 
---- 分发非文本图形块：线、柱、卡片、票根缺口、点和离屏 widget。
+--- 分发非文本图形块：线、柱、卡片、票根缺口、图片和离屏 widget。
 --- 封面 / 进度条不再走 DSL；主体通过 kind=widget 复用 ui.widgets。
 ---@param bb BlitBuffer 目标 Blitbuffer
 ---@param block table 图形块描述
@@ -261,42 +261,6 @@ local function paintShape(bb, block, w, h, background)
             paintRect(bb, x, y + height - filled, width, filled,
                 block.color or Blitbuffer.COLOR_BLACK, radius)
         end
-    elseif block.kind == "line" then
-        -- 折线段：Bresenham 1px（stroke>1 时画平行粗线）
-        local x1 = math.floor(block.x1 or x)
-        local y1 = math.floor(block.y1 or y)
-        local x2 = math.floor(block.x2 or x1)
-        local y2 = math.floor(block.y2 or y1)
-        local color = block.color or Blitbuffer.COLOR_BLACK
-        local stroke = math.max(1, math.floor(tonumber(block.stroke) or 1))
-        local dx = math.abs(x2 - x1)
-        local dy = math.abs(y2 - y1)
-        local sx = x1 < x2 and 1 or -1
-        local sy = y1 < y2 and 1 or -1
-        local err = dx - dy
-        while true do
-            if stroke <= 1 then
-                bb:paintRect(x1, y1, 1, 1, color)
-            else
-                local half = math.floor(stroke / 2)
-                bb:paintRect(x1 - half, y1 - half, stroke, stroke, color)
-            end
-            if x1 == x2 and y1 == y2 then
-                break
-            end
-            local e2 = err * 2
-            if e2 > -dy then
-                err = err - dy
-                x1 = x1 + sx
-            end
-            if e2 < dx then
-                err = err + dx
-                y1 = y1 + sy
-            end
-        end
-    elseif block.kind == "dot" then
-        local size = math.max(1, math.floor(tonumber(block.size) or 4))
-        paintRect(bb, x, y, size, size, block.color or Blitbuffer.COLOR_BLACK, 0)
     elseif block.kind == "cutout_circle" then
         if not background then error("cutout_circle requires background snapshot") end
         local radius = math.max(1, math.floor(tonumber(block.radius) or 1))
@@ -336,7 +300,7 @@ local function freeWidgets(blocks)
         local widget = block.widget
         if widget and not freed[widget] and type(widget.free) == "function" then
             freed[widget] = true
-            pcall(widget.free, widget)
+            widget:free()
         end
     end
 end

@@ -33,28 +33,14 @@ local M = {
 ---@param limit number
 ---@return table[]
 local function books(limit)
-    limit = math.max(1, math.floor(tonumber(limit) or 1))
     local source_id = Library.activeSourceId()
-    local recent = Catalog.recentBooks(source_id, limit * 2)
     local result = {}
     local append = Library.shelfCollector(source_id)
-    append(result, recent, limit)
-    if #result < limit and (type(source_id) == "string" and source_id ~= "" or type(source_id) == "table" and #source_id > 0) then
-        ---@cast source_id string|string[]
-        local rows = select(1, Catalog.listBooks(source_id, {
-            limit = limit * 2,
-            offset = 0,
-        }))
-        append(result, rows, limit)
+    append(result, Catalog.recentBooks(source_id, limit * 2), limit)
+    if #result < limit then
+        append(result, (Catalog.listBooks(source_id, { limit = limit * 2, offset = 0 })), limit)
     end
     return result
-end
-
---- 一张封面的绘制块。
----@param book table
----@return table
-local function coverBlock(book, x, y, w, h)
-    return U.coverBlock(book, x, y, w, h)
 end
 
 --- 错层海报墙：列宽按目标尺寸均分铺满宽度，单数列上移半张探出顶边；
@@ -75,7 +61,7 @@ local function staggered(shelf, w, h)
     for col = 0, cols - 1 do
         local top = col % 2 == 0 and -lift or 0
         for row = 0, math.ceil((h - top) / row_step) - 1 do
-            blocks[#blocks + 1] = coverBlock(shelf[#blocks % #shelf + 1],
+            blocks[#blocks + 1] = U.coverBlock(shelf[#blocks % #shelf + 1],
                 pad_x + col * (poster_w + gap_h), top + row * row_step, poster_w, poster_h)
         end
     end
@@ -96,7 +82,7 @@ local function grid(shelf, cols, w, h)
     local blocks = {}
     for i = 0, cols * rows - 1 do
         local col, row = i % cols, math.floor(i / cols)
-        blocks[#blocks + 1] = coverBlock(shelf[i % #shelf + 1],
+        blocks[#blocks + 1] = U.coverBlock(shelf[i % #shelf + 1],
             left + col * (cell_w + gap), top + row * (cell_h + gap), cell_w, cell_h)
     end
     return blocks

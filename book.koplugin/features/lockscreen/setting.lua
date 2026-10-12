@@ -17,11 +17,10 @@ Setting.defaults = {
     lock_screen_bill_period = "7d",
     lock_screen_poster_style = "vertical",
     lock_screen_custom_message = "读书不觉已春深，一寸光阴一寸金。",
-    lock_screen_asset_cache = {},
 }
 
---- 运行时状态（当天生成标记、高亮轮换），没有默认值，但要从旧分区搬过来。
-Setting.keys = { "lock_screen_day", "lock_screen_quote_index" }
+--- 无默认值的持久键：当天生成标记、高亮轮换、用户选的自定义图 / 壁纸文件夹。
+Setting.keys = { "lock_screen_day", "lock_screen_quote_index", "lock_screen_custom_image", "lock_screen_folder" }
 
 ---@param desktop BookDesktop
 ---@return BookSettingEntry[]

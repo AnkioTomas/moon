@@ -199,8 +199,13 @@ lock_running = false
 
 -- 盘上有图但配置已改（lock_screen_day 被清空）：旧图不能当预览。
 package.loaded["libs/libkoreader-lfs"] = {
-    attributes = function() return { mode = "file", size = 1024 } end,
+    attributes = function(_, name)
+        local attr = { mode = "file", size = 1024 }
+        return name and attr[name] or attr
+    end,
 }
+package.loaded["features.lockscreen.page"] = nil
+LockscreenOn = require("features.lockscreen.page")
 Assert.eq(LockscreenOn.preview(600).kind, "placeholder")
 Assert.eq(status_text, "未生成")
 
