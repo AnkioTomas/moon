@@ -66,6 +66,7 @@ function UI.showEntity(entity)
     TextViewer:new{
         title = entity.name,
         text = text ~= "" and text or _("（无内容）"),
+        fullscreen = false,
     }:show()
 end
 

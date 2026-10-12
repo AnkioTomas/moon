@@ -6,7 +6,7 @@
 
 require("l10n").apply()
 
-local Guard = require("ui.guard")
+local PageMarks = require("reader.page_marks")
 local Text = require("utils.text")
 local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
@@ -66,41 +66,6 @@ local function loadEntities()
     return Marks._entity_cache
 end
 
----@param ui table
----@return number, number
-local function screenSize(ui)
-    local view = ui and ui.view
-    if view and view.dimen and view.dimen.w and view.dimen.h then
-        return view.dimen.w, view.dimen.h
-    end
-    local screen = require("device").screen
-    return screen:getWidth(), screen:getHeight()
-end
-
---- 读取阅读器实时页码；session.page 可能晚于当前绘制帧。
----@param ui table|nil
----@return number|nil
-local function currentPage(ui)
-    if ui and ui.getCurrentPage then
-        local ok, page = pcall(ui.getCurrentPage, ui)
-        if ok and tonumber(page) then return tonumber(page) end
-    end
-    local paging = ui and ui.paging
-    if paging and tonumber(paging.current_page) then
-        return tonumber(paging.current_page)
-    end
-    local rolling = ui and ui.rolling
-    if rolling and tonumber(rolling.current_page) then
-        return tonumber(rolling.current_page)
-    end
-    local document = ui and ui.document
-    if document and document.getCurrentPage then
-        local ok, page = pcall(document.getCurrentPage, document)
-        if ok and tonumber(page) then return tonumber(page) end
-    end
-    return 0
-end
-
 --- 展平实体名与别名，并去重。
 ---@param entities table[]
 ---@return table[]
@@ -147,17 +112,6 @@ local function namesOnScreen(names, text)
     return out
 end
 
----@param box table|nil
----@param width number|nil
----@param height number|nil
----@return boolean
-local function intersectsScreen(box, width, height)
-    return box ~= nil and box.x ~= nil and box.y ~= nil and box.w ~= nil and box.h ~= nil
-        and box.w > 0 and box.h > 0
-        and (not width or (box.x < width and box.x + box.w > 0))
-        and (not height or (box.y < height and box.y + box.h > 0))
-end
-
 --- 仅查当前可见页，并直接解析成屏幕框。
 ---@param ui table
 ---@param entities table[]
@@ -167,7 +121,7 @@ local function scanVisibleMarks(ui, entities)
     if not document then
         return {}
     end
-    local width, height = screenSize(ui)
+    local width, height = PageMarks.screenSize(ui)
     local out = {}
 
     local function addMark(entity, box)
@@ -177,7 +131,7 @@ local function scanVisibleMarks(ui, entities)
         }
     end
 
-    local page = currentPage(ui)
+    local page = PageMarks.currentPage(ui)
     local names = namesOnScreen(collectNames(entities), require("features.xray.context").visibleText(ui, page))
     if document.getScreenBoxesFromPositions and document.findText then
         for _idx, item in ipairs(names) do
@@ -193,7 +147,7 @@ local function scanVisibleMarks(ui, entities)
                             document, start_xp, end_xp, true)
                         if boxes_ok and boxes then
                             for _idx, box in ipairs(boxes) do
-                                if intersectsScreen(box, width, height) then
+                                if PageMarks.intersects(box, width, height) then
                                     addMark(item.entity, box)
                                 end
                             end
@@ -224,7 +178,7 @@ local function scanVisibleMarks(ui, entities)
                         view.pageToScreenTransform, view, page, page_box)
                     screen_box = transformed_ok and transformed or nil
                 end
-                if screen_box and intersectsScreen(screen_box, width, height) then
+                if screen_box and PageMarks.intersects(screen_box, width, height) then
                     addMark(item.entity, screen_box)
                 end
             end
@@ -260,22 +214,7 @@ end
 ---@param ui table
 ---@return string|nil 无阅读会话时 nil
 local function renderKey(ui)
-    local cur = require("reader.session").current()
-    if not cur or not cur.identity then
-        return nil
-    end
-    local w, h = screenSize(ui)
-    local doc = ui and ui.document
-    local pos = ""
-    if doc and doc.getCurrentPos then
-        local ok, p = pcall(doc.getCurrentPos, doc)
-        if ok then pos = tostring(p or "") end
-    end
-    return table.concat({
-        cur.identity.source_id, cur.identity.stable_id,
-        tostring(cur.identity.chapter_idx or 0), tostring(Marks._revision),
-        tostring(w or 0), tostring(h or 0), tostring(currentPage(ui)), pos,
-    }, "\0")
+    return PageMarks.viewKey(ui, Marks._revision)
 end
 
 --- 防抖后在子进程扫描当前页；快速翻页会取消旧计时器或旧 Job。
@@ -337,15 +276,6 @@ local function scheduleScan(self, key, entities)
     UIManager:scheduleIn(SCAN_DEBOUNCE, timer)
 end
 
----@param pos table
----@param box table
----@return boolean
-local function hitScreenBox(pos, box)
-    local pad = math.max(8, math.floor((box.h or 0) * 0.5))
-    return pos.x >= box.x and pos.x <= box.x + box.w
-        and pos.y >= box.y - pad and pos.y <= box.y + box.h + 2
-end
-
 --- 丢弃当前页缓存并重绘阅读视图（实体增删改或开关变化后调用）。
 function Marks.invalidate()
     Marks._revision = Marks._revision + 1
@@ -380,76 +310,23 @@ function Marks:updateView()
     scheduleScan(self, key, entities)
 end
 
----@param rect table
-local function paintUnderscore(bb, rect)
-    local Blitbuffer = require("ffi/blitbuffer")
-    local Size = require("ui/size")
-    local color = Blitbuffer.COLOR_DARK_GRAY
-    local line_y = rect.y + rect.h - 1
-    if require("utils.settings").get("features.xray").book_xray_mark_style == "solid" then
-        bb:paintRect(rect.x, line_y, rect.w, Size.line.thick, color)
-        return
-    end
-    for i = rect.x, rect.x + rect.w - 8, 10 do
-        bb:paintRect(i, line_y, 6, Size.line.thick, color)
-    end
-end
-
----@param self table Marks 实例
----@param bb any Blitbuffer
-local function paint(self, bb)
+--- 标记图层：刷新视口后交出屏上实体（点按弹详情）。
+---@return PageMark[]
+function Marks:marks()
     if not Marks.enabled() then
-        return
+        return {}
     end
     self:updateView()
-    for index, mark in ipairs(self._marks) do
-        paintUnderscore(bb, mark.box)
-    end
-end
-
---- 作为 view module 被调用：先刷新标记框，再给每个命中画虚线下划线；经 guard 隔离。
----@param bb any Blitbuffer
-function Marks:paintTo(bb)
-    Guard.paint("xray.paintTo", paint, self, bb)
-end
-
----@param ges table
----@return boolean
-function Marks:onTap(ges)
-    if not Marks.enabled() or not self.ui or not ges or not ges.pos then
-        return false
-    end
-    self:updateView()
+    local solid = require("utils.settings").get("features.xray").book_xray_mark_style == "solid"
+    local out = {}
     for _idx, mark in ipairs(self._marks) do
-        if hitScreenBox(ges.pos, mark.box) then
-            require("features.xray.ui").showEntity(mark.entity)
-            return true
-        end
+        out[#out + 1] = {
+            boxes = { mark.box },
+            solid = solid,
+            tap = function() require("features.xray.ui").showEntity(mark.entity) end,
+        }
     end
-    return false
-end
-
---- 实体点击必须先于全屏翻页区处理；未命中实体立即返回 false，继续原生翻页。
----@param ui table ReaderUI
-local function registerTouch(ui)
-    if ui._book_xray_marks_touch then
-        return
-    end
-    ui._book_xray_marks_touch = true
-    ui:registerTouchZones({ {
-        id = "book_xray_entity_tap",
-        ges = "tap",
-        screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
-        overrides = {
-            "tap_forward",
-            "tap_backward",
-            "readerfooter_tap",
-            "readermenu_tap",
-        },
-        handler = function(ges)
-            return Marks:onTap(ges)
-        end,
-    } })
+    return out
 end
 
 --- 往划词菜单加「X-Ray 查询」（只装一次）；总开关关闭时该项不显示。
@@ -483,10 +360,8 @@ function Marks.install(ui)
     ui._book_xray_marks = true
     resetMarks(Marks)
     Marks.ui = ui
-    if ui.view and ui.view.registerViewModule then
-        ui.view:registerViewModule("book_xray_marks", Marks)
-    end
-    registerTouch(ui)
+    -- 实体只占一个词，先于段评（priority 20）占位，长句段评在实体处让出。
+    PageMarks.add(ui, "xray", 10, Marks)
     registerHighlight(ui)
 end
 
