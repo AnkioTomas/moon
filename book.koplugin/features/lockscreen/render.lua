@@ -313,6 +313,8 @@ local function paintShape(bb, block, w, h, background)
     elseif block.kind == "image" then
         local image = ImageWidget:new{
             file = assert(block.file, "image block file required"),
+            -- 海报墙一次几十张封面；进全局 ImageCache 会挤掉阅读器 / 桌面的缓存，画完就没用了。
+            file_do_cache = false,
             width = width,
             height = block.height,
             scale_factor = block.scale_factor or 0,

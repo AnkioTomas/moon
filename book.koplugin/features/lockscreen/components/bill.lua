@@ -18,9 +18,6 @@ local M = {
     supports_narrow = false,
     supports_position = false,
     preferred_height = 0.90,
-    cache_key = function()
-        return MoonSettings.get("features.lockscreen").lock_screen_bill_period or "7d"
-    end,
 }
 
 local PERIODS = {
@@ -99,6 +96,16 @@ function M.data()
         summary = summary,
         books = books,
     }
+end
+
+--- 周期或周期内的阅读汇总变化才重画；账单上的打印时间随之更新。
+---@return string
+function M.cache_key()
+    local bill = M.data()
+    local summary = bill.summary
+    return table.concat({
+        bill.period, bill.start_ts, summary.total_seconds or 0, summary.pages or 0, summary.book_count or 0,
+    }, ":")
 end
 
 --- 将秒数转成账单卡片使用的短时长文案。

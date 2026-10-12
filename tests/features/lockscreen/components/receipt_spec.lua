@@ -25,10 +25,13 @@ package.preload["ffi/blitbuffer"] = function()
 end
 
 package.preload["features.lockscreen.components.current"] = function()
-    return { book = function(with_stats)
-        Assert.is_true(with_stats)
-        return current_book
-    end }
+    return {
+        book = function(with_stats)
+            Assert.is_true(with_stats)
+            return current_book
+        end,
+        cache_key = function() return "current" end,
+    }
 end
 
 package.preload["features.lockscreen.components.util"] = function()
@@ -76,10 +79,8 @@ end
 Assert.is_true(found_long_title)
 current_book.title = "测试书"
 
-local cache_key = Receipt.cache_key()
-current_book.page = 51
-Assert.is_true(Receipt.cache_key() ~= cache_key)
-current_book.page = 50
+Assert.eq(Receipt.cache_key, require("features.lockscreen.components.current").cache_key,
+    "票根与当前书共用一个缓存键")
 
 local blocks = Receipt.blocks({
     x = 20, y = 30, w = 500, h = 700,

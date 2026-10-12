@@ -4,6 +4,7 @@
 @module koplugin.book.features.lockscreen.compose
 --]]
 
+local lfs = require("libs/libkoreader-lfs")
 local Paths = require("utils.paths")
 local MoonSettings = require("utils.settings")
 local Background = require("features.lockscreen.background")
@@ -15,13 +16,19 @@ local COMPOSE_PATH = Paths.screensaverDir() .. "/compose.png"
 
 -- 组合图是可丢弃的派生文件；源资源和设置变化都会使它失效。
 
+--- 当前生效的主体；只读设置不碰盘，设置页判断能力位用它，别走 plan()。
+---@return table
+function M.component()
+    -- current 在注册表里必存在；assert 收窄 table|nil，注册表坏了直接炸。
+    return assert(Components.find(MoonSettings.get("features.lockscreen").lock_screen_component)
+        or Components.find("current"))
+end
+
 --- 解析一次当前组合计划；计划内的字段在本轮生成期间保持一致。
 ---@return table
 function M.plan()
     local settings = MoonSettings.get("features.lockscreen")
-    local id = settings.lock_screen_component
-    -- current 在注册表里必存在；assert 收窄 table|nil，注册表坏了直接炸。
-    local component = assert(Components.find(id) or Components.find("current"))
+    local component = M.component()
     local background_mode = settings.lock_screen_background or "bing"
     if not Background.validMode(background_mode) then background_mode = "bing" end
     local asset = component.asset
@@ -77,9 +84,10 @@ function M.cacheValid(plan, force)
     if force then
         return false
     end
+    -- compose.png 是本模块原子写出的（.part + rename），存在且非空即完整，不必整张解码。
     return MoonSettings.get("features.lockscreen").lock_screen_day == M.dayKey(plan)
         and Background.isFresh(plan.asset)
-        and (plan.asset.direct or Background.isValidImage(plan.output_path))
+        and (plan.asset.direct or (lfs.attributes(plan.output_path, "size") or 0) > 0)
 end
 
 --- 将主体声明的相对高度换算为像素高度。

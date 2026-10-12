@@ -15,6 +15,7 @@ local M = {
     full_screen = true,
     uses_background = false,
     asset = Background.background("cover"),
+    cache_key = require("features.lockscreen.components.current").cache_key,
 }
 
 ---@param rect table 全屏矩形

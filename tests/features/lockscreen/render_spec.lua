@@ -67,9 +67,11 @@ package.preload["ui/font"] = function()
     return { getFace = function() return {} end }
 end
 
+local image_cache_flag
 package.preload["ui/widget/imagewidget"] = function()
     return {
         new = function(_, opts)
+            image_cache_flag = opts.file_do_cache
             return {
                 paintTo = function() image_paints = image_paints + 1 end,
                 free = function() image_frees = image_frees + 1 end,
@@ -187,6 +189,7 @@ local ok_run, err_run = pcall(function()
     Assert.is_nil(err)
     Assert.eq(image_paints, 1)
     Assert.eq(image_frees, 1)
+    Assert.is_false(image_cache_flag, "封面等一次性大图不得进全局 ImageCache")
 
     -- 无框文字不得整块贴 TextBoxWidget 白底：黑字蒙版反相后按块颜色 colorblit。
     reset()

@@ -15,6 +15,8 @@ local M = {
     id = "highlight",
     label = _("阅读高亮"),
     layout = "quote",
+    -- 每次锁屏轮换一句：键每秒都变，等于不缓存。
+    cache_key = os.time,
 }
 
 --- 轮换一条当前书高亮，并生成章节/页码出处。

@@ -106,7 +106,16 @@ Assert.is_true(not Poster.validStyle("bogus"))
 
 -- 标准布局：4 列 2:3 对齐铺满，行数向上取整、上下均分溢出，书不够循环补位。
 conf.lock_screen_poster_style = "standard"
-Assert.eq(Poster.cache_key(), "standard")
+local poster_key = Poster.cache_key()
+Assert.matches(poster_key, "^standard:%x+$")
+Assert.eq(Poster.cache_key(), poster_key, "书单不变键就稳定")
+local saved_rows = db_rows
+db_rows = { saved_rows[2], saved_rows[1] }
+Assert.is_true(Poster.cache_key() ~= poster_key, "书单变了要重画")
+db_rows = saved_rows
+conf.lock_screen_poster_style = "vertical"
+Assert.is_true(Poster.cache_key() ~= poster_key, "换风格要重画")
+conf.lock_screen_poster_style = "standard"
 local std = placed(Poster.blocks({ x = 0, y = 0, w = 540, h = 720 }), "image")
 Assert.eq(#std, 16)
 Assert.eq(std[1].x, 0)
