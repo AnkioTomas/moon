@@ -249,4 +249,37 @@ o.runs[1].done({ ok = false })
 Assert.not_nil(o_done)
 connected = true
 
+-- 已结束历史：新的在前、带成败、取消的不记；同 key 只留最新；最多 10 条；不影响未结束快照。
+do
+    local history = Tasks.finished()
+    Assert.eq(history[1].key, "o2")
+    Assert.eq(history[1].state, "finished")
+    Assert.is_false(history[1].ok)
+    Assert.eq(history[2].key, "p1")
+    Assert.is_true(history[2].ok)
+    for _idx, item in ipairs(history) do
+        Assert.is_true(item.key ~= "c2" and item.key ~= "s2", "取消的不记")
+    end
+    history[1] = nil
+    Assert.eq(Tasks.finished()[1].key, "o2", "返回副本")
+    local again = Tasks.enqueue(spec("o2", "sync"))
+    again.runs[1].done({ ok = true })
+    history = Tasks.finished()
+    Assert.eq(history[1].key, "o2")
+    Assert.is_true(history[1].ok)
+    local count = 0
+    for _idx, item in ipairs(history) do
+        if item.key == "o2" then count = count + 1 end
+    end
+    Assert.eq(count, 1, "同 key 只留最新")
+    for i = 1, 12 do
+        Tasks.enqueue(spec("h" .. i, "sync")).runs[1].done({ ok = true })
+    end
+    history = Tasks.finished()
+    Assert.len(history, 10)
+    Assert.eq(history[1].key, "h12")
+    Assert.eq(history[10].key, "h3")
+    Assert.eq(#Tasks.tasks(), 0)
+end
+
 return true

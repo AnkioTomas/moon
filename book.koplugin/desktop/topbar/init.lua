@@ -102,11 +102,12 @@ local ITEMS = {
         watch = Tasks.watch,
         read = function()
             local tasks = Tasks.tasks()
-            local task = tasks[1]
-            if not task then return nil, "download" end
-            local text = TaskDialog.label(task.kind) .. " " .. TaskDialog.status(task, true)
-            if #tasks > 1 then text = text .. " +" .. tostring(#tasks - 1) end
-            return text, "download"
+            if #tasks == 0 then return _("空闲"), "download" end
+            local running = 0
+            for _idx, task in ipairs(tasks) do
+                if task.state == "running" then running = running + 1 end
+            end
+            return running .. "/" .. #tasks, "download"
         end,
         tap = function()
             TaskDialog:new{}:show()

@@ -200,6 +200,7 @@ require("workers.ui.task_dialog").start{
 
 `queued` → `running` → `finished`，旁路 `retry_wait`（退避）、`waiting`（等唤醒 / 网络）、`cancelled`。
 `Tasks.tasks()` 返回快照副本，顺序为运行 / 退避中 → 等网络 → 排队，同组按入队顺序；`Tasks.get(key)` 取未结束任务。
+`Tasks.finished()` 返回最近结束的 10 条快照（新的在前，同 key 只留最新，取消的不记；`ok` 表示成功），只供任务列表展示。
 
 ## 测试
 
