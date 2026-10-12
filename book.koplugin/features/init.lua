@@ -76,6 +76,7 @@ Features.list = {
     "dictionary",
     "baike",
     "lockscreen",
+    "passcode", -- 必须在 remote 之前：remote 的 onCreate / onResume 要看到已锁
     "ime",
     "remote",
     "update",

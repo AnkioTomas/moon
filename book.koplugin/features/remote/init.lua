@@ -962,30 +962,34 @@ function Remote.onCreate()
         logger.warn("book remote screenshot share onCreate failed:", err_share)
     end
     if Remote.autostartOn() then
-        require("ui/uimanager"):nextTick(function()
-            local ok, err = Remote.start()
-            if not ok then
-                logger.warn("book remote autostart failed:", err)
-            end
+        require("features.passcode").afterUnlock("remote", function()
+            require("ui/uimanager"):nextTick(require("ui.guard").wrap("remote autostart", function()
+                local ok, err = Remote.start()
+                if not ok then
+                    logger.warn("book remote autostart failed:", err)
+                end
+            end))
         end)
     end
 end
 
 --- 休眠：记下当前是否在跑再停服（睡眠中留着监听既没用又费电）。
+--- 锁着没解开时服务没起，但上次唤醒欠下的恢复还在，不能被 false 覆盖。
 function Remote.onSuspend()
-    Remote._resume = Remote.isRunning()
+    Remote._resume = Remote._resume or Remote.isRunning()
     Remote.stop()
 end
 
---- 唤醒：休眠前在跑、或开了自启，就重新起服。
+--- 唤醒：休眠前在跑、或开了自启，就在解锁后重新起服（锁屏密码锁着时局域网不能绕过它看文件）。
 function Remote.onResume()
-    if Remote._resume or Remote.autostartOn() then
+    if not (Remote._resume or Remote.autostartOn()) then return end
+    require("features.passcode").afterUnlock("remote", function()
         Remote._resume = false
         local ok, err = Remote.start()
         if not ok then
             logger.warn("book remote resume failed:", err)
         end
-    end
+    end)
 end
 
 --- 退出 KOReader：停服，避免残留监听与 iptables 规则。
