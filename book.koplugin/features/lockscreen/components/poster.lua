@@ -89,14 +89,19 @@ local function grid(shelf, cols, w, h)
 end
 
 -- 剪切按行/列整段 blit；blitFrom 自己裁掉两侧越界，源图外的部分保持 dst 白底。
+-- 偏移是实数：整数部分直接贴，小数部分 f 再把下一像素按 f 混进来（addblitFrom：dst·(1-f) + src·f），
+-- 即 Paeth 的线性插值剪切；只取整的话三次剪切后斜边全是阶梯锯齿。
 
 --- 水平剪切：dst(x, y) = src(x - k·y)，坐标以各自中心为原点。
 local function shearX(dst, ox, oy, dw, dh, src, k)
     local sw, sh = src:getWidth(), src:getHeight()
     for row = 0, dh - 1 do
         local yc = row - dh / 2 + 0.5
-        dst:blitFrom(src, ox, oy + row,
-            math.floor(sw / 2 - dw / 2 - k * yc + 0.5), math.floor(sh / 2 + yc), dw, 1)
+        local offset = sw / 2 - dw / 2 - k * yc
+        local sx, f = math.floor(offset), offset % 1
+        local sy = math.floor(sh / 2 + yc)
+        dst:blitFrom(src, ox, oy + row, sx, sy, dw, 1)
+        if f > 0 then dst:addblitFrom(src, ox, oy + row, sx + 1, sy, dw, 1, f) end
     end
 end
 
@@ -105,8 +110,10 @@ local function shearY(dst, ox, oy, dw, dh, src, k)
     local sw, sh = src:getWidth(), src:getHeight()
     for col = 0, dw - 1 do
         local xc = col - dw / 2 + 0.5
-        dst:blitFrom(src, ox + col, oy,
-            math.floor(sw / 2 + xc), math.floor(sh / 2 - dh / 2 - k * xc + 0.5), 1, dh)
+        local offset = sh / 2 - dh / 2 - k * xc
+        local sx, sy, f = math.floor(sw / 2 + xc), math.floor(offset), offset % 1
+        dst:blitFrom(src, ox + col, oy, sx, sy, 1, dh)
+        if f > 0 then dst:addblitFrom(src, ox + col, oy, sx, sy + 1, 1, dh, f) end
     end
 end
 

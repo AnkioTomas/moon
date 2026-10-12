@@ -52,6 +52,17 @@ function BlitBuffer:fill(color) end
 ---@param ... any
 function BlitBuffer:blitFrom(src, ...) end
 
+--- 按 intensity 混合贴图：dst·(1-intensity) + src·intensity。
+---@param src BlitBuffer
+---@param dest_x number
+---@param dest_y number
+---@param offs_x number
+---@param offs_y number
+---@param width number
+---@param height number
+---@param intensity number 0..1
+function BlitBuffer:addblitFrom(src, dest_x, dest_y, offs_x, offs_y, width, height, intensity) end
+
 ---@return BlitBuffer
 function BlitBuffer:copy() end
 
