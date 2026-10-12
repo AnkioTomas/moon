@@ -57,11 +57,6 @@ local dialogs = 0
 package.preload["workers.ui.task_dialog"] = function()
     return {
         new = function(self) return setmetatable({}, { __index = { show = function() dialogs = dialogs + 1 end } }) end,
-        label = function(kind) return ({ cache = "缓存", sync = "同步书架" })[kind] end,
-        status = function(t, brief)
-            Assert.is_true(brief, "顶栏只用简短状态")
-            return t.status
-        end,
     }
 end
 local task, extra, watch_cb, watch_cancels = nil, {}, nil, 0
@@ -69,7 +64,7 @@ package.preload["workers.tasks"] = function()
     return {
         tasks = function()
             local out = { task }
-            for _, t in ipairs(extra) do out[#out + 1] = t end
+            for _idx, t in ipairs(extra) do out[#out + 1] = t end
             return out
         end,
         watch = function(cb)
@@ -98,9 +93,9 @@ local function has(part) return texts():find(part, 1, true) ~= nil end
 
 Assert.eq(TopBar.height(), Theme.px(Theme.current().control.height))
 
-do -- 全部打开：左时钟 / 源，右内存 / 后台任务 / 存储 / Wi‑Fi / 亮度 / 电量；无任务时后台任务只有图标
+do -- 全部打开：左时钟 / 源，右内存 / 后台任务 / 存储 / Wi‑Fi / 亮度 / 电量；无任务时后台任务显示空闲
     desktop:updateTopbar()
-    Assert.eq(texts(), "1:23 PM|source|书库|memory|0.3 GB|download|hard_drive|10.0 GB|wifi_off|brightness_6|37%|battery_android_full|100%")
+    Assert.eq(texts(), "1:23 PM|source|书库|memory|0.3 GB|download|空闲|hard_drive|10.0 GB|wifi_off|brightness_6|37%|battery_android_full|100%")
 end
 
 do -- 点按：源名换源；其余位置开快捷面板（整条是外层点击区）
@@ -115,23 +110,23 @@ do -- 点按：源名换源；其余位置开快捷面板（整条是外层点�
     Assert.eq(panels[1], "desktop")
 end
 
-do -- 后台任务：类型名 + 简短状态，多个任务追加 +N；点按开任务列表
-    task = { kind = "cache", status = "34/35" }
+do -- 后台任务：执行中数量 / 未结束总数；点按开任务列表
+    task = { kind = "cache", state = "running" }
     desktop:updateTopbar()
-    Assert.is_true(has("download|缓存 34/35|hard_drive"))
+    Assert.is_true(has("download|1/1|hard_drive"))
     Assert.len(Kit.taps(desktop.root), 3)
     Kit.taps(desktop.root)[3]:onTapThemeArea()
     Assert.eq(dialogs, 1)
     local Cache = TopBar.find("cache")
-    task = { kind = "sync", status = "等待网络" }
-    Assert.eq(Cache.read(), "同步书架 等待网络")
-    extra = { { kind = "cache" }, { kind = "cache" } }
-    Assert.eq(Cache.read(), "同步书架 等待网络 +2")
+    task = { kind = "sync", state = "waiting" }
+    Assert.eq(Cache.read(), "0/1")
+    extra = { { kind = "sync", state = "running" }, { kind = "cache", state = "retry_wait" }, { kind = "cache", state = "queued" } }
+    Assert.eq(Cache.read(), "1/4", "退避 / 等网络 / 排队不算执行中")
     extra = {}
     task = nil
     local text, icon = Cache.read()
-    Assert.is_nil(text)
-    Assert.eq(icon, "download", "没有任务也常驻图标，点开看空列表")
+    Assert.eq(text, "空闲")
+    Assert.eq(icon, "download")
 end
 
 do -- 电量档位：放电 0..6 / full，充电分档，越界钳制（图标与文字同值）
@@ -164,7 +159,7 @@ do -- 用户关掉的项不画、不留点击区；读不到的项（存储）�
     Kit.sections.desktop.home_topbar_items = { source = false, memory = false, battery = false }
     avail_disk = nil
     desktop:updateTopbar()
-    Assert.eq(texts(), "1:23 PM|download|wifi_off|brightness_6|37%")
+    Assert.eq(texts(), "1:23 PM|download|空闲|wifi_off|brightness_6|37%")
     Assert.len(Kit.taps(desktop.root), 2, "外层整条 + 后台任务")
     Kit.sections.desktop.home_topbar_items = nil
     avail_disk = 10 * 1000 * 1000 * 1000
@@ -192,10 +187,10 @@ do -- 心跳：读数变了才换顶栏，并续约下一跳
     tick.fn()
     Assert.eq(swaps, 1)
     Assert.is_true(has("80%"))
-    task = { kind = "cache", status = "1/10" }
+    task = { kind = "cache", state = "running" }
     watch_cb()
     Assert.eq(swaps, 2)
-    Assert.is_true(has("缓存 1/10"))
+    Assert.is_true(has("download|1/1"))
     task = nil
 end
 

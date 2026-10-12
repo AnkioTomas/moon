@@ -71,7 +71,7 @@ local TaskDialog = require("workers.ui.task_dialog")
 local tasks = TaskDialog:new{}
 assertModal(tasks)
 tasks:paintTo(Kit.canvas(), 0, 0)
-local size = tasks.frame:getSize()
+local size = tasks[1]:getSize()
 Assert.eq(tasks.panel_x, math.floor((Kit.SCREEN_W - size.w) / 2), "面板水平居中")
 Assert.eq(tasks.panel_y, math.floor((Kit.SCREEN_H - size.h) / 2), "面板垂直居中")
 Assert.is_true(tasks:handleEvent({ handler = "onTapModal", args = { nil, Kit.tap(1, 1) } }))

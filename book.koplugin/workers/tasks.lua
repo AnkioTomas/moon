@@ -57,10 +57,13 @@ local Tasks = {}
 local MAX_ATTEMPTS = 3
 local RETRY_DELAY_SECONDS = 15
 local MAX_PENDING = 64
+local MAX_FINISHED = 10
 local KINDS = { download = true, sync = true, cache = true, online = true }
 
 ---@type BookTask[] 未结束任务，入队顺序
 local list = {}
+--- 最近结束（非取消）的任务快照，新的在前；同 key 只留最新一条。
+local finished = {}
 ---@type table<string, BookTask>
 local by_key = {}
 local watchers = {}
@@ -91,6 +94,32 @@ local function remove(task)
         end
     end
     by_key[task.key] = nil
+end
+
+---@param task BookTask
+---@return table
+local function snapshot(task)
+    return {
+        key = task.key,
+        kind = task.kind,
+        title = task.title,
+        state = task.state,
+        text = task.text,
+        count = task.count,
+        total = task.total,
+        attempt = task.attempt,
+        restartable = task.restartable == true,
+        ok = task.result and task.result.ok == true,
+    }
+end
+
+---@param task BookTask
+local function archive(task)
+    for i = #finished, 1, -1 do
+        if finished[i].key == task.key then table.remove(finished, i) end
+    end
+    table.insert(finished, 1, snapshot(task))
+    finished[MAX_FINISHED + 1] = nil
 end
 
 --- 占着执行权的类型：有 running / retry_wait 任务时为其类型。
@@ -162,6 +191,7 @@ local function settle(task, result)
     task.done = true
     task.result = result
     remove(task)
+    archive(task)
     if task.on_done then task.on_done(result) end
     changed()
     startNext()
@@ -277,22 +307,16 @@ function Tasks.tasks()
     local out = {}
     for group = 1, 3 do
         for _idx, task in ipairs(list) do
-            if ORDER[task.state] == group then
-                out[#out + 1] = {
-                    key = task.key,
-                    kind = task.kind,
-                    title = task.title,
-                    state = task.state,
-                    text = task.text,
-                    count = task.count,
-                    total = task.total,
-                    attempt = task.attempt,
-                    restartable = task.restartable == true,
-                }
-            end
+            if ORDER[task.state] == group then out[#out + 1] = snapshot(task) end
         end
     end
     return out
+end
+
+--- 最近结束的任务（最多 10 条，新的在前，取消的不算）；state 为 finished，ok 表示成功。返回副本。
+---@return table[]
+function Tasks.finished()
+    return { unpack(finished) }
 end
 
 --- 订阅状态改变。返回的 cancel 只注销观察者，绝不影响任务。

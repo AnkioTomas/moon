@@ -1,5 +1,6 @@
 --[[--
-后台任务列表弹窗：随队列原地刷新、尺寸变化才刷下层、只能取消可重跑的任务、关窗注销订阅。
+后台任务列表弹窗：主题弹窗，每条任务「任务名 / 进度描述 / 进度条 + 右侧状态」，按屏高分页；
+随队列刷新、只能取消可重跑的未结束任务、最近结束的标已完成 / 失败、关窗注销订阅。
 前台跟随：进度随队列刷新、任务结束自动关窗、可重跑才有取消、转后台后等网络提示一次。
 start：同 key 执行中拒绝提示、排队中替换并关掉旧窗。
 
@@ -8,96 +9,20 @@ start：同 key 执行中拒绝提示、排队中替换并关掉旧窗。
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
+local Kit = require("support.widget_stubs")
+Kit.install("paper")
 local Themed = require("support.theme_stubs")
 Themed.install()
 
-package.preload["l10n"] = function() return { apply = function() end } end
-package.preload["gettext"] = function() return function(s) return s end end
-package.preload["ffi/util"] = function()
-    return {
-        template = function(s, ...)
-            local args = { ... }
-            return (s:gsub("%%(%d)", function(i) return tostring(args[tonumber(i)]) end))
-        end,
-    }
-end
 local connected = true
 package.preload["ui/network/manager"] = function()
     return { isConnected = function() return connected end }
 end
 
-local Rect = {}
-Rect.__index = Rect
-function Rect:copy() return setmetatable({ x = self.x, y = self.y, w = self.w, h = self.h }, Rect) end
-function Rect:combine(o) return setmetatable({ x = 0, y = 0, w = math.max(self.w, o.w), h = self.h + o.h }, Rect) end
-function Rect:intersectWith(o)
-    return self.x >= o.x and self.x <= o.x + o.w and self.y >= o.y and self.y <= o.y + o.h
-end
-package.preload["ui/geometry"] = function()
-    return { new = function(_, o) return setmetatable(o, Rect) end }
-end
-package.preload["device"] = function()
-    return {
-        screen = {
-            getSize = function() return setmetatable({ x = 0, y = 0, w = 600, h = 800 }, Rect) end,
-            getWidth = function() return 600 end,
-            getHeight = function() return 800 end,
-            scaleBySize = function(_, v) return v end,
-        },
-        hasKeys = function() return false end,
-        isTouchDevice = function() return true end,
-    }
-end
-package.preload["ui/gesturerange"] = function() return { new = function(_, o) return o end } end
-
---- 叶子控件：固定高度。
-local function leaf(h)
-    return function()
-        return { new = function(_, o) o.getSize = function() return { w = 10, h = h } end; return o end }
-    end
-end
-package.preload["ui/widget/horizontalspan"] = leaf(0)
-package.preload["ui/widget/verticalspan"] = leaf(2)
---- 容器：高度为子控件之和。
-local function box()
-    return {
-        new = function(_, o)
-            o.getSize = function(self)
-                local h = 0
-                for _, child in ipairs(self) do h = h + child:getSize().h end
-                return { w = 10, h = h }
-            end
-            return o
-        end,
-    }
-end
-package.preload["ui/widget/verticalgroup"] = box
-package.preload["ui.themes.widgets.box"] = box
-package.preload["ui.themes.widgets.progress"] = leaf(5)
-package.preload["ui.themes.widgets.text"] = function()
-    return { line = function(_, text) return { text = text, getSize = function() return { w = 10, h = 10 } end } end }
-end
-package.preload["ui.themes"] = function()
-    return {
-        px = function(v) return v end,
-        current = function() return { space = { xs = 2, sm = 4, lg = 8 }, dialog = {} } end,
-    }
-end
-require("support.modal_stub").install()
-
-local scheduled, dirty, shown, closed = {}, {}, {}, {}
-package.preload["ui/uimanager"] = function()
-    return {
-        scheduleIn = function(_, _, fn) scheduled[#scheduled + 1] = fn end,
-        setDirty = function(_, widget, fn) dirty[#dirty + 1] = { widget = widget, fn = fn } end,
-        show = function(_, w) shown[#shown + 1] = w end,
-        close = function(_, w) closed[#closed + 1] = w end,
-    }
-end
 local function flush()
-    local fns = scheduled
-    scheduled = {}
-    for _, fn in ipairs(fns) do fn() end
+    local fns = Kit.scheduled
+    Kit.scheduled = {}
+    for _, item in ipairs(fns) do item.fn() end
 end
 
 local Tasks = require("workers.tasks")
@@ -111,47 +36,47 @@ local function spec(key, restartable)
         end,
     }
 end
+local TaskDialog = require("workers.ui.task_dialog")
+local Progress = require("ui.themes.widgets.progress")
+
+local function texts(dialog) return table.concat(Kit.texts(dialog), "|") end
+local function bars(dialog)
+    return Kit.find(dialog, function(w) return getmetatable(w) == Progress end)
+end
+
+-- 空队列且没有历史：标题 + 占位。
+local empty = TaskDialog:new{}
+Assert.eq(texts(empty), "后台任务|当前没有后台任务")
+Assert.len(Kit.taps(empty), 0)
+empty:onCloseWidget()
+
 Tasks.enqueue(spec("a", true))
 Tasks.enqueue(spec("b", false))
 flush()
 
-local TaskDialog = require("workers.ui.task_dialog")
+-- 一条一项：任务名、进度描述（没有时留空行）、进度条，右侧状态；可重跑的才有点击区。
 local dialog = TaskDialog:new{}
 dialog:show()
-Assert.eq(shown[#shown], dialog)
-Assert.eq(#dialog.rows, 2)
-Assert.eq(dialog.rows[1].title, "书a")
-Assert.is_true(dialog.rows[1].restartable)
-Assert.is_false(dialog.rows[2].restartable)
-local status = dialog.rows[1].frame[1][3].text
-Assert.eq(status, "缓存 · 进行中")
+Assert.eq(Kit.shown[#Kit.shown], dialog)
+Assert.eq(texts(dialog), "后台任务|缓存：书a| |进行中|缓存：书b| |进行中")
+Assert.len(bars(dialog), 2)
+Assert.eq(bars(dialog)[1].percent, 0)
+Assert.eq(bars(dialog)[1].width, dialog.inner, "进度条通栏，延伸到状态下方")
+local status_lines = Kit.find(dialog, function(w)
+    return w.align == "center" and #w == 3 and Kit.texts(w)[#Kit.texts(w)] == "进行中"
+end)
+Assert.eq(status_lines[1]:getSize().w, dialog.inner, "左栏定宽，状态贴最右")
+Assert.len(Kit.taps(dialog), 1, "不可重跑的不能点")
 
--- 出现进度条：高度变了，连同旧区域刷下层。
-dialog.frame.dimen = setmetatable({ x = 0, y = 0, w = 100, h = dialog.frame:getSize().h }, Rect)
+-- 进度：描述 = 步骤 + 计数，进度条按 count/total。
 runs.a.report("第 3 章", 3, 10)
 flush()
-Assert.eq(dirty[#dirty].widget, "all")
-Assert.eq(dialog.rows[1].frame[1][3].text, "缓存 · 第 3 章 3/10")
-Assert.eq(#dialog.rows[1].frame[1], 5, "有 total 才画进度条")
+Assert.eq(texts(dialog), "后台任务|缓存：书a|第 3 章 3/10|进行中|缓存：书b| |进行中")
+Assert.eq(bars(dialog)[1].percent, 30)
+Assert.eq(Kit.dirty[#Kit.dirty].widget, dialog, "高度没变只刷弹窗")
 
--- 只是进度前进：尺寸不变，只刷弹窗原区域。
-dialog.frame.dimen = setmetatable({ x = 0, y = 0, w = 100, h = dialog.frame:getSize().h }, Rect)
-runs.a.report("第 4 章", 4, 10)
-flush()
-Assert.eq(dirty[#dirty].widget, dialog)
-local mode = dirty[#dirty].fn()
-Assert.eq(mode, "fast")
-
--- 点不可重跑的任务行：不询问。
-dialog.rows[1].frame.dimen = setmetatable({ x = 0, y = 0, w = 100, h = 30 }, Rect)
-dialog.rows[2].frame.dimen = setmetatable({ x = 0, y = 40, w = 100, h = 30 }, Rect)
-local confirms = #Themed.all("confirm")
-Assert.is_true(dialog:onTapModal(nil, { pos = setmetatable({ x = 5, y = 50, w = 0, h = 0 }, Rect) }))
-Assert.eq(#Themed.all("confirm"), confirms)
-Assert.eq(#closed, 0)
-
--- 点可重跑的任务行：确认后取消任务，弹窗随队列刷新。
-Assert.is_true(dialog:onTapModal(nil, { pos = setmetatable({ x = 5, y = 5, w = 0, h = 0 }, Rect) }))
+-- 点可重跑的任务：确认后取消，列表随队列刷新；取消的不进历史；面板变矮重画整屏。
+Kit.taps(dialog)[1]:onTapThemeArea()
 local confirm = Themed.last("confirm")
 Assert.is_true(confirm.shown)
 Assert.eq(confirm.text, "取消任务「书a」？")
@@ -159,25 +84,51 @@ confirm.ok_callback()
 Assert.is_true(runs.a.cancelled)
 Assert.is_nil(Tasks.get("a"))
 flush()
-Assert.eq(#dialog.rows, 1)
+Assert.eq(texts(dialog), "后台任务|缓存：书b| |进行中")
+Assert.eq(Kit.dirty[#Kit.dirty].widget, "all")
 
--- 点空白收起；关窗注销订阅，之后队列变化不再重建。
-Assert.is_true(dialog:onTapModal(nil, { pos = setmetatable({ x = 500, y = 700, w = 0, h = 0 }, Rect) }))
-Assert.eq(closed[#closed], dialog)
-dialog:onCloseWidget()
-Assert.is_nil(dialog.watch)
-local frame = dialog.frame
+-- 完成：标已完成，进度条满，不能点。
 runs.b.done({ ok = true })
 flush()
-Assert.eq(dialog.frame, frame)
+Assert.eq(texts(dialog), "后台任务|缓存：书b| |已完成")
+Assert.eq(bars(dialog)[1].percent, 100)
+Assert.len(Kit.taps(dialog), 0)
 
--- 空队列：显示占位文案。
-local empty = TaskDialog:new{}
-Assert.eq(#empty.rows, 0)
-Assert.eq(empty.frame[1][4].text, "当前没有后台任务")
-empty:onCloseWidget()
+-- 关窗注销订阅，之后队列变化不再重建。
+dialog:onCloseWidget()
+local panel = dialog[1]
+Tasks.enqueue(spec("z", false))
+flush()
+Assert.eq(dialog[1], panel)
+runs.z.done({ ok = false })
+flush()
 
--- 共用文案：download 按字节，其余按条数；brief 省掉步骤文案。
+-- 分页：未结束在前、结束的在后（新的在前）；按屏高定页长，翻页条 / 左右滑翻页，末页补齐高度。
+for i = 1, 20 do Tasks.enqueue(spec("p" .. i, false)) end
+flush()
+local paged = TaskDialog:new{}
+local per = paged.per_page
+Assert.is_true(per > 1 and per < 20, "页长按屏高：" .. per)
+local first = Kit.texts(paged)
+Assert.eq(first[2], "缓存：书p1")
+Assert.contains(first, "1 / " .. math.ceil(22 / per))
+local height = paged[1]:getSize().h
+Assert.is_true(paged:onSwipeTasks(nil, { direction = "west" }))
+Assert.eq(paged.page, 2)
+Assert.eq(Kit.texts(paged)[2], "缓存：书p" .. (per + 1))
+Assert.is_false(paged:onSwipeTasks(nil, { direction = "north" }))
+paged:goPage(99)
+local pages = math.ceil(22 / per)
+Assert.eq(paged.page, pages, "越界夹到末页")
+local last = Kit.texts(paged)
+Assert.eq(last[#last - 6], "失败", "末页尾部是历史：z 失败在前")
+Assert.eq(last[#last - 3], "已完成", "末尾是翻页条：图标 + 页码 + 图标")
+Assert.eq(paged[1]:getSize().h, height, "末页补齐，翻页不跳")
+paged:onCloseWidget()
+for i = 1, 20 do runs["p" .. i].done({ ok = true }) end
+flush()
+
+-- 共用文案：download 按字节，其余按条数。
 Assert.eq(TaskDialog.label("sync"), "同步书架")
 Assert.eq(TaskDialog.label("online"), "在线")
 local snap = { kind = "download", state = "running", count = 1048576, total = 4 * 1048576, attempt = 1 }
@@ -186,12 +137,14 @@ snap.total = 0
 Assert.eq(TaskDialog.status(snap), "1.0 MB")
 snap = { kind = "sync", state = "running", text = "正在上传 a.epub", count = 1, total = 3, attempt = 1 }
 Assert.eq(TaskDialog.status(snap), "正在上传 a.epub 1/3")
-Assert.eq(TaskDialog.status(snap, true), "1/3")
 snap.state = "retry_wait"
 Assert.eq(TaskDialog.status(snap), "第 1 次失败，稍后重试")
-Assert.eq(TaskDialog.status(snap, true), "稍后重试")
 snap.state = "queued"
 Assert.eq(TaskDialog.status(snap), "排队中")
+snap = { kind = "cache", state = "finished", ok = true }
+Assert.eq(TaskDialog.status(snap), "已完成")
+snap.ok = false
+Assert.eq(TaskDialog.status(snap), "失败")
 
 -- 前台跟随：弹进度窗并随队列刷新；可重跑的有「取消」；任务完成自动关窗、不再更新。
 local f = Tasks.enqueue(spec("f", true))
