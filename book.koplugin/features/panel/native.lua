@@ -19,7 +19,8 @@ local NativeSettings = require("features.panel.native_settings")
 
 ---@class BookQuickPanelNative
 ---@field show fun(mode: "desktop"|"reader"): boolean
----@field install fun(host_ui: table|nil, opts: table|nil)
+---@field onCreate fun(host_ui: table|nil, opts: table|nil)
+---@field closeToDesktop fun(ui: table|nil)
 
 local Native = {}
 
@@ -77,7 +78,7 @@ end
 --- 顶部菜单抽屉（文件浏览器）图标是否改开月读桌面：启动项为月读且设置未关闭。
 ---@return boolean
 local function drawerOpensDesktop()
-    return require("menu").openOnStart() and require("utils.settings").get("desktop").drawer_opens_desktop == true
+    return require("menu").openOnStart() and MoonSettings.get("desktop").drawer_opens_desktop == true
 end
 
 --- 下一 tick 关闭文档并回到月读桌面，而不是 KOReader 原生文件管理器。
@@ -140,8 +141,8 @@ local function buildPanel(menu, W)
             tab._book_panel_editing = false
             Menu.refresh(menu)
         end,
-        on_move = function(id, delta)
-            panel.move(id, delta)
+        on_move = function(id, other_id)
+            panel.swap(id, other_id)
             Menu.refresh(menu)
         end,
         on_disable = function(id)

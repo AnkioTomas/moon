@@ -9,6 +9,9 @@ local Registry = require("features.panel.actions.registry")
 ---@field ids fun(): string[]
 ---@field setEnabled fun(id: string, enabled: boolean)
 ---@field move fun(id: string, delta: number)
+---@field swap fun(a: string, b: string)
+---@field actions fun(ctx: BookQuickPanelContext): BookQuickPanelMenuItem[]
+---@field execute fun(id: string, ctx: BookQuickPanelContext, opts: BookQuickPanelExecuteOpts|nil): boolean
 ---@field options fun(): BookQuickPanelOption[]
 
 --- 设置页没有 ReaderUI：可用性一律按 ctx.ui = nil 判断。
@@ -78,6 +81,55 @@ local function create(scope, settings_key, order_fn)
         end
     end
 
+    --- 按 id 互换两项。面板编辑只看得见可用项，邻居必须由调用方按可见顺序给出，
+    --- 不能用 move：完整列表里夹着当前不可用的项，±1 会换到看不见的位置上。
+    ---@param a string
+    ---@param b string
+    local function swap(a, b)
+        local current = ids()
+        local i, j
+        for k, current_id in ipairs(current) do
+            if current_id == a then i = k elseif current_id == b then j = k end
+        end
+        if not i or not j then return end
+        current[i], current[j] = current[j], current[i]
+        save(current)
+    end
+
+    --- 面板按钮：启用且当前可用的动作，带激活态。
+    ---@param ctx BookQuickPanelContext
+    ---@return BookQuickPanelMenuItem[]
+    local function actions(ctx)
+        local result = {}
+        for _idx, id in ipairs(ids()) do
+            local action = Registry.get(id)
+            if Registry.available(action, ctx) then
+                ---@cast action BookQuickPanelAction
+                local active = Registry.active(action, ctx)
+                result[#result + 1] = {
+                    id = id,
+                    title = action.title,
+                    icon = active and action.active_icon or action.icon,
+                    active = active,
+                }
+            end
+        end
+        return result
+    end
+
+    --- 执行动作；未注册或当前不可用返回 false。
+    ---@param id string
+    ---@param ctx BookQuickPanelContext
+    ---@param opts BookQuickPanelExecuteOpts|nil
+    ---@return boolean
+    local function execute(id, ctx, opts)
+        local action = Registry.get(id)
+        if not Registry.available(action, ctx) then return false end
+        ---@cast action BookQuickPanelAction
+        Registry.execute(action, ctx, opts)
+        return true
+    end
+
     ---@return BookQuickPanelOption[]
     local function options()
         local enabled = {}
@@ -106,6 +158,9 @@ local function create(scope, settings_key, order_fn)
         ids = ids,
         setEnabled = setEnabled,
         move = move,
+        swap = swap,
+        actions = actions,
+        execute = execute,
         options = options,
     }
 end

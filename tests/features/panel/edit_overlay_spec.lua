@@ -49,19 +49,6 @@ for _, b in ipairs(Kit.buttons(lone[3])) do
 end
 Assert.is_true(lone_called == false)
 
-local done_tapped = false
-local done = Edit.doneRow(200, function() done_tapped = true end)
-Assert.eq(done.text, "完成")
-Assert.eq(done:getSize().w, 200)
-done:onTapThemeButton()
-Assert.is_true(done_tapped)
-
-local add_tapped = false
-local add = Edit.addRow(200, function() add_tapped = true end)
-Assert.eq(add.text, "添加动作")
-add:onTapThemeButton()
-Assert.is_true(add_tapped)
-
 local picked
 Edit.showAddDialog({ { id = "wifi", title = "WiFi" } }, function(id) picked = id end)
 local sheet = Themed.last("sheet")

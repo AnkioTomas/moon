@@ -74,8 +74,8 @@ end
 
 local QuickPanel = require("features.panel.settings")
 local desktop = { updateView = function() end }
-local desktop_rows = QuickPanel.desktopRows(desktop)
-local reader_rows = QuickPanel.readerRows(desktop)
+local desktop_rows = QuickPanel.rows("desktop", desktop)
+local reader_rows = QuickPanel.rows("reader", desktop)
 
 Assert.len(desktop_rows, 2)
 Assert.len(reader_rows, 1)
@@ -108,5 +108,5 @@ Assert.eq(built.title, "目录")
 Assert.eq(built.status, "第 1 位")
 Assert.is_true(built.chevron)
 
-Assert.eq(QuickPanel.desktopEnabledCount(), 1)
-Assert.eq(QuickPanel.readerEnabledCount(), 1)
+Assert.eq(QuickPanel.enabledCount("desktop"), 1)
+Assert.eq(QuickPanel.enabledCount("reader"), 1)

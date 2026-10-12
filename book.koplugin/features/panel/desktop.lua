@@ -20,6 +20,7 @@ local Registry = require("features.panel.actions.registry")
 ---@field enabledCount fun(): number
 ---@field setEnabled fun(id: string, enabled: boolean)
 ---@field move fun(id: string, delta: number)
+---@field swap fun(a: string, b: string)
 ---@field sliders fun(): BookQuickPanelSlider[]
 ---@field menuActions fun(): BookQuickPanelMenuItem[]
 ---@field executeAction fun(id: string, opts: BookQuickPanelExecuteOpts|nil): boolean
@@ -81,20 +82,16 @@ function Panel.lightPercent(kind)
     return percent(powerd:frontlightWarmth(), 0, 100)
 end
 
---- 生成快捷面板设置页动作列表。
----@return BookQuickPanelOption[]
-function Panel.options()
-    return list.options()
-end
-
 --- 当前启用的桌面动作数量。
 ---@return number
 function Panel.enabledCount()
     return #list.ids()
 end
 
+Panel.options = list.options
 Panel.setEnabled = list.setEnabled
 Panel.move = list.move
+Panel.swap = list.swap
 
 --- 生成快捷面板灯光滑杆；按设备能力过滤。
 ---@return BookQuickPanelSlider[]
@@ -112,19 +109,7 @@ end
 --- 生成原生菜单里的桌面动作按钮。
 ---@return BookQuickPanelMenuItem[]
 function Panel.menuActions()
-    local actions = {}
-    for _idx, id in ipairs(list.ids()) do
-        local action = Registry.get(id)
-        if action and Registry.available(action) then
-            actions[#actions + 1] = {
-                id = id,
-                title = action.title,
-                icon = action.icon,
-                active = Registry.active(action),
-            }
-        end
-    end
-    return actions
+    return list.actions({})
 end
 
 --- 执行桌面动作；未注册或当前不可用返回 false。
@@ -132,11 +117,7 @@ end
 ---@param opts BookQuickPanelExecuteOpts|nil
 ---@return boolean
 function Panel.executeAction(id, opts)
-    local action = Registry.get(id)
-    if not Registry.available(action) then return false end
-    ---@cast action BookQuickPanelAction
-    Registry.execute(action, { ui = nil }, opts)
-    return true
+    return list.execute(id, {}, opts)
 end
 
 --- 设置亮度或暖色，并在设备不支持时返回 false。

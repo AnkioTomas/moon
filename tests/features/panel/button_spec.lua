@@ -118,16 +118,6 @@ Assert.eq(tile.height, 73)
 Assert.eq(tile[1].text, "夜间", "文字在块内")
 Assert.eq(tile[1].color, 255)
 
--- 禁用：图标变灰、文字用 disabled 色；点按被吞掉不触发动作。
-shape = "bare"
-local fired = false
-local disabled = button{ enabled = false, on_action = function() fired = true end }
-base, label = parts(disabled)
-Assert.is_true(base[1].dim)
-Assert.eq(label.opts.color, 170)
-Assert.is_true(disabled:onTap())
-Assert.is_false(fired)
-
 -- 点按执行、长按交给上层进入编辑。
 local tapped
 Assert.is_true(button{ on_action = function(id) tapped = id end }:onTap())

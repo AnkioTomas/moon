@@ -30,7 +30,6 @@ local BADGE_SIZE = { bare = 44, circle = 52 }
 ---@field title string
 ---@field icon string
 ---@field active boolean|nil
----@field enabled boolean|nil
 ---@field on_action fun(id: string)
 ---@field on_hold fun(): boolean|nil
 
@@ -54,9 +53,8 @@ end
 ---@param self BookQuickPanelActionButton
 ---@param t table
 ---@param v table
----@param enabled boolean
 ---@return table
-local function block(self, t, v, enabled)
+local function block(self, t, v)
     local style = surface(t, v, t.card.radius)
     style.shadow, style.shadow_color = t.card.shadow, t.card.shadow_color
     local shadow = Theme.px(t.card.shadow)
@@ -73,7 +71,6 @@ local function block(self, t, v, enabled)
             font_size = t.font.caption,
             max_width = math.max(Theme.px(36), self.width - Theme.px(t.space.sm)),
             gap = Theme.px(2),
-            dim = not enabled,
         },
     }
 end
@@ -82,11 +79,10 @@ end
 ---@param self BookQuickPanelActionButton
 ---@param t table
 ---@param v table
----@param enabled boolean
 ---@param active boolean
 ---@param shape "bare"|"circle"
 ---@return table
-local function badge(self, t, v, enabled, active, shape)
+local function badge(self, t, v, active, shape)
     local filled = shape == "circle" or active
     local style = filled and surface(t, v, shape == "circle" and 999 or t.control.radius) or {}
     local size = Theme.px(BADGE_SIZE[shape])
@@ -102,14 +98,10 @@ local function badge(self, t, v, enabled, active, shape)
                     name = self.icon,
                     size = t.control.icon,
                     color = Blitbuffer.Color8(filled and v.ink or t.color.ink),
-                    dim = not enabled,
                 },
             },
             VerticalSpan:new{ width = Theme.px(t.space.xs) },
-            Text.line("caption", self.title, {
-                width = self.width,
-                color = enabled and t.color.ink or t.color.disabled,
-            }),
+            Text.line("caption", self.title, { width = self.width, color = t.color.ink }),
         },
     }
 end
@@ -122,23 +114,21 @@ function ActionButton:init()
         Tap = { GestureRange:new{ ges = "tap", range = self.dimen } },
         Hold = { GestureRange:new{ ges = "hold", range = self.dimen } },
     }
-    local enabled = self.enabled ~= false
-    local active = enabled and self.active == true
+    local active = self.active == true
     local t = Theme.current()
     local v = active and t.button.primary or t.button.normal
     local shape = t.tile.shape
     if shape == "block" then
-        self[1] = block(self, t, v, enabled)
+        self[1] = block(self, t, v)
     else
-        self[1] = badge(self, t, v, enabled, active, shape)
+        self[1] = badge(self, t, v, active, shape)
     end
 end
 
---- 处理按钮点击；禁用时吞掉事件，不触发动作。
+--- 处理按钮点击。
 ---@param self BookQuickPanelActionButton 当前视图或布局实例
 ---@return boolean
 function ActionButton:onTap()
-    if self.enabled == false then return true end
     self.on_action(self.id)
     return true
 end
