@@ -190,23 +190,22 @@ end
 -- ── 连接生命周期 ─────────────────────────────────────
 
 --- 标记连接死亡并释放其占用：socket、正在写的文件、未移交的上传临时文件。
---- 关闭动作全部 pcall：kill 常在异常路径调用，二次错误会盖掉真实原因。
 ---@param conn table
 function Server:_kill(conn)
     conn.dead = true
-    pcall(function() conn.sock:close() end)
+    conn.sock:close()
     if conn.file then
-        pcall(function() conn.file:close() end)
+        conn.file:close()
         conn.file = nil
     end
     -- 下载中途断开（浏览器点取消、超时回收）时 body_file 还开着：
     -- 不关就是每次一个 fd，几十次下载后 accept 直接 EMFILE。
     if conn.body_file then
-        pcall(function() conn.body_file:close() end)
+        conn.body_file:close()
         conn.body_file = nil
     end
     if conn.temp then
-        pcall(os.remove, conn.temp)
+        os.remove(conn.temp)
         conn.temp = nil
     end
 end
@@ -220,7 +219,7 @@ function Server:_accept()
         end
         if #self._conns >= MAX_CONNS then
             logger.warn("book remote too many connections, dropping", #self._conns)
-            pcall(function() client:close() end)
+            client:close()
             return
         end
         client:settimeout(0)
@@ -318,6 +317,45 @@ function Server:_readHeaders(conn)
     conn.buf = conn.buf:sub(split + 4) -- 残留字节属于 body
     self:_route(conn, head)
     return true
+end
+
+-- ── 页面与静态资源 ─────────────────────────────────────
+
+-- 一切页面资源都是静态路由（不注入模板）；实例配置走 /api/config。
+local HTML_DIR = (debug.getinfo(1, "S").source:match("^@(.+)/[^/]+$") or ".") .. "/html"
+
+local ASSETS = {
+    ["/"] = { "index.html", "text/html; charset=utf-8" },
+    ["/index.html"] = { "index.html", "text/html; charset=utf-8" },
+    ["/file.html"] = { "file.html", "text/html; charset=utf-8" },
+    ["/input.html"] = { "input.html", "text/html; charset=utf-8" },
+    ["/clipboard.html"] = { "clipboard.html", "text/html; charset=utf-8" },
+    ["/settings.html"] = { "settings.html", "text/html; charset=utf-8" },
+    ["/logo.jpg"] = { "logo.jpg", "image/jpeg" },
+    ["/style.css"] = { "style.css", "text/css; charset=utf-8" },
+    ["/js.js"] = { "js.js", "application/javascript; charset=utf-8" },
+    ["/index.js"] = { "index.js", "application/javascript; charset=utf-8" },
+    ["/file.js"] = { "file.js", "application/javascript; charset=utf-8" },
+    ["/input.js"] = { "input.js", "application/javascript; charset=utf-8" },
+    ["/clipboard.js"] = { "clipboard.js", "application/javascript; charset=utf-8" },
+    ["/settings.js"] = { "settings.js", "application/javascript; charset=utf-8" },
+}
+
+local _asset_cache = {} ---@type table<string, string>
+
+--- 读静态资源（lazy 缓存，随插件安装不变）。读不到是打包缺文件，回 500 把原因亮出来。
+---@param name string
+---@return string|nil body
+---@return string|nil err
+local function readAsset(name)
+    local s = _asset_cache[name]
+    if s then return s end
+    local f, err = io.open(HTML_DIR .. "/" .. name, "rb")
+    if not f then return nil, err end
+    s = f:read("*all")
+    f:close()
+    _asset_cache[name] = s
+    return s
 end
 
 --- query 串 → 表（urlDecode 键值）
@@ -454,13 +492,16 @@ function Server:_route(conn, head)
     ---@cast path string
     local query = parseQuery(qs)
 
-    -- 静态页面/资源（GET）：index/file/input 三页 + css/js
-    local body, ctype = Server.asset(path)
-    if body then
+    local asset = ASSETS[path]
+    if asset then
         if method ~= "GET" then
             return self:_fail(conn, 405, "Method Not Allowed")
         end
-        return self:_queueResponse(conn, { code = 200, ctype = ctype, body = body })
+        local body, err = readAsset(asset[1])
+        if not body then
+            return self:_fail(conn, 500, err)
+        end
+        return self:_queueResponse(conn, { code = 200, ctype = asset[2], body = body })
     end
 
     if not hostIsLiteral(headers) then
@@ -488,9 +529,9 @@ function Server:_route(conn, head)
     elseif path == "/upload" then
         return self:_routeUpload(conn, method, headers, query.dir, query.name, query.conflict)
     elseif path == "/api/mkdir" then
-        return self:_routeMutate(conn, method, query.path, self.handlers.mkdir)
+        return self:_routeMutate(conn, method, query.path, "mkdir")
     elseif path == "/api/delete" then
-        return self:_routeMutate(conn, method, query.path, self.handlers.delete)
+        return self:_routeMutate(conn, method, query.path, "delete")
     elseif path == "/api/input" then
         return self:_routeInput(conn, method, headers, query)
     elseif path == "/api/clipboard" then
@@ -510,36 +551,30 @@ end
 -- ── body（上传流式落盘 / 文本攒内存）────────────────────
 
 --- 文本 body 入口（远程输入/剪贴板/远程配置共用）：校验 Content-Length，
---- 切 body 状态攒内存（不落盘），收尾函数挂 conn.finish——body 收齐后由
---- _readBody 回调（签名 fun(server, conn, text)，自含响应）。
+--- 切 body 状态攒内存（不落盘），收齐后由 _readBody 调 finish(server, conn, text)
+--- 自行排响应；空 body 当场以 "" 调 finish。长度不合法时直接排 411/400/413。
 ---@param conn table
 ---@param headers table 已小写化的请求头
 ---@param limit number body 上限（字节）
 ---@param finish fun(self: table, conn: table, text: string)
----@return true|nil|false true=有 body 进状态机；false=空 body，调用方当场收尾；
----        nil=已排错误响应（411/413），调用方直接 return
 function Server:_acceptText(conn, headers, limit, finish)
     local len, len_err = self:_contentLength(headers)
     if len_err == "missing" then
-        self:_fail(conn, 411, "Content-Length required")
-        return nil
+        return self:_fail(conn, 411, "Content-Length required")
     end
     if not len then
-        self:_fail(conn, 400, "Invalid Content-Length")
-        return nil
+        return self:_fail(conn, 400, "Invalid Content-Length")
     end
     if len > limit then
-        self:_fail(conn, 413, "Body too large")
-        return nil
+        return self:_fail(conn, 413, "Body too large")
     end
     if len == 0 then
-        return false
+        return finish(self, conn, "")
     end
     conn.finish = finish
     conn.text_buf = {}
     conn.remaining = len
     conn.state = "body"
-    return true
 end
 
 --- 完整发出 100 Continue 后再进入 body；与最终响应共用部分写语义。
@@ -582,15 +617,10 @@ function Server:_readBody(conn)
     if conn.finish then
         conn.text_buf[#conn.text_buf + 1] = got
     else
-        -- 磁盘满/IO 错误必须当场失败：继续走下去会 save 一个截断文件并回 {"ok":true}
+        -- 磁盘满/IO 错误必须当场失败：继续走下去会 save 一个截断文件并回 {"ok":true}。
+        -- 文件和临时文件留给回完响应后的 _kill 收拾。
         local ok, werr = conn.file:write(got)
         if not ok then
-            conn.file:close()
-            conn.file = nil
-            if conn.temp then
-                pcall(os.remove, conn.temp)
-                conn.temp = nil
-            end
             self:_fail(conn, 500, tostring(werr or "write failed"))
             return true
         end
@@ -613,10 +643,6 @@ function Server:_readBody(conn)
     local closed, cerr = conn.file:close()
     conn.file = nil
     if not closed then
-        if conn.temp then
-            pcall(os.remove, conn.temp)
-            conn.temp = nil
-        end
         self:_fail(conn, 500, tostring(cerr or "close failed"))
         return true
     end
@@ -735,12 +761,14 @@ function Server:_write(conn)
 end
 
 --- 非阻塞发出 conn.out 的剩余部分（部分写续传）；对端关闭即 kill。
+--- 发送缓冲区满时 send 回 last = out_off - 1：一个字节没发出去不算进展，
+--- 否则 waitEvent 会空转到时间片用完，还会刷新 touched 让卡死的连接永不回收。
 ---@param conn table
 ---@return boolean 本轮是否有进展
 function Server:_send(conn)
     local sent, err, last = conn.sock:send(conn.out, conn.out_off)
     local upto = sent or last
-    if upto then
+    if upto >= conn.out_off then
         conn.out_off = upto + 1
         conn.touched = socket.gettime()
         return true
@@ -749,58 +777,6 @@ function Server:_send(conn)
         self:_kill(conn)
     end
     return false
-end
-
--- ── 页面与静态资源 ─────────────────────────────────────
-
--- 一切页面资源都是静态路由（不注入模板）；实例配置走 /api/config。
-local HTML_DIR = (debug.getinfo(1, "S").source:match("^@(.+)/[^/]+$") or ".") .. "/html"
-
-local ASSETS = {
-    ["/"] = { "index.html", "text/html; charset=utf-8" },
-    ["/index.html"] = { "index.html", "text/html; charset=utf-8" },
-    ["/file.html"] = { "file.html", "text/html; charset=utf-8" },
-    ["/input.html"] = { "input.html", "text/html; charset=utf-8" },
-    ["/clipboard.html"] = { "clipboard.html", "text/html; charset=utf-8" },
-    ["/settings.html"] = { "settings.html", "text/html; charset=utf-8" },
-    ["/logo.jpg"] = { "logo.jpg", "image/jpeg" },
-    ["/style.css"] = { "style.css", "text/css; charset=utf-8" },
-    ["/js.js"] = { "js.js", "application/javascript; charset=utf-8" },
-    ["/index.js"] = { "index.js", "application/javascript; charset=utf-8" },
-    ["/file.js"] = { "file.js", "application/javascript; charset=utf-8" },
-    ["/input.js"] = { "input.js", "application/javascript; charset=utf-8" },
-    ["/clipboard.js"] = { "clipboard.js", "application/javascript; charset=utf-8" },
-    ["/settings.js"] = { "settings.js", "application/javascript; charset=utf-8" },
-}
-
-local _asset_cache = {} ---@type table<string, string>
-
---- 读静态资源（lazy 缓存，随插件安装不变）。
----@param name string
----@return string
-local function readAsset(name)
-    local s = _asset_cache[name]
-    if not s then
-        local f = assert(io.open(HTML_DIR .. "/" .. name, "rb"), "features.remote.server: html/" .. name .. " unreadable")
-        s = f:read("*all")
-        f:close()
-        _asset_cache[name] = s
-    end
-    return s
-end
-
----@param path string 路由路径
----@return string|nil body, string|nil ctype 非静态路由或读取失败时返回 nil
-function Server.asset(path)
-    local a = ASSETS[path]
-    if not a then
-        return nil
-    end
-    local ok, body = pcall(readAsset, a[1])
-    if not ok then
-        return nil
-    end
-    return body, a[2]
 end
 
 return Server

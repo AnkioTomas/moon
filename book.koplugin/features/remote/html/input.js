@@ -19,7 +19,7 @@ function applyInputState(active) {
 }
 
 function pollInput() {
-    jfetch('/api/input').then(function (d) {
+    return jfetch('/api/input').then(function (d) {
         applyInputState(d.active);
     }).catch(function () {
         if (!sending) {
@@ -27,8 +27,6 @@ function pollInput() {
             ritext.disabled = true;
             risend.disabled = true;
         }
-    }).then(function () {
-        setTimeout(pollInput, 3000);
     });
 }
 
@@ -50,4 +48,4 @@ risend.onclick = function () {
     });
 };
 
-pollInput();
+pollWhileVisible(pollInput, 3000);

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 连接配置页（静态路由；逻辑在 /settings.js，共享函数在 /js.js） -->
+<!-- 连接配置页（静态路由；表单按 /api/settings 下发的字段声明生成，逻辑在 /settings.js，共享函数在 /js.js） -->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -20,127 +20,7 @@
 <p class="security-note">密钥读取时会脱敏；不修改时请保持为 ******。</p>
 <div id="loadstate" class="state" role="status" aria-live="polite">加载中…</div>
 
-<div class="settings-grid">
-<form id="form-ai" class="panel cfg-form" autocomplete="off">
-<h2>AI 服务</h2>
-<div class="field">
-<label for="ai_endpoint">接口地址</label>
-<input id="ai_endpoint" name="ai_endpoint" type="url" inputmode="url" placeholder="https://api.example.com/v1">
-</div>
-<div class="field">
-<label for="ai_api_key">API 密钥</label>
-<input id="ai_api_key" name="ai_api_key" type="password" autocomplete="off" placeholder="sk-…">
-</div>
-<div class="field">
-<label for="ai_model">模型</label>
-<input id="ai_model" name="ai_model" type="text" placeholder="gpt-4o-mini">
-</div>
-<div class="btns">
-<button type="submit" class="primary">保存 AI 配置</button>
-</div>
-<div class="state" id="state-ai" role="status" aria-live="polite"></div>
-</form>
-
-<form id="form-copymanga" class="panel cfg-form" autocomplete="off">
-<h2>拷贝漫画</h2>
-<div class="field">
-<label for="copymanga_base_url">站点地址</label>
-<input id="copymanga_base_url" name="base_url" type="url" inputmode="url">
-</div>
-<div class="field">
-<label for="copymanga_username">账号</label>
-<input id="copymanga_username" name="username" type="text" autocomplete="username">
-</div>
-<div class="field">
-<label for="copymanga_password">密码</label>
-<input id="copymanga_password" name="password" type="password" autocomplete="current-password">
-</div>
-<div class="btns">
-<button type="submit" class="primary">保存拷贝漫画配置</button>
-</div>
-<div class="state" id="state-copymanga" role="status" aria-live="polite"></div>
-</form>
-
-<form id="form-moon" class="panel cfg-form" autocomplete="off">
-<h2>月读服务</h2>
-<div class="field">
-<label for="moon_base_url">服务器地址</label>
-<input id="moon_base_url" name="base_url" type="url" inputmode="url" placeholder="https://book.example.com">
-</div>
-<div class="field">
-<label for="moon_token">长期令牌</label>
-<input id="moon_token" name="token" type="password" autocomplete="off" placeholder="bk_…">
-</div>
-<div class="btns">
-<button type="submit" class="primary">保存月读服务配置</button>
-</div>
-<div class="state" id="state-moon" role="status" aria-live="polite"></div>
-</form>
-
-<form id="form-zlib" class="panel cfg-form" autocomplete="off">
-<h2>Z-Library（下载账号）</h2>
-<div class="field">
-<label for="zlib_email">邮箱</label>
-<input id="zlib_email" name="email" type="email" autocomplete="username">
-</div>
-<div class="field">
-<label for="zlib_password">密码</label>
-<input id="zlib_password" name="password" type="password" autocomplete="current-password">
-</div>
-<div class="field">
-<label for="zlib_base_url">镜像地址（可选）</label>
-<input id="zlib_base_url" name="base_url" type="url" inputmode="url" placeholder="留空自动选择">
-</div>
-<div class="btns">
-<button type="submit" class="primary">保存 Z-Library 配置</button>
-</div>
-<div class="state" id="state-zlib" role="status" aria-live="polite"></div>
-</form>
-
-<form id="form-opds" class="panel cfg-form" autocomplete="off">
-<h2>OPDS 目录</h2>
-<div class="field">
-<label for="opds_url">目录地址</label>
-<input id="opds_url" name="url" type="url" inputmode="url" placeholder="http://192.168.1.2:8083/opds（留空关闭）">
-</div>
-<div class="field">
-<label for="opds_username">用户名（可选）</label>
-<input id="opds_username" name="username" type="text" autocomplete="username">
-</div>
-<div class="field">
-<label for="opds_password">密码（可选）</label>
-<input id="opds_password" name="password" type="password" autocomplete="current-password">
-</div>
-<div class="btns">
-<button type="submit" class="primary">保存 OPDS 配置</button>
-</div>
-<div class="state" id="state-opds" role="status" aria-live="polite"></div>
-</form>
-
-<form id="form-local" class="panel cfg-form" autocomplete="off">
-<h2>本地书库 WebDAV</h2>
-<div class="field">
-<label for="webdav_url">WebDAV 地址</label>
-<input id="webdav_url" name="webdav_url" type="url" inputmode="url" placeholder="https://dav.example.com/dav">
-</div>
-<div class="field">
-<label for="webdav_username">用户名</label>
-<input id="webdav_username" name="webdav_username" type="text" autocomplete="username">
-</div>
-<div class="field">
-<label for="webdav_password">密码</label>
-<input id="webdav_password" name="webdav_password" type="password" autocomplete="current-password">
-</div>
-<div class="field">
-<label for="webdav_path">目录</label>
-<input id="webdav_path" name="webdav_path" type="text">
-</div>
-<div class="btns">
-<button type="submit" class="primary">保存 WebDAV 配置</button>
-</div>
-<div class="state" id="state-local" role="status" aria-live="polite"></div>
-</form>
-</div>
+<div class="settings-grid"></div>
 </main>
 
 <footer class="site-footer"><span class="footer-brand"><img src="/logo.jpg" alt="" width="32" height="32"><span><strong>月读</strong><small>作者 Ankio</small></span></span><a class="footer-link" href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net ↗</a></footer>

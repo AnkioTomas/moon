@@ -22,14 +22,12 @@ function flash(message) {
 }
 
 function poll() {
-    jfetch('/api/clipboard').then(function (data) {
+    return jfetch('/api/clipboard').then(function (data) {
         var remote = data.text || '';
         if (text.value === pulled && remote !== text.value) text.value = remote;
         pulled = remote;
     }).catch(function () {
         /* 主动操作会显示错误；后台轮询失败不打断编辑。 */
-    }).then(function () {
-        setTimeout(poll, 2000);
     });
 }
 
@@ -87,4 +85,4 @@ copy.onclick = function () {
     });
 };
 
-poll();
+pollWhileVisible(poll, 2000);

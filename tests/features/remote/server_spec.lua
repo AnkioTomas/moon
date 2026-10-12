@@ -168,6 +168,9 @@ local function fakeHandlers(dirs)
         is_dir = function(path)
             return dirs[path] ~= nil
         end,
+        path_exists = function()
+            return false
+        end,
         resolve_download = function(path)
             return path == "/dl/ok.bin" and "/dl/ok.bin" or nil
         end,
@@ -679,6 +682,14 @@ do
     local code6, body6 = parseResponse(c6:output())
     Assert.eq(code6, 500)
     has(body6, "disk full")
+
+    -- 缺省冲突策略是询问：目标已存在 → 409，不落位
+    local h7, calls7 = fakeHandlers({ ["/inbox"] = {} })
+    h7.path_exists = function(path) return path == "/inbox/x" end
+    local c7 = newClient({ "PUT /upload?dir=/inbox&name=x HTTP/1.1\r\nContent-Length: 1\r\n\r\nZ" })
+    drain(serve(c7, h7))
+    Assert.eq((parseResponse(c7:output())), 409)
+    Assert.is_nil(calls7.save)
 end
 
 -- Expect: 100-continue 也必须走部分写缓冲，不能靠一次 send 碰运气。
@@ -875,6 +886,15 @@ do
     fake_now = fake_now + 200
     server:waitEvent()
     Assert.eq(#server._conns, 0, "空闲超时应强杀")
+
+    -- 对端不收数据（发送缓冲区一直满，send 回 0 字节）：不算进展、不续命，照样回收。
+    local stuck = newClient({ "GET / HTTP/1.1\r\n\r\n" }, { send_limit = 0 })
+    local stuck_server = serve(stuck, nil, { slice = 0 })
+    stuck_server:waitEvent()
+    Assert.eq(#stuck_server._conns, 1)
+    fake_now = fake_now + 200
+    stuck_server:waitEvent()
+    Assert.eq(#stuck_server._conns, 0, "发不出去的连接不能靠空转刷新存活时间")
     Assert.is_true(client.closed)
 end
 
@@ -1077,6 +1097,7 @@ do
         moon = { base_url = "https://moon.test", token = "bk" },
         zlib = { email = "", password = "", base_url = nil },
         opds = {},
+        copymanga = {},
         ["local"] = {},
     }
     package.preload["utils.settings"] = function()
@@ -1096,7 +1117,7 @@ do
         }
     end
     package.preload["source.registry"] = function()
-        return { invalidate = function() end }
+        return { invalidate = function() end, list = function() return {} end }
     end
     for _, name in ipairs({ "utils.settings", "source.registry", "features.remote.settings" }) do
         package.loaded[name] = nil

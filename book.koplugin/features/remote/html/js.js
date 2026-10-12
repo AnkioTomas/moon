@@ -38,6 +38,25 @@ function jfetch(u, opt) {
         });
     });
 }
+/* 定时轮询：fn 返回不会 reject 的 Promise，结束后才排下一轮（请求不叠）。
+   页面隐藏时不排下一轮：后台标签页一直轮询会让设备的空闲自动关闭永不触发；回到前台立刻补一次。 */
+function pollWhileVisible(fn, ms) {
+    var timer = null;
+    var running = false;
+    function tick() {
+        timer = null;
+        if (document.hidden) return;
+        running = true;
+        fn().then(function () {
+            running = false;
+            if (!document.hidden) timer = setTimeout(tick, ms);
+        });
+    }
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && !timer && !running) tick();
+    });
+    tick();
+}
 /* 页面配置（root/home/shortcuts 由 /api/config 提供，免模板注入） */
 function loadConfig() {
     return jfetch('/api/config');

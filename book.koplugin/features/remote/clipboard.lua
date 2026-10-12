@@ -23,7 +23,6 @@ end
 ---@param conn table
 ---@param method string
 ---@param headers table
----@return true|nil
 function Clipboard.route(self, conn, method, headers, _query)
     if method == "GET" then
         return self:_json(conn, 200, JSON.encode(self.handlers.get_clipboard()))
@@ -31,10 +30,7 @@ function Clipboard.route(self, conn, method, headers, _query)
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    local state = self:_acceptText(conn, headers, Clipboard.TEXT_LIMIT, Clipboard.finish)
-    if state == nil then return end
-    if state then return true end
-    return Clipboard.finish(self, conn, "")
+    return self:_acceptText(conn, headers, Clipboard.TEXT_LIMIT, Clipboard.finish)
 end
 
 return Clipboard

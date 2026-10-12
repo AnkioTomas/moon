@@ -10,11 +10,11 @@ local SettingsApi = require("features.remote.settings")
 local Route = {}
 
 --- /api/settings body 收尾：解析 JSON 后做部分更新，回写实际生效的字段。
---- JSON 非法或 apply 拒绝都回 400（带原因）。
+--- 空 body 等价于提交 {}；JSON 非法或 apply 拒绝都回 400（带原因）。
 ---@param conn table
 ---@param text string 收齐的请求体 JSON 文本
 function Route.finishSettings(self, conn, text)
-    local payload, err = JSON.decode(text)
+    local payload, err = JSON.decode(text ~= "" and text or "{}")
     if not payload then
         return self:_fail(conn, 400, err or "invalid json")
     end
@@ -26,12 +26,10 @@ function Route.finishSettings(self, conn, text)
     return self:_json(conn, 200, JSON.encode(applied))
 end
 
---- GET /api/settings 回配置快照；POST 收 JSON 走 finishSettings 做部分更新。
---- 其余方法 405；空 body 等价于提交 {}。
+--- GET /api/settings 回配置快照；POST 收 JSON 走 finishSettings 做部分更新。其余方法 405。
 ---@param conn table
 ---@param method string
 ---@param headers table 已小写化的请求头
----@return true|nil true=已进 body 状态，等收齐后回调
 function Route.settings(self, conn, method, headers, _query)
     if method == "GET" then
         return self:_json(conn, 200, JSON.encode(SettingsApi.snapshot()))
@@ -39,15 +37,7 @@ function Route.settings(self, conn, method, headers, _query)
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    local st = self:_acceptText(conn, headers, SettingsApi.BODY_LIMIT, Route.finishSettings)
-    if st == nil then
-        return
-    end
-    if st then
-        return true
-    end
-    -- 空 body = 空 JSON 部分更新
-    return Route.finishSettings(self, conn, "{}")
+    return self:_acceptText(conn, headers, SettingsApi.BODY_LIMIT, Route.finishSettings)
 end
 
 return Route

@@ -17,23 +17,23 @@ local Input = {}
 --- POST body 上限（字节）
 Input.TEXT_LIMIT = 256 * 1024
 
---- /api/input body 收尾：光标处追加注入；无激活输入框 → 409。
+--- /api/input body 收尾：光标处追加注入；无激活输入框 → 409。空 body 是无操作，不碰输入框。
 ---@param conn table
 ---@param text string 收齐的请求体文本
 function Input.finishAppend(self, conn, text)
-    local ok, err = self.handlers.set_input(text)
-    if not ok then
-        return self:_fail(conn, 409, err)
+    if text ~= "" then
+        local ok, err = self.handlers.set_input(text)
+        if not ok then
+            return self:_fail(conn, 409, err)
+        end
     end
     return self:_json(conn, 200, '{"ok":true}')
 end
 
---- /api/input：GET 回 { active, text }；POST 收文本走 finishAppend 光标处追加。
---- 其余方法 405；空 body 视为无操作直接回 ok。
+--- /api/input：GET 回 { active, text }；POST 收文本走 finishAppend 光标处追加。其余方法 405。
 ---@param conn table
 ---@param method string
 ---@param headers table 已小写化的请求头
----@return true|nil true=已进 body 状态，等收齐后回调
 function Input.route(self, conn, method, headers, _query)
     if method == "GET" then
         local st = self.handlers.get_input()
@@ -45,15 +45,7 @@ function Input.route(self, conn, method, headers, _query)
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    local st = self:_acceptText(conn, headers, Input.TEXT_LIMIT, Input.finishAppend)
-    if st == nil then
-        return
-    end
-    if st then
-        return true
-    end
-    -- 空 body = 无操作（追加空串本就无意义，直接 ok）
-    return self:_json(conn, 200, '{"ok":true}')
+    return self:_acceptText(conn, headers, Input.TEXT_LIMIT, Input.finishAppend)
 end
 
 return Input
