@@ -343,6 +343,26 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot)
     return math.abs(local_frac - remote_pos.fraction) >= 0.01
 end
 
+--- 采用云端进度：覆盖本地记录并跳过去（提示跳到了哪里）。
+---@param id BookIdentity
+---@param remote_pos ProgressPosition
+local function adoptCloud(id, remote_pos)
+    local Session = require("reader.session")
+    if not Session.current() or not isSameBook(id) then
+        return
+    end
+    local remote = Progress.rowPosition(remote_pos)
+    remote.updated_at = os.time()
+    if not ProgressDB.adoptRemote(id.source_id, id.stable_id, remote) then
+        logger.warn("book.progress adopt remote failed", id.stable_id)
+        return
+    end
+    local live = Session.current()
+    if live and isSameBook(id) then
+        applyChosenPos(live.ui, live.identity, remote_pos, remote_pos.fraction, true)
+    end
+end
+
 --- 本地与云端进度不一致：询问用户用哪个（本次阅读会话只问一次）。
 --- 选云端 → 跳转；选本地 → 把本地推上去收敛，避免下次再问。
 ---@param id BookIdentity
@@ -362,23 +382,7 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
         cancel_text = _("本地"),
         -- 两个按钮都是选择：主题 Confirm 点空白 / 返回键等同「取消」= 选本地并上推，必须关掉。
         dismissable = false,
-        ok_callback = function()
-            local Session = require("reader.session")
-            local current = Session.current()
-            if not current or not isSameBook(id) then
-                return
-            end
-            local remote = Progress.rowPosition(remote_pos)
-            remote.updated_at = os.time()
-            if not ProgressDB.adoptRemote(id.source_id, id.stable_id, remote) then
-                logger.warn("book.progress adopt remote failed", id.stable_id)
-                return
-            end
-            local live = Session.current()
-            if live and isSameBook(id) then
-                applyChosenPos(live.ui, live.identity, remote_pos, remote_pos.fraction, true)
-            end
-        end,
+        ok_callback = function() adoptCloud(id, remote_pos) end,
         cancel_callback = function()
             local Session = require("reader.session")
             if not Session.current() or not isSameBook(id) then
@@ -444,13 +448,24 @@ function ReaderProgress.pull(snapshot, opts)
             return tell(T(_("拉取进度失败：%1"), tostring(err or "")))
         end
         local local_position = localProgressForPull(id, snapshot)
+        local row = ProgressDB.get(id.source_id, id.stable_id)
         if progressDiffers(local_position, remote_pos, id, snapshot) then
-            logger.dbg("book.progress reader pull conflict", id.source_id, id.stable_id)
-            askProgressConflict(id, snapshot, local_position, remote_pos)
+            -- 只有两边自上次同步后都动过才问；手动拉取是用户要看对比，照常问。
+            local cloud_moved = not (row and row.synced) or progressDiffers(row.synced, remote_pos, id, snapshot)
+            if manual or (cloud_moved and not (row and row.sync_status == 1)) then
+                logger.dbg("book.progress reader pull conflict", id.source_id, id.stable_id)
+                askProgressConflict(id, snapshot, local_position, remote_pos)
+            elseif cloud_moved then
+                logger.dbg("book.progress reader pull adopt", id.source_id, id.stable_id)
+                adoptCloud(id, remote_pos)
+            elseif row.sync_status == 0 and source.syncProgressAsync then
+                -- 云端还是本机上次同步的位置，只是本地新读的还没推上去。
+                logger.dbg("book.progress reader pull stale cloud", id.source_id, id.stable_id)
+                source:syncProgressAsync({ identity = id, dirty_only = true }, function() end)
+            end
             return
         end
         tell(_("本地与云端进度一致"))
-        local row = ProgressDB.get(id.source_id, id.stable_id)
         if row and row.sync_status == 0 then
             -- 本地脏版本与云端基本一致时只推不拉；上面已经拿到了最新远端，
             -- 再跑完整同步只会产生第二次相同的 getProgress。
