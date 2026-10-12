@@ -5,7 +5,7 @@
 
 ## 边界
 
-- **自成一体**：只依赖 KOReader 自带模块，以及插件的基础设施 `utils.settings`、`utils.log`、`utils.perf`、`utils.paths`、`http.request`、`l10n` / `gettext`。
+- **自成一体**：只依赖 KOReader 自带模块，以及插件的基础设施 `utils.settings`、`utils.log`、`utils.perf`、`utils.paths`、`utils.image`、`http.request`、`l10n` / `gettext`。
   不依赖 `ui/widgets` 等其他 UI 组件，删掉它们不影响这里。
 - **组件只读令牌键，不判断主题 id**：换主题只换数据，组件代码没有 `if theme == "bold"`。
 - **目录模块直接按目录名引用**：KOReader 给插件的 `package.path` 只有 `<plugin>/?.lua`，`main.lua` 的 `allowInitModules` 补上了 `<plugin>/?/init.lua`，所以写 `require("ui.themes")`，不要写 `require("ui.themes.init")`（两种名字会把同一文件加载两次）。
@@ -121,6 +121,7 @@ Confirm:new{
 | `input` | InputDialog / MultiInputDialog | `Input:new{ title, fields, callback, actions }`；`actions` 是取消与确定之间的额外按钮（收字段文本、不关窗）；编辑内核仍是 KOReader InputText（虚拟键盘和中文输入法挂在它上面） |
 | `spin` | SpinWidget / DateTimeWidget | `Spin:new{ title, fields, callback }`，一列或多列 |
 | `icon_picker` | — | `IconPicker:new{ title, current, on_select }`：全屏网格列出图标字体里的全部图标，打开翻到 `current`，左上角按英文名子串搜索，点一格关窗后 `on_select(name)`。名字表 `widgets/icon/names.lua` 由 `tools/build_icon_names.py` 从字体生成，换字体后重跑 |
+| `path_picker` | PathChooser | `PathPicker:new{ path, select_file, filter, show_hidden, on_select }`：继承 `list` 的全屏目录浏览。点目录进入，左上角回上一级；选文件夹模式首项「选择此文件夹」，选文件模式点文件；都是先关窗再 `on_select(绝对路径)`。`filter(name)` 只筛文件；`path` 给文件时从所在目录打开并选中它，不存在则逐级往上回落；图片文件（按后缀）画缩略图代替图标 |
 | `progress_dialog` | ProgressbarDialog | `ProgressDialog:new{ title, on_background, on_cancel }` + `:update(text, done, total)`；按字节显示用 `:bytes(done, total)`（显示 MB）；文案已格式化时用 `:set(text, percent)`。见下方「进度弹窗转后台」 |
 | `qr` | QRMessage | `QR:new{ title, text, caption }` |
 | `text_viewer` | TextViewer | `TextViewer:new{ title, text }`，全屏分页 |

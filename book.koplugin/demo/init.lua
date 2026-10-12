@@ -7,7 +7,7 @@ main.lua 检测到 demo/ 目录存在才转发 addToMainMenu。
     ├─ 控件：文字 / 按钮 / 进度条 / 卡片   全屏展示页，可交互
     ├─ 控件：行 / 翻页条 / 底栏            全屏展示页，可交互
     ├─ 控件：图片 / 锚点弹出 / 多按钮行    全屏展示页，可交互
-    └─ 提示、确认框、动作表、列表×4、进度弹窗、数值×2、输入×2、文本查看、二维码
+    └─ 提示、确认框、动作表、列表×4、图标选择、路径选择×2、进度弹窗、数值×2、输入×2、文本查看、二维码
 
 @module koplugin.book.demo
 --]]
@@ -27,6 +27,7 @@ local Input = require("ui.themes.widgets.input")
 local List = require("ui.themes.widgets.list")
 local Modal = require("ui.themes.widgets.modal")
 local Pager = require("ui.themes.widgets.pager")
+local PathPicker = require("ui.themes.widgets.path_picker")
 local Progress = require("ui.themes.widgets.progress")
 local ProgressDialog = require("ui.themes.widgets.progress_dialog")
 local QR = require("ui.themes.widgets.qr")
@@ -38,6 +39,7 @@ local Text = require("ui.themes.widgets.text")
 local TextViewer = require("ui.themes.widgets.text_viewer")
 local TitleBar = require("ui.themes.widgets.titlebar")
 local Toast = require("ui.themes.widgets.toast")
+local ImageFile = require("utils.image")
 
 local NAMES = { paper = "纸本", bold = "高对比", soft = "柔和" }
 
@@ -369,6 +371,14 @@ local function entries()
         end },
         { text = "图标选择 IconPicker", run = function()
             IconPicker:new{ current = "menu_book", on_select = function(name) say("图标：" .. name) end }:show()
+        end },
+        { text = "文件夹选择 PathPicker", run = function()
+            PathPicker:new{ path = Theme.root(), on_select = function(dir) say("文件夹：" .. dir) end }:show()
+        end },
+        { text = "文件选择 PathPicker（仅图片）", run = function()
+            PathPicker:new{ path = Theme.root() .. "logo.png", select_file = true,
+                filter = function(name) return ImageFile.suffix(name) ~= nil end,
+                on_select = function(file) say("文件：" .. file) end }:show()
         end },
         { text = "进度弹窗 ProgressDialog", run = fakeProgress },
         { text = "数值选择：单列", run = function()
