@@ -233,9 +233,9 @@ end
 ---@param on_progress fun(done: integer, total: integer)|nil
 ---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
 ---@return { cancel: fun() }
-function Source:cacheAllChaptersAsync(identity, on_progress, cb)
+function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
     return require("source.chapter").cacheAllAsync(self, identity, contentFetcher(self), on_progress, cb,
-        FETCH_INTERVAL)
+        FETCH_INTERVAL, range)
 end
 
 function Source:getProgressAsync(identity, cb)

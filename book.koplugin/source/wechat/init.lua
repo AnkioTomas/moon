@@ -303,8 +303,8 @@ end
 ---@param on_progress fun(done: integer, total: integer)|nil
 ---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
 ---@return { cancel: fun() }
-function Source:cacheAllChaptersAsync(identity, on_progress, cb)
-    return require("source.chapter").cacheAllAsync(self, identity, fetchContent, on_progress, cb)
+function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
+    return require("source.chapter").cacheAllAsync(self, identity, fetchContent, on_progress, cb, nil, range)
 end
 
 --- 拉取云端进度并补齐本地需要的坐标。

@@ -132,7 +132,7 @@
 ---@field pushNotesAsync fun(self: BookSource, identity: BookIdentity, annotations: table[], cb: fun(data: table|nil, err: string|nil)): table|nil 上传划线/书签
 ---@field pullNotesAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: table[]|nil, err: string|nil, meta: table|nil)): table|nil 拉取划线/书签
 ---@field localizeAnnotations fun(self: BookSource, document: table|nil, annotations: table[], html_path: string|nil, current: table[]|nil): table[]|nil 按章 HTML 把远端划线定位到本地 xpointer
----@field cacheAllChaptersAsync fun(self: BookSource, identity: BookIdentity, on_progress: function|nil, cb: function): table|nil 章节模式全本缓存
+---@field cacheAllChaptersAsync fun(self: BookSource, identity: BookIdentity, on_progress: function|nil, cb: function, range: ChapterCacheRange|nil): table|nil 章节模式缓存：range 缺省全本，否则从当前阅读章起一段
 ---@field isTocCurrent fun(self: BookSource, toc: BookChapter[]|nil): boolean|nil 本地目录缓存是否仍有效
 ---@field refreshTocAsync fun(self: BookSource, identity: BookIdentity, cb: fun(toc: BookChapter[]|nil, err: string|nil)): table|nil 强制刷新目录
 

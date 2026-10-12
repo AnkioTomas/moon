@@ -574,20 +574,42 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
         end }
 end
 
---- 缓存整本章节正文；目录只拉一次，正文按序下载并返回部分成功统计。
+--- 章节缓存范围：从当前阅读章起缓存 count 章（缺省到结尾）。
+--- 当前章取 chapter_idx，没有则按全书 fraction 折算，再没有就是第 1 章。
+---@class ChapterCacheRange
+---@field chapter_idx integer|nil
+---@field fraction number|nil
+---@field count integer|nil
+
+--- 缓存范围 → prefetchAsync 的 (from_idx, count)。range 为 nil 即全本。
+--- 起点在目录到手后才折算：进度可能只有比例，目录长度要等拉到才知道。
+---@param toc BookChapter[]
+---@param range ChapterCacheRange|nil
+---@return integer from_idx 跳过的章数
+---@return integer count
+function Chapter.cacheRange(toc, range)
+    if not range then return 0, #toc end
+    local idx = tonumber(range.chapter_idx) or math.floor((tonumber(range.fraction) or 0) * #toc) + 1
+    idx = math.max(1, math.min(#toc, idx))
+    return idx - 1, range.count or (#toc - idx + 1)
+end
+
+--- 缓存章节正文（全本或 range 指定的一段）；目录只拉一次，正文按序下载并返回部分成功统计。
 ---@param source BookSource 提供 loadTocAsync
 ---@param identity BookIdentity
 ---@param fetchContent ChapterFetchContent
 ---@param on_progress fun(done: integer, total: integer)|nil
 ---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
 ---@param interval_seconds number|nil 两次正文请求的间隔，缺省 1.5；风控严的源传更大值
+---@param range ChapterCacheRange|nil 缺省全本
 ---@return { cancel: fun() }
-function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb, interval_seconds)
+function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb, interval_seconds, range)
     local cancelled, active = false, nil
     active = source:loadTocAsync(identity, function(toc, err)
         if cancelled then return end
         if not toc then cb(false, 0, err or _("章节列表为空"), 0, 0); return end
-        active = Chapter.prefetchAsync(identity, nil, toc, 0, #toc, {
+        local from_idx, count = Chapter.cacheRange(toc, range)
+        active = Chapter.prefetchAsync(identity, nil, toc, from_idx, count, {
             fetchContent = fetchContent,
             persist_book = false,
             progress = on_progress,

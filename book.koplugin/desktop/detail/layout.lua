@@ -30,7 +30,7 @@ function Detail:buildFooter(width, owner)
     local fns = {
         edit = function() self:openEditor() end,
         scrape = function() self:startScrape() end,
-        download = function() self:cacheAllChapters() end,
+        download = function() self:chooseCacheRange() end,
         download_book = function() self:downloadBook() end,
         read = function() self:toggleRead() end,
         unread = function() self:toggleRead() end,
