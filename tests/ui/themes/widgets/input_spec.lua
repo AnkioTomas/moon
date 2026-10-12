@@ -21,6 +21,8 @@ local dialog = Input:new{
     cancel_callback = function() cancelled = true end,
 }
 local a, b = dialog.inputs[1], dialog.inputs[2]
+-- 键盘窗口在栈顶时，按钮 / 字段 / 面板外的点按要靠这个标记才转到弹窗。
+Assert.is_true(dialog.is_always_active)
 Assert.is_true(a.focused)
 Assert.is_false(b.focused)
 Assert.eq(b.text_type, "password")

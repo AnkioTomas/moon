@@ -62,6 +62,8 @@ local _ = require("gettext")
 ---@field cancel_callback fun()|nil
 ---@field actions { text: string, callback: fun(...: string) }[]|nil 额外按钮，不关窗
 local Input = Modal:extend{
+    -- 键盘是压在上面的独立窗口，键盘没接的点按 UIManager 只转给 is_always_active 的下层窗口（同 InputDialog）。
+    is_always_active = true,
     anchor = "top",
     title = nil,
     fields = nil,
