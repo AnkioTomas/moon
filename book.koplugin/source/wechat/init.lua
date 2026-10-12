@@ -31,6 +31,7 @@ end
 ---@field cfg table
 ---@field _client table
 ---@field _covers table<string, string>
+---@field _heartbeat WechatHeartbeat|nil
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -76,8 +77,8 @@ function Source:configured()
     return Auth.hasSession()
 end
 
---- 阅读中时长推送间隔（秒），对齐网页端 / weread 的上报节奏。
-local STATS_FLUSH_INTERVAL = 30
+--- 阅读时长心跳间隔（秒），也是每拍上报的 rt；对齐 weread.koplugin。
+local HEARTBEAT_INTERVAL = 30
 
 --- 章节开读即发「进入阅读」（putProgressAsync 就是 enter 上报）。
 --- 服务端只认距本会话上次上报的真实间隔：拖到推时长时才 enter，紧跟的 rt 会被当成 0 秒。
@@ -90,7 +91,111 @@ local function enterReading(self, payload)
     end)
 end
 
---- 开读章节时进入阅读会话，翻页时按间隔推送已落盘的阅读时长；其余事件交给基类。
+---@class WechatHeartbeat
+---@field identity BookIdentity 正在读的书
+---@field position ProgressPosition 最近一次翻页的位置
+---@field tick fun()
+---@field busy boolean|nil 有请求在飞；停掉后迟到的回包只改这张作废的表
+
+--- 停掉阅读时长心跳。
+---@param self WechatSource
+local function stopHeartbeat(self)
+    local hb = self._heartbeat
+    if not hb then return end
+    self._heartbeat = nil
+    require("ui/uimanager"):unschedule(hb.tick)
+end
+
+--- 在会话上报一拍：会话未进入先 enter（结果不看），紧跟 rt = 心跳间隔。
+---@param self WechatSource
+---@param session WechatReportSession
+---@param position table makeReadPayload 的位置字段
+---@param cb fun(data: table|nil, err: string|nil)
+local function report(self, session, position, cb)
+    local referer = Protocol.readerUrl(position.book_id)
+    position.psvts, position.pclts, position.token = session.psvts, session.pclts, session.token
+    local function sendTime()
+        position.elapsed_seconds = HEARTBEAT_INTERVAL
+        self._client:reportReadAsync(Protocol.makeReadPayload(position), referer, cb)
+    end
+    if session.entered then
+        sendTime()
+        return
+    end
+    self._client:reportReadAsync(Protocol.makeEnterReadPayload(position), referer, function()
+        session.entered = true
+        sendTime()
+    end)
+end
+
+--- 一拍心跳，对齐 weread.koplugin：离线 / 上一拍未回 / 目录未就绪就跳过（这段不补报）；
+--- 上报失败强制重建会话（重开阅读页、重新进入）再报一次；回包有没有 synckey 只记日志。
+---@param self WechatSource
+---@param hb WechatHeartbeat
+local function beat(self, hb)
+    if self._heartbeat ~= hb then return end
+    require("ui/uimanager"):scheduleIn(HEARTBEAT_INTERVAL, hb.tick)
+    if hb.busy or not require("ui/network/manager"):isConnected() then return end
+    local identity, pos = hb.identity, hb.position
+    local chapter_idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
+    local uid = chapter_idx and Toc.uid(identity.source_id, identity.stable_id, chapter_idx)
+    if not uid then return end
+    local book_id = identity.stable_id
+    local position = {
+        book_id = book_id,
+        chapter_uid = uid,
+        chapter_idx = Toc.sourceIndex(identity.source_id, book_id, chapter_idx) or chapter_idx,
+        chapter_offset = math.floor(Progress.clampFraction(pos.chapter_fraction) * 10000),
+        summary = pos.chapter_title or "",
+        progress = math.floor(Progress.clampFraction(pos.fraction) * 100 + 0.5),
+    }
+    local Context = require("source.wechat.context")
+    hb.busy = true
+    local function attempt(force)
+        Context.sessionAsync(self._client, book_id, force, function(session, err)
+            if not session then
+                hb.busy = false
+                logger.warn("wechat heartbeat session failed", book_id, err)
+                return
+            end
+            report(self, session, position, function(data, report_err)
+                if not data and not force then
+                    attempt(true)
+                    return
+                end
+                hb.busy = false
+                if not data then
+                    logger.warn("wechat heartbeat failed", book_id, report_err)
+                elseif data.synckey == nil then
+                    logger.info("wechat heartbeat without synckey", book_id)
+                end
+            end)
+        end)
+    end
+    attempt(false)
+end
+
+--- 开读 / 翻页：心跳没在跑（或换了书）就起一个，并记下最新位置。
+---@param self WechatSource
+---@param identity BookIdentity
+---@param position ProgressPosition|nil
+local function touchHeartbeat(self, identity, position)
+    if self.cfg.sync_reading_time == false or not self:configured() then return end
+    local hb = self._heartbeat
+    if hb and hb.identity.stable_id ~= identity.stable_id then
+        stopHeartbeat(self)
+        hb = nil
+    end
+    if not hb then
+        hb = { identity = identity, position = {}, tick = function() beat(self, hb) end }
+        self._heartbeat = hb
+        require("ui/uimanager"):scheduleIn(HEARTBEAT_INTERVAL, hb.tick)
+    end
+    hb.identity = identity
+    hb.position = position or hb.position
+end
+
+--- 开读章节时进入阅读会话；开章 / 翻页 / 唤醒起时长心跳并更新位置，关书 / 休眠停掉；其余事件交给基类。
 ---@param event string
 ---@param payload table|nil
 function Source:onEvent(event, payload)
@@ -102,22 +207,24 @@ function Source:onEvent(event, payload)
         else
             enterReading(self, payload)
         end
+        touchHeartbeat(self, payload.identity, payload.position)
         return
     end
-    if event == "page_changed" then
-        local now = os.time()
-        if self:configured() and now - (self._stats_flushed_at or 0) >= STATS_FLUSH_INTERVAL then
-            self._stats_flushed_at = now
-            self:syncStatsAsync({ dirty_only = true }, function() end)
-        end
+    if event == "page_changed" or event == "reading_resumed" then
+        touchHeartbeat(self, payload.identity, payload.position)
+        return
+    end
+    if event == "reading_stopped" then
+        stopHeartbeat(self)
         return
     end
     return SourceBase.onEvent(self, event, payload)
 end
 
---- 关闭这个实例。只清实例自己的封面表：Context（psvts）与 Toc 是进程级的，
+--- 关闭这个实例：停掉时长心跳、清实例自己的封面表。Context（psvts）与 Toc 是进程级的，
 --- 换源时关旧实例若把它们一起清了，正在阅读那本书的上报会报「请先打开该章节」。
 function Source:close()
+    stopHeartbeat(self)
     self._covers = {}
 end
 
@@ -437,185 +544,18 @@ function Source:putProgressAsync(identity, pos, cb)
         end }
 end
 
---- 补报阅读时长：对每章补齐 reader 状态后发 web/book/read。
+--- 本地统计行只在本地确认，不发请求。
 ---
---- 这是微信侧时长的**唯一**来源。本地行带 chapter_idx/chapter_fraction（book.stats
---- 采集时落库），阅读中按 STATS_FLUSH_INTERVAL 节流、关书时各经 syncStatsAsync 推送
---- 同一批待同步行；不要另开一路心跳，否则同一段时间会被计两遍。
----
---- 对齐网页端：rt 是距上次上报的秒数，所以要在阅读中持续小批推送；每条都带真实位置
---- （这个接口同时更新云端进度，填 0 会把进度打回开头），最近读的章最后报。
+--- 微信侧时长由阅读中的心跳（见 onEvent）实时上报：服务端按距上次上报的真实间隔记 rt，
+--- 离线攒下的时长事后补报记不上。确认后这些行不再是脏行，展示仍按「云端 + 拉取后本地新读」合并。
 ---@param rows table[]|nil
 ---@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }|nil
+---@return nil
 function Source:pushStatsAsync(rows, cb)
-    if self.cfg.sync_reading_time == false then
-        -- 关闭同步时直接确认本地行：不留积压，重新开启后不会把关闭期间的时长补报上去。
-        local ids = {}
-        for _idx, row in ipairs(rows or {}) do ids[#ids + 1] = row.id end
-        cb({ ok = true, synced_ids = ids })
-        return nil
-    end
-    if not self:configured() then
-        cb(nil, _("请先扫码登录微信读书"))
-        return nil
-    end
-
-    -- 同一章可能有多条分页记录，按 (stable_id, chapter_idx) 聚合时长与最大章内进度。
-    -- 每个桶记住自己的行 id：逐章上报中途失败时只确认已报出去的章，
-    -- 未报的行保持待上传，避免下次重试把同一段时间再报一遍。
-    local buckets = {}
-    local confirmed = {}
-    local skipped = 0
-    for _idx, row in ipairs(rows or {}) do
-        local stable_id = row.stable_id
-        local chapter_idx = tonumber(row.chapter_idx)
-        if type(stable_id) ~= "string" or stable_id == "" or not chapter_idx then
-            -- 微信按章上报，没有章节坐标就无处可报；直接确认，不留在队列里反复重试。
-            skipped = skipped + 1
-            confirmed[#confirmed + 1] = row.id
-        else
-            local key = stable_id .. "\31" .. tostring(chapter_idx)
-            local bucket = buckets[key]
-            if not bucket then
-                bucket = { stable_id = stable_id, chapter_idx = chapter_idx,
-                    duration = 0, chapter_fraction = 0, last_at = 0, ids = {} }
-                buckets[key] = bucket
-            end
-            bucket.ids[#bucket.ids + 1] = row.id
-            bucket.duration = bucket.duration + (tonumber(row.duration) or 0)
-            -- 位置取该章最后一段的章内进度，而不是最大值：回翻重读时要报读者真实所在处。
-            local at = tonumber(row.start_time) or 0
-            if at >= bucket.last_at then
-                bucket.last_at = at
-                bucket.chapter_fraction = tonumber(row.chapter_fraction) or bucket.chapter_fraction
-            end
-        end
-    end
-    if skipped > 0 then
-        logger.warn("wechat stats push skipped rows without chapter_idx", skipped)
-    end
-
-    local work = {}
-    for _bucket_key, bucket in pairs(buckets) do
-        work[#work + 1] = bucket
-    end
-    table.sort(work, function(a, b)
-        if a.last_at ~= b.last_at then
-            return a.last_at < b.last_at
-        end
-        if a.stable_id ~= b.stable_id then
-            return a.stable_id < b.stable_id
-        end
-        return a.chapter_idx < b.chapter_idx
-    end)
-
-    if #work == 0 then
-        cb({ ok = true, synced_ids = confirmed })
-        return nil
-    end
-
-    local cancelled = false
-    local job
-    local index = 1
-    local nextItem
-
-    --- 中途失败：已报出去的章照常确认，剩下的留待下次重试。
-    ---@param err string|nil
-    local function fail(err)
-        if #confirmed == 0 then
-            cb(nil, err)
-            return
-        end
-        logger.warn("wechat stats push partial", err, #confirmed)
-        cb({ ok = true, synced_ids = confirmed })
-    end
-
-    --- 上报一个章节桶的阅读时长；成功则确认桶内全部行 id 并处理下一个。
-    --- reader 会话首次上报前先发一次进入阅读（与网页端 / weread 一致，否则时长不计）。
-    ---@param bucket table 形如 { stable_id, chapter_idx, duration, chapter_fraction, last_at, ids }
-    ---@param chapter_uid string 章节 uid
-    local function report(bucket, chapter_uid)
-        local reader = require("source.wechat.context").reader(bucket.stable_id, chapter_uid)
-        local toc = Toc.read(self.id, bucket.stable_id)
-        local chapter = toc and toc[bucket.chapter_idx]
-        local whole = Toc.wholeFraction(self.id, bucket.stable_id, bucket.chapter_idx, bucket.chapter_fraction)
-        local position = {
-            book_id = bucket.stable_id,
-            chapter_uid = chapter_uid,
-            chapter_idx = Toc.sourceIndex(self.id, bucket.stable_id, bucket.chapter_idx)
-                or bucket.chapter_idx,
-            chapter_offset = math.floor(Progress.clampFraction(bucket.chapter_fraction) * 10000),
-            summary = chapter and chapter.title or "",
-            progress = math.floor((whole or 0) * 100 + 0.5),
-            psvts = reader.psvts,
-            pclts = reader.pclts,
-        }
-        local referer = Protocol.readerUrl(bucket.stable_id, chapter_uid)
-        local function sendTime()
-            position.elapsed_seconds = bucket.duration
-            job = self._client:reportReadAsync(Protocol.makeReadPayload(position), referer, function(data, rerr)
-                if cancelled then return end
-                if not data then
-                    fail(rerr or _("阅读时长上报失败"))
-                    return
-                end
-                for _idx, id in ipairs(bucket.ids) do
-                    confirmed[#confirmed + 1] = id
-                end
-                nextItem()
-            end)
-        end
-        if reader.entered then
-            sendTime()
-            return
-        end
-        job = self._client:reportReadAsync(Protocol.makeEnterReadPayload(position), referer, function(data, rerr)
-            if cancelled then return end
-            if not data then
-                fail(rerr or _("阅读时长上报失败"))
-                return
-            end
-            reader.entered = true
-            sendTime()
-        end)
-    end
-
-    --- 把桶的章节序号解析成 uid 后上报；缓存没有就拉一次目录，仍解析不出视为失败。
-    ---@param bucket table 章节聚合桶
-    local function resolveAndReport(bucket)
-        local chapter_uid = Toc.uid(self.id, bucket.stable_id, bucket.chapter_idx)
-        if chapter_uid then
-            report(bucket, chapter_uid)
-            return
-        end
-        job = self:loadTocAsync({ source_id = self.id, stable_id = bucket.stable_id }, function()
-            if cancelled then return end
-            chapter_uid = Toc.uid(self.id, bucket.stable_id, bucket.chapter_idx)
-            if not chapter_uid then
-                fail(_("缺少章节信息"))
-                return
-            end
-            report(bucket, chapter_uid)
-        end)
-    end
-
-    nextItem = function()
-        if cancelled then return end
-        local bucket = work[index]
-        index = index + 1
-        if not bucket then
-            cb({ ok = true, synced_ids = confirmed })
-            return
-        end
-        resolveAndReport(bucket)
-    end
-
-    nextItem()
-    return { cancel = function()
-            cancelled = true
-            if job and job.cancel then job:cancel() end
-        end }
+    local ids = {}
+    for _idx, row in ipairs(rows or {}) do ids[#ids + 1] = row.id end
+    cb({ ok = true, synced_ids = ids })
+    return nil
 end
 
 --- 每次统计同步最多补拉 readinfo 的书数；首次同步整个书架分几轮补齐。

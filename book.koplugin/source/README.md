@@ -87,8 +87,10 @@ source/
 
 | 事件 | 谁发 | 谁覆盖 |
 |---|---|---|
-| `page_changed` | 阅读会话 | wechat（每 30 秒推时长） |
+| `page_changed` | 阅读会话 | wechat（维持时长心跳） |
 | `chapter_changed` | 按章会话开章 | wechat（进入阅读） |
+| `reading_stopped` | 关书 / 休眠 | wechat（停时长心跳） |
+| `reading_resumed` | 阅读中唤醒 | wechat（重启时长心跳） |
 | `book_meta_changed` | 编辑 / 刮削已写库 | local（WebDAV 上行这本书） |
 
 桌面打开、换源、图书馆刷新时的书架与统计同步不经过源事件，由 `desktop/sync.lua` 直接调 `syncBooksAsync` / `syncStatsAsync`：
@@ -143,7 +145,7 @@ Bearer Token。整本文件下载到书籍工作目录，扩展名从 `stable_id
 书架用 `source.shelf`（`shelfSyncAsync` / `addToShelfAsync` / `removeFromShelfAsync`）。
 目录缓存带 `toc_version`，旧格式 `isTocCurrent` 为 false，强制重拉。TTL 6 小时，在 `source.toc`。
 开章发「进入阅读」（`chapter_changed` → `putProgressAsync`）。服务端只认距上次上报的间隔，所以 enter 必须在时长上报之前；开书拉进度期间先挂起，避免抢在冲突选择前写云端位置。
-翻页每 30 秒 `syncStatsAsync({ dirty_only = true })`。
+阅读时长走定时心跳，与 weread.koplugin 一致：开章 / 翻页 / 唤醒（`reading_resumed`）起心跳，阅读中每 30 秒报一次固定 `rt=30`，不看是否翻页，`reading_stopped`（关书 / 休眠）才停。上报会话按书一份：参数 `psvts`/`pclts`/`token` 取自真实网页阅读页，建成满 15 分钟重开阅读页重建并重新进入；上报失败强制重建再报一次，回包有没有 `synckey` 只记日志。离线、上一拍未回的那拍直接跳过，不补报；`pushStatsAsync` 只在本地确认统计行，不发请求。
 
 划线不能当普通标注推。`notes.lua` 维护 `wr_bookmark_id` / `wr_review_id`，`annotations.lua` 把本地 xpointer 和网页 range 互定位。
 

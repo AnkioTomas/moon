@@ -278,8 +278,10 @@ function SourceBase:pushDirty()
 end
 
 --- 业务事件，调用方直接对属主源调用；基类空操作，源按需覆盖。事件清单：
----   page_changed      — 翻页（仅源身份书籍），payload = { identity, page, total_pages, percent }
+---   page_changed      — 翻页（仅源身份书籍），payload = { identity, page, total_pages, percent, position }
 ---   chapter_changed   — 按章会话开读章节（含首章），payload = { identity, position }
+---   reading_stopped   — 关书 / 休眠，payload = { identity }；阅读中起的定时任务在这里停
+---   reading_resumed   — 阅读中唤醒，payload = { identity, position }；休眠停掉的定时任务在这里重启
 ---   book_meta_changed — 编辑 / 刮削已写库，payload = { identity, cover }（cover=封面换过）；
 ---     有远端的源立即上行这本书（local WebDAV 写书目条目 + 传封面）
 --- 桌面打开 / 图书馆刷新的书架与统计同步不走这里，见 desktop.sync。

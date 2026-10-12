@@ -343,7 +343,7 @@ function Protocol.makeReadPayload(opts)
     params.rt = math.max(0, math.floor(tonumber(opts.elapsed_seconds) or 0))
     params.ts = ts
     params.rn = rn
-    params.sg = sha256_hex(tostring(ts) .. tostring(rn) .. Protocol.DEFAULT_READER_TOKEN)
+    params.sg = sha256_hex(tostring(ts) .. tostring(rn) .. (opts.token or Protocol.DEFAULT_READER_TOKEN))
     params.s = Protocol.sign(Protocol.sortedQuery(params))
     return params
 end

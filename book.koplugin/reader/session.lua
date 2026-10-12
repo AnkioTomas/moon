@@ -217,6 +217,7 @@ local function syncReading(plugin)
     local identity = Session._snapshot and Session._snapshot.identity
     local source = identity and identity.source
     -- 进度要在时长之后推：微信时长上报也会写云端位置，最后落地的必须是精确进度。
+    if source then source:onEvent("reading_stopped", { identity = identity }) end
     local waiting, progress_saved = 2, false
     local function pushProgress()
         waiting = waiting - 1
@@ -288,6 +289,7 @@ function Session.onPageUpdate(plugin, page)
             page = session.page,
             total_pages = session.total_pages,
             percent = session.percent,
+            position = require("reader.session.progress").position(session),
         })
     end
 end
@@ -325,7 +327,7 @@ function Session.onSuspend(plugin)
     syncReading(plugin)
 end
 
---- 唤醒后恢复当前阅读会话的统计计时。
+--- 唤醒后恢复当前阅读会话的统计计时，并通知属主源（休眠时停掉的定时任务在这里重启）。
 ---@param plugin table Book 插件实例
 function Session.onResume(plugin)
     if not plugin.ui.document then
@@ -334,8 +336,15 @@ function Session.onResume(plugin)
     -- KOReader 在唤醒时可能重新应用 ReaderFooter/status_line 设置。
     -- 月读的用户偏好是持久状态，恢复阅读时必须再次收敛原生栏状态。
     require("features.bars").applyPreferences(plugin.ui)
-    if Session._snapshot then
-        require("reader.session.stats").start(Session._snapshot)
+    local session = Session._snapshot
+    if not session then return end
+    require("reader.session.stats").start(session)
+    local source = session.identity.source
+    if source then
+        source:onEvent("reading_resumed", {
+            identity = session.identity,
+            position = require("reader.session.progress").position(session),
+        })
     end
 end
 

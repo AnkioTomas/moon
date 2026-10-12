@@ -264,80 +264,140 @@ do
     fake_client.readStatsAsync = nil
 end
 
--- pushStatsAsync：无章节坐标的行无处可报，直接成功而非空转失败。
+toc_payload["bp"] = require("support.json_stub").encode({
+    { idx = 1, source_idx = 3, uid = "u1", title = "一" },
+    { idx = 2, source_idx = 5, uid = "u2", title = "二" },
+})
+
+-- pushStatsAsync 只在本地确认统计行，不发请求：服务端按真实间隔记 rt，事后补报记不上。
 do
     local src = WeChat.new()
-    local ok, err
-    src:pushStatsAsync({ { stable_id = "b1", duration = 10 } }, function(data, e)
-        ok, err = data, e
-    end)
-    Assert.not_nil(ok)
+    fake_client.reportReadAsync = function() error("统计行不得补报") end
+    local data, err
+    src:pushStatsAsync({
+        { id = 1, stable_id = "bp", chapter_idx = 1, duration = 10 },
+        { id = 2, stable_id = "bp", duration = 5 },
+    }, function(value, e) data, err = value, e end)
+    fake_client.reportReadAsync = nil
     Assert.is_nil(err)
+    Assert.len(data.synced_ids, 2)
+    Assert.eq(data.synced_ids[1], 1)
+    Assert.eq(data.synced_ids[2], 2)
 end
 
--- pushStatsAsync 逐章上报中途失败：只确认已报出去的章。
--- 若把全部行一起确认就会丢时长，若一条都不确认则下次重试把已报的章再报一遍（微信侧翻倍）。
+-- 阅读时长心跳（对齐 weread.koplugin）：开读起、每 30 秒固定 rt=30、不看翻页；
+-- 会话参数取自阅读页，满 15 分钟重建并重新进入；失败强制重建重报一次；离线跳过不补；关书即停。
 do
-    local src = WeChat.new()
-    toc_payload["bp"] = require("support.json_stub").encode({
-        { idx = 1, source_idx = 3, uid = "u1", title = "一" },
-        { idx = 2, source_idx = 5, uid = "u2", title = "二" },
-    })
-    require("source.wechat.context").clear()
-    local reported_payloads = {}
-    fake_client.reportReadAsync = function(_, payload, _, cb)
-        reported_payloads[#reported_payloads + 1] = payload
-        -- 第一章 enter + 时长成功，第二章 enter 失败
-        if #reported_payloads <= 2 then
-            cb({ succ = 1 })
-        else
-            cb(nil, "boom")
+    local UIManager = require("ui/uimanager")
+    local Net = require("ui/network/manager")
+    local real_in, real_un, real_time = UIManager.scheduleIn, UIManager.unschedule, os.time
+    local scheduled = {}
+    UIManager.scheduleIn = function(_self, delay, fn) scheduled[#scheduled + 1] = { delay = delay, fn = fn } end
+    UIManager.unschedule = function(_self, fn)
+        for i = #scheduled, 1, -1 do
+            if scheduled[i].fn == fn then table.remove(scheduled, i) end
         end
-        return { cancel = function() end }
     end
-    local data, err
-    -- 第二章更早读过、第一章是最近回翻重读的：最近读的最后报，位置取该章最后一段。
-    src:pushStatsAsync({
-        { id = 12, stable_id = "bp", chapter_idx = 2, duration = 20, start_time = 100, chapter_fraction = 0.9 },
-        { id = 11, stable_id = "bp", chapter_idx = 1, duration = 10, start_time = 300, chapter_fraction = 0.2 },
-        { id = 14, stable_id = "bp", chapter_idx = 1, duration = 7, start_time = 200, chapter_fraction = 0.8 },
-        { id = 13, stable_id = "bp", duration = 5 },
-    }, function(value, e) data, err = value, e end)
-    fake_client.reportReadAsync = nil
-    Assert.eq(#reported_payloads, 3)
-    Assert.is_nil(err)
-    local enter, time = reported_payloads[1], reported_payloads[2]
-    Assert.is_nil(enter.rt, "每个 reader 会话先发进入阅读，不带 rt")
-    Assert.eq(time.rt, 20)
-    Assert.eq(time.ci, 5, "时长上报必须使用微信原始 chapterIdx")
-    Assert.eq(time.pr, 95, "时长上报带真实全书进度，填 0 会把云端进度打回开头")
-    Assert.eq(time.co, 9000, "章内位置 = 章内进度 × 10000")
-    Assert.eq(time.sm, "二")
-    Assert.eq(time.pc, enter.pc, "时长上报与进入阅读共用同一个 pc")
-    Assert.is_true(time.ps ~= "" and time.ps ~= time.pc, "ps 本地生成且不同于 pc")
-    Assert.len(data.synced_ids, 2, "只确认无坐标行与已上报成功的那一章")
-    Assert.eq(data.synced_ids[1], 13)
-    Assert.eq(data.synced_ids[2], 12)
+    local now = 1800000000
+    os.time = function(t) return t and real_time(t) or now end
+    local function tick(seconds)
+        now = now + seconds
+        table.remove(scheduled, 1).fn()
+    end
 
-    -- 同一 reader 会话不再重复 enter
-    reported_payloads = {}
-    fake_client.reportReadAsync = function(_, payload, _, cb)
-        reported_payloads[#reported_payloads + 1] = payload
-        cb({ succ = 1 })
+    require("source.wechat.context").clear()
+    local src = WeChat.new()
+    local replies, reported, pages = {}, {}, 0
+    fake_client.reportReadAsync = function(_, payload, referer, cb)
+        reported[#reported + 1] = payload
+        payload.referer = referer
+        local reply = table.remove(replies, 1)
+        if reply == false then cb(nil, "boom") else cb(reply or { succ = 1, synckey = 1 }) end
         return { cancel = function() end }
     end
-    src:pushStatsAsync({
-        { id = 15, stable_id = "bp", chapter_idx = 2, duration = 30, start_time = 400, chapter_fraction = 0.5 },
-    }, function(value, e) data, err = value, e end)
+    fake_client.readerStateAsync = function(_, book_id, cb)
+        Assert.eq(book_id, "bp")
+        pages = pages + 1
+        cb({ psvts = "ps" .. pages, pclts = "pc" .. pages, token = "tk" })
+        return { cancel = function() end }
+    end
+    local page = {
+        identity = { source_id = "wechat", stable_id = "bp", chapter_idx = 2 },
+        position = { fraction = 0.25, chapter_idx = 2, chapter_fraction = 0.5, chapter_title = "二" },
+    }
+
+    src:onEvent("page_changed", page)
+    src:onEvent("page_changed", page)
+    Assert.len(reported, 0, "翻页不直接上报")
+    Assert.len(scheduled, 1, "同一本书只有一个心跳")
+    Assert.eq(scheduled[1].delay, 30)
+
+    tick(30)
+    Assert.eq(pages, 1, "首拍打开阅读页建会话")
+    Assert.len(reported, 2, "首拍先进入阅读，紧跟时长")
+    local enter, time = reported[1], reported[2]
+    Assert.is_nil(enter.rt)
+    Assert.eq(enter.ps, "ps1", "会话参数取自阅读页")
+    Assert.eq(enter.pc, "pc1")
+    Assert.eq(time.rt, 30, "rt 固定为心跳间隔")
+    Assert.eq(time.pc, "pc1")
+    Assert.eq(time.ci, 5, "带微信原始 chapterIdx")
+    Assert.eq(time.co, 5000, "章内位置 = 章内进度 × 10000")
+    Assert.eq(time.pr, 25, "带真实全书进度，填 0 会把云端进度打回开头")
+    Assert.eq(time.sm, "二")
+    Assert.eq(time.referer, require("source.wechat.protocol").readerUrl("bp"))
+
+    replies = { { succ = 1 } }
+    tick(30)
+    Assert.len(reported, 3, "已进入的会话只报时长；不翻页照报")
+    Assert.eq(reported[3].rt, 30)
+    tick(30)
+    Assert.eq(reported[4].rt, 30, "没 synckey 不补报、不改 rt")
+    Assert.eq(pages, 1)
+
+    replies = { false }
+    tick(30)
+    Assert.eq(pages, 2, "失败强制重开阅读页")
+    Assert.len(reported, 7, "失败一次 + 重建后进入 + 时长")
+    Assert.is_nil(reported[6].rt)
+    Assert.eq(reported[7].ps, "ps2")
+
+    local real_connected = Net.isConnected
+    Net.isConnected = function() return false end
+    tick(30)
+    Net.isConnected = real_connected
+    Assert.len(reported, 7, "离线跳过")
+    tick(30)
+    Assert.eq(reported[8].rt, 30, "离线那拍不补报")
+
+    for _i = 1, 30 do tick(30) end
+    Assert.eq(pages, 3, "会话建成满 15 分钟重建")
+    Assert.len(scheduled, 1, "长时间不翻页心跳也不停")
+
+    src:onEvent("reading_stopped", { identity = page.identity })
+    Assert.len(scheduled, 0, "关书 / 休眠即停")
+    src:onEvent("reading_resumed", page)
+    Assert.len(scheduled, 1, "唤醒立即重启，不等翻页")
+    local before = #reported
+    tick(30)
+    Assert.eq(reported[#reported].rt, 30)
+    Assert.eq(#reported, before + 1, "TTL 内的会话唤醒后沿用，不重新进入")
+    src:onEvent("reading_stopped", { identity = page.identity })
+    src.cfg.sync_reading_time = false
+    src:onEvent("page_changed", page)
+    Assert.len(scheduled, 0, "关闭同步阅读时间不起心跳")
+
     fake_client.reportReadAsync = nil
-    Assert.eq(#reported_payloads, 1)
-    Assert.eq(reported_payloads[1].rt, 30)
+    fake_client.readerStateAsync = nil
+    UIManager.scheduleIn, UIManager.unschedule, os.time = real_in, real_un, real_time
 end
 
 -- 章节开读立即 enter：服务端按距上次上报的真实间隔认 rt，
 -- 推时长时才 enter 会让紧随的 rt 被计成 0（用户看到永远 1 分钟）。
+-- 这里只验 enter；心跳会自我重排，flush 会一直跑，单独在上面的用例里测。
 do
     local src = WeChat.new()
+    src.cfg.sync_reading_time = false
     require("source.wechat.context").clear()
     local entered = {}
     fake_client.putProgressAsync = function(_, book_id, opts, cb)
@@ -359,11 +419,7 @@ do
     require("support.stubs").flush()
     Assert.len(entered, 1, "开读章节立即进入阅读")
     Assert.eq(entered[1].chapter_uid, "u1")
-    src:pushStatsAsync({
-        { id = 31, stable_id = "bp", chapter_idx = 1, duration = 40, start_time = 500, chapter_fraction = 0.3 },
-    }, function() end)
-    Assert.len(reported, 1, "已进入的会话推时长只发 rt，不再补 enter")
-    Assert.eq(reported[1].rt, 40)
+    Assert.len(reported, 0, "开章只进入阅读，时长交给心跳")
 
     -- 开书拉云端进度期间挂起 enter，拉取回调之后再发，避免 enter 写的位置吞掉进度冲突。
     local pull_cb
@@ -402,87 +458,6 @@ do
     fake_client.putProgressAsync = nil
     fake_client.reportReadAsync = nil
     fake_client.getProgressAsync = nil
-end
-
--- 关闭同步阅读时间：不发任何上报，本地行全部确认，重新开启后不补报。
-do
-    local src = WeChat.new()
-    src.cfg.sync_reading_time = false
-    local reported = 0
-    fake_client.reportReadAsync = function(_, _, _, cb)
-        reported = reported + 1
-        cb({ succ = 1 })
-        return { cancel = function() end }
-    end
-    local data, err
-    src:pushStatsAsync({
-        { id = 41, stable_id = "bp", chapter_idx = 1, duration = 10 },
-        { id = 42, stable_id = "bp", duration = 5 },
-    }, function(value, e) data, err = value, e end)
-    fake_client.reportReadAsync = nil
-    Assert.eq(reported, 0, "关闭后不得上报")
-    Assert.is_nil(err)
-    Assert.len(data.synced_ids, 2)
-    Assert.eq(data.synced_ids[1], 41)
-    Assert.eq(data.synced_ids[2], 42)
-end
-
--- 全部章节都上报失败时不能报成功：一行都没确认就该让调用方看到错误并重试。
-do
-    local src = WeChat.new()
-    fake_client.reportReadAsync = function(_, _, _, cb)
-        cb(nil, "boom")
-        return { cancel = function() end }
-    end
-    local data, err
-    src:pushStatsAsync({
-        { id = 21, stable_id = "bp", chapter_idx = 1, duration = 10 },
-    }, function(value, e) data, err = value, e end)
-    fake_client.reportReadAsync = nil
-    Assert.is_nil(data)
-    Assert.eq(err, "boom")
-end
-
--- 翻页不得直接上报阅读时长：微信侧时长唯一来源是 pushStatsAsync（本地采集补报）。
--- 一旦这里又开一路心跳，同一段阅读时间会被微信计两遍。
-do
-    local src = WeChat.new()
-    local reported = 0
-    fake_client.reportReadAsync = function(_, _, _, cb)
-        reported = reported + 1
-        cb({ ok = true })
-        return { cancel = function() end }
-    end
-    src:onEvent("page_changed", {
-        identity = { source_id = "wechat", stable_id = "b1", chapter_idx = 2 },
-        percent = 0.5,
-    })
-    src:onEvent("document_close", nil)
-    Assert.eq(reported, 0, "翻页/关书不得直接上报时长")
-    fake_client.reportReadAsync = nil
-end
-
--- 阅读中按 30 秒节流冲刷本地脏统计：只走 syncStatsAsync(dirty_only)，窗口内翻页不重复触发。
-do
-    local src = WeChat.new()
-    src.configured = function() return true end
-    local flushes = {}
-    src.syncStatsAsync = function(_, opts, cb)
-        flushes[#flushes + 1] = opts
-        cb({})
-    end
-    src:onEvent("page_changed", {})
-    src:onEvent("page_changed", {})
-    Assert.len(flushes, 1, "30 秒内翻页只冲刷一次")
-    Assert.is_true(flushes[1].dirty_only)
-    src._stats_flushed_at = os.time() - 30
-    src:onEvent("page_changed", {})
-    Assert.len(flushes, 2, "过了节流窗口再冲刷")
-
-    local idle = WeChat.new()
-    idle.configured = function() return false end
-    idle.syncStatsAsync = function() error("未登录不应冲刷") end
-    idle:onEvent("page_changed", {})
 end
 
 -- getDetailAsync：wire 经 mapper 转 Book，并把封面 URL 记进缓存供 coverRequest 用

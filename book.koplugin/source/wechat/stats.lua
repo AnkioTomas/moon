@@ -156,7 +156,7 @@ function Stats.fromWires(source_id, overall, annuals, monthlies, books, fetched_
     local rows = {}
     local total = tonumber(field(overall, "totalReadTime"))
     if total and total > 0 then
-        rows[#rows + 1] = statsRow(source_id, TOTAL_ID, "total", 0, total)
+        rows[#rows + 1] = statsRow(source_id, TOTAL_ID, "total", 0, total, fetched_at)
     end
     local ranges = {
         { stable_prefix = TOTAL_ID, from_ts = 0, to_ts = 0 },

@@ -51,4 +51,39 @@ do
     Assert.eq(fresh.pclts, Protocol.encode(now))
 end
 
+-- 时长上报会话：按书缓存，自建成起满 15 分钟（或 force）重开阅读页；阅读页没给 pclts 用建成时间。
+do
+    Context.clear()
+    local opened = 0
+    local client = {
+        readerStateAsync = function(_self, book_id, cb)
+            Assert.eq(book_id, "b1")
+            opened = opened + 1
+            cb({ psvts = "ps" .. opened, token = "tk" })
+        end,
+    }
+    local first
+    Context.sessionAsync(client, "b1", false, function(s) first = s end)
+    Assert.eq(first.psvts, "ps1")
+    Assert.eq(first.pclts, Protocol.encode(now))
+    Assert.eq(first.token, "tk")
+    first.entered = true
+    now = now + 15 * 60 - 1
+    local again
+    Context.sessionAsync(client, "b1", false, function(s) again = s end)
+    Assert.is_true(again == first, "TTL 内复用，连续阅读也不续期")
+    Context.sessionAsync(client, "b1", true, function(s) again = s end)
+    Assert.eq(opened, 2, "force 重开阅读页")
+    Assert.is_nil(again.entered, "重建后要重新进入阅读")
+    now = now + 15 * 60
+    Context.sessionAsync(client, "b1", false, function(s) again = s end)
+    Assert.eq(again.psvts, "ps3", "满 TTL 重建")
+
+    local err
+    client.readerStateAsync = function(_self, _book_id, cb) cb(nil, "boom") end
+    Context.sessionAsync(client, "b1", true, function(s, e) again, err = s, e end)
+    Assert.is_nil(again)
+    Assert.eq(err, "boom")
+end
+
 os.time = real_time

@@ -92,6 +92,32 @@ package.loaded["source.wechat.client"] = nil
 
 local client = require("source.wechat.client")
 
+-- 阅读页取会话参数：psvts 必需，pclts / token 可缺；没有 psvts 的页面（登录页、WAF）按失败。
+do
+    local Protocol = require("source.wechat.protocol")
+    local url = Protocol.readerUrl("rs1")
+    web_replies[url] = '<script>window.__INITIAL_STATE__={"reader":{"psvts":"PS","pclts":"PC","token":"TK"}}</script>'
+    local state
+    client:readerStateAsync("rs1", function(s) state = s end)
+    Assert.eq(captured[#captured], url)
+    Assert.eq(state.psvts, "PS")
+    Assert.eq(state.pclts, "PC")
+    Assert.eq(state.token, "TK")
+
+    web_replies[url] = '<script>{"psvts" : "PS2"}</script>'
+    client:readerStateAsync("rs1", function(s) state = s end)
+    Assert.eq(state.psvts, "PS2")
+    Assert.is_nil(state.pclts)
+    Assert.is_nil(state.token)
+
+    web_replies[url] = "<html>login</html>"
+    local err
+    client:readerStateAsync("rs1", function(s, e) state, err = s, e end)
+    Assert.is_nil(state)
+    Assert.eq(err, "reader.psvts not found")
+    web_replies[url] = nil
+end
+
 do
     posted = {}
     client:editReviewAsync({ reviewId = "rv-1", content = "修改" }, function() end)

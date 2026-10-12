@@ -144,6 +144,31 @@ function Client:putProgressAsync(bookId, opts, cb)
     end)
 end
 
+--- 打开网页阅读页，取时长上报会话参数 psvts / pclts / token（weread.koplugin 同款正则）。
+---@param bookId string
+---@param cb fun(state: { psvts: string, pclts: string|nil, token: string|nil }|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:readerStateAsync(bookId, cb)
+    local url = Protocol.readerUrl(bookId)
+    return Auth.webGetAsync(url, { headers = { Referer = url } }, function(raw, err)
+        if not raw then
+            cb(nil, err)
+            return
+        end
+        local psvts = raw:match([["psvts"%s*:%s*"([^"]+)"]])
+        if not psvts then
+            logger.warn("weread reader page without psvts", raw:sub(1, 120))
+            cb(nil, "reader.psvts not found")
+            return
+        end
+        cb({
+            psvts = psvts,
+            pclts = raw:match([["pclts"%s*:%s*"([^"]+)"]]),
+            token = raw:match([["token"%s*:%s*"([^"]+)"]]),
+        })
+    end)
+end
+
 --- 上报阅读行为（进度与时长共用的 /web/book/read 接口）。
 ---@param body table 已签名的请求体
 ---@param referer string|nil Referer 头，缺省用站点首页
