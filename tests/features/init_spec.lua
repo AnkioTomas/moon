@@ -48,6 +48,7 @@ for _, name in ipairs({
     "ui.themes",
     "ui.themes.widgets.mask",
     "ui.themes.widgets.pager",
+    "ui.themes.widgets.tabbar",
     "ui.themes.widgets.text",
 }) do
     package.preload[name] = function() return widget() end

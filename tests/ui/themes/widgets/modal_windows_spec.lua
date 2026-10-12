@@ -52,6 +52,7 @@ package.preload["features.sidebar.info"] = function()
 end
 Kit.sections.reader = {}
 Kit.sections.xray = { book_xray_enabled = true }
+Kit.sections.sidebar = { sidebar_hidden_tabs = {} }
 require("device").hasClipboard = function() return false end
 
 local Modal = require("ui.themes.widgets.modal")
