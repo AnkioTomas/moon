@@ -45,7 +45,7 @@ end
 
 package.loaded["features.lockscreen.components.minimal"] = nil
 local Minimal = require("features.lockscreen.components.minimal")
-Assert.eq(Minimal.uses_background, false, "极简固定白底，不跟随用户背景")
+Assert.is_nil(Minimal.uses_background, "背景归背景设置，主体不再自带")
 
 local rect = { x = 0, y = 0, w = 600, h = 800 }
 

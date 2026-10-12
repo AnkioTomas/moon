@@ -1,5 +1,5 @@
 --[[--
-组合锁屏：普通主体由资源 × 组件 × 布局合成为 compose.png；direct 资源直接使用原图。
+组合锁屏：背景 × 主体组件 × 布局合成为 compose.png。
 
 @module koplugin.book.features.lockscreen.compose
 --]]
@@ -31,9 +31,7 @@ function M.plan()
     local component = M.component()
     local background_mode = settings.lock_screen_background or "bing"
     if not Background.validMode(background_mode) then background_mode = "bing" end
-    local asset = component.asset
-        or (component.uses_background == false and Background.background("none")
-            or Background.background(background_mode))
+    local asset = Background.background(background_mode)
     local position = settings.lock_screen_position or "center-center"
     if component.supports_position == false or not Layout.validPosition(position) then
         position = "center-center"
@@ -49,7 +47,7 @@ function M.plan()
         supports_narrow = component.supports_narrow == true,
         offline = asset.network ~= true and component.needs_network ~= true,
         source_path = source_path,
-        output_path = asset.direct and source_path or COMPOSE_PATH,
+        output_path = COMPOSE_PATH,
     }
 end
 
@@ -70,6 +68,9 @@ function M.dayKey(plan)
         plan.wide and "wide" or "narrow",
         plan.source_path or "",
     }
+    if asset.cache_key then
+        parts[#parts + 1] = asset.cache_key()
+    end
     if component.cache_key then
         parts[#parts + 1] = tostring(component.cache_key())
     end
@@ -87,7 +88,7 @@ function M.cacheValid(plan, force)
     -- compose.png 是本模块原子写出的（.part + rename），存在且非空即完整，不必整张解码。
     return MoonSettings.get("features.lockscreen").lock_screen_day == M.dayKey(plan)
         and Background.isFresh(plan.asset)
-        and (plan.asset.direct or (lfs.attributes(plan.output_path, "size") or 0) > 0)
+        and (lfs.attributes(plan.output_path, "size") or 0) > 0
 end
 
 --- 将主体声明的相对高度换算为像素高度。
@@ -124,10 +125,10 @@ local function buildBlocks(component, position, wide)
     return component.blocks(rect)
 end
 
---- 背景就绪后合成；direct 资源直接用原图。
+--- 背景就绪后合成。
 --- 返回值是可取消任务；本地背景在本次调用中同步完成，返回 nil。
 ---@param plan table
----@param cb fun(ok: boolean, err: any, output_path: string|nil) output_path 仅 direct 资源给出
+---@param cb fun(ok: boolean, err: any)
 ---@return table|nil
 function M.build(plan, cb)
     local cancelled, done = false, false
@@ -136,10 +137,12 @@ function M.build(plan, cb)
         if cancelled then return end
         done = true
         if err then return cb(false, err) end
-        if plan.asset.direct then return cb(true, nil, path) end
         -- 建块与写盘同步完成，中途不会被取消；块里的 widget 由 Render.write 释放。
+        local sw, sh = Layout.portraitSize()
+        local backdrop = plan.asset.blocks and plan.asset.blocks({ x = 0, y = 0, w = sw, h = sh, pad = 0 })
         local blocks = buildBlocks(plan.component, plan.position, plan.wide)
-        local ok, render_err = require("features.lockscreen.render").write(COMPOSE_PATH, path, blocks)
+        local ok, render_err = require("features.lockscreen.render").write(COMPOSE_PATH,
+            { path = path, contain = plan.asset.contain, blocks = backdrop }, blocks)
         if not ok and path and tostring(render_err):find("cannot decode background", 1, true) then
             Background.invalidate(plan.asset)
         end

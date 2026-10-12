@@ -79,6 +79,20 @@ list = List:new{ items = items(3), centered = true }
 Assert.is_true(list.mask)
 Assert.eq(list[1]:getSize().w, 480)
 
+-- 居中分页：末页不满也补成整页高，面板不跳；变矮（换成少项）时连底下窗口一起重画，
+-- 否则网纹遮罩下露出旧面板。
+list = List:new{ items = items(1), centered = true }
+local per_page = list.per_page
+list:setItems(items(per_page + 2))
+local full_h = list[1]:getSize().h
+list:goPage(2)
+Assert.len(Kit.taps(list), 2)
+Assert.eq(list[1]:getSize().h, full_h, "末页面板与首页同高")
+Assert.eq(Kit.dirty[#Kit.dirty].widget, list)
+list:setItems(items(1))
+Assert.is_true(list[1]:getSize().h < full_h)
+Assert.eq(Kit.dirty[#Kit.dirty].widget, "all", "面板变矮重画整屏")
+
 -- 项自带 callback：单选代替 on_select；keep_open 的项不关窗。
 local calls, on_select_n = {}, 0
 list = List:new{ items = {

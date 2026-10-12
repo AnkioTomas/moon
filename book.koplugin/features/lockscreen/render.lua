@@ -115,8 +115,9 @@ end
 ---@param w number 输出宽度
 ---@param h number 输出高度
 ---@param fill table|nil 纯色底颜色，缺省白色
+---@param contain boolean|nil 整图缩进画布、两侧留底色；缺省铺满裁切
 ---@return boolean, any
-local function paintBackground(bb, path, w, h, fill)
+local function paintBackground(bb, path, w, h, fill, contain)
     bb:fill(fill or Blitbuffer.COLOR_WHITE)
     if not path then
         return true
@@ -141,7 +142,7 @@ local function paintBackground(bb, path, w, h, fill)
             image_disposable = true,
             width = w,
             height = h,
-            scale_factor = math.max(w / iw, h / ih),
+            scale_factor = (contain and math.min or math.max)(w / iw, h / ih),
             alpha = true,
         }
         image:paintTo(bb, 0, 0)
@@ -321,18 +322,23 @@ end
 
 --- 生成 PNG，成功后原子替换。
 --- 原子替换保证 KOReader 不会读到半张 compose.png。
+--- 背景 = 图片（path，contain 时整图缩进）+ 自绘块（blocks，如海报墙）；主体 blocks 画在其上，
+--- cutout_circle 挖出的是整个背景。
 ---@param path string
----@param background string|nil
+---@param background {path: string|nil, contain: boolean|nil, blocks: table[]|nil}|nil
 ---@param blocks table[]
 ---@param fill table|nil 无背景图时的底色，缺省白色
 ---@return boolean, any
 function M.write(path, background, blocks, fill)
     Paths.ensureScreensaverDir()
     local w, h = Layout.portraitSize()
+    local backdrop = background and background.blocks or {}
     local background_copy
     local ok, err = writePNG(path, w, h, function(bb)
-        local bg_ok, bg_err = paintBackground(bb, background, w, h, fill)
+        local bg_ok, bg_err = paintBackground(bb, background and background.path, w, h, fill,
+            background and background.contain)
         if not bg_ok then error(bg_err) end
+        for _idx, block in ipairs(backdrop) do M.paintBlock(bb, block, w, h) end
         for _idx, block in ipairs(blocks) do
             if block.kind == "cutout_circle" then
                 background_copy = bb:copy()
@@ -343,6 +349,7 @@ function M.write(path, background, blocks, fill)
             M.paintBlock(bb, block, w, h, background_copy)
         end
     end)
+    freeWidgets(backdrop)
     freeWidgets(blocks)
     if background_copy then background_copy:free() end
     return ok, err

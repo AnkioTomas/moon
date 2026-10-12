@@ -97,6 +97,30 @@ local ok_run, err_run = pcall(function()
     Assert.eq(conf.lock_screen_folder, "/mnt/us/walls")
     Assert.is_nil(conf.lock_screen_day)
     conf.lock_screen_custom_image, conf.lock_screen_folder = previous_image, previous_folder
+
+    -- 背景主体拆分：旧的自带背景主体搬成「背景, 主体」，只迁一次。
+    local previous_bg, previous_component, previous_split =
+        conf.lock_screen_background, conf.lock_screen_component, conf.lock_screen_split
+    local cases = {
+        { "myrl", "myrl", "none" },
+        { "poster", "poster", "none" },
+        { "cover_card", "cover", "capsule" },
+        { "minimal", "none", "minimal" },
+        { "current", "bing", "current" },
+    }
+    for _idx, case in ipairs(cases) do
+        conf.lock_screen_split, conf.lock_screen_background, conf.lock_screen_component = nil, "bing", case[1]
+        Settings.migrate()
+        Assert.eq(conf.lock_screen_background, case[2], case[1])
+        Assert.eq(conf.lock_screen_component, case[3], case[1])
+        Assert.is_true(conf.lock_screen_split)
+    end
+    -- 迁过之后用户给极简另选背景，不得被改回白底。
+    conf.lock_screen_background = "bing"
+    Settings.migrate()
+    Assert.eq(conf.lock_screen_background, "bing")
+    conf.lock_screen_background, conf.lock_screen_component, conf.lock_screen_split =
+        previous_bg, previous_component, previous_split
     MoonSettings.save("features.lockscreen")
 end)
 

@@ -279,10 +279,9 @@ local ok_run, err_run = pcall(function()
     Stubs.flush()
     Assert.is_true(render_writes > 0)
 
-    -- myrl 主体触网；日报不再是独立背景。图归 online。
-    Settings.setBackgroundMode("bing")
-    Settings.setComponent("myrl")
-    Assert.eq(Compose.plan().background_mode, "bing")
+    -- 摸鱼日报是背景：触网下图（图归 online），再合成进 compose.png。
+    Settings.setBackgroundMode("myrl")
+    Settings.setComponent("none")
     Assert.eq(Compose.plan().asset.id, "myrl")
     local myrl_img = require("utils.paths").onlineCacheDir() .. "/myrl.png"
     require("online.myrl"):invalidateImage()
@@ -292,8 +291,8 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(refreshed)
     Assert.not_nil(last_download.url)
     Assert.is_true(tostring(last_download.url):find("myrl", 1, true) ~= nil)
-    Assert.eq(saved.screensaver_document_cover, myrl_img)
-    Assert.eq(saved.screensaver_document_cover ~= compose_path, true)
+    Assert.eq(saved.screensaver_document_cover, compose_path)
+    Assert.eq(lfs.attributes(myrl_img, "mode"), "file")
 
     -- 图丢了必须再下，即使组合日标记还在。
     require("online.myrl"):invalidateImage()

@@ -16,7 +16,7 @@ local Background = require("features.lockscreen.background")
 local Components = require("features.lockscreen.components.base")
 local Layout = require("features.lockscreen.layout")
 local Bill = require("features.lockscreen.components.bill")
-local Poster = require("features.lockscreen.components.poster")
+local Poster = require("features.lockscreen.poster")
 local Image = require("utils.image")
 local Text = require("utils.text")
 local _ = require("gettext")
@@ -167,27 +167,31 @@ function Lockscreen:rows(desktop)
 
     local plan = Compose.plan()
     local component = plan.component
-    if component.uses_background ~= false then
-        local background = plan.background_mode
+    local background = plan.background_mode
+    rows[#rows + 1] = choiceRow(desktop, {
+        icon = "image", title = _("背景"), status = Background.label(background),
+        items = Background.options(), current = background, apply = Settings.setBackgroundMode,
+    })
+    if background == "custom" then
+        local path = Background.customImage()
+        local w, h = Layout.portraitSize()
+        rows[#rows + 1] = navRow{
+            icon = "image", title = _("选择图片"),
+            subtitle = string.format("%s · %d × %d", path, w, h),
+            callback = function() choosePath(desktop, path, true, Settings.setCustomImage) end,
+        }
+    elseif background == "folder" then
+        local path = Background.folder()
+        rows[#rows + 1] = navRow{
+            icon = "folder", title = _("选择文件夹"), subtitle = path,
+            callback = function() choosePath(desktop, path, false, Settings.setFolder) end,
+        }
+    elseif background == "poster" then
+        local style = Poster.style()
         rows[#rows + 1] = choiceRow(desktop, {
-            icon = "image", title = _("背景"), status = Background.label(background),
-            items = Background.options(), current = background, apply = Settings.setBackgroundMode,
+            icon = "view_module", title = _("海报风格"), status = Poster.styleLabel(style),
+            items = Poster.styleOptions(), current = style, apply = Settings.setPosterStyle,
         })
-        if background == "custom" then
-            local path = Background.customImage()
-            local w, h = Layout.portraitSize()
-            rows[#rows + 1] = navRow{
-                icon = "image", title = _("选择图片"),
-                subtitle = string.format("%s · %d × %d", path, w, h),
-                callback = function() choosePath(desktop, path, true, Settings.setCustomImage) end,
-            }
-        elseif background == "folder" then
-            local path = Background.folder()
-            rows[#rows + 1] = navRow{
-                icon = "folder", title = _("选择文件夹"), subtitle = path,
-                callback = function() choosePath(desktop, path, false, Settings.setFolder) end,
-            }
-        end
     end
 
     local component_label = _("无")
@@ -219,12 +223,6 @@ function Lockscreen:rows(desktop)
         rows[#rows + 1] = choiceRow(desktop, {
             icon = "date_range", title = _("账单周期"), status = Bill.periodLabel(period),
             items = Bill.periodOptions(), current = period, apply = Settings.setBillPeriod,
-        })
-    elseif component.id == "poster" then
-        local style = Poster.style()
-        rows[#rows + 1] = choiceRow(desktop, {
-            icon = "view_module", title = _("海报风格"), status = Poster.styleLabel(style),
-            items = Poster.styleOptions(), current = style, apply = Settings.setPosterStyle,
         })
     elseif component.id == "message" then
         local text = Settings.customMessage()

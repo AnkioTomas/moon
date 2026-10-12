@@ -50,6 +50,9 @@ package.preload["features.lockscreen.components.util"] = function()
         coverBlock = function(_, x, y, w, h)
             return { kind = "panel", x = x, y = y, width = w, height = h }
         end,
+        bookHead = function(_, subtitle, x, y, width)
+            return { { text = subtitle, x = x, y = y, width = width } }, y + 20
+        end,
         progressBlocks = function(x, y, width)
             return { { kind = "rule", x = x, y = y, width = width, height = 8 } }, 8
         end,

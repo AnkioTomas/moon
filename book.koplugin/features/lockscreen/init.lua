@@ -53,7 +53,7 @@ function M.refresh(cb, force, reason)
         plan.wide and "wide" or "narrow")
     local generation = Settings.revision()
     local build
-    build = Compose.build(plan, function(ok, err, path)
+    build = Compose.build(plan, function(ok, err)
         if job == build then job = nil end
         if not Settings.isCompose() or generation ~= Settings.revision() then
             logger.dbg("book.lockscreen refresh discarded", reason,
@@ -68,10 +68,9 @@ function M.refresh(cb, force, reason)
         end
         MoonSettings.get("features.lockscreen").lock_screen_day = Compose.dayKey(plan)
         MoonSettings.save("features.lockscreen")
-        local output_path = path or plan.output_path
-        Settings.applyCover(output_path)
+        Settings.applyCover(plan.output_path)
         logger.dbg("book.lockscreen refresh done", reason,
-            Perf.elapsedMs(started_at), "ms", output_path)
+            Perf.elapsedMs(started_at), "ms", plan.output_path)
         if cb then cb(true) end
     end)
     job, job_revision = build, generation
@@ -101,6 +100,7 @@ end
 --- 插件启动：缓存失效时先撤下旧图（别让上次的配置冒充），下一帧补生成。
 function M.onCreate()
     hookScreensaver()
+    Settings.migrate()
     if not Settings.isCompose() then
         logger.dbg("book.lockscreen onCreate skipped", "mode_disabled")
         return

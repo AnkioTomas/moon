@@ -86,6 +86,38 @@ function U.chapterLine(book)
     return _("阅读中")
 end
 
+--- 书卡文字头：书名（粗）、作者、副标题自上而下按实测行高堆叠，每行压成单行；
+--- 长书名折行或字体行高变化都不会压住下一行。空行跳过。
+---@param book table
+---@param subtitle string|nil
+---@param x number
+---@param y number
+---@param width number
+---@return table[] blocks
+---@return number bottom 最后一行之下的 y
+function U.bookHead(book, subtitle, x, y, width)
+    local measure = require("features.lockscreen.render").measureText
+    local Title = require("features.lockscreen.title")
+    local lines = {
+        { text = book.title, size = 18, min = 15, bold = true },
+        { text = book.authors, size = 14, min = 13, color = U.MUTED },
+        { text = subtitle, size = 14, min = 13, color = U.MUTED },
+    }
+    local blocks = {}
+    for _idx, line in ipairs(lines) do
+        if line.text and line.text ~= "" then
+            local function fit(text, w, size) return measure(text, w, size, line.bold) end
+            local text, size = Title.fitSingleLine(line.text, width, line.size, line.min, fit)
+            blocks[#blocks + 1] = {
+                text = text, x = x, y = y, width = width,
+                size = size, bold = line.bold, box = false, color = line.color,
+            }
+            y = y + fit(text, width, size) + 4
+        end
+    end
+    return blocks, y
+end
+
 --- 返回统一的进度百分比和页数文案。
 ---@param book table
 ---@return number, string
