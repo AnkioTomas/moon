@@ -52,7 +52,7 @@ local function cacheReady(path, value)
     end
 end
 
---- 章节 HTML 是否可直接复用（存在且远程 img 已内联）。
+--- 章节 HTML 是否可直接复用（存在、是 HTML 且远程 img 已内联）。
 ---@param path string|nil
 ---@return boolean
 local function chapterReady(path)
@@ -72,8 +72,13 @@ local function chapterReady(path)
     if cached and cached.signature == signature then
         return cached.ready
     end
+    -- write() 只落 HTML；旧版本曾把微信付费章的纯文本试读片段落盘，不是 HTML 的不算缓存。
+    local f = io.open(path, "rb")
+    local head = f and f:read(64)
+    if f then f:close() end
     -- nil 表示读文件失败，同样按未就绪处理。
-    local ready = Text.hasRemoteImageSrcInFile(path) == false
+    local ready = head ~= nil and head:find("^%s*<") ~= nil
+        and Text.hasRemoteImageSrcInFile(path) == false
     cacheReady(path, { signature = signature, ready = ready })
     return ready
 end
