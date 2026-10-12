@@ -15,8 +15,8 @@
        the original method is the rotation-aware hardware ioctl setup, which
        we preserve, and we additionally store swipe_forward for the software
        animation.
-    2. the SwipeAnimation module: full-refresh / clearing decisions and the
-       wipe animation itself (runSwipeAnimation), called from
+    2. the SwipeAnimation module: the wipe animation itself
+       (runSwipeAnimation), honoring KOReader's queued full refresh, called from
        UIManager:_repaint after the new page is painted.
     3. Kobo MTK fence immediately before the wipe loop: drain a leftover
        PARTIAL, or pay one AUTO+wait after a FULL, so the first strips are
@@ -96,11 +96,6 @@ local ok, err = pcall(function()
     end
 
     -- ==================== 2. SwipeAnimation module ====================
-    local logger = require("logger")
-    -- Module-level cache to avoid repeated requires on the _repaint hot path
-    local ReaderUI = require("apps/reader/readerui")
-    -- Shared animation tuning (single source of truth, defined in uimanager.lua)
-    local UIManager = require("ui/uimanager")
     -- For the frame delay sleep in the animation loop
     local ffi = require("ffi")
     -- Gray levels for the page-turn shadow
@@ -108,141 +103,43 @@ local ok, err = pcall(function()
 
     local SwipeAnimation = {}
 
-    ---------------------------------------------------------------
-    -- 2.1 Whether this turn needs a clearing refresh after the animation
-    ---------------------------------------------------------------
-    function SwipeAnimation.shouldDoClearing(self)
-        if not (self.FULL_REFRESH_COUNT and self.FULL_REFRESH_COUNT > 0) then
-            return false
-        end
-
-        self._swipe_full_refresh_count = (self._swipe_full_refresh_count or 0) + 1
-
-        if self._swipe_full_refresh_count >= self.FULL_REFRESH_COUNT then
-            self._swipe_full_refresh_count = 0
-            return true
-        end
-        return false
-    end
+    -- Frame delay (ms) and frame budget per orientation; fewer, faster
+    -- frames in landscape feel better.
+    local DELAY_MS = { landscape = 10, portrait = 20 }
+    local STEPS = { landscape = 6, portrait = 8 }
 
     ---------------------------------------------------------------
-    -- 2.2 Perform the clearing refresh (supports mild global refresh)
+    -- 2.1 Full refresh after the animation
+    --     KOReader has already queued a "full" refresh for this repaint when
+    --     one is due (refresh-count promotion, chapter boundary, image page).
+    --     The animation drops the queue, so read KOReader's decision first
+    --     instead of re-deriving it.
     ---------------------------------------------------------------
-    ---@param screen_w number
-    ---@param screen_h number
-    function SwipeAnimation.performClearing(self, screen_w, screen_h)
-        local mild = G_reader_settings:isTrue("swipe_animation_mild_global_refresh")
-
-        if mild then
-            Screen:refreshPartial(0, 0, screen_w, screen_h)
-            logger.dbg("SwipeAnimation: mild (partial) clearing refresh")
-        else
-            Screen:refreshFull(0, 0, screen_w, screen_h)
-            logger.dbg("SwipeAnimation: full clearing refresh")
-        end
-
-        self.refresh_count = 0
-        self._refresh_stack = {}
-    end
-
-    ---------------------------------------------------------------
-    -- 2.3 Whether a forced full refresh is needed (images / chapter boundaries)
-    --     Can be called before the animation; accurate prev_page is required
-    --     to correctly detect forward/backward chapter boundaries
-    ---------------------------------------------------------------
-    ---@param prev_page number|nil 翻页前的页码，缺省回退到 toc.pageno（精度更差）
+    ---@param stack table[] UIManager._refresh_stack
     ---@return boolean
-    function SwipeAnimation.shouldForceFullAfterAnimation(self, prev_page)
-        local instance = ReaderUI.instance
-        if not instance then
-            return false
+    local function wantsFull(stack)
+        for _idx, refresh in ipairs(stack) do
+            if refresh.mode == "full" then return true end
         end
-
-        -- ===== Images(ReaderView:paintTo) =====
-        local view = instance.view
-        if view then
-            local curr_coverage = view.img_coverage or 0
-            local prev_coverage = view._swipe_prev_img_coverage or 0
-            local coverage_diff = math.abs(curr_coverage - prev_coverage)
-
-            view._swipe_prev_img_coverage = curr_coverage
-
-            if curr_coverage >= 0.075 or coverage_diff >= 0.075 then
-                if G_reader_settings:nilOrTrue("refresh_on_pages_with_images") then
-                    return true
-                end
-            end
-        end
-
-        -- ===== Chapters (faithful recreation of ReaderToc:onPageUpdate) =====
-        local toc = instance.toc
-        if not toc then return false end
-
-        if not (self.FULL_REFRESH_COUNT == -1 or G_reader_settings:isTrue("refresh_on_chapter_boundaries")) then
-            return false
-        end
-
-        local paging = instance.paging
-        local rolling = instance.rolling
-        local current_page = (paging and paging.current_page) or (rolling and rolling.current_page)
-
-        if not current_page then return false end
-
-        -- If prev_page was not provided, fall back to toc.pageno
-        -- (which may already be the new page, so less accurate)
-        prev_page = prev_page or toc.pageno
-
-        local flash_on_second = G_reader_settings:nilOrFalse("no_refresh_on_second_chapter_page")
-        local paging_forward, paging_backward
-
-        if flash_on_second and prev_page then
-            if current_page > prev_page then
-                paging_forward = true
-            elseif current_page < prev_page then
-                paging_backward = true
-            end
-        end
-
-        if paging_backward and toc:isChapterEnd(current_page) then
-            return true
-        elseif toc:isChapterStart(current_page) then
-            return true
-        elseif paging_forward and toc:isChapterSecondPage(current_page) then
-            return true
-        end
-
         return false
     end
 
-    ---------------------------------------------------------------
-    -- 2.4 Actually trigger the full refresh
-    --     Supports mild global refresh, consistent with performClearing
-    ---------------------------------------------------------------
+    --- 动画后补一次整屏刷新；开了柔和全刷则用 partial（不闪屏）。
+    --- 身处 _repaint 内，setDirty 要等下一轮，只能直接刷。
     ---@param screen_w number
     ---@param screen_h number
-    function SwipeAnimation.forceFullAndReset(self, screen_w, screen_h)
-        -- We are inside _repaint, so we must refresh directly;
-        -- setDirty would be deferred to the next frame and become ineffective
-        local mild = G_reader_settings:isTrue("swipe_animation_mild_global_refresh")
-
-        if mild then
+    local function refreshAll(screen_w, screen_h)
+        if G_reader_settings:isTrue("swipe_animation_mild_global_refresh") then
             Screen:refreshPartial(0, 0, screen_w, screen_h)
-            logger.dbg("SwipeAnimation: mild (partial) forced refresh (image/chapter)")
         else
             Screen:refreshFull(0, 0, screen_w, screen_h)
-            logger.dbg("SwipeAnimation: forced full refresh (image/chapter)")
         end
-
-        self._swipe_full_refresh_count = 0
-        self.refresh_count = 0
-        self._refresh_stack = {}
     end
 
     ---------------------------------------------------------------
-    -- 2.5 Run the software wipe animation
+    -- 2.2 Run the software wipe animation
     --     Called from UIManager:_repaint (after the new page has been painted,
-    --     before the queued refreshes are executed). Handles the clearing /
-    --     forced-full decisions and the strip animation.
+    --     before the queued refreshes are executed).
     ---------------------------------------------------------------
     -- Interior cuts snap to `align` (Screen.alignment_constraint, 16 on
     -- Kobo MTK) so getBoundedRect does not expand neighbouring strips
@@ -611,86 +508,30 @@ local ok, err = pcall(function()
 
     --- 跑软件翻页动画：按所选风格把新页分块揭开，盖住旧页快照。
     --- 由 UIManager:_repaint 在新页画完、排队刷新执行前调用。
-    --- 清屏页（每 N 页）/ 图片页 / 章节边界照常播动画，播完再补一次全屏刷新。
-    --- 没有旧页快照时不播动画，只做需要的全屏刷新，其余排队刷新照常执行。
+    --- KOReader 本轮排了全刷（每 N 页 / 图片页 / 章节边界）时照常播动画，播完再补一次整屏刷新。
+    --- 没有旧页快照时不播动画，排队刷新（含全刷）原样交回 KOReader 执行。
     function SwipeAnimation.runSwipeAnimation(self)
-        local screen_w = Screen.bb:getWidth()
-        local screen_h = Screen.bb:getHeight()
-
-        -- Try to capture the previous page number before the animation decision
-        -- Note: by the time we reach _repaint, paging/toc may already reflect the new page,
-        -- so prev_page is not 100% reliable, but it is still better than not passing it
-        -- and letting shouldForceFull fall back to toc.pageno.
-        local prev_page = nil
-        do
-            local instance = ReaderUI.instance
-            if instance then
-                if instance.toc then
-                    prev_page = instance.toc.pageno
-                end
-                if not prev_page then
-                    prev_page = (instance.paging and instance.paging.current_page)
-                             or (instance.rolling and instance.rolling.current_page)
-                end
-            end
-        end
-
-        -- Decide before animating: shouldForceFullAfterAnimation reads the
-        -- page state and updates the image-coverage baseline.
-        local do_clearing = SwipeAnimation.shouldDoClearing(self)
-        local need_force_full = false
-        if not do_clearing then
-            need_force_full = SwipeAnimation.shouldForceFullAfterAnimation(self, prev_page)
-        end
-
-        local function finishRefresh()
-            if need_force_full then
-                SwipeAnimation.forceFullAndReset(self, screen_w, screen_h)
-            elseif do_clearing then
-                SwipeAnimation.performClearing(self, screen_w, screen_h)
-            end
-        end
-
         local saved_bb = Screen.saved_bb
         Screen.saved_bb = nil
+        if not saved_bb then return end
 
-        if not saved_bb then
-            finishRefresh()
-            return
-        end
-
-        -- ==================== Normal software swipe animation path ====================
+        local screen_w = Screen.bb:getWidth()
+        local screen_h = Screen.bb:getHeight()
+        local need_full = wantsFull(self._refresh_stack)
         local new_bb = Screen.bb:copy()
 
-        -- Support custom per-orientation animation frame delay set by the external plugin.
-        -- Defaults come from UIManager.swipe_animation_defaults (single source of truth).
-        local is_landscape = screen_w > screen_h
-        local delay_defaults = (UIManager.swipe_animation_defaults or {}).delay_ms or {}
-        local anim_refresh_mode = G_reader_settings:readSetting("swipe_animation_refresh_mode") or "ui"
-        local delay_ms
-        if is_landscape then
-            delay_ms = tonumber(G_reader_settings:readSetting("swipe_animation_delay_ms_horizontal"))
-        else
-            delay_ms = tonumber(G_reader_settings:readSetting("swipe_animation_delay_ms_vertical"))
-        end
-        if delay_ms == nil then
-            delay_ms = tonumber(G_reader_settings:readSetting("swipe_animation_delay_ms"))
-        end
-        -- Unset: 10/20ms for both UI and Fast. Explicit 0 means no usleep.
+        -- Per-orientation frame delay; settings may be inherited from the
+        -- external Swipe_Animation plugin. Explicit 0 means no usleep.
+        local orientation = screen_w > screen_h and "landscape" or "portrait"
+        local delay_ms = tonumber(G_reader_settings:readSetting(orientation == "landscape"
+            and "swipe_animation_delay_ms_horizontal" or "swipe_animation_delay_ms_vertical"))
+            or tonumber(G_reader_settings:readSetting("swipe_animation_delay_ms"))
         if delay_ms == nil or delay_ms < 0 then
-            delay_ms = is_landscape
-                and (delay_defaults.landscape or 10)
-                or  (delay_defaults.portrait or 20)
+            delay_ms = DELAY_MS[orientation]
         end
-
-        -- Hoisted for slight efficiency in the animation loop
-        local usleep = ffi and ffi.C and ffi.C.usleep
-
-        -- Use fewer animation steps in landscape mode for better visual feel
-        local step_defaults = (UIManager.swipe_animation_defaults or {}).steps or {}
-        local steps = is_landscape
-            and (step_defaults.landscape or 6)
-            or  (step_defaults.portrait or 8)
+        local usleep = ffi.C.usleep
+        local steps = STEPS[orientation]
+        local anim_refresh_mode = G_reader_settings:readSetting("swipe_animation_refresh_mode") or "ui"
         local swipe_forward = Screen.swipe_forward
         if swipe_forward == nil then
             -- Some framebuffer implementations never call setSwipeDirection();
@@ -729,7 +570,7 @@ local ok, err = pcall(function()
                 end
                 refresh_fn(Screen, r[1], r[2], r[3], r[4])
             end
-            if i < #frames and usleep and delay_ms > 0 then
+            if i < #frames and delay_ms > 0 then
                 usleep(delay_ms * 1000)
             end
         end
@@ -737,7 +578,7 @@ local ok, err = pcall(function()
         self._refresh_stack = {}
         new_bb:free()
         saved_bb:free()
-        finishRefresh()
+        if need_full then refreshAll(screen_w, screen_h) end
     end
 
     _G.SwipeAnimation = SwipeAnimation

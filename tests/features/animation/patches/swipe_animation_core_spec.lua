@@ -45,8 +45,6 @@ Screen.refreshPartial = recorder("partial")
 
 package.loaded["device"] = { screen = Screen, isKobo = function() return false end }
 package.loaded["logger"] = { dbg = function() end, warn = function(...) error(table.concat({ ... }, " ")) end }
-package.loaded["apps/reader/readerui"] = {}
-package.loaded["ui/uimanager"] = {}
 local BB = {
     COLOR_LIGHT_GRAY = "gray_c", COLOR_GRAY_9 = "gray_9", COLOR_GRAY_7 = "gray_7", COLOR_GRAY_4 = "gray_4",
 }
@@ -221,17 +219,16 @@ Assert.len(S.wipe(W, H, 200, 16, true), 67)
 
 --- 以给定风格跑一次动画，返回屏幕刷新记录。
 ---@param style string|nil
----@param ui table|nil UIManager 实例替身，缺省不清屏
+---@param stack table[]|nil 本轮 KOReader 排队的刷新，缺省只有一条 partial
 ---@param no_snapshot boolean|nil 模拟 beforePaint 没拍到旧页
-local function run(style, ui, no_snapshot)
+local function run(style, stack, no_snapshot)
     store.swipe_animation_style = style
     store.swipe_animation_delay_ms = 0
     Screen.bb = newBB(W, H)
     Screen.saved_bb = not no_snapshot and newBB(W, H) or nil
     Screen.swipe_forward = true
     Screen.refreshes = {}
-    ui = ui or { FULL_REFRESH_COUNT = 0 }
-    ui._refresh_stack = { "queued" }
+    local ui = { _refresh_stack = stack or { { mode = "partial" } } }
     SwipeAnimation.runSwipeAnimation(ui)
     Assert.is_nil(Screen.saved_bb, "快照被消费")
     return Screen.refreshes, Screen.bb.blits, ui
@@ -265,34 +262,26 @@ Assert.eq(p[4].color, BB.COLOR_GRAY_4)
 Assert.eq(p[4].x + p[4].w, refreshes[1].x, "向前翻阴影贴在第一条揭开区左侧")
 Assert.eq(refreshes[2].x, p[1].x) Assert.eq(refreshes[2].w, 16)
 
--- 每页全刷：每一页都照播动画，播完补一次整屏全刷（回归：以前清屏页整页跳过动画）。
-local every_page = { FULL_REFRESH_COUNT = 1 }
-for _ = 1, 3 do
-    local r, _, ui = run("wipe", every_page)
-    Assert.eq(kinds(r), "ui,ui,ui,ui,ui,ui,ui,ui,full")
-    Assert.eq(r[#r].w, W)
-    Assert.len(ui._refresh_stack, 0)
-end
+-- KOReader 本轮排了全刷（每 N 页 / 章节边界 / 图片页）：照播动画，播完补一次整屏全刷，队列清空。
+local r, _blits, ui = run("wipe", { { mode = "partial" }, { mode = "full" } })
+Assert.eq(kinds(r), "ui,ui,ui,ui,ui,ui,ui,ui,full")
+Assert.eq(r[#r].w, W)
+Assert.len(ui._refresh_stack, 0)
 
--- 每 3 页全刷：只有第 3 页在动画后补全刷，前两页只有动画。
-local every_three = { FULL_REFRESH_COUNT = 3 }
-Assert.eq(kinds((run("split", every_three))), "ui,ui,ui,ui,ui,ui,ui,ui")
-Assert.eq(kinds((run("split", every_three))), "ui,ui,ui,ui,ui,ui,ui,ui")
-Assert.eq(kinds((run("split", every_three))), "ui,ui,ui,ui,ui,ui,ui,ui,full")
-Assert.eq(kinds((run("split", every_three))), "ui,ui,ui,ui,ui,ui,ui,ui")
+-- 只有普通排队刷新：只播动画不补全刷；揭开已覆盖整屏，排队刷新丢弃。
+r, _blits, ui = run("split")
+Assert.eq(kinds(r), "ui,ui,ui,ui,ui,ui,ui,ui")
+Assert.len(ui._refresh_stack, 0)
 
 -- 柔和全刷设置：补的是整屏 partial 而不是闪屏 full。
 store.swipe_animation_mild_global_refresh = true
-refreshes = run("wipe_vertical", { FULL_REFRESH_COUNT = 1 })
+refreshes = run("wipe_vertical", { { mode = "full" } })
 Assert.eq(refreshes[#refreshes].kind, "partial")
 Assert.len(refreshes, STEPS + 1)
 store.swipe_animation_mild_global_refresh = nil
 
--- 没拍到旧页：不播动画，只做清屏；不清屏时排队刷新原样保留。
-local r, _, ui = run("wipe", { FULL_REFRESH_COUNT = 1 }, true)
-Assert.eq(kinds(r), "full")
-Assert.len(ui._refresh_stack, 0)
-r, _, ui = run("wipe", nil, true)
+-- 没拍到旧页：不播动画、不刷新，排队刷新（含全刷）原样交回 KOReader 执行。
+r, _blits, ui = run("wipe", { { mode = "full" } }, true)
 Assert.len(r, 0)
 Assert.len(ui._refresh_stack, 1)
 

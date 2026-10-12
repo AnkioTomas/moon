@@ -43,7 +43,7 @@ function Setting.entries(desktop)
                                     if not res.ok then
                                         require("ui.themes.widgets.toast"):new{
                                             text = require("ffi/util").template(
-                                                _("翻页动画补丁操作失败：%1"), tostring(res.err or "")),
+                                                _("翻页动画补丁操作失败：%1"), res.err),
                                             timeout = 3,
                                         }:show()
                                         return
