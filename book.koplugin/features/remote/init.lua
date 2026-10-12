@@ -15,6 +15,7 @@ KOReader 根、字体、插件、设置、Book 数据及书籍根目录不可删
 local logger = require("utils.log")
 local Settings = require("utils.settings")
 local Text = require("utils.text")
+local Guard = require("ui.guard")
 local _ = require("gettext")
 
 local Remote = {
@@ -42,13 +43,12 @@ local function storageLayout()
     local Paths = require("utils.paths")
     local data = assert(ffiUtil.realpath(DataStorage:getFullDataDir()), "KOReader data dir unavailable")
     local root = ffiUtil.dirname(data)
-    if type(root) ~= "string" or root == "" then root = data end
+    ---@cast root string
     local local_cfg = Settings.getSource("local")
     local home_dir = G_reader_settings:readSetting("home_dir")
     local book = ffiUtil.realpath(local_cfg.path or "")
         or ffiUtil.realpath(type(home_dir) == "string" and home_dir or "")
         or root
-    if type(book) ~= "string" or book == "" then book = root end
     --- realpath 取不到（路径尚不存在等）时退回原串，保证 roots 里没有 nil。
     ---@param p string
     ---@return string
@@ -186,19 +186,6 @@ local function newPath(path)
     return parent .. "/" .. ffiUtil.basename(path)
 end
 
---- 变更操作的全量保护判定：realpath 后命中重要路径本身或其祖先即拒。
----@param path string
----@return boolean
-local function isProtected(path)
-    path = require("ffi/util").realpath(path) or path
-    for _idx, protected in ipairs(layout().protected) do
-        -- 删除/移动祖先同样会带走重要路径，必须一起挡住。
-        if path == protected or Text.pathContains(path, protected) then
-            return true
-        end
-    end
-    return false
-end
 
 --- 配置/凭证文件本身或其目录内：一律不许读出去。
 ---@param path string
@@ -218,9 +205,8 @@ local function isSecret(path)
     return false
 end
 
---- 展示级 protected 判定：与 isProtected 同逻辑但免 realpath——目录列表每个
---- entry 都调一次，realpath 是一趟 FFI syscall，大目录下成百上千次会卡 UI。
---- 安全不降级：删除/改名在 deleteRecursive/renameTo 内部仍走 isProtected 全量校验。
+--- 展示级 protected 判定：命中重要路径本身或其祖先（删除/移动祖先同样会带走重要路径）。
+--- 免 realpath：目录列表每个 entry 都调一次，realpath 是一趟 FFI syscall，大目录下会卡 UI。
 ---@param path string
 ---@return boolean
 local function isProtectedDisplay(path)
@@ -230,6 +216,13 @@ local function isProtectedDisplay(path)
         end
     end
     return false
+end
+
+--- 变更操作的全量保护判定：先 realpath（堵软链绕过），删除/改名一律走这里。
+---@param path string
+---@return boolean
+local function isProtected(path)
+    return isProtectedDisplay(require("ffi/util").realpath(path) or path)
 end
 
 ---@return number
@@ -634,14 +627,14 @@ local function extractZip(archive)
         return nil, "target exists"
     end
     local staging = target .. ".moon-extract.part"
-    if lfs.attributes(staging) then deleteRecursive(staging) end
+    purge(staging)
     local made, make_err = lfs.mkdir(staging)
     if not made then return nil, make_err end
 
     local reader = require("ffi/archiver").Reader:new()
     local function fail(err)
         reader:close()
-        deleteRecursive(staging)
+        purge(staging)
         return nil, err
     end
     if not reader:open(archive) then
@@ -678,12 +671,12 @@ local function extractZip(archive)
     local iterate_err = reader.err
     reader:close()
     if iterate_err then
-        deleteRecursive(staging)
+        purge(staging)
         return nil, iterate_err
     end
     local moved, move_err = os.rename(staging, target)
     if not moved then
-        deleteRecursive(staging)
+        purge(staging)
         return nil, move_err
     end
     return target
@@ -754,11 +747,7 @@ local function getInput()
     if not widget then
         return { active = false }
     end
-    -- 共享剪贴板：带全文的把设备文本拉到网页端；getText 失败不拖垮状态查询
-    local ok, text = pcall(function()
-        return widget:getText() or ""
-    end)
-    return { active = true, text = ok and text or "" }
+    return { active = true, text = widget:getText() }
 end
 
 --- 远程输入：经 addChars 在光标处追加（正常键入路径，含撤销/重绘）。
@@ -789,7 +778,7 @@ local function hookClipboard()
         return
     end
     local Device = require("device")
-    if not (Device:hasClipboard() and Device.input) then
+    if not Device:hasClipboard() then
         return
     end
     local orig = Device.input.setClipboardText
@@ -808,10 +797,10 @@ end
 --- 网页 → 设备：写设备剪贴板 + 同步进激活输入框（无激活框只写剪贴板）。
 ---@param text string
 local function setClipboard(text)
-    Remote._clip = text or ""
+    Remote._clip = text
     local Device = require("device")
-    if Device:hasClipboard() and Device.input then
-        pcall(Device.input.setClipboardText, text)
+    if Device:hasClipboard() then
+        Device.input.setClipboardText(text)
     end
     local widget = activeInputWidget()
     if widget then
@@ -932,6 +921,18 @@ function Remote.start()
     hookClipboard()
     kindleHole(true)
     Remote._server = server
+    -- UIManager:processZMQs 不 pcall，这里抛错会带崩 KOReader。
+    -- 出错即停服：每轮都抛的 bug 否则每 50ms 刷一次日志，用户重开远程管理即可。
+    local wait = server.waitEvent
+    local function step(self)
+        wait(self)
+        return true
+    end
+    function server:waitEvent()
+        if not Guard.call("remote server", step, self) then
+            Guard.call("remote stop", Remote.stop)
+        end
+    end
     require("ui/uimanager"):insertZMQ(server)
     logger.info("book remote started on port", Remote.port())
     return true
@@ -950,20 +951,14 @@ function Remote.stop()
     logger.info("book remote stopped")
 end
 
--- ── 生命周期（main.lua 一行转发）───────────────────────
+-- ── 生命周期（features 钩子）───────────────────────────
 
 --- 插件 onCreate：挂截图分享入口；autostart 开启时自举（双实例调用幂等）。
 function Remote.onCreate()
-    -- ButtonDialog 依赖设备后端；离线加载插件时该后端不存在，不能拖垮远程主流程。
-    local ok_share, err_share = pcall(function()
-        require("features.remote.screenshot").onCreate()
-    end)
-    if not ok_share then
-        logger.warn("book remote screenshot share onCreate failed:", err_share)
-    end
+    require("features.remote.screenshot").onCreate()
     if Remote.autostartOn() then
         require("features.passcode").afterUnlock("remote", function()
-            require("ui/uimanager"):nextTick(require("ui.guard").wrap("remote autostart", function()
+            require("ui/uimanager"):nextTick(Guard.wrap("remote autostart", function()
                 local ok, err = Remote.start()
                 if not ok then
                     logger.warn("book remote autostart failed:", err)

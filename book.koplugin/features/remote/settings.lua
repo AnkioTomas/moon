@@ -1,7 +1,10 @@
 --[[--
 远程配置：白名单读写（连接类设置在浏览器填写）。
 
-GET 脱敏密钥；POST 里保留占位符 "******" 表示不修改该字段。
+内置分组与第三方源是同一种表单声明（RemoteSettingForm），网页按快照里的字段声明建表单。
+GET 脱敏密钥；POST 是部分更新：缺省的键不动，密钥字段的占位符 "******" 表示不修改。
+快照里 `builtin` / `external` 是表单列表；内置分组另按 id 平铺一份键值（`ai`、`moon`…），
+提交时内置分组按 id 提交、第三方源放在 `external[源 id]` 下。
 全部经 utils.settings 落盘，副作用（registry.invalidate、zlib 清会话、OPDS 重算底栏）与设备设置一致。
 
 @module koplugin.book.features.remote.settings
@@ -14,93 +17,210 @@ local SettingsApi = {}
 SettingsApi.MASK = "******"
 SettingsApi.BODY_LIMIT = 256 * 1024
 
----@type table<string, boolean>
-local SECRET_KEYS = {
-    ai_api_key = true,
-    token = true,
-    password = true,
-    webdav_password = true,
+---@class RemoteSettingField
+---@field key string 配置表里的键
+---@field label string
+---@field type string|nil 网页输入框类型，缺省 text
+---@field placeholder string|nil
+---@field secret boolean|nil 读取脱敏、占位符表示不改
+---@field normalize nil|fun(value: string): string|nil 缺省去首尾空白
+
+---@class RemoteSettingForm
+---@field id string 快照 / 提交里的分组键
+---@field name string
+---@field fields RemoteSettingField[]
+---@field owner string|nil utils.settings 的拥有者分区；缺省是同 id 的源配置（getSource）
+---@field invalidate boolean|nil 落盘后作废源实例（连接配置变了）
+---@field on_change nil|fun(cfg: table, changed: table<string, boolean>) 字段已改、落盘之前
+---@field commit nil|fun(cfg: table, values: table<string, string>): boolean 自己落盘，返回有无变化
+
+---@param v string
+---@return string
+local function raw(v)
+    return v
+end
+
+-- 网页只有中文，标签不走 gettext。
+---@type RemoteSettingForm[]
+local BUILTIN = {
+    {
+        id = "ai", name = "AI 服务", owner = "ai",
+        fields = {
+            { key = "ai_endpoint", label = "接口地址", type = "url", placeholder = "https://api.example.com/v1",
+                normalize = function(v) return Text.rtrimSlashes(Text.trim(v)) end },
+            { key = "ai_api_key", label = "API 密钥", secret = true, placeholder = "sk-…" },
+            { key = "ai_model", label = "模型", placeholder = "gpt-4o-mini" },
+        },
+    },
+    {
+        id = "copymanga", name = "拷贝漫画", invalidate = true,
+        fields = {
+            { key = "base_url", label = "站点地址", type = "url", normalize = Text.rtrimSlashes },
+            { key = "username", label = "账号" },
+            { key = "password", label = "密码", secret = true, normalize = raw },
+        },
+    },
+    {
+        id = "moon", name = "月读服务", invalidate = true,
+        fields = {
+            { key = "base_url", label = "服务器地址", type = "url", placeholder = "https://book.example.com",
+                normalize = Text.stripWhitespace },
+            { key = "token", label = "长期令牌", secret = true, placeholder = "bk_…", normalize = Text.stripWhitespace },
+        },
+    },
+    {
+        id = "zlib", name = "Z-Library（下载账号）",
+        fields = {
+            { key = "email", label = "邮箱", type = "email" },
+            { key = "password", label = "密码", secret = true, normalize = raw },
+            { key = "base_url", label = "镜像地址（可选）", type = "url", placeholder = "留空自动选择",
+                normalize = function(v)
+                    v = Text.trim(v)
+                    return v ~= "" and v or nil
+                end },
+        },
+        --- 换账号后旧会话作废；只换镜像不用重新登录。
+        on_change = function(cfg, changed)
+            if changed.email or changed.password then
+                cfg.user_id, cfg.user_key = nil, nil
+            end
+        end,
+    },
+    {
+        id = "opds", name = "OPDS 目录",
+        fields = {
+            { key = "url", label = "目录地址", type = "url", placeholder = "http://192.168.1.2:8083/opds（留空关闭）" },
+            { key = "username", label = "用户名（可选）" },
+            { key = "password", label = "密码（可选）", secret = true },
+        },
+        --- 规范化、清 feed 缓存都在 store.opds.setting.save；地址空 / 非空决定底栏有没有 OPDS 页签。
+        commit = function(cfg, values)
+            local function pick(key)
+                if values[key] == nil then return cfg[key] end
+                return values[key]
+            end
+            if not require("store.opds.setting").save(pick("url"), pick("username"), pick("password")) then
+                return false
+            end
+            require("source.registry").notifyChanged()
+            return true
+        end,
+    },
+    {
+        id = "local", name = "本地书库 WebDAV", invalidate = true,
+        fields = {
+            { key = "webdav_url", label = "WebDAV 地址", type = "url", placeholder = "https://dav.example.com/dav" },
+            { key = "webdav_username", label = "用户名" },
+            { key = "webdav_password", label = "密码", secret = true },
+            { key = "webdav_path", label = "目录" },
+        },
+    },
 }
 
---- 密钥脱敏：空值回空串，否则一律占位符。
----@param value string|nil
----@return string
-local function maskValue(value)
-    if value == nil or value == "" then
-        return ""
+--- 第三方源在设置模块里声明的远程表单字段：`setting.remote = RemoteSettingField[]`。
+---@return RemoteSettingForm[]
+local function externalForms()
+    local Registry = require("source.registry")
+    local out = {}
+    for _idx, meta in ipairs(Registry.list()) do
+        local desc = Registry.external(meta.id)
+        local fields = desc and desc.setting and desc.setting.remote
+        if fields then
+            out[#out + 1] = { id = meta.id, name = meta.name, fields = fields, invalidate = true }
+        end
     end
-    return SettingsApi.MASK
+    return out
 end
 
+---@param form RemoteSettingForm
+---@return table
+local function load(form)
+    local Settings = require("utils.settings")
+    if form.owner then return Settings.get(form.owner) end
+    return Settings.getSource(form.id)
+end
+
+---@param form RemoteSettingForm
 ---@param cfg table
----@param key string
----@param normalize fun(string): string
----@return boolean changed
-local function applyField(cfg, key, incoming, normalize)
-    -- /api/settings is PATCH-like: omitting a key must not erase its saved value.
-    if incoming == nil then
-        return false
+local function store(form, cfg)
+    local Settings = require("utils.settings")
+    if form.owner then
+        Settings.save(form.owner, cfg)
+    else
+        Settings.saveSource(form.id, cfg)
     end
-    if SECRET_KEYS[key] and incoming == SettingsApi.MASK then
-        return false
-    end
-    local next = normalize(tostring(incoming))
-    if cfg[key] ~= next then
-        cfg[key] = next
-        return true
-    end
-    return false
 end
 
----@return string
-local function asStr(value)
-    if value == nil then
-        return ""
+--- 表单快照：网页用的字段声明（密钥脱敏，normalize 不下发）+ 平铺的键值。
+---@param form RemoteSettingForm
+---@return table form_snapshot
+---@return table<string, string> values
+local function snapshotForm(form)
+    local cfg = load(form)
+    local fields, values = {}, {}
+    for idx, field in ipairs(form.fields) do
+        local value = cfg[field.key]
+        if field.secret then
+            value = (value == nil or value == "") and "" or SettingsApi.MASK
+        else
+            value = value == nil and "" or tostring(value)
+        end
+        values[field.key] = value
+        fields[idx] = {
+            key = field.key,
+            label = field.label,
+            type = field.secret and "password" or field.type or "text",
+            placeholder = field.placeholder or "",
+            value = value,
+        }
     end
-    return tostring(value)
+    return { id = form.id, name = form.name, fields = fields }, values
+end
+
+--- 部分更新一张表单：只认声明过的键，缺省键与密钥占位符不动。
+---@param form RemoteSettingForm
+---@param incoming table 网页提交的键值
+---@return boolean changed
+local function applyForm(form, incoming)
+    local cfg = load(form)
+    local values = {}
+    for _idx, field in ipairs(form.fields) do
+        local v = incoming[field.key]
+        if v ~= nil and not (field.secret and v == SettingsApi.MASK) then
+            values[field.key] = tostring(v)
+        end
+    end
+    if form.commit then return form.commit(cfg, values) end
+    local changed = {}
+    for _idx, field in ipairs(form.fields) do
+        local v = values[field.key]
+        if v ~= nil then
+            local value = (field.normalize or Text.trim)(v)
+            if cfg[field.key] ~= value then
+                cfg[field.key] = value
+                changed[field.key] = true
+            end
+        end
+    end
+    if next(changed) == nil then return false end
+    if form.on_change then form.on_change(cfg, changed) end
+    store(form, cfg)
+    if form.invalidate then require("source.registry").invalidate() end
+    return true
 end
 
 ---@return table
 function SettingsApi.snapshot()
-    local Settings = require("utils.settings")
-    local ai = Settings.get("ai")
-    local moon = Settings.getSource("moon")
-    local copymanga = Settings.getSource("copymanga") or {}
-    local zlib = Settings.getSource("zlib")
-    local opds = Settings.getSource("opds")
-    local localSource = Settings.getSource("local")
-    return {
-        ai = {
-            ai_endpoint = asStr(ai.ai_endpoint),
-            ai_api_key = maskValue(ai.ai_api_key),
-            ai_model = asStr(ai.ai_model),
-        },
-        moon = {
-            base_url = asStr(moon.base_url),
-            token = maskValue(moon.token),
-        },
-        copymanga = {
-            base_url = asStr(copymanga.base_url),
-            username = asStr(copymanga.username),
-            password = maskValue(copymanga.password),
-        },
-        zlib = {
-            email = asStr(zlib.email),
-            password = maskValue(zlib.password),
-            base_url = asStr(zlib.base_url),
-        },
-        opds = {
-            url = asStr(opds.url),
-            username = asStr(opds.username),
-            password = maskValue(opds.password),
-        },
-        ["local"] = {
-            webdav_url = asStr(localSource.webdav_url),
-            webdav_username = asStr(localSource.webdav_username),
-            webdav_password = maskValue(localSource.webdav_password),
-            webdav_path = asStr(localSource.webdav_path),
-        },
-    }
+    local out = { builtin = {}, external = {} }
+    for idx, form in ipairs(BUILTIN) do
+        local snapshot, values = snapshotForm(form)
+        out.builtin[idx] = snapshot
+        out[form.id] = values
+    end
+    for idx, form in ipairs(externalForms()) do
+        out.external[idx] = (snapshotForm(form))
+    end
+    return out
 end
 
 ---@param payload table
@@ -110,100 +230,19 @@ function SettingsApi.apply(payload)
     if type(payload) ~= "table" then
         return nil, "invalid json"
     end
-    local Settings = require("utils.settings")
     local changed = false
-
-    if type(payload.ai) == "table" then
-        local cfg = Settings.get("ai")
-        local g = payload.ai
-        local ai_changed = applyField(cfg, "ai_endpoint", g.ai_endpoint, function(v)
-            return Text.rtrimSlashes(Text.trim(v))
-        end)
-        ai_changed = applyField(cfg, "ai_api_key", g.ai_api_key, Text.trim) or ai_changed
-        ai_changed = applyField(cfg, "ai_model", g.ai_model, Text.trim) or ai_changed
-        if ai_changed then
-            Settings.save("ai", cfg)
-            changed = true
+    for _idx, form in ipairs(BUILTIN) do
+        if type(payload[form.id]) == "table" then
+            changed = applyForm(form, payload[form.id]) or changed
         end
     end
-
-    if type(payload.moon) == "table" then
-        local cfg = Settings.getSource("moon")
-        local g = payload.moon
-        local moon_changed = applyField(cfg, "base_url", g.base_url, Text.stripWhitespace)
-        moon_changed = applyField(cfg, "token", g.token, Text.stripWhitespace) or moon_changed
-        if moon_changed then
-            Settings.saveSource("moon", cfg)
-            require("source.registry").invalidate()
-            changed = true
-        end
-    end
-
-    if type(payload.zlib) == "table" then
-        local cfg = Settings.getSource("zlib")
-        local g = payload.zlib
-        local zlib_changed = applyField(cfg, "email", g.email, Text.trim)
-        zlib_changed = applyField(cfg, "password", g.password, tostring) or zlib_changed
-        if zlib_changed then
-            cfg.user_id, cfg.user_key = nil, nil
-        end
-        if g.base_url ~= nil then
-            local base = Text.trim(tostring(g.base_url))
-            local next_base = base ~= "" and base or nil
-            if cfg.base_url ~= next_base then
-                cfg.base_url = next_base
-                zlib_changed = true
+    if type(payload.external) == "table" then
+        for _idx, form in ipairs(externalForms()) do
+            if type(payload.external[form.id]) == "table" then
+                changed = applyForm(form, payload.external[form.id]) or changed
             end
         end
-        if zlib_changed then
-            Settings.saveSource("zlib", cfg)
-            changed = true
-        end
     end
-
-    if type(payload.opds) == "table" then
-        local cfg = Settings.getSource("opds")
-        local g = payload.opds
-        --- 缺省键保持原值；密码占位符同样表示不改。
-        local function pick(key)
-            if g[key] == nil or (SECRET_KEYS[key] and g[key] == SettingsApi.MASK) then return cfg[key] end
-            return tostring(g[key])
-        end
-        if require("store.opds.setting").save(pick("url"), pick("username"), pick("password")) then
-            -- 地址空/非空决定底栏有没有 OPDS 页签。
-            require("source.registry").notifyChanged()
-            changed = true
-        end
-    end
-
-    if type(payload.copymanga) == "table" then
-        local cfg = Settings.getSource("copymanga") or {}
-        local g = payload.copymanga
-        local changed_group = applyField(cfg, "base_url", g.base_url, Text.rtrimSlashes)
-        changed_group = applyField(cfg, "username", g.username, Text.trim) or changed_group
-        changed_group = applyField(cfg, "password", g.password, tostring) or changed_group
-        if changed_group then
-            -- Credentials and endpoint affect the active client/session.
-            Settings.saveSource("copymanga", cfg)
-            require("source.registry").invalidate()
-            changed = true
-        end
-    end
-
-    if type(payload["local"]) == "table" then
-        local cfg = Settings.getSource("local")
-        local g = payload["local"]
-        local local_changed = false
-        for _idx, key in ipairs({ "webdav_url", "webdav_username", "webdav_password", "webdav_path" }) do
-            local_changed = applyField(cfg, key, g[key], Text.trim) or local_changed
-        end
-        if local_changed then
-            Settings.saveSource("local", cfg)
-            require("source.registry").invalidate()
-            changed = true
-        end
-    end
-
     return { ok = true, changed = changed, settings = SettingsApi.snapshot() }
 end
 

@@ -149,7 +149,6 @@ package.preload["features.bars.page"] = function()
         end,
     }
 end
-package.preload["features.remote.ui"] = function() return { menuRows = function() return {} end } end
 package.preload["features.ime"] = function()
     return { isEnabled = function() return false end }
 end

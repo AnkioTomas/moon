@@ -1,17 +1,4 @@
 /* 连接配置页逻辑（依赖 /js.js） */
-function setFormState(id, text, kind) {
-    setState(el(id), text, kind);
-}
-
-function fillFields(map) {
-    Object.keys(map).forEach(function (id) {
-        var node = el(id);
-        if (node && map[id] != null) {
-            node.value = map[id];
-        }
-    });
-}
-
 function readGroup(form) {
     var data = {};
     var nodes = form.querySelectorAll('input[name]');
@@ -32,53 +19,88 @@ function saveGroup(groupName, payload) {
     });
 }
 
+/* 按设备下发的字段声明建表单（只建一次，之后只回填值）。
+   内置分组按 id 提交；第三方源（external）提交到 external[源 id]。 */
+function renderForms(list, external) {
+    var grid = document.querySelector('.settings-grid');
+    var prefix = external ? 'form-ext-' : 'form-';
+    list.forEach(function (src) {
+        var formId = prefix + src.id;
+        var form = el(formId);
+        if (!form) {
+            form = document.createElement('form');
+            form.id = formId;
+            form.className = 'panel cfg-form';
+            form.autocomplete = 'off';
+            var title = document.createElement('h2');
+            title.textContent = src.name;
+            form.appendChild(title);
+            src.fields.forEach(function (f) {
+                var field = document.createElement('div');
+                field.className = 'field';
+                var label = document.createElement('label');
+                var input = document.createElement('input');
+                input.id = formId + '-' + f.key;
+                input.name = f.key;
+                input.type = f.type;
+                input.placeholder = f.placeholder;
+                label.htmlFor = input.id;
+                label.textContent = f.label;
+                field.appendChild(label);
+                field.appendChild(input);
+                form.appendChild(field);
+            });
+            var btns = document.createElement('div');
+            btns.className = 'btns';
+            var button = document.createElement('button');
+            button.type = 'submit';
+            button.className = 'primary';
+            button.textContent = '保存' + src.name + '配置';
+            btns.appendChild(button);
+            form.appendChild(btns);
+            var state = document.createElement('div');
+            state.className = 'state';
+            state.setAttribute('role', 'status');
+            state.setAttribute('aria-live', 'polite');
+            form.appendChild(state);
+            grid.appendChild(form);
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                var group = src.id;
+                var payload = readGroup(form);
+                if (external) {
+                    group = 'external';
+                    payload = {};
+                    payload[src.id] = readGroup(form);
+                }
+                setState(state, '保存中…', '');
+                saveGroup(group, payload).then(function () {
+                    setState(state, '已保存', 'ok');
+                    return loadSettings();
+                }).catch(function (err) {
+                    setState(state, String(err), 'err');
+                });
+            });
+        }
+        src.fields.forEach(function (f) {
+            el(formId + '-' + f.key).value = f.value;
+        });
+    });
+}
+
+/* 空列表经 Lua JSON 编码成 {}，不是数组。 */
+function formList(v) {
+    return Array.isArray(v) ? v : [];
+}
+
 function loadSettings() {
     return jfetch('/api/settings').then(function (data) {
-        fillFields({
-            ai_endpoint: data.ai.ai_endpoint,
-            ai_api_key: data.ai.ai_api_key,
-            ai_model: data.ai.ai_model,
-            moon_base_url: data.moon.base_url,
-            moon_token: data.moon.token,
-            copymanga_base_url: data.copymanga.base_url,
-            copymanga_username: data.copymanga.username,
-            copymanga_password: data.copymanga.password,
-            zlib_email: data.zlib.email,
-            zlib_password: data.zlib.password,
-            zlib_base_url: data.zlib.base_url,
-            opds_url: data.opds.url,
-            opds_username: data.opds.username,
-            opds_password: data.opds.password,
-            webdav_url: data.local.webdav_url,
-            webdav_username: data.local.webdav_username,
-            webdav_password: data.local.webdav_password,
-            webdav_path: data.local.webdav_path,
-        });
+        renderForms(formList(data.builtin), false);
+        renderForms(formList(data.external), true);
         setState(el('loadstate'), '已加载设备配置', 'ok');
     }).catch(function (err) {
         setState(el('loadstate'), String(err), 'err');
     });
 }
-
-function bindForm(formId, groupName, stateId) {
-    var form = el(formId);
-    form.addEventListener('submit', function (e) {
-        e.preventDefault();
-        setFormState(stateId, '保存中…', '');
-        saveGroup(groupName, readGroup(form)).then(function () {
-            setFormState(stateId, '已保存', 'ok');
-            return loadSettings();
-        }).catch(function (err) {
-            setFormState(stateId, String(err), 'err');
-        });
-    });
-}
-
-bindForm('form-ai', 'ai', 'state-ai');
-bindForm('form-moon', 'moon', 'state-moon');
-bindForm('form-zlib', 'zlib', 'state-zlib');
-bindForm('form-opds', 'opds', 'state-opds');
-bindForm('form-copymanga', 'copymanga', 'state-copymanga');
-bindForm('form-local', 'local', 'state-local');
 
 loadSettings();

@@ -83,22 +83,39 @@ package.preload["device"] = function()
         isKindle = function() return false end,
     }
 end
+local zmqs = {}
 package.preload["ui/uimanager"] = function()
     return {
-        insertZMQ = function() end,
-        removeZMQ = function() end,
+        insertZMQ = function(_self, zmq) zmqs[zmq] = true end,
+        removeZMQ = function(_self, zmq) zmqs[zmq] = nil end,
     }
 end
 
-local server_opts
+local reported = {}
+package.preload["ui.guard"] = function()
+    return {
+        call = function(label, fn, ...)
+            local res = { pcall(fn, ...) }
+            if res[1] then return unpack(res, 2) end
+            reported[#reported + 1] = label
+        end,
+    }
+end
+
+local server_opts, server_inst
+local server_throws = false
 package.preload["features.remote.server"] = function()
     return {
         new = function(opts)
             server_opts = opts
-            return {
+            server_inst = {
                 start = function() return true end,
                 stop = function() end,
+                waitEvent = function()
+                    if server_throws then error("boom") end
+                end,
             }
+            return server_inst
         end,
     }
 end
@@ -308,5 +325,18 @@ do
 end
 
 Remote.stop()
+
+-- processZMQs 不 pcall：waitEvent 抛错要被拦下并停服，不能带崩 KOReader。
+Assert.is_true(Remote.start())
+local zmq = server_inst
+Assert.is_true(zmqs[zmq])
+Assert.is_nil(zmq:waitEvent(), "正常一轮返回 nil，UIManager 结束本轮迭代")
+Assert.is_true(Remote.isRunning())
+Assert.len(reported, 0)
+server_throws = true
+Assert.is_nil(zmq:waitEvent())
+Assert.eq(reported[1], "remote server")
+Assert.is_false(Remote.isRunning())
+Assert.is_nil(zmqs[zmq], "出错后摘掉轮询，不再每 50ms 重抛")
 
 return true

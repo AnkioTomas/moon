@@ -17,28 +17,26 @@ local File = {}
 -- FAT32 单文件上限以下留出余量；更大的文件不适合经阅读器缓存中转。
 File.MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
----@return number
-local function mutationErrorCode(err)
-    err = tostring(err or "")
-    if err == "protected path" or err == "path outside managed roots" then
-        return 403
-    end
-    if err == "not found" then
-        return 404
-    end
-    if err == "already exists" or err == "target exists" or err == "target is not a file" then
-        return 409
-    end
-    if err == "archive too large" then
-        return 413
-    end
-    if err == "not a zip archive" or err == "unsafe archive path"
-        or err == "unsupported archive entry" or err == "too many archive entries"
-    then
-        return 400
-    end
-    return 500
-end
+--- handler 错误串 → HTTP 状态码；不在表里的都是 500。
+local ERROR_CODES = {
+    ["protected path"] = 403,
+    ["path outside managed roots"] = 403,
+    ["not found"] = 404,
+    ["already exists"] = 409,
+    ["target exists"] = 409,
+    ["target is not a file"] = 409,
+    ["archive too large"] = 413,
+    ["not a zip archive"] = 400,
+    ["unsafe archive path"] = 400,
+    ["unsupported archive entry"] = 400,
+    ["too many archive entries"] = 400,
+}
+
+-- 不走 utils/image：它认 .svg，同源 inline 下发 SVG 等于把脚本放进管理页的源里。
+local IMAGE_TYPES = {
+    [".png"] = "image/png", [".jpg"] = "image/jpeg", [".jpeg"] = "image/jpeg",
+    [".gif"] = "image/gif", [".webp"] = "image/webp", [".bmp"] = "image/bmp",
+}
 
 ---@param path string
 ---@param parent string|nil
@@ -78,7 +76,7 @@ local function mutationDone(self, conn, op)
         if conn.dead then return end
         if not ok then
             logger.warn("book remote mutate failed", op, err)
-            conn.resp = self.errorResp(mutationErrorCode(err), err)
+            conn.resp = self.errorResp(ERROR_CODES[err] or 500, err)
             return
         end
         logger.dbg("book remote mutate done", op)
@@ -146,11 +144,7 @@ function File.download(self, conn, method, path, inline)
     local size = file:seek("end") or 0
     file:seek("set", 0)
     local name = real:match("([^/]+)$") or "file"
-    local ext = name:lower():match("(%.[^.]*)$")
-    local ctype = ({
-        [".png"] = "image/png", [".jpg"] = "image/jpeg", [".jpeg"] = "image/jpeg",
-        [".gif"] = "image/gif", [".webp"] = "image/webp", [".bmp"] = "image/bmp",
-    })[ext] or "application/octet-stream"
+    local ctype = IMAGE_TYPES[name:lower():match("(%.[^.]*)$")] or "application/octet-stream"
     local extra = nil
     if inline ~= "1" then
         extra = { "Content-Disposition: attachment; filename*=UTF-8''" .. Text.urlEncode(name) }
@@ -193,8 +187,7 @@ function File.upload(self, conn, method, headers, dir, name, conflict)
     if conflict ~= "ask" and conflict ~= "overwrite" and conflict ~= "skip" and conflict ~= "rename" then
         return self:_fail(conn, 400, "Bad conflict policy")
     end
-    if conflict == "ask" and self.handlers.path_exists
-        and self.handlers.path_exists(dir .. "/" .. name) then
+    if conflict == "ask" and self.handlers.path_exists(dir .. "/" .. name) then
         return self:_fail(conn, 409, "File exists")
     end
     if headers["transfer-encoding"] then
@@ -241,8 +234,8 @@ end
 ---@param conn table
 ---@param method string
 ---@param path string|nil 目标绝对路径
----@param fn fun(path: string, cb: fun(ok: boolean|nil, err: any)) 实际变更操作
-function File.mutate(self, conn, method, path, fn)
+---@param op "mkdir"|"delete" handlers 里的同名操作
+function File.mutate(self, conn, method, path, op)
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
@@ -250,13 +243,11 @@ function File.mutate(self, conn, method, path, fn)
     if not target then
         return
     end
-    if fn == self.handlers.delete
-        and (self:_isRoot(target) or self.handlers.is_protected(target)) then
+    if op == "delete" and (self:_isRoot(target) or self.handlers.is_protected(target)) then
         return self:_fail(conn, 403, "Protected path")
     end
-    local op = fn == self.handlers.delete and "delete" or "mkdir"
     conn.state = "pending"
-    fn(target, mutationDone(self, conn, op .. " " .. target))
+    self.handlers[op](target, mutationDone(self, conn, op .. " " .. target))
     return true
 end
 
