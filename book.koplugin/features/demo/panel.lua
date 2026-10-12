@@ -41,7 +41,7 @@ quick_panel_reader_actions 的 id 保持用户原来的启用和排序；不在�
 注册表首次用到时会一次性 require 全部 panel.lua：顶层不要 require 快捷面板（会绕回去），
 也不要 require 重模块，放进 run / available 里延迟加载。
 
-@module koplugin.book.features.tpl.panel
+@module koplugin.book.features.demo.panel
 --]]
 
 local Panel = {}
