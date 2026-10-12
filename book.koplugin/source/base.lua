@@ -316,11 +316,20 @@ function SourceBase:syncStatsAsync(opts, cb)
     return require("book.stats").syncAsync(self, opts, cb)
 end
 
---- 基类不支持封面请求。
----@param _identity BookIdentity
+--- 默认封面：书库 `books.cover` 里的公开 URL。图书馆列表行不带 cover，只能按身份查库。
+--- 需要鉴权头或本地提取的源自己覆盖。
+---@param identity BookIdentity
 ---@return BookCoverRequest|nil, string|nil
-function SourceBase:coverRequest(_identity)
-    return nil, _("当前数据源不支持封面")
+function SourceBase:coverRequest(identity)
+    local url = identity.cover
+    if type(url) ~= "string" or url == "" then
+        local row = require("book.books_db").get(self.id, identity.stable_id)
+        url = row and row.cover
+    end
+    if type(url) ~= "string" or not url:match("^https?://") then
+        return nil, _("无封面")
+    end
+    return { url = url }
 end
 
 SourceBase.SourceCapabilities = SourceCapabilities

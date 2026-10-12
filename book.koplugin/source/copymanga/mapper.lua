@@ -4,7 +4,7 @@
 @module koplugin.book.source.copymanga.mapper
 --]]
 
-local Catalog = require("book.catalog")
+local Text = require("utils.text")
 
 local Mapper = {}
 local SOURCE_ID = "copymanga"
@@ -44,61 +44,40 @@ function Mapper.book(row)
     if type(row) ~= "table" or type(row.path_word) ~= "string" or row.path_word == "" then
         return nil
     end
+    local intro = row.intro or row.brief
     return {
         source_id = SOURCE_ID,
         stable_id = row.path_word,
         title = row.name,
         authors = names(row.author),
         category = row.category or names(row.theme),
-        intro = row.intro or row.brief,
+        intro = intro and Text.stripHtml(intro),
         cover = row.cover,
         percent = tonumber(row.percent) or 0,
         deleted = (row.deleted == true or tonumber(row.deleted) == 1) and 1 or nil,
     }
 end
 
---- 列表 JSON → 标准书城列表。搜索 / 发现 / 收藏共用。
----@param wire table
----@return BookListResult
-function Mapper.search(wire)
-    local root = resultsOf(wire)
+--- 收藏行（见 Client:collectAllAsync）→ 在架书。
+---@param rows table[]
+---@return Book[]
+function Mapper.collect(rows)
     local books = {}
-    for _idx, row in ipairs(root.list or {}) do
+    for _idx, row in ipairs(rows) do
         local book = Mapper.book(row)
-        if book then books[#books + 1] = book end
+        if book then
+            book.deleted = 0
+            books[#books + 1] = book
+        end
     end
-    return Catalog.listResult(books, tonumber(root.total) or #books)
-end
-
---- 收藏列表：同一 list 结构，标记在架。
----@param wire table
----@return BookListResult
-function Mapper.collect(wire)
-    local result = Mapper.search(wire)
-    for _idx, book in ipairs(result.data) do
-        book.deleted = 0
-    end
-    return result
+    return books
 end
 
 --- comic2 JSON → 书籍元数据。
----@param stable_id string
 ---@param wire table
 ---@return Book|nil
-function Mapper.detail(stable_id, wire)
-    local comic = resultsOf(wire).comic
-    if type(comic) ~= "table" then return nil end
-    return Mapper.book({
-        path_word = (type(comic.path_word) == "string" and comic.path_word ~= "")
-            and comic.path_word or stable_id,
-        name = comic.name,
-        author = comic.author,
-        theme = comic.theme,
-        brief = comic.brief,
-        intro = comic.intro,
-        cover = comic.cover,
-        category = comic.category,
-    })
+function Mapper.detail(wire)
+    return Mapper.book(resultsOf(wire).comic)
 end
 
 --- comic2 JSON → 云端收藏用的漫画 uuid。

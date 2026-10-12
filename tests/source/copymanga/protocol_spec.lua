@@ -43,7 +43,7 @@ end
 do
     local images, err = Protocol.chapterImages({})
     Assert.is_nil(images)
-    Assert.eq(err, "chapter payload missing")
+    Assert.eq(err, "章节图片解析失败")
 end
 
 do
@@ -51,5 +51,5 @@ do
         chapter = { contents = { { url = "not-a-url" } }, words = { 0 } },
     })
     Assert.is_nil(images)
-    Assert.eq(err, "chapter images empty")
+    Assert.eq(err, "章节图片解析失败")
 end

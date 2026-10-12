@@ -58,7 +58,7 @@ fake_client.setCollectAsync = function(_, comic_id, on, cb)
 end
 fake_client.collectAllAsync = function(_, cb)
     calls[#calls + 1] = "collectAll"
-    cb({ results = { list = {} } })
+    cb({})
     return { cancel = function() end }
 end
 

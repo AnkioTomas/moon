@@ -27,7 +27,12 @@ local Chapter = require("source.copymanga.chapter")
 
 local calls = {}
 local fail_at
-Chapter.materializeAsync = function(_, _, _, idx, _, cb)
+-- 章节 CBZ 按 uuid 命名，不随目录里的连续章号漂移。
+Assert.eq(Chapter.archivePath({ source_id = "copymanga", stable_id = "comic" }, { idx = 7, uid = "uuid-7" }),
+    "/tmp/uuid-7.cbz")
+
+Chapter.materializeAsync = function(_, _, chapter, _, cb)
+    local idx = chapter.idx
     calls[#calls + 1] = idx
     if fail_at == idx then
         require("ui/uimanager"):nextTick(function() cb(nil, "fail") end)

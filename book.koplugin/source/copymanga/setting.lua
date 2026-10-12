@@ -73,8 +73,8 @@ function Setting.rows()
         function(iw)
             local cfg = require("utils.settings").getSource(SOURCE_ID)
             return require("ui.themes.widgets.row").widget({
-    width = iw,
-    chevron = true,
+                width = iw,
+                chevron = true,
                 kind = "nav",
                 icon = "dns",
                 title = _("站点地址"),
@@ -91,8 +91,8 @@ function Setting.rows()
                 status, status_on = _("未登录 · 点此登录"), false
             end
             return require("ui.themes.widgets.row").widget({
-    width = iw,
-    chevron = true,
+                width = iw,
+                chevron = true,
                 kind = "nav",
                 icon = "account_circle",
                 title = _("拷贝漫画账号"),
@@ -105,8 +105,8 @@ function Setting.rows()
     if not Auth.hasSession() then return rows end
     rows[#rows + 1] = function(iw)
         return require("ui.themes.widgets.row").widget({
-    width = iw,
-    chevron = false,
+            width = iw,
+            chevron = false,
             kind = "action",
             icon = "logout",
             title = _("退出登录"),

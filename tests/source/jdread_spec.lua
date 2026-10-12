@@ -77,12 +77,25 @@ do
     Assert.is_false(type(source.pushStatsAsync) == "function")
 end
 
--- 封面直接挂在 Book 上随书库落盘，源不再自带封面缓存
+-- 图书馆列表行不带 cover：基类按身份查书库取 URL；非 http 或缺失给 nil
 do
     local source = Jdread.new()
-    local req, err = source:coverRequest({ stable_id = "42" })
+    local stored = {
+        ["42"] = { cover = "https://img.jd.com/42.jpg" },
+        ["43"] = { cover = "${free_list[i].cover}" },
+    }
+    local BookDB = require("book.books_db")
+    BookDB.get = function(source_id, stable_id)
+        Assert.eq(source_id, "jdread")
+        return stored[stable_id]
+    end
+    Assert.eq(source:coverRequest({ stable_id = "42" }).url, "https://img.jd.com/42.jpg")
+    Assert.eq(source:coverRequest({ stable_id = "42", cover = "https://x/y.jpg" }).url, "https://x/y.jpg")
+    local req, err = source:coverRequest({ stable_id = "43" })
     Assert.is_nil(req)
-    Assert.eq(err, "当前数据源不支持封面")
+    Assert.eq(err, "无封面")
+    Assert.is_nil((source:coverRequest({ stable_id = "44" })))
+    BookDB.get = nil
 end
 
 -- syncBooksAsync：本地独有成员上行，pushed 填实
