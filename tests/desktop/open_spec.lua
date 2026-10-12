@@ -139,3 +139,15 @@ Stubs.flush()
 Assert.is_false(done_ok)
 Assert.len(shown, shown_before)
 ReaderUI.instance = nil
+
+-- 源已自行展示（在线漫画查看器）：算成功，不开阅读器、不提示、不关桌面。
+done_ok = nil
+local handled_plugin = { desktop = {} }
+local toasts = #Themed.all("toast")
+Open.book(handled_plugin, book, function(ok) done_ok = ok end)
+open_callbacks[9](nil, nil, { handled = true })
+Stubs.flush()
+Assert.is_true(done_ok)
+Assert.len(shown, shown_before)
+Assert.len(Themed.all("toast"), toasts)
+Assert.is_true(handled_plugin.desktop ~= nil)
