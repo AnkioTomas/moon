@@ -14,7 +14,6 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Languages = require("features.translate.languages")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
-local List = require("ui.themes.widgets.list")
 local Modal = require("ui.themes.widgets.modal")
 local Pager = require("ui.themes.widgets.pager")
 local Text = require("ui.themes.widgets.text")
@@ -27,7 +26,8 @@ local Screen = Device.screen
 ---@class BookTranslatePopup : BookThemeModal
 ---@field translator table|nil KOReader Translator 单例
 ---@field text string 待译原文
----@field translated string|nil 译文或状态占位
+---@field translated string|nil 译文；未就绪时 nil
+---@field status string|nil 无译文时显示的状态（翻译中 / 失败原因）
 ---@field source_lang string|nil
 ---@field target_lang string|nil
 ---@field detected_lang string|nil
@@ -70,68 +70,21 @@ function TranslatePopup:turn(dir)
     UIManager:setDirty(self, "ui")
 end
 
---- 弹出语言单选（常用语言 + 全部语言）。
----@param self BookTranslatePopup
----@param title string
----@param include_auto boolean
----@param current string|nil
----@param on_pick fun(code: string)
-function TranslatePopup:pickLanguage(title, include_auto, current, on_pick)
-    --- 展示单选列表；常用语言页选中「全部语言」时递归展开完整列表。
-    ---@param all_languages boolean 是否展示完整语言表
-    local function openPicker(all_languages)
-        List:new{
-            title = title,
-            current = current,
-            centered = not all_languages,
-            items = all_languages
-                and Languages.allItems(self.translator, include_auto)
-                or Languages.pickerItems(self.translator, include_auto, current),
-            on_select = function(code)
-                if code == Languages.ALL_LANGUAGES then
-                    openPicker(true)
-                    return
-                end
-                on_pick(code)
-            end,
-        }:show()
-    end
-    openPicker(false)
-end
-
 --- 发起 Edge 翻译；重复调用会取消在途请求。
 ---@param self BookTranslatePopup
 function TranslatePopup:requestTranslate()
     if self.job then
         self.job.cancel()
     end
-    self.translated = _("正在翻译…")
+    self.translated, self.status = nil, _("正在翻译…")
     self:refreshView()
     self.job = Edge.translateAsync(self.text, self.target_lang, self.source_lang, function(translated, detected_lang, err)
         self.job = nil
-        if not translated then
-            self.translated = _("翻译失败")
-            self:refreshView()
-            return
-        end
         self.translated = translated
-        if detected_lang then
-            self.detected_lang = detected_lang
-        end
+        self.status = not translated and T(_("翻译失败：%1"), tostring(err)) or nil
+        self.detected_lang = detected_lang or self.detected_lang
         self:refreshView()
     end)
-end
-
---- 当前是否已有可用译文（占位文案不算）。
----@param self BookTranslatePopup
----@return string|nil 译文；尚未就绪时 nil
-local function readyTranslation(self)
-    local translated = self.translated
-    if type(translated) ~= "string" or translated == ""
-        or translated == _("正在翻译…") or translated == _("翻译失败") then
-        return nil
-    end
-    return translated
 end
 
 --- 划词场景：复制 / 存笔记。
@@ -146,7 +99,7 @@ function TranslatePopup:actionRows()
     --- 存笔记：index 有值则改写既有笔记，否则新建。
     ---@param full boolean 是否连原文一起存
     local function saveNote(full)
-        local translated = readyTranslation(self)
+        local translated = self.translated
         if not translated then return end
         local ui = require("apps/reader/readerui").instance
         local text = full and ("▣ " .. self.text .. "\n● " .. translated) or translated
@@ -179,7 +132,7 @@ function TranslatePopup:actionRows()
             {
                 text = _("复制主要翻译"),
                 callback = function()
-                    local translated = readyTranslation(self)
+                    local translated = self.translated
                     if translated then
                         Device.input.setClipboardText(translated)
                     end
@@ -190,7 +143,7 @@ function TranslatePopup:actionRows()
             rows[#rows][2] = {
                 text = _("复制全部内容"),
                 callback = function()
-                    local translated = readyTranslation(self)
+                    local translated = self.translated
                     if translated then
                         Device.input.setClipboardText("▣ " .. self.text .. "\n● " .. translated)
                     end
@@ -217,7 +170,7 @@ function TranslatePopup:rebuild()
     local pad = Theme.px(t.space.md)
     local gap = Theme.px(t.space.sm)
     local inner = self.popup_w - pad * 2
-    local body = Text.box("body", self.translated or "", inner, { height = self.text_h, bg = t.dialog.bg })
+    local body = Text.box("body", self.translated or self.status or "", inner, { height = self.text_h, bg = t.dialog.bg })
     self.pages = math.max(1, math.ceil(body:getAllLineCount() / body:getVisLineCount()))
     self.page = math.min(self.page, self.pages)
     for _i = 2, self.page do body:scrollDown() end
@@ -234,7 +187,7 @@ function TranslatePopup:rebuild()
             {
                 text = langButtonText(self, _("源语言"), self.source_lang, true),
                 callback = function()
-                    self:pickLanguage(_("源语言"), true, self.source_lang, function(code)
+                    Languages.pick(self.translator, _("源语言"), true, self.source_lang, function(code)
                         self.source_lang = code
                         Languages.applySource(code)
                         self:requestTranslate()
@@ -244,7 +197,7 @@ function TranslatePopup:rebuild()
             {
                 text = langButtonText(self, _("目标语言"), self.target_lang, false),
                 callback = function()
-                    self:pickLanguage(_("目标语言"), false, self.target_lang, function(code)
+                    Languages.pick(self.translator, _("目标语言"), false, self.target_lang, function(code)
                         self.target_lang = code
                         Languages.applyTarget(code)
                         self:requestTranslate()
@@ -289,7 +242,6 @@ local function open(opts)
         full_page = opts.full_page == true,
         from_highlight = opts.from_highlight,
         note_index = opts.index,
-        translated = "",
     }
     popup:show()
     popup:requestTranslate()

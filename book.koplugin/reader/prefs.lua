@@ -148,6 +148,14 @@ function M.inject(doc_settings, document)
     if not prefs then
         return false
     end
+    M.write(doc_settings, prefs)
+    return true
+end
+
+--- 把 capture 的排版写进 sidecar；同一本书换物理文件（章节、双语版）时在开书前调用。
+---@param doc_settings table
+---@param prefs table capture / load 的结果
+function M.write(doc_settings, prefs)
     for key, value in pairs(prefs.copt or {}) do
         doc_settings:saveSetting("copt_" .. key, copyValue(value))
     end
@@ -158,7 +166,6 @@ function M.inject(doc_settings, document)
         doc_settings:saveSetting("book_reader_font_id", font_id)
         doc_settings:saveSetting("book_reader_font_name", prefs.font_name or font_id)
     end
-    return true
 end
 
 return M

@@ -60,16 +60,12 @@ local function supportedMap(translator)
     return FALLBACK
 end
 
---- 语言展示名。
+--- 语言展示名（未知代码显示为大写代码）。
 ---@param translator table
 ---@param code string
 ---@return string
 local function languageName(translator, code)
-    local map = supportedMap(translator)
-    if map[code] then
-        return map[code]
-    end
-    return translator:getLanguageName(code, code)
+    return (translator:getLanguageName(code, code))
 end
 
 --- 常用语言代码（settings 未配置时用 defaults）。
@@ -92,7 +88,7 @@ end
 
 --- 打开设置页：常用翻译语言多选（完整语言列表，已选中常用语言）。
 ---@param translator table
----@param desktop table|nil
+---@param desktop table
 function Languages.openSettingsPicker(translator, desktop)
     local favorites = {}
     for _idx, code in ipairs(Languages.favoriteCodes()) do
@@ -119,9 +115,7 @@ function Languages.openSettingsPicker(translator, desktop)
                 end
             end
             Languages.saveFavorites(codes)
-            if desktop and desktop.updateView then
-                desktop:updateView()
-            end
+            desktop:updateView()
         end,
     }:show()
 end
@@ -191,6 +185,36 @@ function Languages.displayName(translator, code, detected)
         return "?"
     end
     return languageName(translator, normalizeCode(code))
+end
+
+--- 单选语言：先列常用，选「全部语言…」再展开完整列表。
+---@param translator table
+---@param title string
+---@param include_auto boolean
+---@param current string|nil
+---@param on_pick fun(code: string)
+function Languages.pick(translator, title, include_auto, current, on_pick)
+    local List = require("ui.themes.widgets.list")
+    --- 展示单选列表；常用语言页选中「全部语言」时递归展开完整列表。
+    ---@param all_languages boolean 是否展示完整语言表
+    local function openPicker(all_languages)
+        List:new{
+            title = title,
+            current = current,
+            centered = not all_languages,
+            items = all_languages
+                and Languages.allItems(translator, include_auto)
+                or Languages.pickerItems(translator, include_auto, current),
+            on_select = function(code)
+                if code == ALL_LANGUAGES then
+                    openPicker(true)
+                    return
+                end
+                on_pick(code)
+            end,
+        }:show()
+    end
+    openPicker(false)
 end
 
 --- 写入 KOReader 源语言设置。

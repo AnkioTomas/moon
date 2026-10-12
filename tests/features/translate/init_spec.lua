@@ -24,7 +24,7 @@ package.preload["device"] = function()
     return { hasClipboard = function() return false end }
 end
 package.preload["ui/network/manager"] = function()
-    return { willRerunWhenOnline = function() return false end }
+    return { willRerunWhenConnected = function() return false end }
 end
 
 local native_calls = 0
