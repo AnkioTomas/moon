@@ -15,6 +15,8 @@ DRM、HUFF/CDIC 压缩、结构损坏直接 error。
 --]]
 
 local bit = require("bit")
+local ffi = require("ffi")
+require("ffi/posix_h")
 local Image = require("utils.image")
 local Text = require("utils.text")
 
@@ -22,6 +24,9 @@ local Kf8 = {}
 
 local NULL_INDEX = 0xFFFFFFFF
 local B32 = "0123456789ABCDEFGHIJKLMNOPQRSTUV"
+-- kindle:embed/flow 引用尾巴（?mime=...）：遇引号、空白或 ")" 即止，行内 style 的 url(...) 后续声明不能被吞
+local REF_TAIL = "[^%)%s\"']*"
+local EMBED = "kindle:embed:([0-9A-Va-v]+)" .. REF_TAIL
 
 ---@class Kf8TocItem
 ---@field title string
@@ -53,18 +58,41 @@ local function writeFile(path, data)
     assert(f:close())
 end
 
-local function sections(raw)
-    local count = u16(raw, 76)
+--- 读 PalmDB 分节表与 MOBI 头，按需 seek 取节（不整本读入内存）。
+--- section(sec0) 越界返回 nil，截断报错。非独立 KF8（MOBI 版本不是 8）时 header 为 nil。
+---@return fun(sec0: number): string|nil section, number count, string|nil header
+local function openBook(f)
+    local pdb = f:read(78) or ""
+    if #pdb < 78 or pdb:sub(61, 68) ~= "BOOKMOBI" then error("not a BOOKMOBI container") end
+    local count = u16(pdb, 76)
+    local table_raw = f:read(count * 8) or ""
     local offsets = {}
     for i = 0, count - 1 do
-        offsets[i + 1] = u32(raw, 78 + i * 8)
+        offsets[i + 1] = u32(table_raw, i * 8)
     end
-    offsets[count + 1] = #raw
-    local out = {}
-    for i = 1, count do
-        out[i] = raw:sub(offsets[i] + 1, offsets[i + 1])
+    offsets[count + 1] = f:seek("end")
+    local function section(sec0)
+        local from, to = offsets[sec0 + 1], offsets[sec0 + 2]
+        if not to then return nil end
+        if to < from then error("invalid PalmDB section " .. sec0) end
+        f:seek("set", from)
+        local data = f:read(to - from) or ""
+        if #data ~= to - from then error("truncated PalmDB section " .. sec0) end
+        return data
     end
-    return out
+    local header = section(0) or ""
+    if header:sub(17, 20) ~= "MOBI" then error("missing MOBI header") end
+    return section, count, u32(header, 36) == 8 and header or nil
+end
+
+--- 打开文件跑 fn(f, ...)，出错也关闭句柄后原样抛出；写文件时 close 失败（刷盘）同样报错。
+local function withFile(path, mode, fn, ...)
+    local f = assert(io.open(path, mode))
+    local ok, result = pcall(fn, f, ...)
+    local closed, err = f:close()
+    if not ok then error(result, 0) end
+    assert(closed, err)
+    return result
 end
 
 --- 文本记录尾部附加数据的字节数（MOBI extra_flags）。
@@ -93,40 +121,81 @@ local function trailingSize(data, flags)
     return size
 end
 
-local function palmdoc(data)
-    local out, n, i, len = {}, 0, 1, #data
-    while i <= len do
-        local c = data:byte(i)
+--- PalmDOC 解压 data 的前 size 字节到 dst，返回输出字节数。
+--- dst 至少 size * 5 字节：最坏是 2 字节反向引用展开成 10 字节。
+local function palmdoc(data, size, dst)
+    local src = ffi.cast("const uint8_t *", data)
+    local n, i = 0, 0
+    while i < size do
+        local c = src[i]
         i = i + 1
         if c >= 1 and c <= 8 then
-            local run = math.min(c, len - i + 1)
-            for k = 0, run - 1 do out[n + 1 + k] = data:byte(i + k) end
+            local run = math.min(c, size - i)
+            ffi.copy(dst + n, src + i, run)
             n, i = n + run, i + run
         elseif c < 0x80 then
+            dst[n] = c
             n = n + 1
-            out[n] = c
         elseif c >= 0xC0 then
-            out[n + 1], out[n + 2] = 0x20, bit.bxor(c, 0x80)
+            dst[n], dst[n + 1] = 0x20, bit.bxor(c, 0x80)
             n = n + 2
         else
-            local c2 = data:byte(i)
-            if not c2 then error("truncated PalmDOC backreference") end
+            if i >= size then error("truncated PalmDOC backreference") end
+            local pair = c * 256 + src[i]
             i = i + 1
-            local pair = c * 256 + c2
             local dist = bit.rshift(bit.band(pair, 0x3FFF), 3)
             if dist == 0 or dist > n then error("invalid PalmDOC backreference") end
-            for _ = 1, bit.band(pair, 7) + 3 do
+            for _i = 1, bit.band(pair, 7) + 3 do
+                dst[n] = dst[n - dist]
                 n = n + 1
-                out[n] = out[n - dist]
             end
         end
     end
-    -- unpack 受 C 栈限制，分片转字符串
-    local parts = {}
-    for p = 1, n, 4096 do
-        parts[#parts + 1] = string.char(unpack(out, p, math.min(p + 4095, n)))
+    return n
+end
+
+--- malloc 而非 ffi.new：几十 MB 的正文若算进 GC 堆，回收阈值（默认存活量 2 倍）跟着抬高，
+--- 切片产生的垃圾要攒到同样大小才回收；放在堆外峰值约省一份正文大小。
+local function alloc(size)
+    local p = ffi.C.malloc(math.max(size, 1))
+    if p == nil then error("out of memory for KF8 text (" .. size .. " bytes)") end
+    return ffi.gc(ffi.cast("uint8_t *", p), ffi.C.free)
+end
+
+--- 全部文本记录解压进一块 ffi 缓冲：整本正文只此一份，后续按需切片，不在 Lua 堆里反复拷贝。
+---@return ffi.cdata* buf, number n 字节数
+local function readText(section, header)
+    local compression = u16(header, 0)
+    if compression == 0x4448 then error("HUFF/CDIC-compressed KF8 is not supported") end
+    if compression ~= 1 and compression ~= 2 then error("unknown MOBI compression " .. compression) end
+    local extra_flags = #header >= 0xF4 and u16(header, 0xF2) or 0
+    local records = u16(header, 8)
+    -- 头里的文本长度通常正好够；按记录数封顶，防坏头一次申请巨块内存
+    local cap = math.min(u32(header, 4), records * u16(header, 10))
+    local buf, n = alloc(cap), 0
+    local scratch, scratch_cap = nil, 0
+    for sec0 = 1, records do
+        local data = section(sec0) or error("missing text record " .. sec0)
+        local size = #data - trailingSize(data, extra_flags)
+        if size < 0 then error("corrupt MOBI trailing data") end
+        local src, len = data, size
+        if compression == 2 then
+            if scratch_cap < size * 5 then
+                scratch_cap = size * 5
+                scratch = ffi.new("uint8_t[?]", scratch_cap)
+            end
+            src, len = scratch, palmdoc(data, size, scratch)
+        end
+        if n + len > cap then
+            cap = math.max(n + len, math.floor(cap * 1.5))
+            local grown = alloc(cap)
+            ffi.copy(grown, buf, n)
+            buf = grown
+        end
+        ffi.copy(buf + n, src, len)
+        n = n + len
     end
-    return table.concat(parts)
+    return buf, n
 end
 
 --- 正向变长整数：高位为 1 的字节结束。
@@ -203,7 +272,7 @@ local function tagMap(control_count, tags, data)
     for _idx, x in ipairs(pending) do
         local vals = {}
         if x.count then
-            for _ = 1, x.count * x.num_values do
+            for _i = 1, x.count * x.num_values do
                 local v, used = decint(data, pos)
                 pos = pos + used
                 vals[#vals + 1] = v
@@ -222,13 +291,13 @@ local function tagMap(control_count, tags, data)
 end
 
 --- 读一张 INDX 表：条目列表 + CNCX 字符串池（键为池内偏移）。
-local function readIndex(secs, idx0)
-    local master = secs[idx0 + 1]
+local function readIndex(section, idx0)
+    local master = section(idx0) or error("missing INDX record " .. idx0)
     local mh = indxHeader(master)
     local control_count, tags = tagx(master, mh.tagx)
     local entries = {}
     for sec0 = idx0 + 1, idx0 + mh.count do
-        local data = secs[sec0 + 1]
+        local data = section(sec0) or error("missing INDX record " .. sec0)
         local h = indxHeader(data)
         if data:sub(h.start + 1, h.start + 4) ~= "IDXT" then error("invalid IDXT") end
         local positions = {}
@@ -247,7 +316,7 @@ local function readIndex(secs, idx0)
     end
     local cncx = {}
     for k = 0, mh.ncncx - 1 do
-        local data = secs[idx0 + mh.count + 2 + k] or ""
+        local data = section(idx0 + mh.count + 1 + k) or ""
         local pos = 1
         while pos <= #data do
             local len, used = decint(data, pos)
@@ -285,7 +354,7 @@ local function exth(header)
     if header:sub(pos + 1, pos + 4) ~= "EXTH" then return meta end
     local authors = {}
     local p = pos + 12
-    for _ = 1, u32(header, pos + 8) do
+    for _i = 1, u32(header, pos + 8) do
         if p + 8 > #header then break end
         local typ, len = u32(header, p), u32(header, p + 4)
         if len < 8 or p + len > #header then break end
@@ -305,8 +374,12 @@ end
 
 --- 插入点是否落在标签内部（坏 DIV 偏移，Calibre 同款判断）。
 local function insideTag(s, ip)
-    local head = s:sub(1, ip)
-    if (head:match(".*()<") or 0) > (head:match(".*()>") or 0) then return true end
+    -- 往回找最近的 '<' / '>'，不复制前缀：每个 DIV 都要判一次，骨架可能很大
+    for p = math.min(ip, #s), 1, -1 do
+        local c = s:byte(p)
+        if c == 60 then return true end
+        if c == 62 then break end
+    end
     local gt, lt = s:find(">", ip + 1, true), s:find("<", ip + 1, true)
     return gt ~= nil and (lt == nil or gt < lt)
 end
@@ -317,18 +390,19 @@ local function aidTagEnd(s, aid)
     return p and s:find(">", p, true)
 end
 
---- 按 SKEL/DIV 索引把分片插回骨架，得到各 XHTML 部分。
-local function buildParts(text, skels, divs, div_cncx)
-    local parts = {}
+--- 按 SKEL/DIV 索引把分片插回骨架，逐个部分交给 emit（不攒整本）。
+---@param text fun(from: number, to: number): string 主流 [from, to) 切片
+---@param emit fun(part: string)
+local function buildParts(text, skels, divs, div_cncx, emit)
     local divptr = 1
     for _idx, sk in ipairs(skels) do
         local t1, t6 = sk.tags[1], sk.tags[6]
         if not t1 or not t6 then error("malformed SKEL index") end
         local skelpos = t6[1]
         local baseptr = skelpos + t6[2]
-        local skeleton = text:sub(skelpos + 1, baseptr)
+        local skeleton = text(skelpos, baseptr)
         local anchors = {}
-        for _ = 1, t1[1] do
+        for _i = 1, t1[1] do
             local d = divs[divptr]
             if not d or not d.tags[6] then error("malformed DIV index") end
             local startpos, length = d.tags[6][1], d.tags[6][2]
@@ -340,7 +414,7 @@ local function buildParts(text, skels, divs, div_cncx)
                 if tag_end then ip = tag_end + startpos end
             end
             if ip < 0 or ip > #skeleton then error("invalid KF8 DIV insert position " .. ip) end
-            skeleton = skeleton:sub(1, ip) .. text:sub(baseptr + 1, baseptr + length) .. skeleton:sub(ip + 1)
+            skeleton = skeleton:sub(1, ip) .. text(baseptr, baseptr + length) .. skeleton:sub(ip + 1)
             anchors[#anchors + 1] = { fid = divptr - 1, pos = ip }
             baseptr = baseptr + length
             divptr = divptr + 1
@@ -350,32 +424,13 @@ local function buildParts(text, skels, divs, div_cncx)
         for _idx, a in ipairs(anchors) do
             skeleton = skeleton:sub(1, a.pos) .. '<a id="azwfid' .. b32encode(a.fid) .. '"></a>' .. skeleton:sub(a.pos + 1)
         end
-        parts[#parts + 1] = skeleton
+        emit(skeleton)
     end
-    return parts
 end
 
 local function probeFile(f)
-    local pdb = f:read(78) or ""
-    if #pdb < 78 or pdb:sub(61, 68) ~= "BOOKMOBI" then error("not a BOOKMOBI container") end
-    local count = u16(pdb, 76)
-    local table_raw = f:read(count * 8) or ""
-    local offsets = {}
-    for i = 0, count - 1 do
-        offsets[i + 1] = u32(table_raw, i * 8)
-    end
-    offsets[count + 1] = f:seek("end")
-    local function section(sec0)
-        local from, to = offsets[sec0 + 1], offsets[sec0 + 2]
-        if not to then return nil end
-        f:seek("set", from)
-        local data = f:read(to - from) or ""
-        if #data ~= to - from then error("truncated PalmDB section " .. sec0) end
-        return data
-    end
-    local header = section(0) or ""
-    if header:sub(17, 20) ~= "MOBI" then error("missing MOBI header") end
-    if u32(header, 36) ~= 8 then return nil end
+    local section, _count, header = openBook(f)
+    if not header then return nil end
     local metadata = exth(header)
     local first_image = u32(header, 0x6C)
     local cover = metadata.cover_offset and first_image ~= NULL_INDEX
@@ -389,33 +444,13 @@ end
 ---@param path string
 ---@return { metadata: table, cover_data: string|nil }|nil 非独立 KF8 时为 nil
 function Kf8.probe(path)
-    local f = assert(io.open(path, "rb"))
-    local ok, result = pcall(probeFile, f)
-    f:close()
-    if not ok then error(result, 0) end
-    return result
+    return withFile(path, "rb", probeFile)
 end
 
---- 解析独立 KF8 并把 HTML / CSS / 图片写进 dir（目录须已存在）。
----@param path string
----@param dir string
----@return Kf8Info|nil info 非独立 KF8（MOBI6 / 合并文件）时为 nil
-function Kf8.extract(path, dir)
-    local f = assert(io.open(path, "rb"))
-    local raw = f:read("*a")
-    f:close()
-    if #raw < 78 or raw:sub(61, 68) ~= "BOOKMOBI" then error("not a BOOKMOBI container") end
-    local secs = sections(raw)
-    raw = nil
-    local header = secs[1]
-    if header:sub(17, 20) ~= "MOBI" then error("missing MOBI header") end
-    if u32(header, 36) ~= 8 then return nil end
+local function extractFile(f, dir)
+    local section, count, header = openBook(f)
+    if not header then return nil end
     if u16(header, 12) ~= 0 then error("DRM-encrypted AZW3 is not supported") end
-
-    local compression = u16(header, 0)
-    if compression == 0x4448 then error("HUFF/CDIC-compressed KF8 is not supported") end
-    if compression ~= 1 and compression ~= 2 then error("unknown MOBI compression " .. compression) end
-    local extra_flags = #header >= 0xF4 and u16(header, 0xF2) or 0
     local fdstidx = u32(header, 0xC0)
     local first_image = u32(header, 0x6C)
     local ncxidx = u32(header, 0xF4)
@@ -423,33 +458,32 @@ function Kf8.extract(path, dir)
     if skelidx == NULL_INDEX or dividx == NULL_INDEX then error("KF8 has no SKEL/DIV indexes") end
     local metadata = exth(header)
 
-    local chunks = {}
-    for sec0 = 1, u16(header, 8) do
-        local data = secs[sec0 + 1] or error("missing text record " .. sec0)
-        data = data:sub(1, #data - trailingSize(data, extra_flags))
-        chunks[#chunks + 1] = compression == 2 and palmdoc(data) or data
+    local buf, n = readText(section, header)
+    -- [from, to) 切片，越界按 string.sub 截断
+    local function slice(from, to)
+        from, to = math.max(from, 0), math.min(to, n)
+        return to > from and ffi.string(buf + from, to - from) or ""
     end
-    local raw_ml = table.concat(chunks)
-    chunks = nil
 
-    local flows = { raw_ml }
+    -- 流按 [起, 止) 记；主流（flows[1]）很大，只记范围不切出来
+    local flows = { { 0, n } }
     if fdstidx ~= NULL_INDEX and fdstidx ~= 0 then
-        local fd = secs[fdstidx + 1]
+        local fd = section(fdstidx)
         if not fd or fd:sub(1, 4) ~= "FDST" then error("invalid KF8 FDST record") end
         flows = {}
         for i = 0, u32(fd, 8) - 1 do
-            flows[#flows + 1] = raw_ml:sub(u32(fd, 12 + i * 8) + 1, u32(fd, 16 + i * 8))
+            flows[#flows + 1] = { u32(fd, 12 + i * 8), u32(fd, 16 + i * 8) }
         end
     end
-
-    local skels = readIndex(secs, skelidx)
-    local divs, div_cncx = readIndex(secs, dividx)
-    local parts = buildParts(flows[1], skels, divs, div_cncx)
+    local main_from, main_to = flows[1][1], math.min(flows[1][2], n)
+    local function mainText(from, to)
+        return slice(main_from + math.max(from, 0), main_from + math.min(to, main_to - main_from))
+    end
 
     local resources = {}
     if first_image ~= NULL_INDEX then
-        for sec0 = first_image, #secs - 1 do
-            local data = secs[sec0 + 1]
+        for sec0 = first_image, count - 1 do
+            local data = section(sec0)
             local ext = Image.ext(data)
             if ext then
                 local name = string.format("res%04d%s", sec0 - first_image + 1, ext)
@@ -465,12 +499,11 @@ function Kf8.extract(path, dir)
 
     local flow_names, css_links = {}, {}
     for i = 2, #flows do
-        local data = flows[i]
+        local data = slice(flows[i][1], flows[i][2])
         local ext = data:find("<svg", 1, true) and "svg" or "css"
         local name = string.format("flow%04d.%s", i - 1, ext)
         flow_names[i - 1] = name
-        local pattern = ext == "css" and "kindle:embed:([0-9A-Va-v]+)[^%)%s\"']*" or "kindle:embed:([0-9A-Va-v]+)[^\"']*"
-        writeFile(dir .. "/" .. name, (data:gsub(pattern, embed)))
+        writeFile(dir .. "/" .. name, (data:gsub(EMBED, embed)))
         if ext == "css" then
             css_links[#css_links + 1] = '<link rel="stylesheet" type="text/css" href="' .. name .. '"/>'
         end
@@ -478,7 +511,7 @@ function Kf8.extract(path, dir)
 
     local toc = {}
     if ncxidx ~= NULL_INDEX then
-        local entries, cncx = readIndex(secs, ncxidx)
+        local entries, cncx = readIndex(section, ncxidx)
         for _idx, e in ipairs(entries) do
             local title = e.tags[3] and cncx[e.tags[3][1]]
             local fid = e.tags[6] and e.tags[6][1]
@@ -501,33 +534,50 @@ function Kf8.extract(path, dir)
         for _idx, item in ipairs(toc) do item.fid, item.seq = nil, nil end
     end
 
-    local bodies = {}
-    for i, part in ipairs(parts) do
-        bodies[i] = '<div id="azw-part-' .. i .. '" style="page-break-before:always">\n'
-            .. Text.htmlBodyFragment(part) .. "\n</div>"
+    local function flowName(id)
+        local i = b32decode(id)
+        return i and flow_names[i] or ""
     end
-    local body = table.concat(bodies, "\n")
-        :gsub("kindle:embed:([0-9A-Va-v]+)[^\"']*", embed)
-        :gsub("kindle:flow:([0-9A-Va-v]+)[^\"']*", function(id)
-            local n = b32decode(id)
-            return n and flow_names[n] or ""
+    local function posAnchor(fid)
+        return "#azwfid" .. b32encode(b32decode(fid))
+    end
+    local skels = readIndex(section, skelidx)
+    local divs, div_cncx = readIndex(section, dividx)
+    -- 逐部分改写引用后直接落盘：整本 HTML 不进内存
+    withFile(dir .. "/book.html", "wb", function(out)
+        assert(out:write(table.concat({
+            '<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head>',
+            '<meta charset="utf-8"/>',
+            metadata.title and ("<title>" .. Text.xmlEscape(metadata.title) .. "</title>") or "",
+            metadata.author and ('<meta name="author" content="' .. Text.xmlEscape(metadata.author) .. '"/>') or "",
+            table.concat(css_links, "\n"),
+            "</head><body>",
+        }, "\n")))
+        local i = 0
+        buildParts(mainText, skels, divs, div_cncx, function(part)
+            i = i + 1
+            local body = Text.htmlBodyFragment(part)
+            if body:find("kindle:", 1, true) then
+                body = body:gsub(EMBED, embed)
+                    :gsub("kindle:flow:([0-9A-Va-v]+)" .. REF_TAIL, flowName)
+                    :gsub("kindle:pos:fid:([0-9A-Va-v]+):off:[0-9A-Va-v]+", posAnchor)
+            end
+            assert(out:write('\n<div id="azw-part-', i, '" style="page-break-before:always">\n', body, "\n</div>"))
         end)
-        :gsub("kindle:pos:fid:([0-9A-Va-v]+):off:[0-9A-Va-v]+", function(fid)
-            return "#azwfid" .. b32encode(b32decode(fid))
-        end)
-
-    writeFile(dir .. "/book.html", table.concat({
-        '<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head>',
-        '<meta charset="utf-8"/>',
-        metadata.title and ("<title>" .. Text.xmlEscape(metadata.title) .. "</title>") or "",
-        metadata.author and ('<meta name="author" content="' .. Text.xmlEscape(metadata.author) .. '"/>') or "",
-        table.concat(css_links, "\n"),
-        "</head><body>", body, "</body></html>",
-    }, "\n"))
+        assert(out:write("\n</body></html>"))
+    end)
 
     local cover = metadata.cover_offset and resources[metadata.cover_offset + 1]
     metadata.cover_offset = nil
     return { html = "book.html", cover = cover, metadata = metadata, toc = toc }
+end
+
+--- 解析独立 KF8 并把 HTML / CSS / 图片写进 dir（目录须已存在）。
+---@param path string
+---@param dir string
+---@return Kf8Info|nil info 非独立 KF8（MOBI6 / 合并文件）时为 nil
+function Kf8.extract(path, dir)
+    return withFile(path, "rb", extractFile, dir)
 end
 
 return Kf8

@@ -31,15 +31,19 @@ local function cacheDir(file)
     return require("utils.paths").cacheDir() .. "/azw3/" .. CACHE_VERSION .. "_" .. require("util").partialMD5(file)
 end
 
---- 读缓存；未命中返回 nil。
+--- 读缓存；未命中返回 nil。info.json 坏了或 HTML 已被删（清缓存中断）都算未命中，由 prepare 重建。
 ---@param file string
 ---@return table|nil
 function Azw3Document.cached(file)
     local dir = cacheDir(file)
     local f = io.open(dir .. "/info.json", "rb")
     if not f then return nil end
-    local info = require("json").decode(f:read("*a"))
+    local ok, info = pcall(require("json").decode, f:read("*a"))
     f:close()
+    if not ok or type(info) ~= "table" then return nil end
+    if info.html and require("libs/libkoreader-lfs").attributes(dir .. "/" .. info.html, "mode") ~= "file" then
+        return nil
+    end
     info.dir = dir
     return info
 end

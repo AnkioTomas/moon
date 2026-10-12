@@ -43,6 +43,7 @@ local function checkBook(info, dir)
     has(html, "<title>测试书</title>")
     has(html, '<link rel="stylesheet" type="text/css" href="flow0001.css"/>')
     has(html, '<a id="azwfid0000"></a><p>第一章 开头 Hello Hello Hello</p><img src="res0001.jpg"/>')
+    has(html, '<div style="background:url(res0001.jpg); color:red">bg</div>')
     -- 第二部分插入点落在 <body> 标签里，按 aid 修到标签之后
     has(html, '<a id="azwfid0001"></a><p>第二章 <a href="#azwfid0000">回到开头</a></p>')
     Assert.is_nil(html:find("kindle:", 1, true), "不残留 kindle: 引用")
@@ -71,6 +72,13 @@ end
 -- PalmDOC + 多字节尾巴：解压结果与无压缩一致
 do
     local info, dir = extract("palmdoc", { compression = 2, extra_flags = 1 })
+    checkBook(info, dir)
+    Assert.eq(readFile(dir .. "/book.html"), readFile(root .. "/plain/book.html"))
+end
+
+-- 头里的文本长度偏小：正文缓冲按需扩容，结果不变
+do
+    local info, dir = extract("short_len", { compression = 2, text_length = 16 })
     checkBook(info, dir)
     Assert.eq(readFile(dir .. "/book.html"), readFile(root .. "/plain/book.html"))
 end
