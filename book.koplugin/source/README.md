@@ -171,13 +171,14 @@ cookie + 设备 uuid。协议签名和章节下载 AES 在 `protocol.lua`（`e.m
 
 书架用 `source.shelf`，和微信同一套。进度双向。没有笔记，没有统计拉取（`stats_pull = false`，也没有 `pushStatsAsync`）。
 目录只认下载协议版本 2（`indexes`）和 3（`type` + `ids`）。旧 cread 目录（版本 1）当场作废重拉。
+章节 CBZ 按章节 uuid 命名（`<uuid>.cbz`），不按连续章号：目录是各分组拼起来的，默认组更新后其它组章号整体后移。
 未购买且非试读章节下载返回 `result_code = 101`。
 
 ### copymanga — 拷贝漫画（`chapter`）
 
 App API `COPY/3.0.0`，`/api/v3/*`。默认 host `api.copy202601.com`。token 登录。
 
-书架不是 add/remove，是收藏列表。删除 = 先查 `comic_id` 再 `setCollect(false)`，所以**不用** `source.shelf`，门面里自己推墓碑。没有加架上行。
+书架不是 add/remove，是收藏列表。删除 = 先查 `comic_id` 再 `setCollect(false)`，所以不用 `Shelf.syncAsync`，只把这两步当「删一本」交给 `Shelf.pushDeletes`。没有加架上行。
 `dirty_only` 只推取消收藏。进度双向。没有笔记和统计。
 一章是一组图片 URL（`protocol.lua` 把低清 `.c800x.` 换成 `.c1500x.`），不是 HTML 正文。
 

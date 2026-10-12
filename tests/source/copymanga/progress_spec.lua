@@ -74,6 +74,7 @@ do
     logged_in = false
     local pos, err, meta
     src:getProgressAsync(IDENTITY, function(p, e, m) pos, err, meta = p, e, m end)
+    Stubs.flush()
     Assert.is_nil(pos)
     Assert.is_nil(err)
     Assert.is_true(meta.empty)
@@ -121,10 +122,48 @@ do
     Assert.eq(err, "网络错误")
 end
 
+-- 云端读到缓存目录里没有的新话：缓存没过期也强制重拉目录再定位。
+do
+    local detail_calls = 0
+    fake_client.getProgressAsync = function(_, _, cb)
+        cb({ results = { browse = { chapter_uuid = "chap-4", chapter_name = "第四话" } } })
+        return { cancel = function() end }
+    end
+    fake_client.detailAsync = function(_, _, cb)
+        detail_calls = detail_calls + 1
+        cb({ results = { comic = { path_word = "test-comic" } } })
+        return { cancel = function() end }
+    end
+    fake_client.chaptersAsync = function(_, _, _, cb)
+        cb({
+            { uuid = "chap-1", name = "第一话" }, { uuid = "chap-2", name = "第二话" },
+            { uuid = "chap-3", name = "第三话" }, { uuid = "chap-4", name = "第四话" },
+        })
+        return { cancel = function() end }
+    end
+    local pos, err
+    src:getProgressAsync(IDENTITY, function(p, e) pos, err = p, e end)
+    Assert.is_nil(err)
+    Assert.eq(detail_calls, 1)
+    Assert.eq(pos.chapter_idx, 4)
+    Assert.eq(pos.extra.chapter_uid, "chap-4")
+end
+
+-- 没有章号不能默认推第一章，否则会把云端浏览记录改回开头。
+do
+    local ok, err
+    src:putProgressAsync({ source_id = "copymanga", stable_id = "test-comic" }, {},
+        function(value, e) ok, err = value, e end)
+    Stubs.flush()
+    Assert.is_nil(ok)
+    Assert.eq(err, "缺少章节信息")
+end
+
 do
     logged_in = false
     local ok, err
     src:putProgressAsync(IDENTITY, { chapter_idx = 2 }, function(value, e) ok, err = value, e end)
+    Stubs.flush()
     Assert.is_nil(ok)
     Assert.eq(err, "请先登录拷贝漫画账号")
     logged_in = true

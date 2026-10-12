@@ -9,21 +9,16 @@ local Assert = require("support.assert")
 local Mapper = require("source.copymanga.mapper")
 
 do
-    local result = Mapper.search({
-        results = {
-            total = 1,
-            list = {{
-                name = "测试漫画",
-                path_word = "test-comic",
-                cover = "https://img.example/cover.jpg",
-                author = { { name = "作者甲" }, { name = "作者乙" } },
-            }},
-        },
+    local book = Mapper.book({
+        name = "测试漫画",
+        path_word = "test-comic",
+        cover = "https://img.example/cover.jpg",
+        author = { { name = "作者甲" }, { name = "作者乙" } },
     })
-    Assert.eq(result.count, 1)
-    Assert.eq(result.data[1].source_id, "copymanga")
-    Assert.eq(result.data[1].stable_id, "test-comic")
-    Assert.eq(result.data[1].authors, "作者甲, 作者乙")
+    Assert.eq(book.source_id, "copymanga")
+    Assert.eq(book.stable_id, "test-comic")
+    Assert.eq(book.authors, "作者甲, 作者乙")
+    Assert.is_nil(Mapper.book({ name = "没有 path_word" }))
 end
 
 do
@@ -42,7 +37,8 @@ do
     }
     Assert.eq(Mapper.comicId(wire), "comic-uuid-1")
     Assert.is_nil(Mapper.comicId({ results = { comic = { name = "无id" } } }))
-    local book = Mapper.detail("test-comic", wire)
+    local book = Mapper.detail(wire)
+    Assert.eq(book.stable_id, "test-comic")
     Assert.eq(book.title, "测试漫画")
     Assert.eq(book.authors, "作者甲")
     Assert.eq(book.category, "冒險")
@@ -85,24 +81,22 @@ do
 end
 
 do
-    local result = Mapper.collect({
-        results = {
-            total = 1,
-            list = {{
-                comic = {
-                    name = "收藏漫画",
-                    path_word = "fav-comic",
-                    cover = "https://img.example/fav.jpg",
-                    author = { { name = "作者丙" } },
-                },
-            }},
+    local books = Mapper.collect({
+        {
+            comic = {
+                name = "收藏漫画",
+                path_word = "fav-comic",
+                cover = "https://img.example/fav.jpg",
+                author = { { name = "作者丙" } },
+            },
         },
+        { comic = { name = "坏行" } },
     })
-    Assert.eq(result.count, 1)
-    Assert.eq(result.data[1].stable_id, "fav-comic")
-    Assert.eq(result.data[1].title, "收藏漫画")
-    Assert.eq(result.data[1].authors, "作者丙")
-    Assert.is_true(result.data[1].deleted == 0)
+    Assert.len(books, 1)
+    Assert.eq(books[1].stable_id, "fav-comic")
+    Assert.eq(books[1].title, "收藏漫画")
+    Assert.eq(books[1].authors, "作者丙")
+    Assert.eq(books[1].deleted, 0)
 end
 
 do

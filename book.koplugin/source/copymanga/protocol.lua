@@ -7,6 +7,8 @@ chapter2 返回 ``contents``（图片 URL）和 ``words``（阅读序号）。
 @module koplugin.book.source.copymanga.protocol
 --]]
 
+local _ = require("gettext")
+
 local Protocol = {}
 
 ---@param wire table|nil
@@ -27,9 +29,8 @@ end
 ---@return string[]|nil, string|nil
 function Protocol.chapterImages(wire)
     local chapter = chapterRoot(wire)
-    if not chapter then return nil, "chapter payload missing" end
-    local contents = chapter.contents
-    if type(contents) ~= "table" then return nil, "chapter payload missing" end
+    local contents = chapter and chapter.contents
+    if type(contents) ~= "table" then return nil, _("章节图片解析失败") end
     local words = type(chapter.words) == "table" and chapter.words or {}
     local pages = {}
     for i, row in ipairs(contents) do
@@ -46,7 +47,7 @@ function Protocol.chapterImages(wire)
     for _idx, page in ipairs(pages) do
         images[#images + 1] = page.url
     end
-    if #images == 0 then return nil, "chapter images empty" end
+    if #images == 0 then return nil, _("章节图片解析失败") end
     return images
 end
 

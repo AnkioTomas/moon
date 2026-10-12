@@ -10,7 +10,6 @@
 --]]
 
 local Client = require("source.copymanga.client")
-local JSON = require("json")
 local Text = require("utils.text")
 local _ = require("gettext")
 
@@ -118,21 +117,12 @@ function Auth.loginAsync(username, password, cb)
         timeout = 30,
         connect_timeout = 30,
     }, function(res, err)
-        if err then
-            cb(nil, err)
+        local wire, decode_err = Client.decode(res and res.body, err)
+        if not wire then
+            cb(nil, decode_err)
             return
         end
-        local raw = res and res.body or ""
-        local ok, wire = pcall(JSON.decode, raw)
-        if not ok or type(wire) ~= "table" then
-            cb(nil, _("登录响应无效"))
-            return
-        end
-        if tonumber(wire.code) ~= 200 or type(wire.results) ~= "table" then
-            cb(nil, wire.message or _("登录失败"))
-            return
-        end
-        local results = wire.results
+        local results = type(wire.results) == "table" and wire.results or {}
         local token = results.token
         if type(token) ~= "string" or token == "" then
             cb(nil, _("登录失败：未返回令牌"))

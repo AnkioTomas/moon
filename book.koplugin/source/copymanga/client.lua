@@ -10,19 +10,11 @@ local JSON = require("json")
 local Text = require("utils.text")
 local _ = require("gettext")
 
-local Client = {}
-Client.__index = Client
-
 ---@class CopymangaClient
 ---@field base_url string
 ---@field token string
----@field configured fun(self: CopymangaClient): boolean
----@field detailAsync fun(self: CopymangaClient, stable_id: string, cb: function): CancelHandle|nil
----@field getProgressAsync fun(self: CopymangaClient, stable_id: string, cb: function): CancelHandle|nil
----@field chaptersAsync fun(self: CopymangaClient, stable_id: string, groups: any, cb: function): CancelHandle|nil
----@field chapterAsync fun(self: CopymangaClient, stable_id: string, chapter_uid: string, cb: function): CancelHandle|nil
----@field setCollectAsync fun(self: CopymangaClient, comic_id: string, collect: boolean, cb: function): CancelHandle|nil
----@field collectAllAsync fun(self: CopymangaClient, cb: function): CancelHandle|nil
+local Client = {}
+Client.__index = Client
 
 local DEFAULT_BASE_URL = "https://api.copy202601.com"
 
@@ -54,15 +46,12 @@ function Client.headers(token)
     return headers
 end
 
----@param cfg table|nil
+---@param cfg { base_url: string|nil, token: string|nil }
 ---@return CopymangaClient
 function Client:new(cfg)
-    cfg = cfg or {}
-    local token = cfg.token
-    if type(token) ~= "string" then token = "" end
     return setmetatable({
         base_url = Client.normalizeBaseUrl(cfg.base_url),
-        token = token,
+        token = cfg.token or "",
     }, self)
 end
 
@@ -71,10 +60,11 @@ function Client:configured()
     return self.base_url:match("^https?://[^/]+$") ~= nil
 end
 
+--- 解 App 接口回包：code 200 才算成功，210 是风控。登录也走这里。
 ---@param raw string|nil
 ---@param err string|nil
 ---@return table|nil, string|nil
-local function decodeWire(raw, err)
+function Client.decode(raw, err)
     if not raw then return nil, err end
     local ok, wire = pcall(JSON.decode, raw)
     if not ok or type(wire) ~= "table" then
@@ -101,7 +91,7 @@ function Client:_getJson(path, cb)
         timeout = 60,
         connect_timeout = 30,
     }, function(raw, err)
-        cb(decodeWire(raw, err))
+        cb(Client.decode(raw, err))
     end)
 end
 
@@ -125,13 +115,10 @@ end
 
 --- 按分组分页拉全量章节行（uuid / name / group_*）。
 ---@param stable_id string
----@param groups { path_word: string, name: string }[]|nil
+---@param groups { path_word: string, name: string }[] 见 Mapper.groups（至少有默认组）
 ---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:chaptersAsync(stable_id, groups, cb)
-    if type(groups) ~= "table" or #groups == 0 then
-        groups = { { path_word = "default", name = "默认" } }
-    end
     local cancelled, active = false, nil
     local rows, gi = {}, 1
     local offset, limit = 0, 100
@@ -175,7 +162,7 @@ function Client:chaptersAsync(stable_id, groups, cb)
     step()
     return { cancel = function()
             cancelled = true
-            if active and active.cancel then active.cancel() end
+            if active then active.cancel() end
         end }
 end
 
@@ -199,10 +186,6 @@ function Client:setCollectAsync(comic_id, collect, cb)
         cb(nil, _("请先登录拷贝漫画账号"))
         return { cancel = function() end }
     end
-    if type(comic_id) ~= "string" or comic_id == "" then
-        cb(nil, _("无效书籍"))
-        return { cancel = function() end }
-    end
     local body = Text.formEncode({
         comic_id = comic_id,
         is_collect = collect and "1" or "0",
@@ -219,52 +202,39 @@ function Client:setCollectAsync(comic_id, collect, cb)
             connect_timeout = 30,
         },
         function(raw, err)
-            cb(decodeWire(raw, err))
+            cb(Client.decode(raw, err))
         end
     )
 end
 
---- 分页拉取收藏漫画（需登录）。
----@param offset integer
----@param limit integer
----@param cb fun(wire: table|nil, err: string|nil)
+-- 收藏列表每页条数（接口上限 50）。
+local COLLECT_PAGE = 50
+
+--- 分页拉全量收藏（需登录），回调收藏行数组（每行 ``{ comic = {...} }``）。
+---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
-function Client:collectAsync(offset, limit, cb)
+function Client:collectAllAsync(cb)
     if self.token == "" then
         cb(nil, _("请先登录拷贝漫画账号"))
         return { cancel = function() end }
     end
-    offset = math.max(0, math.floor(tonumber(offset) or 0))
-    limit = math.max(1, math.min(50, math.floor(tonumber(limit) or 50)))
-    local path = "/api/v3/member/collect/comics?free_type=1&limit="
-        .. limit .. "&offset=" .. offset .. "&ordering=-datetime_updated"
-    return self:_getJson(path, cb)
-end
-
---- 拉全量收藏列表。
----@param cb fun(wire: table|nil, err: string|nil)
----@return { cancel: fun() }
-function Client:collectAllAsync(cb)
-    local cancelled = false
+    local cancelled, rows, offset = false, {}, 0
+    ---@type { cancel: fun() }
     local active
-    local books = {}
-    local offset, limit = 0, 50
 
     local function step()
-        if cancelled then return end
-        active = self:collectAsync(offset, limit, function(wire, err)
-            active = nil
+        active = self:_getJson("/api/v3/member/collect/comics?free_type=1&limit=" .. COLLECT_PAGE
+            .. "&offset=" .. offset .. "&ordering=-datetime_updated", function(wire, err)
             if cancelled then return end
             if not wire then cb(nil, err); return end
             local root = type(wire.results) == "table" and wire.results or {}
             local list = root.list or {}
             for _idx, row in ipairs(list) do
-                books[#books + 1] = row
+                rows[#rows + 1] = row
             end
-            local total = tonumber(root.total) or #books
             offset = offset + #list
-            if #list == 0 or offset >= total then
-                cb({ results = { list = books, total = #books } })
+            if #list == 0 or offset >= (tonumber(root.total) or 0) then
+                cb(rows)
                 return
             end
             step()
@@ -274,7 +244,7 @@ function Client:collectAllAsync(cb)
     step()
     return { cancel = function()
             cancelled = true
-            if active and active.cancel then active.cancel() end
+            active.cancel()
         end }
 end
 
