@@ -4,12 +4,14 @@
 
 ## 设计
 
-- 源 id 清单 `IDS` 即展示顺序（local 排前：混合 → 本地 → 在线），模块固定为 `source.<id>`。
+- 源 id 清单即展示顺序：内置 `BUILTIN`（local 排前：混合 → 本地 → 在线，模块固定为 `source.<id>`），后接第三方源。
+- 第三方源：首次访问注册表时扫一次 `PluginLoader.enabled_plugins`，插件根目录有 `moon_source.lua` 就 dofile 成描述表，按插件加载顺序排在内置源之后。描述文件不合约定（`api` 不等于 `Registry.API`、缺 `meta`/`new`、id 不是 `ext.<name>`、与已登记 id 重名、加载抛错）记错误日志并跳过：第三方代码不能拖垮内置源。契约见 [`external`](external.md)。
+- 第三方插件卸载后，它的 id 不再登记：活跃源退回 local，`create` / `resolve` 返回 `nil, err`，书库里的书留着（混合模式按启用源过滤，不显示），重装即恢复。
 - **每个 id 一个实例**，缓存在同一张表里。活跃源只是配置里的 id：`current()` = `resolve(activeId())`，不做静默 fallback。
 - `resolve(id)`：按 id 建/取实例，**不改**用户选择的活跃源。这是「打开旧书不串源」的关键。
 - 切换：`resolve` 成功后才写配置；旧实例不关（可能仍是打开中书籍的属主源），统一由 `invalidate` 释放。
-- 源模块加载失败是代码缺陷，`meta` / `list` / `create` 直接抛出，不从列表里悄悄藏掉。
-- `enabled_sources`：`nil` = 全部启用；活跃源恒视为启用（不能关自己）。
+- 内置源模块加载失败是代码缺陷，`meta` / `list` / `create` 直接抛出，不从列表里悄悄藏掉。
+- `enabled_sources`：`nil` 或集合里没有该 id（后装的源）= 启用，只有显式 `false` 是禁用；活跃源恒视为启用（不能关自己）。
 
 ---
 
@@ -45,7 +47,8 @@ Registry.reload()                   -- 登录态 / 连接配置变了：invalida
 | `meta(id)` / `list()` | 只取 meta，不构造实例 |
 | `listEnabled()` | picker 与设置页用这个 |
 | `isEnabled(id)` | 活跃源恒 true |
-| `setEnabled(id, on)` | 首次写入时用「当前全部启用」初始化集合；禁用活跃源返回 `false, err` |
+| `setEnabled(id, on)` | 写显式 `true` / `false`；禁用活跃源返回 `false, err` |
+| `external(id)` | 第三方源的描述表（含可选 `setting`）；内置源与未知 id 为 `nil` |
 | `create(id)` | 构造新实例（不进缓存） |
 | `current()` | 活跃实例（`resolve(activeId())`） |
 | `resolve(id)` | 属主实例（缓存复用，可非活跃） |
