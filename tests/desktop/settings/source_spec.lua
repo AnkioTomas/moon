@@ -35,6 +35,11 @@ package.preload["source.registry"] = function()
         setEnabled = function() end,
         setActive = function(id) set_active = id; active = id end,
         meta = function(id) return { id = id, name = id } end,
+        external = function(id)
+            if id == "ext.demo" then
+                return { setting = { rows = function() return { function() return { id = "ext-row" } end } end } }
+            end
+        end,
         notifyChanged = function() notified = notified + 1 end,
     }
 end
@@ -139,5 +144,16 @@ end
 Assert.is_nil(src.loadSetting("nosuch"))
 package.preload["source.broken.setting"] = function() error("boom") end
 Assert.errors(function() src.loadSetting("broken") end, "boom")
+
+-- 第三方源的设置模块来自描述表，不按 source.<id>.setting 找文件。
+Assert.eq(src.loadSetting("ext.demo").rows()[1]().id, "ext-row")
+enabled[#enabled + 1] = { id = "ext.demo", name = "Demo" }
+local with_ext = src:configSections{ desktop = desktop, plugin = nil }
+local ext_section
+for _idx, section in ipairs(with_ext) do
+    if section.title == "Demo" then ext_section = section end
+end
+Assert.eq(ext_section.rows[1]().id, "ext-row")
+enabled[#enabled] = nil
 
 return true

@@ -23,11 +23,13 @@ function Source.displayName(active_name)
     return active_name or SourceRegistry.activeId() or _("未知源")
 end
 
---- 取某个源的 setting 模块；源不一定带。
+--- 取某个源的 setting 模块；源不一定带。第三方源的设置模块挂在描述表的 setting 字段上。
 --- 只按「找不到文件」判断没有：模块自身抛错必须冒出来，不能被当成没有设置页。
 ---@param id string 源标识
 ---@return table|nil
 function Source.loadSetting(id)
+    local ext = SourceRegistry.external(id)
+    if ext then return ext.setting end
     local name = "source." .. id .. ".setting"
     if package.loaded[name] or package.preload[name] or package.searchpath(name, package.path) then
         return require(name)

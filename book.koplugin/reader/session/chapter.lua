@@ -209,15 +209,15 @@ end
 ---@param session ReaderSessionSnapshot
 function Chapter.afterBootstrap(plugin, session)
     local chapter = session.chapter
-    if not chapter then return end
-    session.identity.source:onEvent("chapter_changed", {
+    -- 属主源可能已不在（第三方源插件被卸载）：章节照读，只是不发源事件、不预取。
+    local source = chapter and session.identity.source
+    if not source then return end
+    source:onEvent("chapter_changed", {
         identity = session.identity,
         position = require("reader.session.progress").position(session),
     })
     local identity = chapter.identity
     if not identity then return end
-    local source = identity.source
-    if not source then return end
     local toc_current = type(source.isTocCurrent) ~= "function" or source:isTocCurrent(chapter.toc)
     if toc_current and type(chapter.toc) == "table" and #chapter.toc > 0 then
         schedulePrefetch(chapter)

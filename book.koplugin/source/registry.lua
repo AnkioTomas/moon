@@ -1,7 +1,10 @@
 --[[--
 Source 注册表：源 id 清单、实例缓存（每个 id 一个实例）、活跃源与启用源配置。
 活跃源只是配置里的 id，实例与其它源共用同一张缓存表。
-不做静默 fallback；唯一例外是已下线的源 id（如 kindle），activeId 退回 local。
+不做静默 fallback；唯一例外是已下线的源 id（如 kindle，或卸载了的第三方源），activeId 退回 local。
+
+第三方源：任何已启用的 KOReader 插件根目录里放 `moon_source.lua` 即登记一个源（契约见 docs/source/external.md），
+首次访问注册表时按 PluginLoader.enabled_plugins 扫一次，排在内置源之后。
 
 @module koplugin.book.source.registry
 --]]
@@ -13,40 +16,107 @@ local T = require("ffi/util").template
 
 local Registry = {}
 
--- 选择器为「混合 → 本地 → 其余在线源」
+--- 第三方源描述文件的契约版本，不相等即拒绝加载。
+Registry.API = 1
+local DESCRIPTOR = "moon_source.lua"
+
+-- 选择器为「混合 → 本地 → 其余在线源 → 第三方源」
 ---@type SourceId[]
-local IDS = { "local", "moon", "wechat", "jdread", "copymanga", "fanqie" }
-local KNOWN = {}
-for _idx, id in ipairs(IDS) do KNOWN[id] = true end
+local BUILTIN = { "local", "moon", "wechat", "jdread", "copymanga", "fanqie" }
+
+---@type SourceId[]|nil
+local ids
+---@type table<SourceId, boolean>
+local known = {}
+---@type table<SourceId, table> 第三方源 id → 描述表 { api, meta, new, setting? }
+local external = {}
 
 ---@type table<SourceId, BookSource>
 local instances = {}
 
+--- 读一个第三方描述文件，不合约定就抛错。
+---@param path string
+---@return SourceId id, table desc
+local function readDescriptor(path)
+    local desc = dofile(path)
+    assert(type(desc) == "table" and desc.api == Registry.API, "api mismatch, want " .. Registry.API)
+    assert(type(desc.meta) == "function" and type(desc.new) == "function", "meta() and new() required")
+    local id = desc.meta().id
+    assert(type(id) == "string" and id:match("^ext%.[%w_%-]+$"), "id must look like ext.<name>")
+    return id, desc
+end
+
+--- 源 id 清单：内置在前，第三方按插件加载顺序在后。插件集合只在重启时变，扫一次即可。
+---@return SourceId[]
+local function sourceIds()
+    if ids then return ids end
+    ids = {}
+    for i, id in ipairs(BUILTIN) do
+        ids[i] = id
+        known[id] = true
+    end
+    local lfs = require("libs/libkoreader-lfs")
+    for _idx, plugin in ipairs(require("pluginloader").enabled_plugins) do
+        local path = plugin.path .. "/" .. DESCRIPTOR
+        if lfs.attributes(path, "mode") == "file" then
+            -- 第三方代码不归月读管：坏一个只记日志跳过，不能拖垮内置源和整个桌面。
+            local ok, id, desc = pcall(readDescriptor, path)
+            if not ok then
+                logger.err("book.source external rejected", path, id)
+            elseif known[id] then
+                logger.err("book.source external duplicate id", path, id)
+            else
+                ids[#ids + 1] = id
+                known[id] = true
+                external[id] = desc
+            end
+        end
+    end
+    return ids
+end
+
+--- 源门面模块：第三方是描述表，内置按模块名加载。
+---@param id SourceId
+---@return table
+local function sourceModule(id)
+    return external[id] or require("source." .. id)
+end
+
+--- 第三方源的描述表；内置源与未知 id 返回 nil。
+---@param id SourceId
+---@return table|nil
+function Registry.external(id)
+    sourceIds()
+    return external[id]
+end
+
 --- 持久化的活跃源 id（common.active_source）；未配置或该源已下线时为 "local"。
 ---@return SourceId
 function Registry.activeId()
+    sourceIds()
     local id = MoonSettings.get("source").active_source
-    return KNOWN[id] and id or "local"
+    return known[id] and id or "local"
 end
 
 --- 只取 meta，不构造 Source 实例
 ---@param id SourceId
 ---@return BookSourceMeta|nil
 function Registry.meta(id)
-    return KNOWN[id] and require("source." .. id).meta() or nil
+    sourceIds()
+    return known[id] and sourceModule(id).meta() or nil
 end
 
 --- 列出数据源元信息。
 ---@return BookSourceMeta[]
 function Registry.list()
     local out = {}
-    for i, id in ipairs(IDS) do
+    for i, id in ipairs(sourceIds()) do
         out[i] = Registry.meta(id)
     end
     return out
 end
 
---- 源是否启用。common.enabled_sources 为 nil = 全部启用；
+--- 源是否启用。common.enabled_sources 为 nil 或集合里没有这个 id（后装的源）= 启用；
 --- 活跃源恒 true（配置被手改的兜底，picker/设置页都依赖这条）。
 ---@param id SourceId
 ---@return boolean
@@ -55,7 +125,7 @@ function Registry.isEnabled(id)
         return true
     end
     local enabled = MoonSettings.get("source").enabled_sources
-    return enabled == nil or enabled[id] == true
+    return enabled == nil or enabled[id] ~= false
 end
 
 --- 列出启用源元信息（picker 与设置页只显示这些）。
@@ -71,24 +141,19 @@ function Registry.listEnabled()
 end
 
 --- 启用/禁用源并持久化。禁止禁用活跃源（UI 层也该用 enabled=false 挡住）。
---- 首次写入时以「当前全部启用」初始化集合，保持 nil = 全开的语义边界。
 ---@param id SourceId
 ---@param on boolean
 ---@return boolean ok, string|nil err
 function Registry.setEnabled(id, on)
-    if not KNOWN[id] then
+    sourceIds()
+    if not known[id] then
         return false, T(_("未知数据源: %1"), id)
     end
     if not on and id == Registry.activeId() then
         return false, _("不能禁用当前使用的数据源")
     end
     local common = MoonSettings.get("source")
-    if common.enabled_sources == nil then
-        common.enabled_sources = {}
-        for _idx, known in ipairs(IDS) do
-            common.enabled_sources[known] = true
-        end
-    end
+    common.enabled_sources = common.enabled_sources or {}
     common.enabled_sources[id] = on
     MoonSettings.save("source")
     return true
@@ -98,10 +163,11 @@ end
 ---@param id SourceId
 ---@return BookSource|nil, string|nil
 function Registry.create(id)
-    if not KNOWN[id] then
+    sourceIds()
+    if not known[id] then
         return nil, T(_("未知数据源: %1"), id)
     end
-    return require("source." .. id).new()
+    return sourceModule(id).new()
 end
 
 --- 关闭并丢弃全部缓存实例（下次 resolve / current 按新配置重建）。
