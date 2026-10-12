@@ -78,6 +78,22 @@ local KEYWORDS = {
 ---@field icon string
 ---@field image string
 
+---@class BookWeatherHour
+---@field at string 观测地本地时间 "YYYY-MM-DD HH:MM"，按字符串比较先后
+---@field temp string|nil
+---@field desc string|nil
+---@field code string|nil
+---@field icon string
+---@field image string
+
+---@class BookWeatherForecast
+---@field kind "hour"|"day"
+---@field label string hour 为 "HH:MM"，day 为 "YYYY-MM-DD"
+---@field temp string|nil hour 的温度
+---@field low string|nil day 的最低温
+---@field high string|nil day 的最高温
+---@field image string
+
 ---@class BookWeather
 ---@field temp string|nil
 ---@field feels string|nil
@@ -101,6 +117,7 @@ local KEYWORDS = {
 ---@field icon string
 ---@field image string
 ---@field days BookWeatherDay[]
+---@field hours BookWeatherHour[]|nil 逐 3 小时预报，按时间升序；旧缓存没有
 
 ---@class BookOnlineWeather : BookOnline
 ---@field city string|nil 由首页 / 夜间模式写入，这里不读设置
@@ -184,6 +201,56 @@ local function dayRow(day)
     }
 end
 
+--- 一天的逐小时档位追加到 out；time 是 "0" / "300" / … / "2100"（HHMM 去掉前导零）。
+---@param day table
+---@param out BookWeatherHour[]
+local function hourRows(day, out)
+    local date = Online.nonempty(day.date)
+    if not date or type(day.hourly) ~= "table" then return end
+    for _idx, hour in ipairs(day.hourly) do
+        local hhmm = type(hour) == "table" and tonumber(hour.time)
+        if hhmm then
+            local code = numberish(hour.weatherCode)
+            local desc, icon, image = look(code, hour.lang_zh, hour.weatherDesc)
+            out[#out + 1] = {
+                at = string.format("%s %02d:%02d", date, math.floor(hhmm / 100), hhmm % 100),
+                temp = numberish(hour.tempC),
+                desc = desc,
+                code = code,
+                icon = icon,
+                image = image,
+            }
+        end
+    end
+end
+
+--- 从 now 往后的 n 档预报：有逐小时取逐小时，没有取明天起的逐日，都没有返回空表。
+--- 档位按 now 现算，不进缓存：同一份 4 小时缓存里过去的档位会自然滚掉。
+---@param wx BookWeather|nil
+---@param n integer
+---@param now number|nil 时间戳，缺省当前
+---@return BookWeatherForecast[]
+function Weather.upcoming(wx, n, now)
+    local out = {}
+    if not wx then return out end
+    local stamp = os.date("%Y-%m-%d %H:%M", now) --[[@as string]]
+    for _idx, hour in ipairs(wx.hours or {}) do
+        if #out >= n then return out end
+        if hour.at > stamp then
+            out[#out + 1] = { kind = "hour", label = hour.at:sub(12), temp = hour.temp, image = hour.image }
+        end
+    end
+    if #out > 0 then return out end
+    local today = stamp:sub(1, 10)
+    for _idx, day in ipairs(wx.days or {}) do
+        if #out >= n then break end
+        if day.date and day.date > today then
+            out[#out + 1] = { kind = "day", label = day.date, low = day.low, high = day.high, image = day.image }
+        end
+    end
+    return out
+end
+
 ---@return string
 function Weather:url()
     local city = Text.trim(self.city or "")
@@ -203,10 +270,11 @@ function Weather:parse(body)
     local area = payload.nearest_area
     area = type(area) == "table" and area[1] or nil
     local weather = type(payload.weather) == "table" and payload.weather or {}
-    local days = {}
+    local days, hours = {}, {}
     for _idx, day in ipairs(weather) do
         if type(day) == "table" then
             days[#days + 1] = dayRow(day)
+            hourRows(day, hours)
         end
         if #days >= 3 then break end
     end
@@ -238,6 +306,7 @@ function Weather:parse(body)
         icon = icon,
         image = image,
         days = days,
+        hours = hours,
     }
 end
 
