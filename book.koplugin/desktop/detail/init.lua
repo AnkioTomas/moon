@@ -41,7 +41,7 @@ local storeBackend = require("desktop.detail.common").storeBackend
 ---@field _stats table|nil
 ---@field _daily table|nil
 ---@field _daily_page integer|nil
----@field _store_detail_job CancelHandle|nil
+---@field _detail_job CancelHandle|nil
 ---@field updateView fun(self: BookDetailPage) 整页重建，见 detail/layout.lua
 local Detail = Modal:extend{
     name = "book_detail",
@@ -90,14 +90,39 @@ function Detail:init()
     self:updateView()
     -- OPDS 条目本身就是完整详情，只有 zlib 需要补拉。
     local store = storeBackend(self.book)
-    if store and store.getDetailAsync then
-        self._store_detail_job = store.getDetailAsync(self.book, function(detail)
-            self._store_detail_job = nil
-            if self.closed or not detail then return end
-            self.book = detail
-            self:refresh()
-        end)
+    if store then
+        if store.getDetailAsync then
+            self._detail_job = store.getDetailAsync(self.book, function(detail)
+                self._detail_job = nil
+                if self.closed or not detail then return end
+                self.book = detail
+                self:refresh()
+            end)
+        end
+        return
     end
+    self:fetchMissingIntro()
+end
+
+--- 库内书没有简介（书架快照常不带）且在线时，向属主源要一次详情；源负责落库，这里只重读重画。
+--- 离线不请求，不弹联网。
+function Detail:fetchMissingIntro()
+    local book = self.book
+    if self.origin ~= "library" or not (book.source_id and book.stable_id) then return end
+    local row = require("book.books_db").get(book.source_id, book.stable_id)
+    if not row or row.intro then return end
+    local owner = require("desktop.detail.common").bookOwnerSource(book, self.source)
+    if not (owner and owner.getDetailAsync and require("ui/network/manager"):isConnected()) then return end
+    local identity = { source_id = book.source_id, stable_id = book.stable_id, source = owner, book = row }
+    self._detail_job = owner:getDetailAsync(identity, function(detail)
+        self._detail_job = nil
+        if self.closed or not detail then return end
+        local fresh = require("book.books_db").get(book.source_id, book.stable_id)
+        if not (fresh and fresh.intro) then return end
+        -- 只并简介 / 作者：self.book 是书架列表项，带进度等列表专有字段，不能整行换掉。
+        book.intro, book.authors = fresh.intro, fresh.authors or book.authors
+        self:refresh()
+    end)
 end
 
 --- 重建并重画自己。
@@ -136,9 +161,9 @@ end
 
 function Detail:onCloseWidget()
     self.closed = true
-    if self._store_detail_job then
-        self._store_detail_job:cancel()
-        self._store_detail_job = nil
+    if self._detail_job then
+        self._detail_job:cancel()
+        self._detail_job = nil
     end
     if self.scrape_job then
         self.scrape_job.cancel()
