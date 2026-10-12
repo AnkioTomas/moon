@@ -132,6 +132,19 @@ function DocumentToc.current(ui)
     return { idx = idx, title = entry.title }
 end
 
+--- 当前页在本章的序号与本章页数（与 ReaderFooter 章节进度同口径，含页码标签与隐藏流）；
+--- 首章之前或没有目录返回 nil。
+---@param ui table|nil
+---@return integer|nil page
+---@return integer|nil count
+function DocumentToc.chapterPages(ui)
+    local page = currentPage(ui)
+    if not page then return nil end
+    local done = ui.toc:getChapterPagesDone(page)
+    if not done then return nil end
+    return done + 1, ui.toc:getChapterPageCount(page)
+end
+
 ---@param ui table|nil
 ---@return number|nil
 function DocumentToc.chapterFraction(ui)

@@ -34,6 +34,21 @@ function Toc.current(session)
     return DocumentToc.current(session.ui)
 end
 
+--- 当前页在本章的序号与本章页数；连续章节一个文件就是一章，直接用文档页码。
+---@param session ReaderSessionSnapshot|nil
+---@return integer|nil page
+---@return integer|nil count
+function Toc.chapterPages(session)
+    if not session then return nil end
+    if session.identity.chapter_idx ~= nil then
+        if session.page > 0 and session.total_pages > 0 then
+            return session.page, session.total_pages
+        end
+        return nil
+    end
+    return DocumentToc.chapterPages(session.ui)
+end
+
 ---@param session ReaderSessionSnapshot|nil
 ---@return number|nil
 function Toc.chapterFraction(session)

@@ -127,6 +127,14 @@ function Session.chapterTitle(snapshot)
     return current and current.title or nil
 end
 
+--- 当前页在本章的序号与本章页数；两种模式均有效，不在任何章节内返回 nil。
+---@param snapshot ReaderSessionSnapshot|nil 缺省当前会话
+---@return integer|nil page
+---@return integer|nil count
+function Session.chapterPages(snapshot)
+    return Toc.chapterPages(snapshot or Session._snapshot)
+end
+
 --- 全书剩余阅读时间估算（秒）；数据不足或已读完返回 nil。
 ---@return number|nil
 function Session.remainingSeconds()
