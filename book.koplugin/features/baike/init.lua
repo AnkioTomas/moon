@@ -120,8 +120,21 @@ local function lookupInput(self)
     }:show()
 end
 
+local native_long_press_text
+
+--- 长按动作菜单在建菜单时读文字，每次插件创建按当前开关重写一次。
+local function relabelLongPress()
+    for _idx, action in ipairs(require("apps/reader/modules/readerhighlight").long_press_action) do
+        if action[2] == "wikipedia" then
+            native_long_press_text = native_long_press_text or action[1]
+            action[1] = Baike.isEnabled() and _("百度百科") or native_long_press_text
+        end
+    end
+end
+
 --- 安装一次；只修改 KOReader 的入口方法，不触碰其源码。
 function Baike.onCreate()
+    relabelLongPress()
     local ReaderWikipedia = require("apps/reader/modules/readerwikipedia")
     if ReaderWikipedia._book_baike_installed then
         return
@@ -171,6 +184,16 @@ function Baike.onCreate()
             pool.wikipedia.text_func = nil
         end
         return pool
+    end
+
+    -- 手势、快捷菜单、配置档的显示名；动作选择列表直读局部 settingsList，改不到。
+    local Dispatcher = require("dispatcher")
+    local native_name = Dispatcher.getNameFromItem
+    Dispatcher.getNameFromItem = function(self, item, ...)
+        if item == "wikipedia_lookup" and Baike.isEnabled() then
+            return _("百度百科查询")
+        end
+        return native_name(self, item, ...)
     end
 end
 

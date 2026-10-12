@@ -107,9 +107,29 @@ package.preload["ui/widget/dictquicklookup"] = function()
     return DictQuickLookup
 end
 
+local ReaderHighlight = {
+    long_press_action = { { "Translate", "translate" }, { "Wikipedia", "wikipedia" } },
+}
+package.preload["apps/reader/modules/readerhighlight"] = function()
+    return ReaderHighlight
+end
+
+local Dispatcher = {
+    getNameFromItem = function(_, item)
+        return "native:" .. item
+    end,
+}
+package.preload["dispatcher"] = function()
+    return Dispatcher
+end
+
 local Baike = require("features.baike")
 Assert.is_true(Baike.isEnabled())
 Baike.onCreate()
+Assert.eq(ReaderHighlight.long_press_action[2][1], "百度百科")
+Assert.eq(ReaderHighlight.long_press_action[1][1], "Translate")
+Assert.eq(Dispatcher:getNameFromItem("wikipedia_lookup"), "百度百科查询")
+Assert.eq(Dispatcher:getNameFromItem("show_menu"), "native:show_menu")
 
 ReaderWikipedia:lookupWikipedia("第一次")
 Assert.eq(requests[1].word, "第一次")
@@ -157,6 +177,13 @@ Assert.eq(native_lookup_calls, 1)
 Assert.eq(native_input_calls, 1)
 Assert.eq(native_menu_calls, 1)
 Assert.eq(DictQuickLookup:_getButtonPool().wikipedia.text, "Wikipedia")
+Assert.eq(Dispatcher:getNameFromItem("wikipedia_lookup"), "native:wikipedia_lookup")
 
 Baike.onCreate()
 Assert.eq(native_lookup_calls, 1)
+Assert.eq(ReaderHighlight.long_press_action[2][1], "Wikipedia")
+
+settings.baike_enabled = true
+Baike.onCreate()
+Assert.eq(ReaderHighlight.long_press_action[2][1], "百度百科")
+Assert.eq(Dispatcher:getNameFromItem("wikipedia_lookup"), "百度百科查询")
