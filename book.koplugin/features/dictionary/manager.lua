@@ -12,9 +12,7 @@ local Paths = require("utils.paths")
 local Job = require("workers.job")
 local lfs = require("libs/libkoreader-lfs")
 
-local Manager = {
-    _downloading = false,
-}
+local Manager = {}
 local BASE_URL = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/dict"
 --- 校验字典 id：清单来自网络，id 会拼进目录名与分片文件名，
 --- 只放行 `[%w_-]`，否则 `../` 之类能写到数据目录外。
@@ -210,7 +208,7 @@ local function assembleAndExtract(item, dir, target)
 end
 
 --- 逐片下载（递归推进，串行；已完整的片直接跳过 = 续传），全部到位后转入解压安装。
---- 任一片失败即删除该片、清 `Manager._downloading` 并回调失败，不重试。
+--- 任一片失败即删除该片并回调失败，不重试。同一词典不会并发：任务队列按 `dict\0<id>` 去重。
 ---@param item table 清单项
 ---@param dir string 临时目录
 ---@param idx number 当前分片序号（从 1 起）
@@ -227,16 +225,12 @@ local function downloadParts(item, dir, idx, completed, done, report)
             kind = "heavy",
             timeout = 300,
             on_done = function()
-                Manager._downloading = false
-                if lfs.attributes(target, "mode") ~= "directory" then
-                    done.callback(false, "dictionary installation failed")
-                    return
-                end
                 purge(dir)
                 done.callback(true)
             end,
             on_failed = function(err)
-                Manager._downloading = false
+                -- 分片留着续传；拼好的整包与分片同样大，失败就别占着空间。
+                os.remove(dir .. "/archive.part")
                 done.callback(false, err)
             end,
         })
@@ -259,7 +253,6 @@ local function downloadParts(item, dir, idx, completed, done, report)
     }, dir .. "/" .. part.file, function(ok, err)
         if not ok or not partComplete(dir, part) then
             os.remove(dir .. "/" .. part.file)
-            Manager._downloading = false
             done.callback(false, err or "part size mismatch")
             return
         end
@@ -270,15 +263,12 @@ local function downloadParts(item, dir, idx, completed, done, report)
 end
 
 --- 分片下载、校验、解压并原子安装字典。
----@param item table
+---@param item table `Manager.catalog` 校验过的清单项
 ---@param data_dir string
 ---@param cb fun(ok: boolean, err: any)
 ---@param on_progress fun(stage: string, done: number, total: number, idx: number, count: number)|nil
 function Manager.install(item, data_dir, cb, on_progress)
     cb = cb or function() end
-    local checked, err = Manager.validateManifest({ dictionaries = { item } })
-    if not checked then cb(false, err); return end
-    if Manager._downloading then cb(false, "already downloading"); return end
     if Manager.isInstalled(data_dir, item.id) then cb(false, "dictionary already installed"); return end
     Paths.ensureDir(Paths.root())
     local util_ok, make_err = require("util").makePath(data_dir)
@@ -291,7 +281,6 @@ function Manager.install(item, data_dir, cb, on_progress)
     end
     local dir_ok, dir_err = require("util").makePath(dir)
     if not dir_ok then cb(false, dir_err); return end
-    Manager._downloading = true
     local report = on_progress or function() end
     downloadParts(item, dir, 1, 0, { data_dir = data_dir, callback = cb }, report)
 end
@@ -316,11 +305,17 @@ function Manager.installed(path, out)
     return out
 end
 
+--- KOReader 认的全部词典 .ifo：词典目录 + 旁边的 `<dir>_ext`（原生同样扫这两处）。
+---@param data_dir string
+---@return string[]
+function Manager.list(data_dir)
+    return Manager.installed(data_dir .. "_ext", Manager.installed(data_dir))
+end
+
 --- 重建 KOReader 的模块级 .ifo 缓存。ReaderDictionary 没有公开刷新 API；
 --- 这里按其原生 downloadDictionary 的做法重置 init 捕获的 available_ifos。
----@param dictionary table
+---@param dictionary table ReaderDictionary 实例
 function Manager.refresh(dictionary)
-    if not dictionary or type(dictionary.init) ~= "function" then return end
     for index = 1, 32 do
         local name = debug.getupvalue(dictionary.init, index)
         if not name then break end
@@ -333,18 +328,17 @@ function Manager.refresh(dictionary)
 end
 
 --- 启用指定 .ifo，其余字典标记禁用。
----@param dictionary table
+---@param dictionary table ReaderDictionary 实例
 ---@param ifo_path string
 function Manager.activate(dictionary, ifo_path)
-    dictionary.dicts_disabled = dictionary.dicts_disabled or {}
-    for _idx, path in ipairs(Manager.installed(dictionary.data_dir)) do dictionary.dicts_disabled[path] = true end
+    for _idx, path in ipairs(Manager.list(dictionary.data_dir)) do dictionary.dicts_disabled[path] = true end
     dictionary.dicts_disabled[ifo_path] = nil
-    if G_reader_settings then G_reader_settings:saveSetting("dicts_disabled", dictionary.dicts_disabled) end
-    if dictionary.updateSdcvDictNamesOptions then dictionary:updateSdcvDictNamesOptions() end
+    G_reader_settings:saveSetting("dicts_disabled", dictionary.dicts_disabled)
+    dictionary:updateSdcvDictNamesOptions()
 end
 
 --- 删除本插件安装的字典（仅 book-<id>）；用户自装词典拒绝删除。
----@param dictionary table
+---@param dictionary table ReaderDictionary 实例
 ---@param id string
 ---@return boolean, string|nil
 function Manager.remove(dictionary, id)
@@ -355,10 +349,10 @@ function Manager.remove(dictionary, id)
     if lfs.symlinkattributes(target, "mode") ~= "directory" then return false, "dictionary not installed" end
     local removed, remove_err = purge(target)
     if not removed and lfs.symlinkattributes(target) then return false, remove_err or "delete failed" end
-    for path in pairs(dictionary.dicts_disabled or {}) do
+    for path in pairs(dictionary.dicts_disabled) do
         if path:sub(1, #target + 1) == target .. "/" then dictionary.dicts_disabled[path] = nil end
     end
-    if G_reader_settings then G_reader_settings:saveSetting("dicts_disabled", dictionary.dicts_disabled or {}) end
+    G_reader_settings:saveSetting("dicts_disabled", dictionary.dicts_disabled)
     Manager.refresh(dictionary)
     return true
 end

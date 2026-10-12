@@ -9,16 +9,13 @@ package.preload["l10n"] = function() return { apply = function() end } end
 
 local Themed = require("support.theme_stubs")
 Themed.install()
-package.preload["datastorage"] = function()
-    return { getDataDir = function() return "/data" end }
-end
 local installed_paths = {}
 local catalog_items = {}
 local activated
 local install_dir
 package.preload["features.dictionary.manager"] = function()
     return {
-        installed = function() return installed_paths end,
+        list = function() return installed_paths end,
         isInstalled = function() return false end,
         catalog = function(cb) cb(catalog_items) end,
         activate = function(_, path) activated = path end,
@@ -93,14 +90,15 @@ Assert.eq(followed[1].count, 1)
 Assert.is_true(followed[1].done)
 Assert.eq(Themed.last("toast").text, "字典已安装并切换")
 
--- 桌面没有 ReaderUI 时仍按 KOReader 默认目录安装。
+-- 只有一种语言时直接进该语言的列表。
 catalog_items = {
     { id = "zh", name = "中文", size = 1, lang = "zh_CN", lang_name = "简体中文" },
 }
-Dictionary.download(nil)
+Dictionary.download({ dictionary = { data_dir = "/dict" } })
+Assert.eq(Themed.last("list").title, "下载字典 · 简体中文")
 Themed.choose(Themed.last("list"), 1)
 Themed.last("confirm").ok_callback()
-Assert.eq(install_dir, "/data/data/dict")
+Assert.eq(install_dir, "/dict")
 
 -- 查词弹窗切换：激活、关窗、重查当前词。
 local looked, closed_window
