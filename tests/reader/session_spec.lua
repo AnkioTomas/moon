@@ -697,6 +697,26 @@ do
     resolved_source = nil
 end
 
+-- 属主源已不在（第三方源插件被卸载）：已落盘的章节照常打开，不给源发事件、不崩。
+do
+    local Store = require("book.store")
+    local original = Store.ensureIdentity
+    Store.ensureIdentity = function(path)
+        local id = original(path)
+        id.source = nil
+        return id
+    end
+    stored_toc.chapters = { { idx = 1 }, { idx = 2 } }
+    local plugin = mkPlugin("/cache/1.html")
+    Session.onReaderReady(plugin)
+    Stubs.flush()
+    Assert.not_nil(Session.current())
+    Assert.is_nil(Session.current().identity.source)
+    Assert.not_nil(Session.current().chapter)
+    Session.onCloseDocument(plugin)
+    Store.ensureIdentity = original
+end
+
 -- 真正 EndOfBook 是 100% 完成兜底，即使快照比例不足且用户手动标过未读。
 do
     local plugin = mkPlugin("/x/book.epub")
