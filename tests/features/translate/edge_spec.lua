@@ -47,15 +47,18 @@ Assert.eq(Edge.languageCode("zh-CN"), "zh-Hans")
 Assert.eq(Edge.languageCode("zh_TW"), "zh-Hant")
 Assert.eq(Edge.languageCode("en"), "en")
 
-local translated, detected_lang = Edge.parseResponse({
+local translated, detected_lang = Edge.parseList({
     {
         translations = { { text = "你好" } },
         detectedLanguage = { language = "zh-Hans" },
     },
+    { translations = { { text = "世界" } } },
 })
-Assert.eq(translated, "你好")
+Assert.eq(table.concat(translated, "|"), "你好|世界")
 Assert.eq(detected_lang, "zh-Hans")
-Assert.is_nil(Edge.parseResponse({}))
+Assert.is_nil(Edge.parseList({}))
+Assert.is_nil(Edge.parseList({ 1 }))
+Assert.is_nil(Edge.parseList({ { translations = {} } }))
 
 local request_url, request_body, request_opts
 package.preload["http.request"] = function()
@@ -83,3 +86,15 @@ Assert.eq(result, "你好")
 Assert.eq(result_lang, "en")
 Assert.is_nil(result_err)
 Assert.is_true(type(job.cancel) == "function")
+
+-- 批量：逐条返回；条数和请求对不上整批算失败（不能错位插进书里）。
+local list = Edge.parseList({ { translations = { { text = "一" } } }, { translations = { { text = "二" } } } })
+Assert.eq(table.concat(list, "|"), "一|二")
+local batch, batch_err
+Edge.translateListAsync({ "One", "Two" }, "zh", nil, function(value, _lang, err)
+    batch, batch_err = value, err
+end)
+Assert.eq(encoded[2], "Two")
+Assert.matches(request_url, "%?from=&to=zh%-Hans&")
+Assert.is_nil(batch)
+Assert.eq(batch_err, "invalid translation response")

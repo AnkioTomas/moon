@@ -18,8 +18,10 @@ function Translate.isEnabled()
     return MoonSettings.get("features.translate").edge_translation_enabled
 end
 
---- 复制原文到剪贴板，确保联网后打开 Edge 翻译弹窗。
---- 离线时交给 NetworkMgr 排队，联网回调里重跑本函数，因此参数需原样透传。
+--- 复制原文到剪贴板，确保连上网后打开 Edge 翻译弹窗。
+--- 未连网时交给 NetworkMgr 询问开 Wi-Fi，连上后重跑本函数，因此参数需原样透传。
+--- 只认 isConnected：原生用的 willRerunWhenOnline 走同步 DNS，会卡界面，
+--- 且「已连 Wi-Fi 但 DNS 不通」时既不弹窗也不回调；请求失败由弹窗显示原因。
 ---@param translator table KOReader Translator 单例
 ---@param text string 待翻译原文
 ---@param detailed_view boolean|nil 原生详细模式标记，本实现不使用
@@ -33,7 +35,7 @@ local function showTranslation(translator, text, detailed_view, source_lang, tar
         Device.input.setClipboardText(text)
     end
     local NetworkMgr = require("ui/network/manager")
-    if NetworkMgr:willRerunWhenOnline(function()
+    if NetworkMgr:willRerunWhenConnected(function()
         showTranslation(translator, text, detailed_view, source_lang, target_lang, from_highlight, index)
     end) then
         return
