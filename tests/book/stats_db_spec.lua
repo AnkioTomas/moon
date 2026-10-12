@@ -18,6 +18,10 @@ local function stubDbDeps()
     package.preload["ffi/sha2"] = function()
         return { md5 = function(s) return s end }
     end
+    package.loaded["utils.settings"] = nil
+    package.preload["utils.settings"] = function()
+        return { getSource = function() return {} end }
+    end
 end
 
 local function clearMods()

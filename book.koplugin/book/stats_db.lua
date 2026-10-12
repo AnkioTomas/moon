@@ -163,10 +163,12 @@ end
 local FRESH_LOCAL = "(sync_status=0 OR (?>0 AND start_time>=?))"
 
 --- 按天合并云端日桶与本地页记录：有云端日桶的日期 = 云端 + 拉取后本地新读的。
+--- 源配置 merge_local_stats 打开时每天取它与本地当天合计中较大的：补上云端没记到的离线阅读。
+--- 云端只有日合计、没有逐条记录，分不出哪段已上报，较大值是不双计的近似；extra 是比云端优先多出的秒数。
 ---@param source_id string
 ---@param start_ts number|nil 可选时间范围（含）
 ---@param end_ts number|nil 可选时间范围（不含）
----@return table[] rows { ymd, seconds, pages }
+---@return table[] rows { ymd, seconds, pages, extra }
 local function mergedDailyRowsOne(source_id, start_ts, end_ts)
     local fetched_at = tonumber(DB.rowexec(
         "SELECT MAX(last_time) FROM reading_stats WHERE source_id=? AND record_type='day';",
@@ -204,14 +206,19 @@ local function mergedDailyRowsOne(source_id, start_ts, end_ts)
             pages[day] = (pages[day] or 0) + count
         end
     end
+    local merge = require("utils.settings").getSource(source_id).merge_local_stats == true
     local seen, rows = {}, {}
     for day, seconds in pairs(cloud) do
         seen[day] = true
-        rows[#rows + 1] = { ymd = day, seconds = seconds + (fresh[day] or 0), pages = pages[day] or 0 }
+        local merged = seconds + (fresh[day] or 0)
+        local extra = merge and math.max(0, (local_days[day] or 0) - merged) or 0
+        rows[#rows + 1] = { ymd = day, seconds = merged + extra, pages = pages[day] or 0, extra = extra }
     end
+    -- 没有云端日桶的日期（云端当天为 0）本来就全用本地；总时长另以云端 total 为准，拉取前读的才算多出。
     for day, seconds in pairs(local_days) do
         if not seen[day] then
-            rows[#rows + 1] = { ymd = day, seconds = seconds, pages = pages[day] or 0 }
+            rows[#rows + 1] = { ymd = day, seconds = seconds, pages = pages[day] or 0,
+                extra = merge and seconds - (fresh[day] or 0) or 0 }
         end
     end
     table.sort(rows, function(a, b) return a.ymd < b.ymd end)
@@ -408,11 +415,12 @@ end
 ---@return { total_seconds: number, total_pages: number, last7_seconds: number, longest_day_seconds: number }
 function StatsDB.summaryBySource(source_id)
     local daily = mergedDailyRows(source_id)
-    local total_seconds, total_pages, last7_seconds, longest_day_seconds = 0, 0, 0, 0
+    local total_seconds, total_pages, last7_seconds, longest_day_seconds, extra = 0, 0, 0, 0, 0
     local cutoff = os.date("%Y-%m-%d", os.time() - 6 * 86400)
     for _idx, row in ipairs(daily) do
         local seconds = tonumber(row.seconds) or 0
         total_seconds = total_seconds + seconds
+        extra = extra + (row.extra or 0)
         total_pages = total_pages + (tonumber(row.pages) or 0)
         if row.ymd >= cutoff then
             last7_seconds = last7_seconds + seconds
@@ -431,7 +439,7 @@ function StatsDB.summaryBySource(source_id)
         )
         if (tonumber(remote_total) or 0) > 0 then
             fetched_at = tonumber(fetched_at) or 0
-            total_seconds = tonumber(remote_total) + (tonumber(DB.rowexec(
+            total_seconds = tonumber(remote_total) + extra + (tonumber(DB.rowexec(
                 [[SELECT COALESCE(SUM(duration),0) FROM reading_stats
                   WHERE source_id=? AND record_type IN ('page','page_rollup') AND ]] .. FRESH_LOCAL .. ";",
                 source_id, fetched_at, fetched_at
