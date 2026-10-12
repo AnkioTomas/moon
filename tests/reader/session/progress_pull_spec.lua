@@ -232,6 +232,34 @@ Assert.eq(#shown, 0, "pending 与云端一致时不应假冲突")
 Assert.eq(#synced, 0)
 Assert.eq(#remote_upserted, 1)
 
+-- 云端只记到章（不回章内位置）且同章 → 不弹窗，也不拿章首覆盖本地章内位置
+Progress.clearConflicts()
+shown = {}
+synced = {}
+remote_upserted = {}
+pending_row = {
+    fraction = 0.41,
+    chapter_idx = 3,
+    chapter_fraction = 0.09,
+    sync_status = 1,
+}
+source.getProgressAsync = function(_, _, cb)
+    cb({ fraction = 0.4, chapter_idx = 3 })
+    return { cancel = function() end }
+end
+Progress.pull(snapshot())
+Stubs.flush()
+Assert.eq(#shown, 0, "同章且云端没有章内位置 → 以本地为准")
+Assert.eq(#remote_upserted, 0, "不能把本地 9% 冲成章首")
+-- 换了章仍是冲突
+source.getProgressAsync = function(_, _, cb)
+    cb({ fraction = 0.8, chapter_idx = 5 })
+    return { cancel = function() end }
+end
+Progress.pull(snapshot())
+Stubs.flush()
+Assert.eq(#shown, 1, "章不同照常询问")
+
 -- 远端只有全书比例和章内比例时，也必须先推导章节号，不能把 nil 传给 gotoChapter。
 Progress.clearConflicts()
 shown = {}

@@ -243,13 +243,16 @@ function Source:getProgressAsync(identity, cb)
                 cb(nil, nil, { empty = true })
                 return
             end
-            local within = tonumber(row.read_progress) or 0
-            if within > 1 then within = within / 10000 end
-            within = math.max(0, math.min(1, within))
+            -- 没有 read_progress 就是只记到章：留 nil，别写成 0 让开书对比误判为章首。
+            local within = tonumber(row.read_progress)
+            if within then
+                if within > 1 then within = within / 10000 end
+                within = math.max(0, math.min(1, within))
+            end
             cb({
                 chapter_idx = idx,
                 chapter_fraction = within,
-                fraction = (idx - 1 + within) / #toc,
+                fraction = (idx - 1 + (within or 0)) / #toc,
                 extra = { chapter_uid = tostring(row.item_id), chapter_idx = idx },
             })
         end)
