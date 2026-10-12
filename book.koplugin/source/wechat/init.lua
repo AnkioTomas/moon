@@ -784,18 +784,36 @@ function Source:paragraphReviewsEnabled()
     return require("utils.settings").getSource(self.id).show_paragraph_reviews == true
 end
 
---- 本章段评热点，已定位到本地章节 xpointer。
----@param identity BookIdentity 章会话身份
----@param html_path string 本地章节文件（即当前文档）
----@param cb fun(spots: WechatReviewSpot[]|nil, err: string|nil)
----@return { cancel: fun() }
-function Source:paragraphReviewsAsync(identity, html_path, cb)
-    local f = assert(io.open(html_path, "rb"))
-    local html = f:read("*a")
-    f:close()
-    return withChapterUid(self, identity, cb, function(chapter_uid, done)
-        return Reviews.spotsAsync(self._client, identity.stable_id, chapter_uid, html, done)
+--- 按书名搜索微信读书书目（关联本地书看段评用）。
+---@param keyword string
+---@param cb fun(books: WechatSearchBook[]|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:searchBooksAsync(keyword, cb)
+    return self._client:searchAsync(keyword, function(wire, err)
+        if not wire then
+            cb(nil, err)
+            return
+        end
+        cb(Mapper.searchBooks(wire))
     end)
+end
+
+--- 本章有段评的热点原句（未定位）。
+---@param identity BookIdentity 微信书身份，chapter_idx 为微信目录序号
+---@param cb fun(hotspots: WechatReviewHotspot[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:paragraphHotspotsAsync(identity, cb)
+    return withChapterUid(self, identity, cb, function(chapter_uid, done)
+        return Reviews.hotspotsAsync(self._client, identity.stable_id, chapter_uid, done)
+    end)
+end
+
+--- 热点按原句定位到 html（xpointer 以该 HTML 的根为起点）；定位不了的丢弃。
+---@param hotspots WechatReviewHotspot[]
+---@param html string
+---@return WechatReviewSpot[]
+function Source:locateHotspots(hotspots, html)
+    return Reviews.locate(hotspots, html)
 end
 
 --- 某句的一页段评。

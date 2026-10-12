@@ -1150,10 +1150,6 @@ do
     Assert.is_true(src:paragraphReviewsEnabled())
     Settings.getSource = getSource
 
-    local path = os.tmpname()
-    local f = assert(io.open(path, "wb"))
-    f:write("<html><body><p>甲乙丙丁。</p></body></html>")
-    f:close()
     local calls = {}
     fake_client.underlinesAsync = function(_self, book_id, uid, cb)
         calls[#calls + 1] = { book_id, uid }
@@ -1169,12 +1165,13 @@ do
         return { cancel = function() end }
     end
     local identity = setmetatable({ chapter_idx = 1 }, { __index = REF })
-    local spots
-    src:paragraphReviewsAsync(identity, path, function(value) spots = value end)
+    local hotspots
+    src:paragraphHotspotsAsync(identity, function(value) hotspots = value end)
     require("support.stubs").flush()
-    os.remove(path)
     Assert.eq(calls[1][1], "b1")
     Assert.eq(calls[1][2], "40")
+    Assert.len(hotspots, 1)
+    local spots = src:locateHotspots(hotspots, "<html><body><p>甲乙丙丁。</p></body></html>")
     Assert.len(spots, 1)
     Assert.eq(spots[1].pos0, "/html/body/p/text().0")
 
@@ -1198,6 +1195,23 @@ do
     Assert.len(calls, 3)
     toc_payload["b1"] = nil
     require("source.wechat.toc").clear()
+
+    -- 书名搜索：只留带 bookId 的书目。
+    local keyword
+    fake_client.searchAsync = function(_self, word, cb)
+        keyword = word
+        cb({ books = {
+            { type = 0, bookInfo = { bookId = 834464, title = "活着", author = "余华", publisher = "作家" } },
+            { type = 3, mpInfo = { title = "公众号" } },
+        } })
+        return { cancel = function() end }
+    end
+    local found
+    src:searchBooksAsync("活着", function(books) found = books end)
+    Assert.eq(keyword, "活着")
+    Assert.len(found, 1)
+    Assert.eq(found[1].book_id, "834464")
+    Assert.eq(found[1].author, "余华")
 end
 
 -- pushNotesAsync 中途取消：在途请求被取消，迟到回包不回调、不再发后续请求。

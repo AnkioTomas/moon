@@ -25,6 +25,7 @@
 ---@field page number|nil KOReader 文档目录起始页
 ---@field xpointer string|nil KOReader 文档目录定位点
 ---@field tar string|nil 微信章节资源包 URL
+---@field words integer|nil 微信章节字数（按篇幅对齐本地书用）
 
 local Paths = require("utils.paths")
 local Progress = require("book.progress")

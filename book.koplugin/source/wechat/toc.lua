@@ -7,7 +7,7 @@
 local Toc = setmetatable({}, { __index = require("source.toc") })
 
 --- 目录格式版本，Mapper.chapters 写在首章。3：网文章名补「第 N 章」。
-Toc.FORMAT_VERSION = 3
+Toc.FORMAT_VERSION = 4
 
 --- 当前目录是否为最新格式；旧缓存返回 false，触发源重新拉取。
 ---@param list BookChapter[]|nil

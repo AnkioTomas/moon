@@ -1,26 +1,36 @@
 --[[--
 微信读书段评（他人在本章某句下的点评）：本章热点与按句分页。
 
-热点 = ``/web/book/underlines`` 的全部 range，分批 ``readReviews``（每句只要 1 条）换回原句
-``abstract`` 与段评总数；原句经 ``Annotations.locateBatch`` 落到本地章节 xpointer，
-定位不了（找不到 / 重复无法消歧）的热点直接丢弃，不画错位置。
+热点 = ``/web/book/underlines`` 的全部 range，分批并发 ``readReviews``（每句只要 1 条）换回原句
+``abstract`` 与段评总数，按章缓存到磁盘。拉取与定位分开：章会话在本章 HTML 上定位，关联书按页查找原句。
+原句经 ``Annotations.locateBatch`` 落到 HTML 的 xpointer，定位不了（找不到 / 重复无法消歧）的直接丢弃，不画错位置。
 
 @module koplugin.book.source.wechat.reviews
 --]]
 
 local Annotations = require("source.wechat.annotations")
+local JSON = require("json")
+local Paths = require("utils.paths")
 local _ = require("gettext")
 
 local PAGE_SIZE = 30
--- 服务端按 range 逐个查，整批 3 秒超时（errCode -10100）；实测每个约 30ms，一章常有 150 个。
+-- 服务端按 range 逐个查，整批 3 秒超时（errCode -10100）；实测每个约 30ms，一章常有 150～300 个。
 local BATCH_SIZE = 40
+-- 同时在飞的批数：串行时一章 8 批要 10 秒以上。
+local CONCURRENCY = 3
+-- 热点原句与段评数变得慢，缓存一周（cache/wechat/reviews/<bookId>/<章 uid>.json）。
+local CACHE_TTL = 7 * 24 * 3600
 
 local Reviews = {}
 
----@class WechatReviewSpot
+--- 未定位的热点。
+---@class WechatReviewHotspot
 ---@field range string wire range，翻页时原样带回
 ---@field text string 原句
 ---@field total integer 段评总数
+
+--- 已定位的热点。
+---@class WechatReviewSpot: WechatReviewHotspot
 ---@field pos0 string
 ---@field pos1 string
 
@@ -37,32 +47,35 @@ local Reviews = {}
 ---@field max_idx integer 下一页请求带回
 ---@field more boolean
 
---- readReviews 回包 → 已定位的热点。
+--- readReviews 回包 → 有段评的热点（未定位）。
 ---@param wire table ``{ reviews = [{ range, totalCount, pageReviews[] }] }``
----@param html string 本地章节 HTML
----@return WechatReviewSpot[]
-function Reviews.spots(wire, html)
-    local items = {}
+---@return WechatReviewHotspot[]
+function Reviews.hotspots(wire)
+    local out = {}
     for _idx, entry in ipairs(wire.reviews or {}) do
         local first = entry.pageReviews and entry.pageReviews[1]
         local total = tonumber(entry.totalCount) or 0
         if first and total > 0 then
-            items[#items + 1] = {
-                text = first.review.abstract,
-                wr_range = entry.range,
-                total = total,
-            }
+            out[#out + 1] = { range = entry.range, text = first.review.abstract, total = total }
         end
     end
+    return out
+end
+
+--- 热点按原句定位到 html；xpointer 以该 HTML 的根为起点。
+---@param hotspots WechatReviewHotspot[]
+---@param html string
+---@return WechatReviewSpot[]
+function Reviews.locate(hotspots, html)
+    local items = {}
+    for i, spot in ipairs(hotspots) do items[i] = { text = spot.text, wr_range = spot.range, spot = spot } end
     local located = Annotations.locateBatch(html, items)
     local out = {}
     for _idx, item in ipairs(items) do
         local hit = located[item]
         if hit then
-            out[#out + 1] = {
-                range = item.wr_range, text = item.text, total = item.total,
-                pos0 = hit.pos0, pos1 = hit.pos1,
-            }
+            local spot = item.spot
+            out[#out + 1] = { range = spot.range, text = spot.text, total = spot.total, pos0 = hit.pos0, pos1 = hit.pos1 }
         end
     end
     return out
@@ -82,49 +95,105 @@ function Reviews.item(entry)
     }
 end
 
---- 拉本章热点：underlines → 批量 readReviews → 定位。
+---@param book_id string
+---@param chapter_uid string
+---@return string
+local function cachePath(book_id, chapter_uid)
+    return Paths.sourceCacheDir("wechat") .. "/reviews/" .. book_id .. "/" .. chapter_uid .. ".json"
+end
+
+--- 未过期的本章热点缓存；没有、过期或损坏时 nil。
+---@param book_id string
+---@param chapter_uid string
+---@return WechatReviewHotspot[]|nil
+local function readCache(book_id, chapter_uid)
+    local f = io.open(cachePath(book_id, chapter_uid), "rb")
+    if not f then return nil end
+    -- 写到一半断电留下的残文件：当没有缓存，重新拉一次覆盖。
+    local ok, data = pcall(JSON.decode, f:read("*a"))
+    f:close()
+    if ok and type(data) == "table" and (data.expire or 0) > os.time() then return data.hotspots end
+    return nil
+end
+
+---@param book_id string
+---@param chapter_uid string
+---@param hotspots WechatReviewHotspot[]
+local function writeCache(book_id, chapter_uid, hotspots)
+    local path = cachePath(book_id, chapter_uid)
+    Paths.ensureDir(path:match("(.+)/[^/]+$"))
+    local f = io.open(path, "wb")
+    if not f then return end
+    f:write(JSON.encode({ expire = os.time() + CACHE_TTL, hotspots = hotspots }))
+    f:close()
+end
+
+--- 拉本章热点：磁盘缓存 → underlines → 并发分批 readReviews。
 ---@param client WechatClient
 ---@param book_id string
 ---@param chapter_uid string
----@param html string 本地章节 HTML
----@param cb fun(spots: WechatReviewSpot[]|nil, err: string|nil)
+---@param cb fun(hotspots: WechatReviewHotspot[]|nil, err: string|nil)
 ---@return { cancel: fun() }
-function Reviews.spotsAsync(client, book_id, chapter_uid, html, cb)
-    local job
+function Reviews.hotspotsAsync(client, book_id, chapter_uid, cb)
     local cancelled = false
-    job = client:underlinesAsync(book_id, chapter_uid, function(data, err)
+    local jobs = {}
+    local function cancel()
+        cancelled = true
+        for _key, job in pairs(jobs) do job.cancel() end
+    end
+    local cached = readCache(book_id, chapter_uid)
+    if cached then
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled then cb(cached) end
+        end)
+        return { cancel = cancel }
+    end
+    jobs.underlines = client:underlinesAsync(book_id, chapter_uid, function(data, err)
+        jobs.underlines = nil
         if cancelled then return end
         if not data then
             cb(nil, err)
             return
         end
-        local ranges = {}
-        for _idx, underline in ipairs(data.underlines or {}) do
-            ranges[#ranges + 1] = { range = underline.range, maxIdx = 0, count = 1, synckey = 0 }
-        end
-        local collected = {}
-        local function nextBatch(from)
-            if from > #ranges then
-                cb(Reviews.spots({ reviews = collected }, html))
-                return
+        local batches = {}
+        local underlines = data.underlines or {}
+        for from = 1, #underlines, BATCH_SIZE do
+            local batch = {}
+            for i = from, math.min(from + BATCH_SIZE - 1, #underlines) do
+                batch[#batch + 1] = { range = underlines[i].range, maxIdx = 0, count = 1, synckey = 0 }
             end
-            local batch = { unpack(ranges, from, math.min(from + BATCH_SIZE - 1, #ranges)) }
-            job = client:readReviewsAsync(book_id, chapter_uid, batch, function(wire, review_err)
-                if cancelled then return end
-                if not wire then
-                    cb(nil, review_err)
-                    return
-                end
-                for _idx, entry in ipairs(wire.reviews or {}) do collected[#collected + 1] = entry end
-                nextBatch(from + BATCH_SIZE)
-            end)
+            batches[#batches + 1] = batch
         end
-        nextBatch(1)
+        local results, next_batch, pending = {}, 1, 0
+        local function finish()
+            local collected = {}
+            for _idx, reviews in ipairs(results) do
+                for _entry_idx, entry in ipairs(reviews) do collected[#collected + 1] = entry end
+            end
+            local hotspots = Reviews.hotspots({ reviews = collected })
+            writeCache(book_id, chapter_uid, hotspots)
+            cb(hotspots)
+        end
+        local function launch()
+            while next_batch <= #batches and pending < CONCURRENCY do
+                local i = next_batch
+                next_batch, pending = next_batch + 1, pending + 1
+                jobs[i] = client:readReviewsAsync(book_id, chapter_uid, batches[i], function(wire, review_err)
+                    jobs[i], pending = nil, pending - 1
+                    if cancelled then return end
+                    if not wire then
+                        cancel()
+                        cb(nil, review_err)
+                        return
+                    end
+                    results[i] = wire.reviews or {}
+                    if next_batch > #batches and pending == 0 then finish() else launch() end
+                end)
+            end
+        end
+        if #batches == 0 then finish() else launch() end
     end)
-    return { cancel = function()
-        cancelled = true
-        if job then job.cancel() end
-    end }
+    return { cancel = cancel }
 end
 
 --- 拉某句的一页段评。

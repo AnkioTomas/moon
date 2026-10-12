@@ -68,6 +68,14 @@ local function postWebAsync(path, body, referer, cb)
         webWire(url, cb))
 end
 
+--- 书城搜索：``books[]`` 每条 ``{ type, bookInfo = { bookId, title, author, publisher, … } }``。
+---@param keyword string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:searchAsync(keyword, cb)
+    return getWebAsync("/web/search/global", { keyword = keyword, maxIdx = 0, fragmentSize = 120, count = 20 }, cb)
+end
+
 --- 全量拉取书架（synckey=0 表示不做增量）。
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil

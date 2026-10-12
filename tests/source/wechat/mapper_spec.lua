@@ -94,7 +94,8 @@ do
     Assert.eq(chapters[1].depth, 1)
     Assert.eq(chapters[1].anchors[1].title, "第一章")
     Assert.eq(chapters[1].anchors[1].depth, 2)
-    Assert.eq(chapters[1].toc_version, 3)
+    Assert.eq(chapters[1].toc_version, 4)
+    Assert.not_nil(chapters[1].words, "带字数：关联书按篇幅对齐")
     Assert.eq(chapters[2].title, "二", "出版书（epub）章名原样")
     Assert.eq(chapters[2].depth, 2)
 end

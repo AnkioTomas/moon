@@ -279,6 +279,7 @@ function Mapper.chapters(data, bookId)
                 source_idx = source_idx ~= nil and tostring(source_idx) or nil,
                 uid = uid ~= nil and tostring(uid) or nil,
                 title = title,
+                words = wc,
                 tar = type(ch.tar) == "string" and ch.tar ~= "" and ch.tar or nil,
             }
         end
@@ -302,6 +303,31 @@ function Mapper.chapters(data, bookId)
     end
     chapters[1].toc_version = require("source.wechat.toc").FORMAT_VERSION
     return chapters
+end
+
+---@class WechatSearchBook
+---@field book_id string
+---@field title string
+---@field author string
+---@field publisher string
+
+--- 搜索 wire → 书目（只留带 bookId 的书，公众号等其它条目没有 bookInfo）。
+---@param data table
+---@return WechatSearchBook[]
+function Mapper.searchBooks(data)
+    local out = {}
+    for _idx, entry in ipairs(data.books or {}) do
+        local info = entry.bookInfo
+        if type(info) == "table" and info.bookId then
+            out[#out + 1] = {
+                book_id = tostring(info.bookId),
+                title = info.title or "",
+                author = info.author or "",
+                publisher = info.publisher or "",
+            }
+        end
+    end
+    return out
 end
 
 --- 进度 wire → ProgressPosition（getProgress 的进度在 book 子对象里）。
