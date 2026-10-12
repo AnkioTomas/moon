@@ -236,6 +236,7 @@ function Auth.waitQrLoginAsync(login, cb)
             local payload = raw:match("^%s*" .. callback .. "%s*%((.*)%)%s*;?%s*$")
             local ok, data = pcall(JSON.decode, payload or "")
             if not ok or type(data) ~= "table" then
+                clearQrFile()
                 cb(nil, _("京东扫码状态无效"), "error")
                 return
             end
@@ -259,15 +260,11 @@ function Auth.waitQrLoginAsync(login, cb)
 end
 
 --- 使用扫码 ticket 换取登录 Cookie 并原子保存源配置。
----@param info { ticket: string, jar: table }|nil waitQrLoginAsync 的结果
+---@param info { ticket: string, jar: table } waitQrLoginAsync 的结果
 ---@param cb fun(user: { user_name: string }|nil, err: string|nil)
----@return { cancel: fun() }|nil
+---@return { cancel: fun() }
 function Auth.completeQrLoginAsync(info, cb)
-    if type(info) ~= "table" or type(info.ticket) ~= "string" or info.ticket == "" then
-        cb(nil, _("无登录信息"))
-        return nil
-    end
-    local jar = info.jar or {}
+    local jar = info.jar
     local cancelled = false
     local job
     local hops = 0
@@ -342,9 +339,8 @@ function Auth.completeQrLoginAsync(info, cb)
             persist()
             return
         end
-        local hop = ok and type(data) == "table" and data.url
-        if type(hop) ~= "string" or hop == "" then hop = HOME end
-        follow(hop)
+        local hop = data.url
+        follow(type(hop) == "string" and hop ~= "" and hop or HOME)
     end)
     return { cancel = function()
             cancelled = true

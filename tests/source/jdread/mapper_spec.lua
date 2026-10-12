@@ -8,38 +8,34 @@
 local Assert = require("support.assert")
 local Mapper = require("source.jdread.mapper")
 
+-- ebooks/lite 真实行（抓包）
 do
-    local result = Mapper.shelfList({
-        data = {
-            total = 1,
-            books = {{
-                ebook_id = 42,
-                name = "测试书",
-                author = "作者",
-                progress = 0.25,
-                image_url = "//example.test/cover.jpg.dpg",
-            }},
+    local books = Mapper.shelfList({
+        {
+            ebook_id = 30451107,
+            name = "H5匠人手册：霸屏H5实战解密",
+            author = "网易传媒设计中心",
+            image_url = "https://img10.360buyimg.com/n12/s280x280_jfs/t1/fb9d03bd56331f5d.jpg.dpg",
+            format = "epub",
+            cate_second_names = { "计算机" },
+            cate_third_names = { "程序设计" },
         },
+        { ebook_id = 30394360, name = "无封面无分类" },
     })
-    Assert.eq(result.count, 1)
-    Assert.eq(result.data[1].source_id, "jdread")
-    Assert.eq(result.data[1].stable_id, "42")
-    Assert.eq(result.data[1].title, "测试书")
-    Assert.eq(result.data[1].percent, 25)
-    Assert.eq(result.data[1].cover, "https://example.test/cover.jpg")
+    Assert.len(books, 2)
+    Assert.eq(books[1].source_id, "jdread")
+    Assert.eq(books[1].stable_id, "30451107")
+    Assert.eq(books[1].title, "H5匠人手册：霸屏H5实战解密")
+    Assert.eq(books[1].authors, "网易传媒设计中心")
+    Assert.eq(books[1].category, "程序设计")
+    Assert.eq(books[1].cover, "https://img10.360buyimg.com/n12/s280x280_jfs/t1/fb9d03bd56331f5d.jpg")
+    Assert.is_nil(books[1].percent)
+    Assert.is_nil(books[2].cover)
+    Assert.is_nil(books[2].category)
 end
 
 do
-    local result = Mapper.shelfList({
-        data = {
-            books = {{
-                ebook_id = 43,
-                name = "京东封面",
-                image_url = "//img10.360buyimg.com/n12/cover.jpg.dpg",
-            }},
-        },
-    })
-    Assert.eq(result.data[1].cover, "https://img10.360buyimg.com/n12/cover.jpg")
+    Assert.len(Mapper.shelfList({}), 0)
 end
 
 -- 旧 cread wire 不再识别
@@ -76,8 +72,77 @@ do
     })
     Assert.len(toc, 2)
     Assert.eq(toc[1].uid, "0")
-    Assert.eq(toc[1].toc_version, 2)
+    Assert.eq(toc[1].toc_version, 5)
     Assert.eq(toc[2].title, "版权信息")
+end
+
+-- 《三盏灯》真实目录（抓包）：正文一个文件，小节 1~9 只是锚点；试读版 x.html 与完整版 x-CD.html 同一文件。
+-- 按文件成章，已购取完整版下标；封面图挂首章
+do
+    local rows = {
+        { chapter_index = 0, chapter_name = "封面", chapter_item = "titlepage", is_try = true, is_buy = true,
+            chapter_uri = "Text/titlepage.xhtml" },
+        { chapter_index = 1, chapter_name = "版权信息", chapter_item = "id22", is_try = true, is_buy = true,
+            chapter_uri = "Text/index_split_000.html" },
+        { chapter_index = 2, chapter_name = "三盏灯", chapter_item = "id21", is_try = false, is_buy = true,
+            chapter_uri = "Text/index_split_001-CD.html" },
+        { chapter_index = 3, chapter_name = "1", chapter_item = "id21", anchor = "id_1", is_try = true, is_buy = true,
+            chapter_uri = "Text/index_split_001.html#id_1" },
+        { chapter_index = 4, chapter_name = "2", chapter_item = "id21", anchor = "id_2", is_try = true, is_buy = true,
+            chapter_uri = "Text/index_split_001.html#id_2" },
+    }
+    for i = 5, 11 do
+        rows[#rows + 1] = { chapter_index = i, chapter_name = tostring(i - 2), chapter_item = "id21",
+            anchor = "id_" .. (i - 2), is_try = false, is_buy = true,
+            chapter_uri = "Text/index_split_001-CD.html#id_" .. (i - 2) }
+    end
+    local toc = Mapper.chapters({ data = {
+        format = "epub",
+        image_url = "https://img10.360buyimg.com/n12/s280x280_jfs/cover.jpg.dpg",
+        chapter_info = rows,
+    } })
+    Assert.len(toc, 3)
+    Assert.eq(toc[1].title, "封面")
+    Assert.eq(toc[1].cover, "https://img10.360buyimg.com/n12/s280x280_jfs/cover.jpg")
+    Assert.eq(toc[2].uid, "1")
+    Assert.eq(toc[3].title, "三盏灯")
+    Assert.eq(toc[3].uid, "2")
+    Assert.eq(toc[3].source_idx, "2")
+    Assert.is_nil(toc[2].cover)
+    Assert.is_nil(toc[2].anchors)
+    -- 小节 1~9 挂成章内锚点，点选按 HTML id 定位
+    Assert.len(toc[3].anchors, 9)
+    Assert.eq(toc[3].anchors[1].title, "1")
+    Assert.eq(toc[3].anchors[1].id, "id_1")
+    Assert.eq(toc[3].anchors[1].depth, 2)
+    Assert.eq(toc[3].anchors[9].id, "id_9")
+end
+
+-- 未购买：组内只有试读行可下，取首个试读版；同文件不带锚点的重复行丢弃
+do
+    local toc = Mapper.chapters({ data = { format = "epub", chapter_info = {
+        { chapter_index = 0, chapter_name = "正文", chapter_uri = "Text/a-CD.html", is_try = false, is_buy = false },
+        { chapter_index = 1, chapter_name = "1", chapter_uri = "Text/a.html#id_1", anchor = "id_1",
+            is_try = true, is_buy = false },
+        { chapter_index = 2, chapter_name = "重复", chapter_uri = "Text/a.html", is_try = true, is_buy = false },
+        { chapter_index = 3, chapter_name = "后记", chapter_uri = "Text/b.html", is_try = false, is_buy = false },
+    } } })
+    Assert.len(toc, 2)
+    Assert.eq(toc[1].uid, "1")
+    Assert.len(toc[1].anchors, 1, "不带锚点的重复行不进章内目录")
+    Assert.eq(toc[2].title, "后记")
+    Assert.eq(toc[2].uid, "3")
+end
+
+-- 封面页空 body：给了封面图就补图，没给保持原样（空串，交给落盘报错）
+do
+    local wire = { data = { chapter = { { content = "<html><body></body></html>" } } } }
+    Assert.eq(Mapper.content(wire, "封面", 'https://img.test/a"b.jpg').html, '<p><img src="https://img.test/a&quot;b.jpg"/></p>')
+    Assert.eq(Mapper.content(wire, "封面").html, "")
+    local text = Mapper.content({ data = { chapter = { { content = "<html><body><p>正文</p></body></html>" } } } },
+        "正文", "https://img.test/a.jpg")
+    Assert.matches(text.html, "<p>正文</p>")
+    Assert.is_nil(text.html:find("img", 1, true))
 end
 
 do

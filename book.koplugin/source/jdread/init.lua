@@ -25,7 +25,6 @@ end
 
 ---@class JdreadSource : SourceBase
 ---@field _client JdreadClient
----@field _covers table<string, string>
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -37,8 +36,7 @@ function Jdread.new()
         id = meta.id,
         name = meta.name,
         type = meta.type,
-        _client = Client:new(cfg),
-        _covers = {},
+        _client = Client:new{ cookie = cfg.cookie, uuid = cfg.uuid },
     }, Source)
 end
 
@@ -56,41 +54,11 @@ function Source:configured()
     return self._client:configured()
 end
 
-function Source:clearCaches()
-    self._covers = {}
-    Toc.clear()
-end
-
-function Source:close()
-    self._covers = {}
-end
-
---- 删除：本地先标 deleted，能上网时再推云端真删。
----@param identity BookIdentity
----@param cb fun(ok: boolean, err: string|nil)
----@return { cancel: fun() }
-function Source:deleteBookAsync(identity, cb)
-    return Shelf.deleteAsync(self, self._client, identity, cb)
-end
-
----@param identity BookIdentity
----@return BookCoverRequest|nil, string|nil
-function Source:coverRequest(identity)
-    local url = self._covers[identity.stable_id]
-        or (identity.book and identity.book.cover)
-    if type(url) ~= "string" or not url:match("^https?://") then
-        return nil, _("无封面")
-    end
-    return { url = url }
-end
-
 ---@param opts { dirty_only?: boolean, force?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:syncBooksAsync(opts, cb)
-    return Shelf.syncAsync(self, self._client, opts, cb, function(id, url)
-        self._covers[id] = url
-    end, Mapper.shelfList)
+    return Shelf.syncAsync(self.id, self._client, Mapper.shelfList, opts, cb)
 end
 
 ---@param identity BookIdentity
@@ -99,16 +67,15 @@ end
 function Source:getDetailAsync(identity, cb)
     return self._client:bookInfoAsync(identity.stable_id, function(wire, err)
         if not wire then cb(nil, err); return end
-        local book, cover = Mapper.book(wire.data or wire)
-        if not book then cb(nil, _("书籍详情为空")); return end
-        if cover then self._covers[book.stable_id] = cover end
+        if type(wire.data) ~= "table" then cb(nil, _("书籍详情为空")); return end
+        local book = Mapper.book(wire.data)
         local existing = require("book.books_db").get(self.id, book.stable_id)
         if existing then
             book.deleted = existing.deleted
         end
         local progress = require("book.progress_db").get(self.id, book.stable_id)
         if progress then
-            book.percent = require("book.progress").clampPercent(progress.fraction, false, true)
+            book.percent = Progress.clampPercent(progress.fraction, false, true)
         end
         require("book.store").rememberMany({ book })
         cb(book)
@@ -116,12 +83,14 @@ function Source:getDetailAsync(identity, cb)
 end
 
 --- 目录版本 → download/chapter 查询参数（见 Mapper.chapters）。
+--- 版本 5 是按文件成章、锚点小节挂 anchors 的 EPUB 目录；版本 2（一条目录一章）会把同一文件
+--- 下载多遍，版本 4 丢了小节，均已失效。
 local DOWNLOAD_QUERY = {
-    [2] = function(uid) return { indexes = uid } end,
     [3] = function(uid) return { type = 1, ids = uid } end,
+    [5] = function(uid) return { indexes = uid } end,
 }
 
---- 只认下载协议目录；旧 cread 目录（版本 1）与无版本目录一律失效。
+--- 只认下载协议目录；旧 cread 目录（版本 1）、旧 EPUB 目录（版本 2/4）与无版本目录一律失效。
 ---@param toc BookChapter[]|nil
 ---@return boolean
 function Source:isTocCurrent(toc)
@@ -202,11 +171,11 @@ end
 ---@param cb fun(payload: ChapterContentPayload|nil, err: string|nil)
 ---@return CancelHandle|nil
 local function fetchContent(self, identity, chapter, cb)
-    local cancelled, fetch_job, asset_job = false, nil, nil
+    local cancelled, fetch_job, asset_job, cover = false, nil, nil, nil
     local done = function(wire, err)
         if cancelled then return end
         if not wire then cb(nil, err); return end
-        local payload = Mapper.content(wire, chapter.title)
+        local payload = Mapper.content(wire, chapter.title, cover)
         if not payload then
             cb(nil, err or _("京东读书网页协议读不到本章，请在京东读书 App 内阅读"))
             return
@@ -226,6 +195,7 @@ local function fetchContent(self, identity, chapter, cb)
     local function download(toc)
         local target = toc[chapter.idx]
         if not target then cb(nil, _("缺少章节信息")); return end
+        cover = target.cover
         local query = DOWNLOAD_QUERY[toc[1].toc_version](target.uid)
         fetch_job = self._client:downloadChapterAsync(identity.stable_id, query, done)
     end
@@ -241,8 +211,8 @@ local function fetchContent(self, identity, chapter, cb)
     end
     return { cancel = function()
             cancelled = true
-            if fetch_job and fetch_job.cancel then fetch_job.cancel() end
-            if asset_job and asset_job.cancel then asset_job.cancel() end
+            if fetch_job then fetch_job.cancel() end
+            if asset_job then asset_job.cancel() end
         end }
 end
 
@@ -255,15 +225,51 @@ local function contentFetcher(self)
     end
 end
 
+--- 旧目录一条一章，带锚点小节的书改成按文件成章后章号错位，已缓存的章节文件会对不上。
+--- 开书前（书还没打开，删章节文件安全）在线比一次章数：变了就清整本缓存，没变的旧缓存照用。
+---@param self JdreadSource
+---@param identity BookIdentity
+---@param cb fun()
+---@return { cancel: fun() }|nil
+local function migrateLayout(self, identity, cb)
+    local old = Toc.read(self.id, identity.stable_id)
+    if old == nil then
+        local payload = require("book.books_db").getToc(self.id, identity.stable_id)
+        -- 不看 TTL 的原始目录；坏 JSON 等同没有旧目录。
+        local ok, list = pcall(require("json").decode, payload or "")
+        old = ok and type(list) == "table" and list or nil
+    end
+    if not old or #old == 0 or self:isTocCurrent(old)
+        or not require("ui/network/manager"):isConnected() then
+        cb()
+        return nil
+    end
+    return fetchTocAsync(self, identity, function(toc)
+        if toc and #toc ~= #old then
+            require("book.store").clearCache(self.id, identity.stable_id)
+        end
+        cb()
+    end)
+end
+
 ---@param identity BookIdentity
 ---@param opts table|nil
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:openBookAsync(identity, opts, cb)
-    return require("source.chapter").openWithUi(self, identity, identity.book, opts, {
-        loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
-        fetchContent = contentFetcher(self),
-    }, cb)
+    local cancelled, open_job = false, nil
+    local migrate_job = migrateLayout(self, identity, function()
+        if cancelled then return end
+        open_job = require("source.chapter").openWithUi(self, identity, identity.book, opts, {
+            loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
+            fetchContent = contentFetcher(self),
+        }, cb)
+    end)
+    return { cancel = function()
+            cancelled = true
+            if migrate_job then migrate_job.cancel() end
+            if open_job then open_job.cancel() end
+        end }
 end
 
 ---@param identity BookIdentity
@@ -287,7 +293,7 @@ function Source:cacheAllChaptersAsync(identity, on_progress, cb)
     return require("source.chapter").cacheAllAsync(self, identity, contentFetcher(self), on_progress, cb)
 end
 
---- 拉取云端进度，以 catalogId 映射本地连续章节号。
+--- 拉取云端进度，以章节 uid（对不上时用标题）映射本地连续章节号。
 ---@param identity BookIdentity
 ---@param cb fun(pos: ProgressPosition|nil, err: string|nil, meta: table|nil)
 ---@return { cancel: fun() }
@@ -298,35 +304,36 @@ function Source:getProgressAsync(identity, cb)
         if not wire then cb(nil, err); return end
         local pos, uid = Mapper.progress(wire)
         if not pos then cb(nil, nil, { empty = true }); return end
-        local toc = currentToc(self, identity)
-        local idx = toc and Toc.index(identity.source_id, identity.stable_id, uid)
-        if not idx and pos.chapter_title then
-            for _idx, chapter in ipairs(toc or {}) do
-                if chapter.title == pos.chapter_title then
-                    idx = chapter.idx
-                    uid = chapter.uid
-                    break
+        --- 按 uid 定位章节；JD 上报的 chapter_id 常对不上本地目录 uid，再按标题兜底。
+        ---@param toc BookChapter[]|nil
+        local function locate(toc)
+            local idx = toc and Toc.index(identity.source_id, identity.stable_id, uid)
+            if not idx and pos.chapter_title then
+                for _idx, chapter in ipairs(toc or {}) do
+                    if chapter.title == pos.chapter_title then
+                        idx = chapter.idx
+                        uid = chapter.uid
+                        break
+                    end
                 end
             end
-        end
-        if idx then
-            pos.chapter_idx = idx
-            pos.extra = { chapter_uid = uid, chapter_idx = idx }
+            if idx then
+                pos.chapter_idx = idx
+                pos.extra = { chapter_uid = uid, chapter_idx = idx }
+            end
             cb(pos)
-            return
         end
-        toc_job = self:loadTocAsync(identity, function()
+        local toc = currentToc(self, identity)
+        if toc then locate(toc); return end
+        toc_job = self:loadTocAsync(identity, function(fresh)
             if cancelled then return end
-            idx = Toc.index(identity.source_id, identity.stable_id, uid)
-            pos.chapter_idx = idx
-            if idx then pos.extra = { chapter_uid = uid, chapter_idx = idx } end
-            cb(pos)
+            locate(fresh)
         end)
     end)
     return { cancel = function()
             cancelled = true
-            if request and request.cancel then request.cancel() end
-            if toc_job and toc_job.cancel then toc_job.cancel() end
+            request.cancel()
+            if toc_job then toc_job.cancel() end
         end }
 end
 
@@ -336,22 +343,20 @@ end
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:putProgressAsync(identity, pos, cb)
-    pos = pos or {}
     local cancelled, toc_job, push_job
-    local chapter_idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx) or 1
+    local chapter_idx = pos.chapter_idx or identity.chapter_idx
 
     local function push(toc)
-        local chapter = toc and toc[chapter_idx]
-        local uid = Toc.uid(identity.source_id, identity.stable_id, chapter_idx)
-        if not uid then cb(nil, _("缺少章节信息")); return end
+        local chapter = chapter_idx and toc[chapter_idx]
+        if not chapter then cb(nil, _("缺少章节信息")); return end
         push_job = self._client:putProgressAsync(identity.stable_id, {
             action = "create",
             data_type = 0,
             force = 2,
             para_idx = 0,
             offset_in_para = 0,
-            chapter_id = uid,
-            epub_chapter_title = pos.chapter_title or (chapter and chapter.title) or "",
+            chapter_id = chapter.uid,
+            epub_chapter_title = pos.chapter_title or chapter.title,
             quote_text = "",
             percent = Progress.clampFraction(pos.fraction),
             created_at = os.time(),
@@ -373,8 +378,8 @@ function Source:putProgressAsync(identity, pos, cb)
     end
     return { cancel = function()
             cancelled = true
-            if toc_job and toc_job.cancel then toc_job.cancel() end
-            if push_job and push_job.cancel then push_job.cancel() end
+            if toc_job then toc_job.cancel() end
+            if push_job then push_job.cancel() end
         end }
 end
 

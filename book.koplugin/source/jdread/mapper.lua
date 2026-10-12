@@ -5,91 +5,88 @@
 --]]
 
 local Progress = require("book.progress")
-local Catalog = require("book.catalog")
 local Text = require("utils.text")
 
 local Mapper = {}
 local SOURCE_ID = "jdread"
 
+--- 京东图片地址带 .dpg 后缀（图床转 webp），去掉取原图。
+---@param value any
 ---@return string|nil
-local function coverUrl(value)
-    if type(value) ~= "string" or value == "" then return nil end
-    if value:sub(1, 2) == "//" then value = "https:" .. value end
-    if not value:match("^https?://") then return nil end
-    return (value:gsub("%.dpg$", ""))
+local function imageUrl(value)
+    return type(value) == "string" and (value:gsub("%.dpg$", "")) or nil
 end
 
----@param row table|nil
----@return Book|nil, string|nil
+--- ebook/lite、ebooks/lite 的一行 → Book。
+--- 实际字段只有 ebook_id/name/author/image_url/cate_third_names；没有简介与进度。
+---@param row table
+---@return Book
 function Mapper.book(row)
-    if type(row) ~= "table" then return nil end
-    row = type(row.ebook) == "table" and row.ebook or row
-    local id = row.ebook_id or row.ebookId or row.product_id
-        or row.book_id or row.bookId or row.id
-    if id == nil or tostring(id) == "" then return nil end
-    local cover = coverUrl(
-        row.image_url or row.imageUrl or row.logo or row.cover or row.cover_url
-    )
-    local percent = row.percent or row.progress or row.read_progress or row.readProgress
-    local category = row.category
-    local intro = row.intro or row.info or row.content_info or row.description or row.summary
-    if category == nil and type(row.cate_third_names) == "table" then
-        category = table.concat(row.cate_third_names, ", ")
-    end
     return {
         source_id = SOURCE_ID,
-        stable_id = tostring(id),
-        title = row.name or row.product_name
-            or row.ebook_name or row.ebookName or row.book_name or row.bookName,
-        authors = row.author or row.authors,
-        percent = Progress.clampPercent(percent),
-        category = category,
-        intro = intro and Text.stripHtml(intro),
-        cover = cover,
-    }, cover
+        stable_id = tostring(row.ebook_id),
+        title = row.name,
+        authors = row.author,
+        category = type(row.cate_third_names) == "table" and table.concat(row.cate_third_names, ", ") or nil,
+        cover = imageUrl(row.image_url),
+    }
 end
 
---- 京东书架 wire → BookListResult。
----@param wire table
----@param on_cover fun(stable_id: string, url: string)|nil
----@return BookListResult
-function Mapper.shelfList(wire, on_cover)
-    local root = type(wire.data) == "table" and wire.data or wire
-    local rows = root.books or root.ebooks or root.list or root.items or {}
+--- 京东书架 ebooks/lite 行数组 → Book[]。
+---@param rows table[]
+---@return Book[]
+function Mapper.shelfList(rows)
     local books = {}
-    for _idx, row in ipairs(rows) do
-        local book, cover = Mapper.book(row)
-        if book then
-            if cover and on_cover then on_cover(book.stable_id, cover) end
-            books[#books + 1] = book
-        end
-    end
-    return Catalog.listResult(books, root.total or root.total_count)
+    for _idx, row in ipairs(rows) do books[#books + 1] = Mapper.book(row) end
+    return books
 end
 
---- 新阅读器目录 /jdread/api/ebook/catalog/{id} → BookChapter[]。
---- 该接口 chapter_id 常为空，下载只认 0-based indexes，故 uid 就是 index。
+--- EPUB 目录 /jdread/api/ebook/catalog/v2/{id} → BookChapter[]，与网页阅读器同一成章规则：
+--- 一个文件一章（chapter_uri 去掉 #锚点，试读版 x.html 与完整版 x-CD.html 算同一文件），
+--- 带锚点的小节并入所在文件，同文件不带锚点的行丢弃。小节各自下载会拿到整份文件，正文重复。
+--- 下载只认 0-based indexes：组内首个已购完整版，没有再取首个试读版，都没有取组首行；uid 就是它。
+--- 封面页正文是空 body，首章挂上封面图供补页。
 ---@param rows table
+---@param cover string|nil
 ---@return BookChapter[]|nil
-local function downloadChapters(rows)
-    local chapters = {}
-    for _idx, row in ipairs(rows) do
-        local index = tonumber(row.chapter_index)
-        if index == nil then index = #chapters end
-        local title = row.chapter_name or row.catalogName or row.catalog_name
-        if title == nil or tostring(title) == "" then
-            title = "第" .. (index + 1) .. "章"
+local function downloadChapters(rows, cover)
+    local chapters, by_file, full, try = {}, {}, {}, {}
+    for pos, row in ipairs(rows) do
+        local index = tonumber(row.chapter_index) or pos - 1
+        local file = row.chapter_uri and (row.chapter_uri:gsub("#.*$", ""):gsub("%-CD%.", "."))
+            or row.chapter_item or tostring(index)
+        local title = row.chapter_name ~= nil and tostring(row.chapter_name) or ""
+        local chapter = by_file[file]
+        if not chapter then
+            chapter = {
+                idx = #chapters + 1,
+                source_idx = tostring(index),
+                title = title ~= "" and title or ("第" .. (index + 1) .. "章"),
+                depth = 1,
+            }
+            by_file[file] = chapter
+            chapters[#chapters + 1] = chapter
+        elseif row.anchor then
+            chapter.anchors = chapter.anchors or {}
+            chapter.anchors[#chapter.anchors + 1] = { title = title, depth = 2, id = tostring(row.anchor) }
+        else
+            chapter = nil
         end
-        chapters[#chapters + 1] = {
-            idx = #chapters + 1,
-            source_idx = tostring(index),
-            uid = tostring(index),
-            title = tostring(title),
-            depth = 1,
-        }
+        if chapter then
+            local idx = chapter.idx
+            if not row.is_try and row.is_buy then
+                full[idx] = full[idx] or index
+            elseif row.is_try then
+                try[idx] = try[idx] or index
+            end
+        end
     end
     if #chapters == 0 then return nil end
-    chapters[1].toc_version = 2
+    for idx, chapter in ipairs(chapters) do
+        chapter.uid = tostring(full[idx] or try[idx] or chapter.source_idx)
+    end
+    chapters[1].toc_version = 5
+    chapters[1].cover = cover
     return chapters
 end
 
@@ -125,7 +122,7 @@ function Mapper.chapters(wire)
     local root = type(wire.data) == "table" and wire.data or wire
     if type(root.chapter_info) ~= "table" then return nil end
     if root.format == "txt" then return netChapters(root.chapter_info) end
-    return downloadChapters(root.chapter_info)
+    return downloadChapters(root.chapter_info, imageUrl(root.image_url))
 end
 
 ---@param content string
@@ -137,10 +134,12 @@ end
 --- download/chapter 正文 wire → 标准章节内容。
 --- txt 网文正文 content_type = "net"，是 \r\n 分段的纯文本，
 --- 行首全角缩进时有时无，统一剥掉交给章节模板的 text-indent。
+--- 网页版封面页去掉了图只剩空 body，传入 cover 时用封面图补成一页，否则落盘会报章节内容为空。
 ---@param wire table
 ---@param title string|nil
+---@param cover string|nil
 ---@return ChapterContentPayload|nil
-function Mapper.content(wire, title)
+function Mapper.content(wire, title, cover)
     local data = type(wire.data) == "table" and wire.data or wire
     local parts = data.chapter
     if type(parts) ~= "table" then return nil end
@@ -156,7 +155,11 @@ function Mapper.content(wire, title)
         end
     end
     if #html == 0 then return nil end
-    return { title = title, html = table.concat(html, "\n") }
+    local body = table.concat(html, "\n")
+    if cover and not body:find("%S") then
+        body = '<p><img src="' .. Text.xmlEscape(cover) .. '"/></p>'
+    end
+    return { title = title, html = body }
 end
 
 --- marker/sync wire → ProgressPosition 与章节 uid。

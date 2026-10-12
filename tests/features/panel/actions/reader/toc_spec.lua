@@ -18,7 +18,7 @@ package.preload["reader.session"] = function()
         isChapterMode = function() return state.chapter_mode end,
         toc = function() return state.toc end,
         chapterIndex = function() return 2 end,
-        gotoChapter = function(idx) state.goto_idx = idx end,
+        gotoChapter = function(idx, opts) state.goto_idx, state.goto_opts = idx, opts end,
     }
 end
 
@@ -61,6 +61,14 @@ Assert.eq(state.chapter_toc.current_idx, 2)
 
 state.chapter_toc.on_select(1)
 Assert.eq(state.goto_idx, 1)
+Assert.is_nil(state.goto_opts)
+
+-- 带 id 的锚点按 HTML id 定位；没有 id 的锚点（微信）落到章首
+state.chapter_toc.on_select(2, { title = "1", depth = 2, id = "id_1" })
+Assert.eq(state.goto_idx, 2)
+Assert.eq(state.goto_opts.xpointer, "#id_1")
+state.chapter_toc.on_select(2, { title = "第一节", depth = 2 })
+Assert.is_nil(state.goto_opts)
 
 state.toc = nil
 state.chapter_toc = nil

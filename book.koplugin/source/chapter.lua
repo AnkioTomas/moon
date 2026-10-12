@@ -10,6 +10,7 @@
 ---@class BookChapterAnchor
 ---@field title string 章内目录标题
 ---@field depth integer 展示层级（1-based）
+---@field id string|nil 章节正文里的 HTML id；有则目录点选跳到该元素，否则落到章首
 
 --- online / article 源目录中的一章。
 ---@class BookChapter

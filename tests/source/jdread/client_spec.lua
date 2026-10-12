@@ -21,9 +21,6 @@ package.preload["http.request"] = function()
                 cb('{"data":{"book_ids":[{"ebook_id":2},{"ebook_id":1}]},"result_code":0}')
             elseif url:find("/jdread/api/ebooks/lite/2,1", 1, true) then
                 cb('{"data":[{"ebook_id":2,"name":"二"},{"ebook_id":1,"name":"一"}],"result_code":0}')
-            elseif url:find("/jdread/api/search/v2", 1, true) then
-                cb('{"data":{"product_search_infos":[{"product_id":3,"product_name":"搜索书"}],'
-                    .. '"total_count":1},"result_code":0}')
             elseif url:find("/recommend", 1, true) then
                 cb('{"data":[{"ebook_id":4,"name":"推荐书"}],"result_code":0}')
             elseif url:find("/jdread/api/ebook/catalog/v2/30394360", 1, true) then
@@ -61,8 +58,8 @@ do
     local wire, err
     client:shelfSyncAsync(function(value, e) wire, err = value, e end)
     Assert.is_nil(err)
-    Assert.len(wire.data.books, 2)
-    Assert.eq(wire.data.books[1].ebook_id, 2)
+    Assert.len(wire, 2)
+    Assert.eq(wire[1].ebook_id, 2)
     Assert.matches(requests[1].url, "/jdread/api/bookshelf/sort%?")
     Assert.matches(requests[2].url, "/jdread/api/ebooks/lite/2,1%?")
     Assert.eq(requests[1].opts.headers.Cookie, "thor=test")
@@ -88,42 +85,9 @@ do
     end
     local wire
     batched:shelfSyncAsync(function(value) wire = value end)
-    Assert.len(wire.data.books, 20)
-    Assert.eq(wire.data.total, 20)
+    Assert.len(wire, 20)
     Assert.matches(paths[2], "/ebooks/lite/1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18$")
     Assert.matches(paths[3], "/ebooks/lite/19,20$")
-end
-
-do
-    local wire, err
-    client:searchAsync("计算机", 2, 30, function(value, e) wire, err = value, e end)
-    local req = requests[#requests]
-    Assert.is_nil(err)
-    Assert.eq(wire.data.total_count, 1)
-    Assert.matches(req.url, "^https://e%.m%.jd%.com/jdread/api/search/v2%?")
-    Assert.matches(req.url, "[?&]keyword=%%E8%%AE%%A1%%E7%%AE%%97%%E6%%9C%%BA")
-    Assert.matches(req.url, "[?&]page=2")
-    Assert.matches(req.url, "[?&]page_size=30")
-    Assert.matches(req.url, "[?&]cv=3%.4%.0")
-end
-
-do
-    local paged = Client:new{ cookie = "thor=test", uuid = "h5-test" }
-    local pages = {}
-    function paged:apiGetAsync(_, params, cb)
-        pages[#pages + 1] = params.page
-        local rows = {}
-        local count = params.page == 1 and 30 or 1
-        for i = 1, count do rows[i] = { product_id = #pages * 100 + i } end
-        cb({ data = { product_search_infos = rows, total_count = 31 } })
-        return { cancel = function() end }
-    end
-    local wire
-    paged:searchAsync("Lua", 1, 200, function(value) wire = value end)
-    Assert.len(wire.data.product_search_infos, 31)
-    Assert.eq(pages[1], 1)
-    Assert.eq(pages[2], 2)
-    Assert.len(pages, 2)
 end
 
 do
@@ -238,4 +202,12 @@ do
     local body = require("json").decode(req.body)
     Assert.eq(body[1].ebook_id, 30451107)
     Assert.eq(body[1].format, 1)
+end
+
+-- 推进度与拉进度同一接口，ebook_id 同为数字
+do
+    client:putProgressAsync("30451107", { data_type = 0 }, function() end)
+    local body = require("json").decode(requests[#requests].body)
+    Assert.eq(body[1].ebook_id, 30451107)
+    Assert.eq(body[1].list[1].data_type, 0)
 end

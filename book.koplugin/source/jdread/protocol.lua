@@ -8,6 +8,7 @@ local md5 = require("ffi/sha2").md5
 local JSON = require("json")
 local Aes = require("crypto.aes")
 local Text = require("utils.text")
+local _ = require("gettext")
 
 local Protocol = {}
 
@@ -76,7 +77,7 @@ end
 ---@return string
 function Protocol.encryptQuery(query, tm)
     local raw = Aes.ecb_encrypt(query, md5bin(tostring(tm) .. APP))
-    return (Text.base64Encode(raw):gsub("+", "-"):gsub("/", "_"))
+    return (Text.base64Encode(raw):gsub("%+", "-"):gsub("/", "_"))
 end
 
 ---@param envelope table
@@ -84,7 +85,7 @@ end
 local function checkDownload(envelope)
     local code = tonumber(envelope.result_code)
     if code ~= 0 then
-        return nil, envelope.message or ("JD error " .. tostring(envelope.result_code)), code
+        return nil, envelope.message or (_("京东读书错误 ") .. tostring(envelope.result_code)), code
     end
     return envelope
 end
@@ -95,7 +96,7 @@ end
 ---@return table|nil, string|nil, integer|nil result_code
 function Protocol.decodeDownload(raw, tm)
     if type(raw) ~= "string" or raw == "" then
-        return nil, "empty JD download"
+        return nil, _("京东读书响应无效")
     end
     if raw:sub(1, 1) == "{" then
         local ok, envelope = pcall(JSON.decode, raw)
@@ -105,11 +106,11 @@ function Protocol.decodeDownload(raw, tm)
     end
     local ok, text = pcall(Aes.ecb_decrypt, Text.base64Decode(raw), md5bin(tostring(tm) .. APP))
     if not ok or type(text) ~= "string" or text == "" then
-        return nil, "invalid JD download"
+        return nil, _("京东读书响应无效")
     end
     local decoded_ok, decoded = pcall(JSON.decode, text)
     if not decoded_ok or type(decoded) ~= "table" then
-        return nil, "invalid JD download payload"
+        return nil, _("京东读书响应无效")
     end
     return checkDownload(decoded)
 end

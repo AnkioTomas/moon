@@ -77,19 +77,12 @@ do
     Assert.is_false(type(source.pushStatsAsync) == "function")
 end
 
+-- 封面直接挂在 Book 上随书库落盘，源不再自带封面缓存
 do
     local source = Jdread.new()
-    source._covers["42"] = "http://img10.360buyimg.com/n12/cover.jpg"
-    local request = source:coverRequest({ stable_id = "42" })
-    Assert.eq(request.url, "http://img10.360buyimg.com/n12/cover.jpg")
-    Assert.is_nil(request.headers)
-
-    local invalid, err = source:coverRequest({
-        stable_id = "43",
-        book = { cover = "file:///tmp/cover.jpg" },
-    })
-    Assert.is_nil(invalid)
-    Assert.eq(err, "无封面")
+    local req, err = source:coverRequest({ stable_id = "42" })
+    Assert.is_nil(req)
+    Assert.eq(err, "当前数据源不支持封面")
 end
 
 -- syncBooksAsync：本地独有成员上行，pushed 填实
@@ -98,11 +91,7 @@ do
     local list_calls = 0
     fake_client.shelfSyncAsync = function(_, cb)
         shelf_calls = shelf_calls + 1
-        cb({
-            books = {
-                { ebook_id = "10", name = "远端" },
-            },
-        })
+        cb({ { ebook_id = 10, name = "远端" } })
         return { cancel = function() end }
     end
     fake_client.addToShelfAsync = function(_, book_id, cb)
@@ -115,7 +104,7 @@ do
     local orig_shelf = real_mapper.shelfList
     real_mapper.shelfList = function()
         list_calls = list_calls + 1
-        return { data = { { stable_id = "10", title = "远端" } } }
+        return { { stable_id = "10", title = "远端" } }
     end
     -- 10 已在远端：只标已同步不再请求；99 是本地新加架，上行。
     pending_adds = { "10", "99" }
@@ -129,6 +118,7 @@ do
     local src = Jdread.new()
     local result, err
     src:syncBooksAsync(nil, function(r, e) result, err = r, e end)
+    require("support.stubs").flush()
     Assert.is_nil(err)
     Assert.not_nil(result)
     Assert.eq(result.pushed, 1)
@@ -144,6 +134,7 @@ do
     local_library = { "10", "77" }
     remembered = nil
     src:syncBooksAsync(nil, function(r, e) result, err = r, e end)
+    require("support.stubs").flush()
     Assert.is_nil(err)
     Assert.eq(#added, 0)
     Assert.eq(result.pushed, 0)
@@ -168,6 +159,7 @@ do
     local src = Jdread.new()
     local result, err
     src:syncBooksAsync({ dirty_only = true }, function(r, e) result, err = r, e end)
+    require("support.stubs").flush()
     Assert.is_nil(err)
     Assert.eq(result.pushed, 0)
     Assert.eq(#finalized, 0)
@@ -193,6 +185,7 @@ do
     local src = Jdread.new()
     local result
     src:syncBooksAsync({ dirty_only = true }, function(r) result = r end)
+    require("support.stubs").flush()
     Assert.eq(result.pushed, 0)
     Assert.eq(#finalized, 1)
     BookDB.remove = function(_, stable_id)
@@ -219,6 +212,7 @@ do
     local src = Jdread.new()
     local result
     src:syncBooksAsync({ dirty_only = true }, function(r) result = r end)
+    require("support.stubs").flush()
     Assert.eq(result.pushed, 0)
     Assert.eq(#synced, 0)
     Assert.eq(warnings[1][1], "jdread shelf push failed")
@@ -239,6 +233,7 @@ do
     local src = Jdread.new()
     local result
     src:syncBooksAsync({ dirty_only = true }, function(r) result = r end)
+    require("support.stubs").flush()
     Assert.eq(result.pushed, 0)
     Assert.eq(warnings[1][1], "jdread shelf mark synced failed")
     package.loaded["book.books_db"].markSynced = function() return true end
@@ -270,7 +265,7 @@ do
     local source = Jd.new()
     source.loadTocAsync = function(_, _, cb)
         cb({
-            { idx = 1, uid = "0", title = "第一章", toc_version = 2 },
+            { idx = 1, uid = "0", title = "第一章", toc_version = 5 },
             { idx = 2, uid = "1", title = "第二章" },
         })
         return { cancel = function() end }
@@ -368,8 +363,10 @@ do
     Assert.eq(catalog_calls, 1)
     Assert.eq(asked.indexes, "0")
     Assert.matches(html, "<p>新</p>")
-    Assert.eq(stored[1].toc_version, 2)
+    Assert.eq(stored[1].toc_version, 5)
     Assert.is_true(src:isTocCurrent(stored))
+    Assert.is_false(src:isTocCurrent({ { idx = 1, uid = "0", title = "旧 EPUB 目录", toc_version = 2 } }))
+    Assert.is_false(src:isTocCurrent({ { idx = 1, uid = "0", title = "无锚点目录", toc_version = 4 } }))
 
     -- 网页协议判定 can_read=false：提示走 App，不冒充网络/权限错误
     fake_client.downloadChapterAsync = function(_, _, _, cb)
@@ -387,4 +384,178 @@ do
     )
     Assert.eq(denied, "京东读书网页协议读不到本章，请在京东读书 App 内阅读")
     Toc.read, Toc.put = orig_read, orig_put
+end
+
+-- getProgressAsync：目录未缓存时拉到目录后仍按章节标题兜底（JD chapter_id 对不上本地 uid）
+do
+    local Toc = require("source.toc")
+    local orig_read, orig_put, orig_index = Toc.read, Toc.put, Toc.index
+    local stored
+    Toc.read = function() return stored end
+    Toc.put = function(_, _, list) stored = list; return true end
+    Toc.index = function() return nil end
+    fake_client.getProgressAsync = function(_, _, cb)
+        cb({ data = { { list = { {
+            data_type = 0, version = 2, percent = 0.4,
+            epub_chapter_title = "第二章", chapter_id = "jd-998",
+        } } } } })
+        return { cancel = function() end }
+    end
+    fake_client.catalogAsync = function(_, _, cb)
+        cb({ data = { format = "epub", chapter_info = {
+            { chapter_index = 0, chapter_name = "第一章" },
+            { chapter_index = 1, chapter_name = "第二章" },
+        } } })
+        return { cancel = function() end }
+    end
+    local pos
+    Jdread.new():getProgressAsync({ source_id = "jdread", stable_id = "30451107" }, function(v) pos = v end)
+    require("support.stubs").flush()
+    Assert.eq(pos.chapter_idx, 2)
+    Assert.eq(pos.extra.chapter_idx, 2)
+
+    -- 目录已缓存但 uid、标题都对不上：只定位一次，不再空转拉目录
+    stored = { { idx = 1, uid = "0", title = "第一章", toc_version = 5 } }
+    local catalog_calls = 0
+    fake_client.catalogAsync = function(_, _, cb)
+        catalog_calls = catalog_calls + 1
+        cb(nil, "should not fetch")
+        return { cancel = function() end }
+    end
+    pos = nil
+    Jdread.new():getProgressAsync({ source_id = "jdread", stable_id = "30451107" }, function(v) pos = v end)
+    require("support.stubs").flush()
+    Assert.eq(catalog_calls, 0)
+    Assert.eq(pos.fraction, 0.4)
+    Assert.is_nil(pos.chapter_idx)
+    Toc.read, Toc.put, Toc.index = orig_read, orig_put, orig_index
+end
+
+-- putProgressAsync：章节 uid 取自目录；缺章节号直接失败，不把进度推到第 1 章
+do
+    local Toc = require("source.toc")
+    local orig_read = Toc.read
+    Toc.read = function()
+        return {
+            { idx = 1, uid = "0", title = "第一章", toc_version = 5 },
+            { idx = 2, uid = "1", title = "第二章" },
+        }
+    end
+    local marker
+    fake_client.putProgressAsync = function(_, _, m, cb)
+        marker = m
+        cb({ result_code = 0 })
+        return { cancel = function() end }
+    end
+    local src = Jdread.new()
+    local identity = { source_id = "jdread", stable_id = "30451107" }
+    local ok, err
+    src:putProgressAsync(identity, { fraction = 0.5, chapter_idx = 2 }, function(v, e) ok, err = v, e end)
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(marker.chapter_id, "1")
+    Assert.eq(marker.epub_chapter_title, "第二章")
+    Assert.eq(marker.percent, 0.5)
+
+    marker, ok, err = nil, nil, nil
+    src:putProgressAsync(identity, { fraction = 0.5 }, function(v, e) ok, err = v, e end)
+    Assert.is_nil(ok)
+    Assert.eq(err, "缺少章节信息")
+    Assert.is_nil(marker)
+
+    src:putProgressAsync(identity, { fraction = 0.5, chapter_idx = 9 }, function(v, e) ok, err = v, e end)
+    Assert.eq(err, "缺少章节信息")
+    Assert.is_nil(marker)
+    Toc.read = orig_read
+end
+
+-- 封面章：网页版只给空 body，用目录首章挂的封面图补成一页
+do
+    local Toc = require("source.toc")
+    local orig_read = Toc.read
+    Toc.read = function()
+        return { { idx = 1, uid = "0", title = "封面", toc_version = 5, cover = "https://img.test/c.jpg" } }
+    end
+    fake_client.downloadChapterAsync = function(_, _, _, cb)
+        cb({ data = { content_type = "epub", chapter = { {
+            content = '<?xml version="1.0"?><html><head><title>Cover</title></head><body></body></html>',
+        } } } })
+        return { cancel = function() end }
+    end
+    local html
+    require("source.chapter").prefetchAsync = function(identity, _, toc, _, _, opts, cb)
+        opts.fetchContent(identity, toc[1], function(payload) html = payload.html; cb() end)
+        return { cancel = function() end }
+    end
+    require("source.assets").localizeAsync = function(raw, _, _, done) done(raw) end
+    Jdread.new():prefetchChaptersAsync(
+        { source_id = "jdread", stable_id = "30982479", book = { stable_id = "30982479" } },
+        { { idx = 1, uid = "0", title = "封面" } }, 1, 1, function() end
+    )
+    Assert.eq(html, '<p><img src="https://img.test/c.jpg"/></p>')
+    Toc.read = orig_read
+end
+
+-- 开书迁移：旧版目录（版本 2）章数和新目录不同，章节文件章号错位，清整本缓存后再开；
+-- 章数相同保留缓存；目录已是新版不发请求
+do
+    local Toc = require("source.toc")
+    local orig_read, orig_put = Toc.read, Toc.put
+    local Chapter = require("source.chapter")
+    local orig_open = Chapter.openWithUi
+    local old
+    Toc.read = function() return old end
+    Toc.put = function() return true end
+    local cleared, catalog_calls, opened = {}, 0, 0
+    require("book.store").clearCache = function(_, stable_id)
+        cleared[#cleared + 1] = stable_id
+        return true
+    end
+    fake_client.catalogAsync = function(_, _, cb)
+        catalog_calls = catalog_calls + 1
+        cb({ data = { format = "epub", chapter_info = {
+            { chapter_index = 0, chapter_name = "封面", chapter_uri = "Text/titlepage.xhtml", is_try = true, is_buy = true },
+            { chapter_index = 1, chapter_name = "三盏灯", chapter_uri = "Text/a-CD.html", is_try = false, is_buy = true },
+            { chapter_index = 2, chapter_name = "1", chapter_uri = "Text/a.html#id_1", anchor = "id_1",
+                is_try = true, is_buy = true },
+        } } })
+        return { cancel = function() end }
+    end
+    Chapter.openWithUi = function()
+        opened = opened + 1
+        return { cancel = function() end }
+    end
+    local identity = { source_id = "jdread", stable_id = "30982479" }
+    local src = Jdread.new()
+
+    old = {
+        { idx = 1, uid = "0", title = "封面", toc_version = 2 },
+        { idx = 2, uid = "1", title = "三盏灯" },
+        { idx = 3, uid = "2", title = "1" },
+    }
+    src:openBookAsync(identity, nil, function() end)
+    Assert.eq(catalog_calls, 1)
+    Assert.eq(table.concat(cleared, ","), "30982479")
+    Assert.eq(opened, 1)
+
+    old = { { idx = 1, uid = "0", title = "封面", toc_version = 2 }, { idx = 2, uid = "1", title = "三盏灯" } }
+    src:openBookAsync(identity, nil, function() end)
+    Assert.eq(catalog_calls, 2)
+    Assert.len(cleared, 1)
+    Assert.eq(opened, 2)
+
+    -- v4 已按文件成章、只缺锚点：重拉补小节，章号不变，缓存照用
+    old = { { idx = 1, uid = "0", title = "封面", toc_version = 4 }, { idx = 2, uid = "1", title = "三盏灯" } }
+    src:openBookAsync(identity, nil, function() end)
+    Assert.eq(catalog_calls, 3)
+    Assert.len(cleared, 1)
+    Assert.eq(opened, 3)
+
+    old = { { idx = 1, uid = "0", title = "封面", toc_version = 5 }, { idx = 2, uid = "1", title = "三盏灯" } }
+    src:openBookAsync(identity, nil, function() end)
+    Assert.eq(catalog_calls, 3)
+    Assert.len(cleared, 1)
+    Assert.eq(opened, 4)
+
+    Toc.read, Toc.put, Chapter.openWithUi = orig_read, orig_put, orig_open
 end

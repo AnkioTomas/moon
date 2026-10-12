@@ -29,7 +29,7 @@ local function showQrLogin()
 
     NetworkMgr:runWhenOnline(function()
         local cancelled = false
-        local dialog, begin_job, wait_job
+        local dialog, begin_job, wait_job, complete_job
         local qr_size = math.floor(math.min(Screen:getWidth(), Screen:getHeight()) * 0.55)
 
         --- 代码主动关窗：先摘掉引用，close_callback 就不会当成用户取消。
@@ -49,6 +49,10 @@ local function showQrLogin()
             if wait_job then
                 wait_job.cancel()
                 wait_job = nil
+            end
+            if complete_job then
+                complete_job.cancel()
+                complete_job = nil
             end
         end
 
@@ -99,7 +103,8 @@ local function showQrLogin()
                         Toast:new{ text = wait_err or _("二维码已失效，请重新登录") }:show()
                         return
                     end
-                    Auth.completeQrLoginAsync(info, function(user, complete_err)
+                    complete_job = Auth.completeQrLoginAsync(info, function(user, complete_err)
+                        complete_job = nil
                         if cancelled then return end
                         closeDialog()
                         if not user then

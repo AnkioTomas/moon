@@ -10,25 +10,16 @@ local Request = require("http.request")
 local Text = require("utils.text")
 local _ = require("gettext")
 
-local Client = {}
-Client.__index = Client
-
 ---@class JdreadClient
 ---@field cookie string|nil
 ---@field uuid string|nil
----@field configured fun(self: JdreadClient): boolean
----@field shelfSyncAsync fun(self: JdreadClient, cb: function): CancelHandle|nil
----@field bookInfoAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
----@field addToShelfAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
----@field removeFromShelfAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
----@field catalogAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
----@field downloadChapterAsync fun(self: JdreadClient, book_id: string, query: table, cb: function): CancelHandle|nil
----@field getProgressAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
----@field putProgressAsync fun(self: JdreadClient, book_id: string, marker: table, cb: function): CancelHandle|nil
----@field apiPostAsync fun(self: JdreadClient, path: string, body: table, cb: function): CancelHandle|nil
+local Client = {}
+Client.__index = Client
 
 local API = "https://e.m.jd.com"
 local CATALOG_PAGE_SIZE = 2000
+-- ebooks/lite 每次最多取的书数。
+local SHELF_BATCH = 18
 -- download/chapter 对未购买且非试读章节返回 {"result_code":101,"message":"can not download"}。
 local DOWNLOAD_DENIED = 101
 
@@ -44,10 +35,10 @@ local function decodeApi(raw, err)
     return wire
 end
 
----@param o table|nil
+---@param o { cookie: string|nil, uuid: string|nil }
 ---@return JdreadClient
 function Client:new(o)
-    return setmetatable(o or {}, self)
+    return setmetatable(o, self)
 end
 
 ---@return boolean
@@ -94,8 +85,8 @@ function Client:apiPostAsync(path, body, cb)
     end)
 end
 
---- 拉取完整个人书架。
----@param cb fun(data: table|nil, err: string|nil)
+--- 拉取完整个人书架，回调 ebooks/lite 行数组。
+---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:shelfSyncAsync(cb)
     local cancelled, active = false, nil
@@ -103,11 +94,11 @@ function Client:shelfSyncAsync(cb)
 
     local function nextBatch()
         if index > #ids then
-            cb({ data = { books = books, total = #ids } })
+            cb(books)
             return
         end
         local batch = {}
-        for i = index, math.min(#ids, index + 17) do
+        for i = index, math.min(#ids, index + SHELF_BATCH - 1) do
             batch[#batch + 1] = ids[i]
         end
         index = index + #batch
@@ -141,7 +132,7 @@ function Client:shelfSyncAsync(cb)
     end)
     return { cancel = function()
             cancelled = true
-            if active and active.cancel then active.cancel() end
+            active.cancel()
         end }
 end
 
@@ -152,57 +143,6 @@ end
 function Client:bookInfoAsync(book_id, cb)
     local path = "/jdread/api/ebook/lite/" .. tostring(book_id)
     return self:apiGetAsync(path, nil, cb)
-end
-
---- 搜索京东书城。直连 e.m.jd.com，不依赖浏览器 h5st 风控运行时。
----@param keyword string
----@param page integer|nil
----@param page_size integer|nil
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }
-function Client:searchAsync(keyword, page, page_size, cb)
-    local cancelled, active = false, nil
-    local current = math.max(1, math.floor(tonumber(page) or 1))
-    local wanted = math.max(1, math.floor(tonumber(page_size) or 20))
-    local size, books = math.min(wanted, 30), {}
-
-    local function nextPage()
-        active = self:apiGetAsync("/jdread/api/search/v2", {
-            keyword = keyword,
-            order_by = "",
-            page = current,
-            page_size = size,
-            cv = "3.4.0",
-        }, function(wire, err)
-            if cancelled then return end
-            if not wire then cb(nil, err); return end
-            local data = type(wire.data) == "table" and wire.data or {}
-            local rows = data.product_search_infos or {}
-            for _idx, row in ipairs(rows) do
-                if #books >= wanted then break end
-                books[#books + 1] = row
-            end
-            local total = tonumber(data.total_count) or #books
-            if #rows > 0 and #books < wanted and current * size < total then
-                current = current + 1
-                nextPage()
-            else
-                cb({
-                    data = {
-                        product_search_infos = books,
-                        total_count = total,
-                    },
-                    result_code = 0,
-                    message = wire.message,
-                })
-            end
-        end)
-    end
-    nextPage()
-    return { cancel = function()
-            cancelled = true
-            if active and active.cancel then active.cancel() end
-        end }
 end
 
 --- 书架同步协议：action=0 加入，action=1 移除（与官方客户端一致）。
@@ -216,7 +156,7 @@ local function shelfActionAsync(client, book_id, action, cb)
         version = os.time() * 1000,
         first_sync = 1,
         items = {
-            { action = action, ebook_id = tonumber(book_id) or tostring(book_id) },
+            { action = action, ebook_id = tonumber(book_id) },
         },
     }, cb)
 end
@@ -244,8 +184,9 @@ end
 ---@return { cancel: fun() }
 function Client:catalogAsync(book_id, cb)
     local path = "/jdread/api/ebook/catalog/v2/" .. tostring(book_id)
-    local cancelled, active = false, nil
-    local rows = {}
+    local cancelled, rows = false, {}
+    ---@type { cancel: fun() }
+    local active
 
     local function nextPage()
         active = self:apiGetAsync(path, { page_size = CATALOG_PAGE_SIZE, index = #rows }, function(wire, err)
@@ -266,7 +207,7 @@ function Client:catalogAsync(book_id, cb)
     nextPage()
     return { cancel = function()
             cancelled = true
-            if active and active.cancel then active.cancel() end
+            active.cancel()
         end }
 end
 
@@ -302,7 +243,7 @@ end
 ---@return { cancel: fun() }
 function Client:getProgressAsync(book_id, cb)
     return self:apiPostAsync("/jdread/api/marker/sync", {
-        { ebook_id = tonumber(book_id) or tostring(book_id), format = 1 },
+        { ebook_id = tonumber(book_id), format = 1 },
     }, cb)
 end
 
@@ -315,7 +256,7 @@ function Client:putProgressAsync(book_id, marker, cb)
     return self:apiPostAsync("/jdread/api/marker/sync", {
         {
             version = 0,
-            ebook_id = tostring(book_id),
+            ebook_id = tonumber(book_id),
             format = 1,
             list = { marker },
         },
