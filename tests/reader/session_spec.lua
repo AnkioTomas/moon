@@ -597,6 +597,16 @@ do
     Assert.eq(cur.identity.book.read_state, 1)
     book_fraction = 0.25
 
+    -- 阅读中唤醒：通知源重启休眠时停掉的定时任务（微信时长心跳），带当前位置
+    local emitted_before_resume = #emitted
+    current_resume_plugin = plugin
+    Session.onResume(plugin)
+    current_resume_plugin = nil
+    Assert.eq(#emitted, emitted_before_resume + 1)
+    Assert.eq(emitted[#emitted].ev, "reading_resumed")
+    Assert.eq(emitted[#emitted].payload.identity.stable_id, "b1")
+    Assert.not_nil(emitted[#emitted].payload.position)
+
     -- 关文档：推进度/结清/通知源/清会话（真关书还会清进度冲突记忆）
     defer_tracker_stop = true
     local emitted_before_close = #emitted
@@ -612,7 +622,8 @@ do
     Assert.is_true(calls.progress[#calls.progress][3],
         "关书进度只能上传，不能立即回拉旧云端值")
     Assert.eq(calls.tracker[#calls.tracker][1], "stop")
-    Assert.eq(#emitted, emitted_before_close, "关书不再给源发事件")
+    Assert.eq(#emitted, emitted_before_close + 1, "关书只给源发 reading_stopped")
+    Assert.eq(emitted[#emitted].ev, "reading_stopped")
     Assert.eq(calls.notes[#calls.notes][1].stable_id, "b1", "注解同步复用阅读身份")
     Assert.eq(calls.notes[#calls.notes][2], "dirty", "关书注解只推脏，完整 pull 留给下次开书")
     Assert.is_nil(Session.current(), "关闭文档清理阅读状态")

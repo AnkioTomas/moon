@@ -421,16 +421,23 @@ function StatsDB.summaryBySource(source_id)
             longest_day_seconds = seconds
         end
     end
-    local remote_total = 0
     -- 权威 total 是单源语义（微信）；混合跨源只用合并日桶。
+    -- 快照不含拉取之后本地新读的，和日桶同一口径补上，否则不重新拉取总时长就不动。
     if type(source_id) == "string" then
-        remote_total = tonumber(DB.rowexec(
-            [[SELECT COALESCE(MAX(duration),0) FROM reading_stats
-              WHERE source_id=? AND record_type='total';]],
+        local remote_total, fetched_at = DB.rowexec(
+            [[SELECT duration, last_time FROM reading_stats
+              WHERE source_id=? AND record_type='total' ORDER BY duration DESC LIMIT 1;]],
             source_id
-        )) or 0
+        )
+        if (tonumber(remote_total) or 0) > 0 then
+            fetched_at = tonumber(fetched_at) or 0
+            total_seconds = tonumber(remote_total) + (tonumber(DB.rowexec(
+                [[SELECT COALESCE(SUM(duration),0) FROM reading_stats
+                  WHERE source_id=? AND record_type IN ('page','page_rollup') AND ]] .. FRESH_LOCAL .. ";",
+                source_id, fetched_at, fetched_at
+            )) or 0)
+        end
     end
-    if remote_total > 0 then total_seconds = remote_total end
     return {
         total_seconds = total_seconds,
         total_pages = total_pages,
