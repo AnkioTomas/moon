@@ -28,9 +28,9 @@ package.preload["ui.widgets.cover"] = function()
         end,
     }
 end
-local shelf = {}
+local shelf, first = {}, nil
 package.preload["book.catalog"] = function()
-    return { recentShelf = function() return nil, shelf, nil end }
+    return { recentShelf = function() return first, shelf, nil end }
 end
 
 local List = require("desktop.pages.home.recent_list")
@@ -52,26 +52,30 @@ List.saveCols(4)
 List.saveRows(0)
 Assert.eq(List.rows(), 2, "非法行数回退两行")
 
+-- 空书架只有一页：不留分页条高度
 local range = List:heightRange({}, { width = 600 })
-Assert.eq(range.height, SECTION + PAGER + 176 * 2 + 10)
+Assert.eq(range.height, SECTION + 176 * 2 + 10)
 Assert.is_nil(range.fill)
 List.saveRows(1)
-Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + PAGER + 176)
+Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + 176)
 List.saveShowTitle(false)
-Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + PAGER + 150)
+Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + 150)
 List.saveShowTitle(true)
-List.saveRows(2)
-
 for i = 1, 5 do shelf[i] = { title = "book" .. i } end
+Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + PAGER + 176, "一行四列五本两页：留分页条")
+List.saveRows(2)
 local events = {}
 local desktop = { plugin = {}, onEvent = function(_, e) events[#events + 1] = e end }
 local ctx = { desktop = desktop, source = { id = "local" } }
 
-do -- 一页装下：五本 + 单页分页条；开书状态挂在组件实例上
+do -- 一页装下：五本、不画分页条；开书状态挂在组件实例上
     local list = List:new()
-    local h = range.height
+    local h = List:heightRange(ctx, { width = 600 }).height
+    Assert.eq(h, range.height)
     local slot = list:build(ctx, { width = 600, height = h })
     Assert.eq(slot:getSize().h, h)
+    Assert.len(Kit.buttons(slot), 0, "单页没有翻页按钮")
+    Assert.is_false(list.paged)
     Assert.len(covers, 5)
     Assert.eq(covers[1].w, 100)
     Assert.is_true(covers[1].more)
@@ -103,6 +107,24 @@ do -- 一行三列：两页；翻页只重建自己并局部刷新；换源回�
     Assert.eq(Kit.dirty[1].region.y, 40)
     list:onEvent("source_changed")
     Assert.is_nil(list.page)
+    list:destroy()
+end
+
+do -- 书架变化让分页条出现 / 消失：高度跟着变，交给首页整页重排
+    List.saveRows(1)
+    List.saveCols(3)
+    local home_events = {}
+    local list = List:new{ home = { onEvent = function(_, e) home_events[#home_events + 1] = e end } }
+    list:build(ctx, { width = 600, height = 250 })
+    list:activate()
+    Assert.is_true(list.paged)
+    list:onEvent("shelf_changed")
+    Assert.len(home_events, 0, "分页条不变不重排")
+    local saved = shelf
+    shelf = { saved[1] }
+    list:onEvent("shelf_changed")
+    Assert.eq(home_events[1], "home_changed")
+    shelf = saved
     list:destroy()
 end
 
@@ -142,13 +164,36 @@ do -- 设置 Sheet：行数按钮行、列数 Spin、标题开关，改完通知
     Assert.eq(List.cols(), 5)
     Assert.len(events, 3)
     List.saveShowTitle(true)
+    Assert.eq(sheet.items[4].text, "显示第一本", "缺省不显示第一本")
+    sheet.items[4].callback()
+    Assert.is_true(List.showFirst())
+    Assert.len(events, 4)
+    List.saveShowFirst(false)
+end
+
+do -- 第一本：缺省不进列表；打开后排最前、计入数量
+    List.saveRows(2)
+    List.saveCols(4)
+    first = { title = "first" }
+    covers = {}
+    local slot = List:new():build(ctx, { width = 600, height = 500 })
+    Assert.eq(covers[1].book.title, "book1")
+    Assert.eq(Kit.texts(slot)[1], "最近阅读 · 5")
+    List.saveShowFirst(true)
+    covers = {}
+    slot = List:new():build(ctx, { width = 600, height = 500 })
+    Assert.eq(covers[1].book, first)
+    Assert.len(covers, 6)
+    Assert.eq(Kit.texts(slot)[1], "最近阅读 · 6")
+    List.saveShowFirst(false)
+    first = nil
 end
 
 do -- 分配高度不够两行：封面压到装得下
     List.saveRows(2)
     List.saveCols(4)
     covers = {}
-    List:new():build(ctx, { width = 600, height = SECTION + PAGER + 100 })
+    List:new():build(ctx, { width = 600, height = SECTION + 100 })
     Assert.is_true(covers[1].h <= 50 - 26)
     Assert.is_true(covers[1].w >= 1)
 end

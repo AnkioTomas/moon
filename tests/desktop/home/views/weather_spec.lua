@@ -19,6 +19,14 @@ local ICON_URL = "https://cdn.example/weather/"
 package.preload["online.weather"] = function()
     return {
         iconUrl = function(key) return ICON_URL .. key .. ".png" end,
+        upcoming = function(wx, n)
+            local out = {}
+            for i, item in ipairs(wx and wx.forecast or {}) do
+                if i > n then break end
+                out[i] = item
+            end
+            return out
+        end,
         current = function() return nil end,
         watch = function(_, cb) watch_cb = cb end,
         ensure = function() ensures = ensures + 1 end,
@@ -39,11 +47,13 @@ local FULL = {
 }
 local function copy(t) local o = {} for k, v in pairs(t) do o[k] = v end return o end
 
-do -- 空态：多云占位 + --°；失败不改字也不刷新
+do -- 空态：主行只有多云占位图标 + 一行提示；失败不改字也不刷新
     local weather = Weather:new()
     local slot = weather:build(ctx, opts)
-    Assert.eq(table.concat(Kit.texts(slot), "|"), "--°|--|--")
+    Assert.eq(table.concat(Kit.texts(slot), "|"), "暂无天气|")
     Assert.eq(weather.picture.src, ICON_URL .. "cloud.png")
+    Assert.eq(weather.hero[1], weather.picture)
+    Assert.is_nil(weather.hero[2], "空态主行不留温度和间隔")
     Assert.is_nil(watch_cb, "构建不挂订阅")
     slot:paintTo(Kit.canvas(), 0, 10)
     weather:activate()
@@ -51,7 +61,7 @@ do -- 空态：多云占位 + --°；失败不改字也不刷新
     Assert.eq(ensures, 1)
     Assert.len(Kit.scheduled, 1, "恢复起整点定时")
     watch_cb({}, "network")
-    Assert.eq(weather.temp.text, "--°")
+    Assert.eq(weather.temp.text, "")
     Assert.len(Kit.dirty, 0, "内容与图标未变，恢复与失败都不刷新")
     weather:deactivate()
     Assert.eq(unwatched, 1, "暂停摘等待")
@@ -67,7 +77,7 @@ do -- 成功补温度和图；同内容新表不刷新；暂停丢图标框；�
     weather:activate()
     watch_cb(copy(FULL))
     Assert.eq(weather.temp.text, "26°")
-    Assert.eq(weather.detail.text, "阴 · 上海 · 18–28°")
+    Assert.eq(weather.detail.text, "阴 · Shanghai · 18–28°", "地名用用户输入的地点")
     Assert.eq(weather.extra.text, "体感 25° · 湿度 62% · 北风 12km/h")
     Assert.eq(weather.picture.src, FULL.image)
     Assert.eq(weather.hero[1], weather.picture)
@@ -95,6 +105,50 @@ do -- 成功补温度和图；同内容新表不刷新；暂停丢图标框；�
     weather:destroy()
     Assert.eq(Kit.unscheduled[#Kit.unscheduled], tick)
     Assert.is_nil(weather.temp)
+end
+
+do -- 没填地点（按 IP）时地名回退接口返回的城市；小卡片不带预报行
+    Kit.sections.home.home_weather_city = ""
+    Kit.dirty, watch_cb = {}, nil
+    local weather = Weather:new()
+    weather:build(ctx, opts)
+    weather:activate()
+    local wx = copy(FULL)
+    wx.forecast = { { kind = "hour", label = "18:00", temp = "21", image = "a.png" } }
+    watch_cb(wx)
+    Assert.eq(weather.detail.text, "阴 · 上海 · 18–28°")
+    Assert.is_nil(table.concat(Kit.texts(weather.slot), "|"):find("18:00", 1, true), "小卡片不画预报")
+    weather:destroy()
+    Kit.sections.home.home_weather_city = "Shanghai"
+end
+
+do -- 预报组件：最多四格；逐小时写 HH:MM + 温度，逐日写明天 + 温差；档位变化整块重建
+    local Forecast = require("desktop.pages.home.weather_forecast")
+    Assert.eq(Forecast.id, "weather_forecast")
+    Assert.is_true(Forecast:heightRange().height > Weather:heightRange().height, "预报行高度始终预留")
+    Kit.dirty, watch_cb = {}, nil
+    local weather = Forecast:new()
+    local slot = weather:build(ctx, { width = 400, height = Forecast:heightRange().height })
+    slot:paintTo(Kit.canvas(), 0, 10)
+    weather:activate()
+    local wx = copy(FULL)
+    wx.forecast = {
+        { kind = "hour", label = "18:00", temp = "21", image = "a.png" },
+        { kind = "hour", label = "21:00", temp = "19", image = "b.png" },
+        { kind = "hour", label = "00:00", temp = "18", image = "b.png" },
+        { kind = "hour", label = "03:00", temp = "17", image = "b.png" },
+        { kind = "hour", label = "06:00", temp = "16", image = "b.png" },
+    }
+    watch_cb(wx)
+    local texts = table.concat(Kit.texts(weather.slot), "|")
+    Assert.matches(texts, "18:00|21°|21:00|19°|00:00|18°|03:00|17°$")
+    Assert.len(Kit.dirty, 1, "整块重建只刷一次")
+    local tomorrow = os.date("%Y-%m-%d", os.time() + 86400)
+    local wx2 = copy(FULL)
+    wx2.forecast = { { kind = "day", label = tomorrow, low = "18", high = "25", image = "c.png" } }
+    watch_cb(wx2)
+    Assert.matches(table.concat(Kit.texts(weather.slot), "|"), "明天|18–25°$")
+    weather:destroy()
 end
 
 do -- 设置：中文地名拒绝后带原输入重开；测试按钮试查不保存；保存后通知首页刷新

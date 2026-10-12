@@ -14,6 +14,7 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local MoonSettings = require("utils.settings")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -60,14 +61,35 @@ local SCALE = { [0] = 1, 0.91, 0.82, 0.73, 0.64 }
 ---@class BookRecentCardPerspective : WidgetContainer
 ---@field dimen table 封面投影包围盒
 local Perspective = WidgetContainer:extend{}
---- 先画封面，再提亮两次压淡，衬出中间封面。
+--- 先画封面，再提亮一次压淡，衬出中间封面；再淡封面就洗成白片了。
 ---@param bb BlitBuffer 目标画布
 ---@param x integer 目标左上角横坐标
 ---@param y integer 目标左上角纵坐标
 function Perspective:paintTo(bb, x, y)
     self[1]:paintTo(bb, x, y)
     bb:lightenRect(x, y, self.dimen.w, self.dimen.h)
-    bb:lightenRect(x, y, self.dimen.w, self.dimen.h)
+end
+
+--- 是否把第一本（最近读的那本）放进堆叠；缺省放，居中。
+---@return boolean
+function M.showFirst()
+    return MoonSettings.get("desktop.pages.home").home_recent_cards_show_first ~= false
+end
+
+--- 编辑态设置：是否显示第一本。
+---@param desktop BookDesktop
+function M:showSettings(desktop)
+    require("ui.themes.widgets.sheet"):new{
+        title = M.label,
+        items = {
+            { text = M.showFirst() and _("✓ 显示第一本") or _("显示第一本"), callback = function()
+                local home = MoonSettings.get("desktop.pages.home")
+                home.home_recent_cards_show_first = not M.showFirst()
+                MoonSettings.save("desktop.pages.home", home)
+                desktop:onEvent("home_refresh")
+            end },
+        },
+    }:show()
 end
 
 --- 封面堆叠的内容高度。
@@ -123,17 +145,17 @@ local function fanItems(slots, main_cw, main_ch)
     return by_slot, min_x, max_x - min_x
 end
 
---- 第一本居中，其余从近到远交替放在左右槽位，超过九本的忽略。
+--- 第一本居中，其余从近到远交替放在左右槽位；两侧本数取偶数保证对称，多出的一本和超过九本的不画
+--（仍参与轮换，切焦点时会转到中间）。
 ---@param books Book[] 非空书籍列表，第一本为当前焦点
 ---@return table<integer, BookRecentCardSlot> slots 已占用槽位
 local function assignSlots(books)
     local slots = {}
     slots[CENTER] = { book = books[1] }
-    for i = 2, #books do
-        local slot = FILL[i - 1]
-        if slot then
-            slots[slot] = { book = books[i] }
-        end
+    local sides = math.min(#FILL, #books - 1)
+    sides = sides - sides % 2
+    for i = 1, sides do
+        slots[FILL[i]] = { book = books[i + 1] }
     end
     return slots
 end
@@ -174,7 +196,7 @@ local function captionBlock(book, width, on_tap)
         align = "center",
         Text.line("title", Book.title(book), { width = width }),
         VerticalSpan:new{ width = xs },
-        Text.line("caption", author ~= "" and T(_("作者：%1"), author) or _("未知作者"),
+        Text.line("caption", author ~= "" and author or _("未知作者"),
             { width = width, color = t.color.muted }),
         VerticalSpan:new{ width = xs },
         HorizontalGroup:new{
@@ -221,10 +243,10 @@ function M:createWidget()
     local w = opts.width
     local h = opts.height
     local recent, reading, err = self:shelf()
+    local books = {}
+    if recent and M.showFirst() then books[1] = recent end
+    if #books == 0 and #reading == 0 then return M.libraryPrompt(ctx, w, h, err) end
 
-    if not recent then return M.libraryPrompt(ctx, w, h, err) end
-
-    local books = { recent }
     for _idx, book in ipairs(reading) do
         if #books < MAX_BOOKS then
             books[#books + 1] = book
@@ -281,14 +303,14 @@ function M:createWidget()
     if #books > 1 then
         for _idx, delta in ipairs({ -1, 1 }) do
             local button = Tap.wrap(CenterContainer:new{
-                dimen = Geom:new{ w = arrow_w, h = avail_h },
+                dimen = Geom:new{ w = arrow_w, h = main_ch },
                 Icon.widget{
                     name = delta < 0 and "chevron_left" or "chevron_right",
-                    size = 12,
-                    color = Blitbuffer.Color8(Theme.current().color.faint),
+                    size = 20,
+                    color = Blitbuffer.Color8(Theme.current().color.muted),
                 },
             }, function() shiftFocus(self, delta) end)
-            button.overlap_offset = { delta < 0 and 0 or avail_w - arrow_w, 0 }
+            button.overlap_offset = { delta < 0 and 0 or avail_w - arrow_w, row_bottom - main_ch }
             table.insert(overlap, button)
         end
     end

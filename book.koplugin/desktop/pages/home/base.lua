@@ -133,8 +133,10 @@ function Base.shelfKey(recent, reading, err)
     return table.concat(out, "\31")
 end
 
+--- 读当前源的最近书架；返回 Catalog.recentShelf 的三个值。
 ---@param ctx table 构建上下文
-local function readShelf(ctx)
+---@return table|nil recent, table[] reading, string|nil err
+function Base.readShelf(ctx)
     local source = ctx.source or (ctx.desktop and ctx.desktop.source)
     return require("book.catalog").recentShelf(source and source.id, 24)
 end
@@ -142,7 +144,7 @@ end
 --- 读最近书架并登记签名（shelf_changed 据此判断要不要重建）；返回 Catalog.recentShelf 的三个值。
 ---@return table|nil recent, table[] reading, string|nil err
 function Base:shelf()
-    local recent, reading, err = readShelf(self.ctx)
+    local recent, reading, err = Base.readShelf(self.ctx)
     self.shelf_key = Base.shelfKey(recent, reading, err)
     return recent, reading, err
 end
@@ -165,7 +167,7 @@ end
 ---@param event string|table 父组件转发的事件名称或事件对象
 function Base:onEvent(event)
     if event ~= "shelf_changed" or not (self.shelf_key and self.active) then return end
-    local key = Base.shelfKey(readShelf(self.ctx))
+    local key = Base.shelfKey(Base.readShelf(self.ctx))
     if key ~= self.shelf_key then self:refresh() end
 end
 

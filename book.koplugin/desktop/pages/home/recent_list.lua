@@ -22,6 +22,8 @@ local MIN_ROWS, MAX_ROWS, DEFAULT_ROWS = 1, 2, 2
 local MIN_COLS, MAX_COLS, DEFAULT_COLS = 3, 8, 4
 
 ---@class BookHomeRecentList : BookHomeComponent
+---@field page number|nil 当前页码
+---@field paged boolean|nil 本次构建是否画了分页条
 local M = {
     id = "recent_list",
     label = _("最近阅读列表"),
@@ -78,7 +80,31 @@ function M.saveShowTitle(on)
     MoonSettings.save("desktop.pages.home", home)
 end
 
---- 编辑态设置：行数 1/2，列数 3–8，封面下标题开关。
+--- 是否把第一本（最近读的那本）也排进列表；缺省不排，留给「当前阅读」大卡片。
+---@return boolean
+function M.showFirst()
+    return MoonSettings.get("desktop.pages.home").home_recent_list_show_first == true
+end
+
+---@param on boolean
+function M.saveShowFirst(on)
+    local home = MoonSettings.get("desktop.pages.home")
+    home.home_recent_list_show_first = on
+    MoonSettings.save("desktop.pages.home", home)
+end
+
+--- 列表要显示的书：其余在读，开关打开时第一本排在最前。
+---@param recent Book|nil
+---@param reading Book[]
+---@return Book[]
+local function listBooks(recent, reading)
+    if not (recent and M.showFirst()) then return reading end
+    local books = { recent }
+    for i, book in ipairs(reading) do books[i + 1] = book end
+    return books
+end
+
+--- 编辑态设置：行数 1/2，列数 3–8，封面下标题开关，是否显示第一本。
 ---@param desktop BookDesktop
 function M:showSettings(desktop)
     --- 保存后走首页刷新，列数变化时高度不变也必须重建网格。
@@ -111,6 +137,10 @@ function M:showSettings(desktop)
             end },
             { text = M.showTitle() and _("✓ 显示标题") or _("显示标题"), callback = function()
                 M.saveShowTitle(not M.showTitle())
+                refresh()
+            end },
+            { text = M.showFirst() and _("✓ 显示第一本") or _("显示第一本"), callback = function()
+                M.saveShowFirst(not M.showFirst())
                 refresh()
             end },
         },
@@ -175,14 +205,28 @@ local function sectionHeight()
     return Text.line("caption", "0"):getSize().h + Theme.px(Theme.current().space.xs)
 end
 
---- 按所选行列计算内容高度。
----@param _ctx table 为保持组件接口一致保留的上下文，本实现不读取
+--- 书架书数按当前行列能分几页。
+---@param n number 书数
+---@return number
+local function pageCount(n)
+    return math.max(1, math.ceil(n / (M.cols() * M.rows())))
+end
+
+--- 只有一页时不画分页条；高度要和 createWidget 的取舍一致。
+---@param ctx table 构建上下文
+---@return boolean
+local function paged(ctx)
+    return pageCount(#listBooks(M.readShelf(ctx))) > 1
+end
+
+--- 按所选行列计算内容高度；单页不留分页条。
+---@param ctx table 构建上下文
 ---@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table
-function M:heightRange(_ctx, opts)
+function M:heightRange(ctx, opts)
     local _slot_w, _cw, _ch, _cols, _gap, row_gap, cell_h = gridMetrics(opts.width)
-    local h = sectionHeight() + Theme.px(Theme.current().control.height)
-        + cell_h + (M.rows() - 1) * (row_gap + cell_h)
+    local pager = paged(ctx) and Theme.px(Theme.current().control.height) or 0
+    local h = sectionHeight() + pager + cell_h + (M.rows() - 1) * (row_gap + cell_h)
     return { height = h }
 end
 
@@ -240,9 +284,12 @@ function M:createWidget()
     local ctx, opts = self.ctx, self.opts
     local t = Theme.current()
     local w, h = opts.width, opts.height
-    local recent, books, err = self:shelf()
+    local recent, reading = self:shelf()
+    local books = listBooks(recent, reading)
+    self.paged = pageCount(#books) > 1
+    local pager_h = self.paged and Theme.px(t.control.height) or 0
     local section_h = sectionHeight()
-    local grid_h = math.max(1, h - section_h - Theme.px(t.control.height))
+    local grid_h = math.max(1, h - section_h - pager_h)
     local page, pages = 1, 1
     local content
     if #books > 0 then
@@ -261,24 +308,32 @@ function M:createWidget()
     self.page = page
 
     local label = #books > 0 and T(_("最近阅读 · %1"), #books) or _("最近阅读")
-    return VerticalGroup:new{
+    local col = VerticalGroup:new{
         align = "left",
         Text.line("caption", label, { width = w, color = t.color.muted, bold = true }),
         VerticalSpan:new{ width = Theme.px(t.space.xs) },
         content,
-        Pager.widget({
+    }
+    if self.paged then
+        col[#col + 1] = Pager.widget({
             width = w,
             page = page,
             pages = pages,
             on_prev = function() self.page = page - 1; self:refresh() end,
             on_next = function() self.page = page + 1; self:refresh() end,
-        }),
-    }
+        })
+    end
+    return col
 end
 
+--- 书架变化让分页条出现 / 消失时组件高度跟着变，只能整页重排；否则只重建自己。
 ---@param event string|table 从父视图转发的事件标识或事件对象
 function M:onEvent(event)
     if event == "source_changed" then self.page = nil end
+    if event == "shelf_changed" and self.active and self.home and paged(self.ctx) ~= self.paged then
+        self.home:onEvent("home_changed")
+        return
+    end
     require("desktop.pages.home.base").onEvent(self, event)
 end
 

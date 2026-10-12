@@ -6,7 +6,10 @@
 local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
+local Themed = require("support.theme_stubs")
+Themed.install()
 local Widget = require("ui/widget/widget")
+Kit.sections.home = {}
 
 local covers = {}
 package.preload["ui.widgets.book"] = function()
@@ -43,10 +46,24 @@ do -- 单本：一张正面封面，无箭头
     Assert.is_true(covers[1].shadow)
     local texts = Kit.texts(slot)
     Assert.contains(texts, "心挣")
-    Assert.contains(texts, "作者：初禾")
+    Assert.contains(texts, "初禾")
     Assert.contains(texts, "已读 25%")
     Assert.len(Kit.taps(slot), 2, "说明区 + 封面")
     cards:destroy()
+end
+
+do -- 四本：两侧本数取偶数，左右各一本，第四本不画但仍可轮换
+    for i = 1, 3 do reading[i] = { title = "b" .. i } end
+    covers = {}
+    local cards = Cards:new()
+    local slot = cards:build(ctx, { width = 600, height = 220 })
+    Assert.len(covers, 3, "中间 + 左右各一")
+    Assert.eq(cards._book_n, 4)
+    local stack = slot[1][1][1][1][1]
+    Assert.is_true(stack[1].overlap_offset[1] < stack[3].overlap_offset[1], "一本在中间左侧")
+    Assert.is_true(stack[2].overlap_offset[1] > stack[3].overlap_offset[1], "一本在中间右侧")
+    cards:destroy()
+    reading = {}
 end
 
 do -- 九本：底边对齐、不出框；侧封面在两边
@@ -91,6 +108,31 @@ do -- 九本：底边对齐、不出框；侧封面在两边
     cards:deactivate()
     Assert.is_true(covers[#covers].paused, "暂停下发 HomePause")
     cards:destroy()
+end
+
+do -- 关掉第一本：只在其余在读里轮换；其余也没有时给图书馆入口；设置 Sheet 切换后通知首页刷新
+    reading = { { title = "b1" }, { title = "b2" } }
+    local events = {}
+    local desktop = { onEvent = function(_, e) events[#events + 1] = e end }
+    Cards:showSettings(desktop)
+    local sheet = Themed.last("sheet")
+    Assert.eq(sheet.items[1].text, "✓ 显示第一本", "缺省显示第一本")
+    sheet.items[1].callback()
+    Assert.is_false(Cards.showFirst())
+    Assert.eq(events[1], "home_refresh")
+
+    covers = {}
+    local cards = Cards:new()
+    cards:build(ctx, { width = 600, height = 220 })
+    Assert.eq(cards._book_n, 2)
+    Assert.eq(covers[#covers].book.title, "b1", "其余在读的第一本居中")
+    cards:destroy()
+
+    reading = {}
+    local lib = { library = { reset = function() end }, switchTab = function() end }
+    local slot = Cards:new():build({ desktop = lib }, { width = 600, height = 220 })
+    Assert.eq(Kit.texts(slot)[1], "去图书馆挑一本 ›")
+    Kit.sections.home.home_recent_cards_show_first = nil
 end
 
 do -- 空书架：图书馆入口

@@ -4,7 +4,9 @@
 @module koplugin.book.desktop.pages.home.hitokoto
 --]]
 
+local Geom = require("ui/geometry")
 local Hitokoto = require("online.hitokoto")
+local RightContainer = require("ui/widget/container/rightcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Theme = require("ui.themes")
@@ -57,18 +59,22 @@ function M:sample()
     return quote
 end
 
+--- 正文最多两行（heightRange 只留了两行），署名靠右。
 ---@return table
 function M:createWidget()
     self.current = self.current or self:sample()
     local quote = self.current
+    local t = Theme.current()
     local width = self.opts.width
     local kids = {
-        Text.box("body", "“" .. (quote.text or ""), width),
+        align = "left",
+        Text.box("body", quote.text or "", width, { max_lines = 2 }),
     }
     local attr = attribution(quote)
     if attr ~= "" then
-        kids[#kids + 1] = VerticalSpan:new{ width = Theme.px(Theme.current().space.xs) }
-        kids[#kids + 1] = Text.line("caption", attr, { width = width, color = Theme.current().color.muted })
+        local line = Text.line("caption", attr, { width = width, color = t.color.muted })
+        kids[#kids + 1] = VerticalSpan:new{ width = Theme.px(t.space.xs) }
+        kids[#kids + 1] = RightContainer:new{ dimen = Geom:new{ w = width, h = line:getSize().h }, line }
     end
     return VerticalGroup:new(kids)
 end

@@ -87,6 +87,48 @@ do -- 空城市 + 测试不走缓存；无 lang_zh 时用码表
     Assert.eq(got.image, Weather.iconUrl("sunny"))
 end
 
+do -- 逐 3 小时档：解析成绝对时间；upcoming 从 now 往后取，跨天接上；没有逐小时退回明天起的逐日
+    local wx = Weather:parse([[{
+        "current_condition":[{"temp_C":"20","weatherCode":"113"}],
+        "weather":[{
+            "date":"2026-10-13","maxtempC":"23","mintempC":"16",
+            "hourly":[{"time":"0","tempC":"17","weatherCode":"113"},
+                {"time":"1800","tempC":"21","weatherCode":"176"},
+                {"time":"2100","tempC":"19","weatherCode":"122"}]
+        },{
+            "date":"2026-10-14","maxtempC":"25","mintempC":"18",
+            "hourly":[{"time":"0","tempC":"18","weatherCode":"143"},{"time":"300","tempC":"17"}]
+        }]
+    }]])
+    Assert.len(wx.hours, 5)
+    Assert.eq(wx.hours[2].at, "2026-10-13 18:00")
+    Assert.eq(wx.hours[2].icon, "rain")
+    Assert.eq(wx.hours[4].at, "2026-10-14 00:00")
+
+    local now = os.time{ year = 2026, month = 10, day = 13, hour = 17, min = 30 }
+    local next3 = Weather.upcoming(wx, 3, now)
+    Assert.len(next3, 3)
+    Assert.eq(next3[1].kind, "hour")
+    Assert.eq(next3[1].label, "18:00")
+    Assert.eq(next3[1].temp, "21")
+    Assert.eq(next3[1].image, Weather.iconUrl("rain"))
+    Assert.eq(next3[3].label, "00:00", "跨天接上第二天")
+    Assert.len(Weather.upcoming(wx, 10, now), 4, "只有未来档")
+
+    local late = os.time{ year = 2026, month = 10, day = 14, hour = 4 }
+    local days = Weather.upcoming(wx, 4, late)
+    Assert.len(days, 0, "逐小时全过期、也没有明天之后的日预报")
+
+    wx.hours = nil
+    days = Weather.upcoming(wx, 4, now)
+    Assert.len(days, 1, "旧缓存没有逐小时：退回明天起的逐日")
+    Assert.eq(days[1].kind, "day")
+    Assert.eq(days[1].label, "2026-10-14")
+    Assert.eq(days[1].low, "18")
+    Assert.eq(days[1].high, "25")
+    Assert.len(Weather.upcoming(nil, 4, now), 0)
+end
+
 do -- 无 current_condition 不是天气
     Assert.is_nil(Weather:parse('{"nearest_area":[]}'))
 end
