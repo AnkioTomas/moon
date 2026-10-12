@@ -9,8 +9,6 @@
 require("l10n").apply()
 
 local Device = require("device")
-local Event = require("ui/event")
-local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 
 local ActionList = require("features.panel.action_list")
@@ -29,9 +27,7 @@ local Registry = require("features.panel.actions.registry")
 
 local Panel = {}
 
-local list = ActionList.create("desktop", "quick_panel_actions", Registry.desktopOrder, {
-    can_enable = function(action) return Registry.available(action) end,
-})
+local list = ActionList.create("desktop", "quick_panel_actions", Registry.desktopOrder)
 
 --- 桌面设置页展示的快捷动作选项。
 ---@class BookQuickPanelOption
@@ -88,7 +84,7 @@ end
 --- 生成快捷面板设置页动作列表。
 ---@return BookQuickPanelOption[]
 function Panel.options()
-    return list.options(Registry.desktopOrder)
+    return list.options()
 end
 
 --- 当前启用的桌面动作数量。
@@ -124,36 +120,22 @@ function Panel.menuActions()
                 id = id,
                 title = action.title,
                 icon = action.icon,
-                active = Registry.active(id, action),
+                active = Registry.active(action),
             }
         end
     end
     return actions
 end
 
---- 执行桌面动作：广播事件，按需保持面板打开并延迟刷新。
+--- 执行桌面动作；未注册或当前不可用返回 false。
 ---@param id string
 ---@param opts BookQuickPanelExecuteOpts|nil
 ---@return boolean
 function Panel.executeAction(id, opts)
-    opts = opts or {}
     local action = Registry.get(id)
-    if not action or not Registry.available(action) then return false end
-    if not action.keep_open and opts.close then opts.close() end
-    if action.run then
-        action.run({ ui = nil })
-    elseif action.event then
-        UIManager:broadcastEvent(Event:new(action.event))
-    else
-        return false
-    end
-    if opts.refresh then
-        if action.refresh_delay then
-            UIManager:scheduleIn(action.refresh_delay, opts.refresh)
-        else
-            UIManager:nextTick(opts.refresh)
-        end
-    end
+    if not Registry.available(action) then return false end
+    ---@cast action BookQuickPanelAction
+    Registry.execute(action, { ui = nil }, opts)
     return true
 end
 
@@ -162,7 +144,7 @@ end
 ---@param fraction number
 ---@return boolean
 function Panel.setLevel(kind, fraction)
-    fraction = math.max(0, math.min(1, tonumber(fraction) or 0))
+    fraction = math.max(0, math.min(1, fraction))
     local powerd = Device:getPowerDevice()
     if kind == "brightness" then
         local min, max = tonumber(powerd.fl_min) or 0, tonumber(powerd.fl_max) or 100

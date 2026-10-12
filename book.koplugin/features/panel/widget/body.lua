@@ -69,7 +69,8 @@ local Body = InputContainer:extend{
 ---@param self BookQuickPanelBody
 function Body:init()
     self.gap = Theme.px(6)
-    self.tile_h = Theme.px(64)
+    -- 容得下 circle 底座（52）+ 间距 + 一行 caption。
+    self.tile_h = Theme.px(76)
     self:updateView()
 end
 
@@ -82,14 +83,7 @@ function Body:updateView()
     local columns = columnCount(self.width, math.max(1, #actions), self.gap)
     local tile_w = math.floor((self.width - self.gap * (columns - 1)) / columns)
     ---@type BookQuickPanelEditHandlers
-    local handlers = {
-        on_move = function(id, delta)
-            if self.on_move then self.on_move(id, delta) end
-        end,
-        on_disable = function(id)
-            if self.on_disable then self.on_disable(id) end
-        end,
-    }
+    local handlers = { on_move = self.on_move, on_disable = self.on_disable }
 
     local group = VerticalGroup:new{ align = "left" }
     if self.header then

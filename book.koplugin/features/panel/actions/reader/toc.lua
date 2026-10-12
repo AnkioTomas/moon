@@ -7,28 +7,20 @@ local _ = require("gettext")
 --- 显示目录：整书复用 KOReader 原生树形目录，连续章节使用 Book 会话目录。
 ---@param ctx BookQuickPanelContext|nil
 local function showToc(ctx)
-    local ui = ctx and ctx.ui
-    local toc_widget = ui and ui.toc
+    local toc_widget = ctx and ctx.ui and ctx.ui.toc
     local session = require("reader.session")
-    if toc_widget then
-        if not session.isChapterMode() and toc_widget.onShowToc then
-            toc_widget:onShowToc()
-            return
-        end
-    end
-
-    local toc = session.toc()
-    if not toc then
-        if toc_widget then
-            if toc_widget.onShowToc then
-                toc_widget:onShowToc()
-            end
-        end
+    if toc_widget and not session.isChapterMode() then
+        toc_widget:onShowToc()
         return
     end
-    require("reader.chapter_toc").show(toc, session.chapterIndex(), function(idx, anchor)
-        session.gotoChapter(idx, anchor and anchor.id and { xpointer = "#" .. anchor.id })
-    end)
+    local toc = session.toc()
+    if toc then
+        require("reader.chapter_toc").show(toc, session.chapterIndex(), function(idx, anchor)
+            session.gotoChapter(idx, anchor and anchor.id and { xpointer = "#" .. anchor.id })
+        end)
+    elseif toc_widget then
+        toc_widget:onShowToc()
+    end
 end
 
 ---@type BookQuickPanelAction

@@ -15,13 +15,27 @@ package.preload["logger"] = function() return { err = function() end } end
 package.preload["device"] = function()
     return { isTouchDevice = function() return true end }
 end
-local dirty_funcs = {}
+local full_repaints = 0
 package.preload["ui/uimanager"] = function()
     return {
         show = function() end,
-        setDirty = function(_, _, arg)
-            if type(arg) == "function" then dirty_funcs[#dirty_funcs + 1] = arg end
+        setDirty = function(_, widget, refresh)
+            if widget == "all" and refresh == "full" then full_repaints = full_repaints + 1 end
         end,
+    }
+end
+local ui_conf = { mesh_mask = true }
+package.preload["utils.settings"] = function()
+    return { get = function(name) assert(name == "ui"); return ui_conf end }
+end
+local guarded = {}
+package.preload["ui.guard"] = function()
+    return {
+        call = function(label, fn, ...)
+            local ok, err = pcall(fn, ...)
+            if not ok then guarded[#guarded + 1] = { label = label, err = err } end
+        end,
+        paint = function(_label, fn, ...) fn(...) end,
     }
 end
 local mesh_calls = {}
@@ -101,7 +115,9 @@ local TouchMenu = {
         clear = function() end,
         getSize = function() return { h = 100 } end,
     },
+    screen_size = { w = 800, h = 1200 },
     dimen = {
+        y = 0,
         w = 0,
         h = 0,
         copy = function() return { combine = function() return {} end, w = 0, h = 0 } end,
@@ -126,7 +142,11 @@ TouchMenu.bar = {
     bar_sep = { empty_segments = {} },
 }
 
-function TouchMenu:updateItems() end
+-- 原生 updateItems 只模拟它改菜单高度
+local native_items_h
+function TouchMenu:updateItems()
+    if native_items_h then self.dimen.h = native_items_h end
+end
 local native_painted
 function TouchMenu:paintTo() native_painted = true end
 
@@ -166,13 +186,13 @@ TouchMenu:updateItems()
 Assert.eq(icon_synced, 2)
 Assert.eq(TouchMenu.switchMenuTab, native_switch)
 
--- 回调抛异常：异常必须原样冒出去，但 switchMenuTab 不能留在 noop 状态
+-- 回调抛异常：异常交给入口 guard 报告（不静默吞），且 switchMenuTab 不能留在 noop 状态
 raise = true
 icon_synced = nil
-local ok, err = pcall(function() TouchMenu:updateItems() end)
+TouchMenu:updateItems()
 raise = false
-Assert.is_false(ok, "icon callback 的异常不得被吞掉")
-Assert.matches(tostring(err), "icon callback boom")
+Assert.len(guarded, 1, "icon callback 的异常必须经 guard 报告")
+Assert.matches(tostring(guarded[1].err), "icon callback boom")
 Assert.eq(TouchMenu.switchMenuTab, native_switch, "异常路径同样必须还原 switchMenuTab")
 Assert.eq(icon_synced, 2, "抛错前的副作用照旧生效")
 
@@ -182,7 +202,7 @@ TouchMenu.cur_tab = 1
 TouchMenu:updateItems()
 Assert.eq(TouchMenu.switchMenuTab, native_switch)
 
--- 菜单下方铺网状遮罩：从菜单下沿画到屏底，并单独刷新该区域
+-- 菜单下方铺网状遮罩：从菜单下沿画到屏底
 TouchMenu.screen_size = { w = 800, h = 1200 }
 TouchMenu.dimen.y, TouchMenu.dimen.h = 0, 300
 TouchMenu:paintTo({}, 0, 0)
@@ -190,13 +210,38 @@ Assert.is_true(native_painted, "原生菜单必须照常绘制")
 Assert.eq(mesh_calls[1].y, 300)
 Assert.eq(mesh_calls[1].h, 900)
 Assert.eq(mesh_calls[1].w, 800)
-local refresh, region = dirty_funcs[#dirty_funcs]()
-Assert.eq(refresh, "ui")
-Assert.eq(region.y, 300)
-Assert.eq(region.h, 900)
 
--- 菜单占满屏：不画遮罩，也不产生刷新（"ui" + nil 区域会变成全屏刷新）
+-- 菜单占满屏：不画遮罩
 TouchMenu.dimen.h = 1200
 TouchMenu:paintTo({}, 0, 0)
 Assert.len(mesh_calls, 1)
-Assert.is_nil(dirty_funcs[#dirty_funcs]())
+
+-- 遮罩开着、菜单高度变了（切 tab）：整屏重画 + 全刷，否则新旧网点错位叠黑
+TouchMenu.item_table = {}
+native_items_h = 400
+full_repaints = 0
+TouchMenu.dimen.h = 300
+TouchMenu:updateItems()
+Assert.eq(full_repaints, 1, "高度变化必须整屏重画并全刷")
+
+-- 高度不变（菜单内勾选、刷新）：网点落在同一批像素上，不闪屏
+TouchMenu:updateItems()
+Assert.eq(full_repaints, 1)
+
+-- 刚打开：下方还没有遮罩像素，同样全刷一次
+TouchMenu.is_fresh = true
+TouchMenu:updateItems()
+TouchMenu.is_fresh = false
+Assert.eq(full_repaints, 2)
+
+-- 关了遮罩：不画也不额外刷新
+ui_conf.mesh_mask = false
+native_items_h = 500
+TouchMenu:updateItems()
+Assert.eq(full_repaints, 2)
+ui_conf.mesh_mask = true
+
+-- 菜单占满屏：没有遮罩区，不全刷
+native_items_h = 1200
+TouchMenu:updateItems()
+Assert.eq(full_repaints, 2)

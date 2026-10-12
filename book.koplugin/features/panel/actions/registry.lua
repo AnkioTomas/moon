@@ -4,22 +4,22 @@
 
 require("l10n").apply()
 
-local logger = require("utils.log")
-
 ---@class BookQuickPanelRegistry
 ---@field get fun(id: string): BookQuickPanelAction|nil
 ---@field desktopOrder fun(): string[]
 ---@field available fun(action: BookQuickPanelAction|nil, ctx: BookQuickPanelContext|nil): boolean
----@field active fun(id: string, action: BookQuickPanelAction|nil, ctx: BookQuickPanelContext|nil): boolean
+---@field active fun(action: BookQuickPanelAction, ctx: BookQuickPanelContext|nil): boolean
+---@field execute fun(action: BookQuickPanelAction, ctx: BookQuickPanelContext, opts: BookQuickPanelExecuteOpts|nil)
 
 local Registry = {}
 
--- 内置动作。feature 的开关不写在这里，扫描 features/<name>/panel.lua 追加到对应 scope 末尾（按目录名）。
+-- 内置动作只放 KOReader 原生能力与核心阅读会话（actions/<scope>/<id>.lua）。
+-- 属于某个 feature 的开关一律写在 features/<name>/panel.lua，扫描后追加到对应 scope 末尾（按目录名）。
 local DESKTOP_ORDER = {
-    "night", "wifi", "rotate", "refresh", "screenshot", "frontlight", "autolight", "suspend",
+    "night", "wifi", "rotate", "refresh", "screenshot", "frontlight", "suspend",
 }
 local READER_ORDER = {
-    "toc", "font", "highlights", "bookorbit", "xray", "xray_refresh",
+    "toc", "font", "highlights", "bookorbit",
 }
 
 local builtins = {}
@@ -69,6 +69,9 @@ local function featureActions()
             if not action.title or not action.icon then
                 error("feature " .. name .. " panel: action needs title and icon")
             end
+            if not action.run and not action.event then
+                error("feature " .. name .. " panel: action needs run or event")
+            end
             out[#out + 1] = action
         end
     end
@@ -103,7 +106,6 @@ end
 ---@param feature_ids string[]
 ---@return string[]
 local function withFeatures(base, feature_ids)
-    ensureLoaded()
     local order = { unpack(base) }
     for _idx, id in ipairs(feature_ids) do
         order[#order + 1] = id
@@ -139,28 +141,36 @@ end
 ---@return boolean
 function Registry.available(action, ctx)
     if not action then return false end
-    if not action.available then return true end
-    local ok, result = pcall(action.available, ctx)
-    if not ok then
-        logger.error("book quick panel action availability failed:", result)
-        return false
-    end
-    return result == true
+    return not action.available or action.available(ctx) == true
 end
 
---- 调用动作激活态检查，并捕获异常。
----@param id string
----@param action BookQuickPanelAction|nil
+---@param action BookQuickPanelAction
 ---@param ctx BookQuickPanelContext|nil
 ---@return boolean
-function Registry.active(id, action, ctx)
-    if not action or not action.active then return false end
-    local ok, result = pcall(action.active, ctx)
-    if not ok then
-        logger.error("book quick panel action state failed:", id, result)
-        return false
+function Registry.active(action, ctx)
+    return action.active ~= nil and action.active(ctx) == true
+end
+
+--- 执行动作：非 keep_open 先关面板；keep_open 的下一 tick（或 refresh_delay 秒后）刷新面板。
+--- 关掉的面板不能再刷新：updateItems 会在已关闭的菜单上重建内容并多刷一次墨水屏。
+---@param action BookQuickPanelAction
+---@param ctx BookQuickPanelContext
+---@param opts BookQuickPanelExecuteOpts|nil
+function Registry.execute(action, ctx, opts)
+    local UIManager = require("ui/uimanager")
+    opts = opts or {}
+    if not action.keep_open and opts.close then opts.close() end
+    if action.run then
+        action.run(ctx)
+    else
+        UIManager:broadcastEvent(require("ui/event"):new(action.event))
     end
-    return result == true
+    if not action.keep_open or not opts.refresh then return end
+    if action.refresh_delay then
+        UIManager:scheduleIn(action.refresh_delay, opts.refresh)
+    else
+        UIManager:nextTick(opts.refresh)
+    end
 end
 
 ---@type BookQuickPanelRegistry

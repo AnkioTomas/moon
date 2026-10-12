@@ -1,4 +1,5 @@
---[[-- features.panel.widget.button 离线 smoke 用例。 --]]
+--[[-- features.panel.widget.button：形状跟主题 tile.shape 走（bare / circle / block），交互不变。 --]]
+---@diagnostic disable: missing-fields, undefined-field
 
 local Assert = require("support.assert")
 
@@ -26,83 +27,112 @@ end
 
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["ffi/blitbuffer"] = function()
-    return {
-        COLOR_BLACK = 0,
-        COLOR_WHITE = 255,
-        Color8 = function(c) return c end,
-    }
+    return { COLOR_BLACK = 0, COLOR_WHITE = 255, Color8 = function(c) return c end }
 end
 package.preload["ui/geometry"] = widget
 package.preload["ui/gesturerange"] = widget
 package.preload["ui/widget/container/inputcontainer"] = widget
 package.preload["ui/widget/container/centercontainer"] = widget
+package.preload["ui/widget/verticalgroup"] = widget
+package.preload["ui/widget/verticalspan"] = widget
 package.preload["ui.themes.widgets.icon"] = function()
     return {
         label = function(opts) return opts end,
+        widget = function(opts) return opts end,
     }
 end
-package.preload["ui.themes"] = function()
-    return {
-        px = function(n) return n end,
-        current = function()
-            return {
-                button = {
-                    primary = { bg = 0, ink = 255 },
-                    normal = { bg = 238, ink = 0, border_color = 0 },
-                },
-                control = { border = 1, icon = 22 },
-                space = { sm = 8 },
-                font = { caption = 11 },
-            }
-        end,
-    }
+package.preload["ui.themes.widgets.text"] = function()
+    return { line = function(role, text, opts) return { role = role, text = text, opts = opts } end }
 end
 package.preload["ui.themes.widgets.box"] = function()
     return { new = function(_, opts) return opts end }
 end
 
+local shape = "bare"
+package.preload["ui.themes"] = function()
+    return {
+        px = function(n) return n end,
+        current = function()
+            return {
+                tile = { shape = shape },
+                button = {
+                    primary = { bg = 0, ink = 255, border_color = 0 },
+                    normal = { bg = 255, ink = 0, border_color = 0 },
+                },
+                card = { radius = 0, shadow = 3, shadow_color = 0 },
+                control = { border = 2, radius = 2, icon = 22 },
+                color = { ink = 0, disabled = 170 },
+                space = { xs = 4, sm = 8 },
+                font = { caption = 11 },
+            }
+        end,
+    }
+end
+
 local ActionButton = require("features.panel.widget.button")
-local active = ActionButton:new{
-    width = 80,
-    height = 64,
-    id = "night",
-    title = "夜间",
-    icon = "dark_mode",
-    active = true,
-    enabled = true,
-    on_action = function() end,
-}
-Assert.not_nil(active[1])
--- Icon.label 的 size 是必填：漏传会在 Theme.fontSize 里崩。
-Assert.eq(active[1][1].size, 22)
-Assert.is_false(active[1][1].dim)
-Assert.is_true(active.onTap(active))
 
+---@param opts table|nil
+local function button(opts)
+    local o = { width = 80, height = 76, id = "night", title = "夜间", icon = "dark_mode", on_action = function() end }
+    for k, v in pairs(opts or {}) do o[k] = v end
+    return ActionButton:new(o)
+end
+
+--- bare / circle：CenterContainer → VerticalGroup{ 底座 Box, 间距, 文字 }
+local function parts(b)
+    local group = b[1][1]
+    return group[1], group[3]
+end
+
+-- bare（paper）：关着无框，图标用正文色；开着垫 primary 底、反色图标，圆角取 control.radius。
+shape = "bare"
+local base, label = parts(button())
+Assert.is_nil(base.style.bg, "关着不画底")
+Assert.is_nil(base.style.border, "关着不画框")
+Assert.eq(base[1].color, 0)
+Assert.eq(base[1].size, 22, "图标字号必填，漏传会在 Theme.fontSize 里崩")
+Assert.eq(label.text, "夜间")
+base = parts(button{ active = true })
+Assert.eq(base.style.bg, 0)
+Assert.eq(base.style.radius, 2)
+Assert.eq(base[1].color, 255)
+Assert.eq(base.width, 44)
+
+-- circle（soft）：总有圆底，开关只换变体；文字在圆外。
+shape = "circle"
+base = parts(button())
+Assert.eq(base.style.bg, 255)
+Assert.eq(base.style.radius, 999)
+Assert.eq(base.width, 52)
+base = parts(button{ active = true })
+Assert.eq(base.style.bg, 0)
+Assert.eq(base[1].color, 255)
+
+-- block（bold）：卡片的圆角与阴影；阴影从宽高里扣掉，网格不被撑宽。
+shape = "block"
+local tile = button{ active = true }[1]
+Assert.eq(tile.style.radius, 0)
+Assert.eq(tile.style.shadow, 3)
+Assert.eq(tile.width, 77)
+Assert.eq(tile.height, 73)
+Assert.eq(tile[1].text, "夜间", "文字在块内")
+Assert.eq(tile[1].color, 255)
+
+-- 禁用：图标变灰、文字用 disabled 色；点按被吞掉不触发动作。
+shape = "bare"
+local fired = false
+local disabled = button{ enabled = false, on_action = function() fired = true end }
+base, label = parts(disabled)
+Assert.is_true(base[1].dim)
+Assert.eq(label.opts.color, 170)
+Assert.is_true(disabled:onTap())
+Assert.is_false(fired)
+
+-- 点按执行、长按交给上层进入编辑。
+local tapped
+Assert.is_true(button{ on_action = function(id) tapped = id end }:onTap())
+Assert.eq(tapped, "night")
 local held = false
-local with_hold = ActionButton:new{
-    width = 80,
-    height = 64,
-    id = "wifi",
-    title = "Wi-Fi",
-    icon = "wifi",
-    on_action = function() end,
-    on_hold = function()
-        held = true
-        return true
-    end,
-}
-Assert.is_true(with_hold:onHold())
+Assert.is_true(button{ on_hold = function() held = true; return true end }:onHold())
 Assert.is_true(held)
-
-local disabled = ActionButton:new{
-    width = 80,
-    height = 64,
-    id = "wifi",
-    title = "Wi-Fi",
-    icon = "signal_wifi_4_bar",
-    active = false,
-    enabled = false,
-    on_action = function() end,
-}
-Assert.is_true(disabled.onTap(disabled))
-Assert.is_true(disabled[1][1].dim, "禁用态图标与文案变灰")
+Assert.is_false(button():onHold())

@@ -26,6 +26,7 @@ return {
         ghost = { ink = 0x00 },
     },
     selected = { bg = 0x00, ink = 0xFF, mark = 0 },
+    tile = { shape = "block" },
     progress = { height = 10, radius = 0, border = 2, border_color = 0x00, track = 0xFF, fill = 0x00 },
     font = { caption = 12, body = 15, title = 20, hero = 48 },
     space = { xs = 4, sm = 8, md = 12, lg = 16 },

@@ -66,6 +66,7 @@ Confirm:new{
 | `control` | `height` `radius` `border` `icon` | 按钮、chip、输入框共用的几何。`radius` 超过半高就是胶囊，`icon` 是图标逻辑字号 |
 | `button` | `normal` / `primary` / `ghost`，各含 `bg` `ink` `border_color` | 按钮三种变体。没有 `bg` 不填底，没有 `border_color` 不画边 |
 | `selected` | `bg` `ink` `mark` | 选中项（当前 Tab、列表当前项）。`mark > 0` 时在底部画指示条 |
+| `tile` | `shape` | 图标磁贴（快捷面板开关）形状：`bare` 无框、只给开着的项垫 `button.primary` 底（paper）/ `circle` 圆形底座、文字在外（soft）/ `block` 方块，圆角与阴影取 `card`，文字在内（bold） |
 | `progress` | `height` `radius` `border` `border_color` `track` `fill` | 进度条 |
 | `font` | `caption` `body` `title` `hero` | 四种字号角色 |
 | `space` | `xs` `sm` `md` `lg` | 间距，都是 4 的倍数 |

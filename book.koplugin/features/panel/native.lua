@@ -12,6 +12,8 @@ require("l10n").apply()
 local Device = require("device")
 local UIManager = require("ui/uimanager")
 
+local MoonSettings = require("utils.settings")
+local Guard = require("ui.guard")
 local Menu = require("features.panel.menu")
 local NativeSettings = require("features.panel.native_settings")
 
@@ -31,11 +33,7 @@ local READER_TAB_ICON = "appbar.pageview"
 ---@return BookQuickPanelExecuteOpts
 local function menuCallbacks(menu)
     return {
-        close = function()
-            local tab = menu.item_table
-            if tab then tab._book_panel_editing = false end
-            Menu.close(menu)
-        end,
+        close = function() Menu.close(menu) end,
         refresh = function() Menu.refresh(menu) end,
     }
 end
@@ -147,7 +145,6 @@ local function buildPanel(menu, W)
             Menu.refresh(menu)
         end,
         on_disable = function(id)
-            if panel.enabledCount() <= 1 then return end
             panel.setEnabled(id, false)
             Menu.refresh(menu)
         end,
@@ -170,7 +167,6 @@ local function buildPanel(menu, W)
         body_opts.header = W.Header:new{
             width = content_w,
             height = W.Theme.px(52),
-            ui = ui,
             on_exit = function()
                 Menu.close(menu)
                 closeToDesktop(ui)
@@ -241,6 +237,18 @@ local function meshSpan(menu)
     return top, menu.screen_size.h - top
 end
 
+--- 绘制菜单下方的主题网点遮罩。
+---@param menu table
+---@param bb table
+---@param x number
+local function paintMesh(menu, bb, x)
+    local top, h = meshSpan(menu)
+    if h <= 0 then return end
+    local Mask = require("ui.themes.widgets.mask")
+    local Geom = require("ui/geometry")
+    Mask:new{ dimen = Geom:new{ w = menu.screen_size.w, h = h } }:paintTo(bb, x, top)
+end
+
 --- 一次性 patch TouchMenu：触屏设备命中面板 Tab 时改走自绘渲染；
 --- 菜单下方铺主题网点遮罩，点遮罩由原生 TapCloseAllMenus 关菜单。
 local function patchTouchMenu()
@@ -249,27 +257,29 @@ local function patchTouchMenu()
     TouchMenu._book_panel_patched = true
     local original = TouchMenu.updateItems
     TouchMenu.updateItems = function(self, ...)
+        local fresh, old_h = self.is_fresh, self.dimen.h
         if panelMode(self.item_table) and Device:isTouchDevice() then
-            renderPanelContent(self)
+            Guard.call("quick panel render", renderPanelContent, self)
         else
             original(self, ...)
         end
-        -- 原生只刷新菜单自身区域，遮罩区域要单独刷。
-        UIManager:setDirty(nil, function()
-            local top, h = meshSpan(self)
-            if h <= 0 then return end
-            local Geom = require("ui/geometry")
-            return "ui", Geom:new{ x = 0, y = top, w = self.screen_size.w, h = h }
-        end)
+        -- 网点按菜单下沿起算，叠画在下层旧像素上。菜单变高时原生只重画菜单自身，
+        -- 下沿一移，新旧网点相位错开叠成更黑的一片：下层必须重画，顺带全刷清残影。
+        if (fresh or self.dimen.h ~= old_h) and MoonSettings.get("ui").mesh_mask
+            and select(2, meshSpan(self)) > 0 then
+            UIManager:setDirty("all", "full")
+        end
     end
     local original_paint = TouchMenu.paintTo
     TouchMenu.paintTo = function(self, bb, x, y)
         original_paint(self, bb, x, y)
-        local top, h = meshSpan(self)
-        if h <= 0 then return end
-        local Mask = require("ui.themes.widgets.mask")
-        local Geom = require("ui/geometry")
-        Mask:new{ dimen = Geom:new{ w = self.screen_size.w, h = h } }:paintTo(bb, x, top)
+        Guard.paint("quick panel mesh", paintMesh, self, bb, x)
+    end
+    -- 编辑态挂在跨次打开复用的 tab 表上；点遮罩 / 返回键关菜单不经面板回调，只能在这里清。
+    local original_close = TouchMenu.onCloseWidget
+    TouchMenu.onCloseWidget = function(self, ...)
+        for _idx, tab in ipairs(self.tab_item_table) do tab._book_panel_editing = nil end
+        return original_close(self, ...)
     end
 end
 

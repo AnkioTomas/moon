@@ -27,7 +27,7 @@ package.preload["menu"] = function()
 end
 
 local native_update_calls = 0
-local TouchMenu = {}
+local TouchMenu = { dimen = { h = 0 } }
 function TouchMenu:updateItems()
     native_update_calls = native_update_calls + 1
 end
@@ -77,7 +77,7 @@ NativePanel.onCreate()
 NativePanel.onCreate()
 Assert.is_true(TouchMenu._book_panel_patched)
 TouchMenu:updateItems()
-TouchMenu.updateItems({ item_table = { _book_quick_panel = true } })
+TouchMenu.updateItems({ item_table = { _book_quick_panel = true }, dimen = { h = 0 } })
 Assert.eq(native_update_calls, 2)
 
 local existing = { menu = { tab_item_table = {{ icon = "appbar.menu" }} } }

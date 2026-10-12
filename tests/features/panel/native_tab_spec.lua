@@ -23,9 +23,10 @@ package.preload["utils.settings"] = function()
     }
 end
 
-local native_updates = 0
-local TouchMenu = {}
+local native_updates, native_closes = 0, 0
+local TouchMenu = { dimen = { h = 0 } }
 function TouchMenu:updateItems() native_updates = native_updates + 1 end
+function TouchMenu:onCloseWidget() native_closes = native_closes + 1 end
 package.preload["ui/widget/touchmenu"] = function() return TouchMenu end
 
 local executed, action_ui, refreshed = {}, nil, 0
@@ -104,6 +105,14 @@ tab[2].callback({
 Assert.eq(executed[1], "sync")
 Assert.eq(action_ui, ui)
 Assert.eq(refreshed, 1)
+
+-- 编辑态挂在复用的 tab 表上：点遮罩 / 返回键关菜单（不经面板 close 回调）也要清掉，下次打开不能还在编辑。
+tab._book_panel_editing = true
+menu.tab_item_table[2]._book_panel_editing = true
+TouchMenu.onCloseWidget({ tab_item_table = menu.tab_item_table })
+Assert.is_nil(tab._book_panel_editing)
+Assert.is_nil(menu.tab_item_table[2]._book_panel_editing)
+Assert.eq(native_closes, 1, "原生 onCloseWidget 照常执行")
 
 local first_menu_patch = ReaderMenu.setUpdateItemTable
 Native.onCreate(ui, { reader = true })
