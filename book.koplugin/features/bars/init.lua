@@ -19,7 +19,6 @@ local Guard = require("ui.guard")
 local _ = require("gettext")
 local Screen = Device.screen
 
-local HEADER_FONT_SIZE_DEFAULT = 20
 --- 比 CRE 原生页头额外增加的固定高度，不跟文档页边距变化。
 local TOP_BAR_EXTRA_HEIGHT = 12
 --- 顶栏固定水平留白，不跟书籍左右页边距变化。
@@ -294,18 +293,18 @@ local function refreshBars(ui)
     end
 end
 
---- 顶栏文字 face：跟 cre_header_status_font_size，不叠 ui_scale；限制在条带高度内。
+--- 顶栏文字 face：与底栏同字体同字号；超出条带高度时等比缩小。
+---@param footer table ReaderFooter
 ---@param bar_h number
 ---@return table
-local function topTextFace(bar_h)
-    local Font = require("ui/font")
-    local unscaled = G_reader_settings:readSetting(
-        "cre_header_status_font_size", HEADER_FONT_SIZE_DEFAULT)
-    local scaled = Screen:scaleBySize(unscaled)
+local function topTextFace(footer, bar_h)
+    local s = footer.settings
+    local scaled = Screen:scaleBySize(s.text_font_size)
     if bar_h > 2 and scaled > bar_h - 2 then
-        unscaled = math.max(8, math.floor(unscaled * (bar_h - 2) / scaled))
+        local size = math.max(8, math.floor(s.text_font_size * (bar_h - 2) / scaled))
+        return require("ui/font"):getFace(s.text_font_face, size)
     end
-    return Font:getFace("xx_smallinfofont", unscaled)
+    return footer.footer_text_face
 end
 
 --- 包装 ReaderFooter：
@@ -443,7 +442,7 @@ local function paint(self, bb, x, y)
         Items.paint(
             bb, rect.x + margin, rect.y, math.max(1, rect.w - margin * 2), rect.h,
             Layout.get("top"), ctx, {
-                face = topTextFace(header_h),
+                face = topTextFace(ui.view.footer, header_h),
                 fgcolor = Blitbuffer.COLOR_BLACK,
                 cache = cache,
                 prefix = "top:",
