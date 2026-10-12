@@ -37,19 +37,31 @@ Assert.len(titles, 2)
 Assert.eq(titles[1], "第一章 开始")
 Assert.eq(titles[2], "第二章 继续")
 
-local analyze_done = false
+local preview
 local preview_path = os.tmpname() .. ".txt"
 local preview_file = io.open(preview_path, "w")
 preview_file:write("第一章 开始\n正文\n\n第二章 继续\n更多")
 preview_file:close()
-Reflow.analyzeAsync(identity(preview_path), function(titles_out, err)
-    analyze_done = true
+Reflow.analyzeAsync(identity(preview_path), function(out, err)
     Assert.is_nil(err)
-    Assert.len(titles_out, 2)
-    Assert.eq(titles_out[1], "第一章 开始")
+    preview = out
 end)
 Stubs.flush()
-Assert.is_true(analyze_done)
+Assert.eq(preview.text, "第一章 开始\n正文\n\n第二章 继续\n更多", "预览持有全文，确认后原样交给转换")
+Assert.len(preview.titles, 2)
+Assert.eq(preview.titles[1], "第一章 开始")
+
+-- 非 UTF-8 / 空文件在分析阶段就失败。
+for _idx, body in ipairs({ "\255\254bad", "  \n" }) do
+    preview_file = io.open(preview_path, "wb")
+    preview_file:write(body)
+    preview_file:close()
+    local out, err
+    Reflow.analyzeAsync(identity(preview_path), function(p, e) out, err = p, e end)
+    Stubs.flush()
+    Assert.is_nil(out)
+    Assert.not_nil(err)
+end
 os.remove(preview_path)
 
 -- 转换产物交给源按身份替换：读写本地副本，替换用 stable_id；成功交出新路径，失败清掉临时文件。
@@ -68,7 +80,8 @@ do
         cb("/books/A/b.epub")
     end
     local new_path, err
-    Reflow.applyAsync(book, function(p, e) new_path, err = p, e end)
+    Reflow.applyAsync(book, "全文", function(p, e) new_path, err = p, e end)
+    Assert.eq(built.text, "全文")
     Assert.eq(built.source, "/books/A/b.txt")
     Assert.eq(built.dest, "/books/A/b.epub.moon-reflow")
     Assert.eq(replaced.temp, "/books/A/b.epub.moon-reflow")
@@ -80,7 +93,7 @@ do
     local original_remove = os.remove
     os.remove = function(p) removed[#removed + 1] = p end
     book.source.replaceBookAsync = function(_, _, _, cb) cb(nil, "更新书目失败") end
-    Reflow.applyAsync(book, function(p, e) new_path, err = p, e end)
+    Reflow.applyAsync(book, "全文", function(p, e) new_path, err = p, e end)
     os.remove = original_remove
     Text2Epub.build = original_build
     Assert.is_nil(new_path)

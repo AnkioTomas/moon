@@ -152,16 +152,26 @@ do
     Assert.eq(book.author, "自定义作者")
 end
 
--- build 拒绝非 UTF-8，不能悄悄生成损坏 XHTML
+-- read 拒绝缺失、空白和非 UTF-8，不能悄悄生成损坏 XHTML
 do
-    local ok, err
-    Text2Epub.build({
-        dest = "/tmp/invalid.epub",
-        text = "\255",
-    }, function(value, reason)
-        ok, err = value, reason
-    end)
-    Stubs.flush()
-    Assert.is_nil(ok)
+    local path = os.tmpname()
+    local function readBody(body)
+        local file = assert(io.open(path, "wb"))
+        file:write(body)
+        file:close()
+        return Text2Epub.read(path)
+    end
+    local text, err = readBody("第一章\n正文")
+    Assert.eq(text, "第一章\n正文")
+    Assert.is_nil(err)
+    text, err = readBody("\255")
+    Assert.is_nil(text)
     Assert.eq(err, "仅支持 UTF-8 编码的文本")
+    text, err = readBody(" \n ")
+    Assert.is_nil(text)
+    Assert.eq(err, "无文本内容")
+    os.remove(path)
+    text, err = Text2Epub.read(path)
+    Assert.is_nil(text)
+    Assert.eq(err, "无法读取文本文件")
 end

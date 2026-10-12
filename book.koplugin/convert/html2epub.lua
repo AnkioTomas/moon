@@ -1,52 +1,29 @@
 --[[--
-HTML → EPUB（多章节、内嵌图片、元数据）。
+HTML 章节 → EPUB。
 
-设计要点：
-  - 章节内容经 `get_chapter(index, chapter, cb)` 按需回调拉取，避免一次性塞入巨量 HTML。
-  - 网络图片支持统一 `image_headers`，或按 URL 的 `image_headers_for(url)`。
-  - 打包走子进程（workers.job），不堵 UI。
-  - 逐章 / 逐图之间用 nextTick 让出事件循环。
+调用方给齐每章的 HTML body（不含外部资源），这里包成 XHTML、生成
+OPF/NCX，zip 写入放进子进程（workers.job），不堵 UI。
 
   local Html2Epub = require("convert.html2epub")
   local job = Html2Epub.build({
       dest = "/path/book.epub",
       title = "书名",
       author = "作者",
-      chapters = { { title = "第一章" }, { title = "第二章" } },
-      get_chapter = function(i, ch, cb) cb(html_or_nil, err) end,
-      image_headers = { Cookie = "..." },
+      chapters = { { title = "第一章", html = "<p>…</p>" } },
   }, function(ok, err) end)
   job.cancel()
 
 @module koplugin.book.convert.html2epub
 --]]
 
-local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
-local Header = require("http.request.header")
-local Image = require("utils.image")
 local Text = require("utils.text")
 local Perf = require("utils.perf")
 local _ = require("gettext")
 
 local Html2Epub = {}
 
-------------------------------------------------------------------------
--- 小工具
-------------------------------------------------------------------------
-
---- 粗判是否像 HTML；否则包成段落。
----@param s string|nil
----@return string
-local function ensureHtmlBody(s)
-    s = tostring(s or "")
-    if Text.looksLikeHtml(s) then
-        return s
-    end
-    return Text.textToBody(s)
-end
-
---- 从 HTML body 抽出完整文档外壳。
+--- 把章节 HTML body 包成完整 XHTML 文档。
 ---@param title string
 ---@param body string
 ---@return string
@@ -62,7 +39,6 @@ local function wrapXhtml(title, body)
 body{margin:5%%;line-height:1.8;text-align:justify;}
 h1{font-size:1.5em;text-align:center;margin:2em 0 1.5em;page-break-after:avoid;}
 p{text-indent:2em;margin:0.45em 0;orphans:2;widows:2;}
-img{max-width:100%%;}
 </style>
 </head>
 <body>
@@ -70,67 +46,6 @@ img{max-width:100%%;}
 </body>
 </html>
 ]], Text.xmlEscape(title), body)
-end
-
---- data: URI 图片解码；用 LuaSocket 的原生 mime（大图纯 Lua 解码很慢）。
----@param data string
----@return string|nil
-local function b64decode(data)
-    data = data:gsub("[^%w+/=]", "")
-    if data == "" then
-        return nil
-    end
-    local out = require("mime").unb64(data)
-    return out ~= "" and out or nil
-end
-
-local EXT_BY_MIME = {
-    ["image/jpeg"] = ".jpg",
-    ["image/png"] = ".png",
-    ["image/gif"] = ".gif",
-    ["image/webp"] = ".webp",
-    ["image/svg+xml"] = ".svg",
-}
-
---- 收集 HTML 中的 img src（去重、保序）。
----@param html string
----@return string[]
-local function collectImageSrcs(html)
-    local list = {}
-    local seen = {}
-    --- 按首次出现顺序收录一个 src，空值与重复项跳过。
-    ---@param src string
-    local function add(src)
-        src = Text.trim(src)
-        if src == "" or seen[src] then
-            return
-        end
-        seen[src] = true
-        list[#list + 1] = src
-    end
-    for _quote, src in html:gmatch([[<img%s+[^>]-src%s*=%s*(["'])(.-)%1]]) do
-        add(src)
-    end
-    -- 空白类必须写 %s：Lua 模式没有 \s，写成 \s 是「排除反斜杠和字母 s」，
-    -- 于是 <img src=a.png width=10> 会被取成 "a.png width=10"，且带 s 的文件名被截断。
-    for src in html:gmatch([[<img%s+[^>]-src%s*=%s*([^%s"'=<>`]+)]]) do
-        add(src)
-    end
-    return list
-end
-
---- 把 src 映射表应用到 HTML。
----@param html string
----@param map table<string, string>
----@return string
-local function rewriteImageSrcs(html, map)
-    html = html:gsub([[(<img%s+[^>]-src%s*=%s*)(["'])(.-)%2]], function(pre, q, src)
-        return pre .. q .. (map[src] or src) .. q
-    end)
-    html = html:gsub([[(<img%s+[^>]-src%s*=%s*)([^%s"'=<>`]+)]], function(pre, src)
-        return pre .. (map[src] or src)
-    end)
-    return html
 end
 
 ------------------------------------------------------------------------
@@ -143,7 +58,6 @@ end
 ---   language: string|nil,
 ---   identifier: string|nil,
 ---   chapters: { title: string, href: string, xhtml: string, toc?: boolean }[],
----   images: { href: string, mime: string, bytes: string }[],
 --- }
 ---@param dest string
 ---@return boolean|nil, string|nil
@@ -154,7 +68,6 @@ local function writeEpubPackage(opts, dest)
     local language = opts.language or "zh"
     local identifier = opts.identifier or ("moon-html2epub-" .. tostring(os.time()))
     local chapters = opts.chapters
-    local images = opts.images
 
     local tmp = dest .. ".part"
     os.remove(tmp)
@@ -211,13 +124,6 @@ local function writeEpubPackage(opts, dest)
     </navPoint>]], #nav + 1, #nav + 1, Text.xmlEscape(ch.title or id), ch.href)
         end
     end
-    for i, img in ipairs(images) do
-        local id = string.format("img%d", i)
-        manifest[#manifest + 1] = string.format(
-            '    <item id="%s" href="%s" media-type="%s"/>',
-            id, img.href, img.mime
-        )
-    end
 
     local creator = ""
     if author ~= "" then
@@ -264,11 +170,6 @@ local function writeEpubPackage(opts, dest)
             return abort(_("写入章节失败"))
         end
     end
-    for _i, img in ipairs(images) do
-        if not epub:addFileFromMemory("OEBPS/" .. img.href, img.bytes, mtime) then
-            return abort(_("写入图片失败"))
-        end
-    end
 
     epub:close()
     os.remove(dest)
@@ -279,347 +180,78 @@ local function writeEpubPackage(opts, dest)
     return true
 end
 
-------------------------------------------------------------------------
--- 公开 API
-------------------------------------------------------------------------
-
 --- 异步构建 EPUB。
----
---- opts.chapters 只放轻量元数据（至少 title）。正文用 get_chapter 按需取。
---- 若某章自带 chapter.html，则跳过对该章的 get_chapter。
----
 ---@param opts {
 ---   dest: string,
 ---   title: string,
 ---   author: string|nil,
 ---   language: string|nil,
 ---   identifier: string|nil,
----   chapters: { title: string, html: string|nil, toc: boolean|nil }[],
----   get_chapter: (fun(index: number, chapter: table, cb: fun(html: string|nil, err: any)))|nil,
----   image_headers: table|nil,
----   image_headers_for: (fun(url: string): table|nil)|nil,
----   image_timeout: number|nil,
----   on_progress: (fun(ev: table))|nil,
+---   chapters: { title: string, html: string, toc: boolean|nil }[],
 --- }
 ---@param cb fun(ok: boolean|nil, err: any)
 ---@return { cancel: fun() }
 function Html2Epub.build(opts, cb)
-    opts = opts or {}
-    if type(cb) ~= "function" then
-        error("html2epub.build: cb must be function", 2)
-    end
-
     local dest = opts.dest
-    local chapters_meta = opts.chapters
-    if type(dest) ~= "string" or dest == "" then
-        UIManager:nextTick(function() cb(nil, _("无效路径")) end)
-        return { cancel = function() end }
+    local started_at = Perf.now()
+    local chapters = {}
+    for index, chapter in ipairs(opts.chapters) do
+        chapters[index] = {
+            title = chapter.title,
+            toc = chapter.toc,
+            href = string.format("chapter_%03d.xhtml", index),
+            xhtml = wrapXhtml(chapter.title, chapter.html),
+        }
     end
-    if type(chapters_meta) ~= "table" or #chapters_meta == 0 then
-        UIManager:nextTick(function() cb(nil, _("无章节")) end)
-        return { cancel = function() end }
-    end
+    local pack_opts = {
+        title = opts.title,
+        author = opts.author,
+        language = opts.language,
+        identifier = opts.identifier,
+        chapters = chapters,
+    }
 
     local cancelled = false
-    local started_at = Perf.now()
-    local active_job
-    local pack_task
-    local total = #chapters_meta
-    local out_chapters = {}
-    ---@type table<string, { href: string, mime: string, bytes: string }>
-    local image_by_key = {}
-    local image_order = {}
-    local img_seq = 0
-
-    --- 上报进度事件；已取消或调用方没给 on_progress 时静默丢弃。
-    ---@param ev table 形如 { phase = "chapter"|"image"|"pack", index, total, title, url }
-    local function emit(ev)
-        if cancelled or type(opts.on_progress) ~= "function" then
-            return
-        end
-        opts.on_progress(ev)
-    end
-
-    --- 终止构建并以错误回调；置位 cancelled 保证 cb 只触发一次。
+    --- 以错误回调；已取消时静默。
     ---@param err any 失败原因
     local function fail(err)
         if cancelled then
             return
         end
-        cancelled = true
         logger.warn("book.html2epub failed", dest, Perf.elapsedMs(started_at), "ms", err)
         cb(nil, err)
     end
 
-    --- 计算某张图片的下载请求头：按 URL 定制的头覆盖全局 image_headers。
-    ---@param url string 图片地址
-    ---@return table<string, string>
-    local function headersFor(url)
-        local extra = opts.image_headers
-        if type(opts.image_headers_for) == "function" then
-            local per = opts.image_headers_for(url)
-            if type(per) == "table" then
-                extra = Header.merge(per, extra)
-            end
-        end
-        return Header.forDownload(extra)
-    end
-
-    --- 把图片字节登记进 epub 资源表并分配 images/img_NNN.ext 路径。
-    --- 扩展名优先按字节魔数嗅探，嗅不出才用 prefer_ext 或 URL 后缀，都没有则落到 .bin。
-    ---@param key string 去重键（原始 src）
-    ---@param bytes string 图片字节
-    ---@param prefer_ext string|nil 备选扩展名（含点）
-    ---@return string href 章节 XHTML 中应引用的相对路径
-    local function rememberImage(key, bytes, prefer_ext)
-        local existing = image_by_key[key]
-        if existing then
-            return existing.href
-        end
-        local ext, mime = Image.ext(bytes)
-        if not ext then
-            ext = prefer_ext or Image.suffix(key) or ".bin"
-            mime = Image.mime(ext) or "application/octet-stream"
-        end
-        img_seq = img_seq + 1
-        local href = string.format("images/img_%03d%s", img_seq, ext)
-        local item = { href = href, mime = mime, bytes = bytes }
-        image_by_key[key] = item
-        image_order[#image_order + 1] = item
-        return href
-    end
-
-    --- 取回单张图片并登记：data: URI 就地解码，本地路径直接读文件，http(s) 走异步下载。
-    --- 取不到不算致命错误——done(nil) 表示保留原 src 不重写。已取消时不回调。
-    ---@param src string 原始 img src
-    ---@param done fun(href: string|nil) 成功给 epub 内相对路径，失败给 nil
-    local function loadOneImage(src, done)
-        if cancelled then
-            return
-        end
-        if image_by_key[src] then
-            done(image_by_key[src].href)
-            return
-        end
-
-        if src:sub(1, 5) == "data:" then
-            local mime, b64 = src:match("^data:([^;,]+);base64,(.+)$")
-            if not b64 then
-                done(nil)
-                return
-            end
-            local bytes = b64decode(b64)
-            if not bytes then
-                done(nil)
-                return
-            end
-            done(rememberImage(src, bytes, EXT_BY_MIME[mime]))
-            return
-        end
-
-        if src:sub(1, 7) ~= "http://" and src:sub(1, 8) ~= "https://" then
-            local f = io.open(src, "rb")
-            if not f then
-                logger.warn("html2epub local image miss", src)
-                done(nil)
-                return
-            end
-            local bytes = f:read("*a")
-            f:close()
-            if type(bytes) ~= "string" or bytes == "" then
-                done(nil)
-                return
-            end
-            done(rememberImage(src, bytes, Image.suffix(src)))
-            return
-        end
-
-        emit({ phase = "image", url = src, index = #image_order + 1 })
-        local Request = require("http.request")
-        active_job = Request.get(src, {
-            headers = headersFor(src),
-            timeout = opts.image_timeout or 60,
-            accept = "image/*,*/*",
-        }, function(body, err)
-            active_job = nil
+    local pack_task = require("workers.job").run(function()
+        local ok, err = writeEpubPackage(pack_opts, dest)
+        return ok and "ok" or ("err:" .. tostring(err or "pack failed"))
+    end, {
+        name = "epub.pack",
+        kind = "heavy",
+        on_done = function(result)
             if cancelled then
                 return
             end
-            if not body or body == "" then
-                logger.warn("html2epub image fail", src, err)
-                done(nil)
+            if result == "ok" then
+                logger.dbg("book.html2epub done", dest, #chapters, "chapters", Perf.elapsedMs(started_at), "ms")
+                cb(true)
                 return
             end
-            done(rememberImage(src, body, Image.suffix(src)))
-        end)
-    end
-
-    --- 逐张取回章节内图片（串行，每张之间让出一次事件循环），再重写 src 为 epub 内路径。
-    ---@param html string 章节 HTML
-    ---@param done fun(html: string) 重写后的 HTML；取不到的图片保持原 src
-    local function embedImages(html, done)
-        local srcs = collectImageSrcs(html)
-        if #srcs == 0 then
-            done(html)
-            return
-        end
-        local map = {}
-        local i = 0
-        --- 处理下一张图片，全部处理完则交付重写后的 HTML。
-        local function nextImg()
-            if cancelled then
-                return
-            end
-            i = i + 1
-            if i > #srcs then
-                done(rewriteImageSrcs(html, map))
-                return
-            end
-            local src = srcs[i]
-            loadOneImage(src, function(href)
-                if href then
-                    map[src] = href
-                end
-                UIManager:nextTick(nextImg)
-            end)
-        end
-        nextImg()
-    end
-
-    --- 全部章节就绪后打包 epub：zip 写入放进 Job 子进程，避免阻塞 UI。
-    local function packAndFinish()
-        if cancelled then
-            return
-        end
-        emit({ phase = "pack", index = total, total = total })
-        local pack_opts = {
-            title = opts.title or _("未命名"),
-            author = opts.author,
-            language = opts.language,
-            identifier = opts.identifier,
-            chapters = out_chapters,
-            images = image_order,
-        }
-        local Job = require("workers.job")
-        pack_task = Job.run(function()
-            local ok, err = writeEpubPackage(pack_opts, dest)
-            return ok and "ok" or ("err:" .. tostring(err or "pack failed"))
-        end, {
-            name = "epub.pack",
-            kind = "heavy",
-            on_done = function(result)
-                pack_task = nil
-                if cancelled then
-                    return
-                end
-                if result == "ok" then
-                    logger.dbg("book.html2epub done", dest, total, "chapters",
-                        #image_order, "images", Perf.elapsedMs(started_at), "ms")
-                    cb(true)
-                    return
-                end
-                local msg = type(result) == "string" and result:match("^err:(.*)$") or nil
-                fail(msg or result or _("写入 epub 失败"))
-            end,
-            on_failed = function(err)
-                pack_task = nil
-                if not cancelled then
-                    fail(err or _("写入 epub 失败"))
-                end
-            end,
-        })
-    end
-
-    --- 处理第 index 章（取正文 → 内嵌图片 → 生成 XHTML），越界则转入打包。
-    ---@param index number 章节序号，从 1 起
-    local function processChapter(index)
-        if cancelled then
-            return
-        end
-        if index > total then
-            packAndFinish()
-            return
-        end
-
-        local meta = chapters_meta[index]
-        local title = meta.title or string.format(_("第 %d 章"), index)
-        emit({ phase = "chapter", index = index, total = total, title = title })
-
-        --- 收到本章正文后补全 html 骨架、内嵌图片并追加到章节表；无正文视为致命错误。
-        ---@param html string|nil 章节 HTML
-        ---@param err any 取正文失败的原因
-        local function onHtml(html, err)
-            if cancelled then
-                return
-            end
-            if not html then
-                fail(err or string.format(_("章节 %d 无内容"), index))
-                return
-            end
-            html = ensureHtmlBody(html)
-            embedImages(html, function(body)
-                if cancelled then
-                    return
-                end
-                local href = string.format("chapter_%03d.xhtml", index)
-                out_chapters[#out_chapters + 1] = {
-                    title = title,
-                    toc = meta.toc,
-                    href = href,
-                    xhtml = wrapXhtml(title, body),
-                }
-                UIManager:nextTick(function()
-                    processChapter(index + 1)
-                end)
-            end)
-        end
-
-        if type(meta.html) == "string" then
-            UIManager:nextTick(function()
-                onHtml(meta.html)
-            end)
-            return
-        end
-
-        if type(opts.get_chapter) ~= "function" then
-            fail(_("缺少 get_chapter"))
-            return
-        end
-
-        local settled = false
-        opts.get_chapter(index, meta, function(html, err)
-            if settled or cancelled then
-                return
-            end
-            settled = true
-            -- 调用方可能同步回调：下一拍再继续，避免栈爆 / 卡死
-            UIManager:nextTick(function()
-                onHtml(html, err)
-            end)
-        end)
-    end
-
-    UIManager:nextTick(function()
-        processChapter(1)
-    end)
+            local msg = type(result) == "string" and result:match("^err:(.*)$") or nil
+            fail(msg or result or _("写入 epub 失败"))
+        end,
+        on_failed = function(err)
+            fail(err or _("写入 epub 失败"))
+        end,
+    })
 
     return { cancel = function()
             if cancelled then
                 return
             end
             cancelled = true
-            if active_job then
-                active_job.cancel()
-            end
-            if pack_task then
-                pack_task:cancel()
-            end
+            pack_task:cancel()
         end }
 end
-
--- 测试可见的纯函数
-Html2Epub._collectImageSrcs = collectImageSrcs
-Html2Epub._rewriteImageSrcs = rewriteImageSrcs
-Html2Epub._ensureHtmlBody = ensureHtmlBody
 
 return Html2Epub

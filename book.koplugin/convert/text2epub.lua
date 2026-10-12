@@ -4,9 +4,11 @@
 负责从文本中提取书名、作者和章节，再复用 html2epub 完成目录与打包。
 
   local Text2Epub = require("convert.text2epub")
+  local text = assert(Text2Epub.read("/path/book.txt"))
   local job = Text2Epub.build({
       dest = "/path/book.epub",
-      source = "/path/book.txt",
+      text = text,
+      source = "/path/book.txt", -- 可省略，用于推断书名 / 作者
       title = "书名", -- 可省略
       author = "作者", -- 可省略
   }, function(ok, err) end)
@@ -372,22 +374,30 @@ function Text2Epub.parse(text, opts)
     }
 end
 
+--- 读取 UTF-8 文本文件；空文件或非 UTF-8 视为失败。
 ---@param source string
----@return string|nil, string|nil
-local function readText(source)
-    local file, err = io.open(source, "rb")
+---@return string|nil text, string|nil err
+function Text2Epub.read(source)
+    local file = io.open(source, "rb")
     if not file then
-        return nil, err
+        return nil, _("无法读取文本文件")
     end
     local text = file:read("*a")
     file:close()
+    if type(text) ~= "string" or trim(text) == "" then
+        return nil, _("无文本内容")
+    end
+    if not Text.isValidUtf8(text) then
+        return nil, _("仅支持 UTF-8 编码的文本")
+    end
     return text
 end
 
----异步构建 EPUB。opts.text 与 opts.source 至少提供一个。
+--- 异步构建 EPUB。opts.text 是全文（经 `Text2Epub.read` 或其它提取得到），
+--- opts.source 只用于从文件名推断书名 / 作者。
 ---@param opts {
 ---   dest: string,
----   text: string|nil,
+---   text: string,
 ---   source: string|nil,
 ---   title: string|nil,
 ---   author: string|nil,
@@ -395,39 +405,11 @@ end
 ---   identifier: string|nil,
 ---   reflow: boolean|nil,
 ---   max_part_chars: number|nil,
----   on_progress: (fun(ev: table))|nil,
 --- }
 ---@param cb fun(ok: boolean|nil, err: any)
 ---@return { cancel: fun() }
 function Text2Epub.build(opts, cb)
-    opts = opts or {}
-    if type(cb) ~= "function" then
-        error("text2epub.build: cb must be function", 2)
-    end
-
-    --- 输入不可用：下一拍回调错误，返回空取消句柄。
-    ---@param err any
-    local function reject(err)
-        UIManager:nextTick(function() cb(nil, err) end)
-        return { cancel = function() end }
-    end
-
-    local text = opts.text
-    if type(text) ~= "string" and type(opts.source) == "string" then
-        local err
-        text, err = readText(opts.source)
-        if not text then
-            return reject(err or _("无法读取文本文件"))
-        end
-    end
-    if type(text) ~= "string" or trim(text) == "" then
-        return reject(_("无文本内容"))
-    end
-    if not Text.isValidUtf8(text) then
-        return reject(_("仅支持 UTF-8 编码的文本"))
-    end
-
-    local book = Text2Epub.parse(text, opts)
+    local book = Text2Epub.parse(opts.text, opts)
     return Html2Epub.build({
         dest = opts.dest,
         title = book.title,
@@ -435,7 +417,6 @@ function Text2Epub.build(opts, cb)
         language = opts.language,
         identifier = opts.identifier,
         chapters = book.chapters,
-        on_progress = opts.on_progress,
     }, cb)
 end
 
