@@ -5,10 +5,10 @@
 @module koplugin.book.desktop.pages.home.history
 --]]
 
-local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local LeftContainer = require("ui/widget/container/leftcontainer")
 local Myrl = require("online.myrl")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -107,7 +107,8 @@ function M:createWidget()
     local w, h = self.opts.width, self.opts.height
     local col
     col, self.marks, self.items = self:column(w)
-    return CenterContainer:new{ dimen = Geom:new{ w = w, h = h }, col }
+    -- 行宽随文字：居中会让整列漂离页边，和其它组件的左边缘对不齐。
+    return LeftContainer:new{ dimen = Geom:new{ w = w, h = h }, col }
 end
 
 --- 把当前数据写入已有行；所有行都未变时不刷新。

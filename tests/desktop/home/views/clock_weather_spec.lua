@@ -27,6 +27,7 @@ package.preload["online.weather"] = function()
         ensure = function() weather_fetches = weather_fetches + 1 end,
         unwatch = function() end,
         iconUrl = function(key) return key end,
+        upcoming = function() return {} end,
     }
 end
 

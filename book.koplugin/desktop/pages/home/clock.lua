@@ -14,7 +14,8 @@ local Theme = require("ui.themes")
 local Text = require("ui.themes.widgets.text")
 local _ = require("gettext")
 
-local DOW = { _("日"), _("一"), _("二"), _("三"), _("四"), _("五"), _("六") }
+-- 整词翻译：英文星期名拼不出「星期」+ 单字的结构。
+local DOW = { "星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六" }
 
 ---@class BookHomeClock : BookHomeComponent
 ---@field time_widget table|nil
@@ -46,8 +47,7 @@ end
 --- 组合当前日期与本地化星期文案。
 ---@return string
 local function dateLine()
-    return os.date("%Y-%m-%d") .. " " .. _("星期")
-        .. DOW[(tonumber(os.date("%w")) or 0) + 1]
+    return os.date("%Y-%m-%d") .. " " .. _(DOW[(tonumber(os.date("%w")) or 0) + 1])
 end
 
 --- 组合农历与节日名称；两项均缺失时显示占位符。
@@ -78,17 +78,20 @@ end
 ---@param hero table 主行控件
 ---@param detail string 第一行辅文
 ---@param extra string 第二行辅文
+---@param foot table|nil 辅文下方的附加行（天气预报）
 ---@return table
-function M.stack(view, hero, detail, extra)
+function M.stack(view, hero, detail, extra, foot)
     local t = Theme.current()
     local w, h = view.opts.width, view.opts.height
     view.detail = Text.line("caption", detail, { width = w, color = t.color.muted })
     view.extra = Text.line("caption", extra, { width = w, color = t.color.faint })
     local gap = VerticalSpan:new{ width = Theme.px(t.space.xs) }
-    return CenterContainer:new{
-        dimen = Geom:new{ w = w, h = h },
-        VerticalGroup:new{ align = "center", hero, gap, view.detail, gap, view.extra },
-    }
+    local col = VerticalGroup:new{ align = "center", hero, gap, view.detail, gap, view.extra }
+    if foot then
+        col[#col + 1] = VerticalSpan:new{ width = Theme.px(t.space.sm) }
+        col[#col + 1] = foot
+    end
+    return CenterContainer:new{ dimen = Geom:new{ w = w, h = h }, col }
 end
 
 --- 按指定宽高构建时间、日期和农历节日三行内容。

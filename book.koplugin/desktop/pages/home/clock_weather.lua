@@ -31,7 +31,7 @@ M.__index = M
 M.ORDER_WEATHER = ORDER_WEATHER
 M.ORDER_CLOCK = ORDER_CLOCK
 
---- 与时钟同高：左右两栏并排，高度由较高内容决定。
+--- 与时钟同高：左右两栏并排，天气栏是不带预报的小卡片。
 ---@return BookHomeHeightSpec
 function M:heightRange()
     return { height = Clock.contentHeight() }
