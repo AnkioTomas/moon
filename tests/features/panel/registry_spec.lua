@@ -11,10 +11,10 @@ package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(s) return s end end
 
 local DESKTOP = {
-    "night", "wifi", "rotate", "refresh", "screenshot", "frontlight", "autolight", "suspend",
+    "night", "wifi", "rotate", "refresh", "screenshot", "frontlight", "suspend",
 }
 local READER = {
-    "toc", "font", "highlights", "bookorbit", "xray", "xray_refresh",
+    "toc", "font", "highlights", "bookorbit",
 }
 for _, id in ipairs(DESKTOP) do
     package.preload["features.panel.actions.desktop." .. id] = function()
@@ -35,8 +35,9 @@ Assert.eq(desktop[#desktop], "remote")
 Assert.eq(table.concat(desktop, ",", 1, #DESKTOP), table.concat(DESKTOP, ","))
 Assert.eq(Registry.get("remote").scope, "desktop")
 Assert.eq(Registry.get("remote").icon, "dns")
--- page_turn（animation）/ reflow 由 feature 追加在内置项之后，按目录名顺序。
-Assert.eq(table.concat(reader, ","), table.concat(READER, ",") .. ",page_turn,reflow")
+-- feature 自己的开关经 features/<name>/panel.lua 追加在内置项之后，按目录名顺序。
+Assert.eq(table.concat(desktop, ",", #DESKTOP + 1), "autolight,remote")
+Assert.eq(table.concat(reader, ","), table.concat(READER, ",") .. ",page_turn,reflow,xray,xray_refresh")
 Assert.eq(Registry.get("page_turn").scope, "reader")
 Assert.is_nil(Registry.get("missing"))
 
@@ -46,7 +47,7 @@ package.loaded["features.remote.panel"] = nil
 package.preload["features.remote.panel"] = function()
     return {
         actions = function()
-            return { { id = "night", title = "冲突", icon = "x", scope = "desktop" } }
+            return { { id = "night", title = "冲突", icon = "x", scope = "desktop", event = "X" } }
         end,
     }
 end
@@ -72,9 +73,12 @@ Assert.errors(function() withPanel({ { id = "x", title = "x", scope = "reader" }
 Assert.errors(function() withPanel({ { title = "x", icon = "tune", scope = "reader" } }).desktopOrder() end, "needs id")
 Assert.errors(function()
     withPanel({
-        { id = "same", title = "甲", icon = "tune", scope = "desktop" },
-        { id = "same", title = "乙", icon = "tune", scope = "reader" },
+        { id = "same", title = "甲", icon = "tune", scope = "desktop", event = "X" },
+        { id = "same", title = "乙", icon = "tune", scope = "reader", event = "X" },
     }).desktopOrder()
 end, "already registered")
-local ok = withPanel({ { id = "extra", title = "额外", icon = "tune", scope = "reader" } })
+Assert.errors(function()
+    withPanel({ { id = "x", title = "x", icon = "tune", scope = "reader" } }).readerOrder()
+end, "run or event")
+local ok = withPanel({ { id = "extra", title = "额外", icon = "tune", scope = "reader", run = function() end } })
 Assert.eq(ok.readerOrder()[#READER + 1], "extra")

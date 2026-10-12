@@ -30,6 +30,9 @@ return {
     },
     -- 选中项（Tab、列表当前项）；mark > 0 时在底部画同色指示条。
     selected = { bg = 0xFF, ink = 0x00, mark = 2 },
+    -- 图标磁贴（快捷面板开关）：bare 无框、只给开着的项垫 primary 底 / circle 圆形底座、文字在外 /
+    -- block 方块（card 的圆角、阴影）、文字在内。
+    tile = { shape = "bare" },
     progress = { height = 4, radius = 0, border = 0, border_color = 0x00, track = 0xDD, fill = 0x00 },
     font = { caption = 11, body = 14, title = 17, hero = 40 },
     space = { xs = 4, sm = 8, md = 12, lg = 16 },

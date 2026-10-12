@@ -28,22 +28,12 @@ local ReaderPanel = {}
 ---@field enabled boolean
 ---@field keep_open boolean
 
---- 设置页无 ReaderUI，用 nil ui 判断动作是否可配置。
----@param action BookQuickPanelAction
----@return boolean
-local function settingsAvailable(action)
-    return Registry.available(action, { ui = nil })
-end
-
-local list = ActionList.create("reader", "quick_panel_reader_actions", Registry.readerOrder, {
-    can_enable = settingsAvailable,
-    settings_available = settingsAvailable,
-})
+local list = ActionList.create("reader", "quick_panel_reader_actions", Registry.readerOrder)
 
 --- 生成阅读页快捷面板设置项。
 ---@return BookQuickPanelOption[]
 function ReaderPanel.options()
-    return list.options(Registry.readerOrder)
+    return list.options()
 end
 
 --- 当前启用的阅读页动作数量。
@@ -64,7 +54,7 @@ function ReaderPanel.actions(ui)
     for _idx, id in ipairs(list.ids()) do
         local action = Registry.get(id)
         if action and Registry.available(action, ctx) then
-            local active = Registry.active(id, action, ctx)
+            local active = Registry.active(action, ctx)
             result[#result + 1] = {
                 id = id,
                 title = action.title,
@@ -78,21 +68,17 @@ function ReaderPanel.actions(ui)
     return result
 end
 
---- 执行阅读页动作，按动作配置决定是否关闭或刷新面板。
+--- 执行阅读页动作；未注册或当前不可用返回 false。
 ---@param id string
 ---@param ui table|nil
----@param opts { close: fun()|nil, refresh: fun()|nil }|nil
+---@param opts BookQuickPanelExecuteOpts|nil
 ---@return boolean
 function ReaderPanel.executeAction(id, ui, opts)
     local action = Registry.get(id)
     local ctx = { ui = ui }
-    if not action or not Registry.available(action, ctx) then
-        return false
-    end
-    opts = opts or {}
-    if not action.keep_open and opts.close then opts.close() end
-    action.run(ctx)
-    if action.keep_open and opts.refresh then opts.refresh() end
+    if not Registry.available(action, ctx) then return false end
+    ---@cast action BookQuickPanelAction
+    Registry.execute(action, ctx, opts)
     return true
 end
 

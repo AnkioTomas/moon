@@ -24,7 +24,6 @@ local _ = require("gettext")
 ---@class BookQuickPanelHeader : WidgetContainer
 ---@field width number 头部宽度，单位像素
 ---@field height number 头部高度，单位像素
----@field ui table|nil 当前 ReaderUI，用于取书名/章节
 ---@field on_exit fun()|nil 点击退出阅读
 
 local Header = InputContainer:extend{
@@ -32,11 +31,10 @@ local Header = InputContainer:extend{
 }
 
 --- 从当前阅读会话提取书名和章节/作者副标题。
----@param ui table|nil KOReader 阅读界面实例
 ---@return string, string|nil
-local function bookTexts(ui)
-    local current = Session.current() or {}
-    local identity = current.identity
+local function bookTexts()
+    local current = Session.current()
+    local identity = current and current.identity
     local toc = Session.toc()
     local title = (identity and identity.book and identity.book.title) or _("阅读")
     local subtitle = ""
@@ -56,7 +54,7 @@ end
 --- 构建标题文本和退出按钮布局。
 ---@param self BookQuickPanelHeader 当前视图或布局实例
 function Header:init()
-    local title, subtitle = bookTexts(self.ui)
+    local title, subtitle = bookTexts()
     local t = Theme.current()
     local exit_w = Theme.px(t.control.height)
     local gap = Theme.px(t.space.sm)

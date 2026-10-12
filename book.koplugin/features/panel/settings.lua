@@ -24,19 +24,15 @@ local QuickPanel = {}
 ---@class BookQuickPanelSettingRowFactory
 ---@field __call fun(self: BookQuickPanelSettingRowFactory, width: number): table
 
---- 按动作作用域选择配置后端。
----@param option BookQuickPanelOption
----@return BookQuickPanelDesktop|BookQuickPanelReader
-local function panelFor(option)
-    if option.scope == "reader" then return ReaderPanel end
-    return DesktopPanel
-end
+--- 动作作用域 → 配置后端。
+---@type table<string, BookQuickPanelDesktop|BookQuickPanelReader>
+local PANELS = { desktop = DesktopPanel, reader = ReaderPanel }
 
 --- 弹出单个快捷动作设置对话框，处理启用、上下移动和关闭。
 ---@param desktop table
 ---@param option BookQuickPanelOption
 local function configure(desktop, option)
-    local panel = panelFor(option)
+    local panel = PANELS[option.scope]
     --- 执行配置变更后刷新设置页。
     ---@param change fun()
     ---@return fun()
@@ -136,7 +132,7 @@ function QuickPanel.preview(scope, width)
     local HorizontalGroup = require("ui/widget/horizontalgroup")
     local HorizontalSpan = require("ui/widget/horizontalspan")
     local LeftContainer = require("ui/widget/container/leftcontainer")
-    local options = scope == "reader" and ReaderPanel.options() or DesktopPanel.options()
+    local options = PANELS[scope].options()
     local t = Theme.current()
     local bar_h = Theme.px(t.row.height)
     local pad = Theme.px(10)

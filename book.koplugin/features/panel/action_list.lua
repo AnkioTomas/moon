@@ -9,25 +9,20 @@ local Registry = require("features.panel.actions.registry")
 ---@field ids fun(): string[]
 ---@field setEnabled fun(id: string, enabled: boolean)
 ---@field move fun(id: string, delta: number)
----@field options fun(order_fn: fun(): string[]): BookQuickPanelOption[]
+---@field options fun(): BookQuickPanelOption[]
+
+--- 设置页没有 ReaderUI：可用性一律按 ctx.ui = nil 判断。
+local SETTINGS_CTX = {}
 
 ---@param scope "desktop"|"reader"
 ---@param settings_key string
----@param default_ids string[]|fun(): string[]
----@param opts { can_enable: (fun(action: BookQuickPanelAction): boolean)|nil, settings_available: (fun(action: BookQuickPanelAction): boolean)|nil }|nil
+---@param order_fn fun(): string[] 设置页展示顺序；配置缺失时即启用列表
 ---@return BookQuickPanelActionList
-local function create(scope, settings_key, default_ids, opts)
-    opts = opts or {}
-
+local function create(scope, settings_key, order_fn)
     ---@return string[]
     local function ids()
         local raw = MoonSettings.get("features.panel")[settings_key]
-        if type(raw) ~= "table" then
-            raw = type(default_ids) == "function" and default_ids() or default_ids
-        end
-        if type(raw) ~= "table" then
-            return {}
-        end
+        if type(raw) ~= "table" then raw = order_fn() end
         local seen, result = {}, {}
         for _idx, id in ipairs(raw) do
             local action = Registry.get(id)
@@ -51,7 +46,7 @@ local function create(scope, settings_key, default_ids, opts)
     local function setEnabled(id, enabled)
         local action = Registry.get(id)
         if not action or action.scope ~= scope then return end
-        if enabled and opts.can_enable and not opts.can_enable(action) then return end
+        if enabled and not Registry.available(action, SETTINGS_CTX) then return end
         local current, found = ids(), nil
         for i, current_id in ipairs(current) do
             if current_id == id then
@@ -83,9 +78,8 @@ local function create(scope, settings_key, default_ids, opts)
         end
     end
 
-    ---@param order_fn fun(): string[]
     ---@return BookQuickPanelOption[]
-    local function options(order_fn)
+    local function options()
         local enabled = {}
         for position, action_id in ipairs(ids()) do
             enabled[action_id] = position
@@ -94,9 +88,6 @@ local function create(scope, settings_key, default_ids, opts)
         for _idx, action_id in ipairs(order_fn()) do
             local action = Registry.get(action_id)
             if action then
-                local available = opts.settings_available
-                    and opts.settings_available(action)
-                    or Registry.available(action)
                 result[#result + 1] = {
                     id = action_id,
                     scope = scope,
@@ -104,7 +95,7 @@ local function create(scope, settings_key, default_ids, opts)
                     icon = action.icon,
                     enabled = enabled[action_id] ~= nil,
                     position = enabled[action_id],
-                    available = available,
+                    available = Registry.available(action, SETTINGS_CTX),
                 }
             end
         end

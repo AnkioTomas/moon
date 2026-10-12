@@ -263,6 +263,7 @@ return {
     ["尚未安装字典"] = "No dictionaries installed",
     ["居中"] = "Center",
     ["示例书名"] = "Sample title",
+    ["示例开关"] = "Sample toggle",
     ["左"] = "Left",
     ["左上"] = "Top left",
     ["左下"] = "Bottom left",
