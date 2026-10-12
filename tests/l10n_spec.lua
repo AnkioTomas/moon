@@ -86,7 +86,7 @@ end
 -- 但源码里的文案根本没进目录，切语言后原样显示简体。
 do
     --- 源文件是文本，捕获到的是字面转义序列（`\n` 是反斜杠加 n）；
-    --- 目录经 dofile 后是真字符，不还原就会把 `_("桌面打开失败:\n")` 误报成缺键。
+    --- 目录经 dofile 后是真字符，不还原就会把含 `\n` 的 msgid 误报成缺键。
     ---@param s string
     ---@return string
     local function unescape(s)

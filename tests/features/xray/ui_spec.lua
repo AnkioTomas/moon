@@ -8,9 +8,16 @@ package.preload["ffi/util"] = function()
     return { template = function(value) return value end }
 end
 package.preload["ui.themes.widgets.list"] = function() return {} end
-package.preload["ui.themes.widgets.text_viewer"] = function() return {} end
+local viewer
+package.preload["ui.themes.widgets.text_viewer"] = function()
+    return { new = function(_self, o)
+        viewer = o
+        o.show = function() o.shown = true end
+        return o
+    end }
+end
 package.preload["utils.text"] = function() return {} end
-package.preload["features.xray.kinds"] = function() return {} end
+package.preload["features.xray.kinds"] = function() return { label = function() return "人物" end } end
 package.preload["features.xray.db"] = function() return {} end
 package.preload["ui.themes.widgets.toast"] = function()
     return { new = function(_, opts)
@@ -46,5 +53,11 @@ require("features.xray.ui").refresh(ui)
 Assert.eq(captured.ui, ui)
 Assert.eq(captured.identity, identity)
 Assert.is_true(captured.opts.force)
+
+-- 实体详情：居中弹窗卡片，不全屏。
+require("features.xray.ui").showEntity({ kind = "character", name = "李善德", role = "主角" })
+Assert.is_true(viewer.shown)
+Assert.eq(viewer.title, "李善德")
+Assert.is_false(viewer.fullscreen)
 
 return true

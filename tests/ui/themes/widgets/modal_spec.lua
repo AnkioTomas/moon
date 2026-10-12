@@ -255,6 +255,10 @@ do
     Assert.eq(reported[1], "modal onTapModal")
     Assert.eq(#Kit.closed, closed_before)
 
+    -- UIManager.__default__ 原样转发的原始输入（模拟器电源键）不是 Event：不消费、不报错
+    Assert.is_nil(GuardedToast:new{ text = "raw" }:handleEvent("PowerRelease"))
+    Assert.len(reported, 1)
+
     -- 绘制抛错：报告一次并关窗；关窗前的重绘不再画、不再报
     local bad_paint = GuardedToast:new{ text = "x" }
     bad_paint[1] = { paintTo = function() error("paint boom") end }

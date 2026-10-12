@@ -553,6 +553,44 @@ Assert.eq(Themed.last("toast").text, "网络错误")
 Assert.eq(#Tasks.tasks(), 0)
 page:close()
 
+-- 库内书缺简介：在线时向属主源要一次详情（源负责落库），只并简介 / 作者；有简介、离线都不请求。
+local asked, owner_cb, owner_cancelled = 0, nil, false
+local net_online = true
+package.loaded["ui/network/manager"] = { isConnected = function() return net_online end }
+resolved = { id = "ext.kavita", getDetailAsync = function(_self, identity, cb)
+    asked = asked + 1
+    Assert.eq(identity.stable_id, "k1")
+    Assert.eq(identity.source, resolved)
+    owner_cb = cb
+    return { cancel = function() owner_cancelled = true end }
+end }
+db_row = { title = "K" }
+local kbook = { source_id = "ext.kavita", stable_id = "k1", title = "K", percent = 30 }
+Detail.open(desktop, "library", kbook)
+page = desktop.detail
+Assert.eq(asked, 1)
+db_row = { title = "K", intro = "补到的简介", authors = "甲" }
+Kit.dirty = {}
+owner_cb({})
+Assert.eq(page.book.intro, "补到的简介")
+Assert.eq(page.book.authors, "甲")
+Assert.eq(page.book.percent, 30, "列表专有字段不丢")
+Assert.is_true(dirtied(page))
+page:close()
+Assert.is_false(owner_cancelled)
+Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+desktop.detail:close()
+Assert.eq(asked, 1, "已有简介不请求")
+db_row, net_online = { title = "K" }, false
+Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+desktop.detail:close()
+Assert.eq(asked, 1, "离线不请求")
+net_online = true
+Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+desktop.detail:close()
+Assert.is_true(owner_cancelled, "关窗取消在飞请求")
+db_row = nil
+
 -- 桌面已关：关详情不再碰桌面。
 desktop.closed = true
 Detail.open(desktop, "library", { source_id = "local", stable_id = "b1", title = "书一" })

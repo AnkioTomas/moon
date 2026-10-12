@@ -100,6 +100,16 @@ Assert.len(rows, 1)
 Assert.eq(rows[1].stable_id, "b")
 Assert.is_true(rows[1].downloaded)
 
+-- 下载校验范围：纯本地书（path 即 stable_id）归扫盘，不校验；WebDAV 书的 path 是下载副本，要校验。
+Assert.is_true(BookDB.touchPath("local", "/lib/a.epub", "/lib/a.epub"))
+Assert.is_true(BookDB.touchPath("local", "webdav://b.epub", "/old/b.epub"))
+local checked = {}
+for _idx, row in ipairs(BookDB.pathsBySource("local")) do checked[row.stable_id] = row.path end
+Assert.is_nil(checked["/lib/a.epub"], "纯本地书不校验")
+Assert.eq(checked["webdav://b.epub"], "/old/b.epub", "WebDAV 下载副本要校验")
+Assert.is_true(BookDB.clearPaths({ { source_id = "local", stable_id = "webdav://b.epub", path = "/old/b.epub" } }))
+Assert.is_false(BookDB.isDownloaded("local", "webdav://b.epub", false), "副本没了撤掉已下载标记")
+
 Base.close()
 for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end
 

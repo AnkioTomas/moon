@@ -4,11 +4,12 @@
 
 local Assert = require("support.assert")
 local Progress = require("book.progress")
-local SourceCapabilities = require("source.base").SourceCapabilities
+local SourceBase = require("source.base")
+local SourceCapabilities = SourceBase.SourceCapabilities
 local Catalog = require("book.catalog")
 
 do
-    local c = SourceCapabilities.defaults()
+    local c = SourceBase:capabilities()
     Assert.is_false(c.store)
     Assert.is_nil(c.insight)
     Assert.is_false(c.stats_pull)

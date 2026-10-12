@@ -186,10 +186,13 @@ Assert.len(Marks._marks, 1)
 Assert.eq(Marks._marks[1].box.x, 20)
 Assert.eq(Marks._marks[1].box.w, 80)
 
--- 排版框与真机触点存在偏差：文字上下保留容错，远离实体仍须透传。
-Assert.is_false(Marks:onTap({ pos = { x = 25, y = -11 } }))
+-- 交给标记层的图层数据：一个实体一条，点按弹详情。
+local layer_marks = Marks:marks()
+Assert.len(layer_marks, 1)
+Assert.eq(layer_marks[1].boxes[1].x, 20)
+Assert.is_false(layer_marks[1].solid)
 Assert.is_nil(opened)
-Assert.is_true(Marks:onTap({ pos = { x = 25, y = 5 } }))
+layer_marks[1].tap()
 Assert.eq(opened, "Whitby")
 
 page = 4
@@ -211,14 +214,16 @@ Marks = require("features.xray.marks")
 Assert.is_true(Marks.enabled())
 Marks.setEnabled(false)
 Assert.is_false(Marks.enabled())
+Assert.len(Marks:marks(), 0, "关掉后不交标记")
 Marks.setEnabled(true)
 Assert.is_true(Marks.enabled())
 
--- 实体 tap 未命中时透传，但注册顺序必须先于原生全屏翻页区。
+-- 挂到阅读页公共标记层：唯一 view module + 全屏点按区，未命中透传。
 local registered_module
 local registered_touch_zones
 local ui = {
     view = {
+        dimen = { w = 100, h = 50 },
         registerViewModule = function(_, name, module)
             registered_module = { name = name, module = module }
         end,
@@ -228,8 +233,8 @@ local ui = {
     end,
 }
 Marks.install(ui)
-Assert.eq(registered_module.name, "book_xray_marks")
-Assert.eq(registered_module.module, Marks)
-Assert.eq(registered_touch_zones[1].id, "book_xray_entity_tap")
-Assert.contains(registered_touch_zones[1].overrides, "tap_forward")
-Assert.contains(registered_touch_zones[1].overrides, "tap_backward")
+Assert.eq(registered_module.name, "book_page_marks")
+Assert.eq(registered_module.module, ui._book_page_marks)
+Assert.eq(ui._book_page_marks.layers[1].layer, Marks)
+Assert.eq(registered_touch_zones[1].id, "book_page_marks_tap")
+Assert.is_false(registered_touch_zones[1].handler({ pos = { x = 9999, y = 9999 } }))

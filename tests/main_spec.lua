@@ -1,5 +1,5 @@
 --[[--
-插件入口：宿主接线（启动项 / 菜单 / 手势）、源生命周期、阅读会话转发、脏同步重试、桌面生命周期。
+插件入口：宿主接线（启动项 / 菜单 / 手势）、启用源推脏行、阅读会话转发、桌面生命周期。
 
 @module tests.main_spec
 --]]
@@ -45,22 +45,26 @@ stub("l10n", {})
 stub("gettext", setmetatable({}, { __call = function(_, text) return text end }))
 local current_source
 local source_hooks = {}
---- 当前源桩：补齐四个生命周期钩子并记录调用。
+--- 源桩：记录 pushDirty 调用。
 ---@param fields table
 ---@return table
 local function mkSource(fields)
-    for _, hook in ipairs({ "onCreate", "onSuspend", "onResume", "onNetworkConnected", "onExit" }) do
-        fields[hook] = function(_, host) source_hooks[#source_hooks + 1] = hook .. ":" .. host.path end
-    end
+    fields.pushDirty = function(self) source_hooks[#source_hooks + 1] = "pushDirty:" .. self.id end
+    fields.configured = function(self) return self.unconfigured ~= true end
     return fields
 end
+--- 有脏行的源 id；没登记的源不该被建实例。
+local dirty = { moon = true, ["local"] = true, wechat = true, jdread = true }
+local connected = true
+stub("source.base", { hasDirty = function(id) return dirty[id] == true end })
+stub("ui/network/manager", { isConnected = function() return connected end })
 --- 除当前源外的其他启用源（混合模式）；值为 false 表示已启用但加载失败。
 local other_sources = {}
 stub("source.registry", {
     current = function() return current_source end,
     listEnabled = function()
         local out = current_source and { { id = current_source.id } } or {}
-        for _, id in ipairs(other_sources) do out[#out + 1] = { id = id } end
+        for _idx, id in ipairs(other_sources) do out[#out + 1] = { id = id } end
         return out
     end,
     resolve = function(id)
@@ -182,7 +186,7 @@ Assert.eq(#start_item.sub_item_table, 1)
 Assert.eq(start_item.sub_item_table[1].text, "月读")
 start_item.sub_item_table[1].callback()
 Assert.eq(start_item.text_func(), "Start with: 月读", "选中月读后标题不为 nil")
-Assert.eq(table.concat(source_hooks, ","), "onCreate:book.koplugin", "init 转发当前源 onCreate")
+Assert.eq(table.concat(source_hooks, ","), "pushDirty:moon", "启动有网就推遗留脏行")
 Assert.eq(calls.attach, 1)
 Assert.eq(table.concat(dispatcher_actions, ","), "book_open_shelf", "feature 的手势由各自 onCreate 登记")
 Assert.is_nil(calls.boot, "init 不直接挂功能，全部进 features")
@@ -226,14 +230,14 @@ do
     plugin.ui = { menu = menu } -- FM
     local before = #source_hooks
     plugin:onNetworkConnected()
-    Assert.eq(source_hooks[#source_hooks], "onNetworkConnected:book.koplugin")
-    Assert.eq(#source_hooks - before, 1, "启用源自己收联网")
+    Assert.eq(source_hooks[#source_hooks], "pushDirty:moon")
+    Assert.eq(#source_hooks - before, 1, "联网推脏行")
     Assert.eq(calls.lock_refresh, 0, "锁屏刷新由 feature onNetworkConnected 负责")
     Assert.eq(online_hooks[#online_hooks], "onNetworkConnected:book.koplugin", "离线没刷的 online 联网补拉")
     Assert.eq(feature_hooks[#feature_hooks], "onNetworkConnected:book.koplugin")
     Assert.eq(calls.update_check, 0, "自动更新检查只在 Desktop:activate")
     -- 桌面在窗口栈上，自己收 UIManager 的 NetworkConnected 广播；插件再转就重复了。
-    -- 联网是源生命周期，不走 onEvent。
+    -- 推脏行不走 onEvent。
     Assert.eq(table.concat(seen, ","), "")
 end
 
@@ -280,11 +284,12 @@ plugin.desktop = resumed_desktop
 
 calls.session = nil
 calls.lock_refresh = 0
+local hooks_before_suspend = #source_hooks
 plugin:onSuspend()
 Assert.is_true(calls.session.suspend)
 Assert.is_nil(calls.desktop_pause, "休眠不经插件转，桌面自收 Suspend 广播")
 Assert.eq(feature_hooks[#feature_hooks], "onSuspend:book.koplugin", "休眠经 features 通知夜间模式")
-Assert.eq(source_hooks[#source_hooks], "onSuspend:book.koplugin", "休眠转发当前源 onSuspend")
+Assert.eq(#source_hooks, hooks_before_suspend, "休眠不碰源（关书推送归阅读会话）")
 Assert.eq(calls.lock_refresh, 0)
 
 calls.session = nil
@@ -292,27 +297,38 @@ plugin:onResume()
 Assert.is_true(calls.session.resume)
 Assert.eq(online_hooks[#online_hooks], "onNetworkConnected:book.koplugin", "唤醒不刷 online")
 Assert.eq(feature_hooks[#feature_hooks], "onResume:book.koplugin", "唤醒经 features 通知夜间模式")
-Assert.eq(source_hooks[#source_hooks], "onResume:book.koplugin", "唤醒转发当前源 onResume")
+Assert.eq(source_hooks[#source_hooks], "pushDirty:local", "唤醒有网就推脏行（Wi-Fi 常开时不会再有联网事件）")
 
--- 混合模式：生命周期转给所有启用源，不只当前源；加载失败的源跳过
+-- 混合模式：所有有脏行的已配置启用源都推；没脏行的不建实例，加载失败、未登录的跳过；离线谁都不推
 do
-    local seen = {}
-    other_sources = { "wechat", "jdread", wechat = mkSource({ id = "wechat" }), jdread = false }
-    other_sources.wechat.onSuspend = function(_, host) seen[#seen + 1] = "wechat:" .. host.path end
+    local resolved_ids = {}
+    dirty.moon_off = true
+    other_sources = { "wechat", "jdread", "moon_off", "copymanga", wechat = mkSource({ id = "wechat" }), jdread = false,
+        moon_off = mkSource({ id = "moon_off", unconfigured = true }), copymanga = mkSource({ id = "copymanga" }) }
+    local registry = require("source.registry")
+    local resolve = registry.resolve
+    registry.resolve = function(id) resolved_ids[#resolved_ids + 1] = id; return resolve(id) end
     local before = #source_hooks
-    plugin:onSuspend()
-    Assert.eq(#source_hooks - before, 1, "当前源收到 onSuspend")
-    Assert.eq(table.concat(seen, ","), "wechat:book.koplugin", "非当前的启用源也收到 onSuspend")
+    plugin:onResume()
+    Assert.eq(table.concat(source_hooks, ",", before + 1), "pushDirty:local,pushDirty:wechat")
+    Assert.eq(table.concat(resolved_ids, ","), "local,wechat,jdread,moon_off", "没脏行的 copymanga 不建实例")
+    connected = false
+    before = #source_hooks
+    plugin:onResume()
+    Assert.eq(#source_hooks, before, "离线不推，等联网")
+    connected = true
+    registry.resolve = resolve
     other_sources = {}
     feature_hooks[#feature_hooks] = nil
 end
 
+local hooks_before_exit = #source_hooks
 plugin:onExit()
-Assert.eq(source_hooks[#source_hooks], "onExit:book.koplugin", "退出转发当前源 onExit")
+Assert.eq(#source_hooks, hooks_before_exit, "退出不碰源")
 Assert.is_nil(calls.desktop_destroy, "退出不经插件转，桌面自收 Exit 广播")
 resumed_desktop:onExit()
 Assert.eq(table.concat(feature_hooks, ","),
-    "onNetworkConnected:book.koplugin,onResume:book.koplugin,onSuspend:book.koplugin,onResume:book.koplugin,onExit:book.koplugin")
+    "onNetworkConnected:book.koplugin,onResume:book.koplugin,onSuspend:book.koplugin,onResume:book.koplugin,onResume:book.koplugin,onExit:book.koplugin")
 Assert.eq(table.concat(online_hooks, ","),
     "onNetworkConnected:book.koplugin")
 
@@ -358,8 +374,7 @@ Assert.eq(reader_settings.start_with, "filemanager", "取消即回到文件管�
 for _, label in ipairs({
     "init", "onShow", "addToMainMenu", "openShelf",
     "tasks.onSuspend", "session.onSuspend", "tasks.onResume", "session.onResume",
-    "tasks.onNetworkConnected", "source moon.onNetworkConnected",
-    "source moon.onCreate", "source wechat.onSuspend",
+    "tasks.onNetworkConnected", "sources.pushDirty",
     "online.onNetworkConnected",
 }) do
     Assert.is_true(guard_labels[label] or false, label .. " 经 guard")

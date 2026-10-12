@@ -1,6 +1,6 @@
 --[[--
 后台任务队列：同类并行、异类互斥、队首异类不被同类插队、同 key 排队替换 / 执行中拒绝、取消、同步完成、迟到回调、
-重试上限（退避占执行权）、休眠暂停 / 唤醒续跑、断网失败等网络。
+重试上限（退避占执行权）、休眠暂停 / 唤醒续跑、断网失败等网络、未结束任务上限。
 
 @module tests.tasks_spec
 --]]
@@ -280,6 +280,21 @@ do
     Assert.eq(history[1].key, "h12")
     Assert.eq(history[10].key, "h3")
     Assert.eq(#Tasks.tasks(), 0)
+end
+
+-- 未结束任务满 64 个后拒绝入队，带 queue_full（同类并行时在跑的也算）。
+do
+    local accepted, reason = 0, nil
+    for i = 1, 80 do
+        local job, why = Tasks.enqueue(spec("fill-" .. i, "cache"))
+        if not job then
+            reason = why
+            break
+        end
+        accepted = accepted + 1
+    end
+    Assert.eq(accepted, 64)
+    Assert.eq(reason, "queue_full")
 end
 
 return true
