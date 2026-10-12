@@ -5,6 +5,9 @@
 几何跟系统状态栏同步；开启跟随系统，替代开关决定要不要盖住原栏。
 底栏短按透传给原生翻页区，长按只用于阻止 ReaderFooter 切换模式。
 
+刷新：翻页由 ReaderView 整页重画带上；时钟每分钟、设备状态事件经 refreshBars
+只刷栏区域；原生底栏的「只重画底栏」快路径被改成整页重画，免得盖住月读底栏。
+
 @module koplugin.book.features.bars.init
 --]]
 
@@ -23,11 +26,8 @@ local TOP_BAR_EXTRA_HEIGHT = 12
 local TOP_BAR_HORIZONTAL_PADDING = 12
 --- 底栏文字向屏幕内侧偏移，避免视觉上贴住边缘。
 local BOTTOM_CONTENT_INSET = 4
---- 顶栏额外高度（已按屏幕缩放）。
----@return number
-local function topBarExtraHeight()
-    return Screen:scaleBySize(TOP_BAR_EXTRA_HEIGHT)
-end
+--- 不随翻页变化、要靠时钟或设备事件重画的组件。
+local LIVE_ITEMS = { clock = true, battery = true, wifi = true, brightness = true, remaining = true }
 
 ---@class BookReaderBars
 ---@field view table|nil
@@ -47,7 +47,7 @@ local Bars = {
 
 local function clearPaintWidgets()
     for slot, widget in pairs(Bars._paint_widgets) do
-        if widget and widget.free then
+        if widget.free then
             widget:free()
         end
         Bars._paint_widgets[slot] = nil
@@ -68,7 +68,6 @@ end
 ---@param remaining_seconds number|nil
 ---@return string
 function Bars.remainingText(remaining_seconds)
-    remaining_seconds = tonumber(remaining_seconds)
     if not remaining_seconds or remaining_seconds < 60 then
         return ""
     end
@@ -80,65 +79,58 @@ function Bars.remainingText(remaining_seconds)
     return string.format(_("约 %d 分钟"), minutes)
 end
 
+--- 写偏好；值没变不落盘（原生入口回写时每次事件都会调到这里）。
+---@param key string
+---@param on boolean
+local function savePreference(key, on)
+    local MoonSettings = require("utils.settings")
+    local settings = MoonSettings.get("features.bars")
+    if settings[key] == on then
+        return
+    end
+    settings[key] = on
+    MoonSettings.save("features.bars", settings)
+end
+
 --- 设置系统顶栏开/关（同步 configurable + crengine，与 Aa 菜单一致）。
----@param ui table|nil
+---@param ui table ReaderUI
 ---@param enabled boolean
 function Bars.setSystemTop(ui, enabled)
-    ui = ui or Bars.ui
-    if not ui or not ui.rolling or not ui.document or not ui.handleEvent then
+    if not ui.rolling or not ui.document then
         return
     end
     local config = ui.document.configurable
-    if not config then
-        return
-    end
     local next_val = enabled and 0 or 1
-    if tonumber(config.status_line) == next_val then
+    if config.status_line == next_val then
         return
     end
     local Event = require("ui/event")
     ui:handleEvent(Event:new("ConfigChange", "status_line", next_val))
     ui:handleEvent(Event:new("SetStatusLine", next_val))
-    if ui.doc_settings and config.saveSettings then
-        config:saveSettings(ui.doc_settings, "copt_")
-        ui.doc_settings:flush()
-    end
+    config:saveSettings(ui.doc_settings, "copt_")
+    ui.doc_settings:flush()
 end
 
 --- 设置系统底栏开/关（走原生 ReaderFooter 的模式切换）。
 --- 目标状态与当前一致时直接返回，避免把 footer 切到别的模式。
----@param ui table|nil ReaderUI 实例，缺省用当前会话的
+---@param ui table ReaderUI
 ---@param enabled boolean 是否显示系统底栏
 function Bars.setSystemBottom(ui, enabled)
-    ui = ui or Bars.ui
-    if not ui or Bars.bottomVisible(ui) == enabled then
+    if Bars.bottomVisible(ui) == enabled then
         return
     end
-    local footer = ui.view and ui.view.footer
-    if not footer or not footer.applyFooterMode then
-        return
-    end
+    local footer = ui.view.footer
     local mode
     if enabled then
-        mode = footer._book_bars_mode
-            or (footer.mode_list and footer.mode_list.page_progress)
+        mode = footer._book_bars_mode or footer.mode_list.page_progress
     else
         footer._book_bars_mode = footer.mode
-        mode = footer.mode_list and footer.mode_list.off
-    end
-    if mode == nil then
-        return
+        mode = footer.mode_list.off
     end
     footer:applyFooterMode(mode)
-    if G_reader_settings then
-        G_reader_settings:saveSetting("reader_footer_mode", mode)
-    end
-    if footer.onUpdateFooter then
-        footer:onUpdateFooter(true)
-    end
-    if footer.rescheduleFooterAutoRefreshIfNeeded then
-        footer:rescheduleFooterAutoRefreshIfNeeded()
-    end
+    G_reader_settings:saveSetting("reader_footer_mode", mode)
+    footer:onUpdateFooter(true)
+    footer:rescheduleFooterAutoRefreshIfNeeded()
 end
 
 --- 顶栏偏好（默认开）。
@@ -155,29 +147,21 @@ end
 
 --- 写入顶栏偏好，并在阅读中时立即应用。
 ---@param enabled boolean
----@param ui table|nil
+---@param ui table|nil 正在阅读的 ReaderUI；不在阅读时为 nil，下次开书应用
 function Bars.setTopBarPreference(enabled, ui)
-    local MoonSettings = require("utils.settings")
-    local settings = MoonSettings.get("features.bars")
-    settings.book_reader_top_bar = enabled ~= false
-    MoonSettings.save("features.bars", settings)
-    ui = ui or Bars.ui
+    savePreference("book_reader_top_bar", enabled)
     if ui then
-        Bars.setSystemTop(ui, settings.book_reader_top_bar)
+        Bars.setSystemTop(ui, enabled)
     end
 end
 
 --- 写入底栏偏好，并在阅读中时立即应用。
 ---@param enabled boolean
----@param ui table|nil
+---@param ui table|nil 正在阅读的 ReaderUI；不在阅读时为 nil，下次开书应用
 function Bars.setBottomBarPreference(enabled, ui)
-    local MoonSettings = require("utils.settings")
-    local settings = MoonSettings.get("features.bars")
-    settings.book_reader_bottom_bar = enabled ~= false
-    MoonSettings.save("features.bars", settings)
-    ui = ui or Bars.ui
+    savePreference("book_reader_bottom_bar", enabled)
     if ui then
-        Bars.setSystemBottom(ui, settings.book_reader_bottom_bar)
+        Bars.setSystemBottom(ui, enabled)
     end
 end
 
@@ -193,173 +177,221 @@ function Bars.injectStatusLine(doc_settings, document)
 end
 
 --- 按 Book 设置同步系统顶底栏。
----@param ui table|nil
+---@param ui table ReaderUI
 function Bars.applyPreferences(ui)
-    ui = ui or Bars.ui
-    if not ui then
-        return
-    end
     Bars.setSystemTop(ui, Bars.topBarPreference())
     Bars.setSystemBottom(ui, Bars.bottomBarPreference())
 end
 
 --- 顶栏 overlay 是否应绘制（系统 Alt Status Bar 开）。
----@param ui table|nil
+--- 关书时 closeDocument 先清 document，ReaderUI 还在，这段时间不画。
+---@param ui table ReaderUI
 ---@return boolean
 function Bars.topVisible(ui)
-    ui = ui or Bars.ui
-    if not ui or not ui.document or not ui.rolling then
-        return false
-    end
-    if ui.view and ui.view.view_mode ~= "page" then
+    if not ui.document or not ui.rolling or ui.view.view_mode ~= "page" then
         return false
     end
     return ui.document:getHeaderHeight() > 0
 end
 
 --- 底栏 overlay 是否应绘制（系统 ReaderFooter 开）。
----@param ui table|nil
----@return boolean|nil
+---@param ui table ReaderUI
+---@return boolean
 function Bars.bottomVisible(ui)
-    ui = ui or Bars.ui
-    local view = ui and ui.view
-    return view and view.footer_visible
+    return ui.view.footer_visible
 end
 
---- 底栏 overlay 在 ReaderView paintTo 坐标下的 y / 高度（对齐 BottomContainer 内容区）。
---- 背景向下补到物理屏底。
----@param view table ReaderView
----@param footer table ReaderFooter
----@param paint_y number
----@return number|nil band_y
----@return number|nil band_h
-local function bottomBandGeometry(view, footer, paint_y)
+--- 该栏此刻是否由月读画（系统栏开着且开了替代）。
+---@param ui table ReaderUI
+---@param which string "top"|"bottom"
+---@return boolean
+local function drawn(ui, which)
+    local visible
+    if which == "top" then
+        visible = Bars.topVisible(ui)
+    else
+        visible = Bars.bottomVisible(ui)
+    end
+    return visible and Layout.replace(which)
+end
+
+--- 顶栏在 ReaderView paintTo 坐标下的矩形。
+---@param ui table ReaderUI
+---@param x number
+---@param y number
+---@return number header_h
+---@return table rect
+local function topRect(ui, x, y)
+    local header_h = ui.document:getHeaderHeight()
+    -- ReaderView.state.offset 属于文档可视区，不是状态栏几何，不能混进来。
+    return header_h, Geom:new{
+        x = x,
+        y = y,
+        w = ui.view.dimen.w,
+        h = header_h + Screen:scaleBySize(TOP_BAR_EXTRA_HEIGHT),
+    }
+end
+
+--- 底栏在 ReaderView paintTo 坐标下的矩形（对齐 BottomContainer 内容区，背景补到物理屏底，
+--- 再向上让出 BOTTOM_CONTENT_INSET，不让文字或进度条漏到正文上）。
+---@param ui table ReaderUI
+---@param x number
+---@param y number
+---@return table|nil
+local function bottomRect(ui, x, y)
+    local view, footer = ui.view, ui.view.footer
     local pos = footer.footer_positioner
     local screen_h = Screen:getHeight()
-    local view_h = view.dimen and view.dimen.h or screen_h
+    local view_h = view.dimen.h
     local band_y, band_h
     if pos and pos.contentRange then
         band_h = pos:contentRange().h
-        band_y = paint_y + (pos.dimen and pos.dimen.y or 0) + (pos.dimen and pos.dimen.h or view_h) - band_h
+        band_y = y + (pos.dimen and pos.dimen.y or 0) + (pos.dimen and pos.dimen.h or view_h) - band_h
     else
         band_h = footer:getHeight()
-        if not band_h or band_h <= 0 then
-            return nil, nil
+        if band_h <= 0 then
+            return nil
         end
-        band_y = paint_y + view_h - band_h
+        band_y = y + view_h - band_h
     end
-    return band_y, math.max(band_h, paint_y + screen_h - band_y)
+    local inset = Screen:scaleBySize(BOTTOM_CONTENT_INSET)
+    return Geom:new{
+        x = x,
+        y = band_y - inset,
+        w = view.dimen.w,
+        h = math.max(band_h, y + screen_h - band_y) + inset,
+    }
 end
 
---- 顶栏固定水平内边距（左、右）。
----@return number, number
-local function topMargins()
-    local margin = Screen:scaleBySize(TOP_BAR_HORIZONTAL_PADDING)
-    return margin, margin
+--- 该栏布局里有没有随时间 / 设备状态变化的组件。
+---@param which string
+---@return boolean
+local function hasLiveItems(which)
+    for _idx, slot in ipairs(Layout.get(which)) do
+        if LIVE_ITEMS[slot.id] then
+            return true
+        end
+    end
+    return false
 end
 
---- 底栏水平内边距（左、右），跟 ReaderFooter 一致。
----@param footer table ReaderFooter
----@return number, number
-local function bottomMargins(footer)
-    local margin = footer.horizontal_margin or 0
-    local inner = Screen:scaleBySize(footer.settings and footer.settings.progress_margin_width or 0)
-    return margin + inner, margin + inner
+--- 只刷新月读正在画、且含动态组件的栏区域；ReaderView 整页重画时会重新取数。
+---@param ui table ReaderUI
+local function refreshBars(ui)
+    if not require("reader.session").current() then
+        return
+    end
+    local UIManager = require("ui/uimanager")
+    if drawn(ui, "top") and hasLiveItems("top") then
+        local _header_h, rect = topRect(ui, 0, 0)
+        UIManager:setDirty(ui.dialog, "ui", rect)
+    end
+    if drawn(ui, "bottom") and hasLiveItems("bottom") then
+        local rect = bottomRect(ui, 0, 0)
+        if rect then
+            UIManager:setDirty(ui.dialog, "ui", rect)
+        end
+    end
 end
 
 --- 顶栏文字 face：跟 cre_header_status_font_size，不叠 ui_scale；限制在条带高度内。
----@param ui table|nil
----@param bar_h number|nil
+---@param bar_h number
 ---@return table
-local function topTextFace(ui, bar_h)
+local function topTextFace(bar_h)
     local Font = require("ui/font")
     local unscaled = G_reader_settings:readSetting(
         "cre_header_status_font_size", HEADER_FONT_SIZE_DEFAULT)
     local scaled = Screen:scaleBySize(unscaled)
-    bar_h = tonumber(bar_h) or 0
     if bar_h > 2 and scaled > bar_h - 2 then
         unscaled = math.max(8, math.floor(unscaled * (bar_h - 2) / scaled))
     end
     return Font:getFace("xx_smallinfofont", unscaled)
 end
 
---- 包装 ReaderFooter：底栏可见时禁止切换模式；短按继续交给原生翻页区，
---- 兼容把蓝牙按钮转换为屏幕点击的翻页器。
+--- 包装 ReaderFooter：
+--- - 底栏由月读画时禁止切换模式；短按继续交给原生翻页区，兼容把蓝牙按钮转换为屏幕点击的翻页器。
+--- - 强制重画时原生走 widgetRepaint(footer) 只画底栏、不经 ReaderView，会把原栏盖回月读底栏上；
+---   改走 full_repaint 分支（整页重画、只刷底栏区域）。
+--- - 用户点底栏 / 手势切模式时回写偏好，否则下次开书又被偏好覆盖回去。不包 applyFooterMode：
+---   翻页模式进出也调它，临时切换不是用户意图。
+--- ReaderFooter:onReaderReady 会把 updateFooterText 指回原方法，所以包 onUpdateFooter（唯一调用口）。
 ---@param ui table
 local function hijackFooter(ui)
-    local footer = ui.view and ui.view.footer
-    if not footer or footer._book_bars_hijacked then
+    local footer = ui.view.footer
+    if footer._book_bars_hijacked then
         return
     end
     local orig_tap = footer.TapFooter
     footer.TapFooter = function(self, ges)
-        if Bars.bottomVisible(self.ui) and Layout.replace("bottom") then
+        if drawn(self.ui, "bottom") then
             return false
         end
         return orig_tap(self, ges)
     end
     local orig_hold = footer.onHoldFooter
     footer.onHoldFooter = function(self, ges)
-        if Bars.bottomVisible(self.ui) and Layout.replace("bottom") then
+        if drawn(self.ui, "bottom") then
             return true
         end
         return orig_hold(self, ges)
     end
+    local orig_update = footer.onUpdateFooter
+    footer.onUpdateFooter = function(self, force_repaint, full_repaint)
+        if force_repaint and drawn(self.ui, "bottom") then
+            full_repaint = true
+        end
+        return orig_update(self, force_repaint, full_repaint)
+    end
+    local orig_toggle = footer.onToggleFooterMode
+    footer.onToggleFooterMode = function(self)
+        local handled = orig_toggle(self)
+        savePreference("book_reader_bottom_bar", self.view.footer_visible)
+        return handled
+    end
     footer._book_bars_hijacked = true
 end
 
---- 安装底栏模式保护。
+--- 安装底栏模式保护；偏好等 ReaderReady 收尾后再应用，此时 ReaderRolling 才会响应重排。
 ---@param ui table
 function Bars.install(ui)
-    if not ui or ui._book_bars_installed or not Device:isTouchDevice() then
+    if ui._book_bars_installed or not Device:isTouchDevice() then
         return
     end
     ui._book_bars_installed = true
     hijackFooter(ui)
-    -- Reader.onCreate 在 ReaderReady 内执行，postInitCallback 此时已为 nil。
-    if ui.registerPostReaderReadyCallback then
-        ui:registerPostReaderReadyCallback(function()
-            hijackFooter(ui)
-            Bars.applyPreferences(ui)
-        end)
-    end
-    Bars.applyPreferences(ui)
+    ui:registerPostReaderReadyCallback(function()
+        Bars.applyPreferences(ui)
+    end)
 end
 
---- 每分钟顶条时钟；ReaderUI 销毁后自动停摆。
+--- 停时钟、释放文字控件；关书时调。
+function Bars:stopClock()
+    if self._clock then
+        require("ui/uimanager"):unschedule(self._clock)
+        self._clock = nil
+    end
+    clearPaintWidgets()
+end
+
+--- 每分钟刷一次含动态组件的栏；关书由 CloseDocument 停摆。
 function Bars:startClock()
     local UIManager = require("ui/uimanager")
+    self:stopClock()
     -- Bars 是单例，registerViewModule 每次开书都把 self.ui 覆写成新的 ReaderUI：
-    -- 闭包里必须捕获本次的 ui，否则 instance ~= self.ui 永远为假，旧链条不停摆，
-    -- 每开一本书就多一条每分钟刷屏的定时器。
+    -- 闭包里必须捕获本次的 ui，CloseDocument 没送达时旧链条也能自己停摆。
     local ui = self.ui
-    if self._paint_ui and self._paint_ui ~= ui then
-        clearPaintWidgets()
-    end
-    self._paint_ui = ui
-    if self._clock then
-        UIManager:unschedule(self._clock)
-    end
-    --- 刷一次顶条并把自己排到下一个整分；换书或退出阅读后不再续排。
     local function tick()
         if require("apps/reader/readerui").instance ~= ui then
             return
         end
-        if Bars.topVisible(ui) and Layout.replace("top") and require("reader.session").current() then
-            UIManager:setDirty(ui.dialog, "ui", Geom:new{
-                x = 0,
-                y = 0,
-                w = ui.view.dimen.w,
-                h = ui.document:getHeaderHeight() + topBarExtraHeight(),
-            })
-        end
+        refreshBars(ui)
         UIManager:scheduleIn(61 - tonumber(os.date("%S")), tick)
     end
     self._clock = tick
     UIManager:scheduleIn(61 - tonumber(os.date("%S")), tick)
 end
 
---- 当前阅读会话给栏组件用的上下文。
+--- 当前阅读会话给栏组件用的上下文；章节标题、序号、目录长度同一时刻现算，不混用翻页快照。
 ---@return table|nil
 local function liveContext()
     local Session = require("reader.session")
@@ -367,18 +399,20 @@ local function liveContext()
     if not cur then
         return nil
     end
-    local identity = cur.identity or {}
-    local book = identity.book or {}
+    local book = cur.identity.book
     local toc = Session.toc()
+    local chapter_page, chapter_pages = Session.chapterPages(cur)
     return {
         chapter = Session.chapterTitle(cur) or "",
-        title = book.title or "",
+        title = book and book.title or "",
         clock = Bars.timeText(),
         percent = cur.percent,
-        chapter_idx = tonumber(cur.reading_chapter_idx) or tonumber(identity.chapter_idx),
+        chapter_idx = Session.chapterIndex(cur) or cur.identity.chapter_idx,
         chapter_count = toc and #toc or nil,
         page = cur.page,
         total_pages = cur.total_pages,
+        chapter_page = chapter_page,
+        chapter_pages = chapter_pages,
         remaining = Bars.remainingText(Session.remainingSeconds()),
     }
 end
@@ -388,54 +422,55 @@ end
 ---@param x number ReaderView 原点
 ---@param y number
 local function paint(self, bb, x, y)
+    local ui = self.ui
+    local top, bottom = drawn(ui, "top"), drawn(ui, "bottom")
+    if not top and not bottom then
+        return
+    end
     local ctx = liveContext()
     if not ctx then
         return
     end
-    local ui = self.ui
-    local dimen = self.view and self.view.dimen or Screen:getSize()
-    local w = dimen.w
     local Items = require("features.bars.items")
     local bg = Blitbuffer.COLOR_WHITE
     local cache = { widgets = Bars._paint_widgets, keys = Bars._paint_widget_keys }
+    local icons = Layout.icons()
 
-    if Bars.topVisible(ui) and Layout.replace("top") then
-        -- ReaderView.state.offset 属于文档可视区，不是状态栏几何，不能混进来。
-        local header_h = ui.document:getHeaderHeight()
-        local bar_h = header_h + topBarExtraHeight()
-        bb:paintRect(x, y, w, bar_h, bg)
-        local margin_l, margin_r = topMargins()
+    if top then
+        local header_h, rect = topRect(ui, x, y)
+        bb:paintRect(rect.x, rect.y, rect.w, rect.h, bg)
+        local margin = Screen:scaleBySize(TOP_BAR_HORIZONTAL_PADDING)
         Items.paint(
-            bb, x + margin_l, y, math.max(1, w - margin_l - margin_r), bar_h,
+            bb, rect.x + margin, rect.y, math.max(1, rect.w - margin * 2), rect.h,
             Layout.get("top"), ctx, {
-                face = topTextFace(ui, header_h),
+                face = topTextFace(header_h),
                 fgcolor = Blitbuffer.COLOR_BLACK,
                 cache = cache,
                 prefix = "top:",
+                icons = icons,
             }
         )
     end
 
-    if Bars.bottomVisible(ui) and Layout.replace("bottom") then
+    local rect = bottom and bottomRect(ui, x, y)
+    if rect then
         local footer = ui.view.footer
-        local bottom_y, bar_h = bottomBandGeometry(self.view, footer, y)
-        if bottom_y and bar_h then
-            local bottom_inset = Screen:scaleBySize(BOTTOM_CONTENT_INSET)
-            -- 内容上移时同时向内扩背景，不能让文字或进度条漏到正文上。
-            bottom_y = bottom_y - bottom_inset
-            bb:paintRect(x, bottom_y, w, bar_h + bottom_inset, bg)
-            local margin_l, margin_r = bottomMargins(footer)
-            Items.paint(
-                bb, x + margin_l, bottom_y, math.max(1, w - margin_l - margin_r), bar_h,
-                Layout.get("bottom"), ctx, {
-                    face = footer.footer_text_face,
-                    fgcolor = footer.footer_text.fgcolor,
-                    cache = cache,
-                    bar_h = footer.progress_bar and footer.progress_bar.height,
-                    prefix = "bottom:",
-                }
-            )
-        end
+        bb:paintRect(rect.x, rect.y, rect.w, rect.h, bg)
+        -- 跟 ReaderFooter 一致的水平内边距。
+        local margin = footer.horizontal_margin
+            + Screen:scaleBySize(footer.settings.progress_margin_width)
+        Items.paint(
+            bb, rect.x + margin, rect.y, math.max(1, rect.w - margin * 2),
+            rect.h - Screen:scaleBySize(BOTTOM_CONTENT_INSET),
+            Layout.get("bottom"), ctx, {
+                face = footer.footer_text_face,
+                fgcolor = footer.footer_text.fgcolor,
+                cache = cache,
+                bar_h = footer.progress_bar.height,
+                prefix = "bottom:",
+                icons = icons,
+            }
+        )
     end
 end
 
@@ -447,11 +482,35 @@ function Bars:paintTo(bb, x, y)
     Guard.paint("bars.paintTo", paint, self, bb, x, y)
 end
 
+--- 设备状态变了：重画含动态组件的栏。只在阅读器侧有意义；返回 nil 不吞事件。
+---@param plugin BookPlugin
+local function onDeviceStateChanged(plugin)
+    if plugin.ui.document then
+        refreshBars(plugin.ui)
+    end
+end
+
+--- KOReader 事件。亮度调节由 DeviceListener 发 UpdateFooter，前光开关才发 FrontlightStateChanged。
+Bars.events = {
+    UpdateFooter = onDeviceStateChanged,
+    FrontlightStateChanged = onDeviceStateChanged,
+    Charging = onDeviceStateChanged,
+    NotCharging = onDeviceStateChanged,
+    NetworkConnected = onDeviceStateChanged,
+    NetworkDisconnected = onDeviceStateChanged,
+    --- 用户经原生入口（Aa 菜单）开关顶栏时回写偏好；0 = 显示。
+    SetStatusLine = function(_plugin, status_line)
+        savePreference("book_reader_top_bar", status_line == 0)
+    end,
+    CloseDocument = function(_plugin)
+        Bars:stopClock()
+    end,
+}
+
 --- 阅读页创建、首绘之前安装。install 用点号调用：冒号会把模块自己绑成 ui。
 ---@param plugin BookPlugin
 function Bars.onReaderReady(plugin)
-    local ui = plugin and plugin.ui
-    if not ui or not ui.view or not ui.view.registerViewModule then return end
+    local ui = plugin.ui
     ui.view:registerViewModule("book_bars", Bars)
     Bars.install(ui)
     Bars:startClock()

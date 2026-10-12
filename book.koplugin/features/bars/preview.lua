@@ -33,6 +33,7 @@ function Preview.build(width, which)
             face = Text.face("caption"),
             fgcolor = Blitbuffer.Color8(t.color.ink),
             bar_h = Theme.px(t.progress.height),
+            icons = Layout.icons(),
         })
     end
     return Overlay.previewBox(width, inner, bar_h)

@@ -41,8 +41,11 @@ package.preload["features.bars.items"] = function()
         end,
     }
 end
+local icons_on = true
 package.preload["features.bars.layout"] = function()
     return {
+        icons = function() return icons_on end,
+        setIcons = function(on) icons_on = on end,
         replace = function() return true end,
         setReplace = function() end,
         get = function() return { { id = "chapter", align = "left" } } end,
@@ -69,6 +72,11 @@ Assert.eq(page.sections[1].title, "显示")
 Assert.eq(page.sections[1].rows[1](600).title, "替代系统顶栏")
 Assert.eq(page.sections[1].rows[2](600).title, "开启顶栏")
 Assert.is_true(page.sections[1].rows[2](600).status_on)
+Assert.eq(page.sections[1].rows[3](600).title, "组件图标")
+Assert.is_true(page.sections[1].rows[3](600).status_on)
+page.sections[1].rows[3](600).callback()
+Assert.is_false(icons_on, "点一下关掉图标")
+Assert.is_false(page.sections[1].rows[3](600).status_on)
 Assert.eq(page.sections[2].title, "组件")
 Assert.eq(page.sections[2].rows[1](600).title, "章节")
 Assert.eq(page.sections[2].rows[1](600).status, "左 · 第 1 位")

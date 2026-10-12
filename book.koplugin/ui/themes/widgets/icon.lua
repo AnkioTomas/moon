@@ -53,17 +53,25 @@ local function ensureFont()
     _ensured = true
 end
 
+--- 图标字面。size 同 Font:getFace（未缩放的逻辑字号）；要和某段文字同高就传它 face 的 orig_size。
+--- 调用方自建 TextWidget（text = 图标名，use_xtext = true）时用，便于缓存控件。
+---@param size number
+---@return table
+function Icon.face(size)
+    ensureFont()
+    return Font:getFace(FACE, size)
+end
+
 ---@param opts { name: string, size: number, color: table|nil, box: boolean|nil, dim: boolean|nil }
 ---@return table|nil
 function Icon.widget(opts)
     opts = opts or {}
     if type(opts.name) ~= "string" or opts.name == "" then return nil end
-    ensureFont()
     local color = opts.color or Blitbuffer.COLOR_BLACK
     if opts.dim then color = Blitbuffer.COLOR_GRAY end
     local glyph = TextWidget:new{
         text = opts.name,
-        face = Font:getFace(FACE, Theme.fontSize(opts.size)),
+        face = Icon.face(Theme.fontSize(opts.size)),
         fgcolor = color,
         use_xtext = true,
     }

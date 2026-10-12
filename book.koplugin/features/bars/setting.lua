@@ -14,6 +14,7 @@ Setting.defaults = {
     book_reader_bottom_bar = true,
     book_reader_replace_top_bar = true,
     book_reader_replace_bottom_bar = true,
+    book_reader_bar_icons = true,
     book_reader_top_bar_layout = {
         { id = "chapter", align = "left" },
         { id = "clock", align = "right" },
