@@ -49,12 +49,13 @@ end
 
 local configured = true
 local requests, pending, cancelled = {}, nil, 0
+local recap_chapters = 5
 package.preload["ai"] = function()
     return {
         isConfigured = function() return configured end,
         priorSummaries = function(identity, idx, chapters)
             Assert.eq(identity, book_identity)
-            Assert.eq(chapters, 5)
+            Assert.eq(chapters, recap_chapters)
             return "第" .. idx - 1 .. "章\n翠翠长大了。"
         end,
         chat = function(messages, opts, cb)
@@ -63,6 +64,11 @@ package.preload["ai"] = function()
             return { cancel = function() cancelled = cancelled + 1 end }
         end,
     }
+end
+
+local actions = {}
+package.preload["dispatcher"] = function()
+    return { registerAction = function(_self, id, spec) actions[id] = spec end }
 end
 
 local recap_ready = 0
@@ -236,3 +242,46 @@ Assert.eq(Explain.plain(table.concat({
     "结尾",
 }, "\n"))
 Assert.eq(Explain.plain("3 * 4 = 12，纯文本不动"), "3 * 4 = 12，纯文本不动")
+
+-- 问书：输入框提问，前文给得更宽（30 章摘要、6000 字节前文），回答卡片同划词解释
+chapter_idx, recap_chapters = 4, 30
+Explain.askBook(ui)
+local ask_input = Themed.last("input")
+Assert.eq(ask_input.title, "问书")
+before = #requests
+ask_input.callback("   ")
+Assert.eq(#requests, before, "空问题不发")
+ask_input.callback("翠翠的爷爷是做什么的？")
+Assert.eq(context_limit, 6000)
+local ask_prompt = requests[#requests].messages[2].content
+Assert.matches(ask_prompt, "《边城》（作者：沈从文）")
+Assert.matches(ask_prompt, "提了一个问题：\n翠翠的爷爷是做什么的？")
+Assert.matches(ask_prompt, "不要透露后文")
+Assert.matches(ask_prompt, "CURRENT PAGE:\n他望着那片月色")
+Assert.matches(ask_prompt, "STORY SO FAR（前几章摘要）:\n第3章\n翠翠长大了。$")
+Assert.eq(shown[#shown].title, "翠翠的爷爷是做什么的？")
+pending("撑渡船。")
+Assert.eq(shown[#shown].text, "撑渡船。")
+Assert.len(shown[#shown].buttons, 2, "没有选区：只有追问、复制")
+chapter_idx, recap_chapters = nil, 5
+
+-- 问书离线：不弹输入框
+connected = false
+local inputs_before = #Themed.all("input")
+Explain.askBook(ui)
+connected = true
+Assert.eq(#Themed.all("input"), inputs_before)
+Assert.eq(shown[#shown].text, "网络不可用，请先连接 Wi-Fi")
+
+-- 手势：登记 book_ai_ask；没文档不处理，未配置提示，配置好弹问书
+Ai.onCreate()
+Assert.eq(actions.book_ai_ask.event, "BookAiAsk")
+Assert.is_true(actions.book_ai_ask.reader)
+Assert.is_false(Ai.events.BookAiAsk({ ui = {} }))
+ui.document = {}
+configured = false
+Assert.is_true(Ai.events.BookAiAsk({ ui = ui }))
+Assert.eq(shown[#shown].text, "请先在月读设置中配置 AI 服务")
+configured = true
+Assert.is_true(Ai.events.BookAiAsk({ ui = ui }))
+Assert.eq(Themed.last("input").title, "问书")
