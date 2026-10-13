@@ -121,6 +121,7 @@ end
 -- 进入桌面：关着不校时；没联网等联网补一次；联网了直接校时
 do
     local count = #jobs
+    conf.ntp_last = 0
     Clock.autoSync()
     Assert.len(jobs, count, "默认关闭")
 
@@ -135,6 +136,9 @@ do
     Clock.onNetworkConnected({})
     Assert.len(jobs, count + 1, "补过了不再重复")
 
+    Clock.autoSync()
+    Assert.len(jobs, count + 1, "6 小时内校过：进桌面不再起子进程")
+    conf.ntp_last = os.time() - 7 * 3600
     Clock.autoSync()
     Assert.len(jobs, count + 2)
     Clock.onExit({})
