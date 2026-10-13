@@ -331,6 +331,24 @@ function StatsDB.exists(row)
     ) ~= nil
 end
 
+--- 一本书本地采集记录覆盖的时间段 [起, 止)；page_rollup 只知道所在小时，按整小时算。
+---@param source_id string
+---@param stable_id string
+---@return { [1]: integer, [2]: integer }[]
+function StatsDB.localSpans(source_id, stable_id)
+    local result, nrows = DB.query(
+        [[SELECT start_time, CASE WHEN record_type='page_rollup' THEN 3600 ELSE duration END
+          FROM reading_stats WHERE source_id=? AND stable_id=? AND record_type IN ('page','page_rollup');]],
+        source_id, stable_id
+    )
+    local spans = {}
+    for i = 1, nrows do
+        local start = tonumber(result[1][i]) or 0
+        spans[i] = { start, start + (tonumber(result[2][i]) or 0) }
+    end
+    return spans
+end
+
 --- 云端拉取入库：按 replace 策略清理旧已同步行后写入本批记录，全程单事务。
 --- 中途失败整体回滚，不会出现「删掉了旧数据但没写进新数据」的空窗。
 ---@param source_id string

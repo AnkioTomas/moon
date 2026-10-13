@@ -3,6 +3,7 @@
 --]]
 
 local Device = require("device")
+local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Theme = require("ui.themes")
@@ -139,6 +140,48 @@ function Maintenance:clearStatsRow(desktop)
                         desktop:onEvent("stats_changed")
                         desktop:updateView()
                         Toast:new{ text = ok and _("已清除本地统计") or _("清除统计失败"), timeout = 2 }:show()
+                    end,
+                }:show()
+            end,
+        })
+    end
+end
+
+--- 导入 KOReader 自带统计插件的阅读记录；纯本地操作，不推给任何源。
+---@param desktop table
+---@return fun(iw: number): table
+function Maintenance:importKoreaderStatsRow(desktop)
+    return function(iw)
+        return Row.widget({
+            width = iw,
+            chevron = false,
+            kind = "action", icon = "download", title = _("导入 KOReader 统计"),
+            subtitle = _("按书匹配书库，已有的记录不会重复导入"), status_on = true,
+            callback = function()
+                Confirm:new{
+                    text = _("把 KOReader 自带统计插件的阅读记录导入月读？只导入书库里能对上的书。"),
+                    ok_text = _("导入"),
+                    ok_callback = function()
+                        local toast = Toast:new{ text = _("正在导入…"), dismissable = false }
+                        toast:show()
+                        UIManager:forceRePaint()
+                        local counts, err = require("book.stats_koreader").import()
+                        toast:close()
+                        if not counts then
+                            Toast:new{ text = err == "missing" and _("没有找到 KOReader 统计数据")
+                                or _("导入失败"), timeout = 2 }:show()
+                            return
+                        end
+                        if counts.rows > 0 then
+                            if desktop.home then desktop:onEvent("home_refresh") end
+                            desktop:onEvent("stats_changed")
+                            desktop:updateView()
+                        end
+                        Toast:new{
+                            text = T(_("已导入 %1 本书的 %2 条记录，%3 本书在书库中未找到"),
+                                counts.books, counts.rows, counts.unmatched),
+                            timeout = 3,
+                        }:show()
                     end,
                 }:show()
             end,

@@ -139,6 +139,10 @@ function SQLiteStatement:bind(...) end
 ---@return any
 function SQLiteStatement:step() end
 
+--- 按列取全部结果：result[列][行]；没有行时返回 nil, 0。
+---@return table|nil, integer
+function SQLiteStatement:resultset() end
+
 function SQLiteStatement:reset() end
 
 function SQLiteStatement:clearbind() end

@@ -179,6 +179,7 @@ package.preload["desktop.pages.setting.maintenance"] = function()
     return {
         cacheRow = function() return row("清理缓存") end,
         clearStatsRow = function() return row("清除当前源统计") end,
+        importKoreaderStatsRow = function() return row("导入 KOReader 统计") end,
         debugLogRow = function() return row("调试日志") end,
         aboutRow = function() return row("关于") end,
         closeRow = function() return row("关闭桌面") end,
@@ -202,7 +203,7 @@ local desktop = {
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 27)
+Assert.len(built_rows, 28)
 Assert.eq(table.concat(section_titles, ","), "书库,桌面,阅读,系统,维护")
 
 local expected = {
@@ -269,7 +270,7 @@ local maintenance = {}
 for _, row in ipairs(built_rows) do
     if row.kind == "action" or row.kind == "toggle" or row.toggle ~= nil then maintenance[#maintenance + 1] = row.title end
 end
-Assert.eq(table.concat(maintenance, ","), "清理缓存,清除当前源统计,调试日志,自动检查更新,检查更新,关于,关闭桌面")
+Assert.eq(table.concat(maintenance, ","), "清理缓存,清除当前源统计,导入 KOReader 统计,调试日志,自动检查更新,检查更新,关于,关闭桌面")
 
 _G.G_reader_settings = previous_settings
 
