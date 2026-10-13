@@ -16,6 +16,8 @@ local Fetch = {}
 local MIN_GROUND_LEN = 2
 local INTRO_LIMIT = 1500
 local LOOKUP_PRIOR_LIMIT = 2000
+--- 提示词最多带前面几章的摘要。
+local RECAP_CHAPTERS = 5
 
 local payload_sections = {
     { kind = "character", key = "characters" },
@@ -155,6 +157,14 @@ local function persist(identity, incoming, cb)
     if ok then cb(fetchResult(result)) else cb(nil, result) end
 end
 
+--- 当前章之前的章节摘要；不在任何章或没有摘要时 nil。
+---@param identity BookIdentity
+---@return string|nil
+local function storySoFar(identity)
+    local idx = require("reader.session").chapterIndex()
+    return idx and AI.priorSummaries(identity, idx, RECAP_CHAPTERS) or nil
+end
+
 ---@return integer 1..100
 local function progressPercent()
     local session = require("reader.session").current()
@@ -178,7 +188,8 @@ local function fromContext(ui, identity, existing, cb)
     local messages = {
         { role = "system", content = Prompts.system },
         { role = "user", content = Prompts.comprehensive(
-            title, author, progressPercent(), ctx.current_page, ctx.prior_text, Store.promptSnapshot(existing)) },
+            title, author, progressPercent(), ctx.current_page, ctx.prior_text, Store.promptSnapshot(existing),
+            storySoFar(identity)) },
     }
     return AI.jsonExtract(messages, { max_tokens = 8000, timeout = 180 }, function(decoded, err)
         if not decoded then cb(nil, err); return end
@@ -239,6 +250,28 @@ function Fetch.comprehensive(ui, identity, opts, cb)
     return fromContext(ui, identity, existing, cb)
 end
 
+--- 本地实体库按名字 / 别名（不分大小写）找词；不联网、不需要 AI。
+---@param entities table[]
+---@param word string 已 trim
+---@return table|nil
+local function findIn(entities, word)
+    local normalized_word = word:lower()
+    for _idx, entity in ipairs(entities) do
+        if Text.trim(entity.name):lower() == normalized_word then return entity end
+        for _alias_idx, alias in ipairs(entity.aliases) do
+            if Text.trim(alias):lower() == normalized_word then return entity end
+        end
+    end
+end
+
+--- 只查本地实体库；没收录返回 nil。
+---@param identity BookIdentity
+---@param word string
+---@return table|nil
+function Fetch.findLocal(identity, word)
+    return findIn(XrayDB.list(identity.source_id, identity.stable_id), Text.trim(word))
+end
+
 --- 选词查实体：本地别名命中免请求，否则 AI 补全并落库。
 ---@param ui table
 ---@param identity BookIdentity
@@ -256,18 +289,10 @@ function Fetch.lookupWord(ui, identity, word, cb)
         return nil
     end
     local entities = XrayDB.list(identity.source_id, identity.stable_id)
-    local normalized_word = word:lower()
-    for index, entity in ipairs(entities) do
-        if Text.trim(entity.name):lower() == normalized_word then
-            cb(entity)
-            return nil
-        end
-        for index, alias in ipairs(entity.aliases) do
-            if Text.trim(alias):lower() == normalized_word then
-                cb(entity)
-                return nil
-            end
-        end
+    local hit = findIn(entities, word)
+    if hit then
+        cb(hit)
+        return nil
     end
 
     local ctx = Context.forAnalysis(ui, LOOKUP_PRIOR_LIMIT)
@@ -276,7 +301,7 @@ function Fetch.lookupWord(ui, identity, word, cb)
     local messages = {
         { role = "system", content = Prompts.system },
         { role = "user", content = Prompts.singleWord(
-            word, title, author, ctx.current_page, ctx.prior_text, existing) },
+            word, title, author, ctx.current_page, ctx.prior_text, existing, storySoFar(identity)) },
     }
     return AI.jsonExtract(messages, { max_tokens = 800 }, function(decoded, err)
         if not decoded then cb(nil, err); return end

@@ -70,11 +70,15 @@ function UI.showEntity(entity)
     }:show()
 end
 
---- 未配置 AI 时提示并拦下操作。
+--- 未配置 AI 或没联网时提示并拦下操作；离线立即失败，不等联网回调。
 ---@return boolean 是否可以继续
-local function ensureConfigured()
+local function ensureReady()
     if not require("ai").isConfigured() then
         info(_("请先在月读设置中配置 AI 服务"))
+        return false
+    end
+    if not require("ui/network/manager"):isConnected() then
+        info(_("网络不可用，请先连接 Wi-Fi"))
         return false
     end
     return true
@@ -152,10 +156,8 @@ function UI.refresh(ui, identity)
         info(_("当前书籍没有可用身份"))
         return
     end
-    if not ensureConfigured() then return end
-    require("ui/network/manager"):runWhenOnline(function()
-        runFetch(ui, identity, true)
-    end)
+    if not ensureReady() then return end
+    runFetch(ui, identity, true)
 end
 
 --- 打开 X-Ray 主菜单（底部分栏，左上角重新生成）。
@@ -204,19 +206,24 @@ function UI.lookup(ui, word)
     if word == "" then
         return
     end
-    if not ensureConfigured() then return end
-    require("ui/network/manager"):runWhenOnline(function()
-        local loading = Toast:new{ text = _("X-Ray 查询中…") }
-        loading:show()
-        require("features.xray.fetch").lookupWord(ui, identity, word, function(entity, err)
-            loading:close()
-            if not entity then
-                info(T(_("未找到：%1"), tostring(err or word)))
-                return
-            end
-            UI.showEntity(entity)
-            require("features.xray.marks").invalidate()
-        end)
+    local Fetch = require("features.xray.fetch")
+    -- 已收录的直接出详情：离线、未配置 AI 也能查。
+    local hit = Fetch.findLocal(identity, word)
+    if hit then
+        UI.showEntity(hit)
+        return
+    end
+    if not ensureReady() then return end
+    local loading = Toast:new{ text = _("X-Ray 查询中…") }
+    loading:show()
+    Fetch.lookupWord(ui, identity, word, function(entity, err)
+        loading:close()
+        if not entity then
+            info(T(_("未找到：%1"), tostring(err or word)))
+            return
+        end
+        UI.showEntity(entity)
+        require("features.xray.marks").invalidate()
     end)
 end
 

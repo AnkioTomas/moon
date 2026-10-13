@@ -1,7 +1,8 @@
 --[[--
 划词「AI 解释」：结合当前阅读上下文解释选中的词句（多义词、典故、古文、外文、长难句）。
 
-一问一答，非流式。等待和结果都是居中弹窗卡片；等待中关掉卡片即取消请求。
+非流式。等待和结果都是居中弹窗卡片；等待中关掉卡片即取消请求。
+结果卡片可存为划线笔记（走 KOReader 原生 addNote，随注解同步）、追问（带上整条对话再问）、复制。
 回答只给纯文本：提示词要求不写 Markdown、不写思考过程，模型不听时由 `plain` 兜底剥掉
 （思考过程已由 `ai.client` 统一去掉）。
 
@@ -19,6 +20,8 @@ local Explain = {}
 local CONTEXT_LIMIT = 2000
 local SELECTION_LIMIT = 1000
 local TITLE_LIMIT = 60
+--- 提示词最多带前面几章的摘要。
+local RECAP_CHAPTERS = 5
 
 local SYSTEM = [[你是阅读助手。用简体中文回答，只输出纯文本：
 不要 Markdown（不要标题、加粗、斜体、代码块、表格、链接语法），需要分点时用「1. 2. 3.」或「• 」；
@@ -30,8 +33,9 @@ local SYSTEM = [[你是阅读助手。用简体中文回答，只输出纯文本
 ---@param author string
 ---@param current_page string
 ---@param prior_text string
+---@param recap string|nil 当前章之前的章节摘要；nil 时提示词不带这一段
 ---@return string
-function Explain.prompt(selection, title, author, current_page, prior_text)
+function Explain.prompt(selection, title, author, current_page, prior_text, recap)
     local book = string.format("《%s》", title ~= "" and title or "未知书名")
     if author ~= "" then
         book = book .. string.format("（作者：%s）", author)
@@ -60,6 +64,7 @@ CURRENT PAGE:
 PRIOR CONTEXT:
 %s]], book, Text.truncateUtf8(selection.text, SELECTION_LIMIT), selection.sentence,
         selection.paragraph ~= "" and selection.paragraph or "（无）", current_page, prior_text)
+        .. (recap and ("\n\nSTORY SO FAR（前几章摘要）:\n" .. recap) or "")
 end
 
 --- 剥掉模型仍然写出来的 Markdown 标记和行首缩进，保留文字。
@@ -88,50 +93,93 @@ local function card(title, text, fields)
     return require("ui.themes.widgets.text_viewer"):new(o)
 end
 
+--- 离线立即失败并提示；返回是否已联网。
+---@return boolean
+local function online()
+    if require("ui/network/manager"):isConnected() then return true end
+    require("ui.themes.widgets.toast"):new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
+    return false
+end
+
+--- 发一轮请求：等待卡片，回来后换成结果卡片（存为笔记 / 追问 / 复制）。
+--- 追问把整条对话（含上一轮回答）带上再问，只有这一条链，不落盘。
+---@param ui table ReaderUI
+---@param title string
+---@param messages table[] 末条是本轮 user 消息
+local function ask(ui, title, messages)
+    local handle
+    local loading = card(title, _("AI 解释中…"), {
+        -- 结果回来时先清 handle 再关窗，所以只有用户关掉才会取消请求。
+        close_callback = function()
+            if handle then handle.cancel() end
+        end,
+    })
+    loading:show()
+    handle = require("ai").chat(messages, { max_tokens = 1000, timeout = 60 }, function(content, err)
+        handle = nil
+        loading:close()
+        local answer = content and Explain.plain(content) or ""
+        if answer == "" then
+            require("ui.themes.widgets.toast"):new{
+                text = T(_("AI 解释失败：%1"), tostring(err or _("未知错误"))), timeout = 3,
+            }:show()
+            return
+        end
+        local viewer
+        local buttons = {}
+        -- 选区还在才能存：KOReader 按当前选区建划线，再弹预填好的笔记编辑框，之后照常同步。
+        if ui.highlight and ui.highlight.selected_text then
+            buttons[#buttons + 1] = { text = _("存为笔记"), callback = function()
+                viewer:close()
+                ui.highlight:addNote(answer)
+            end }
+        end
+        buttons[#buttons + 1] = { text = _("追问"), callback = function()
+            require("ui.themes.widgets.input"):new{
+                title = _("追问"),
+                fields = { { text = "", hint = _("想进一步了解什么？") } },
+                ok_text = _("发送"),
+                callback = function(question)
+                    question = Text.trim(question)
+                    if question == "" or not online() then return end
+                    viewer:close()
+                    local chain = { unpack(messages) }
+                    chain[#chain + 1] = { role = "assistant", content = answer }
+                    chain[#chain + 1] = { role = "user", content = question }
+                    ask(ui, title, chain)
+                end,
+            }:show()
+        end }
+        buttons[#buttons + 1] = {
+            text = _("复制"),
+            variant = "primary",
+            callback = function() require("device").input.setClipboardText(answer) end,
+        }
+        viewer = card(title, answer, { buttons = buttons })
+        viewer:show()
+    end)
+end
+
 --- 请求 AI 解释选中内容并弹窗展示。
 ---@param ui table ReaderUI
 ---@param selected { text: string, pos0: string|table|nil } 划词选区（text 已清理）
 function Explain.run(ui, selected)
     local Context = require("reader.context")
     local selection = Context.selection(ui, selected)
-    if selection.text == "" then
+    if selection.text == "" or not online() then
         return
     end
-    local title = Text.truncateUtf8(selection.text, TITLE_LIMIT)
-    require("ui/network/manager"):runWhenOnline(require("ui.guard").wrap("ai explain", function()
-        local ctx = Context.forAnalysis(ui, CONTEXT_LIMIT)
-        local session = require("reader.session").current()
-        local book = session and session.identity and session.identity.book or {}
-        local messages = {
-            { role = "system", content = SYSTEM },
-            { role = "user", content = Explain.prompt(selection, Text.trim(book.title),
-                Text.trim(book.authors or book.author), ctx.current_page, ctx.prior_text) },
-        }
-        local handle
-        local loading = card(title, _("AI 解释中…"), {
-            -- 结果回来时先清 handle 再关窗，所以只有用户关掉才会取消请求。
-            close_callback = function()
-                if handle then handle.cancel() end
-            end,
-        })
-        loading:show()
-        handle = require("ai").chat(messages, { max_tokens = 1000, timeout = 60 }, function(content, err)
-            handle = nil
-            loading:close()
-            local answer = content and Explain.plain(content) or ""
-            if answer == "" then
-                require("ui.themes.widgets.toast"):new{
-                    text = T(_("AI 解释失败：%1"), tostring(err or _("未知错误"))), timeout = 3,
-                }:show()
-                return
-            end
-            card(title, answer, { buttons = { {
-                text = _("复制"),
-                variant = "primary",
-                callback = function() require("device").input.setClipboardText(answer) end,
-            } } }):show()
-        end)
-    end))
+    local ctx = Context.forAnalysis(ui, CONTEXT_LIMIT)
+    local Session = require("reader.session")
+    local session = Session.current()
+    local book = session and session.identity and session.identity.book or {}
+    local idx = session and Session.chapterIndex(session)
+    local recap = idx and require("ai").priorSummaries(session.identity, idx, RECAP_CHAPTERS) or nil
+    ask(ui, Text.truncateUtf8(selection.text, TITLE_LIMIT), {
+        { role = "system", content = SYSTEM },
+        { role = "user", content = Explain.prompt(selection, Text.trim(book.title),
+            Text.trim(book.authors or book.author), ctx.current_page, ctx.prior_text, recap) },
+    })
 end
 
 return Explain

@@ -1,8 +1,9 @@
 --[[--
 段评列表：全屏，标题栏 + 原句引用 + 段评卡片，按卡片实际高度分页；翻到已加载内容末页时自动续拉。
+标题栏左侧 [✦] 是「AI 归纳」（已加载到段评且 AI 已配置才有，见 digest.lua）。
 
   +-------------------------------+
-  |      段评 · 共 321 条    [×]  |
+  | [✦]  段评 · 共 321 条    [×]  |
   |-------------------------------|
   | ❝ 圣人对节帅的品位……          |
   |                               |
@@ -189,9 +190,14 @@ function Sheet:rebuild()
         body[#body + 1] = self:card(i)
     end
     local pages = #self.pages
+    local can_digest = #self.items > 0 and require("ai").isConfigured()
     local bar = TitleBar.widget({
         width = w,
         title = self.loaded and T(_("段评 · 共 %1 条"), self.total) or _("段评"),
+        left_icon = can_digest and "auto_awesome" or nil,
+        left_callback = can_digest and function()
+            require("features.reviews.digest").run(self.spot.text, self.items)
+        end or nil,
         right_icon = "close",
         right_callback = function() self:dismiss() end,
     })
