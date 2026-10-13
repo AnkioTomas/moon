@@ -106,6 +106,11 @@ Assert.eq(marks.current[1].spot.total, 12)
 Assert.is_nil(marks.current[1].count, "不显示段评数")
 Assert.len(marks.current[1].boxes, 2)
 Assert.eq(marks:marks(), marks.current)
+Assert.is_false(marks.current[1].solid, "默认虚线")
+local review_conf = require("utils.settings").get("features.reviews")
+review_conf.book_reviews_mark_style = "solid"
+Assert.is_true(marks:marks()[1].solid, "改样式不用等翻页")
+review_conf.book_reviews_mark_style = "dashed"
 Assert.is_nil(box_lookups.c0, "远页句子不取屏幕框")
 Assert.eq(page_lookups, 6, "每句起止页各查一次")
 

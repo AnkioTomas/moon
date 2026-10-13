@@ -152,7 +152,7 @@ function Setting.rows(plugin)
     toggle("sync_reading_time", true, "timer", _("同步阅读时间"), _("阅读时必须联网，微信读书才会计入时长"))
     toggle("merge_local_stats", false, "history", _("合并本地阅读时长"),
         _("关闭时以云端为准；打开后每天取云端与本地中较大的，补上离线阅读。只影响月读里的统计"))
-    toggle("show_paragraph_reviews", false, "forum", _("显示段评"), _("阅读时给有他人段评的句子画虚线，点按查看；需联网"))
+    toggle("show_paragraph_reviews", false, "forum", _("显示段评"), _("阅读时给有他人段评的句子画线，点按查看；需联网"))
     if not Auth.hasSession() then return rows end
     rows[#rows + 1] = function(iw)
         return Row.widget({ width = iw, chevron = false, kind = "action", icon = "autorenew", title = _("续期会话"),
