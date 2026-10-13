@@ -288,6 +288,32 @@ local function installLeafStubs()
     installIfMissing("ffi/posix", function()
         return {}
     end)
+    installIfMissing("ffi/posix_h", function()
+        require("ffi").cdef([[
+            int setenv(const char *, const char *, int);
+            int unsetenv(const char *);
+            void *malloc(size_t);
+            void free(void *);
+        ]])
+        return true
+    end)
+    installIfMissing("ui/geometry", function()
+        local Geom = {}
+        Geom.__index = Geom
+        function Geom:new(options)
+            return setmetatable(options or {}, self)
+        end
+        return Geom
+    end)
+    for _idx, name in ipairs({ "ui/widget/linewidget", "ui/widget/container/topcontainer" }) do
+        installIfMissing(name, function()
+            local Leaf = {}
+            function Leaf:new(options)
+                return options or {}
+            end
+            return Leaf
+        end)
+    end
     installIfMissing("ui/event", function()
         local Event = {}
         function Event:new(name, ...)
