@@ -14,9 +14,9 @@ moonsource-xxx.koplugin/
 └── moonsource_xxx/    可选：自己的子模块，目录名带唯一前缀
 ```
 
-月读在首次访问源注册表时，对每个**已启用**插件检查 `<插件目录>/moon_source.lua`，有就 `dofile`。用户在 KOReader 插件管理里禁用插件，这个源就消失。
+KOReader 加载完全部插件后，月读在首次访问源注册表时对每个**已启用**插件检查 `<插件目录>/moon_source.lua`，有就 `dofile`，结果缓存到重启。插件加载期间注册表只有内置源，不会读描述文件。用户在 KOReader 插件管理里禁用插件，这个源就消失。
 
-此时所有插件目录都已在 `package.path` 上，可以 `require` 月读模块。所有插件共用一个 `package.path`，同名模块谁先加载算谁的，所以自己的子模块不要叫 `client`、`utils` 这类通用名，放进带前缀的目录：`require("moonsource_xxx.client")`。
+`dofile` 时所有插件目录都已在 `package.path` 上，可以 `require` 月读模块。所有插件共用一个 `package.path`，同名模块谁先加载算谁的，所以自己的子模块不要叫 `client`、`utils` 这类通用名，放进带前缀的目录：`require("moonsource_xxx.client")`。
 
 ## 描述文件
 

@@ -234,7 +234,7 @@ local function unplaced()
     local placed = {}
     for _i, item in ipairs(Components.widgets()) do placed[item.id] = true end
     local candidates = {}
-    for _i, comp in ipairs(Components.components) do
+    for _i, comp in ipairs(Components.list()) do
         if not placed[comp.id] then
             candidates[#candidates + 1] = { id = comp.id, label = comp.label }
         end

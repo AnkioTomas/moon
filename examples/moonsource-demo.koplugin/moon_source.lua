@@ -1,7 +1,7 @@
 --[[--
 月读第三方书源示例：一本三章的静态书，不联网。契约见月读仓库 docs/source/external.md。
 
-月读在首次访问源注册表时 dofile 本文件，此时所有插件目录都已在 package.path 上，
+KOReader 加载完全部插件后，月读在首次访问源注册表时 dofile 本文件，此时所有插件目录都已在 package.path 上，
 可以直接 require 月读的 source.base / source.chapter / source.shelf / source.toc。
 自己的子模块放进带唯一前缀的目录（如 moonsource_demo/client.lua → require("moonsource_demo.client")），
 别用 client / utils 这类通用名：所有插件共用一个 package.path，同名模块谁先加载算谁的。

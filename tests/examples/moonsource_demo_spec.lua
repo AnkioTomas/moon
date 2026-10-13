@@ -43,7 +43,7 @@ end
 package.loaded["source.chapter"] = { openAsync = open("async"), openWithUi = open("ui") }
 
 package.loaded["pluginloader"] = {
-    enabled_plugins = { { path = Config.root() .. "/examples/moonsource-demo.koplugin" } },
+    enabled_plugins = { Config.selfPlugin(), { path = Config.root() .. "/examples/moonsource-demo.koplugin" } },
 }
 package.loaded["source.registry"] = nil
 local Registry = require("source.registry")

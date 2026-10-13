@@ -51,6 +51,12 @@ function Config.root()
     return ROOT
 end
 
+--- 月读自己在 PluginLoader.enabled_plugins 里的那一项：源注册表见到它才认为插件已全部加载、才扫第三方源。
+---@return table
+function Config.selfPlugin()
+    return { path = package.searchpath("source.registry", package.path):match("^(.*)/source/registry%.lua$") }
+end
+
 --- KOReader 数据目录（测试沙箱，非模拟器 config/）
 ---@return string
 function Config.dir()

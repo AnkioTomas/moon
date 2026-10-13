@@ -46,14 +46,14 @@ local Base = require("desktop.pages.home.registry")
 local Layout = require("desktop.pages.home.layout")
 local Widgets = require("desktop.pages.home.placements")
 
-Assert.len(Base.components, 12)
+Assert.len(Base.list(), 12)
 local defaults = Base.enabledLayout()
 Assert.len(defaults, 2)
 Assert.eq(defaults[1], "recent_hero")
 Assert.eq(defaults[2], "recent_list")
 
 local components = {}
-for _, class in ipairs(Base.components) do components[class.id] = class.new() end
+for _, class in ipairs(Base.list()) do components[class.id] = class.new() end
 
 -- fill 吃剩余；default 用内容高度。
 local selected, heights, unused = Layout.allocate({
