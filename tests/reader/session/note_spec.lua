@@ -5,6 +5,7 @@ local Assert = require("support.assert")
 local writes = {}
 local encoded
 local fail_encode = false
+local derived_file
 
 package.preload["json"] = function()
     return {
@@ -13,6 +14,7 @@ package.preload["json"] = function()
             if fail_encode then error("invalid annotation") end
             return "[snapshot]"
         end,
+        decode = function() return { origin = "/books/origin.epub", file = derived_file } end,
     }
 end
 package.preload["book.note_db"] = function()
@@ -36,7 +38,7 @@ package.loaded["reader.session.note"] = nil
 local SessionNote = require("reader.session.note")
 local annotations = { { datetime = "2026-08-20", text = "高亮", page = 3 } }
 local ui = {
-    document = { getPageCount = function() return 100 end },
+    document = { file = "/books/note-spec.epub", getPageCount = function() return 100 end },
     annotation = { annotations = annotations },
     doc_settings = {
         flush = function() end,
@@ -61,6 +63,23 @@ Assert.eq(writes[1][4], "[snapshot]")
 fail_encode = true
 SessionNote.save(ui, { source_id = "moon", stable_id = "b2" })
 Assert.len(writes, 1, "编码失败不能写入不完整快照")
+fail_encode = false
+
+-- 衍生版（同目录 meta.json 指向自己）的坐标原书不认，不进 notes 表
+local dir = os.tmpname()
+os.remove(dir)
+assert(os.execute("mkdir -p '" .. dir .. "'"))
+local meta = assert(io.open(dir .. "/meta.json", "wb"))
+meta:write("[meta]")
+meta:close()
+derived_file = dir .. "/book.epub"
+ui.document.file = derived_file
+local saved
+SessionNote.save(ui, identity, function(ok) saved = ok end)
+Assert.is_true(saved)
+Assert.len(writes, 1, "衍生版不写库")
+os.remove(dir .. "/meta.json")
+os.remove(dir)
 
 for _, name in ipairs({ "json", "book.note_db", "logger", "book.store", "book.note", "reader.session.note" }) do
     package.preload[name] = nil

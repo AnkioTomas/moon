@@ -9,7 +9,8 @@
 流式文档与带文字层的 PDF/DjVu 都行。分析得到的全文由预览持有，确认后原样交给转换，不重复提取。
 
 身份：排版版是同一本书的另一个文件。切换前 `Store.touch` 把 books.path 指过去，开书时按路径解析回
-同一身份，进度、笔记、统计都记在这本书上。排版版结构和原书不同，xpointer 不通用，切换时按全书比例落位。
+同一身份，进度、统计都记在这本书上。排版版结构和原书不同，xpointer 不通用，切换时按全书比例落位；
+划线留在排版版自己的 sidecar，和原书之间按文字互相定位（见 reader/session/derived_note）。
 章节源（`type == "chapter"`）的书不做：章节文件各自独立，没有整本可排。
 
 @module koplugin.book.features.reflow
