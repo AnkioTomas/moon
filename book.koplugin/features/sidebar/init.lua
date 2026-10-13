@@ -28,8 +28,8 @@ local OverlapGroup = require("ui/widget/overlapgroup")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local Box = require("ui.themes.widgets.box")
-local Mask = require("ui.themes.widgets.mask")
 local Modal = require("ui.themes.widgets.modal")
+local Guard = require("ui.guard")
 local Tabbar = require("ui.themes.widgets.tabbar")
 local Text = require("ui.themes.widgets.text")
 local Theme = require("ui.themes")
@@ -54,10 +54,8 @@ local PANEL_RATIO = 0.85
 ---@field ticket BookSidebarTicket|nil 首次进入票根页时生成，关侧栏取消
 ---@field font_job table|nil 字体列表拉取中（{ cancel }），关侧栏取消
 ---@field closed boolean|nil 已关闭：迟到的异步回调不再重画
---- 遮罩只压右侧正文，自己画在面板旁（Modal 的遮罩是整屏），所以 mask=false。
-local Sidebar = Modal:extend{
-    mask = false,
-}
+--- 用 Modal 的整屏遮罩，面板贴左缘盖住左侧部分（见 render 末尾）。
+local Sidebar = Modal:extend{}
 
 --- 按条件出现的页：字体页要文档能换字体，X-Ray 页要功能开着。
 local AVAILABLE = {
@@ -209,11 +207,11 @@ function Sidebar:fontMenu(width, height)
                 self.menus.font = false
             end
             -- 可能同步回调（缓存命中），推迟到下一 tick 再重画
-            UIManager:nextTick(function()
+            UIManager:nextTick(require("ui.guard").wrap("sidebar font", function()
                 if self.closed or self.tabs[self.tab] ~= "font" then return end
                 self:render()
                 UIManager:setDirty(self, "ui")
-            end)
+            end))
         end)
         if self.menus.font == nil then self.font_job = job end
     end
@@ -227,11 +225,11 @@ function Sidebar:ticketFor()
         local ticket
         ticket = require("features.sidebar.ticket").new(self.snapshot, function()
             -- 可能在 new 里同步回调，推迟到下一 tick，别在 render 里嵌套 render
-            UIManager:nextTick(function()
+            UIManager:nextTick(require("ui.guard").wrap("sidebar ticket", function()
                 if self.ticket ~= ticket or self.tabs[self.tab] ~= "ticket" then return end
                 self:render()
                 UIManager:setDirty(self, "ui")
-            end)
+            end))
         end)
         self.ticket = ticket
     end
@@ -309,19 +307,15 @@ function Sidebar:render()
             end,
         }),
     }
-    self:setPanel(OverlapGroup:new{
-        allow_mirroring = false,
-        dimen = Geom:new{ w = self.dimen.w, h = h },
-        Mask:new{ dimen = Geom:new{ w = self.dimen.w, h = h } },
-        HorizontalGroup:new{
-            align = "top",
-            panel,
-            LineWidget:new{
-                dimen = Geom:new{ w = math.max(1, Theme.px(t.row.divider)) * 2, h = h },
-                background = Blitbuffer.Color8(t.color.ink),
-            },
+    self:setPanel(HorizontalGroup:new{
+        align = "top",
+        panel,
+        LineWidget:new{
+            dimen = Geom:new{ w = math.max(1, Theme.px(t.row.divider)) * 2, h = h },
+            background = Blitbuffer.Color8(t.color.ink),
         },
     })
+    self.panel_x, self.panel_y = 0, 0
 end
 
 ---@param tab integer
@@ -398,7 +392,7 @@ function Sidebar.install(ui)
         ges = "swipe",
         screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
         overrides = { "paging_swipe", "rolling_swipe" },
-        handler = function(ges) return Sidebar.onReaderSwipe(ui, ges) end,
+        handler = function(ges) return Guard.call("sidebar swipe", Sidebar.onReaderSwipe, ui, ges) end,
     } })
 end
 

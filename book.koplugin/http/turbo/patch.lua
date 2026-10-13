@@ -12,10 +12,15 @@ local patched = false
 -- 设备上没有系统 DNS 缓存，10 路封面下载就是 20 次阻塞解析；这里按主机名缓存结果。
 local DNS_TTL = 10 * 60
 local dns = {}
+-- 解析失败也记 10 秒：Wi-Fi 连着但上不了网时每次 getaddrinfo 都要阻塞到超时，一屏封面就是十几次。
+-- 只挡同一批请求，不能长：刚联网的重试不该吃到联网前的失败。
+-- 单独一张表：连接失败会清 dns[host]，不能顺手把失败记录也清了。
+local DNS_FAIL_TTL = 10
+local dns_fail = {}
 
---- 主机名换成缓存地址；IP 字面量原样返回，解析失败交回 connect 报真实错误。
+--- 主机名换成缓存地址；IP 字面量原样返回，解析失败（含 10 秒内失败过）返回 nil。
 ---@param host string
----@return string
+---@return string|nil
 local function resolve(host)
     if host:match("^[%d%.]+$") or host:find(":", 1, true) then
         return host
@@ -25,11 +30,16 @@ local function resolve(host)
     if hit and hit.expires > now then
         return hit.addr
     end
+    if (dns_fail[host] or 0) > now then
+        return nil
+    end
     local list = require("socket").dns.getaddrinfo(host)
     local addr = list and list[1] and list[1].addr
     if not addr then
-        return host
+        dns_fail[host] = now + DNS_FAIL_TTL
+        return nil
     end
+    dns_fail[host] = nil
     dns[host] = { addr = addr, expires = now + DNS_TTL }
     return addr
 end
@@ -105,14 +115,20 @@ function Patch.apply()
     -- `self._handle_connect_fail(err)` 点号调用会把 self 变成错误字符串；主机名解析收口到 resolve。
     wrap(IOStream, "connect", function(orig)
         local orig_fail = IOStream._handle_connect_fail
-        return function(self, address, ...)
+        return function(self, address, port, family, callback, fail_callback, arg)
             self._handle_connect_fail = function(first, second)
                 if type(first) ~= "table" then
                     return orig_fail(self, first)
                 end
                 return orig_fail(first, second)
             end
-            return orig(self, resolve(address), ...)
+            local addr = resolve(address)
+            if not addr then
+                -- 与 turbo 自己解析失败同一条路：登记失败回调后立即失败，不让 LuaSocket 再阻塞解析一次。
+                self._connect_fail_callback, self._connect_callback_arg = fail_callback, arg
+                return self._handle_connect_fail("DNS resolv error: " .. address)
+            end
+            return orig(self, addr, port, family, callback, fail_callback, arg)
         end
     end)
 
@@ -142,6 +158,7 @@ end
 ---@param host string
 function Patch.forget(host)
     dns[host] = nil
+    dns_fail[host] = nil
 end
 
 return Patch

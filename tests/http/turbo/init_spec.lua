@@ -114,9 +114,24 @@ do
     Assert.eq(#lookups, 3, "异步连接失败后也必须重新解析")
     HTTPClient._handle_connect_fail({ hostname = "cdn.example.com" }, -1)
     Assert.eq(client_fail_msgs[3], "Could not connect: -1", "无真实错误时保留原样")
+    -- 解析失败：按 turbo 自己的 DNS 失败路径立即失败，不让 LuaSocket 再阻塞解析一次；10 秒内同主机不再解析。
+    local before = #lookups
     local nx = {}
-    iostream.IOStream.connect(nx, "nx.invalid", 443)
-    Assert.eq(nx.connected_to, "nx.invalid", "解析失败交回 connect 报真实错误")
+    iostream.IOStream.connect(nx, "nx.invalid", 443, nil, nil, "fail-cb", "arg")
+    Assert.is_nil(nx.connected_to, "解析失败不得交给 connect 再解析")
+    Assert.matches(nx.fail_err, "^DNS resolv error")
+    Assert.eq(nx._connect_fail_callback, "fail-cb")
+    Assert.eq(nx._connect_callback_arg, "arg")
+    local nx2 = {}
+    iostream.IOStream.connect(nx2, "nx.invalid", 443)
+    Assert.eq(#lookups, before + 1, "失败记录挡住同一批请求")
+    Assert.matches(nx2.fail_err, "^DNS resolv error")
+    HTTPClient._handle_connect_fail({ hostname = "nx.invalid" }, "DNS resolv error")
+    iostream.IOStream.connect({}, "nx.invalid", 443)
+    Assert.eq(#lookups, before + 1, "连接失败清正向缓存，不清失败记录")
+    require("http.turbo.patch").forget("nx.invalid")
+    iostream.IOStream.connect({}, "nx.invalid", 443)
+    Assert.eq(#lookups, before + 2, "forget 连失败记录一起清")
     local ffi = require("ffi")
     local sized = {
         _read_buffer_size = ffi.new("int64_t", 16),

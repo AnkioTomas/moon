@@ -35,6 +35,7 @@ local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
 local Mask = require("ui.themes.widgets.mask")
 local Text = require("ui.themes.widgets.text")
+local MoonSettings = require("utils.settings")
 local Screen = Device.screen
 
 ---@class BookThemeModal : InputContainer
@@ -184,8 +185,9 @@ function Modal:handleEvent(event)
     return handled
 end
 
+--- 网点遮罩叠在旧像素上，局刷会留残影：带遮罩（且设置开着网点）弹出时全刷。
 function Modal:show()
-    UIManager:show(self, "ui")
+    UIManager:show(self, self._mask and MoonSettings.get("ui").mesh_mask and "full" or "ui")
 end
 
 function Modal:close()

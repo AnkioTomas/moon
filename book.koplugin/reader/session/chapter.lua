@@ -85,7 +85,7 @@ local function applyChapterTarget(chapter, ui)
     if target.within == nil and target.direction == nil and target.xpointer == nil then return end
     local within, direction = target.within, target.direction
 
-    require("ui/uimanager"):nextTick(function()
+    require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter jump", function()
         if chapter_session ~= chapter or ui.document.file ~= target.path then return end
         if target.xpointer then
             ui:handleEvent(require("ui/event"):new("GotoXPointer", target.xpointer, target.xpointer))
@@ -104,7 +104,7 @@ local function applyChapterTarget(chapter, ui)
             ui.link:addCurrentLocationToStack()
         end
         ui:handleEvent(require("ui/event"):new("GotoPage", page))
-    end)
+    end))
 end
 
 ---@param view table|nil
@@ -119,7 +119,8 @@ local function wrapBoundary(view, position, atStart)
         local before = position(self)
         local result = original(self, diff)
         if diff < 0 and atStart(before, position(self)) then
-            Chapter.onChapterBoundary(require("reader.session").current(), -1)
+            require("ui.guard").call("chapter boundary", Chapter.onChapterBoundary,
+                require("reader.session").current(), -1)
         end
         return result
     end

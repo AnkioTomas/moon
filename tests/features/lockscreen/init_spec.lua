@@ -323,10 +323,12 @@ local ok_run, err_run = pcall(function()
 
     -- KOReader 先 Screensaver:setup 再发 Suspend：钩子必须在原生 setup 读设置前把图生成好，
     -- 否则锁屏永远显示上一轮的内容；内容没变时命中缓存不重画；关机 / 重启画面不生成。
+    render_writes = 0
+    current_cover = cover_a
     LockScreen.onCreate()
     LockScreen.onCreate()
     Stubs.flush()
-    render_writes = 0
+    Assert.eq(render_writes, 0, "本地背景：启动 / 开书不预合成，留给休眠钩子")
     current_cover = cover_a
     Screensaver:setup()
     Assert.len(setup_seen, 1, "钩子只装一次")

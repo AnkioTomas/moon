@@ -203,7 +203,8 @@ function DB.schema(name, fn)
 end
 
 --- 打开（或复用）全局 SQLite 连接并确保 schema。
---- WAL 模式 + busy_timeout=5000。
+--- WAL 模式 + busy_timeout=5000。synchronous=NORMAL：WAL 下断电最多丢最后几次提交、不损坏库，
+--- 省掉每次提交的 fsync（翻页写统计每页一次）；页缓存压到 512KB（默认约 2MB）。
 --- SQL 在当前进程同步执行；调用方自行保证写操作顺序。
 ---@return SQLiteConnection|nil, string|nil
 function DB.open()
@@ -218,6 +219,8 @@ function DB.open()
     conn = c
     conn:exec("PRAGMA journal_mode=WAL;")
     conn:exec("PRAGMA busy_timeout=5000;")
+    conn:exec("PRAGMA synchronous=NORMAL;")
+    conn:exec("PRAGMA cache_size=-512;")
     local schema_ok, schema_err = ensureSchema()
     if not schema_ok then
         logger.warn("book.db schema init failed", schema_err)

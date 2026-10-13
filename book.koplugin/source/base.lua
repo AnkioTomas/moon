@@ -173,7 +173,7 @@ SourceBase.__index = SourceBase
 function SourceBase.defer(cb, ...)
     local args, cancelled = { n = select("#", ...), ... }, false
     require("ui/uimanager"):nextTick(function()
-        if not cancelled then cb(unpack(args, 1, args.n)) end
+        if not cancelled then require("ui.guard").call("source callback", cb, unpack(args, 1, args.n)) end
     end)
     return { cancel = function() cancelled = true end }
 end

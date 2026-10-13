@@ -63,7 +63,7 @@ function Translate.onCreate()
         if not Translate.isEnabled() then
             return native_show_translation(self, text, detailed_view, source_lang, target_lang, from_highlight, index)
         end
-        return showTranslation(self, text, detailed_view, source_lang, target_lang, from_highlight, index)
+        return require("ui.guard").call("edge translate", showTranslation, self, text, detailed_view, source_lang, target_lang, from_highlight, index)
     end
 end
 

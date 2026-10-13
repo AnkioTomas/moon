@@ -54,6 +54,8 @@ local function inCache(path)
     return type(path) == "string" and path:sub(1, #root) == root
 end
 
+local trash_seq = 0
+
 --- 删单书工作目录（整本/章节/图片）与封面文件，并撤掉目录下的章节登记。
 ---@param source_id string
 ---@param stable_id string
@@ -62,8 +64,17 @@ end
 local function purgeBookFiles(source_id, stable_id)
     local dir = Paths.bookWorkDir(stable_id, source_id)
     local leftover
-    if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory" then
-        if not require("ffi/util").purgeDir(dir) then
+    local lfs = require("libs/libkoreader-lfs")
+    if lfs.attributes(dir, "mode") == "directory" then
+        -- 漫画工作目录动辄上千张图，同步删要卡好几秒：同盘改名移走即刻生效，再分 tick 慢慢删。
+        -- 改名失败才退回同步删；中途关机留下的 .trash 由「清空缓存」一并清掉。
+        trash_seq = trash_seq + 1
+        local trash = Paths.cacheDir() .. "/.trash"
+        local moved = trash .. "/" .. os.time() .. "-" .. trash_seq
+        lfs.mkdir(trash)
+        if os.rename(dir, moved) then
+            require("book.cache").purgeAsync(moved)
+        elseif not require("ffi/util").purgeDir(dir) then
             logger.warn("book cache purge failed", dir)
             leftover = "partial"
         end

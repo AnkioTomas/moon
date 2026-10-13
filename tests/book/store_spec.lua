@@ -56,6 +56,7 @@ package.preload["libs/libkoreader-lfs"] = function()
             if field == "mode" then return "directory" end
             return nil
         end,
+        mkdir = function() return true end,
     }
 end
 package.preload["ffi/util"] = function()
@@ -409,6 +410,25 @@ do
     Assert.eq(leftover, "partial")
     Assert.eq(warnings[1][1], "book cache purge failed")
     purge_ok = true
+    warnings = {}
+end
+
+-- ── markDeleted：工作目录改名移进 .trash 后交给后台分 tick 删，不同步 purge ──
+do
+    local purged = {}
+    package.loaded["book.cache"] = { purgeAsync = function(dir) purged[#purged + 1] = dir end }
+    local original_rename = os.rename
+    local renamed
+    os.rename = function(from, to) renamed = { from, to }; return true end
+    purge_ok = false
+    local ok, leftover = Store.markDeleted("wechat", "moved")
+    os.rename = original_rename
+    purge_ok = true
+    package.loaded["book.cache"] = nil
+    Assert.is_true(ok)
+    Assert.is_nil(leftover, "改名成功即算删掉")
+    Assert.matches(renamed[2], "/%.trash/%d+%-%d+$")
+    Assert.eq(purged[1], renamed[2])
     warnings = {}
 end
 

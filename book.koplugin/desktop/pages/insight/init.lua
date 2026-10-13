@@ -210,10 +210,10 @@ end
 function Insight:updateView()
     local desktop = self.desktop
     if self.state then return self:build() end
-    UIManager:nextTick(function()
+    UIManager:nextTick(require("ui.guard").wrap("insight fetch", function()
         if desktop.closed or desktop.tab ~= "insight" then return end
         self:fetch()
-    end)
+    end))
     local t = Theme.current()
     local width, height = desktop.dimen.w, desktop:contentHeight()
     return Box:new{

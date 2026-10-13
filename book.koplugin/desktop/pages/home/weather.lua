@@ -296,12 +296,12 @@ end
 function M:scheduleHourly()
     stopTick(self)
     if not self.active then return end
-    self._tick = function()
+    self._tick = require("ui.guard").wrap("home weather", function()
         if not self.active then return end
         self:paint()
         self:pull()
         self:scheduleHourly()
-    end
+    end)
     UIManager:scheduleIn(INTERVAL, self._tick)
 end
 

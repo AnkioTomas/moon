@@ -64,7 +64,7 @@ function M.onCreate()
                         text = _("通过远程管理分享"),
                         callback = function()
                             -- 二维码是下一步页面，不能叠在仍占满屏幕的截图确认框上。
-                            M.share(path, function()
+                            require("ui.guard").call("remote share", M.share, path, function()
                                 if screenshot_dialog and screenshot_dialog.onClose then
                                     screenshot_dialog:onClose()
                                 else

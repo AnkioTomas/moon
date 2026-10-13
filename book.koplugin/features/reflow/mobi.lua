@@ -48,13 +48,17 @@ function Mobi.extract(source, cb)
     local cancelled = false
     local finished = false
     local document
+    --- openDocument 对已打开的文件返回阅读器正在用的同一实例（只加引用计数）：末页 gotoPage 会挪走阅读位置，收尾时放回。
+    local restore_xp
     local pages = {}
 
-    --- 关闭已打开的 crengine 文档并置空句柄；重复调用无副作用。
+    --- 放回阅读位置、关闭 crengine 文档（共享实例只减引用）并置空句柄；重复调用无副作用。
     local function closeDocument()
         local doc = document
         document = nil
-        if doc and type(doc.close) == "function" then
+        if not doc then return end
+        if restore_xp then pcall(doc.gotoXPointer, doc, restore_xp) end
+        if type(doc.close) == "function" then
             pcall(doc.close, doc)
         end
     end
@@ -124,13 +128,13 @@ function Mobi.extract(source, cb)
             end
             finish(text)
         else
-            UIManager:nextTick(function()
+            UIManager:nextTick(require("ui.guard").wrap("mobi extract", function()
                 extractPage(page + 1, page_count)
-            end)
+            end))
         end
     end
 
-    UIManager:nextTick(function()
+    UIManager:nextTick(require("ui.guard").wrap("mobi extract", function()
         if cancelled then
             return
         end
@@ -145,13 +149,17 @@ function Mobi.extract(source, cb)
                 return nil, _("无法读取 MOBI")
             end
             document = doc
-            if type(doc.loadDocument) ~= "function" or not doc:loadDocument() then
-                return nil, _("无法读取 MOBI")
+            if doc.been_rendered then
+                restore_xp = doc:getXPointer()
+            else
+                if type(doc.loadDocument) ~= "function" or not doc:loadDocument() then
+                    return nil, _("无法读取 MOBI")
+                end
+                if type(doc.render) ~= "function" then
+                    return nil, _("此 MOBI 无法由 CRengine 打开")
+                end
+                doc:render()
             end
-            if type(doc.render) ~= "function" then
-                return nil, _("此 MOBI 无法由 CRengine 打开")
-            end
-            doc:render()
             local count = math.floor(tonumber(doc:getPageCount()) or 0)
             if count < 1 then
                 return nil, _("MOBI 没有可提取的文本")
@@ -166,10 +174,10 @@ function Mobi.extract(source, cb)
             finish(nil, open_err)
             return
         end
-        UIManager:nextTick(function()
+        UIManager:nextTick(require("ui.guard").wrap("mobi extract", function()
             extractPage(1, result)
-        end)
-    end)
+        end))
+    end))
 
     return job
 end

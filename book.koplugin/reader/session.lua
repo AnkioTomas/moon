@@ -14,6 +14,7 @@ local Store = require("book.store")
 local Snapshot = require("reader.session.snapshot")
 local ChapterMode = require("reader.session.chapter")
 local Toc = require("reader.session.toc")
+local Guard = require("ui.guard")
 local _ = require("gettext")
 
 ---@class BookReaderSession
@@ -52,14 +53,14 @@ local function installEndOfBookHandler(plugin, ui)
         return
     end
     ui._book_end_of_book_handler = true
-    status.onEndOfBook = function(self)
+    status.onEndOfBook = Guard.wrap("onEndOfBook", function()
         if ChapterMode.onChapterBoundary(Session._snapshot, 1) then
             return true
         end
         updateReadState(Session._snapshot, true)
         require("reader.end_dialog").show(plugin, Session._snapshot and Session._snapshot.identity)
         return true
-    end
+    end)
 end
 
 ---@param plugin table
@@ -82,12 +83,12 @@ end
 ---@param identity BookIdentity
 local function ensureCover(ui, identity)
     local doc = ui.document
-    require("ui/uimanager"):nextTick(function()
+    require("ui/uimanager"):nextTick(require("ui.guard").wrap("ensure cover", function()
         if ui.document ~= doc then return end
         local Paths = require("utils.paths")
         Paths.ensureLayout(identity.source_id)
         require("book.cover").save(doc, Paths.coverPath(identity.stable_id, identity.source_id))
-    end)
+    end))
 end
 
 --- 当前阅读快照；调用方只读，不得修改其字段。
@@ -289,7 +290,7 @@ function Session.onPageUpdate(plugin, page)
             page = session.page,
             total_pages = session.total_pages,
             percent = session.percent,
-            position = require("reader.session.progress").position(session),
+            position = session.position,
         })
     end
 end

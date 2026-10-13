@@ -116,11 +116,11 @@ end
 function M:tick()
     if not self.time_widget then return end
     stopTick(self)
-    self._tick = function()
+    self._tick = require("ui.guard").wrap("home clock", function()
         if not self.active then return end
         self:paint()
         UIManager:scheduleIn(61 - tonumber(os.date("%S")), self._tick)
-    end
+    end)
     self._tick()
 end
 

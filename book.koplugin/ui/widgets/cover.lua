@@ -58,7 +58,7 @@ function CoverCell.opener(owner, ctx)
         local token = {}
         owner._open_token = token
         if desktop then UIManager:setDirty(desktop, "ui") end
-        UIManager:nextTick(function()
+        UIManager:nextTick(require("ui.guard").wrap("open book", function()
             if owner._open_token ~= token then return end
             require("desktop.open").book(plugin, book, function()
                 if owner._open_token ~= token then return end
@@ -66,7 +66,7 @@ function CoverCell.opener(owner, ctx)
                 clearOpening(owner)
                 if desktop then UIManager:setDirty(desktop, "ui") end
             end)
-        end)
+        end))
     end
 end
 

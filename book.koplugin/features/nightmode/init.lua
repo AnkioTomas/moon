@@ -13,6 +13,7 @@
 
 local MoonSettings = require("utils.settings")
 local Text = require("utils.text")
+local Guard = require("ui.guard")
 
 local NightMode = {}
 
@@ -192,7 +193,7 @@ local function clockTarget(percents)
 end
 
 --- 读环境光档位或按时段估算，目标亮度变了才设，然后排下一次读取（传感器轮询，时段等到下一个起点）。
-function NightMode.sense()
+NightMode.sense = Guard.wrap("nightmode sense", function()
     local UIManager = require("ui/uimanager")
     UIManager:unschedule(NightMode.sense)
     local source = NightMode.lightSource()
@@ -215,7 +216,7 @@ function NightMode.sense()
     end
     UIManager:scheduleIn(delay, NightMode.sense)
     if daylight then NightMode.refreshWeather() end
-end
+end)
 
 --- 取当前天气（只读缓存；过期由 ensure 入队）。离线拿到空，倍率回落到 1。
 function NightMode.refreshWeather()
@@ -260,7 +261,7 @@ function NightMode.setLight(on)
 end
 
 --- 按当前时刻判定昼夜，状态变了才切，然后排到下一个切换点。
-function NightMode.tick()
+NightMode.tick = Guard.wrap("nightmode tick", function()
     local UIManager = require("ui/uimanager")
     UIManager:unschedule(NightMode.tick)
     local now = os.time()
@@ -277,7 +278,7 @@ function NightMode.tick()
         UIManager:broadcastEvent(require("ui/event"):new("SetNightMode", night))
     end
     UIManager:scheduleIn(NightMode.nextDelay(minute, t.sec, from, to), NightMode.tick)
-end
+end)
 
 --- 切换模式并立即按新规则应用一次。
 ---@param mode "off"|"schedule"|"sun"

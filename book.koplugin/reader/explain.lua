@@ -64,7 +64,7 @@ function Explain.run(ui, selected)
     if selected == "" then
         return
     end
-    require("ui/network/manager"):runWhenOnline(function()
+    require("ui/network/manager"):runWhenOnline(require("ui.guard").wrap("ai explain", function()
         local ctx = require("features.xray.context").forAnalysis(ui, CONTEXT_LIMIT)
         local session = require("reader.session").current()
         local book = session and session.identity and session.identity.book or {}
@@ -105,7 +105,7 @@ function Explain.run(ui, selected)
             }
             viewer:show()
         end)
-    end)
+    end))
 end
 
 --- 往划词菜单加「AI 解释」（每个 ReaderUI 只装一次）；AI 未配置时不显示。
@@ -121,11 +121,11 @@ function Explain.install(ui)
             show_in_highlight_dialog_func = function()
                 return require("ai").isConfigured()
             end,
-            callback = function()
+            callback = require("ui.guard").wrap("ai explain", function()
                 local selected = require("util").cleanupSelectedText(this.selected_text.text)
                 this:onClose(true)
                 Explain.run(this.ui, selected)
-            end,
+            end),
         }
     end)
 end

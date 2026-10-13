@@ -93,9 +93,9 @@ function Reflow.analyzeAsync(identity, cb)
     if fileKind(path) == "mobi" then
         return require("features.reflow.mobi").extract(path, done)
     end
-    require("ui/uimanager"):nextTick(function()
+    require("ui/uimanager"):nextTick(require("ui.guard").wrap("reflow read", function()
         done(Text2Epub.read(path))
-    end)
+    end))
     return { cancel = function() end }
 end
 

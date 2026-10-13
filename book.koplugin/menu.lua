@@ -101,7 +101,7 @@ function Menu.addToMainMenu(plugin, menu_items)
     menu_items[MENU_ITEM_ID] = {
         text = _("月读"),
         sorting_hint = "setting",
-        callback = function() Desktop.open(plugin) end,
+        callback = require("ui.guard").wrap("open desktop", function() Desktop.open(plugin) end),
     }
     if require("libs/libkoreader-lfs").attributes(plugin.path .. "/demo", "mode") == "directory" then
         require("demo").addToMainMenu(menu_items)

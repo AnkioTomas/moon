@@ -368,6 +368,11 @@ function Home:enterEdit()
     if self.editing then return end
     self.editing = true
     redraw(self)
+    -- 组件上叠网点遮罩，局刷会留残影。
+    local desktop = self.desktop
+    if desktop.active and desktop.tab == "home" and require("utils.settings").get("ui").mesh_mask then
+        require("ui/uimanager"):setDirty(desktop, "full")
+    end
 end
 
 --- 退出编辑模式；每个编辑动作已各自落盘。

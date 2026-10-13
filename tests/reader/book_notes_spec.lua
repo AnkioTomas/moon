@@ -44,11 +44,18 @@ end
 package.preload["ui/event"] = function()
     return { new = function(_, name, a) return { name = name, arg = a } end }
 end
-package.preload["ui/widget/menu"] = function()
-    return { new = function(_, o) return o end }
+package.preload["ui.themes.widgets.list"] = function()
+    return { new = function(_, o)
+        function o:show() state.shown = self end
+        function o:close() state.closed = state.closed + 1 end
+        return o
+    end }
+end
+package.preload["ui.guard"] = function()
+    return { wrap = function(_, fn) return fn end }
 end
 for _, name in ipairs({ "json", "l10n", "gettext", "book.note_db", "reader.session", "ui/uimanager",
-    "ui/event", "ui/widget/menu", "reader.book_notes" }) do
+    "ui/event", "ui.themes.widgets.list", "ui.guard", "reader.book_notes" }) do
     package.loaded[name] = nil
 end
 
@@ -118,11 +125,13 @@ do
     ui.bookmark:onShowBookmark()
     Assert.eq(native(), 0)
     local menu = state.shown
+    menu.item_table = menu.items
     Assert.eq(#menu.item_table, 3)
     Assert.matches(menu.title, "3")
     Assert.eq(menu.item_table[2].mandatory, "第三章")
-    Assert.is_true(menu.item_table[2].bold)
-    Assert.eq(menu.item_table[3].text, "五章划线\n✎ 想法五")
+    Assert.is_nil(menu.item_table[2].icon)
+    Assert.eq(menu.item_table[3].text, "五章划线")
+    Assert.eq(menu.item_table[3].icon, "edit_note", "有想法的条目带笔记图标")
 
     menu.item_table[2].callback()
     Assert.eq(ui.events[1].name, "GotoXPointer")
@@ -137,6 +146,7 @@ do
     Assert.eq(state.goto_calls[2].idx, 2)
     Assert.is_nil(state.goto_calls[2].opts.xpointer, "没有位置时落到章首")
 
-    menu:onLeftButtonTap()
+    menu.left_callback()
+    Assert.eq(state.closed, 1)
     Assert.eq(native(), 1)
 end

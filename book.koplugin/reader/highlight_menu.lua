@@ -135,8 +135,9 @@ local function patchShowMenu()
     end
     ReaderHighlight._book_popup_patched = true
     --- 原生实现把 columns 写死为 2。保留其余生命周期，仅改为工具栏五列与可配顺序。
+    ---@param self table ReaderHighlight
     ---@param index number|nil 已有标注的序号；新划词为 nil
-    function ReaderHighlight:onShowHighlightMenu(index)
+    local function showMenu(self, index)
         HighlightMenu.ensureWrapped(self)
         if not self.selected_text then
             return
@@ -182,6 +183,7 @@ local function patchShowMenu()
         end
         return true
     end
+    ReaderHighlight.onShowHighlightMenu = require("ui.guard").wrap("highlight menu", showMenu)
 end
 
 --- 安装划词弹窗显隐门控；重复调用无副作用。

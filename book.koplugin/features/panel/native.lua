@@ -84,7 +84,7 @@ end
 --- 下一 tick 关闭文档并回到月读桌面，而不是 KOReader 原生文件管理器。
 ---@param ui table|nil
 local function closeToDesktop(ui)
-    UIManager:nextTick(function()
+    UIManager:nextTick(require("ui.guard").wrap("close to desktop", function()
         if ui and ui.onClose then ui:onClose() end
         local FileManager = require("apps/filemanager/filemanager")
         -- 打开书时 ReaderUI 会关掉 FileManager；这里先重建，否则关闭文档后窗口栈为空直接退出。
@@ -92,7 +92,7 @@ local function closeToDesktop(ui)
             FileManager:showFiles()
         end
         require("desktop").open(FileManager.instance.book)
-    end)
+    end))
 end
 Native.closeToDesktop = closeToDesktop
 
@@ -103,12 +103,22 @@ Native.closeToDesktop = closeToDesktop
 ---@param pad number
 ---@return table
 local function wrapPanel(body, W, width, pad)
-    return W.Box:new{
+    local box = W.Box:new{
         style = { bg = W.Theme.current().color.page },
         width = width,
         height = pad * 2 + body:getSize().h,
         body,
     }
+    -- 面板挂在原生 TouchMenu 里，不经 Modal 的 guard：按钮、滑条、动作执行都从这里进，出错算已处理。
+    local handle = box.handleEvent
+    function box:handleEvent(event)
+        local ok, handled = Guard.call("quick panel " .. tostring(event.handler), function()
+            return true, handle(self, event)
+        end)
+        if not ok then return true end
+        return handled
+    end
+    return box
 end
 
 --- 按面板模式构建面板主体内容。
@@ -386,10 +396,10 @@ local function patchDrawerTab(menu)
                 local plugin = menu.ui and menu.ui.book
                 if plugin and not plugin.desktop and drawerOpensDesktop() then
                     -- switchMenuTab 在回调后还要渲染本 Tab，关菜单推迟到下一 tick。
-                    UIManager:nextTick(function()
+                    UIManager:nextTick(require("ui.guard").wrap("open desktop", function()
                         menu:onCloseFileManagerMenu()
                         require("desktop").open(plugin)
-                    end)
+                    end))
                     return
                 end
                 if native then native() end

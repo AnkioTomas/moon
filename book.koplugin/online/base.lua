@@ -284,8 +284,10 @@ local function notify(self, data, err)
     for i = 1, #waiters do
         snapshot[i] = waiters[i]
     end
+    -- 观察者是 UI；一个抛错不能跳过后面的观察者和任务的 done()（否则队列一直被占）。
+    local Guard = require("ui.guard")
     for i = 1, #snapshot do
-        snapshot[i](data, err)
+        Guard.call("online watcher " .. self.name, snapshot[i], data, err)
     end
 end
 

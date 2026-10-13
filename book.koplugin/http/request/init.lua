@@ -78,12 +78,11 @@ end
 function Request.request(opts, cb)
     local ctx, begin_err = Fetch.begin(opts, "book.http")
     if not ctx then
-        cb(nil, begin_err)
-        return Fetch.NOOP
+        return Fetch.fail("http callback", cb, nil, begin_err)
     end
     local state = { cancelled = false, done = false }
 
-    --- 先回调再 release，连环请求不会把泵拆了又装。
+    --- 先回调再 release，连环请求不会把泵拆了又装；回调经 guard，抛错也一定 release。
     ---@param res table|nil
     local function settle(res, err)
         if state.done then
@@ -94,7 +93,7 @@ function Request.request(opts, cb)
         Fetch.log(ctx, err or (state.cancelled and "cancelled"), "status", res and res.code or "-",
             "bytes", res and type(res.body) == "string" and #res.body or 0)
         if not state.cancelled then
-            cb(res, err)
+            Fetch.call("http callback", cb, res, err)
         end
         Turbo.release()
     end
@@ -205,8 +204,7 @@ function Request.download(opts, dest, cb)
 
     local file, open_err = io.open(tmp, "wb")
     if not file then
-        done(false, open_err)
-        return Fetch.NOOP
+        return Fetch.fail("http download", done, false, open_err)
     end
 
     --- 已注定失败（超限/写盘错）就立刻断流，不再白拉剩余 body；on_done 仍会收口。

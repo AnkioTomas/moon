@@ -321,23 +321,27 @@ local function hijackFooter(ui)
     if footer._book_bars_hijacked then
         return
     end
+    -- 原生方法照常调用，只把月读自己的判断经 guard：出错时按「月读没画底栏」退回原生行为。
+    local function ours(self)
+        return Guard.call("bars footer", drawn, self.ui, "bottom")
+    end
     local orig_tap = footer.TapFooter
     footer.TapFooter = function(self, ges)
-        if drawn(self.ui, "bottom") then
+        if ours(self) then
             return false
         end
         return orig_tap(self, ges)
     end
     local orig_hold = footer.onHoldFooter
     footer.onHoldFooter = function(self, ges)
-        if drawn(self.ui, "bottom") then
+        if ours(self) then
             return true
         end
         return orig_hold(self, ges)
     end
     local orig_update = footer.onUpdateFooter
     footer.onUpdateFooter = function(self, force_repaint, full_repaint)
-        if force_repaint and drawn(self.ui, "bottom") then
+        if force_repaint and ours(self) then
             full_repaint = true
         end
         return orig_update(self, force_repaint, full_repaint)
@@ -345,7 +349,7 @@ local function hijackFooter(ui)
     local orig_toggle = footer.onToggleFooterMode
     footer.onToggleFooterMode = function(self)
         local handled = orig_toggle(self)
-        savePreference("book_reader_bottom_bar", self.view.footer_visible)
+        Guard.call("bars save preference", savePreference, "book_reader_bottom_bar", self.view.footer_visible)
         return handled
     end
     footer._book_bars_hijacked = true
@@ -359,9 +363,9 @@ function Bars.install(ui)
     end
     ui._book_bars_installed = true
     hijackFooter(ui)
-    ui:registerPostReaderReadyCallback(function()
+    ui:registerPostReaderReadyCallback(Guard.wrap("bars preferences", function()
         Bars.applyPreferences(ui)
-    end)
+    end))
 end
 
 --- 停时钟、释放文字控件；关书时调。
@@ -380,13 +384,15 @@ function Bars:startClock()
     -- Bars 是单例，registerViewModule 每次开书都把 self.ui 覆写成新的 ReaderUI：
     -- 闭包里必须捕获本次的 ui，CloseDocument 没送达时旧链条也能自己停摆。
     local ui = self.ui
-    local function tick()
+    -- 出错就停摆（不再续约），免得每分钟弹一次错误页。
+    local tick
+    tick = Guard.wrap("bars clock", function()
         if require("apps/reader/readerui").instance ~= ui then
             return
         end
         refreshBars(ui)
         UIManager:scheduleIn(61 - tonumber(os.date("%S")), tick)
-    end
+    end)
     self._clock = tick
     UIManager:scheduleIn(61 - tonumber(os.date("%S")), tick)
 end

@@ -197,13 +197,13 @@ function M.setPosterStyle(style)
     if require("features.lockscreen.poster").validStyle(style) then save("lock_screen_poster_style", style) end
 end
 
---- 设置自定义背景图路径（PathChooser 选出的真实文件）。
+--- 设置自定义背景图路径（路径选择器选出的真实文件）。
 ---@param path string
 function M.setCustomImage(path)
     save("lock_screen_custom_image", path)
 end
 
---- 设置壁纸文件夹路径（PathChooser 选出的真实目录）。
+--- 设置壁纸文件夹路径（路径选择器选出的真实目录）。
 ---@param path string
 function M.setFolder(path)
     save("lock_screen_folder", path)

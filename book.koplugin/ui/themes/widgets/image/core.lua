@@ -57,7 +57,8 @@ local replaced = {}
 -- KOReader ImageCache 只有 8 MiB 且全局共用，彩屏或内存告急时装不下一屏封面，
 -- 每次重建都要从文件全尺寸重解，按队列逐张上屏。
 -- 淘汰只丢引用、不 free：仍在显示的 ImageWidget 持有同一张位图，释放交给 Blitbuffer 的 GC 终结器。
-local BITMAP_BUDGET = 16 * 1024 * 1024
+-- 6 MiB ≈ 灰度屏 4 屏封面、彩屏 1 屏；256 MiB 设备上常驻缓存不能更大。
+local BITMAP_BUDGET = 6 * 1024 * 1024
 local bitmaps = {}
 local bitmap_bytes, bitmap_tick = 0, 0
 

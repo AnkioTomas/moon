@@ -65,10 +65,10 @@ local function walkAsync(root, visit, done)
         if #stack == 0 then
             done(true)
         else
-            UIManager:nextTick(step)
+            UIManager:nextTick(require("ui.guard").wrap("book cache", step))
         end
     end
-    UIManager:nextTick(step)
+    UIManager:nextTick(require("ui.guard").wrap("book cache", step))
     return { cancel = function() cancelled = true end }
 end
 
@@ -87,6 +87,14 @@ function Cache.sizeBytesAsync(cb)
             total = total + (tonumber(db_attr.size) or 0)
         end
         cb(total)
+    end)
+end
+
+--- 后台分 tick 删除一个已脱离书库的目录（删书时改名移走的工作目录）；失败只记日志。
+---@param dir string
+function Cache.purgeAsync(dir)
+    walkAsync(dir, function(path) return os.remove(path) end, function(ok, err)
+        if not ok then logger.warn("book cache trash purge failed", dir, err) end
     end)
 end
 

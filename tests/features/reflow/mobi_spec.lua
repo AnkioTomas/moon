@@ -159,6 +159,27 @@ do
     Assert.eq(doc.close_count, 1)
 end
 
+-- 阅读器正在读同一本：openDocument 返回共享实例（已渲染），不得重载 / 重排，末页跳转后放回原位置。
+do
+    local doc = baseDoc(2)
+    doc.been_rendered = true
+    local at = "reading"
+    function doc:loadDocument() error("must not reload shared document") end
+    function doc:render() error("must not re-render shared document") end
+    function doc:getXPointer() return at end
+    function doc:gotoXPointer(xp) at = xp end
+    function doc:getPageXPointer(page) return "p" .. page end
+    function doc:getTextFromXPointers() return "正文" end
+    function doc:gotoPage(page) at = "page" .. page end
+    function doc:getTextFromPositions() return { text = "结尾" } end
+
+    local text, err = run(doc)
+    Assert.eq(text, "正文\n结尾")
+    Assert.is_nil(err)
+    Assert.eq(at, "reading")
+    Assert.eq(doc.close_count, 1)
+end
+
 -- 每页单独 nextTick；打开后取消会立即 close，排队的页不再提取也不回调。
 do
     local UIManager = require("ui/uimanager")

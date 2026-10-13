@@ -87,6 +87,8 @@ end
 ---@return ReviewTarget
 local function chapterTarget(self, identity)
     local source = identity.source --[[@as ParagraphReviewSource]]
+    -- 回包时文档可能已关（document 为 nil）或已切到别的章文件，只能用发起时这一章。
+    local file = self.ui.document.file
     local fetch = function(cb)
         local locate
         local job = source:paragraphHotspotsAsync(identity, function(hotspots, err)
@@ -94,7 +96,7 @@ local function chapterTarget(self, identity)
                 cb(nil, err)
                 return
             end
-            local f = assert(io.open(self.ui.document.file, "rb"))
+            local f = assert(io.open(file, "rb"))
             local html = f:read("*a")
             f:close()
             locate = locateAsync(source, hotspots, html, cb)

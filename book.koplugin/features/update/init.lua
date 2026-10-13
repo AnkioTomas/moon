@@ -188,11 +188,11 @@ local function pickDownloadUrl(release, cb)
                 -- 死镜像常回 200 + 自家首页且不带长度，只凭长度拦不住。
                 local mime = headers:get("Content-Type", true)
                 if mime and mime:lower():find("text/html", 1, true) then return end
-                UIManager:nextTick(function() settle(url) end)
+                UIManager:nextTick(require("ui.guard").wrap("update settle", function() settle(url) end))
             end,
             on_done = function()
                 pending = pending - 1
-                if pending == 0 then UIManager:nextTick(function() settle(release.url) end) end
+                if pending == 0 then UIManager:nextTick(require("ui.guard").wrap("update settle", function() settle(release.url) end)) end
             end,
         })
     end

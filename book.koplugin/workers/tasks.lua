@@ -29,6 +29,8 @@ restartable 的任务归队列所有，队列可以随时中断并从头重跑�
 @module koplugin.book.workers.tasks
 --]]
 
+local Guard = require("ui.guard")
+
 local Tasks = {}
 
 ---@alias BookTaskKind "download"|"sync"|"cache"|"online"
@@ -75,7 +77,7 @@ local suspended = false
 local function flushChanged()
     change_scheduled = false
     for callback in pairs(watchers) do
-        callback()
+        Guard.call("tasks watcher", callback)
     end
 end
 
@@ -192,7 +194,7 @@ local function settle(task, result)
     task.result = result
     remove(task)
     archive(task)
-    if task.on_done then task.on_done(result) end
+    if task.on_done then Guard.call("task on_done " .. task.kind, task.on_done, result) end
     changed()
     startNext()
 end
@@ -207,15 +209,22 @@ start = function(task)
         return task.token == token and task.state == "running"
     end
     changed()
-    local handle = task.run(function(text, count, total)
-        if not live() then return end
-        task.text = text
-        task.count = count or task.count
-        task.total = total or task.total
-        changed()
-    end, function(result)
-        if live() then settle(task, result) end
+    -- run 同步抛错时任务还停在 running，会永远占着执行权；按失败结算后队列继续。
+    local ran, handle = Guard.call("task run " .. task.kind, function()
+        return true, task.run(function(text, count, total)
+            if not live() then return end
+            task.text = text
+            task.count = count or task.count
+            task.total = total or task.total
+            changed()
+        end, function(result)
+            if live() then settle(task, result) end
+        end)
     end)
+    if not ran then
+        if live() then settle(task, { ok = false, err = "task crashed" }) end
+        return
+    end
     if live() then task.handle = handle end
 end
 

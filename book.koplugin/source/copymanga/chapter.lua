@@ -71,9 +71,9 @@ local function buildArchive(paths, archive_path, state, cb)
             return
         end
         index = index + 1
-        require("ui/uimanager"):nextTick(nextFile)
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("copymanga write", nextFile))
     end
-    require("ui/uimanager"):nextTick(nextFile)
+    require("ui/uimanager"):nextTick(require("ui.guard").wrap("copymanga write", nextFile))
 end
 
 --- 章节 CBZ 路径。按章节 uuid 命名：多分组漫画更新后连续章序号会整体后移，按序号命名会串章。
@@ -106,9 +106,9 @@ function Chapter.materializeAsync(client, identity, chapter, on_progress, cb)
     ---@type { cancelled: boolean, active: CancelHandle|nil, writer: ArchiverWriter|nil }
     local state = { cancelled = false, active = nil, writer = nil }
     if fileReady(archive_path) then
-        require("ui/uimanager"):nextTick(function()
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("copymanga callback", function()
             if not state.cancelled then cb(archive_path) end
-        end)
+        end))
         return { cancel = function() state.cancelled = true end }
     end
 
@@ -137,7 +137,7 @@ function Chapter.materializeAsync(client, identity, chapter, on_progress, cb)
             if Image.ok(path) then
                 if on_progress then on_progress(current, #urls) end
                 current = current + 1
-                require("ui/uimanager"):nextTick(nextImage)
+                require("ui/uimanager"):nextTick(require("ui.guard").wrap("copymanga image", nextImage))
                 return
             end
             state.active = require("http.request").download({
@@ -213,14 +213,14 @@ function Chapter.prefetchAsync(client, identity, toc, from_idx, count, ops, cb)
                 ops.progress(cached_count + failed_count, #chapters)
             end
             if interval > 0 then
-                UIManager:scheduleIn(interval, step)
+                UIManager:scheduleIn(interval, require("ui.guard").wrap("copymanga step", step))
             else
-                UIManager:nextTick(step)
+                UIManager:nextTick(require("ui.guard").wrap("copymanga step", step))
             end
         end)
     end
 
-    UIManager:nextTick(step)
+    UIManager:nextTick(require("ui.guard").wrap("copymanga step", step))
     return { cancel = function()
             cancelled = true
             if active then active.cancel() end

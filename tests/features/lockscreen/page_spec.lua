@@ -47,8 +47,8 @@ end
 local component_id = "current"
 local background_mode = "bing"
 local chooser
-package.preload["ui/widget/pathchooser"] = function()
-    return { new = function(_, opts) chooser = opts; return opts end }
+package.preload["ui.themes.widgets.path_picker"] = function()
+    return { new = function(_self, opts) chooser = opts; opts.show = function() end; return opts end }
 end
 package.preload["apps/filemanager/filemanagerutil"] = function()
     return { getHomeFolder = function() return "/home" end }
@@ -148,12 +148,11 @@ Assert.eq(pick.title, "选择图片")
 Assert.matches(pick.subtitle, "^/nonexistent/custom%.png · 600 × 800$")
 pick.callback()
 Assert.is_true(chooser.select_file)
-Assert.is_false(chooser.select_directory)
 Assert.eq(chooser.path, "/home")
-Assert.is_true(chooser.file_filter("a.JPG"))
-Assert.is_false(chooser.file_filter("a.epub"))
+Assert.is_true(chooser.filter("a.JPG"))
+Assert.is_false(chooser.filter("a.epub"))
 ticks = {}
-chooser.onConfirm("/mnt/us/me.png")
+chooser.on_select("/mnt/us/me.png")
 Assert.eq(log[#log - 2], "image:/mnt/us/me.png")
 Assert.len(ticks, 1, "选完立刻重出图")
 
@@ -165,10 +164,9 @@ Assert.eq(folder_pick.title, "选择文件夹")
 Assert.eq(folder_pick.subtitle, "/")
 folder_pick.callback()
 Assert.is_false(chooser.select_file)
-Assert.is_true(chooser.select_directory)
 Assert.eq(chooser.path, "/")
-Assert.is_nil(chooser.file_filter)
-chooser.onConfirm("/mnt/us/walls")
+Assert.is_nil(chooser.filter)
+chooser.on_select("/mnt/us/walls")
 Assert.eq(log[#log - 2], "folder:/mnt/us/walls")
 
 return true

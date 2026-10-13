@@ -231,7 +231,7 @@ local function scheduleScan(self, key, entities)
     local token = {}
     self._scan_token = token
     local timer
-    timer = function()
+    timer = require("ui.guard").wrap("xray scan", function()
         if self._scan_token ~= token or self._scan_pending ~= key or self.ui ~= ui then
             return
         end
@@ -255,7 +255,8 @@ local function scheduleScan(self, key, entities)
                 self._scan_pending = nil
                 self._marks = marks or {}
                 self._render_key = key
-                if ui.dialog then
+                -- updateView 排扫描前已清空标记并随翻页画过一次，空结果无需再整页刷新。
+                if ui.dialog and #self._marks > 0 then
                     UIManager:setDirty(ui.dialog, "ui")
                 end
             end,
@@ -271,7 +272,7 @@ local function scheduleScan(self, key, entities)
         if self._scan_token == token and not job.settled then
             self._scan_job = job
         end
-    end
+    end)
     self._scan_timer = timer
     UIManager:scheduleIn(SCAN_DEBOUNCE, timer)
 end
@@ -342,11 +343,11 @@ local function registerHighlight(ui)
             show_in_highlight_dialog_func = function()
                 return require("utils.settings").get("features.xray").book_xray_enabled
             end,
-            callback = function()
+            callback = require("ui.guard").wrap("xray lookup", function()
                 local word = require("util").cleanupSelectedText(this.selected_text.text)
                 require("features.xray.ui").lookup(this.ui, word)
                 this:onClose(true)
-            end,
+            end),
         }
     end)
 end
