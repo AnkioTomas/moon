@@ -155,13 +155,7 @@ local function coreEntries(desktop)
             parent = "lookup", order = 90,
             sections = function() return {{ title = _("菜单"), rows = ReaderSettings:popupRows(desktop) }} end,
         },
-        {
-            group = "system", order = 10, id = "language", icon = "language", title = _("语言"),
-            subtitle = _("界面语言"),
-            status = require("ui/language"):getLanguageName(G_reader_settings:readSetting("language") or "C"),
-            status_on = true,
-            page = { title = _("语言"), sections = function() return Language:sections(desktop) end },
-        },
+        { group = "system", order = 10, row = Language:row() },
         {
             group = "system", order = 20, id = "ai", icon = "psychology", title = _("AI 接口"),
             subtitle = _("X-Ray 使用的大模型接口"),
