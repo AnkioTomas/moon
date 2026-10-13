@@ -96,7 +96,8 @@ function BlitBuffer:writePNG(path, color) end
 ---@param border number
 ---@param color any
 ---@param radius number|nil
-function BlitBuffer:paintBorder(x, y, w, h, border, color, radius) end
+---@param anti_alias boolean|nil 圆角抗锯齿（只在 C 实现、Color8 下生效）
+function BlitBuffer:paintBorder(x, y, w, h, border, color, radius, anti_alias) end
 
 ---@param src BlitBuffer
 ---@param dest_x number

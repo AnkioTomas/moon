@@ -103,7 +103,8 @@ function Box:paintTo(bb, x, y)
     end
     local border = Theme.px(s.border or 0)
     if border > 0 then
-        bb:paintBorder(x, y, w, h, border, Blitbuffer.Color8(s.border_color), r)
+        -- 只有边框收 anti_alias（paintRoundedRect 不收）：和 FrameContainer 一样靠它盖住底色的锯齿。
+        bb:paintBorder(x, y, w, h, border, Blitbuffer.Color8(s.border_color), r, true)
     end
     local child = self[1]
     if not child then return end
