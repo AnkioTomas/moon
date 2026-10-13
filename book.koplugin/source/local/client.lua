@@ -21,7 +21,7 @@ local LocalWebdav = require("source.local.webdav")
 local RemoteData = require("source.local.remote_data")
 
 local SOURCE_ID = Common.SOURCE_ID
-local defer, rootPath, localRoot = Common.defer, Common.rootPath, Common.localRoot
+local rootPath, localRoot = Common.rootPath, Common.localRoot
 local remoteRelativePath, coverPath = Common.remoteRelativePath, Common.coverPath
 
 ---@class LocalClient
@@ -114,18 +114,6 @@ function Client:validatePath()
     return true
 end
 
---- 用转换后的临时 EPUB 替换原书，按身份分派：webdav:// 走远端替换，其余是本地文件替换。
----@param temp_path string
----@param stable_id string
----@param cb fun(new_path: string|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Client:replaceBookAsync(temp_path, stable_id, cb)
-    if remoteRelativePath(stable_id) then
-        return self:replaceWebdavAsync(temp_path, stable_id, cb)
-    end
-    return defer(cb, self:replaceBook(temp_path, stable_id))
-end
-
 --- 封面缓存路径（已存在才返回；绝不现提取，coverRequest 在 UI 线程同步调用）。
 ---@param stable_id string
 ---@return string|nil
@@ -139,7 +127,6 @@ end
 
 Client.importAsync = Scan.importAsync
 Client.moveBook = Scan.moveBook
-Client.replaceBook = Scan.replaceBook
 Client.indexOneAsync = Scan.indexOneAsync
 Client.scanAsync = Scan.scanAsync
 
@@ -147,7 +134,6 @@ Client.scanWebdavAsync = LocalWebdav.scanWebdavAsync
 Client.openWebdavAsync = LocalWebdav.openWebdavAsync
 Client.pushBookAsync = LocalWebdav.pushBookAsync
 Client.importWebdavAsync = LocalWebdav.importWebdavAsync
-Client.replaceWebdavAsync = LocalWebdav.replaceWebdavAsync
 Client.testWebdavAsync = LocalWebdav.testWebdavAsync
 
 Client.getProgressAsync = RemoteData.getProgressAsync
