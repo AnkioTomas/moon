@@ -38,6 +38,9 @@ Assert.eq(o.fallback.face.size, t.font.caption)
 Assert.eq(o.fallback.max_width, 116 - t.space.xs * 2)
 Assert.is_nil(Image.widget({ width = 10, height = 10, src = "x", fallback = "" })[1].image_opts.fallback,
     "空文案 = 空白占位")
+local fb_widget = { getSize = function() return { w = 1, h = 1 } end }
+Assert.eq(Image.widget({ width = 10, height = 10, src = "x", fallback = fb_widget })[1].image_opts.fallback,
+    fb_widget, "控件占位原样透传")
 Assert.eq(Image.fetchAsync, require("ui.themes.widgets.image.core").fetchAsync)
 
 -- 换表面：soft 无边框，图不内缩。

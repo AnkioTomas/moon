@@ -24,6 +24,7 @@ local GestureRange = require("ui/gesturerange")
 local Image = require("ui.themes.widgets.image")
 local Icon = require("ui.themes.widgets.icon")
 local Box = require("ui.themes.widgets.box")
+local PlainCover = require("ui.widgets.plain_cover")
 local Text = require("ui.themes.widgets.text")
 local Theme = require("ui.themes")
 local Paths = require("utils.paths")
@@ -475,7 +476,12 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         height = cover_h,
         alpha = false,
         style = {},
-        fallback = title,
+        fallback = PlainCover:new{
+            title = title,
+            author = Book.author(book),
+            width = cover_w,
+            height = cover_h,
+        },
         fallback_src = cached_cover and cached_cover ~= (req and req.url) and cached_cover or nil,
         on_ready = function(path)
             persistCover(book, path)
