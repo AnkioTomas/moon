@@ -152,8 +152,12 @@ local function coreEntries(desktop)
         },
         { parent = "lookup", order = 10, sections = function() return ReaderSettings:lookupSections(desktop) end },
         {
-            parent = "lookup", order = 90,
-            sections = function() return {{ title = _("菜单"), rows = ReaderSettings:popupRows(desktop) }} end,
+            group = "reader", order = 25, id = "popup_menu", icon = "touch_long", title = _("划词菜单"),
+            subtitle = _("按钮开关、顺序与来源"),
+            page = {
+                title = _("划词菜单"),
+                sections = function() return {{ title = _("按钮"), rows = ReaderSettings:popupRows(desktop) }} end,
+            },
         },
         { group = "system", order = 10, row = Language:row() },
         {

@@ -202,7 +202,7 @@ local desktop = {
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 25)
+Assert.len(built_rows, 26)
 Assert.eq(table.concat(section_titles, ","), "书库,桌面,阅读,系统,维护")
 
 local expected = {
@@ -215,6 +215,7 @@ local expected = {
     { title = "锁屏壁纸", id = "feature:lockscreen:main" },
     { title = "阅读行为", id = "reader_behavior" },
     { title = "划词与查询", id = "lookup" },
+    { title = "划词菜单", id = "popup_menu" },
     { title = "阅读快捷面板", id = "feature:panel:reader" },
     { title = "阅读页顶栏", id = "feature:bars:top" },
     { title = "阅读页底栏", id = "feature:bars:bottom" },
@@ -258,7 +259,8 @@ local function sectionTitles(page)
     return table.concat(titles, ",")
 end
 Assert.eq(sectionTitles(behavior), "行为,翻页动画,阅读侧栏")
-Assert.eq(sectionTitles(pages.lookup), "选区,翻译,X-Ray,段评,词典,百科,菜单")
+Assert.eq(sectionTitles(pages.lookup), "选区,翻译,X-Ray,段评,词典,百科")
+Assert.eq(sectionTitles(pages.popup_menu), "按钮")
 Assert.eq(sectionTitles(pages.display), "启动,显示,夜间与亮度")
 
 -- 维护组：update feature 的两行按 order 插在调试日志与关于之间
