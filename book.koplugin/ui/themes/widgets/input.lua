@@ -1,6 +1,6 @@
 --[[--
 主题输入框（替代 InputDialog / MultiInputDialog）：一个或多个输入字段 + 取消 / 确定。
-面板贴顶，给虚拟键盘让位。
+面板贴顶，给虚拟键盘让位；字段多到焦点字段会落进键盘时整块上移，收键盘后回到贴顶。
 
   +-------------------------+
   | 标题                    |
@@ -123,10 +123,45 @@ function Input:init()
     end
     buttons[#buttons + 1] = { text = self.ok_text or _("确定"), variant = "primary", callback = function() self:confirm() end }
     self:setDialog{ title = self.title, body = body, buttons = buttons }
+    self.top_y = self.panel_y
+    -- 各字段框底边相对面板顶的偏移：Box 把子件竖直居中，组内子件从上往下紧排。
+    local panel, group = self[1], self[1][1]
+    ---@cast panel BookThemeBox
+    local function offsetIn(parent, target)
+        local y = 0
+        for _i, child in ipairs(parent) do
+            if child == target then return y end
+            y = y + child:getSize().h
+        end
+    end
+    local body_y = math.floor((panel.box_h - group:getSize().h) / 2) + offsetIn(group, body)
+    self.field_bottoms = {}
+    for i, frame in ipairs(self.frames) do
+        self.field_bottoms[i] = body_y + offsetIn(body, frame) + frame:getSize().h
+    end
+end
+
+--- 键盘开着且焦点字段会落到键盘下面时整块上移，让焦点字段停在键盘上方；否则贴顶。
+function Input:place()
+    local input = self.inputs[self.focus_idx]
+    local y = self.top_y
+    if input:isKeyboardVisible() then
+        local limit = self.dimen.h - input:getKeyboardDimen().h - Theme.px(self.theme.space.sm)
+        y = math.min(y, limit - self.field_bottoms[self.focus_idx])
+    end
+    if y == self.panel_y then return end
+    self.panel_y = y
+    UIManager:setDirty(self, "ui")
 end
 
 function Input:onShow()
     self.inputs[self.focus_idx]:onShowKeyboard()
+    self:place()
+end
+
+--- 键盘上的收起键关掉键盘（VirtualKeyboard:onCloseWithKey 回调）。
+function Input:onKeyboardClosed()
+    self:place()
 end
 
 --- InputText 被点按时回调（含已聚焦字段）：切焦点、换键盘、改描边。
@@ -145,6 +180,7 @@ function Input:onSwitchFocus(input)
         UIManager:setDirty(self, function() return "ui", self[1].dimen end)
     end
     input:onShowKeyboard()
+    self:place()
 end
 
 --- 有方向键的设备上 InputText 点按后会把 parent 当 FocusManager 查焦点坐标；
@@ -162,6 +198,7 @@ function Input:onTapModal(arg, ges)
     local input = self.inputs[self.focus_idx]
     if not ges.pos:intersectWith(self[1].dimen) and input:isKeyboardVisible() then
         input:onCloseKeyboard()
+        self:place()
         return true
     end
     return Modal.onTapModal(self, arg, ges)
