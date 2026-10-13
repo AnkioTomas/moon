@@ -11,7 +11,8 @@ local T = require("ffi/util").template
 ---@class BookSettingsReader
 local ReaderSettings = {}
 
---- 设置页列表顺序；实际弹窗顺序以 HighlightMenu.order() 为准。
+--- 内置按钮的设置页顺序、标题与图标；划词弹窗扫描到的其余按钮（`reader_popup_seen`）排在后面。
+--- 实际弹窗顺序以 HighlightMenu.order() 为准。
 ---@type { id: string, title: string, icon: string }[]
 local POPUP_BUTTONS = {
     { id = "select", title = _("选择"), icon = "highlight" },
@@ -28,6 +29,20 @@ local POPUP_BUTTONS = {
     { id = "qrcode", title = _("生成二维码"), icon = "qr_code" },
     { id = "search", title = _("搜索"), icon = "search" },
 }
+
+--- 按钮来源的展示文字；还没在划词弹窗里出现过的按钮来源未知，返回 nil。
+---@param origin string|nil HighlightMenu.originOf 的结果
+---@return string|nil
+local function originLabel(origin)
+    if not origin then return nil end
+    if origin == "book" then return _("来自：月读") end
+    if origin == "koreader" then return _("来自：KOReader 自带") end
+    local plugin = origin:match("^plugin:(.+)$")
+    if plugin then return T(_("来自：插件 %1"), plugin) end
+    local patch = origin:match("^patch:(.+)$")
+    if patch then return T(_("来自：用户补丁 %1"), patch) end
+    return _("来自：未知")
+end
 
 ---@return table|nil
 local function readerUi()
@@ -56,7 +71,7 @@ local function toggleRow(desktop, section, data, key, on, row)
 end
 
 ---@param desktop table
----@param item { id: string, title: string, icon: string }
+---@param item { id: string, title: string, icon: string, subtitle: string|nil }
 ---@return fun(width: number): table
 local function popupConfigureRow(desktop, item)
     return function(iw)
@@ -70,7 +85,7 @@ local function popupConfigureRow(desktop, item)
         local enabled = buttons[item.id] ~= false
         return Row.widget({
             width = iw,
-            kind = "nav", icon = item.icon, title = item.title,
+            kind = "nav", icon = item.icon, title = item.title, subtitle = item.subtitle,
             status = enabled and T(_("第 %1 位"), position) or _("关闭"), status_on = enabled,
             callback = function()
                 local actions = {{
@@ -100,12 +115,24 @@ local function popupConfigureRow(desktop, item)
     end
 end
 
---- 构建划词菜单操作列表。
+--- 构建划词菜单操作列表：内置按钮在前，划词弹窗扫描到的其余按钮按弹窗顺序接在后面。
 ---@param desktop table
 ---@return function[]
 function ReaderSettings:popupRows(desktop)
-    local rows = {}
+    local seen = MoonSettings.get("reader").reader_popup_seen
+    local items, listed = {}, {}
     for _idx, item in ipairs(POPUP_BUTTONS) do
+        items[#items + 1] = { id = item.id, title = item.title, icon = item.icon }
+        listed[item.id] = true
+    end
+    for _idx, key in ipairs(require("reader.highlight_menu").order()) do
+        if not listed[key] then
+            items[#items + 1] = { id = key, title = seen[key] and seen[key].title or key, icon = "extension" }
+        end
+    end
+    local rows = {}
+    for _idx, item in ipairs(items) do
+        item.subtitle = originLabel(seen[item.id] and seen[item.id].origin)
         rows[#rows + 1] = popupConfigureRow(desktop, item)
     end
     return rows
