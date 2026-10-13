@@ -444,10 +444,10 @@ local function tabStrip(w, active, on_tab)
     }
 end
 
---- 构建书城页（网格 + 搜索/清除/上级 + 总数）。
+--- 构建书城页（网格 + 上级/搜索 + 总数）；清空搜索框再搜即退出搜索。
 ---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
 ---@param state table 当前页面的数据和分页状态
----@param opts table on_open 接管点击；on_back 出现「上级」；on_search / on_clear；show_status=false 不画角标
+---@param opts table on_open 接管点击；on_back 出现「上级」；on_search；show_status=false 不画角标
 ---@return table
 function Library:build(ctx, state, opts)
     local t = Theme.current()
@@ -457,8 +457,7 @@ function Library:build(ctx, state, opts)
     if opts.on_back then
         left[#left + 1] = Button:new{ icon = "arrow_back", text = _("上级"), size = "small", callback = opts.on_back }
     end
-    left[#left + 1] = Button:new{ icon = "search", text = _("搜索"), size = "small", callback = opts.on_search }
-    left[#left + 1] = Button:new{ icon = "clear", text = _("清除"), size = "small", callback = opts.on_clear }
+    left[#left + 1] = Button:new{ icon = "search", variant = "ghost", size = "small", callback = opts.on_search }
     local total = Text.line("caption", T(_("共%1"), opts.total or 0), { color = t.color.muted })
     local books = state.books
     local body

@@ -124,9 +124,6 @@ function Store:build(ctx, state, opts)
     opts.on_search = function()
         self:showSearch()
     end
-    opts.on_clear = function()
-        self:applySearch("")
-    end
     return ctx.desktop.library:build(ctx, state, opts)
 end
 
@@ -142,7 +139,7 @@ function Store:browse(change)
     self.desktop:updateView()
 end
 
---- 应用搜索；与图书馆筛选状态分开保存。搜索面向整个目录，搜索与清除都回到目录根。
+--- 应用搜索；与图书馆筛选状态分开保存。搜索面向整个目录，回到目录根；空查询即退出搜索。
 ---@param query string|nil
 function Store:applySearch(query)
     self.search = query and query ~= "" and query or nil

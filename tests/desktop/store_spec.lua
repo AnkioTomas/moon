@@ -81,7 +81,7 @@ store:build({ desktop = desktop }, {}, {})
 Assert.is_true(build_opts.search_only)
 Assert.is_false(build_opts.show_status)
 Assert.is_true(type(build_opts.on_search) == "function")
-Assert.is_true(type(build_opts.on_clear) == "function")
+Assert.is_nil(build_opts.on_clear)
 Assert.eq(build_opts.empty_text, "Z站暂无内容")
 
 -- 搜索由本页接管：留在 store tab、回第一页并丢弃旧结果。
@@ -135,9 +135,9 @@ store:applySearch("Lua")
 store:fetch()
 Assert.eq(requests, 2)
 Assert.eq(request_opts.search, "Lua")
-store:build({ desktop = desktop }, {}, {})
-build_opts.on_clear()
+store:applySearch("")
 Assert.is_nil(store.search)
+store:build({ desktop = desktop }, {}, {})
 -- zlib 没有导航项，不出现「上级」。
 Assert.is_nil(build_opts.on_back)
 
