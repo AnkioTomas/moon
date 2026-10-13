@@ -461,7 +461,10 @@ function Book.cover(plugin, source, book, cw, ch, opts)
             req = select(1, owner:coverRequest(book))
         end
     end
-    local cover_pad = Theme.px(2)
+    local t = Theme.current()
+    local style = opts.shadow == false and t.image or t.raised
+    -- 内边距只让出边框：Box 先画边框再画子件，图贴着边框内沿。
+    local cover_pad = Theme.px(style.border or 0)
     local cover_w = math.max(Theme.px(16), cw - cover_pad * 2)
     local cover_h = math.max(Theme.px(24), ch - cover_pad * 2)
     local on_ready = opts.on_ready
@@ -479,9 +482,8 @@ function Book.cover(plugin, source, book, cw, ch, opts)
             if on_ready then on_ready(path) end
         end,
     }
-    local t = Theme.current()
     local cover = Box:new{
-        style = opts.shadow == false and t.image or t.raised,
+        style = style,
         padding = cover_pad,
         image,
     }
