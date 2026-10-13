@@ -53,3 +53,23 @@ Assert.eq(extracted.a, 1)
 
 settings.ai_api_key = ""
 Assert.is_false(AI.isConfigured())
+
+-- 前文章节摘要：查到当前章 - 1 为止，按章序拼「章名\n摘要」，缺标题用章号；没有摘要返回 nil
+local summary_rows, summary_asked = {}, nil
+package.loaded["ai.summary_db"] = {
+    upTo = function(source_id, stable_id, max_idx, limit)
+        summary_asked = { source_id, stable_id, max_idx, limit }
+        return summary_rows
+    end,
+}
+local identity = { source_id = "wechat", stable_id = "b1" }
+Assert.is_nil(AI.priorSummaries(identity, 5, 3))
+Assert.eq(summary_asked[1], "wechat")
+Assert.eq(summary_asked[2], "b1")
+Assert.eq(summary_asked[3], 4, "当前章不算前文")
+Assert.eq(summary_asked[4], 3)
+summary_rows = {
+    { chapter_idx = 3, title = "第三章", summary = "他出发了。" },
+    { chapter_idx = 4, title = "", summary = "他到了。" },
+}
+Assert.eq(AI.priorSummaries(identity, 5, 3), "第三章\n他出发了。\n\n#4\n他到了。")

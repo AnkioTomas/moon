@@ -668,15 +668,16 @@ do
             updates[#updates + 1] = c
         end
     end
-    Assert.eq(#updates, 6)
+    Assert.eq(#updates, 7)
     Assert.is_true(updates[1].sql:find("UPDATE books SET stable_id=?, category=?, series=?, path=?", 1, true) ~= nil)
     -- 核心表按 IDENTITY_MODULES 顺序，最后是事件订阅方 xray
     Assert.is_true(updates[2].sql:find("UPDATE chapters SET stable_id=?", 1, true) ~= nil)
     Assert.is_true(updates[3].sql:find("UPDATE notes SET stable_id=?", 1, true) ~= nil)
     Assert.is_true(updates[4].sql:find("UPDATE pending_progress SET stable_id=?", 1, true) ~= nil)
     Assert.is_true(updates[5].sql:find("UPDATE reading_stats SET stable_id=?", 1, true) ~= nil)
-    Assert.is_true(updates[6].sql:find("UPDATE xray_entities SET stable_id=?", 1, true) ~= nil)
-    -- books 更新带 category/series（位置派生字段随新路径刷新）+ path（本地源 path==stable_id），其余五表只改 stable_id
+    Assert.is_true(updates[6].sql:find("UPDATE chapter_summaries SET stable_id=?", 1, true) ~= nil)
+    Assert.is_true(updates[7].sql:find("UPDATE xray_entities SET stable_id=?", 1, true) ~= nil)
+    -- books 更新带 category/series（位置派生字段随新路径刷新）+ path（本地源 path==stable_id），其余六表只改 stable_id
     Assert.eq(updates[1].argc, 6)
     Assert.eq(updates[1].args[1], "/new.epub")
     Assert.eq(updates[1].args[2], "小说")
@@ -684,7 +685,7 @@ do
     Assert.eq(updates[1].args[4], "/new.epub") -- path 同步改写为新 stable_id
     Assert.eq(updates[1].args[5], "local")
     Assert.eq(updates[1].args[6], "/old.a'epub")
-    for i = 2, 6 do
+    for i = 2, 7 do
         local u = updates[i]
         Assert.eq(u.argc, 3)
         Assert.eq(u.args[1], "/new.epub")

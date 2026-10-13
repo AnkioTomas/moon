@@ -15,8 +15,9 @@ package.preload["ui/uimanager"] = function() return {} end
 local Themed = require("support.theme_stubs")
 Themed.install()
 Themed.on_show = function(o) shown[#shown + 1] = o end
+local connected = true
 package.preload["ui/network/manager"] = function()
-    return { runWhenOnline = function(_, callback) callback() end }
+    return { isConnected = function() return connected end }
 end
 local context_limit, selected_pos
 package.preload["reader.context"] = function()
@@ -32,11 +33,14 @@ package.preload["reader.context"] = function()
         end,
     }
 end
+local chapter_idx
+local book_identity = { book = { title = "边城", authors = "沈从文" } }
 package.preload["reader.session"] = function()
     return {
         current = function()
-            return { identity = { book = { title = "边城", authors = "沈从文" } } }
+            return { identity = book_identity }
         end,
+        chapterIndex = function() return chapter_idx end,
     }
 end
 package.preload["util"] = function()
@@ -48,12 +52,22 @@ local requests, pending, cancelled = {}, nil, 0
 package.preload["ai"] = function()
     return {
         isConfigured = function() return configured end,
+        priorSummaries = function(identity, idx, chapters)
+            Assert.eq(identity, book_identity)
+            Assert.eq(chapters, 5)
+            return "第" .. idx - 1 .. "章\n翠翠长大了。"
+        end,
         chat = function(messages, opts, cb)
             requests[#requests + 1] = { messages = messages, opts = opts }
             pending = cb
             return { cancel = function() cancelled = cancelled + 1 end }
         end,
     }
+end
+
+local recap_ready = 0
+package.preload["features.ai.recap"] = function()
+    return { onReaderReady = function() recap_ready = recap_ready + 1 end }
 end
 
 local Ai = require("features.ai")
@@ -67,6 +81,7 @@ local ui = {
     },
 }
 Ai.onReaderReady({ ui = ui })
+Assert.eq(recap_ready, 1, "开书时检查前情提要")
 local closed_dialog = false
 local this = {
     ui = ui,
@@ -92,6 +107,7 @@ Assert.matches(prompt, "「月色」")
 Assert.matches(prompt, "所在句子：\n他望着那片月色。")
 Assert.matches(prompt, "所在段落：\n整段：他望着那片月色。")
 Assert.matches(prompt, "前文若干")
+Assert.is_nil(prompt:find("STORY SO FAR", 1, true), "不在任何章：不带前文摘要")
 Assert.matches(requests[1].messages[1].content, "不要 Markdown")
 Assert.matches(requests[1].messages[1].content, "不要输出思考过程")
 Assert.eq(shown[1].kind, "text_viewer")
@@ -105,14 +121,67 @@ Assert.eq(shown[2].kind, "text_viewer")
 Assert.is_false(shown[2].fullscreen)
 Assert.eq(shown[2].title, "月色")
 Assert.eq(shown[2].text, "月色：这里指夜晚的月光。", "Markdown 标记剥掉")
-Assert.len(shown[2].buttons, 1, "关闭走右上角 ×，底栏只留复制")
-Assert.eq(shown[2].buttons[1].text, "复制")
+Assert.len(shown[2].buttons, 2, "关闭走右上角 ×；选区已没了，不出存为笔记")
+Assert.eq(shown[2].buttons[1].text, "追问")
+Assert.eq(shown[2].buttons[2].text, "复制")
+
+-- 选区还在：可存为笔记，交给 KOReader 原生 addNote（建划线 + 预填笔记编辑框）
+local noted
+ui.highlight.selected_text = { text = "月色", pos0 = "a", pos1 = "b" }
+ui.highlight.addNote = function(_hl, text) noted = text end
+Explain.run(ui, { text = "月色" })
+pending("夜晚的月光。")
+local answer_card = shown[#shown]
+Assert.len(answer_card.buttons, 3)
+Assert.eq(answer_card.buttons[1].text, "存为笔记")
+answer_card.buttons[1].callback()
+Assert.is_true(answer_card.closed)
+Assert.eq(noted, "夜晚的月光。")
+
+-- 追问：带上整条对话（含上一轮回答）再问；空问题不发
+Explain.run(ui, { text = "月色" })
+pending("夜晚的月光。")
+answer_card = shown[#shown]
+local before_followup = #requests
+answer_card.buttons[2].callback()
+local input = Themed.last("input")
+Assert.eq(input.title, "追问")
+input.callback("   ")
+Assert.eq(#requests, before_followup, "空追问不发请求")
+input.callback("为什么用月色？")
+Assert.is_true(answer_card.closed)
+local chain = requests[#requests].messages
+Assert.len(chain, 4)
+Assert.eq(chain[3].role, "assistant")
+Assert.eq(chain[3].content, "夜晚的月光。")
+Assert.eq(chain[4].role, "user")
+Assert.eq(chain[4].content, "为什么用月色？")
+Assert.len(requests[#requests - 1].messages, 2, "上一轮的对话不被改写")
+pending("营造清冷氛围。")
+Assert.eq(shown[#shown].text, "营造清冷氛围。")
+ui.highlight.selected_text = nil
+
+-- 追问时断网：立即提示，不发请求
+shown[#shown].buttons[2].callback()
+connected = false
+before_followup = #requests
+Themed.last("input").callback("还有呢")
+connected = true
+Assert.eq(#requests, before_followup)
+Assert.eq(shown[#shown].text, "网络不可用，请先连接 Wi-Fi")
+
+-- 在第 4 章：提示词末尾带前三章的摘要
+chapter_idx = 4
+Explain.run(ui, { text = "月色" })
+Assert.matches(requests[#requests].messages[2].content, "STORY SO FAR（前几章摘要）:\n第3章\n翠翠长大了。$")
+pending("解释")
+chapter_idx = nil
 
 -- 失败：提示错误原因
 Explain.run(ui, { text = "月色" })
 pending(nil, "timeout")
-Assert.eq(shown[4].kind, "toast")
-Assert.matches(shown[4].text, "timeout")
+Assert.eq(shown[#shown].kind, "toast")
+Assert.matches(shown[#shown].text, "timeout")
 
 -- 只剩 Markdown 空壳也算失败
 Explain.run(ui, { text = "月色" })
@@ -123,6 +192,16 @@ Assert.eq(shown[#shown].kind, "toast")
 Explain.run(ui, { text = "月色" })
 shown[#shown]:close()
 Assert.eq(cancelled, 1)
+
+-- 离线：立即提示，不发请求、不弹等待卡片
+connected = false
+local offline_before, offline_shown = #requests, #shown
+Explain.run(ui, { text = "月色" })
+connected = true
+Assert.eq(#requests, offline_before)
+Assert.eq(#shown, offline_shown + 1)
+Assert.eq(shown[#shown].kind, "toast")
+Assert.eq(shown[#shown].text, "网络不可用，请先连接 Wi-Fi")
 
 -- 空选中不发请求
 local before = #requests

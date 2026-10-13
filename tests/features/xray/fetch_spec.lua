@@ -42,15 +42,24 @@ package.preload["reader.context"] = function()
         currentPage = function() return 5 end,
     }
 end
+local chapter_idx
 package.preload["reader.session"] = function()
-    return { current = function() return { percent = 42 } end }
+    return {
+        current = function() return { percent = 42 } end,
+        chapterIndex = function() return chapter_idx end,
+    }
 end
 
 --- 每次调用按顺序吐一个预设响应，并记下 prompt。
 local replies, prompts = {}, {}
+local recap, recap_asked
 package.preload["ai"] = function()
     return {
         isConfigured = function() return true end,
+        priorSummaries = function(ident, idx, chapters)
+            recap_asked = { identity = ident, idx = idx, chapters = chapters }
+            return recap
+        end,
         jsonExtract = function(messages, opts, cb)
             prompts[#prompts + 1] = messages[2].content
             cb(table.remove(replies, 1))
@@ -136,6 +145,25 @@ Assert.is_true(names.Old)
 Assert.is_true(names.Mina)
 Assert.is_nil(names.Imaginary)
 
+-- 没有前文摘要：提示词不带 STORY SO FAR（与原来一致）
+Assert.is_nil(prompts[1]:find("STORY SO FAR", 1, true))
+
+-- 有前文摘要：增量与划词提示词末尾带上，按当前章取最多 5 章
+chapter_idx, recap = 7, "第六章\n伯爵来到了惠特比。"
+run({ { kind = "character", name = "Old", aliases = {}, role = "", description = "", updated_at = 1 } }, {
+    { characters = {}, locations = {}, terms = {} },
+})
+Assert.matches(prompts[1], "STORY SO FAR")
+Assert.matches(prompts[1], "伯爵来到了惠特比。$")
+Assert.eq(recap_asked.identity, identity)
+Assert.eq(recap_asked.idx, 7)
+Assert.eq(recap_asked.chapters, 5)
+entity_rows, prompts = {}, {}
+replies = { { is_valid = true, type = "character", item = { name = "Mina", aliases = {}, description = "x" } } }
+Fetch.lookupWord({}, identity, "Mina", function() end)
+Assert.matches(prompts[1], "伯爵来到了惠特比。$")
+chapter_idx, recap = nil, nil
+
 -- 已有数据且非 force：直接回缓存，不请求 AI
 result, failure = run({
     { kind = "character", name = "Old", aliases = {}, role = "", description = "", updated_at = 1 },
@@ -152,6 +180,15 @@ Fetch.lookupWord({}, identity, "Mina", function(item) looked = item end)
 Assert.eq(looked.name, "Mina")
 Assert.eq(prior_limits[1], 2000)
 Assert.matches(prompts[1], "全书中的整体描述")
+
+-- 只查本地：名字、别名都认，不分大小写；没收录返回 nil，不请求 AI
+entity_rows, prompts = {
+    { kind = "character", name = "Mina", aliases = { "Mina Harker" } },
+}, {}
+Assert.eq(Fetch.findLocal(identity, " mina harker ").name, "Mina")
+Assert.eq(Fetch.findLocal(identity, "MINA").name, "Mina")
+Assert.is_nil(Fetch.findLocal(identity, "Lucy"))
+Assert.len(prompts, 0)
 
 -- AI 失败：不回落，直接报错
 result, failure = run({}, {})
