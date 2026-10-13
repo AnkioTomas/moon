@@ -139,4 +139,16 @@ file:close()
 Assert.not_nil(content:find("[WARN] new day", 1, true))
 Assert.is_nil(content:find("visible", 1, true))
 
+-- 启动横幅不看调试开关，立即排入落盘。
+Settings.get("utils").book_debug_enabled = false; Settings.save("utils")
+package.preload["version"] = function() return { getShortVersion = function() return "v2026.07.2" end } end
+package.preload["device"] = function() return { model = "KindlePaperWhite2" } end
+package.loaded["version"], package.loaded["device"] = nil, nil
+NextDayLog.boot()
+Stubs.flush()
+file = assert(io.open(log_path, "r"))
+content = file:read("*a")
+file:close()
+Assert.not_nil(content:find("[BOOT] moon " .. require("bookversion") .. " koreader v2026.07.2 device KindlePaperWhite2", 1, true))
+
 Settings.get("utils").book_debug_enabled = original_debug; Settings.save("utils")

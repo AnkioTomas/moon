@@ -4,6 +4,8 @@ Book 独立文件日志。
 同一天内重启继续追加日志，跨天首次启动时清空旧日志；后续日志积攒 10 条后经 nextTick
 批量追加到 $DATA/.moon/book.log。
 
+进程启动时 main.lua 调 `boot` 写一行版本与设备（不受调试开关影响）。
+
 调试模式（book_debug_enabled）打开时：dbg/info 才写文件，且所有级别同步镜像到
 KOReader `logger`（crash.log / 控制台），方便和系统日志一起看。
 
@@ -109,6 +111,13 @@ end
 --- 提交当前尾批；实际写盘仍在下一次 UI tick 完成。
 function Log.flush()
     scheduleFlush(true)
+end
+
+--- 启动横幅：月读 / KOReader 版本与设备型号，不受调试开关影响，反馈问题时先看这一行。
+function Log.boot()
+    write("BOOT", "moon", require("bookversion"), "koreader", require("version"):getShortVersion(),
+        "device", require("device").model)
+    Log.flush()
 end
 
 function Log.dbg(...)
