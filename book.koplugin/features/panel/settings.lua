@@ -3,6 +3,7 @@
 --]]
 
 local Sheet = require("ui.themes.widgets.sheet")
+local Position = require("desktop.pages.setting.position")
 local Row = require("ui.themes.widgets.row")
 local DesktopPanel = require("features.panel.desktop")
 local ReaderPanel = require("features.panel.reader")
@@ -54,6 +55,10 @@ local function configure(desktop, option)
             text = _("下移"), enabled = option.position ~= nil and option.position < panel.enabledCount(),
             callback = apply(function() panel.move(option.id, 1) end),
         }
+        items[#items + 1] = Position.item(option.position, panel.enabledCount(), function(delta)
+            panel.move(option.id, delta)
+            desktop:updateView()
+        end)
     end
     items[#items + 1] = { text = _("关闭") }
     Sheet:new{ title = option.title, items = items }:show()

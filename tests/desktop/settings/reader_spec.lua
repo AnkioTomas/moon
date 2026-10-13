@@ -106,4 +106,25 @@ sheet.items[1].callback()
 Assert.is_false(reader_section.reader_popup_buttons["12_0_make_handmade_toc_item"])
 Assert.eq(saved_section.name, "reader")
 
+-- 设为第几位：输入框默认当前位次，确认后插到目标位，越界截断
+reader_section = { reader_popup_seen = {} }
+popup_rows = Settings:popupRows(desktop)
+popup_rows[3](600).callback()
+local position_item
+for _idx, item in ipairs(require("support.theme_stubs").last("sheet").items) do
+    if item.text == "设为第几位…" then position_item = item end
+end
+Assert.not_nil(position_item)
+position_item.callback()
+local input = require("support.theme_stubs").last("input")
+local copy_pos
+for i, key in ipairs(require("reader.highlight_menu").order()) do
+    if key == "copy" then copy_pos = i end
+end
+Assert.eq(input.fields[1].text, tostring(copy_pos))
+input.callback("1")
+Assert.eq(reader_section.reader_popup_button_order[1], "copy")
+input.callback("abc")
+Assert.eq(reader_section.reader_popup_button_order[1], "copy", "非数字忽略")
+
 return true

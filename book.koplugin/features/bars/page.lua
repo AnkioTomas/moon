@@ -6,6 +6,7 @@
 
 local UIManager = require("ui/uimanager")
 local Sheet = require("ui.themes.widgets.sheet")
+local Position = require("desktop.pages.setting.position")
 local Row = require("ui.themes.widgets.row")
 local Bars = require("features.bars")
 local Items = require("features.bars.items")
@@ -91,6 +92,10 @@ local function itemRow(desktop, item, which)
                         text = _("下移"), enabled = index < count,
                         callback = apply(function() Layout.move(which, item.id, 1) end),
                     }
+                    actions[#actions + 1] = Position.item(index, count, function(delta)
+                        Layout.move(which, item.id, delta)
+                        refresh(desktop)
+                    end)
                 end
                 actions[#actions + 1] = { text = _("关闭") }
                 Sheet:new{ title = item.label, items = actions }:show()

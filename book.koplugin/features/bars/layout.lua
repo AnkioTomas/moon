@@ -190,7 +190,7 @@ function Layout.toggle(which, id)
     Layout.set(which, layout)
 end
 
---- 同栏内上下移动。
+--- 同栏内移动 delta 位，越界截断到首尾。
 ---@param which string
 ---@param id string
 ---@param delta number
@@ -200,11 +200,11 @@ function Layout.move(which, id, delta)
     if not index then
         return
     end
-    local next_index = index + delta
-    if next_index < 1 or next_index > #layout then
+    local target = math.max(1, math.min(#layout, index + delta))
+    if target == index then
         return
     end
-    layout[index], layout[next_index] = layout[next_index], layout[index]
+    table.insert(layout, target, table.remove(layout, index))
     Layout.set(which, layout)
 end
 

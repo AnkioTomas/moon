@@ -73,6 +73,12 @@ Assert.eq(saved.quick_panel_actions[1], "night")
 Assert.eq(saved.quick_panel_actions[2], "rotate")
 Assert.eq(saved.quick_panel_actions[3], "wifi")
 
+-- 跨多位移动是插入：night 移到末尾，其余前移
+DesktopPanel.move("night", 2)
+Assert.eq(table.concat(saved.quick_panel_actions, ","), "rotate,wifi,night")
+DesktopPanel.move("night", -99)
+Assert.eq(table.concat(saved.quick_panel_actions, ","), "night,rotate,wifi")
+
 -- 面板编辑按 id 互换：wifi 不可用、在面板里看不见，rotate 前移应直接换到 night 前面。
 saved.quick_panel_actions = { "night", "wifi", "rotate" }
 DesktopPanel.swap("rotate", "night")

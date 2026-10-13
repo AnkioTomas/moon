@@ -73,7 +73,7 @@ local function create(scope, settings_key, order_fn)
             if current_id == id then
                 local target = math.max(1, math.min(#current, i + delta))
                 if target ~= i then
-                    current[i], current[target] = current[target], current[i]
+                    table.insert(current, target, table.remove(current, i))
                     save(current)
                 end
                 return
