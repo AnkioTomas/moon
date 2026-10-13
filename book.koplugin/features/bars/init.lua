@@ -299,12 +299,13 @@ end
 ---@return table
 local function topTextFace(footer, bar_h)
     local s = footer.settings
-    local scaled = Screen:scaleBySize(s.text_font_size)
+    local size = s.text_font_size
+    local scaled = Screen:scaleBySize(size)
     if bar_h > 2 and scaled > bar_h - 2 then
-        local size = math.max(8, math.floor(s.text_font_size * (bar_h - 2) / scaled))
-        return require("ui/font"):getFace(s.text_font_face, size)
+        size = math.max(8, math.floor(size * (bar_h - 2) / scaled))
     end
-    return footer.footer_text_face
+    -- 底栏被 KOReader 整体禁用时 footer_text_face 不会初始化，不能复用。
+    return require("ui/font"):getFace(s.text_font_face, size)
 end
 
 --- 包装 ReaderFooter：
