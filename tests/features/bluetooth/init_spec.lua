@@ -69,6 +69,7 @@ do
     Assert.len(calls, 0)
     h.cancel()
     Assert.is_nil(Bluetooth.topbar())
+    Assert.len(require("features.bluetooth.topbar").items(), 0, "没装不出顶栏项，设置页也没有开关")
 end
 
 -- 三态与顶栏读数；地址大小写不敏感。

@@ -13,6 +13,7 @@ local Topbar = {}
 
 ---@return BookTopBarItem[]
 function Topbar.items()
+    if not require("features.bluetooth").installed() then return {} end
     return {
         {
             id = "bluetooth",

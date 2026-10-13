@@ -74,6 +74,15 @@ package.preload["workers.tasks"] = function()
     }
 end
 
+-- 蓝牙项只在装了守护进程时出现；这里只验证 feature 项的收集，按已装处理。
+package.preload["features.bluetooth"] = function()
+    return {
+        installed = function() return true end,
+        topbar = function() end,
+        watch = function() return { cancel = function() end } end,
+    }
+end
+
 local previous_settings = _G.G_reader_settings
 _G.G_reader_settings = { isTrue = function(_, key) return key == "twelve_hour_clock" end }
 

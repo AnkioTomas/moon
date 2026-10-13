@@ -74,6 +74,7 @@ flush()
 Assert.eq(texts(dialog), "后台任务|缓存：书a|第 3 章 3/10|进行中|缓存：书b| |进行中")
 Assert.eq(bars(dialog)[1].percent, 30)
 Assert.eq(Kit.dirty[#Kit.dirty].widget, dialog, "高度没变只刷弹窗")
+Assert.eq(Kit.dirty[#Kit.dirty].mode(), "fast", "进度高频变化用快刷，墨水屏不闪")
 
 -- 点可重跑的任务：确认后取消，列表随队列刷新；取消的不进历史；面板变矮重画整屏。
 Kit.taps(dialog)[1]:onTapThemeArea()
