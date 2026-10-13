@@ -13,11 +13,11 @@
   | [<]          1 / 2          [>] |
   +--------------------------------+
 
-未结束任务之后列出最近结束的任务（已完成 / 失败）。点按可取消的未结束任务询问取消；
+未结束任务之后列出最近结束的任务（已完成 / 失败）。点按可重跑的未结束任务询问取消；
 点面板外或返回键收起，收起只关窗，不影响任务。
 
 前台：任务入队后默认 `follow` 弹出进度窗，任务结束自动关窗；「后台运行」只关窗，
-之后遇到等网络提示一次，结果仍由任务自己的 on_done 报告。可重跑的任务另有「取消」（`cancelable = false` 的没有）。
+之后遇到等网络提示一次，结果仍由任务自己的 on_done 报告。可重跑的任务另有「取消」。
 
   TaskDialog:new{}:show()
   TaskDialog.start{ key = …, kind = …, title = …, run = … }   -- 入队 + 前台跟随，被拒时提示
@@ -96,13 +96,6 @@ local function detail(task)
     return task.text or progress
 end
 
---- 用户能否取消：restartable 且没声明 cancelable = false。
----@param task table BookTask 或快照项
----@return boolean
-local function cancelable(task)
-    return task.restartable == true and task.cancelable ~= false
-end
-
 --- 状态短词（列表右侧）。
 ---@param task table
 ---@return string
@@ -134,7 +127,7 @@ function TaskDialog.follow(task)
         on_background = function()
             Toast:new{ text = _("已转到后台，可在顶栏查看进度"), timeout = 2 }:show()
         end,
-        on_cancel = cancelable(task) and function() task.cancel() end or nil,
+        on_cancel = task.restartable and function() task.cancel() end or nil,
         close_callback = function() open = false end,
     }
     local function refresh()
@@ -217,7 +210,7 @@ function TaskDialog:row(task)
             dimen = Geom:new{ w = self.inner, h = Theme.px(t.row.divider) },
         },
     }
-    return Tap.wrap(row, cancelable(task) and task.state ~= "finished"
+    return Tap.wrap(row, task.restartable and task.state ~= "finished"
         and function() TaskDialog.confirmCancel(task) end or nil)
 end
 

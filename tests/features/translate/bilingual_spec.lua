@@ -1,4 +1,4 @@
---[[-- features.translate.bilingual：分批、整书任务（续跑 / 失败 / 取消）、切回原文的位置换算。 --]]
+--[[-- features.translate.bilingual：分批、整书任务（续跑 / 失败）、前台进度窗、切回原文的位置换算。 --]]
 
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
@@ -158,7 +158,7 @@ local _h2, _r2, results2 = start(again)
 Assert.len(requests, 0)
 Assert.is_true(results2[1].ok)
 
--- 失败：标 retry，已成功的批次留在缓存里供重试续跑。
+-- 失败：回调错误，已成功的批次留在缓存里，重来时续跑。
 requests = {}
 local failing = input("fail")
 failing.engine = "edge"
@@ -167,20 +167,42 @@ Assert.len(requests, 1)
 requests[1].cb(nil, nil, "HTTP 500")
 Assert.len(results3, 1)
 Assert.is_false(results3[1].ok)
-Assert.is_true(results3[1].retry)
 Assert.eq(results3[1].err, "HTTP 500")
 Assert.is_nil(read(failing.dest))
 Assert.not_nil(read(failing.source))
 
--- 取消：在飞请求被取消，之后的应答不再回调。
-requests = {}
-local cancelled = input("cancel")
-local handle4, _r4, results4 = start(cancelled)
-handle4:cancel()
-Assert.is_true(requests[1].cancelled)
-requests[1].cb({ "a", "b", "c" })
-Assert.len(results4, 0)
-Assert.is_nil(read(cancelled.dest))
+-- 入口：前台进度窗，不入队、不能取消也不能转后台、返回键不关；失败关窗并提示
+do
+    local Themed = require("support.theme_stubs")
+    Themed.install()
+    package.preload["ui/network/manager"] = function() return { isConnected = function() return true end } end
+    package.loaded["ui/network/manager"] = nil
+    package.preload["ui/translator"] = function() return { getTargetLanguage = function() return "zh" end } end
+    package.preload["features.translate.languages"] = function()
+        return { displayName = function(_translator, code) return code end }
+    end
+    package.preload["ai"] = function() return { isConfigured = function() return false end } end
+    session = { identity = { source_id = "local", stable_id = "/books/bilingual-entry.epub",
+        source = { type = "book" }, book = { title = "书" } } }
+    local ui = { rolling = {}, document = {
+        file = "/books/bilingual-entry.epub",
+        getXPointer = function() return "/body/p[1]" end,
+    } }
+    Bilingual.show(ui)
+    local sheet = Themed.last("sheet")
+    Assert.eq(sheet.items[2].text, "用 Edge 翻译全书")
+    local dialog
+    Themed.on_show = function(o) if o.kind == "progress_dialog" then dialog = o end end
+    sheet.items[2].callback()
+    Assert.eq(dialog.title, "书（双语）")
+    Assert.is_false(dialog.dismissable)
+    Assert.is_nil(dialog.on_cancel)
+    Assert.is_nil(dialog.on_background)
+    Assert.eq(dialog.updates[1][1], "正在分析全书段落")
+    Assert.is_true(dialog.closed, "原书不存在：分析失败即关窗")
+    Assert.matches(Themed.last("toast").text, "双语翻译失败")
+    require("ffi/util").purgeDir(require("utils.paths").bookWorkDir(session.identity.stable_id, "local"))
+end
 
 -- 切回原文：位置落在译文 span 里时退到所在段落；原书自带的 span 不动。
 local document = {
