@@ -92,16 +92,26 @@ package.preload["utils.settings"] = function()
         save = function(name) assert(name == "features.update") end,
     }
 end
-local job_opts
+local job_opts, job_worker
+local fork_fails = false
 package.preload["workers.job"] = function()
     return {
-        run = function(_, opts)
-            job_opts = opts
+        run = function(worker, opts)
+            job_worker, job_opts = worker, opts
+            if fork_fails then opts.on_failed("fork failed") end
             return { cancel = function() end }
         end,
     }
 end
-package.preload["features.update.install"] = function() return {} end
+local install_args
+package.preload["features.update.install"] = function()
+    return {
+        run = function(archive, root, sha)
+            install_args = { archive = archive, root = root, sha = sha }
+            return true
+        end,
+    }
+end
 package.preload["bookversion"] = function() return "1.2.3" end
 
 local Update = require("features.update")
@@ -351,5 +361,54 @@ connected = true
 Update.autoCheck("/plugins/book.koplugin")
 Assert.eq(gets, before + 1)
 check_cb(release("v1.2.3"))
+
+-- 远程上传的包：不带校验值装包，成败都删包；错误只留首行。
+local function tempArchive()
+    local path = os.tmpname()
+    local f = assert(io.open(path, "wb"))
+    f:write("zip")
+    f:close()
+    return path
+end
+local function exists(path)
+    local f = io.open(path, "rb")
+    if f then f:close() end
+    return f ~= nil
+end
+local archive_ok, archive_err
+local archive = tempArchive()
+Update.installArchive(archive, "/plugins/book.koplugin", function(ok, e) archive_ok, archive_err = ok, e end)
+job_worker()
+Assert.eq(install_args.archive, archive)
+Assert.eq(install_args.root, "/plugins/book.koplugin")
+Assert.is_nil(install_args.sha)
+-- 装包期间在线更新与再次上传都是忙。
+local check_err
+Update.check(function(_, e) check_err = e end)
+Assert.eq(check_err, "busy")
+local busy_archive = tempArchive()
+local busy_ok, busy_err
+Update.installArchive(busy_archive, "/plugins/book.koplugin", function(ok, e) busy_ok, busy_err = ok, e end)
+Assert.is_false(busy_ok)
+Assert.eq(busy_err, "busy")
+Assert.is_false(exists(busy_archive))
+job_opts.on_done()
+Assert.is_true(archive_ok)
+Assert.is_nil(archive_err)
+Assert.is_false(exists(archive))
+
+archive = tempArchive()
+Update.installArchive(archive, "/plugins/book.koplugin", function(ok, e) archive_ok, archive_err = ok, e end)
+job_opts.on_failed("not a moon plugin archive\nstack traceback:\n\tinstall.lua:1")
+Assert.is_false(archive_ok)
+Assert.eq(archive_err, "not a moon plugin archive")
+Assert.is_false(exists(archive))
+
+-- fork 失败同步回调：不能留下「忙」。
+fork_fails = true
+Update.installArchive(tempArchive(), "/plugins/book.koplugin", function(ok, e) archive_ok, archive_err = ok, e end)
+fork_fails = false
+Assert.eq(archive_err, "fork failed")
+Assert.is_nil(Update._job)
 
 return true

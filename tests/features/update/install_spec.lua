@@ -89,6 +89,28 @@ Assert.not_nil(wrong_err)
 Assert.eq(assert(loadfile(current .. "/main.lua"))(), "new")
 Assert.is_nil(lfs.attributes(tmp .. "/.book.koplugin-update"))
 
+-- 有 book.koplugin/ 但没有 bookversion.lua：不是月读包，换位前就拒绝。
+entries = {
+    { path = "book.koplugin", mode = "directory", size = 0 },
+    { path = "book.koplugin/main.lua", mode = "file", body = "return 'evil'\n" },
+}
+local foreign_ok, foreign_err = Install.run(archive, current)
+Assert.is_nil(foreign_ok)
+Assert.eq(foreign_err, "not a moon plugin archive")
+Assert.eq(assert(loadfile(current .. "/main.lua"))(), "new")
+Assert.is_nil(lfs.attributes(tmp .. "/.book.koplugin-update"))
+
+-- 远程上传的包没有校验值：不做 SHA 校验，照常换位。
+entries = {
+    { path = "book.koplugin", mode = "directory", size = 0 },
+    { path = "book.koplugin/main.lua", mode = "file", body = "return 'uploaded'\n" },
+    { path = "book.koplugin/bookversion.lua", mode = "file", body = 'return "1.2.4"\n' },
+}
+local local_ok, local_err = Install.run(archive, current)
+Assert.is_true(local_ok, local_err)
+Assert.eq(assert(loadfile(current .. "/main.lua"))(), "uploaded")
+Assert.eq(assert(loadfile(tmp .. "/.book.koplugin-backup/main.lua"))(), "new")
+
 os.execute("rm -rf " .. tmp)
 
 return true

@@ -22,7 +22,7 @@ local HEADER_LIMIT = 16 * 1024
 local CHUNK = 32 * 1024
 --- 无字节进展的连接存活上限（秒）；pending 状态（写入中）用 PENDING_TIMEOUT
 local IDLE_TIMEOUT = 120
---- pending（等 handlers.save 回调）的存活上限（秒）。回调丢了就永远不回收，
+--- pending（等落位 / 安装回调）的存活上限（秒）。回调丢了就永远不回收，
 --- 连接与临时文件一起挂着，因此豁免必须有尽头。大文件落位可能很慢，给足余量。
 local PENDING_TIMEOUT = 30 * 60
 --- 同时在途连接上限。到顶后直接拒绝新连接：设备内存与 fd 都很紧，
@@ -53,13 +53,14 @@ local STATUS = {
 ---@field delete fun(path: string, cb: fun(ok: boolean|nil, err: any))
 ---@field rename fun(path: string, to: string, cb: fun(ok: boolean|nil, err: any))
 ---@field extract fun(path: string, cb: fun(ok: boolean|nil, err: any, output: string|nil))
----@field temp_path fun(name: string): string 上传临时落盘路径
+---@field temp_path fun(): string 上传临时落盘路径
 ---@field is_protected fun(path: string): boolean 重要路径及其祖先不可删除/移动（展示级判定，可免 realpath；变更 handler 内部仍全量校验）
 ---@field get_input fun(): { active: boolean, text: string|nil } 设备激活输入框状态与当前文本
 ---@field set_input fun(text: string): boolean|nil, any 光标处追加注入（addChars 路径）；无激活框返回 nil, err
 ---@field get_clipboard fun(): { text: string } 设备共享剪贴板（最后复制的文本）
 ---@field set_clipboard fun(text: string) 写入设备剪贴板并同步进激活输入框
 ---@field get_status fun(): table 首页设备状态快照
+---@field install_update fun(temp: string, cb: fun(ok: boolean, err: string|nil)) 安装上传的月读插件包（临时文件所有权移交）
 
 --- 一切非 2xx 响应都是 JSON {"error": msg}：页面能把真实原因显示出来，
 --- 而不是 r.json() 解析纯文本炸出 SyntaxError 掩盖问题。
@@ -67,13 +68,14 @@ local STATUS = {
 local Server = {}
 Server.__index = Server
 
--- 路由实现拆分：文件、远程输入、共享剪贴板、远程配置各自独立。
+-- 路由实现拆分：文件、远程输入、共享剪贴板、远程配置、月读更新各自独立。
 -- （函数首参即 self；不反向 require server，无循环）
 local File = require("features.remote.file")
 local Input = require("features.remote.input")
 local Clipboard = require("features.remote.clipboard")
 local Status = require("features.remote.status")
 local SettingsRoute = require("features.remote.settings_route")
+local UpdateRoute = require("features.remote.update")
 Server._routeList = File.list
 Server._routeDownload = File.download
 Server._routeUpload = File.upload
@@ -84,6 +86,7 @@ Server._routeInput = Input.route
 Server._routeClipboard = Clipboard.route
 Server._routeStatus = Status.route
 Server._routeSettings = SettingsRoute.settings
+Server._routeUpdate = UpdateRoute.route
 
 --- idle_timeout：连续这么多秒没有任何在途连接就调一次 on_idle（nil = 不检测）。
 ---@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil, idle_timeout: number|nil, on_idle: fun()|nil }
@@ -331,6 +334,7 @@ local ASSETS = {
     ["/input.html"] = { "input.html", "text/html; charset=utf-8" },
     ["/clipboard.html"] = { "clipboard.html", "text/html; charset=utf-8" },
     ["/settings.html"] = { "settings.html", "text/html; charset=utf-8" },
+    ["/update.html"] = { "update.html", "text/html; charset=utf-8" },
     ["/logo.jpg"] = { "logo.jpg", "image/jpeg" },
     ["/style.css"] = { "style.css", "text/css; charset=utf-8" },
     ["/js.js"] = { "js.js", "application/javascript; charset=utf-8" },
@@ -339,6 +343,7 @@ local ASSETS = {
     ["/input.js"] = { "input.js", "application/javascript; charset=utf-8" },
     ["/clipboard.js"] = { "clipboard.js", "application/javascript; charset=utf-8" },
     ["/settings.js"] = { "settings.js", "application/javascript; charset=utf-8" },
+    ["/update.js"] = { "update.js", "application/javascript; charset=utf-8" },
 }
 
 local _asset_cache = {} ---@type table<string, string>
@@ -544,6 +549,8 @@ function Server:_route(conn, head)
         return self:_routeExtract(conn, method, query.path)
     elseif path == "/api/settings" then
         return self:_routeSettings(conn, method, headers, query)
+    elseif path == "/api/update" then
+        return self:_routeUpdate(conn, method, headers)
     end
     return self:_fail(conn, 404, "Not Found")
 end
@@ -577,6 +584,48 @@ function Server:_acceptText(conn, headers, limit, finish)
     conn.state = "body"
 end
 
+--- 文件 body 入口（上传、更新包共用）：校验长度后开临时文件，切 body 状态流式落盘；
+--- 收齐后临时文件所有权移交 commit，commit 落位完调 reply(resp) 排响应。
+--- 带 Expect: 100-continue 先回 interim。chunked 501，缺长度 411，非法 400，超 limit 413，开文件失败 500。
+---@param conn table
+---@param headers table 已小写化的请求头
+---@param limit number body 上限（字节）
+---@param commit fun(temp: string, reply: fun(resp: table))
+---@return true|nil true=已进 body 状态；nil=已排错误响应
+function Server:_acceptFile(conn, headers, limit, commit)
+    if headers["transfer-encoding"] then
+        return self:_fail(conn, 501, "Chunked not supported")
+    end
+    local len, len_err = self:_contentLength(headers)
+    if len_err == "missing" or len == 0 then
+        return self:_fail(conn, 411, "Content-Length required")
+    end
+    if not len then
+        return self:_fail(conn, 400, "Invalid Content-Length")
+    end
+    if len > limit then
+        return self:_fail(conn, 413, "Upload too large")
+    end
+    local temp = self.handlers.temp_path()
+    local file, ferr = io.open(temp, "wb")
+    if not file then
+        return self:_fail(conn, 500, ferr)
+    end
+    conn.file = file
+    conn.temp = temp
+    conn.commit = commit
+    conn.remaining = len
+    local expect = headers["expect"]
+    if type(expect) == "string" and expect:lower():find("100%-continue") then
+        conn.out = "HTTP/1.1 100 Continue\r\n\r\n"
+        conn.out_off = 1
+        conn.state = "continue"
+    else
+        conn.state = "body"
+    end
+    return true
+end
+
 --- 完整发出 100 Continue 后再进入 body；与最终响应共用部分写语义。
 ---@param conn table
 ---@return boolean
@@ -591,8 +640,8 @@ function Server:_writeContinue(conn)
 end
 
 --- 收 body：文本通道攒内存，上传通道流式写盘。
---- 收满后文本通道调 conn.finish 自行收尾；上传通道关文件、把临时文件所有权移交
---- handlers.save 并转 pending 等回调。写盘失败当场回 500，避免落一个截断文件还回 ok。
+--- 收满后文本通道调 conn.finish 自行收尾；文件通道关文件、把临时文件所有权移交
+--- conn.commit 并转 pending 等回调。写盘失败当场回 500，避免落一个截断文件还回 ok。
 ---@param conn table
 ---@return boolean 本轮是否有进展
 function Server:_readBody(conn)
@@ -646,21 +695,14 @@ function Server:_readBody(conn)
         self:_fail(conn, 500, tostring(cerr or "close failed"))
         return true
     end
-    local temp, dir, name, conflict = conn.temp, conn.dir, conn.name, conn.conflict
-    conn.temp = nil -- 所有权移交 save（kill 不许再删）
+    local temp, commit = conn.temp, conn.commit
+    conn.temp, conn.commit = nil, nil -- 所有权移交 commit（kill 不许再删）
     conn.state = "pending"
-    self.handlers.save(temp, dir, name, function(ok, err)
-        if ok then
-            logger.dbg("book remote upload saved", dir, name, conflict)
-        else
-            logger.warn("book remote upload failed", dir, name, err)
+    commit(temp, function(resp)
+        if not conn.dead then
+            conn.resp = resp
         end
-        if conn.dead then
-            return
-        end
-        conn.resp = ok and Server.jsonResp(200, '{"ok":true}')
-            or Server.errorResp(500, "Save failed: " .. tostring(err))
-    end, conflict)
+    end)
     return true
 end
 
