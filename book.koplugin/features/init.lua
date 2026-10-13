@@ -67,6 +67,7 @@ end
 
 -- 顺序即 onCreate 先后。bars / sidebar 没有 onCreate，排前面只影响设置页里的行序。
 Features.list = {
+    "clock", -- 最先：时区要在其它 feature 按本地时间算东西之前生效
     "nightmode",
     "panel",
     "azw3",

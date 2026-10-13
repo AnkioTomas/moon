@@ -10,6 +10,7 @@ local Kit = require("support.widget_stubs")
 Kit.install("paper")
 Kit.sections.store = {}
 Kit.sections.extensions = {}
+Kit.sections.clock = { ntp_auto = false }
 
 local Widget = require("ui/widget/widget")
 
