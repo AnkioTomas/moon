@@ -29,7 +29,7 @@ package.preload["features.xray.db"] = function()
     }
 end
 local prior_limits = {}
-package.preload["features.xray.context"] = function()
+package.preload["reader.context"] = function()
     return {
         forAnalysis = function(ui, prior_limit)
             prior_limits[#prior_limits + 1] = prior_limit or "default"

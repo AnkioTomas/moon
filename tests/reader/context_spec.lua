@@ -1,11 +1,11 @@
---[[-- features.xray.context：当前页 + 前序正文。 --]]
+--[[-- reader.context：选区句子/段落、当前页、前序正文。 --]]
 
 local Assert = require("support.assert")
 local current_session = { page = 7 }
 package.preload["reader.session"] = function()
     return { current = function() return current_session end }
 end
-local Context = require("features.xray.context")
+local Context = require("reader.context")
 
 local rolling = {
     rolling = {},
@@ -82,3 +82,40 @@ Assert.is_nil(prior:find("本章", 1, true))
 Assert.is_true(#Context.priorText(cre, 5, 2000) <= 2000)
 cre.document.getTextFromXPointers = function() error("bad xpointer") end
 Assert.eq(Context.priorText(cre, 5), "")
+
+-- 段落 xpointer：去掉 text() 与偏移，跳出行内元素，停在块元素
+Assert.eq(Context.blockXPointer("/body/DocFragment[3]/body/div/p[12]/text().5"), "/body/DocFragment[3]/body/div/p[12]")
+Assert.eq(Context.blockXPointer("/body/DocFragment[3]/body/p[2]/em/span[2]/text()[2].0"), "/body/DocFragment[3]/body/p[2]")
+Assert.eq(Context.blockXPointer("/body/DocFragment/body/p[3].0"), "/body/DocFragment/body/p[3]")
+Assert.eq(Context.blockXPointer("/body"), "/body")
+
+-- 整句：向前到上一个句末标点，向后到下一个句末标点并带上右引号
+local para = "他推开门。“她不在，”老人说，“去镇上了。”他沉默了。"
+Assert.eq(Context.sentence(para, "老人"), "“她不在，”老人说，“去镇上了。”")
+Assert.eq(Context.sentence(para, "推开"), "他推开门。")
+Assert.eq(Context.sentence(para, "沉默"), "他沉默了。")
+Assert.eq(Context.sentence("He left. Mary refused to speak to him! Then", "refused"), "Mary refused to speak to him!")
+Assert.eq(Context.sentence("没有标点的一段话", "标点"), "没有标点的一段话")
+Assert.eq(Context.sentence(para, "不在段落里"), "不在段落里", "段落里找不到就退回选中文字")
+Assert.eq(Context.sentence("", "月色"), "月色")
+
+-- 选区：滚动文档按 pos0 取所在段落；分页文档没有段落
+local asked
+local cre_sel = {
+    rolling = {},
+    document = {
+        getTextFromXPointer = function(document, xp)
+            asked = xp
+            return "  前一句。他望着那片月色，久久不语。后一句。  "
+        end,
+    },
+}
+local sel = Context.selection(cre_sel, { text = " 月色 ", pos0 = "/body/p[4]/i/text().6" })
+Assert.eq(asked, "/body/p[4]")
+Assert.eq(sel.text, "月色")
+Assert.eq(sel.sentence, "他望着那片月色，久久不语。")
+Assert.eq(sel.paragraph, "前一句。他望着那片月色，久久不语。后一句。")
+
+sel = Context.selection({ document = {} }, { text = "月色", pos0 = { page = 3 } })
+Assert.eq(sel.sentence, "月色")
+Assert.eq(sel.paragraph, "")
