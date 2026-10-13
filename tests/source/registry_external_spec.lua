@@ -53,9 +53,7 @@ return {
 }]]):format(extra or "1", id, id)
 end
 
-package.loaded["pluginloader"] = {
-    enabled_plugins = {
-        plugin("book"),
+local enabled = {
         plugin("demo", descriptor("ext.demo")),
         plugin("oldapi", descriptor("ext.old", "2")),
         plugin("noprefix", descriptor("demo")),
@@ -63,10 +61,21 @@ package.loaded["pluginloader"] = {
         plugin("dup", descriptor("ext.demo")),
         plugin("broken", "error('boom')"),
         plugin("garbage", "return 42"),
-    },
 }
+package.loaded["pluginloader"] = { enabled_plugins = enabled }
 package.loaded["source.registry"] = nil
 local Registry = require("source.registry")
+
+-- KOReader 正在加载本插件（本插件还不在 enabled_plugins 里）：只给内置源、不缓存；加载完扫一次就缓存。
+do
+    Assert.eq(#Registry.list(), #BUILTIN, "加载期间不碰第三方描述文件")
+    Assert.is_nil(Registry.meta("ext.demo"))
+    enabled[#enabled + 1] = Config.selfPlugin()
+    Assert.eq(#Registry.list(), #BUILTIN + 1)
+    enabled[#enabled + 1] = plugin("after", descriptor("ext.after"))
+    Assert.eq(#Registry.list(), #BUILTIN + 1, "插件集合只在重启时变")
+    Assert.is_nil(Registry.meta("ext.after"))
+end
 
 -- 合法的第三方源排在内置源之后；不合约定的、重名的、加载抛错的全部跳过，内置源不受影响。
 do

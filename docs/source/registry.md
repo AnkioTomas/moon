@@ -5,7 +5,7 @@
 ## 设计
 
 - 源 id 清单即展示顺序：内置 `BUILTIN`（local 排前：混合 → 本地 → 在线，模块固定为 `source.<id>`），后接第三方源。
-- 第三方源：首次访问注册表时扫一次 `PluginLoader.enabled_plugins`，插件根目录有 `moon_source.lua` 就 dofile 成描述表，按插件加载顺序排在内置源之后。描述文件不合约定（`api` 不等于 `Registry.API`、缺 `meta`/`new`、id 不是 `ext.<name>`、与已登记 id 重名、加载抛错）记错误日志并跳过：第三方代码不能拖垮内置源。契约见 [`external`](external.md)。
+- 第三方源：KOReader 加载完全部插件（本插件已在 `PluginLoader.enabled_plugins` 里）后，首次访问注册表时扫一次 `enabled_plugins` 并缓存；加载期间（月读顶层模块被 require 时）只有内置源、不缓存。插件根目录有 `moon_source.lua` 就 dofile 成描述表，按插件加载顺序排在内置源之后。描述文件不合约定（`api` 不等于 `Registry.API`、缺 `meta`/`new`、id 不是 `ext.<name>`、与已登记 id 重名、加载抛错）记错误日志并跳过：第三方代码不能拖垮内置源。契约见 [`external`](external.md)。
 - 第三方插件卸载后，它的 id 不再登记：活跃源退回 local，`create` / `resolve` 返回 `nil, err`，书库里的书留着（混合模式按启用源过滤，不显示），重装即恢复。
 - **每个 id 一个实例**，缓存在同一张表里。活跃源只是配置里的 id：`current()` = `resolve(activeId())`，不做静默 fallback。
 - `resolve(id)`：按 id 建/取实例，**不改**用户选择的活跃源。这是「打开旧书不串源」的关键。

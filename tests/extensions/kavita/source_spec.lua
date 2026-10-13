@@ -129,7 +129,7 @@ package.loaded["utils.paths"] = {
     bookWorkDir = function(id) return WORK .. "/" .. id end,
 }
 
-package.loaded["pluginloader"] = { enabled_plugins = { { path = PLUGIN } } }
+package.loaded["pluginloader"] = { enabled_plugins = { Config.selfPlugin(), { path = PLUGIN } } }
 package.loaded["source.registry"] = nil
 local Registry = require("source.registry")
 

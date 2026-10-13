@@ -11,7 +11,6 @@ local Widgets = require("desktop.pages.home.placements")
 local logger = require("utils.log")
 
 ---@class BookHomeRegistry
----@field components BookHomeComponent[]
 local M = {}
 
 local COMPONENT_MODULES = {
@@ -20,40 +19,48 @@ local COMPONENT_MODULES = {
     "recent_hero", "recent_list", "recent_cards",
 }
 
-M.components = {}
+---@type BookHomeComponent[]|nil
+local components
 local by_id = {}
 
-for _idx, name in ipairs(COMPONENT_MODULES) do
-    local component = require("desktop.pages.home." .. name)
-    M.components[#M.components + 1] = component
-    by_id[component.id] = component
-end
-
-local Sources = require("source.registry")
-for _idx, meta in ipairs(Sources.list()) do
-    local desc = Sources.external(meta.id)
-    for _cidx, component in ipairs(desc and desc.home or {}) do
-        local id = component.id
-        if type(id) == "string" and id:match("^ext%.") and not by_id[id] then
-            M.components[#M.components + 1] = component
-            by_id[id] = component
-        else
-            logger.err("desktop.home external component rejected", meta.id, id)
+--- 全部组件定义，首次使用时收集：第三方组件来自源注册表，KOReader 加载插件期间还扫不全。
+---@return BookHomeComponent[]
+function M.list()
+    if components then return components end
+    components = {}
+    for _idx, name in ipairs(COMPONENT_MODULES) do
+        local component = require("desktop.pages.home." .. name)
+        components[#components + 1] = component
+        by_id[component.id] = component
+    end
+    local Sources = require("source.registry")
+    for _idx, meta in ipairs(Sources.list()) do
+        local desc = Sources.external(meta.id)
+        for _cidx, component in ipairs(desc and desc.home or {}) do
+            local id = type(component) == "table" and component.id
+            if type(id) == "string" and id:match("^ext%.") and not by_id[id] then
+                components[#components + 1] = component
+                by_id[id] = component
+            else
+                logger.err("desktop.home external component rejected", meta.id, id)
+            end
         end
     end
+    return components
 end
 
 --- 按 id 查找组件定义。
 ---@param id string|nil
 ---@return BookHomeComponent|nil
 function M.find(id)
+    M.list()
     return id and by_id[id] or nil
 end
 
 --- 当前钉页放置表（已净化）。
 ---@return BookHomeWidgetPlacement[]
 function M.widgets()
-    return Widgets.load(M.components)
+    return Widgets.load(M.list())
 end
 
 --- 写回放置表。

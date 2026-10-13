@@ -4,7 +4,7 @@ Source 注册表：源 id 清单、实例缓存（每个 id 一个实例）、�
 不做静默 fallback；唯一例外是已下线的源 id（如 kindle，或卸载了的第三方源），activeId 退回 local。
 
 第三方源：任何已启用的 KOReader 插件根目录里放 `moon_source.lua` 即登记一个源（契约见 docs/source/external.md），
-首次访问注册表时按 PluginLoader.enabled_plugins 扫一次，排在内置源之后。
+按 PluginLoader.enabled_plugins 扫描，排在内置源之后；插件全部加载完后才缓存扫描结果。
 
 @module koplugin.book.source.registry
 --]]
@@ -46,32 +46,53 @@ local function readDescriptor(path)
     return id, desc
 end
 
---- 源 id 清单：内置在前，第三方按插件加载顺序在后。插件集合只在重启时变，扫一次即可。
+--- 本插件根目录，与 PluginLoader 给的 plugin.path 同一字符串（模块经 `<plugin.path>/?.lua` 加载）。
+local PLUGIN_ROOT = debug.getinfo(1, "S").source:match("^@(.*)/source/registry%.lua$")
+
+--- KOReader 已加载完全部插件：本插件进 enabled_plugins 是在 dofile 本插件 main.lua 之后，
+--- 在那之前排在后面的插件还没加载，package.path 上也只有本插件目录。
+---@param plugins table[]
+---@return boolean
+local function pluginsLoaded(plugins)
+    for _idx, plugin in ipairs(plugins) do
+        if plugin.path == PLUGIN_ROOT then return true end
+    end
+    return false
+end
+
+--- 源 id 清单：内置在前，第三方按插件加载顺序在后。插件集合只在重启时变，加载完扫一次即可；
+--- 加载期间（本插件顶层模块被 require 时）只给内置源、不缓存。
 ---@return SourceId[]
 local function sourceIds()
     if ids then return ids end
-    ids = {}
+    local list, seen, ext = {}, {}, {}
     for i, id in ipairs(BUILTIN) do
-        ids[i] = id
-        known[id] = true
+        list[i] = id
+        seen[id] = true
+    end
+    local plugins = require("pluginloader").enabled_plugins
+    if not pluginsLoaded(plugins) then
+        known, external = seen, ext
+        return list
     end
     local lfs = require("libs/libkoreader-lfs")
-    for _idx, plugin in ipairs(require("pluginloader").enabled_plugins) do
+    for _idx, plugin in ipairs(plugins) do
         local path = plugin.path .. "/" .. DESCRIPTOR
         if lfs.attributes(path, "mode") == "file" then
             -- 第三方代码不归月读管：坏一个只记日志跳过，不能拖垮内置源和整个桌面。
             local ok, id, desc = pcall(readDescriptor, path)
             if not ok then
                 logger.err("book.source external rejected", path, id)
-            elseif known[id] then
+            elseif seen[id] then
                 logger.err("book.source external duplicate id", path, id)
             else
-                ids[#ids + 1] = id
-                known[id] = true
-                external[id] = desc
+                list[#list + 1] = id
+                seen[id] = true
+                ext[id] = desc
             end
         end
     end
+    ids, known, external = list, seen, ext
     return ids
 end
 
