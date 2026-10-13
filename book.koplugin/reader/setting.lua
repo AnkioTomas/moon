@@ -27,5 +27,7 @@ return {
             qrcode = true,
             search = true,
         },
+        -- 划词弹窗扫描到的按钮：设置项 id → { title = 按钮文字, origin = 来源 }，供设置页列出。
+        reader_popup_seen = {},
     },
 }

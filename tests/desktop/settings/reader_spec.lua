@@ -11,7 +11,7 @@ package.preload["ffi/util"] = function()
         end,
     }
 end
-local reader_section = {}
+local reader_section = { reader_popup_seen = {} }
 local saved_section
 package.preload["utils.settings"] = function()
     return {
@@ -49,7 +49,7 @@ auto_mark.callback()
 Assert.is_true(reader_section.auto_mark_read_at_99)
 Assert.eq(saved_section.name, "reader")
 Assert.eq(updates, 1)
-reader_section = {}
+reader_section = { reader_popup_seen = {} }
 
 local lookup = Settings:lookupSections(desktop)
 local titles = {}
@@ -67,7 +67,7 @@ Assert.eq(popup_rows[9](600).title, "AI 解释")
 Assert.eq(popup_rows[12](600).title, "搜索")
 
 -- 旧配置缺键：设置页显示的位次必须和实际弹窗顺序（HighlightMenu.order）一致。
-reader_section = { reader_popup_button_order = { "copy" } }
+reader_section = { reader_popup_button_order = { "copy" }, reader_popup_seen = {} }
 local order = require("reader.highlight_menu").order()
 local dictionary_pos
 for i, key in ipairs(order) do
@@ -75,5 +75,35 @@ for i, key in ipairs(order) do
 end
 Assert.eq(popup_rows[6](600).title, "词典")
 Assert.eq(popup_rows[6](600).status, "第 " .. dictionary_pos .. " 位")
+
+-- 扫描到的按钮：内置按钮之后列出，标题用扫描到的文字，副标题写来源；还没扫到来源的不写
+reader_section = {
+    reader_popup_seen = {
+        ["12_0_make_handmade_toc_item"] = { title = "开始目录章节 ⊡", origin = "koreader" },
+        qrcode = { title = "生成二维码", origin = "plugin:qrclipboard" },
+        ai_explain = { title = "AI 解释", origin = "book" },
+        ["13_patch_button"] = { origin = "patch:2-my-button" },
+    },
+}
+popup_rows = Settings:popupRows(desktop)
+Assert.len(popup_rows, 14)
+Assert.is_nil(popup_rows[1](600).subtitle)
+Assert.eq(popup_rows[9](600).subtitle, "来自：月读")
+Assert.eq(popup_rows[11](600).subtitle, "来自：插件 qrclipboard")
+local toc_row = popup_rows[13](600)
+Assert.eq(toc_row.title, "开始目录章节 ⊡")
+Assert.eq(toc_row.icon, "extension")
+Assert.eq(toc_row.subtitle, "来自：KOReader 自带")
+Assert.eq(popup_rows[14](600).title, "13_patch_button", "没扫到文字时显示原键")
+Assert.eq(popup_rows[14](600).subtitle, "来自：用户补丁 2-my-button")
+
+-- 停用扫描到的按钮：按原键写进 reader_popup_buttons
+toc_row.callback()
+local sheet = require("support.theme_stubs").last("sheet")
+Assert.eq(sheet.title, "开始目录章节 ⊡")
+Assert.eq(sheet.items[1].text, "停用")
+sheet.items[1].callback()
+Assert.is_false(reader_section.reader_popup_buttons["12_0_make_handmade_toc_item"])
+Assert.eq(saved_section.name, "reader")
 
 return true

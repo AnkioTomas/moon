@@ -1,8 +1,9 @@
 --[[--
 划词工具栏：复用 KOReader 原生 ButtonDialog，按 Book 设置裁剪、排序并五列排版。
 
-按钮工厂、回调、锚点和关闭行为全部保持原生；这里只接管收集和分行，含
-qrclipboard 的 12_generate_qr_code 与 Book 的 X-Ray 查询、AI 解释。
+按钮工厂、回调、锚点和关闭行为全部保持原生；这里只接管收集和分行。
+所有已注册按钮（KOReader 自带、其它插件、用户补丁、本插件）都受显隐与排序设置控制：
+弹窗时扫描到的按钮记进 `reader_popup_seen`（设置键 → { title, origin }），设置页据此列出。
 
 @module koplugin.book.reader.highlight_menu
 --]]
@@ -17,7 +18,7 @@ local HighlightMenu = {}
 
 local TOOLBAR_COLUMNS = 5
 
---- ReaderHighlight._highlight_buttons 键 → 设置项 id
+--- ReaderHighlight._highlight_buttons 键 → 设置项 id；不在表里的按钮直接用原键作设置项 id。
 ---@type table<string, string>
 local INDEX_TO_KEY = {
     ["01_select"] = "select",
@@ -34,6 +35,45 @@ local INDEX_TO_KEY = {
     ["12_ai_explain"] = "ai_explain",
 }
 
+local OWN_PLUGIN = debug.getinfo(1, "S").source:match("([^/]+)%.koplugin/")
+
+---@param index string
+---@return string
+local function keyOf(index)
+    return INDEX_TO_KEY[index] or index
+end
+
+--- 按钮工厂定义在哪：`book`（本插件）、`koreader`、`plugin:<目录名>`、`patch:<文件名>`、`unknown`。
+---@param factory function
+---@return string
+function HighlightMenu.originOf(factory)
+    local source = debug.getinfo(factory, "S").source
+    local plugin = source:match("([^/]+)%.koplugin/")
+    if plugin then
+        return plugin == OWN_PLUGIN and "book" or "plugin:" .. plugin
+    end
+    local patch = source:match("patches/([^/]+)%.lua$")
+    if patch then return "patch:" .. patch end
+    if source:find("frontend/", 1, true) then return "koreader" end
+    return "unknown"
+end
+
+--- 记下扫描到的按钮字段，有变化才落盘。
+---@param key string
+---@param field "title"|"origin"
+---@param value string
+local function remember(key, field, value)
+    local reader = MoonSettings.get("reader")
+    local entry = reader.reader_popup_seen[key]
+    if not entry then
+        entry = {}
+        reader.reader_popup_seen[key] = entry
+    end
+    if entry[field] == value then return end
+    entry[field] = value
+    MoonSettings.save("reader")
+end
+
 --- 划词弹窗某项是否应在菜单中显示。
 ---@param key string
 ---@return boolean
@@ -41,12 +81,12 @@ function HighlightMenu.isEnabled(key)
     return MoonSettings.get("reader").reader_popup_buttons[key] ~= false
 end
 
---- 合并用户顺序与新增按钮，旧配置或重复项不会让按钮消失。
+--- 合并用户顺序、内置默认顺序与扫描到的按钮，旧配置或重复项不会让按钮消失。
 ---@return string[]
 function HighlightMenu.order()
-    local configured = MoonSettings.get("reader").reader_popup_button_order
+    local reader = MoonSettings.get("reader")
     local out, seen = {}, {}
-    for _idx, key in ipairs(configured or {}) do
+    for _idx, key in ipairs(reader.reader_popup_button_order or {}) do
         if type(key) == "string" and not seen[key] then
             out[#out + 1], seen[key] = key, true
         end
@@ -56,6 +96,12 @@ function HighlightMenu.order()
             out[#out + 1], seen[key] = key, true
         end
     end
+    local scanned = {}
+    for key in pairs(reader.reader_popup_seen) do
+        if not seen[key] then scanned[#scanned + 1] = key end
+    end
+    table.sort(scanned)
+    for _idx, key in ipairs(scanned) do out[#out + 1] = key end
     return out
 end
 
@@ -72,7 +118,7 @@ function HighlightMenu.orderedFactories(highlight)
         factories[#factories + 1] = {
             index = index,
             factory = factory,
-            position = position[INDEX_TO_KEY[index]] or math.huge,
+            position = position[keyOf(index)] or math.huge,
         }
     end
     table.sort(factories, function(a, b)
@@ -108,20 +154,22 @@ local function wrapFactory(fn, key)
     end
 end
 
---- 给当前 ReaderHighlight 实例挂上显隐门控（含晚注册的插件按钮）。
+--- 给当前 ReaderHighlight 实例的全部按钮挂上显隐门控并记下来源（含晚注册、重新注册的按钮）。
 ---@param highlight table|nil
 function HighlightMenu.ensureWrapped(highlight)
     if not highlight or not highlight._highlight_buttons then
         return
     end
+    -- 按工厂函数而非键记：原生自定义目录开关时会移除再注册同一个键。
     highlight._book_popup_wrapped = highlight._book_popup_wrapped or {}
+    local wrapped = highlight._book_popup_wrapped
     for idx, factory in pairs(highlight._highlight_buttons) do
-        if not highlight._book_popup_wrapped[idx] then
-            local key = INDEX_TO_KEY[idx]
-            if key then
-                highlight._highlight_buttons[idx] = wrapFactory(factory, key)
-            end
-            highlight._book_popup_wrapped[idx] = true
+        if not wrapped[factory] then
+            local key = keyOf(idx)
+            remember(key, "origin", HighlightMenu.originOf(factory))
+            local wrapper = wrapFactory(factory, key)
+            wrapped[wrapper] = true
+            highlight._highlight_buttons[idx] = wrapper
         end
     end
 end
@@ -147,6 +195,8 @@ local function patchShowMenu()
         local buttons = { {} }
         for _idx, item in ipairs(HighlightMenu.orderedFactories(self)) do
             local button = item.factory(self, index)
+            local title = button.text or button.text_func and button.text_func()
+            if title then remember(keyOf(item.index), "title", title) end
             if not button.show_in_highlight_dialog_func or button.show_in_highlight_dialog_func() then
                 if #buttons[#buttons] >= TOOLBAR_COLUMNS then
                     buttons[#buttons + 1] = {}
