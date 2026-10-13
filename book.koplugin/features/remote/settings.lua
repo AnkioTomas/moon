@@ -65,7 +65,7 @@ local BUILTIN = {
         fields = {
             { key = "base_url", label = "服务器地址", type = "url", placeholder = "https://book.example.com",
                 normalize = Text.stripWhitespace },
-            { key = "token", label = "长期令牌", secret = true, placeholder = "bk_…", normalize = Text.stripWhitespace },
+            { key = "token", label = "长期令牌", secret = true, placeholder = "个人Token", normalize = Text.stripWhitespace },
         },
     },
     {

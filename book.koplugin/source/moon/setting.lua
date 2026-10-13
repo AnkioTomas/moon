@@ -61,7 +61,7 @@ end
 function Setting.rows()
     return {
         field("base_url", _("服务器地址"), "https://book.example.com", false, Text.stripWhitespace, "dns"),
-        field("token", _("长期令牌"), "bk_...", true, Text.stripWhitespace, "key"),
+        field("token", _("长期令牌"), _("个人Token"), true, Text.stripWhitespace, "key"),
     }
 end
 
@@ -84,7 +84,7 @@ function Setting.open()
         title = _("服务器与令牌"),
         fields = {
             { text = tostring(cfg.base_url or ""), hint = _("https://book.example.com") },
-            { text = tostring(cfg.token or ""), hint = _("bk_… 长期令牌"), text_type = "password" },
+            { text = tostring(cfg.token or ""), hint = _("个人Token"), text_type = "password" },
         },
         ok_text = _("保存"),
         callback = function(base_url, token)

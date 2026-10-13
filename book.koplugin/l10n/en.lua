@@ -49,7 +49,7 @@ return {
     ["Z-Library 账号"] = "Z-Library account",
     ["Z站"] = "Z-Lib",
     ["Z站暂无内容"] = "Z-Lib is empty",
-    ["bk_… 长期令牌"] = "bk_… long-lived token",
+    ["个人Token"] = "Personal token",
     ["https://book.example.com"] = "https://book.example.com",
     ["txt 章节解码失败"] = "Failed to decode txt chapter",
     ["✓ 一行"] = "✓ 1 row",
