@@ -401,6 +401,15 @@ function BookDB.get(source_id, stable_id)
     ))
 end
 
+--- 全部源的在架书（deleted=0）。
+---@return Book[]
+function BookDB.listLibrary()
+    local result, nrows = DB.query("SELECT " .. COLUMNS .. " FROM books WHERE deleted=?;", 0)
+    local out = {}
+    for i = 1, nrows do out[i] = bookAt(result, i) end
+    return out
+end
+
 --- 批量取 books 行，避免统计/列表场景的 N+1 查询。
 ---@param source_id string
 ---@param stable_ids string[]

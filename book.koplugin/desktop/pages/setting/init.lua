@@ -168,6 +168,7 @@ local function coreEntries(desktop)
         network,
         { group = "maintenance", order = 10, row = Maintenance:cacheRow(desktop) },
         { group = "maintenance", order = 20, row = Maintenance:clearStatsRow(desktop) },
+        { group = "maintenance", order = 25, row = Maintenance:importKoreaderStatsRow(desktop) },
         { group = "maintenance", order = 30, row = Maintenance:debugLogRow(desktop) },
         { group = "maintenance", order = 60, row = Maintenance:aboutRow() },
         { group = "maintenance", order = 70, row = Maintenance:closeRow(desktop) },
