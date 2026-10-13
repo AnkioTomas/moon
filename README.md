@@ -29,8 +29,8 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/PixPin_2026-09-05_14-07-22.png" width="48%" alt="月读首页">
-  <img src="screenshots/PixPin_2026-09-05_14-07-43.png" width="48%" alt="KOReader 阅读页">
+  <img src="screenshots/home.png" width="48%" alt="月读首页">
+  <img src="screenshots/reader.png" width="48%" alt="KOReader 阅读页">
 </p>
 
 月读是面向 [KOReader](https://koreader.rocks/) 的本地优先阅读增强插件。它不是另一个阅读器，而是在 KOReader 之上补齐书库桌面、多数据源、同步、统计、AI 阅读助手、组合锁屏、中文输入和局域网管理。
@@ -68,15 +68,15 @@
 
 | 图书馆 | 书籍详情 |
 |:---:|:---:|
-| <img src="screenshots/PixPin_2026-09-05_14-15-17.png" alt="图书馆" width="360"> | <img src="screenshots/PixPin_2026-09-05_14-08-13.png" alt="书籍详情" width="360"> |
+| <img src="screenshots/library.png" alt="图书馆" width="360"> | <img src="screenshots/detail.png" alt="书籍详情" width="360"> |
 
 | 阅读统计 | 组合锁屏 |
 |:---:|:---:|
-| <img src="screenshots/PixPin_2026-09-05_14-15-24.png" alt="阅读统计日历" width="360"> | <img src="screenshots/PixPin_2026-09-05_14-16-12.png" alt="阅读回执锁屏" width="360"> |
+| <img src="screenshots/stats_overview.png" alt="阅读统计概览" width="360"> | <img src="screenshots/lock_receipt.png" alt="阅读回执锁屏" width="360"> |
 
 | 远程管理 | 文件管理 |
 |:---:|:---:|
-| <img src="screenshots/PixPin_2026-09-05_14-19-23.png" alt="远程管理首页" width="480"> | <img src="screenshots/PixPin_2026-09-05_14-19-43.png" alt="远程文件管理" width="480"> |
+| <img src="screenshots/remote_index.png" alt="远程管理首页" width="480"> | <img src="screenshots/remote_file.png" alt="远程文件管理" width="480"> |
 
 ## 增强了什么
 
@@ -94,9 +94,9 @@
 - **自动夜间模式：** 按固定时间或当地日出日落切换；只在昼夜交替那一刻切换，中途手动切换不会被立刻改回。日出日落离线计算，经纬度在选择该模式时经天气接口定位一次。
 - **自动亮度：** 有光线传感器的 Kindle 按环境光档位调节；其他设备按八个时段的亮度表调节，白天再按天气（阴雨雾雪）适当补光。手动调亮度即关闭自动亮度，桌面快捷面板也有开关。
 
-| 书架视图 | 封面墙 |
-|:---:|:---:|
-| <img src="screenshots/PixPin_2026-09-05_14-16-57.png" alt="书架视图" width="360"> | <img src="screenshots/PixPin_2026-09-05_14-17-10.png" alt="书库封面墙" width="360"> |
+<p align="center">
+  <img src="screenshots/home_heatmap.png" width="48%" alt="首页天气与阅读热力图组件">
+</p>
 
 ### 2. 把不同来源的书统一为可靠的书籍身份
 
@@ -110,10 +110,6 @@
 - 微信读书使用墨水屏客户端扫码登录，会话过期自动续期；京东读书目录分页拉取，支持 EPUB、会员书和 TXT 网文，无下载权限时明确报错。
 - 本地源 WebDAV 模式提供「测试 WebDAV 连接」：写入、读回并删除一个测试文件，确认可读写。
 
-<p align="center">
-  <img src="screenshots/PixPin_2026-09-05_14-15-56.png" width="48%" alt="数据源设置">
-</p>
-
 ### 3. 阅读进度、笔记和统计形成闭环
 
 - 自动记录阅读页数、时长和会话统计，不依赖 KOReader 自带统计插件；也可在维护页一次性导入 KOReader 自带统计插件的历史记录（按书匹配书库，已有的记录不会重复导入）。
@@ -122,9 +118,9 @@
 - 关闭文档、休眠和网络恢复时会结清或重试待同步数据。
 - 统计页提供概览、今日总览、连续记录和阅读时段（一天中各时段的阅读分布）；首页可放阅读热力图，书籍详情显示预计读完日期。微信读书数据还可按周查看阅读书目。
 
-| 每日书单 | 连续阅读 |
-|:---:|:---:|
-| <img src="screenshots/PixPin_2026-09-05_14-15-31.png" alt="每日阅读书单" width="360"> | <img src="screenshots/PixPin_2026-09-05_14-15-37.png" alt="年度阅读与连续记录" width="360"> |
+| 今日总览 | 连续记录 | 阅读时段 |
+|:---:|:---:|:---:|
+| <img src="screenshots/stats_day.png" alt="今日阅读总览" width="300"> | <img src="screenshots/stats_records.png" alt="年度阅读与连续记录" width="300"> | <img src="screenshots/stats_hours.png" alt="阅读时段分布" width="300"> |
 
 ### 4. 增强阅读页，而不复制 KOReader
 
@@ -139,13 +135,17 @@
 - 读完后提供返回主页或删除本书的结束操作。
 - 可启用翻页动画补丁，提供擦除、翻页阴影、百叶窗、螺旋、时钟、棋盘等 14 种风格；开关需重启，切换风格下一次翻页即生效。
 
+| 阅读快捷面板 | 阅读侧栏 |
+|:---:|:---:|
+| <img src="screenshots/reader_panel.png" alt="阅读快捷面板" width="360"> | <img src="screenshots/sidebar.png" alt="阅读侧栏书籍页" width="360"> |
+
 | 划词工具栏 | 百度百科 | 翻译 |
 |:---:|:---:|:---:|
-| <img src="screenshots/Reader_book.epub_p172_2026-09-05_141327.png" alt="可排序的划词工具栏" width="300"> | <img src="screenshots/Reader_book.epub_p172_2026-09-05_141337.png" alt="百度百科查询" width="300"> | <img src="screenshots/Reader_book.epub_p172_2026-09-05_141346.png" alt="划词翻译" width="300"> |
+| <img src="screenshots/highlight_menu.png" alt="可排序的划词工具栏" width="300"> | <img src="screenshots/baike.png" alt="百度百科查询" width="300"> | <img src="screenshots/translate.png" alt="划词翻译" width="300"> |
 
 | 章节目录 | 阅读字体 |
 |:---:|:---:|
-| <img src="screenshots/PixPin_2026-09-05_14-08-26.png" alt="章节目录" width="360"> | <img src="screenshots/PixPin_2026-09-05_14-12-46.png" alt="阅读字体选择" width="360"> |
+| <img src="screenshots/sidebar_toc.png" alt="侧栏章节目录" width="360"> | <img src="screenshots/sidebar_font.png" alt="侧栏阅读字体选择" width="360"> |
 
 ### 5. 增加真正用于阅读的内容工具
 
@@ -165,13 +165,9 @@
 
 AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址、API 密钥和模型；设置页提供最小请求的连接测试。未配置 AI 时相关入口不出现。
 
-| X-Ray 实体 | 实体详情 |
+| AI 解释 | X-Ray 实体详情 |
 |:---:|:---:|
-| <img src="screenshots/PixPin_2026-09-05_14-08-47.png" alt="X-Ray 实体列表" width="360"> | <img src="screenshots/PixPin_2026-09-05_14-08-55.png" alt="X-Ray 实体详情" width="360"> |
-
-| StarDict 词典下载 | 查询无结果状态 |
-|:---:|:---:|
-| <img src="screenshots/PixPin_2026-09-05_14-11-18.png" alt="StarDict 词典下载" width="360"> | <img src="screenshots/Reader_book.epub_p172_2026-09-05_141358.png" alt="词典查询无结果状态" width="360"> |
+| <img src="screenshots/ai_explain.png" alt="划词 AI 解释" width="360"> | <img src="screenshots/xray.png" alt="X-Ray 实体详情" width="360"> |
 
 ### 6. 把锁屏变成可组合的信息页
 
@@ -184,9 +180,9 @@ AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址�
 - 锁屏图先在后台完整生成，再替换显示文件；生成失败时保留上一张可用图片。
 - **锁屏密码：** 设置 4～6 位数字密码后，冷启动和每次唤醒都要先输入密码；连续输错会冷却。这只是隐私遮挡，不是加密，忘记密码时删除 `.moon/settings/passcode.lua` 即可解除。
 
-| 当前阅读 | 阅读账单 | 阅读统计 |
+| 当前阅读 × 必应壁纸 | 阅读统计 × 书籍封面 | 当前阅读 × 海报墙 |
 |:---:|:---:|:---:|
-| <img src="screenshots/PixPin_2026-09-05_14-16-27.png" alt="当前阅读锁屏" width="300"> | <img src="screenshots/PixPin_2026-09-05_14-16-42.png" alt="阅读账单锁屏" width="300"> | <img src="screenshots/PixPin_2026-09-05_14-17-25.png" alt="阅读统计锁屏" width="300"> |
+| <img src="screenshots/lock_current.png" alt="当前阅读锁屏" width="300"> | <img src="screenshots/lock_stats.png" alt="阅读统计锁屏" width="300"> | <img src="screenshots/lock_poster.png" alt="海报墙锁屏" width="300"> |
 
 ### 7. 改善墨水屏上的中文输入
 
@@ -199,7 +195,7 @@ AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址�
 - 非中文布局、数字输入框、词库缺失以及物理键盘输入保持 KOReader 原生行为。
 
 <p align="center">
-  <img src="screenshots/PixPin_2026-09-05_14-15-45.png" width="48%" alt="语言、输入与系统设置入口">
+  <img src="screenshots/settings.png" width="48%" alt="设置首页">
 </p>
 
 ### 8. 从电脑或手机管理阅读器
