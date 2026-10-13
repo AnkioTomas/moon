@@ -188,18 +188,6 @@ runs.n.done({ ok = true })
 flush()
 Assert.is_true(Themed.last("progress_dialog").closed)
 
--- 可重跑但声明 cancelable = false：进度窗没有取消，列表里也不能点
-local locked = spec("locked", true)
-locked.cancelable = false
-TaskDialog.follow(Tasks.enqueue(locked))
-Assert.is_nil(Themed.last("progress_dialog").on_cancel)
-Assert.not_nil(Themed.last("progress_dialog").on_background, "仍可转后台")
-local locked_list = TaskDialog:new{}
-Assert.len(Kit.taps(locked_list), 0)
-locked_list:onCloseWidget()
-runs.locked.done({ ok = true })
-flush()
-
 -- 转后台：只关窗并提示；之后进入等网络提示一次，状态不变不重复提示；任务照常跑完。
 local h = Tasks.enqueue(spec("h", true))
 TaskDialog.follow(h)

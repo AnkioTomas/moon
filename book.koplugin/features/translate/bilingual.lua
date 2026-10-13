@@ -235,9 +235,9 @@ end
 ---@field engine "edge"|"ai"
 ---@field lang string
 
---- 任务体：分析 → 翻译缺的段落 → 生成双语版 → 写 meta。返回 Tasks 要的 run。
+--- 任务体：分析 → 翻译缺的段落 → 生成双语版 → 写 meta。返回 run(report, done)，done 恰好一次。
 ---@param input BilingualInput
----@return fun(report: function, done: fun(result: table)): { cancel: fun() }
+---@return fun(report: fun(text: string, count: integer|nil, total: integer|nil), done: fun(result: table))
 local function task(input)
     local engine = ENGINES[input.engine]
     return function(report, done)
@@ -303,7 +303,7 @@ local function task(input)
                         return engine.translate(texts, input.lang, settle)
                     end, function(list, err)
                         inflight = inflight - 1
-                        if not list then return finish({ ok = false, err = err, retry = true }) end
+                        if not list then return finish({ ok = false, err = err }) end
                         appendCache(input.cache, texts, list)
                         finished = finished + #texts
                         report(_("正在翻译…"), finished, found.total)
@@ -314,8 +314,6 @@ local function task(input)
             report(_("正在翻译…"), finished, found.total)
             pump()
         end)
-
-        return { cancel = halt }
     end
 end
 
@@ -392,7 +390,8 @@ local function prepare(ui, identity, engine, lang)
     return input
 end
 
---- 入队整书翻译；同一本书已有任务在跑时直接提示，不去覆盖它正在读的导出文件。
+--- 整书翻译：前台进度窗，不入队、不能转后台、不能取消（窗口占住阅读页，期间书不会被换掉）。
+--- 失败后重来时已译段落从缓存续上。
 ---@param ui table
 ---@param identity BookIdentity
 ---@param engine "edge"|"ai"
@@ -403,44 +402,26 @@ local function start(ui, identity, engine, lang)
         Toast:new{ text = _("网络不可用，请先连接 Wi-Fi") }:show()
         return
     end
-    local TaskDialog = require("workers.ui.task_dialog")
-    local spec = {
-        key = "bilingual\0" .. identity.source_id .. "\0" .. identity.stable_id,
-        kind = "cache",
-        title = T(_("%1（双语）"), identity.book and identity.book.title or ""),
-        restartable = true,
-        cancelable = false,
-        retryable = function(result) return result.retry == true end,
-    }
-    local existing = require("workers.tasks").get(spec.key)
-    if existing and existing.state ~= "queued" then
-        TaskDialog.rejected("running", spec)
-        return
-    end
     local input = prepare(ui, identity, engine, lang)
-    spec.run = task(input)
-    spec.on_done = function(result)
+    local dialog = require("ui.themes.widgets.progress_dialog"):new{
+        title = T(_("%1（双语）"), identity.book and identity.book.title or ""),
+        dismissable = false,
+    }
+    dialog:show()
+    task(input)(function(text, count, total) dialog:update(text, count, total) end, function(result)
+        dialog:close()
         if not result.ok then
             Toast:new{ text = T(_("双语翻译失败：%1"), tostring(result.err):match("[^\n]*")) }:show()
-            return
-        end
-        local reader = require("apps/reader/readerui").instance
-        local session = require("reader.session").current()
-        local current = session and session.identity
-        if not (reader and current and current.source_id == identity.source_id
-                and current.stable_id == identity.stable_id and reader.document.file == input.origin) then
-            Toast:new{ text = _("双语对照已生成，可在阅读快捷面板打开") }:show()
             return
         end
         require("ui.themes.widgets.confirm"):new{
             text = _("双语对照已生成，现在打开？"),
             ok_text = _("打开"),
             ok_callback = function()
-                switchTo(reader, current, input.dest, reader.document:getXPointer())
+                switchTo(ui, identity, input.dest, ui.document:getXPointer())
             end,
         }:show()
-    end
-    TaskDialog.start(spec)
+    end)
 end
 
 --- 正在读双语版（面板按钮高亮）。
