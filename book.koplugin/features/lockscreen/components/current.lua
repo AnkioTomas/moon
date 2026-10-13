@@ -149,8 +149,15 @@ function M.blocks(rect)
         block.y = block.y + content_y
         blocks[#blocks + 1] = block
     end
-    local bar = U.progressBlocks(text_x, content_y + head_h + bar_gap, text_w, book.percent)
+    -- 进度条右侧留一列给百分比，文字与 6px 细条垂直居中。
+    local pct_w = 52
+    local bar_y = content_y + head_h + bar_gap
+    local bar, bar_h = U.progressBlocks(text_x, bar_y, math.max(1, text_w - pct_w - 8), book.percent)
     for _idx, block in ipairs(bar) do blocks[#blocks + 1] = block end
+    blocks[#blocks + 1] = {
+        text = U.percentText(book.percent), x = text_x + text_w - pct_w, y = bar_y + math.floor(bar_h / 2) - 9,
+        width = pct_w, size = 13, bold = true, align = "right", box = false,
+    }
     return blocks
 end
 

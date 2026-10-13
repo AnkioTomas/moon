@@ -17,6 +17,20 @@ Assert.eq(pages, "70 / 200 页")
 local _, no_pages = U.progress({ percent = 10, page = 0, total_pages = 0 })
 Assert.eq(no_pages, "页数暂无")
 
+-- 百分比：不足 10% 保留一位小数，整数去掉 .0；越界夹住。
+Assert.eq(U.percentText(0.26), "0.3%")
+Assert.eq(U.percentText(0), "0%")
+Assert.eq(U.percentText(5), "5%")
+Assert.eq(U.percentText(55.7), "55%")
+Assert.eq(U.percentText(120), "100%")
+Assert.eq(U.percentText(nil), "0%")
+
+-- 进度条：浅灰轨（不是深灰），按比例画黑色填充。
+local bar, bar_h = U.progressBlocks(0, 0, 200, 25)
+Assert.eq(bar_h, 6)
+Assert.eq(bar[1].color, U.TRACK)
+Assert.eq(bar[2].width, 50)
+
 -- 书卡文字头：按实测行高逐行下移，不写死偏移；长书名压成单行；空作者跳过。
 -- 替身：每字宽 = 字号，行高 = 字号 × 1.5，超宽就折行（高度翻倍）。
 package.loaded["features.lockscreen.render"] = {
