@@ -1,5 +1,5 @@
 --[[--
-desktop.pages.insight：按当前源读本地洞察（不联网、不同步远端）；主题翻页条按页名切三页；
+desktop.pages.insight：按当前源读本地洞察（不联网、不同步远端）；主题翻页条按页名切四页；
 日历点日期跳当日书单；书单点书进详情，缺行 Toast 提示。
 
 @module tests.desktop.pages.insight_spec
@@ -71,14 +71,18 @@ end
 
 local today = os.date("%Y-%m-%d")
 local view_updates = 0
+local hours = {}
+for h = 1, 24 do hours[h] = h == 22 and 600 or 0 end
 payload = {
     has_data = true,
-    total = { has_data = true, total_text = "12小时", last7_text = "3小时" },
+    total = { has_data = true, total_seconds = 30 * 3600, total_text = "12小时", last7_text = "3小时" },
     calendar = {
         days = {
             [today] = {
                 duration_seconds = 600,
                 duration_text = "10分钟",
+                pages = 7,
+                hours = hours,
                 books = { { source_id = "wechat", stable_id = "book-1", title = "本地书", percent = 42 } },
             },
         },
@@ -139,6 +143,11 @@ Assert.eq(insight.ui_page, 2)
 view = desktop.view
 Assert.is_true(has(view, "今日总览"))
 Assert.is_true(has(view, "本地书"))
+Assert.is_true(has(view, "阅读时段"), "有本机记录的日子画 24 小时时间线")
+Assert.len(chart_opts.points, 24)
+Assert.eq(chart_opts.points[22].value, 600)
+Assert.eq(chart_opts.points[19].label, "18")
+Assert.eq(chart_opts.points[20].label, "")
 
 -- 书单点书：books 表有行 → 进详情，进度用洞察里的值补。
 opened = nil
@@ -154,7 +163,7 @@ Assert.is_nil(opened)
 Assert.eq(Themed.last("toast").text, "没有这本书")
 Assert.is_true(Themed.last("toast").shown)
 
--- 第 3 页：指标卡 + 月度图；末页右键置灰。
+-- 第 3 页：指标卡 + 月度图；累计 30 小时，下一档里程碑 50 小时。
 nav = Kit.buttons(view)
 nav[#nav].callback()
 Assert.eq(insight.ui_page, 3)
@@ -162,7 +171,23 @@ view = desktop.view
 Assert.is_true(has(view, "连续记录"))
 Assert.is_true(has(view, "今年总阅读时长"))
 Assert.is_true(has(view, "600s"))
+Assert.is_true(has(view, "单日最多页数"))
+Assert.is_true(has(view, "7"))
+Assert.is_true(has(view, "50小时"))
+Assert.is_true(has(view, "距下一里程碑 72000s"))
 Assert.len(chart_opts.points, 12)
+
+-- 第 4 页：阅读时段（本机记录）；末页右键置灰。
+nav = Kit.buttons(view)
+nav[#nav].callback()
+Assert.eq(insight.ui_page, 4)
+view = desktop.view
+Assert.is_true(has(view, "阅读时段"))
+Assert.is_true(has(view, "21:00–22:00"), "最常阅读时段取最多的那个小时")
+Assert.is_true(has(view, "600s"))
+Assert.len(chart_opts.points, 7, "最后画的是按星期")
+local wday = (os.date("*t").wday + 5) % 7 + 1
+Assert.eq(chart_opts.points[wday].value, 600, "今天落在对应星期")
 nav = Kit.buttons(view)
 Assert.is_false(nav[#nav].enabled)
 

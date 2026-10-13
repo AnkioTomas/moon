@@ -20,6 +20,24 @@ local Records = {}
 
 local Catalog = require("book.catalog")
 
+--- 累计阅读小时数的里程碑阶梯。
+local MILESTONE_HOURS = { 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000 }
+
+--- 下一档里程碑卡片：还没到的最低一档；全部达成时停在最高档。
+---@param total_seconds number
+---@return { value: string, label: string }
+local function milestone(total_seconds)
+    for _idx, hours in ipairs(MILESTONE_HOURS) do
+        if total_seconds < hours * 3600 then
+            return {
+                value = T(_("%1小时"), hours),
+                label = T(_("距下一里程碑 %1"), Catalog.formatDuration(hours * 3600 - total_seconds)),
+            }
+        end
+    end
+    return { value = T(_("%1小时"), MILESTONE_HOURS[#MILESTONE_HOURS]), label = _("里程碑全部达成") }
+end
+
 --- 解析日历日期键。
 ---@param ymd string YYYY-MM-DD 日期键。
 ---@return number|nil, number|nil, number|nil
@@ -66,6 +84,7 @@ local function aggregate(state)
     for month = 1, 12 do month_seconds[month] = 0 end
     local all_weeks, all_months = {}, {}
     local week_seconds, day_seconds = {}, {}
+    local pages_record = 0
 
     for ymd, info in pairs(state.calendar.days) do
         local y, m, d = parseYmd(ymd)
@@ -84,6 +103,7 @@ local function aggregate(state)
             all_months[month] = true
             week_seconds[week] = (week_seconds[week] or 0) + seconds
             day_seconds[day] = (day_seconds[day] or 0) + seconds
+            pages_record = math.max(pages_record, info.pages or 0)
             if yy == year then
                 year_seconds = year_seconds + seconds
                 month_seconds[mm] = month_seconds[mm] + seconds
@@ -119,6 +139,7 @@ local function aggregate(state)
         month_streak = longestRun(sortedKeys(all_months)),
         week_record = maxValue(week_seconds),
         day_record = maxValue(day_seconds),
+        pages_record = pages_record,
     }
 end
 
@@ -197,6 +218,12 @@ function Records:build(state, width, avail_h)
         { value = Catalog.formatDuration(stats.day_record), label = _("每日记录") },
     }, width, gap)
     push(record_row, record_h)
+    push(VerticalSpan:new{ width = gap }, gap)
+    local mile_row, mile_h = recordRow({
+        { value = tostring(stats.pages_record), label = _("单日最多页数") },
+        milestone(state.total and state.total.total_seconds or 0),
+    }, width, gap)
+    push(mile_row, mile_h)
     push(VerticalSpan:new{ width = gap }, gap)
     local title = Text.line("caption", T(_("%1年每月阅读时长"), stats.year), { width = width, color = t.color.muted })
     push(title, title:getSize().h)

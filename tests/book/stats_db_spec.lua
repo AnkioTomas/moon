@@ -289,7 +289,12 @@ do
     Assert.eq(sb.total_seconds, 3660)
     Assert.eq(sb.pages, 3)
     Assert.eq(sb.last_read, 2000)
-    local sb_q = calls[#calls]
+    Assert.eq(sb.first_read, 0)
+    local first_q = calls[#calls]
+    Assert.is_true(first_q.sql:find("MIN(start_time)", 1, true) ~= nil)
+    Assert.eq(first_q.args[1], "local")
+    Assert.eq(first_q.args[2], "/books/a.epub")
+    local sb_q = calls[#calls - 1]
     Assert.is_true(sb_q.sql:find("AND stable_id=?", 1, true) ~= nil)
     Assert.eq(sb_q.args[1], 0, "无云端快照时快照时间按 0 绑定")
     Assert.eq(sb_q.args[2], "local")

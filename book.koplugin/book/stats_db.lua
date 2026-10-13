@@ -477,7 +477,7 @@ end
 --- 快照前已上传的本地时长已含在快照里，不能再加。没有快照时就是本地累计。
 ---@param source_id string
 ---@param stable_id string
----@return { total_seconds: number, pages: number, last_read: number }
+---@return { total_seconds: number, pages: number, last_read: number, first_read: number }
 function StatsDB.summaryByBook(source_id, stable_id)
     local snapshot, fetched_at = DB.rowexec(
         [[SELECT duration, start_time FROM reading_stats
@@ -501,11 +501,46 @@ function StatsDB.summaryByBook(source_id, stable_id)
     if snapshot then
         total_seconds = tonumber(snapshot) + (tonumber(fresh_seconds) or 0)
     end
+    local first_read = DB.rowexec(
+        [[SELECT COALESCE(MIN(start_time),0) FROM reading_stats WHERE source_id=? AND stable_id=?
+            AND record_type IN ('page','page_rollup','book_day');]],
+        source_id,
+        stable_id
+    )
     return {
         total_seconds = total_seconds,
         pages = tonumber(pages) or 0,
         last_read = tonumber(last_read) or 0,
+        first_read = tonumber(first_read) or 0,
     }
+end
+
+--- 本机记录按（本地日期，小时）汇总的阅读秒数。云端只有日桶、不知道几点读的，不在内。
+--- page_rollup 的 start_time 是整点，压缩后仍落在原小时。
+---@param source_id string|string[]
+---@return table<string, number[]> ymd → 24 格秒数（[1] 为 0 点）
+function StatsDB.hourlyBySource(source_id)
+    local src, args = DB.sourceClause("source_id", source_id)
+    local result, nrows = DB.query(
+        [[SELECT date(start_time,'unixepoch','localtime'),
+                 CAST(strftime('%H', start_time,'unixepoch','localtime') AS INTEGER), SUM(duration)
+          FROM reading_stats WHERE ]] .. src .. [[ AND record_type IN ('page','page_rollup')
+          GROUP BY 1, 2;]],
+        unpack(args)
+    )
+    local out = {}
+    for i = 1, nrows do
+        local ymd = result[1][i]
+        local hours = out[ymd]
+        if not hours then
+            hours = {}
+            for h = 1, 24 do hours[h] = 0 end
+            out[ymd] = hours
+        end
+        local h = (tonumber(result[2][i]) or 0) + 1
+        hours[h] = hours[h] + (tonumber(result[3][i]) or 0)
+    end
+    return out
 end
 
 --- 云端单书累计快照：stable_id → 秒（判断哪些书需要重拉按日明细）。

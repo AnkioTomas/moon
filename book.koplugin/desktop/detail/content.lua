@@ -179,7 +179,44 @@ function Detail:buildRecent(w, avail_h)
     return kids
 end
 
---- 阅读情况区：KPI 卡片三列 + 最近几天；无本机记录时单行占位。
+--- 按进度比例外推剩余时长，再按最近有记录的这段日历天数（没读的日子也算）摊出日均，推出读完日期。
+---@param percent number 0..100
+---@param total_seconds number 累计时长
+---@param daily table[] StatsDB.dailyByBook（日期倒序）
+---@return number|nil remaining 秒；没开始或已读完为 nil
+---@return number|nil finish 读完日期的时间戳；没有近期记录为 nil
+local function estimate(percent, total_seconds, daily)
+    local fraction = percent / 100
+    if fraction <= 0 or fraction >= 1 or total_seconds <= 0 then return nil end
+    local remaining = math.floor(total_seconds * (1 - fraction) / fraction)
+    local sum = 0
+    for _idx, r in ipairs(daily) do sum = sum + r.seconds end
+    if sum <= 0 then return remaining end
+    local y, m, d = tostring(daily[#daily].ymd):match("^(%d+)%-(%d+)%-(%d+)$")
+    if not y then return remaining end
+    local today = os.date("*t")
+    local now = os.time{ year = today.year, month = today.month, day = today.day, hour = 12 }
+    local span = math.floor((now - os.time{ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 })
+        / 86400 + 0.5) + 1
+    return remaining, now + math.ceil(remaining / (sum / span)) * 86400
+end
+
+--- 一行三张 KPI 卡。
+---@param w number
+---@param gap number
+---@param items string[][] { 数值, 说明 }
+---@return table
+local function kpiRow(w, gap, items)
+    local cell_w = math.floor((w - gap * 2) / 3)
+    local row = HorizontalGroup:new{ align = "center" }
+    for i, item in ipairs(items) do
+        if i > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
+        row[#row + 1] = Common.kpiCard(cell_w, item[1], item[2])
+    end
+    return row
+end
+
+--- 阅读情况区：KPI 卡片两行三列 + 最近几天；无本机记录时单行占位。
 ---@param w number 物理像素
 ---@param avail_h number 可用高度
 ---@return table
@@ -190,16 +227,24 @@ function Detail:buildStatsArea(w, avail_h)
         return Text.line("body", _("暂无阅读记录"), { width = w, color = t.color.muted })
     end
     local gap = Theme.px(t.space.sm)
-    local cell_w = math.floor((w - gap * 2) / 3)
-    local kpi = HorizontalGroup:new{ align = "center" }
-    for i, item in ipairs({
-        { Catalog.formatDuration(st.total_seconds), _("累计时长") },
-        { tostring(st.pages), _("已读页数") },
-        { st.last_read > 0 and os.date("%Y-%m-%d", st.last_read) or "—", _("上次阅读") },
-    }) do
-        if i > 1 then kpi[#kpi + 1] = HorizontalSpan:new{ width = gap } end
-        kpi[#kpi + 1] = Common.kpiCard(cell_w, item[1], item[2])
-    end
+    ---@param ts number|nil
+    ---@return string
+    local function date(ts) return ts and ts > 0 and os.date("%Y-%m-%d", ts) --[[@as string]] or "—" end
+    local remaining, finish = estimate(tonumber(self.book.percent) or 0, st.total_seconds, self._daily or {})
+    local kpi = VerticalGroup:new{
+        align = "left",
+        kpiRow(w, gap, {
+            { Catalog.formatDuration(st.total_seconds), _("累计时长") },
+            { tostring(st.pages), _("已读页数") },
+            { date(st.last_read), _("上次阅读") },
+        }),
+        VerticalSpan:new{ width = gap },
+        kpiRow(w, gap, {
+            { date(st.first_read), _("开始日期") },
+            { remaining and Catalog.formatDuration(remaining) or "—", _("预计剩余") },
+            { date(finish), _("预计读完") },
+        }),
+    }
     local kids = VerticalGroup:new{ align = "left", kpi }
     local recent = self:buildRecent(w, avail_h - kpi:getSize().h - gap * 2)
     if recent then

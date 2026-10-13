@@ -37,6 +37,8 @@ reading_stats 提供统计。
 ---@class StatsCalendarDay
 ---@field duration_seconds number|nil 当日阅读秒数（>0 则日历格高亮）
 ---@field duration_text string|nil 当日时长文案（日详情标题）
+---@field pages number|nil 当日翻页数
+---@field hours number[]|nil 本机记录按小时的秒数（24 格，[1] 为 0 点）；只有云端时长的日子为 nil
 ---@field books Book[]|nil 日详情书单（含云端单书按日时长）
 
 --- 阅读日历（insight 页月历）。
@@ -48,6 +50,7 @@ reading_stats 提供统计。
 ---@class StatsTotal
 ---@field has_data boolean 是否有可展示的统计数据
 ---@field total_pages number|nil 累计阅读页数
+---@field total_seconds number|nil 总阅读秒数
 ---@field total_text string|nil 总阅读时长文案（英雄区大字）
 ---@field last7_text string|nil 近 7 天阅读时长文案
 ---@field longest_day_text string|nil 单日最长阅读时长文案
@@ -178,8 +181,9 @@ end
 ---@param summary table|nil
 ---@param daily table[]|nil
 ---@param daily_books table[]|nil
+---@param hourly table<string, number[]>|nil StatsDB.hourlyBySource
 ---@return StatsInsight
-function Catalog.toInsight(source_id, summary, daily, daily_books)
+function Catalog.toInsight(source_id, summary, daily, daily_books, hourly)
     local has_data = (tonumber(summary and summary.total_seconds) or 0) > 0
     local days = {}
     for _idx, d in ipairs(daily or {}) do
@@ -187,6 +191,8 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
             days[d.ymd] = {
                 duration_seconds = tonumber(d.seconds) or 0,
                 duration_text = Catalog.formatDuration(d.seconds),
+                pages = tonumber(d.pages) or 0,
+                hours = hourly and hourly[d.ymd],
                 books = {},
             }
         end
@@ -243,6 +249,7 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
         total = {
             has_data = has_data,
             total_pages = tonumber(summary and summary.total_pages) or 0,
+            total_seconds = total_seconds,
             total_text = Catalog.formatDuration(total_seconds),
             last7_text = Catalog.formatDuration(summary and summary.last7_seconds),
             longest_day_text = Catalog.formatDuration(summary and summary.longest_day_seconds),
@@ -516,7 +523,8 @@ function Catalog.readingInsightAsync(source_id, cb)
                 scope,
                 StatsDB.summaryBySource(scope),
                 StatsDB.dailyBySource(scope),
-                StatsDB.dailyBooksBySource(scope)
+                StatsDB.dailyBooksBySource(scope),
+                StatsDB.hourlyBySource(scope)
             ),
         })
     end)
