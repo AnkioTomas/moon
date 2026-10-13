@@ -624,6 +624,28 @@ do
     Assert.eq(wordCell(kb, 1).tw.text, "你好")
 end
 
+-- 简繁转换：查词结果按 ime_script 转字形；默认 keep 原样
+do
+    local ime = require("utils.settings").get("features.ime")
+    Assert.eq(ime.ime_script, "keep")
+    ime.ime_script = "traditional"
+    local got
+    package.loaded["features.ime.script"] = {
+        convertWords = function(words, target)
+            got = target
+            local out = {}
+            for i, w in ipairs(words) do out[i] = w == "内耗" and "內耗" or w end
+            return out
+        end,
+    }
+    local kb = newKeyboard()
+    typeAndLookup(kb, "nihao")
+    Assert.eq(got, "traditional")
+    Assert.eq(wordCell(kb, 3).tw.text, "內耗")
+    ime.ime_script = "keep"
+    package.loaded["features.ime.script"] = nil
+end
+
 -- 功能关闭：全透传且摘行
 do
     pinyin_on = false

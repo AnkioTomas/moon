@@ -1154,4 +1154,8 @@ Current version: ",
     ["蓝牙服务没有启动，详见 /var/log/hid_passthrough.log"] = "Bluetooth service did not start. See /var/log/hid_passthrough.log",
     ["蓝牙服务返回了无效数据"] = "Bluetooth service returned invalid data",
     ["蓝牙状态没有变化，详见 /var/log/hid_passthrough.log"] = "Bluetooth state did not change. See /var/log/hid_passthrough.log",
+    ["简繁转换"] = "Simplified/Traditional",
+    ["不转换"] = "No conversion",
+    ["转为简体"] = "Convert to Simplified",
+    ["转为繁体"] = "Convert to Traditional",
 }

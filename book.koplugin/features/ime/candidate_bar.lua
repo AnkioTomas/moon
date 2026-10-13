@@ -360,8 +360,11 @@ local function startLookup(keyboard, code)
                     or keyboard ~= Bar._keyboard or code ~= Bar.lookup.code then
                 return
             end
+            local script = require("utils.settings").get("features.ime").ime_script
             if type(words) ~= "table" or #words == 0 then
                 words = { code }
+            elseif script ~= "keep" then
+                words = require("features.ime.script").convertWords(words, script)
             end
             Bar.lookup.pages = makePages(words)
             Bar.lookup.page = 1

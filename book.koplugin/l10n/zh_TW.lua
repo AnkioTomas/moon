@@ -1155,4 +1155,8 @@ return {
     ["蓝牙服务没有启动，详见 /var/log/hid_passthrough.log"] = "藍牙服務沒有啟動，詳見 /var/log/hid_passthrough.log",
     ["蓝牙服务返回了无效数据"] = "藍牙服務回傳了無效資料",
     ["蓝牙状态没有变化，详见 /var/log/hid_passthrough.log"] = "藍牙狀態沒有變化，詳見 /var/log/hid_passthrough.log",
+    ["简繁转换"] = "簡繁轉換",
+    ["不转换"] = "不轉換",
+    ["转为简体"] = "轉為簡體",
+    ["转为繁体"] = "轉為繁體",
 }
