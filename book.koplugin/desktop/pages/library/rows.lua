@@ -21,6 +21,7 @@ local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -108,11 +109,16 @@ function Rows.book(ctx, book, w, h, on_open, on_detail)
         meta[3] = Text.line("caption", book.series, { width = mid_w, color = t.color.muted })
     end
     local bottom = progressLine(book, mid_w, t)
-    local mid = VerticalGroup:new{
-        align = "left",
-        meta,
-        VerticalSpan:new{ width = math.max(0, ch - meta:getSize().h - bottom:getSize().h) },
-        bottom,
+    local mid_h = math.max(ch, meta:getSize().h + bottom:getSize().h)
+    -- Text.line 的 width 只是上限，不固定宽度时右侧列会随书名长短漂移。
+    local mid = LeftContainer:new{
+        dimen = Geom:new{ w = mid_w, h = mid_h },
+        VerticalGroup:new{
+            align = "left",
+            meta,
+            VerticalSpan:new{ width = mid_h - meta:getSize().h - bottom:getSize().h },
+            bottom,
+        },
     }
 
     local row = VerticalGroup:new{
