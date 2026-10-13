@@ -9,6 +9,7 @@ local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
 Kit.sections.store = {}
+Kit.sections.extensions = {}
 
 local Widget = require("ui/widget/widget")
 
@@ -60,6 +61,10 @@ end
 local panels, checks = {}, {}
 package.preload["features.panel.native"] = function()
     return { show = function(id) panels[#panels + 1] = id end }
+end
+local popups = {}
+package.preload["features.extensions"] = function()
+    return { show = function(p, rect) popups[#popups + 1] = { plugin = p, rect = rect } end }
 end
 package.preload["features.update"] = function()
     return { autoCheck = function(root) checks[#checks + 1] = root end }
@@ -162,6 +167,22 @@ do -- 当前 Tab 被关掉（书城开关）：回退首页
     desk:updateView()
     Assert.eq(desk.tab, "home")
     Assert.eq(desk.layers[1].page, "home")
+    Assert.eq(ids(), "home,library,insight,settings")
+    drain()
+end
+
+do -- 拓展格：开关打开才出现；点它在格子上弹层，不切页
+    Kit.sections.extensions.enabled = true
+    desk:updateView()
+    Assert.eq(ids(), "home,library,insight,extensions,settings")
+    local cell = tabs()[4]
+    Assert.is_true(cell:onTapThemeArea())
+    Assert.eq(desk.tab, "home")
+    Assert.len(popups, 1)
+    Assert.eq(popups[1].plugin, plugin)
+    Assert.eq(popups[1].rect, cell.dimen)
+    Kit.sections.extensions.enabled = nil
+    desk:updateView()
     Assert.eq(ids(), "home,library,insight,settings")
     drain()
 end

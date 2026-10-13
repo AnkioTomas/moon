@@ -12,6 +12,7 @@
       active = "home", on_tab = function(id) … end })
 
 未选中格：页面底色 + faint 文字；点当前格不回调，但照样吞掉点按（不漏给下层手势）。
+on_tab(id, rect) 的 rect 是被点格子的屏幕矩形，可作弹层锚点。
 
 @module koplugin.book.ui.themes.widgets.tabbar
 --]]
@@ -79,9 +80,11 @@ function Tabbar.widget(opts)
                 },
             }
         end
-        row[#row + 1] = Tap.wrap(cell, opts.on_tab and function()
-            if not active then opts.on_tab(tab.id) end
+        local tap
+        tap = Tap.wrap(cell, opts.on_tab and function()
+            if not active then opts.on_tab(tab.id, tap.dimen) end
         end or nil)
+        row[#row + 1] = tap
     end
     return VerticalGroup:new{
         align = "left",

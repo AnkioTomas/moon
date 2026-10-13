@@ -10,8 +10,9 @@
   |          Tab 内容区（contentHeight）           |
   |                                               |
   |-----------------------------------------------|
-  | Tabbar  首页|图书馆|[Z站]|[OPDS]|[统计]|设置    |
+  | Tabbar 首页|图书馆|[Z站]|[OPDS]|统计|[拓展]|设置 |
   +-----------------------------------------------+
+  「拓展」不是页：点它在格子上方弹出第三方插件入口（features.extensions）。
   updateView：外壳（屏幕尺寸 / 主题 / 缩放）变了整壳重建；否则只换内容层和底栏层，刷顶栏以下。
   顶栏读数变化由 TopBar 自己经 updateTopbar 换第 2 层，只刷顶栏。
   手势：控件自己的点按优先（底栏格、顶栏项）；没被消费的底栏点按在这里吞掉，
@@ -117,6 +118,9 @@ local function desktopTabs()
         tabs[#tabs + 1] = { id = "opds", text = _("OPDS"), icon = "rss_feed" }
     end
     tabs[#tabs + 1] = { id = "insight", text = _("统计"), icon = "bar_chart" }
+    if MoonSettings.get("features.extensions").enabled then
+        tabs[#tabs + 1] = { id = "extensions", text = _("拓展"), icon = "extension" }
+    end
     tabs[#tabs + 1] = { id = "settings", text = _("设置"), icon = "settings" }
     return tabs
 end
@@ -162,7 +166,13 @@ local function tabbar(self)
         width = self.dimen.w,
         tabs = self._tabs,
         active = self.tab,
-        on_tab = function(id) self:switchTab(id) end,
+        on_tab = function(id, rect)
+            if id == "extensions" then
+                require("features.extensions").show(self.plugin, rect)
+            else
+                self:switchTab(id)
+            end
+        end,
     }
     bar.overlap_offset = { 0, self.dimen.h - Tabbar.height() }
     return bar
