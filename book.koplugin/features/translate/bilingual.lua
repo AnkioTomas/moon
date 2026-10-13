@@ -448,12 +448,13 @@ local function start(ui, identity, engine, lang)
     TaskDialog.start(spec)
 end
 
---- 整书 CREngine 文档才能做；章节源的书（含全本缓存后的）一律不做。
+--- 整书 CREngine 文档才能做；章节源的书（含全本缓存后的）一律不做；属主源已卸载（第三方源插件）的也不做。
 ---@param ui table
 ---@return boolean
 function Bilingual.available(ui)
     local session = require("reader.session").current()
-    return session ~= nil and session.identity.source.type ~= "chapter" and ui.rolling ~= nil
+    local source = session and session.identity.source
+    return source ~= nil and source.type ~= "chapter" and ui.rolling ~= nil
 end
 
 --- 正在读双语版（面板按钮高亮）。

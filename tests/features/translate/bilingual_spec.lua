@@ -48,6 +48,8 @@ session = { identity = { source = { type = "chapter" } } }
 Assert.is_false(Bilingual.available(rolling))
 session = { identity = { source = { type = "chapter" }, chapter_idx = 3 } }
 Assert.is_false(Bilingual.available(rolling))
+session = { identity = {} }
+Assert.is_false(Bilingual.available(rolling), "属主源已卸载（第三方源插件）不可用，不能抛错")
 
 local function sizes(list)
     local out = {}

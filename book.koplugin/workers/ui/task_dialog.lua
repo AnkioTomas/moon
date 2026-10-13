@@ -262,17 +262,25 @@ function TaskDialog:rebuild()
     self:setDialog{ title = _("后台任务"), body = body }
 end
 
---- 重画；面板变矮时连底下窗口一起重画，免得旧面板残留在遮罩外。
-function TaskDialog:refresh()
+--- 重画；高度不变时只刷面板区域（任务进度每秒数次，默认 "fast" 免得墨水屏一直闪），
+--- 面板变矮时连底下窗口一起重画，免得旧面板残留在遮罩外。
+---@param mode string|nil 高度不变时的刷新方式
+function TaskDialog:refresh(mode)
+    local old = self[1].dimen and self[1].dimen:copy()
     local old_h = self[1]:getSize().h
     self:rebuild()
-    UIManager:setDirty(self[1]:getSize().h < old_h and "all" or self, "ui")
+    local new_h = self[1]:getSize().h
+    if new_h == old_h then
+        UIManager:setDirty(self, function() return mode or "fast", old end)
+    else
+        UIManager:setDirty(new_h < old_h and "all" or self, "ui")
+    end
 end
 
 ---@param page integer
 function TaskDialog:goPage(page)
     self.page = page
-    self:refresh()
+    self:refresh("ui")
 end
 
 ---@param _arg any

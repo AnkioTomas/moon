@@ -93,8 +93,11 @@ function Stream.open(opts, handlers)
             end
             self.response_headers = headers
             local code = headers:get_status_code()
-            if not state.cancelled and handlers.on_headers then
+            if not state.cancelled and handlers.on_headers and not Fetch.call("http stream headers", function()
                 handlers.on_headers(code, headers)
+                return true
+            end) then
+                state.data_err = "stream callback failed"
             end
             if opts.allow_redirects and (code == 301 or code == 302) then
                 return self:_finalize_request()

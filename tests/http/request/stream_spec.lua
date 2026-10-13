@@ -196,6 +196,28 @@ do
     Assert.is_nil(io.open(dest, "rb"), "错误页不落盘")
     Assert.is_nil(io.open(dest .. ".part", "rb"))
 
+    -- on_headers 抛错同 on_data：经 guard 报告，丢弃 body，on_done 报错收口（否则跳过 release，泵不拆）。
+    local guard = package.loaded["ui.guard"]
+    local reported = {}
+    package.loaded["ui.guard"] = {
+        call = function(label, fn, ...)
+            local ok, ret = pcall(fn, ...)
+            if ok then return ret end
+            reported[#reported + 1] = label
+        end,
+    }
+    first_hop = "second"
+    local header_err, header_chunks = "unset", {}
+    Request.stream({ url = "https://example.test/file" }, {
+        on_headers = function() error("boom") end,
+        on_data = function(chunk) header_chunks[#header_chunks + 1] = chunk end,
+        on_done = function(err) header_err = err end,
+    })
+    Assert.eq(reported[1], "http stream headers")
+    Assert.len(header_chunks, 0)
+    Assert.eq(header_err, "stream callback failed")
+    package.loaded["ui.guard"] = guard
+
     for _idx, name in ipairs({ "turbo", "turbo.httputil", "turbo.structs.buffer" }) do
         package.preload[name] = nil
         package.loaded[name] = nil
