@@ -187,7 +187,7 @@ local function touchHeartbeat(self, identity, position)
         hb = nil
     end
     if not hb then
-        hb = { identity = identity, position = {}, tick = function() beat(self, hb) end }
+        hb = { identity = identity, position = { fraction = 0 }, tick = require("ui.guard").wrap("wechat heartbeat", function() beat(self, hb) end) }
         self._heartbeat = hb
         require("ui/uimanager"):scheduleIn(HEARTBEAT_INTERVAL, hb.tick)
     end
@@ -326,9 +326,9 @@ function Source:loadTocAsync(identity, cb)
     local cached = Toc.read(identity.source_id, identity.stable_id)
     if cached and #cached > 0 then
         local cancelled = false
-        require("ui/uimanager"):nextTick(function()
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("wechat callback", function()
             if not cancelled then cb(cached) end
-        end)
+        end))
         return { cancel = function() cancelled = true end }
     end
     return fetchTocAsync(self, identity, cb)

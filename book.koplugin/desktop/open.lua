@@ -44,7 +44,7 @@ end
 ---@param done fun(ok: boolean) 交接给 ReaderUI 时 true，因用户已在读别的文档而放弃时 false
 local function showReader(plugin, path, generation, done)
     local ReaderUI = require("apps/reader/readerui")
-    UIManager:nextTick(function()
+    UIManager:nextTick(require("ui.guard").wrap("open document", function()
         if generation ~= Open.generation then return end
         local ui = ReaderUI.instance
         if ui and ui.document and ui.document.file ~= path then
@@ -58,11 +58,11 @@ local function showReader(plugin, path, generation, done)
         ReaderUI:showReader(path, nil, nil, nil, function()
             -- KOReader 在此回调返回后才把 ReaderUI 放入窗口栈；再排一拍，
             -- 避免先关全屏桌面导致底层 FileManager 被重绘出来。
-            UIManager:nextTick(function()
+            UIManager:nextTick(require("ui.guard").wrap("open document", function()
                 closeDesktop(plugin, desktop)
-            end)
+            end))
         end)
-    end)
+    end))
 end
 
 --- 打开书籍：Book 身份决定属主源，源负责返回已登记的物理文档。

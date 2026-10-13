@@ -11,6 +11,8 @@ local lfs = require("libs/libkoreader-lfs")
 
 local Cover = {}
 
+local MAX_SIDE = 1000
+
 --- 从已打开的文档提取封面写成 PNG；目标已存在或文档没有封面时什么都不做。
 --- os.remove/os.rename 不抛异常，无需 pcall；取图与写盘是引擎调用，失败按“无封面”处理。
 ---@param doc table KOReader Document
@@ -24,6 +26,16 @@ function Cover.save(doc, target)
     end)
     if not (ok_cover and bb) then
         return
+    end
+    -- 内嵌封面常是 1600×2400 彩图；按原尺寸落盘，之后每次显示都要全尺寸解码再缩。
+    local scale = MAX_SIDE / math.max(bb:getWidth(), bb:getHeight())
+    if scale < 1 then
+        local ok_scaled, scaled = pcall(require("ffi/mupdf").scaleBlitBuffer, bb,
+            math.floor(bb:getWidth() * scale), math.floor(bb:getHeight() * scale))
+        if ok_scaled and scaled then
+            bb:free()
+            bb = scaled
+        end
     end
     local tmp = target .. ".part"
     local ok = pcall(function() bb:writePNG(tmp) end)

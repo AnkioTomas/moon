@@ -25,6 +25,17 @@ package.preload["ui/network/manager"] = function()
     return { isConnected = function() return connected end }
 end
 
+local guarded = {}
+package.preload["ui.guard"] = function()
+    return {
+        call = function(label, fn, ...)
+            local res = { pcall(fn, ...) }
+            if res[1] then return unpack(res, 2) end
+            guarded[#guarded + 1] = label
+        end,
+    }
+end
+
 local Tasks = require("workers.tasks")
 
 --- 造一个手动控制完成的任务；runs 记录每次启动的 { report, done, cancelled }。
@@ -280,6 +291,26 @@ do
     Assert.eq(history[1].key, "h12")
     Assert.eq(history[10].key, "h3")
     Assert.eq(#Tasks.tasks(), 0)
+end
+
+-- run 同步抛错 / on_done 抛错：按失败结算并报告，队列不被占死，异类照常开跑。
+do
+    local results = {}
+    local bad = Tasks.enqueue(spec("crash", "download", {
+        run = function() error("boom") end,
+        on_done = function(result)
+            results[#results + 1] = result
+            error("on_done boom")
+        end,
+    }))
+    Assert.eq(bad.state, "finished")
+    Assert.is_false(bad.result.ok)
+    Assert.len(results, 1)
+    Assert.contains(guarded, "task run download")
+    Assert.contains(guarded, "task on_done download")
+    local next_task = Tasks.enqueue(spec("after-crash", "sync"))
+    Assert.eq(#next_task.runs, 1, "崩溃任务不再占执行权")
+    next_task.runs[1].done({ ok = true })
 end
 
 -- 未结束任务满 64 个后拒绝入队，带 queue_full（同类并行时在跑的也算）。

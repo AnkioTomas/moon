@@ -5,7 +5,7 @@ local Assert = require("support.assert")
 local Request = require("http.request")
 local Turbo = require("http.turbo")
 
--- Turbo 不可用：当场失败，cancel 是空操作
+-- Turbo 不可用：下一 tick 失败，cancel 是空操作
 do
     local orig = Turbo.acquire
     Turbo.acquire = function() return nil, "boom" end
@@ -13,6 +13,8 @@ do
     local job = Request.stream({ url = "https://example.test/" }, {
         on_done = function(err) done_err = err end,
     })
+    Assert.is_nil(done_err)
+    require("support.stubs").flush()
     Assert.eq(done_err, "网络组件加载失败：boom")
     job.cancel()
     Turbo.acquire = orig

@@ -62,7 +62,7 @@ function ChapterToc.show(toc, current_idx, on_select)
         handleEvent = function(_self, event)
             if event.handler == "onGotoPage" then
                 local target = targets[event.args[1]]
-                if target then on_select(target.idx, target.anchor) end
+                if target then require("ui.guard").call("chapter toc", on_select, target.idx, target.anchor) end
             end
         end,
     }

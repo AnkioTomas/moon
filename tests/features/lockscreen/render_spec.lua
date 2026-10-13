@@ -64,7 +64,8 @@ package.preload["ffi/blitbuffer"] = function()
     }
 end
 
-package.loaded["device"] = { screen = { night_mode = false } }
+local color_screen = true
+package.loaded["device"] = { screen = { night_mode = false, isColorEnabled = function() return color_screen end } }
 package.preload["ui/font"] = function()
     return { getFace = function() return {} end }
 end
@@ -168,7 +169,14 @@ local ok_run, err_run = pcall(function()
     Assert.eq(renamed[2], "/tmp/compose.png")
     Assert.is_nil(removed)
     Assert.eq(ensured, 1)
-    Assert.eq(buffer_types[1], 2, "组合图必须使用彩色缓冲，不能提前丢弃背景颜色")
+    Assert.eq(buffer_types[1], 2, "彩屏组合图必须使用彩色缓冲，不能提前丢弃背景颜色")
+
+    -- 灰度屏：最终显示也是灰度，直接用 BB8 画布省 3/4 内存。
+    reset()
+    color_screen = false
+    Assert.is_true((Render.write("/tmp/compose.png", nil, {})))
+    Assert.eq(buffer_types[1], 1, "灰度屏用 BB8 画布")
+    color_screen = true
 
     -- 票根缺口必须逐行恢复原背景，并释放背景快照。
     reset()

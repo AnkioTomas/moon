@@ -438,6 +438,9 @@ function ReaderProgress.pull(snapshot, opts)
             logger.dbg("book.progress pull skip: document changed")
             return
         end
+        -- 按章阅读时等回包期间可能已切章：拿现在的会话比，不用发起时的快照。
+        snapshot = require("reader.session").current()
+        id = snapshot.identity
         if type(meta) == "table" and meta.empty then
             logger.dbg("book.progress reader pull empty", id.source_id, id.stable_id)
             return tell(_("云端没有这本书的进度"))

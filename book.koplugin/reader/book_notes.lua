@@ -98,34 +98,26 @@ function BookNotes.show(ui, snapshot, native)
     local live = ui.annotation and ui.annotation.annotations or {}
     local entries = BookNotes.collect(identity.source_id, identity.stable_id, current_idx, live, titles)
 
-    local UIManager = require("ui/uimanager")
-    local Menu = require("ui/widget/menu")
-    local menu
-    local item_table = {}
+    local items = {}
     for _idx, entry in ipairs(entries) do
-        item_table[#item_table + 1] = {
-            text = entry.note and (entry.text .. "\n✎ " .. entry.note) or entry.text,
+        items[#items + 1] = {
+            text = entry.text,
+            icon = entry.note and "edit_note" or nil,
             mandatory = entry.chapter,
-            bold = entry.chapter_idx == current_idx,
             callback = function() jump(ui, entry, current_idx) end,
         }
     end
-    menu = Menu:new{
-        title = T(_("全书笔记（%1）"), #item_table),
-        item_table = item_table,
-        is_borderless = true,
-        is_popout = false,
-        covers_fullscreen = true,
-        title_bar_fm_style = true,
-        title_bar_left_icon = "appbar.menu",
-        items_max_lines = 3,
+    local list
+    list = require("ui.themes.widgets.list"):new{
+        title = T(_("全书笔记（%1）"), #items),
+        items = items,
+        left_icon = "menu",
+        left_callback = function()
+            list:close()
+            native()
+        end,
     }
-    function menu:onLeftButtonTap()
-        UIManager:close(menu)
-        native()
-    end
-    menu.close_callback = function() UIManager:close(menu) end
-    UIManager:show(menu)
+    list:show()
 end
 
 --- 连续章节模式下接管 ReaderBookmark:onShowBookmark（菜单、手势、快捷面板都走它）。
@@ -135,14 +127,14 @@ function BookNotes.install(ui)
     if not bookmark or bookmark._book_notes_wrapped then return end
     bookmark._book_notes_wrapped = true
     local original = bookmark.onShowBookmark
-    bookmark.onShowBookmark = function(self)
+    bookmark.onShowBookmark = require("ui.guard").wrap("show bookmark", function(self)
         local snapshot = require("reader.session").current()
         if not (snapshot and snapshot.chapter and snapshot.identity.chapter_idx) then
             return original(self)
         end
         BookNotes.show(ui, snapshot, function() original(self) end)
         return true
-    end
+    end)
 end
 
 return BookNotes

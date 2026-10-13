@@ -22,6 +22,8 @@ local function doc(bb)
     return { getCoverPageImage = function() asked = asked + 1; return bb end }
 end
 local image = {
+    getWidth = function() return 600 end,
+    getHeight = function() return 800 end,
     writePNG = function(_, path)
         local f = assert(io.open(path, "wb"))
         f:write("png")
@@ -60,7 +62,20 @@ Cover.save(doc({ writePNG = function(_, path)
     out:write("half")
     out:close()
     error("disk full")
-end, free = function() end }), target)
+end, free = function() end, getWidth = function() return 1 end, getHeight = function() return 1 end }), target)
 Assert.is_nil(read(target))
 Assert.is_nil(read(target .. ".part"))
+os.remove(target)
+
+-- 大封面：写盘前把最长边缩到 1000，原图释放，只写缩小后的那张。
+local scaled_to
+local small = { writePNG = image.writePNG, free = function() freed = freed + 1 end,
+    getWidth = function() return 1000 end, getHeight = function() return 1500 end }
+package.loaded["ffi/mupdf"] = { scaleBlitBuffer = function(_bb, w, h) scaled_to = w .. "x" .. h; return small end }
+freed = 0
+Cover.save(doc({ getWidth = function() return 1600 end, getHeight = function() return 2400 end,
+    writePNG = function() error("原图不该落盘") end, free = function() freed = freed + 1 end }), target)
+Assert.eq(scaled_to, "666x1000")
+Assert.eq(read(target), "png")
+Assert.eq(freed, 2, "原图与缩图都释放")
 os.remove(target)

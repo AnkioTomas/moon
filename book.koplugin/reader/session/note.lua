@@ -158,7 +158,7 @@ function SessionNote.pull(ui, identity)
                 logger.warn("book.note pull failed", identity.stable_id, err)
                 return
             end
-            UIManager:nextTick(applyFromDb)
+            UIManager:nextTick(require("ui.guard").wrap("notes apply", applyFromDb))
         end)
     end
     local existing = NoteDB.get(identity.source_id, identity.stable_id, identity.chapter_idx)

@@ -166,10 +166,10 @@ function Stats.syncAsync(source, opts, cb)
         if cb then cb(value, err) end
     end
     if not can_pull and not can_push then
-        require("ui/uimanager"):nextTick(function()
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("stats sync", function()
             result.skipped, result.reason = true, "unsupported"
             finish(result)
-        end)
+        end))
         return { cancel = function() cancelled = true end }
     end
     --- 拉取远端统计后终结同步；dirty_only 路径只推不拉。
@@ -217,7 +217,7 @@ function Stats.syncAsync(source, opts, cb)
             push()
         end)
     end
-    require("ui/uimanager"):nextTick(push)
+    require("ui/uimanager"):nextTick(require("ui.guard").wrap("stats sync", push))
     return { cancel = function()
             cancelled = true
             if current_job and current_job.cancel then current_job:cancel() end

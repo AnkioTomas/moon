@@ -13,6 +13,11 @@ package.preload["ui.guard"] = function()
             local ok = pcall(fn, ...)
             if not ok then broken[label] = true; reported[#reported + 1] = label end
         end,
+        call = function(label, fn, ...)
+            local res = { pcall(fn, ...) }
+            if res[1] then return unpack(res, 2) end
+            reported[#reported + 1] = label
+        end,
     }
 end
 

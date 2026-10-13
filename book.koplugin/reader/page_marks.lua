@@ -259,7 +259,7 @@ function PageMarks.add(ui, id, priority, layer)
                 "readerfooter_tap",
                 "readermenu_tap",
             },
-            handler = function(ges) return self:onTap(ges) end,
+            handler = function(ges) return Guard.call("page marks tap", self.onTap, self, ges) end,
         } })
     end
     self.layers[#self.layers + 1] = { id = id, priority = priority, layer = layer }

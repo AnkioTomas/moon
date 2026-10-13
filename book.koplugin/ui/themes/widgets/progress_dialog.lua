@@ -90,6 +90,11 @@ end
 ---@param text string
 ---@param percent number|nil
 function ProgressDialog:set(text, percent)
+    -- 按字节推进时回调很密；文案与整数进度都没变就不重画（电子墨水每次刷新都有代价）。
+    local whole = percent and math.floor(percent)
+    if text == self._shown_text and (not whole or whole == self._shown_percent) then return end
+    self._shown_text = text
+    self._shown_percent = whole or self._shown_percent
     self.detail:setText(text)
     if percent then self.bar:setPercent(percent) end
     UIManager:setDirty(self, function() return "fast", self[1].dimen end)

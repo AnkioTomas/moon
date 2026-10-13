@@ -76,7 +76,8 @@ local function writePNG(path, width, height, paint)
     local night = Screen.night_mode
     Screen.night_mode = false
     local ok, err = xpcall(function()
-        bb = Blitbuffer.new(width, height, Blitbuffer.TYPE_BBRGB32)
+        -- 灰度屏用 BB8：整屏画布 RGB32 要 8 MiB，灰度 PNG 也小得多。
+        bb = Blitbuffer.new(width, height, Screen:isColorEnabled() and Blitbuffer.TYPE_BBRGB32 or Blitbuffer.TYPE_BB8)
         ---@diagnostic disable-next-line: cast-type-mismatch
         ---@cast bb BlitBuffer
         bb:fill(Blitbuffer.COLOR_WHITE)

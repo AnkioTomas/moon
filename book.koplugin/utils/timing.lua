@@ -73,7 +73,7 @@ function Timing.debounce(fn, wait)
         n_args = nil
         args = nil
         if a then
-            fn(unpack(a, 1, n))
+            require("ui.guard").call("debounce", fn, unpack(a, 1, n))
         end
     end
 

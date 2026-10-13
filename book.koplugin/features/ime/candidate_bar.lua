@@ -9,6 +9,7 @@ local Strip = require("features.ime.strip")
 local Registry = require("features.ime.registry")
 local util = require("util")
 local Job = require("workers.job")
+local Guard = require("ui.guard")
 
 local ZH_MODULE = "ui/data/keyboardlayouts/zh_CN_keyboard"
 local SLOT_COUNT = Strip.SLOT_COUNT
@@ -402,13 +403,17 @@ end
 ---@param ... any 透传给原方法
 local function wrappedAddKeys(self, ...)
     orig_addKeys(self, ...)
-    if Bar._want then
-        -- 只改这个键盘实例；插件关闭或词库不可用时仍服从 KOReader 设置。
-        disableKeyFlash(self)
-    end
-    Bar._keyboard = self
-    Bar._active = Bar._want and installStrip(self)
-    refresh()
+    local ok = Guard.call("ime addKeys", function()
+        if Bar._want then
+            -- 只改这个键盘实例；插件关闭或词库不可用时仍服从 KOReader 设置。
+            disableKeyFlash(self)
+        end
+        Bar._keyboard = self
+        Bar._active = Bar._want and installStrip(self)
+        refresh()
+        return true
+    end)
+    if not ok then Bar._active = false end
 end
 
 --- VirtualKeyboard:init 包装：建键盘树之前定下这次要不要候选行并同步布局数据
@@ -417,14 +422,18 @@ end
 --- number 输入框从符号层起步、不打字，候选行直接不装。
 ---@param ... any 透传给原方法
 local function wrappedInit(self, ...)
-    Bar._profile = Registry.current()
-    Bar._want = Bar._enabled() and Registry.isAvailable(Bar._profile)
-        and not (self.inputbox and self.inputbox.input_type == "number")
-    applyKeyboardLabels(Bar._want and Bar._profile or nil)
-    if Bar._want then
-        insertBarRow(Bar._profile.id == "zhuyin" and 11 or 10)
-    end
-    clearCode()
+    local ok = Guard.call("ime init", function()
+        Bar._profile = Registry.current()
+        Bar._want = Bar._enabled() and Registry.isAvailable(Bar._profile)
+            and not (self.inputbox and self.inputbox.input_type == "number")
+        applyKeyboardLabels(Bar._want and Bar._profile or nil)
+        if Bar._want then
+            insertBarRow(Bar._profile.id == "zhuyin" and 11 or 10)
+        end
+        clearCode()
+        return true
+    end)
+    if not ok then Bar._want = false end
     orig_init(self, ...)
 end
 
@@ -498,10 +507,27 @@ end
 --- 因为 KOReader 隐藏后可能复用同一个键盘实例。
 local function wrappedOnCloseWidget(self, ...)
     if self == Bar._keyboard then
-        clearCode()
-        refresh()
+        Guard.call("ime close", function()
+            clearCode()
+            refresh()
+        end)
     end
     return orig_onCloseWidget(self, ...)
+end
+
+--- 拦截体出错就停用候选栏、退回原生输入，免得每个键都再抛一次。
+---@param label string
+---@param fn function
+---@return function
+local function keyHook(label, fn)
+    return function(self, ...)
+        local args, n = { ... }, select("#", ...)
+        local ok = Guard.call(label, function()
+            fn(self, unpack(args, 1, n))
+            return true
+        end)
+        if not ok then Bar._active = false end
+    end
 end
 
 --- 安装 VirtualKeyboard 钩子；重复安装不重复包装方法。
@@ -519,8 +545,8 @@ function Bar.install(opts)
     orig_onCloseWidget = VK.onCloseWidget
     VK.init = wrappedInit
     VK.addKeys = wrappedAddKeys
-    VK.addChar = wrappedAddChar
-    VK.delChar = wrappedDelChar
+    VK.addChar = keyHook("ime addChar", wrappedAddChar)
+    VK.delChar = keyHook("ime delChar", wrappedDelChar)
     if orig_onCloseWidget then VK.onCloseWidget = wrappedOnCloseWidget end
     Bar._hooked = true
 end

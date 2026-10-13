@@ -27,6 +27,7 @@ Request.request({
 }, function(_, err)
     received = err
 end)
+require("support.stubs").flush()
 
 local output = table.concat(lines, "\n")
 Assert.not_nil(output:find("book.http start", 1, true))

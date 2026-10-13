@@ -40,7 +40,7 @@ local function refreshAfterChange(desktop)
     local function refresh()
         Toast:new{ text = _("正在生成锁屏图…"), timeout = 2 }:show()
         -- 合成在主线程同步绘制；nextTick 仍排在重绘之前，必须隔一帧才能先把选中态和提示画出来。
-        UIManager:tickAfterNext(function()
+        UIManager:tickAfterNext(require("ui.guard").wrap("lockscreen refresh", function()
             LockScreen.refresh(function(ok, err)
                 updateOverlay(desktop)
                 Toast:new{
@@ -50,7 +50,7 @@ local function refreshAfterChange(desktop)
                 }:show()
             end, nil, "settings")
             if LockScreen.running() then updateOverlay(desktop) end
-        end)
+        end))
     end
     if Compose.plan().offline then
         refresh()
@@ -89,27 +89,24 @@ local function choiceRow(desktop, opts)
     }
 end
 
---- 用 KOReader 的路径选择器选图片（is_file）或文件夹，长按条目确认。
+--- 用主题路径选择器选图片（is_file）或文件夹。
 ---@param desktop table
 ---@param current string 当前路径；所在目录不存在时从主目录开始
 ---@param is_file boolean
 ---@param apply fun(path: string)
 local function choosePath(desktop, current, is_file, apply)
     local dir = is_file and current:match("^(.*)/") or current
-    if lfs.attributes(dir, "mode") ~= "directory" then
-        dir = require("apps/filemanager/filemanagerutil").getHomeFolder()
-    end
-    UIManager:show(require("ui/widget/pathchooser"):new{
+    local start = lfs.attributes(dir, "mode") == "directory" and current
+        or require("apps/filemanager/filemanagerutil").getHomeFolder()
+    require("ui.themes.widgets.path_picker"):new{
+        path = start,
         select_file = is_file,
-        select_directory = not is_file,
-        show_files = is_file,
-        file_filter = is_file and function(name) return Image.suffix(name) ~= nil end or nil,
-        path = dir,
-        onConfirm = function(path)
+        filter = is_file and function(name) return Image.suffix(name) ~= nil end or nil,
+        on_select = function(path)
             apply(path)
             refreshAfterChange(desktop)
         end,
-    })
+    }:show()
 end
 
 --- 弹输入框编辑锁屏自定义留言，保存后立刻重出图。

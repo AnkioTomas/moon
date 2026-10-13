@@ -248,8 +248,9 @@ state.xray = { book_xray_enabled = true }
 local bar = state.shown[1]
 Assert.eq(table.concat(bar.tabs, ","), "info,toc,notes,xray,ticket")
 Assert.eq(bar.panel_w, 510)
-Assert.is_true(bar[1][1].mesh, "底层是网状遮罩")
-local info_box = bar[1][2][1][1][1]
+Assert.is_true(bar.mask ~= false, "用 Modal 的整屏遮罩")
+Assert.eq(bar.panel_x, 0, "面板贴左缘")
+local info_box = bar[1][1][1][1]
 Assert.eq(info_box.dimen.w, 510 - 16 * 2, "书籍页内容区定宽 = 面板宽 - 两侧内边距")
 Assert.eq(info_box.dimen.h, 800 - 40 - 1 - 16 * 2, "内容区定高，底栏才能贴底")
 Assert.len(state.opened, 0, "列表页没打开前不借菜单")
@@ -264,7 +265,7 @@ bar:onSwipeSidebar(nil, { direction = "west", pos = { x = 100, y = 10 } })
 Assert.eq(bar.tab, 2)
 Assert.eq(state.dirty, dirty + 1)
 Assert.len(state.shown, 2, "原生全屏容器被截下，不上屏")
-local toc_menu = bar[1][2][1][1][1]
+local toc_menu = bar[1][1][1][1]
 Assert.eq(toc_menu, ui.toc_menu)
 Assert.eq(toc_menu.w, 510)
 Assert.eq(toc_menu.h, 800 - 40 - 1)
@@ -292,18 +293,18 @@ Assert.eq(toc_menu.page_info_spacer.width, 22, "548 - 510 = 38，每个间隔收
 bar:goTab(1)
 bar:goTab(2)
 Assert.len(state.opened, 1)
-Assert.eq(bar[1][2][1][1][1], toc_menu)
+Assert.eq(bar[1][1][1][1], toc_menu)
 
 -- 书摘：原生书签列表直接 show 的 Menu 同样被借入。
 bar:goTab(3)
-local notes_menu = bar[1][2][1][1][1]
+local notes_menu = bar[1][1][1][1]
 Assert.eq(notes_menu.title, "书签")
 Assert.eq(notes_menu.w, 510)
 
 -- X-Ray 入口只弹了提示（非 Menu）：照常显示，页内给白底占位。
 bar:goTab(4)
 Assert.is_true(state.shown[#state.shown].info_message)
-Assert.eq(bar[1][2][1][1][1].height, 800 - 40 - 1)
+Assert.eq(bar[1][1][1][1].height, 800 - 40 - 1)
 bar:goTab(4)
 
 -- 票根：首次进入才生成；未出图先显示占位，出图回调推迟一 tick 再刷新本页。
@@ -312,7 +313,7 @@ bar:goTab(5)
 Assert.len(state.tickets, 1)
 local ticket = state.tickets[1]
 Assert.eq(ticket.snapshot, state.snapshot)
-local ticket_body = bar[1][2][1][1][1][1]
+local ticket_body = bar[1][1][1][1][1]
 Assert.is_false(ticket_body.ready)
 Assert.eq(ticket_body.w, 510)
 Assert.eq(ticket_body.h, 800 - 40 - 1)
@@ -321,7 +322,7 @@ dirty = state.dirty
 ticket.on_ready()
 Assert.eq(state.dirty, dirty, "回调里不直接重绘（可能在 render 内同步回调）")
 flush()
-Assert.is_true(bar[1][2][1][1][1][1].ready)
+Assert.is_true(bar[1][1][1][1][1].ready)
 Assert.eq(state.dirty, dirty + 1)
 -- 切走再回来复用同一张；切走后才出图的回调不重绘别的页。
 bar:goTab(4)
@@ -363,14 +364,14 @@ Assert.eq(table.concat(fonted.tabs, ","), "info,toc,font,notes,xray,ticket")
 Assert.len(state.font_jobs, 0, "没进字体页不拉列表")
 fonted:goTab(3)
 Assert.len(state.font_jobs, 1)
-local loading = fonted[1][2][1][1][1]
+local loading = fonted[1][1][1][1]
 Assert.eq(loading[1].muted, "正在加载字体列表…")
 -- 列表回来：借选择器菜单进侧栏，推迟一 tick 重画；选择器参数来自阅读字体快捷动作。
 local shown_before = #state.shown
 state.font_jobs[1].cb({ { id = "a" } })
 Assert.len(state.shown, shown_before, "选择器菜单被截下，不上屏")
 flush()
-local font_menu = fonted[1][2][1][1][1]
+local font_menu = fonted[1][1][1][1]
 Assert.eq(font_menu.title, "阅读字体")
 Assert.eq(font_menu.w, 510)
 Assert.eq(font_menu.picker_opts.ui, font_ui)
@@ -386,7 +387,7 @@ local failing = Sidebar:new{ ui = font_ui, snapshot = state.snapshot }
 failing:goTab(3)
 state.font_jobs[2].cb(nil)
 flush()
-Assert.eq(failing[1][2][1][1][1][1].muted, "字体列表加载失败")
+Assert.eq(failing[1][1][1][1][1].muted, "字体列表加载失败")
 local pending = Sidebar:new{ ui = font_ui, snapshot = state.snapshot }
 pending:goTab(3)
 pending:onClose()
@@ -402,7 +403,7 @@ Assert.eq(other.tab, 1)
 -- 底栏图标：每页一格、当前页高亮，点哪格直达哪页，不经过中间页。
 do
     local jump = Sidebar:new{ ui = ui, snapshot = state.snapshot }
-    local strip = jump[1][2][1][2].strip
+    local strip = jump[1][1][2].strip
     Assert.eq(strip.width, 510)
     Assert.eq(strip.active, "info")
     Assert.len(strip.tabs, 5)
@@ -413,7 +414,7 @@ do
     Assert.eq(jump.tab, 5)
     Assert.len(state.opened, opened, "跳过目录 / 书摘，不借它们的菜单")
     Assert.len(state.tickets, tickets + 1)
-    Assert.eq(jump[1][2][1][2].strip.active, "ticket")
+    Assert.eq(jump[1][1][2].strip.active, "ticket")
     jump:onClose()
 end
 
@@ -422,7 +423,7 @@ do
     state.sidebar.sidebar_hidden_tabs = { "toc", "ticket" }
     local trimmed = Sidebar:new{ ui = ui, snapshot = state.snapshot }
     Assert.eq(table.concat(trimmed.tabs, ","), "info,notes,xray")
-    local strip = trimmed[1][2][1][2].strip
+    local strip = trimmed[1][1][2].strip
     Assert.len(strip.tabs, 3)
     Assert.eq(strip.tabs[3].id, "xray")
 
@@ -430,7 +431,7 @@ do
     state.xray = { book_xray_enabled = false }
     local fallback = Sidebar:new{ ui = ui, snapshot = state.snapshot }
     Assert.eq(table.concat(fallback.tabs, ","), "info", "只剩不可用的 X-Ray：退回书籍页")
-    Assert.eq(fallback[1][2][1][2].strip.tabs[1].id, "info")
+    Assert.eq(fallback[1][1][2].strip.tabs[1].id, "info")
 
     state.sidebar.sidebar_hidden_tabs = {}
     state.xray = { book_xray_enabled = true }

@@ -52,7 +52,7 @@ function DictInit.onCreate()
     local native_add_to_main_menu = ReaderDictionary.addToMainMenu
     ReaderDictionary.showDictionariesMenu = function(self, changed_callback)
         if DictInit.isEnabled() then
-            require("features.dictionary.ui").manage(self.ui, changed_callback)
+            require("ui.guard").call("dictionary manage", require("features.dictionary.ui").manage, self.ui, changed_callback)
             return
         end
         return native_show_menu(self, changed_callback)
@@ -66,9 +66,9 @@ function DictInit.onCreate()
                 table.remove(settings.sub_item_table, index)
                 item.sub_item_table_func = nil
                 item.separator = nil
-                item.callback = function()
+                item.callback = require("ui.guard").wrap("dictionary download", function()
                     require("features.dictionary.ui").download(self.ui)
-                end
+                end)
                 menu_items[DOWNLOAD_ITEM_ID] = item
                 break
             end
@@ -93,7 +93,7 @@ function DictInit.onCreate()
     DictQuickLookup.onTap = function(self, arg, ges_ev)
         if DictInit.isEnabled() and not self.is_wiki
             and ges_ev.pos:intersectWith(self.dict_title.dimen) then
-            require("features.dictionary.ui").pick(self.ui, {
+            require("ui.guard").call("dictionary pick", require("features.dictionary.ui").pick, self.ui, {
                 word = self.word,
                 current_name = self.dictionary,
                 close_window = function()

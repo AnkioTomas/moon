@@ -21,13 +21,12 @@ local Stream = {}
 function Stream.open(opts, handlers)
     local ctx, begin_err = Fetch.begin(opts, "book.http stream")
     if not ctx then
-        if handlers.on_done then handlers.on_done(begin_err) end
-        return Fetch.NOOP
+        return handlers.on_done and Fetch.fail("http stream", handlers.on_done, begin_err) or Fetch.NOOP
     end
     local state = { cancelled = false, done = false }
     local received = 0
 
-    --- 只回调一次 on_done。on_done 后再 release，方便连环开流。
+    --- 只回调一次 on_done。on_done 后再 release，方便连环开流；回调经 guard，抛错也一定 release。
     ---@param err any nil 表示正常收完
     local function finish(err)
         if state.done then
@@ -35,16 +34,23 @@ function Stream.open(opts, handlers)
         end
         state.done = true
         state.client = nil
+        err = state.data_err or err
         Fetch.log(ctx, err, "bytes", received)
-        if handlers.on_done then handlers.on_done(err) end
+        if handlers.on_done then Fetch.call("http stream", handlers.on_done, err) end
         Turbo.release()
     end
 
-    --- 已取消或已结束后一律丢弃；非字符串或空串忽略。
+    --- 已取消或已结束后一律丢弃；非字符串或空串忽略。on_data 抛过错就丢弃后续块，免得每块都再报一次。
     local function emit(chunk)
-        if not state.cancelled and not state.done and type(chunk) == "string" and #chunk > 0 then
-            received = received + #chunk
-            if handlers.on_data then handlers.on_data(chunk) end
+        if state.cancelled or state.done or state.data_err or type(chunk) ~= "string" or #chunk == 0 then
+            return
+        end
+        received = received + #chunk
+        if handlers.on_data and not Fetch.call("http stream data", function()
+            handlers.on_data(chunk)
+            return true
+        end) then
+            state.data_err = "stream callback failed"
         end
     end
 

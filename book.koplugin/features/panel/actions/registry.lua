@@ -161,7 +161,8 @@ function Registry.execute(action, ctx, opts)
     opts = opts or {}
     if not action.keep_open and opts.close then opts.close() end
     if action.run then
-        action.run(ctx)
+        -- 非触屏设备由原生菜单项回调直接调到这里，不经面板的 guard。
+        require("ui.guard").call("quick action " .. tostring(action.id), action.run, ctx)
     else
         UIManager:broadcastEvent(require("ui/event"):new(action.event))
     end

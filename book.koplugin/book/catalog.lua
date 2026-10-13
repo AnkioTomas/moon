@@ -268,7 +268,7 @@ end
 ---@return { cancel: fun() }
 local function deferScoped(source_id, cb, fn)
     local cancelled = false
-    require("ui/uimanager"):nextTick(function()
+    require("ui/uimanager"):nextTick(require("ui.guard").wrap("catalog defer", function()
         if cancelled then
             return
         end
@@ -279,7 +279,7 @@ local function deferScoped(source_id, cb, fn)
         end
         ---@cast scope string|string[]
         fn(scope)
-    end)
+    end))
     return { cancel = function()
             cancelled = true
         end }

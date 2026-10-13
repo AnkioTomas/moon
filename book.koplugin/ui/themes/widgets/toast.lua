@@ -19,7 +19,9 @@ local Text = require("ui.themes.widgets.text")
 ---@class BookThemeToast : BookThemeModal
 ---@field text string
 ---@field timeout number|nil 秒；nil 不自动收起
+--- 不画遮罩：提示频繁，带遮罩弹出就要全刷，每条提示闪两次。
 local Toast = Modal:extend{
+    mask = false,
     close_on_tap = true,
     text = nil,
     timeout = nil,

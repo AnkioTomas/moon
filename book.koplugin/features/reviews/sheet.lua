@@ -236,8 +236,9 @@ function Sheet:load()
         return
     end
     local source = self.identity.source --[[@as ParagraphReviewSource]]
-    self.job = source:paragraphReviewPageAsync(self.identity, self.spot.range, self.max_idx, function(page, err)
-        self.job = nil
+    local done = false
+    local job = source:paragraphReviewPageAsync(self.identity, self.spot.range, self.max_idx, function(page, err)
+        done, self.job = true, nil
         if not page then
             Toast:new{ text = err or _("无法获取段评"), timeout = 2 }:show()
             self.turn_after_load = false
@@ -252,6 +253,7 @@ function Sheet:load()
         self.turn_after_load = false
         self:refresh()
     end)
+    if not done then self.job = job end
 end
 
 --- 翻页；到末页时预取下一批，越过末页则等续拉回来再翻。

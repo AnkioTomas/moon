@@ -92,7 +92,7 @@ function Cache.fetch(key, ttl, load, cb)
         return load(cb) or { cancel = function() end }
     end
     local cancelled, job = false, nil
-    UIManager:nextTick(function()
+    UIManager:nextTick(require("ui.guard").wrap("http cache fetch", function()
         if cancelled then
             return
         end
@@ -107,7 +107,7 @@ function Cache.fetch(key, ttl, load, cb)
             end
             cb(value, err, ...)
         end)
-    end)
+    end))
     return { cancel = function()
         cancelled = true
         if job then

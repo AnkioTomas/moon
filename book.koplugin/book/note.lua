@@ -130,10 +130,10 @@ local function runSyncAsync(source, opts, cb)
         if cb then cb(value, err) end
     end
     if not can_pull and not can_push then
-        require("ui/uimanager"):nextTick(function()
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("note sync", function()
             result.skipped, result.reason = true, "unsupported"
             finish(result)
-        end)
+        end))
         return { cancel = function() cancelled = true end }
     end
 
@@ -253,7 +253,7 @@ local function runSyncAsync(source, opts, cb)
         end
         pullRemote()
     end
-    require("ui/uimanager"):nextTick(nextIdentity)
+    require("ui/uimanager"):nextTick(require("ui.guard").wrap("note sync", nextIdentity))
     return { cancel = function()
             cancelled = true
             if current_job and current_job.cancel then current_job:cancel() end

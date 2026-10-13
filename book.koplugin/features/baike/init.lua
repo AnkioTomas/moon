@@ -146,13 +146,13 @@ function Baike.onCreate()
     local native_close_document = ReaderWikipedia.onCloseDocument
     ReaderWikipedia.lookupWikipedia = function(self, ...)
         if Baike.isEnabled() then
-            return lookup(self, ...)
+            return require("ui.guard").call("baike lookup", lookup, self, ...)
         end
         return native_lookup(self, ...)
     end
     ReaderWikipedia.lookupInput = function(self, ...)
         if Baike.isEnabled() then
-            return lookupInput(self)
+            return require("ui.guard").call("baike input", lookupInput, self)
         end
         return native_lookup_input(self, ...)
     end

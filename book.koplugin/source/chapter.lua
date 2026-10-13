@@ -247,9 +247,9 @@ local function write(path, payload, cb, opts)
             return
         end
         offset = offset + #chunk
-        UIManager:nextTick(writeNext)
+        UIManager:nextTick(require("ui.guard").wrap("chapter write", writeNext))
     end
-    UIManager:nextTick(writeNext)
+    UIManager:nextTick(require("ui.guard").wrap("chapter write", writeNext))
     return { cancel = function()
             if completed then return end
             completed = true
@@ -388,9 +388,9 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
         -- 本地命中直接交付。不要在切章时再启动后台 openAsync：它会重复读目录、
         -- 扫描/改写整份 HTML，并把这些同步工作塞回 UI 线程，抵消快开收益。
         -- 但身份登记不能省：旧缓存可能早于 chapters 表，ReaderReady 只按路径精确查库。
-        require("ui/uimanager"):nextTick(function()
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter callback", function()
             if not cancelled then cb(touched and local_path or nil, touch_err) end
-        end)
+        end))
         return { cancel = function()
                 cancelled = true
             end }
@@ -405,12 +405,12 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
         current:close()
     end
     if not require("ui/network/manager"):isConnected() then
-        require("ui/uimanager"):nextTick(function()
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter callback", function()
             if not cancelled then cb(nil, _("网络不可用，请先连接 Wi-Fi")) end
-        end)
+        end))
         return { cancel = function() cancelled = true end }
     end
-    require("ui/uimanager"):nextTick(function()
+    require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter open", function()
         if cancelled then
             return
         end
@@ -438,11 +438,11 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
         end
         job = Chapter.openAsync(source, identity, book, opts, ops, function(path, err)
             closeDialog()
-            require("ui/uimanager"):nextTick(function()
+            require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter callback", function()
                 if not cancelled then cb(path, err) end
-            end)
+            end))
         end)
-    end)
+    end))
     return { cancel = function()
             cancelled = true
             if job then
@@ -483,9 +483,9 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
         end
     end
     if #indices == 0 then
-        require("ui/uimanager"):nextTick(function()
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter callback", function()
             if not cancelled and cb then cb(0, 0, 0) end
-        end)
+        end))
         return { cancel = function() cancelled = true end }
     end
 
@@ -501,9 +501,9 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
     local function continueNext()
         local UIManager = require("ui/uimanager")
         if interval > 0 then
-            UIManager:scheduleIn(interval, nextIndex)
+            UIManager:scheduleIn(interval, require("ui.guard").wrap("chapter prefetch", nextIndex))
         else
-            UIManager:nextTick(nextIndex)
+            UIManager:nextTick(require("ui.guard").wrap("chapter prefetch", nextIndex))
         end
     end
     local function failed(err)
@@ -527,7 +527,7 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
         if chapterReady(path) then
             cached_count = cached_count + 1
             report()
-            require("ui/uimanager"):nextTick(nextIndex)
+            require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter prefetch", nextIndex))
             return
         end
         local item = toc[idx]
@@ -564,11 +564,11 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
     end
 
     if require("ui/network/manager"):isConnected() then
-        require("ui/uimanager"):nextTick(nextIndex)
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter prefetch", nextIndex))
     else
-        require("ui/uimanager"):nextTick(function()
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter callback", function()
             if not cancelled and cb then cb(0, #indices, #indices, _("网络不可用，请先连接 Wi-Fi")) end
-        end)
+        end))
     end
     return { cancel = function()
             cancelled = true

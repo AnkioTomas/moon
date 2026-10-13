@@ -364,8 +364,12 @@ function Handles:onSetDimensions(dimen)
     self:layout()
 end
 
+--- 独立上屏、不是 Modal：自己的手势处理经 guard，出错算已处理；没接住的照常转给原生划词菜单。
 function Handles:handleEvent(event)
-    if InputContainer.handleEvent(self, event) then
+    local ok, handled = Guard.call("selection " .. tostring(event.handler or event), function()
+        return true, InputContainer.handleEvent(self, event)
+    end)
+    if not ok or handled then
         return true
     end
     local dialog = self.highlight and self.highlight.highlight_dialog

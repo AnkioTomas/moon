@@ -334,12 +334,12 @@ local function scheduleScan(ui, entries, cache, page)
     while p <= last and cache.scanned[p] == #entries do p = p + 1 end
     if p > last then return end
     local key = PageMarks.viewKey(ui, 0)
-    cache.timer = function()
+    cache.timer = require("ui.guard").wrap("reviews scan", function()
         cache.timer = nil
         if not key or PageMarks.viewKey(ui, 0) ~= key then return end
         scan(ui, entries, cache, p)
         scheduleScan(ui, entries, cache, page)
-    end
+    end)
     UIManager:scheduleIn(IDLE, cache.timer)
 end
 

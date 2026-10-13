@@ -119,10 +119,10 @@ local function syncOnce(source, opts, cb)
         if cb then cb(value, err) end
     end
     if not can_push then
-        require("ui/uimanager"):nextTick(function()
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("progress sync", function()
             result.skipped, result.reason = true, "unsupported"
             finish(result)
-        end)
+        end))
         return { cancel = function() cancelled = true end }
     end
 
@@ -186,7 +186,7 @@ local function syncOnce(source, opts, cb)
         end
         nextIdentity()
     end
-    require("ui/uimanager"):nextTick(nextIdentity)
+    require("ui/uimanager"):nextTick(require("ui.guard").wrap("progress sync", nextIdentity))
     return { cancel = function()
             cancelled = true
             if current_job and current_job.cancel then current_job:cancel() end

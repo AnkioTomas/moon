@@ -371,10 +371,10 @@ function Library:updateView()
     self:syncPageSize()
     local state = self.state
     if not state then
-        UIManager:nextTick(function()
+        UIManager:nextTick(require("ui.guard").wrap("library fetch", function()
             if self.desktop.closed or self.desktop.tab ~= "library" then return end
             self:fetch()
-        end)
+        end))
     end
     return self:build(self.desktop:ctx(), state or {}, {
         page = self.page,

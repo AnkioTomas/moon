@@ -246,10 +246,10 @@ function Store:updateView()
         self.state = state
     end
     if not state then
-        UIManager:nextTick(function()
+        UIManager:nextTick(require("ui.guard").wrap("store fetch", function()
             if desktop.closed or desktop.tab ~= self.name then return end
             self:fetch()
-        end)
+        end))
     end
     return self:build(desktop:ctx(), state or {}, {
         page = self.page,

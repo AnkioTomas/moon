@@ -97,7 +97,9 @@ local function hookScreensaver()
     end
 end
 
---- 插件启动：缓存失效时先撤下旧图（别让上次的配置冒充），下一帧补生成。
+--- 插件启动：缓存失效时先撤下旧图（别让上次的配置冒充）。
+--- 背景在本地时休眠钩子会当场同步合成，这里不预生成：开书时在主线程合成整屏图只会卡，
+--- 而且当前书 / 轮换类主体的键到休眠时早变了。只有在线背景没就绪才下一帧发起（等下载）。
 function M.onCreate()
     hookScreensaver()
     Settings.migrate()
@@ -105,10 +107,11 @@ function M.onCreate()
         logger.dbg("book.lockscreen onCreate skipped", "mode_disabled")
         return
     end
-    if not Compose.cacheValid(Compose.plan()) then
-        Settings.clearCover()
-    end
-    require("ui/uimanager"):nextTick(function() M.refresh(nil, false, "onCreate") end)
+    local plan = Compose.plan()
+    if Compose.cacheValid(plan) then return end
+    Settings.clearCover()
+    if require("features.lockscreen.background").isFresh(plan.asset) then return end
+    require("ui/uimanager"):nextTick(function() require("ui.guard").call("lockscreen.create", M.refresh, nil, false, "onCreate") end)
 end
 
 --- 网络恢复：必应 / 摸鱼日报 / 一言可能刚就绪；内容没变就是缓存命中。
