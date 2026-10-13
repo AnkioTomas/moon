@@ -105,7 +105,7 @@ local function coreEntries(desktop)
         },
         {
             group = "library", order = 20, id = "source_config", icon = "tune", title = _("账号与登录"),
-            subtitle = _("书源账号、本地书籍目录"),
+            subtitle = _("书源账号、本地目录、Z-Library / OPDS 书城"),
             page = {
                 title = _("账号与登录"),
                 sections = function() return Source:configSections{ desktop = desktop, plugin = plugin } end,
@@ -142,12 +142,12 @@ local function coreEntries(desktop)
         },
         {
             group = "reader", order = 10, id = "reader_behavior", icon = "touch_app", title = _("阅读行为"),
-            subtitle = _("脚注弹窗、自动标记已读"),
+            subtitle = _("脚注、翻页动画、侧栏"),
             page = { title = _("阅读行为"), sections = function() return ReaderSettings:sections(desktop) end },
         },
         {
             group = "reader", order = 20, id = "lookup", icon = "format_ink_highlighter", title = _("划词与查询"),
-            subtitle = _("翻译、X-Ray、划词菜单"),
+            subtitle = _("翻译、X-Ray、词典、百科"),
             page = { title = _("划词与查询") },
         },
         { parent = "lookup", order = 10, sections = function() return ReaderSettings:lookupSections(desktop) end },

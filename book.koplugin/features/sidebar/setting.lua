@@ -94,63 +94,55 @@ function Setting.entries(desktop)
     local Row = require("ui.themes.widgets.row")
     return {
         {
-            id = "main",
-            group = "reader",
-            order = 120,
-            icon = "swipe_right",
-            title = _("阅读侧栏"),
-            subtitle = _("打开手势与显示的页面"),
-            status = statusText(MoonSettings.get("features.sidebar")),
-            page = {
-                title = _("阅读侧栏"),
-                sections = function()
-                    local settings = MoonSettings.get("features.sidebar")
-                    local current = settings.sidebar_gesture
-                    return {
-                        {
-                            title = _("阅读侧栏"),
-                            rows = {
-                                function(iw)
-                                    return Row.widget({
-                                        width = iw,
-                                        chevron = true,
-                                        kind = "nav",
-                                        icon = "swipe_right",
-                                        title = _("侧栏手势"),
-                                        subtitle = _("也可在 KOReader 手势管理中绑定「打开月读侧栏」"),
-                                        status = statusText(settings),
-                                        callback = function()
-                                            require("ui.themes.widgets.list"):new{
-                                                title = _("侧栏手势"),
-                                                items = GESTURES,
-                                                current = current,
-                                                centered = true,
-                                                on_select = function(value)
-                                                    settings.sidebar_gesture = value
-                                                    MoonSettings.save("features.sidebar", settings)
-                                                    desktop:updateView()
-                                                end,
-                                            }:show()
-                                        end,
-                                    })
-                                end,
-                                function(iw)
-                                    return Row.widget({
-                                        width = iw,
-                                        chevron = true,
-                                        kind = "nav",
-                                        icon = "view_sidebar",
-                                        title = _("侧栏页面"),
-                                        subtitle = _("选择侧栏底部显示哪些页面"),
-                                        status = tabsStatus(settings),
-                                        callback = function() pickTabs(settings, desktop) end,
-                                    })
-                                end,
-                            },
+            parent = "reader_behavior",
+            order = 20,
+            sections = function()
+                local settings = MoonSettings.get("features.sidebar")
+                local current = settings.sidebar_gesture
+                return {
+                    {
+                        title = _("阅读侧栏"),
+                        rows = {
+                            function(iw)
+                                return Row.widget({
+                                    width = iw,
+                                    chevron = true,
+                                    kind = "nav",
+                                    icon = "swipe_right",
+                                    title = _("侧栏手势"),
+                                    subtitle = _("也可在 KOReader 手势管理中绑定「打开月读侧栏」"),
+                                    status = statusText(settings),
+                                    callback = function()
+                                        require("ui.themes.widgets.list"):new{
+                                            title = _("侧栏手势"),
+                                            items = GESTURES,
+                                            current = current,
+                                            centered = true,
+                                            on_select = function(value)
+                                                settings.sidebar_gesture = value
+                                                MoonSettings.save("features.sidebar", settings)
+                                                desktop:updateView()
+                                            end,
+                                        }:show()
+                                    end,
+                                })
+                            end,
+                            function(iw)
+                                return Row.widget({
+                                    width = iw,
+                                    chevron = true,
+                                    kind = "nav",
+                                    icon = "view_sidebar",
+                                    title = _("侧栏页面"),
+                                    subtitle = _("选择侧栏底部显示哪些页面"),
+                                    status = tabsStatus(settings),
+                                    callback = function() pickTabs(settings, desktop) end,
+                                })
+                            end,
                         },
-                    }
-                end,
-            },
+                    },
+                }
+            end,
         },
     }
 end

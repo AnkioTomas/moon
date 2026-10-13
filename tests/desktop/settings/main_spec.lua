@@ -202,7 +202,7 @@ local desktop = {
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 28)
+Assert.len(built_rows, 24)
 Assert.eq(table.concat(section_titles, ","), "书库,桌面,阅读,系统,维护")
 
 local expected = {
@@ -217,10 +217,6 @@ local expected = {
     { title = "阅读快捷面板", id = "feature:panel:reader" },
     { title = "阅读页顶栏", id = "feature:bars:top" },
     { title = "阅读页底栏", id = "feature:bars:bottom" },
-    { title = "阅读侧栏", id = "feature:sidebar:main" },
-    { title = "翻页动画", id = "feature:animation:main" },
-    { title = "月读词典", id = "feature:dictionary:main" },
-    { title = "百度百科", id = "feature:baike:main" },
     { title = "AI 接口", id = "ai" },
     { title = "网络", id = "network" },
     { title = "中文输入法增强", id = "feature:ime:main" },
@@ -254,15 +250,14 @@ end
 local behavior = pages.reader_behavior
 Assert.eq(behavior.title, "阅读行为")
 Assert.is_nil(behavior.preview)
-Assert.eq(#behavior.sections(), 1)
-
 -- 第三层：feature 往核心页面追加分节，按 order 排在核心分节之间 / 之后
 local function sectionTitles(page)
     local titles = {}
     for _, section in ipairs(page.sections()) do titles[#titles + 1] = section.title end
     return table.concat(titles, ",")
 end
-Assert.eq(sectionTitles(pages.lookup), "选区,翻译,X-Ray,菜单")
+Assert.eq(sectionTitles(behavior), "行为,翻页动画,阅读侧栏")
+Assert.eq(sectionTitles(pages.lookup), "选区,翻译,X-Ray,词典,百科,菜单")
 Assert.eq(sectionTitles(pages.display), "启动,显示,夜间与亮度")
 
 -- 维护组：update feature 的两行按 order 插在调试日志与关于之间
