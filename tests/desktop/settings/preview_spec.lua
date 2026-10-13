@@ -78,11 +78,26 @@ end
 package.preload["ui/widget/imagewidget"] = function()
     return { new = function(_, opts) return opts end }
 end
+local function iconSize() return { w = 22, h = 22 } end
 package.preload["ui.themes.widgets.icon"] = function()
     return {
-        widget = function(opts) return { icon = opts.name } end,
-        label = function(opts) return { icon = opts.name, text = opts.text } end,
+        widget = function(opts) return { icon = opts.name, getSize = iconSize } end,
+        label = function(opts) return { icon = opts.name, text = opts.text, getSize = iconSize } end,
     }
+end
+package.preload["ui/widget/verticalspan"] = function()
+    return { new = function(_, opts) return opts end }
+end
+--- 竖排：图标行高 22，间隔取 VerticalSpan 的 width。
+package.preload["ui/widget/verticalgroup"] = function()
+    return { new = function(_, opts)
+        opts.getSize = function(self)
+            local h = 0
+            for _i, child in ipairs(self) do h = h + (child.width or 22) end
+            return { w = 0, h = h }
+        end
+        return opts
+    end }
 end
 for _, name in ipairs({
     "ui/widget/horizontalgroup",
@@ -106,8 +121,9 @@ package.preload["features.panel.desktop"] = function()
         end,
     }
 end
+local reader_options = {}
 package.preload["features.panel.reader"] = function()
-    return { options = function() return {} end }
+    return { options = function() return reader_options end }
 end
 package.preload["ui/widget/buttondialog"] = function() return {} end
 local shown, closed = {}, {}
@@ -268,5 +284,16 @@ local empty = QuickPanel.preview("reader", 600)
 Assert.eq(empty.kind, "placeholder")
 Assert.eq(status_text, "无")
 Assert.eq(preview_h, 48)
+
+-- 一行放不下就折行，框跟着长高：可用宽 600-2-2*10=578，每个图标 22+间隔 12，一行 17 个。
+for i = 1, 20 do
+    reader_options[i] = { id = "a" .. i, icon = "x", enabled = true, available = true }
+end
+local wrapped = QuickPanel.preview("reader", 600)
+local rows = wrapped.child[1][2]
+Assert.len(rows, 3, "两行图标中间夹一段间隔")
+Assert.len(rows[1], 17 * 2 - 1)
+Assert.len(rows[3], 3 * 2 - 1)
+Assert.eq(preview_h, 22 + 12 + 22 + 12 * 2 + 2)
 
 return true
