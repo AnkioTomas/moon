@@ -18,6 +18,9 @@ notes 表只存原书坐标：远端同步只认原书。衍生版和原书结�
 - 未记录、对侧没有：对侧的新划线，搜出位置加到本侧。
 只有书签（没有 drawer）不跨版本。逐条搜索走 nextTick，不卡翻页。
 
+衍生版文件整个重建（重新排版）时 sidecar 跟着清空，记为 false 的划线原书里没有，清了就没了：
+`purge` 先把它们暂存到新 sidecar 的 `book_note_orphans`，下次打开衍生版时按文字重新落位（仍记 false）。
+
 @module koplugin.book.reader.session.derived_note
 --]]
 
@@ -28,6 +31,7 @@ local Normalize = require("book.note.normalize")
 local DerivedNote = {}
 
 local LINKED = "book_note_linked"
+local ORPHANS = "book_note_orphans"
 --- 搜索串取划线首尾各这么多个字：太短重复多，太长容易跨过排版版合并掉的断行。
 local EDGE_CHARS = 16
 local MAX_HITS = 200
@@ -179,9 +183,10 @@ end
 ---@param pending table[] 对侧条目
 ---@param pages integer 对侧文档总页数
 ---@param linked table<string, boolean>
----@param remember_misses boolean 搜不到的是否记 false（只有衍生版条目要记）
+---@param hit boolean 搜到的基线记什么（原书条目 true；衍生版自己的旧划线仍是 false）
+---@param miss boolean|nil 搜不到的记什么（只有衍生版条目要记 false）
 ---@param done fun()
-local function place(ui, pending, pages, linked, remember_misses, done)
+local function place(ui, pending, pages, linked, hit, miss, done)
     local UIManager = require("ui/uimanager")
     local document = ui.document
     local index = 0
@@ -201,9 +206,9 @@ local function place(ui, pending, pages, linked, remember_misses, done)
                     datetime = item.datetime, datetime_updated = item.datetime_updated,
                     chapter = chapter ~= "" and chapter or nil,
                 })
-                linked[item.datetime] = true
-            elseif remember_misses then
-                linked[item.datetime] = false
+                linked[item.datetime] = hit
+            elseif miss ~= nil then
+                linked[item.datetime] = miss
             end
         end
         UIManager:nextTick(require("ui.guard").wrap("derived note", step))
@@ -245,9 +250,39 @@ function DerivedNote.project(ui, identity)
     local annotations = ui.annotation.annotations
     local changed = reconcile(annotations, linked, byDatetime(items))
     local pending = newcomers(items, linked, byDatetime(annotations))
+    -- 落位完才删：中途关书下次接着放，已放上的按 datetime 跳过。
+    local orphans = ui.doc_settings:readSetting(ORPHANS)
     if changed then redraw(ui) end
-    if #pending == 0 then return end
-    place(ui, pending, 0, linked, false, function() redraw(ui) end)
+    if #pending == 0 and not orphans then return end
+    place(ui, pending, 0, linked, true, nil, function()
+        if not orphans then return redraw(ui) end
+        place(ui, orphans, 0, linked, false, nil, function()
+            ui.doc_settings:delSetting(ORPHANS)
+            redraw(ui)
+        end)
+    end)
+end
+
+--- 衍生版文件要整个重建、sidecar 随之清空：只在衍生版里的划线暂存进新 sidecar，等下次打开重新落位。
+---@param file string 衍生版路径
+function DerivedNote.purge(file)
+    local DocSettings = require("docsettings")
+    local old = DocSettings:open(file)
+    local linked = old:readSetting(LINKED) or {}
+    local pages = old:readSetting("doc_pages")
+    -- 上次重建后还没打开过的，也一并带着。
+    local orphans = old:readSetting(ORPHANS) or {}
+    for _idx, item in ipairs(old:readSetting("annotations") or {}) do
+        if item.drawer and item.datetime and linked[item.datetime] == false then
+            item.total_pages = item.total_pages or pages
+            orphans[#orphans + 1] = item
+        end
+    end
+    old:purge()
+    if #orphans == 0 then return end
+    local fresh = DocSettings:open(file)
+    fresh:saveSetting(ORPHANS, orphans)
+    fresh:flush()
 end
 
 --- 读原书：把各衍生版里新划、改过、删掉的线收进原书，再存快照落库。
@@ -255,8 +290,10 @@ end
 ---@param identity BookIdentity
 function DerivedNote.collect(ui, identity)
     if not ui.rolling then return end
+    local lfs = require("libs/libkoreader-lfs")
     for _idx, file in ipairs(derivedFiles(identity, ui.document.file)) do
         local settings = require("docsettings"):open(file)
+        local built = lfs.attributes(file, "modification")
         local items = settings:readSetting("annotations") or {}
         local linked = settings:readSetting(LINKED) or {}
         local annotations = ui.annotation.annotations
@@ -269,7 +306,8 @@ function DerivedNote.collect(ui, identity)
         local function finish()
             if changed or #pending > 0 then redraw(ui) end
             require("reader.session.note").save(ui, identity, function(ok)
-                if not ok then return end
+                -- 逐条收线期间衍生版被重建（重新排版）：手里这份 sidecar 已过时，写回会盖掉新版的。
+                if not ok or lfs.attributes(file, "modification") ~= built then return end
                 settings:saveSetting(LINKED, linked)
                 settings:flush()
             end)
@@ -277,7 +315,7 @@ function DerivedNote.collect(ui, identity)
         if #pending == 0 then
             if changed then finish() end
         else
-            place(ui, pending, settings:readSetting("doc_pages") or 0, linked, true, finish)
+            place(ui, pending, settings:readSetting("doc_pages") or 0, linked, true, false, finish)
         end
     end
 end

@@ -279,7 +279,9 @@ local function dropTocEchoes(sections)
     return kept
 end
 
---- 正文里的内嵌目录：表头（目录 / Contents）之后连续的短行，遇到长行或重复的标题（正文开始了）为止。
+--- 正文里的内嵌目录：表头（目录 / Contents）之后连续的短行，遇到重复的标题（正文开始了）为止。
+--- 只有这样收尾的才算数：遇到长行或到文末都没重复，说明条目对不上正文（如带页码），
+--- 收到的多半混进了正文短句，整批丢掉，否则全书每出现一次这句就切一章。
 --- 不读 NCX 的文档（如 CREngine 打开的 MOBI 6）只有这一份目录。
 ---@param lines string[]
 ---@param known table<string, boolean> 收进来的标题（就地加）
@@ -290,11 +292,13 @@ local function collectInlineToc(lines, known)
         if TOC_HEADERS[line:lower()] then
             entries = {}
         elseif entries and line ~= "" then
-            if #line > MAX_TOC_ENTRY_BYTES or entries[line] then
+            if entries[line] then
+                for entry in pairs(entries) do known[entry] = true end
+                entries = nil
+            elseif #line > MAX_TOC_ENTRY_BYTES then
                 entries = nil
             else
                 entries[line] = true
-                known[line] = true
             end
         end
     end
@@ -403,6 +407,8 @@ function Text2Epub.parse(text, opts)
         local heading = line ~= "" and headingOf(line)
         if TOC_HEADERS[line:lower()] then
             -- 内嵌目录的表头：条目已由 dropTocEchoes 去掉，单留表头没有意义
+        elseif heading and current and heading == current.title then
+            -- 与本章标题相同的行是 PDF 每页的页眉，不另起一章
         elseif heading then
             startSection(heading)
         elseif current then

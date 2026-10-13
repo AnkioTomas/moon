@@ -169,6 +169,25 @@ do
     -- 表头后紧跟长段落：不是目录，不收
     book = Text2Epub.parse("目录\n" .. string.rep("很长的正文", 20) .. "\n短句\n正文\n短句", { title = "书" })
     Assert.len(book.chapters, 1)
+
+    -- 条目带页码、对不上正文：一直收到长行也没碰到重复，整批不算目录，正文短句不切章
+    book = Text2Epub.parse(table.concat({
+        "目录", "开端……1", "归来……9", "“嗯。”", "“你是谁？”", string.rep("很长的正文", 20),
+        "“嗯。”", "又是一段。", "“嗯。”",
+    }, "\n"), { title = "书" })
+    Assert.len(book.chapters, 1)
+end
+
+-- PDF 每页页眉就是章名：与本章标题相同的行不另起一章
+do
+    local book = Text2Epub.parse(table.concat({
+        "开端", "第一页。", "开端", "第二页。", "归来", "第三页。", "归来", "第四页。",
+    }, "\n"), { title = "书", headings = { "开端", "归来" } })
+    local titles = {}
+    for _idx, chapter in ipairs(book.chapters) do titles[#titles + 1] = chapter.title end
+    Assert.eq(table.concat(titles, "|"), "开端|归来")
+    Assert.is_true(book.chapters[1].html:find("第二页。", 1, true) ~= nil)
+    Assert.is_nil(book.chapters[1].html:find("<p>开端</p>", 1, true), "页眉行丢掉")
 end
 
 -- 知轩藏书式文件名可补全元数据；调用方显式提供的值仍优先。
