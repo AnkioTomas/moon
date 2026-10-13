@@ -58,7 +58,8 @@ function M:line(mark_text, title, inner_w)
     local sample = Text.line("caption", self.mark_sample)
     local mark_w, gap = sample:getSize().w, Theme.px(t.space.sm)
     sample:free()
-    local mark = Text.line("caption", mark_text, { width = mark_w, color = t.color[self.mark_color] })
+    -- 不给 max_width：数字不等宽的字体里实际比样例宽一两像素，限宽就截成省略号；多出的部分落进间距。
+    local mark = Text.line("caption", mark_text, { color = t.color[self.mark_color] })
     local body = Text.line("body", title, { width = math.max(1, inner_w - mark_w - gap) })
     local h = math.max(mark:getSize().h, body:getSize().h)
     return HorizontalGroup:new{
