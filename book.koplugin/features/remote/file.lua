@@ -159,8 +159,8 @@ function File.download(self, conn, method, path, inline)
 end
 
 --- PUT|POST /upload?dir=&name=（raw body 流式落盘，body 读取在 server 状态机）。
---- 校验通过后开临时文件、把连接切到 body 状态；带 Expect: 100-continue 先回 interim。
---- 方法不符 405，dir/name 非法 400，越界 403，chunked 501，缺 Content-Length 411，开文件失败 500。
+--- 校验目标后交给 server:_acceptFile 流式落盘，收齐再由 handlers.save 落位。
+--- 方法不符 405，dir/name 非法 400，越界 403，其余长度类错误见 _acceptFile。
 ---@param conn table
 ---@param method string
 ---@param headers table 已小写化的请求头
@@ -190,42 +190,16 @@ function File.upload(self, conn, method, headers, dir, name, conflict)
     if conflict == "ask" and self.handlers.path_exists(dir .. "/" .. name) then
         return self:_fail(conn, 409, "File exists")
     end
-    if headers["transfer-encoding"] then
-        return self:_fail(conn, 501, "Chunked not supported")
-    end
-    local len, len_err = self:_contentLength(headers)
-    if len_err == "missing" then
-        return self:_fail(conn, 411, "Content-Length required")
-    end
-    if not len then
-        return self:_fail(conn, 400, "Invalid Content-Length")
-    end
-    if len < 1 then
-        return self:_fail(conn, 411, "Content-Length required")
-    end
-    if len > File.MAX_UPLOAD_BYTES then
-        return self:_fail(conn, 413, "Upload too large")
-    end
-    local temp = self.handlers.temp_path(name)
-    local file, ferr = io.open(temp, "wb")
-    if not file then
-        return self:_fail(conn, 500, ferr)
-    end
-    conn.file = file
-    conn.temp = temp
-    conn.dir = dir
-    conn.name = name
-    conn.conflict = conflict
-    conn.remaining = len
-    local expect = headers["expect"]
-    if type(expect) == "string" and expect:lower():find("100%-continue") then
-        conn.out = "HTTP/1.1 100 Continue\r\n\r\n"
-        conn.out_off = 1
-        conn.state = "continue"
-    else
-        conn.state = "body"
-    end
-    return true
+    return self:_acceptFile(conn, headers, File.MAX_UPLOAD_BYTES, function(temp, reply)
+        self.handlers.save(temp, dir, name, function(ok, err)
+            if not ok then
+                logger.warn("book remote upload failed", dir, name, err)
+                return reply(self.errorResp(500, "Save failed: " .. tostring(err)))
+            end
+            logger.dbg("book remote upload saved", dir, name, conflict)
+            reply(self.jsonResp(200, '{"ok":true}'))
+        end, conflict)
+    end)
 end
 
 --- POST /api/mkdir|delete?path=（无请求体的单路径变更操作公共壳）。

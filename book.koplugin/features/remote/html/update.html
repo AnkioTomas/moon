@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!-- 月读更新页（静态路由；逻辑在 /update.js，共享函数在 /js.js） -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>月读更新 - 远程管理</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="utility-page">
+<header class="brand-page-header">
+<a class="brand-mini" href="/">
+<img src="/logo.jpg" alt="" width="36" height="36"><span>月读</span>
+</a>
+<span class="brand-divider" aria-hidden="true"></span>
+<h1>月读更新</h1>
+</header>
+
+<main class="single-page">
+<section id="uppanel" class="panel" aria-labelledby="up-title">
+<h2 id="up-title">上传安装包</h2>
+<p class="state">选择或拖入发布页下载的 book.koplugin-v*.zip，上传完成后立即安装，KOReader 随后自动重启。</p>
+<div id="upstate" class="state" role="status" aria-live="polite"></div>
+<input type="file" id="upfile" accept=".zip,application/zip" hidden>
+<div class="btns">
+<button type="button" id="uppick" class="primary">选择安装包</button>
+</div>
+</section>
+</main>
+
+<footer class="site-footer"><span class="footer-brand"><img src="/logo.jpg" alt="" width="32" height="32"><span><strong>月读</strong><small>作者 Ankio</small></span></span><a class="footer-link" href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net ↗</a></footer>
+<script src="/js.js"></script>
+<script src="/update.js"></script>
+</body>
+</html>

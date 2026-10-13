@@ -836,9 +836,28 @@ local function getStatus()
     return status
 end
 
+--- 本插件根目录，与 PluginLoader 给的 plugin.path 同一字符串（同 source/registry）。
+local PLUGIN_ROOT = debug.getinfo(1, "S").source:match("^@(.*)/features/remote/init%.lua$")
+
+--- 装上传的插件包；装好在设备上提示并稍后重启：留几秒让「成功」响应发回浏览器，
+--- 也不能继续跑旧模块（延迟加载会混进新版文件）。
+---@param temp string
+---@param cb fun(ok: boolean, err: string|nil)
+local function installUpdate(temp, cb)
+    require("features.update").installArchive(temp, PLUGIN_ROOT, function(ok, err)
+        cb(ok, err)
+        if not ok then return end
+        local UIManager = require("ui/uimanager")
+        require("ui.themes.widgets.toast"):new{
+            text = _("月读已通过远程管理更新，正在重启 KOReader…"),
+        }:show()
+        UIManager:scheduleIn(3, function() UIManager:restartKOReader() end)
+    end)
+end
+
 --- 上传临时落盘路径：缓存目录下 upload-<时间>-<序号>.part，进程内自增保证不撞名。
 ---@return string
-local function tempPath(_name)
+local function tempPath()
     local Paths = require("utils.paths")
     Paths.ensureCacheRoot()
     Remote._temp_seq = Remote._temp_seq + 1
@@ -912,6 +931,7 @@ function Remote.start()
             get_clipboard = getClipboard,
             set_clipboard = setClipboard,
             get_status = getStatus,
+            install_update = installUpdate,
         },
     }
     local started, serr = server:start()

@@ -226,6 +226,15 @@ local function fakeHandlers(dirs)
         temp_path = function()
             return os.tmpname()
         end,
+        install_update = function(temp, cb)
+            local f = io.open(temp, "rb")
+            calls.update = f and f:read("*all") or nil
+            if f then
+                f:close()
+            end
+            os.remove(temp)
+            cb(true)
+        end,
     }
     return handlers, calls
 end
@@ -299,6 +308,7 @@ do
     has(body, "/input.html")
     has(body, "/clipboard.html")
     has(body, "/settings.html")
+    has(body, "/update.html")
     has(body, "/logo.jpg")
     has(body, 'id="status-battery"')
     has(body, "/index.js")
@@ -386,6 +396,17 @@ do
     has(b_s, "连接配置")
     has(b_s, "/settings.js")
     has(b_s, "ankio.net")
+
+    local c_u = newClient({ "GET /update.html HTTP/1.1\r\n\r\n" })
+    drain(serve(c_u))
+    local _, b_u = parseResponse(c_u:output())
+    has(b_u, "月读更新")
+    has(b_u, "/update.js")
+    local c_u_js = newClient({ "GET /update.js HTTP/1.1\r\n\r\n" })
+    drain(serve(c_u_js))
+    local _, b_u_js, h_u_js = parseResponse(c_u_js:output())
+    has(h_u_js, "application/javascript")
+    has(b_u_js, "/api/update")
 
     -- 静态路由非 GET → 405；未知路径 → 404
     local c_p = newClient({ "POST /style.css HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
@@ -703,6 +724,57 @@ do
     has(client:output(), "HTTP/1.1 100 Continue\r\n\r\n")
     has(client:output(), "HTTP/1.1 200 OK\r\n")
     Assert.eq(calls.save.content, "Z")
+end
+
+-- ── 月读更新：上传即安装 ──────────────────────────────
+
+do
+    local handlers, calls = fakeHandlers({})
+    local client = newClient({
+        "POST /api/update HTTP/1.1\r\nContent-Length: 6\r\n\r\nPK",
+        "\3\4zz",
+    })
+    drain(serve(client, handlers))
+    Assert.eq(calls.update, "PK\3\4zz", "安装包必须完整落盘后再交给安装")
+    local code, body = parseResponse(client:output())
+    Assert.eq(code, 200)
+    Assert.eq(body, '{"ok":true}')
+
+    -- 不是月读包 → 400；正在装别的更新 → 409；其它失败 → 500，都带原因。
+    for err, want in pairs({ ["not a moon plugin archive"] = 400, busy = 409, ["disk full"] = 500 }) do
+        local h = fakeHandlers({})
+        h.install_update = function(temp, cb)
+            os.remove(temp)
+            cb(false, err)
+        end
+        local c = newClient({ "POST /api/update HTTP/1.1\r\nContent-Length: 1\r\n\r\nZ" })
+        drain(serve(c, h))
+        local got, got_body = parseResponse(c:output())
+        Assert.eq(got, want, err)
+        has(got_body, err)
+    end
+
+    -- GET → 405；空包 → 411；超上限 → 413，都不调安装。
+    local h2, calls2 = fakeHandlers({})
+    local c_get = newClient({ "GET /api/update HTTP/1.1\r\n\r\n" })
+    drain(serve(c_get, h2))
+    Assert.eq((parseResponse(c_get:output())), 405)
+    local c_empty = newClient({ "POST /api/update HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c_empty, h2))
+    Assert.eq((parseResponse(c_empty:output())), 411)
+    local c_big = newClient({ "POST /api/update HTTP/1.1\r\nContent-Length: 104857601\r\n\r\n" })
+    drain(serve(c_big, h2))
+    Assert.eq((parseResponse(c_big:output())), 413)
+    Assert.is_nil(calls2.update)
+
+    -- 跨站写同样拦截：恶意页面不能替用户换插件。
+    local c_cross = newClient({
+        "POST /api/update HTTP/1.1\r\nHost: 10.0.0.2:9528\r\nOrigin: http://evil.example\r\n"
+            .. "Content-Length: 1\r\n\r\nZ",
+    })
+    drain(serve(c_cross, h2))
+    Assert.eq((parseResponse(c_cross:output())), 403)
+    Assert.is_nil(calls2.update)
 end
 
 -- ── 下载 ──────────────────────────────────────────────

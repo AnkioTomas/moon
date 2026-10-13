@@ -260,6 +260,42 @@ function Update.install(release, plugin_root, cb, on_progress, on_installing)
     end)
 end
 
+--- 安装本地已有的更新包（远程管理上传）。无论成败都删包；装好后由调用方重启。
+---@param archive string ZIP 路径，所有权移交本函数
+---@param plugin_root string 当前插件目录
+---@param cb fun(ok: boolean, err: string|nil) err 只取首行，不带子进程堆栈
+function Update.installArchive(archive, plugin_root, cb)
+    if Update._job then
+        os.remove(archive)
+        return cb(false, "busy")
+    end
+    local settled = false
+    local function settle()
+        settled = true
+        Update._job = nil
+        os.remove(archive)
+    end
+    local job = Job.run(function()
+        local installed, install_err = Install.run(archive, plugin_root)
+        if not installed then error(install_err, 0) end
+    end, {
+        name = "plugin.update",
+        kind = "heavy",
+        timeout = 120,
+        on_done = function()
+            settle()
+            cb(true)
+        end,
+        on_failed = function(err)
+            settle()
+            cb(false, tostring(err):match("[^\n]*"))
+        end,
+        on_cancelled = settle,
+    })
+    -- fork 失败时 Job.run 同步回调，不能再把已结束的 job 挂回去占着「忙」。
+    if not settled then Update._job = job end
+end
+
 --- 取消在途的检查 / 下载，不回调。换目录的子进程只有退出时才会被杀。
 function Update.cancel()
     if Update._job then Update._job:cancel() end
