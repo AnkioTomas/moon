@@ -60,9 +60,10 @@ package.preload["document/documentregistry"] = function()
     }
 end
 
--- 子进程替身：下一 tick 执行，结果按管道协议过一遍 JSON（子进程只能传回可序列化的值）
+-- 子进程替身：下一 tick 执行，进度与结果按管道协议过一遍 JSON（子进程只能传回可序列化的值）
 local jobs = {}
 package.preload["workers.job"] = function()
+    local JSON = require("json")
     return {
         run = function(worker, opts)
             local job = { name = opts.name }
@@ -70,8 +71,10 @@ package.preload["workers.job"] = function()
             jobs[#jobs + 1] = job
             require("ui/uimanager"):nextTick(function()
                 if job.cancelled then return end
-                local JSON = require("json")
-                opts.on_done(JSON.decode(JSON.encode(worker())))
+                local result = worker(function(value)
+                    if opts.on_progress then opts.on_progress(JSON.decode(JSON.encode(value))) end
+                end)
+                opts.on_done(JSON.decode(JSON.encode(result)))
             end)
             return job
         end,
@@ -119,7 +122,7 @@ Assert.is_false(Reflow.available(reader("/books/a.epub", "rolling")))
 session = { identity = identity, fraction = 0.4 }
 
 -- 目录标题
-local titles = Reflow._tocTitles(Text2Epub.parse("第一章 开始\n正文\n\n第二章 继续\n更多", { title = "测试", reflow = true }))
+local titles = Reflow._tocTitles(Text2Epub.parse("第一章 开始\n正文\n\n第二章 继续\n更多", { title = "测试", reflow = true }).chapters)
 Assert.eq(table.concat(titles, "|"), "第一章 开始|第二章 继续")
 
 -- TXT：子进程读文件、识别章节，只传回目录标题
@@ -128,34 +131,29 @@ local f = io.open(txt, "w")
 f:write("第一章 开始\n正文\n\n第二章 继续\n更多")
 f:close()
 local preview, err
-Reflow.analyzeAsync(reader(txt, "rolling"), identity, function(p, e) preview, err = p, e end)
+local steps = {}
+local function progress(text, done, total) steps[#steps + 1] = text .. " " .. done .. "/" .. total end
+Reflow.analyzeAsync(reader(txt, "rolling"), identity, function(p, e) preview, err = p, e end, progress)
 Assert.is_nil(preview, "识别在子进程里，不在调用栈上同步完成")
 Stubs.flush()
 Assert.is_nil(err)
-Assert.eq(jobs[#jobs].name, "reflow.analyze")
+Assert.eq(jobs[#jobs].name, "epub.chapters")
 Assert.is_nil(preview.text, "TXT 全文不进主进程，生成时子进程重读原文件")
 Assert.eq(table.concat(preview.titles, "|"), "第一章 开始|第二章 继续")
 Assert.is_nil(extracted_ui, "TXT 不走逐页提取")
-
--- 取消：子进程结果不再回调
-preview, err = nil, nil
-Reflow.analyzeAsync(reader(txt, "rolling"), identity, function(p, e) preview, err = p, e end).cancel()
-Stubs.flush()
-Assert.is_true(jobs[#jobs].cancelled)
-Assert.is_nil(preview)
-Assert.is_nil(err)
+Assert.eq(table.concat(steps, ","), "正在识别章节 1/2,正在识别章节 2/2", "子进程按节报进度")
 
 f = io.open(txt, "wb")
 f:write("\255\254bad")
 f:close()
-Reflow.analyzeAsync(reader(txt, "rolling"), identity, function(p, e) preview, err = p, e end)
+Reflow.analyzeAsync(reader(txt, "rolling"), identity, function(p, e) preview, err = p, e end, progress)
 Stubs.flush()
 Assert.is_nil(preview)
 Assert.not_nil(err)
 
 -- 其它格式：从打开的文档逐页提取
 local pdf_ui = reader("/books/a.pdf", "pdf")
-Reflow.analyzeAsync(pdf_ui, identity, function(p, e) preview, err = p, e end)
+Reflow.analyzeAsync(pdf_ui, identity, function(p, e) preview, err = p, e end, progress)
 Stubs.flush()
 Assert.eq(extracted_ui, pdf_ui)
 Assert.eq(preview.text, "第一章 开始\n正文\n第二章 继续\n更多", "预览持有提取的全文，确认后原样交给转换")
@@ -167,7 +165,7 @@ local toc_txt = os.tmpname() .. ".txt"
 f = io.open(toc_txt, "wb")
 f:write("目录\n（1970）双剑交锋（1）\n（1971）亮出底牌（1）\n（1970）双剑交锋（1）\n春天。\n（1971）亮出底牌（1）\n北戴河。")
 f:close()
-Reflow.analyzeAsync(reader(toc_txt, "rolling"), identity, function(p, e) preview, err = p, e end)
+Reflow.analyzeAsync(reader(toc_txt, "rolling"), identity, function(p, e) preview, err = p, e end, progress)
 Stubs.flush()
 Assert.eq(table.concat(preview.titles, "|"), "（1970）双剑交锋（1）|（1971）亮出底牌（1）")
 Assert.eq(table.concat(preview.headings, "|"), "（1970）双剑交锋（1）|（1971）亮出底牌（1）")
@@ -262,6 +260,26 @@ Reflow.show(reader("/books/a.epub", "rolling"))
 Assert.eq(Themed.last("confirm").ok_text, "继续")
 Assert.matches(Themed.last("confirm").text, "原书保留不变")
 Assert.is_true(#Themed.made > shown_before)
+
+-- 分析进度窗：任务同款，不能取消也不能转后台、返回键不关；显示步骤与进度，结果回来自动关
+local fresh_txt = os.tmpname() .. ".txt"
+f = assert(io.open(fresh_txt, "wb"))
+f:write("第一章 开始\n正文\n\n第二章 继续\n更多")
+f:close()
+Reflow.show(reader(fresh_txt, "rolling"))
+local dialog = Themed.last("progress_dialog")
+Assert.is_true(dialog.shown)
+Assert.eq(dialog.title, "优化排版")
+Assert.is_false(dialog.dismissable)
+Assert.is_nil(dialog.on_cancel)
+Assert.is_nil(dialog.on_background)
+Stubs.flush()
+Assert.eq(dialog.updates[1][1], "正在识别章节")
+Assert.eq(dialog.updates[#dialog.updates][2], 2)
+Assert.eq(dialog.updates[#dialog.updates][3], 2)
+Assert.is_true(dialog.closed)
+Assert.eq(Themed.last("list").title, "排版预览")
+os.remove(fresh_txt)
 
 os.remove(txt)
 os.remove(txt .. ".pdf")

@@ -409,6 +409,7 @@ local function start(ui, identity, engine, lang)
         kind = "cache",
         title = T(_("%1（双语）"), identity.book and identity.book.title or ""),
         restartable = true,
+        cancelable = false,
         retryable = function(result) return result.retry == true end,
     }
     local existing = require("workers.tasks").get(spec.key)

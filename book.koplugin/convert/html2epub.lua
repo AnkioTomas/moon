@@ -57,8 +57,9 @@ end
 ---   chapters: { title: string, href: string, xhtml: string, toc?: boolean }[],
 --- }
 ---@param dest string
+---@param progress fun(done: integer, total: integer)|nil 每写完一章
 ---@return boolean|nil, string|nil
-local function writeEpubPackage(opts, dest)
+local function writeEpubPackage(opts, dest, progress)
     local Archiver = require("ffi/archiver")
     local title = opts.title
     local author = opts.author or ""
@@ -162,10 +163,11 @@ local function writeEpubPackage(opts, dest)
         return abort(_("写入 epub 失败"))
     end
 
-    for _i, ch in ipairs(chapters) do
+    for i, ch in ipairs(chapters) do
         if not epub:addFileFromMemory("OEBPS/" .. ch.href, ch.xhtml, mtime) then
             return abort(_("写入章节失败"))
         end
+        if progress then progress(i, #chapters) end
     end
 
     epub:close()
@@ -186,8 +188,9 @@ end
 ---   identifier: string|nil,
 ---   chapters: { title: string, html: string, toc: boolean|nil }[],
 --- }
+---@param progress fun(done: integer, total: integer)|nil 每写完一章
 ---@return boolean|nil, string|nil
-function Html2Epub.write(opts)
+function Html2Epub.write(opts, progress)
     local chapters = {}
     for index, chapter in ipairs(opts.chapters) do
         chapters[index] = {
@@ -203,7 +206,7 @@ function Html2Epub.write(opts)
         language = opts.language,
         identifier = opts.identifier,
         chapters = chapters,
-    }, opts.dest)
+    }, opts.dest, progress)
 end
 
 return Html2Epub

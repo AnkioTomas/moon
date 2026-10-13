@@ -19,9 +19,11 @@ package.preload["utils.perf"] = function() return { now = function() return cloc
 
 local Extract = require("features.reflow.extract")
 
+local function ignore() end
+
 local function run(ui)
     local result, reason
-    local handle = Extract.run(ui, function(text, err) result, reason = text, err end)
+    local handle = Extract.run(ui, function(text, err) result, reason = text, err end, ignore)
     Stubs.flush()
     return result, reason, handle
 end
@@ -117,20 +119,23 @@ do
     -- 页快：一批取完整本
     local ui = rollingUi(3, { "一", "二", "三" })
     local text, err
-    Extract.run(ui, function(t, e) text, err = t, e end)
+    Extract.run(ui, function(t, e) text, err = t, e end, ignore)
     tick()
     Assert.eq(text, "一\n二\n三")
     Assert.is_nil(err)
     Assert.eq(#pending, 0)
 
-    -- 页慢：一页就用完一批，下一批排队
+    -- 页慢：一页就用完一批，下一批排队，每批报一次已取页数
     ui = rollingUi(3, { "一", "二", "三" })
     ui.document.cost = 100
     local callbacks = 0
-    local handle = Extract.run(ui, function() callbacks = callbacks + 1 end)
+    local reported
+    local handle = Extract.run(ui, function() callbacks = callbacks + 1 end,
+        function(step, done, total) reported = { step, done, total } end)
     tick()
     Assert.len(ui.document.calls, 1)
     Assert.eq(#pending, 1)
+    Assert.eq(table.concat(reported, " "), "正在提取文字 1 3")
     handle.cancel()
     tick()
     Assert.len(ui.document.calls, 1)
@@ -143,7 +148,7 @@ do
     ui = rollingUi(3, { "一", "二", "三" })
     ui.document.cost = 100
     local doc = ui.document
-    Extract.run(ui, function(t, e) text, err = t, e end)
+    Extract.run(ui, function(t, e) text, err = t, e end, ignore)
     tick()
     ui.document = { file = "other" }
     function doc:gotoXPointer() error("closed document touched") end

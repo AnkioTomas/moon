@@ -263,7 +263,9 @@ do
         return {
             run = function(worker, opts)
                 job_name = opts.name
-                opts.on_done(worker())
+                opts.on_done(worker(function(value)
+                    if opts.on_progress then opts.on_progress(value) end
+                end))
                 return { cancel = function() cancelled = true end }
             end,
         }
@@ -271,23 +273,45 @@ do
     local Html2Epub = require("convert.html2epub")
     local original_write = Html2Epub.write
     local written, write_err
-    Html2Epub.write = function(opts) written = opts return write_err == nil or nil, write_err end
+    Html2Epub.write = function(opts, progress)
+        written = opts
+        for i = 1, #opts.chapters do progress(i, #opts.chapters) end
+        return write_err == nil or nil, write_err
+    end
 
     local path = os.tmpname()
     local file = assert(io.open(path, "wb"))
     file:write("第一章 开始\nhello\nworld")
     file:close()
     local ok, err
+    local steps = {}
     local handle = Text2Epub.build({ dest = "/tmp/out.epub", source = path, title = "书", reflow = true },
-        function(o, e) ok, err = o, e end)
+        function(o, e) ok, err = o, e end,
+        function(text, done, total) steps[#steps + 1] = text .. " " .. done .. "/" .. total end)
     Assert.eq(job_name, "epub.text")
     Assert.is_true(ok)
     Assert.is_nil(err)
     Assert.eq(written.dest, "/tmp/out.epub")
     Assert.eq(written.chapters[1].title, "第一章 开始")
     Assert.matches(written.chapters[1].html, "hello world", "ASCII 断行合并补空格")
+    Assert.eq(table.concat(steps, ","), "正在识别章节 1/1,正在写入 1/1", "识别、写入两段进度")
     handle.cancel()
     Assert.is_true(cancelled)
+
+    -- chaptersAsync：只回传标题与 toc，正文不出子进程；进度按整数百分比节流
+    local chapters
+    steps = {}
+    local many = {}
+    for i = 1, 300 do many[#many + 1] = "第" .. i .. "章\n正文" end
+    Text2Epub.chaptersAsync({ text = table.concat(many, "\n"), title = "书" },
+        function(list, e) chapters, err = list, e end,
+        function(text, done, total) steps[#steps + 1] = done end)
+    Assert.eq(job_name, "epub.chapters")
+    Assert.len(chapters, 300)
+    Assert.eq(chapters[2].title, "第2章")
+    Assert.is_true(chapters[2].toc)
+    Assert.is_nil(chapters[2].html)
+    Assert.eq(#steps, 101, "300 节只按 0..100% 报 101 次")
 
     -- 给了 text 就不读文件
     os.remove(path)
