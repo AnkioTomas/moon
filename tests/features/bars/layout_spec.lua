@@ -69,6 +69,15 @@ Assert.eq(select(2, Layout.slot("top", "percent")), "left")
 Layout.move("top", "percent", -1)
 Assert.eq(Layout.get("top")[2].id, "percent")
 
+-- 设为第几位：一次跨多位是取出再插入，越界截断到首尾
+local before = Layout.get("top")
+Layout.move("top", before[1].id, 99)
+local after = Layout.get("top")
+Assert.eq(after[#after].id, before[1].id)
+Assert.eq(after[1].id, before[2].id, "其余项整体前移，不是首尾互换")
+Layout.move("top", before[1].id, -99)
+Assert.eq(Layout.get("top")[1].id, before[1].id)
+
 Layout.toggle("top", "clock")
 Assert.is_nil(Layout.slot("top", "clock"))
 

@@ -68,6 +68,8 @@ return {
     ["上移"] = "Move up",
     ["下中"] = "Bottom center",
     ["下移"] = "Move down",
+    ["设为第几位…"] = "Set position…",
+    ["设为第几位"] = "Set position",
     ["下载"] = "Download",
     ["下载 StarDict 字典"] = "Download StarDict dictionaries",
     ["下载中…"] = "Downloading…",

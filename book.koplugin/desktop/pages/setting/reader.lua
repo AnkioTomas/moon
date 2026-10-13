@@ -3,6 +3,7 @@
 --]]
 
 local Sheet = require("ui.themes.widgets.sheet")
+local Position = require("desktop.pages.setting.position")
 local MoonSettings = require("utils.settings")
 local Row = require("ui.themes.widgets.row")
 local _ = require("gettext")
@@ -99,14 +100,16 @@ local function popupConfigureRow(desktop, item)
                 }}
                 if enabled then
                     local function move(delta)
-                        local next_pos = position + delta
-                        order[position], order[next_pos] = order[next_pos], order[position]
+                        local target = math.max(1, math.min(#order, position + delta))
+                        if target == position then return end
+                        table.insert(order, target, table.remove(order, position))
                         reader.reader_popup_button_order = order
                         MoonSettings.save("reader", reader)
                         desktop:updateView()
                     end
                     actions[#actions + 1] = { text = _("上移"), enabled = position > 1, callback = function() move(-1) end }
                     actions[#actions + 1] = { text = _("下移"), enabled = position < #order, callback = function() move(1) end }
+                    actions[#actions + 1] = Position.item(position, #order, move)
                 end
                 actions[#actions + 1] = { text = _("关闭") }
                 Sheet:new{ title = item.title, items = actions }:show()
