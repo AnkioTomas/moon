@@ -23,6 +23,7 @@ package.preload["docsettings"] = function()
                 readSetting = function(_, key) return data[key] end,
                 saveSetting = function(_, key, value) data[key] = value end,
                 flush = function() data.flushed = true end,
+                purge = function() for key in pairs(data) do data[key] = nil end end,
             }
         end,
     }
@@ -60,6 +61,7 @@ local function reader(doc, annotations, settings)
         doc_settings = {
             readSetting = function(_, key) return settings[key] end,
             saveSetting = function(_, key, value) settings[key] = value end,
+            delSetting = function(_, key) settings[key] = nil end,
         },
         annotation = { annotations = annotations, updated = 0 },
     }
@@ -217,6 +219,66 @@ do
     DerivedNote.collect(ui, identity)
     Stubs.flush()
     Assert.eq(saves, 0)
+    ui.rolling = {}
+    table.remove(sidecars[derived].annotations)
+
+    -- 收线途中衍生版被重建（重新排版）：手里的旧 sidecar 不写回
+    local lfs = require("libs/libkoreader-lfs")
+    sidecars[derived].annotations[#sidecars[derived].annotations + 1] =
+        { datetime = "racing", drawer = "lighten", text = "月色" }
+    sidecars[derived].flushed = nil
+    DerivedNote.collect(ui, identity)
+    lfs.touch(derived, os.time() + 60, os.time() + 60)
+    Stubs.flush()
+    Assert.eq(saves, 1, "原书照常存快照")
+    Assert.is_nil(sidecars[derived].flushed)
+end
+
+-- 重新排版：只在衍生版里的划线（基线 false）暂存进新 sidecar，其余清空；下次打开按文字重新落位，仍记 false
+do
+    sidecars[derived] = {
+        doc_pages = 200,
+        last_xpointer = "/old",
+        annotations = {
+            { datetime = "linked", drawer = "lighten", text = "月色", pos0 = "/old" },
+            { datetime = "only-here", drawer = "lighten", text = "moonlight", note = "译文上划的", pageno = 150,
+              pos0 = "/old.1" },
+            { datetime = "bm", text = "书签", pageno = 3 },
+        },
+        book_note_linked = { linked = true, ["only-here"] = false },
+    }
+    DerivedNote.purge(derived)
+    local data = sidecars[derived]
+    Assert.is_nil(data.annotations)
+    Assert.is_nil(data.last_xpointer)
+    Assert.is_nil(data.book_note_linked)
+    Assert.len(data.book_note_orphans, 1)
+    Assert.eq(data.book_note_orphans[1].datetime, "only-here")
+    Assert.eq(data.book_note_orphans[1].total_pages, 200, "比例按旧版页数算")
+
+    -- 没打开过又重排一次：暂存的接着带上
+    DerivedNote.purge(derived)
+    Assert.len(sidecars[derived].book_note_orphans, 1)
+
+    snapshot = {}
+    local annotations = {}
+    local ui = reader(document(derived, {
+        ["moonlight"] = { { start = "/p[10].0", ["end"] = "/p[10].9" }, { start = "/p[74].0", ["end"] = "/p[74].9" } },
+    }), annotations, sidecars[derived])
+    DerivedNote.project(ui, identity)
+    Stubs.flush()
+    Assert.len(annotations, 1)
+    Assert.eq(annotations[1].pos0, "/p[74].0", "150/200 离第 74 页最近")
+    Assert.eq(annotations[1].note, "译文上划的")
+    Assert.eq(sidecars[derived].book_note_linked["only-here"], false, "仍只留在衍生版")
+    Assert.is_nil(sidecars[derived].book_note_orphans)
+
+    -- 没有只在衍生版里的划线：清空后不再写 sidecar
+    sidecars[derived] = { annotations = { { datetime = "x", drawer = "lighten", text = "a" } },
+        book_note_linked = { x = true } }
+    DerivedNote.purge(derived)
+    Assert.is_nil(sidecars[derived].flushed)
+    Assert.is_nil(sidecars[derived].book_note_orphans)
 end
 
 require("ffi/util").purgeDir(root)

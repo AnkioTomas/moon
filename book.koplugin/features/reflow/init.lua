@@ -152,8 +152,8 @@ function Reflow.applyAsync(identity, origin, preview, cb)
             return
         end
         -- 重新排版写回同一路径，sidecar 按路径跟着新文件：旧划线的 xpointer 指向旧结构，连同基线一起清掉，
-        -- 原书的划线下次打开排版版时按文字重新搜进来。
-        require("docsettings"):open(opts.dest):purge()
+        -- 原书的划线、只在排版版里的划线，下次打开排版版时都按文字重新搜进来。
+        DerivedNote.purge(opts.dest)
         local f = assert(io.open(dir .. "/meta.json.part", "wb"))
         assert(f:write(JSON.encode({ origin = origin, file = opts.dest })))
         assert(f:close())
