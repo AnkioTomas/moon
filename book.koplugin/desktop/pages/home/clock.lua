@@ -21,6 +21,7 @@ local DOW = { "星期日", "星期一", "星期二", "星期三", "星期四", "
 ---@field time_widget table|nil
 ---@field detail table|nil
 ---@field extra table|nil
+---@field column table|nil
 ---@field _tick fun()|nil
 local M = {
     id = "clock",
@@ -73,7 +74,8 @@ local function stopTick(self)
 end
 
 --- 居中主行 + 两行辅文的同构排版（时钟、天气共用）。
---- 两行辅文控件写回 view.detail / view.extra，供 paint 原地 setText。
+--- 两行辅文控件写回 view.detail / view.extra，供 paint 原地 setText；
+--- 列写回 view.column：VerticalGroup 缓存子控件宽度，setText 后必须 resetLayout，否则按旧宽度居中会偏。
 ---@param view BookHomeClock|BookHomeWeather 已保存 ctx / opts 的组件实例
 ---@param hero table 主行控件
 ---@param detail string 第一行辅文
@@ -91,6 +93,7 @@ function M.stack(view, hero, detail, extra, foot)
         col[#col + 1] = VerticalSpan:new{ width = Theme.px(t.space.sm) }
         col[#col + 1] = foot
     end
+    view.column = col
     return CenterContainer:new{ dimen = Geom:new{ w = w, h = h }, col }
 end
 
@@ -109,6 +112,7 @@ function M:paint()
     self.time_widget:setText(time)
     self.detail:setText(date)
     self.extra:setText(lunar)
+    self.column:resetLayout()
     self:dirty()
 end
 
@@ -149,6 +153,7 @@ function M:onDestroy()
     self.time_widget = nil
     self.detail = nil
     self.extra = nil
+    self.column = nil
 end
 
 return M

@@ -39,6 +39,7 @@ local FORECAST_CELL = 84
 ---@field temp table|nil
 ---@field detail table|nil
 ---@field extra table|nil
+---@field column table|nil
 ---@field forecast boolean 底部是否带未来预报行（天气预报组件为真）
 ---@field forecast_key string|nil 当前预报行内容签名
 ---@field _tick fun()|nil
@@ -278,6 +279,7 @@ function M:paint()
     self.detail:setText(detail)
     self.extra:setText(extra)
     putHero(self)
+    self.column:resetLayout()
     self:dirty()
 end
 
@@ -342,6 +344,7 @@ function M:onDestroy()
     self.temp = nil
     self.detail = nil
     self.extra = nil
+    self.column = nil
 end
 
 --- 地名必须是英文字母（接口不吃中文）；不合规时提示并返回 true。
