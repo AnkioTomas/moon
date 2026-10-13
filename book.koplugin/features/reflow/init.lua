@@ -18,8 +18,10 @@
 
 require("l10n").apply()
 
+local DerivedNote = require("reader.session.derived_note")
 local JSON = require("json")
 local Text2Epub = require("convert.text2epub")
+local readMeta = DerivedNote.readMeta
 local T = require("ffi/util").template
 local _ = require("gettext")
 
@@ -35,31 +37,10 @@ local function workDir(identity)
     return require("utils.paths").bookWorkDir(identity.stable_id, identity.source_id) .. "/reflow"
 end
 
----@param dir string
----@return { origin: string, file: string }|nil
-local function readMeta(dir)
-    local f = io.open(dir .. "/meta.json", "rb")
-    if not f then return nil end
-    local data = f:read("*a")
-    f:close()
-    return JSON.decode(data)
-end
-
 ---@param path string
 ---@return boolean
 local function isFile(path)
     return require("libs/libkoreader-lfs").attributes(path, "mode") == "file"
-end
-
---- 整本书、且当前文档能取出文字（流式文档，或有文字层接口的 PDF/DjVu）才能排；
---- 章节源的书、属主源已卸载（第三方源插件）的不做。
----@param ui table
----@return boolean
-function Reflow.available(ui)
-    local session = require("reader.session").current()
-    local source = session and session.identity.source
-    if source == nil or source.type == "chapter" then return false end
-    return ui.rolling ~= nil or ui.document.getPageTextBoxes ~= nil
 end
 
 --- 正在读排版版（面板按钮高亮）。
@@ -68,6 +49,19 @@ end
 function Reflow.active(ui)
     local meta = readMeta(workDir(require("reader.session").current().identity))
     return meta ~= nil and meta.file == ui.document.file
+end
+
+--- 整本书、且当前文档能取出文字（流式文档，或有文字层接口的 PDF/DjVu）才能排；
+--- 章节源的书、属主源已卸载（第三方源插件）的不做。
+--- 读别的衍生版（如双语版）时不做：衍生版的划线只会和它的原书收敛，再套一层就回不到笔记库。
+---@param ui table
+---@return boolean
+function Reflow.available(ui)
+    local session = require("reader.session").current()
+    local source = session and session.identity.source
+    if source == nil or source.type == "chapter" then return false end
+    if DerivedNote.originOf(ui.document.file) and not Reflow.active(ui) then return false end
+    return ui.rolling ~= nil or ui.document.getPageTextBoxes ~= nil
 end
 
 ---@param parsed { chapters: { title: string, toc: boolean|nil }[] }
@@ -140,6 +134,9 @@ function Reflow.applyAsync(identity, origin, text, cb)
             cb(nil, err or _("排版失败"))
             return
         end
+        -- 重新排版写回同一路径，sidecar 按路径跟着新文件：旧划线的 xpointer 指向旧结构，连同基线一起清掉，
+        -- 原书的划线下次打开排版版时按文字重新搜进来。
+        require("docsettings"):open(opts.dest):purge()
         local f = assert(io.open(dir .. "/meta.json.part", "wb"))
         assert(f:write(JSON.encode({ origin = origin, file = opts.dest })))
         assert(f:close())

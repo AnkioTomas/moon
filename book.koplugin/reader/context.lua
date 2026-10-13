@@ -130,6 +130,32 @@ local function chapterStart(ui, page)
     return toc:getPreviousChapter(page) or 1
 end
 
+--- [start_page, end_page) 区间的全部正文，不截断；区间为空返回空串。
+---@param ui table
+---@param start_page integer
+---@param end_page integer
+---@return string
+function Context.pagesText(ui, start_page, end_page)
+    if end_page <= start_page then
+        return ""
+    end
+    local document = ui.document
+    -- CRE 没有逐页取字接口，只能按两页起点的 xpointer 取区间文本。
+    if ui.rolling and document.getPageXPointer then
+        local ok, text = pcall(function()
+            return document:getTextFromXPointers(
+                document:getPageXPointer(start_page), document:getPageXPointer(end_page))
+        end)
+        return ok and Text.trim(Text.normalizeNewlines(text)) or ""
+    end
+    local parts = {}
+    for page = start_page, end_page - 1 do
+        local text = pageText(ui, page)
+        if text ~= "" then parts[#parts + 1] = text end
+    end
+    return table.concat(parts, "\n\n")
+end
+
 --- 本章开头到当前页之前的正文（不含当前页），超过 limit 字节保留末尾。
 ---@param ui table
 ---@param end_page integer
@@ -141,15 +167,8 @@ function Context.priorText(ui, end_page, limit)
     if end_page <= start_page then
         return ""
     end
-    local document = ui.document
-    -- CRE 没有逐页取字接口，只能按两页起点的 xpointer 取区间文本。
-    if ui.rolling and document.getPageXPointer then
-        local ok, text = pcall(function()
-            return document:getTextFromXPointers(
-                document:getPageXPointer(start_page), document:getPageXPointer(end_page))
-        end)
-        text = ok and Text.trim(Text.normalizeNewlines(text)) or ""
-        return tailUtf8(text, limit)
+    if ui.rolling and ui.document.getPageXPointer then
+        return tailUtf8(Context.pagesText(ui, start_page, end_page), limit)
     end
     local parts = {}
     local total = 0
@@ -254,14 +273,32 @@ local function sentenceEnd(s, init)
     return skipClosers(s, stop_at)
 end
 
+--- needle 在 s 里不重叠出现的次数。
+---@param s string
+---@param needle string
+---@return integer
+local function countPlain(s, needle)
+    local n, init = 0, 1
+    while true do
+        local _first, last = s:find(needle, init, true)
+        if not last then return n end
+        n, init = n + 1, last + 1
+    end
+end
+
 --- 段落中包含选中文字的整句；段落里找不到选中文字时返回选中文字本身。
 ---@param paragraph string
 ---@param selected string
+---@param skip integer|nil 选区之前段落里同样文字已出现的次数（同一个词在段里出现多次时定位到选中的那一处）
 ---@return string
-function Context.sentence(paragraph, selected)
+function Context.sentence(paragraph, selected, skip)
+    if selected == "" then return selected end
     local first, last = paragraph:find(selected, 1, true)
-    if not first or selected == "" then
-        return selected
+    if not first then return selected end
+    for _idx = 1, skip or 0 do
+        local next_first, next_last = paragraph:find(selected, last + 1, true)
+        if not next_first then break end
+        first, last = next_first, next_last
     end
     local start = sentenceStart(paragraph, first)
     return Text.trim(paragraph:sub(start, sentenceEnd(paragraph, last + 1)))
@@ -273,15 +310,16 @@ end
 ---@return { text: string, sentence: string, paragraph: string }
 function Context.selection(ui, selected)
     local text = Text.trim(selected.text)
-    local paragraph = ""
+    local paragraph, skip = "", 0
     local pos0 = selected.pos0
-    if ui.rolling and type(pos0) == "string" then
-        local block = ui.document:getTextFromXPointer(Context.blockXPointer(pos0))
-        paragraph = Text.trim(Text.normalizeNewlines(block or ""))
+    if ui.rolling and type(pos0) == "string" and text ~= "" then
+        local block = Context.blockXPointer(pos0)
+        paragraph = Text.trim(Text.normalizeNewlines(ui.document:getTextFromXPointer(block) or ""))
+        skip = countPlain(ui.document:getTextFromXPointers(block, pos0) or "", text)
     end
     return {
         text = text,
-        sentence = Context.sentence(paragraph, text),
+        sentence = Context.sentence(paragraph, text, skip),
         paragraph = Text.truncateUtf8(paragraph, PARAGRAPH_LIMIT),
     }
 end

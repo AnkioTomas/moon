@@ -123,7 +123,7 @@ end
 local bookmarked, toggles = false, 0
 local ui = {
     dialog = {},
-    document = {},
+    document = { file = "/books/page-spec.epub" },
     highlight = { _highlight_buttons = {}, addToHighlightDialog = function() end },
     toc = { onShowToc = function() end },
     bookmark = {

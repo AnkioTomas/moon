@@ -91,6 +91,7 @@ do
     Assert.is_nil(DerivedNote.locate(doc, "不存在", 0.5))
     Assert.is_nil(DerivedNote.locate(doc, "他说今天\n没有结尾", 0.5), "结尾搜不到就算没找到")
     Assert.is_nil(DerivedNote.locate(doc, "  ", 0.5))
+    Assert.eq(DerivedNote.locate(doc, "月色", nil), "/p[10].0", "比例未知取第一个命中")
 end
 
 local identity = { source_id = "local", stable_id = "/books/derived-note.epub" }
@@ -118,6 +119,7 @@ do
         { datetime = "edited", drawer = "lighten", text = "旧", note = "原书改的", datetime_updated = "2026-02" },
         { datetime = "deleted-here", drawer = "lighten", text = "删" },
         { datetime = "bookmark", text = "书签", pageno = 3 },
+        { datetime = "zero", drawer = "lighten", text = "月色", pageno = 80, total_pages = 0 },
     }
     local annotations = {
         { datetime = "edited", drawer = "lighten", text = "旧", note = "旧笔记", datetime_updated = "2026-01" },
@@ -131,10 +133,11 @@ do
     }), annotations, settings)
     DerivedNote.project(ui, identity)
     Stubs.flush()
-    Assert.eq(datetimes(annotations), "edited,mine,new")
+    Assert.eq(datetimes(annotations), "edited,mine,new,zero")
     Assert.eq(annotations[1].note, "原书改的")
     local placed = annotations[3]
     Assert.eq(placed.pos0, "/p[78].0")
+    Assert.eq(annotations[4].pos0, "/p[10].0", "total_pages 为 0 不能拿页码当比例，退回第一个命中")
     Assert.eq(placed.page, "/p[78].0")
     Assert.eq(placed.chapter, "第一章")
     local linked = settings.book_note_linked

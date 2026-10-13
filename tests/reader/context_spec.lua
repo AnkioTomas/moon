@@ -99,22 +99,33 @@ Assert.eq(Context.sentence("没有标点的一段话", "标点"), "没有标点�
 Assert.eq(Context.sentence(para, "不在段落里"), "不在段落里", "段落里找不到就退回选中文字")
 Assert.eq(Context.sentence("", "月色"), "月色")
 
--- 选区：滚动文档按 pos0 取所在段落；分页文档没有段落
-local asked
+-- 同一个词在段里出现多次：skip 定位到第 skip+1 处；skip 超出时停在最后一处
+local repeated = "月色很好。他望着那片月色，久久不语。"
+Assert.eq(Context.sentence(repeated, "月色"), "月色很好。")
+Assert.eq(Context.sentence(repeated, "月色", 1), "他望着那片月色，久久不语。")
+Assert.eq(Context.sentence(repeated, "月色", 5), "他望着那片月色，久久不语。")
+
+-- 选区：滚动文档按 pos0 取所在段落，段首到 pos0 的文字决定是段里第几处；分页文档没有段落
+local asked, prefix_range
 local cre_sel = {
     rolling = {},
     document = {
         getTextFromXPointer = function(document, xp)
             asked = xp
-            return "  前一句。他望着那片月色，久久不语。后一句。  "
+            return "  月色很好。他望着那片月色，久久不语。后一句。  "
+        end,
+        getTextFromXPointers = function(document, from, to)
+            prefix_range = from .. "-" .. to
+            return "月色很好。他望着那片"
         end,
     },
 }
 local sel = Context.selection(cre_sel, { text = " 月色 ", pos0 = "/body/p[4]/i/text().6" })
 Assert.eq(asked, "/body/p[4]")
+Assert.eq(prefix_range, "/body/p[4]-/body/p[4]/i/text().6")
 Assert.eq(sel.text, "月色")
-Assert.eq(sel.sentence, "他望着那片月色，久久不语。")
-Assert.eq(sel.paragraph, "前一句。他望着那片月色，久久不语。后一句。")
+Assert.eq(sel.sentence, "他望着那片月色，久久不语。", "选的是第二处月色")
+Assert.eq(sel.paragraph, "月色很好。他望着那片月色，久久不语。后一句。")
 
 sel = Context.selection({ document = {} }, { text = "月色", pos0 = { page = 3 } })
 Assert.eq(sel.sentence, "月色")

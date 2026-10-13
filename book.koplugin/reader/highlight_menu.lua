@@ -174,6 +174,22 @@ function HighlightMenu.ensureWrapped(highlight)
     end
 end
 
+--- 弹窗时已注册的按钮就是全部：卸掉的插件、删掉的补丁不再留在设置页。显隐与顺序设置不动，装回来照旧生效。
+---@param highlight table ReaderHighlight
+local function forgetMissing(highlight)
+    local present = {}
+    for idx in pairs(highlight._highlight_buttons) do present[keyOf(idx)] = true end
+    local reader = MoonSettings.get("reader")
+    local changed = false
+    for key in pairs(reader.reader_popup_seen) do
+        if not present[key] then
+            reader.reader_popup_seen[key] = nil
+            changed = true
+        end
+    end
+    if changed then MoonSettings.save("reader") end
+end
+
 --- 在 ReaderHighlight 类上挂一次钩子，弹窗前补齐按钮门控。
 --- 必须在弹窗时机而非安装时机包装，因为别的插件会晚注册按钮；类级标记保证只打一次补丁。
 local function patchShowMenu()
@@ -190,6 +206,7 @@ local function patchShowMenu()
         if not self.selected_text then
             return
         end
+        forgetMissing(self)
         local ButtonDialog = require("ui/widget/buttondialog")
         local UIManager = require("ui/uimanager")
         local buttons = { {} }
