@@ -23,9 +23,12 @@ function Tap.wrap(widget, callback)
     tap.ges_events = {
         TapThemeArea = {
             GestureRange:new{ ges = "tap", range = function() return tap.dimen end },
+            args = tap,
         },
     }
-    function tap:onTapThemeArea(_arg, ges)
+    -- handleEvent 先下发给子控件：外层点击区发出的事件会经过嵌套的点击区，只认自己发出的。
+    function tap:onTapThemeArea(owner, ges)
+        if owner ~= nil and owner ~= self then return end
         callback(ges)
         return true
     end
