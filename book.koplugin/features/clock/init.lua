@@ -49,6 +49,8 @@ local SYSTEM_UTC = utcLabel(os.date("%z") --[[@as string]])
 local QUERY_TIMEOUT = 5
 --- 偏差小于这个秒数不改系统时间。
 local TOLERANCE = 1
+--- 自动校时的间隔：进桌面很频繁（每次从阅读页回来、每次唤醒），校一次管半天。
+local AUTO_INTERVAL = 6 * 3600
 
 --- 时区选项：tz 是 POSIX TZ 串，"" = 跟随系统（显示名见 zoneText）。同一偏移只列一个，城市名帮用户认。
 ---@type { tz: string, text: string|nil }[]
@@ -165,9 +167,13 @@ function Clock.sync(cb)
     return true
 end
 
---- 进入桌面时静默校时；没联网等联网再补。
+--- 进入桌面时静默校时；没联网等联网再补。上次成功在 AUTO_INTERVAL 内就跳过（abs：时间被往回改过也算）。
 function Clock.autoSync()
-    if not conf().ntp_auto or not Clock.canSetTime() then return end
+    local settings = conf()
+    if not settings.ntp_auto or math.abs(os.time() - settings.ntp_last) < AUTO_INTERVAL
+            or not Clock.canSetTime() then
+        return
+    end
     if not require("ui/network/manager"):isConnected() then
         Clock._pending = true
         return
