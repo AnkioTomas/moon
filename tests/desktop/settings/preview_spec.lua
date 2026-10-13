@@ -173,7 +173,7 @@ Assert.eq(preview_h, 40)
 Assert.eq(top.child.kind, "row")
 Assert.eq(top.child.left[1].sample, "12:34")
 Assert.is_nil(top.child.left[1].icon, "时钟不画图标")
-Assert.eq(#top.child.right, 5, "内存已关")
+Assert.eq(#top.child.right, 6, "内存已关")
 
 local Lockscreen = require("features.lockscreen.page")
 local off = Lockscreen.preview(600)

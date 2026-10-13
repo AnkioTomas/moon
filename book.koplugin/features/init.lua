@@ -81,6 +81,7 @@ Features.list = {
     "ime",
     "remote",
     "update",
+    "bluetooth",
 }
 
 ---@param hook string

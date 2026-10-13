@@ -1,5 +1,5 @@
 --[[--
-桌面顶栏：左时钟 / 源名，右内存 / 后台任务 / 存储 / Wi‑Fi / 亮度 / 电量。
+桌面顶栏：左时钟 / 源名，右内存 / 后台任务 / 存储 / Wi‑Fi / 蓝牙 / 亮度 / 电量。
 
   +---------------------------------------------------+
   | 12:00  [源] 源名          内存  任务  存储  Wi‑Fi  ☀  🔋 |
@@ -128,6 +128,13 @@ local ITEMS = {
         read = function()
             return nil, require("ui/network/manager"):isWifiOn() and "wifi" or "wifi_off"
         end,
+    },
+    {
+        id = "bluetooth",
+        max_ratio = 0.25,
+        watch = function(cb) return require("features.bluetooth").watch(cb) end,
+        read = function() return require("features.bluetooth").topbar() end,
+        tap = function() require("features.bluetooth.devices").show() end,
     },
     {
         id = "brightness",
@@ -305,10 +312,11 @@ end
 --- 分钟对齐的心跳：refresh 每次重读全部项，一个定时器就够。
 ---@param self BookTopBar
 local function schedule(self)
-    local function tick()
+    local tick
+    tick = require("ui.guard").wrap("topbar tick", function()
         self:refresh()
         UIManager:scheduleIn(untilNextMinute(), tick)
-    end
+    end)
     UIManager:scheduleIn(untilNextMinute(), tick)
     self.handles[#self.handles + 1] = { cancel = function() UIManager:unschedule(tick) end }
 end

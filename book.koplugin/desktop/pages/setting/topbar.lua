@@ -17,6 +17,7 @@ local ITEMS = {
     { id = "cache", label = _("后台任务"), icon = "download", sample = "1/3", bar_icon = "download" },
     { id = "storage", label = _("剩余存储"), icon = "hard_drive", sample = "2.1G", bar_icon = "hard_drive" },
     { id = "wifi", label = _("Wi-Fi"), icon = "wifi", bar_icon = "wifi" },
+    { id = "bluetooth", label = _("蓝牙"), icon = "bluetooth", bar_icon = "bluetooth" },
     { id = "brightness", label = _("亮度"), icon = "brightness_6", sample = "40%", bar_icon = "brightness_6" },
     { id = "battery", label = _("电池"), icon = "battery_android_full", sample = "85%", bar_icon = "battery_android_full" },
 }
