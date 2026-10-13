@@ -303,7 +303,7 @@ function Fetch.lookupWord(ui, identity, word, cb)
         { role = "user", content = Prompts.singleWord(
             word, title, author, ctx.current_page, ctx.prior_text, existing, storySoFar(identity)) },
     }
-    return AI.jsonExtract(messages, { max_tokens = 800 }, function(decoded, err)
+    return AI.jsonExtract(messages, { max_tokens = 4000 }, function(decoded, err)
         if not decoded then cb(nil, err); return end
         if decoded.is_valid == false then
             cb(nil, Text.trim(decoded.error_message) ~= "" and decoded.error_message or "not an entity")

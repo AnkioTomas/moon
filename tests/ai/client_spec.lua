@@ -25,6 +25,8 @@ package.preload["http.request"] = function()
             local reply = table.remove(replies, 1)
             if reply == "hold" then
                 sent.cb = cb
+            elseif reply == "length" then
+                cb('{"choices":[{"finish_reason":"length","message":{"content":"","reasoning_content":"..."}}]}', nil, {})
             elseif reply then
                 cb(nil, "HTTP " .. reply, { code = reply, body = '{"error":{"message":"Unrecognized request argument"}}' })
             else
@@ -72,6 +74,29 @@ posts = {}
 Client.chat({ { role = "user", content = "hello" } }, nil, function() end)
 Assert.len(posts, 1)
 Assert.is_nil(posts[1].payload.chat_template_kwargs)
+
+-- 推理把上限吃光、正文为空：按 4 倍上限重试一次
+replies, posts = { "length" }, {}
+Client.chat({ { role = "user", content = "hello" } }, { max_tokens = 800 }, function(value, err)
+    content, failure = value, err
+end)
+Assert.len(posts, 2)
+Assert.eq(posts[1].payload.max_tokens, 800)
+Assert.eq(posts[2].payload.max_tokens, 3200)
+Assert.eq(content, "ok")
+Assert.is_nil(failure)
+replies, posts = { "length", "length" }, {}
+Client.chat({ { role = "user", content = "hello" } }, nil, function(value, err) content, failure = value, err end)
+Assert.len(posts, 2, "只重试一次")
+Assert.eq(posts[2].payload.max_tokens, 8000)
+Assert.is_nil(content)
+Assert.eq(failure, "response truncated (max_tokens too low)")
+replies, posts = { "length", "hold" }, {}
+local retry_handle = Client.chat({ { role = "user", content = "hello" } }, nil,
+    function() error("cancelled retry must not call back") end)
+retry_handle:cancel()
+Assert.len(posts, 2)
+Assert.is_true(posts[2].cancelled, "取消的是重试那条")
 
 -- 其它失败照常报错，不重发；取消后不再回调
 settings.ai_endpoint = "https://other.test/v1"
