@@ -79,6 +79,19 @@ list = List:new{ items = items(3), centered = true }
 Assert.is_true(list.mask)
 Assert.eq(list[1]:getSize().w, 480)
 
+-- 贴着锚点弹出：内容宽取 inner_width（不超过标准宽），每页行数只按锚点上方空间算，面板在锚点之上。
+local wide = List:new{ items = items(40), centered = true }
+local anchor = { x = 400, y = 600, w = 100, h = 200 }
+list = List:new{ items = items(40), centered = true, anchor = anchor, inner_width = 200 }
+Assert.eq(list.row_w, 200)
+Assert.is_true(list.per_page < wide.per_page, "锚点上方空间小于整屏")
+Assert.is_true(list.per_page >= 1)
+Assert.is_true(list.panel_y + list[1]:getSize().h <= anchor.y, "面板在锚点上方")
+list = List:new{ items = items(3), centered = true, inner_width = 9999 }
+Assert.eq(list[1]:getSize().w, 480, "inner_width 不超过标准弹窗宽")
+list = List:new{ items = { { text = "a", chevron = true }, { text = "b" } }, centered = true }
+Assert.len(Kit.find(list, function(w) return w.text == "chevron_right" or w.icon == "chevron_right" end), 1)
+
 -- 居中分页：末页不满也补成整页高，面板不跳；变矮（换成少项）时连底下窗口一起重画，
 -- 否则网纹遮罩下露出旧面板。
 list = List:new{ items = items(1), centered = true }

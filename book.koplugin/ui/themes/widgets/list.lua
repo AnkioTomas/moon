@@ -13,10 +13,11 @@
   +-------------------------------+
 
 subtitle 只在全屏标题栏里显示；居中面板点外面关，全屏点右上角或返回键关；左右滑翻页。
+居中面板可给 anchor 矩形（贴着按钮弹出，每页行数按锚点上下较大一侧的空间算）与 inner_width（内容宽上限，物理像素）。
 左上角按钮：left_icon + left_callback（仅全屏）。
 items：{ text, value, icon, mandatory（右侧状态字）, widget（右侧控件，优先于 mandatory；
          可给函数，翻到该页才构建）, image / image_w / image_h（缩略图，逻辑像素）,
-         enabled, checked, callback, keep_open }
+         enabled, checked, callback, keep_open, chevron（画右箭头，如进入子菜单） }
   checked 为 nil 的项不画选择标记；非 nil 时单选画 radio、多选画 checkbox。
   callback：单选时代替 on_select 调 callback()；多选时先 callback(checked, item) 再 on_toggle。
 单选：点按即关窗（keep_open 的项不关），再 callback() 或 on_select(value, item)；
@@ -61,6 +62,7 @@ local TitleBar = require("ui.themes.widgets.titlebar")
 ---@field left_callback fun()|nil
 ---@field tabs BookThemeListTabs|nil
 ---@field current any 单选当前值；非 nil 时代替各项 checked
+---@field inner_width number|nil 居中面板内容宽上限（物理像素）；缺省标准弹窗宽
 ---@field on_select fun(value: any, item: table)|nil
 ---@field on_toggle fun(value: any, checked: boolean, item: table)|nil
 ---@field page integer
@@ -89,10 +91,21 @@ function List:init()
     local chrome = Theme.px(t.control.height)                      -- 翻页条
         + (self.centered and pad * 4 + Theme.px(t.font.title * 2)   -- 面板边距 + 标题
             or TitleBar.height() + (self.tabs and Tabbar.height() or 0))
-    self.per_page = math.max(1, math.floor((self.dimen.h - chrome) / self.pitch))
+    local room = self.dimen.h
+    local a = self.anchor
+    if type(a) == "table" then
+        room = math.max(a.y, self.dimen.h - a.y - a.h) - Theme.px(t.space.sm) * 2
+    end
+    self.per_page = math.max(1, math.floor((room - chrome) / self.pitch))
     self.page = self:checkedPage()
     self.ges_events.SwipeList = { GestureRange:new{ ges = "swipe", range = self.dimen } }
     self:rebuild()
+end
+
+--- 居中面板内容宽：标准弹窗宽，给了 inner_width 时取较小者。
+---@return number 物理像素
+function List:innerWidth()
+    return math.min(self.inner_width or math.huge, Modal.innerWidth(self))
 end
 
 ---@param _arg any
@@ -186,7 +199,7 @@ function List:rebuild()
             image_h = item.image_h,
             title = item.text,
             status = status or item.mandatory,
-            chevron = false,
+            chevron = item.chevron == true,
             selected = not self.multi and self:checked(item) == true,
             enabled = item.enabled,
             callback = function() self:choose(item) end,

@@ -202,7 +202,7 @@ local desktop = {
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 24)
+Assert.len(built_rows, 25)
 Assert.eq(table.concat(section_titles, ","), "书库,桌面,阅读,系统,维护")
 
 local expected = {
@@ -211,6 +211,7 @@ local expected = {
     { title = "界面显示", id = "display" },
     { title = "桌面顶栏", id = "topbar" },
     { title = "桌面快捷面板", id = "feature:panel:desktop" },
+    { title = "底栏拓展", id = "feature:extensions:main" },
     { title = "锁屏壁纸", id = "feature:lockscreen:main" },
     { title = "阅读行为", id = "reader_behavior" },
     { title = "划词与查询", id = "lookup" },
