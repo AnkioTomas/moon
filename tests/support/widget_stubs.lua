@@ -334,6 +334,7 @@ function Kit.install(theme)
         ["ui/widget/container/leftcontainer"] = aligned("left"),
         ["ui/widget/container/rightcontainer"] = aligned("right"),
         ["ui/widget/container/framecontainer"] = Container,
+        ["ui/widget/container/topcontainer"] = Container,
         ["ui/widget/overlapgroup"] = Container,
         ["ui/widget/verticalgroup"] = group(true),
         ["ui/widget/horizontalgroup"] = group(false),

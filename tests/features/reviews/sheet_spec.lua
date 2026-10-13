@@ -6,7 +6,9 @@ Stubs.install()
 require("support.modal_stub").install()
 package.preload["l10n"] = function() return { apply = function() end } end
 for _idx, name in ipairs({ "ui.themes", "ui.themes.widgets.box", "ui.themes.widgets.icon",
-        "ui.themes.widgets.pager", "ui.themes.widgets.text", "ui.themes.widgets.titlebar" }) do
+        "ui.themes.widgets.pager", "ui.themes.widgets.text", "ui.themes.widgets.titlebar",
+        "ui/gesturerange", "ui/widget/horizontalgroup", "ui/widget/horizontalspan",
+        "ui/widget/verticalgroup" }) do
     package.preload[name] = function() return {} end
 end
 
