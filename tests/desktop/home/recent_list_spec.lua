@@ -12,9 +12,11 @@ local Widget = require("ui/widget/widget")
 
 Kit.sections.home = {}
 local covers, opened = {}, {}
+package.preload["ui.widgets.book"] = function()
+    return { captionExtra = function(show_title) return show_title ~= false and 26 or 0 end }
+end
 package.preload["ui.widgets.cover"] = function()
     return {
-        titleExtra = function() return 26 end,
         gridCoverMaxH = function() return 200 end,
         denseCoverMetrics = function(_, _, opts)
             return 100, 100, 150, opts.min_cols, 8, 10, 150 + opts.title_extra

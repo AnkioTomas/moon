@@ -174,6 +174,14 @@ do
     Catalog.listBooks("local", { unseries = true })
     Assert.is_true(calls[1].sql:find("b.series IS NULL OR b.series=''", 1, true) ~= nil)
     calls = {}
+    Catalog.listBooks("local", { unauthor = true, author = "鲁迅" })
+    Assert.is_true(calls[1].sql:find("b.authors IS NULL OR b.authors=''", 1, true) ~= nil)
+    Assert.is_nil(calls[1].sql:find("b.authors=?", 1, true), "空桶优先于组名")
+    calls = {}
+    Catalog.listBooks("local", { author = "鲁迅" })
+    Assert.is_true(calls[1].sql:find("AND b.authors=?", 1, true) ~= nil)
+    Assert.eq(calls[1].args[2], "鲁迅")
+    calls = {}
     Catalog.listBooks({ "local", "wechat" }, { source_id = "wechat" })
     Assert.is_true(calls[1].sql:find("b.source_id IN (?,?)", 1, true) ~= nil)
     Assert.is_true(calls[1].sql:find("AND b.source_id=?", 1, true) ~= nil)
