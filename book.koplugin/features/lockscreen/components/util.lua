@@ -17,6 +17,8 @@ local U = {}
 U.MUTED = Blitbuffer.COLOR_GRAY_3
 U.DIM = Blitbuffer.COLOR_GRAY_4
 U.RULE = Blitbuffer.COLOR_GRAY_5
+-- 进度条 / 柱图的空轨道，同主题 progress.track（0xDD）。COLOR_GRAY_N 是 0xNN，数字越小越黑。
+U.TRACK = Blitbuffer.COLOR_GRAY_D
 U.FALLBACK_MESSAGE = "读书不觉已春深，一寸光阴一寸金。"
 --- 插件根目录下的 logo.png（账单 / 票根页眉共用）。
 U.LOGO_PATH = (debug.getinfo(1, "S").source:match("^@(.+)/features/lockscreen/components/[^/]+$") or "") .. "/logo.png"
@@ -96,8 +98,6 @@ end
 ---@return table[] blocks
 ---@return number bottom 最后一行之下的 y
 function U.bookHead(book, subtitle, x, y, width)
-    local measure = require("features.lockscreen.render").measureText
-    local Title = require("features.lockscreen.title")
     local lines = {
         { text = book.title, size = 18, min = 15, bold = true },
         { text = book.authors, size = 14, min = 13, color = U.MUTED },
@@ -106,16 +106,32 @@ function U.bookHead(book, subtitle, x, y, width)
     local blocks = {}
     for _idx, line in ipairs(lines) do
         if line.text and line.text ~= "" then
-            local function fit(text, w, size) return measure(text, w, size, line.bold) end
-            local text, size = Title.fitSingleLine(line.text, width, line.size, line.min, fit)
-            blocks[#blocks + 1] = {
-                text = text, x = x, y = y, width = width,
-                size = size, bold = line.bold, box = false, color = line.color,
-            }
-            y = y + fit(text, width, size) + 4
+            local block, h = U.fitLine(line.text, x, y, width, line.size, line.min, line.bold)
+            block.color = line.color
+            blocks[#blocks + 1] = block
+            y = y + h + 4
         end
     end
     return blocks, y
+end
+
+--- 单行文字块：放不下先缩字号（不小于 min_size），再截断；返回块与实测行高。
+---@param text string
+---@param x number
+---@param y number
+---@param width number
+---@param size number
+---@param min_size number
+---@param bold boolean|nil
+---@return table block
+---@return number h
+function U.fitLine(text, x, y, width, size, min_size, bold)
+    local measure = require("features.lockscreen.render").measureText
+    local function fit(s, w, sz) return measure(s, w, sz, bold) end
+    local fitted, fitted_size = require("features.lockscreen.title").fitSingleLine(text, width, size, min_size, fit)
+    return {
+        text = fitted, x = x, y = y, width = width, size = fitted_size, bold = bold, box = false,
+    }, fit(fitted, width, fitted_size)
 end
 
 --- 返回统一的进度百分比和页数文案。
@@ -232,13 +248,22 @@ function U.coverBlock(book, x, y, w, h)
     return { kind = "panel", x = x, y = y, width = w, height = h, color = U.RULE }
 end
 
---- 横向进度：灰轨 + 黑色填充。高度固定 8。
+--- 百分比文案：不足 10% 保留一位小数，免得刚开读一直显示 0%。
+---@param percent number|nil
+---@return string
+function U.percentText(percent)
+    local pct = math.max(0, math.min(100, tonumber(percent) or 0))
+    local text = pct >= 10 and tostring(math.floor(pct)) or string.format("%.1f", pct):gsub("%.0$", "")
+    return text .. "%"
+end
+
+--- 横向进度：浅灰轨 + 黑色填充。高度固定 6。
 ---@return table[], number
 function U.progressBlocks(x, y, width, percent)
-    local h = 8
+    local h = 6
     local pct = math.max(0, math.min(100, tonumber(percent) or 0))
     local blocks = {
-        { kind = "rule", x = x, y = y, width = width, height = h, color = U.RULE },
+        { kind = "rule", x = x, y = y, width = width, height = h, color = U.TRACK },
     }
     local fill = math.floor(width * pct / 100)
     if fill > 0 then
