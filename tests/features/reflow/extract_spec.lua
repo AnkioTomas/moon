@@ -1,0 +1,135 @@
+--[[--
+从打开的文档逐页取文字：流式 / 固定版式、出错、空文本、取消、中途关书。
+
+@module tests.features.reflow.extract_spec
+--]]
+
+local Assert = require("support.assert")
+local Stubs = require("support.stubs")
+
+Stubs.install()
+Stubs.reset()
+package.preload["l10n"] = function() return { apply = function() end } end
+package.preload["device"] = function()
+    return { screen = { getWidth = function() return 600 end, getHeight = function() return 800 end } }
+end
+
+local Extract = require("features.reflow.extract")
+
+local function run(ui)
+    local result, reason
+    local handle = Extract.run(ui, function(text, err) result, reason = text, err end)
+    Stubs.flush()
+    return result, reason, handle
+end
+
+local function rollingUi(count, pages)
+    local doc = { at = "reading", calls = {} }
+    function doc:getPageCount() return count end
+    function doc:getXPointer() return self.at end
+    function doc:gotoXPointer(xp) self.at = xp end
+    function doc:getPageXPointer(page) return "p" .. page end
+    function doc:getTextFromXPointers(pos0, pos1)
+        self.calls[#self.calls + 1] = pos0 .. ">" .. pos1
+        return pages[tonumber(pos0:sub(2))]
+    end
+    function doc:gotoPage(page) self.at = "page" .. page end
+    function doc:getTextFromPositions(pos0, pos1, no_draw)
+        self.calls[#self.calls + 1] = string.format("screen:%d,%d,%d,%d:%s", pos0.x, pos0.y, pos1.x, pos1.y, tostring(no_draw))
+        return { text = pages[count] }
+    end
+    return { document = doc, rolling = {} }
+end
+
+local function pagingUi(lines_by_page)
+    local doc = {}
+    function doc:getPageCount() return #lines_by_page end
+    function doc:getPageTextBoxes(page)
+        local lines = {}
+        for _line_idx, words in ipairs(lines_by_page[page]) do
+            local line = {}
+            for _word_idx, word in ipairs(words) do line[#line + 1] = { word = word } end
+            lines[#lines + 1] = line
+        end
+        return lines
+    end
+    return { document = doc, paging = {} }
+end
+
+-- 流式：前几页按相邻 xpointer 取，末页按屏幕范围取；相同的边界行只留一份；取完放回阅读位置
+do
+    local ui = rollingUi(3, { "第一行\n重复行", "重复行\n第二行", "第三行" })
+    local text, err = run(ui)
+    Assert.is_nil(err)
+    Assert.eq(text, "第一行\n重复行\n第二行\n第三行")
+    Assert.eq(table.concat(ui.document.calls, ","), "p1>p2,p2>p3,screen:0,0,600,800:true")
+    Assert.eq(ui.document.at, "reading")
+end
+
+-- 固定版式：按行拼词，相邻两个 ASCII 词之间补空格，中文不加
+do
+    local text, err = run(pagingUi({
+        { { "Hello", "world," }, { "第一", "章" } },
+        { { "a", "b" } },
+    }))
+    Assert.is_nil(err)
+    Assert.eq(text, "Hello world,\n第一章\na b")
+end
+
+-- 坏页抛错：整次作废，带上原因
+do
+    local ui = rollingUi(2, { "正文", "结尾" })
+    function ui.document:getTextFromXPointers() error("bad page") end
+    local text, err = run(ui)
+    Assert.is_nil(text)
+    Assert.matches(err, "无法提取文字")
+    Assert.matches(err, "bad page")
+    Assert.eq(ui.document.at, "reading")
+end
+
+-- 没有页、只有空白（扫描版 PDF 没有文字层）都算失败
+do
+    local text, err = run(rollingUi(0, {}))
+    Assert.is_nil(text)
+    Assert.eq(err, "文档没有可提取的文字")
+
+    text, err = run(pagingUi({ { {} }, { { "", "" } } }))
+    Assert.is_nil(text)
+    Assert.eq(err, "文档没有可提取的文字")
+end
+
+-- 每页单独 nextTick；取消后排队的页不再提取、也不回调
+do
+    local UIManager = require("ui/uimanager")
+    local original = UIManager.nextTick
+    local pending = {}
+    UIManager.nextTick = function(_self, fn) pending[#pending + 1] = fn end
+    local function tick() table.remove(pending, 1)() end
+
+    local ui = rollingUi(3, { "一", "二", "三" })
+    local callbacks = 0
+    local handle = Extract.run(ui, function() callbacks = callbacks + 1 end)
+    tick()
+    Assert.len(ui.document.calls, 1)
+    Assert.eq(#pending, 1)
+    handle.cancel()
+    tick()
+    Assert.len(ui.document.calls, 1)
+    Assert.eq(#pending, 0)
+    Assert.eq(callbacks, 0)
+
+    -- 中途换了文档：报错收尾，不去碰已关闭文档的阅读位置
+    local text, err
+    ui = rollingUi(3, { "一", "二", "三" })
+    local doc = ui.document
+    Extract.run(ui, function(t, e) text, err = t, e end)
+    tick()
+    ui.document = { file = "other" }
+    function doc:gotoXPointer() error("closed document touched") end
+    tick()
+    Assert.is_nil(text)
+    Assert.eq(err, "文档已关闭")
+    Assert.eq(#pending, 0)
+
+    UIManager.nextTick = original
+end
