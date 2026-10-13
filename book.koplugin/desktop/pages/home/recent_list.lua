@@ -4,6 +4,7 @@
 @module koplugin.book.desktop.pages.home.recent_list
 --]]
 
+local Book = require("ui.widgets.book")
 local CoverCell = require("ui.widgets.cover")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
@@ -147,13 +148,6 @@ function M:showSettings(desktop)
     }:show()
 end
 
---- 返回最近阅读网格封面下方的标题和间隔高度；关闭标题时为 0。
----@return number height 封面下方标题与间隔高度，单位像素
-local function titleExtra()
-    if not M.showTitle() then return 0 end
-    return CoverCell.titleExtra()
-end
-
 --- 按用户列数算封面；固定列时 denseCoverMetrics 不会加列压高，这里自己封顶。
 --- area_h 有值时再收到「行×列刚好装进分配高度」：页溢出缩放后仍按完整行列画
 --- 会画出屏幕 BB，模拟器直接 SIGSEGV。
@@ -168,7 +162,7 @@ end
 ---@return number cell_h
 local function gridMetrics(width, area_h)
     local cols = M.cols()
-    local extra = titleExtra()
+    local extra = Book.captionExtra(M.showTitle())
     -- 单行时宽度决定封面尺寸；用剩余高度压缩会留下无意义的横向空隙。
     -- 多行才需要受区域高度约束，避免整组网格溢出。
     local max_h = M.rows() == 1 and math.huge or CoverCell.gridCoverMaxH(area_h)

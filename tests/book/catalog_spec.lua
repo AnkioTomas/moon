@@ -107,7 +107,7 @@ do -- listLibraryAsync 读假库
     FakeBooks.list_count = 1
     local got
     Catalog.listLibraryAsync("local", {
-        page = 1, page_size = 10, read_status = "unread",
+        page = 1, page_size = 10, read_status = "unread", author = "鲁迅", unauthor = false,
     }, function(res, err)
         got = { res = res, err = err }
     end)
@@ -117,6 +117,8 @@ do -- listLibraryAsync 读假库
     Assert.eq(got.res.data[1].source_id, "local")
     Assert.eq(got.res.data[1].title, "B")
     Assert.eq(FakeBooks.list_opts.read_status, "unread")
+    Assert.eq(FakeBooks.list_opts.author, "鲁迅")
+    Assert.is_false(FakeBooks.list_opts.unauthor)
     Assert.eq(FakeBooks.list_opts.chapter_sources[1], "wechat", "每行都要算 downloaded，章节源总是传")
     Assert.eq(seen_scope, "local")
 
@@ -130,6 +132,7 @@ end
 do -- filtersAsync
     FakeBooks.category_counts = { { category = "科幻", count = 2 } }
     FakeBooks.series_counts = { { series = "三体", count = 2 } }
+    FakeBooks.authors_counts = { { authors = "刘慈欣", count = 3 } }
     FakeBooks.read_counts = { { status = "read", count = 1 } }
     local got
     Catalog.filtersAsync("local", function(res)
@@ -138,6 +141,7 @@ do -- filtersAsync
     Stubs.flush()
     Assert.eq(got.data.category_counts[1].count, 2)
     Assert.eq(got.data.series_counts[1].series, "三体")
+    Assert.eq(got.data.author_counts[1].authors, "刘慈欣")
     Assert.eq(got.data.read_counts[1].status, "read")
     Assert.eq(got.data.downloaded_count, 3)
     Assert.eq(FakeBooks.count_chapter_sources[1], "wechat")

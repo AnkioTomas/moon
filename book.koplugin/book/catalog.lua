@@ -13,7 +13,7 @@ reading_stats 提供统计。
 
 --- 图书馆筛选项与分类索引。
 ---@class BookFiltersResult
----@field data { category_counts: { category: string, count: integer }[]|nil, series_counts: { series: string, count: integer }[]|nil, read_counts: { status: string, count: integer }[]|nil, downloaded_count: integer|nil, source_counts: { source_id: string, name: string, count: integer }[]|nil }|nil
+---@field data { category_counts: { category: string, count: integer }[]|nil, series_counts: { series: string, count: integer }[]|nil, author_counts: { authors: string, count: integer }[]|nil, read_counts: { status: string, count: integer }[]|nil, downloaded_count: integer|nil, source_counts: { source_id: string, name: string, count: integer }[]|nil }|nil
 
 --- 图书馆 / 书城列表查询参数。
 --- 未使用的筛选项传 nil 或空串；源不支持的项可忽略。
@@ -26,6 +26,8 @@ reading_stats 提供统计。
 ---@field category string|nil 按分类筛选
 ---@field uncategorized boolean|nil 只查询 category 为 NULL/空串的未分类桶
 ---@field unseries boolean|nil 只查询 series 为 NULL/空串的无系列桶
+---@field author string|nil 按作者筛选（authors 整串精确匹配）
+---@field unauthor boolean|nil 只查询 authors 为 NULL/空串的未知作者桶
 ---@field read_status "read"|"unread"|nil 按独立阅读状态筛选
 ---@field downloaded boolean|nil 只查询已下载到本地的书（口径同 BookDB.isDownloaded）
 ---@field source_id string|nil 混合模式下按书行所属源筛选
@@ -329,6 +331,12 @@ function Catalog.listBooks(source_id, opts)
         where = where .. " AND b.series=?"
         args[#args + 1] = opts.series
     end
+    if opts.unauthor then
+        where = where .. " AND (b.authors IS NULL OR b.authors='')"
+    elseif opts.author and opts.author ~= "" then
+        where = where .. " AND b.authors=?"
+        args[#args + 1] = opts.author
+    end
     if opts.search and opts.search ~= "" then
         where = where .. [[ AND (b.title LIKE ? ESCAPE '\' OR b.authors LIKE ? ESCAPE '\' OR b.stable_id LIKE ? ESCAPE '\')]]
         local like = "%" .. opts.search:gsub("([%%_\\])", "\\%1") .. "%"
@@ -412,6 +420,8 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             uncategorized = opts.uncategorized,
             series = opts.series,
             unseries = opts.unseries,
+            author = opts.author,
+            unauthor = opts.unauthor,
             search = opts.search,
             read_status = opts.read_status,
             downloaded = opts.downloaded,
@@ -436,6 +446,7 @@ function Catalog.filtersAsync(source_id, cb)
         local data = {
             category_counts = BookDB.countsBy("category", scope),
             series_counts = BookDB.countsBy("series", scope),
+            author_counts = BookDB.countsBy("authors", scope),
             read_counts = BookDB.readStatusCountsBySource(scope),
             downloaded_count = BookDB.downloadedCountBySource(scope, chapterSources()),
         }

@@ -11,6 +11,7 @@ return {
         -- 启动项为月读时，顶部菜单的抽屉（文件浏览器）图标直接回月读桌面。
         drawer_opens_desktop = true,
         library_sort = "recent_added",
+        library_view = "grid",
         home_topbar_items = {
             clock = true,
             source = true,

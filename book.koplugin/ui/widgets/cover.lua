@@ -11,21 +11,8 @@ local MoonSettings = require("utils.settings")
 local UIManager = require("ui/uimanager")
 local Theme = require("ui.themes")
 local Tap = require("ui.themes.widgets.tap")
-local Text = require("ui.themes.widgets.text")
 
 local CoverCell = {}
-
---- 封面下方说明占用的高度。缺省一行书名；show_author 时再加一行作者。
----@param show_author boolean|nil 缺省不加作者行
----@return number
-function CoverCell.titleExtra(show_author)
-    local line = Text.line("caption", "M")
-    local h = line:getSize().h
-    line:free()
-    local one = Theme.px(Theme.current().space.xs) + h
-    if show_author then return one * 2 end
-    return one
-end
 
 --- 揭掉上一本封面的「正在打开」条。
 ---@param owner table 持有打开中状态的视图实例
@@ -91,26 +78,11 @@ function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_t
         badge = true,
         ribbon = status,
         download = status,
-        -- 图书馆右下角进详情；书城整卡即详情，不画「更多」。
-        more = status,
+        -- 图书馆右下角「更多」进详情（角标自带点击区，先于整卡收到点按）；书城整卡即详情，不画「更多」。
+        more = status and function() ctx.on_detail(book) end,
         show_parent = ctx.desktop,
     })
-    local tap
-    -- 一个点击区完成分流：「更多」角标落在封面右下角，点中进详情，其余位置开书。
-    tap = Tap.wrap(card, function(ges)
-        local pos, dimen = ges and ges.pos, tap.dimen
-        if status and pos then
-            local t = Theme.current()
-            local size, inset = Theme.px(18), Theme.px(t.space.xs)
-            local cover_x = dimen.x + math.floor((slot_w - cw) / 2)
-            if pos.x >= cover_x + cw - size - inset and pos.x < cover_x + cw - inset
-                and pos.y >= dimen.y + ch - size - inset and pos.y < dimen.y + ch - inset then
-                if ctx.on_detail then ctx.on_detail(book) end
-                return
-            end
-        end
-        on_open(book, cover, cw, ch)
-    end)
+    local tap = Tap.wrap(card, function() on_open(book, cover, cw, ch) end)
     return tap, tap:getSize().h
 end
 

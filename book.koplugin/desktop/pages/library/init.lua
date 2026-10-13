@@ -1,42 +1,58 @@
 --[[--
-图书馆：平铺封面书架 + 筛选/搜索/排序。
+图书馆：分组页签 + 工具条 + 封面网格 / 列表 / 分组列表 + 分页。
 
 布局：
   +-----------------------------------------------+
-  | [刷新] [筛选] [搜索] [清除]              共N  |
-  | +----+ +----+ +----+ +----+                   |
-  | |封面| |封面| |封面| |封面|                   |
+  |   书籍   |   作者   |   系列   |   分类        |
+  | 467 本书     [排序▾] [全部▾] [☰] [⌕] [↻]      |
+  | +----+ +----+ +----+ +----+                   |   网格（默认）
+  | |封面| |封面| |封面| |封面|                   |   或列表：一行一本（rows.lua）
   | |书名| |书名| |书名| |书名|                   |
   | +----+ +----+ +----+ +----+                   |
-  |                                               |
   | [<]              N / M                   [>]  |
   +-----------------------------------------------+
+
+作者 / 系列 / 分类页签先列分组（按名称，空桶排最后），点进去是该组的书，工具条左侧换成「上级 + 组名」。
+分组只在内存里，视图（网格 / 列表）落盘 desktop.library_view。
+书城复用 build（网格 + 搜索/清除/上级工具条）与 gridMetrics，不带页签。
 
 @module koplugin.book.ui.library
 --]]
 
+local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local LineWidget = require("ui/widget/linewidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local CoverCell = require("ui.widgets.cover")
+local Filter = require("desktop.pages.library.filter")
+local Rows = require("desktop.pages.library.rows")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
 local Input = require("ui.themes.widgets.input")
 local Pager = require("ui.themes.widgets.pager")
+local Tap = require("ui.themes.widgets.tap")
 local Text = require("ui.themes.widgets.text")
 local MoonSettings = require("utils.settings")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+-- 列表书行的目标高度（逻辑像素）：768×1024 一页约 6 行。
+local LIST_ROW_H = 120
+
 ---@class BookLibrary
 ---@field desktop BookDesktop
 ---@field filter table
 ---@field sort string
+---@field view "grid"|"list"
+---@field group string 当前分组页签 id
+---@field groups { rows: { value: string, count: integer }[], err: string|nil }|nil 当前页签的分组缓存
+---@field group_page number
 ---@field page number
 ---@field page_size number
 ---@field total number
@@ -50,71 +66,202 @@ local T = require("ffi/util").template
 local Library = {}
 Library.__index = Library
 
+--- 分组页签：key/flag 是筛选字段（组名 / 空桶），counts 是 filtersAsync 的计数键，column 是计数行的取值键。
+---@return table[]
+local function groupTabs()
+    return {
+        { id = "books", text = _("书籍") },
+        { id = "author", text = _("作者"), key = "author", flag = "unauthor",
+            counts = "author_counts", column = "authors", empty = _("未知作者") },
+        { id = "series", text = _("系列"), key = "series", flag = "unseries",
+            counts = "series_counts", column = "series", empty = _("无系列") },
+        { id = "category", text = _("分类"), key = "category", flag = "uncategorized",
+            counts = "category_counts", column = "category", empty = _("未分类") },
+    }
+end
+
 --- 创建图书馆实例，独立持有筛选、分页和请求句柄。
 ---@param opts table
 ---@return BookLibrary
 function Library:new(opts)
+    local display = MoonSettings.get("desktop")
     opts.filter = opts.filter or {}
     opts.page = opts.page or 1
     opts.page_size = opts.page_size or 12
     opts.total = opts.total or 0
-    opts.sort = opts.sort or (MoonSettings.get("desktop").library_sort or "recent_added")
+    opts.sort = opts.sort or (display.library_sort or "recent_added")
+    opts.view = opts.view or (display.library_view == "list" and "list" or "grid")
+    opts.group = opts.group or "books"
+    opts.group_page = opts.group_page or 1
     return setmetatable(opts, self)
 end
 
-function Library:showFilter()
-    local source = self.desktop.source
-    if not source then return end
-    if self.filter_cancel then self.filter_cancel:cancel(); self.filter_cancel = nil end
+--- 当前分组页签。
+---@return table
+function Library:currentGroup()
+    for _idx, g in ipairs(groupTabs()) do
+        if g.id == self.group then return g end
+    end
+    return groupTabs()[1]
+end
+
+--- 是否停在分组列表（分组页签且还没点进某一组）。
+---@return boolean
+function Library:inGroupList()
+    local g = self:currentGroup()
+    return g.key ~= nil and self.filter[g.key] == nil and not self.filter[g.flag]
+end
+
+--- 改设置项并落盘。
+---@param key string
+---@param value any
+local function persist(key, value)
+    local display = MoonSettings.get("desktop")
+    display[key] = value
+    MoonSettings.save("desktop", display)
+end
+
+--- 换书籍列表的条件后回第一页重拉。
+function Library:refetch()
+    self.page, self.state = 1, nil
+    self.desktop:updateView()
+end
+
+--- 翻页条与滑动作用的页码：分组列表本地分页，书籍按查询分页。
+---@return number
+function Library:currentPage()
+    return self:inGroupList() and self.group_page or self.page
+end
+
+--- 切换分组页签（点当前页签即回到它的首页）：丢掉所有分组下钻条件。
+---@param id string
+function Library:selectGroup(id)
+    for _idx, g in ipairs(groupTabs()) do
+        if g.key then self.filter[g.key], self.filter[g.flag] = nil, nil end
+    end
+    self.group, self.group_page, self.groups = id, 1, nil
+    self:refetch()
+end
+
+--- 点进一组；空串是空桶。
+---@param value string
+function Library:openGroup(value)
+    local g = self:currentGroup()
+    if value == "" then
+        self.filter[g.flag] = true
+    else
+        self.filter[g.key] = value
+    end
+    self:refetch()
+end
+
+--- 从一组退回分组列表（group_page 保留）。
+function Library:closeGroup()
+    local g = self:currentGroup()
+    self.filter[g.key], self.filter[g.flag] = nil, nil
+    self.state = nil
+    self.desktop:updateView()
+end
+
+--- 网格 / 列表互切，尽量停在原来第一本书所在页。
+function Library:toggleView()
+    local first = (self.page - 1) * self.page_size
+    self.view = self.view == "list" and "grid" or "list"
+    persist("library_view", self.view)
+    self.page = math.floor(first / self:syncPageSize()) + 1
+    self.state = nil
+    self.desktop:updateView()
+end
+
+--- 取筛选计数；离开图书馆或换源后丢弃结果。
+---@param done fun(data: table|nil, err: string|nil)
+function Library:loadFilters(done)
+    local desktop = self.desktop
+    local source = desktop.source
+    if not source then done(nil, _("当前数据源不可用")); return end
+    if self.filter_cancel then self.filter_cancel:cancel() end
     self.filter_cancel = require("book.catalog").filtersAsync(source.id, function(res, err)
         self.filter_cancel = nil
-        if self.desktop.closed or self.desktop.tab ~= "library"
-            or self.desktop.source ~= source then return end
-        if not res then
-            require("ui.themes.widgets.toast"):new{ text = err or _("加载失败"), timeout = 2 }:show()
-            return
-        end
-        require("desktop.pages.library.filter").open{
-            data = res.data,
-            current = self.filter,
-            sort = self.sort,
-            on_apply = function(filter, sort)
-                self.filter = filter
-                self.sort = sort or "recent_added"
-                local display = MoonSettings.get("desktop")
-                display.library_sort = self.sort
-                MoonSettings.save("desktop", display)
-                self.page, self.state = 1, nil
-                self.desktop:updateView()
-            end,
-        }
+        if desktop.closed or desktop.tab ~= "library" or desktop.source ~= source then return end
+        done(res and res.data, res and nil or (err or _("加载失败")))
     end)
 end
 
---- 应用书名搜索。
+--- 排序下拉。
+---@param anchor table
+function Library:showSort(anchor)
+    Filter.openSort(anchor, self.sort, function(sort)
+        self.sort = sort
+        persist("library_sort", sort)
+        self:refetch()
+    end)
+end
+
+--- 筛选下拉（阅读状态 / 已下载 / 数据源）。
+---@param anchor table
+function Library:showStatus(anchor)
+    self:loadFilters(function(data, err)
+        if not data then
+            require("ui.themes.widgets.toast"):new{ text = err, timeout = 2 }:show()
+            return
+        end
+        Filter.openStatus(anchor, data, self.filter, function(filter)
+            self.filter = filter
+            self:refetch()
+        end)
+    end)
+end
+
+--- 拉当前页签的分组计数。
+function Library:fetchGroups()
+    local g = self:currentGroup()
+    self:loadFilters(function(data, err)
+        local rows = {}
+        for i, row in ipairs(data and data[g.counts] or {}) do
+            rows[i] = { value = row[g.column], count = row.count }
+        end
+        self.groups = { rows = rows, err = err }
+        self.desktop:updateView()
+    end)
+end
+
+--- 应用书名搜索：搜索面向全部书籍，回到书籍页签。
 ---@param value string|nil 当前设置项的值
 function Library:applySearch(value)
     self.filter = value and value ~= "" and { search = value } or {}
-    self.page = 1
-    self.state = nil
-    self.desktop:updateView()
+    self.group, self.groups = "books", nil
+    self:refetch()
+end
+
+--- 工具条与翻页条的固定高度。
+---@param t table
+---@return number top_h, number bottom_h
+local function barHeights(t)
+    return Button.heightOf("small") + Theme.px(t.space.sm) * 2, Theme.px(t.control.height)
+end
+
+--- 分组页签条高度（含底线）。
+---@return number
+function Library.tabsHeight()
+    local t = Theme.current()
+    return Theme.px(t.control.height) + Theme.px(t.row.divider)
 end
 
 --- 按内容区尺寸算出网格容量；请求 page_size 必须与此一致。
 ---@param w number 可用宽度，单位像素
 ---@param h number 可用高度，单位像素
+---@param head_h number|nil 工具条上方另占的高度（图书馆的分组页签），书城不传
 ---@return table
-function Library.gridMetrics(w, h)
+function Library.gridMetrics(w, h, head_h)
     local t = Theme.current()
     w = math.max(1, w)
     h = math.max(1, h)
     local pad = Theme.px(t.space.md)
-    local top_h = Theme.px(t.control.height) + Theme.px(t.space.sm) * 2
-    local bottom_h = Theme.px(t.control.height)
-    local grid_h = math.max(1, h - top_h - bottom_h)
+    local top_h, bottom_h = barHeights(t)
+    local grid_h = math.max(1, h - (head_h or 0) - top_h - bottom_h)
     local avail = math.max(1, w - pad * 2)
     local slot_w, cw, ch, cols, gap, row_gap, cell_h = CoverCell.denseCoverMetrics(avail, grid_h, {
-        title_extra = CoverCell.titleExtra(),
+        title_extra = require("ui.widgets.book").captionExtra(),
     })
     local rows = math.max(1, math.floor((grid_h + row_gap) / (cell_h + row_gap)))
     return {
@@ -132,6 +279,37 @@ function Library.gridMetrics(w, h)
         cell_h = cell_h,
         page_size = cols * rows,
     }
+end
+
+--- 列表度量：正文均分成书行；分组行另按主题行高算。
+---@param w number
+---@param h number
+---@return table
+function Library.listMetrics(w, h)
+    local t = Theme.current()
+    local top_h, bottom_h = barHeights(t)
+    local body_h = math.max(1, h - Library.tabsHeight() - top_h - bottom_h)
+    local rows = math.max(1, math.floor(body_h / Theme.px(LIST_ROW_H)))
+    return {
+        pad = Theme.px(t.space.md),
+        width = math.max(1, w),
+        top_h = top_h,
+        bottom_h = bottom_h,
+        grid_h = body_h,
+        rows = rows,
+        row_h = math.floor(body_h / rows),
+        group_rows = math.max(1, math.floor(body_h / Rows.groupHeight())),
+        page_size = rows,
+    }
+end
+
+--- 当前视图的度量。
+---@return table
+function Library:metrics()
+    local desktop = self.desktop
+    local w, h = desktop.dimen.w, desktop:contentHeight()
+    if self.view == "list" then return Library.listMetrics(w, h) end
+    return Library.gridMetrics(w, h, Library.tabsHeight())
 end
 
 --- 按网格度量铺满一页封面格子（放不下的整行丢弃）。
@@ -158,82 +336,235 @@ local function buildGrid(ctx, books, m, on_open, show_status)
     return grid
 end
 
---- 构建图书馆页 UI（工具栏 + 网格 + 分页）。
+--- 正文空态：加载中 / 错误 / 空列表。
+---@param w number
+---@param h number
+---@param msg string
+---@return table
+local function emptyBody(w, h, msg)
+    local t = Theme.current()
+    return CenterContainer:new{
+        dimen = Geom:new{ w = w, h = h },
+        Text.line("body", msg, { color = t.color.muted, width = w - Theme.px(t.space.md) * 2 }),
+    }
+end
+
+--- 工具条：左侧控件靠左，右侧控件靠右，中间留白撑满。
+--- 不能对拼好的 HorizontalGroup 调 getSize 再追加：它会缓存子件偏移，后追加的子件绘制时偏移是 nil。
+---@param w number
+---@param h number
+---@param left table[]
+---@param right table[]
+---@return table
+local function toolbar(w, h, left, right)
+    local t = Theme.current()
+    local pad, gap = Theme.px(t.space.md), Theme.px(t.space.sm)
+    local bar = HorizontalGroup:new{ align = "center", HorizontalSpan:new{ width = pad } }
+    local used = pad * 2
+    local function put(list)
+        for i, child in ipairs(list) do
+            if i > 1 then
+                bar[#bar + 1] = HorizontalSpan:new{ width = gap }
+                used = used + gap
+            end
+            bar[#bar + 1] = child
+            used = used + child:getSize().w
+        end
+    end
+    put(left)
+    local filler = HorizontalSpan:new{ width = 0 }
+    bar[#bar + 1] = filler
+    put(right)
+    filler.width = math.max(gap, w - used)
+    bar[#bar + 1] = HorizontalSpan:new{ width = pad }
+    return CenterContainer:new{ dimen = Geom:new{ w = w, h = h }, bar }
+end
+
+--- 页面骨架：头部各行 + 正文（不足补空）+ 翻页条，整页正好是内容区尺寸。
+---@param w number
+---@param h number
+---@param head table[]
+---@param body table
+---@param body_h number
+---@param pager table Pager.widget 参数（width 由这里补）
+---@return table
+local function frame(w, h, head, body, body_h, pager)
+    local group = VerticalGroup:new{ align = "left" }
+    for _idx, widget in ipairs(head) do group[#group + 1] = widget end
+    group[#group + 1] = body
+    group[#group + 1] = VerticalSpan:new{ width = math.max(0, body_h - body:getSize().h) }
+    pager.width = w
+    group[#group + 1] = Pager.widget(pager)
+    return Box:new{ style = { bg = Theme.current().color.page }, width = w, height = h, group }
+end
+
+--- 分组页签条：当前页签粗体加下划线。
+---@param w number
+---@param active string
+---@param on_tab fun(id: string)
+---@return table
+local function tabStrip(w, active, on_tab)
+    local t = Theme.current()
+    local tabs = groupTabs()
+    local tab_w = math.floor(w / #tabs)
+    local line = Theme.px(2)
+    local text_h = Theme.px(t.control.height) - line
+    local strip = HorizontalGroup:new{}
+    for _idx, g in ipairs(tabs) do
+        local on = g.id == active
+        strip[#strip + 1] = Tap.wrap(VerticalGroup:new{
+            CenterContainer:new{
+                dimen = Geom:new{ w = tab_w, h = text_h },
+                Text.line("body", g.text, { bold = on, color = on and t.color.ink or t.color.muted }),
+            },
+            on and LineWidget:new{
+                background = Blitbuffer.Color8(t.color.ink),
+                dimen = Geom:new{ w = tab_w, h = line },
+            } or VerticalSpan:new{ width = line },
+        }, function() on_tab(g.id) end)
+    end
+    return VerticalGroup:new{
+        align = "left",
+        strip,
+        LineWidget:new{
+            background = Blitbuffer.Color8(t.color.rule),
+            dimen = Geom:new{ w = w, h = Theme.px(t.row.divider) },
+        },
+    }
+end
+
+--- 构建书城页（网格 + 搜索/清除/上级 + 总数）。
 ---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
 ---@param state table 当前页面的数据和分页状态
----@param opts table|nil 书城页传 on_open 接管点击、on_back 出现「上级」、search_only 只留搜索/清除
+---@param opts table on_open 接管点击；on_back 出现「上级」；on_search / on_clear；show_status=false 不画角标
 ---@return table
 function Library:build(ctx, state, opts)
-    opts = opts or {}
     local t = Theme.current()
     local w, h = ctx.width, ctx.height
     local m = Library.gridMetrics(w, h)
-    local gap = Theme.px(t.space.sm)
-    local on_open = opts.on_open or CoverCell.opener(self, ctx)
-    if opts.show_status ~= false then
-        ctx.on_detail = function(book)
-            require("desktop.detail").open(ctx.desktop, "library", book)
-        end
-    end
-
-    local actions = {}
+    local left = {}
     if opts.on_back then
-        actions[#actions + 1] = { "arrow_back", _("上级"), opts.on_back }
+        left[#left + 1] = Button:new{ icon = "arrow_back", text = _("上级"), size = "small", callback = opts.on_back }
     end
-    if not opts.search_only then
-        actions[#actions + 1] = { "refresh", _("刷新"), function() self:rescan() end }
-        if ctx.source then
-            actions[#actions + 1] = { "filter_list", _("筛选"), function() self:showFilter() end }
-        end
-    end
-    actions[#actions + 1] = { "search", _("搜索"), opts.on_search or function() self:showSearch() end }
-    actions[#actions + 1] = { "clear", _("清除"), opts.on_clear or function() self:applySearch("") end }
-
-    local tools = HorizontalGroup:new{ align = "center", HorizontalSpan:new{ width = m.pad } }
-    for i, a in ipairs(actions) do
-        if i > 1 then tools[#tools + 1] = HorizontalSpan:new{ width = gap } end
-        tools[#tools + 1] = Button:new{ icon = a[1], text = a[2], callback = a[3] }
-    end
+    left[#left + 1] = Button:new{ icon = "search", text = _("搜索"), size = "small", callback = opts.on_search }
+    left[#left + 1] = Button:new{ icon = "clear", text = _("清除"), size = "small", callback = opts.on_clear }
     local total = Text.line("caption", T(_("共%1"), opts.total or 0), { color = t.color.muted })
-    -- 不能对 tools 调 getSize：HorizontalGroup 会缓存每个子件的偏移，
-    -- 后面再追加间距和总数，绘制时 _offsets[i] 是 nil。
-    local used = 0
-    for _idx, child in ipairs(tools) do used = used + child:getSize().w end
-    tools[#tools + 1] = HorizontalSpan:new{
-        width = math.max(gap, w - m.pad - used - total:getSize().w),
-    }
-    tools[#tools + 1] = total
-
     local books = state.books
     local body
     if books and #books > 0 then
-        body = buildGrid(ctx, books, m, on_open, opts.show_status)
+        body = buildGrid(ctx, books, m, opts.on_open, opts.show_status)
     else
-        local msg = not books and _("加载中…")
-            or state.err or opts.empty_text or _("没有书籍")
-        body = CenterContainer:new{
-            dimen = Geom:new{ w = w, h = m.grid_h },
-            Text.line("body", msg, { color = t.color.muted, width = w - m.pad * 2 }),
+        body = emptyBody(w, m.grid_h, not books and _("加载中…") or state.err or opts.empty_text or _("没有书籍"))
+    end
+    return frame(w, h, { toolbar(w, m.top_h, left, { total }) }, body, m.grid_h, {
+        page = opts.page or 1,
+        pages = opts.pages or 1,
+        on_prev = opts.on_prev,
+        on_next = opts.on_next,
+    })
+end
+
+--- 书籍视图的工具条右侧：排序、筛选、视图切换、搜索、刷新，搜索中再加清除。
+---@return table[]
+function Library:bookTools()
+    local sort_btn, status_btn
+    sort_btn = Button:new{
+        text = Filter.sortText(self.sort), icon = "arrow_drop_down", trailing = true, size = "small",
+        callback = function() self:showSort(sort_btn.dimen) end,
+    }
+    status_btn = Button:new{
+        text = Filter.status(self.filter).text, icon = "arrow_drop_down", trailing = true, size = "small",
+        callback = function() self:showStatus(status_btn.dimen) end,
+    }
+    local tools = {
+        sort_btn,
+        status_btn,
+        Button:new{
+            icon = self.view == "list" and "grid_view" or "view_list", variant = "ghost", size = "small",
+            callback = function() self:toggleView() end,
+        },
+        Button:new{ icon = "search", variant = "ghost", size = "small", callback = function() self:showSearch() end },
+        Button:new{ icon = "refresh", variant = "ghost", size = "small", callback = function() self:rescan() end },
+    }
+    if self.filter.search then
+        tools[#tools + 1] = Button:new{
+            icon = "search_off", variant = "ghost", size = "small",
+            callback = function() self:applySearch("") end,
         }
     end
-    return Box:new{
-        style = { bg = t.color.page },
-        width = w,
-        height = h,
-        VerticalGroup:new{
-            align = "left",
-            CenterContainer:new{ dimen = Geom:new{ w = w, h = m.top_h }, tools },
-            body,
-            VerticalSpan:new{ width = math.max(0, m.grid_h - body:getSize().h) },
-            Pager.widget({
-                width = w,
-                page = opts.page or 1,
-                pages = opts.pages or 1,
-                on_prev = opts.on_prev,
-                on_next = opts.on_next,
-            }),
-        },
+    return tools
+end
+
+--- 图书馆页面：页签 + 工具条 + 分组列表 / 书籍（网格或列表）+ 翻页。
+---@param ctx table
+---@return table
+function Library:buildPage(ctx)
+    local t = Theme.current()
+    local w, h = ctx.width, ctx.height
+    local tabs = tabStrip(w, self.group, function(id) self:selectGroup(id) end)
+    local muted = { color = t.color.muted }
+    local pager = {
+        page = self:currentPage(),
+        pages = self:pages(),
+        on_prev = function() self:gotoPage(self:currentPage() - 1) end,
+        on_next = function() self:gotoPage(self:currentPage() + 1) end,
     }
+
+    if self:inGroupList() then
+        local m = Library.listMetrics(w, h)
+        local g = self:currentGroup()
+        local groups = self.groups
+        local left = { Text.line("caption", T(_("共%1"), groups and #groups.rows or 0), muted) }
+        local right = {
+            Button:new{ icon = "search", variant = "ghost", size = "small", callback = function() self:showSearch() end },
+            Button:new{ icon = "refresh", variant = "ghost", size = "small", callback = function() self:rescan() end },
+        }
+        local body
+        if groups and #groups.rows > 0 then
+            body = VerticalGroup:new{ align = "left" }
+            local first = (self.group_page - 1) * m.group_rows
+            for i = first + 1, math.min(#groups.rows, first + m.group_rows) do
+                local row = groups.rows[i]
+                body[#body + 1] = Rows.group(row.value ~= "" and row.value or g.empty, row.count, w, function()
+                    self:openGroup(row.value)
+                end)
+            end
+        else
+            body = emptyBody(w, m.grid_h, not groups and _("加载中…") or groups.err or _("没有书籍"))
+        end
+        return frame(w, h, { tabs, toolbar(w, m.top_h, left, right) }, body, m.grid_h, pager)
+    end
+
+    local m = self:metrics()
+    local left
+    local g = self:currentGroup()
+    if g.key then
+        local back = Button:new{
+            icon = "arrow_back", text = _("上级"), size = "small",
+            callback = function() self:closeGroup() end,
+        }
+        local name = self.filter[g.key] or g.empty
+        left = { back, Text.line("body", name, { bold = true, width = math.floor(w / 4) }) }
+    else
+        left = { Text.line("caption", T(_("%1 本书"), self.total), muted) }
+    end
+    local state = self.state or {}
+    local books = state.books
+    local on_open = CoverCell.opener(self, ctx)
+    local on_detail = function(book) require("desktop.detail").open(ctx.desktop, "library", book) end
+    local body
+    if not books or #books == 0 then
+        body = emptyBody(w, m.grid_h, not books and _("加载中…") or state.err or _("没有书籍"))
+    elseif self.view == "list" then
+        body = VerticalGroup:new{ align = "left" }
+        for i = 1, math.min(#books, m.rows) do
+            body[i] = Rows.book(ctx, books[i], w, m.row_h, on_open, on_detail)
+        end
+    else
+        ctx.on_detail = on_detail
+        body = buildGrid(ctx, books, m, on_open, true)
+    end
+    return frame(w, h, { tabs, toolbar(w, m.top_h, left, self:bookTools()) }, body, m.grid_h, pager)
 end
 
 --- 异步拉取图书馆列表。
@@ -269,16 +600,18 @@ function Library:fetch()
         uncategorized = not not f.uncategorized,
         series = f.series or "",
         unseries = not not f.unseries,
+        author = f.author or "",
+        unauthor = not not f.unauthor,
         read_status = f.read_status,
         downloaded = f.downloaded,
         source_id = f.source_id or "",
         sort = self.sort,
     }, function(res, err)
+        self.fetch_cancel = nil
         if self.desktop.closed or self.desktop.tab ~= "library"
             or self.desktop.source ~= source then
             return
         end
-        self.fetch_cancel = nil
         if not res then
             done({}, err or _("加载失败"))
             return
@@ -295,11 +628,10 @@ function Library:fetch()
     end)
 end
 
---- 按当前网格容量同步 page_size。
+--- 按当前视图容量同步 page_size。
 ---@return number
 function Library:syncPageSize()
-    local desktop = self.desktop
-    local n = Library.gridMetrics(desktop.dimen.w, desktop:contentHeight()).page_size
+    local n = self:metrics().page_size
     if self.page_size ~= n then
         self.page_size = n
         self.state = nil
@@ -311,17 +643,27 @@ function Library:syncPageSize()
     return self.page_size
 end
 
---- 计算图书馆总页数。
+--- 总页数：分组列表按分组行数，书籍按 page_size（由 updateView / fetch 同步）。
 ---@return number
 function Library:pages()
-    return math.max(1, math.ceil(self.total / self:syncPageSize()))
+    if self:inGroupList() then
+        local d = self.desktop
+        local per = Library.listMetrics(d.dimen.w, d:contentHeight()).group_rows
+        return math.max(1, math.ceil(#(self.groups and self.groups.rows or {}) / per))
+    end
+    return math.max(1, math.ceil(self.total / self.page_size))
 end
 
---- 跳转到指定页并重建。
+--- 跳转到指定页并重建；分组列表本地翻页，不发请求。
 ---@param page number 当前页码，从 1 开始
 function Library:gotoPage(page)
-    local pages = self:pages()
-    page = math.max(1, math.min(pages, page))
+    page = math.max(1, math.min(self:pages(), page))
+    if self:inGroupList() then
+        if page == self.group_page then return end
+        self.group_page = page
+        self.desktop:updateView()
+        return
+    end
     if page == self.page and self.state and self.state.books then
         return
     end
@@ -365,24 +707,23 @@ function Library:showSearch(on_apply, initial_query)
     }:show()
 end
 
---- Desktop 入口：同步 page_size、缺态触发 fetch、拼分页 UI。
+--- Desktop 入口：同步 page_size、缺数据就下一 tick 补拉、拼页面。
 ---@return table
 function Library:updateView()
     self:syncPageSize()
-    local state = self.state
-    if not state then
+    local load
+    if self:inGroupList() then
+        load = not self.groups and self.fetchGroups
+    else
+        load = not self.state and self.fetch
+    end
+    if load then
         UIManager:nextTick(require("ui.guard").wrap("library fetch", function()
             if self.desktop.closed or self.desktop.tab ~= "library" then return end
-            self:fetch()
+            load(self)
         end))
     end
-    return self:build(self.desktop:ctx(), state or {}, {
-        page = self.page,
-        pages = self:pages(),
-        total = self.total,
-        on_prev = function() self:gotoPage(self.page - 1) end,
-        on_next = function() self:gotoPage(self.page + 1) end,
-    })
+    return self:buildPage(self.desktop:ctx())
 end
 
 --- 仅取消本实例当前的列表查询，并清空请求句柄；同步本身归源管。
@@ -397,13 +738,15 @@ function Library:cancel()
     end
 end
 
---- 取消旧查询并清除筛选、分页及列表缓存。
+--- 取消旧查询并清除筛选、分页及列表缓存（分组页签与视图保留）。
 function Library:reset()
     self:cancel()
     self.filter = {}
     self.page = 1
+    self.group_page = 1
     self.total = 0
     self.state = nil
+    self.groups = nil
 end
 
 -- 取消、暂停、销毁都只需停掉在飞查询，避免离开页面后旧结果继续更新界面。
@@ -420,14 +763,14 @@ function Library:onEvent(event, payload)
         return
     end
     if event == "shelf_changed" then
-        self.state = nil
+        self.state, self.groups = nil, nil
         return
     end
     if event ~= "swipe" then return end
     if payload.direction == "west" then
-        self:gotoPage(self.page + 1)
+        self:gotoPage(self:currentPage() + 1)
     elseif payload.direction == "east" then
-        self:gotoPage(self.page - 1)
+        self:gotoPage(self:currentPage() - 1)
     end
 end
 
