@@ -10,6 +10,7 @@ local NoteDB = require("book.note_db")
 local logger = require("utils.log")
 local Note = require("book.note")
 local Normalize = require("book.note.normalize")
+local DerivedNote = require("reader.session.derived_note")
 
 local SessionNote = {}
 
@@ -30,6 +31,11 @@ end
 function SessionNote.save(ui, identity, done)
     if not ui or not ui.doc_settings then
         if done then done(false) end
+        return
+    end
+    -- 衍生版的坐标原书不认：划线留在它自己的 sidecar，回原书时由 derived_note 收进来。
+    if DerivedNote.originOf(ui.document.file) then
+        if done then done(true) end
         return
     end
     ui.doc_settings:flush()
@@ -67,28 +73,11 @@ function SessionNote.save(ui, identity, done)
     if done then done(saved, saved and updated_at or nil) end
 end
 
---- 把本地 notes 快照定位并写入阅读器注解。
----
---- 纯本地：读 sqlite、算 xpointer、写 doc_settings，不碰网络也不排 nextTick。
---- 必须在文档首次绘制前**同步**跑完，否则云端划线要等下一次刷新才出现。
 ---@param ui table
 ---@param identity BookIdentity
----@return integer applied 写入阅读器的注解条数
-function SessionNote.applyLocal(ui, identity)
-    local source = identity and identity.source
-    if not ui or not ui.doc_settings or not identity then
-        return 0
-    end
-    -- 异步回调回来时阅读器可能已换了文档（或同书换了章）
-    local current_id = ui.document and ui.document.file
-        and require("book.store").identityFor(ui.document.file)
-    if not current_id
-            or current_id.source_id ~= identity.source_id
-            or current_id.stable_id ~= identity.stable_id
-            or current_id.chapter_idx ~= identity.chapter_idx then
-        logger.dbg("book.note apply skip: document changed")
-        return 0
-    end
+---@return integer applied
+local function applySnapshot(ui, identity)
+    local source = identity.source
     local row = NoteDB.get(identity.source_id, identity.stable_id, identity.chapter_idx)
     local annotations, authoritative = Normalize.decode(row and row.payload)
     if not annotations then
@@ -130,6 +119,38 @@ function SessionNote.applyLocal(ui, identity)
         ui.annotation:updateAnnotations(true)
     end
     return #annotations
+end
+
+--- 把本地 notes 快照定位并写入阅读器注解。
+---
+--- 纯本地：读 sqlite、算 xpointer、写 doc_settings，不碰网络也不排 nextTick。
+--- 必须在文档首次绘制前**同步**跑完，否则云端划线要等下一次刷新才出现。
+--- 衍生版（双语版、排版版）的 xpointer 和快照对不上，改由 derived_note 逐条搜索补画；
+--- 读原书时顺带把衍生版里的划线收回来。
+---@param ui table
+---@param identity BookIdentity
+---@return integer applied 写入阅读器的注解条数
+function SessionNote.applyLocal(ui, identity)
+    if not ui or not ui.doc_settings or not identity then
+        return 0
+    end
+    -- 异步回调回来时阅读器可能已换了文档（或同书换了章）
+    local current_id = ui.document and ui.document.file
+        and require("book.store").identityFor(ui.document.file)
+    if not current_id
+            or current_id.source_id ~= identity.source_id
+            or current_id.stable_id ~= identity.stable_id
+            or current_id.chapter_idx ~= identity.chapter_idx then
+        logger.dbg("book.note apply skip: document changed")
+        return 0
+    end
+    if DerivedNote.originOf(ui.document.file) then
+        DerivedNote.project(ui, identity)
+        return #(ui.doc_settings:readSetting("annotations") or {})
+    end
+    local applied = applySnapshot(ui, identity)
+    DerivedNote.collect(ui, identity)
+    return applied
 end
 
 --- 拉取远端注解前先保存当前快照，避免远端覆盖尚未落盘的本地修改。
