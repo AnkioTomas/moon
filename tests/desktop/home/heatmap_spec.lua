@@ -58,6 +58,16 @@ daily[1].seconds = 601
 comp:onEvent("stats_changed")
 Assert.is_true(slot[1] ~= first, "总时长变了要重建")
 
+-- 回到桌面：同一天不重建；跨天了重画
+first = slot[1]
+comp:deactivate()
+comp:activate()
+Assert.eq(slot[1], first, "同一天回来不重建")
+comp.day = "1999-01-01"
+comp:deactivate()
+comp:activate()
+Assert.is_true(slot[1] ~= first, "跨天回来重画")
+
 Kit.taps(slot)[1]:onTapThemeArea(nil, Kit.tap(0, 0))
 Assert.eq(switched, "insight")
 comp:destroy()

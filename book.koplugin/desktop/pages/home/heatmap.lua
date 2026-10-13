@@ -24,6 +24,7 @@ local T = require("ffi/util").template
 ---@class BookHomeHeatmap : BookHomeComponent
 ---@field key string|nil 当前显示的档位签名
 ---@field weeks integer|nil 当前显示的周数
+---@field day string|nil 画的时候是哪天
 local M = {
     id = "heatmap",
     label = _("阅读热力图"),
@@ -101,7 +102,7 @@ function M:createWidget()
     local cell = math.max(1, math.min(Theme.px(MAX_CELL), math.floor((h - caption_h - xs - gap * 6) / 7)))
     local weeks = math.max(1, math.min(MAX_WEEKS, math.floor((w + gap) / (cell + gap))))
     local levels, total = collect(self.ctx.source, weeks)
-    self.weeks, self.key = weeks, keyOf(levels, total)
+    self.weeks, self.key, self.day = weeks, keyOf(levels, total), os.date("%Y-%m-%d") --[[@as string]]
 
     local track, ink = t.progress.track, t.color.ink
     local grid = HorizontalGroup:new{ align = "top" }
@@ -126,6 +127,11 @@ function M:createWidget()
     local desktop = self.ctx.desktop
     return Tap.wrap(CenterContainer:new{ dimen = Geom:new{ w = w, h = h }, body },
         desktop and function() desktop:switchTab("insight") end or nil)
+end
+
+--- 回到桌面时已经跨天：「今天」挪了一格，重画。
+function M:onActivate()
+    if self.slot and self.day ~= os.date("%Y-%m-%d") then self:refresh() end
 end
 
 --- 统计落库后重读；档位全未变时不重建（墨水屏每次 dirty 都是一次真实刷新）。
