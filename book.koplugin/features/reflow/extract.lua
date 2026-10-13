@@ -4,8 +4,8 @@
 流式文档（CREngine：EPUB/FB2/HTML/MOBI/AZW3/DOC/RTF/CHM…）没有整本导出接口：前 N-1 页取相邻页
 XPointer 之间的文本，末页跳到页首后按屏幕范围取，取完放回阅读位置。
 固定版式（PDF/DjVu）逐页取文字层，按行拼词；扫描版没有文字层，取不到就报错。
-每页一个 nextTick，不卡界面。结果交给 text2epub 做章节识别与物理行合并；转换有损，
-不保留图片、脚注和原样式。
+文档对象只在主进程里，取字只能在 UI 线程上做：按时长分批，批间让出给输入。结果交给 text2epub
+做章节识别与物理行合并；转换有损，不保留图片、脚注和原样式。
 
 @module koplugin.book.features.reflow.extract
 --]]
@@ -13,10 +13,21 @@ XPointer 之间的文本，末页跳到页首后按屏幕范围取，取完放�
 require("l10n").apply()
 
 local UIManager = require("ui/uimanager")
+local Perf = require("utils.perf")
 local Text = require("utils.text")
 local _ = require("gettext")
 
 local Extract = {}
+
+--- 一批取字的时长上限（毫秒）。
+local BATCH_MS = 100
+--- 批间延迟（秒），必须为正：UIManager:handleInput 会把 nextTick 链一口气跑完、中间不轮询输入。
+local YIELD_S = 0.01
+
+---@param fn fun()
+local function later(fn)
+    UIManager:scheduleIn(YIELD_S, require("ui.guard").wrap("reflow extract", fn))
+end
 
 --- 只消除相邻渲染页完全相同的边界行。
 ---@param pages string[]
@@ -101,24 +112,25 @@ function Extract.run(ui, cb)
         cb(text, err)
     end
 
+    local readPage = rolling and rollingPage or pagingPage
+
+    --- 从第 page 页取到用完一批的时长，没取完排下一批。
     ---@param page integer
     local function step(page)
         if cancelled then return end
         if ui.document ~= document then return finish(nil, _("文档已关闭")) end
-        -- 坏页上 CREngine / MuPDF 会抛错：整次提取作废并告诉用户，不带着半本书继续。
-        local ok, chunk
-        if rolling then
-            ok, chunk = pcall(rollingPage, document, page, count)
-        else
-            ok, chunk = pcall(pagingPage, document, page)
-        end
-        if not ok or type(chunk) ~= "string" then
-            return finish(nil, _("无法提取文字") .. ": " .. tostring(chunk))
-        end
-        appendPage(pages, chunk)
-        if page < count then
-            UIManager:nextTick(require("ui.guard").wrap("reflow extract", function() step(page + 1) end))
-            return
+        local started = Perf.now()
+        while page <= count do
+            -- 坏页上 CREngine / MuPDF 会抛错：整次提取作废并告诉用户，不带着半本书继续。
+            local ok, chunk = pcall(readPage, document, page, count)
+            if not ok or type(chunk) ~= "string" then
+                return finish(nil, _("无法提取文字") .. ": " .. tostring(chunk))
+            end
+            appendPage(pages, chunk)
+            page = page + 1
+            if page <= count and Perf.now() - started >= BATCH_MS then
+                return later(function() step(page) end)
+            end
         end
         local text = table.concat(pages, "\n")
         if Text.trim(text) == "" then
@@ -127,10 +139,7 @@ function Extract.run(ui, cb)
         finish(text)
     end
 
-    UIManager:nextTick(require("ui.guard").wrap("reflow extract", function()
-        if count < 1 and not cancelled then return finish(nil, _("文档没有可提取的文字")) end
-        step(1)
-    end))
+    later(function() step(1) end)
     return { cancel = function() cancelled = true end }
 end
 

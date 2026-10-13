@@ -4,11 +4,10 @@
 负责从文本中提取书名、作者和章节，再复用 html2epub 完成目录与打包。
 
   local Text2Epub = require("convert.text2epub")
-  local text = assert(Text2Epub.read("/path/book.txt"))
   local job = Text2Epub.build({
       dest = "/path/book.epub",
-      text = text,
-      source = "/path/book.txt", -- 可省略，用于推断书名 / 作者
+      source = "/path/book.txt", -- 没给 text 时读这个文件；也用于推断书名 / 作者
+      text = nil, -- 可省略，已有全文（如从文档提取）时直接给
       title = "书名", -- 可省略
       author = "作者", -- 可省略
   }, function(ok, err) end)
@@ -17,7 +16,6 @@
 @module koplugin.book.convert.text2epub
 --]]
 
-local UIManager = require("ui/uimanager")
 local Html2Epub = require("convert.html2epub")
 local Text = require("utils.text")
 local _ = require("gettext")
@@ -30,6 +28,8 @@ local DEFAULT_PART_CHARS = 256 * 1024
 local CHINESE_NUMBER_CHARS = { "零", "〇", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "百", "千", "万", "两" }
 --- 内嵌目录条目的长度上限（字节，约 40 个汉字）；更长的是正文。
 local MAX_TOC_ENTRY_BYTES = 120
+--- 连续空章达到这个数就是正文里印的目录页，不是章节（见 dropTocEchoes）。
+local MIN_LISTING = 3
 local TOC_HEADERS = { ["目录"] = true, ["目錄"] = true, ["content"] = true, ["contents"] = true, ["table of contents"] = true }
 local INVALID_VOLUME_SUFFIX = { ["门"] = true, ["队"] = true, ["属"] = true, ["分"] = true, ["件"] = true, ["落"] = true }
 
@@ -146,21 +146,21 @@ end
 ---@param paragraph string[]
 ---@return string
 local function paragraphText(paragraph)
-    local out = paragraph[1] or ""
+    -- 一段可能是一整章（英文 PDF 没有空行、句号不断段），逐行 .. 拼接是平方级。
+    local out = { paragraph[1] or "" }
     for i = 2, #paragraph do
         local next_line = paragraph[i]
-        local left = out:sub(-1)
+        local left = paragraph[i - 1]:sub(-1)
         local right = next_line:sub(1, 1)
         local ascii_word = left:match("[%w]$") and right:match("^[%w]")
         local after_punctuation = left:match("[,.;:!?%)%]}'\"]$")
             and right:match("^[A-Za-z0-9]")
         if ascii_word or after_punctuation then
-            out = out .. " " .. next_line
-        else
-            out = out .. next_line
+            out[#out + 1] = " "
         end
+        out[#out + 1] = next_line
     end
-    return out
+    return table.concat(out)
 end
 
 --- 在 UTF-8 字符边界前截断，避免把多字节字符拆坏。
@@ -261,7 +261,10 @@ local function blank(lines)
     return true
 end
 
---- 书开头的内嵌目录把每个标题都列一遍，会切出一串空章：空章后面还有同名章节就丢掉，留带正文的那个。
+--- 内嵌目录把每个标题都列一遍，会切出一串空章：空章后面还有同名章节就丢掉，留带正文的那个。
+--- 剩下连续 MIN_LISTING 个以上的空章也是目录页（条目与正文标题写法对不上，如合集每卷卷首、书末的
+--- 「第一章　源家次子 The Second…」对正文的「第一章」）：标题还原成上一章末尾的段落，不丢字。
+--- 不到这个数的是卷名这类结构标题，照旧成章。
 ---@param sections { title: string, lines: string[] }[]
 ---@return { title: string, lines: string[] }[]
 local function dropTocEchoes(sections)
@@ -269,13 +272,30 @@ local function dropTocEchoes(sections)
     for _idx, section in ipairs(sections) do
         remaining[section.title] = (remaining[section.title] or 0) + 1
     end
-    local kept = {}
+    local kept, run = {}, {}
+    local function flushRun()
+        if #run >= MIN_LISTING then
+            if #kept == 0 then kept[1] = { title = _("前言"), lines = {} } end
+            local lines = kept[#kept].lines
+            for _idx, section in ipairs(run) do
+                lines[#lines + 1] = ""
+                lines[#lines + 1] = section.title
+            end
+        else
+            for _idx, section in ipairs(run) do kept[#kept + 1] = section end
+        end
+        run = {}
+    end
     for _idx, section in ipairs(sections) do
         remaining[section.title] = remaining[section.title] - 1
-        if remaining[section.title] == 0 or not blank(section.lines) then
+        if not blank(section.lines) then
+            flushRun()
             kept[#kept + 1] = section
+        elseif remaining[section.title] == 0 then
+            run[#run + 1] = section
         end
     end
+    flushRun()
     return kept
 end
 
@@ -465,11 +485,11 @@ function Text2Epub.read(source)
     return text
 end
 
---- 异步构建 EPUB。opts.text 是全文（经 `Text2Epub.read` 或其它提取得到），
---- opts.source 只用于从文件名推断书名 / 作者。
+--- 异步构建 EPUB。读文件、解析、打包都在子进程里：整本书在 UI 线程上要跑几十秒。
+--- opts.text 是全文；没给就读 opts.source（`Text2Epub.read`）。opts.source 也用于从文件名推断书名 / 作者。
 ---@param opts {
 ---   dest: string,
----   text: string,
+---   text: string|nil,
 ---   source: string|nil,
 ---   title: string|nil,
 ---   author: string|nil,
@@ -482,15 +502,29 @@ end
 ---@param cb fun(ok: boolean|nil, err: any)
 ---@return { cancel: fun() }
 function Text2Epub.build(opts, cb)
-    local book = Text2Epub.parse(opts.text, opts)
-    return Html2Epub.build({
-        dest = opts.dest,
-        title = book.title,
-        author = book.author,
-        language = opts.language,
-        identifier = opts.identifier,
-        chapters = book.chapters,
-    }, cb)
+    local job = require("workers.job").run(function()
+        local text, err = opts.text, nil
+        if not text then text, err = Text2Epub.read(opts.source) end
+        if not text then return { err = err } end
+        local book = Text2Epub.parse(text, opts)
+        local ok, write_err = Html2Epub.write({
+            dest = opts.dest,
+            title = book.title,
+            author = book.author,
+            language = opts.language,
+            identifier = opts.identifier,
+            chapters = book.chapters,
+        })
+        return { err = not ok and (write_err or _("写入 epub 失败")) or nil }
+    end, {
+        name = "epub.text",
+        kind = "heavy",
+        on_done = function(result)
+            if result.err then cb(nil, result.err) else cb(true) end
+        end,
+        on_failed = function(err) cb(nil, err) end,
+    })
+    return { cancel = function() job:cancel() end }
 end
 
 Text2Epub.chapterTitle = chapterTitle

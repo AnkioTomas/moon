@@ -60,6 +60,24 @@ package.preload["document/documentregistry"] = function()
     }
 end
 
+-- 子进程替身：下一 tick 执行，结果按管道协议过一遍 JSON（子进程只能传回可序列化的值）
+local jobs = {}
+package.preload["workers.job"] = function()
+    return {
+        run = function(worker, opts)
+            local job = { name = opts.name }
+            function job:cancel() self.cancelled = true end
+            jobs[#jobs + 1] = job
+            require("ui/uimanager"):nextTick(function()
+                if job.cancelled then return end
+                local JSON = require("json")
+                opts.on_done(JSON.decode(JSON.encode(worker())))
+            end)
+            return job
+        end,
+    }
+end
+
 local Reflow = require("features.reflow")
 local Text2Epub = require("convert.text2epub")
 local Paths = require("utils.paths")
@@ -104,18 +122,28 @@ session = { identity = identity, fraction = 0.4 }
 local titles = Reflow._tocTitles(Text2Epub.parse("第一章 开始\n正文\n\n第二章 继续\n更多", { title = "测试", reflow = true }))
 Assert.eq(table.concat(titles, "|"), "第一章 开始|第二章 继续")
 
--- TXT：直接读文件
+-- TXT：子进程读文件、识别章节，只传回目录标题
 local txt = os.tmpname() .. ".txt"
 local f = io.open(txt, "w")
 f:write("第一章 开始\n正文\n\n第二章 继续\n更多")
 f:close()
 local preview, err
 Reflow.analyzeAsync(reader(txt, "rolling"), identity, function(p, e) preview, err = p, e end)
+Assert.is_nil(preview, "识别在子进程里，不在调用栈上同步完成")
 Stubs.flush()
 Assert.is_nil(err)
-Assert.eq(preview.text, "第一章 开始\n正文\n\n第二章 继续\n更多", "预览持有全文，确认后原样交给转换")
-Assert.len(preview.titles, 2)
+Assert.eq(jobs[#jobs].name, "reflow.analyze")
+Assert.is_nil(preview.text, "TXT 全文不进主进程，生成时子进程重读原文件")
+Assert.eq(table.concat(preview.titles, "|"), "第一章 开始|第二章 继续")
 Assert.is_nil(extracted_ui, "TXT 不走逐页提取")
+
+-- 取消：子进程结果不再回调
+preview, err = nil, nil
+Reflow.analyzeAsync(reader(txt, "rolling"), identity, function(p, e) preview, err = p, e end).cancel()
+Stubs.flush()
+Assert.is_true(jobs[#jobs].cancelled)
+Assert.is_nil(preview)
+Assert.is_nil(err)
 
 f = io.open(txt, "wb")
 f:write("\255\254bad")
@@ -128,7 +156,9 @@ Assert.not_nil(err)
 -- 其它格式：从打开的文档逐页提取
 local pdf_ui = reader("/books/a.pdf", "pdf")
 Reflow.analyzeAsync(pdf_ui, identity, function(p, e) preview, err = p, e end)
+Stubs.flush()
 Assert.eq(extracted_ui, pdf_ui)
+Assert.eq(preview.text, "第一章 开始\n正文\n第二章 继续\n更多", "预览持有提取的全文，确认后原样交给转换")
 Assert.len(preview.titles, 2)
 
 -- 原文档带目录：标题整行命中即切章（不是「第 X 章」写法也认），开头的内嵌目录不切出空章

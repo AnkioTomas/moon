@@ -178,6 +178,29 @@ do
     Assert.len(book.chapters, 1)
 end
 
+-- 合集卷首 / 书末印的目录：条目写法对不上正文标题，连续三个以上空章还原成上一章的段落，不丢字；单个空卷名照旧成章
+do
+    local book = Text2Epub.parse(table.concat({
+        "第一章", "甲。", "第一章　开端 Begin", "第二章　归来 Return", "第三章　远行 Away",
+        "序", "丁。", "第二卷", "第一章", "乙。", "第二章", "丙。",
+    }, "\n"), { title = "合集", reflow = true, headings = {
+        "第一章　开端 Begin", "第二章　归来 Return", "第三章　远行 Away", "第二卷", "序",
+    } })
+    local titles = {}
+    for _idx, chapter in ipairs(book.chapters) do titles[#titles + 1] = chapter.title end
+    Assert.eq(table.concat(titles, "|"), "第一章|序|第二卷|第一章|第二章")
+    Assert.is_true(book.chapters[1].html:find("<p>第三章　远行 Away</p>", 1, true) ~= nil)
+
+    -- 开头就是目录页：收进前言
+    book = Text2Epub.parse("一\n二\n三\n第一章\n正文。", {
+        title = "书", reflow = true, headings = { "一", "二", "三" },
+    })
+    titles = {}
+    for _idx, chapter in ipairs(book.chapters) do titles[#titles + 1] = chapter.title end
+    Assert.eq(table.concat(titles, "|"), "前言|第一章")
+    Assert.is_true(book.chapters[1].html:find("<p>二</p>", 1, true) ~= nil)
+end
+
 -- PDF 每页页眉就是章名：与本章标题相同的行不另起一章
 do
     local book = Text2Epub.parse(table.concat({
@@ -229,4 +252,59 @@ do
     text, err = Text2Epub.read(path)
     Assert.is_nil(text)
     Assert.eq(err, "无法读取文本文件")
+end
+
+-- build：读文件、解析、打包都在子进程（workers.job）里；没给 text 就读 source，错误原样回调
+do
+    local saved_preload, saved_loaded = package.preload["workers.job"], package.loaded["workers.job"]
+    local job_name, cancelled
+    package.loaded["workers.job"] = nil
+    package.preload["workers.job"] = function()
+        return {
+            run = function(worker, opts)
+                job_name = opts.name
+                opts.on_done(worker())
+                return { cancel = function() cancelled = true end }
+            end,
+        }
+    end
+    local Html2Epub = require("convert.html2epub")
+    local original_write = Html2Epub.write
+    local written, write_err
+    Html2Epub.write = function(opts) written = opts return write_err == nil or nil, write_err end
+
+    local path = os.tmpname()
+    local file = assert(io.open(path, "wb"))
+    file:write("第一章 开始\nhello\nworld")
+    file:close()
+    local ok, err
+    local handle = Text2Epub.build({ dest = "/tmp/out.epub", source = path, title = "书", reflow = true },
+        function(o, e) ok, err = o, e end)
+    Assert.eq(job_name, "epub.text")
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(written.dest, "/tmp/out.epub")
+    Assert.eq(written.chapters[1].title, "第一章 开始")
+    Assert.matches(written.chapters[1].html, "hello world", "ASCII 断行合并补空格")
+    handle.cancel()
+    Assert.is_true(cancelled)
+
+    -- 给了 text 就不读文件
+    os.remove(path)
+    ok, err = nil, nil
+    Text2Epub.build({ dest = "/tmp/out.epub", source = path, text = "正文", title = "书" },
+        function(o, e) ok, err = o, e end)
+    Assert.is_true(ok)
+
+    -- 读失败、写失败都回调错误
+    Text2Epub.build({ dest = "/tmp/out.epub", source = path }, function(o, e) ok, err = o, e end)
+    Assert.is_nil(ok)
+    Assert.eq(err, "无法读取文本文件")
+    write_err = "磁盘满"
+    Text2Epub.build({ dest = "/tmp/out.epub", text = "正文" }, function(o, e) ok, err = o, e end)
+    Assert.is_nil(ok)
+    Assert.eq(err, "磁盘满")
+
+    Html2Epub.write = original_write
+    package.preload["workers.job"], package.loaded["workers.job"] = saved_preload, saved_loaded
 end
