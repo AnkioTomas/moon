@@ -123,6 +123,7 @@ end
 local bookmarked, toggles = false, 0
 local ui = {
     dialog = {},
+    document = {},
     toc = { onShowToc = function() end },
     bookmark = {
         isPageBookmarked = function() return bookmarked end,
