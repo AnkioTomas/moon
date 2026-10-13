@@ -137,9 +137,10 @@ local Fake = {}
 local fake_freed = 0
 package.preload["ffi/blitbuffer"] = function()
     return {
-        TYPE_BBRGB32 = 1, COLOR_WHITE = 255, COLOR_BLACK = 0,
-        new = function(w, h)
-            local bb = { w = w, h = h, px = {} }
+        TYPE_BB8 = 1, TYPE_BBRGB32 = 5, COLOR_WHITE = 255, COLOR_BLACK = 0,
+        new = function(w, h, bbtype)
+            local bb = { w = w, h = h, px = {}, type = assert(bbtype, "Blitbuffer.new 必须给类型") }
+            function bb:getType() return self.type end
             function bb:getWidth() return self.w end
             function bb:getHeight() return self.h end
             function bb:fill() self.px = {} end
@@ -160,7 +161,9 @@ package.preload["ffi/blitbuffer"] = function()
             function bb:blitFrom(src, dx, dy, sx, sy, bw, bh)
                 each(self, src, dx, dy, sx, sy, bw, bh, function(x, y, v) self:set(x, y, v) end)
             end
+            -- 照 C 版 BB_add_blit_from：类型不同直接 exit(1)。
             function bb:addblitFrom(src, dx, dy, sx, sy, bw, bh, a)
+                assert(self.type == src.type, "addblitFrom 类型不一致")
                 each(self, src, dx, dy, sx, sy, bw, bh, function(x, y, v)
                     self:set(x, y, self:get(x, y) * (1 - a) + v * a)
                 end)
@@ -170,7 +173,8 @@ package.preload["ffi/blitbuffer"] = function()
     }
 end
 package.loaded["ffi/blitbuffer"] = nil
-Fake.new = function(w, h) return require("ffi/blitbuffer").new(w, h) end
+-- 灰度 Kindle 的锁屏画布是 BB8，斜边旋转的中间图必须跟着用 BB8。
+Fake.new = function(w, h) return require("ffi/blitbuffer").new(w, h, 1) end
 
 conf.lock_screen_poster_style = "slant_right"
 local tilted = Poster.blocks({ x = 0, y = 0, w = 540, h = 720 })

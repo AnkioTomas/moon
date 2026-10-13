@@ -113,7 +113,8 @@ end
 
 --- 把 src 绕中心旋转 angle（屏幕坐标，正值顺时针）贴到 dst 的 w×h 区域。
 --- Paeth 三次剪切 Sx(α)·Sy(β)·Sx(α)，α=-tan(θ/2)、β=sin θ；中间图尺寸由输出反推，
---- 调用方的 src 必须至少有 M.slantSourceSize 那么大。
+--- 调用方的 src 必须至少有 M.slantSourceSize 那么大，且与 dst 同类型：
+--- C 版 addblitFrom 遇到类型不同的两张图直接 exit(1)（灰度 Kindle 上 dst 是 BB8）。
 ---@param dst BlitBuffer
 ---@param src BlitBuffer 旋转后释放
 function M.rotateInto(dst, x, y, w, h, src, angle)
@@ -123,13 +124,13 @@ function M.rotateInto(dst, x, y, w, h, src, angle)
     local b1 = math.ceil(h / 2 + math.abs(beta) * a2)
     ---@type BlitBuffer
     ---@diagnostic disable-next-line: assign-type-mismatch
-    local mid = Blitbuffer.new(a2 * 2, b1 * 2, Blitbuffer.TYPE_BBRGB32)
+    local mid = Blitbuffer.new(a2 * 2, b1 * 2, dst:getType())
     mid:fill(Blitbuffer.COLOR_WHITE)
     shearX(mid, 0, 0, a2 * 2, b1 * 2, src, alpha)
     src:free()
     ---@type BlitBuffer
     ---@diagnostic disable-next-line: assign-type-mismatch
-    local last = Blitbuffer.new(a2 * 2, h, Blitbuffer.TYPE_BBRGB32)
+    local last = Blitbuffer.new(a2 * 2, h, dst:getType())
     last:fill(Blitbuffer.COLOR_WHITE)
     shearY(last, 0, 0, a2 * 2, h, mid, beta)
     mid:free()
@@ -160,7 +161,7 @@ local function slanted(shelf, w, h, angle)
     function wall:paintTo(bb, x, y)
         ---@type BlitBuffer
         ---@diagnostic disable-next-line: assign-type-mismatch
-        local src = Blitbuffer.new(sw, sh, Blitbuffer.TYPE_BBRGB32)
+        local src = Blitbuffer.new(sw, sh, bb:getType())
         src:fill(Blitbuffer.COLOR_WHITE)
         local Canvas = require("features.lockscreen.render")
         for _idx, block in ipairs(covers) do Canvas.paintBlock(src, block, sw, sh) end
