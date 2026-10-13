@@ -8,6 +8,8 @@
   Button:new{ text = "确定", icon = "check", variant = "primary", width = w, callback = fn }
 
 width/height 是物理像素：缺省宽按内容加左右内边距，高取 control.height。
+size = "small"：工具条用的紧凑规格（caption 字号、小图标、小内边距，高见 Button.heightOf）。
+trailing = true：图标放在文字后（下拉 chip：text = "全部", icon = "arrow_drop_down"）。
 enabled=false 时文字与边框改 disabled 色，点按被吞掉不回调。
 
 @module koplugin.book.ui.themes.widgets.button
@@ -26,6 +28,8 @@ local Text = require("ui.themes.widgets.text")
 ---@field text string|nil
 ---@field icon string|nil Material 图标名
 ---@field variant string normal/primary/ghost
+---@field size string|nil nil 标准 / small 紧凑
+---@field trailing boolean 图标在文字后
 ---@field enabled boolean
 ---@field width number|nil
 ---@field height number|nil
@@ -34,6 +38,8 @@ local Button = InputContainer:extend{
     text = nil,
     icon = nil,
     variant = "normal",
+    size = nil,
+    trailing = false,
     enabled = true,
     width = nil,
     height = nil,
@@ -46,29 +52,41 @@ local Button = InputContainer:extend{
 ---@param max_w number|nil 物理像素
 ---@return table
 function Button:content(t, ink, max_w)
+    local small = self.size == "small"
+    local icon_size = small and t.control.icon - t.space.xs or t.control.icon
     if self.icon and self.text then
         return Icon.label{
             name = self.icon,
             text = self.text,
-            size = t.control.icon,
+            size = icon_size,
             color = Blitbuffer.Color8(ink),
-            face = "cfont",
-            font_size = t.font.body,
+            face = small and "xx_smallinfofont" or "cfont",
+            font_size = small and t.font.caption or t.font.body,
             gap = Theme.px(t.space.xs),
             max_width = max_w,
+            trailing = self.trailing,
         }
     end
     if self.icon then
-        return Icon.widget{ name = self.icon, size = t.control.icon, color = Blitbuffer.Color8(ink) }
+        return Icon.widget{ name = self.icon, size = icon_size, color = Blitbuffer.Color8(ink) }
     end
-    return Text.line("body", self.text, { width = max_w, color = ink })
+    return Text.line(small and "caption" or "body", self.text, { width = max_w, color = ink })
+end
+
+--- 按钮缺省高度（物理像素）；工具条按它排版。
+---@param size string|nil nil 标准 / small 紧凑
+---@return number
+function Button.heightOf(size)
+    local t = Theme.current()
+    if size == "small" then return Theme.px(t.control.height - t.space.md) end
+    return Theme.px(t.control.height)
 end
 
 function Button:init()
     local t = Theme.current()
     local v = t.button[self.variant]
     local ink = self.enabled and v.ink or t.color.disabled
-    local pad = Theme.px(t.space.md)
+    local pad = Theme.px(self.size == "small" and t.space.sm or t.space.md)
     local content = self:content(t, ink, self.width and math.max(1, self.width - pad * 2))
     local border_color = v.border_color and (self.enabled and v.border_color or t.color.disabled)
     self[1] = Box:new{
@@ -79,7 +97,7 @@ function Button:init()
             radius = t.control.radius,
         },
         width = self.width or content:getSize().w + pad * 2,
-        height = self.height or Theme.px(t.control.height),
+        height = self.height or Button.heightOf(self.size),
         content,
     }
     local size = self[1]:getSize()
