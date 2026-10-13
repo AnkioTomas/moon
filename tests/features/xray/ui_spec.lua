@@ -29,6 +29,14 @@ package.preload["ui.themes.widgets.toast"] = function()
         return opts
     end }
 end
+local dialogs = {}
+package.preload["ui.themes.widgets.progress_dialog"] = function()
+    return { new = function(_, opts)
+        opts.show = function() dialogs[#dialogs + 1] = opts end
+        opts.close = function() opts.closed = true end
+        return opts
+    end }
+end
 local configured = true
 package.preload["ai"] = function()
     return { isConfigured = function() return configured end }
@@ -67,6 +75,9 @@ require("features.xray.ui").refresh(ui)
 Assert.eq(captured.ui, ui)
 Assert.eq(captured.identity, identity)
 Assert.is_true(captured.opts.force)
+Assert.eq(dialogs[#dialogs].text, "正在重新生成 X-Ray…")
+Assert.eq(dialogs[#dialogs].dismissable, false, "生成中不可取消")
+Assert.is_nil(dialogs[#dialogs].on_cancel)
 
 -- 离线：立即提示，不拉取。
 captured, connected = nil, false

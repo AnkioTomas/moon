@@ -18,6 +18,7 @@ require("l10n").apply()
 
 local Bluetooth = require("features.bluetooth")
 local List = require("ui.themes.widgets.list")
+local ProgressDialog = require("ui.themes.widgets.progress_dialog")
 local Toast = require("ui.themes.widgets.toast")
 local T = require("ffi/util").template
 local _ = require("gettext")
@@ -32,7 +33,9 @@ end
 --- 开 / 关蓝牙，结果用提示告知。
 ---@param on boolean
 function Devices.setEnabled(on)
-    local waiting = Toast:new{ text = on and _("正在打开蓝牙…") or _("正在关闭蓝牙…") }
+    local waiting = ProgressDialog:new{
+        title = _("蓝牙"), text = on and _("正在打开蓝牙…") or _("正在关闭蓝牙…"), dismissable = false,
+    }
     waiting:show()
     Bluetooth.setEnabled(on, function(ok, err)
         waiting:close()
@@ -51,7 +54,9 @@ end
 ---@param dev BookBluetoothDevice
 function Devices.pair(dev)
     local name = Bluetooth.name(dev)
-    local waiting = Toast:new{ text = T(_("正在配对 %1…\n请让设备保持配对模式"), name) }
+    local waiting = ProgressDialog:new{
+        title = name, text = _("正在配对，请让设备保持配对模式"), dismissable = false,
+    }
     waiting:show()
     Bluetooth.pair(dev, function(ok, err)
         waiting:close()

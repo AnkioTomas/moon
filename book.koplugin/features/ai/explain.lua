@@ -2,7 +2,7 @@
 划词「AI 解释」：结合当前阅读上下文解释选中的词句（多义词、典故、古文、外文、长难句）。
 「问书」：不划词，直接就已读内容提问（快捷面板 / 手势），材料同样只取到当前页，不剧透。
 
-非流式。等待和结果都是居中弹窗卡片；等待中关掉卡片即取消请求。
+非流式。等待是不可取消的进度窗（请求自带超时），结果是居中弹窗卡片。
 结果卡片可存为划线笔记（走 KOReader 原生 addNote，随注解同步）、追问（带上整条对话再问）、复制。
 回答只给纯文本：提示词要求不写 Markdown、不写思考过程，模型不听时由 `plain` 兜底剥掉
 （思考过程已由 `ai.client` 统一去掉）。
@@ -115,16 +115,6 @@ function Explain.plain(text)
     return Text.trim((table.concat(lines, "\n"):gsub("\n\n\n+", "\n\n")))
 end
 
----@param title string
----@param text string
----@param fields table|nil
----@return table
-local function card(title, text, fields)
-    local o = fields or {}
-    o.title, o.text, o.fullscreen = title, text, false
-    return require("ui.themes.widgets.text_viewer"):new(o)
-end
-
 --- 离线立即失败并提示；返回是否已联网。
 ---@return boolean
 local function online()
@@ -133,29 +123,21 @@ local function online()
     return false
 end
 
---- 发一轮请求：等待卡片，回来后换成结果卡片（存为笔记 / 追问 / 复制）。
+--- 发一轮请求：不可取消的进度窗等回答（请求自带超时），回来后换成结果卡片（存为笔记 / 追问 / 复制）。
 --- 追问把整条对话（含上一轮回答）带上再问，只有这一条链，不落盘。
 ---@param ui table ReaderUI
 ---@param title string
 ---@param messages table[] 末条是本轮 user 消息
 ---@param selection boolean 划词进来的：选区留给「存为笔记」，流程结束时清掉（KOReader 词典关窗也清）
 local function ask(ui, title, messages, selection)
-    local handle
     local function release()
         if selection then ui.highlight:clear() end
     end
-    local loading = card(title, _("AI 解释中…"), {
-        -- 结果回来时先清 handle 再关窗，所以只有用户关掉才会取消请求。
-        close_callback = function()
-            if handle then
-                handle.cancel()
-                release()
-            end
-        end,
-    })
+    local loading = require("ui.themes.widgets.progress_dialog"):new{
+        title = title, text = _("AI 解释中…"), dismissable = false,
+    }
     loading:show()
-    handle = require("ai").chat(messages, { max_tokens = 1000, timeout = 60 }, function(content, err)
-        handle = nil
+    require("ai").chat(messages, { max_tokens = 1000, timeout = 60 }, function(content, err)
         loading:close()
         local answer = content and Explain.plain(content) or ""
         if answer == "" then
@@ -198,12 +180,15 @@ local function ask(ui, title, messages, selection)
             variant = "primary",
             callback = function() require("device").input.setClipboardText(answer) end,
         }
-        viewer = card(title, answer, {
+        viewer = require("ui.themes.widgets.text_viewer"):new{
+            title = title,
+            text = answer,
+            fullscreen = false,
             buttons = buttons,
             close_callback = function()
                 if not handed_off then release() end
             end,
-        })
+        }
         viewer:show()
     end)
 end

@@ -68,7 +68,9 @@ local function showQrLogin()
             d:show()
         end
 
-        showDialog(Toast:new{ text = _("正在获取二维码…") })
+        showDialog(require("ui.themes.widgets.progress_dialog"):new{
+            title = _("微信扫码登录"), text = _("正在获取二维码…"), dismissable = false,
+        })
 
         --- 展示二维码并长连接等待扫码结果。
         ---@param uid string

@@ -112,7 +112,9 @@ end
 ---@param on_close fun()|nil
 ---@param owner table
 local function performSearch(identity, query, on_close, owner)
-    local info = Toast:new{ text = _("搜索中...") }
+    local info = require("ui.themes.widgets.progress_dialog"):new{
+        title = _("搜索结果"), text = _("搜索中..."), dismissable = false,
+    }
     info:show()
 
     local done = false

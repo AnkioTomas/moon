@@ -26,7 +26,9 @@ function M.open()
     end
     function owner:showBusy(text)
         self:closeBusy()
-        self.busy = require("ui.themes.widgets.toast"):new{ text = text }
+        self.busy = require("ui.themes.widgets.progress_dialog"):new{
+            title = _("番茄扫码登录"), text = text, dismissable = false,
+        }
         self.busy:show()
     end
     function owner:onLoginSuccess()

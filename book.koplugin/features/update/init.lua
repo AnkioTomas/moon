@@ -382,7 +382,9 @@ end
 ---@param plugin_root string
 function Update.manualCheck(plugin_root)
     local Toast = require("ui.themes.widgets.toast")
-    local loading = Toast:new{ text = _("正在检查月读更新…") }
+    local loading = require("ui.themes.widgets.progress_dialog"):new{
+        title = _("检查更新"), text = _("正在检查月读更新…"), dismissable = false,
+    }
     loading:show()
     Update.check(function(release, err)
         loading:close()

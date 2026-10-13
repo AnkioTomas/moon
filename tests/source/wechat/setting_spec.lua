@@ -106,11 +106,12 @@ confirm.ok_callback()
 Assert.is_true(cleared)
 Assert.eq(auth_changed, 1)
 
--- 扫码：先出等待提示，拿到二维码换成 QR 窗；代码换窗不算取消，用户关窗才取消轮询。
+-- 扫码：先出不可取消的进度窗，拿到二维码换成 QR 窗；代码换窗不算取消，用户关窗才取消轮询。
 logged_in = false
 Setting.rows(plugin)[1]().callback()
-local waiting = Themed.last("toast")
+local waiting = Themed.last("progress_dialog")
 Assert.eq(waiting.text, "正在获取二维码…")
+Assert.eq(waiting.dismissable, false)
 begin_cb({ uid = "u1", qr_payload = "weread://login?u1" })
 Assert.is_true(waiting.closed)
 Assert.eq(begin_cancels, 0)
@@ -122,10 +123,3 @@ local made = #Themed.made
 wait_cb(nil, "迟到", "error")
 Assert.eq(#Themed.made, made, "已取消的轮询不再弹提示")
 
--- 等待中关掉提示：取消取码，迟到的二维码不再弹。
-Setting.rows(plugin)[1]().callback()
-Themed.last("toast"):close()
-Assert.eq(begin_cancels, 1)
-made = #Themed.made
-begin_cb({ uid = "u2", qr_payload = "x" })
-Assert.eq(#Themed.made, made)

@@ -7,6 +7,7 @@ X-Ray 阅读 UI：底部分栏主菜单、TextViewer 详情、划词补全。
 require("l10n").apply()
 
 local List = require("ui.themes.widgets.list")
+local ProgressDialog = require("ui.themes.widgets.progress_dialog")
 local TextViewer = require("ui.themes.widgets.text_viewer")
 local Toast = require("ui.themes.widgets.toast")
 local Text = require("utils.text")
@@ -125,8 +126,10 @@ end
 ---@param force boolean|nil 为真则忽略已有缓存重新生成
 local function runFetch(ui, identity, force)
     local Fetch = require("features.xray.fetch")
-    local loading = Toast:new{
+    local loading = ProgressDialog:new{
+        title = _("X-Ray"),
         text = force and _("正在重新生成 X-Ray…") or _("正在生成 X-Ray…"),
+        dismissable = false,
     }
     loading:show()
     --- 拉取回调：关掉进行中提示，成功报三类数量，失败提示原因。
@@ -214,7 +217,7 @@ function UI.lookup(ui, word)
         return
     end
     if not ensureReady() then return end
-    local loading = Toast:new{ text = _("X-Ray 查询中…") }
+    local loading = ProgressDialog:new{ title = word, text = _("X-Ray 查询中…"), dismissable = false }
     loading:show()
     Fetch.lookupWord(ui, identity, word, function(entity, err)
         loading:close()
