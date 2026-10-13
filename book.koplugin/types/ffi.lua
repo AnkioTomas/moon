@@ -82,6 +82,9 @@ function BlitBuffer:getWidth() end
 ---@return number
 function BlitBuffer:getHeight() end
 
+---@return integer TYPE_BB8 / TYPE_BBRGB32 ...
+function BlitBuffer:getType() end
+
 function BlitBuffer:free() end
 
 ---@param path string
