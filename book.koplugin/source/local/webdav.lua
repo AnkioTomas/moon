@@ -761,7 +761,7 @@ end
 ---   <根>/.Moon+/Cache/<文件名>.po      进度
 ---   <根>/.Moon+/Stats/                 阅读统计：index.json 总表 + books/<md5>.json 按书（本插件私有，见 remote_data）
 --- 正文不下载，openWebdavAsync 按需拉到本地书库目录。
---- 与单本上行、排版替换同经 serial 排队：桌面同步、推脏、编辑上行不会交错读改写 books.sync。
+--- 与单本上行同经 serial 排队：桌面同步、推脏、编辑上行不会交错读改写 books.sync。
 ---@param cb fun(ok: boolean, err: string|nil, push_error: string|nil) push_error=整轮跑完但有本地改动没推上去
 ---@param opts { refresh?: boolean, dirty_only?: boolean, on_progress?: fun(text: string, done: integer|nil, total: integer|nil) }|nil refresh=用户点刷新：另列远端文件合并；dirty_only=只推本地改动
 ---@return { cancel: fun() }|nil
