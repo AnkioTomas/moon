@@ -239,11 +239,12 @@ function Desktop:activate()
     self.active = true
     notify(self.topbar, "activate")
     notify(self[self.tab], "activate")
-    -- 插件更新检查走桌面 Resume，不在插件 init / 网络回调里抢跑。
+    -- 插件更新检查、NTP 校时走桌面 Resume，不在插件 init / 网络回调里抢跑。
     local root = self.plugin and self.plugin.path
     if root then
         require("features.update").autoCheck(root)
     end
+    require("features.clock").autoSync()
 end
 
 Desktop.onResume = Desktop.activate
