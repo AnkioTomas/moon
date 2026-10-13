@@ -27,23 +27,16 @@ local Common = require("desktop.detail.common")
 -- 「阅读记录」里列出的天数；估算读完日期仍用 loadStats 取的全部记录。
 local RECENT_DAYS = 14
 
----@param code string 语言代码（zh / en-US / zh_CN …）
----@return string
-local function languageName(code)
-    local names = { zh = _("中文"), en = _("英文"), ja = _("日文") }
-    return names[code:lower():match("^(%a%a)")] or code
-end
-
 --- 头部第四行：「★ 9.6 微信读书 · 43.2 万字」；都没有返回 nil。
----@param book table
+---@param m BookMeta
 ---@return string|nil
-local function scoreLine(book)
+local function scoreLine(m)
     local parts = {}
-    if book.rating then
-        local by = ({ weread = _("微信读书"), douban = _("豆瓣") })[book.rating_by] or book.rating_by
-        parts[1] = string.format("★ %.1f", book.rating) .. (by and " " .. by or "")
+    if m.rating then
+        local by = ({ weread = _("微信读书"), douban = _("豆瓣") })[m.rating.by] or m.rating.by
+        parts[1] = string.format("★ %.1f", m.rating.score) .. (by and " " .. by or "")
     end
-    local words = book.words
+    local words = m.words
     if words then
         parts[#parts + 1] = words >= 10000 and T(_("%1 万字"), string.format("%.1f", words / 10000))
             or T(_("%1 字"), words)
@@ -60,6 +53,7 @@ local function infoItems(book, owner)
     local format = book.format or (name and name:match("%.(%w+)$"))
     local size = tonumber(book.filesize) or (path and require("libs/libkoreader-lfs").attributes(path, "size"))
     local added = tonumber(book.inserted_at) or 0
+    local m = book.meta or {}
     local items = {}
     for _idx, item in ipairs({
         { _("来源"), sid == "zlib" and _("Z站") or sid == "opds" and _("OPDS")
@@ -67,8 +61,8 @@ local function infoItems(book, owner)
         { _("格式"), format and format:upper() },
         { _("大小"), size and size > 0 and require("util").getFriendlySize(size) },
         { _("加入"), added > 0 and os.date("%Y-%m-%d", added) },
-        { _("语言"), book.language and languageName(book.language) },
-        { "ISBN", book.isbn },
+        { _("语言"), m.language and ({ zh = _("中文"), en = _("英文"), ja = _("日文") })[m.language] or m.language },
+        { "ISBN", m.isbn },
         { _("文件"), name, true },
     }) do
         if item[2] and item[2] ~= "" then items[#items + 1] = item end
@@ -248,19 +242,20 @@ function Detail:buildHead(w, owner, primary)
         VerticalSpan:new{ width = small },
         Text.line("body", author ~= "" and author or _("未知作者"), { width = sw }),
     }
-    local meta = {}
-    if book.series and book.series ~= "" then meta[#meta + 1] = book.series end
-    if book.category and book.category ~= "" then meta[#meta + 1] = (book.category:gsub("[,\n]+", " · ")) end
+    local tags = {}
+    if book.series and book.series ~= "" then tags[#tags + 1] = book.series end
+    if book.category and book.category ~= "" then tags[#tags + 1] = (book.category:gsub("[,\n]+", " · ")) end
+    local m = book.meta or {}
     local pub = {}
-    if book.publisher then pub[#pub + 1] = book.publisher end
-    if book.published then pub[#pub + 1] = book.published end
-    for _idx, line in ipairs({ table.concat(meta, " · "), table.concat(pub, " · ") }) do
+    if m.publisher then pub[#pub + 1] = m.publisher end
+    if m.published then pub[#pub + 1] = m.published end
+    for _idx, line in ipairs({ table.concat(tags, " · "), table.concat(pub, " · ") }) do
         if line ~= "" then
             top[#top + 1] = VerticalSpan:new{ width = small }
             top[#top + 1] = Text.line("caption", line, { width = sw, color = t.color.muted })
         end
     end
-    local score = scoreLine(book)
+    local score = scoreLine(m)
     if score then
         top[#top + 1] = VerticalSpan:new{ width = Theme.px(t.space.sm) }
         top[#top + 1] = Text.line("body", score, { width = sw })

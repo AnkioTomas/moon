@@ -178,7 +178,7 @@ local function commitFiles(files, known, full_snapshot)
         -- 换了内容的行即便走快照也要本地可信写入：reconcile 对脏行保留旧书名。
         elseif (f.changed or not full_snapshot) and not BookDB.upsert({
             source_id = SOURCE_ID, stable_id = f.path, md5 = f.md5,
-            title = f.title, authors = f.authors, intro = f.intro, language = f.language,
+            title = f.title, authors = f.authors, intro = f.intro, meta = { language = f.language },
             category = f.category, series = f.series,
             inserted_at = moved and moved.inserted_at or os.time(), path = f.path,
         }) then

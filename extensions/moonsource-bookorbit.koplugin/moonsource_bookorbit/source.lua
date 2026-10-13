@@ -196,7 +196,23 @@ function Source:syncBooksAsync(opts, cb)
     end }
 end
 
---- 详情：写回作者 / 简介 / 系列，回调原始详情（开书要 files）。
+--- KoreaderCatalogBookDetail → 书库行。rating 是用户自己打的分，不是公共评分，不收。
+---@param id string 源 id
+---@param stable_id string
+---@param detail table
+---@return Book
+local function detailRow(id, stable_id, detail)
+    return {
+        source_id = id, stable_id = stable_id, title = detail.title,
+        authors = authorsOf(detail.authors), intro = detail.description, series = detail.seriesName,
+        meta = {
+            publisher = detail.publisher, published = detail.publishedDate or detail.publishedYear,
+            language = detail.language, isbn = detail.isbn13 or detail.isbn10,
+        },
+    }
+end
+
+--- 详情：写回作者 / 简介 / 系列 / 扩展元数据，回调原始详情（开书要 files）。
 ---@param stable_id string
 ---@param cb fun(detail: table|nil, err: string|nil)
 ---@return HttpJob
@@ -204,10 +220,7 @@ function Source:detail(stable_id, cb)
     return self.client:json("GET", "/koreader/plugin/catalog/books/" .. stable_id, { deviceId = deviceId() }, nil,
         function(detail, err)
             if not detail then return cb(nil, err) end
-            require("book.store").rememberMany({ {
-                source_id = self.id, stable_id = stable_id, title = detail.title,
-                authors = authorsOf(detail.authors), intro = detail.description, series = detail.seriesName,
-            } })
+            require("book.store").rememberMany({ detailRow(self.id, stable_id, detail) })
             cb(detail)
         end)
 end
@@ -218,10 +231,7 @@ end
 function Source:getDetailAsync(identity, cb)
     return self:detail(identity.stable_id, function(detail, err)
         if not detail then return cb(nil, err) end
-        cb({
-            source_id = self.id, stable_id = identity.stable_id, title = detail.title,
-            authors = authorsOf(detail.authors), intro = detail.description, series = detail.seriesName,
-        })
+        cb(detailRow(self.id, identity.stable_id, detail))
     end)
 end
 

@@ -82,21 +82,17 @@ function Mapper.book(row)
         category = book.category,
         series = book.series,
         cover = cover,
-        publisher = book.publisher,
-        isbn = book.isbn,
-        language = book.language,
+        -- publishTime 形如 "2022-01-01 00:00:00"；newRating 是千分制推荐值（955 = 95.5%）。
+        -- 规范化（只留年月、10 分制一位小数）在 BookDB 入库时做。
+        meta = {
+            publisher = book.publisher,
+            published = book.publishTime,
+            isbn = book.isbn,
+            language = book.language,
+            words = book.totalWords,
+            rating = { score = (tonumber(book.newRating) or 0) / 100, by = "weread" },
+        },
     }
-    -- publishTime 形如 "2022-01-01 00:00:00"，日多为占位，只留年月
-    if type(book.publishTime) == "string" then
-        out.published = book.publishTime:match("^(%d%d%d%d%-%d%d)")
-    end
-    local words = tonumber(book.totalWords) or 0
-    if words > 0 then out.words = words end
-    -- newRating 是千分制推荐值（955 = 95.5%），折成 10 分制保留一位，与刮削一致
-    local rating = tonumber(book.newRating) or 0
-    if rating > 0 then
-        out.rating, out.rating_by = math.floor(rating / 10 + 0.5) / 10, "weread"
-    end
     local intro = book.intro or book.description or book.summary
     if type(intro) == "string" and intro ~= "" then
         out.intro = Text.stripHtml(intro)

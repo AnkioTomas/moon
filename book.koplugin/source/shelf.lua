@@ -23,10 +23,11 @@ local Shelf = {}
 --- 用远端书架快照对账 books 表；pushed 由源在 add/delete 上行后自行累加。
 ---@param source_id string
 ---@param books Book[]
+---@param force boolean|nil 用户强制刷新：快照里的 meta 覆盖本地已有键
 ---@return SyncResult|nil result
 ---@return string|nil err
-function Shelf.reconcile(source_id, books)
-    local ok, hidden = require("book.books_db").reconcile(source_id, books)
+function Shelf.reconcile(source_id, books, force)
+    local ok, hidden = require("book.books_db").reconcile(source_id, books, { force = force })
     if not ok then return nil, "failed to reconcile books" end
     return { pulled = #books, pushed = 0, hidden = hidden, conflicts = 0, skipped = false }
 end
@@ -118,7 +119,7 @@ end
 ---@param source_id string
 ---@param remote table 书架远端（见模块头注释）
 ---@param to_books fun(wire: table): Book[] 书架 wire 映射（封面等副产物由源在这里自己记）
----@param opts { dirty_only?: boolean, on_progress?: ShelfReport }|nil
+---@param opts { dirty_only?: boolean, force?: boolean, on_progress?: ShelfReport }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }
 function Shelf.syncAsync(source_id, remote, to_books, opts, cb)
@@ -163,7 +164,7 @@ function Shelf.syncAsync(source_id, remote, to_books, opts, cb)
     ---@param pushed integer
     local function reconcile(books, pushed)
         report(T(_("正在写入书架（%1 本）"), #books))
-        local result, err = Shelf.reconcile(source_id, books)
+        local result, err = Shelf.reconcile(source_id, books, opts.force)
         if not result then cb(nil, err); return end
         result.pushed = pushed
         cb(result)

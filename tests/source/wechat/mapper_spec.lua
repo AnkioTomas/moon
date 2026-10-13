@@ -37,23 +37,19 @@ do
     Assert.is_nil(cover)
 end
 
--- bookInfo 扩展元数据：出版日期截到年月，newRating 千分制换算成十分制
+-- bookInfo 扩展元数据原样交给 meta（规范化在 BookDB 入库时做），newRating 千分制折成十分制
 do
     local b = Mapper.book({
         bookId = "wx-meta", publisher = "湖南文艺出版社", publishTime = "2022-01-01 00:00:00",
         isbn = "9787572606878", language = "zh", totalWords = 68000, newRating = 955,
     })
-    Assert.eq(b.publisher, "湖南文艺出版社")
-    Assert.eq(b.published, "2022-01")
-    Assert.eq(b.isbn, "9787572606878")
-    Assert.eq(b.language, "zh")
-    Assert.eq(b.words, 68000)
-    Assert.eq(b.rating, 9.6)
-    Assert.eq(b.rating_by, "weread")
-    local bare = Mapper.book({ bookId = "wx-bare", totalWords = 0 })
-    Assert.is_nil(bare.words)
-    Assert.is_nil(bare.rating)
-    Assert.is_nil(bare.rating_by)
+    Assert.eq(b.meta.publisher, "湖南文艺出版社")
+    Assert.eq(b.meta.published, "2022-01-01 00:00:00")
+    Assert.eq(b.meta.isbn, "9787572606878")
+    Assert.eq(b.meta.language, "zh")
+    Assert.eq(b.meta.words, 68000)
+    Assert.eq(b.meta.rating.score, 9.55)
+    Assert.eq(b.meta.rating.by, "weread")
 end
 
 -- 微信作品完结 finished=1 不当作用户读完

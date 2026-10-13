@@ -79,7 +79,12 @@ local upsert_ok = true
 local downloaded = {} -- stable_id → true
 package.preload["book.books_db"] = function()
     return {
-        META = { "publisher", "published", "isbn", "language", "words", "rating", "rating_by" },
+        setMeta = function(row, overwrite)
+            Assert.is_true(overwrite)
+            db_row.meta = db_row.meta or {}
+            for key, value in pairs(row.meta) do db_row.meta[key] = value end
+            return true
+        end,
         isDownloaded = function(_source_id, stable_id) return downloaded[stable_id] == true end,
         setRead = function(source_id, stable_id, value)
             set_read = { source_id, stable_id, value }
@@ -600,13 +605,14 @@ local kbook = { source_id = "ext.kavita", stable_id = "k1", title = "K", percent
 Detail.open(desktop, "library", kbook)
 page = desktop.detail
 Assert.eq(asked, 1)
-db_row = { title = "K", intro = "补到的简介", authors = "甲", publisher = "某出版社", published = "2020-05",
-    words = 432100, rating = 9.6, rating_by = "weread", language = "zh-CN", isbn = "9787000000000" }
+db_row = { title = "K", intro = "补到的简介", authors = "甲", meta = { publisher = "某出版社", published = "2020-05",
+    words = 432100, rating = { score = 9.6, by = "weread" }, language = "zh", isbn = "9787000000000" } }
 Kit.dirty = {}
 owner_cb({})
 Assert.eq(page.book.intro, "补到的简介")
 Assert.eq(page.book.authors, "甲")
-Assert.eq(page.book.words, 432100)
+Assert.eq(page.book.meta.words, 432100)
+Assert.is_true(db_row.meta.detail_at ~= nil, "拉过详情记 detail_at，之后不再自动拉")
 Assert.eq(page.book.percent, 30, "列表专有字段不丢")
 Assert.is_true(dirtied(page))
 local shown = Kit.texts(page)
@@ -618,11 +624,11 @@ page:close()
 Assert.is_false(owner_cancelled)
 Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
 desktop.detail:close()
-Assert.eq(asked, 1, "简介与元数据都有不请求")
-db_row = { title = "K", intro = "简介" }
+Assert.eq(asked, 1, "有简介且拉过详情不请求")
+db_row = { title = "K", intro = "简介", meta = { words = 1 } }
 Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
 desktop.detail:close()
-Assert.eq(asked, 2, "有简介但没有扩展元数据仍请求")
+Assert.eq(asked, 2, "书架快照带了部分元数据但没拉过详情仍请求")
 owner_cancelled = false
 db_row, net_online = { title = "K" }, false
 Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })

@@ -14,14 +14,18 @@ local Themed = require("support.theme_stubs")
 -- 往返桩：encode 登记表并发一个令牌串，decode 凭令牌取回（不是令牌就报错，同真解析器）。
 local encoded = {}
 local ARRAY = {}
+-- decode 同 LuaJSON 是可调用表，带 simple 模式（null → nil）。
+local SIMPLE = {}
+local decode_mode
 local JSON = {
     encode = function(value)
         encoded[#encoded + 1] = value
         return "\0json" .. #encoded
     end,
-    decode = function(text)
+    decode = setmetatable({ simple = SIMPLE }, { __call = function(_self, text, mode)
+        decode_mode = mode
         return encoded[tonumber(text:match("^%z?json(%d+)$"))] or error("not json: " .. text)
-    end,
+    end }),
     util = { InitArray = function(t) return setmetatable(t, ARRAY) end },
 }
 package.loaded["json"] = JSON
@@ -184,7 +188,9 @@ Assert.matches(err, "密码")
 -- 开书：详情写回元数据，按偏好挑 epub（不挑有声书 / pdf），下载原件并登记路径。
 routes["GET /koreader/plugin/catalog/books/1"] = function(opts)
     Assert.eq(query(opts, "deviceId"), "dev-1")
-    return json({ id = 1, title = "长夜", authors = { "甲" }, description = "简介", seriesName = "夜", files = {
+    return json({ id = 1, title = "长夜", authors = { "甲" }, description = "简介", seriesName = "夜",
+        publisher = "某出版社", publishedDate = "2008-01-01T00:00:00.000Z", publishedYear = 2008,
+        language = "zh", isbn10 = "7000000000", isbn13 = "9787000000000", rating = 5, files = {
         { id = 10, format = "m4b" }, { id = 11, format = "PDF" }, { id = 12, format = "EPUB", sizeBytes = 9 },
     } })
 end
@@ -193,6 +199,11 @@ Assert.eq(path, WORK .. "/1/12.epub")
 Assert.eq(touched[1].stable_id, "1")
 Assert.eq(remembered["1"].intro, "简介")
 Assert.eq(remembered["1"].authors, "甲")
+Assert.eq(remembered["1"].meta.publisher, "某出版社")
+Assert.eq(remembered["1"].meta.published, "2008-01-01T00:00:00.000Z", "原样交给 BookDB 规范化")
+Assert.eq(remembered["1"].meta.language, "zh")
+Assert.eq(remembered["1"].meta.isbn, "9787000000000", "优先 ISBN-13")
+Assert.is_nil(remembered["1"].meta.rating, "用户自评分不当公共评分")
 Assert.matches(calls[#calls].url, "/koreader/plugin/catalog/files/12/download$")
 Assert.eq(calls[#calls].headers["x-auth-key"], "k", "下载带鉴权头")
 Assert.is_nil(io.open(path .. ".part"), "临时文件改名后不留")
@@ -229,6 +240,10 @@ download.body = "PK\3\4epub"
 local detail = run("getDetailAsync", { source_id = "ext.bookorbit", stable_id = "1" })
 Assert.eq(detail.intro, "简介")
 Assert.eq(detail.title, "长夜")
+Assert.eq(detail.meta.isbn, "9787000000000")
+Assert.eq(decode_mode, SIMPLE, "响应按 simple 模式解析（null → nil）")
+routes["GET /koreader/plugin/catalog/books/4"] = json({ id = 4, title = "无日期", publishedYear = 1999, files = {} })
+Assert.eq(run("getDetailAsync", { source_id = "ext.bookorbit", stable_id = "4" }).meta.published, 1999, "没有日期退到年份")
 
 -- 封面：缩略图接口带鉴权头。
 local cover = source:coverRequest({ stable_id = "1" })

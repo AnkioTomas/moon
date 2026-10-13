@@ -115,6 +115,23 @@ local function authorsOf(metadata)
     return #authors > 0 and table.concat(authors, " / ") or nil
 end
 
+--- SeriesMetadataDto 写回书库的字段（作者 / 简介 / 出版社 / 年份 / 语言）。
+--- Kavita 的未知值是空串 / 0 / 空表，入库时由 BookDB 规范化丢掉。
+---@param row table 至少带 source_id / stable_id
+---@param metadata table
+---@return table row
+local function withMetadata(row, metadata)
+    local publishers = {}
+    for _idx, person in ipairs(metadata.publishers or {}) do publishers[#publishers + 1] = person.name end
+    row.authors, row.intro = authorsOf(metadata), metadata.summary
+    row.meta = {
+        publisher = table.concat(publishers, " / "),
+        published = metadata.releaseYear,
+        language = metadata.language,
+    }
+    return row
+end
+
 --- Kavita 的时间是不带时区的 UTC（`2026-09-29T20:07:19.193`）。
 ---@param value any
 ---@return integer|nil
@@ -178,10 +195,9 @@ function Source:backfillMeta(series_ids)
         job = self.client:json("GET", "/api/Series/metadata", { seriesId = series_id }, nil, function(metadata)
             if cancelled then return end
             if not metadata then return stop() end
-            require("book.store").rememberMany({ {
-                source_id = self.id, stable_id = series_id,
-                authors = authorsOf(metadata), intro = metadata.summary,
-            } })
+            require("book.store").rememberMany({
+                withMetadata({ source_id = self.id, stable_id = series_id }, metadata),
+            })
             done[series_id] = true
             timer = step
             UIManager:scheduleIn(0.3, timer)
@@ -204,10 +220,7 @@ function Source:getDetailAsync(identity, cb)
     return self.client:json("GET", "/api/Series/metadata", { seriesId = splitId(identity.stable_id) }, nil,
         function(metadata, err)
             if not metadata then return cb(nil, err) end
-            local book = {
-                source_id = self.id, stable_id = identity.stable_id,
-                authors = authorsOf(metadata), intro = metadata.summary,
-            }
+            local book = withMetadata({ source_id = self.id, stable_id = identity.stable_id }, metadata)
             require("book.store").rememberMany({ book })
             cb(book)
         end)
@@ -219,7 +232,7 @@ end
 
 --- 书架：所选库的全部 series 交给书库对账。Kavita 没有删书接口，dirty_only 跳过，
 --- 本地删除留墓碑，对账不会复活。
---- 远端快照（库 + 每本 id/名称/库名）的指纹没变、本地书架也非空时跳过对账：
+--- 远端快照（库 + 每本 id/名称/库名/字数）的指纹没变、本地书架也非空时跳过对账：
 --- 本地书架只会被对账和删除改动，删除留墓碑本来就不用对账；force 刷新照常对账。
 ---@param opts { dirty_only?: boolean, force?: boolean, on_progress?: fun(text: string|nil, done: integer|nil, total: integer|nil) }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
@@ -249,7 +262,7 @@ function Source:syncBooksAsync(opts, cb)
             and #require("book.books_db").libraryStableIdsBySource(self.id) > 0 then
             result = { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
         else
-            result, err = require("source.shelf").reconcile(self.id, books)
+            result, err = require("source.shelf").reconcile(self.id, books, opts.force)
             if not result then return cb(nil, err) end
             cfg.shelf_fingerprint = fingerprint
             settings.saveSource(ID, cfg)
@@ -279,8 +292,10 @@ function Source:syncBooksAsync(opts, cb)
                     stable_id = tostring(series.id),
                     title = series.name,
                     category = series.libraryName,
+                    meta = { words = series.wordCount },
                 }
-                prints[#prints + 1] = table.concat({ series.id, series.name or "", series.libraryName or "" }, "\31")
+                prints[#prints + 1] = table.concat({ series.id, series.name or "", series.libraryName or "",
+                    tonumber(series.wordCount) or 0 }, "\31")
                 if tonumber(series.format) == 1 then comics[#comics + 1] = series end
             end
             if #list >= PAGE_SIZE then
@@ -342,10 +357,9 @@ function Source:fetchToc(series_id, cb)
             end
             step("GET", "/api/Series/metadata", { seriesId = series_id }, function(metadata)
                 if metadata then
-                    require("book.store").rememberMany({ {
-                        source_id = self.id, stable_id = series_id, title = series.name,
-                        authors = authorsOf(metadata), intro = metadata.summary,
-                    } })
+                    require("book.store").rememberMany({
+                        withMetadata({ source_id = self.id, stable_id = series_id, title = series.name }, metadata),
+                    })
                 end
                 cb(toc)
             end)

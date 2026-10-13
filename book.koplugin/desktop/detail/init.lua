@@ -112,21 +112,17 @@ function Detail:mergeStored()
     if self.origin ~= "library" or not (book.source_id and book.stable_id) then return nil end
     local BookDB = require("book.books_db")
     local row = BookDB.get(book.source_id, book.stable_id)
-    if row then
-        for _idx, col in ipairs(BookDB.META) do book[col] = row[col] end
-    end
+    if row then book.meta = row.meta end
     return row
 end
 
---- 库内书缺简介，或一项扩展元数据都没有（书架快照常不带）且在线时，向属主源要一次详情；
---- 源负责落库，这里重读后并简介 / 作者 / 扩展元数据再重画。离线不请求，不弹联网。
+--- 库内书缺简介，或还没拉过详情（书架快照的扩展元数据常不全）且在线时，向属主源要一次详情；
+--- 源负责落库，成功后记 meta.detail_at，之后只靠强制刷新更新。离线不请求，不弹联网。
 ---@param row Book|nil mergeStored 读到的 books 行
 function Detail:fetchMissingDetail(row)
     if not row then return end
+    if row.intro and row.meta and row.meta.detail_at then return end
     local BookDB = require("book.books_db")
-    local has_meta = false
-    for _idx, col in ipairs(BookDB.META) do has_meta = has_meta or row[col] ~= nil end
-    if row.intro and has_meta then return end
     local book = self.book
     local owner = require("desktop.detail.common").bookOwnerSource(book, self.source)
     if not (owner and owner.getDetailAsync and require("ui/network/manager"):isConnected()) then return end
@@ -134,10 +130,10 @@ function Detail:fetchMissingDetail(row)
     self._detail_job = owner:getDetailAsync(identity, function(detail)
         self._detail_job = nil
         if self.closed or not detail then return end
+        BookDB.setMeta({ source_id = book.source_id, stable_id = book.stable_id, meta = { detail_at = os.time() } }, true)
         local fresh = BookDB.get(book.source_id, book.stable_id)
         if not fresh then return end
-        book.intro, book.authors = fresh.intro or book.intro, fresh.authors or book.authors
-        for _idx, col in ipairs(BookDB.META) do book[col] = fresh[col] end
+        book.intro, book.authors, book.meta = fresh.intro or book.intro, fresh.authors or book.authors, fresh.meta
         self:refresh()
     end)
 end

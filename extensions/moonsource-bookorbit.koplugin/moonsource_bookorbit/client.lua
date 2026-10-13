@@ -93,7 +93,8 @@ function Client:json(method, path, query, body, cb)
             return
         end
         -- 反代可能回 HTML 错误页：解析失败按请求失败处理，不让异常冒到回调链外。
-        local ok, data = pcall(JSON.decode, raw)
+        -- simple：null 解成 nil。默认模式解成 json.util.null 函数，写进书库会绑定失败、整行丢掉。
+        local ok, data = pcall(JSON.decode, raw, JSON.decode.simple)
         if ok and type(data) == "table" then
             cb(data, nil, code)
         else
