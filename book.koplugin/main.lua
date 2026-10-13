@@ -24,6 +24,7 @@ allowInitModules(debug.getinfo(1, "S").source:match("^@(.*)/"))
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger = require("utils.log")
+logger.boot()
 require("l10n")
 
 local SourceRegistry = require("source.registry")
