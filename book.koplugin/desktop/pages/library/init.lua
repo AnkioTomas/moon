@@ -551,7 +551,7 @@ function Library:buildPage(ctx)
     local g = self:currentGroup()
     if g.key then
         local back = Button:new{
-            icon = "arrow_back", text = _("上级"), size = "small",
+            icon = "arrow_back", variant = "ghost", size = "small",
             callback = function() self:closeGroup() end,
         }
         local name = self.filter[g.key] or g.empty
