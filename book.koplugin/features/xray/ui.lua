@@ -163,6 +163,54 @@ function UI.refresh(ui, identity)
     runFetch(ui, identity, true)
 end
 
+--- 分析全书：前台取出全书正文（不可取消），再交给后台任务逐段请求 AI；
+--- 这本书已在分析就只跟随它的进度。
+---@param ui table ReaderUI
+---@param identity BookIdentity
+function UI.scanBook(ui, identity)
+    if not ensureReady() then return end
+    local TaskDialog = require("workers.ui.task_dialog")
+    local key = "xray\0" .. identity.source_id .. "\0" .. identity.stable_id
+    local running = require("workers.tasks").get(key)
+    if running then
+        TaskDialog.follow(running)
+        return
+    end
+    local function start()
+        local dialog = ProgressDialog:new{ title = _("X-Ray"), dismissable = false }
+        dialog:show()
+        require("features.reflow.extract").run(ui, function(text, err)
+            dialog:close()
+            if not text then
+                info(T(_("X-Ray 失败：%1"), tostring(err)))
+                return
+            end
+            local title = Text.trim((identity.book or {}).title)
+            TaskDialog.start{
+                key = key,
+                kind = "ai",
+                title = title ~= "" and title or _("X-Ray"),
+                restartable = true,
+                run = require("features.xray.fetch").scanBook(identity, text),
+                retryable = function() return true end,
+                on_done = function(result)
+                    if not result.ok then
+                        info(T(_("X-Ray 失败：%1"), tostring(result.err or _("未知错误"))))
+                        return
+                    end
+                    info(_("X-Ray 全书分析完成"))
+                    refreshMainTab(main_holder)
+                end,
+            }
+        end, function(step, done, total) dialog:update(step, done, total) end)
+    end
+    require("ui.themes.widgets.confirm"):new{
+        text = _("逐段读取全书，由 AI 一次性提取所有人物、地点和专有名词，结果包含剧透。书越长请求越多、耗时越久，可转到后台运行。继续？"),
+        ok_text = _("继续"),
+        ok_callback = start,
+    }:show()
+end
+
 --- 打开 X-Ray 主菜单（底部分栏，左上角重新生成）。
 ---@param ui table|nil
 ---@param initial_tab string|nil
@@ -181,7 +229,10 @@ function UI.openMain(ui, initial_tab)
         items = rowsForTab(initial_tab, identity),
         left_icon = "sync",
         left_callback = function()
-            UI.refresh(ui, identity)
+            require("ui.themes.widgets.sheet"):new{ title = _("X-Ray"), items = {
+                { text = _("按当前位置更新"), callback = function() UI.refresh(ui, identity) end },
+                { text = _("分析全书（含剧透）"), callback = function() UI.scanBook(ui, identity) end },
+            } }:show()
         end,
         tabs = { tabs = Kinds, active = initial_tab, on_tab = function(tab_id)
             holder.menu.subtitle = Kinds.label(tab_id)

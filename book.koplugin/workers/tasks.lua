@@ -1,7 +1,8 @@
 --[[--
-后台任务队列：用户发起、耗时长的操作，按 kind 分四类：
+后台任务队列：用户发起、耗时长的操作，按 kind 分五类：
 `download` 资源下载（书城、字典、输入法词库）、`sync` 书库同步、`cache` 书籍缓存、
-`online` ankio.net 公共接口（天气 / 一言 / 摸鱼日报 / 必应；自动入队，不弹进度窗）。
+`online` ankio.net 公共接口（天气 / 一言 / 摸鱼日报 / 必应；自动入队，不弹进度窗）、
+`ai` 逐段调用 AI 的整书分析（X-Ray 全书分析）。
 
 同类可以并行，异类互斥：有任务在跑（或退避占位）时只放行同类；队首排队的是异类时后面的同类不插队，
 免得异类饿死。key 必填且唯一：同 key 还在排队的旧任务被新任务替换（旧的按取消处理），已在执行的拒绝新任务。
@@ -33,7 +34,7 @@ local Guard = require("ui.guard")
 
 local Tasks = {}
 
----@alias BookTaskKind "download"|"sync"|"cache"|"online"
+---@alias BookTaskKind "download"|"sync"|"cache"|"online"|"ai"
 
 ---@class BookTask
 ---@field key string
@@ -60,7 +61,7 @@ local MAX_ATTEMPTS = 3
 local RETRY_DELAY_SECONDS = 15
 local MAX_PENDING = 64
 local MAX_FINISHED = 10
-local KINDS = { download = true, sync = true, cache = true, online = true }
+local KINDS = { download = true, sync = true, cache = true, online = true, ai = true }
 
 ---@type BookTask[] 未结束任务，入队顺序
 local list = {}

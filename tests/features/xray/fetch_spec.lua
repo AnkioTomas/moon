@@ -194,3 +194,57 @@ Assert.len(prompts, 0)
 result, failure = run({}, {})
 Assert.is_nil(result)
 Assert.len(prompts, 1)
+
+-- 分段：优先在换行处断开；没有合适换行时不切断 UTF-8 字符
+local parts = Fetch.chunks("aaaa\nbbbb\ncc", 6)
+Assert.eq(parts[1], "aaaa")
+Assert.eq(parts[2], "bbbb")
+Assert.eq(parts[3], "cc")
+parts = Fetch.chunks("一二三四", 7)
+Assert.eq(parts[1], "一二")
+Assert.eq(parts[2], "三四")
+Assert.len(Fetch.chunks("", 8), 0)
+Assert.len(Fetch.chunks("  \n  ", 8), 0)
+
+-- 全书分析：逐段请求、每段落库；只带本段提到的已收录实体；失败后重跑从断点续
+package.loaded["features.xray.marks"] = { invalidate = function() end }
+local chunk_a = string.rep("x", 20000) .. " Mina at Whitby"
+local chunk_b = string.rep("y", 20000) .. " Lucy met Mina"
+entity_rows, prompts = {
+    { kind = "character", name = "Old", aliases = {}, role = "", description = "老管家", updated_at = 1 },
+}, {}
+replies = {
+    { characters = { { name = "Mina", aliases = {} }, { name = "Ghost", aliases = {} } }, locations = {}, terms = {} },
+}
+local scan = Fetch.scanBook(identity, chunk_a .. "\n" .. chunk_b)
+local reports = {}
+---@type { ok: boolean, err: any }
+local outcome
+local function attempt()
+    outcome = nil
+    scan(function(text, count, total) reports[#reports + 1] = { text, count, total } end,
+        function(res) outcome = res end)
+end
+attempt()
+Assert.eq(outcome.ok, false, "第二段没回复，本次尝试失败")
+Assert.len(prompts, 2)
+Assert.is_nil(prompts[1]:find("Old", 1, true), "本段没提到的实体不进提示词")
+Assert.matches(prompts[2], "%- Mina")
+Assert.eq(reports[1][2], 0)
+Assert.eq(reports[1][3], 2)
+local names_after = {}
+for _idx, row in ipairs(entity_rows) do names_after[row.name] = true end
+Assert.is_true(names_after.Old)
+Assert.is_true(names_after.Mina)
+Assert.is_nil(names_after.Ghost, "未在本段出现的名字丢弃")
+
+prompts = {}
+replies = { { characters = { { name = "Lucy", aliases = {} } }, locations = {}, terms = {} } }
+attempt()
+Assert.eq(outcome.ok, true)
+Assert.len(prompts, 1, "重跑只请求没做完的段")
+Assert.matches(prompts[1], "Lucy met Mina")
+Assert.eq(reports[#reports][2], 2)
+names_after = {}
+for _idx, row in ipairs(entity_rows) do names_after[row.name] = true end
+Assert.is_true(names_after.Lucy)
