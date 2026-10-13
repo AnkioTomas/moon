@@ -1,7 +1,9 @@
 --[[--
-X-Ray 阅读上下文：当前可见页 + 本章开头到当前页之前的正文（过长保留末尾）。
+AI 阅读上下文：选区所在句子与段落、当前可见页、本章开头到当前页之前的正文（过长保留末尾）。
 
-@module koplugin.book.features.xray.context
+只取读者已经读到的内容：前文止于当前页，不取后文。
+
+@module koplugin.book.reader.context
 --]]
 
 local Text = require("utils.text")
@@ -10,6 +12,17 @@ local Context = {}
 
 local PRIOR_TEXT_LIMIT = 24000
 local VISIBLE_TEXT_LIMIT = 12000
+local PARAGRAPH_LIMIT = 4000
+
+local SENTENCE_STOPS = { "。", "！", "？", "!", "?", ".", "\n" }
+local SENTENCE_CLOSERS = { "”", "」", "』", "）", "\"", "'", ")" }
+
+-- 选区常落在这些行内元素里，段落要跳到它们外面的块元素。
+local INLINE_TAGS = {
+    a = true, abbr = true, b = true, big = true, cite = true, code = true, em = true,
+    font = true, i = true, mark = true, q = true, rt = true, ruby = true, s = true,
+    small = true, span = true, strong = true, sub = true, sup = true, u = true,
+}
 
 --- 取阅读会话维护的当前页码。
 ---@return integer
@@ -173,6 +186,103 @@ function Context.forAnalysis(ui, prior_limit)
         current_page = visible or pageText(ui, page),
         prior_text = Context.priorText(ui, page, prior_limit),
         page = page,
+    }
+end
+
+--- 选区 xpointer 所在块元素：去掉 text() 段，再跳出行内元素。
+---@param xp string 如 /body/DocFragment[3]/body/div/p[12]/em/text().5
+---@return string
+function Context.blockXPointer(xp)
+    local path = xp:gsub("/text%(%).*$", ""):gsub("%.%d+$", "")
+    while true do
+        local parent, tag = path:match("^(.+)/([%a][%w]*)[^/]*$")
+        if not parent or not INLINE_TAGS[tag:lower()] then
+            return path
+        end
+        path = parent
+    end
+end
+
+--- 句末标点 stop_at 之后紧跟的右引号、右括号一并算进这一句，返回新的结束字节。
+---@param s string
+---@param stop_at integer
+---@return integer
+local function skipClosers(s, stop_at)
+    local extended = true
+    while extended do
+        extended = false
+        for _idx, closer in ipairs(SENTENCE_CLOSERS) do
+            if s:sub(stop_at + 1, stop_at + #closer) == closer then
+                stop_at = stop_at + #closer
+                extended = true
+            end
+        end
+    end
+    return stop_at
+end
+
+--- 句子起点：在 first 之前最后一个句末标点（连同右引号）之后；没有则为 1。
+---@param s string
+---@param first integer
+---@return integer
+local function sentenceStart(s, first)
+    local last = 0
+    for _idx, stop in ipairs(SENTENCE_STOPS) do
+        local init = 1
+        while true do
+            local found, finish = s:find(stop, init, true)
+            if not found or finish >= first then break end
+            if finish > last then last = finish end
+            init = finish + 1
+        end
+    end
+    if last == 0 then return 1 end
+    return math.min(skipClosers(s, last), first - 1) + 1
+end
+
+--- 从 init 起第一个句末标点（连同右引号）的结束字节；没有则为 #s。
+---@param s string
+---@param init integer
+---@return integer
+local function sentenceEnd(s, init)
+    local stop_at
+    for _idx, stop in ipairs(SENTENCE_STOPS) do
+        local _first, finish = s:find(stop, init, true)
+        if finish and (not stop_at or finish < stop_at) then stop_at = finish end
+    end
+    if not stop_at then return #s end
+    return skipClosers(s, stop_at)
+end
+
+--- 段落中包含选中文字的整句；段落里找不到选中文字时返回选中文字本身。
+---@param paragraph string
+---@param selected string
+---@return string
+function Context.sentence(paragraph, selected)
+    local first, last = paragraph:find(selected, 1, true)
+    if not first or selected == "" then
+        return selected
+    end
+    local start = sentenceStart(paragraph, first)
+    return Text.trim(paragraph:sub(start, sentenceEnd(paragraph, last + 1)))
+end
+
+--- 划词上下文：选中文字、所在句子、所在段落。分页文档（PDF 等）没有 DOM，段落为空、句子即选中文字。
+---@param ui table ReaderUI
+---@param selected { text: string, pos0: string|table|nil }
+---@return { text: string, sentence: string, paragraph: string }
+function Context.selection(ui, selected)
+    local text = Text.trim(selected.text)
+    local paragraph = ""
+    local pos0 = selected.pos0
+    if ui.rolling and type(pos0) == "string" then
+        local block = ui.document:getTextFromXPointer(Context.blockXPointer(pos0))
+        paragraph = Text.trim(Text.normalizeNewlines(block or ""))
+    end
+    return {
+        text = text,
+        sentence = Context.sentence(paragraph, text),
+        paragraph = Text.truncateUtf8(paragraph, PARAGRAPH_LIMIT),
     }
 end
 

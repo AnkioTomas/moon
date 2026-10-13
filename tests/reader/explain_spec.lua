@@ -18,12 +18,17 @@ Themed.on_show = function(o) shown[#shown + 1] = o end
 package.preload["ui/network/manager"] = function()
     return { runWhenOnline = function(_, callback) callback() end }
 end
-local context_limit
-package.preload["features.xray.context"] = function()
+local context_limit, selected_pos
+package.preload["reader.context"] = function()
     return {
         forAnalysis = function(ui, limit)
             context_limit = limit
             return { current_page = "他望着那片月色", prior_text = "前文若干", page = 3 }
+        end,
+        selection = function(ui, selected)
+            selected_pos = selected.pos0
+            local text = selected.text:gsub("^%s+", ""):gsub("%s+$", "")
+            return { text = text, sentence = "他望着那片" .. text .. "。", paragraph = "整段：他望着那片" .. text .. "。" }
         end,
     }
 end
@@ -65,7 +70,7 @@ Explain.install(ui)
 local closed_dialog = false
 local this = {
     ui = ui,
-    selected_text = { text = "  月色  " },
+    selected_text = { text = "  月色  ", pos0 = "/body/p[3]/text().4" },
     onClose = function() closed_dialog = true end,
 }
 local button = factories["12_ai_explain"](this)
@@ -82,8 +87,10 @@ Assert.eq(context_limit, 2000)
 Assert.len(requests, 1)
 local prompt = requests[1].messages[2].content
 Assert.matches(prompt, "《边城》（作者：沈从文）")
+Assert.eq(selected_pos, "/body/p[3]/text().4", "选区位置要交给上下文取段落")
 Assert.matches(prompt, "「月色」")
-Assert.matches(prompt, "他望着那片月色")
+Assert.matches(prompt, "所在句子：\n他望着那片月色。")
+Assert.matches(prompt, "所在段落：\n整段：他望着那片月色。")
 Assert.matches(prompt, "前文若干")
 Assert.eq(shown[1].text, "AI 解释中…")
 pending("  这里指夜晚的月光。  ")
@@ -94,17 +101,17 @@ Assert.eq(shown[2].title, "月色")
 Assert.eq(shown[2].text, "这里指夜晚的月光。")
 
 -- 失败：提示错误原因
-Explain.run(ui, "月色")
+Explain.run(ui, { text = "月色" })
 pending(nil, "timeout")
 Assert.eq(shown[4].kind, "toast")
 Assert.matches(shown[4].text, "timeout")
 
 -- 用户关掉等待提示：取消请求
-Explain.run(ui, "月色")
+Explain.run(ui, { text = "月色" })
 shown[#shown]:close()
 Assert.eq(cancelled, 1)
 
 -- 空选中不发请求
 local before = #requests
-Explain.run(ui, "   ")
+Explain.run(ui, { text = "   " })
 Assert.eq(#requests, before)

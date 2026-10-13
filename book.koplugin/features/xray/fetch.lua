@@ -5,7 +5,7 @@ X-Ray 拉取：综合拉取 / 选词补全。
 --]]
 
 local AI = require("ai")
-local Context = require("features.xray.context")
+local Context = require("reader.context")
 local Prompts = require("features.xray.prompts")
 local Store = require("features.xray.store")
 local XrayDB = require("features.xray.db")

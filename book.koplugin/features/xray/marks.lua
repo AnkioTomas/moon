@@ -132,7 +132,7 @@ local function scanVisibleMarks(ui, entities)
     end
 
     local page = PageMarks.currentPage(ui)
-    local names = namesOnScreen(collectNames(entities), require("features.xray.context").visibleText(ui, page))
+    local names = namesOnScreen(collectNames(entities), require("reader.context").visibleText(ui, page))
     if document.getScreenBoxesFromPositions and document.findText then
         for _idx, item in ipairs(names) do
             -- CRE 的 findText 只搜索当前视口附近有限高度；结果仍按屏幕相交严格裁剪。
