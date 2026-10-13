@@ -1,7 +1,7 @@
 --[[--
 界面字体选择器：用户/本地/系统字库 + 微信读书（可下载）。
 
-底部分栏（在线/用户/本地）走主题 List 的 tabs。
+底部分栏（在线/用户/本地/系统）走主题 List 的 tabs。
 列表行只留通栏预览：已装字体把字体名用该字体渲染，在线用远程预览图；当前项是选中的单选标记。
 预览按页懒构建（List 翻到该页才调 item.widget；禁止打开时全表 getFace / 拉图）。
 列表走 FontCatalog.listAsync（微信列表经 http.Cache，TTL 内不联网）。
@@ -141,7 +141,7 @@ function FontPicker.show(opts, items)
         - Theme.px(t.control.icon) - Theme.px(t.space.sm) * 2
     local ph = Theme.px(36)
     --- 把某一分组的字体转成列表项；预览由 List 翻到该页时才构建。分组为空给一条禁用占位行。
-    ---@param kind string 分组名：weread / user / local
+    ---@param kind string 分组名：weread / user / local / system
     ---@return table[]
     local function rowsFor(kind)
         local rows = {}

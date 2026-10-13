@@ -56,6 +56,13 @@ package.preload["ui.fonts.catalog"] = function()
             kind = "local",
         }
     end
+    for i = 1, 3 do
+        items[#items + 1] = {
+            id = string.format("Sys%d.ttf", i),
+            name = "Sys" .. i,
+            kind = "system",
+        }
+    end
     for i = 1, 20 do
         items[#items + 1] = {
             id = "wr" .. i,
@@ -86,7 +93,7 @@ Assert.eq(Kit.closed[1] ~= nil and Kit.closed[1].text, "正在加载字体列表
 
 -- 当前字体在本地分栏第 25 项：默认打开本地分栏并翻到它所在页（每页 13 项，含底栏）。
 Assert.eq(list.tabs.active, "local")
-Assert.len(list.tabs.tabs, 3, "底部三个分栏：在线/用户/本地")
+Assert.len(list.tabs.tabs, 4, "底部四个分栏：在线/用户/本地/系统")
 Assert.len(list.items, 40, "本地 40 行，无系统默认行")
 Assert.eq(list.items[1].text, "", "行只留预览，无名字列")
 Assert.eq(list.page, math.ceil(25 / list.per_page))
@@ -109,6 +116,13 @@ Assert.is_true(last_image.width <= math.floor(last_image.height * 90 / 24), "预
 list:switchTab("user")
 Assert.len(list.items, 1)
 Assert.is_false(list.items[1].enabled)
+
+-- 系统字库单独一栏，预览走本地字体渲染。
+getface_n = 0
+list:switchTab("system")
+Assert.len(list.items, 3)
+Assert.eq(list.items[1].value.id, "Sys1.ttf")
+Assert.eq(getface_n, 3, "系统页用字体本身渲染预览")
 
 -- 选中已安装字体：关列表、写设置、提示。
 list:switchTab("local")

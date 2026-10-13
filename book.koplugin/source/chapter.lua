@@ -283,7 +283,7 @@ end
 ---@param identity BookIdentity
 ---@param book Book
 ---@param opts table|nil
----@param ops { loadToc: ChapterLoadToc, fetchContent: ChapterFetchContent, progress: fun(step: integer)|nil }
+---@param ops { loadToc: ChapterLoadToc, fetchContent: ChapterFetchContent, progress: fun(step: integer)|nil, book_title?: string }
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Chapter.openAsync(source, identity, book, opts, ops, cb)

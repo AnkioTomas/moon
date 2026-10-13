@@ -55,7 +55,7 @@ end
 --- 以前是无条件写 `screensaver_type="disable"`：用户原本设的封面/书签/随机图锁屏
 --- 会被永久改成「关闭」，关掉本插件功能也回不来。
 function M.clearCover()
-    local saved = G_reader_settings:readSetting(PREVIOUS_KEY)
+    local saved = G_reader_settings:readSetting(PREVIOUS_KEY) --[[@as table<string, { present: boolean, value: any }>|nil]]
     if type(saved) == "table" then
         for _idx, key in ipairs(KEYS) do
             local entry = saved[key]
