@@ -35,7 +35,7 @@ Assert.not_nil(Base.open())
 
 local function add(source_id, stable_id, record_type, start_time, duration)
     Assert.is_true(StatsDB.add({ source_id = source_id, stable_id = stable_id, record_type = record_type,
-        page = 1, start_time = start_time, duration = duration, total_pages = 0 }, true))
+        page = 1, start_time = start_time, duration = duration, total_pages = 0 }, StatsDB.SYNCED))
 end
 
 local DAY = os.time({ year = 2026, month = 10, day = 10, hour = 0 })

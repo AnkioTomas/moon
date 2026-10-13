@@ -58,7 +58,7 @@ local H = 1700002800 -- 整小时
 Assert.is_true(StatsDB.add({ source_id = "local", stable_id = "/b/a.epub", record_type = "page",
     page = 3, start_time = T, duration = 30, total_pages = 100 }))
 Assert.is_true(StatsDB.add({ source_id = "wechat", stable_id = "w1", record_type = "page_rollup",
-    page = 5, start_time = H, duration = 900, total_pages = 50 }, true))
+    page = 5, start_time = H, duration = 900, total_pages = 50 }, StatsDB.SYNCED))
 
 local ko = SQL.open(ko_path)
 ko:exec([[
@@ -107,5 +107,13 @@ Assert.eq(StatsDB.summaryByBook("local", "/b/a.epub").total_seconds, 90)
 Assert.not_nil(StatsDB.compactSynced("local", T + 3 * 3600))
 Assert.eq(KoreaderStats.import(ko_path).rows, 0)
 Assert.eq(StatsDB.summaryByBook("local", "/b/a.epub").total_seconds, 90)
+
+-- 源全量 pull（all_synced）只删已同步行，导入行留着。
+Assert.not_nil(StatsDB.replaceSynced("local", { mode = "all_synced" }, {
+    { source_id = "local", stable_id = "/b/c.epub", record_type = "page", page = 1,
+      start_time = H, duration = 5, total_pages = 10 },
+}))
+Assert.eq(StatsDB.summaryByBook("local", "/b/a.epub").total_seconds, 90)
+Assert.eq(StatsDB.summaryByBook("wechat", "w1").total_seconds, 900 + 45)
 
 Base.close()

@@ -43,7 +43,7 @@ end
 
 local function page(start_time, duration, synced)
     Assert.is_true(StatsDB.add({ source_id = "wechat", stable_id = ID, record_type = "page",
-        page = 1, start_time = start_time, duration = duration, total_pages = 9, chapter_idx = 1 }, synced))
+        page = 1, start_time = start_time, duration = duration, total_pages = 9, chapter_idx = 1 }, synced and StatsDB.SYNCED or StatsDB.PENDING))
 end
 
 -- 拉取前已上传的已含在快照里；拉取后读的（已上传或未上传）都要补上。
