@@ -10,7 +10,7 @@
   Icon.widget{ name = "home", size = 24, color = c }
   Icon.label{ name = "home", text = "首页", direction = "row"|"column",
               size = 24, color = c, face = "cfont", font_size = 14, gap = px, max_width = px,
-              dim = bool }  -- dim：图标与文案一起变灰（禁用态）
+              dim = bool, trailing = bool }  -- dim：图标与文案一起变灰（禁用态）；trailing：图标在文案后（下拉箭头）
 
 name 写 Material Icons 原名：字体用 OpenType rlig 把 ASCII 合成字形，所以强制 use_xtext。
 名字写错时显示英文字面，一眼可见。
@@ -89,14 +89,16 @@ function Icon.label(opts)
     local color = opts.dim and Blitbuffer.COLOR_GRAY or opts.color or Blitbuffer.COLOR_BLACK
     local column = opts.direction == "column"
     local group = (column and VerticalGroup or HorizontalGroup):new{ align = "center" }
-    group[1] = Icon.widget{ name = opts.name, size = opts.size, color = color }
-    group[2] = (column and VerticalSpan or HorizontalSpan):new{ width = opts.gap or Theme.px(4) }
-    group[3] = TextWidget:new{
+    local icon = Icon.widget{ name = opts.name, size = opts.size, color = color }
+    local text = TextWidget:new{
         text = opts.text,
         face = Theme.face(opts.face or "xx_smallinfofont", opts.font_size or 12),
         fgcolor = color,
         max_width = opts.max_width,
     }
+    group[1] = opts.trailing and text or icon
+    group[2] = (column and VerticalSpan or HorizontalSpan):new{ width = opts.gap or Theme.px(4) }
+    group[3] = opts.trailing and icon or text
     return group
 end
 
