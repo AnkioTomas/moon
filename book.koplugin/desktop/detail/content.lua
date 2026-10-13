@@ -303,11 +303,19 @@ function Detail:buildStats(w)
     }
     local rule = math.max(1, Theme.px(t.row.divider))
     local cell_w = math.floor((w - rule * (#items - 1)) / #items)
+    -- 大字号主题下带年份的日期放不进四分之一宽：整排一起降一档，不让单格截断。
+    local role = "title"
+    for _idx, item in ipairs(items) do
+        local probe = Text.line("title", item[1])
+        local fits = probe:getSize().w <= cell_w
+        probe:free()
+        if not fits then role = "body" break end
+    end
     local row = HorizontalGroup:new{ align = "center" }
     for i, item in ipairs(items) do
         local cell = VerticalGroup:new{
             align = "center",
-            Text.line("title", item[1], { width = cell_w }),
+            Text.line(role, item[1], { width = cell_w, bold = true }),
             VerticalSpan:new{ width = Theme.px(t.space.xs) },
             Text.line("caption", item[2], { width = cell_w, color = t.color.muted }),
         }

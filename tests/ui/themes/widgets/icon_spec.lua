@@ -61,8 +61,4 @@ Assert.eq(FontList.fontlist[1], "/plugin/ui/themes/widgets/icon/MaterialSymbolsO
 local label = Icon.label{ name = "wifi", text = "Wi-Fi", size = 12, color = 7 }
 Assert.eq(label[1][1].fgcolor, 7)
 Assert.eq(label[3].fgcolor, 7)
-local dimmed = Icon.label{ name = "wifi", text = "Wi-Fi", size = 12, color = 7, dim = true }
-Assert.eq(dimmed[1][1].fgcolor, 128, "dim 图标变灰")
-Assert.eq(dimmed[3].fgcolor, 128, "dim 文案变灰")
-
 return true

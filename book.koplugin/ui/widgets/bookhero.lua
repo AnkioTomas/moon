@@ -59,7 +59,8 @@ function Hero.widget(plugin, source, book, opts)
     local t = Theme.current()
     local pad = opts.pad or Theme.px(10)
     local avail = math.max(1, w - pad * 2)
-    local gap = Theme.px(t.space.sm)
+    -- 封面阴影画在 cw 之外，不让出来就压到右栏文字上。
+    local gap = Theme.px(t.space.sm) + Theme.px(t.raised.shadow)
     local cw = math.min(Theme.px(80), math.floor(avail * 0.22))
     if opts.cover_width then
         cw = math.max(1, math.min(
