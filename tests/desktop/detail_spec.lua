@@ -434,7 +434,23 @@ Kit.dirty = {}
 pager_next:onTapThemeButton()
 Assert.eq(page._daily_page, 2)
 Assert.is_true(dirtied(page))
+Assert.contains(Kit.texts(page), "开始日期")
+Assert.contains(Kit.texts(page), "—", "没有进度时预计剩余 / 读完都空着")
 page:close()
+
+-- 预计剩余按进度比例外推；日均按最近记录跨的日历天数摊（没读的日子也算）。
+local noon = os.time{ year = os.date("*t").year, month = os.date("*t").month, day = os.date("*t").day, hour = 12 }
+stats.summary = { pages = 10, total_seconds = 600, last_read = noon, first_read = noon - 9 * 86400 }
+stats.daily = {
+    { ymd = os.date("%Y-%m-%d", noon), seconds = 300 },
+    { ymd = os.date("%Y-%m-%d", noon - 9 * 86400), seconds = 300 },
+}
+Detail.open(desktop, "library", { source_id = "local", stable_id = "b9", title = "统计书", percent = 25 })
+texts = Kit.texts(desktop.detail)
+Assert.contains(texts, os.date("%Y-%m-%d", noon - 9 * 86400), "开始日期取最早一条记录")
+Assert.contains(texts, "1800s", "读了 25% 用 600 秒，剩下 75% 要 1800 秒")
+Assert.contains(texts, os.date("%Y-%m-%d", noon + 30 * 86400), "10 天读 600 秒，日均 60 秒，还要 30 天")
+desktop.detail:close()
 stats.summary, stats.daily = nil, {}
 
 -- Hero 下方信息条：图标 + 文字一行排开，带属主源名（混合模式同屏多源时可读）。

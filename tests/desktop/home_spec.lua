@@ -16,7 +16,7 @@ local Base = require("desktop.pages.home.base")
 
 local log, heights, events = {}, {}, {}
 local IDS = {
-    "clock", "weather", "clock_weather", "weather_forecast", "stats", "hitokoto", "excerpt",
+    "clock", "weather", "clock_weather", "weather_forecast", "stats", "heatmap", "hitokoto", "excerpt",
     "history", "news", "recent_hero", "recent_list", "recent_cards",
 }
 for _, id in ipairs(IDS) do
@@ -57,7 +57,7 @@ do -- 首显：默认全部组件按屏高分页并落盘；未 resume 的首页
     Assert.eq(list[1].id, "clock")
     Assert.eq(list[2].page, 1)
     Assert.eq(list[3].page, 2, "每页只塞得下两个 300 高")
-    Assert.eq(home.pages, 6)
+    Assert.eq(home.pages, 7)
     Assert.is_true(home.visible.clock and home.visible.weather)
     Assert.is_nil(home.visible.clock_weather)
     Assert.eq(drain(), "", "首页不在前台不启动组件")

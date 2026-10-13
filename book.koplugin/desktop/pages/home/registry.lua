@@ -14,7 +14,7 @@ local logger = require("utils.log")
 local M = {}
 
 local COMPONENT_MODULES = {
-    "clock", "weather", "clock_weather", "weather_forecast", "stats", "hitokoto", "excerpt",
+    "clock", "weather", "clock_weather", "weather_forecast", "stats", "heatmap", "hitokoto", "excerpt",
     "history", "news",
     "recent_hero", "recent_list", "recent_cards",
 }

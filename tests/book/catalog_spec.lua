@@ -79,6 +79,7 @@ package.preload["book.stats_db"] = function()
         summaryBySource = function() return FakeStats.summary end,
         dailyBySource = function() return FakeStats.daily end,
         dailyBooksBySource = function() return FakeStats.daily_books end,
+        hourlyBySource = function() return FakeStats.hourly end,
     }
 end
 package.loaded["book.catalog"] = nil
@@ -168,10 +169,13 @@ end
 
 do -- readingInsightAsync
     FakeStats.summary = { total_seconds = 120, total_pages = 3 }
-    FakeStats.daily = { { ymd = "2026-08-21", seconds = 120 } }
+    FakeStats.daily = { { ymd = "2026-08-21", seconds = 120, pages = 4 }, { ymd = "2026-08-22", seconds = 60 } }
     FakeStats.daily_books = {
         { ymd = "2026-08-21", stable_id = "c.epub", max_page = 2, max_total_pages = 10 },
     }
+    local hours = {}
+    for h = 1, 24 do hours[h] = h == 22 and 120 or 0 end
+    FakeStats.hourly = { ["2026-08-21"] = hours }
     FakeBooks.meta = { ["local\nc.epub"] = { title = "C", authors = "作者" } }
     local got
     Catalog.readingInsightAsync("local", function(res)
@@ -179,6 +183,10 @@ do -- readingInsightAsync
     end)
     Stubs.flush()
     Assert.is_true(got.data.has_data)
+    Assert.eq(got.data.total.total_seconds, 120)
+    Assert.eq(got.data.calendar.days["2026-08-21"].pages, 4)
+    Assert.eq(got.data.calendar.days["2026-08-21"].hours, hours)
+    Assert.is_nil(got.data.calendar.days["2026-08-22"].hours, "只有云端时长的日子没有小时分布")
     Assert.eq(got.data.calendar.days["2026-08-21"].books[1].title, "C")
     Assert.eq(got.data.calendar.days["2026-08-21"].books[1].percent, 20)
 end

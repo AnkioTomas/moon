@@ -1,5 +1,5 @@
 --[[--
-统计页入口：经当前源读本地洞察，打开书籍详情，分发三页 UI。
+统计页入口：经当前源读本地洞察，打开书籍详情，分发四页 UI。
 
 不发起网络请求。读路径直查 book.catalog.readingInsightAsync（聚合本地库）；
 远端写入只由源侧 syncStatsAsync 完成。
@@ -8,6 +8,7 @@ UI 页面按需加载：
   1. insight/overview.lua - 概览与日历
   2. insight/day.lua      - 当日书单
   3. insight/records.lua  - 连续记录与年度图表
+  4. insight/hours.lua    - 阅读时段（仅本机记录）
 
 @module koplugin.book.desktop.pages.insight
 --]]
@@ -98,8 +99,10 @@ local function buildPage(insight, page, state, width, height)
             desktop, state, width, height,
             function(book) insight:openBookDetail(book) end
         )
+    elseif page == 3 then
+        return require("desktop.pages.insight.records"):build(state, width, height)
     end
-    return require("desktop.pages.insight.records"):build(state, width, height)
+    return require("desktop.pages.insight.hours"):build(state, width, height)
 end
 
 --- 构建统计 Tab 整页 UI：正文区（顶对齐）+ 以页名作标题的翻页条。
@@ -115,11 +118,11 @@ function Insight:build()
     local body_h = math.max(1, height - Theme.px(t.control.height))
     local inner_h = math.max(1, body_h - pad * 2)
 
-    local pages = state.has_data and not state.error and 3 or 1
+    local labels = { _("概览"), _("今日总览"), _("连续记录"), _("阅读时段") }
+    local pages = state.has_data and not state.error and #labels or 1
     local page = math.max(1, math.min(self.ui_page, pages))
     self.ui_page = page
     local body = buildPage(self, page, state, content_w, inner_h)
-    local labels = { _("概览"), _("今日总览"), _("连续记录") }
     return Box:new{
         style = { bg = t.color.page },
         width = width,

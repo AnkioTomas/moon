@@ -5,6 +5,7 @@
 --]]
 
 local Book = require("ui.widgets.book")
+local Chart = require("ui.widgets.chart")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
@@ -67,6 +68,15 @@ function Day:build(desktop, state, width, avail_h, open_book)
         or dayTitle(selected, info and info.duration_text or nil)
     push(Text.line("title", title, { width = width }))
     push(VerticalSpan:new{ width = md })
+    if info and info.hours then
+        push(muted(_("阅读时段")))
+        push(VerticalSpan:new{ width = xs })
+        push(Chart.bars({
+            points = require("desktop.pages.insight.hours").points(info.hours),
+            width = width, height = Theme.px(56), gap = Theme.px(2),
+        }))
+        push(VerticalSpan:new{ width = md })
+    end
 
     if #books == 0 then
         push(muted(_("这一天没有阅读记录")))
