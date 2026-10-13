@@ -259,7 +259,7 @@ end
 --- 解析单本书元数据 + 封面；失败返回 nil（损坏 / 无引擎）。
 ---@param path string 书路径
 ---@param cover_key string|nil 封面缓存键（stable_id）；缺省即 path
----@return { title: string|nil, authors: string|nil, intro: string|nil }|nil
+---@return { title: string|nil, authors: string|nil, intro: string|nil, language: string|nil }|nil
 local function parseBookProps(path, cover_key)
     local ok, props = pcall(withDocument, path, function(doc)
         local p = doc:getProps()
@@ -274,6 +274,7 @@ local function parseBookProps(path, cover_key)
         title = field(props.title),
         authors = field(props.authors),
         intro = field(Text.stripHtml(props.description)),
+        language = field(props.language),
     }
 end
 

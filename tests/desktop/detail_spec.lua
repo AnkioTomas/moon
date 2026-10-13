@@ -1,6 +1,6 @@
 --[[--
-desktop.detail：主题全屏页；底栏动作规划、标记已读、清理缓存、属主源删除、编辑保存、
-最近几天分页、书城加入书库；打开 / 关窗与桌面联动。
+desktop.detail：主题全屏页；动作规划与右上角菜单、标记已读、清理缓存、属主源删除、编辑保存、
+指标带与阅读记录、书籍信息表、书城加入书库；打开 / 关窗与桌面联动。
 
 @module tests.desktop.detail_spec
 --]]
@@ -15,20 +15,19 @@ Themed.install()
 local Container = require("ui/widget/container/widgetcontainer")
 local Geom = require("ui/geometry")
 
-local hero_opts
+local cover_args
 package.preload["ui.widgets.book"] = function()
     return {
         title = function(book) return book.title or "" end,
         author = function() return "作者甲" end,
         pct = function(book) return tonumber(book.percent) or 0 end,
         desc = function(book) return book.intro or "" end,
-    }
-end
-package.preload["ui.widgets.bookhero"] = function()
-    return {
-        widget = function(_, source, book, opts)
-            hero_opts = { source = source, book = book, opts = opts }
-            return Container:new{ dimen = Geom:new{ w = opts.width, h = 80 } }, 80
+        cover = function(_plugin, source, book, cw, ch)
+            cover_args = { source = source, book = book, w = cw, h = ch }
+            return Container:new{ dimen = Geom:new{ w = cw, h = ch } }
+        end,
+        tappable = function(w, h, on_tap)
+            return Container:new{ dimen = Geom:new{ w = w, h = h }, on_tap = on_tap }
         end,
     }
 end
@@ -80,6 +79,7 @@ local upsert_ok = true
 local downloaded = {} -- stable_id → true
 package.preload["book.books_db"] = function()
     return {
+        META = { "publisher", "published", "isbn", "language", "words", "rating", "rating_by" },
         isDownloaded = function(_source_id, stable_id) return downloaded[stable_id] == true end,
         setRead = function(source_id, stable_id, value)
             set_read = { source_id, stable_id, value }
@@ -162,7 +162,14 @@ local function dirtied(widget)
     return false
 end
 
--- 打开：全屏主题页登记到桌面；标题栏返回、工具行、主操作都画出来。
+--- 按图标找主题按钮。
+local function buttonBy(root, icon)
+    for _, b in ipairs(Kit.buttons(root)) do
+        if b.icon == icon then return b end
+    end
+end
+
+-- 打开：全屏主题页登记到桌面；主操作在头部，工具项收进右上角菜单，删除与其余项隔开。
 resolved = local_src
 local desktop = newDesktop()
 Detail.open(desktop, "library", { source_id = "local", stable_id = "b1", title = "书一", read_state = 0 })
@@ -170,10 +177,23 @@ local page = desktop.detail
 Assert.eq(Kit.shown[#Kit.shown], page)
 Assert.eq(page[1]:getSize().h, 800)
 local texts = Kit.texts(page)
-for _, label in ipairs({ "编辑", "刮削", "已读", "删除", "开始阅读", "暂无阅读记录" }) do
+for _, label in ipairs({ "开始阅读", "暂无阅读记录" }) do
     Assert.contains(texts, label)
 end
+for _, text in ipairs(texts) do
+    Assert.is_true(text ~= "编辑" and text ~= "删除", "工具项不在页面上：" .. text)
+end
 Assert.eq(Kit.buttons(page)[1].icon, "arrow_back")
+Assert.eq(cover_args.w, math.floor((600 - 32) * 0.38), "封面占内容宽 38%")
+buttonBy(page, "more_horiz"):onTapThemeButton()
+local menu = Themed.last("list")
+Assert.is_false(menu.mask)
+Assert.is_true(menu.centered, "贴按钮的窄下拉，不是全屏列表")
+local menu_texts = {}
+for i, item in ipairs(menu.items) do menu_texts[i] = item.text end
+Assert.eq(table.concat(menu_texts, ","), "编辑,刮削,已读,删除")
+menu.items[4].callback()
+Assert.eq(Themed.last("confirm").text, "确定删除《书一》？", "菜单项走详情页同名动作")
 
 -- 返回键关窗：清引用，数据没变只重画桌面。
 Kit.dirty = {}
@@ -414,7 +434,7 @@ db_row = nil
 page:close()
 desktop.source = local_src
 
--- 最近几天：放不下时分页，翻页只重建自己。
+-- 指标带：四格摘要，点按弹「阅读记录」（完整 KPI + 最近 14 天）。
 resolved = local_src
 stats.summary = { pages = 10, total_seconds = 600, last_read = 0 }
 stats.daily = {}
@@ -424,18 +444,19 @@ page = desktop.detail
 texts = Kit.texts(page)
 Assert.contains(texts, "累计时长")
 Assert.contains(texts, "600s")
-Assert.contains(texts, "最近几天")
-Assert.eq(page._daily_page, 1)
-local pager_next
-for _, b in ipairs(Kit.buttons(page)) do
-    if b.icon == "chevron_right" then pager_next = b end
+Assert.contains(texts, "开始日期", "没有进度估算时第四格是开始日期")
+local strip = Kit.taps(page)[1]
+strip:onTapThemeArea(strip)
+local records = Themed.last("sheet")
+Assert.eq(records.title, "阅读记录")
+local rec_texts = Kit.texts(records.items[1].widget(400))
+Assert.contains(rec_texts, "最近几天")
+Assert.contains(rec_texts, "预计剩余")
+Assert.contains(rec_texts, "—", "没有进度时预计剩余 / 读完都空着")
+Assert.contains(rec_texts, "14s")
+for _, text in ipairs(rec_texts) do
+    Assert.is_true(text ~= "15s", "只列最近 14 天：" .. text)
 end
-Kit.dirty = {}
-pager_next:onTapThemeButton()
-Assert.eq(page._daily_page, 2)
-Assert.is_true(dirtied(page))
-Assert.contains(Kit.texts(page), "开始日期")
-Assert.contains(Kit.texts(page), "—", "没有进度时预计剩余 / 读完都空着")
 page:close()
 
 -- 预计剩余按进度比例外推；日均按最近记录跨的日历天数摊（没读的日子也算）。
@@ -447,32 +468,34 @@ stats.daily = {
 }
 Detail.open(desktop, "library", { source_id = "local", stable_id = "b9", title = "统计书", percent = 25 })
 texts = Kit.texts(desktop.detail)
-Assert.contains(texts, os.date("%Y-%m-%d", noon - 9 * 86400), "开始日期取最早一条记录")
-Assert.contains(texts, "1800s", "读了 25% 用 600 秒，剩下 75% 要 1800 秒")
-Assert.contains(texts, os.date("%Y-%m-%d", noon + 30 * 86400), "10 天读 600 秒，日均 60 秒，还要 30 天")
+Assert.contains(texts, "约剩 1800s", "读了 25% 用 600 秒，剩下 75% 要 1800 秒")
+local finish = noon + 30 * 86400
+Assert.contains(texts, os.date(os.date("%Y", finish) == os.date("%Y") and "%m-%d" or "%Y-%m-%d", finish),
+    "10 天读 600 秒，日均 60 秒，还要 30 天；跨年带年份")
+Assert.contains(texts, "预计读完")
+rec_texts = Kit.texts(desktop.detail:buildRecords(400))
+Assert.contains(rec_texts, os.date("%Y-%m-%d", noon - 9 * 86400), "开始日期取最早一条记录")
+Assert.contains(rec_texts, "1800s")
+Assert.contains(rec_texts, os.date("%Y-%m-%d", noon + 30 * 86400))
 desktop.detail:close()
 stats.summary, stats.daily = nil, {}
 
--- Hero 下方信息条：图标 + 文字一行排开，带属主源名（混合模式同屏多源时可读）。
+-- 头部副行是系列 · 分类；书籍信息表带属主源名（混合模式同屏多源时可读），章节源没有文件项。
 resolved = { id = "wechat" }
 Detail.open(desktop, "library", {
     source_id = "wechat", stable_id = "b1", title = "书", category = "科幻,硬科幻", series = "三体",
 })
 local texts_w = Kit.texts(desktop.detail)
+Assert.contains(texts_w, "三体 · 科幻 · 硬科幻")
+Assert.contains(texts_w, "来源")
 Assert.contains(texts_w, "微信读书")
-Assert.contains(texts_w, "科幻 · 硬科幻")
-Assert.contains(texts_w, "三体")
-Assert.contains(texts_w, "source", "图标走主题 Icon")
 for _idx, text in ipairs(texts_w) do
-    Assert.is_true(text ~= "folder" and text ~= "article", "章节源没有文件项：" .. text)
+    Assert.is_true(text ~= "文件" and text ~= "格式", "章节源没有文件项：" .. text)
 end
-Assert.eq(hero_opts.opts.title_lines, 3)
-Assert.is_true(hero_opts.opts.show_desc, "图书馆简介在 Hero 右栏")
-Assert.is_nil(hero_opts.opts.on_info_tap, "无简介时右栏同封面")
-Assert.eq(hero_opts.source.id, "wechat")
+Assert.eq(cover_args.source.id, "wechat")
 desktop.detail:close()
 
--- 整本书文件：格式、大小、加入日期、文件名；点 Hero 右栏看简介全文。
+-- 整本书文件：格式、大小、加入日期、文件名；短简介整段直出，不给「更多」。
 resolved = local_src
 local added = os.time({ year = 2026, month = 9, day = 1, hour = 12 })
 Detail.open(desktop, "library", {
@@ -483,25 +506,15 @@ texts_w = Kit.texts(desktop.detail)
 Assert.contains(texts_w, "local")
 Assert.contains(texts_w, "EPUB")
 Assert.contains(texts_w, require("util").getFriendlySize(2048))
-Assert.contains(texts_w, "2026-09-01 加入")
+Assert.contains(texts_w, "2026-09-01")
 Assert.contains(texts_w, "长书.epub")
 Assert.contains(texts_w, "暂无阅读记录")
-desktop.detail[1]:paintTo(Kit.canvas(), 0, 0)
-hero_opts.opts.on_info_tap()
-Assert.eq(Themed.last("text_viewer").title, "长书")
-Assert.eq(Themed.last("text_viewer").text, "全文简介")
-desktop.detail:close()
-
--- 一行放不下：从放不下的那项起整项隐藏，不折行。
-Detail.open(desktop, "library", {
-    source_id = "local", stable_id = "/books/长书.epub", path = "/books/长书.epub", title = "长书",
-    filesize = 2048, series = string.rep("系", 60),
-})
-texts_w = Kit.texts(desktop.detail)
-Assert.contains(texts_w, "EPUB")
+Assert.contains(texts_w, "简介")
+Assert.len(Kit.find(desktop.detail, function(w) return w.text == "全文简介" end), 1)
 for _idx, text in ipairs(texts_w) do
-    Assert.is_true(text ~= string.rep("系", 60) and text ~= "长书.epub", "超宽项及其后各项隐藏：" .. text)
+    Assert.is_true(text ~= "更多 ›", "放得下不给更多")
 end
+desktop.detail[1]:paintTo(Kit.canvas(), 0, 0)
 desktop.detail:close()
 
 -- 书城：补拉完整详情，关窗时取消在飞请求；底栏只有「加入书库」，简介直下。
@@ -523,6 +536,8 @@ end
 Detail.open(desktop, "store", { source_id = "zlib", stable_id = "1:abc", title = "书城书", filesize = 100 })
 page = desktop.detail
 Assert.contains(Kit.texts(page), "加入书库")
+Assert.is_nil(buttonBy(page, "more_horiz"), "书城没有工具菜单")
+Assert.len(Kit.taps(page), 0, "书城没有指标带")
 Kit.dirty = {}
 detail_cb({ source_id = "zlib", stable_id = "1:abc", title = "书城书", intro = "完整简介", filesize = 100 })
 Assert.eq(page.book.intro, "完整简介")
@@ -585,22 +600,34 @@ local kbook = { source_id = "ext.kavita", stable_id = "k1", title = "K", percent
 Detail.open(desktop, "library", kbook)
 page = desktop.detail
 Assert.eq(asked, 1)
-db_row = { title = "K", intro = "补到的简介", authors = "甲" }
+db_row = { title = "K", intro = "补到的简介", authors = "甲", publisher = "某出版社", published = "2020-05",
+    words = 432100, rating = 9.6, rating_by = "weread", language = "zh-CN", isbn = "9787000000000" }
 Kit.dirty = {}
 owner_cb({})
 Assert.eq(page.book.intro, "补到的简介")
 Assert.eq(page.book.authors, "甲")
+Assert.eq(page.book.words, 432100)
 Assert.eq(page.book.percent, 30, "列表专有字段不丢")
 Assert.is_true(dirtied(page))
+local shown = Kit.texts(page)
+Assert.contains(shown, "某出版社 · 2020-05")
+Assert.contains(shown, "★ 9.6 微信读书 · 43.2 万字")
+Assert.contains(shown, "中文")
+Assert.contains(shown, "9787000000000")
 page:close()
 Assert.is_false(owner_cancelled)
 Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
 desktop.detail:close()
-Assert.eq(asked, 1, "已有简介不请求")
+Assert.eq(asked, 1, "简介与元数据都有不请求")
+db_row = { title = "K", intro = "简介" }
+Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+desktop.detail:close()
+Assert.eq(asked, 2, "有简介但没有扩展元数据仍请求")
+owner_cancelled = false
 db_row, net_online = { title = "K" }, false
 Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
 desktop.detail:close()
-Assert.eq(asked, 1, "离线不请求")
+Assert.eq(asked, 2, "离线不请求")
 net_online = true
 Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
 desktop.detail:close()

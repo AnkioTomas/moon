@@ -419,7 +419,7 @@ local function enrichCached(self, run, done)
                     BookDB.upsertLocal({
                         source_id = SOURCE_ID, stable_id = item.stable_id,
                         title = title, authors = row.authors or p.authors, intro = row.intro or p.intro,
-                        category = row.category, series = row.series,
+                        category = row.category, series = row.series, language = p.language,
                     })
                 end
             end

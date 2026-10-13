@@ -27,7 +27,7 @@ function Store.rememberMany(books)
     local payload = {}
     for _idx, book in ipairs(books) do
         if book.source_id and book.stable_id then
-            payload[#payload + 1] = {
+            local row = {
                 source_id = book.source_id,
                 stable_id = book.stable_id,
                 md5 = book.md5,
@@ -39,6 +39,8 @@ function Store.rememberMany(books)
                 cover = book.cover,
                 deleted = book.deleted,
             }
+            for _i, col in ipairs(BookDB.META) do row[col] = book[col] end
+            payload[#payload + 1] = row
         end
     end
     if #payload == 0 then

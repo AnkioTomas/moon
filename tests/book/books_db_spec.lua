@@ -283,6 +283,32 @@ do
     clearMods()
 end
 
+-- ── setMeta：upsert 之后只写非空扩展元数据，空值不清已有列 ──
+do
+    local connection, calls = makeConn()
+    local DbBase, BookDB = loadBook(connection)
+
+    local before = #calls
+    Assert.is_true(BookDB.upsertRemote({
+        source_id = "wechat", stable_id = "w1", publisher = "某出版社", isbn = "", words = 1200, rating = 9.6,
+    }))
+    local q = calls[#calls]
+    Assert.eq(#calls, before + 2, "upsert 之后多一条 UPDATE")
+    Assert.eq(q.sql, "UPDATE books SET publisher=?, words=?, rating=? WHERE source_id=? AND stable_id=?;")
+    Assert.eq(q.args[1], "某出版社")
+    Assert.eq(q.args[2], 1200)
+    Assert.eq(q.args[3], 9.6)
+    Assert.eq(q.args[4], "wechat")
+    Assert.eq(q.args[5], "w1")
+
+    before = #calls
+    Assert.is_true(BookDB.upsertRemote({ source_id = "wechat", stable_id = "w2" }))
+    Assert.eq(#calls, before + 1, "没有元数据不发 UPDATE")
+
+    DbBase.close()
+    clearMods()
+end
+
 -- ── upsertRemoteMany：逐条 upsertRemote（不再批量 VALUES）──
 do
     local connection, calls = makeConn()
