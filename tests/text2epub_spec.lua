@@ -135,6 +135,42 @@ do
     Assert.is_true(book.chapters[1].html:find("<p>第二天继续写正文</p>", 1, true) ~= nil)
 end
 
+-- 原文档目录标题：整行命中即切章；书开头内嵌目录（表头 + 一串标题）不切出空章；只出现一次的空卷标题保留。
+do
+    local book = Text2Epub.parse(table.concat({
+        "目录", "Contents", "（1970）双剑交锋（1）", "（1971）亮出底牌（1）",
+        "上卷", "（1970）双剑交锋（1）", "春天。", "（1971）亮出底牌（1）", "北戴河。",
+    }, "\n"), { title = "风雨路", reflow = true, headings = { " （1970）双剑交锋（1） ", "（1971）亮出底牌（1）", "上卷" } })
+    local titles = {}
+    for _idx, chapter in ipairs(book.chapters) do titles[#titles + 1] = chapter.title end
+    Assert.eq(table.concat(titles, "|"), "上卷|（1970）双剑交锋（1）|（1971）亮出底牌（1）")
+    Assert.is_true(book.chapters[2].html:find("<p>春天。</p>", 1, true) ~= nil)
+    Assert.is_nil(book.chapters[1].html:find("目录", 1, true))
+
+    -- 没有目录（既没给 headings、正文也没有内嵌目录）时行为不变：这种标题认不出来
+    book = Text2Epub.parse("（1970）双剑交锋（1）\n春天。", { title = "风雨路" })
+    Assert.len(book.chapters, 1)
+    Assert.eq(book.chapters[1].title, "风雨路")
+end
+
+-- 不读 NCX 的 MOBI：只有正文里的内嵌目录。表头后的短行是条目，碰到重复（正文开始）就停，正文里的同名行不再收。
+do
+    local book = Text2Epub.parse(table.concat({
+        "目录", "Content", "前言", "（1970）双剑交锋（1）", "（1971）亮出底牌（1）",
+        "前言", "<毛泽东最后七年风雨路>",
+        "（1970）双剑交锋（1）", " （1970）双剑交锋", "春天。",
+        "（1971）亮出底牌（1）", "北戴河。",
+    }, "\n"), { title = "风雨路" })
+    local titles = {}
+    for _idx, chapter in ipairs(book.chapters) do titles[#titles + 1] = chapter.title end
+    Assert.eq(table.concat(titles, "|"), "前言|（1970）双剑交锋（1）|（1971）亮出底牌（1）")
+    Assert.is_true(book.chapters[2].html:find("<p>（1970）双剑交锋</p>", 1, true) ~= nil, "正文小标题不是目录条目")
+
+    -- 表头后紧跟长段落：不是目录，不收
+    book = Text2Epub.parse("目录\n" .. string.rep("很长的正文", 20) .. "\n短句\n正文\n短句", { title = "书" })
+    Assert.len(book.chapters, 1)
+end
+
 -- 知轩藏书式文件名可补全元数据；调用方显式提供的值仍优先。
 do
     local book = Text2Epub.parse("第一章\n正文", {

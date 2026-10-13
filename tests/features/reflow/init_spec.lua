@@ -74,10 +74,15 @@ local dir = Paths.bookWorkDir(identity.stable_id, identity.source_id) .. "/reflo
 require("ffi/util").purgeDir(dir)
 
 local switched
+local toc_titles = {}
 local function reader(file, kind)
     local ui = {
         document = { file = file },
         switchDocument = function(_, target) switched = target end,
+        toc = { fillToc = function(self)
+            self.toc = {}
+            for i, title in ipairs(toc_titles) do self.toc[i] = { title = title, page = i } end
+        end },
     }
     if kind == "rolling" then ui.rolling = {} end
     if kind == "pdf" then ui.paging = {}; ui.document.getPageTextBoxes = function() end end
@@ -126,6 +131,19 @@ Reflow.analyzeAsync(pdf_ui, identity, function(p, e) preview, err = p, e end)
 Assert.eq(extracted_ui, pdf_ui)
 Assert.len(preview.titles, 2)
 
+-- 原文档带目录：标题整行命中即切章（不是「第 X 章」写法也认），开头的内嵌目录不切出空章
+toc_titles = { "（1970）双剑交锋（1）", "（1971）亮出底牌（1）" }
+local toc_txt = os.tmpname() .. ".txt"
+f = io.open(toc_txt, "wb")
+f:write("目录\n（1970）双剑交锋（1）\n（1971）亮出底牌（1）\n（1970）双剑交锋（1）\n春天。\n（1971）亮出底牌（1）\n北戴河。")
+f:close()
+Reflow.analyzeAsync(reader(toc_txt, "rolling"), identity, function(p, e) preview, err = p, e end)
+Stubs.flush()
+Assert.eq(table.concat(preview.titles, "|"), "（1970）双剑交锋（1）|（1971）亮出底牌（1）")
+Assert.eq(table.concat(preview.headings, "|"), "（1970）双剑交锋（1）|（1971）亮出底牌（1）")
+toc_titles = {}
+os.remove(toc_txt)
+
 -- 生成：EPUB 和 meta 都在工作目录 reflow/ 下，原书不动
 local original_build = Text2Epub.build
 local built
@@ -139,12 +157,13 @@ Text2Epub.build = function(opts, cb)
 end
 local path
 sidecars[dir .. "/book.epub"] = { annotations = { { pos0 = "/body/old" } }, book_note_linked = { a = true } }
-Reflow.applyAsync(identity, txt, "全文", function(p, e) path, err = p, e end)
+Reflow.applyAsync(identity, txt, { text = "全文", headings = { "甲" }, titles = {} }, function(p, e) path, err = p, e end)
 Assert.is_nil(err)
 Assert.eq(path, dir .. "/book.epub")
 Assert.is_nil(sidecars[path].annotations, "重新排版同一路径：旧划线坐标指向旧结构，清掉")
 Assert.is_nil(sidecars[path].book_note_linked)
 Assert.eq(built.text, "全文")
+Assert.eq(built.headings[1], "甲", "原文档目录标题带到转换")
 Assert.eq(built.source, txt, "书名 / 作者仍可从原书文件名推断")
 Assert.is_true(built.reflow)
 local meta = require("support.json_stub").decode(assert(io.open(dir .. "/meta.json")):read("*a"))
@@ -154,7 +173,7 @@ Assert.eq(assert(io.open(txt, "rb")):read("*a"), "\255\254bad", "原书原样保
 
 -- 生成失败：回调错误，meta 不变
 Text2Epub.build = function(opts, cb) cb(nil, "磁盘满") return { cancel = function() end } end
-Reflow.applyAsync(identity, "/books/other.epub", "全文", function(p, e) path, err = p, e end)
+Reflow.applyAsync(identity, "/books/other.epub", { text = "全文", headings = {}, titles = {} }, function(p, e) path, err = p, e end)
 Assert.is_nil(path)
 Assert.eq(err, "磁盘满")
 meta = require("support.json_stub").decode(assert(io.open(dir .. "/meta.json")):read("*a"))
