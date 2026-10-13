@@ -112,7 +112,7 @@ function QuickPanel.rows(scope, desktop)
     return optionRows(desktop, PANELS[scope].options())
 end
 
---- 已启用动作的图标横条；不实例化面板主体。
+--- 已启用动作的图标条，一行放不下就折行；不实例化面板主体。
 ---@param scope string "desktop"|"reader"
 ---@param width number
 ---@return table
@@ -123,35 +123,50 @@ function QuickPanel.preview(scope, width)
     local Geom = require("ui/geometry")
     local HorizontalGroup = require("ui/widget/horizontalgroup")
     local HorizontalSpan = require("ui/widget/horizontalspan")
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local VerticalSpan = require("ui/widget/verticalspan")
     local LeftContainer = require("ui/widget/container/leftcontainer")
     local options = PANELS[scope].options()
     local t = Theme.current()
     local bar_h = Theme.px(t.row.height)
     local pad = Theme.px(10)
     local gap = Theme.px(t.space.md)
-    local row = HorizontalGroup:new{ align = "center" }
-    local n = 0
+    local inner_w = math.max(1, width - 2)
+    local avail = inner_w - pad * 2
+    local rows = VerticalGroup:new{ align = "left" }
+    local row, used
     for _idx, option in ipairs(options) do
         if option.enabled and option.available then
-            if n > 0 then table.insert(row, HorizontalSpan:new{ width = gap }) end
-            table.insert(row, Icon.widget{ name = option.icon, size = 22 } or Icon.label{
+            local icon = Icon.widget{ name = option.icon, size = 22 } or Icon.label{
                 name = option.icon, text = option.title, size = 18,
-            })
-            n = n + 1
+            }
+            local w = icon:getSize().w
+            if row and used + gap + w > avail then
+                rows[#rows + 1] = row
+                rows[#rows + 1] = VerticalSpan:new{ width = gap }
+                row = nil
+            end
+            if row then
+                row[#row + 1] = HorizontalSpan:new{ width = gap }
+                used = used + gap + w
+            else
+                row, used = HorizontalGroup:new{ align = "center" }, w
+            end
+            row[#row + 1] = icon
         end
     end
-    if n == 0 then
+    if not row then
         return Overlay.previewPlaceholder(width, bar_h, _("无"))
     end
-    local inner_w = math.max(1, width - 2)
-    local inner_h = math.max(1, bar_h - 2)
+    rows[#rows + 1] = row
+    local inner_h = math.max(bar_h - 2, rows:getSize().h + gap * 2)
     return Overlay.previewBox(width, LeftContainer:new{
         dimen = Geom:new{ w = inner_w, h = inner_h },
         HorizontalGroup:new{
             HorizontalSpan:new{ width = pad },
-            row,
+            rows,
         },
-    }, bar_h)
+    }, inner_h + 2)
 end
 
 ---@type BookQuickPanelSettings
