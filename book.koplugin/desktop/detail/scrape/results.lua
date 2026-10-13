@@ -15,6 +15,7 @@ local LineWidget = require("ui/widget/linewidget")
 local TitleBar = require("ui.themes.widgets.titlebar")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
+local VerticalSpan = require("ui/widget/verticalspan")
 local TopContainer = require("ui/widget/container/topcontainer")
 local Hero = require("ui.widgets.bookhero")
 local Box = require("ui.themes.widgets.box")
@@ -91,6 +92,8 @@ end
 ---@param width number
 ---@return table
 local function buildCard(self, result, width)
+    local t = Theme.current()
+    local gap = Theme.px(t.space.md)
     local row = select(1, Hero.widget(nil, nil, {
         title = result.title,
         authors = result.author,
@@ -112,10 +115,12 @@ local function buildCard(self, result, width)
     }))
     return VerticalGroup:new{
         align = "left",
+        VerticalSpan:new{ width = gap },
         row,
+        VerticalSpan:new{ width = gap },
         LineWidget:new{
-            background = Blitbuffer.Color8(Theme.current().color.rule),
-            dimen = Geom:new{ w = width, h = math.max(1, Theme.px(Theme.current().row.divider)) },
+            background = Blitbuffer.Color8(t.color.rule),
+            dimen = Geom:new{ w = width, h = math.max(1, Theme.px(t.row.divider)) },
         },
     }
 end
