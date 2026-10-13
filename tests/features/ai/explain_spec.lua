@@ -103,7 +103,7 @@ configured = false
 Assert.is_false(button.show_in_highlight_dialog_func())
 configured = true
 
--- 成功：小段上下文，提示词带书名、选中词与正文；等待和结果都是弹窗卡片
+-- 成功：小段上下文，提示词带书名、选中词与正文；等待是进度窗，结果是弹窗卡片
 button.callback()
 Assert.is_true(closed_dialog)
 Assert.eq(context_limit, 2000)
@@ -118,13 +118,11 @@ Assert.matches(prompt, "前文若干")
 Assert.is_nil(prompt:find("STORY SO FAR", 1, true), "不在任何章：不带前文摘要")
 Assert.matches(requests[1].messages[1].content, "不要 Markdown")
 Assert.matches(requests[1].messages[1].content, "不要输出思考过程")
-Assert.eq(shown[1].kind, "text_viewer")
-Assert.is_false(shown[1].fullscreen)
+Assert.eq(shown[1].kind, "progress_dialog")
 Assert.eq(shown[1].title, "月色")
 Assert.eq(shown[1].text, "AI 解释中…")
 pending("  **月色**：这里指夜晚的月光。  ")
 Assert.is_true(shown[1].closed)
-Assert.eq(cancelled, 0, "请求完成后关等待弹窗不得再取消")
 Assert.eq(shown[2].kind, "text_viewer")
 Assert.is_false(shown[2].fullscreen)
 Assert.eq(shown[2].title, "月色")
@@ -206,12 +204,13 @@ Explain.run(ui, { text = "月色" })
 pending("```\n```")
 Assert.eq(shown[#shown].kind, "toast")
 
--- 用户关掉等待弹窗：取消请求
+-- 等待是不可取消的进度窗：不给取消按钮，返回键也关不掉
 Explain.run(ui, { text = "月色" })
-clears = 0
-shown[#shown]:close()
-Assert.eq(cancelled, 1)
-Assert.eq(clears, 1, "取消也清选区")
+Assert.eq(shown[#shown].kind, "progress_dialog")
+Assert.eq(shown[#shown].dismissable, false)
+Assert.is_nil(shown[#shown].on_cancel)
+pending("收尾")
+Assert.eq(cancelled, 0)
 
 -- 离线：立即提示，不发请求、不弹等待卡片
 connected = false

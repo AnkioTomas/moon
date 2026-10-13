@@ -62,27 +62,23 @@ end
 ---@param desktop table
 ---@return function
 local function testRow(desktop)
-    local testing = false
     return function(iw)
         return Row.widget({
             width = iw,
             chevron = false,
             kind = "action", icon = "network_check", title = _("测试连接"),
             callback = function()
-                if testing then
-                    return
-                end
                 if not require("ai").isConfigured() then
                     Toast:new{ text = _("请先配置接口地址、API 密钥和模型"), timeout = 2 }:show()
                     return
                 end
-                testing = true
-                local loading = Toast:new{ text = _("正在测试…") }
+                local loading = require("ui.themes.widgets.progress_dialog"):new{
+                    title = _("测试连接"), text = _("正在测试…"), dismissable = false,
+                }
                 loading:show()
                 require("ai").chat({ { role = "user", content = "ping" } },
                     { max_tokens = 64 },
                     function(content, err)
-                        testing = false
                         loading:close()
                         if desktop.closed then
                             return

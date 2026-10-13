@@ -69,9 +69,10 @@ catalog_items = {
     { id = "en", name = "English", size = 1, lang = "en", lang_name = "英语" },
 }
 Dictionary.download({ dictionary = { data_dir = "/tmp" } })
-local toasts = Themed.all("toast")
-Assert.eq(toasts[#toasts].text, "正在获取字典目录…")
-Assert.is_true(toasts[#toasts].closed, "目录拉完收起加载提示")
+local loading = Themed.last("progress_dialog")
+Assert.eq(loading.text, "正在获取字典目录…")
+Assert.eq(loading.dismissable, false)
+Assert.is_true(loading.closed, "目录拉完收起进度窗")
 local language_list = Themed.last("list")
 Assert.len(language_list.items, 2)
 Assert.is_true(language_list.items[1].keep_open)

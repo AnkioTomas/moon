@@ -358,7 +358,9 @@ end
 ---@param desktop BookDesktop
 ---@param done fun() 查完（无论成败）
 local function probe(city, desktop, done)
-    local loading = Toast:new{ text = _("正在测试…") }
+    local loading = require("ui.themes.widgets.progress_dialog"):new{
+        title = city, text = _("正在测试…"), dismissable = false,
+    }
     loading:show()
     OnlineWeather:fetch({ city = city, ttl = 0 }, function(wx)
         done()

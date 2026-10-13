@@ -178,18 +178,11 @@ end
 ---@param opts FontPickerOpts|table|nil
 function FontPicker.open(opts)
     opts = opts or {}
-    local done = false
-    local job
-    -- 点掉加载提示即取消拉列表。
-    local loading = Toast:new{
-        text = _("正在加载字体列表…"),
-        close_callback = function()
-            if not done and job then job.cancel() end
-        end,
+    local loading = ProgressDialog:new{
+        title = opts.title or _("界面字体"), text = _("正在加载字体列表…"), dismissable = false,
     }
     loading:show()
-    job = FontCatalog.listAsync(function(items)
-        done = true
+    FontCatalog.listAsync(function(items)
         loading:close()
         if not items then
             Toast:new{ text = _("字体列表加载失败") }:show()

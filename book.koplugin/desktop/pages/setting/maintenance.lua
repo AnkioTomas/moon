@@ -162,7 +162,9 @@ function Maintenance:importKoreaderStatsRow(desktop)
                     text = _("把 KOReader 自带统计插件的阅读记录导入月读？只导入书库里能对上的书。"),
                     ok_text = _("导入"),
                     ok_callback = function()
-                        local toast = Toast:new{ text = _("正在导入…"), dismissable = false }
+                        local toast = require("ui.themes.widgets.progress_dialog"):new{
+                            title = _("导入 KOReader 统计"), text = _("正在导入…"), dismissable = false,
+                        }
                         toast:show()
                         UIManager:forceRePaint()
                         local counts, err = require("book.stats_koreader").import()

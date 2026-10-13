@@ -69,16 +69,14 @@ Assert.len(chat_calls, 1)
 Assert.eq(chat_calls[1].opts.max_tokens, 64)
 Assert.eq(chat_calls[1].opts.timeout, nil)
 Assert.eq(shown[#shown].text, "正在测试…")
-Assert.is_nil(shown[#shown].timeout)
+Assert.eq(shown[#shown].dismissable, false)
+Assert.is_nil(shown[#shown].on_cancel)
 Assert.len(closed, 0)
 chat_calls[1].cb("pong 你好世界")
 Assert.len(closed, 1)
 Assert.eq(closed[1].text, "正在测试…")
 Assert.eq(shown[#shown].text, "连接正常，模型回复：pong 你好世界")
 
--- 在途时重复点击不发第二次（新发起一轮再点）
-built.callback()
-Assert.len(chat_calls, 2)
 built.callback()
 Assert.len(chat_calls, 2)
 

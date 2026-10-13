@@ -50,11 +50,13 @@ local function use(desktop, url)
     desktop:updateView()
 end
 
---- 经候选代理发一次请求。提示窗不可点掉，测试期间顺带挡住重复点按。
+--- 经候选代理发一次请求。进度窗不可取消，测试期间顺带挡住重复点按。
 ---@param url string 规范化的代理地址
 ---@param cb fun(err: string|nil) err 为 nil 表示代理可用
 local function probe(url, cb)
-    local loading = Toast:new{ text = _("正在通过代理连接…"), dismissable = false }
+    local loading = require("ui.themes.widgets.progress_dialog"):new{
+        title = _("HTTP 代理"), text = _("正在通过代理连接…"), dismissable = false,
+    }
     loading:show()
     Request.request({ url = PROBE_URL, proxy = url, timeout = 15, connect_timeout = 10 }, function(_res, err)
         loading:close()

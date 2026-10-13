@@ -60,13 +60,14 @@ function Setting.rows(plugin)
     local function testRow(iw)
         return Row.widget({ width = iw, chevron = false, kind = "action", icon = "network_check", title = _("测试 WebDAV 连接"),
             subtitle = _("写入、读回并删除一个测试文件"), callback = function()
-                local Toast = require("ui.themes.widgets.toast")
-                local waiting = Toast:new{ text = _("正在测试 WebDAV 连接…") }
+                local waiting = require("ui.themes.widgets.progress_dialog"):new{
+                    title = _("测试 WebDAV 连接"), text = _("正在测试 WebDAV 连接…"), dismissable = false,
+                }
                 waiting:show()
                 local client = require("source.local.client").new(require("utils.settings").getSource(SOURCE_ID))
                 client:testWebdavAsync(function(ok, err)
                     waiting:close()
-                    Toast:new{ text = ok and _("WebDAV 连接正常，可读写") or err, timeout = ok and 2 or nil }:show()
+                    require("ui.themes.widgets.toast"):new{ text = ok and _("WebDAV 连接正常，可读写") or err, timeout = ok and 2 or nil }:show()
                 end)
             end })
     end

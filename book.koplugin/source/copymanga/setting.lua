@@ -33,7 +33,9 @@ local function doLogin(username, password)
     local NetworkMgr = require("ui/network/manager")
     local Toast = require("ui.themes.widgets.toast")
     NetworkMgr:runWhenOnline(function()
-        local waiting = Toast:new{ text = _("正在登录…") }
+        local waiting = require("ui.themes.widgets.progress_dialog"):new{
+            title = _("拷贝漫画账号"), text = _("正在登录…"), dismissable = false,
+        }
         waiting:show()
         Auth.loginAsync(username, password, function(ok, err)
             waiting:close()

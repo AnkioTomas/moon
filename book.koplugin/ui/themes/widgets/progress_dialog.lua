@@ -20,6 +20,7 @@
   dialog:set("已格式化的文案", 40)          -- 文案原样显示；percent 省略时进度条不动
 
   ProgressDialog:new{ title = "…", on_background = fn, on_cancel = fn }   -- 可转后台 / 可取消
+  ProgressDialog:new{ title = "…", text = "正在测试…", dismissable = false }  -- 不可取消的前台等待
 
 @module koplugin.book.ui.themes.widgets.progress_dialog
 --]]
@@ -37,11 +38,13 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 
 ---@class BookThemeProgressDialog : BookThemeModal
----@field title string
+---@field title string|nil
+---@field text string|nil 初始说明行，缺省「正在准备…」
 ---@field on_background fun()|nil 给了就出「后台运行」按钮；返回键同此
 ---@field on_cancel fun()|nil 给了就出「取消」按钮
 local ProgressDialog = Modal:extend{
     title = nil,
+    text = nil,
     on_background = nil,
     on_cancel = nil,
 }
@@ -60,7 +63,7 @@ function ProgressDialog:init()
     Modal.init(self)
     local t = self.theme
     local width = self:innerWidth()
-    self.detail = Text.line("body", _("正在准备…"), { width = width, color = t.color.muted })
+    self.detail = Text.line("body", self.text or _("正在准备…"), { width = width, color = t.color.muted })
     self.bar = Progress:new{ width = width }
     self:setDialog{
         title = self.title,
