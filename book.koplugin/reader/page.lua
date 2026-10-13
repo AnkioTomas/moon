@@ -24,7 +24,6 @@ function Reader.onCreate(plugin)
     if ui.handleEvent then
         ui:handleEvent(Event:new("UpdatePos"))
     end
-    require("reader.explain").install(ui)
     require("reader.highlight_menu").install(ui)
     require("reader.book_notes").install(ui)
     require("reader.selection").install(ui)

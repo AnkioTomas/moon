@@ -124,6 +124,7 @@ local bookmarked, toggles = false, 0
 local ui = {
     dialog = {},
     document = {},
+    highlight = { _highlight_buttons = {}, addToHighlightDialog = function() end },
     toc = { onShowToc = function() end },
     bookmark = {
         isPageBookmarked = function() return bookmarked end,

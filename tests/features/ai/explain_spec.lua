@@ -1,6 +1,6 @@
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
---[[-- reader.explain：划词 AI 解释的注册、请求拼装、展示与取消。 --]]
+--[[-- features.ai：划词 AI 解释的注册、请求拼装、纯文本清洗、弹窗展示与取消。 --]]
 
 local Assert = require("support.assert")
 
@@ -56,17 +56,17 @@ package.preload["ai"] = function()
     }
 end
 
-local Explain = require("reader.explain")
+local Ai = require("features.ai")
+local Explain = require("features.ai.explain")
 
--- 注册：只装一次，AI 未配置时不显示
+-- 注册：阅读页就绪时挂进划词菜单，按钮键不变；AI 未配置时不显示
 local factories = {}
 local ui = {
     highlight = {
         addToHighlightDialog = function(_, index, factory) factories[index] = factory end,
     },
 }
-Explain.install(ui)
-Explain.install(ui)
+Ai.onReaderReady({ ui = ui })
 local closed_dialog = false
 local this = {
     ui = ui,
@@ -80,7 +80,7 @@ configured = false
 Assert.is_false(button.show_in_highlight_dialog_func())
 configured = true
 
--- 成功：小段上下文，提示词带书名、选中词与正文，结果进 TextViewer
+-- 成功：小段上下文，提示词带书名、选中词与正文；等待和结果都是弹窗卡片
 button.callback()
 Assert.is_true(closed_dialog)
 Assert.eq(context_limit, 2000)
@@ -92,13 +92,21 @@ Assert.matches(prompt, "「月色」")
 Assert.matches(prompt, "所在句子：\n他望着那片月色。")
 Assert.matches(prompt, "所在段落：\n整段：他望着那片月色。")
 Assert.matches(prompt, "前文若干")
+Assert.matches(requests[1].messages[1].content, "不要 Markdown")
+Assert.matches(requests[1].messages[1].content, "不要输出思考过程")
+Assert.eq(shown[1].kind, "text_viewer")
+Assert.is_false(shown[1].fullscreen)
+Assert.eq(shown[1].title, "月色")
 Assert.eq(shown[1].text, "AI 解释中…")
-pending("  这里指夜晚的月光。  ")
+pending("  **月色**：这里指夜晚的月光。  ")
 Assert.is_true(shown[1].closed)
-Assert.eq(cancelled, 0, "请求完成后关提示不得再取消")
+Assert.eq(cancelled, 0, "请求完成后关等待弹窗不得再取消")
 Assert.eq(shown[2].kind, "text_viewer")
+Assert.is_false(shown[2].fullscreen)
 Assert.eq(shown[2].title, "月色")
-Assert.eq(shown[2].text, "这里指夜晚的月光。")
+Assert.eq(shown[2].text, "月色：这里指夜晚的月光。", "Markdown 标记剥掉")
+Assert.len(shown[2].buttons, 1, "关闭走右上角 ×，底栏只留复制")
+Assert.eq(shown[2].buttons[1].text, "复制")
 
 -- 失败：提示错误原因
 Explain.run(ui, { text = "月色" })
@@ -106,7 +114,12 @@ pending(nil, "timeout")
 Assert.eq(shown[4].kind, "toast")
 Assert.matches(shown[4].text, "timeout")
 
--- 用户关掉等待提示：取消请求
+-- 只剩 Markdown 空壳也算失败
+Explain.run(ui, { text = "月色" })
+pending("```\n```")
+Assert.eq(shown[#shown].kind, "toast")
+
+-- 用户关掉等待弹窗：取消请求
 Explain.run(ui, { text = "月色" })
 shown[#shown]:close()
 Assert.eq(cancelled, 1)
@@ -115,3 +128,32 @@ Assert.eq(cancelled, 1)
 local before = #requests
 Explain.run(ui, { text = "   " })
 Assert.eq(#requests, before)
+
+-- 纯文本清洗：标题、加粗、斜体、行内代码、代码块、引用、分隔线、链接去掉，列表符号换成圆点
+Assert.eq(Explain.plain(table.concat({
+    "## 释义",
+    "**月色**指*月光*，见`古诗`。",
+    "```text",
+    "代码",
+    "```",
+    "> 引文",
+    "---",
+    "  - 第一点",
+    "* 第二点",
+    "参见[词典](https://example.com)。",
+    "",
+    "",
+    "",
+    "结尾",
+}, "\n")), table.concat({
+    "释义",
+    "月色指月光，见古诗。",
+    "代码",
+    "引文",
+    "• 第一点",
+    "• 第二点",
+    "参见词典。",
+    "",
+    "结尾",
+}, "\n"))
+Assert.eq(Explain.plain("3 * 4 = 12，纯文本不动"), "3 * 4 = 12，纯文本不动")

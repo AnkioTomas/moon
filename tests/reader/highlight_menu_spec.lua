@@ -66,7 +66,7 @@ local function defined_in(path)
     return load("return function() return { text = 'x' } end", "@" .. path)()
 end
 Assert.eq(HighlightMenu.originOf(defined_in("/mnt/us/koreader/plugins/qrclipboard.koplugin/main.lua")), "plugin:qrclipboard")
-Assert.eq(HighlightMenu.originOf(defined_in("/mnt/us/koreader/plugins/book.koplugin/reader/explain.lua")), "book")
+Assert.eq(HighlightMenu.originOf(defined_in("/mnt/us/koreader/plugins/book.koplugin/features/ai/explain.lua")), "book")
 Assert.eq(HighlightMenu.originOf(defined_in("frontend/apps/reader/modules/readerhighlight.lua")), "koreader")
 Assert.eq(HighlightMenu.originOf(defined_in("/mnt/us/koreader/patches/2-my-button.lua")), "patch:2-my-button")
 Assert.eq(HighlightMenu.originOf(defined_in("somewhere.lua")), "unknown")
