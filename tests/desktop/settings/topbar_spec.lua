@@ -32,7 +32,7 @@ local desktop = {
 local Settings = require("desktop.pages.setting.topbar")
 
 local rows = Settings:rows(desktop)
-Assert.len(rows, 8)
+Assert.len(rows, 9)
 local memory = rows[3](600)
 Assert.eq(memory.title, "剩余内存")
 Assert.is_true(memory.toggle)

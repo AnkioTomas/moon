@@ -14,8 +14,27 @@ local _ = require("gettext")
 
 local Fetch = {}
 
---- 失败当场回调过的请求句柄。
+--- 发起前就失败的请求句柄（失败回调已推迟到下一 tick）。
 Fetch.NOOP = { cancel = function() end }
+
+--- 业务回调入口：turbo 协程里抛错只进 turbo 日志，而且会跳过之后的 Turbo.release()，泵永不拆。
+---@param label string
+---@param fn function
+function Fetch.call(label, fn, ...)
+    return require("ui.guard").call(label, fn, ...)
+end
+
+--- 发起前就失败时推迟回调：调用方常把返回的句柄存起来、在回调里清掉，同步回调会被随后的赋值覆盖。
+---@param label string
+---@param fn function
+---@return HttpJob
+function Fetch.fail(label, fn, ...)
+    local n, args = select("#", ...), { ... }
+    require("ui/uimanager"):nextTick(function()
+        Fetch.call(label, fn, unpack(args, 1, n))
+    end)
+    return Fetch.NOOP
+end
 
 local seq = 0
 
@@ -37,12 +56,13 @@ end
 
 --- 开一次请求：查网络、编号、记日志、占泵。失败返回 nil, err（未占泵，不要 release）。
 --- 只看网卡状态：isOnline 会在 UI 线程同步解析 DNS，每个请求都卡一次界面。
+--- 本机回环（如蓝牙守护进程接口）不走网卡，Wi-Fi 关着也要能连。
 ---@param opts HttpRequest
 ---@param tag string
 ---@return HttpFetchCtx|nil
 ---@return string|nil err
 function Fetch.begin(opts, tag)
-    if not NetworkMgr:isConnected() then
+    if not opts.url:find("^http://127%.0%.0%.1[:/]") and not NetworkMgr:isConnected() then
         return nil, _("网络不可用，请先连接 Wi-Fi")
     end
     seq = seq + 1

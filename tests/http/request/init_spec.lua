@@ -35,8 +35,9 @@ do
     Assert.is_false(Request.ok(true))
 end
 
--- 离线出口：不创建 Turbo client、不打开下载文件，当场失败。
+-- 离线出口：不创建 Turbo client、不打开下载文件；失败回调推迟到下一 tick（不覆盖调用方随后保存的句柄）。
 do
+    local Stubs = require("support.stubs")
     network_connected = false
     local request_err, stream_err, download_ok, download_err
     Request.request({ url = "https://example.test/offline" }, function(_, err)
@@ -58,6 +59,8 @@ do
     Request.post("https://example.test/offline", "x", {}, function(_, err)
         post_err = err
     end)
+    Assert.is_nil(request_err)
+    Stubs.flush()
     Assert.matches(request_err, "网络不可用")
     Assert.matches(stream_err, "网络不可用")
     Assert.is_false(download_ok)
@@ -471,3 +474,16 @@ do
     Assert.is_nil(sent.Authorization)
 end
 
+-- 本机回环不看网卡（蓝牙守护进程接口在 Wi-Fi 关着时也要能连）。
+do
+    network_connected = false
+    -- 桩掉占泵：只验联网判断，不起真 ioloop。放在文件末尾：放行后会加载真 socket，前面的 socket 桩就失效了。
+    local Fetch = require("http.request.fetch")
+    local Turbo = require("http.turbo")
+    local acquire = Turbo.acquire
+    Turbo.acquire = function() return nil, "pump stub" end
+    Assert.matches(select(2, Fetch.begin({ url = "http://127.0.0.1:8321/status" }, "spec")), "pump stub")
+    Assert.matches(select(2, Fetch.begin({ url = "http://127.0.0.10/x" }, "spec")), "网络不可用")
+    Turbo.acquire = acquire
+    network_connected = true
+end
