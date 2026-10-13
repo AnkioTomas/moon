@@ -30,9 +30,9 @@ has_frontlight = false
 Assert.is_false(autolight.available())
 
 Assert.is_false(autolight.active())
-autolight.run()
+autolight.run({})
 Assert.is_true(set_to, "关着时点一下打开")
 conf.auto_light = true
 Assert.is_true(autolight.active())
-autolight.run()
+autolight.run({})
 Assert.is_false(set_to)

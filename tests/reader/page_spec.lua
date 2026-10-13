@@ -115,6 +115,10 @@ end
 package.preload["features.xray.marks"] = function()
     return { install = function() end }
 end
+-- 段评关联动作只对有微信读书的本地书可用，本 spec 只看核心动作
+package.preload["features.reviews.link"] = function()
+    return { available = function() return false end }
+end
 
 local bookmarked, toggles = false, 0
 local ui = {
