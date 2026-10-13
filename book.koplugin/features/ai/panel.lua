@@ -1,5 +1,5 @@
 --[[--
-AI 阅读助手的阅读快捷面板开关：回顾前文、读书报告。未配置 AI 时不出现。
+AI 阅读助手的阅读快捷面板开关：回顾前文、读书报告、问书。未配置 AI 时不出现。
 
 @module koplugin.book.features.ai.panel
 --]]
@@ -37,6 +37,17 @@ function Panel.actions()
             ---@param ctx BookQuickPanelContext
             run = function(ctx)
                 require("features.ai.report").open(ctx.ui)
+            end,
+        },
+        {
+            id = "ai_ask",
+            title = _("问书"),
+            icon = "contact_support",
+            scope = "reader",
+            available = configured,
+            ---@param ctx BookQuickPanelContext
+            run = function(ctx)
+                require("features.ai.explain").askBook(ctx.ui)
             end,
         },
     }
