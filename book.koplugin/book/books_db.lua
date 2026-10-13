@@ -5,6 +5,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
   身份：source_id + stable_id（PK）、md5、path、inserted_at（0=仅身份行）
   成员：deleted（0=在架有效，1=软删/非成员）；sync_status（0 待上传，1 已同步）
   展示：title/authors/category/series/intro/cover
+  扩展元数据（BookDB.META）：publisher/published/isbn/language/words/rating/rating_by
   本地-only：reader_prefs、toc、toc_fetched_at、read_state
   进度真源在 pending_progress；本表不存 percent，进度禁止写回本表。
 
@@ -14,6 +15,8 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
   - inserted_at 只在首次上架时写一次：身份行（0）经 upsert / upsertLocal / 远端在架行上架时补写，之后不改。
   - 本地删除 = deleted=1 + sync_status=0（墓碑），推云端成功后 remove 撕墓碑（连同依附表）；本地上架推 addToShelf 后 markSynced。
   - 远端 upsert 遇本地脏行（sync_status=0）不盖 title/authors/category/series/intro 与 deleted。
+  - 扩展元数据只经 setMeta 写（三种 upsert 写完顺带调）：只写非空值，空值不清已有值，
+    书架快照不带这些字段时不会冲掉刮削 / 详情补到的数据。
   - 书架脏位只在单条 push 成功时清，禁止整源盲清。
   - toc 是不透明 JSON，TTL 由调用方经 getToc(max_age) 解释，过期不删列。
 跨表：只读 JOIN chapters（已下载口径）。改名 / 收编在同一事务里调核心依附表的 moveIdentity，
@@ -70,6 +73,13 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 ---@field reader_prefs string|nil 全书排版偏好 JSON（仅本地）
 ---@field toc string|nil 目录缓存 JSON（仅本地）
 ---@field toc_fetched_at integer|nil 目录缓存时间
+---@field publisher string|nil 出版社
+---@field published string|nil 出版日期（YYYY 或 YYYY-MM）
+---@field isbn string|nil ISBN
+---@field language string|nil 语言代码（zh / en / zh-CN …）
+---@field words integer|nil 字数
+---@field rating number|nil 评分（10 分制）
+---@field rating_by string|nil 评分来源 id（weread / douban）
 
 --- 书籍详情（继承 Book 全部字段，含 intro）。
 --- 详情页 / 悬浮菜单简介区使用；列表接口不必填 intro。
@@ -90,6 +100,8 @@ CREATE TABLE IF NOT EXISTS books (
   deleted INTEGER NOT NULL DEFAULT 1, sync_status INTEGER NOT NULL DEFAULT 1,
   reader_prefs TEXT, toc TEXT, toc_fetched_at INTEGER NOT NULL DEFAULT 0,
   read_state INTEGER NOT NULL DEFAULT 0,
+  publisher TEXT, published TEXT, isbn TEXT, language TEXT,
+  words INTEGER, rating REAL, rating_by TEXT,
   PRIMARY KEY (source_id, stable_id)
 );
 ]]) then return false end
@@ -104,6 +116,13 @@ CREATE TABLE IF NOT EXISTS books (
         { "toc", "toc TEXT" },
         { "toc_fetched_at", "toc_fetched_at INTEGER NOT NULL DEFAULT 0" },
         { "read_state", "read_state INTEGER NOT NULL DEFAULT 0" },
+        { "publisher", "publisher TEXT" },
+        { "published", "published TEXT" },
+        { "isbn", "isbn TEXT" },
+        { "language", "language TEXT" },
+        { "words", "words INTEGER" },
+        { "rating", "rating REAL" },
+        { "rating_by", "rating_by TEXT" },
     }
     if columns then
         for i = 1, nrows do
@@ -136,6 +155,28 @@ CREATE INDEX IF NOT EXISTS idx_books_library_v2 ON books(source_id, deleted, sta
 CREATE INDEX IF NOT EXISTS idx_books_sync ON books(source_id, sync_status);
 ]]) ~= nil
 end)
+
+--- 扩展元数据列；顺序无意义，列名只来自这张表（拼进 SQL）。
+BookDB.META = { "publisher", "published", "isbn", "language", "words", "rating", "rating_by" }
+
+--- 写扩展元数据：只写 row 里非空的列，其余保持原值；行不存在时什么都不做。
+---@param row table 带 source_id / stable_id 与 META 中任意字段
+---@return boolean
+function BookDB.setMeta(row)
+    local sets, args = {}, {}
+    for _idx, col in ipairs(BookDB.META) do
+        local v = row[col]
+        if v ~= nil and v ~= "" then
+            sets[#sets + 1] = col .. "=?"
+            args[#args + 1] = v
+        end
+    end
+    if #sets == 0 then return true end
+    args[#args + 1] = row.source_id
+    args[#args + 1] = row.stable_id
+    return DB.exec("UPDATE books SET " .. table.concat(sets, ", ") .. " WHERE source_id=? AND stable_id=?;",
+        unpack(args, 1, #args)) ~= nil
+end
 
 --- 插入或更新 books 行（本地可信写入：扫盘/本地登记），标脏待上传。
 ---@param row table
@@ -172,7 +213,7 @@ function BookDB.upsert(row)
         row.cover,
         now,
         row.path
-    ) ~= nil
+    ) ~= nil and BookDB.setMeta(row)
 end
 
 --- 远端书架行写入。本地脏行（sync_status=0）保留展示字段。
@@ -220,7 +261,7 @@ function BookDB.upsertRemote(row)
         row.category, row.series, row.intro, row.cover, now, row.path,
         deleted,
         has_membership and 1 or 0, has_membership and 1 or 0
-    ) ~= nil
+    ) ~= nil and BookDB.setMeta(row)
 end
 
 --- 一个事务写入一批远端行（逐行语义同 upsertRemote）；任一行失败整批回滚。
@@ -257,7 +298,7 @@ function BookDB.upsertLocal(row)
             sync_status=CASE WHEN books.deleted=1 THEN 0 ELSE books.sync_status END;]],
         source_id, stable_id, row.title, row.authors,
         row.category, row.series, row.intro, now
-    ) ~= nil
+    ) ~= nil and BookDB.setMeta(row)
 end
 
 --- 远端书架快照入库：先把当前在架标软删，再 upsert 远端成员。
@@ -353,16 +394,17 @@ function BookDB.pendingShelfAddIds(source_id)
 end
 
 local COLUMNS =
-    "source_id, stable_id, md5, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state"
+    "source_id, stable_id, md5, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state, "
+    .. table.concat(BookDB.META, ", ")
 
---- rowexec 位置参数 → Book 表
+--- rowexec 位置参数 → Book 表；固定列之后按 BookDB.META 顺序是扩展元数据。
 ---@return Book|nil
-local function rowToBook(source_id_r, stable_id_r, digest, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state)
+local function rowToBook(source_id_r, stable_id_r, digest, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state, ...)
     if not source_id_r then
         return nil
     end
     local del = tonumber(deleted) or 1
-    return {
+    local book = {
         source_id = source_id_r,
         stable_id = stable_id_r,
         md5 = digest,
@@ -379,6 +421,12 @@ local function rowToBook(source_id_r, stable_id_r, digest, title, authors, categ
         read_state = tonumber(read_state) or 0,
         percent = 0,
     }
+    for i, col in ipairs(BookDB.META) do
+        local v = select(i, ...)
+        -- INTEGER / REAL 列可能是 int64 cdata，统一成 Lua number
+        book[col] = (col == "words" or col == "rating") and tonumber(v) or v
+    end
+    return book
 end
 
 --- DB.query 列式结果的第 i 行 → Book
@@ -714,8 +762,8 @@ function BookDB.isDownloaded(source_id, stable_id, chapter)
     )) == 1
 end
 
---- 书架按某文本列（category / series）聚合册数；空值归到 ''，排在最后
----@param column "category"|"series" 同时是返回行的键
+--- 书架按某文本列（category / series / authors）聚合册数；空值归到 ''，排在最后
+---@param column "category"|"series"|"authors" 同时是返回行的键
 ---@param source_id string|string[]
 ---@return table[]
 function BookDB.countsBy(column, source_id)

@@ -1,25 +1,25 @@
 --[[--
-书籍详情：全屏主题页，标题栏返回 + Hero 卡片 + 来源内容区 + 最多两行按钮区。
-  单页不滚动，「最近几天」用翻页条分页。
-  书城预览书（Z-Library / OPDS）未入库：无编辑/统计，hero 不显示简介摘要与进度，完整简介直下，
-  底栏「加入书库」；图书馆显示统计及源支持的操作。
+书籍详情：全屏主题页，单页不滚动。主操作在头部，次要操作收在标题栏右上角「更多」菜单。
+  书城预览书（Z-Library / OPDS）未入库：没有菜单与指标带，主按钮「加入书库」；
+  图书馆显示阅读指标（点按看完整阅读记录）及源支持的操作。
   关窗即结束：closed 置位，在飞的书城详情补拉随之取消。
 
 布局：
   +-----------------------------------------------+
-  | [<]                                           | TitleBar
+  | [<]                                     [...] | TitleBar；[...] 是工具项菜单
   |-----------------------------------------------|
-  | +----+  书名                                  |
-  | |封面|  作者          ← 点按开始阅读           | bookhero
-  | +----+  源名 · 分类 · 系列 / 简介 / 进度条     |
-  |                                               |
-  | [累计时长] [已读页数] [上次阅读]               | KPI 卡片
-  | 最近几天                                       |
-  | 08-15  ========····  42分钟                    |
-  | [<]            1 / 3                     [>]  | 多于一页才出现
-  |                                               |
-  | [编辑] [刮削] [下载] [状态] [删除]             | 工具行
-  | [██████ 继续阅读 / 开始阅读 ██████]            | 主操作
+  | +--------+  书名（最多 3 行）                  |
+  | |        |  作者                               |
+  | |  封面  |  系列 · 分类                        |
+  | |  38%   |                                     |
+  | |        |  [████ 继续阅读 / 开始阅读 ████]    | 主操作，贴封面底边
+  | +--------+  42% ========····  约剩 3小时       |
+  |-----------------------------------------------|
+  |  12小时 | 356 | 10-12 | 10-20                 | 指标带，点按弹「阅读记录」
+  |-----------------------------------------------|
+  | 简介 …………………………………………………… 更多 ›         | 截断时点按看全文
+  |-----------------------------------------------|
+  | 书籍信息  来源 x  格式 x / 大小 x  加入 x       | 两列表格，放不下从末尾丢行
   +-----------------------------------------------+
 
 @module koplugin.book.desktop.detail
@@ -40,7 +40,6 @@ local storeBackend = require("desktop.detail.common").storeBackend
 ---@field _dirty boolean|nil
 ---@field _stats table|nil
 ---@field _daily table|nil
----@field _daily_page integer|nil
 ---@field _detail_job CancelHandle|nil
 ---@field updateView fun(self: BookDetailPage) 整页重建，见 detail/layout.lua
 local Detail = Modal:extend{
@@ -87,6 +86,7 @@ end
 function Detail:init()
     Modal.init(self)
     self:loadStats()
+    local row = self:mergeStored()
     self:updateView()
     -- OPDS 条目本身就是完整详情，只有 zlib 需要补拉。
     local store = storeBackend(self.book)
@@ -101,26 +101,43 @@ function Detail:init()
         end
         return
     end
-    self:fetchMissingIntro()
+    self:fetchMissingDetail(row)
 end
 
---- 库内书没有简介（书架快照常不带）且在线时，向属主源要一次详情；源负责落库，这里只重读重画。
---- 离线不请求，不弹联网。
-function Detail:fetchMissingIntro()
+--- 库内书：书架列表行不带扩展元数据，从 books 行并进来。
+--- self.book 是书架列表项，带进度等列表专有字段，不能整行换掉。
+---@return Book|nil row books 行；书城书 / 未入库返回 nil
+function Detail:mergeStored()
     local book = self.book
-    if self.origin ~= "library" or not (book.source_id and book.stable_id) then return end
-    local row = require("book.books_db").get(book.source_id, book.stable_id)
-    if not row or row.intro then return end
+    if self.origin ~= "library" or not (book.source_id and book.stable_id) then return nil end
+    local BookDB = require("book.books_db")
+    local row = BookDB.get(book.source_id, book.stable_id)
+    if row then
+        for _idx, col in ipairs(BookDB.META) do book[col] = row[col] end
+    end
+    return row
+end
+
+--- 库内书缺简介，或一项扩展元数据都没有（书架快照常不带）且在线时，向属主源要一次详情；
+--- 源负责落库，这里重读后并简介 / 作者 / 扩展元数据再重画。离线不请求，不弹联网。
+---@param row Book|nil mergeStored 读到的 books 行
+function Detail:fetchMissingDetail(row)
+    if not row then return end
+    local BookDB = require("book.books_db")
+    local has_meta = false
+    for _idx, col in ipairs(BookDB.META) do has_meta = has_meta or row[col] ~= nil end
+    if row.intro and has_meta then return end
+    local book = self.book
     local owner = require("desktop.detail.common").bookOwnerSource(book, self.source)
     if not (owner and owner.getDetailAsync and require("ui/network/manager"):isConnected()) then return end
     local identity = { source_id = book.source_id, stable_id = book.stable_id, source = owner, book = row }
     self._detail_job = owner:getDetailAsync(identity, function(detail)
         self._detail_job = nil
         if self.closed or not detail then return end
-        local fresh = require("book.books_db").get(book.source_id, book.stable_id)
-        if not (fresh and fresh.intro) then return end
-        -- 只并简介 / 作者：self.book 是书架列表项，带进度等列表专有字段，不能整行换掉。
-        book.intro, book.authors = fresh.intro, fresh.authors or book.authors
+        local fresh = BookDB.get(book.source_id, book.stable_id)
+        if not fresh then return end
+        book.intro, book.authors = fresh.intro or book.intro, fresh.authors or book.authors
+        for _idx, col in ipairs(BookDB.META) do book[col] = fresh[col] end
         self:refresh()
     end)
 end

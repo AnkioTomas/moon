@@ -4,7 +4,7 @@
   +-------------------------------------+
   | [<]         标题              [×]   |
   |            副标题                   |
-  +-------------------------------------+   row.divider > 0 时画线
+  +-------------------------------------+   row.divider > 0 时画线（divider = false 不画）
 
   TitleBar.widget({ width = w, title = "…", subtitle = "…",
       left_icon = "arrow_back", left_callback = fn, right_icon = "close", right_callback = fn })
@@ -33,7 +33,7 @@ function TitleBar.height()
     return Theme.px(t.control.height) + Theme.px(t.space.sm) * 2 + Theme.px(t.row.divider)
 end
 
----@param opts table width/title/subtitle/left_icon/left_callback/right_icon/right_callback
+---@param opts table width/title/subtitle/left_icon/left_callback/right_icon/right_callback/divider
 ---@return table
 function TitleBar.widget(opts)
     local t = Theme.current()
@@ -62,7 +62,7 @@ function TitleBar.widget(opts)
         },
     }
     local divider = Theme.px(t.row.divider)
-    if divider > 0 then
+    if divider > 0 and opts.divider ~= false then
         bar[#bar + 1] = LineWidget:new{
             background = Blitbuffer.Color8(t.color.rule),
             dimen = Geom:new{ w = opts.width, h = divider },

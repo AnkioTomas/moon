@@ -111,6 +111,7 @@ local touch_ok = true
 local mark_deleted_ok = true
 package.preload["book.books_db"] = function()
     return {
+        META = { "publisher", "words" },
         getByPath = function(path)
             return book_rows_by_path[path]
         end,
@@ -558,6 +559,8 @@ do
             series = "系列",
             intro = "简介",
             cover = "https://img.test/a.jpg",
+            publisher = "出版社",
+            words = 1000,
             path = "/should/not/persist.epub", -- rememberMany 不写 path
         },
         { title = "无身份临时条目" },
@@ -572,6 +575,8 @@ do
     Assert.eq(book_upserts[1].series, "系列")
     Assert.eq(book_upserts[1].intro, "简介")
     Assert.eq(book_upserts[1].cover, "https://img.test/a.jpg")
+    Assert.eq(book_upserts[1].publisher, "出版社", "扩展元数据随书架快照落库")
+    Assert.eq(book_upserts[1].words, 1000)
     Assert.is_nil(book_upserts[1].percent)
     Assert.is_nil(book_upserts[1].inserted_at)
     Assert.is_nil(book_upserts[1].path) -- path 由 touchPath 单独维护

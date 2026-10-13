@@ -18,10 +18,11 @@ local function imageUrl(value)
 end
 
 --- ebook/lite、ebooks/lite 的一行 → Book。
---- 实际字段只有 ebook_id/name/author/image_url/cate_third_names；没有简介与进度。
+--- 实际字段只有 ebook_id/name/author/image_url/cate_third_names（详情另有 word_count）；没有简介与进度。
 ---@param row table
 ---@return Book
 function Mapper.book(row)
+    local words = tonumber(row.word_count) or 0
     return {
         source_id = SOURCE_ID,
         stable_id = tostring(row.ebook_id),
@@ -29,6 +30,7 @@ function Mapper.book(row)
         authors = row.author,
         category = type(row.cate_third_names) == "table" and table.concat(row.cate_third_names, ", ") or nil,
         cover = imageUrl(row.image_url),
+        words = words > 0 and words or nil,
     }
 end
 
