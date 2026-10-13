@@ -117,8 +117,8 @@ package.loaded["source.toc"] = {
     end,
 }
 package.loaded["source.shelf"] = {
-    reconcile = function(source_id, list)
-        reconciled = { source_id = source_id, books = list }
+    reconcile = function(source_id, list, force)
+        reconciled = { source_id = source_id, books = list, force = force }
         return { pulled = #list, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
     end,
 }
@@ -152,7 +152,7 @@ end
 
 -- 书架：按库分页拉 series，库名即分类；Key 去空白、地址去尾斜杠。
 local series_page = {}
-for i = 1, 500 do series_page[i] = { id = i, name = "S" .. i, libraryName = "小说" } end
+for i = 1, 500 do series_page[i] = { id = i, name = "S" .. i, libraryName = "小说", wordCount = i == 1 and 120000 or 0 } end
 routes["POST /api/Series/all-v2"] = function(opts)
     local body = JSON.decode(opts.body)
     local lib, page = body.Statements[1].Value, query(opts, "pageNumber")
@@ -167,6 +167,7 @@ Assert.eq(result.pulled, 503, "对账 502 本 + 1 本漫画进度")
 Assert.eq(reconciled.source_id, "ext.kavita")
 Assert.eq(reconciled.books[502].category, "漫画")
 Assert.eq(reconciled.books[1].stable_id, "1")
+Assert.eq(reconciled.books[1].meta.words, 120000, "书架带字数（0 = 未知，入库时丢掉）")
 Assert.eq(calls[1].headers["x-api-key"], "k")
 Assert.matches(calls[1].url, "^http://kav/api/Series/all%-v2%?")
 Assert.is_true(run("syncBooksAsync", { dirty_only = true }).skipped, "没有删书接口，只推脏行时跳过")
@@ -197,7 +198,8 @@ routes["GET /api/Series/volumes"] = function(opts)
     end
     return json({ { id = 400, chapters = { { id = 4000, titleName = "散图", format = 0, pages = 3 } } } })
 end
-routes["GET /api/Series/metadata"] = json({ summary = "简介", writers = { { name = "甲" }, { name = "乙" } } })
+routes["GET /api/Series/metadata"] = json({ summary = "简介", writers = { { name = "甲" }, { name = "乙" } },
+    publishers = { { name = "某出版社" } }, releaseYear = 2019, language = "zh" })
 for _idx, sid in ipairs({ 20, 30, 40, 50 }) do
     routes["GET /api/Series/" .. sid] = json({ id = sid, name = "合集" .. sid, libraryId = 2 })
 end
@@ -230,9 +232,13 @@ routes["GET /api/Series/metadata"] = function(opts)
 end
 run("syncBooksAsync", { force = true })
 Assert.is_true(reconciled ~= nil, "force 不看指纹")
+Assert.is_true(reconciled.force, "force 传给对账，书架 meta 覆盖本地")
 Assert.eq(table.concat(meta_calls, ","), "2,3")
 Assert.eq(remembered["2"].intro, "简介")
 Assert.eq(remembered["2"].authors, "甲 / 乙")
+Assert.eq(remembered["2"].meta.publisher, "某出版社")
+Assert.eq(remembered["2"].meta.published, 2019)
+Assert.eq(remembered["2"].meta.language, "zh")
 Assert.is_nil(remembered["2"].title, "不碰标题")
 -- 书库把空简介存成 NULL：补过的记在单独文件里，否则没简介的书每次同步都重拉。
 meta_calls, books["2"], books["3"] = {}, {}, {}

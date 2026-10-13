@@ -5,7 +5,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
   身份：source_id + stable_id（PK）、md5、path、inserted_at（0=仅身份行）
   成员：deleted（0=在架有效，1=软删/非成员）；sync_status（0 待上传，1 已同步）
   展示：title/authors/category/series/intro/cover
-  扩展元数据（BookDB.META）：publisher/published/isbn/language/words/rating/rating_by
+  扩展元数据：meta（JSON 对象，见 BookMeta；入库前由 normalizeMeta 规范成可直接展示的值）
   本地-only：reader_prefs、toc、toc_fetched_at、read_state
   进度真源在 pending_progress；本表不存 percent，进度禁止写回本表。
 
@@ -15,8 +15,9 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
   - inserted_at 只在首次上架时写一次：身份行（0）经 upsert / upsertLocal / 远端在架行上架时补写，之后不改。
   - 本地删除 = deleted=1 + sync_status=0（墓碑），推云端成功后 remove 撕墓碑（连同依附表）；本地上架推 addToShelf 后 markSynced。
   - 远端 upsert 遇本地脏行（sync_status=0）不盖 title/authors/category/series/intro 与 deleted。
-  - 扩展元数据只经 setMeta 写（三种 upsert 写完顺带调）：只写非空值，空值不清已有值，
-    书架快照不带这些字段时不会冲掉刮削 / 详情补到的数据。
+  - meta 只经 setMeta 写（三种 upsert 写完顺带调），按键合并、从不清键：
+    普通同步与详情只补缺的键；强制刷新（reconcile force）与本地写入（扫盘 / 刮削）覆盖传入的键。
+    rating 是 { score, by } 整体，分数和来源不会拆开合并。
   - 书架脏位只在单条 push 成功时清，禁止整源盲清。
   - toc 是不透明 JSON，TTL 由调用方经 getToc(max_age) 解释，过期不删列。
 跨表：只读 JOIN chapters（已下载口径）。改名 / 收编在同一事务里调核心依附表的 moveIdentity，
@@ -73,13 +74,17 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 ---@field reader_prefs string|nil 全书排版偏好 JSON（仅本地）
 ---@field toc string|nil 目录缓存 JSON（仅本地）
 ---@field toc_fetched_at integer|nil 目录缓存时间
+---@field meta BookMeta|nil 扩展元数据（books.meta 解码）；写入时可传未规范的原始值
+
+--- books.meta 的规范形态（normalizeMeta 的产物），缺的键即未知。
+---@class BookMeta
 ---@field publisher string|nil 出版社
----@field published string|nil 出版日期（YYYY 或 YYYY-MM）
----@field isbn string|nil ISBN
----@field language string|nil 语言代码（zh / en / zh-CN …）
----@field words integer|nil 字数
----@field rating number|nil 评分（10 分制）
----@field rating_by string|nil 评分来源 id（weread / douban）
+---@field published string|nil 出版日期：YYYY-MM 或 YYYY
+---@field isbn string|nil ISBN：10 / 13 位，只含数字与 X
+---@field language string|nil 语言主码，小写（zh / en / ja）
+---@field words integer|nil 字数，> 0
+---@field rating { score: number, by: string|nil }|nil 十分制一位小数 + 来源 id（weread / douban）
+---@field detail_at integer|nil 最近一次拉单本详情的时间；详情页据此决定还要不要拉
 
 --- 书籍详情（继承 Book 全部字段，含 intro）。
 --- 详情页 / 悬浮菜单简介区使用；列表接口不必填 intro。
@@ -87,6 +92,8 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 
 local DB = require("utils.db")
 local Event = require("utils.event")
+local JSON = require("json")
+local Text = require("utils.text")
 require("book.chapters_db")
 
 local BookDB = {}
@@ -99,9 +106,7 @@ CREATE TABLE IF NOT EXISTS books (
   inserted_at INTEGER NOT NULL DEFAULT 0, path TEXT,
   deleted INTEGER NOT NULL DEFAULT 1, sync_status INTEGER NOT NULL DEFAULT 1,
   reader_prefs TEXT, toc TEXT, toc_fetched_at INTEGER NOT NULL DEFAULT 0,
-  read_state INTEGER NOT NULL DEFAULT 0,
-  publisher TEXT, published TEXT, isbn TEXT, language TEXT,
-  words INTEGER, rating REAL, rating_by TEXT,
+  read_state INTEGER NOT NULL DEFAULT 0, meta TEXT,
   PRIMARY KEY (source_id, stable_id)
 );
 ]]) then return false end
@@ -116,13 +121,7 @@ CREATE TABLE IF NOT EXISTS books (
         { "toc", "toc TEXT" },
         { "toc_fetched_at", "toc_fetched_at INTEGER NOT NULL DEFAULT 0" },
         { "read_state", "read_state INTEGER NOT NULL DEFAULT 0" },
-        { "publisher", "publisher TEXT" },
-        { "published", "published TEXT" },
-        { "isbn", "isbn TEXT" },
-        { "language", "language TEXT" },
-        { "words", "words INTEGER" },
-        { "rating", "rating REAL" },
-        { "rating_by", "rating_by TEXT" },
+        { "meta", "meta TEXT" },
     }
     if columns then
         for i = 1, nrows do
@@ -156,26 +155,52 @@ CREATE INDEX IF NOT EXISTS idx_books_sync ON books(source_id, sync_status);
 ]]) ~= nil
 end)
 
---- 扩展元数据列；顺序无意义，列名只来自这张表（拼进 SQL）。
-BookDB.META = { "publisher", "published", "isbn", "language", "words", "rating", "rating_by" }
-
---- 写扩展元数据：只写 row 里非空的列，其余保持原值；行不存在时什么都不做。
----@param row table 带 source_id / stable_id 与 META 中任意字段
----@return boolean
-function BookDB.setMeta(row)
-    local sets, args = {}, {}
-    for _idx, col in ipairs(BookDB.META) do
-        local v = row[col]
-        if v ~= nil and v ~= "" then
-            sets[#sets + 1] = col .. "=?"
-            args[#args + 1] = v
-        end
+--- 源给的原始元数据 → BookMeta；认不出的值丢掉，一项都没有返回 nil。
+--- 源只做自己的语义换算（如微信千分制推荐值 → 十分），格式统一在这里。
+---@param raw table|nil
+---@return BookMeta|nil
+local function normalizeMeta(raw)
+    if type(raw) ~= "table" then return nil end
+    local out = {}
+    local publisher = type(raw.publisher) == "string" and Text.trim(raw.publisher) or ""
+    if publisher ~= "" then out.publisher = publisher end
+    -- 2022-01-01 00:00:00 / 2008-1 / 2008-01-01T00:00:00Z / 2008 → YYYY-MM 或 YYYY
+    local year, month = tostring(raw.published or ""):match("^(%d%d%d%d)%D?(%d?%d?)")
+    if year and tonumber(year) > 0 then
+        month = tonumber(month)
+        out.published = month and month >= 1 and month <= 12 and string.format("%s-%02d", year, month) or year
     end
-    if #sets == 0 then return true end
-    args[#args + 1] = row.source_id
-    args[#args + 1] = row.stable_id
-    return DB.exec("UPDATE books SET " .. table.concat(sets, ", ") .. " WHERE source_id=? AND stable_id=?;",
-        unpack(args, 1, #args)) ~= nil
+    local isbn = (tostring(raw.isbn or ""):gsub("[^%dXx]", "")):upper()
+    if #isbn == 10 or #isbn == 13 then out.isbn = isbn end
+    -- zh-wr / zh_CN / EN → zh / en；整词（Chinese）不是语言码，不收
+    local language = type(raw.language) == "string" and raw.language:lower():match("^%a+")
+    if language and #language <= 3 then out.language = language end
+    local words = math.floor(tonumber(raw.words) or 0)
+    if words > 0 then out.words = words end
+    local score = type(raw.rating) == "table" and tonumber(raw.rating.score)
+    if score and score > 0 and score <= 10 then
+        -- 1e-9：9.55 之类的浮点乘 10 后略小于 95.5，不补会舍成 9.5
+        out.rating = { score = math.floor(score * 10 + 0.5 + 1e-9) / 10, by = raw.rating.by }
+    end
+    out.detail_at = tonumber(raw.detail_at)
+    return next(out) and out or nil
+end
+
+--- 合并写 row.meta：overwrite 时传入的键覆盖已有值，否则只补缺的键；不清键。行不存在时什么都不做。
+---@param row table 带 source_id / stable_id，meta 为原始元数据
+---@param overwrite boolean|nil
+---@return boolean
+function BookDB.setMeta(row, overwrite)
+    local incoming = normalizeMeta(row.meta)
+    if not incoming then return true end
+    local stored = DB.rowexec("SELECT meta FROM books WHERE source_id=? AND stable_id=? LIMIT 1;",
+        row.source_id, row.stable_id)
+    local merged = stored and JSON.decode(stored) or {}
+    for key, value in pairs(incoming) do
+        if overwrite or merged[key] == nil then merged[key] = value end
+    end
+    return DB.exec("UPDATE books SET meta=? WHERE source_id=? AND stable_id=?;",
+        JSON.encode(merged), row.source_id, row.stable_id) ~= nil
 end
 
 --- 插入或更新 books 行（本地可信写入：扫盘/本地登记），标脏待上传。
@@ -213,13 +238,14 @@ function BookDB.upsert(row)
         row.cover,
         now,
         row.path
-    ) ~= nil and BookDB.setMeta(row)
+    ) ~= nil and BookDB.setMeta(row, true)
 end
 
 --- 远端书架行写入。本地脏行（sync_status=0）保留展示字段。
 ---@param row table
+---@param overwrite boolean|nil 用户强制刷新：meta 覆盖已有键，否则只补缺
 ---@return boolean
-function BookDB.upsertRemote(row)
+function BookDB.upsertRemote(row, overwrite)
     local source_id = row.source_id
     local stable_id = row.stable_id
     local has_membership = row.deleted ~= nil
@@ -261,7 +287,7 @@ function BookDB.upsertRemote(row)
         row.category, row.series, row.intro, row.cover, now, row.path,
         deleted,
         has_membership and 1 or 0, has_membership and 1 or 0
-    ) ~= nil and BookDB.setMeta(row)
+    ) ~= nil and BookDB.setMeta(row, overwrite)
 end
 
 --- 一个事务写入一批远端行（逐行语义同 upsertRemote）；任一行失败整批回滚。
@@ -298,13 +324,13 @@ function BookDB.upsertLocal(row)
             sync_status=CASE WHEN books.deleted=1 THEN 0 ELSE books.sync_status END;]],
         source_id, stable_id, row.title, row.authors,
         row.category, row.series, row.intro, now
-    ) ~= nil and BookDB.setMeta(row)
+    ) ~= nil and BookDB.setMeta(row, true)
 end
 
 --- 远端书架快照入库：先把当前在架标软删，再 upsert 远端成员。
 ---@param source_id string
 ---@param books table[]
----@param opts { clear_missing_paths: boolean|nil }|nil
+---@param opts { clear_missing_paths: boolean|nil, force: boolean|nil }|nil force：用户强制刷新，快照里的 meta 覆盖已有键
 ---@return boolean ok
 ---@return integer|nil hidden 原本在架、本次快照里缺席的行数
 function BookDB.reconcile(source_id, books, opts)
@@ -329,7 +355,7 @@ function BookDB.reconcile(source_id, books, opts)
             for k, v in pairs(row) do copy[k] = v end
             copy.source_id = source_id
             copy.deleted = 0
-            if not BookDB.upsertRemote(copy) then return nil end
+            if not BookDB.upsertRemote(copy, opts.force) then return nil end
         end
         return count
     end)
@@ -394,12 +420,11 @@ function BookDB.pendingShelfAddIds(source_id)
 end
 
 local COLUMNS =
-    "source_id, stable_id, md5, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state, "
-    .. table.concat(BookDB.META, ", ")
+    "source_id, stable_id, md5, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state, meta"
 
---- rowexec 位置参数 → Book 表；固定列之后按 BookDB.META 顺序是扩展元数据。
+--- rowexec 位置参数 → Book 表
 ---@return Book|nil
-local function rowToBook(source_id_r, stable_id_r, digest, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state, ...)
+local function rowToBook(source_id_r, stable_id_r, digest, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state, meta)
     if not source_id_r then
         return nil
     end
@@ -420,12 +445,8 @@ local function rowToBook(source_id_r, stable_id_r, digest, title, authors, categ
         sync_status = tonumber(sync_status) or 1,
         read_state = tonumber(read_state) or 0,
         percent = 0,
+        meta = meta and JSON.decode(meta) or nil,
     }
-    for i, col in ipairs(BookDB.META) do
-        local v = select(i, ...)
-        -- INTEGER / REAL 列可能是 int64 cdata，统一成 Lua number
-        book[col] = (col == "words" or col == "rating") and tonumber(v) or v
-    end
     return book
 end
 

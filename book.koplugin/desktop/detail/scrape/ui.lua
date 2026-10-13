@@ -66,11 +66,12 @@ local function applyResult(identity, result, done)
         category = existing and existing.category or nil,
         series = result.series,
         md5 = existing and existing.md5 or nil,
-        publisher = result.publisher,
-        published = result.year,
-        isbn = result.isbn,
-        rating = tonumber(result.rating),
-        rating_by = tonumber(result.rating) and result.source or nil,
+        meta = {
+            publisher = result.publisher,
+            published = result.year,
+            isbn = result.isbn,
+            rating = { score = result.rating, by = result.source },
+        },
     })
     if not ok then
         done(_("元数据更新失败"))

@@ -104,6 +104,8 @@ local function loadBook(connection, dependents)
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
+    package.preload["json"] = function() return require("support.json_stub") end
+    package.loaded["json"] = nil
     package.loaded["utils.db"] = nil
     package.loaded["utils.event"] = nil
     package.loaded["book.books_db"] = nil
@@ -283,27 +285,92 @@ do
     clearMods()
 end
 
--- ── setMeta：upsert 之后只写非空扩展元数据，空值不清已有列 ──
+-- ── setMeta：入库前规范化；补缺 / 覆盖按键合并，从不清键 ──
 do
-    local connection, calls = makeConn()
+    local Json = require("support.json_stub")
+    local stored = nil
+    local connection, calls = makeConn({
+        step = function(sql)
+            if sql:find("^SELECT meta FROM books") then return stored and { stored } or nil end
+        end,
+    })
     local DbBase, BookDB = loadBook(connection)
+    local function written()
+        local q = calls[#calls]
+        Assert.eq(q.sql, "UPDATE books SET meta=? WHERE source_id=? AND stable_id=?;")
+        return Json.decode(q.args[1])
+    end
 
     local before = #calls
     Assert.is_true(BookDB.upsertRemote({
-        source_id = "wechat", stable_id = "w1", publisher = "某出版社", isbn = "", words = 1200, rating = 9.6,
+        source_id = "wechat", stable_id = "w1", meta = {
+            publisher = "  某出版社 ", published = "2022-01-01 00:00:00", isbn = "978-7-5404-9876-5",
+            language = "zh-Hans", words = "1200.7", rating = { score = 9.55, by = "weread" },
+        },
     }))
-    local q = calls[#calls]
-    Assert.eq(#calls, before + 2, "upsert 之后多一条 UPDATE")
-    Assert.eq(q.sql, "UPDATE books SET publisher=?, words=?, rating=? WHERE source_id=? AND stable_id=?;")
-    Assert.eq(q.args[1], "某出版社")
-    Assert.eq(q.args[2], 1200)
-    Assert.eq(q.args[3], 9.6)
-    Assert.eq(q.args[4], "wechat")
-    Assert.eq(q.args[5], "w1")
+    Assert.eq(#calls, before + 3, "upsert 之后读一次 meta 再写一次")
+    local m = written()
+    Assert.eq(m.publisher, "某出版社")
+    Assert.eq(m.published, "2022-01", "日期只留年月")
+    Assert.eq(m.isbn, "9787540498765", "ISBN 去掉连字符")
+    Assert.eq(m.language, "zh", "语言只留主码小写")
+    Assert.eq(m.words, 1200)
+    Assert.eq(m.rating.score, 9.6, "10 分制一位小数，9.55 不能被浮点误差舍成 9.5")
+    Assert.eq(m.rating.by, "weread")
 
+    -- 未知值（空串 / 0 / 年份 0 / 位数不对的 ISBN / 超范围评分）丢掉；全是未知不发 SQL
     before = #calls
-    Assert.is_true(BookDB.upsertRemote({ source_id = "wechat", stable_id = "w2" }))
-    Assert.eq(#calls, before + 1, "没有元数据不发 UPDATE")
+    Assert.is_true(BookDB.upsertRemote({
+        source_id = "kavita", stable_id = "k1", meta = {
+            publisher = "", published = 0, isbn = "123", language = "", words = 0, rating = { score = 0 },
+        },
+    }))
+    Assert.eq(#calls, before + 1, "没有有效元数据只有 upsert 本身")
+
+    Assert.eq(BookDB.upsertRemote({ source_id = "x", stable_id = "y", meta = { published = 2020 } }) and written().published,
+        "2020", "数字年份")
+    Assert.eq(BookDB.upsertRemote({ source_id = "x", stable_id = "y", meta = { published = "2020-5" } }) and written().published,
+        "2020-05")
+    Assert.eq(BookDB.upsertRemote({ source_id = "x", stable_id = "y", meta = { isbn = "0-306-40615-x" } }) and written().isbn,
+        "030640615X")
+
+    -- 普通同步只补缺的键；强制刷新覆盖传入的键；都不清掉没传的键
+    stored = Json.encode({ publisher = "旧社", words = 100, detail_at = 5 })
+    BookDB.upsertRemote({ source_id = "w", stable_id = "1", meta = { publisher = "新社", isbn = "9787540498765" } })
+    m = written()
+    Assert.eq(m.publisher, "旧社", "普通同步不覆盖已有键")
+    Assert.eq(m.isbn, "9787540498765", "普通同步补缺")
+    Assert.eq(m.words, 100)
+    BookDB.upsertRemote({ source_id = "w", stable_id = "1", meta = { publisher = "新社" } }, true)
+    m = written()
+    Assert.eq(m.publisher, "新社", "强制刷新覆盖")
+    Assert.eq(m.words, 100, "强制刷新不清没传的键")
+    Assert.eq(m.detail_at, 5)
+    BookDB.upsertLocal({ source_id = "w", stable_id = "1", title = "t", meta = { publisher = "刮削社" } })
+    Assert.eq(written().publisher, "刮削社", "本地写入覆盖")
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── reconcile force 传到 upsertRemote：快照 meta 覆盖 ──
+do
+    local Json = require("support.json_stub")
+    local connection, calls = makeConn({
+        step = function(sql)
+            if sql:find("^SELECT meta FROM books") then return { Json.encode({ words = 1 }) } end
+        end,
+    })
+    local DbBase, BookDB = loadBook(connection)
+    local function lastWords()
+        for i = #calls, 1, -1 do
+            if calls[i].sql:find("^UPDATE books SET meta") then return Json.decode(calls[i].args[1]).words end
+        end
+    end
+    BookDB.reconcile("w", { { stable_id = "1", meta = { words = 2 } } })
+    Assert.eq(lastWords(), 1, "普通对账只补缺")
+    BookDB.reconcile("w", { { stable_id = "1", meta = { words = 2 } } }, { force = true })
+    Assert.eq(lastWords(), 2, "强制刷新覆盖")
 
     DbBase.close()
     clearMods()

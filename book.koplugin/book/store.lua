@@ -38,8 +38,8 @@ function Store.rememberMany(books)
                 intro = book.intro,
                 cover = book.cover,
                 deleted = book.deleted,
+                meta = book.meta,
             }
-            for _i, col in ipairs(BookDB.META) do row[col] = book[col] end
             payload[#payload + 1] = row
         end
     end
