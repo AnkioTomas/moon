@@ -146,26 +146,32 @@ local function adopt(mine, theirs)
 end
 
 --- 删掉对侧已删的划线（基线记为 true、对侧没了），并把对侧的修改合过来。
+--- 两边都有却没记基线的（逐条补画中途关书，基线没来得及存）补记为 true，否则日后一侧删掉会被另一侧当新划线加回来。
 ---@param annotations table[] 本侧阅读器注解（就地改）
 ---@param linked table<string, boolean>
 ---@param theirs table<string, table>
----@return boolean changed
+---@return boolean changed 本侧注解有变
+---@return boolean relinked 补记了基线
 local function reconcile(annotations, linked, theirs)
-    local changed = false
+    local changed, relinked = false, false
     for index = #annotations, 1, -1 do
         local item = annotations[index]
         local other = item.datetime and theirs[item.datetime]
         if linked[item.datetime] and not other then
             table.remove(annotations, index)
             changed = true
-        elseif other and linked[item.datetime] then
+        elseif other then
+            if not linked[item.datetime] then
+                linked[item.datetime] = true
+                relinked = true
+            end
             changed = adopt(item, other) or changed
         end
     end
     for datetime, flag in pairs(linked) do
         if flag and not theirs[datetime] then linked[datetime] = nil end
     end
-    return changed
+    return changed, relinked
 end
 
 --- 对侧新划线逐条搜位置加进本侧，每条一个 tick；文档换掉就停。
@@ -233,19 +239,15 @@ end
 function DerivedNote.project(ui, identity)
     local row = NoteDB.get(identity.source_id, identity.stable_id, identity.chapter_idx)
     local items = Normalize.decode(row and row.payload) or {}
+    -- 先挂回设置：逐条补画中途关书时，已补上的基线随 sidecar 一起落盘。
     local linked = ui.doc_settings:readSetting(LINKED) or {}
+    ui.doc_settings:saveSetting(LINKED, linked)
     local annotations = ui.annotation.annotations
     local changed = reconcile(annotations, linked, byDatetime(items))
     local pending = newcomers(items, linked, byDatetime(annotations))
     if changed then redraw(ui) end
-    if #pending == 0 then
-        ui.doc_settings:saveSetting(LINKED, linked)
-        return
-    end
-    place(ui, pending, 0, linked, false, function()
-        ui.doc_settings:saveSetting(LINKED, linked)
-        redraw(ui)
-    end)
+    if #pending == 0 then return end
+    place(ui, pending, 0, linked, false, function() redraw(ui) end)
 end
 
 --- 读原书：把各衍生版里新划、改过、删掉的线收进原书，再存快照落库。
@@ -258,8 +260,12 @@ function DerivedNote.collect(ui, identity)
         local items = settings:readSetting("annotations") or {}
         local linked = settings:readSetting(LINKED) or {}
         local annotations = ui.annotation.annotations
-        local changed = reconcile(annotations, linked, byDatetime(items))
+        local changed, relinked = reconcile(annotations, linked, byDatetime(items))
         local pending = newcomers(items, linked, byDatetime(annotations))
+        if relinked and not changed and #pending == 0 then
+            settings:saveSetting(LINKED, linked)
+            settings:flush()
+        end
         local function finish()
             if changed or #pending > 0 then redraw(ui) end
             require("reader.session.note").save(ui, identity, function(ok)

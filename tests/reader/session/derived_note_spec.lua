@@ -146,6 +146,14 @@ do
     Assert.is_nil(linked["gone-at-origin"])
     Assert.is_nil(linked.bookmark, "书签不跨版本")
     Assert.is_true(ui.annotation.updated > 0)
+
+    -- 首次打开（还没有基线）：补画前基线表已挂进设置，中途关书时已补上的随 sidecar 落盘
+    local fresh = {}
+    local first = reader(document(derived, {}), {}, fresh)
+    snapshot = { { datetime = "slow", drawer = "lighten", text = "月色" } }
+    DerivedNote.project(first, identity)
+    Assert.is_true(fresh.book_note_linked ~= nil)
+    Stubs.flush()
 end
 
 -- 读原书：衍生版新划线收进原书（搜不到的记 false 不再重搜），衍生版删改的同步过来，然后存快照
@@ -186,6 +194,21 @@ do
     DerivedNote.collect(ui, identity)
     Stubs.flush()
     Assert.eq(saves, 0)
+
+    -- 上次补画中途关书：两边都有、基线没记。补记并落盘，之后原书删掉它也不会被当新划线收回来
+    local half = { datetime = "half", drawer = "lighten", text = "月色" }
+    sidecars[derived].annotations[#sidecars[derived].annotations + 1] = half
+    annotations[#annotations + 1] = { datetime = "half", drawer = "lighten", text = "月色", pos0 = "/p[10].0" }
+    sidecars[derived].flushed = nil
+    DerivedNote.collect(ui, identity)
+    Stubs.flush()
+    Assert.is_true(sidecars[derived].book_note_linked.half)
+    Assert.is_true(sidecars[derived].flushed, "只补基线也要落盘")
+    Assert.eq(saves, 0)
+    table.remove(annotations)
+    DerivedNote.collect(ui, identity)
+    Stubs.flush()
+    Assert.eq(datetimes(annotations), "edited,fresh,own", "原书删掉的不复活")
 
     -- PDF 原书搜不出 xpointer：不收
     sidecars[derived].annotations[#sidecars[derived].annotations + 1] =
