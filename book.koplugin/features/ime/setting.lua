@@ -94,6 +94,42 @@ local function pickInputMethod(desktop)
     }:show()
 end
 
+--- 候选词输出字形：keep 跟随词库（拼音 / 五笔多为简体，注音多为繁体）。
+---@return table[]
+local function scripts()
+    return {
+        { value = "keep", text = _("不转换") },
+        { value = "simplified", text = _("转为简体") },
+        { value = "traditional", text = _("转为繁体") },
+    }
+end
+
+---@param id string
+---@return string
+local function scriptLabel(id)
+    for _idx, item in ipairs(scripts()) do
+        if item.value == id then return item.text end
+    end
+    return id
+end
+
+---@param desktop BookDesktop
+local function pickScript(desktop)
+    local Settings = require("utils.settings")
+    require("ui.themes.widgets.list"):new{
+        title = _("简繁转换"),
+        items = scripts(),
+        current = Settings.get("features.ime").ime_script,
+        centered = true,
+        on_select = function(id)
+            local settings = Settings.get("features.ime")
+            settings.ime_script = id
+            Settings.save("features.ime", settings)
+            desktop:updateView()
+        end,
+    }:show()
+end
+
 ---@param desktop BookDesktop
 ---@return table[]
 local function sections(desktop)
@@ -143,6 +179,19 @@ local function sections(desktop)
                     })
                 end,
                 function(iw)
+                    local script = require("utils.settings").get("features.ime").ime_script
+                    return Row.widget({
+                        width = iw,
+                        chevron = true,
+                        kind = "nav",
+                        icon = "g_translate",
+                        title = _("简繁转换"),
+                        status = scriptLabel(script),
+                        status_on = script ~= "keep",
+                        callback = function() pickScript(desktop) end,
+                    })
+                end,
+                function(iw)
                     return Row.widget({
                         width = iw,
                         chevron = true,
@@ -167,11 +216,12 @@ end
 local Setting = {}
 
 -- pinyin_enabled 是总开关（键名沿用拼音时代）；ime_layout 取 registry 的方法 id；
--- ime_dict_built_at 按词库记已装版本。
+-- ime_dict_built_at 按词库记已装版本；ime_script 是候选词字形（keep / simplified / traditional）。
 Setting.defaults = {
     pinyin_enabled = false,
     ime_layout = "pinyin",
     ime_dict_built_at = {},
+    ime_script = "keep",
 }
 
 ---@param desktop BookDesktop
