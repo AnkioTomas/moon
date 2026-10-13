@@ -3,7 +3,7 @@
 
 KOReader 的库只读。书按内容 partialMD5 对上书库在架书（books.md5，缺 md5 的按 path 现算），
 对不上再按书名唯一匹配；书名重复或都对不上的书跳过。
-导入行记为已同步：历史数据只进本地统计，不推给任何源。
+导入行记为 StatsDB.IMPORTED：历史数据只进本地统计，不推给任何源，源 pull 清理已同步行时也不删。
 去重按分钟：本插件已有记录覆盖的分钟不再导入。KOReader 统计插件与本插件读书时同时计时，
 同一段阅读两边各有一份；导入行自己也会覆盖对应分钟，所以重复导入不会重复计。
 
@@ -18,17 +18,30 @@ local Text = require("utils.text")
 local KoreaderStats = {}
 
 --- 书库在架书按 md5 与书名索引；书名重复的记 false，对不上就不猜。
----@return table<string, Book>, table<string, Book|false>
+--- 缺 md5 的书要读文件现算，只在已知 md5 对不上时算一次。
+---@return fun(md5: string|nil, title: string|nil): Book|false|nil
 local function libraryIndex()
-    local partialMD5 = require("util").partialMD5
-    local by_md5, by_title = {}, {}
+    local by_md5, by_title, unhashed = {}, {}, {}
     for _idx, book in ipairs(BookDB.listLibrary()) do
-        local digest = book.md5 or (book.path and partialMD5(book.path))
-        if digest then by_md5[digest] = by_md5[digest] or book end
+        if book.md5 then
+            by_md5[book.md5] = by_md5[book.md5] or book
+        elseif book.path then
+            unhashed[#unhashed + 1] = book
+        end
         local title = Text.trim(book.title or "")
         if title ~= "" then by_title[title] = by_title[title] == nil and book or false end
     end
-    return by_md5, by_title
+    return function(md5, title)
+        if md5 and not by_md5[md5] and unhashed then
+            local partialMD5 = require("util").partialMD5
+            for _idx, book in ipairs(unhashed) do
+                local digest = partialMD5(book.path)
+                if digest then by_md5[digest] = by_md5[digest] or book end
+            end
+            unhashed = nil
+        end
+        return md5 and by_md5[md5] or by_title[Text.trim(title or "")]
+    end
 end
 
 --- 一本书本地记录覆盖的分钟集合。
@@ -76,7 +89,7 @@ local function importBook(conn, id_book, book)
                 start_time = start,
                 duration = duration,
                 total_pages = tonumber(rows[4][i]),
-            }, true) then
+            }, StatsDB.IMPORTED) then
                 return nil
             end
             imported = imported + 1
@@ -90,11 +103,11 @@ end
 local function importFrom(conn)
     local ko, nbooks = conn:exec([[SELECT id, title, md5 FROM book b
         WHERE EXISTS (SELECT 1 FROM page_stat_data WHERE id_book=b.id AND duration>0);]])
-    local by_md5, by_title = libraryIndex()
+    local match = libraryIndex()
     return DB.transaction(function()
         local counts = { books = 0, rows = 0, unmatched = 0 }
         for i = 1, nbooks do
-            local book = by_md5[ko[3][i]] or by_title[Text.trim(ko[2][i] or "")]
+            local book = match(ko[3][i], ko[2][i])
             if book then
                 local imported = importBook(conn, ko[1][i], book)
                 if not imported then return nil end

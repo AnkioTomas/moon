@@ -44,7 +44,7 @@ local function page(source_id, stable_id, start_time, duration, synced)
     Assert.is_true(StatsDB.add({
         source_id = source_id, stable_id = stable_id, record_type = "page",
         page = 7, start_time = start_time, duration = duration, total_pages = 100,
-    }, synced))
+    }, synced and StatsDB.SYNCED or StatsDB.PENDING))
 end
 
 --- 走真实入库路径：mapper → replaceSynced。
@@ -144,7 +144,7 @@ Assert.len(StatsDB.dailyByBook("wechat", "phone_only", 30), 0)
 Assert.is_true(StatsDB.add({
     source_id = "legacy", stable_id = "__wr:day:" .. D1, record_type = "day",
     page = 0, start_time = D1, duration = 600, total_pages = 0,
-}, true))
+}, StatsDB.SYNCED))
 page("legacy", "b", D1 + 3600, 40, true)
 page("legacy", "b", D1 + 7200, 20, false)
 Assert.eq(byYmd(StatsDB.dailyBySource("legacy"))[YMD1], 620)

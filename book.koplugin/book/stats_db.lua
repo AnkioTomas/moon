@@ -1,7 +1,8 @@
 --[[--
 reading_stats 表：自采集与拉取的阅读统计（逐页事件、云端分桶及权威累计值，按记录身份去重）。
 
-sync_status=0 表示待上传，1 表示已与远端同步。
+sync_status=0 表示待上传，1 表示已与远端同步，2 表示从 KOReader 统计导入（不上传，pull 的
+按 sync_status=1 清理也删不到它）。
 
 身份即 BookIdentity(source_id + stable_id)，天然按源隔离。
 
@@ -24,7 +25,11 @@ local logger = require("utils.log")
 require("book.books_db")
 require("book.progress_db")
 
-local StatsDB = {}
+local StatsDB = {
+    PENDING = 0,
+    SYNCED = 1,
+    IMPORTED = 2,
+}
 
 local DAY_RECORD = "day"
 local ROLLUP_RECORD = "page_rollup"
@@ -253,9 +258,9 @@ end
 
 --- 追加一条阅读统计。
 ---@param row BookStatsRow
----@param synced boolean|nil
+---@param status integer|nil sync_status，缺省 PENDING
 ---@return boolean
-function StatsDB.add(row, synced)
+function StatsDB.add(row, status)
     local source_id = row.source_id
     local start_time = tonumber(row.start_time)
     local duration = tonumber(row.duration)
@@ -278,7 +283,7 @@ function StatsDB.add(row, synced)
         tonumber(row.total_pages) or 0,
         tonumber(row.chapter_idx),
         tonumber(row.chapter_fraction),
-        synced and 1 or 0,
+        status or StatsDB.PENDING,
         math.max(1, tonumber(row.event_count) or 1),
         tonumber(row.last_time) or 0
     ) ~= nil
@@ -414,7 +419,7 @@ function StatsDB.replaceSynced(source_id, replace, rows)
         local counts = { imported = 0, skipped = 0 }
         for _idx, row in ipairs(rows) do
             local duplicate = StatsDB.exists(row)
-            if not StatsDB.add(row, true) then return nil end
+            if not StatsDB.add(row, StatsDB.SYNCED) then return nil end
             if duplicate then
                 counts.skipped = counts.skipped + 1
             else

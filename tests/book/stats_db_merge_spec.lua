@@ -40,7 +40,7 @@ local FETCHED = DAY + 22 * 3600
 
 local function page(start_time, duration)
     Assert.is_true(StatsDB.add({ source_id = "wechat", stable_id = "b1", record_type = "page",
-        page = 1, start_time = start_time, duration = duration, total_pages = 9, chapter_idx = 1 }, true))
+        page = 1, start_time = start_time, duration = duration, total_pages = 9, chapter_idx = 1 }, StatsDB.SYNCED))
 end
 
 -- 上午在线读 1:35 已被心跳报上；下午离线读 2 小时云端没有；前一天离线读 10 分钟；拉取后又读 100 秒。
