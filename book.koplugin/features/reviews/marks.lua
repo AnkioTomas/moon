@@ -1,5 +1,5 @@
 --[[--
-页内段评标记：本章他人段评的句子画虚线下划线，点按弹出段评列表。
+页内段评标记：本章他人段评的句子画下划线（虚线 / 实线见 `features.reviews.setting`），点按弹出段评列表。
 
 两种目标，都是「键 + fetch + place」：键变了才重新 fetch，视口变了才重新 place。
 - 微信读书章会话：fetch 拉本章热点并在子进程里定位到本章文件；place 只问当前页附近句子的屏幕框。
@@ -209,10 +209,12 @@ function ReviewMarks:updateView()
     logger.dbg("book.perf reviews.view", Perf.elapsedMs(started_at), "ms marks", #marks)
 end
 
---- 标记图层：刷新视口后交出屏上句子（点按开段评）。
+--- 标记图层：刷新视口后交出屏上句子（点按开段评）。样式每帧读，改设置不用等翻页。
 ---@return PageMark[]
 function ReviewMarks:marks()
     self:updateView()
+    local solid = require("utils.settings").get("features.reviews").book_reviews_mark_style == "solid"
+    for _idx, mark in ipairs(self.current) do mark.solid = solid end
     return self.current
 end
 

@@ -258,7 +258,7 @@ local function sectionTitles(page)
     return table.concat(titles, ",")
 end
 Assert.eq(sectionTitles(behavior), "行为,翻页动画,阅读侧栏")
-Assert.eq(sectionTitles(pages.lookup), "选区,翻译,X-Ray,词典,百科,菜单")
+Assert.eq(sectionTitles(pages.lookup), "选区,翻译,X-Ray,段评,词典,百科,菜单")
 Assert.eq(sectionTitles(pages.display), "启动,显示,夜间与亮度")
 
 -- 维护组：update feature 的两行按 order 插在调试日志与关于之间
