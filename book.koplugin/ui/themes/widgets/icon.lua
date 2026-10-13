@@ -10,7 +10,7 @@
   Icon.widget{ name = "home", size = 24, color = c }
   Icon.label{ name = "home", text = "首页", direction = "row"|"column",
               size = 24, color = c, face = "cfont", font_size = 14, gap = px, max_width = px,
-              dim = bool, trailing = bool }  -- dim：图标与文案一起变灰（禁用态）；trailing：图标在文案后（下拉箭头）
+              trailing = bool }  -- trailing：图标在文案后（下拉箭头）
 
 name 写 Material Icons 原名：字体用 OpenType rlig 把 ASCII 合成字形，所以强制 use_xtext。
 名字写错时显示英文字面，一眼可见。
@@ -62,17 +62,15 @@ function Icon.face(size)
     return Font:getFace(FACE, size)
 end
 
----@param opts { name: string, size: number, color: table|nil, box: boolean|nil, dim: boolean|nil }
+---@param opts { name: string, size: number, color: table|nil, box: boolean|nil }
 ---@return table|nil
 function Icon.widget(opts)
     opts = opts or {}
     if type(opts.name) ~= "string" or opts.name == "" then return nil end
-    local color = opts.color or Blitbuffer.COLOR_BLACK
-    if opts.dim then color = Blitbuffer.COLOR_GRAY end
     local glyph = TextWidget:new{
         text = opts.name,
         face = Icon.face(Theme.fontSize(opts.size)),
-        fgcolor = color,
+        fgcolor = opts.color or Blitbuffer.COLOR_BLACK,
         use_xtext = true,
     }
     if opts.box == false then return glyph end
@@ -86,7 +84,7 @@ end
 ---@param opts table 见模块头
 ---@return table 横排 / 竖排组
 function Icon.label(opts)
-    local color = opts.dim and Blitbuffer.COLOR_GRAY or opts.color or Blitbuffer.COLOR_BLACK
+    local color = opts.color or Blitbuffer.COLOR_BLACK
     local column = opts.direction == "column"
     local group = (column and VerticalGroup or HorizontalGroup):new{ align = "center" }
     local icon = Icon.widget{ name = opts.name, size = opts.size, color = color }
