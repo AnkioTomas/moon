@@ -73,27 +73,47 @@ local function display(field, value)
     return field.format and field.format(value) or tostring(value)
 end
 
---- 列宽：两个按钮高，且容得下 min / max / 初值里最宽的 hero 数字（"130%" 会超出固定宽而被截成省略号）。
+--- min / max / 初值里最宽的 hero 数字宽（"130%" 会超出固定宽而被截成省略号）。
 ---@param field BookThemeSpinField
----@param base number 物理像素
 ---@return number
-local function columnWidth(field, base)
-    local w = base
+local function digitWidth(field)
+    local w = 0
     for _idx, v in ipairs({ field.min, field.max, field.value }) do
         w = math.max(w, Text.line("hero", display(field, v)):getSize().w)
     end
     return w
 end
 
+--- 列宽：默认两个按钮高且容得下数字；整行超出 inner 时（年月日时分五列）每列只给数字宽加均分的余量。
+---@param fields BookThemeSpinField[]
+---@param base number 物理像素
+---@param gap number
+---@param inner number
+---@return number[]
+local function columnWidths(fields, base, gap, inner)
+    local digits, widths, total, digits_total = {}, {}, gap * (#fields - 1), 0
+    for i, field in ipairs(fields) do
+        digits[i] = digitWidth(field)
+        widths[i] = math.max(base, digits[i])
+        total = total + widths[i]
+        digits_total = digits_total + digits[i]
+    end
+    if total <= inner then return widths end
+    local extra = math.max(0, math.floor((inner - gap * (#fields - 1) - digits_total) / #fields))
+    for i = 1, #fields do widths[i] = digits[i] + extra end
+    return widths
+end
+
 function Spin:init()
     Modal.init(self)
     local t = self.theme
-    local base_w = Theme.px(t.control.height) * 2
     local gap = Theme.px(t.space.lg)
+    local inner = self:innerWidth()
+    local widths = columnWidths(self.fields, Theme.px(t.control.height) * 2, gap, inner)
     self.values, self.labels = {}, {}
     local row = HorizontalGroup:new{ align = "center" }
     for i, field in ipairs(self.fields) do
-        local col_w = columnWidth(field, base_w)
+        local col_w = widths[i]
         self.values[i] = field.value
         self.labels[i] = Text.line("hero", display(field, field.value), { width = col_w })
         local col = VerticalGroup:new{ align = "center" }
@@ -110,7 +130,6 @@ function Spin:init()
         if i > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
         row[#row + 1] = col
     end
-    local inner = self:innerWidth()
     self:setDialog{
         title = self.title,
         body = CenterContainer:new{ dimen = Geom:new{ w = inner, h = row:getSize().h }, row },

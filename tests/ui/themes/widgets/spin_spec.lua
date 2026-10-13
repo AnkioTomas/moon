@@ -60,4 +60,19 @@ Assert.is_nil(single)
 buttons[4]:onTapThemeButton()
 Assert.eq(single, 3)
 
+-- 年月日时分五列：整行不超出弹窗内宽，每列仍容得下自己的数字。
+local Theme = require("ui.themes")
+spin = Spin:new{ fields = {
+    { value = 2026, min = 1970, max = 2099 },
+    { value = 10, min = 1, max = 12, format = fmt2 },
+    { value = 14, min = 1, max = 31, format = fmt2 },
+    { value = 1, min = 0, max = 23, format = fmt2 },
+    { value = 11, min = 0, max = 59, format = fmt2 },
+} }
+local total = Theme.px(spin.theme.space.lg) * 4
+for _idx, button in ipairs(Kit.buttons(spin)) do
+    if button.icon == "add" then total = total + button.width end
+end
+Assert.is_true(total <= spin:innerWidth(), "五列整行不溢出")
+
 return true
