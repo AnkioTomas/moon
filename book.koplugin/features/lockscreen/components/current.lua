@@ -150,7 +150,8 @@ function M.blocks(rect)
         blocks[#blocks + 1] = block
     end
     -- 进度条右侧留一列给百分比，文字与 6px 细条垂直居中。
-    local pct_w = 52
+    -- 按比例留宽：画布是物理像素，字号却随 DPI 放大，写死像素在高分屏上放不下。
+    local pct_w = math.floor(text_w * 0.18)
     local bar_y = content_y + head_h + bar_gap
     local bar, bar_h = U.progressBlocks(text_x, bar_y, math.max(1, text_w - pct_w - 8), book.percent)
     for _idx, block in ipairs(bar) do blocks[#blocks + 1] = block end

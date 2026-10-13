@@ -235,7 +235,8 @@ function U.emptyBlocks(rect, title, message)
     }
 end
 
---- 本地封面图；没有缓存文件时画一块灰底。
+--- 本地封面图；没有缓存文件时用桌面同款生成封面（书名取色 + 竖排书名 + 作者）。
+--- 生成封面是 widget 块，由 render 画完统一 free。
 ---@param book table|nil
 ---@return table
 function U.coverBlock(book, x, y, w, h)
@@ -245,7 +246,13 @@ function U.coverBlock(book, x, y, w, h)
             kind = "image", file = file, x = x, y = y, width = w, height = h, scale_factor = 0,
         }
     end
-    return { kind = "panel", x = x, y = y, width = w, height = h, color = U.RULE }
+    local widget = require("ui.widgets.plain_cover"):new{
+        title = book and book.title or "",
+        author = book and book.authors or "",
+        width = w,
+        height = h,
+    }
+    return { kind = "widget", widget = widget, x = x, y = y, width = w, height = h }
 end
 
 --- 百分比文案：不足 10% 保留一位小数，免得刚开读一直显示 0%。
