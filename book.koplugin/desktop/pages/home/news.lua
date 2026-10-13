@@ -13,7 +13,7 @@ local M = setmetatable({
     label = _("热点新闻"),
     icon = "newspaper",
     lines = 4,
-    mark_w = 20,
+    mark_sample = "00",
     field = "news",
     mark_color = "faint",
 }, require("desktop.pages.home.history"))

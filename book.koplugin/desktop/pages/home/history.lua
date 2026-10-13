@@ -10,7 +10,6 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local Myrl = require("online.myrl")
-local RightContainer = require("ui/widget/container/rightcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Theme = require("ui.themes")
@@ -20,7 +19,7 @@ local _ = require("gettext")
 ---@class BookHomeHistory : BookHomeComponent
 ---@field data table[]|nil
 ---@field lines integer 固定行数
----@field mark_w number 标记列宽（逻辑像素）
+---@field mark_sample string 标记列最宽的样例文字，列宽按它实测
 ---@field field string 摸鱼日报里的数据字段
 ---@field mark_color string 标记列颜色令牌名（color.*）
 local M = {
@@ -28,7 +27,7 @@ local M = {
     label = _("历史上的今天"),
     icon = "history_edu",
     lines = 3,
-    mark_w = 40,
+    mark_sample = "0000",
     field = "history",
     mark_color = "muted",
 }
@@ -56,13 +55,15 @@ end
 ---@return table body
 function M:line(mark_text, title, inner_w)
     local t = Theme.current()
-    local mark_w, gap = Theme.px(self.mark_w), Theme.px(t.space.sm)
+    local sample = Text.line("caption", self.mark_sample)
+    local mark_w, gap = sample:getSize().w, Theme.px(t.space.sm)
+    sample:free()
     local mark = Text.line("caption", mark_text, { width = mark_w, color = t.color[self.mark_color] })
     local body = Text.line("body", title, { width = math.max(1, inner_w - mark_w - gap) })
     local h = math.max(mark:getSize().h, body:getSize().h)
     return HorizontalGroup:new{
         align = "center",
-        RightContainer:new{ dimen = Geom:new{ w = mark_w, h = h }, mark },
+        LeftContainer:new{ dimen = Geom:new{ w = mark_w, h = h }, mark },
         HorizontalSpan:new{ width = gap },
         body,
     }, mark, body
