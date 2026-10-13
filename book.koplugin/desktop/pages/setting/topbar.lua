@@ -9,18 +9,8 @@ local _ = require("gettext")
 ---@class BookSettingsTopbar
 local TopbarSettings = {}
 
--- 预览样例跟着真顶栏：左时钟/源，右指标。bar_icon 是顶栏上画的图标（时钟不画，wifi 只有图标）。
-local ITEMS = {
-    { id = "clock", label = _("时钟"), icon = "schedule", align = "left", sample = "12:34" },
-    { id = "source", label = _("数据源"), icon = "source", align = "left", sample = _("本地"), bar_icon = "source" },
-    { id = "memory", label = _("剩余内存"), icon = "memory", sample = "128M", bar_icon = "memory" },
-    { id = "cache", label = _("后台任务"), icon = "download", sample = "1/3", bar_icon = "download" },
-    { id = "storage", label = _("剩余存储"), icon = "hard_drive", sample = "2.1G", bar_icon = "hard_drive" },
-    { id = "wifi", label = _("Wi-Fi"), icon = "wifi", bar_icon = "wifi" },
-    { id = "bluetooth", label = _("蓝牙"), icon = "bluetooth", bar_icon = "bluetooth" },
-    { id = "brightness", label = _("亮度"), icon = "brightness_6", sample = "40%", bar_icon = "brightness_6" },
-    { id = "battery", label = _("电池"), icon = "battery_android_full", sample = "85%", bar_icon = "battery_android_full" },
-}
+-- 行与预览都读顶栏自己的项（含 feature 的项）：label / icon 是设置行，sample / bar_icon 是预览样例
+-- （时钟不画图标，wifi 只有图标）。
 
 ---@param desktop table
 ---@return table
@@ -28,7 +18,7 @@ function TopbarSettings:rows(desktop)
     local home = MoonSettings.get("desktop")
     local config = home.home_topbar_items
     local rows = {}
-    for _idx, item in ipairs(ITEMS) do
+    for _idx, item in ipairs(require("desktop.topbar").items()) do
         local enabled = config[item.id] ~= false
         rows[#rows + 1] = function(iw)
             return Row.widget({
@@ -56,7 +46,7 @@ function TopbarSettings.preview(width)
     local TopBar = require("desktop.topbar")
     local bar_h = TopBar.height()
     local left, right = {}, {}
-    for _idx, item in ipairs(ITEMS) do
+    for _idx, item in ipairs(TopBar.items()) do
         if TopBar.visible(item.id) then
             local side = item.align == "left" and left or right
             side[#side + 1] = TopBar.metric(item.sample, item.bar_icon)

@@ -20,7 +20,7 @@ KOReader 事件（Dispatcher 动作、FrontlightStateChanged 这类广播）写�
 
 每个 feature 的钩子经 `ui.guard` 隔离：一个抛错弹错误页，不影响其余 feature。实现就在 `features/<name>/`，这里只登记生命周期钩子与 KOReader 事件。
 
-下面三个约定文件都经 `Features.scan` 扫描目录收集（按目录名排序），不经本文件、不看 `list`：
+下面四个约定文件都经 `Features.scan` 扫描目录收集（按目录名排序），不经本文件、不看 `list`：
 
 可选 `features/<name>/setting.lua`（设置页收集）：
   - `defaults` / `keys`：本 feature 的配置键与默认值，落盘到 settings/<name>.lua，经 `utils.settings.get("features.<name>")` 读、
@@ -34,6 +34,9 @@ KOReader 事件（Dispatcher 动作、FrontlightStateChanged 这类广播）写�
 
 可选 `features/<name>/panel.lua`：`actions()` 返回数组，每条是一个快捷面板开关，`scope` 为 desktop 或 reader。
 由快捷面板注册表（features/panel/actions/registry.lua）加载时收集，追加在该侧内置开关之后。
+
+可选 `features/<name>/topbar.lua`：`items()` 返回桌面顶栏项数组（BookTopBarItem，见 desktop/topbar），
+由顶栏首次用到时收集，追加在核心项之后；设置页的开关与预览读同一份数据。
 
 @module koplugin.book.features
 --]]

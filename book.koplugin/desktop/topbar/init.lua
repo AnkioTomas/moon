@@ -1,5 +1,5 @@
 --[[--
-桌面顶栏：左时钟 / 源名，右内存 / 后台任务 / 存储 / Wi‑Fi / 蓝牙 / 亮度 / 电量。
+桌面顶栏：左时钟 / 源名，右内存 / 后台任务 / 存储 / Wi‑Fi / 亮度 / 电量，之后是各 feature 的项。
 
   +---------------------------------------------------+
   | 12:00  [源] 源名          内存  任务  存储  Wi‑Fi  ☀  🔋 |
@@ -8,6 +8,10 @@
 每项是数据（见 BookTopBarItem）：read() 给 text, icon，都空则不显示。
 读数任一变化就整条重建、只刷顶栏这一条；定时器与订阅归顶栏，恢复时挂、暂停时拆。
 点按：有 tap 的项优先（子控件先收事件），其余位置打开快捷面板。
+
+feature 的顶栏项写在 `features/<name>/topbar.lua`：`items()` 返回 BookTopBarItem 数组，
+首次用到时经 Features.scan 收集，追加在核心项之后（按目录名）。id 不能和核心项、其它 feature 重复。
+顶层不要 require 重模块，放进 read / watch / tap 里延迟加载。设置页与预览读同一份数据，不用再登记。
 
 @module koplugin.book.desktop.topbar
 --]]
@@ -45,6 +49,10 @@ local _ = require("gettext")
 ---@field watch? fun(cb: fun()): CancelHandle 订阅变化，返回 { cancel }
 ---@field tap fun(desktop: BookDesktop)|nil 点按动作
 ---@field max_ratio number|nil 占顶栏宽度的上限比例
+---@field label string 设置页标题
+---@field icon string 设置页行图标
+---@field sample string|nil 设置页预览的样例文字
+---@field bar_icon string|nil 设置页预览画的图标
 
 --- 非充电用 battery_android_0..6 / full，充电用电量档位图标。
 ---@param pct number 电量百分比 0..100
@@ -67,6 +75,7 @@ end
 local ITEMS = {
     {
         id = "clock",
+        label = _("时钟"), icon = "schedule", sample = "12:34",
         align = "left",
         minute = true,
         read = function()
@@ -75,6 +84,7 @@ local ITEMS = {
     },
     {
         id = "source",
+        label = _("数据源"), icon = "source", sample = _("本地"), bar_icon = "source",
         align = "left",
         max_ratio = 0.36,
         read = function()
@@ -89,6 +99,7 @@ local ITEMS = {
     },
     {
         id = "memory",
+        label = _("剩余内存"), icon = "memory", sample = "128M", bar_icon = "memory",
         interval = 120,
         read = function()
             local avail = util.calcFreeMem()
@@ -98,6 +109,7 @@ local ITEMS = {
     },
     {
         id = "cache",
+        label = _("后台任务"), icon = "download", sample = "1/3", bar_icon = "download",
         max_ratio = 0.4,
         watch = Tasks.watch,
         read = function()
@@ -115,6 +127,7 @@ local ITEMS = {
     },
     {
         id = "storage",
+        label = _("剩余存储"), icon = "hard_drive", sample = "2.1G", bar_icon = "hard_drive",
         interval = 600,
         read = function()
             local _total, _used, avail = ffiUtil.df(DataStorage:getDataDir())
@@ -124,20 +137,15 @@ local ITEMS = {
     },
     {
         id = "wifi",
+        label = _("Wi-Fi"), icon = "wifi", bar_icon = "wifi",
         events = { NetworkConnected = true, NetworkDisconnected = true },
         read = function()
             return nil, require("ui/network/manager"):isWifiOn() and "wifi" or "wifi_off"
         end,
     },
     {
-        id = "bluetooth",
-        max_ratio = 0.25,
-        watch = function(cb) return require("features.bluetooth").watch(cb) end,
-        read = function() return require("features.bluetooth").topbar() end,
-        tap = function() require("features.bluetooth.devices").show() end,
-    },
-    {
         id = "brightness",
+        label = _("亮度"), icon = "brightness_6", sample = "40%", bar_icon = "brightness_6",
         events = { FrontlightStateChanged = true },
         read = function()
             if not Device:hasFrontlight() then return nil end
@@ -146,6 +154,7 @@ local ITEMS = {
     },
     {
         id = "battery",
+        label = _("电池"), icon = "battery_android_full", sample = "85%", bar_icon = "battery_android_full",
         interval = 600,
         events = { Charging = true, NotCharging = true },
         read = function()
@@ -160,11 +169,9 @@ local ITEMS = {
 --- 顶栏在桌面控件树里的节点：KOReader 广播沿树下发，按各项声明的 events 直接重读。
 --- 处理函数必须返回 nil：返回 true 会截断同层后续控件（底栏）收到这条广播。
 local BarWidget = WidgetContainer:extend{}
-for _idx, item in ipairs(ITEMS) do
-    for event in pairs(item.events or {}) do
-        BarWidget["on" .. event] = function(self) self.bar:refresh() end
-    end
-end
+
+---@param self table
+local function onBarEvent(self) self.bar:refresh() end
 
 local ICON_SIZE = 14
 
@@ -176,11 +183,31 @@ local ICON_SIZE = 14
 local TopBar = {}
 TopBar.__index = TopBar
 
+---@type BookTopBarItem[]|nil
+local all_items
+
+--- 全部顶栏项：核心项后接 features/<name>/topbar.lua 的项；首次调用时收集并把各项 events 挂到 BarWidget。
+---@return BookTopBarItem[]
+function TopBar.items()
+    if all_items then return all_items end
+    local items = { unpack(ITEMS) }
+    for _idx, name in ipairs(require("features").scan("topbar")) do
+        for _i, item in ipairs(require("features." .. name .. ".topbar").items()) do
+            items[#items + 1] = item
+        end
+    end
+    for _idx, item in ipairs(items) do
+        for event in pairs(item.events or {}) do BarWidget["on" .. event] = onBarEvent end
+    end
+    all_items = items
+    return items
+end
+
 --- 按 id 取顶栏项（测试读单项）。
 ---@param id string
 ---@return BookTopBarItem|nil
 function TopBar.find(id)
-    for _idx, item in ipairs(ITEMS) do
+    for _idx, item in ipairs(TopBar.items()) do
         if item.id == id then return item end
     end
 end
@@ -260,7 +287,7 @@ end
 ---@return string key
 local function readAll()
     local shown, key = {}, {}
-    for _idx, item in ipairs(ITEMS) do
+    for _idx, item in ipairs(TopBar.items()) do
         if TopBar.visible(item.id) then
             local text, icon = item.read()
             if text == "" then text = nil end
@@ -326,7 +353,7 @@ function TopBar:activate()
     if not self.active then
         self.active = true
         local poll = false
-        for _idx, item in ipairs(ITEMS) do
+        for _idx, item in ipairs(TopBar.items()) do
             if TopBar.visible(item.id) then
                 poll = poll or item.minute == true
                 if item.watch then self.handles[#self.handles + 1] = item.watch(function() self:refresh() end) end
