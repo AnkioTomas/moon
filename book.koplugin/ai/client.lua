@@ -18,6 +18,8 @@ Client.DEFAULT_TIMEOUT = 120
 --- AI 请求默认 User-Agent；部分 OpenAI 兼容网关按 UA 分流/限流。
 local DEFAULT_UA = "opencode/1.2.3 ai-sdk/amazon-bedrock/3.0.73 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5"
 
+local TRUNCATED = "response truncated (max_tokens too low)"
+
 --- 规范化 Chat Completions URL；已带路径则原样返回。
 ---@param base string|nil
 ---@return string|nil
@@ -109,7 +111,7 @@ function Client.decodeResponse(body)
             return nil, tostring(err.message or err.code)
         end
         if choice and choice.finish_reason == "length" then
-            return nil, "response truncated (max_tokens too low)"
+            return nil, TRUNCATED
         end
         logger.warn("ai.client: empty content; keys=",
             choice and choice.message and "has-message" or "no-message", "body=", snip(body, 200))
@@ -121,12 +123,12 @@ end
 --- 端点不认 chat_template_kwargs（返回过 400 / 422）的，本进程内不再带。
 local no_think_param = {}
 
---- 处理一次 Chat Completions 响应并回调 cb(content, err)。
+--- 处理一次 Chat Completions 响应，返回 content, err。
 ---@param response string|nil
 ---@param err any
 ---@param raw table|nil
----@param cb fun(content: string|nil, err: any)
-local function finish(response, err, raw, cb)
+---@return string|nil, any
+local function finish(response, err, raw)
     if not response then
         local detail
         if raw and type(raw.body) == "string" then
@@ -138,14 +140,13 @@ local function finish(response, err, raw, cb)
             logger.warn("ai.client: request failed err=", err, "code=",
                 raw and raw.code, "body=", snip(raw and raw.body, 200))
         end
-        cb(nil, detail or err)
-        return
+        return nil, detail or err
     end
     local content, decode_err = Client.decodeResponse(response)
     if not content then
         logger.warn("ai.client: decode failed err=", decode_err, "body=", snip(response, 300))
     end
-    cb(content, decode_err)
+    return content, decode_err
 end
 
 --- 非流式 Chat Completions；cb(content, err)。
@@ -162,16 +163,18 @@ function Client.chat(messages, opts, cb)
     end
     -- 连接与整包共用同一预算；推理模型首包可能较慢。
     local timeout = opts.timeout or Client.DEFAULT_TIMEOUT
+    local max_tokens = opts.max_tokens or 2000
     local current, cancelled
 
     ---@param think_off boolean
+    ---@param budget number
     ---@return table|nil
-    local function send(think_off)
+    local function send(think_off, budget)
         local payload = {
             model = opts.model or model,
             messages = messages,
             temperature = opts.temperature or 0.2,
-            max_tokens = opts.max_tokens or 2000,
+            max_tokens = budget,
         }
         -- Qwen3.5 这类混合推理模型默认先写一大段思考，吃光 max_tokens，回答被截断。
         if think_off then payload.chat_template_kwargs = { enable_thinking = false } end
@@ -190,14 +193,20 @@ function Client.chat(messages, opts, cb)
             -- OpenAI 官方等严格端点不认这个参数会 400 / 422：去掉重发，本进程内记住。
             if not response and think_off and raw and (raw.code == 400 or raw.code == 422) then
                 no_think_param[endpoint] = true
-                if not cancelled then current = send(false) end
+                if not cancelled then current = send(false, budget) end
                 return
             end
-            finish(response, err, raw, cb)
+            local content, fail = finish(response, err, raw)
+            -- 关不掉思考的推理模型会把上限吃光、正文为空：放大到 4 倍重试一次。
+            if fail == TRUNCATED and budget == max_tokens then
+                if not cancelled then current = send(think_off, budget * 4) end
+                return
+            end
+            cb(content, fail)
         end)
     end
 
-    current = send(not no_think_param[endpoint])
+    current = send(not no_think_param[endpoint], max_tokens)
     if not current then return nil end
     return { cancel = function()
         cancelled = true
