@@ -31,16 +31,17 @@ package.preload["ai"] = function()
 end
 
 local db_report
+local summary_rows = {
+    { chapter_idx = 1, title = "第一章", summary = "他出发了。" },
+    { chapter_idx = 2, title = "", summary = "他到了。" },
+}
 package.preload["ai.summary_db"] = function()
     return {
         upTo = function(source_id, stable_id, _max_idx, limit)
             Assert.eq(source_id, "wechat")
             Assert.eq(stable_id, "b1")
             Assert.eq(limit, 200)
-            return {
-                { chapter_idx = 1, title = "第一章", summary = "他出发了。" },
-                { chapter_idx = 2, title = "", summary = "他到了。" },
-            }
+            return summary_rows
         end,
         report = function() return db_report end,
         putReport = function(_source_id, _stable_id, text)
@@ -144,6 +145,21 @@ has(content, "第一章：他出发了。\n#2：他到了。")
 has(content, "「人生如逆旅」　笔记：喜欢\n「我亦是行人」")
 Assert.is_nil(content:find("书签，不算", 1, true))
 has(content, "必须是书中原文")
+
+-- 章多、摘要长：每章都留下（截短），总长不超上限；短摘要原样
+local saved_rows = summary_rows
+summary_rows = { { chapter_idx = 1, title = "短", summary = "很短。" } }
+for i = 2, 100 do
+    summary_rows[i] = { chapter_idx = i, title = "章" .. i, summary = string.rep("长", 200) }
+end
+content = Report.messages(identity, 42.4)[2].content
+has(content, "短：很短。\n")
+has(content, "章100：长")
+local section = content:match("章节摘要：\n(.-)\n\n划线与笔记")
+Assert.is_true(#section <= 10000, "摘要块不超过 10000 字节")
+Assert.is_true(#section > 9000, "额度用满")
+Assert.is_true(require("utils.text").isValidUtf8(section), "不切断多字节字符")
+summary_rows = saved_rows
 
 -- 金句只取第四节的「」
 local REPORT = "一、讲「旅途」\n四、值得回味的句子\n• 「人生如逆旅」\n• 「 我亦是行人 」\n• 「不在书里」\n"

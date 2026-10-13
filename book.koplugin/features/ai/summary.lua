@@ -77,7 +77,7 @@ local function chapterText(ui, identity, toc, from, to)
     end
     local start_page, end_page = tonumber(toc[from].page), tonumber(toc[to].page)
     if not start_page or not end_page then return "" end
-    return require("reader.context").pagesText(ui, start_page, end_page)
+    return require("reader.context").pagesText(ui, start_page, end_page, HEAD_LIMIT, TAIL_LIMIT)
 end
 
 --- 入队生成一章摘要。
@@ -116,6 +116,11 @@ end
 --- PageUpdate / PosUpdate：发现顺读进了下一章就给上一章入队生成摘要。
 ---@param ui table ReaderUI
 function Summary.onPage(ui)
+    -- 开关默认关：关着时每次翻页都不查目录。
+    if not Summary.enabled() then
+        last = nil
+        return
+    end
     local Session = require("reader.session")
     local session = Session.current()
     local idx = session and Session.chapterIndex(session)
@@ -128,7 +133,6 @@ function Summary.onPage(ui)
     local chapter_mode = identity.chapter_idx ~= nil
     if chapter_mode and idx ~= prev.idx + 1 then return end
     if not chapter_mode and session.page - prev.page > MAX_PAGE_STEP then return end
-    if not Summary.enabled() then return end
     local SummaryDB = require("ai.summary_db")
     if SummaryDB.get(identity.source_id, identity.stable_id, prev.idx) then return end
     local toc = Session.toc()

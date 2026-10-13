@@ -127,6 +127,13 @@ Assert.eq(sel.text, "月色")
 Assert.eq(sel.sentence, "他望着那片月色，久久不语。", "选的是第二处月色")
 Assert.eq(sel.paragraph, "月色很好。他望着那片月色，久久不语。后一句。")
 
+-- 跨行选区：段前文字里是 \r\n，规范后才数得出前面已有一处
+cre_sel.document.getTextFromXPointer = function() return "甲\n乙。丙。甲\n乙，后文。" end
+cre_sel.document.getTextFromXPointers = function() return "甲\r\n乙。丙。" end
+sel = Context.selection(cre_sel, { text = "甲\r\n乙", pos0 = "/body/p[4]/text().9" })
+Assert.eq(sel.text, "甲\n乙")
+Assert.eq(sel.sentence, "甲\n乙，后文。", "选的是第二处")
+
 sel = Context.selection({ document = {} }, { text = "月色", pos0 = { page = 3 } })
 Assert.eq(sel.sentence, "月色")
 Assert.eq(sel.paragraph, "")

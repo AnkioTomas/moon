@@ -40,6 +40,22 @@ local function capped(lines, limit)
     return table.concat(out, "\n")
 end
 
+--- 每行都留下、总长不超过 limit 字节：短行原样，剩下的额度平分给长行截短。
+---@param lines string[]
+---@param limit integer
+---@return string
+local function fitAll(lines, limit)
+    local order = {}
+    for i = 1, #lines do order[i] = i end
+    table.sort(order, function(a, b) return #lines[a] < #lines[b] end)
+    local out, left = {}, limit
+    for k, i in ipairs(order) do
+        local line = Text.truncateUtf8(lines[i], math.floor(left / (#order - k + 1)) - 1)
+        out[i], left = line, left - #line - 1
+    end
+    return table.concat(out, "\n")
+end
+
 --- 这本书所有章（含按章分片）的划线与笔记，「原文」+ 笔记。
 ---@param identity BookIdentity
 ---@return string[]
@@ -89,7 +105,7 @@ function Report.messages(identity, percent)
 划线与笔记：
 %s]], title ~= "" and title or "未知书名", author ~= "" and ("（作者：" .. author .. "）") or "",
             math.floor(percent + 0.5), math.floor(stats.total_seconds / 60), stats.pages,
-            #summaries > 0 and capped(summaries, SUMMARIES_LIMIT) or "（无）",
+            #summaries > 0 and fitAll(summaries, SUMMARIES_LIMIT) or "（无）",
             capped(highlightLines(identity), HIGHLIGHTS_LIMIT)) },
     }
 end

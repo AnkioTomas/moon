@@ -81,9 +81,11 @@ local Explain = require("features.ai.explain")
 
 -- 注册：阅读页就绪时挂进划词菜单，按钮键不变；AI 未配置时不显示
 local factories = {}
+local clears = 0
 local ui = {
     highlight = {
         addToHighlightDialog = function(_, index, factory) factories[index] = factory end,
+        clear = function() clears = clears + 1 end,
     },
 }
 Ai.onReaderReady({ ui = ui })
@@ -130,6 +132,9 @@ Assert.eq(shown[2].text, "月色：这里指夜晚的月光。", "Markdown 标�
 Assert.len(shown[2].buttons, 2, "关闭走右上角 ×；选区已没了，不出存为笔记")
 Assert.eq(shown[2].buttons[1].text, "追问")
 Assert.eq(shown[2].buttons[2].text, "复制")
+Assert.eq(clears, 0, "结果卡片还开着，选区留着")
+shown[2]:close()
+Assert.eq(clears, 1, "关掉结果卡片清选区")
 
 -- 选区还在：可存为笔记，交给 KOReader 原生 addNote（建划线 + 预填笔记编辑框）
 local noted
@@ -140,9 +145,11 @@ pending("夜晚的月光。")
 local answer_card = shown[#shown]
 Assert.len(answer_card.buttons, 3)
 Assert.eq(answer_card.buttons[1].text, "存为笔记")
+clears = 0
 answer_card.buttons[1].callback()
 Assert.is_true(answer_card.closed)
 Assert.eq(noted, "夜晚的月光。")
+Assert.eq(clears, 0, "存为笔记要用选区，由 addNote 自己清")
 
 -- 追问：带上整条对话（含上一轮回答）再问；空问题不发
 Explain.run(ui, { text = "月色" })
@@ -154,8 +161,10 @@ local input = Themed.last("input")
 Assert.eq(input.title, "追问")
 input.callback("   ")
 Assert.eq(#requests, before_followup, "空追问不发请求")
+clears = 0
 input.callback("为什么用月色？")
 Assert.is_true(answer_card.closed)
+Assert.eq(clears, 0, "追问的结果卡片接着用选区")
 local chain = requests[#requests].messages
 Assert.len(chain, 4)
 Assert.eq(chain[3].role, "assistant")
@@ -165,6 +174,7 @@ Assert.eq(chain[4].content, "为什么用月色？")
 Assert.len(requests[#requests - 1].messages, 2, "上一轮的对话不被改写")
 pending("营造清冷氛围。")
 Assert.eq(shown[#shown].text, "营造清冷氛围。")
+Assert.eq(shown[#shown].buttons[1].text, "存为笔记", "追问后的结果仍可存为笔记")
 ui.highlight.selected_text = nil
 
 -- 追问时断网：立即提示，不发请求
@@ -183,11 +193,13 @@ Assert.matches(requests[#requests].messages[2].content, "STORY SO FAR（前几�
 pending("解释")
 chapter_idx = nil
 
--- 失败：提示错误原因
+-- 失败：提示错误原因，清选区
 Explain.run(ui, { text = "月色" })
+clears = 0
 pending(nil, "timeout")
 Assert.eq(shown[#shown].kind, "toast")
 Assert.matches(shown[#shown].text, "timeout")
+Assert.eq(clears, 1)
 
 -- 只剩 Markdown 空壳也算失败
 Explain.run(ui, { text = "月色" })
@@ -196,8 +208,10 @@ Assert.eq(shown[#shown].kind, "toast")
 
 -- 用户关掉等待弹窗：取消请求
 Explain.run(ui, { text = "月色" })
+clears = 0
 shown[#shown]:close()
 Assert.eq(cancelled, 1)
+Assert.eq(clears, 1, "取消也清选区")
 
 -- 离线：立即提示，不发请求、不弹等待卡片
 connected = false
@@ -263,6 +277,16 @@ Assert.eq(shown[#shown].title, "翠翠的爷爷是做什么的？")
 pending("撑渡船。")
 Assert.eq(shown[#shown].text, "撑渡船。")
 Assert.len(shown[#shown].buttons, 2, "没有选区：只有追问、复制")
+-- 问书不碰选区：即使阅读页还留着别的选区，也不出存为笔记、不清它
+ui.highlight.selected_text = { text = "旧选区" }
+clears = 0
+Explain.askBook(ui)
+Themed.last("input").callback("还有谁？")
+pending("翠翠。")
+Assert.len(shown[#shown].buttons, 2, "问书的回答不挂到旧选区上")
+shown[#shown]:close()
+Assert.eq(clears, 0)
+ui.highlight.selected_text = nil
 chapter_idx, recap_chapters = nil, 5
 
 -- 问书离线：不弹输入框
