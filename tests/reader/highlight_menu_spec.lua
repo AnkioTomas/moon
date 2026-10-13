@@ -111,9 +111,16 @@ end
 package.loaded["ui/widget/buttondialog"] = nil
 HighlightMenu.install(nil)
 settings.reader_popup_seen["12_gone_plugin"] = { title = "Gone", origin = "plugin:gone" }
+-- 用户调过顺序：保存的顺序里也有它
+local saved_order = HighlightMenu.order()
+settings.reader_popup_button_order = saved_order
+Assert.is_true(table.concat(saved_order, ","):find("12_gone_plugin", 1, true) ~= nil)
 highlight.selected_text = { text = "x" }
 ReaderHighlight.onShowHighlightMenu(highlight)
 Assert.is_nil(settings.reader_popup_seen["12_gone_plugin"])
+Assert.is_nil(table.concat(HighlightMenu.order(), ","):find("12_gone_plugin", 1, true),
+    "保存的顺序里还有，也不再列出")
+Assert.eq(settings.reader_popup_button_order, saved_order, "保存的顺序不动")
 Assert.not_nil(settings.reader_popup_seen["12_0_make_handmade_toc_item"])
 Assert.is_false(settings.reader_popup_buttons["12_0_make_handmade_toc_item"], "显隐设置不动")
 Assert.not_nil(highlight.highlight_dialog)

@@ -82,16 +82,21 @@ function HighlightMenu.isEnabled(key)
 end
 
 --- 合并用户顺序、内置默认顺序与扫描到的按钮，旧配置或重复项不会让按钮消失。
+--- 用户顺序里既非内置、又已被 forgetMissing 忘掉的键（卸掉的插件）不列出；期间没调过顺序的话，
+--- 装回来重新扫到就照旧排回原位。
 ---@return string[]
 function HighlightMenu.order()
     local reader = MoonSettings.get("reader")
+    local defaults = require("reader.setting").defaults.reader_popup_button_order
+    local builtin = {}
+    for _idx, key in ipairs(defaults) do builtin[key] = true end
     local out, seen = {}, {}
     for _idx, key in ipairs(reader.reader_popup_button_order or {}) do
-        if type(key) == "string" and not seen[key] then
+        if type(key) == "string" and not seen[key] and (builtin[key] or reader.reader_popup_seen[key]) then
             out[#out + 1], seen[key] = key, true
         end
     end
-    for _idx, key in ipairs(require("reader.setting").defaults.reader_popup_button_order) do
+    for _idx, key in ipairs(defaults) do
         if not seen[key] then
             out[#out + 1], seen[key] = key, true
         end
