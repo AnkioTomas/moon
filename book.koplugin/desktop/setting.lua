@@ -18,7 +18,6 @@ return {
             cache = true,
             storage = true,
             wifi = true,
-            bluetooth = true,
             brightness = true,
             battery = true,
         },

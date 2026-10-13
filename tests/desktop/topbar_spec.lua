@@ -129,6 +129,14 @@ do -- 后台任务：执行中数量 / 未结束总数；点按开任务列表
     Assert.eq(icon, "download")
 end
 
+do -- feature 的项经 features/<name>/topbar.lua 收集，排在核心项之后，带设置页元数据
+    local items = TopBar.items()
+    Assert.eq(items[#items].id, "bluetooth")
+    Assert.eq(TopBar.find("bluetooth").label, "蓝牙")
+    Assert.eq(TopBar.find("battery").label, "电池")
+    Assert.eq(TopBar.find("clock").sample, "12:34")
+end
+
 do -- 电量档位：放电 0..6 / full，充电分档，越界钳制（图标与文字同值）
     local Battery = TopBar.find("battery")
     local cases = {

@@ -164,6 +164,18 @@ package.preload["desktop.topbar"] = function()
         end,
         metric = function(text, icon) return { sample = text, icon = icon } end,
         row = function(_, _, left, right) return { kind = "row", left = left, right = right } end,
+        items = function()
+            return {
+                { id = "clock", align = "left", sample = "12:34" },
+                { id = "source", align = "left", sample = "本地", bar_icon = "source" },
+                { id = "memory", sample = "128M", bar_icon = "memory" },
+                { id = "cache", sample = "1/3", bar_icon = "download" },
+                { id = "storage", sample = "2.1G", bar_icon = "hard_drive" },
+                { id = "wifi", bar_icon = "wifi" },
+                { id = "brightness", sample = "40%", bar_icon = "brightness_6" },
+                { id = "battery", sample = "85%", bar_icon = "battery_android_full" },
+            }
+        end,
     }
 end
 local Topbar = require("desktop.pages.setting.topbar")
@@ -173,7 +185,7 @@ Assert.eq(preview_h, 40)
 Assert.eq(top.child.kind, "row")
 Assert.eq(top.child.left[1].sample, "12:34")
 Assert.is_nil(top.child.left[1].icon, "时钟不画图标")
-Assert.eq(#top.child.right, 6, "内存已关")
+Assert.eq(#top.child.right, 5, "内存已关")
 
 local Lockscreen = require("features.lockscreen.page")
 local off = Lockscreen.preview(600)
