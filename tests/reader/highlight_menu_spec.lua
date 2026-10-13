@@ -98,3 +98,22 @@ Assert.is_false(highlight._highlight_buttons["12_0_make_handmade_toc_item"]({}, 
 -- 扫描到的按钮进排序：排在内置默认顺序之后
 local order = HighlightMenu.order()
 Assert.eq(order[#order], "12_0_make_handmade_toc_item")
+
+-- 弹窗时已注册的就是全部：卸掉的插件按钮从设置页消失，显隐设置保留
+local ReaderHighlight = {}
+package.preload["apps/reader/modules/readerhighlight"] = function() return ReaderHighlight end
+package.preload["ui/widget/buttondialog"] = function()
+    return { new = function(_, o) o.movable = { dimen = {} } return o end }
+end
+package.preload["reader.selection"] = function()
+    return { enabled = function() return false end, attach = function() return true end }
+end
+package.loaded["ui/widget/buttondialog"] = nil
+HighlightMenu.install(nil)
+settings.reader_popup_seen["12_gone_plugin"] = { title = "Gone", origin = "plugin:gone" }
+highlight.selected_text = { text = "x" }
+ReaderHighlight.onShowHighlightMenu(highlight)
+Assert.is_nil(settings.reader_popup_seen["12_gone_plugin"])
+Assert.not_nil(settings.reader_popup_seen["12_0_make_handmade_toc_item"])
+Assert.is_false(settings.reader_popup_buttons["12_0_make_handmade_toc_item"], "显隐设置不动")
+Assert.not_nil(highlight.highlight_dialog)

@@ -36,6 +36,7 @@ package.preload["docsettings"] = function()
                 saveSetting = function(_, key, value) data[key] = value end,
                 delSetting = function(_, key) data[key] = nil end,
                 flush = function() data.flushed = true end,
+                purge = function() for key in pairs(data) do data[key] = nil end end,
             }
         end,
     }
@@ -137,9 +138,12 @@ Text2Epub.build = function(opts, cb)
     return { cancel = function() end }
 end
 local path
+sidecars[dir .. "/book.epub"] = { annotations = { { pos0 = "/body/old" } }, book_note_linked = { a = true } }
 Reflow.applyAsync(identity, txt, "全文", function(p, e) path, err = p, e end)
 Assert.is_nil(err)
 Assert.eq(path, dir .. "/book.epub")
+Assert.is_nil(sidecars[path].annotations, "重新排版同一路径：旧划线坐标指向旧结构，清掉")
+Assert.is_nil(sidecars[path].book_note_linked)
 Assert.eq(built.text, "全文")
 Assert.eq(built.source, txt, "书名 / 作者仍可从原书文件名推断")
 Assert.is_true(built.reflow)
@@ -191,6 +195,16 @@ Reflow.show(reflowed_ui)
 Assert.eq(switched, txt .. ".pdf")
 Assert.is_nil(prefs_written, "copt_ 在 PDF sidecar 里是 KOPT 设置")
 Assert.eq(sidecars[txt .. ".pdf"].last_percent, 0.5)
+
+-- 读别的衍生版（双语版）时不能再套一层排版：二级衍生版的划线收不回笔记库
+local bilingual_dir = Paths.bookWorkDir(identity.stable_id, identity.source_id) .. "/bilingual"
+assert(Paths.ensureDir(bilingual_dir))
+local bilingual_meta = assert(io.open(bilingual_dir .. "/meta.json", "wb"))
+bilingual_meta:write(require("support.json_stub").encode({ origin = txt, file = bilingual_dir .. "/book.epub" }))
+bilingual_meta:close()
+Assert.is_false(Reflow.available(reader(bilingual_dir .. "/book.epub", "rolling")))
+Assert.is_true(Reflow.available(reflowed_ui), "读自己的排版版仍可用（切回原书）")
+require("ffi/util").purgeDir(bilingual_dir)
 
 -- 没有排版版：TXT 直接分析，其它格式先确认有损
 require("ffi/util").purgeDir(dir)

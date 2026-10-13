@@ -22,8 +22,10 @@ books.path 即用户最后选的版本：复用 books.path 的源从桌面重开
 
 require("l10n").apply()
 
+local DerivedNote = require("reader.session.derived_note")
 local JSON = require("json")
 local Markup = require("features.translate.markup")
+local readMeta = DerivedNote.readMeta
 local T = require("ffi/util").template
 local _ = require("gettext")
 
@@ -91,14 +93,6 @@ local function writeFile(path, data)
     assert(f:close())
     assert(os.rename(path .. ".part", path))
 end
-
----@param dir string
----@return { origin: string, file: string }|nil
-local function readMeta(dir)
-    local data = readFile(dir .. "/meta.json")
-    return data and JSON.decode(data)
-end
-
 --- 译文缓存（子进程读）：最后一行可能是被杀时写了一半，解不出来就丢掉这一行。
 ---@param path string
 ---@return table<string, string>
@@ -448,21 +442,23 @@ local function start(ui, identity, engine, lang)
     TaskDialog.start(spec)
 end
 
---- 整书 CREngine 文档才能做；章节源的书（含全本缓存后的）一律不做；属主源已卸载（第三方源插件）的也不做。
----@param ui table
----@return boolean
-function Bilingual.available(ui)
-    local session = require("reader.session").current()
-    local source = session and session.identity.source
-    return source ~= nil and source.type ~= "chapter" and ui.rolling ~= nil
-end
-
 --- 正在读双语版（面板按钮高亮）。
 ---@param ui table
 ---@return boolean
 function Bilingual.active(ui)
     local meta = readMeta(workDir(require("reader.session").current().identity))
     return meta ~= nil and meta.file == ui.document.file
+end
+
+--- 整书 CREngine 文档才能做；章节源的书（含全本缓存后的）一律不做；属主源已卸载（第三方源插件）的也不做。
+--- 读别的衍生版（如排版版）时不做：衍生版的划线只会和它的原书收敛，再套一层就回不到笔记库。
+---@param ui table
+---@return boolean
+function Bilingual.available(ui)
+    local session = require("reader.session").current()
+    local source = session and session.identity.source
+    if source == nil or source.type == "chapter" or ui.rolling == nil then return false end
+    return DerivedNote.originOf(ui.document.file) == nil or Bilingual.active(ui)
 end
 
 --- 快捷面板入口：读双语版时直接切回原文；读原文时选择打开已有双语版或用某个引擎翻译全书。

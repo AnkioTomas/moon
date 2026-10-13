@@ -39,7 +39,7 @@ end
 local Bilingual = require("features.translate.bilingual")
 
 -- 可用：整本源的流式文档；章节源（含全本缓存后的整本）、固定版式、无会话一律不可用。
-local rolling = { rolling = {} }
+local rolling = { rolling = {}, document = { file = "/books/bilingual-spec.epub" } }
 Assert.is_false(Bilingual.available(rolling))
 session = { identity = { source = { type = "book" } } }
 Assert.is_true(Bilingual.available(rolling))
@@ -50,6 +50,21 @@ session = { identity = { source = { type = "chapter" }, chapter_idx = 3 } }
 Assert.is_false(Bilingual.available(rolling))
 session = { identity = {} }
 Assert.is_false(Bilingual.available(rolling), "属主源已卸载（第三方源插件）不可用，不能抛错")
+
+-- 读别的衍生版（排版版）时不能再套一层双语：二级衍生版的划线收不回笔记库
+do
+    local Paths = require("utils.paths")
+    local identity = { source_id = "local", stable_id = "/books/bilingual-chain.epub", source = { type = "book" } }
+    local reflow_dir = Paths.bookWorkDir(identity.stable_id, identity.source_id) .. "/reflow"
+    assert(Paths.ensureDir(reflow_dir))
+    local meta = assert(io.open(reflow_dir .. "/meta.json", "wb"))
+    meta:write(require("support.json_stub").encode({ origin = identity.stable_id, file = reflow_dir .. "/book.epub" }))
+    meta:close()
+    session = { identity = identity }
+    Assert.is_false(Bilingual.available({ rolling = {}, document = { file = reflow_dir .. "/book.epub" } }))
+    Assert.is_true(Bilingual.available({ rolling = {}, document = { file = identity.stable_id } }))
+    require("ffi/util").purgeDir(Paths.bookWorkDir(identity.stable_id, identity.source_id))
+end
 
 local function sizes(list)
     local out = {}

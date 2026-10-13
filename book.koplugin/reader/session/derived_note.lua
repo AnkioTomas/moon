@@ -33,9 +33,10 @@ local EDGE_CHARS = 16
 local MAX_HITS = 200
 local UTF8_CHAR = "[%z\1-\127\194-\244][\128-\191]*"
 
+--- 衍生版目录的 meta.json；没有或解不出来返回 nil。
 ---@param dir string
 ---@return { origin: string, file: string }|nil
-local function readMeta(dir)
+function DerivedNote.readMeta(dir)
     local f = io.open(dir .. "/meta.json", "rb")
     if not f then return nil end
     local data = f:read("*a")
@@ -49,7 +50,7 @@ end
 ---@param file string
 ---@return string|nil
 function DerivedNote.originOf(file)
-    local meta = readMeta(file:match("^(.*)/[^/]+$") or ".")
+    local meta = DerivedNote.readMeta(file:match("^(.*)/[^/]+$") or ".")
     return meta and meta.file == file and meta.origin or nil
 end
 
@@ -63,7 +64,7 @@ local function derivedFiles(identity, origin)
     local files = {}
     if lfs.attributes(root, "mode") ~= "directory" then return files end
     for name in lfs.dir(root) do
-        local meta = name ~= "." and name ~= ".." and readMeta(root .. "/" .. name)
+        local meta = name ~= "." and name ~= ".." and DerivedNote.readMeta(root .. "/" .. name)
         if meta and meta.origin == origin and lfs.attributes(meta.file, "mode") == "file" then
             files[#files + 1] = meta.file
         end
@@ -85,10 +86,10 @@ local function edge(text, tail)
     return table.concat(chars, "", 1, math.min(#chars, EDGE_CHARS))
 end
 
---- 在 CREngine 文档里搜出划线位置：开头取离全书比例最近的命中，结尾取其后最近的命中。
+--- 在 CREngine 文档里搜出划线位置：开头取离全书比例最近的命中（比例未知取第一个），结尾取其后最近的命中。
 ---@param document table CreDocument
 ---@param text string
----@param fraction number 划线在全书的大致位置 0..1
+---@param fraction number|nil 划线在全书的大致位置 0..1；nil = 不知道
 ---@return string|nil pos0
 ---@return string|nil pos1
 function DerivedNote.locate(document, text, fraction)
@@ -98,7 +99,7 @@ function DerivedNote.locate(document, text, fraction)
     local pages = document:getPageCount()
     local start, best
     for _idx, hit in ipairs(document:findAllText(head, false, 0, MAX_HITS) or {}) do
-        local distance = math.abs(document:getPageFromXPointer(hit.start) / pages - fraction)
+        local distance = fraction and math.abs(document:getPageFromXPointer(hit.start) / pages - fraction) or 0
         if not best or distance < best then start, best = hit, distance end
     end
     if not start then return nil end
@@ -114,10 +115,13 @@ function DerivedNote.locate(document, text, fraction)
 end
 
 ---@param item table
----@param pages integer 划线所在文档的总页数（条目没带 total_pages 时用）
----@return number
+---@param pages integer 划线所在文档的总页数（条目的 total_pages 缺失或为 0 时用；0 = 不知道）
+---@return number|nil
 local function fractionOf(item, pages)
-    return (item.pageno or 0) / math.max(1, item.total_pages or pages)
+    local total = item.total_pages
+    if not total or total <= 0 then total = pages end
+    if not item.pageno or total <= 0 then return nil end
+    return item.pageno / total
 end
 
 ---@param items table[]
