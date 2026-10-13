@@ -49,7 +49,7 @@ return {
     ["Z-Library 账号"] = "Z-Library 帳號",
     ["Z站"] = "Z站",
     ["Z站暂无内容"] = "Z站暫無內容",
-    ["bk_… 长期令牌"] = "bk_… 長期權杖",
+    ["个人Token"] = "個人Token",
     ["https://book.example.com"] = "https://book.example.com",
     ["txt 章节解码失败"] = "txt 章節解碼失敗",
     ["✓ 一行"] = "✓ 一行",
