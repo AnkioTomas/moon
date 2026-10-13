@@ -26,6 +26,8 @@ local Theme = require("ui.themes")
 ---@field padding number 物理像素内边距
 ---@field width number|nil 物理像素外框宽（不含阴影）
 ---@field height number|nil 物理像素外框高（不含阴影）
+---@field box_w number 实际外框宽（init 算定，不含阴影）
+---@field box_h number 实际外框高（init 算定，不含阴影）
 local Box = WidgetContainer:extend{
     style = nil,
     padding = 0,

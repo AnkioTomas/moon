@@ -175,6 +175,7 @@ local InputText = InputContainer:extend{
     onShowKeyboard = function(self) self.kb = true end,
     onCloseKeyboard = function(self) self.kb = false end,
     isKeyboardVisible = function(self) return self.kb == true end,
+    getKeyboardDimen = function(self) return geom{ w = Kit.SCREEN_W, h = self.kb_h or 0 } end,
 }
 
 local Leaf = Widget:extend{}

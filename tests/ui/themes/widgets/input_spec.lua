@@ -70,6 +70,24 @@ dialog:onTapModal(nil, Kit.tap(1, 790))
 Assert.is_true(cancelled)
 Assert.eq(Kit.closed[#Kit.closed], dialog)
 
+-- 键盘挡住焦点字段：整块上移到焦点字段底边落在键盘上方；收键盘回到贴顶。
+dialog = Input:new{ fields = { { text = "1" }, { text = "2" }, { text = "3" }, { text = "4" } } }
+local kb_top = Kit.SCREEN_H - 760
+for _i, it in ipairs(dialog.inputs) do it.kb_h = 760 end
+dialog:onShow()
+Assert.is_true(dialog.panel_y + dialog.field_bottoms[1] <= kb_top)
+Assert.is_true(dialog.panel_y < 16)
+local last = dialog.inputs[4]
+dialog:onSwitchFocus(last)
+Assert.is_true(dialog.panel_y + dialog.field_bottoms[4] <= kb_top)
+Assert.is_true(dialog.panel_y + dialog.field_bottoms[4] > kb_top - 40, "只上移到刚好露出")
+dialog:onTapModal(nil, Kit.tap(1, 790))
+Assert.eq(dialog.panel_y, 16)
+last.kb_h = 100
+last:onShowKeyboard()
+dialog:onKeyboardClosed()
+Assert.eq(dialog.panel_y, 16, "键盘矮、不挡字段时保持贴顶")
+
 -- 确定：按字段顺序回传当前文本；关窗收起全部键盘。
 dialog = Input:new{ fields = { { text = "x" }, { text = "y" } }, callback = function(...) got = { ... } end }
 dialog.inputs[1].text = "改过"
