@@ -72,7 +72,7 @@ function TextViewer:init()
     })
     local button_h = 0
     if self.buttons and #self.buttons > 0 then
-        button_h = Theme.px(t.space.lg) + Theme.px(t.control.height)
+        button_h = pad * 2 + Theme.px(t.control.height)
     end
     self.pager_h = Theme.px(t.control.height)
     self.body_h = math.max(1, h - self.bar:getSize().h - self.pager_h - pad * 2 - button_h)
@@ -112,6 +112,7 @@ function TextViewer:rebuild()
     if self.buttons and #self.buttons > 0 then
         kids[#kids + 1] = VerticalSpan:new{ width = pad }
         kids[#kids + 1] = self:buttonRow(self.buttons, w - pad * 2)
+        kids[#kids + 1] = VerticalSpan:new{ width = pad }
     end
     self:setPanel(Box:new{
         style = self.fullscreen and { bg = t.color.page } or t.dialog,
