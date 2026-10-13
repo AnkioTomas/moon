@@ -9,7 +9,7 @@
   local img = Image.widget({
       width = w, height = h,
       src = "https://…" | "/abs/path.png" | "logo.png"（插件相对）,
-      fallback = "书名",     -- 未就绪 / 失败时的文案
+      fallback = "书名",     -- 未就绪 / 失败时的文案；也可直接给控件
       style = theme.card,    -- 可选：换一种表面，缺省 theme.image
       -- 其余原样交给内核：headers / alpha / on_ready / fallback_src / invert_in_night
   })
@@ -41,8 +41,11 @@ function ThemeImage.widget(opts)
     local style = opts.style or t.image
     local inset = Theme.px(style.border or 0) * 2
     local w, h = opts.width - inset, opts.height - inset
-    local fallback = opts.fallback and opts.fallback ~= "" and Text.line("caption", opts.fallback,
-        { width = w - Theme.px(t.space.xs) * 2, color = t.color.muted }) or nil
+    local fallback = opts.fallback
+    if type(fallback) == "string" then
+        fallback = fallback ~= "" and Text.line("caption", fallback,
+            { width = w - Theme.px(t.space.xs) * 2, color = t.color.muted }) or nil
+    end
     return Box:new{
         style = style,
         width = opts.width,

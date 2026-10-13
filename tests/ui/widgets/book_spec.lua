@@ -41,6 +41,9 @@ package.preload["ui/geometry"] = function()
 end
 package.preload["ui/gesturerange"] = widgetModule
 package.preload["ui.themes.widgets.image"] = function() return { widget = function(opts) return opts end } end
+package.preload["ui.widgets.plain_cover"] = function()
+    return { new = function(_, opts) return opts end }
+end
 package.preload["ui.themes.widgets.icon"] = function()
     return {
         widget = function()
@@ -242,6 +245,8 @@ local image = select(1, Book.cover(nil, active, {
 Assert.eq(resolved[1], "wechat")
 Assert.eq(coverImage(image).src, "https://wechat/book-1")
 Assert.eq(coverImage(image).headers.X, "wechat")
+Assert.eq(coverImage(image).fallback.title, "跨源书", "无图时用生成封面")
+Assert.eq(coverImage(image).fallback.author, "")
 
 -- 活跃源就是属主源时不 resolve。
 resolved = {}
