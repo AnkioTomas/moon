@@ -11,7 +11,9 @@ package.preload["ui/uimanager"] = function()
         show = function(_, widget) shown[#shown + 1] = widget end,
         close = function(_, widget) closed[#closed + 1] = widget end,
         nextTick = function(_, fn) ticks[#ticks + 1] = fn end,
-        restartKOReader = function() restarted = restarted + 1 end,
+        broadcastEvent = function(_, event)
+            if event.handler == "onRestart" then restarted = restarted + 1 end
+        end,
     }
 end
 local connected = true

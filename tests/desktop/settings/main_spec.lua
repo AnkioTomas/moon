@@ -192,6 +192,7 @@ _G.G_reader_settings = {
         if key == "language" then return "zh_CN" end
         return nil
     end,
+    nilOrTrue = function() return true end,
 }
 
 local desktop = {

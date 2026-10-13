@@ -633,11 +633,13 @@ function StatsDB.dailyByBook(source_id, stable_id, limit)
     return rows
 end
 
---- 按天聚合某源阅读统计（本地洞察日历用）。
+--- 按天聚合某源阅读统计（本地洞察日历、首页热力图用）。
 ---@param source_id string|string[]
+---@param start_ts number|nil 与 end_ts 同给时只聚合 [start_ts, end_ts)，走 (source_id, start_time) 索引
+---@param end_ts number|nil
 ---@return table[] rows { ymd, seconds, pages }（按日期升序）
-function StatsDB.dailyBySource(source_id)
-    return mergedDailyRows(source_id)
+function StatsDB.dailyBySource(source_id, start_ts, end_ts)
+    return mergedDailyRows(source_id, start_ts, end_ts)
 end
 
 --- 按天按书聚合某源阅读统计（本地洞察当日书单用），含云端单书按日时长。

@@ -2,7 +2,7 @@
 导入 KOReader 自带统计插件的阅读记录（设置目录下 statistics.sqlite3 的 page_stat_data）。
 
 KOReader 的库只读。书按内容 partialMD5 对上书库在架书（books.md5，缺 md5 的按 path 现算），
-对不上再按书名唯一匹配；书名重复或都对不上的书跳过。
+对不上再按书名唯一匹配；md5 对上多本、书名重复或都对不上的书跳过。
 导入行记为 StatsDB.IMPORTED：历史数据只进本地统计，不推给任何源，源 pull 清理已同步行时也不删。
 去重按分钟：本插件已有记录覆盖的分钟不再导入。KOReader 统计插件与本插件读书时同时计时，
 同一段阅读两边各有一份；导入行自己也会覆盖对应分钟，所以重复导入不会重复计。
@@ -17,30 +17,39 @@ local Text = require("utils.text")
 
 local KoreaderStats = {}
 
---- 书库在架书按 md5 与书名索引；书名重复的记 false，对不上就不猜。
+--- 键唯一才记书，重复的记 false：同一文件在书库里有两条时，记录导进哪本都会和另一本的本地记录算重。
+---@param index table
+---@param key string
+---@param book Book
+local function addUnique(index, key, book)
+    index[key] = index[key] == nil and book or false
+end
+
+--- 书库在架书按 md5 与书名索引；md5 或书名重复的记 false，对不上就不猜。
 --- 缺 md5 的书要读文件现算，只在已知 md5 对不上时算一次。
 ---@return fun(md5: string|nil, title: string|nil): Book|false|nil
 local function libraryIndex()
     local by_md5, by_title, unhashed = {}, {}, {}
     for _idx, book in ipairs(BookDB.listLibrary()) do
         if book.md5 then
-            by_md5[book.md5] = by_md5[book.md5] or book
+            addUnique(by_md5, book.md5, book)
         elseif book.path then
             unhashed[#unhashed + 1] = book
         end
         local title = Text.trim(book.title or "")
-        if title ~= "" then by_title[title] = by_title[title] == nil and book or false end
+        if title ~= "" then addUnique(by_title, title, book) end
     end
     return function(md5, title)
-        if md5 and not by_md5[md5] and unhashed then
+        if md5 and by_md5[md5] == nil and unhashed then
             local partialMD5 = require("util").partialMD5
             for _idx, book in ipairs(unhashed) do
-                local digest = partialMD5(book.path)
-                if digest then by_md5[digest] = by_md5[digest] or book end
+                local digest = partialMD5(book.path) ---@type string|nil
+                if digest then addUnique(by_md5, digest, book) end
             end
             unhashed = nil
         end
-        return md5 and by_md5[md5] or by_title[Text.trim(title or "")]
+        if md5 and by_md5[md5] ~= nil then return by_md5[md5] end
+        return by_title[Text.trim(title or "")]
     end
 end
 

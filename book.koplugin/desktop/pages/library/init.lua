@@ -66,17 +66,17 @@ local LIST_ROW_H = 120
 local Library = {}
 Library.__index = Library
 
---- 分组页签：key/flag 是筛选字段（组名 / 空桶），counts 是 filtersAsync 的计数键，column 是计数行的取值键。
+--- 分组页签：key/flag 是筛选字段（组名 / 空桶），column 是 books 的分组列（也是计数行的取值键）。
 ---@return table[]
 local function groupTabs()
     return {
         { id = "books", text = _("书籍") },
         { id = "author", text = _("作者"), key = "author", flag = "unauthor",
-            counts = "author_counts", column = "authors", empty = _("未知作者") },
+            column = "authors", empty = _("未知作者") },
         { id = "series", text = _("系列"), key = "series", flag = "unseries",
-            counts = "series_counts", column = "series", empty = _("无系列") },
+            column = "series", empty = _("无系列") },
         { id = "category", text = _("分类"), key = "category", flag = "uncategorized",
-            counts = "category_counts", column = "category", empty = _("未分类") },
+            column = "category", empty = _("未分类") },
     }
 end
 
@@ -212,16 +212,27 @@ function Library:showStatus(anchor)
     end)
 end
 
---- 拉当前页签的分组计数。
+--- 拉当前页签的分组计数；分组变少（删书、改元数据后返回）时页码夹回末页，不停在空页。
 function Library:fetchGroups()
     local g = self:currentGroup()
-    self:loadFilters(function(data, err)
+    local desktop = self.desktop
+    local source = desktop.source
+    if not source then
+        self.groups = { rows = {}, err = _("当前数据源不可用") }
+        desktop:updateView()
+        return
+    end
+    if self.filter_cancel then self.filter_cancel:cancel() end
+    self.filter_cancel = require("book.catalog").groupCountsAsync(source.id, g.column, function(counts, err)
+        self.filter_cancel = nil
+        if desktop.closed or desktop.tab ~= "library" or desktop.source ~= source then return end
         local rows = {}
-        for i, row in ipairs(data and data[g.counts] or {}) do
+        for i, row in ipairs(counts or {}) do
             rows[i] = { value = row[g.column], count = row.count }
         end
-        self.groups = { rows = rows, err = err }
-        self.desktop:updateView()
+        self.groups = { rows = rows, err = not counts and (err or _("加载失败")) or nil }
+        self.group_page = math.min(self.group_page, self:pages())
+        desktop:updateView()
     end)
 end
 

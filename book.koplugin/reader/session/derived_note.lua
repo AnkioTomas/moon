@@ -257,7 +257,17 @@ function DerivedNote.project(ui, identity)
     place(ui, pending, 0, linked, true, nil, function()
         if not orphans then return redraw(ui) end
         place(ui, orphans, 0, linked, false, nil, function()
-            ui.doc_settings:delSetting(ORPHANS)
+            -- 这些线原书里没有，新版里也搜不到就只剩这一份：留着下次再搜，不能删。
+            local mine = byDatetime(ui.annotation.annotations)
+            local left = {}
+            for _idx, item in ipairs(orphans) do
+                if not mine[item.datetime] then left[#left + 1] = item end
+            end
+            if #left > 0 then
+                ui.doc_settings:saveSetting(ORPHANS, left)
+            else
+                ui.doc_settings:delSetting(ORPHANS)
+            end
             redraw(ui)
         end)
     end)

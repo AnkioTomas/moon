@@ -63,6 +63,11 @@ local filters_data = {
 local catalog = {
     libraryScope = function(id) return { id, "extra" } end,
     filtersAsync = function(_, cb) cb({ data = filters_data }) end,
+    groupCountsAsync = function(_, column, cb)
+        Assert.eq(column, "authors")
+        cb(filters_data.author_counts)
+        return { cancel = function() end }
+    end,
     listLibraryAsync = function(source_id, opts, cb)
         listed_source_id, requested = source_id, opts
         cb({ data = {}, count = 0 })

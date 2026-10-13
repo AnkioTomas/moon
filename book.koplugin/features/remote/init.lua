@@ -839,19 +839,19 @@ end
 --- 本插件根目录，与 PluginLoader 给的 plugin.path 同一字符串（同 source/registry）。
 local PLUGIN_ROOT = debug.getinfo(1, "S").source:match("^@(.*)/features/remote/init%.lua$")
 
---- 装上传的插件包；装好在设备上提示并稍后重启：留几秒让「成功」响应发回浏览器，
---- 也不能继续跑旧模块（延迟加载会混进新版文件）。
+--- 装上传的插件包；装好在设备上提示并稍后重启：留一秒让「成功」响应发回浏览器，
+--- 不能久等（旧模块还在内存里，延迟加载会混进新版文件）。重启走 Update.restart，开着书也先落盘。
 ---@param temp string
 ---@param cb fun(ok: boolean, err: string|nil)
 local function installUpdate(temp, cb)
-    require("features.update").installArchive(temp, PLUGIN_ROOT, function(ok, err)
+    local Update = require("features.update")
+    Update.installArchive(temp, PLUGIN_ROOT, function(ok, err)
         cb(ok, err)
         if not ok then return end
-        local UIManager = require("ui/uimanager")
         require("ui.themes.widgets.toast"):new{
             text = _("月读已通过远程管理更新，正在重启 KOReader…"),
         }:show()
-        UIManager:scheduleIn(3, function() UIManager:restartKOReader() end)
+        require("ui/uimanager"):scheduleIn(1, Update.restart)
     end)
 end
 

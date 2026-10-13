@@ -304,6 +304,12 @@ end
 
 Update.onExit = Update.cancel
 
+--- 装好后重启 KOReader：走 KOReader 自己的重启动作（广播 Restart → DeviceListener → exitOrRestart），
+--- 阅读器 / 文件管理器先 onClose（sidecar、阅读会话、各 onExit 落盘）再退出；禁止直接 restartKOReader。
+function Update.restart()
+    UIManager:broadcastEvent(require("ui/event"):new("Restart"))
+end
+
 --- 已知错误码 → 用户文案；子进程错误带堆栈，只取首行。
 ---@param err any
 ---@return string
@@ -336,7 +342,7 @@ local function startInstall(release, plugin_root)
     Update.install(release, plugin_root, function(ok, err)
         if ok then
             dialog:set(_("更新完成，正在重启 KOReader…"), 100)
-            UIManager:nextTick(function() UIManager:restartKOReader() end)
+            UIManager:nextTick(Update.restart)
             return
         end
         dialog:close()

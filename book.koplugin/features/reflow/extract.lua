@@ -39,7 +39,7 @@ local function appendPage(pages, raw)
     end
     local previous = pages[#pages]
     if previous then
-        local last_line = previous:match("([^\n]+)$")
+        local last_line = previous:match("^.*\n([^\n]+)$") or previous:match("^[^\n]+$")
         local first_line, rest = page:match("^([^\n]+)\n(.*)$")
         if not first_line then
             first_line, rest = page, ""
@@ -109,9 +109,15 @@ function Extract.run(ui, cb, on_progress)
     ---@param text string|nil
     ---@param err any
     local function finish(text, err)
-        if ui.document == document and restore_xp then document:gotoXPointer(restore_xp) end
+        if ui.document == document and restore_xp then
+            -- 放不回原位置只是阅读位置偏了；抛出去 cb 就不来了，调用方的进度窗会一直挡着阅读页。
+            local ok, restore_err = pcall(document.gotoXPointer, document, restore_xp)
+            if not ok then require("logger").warn("reflow extract: restore position failed", restore_err) end
+        end
         cb(text, err)
     end
+    -- 进度条按整数百分比走：每批都报会让墨水屏 10 次/秒刷新。
+    local reported = -1
 
     local readPage = rolling and rollingPage or pagingPage
 
@@ -130,12 +136,16 @@ function Extract.run(ui, cb, on_progress)
             appendPage(pages, chunk)
             page = page + 1
             if page <= count and Perf.now() - started >= BATCH_MS then
-                on_progress(_("正在提取文字"), page - 1, count)
+                local percent = math.floor((page - 1) * 100 / count)
+                if percent ~= reported then
+                    reported = percent
+                    on_progress(_("正在提取文字"), page - 1, count)
+                end
                 return later(function() step(page) end)
             end
         end
         local text = table.concat(pages, "\n")
-        if Text.trim(text) == "" then
+        if not text:find("%S") then
             return finish(nil, _("文档没有可提取的文字"))
         end
         finish(text)

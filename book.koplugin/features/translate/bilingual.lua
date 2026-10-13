@@ -283,7 +283,10 @@ local function task(input)
         local function produce()
             report(_("正在生成双语版"))
             job("bilingual.build", function() return build(input) end, function()
-                writeFile(input.dir .. "/meta.json", JSON.encode({ origin = input.origin, file = input.dest }))
+                -- job 回调里抛错会被吞掉、finish 不来，前台进度窗就关不掉：写盘失败按任务失败结束。
+                local ok, err = pcall(writeFile, input.dir .. "/meta.json",
+                    JSON.encode({ origin = input.origin, file = input.dest }))
+                if not ok then return finish({ ok = false, err = err }) end
                 if input.source then os.remove(input.source) end
                 finish({ ok = true, file = input.dest })
             end)
@@ -407,8 +410,13 @@ local function start(ui, identity, engine, lang)
         title = T(_("%1（双语）"), identity.book and identity.book.title or ""),
         dismissable = false,
     }
-    dialog:show()
-    task(input)(function(text, count, total) dialog:update(text, count, total) end, function(result)
+    -- 整书翻译常比自动休眠时长还久，休眠断网整次就失败了。AutoSuspend（Kindle 上是重置 powerd 的 t1）
+    -- 按最后一次 InputEvent 计时：每报一次进度就算一次操作，翻译结束自然恢复，不留开关状态。
+    local event_hook = require("ui/uimanager").event_hook
+    dialog:showWhile(task(input), function(text, count, total)
+        event_hook:execute("InputEvent")
+        dialog:update(text, count, total)
+    end, function(result)
         dialog:close()
         if not result.ok then
             Toast:new{ text = T(_("双语翻译失败：%1"), tostring(result.err):match("[^\n]*")) }:show()

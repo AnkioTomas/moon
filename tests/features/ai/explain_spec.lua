@@ -204,13 +204,18 @@ Explain.run(ui, { text = "月色" })
 pending("```\n```")
 Assert.eq(shown[#shown].kind, "toast")
 
--- 等待是不可取消的进度窗：不给取消按钮，返回键也关不掉
+-- 等待窗：返回键关不掉，但有取消按钮；取消撤掉请求、清选区，迟到的回答不再出卡片
 Explain.run(ui, { text = "月色" })
 Assert.eq(shown[#shown].kind, "progress_dialog")
 Assert.eq(shown[#shown].dismissable, false)
-Assert.is_nil(shown[#shown].on_cancel)
+local shown_before = #shown
+clears = 0
+shown[#shown].on_cancel()
+Assert.eq(cancelled, 1)
+Assert.eq(clears, 1)
 pending("收尾")
-Assert.eq(cancelled, 0)
+Assert.eq(#shown, shown_before)
+cancelled = 0
 
 -- 离线：立即提示，不发请求、不弹等待卡片
 connected = false

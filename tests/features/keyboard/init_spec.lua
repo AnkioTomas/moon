@@ -16,6 +16,10 @@ function VK:addKeys() orig_add_keys = orig_add_keys + 1 end
 function VK:addChar(key) passed[#passed + 1] = key end
 function VK:onClose() closed = closed + 1 end
 package.preload["ui/widget/virtualkeyboard"] = function() return VK end
+local cfg = { enabled = true }
+package.preload["utils.settings"] = function()
+    return { get = function(owner) assert(owner == "features.keyboard") return cfg end }
+end
 package.preload["ui.guard"] = function()
     return { call = function(_label, fn, ...) return fn(...) end }
 end
@@ -68,6 +72,14 @@ kb:addKeys()
 Assert.eq(kb.KEYS, first)
 Assert.len(kb.KEYS[2], 5)
 Assert.eq(orig_add_keys, 2)
+
+-- 开关关：不加收起键
+cfg.enabled = false
+local plain = setmetatable({ KEYS = layout() }, { __index = VK })
+plain:addKeys()
+Assert.len(plain.KEYS[2], 4)
+Assert.is_nil(plain.KEYS._with_hide)
+cfg.enabled = true
 
 -- 收起：关键盘 + 通知父窗口；普通键透传
 local notified = 0

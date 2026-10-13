@@ -57,7 +57,8 @@ function Progress:paintTo(bb, x, y)
             Blitbuffer.Color8(s.fill), math.max(0, r - border))
     end
     if border > 0 then
-        bb:paintBorder(x, y, w, h, border, Blitbuffer.Color8(s.border_color), r, true)
+        bb:paintBorder(x, y, w, h, border, Blitbuffer.Color8(s.border_color), r,
+            G_reader_settings:nilOrTrue("anti_alias_ui"))
     end
 end
 

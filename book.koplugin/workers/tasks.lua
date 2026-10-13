@@ -5,7 +5,7 @@
 `ai` 逐段调用 AI 的整书分析（X-Ray 全书分析）。
 
 同类可以并行，异类互斥：有任务在跑（或退避占位）时只放行同类；队首排队的是异类时后面的同类不插队，
-免得异类饿死。key 必填且唯一：同 key 还在排队的旧任务被新任务替换（旧的按取消处理），已在执行的拒绝新任务。
+免得异类饿死。`ai` 例外：一跑几小时、每次只是一条串行请求，不占执行权，与任何类型并行。key 必填且唯一：同 key 还在排队的旧任务被新任务替换（旧的按取消处理），已在执行的拒绝新任务。
 任务只活在本进程；断点靠各业务自己的落盘状态（已缓存章节、脏标记），不持久化队列。
 队列不认识业务：进度文案、完成提示、可否重试都由任务自己给；download 类的 count/total 是字节数。
 前台弹窗 / 转后台 / 被拒提示由 `workers/ui/task_dialog`（`start` / `follow`）负责，队列本身零 UI。
@@ -22,7 +22,7 @@ restartable 的任务归队列所有，队列可以随时中断并从头重跑�
           report(text, count, total)         -- 三者皆可省
           done(result)                       -- 每次尝试恰好一次；result.ok 表示成功
       end,
-      retryable = function(result) end,     -- 可省；真则退避重试（最多 3 次）
+      retryable = function(result) end,     -- 可省；真则退避重试（最多 3 次；result.progressed 为真的尝试不计数）
       on_done = function(result) end,       -- 可省；最终结束时调一次，取消不调
   }
   task.cancel()
@@ -62,6 +62,8 @@ local RETRY_DELAY_SECONDS = 15
 local MAX_PENDING = 64
 local MAX_FINISHED = 10
 local KINDS = { download = true, sync = true, cache = true, online = true, ai = true }
+--- 不占执行权、也不被别人挡住的类型。
+local SHARED = { ai = true }
 
 ---@type BookTask[] 未结束任务，入队顺序
 local list = {}
@@ -129,18 +131,24 @@ end
 ---@return BookTaskKind|nil
 local function activeKind()
     for _idx, task in ipairs(list) do
-        if task.state == "running" or task.state == "retry_wait" then return task.kind end
+        if (task.state == "running" or task.state == "retry_wait") and not SHARED[task.kind] then
+            return task.kind
+        end
     end
 end
 
---- 下一个可启动的排队任务；队首可启动的排队任务是异类时返回 nil（后面的同类不插队）。
+--- 下一个可启动的排队任务；队首可启动的排队任务是异类时后面的同类不插队，只有 SHARED 类照常启动。
 ---@return BookTask|nil
 local function nextQueued()
     local kind = activeKind()
+    local blocked = false
     for _idx, task in ipairs(list) do
         if task.state == "queued" and not (suspended and task.restartable) then
-            if kind == nil or task.kind == kind then return task end
-            return nil
+            if SHARED[task.kind] then return task end
+            if not blocked then
+                if kind == nil or task.kind == kind then return task end
+                blocked = true
+            end
         end
     end
 end
@@ -177,6 +185,7 @@ local function settle(task, result)
         startNext()
         return
     end
+    if result.progressed then task.attempt = 0 end
     if task.retryable and task.attempt < MAX_ATTEMPTS and task.retryable(result) then
         -- 退避期间继续占执行权，避免异类任务趁窗口开跑。
         task.state = "retry_wait"

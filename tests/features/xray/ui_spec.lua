@@ -34,6 +34,12 @@ package.preload["ui.themes.widgets.progress_dialog"] = function()
     return { new = function(_, opts)
         opts.show = function() dialogs[#dialogs + 1] = opts end
         opts.close = function() opts.closed = true end
+        opts.showWhile = function(self, fn, ...)
+            self:show()
+            local ok, result = pcall(fn, ...)
+            if not ok then self:close(); error(result, 0) end
+            return result
+        end
         return opts
     end }
 end
@@ -54,11 +60,14 @@ end
 local captured
 local local_entities = {}
 local looked_up
+local scan_progress
 package.preload["features.xray.fetch"] = function()
     return {
-        comprehensive = function(ui, current, opts)
-            captured = { ui = ui, identity = current, opts = opts }
+        comprehensive = function(ui, current, opts, cb)
+            captured = { ui = ui, identity = current, opts = opts, cb = cb }
+            return { cancel = function() captured.cancelled = true end }
         end,
+        scanProgress = function() return scan_progress end,
         findLocal = function(current, word)
             Assert.eq(current, identity)
             return local_entities[word]
@@ -101,8 +110,13 @@ Assert.eq(captured.ui, ui)
 Assert.eq(captured.identity, identity)
 Assert.is_true(captured.opts.force)
 Assert.eq(dialogs[#dialogs].text, "正在重新生成 X-Ray…")
-Assert.eq(dialogs[#dialogs].dismissable, false, "生成中不可取消")
-Assert.is_nil(dialogs[#dialogs].on_cancel)
+Assert.eq(dialogs[#dialogs].dismissable, false, "返回键不关")
+-- 取消：撤掉在飞请求，迟到的结果不再提示
+local toast_count = #toasts
+dialogs[#dialogs].on_cancel()
+Assert.is_true(captured.cancelled)
+captured.cb(nil, "cancelled")
+Assert.eq(#toasts, toast_count)
 
 -- 离线：立即提示，不拉取。
 captured, connected = nil, false
@@ -146,6 +160,12 @@ Assert.eq(started.key, "xray\0moon\0book-1")
 Assert.is_true(started.restartable)
 Assert.eq(started.run.text, "全书正文")
 Assert.is_true(started.retryable({ ok = false }))
+
+-- 上次没分析完：确认框报断点
+scan_progress = { done = 3, total = 10 }
+require("features.xray.ui").scanBook(ui, identity)
+Assert.eq(confirm.text, "上次全书分析进行到第 %1 / %2 段，继续从断点分析？")
+scan_progress = nil
 
 -- 同一本书已在分析：只跟随进度，不再取字
 running_task, confirm = { key = "xray\0moon\0book-1" }, nil
