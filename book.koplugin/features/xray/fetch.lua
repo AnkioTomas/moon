@@ -21,6 +21,8 @@ local INTRO_LIMIT = 1500
 local LOOKUP_PRIOR_LIMIT = 2000
 --- 提示词最多带前面几章的摘要。
 local RECAP_CHAPTERS = 5
+--- 全书分析每段正文的字节上限。
+local SCAN_CHUNK = 32000
 
 local payload_sections = {
     { kind = "character", key = "characters" },
@@ -251,6 +253,72 @@ function Fetch.comprehensive(ui, identity, opts, cb)
         return nil
     end
     return fromContext(ui, identity, existing, cb)
+end
+
+--- 把正文切成不超过 size 字节的段：优先在后半段的换行处断开，否则退到 UTF-8 字符边界。
+---@param text string
+---@param size integer
+---@return string[]
+function Fetch.chunks(text, size)
+    local out, pos, len = {}, 1, #text
+    while pos <= len do
+        local stop = math.min(pos + size - 1, len)
+        if stop < len then
+            local cut = text:sub(pos, stop):match(".*()\n")
+            if cut and cut > size / 2 then
+                stop = pos + cut - 1
+            else
+                local byte = text:byte(stop + 1)
+                while stop > pos and byte >= 0x80 and byte < 0xC0 do
+                    stop = stop - 1
+                    byte = text:byte(stop + 1)
+                end
+            end
+        end
+        local chunk = Text.trim(text:sub(pos, stop))
+        if chunk ~= "" then out[#out + 1] = chunk end
+        pos = stop + 1
+    end
+    return out
+end
+
+--- 全书分析的任务体（`workers.tasks` 的 run）：逐段请求 AI，每段结果当场合并落库。
+--- 游标在闭包里：退避重试、休眠 / 断网后重跑都从没做完的那段接着来。
+--- 提示词只带本段提到的已收录实体，否则实体越积越多会撑爆上下文。
+---@param identity BookIdentity
+---@param text string 全书正文
+---@return fun(report: fun(text: string|nil, count: integer|nil, total: integer|nil), done: fun(result: table)): table
+function Fetch.scanBook(identity, text)
+    local chunks = Fetch.chunks(text, SCAN_CHUNK)
+    local title, author = bookMeta(identity)
+    local index = 1
+    return function(report, done)
+        local request
+        local function step()
+            report(_("正在分析全书"), index - 1, #chunks)
+            if index > #chunks then
+                done({ ok = true })
+                return
+            end
+            local chunk = chunks[index]
+            local existing = filterGrounded(XrayDB.list(identity.source_id, identity.stable_id), chunk)
+            local messages = {
+                { role = "system", content = Prompts.system },
+                { role = "user", content = Prompts.comprehensive(
+                    title, author, math.floor(index * 100 / #chunks), chunk, "", Store.promptSnapshot(existing)) },
+            }
+            request = AI.jsonExtract(messages, { max_tokens = 8000, timeout = 180 }, function(decoded, err)
+                if not decoded then done({ ok = false, err = err }); return end
+                local ok, save_err = pcall(mergeAndSave, identity, filterGrounded(cleanPayload(decoded), chunk))
+                if not ok then done({ ok = false, err = save_err }); return end
+                require("features.xray.marks").invalidate()
+                index = index + 1
+                step()
+            end)
+        end
+        step()
+        return { cancel = function() if request then request.cancel() end end }
+    end
 end
 
 --- 本地实体库按名字 / 别名（不分大小写）找词；不联网、不需要 AI。

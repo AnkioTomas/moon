@@ -66,6 +66,31 @@ package.preload["features.xray.fetch"] = function()
         lookupWord = function(ui, current, word)
             looked_up = word
         end,
+        scanBook = function(current, text)
+            return { identity = current, text = text }
+        end,
+    }
+end
+local confirm
+package.preload["ui.themes.widgets.confirm"] = function()
+    return { new = function(_, opts)
+        opts.show = function() confirm = opts end
+        return opts
+    end }
+end
+local extract_cb
+package.preload["features.reflow.extract"] = function()
+    return { run = function(_ui, cb) extract_cb = cb end }
+end
+local running_task
+package.preload["workers.tasks"] = function()
+    return { get = function() return running_task end }
+end
+local started, followed
+package.preload["workers.ui.task_dialog"] = function()
+    return {
+        start = function(spec) started = spec end,
+        follow = function(task) followed = task end,
     }
 end
 
@@ -107,5 +132,25 @@ Assert.eq(toasts[#toasts], "网络不可用，请先连接 Wi-Fi")
 connected = true
 require("features.xray.ui").lookup(ui, "爷爷")
 Assert.eq(looked_up, "爷爷")
+
+-- 分析全书：确认 → 前台取字 → 入后台任务队列（ai 类、可重跑）
+require("features.xray.ui").scanBook(ui, identity)
+Assert.is_nil(extract_cb, "确认前不取字")
+confirm.ok_callback()
+extract_cb(nil, "文档没有可提取的文字")
+Assert.is_nil(started)
+Assert.eq(toasts[#toasts], "X-Ray 失败：%1")
+extract_cb("全书正文")
+Assert.eq(started.kind, "ai")
+Assert.eq(started.key, "xray\0moon\0book-1")
+Assert.is_true(started.restartable)
+Assert.eq(started.run.text, "全书正文")
+Assert.is_true(started.retryable({ ok = false }))
+
+-- 同一本书已在分析：只跟随进度，不再取字
+running_task, confirm = { key = "xray\0moon\0book-1" }, nil
+require("features.xray.ui").scanBook(ui, identity)
+Assert.eq(followed, running_task)
+Assert.is_nil(confirm)
 
 return true
