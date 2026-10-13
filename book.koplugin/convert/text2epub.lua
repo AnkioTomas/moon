@@ -28,6 +28,9 @@ local trim = Text.trim
 local xmlEscape = Text.xmlEscape
 local DEFAULT_PART_CHARS = 256 * 1024
 local CHINESE_NUMBER_CHARS = { "零", "〇", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "百", "千", "万", "两" }
+--- 内嵌目录条目的长度上限（字节，约 40 个汉字）；更长的是正文。
+local MAX_TOC_ENTRY_BYTES = 120
+local TOC_HEADERS = { ["目录"] = true, ["目錄"] = true, ["content"] = true, ["contents"] = true, ["table of contents"] = true }
 local INVALID_VOLUME_SUFFIX = { ["门"] = true, ["队"] = true, ["属"] = true, ["分"] = true, ["件"] = true, ["落"] = true }
 
 ---@param value string
@@ -249,19 +252,79 @@ local function metadataFromPath(source)
     return trim(name) ~= "" and trim(name) or nil
 end
 
+---@param lines string[]
+---@return boolean
+local function blank(lines)
+    for _idx, line in ipairs(lines) do
+        if trim(line) ~= "" then return false end
+    end
+    return true
+end
+
+--- 书开头的内嵌目录把每个标题都列一遍，会切出一串空章：空章后面还有同名章节就丢掉，留带正文的那个。
+---@param sections { title: string, lines: string[] }[]
+---@return { title: string, lines: string[] }[]
+local function dropTocEchoes(sections)
+    local remaining = {}
+    for _idx, section in ipairs(sections) do
+        remaining[section.title] = (remaining[section.title] or 0) + 1
+    end
+    local kept = {}
+    for _idx, section in ipairs(sections) do
+        remaining[section.title] = remaining[section.title] - 1
+        if remaining[section.title] == 0 or not blank(section.lines) then
+            kept[#kept + 1] = section
+        end
+    end
+    return kept
+end
+
+--- 正文里的内嵌目录：表头（目录 / Contents）之后连续的短行，遇到长行或重复的标题（正文开始了）为止。
+--- 不读 NCX 的文档（如 CREngine 打开的 MOBI 6）只有这一份目录。
+---@param lines string[]
+---@param known table<string, boolean> 收进来的标题（就地加）
+local function collectInlineToc(lines, known)
+    local entries
+    for _idx, raw in ipairs(lines) do
+        local line = trim(raw)
+        if TOC_HEADERS[line:lower()] then
+            entries = {}
+        elseif entries and line ~= "" then
+            if #line > MAX_TOC_ENTRY_BYTES or entries[line] then
+                entries = nil
+            else
+                entries[line] = true
+                known[line] = true
+            end
+        end
+    end
+end
+
 ---解析纯文本。显式 title/author 优先，其次读取“书名/作者”元数据；
 ---没有书名元数据时使用文件名，最后才使用首个非空行。
+---章节标题：与目录标题（opts.headings 原文档自带目录，加上正文里的内嵌目录）完全相同的整行，
+---或常见章节写法（chapterTitle）。
 ---@param text string
 ---@param opts table|nil
 ---@return { title: string, author: string|nil, chapters: { title: string, html: string }[] }
 function Text2Epub.parse(text, opts)
     opts = opts or {}
     text = Text.stripBom(Text.normalizeNewlines(text))
+    local known = {}
+    for _idx, heading in ipairs(opts.headings or {}) do
+        known[trim(heading)] = true
+    end
+    ---@param line string 已 trim 的非空行
+    ---@return string|nil
+    local function headingOf(line)
+        return known[line] and line or chapterTitle(line)
+    end
 
     local lines = {}
     for line in (text .. "\n"):gmatch("(.-)\n") do
         lines[#lines + 1] = line
     end
+    collectInlineToc(lines, known)
 
     local title = trim(opts.title)
     local author = trim(opts.author)
@@ -270,7 +333,7 @@ function Text2Epub.parse(text, opts)
 
     for index, raw in ipairs(lines) do
         local line = trim(raw)
-        if line ~= "" and chapterTitle(line) then
+        if line ~= "" and headingOf(line) then
             metadata_open = false
         end
         local metadata_title
@@ -319,7 +382,7 @@ function Text2Epub.parse(text, opts)
     for index, raw in ipairs(content) do
         local line = trim(raw)
         if line ~= "" then
-            if line == title and not isChapterTitle(line) then
+            if line == title and not headingOf(line) then
                 table.remove(content, index)
             end
             break
@@ -337,8 +400,10 @@ function Text2Epub.parse(text, opts)
 
     for _index, raw in ipairs(content) do
         local line = trim(raw)
-        local heading = line ~= "" and chapterTitle(line)
-        if heading then
+        local heading = line ~= "" and headingOf(line)
+        if TOC_HEADERS[line:lower()] then
+            -- 内嵌目录的表头：条目已由 dropTocEchoes 去掉，单留表头没有意义
+        elseif heading then
             startSection(heading)
         elseif current then
             current.lines[#current.lines + 1] = raw
@@ -348,6 +413,7 @@ function Text2Epub.parse(text, opts)
         end
     end
 
+    sections = dropTocEchoes(sections)
     if #sections == 0 then
         startSection(title)
     elseif #sections == 1 and sections[1].title == _("前言") then
@@ -405,6 +471,7 @@ end
 ---   identifier: string|nil,
 ---   reflow: boolean|nil,
 ---   max_part_chars: number|nil,
+---   headings: string[]|nil,
 --- }
 ---@param cb fun(ok: boolean|nil, err: any)
 ---@return { cancel: fun() }

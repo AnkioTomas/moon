@@ -7,6 +7,7 @@
 
 文字来源：TXT 直接读文件（保留原始换行，章节识别最准）；其余格式从打开的文档逐页取字（见 extract），
 流式文档与带文字层的 PDF/DjVu 都行。分析得到的全文由预览持有，确认后原样交给转换，不重复提取。
+章节：原文档自带目录（`ui.toc`）的标题整行命中即切章，没有目录或标题对不上的再按常见章节写法识别。
 
 身份：排版版是同一本书的另一个文件。切换前 `Store.touch` 把 books.path 指过去，开书时按路径解析回
 同一身份，进度、统计都记在这本书上。排版版结构和原书不同，xpointer 不通用，切换时按全书比例落位；
@@ -29,6 +30,7 @@ local Reflow = {}
 
 ---@class ReflowPreview
 ---@field text string 全文
+---@field headings string[] 原文档目录的标题
 ---@field titles string[] 识别出的目录标题
 
 ---@param identity BookIdentity
@@ -79,8 +81,9 @@ end
 
 ---@param origin string 原书路径
 ---@param identity BookIdentity
+---@param headings string[]
 ---@return table
-local function buildOpts(origin, identity)
+local function buildOpts(origin, identity, headings)
     local book = identity.book
     return {
         source = origin,
@@ -88,7 +91,20 @@ local function buildOpts(origin, identity)
         author = book.authors,
         identifier = "moon-reflow-" .. require("utils.paths").slugFor(origin),
         reflow = true,
+        headings = headings,
     }
+end
+
+--- 原文档自带目录的标题。
+---@param ui table ReaderUI
+---@return string[]
+local function tocHeadings(ui)
+    ui.toc:fillToc()
+    local headings = {}
+    for _idx, item in ipairs(ui.toc.toc) do
+        headings[#headings + 1] = item.title
+    end
+    return headings
 end
 
 --- 读出全文并识别章节，供预览目录使用。
@@ -98,13 +114,14 @@ end
 ---@return { cancel: fun() }
 function Reflow.analyzeAsync(ui, identity, cb)
     local origin = ui.document.file
+    local headings = tocHeadings(ui)
     local function done(text, err)
         if not text then
             cb(nil, err)
             return
         end
-        local parsed = Text2Epub.parse(text, buildOpts(origin, identity))
-        cb({ text = text, titles = tocTitles(parsed) })
+        local parsed = Text2Epub.parse(text, buildOpts(origin, identity, headings))
+        cb({ text = text, headings = headings, titles = tocTitles(parsed) })
     end
     if origin:lower():match("%.txt$") then
         require("ui/uimanager"):nextTick(require("ui.guard").wrap("reflow read", function()
@@ -118,17 +135,17 @@ end
 --- 把预览得到的全文转成 EPUB 写进工作目录并记下 meta，完成后回调排版版路径。原书不动。
 ---@param identity BookIdentity
 ---@param origin string 原书路径
----@param text string `analyzeAsync` 给出的全文
+---@param preview ReflowPreview `analyzeAsync` 的结果
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return { cancel: fun() }
-function Reflow.applyAsync(identity, origin, text, cb)
+function Reflow.applyAsync(identity, origin, preview, cb)
     local Paths = require("utils.paths")
     local dir = workDir(identity)
     Paths.ensureBookWork(identity.stable_id, identity.source_id)
     assert(Paths.ensureDir(dir))
-    local opts = buildOpts(origin, identity)
+    local opts = buildOpts(origin, identity, preview.headings)
     opts.dest = dir .. "/book.epub"
-    opts.text = text
+    opts.text = preview.text
     return Text2Epub.build(opts, function(ok, err)
         if not ok then
             cb(nil, err or _("排版失败"))
@@ -187,11 +204,11 @@ local function start(ui, identity)
     local Toast = require("ui.themes.widgets.toast")
     local origin = ui.document.file
 
-    ---@param text string 预览持有的全文
-    local function apply(text)
+    ---@param preview ReflowPreview
+    local function apply(preview)
         local loading = Toast:new{ text = _("正在优化排版…") }
         loading:show()
-        Reflow.applyAsync(identity, origin, text, function(path, err)
+        Reflow.applyAsync(identity, origin, preview, function(path, err)
             loading:close()
             if not path then
                 Toast:new{ text = err or _("排版失败") }:show()
@@ -211,7 +228,7 @@ local function start(ui, identity)
         local list
         local items = { { text = _("确认优化"), icon = "check", keep_open = true, callback = function()
             list:close()
-            apply(preview.text)
+            apply(preview)
         end } }
         for _idx, title in ipairs(preview.titles) do
             items[#items + 1] = { text = title, enabled = false }
