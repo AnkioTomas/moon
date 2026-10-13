@@ -6,7 +6,8 @@
 - `meta.json`：`{ origin, file }`，排版版与它的原书路径。
 
 文字来源：TXT 直接读文件（保留原始换行，章节识别最准）；其余格式从打开的文档逐页取字（见 extract），
-流式文档与带文字层的 PDF/DjVu 都行。分析得到的全文由预览持有，确认后原样交给转换，不重复提取。
+流式文档与带文字层的 PDF/DjVu 都行。读文件、章节识别、打包都在子进程里（整本书在 UI 线程上要跑几十秒），
+子进程只把目录标题传回来。提取得到的全文由预览持有，确认后原样交给转换，不重复提取；TXT 生成时子进程重读原文件。
 章节：原文档自带目录（`ui.toc`）的标题整行命中即切章，没有目录或标题对不上的再按常见章节写法识别。
 
 身份：排版版是同一本书的另一个文件。切换前 `Store.touch` 把 books.path 指过去，开书时按路径解析回
@@ -29,7 +30,7 @@ local _ = require("gettext")
 local Reflow = {}
 
 ---@class ReflowPreview
----@field text string 全文
+---@field text string|nil 从文档提取的全文；TXT 为 nil（生成时读原文件）
 ---@field headings string[] 原文档目录的标题
 ---@field titles string[] 识别出的目录标题
 
@@ -114,22 +115,37 @@ end
 ---@return { cancel: fun() }
 function Reflow.analyzeAsync(ui, identity, cb)
     local origin = ui.document.file
-    local headings = tocHeadings(ui)
-    local function done(text, err)
-        if not text then
-            cb(nil, err)
-            return
-        end
-        local parsed = Text2Epub.parse(text, buildOpts(origin, identity, headings))
-        cb({ text = text, headings = headings, titles = tocTitles(parsed) })
+    local opts = buildOpts(origin, identity, tocHeadings(ui))
+    local job
+    ---@param text string|nil nil 时子进程读原文件
+    local function analyze(text)
+        job = require("workers.job").run(function()
+            local body, err = text, nil
+            if not body then body, err = Text2Epub.read(origin) end
+            if not body then return { err = err } end
+            return { titles = tocTitles(Text2Epub.parse(body, opts)) }
+        end, {
+            name = "reflow.analyze",
+            kind = "medium",
+            on_done = function(result)
+                if result.err then return cb(nil, result.err) end
+                cb({ text = text, headings = opts.headings, titles = result.titles })
+            end,
+            on_failed = function(err) cb(nil, err) end,
+        })
     end
     if origin:lower():match("%.txt$") then
-        require("ui/uimanager"):nextTick(require("ui.guard").wrap("reflow read", function()
-            done(Text2Epub.read(origin))
-        end))
-        return { cancel = function() end }
+        analyze(nil)
+        return { cancel = function() job:cancel() end }
     end
-    return require("features.reflow.extract").run(ui, done)
+    local extract = require("features.reflow.extract").run(ui, function(text, err)
+        if not text then return cb(nil, err) end
+        analyze(text)
+    end)
+    return { cancel = function()
+        extract.cancel()
+        if job then job:cancel() end
+    end }
 end
 
 --- 把预览得到的全文转成 EPUB 写进工作目录并记下 meta，完成后回调排版版路径。原书不动。

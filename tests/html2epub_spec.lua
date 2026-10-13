@@ -12,7 +12,7 @@ Stubs.reset()
 
 local Html2Epub = require("convert.html2epub")
 
--- build：章节 HTML 打包（stub Archiver / Job）
+-- write：章节 HTML 打包（stub Archiver）
 do
     local added = {}
     local opened
@@ -20,8 +20,6 @@ do
     local saved = {
         archiver_loaded = package.loaded["ffi/archiver"],
         archiver_preload = package.preload["ffi/archiver"],
-        job_loaded = package.loaded["workers.job"],
-        job_preload = package.preload["workers.job"],
         html2epub = package.loaded["convert.html2epub"],
     }
 
@@ -55,29 +53,10 @@ do
     end
     os.remove = function() return true end
 
-    package.loaded["workers.job"] = nil
-    package.preload["workers.job"] = function()
-        return {
-            run = function(worker, opts)
-                local ok, result = pcall(worker)
-                if not ok then
-                    if opts and opts.on_failed then
-                        opts.on_failed(err)
-                    end
-                elseif opts and opts.on_done then
-                    opts.on_done(result)
-                end
-                return { abort = function() end }
-            end,
-        }
-    end
-
     package.loaded["convert.html2epub"] = nil
     local M = require("convert.html2epub")
 
-    local got_ok, got_err
-
-    M.build({
+    local got_ok, got_err = M.write({
         dest = "/tmp/moon-test-html2epub.epub",
         title = "测试书",
         author = "作者甲",
@@ -85,11 +64,8 @@ do
             { title = "第一章", html = "<p>chapter 1</p>" },
             { title = "第二章", html = "<p>chapter 2</p>", toc = false },
         },
-    }, function(ok, err)
-        got_ok, got_err = ok, err
-    end)
+    })
 
-    Stubs.flush()
     Assert.eq(got_ok, true)
     Assert.eq(got_err, nil)
     Assert.eq(opened and opened.fmt, "epub")
@@ -119,15 +95,11 @@ do
         fail_path = path
         local renamed = false
         os.rename = function() renamed = true; return true end
-        got_ok, got_err = nil, nil
-        M.build({
+        got_ok, got_err = M.write({
             dest = "/tmp/moon-test-html2epub.epub",
             title = "测试书",
             chapters = { { title = "第一章", html = "<p>x</p>" } },
-        }, function(ok, err)
-            got_ok, got_err = ok, err
-        end)
-        Stubs.flush()
+        })
         Assert.is_nil(got_ok, path)
         Assert.matches(tostring(got_err), "写入 epub 失败")
         Assert.is_false(renamed, path)
@@ -137,7 +109,5 @@ do
     os.remove = old_remove
     package.preload["ffi/archiver"] = saved.archiver_preload
     package.loaded["ffi/archiver"] = saved.archiver_loaded
-    package.preload["workers.job"] = saved.job_preload
-    package.loaded["workers.job"] = saved.job_loaded
     package.loaded["convert.html2epub"] = saved.html2epub
 end

@@ -2,23 +2,20 @@
 HTML 章节 → EPUB。
 
 调用方给齐每章的 HTML body（不含外部资源），这里包成 XHTML、生成
-OPF/NCX，zip 写入放进子进程（workers.job），不堵 UI。
+OPF/NCX 并写 zip。同步执行，整本书的量会卡 UI，调用方放进子进程（workers.job）里跑。
 
   local Html2Epub = require("convert.html2epub")
-  local job = Html2Epub.build({
+  local ok, err = Html2Epub.write({
       dest = "/path/book.epub",
       title = "书名",
       author = "作者",
       chapters = { { title = "第一章", html = "<p>…</p>" } },
-  }, function(ok, err) end)
-  job.cancel()
+  })
 
 @module koplugin.book.convert.html2epub
 --]]
 
-local logger = require("utils.log")
 local Text = require("utils.text")
-local Perf = require("utils.perf")
 local _ = require("gettext")
 
 local Html2Epub = {}
@@ -180,7 +177,7 @@ local function writeEpubPackage(opts, dest)
     return true
 end
 
---- 异步构建 EPUB。
+--- 写 EPUB 到 opts.dest（先写 .part 再改名）。
 ---@param opts {
 ---   dest: string,
 ---   title: string,
@@ -189,11 +186,8 @@ end
 ---   identifier: string|nil,
 ---   chapters: { title: string, html: string, toc: boolean|nil }[],
 --- }
----@param cb fun(ok: boolean|nil, err: any)
----@return { cancel: fun() }
-function Html2Epub.build(opts, cb)
-    local dest = opts.dest
-    local started_at = Perf.now()
+---@return boolean|nil, string|nil
+function Html2Epub.write(opts)
     local chapters = {}
     for index, chapter in ipairs(opts.chapters) do
         chapters[index] = {
@@ -203,55 +197,13 @@ function Html2Epub.build(opts, cb)
             xhtml = wrapXhtml(chapter.title, chapter.html),
         }
     end
-    local pack_opts = {
+    return writeEpubPackage({
         title = opts.title,
         author = opts.author,
         language = opts.language,
         identifier = opts.identifier,
         chapters = chapters,
-    }
-
-    local cancelled = false
-    --- 以错误回调；已取消时静默。
-    ---@param err any 失败原因
-    local function fail(err)
-        if cancelled then
-            return
-        end
-        logger.warn("book.html2epub failed", dest, Perf.elapsedMs(started_at), "ms", err)
-        cb(nil, err)
-    end
-
-    local pack_task = require("workers.job").run(function()
-        local ok, err = writeEpubPackage(pack_opts, dest)
-        return ok and "ok" or ("err:" .. tostring(err or "pack failed"))
-    end, {
-        name = "epub.pack",
-        kind = "heavy",
-        on_done = function(result)
-            if cancelled then
-                return
-            end
-            if result == "ok" then
-                logger.dbg("book.html2epub done", dest, #chapters, "chapters", Perf.elapsedMs(started_at), "ms")
-                cb(true)
-                return
-            end
-            local msg = type(result) == "string" and result:match("^err:(.*)$") or nil
-            fail(msg or result or _("写入 epub 失败"))
-        end,
-        on_failed = function(err)
-            fail(err or _("写入 epub 失败"))
-        end,
-    })
-
-    return { cancel = function()
-            if cancelled then
-                return
-            end
-            cancelled = true
-            pack_task:cancel()
-        end }
+    }, opts.dest)
 end
 
 return Html2Epub

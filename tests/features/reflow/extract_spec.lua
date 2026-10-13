@@ -13,6 +13,9 @@ package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["device"] = function()
     return { screen = { getWidth = function() return 600 end, getHeight = function() return 800 end } }
 end
+-- 假时钟（毫秒）：每页耗时由用例的 doc.cost 决定，分批可预测
+local clock = 0
+package.preload["utils.perf"] = function() return { now = function() return clock end } end
 
 local Extract = require("features.reflow.extract")
 
@@ -24,12 +27,13 @@ local function run(ui)
 end
 
 local function rollingUi(count, pages)
-    local doc = { at = "reading", calls = {} }
+    local doc = { at = "reading", calls = {}, cost = 0 }
     function doc:getPageCount() return count end
     function doc:getXPointer() return self.at end
     function doc:gotoXPointer(xp) self.at = xp end
     function doc:getPageXPointer(page) return "p" .. page end
     function doc:getTextFromXPointers(pos0, pos1)
+        clock = clock + self.cost
         self.calls[#self.calls + 1] = pos0 .. ">" .. pos1
         return pages[tonumber(pos0:sub(2))]
     end
@@ -98,15 +102,30 @@ do
     Assert.eq(err, "文档没有可提取的文字")
 end
 
--- 每页单独 nextTick；取消后排队的页不再提取、也不回调
+-- 按时长分批，批间 scheduleIn 正延迟（nextTick 链不让出输入）；取消后排队的批不再提取、也不回调
 do
     local UIManager = require("ui/uimanager")
-    local original = UIManager.nextTick
-    local pending = {}
-    UIManager.nextTick = function(_self, fn) pending[#pending + 1] = fn end
+    local original_in, original_tick = UIManager.scheduleIn, UIManager.nextTick
+    local pending, delays = {}, {}
+    UIManager.scheduleIn = function(_self, delay, fn)
+        delays[#delays + 1] = delay
+        pending[#pending + 1] = fn
+    end
+    UIManager.nextTick = function() error("extract must not chain nextTick") end
     local function tick() table.remove(pending, 1)() end
 
+    -- 页快：一批取完整本
     local ui = rollingUi(3, { "一", "二", "三" })
+    local text, err
+    Extract.run(ui, function(t, e) text, err = t, e end)
+    tick()
+    Assert.eq(text, "一\n二\n三")
+    Assert.is_nil(err)
+    Assert.eq(#pending, 0)
+
+    -- 页慢：一页就用完一批，下一批排队
+    ui = rollingUi(3, { "一", "二", "三" })
+    ui.document.cost = 100
     local callbacks = 0
     local handle = Extract.run(ui, function() callbacks = callbacks + 1 end)
     tick()
@@ -117,10 +136,12 @@ do
     Assert.len(ui.document.calls, 1)
     Assert.eq(#pending, 0)
     Assert.eq(callbacks, 0)
+    for _idx, delay in ipairs(delays) do Assert.is_true(delay > 0, "延迟必须为正才会轮询输入") end
 
     -- 中途换了文档：报错收尾，不去碰已关闭文档的阅读位置
-    local text, err
+    text, err = nil, nil
     ui = rollingUi(3, { "一", "二", "三" })
+    ui.document.cost = 100
     local doc = ui.document
     Extract.run(ui, function(t, e) text, err = t, e end)
     tick()
@@ -131,5 +152,5 @@ do
     Assert.eq(err, "文档已关闭")
     Assert.eq(#pending, 0)
 
-    UIManager.nextTick = original
+    UIManager.scheduleIn, UIManager.nextTick = original_in, original_tick
 end
