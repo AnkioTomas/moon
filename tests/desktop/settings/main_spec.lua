@@ -120,7 +120,13 @@ package.preload["desktop.pages.setting.topbar"] = function()
     }
 end
 package.preload["desktop.pages.setting.language"] = function()
-    return { sections = function() return {} end }
+    return {
+        row = function()
+            return function(width)
+                return require("ui.themes.widgets.row").widget({ width = width, kind = "nav", title = "语言" })
+            end
+        end,
+    }
 end
 package.preload["desktop.pages.setting.ai"] = function()
     return { rows = function() return {} end }
@@ -215,7 +221,6 @@ local expected = {
     { title = "翻页动画", id = "feature:animation:main" },
     { title = "月读词典", id = "feature:dictionary:main" },
     { title = "百度百科", id = "feature:baike:main" },
-    { title = "语言", id = "language" },
     { title = "AI 接口", id = "ai" },
     { title = "网络", id = "network" },
     { title = "中文输入法增强", id = "feature:ime:main" },
@@ -237,7 +242,7 @@ end
 Assert.eq(nav, #expected + 1)
 
 for _, title in ipairs({
-    "清理缓存", "调试日志", "自动检查更新", "检查更新", "关于", "关闭桌面",
+    "语言", "清理缓存", "调试日志", "自动检查更新", "检查更新", "关于", "关闭桌面",
 }) do
     local found = false
     for _, row in ipairs(built_rows) do
