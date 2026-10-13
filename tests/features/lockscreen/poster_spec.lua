@@ -82,10 +82,17 @@ Assert.eq(wall[1].file, "a")
 Assert.eq(wall[5].file, "e")
 Assert.eq(wall[6].file, "a", "书不够循环补位")
 
--- 窄画布：列数随宽度减少，仍然铺满宽度。
-local narrow = placed(Poster.blocks({ x = 0, y = 0, w = 200, h = 720 }), "image")
-Assert.eq(narrow[1].width, 92)
-Assert.eq(narrow[#narrow].x + narrow[#narrow].width, 200 - 6)
+-- 高分屏（Kindle PW6 物理 1272×1696）：仍是 4 列，边距与间距按比例放大，不排成十列小图。
+local hires = placed(Poster.blocks({ x = 0, y = 0, w = 1272, h = 1696 }), "image")
+local columns = {}
+for _, block in ipairs(hires) do columns[block.x] = true end
+local ncols = 0
+for _ in pairs(columns) do ncols = ncols + 1 end
+Assert.eq(ncols, 4)
+Assert.eq(hires[1].x, 14)
+Assert.eq(hires[1].width, 304)
+local right_pad = 1272 - (hires[#hires].x + hires[#hires].width)
+Assert.is_true(right_pad >= 14 and right_pad <= 15, "右边距与左边距对称（整除余数最多 1px）")
 
 -- 单本书也铺满整屏。
 local all_rows = db_rows

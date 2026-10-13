@@ -25,6 +25,23 @@ Assert.eq(U.percentText(55.7), "55%")
 Assert.eq(U.percentText(120), "100%")
 Assert.eq(U.percentText(nil), "0%")
 
+-- 封面：有缓存图画图；没有就用桌面同款生成封面，不画灰块。
+package.preload["ui.widgets.plain_cover"] = function()
+    return { new = function(_, o) return o end }
+end
+local img = U.coverBlock({ cover = "/c.jpg" }, 1, 2, 30, 45)
+Assert.eq(img.kind, "image")
+Assert.eq(img.file, "/c.jpg")
+local plain = U.coverBlock({ title = "三国演义", authors = "罗贯中" }, 1, 2, 30, 45)
+Assert.eq(plain.kind, "widget")
+Assert.eq(plain.widget.title, "三国演义")
+Assert.eq(plain.widget.author, "罗贯中")
+Assert.eq(plain.widget.width, 30)
+Assert.eq(plain.widget.height, 45)
+Assert.eq(plain.x, 1)
+Assert.eq(plain.y, 2)
+Assert.eq(U.coverBlock(nil, 0, 0, 10, 15).widget.title, "", "没有书也不报错")
+
 -- 进度条：浅灰轨（不是深灰），按比例画黑色填充。
 local bar, bar_h = U.progressBlocks(0, 0, 200, 25)
 Assert.eq(bar_h, 6)

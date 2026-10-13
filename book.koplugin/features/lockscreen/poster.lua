@@ -42,9 +42,12 @@ end
 ---@param shelf table[]
 ---@return table[]
 local function staggered(shelf, w, h)
-    -- 逻辑像素，不走 Theme.px。下限固定，窄屏列数才会降下来。
-    local pad_x, gap_v, gap_h = 6, 8, 4
-    local target_w = math.max(100, math.min(128, math.floor(w * 0.26)))
+    -- w 是物理像素（锁屏画布 = 屏幕真实分辨率），尺寸一律按宽度比例算：
+    -- 写死像素在 1272 宽的 Kindle 上会排出十列小图。540 宽时为 6 / 8 / 4、4 列。
+    local pad_x = math.max(2, math.floor(w * 0.0112))
+    local gap_v = math.max(2, math.floor(w * 0.015))
+    local gap_h = math.max(1, math.floor(w * 0.0075))
+    local target_w = math.floor(w * 0.26)
     local inner_w = w - pad_x * 2
     local cols = math.max(1, math.floor((inner_w + gap_h) / (target_w + gap_h) + 0.5))
     local poster_w = math.floor((inner_w - gap_h * (cols - 1)) / cols)
@@ -167,7 +170,11 @@ local function slanted(shelf, w, h, angle)
         for _idx, block in ipairs(covers) do Canvas.paintBlock(src, block, sw, sh) end
         M.rotateInto(bb, x, y, w, h, src, angle)
     end
-    function wall:free() end
+    function wall:free()
+        for _idx, block in ipairs(covers) do
+            if block.widget then block.widget:free() end
+        end
+    end
     return {{ kind = "widget", widget = wall, x = 0, y = 0, width = w, height = h }}
 end
 

@@ -47,6 +47,10 @@ package.preload["features.lockscreen.components.util"] = function()
     return U
 end
 
+package.preload["ui.widgets.plain_cover"] = function()
+    return { new = function(_, o) return o end }
+end
+
 package.preload["features.lockscreen.render"] = function()
     return {
         measureText = function(text, width, size)
@@ -101,8 +105,8 @@ for _, block in ipairs(blocks) do
     if block.text then texts[#texts + 1] = block.text end
     if block.kind == "vbar" then barcode = barcode + 1 end
     if block.kind == "cutout_circle" then cutouts = cutouts + 1 end
-    if block.kind == "panel" and block.shadow == nil and block.height and block.width
-        and block.height > block.width then
+    -- 测试书没有封面图：用生成封面（书名取色 + 竖排书名），不是灰块。
+    if block.kind == "widget" and block.widget.title == "测试书" then
         cover_block = block
     end
     if block.kind == "image" then logo_block = block end
