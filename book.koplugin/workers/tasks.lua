@@ -12,7 +12,7 @@
 restartable 的任务归队列所有，队列可以随时中断并从头重跑它：
 休眠（`Tasks.onSuspend`）时中断、放回 waiting；断网导致的失败（result.ok 为假且设备未连网）
 也放回 waiting，不算失败、不消耗重试次数；`Tasks.onResume` / `Tasks.onNetworkConnected` 后按原顺序续跑。
-用户也只能取消 restartable 的任务。书架同步归桌面所有，不设 restartable，队列只展示。
+用户也只能取消 restartable 的任务（`cancelable = false` 的除外）。书架同步归桌面所有，不设 restartable，队列只展示。
 
   local task, reason = Tasks.enqueue{       -- 被拒时 task 为 nil，reason = running / queue_full
       key = "cache\0wechat\0123", kind = "cache", title = "书名",
@@ -40,6 +40,7 @@ local Tasks = {}
 ---@field kind BookTaskKind
 ---@field title string|nil
 ---@field restartable boolean|nil
+---@field cancelable boolean|nil false：restartable 也不给用户取消（进度窗与任务列表都不出取消）
 ---@field run fun(report: fun(text: string|nil, count: integer|nil, total: integer|nil), done: fun(result: table)): table|nil
 ---@field retryable (fun(result: table): boolean)|nil
 ---@field on_done fun(result: table)|nil
@@ -111,6 +112,7 @@ local function snapshot(task)
         total = task.total,
         attempt = task.attempt,
         restartable = task.restartable == true,
+        cancelable = task.cancelable,
         ok = task.result and task.result.ok == true,
     }
 end
@@ -311,7 +313,7 @@ end
 local ORDER = { running = 1, retry_wait = 1, waiting = 2, queued = 3 }
 
 --- 任务快照：运行 / 退避中的在前，其次等待网络的，最后排队的；同组按入队顺序。返回副本。
----@return { key: string, kind: BookTaskKind, title: string|nil, state: string, text: string|nil, count: integer, total: integer, attempt: integer, restartable: boolean }[]
+---@return { key: string, kind: BookTaskKind, title: string|nil, state: string, text: string|nil, count: integer, total: integer, attempt: integer, restartable: boolean, cancelable: boolean|nil }[]
 function Tasks.tasks()
     local out = {}
     for group = 1, 3 do

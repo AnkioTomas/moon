@@ -330,8 +330,9 @@ end
 ---或常见章节写法（chapterTitle）。
 ---@param text string
 ---@param opts table|nil
----@return { title: string, author: string|nil, chapters: { title: string, html: string }[] }
-function Text2Epub.parse(text, opts)
+---@param progress fun(done: integer, total: integer)|nil 每排完一节
+---@return { title: string, author: string|nil, chapters: { title: string, html: string, toc: boolean }[] }
+function Text2Epub.parse(text, opts, progress)
     opts = opts or {}
     text = Text.stripBom(Text.normalizeNewlines(text))
     local known = {}
@@ -448,7 +449,7 @@ function Text2Epub.parse(text, opts)
 
     local chapters = {}
     local max_part_chars = opts.max_part_chars or DEFAULT_PART_CHARS
-    for _index, section in ipairs(sections) do
+    for index, section in ipairs(sections) do
         local parts = chapterParts(section.title, section.lines, max_part_chars, opts.reflow == true)
         for part_index, html in ipairs(parts) do
             chapters[#chapters + 1] = {
@@ -457,6 +458,7 @@ function Text2Epub.parse(text, opts)
                 toc = part_index == 1,
             }
         end
+        if progress then progress(index, #sections) end
     end
 
     return {
@@ -485,7 +487,61 @@ function Text2Epub.read(source)
     return text
 end
 
---- 异步构建 EPUB。读文件、解析、打包都在子进程里：整本书在 UI 线程上要跑几十秒。
+--- 子进程里跑 worker(report)：整本书在 UI 线程上要跑几十秒。report(text, done, total) 按整数百分比节流
+--- （管道有容量上限），父进程转给 on_progress。worker 返回 { err } 表示失败，否则把结果表交给 cb。
+---@param name string
+---@param worker fun(report: fun(text: string, done: integer, total: integer)): table
+---@param cb fun(result: table|nil, err: any)
+---@param on_progress fun(text: string, done: integer, total: integer)|nil
+---@return { cancel: fun() }
+local function runJob(name, worker, cb, on_progress)
+    local job = require("workers.job").run(function(progress)
+        local last_text, last_percent
+        return worker(function(text, done, total)
+            local percent = math.floor(done * 100 / total)
+            if text == last_text and percent == last_percent then return end
+            last_text, last_percent = text, percent
+            progress({ text = text, done = done, total = total })
+        end)
+    end, {
+        name = name,
+        kind = "medium",
+        on_progress = on_progress and function(value) on_progress(value.text, value.done, value.total) end,
+        on_done = function(result)
+            if result.err then cb(nil, result.err) else cb(result) end
+        end,
+        on_failed = function(err) cb(nil, err) end,
+    })
+    return { cancel = function() job:cancel() end }
+end
+
+--- opts.text 是全文；没给就读 opts.source。
+---@param opts table
+---@return string|nil text, string|nil err
+local function load(opts)
+    if opts.text then return opts.text end
+    return Text2Epub.read(opts.source)
+end
+
+--- 异步识别章节，只回传标题（全文与正文 HTML 不出子进程）。opts 同 `build`。
+---@param opts table
+---@param cb fun(chapters: { title: string, toc: boolean }[]|nil, err: any)
+---@param on_progress fun(text: string, done: integer, total: integer)|nil
+---@return { cancel: fun() }
+function Text2Epub.chaptersAsync(opts, cb, on_progress)
+    return runJob("epub.chapters", function(report)
+        local text, err = load(opts)
+        if not text then return { err = err } end
+        local book = Text2Epub.parse(text, opts, function(done, total) report(_("正在识别章节"), done, total) end)
+        local chapters = {}
+        for index, chapter in ipairs(book.chapters) do
+            chapters[index] = { title = chapter.title, toc = chapter.toc }
+        end
+        return { chapters = chapters }
+    end, function(result, err) cb(result and result.chapters, err) end, on_progress)
+end
+
+--- 异步构建 EPUB，读文件、解析、打包都在子进程里。
 --- opts.text 是全文；没给就读 opts.source（`Text2Epub.read`）。opts.source 也用于从文件名推断书名 / 作者。
 ---@param opts {
 ---   dest: string,
@@ -500,13 +556,13 @@ end
 ---   headings: string[]|nil,
 --- }
 ---@param cb fun(ok: boolean|nil, err: any)
+---@param on_progress fun(text: string, done: integer, total: integer)|nil
 ---@return { cancel: fun() }
-function Text2Epub.build(opts, cb)
-    local job = require("workers.job").run(function()
-        local text, err = opts.text, nil
-        if not text then text, err = Text2Epub.read(opts.source) end
+function Text2Epub.build(opts, cb, on_progress)
+    return runJob("epub.text", function(report)
+        local text, err = load(opts)
         if not text then return { err = err } end
-        local book = Text2Epub.parse(text, opts)
+        local book = Text2Epub.parse(text, opts, function(done, total) report(_("正在识别章节"), done, total) end)
         local ok, write_err = Html2Epub.write({
             dest = opts.dest,
             title = book.title,
@@ -514,17 +570,9 @@ function Text2Epub.build(opts, cb)
             language = opts.language,
             identifier = opts.identifier,
             chapters = book.chapters,
-        })
+        }, function(done, total) report(_("正在写入"), done, total) end)
         return { err = not ok and (write_err or _("写入 epub 失败")) or nil }
-    end, {
-        name = "epub.text",
-        kind = "heavy",
-        on_done = function(result)
-            if result.err then cb(nil, result.err) else cb(true) end
-        end,
-        on_failed = function(err) cb(nil, err) end,
-    })
-    return { cancel = function() job:cancel() end }
+    end, function(result, err) cb(result and true, err) end, on_progress)
 end
 
 Text2Epub.chapterTitle = chapterTitle

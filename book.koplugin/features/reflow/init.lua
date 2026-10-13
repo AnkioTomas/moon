@@ -67,11 +67,11 @@ function Reflow.available(ui)
     return ui.rolling ~= nil or ui.document.getPageTextBoxes ~= nil
 end
 
----@param parsed { chapters: { title: string, toc: boolean|nil }[] }
+---@param chapters { title: string, toc: boolean|nil }[]
 ---@return string[]
-local function tocTitles(parsed)
+local function tocTitles(chapters)
     local titles = {}
-    for _idx, chapter in ipairs(parsed.chapters) do
+    for _idx, chapter in ipairs(chapters) do
         if chapter.toc ~= false then
             titles[#titles + 1] = chapter.title ~= "" and chapter.title
                 or ("#" .. (#titles + 1))
@@ -108,44 +108,27 @@ local function tocHeadings(ui)
     return headings
 end
 
---- 读出全文并识别章节，供预览目录使用。
+--- 读出全文并识别章节，供预览目录使用。不可取消：取字期间界面仍响应，但由进度窗占住。
 ---@param ui table ReaderUI，正在读原书
 ---@param identity BookIdentity
 ---@param cb fun(preview: ReflowPreview|nil, err: string|nil)
----@return { cancel: fun() }
-function Reflow.analyzeAsync(ui, identity, cb)
+---@param on_progress fun(text: string, done: integer, total: integer) 当前步骤与进度
+function Reflow.analyzeAsync(ui, identity, cb, on_progress)
     local origin = ui.document.file
     local opts = buildOpts(origin, identity, tocHeadings(ui))
-    local job
     ---@param text string|nil nil 时子进程读原文件
     local function analyze(text)
-        job = require("workers.job").run(function()
-            local body, err = text, nil
-            if not body then body, err = Text2Epub.read(origin) end
-            if not body then return { err = err } end
-            return { titles = tocTitles(Text2Epub.parse(body, opts)) }
-        end, {
-            name = "reflow.analyze",
-            kind = "medium",
-            on_done = function(result)
-                if result.err then return cb(nil, result.err) end
-                cb({ text = text, headings = opts.headings, titles = result.titles })
-            end,
-            on_failed = function(err) cb(nil, err) end,
-        })
+        opts.text = text
+        Text2Epub.chaptersAsync(opts, function(chapters, err)
+            if not chapters then return cb(nil, err) end
+            cb({ text = text, headings = opts.headings, titles = tocTitles(chapters) })
+        end, on_progress)
     end
-    if origin:lower():match("%.txt$") then
-        analyze(nil)
-        return { cancel = function() job:cancel() end }
-    end
-    local extract = require("features.reflow.extract").run(ui, function(text, err)
+    if origin:lower():match("%.txt$") then return analyze(nil) end
+    require("features.reflow.extract").run(ui, function(text, err)
         if not text then return cb(nil, err) end
         analyze(text)
-    end)
-    return { cancel = function()
-        extract.cancel()
-        if job then job:cancel() end
-    end }
+    end, on_progress)
 end
 
 --- 把预览得到的全文转成 EPUB 写进工作目录并记下 meta，完成后回调排版版路径。原书不动。
@@ -153,8 +136,9 @@ end
 ---@param origin string 原书路径
 ---@param preview ReflowPreview `analyzeAsync` 的结果
 ---@param cb fun(path: string|nil, err: string|nil)
+---@param on_progress fun(text: string, done: integer, total: integer) 当前步骤与进度
 ---@return { cancel: fun() }
-function Reflow.applyAsync(identity, origin, preview, cb)
+function Reflow.applyAsync(identity, origin, preview, cb, on_progress)
     local Paths = require("utils.paths")
     local dir = workDir(identity)
     Paths.ensureBookWork(identity.stable_id, identity.source_id)
@@ -175,7 +159,7 @@ function Reflow.applyAsync(identity, origin, preview, cb)
         assert(f:close())
         assert(os.rename(dir .. "/meta.json.part", dir .. "/meta.json"))
         cb(opts.dest)
-    end)
+    end, on_progress)
 end
 
 --- 把排版、落位写进目标文件的 sidecar 再换文档。两版 xpointer 不通用：清掉目标的 last_xpointer，
@@ -220,18 +204,25 @@ local function start(ui, identity)
     local Toast = require("ui.themes.widgets.toast")
     local origin = ui.document.file
 
+    --- 任务同款进度窗：没有取消 / 后台按钮，返回键也不关；结果回来时调用方关窗。
+    ---@return BookThemeProgressDialog dialog, fun(text: string, done: integer, total: integer) progress
+    local function progressDialog()
+        local dialog = require("ui.themes.widgets.progress_dialog"):new{ title = _("优化排版"), dismissable = false }
+        dialog:show()
+        return dialog, function(text, done, total) dialog:update(text, done, total) end
+    end
+
     ---@param preview ReflowPreview
     local function apply(preview)
-        local loading = Toast:new{ text = _("正在优化排版…") }
-        loading:show()
+        local dialog, progress = progressDialog()
         Reflow.applyAsync(identity, origin, preview, function(path, err)
-            loading:close()
+            dialog:close()
             if not path then
                 Toast:new{ text = err or _("排版失败") }:show()
                 return
             end
             switchTo(ui, identity, path, require("reader.session").current().fraction)
-        end)
+        end, progress)
     end
 
     --- 首行确认优化，其余章节只读；右上角关闭即放弃。未识别到章节只提示不弹表。
@@ -258,24 +249,15 @@ local function start(ui, identity)
     end
 
     local function runAnalyze()
-        local handle
-        local loading = Toast:new{
-            text = _("正在分析章节…"),
-            -- 结果回来时先清 handle 再关窗，所以只有用户点掉才会取消提取。
-            close_callback = function()
-                if handle then handle.cancel() end
-            end,
-        }
-        loading:show()
-        handle = Reflow.analyzeAsync(ui, identity, function(preview, err)
-            handle = nil
-            loading:close()
+        local dialog, progress = progressDialog()
+        Reflow.analyzeAsync(ui, identity, function(preview, err)
+            dialog:close()
             if not preview then
                 Toast:new{ text = err or _("排版失败") }:show()
                 return
             end
             showPreview(preview)
-        end)
+        end, progress)
     end
 
     if origin:lower():match("%.txt$") then

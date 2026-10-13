@@ -95,8 +95,9 @@ end
 --- 取出 ui 当前文档的全部文字；可取消，取消后 cb 不再触发。
 ---@param ui table ReaderUI
 ---@param cb fun(text: string|nil, err: any)
+---@param on_progress fun(text: string, done: integer, total: integer) 每批结束报一次已取页数
 ---@return { cancel: fun() }
-function Extract.run(ui, cb)
+function Extract.run(ui, cb, on_progress)
     local document = ui.document
     local rolling = ui.rolling ~= nil
     local count = document:getPageCount()
@@ -129,6 +130,7 @@ function Extract.run(ui, cb)
             appendPage(pages, chunk)
             page = page + 1
             if page <= count and Perf.now() - started >= BATCH_MS then
+                on_progress(_("正在提取文字"), page - 1, count)
                 return later(function() step(page) end)
             end
         end
