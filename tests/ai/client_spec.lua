@@ -16,12 +16,22 @@ package.preload["json"] = function()
         decode = Json.decode,
     }
 end
+local replies, posts = {}, {}
 package.preload["http.request"] = function()
     return {
         post = function(url, body, opts, cb)
-            sent = { url = url, body = body, opts = opts }
-            cb('{"choices":[{"message":{"content":"ok"}}]}', nil, {})
-            return { cancel = function() end }
+            sent = { url = url, body = body, opts = opts, payload = encoded }
+            posts[#posts + 1] = sent
+            local reply = table.remove(replies, 1)
+            if reply == "hold" then
+                sent.cb = cb
+            elseif reply then
+                cb(nil, "HTTP " .. reply, { code = reply, body = '{"error":{"message":"Unrecognized request argument"}}' })
+            else
+                cb('{"choices":[{"message":{"content":"ok"}}]}', nil, {})
+            end
+            local job = sent
+            return { cancel = function() job.cancelled = true end }
         end,
     }
 end
@@ -40,7 +50,7 @@ Assert.eq(sent.url, "https://example.test/v1/chat/completions")
 Assert.eq(sent.body, "model-x")
 Assert.is_nil(encoded.reasoning)
 Assert.is_nil(encoded.enable_thinking)
-Assert.is_nil(encoded.chat_template_kwargs)
+Assert.eq(encoded.chat_template_kwargs.enable_thinking, false, "默认关掉混合推理模型的思考")
 Assert.eq(sent.opts.headers.Authorization, "Bearer secret")
 Assert.eq(sent.opts.headers["User-Agent"],
     "opencode/1.2.3 ai-sdk/amazon-bedrock/3.0.73 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5")
@@ -50,6 +60,31 @@ Assert.eq(sent.opts.connect_timeout, Client.DEFAULT_TIMEOUT)
 Assert.eq(Client.DEFAULT_TIMEOUT, 120)
 Assert.eq(content, "ok")
 Assert.is_nil(failure)
+
+-- 严格端点不认 chat_template_kwargs（400）：去掉重发一次，本进程内不再带
+replies, posts = { 400 }, {}
+Client.chat({ { role = "user", content = "hello" } }, nil, function(value, err) content, failure = value, err end)
+Assert.len(posts, 2)
+Assert.not_nil(posts[1].payload.chat_template_kwargs)
+Assert.is_nil(posts[2].payload.chat_template_kwargs)
+Assert.eq(content, "ok")
+posts = {}
+Client.chat({ { role = "user", content = "hello" } }, nil, function() end)
+Assert.len(posts, 1)
+Assert.is_nil(posts[1].payload.chat_template_kwargs)
+
+-- 其它失败照常报错，不重发；取消后不再回调
+settings.ai_endpoint = "https://other.test/v1"
+replies, posts = { 401 }, {}
+Client.chat({ { role = "user", content = "hello" } }, nil, function(value, err) content, failure = value, err end)
+Assert.len(posts, 1)
+Assert.is_nil(content)
+Assert.eq(failure, "Unrecognized request argument")
+replies, posts = { "hold" }, {}
+local handle = Client.chat({ { role = "user", content = "hello" } }, nil, function() error("cancelled request must not call back") end)
+handle:cancel()
+Assert.is_true(posts[1].cancelled)
+settings.ai_endpoint = " https://example.test/v1/ "
 
 local array_content = Client.decodeResponse('{"choices":[{"message":{"content":[{"text":"a"},{"text":"b"}]}}]}')
 Assert.eq(array_content, "a\nb")
@@ -63,6 +98,11 @@ Assert.eq(err, "bad key")
 -- 只取 content，不回退到 reasoning 字段
 Assert.eq(Client.decodeResponse('{"choices":[{"message":{"content":"hello"}}]}'), "hello")
 Assert.eq(Client.decodeResponse('{"choices":[{"message":{"content":"out","reasoning_content":"think"}}]}'), "out")
+-- 混在正文里的思考过程（含只剩结尾标签的）去掉；只有思考没有回答算空回复
+Assert.eq(Client.decodeResponse('{"choices":[{"message":{"content":"<think>先想想</think>\\n\\n回答"}}]}'), "回答")
+Assert.eq(Client.decodeResponse('{"choices":[{"message":{"content":"想了一半</think>回答"}}]}'), "回答")
+local thinking_only = Client.decodeResponse('{"choices":[{"message":{"content":"<think>只有思考</think>"}}]}')
+Assert.is_nil(thinking_only)
 local empty, empty_err = Client.decodeResponse('{"choices":[{"message":{"content":"","reasoning_content":"think"}}]}')
 Assert.is_nil(empty)
 Assert.eq(empty_err, "empty AI response")

@@ -73,6 +73,7 @@ Features.list = {
     "bars",
     "sidebar",
     "xray",
+    "ai",
     "reviews",
     "translate",
     "reflow",
