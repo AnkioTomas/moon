@@ -187,6 +187,7 @@ local function normalizeMeta(raw)
 end
 
 --- 合并写 row.meta：overwrite 时传入的键覆盖已有值，否则只补缺的键；不清键。行不存在时什么都不做。
+--- 书架对账逐行都会走到这里：合并后没变就不写（同步多是同一批元数据，空写上千行都在主线程）。
 ---@param row table 带 source_id / stable_id，meta 为原始元数据
 ---@param overwrite boolean|nil
 ---@return boolean
@@ -196,9 +197,13 @@ function BookDB.setMeta(row, overwrite)
     local stored = DB.rowexec("SELECT meta FROM books WHERE source_id=? AND stable_id=? LIMIT 1;",
         row.source_id, row.stable_id)
     local merged = stored and JSON.decode(stored) or {}
+    local changed = false
     for key, value in pairs(incoming) do
-        if overwrite or merged[key] == nil then merged[key] = value end
+        if merged[key] == nil or (overwrite and JSON.encode(merged[key]) ~= JSON.encode(value)) then
+            merged[key], changed = value, true
+        end
     end
+    if not changed then return true end
     return DB.exec("UPDATE books SET meta=? WHERE source_id=? AND stable_id=?;",
         JSON.encode(merged), row.source_id, row.stable_id) ~= nil
 end

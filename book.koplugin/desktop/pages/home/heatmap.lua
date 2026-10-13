@@ -25,6 +25,7 @@ local T = require("ffi/util").template
 ---@field key string|nil 当前显示的档位签名
 ---@field weeks integer|nil 当前显示的周数
 ---@field day string|nil 画的时候是哪天
+---@field collected { weeks: integer, levels: (integer|false)[][], total: number }|nil onEvent 已读到的数据，下次重建直接用
 local M = {
     id = "heatmap",
     label = _("阅读热力图"),
@@ -42,16 +43,18 @@ local MAX_WEEKS = 53
 ---@return (integer|false)[][] levels
 ---@return number total 区间内总秒数
 local function collect(source, weeks)
-    local by_day = {}
-    if source then
-        for _idx, row in ipairs(StatsDB.dailyBySource(Catalog.libraryScope(source.id))) do
-            by_day[row.ymd] = row.seconds
-        end
-    end
     local now = os.date("*t")
     -- 取正午推日期：跨夏令时差一小时也落不到隔壁一天
     local today = os.time{ year = now.year, month = now.month, day = now.day, hour = 12 }
     local start = today - ((now.wday + 5) % 7 + (weeks - 1) * 7) * 86400
+    local by_day = {}
+    if source then
+        -- 只聚合画得到的那几周，不扫全部历史（每次统计落库都会重算）
+        local rows = StatsDB.dailyBySource(Catalog.libraryScope(source.id), start - 43200, today + 43200)
+        for _idx, row in ipairs(rows) do
+            by_day[row.ymd] = row.seconds
+        end
+    end
     local seconds, peak, total = {}, 0, 0
     for i = 1, weeks * 7 do
         local ts = start + (i - 1) * 86400
@@ -101,7 +104,14 @@ function M:createWidget()
     local caption_h = Text.line("caption", "0"):getSize().h
     local cell = math.max(1, math.min(Theme.px(MAX_CELL), math.floor((h - caption_h - xs - gap * 6) / 7)))
     local weeks = math.max(1, math.min(MAX_WEEKS, math.floor((w + gap) / (cell + gap))))
-    local levels, total = collect(self.ctx.source, weeks)
+    local fresh = self.collected
+    self.collected = nil
+    local levels, total
+    if fresh and fresh.weeks == weeks then
+        levels, total = fresh.levels, fresh.total
+    else
+        levels, total = collect(self.ctx.source, weeks)
+    end
     self.weeks, self.key, self.day = weeks, keyOf(levels, total), os.date("%Y-%m-%d") --[[@as string]]
 
     local track, ink = t.progress.track, t.color.ink
@@ -134,11 +144,14 @@ function M:onActivate()
     if self.slot and self.day ~= os.date("%Y-%m-%d") then self:refresh() end
 end
 
---- 统计落库后重读；档位全未变时不重建（墨水屏每次 dirty 都是一次真实刷新）。
+--- 统计落库后重读；档位全未变时不重建（墨水屏每次 dirty 都是一次真实刷新），变了就把这次读到的交给重建。
 ---@param event string|table 父组件转发的事件名称或事件对象
 function M:onEvent(event)
     if event ~= "stats_changed" or not self.slot then return end
-    if keyOf(collect(self.ctx.source, self.weeks)) ~= self.key then self:refresh() end
+    local levels, total = collect(self.ctx.source, self.weeks)
+    if keyOf(levels, total) == self.key then return end
+    self.collected = { weeks = self.weeks, levels = levels, total = total }
+    self:refresh()
 end
 
 return M

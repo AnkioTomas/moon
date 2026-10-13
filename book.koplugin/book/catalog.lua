@@ -436,6 +436,17 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
     end)
 end
 
+--- 一列的分组计数（图书馆作者 / 系列 / 分类页签）；只算这一列，切页签不连带算全部筛选聚合。
+---@param source_id string
+---@param column "authors"|"series"|"category"
+---@param cb fun(rows: table[]|nil, err: string|nil) 行带 [column] 与 count
+---@return { cancel: fun() }
+function Catalog.groupCountsAsync(source_id, column, cb)
+    return deferScoped(source_id, cb, function(scope)
+        cb(require("book.books_db").countsBy(column, scope))
+    end)
+end
+
 --- 分类 / 系列 /（混合时）数据源筛选项。
 ---@param source_id string
 ---@param cb fun(data: BookFiltersResult|nil, err: string|nil)

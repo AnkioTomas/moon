@@ -164,6 +164,9 @@ function Input:onKeyboardClosed()
     self:place()
 end
 
+--- 切换键盘布局后键盘变高（如换到带候选栏的中文）时 VirtualKeyboard 回调这里，焦点字段可能又被挡住。
+Input.onKeyboardHeightChanged = Input.place
+
 --- InputText 被点按时回调（含已聚焦字段）：切焦点、换键盘、改描边。
 ---@param input table InputText
 function Input:onSwitchFocus(input)

@@ -89,6 +89,7 @@ local base_preload = snapshot(package.preload)
 local base_loaded = snapshot(package.loaded)
 local base_os = snapshot(os)
 local base_io = snapshot(io)
+local base_reader_settings = _G.G_reader_settings
 
 local function restoreTable(t, base)
     for k in pairs(t) do
@@ -107,6 +108,7 @@ local function restoreEnv()
     restoreTable(package.preload, base_preload)
     restoreTable(os, base_os)
     restoreTable(io, base_io)
+    _G.G_reader_settings = base_reader_settings
     -- 卸载上个 spec 加载的一切非基线模块。同名 cdef 重复定义 LuaJIT 是放行的
     -- （实测 ffi/sha2 重 require 无错），保留例外反而会让假桩（如 spec 桩的
     -- ffi/util）漏给后续文件。

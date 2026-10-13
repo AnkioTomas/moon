@@ -8,8 +8,15 @@ package.preload["json"] = function()
 end
 
 local entity_rows = {}
+local scan_cursor
 package.preload["features.xray.db"] = function()
     return {
+        scanCursor = function() return scan_cursor end,
+        saveScanCursor = function(source_id, stable_id, digest, done, total)
+            scan_cursor = { digest = digest, done = done, total = total }
+            return true
+        end,
+        clearScanCursor = function() scan_cursor = nil; return true end,
         list = function(source_id, stable_id, kind)
             local out = {}
             for index, row in ipairs(entity_rows) do
@@ -207,7 +214,8 @@ Assert.len(Fetch.chunks("", 8), 0)
 Assert.len(Fetch.chunks("  \n  ", 8), 0)
 
 -- 全书分析：逐段请求、每段落库；只带本段提到的已收录实体；失败后重跑从断点续
-package.loaded["features.xray.marks"] = { invalidate = function() end }
+local invalidated = 0
+package.loaded["features.xray.marks"] = { invalidate = function() invalidated = invalidated + 1 end }
 local chunk_a = string.rep("x", 20000) .. " Mina at Whitby"
 local chunk_b = string.rep("y", 20000) .. " Lucy met Mina"
 entity_rows, prompts = {
@@ -218,7 +226,7 @@ replies = {
 }
 local scan = Fetch.scanBook(identity, chunk_a .. "\n" .. chunk_b)
 local reports = {}
----@type { ok: boolean, err: any }
+---@type { ok: boolean, err: any, progressed: boolean|nil }
 local outcome
 local function attempt()
     outcome = nil
@@ -227,6 +235,11 @@ local function attempt()
 end
 attempt()
 Assert.eq(outcome.ok, false, "第二段没回复，本次尝试失败")
+Assert.is_true(outcome.progressed, "做完了一段：这次失败不计入重试次数")
+Assert.eq(invalidated, 1, "页内标记只在尝试结束时刷新一次")
+Assert.eq(scan_cursor.done, 1, "游标落库：第一段已完成")
+Assert.eq(scan_cursor.total, 2)
+Assert.eq(Fetch.scanProgress(identity).done, 1)
 Assert.len(prompts, 2)
 Assert.is_nil(prompts[1]:find("Old", 1, true), "本段没提到的实体不进提示词")
 Assert.matches(prompts[2], "%- Mina")
@@ -238,10 +251,20 @@ Assert.is_true(names_after.Old)
 Assert.is_true(names_after.Mina)
 Assert.is_nil(names_after.Ghost, "未在本段出现的名字丢弃")
 
+-- 没推进的失败照常计入重试次数
 prompts = {}
+attempt()
+Assert.eq(outcome.ok, false)
+Assert.is_true(not outcome.progressed)
+
+-- 下次重新点「分析全书」：新建的任务体按游标从第二段开始
+prompts = {}
+scan = Fetch.scanBook(identity, chunk_a .. "\n" .. chunk_b)
 replies = { { characters = { { name = "Lucy", aliases = {} } }, locations = {}, terms = {} } }
 attempt()
 Assert.eq(outcome.ok, true)
+Assert.is_nil(scan_cursor, "全部完成删游标")
+Assert.is_nil(Fetch.scanProgress(identity))
 Assert.len(prompts, 1, "重跑只请求没做完的段")
 Assert.matches(prompts[1], "Lucy met Mina")
 Assert.eq(reports[#reports][2], 2)

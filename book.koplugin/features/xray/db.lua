@@ -1,5 +1,8 @@
 --[[--
-X-Ray 书级实体。
+X-Ray 书级实体，以及全书分析的续扫游标。
+
+xray_scan 每本书至多一行：digest 是全书正文的指纹（字节数:段数），done 是已落库的段数；
+正文变了（换了排版版、书被更新）指纹对不上就从头分析。全书分析完成即删行。
 
 @module koplugin.book.features.xray.db
 --]]
@@ -22,6 +25,48 @@ CREATE INDEX IF NOT EXISTS idx_xray_entities_book
   ON xray_entities(source_id, stable_id, kind);
 ]]) ~= nil
 end)
+
+DB.schema("xray_scan", function()
+    return DB.exec([[
+CREATE TABLE IF NOT EXISTS xray_scan (
+  source_id TEXT NOT NULL, stable_id TEXT NOT NULL,
+  digest TEXT NOT NULL, done INTEGER NOT NULL, total INTEGER NOT NULL,
+  PRIMARY KEY (source_id, stable_id)
+);
+]]) ~= nil
+end)
+
+--- 全书分析的续扫游标；没有时 nil。
+---@param source_id string
+---@param stable_id string
+---@return { digest: string, done: integer, total: integer }|nil
+function XrayDB.scanCursor(source_id, stable_id)
+    local digest, done, total = DB.rowexec(
+        "SELECT digest, done, total FROM xray_scan WHERE source_id=? AND stable_id=?;", source_id, stable_id)
+    if not digest then return nil end
+    return { digest = digest, done = tonumber(done) or 0, total = tonumber(total) or 0 }
+end
+
+---@param source_id string
+---@param stable_id string
+---@param digest string
+---@param done integer 已落库的段数
+---@param total integer
+---@return boolean
+function XrayDB.saveScanCursor(source_id, stable_id, digest, done, total)
+    return DB.exec([[
+        INSERT INTO xray_scan (source_id, stable_id, digest, done, total) VALUES (?,?,?,?,?)
+        ON CONFLICT(source_id, stable_id) DO UPDATE SET
+          digest=excluded.digest, done=excluded.done, total=excluded.total;
+    ]], source_id, stable_id, digest, done, total) ~= nil
+end
+
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function XrayDB.clearScanCursor(source_id, stable_id)
+    return DB.removeIdentity("xray_scan", source_id, stable_id)
+end
 
 local function splitAliases(encoded)
     local aliases = {}

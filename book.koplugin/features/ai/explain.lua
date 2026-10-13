@@ -123,7 +123,7 @@ local function online()
     return false
 end
 
---- 发一轮请求：不可取消的进度窗等回答（请求自带超时），回来后换成结果卡片（存为笔记 / 追问 / 复制）。
+--- 发一轮请求：进度窗等回答（可取消：加上重试最长要等几分钟），回来后换成结果卡片（存为笔记 / 追问 / 复制）。
 --- 追问把整条对话（含上一轮回答）带上再问，只有这一条链，不落盘。
 ---@param ui table ReaderUI
 ---@param title string
@@ -133,11 +133,17 @@ local function ask(ui, title, messages, selection)
     local function release()
         if selection then ui.highlight:clear() end
     end
+    local handle, cancelled
     local loading = require("ui.themes.widgets.progress_dialog"):new{
         title = title, text = _("AI 解释中…"), dismissable = false,
+        on_cancel = function()
+            cancelled = true
+            if handle then handle.cancel() end
+            release()
+        end,
     }
-    loading:show()
-    require("ai").chat(messages, { max_tokens = 1000, timeout = 60 }, function(content, err)
+    handle = loading:showWhile(require("ai").chat, messages, { max_tokens = 1000, timeout = 60 }, function(content, err)
+        if cancelled then return end
         loading:close()
         local answer = content and Explain.plain(content) or ""
         if answer == "" then

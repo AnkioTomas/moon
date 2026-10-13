@@ -165,9 +165,10 @@ function Maintenance:importKoreaderStatsRow(desktop)
                         local toast = require("ui.themes.widgets.progress_dialog"):new{
                             title = _("导入 KOReader 统计"), text = _("正在导入…"), dismissable = false,
                         }
-                        toast:show()
-                        UIManager:forceRePaint()
-                        local counts, err = require("book.stats_koreader").import()
+                        local counts, err = toast:showWhile(function()
+                            UIManager:forceRePaint()
+                            return require("book.stats_koreader").import()
+                        end)
                         toast:close()
                         if not counts then
                             Toast:new{ text = err == "missing" and _("没有找到 KOReader 统计数据")

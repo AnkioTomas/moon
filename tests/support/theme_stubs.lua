@@ -34,6 +34,15 @@ function Themed.install()
                     self.closed = true
                     if self.close_callback then self.close_callback() end
                 end
+                o.showWhile = function(self, fn, ...)
+                    self:show()
+                    local res = { pcall(fn, ...) }
+                    if not res[1] then
+                        self:close()
+                        error(res[2], 0)
+                    end
+                    return unpack(res, 2, table.maxn(res))
+                end
                 o.dismiss = function(self)
                     self:close()
                     if self.on_background then self.on_background() end

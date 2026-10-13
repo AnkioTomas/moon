@@ -154,10 +154,18 @@ function Reflow.applyAsync(identity, origin, preview, cb, on_progress)
         -- 重新排版写回同一路径，sidecar 按路径跟着新文件：旧划线的 xpointer 指向旧结构，连同基线一起清掉，
         -- 原书的划线、只在排版版里的划线，下次打开排版版时都按文字重新搜进来。
         DerivedNote.purge(opts.dest)
-        local f = assert(io.open(dir .. "/meta.json.part", "wb"))
-        assert(f:write(JSON.encode({ origin = origin, file = opts.dest })))
-        assert(f:close())
-        assert(os.rename(dir .. "/meta.json.part", dir .. "/meta.json"))
+        -- 这里跑在 job 回调里，抛错会被吞掉、cb 永远不来，调用方的进度窗就关不掉：失败一律走 cb。
+        local part = dir .. "/meta.json.part"
+        local f, err_open = io.open(part, "wb")
+        if not f then return cb(nil, err_open) end
+        local written, err_write = f:write(JSON.encode({ origin = origin, file = opts.dest }))
+        f:close()
+        local renamed, err_rename = nil, err_write
+        if written then renamed, err_rename = os.rename(part, dir .. "/meta.json") end
+        if not renamed then
+            os.remove(part)
+            return cb(nil, err_rename)
+        end
         cb(opts.dest)
     end, on_progress)
 end
@@ -208,19 +216,20 @@ local function start(ui, identity)
     ---@return BookThemeProgressDialog dialog, fun(text: string, done: integer, total: integer) progress
     local function progressDialog()
         local dialog = require("ui.themes.widgets.progress_dialog"):new{ title = _("优化排版"), dismissable = false }
-        dialog:show()
         return dialog, function(text, done, total) dialog:update(text, done, total) end
+    end
+
+    ---@param err any
+    local function fail(err)
+        Toast:new{ text = err and tostring(err):match("[^\n]*") or _("排版失败") }:show()
     end
 
     ---@param preview ReflowPreview
     local function apply(preview)
         local dialog, progress = progressDialog()
-        Reflow.applyAsync(identity, origin, preview, function(path, err)
+        dialog:showWhile(Reflow.applyAsync, identity, origin, preview, function(path, err)
             dialog:close()
-            if not path then
-                Toast:new{ text = err or _("排版失败") }:show()
-                return
-            end
+            if not path then return fail(err) end
             switchTo(ui, identity, path, require("reader.session").current().fraction)
         end, progress)
     end
@@ -250,12 +259,9 @@ local function start(ui, identity)
 
     local function runAnalyze()
         local dialog, progress = progressDialog()
-        Reflow.analyzeAsync(ui, identity, function(preview, err)
+        dialog:showWhile(Reflow.analyzeAsync, ui, identity, function(preview, err)
             dialog:close()
-            if not preview then
-                Toast:new{ text = err or _("排版失败") }:show()
-                return
-            end
+            if not preview then return fail(err) end
             showPreview(preview)
         end, progress)
     end

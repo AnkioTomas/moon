@@ -105,8 +105,10 @@ function Box:paintTo(bb, x, y)
     end
     local border = Theme.px(s.border or 0)
     if border > 0 then
-        -- 只有边框收 anti_alias（paintRoundedRect 不收）：和 FrameContainer 一样靠它盖住底色的锯齿。
-        bb:paintBorder(x, y, w, h, border, Blitbuffer.Color8(s.border_color), r, true)
+        -- 只有边框收 anti_alias（paintRoundedRect 不收）：和 FrameContainer 一样靠它盖住底色的锯齿，
+        -- 也和它一样听 KOReader「界面抗锯齿」设置。
+        bb:paintBorder(x, y, w, h, border, Blitbuffer.Color8(s.border_color), r,
+            G_reader_settings:nilOrTrue("anti_alias_ui"))
     end
     local child = self[1]
     if not child then return end

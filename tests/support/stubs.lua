@@ -393,6 +393,7 @@ local function installUIManager()
         end
         function UIManager:allowStandby()
         end
+        UIManager.event_hook = { execute = function() end }
         return UIManager
     end
 end

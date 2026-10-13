@@ -21,6 +21,9 @@
 
   ProgressDialog:new{ title = "…", on_background = fn, on_cancel = fn }   -- 可转后台 / 可取消
   ProgressDialog:new{ title = "…", text = "正在测试…", dismissable = false }  -- 不可取消的前台等待
+  local handle = dialog:showWhile(startAsync, …)  -- 弹窗并同步发起；发起时抛错先关窗再抛
+
+不画遮罩：等待窗多是一闪而过，带网点遮罩每次弹出都要整屏刷新。
 
 @module koplugin.book.ui.themes.widgets.progress_dialog
 --]]
@@ -47,6 +50,7 @@ local ProgressDialog = Modal:extend{
     text = nil,
     on_background = nil,
     on_cancel = nil,
+    mask = false,
 }
 
 function ProgressDialog:init()
@@ -75,6 +79,23 @@ function ProgressDialog:init()
         },
         buttons = buttons,
     }
+end
+
+--- 弹窗后同步调用 fn（通常是发起异步操作）。fn 抛错时先关窗再原样抛出：
+--- 不可关闭的窗留在栈顶会吞掉全部输入，只能重启 KOReader。
+---@param fn function
+---@return any ... fn 的返回值
+function ProgressDialog:showWhile(fn, ...)
+    self:show()
+    return self:_settle(pcall(fn, ...))
+end
+
+function ProgressDialog:_settle(ok, ...)
+    if not ok then
+        self:close()
+        error((...), 0)
+    end
+    return ...
 end
 
 --- 返回键：关窗，给了 on_background 就转后台。

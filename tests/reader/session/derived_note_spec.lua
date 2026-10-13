@@ -273,6 +273,23 @@ do
     Assert.eq(sidecars[derived].book_note_linked["only-here"], false, "仍只留在衍生版")
     Assert.is_nil(sidecars[derived].book_note_orphans)
 
+    -- 新版里也搜不到：只剩这一份，留着下次再搜
+    sidecars[derived] = {
+        doc_pages = 200,
+        annotations = {
+            { datetime = "lost", drawer = "lighten", text = "无处可寻", pageno = 10, pos0 = "/old.2" },
+        },
+        book_note_linked = { lost = false },
+    }
+    DerivedNote.purge(derived)
+    local missing = {}
+    ui = reader(document(derived, {}), missing, sidecars[derived])
+    DerivedNote.project(ui, identity)
+    Stubs.flush()
+    Assert.len(missing, 0)
+    Assert.len(sidecars[derived].book_note_orphans, 1)
+    Assert.eq(sidecars[derived].book_note_orphans[1].datetime, "lost")
+
     -- 没有只在衍生版里的划线：清空后不再写 sidecar
     sidecars[derived] = { annotations = { { datetime = "x", drawer = "lighten", text = "a" } },
         book_note_linked = { x = true } }

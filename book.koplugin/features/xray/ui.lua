@@ -120,21 +120,26 @@ local function refreshMainTab(holder)
     holder.menu:setItems(rowsForTab(holder.menu.tabs.active, holder.identity))
 end
 
---- 跑一次综合拉取：显示进行中提示，完成后报数、失效页内标记并刷新当前分栏。
+--- 跑一次综合拉取：显示可取消的进行中提示（一轮最长 3 分钟、可能连两轮），完成后报数、失效页内标记并刷新当前分栏。
 ---@param ui table ReaderUI
 ---@param identity BookIdentity
 ---@param force boolean|nil 为真则忽略已有缓存重新生成
 local function runFetch(ui, identity, force)
     local Fetch = require("features.xray.fetch")
+    local handle, cancelled
     local loading = ProgressDialog:new{
         title = _("X-Ray"),
         text = force and _("正在重新生成 X-Ray…") or _("正在生成 X-Ray…"),
         dismissable = false,
+        on_cancel = function()
+            cancelled = true
+            if handle then handle.cancel() end
+        end,
     }
-    loading:show()
     --- 拉取回调：关掉进行中提示，成功报三类数量，失败提示原因。
     ---@param result table|nil
     local cb = function(result, err)
+        if cancelled then return end
         loading:close()
         if not result then
             info(T(_("X-Ray 失败：%1"), tostring(err or _("未知错误"))))
@@ -147,7 +152,7 @@ local function runFetch(ui, identity, force)
         require("features.xray.marks").invalidate()
         refreshMainTab(main_holder)
     end
-    Fetch.comprehensive(ui, identity, { force = force == true }, cb)
+    handle = loading:showWhile(Fetch.comprehensive, ui, identity, { force = force == true }, cb)
 end
 
 --- 强制重新生成当前书籍的 X-Ray。
@@ -164,7 +169,7 @@ function UI.refresh(ui, identity)
 end
 
 --- 分析全书：前台取出全书正文（不可取消），再交给后台任务逐段请求 AI；
---- 这本书已在分析就只跟随它的进度。
+--- 这本书已在分析就只跟随它的进度；上次没分析完的从断点接着来（游标见 features.xray.db）。
 ---@param ui table ReaderUI
 ---@param identity BookIdentity
 function UI.scanBook(ui, identity)
@@ -178,8 +183,7 @@ function UI.scanBook(ui, identity)
     end
     local function start()
         local dialog = ProgressDialog:new{ title = _("X-Ray"), dismissable = false }
-        dialog:show()
-        require("features.reflow.extract").run(ui, function(text, err)
+        dialog:showWhile(require("features.reflow.extract").run, ui, function(text, err)
             dialog:close()
             if not text then
                 info(T(_("X-Ray 失败：%1"), tostring(err)))
@@ -195,7 +199,8 @@ function UI.scanBook(ui, identity)
                 retryable = function() return true end,
                 on_done = function(result)
                     if not result.ok then
-                        info(T(_("X-Ray 失败：%1"), tostring(result.err or _("未知错误"))))
+                        info(T(_("X-Ray 全书分析中断：%1。再次分析会从断点继续"),
+                            tostring(result.err or _("未知错误")):match("[^\n]*")))
                         return
                     end
                     info(_("X-Ray 全书分析完成"))
@@ -204,8 +209,10 @@ function UI.scanBook(ui, identity)
             }
         end, function(step, done, total) dialog:update(step, done, total) end)
     end
+    local resume = require("features.xray.fetch").scanProgress(identity)
     require("ui.themes.widgets.confirm"):new{
-        text = _("逐段读取全书，由 AI 一次性提取所有人物、地点和专有名词，结果包含剧透。书越长请求越多、耗时越久，可转到后台运行。继续？"),
+        text = resume and T(_("上次全书分析进行到第 %1 / %2 段，继续从断点分析？"), resume.done, resume.total)
+            or _("逐段读取全书，由 AI 一次性提取所有人物、地点和专有名词，结果包含剧透。书越长请求越多、耗时越久，可转到后台运行。继续？"),
         ok_text = _("继续"),
         ok_callback = start,
     }:show()

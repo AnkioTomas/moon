@@ -264,7 +264,7 @@ function Fetch.chunks(text, size)
     while pos <= len do
         local stop = math.min(pos + size - 1, len)
         if stop < len then
-            local cut = text:sub(pos, stop):match(".*()\n")
+            local cut = text:sub(pos, stop):match("^.*()\n")
             if cut and cut > size / 2 then
                 stop = pos + cut - 1
             else
@@ -282,22 +282,48 @@ function Fetch.chunks(text, size)
     return out
 end
 
---- 全书分析的任务体（`workers.tasks` 的 run）：逐段请求 AI，每段结果当场合并落库。
---- 游标在闭包里：退避重试、休眠 / 断网后重跑都从没做完的那段接着来。
+--- 全书正文的指纹：同一本书的同一版正文分段结果不变，续扫游标才对得上。
+---@param text string
+---@param chunks string[]
+---@return string
+local function scanDigest(text, chunks)
+    return #text .. ":" .. #chunks
+end
+
+--- 上次没分析完、这次可以接着来的段数；没有或正文变了时 nil。
+---@param identity BookIdentity
+---@return { done: integer, total: integer }|nil
+function Fetch.scanProgress(identity)
+    local cursor = XrayDB.scanCursor(identity.source_id, identity.stable_id)
+    if cursor and cursor.done > 0 and cursor.done < cursor.total then return cursor end
+end
+
+--- 全书分析的任务体（`workers.tasks` 的 run）：逐段请求 AI，每段结果当场合并落库并推进游标（xray_scan）。
+--- 退避重试、休眠 / 断网后重跑、下次重新点「分析全书」都从没做完的那段接着来；全部完成删游标。
 --- 提示词只带本段提到的已收录实体，否则实体越积越多会撑爆上下文。
 ---@param identity BookIdentity
 ---@param text string 全书正文
 ---@return fun(report: fun(text: string|nil, count: integer|nil, total: integer|nil), done: fun(result: table)): table
 function Fetch.scanBook(identity, text)
     local chunks = Fetch.chunks(text, SCAN_CHUNK)
+    local digest = scanDigest(text, chunks)
     local title, author = bookMeta(identity)
-    local index = 1
+    local cursor = XrayDB.scanCursor(identity.source_id, identity.stable_id)
+    local index = cursor and cursor.digest == digest and cursor.done + 1 or 1
     return function(report, done)
         local request
+        local first = index
+        --- 结束本次尝试；推进过就让页内标记重扫一次（每段都刷会一直闪阅读页）。
+        local function finish(result)
+            result.progressed = index > first
+            if result.ok then XrayDB.clearScanCursor(identity.source_id, identity.stable_id) end
+            if result.progressed then require("features.xray.marks").invalidate() end
+            done(result)
+        end
         local function step()
             report(_("正在分析全书"), index - 1, #chunks)
             if index > #chunks then
-                done({ ok = true })
+                finish({ ok = true })
                 return
             end
             local chunk = chunks[index]
@@ -308,10 +334,10 @@ function Fetch.scanBook(identity, text)
                     title, author, math.floor(index * 100 / #chunks), chunk, "", Store.promptSnapshot(existing)) },
             }
             request = AI.jsonExtract(messages, { max_tokens = 8000, timeout = 180 }, function(decoded, err)
-                if not decoded then done({ ok = false, err = err }); return end
+                if not decoded then finish({ ok = false, err = err }); return end
                 local ok, save_err = pcall(mergeAndSave, identity, filterGrounded(cleanPayload(decoded), chunk))
-                if not ok then done({ ok = false, err = save_err }); return end
-                require("features.xray.marks").invalidate()
+                if not ok then finish({ ok = false, err = save_err }); return end
+                XrayDB.saveScanCursor(identity.source_id, identity.stable_id, digest, index, #chunks)
                 index = index + 1
                 step()
             end)
