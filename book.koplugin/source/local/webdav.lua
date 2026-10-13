@@ -19,7 +19,7 @@ local fetchText, putText = Common.fetchText, Common.putText
 local remoteStableId, remoteRelativePath = Common.remoteStableId, Common.remoteRelativePath
 local sidecarKey, stem, readFile, writeFile, field = Common.sidecarKey, Common.stem, Common.readFile, Common.writeFile, Common.field
 local decodeProgress, eachAsync, coverPath = Common.decodeProgress, Common.eachAsync, Common.coverPath
-local moveCover, safeRel = Common.moveCover, Common.safeRel
+local safeRel = Common.safeRel
 local parseBookProps, scanFiles = Common.parseBookProps, Common.scanFiles
 local moonPath, coverRemotePath = Common.moonPath, Common.coverRemotePath
 local progressRemotePath, notesRemotePath = Common.progressRemotePath, Common.notesRemotePath
@@ -929,113 +929,6 @@ function Webdav.importWebdavAsync(self, temp_path, filename, cb)
         if active and active.cancel then active:cancel() end
     end }
 end
-
---- 用转换后的临时 EPUB 替换 WebDAV 书（同目录同名 .epub）。
---- 顺序：查远端重名 → 传新文件 → 书目条目改名（其余字段原样保留）→ 换本地文件、迁移身份与 .sdr/封面 →
---- 删远端原书及其边车。书目写成之前失败都撤掉已传的新文件，远端与本地保持原样；
---- 之后的远端清理失败只记日志（新书已生效）。临时文件失败时留给调用方清理。
----@param temp_path string
----@param stable_id string webdav://rel
----@param cb fun(new_path: string|nil, err: string|nil)
----@return { cancel: fun() }|nil
----@param self LocalClient
-function Webdav.replaceWebdavAsync(self, temp_path, stable_id, cb)
-    local rel = remoteRelativePath(stable_id)
-    if not rel then return defer(cb, nil, _("无效的 WebDAV 书籍路径")) end
-    if not self:isWebdav() then return defer(cb, nil, _("未配置 WebDAV，无法替换云端书籍")) end
-    local new_rel = rel:gsub("%.[^./]+$", ".epub")
-    if new_rel == rel then return defer(cb, nil, _("原书已经是 EPUB")) end
-    local BookDB = require("book.books_db")
-    local new_id, name = remoteStableId(new_rel), sidecarKey(new_rel)
-    local root = self:webdavBookRoot()
-    local old_path, new_path = root .. "/" .. rel, root .. "/" .. new_rel
-    local taken = BookDB.get(SOURCE_ID, new_id)
-    if lfs.attributes(new_path) or (taken and taken.deleted ~= 1) then
-        return defer(cb, nil, _("目标位置已有同名文件：") .. name)
-    end
-    local parent = rel:match("^(.+)/[^/]+$")
-    local remote_new = self:webdavPath() .. "/" .. new_rel
-    local cancelled, active = false, nil
-
-    local function swapLocal()
-        ensureParent(new_path)
-        local placed, place_err = os.rename(temp_path, new_path)
-        if not placed then return _("放置转换文件失败：") .. tostring(place_err) end
-        if not BookDB.adoptStableId(SOURCE_ID, stable_id, new_id, new_path) then
-            os.rename(new_path, temp_path)
-            return _("更新书籍身份失败")
-        end
-        os.remove(old_path)
-        moveCover(stable_id, new_id)
-        local sdr_ok, sdr_err = require("book.sidecar").move(old_path, new_path)
-        if not sdr_ok then require("utils.log").warn("book webdav replace sdr move failed", old_path, sdr_err) end
-        -- 远端进度 / 笔记边车按文件名寻址，旧名的随原书删掉；本地已同步的那份要标脏重推到新名下。
-        local ProgressDB, NoteDB = require("book.progress_db"), require("book.note_db")
-        local pos = ProgressDB.get(SOURCE_ID, new_id)
-        if pos then ProgressDB.upsert(SOURCE_ID, new_id, pos) end
-        local note = NoteDB.get(SOURCE_ID, new_id, 0)
-        if note then NoteDB.upsert(SOURCE_ID, new_id, 0, note.payload, note.updated_at) end
-    end
-
-    return serial(self, function(release)
-        local function finish(...)
-            release()
-            cb(...)
-        end
-        active = self.dav:listAsync(self:webdavPath() .. (parent and "/" .. parent or ""), function(entries, list_err)
-            if cancelled then return end
-            if not entries then return finish(nil, list_err) end
-            for i = 1, #entries do
-                if not entries[i].is_dir and entries[i].name == name then
-                    return finish(nil, _("目标位置已有同名文件：") .. name)
-                end
-            end
-            active = self.dav:putFileAsync(remote_new, temp_path, function(ok, put_err)
-                if cancelled then return end
-                if not ok then return finish(nil, put_err) end
-                local original
-                active = editBooksSync(self, rel, function(entry)
-                    original = entry
-                    local renamed = {}
-                    for k, v in pairs(entry or {}) do renamed[k] = v end
-                    renamed.filename = new_rel
-                    if renamed.downloadUrl then renamed.downloadUrl = "[WebDav]/" .. remote_new end
-                    return renamed
-                end, function(listed, edit_err)
-                    if cancelled then return end
-                    if not listed then
-                        self.dav:deleteAsync(remote_new, function() end)
-                        return finish(nil, edit_err)
-                    end
-                    local swap_err = swapLocal()
-                    if swap_err then
-                        -- 书目已指向新文件，本地却没换成：改回去，否则下次同步把旧身份连同阅读数据下架。
-                        active = editBooksSync(self, new_rel, function() return original end, function(reverted)
-                            if reverted then
-                                self.dav:deleteAsync(remote_new, function() end)
-                            else
-                                require("utils.log").warn("book webdav replace rollback failed", rel)
-                            end
-                            if not cancelled then finish(nil, swap_err) end
-                        end)
-                        return
-                    end
-                    active = deleteRemoteBook(self, rel, function(deleted, del_err)
-                        if not deleted then
-                            require("utils.log").warn("book webdav replace cleanup failed", rel, del_err)
-                        end
-                        if not cancelled then finish(new_path) end
-                    end)
-                end)
-            end)
-        end)
-        return { cancel = function()
-            cancelled = true
-            if active and active.cancel then active:cancel() end
-        end }
-    end)
-end
-
 
 --- 连通性测试：在书库目录写入探针文件、读回比对、再删除。
 ---@param cb fun(ok: boolean, err: string|nil)

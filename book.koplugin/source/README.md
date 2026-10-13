@@ -123,9 +123,9 @@ source/
 | 推脏 `pushDirty` | 不入队（没有远端，脏行推不出去） | 照常入队 |
 
 `scrape` / `edit` 只有这个源为 true。改分类/系列 = 移动文件（`stable_id` 跟着变）；WebDAV 下分类只是元数据，不搬文件。
-书城导入走 `importBookAsync`。转换替换走 `replaceBookAsync`。
+书城导入走 `importBookAsync`。
 
-`local/client.lua` 只管配置、路径和方法装配，实现按职责拆开：`scan.lua`（本地目录扫盘 / 导入 / 移动 / 排版替换）、`webdav.lua`（books.sync 同步流水线、按需下载、删除、单本上行、远端替换、连通性测试）、`remote_data.lua`（`.Moon+/` 下的进度、统计、笔记文件）、`common.lua`（共享原语：路径与边车寻址、文件读写、目录遍历、元数据与封面解析）。子模块函数首参即 `self`，在 `client.lua` 末尾逐个赋给 `Client`；子模块之间不互相 require。
+`local/client.lua` 只管配置、路径和方法装配，实现按职责拆开：`scan.lua`（本地目录扫盘 / 导入 / 移动）、`webdav.lua`（books.sync 同步流水线、按需下载、删除、单本上行、连通性测试）、`remote_data.lua`（`.Moon+/` 下的进度、统计、笔记文件）、`common.lua`（共享原语：路径与边车寻址、文件读写、目录遍历、元数据与封面解析）。子模块函数首参即 `self`，在 `client.lua` 末尾逐个赋给 `Client`；子模块之间不互相 require。
 
 ### moon — 月读服务（`book`）
 

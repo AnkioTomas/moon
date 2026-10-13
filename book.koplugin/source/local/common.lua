@@ -419,7 +419,6 @@ return {
     decodeProgress = decodeProgress,
     eachAsync = eachAsync,
     coverPath = coverPath,
-    moveCover = moveCover,
     moveBookArtifacts = moveBookArtifacts,
     ensureCover = ensureCover,
     parseBookProps = parseBookProps,

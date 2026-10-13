@@ -433,7 +433,7 @@ do
     books = {}
 end
 
--- 关掉 WebDAV 后残留的云端书：本地已下载的照常打开；没下载的、排版替换都直接报“未配置”，不发请求。
+-- 关掉 WebDAV 后残留的云端书：本地已下载的照常打开；没下载的直接报“未配置”，不发请求。
 do
     local L = require("support.config").dir() .. "/webdav-off"
     Paths.ensureDir(L)
@@ -451,9 +451,6 @@ do
     Stubs.flush()
     Assert.is_nil(path)
     Assert.eq(err, "未配置 WebDAV，无法下载云端书籍")
-    c:replaceBookAsync(L .. "/tmp.epub", "webdav://有.txt", function(p, e) path, err = p, e end)
-    Stubs.flush()
-    Assert.eq(err, "未配置 WebDAV，无法替换云端书籍")
     Assert.len(dav.calls, 0)
     os.remove(L .. "/有.epub")
 end
@@ -1034,111 +1031,6 @@ do
     books = {}
 end
 
--- 排版替换：新 EPUB 传到同目录，书目条目原位改名（其余字段保留），本地文件/身份跟着换、KOReader 状态交给
--- book.sidecar 迁移，远端原书与边车删掉。书目写成之前失败，撤掉已传的新文件，两边保持原样。
-do
-    local sidecar_moves = {}
-    package.loaded["book.sidecar"] = {
-        move = function(from, to) sidecar_moves[#sidecar_moves + 1] = { from, to }; return true end,
-    }
-    local L = require("support.config").dir() .. "/webdav-reflow"
-    local function write(path, data)
-        Paths.ensureDir(path:match("(.+)/[^/]+$"))
-        local f = assert(io.open(path, "wb"))
-        f:write(data)
-        f:close()
-    end
-    local old_path, new_path, temp = L .. "/A/书.txt", L .. "/A/书.epub", L .. "/A/书.epub.moon-reflow"
-    for _, p in ipairs({ old_path, new_path, temp }) do
-        os.remove(p)
-    end
-    write(old_path, "txt")
-    local function reset(dav)
-        books = { ["webdav://A/书.txt"] = { stable_id = "webdav://A/书.txt", title = "书", deleted = 0,
-            sync_status = 1, path = old_path } }
-        dav:put(ROOT .. "/A/书.txt", "txt")
-        dav:put(ROOT .. "/.Moon+/Cache/书.txt.po", "1*0:1%")
-        putSync(dav, {
-            { filename = "A/书.txt", bookName = "书", rate = "5", downloadUrl = "[WebDav]/" .. ROOT .. "/A/书.txt" },
-            { filename = "other.epub", bookName = "other" },
-        })
-        write(temp, "epub")
-    end
-    local dav = fakeDav()
-    local c = Client.new({ webdav_url = "https://dav.example", path = L })
-    c.dav = dav
-    local function replace()
-        local p, e
-        c:replaceBookAsync(temp, "webdav://A/书.txt", function(v, err) p, e = v, err end)
-        Stubs.flush()
-        return p, e
-    end
-
-    -- 远端已有同名 EPUB：拒绝，不动任何东西。
-    reset(dav)
-    dav:put(ROOT .. "/A/书.epub", "someone")
-    local p, e = replace()
-    Assert.is_nil(p)
-    Assert.matches(e, "书%.epub")
-    Assert.eq(dav.files[ROOT .. "/A/书.epub"].data, "someone")
-    Assert.eq(readFile(temp), "epub")
-    dav.files[ROOT .. "/A/书.epub"] = nil
-
-    -- 书目写失败：撤掉已传的新文件，本地与身份不动。
-    local put = dav.putFileAsync
-    function dav:putFileAsync(path, local_path, cb)
-        if path == SYNC then return cb(nil, "HTTP 507") end
-        return put(self, path, local_path, cb)
-    end
-    p, e = replace()
-    dav.putFileAsync = put
-    Assert.is_nil(p)
-    Assert.eq(e, "HTTP 507", "书目写失败的原因原样报出")
-    Assert.is_nil(dav.files[ROOT .. "/A/书.epub"])
-    Assert.eq(dav.files[ROOT .. "/A/书.txt"].data, "txt")
-    Assert.eq(readFile(old_path), "txt")
-    Assert.not_nil(books["webdav://A/书.txt"])
-
-    -- 正常替换。旧名的远端进度 / 笔记随原书删掉，新身份的已同步副本要标脏重推。
-    reset(dav)
-    progress["webdav://A/书.epub"] = { fraction = 0.5, updated_at = 10, sync_status = 1 }
-    notes["webdav://A/书.epub"] = { payload = "[]", updated_at = 10, sync_status = 1 }
-    p, e = replace()
-    Assert.eq(progress["webdav://A/书.epub"].sync_status, 0)
-    Assert.eq(progress["webdav://A/书.epub"].fraction, 0.5)
-    Assert.eq(notes["webdav://A/书.epub"].sync_status, 0)
-    Assert.eq(notes["webdav://A/书.epub"].payload, "[]")
-    progress["webdav://A/书.epub"], notes["webdav://A/书.epub"] = nil, nil
-    Assert.is_nil(e)
-    Assert.eq(p, new_path)
-    Assert.eq(readFile(new_path), "epub")
-    Assert.is_nil(readFile(old_path))
-    Assert.is_nil(readFile(temp))
-    Assert.eq(sidecar_moves[#sidecar_moves][1], old_path, "KOReader 状态跟着新文件走")
-    Assert.eq(sidecar_moves[#sidecar_moves][2], new_path)
-    Assert.eq(dav.files[ROOT .. "/A/书.epub"].data, "epub")
-    Assert.is_nil(dav.files[ROOT .. "/A/书.txt"])
-    Assert.is_nil(dav.files[ROOT .. "/.Moon+/Cache/书.txt.po"])
-    local list = Json.decode(dav.files[SYNC].data:sub(2))
-    Assert.len(list, 2)
-    Assert.eq(list[1].filename, "A/书.epub", "条目原位改名")
-    Assert.eq(list[1].rate, "5")
-    Assert.eq(list[1].downloadUrl, "[WebDav]/" .. ROOT .. "/A/书.epub")
-    Assert.eq(list[2].filename, "other.epub")
-    Assert.is_nil(books["webdav://A/书.txt"])
-    Assert.eq(books["webdav://A/书.epub"].path, new_path)
-    Assert.eq(books["webdav://A/书.epub"].title, "书")
-    Assert.eq(books["webdav://A/书.epub"].deleted, 0)
-
-    -- 下一轮刷新不会把书拆成两本。
-    Assert.is_true(refresh(c))
-    local entries = remoteEntries(dav)
-    Assert.not_nil(entries["A/书.epub"])
-    Assert.is_nil(entries["A/书.txt"])
-    Assert.eq(books["webdav://A/书.epub"].deleted, 0)
-    books = {}
-end
-
 -- 笔记：`.Moon+/Notes/<文件名>.json` 按设备存完整快照；推送只换本设备那份，拉取取并集。
 do
     local NOTES = ROOT .. "/.Moon+/Notes/a.epub.json"
@@ -1412,50 +1304,6 @@ do
     Assert.eq(books["webdav://三体 (2).epub"].sync_status, 1, "书目写成即清脏")
     Assert.not_nil(remoteEntries(dav)["三体 (2).epub"])
     Assert.not_nil(remoteEntries(dav)["三体.epub"], "其它条目原样保留")
-    os.remove(temp)
-    books = {}
-end
-
--- 转换替换：成功则远端、书目、本地身份一起换；本地换身份失败则书目改回、删掉新上传的文件。
-do
-    local function setup()
-        local dav = fakeDav()
-        dav:put(ROOT .. "/a.txt", "txt")
-        putSync(dav, { { filename = "a.txt", bookName = "A" } })
-        books = { ["webdav://a.txt"] = { stable_id = "webdav://a.txt", deleted = 0, sync_status = 1 } }
-        local temp = require("support.config").dir() .. "/replace-temp.epub"
-        local f = assert(io.open(temp, "wb"))
-        f:write("epub")
-        f:close()
-        return dav, temp
-    end
-
-    local dav, temp = setup()
-    local new_path, err
-    client(dav):replaceWebdavAsync(temp, "webdav://a.txt", function(p, e) new_path, err = p, e end)
-    Stubs.flush()
-    Assert.not_nil(new_path, err)
-    Assert.is_nil(dav.files[ROOT .. "/a.txt"])
-    Assert.eq(dav.files[ROOT .. "/a.epub"].data, "epub")
-    Assert.not_nil(remoteEntries(dav)["a.epub"])
-    Assert.is_nil(remoteEntries(dav)["a.txt"])
-    Assert.not_nil(books["webdav://a.epub"])
-    os.remove(new_path)
-
-    dav, temp = setup()
-    local adopt = BookDB.adoptStableId
-    BookDB.adoptStableId = function() return false end
-    new_path, err = nil, nil
-    client(dav):replaceWebdavAsync(temp, "webdav://a.txt", function(p, e) new_path, err = p, e end)
-    Stubs.flush()
-    BookDB.adoptStableId = adopt
-    Assert.is_nil(new_path)
-    Assert.not_nil(err)
-    Assert.eq(dav.files[ROOT .. "/a.txt"].data, "txt", "旧文件不动")
-    Assert.is_nil(dav.files[ROOT .. "/a.epub"], "新上传的文件删掉")
-    Assert.not_nil(remoteEntries(dav)["a.txt"], "书目改回旧文件")
-    Assert.is_nil(remoteEntries(dav)["a.epub"])
-    Assert.not_nil(books["webdav://a.txt"], "本地身份不变")
     os.remove(temp)
     books = {}
 end
