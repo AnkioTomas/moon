@@ -27,7 +27,8 @@ end
 
 local Setting = require("features.dictionary.setting")
 local entry = Setting.entries({ updateView = function() end })[1]
-local rows = entry.page.sections()[1].rows
+Assert.eq(entry.parent, "lookup")
+local rows = entry.sections()[1].rows
 Assert.len(rows, 3)
 rows[2](100).callback()
 rows[3](100).callback()

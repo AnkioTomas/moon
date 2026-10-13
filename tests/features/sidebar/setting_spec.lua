@@ -26,12 +26,10 @@ local Setting = require("features.sidebar.setting")
 local updates = 0
 local desktop = { updateView = function() updates = updates + 1 end }
 local entry = Setting.entries(desktop)[1]
-Assert.eq(entry.group, "reader")
-Assert.eq(entry.title, "阅读侧栏")
-Assert.eq(entry.status, "左边缘右滑")
+Assert.eq(entry.parent, "reader_behavior")
 
 local function row()
-    return entry.page.sections()[1].rows[1](600)
+    return entry.sections()[1].rows[1](600)
 end
 
 Assert.eq(row().status, "左边缘右滑")
@@ -47,7 +45,7 @@ Assert.eq(row().status, "任意位置右滑")
 
 -- 页面：全部缺省显示；取消即落盘隐藏列表；最后一页不让取消。
 local function tabsRow()
-    return entry.page.sections()[1].rows[2](600)
+    return entry.sections()[1].rows[2](600)
 end
 Assert.eq(tabsRow().status, "6 / 6")
 tabsRow().callback()

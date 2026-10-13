@@ -1,5 +1,5 @@
 --[[--
-翻页动画设置：reader 分组入口，开关装/卸补丁，开启时多一行风格。
+翻页动画设置：追加到「阅读行为」页，开关装/卸补丁，开启时多一行风格。
 
 @module tests.features.animation.setting_spec
 --]]
@@ -48,13 +48,10 @@ local Setting = require("features.animation.setting")
 local entries = Setting.entries(desktop)
 Assert.len(entries, 1)
 local entry = entries[1]
-Assert.eq(entry.group, "reader")
-Assert.eq(entry.title, "翻页动画")
-Assert.eq(entry.status, "关")
-Assert.is_false(entry.status_on)
+Assert.eq(entry.parent, "reader_behavior")
 
 -- 关闭时只有开关一行。
-local rows = entry.page.sections()[1].rows
+local rows = entry.sections()[1].rows
 Assert.len(rows, 1)
 local toggle = rows[1](600)
 Assert.eq(toggle.kind, "toggle")
@@ -76,8 +73,8 @@ Assert.eq(updates, 1)
 Assert.eq(restarts, 1)
 
 -- 开启后多一行风格，显示当前风格名；选中后刷新设置页。
-Assert.eq(Setting.entries(desktop)[1].status, "开")
-rows = entry.page.sections()[1].rows
+rows = entry.sections()[1].rows
+Assert.is_true(rows[1](600).status_on)
 Assert.len(rows, 2)
 local style_row = rows[2](600)
 Assert.eq(style_row.title, "翻页动画风格")
@@ -86,6 +83,6 @@ style_row.callback()
 on_change()
 Assert.eq(updates, 2)
 style = { text = "方框", value = "box" }
-Assert.eq(entry.page.sections()[1].rows[2](600).status, "方框")
+Assert.eq(entry.sections()[1].rows[2](600).status, "方框")
 
 return true
