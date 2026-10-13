@@ -138,20 +138,22 @@ local function render(books, total)
     return page
 end
 
--- 书城：上级 / 搜索 / 清除 + 共 N，网格无「更多」，整卡交给 on_open；整页正好是内容区尺寸。
+-- 书城：上级 + 搜索图标（无清除）+ 共 N，网格无「更多」，整卡交给 on_open；整页正好是内容区尺寸。
 local store_opened, back, searched = nil, 0, 0
 local page = library:build(ctx, { books = { book } }, {
     page = 1, pages = 3, total = 7, show_status = false,
     on_open = function(b) store_opened = b end,
     on_back = function() back = back + 1 end,
     on_search = function() searched = searched + 1 end,
-    on_clear = function() end,
 })
 Assert.eq(page:getSize().w, 600)
 Assert.eq(page:getSize().h, 600)
 local texts = Kit.texts(page)
-for _idx, label in ipairs({ "上级", "搜索", "清除", "共7", "书一", "1 / 3" }) do
+for _idx, label in ipairs({ "上级", "共7", "书一", "1 / 3" }) do
     Assert.contains(texts, label)
+end
+for _idx, s in ipairs(texts) do
+    Assert.is_true(s ~= "搜索" and s ~= "清除", "书城工具条只留搜索图标：" .. s)
 end
 Assert.is_false(more_option)
 page:paintTo(Kit.canvas(), 0, 0)
