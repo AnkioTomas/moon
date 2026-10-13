@@ -138,12 +138,19 @@ end
 ---@param ui table ReaderUI
 ---@param title string
 ---@param messages table[] 末条是本轮 user 消息
-local function ask(ui, title, messages)
+---@param selection boolean 划词进来的：选区留给「存为笔记」，流程结束时清掉（KOReader 词典关窗也清）
+local function ask(ui, title, messages, selection)
     local handle
+    local function release()
+        if selection then ui.highlight:clear() end
+    end
     local loading = card(title, _("AI 解释中…"), {
         -- 结果回来时先清 handle 再关窗，所以只有用户关掉才会取消请求。
         close_callback = function()
-            if handle then handle.cancel() end
+            if handle then
+                handle.cancel()
+                release()
+            end
         end,
     })
     loading:show()
@@ -152,16 +159,19 @@ local function ask(ui, title, messages)
         loading:close()
         local answer = content and Explain.plain(content) or ""
         if answer == "" then
+            release()
             require("ui.themes.widgets.toast"):new{
                 text = T(_("AI 解释失败：%1"), tostring(err or _("未知错误"))), timeout = 3,
             }:show()
             return
         end
-        local viewer
+        -- 交给存为笔记（addNote 自己清选区）或追问（下一张卡片接着用）的，关窗时不清。
+        local viewer, handed_off
         local buttons = {}
         -- 选区还在才能存：KOReader 按当前选区建划线，再弹预填好的笔记编辑框，之后照常同步。
-        if ui.highlight and ui.highlight.selected_text then
+        if selection and ui.highlight.selected_text then
             buttons[#buttons + 1] = { text = _("存为笔记"), callback = function()
+                handed_off = true
                 viewer:close()
                 ui.highlight:addNote(answer)
             end }
@@ -174,11 +184,12 @@ local function ask(ui, title, messages)
                 callback = function(question)
                     question = Text.trim(question)
                     if question == "" or not online() then return end
+                    handed_off = true
                     viewer:close()
                     local chain = { unpack(messages) }
                     chain[#chain + 1] = { role = "assistant", content = answer }
                     chain[#chain + 1] = { role = "user", content = question }
-                    ask(ui, title, chain)
+                    ask(ui, title, chain, selection)
                 end,
             }:show()
         end }
@@ -187,7 +198,12 @@ local function ask(ui, title, messages)
             variant = "primary",
             callback = function() require("device").input.setClipboardText(answer) end,
         }
-        viewer = card(title, answer, { buttons = buttons })
+        viewer = card(title, answer, {
+            buttons = buttons,
+            close_callback = function()
+                if not handed_off then release() end
+            end,
+        })
         viewer:show()
     end)
 end
@@ -211,6 +227,7 @@ function Explain.run(ui, selected)
     local Context = require("reader.context")
     local selection = Context.selection(ui, selected)
     if selection.text == "" or not online() then
+        ui.highlight:clear()
         return
     end
     local ctx = Context.forAnalysis(ui, CONTEXT_LIMIT)
@@ -218,7 +235,7 @@ function Explain.run(ui, selected)
     ask(ui, Text.truncateUtf8(selection.text, TITLE_LIMIT), {
         { role = "system", content = SYSTEM },
         { role = "user", content = Explain.prompt(selection, title, author, ctx.current_page, ctx.prior_text, recap) },
-    })
+    }, true)
 end
 
 --- 问书：弹输入框，就已读内容提问，回答卡片同划词解释（可追问、复制）。
@@ -238,7 +255,7 @@ function Explain.askBook(ui)
                 { role = "system", content = SYSTEM },
                 { role = "user", content = Explain.askPrompt(question, title, author,
                     ctx.current_page, ctx.prior_text, recap) },
-            })
+            }, false)
         end,
     }:show()
 end

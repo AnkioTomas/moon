@@ -4,9 +4,12 @@ AI JSON 解码：剥离 Markdown fence，再解析对象。
 @module koplugin.book.ai.json
 --]]
 
+require("l10n").apply()
+
 local JSON = require("json")
 local Text = require("utils.text")
 local logger = require("utils.log")
+local _ = require("gettext")
 
 local AiJson = {}
 
@@ -16,7 +19,7 @@ local AiJson = {}
 function AiJson.decode(content)
     content = Text.trim(content)
     if content == "" then
-        return nil, "empty AI response"
+        return nil, _("AI 没有返回内容")
     end
     content = content:gsub("^```[%w_%-]*%s*", ""):gsub("%s*```$", "")
     local ok, result = pcall(JSON.decode, content)
@@ -30,7 +33,7 @@ function AiJson.decode(content)
     if not ok or type(result) ~= "table" then
         local s = content:gsub("%s+", " ")
         logger.warn("ai.json: not JSON; err=", tostring(result), "content=", s:sub(1, 200), (#content > 200 and "…" or ""))
-        return nil, "AI did not return JSON"
+        return nil, _("AI 返回的内容无法解析")
     end
     return result
 end

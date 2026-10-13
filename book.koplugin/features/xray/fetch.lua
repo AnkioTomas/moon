@@ -4,12 +4,15 @@ X-Ray 拉取：综合拉取 / 选词补全。
 @module koplugin.book.features.xray.fetch
 --]]
 
+require("l10n").apply()
+
 local AI = require("ai")
 local Context = require("reader.context")
 local Prompts = require("features.xray.prompts")
 local Store = require("features.xray.store")
 local XrayDB = require("features.xray.db")
 local Text = require("utils.text")
+local _ = require("gettext")
 
 local Fetch = {}
 
@@ -234,7 +237,7 @@ end
 function Fetch.comprehensive(ui, identity, opts, cb)
     opts = opts or {}
     if not AI.isConfigured() then
-        cb(nil, "AI is not configured")
+        cb(nil, _("AI 未配置"))
         return nil
     end
     local existing = XrayDB.list(identity.source_id, identity.stable_id)
@@ -285,7 +288,7 @@ function Fetch.lookupWord(ui, identity, word, cb)
         return nil
     end
     if not AI.isConfigured() then
-        cb(nil, "AI is not configured")
+        cb(nil, _("AI 未配置"))
         return nil
     end
     local entities = XrayDB.list(identity.source_id, identity.stable_id)

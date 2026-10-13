@@ -4,11 +4,14 @@ OpenAI 兼容 Chat Completions 客户端。只负责协议，不拥有阅读上�
 @module koplugin.book.ai.client
 --]]
 
+require("l10n").apply()
+
 local JSON = require("json")
 local Request = require("http.request")
 local Settings = require("utils.settings")
 local Text = require("utils.text")
 local logger = require("utils.log")
+local _ = require("gettext")
 
 local Client = {}
 
@@ -18,7 +21,9 @@ Client.DEFAULT_TIMEOUT = 120
 --- AI 请求默认 User-Agent；部分 OpenAI 兼容网关按 UA 分流/限流。
 local DEFAULT_UA = "opencode/1.2.3 ai-sdk/amazon-bedrock/3.0.73 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5"
 
-local TRUNCATED = "response truncated (max_tokens too low)"
+local TRUNCATED = _("回答被截断：输出长度上限不够")
+--- 截断后放大重试的上限：常见模型的输出上限在 8K～16K，再大端点会直接 400。
+local RETRY_MAX_TOKENS = 16384
 
 --- 规范化 Chat Completions URL；已带路径则原样返回。
 ---@param base string|nil
@@ -37,7 +42,7 @@ local function credentials()
     local api_key = Text.trim(settings.ai_api_key)
     local model = Text.trim(settings.ai_model)
     if not endpoint or api_key == "" or model == "" then
-        return nil, nil, nil, "AI is not configured"
+        return nil, nil, nil, _("AI 未配置")
     end
     return endpoint, api_key, model
 end
@@ -86,11 +91,13 @@ local function messageContent(message)
 end
 
 --- 去掉混在正文里的思考过程：部分推理模型 / 网关把它包在 <think>…</think> 里放进 content
---- （有时只剩结尾标签），只留标签之后的回答。
+--- （有时只剩结尾标签），只留标签之后的回答。有开头标签没结尾的是思考写到一半被截断，没有回答。
 ---@param content string
 ---@return string|nil
 local function dropThinking(content)
-    local answer = content:match("</think>%s*(.*)$") or content
+    local answer = content:match("</think>%s*(.*)$")
+    if not answer and content:match("^%s*<think>") then return nil end
+    answer = answer or content
     return answer ~= "" and answer or nil
 end
 
@@ -100,7 +107,7 @@ end
 function Client.decodeResponse(body)
     local ok, decoded = pcall(JSON.decode, body or "")
     if not ok or type(decoded) ~= "table" then
-        return nil, "invalid AI response"
+        return nil, _("AI 返回的内容无法解析")
     end
     local choice = decoded.choices and decoded.choices[1]
     local content = messageContent(choice and choice.message)
@@ -115,7 +122,7 @@ function Client.decodeResponse(body)
         end
         logger.warn("ai.client: empty content; keys=",
             choice and choice.message and "has-message" or "no-message", "body=", snip(body, 200))
-        return nil, "empty AI response"
+        return nil, _("AI 没有返回内容")
     end
     return content
 end
@@ -190,16 +197,20 @@ function Client.chat(messages, opts, cb)
             connect_timeout = opts.connect_timeout or timeout,
             headers = { Authorization = "Bearer " .. api_key, ["User-Agent"] = DEFAULT_UA },
         }, function(response, err, raw)
+            if cancelled then return end
             -- OpenAI 官方等严格端点不认这个参数会 400 / 422：去掉重发，本进程内记住。
-            if not response and think_off and raw and (raw.code == 400 or raw.code == 422) then
+            -- 只认原始额度那一轮：放大额度后的 400 多半是 max_tokens 超出模型上限，与这个参数无关。
+            if not response and think_off and budget == max_tokens and raw
+                    and (raw.code == 400 or raw.code == 422) then
                 no_think_param[endpoint] = true
-                if not cancelled then current = send(false, budget) end
+                current = send(false, budget)
                 return
             end
             local content, fail = finish(response, err, raw)
-            -- 关不掉思考的推理模型会把上限吃光、正文为空：放大到 4 倍重试一次。
-            if fail == TRUNCATED and budget == max_tokens then
-                if not cancelled then current = send(think_off, budget * 4) end
+            -- 关不掉思考的推理模型会把上限吃光、正文为空：放大到 4 倍（封顶）重试一次。
+            local enlarged = math.min(max_tokens * 4, RETRY_MAX_TOKENS)
+            if fail == TRUNCATED and budget == max_tokens and enlarged > budget then
+                current = send(think_off, enlarged)
                 return
             end
             cb(content, fail)

@@ -90,7 +90,16 @@ Client.chat({ { role = "user", content = "hello" } }, nil, function(value, err) 
 Assert.len(posts, 2, "只重试一次")
 Assert.eq(posts[2].payload.max_tokens, 8000)
 Assert.is_nil(content)
-Assert.eq(failure, "response truncated (max_tokens too low)")
+Assert.eq(failure, "回答被截断：输出长度上限不够")
+replies, posts = { "length" }, {}
+Client.chat({ { role = "user", content = "hello" } }, { max_tokens = 8000 }, function() end)
+Assert.eq(posts[2].payload.max_tokens, 16384, "放大重试封顶")
+replies, posts = { "length" }, {}
+Client.chat({ { role = "user", content = "hello" } }, { max_tokens = 20000 }, function(value, err)
+    content, failure = value, err
+end)
+Assert.len(posts, 1, "已到封顶不再重试")
+Assert.eq(failure, "回答被截断：输出长度上限不够")
 replies, posts = { "length", "hold" }, {}
 local retry_handle = Client.chat({ { role = "user", content = "hello" } }, nil,
     function() error("cancelled retry must not call back") end)
@@ -109,13 +118,30 @@ replies, posts = { "hold" }, {}
 local handle = Client.chat({ { role = "user", content = "hello" } }, nil, function() error("cancelled request must not call back") end)
 handle:cancel()
 Assert.is_true(posts[1].cancelled)
+-- 取消不掉的请求（句柄是空操作）回包后也不回调
+replies, posts = { "hold" }, {}
+handle = Client.chat({ { role = "user", content = "hello" } }, nil, function() error("cancelled request must not call back") end)
+handle:cancel()
+posts[1].cb('{"choices":[{"message":{"content":"late"}}]}', nil, {})
+
+-- 放大额度后的 400 是额度超上限，不是端点不认关思考参数
+settings.ai_endpoint = "https://third.test/v1"
+replies, posts = { "length", 400 }, {}
+Client.chat({ { role = "user", content = "hello" } }, { max_tokens = 800 }, function(value, err)
+    content, failure = value, err
+end)
+Assert.len(posts, 2)
+Assert.eq(failure, "Unrecognized request argument")
+posts = {}
+Client.chat({ { role = "user", content = "hello" } }, nil, function() end)
+Assert.not_nil(posts[1].payload.chat_template_kwargs, "仍然关思考")
 settings.ai_endpoint = " https://example.test/v1/ "
 
 local array_content = Client.decodeResponse('{"choices":[{"message":{"content":[{"text":"a"},{"text":"b"}]}}]}')
 Assert.eq(array_content, "a\nb")
 local truncated, trunc_err = Client.decodeResponse('{"choices":[{"finish_reason":"length","message":{"role":"assistant","content":"","reasoning_content":"pong reply"}}]}')
 Assert.is_nil(truncated)
-Assert.eq(trunc_err, "response truncated (max_tokens too low)")
+Assert.eq(trunc_err, "回答被截断：输出长度上限不够")
 local missing, err = Client.decodeResponse('{"error":{"message":"bad key"}}')
 Assert.is_nil(missing)
 Assert.eq(err, "bad key")
@@ -128,9 +154,14 @@ Assert.eq(Client.decodeResponse('{"choices":[{"message":{"content":"<think>先�
 Assert.eq(Client.decodeResponse('{"choices":[{"message":{"content":"想了一半</think>回答"}}]}'), "回答")
 local thinking_only = Client.decodeResponse('{"choices":[{"message":{"content":"<think>只有思考</think>"}}]}')
 Assert.is_nil(thinking_only)
+-- 思考写到一半就到上限：没有回答，按截断处理（会触发放大重试）
+local half, half_err = Client.decodeResponse(
+    '{"choices":[{"finish_reason":"length","message":{"content":"<think>想到一半"}}]}')
+Assert.is_nil(half)
+Assert.eq(half_err, "回答被截断：输出长度上限不够")
 local empty, empty_err = Client.decodeResponse('{"choices":[{"message":{"content":"","reasoning_content":"think"}}]}')
 Assert.is_nil(empty)
-Assert.eq(empty_err, "empty AI response")
+Assert.eq(empty_err, "AI 没有返回内容")
 Assert.is_nil(Client.decodeResponse('{"choices":[{"message":{"reasoning_details":[{"text":"via details"}]}}]}'))
 
 settings.ai_api_key = ""

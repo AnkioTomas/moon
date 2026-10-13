@@ -1,4 +1,4 @@
---[[-- reader.context.pagesText：按页区间取全文（章节摘要用），不截断。 --]]
+--[[-- reader.context.pagesText：按页区间取全文（章节摘要用）；分页文档可只取两头。 --]]
 
 local Assert = require("support.assert")
 package.preload["reader.session"] = function()
@@ -32,6 +32,19 @@ local paging = {
     },
 }
 Assert.eq(Context.pagesText(paging, 1, 4), "p1\n\np3")
+
+-- 分页文档给了开头 / 结尾上限：只取够两头，中间的页不碰
+local touched = {}
+paging.document.getTextBoxes = function(_doc, page)
+    touched[#touched + 1] = page
+    return { { { word = "p" .. page } } }
+end
+Assert.eq(Context.pagesText(paging, 1, 41, 4, 3), "p1\n\np2\n……\np40")
+Assert.eq(table.concat(touched, ","), "1,2,40", "40 页的章只取了 3 页")
+-- 两头相接：不加省略号，每页只取一次
+touched = {}
+Assert.eq(Context.pagesText(paging, 1, 4, 4, 100), "p1\n\np2\n\np3")
+Assert.eq(table.concat(touched, ","), "1,2,3")
 
 -- 空区间
 Assert.eq(Context.pagesText(paging, 5, 5), "")

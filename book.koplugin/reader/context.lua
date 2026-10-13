@@ -130,12 +130,15 @@ local function chapterStart(ui, page)
     return toc:getPreviousChapter(page) or 1
 end
 
---- [start_page, end_page) 区间的全部正文，不截断；区间为空返回空串。
+--- [start_page, end_page) 区间的正文；区间为空返回空串。
+--- 固定版式逐页取字很慢：给了 head 时只从头取够 head 字节、从尾取够 tail 字节，中间跳过的页以「……」相隔。
 ---@param ui table
 ---@param start_page integer
 ---@param end_page integer
+---@param head integer|nil 开头至少取这么多字节；nil = 全取
+---@param tail integer|nil 结尾至少取这么多字节（与 head 一起给）
 ---@return string
-function Context.pagesText(ui, start_page, end_page)
+function Context.pagesText(ui, start_page, end_page, head, tail)
     if end_page <= start_page then
         return ""
     end
@@ -148,12 +151,22 @@ function Context.pagesText(ui, start_page, end_page)
         end)
         return ok and Text.trim(Text.normalizeNewlines(text)) or ""
     end
-    local parts = {}
-    for page = start_page, end_page - 1 do
-        local text = pageText(ui, page)
-        if text ~= "" then parts[#parts + 1] = text end
+    local first, last = {}, {}
+    local lo, hi, used = start_page, end_page - 1, 0
+    while lo <= hi and (not head or used < head) do
+        local text = pageText(ui, lo)
+        lo = lo + 1
+        if text ~= "" then first[#first + 1], used = text, used + #text end
     end
-    return table.concat(parts, "\n\n")
+    used = 0
+    while lo <= hi and used < (tail or 0) do
+        local text = pageText(ui, hi)
+        hi = hi - 1
+        if text ~= "" then table.insert(last, 1, text); used = used + #text end
+    end
+    local out = table.concat(first, "\n\n")
+    if #last == 0 then return out end
+    return out .. (lo <= hi and "\n……\n" or "\n\n") .. table.concat(last, "\n\n")
 end
 
 --- 本章开头到当前页之前的正文（不含当前页），超过 limit 字节保留末尾。
@@ -309,13 +322,14 @@ end
 ---@param selected { text: string, pos0: string|table|nil }
 ---@return { text: string, sentence: string, paragraph: string }
 function Context.selection(ui, selected)
-    local text = Text.trim(selected.text)
+    -- 选中文字、段落、段前文字按同一规则规范换行，跨行选区的出现次数才对得上。
+    local text = Text.trim(Text.normalizeNewlines(selected.text))
     local paragraph, skip = "", 0
     local pos0 = selected.pos0
     if ui.rolling and type(pos0) == "string" and text ~= "" then
         local block = Context.blockXPointer(pos0)
         paragraph = Text.trim(Text.normalizeNewlines(ui.document:getTextFromXPointer(block) or ""))
-        skip = countPlain(ui.document:getTextFromXPointers(block, pos0) or "", text)
+        skip = countPlain(Text.normalizeNewlines(ui.document:getTextFromXPointers(block, pos0) or ""), text)
     end
     return {
         text = text,
