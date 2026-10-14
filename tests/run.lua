@@ -5,6 +5,8 @@
   ./tests/run.sh tests/source/contract_spec.lua
 
 递归扫描 tests/ 下全部 *_spec.lua（镜像 book.koplugin 目录）。
+每个 spec 在独立 luajit 进程中运行，避免跨文件卸/装 ffi 导致
+ctype 表重建（CI 段错误）或 Mac 上 static const 重复 cdef 失败。
 
 @module tests.run
 --]]
@@ -17,6 +19,90 @@ if ROOT:match("/tests$") or ROOT == "tests" then
     end
 end
 
+local function listSpecsRecursive(dir)
+    local out = {}
+    local p = io.popen('find "' .. dir .. '" -type f -name "*_spec.lua" 2>/dev/null | sort')
+    if p then
+        for line in p:lines() do
+            out[#out + 1] = line
+        end
+        p:close()
+    end
+    return out
+end
+
+local function shellQuote(value)
+    return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+local function relName(path)
+    if ROOT == "." then
+        return path:gsub("^%./", "")
+    end
+    if path:sub(1, #ROOT + 1) == ROOT .. "/" then
+        return path:sub(#ROOT + 2)
+    end
+    return path
+end
+
+local specs = {}
+if arg[1] then
+    for i = 1, #arg do
+        specs[#specs + 1] = arg[i]
+    end
+else
+    specs = listSpecsRecursive(ROOT .. "/tests")
+end
+
+if #specs == 0 then
+    io.stderr:write("no *_spec.lua found under tests/\n")
+    os.exit(1)
+end
+
+-- 父进程：逐个拉起子进程，汇总结果（子进程设 MOON_TEST_CHILD=1）
+if os.getenv("MOON_TEST_CHILD") ~= "1" then
+    local passed, skipped, failed, total_asserts = 0, 0, 0, 0
+    local self = arg[0]
+    for _, path in ipairs(specs) do
+        local cmd = table.concat({
+            "MOON_TEST_CHILD=1",
+            "luajit",
+            shellQuote(self),
+            shellQuote(path),
+            "2>&1",
+        }, " ")
+        local pipe = io.popen(cmd)
+        local out = pipe and pipe:read("*a") or ""
+        if pipe then
+            pipe:close()
+        end
+        -- 转发子进程输出，去掉它自己的汇总行（父进程统一打印）
+        for line in (out .. "\n"):gmatch("(.-)\n") do
+            if not line:match("^%d+ passed, %d+ skipped, %d+ failed") then
+                io.write(line .. "\n")
+            end
+        end
+        local p, s, f, a = out:match(
+            "(%d+) passed, (%d+) skipped, (%d+) failed %((%d+) assertions%)"
+        )
+        if not p then
+            io.stderr:write("  FAIL: child produced no summary for " .. relName(path) .. "\n")
+            failed = failed + 1
+        else
+            passed = passed + tonumber(p)
+            skipped = skipped + tonumber(s)
+            failed = failed + tonumber(f)
+            total_asserts = total_asserts + tonumber(a)
+        end
+    end
+    io.write(string.format(
+        "\n%d passed, %d skipped, %d failed (%d assertions)\n",
+        passed, skipped, failed, total_asserts
+    ))
+    os.exit(failed == 0 and 0 or 1)
+end
+
+-- 子进程：只跑本进程收到的 spec（通常一个）
 _G.BOOK_TEST_ROOT = ROOT
 
 package.path = table.concat({
@@ -44,32 +130,6 @@ require("support.stubs").install()
 
 local Assert = require("support.assert")
 
-local function listSpecsRecursive(dir)
-    local out = {}
-    local p = io.popen('find "' .. dir .. '" -type f -name "*_spec.lua" 2>/dev/null | sort')
-    if p then
-        for line in p:lines() do
-            out[#out + 1] = line
-        end
-        p:close()
-    end
-    return out
-end
-
-local specs = {}
-if arg[1] then
-    for i = 1, #arg do
-        specs[#specs + 1] = arg[i]
-    end
-else
-    specs = listSpecsRecursive(ROOT .. "/tests")
-end
-
-if #specs == 0 then
-    io.stderr:write("no *_spec.lua found under tests/\n")
-    os.exit(1)
-end
-
 local failed = 0
 local passed = 0
 local skipped = 0
@@ -84,10 +144,6 @@ local function snapshot(t)
     end
     return s
 end
-
--- ffi 必须先于基线加载：若被卸载后再 require，luaopen_ffi 会重建 ctype 表，
--- 旧 cdata 的 ctypeid 越界，GC 回收时读野内存 → 偶发段错误（CI exit 139）。
-require("ffi")
 
 local base_preload = snapshot(package.preload)
 local base_loaded = snapshot(package.loaded)
@@ -126,16 +182,6 @@ local function restoreEnv()
             package.loaded[k] = v
         end
     end
-end
-
-local function relName(path)
-    if ROOT == "." then
-        return path:gsub("^%./", "")
-    end
-    if path:sub(1, #ROOT + 1) == ROOT .. "/" then
-        return path:sub(#ROOT + 2)
-    end
-    return path
 end
 
 for _, path in ipairs(specs) do
@@ -179,8 +225,9 @@ for _, path in ipairs(specs) do
     end
 end
 
+-- 子进程不加前导空行，避免父进程剥掉汇总后规格之间多空行
 io.write(string.format(
-    "\n%d passed, %d skipped, %d failed (%d assertions)\n",
+    "%d passed, %d skipped, %d failed (%d assertions)\n",
     passed, skipped, failed, total_asserts
 ))
 os.exit(failed == 0 and 0 or 1)
