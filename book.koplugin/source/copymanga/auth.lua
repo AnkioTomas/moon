@@ -90,7 +90,7 @@ end
 --- 账号密码登录；成功后写入 token / 用户信息。
 ---@param username string
 ---@param password string
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, rejected: boolean|nil) rejected = 服务端拒绝（非网络错误）
 ---@return { cancel: fun() }|nil
 function Auth.loginAsync(username, password, cb)
     username = Text.stripWhitespace(username)
@@ -119,13 +119,14 @@ function Auth.loginAsync(username, password, cb)
     }, function(res, err)
         local wire, decode_err = Client.decode(res and res.body, err)
         if not wire then
-            cb(nil, decode_err)
+            -- 第三个参数：服务端回了包并拒绝（密码错 / 风控），区别于网络错误。
+            cb(nil, decode_err, err == nil and res ~= nil)
             return
         end
         local results = type(wire.results) == "table" and wire.results or {}
         local token = results.token
         if type(token) ~= "string" or token == "" then
-            cb(nil, _("登录失败：未返回令牌"))
+            cb(nil, _("登录失败：未返回令牌"), true)
             return
         end
         save({
