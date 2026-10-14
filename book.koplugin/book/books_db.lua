@@ -12,7 +12,10 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 不变量：
   - touchPath / setReaderPrefs / setToc 新建行必须 deleted=1（只登记身份，禁止误上架）；
     upsert / upsertLocal 上架写 deleted=0 + sync_status=0。
-  - inserted_at 只在首次上架时写一次：身份行（0）经 upsert / upsertLocal / 远端在架行上架时补写，之后不改。
+  - inserted_at 只在首次上架时写一次：身份行（0）经 upsert / upsertLocal / 远端在架行上架时补写，
+    之后不改；但源声明了权威加入时间（reconcile 的 inserted_at_from_row，如 Kavita 的
+    lastChapterAddedUtc）时以源为准，否则整库同一次同步上架的行加入时间全相同，
+    图书馆「最近添加」只能按 id 排。
   - 本地删除 = deleted=1 + sync_status=0（墓碑），推云端成功后 remove 撕墓碑（连同依附表）；本地上架推 addToShelf 后 markSynced。
   - 远端 upsert 遇本地脏行（sync_status=0）不盖 title/authors/category/series/intro 与 deleted。
   - meta 只经 setMeta 写（三种 upsert 写完顺带调），按键合并、从不清键：
@@ -249,8 +252,9 @@ end
 --- 远端书架行写入。本地脏行（sync_status=0）保留展示字段。
 ---@param row table
 ---@param overwrite boolean|nil 用户强制刷新：meta 覆盖已有键，否则只补缺
+---@param dated boolean|nil 快照行自带权威加入时间：为真且 row.inserted_at 有值时覆盖已有的占位值
 ---@return boolean
-function BookDB.upsertRemote(row, overwrite)
+function BookDB.upsertRemote(row, overwrite, dated)
     local source_id = row.source_id
     local stable_id = row.stable_id
     local has_membership = row.deleted ~= nil
@@ -258,6 +262,8 @@ function BookDB.upsertRemote(row, overwrite)
     if row.deleted ~= nil then
         deleted = (row.deleted == true or tonumber(row.deleted) == 1) and 1 or 0
     end
+    -- 源给了加入时间才算权威；行里没带日期的仍走「只在 0 时补写」。
+    local authored = dated == true and row.inserted_at ~= nil
     local now = deleted == 0 and (tonumber(row.inserted_at) or os.time()) or 0
     return DB.exec(
         [[INSERT INTO books (
@@ -278,8 +284,10 @@ function BookDB.upsertRemote(row, overwrite)
                 THEN books.intro ELSE COALESCE(excluded.intro, books.intro) END,
             cover=COALESCE(NULLIF(excluded.cover, ''), books.cover),
             path=COALESCE(excluded.path, books.path),
-            inserted_at=CASE WHEN books.inserted_at=0 AND excluded.deleted=0
-                THEN excluded.inserted_at ELSE books.inserted_at END,
+            inserted_at=CASE
+                WHEN excluded.deleted=0 AND (?=1 OR books.inserted_at=0)
+                    THEN excluded.inserted_at
+                ELSE books.inserted_at END,
             deleted=CASE
                 WHEN books.sync_status=0 THEN books.deleted
                 WHEN ?=1 THEN excluded.deleted
@@ -291,6 +299,7 @@ function BookDB.upsertRemote(row, overwrite)
         source_id, stable_id, row.md5, row.title, row.authors,
         row.category, row.series, row.intro, row.cover, now, row.path,
         deleted,
+        authored and 1 or 0,
         has_membership and 1 or 0, has_membership and 1 or 0
     ) ~= nil and BookDB.setMeta(row, overwrite)
 end
@@ -335,7 +344,9 @@ end
 --- 远端书架快照入库：先把当前在架标软删，再 upsert 远端成员。
 ---@param source_id string
 ---@param books table[]
----@param opts { clear_missing_paths: boolean|nil, force: boolean|nil }|nil force：用户强制刷新，快照里的 meta 覆盖已有键
+---@param opts { clear_missing_paths: boolean|nil, force: boolean|nil, inserted_at_from_row: boolean|nil }|nil
+---   force：用户强制刷新，快照里的 meta 覆盖已有键；
+---   inserted_at_from_row：行自带权威加入时间（如 Kavita 的 lastChapterAddedUtc），覆盖本地占位值
 ---@return boolean ok
 ---@return integer|nil hidden 原本在架、本次快照里缺席的行数
 function BookDB.reconcile(source_id, books, opts)
@@ -360,7 +371,7 @@ function BookDB.reconcile(source_id, books, opts)
             for k, v in pairs(row) do copy[k] = v end
             copy.source_id = source_id
             copy.deleted = 0
-            if not BookDB.upsertRemote(copy, opts.force) then return nil end
+            if not BookDB.upsertRemote(copy, opts.force, opts.inserted_at_from_row) then return nil end
         end
         return count
     end)
