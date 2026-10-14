@@ -51,6 +51,17 @@ local function isBookFile(name)
     return BOOK_EXT[string.lower(ext)] == true
 end
 
+local MOBI_EXT = { mobi = true, azw = true, azw3 = true }
+
+--- 带 DRM 的 mobi / azw / azw3：KOReader 打不开，扫盘跳过。
+---@param name string
+---@param path string
+---@return boolean
+local function isDrmMobi(name, path)
+    local ext = name:match("%.([^.]+)$")
+    return ext ~= nil and MOBI_EXT[ext:lower()] == true and require("utils.mobi").encrypted(path)
+end
+
 --- 书库根目录：去尾部空白与斜杠。
 ---@param cfg table|nil
 ---@return string
@@ -323,7 +334,7 @@ local function scanFiles(root, flat)
                                 walk(path, category, name, depth + 1)
                             end
                         end
-                    elseif attr.mode == "file" and isBookFile(name) then
+                    elseif attr.mode == "file" and isBookFile(name) and not isDrmMobi(name, path) then
                         files[#files + 1] = {
                             name = name,
                             path = path,
@@ -417,6 +428,7 @@ return {
     SOURCE_ID = SOURCE_ID,
     defer = defer,
     isBookFile = isBookFile,
+    isDrmMobi = isDrmMobi,
     rootPath = rootPath,
     localRoot = localRoot,
     ensureParent = ensureParent,
