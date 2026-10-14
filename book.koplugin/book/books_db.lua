@@ -524,6 +524,13 @@ function BookDB.getByPath(path)
     ))
 end
 
+--- 清空某源全部书的分类 / 系列（本地源关闭「按文件夹分类」时，丢掉由目录派生的旧值）。
+---@param source_id string
+---@return boolean
+function BookDB.clearCategories(source_id)
+    return DB.exec("UPDATE books SET category=NULL, series=NULL WHERE source_id=?;", source_id) ~= nil
+end
+
 --- 文件落地后登记物理路径。
 --- 行不存在时补身份行：deleted=1（非书架成员）、sync_status=1。
 ---@param source_id string

@@ -72,8 +72,9 @@ end
 ---@param files table[] parseFile 产物
 ---@param known table<string, Book>
 ---@param rows table<string, Book> 本源全部行
+---@param flat boolean|nil 关闭「按文件夹分类」：分类 / 系列不由目录派生，不参与比较
 ---@return boolean
-local function upToDate(files, known, rows)
+local function upToDate(files, known, rows, flat)
     local shelved = 0
     for _id, row in pairs(rows) do
         if row.deleted == 0 and row.sync_status == 1 then shelved = shelved + 1 end
@@ -82,7 +83,9 @@ local function upToDate(files, known, rows)
     for _idx, f in ipairs(files) do
         local row = known[f.path]
         if not row or f.changed or row.md5 ~= f.md5 or row.deleted ~= 0 or row.sync_status ~= 1
-            or row.path ~= f.path then
+            or row.path ~= f.path
+            -- 打开「按文件夹分类」后分类 / 系列与目录不一致：要整轮写库
+            or not flat and ((row.category or "") ~= (f.category or "") or (row.series or "") ~= (f.series or "")) then
             return false
         end
     end
@@ -221,7 +224,7 @@ function Scan.scanAsync(self, cb, report)
         local opening, count
         report(_("正在扫描书库…"))
         job = Job.run(function(progress)
-            local files = scanFiles(root)
+            local files = scanFiles(root, self.cfg.folder_category == false)
             for i = 1, #files do
                 progress({ i, #files, files[i].name })
                 files[i] = parseFile(files[i], known, digests, skip, index, progress)
@@ -245,7 +248,7 @@ function Scan.scanAsync(self, cb, report)
                 if not ScanDB.save(index, files) then
                     require("utils.log").warn("book local scan index save failed")
                 end
-                local unchanged = upToDate(files, known, rows)
+                local unchanged = upToDate(files, known, rows, self.cfg.folder_category == false)
                 if unchanged or commitFiles(files, known, true) then
                     require("utils.log").dbg("book.perf local.scan", Perf.elapsedMs(started_at), "ms",
                         "files", #files, unchanged and "unchanged" or "committed")
@@ -326,7 +329,7 @@ function Scan.importAsync(self, temp_path, filename, cb)
     return self:indexOneAsync(target, cb)
 end
 
---- 手动改分类/系列 = 移动文件：分类是一级目录、系列是二级目录（无分类则系列无意义，丢弃）。
+--- 手动改分类/系列 = 移动文件（仅「按文件夹分类」开启时）：分类是一级目录、系列是二级目录（无分类则系列无意义，丢弃）。
 --- stable_id 即文件绝对路径，移动后跟着变；书籍相关身份经 renameStableId 迁移，
 --- 封面缓存与 KOReader 的 .sdr 目录（阅读进度/书签/笔记）改名跟随。
 --- 编辑对话框保存时同步调用 renameStableId 写库；FS 操作不另起子进程。
@@ -336,6 +339,10 @@ end
 ---@return string|nil, string|nil err
 ---@param self LocalClient
 function Scan.moveBook(self, stable_id, category, series)
+    -- 关闭「按文件夹分类」：分类 / 系列只是书库字段，编辑只改库、不动文件（也不建目录）。
+    if self.cfg.folder_category == false then
+        return stable_id
+    end
     local root = rootPath(self.cfg)
     if root == "" then
         return nil, _("未配置本地路径")

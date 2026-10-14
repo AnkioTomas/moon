@@ -174,6 +174,8 @@ return {
     ["全部语言…"] = "All languages…",
     ["六"] = "Sa",
     ["共%1"] = "%1",
+    ["按文件夹分类"] = "Categorize by folder",
+    ["第一层文件夹作为分类，第二层作为系列"] = "First-level folders become categories, second-level folders become series",
     ["关"] = "Off",
     ["关于"] = "About",
     ["关闭"] = "Close",

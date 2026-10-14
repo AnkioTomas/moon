@@ -6,7 +6,7 @@ local Assert = require("support.assert")
 local Stubs = require("support.stubs")
 
 -- 虚拟目录树：.moon（插件配置/缓存）与 .hidden 都不该被扫进书库
--- sub 是第 2 层（分类）；sub/deep 是第 3 层（系列）；x4 是第 4 层，沿用分类 / 系列继续收；bad.epub 模拟引擎解析失败
+-- sub 是第 2 层（分类）；sub/deep 是第 3 层（系列）；x4 是第 4 层，按约定不识别；bad.epub 模拟引擎解析失败
 -- a.sdr 模拟 KOReader 边车目录（a.epub → a.sdr）：扫盘不当下钻；moveBook 时的迁移见 book.sidecar 桩
 local DENIED_DIRS = {}
 local COVERS = {}
@@ -73,6 +73,9 @@ package.preload["libs/libkoreader-lfs"] = function()
         end,
         mkdir = function()
             return true
+        end,
+        symlinkattributes = function(path, request)
+            return require("libs/libkoreader-lfs").attributes(path, request)
         end,
     }
 end
@@ -377,15 +380,12 @@ do
     Stubs.flush()
     Assert.is_true(ok)
     Assert.is_nil(err)
-    -- 白名单内 7 本进完整快照：a.epub / note.md / c.pdf / d.djvu / bad.epub / e.epub（第 3 层）/ f.epub（第 4 层）
-    Assert.len(upserts, 7)
+    -- 白名单内 6 本进完整快照：a.epub / note.md / c.pdf / d.djvu / bad.epub / e.epub（第 3 层）
+    Assert.len(upserts, 6)
     Assert.is_true(#dirs_scanned > 0)
-    -- 第 4 层照样下钻（Kindle documents/作者/书名/ 这类深目录），分类 / 系列沿用前两级
-    local f4 = db_rows[rowKey("local", "/books/sub/deep/x4/f.epub")]
-    Assert.not_nil(f4)
-    Assert.eq(f4.category, "sub")
-    Assert.eq(f4.series, "deep")
-    Assert.is_true(hasValue(dirs_scanned, "/books/sub/deep/x4"))
+    -- 第 4 层不识别
+    Assert.is_nil(db_rows[rowKey("local", "/books/sub/deep/x4/f.epub")])
+    Assert.is_false(hasValue(dirs_scanned, "/books/sub/deep/x4"))
     -- KOReader .sdr 边车目录不下钻、不入库
     Assert.is_false(hasValue(dirs_scanned, "/books/a.sdr"))
     Assert.is_nil(db_rows[rowKey("local", "/books/a.sdr/metadata.epub.lua")])
@@ -419,8 +419,8 @@ do
     Assert.is_nil(db_rows[rowKey("local", "/books/gone.epub")].path)
     Assert.is_false(hasValue(removed_files, "/data/.moon/cache/local/image//books/gone.epub.png"))
     Assert.not_nil(db_rows[rowKey("local", "/books/a.epub")])
-    -- 封面：解析成功的 6 本都尝试提取（bad.epub 无引擎不提取）
-    Assert.len(covers_saved, 6)
+    -- 封面：解析成功的 5 本都尝试提取（bad.epub 无引擎不提取）
+    Assert.len(covers_saved, 5)
 end
 
 -- ── 已有行缺少作者/简介时，扫描必须补齐元数据，不能被 title 命中永久冻结 ──
@@ -562,9 +562,9 @@ do
     local c = Client.new({ path = "/books" })
     c:scanAsync(function() end)
     Stubs.flush()
-    Assert.len(opened, 6)
-    Assert.eq(props_read, 6)
-    Assert.len(hashed, 7)
+    Assert.len(opened, 5)
+    Assert.eq(props_read, 5)
+    Assert.len(hashed, 6)
     db_rows[rowKey("local", "/books/a.epub")].percent = 42
 
     -- 同一会话再扫：不算 md5、不开文档、不写库
@@ -576,7 +576,7 @@ do
     Assert.is_true(#dirs_scanned > 0)
     Assert.len(hashed, 0)
     Assert.len(opened, 0)
-    Assert.eq(props_read, 6)
+    Assert.eq(props_read, 5)
     Assert.len(upserts, 0, "盘与库一致：不 reconcile")
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].percent, 42)
 
@@ -600,7 +600,7 @@ do
     c:scanAsync(function() end)
     Stubs.flush()
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 0)
-    Assert.len(upserts, 7)
+    Assert.len(upserts, 6)
 
     -- 索引丢了：退回旧行为，缺封面的书补提一次，元数据不重解析
     scan_rows = {}
@@ -609,11 +609,11 @@ do
     opened, covers_saved, hashed = {}, {}, {}
     c:scanAsync(function() end)
     Stubs.flush()
-    Assert.len(hashed, 7)
-    Assert.len(opened, 5)
+    Assert.len(hashed, 6)
+    Assert.len(opened, 4)
     Assert.is_false(hasValue(opened, "/books/a.epub"))
-    Assert.eq(props_read, 6)
-    Assert.len(covers_saved, 5)
+    Assert.eq(props_read, 5)
+    Assert.len(covers_saved, 4)
 
     opened = {}
     c:scanAsync(function() end)
@@ -634,6 +634,25 @@ do
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].title, "只有书名")
 
     util.partialMD5 = real_md5
+end
+
+-- ── 关闭「按文件夹分类」：不由目录派生分类 / 系列（手动编辑保留），第 4 层也收；再打开时按目录重算 ──────
+do
+    reset()
+    db_rows[rowKey("local", "/books/sub/c.pdf")] = {
+        source_id = "local", stable_id = "/books/sub/c.pdf", title = "c", path = "/books/sub/c.pdf",
+        md5 = "md5", category = "手动", deleted = 0, sync_status = 1,
+    }
+    Client.new({ path = "/books", folder_category = false }):scanAsync(function() end)
+    Stubs.flush()
+    Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].category, "手动", "关闭时扫盘不覆盖手动分类")
+    Assert.is_nil(db_rows[rowKey("local", "/books/sub/deep/e.epub")].series)
+    Assert.not_nil(db_rows[rowKey("local", "/books/sub/deep/x4/f.epub")])
+    upserts = {}
+    Client.new({ path = "/books" }):scanAsync(function() end)
+    Stubs.flush()
+    Assert.is_true(#upserts > 0, "分类与目录不一致不走 upToDate 快路径")
+    Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].category, "sub")
 end
 
 -- ── 同路径换了文件（删书后拷入同名新书）：删旧封面重提、刷新元数据、绕过位图缓存 ──────
@@ -928,6 +947,14 @@ do
     local before_files, before_renames = #renamed, #renames
     new_id, err = c:moveBook("/books/sub/c.pdf", "sub", nil)
     Assert.eq(new_id, "/books/sub/c.pdf")
+
+    -- 关闭「按文件夹分类」：编辑分类 / 系列只改库，不移动文件、不建目录
+    local flat_files, flat_renames = #renamed, #renames
+    new_id, err = Client.new({ path = "/books", folder_category = false }):moveBook("/books/sub/c.pdf", "新分类", "新系列")
+    Assert.is_nil(err)
+    Assert.eq(new_id, "/books/sub/c.pdf")
+    Assert.eq(#renamed, flat_files)
+    Assert.eq(#renames, flat_renames)
     Assert.is_nil(err)
     Assert.eq(#renamed, before_files)
     Assert.eq(#renames, before_renames)

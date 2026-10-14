@@ -30,7 +30,7 @@ function Detail:openEditor()
 end
 
 --- 保存编辑结果到 books 表（进度/简介/md5 保留），完成后 reload 重绘。
---- 本地源：分类/系列即目录层级，改动会移动文件、stable_id 跟着变
+--- 本地源开启「按文件夹分类」时：分类/系列即目录层级，改动会移动文件、stable_id 跟着变；关闭时只改库
 ---（opens/reading_stats/pending_progress 由 moveBook 里的 renameStableId 迁移）。
 ---@param fields table 对话框字段值：书名/作者/分类/系列
 function Detail:saveMeta(fields)
