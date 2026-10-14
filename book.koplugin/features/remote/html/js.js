@@ -1,4 +1,106 @@
-/* 远程管理共享 JS：文件管理 / 远程输入页面共用（经 /js.js 路由加载） */
+// ── 多语言：跟随 KOReader 语言。源文案即简体中文；/api/i18n 下发 {lang, html, strings}，
+// 每次页面加载取一次。t() 查表（支持 %1 %2 占位），DOM 文本与 title/placeholder/aria-label
+// 由 MutationObserver 自动替换，动态生成的对话框/提示/菜单无需逐处改调用。
+var I18N = (function () {
+    var data = { lang: 'zh_CN', html: 'zh-CN', strings: {} };
+    try {
+        var x = new XMLHttpRequest();
+        x.open('GET', '/api/i18n', false);
+        x.send();
+        if (x.status === 200) {
+            var d = JSON.parse(x.responseText);
+            if (d && typeof d.strings === 'object') data = d;
+        }
+    } catch (e) { /* 取不到就用中文 */ }
+    try { localStorage.setItem('moon-lang', data.lang || 'zh_CN'); } catch (e) {}
+    var dict = data.strings || {};
+    var tpls = [];
+    Object.keys(dict).forEach(function (k) {
+        if (k.indexOf('%1') < 0) return;
+        var lit = k.replace(/%\d/g, '').length;
+        var re = '^' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%(\d)/g, '([\\s\\S]+?)') + '$';
+        tpls.push({ re: new RegExp(re), order: (k.match(/%\d/g) || []).map(function (m) { return +m.charAt(1); }), out: dict[k], lit: lit });
+    });
+    tpls.sort(function (a, b) { return b.lit - a.lit; });
+    function fill(s, args) {
+        return s.replace(/%(\d)/g, function (m, n) { var v = args[n - 1]; return v == null ? m : v; });
+    }
+    // 整句查表；失败再套模板（捕获段递归翻译，如「主题：浅色」）
+    function tr(s, depth) {
+        if (!s) return s;
+        if (Object.prototype.hasOwnProperty.call(dict, s)) return dict[s];
+        if ((depth || 0) > 2) return s;
+        for (var i = 0; i < tpls.length; i++) {
+            var m = tpls[i].re.exec(s);
+            if (!m) continue;
+            var args = [];
+            tpls[i].order.forEach(function (n, j) { args[n - 1] = tr(m[j + 1], (depth || 0) + 1); });
+            return fill(tpls[i].out, args);
+        }
+        return s;
+    }
+    function t(key) {
+        var args = Array.prototype.slice.call(arguments, 1);
+        var s = Object.prototype.hasOwnProperty.call(dict, key) ? dict[key] : key;
+        return args.length ? fill(s, args) : s;
+    }
+    var active = Object.keys(dict).length > 0;
+    var ATTRS = ['title', 'placeholder', 'aria-label', 'alt'];
+    // 文件名、路径等用户数据打 translate="no"，不参与替换
+    function skip(e) { return !e || (e.closest && e.closest('[translate="no"]')); }
+    function trText(node) {
+        if (skip(node.parentNode)) return;
+        var v = node.nodeValue;
+        if (!v || !/[\u3000-\u9fff\uff00-\uffef]/.test(v)) return;
+        var m = /^(\s*)([\s\S]*?)(\s*)$/.exec(v);
+        var out = tr(m[2]);
+        if (out !== m[2]) node.nodeValue = m[1] + out + m[3];
+    }
+    function trEl(e) {
+        if (e.nodeType !== 1 || skip(e)) return;
+        var key = e.getAttribute('data-i18n');
+        if (key) e.textContent = t(key);
+        ATTRS.forEach(function (a) {
+            var v = e.getAttribute(a);
+            if (v && /[\u3000-\u9fff\uff00-\uffef]/.test(v)) {
+                var out = tr(v.trim());
+                if (out !== v.trim()) e.setAttribute(a, out);
+            }
+        });
+    }
+    function walk(root) {
+        if (root.nodeType === 3) return trText(root);
+        if (root.nodeType !== 1 || root.tagName === 'SCRIPT' || root.tagName === 'STYLE' || root.tagName === 'TEXTAREA') return;
+        trEl(root);
+        var w = document.createTreeWalker(root, 5, null);
+        var n;
+        while ((n = w.nextNode())) {
+            if (n.nodeType === 3) {
+                var p = n.parentNode && n.parentNode.tagName;
+                if (p !== 'SCRIPT' && p !== 'STYLE' && p !== 'TEXTAREA') trText(n);
+            } else trEl(n);
+        }
+    }
+    function start() {
+        document.documentElement.lang = data.html || 'zh-CN';
+        if (active) {
+            walk(document.documentElement);
+            new MutationObserver(function (list) {
+                list.forEach(function (r) {
+                    if (r.type === 'characterData') trText(r.target);
+                    else if (r.type === 'attributes') trEl(r.target);
+                    else r.addedNodes.forEach(walk);
+                });
+            }).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ATTRS.concat('data-i18n') });
+        }
+        document.documentElement.classList.remove('i18n-wait');
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+    return { lang: data.lang, t: t, tr: function (s) { return tr(s); } };
+})();
+function t() { return I18N.t.apply(null, arguments); }
+
+/* 远程管理共享 JS：各页面共用（经 /js.js 路由加载） */
 function fmt(n) {
     if (n == null) return '';
     if (n > 1073741824) return (n / 1073741824).toFixed(1) + ' G';
@@ -155,3 +257,30 @@ function dialog(o) {
         }
     });
 }
+
+/* 主题：跟随系统 → 浅色 → 深色 循环；存 localStorage，<head> 里的小脚本在首帧前套用，避免闪白。 */
+(function () {
+    var btn = el('theme-toggle');
+    if (!btn) return;
+    var order = ['auto', 'light', 'dark'];
+    var label = { auto: '跟随系统', light: '浅色', dark: '深色' };
+    function current() {
+        var t = document.documentElement.getAttribute('data-theme');
+        return t === 'light' || t === 'dark' ? t : 'auto';
+    }
+    function show(t) {
+        btn.title = '主题：' + label[t];
+        btn.setAttribute('aria-label', '切换主题（当前：' + label[t] + '）');
+    }
+    show(current());
+    btn.onclick = function () {
+        var next = order[(order.indexOf(current()) + 1) % order.length];
+        if (next === 'auto') document.documentElement.removeAttribute('data-theme');
+        else document.documentElement.setAttribute('data-theme', next);
+        try {
+            if (next === 'auto') localStorage.removeItem('moon-theme');
+            else localStorage.setItem('moon-theme', next);
+        } catch (e) {}
+        show(next);
+    };
+})();

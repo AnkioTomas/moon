@@ -869,6 +869,405 @@ local function tempPath()
     )
 end
 
+-- ── 复制 / 移动 / 属性 / 文本写入 / 打包（远程文件管理扩展）──────────
+
+local MAX_TREE_ENTRIES = 20000
+local MAX_TEXT_BYTES = 4 * 1024 * 1024
+
+--- 同目录下不撞名的新路径：name (2).ext、name (3).ext …（目录不拆扩展名）。
+---@param path string
+---@param is_dir boolean
+---@return string
+local function uniquePath(path, is_dir)
+    local lfs = require("libs/libkoreader-lfs")
+    local dir, name = path:match("^(.*)/([^/]+)$")
+    local stem, ext = name, ""
+    if not is_dir then
+        local s, e = name:match("^(.+)(%.[^.]+)$")
+        if s then stem, ext = s, e end
+    end
+    local n, target = 2, path
+    while lfs.symlinkattributes(target) do
+        target = string.format("%s/%s (%d)%s", dir, stem, n, ext)
+        n = n + 1
+    end
+    return target
+end
+
+--- 递归复制：不跟随软链接（链接跳过，免得把范围外的内容拷进来）；凭证文件跳过。
+---@param src string
+---@param dst string
+---@param budget table { left: number }
+---@return boolean|nil, any
+local function copyTree(src, dst, budget)
+    local lfs = require("libs/libkoreader-lfs")
+    budget.left = budget.left - 1
+    if budget.left < 0 then
+        return nil, "too many entries"
+    end
+    local attr = lfs.symlinkattributes(src)
+    if not attr then
+        return nil, "not found"
+    end
+    if attr.mode == "link" or isSecret(src) then
+        return true
+    end
+    if attr.mode == "file" then
+        return copyFile(src, dst)
+    end
+    if attr.mode ~= "directory" then
+        return true
+    end
+    local made, err = lfs.mkdir(dst)
+    if not made then
+        return nil, err
+    end
+    local ok, iter, state = pcall(lfs.dir, src)
+    if not ok or not iter then
+        return nil, "cannot open"
+    end
+    for name in iter, state do
+        if name ~= "." and name ~= ".." then
+            local c_ok, c_err = copyTree(src .. "/" .. name, dst .. "/" .. name, budget)
+            if not c_ok then
+                return nil, c_err
+            end
+        end
+    end
+    return true
+end
+
+--- 复制 / 移动一个条目到 to（完整目标路径）。
+--- conflict：ask（默认，目标存在报 target exists）/ skip / rename（保留两份）/ overwrite（替换）。
+--- 移动先 os.rename，跨设备失败再复制后删源。
+---@param op "copy"|"move"
+---@param path string
+---@param to string
+---@param conflict string|nil
+---@return string|nil output 实际目标路径
+---@return any err
+local function transfer(op, path, to, conflict)
+    local lfs = require("libs/libkoreader-lfs")
+    if (op == "move" and isProtected(path)) or isProtected(to) then
+        return nil, "protected path"
+    end
+    local src, dst = newPath(path), newPath(to)
+    if not src or not dst then
+        return nil, "path outside managed roots"
+    end
+    if isSecret(src) or isSecret(dst) then
+        return nil, "protected path"
+    end
+    local attr = lfs.symlinkattributes(src)
+    if not attr then
+        return nil, "not found"
+    end
+    if dst == src or Text.pathContains(src, dst) then
+        return nil, "target inside source"
+    end
+    if lfs.symlinkattributes(dst) then
+        if conflict == "skip" then
+            return dst
+        elseif conflict == "rename" then
+            dst = uniquePath(dst, attr.mode == "directory")
+        elseif conflict == "overwrite" then
+            if isProtected(dst) then
+                return nil, "protected path"
+            end
+            local purged, p_err = purge(dst)
+            if not purged then
+                return nil, p_err
+            end
+        else
+            return nil, "target exists"
+        end
+    end
+    if op == "move" and os.rename(src, dst) then
+        return dst
+    end
+    local copied, c_err = copyTree(src, dst, { left = MAX_TREE_ENTRIES })
+    if not copied then
+        purge(dst)
+        return nil, c_err
+    end
+    if op == "move" then
+        local purged, p_err = purge(src)
+        if not purged then
+            return nil, p_err
+        end
+    end
+    return dst
+end
+
+---@param op "copy"|"move"
+---@param path string
+---@param to string
+---@param conflict string|nil
+---@param cb fun(ok: boolean|nil, err: any, output: string|nil)
+local function transferAsync(op, path, to, conflict, cb)
+    runFilesystem("remote-" .. op, function()
+        return transfer(op, path, to, conflict)
+    end, function(output, err)
+        cb(output ~= nil, err, output)
+    end)
+end
+
+--- 条目属性：类型、大小、时间、权限、属主、链接目标；目录另统计文件数 / 文件夹数 / 总大小。
+---@param path string
+---@return table|nil, any
+local function statPath(path)
+    local lfs = require("libs/libkoreader-lfs")
+    local entry = newPath(path)
+    if not entry then
+        return nil, "path outside managed roots"
+    end
+    local attr = lfs.symlinkattributes(entry)
+    if not attr then
+        return nil, "not found"
+    end
+    local info = {
+        path = entry,
+        name = entry:match("([^/]+)$") or entry,
+        type = attr.mode,
+        size = attr.size,
+        mtime = attr.modification,
+        atime = attr.access,
+        ctime = attr.change,
+        permissions = attr.permissions,
+        uid = attr.uid,
+        gid = attr.gid,
+        blocks = attr.blocks,
+        protected = isProtectedDisplay(entry),
+    }
+    if attr.mode == "link" then
+        info.target = attr.target or require("ffi/util").realpath(entry)
+    end
+    if attr.mode == "directory" then
+        local files, dirs, bytes, blocks, left = 0, 0, 0, 0, MAX_TREE_ENTRIES
+        local function walk(dir)
+            local ok, iter, state = pcall(lfs.dir, dir)
+            if not ok or not iter then return end
+            for name in iter, state do
+                if name ~= "." and name ~= ".." then
+                    left = left - 1
+                    if left < 0 then
+                        info.truncated = true
+                        return
+                    end
+                    local child = dir .. "/" .. name
+                    local a = lfs.symlinkattributes(child)
+                    if a and a.mode == "directory" then
+                        dirs = dirs + 1
+                        walk(child)
+                    elseif a then
+                        files = files + 1
+                        bytes = bytes + (a.mode == "file" and (a.size or 0) or 0)
+                        blocks = blocks + (a.blocks or 0)
+                    end
+                    if info.truncated then return end
+                end
+            end
+        end
+        walk(entry)
+        info.files, info.dirs, info.size, info.blocks = files, dirs, bytes, blocks + (attr.blocks or 0)
+    end
+    return info
+end
+
+---@param path string
+---@param cb fun(info: table|nil, err: any)
+local function statAsync(path, cb)
+    runFilesystem("remote-stat", function()
+        return statPath(path)
+    end, cb)
+end
+
+--- 写文本文件（文本编辑器保存 / 新建文件）：先写同目录临时文件再 rename，断电不留半截。
+---@param path string
+---@param text string
+---@param create boolean 为 true 时目标已存在即失败
+---@return boolean|nil, any
+local function writeText(path, text, create)
+    local lfs = require("libs/libkoreader-lfs")
+    if #text > MAX_TEXT_BYTES then
+        return nil, "file too large"
+    end
+    if isProtected(path) then
+        return nil, "protected path"
+    end
+    local target = newPath(path)
+    if not target then
+        return nil, "path outside managed roots"
+    end
+    if isSecret(target) then
+        return nil, "protected path"
+    end
+    local attr = lfs.attributes(target)
+    if attr and create then
+        return nil, "already exists"
+    end
+    if attr and attr.mode ~= "file" then
+        return nil, "target is not a file"
+    end
+    local staging = target .. ".moon-write.part"
+    local file, err = io.open(staging, "wb")
+    if not file then
+        return nil, err
+    end
+    local ok, w_err = file:write(text)
+    local closed, c_err = file:close()
+    if not ok or not closed then
+        os.remove(staging)
+        return nil, w_err or c_err or "write failed"
+    end
+    local moved, m_err = os.rename(staging, target)
+    if not moved then
+        os.remove(staging)
+        return nil, m_err
+    end
+    return true
+end
+
+--- 打包下载：把若干条目（目录递归）写成不压缩的 ZIP 临时文件。不跟随软链接，凭证文件跳过。
+---@param paths string[]
+---@return string|nil output 临时 zip 路径
+---@return any err
+local function zipPaths(paths)
+    local lfs = require("libs/libkoreader-lfs")
+    local entries = {}
+    local left, total = MAX_ARCHIVE_ENTRIES, 0
+    local function collect(real, name)
+        local attr = lfs.symlinkattributes(real)
+        if not attr or attr.mode == "link" or isSecret(real) then
+            return true
+        end
+        left = left - 1
+        if left < 0 then
+            return nil, "too many archive entries"
+        end
+        if attr.mode == "file" then
+            total = total + (attr.size or 0)
+            if total > MAX_EXTRACT_BYTES then
+                return nil, "archive too large"
+            end
+            entries[#entries + 1] = { name, real }
+            return true
+        end
+        if attr.mode ~= "directory" then
+            return true
+        end
+        entries[#entries + 1] = { name, real }
+        local ok, iter, state = pcall(lfs.dir, real)
+        if not ok or not iter then
+            return nil, "cannot open"
+        end
+        for child in iter, state do
+            if child ~= "." and child ~= ".." then
+                local c_ok, c_err = collect(real .. "/" .. child, name .. "/" .. child)
+                if not c_ok then
+                    return nil, c_err
+                end
+            end
+        end
+        return true
+    end
+    for _idx, path in ipairs(paths) do
+        local real = newPath(path)
+        if not real then
+            return nil, "path outside managed roots"
+        end
+        if not lfs.symlinkattributes(real) then
+            return nil, "not found"
+        end
+        local ok, err = collect(real, real:match("([^/]+)$"))
+        if not ok then
+            return nil, err
+        end
+    end
+    local output = tempPath() .. ".zip"
+    local writer = require("ffi/archiver").Writer:new()
+    if not writer:open(output, "zip") then
+        return nil, writer.err or "cannot create archive"
+    end
+    writer:setZipCompression("store")
+    for _idx, item in ipairs(entries) do
+        if not writer:addPath(item[1], item[2], false) then
+            local err = writer.err
+            writer:close()
+            os.remove(output)
+            return nil, err or "archive write failed"
+        end
+    end
+    writer:close()
+    return output
+end
+
+--- 一键日志包：插件日志（含轮转件）+ KOReader crash.log 等，内容脱敏，附 info.txt。
+--- 只按文件名白名单收日志，settings/cookie 等凭证文件不会进包。
+---@return string|nil output 临时 zip 路径
+---@return any err
+local function buildLogsZip()
+    local Logs = require("features.remote.logs")
+    local DataStorage = require("datastorage")
+    local Paths = require("utils.paths")
+    local lfs = require("libs/libkoreader-lfs")
+    local Device = require("device")
+    local function is(name)
+        local f = Device[name]
+        local ok, v = pcall(function() return f and f(Device) end)
+        return ok and v
+    end
+    local KO = { "^crash.*%.log$", "^crash%.log%.old$", "^crash%.log%.%d+$", "^reader%.log$", "^koreader.*%.log$" }
+    local data = DataStorage:getFullDataDir()
+    local install = lfs.currentdir() or "."
+    local spec = {
+        { dir = Paths.root(), prefix = "moon/", patterns = { "^book%.log" } },
+        { dir = data, prefix = "koreader-data/", patterns = KO },
+        { dir = install, prefix = "koreader-install/", patterns = KO },
+        { dir = "/tmp", prefix = "tmp/", patterns = { "^koreader.*%.log$", "^crash.*%.log$" } },
+    }
+    if install ~= data and DataStorage.getDataDir and DataStorage:getDataDir() ~= data then
+        spec[#spec + 1] = { dir = DataStorage:getDataDir(), prefix = "koreader-datadir/", patterns = KO }
+    end
+    if is("isKobo") then
+        spec[#spec + 1] = { dir = "/mnt/onboard/.kobo", prefix = "kobo/", patterns = { "%.log$" } }
+        spec[#spec + 1] = { dir = "/mnt/onboard/.adds/koreader", prefix = "kobo-koreader/", patterns = KO }
+    elseif is("isKindle") then
+        spec[#spec + 1] = { dir = "/mnt/us/koreader", prefix = "kindle-koreader/", patterns = KO }
+    elseif is("isPocketBook") then
+        spec[#spec + 1] = { dir = "/mnt/ext1/applications/koreader", prefix = "pocketbook-koreader/", patterns = KO }
+        spec[#spec + 1] = { dir = "/mnt/ext1/system/logs", prefix = "pocketbook/", patterns = { "%.log$" } }
+    end
+    local files, missing = Logs.collect(lfs, spec)
+    local notes = {}
+    for _idx, dir in ipairs(missing) do notes[#notes + 1] = "skipped (not found): " .. dir end
+
+    local extras = {}
+    -- 设置只导出键名，不含值（凭证都在值里）
+    local ok_s, keys = pcall(function() return Logs.settingsKeys(G_reader_settings and G_reader_settings.data) end)
+    if ok_s then extras[#extras + 1] = { name = "koreader-settings-keys.txt", text = keys } end
+    if is("isAndroid") then
+        -- 应用只能读到自己进程的 logcat；取不到就记 skipped
+        local ok_l, text = pcall(function()
+            local h = io.popen("logcat -d -t 5000 2>/dev/null")
+            if not h then return "" end
+            local t = h:read("*a") or ""
+            h:close()
+            return t
+        end)
+        extras[#extras + 1] = { name = "android-logcat.txt", text = ok_l and text or "" }
+    end
+
+    local ok_v, Version = pcall(require, "version")
+    local info = {
+        plugin_version = require("bookversion"),
+        koreader_version = ok_v and Version:getCurrentRevision() or "?",
+        device = tostring(Device.model or "?"),
+        language = require("gettext").current_lang or G_reader_settings:readSetting("language") or "C",
+    }
+    return Logs.build(tempPath() .. ".zip", files, info, require("ffi/archiver").Writer, extras, notes)
+end
+
 -- ── 启停 ─────────────────────────────────────────────
 
 --- Kindle 防火墙打孔（照 httpinspector 语义：start 打、stop 堵）。
@@ -924,6 +1323,23 @@ function Remote.start()
                 cb(renameTo(path, to))
             end,
             extract = extractZipAsync,
+            transfer = transferAsync,
+            stat = statAsync,
+            write_text = function(path, text, create, cb)
+                runFilesystem("remote-write", function()
+                    return writeText(path, text, create)
+                end, cb)
+            end,
+            zip = function(paths, cb)
+                runFilesystem("remote-zip", function()
+                    return zipPaths(paths)
+                end, cb)
+            end,
+            logs_zip = function(cb)
+                -- 先把缓冲里的插件日志刷盘，打包才完整
+                pcall(require("utils.log").flush)
+                runFilesystem("remote-logs", buildLogsZip, cb)
+            end,
             temp_path = tempPath,
             is_protected = isProtectedDisplay,
             get_input = getInput,

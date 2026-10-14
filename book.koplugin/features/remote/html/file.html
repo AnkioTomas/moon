@@ -3,60 +3,90 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>文件管理 - 远程管理</title>
+<link rel="icon" href="/favicon.ico?v=2" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<meta name="theme-color" content="#263a52">
 <link rel="stylesheet" href="/style.css">
+<script>try{var t=localStorage.getItem('moon-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);var l=localStorage.getItem('moon-lang');if(l&&!/^zh_CN/.test(l))document.documentElement.classList.add('i18n-wait')}catch(e){}</script>
 </head>
 <body class="file-page">
+<header class="appbar"><div class="appbar-inner">
+<a class="appbar-brand" href="/"><img src="/logo.jpg" alt="" width="28" height="28"><span>月读远程管理</span></a>
+<nav class="appbar-nav" aria-label="页面导航"><a href="/"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span>首页</span></a><a href="/file.html" aria-current="page"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>文件</span></a><a href="/input.html"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M20 5H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z"/></svg><span>输入</span></a><a href="/clipboard.html"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1S9.6 1.84 9.18 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm5 14H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg><span>剪贴板</span></a><a href="/settings.html"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.47.47 0 0 0-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/></svg><span>配置</span></a><a href="/update.html"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z"/></svg><span>更新</span></a></nav>
+<button type="button" id="theme-toggle" class="icon-btn" aria-label="切换主题" title="主题：跟随系统"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18V4a8 8 0 0 1 0 16z"/></svg></button>
+</div></header>
 <main class="file-main">
-<nav class="explorer-nav" aria-label="目录导航">
-<a class="explorer-home" href="/" aria-label="返回远程管理">
-<img src="/logo.jpg" alt="" width="28" height="28"><span>文件管理</span>
-</a>
-<button type="button" id="back" title="后退" aria-label="后退" disabled>←</button>
-<button type="button" id="parent" title="上一级" aria-label="上一级" disabled>↑</button>
-<button type="button" id="refresh" title="刷新" aria-label="刷新">↻</button>
-<div class="address-bar">
-<span aria-hidden="true">▰</span>
-<div id="path" class="path" aria-live="polite"></div>
+<div class="tab-strip">
+<div class="file-action-toolbar" role="toolbar" aria-label="文件操作">
+<div class="fa-group fa-left">
+<button type="button" id="sel-all" class="file-action">全选</button>
+<button type="button" id="sel-invert" class="file-action" disabled>反选</button>
+<button type="button" id="sel-type" class="file-action" disabled>类选</button>
 </div>
-<span class="titlebar-credit">Ankio · <a href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net</a></span>
+<div class="fa-group fa-right">
+<button type="button" id="mk" class="file-action">新建</button>
+<button type="button" id="pickfile" class="file-action">上传</button>
+<button type="button" id="sel-download" class="file-action" disabled>下载</button>
+<button type="button" id="sel-copy" class="file-action" disabled>复制</button>
+<button type="button" id="sel-cut" class="file-action" disabled>剪切</button>
+<button type="button" id="sel-delete" class="file-action" disabled>删除</button>
+<button type="button" id="sel-rename" class="file-action" disabled>重命名</button>
+<button type="button" id="sel-props" class="file-action" disabled>属性</button>
+</div>
+<input type="file" id="file" multiple hidden>
+<input type="file" id="folder" webkitdirectory directory multiple hidden>
+<button type="button" id="pickfolder" hidden>上传文件夹</button>
+</div>
+<div class="tab-bar" id="tabs" role="tablist" aria-label="目录标签"></div>
+</div>
+<nav class="crumb-bar" aria-label="目录导航">
+<button type="button" id="back" hidden>后退</button>
+<div class="address-bar" id="address" title="点击空白处输入路径">
+<div id="path" class="path breadcrumb" aria-live="polite"></div>
+<input id="pathinput" class="path-input" type="text" spellcheck="false" aria-label="输入路径" hidden>
+</div>
+<div class="crumb-actions">
+<button type="button" id="parent" class="crumb-action" title="上一级（Backspace）" aria-label="上一级" disabled><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 5l-7 7h4.5v7h5v-7H19z"/></svg></button>
+<button type="button" id="hiddenbtn" class="crumb-action wide-only" title="隐藏文件" aria-label="隐藏文件" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 5C7 5 2.7 8.1 1 12.5 2.7 16.9 7 20 12 20s9.3-3.1 11-7.5C21.3 8.1 17 5 12 5zm0 12.5a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg></button>
+<button type="button" id="sortbtn" class="crumb-action wide-only" title="排序方式" aria-label="排序方式"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M3 6h18v2H3zm0 5h12v2H3zm0 5h6v2H3z"/></svg></button>
+<button type="button" id="refresh" class="crumb-action wide-only" title="刷新" aria-label="刷新"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></svg></button>
+<button type="button" id="more" class="crumb-action" title="更多" aria-label="更多" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
+</div>
 </nav>
 
 <div class="explorer-shell">
 <aside class="explorer-sidebar">
 <div class="sidebar-title">此阅读器</div>
 <div id="quick" class="quick-list"></div>
+<div class="sidebar-credit">月读 · Ankio · <a href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net</a></div>
 </aside>
 
 <section class="explorer-content" aria-labelledby="list-title">
 <div id="dropzone" class="drop-overlay" hidden>
 <strong>释放以上传</strong>
-<span>文件和文件夹将上传到当前目录</span>
-</div>
-<div class="command-bar" role="toolbar" aria-label="文件操作">
-<button type="button" id="pickfile">＋ 上传文件</button>
-<button type="button" id="pickfolder">▰ 上传文件夹</button>
-<button type="button" id="mk">新建文件夹</button>
-<input type="file" id="file" multiple hidden>
-<input type="file" id="folder" webkitdirectory directory multiple hidden>
-<span class="command-spacer"></span>
-<span id="count" class="count-badge">0 项</span>
+<span>文件和文件夹将加入上传列表</span>
 </div>
 <h1 id="list-title" class="visually-hidden">目录内容</h1>
-<div class="table-wrap">
-<table>
-<thead>
-<tr><th scope="col">名称</th><th scope="col">大小</th><th scope="col">修改时间</th><th scope="col" class="ops-head">操作</th></tr>
-</thead>
+<span id="count" class="visually-hidden" aria-live="polite">0 项</span>
+<div class="table-wrap" id="listwrap" tabindex="0">
+<table class="file-list">
 <tbody id="list"></tbody>
 </table>
-<div id="preview" class="preview" aria-label="图片预览"></div>
 </div>
 <pre id="log" class="log status-log" aria-live="polite"></pre>
 </section>
 </div>
 </main>
+
+<div id="clipfab" class="clip-fab" hidden>
+<span id="clipinfo" class="clip-info"></span>
+<button type="button" id="clippaste" class="fab paste" title="粘贴到当前目录">粘贴</button>
+<button type="button" id="clipcancel" class="fab cancel" title="取消">✕</button>
+</div>
+
+<div id="menu" class="ctx-menu" role="menu" hidden></div>
 
 <div id="ov" class="overlay" hidden>
 <div id="dlg" class="dialog" role="dialog" aria-modal="true" aria-labelledby="dt">
@@ -68,6 +98,85 @@
 <button type="button" id="dc">取消</button>
 <button type="button" id="dk" class="primary">确定</button>
 </div>
+</div>
+</div>
+
+<div id="sheet" class="overlay sheet-overlay" hidden>
+<div class="dialog sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+<h2 id="sheet-title"></h2>
+<div id="sheet-body" class="sheet-body"></div>
+<div id="sheet-btns" class="btns"></div>
+</div>
+</div>
+
+<div id="editor" class="fullscreen" role="dialog" aria-modal="true" aria-labelledby="ed-title" hidden>
+<header class="ed-header">
+<button type="button" id="ed-close" class="icon-btn" aria-label="关闭">✕</button>
+<h2 id="ed-title" translate="no" class="ed-title"></h2>
+<span id="ed-dirty" class="ed-dirty" hidden>未保存的修改</span>
+<button type="button" id="ed-undo" title="撤销 (Ctrl+Z)">撤销</button>
+<button type="button" id="ed-redo" title="重做 (Ctrl+Y)">重做</button>
+<button type="button" id="ed-find" title="搜索和替换 (Ctrl+F)">搜索</button>
+<button type="button" id="ed-save" class="primary" title="保存 (Ctrl+S)">保存</button>
+</header>
+<div id="ed-search" class="ed-search" hidden>
+<input id="ed-q" type="text" placeholder="查找" aria-label="查找" spellcheck="false">
+<span class="ed-opts"><label class="ed-opt" title="区分大小写"><input type="checkbox" id="ed-case">Aa</label>
+<label class="ed-opt" title="全词匹配"><input type="checkbox" id="ed-word">词</label>
+<label class="ed-opt" title="正则表达式"><input type="checkbox" id="ed-regex">.*</label></span>
+<button type="button" id="ed-prev" title="上一个 (Shift+Enter)">↑</button>
+<button type="button" id="ed-next" title="下一个 (Enter)">↓</button>
+<span id="ed-count" class="ed-count"></span>
+<input id="ed-r" type="text" placeholder="替换为" aria-label="替换为" spellcheck="false">
+<button type="button" id="ed-rep">替换</button>
+<button type="button" id="ed-repall">全部替换</button>
+</div>
+<textarea id="ed-text" spellcheck="false" wrap="off" aria-label="文本内容"></textarea>
+<footer class="ed-status">
+<button type="button" id="ed-pos" class="ed-chip" title="跳转位置">行 1，列 1</button>
+<label class="ed-chip">编码 <select id="ed-enc"><option value="utf-8">UTF-8</option><option value="gb18030">GBK/GB18030</option><option value="big5">Big5</option><option value="utf-16le">UTF-16LE</option><option value="shift_jis">Shift_JIS</option></select></label>
+<label class="ed-chip">换行符 <select id="ed-eol"><option value="lf">LF</option><option value="crlf">CRLF</option></select></label>
+<span id="ed-msg" class="ed-msg"></span>
+</footer>
+</div>
+
+<div id="viewer" class="fullscreen viewer" role="dialog" aria-modal="true" aria-labelledby="vw-title" hidden>
+<header class="ed-header">
+<button type="button" id="vw-close" class="icon-btn" aria-label="关闭">✕</button>
+<h2 id="vw-title" translate="no" class="ed-title"></h2>
+<span id="vw-index" class="ed-msg"></span>
+<button type="button" id="vw-scale" title="图片显示比例">实际大小</button>
+<a id="vw-dl" class="btn-link" href="#">下载</a>
+</header>
+<div id="vw-stage" class="vw-stage"></div>
+<button type="button" id="vw-prev" class="vw-nav prev" aria-label="上一个">‹</button>
+<button type="button" id="vw-next" class="vw-nav next" aria-label="下一个">›</button>
+</div>
+
+<div id="uploads" class="overlay up-overlay" hidden>
+<div class="dialog upload-dialog" role="dialog" aria-modal="true" aria-labelledby="up-title">
+<h2 id="up-title" class="up-title">上传到 /</h2>
+<div class="up-tools">
+<span class="split-btn"><button type="button" id="up-addfile" class="split-main">添加文件</button><button type="button" id="up-addmenu" class="split-toggle" aria-label="更多添加方式" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></span>
+<span class="spacer"></span>
+<button type="button" id="up-clear" class="btn-outline">清空列表</button>
+</div>
+<div id="up-list" class="up-drop"></div>
+<div class="btns up-foot">
+<button type="button" id="up-close" class="btn-outline">关闭</button>
+<button type="button" id="up-start" class="primary">开始上传</button>
+</div>
+</div>
+</div>
+
+<div id="upprog" class="overlay up-overlay" hidden>
+<div class="dialog progress-dialog" role="dialog" aria-modal="true" aria-labelledby="pg-title">
+<h2 id="pg-title" class="pg-title">正在上传...</h2>
+<p id="pg-sub" class="pg-sub">进行中</p>
+<div id="pg-name" translate="no" class="pg-name"></div>
+<div class="pg-track" role="progressbar" aria-label="上传进度"><div id="pg-fill" class="pg-fill"></div></div>
+<div id="pg-stats" class="pg-stats"></div>
+<div class="btns"><button type="button" id="pg-cancel" class="btn-outline">取消</button></div>
 </div>
 </div>
 

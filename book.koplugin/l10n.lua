@@ -44,6 +44,26 @@ local function candidates(lang)
     return out
 end
 
+--- 当前语言对应的目录：返回目录名（"en" / "zh_TW" / …；简体中文为 "zh_CN"）与译文表。
+--- 远程管理网页经 /api/i18n 取用（再合并 features/remote/l10n/web），与 KOReader 界面语言保持一致。
+---@param lang string|nil 缺省取 KOReader 当前语言
+---@return string name
+---@return table catalog 源文（简体中文）→ 译文；简体中文为空表
+function M.catalog(lang)
+    lang = lang or GetText.current_lang or "C"
+    local list = candidates(lang)
+    if #list == 0 then
+        return "zh_CN", {}
+    end
+    for _idx, cand in ipairs(list) do
+        local ok, catalog = pcall(require, "l10n." .. cand)
+        if ok and type(catalog) == "table" then
+            return cand, catalog
+        end
+    end
+    return "zh_CN", {}
+end
+
 --- 按 KOReader 当前语言加载翻译并合并进 gettext（同语言只做一次）
 function M.apply()
     local lang = GetText.current_lang or "C"
