@@ -96,6 +96,19 @@ Guard.call("third", function() error("third") end)
 Assert.len(shown, 2)
 shown[2]:close()
 
+-- 关闭月读：关错误页并关掉所有月读窗口
+local closed_windows = 0
+package.loaded["ui.exit_windows"] = { close = function() closed_windows = closed_windows + 1; return 1 end }
+Guard.call("fourth", function() error("fourth") end)
+local d3 = shown[#shown]
+Assert.eq(d3.buttons[3].text, "关闭月读")
+d3.buttons[3].callback()
+Assert.eq(closed_windows, 1)
+Guard.call("fifth", function() error("fifth") end)
+Assert.eq(#shown, 4, "关闭后错误页可再次弹出")
+shown[4]:close()
+package.loaded["ui.exit_windows"] = nil
+
 -- 错误页自身起不来：不吞，带着原始错误上抛
 viewer_broken = true
 local ok, err = pcall(Guard.call, "ui", function() error("original") end)
@@ -106,7 +119,7 @@ Assert.matches(err, "theme broken")
 -- 上抛后 showing 复位：UI 恢复后仍能弹
 viewer_broken = false
 Guard.call("recover", function() error("x") end)
-Assert.len(shown, 3)
+Assert.len(shown, 5)
 
 -- paint：出错一次就停画该 label（重绘不再抛、不再弹），其它 label 照常
 shown[#shown]:close()
