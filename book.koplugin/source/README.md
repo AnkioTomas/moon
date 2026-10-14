@@ -95,7 +95,7 @@ source/
 | `book_meta_changed` | 编辑 / 刮削已写库 | local（WebDAV 上行这本书） |
 
 桌面打开、换源、图书馆刷新时的书架与统计同步不经过源事件，由 `desktop/sync.lua` 直接调 `syncBooksAsync` / `syncStatsAsync`：
-`Sync.open` 后台同步（统计 5 分钟节流），`Sync.refresh` 强制同步并把书架任务放进任务队列。源未配置时，后台打开静默跳过，手动刷新会提示，源有 `setting.open` 时附带「立即设置」按钮。
+`Sync.open` 后台同步（统计 5 分钟节流），`Sync.refresh` 强制同步并把书架任务放进任务队列。同步范围跟图书馆展示范围一致：混合模式下是全部已启用且已配置的源，否则只有活跃源。源未配置时，后台打开静默跳过，单源模式下手动刷新会提示，源有 `setting.open` 时附带「立即设置」按钮。
 源没实现 `pushStatsAsync` 也没开 `stats_pull` 时，不同步统计。
 
 ## 新增一个源

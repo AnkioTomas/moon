@@ -1,15 +1,19 @@
 --[[--
 桌面驱动的书架 / 统计同步：桌面可见时后台同步，图书馆刷新时强制同步。
 什么时候同步、在飞状态、过期结果丢弃、刷新哪个页签都归桌面；源只提供
-``syncBooksAsync`` / ``syncStatsAsync``。在飞状态挂在桌面实例上，统计节流按源 id 记时间戳。
+``syncBooksAsync`` / ``syncStatsAsync``。同步范围跟图书馆展示范围一致：混合模式是全部已启用源，
+否则只有活跃源。在飞状态按源 id 挂在桌面实例上，统计节流按源 id 记时间戳。
 
 @module koplugin.book.desktop.sync
 --]]
 
+local MoonSettings = require("utils.settings")
+local Registry = require("source.registry")
 local SourceCapabilities = require("source.base").SourceCapabilities
 local Tasks = require("workers.tasks")
 local logger = require("utils.log")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Sync = {}
 
@@ -20,6 +24,37 @@ local stats_at = {}
 
 ---@type table<string, string> 源 id → 已提示过的书架同步错误；同步干净成功后清掉
 local reported = {}
+
+---@return boolean
+local function mixed()
+    return MoonSettings.get("source").library_mixed == true
+end
+
+--- 本轮要同步的已配置源：混合模式 = 全部已启用源，否则只有活跃源。加载失败的源跳过。
+---@param desktop table
+---@return BookSource[]
+local function targets(desktop)
+    local list = {}
+    if not mixed() then
+        if desktop.source and desktop.source:configured() then list[1] = desktop.source end
+        return list
+    end
+    for _idx, meta in ipairs(Registry.listEnabled()) do
+        local source = Registry.resolve(meta.id)
+        if source and source:configured() then list[#list + 1] = source end
+    end
+    return list
+end
+
+--- 结果还归不归当前桌面：换源 / 退出混合 / 停用该源之后，旧源的结果不落到新页面上。
+---@param desktop table
+---@param source BookSource
+---@return boolean
+local function inScope(desktop, source)
+    if desktop.closed then return false end
+    if mixed() then return Registry.isEnabled(source.id) end
+    return desktop.source == source
+end
 
 --- 书架同步出错的提示：手动刷新每次都提示；后台同步只在联网时提示（离线失败是常态），
 --- 同一源同一条错误本次运行只提示一次，免得每次打开桌面都弹。err 为 nil 表示这轮干净成功。
@@ -34,22 +69,21 @@ local function report(source, force, err)
     require("ui.themes.widgets.toast"):new{ text = err }:show()
 end
 
---- 书架同步落地：清桌面在飞标记，按结果刷新图书馆 / 首页。被新一轮取代的旧结果丢弃。
+--- 书架同步落地：清该源在飞标记，按结果刷新图书馆 / 首页。被新一轮取代的旧结果丢弃。
 --- 失败不动本地书架（本地是唯一真相），只按 report 的规则提示。
 ---@param desktop table
 ---@param source BookSource
----@param request table 发起时的请求令牌
+---@param flight table 发起时的在飞记录
 ---@param force boolean|nil 手动刷新
 ---@param result SyncResult|nil
 ---@param err any
-local function onBooksSynced(desktop, source, request, force, result, err)
-    if desktop._books_sync_request ~= request then
+local function onBooksSynced(desktop, source, flight, force, result, err)
+    if desktop._books_sync[source.id] ~= flight then
         logger.dbg("book shelf refresh result dropped", source.id, "stale")
         return
     end
-    desktop._books_sync_request = nil
-    desktop._books_sync_cancel = nil
-    if desktop.closed or desktop.source ~= source then return end
+    desktop._books_sync[source.id] = nil
+    if not inScope(desktop, source) then return end
     if not result then
         logger.warn("book shelf sync failed", source.id, err)
         report(source, force, err or _("同步失败"))
@@ -69,53 +103,55 @@ local function onBooksSynced(desktop, source, request, force, result, err)
     if desktop.tab == "library" then desktop:updateView() end
 end
 
---- 同步书架。手动刷新（force）进任务队列并前台跟随；自动后台同步不入队，免得每次开桌面都弹窗。
+--- 同步书架。手动刷新（force）进任务队列，follow 时前台跟随；自动后台同步不入队，免得每次开桌面都弹窗。
 ---@param desktop table
 ---@param source BookSource
 ---@param force boolean|nil
-local function syncBooks(desktop, source, force)
-    if desktop._books_sync_request and not force then
+---@param follow boolean|nil 手动刷新时弹前台进度窗
+local function syncBooks(desktop, source, force, follow)
+    local current = desktop._books_sync[source.id]
+    if current and not force then
         logger.dbg("book shelf refresh skipped", source.id, "pending")
         return
     end
     local key = "books\0" .. tostring(source.id)
-    -- 同源手动刷新已在执行：按队列规则拒绝。必须在改桌面在飞状态之前判断，否则执行中那条的结果会被当成过期丢弃。
-    -- 还在排队的那条就是下面的 _books_sync_cancel，取消后重新入队即替换。
+    -- 同源手动刷新已在执行：按队列规则拒绝。必须在改在飞状态之前判断，否则执行中那条的结果会被当成过期丢弃。
+    -- 还在排队的那条就是 current.cancel，取消后重新入队即替换。
     local existing = force and Tasks.get(key)
     if existing and existing.state ~= "queued" then
         require("workers.ui.task_dialog").rejected("running", existing)
         return
     end
-    if desktop._books_sync_cancel then
+    if current and current.cancel then
         logger.dbg("book shelf refresh cancel previous", source.id)
-        desktop._books_sync_cancel:cancel()
+        current.cancel:cancel()
     end
     logger.dbg("book shelf refresh start", source.id, force and "forced" or "background")
-    local request = {}
-    desktop._books_sync_request = request
-    local function run(report, finish)
+    local flight = {}
+    desktop._books_sync[source.id] = flight
+    local function run(progress, finish)
         return source:syncBooksAsync({
             force = force,
             on_progress = function(text, done, total)
-                if desktop._books_sync_request ~= request then return end
-                report(text, done, total)
+                if desktop._books_sync[source.id] ~= flight then return end
+                progress(text, done, total)
             end,
         }, function(result, err)
             finish({ ok = result ~= nil, err = err })
-            onBooksSynced(desktop, source, request, force, result, err)
+            onBooksSynced(desktop, source, flight, force, result, err)
         end)
     end
     -- 队列满时退回直接跑。
     local job = force and Tasks.enqueue{ key = key, kind = "sync", title = source.name, run = run }
     if job then
-        require("workers.ui.task_dialog").follow(job)
+        if follow then require("workers.ui.task_dialog").follow(job) end
     else
         local noop = function() end
         job = run(noop, noop)
     end
     -- 某些源会同步回调；避免把已完成的 job 句柄残留到桌面状态。
-    if desktop._books_sync_request == request then
-        desktop._books_sync_cancel = job
+    if desktop._books_sync[source.id] == flight then
+        flight.cancel = job
     end
 end
 
@@ -127,7 +163,7 @@ local function syncStats(desktop, source, force)
     if not SourceCapabilities.supportsStatsPull(source) and type(source.pushStatsAsync) ~= "function" then
         return
     end
-    if desktop._stats_sync_pending then
+    if desktop._stats_sync[source.id] then
         logger.dbg("book stats sync skipped", source.id, "pending")
         return
     end
@@ -138,10 +174,10 @@ local function syncStats(desktop, source, force)
     end
     logger.dbg("book stats sync start", source.id)
     stats_at[source.id] = os.time()
-    desktop._stats_sync_pending = true
+    desktop._stats_sync[source.id] = true
     source:syncStatsAsync(nil, function(result, err)
-        desktop._stats_sync_pending = false
-        if desktop.closed or desktop.source ~= source then return end
+        desktop._stats_sync[source.id] = nil
+        if not inScope(desktop, source) then return end
         if not result then
             logger.warn("book stats sync failed", source.id, err)
             return
@@ -155,18 +191,19 @@ end
 --- 桌面变为可见（新开 / 换源）：后台同步统计（5 分钟节流）与书架。首页先读本地数据，成功后由回调刷新。
 ---@param desktop table
 function Sync.open(desktop)
-    local source = desktop.source
-    if not source or not source:configured() then return end
-    syncStats(desktop, source)
-    syncBooks(desktop, source)
+    for _idx, source in ipairs(targets(desktop)) do
+        syncStats(desktop, source)
+        syncBooks(desktop, source)
+    end
 end
 
---- 图书馆手动刷新：强制同步。源未配置时说明原因，源有设置入口就提供直达按钮。
+--- 图书馆手动刷新：强制同步。单源模式下源未配置时说明原因，源有设置入口就提供直达按钮；
+--- 混合模式只刷已配置的源，多个源一起刷时不逐个弹进度窗，进度看顶栏任务。
 ---@param desktop table
 function Sync.refresh(desktop)
     local source = desktop.source
     if not source then return end
-    if not source:configured() then
+    if not mixed() and not source:configured() then
         local text = _("请先完成数据源设置，再刷新书库。")
         local setting = require("desktop.pages.setting.source").loadSetting(source.id)
         if setting and type(setting.open) == "function" then
@@ -180,8 +217,16 @@ function Sync.refresh(desktop)
         end
         return
     end
-    syncStats(desktop, source, true)
-    syncBooks(desktop, source, true)
+    local list = targets(desktop)
+    for _idx, target in ipairs(list) do
+        syncStats(desktop, target, true)
+        syncBooks(desktop, target, true, #list == 1)
+    end
+    if #list > 1 then
+        require("ui.themes.widgets.toast"):new{
+            text = T(_("正在同步 %1 个数据源，可在顶栏查看进度"), #list), timeout = 2,
+        }:show()
+    end
 end
 
 return Sync
