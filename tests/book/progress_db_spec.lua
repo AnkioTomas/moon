@@ -250,6 +250,27 @@ do
     clearMods()
 end
 
+-- ── fixRemoteTime：源换时间口径时显式拉回未来时间 ──────────────
+do
+    local connection, calls = makeConn({ step = function() return nil end })
+    local DbBase, ProgressDB = loadProgress(connection)
+    local before = #calls
+
+    Assert.is_true(ProgressDB.fixRemoteTime("ext.kavita", "700", 1770062706))
+    local q = calls[before + 1]
+    Assert.is_true(q.sql:find("UPDATE pending_progress SET updated_at=?", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("sync_status=1", 1, true) ~= nil, "只改干净行：脏行的时间归本地 revision")
+    Assert.is_true(q.sql:find("updated_at>?", 1, true) ~= nil, "只降不升")
+    Assert.eq(q.args[1], 1770062706)
+    Assert.eq(q.args[2], "ext.kavita")
+    Assert.eq(q.args[3], "700")
+    Assert.eq(q.args[4], 1770062706)
+    Assert.is_true(q.sql:find("INSERT INTO pending_progress", 1, true) == nil, "不新建行")
+
+    DbBase.close()
+    clearMods()
+end
+
 -- ── recent：仅由 pending_progress 决定准入与顺序 ─────────
 do
     local connection, calls = makeConn({
@@ -274,7 +295,9 @@ do
     local q = calls[#calls]
     Assert.is_true(q.sql:find("FROM pending_progress p", 1, true) ~= nil)
     Assert.is_true(q.sql:find("EXISTS", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("b.deleted=0", 1, true) ~= nil)
+    -- 卷行（deleted=1 + sync_status=1，非书架成员但仍是有效身份）也要能进最近阅读；
+    -- 墓碑（sync_status=0）不算。
+    Assert.is_true(q.sql:find("(b.deleted=0 OR b.sync_status=1)", 1, true) ~= nil)
     Assert.is_true(q.sql:find("in_library", 1, true) == nil)
     Assert.is_true(q.sql:find("last_open", 1, true) == nil)
     Assert.is_true(q.sql:find("ORDER BY p.updated_at DESC, p.stable_id ASC", 1, true) ~= nil)

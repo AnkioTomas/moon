@@ -347,6 +347,83 @@ Assert.matches(shown[1].text, "要从哪里继续读")
 Assert.len(adopted, 0)
 Assert.len(synced, 0)
 
+-- ── 页级源（Kavita）：只按 spine 序号 + spine 内元素路径判，绝不按百分比 ──────
+-- 远端的比例是「第几个 spine」，本地是全书渲染页比例，两者不可比。
+local function kavitaPull(remote, row)
+    -- stable_id 保持 b1：测试桩的 ProgressDB.get 只认这个 id。
+    current_identity = { source_id = "kavita", stable_id = "b1", source = source }
+    source.getProgressAsync = function(_, _, cb)
+        cb(remote, nil, { page_level = true })
+        return { cancel = function() end }
+    end
+    Progress.clearConflicts()
+    shown, synced, adopted, remote_upserted, goto_calls = {}, {}, {}, {}, {}
+    pending_row = row
+    Progress.pull(snapshot())
+    Stubs.flush()
+end
+
+local spine15_190 = "/body[1]/DocFragment[15]/body[1]/p[190]/text()[1].150"
+
+-- 同 spine、远端带页内锚点更靠后（网页端在同一条里往后读了几页）→ 静默采纳并跳转。
+kavitaPull({ fraction = 0.64, total_pages = 22, locator = "/body/DocFragment[15]/body/p[312]" },
+    { fraction = 0.61, page = 209, total_pages = 307, locator = spine15_190, sync_status = 1,
+      synced = { fraction = 0.61, locator = spine15_190 } })
+Assert.eq(#shown, 1, "只有「已跳转到」提示，没有冲突框")
+Assert.is_nil(shown[1].ok_callback, "采纳是静默的，不该是冲突选择框")
+Assert.len(adopted, 1, "云端动过就跟随远端的页内位置")
+Assert.eq(adopted[1].locator, "/body/DocFragment[15]/body/p[312]", "位置用远端")
+Assert.eq(adopted[1].fraction, 0.61, "同 spine 采纳保留本地的内容页比例（不用 spine 比例冲掉）")
+Assert.eq(adopted[1].page, 209, "同 spine 采纳保留本地页码")
+Assert.eq(adopted[1].total_pages, 307)
+
+-- 同 spine、远端只有 spine 粒度且比例差 31% → 不弹窗、不采纳、不拿粗坐标盖本地（kavita 不看百分比）
+kavitaPull({ fraction = 0.30, total_pages = 22, locator = "/body/DocFragment[15]/body" },
+    { fraction = 0.61, locator = spine15_190, sync_status = 1,
+      synced = { fraction = 0.61, locator = spine15_190 } })
+Assert.eq(#shown, 0, "页级源不看百分比：同 spine 就不算冲突")
+Assert.eq(#adopted, 0, "远端只有 spine 粒度就不动本地页内位置")
+Assert.eq(#remote_upserted, 0, "不能拿 spine 粒度的远端盖掉本地页内坐标")
+
+-- 同一位置的不同写法（归一化 vs 原始）不得当成冲突。
+kavitaPull({ fraction = 0.63, total_pages = 22, locator = "/body/DocFragment[15]/body/p[190]" },
+    { fraction = 0.61, locator = spine15_190, sync_status = 1,
+      synced = { fraction = 0.61, locator = spine15_190 } })
+Assert.eq(#shown, 0, "同 spine 同段号只是写法不同，不算冲突")
+Assert.eq(#adopted, 0, "同一位置不需要跳转")
+
+-- 跨 spine：本地自上次同步没动过 → 直接跟云端。
+kavitaPull({ fraction = 0.52, total_pages = 24, locator = "/body/DocFragment[13]/body/p[3]" },
+    { fraction = 0.25, locator = "/body/DocFragment[7]/body/p[1]", sync_status = 1,
+      synced = { fraction = 0.25, locator = "/body/DocFragment[7]/body/p[1]" } })
+Assert.eq(#shown, 1, "只有「已跳转到」提示，不弹冲突框")
+Assert.is_nil(shown[1].ok_callback, "不是冲突选择框")
+Assert.len(adopted, 1, "本地干净时直接跟到云端所在 spine")
+Assert.eq(adopted[1].locator, "/body/DocFragment[13]/body/p[3]")
+Assert.eq(adopted[1].fraction, 0.52, "跨 spine 整套用远端（本地那几个数描述的是别处）")
+
+-- 跨 spine：两边都动过 → 弹窗（不把正在读别的章的人拽走）。
+kavitaPull({ fraction = 0.52, total_pages = 24, locator = "/body/DocFragment[13]/body/p[3]" },
+    { fraction = 0.25, locator = "/body/DocFragment[7]/body/p[1]", sync_status = 0 })
+Assert.len(shown, 1, "跨 spine 且本地也有未推改动要问")
+Assert.not_nil(shown[1].ok_callback, "弹的是本地/云端选择框")
+Assert.eq(#adopted, 0, "未决议前不采纳")
+
+-- 本地读得更靠后（云端在更早的 spine / 同 spine 内更靠前）→ 不往回拽、不弹窗。
+kavitaPull({ fraction = 0.30, total_pages = 22, locator = "/body/DocFragment[13]/body/p[5]" },
+    { fraction = 0.55, locator = "/body/DocFragment[15]/body/p[200]", sync_status = 1,
+      synced = { fraction = 0.55, locator = "/body/DocFragment[15]/body/p[200]" } })
+Assert.eq(#shown, 0, "本地更靠后不是冲突")
+Assert.eq(#adopted, 0, "不能把读者往回拽")
+Assert.eq(#synced, 0, "本地没有新改动，不必回推")
+
+-- 同 spine 但本地更靠前（云端在同一条内更靠后）→ 照旧跟随。
+kavitaPull({ fraction = 0.30, total_pages = 22, locator = "/body/DocFragment[15]/body/p[260]" },
+    { fraction = 0.55, locator = "/body/DocFragment[15]/body/p[200]", sync_status = 1,
+      synced = { fraction = 0.55, locator = "/body/DocFragment[15]/body/p[200]" } })
+Assert.len(adopted, 1, "同 spine 内云端更靠后要跟")
+Assert.eq(adopted[1].locator, "/body/DocFragment[15]/body/p[260]")
+
 -- 拉失败只记日志，不弹窗：离线开缓存书必须能继续读
 Progress.clearConflicts()
 shown = {}

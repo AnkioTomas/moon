@@ -200,6 +200,9 @@ function Session.onReaderReady(plugin)
     else
         ChapterMode.clearActiveChapter(Session._snapshot)
         Snapshot.refresh(Session._snapshot)
+        -- sidecar 缺失（清缓存后重下 / 换设备）时文档停在开头：用本地进度回落。
+        require("reader.session.progress").applyLocalPending(Session._snapshot)
+        Snapshot.refresh(Session._snapshot)
         require("reader.session.auto_toc").start(Session._snapshot)
         ensureCover(ui, identity)
     end
