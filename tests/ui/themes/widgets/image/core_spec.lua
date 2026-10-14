@@ -461,6 +461,41 @@ Assert.eq(table.concat(completed, ","), "a,b")
 a:free()
 b:free()
 
+-- 本地封面解码前留白，不画兜底控件：冷启动整屏排队解码时不能先闪一遍假封面。
+local function fbWidget()
+    local fb = { freed = 0 }
+    fb.getSize = function() return { w = 1, h = 1 } end
+    fb.free = function() fb.freed = fb.freed + 1 end
+    return fb
+end
+local fb_ok = fbWidget()
+local blank = Image.widget{ src = image_path, width = big(), height = 200, fallback = fb_ok }
+Assert.is_true(blank[1][1] ~= fb_ok, "解码前留白")
+Stubs.flush()
+Assert.is_true(blank[1][1] ~= fb_ok and blank[1][1].image ~= nil, "解码后换成图")
+Assert.eq(fb_ok.freed, 1, "没用上的兜底控件随出图释放")
+blank:free()
+Assert.eq(fb_ok.freed, 1, "不得重复释放")
+
+local render_ok = package.loaded["ui/renderimage"].renderImageFile
+package.loaded["ui/renderimage"].renderImageFile = function() error("bad image") end
+local fb_bad = fbWidget()
+local broken = Image.widget{ src = image_path, width = big(), height = 200, fallback = fb_bad }
+Stubs.flush()
+Assert.eq(broken[1][1], fb_bad, "解码失败补上兜底控件")
+broken:free()
+package.loaded["ui/renderimage"].renderImageFile = render_ok
+
+local fb_net = fbWidget()
+local loading = Image.widget{ src = "https://example.test/loading.png", width = 40, height = 60, fallback = fb_net }
+Assert.eq(loading[1][1], fb_net, "下载中仍显示兜底控件")
+loading:free()
+
+local fb_none = fbWidget()
+local none = Image.widget{ width = 40, height = 60, fallback = fb_none }
+Assert.eq(none[1][1], fb_none, "没有来源直接显示兜底控件")
+none:free()
+
 os.remove(image_path)
 os.remove(cached_file)
 package.loaded["ui/renderimage"] = nil

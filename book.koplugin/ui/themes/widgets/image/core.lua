@@ -16,7 +16,7 @@
     width = n, height = n,
     alpha = true,
     invert_in_night = false,  -- 单色字形图随夜间模式反色；默认保持原色
-    fallback = widget,        -- 未就绪/失败时居中显示的控件；省略则空白占位
+    fallback = widget,        -- 下载中/失败/无图时居中显示的控件（本地文件解码前留白）；省略则空白占位
     on_ready = function(path) end,  -- 可选：下载并替换完成后
   }
 
@@ -296,11 +296,14 @@ end
 ---@param invert_in_night boolean|nil 夜间模式下是否随屏幕反色
 ---@return table
 local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, invert_in_night)
+    -- 本地文件解码前留白：冷启动整屏封面排队解码，先画占位再换图会像整架重新加载。
+    local path = resolve(src)
     local box = WidgetContainer:new{
         dimen = Geom:new{ x = 0, y = 0, w = w, h = h },
         align = "center",
-        placeholder(w, h, fb),
+        placeholder(w, h, not path and fb or nil),
     }
+    box._fb = path and fb or nil
 
     --- 记录屏幕绝对位置；勿写回 dimen.x/y（WidgetContainer:paintTo 会再加一次）。
     ---@param bb any 用于绘制的 Blitbuffer 画布
@@ -346,6 +349,30 @@ local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, i
         self:_settle()
     end
 
+    --- 换下当前内容。
+    ---@param widget table 参与布局或绘制的 Widget
+    function box:_replace(widget)
+        if self[1] and self[1].free then
+            self[1]:free()
+        end
+        self[1] = frame(widget, self._w, self._h)
+        requestPaint(self)
+    end
+
+    --- 丢掉还没上屏的留白期占位控件。
+    function box:_dropFallback()
+        if self._fb and self._fb.free then self._fb:free() end
+        self._fb = nil
+    end
+
+    --- 留白期解码失败：补上占位控件。
+    function box:_fallback()
+        local widget = self._fb
+        if not (widget and self._alive) then return end
+        self._fb = nil
+        self:_replace(widget)
+    end
+
     --- 换成已落地的图片。
     ---@param widget table|nil 参与布局或绘制的 Widget
     ---@param path string|nil 图片或书籍的本地文件路径
@@ -357,11 +384,8 @@ local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, i
             widget:free()
             return
         end
-        if self[1] and self[1].free then
-            self[1]:free()
-        end
-        self[1] = frame(widget, self._w, self._h)
-        requestPaint(self)
+        self:_dropFallback()
+        self:_replace(widget)
         if self._on_ready then
             self._on_ready(path)
         end
@@ -373,6 +397,7 @@ local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, i
         self._alive = false
         self:cancel()
         self:_settle()
+        self:_dropFallback()
         WidgetContainer.free(self, full)
     end
 
@@ -399,6 +424,7 @@ local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, i
         if not ok then
             if widget then widget:free() end
             logger.warn("book image decode failed", path, err)
+            self:_fallback()
             return
         end
         self:_apply(widget, path)
@@ -419,7 +445,6 @@ local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, i
         self:_settle()
     end
 
-    local path = resolve(src)
     if path then
         box:_showFile(path)
     elseif isHttp(src) then
