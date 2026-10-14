@@ -455,7 +455,9 @@ do
     Assert.eq(Session.current().identity.source_id, "local")
     Assert.eq(Session.current().identity.source.id, "local")
     Assert.eq(calls.tracker[#calls.tracker][1], "start")
-    Assert.eq(calls.progress[progress_before + 1][1], "pull")
+    -- 整本书冷打开：先按本地记录回落位置，再拉云端对比。
+    Assert.eq(calls.progress[progress_before + 1][1], "applyLocalPending")
+    Assert.eq(calls.progress[progress_before + 2][1], "pull")
     Assert.eq(calls.reader[#calls.reader][1], "onCreate")
 end
 
