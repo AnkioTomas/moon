@@ -29,6 +29,7 @@ end
 package.preload["features.bars.layout"] = function()
     return {
         TOP_HEIGHT_DEFAULT = 12,
+        BAR_HORIZONTAL_PADDING = 12,
         fontSize = function(which, fs)
             if which == "top" then return font.top or (fs and fs.text_font_size) or 14 end
             return (fs and fs.text_font_size) or 14
@@ -59,12 +60,12 @@ Assert.eq(top.h, 40)
 top.inner:paintTo({ paintRect = function() end }, 0, 0)
 Assert.eq(painted.face.size, 14)
 
--- 开着书：底栏用状态栏字号与字体；顶栏未设置时跟随底栏。
+-- 开着书：底栏用状态栏字号；字体跟随月读界面字体（ffont），不用状态栏字体；顶栏未设置时跟随底栏。
 ReaderUIStub.instance = { document = {}, view = { footer = { settings = { text_font_size = 20, text_font_face = "myfont" } } } }
 local bottom = Preview.build(600, "bottom")
 bottom.inner:paintTo({ paintRect = function() end }, 0, 0)
 Assert.eq(painted.face.size, 20)
-Assert.eq(painted.face.name, "myfont")
+Assert.eq(painted.face.name, "ffont")
 Assert.eq(bottom.h, 56)
 Preview.build(600, "top").inner:paintTo({ paintRect = function() end }, 0, 0)
 Assert.eq(painted.face.size, 20)

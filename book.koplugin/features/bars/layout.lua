@@ -150,6 +150,8 @@ end
 Layout.FONT_MIN, Layout.FONT_MAX, Layout.FONT_DEFAULT = 8, 36, 14
 --- 顶栏比 CRE 原生页头额外增加的高度范围与缺省（未缩放像素）。
 Layout.TOP_HEIGHT_MIN, Layout.TOP_HEIGHT_MAX, Layout.TOP_HEIGHT_DEFAULT = 0, 60, 12
+--- 顶栏 / 底栏 / 预览共用的水平留白（未缩放），不跟书籍页边距或 ReaderFooter 进度条边距变化。
+Layout.BAR_HORIZONTAL_PADDING = 12
 
 local FONT_KEY = { top = "book_reader_top_font_size", bottom = "book_reader_bottom_font_size" }
 

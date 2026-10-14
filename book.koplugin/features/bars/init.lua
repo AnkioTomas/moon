@@ -19,10 +19,12 @@ local Guard = require("ui.guard")
 local _ = require("gettext")
 local Screen = Device.screen
 
---- 顶栏固定水平留白，不跟书籍左右页边距变化。
-local TOP_BAR_HORIZONTAL_PADDING = 12
 --- 底栏文字向屏幕内侧偏移，避免视觉上贴住边缘。
 local BOTTOM_CONTENT_INSET = 4
+--- 栏文字字体：跟随月读界面字体。ui.fonts.applyCurrent 把 ffont 等 UI 别名映射到用户所选字体；
+--- 每次绘制现取 face（Font 自带缓存），换字体后下一次重绘即生效，不用重开书。
+--- 不读 ReaderFooter.footer_text_face：它在 footer init 时取一次，早于插件改 fontmap 或之后换字体都会过期。
+local BAR_FONT = "ffont"
 --- 不随翻页变化、要靠时钟或设备事件重画的组件。
 local LIVE_ITEMS = { clock = true, battery = true, wifi = true, brightness = true, remaining = true }
 
@@ -229,7 +231,7 @@ local function topRect(ui, x, y)
     }
 end
 
---- 底栏在 ReaderView paintTo 坐标下的矩形（对齐 BottomContainer 内容区，背景补到物理屏底，
+--- 底栏在 ReaderView paintTo 坐标下的矩形（对齐 BottomContainer 内容区，背景补到物理屏底；
 --- 再向上让出 BOTTOM_CONTENT_INSET，不让文字或进度条漏到正文上）。
 ---@param ui table ReaderUI
 ---@param x number
@@ -291,7 +293,7 @@ local function refreshBars(ui)
     end
 end
 
---- 顶栏文字 face：与底栏同字体；字号用顶栏自己的设置（未设置跟随底栏）；超出条带高度时等比缩小。
+--- 顶栏文字 face：跟随月读界面字体；字号用顶栏自己的设置（未设置跟随底栏）；超出条带高度时等比缩小。
 ---@param footer table ReaderFooter
 ---@param bar_h number
 ---@return table
@@ -302,8 +304,14 @@ local function topTextFace(footer, bar_h)
     if bar_h > 2 and scaled > bar_h - 2 then
         size = math.max(8, math.floor(size * (bar_h - 2) / scaled))
     end
-    -- 底栏被 KOReader 整体禁用时 footer_text_face 不会初始化，不能复用。
-    return require("ui/font"):getFace(s.text_font_face, size)
+    return require("ui/font"):getFace(BAR_FONT, size)
+end
+
+--- 底栏文字 face：字体跟随月读界面字体，字号用底栏设置。
+---@param footer table ReaderFooter
+---@return table
+local function bottomTextFace(footer)
+    return require("ui/font"):getFace(BAR_FONT, Layout.fontSize("bottom", footer.settings))
 end
 
 --- 包装 ReaderFooter：
@@ -443,7 +451,7 @@ local function paint(self, bb, x, y)
     if top then
         local header_h, rect = topRect(ui, x, y)
         bb:paintRect(rect.x, rect.y, rect.w, rect.h, bg)
-        local margin = Screen:scaleBySize(TOP_BAR_HORIZONTAL_PADDING)
+        local margin = Screen:scaleBySize(Layout.BAR_HORIZONTAL_PADDING)
         Items.paint(
             bb, rect.x + margin, rect.y, math.max(1, rect.w - margin * 2), rect.h,
             Layout.get("top"), ctx, {
@@ -460,17 +468,18 @@ local function paint(self, bb, x, y)
     if rect then
         local footer = ui.view.footer
         bb:paintRect(rect.x, rect.y, rect.w, rect.h, bg)
-        -- 跟 ReaderFooter 一致的水平内边距。
-        local margin = footer.horizontal_margin
-            + Screen:scaleBySize(footer.settings.progress_margin_width)
+        -- 与顶栏同一固定水平留白。不用 ReaderFooter 的 horizontal_margin + progress_margin_width：
+        -- 两者叠加约 20px，progress_margin_width 还可能跟随书籍页边距，Android 缺省值又被再缩放一次。
+        local margin = Screen:scaleBySize(Layout.BAR_HORIZONTAL_PADDING)
         Items.paint(
             bb, rect.x + margin, rect.y, math.max(1, rect.w - margin * 2),
             rect.h - Screen:scaleBySize(BOTTOM_CONTENT_INSET),
             Layout.get("bottom"), ctx, {
-                face = footer.footer_text_face,
-                fgcolor = footer.footer_text.fgcolor,
+                face = bottomTextFace(footer),
+                fgcolor = Blitbuffer.COLOR_BLACK,
                 cache = cache,
-                bar_h = footer.progress_bar.height,
+                -- 不传 bar_h：进度条用主题高度（与预览一致）。ReaderFooter.progress_bar.height 在
+                -- KOReader 底栏「显示进度条」关掉时被 resetLayout 置 0，复用它会让进度条开着却画不出来。
                 prefix = "bottom:",
                 icons = icons,
             }

@@ -31,7 +31,7 @@ end
 ---@return number size 未缩放字号
 function Preview.face(which, fs)
     local size = Layout.fontSize(which, fs)
-    return require("ui/font"):getFace(fs and fs.text_font_face or "ffont", size), size
+    return require("ui/font"):getFace("ffont", size), size
 end
 
 --- 预览条高度：底栏固定 56 起；顶栏按主题行高起，再加上「高度」相对缺省 12 的增减。
@@ -66,7 +66,7 @@ function Preview.build(width, which)
     function inner:paintTo(bb, x, y)
         bb:paintRect(x, y, self.dimen.w, self.dimen.h, Blitbuffer.Color8(t.color.page))
         local ctx = Items.sampleContext()
-        local pad = Theme.px(10)
+        local pad = require("device").screen:scaleBySize(Layout.BAR_HORIZONTAL_PADDING)
         Items.paint(bb, x + pad, y, math.max(1, self.dimen.w - pad * 2), self.dimen.h, Layout.get(which), ctx, {
             face = face,
             fgcolor = Blitbuffer.Color8(t.color.ink),
