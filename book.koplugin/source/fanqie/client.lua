@@ -22,7 +22,7 @@ Client.__index = Client
 ---@field fetchShelfDetailAsync fun(self: FanqieClient, force_refresh: boolean|nil, cb: function): CancelHandle|nil
 ---@field officialGetContentAsync fun(self: FanqieClient, book_id: string, item_id: string, cb: function): CancelHandle|nil
 
-local DEFAULT_TIMEOUT = 15
+local TIMEOUT_RATIO = 0.5 -- × 「网络超时」，缺省 15 秒
 local SHELF_CACHE_TTL = 5 * 60
 -- 书架逐本拉详情的并发上限：一次全发会被风控。
 local DETAIL_LIMIT = 4
@@ -182,7 +182,7 @@ local function jsonAsync(self, method, url, extra_headers, body, cb)
         method = method,
         body = body,
         headers = sessionHeaders(self, extra_headers),
-        timeout = DEFAULT_TIMEOUT,
+        timeout = require("http.timeout").net(TIMEOUT_RATIO),
         allow_redirects = true,
     }, function(res, err)
         if err or not res then

@@ -15,7 +15,7 @@ local logger = require("utils.log")
 local Reading = {}
 
 local HOST = Crypto.HOST
-local TIMEOUT = 20
+local TIMEOUT_RATIO = 2 / 3 -- × 「网络超时」，缺省 20 秒
 
 ---@param text string|nil
 ---@return table|nil, string|nil
@@ -61,7 +61,7 @@ local function signedAsync(device, name, path, build_query, build_body, cb)
         method = body and "POST" or "GET",
         headers = headers,
         body = body,
-        timeout = TIMEOUT,
+        timeout = require("http.timeout").net(TIMEOUT_RATIO),
         allow_redirects = true,
     }, function(res, err)
         if err or not res then

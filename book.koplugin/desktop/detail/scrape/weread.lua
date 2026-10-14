@@ -104,7 +104,7 @@ function Weread.searchAsync(query, cb)
             ["Referer"] = "https://weread.qq.com/",
             ["Origin"] = "https://weread.qq.com",
         },
-        timeout = 30,
+        timeout = require("http.timeout").net(1),
     }, function(res, err)
         if err then
             logger.warn("weread search error:", err)

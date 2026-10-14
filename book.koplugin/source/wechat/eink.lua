@@ -189,7 +189,7 @@ local function postLogin(body, cb)
         method = "POST",
         body = JSON.encode(body),
         headers = versionHeaders({ ["Content-Type"] = "application/json; charset=UTF-8" }),
-        timeout = 30,
+        timeout = require("http.timeout").net(1),
     }, cb)
 end
 
@@ -202,7 +202,7 @@ function Eink.beginQrLoginAsync(cb)
         url = API .. "/wxticket?nonceStr=weread",
         method = "GET",
         headers = versionHeaders(),
-        timeout = 30,
+        timeout = require("http.timeout").net(1),
     }, function(res, err)
         if cancelled then return end
         local ticket = not err and res and Request.ok(res.code) and decode(res.body) or nil
@@ -220,7 +220,7 @@ function Eink.beginQrLoginAsync(cb)
             }),
             method = "GET",
             headers = { ["User-Agent"] = VERSION_HEADERS["User-Agent"] },
-            timeout = 30,
+            timeout = require("http.timeout").net(1),
         }, function(res2, err2)
             if cancelled then return end
             local qr = not err2 and res2 and Request.ok(res2.code) and decode(res2.body) or nil
@@ -401,7 +401,7 @@ function Eink.callAsync(method, path, opts, cb)
             method = method,
             body = opts.body and JSON.encode(opts.body) or nil,
             headers = headers,
-            timeout = 30,
+            timeout = require("http.timeout").net(1),
         }, function(res, err)
             if cancelled then return end
             if err then

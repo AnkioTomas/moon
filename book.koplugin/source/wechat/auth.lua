@@ -192,7 +192,7 @@ local function sessionRequest(method, url, body, opts, cb)
             method = method,
             body = body,
             headers = headers,
-            timeout = opts.timeout or 45,
+            timeout = opts.timeout or require("http.timeout").net(1.5),
             allow_redirects = opts.allow_redirects,
         }, function(res, err)
             if cancelled then return end

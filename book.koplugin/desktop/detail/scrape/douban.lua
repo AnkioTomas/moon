@@ -236,7 +236,7 @@ function Douban.searchAsync(query, cb)
             ["Upgrade-Insecure-Requests"] = "1",
             ["Cache-Control"] = "max-age=0",
         },
-        timeout = 30,
+        timeout = require("http.timeout").net(1),
     }, function(res, err)
         if err then
             logger.warn("douban search error:", err)

@@ -14,7 +14,7 @@ HTTP 请求原语（Turbo，非阻塞，唯一网络栈）：回调 + `{ cancel 
 ---@class HttpRequestOpts
 ---@field headers table|nil
 ---@field timeout number|nil 请求超时秒
----@field connect_timeout number|nil 默认 20
+---@field connect_timeout number|nil 默认「网络超时」× 2/3（缺省 20）
 ---@field allow_redirects boolean|nil 显式 true 才跟 301/302
 ---@field auth_username string|nil
 ---@field auth_password string|nil
@@ -109,7 +109,7 @@ function Request.request(opts, cb)
             return
         end
         state.client = client
-        local fetched, future = pcall(client.fetch, client, opts.url, Fetch.options(opts, 30))
+        local fetched, future = pcall(client.fetch, client, opts.url, Fetch.options(opts, 1))
         if not fetched then
             settle(nil, future)
             return

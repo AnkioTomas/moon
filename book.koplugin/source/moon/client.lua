@@ -135,7 +135,7 @@ function Client:_jsonAsync(method, path, opts, cb)
             method = method,
             headers = headers,
             body = body,
-            timeout = 30,
+            timeout = require("http.timeout").net(1),
         }, function(res, req_err)
             if req_err then
                 logger.info("book HTTP request error:", path, req_err)
@@ -279,7 +279,7 @@ function Client:downloadBookAsync(filename, dest, on_progress, cb)
             ["Connection"] = "close",
             ["Accept"] = "*/*",
         },
-        timeout = 120,
+        timeout = require("http.timeout").net(4),
         on_progress = on_progress,
     }, dest, function(ok, err)
         if not ok then

@@ -153,7 +153,7 @@ local function downloadImage(url, cb)
         headers = {
             ["Referer"] = "https://e.m.jd.com/",
         },
-        timeout = 90,
+        timeout = require("http.timeout").net(3),
         allow_redirects = true,
     }, function(raw, err)
         if not raw or raw == "" then

@@ -171,7 +171,7 @@ function Auth.beginQrLoginAsync(cb)
     })
     local job = Request.get(url, {
         headers = browserHeaders(jar),
-        timeout = 30,
+        timeout = require("http.timeout").net(1),
     }, function(body, err, res)
         if cancelled then return end
         mergeCookies(jar, res)
@@ -220,7 +220,7 @@ function Auth.waitQrLoginAsync(login, cb)
         })
         request_job = Request.get(url, {
             headers = browserHeaders(jar),
-            timeout = 20,
+            timeout = require("http.timeout").net(2 / 3),
         }, function(raw, err, res)
             if cancelled then return end
             mergeCookies(jar, res)
@@ -295,7 +295,7 @@ function Auth.completeQrLoginAsync(info, cb)
         hops = hops + 1
         job = Request.get(url, {
             headers = browserHeaders(jar),
-            timeout = 30,
+            timeout = require("http.timeout").net(1),
         }, function(_body, _err, res)
             if cancelled then return end
             mergeCookies(jar, res)
@@ -318,7 +318,7 @@ function Auth.completeQrLoginAsync(info, cb)
     })
     job = Request.get(url, {
         headers = browserHeaders(jar),
-        timeout = 30,
+        timeout = require("http.timeout").net(1),
     }, function(raw, err, res)
         if cancelled then return end
         mergeCookies(jar, res)

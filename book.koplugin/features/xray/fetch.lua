@@ -196,7 +196,7 @@ local function fromContext(ui, identity, existing, cb)
             title, author, progressPercent(), ctx.current_page, ctx.prior_text, Store.promptSnapshot(existing),
             storySoFar(identity)) },
     }
-    return AI.jsonExtract(messages, { max_tokens = 8000, timeout = 180 }, function(decoded, err)
+    return AI.jsonExtract(messages, { max_tokens = 8000, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
         if not decoded then cb(nil, err); return end
         persist(identity, filterGrounded(cleanPayload(decoded), readingContext(ctx)), cb)
     end)
@@ -218,7 +218,7 @@ local function fromKnowledge(ui, identity, cb)
         { role = "system", content = Prompts.system },
         { role = "user", content = Prompts.knowledge(title, author, intro) },
     }
-    return AI.jsonExtract(messages, { max_tokens = 8000, timeout = 180 }, function(decoded, err)
+    return AI.jsonExtract(messages, { max_tokens = 8000, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
         if not decoded then cb(nil, err); return end
         local incoming = decoded.known ~= false and cleanPayload(decoded) or {}
         if #incoming == 0 then
@@ -333,7 +333,7 @@ function Fetch.scanBook(identity, text)
                 { role = "user", content = Prompts.comprehensive(
                     title, author, math.floor(index * 100 / #chunks), chunk, "", Store.promptSnapshot(existing)) },
             }
-            request = AI.jsonExtract(messages, { max_tokens = 8000, timeout = 180 }, function(decoded, err)
+            request = AI.jsonExtract(messages, { max_tokens = 8000, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
                 if not decoded then finish({ ok = false, err = err }); return end
                 local ok, save_err = pcall(mergeAndSave, identity, filterGrounded(cleanPayload(decoded), chunk))
                 if not ok then finish({ ok = false, err = save_err }); return end

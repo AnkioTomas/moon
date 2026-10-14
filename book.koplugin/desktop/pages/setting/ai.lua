@@ -96,6 +96,33 @@ local function testRow(desktop)
     end
 end
 
+--- 「AI 请求超时」：AI 默认秒数，各功能按倍率 × 它（见 http/timeout.lua）。
+---@param desktop table
+---@return function
+local function timeoutRow(desktop)
+    return function(iw)
+        local Timeout = require("http.timeout")
+        local value = Timeout.aiSeconds()
+        return Row.widget({
+            width = iw,
+            kind = "nav", icon = "timer", title = _("AI 请求超时"),
+            subtitle = T(_("等待模型回复的最长时间；报告、X-Ray 按倍率更长（%1 秒）"), Timeout.ai(1.5)),
+            status = T(_("%1 秒"), value), status_on = true,
+            callback = function()
+                require("ui.themes.widgets.spin"):new{
+                    title = _("AI 请求超时"),
+                    fields = { { value = value, min = Timeout.AI_MIN, max = Timeout.AI_MAX, step = Timeout.AI_STEP,
+                        format = function(v) return T(_("%1 秒"), v) end } },
+                    callback = function(v)
+                        Timeout.setAiSeconds(v)
+                        desktop:updateView()
+                    end,
+                }:show()
+            end,
+        })
+    end
+end
+
 ---@param desktop table
 ---@return table
 function AI:rows(desktop)
@@ -106,6 +133,7 @@ function AI:rows(desktop)
             function(value) return Text.trim(value) end),
         row(desktop, "ai_model", _("模型"), _("输入模型名"), false,
             function(value) return Text.trim(value) end),
+        timeoutRow(desktop),
         testRow(desktop),
     }
 end

@@ -16,7 +16,7 @@ local Device = {}
 
 local REGISTER_HOST = "log.snssdk.com"
 local REGISTER_PATH = "/service/2/device_register/"
-local TIMEOUT = 20
+local TIMEOUT_RATIO = 2 / 3 -- × 「网络超时」，缺省 20 秒
 
 -- 画像模板（不含服务端签发的 id）。
 local PROFILE_TEMPLATE = {
@@ -209,7 +209,7 @@ function Device.registerAsync(settings, cb)
         method = "POST",
         headers = headers,
         body = body,
-        timeout = TIMEOUT,
+        timeout = require("http.timeout").net(TIMEOUT_RATIO),
         allow_redirects = true,
     }, function(res, err)
         -- turbo 超时仍返回 res 表，错误在 err；只看 res 会变成「HTTP nil」。

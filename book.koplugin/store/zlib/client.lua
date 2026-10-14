@@ -262,7 +262,7 @@ function Client:_jsonAsync(method, path, opts, cb)
         local url = current_base .. path
         logger.dbg("book.zlib mirror attempt", method, path,
             "attempt", bi, "of", #bases, current_base,
-            "timeout", opts.timeout or 30)
+            "timeout", opts.timeout or require("http.timeout").net(1))
         issue(url, method, body, headers, { [url] = true }, 0)
     end
 
@@ -279,7 +279,7 @@ function Client:_jsonAsync(method, path, opts, cb)
             method = m,
             body = req_body,
             headers = headers,
-            timeout = opts.timeout or 30,
+            timeout = opts.timeout or require("http.timeout").net(1),
         }, function(res, err)
             if cancelled then return end
             local code = res and tonumber(res.code) or nil
@@ -496,7 +496,7 @@ function Client:downloadAsync(id, hash, dest, on_progress, cb)
             url = link,
             method = "GET",
             headers = self:headers(true),
-            timeout = 180,
+            timeout = require("http.timeout").net(6),
             -- CDN 直链常带 301/302：允许 Turbo 自动跟随
             allow_redirects = true,
             on_progress = on_progress,

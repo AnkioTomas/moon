@@ -144,7 +144,7 @@ local function downloadBinaryAsync(url, referer, cb)
         headers = {
             ["Referer"] = referer or (WEB .. "/"),
         },
-        timeout = 90,
+        timeout = require("http.timeout").net(3),
         allow_redirects = true,
         -- CDN 403 不是会话失效，禁止走 renewal 误判。
         skip_auth_retry = true,

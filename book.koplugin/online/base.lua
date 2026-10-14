@@ -32,7 +32,7 @@ local Text = require("utils.text")
 local Online = {}
 Online.__index = Online
 Online.host = "https://api.ankio.net"
-Online.timeout = 20
+Online.timeout_ratio = 2 / 3 -- × 「网络超时」，缺省 20 秒
 
 --- 距本地今日结束的秒数。日更用这个。
 ---@return number
@@ -184,7 +184,7 @@ local function downloadImage(self, cb)
         url = url,
         method = "GET",
         allow_redirects = true,
-        timeout = 60,
+        timeout = require("http.timeout").net(2),
     }, path, function(ok)
         if ok and Image.ok(path) and type(self.data) == "table"
                 and type(self._expire) == "number" then
@@ -239,7 +239,7 @@ function Online:fetch(args, cb)
     local url = self:url()
     self.city = saved
     return Request.get(url, {
-        timeout = self.timeout,
+        timeout = require("http.timeout").net(self.timeout_ratio),
         allow_redirects = true,
         cache_ttl = 0,
     }, function(body, err)

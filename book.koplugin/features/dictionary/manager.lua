@@ -66,7 +66,7 @@ end
 ---@param cb fun(items: table[]|nil, err: any)
 ---@return table
 function Manager.catalog(cb)
-    return Request.get(BASE_URL .. "/manifest.json", { timeout = 30 }, function(body, err)
+    return Request.get(BASE_URL .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
         if not body then cb(nil, err); return end
         local ok, manifest = pcall(JSON.decode, body)
         if not ok then cb(nil, manifest); return end
@@ -245,7 +245,7 @@ local function downloadParts(item, dir, idx, completed, done, report)
     Request.download({
         url = BASE_URL .. "/" .. part.file,
         method = "GET",
-        timeout = 300,
+        timeout = require("http.timeout").net(10),
         allow_redirects = true,
         on_progress = function(bytes)
             report("part", completed + bytes, item.size, idx, #item.parts)

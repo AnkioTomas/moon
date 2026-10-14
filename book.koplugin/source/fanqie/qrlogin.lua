@@ -143,7 +143,7 @@ function QRLogin:_http_get(url, jar, csrf, cb)
         url = url,
         method = "GET",
         headers = headers,
-        timeout = 15,
+        timeout = require("http.timeout").net(0.5),
         allow_redirects = false,
     }, function(res, err)
         if err then

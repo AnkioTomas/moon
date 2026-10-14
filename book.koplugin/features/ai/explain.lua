@@ -142,7 +142,7 @@ local function ask(ui, title, messages, selection)
             release()
         end,
     }
-    handle = loading:showWhile(require("ai").chat, messages, { max_tokens = 1000, timeout = 60 }, function(content, err)
+    handle = loading:showWhile(require("ai").chat, messages, { max_tokens = 1000, timeout = require("http.timeout").ai(0.5) }, function(content, err)
         if cancelled then return end
         loading:close()
         local answer = content and Explain.plain(content) or ""

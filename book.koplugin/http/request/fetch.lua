@@ -134,22 +134,24 @@ local function addHeaders(headers, values)
     end
 end
 
---- 拼 turbo HTTPClient:fetch 的 kwargs。timeout 是未传 opts.timeout 时的默认秒。
+--- 拼 turbo HTTPClient:fetch 的 kwargs。timeout_ratio 是未传 opts.timeout 时相对「网络超时」的倍率。
 --- turbo 文档写了 auth_username/auth_password 但从未实现，Basic 头只能自己拼。
 ---@param opts HttpRequest
----@param timeout number
+---@param timeout_ratio number
 ---@return table
-function Fetch.options(opts, timeout)
+function Fetch.options(opts, timeout_ratio)
     local user = opts.auth_username
     local auth = user and user ~= "" and {
         Authorization = "Basic " .. Text.base64Encode(user .. ":" .. (opts.auth_password or "")),
     }
     local user_agent = Fetch.getHeader(opts.headers, "User-Agent")
+    -- 超时 = 「网络超时」× 倍率（调用方已换算的原样用），规则见 http/timeout.lua。
+    local request_timeout, connect_timeout = require("http.timeout").resolve(opts, timeout_ratio)
     return {
         method = opts.method or "GET",
         body = opts.body,
-        request_timeout = opts.timeout or timeout,
-        connect_timeout = opts.connect_timeout or 20,
+        request_timeout = request_timeout,
+        connect_timeout = connect_timeout,
         allow_redirects = opts.allow_redirects,
         user_agent = user_agent and tostring(user_agent),
         on_headers = function(headers)

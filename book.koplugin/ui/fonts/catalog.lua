@@ -205,7 +205,7 @@ function Catalog.ensureInstalledAsync(item, on_progress, cb)
     local cancelled = false
     local extract_job
     os.remove(zip_path)
-    local download_job = Request.download({ url = item.url, timeout = 300, on_progress = on_progress },
+    local download_job = Request.download({ url = item.url, timeout = require("http.timeout").net(10), on_progress = on_progress },
         zip_path, function(ok, err)
             if cancelled then return end
             if not ok then return cb(nil, err) end

@@ -58,7 +58,7 @@ local function probe(url, cb)
         title = _("HTTP 代理"), text = _("正在通过代理连接…"), dismissable = false,
     }
     loading:show()
-    Request.request({ url = PROBE_URL, proxy = url, timeout = 15, connect_timeout = 10 }, function(_res, err)
+    Request.request({ url = PROBE_URL, proxy = url, timeout = require("http.timeout").net(0.5), connect_timeout = require("http.timeout").net(1 / 3) }, function(_res, err)
         loading:close()
         cb(err and tostring(err) or nil)
     end)
@@ -149,10 +149,40 @@ function Setting.entry(desktop)
         page = {
             title = _("网络"),
             sections = function()
-                return { { title = _("HTTP 代理"), rows = Setting.rows(desktop) } }
+                return {
+                    { title = _("HTTP 代理"), rows = Setting.rows(desktop) },
+                    { title = _("超时"), rows = { Setting.timeoutRow(desktop) } },
+                }
             end,
         },
     }
+end
+
+--- 「网络超时」：普通请求的默认秒数，其余请求按倍率 × 它（见 http/timeout.lua）。
+---@param desktop BookDesktop
+---@return fun(iw: number): table
+function Setting.timeoutRow(desktop)
+    return function(iw)
+        local Timeout = require("http.timeout")
+        local value = Timeout.networkSeconds()
+        return Row.widget({
+            width = iw, kind = "nav", icon = "timer",
+            title = _("网络超时"),
+            subtitle = T(_("普通请求的默认超时；下载等按倍率放大（如下载 %1 秒）"), Timeout.net(10)),
+            status = T(_("%1 秒"), value), status_on = true,
+            callback = function()
+                require("ui.themes.widgets.spin"):new{
+                    title = _("网络超时"),
+                    fields = { { value = value, min = Timeout.NETWORK_MIN, max = Timeout.NETWORK_MAX, step = Timeout.NETWORK_STEP,
+                        format = function(v) return T(_("%1 秒"), v) end } },
+                    callback = function(v)
+                        Timeout.setNetworkSeconds(v)
+                        desktop:updateView()
+                    end,
+                }:show()
+            end,
+        })
+    end
 end
 
 ---@param desktop BookDesktop

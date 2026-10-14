@@ -40,7 +40,7 @@ local function requestShard(bookId, uid, psvts, endpoint, style, done)
                 ["Origin"] = "https://weread.qq.com",
                 ["Referer"] = Protocol.readerUrl(bookId, uid),
             },
-            timeout = 90,
+            timeout = require("http.timeout").net(3),
         },
         function(raw, err)
             if not raw then

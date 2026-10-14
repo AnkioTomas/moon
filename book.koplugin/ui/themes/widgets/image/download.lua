@@ -105,8 +105,8 @@ function Queue:pump()
             method = "GET",
             headers = task.headers,
             allow_redirects = true,
-            timeout = 60,
-            connect_timeout = 30,
+            timeout = require("http.timeout").net(2),
+            connect_timeout = require("http.timeout").net(1),
         }, task.tmp, function(ok, err)
             task:_onHttp(ok, err)
         end)
