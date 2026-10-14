@@ -208,7 +208,11 @@ local SHELF_LIMIT = 128
 ---@return string
 function M.cache_key()
     local parts = {}
-    for _idx, book in ipairs(books(SHELF_LIMIT)) do
+    local shelf = books(SHELF_LIMIT)
+    -- 没开过的网络书本地没封面：联网时后台补下载，落盘后键变化，下次锁屏重画。
+    -- 预取失败不能影响锁屏生成。
+    pcall(function() require("features.lockscreen.components.cover_prefetch").run(shelf) end)
+    for _idx, book in ipairs(shelf) do
         parts[#parts + 1] = (book.source_id or "") .. "\0" .. book.stable_id .. (book.cover and "+" or "-")
     end
     return M.style() .. ":" .. require("ffi/sha2").md5(table.concat(parts, "\n"))

@@ -42,6 +42,8 @@ function M.shelfBook(book, source_id)
         authors = book.authors or "",
         percent = tonumber(book.percent) or 0,
         cover = M.coverPath(stable_id, sid),
+        -- 本地没有封面时留着远程地址，交给 cover_prefetch 联网补齐。
+        cover_url = type(book.cover) == "string" and book.cover:match("^https?://") and book.cover or nil,
     }
 end
 
