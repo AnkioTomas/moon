@@ -1330,4 +1330,8 @@ Current version: ",
     ["全部"] = "All",
     ["已读完"] = "Finished",
     ["搜索结果"] = "Search results",
+    ["Kindle 书库"] = "Kindle Library",
+    ["Kindle 书库里找不到这本书"] = "This book was not found in the Kindle library",
+    ["需要先安装并启用 kindle.koplugin"] = "Install and enable kindle.koplugin first",
+    ["首次打开需要转换，可能要几分钟，请耐心等待"] = "First open needs conversion and may take a few minutes, please wait",
 }
