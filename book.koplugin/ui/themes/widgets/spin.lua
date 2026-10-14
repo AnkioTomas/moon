@@ -99,7 +99,13 @@ local function columnWidths(fields, base, gap, inner)
         digits_total = digits_total + digits[i]
     end
     if total <= inner then return widths end
-    local extra = math.max(0, math.floor((inner - gap * (#fields - 1) - digits_total) / #fields))
+    local avail = inner - gap * (#fields - 1)
+    if digits_total > avail then
+        -- 极窄屏连数字都放不下：按数字宽等比缩，整行不越界（数字由文本控件截断）。
+        for i = 1, #fields do widths[i] = math.max(1, math.floor(avail * digits[i] / digits_total)) end
+        return widths
+    end
+    local extra = math.floor((avail - digits_total) / #fields)
     for i = 1, #fields do widths[i] = digits[i] + extra end
     return widths
 end
