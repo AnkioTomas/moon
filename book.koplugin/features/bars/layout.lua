@@ -146,6 +146,66 @@ function Layout.setIcons(on)
     MoonSettings.save("features.bars", bars)
 end
 
+--- 文字字号范围与缺省（与 KOReader 状态栏「Item font size」一致，未缩放的 pt）。
+Layout.FONT_MIN, Layout.FONT_MAX, Layout.FONT_DEFAULT = 8, 36, 14
+--- 顶栏比 CRE 原生页头额外增加的高度范围与缺省（未缩放像素）。
+Layout.TOP_HEIGHT_MIN, Layout.TOP_HEIGHT_MAX, Layout.TOP_HEIGHT_DEFAULT = 0, 60, 12
+
+local FONT_KEY = { top = "book_reader_top_font_size", bottom = "book_reader_bottom_font_size" }
+
+---@param v any
+---@param min number
+---@param max number
+---@return number|nil
+local function clampInt(v, min, max)
+    v = tonumber(v)
+    if not v then return nil end
+    return math.max(min, math.min(max, math.floor(v)))
+end
+
+--- 文字字号。底栏以 KOReader 状态栏为准（两边同一份）；顶栏用自己的值，未设置时跟随底栏。
+---@param which string
+---@param footer_settings table|nil KOReader ReaderFooter.settings
+---@return number
+function Layout.fontSize(which, footer_settings)
+    local bars = MoonSettings.get("features.bars")
+    local footer = footer_settings and clampInt(footer_settings.text_font_size, Layout.FONT_MIN, Layout.FONT_MAX)
+    local own = clampInt(bars[FONT_KEY[which]], Layout.FONT_MIN, Layout.FONT_MAX)
+    if which == "top" then
+        return own or footer or Layout.FONT_DEFAULT
+    end
+    return footer or own or Layout.FONT_DEFAULT
+end
+
+--- 顶栏是否设置了自己的字号（否则跟随底栏）。
+---@return boolean
+function Layout.topFontCustom()
+    return MoonSettings.get("features.bars")[FONT_KEY.top] ~= nil
+end
+
+--- 写入字号；nil 清除（顶栏恢复跟随底栏）。
+---@param which string
+---@param size number|nil
+function Layout.setFontSize(which, size)
+    local bars = MoonSettings.get("features.bars")
+    bars[FONT_KEY[which]] = size and clampInt(size, Layout.FONT_MIN, Layout.FONT_MAX) or nil
+    MoonSettings.save("features.bars", bars)
+end
+
+--- 顶栏额外高度（未缩放像素）。
+---@return number
+function Layout.topHeight()
+    return clampInt(MoonSettings.get("features.bars").book_reader_top_bar_height,
+        Layout.TOP_HEIGHT_MIN, Layout.TOP_HEIGHT_MAX) or Layout.TOP_HEIGHT_DEFAULT
+end
+
+---@param v number
+function Layout.setTopHeight(v)
+    local bars = MoonSettings.get("features.bars")
+    bars.book_reader_top_bar_height = clampInt(v, Layout.TOP_HEIGHT_MIN, Layout.TOP_HEIGHT_MAX)
+    MoonSettings.save("features.bars", bars)
+end
+
 --- 组件在布局里的下标；不在返回 nil。
 ---@param layout table
 ---@param id string

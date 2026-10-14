@@ -95,4 +95,25 @@ store.book_reader_top_bar_layout = {}
 local fallback = Layout.get("top")
 Assert.eq(#fallback, 0)
 
+-- 文字大小：底栏以 KOReader 状态栏为准；顶栏未设置跟随底栏；越界钳到范围内。
+Assert.eq(Layout.fontSize("bottom", nil), 14)
+Assert.eq(Layout.fontSize("bottom", { text_font_size = 18 }), 18)
+Assert.eq(Layout.fontSize("top", { text_font_size = 18 }), 18)
+Assert.is_false(Layout.topFontCustom())
+Layout.setFontSize("top", 99)
+Assert.eq(Layout.fontSize("top", { text_font_size = 18 }), 36)
+Assert.is_true(Layout.topFontCustom())
+Layout.setFontSize("top", nil)
+Assert.is_false(Layout.topFontCustom())
+Layout.setFontSize("bottom", 20)
+Assert.eq(Layout.fontSize("bottom", nil), 20)
+Assert.eq(Layout.fontSize("bottom", { text_font_size = 16 }), 16)
+
+-- 顶栏高度：缺省 12 保持原行为；越界钳到范围内。
+Assert.eq(Layout.topHeight(), 12)
+Layout.setTopHeight(-5)
+Assert.eq(Layout.topHeight(), 0)
+Layout.setTopHeight(24)
+Assert.eq(Layout.topHeight(), 24)
+
 return true
