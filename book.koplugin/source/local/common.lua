@@ -289,12 +289,15 @@ end
 --- 同步阻塞，只在子进程里跑。
 --- 任一目录列不出来就抛错：扫盘结果要按全量快照 reconcile，漏一个目录等于软删其中所有书。
 --- fp = 文件指纹（大小:修改时间），没变就不重算内容 md5。
+--- flat=true（关闭「按文件夹分类」）：不看目录结构、不派生分类 / 系列（库里的手动编辑保留），不限层数下钻；
+--- 软链接目录跳过，免得成环。
 ---@param root string
+---@param flat boolean|nil
 ---@return { name: string, path: string, category: string|nil, series: string|nil, fp: string }[]
-local function scanFiles(root)
+local function scanFiles(root, flat)
     local files = {}
     --- 递归遍历一层目录，把书籍文件连同继承来的分类/系列收进 files。
-    --- 跳过 . 前缀项与 .sdr 边车目录；分类 / 系列取前两级，更深沿用，至多下钻 8 层。
+    --- 跳过 . 前缀项与 .sdr 边车目录；depth 超过 2 不再下钻（flat 时不限）。
     ---@param dir string 当前目录绝对路径
     ---@param category string|nil 继承的分类（一级子目录名）
     ---@param series string|nil 继承的系列（二级子目录名）
@@ -310,12 +313,14 @@ local function scanFiles(root)
                         -- KOReader 的 .sdr 边车目录不是书籍分类，不下钻
                         if name:sub(-4) ~= ".sdr" then
                             -- 下钻：根下的一级目录名是分类，分类下的二级目录名是系列
-                            if depth == 1 then
+                            if flat then
+                                if lfs.symlinkattributes(path, "mode") ~= "link" then
+                                    walk(path, category, series, depth + 1)
+                                end
+                            elseif depth == 1 then
                                 walk(path, name, nil, depth + 1)
                             elseif depth == 2 then
                                 walk(path, category, name, depth + 1)
-                            elseif depth < 8 then
-                                walk(path, category, series, depth + 1)
                             end
                         end
                     elseif attr.mode == "file" and isBookFile(name) then

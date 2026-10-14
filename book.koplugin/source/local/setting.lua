@@ -71,8 +71,26 @@ function Setting.rows(plugin)
                 end)
             end })
     end
+    --- 按文件夹分类（默认开）：切换后重扫一次，分类 / 系列随之刷新。
+    local function folderCategoryRow(iw)
+        local Settings = require("utils.settings")
+        local cfg = Settings.getSource(SOURCE_ID)
+        local on = cfg.folder_category ~= false
+        return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = "folder",
+            title = _("按文件夹分类"), subtitle = _("第一层文件夹作为分类，第二层作为系列"),
+            status = on and _("开") or _("关"), status_on = on,
+            callback = function()
+                cfg.folder_category = not on
+                Settings.saveSource(SOURCE_ID, cfg)
+                -- 关闭：目录派生的分类 / 系列一次清掉，之后只由手动编辑设置；打开：下次扫盘按目录重算。
+                if on then require("book.books_db").clearCategories(SOURCE_ID) end
+                -- 重建源实例并通知桌面，桌面重开时照常后台扫盘（指纹快路径），分类 / 系列不一致会整轮写库。
+                require("source.registry").reload()
+            end })
+    end
     return {
         localPathRow,
+        folderCategoryRow,
         row("webdav_url", _("WebDAV 地址"), false, "dns"),
         row("webdav_username", _("WebDAV 用户名"), false, "person"),
         row("webdav_password", _("WebDAV 密码"), true, "key"),
