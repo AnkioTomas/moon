@@ -144,7 +144,9 @@ function Setting.open()
         end
         local names = {}
         for name in lfs.dir(path) do
-            if name ~= "." and name ~= ".." and lfs.attributes(join(path, name), "mode") == "directory" then
+            -- KOReader 的 .sdr 边车目录不是书库目录，不列出
+            if name ~= "." and name ~= ".." and name:sub(-4) ~= ".sdr"
+                and lfs.attributes(join(path, name), "mode") == "directory" then
                 names[#names + 1] = name
             end
         end
