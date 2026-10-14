@@ -24,7 +24,9 @@ allowInitModules(debug.getinfo(1, "S").source:match("^@(.*)/"))
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger = require("utils.log")
-logger.boot()
+-- 启动横幅只是诊断信息，失败不能拖垮插件加载。
+local boot_ok, boot_err = pcall(logger.boot)
+if not boot_ok then logger.warn("book boot banner failed", boot_err) end
 require("l10n")
 
 local SourceRegistry = require("source.registry")
