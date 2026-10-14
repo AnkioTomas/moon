@@ -135,16 +135,50 @@ local function withMetadata(row, metadata)
     return row
 end
 
---- Kavita 的时间是不带时区的 UTC（`2026-09-29T20:07:19.193`）。
+--- Kwita 的 ISO 时间（不带时区）→ 按本地时钟解析成 epoch；解析不了返回 nil。
+---@param value any
+---@return integer|nil
+local function parseWall(value)
+    local y, mo, d, h, mi, s = tostring(value or ""):match("^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
+    if not y or tonumber(y) < 1971 then return nil end
+    return os.time({ year = tonumber(y), month = tonumber(mo), day = tonumber(d),
+        hour = tonumber(h), min = tonumber(mi), sec = tonumber(s) })
+end
+
+--- 客户端时区偏移（秒）：os.time 按本地解析 UTC 时钟得到的差值。
+---@return integer
+local function clientOffset()
+    local now = os.time()
+    return now - os.time(os.date("!*t", now) --[[@as osdate]])
+end
+
+--- `xxxUtc` 字段是真的 UTC（`2026-09-29T20:07:19.193`）：按本地解析后补回客户端偏移。
 ---@param value any
 ---@return integer|nil
 local function utcTime(value)
-    local y, mo, d, h, mi, s = tostring(value or ""):match("^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
-    if not y or tonumber(y) < 1971 then return nil end
-    local now = os.time()
-    local offset = now - os.time(os.date("!*t", now) --[[@as osdate]])
-    return os.time({ year = tonumber(y), month = tonumber(mo), day = tonumber(d),
-        hour = tonumber(h), min = tonumber(mi), sec = tonumber(s) }) + offset
+    local t = parseWall(value)
+    if not t then return nil end
+    return t + clientOffset()
+end
+
+--- 服务器时区偏移（秒）：Kavita 同时给 `lastChapterAdded`（服务器本地）与
+--- `lastChapterAddedUtc`（UTC），两者差值就是服务器时区（实测服务器在 UTC+8 时为 28800）。
+---@param series table Kavita SeriesDto
+---@return integer
+local function serverOffset(series)
+    local local_t, utc_t = parseWall(series.lastChapterAdded), parseWall(series.lastChapterAddedUtc)
+    if not (local_t and utc_t) then return 0 end
+    return local_t - utc_t
+end
+
+--- 阅读时间：`latestReadDate` 没有 Utc 后缀 —— 它是**服务器本地时间**，不是 UTC。
+--- 按 UTC 解析会存成 8 小时后的「未来」时间，刚读完的书反而被它压在下面。
+---@param series table Kavita SeriesDto
+---@return integer|nil
+local function readTime(series)
+    local t = parseWall(series.latestReadDate)
+    if not t then return nil end
+    return t - serverOffset(series) + clientOffset()
 end
 
 --- 服务端已读回填成本地进度（远端版，本地脏行不覆盖），书架 /「最近阅读」/「已读」都看得到。
@@ -157,6 +191,7 @@ end
 ---@return integer changed
 local function backfillRead(source_id, series_list)
     local ProgressDB = require("book.progress_db")
+    local now = os.time()
     local changed = 0
     for _idx, series in ipairs(series_list) do
         local pages, read = tonumber(series.pages) or 0, tonumber(series.pagesRead) or 0
@@ -164,12 +199,18 @@ local function backfillRead(source_id, series_list)
             local stable_id = tostring(series.id)
             local comic = tonumber(series.format) == 1
             local here = ProgressDB.get(source_id, stable_id)
+            local at = readTime(series)
+            -- 旧版把 latestReadDate（服务器本地时间）当 UTC 解析，存成了 8 小时后的「未来」时间，
+            -- 结果刚读完的书被它挤到后面；显式拉回来（只降不升，只动干净行）。
+            if here and at and (tonumber(here.updated_at) or 0) > now + 60 then
+                ProgressDB.fixRemoteTime(source_id, stable_id, at)
+            end
             if (comic and not (here and here.page == read)) or (not comic and here == nil) then
                 if ProgressDB.upsertRemote(source_id, stable_id, {
                     fraction = math.min(1, read / pages),
                     page = comic and read or nil,
                     total_pages = comic and pages or nil,
-                    updated_at = utcTime(series.latestReadDate),
+                    updated_at = at,
                 }) then
                     changed = changed + 1
                 end

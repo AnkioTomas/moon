@@ -250,6 +250,27 @@ do
     clearMods()
 end
 
+-- ── fixRemoteTime：源换时间口径时显式拉回未来时间 ──────────────
+do
+    local connection, calls = makeConn({ step = function() return nil end })
+    local DbBase, ProgressDB = loadProgress(connection)
+    local before = #calls
+
+    Assert.is_true(ProgressDB.fixRemoteTime("ext.kavita", "700", 1770062706))
+    local q = calls[before + 1]
+    Assert.is_true(q.sql:find("UPDATE pending_progress SET updated_at=?", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("sync_status=1", 1, true) ~= nil, "只改干净行：脏行的时间归本地 revision")
+    Assert.is_true(q.sql:find("updated_at>?", 1, true) ~= nil, "只降不升")
+    Assert.eq(q.args[1], 1770062706)
+    Assert.eq(q.args[2], "ext.kavita")
+    Assert.eq(q.args[3], "700")
+    Assert.eq(q.args[4], 1770062706)
+    Assert.is_true(q.sql:find("INSERT INTO pending_progress", 1, true) == nil, "不新建行")
+
+    DbBase.close()
+    clearMods()
+end
+
 -- ── recent：仅由 pending_progress 决定准入与顺序 ─────────
 do
     local connection, calls = makeConn({
