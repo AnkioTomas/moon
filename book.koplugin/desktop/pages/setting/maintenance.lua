@@ -71,17 +71,21 @@ end
 ---@return fun(iw: number): table
 function Maintenance:cacheRow(desktop)
     local page = desktop.settings
+    --- 异步量一次缓存体积，结果写回设置页实例并重建设置页刷新状态文本。
+    local function measure()
+        if page.cache_size_job then return end
+        page.cache_size_label = nil
+        page.cache_size_job = Cache.sizeBytesAsync(function(bytes)
+            page.cache_size_job = nil
+            if desktop.closed then return end
+            page.cache_size_label = bytes > 0
+                and (require("util").getFriendlySize(bytes) or tostring(bytes)) or "0"
+            if desktop.tab == "settings" then desktop:updateView() end
+        end)
+    end
     return function(iw)
         local cache_size = page.cache_size_label or _("计算中…")
-        if page.cache_size_label == nil and not page.cache_size_job then
-            page.cache_size_job = Cache.sizeBytesAsync(function(bytes)
-                page.cache_size_job = nil
-                if desktop.closed then return end
-                page.cache_size_label = bytes > 0
-                    and (require("util").getFriendlySize(bytes) or tostring(bytes)) or "0"
-                if desktop.tab == "settings" then desktop:updateView() end
-            end)
-        end
+        if page.cache_size_label == nil then measure() end
         return Row.widget({
             width = iw,
             chevron = false,
@@ -98,10 +102,11 @@ function Maintenance:cacheRow(desktop)
                             page.cache_clear_job = nil
                             if desktop.closed then return end
                             if ok then
-                                page.cache_size_label = "0"
+                                -- 边车（.sdr）会保留，体积不为零，重新量一次而不是直接写 0。
                                 desktop:onEvent("home_refresh")
                                 desktop:onEvent("shelf_changed")
                                 desktop:updateView()
+                                measure()
                             end
                             Toast:new{ text = ok and _("已清理") or _("清理失败"), timeout = 2 }:show()
                         end)

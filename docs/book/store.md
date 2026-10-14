@@ -73,3 +73,4 @@ Store.rememberMany(books)
 - 打开旧源书之后同步，必须用 `identity.source`，不要 `Registry.current()`。
 - local：`stable_id == path`；改名靠 `md5` + 扫盘 `renameStableId`。
 - `touch` 失败就停止打开链路，不要「先开再说」。
+- 清缓存（整库 `Cache.clearAsync` / 单书 `Store.clearCache`）保留工作目录里的 KOReader `.sdr` 边车（阅读位置、书签、标注）：它们是用户数据，不是「可重新生成的缓存」，重下到同一路径即原样可用。删书（`markDeleted`）连同边车一起清。

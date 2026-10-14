@@ -202,6 +202,42 @@ do
     Assert.eq(#chapter_rows, 0)
 end
 
+-- ── clearAsync：KOReader 的 .sdr 边车保留，其余缓存照删 ──
+do
+    resetTree()
+    writeFile(CACHE .. "/moon/book/aaa/book.epub", 10)
+    writeFile(CACHE .. "/moon/book/aaa/book.sdr/metadata.epub.lua", 20)
+    writeFile(CACHE .. "/moon/book/aaa/other.html", 10)
+
+    local ok_result
+    Cache.clearAsync(function(ok)
+        ok_result = ok
+    end)
+    Stubs.flush()
+
+    Assert.is_true(ok_result)
+    Assert.is_nil(lfs.attributes(CACHE .. "/moon/book/aaa/book.epub"))
+    Assert.is_nil(lfs.attributes(CACHE .. "/moon/book/aaa/other.html"))
+    Assert.eq(lfs.attributes(CACHE .. "/moon/book/aaa/book.sdr/metadata.epub.lua", "mode"), "file")
+end
+
+-- ── clearAsync：.trash 里的边车是删书残留，跟着垃圾一起清 ──
+do
+    resetTree()
+    writeFile(CACHE .. "/.trash/1-1/book.sdr/metadata.epub.lua", 20)
+    writeFile(CACHE .. "/moon/book/aaa/book.sdr/metadata.epub.lua", 20)
+
+    local ok_result
+    Cache.clearAsync(function(ok)
+        ok_result = ok
+    end)
+    Stubs.flush()
+
+    Assert.is_true(ok_result)
+    Assert.is_nil(lfs.attributes(CACHE .. "/.trash"))
+    Assert.eq(lfs.attributes(CACHE .. "/moon/book/aaa/book.sdr/metadata.epub.lua", "mode"), "file")
+end
+
 -- ── purgeDirAsync：条目超过单步 budget=24，靠 nextTick 续跑 ──
 do
     resetTree()
