@@ -1,5 +1,5 @@
 --[[--
-文件管理路由：列表 / 下载 / 上传 / mkdir / delete / rename + 页面片段。
+文件管理路由：列表 / 下载 / 上传 / mkdir / delete / rename / 解压 / 复制 / 移动 / 属性 / 文本写入 / 打包下载。
 
 函数签名对齐 Server 方法（首参 self=server），由 features.remote.server 装配到
 Server._route* 上；只依赖 server 暴露的 _fail/_queueResponse/jsonResp/errorResp/
@@ -30,12 +30,19 @@ local ERROR_CODES = {
     ["unsafe archive path"] = 400,
     ["unsupported archive entry"] = 400,
     ["too many archive entries"] = 400,
+    ["target inside source"] = 400,
+    ["too many entries"] = 413,
+    ["file too large"] = 413,
 }
 
 -- 不走 utils/image：它认 .svg，同源 inline 下发 SVG 等于把脚本放进管理页的源里。
 local IMAGE_TYPES = {
     [".png"] = "image/png", [".jpg"] = "image/jpeg", [".jpeg"] = "image/jpeg",
     [".gif"] = "image/gif", [".webp"] = "image/webp", [".bmp"] = "image/bmp",
+    -- 媒体预览：音视频 inline 播放（不会被当成页面执行）。
+    [".mp4"] = "video/mp4", [".m4v"] = "video/mp4", [".webm"] = "video/webm",
+    [".mp3"] = "audio/mpeg", [".m4a"] = "audio/mp4", [".ogg"] = "audio/ogg",
+    [".wav"] = "audio/wav", [".flac"] = "audio/flac",
 }
 
 ---@param path string
@@ -266,6 +273,178 @@ function File.extract(self, conn, method, path)
     conn.state = "pending"
     self.handlers.extract(target, mutationDone(self, conn, "extract " .. target))
     return true
+end
+
+-- ── 复制 / 移动 / 属性 / 文本写入 / 打包下载 ──────────────
+
+local CONFLICTS = { ask = true, skip = true, rename = true, overwrite = true }
+
+--- POST /api/copy|move?path=&to=&conflict=：复制或移动一个条目到完整目标路径。
+--- conflict 缺省 ask（目标存在回 409，由网页选择保留两份 / 替换 / 跳过）。
+--- 非 POST 405，路径非法 400，越界 403；移动的源、任一目标受保护 403。
+---@param conn table
+---@param method string
+---@param query table
+---@param op "copy"|"move"
+function File.transfer(self, conn, method, query, op)
+    if method ~= "POST" then
+        return self:_fail(conn, 405, "Method Not Allowed")
+    end
+    local from, to = self.cleanPath(query.path), self.cleanPath(query.to)
+    if not from or not to then
+        return self:_fail(conn, 400, "Bad path")
+    end
+    from, to = self:_safePath(from), self:_safePath(to)
+    if not from or not to then
+        return self:_fail(conn, 403, "Path outside managed roots")
+    end
+    local conflict = query.conflict or "ask"
+    if not CONFLICTS[conflict] then
+        return self:_fail(conn, 400, "Bad conflict policy")
+    end
+    if self:_isRoot(to) or self.handlers.is_protected(to)
+        or (op == "move" and (self:_isRoot(from) or self.handlers.is_protected(from))) then
+        return self:_fail(conn, 403, "Protected path")
+    end
+    conn.state = "pending"
+    self.handlers.transfer(op, from, to, conflict, mutationDone(self, conn, op .. " " .. from .. " " .. to))
+    return true
+end
+
+--- GET /api/stat?path=：属性（类型、大小、时间、权限、属主、链接目标；目录含统计）。
+---@param conn table
+---@param method string
+---@param path string|nil
+function File.stat(self, conn, method, path)
+    if method ~= "GET" then
+        return self:_fail(conn, 405, "Method Not Allowed")
+    end
+    local target = resolveTarget(self, conn, path, "Bad path")
+    if not target then
+        return
+    end
+    conn.state = "pending"
+    self.handlers.stat(target, function(info, err)
+        if conn.dead then return end
+        if not info then
+            conn.resp = self.errorResp(ERROR_CODES[err] or 500, err)
+            return
+        end
+        conn.resp = self.jsonResp(200, JSON.encode(info))
+    end)
+    return true
+end
+
+File.MAX_TEXT_BYTES = 4 * 1024 * 1024
+
+--- POST /api/write?path=[&create=1]：请求体原样写成文本文件（编辑器保存 / 新建空文件）。
+--- create=1 时目标已存在回 409。体积上限 MAX_TEXT_BYTES。
+---@param conn table
+---@param method string
+---@param headers table
+---@param query table
+function File.write(self, conn, method, headers, query)
+    if method ~= "POST" then
+        return self:_fail(conn, 405, "Method Not Allowed")
+    end
+    local target = resolveTarget(self, conn, query.path, "Bad path")
+    if not target then
+        return
+    end
+    if self:_isRoot(target) or self.handlers.is_protected(target) then
+        return self:_fail(conn, 403, "Protected path")
+    end
+    local create = query.create == "1"
+    return self:_acceptText(conn, headers, File.MAX_TEXT_BYTES, function(server, c, text)
+        c.state = "pending"
+        server.handlers.write_text(target, text, create, mutationDone(server, c, "write " .. target))
+    end)
+end
+
+File.ZIP_BODY_LIMIT = 256 * 1024
+File.MAX_ZIP_ITEMS = 1000
+
+--- 打包请求体收尾：{"paths":[...],"name":"x.zip"} → 后台建 zip，回 {"id":...}，再由 GET 取走。
+---@param conn table
+---@param text string
+local function finishZip(self, conn, text)
+    local payload = JSON.decode(text ~= "" and text or "{}")
+    local list = type(payload) == "table" and payload.paths
+    if type(list) ~= "table" or #list == 0 or #list > File.MAX_ZIP_ITEMS then
+        return self:_fail(conn, 400, "Bad paths")
+    end
+    local paths = {}
+    for i, p in ipairs(list) do
+        local target = type(p) == "string" and self.cleanPath(p)
+        if not target then
+            return self:_fail(conn, 400, "Bad path")
+        end
+        target = self:_safePath(target)
+        if not target then
+            return self:_fail(conn, 403, "Path outside managed roots")
+        end
+        paths[i] = target
+    end
+    local name = type(payload.name) == "string" and payload.name:gsub("[/\\%c\"]", "_") or ""
+    if name == "" then
+        name = "moon-files.zip"
+    elseif not name:lower():match("%.zip$") then
+        name = name .. ".zip"
+    end
+    conn.state = "pending"
+    self.handlers.zip(paths, function(output, err)
+        if conn.dead then
+            if output then os.remove(output) end
+            return
+        end
+        if not output then
+            logger.warn("book remote zip failed", err)
+            conn.resp = self.errorResp(ERROR_CODES[err] or 500, err)
+            return
+        end
+        -- 只留最近一个未取走的包：新包替换旧包，旧临时文件当场删。
+        if self._zip and self._zip.path ~= output then
+            os.remove(self._zip.path)
+        end
+        self._zip_seq = (self._zip_seq or 0) + 1
+        local id = tostring(os.time()) .. "-" .. self._zip_seq
+        self._zip = { id = id, path = output, name = name }
+        conn.resp = self.jsonResp(200, JSON.encode({ id = id, name = name }))
+    end)
+    return true
+end
+
+--- POST /api/zip 建包；GET /api/zip?id= 以附件下发并删除临时包（打开后即 unlink，发完自动回收）。
+---@param conn table
+---@param method string
+---@param headers table
+---@param query table
+function File.zip(self, conn, method, headers, query)
+    if method == "POST" then
+        return self:_acceptText(conn, headers, File.ZIP_BODY_LIMIT, finishZip)
+    end
+    if method ~= "GET" then
+        return self:_fail(conn, 405, "Method Not Allowed")
+    end
+    local pending = self._zip
+    if not pending or pending.id ~= query.id then
+        return self:_fail(conn, 404, "Archive expired")
+    end
+    self._zip = nil
+    local file = io.open(pending.path, "rb")
+    os.remove(pending.path)
+    if not file then
+        return self:_fail(conn, 404, "Archive gone")
+    end
+    local size = file:seek("end") or 0
+    file:seek("set", 0)
+    return self:_queueResponse(conn, {
+        code = 200,
+        ctype = "application/zip",
+        extra = { "Content-Disposition: attachment; filename*=UTF-8''" .. Text.urlEncode(pending.name) },
+        file = file,
+        size = size,
+    })
 end
 
 return File

@@ -350,11 +350,56 @@ do
     has(h_logo, "image/jpeg")
     Assert.is_true(#b_logo > 100)
 
+    -- favicon / apple-touch-icon：静态路由、免 token（浏览器自动请求不带 token），MIME 正确
+    local c_ico = newClient({ "GET /favicon.ico HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_ico))
+    local code_ico, b_ico, h_ico = parseResponse(c_ico:output())
+    Assert.eq(code_ico, 200)
+    has(h_ico, "image/x-icon")
+    Assert.eq(b_ico:sub(1, 4), "\0\0\1\0")
+    local c_ati = newClient({ "GET /apple-touch-icon.png HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_ati))
+    local code_ati, b_ati, h_ati = parseResponse(c_ati:output())
+    Assert.eq(code_ati, 200)
+    has(h_ati, "image/png")
+    Assert.eq(b_ati:sub(2, 4), "PNG")
+    -- 逐字节与磁盘文件一致（二进制安全、无文本转换），Content-Length 等于文件大小；
+    -- 带 ?v= 缓存破坏参数同样命中静态路由
+    local root_dir = require("support.config").root() .. "/book.koplugin/features/remote/html/"
+    local function disk(name)
+        local fh = assert(io.open(root_dir .. name, "rb"))
+        local data = fh:read("*a")
+        fh:close()
+        return data
+    end
+    for _, item in ipairs({ { "/favicon.ico?v=2", "favicon.ico", "image/x-icon" }, { "/apple-touch-icon.png?v=2", "apple-touch-icon.png", "image/png" } }) do
+        local cv = newClient({ "GET " .. item[1] .. " HTTP/1.1\r\nHost: 192.168.1.5:9528\r\n\r\n" }, { no_token = true })
+        drain(serve(cv))
+        local code_v, body_v, head_v = parseResponse(cv:output())
+        Assert.eq(code_v, 200)
+        has(head_v, item[3])
+        local expect = disk(item[2])
+        Assert.eq(#body_v, #expect)
+        Assert.is_true(body_v == expect, item[2] .. " bytes differ")
+        has(head_v, "Content-Length: " .. #expect)
+    end
+    Assert.eq(b_ico, disk("favicon.ico"))
+    -- ICO 目录：3 个尺寸，planes=1、32 位（兼容只认 BMP 图标的浏览器）
+    local count = b_ico:byte(5) + b_ico:byte(6) * 256
+    Assert.eq(count, 3)
+    for i = 0, count - 1 do
+        local e = 7 + i * 16
+        Assert.eq(b_ico:byte(e + 4), 1)
+        Assert.eq(b_ico:byte(e + 6), 32)
+    end
+
     local c_f = newClient({ "GET /file.html HTTP/1.1\r\n\r\n" })
     drain(serve(c_f))
     local _, b_f = parseResponse(c_f:output())
     has(b_f, "文件管理")
     has(b_f, "/logo.jpg")
+    has(b_f, 'href="/favicon.ico?v=2"')
+    has(b_f, 'href="/apple-touch-icon.png?v=2"')
     has(b_f, "ankio.net")
     Assert.is_nil(b_f:find("第 2 级目录为分类", 1, true))
     has(b_f, "file-main")
@@ -889,6 +934,183 @@ do
     Assert.eq((parseResponse(c11:output())), 405)
 end
 
+-- ── copy / move / stat / write / zip ─────────────────
+
+do
+    -- copy → 200 + 透传 op / 源 / 目标 / 冲突策略
+    local h, calls = fakeHandlers({})
+    h.transfer = function(op, from, to, conflict, cb)
+        calls.transfer = { op = op, from = from, to = to, conflict = conflict }
+        cb(true)
+    end
+    local c1 = newClient({ "POST /api/copy?path=/a/x.txt&to=/b/x.txt HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c1, h))
+    Assert.eq((parseResponse(c1:output())), 200)
+    Assert.eq(calls.transfer.op, "copy")
+    Assert.eq(calls.transfer.from, "/a/x.txt")
+    Assert.eq(calls.transfer.to, "/b/x.txt")
+    Assert.eq(calls.transfer.conflict, "ask")
+
+    local c2 = newClient({ "POST /api/move?path=/a/x.txt&to=/b/x.txt&conflict=rename HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c2, h))
+    Assert.eq((parseResponse(c2:output())), 200)
+    Assert.eq(calls.transfer.op, "move")
+    Assert.eq(calls.transfer.conflict, "rename")
+
+    -- 方法 / 参数 / 策略 / 保护路径
+    local c3 = newClient({ "GET /api/copy?path=/a&to=/b HTTP/1.1\r\n\r\n" })
+    drain(serve(c3, h))
+    Assert.eq((parseResponse(c3:output())), 405)
+    local c4 = newClient({ "POST /api/copy?path=/a HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c4, h))
+    Assert.eq((parseResponse(c4:output())), 400)
+    local c5 = newClient({ "POST /api/copy?path=/a&to=/b&conflict=evil HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c5, h))
+    Assert.eq((parseResponse(c5:output())), 400)
+    local c5b = newClient({ "POST /api/copy?path=/a&to=../etc HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c5b, h))
+    Assert.eq((parseResponse(c5b:output())), 400)
+    local c6 = newClient({ "POST /api/move?path=/&to=/b HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c6, h))
+    Assert.eq((parseResponse(c6:output())), 403)
+    h.is_protected = function(p) return p == "/a/settings.lua" end
+    local c7 = newClient({ "POST /api/move?path=/a/settings.lua&to=/b/s.lua HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c7, h))
+    Assert.eq((parseResponse(c7:output())), 403)
+    local c7b = newClient({ "POST /api/copy?path=/a/x&to=/a/settings.lua&conflict=overwrite HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c7b, h))
+    Assert.eq((parseResponse(c7b:output())), 403)
+    -- 复制受保护文件本身允许（只读源）
+    local c7c = newClient({ "POST /api/copy?path=/a/settings.lua&to=/b/s.lua HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c7c, h))
+    Assert.eq((parseResponse(c7c:output())), 200)
+
+    -- 业务错误语义：存在 409，目标在源内 400，条目过多 413
+    h.transfer = function(_, _, _, _, cb) cb(nil, "target exists") end
+    local c8 = newClient({ "POST /api/copy?path=/a/x&to=/b/x HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c8, h))
+    local code8, body8 = parseResponse(c8:output())
+    Assert.eq(code8, 409)
+    has(body8, "target exists")
+    h.transfer = function(_, _, _, _, cb) cb(nil, "target inside source") end
+    local c9 = newClient({ "POST /api/copy?path=/a&to=/a/b/a HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c9, h))
+    Assert.eq((parseResponse(c9:output())), 400)
+    h.transfer = function(_, _, _, _, cb) cb(nil, "too many entries") end
+    local c10 = newClient({ "POST /api/copy?path=/a&to=/c HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c10, h))
+    Assert.eq((parseResponse(c10:output())), 413)
+end
+
+do
+    -- stat → JSON；非 GET 405；不存在 404
+    local h = fakeHandlers({})
+    h.stat = function(path, cb)
+        if path == "/a/none" then return cb(nil, "not found") end
+        cb({ name = "x.txt", path = path, type = "file", size = 12, permissions = "rw-r--r--", uid = 0 })
+    end
+    local c1 = newClient({ "GET /api/stat?path=/a/x.txt HTTP/1.1\r\n\r\n" })
+    drain(serve(c1, h))
+    local code1, body1 = parseResponse(c1:output())
+    Assert.eq(code1, 200)
+    has(body1, '"permissions":"rw-r--r--"')
+    has(body1, '"size":12')
+    local c2 = newClient({ "POST /api/stat?path=/a/x.txt HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c2, h))
+    Assert.eq((parseResponse(c2:output())), 405)
+    local c3 = newClient({ "GET /api/stat?path=/a/none HTTP/1.1\r\n\r\n" })
+    drain(serve(c3, h))
+    Assert.eq((parseResponse(c3:output())), 404)
+    local c4 = newClient({ "GET /api/stat?path=a/x HTTP/1.1\r\n\r\n" })
+    drain(serve(c4, h))
+    Assert.eq((parseResponse(c4:output())), 400)
+end
+
+do
+    -- write → 正文原样透传；create=1 冲突 409；空体（新建空文件）也可；受保护 403；超限 413
+    local h, calls = fakeHandlers({})
+    h.write_text = function(path, text, create, cb)
+        if create and path == "/a/exists.txt" then return cb(nil, "already exists") end
+        calls.write = { path = path, text = text, create = create }
+        cb(true)
+    end
+    local c1 = newClient({ "POST /api/write?path=/a/n.txt HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello" })
+    drain(serve(c1, h))
+    Assert.eq((parseResponse(c1:output())), 200)
+    Assert.eq(calls.write.text, "hello")
+    Assert.eq(calls.write.create, false)
+    local c2 = newClient({ "POST /api/write?path=/a/new.txt&create=1 HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c2, h))
+    Assert.eq((parseResponse(c2:output())), 200)
+    Assert.eq(calls.write.text, "")
+    Assert.eq(calls.write.create, true)
+    local c3 = newClient({ "POST /api/write?path=/a/exists.txt&create=1 HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c3, h))
+    Assert.eq((parseResponse(c3:output())), 409)
+    local c4 = newClient({ "GET /api/write?path=/a/n.txt HTTP/1.1\r\n\r\n" })
+    drain(serve(c4, h))
+    Assert.eq((parseResponse(c4:output())), 405)
+    h.is_protected = function(p) return p == "/a/settings.lua" end
+    local c5 = newClient({ "POST /api/write?path=/a/settings.lua HTTP/1.1\r\nContent-Length: 1\r\n\r\nx" })
+    drain(serve(c5, h))
+    Assert.eq((parseResponse(c5:output())), 403)
+    local c6 = newClient({ "POST /api/write?path=/a/big.txt HTTP/1.1\r\nContent-Length: 99999999\r\n\r\n" })
+    drain(serve(c6, h))
+    Assert.eq((parseResponse(c6:output())), 413)
+end
+
+do
+    -- zip：POST 建包回 id → GET 以附件下发且只能取一次；坏请求 400；越界路径 400
+    local h, calls = fakeHandlers({})
+    local tmp = os.tmpname()
+    h.zip = function(paths, cb)
+        calls.zip = paths
+        local f = io.open(tmp, "wb")
+        f:write("PK-zip-bytes")
+        f:close()
+        cb(tmp)
+    end
+    local body = '{"paths":["/a/x.txt","/a/dir"],"name":"books"}'
+    local srv
+    local c1 = newClient({ "POST /api/zip HTTP/1.1\r\nContent-Length: " .. #body .. "\r\n\r\n" .. body })
+    srv = serve(c1, h)
+    drain(srv)
+    local code1, body1 = parseResponse(c1:output())
+    Assert.eq(code1, 200)
+    has(body1, '"name":"books.zip"')
+    Assert.eq(#calls.zip, 2)
+    Assert.eq(calls.zip[2], "/a/dir")
+    local id = body1:match('"id":"([^"]+)"')
+    Assert.is_true(id ~= nil, "zip id")
+
+    local c2 = newClient({ "GET /api/zip?id=" .. id .. " HTTP/1.1\r\n\r\n" })
+    bind_queue[#bind_queue + 1] = c2
+    drain(srv)
+    local code2, body2 = parseResponse(c2:output())
+    Assert.eq(code2, 200)
+    has(c2:output(), "application/zip")
+    has(c2:output(), "books.zip")
+    has(body2, "PK-zip-bytes")
+    Assert.is_true(io.open(tmp, "rb") == nil, "temp zip removed")
+
+    local c3 = newClient({ "GET /api/zip?id=" .. id .. " HTTP/1.1\r\n\r\n" })
+    bind_queue[#bind_queue + 1] = c3
+    drain(srv)
+    Assert.eq((parseResponse(c3:output())), 404)
+
+    local bad = '{"paths":[]}'
+    local c4 = newClient({ "POST /api/zip HTTP/1.1\r\nContent-Length: " .. #bad .. "\r\n\r\n" .. bad })
+    drain(serve(c4, h))
+    Assert.eq((parseResponse(c4:output())), 400)
+    local evil = '{"paths":["../etc/passwd"]}'
+    local c5 = newClient({ "POST /api/zip HTTP/1.1\r\nContent-Length: " .. #evil .. "\r\n\r\n" .. evil })
+    drain(serve(c5, h))
+    Assert.eq((parseResponse(c5:output())), 400)
+    local c6 = newClient({ "DELETE /api/zip HTTP/1.1\r\n\r\n" })
+    drain(serve(c6, h))
+    Assert.eq((parseResponse(c6:output())), 405)
+end
+
 -- ── 路由杂项 ──────────────────────────────────────────
 
 do
@@ -1228,4 +1450,102 @@ do
         package.preload[name] = nil
         package.loaded[name] = nil
     end
+end
+
+-- ── /api/i18n：网页文案跟随 KOReader 语言 ──────────────
+
+do
+    local GetText = require("gettext")
+    local saved = GetText.current_lang
+    local function fetchI18n(lang)
+        GetText.current_lang = lang
+        local c = newClient({ "GET /api/i18n HTTP/1.1\r\n\r\n" }, { no_token = true })
+        drain(serve(c))
+        return parseResponse(c:output())
+    end
+    local code_en, b_en, h_en = fetchI18n("en_US.UTF-8")
+    Assert.eq(code_en, 200)
+    has(h_en, "application/json")
+    has(b_en, '"lang":"en"')
+    has(b_en, '"html":"en"')
+    has(b_en, '"开始上传":"Start upload"')
+    has(b_en, '"下载日志":"Download logs"')
+    has(b_en, '"上传到 %1":"Upload to %1"')
+    local code_tw, b_tw = fetchI18n("zh_TW")
+    Assert.eq(code_tw, 200)
+    has(b_tw, '"lang":"zh_TW"')
+    has(b_tw, '"html":"zh-TW"')
+    has(b_tw, '"开始上传":"開始上傳"')
+    local code_cn, b_cn = fetchI18n("zh_CN")
+    Assert.eq(code_cn, 200)
+    has(b_cn, '"lang":"zh_CN"')
+    has(b_cn, '"html":"zh-CN"')
+    Assert.is_nil(b_cn:find("开始上传", 1, true))
+    -- 未提供目录的语言回落英文
+    local _code_fr, b_fr = fetchI18n("fr_FR")
+    has(b_fr, '"lang":"en"')
+    GetText.current_lang = saved
+    local c_post = newClient({ "POST /api/i18n HTTP/1.1\r\nContent-Length: 0\r\n\r\n" }, { no_token = true })
+    drain(serve(c_post))
+    Assert.eq((parseResponse(c_post:output())), 405)
+    -- 页面接入：js.js 取 /api/i18n，6 个页面都有防闪烁标记
+    local c_js = newClient({ "GET /js.js HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_js))
+    local _cj, b_js = parseResponse(c_js:output())
+    has(b_js, "/api/i18n")
+    has(b_js, "MutationObserver")
+    has(b_js, "documentElement.lang")
+    for _, page in ipairs({ "/", "/file.html", "/input.html", "/clipboard.html", "/settings.html", "/update.html" }) do
+        local cp = newClient({ "GET " .. page .. " HTTP/1.1\r\n\r\n" }, { no_token = true })
+        drain(serve(cp))
+        local _c, bp = parseResponse(cp:output())
+        has(bp, "i18n-wait")
+    end
+end
+
+-- ── /api/logs.zip：一键下载日志 ───────────────────────
+
+do
+    local tmp = os.tmpname()
+    local f = assert(io.open(tmp, "wb"))
+    f:write("PK\3\4fake-zip")
+    f:close()
+    local handlers = fakeHandlers({})
+    local calls = 0
+    handlers.logs_zip = function(cb)
+        calls = calls + 1
+        cb(tmp)
+    end
+    local c = newClient({ "GET /api/logs.zip HTTP/1.1\r\n\r\n" })
+    drain(serve(c, handlers))
+    local code, body, head = parseResponse(c:output())
+    Assert.eq(code, 200)
+    Assert.eq(calls, 1)
+    has(head, "application/zip")
+    has(head, "filename*=UTF-8''moon-logs-")
+    Assert.is_true(head:match("moon%-logs%-%d%d%d%d%d%d%d%d%-%d%d%d%d%.zip") ~= nil, "logs zip name")
+    has(head, "Cache-Control: no-store")
+    Assert.eq(body, "PK\3\4fake-zip")
+    Assert.is_nil(io.open(tmp, "rb"), "temp zip removed after send")
+
+    -- 打包失败 → 500 + 原因
+    local h_err = fakeHandlers({})
+    h_err.logs_zip = function(cb) cb(nil, "disk full") end
+    local c_err = newClient({ "GET /api/logs.zip HTTP/1.1\r\n\r\n" })
+    drain(serve(c_err, h_err))
+    local code_err, b_err = parseResponse(c_err:output())
+    Assert.eq(code_err, 500)
+    has(b_err, "disk full")
+
+    -- 只允许 GET
+    local c_post = newClient({ "POST /api/logs.zip HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c_post, handlers))
+    Assert.eq((parseResponse(c_post:output())), 405)
+
+    -- 首页入口
+    local c_idx = newClient({ "GET / HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_idx))
+    local _ci, b_idx = parseResponse(c_idx:output())
+    has(b_idx, 'href="/api/logs.zip"')
+    has(b_idx, "下载日志")
 end

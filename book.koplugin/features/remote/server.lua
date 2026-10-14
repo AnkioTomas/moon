@@ -82,6 +82,10 @@ Server._routeUpload = File.upload
 Server._routeMutate = File.mutate
 Server._routeRename = File.rename
 Server._routeExtract = File.extract
+Server._routeTransfer = File.transfer
+Server._routeStat = File.stat
+Server._routeWrite = File.write
+Server._routeZip = File.zip
 Server._routeInput = Input.route
 Server._routeClipboard = Clipboard.route
 Server._routeStatus = Status.route
@@ -149,6 +153,10 @@ function Server:stop()
         self:_kill(conn)
     end
     self._conns = {}
+    if self._zip then -- 未取走的打包下载临时文件
+        os.remove(self._zip.path)
+        self._zip = nil
+    end
     if self._sock then
         self._sock:close()
         self._sock = nil
@@ -336,6 +344,8 @@ local ASSETS = {
     ["/settings.html"] = { "settings.html", "text/html; charset=utf-8" },
     ["/update.html"] = { "update.html", "text/html; charset=utf-8" },
     ["/logo.jpg"] = { "logo.jpg", "image/jpeg" },
+    ["/favicon.ico"] = { "favicon.ico", "image/x-icon" },
+    ["/apple-touch-icon.png"] = { "apple-touch-icon.png", "image/png" },
     ["/style.css"] = { "style.css", "text/css; charset=utf-8" },
     ["/js.js"] = { "js.js", "application/javascript; charset=utf-8" },
     ["/index.js"] = { "index.js", "application/javascript; charset=utf-8" },
@@ -346,20 +356,34 @@ local ASSETS = {
     ["/update.js"] = { "update.js", "application/javascript; charset=utf-8" },
 }
 
-local _asset_cache = {} ---@type table<string, string>
+local _asset_cache = {} ---@type table<string, { body: string, stamp: string|nil }>
 
---- 读静态资源（lazy 缓存，随插件安装不变）。读不到是打包缺文件，回 500 把原因亮出来。
+--- 文件戳（mtime+size）；取不到 lfs（离线测试）时返回 nil，退化为永久缓存。
+---@param path string
+---@return string|nil
+local function assetStamp(path)
+    local ok, lfs = pcall(require, "libs/libkoreader-lfs")
+    if not ok or type(lfs) ~= "table" or not lfs.attributes then return nil end
+    local attr = lfs.attributes(path)
+    if not attr then return nil end
+    return tostring(attr.modification) .. ":" .. tostring(attr.size)
+end
+
+--- 读静态资源（二进制安全 "rb"，按 mtime+size 失效的内存缓存：插件热更新/替换文件后
+--- 不必重启 KOReader 就能拿到新内容）。读不到是打包缺文件，回 500 把原因亮出来。
 ---@param name string
 ---@return string|nil body
 ---@return string|nil err
 local function readAsset(name)
-    local s = _asset_cache[name]
-    if s then return s end
-    local f, err = io.open(HTML_DIR .. "/" .. name, "rb")
+    local path = HTML_DIR .. "/" .. name
+    local stamp = assetStamp(path)
+    local hit = _asset_cache[name]
+    if hit and hit.stamp == stamp then return hit.body end
+    local f, err = io.open(path, "rb")
     if not f then return nil, err end
-    s = f:read("*all")
+    local s = f:read("*all")
     f:close()
-    _asset_cache[name] = s
+    _asset_cache[name] = { body = s, stamp = stamp }
     return s
 end
 
@@ -527,6 +551,10 @@ function Server:_route(conn, head)
             home = self.home,
             shortcuts = self.shortcuts,
         }))
+    elseif path == "/api/i18n" then
+        return self:_routeI18n(conn, method)
+    elseif path == "/api/logs.zip" then
+        return self:_routeLogs(conn, method)
     elseif path == "/api/list" then
         return self:_routeList(conn, method, query.path)
     elseif path == "/download" then
@@ -547,6 +575,14 @@ function Server:_route(conn, head)
         return self:_routeRename(conn, method, query)
     elseif path == "/api/extract" then
         return self:_routeExtract(conn, method, query.path)
+    elseif path == "/api/copy" or path == "/api/move" then
+        return self:_routeTransfer(conn, method, query, path == "/api/copy" and "copy" or "move")
+    elseif path == "/api/stat" then
+        return self:_routeStat(conn, method, query.path)
+    elseif path == "/api/write" then
+        return self:_routeWrite(conn, method, headers, query)
+    elseif path == "/api/zip" then
+        return self:_routeZip(conn, method, headers, query)
     elseif path == "/api/settings" then
         return self:_routeSettings(conn, method, headers, query)
     elseif path == "/api/update" then
@@ -739,6 +775,88 @@ end
 
 ---@param conn table
 ---@param code number
+
+
+--- GET /api/logs.zip：一键打包日志（插件日志 + KOReader crash.log + info.txt，已脱敏）。
+--- 后台建临时 zip，打开后即 unlink，以附件 moon-logs-YYYYMMDD-HHMM.zip 流式发完自动回收。
+---@param conn table
+---@param method string
+function Server:_routeLogs(conn, method)
+    if method ~= "GET" then
+        return self:_fail(conn, 405, "Method Not Allowed")
+    end
+    local build = self.handlers.logs_zip
+    if not build then
+        return self:_fail(conn, 404, "Not Found")
+    end
+    local name = require("features.remote.logs").fileName()
+    conn.state = "pending"
+    build(function(output, err)
+        if conn.dead then
+            if output then os.remove(output) end
+            return
+        end
+        if not output then
+            logger.warn("book remote logs zip failed", err)
+            conn.resp = Server.errorResp(500, err or "logs archive failed")
+            return
+        end
+        local file = io.open(output, "rb")
+        os.remove(output)
+        if not file then
+            conn.resp = Server.errorResp(500, "Archive gone")
+            return
+        end
+        local size = file:seek("end") or 0
+        file:seek("set", 0)
+        conn.resp = {
+            code = 200,
+            ctype = "application/zip",
+            extra = {
+                "Content-Disposition: attachment; filename*=UTF-8''" .. Text.urlEncode(name),
+                "Cache-Control: no-store",
+            },
+            file = file,
+            size = size,
+        }
+    end)
+    return true
+end
+
+--- GET /api/i18n：网页文案跟随 KOReader 语言。插件 l10n 目录 + features/remote/l10n/web（源文即简体中文），
+--- 下发 {lang, html, strings}；同一语言只编码一次（语言切换后 KOReader 会重启）。
+---@param conn table
+---@param method string
+function Server:_routeI18n(conn, method)
+    if method ~= "GET" then
+        return self:_fail(conn, 405, "Method Not Allowed")
+    end
+    local name, catalog = require("l10n").catalog()
+    local cache = self._i18n_cache
+    if not cache or cache.name ~= name then
+        local html = name == "zh_CN" and "zh-CN" or name:gsub("_", "-")
+        local strings = {}
+        local function merge(t)
+            for k, v in pairs(t) do
+                if type(k) == "string" and type(v) == "string" and v ~= "" then
+                    strings[k] = v
+                end
+            end
+        end
+        merge(catalog)
+        -- 网页专属文案（features/remote/l10n/web/{lang}.lua）覆盖同名插件文案
+        if name ~= "zh_CN" then
+            local ok_web, web = pcall(require, "features.remote.l10n.web." .. name)
+            if ok_web and type(web) == "table" then merge(web) end
+        end
+        -- 简体中文 strings 为空（可能编码成 []），前端按「无译文」处理
+        local body = JSON.encode({ lang = name, html = html, strings = strings })
+        cache = { name = name, body = body }
+        self._i18n_cache = cache
+    end
+    return self:_json(conn, 200, cache.body)
+end
+
 ---@param body string 已编码的 JSON 串
 function Server:_json(conn, code, body)
     return self:_queueResponse(conn, Server.jsonResp(code, body))
