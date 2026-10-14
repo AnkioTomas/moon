@@ -204,20 +204,41 @@ local function progressedVolumes(source_id, series_id, ProgressDB)
     return toc, out
 end
 
+--- 卷行继承的元数据字段。
+local VOLUME_META_FIELDS = { "title", "authors", "intro", "category", "series" }
+
+--- 源这行写下去会不会真的改动库里的行。nil 字段经 COALESCE 不覆盖（同 BookDB.upsertRemote），
+--- 本地脏行（sync_status=0）书库一律保留远端盖不动 —— 两种情况都不算变更。
+---@param cur Book|nil 库里的卷行
+---@param row table 待写的元数据字段
+---@return boolean
+local function untouched(cur, row)
+    if not cur then return false end
+    if cur.sync_status == 0 then return true end
+    for _idx, field in ipairs(VOLUME_META_FIELDS) do
+        if row[field] ~= nil and cur[field] ~= row[field] then return false end
+    end
+    return true
+end
+
 --- 读过的卷行继承容器元数据（作者 / 简介 / 分类 / 系列）。
 --- Kavita 只在 series 级给这些字段，而最近阅读列的是卷行：卷行空着就是「未知作者」。
---- 容器补全后卷行也跟着对齐（每次同步跑一遍，幂等）。
+--- 容器补全后卷行也跟着对齐（每次同步跑一遍，幂等）。只写真会改动库的行，并把改动的行数
+--- 回给调用方：对齐不算进同步变更的话，首页「当前阅读」收不到 shelf_changed，
+--- 卡片会一直停在未知作者（库里其实已经补上了）。
 ---@param series Book|nil 容器书行
 ---@param series_id string
 ---@param entries table[] 读过的卷表项
+---@return integer changed 真正改动的卷行数
 local function syncVolumeMeta(series, series_id, entries)
-    if not series or #entries == 0 then return end
+    if not series or #entries == 0 then return 0 end
+    local BookDB = require("book.books_db")
     local rows = {}
     for _idx, entry in ipairs(entries) do
-        local chapter_id = entry.chapterId or entry.uid
-        rows[#rows + 1] = {
+        local stable_id = series_id .. ":" .. tostring(entry.chapterId or entry.uid)
+        local row = {
             source_id = ID,
-            stable_id = series_id .. ":" .. tostring(chapter_id),
+            stable_id = stable_id,
             title = T("%1 · %2", series.title or "", entry.title or ""),
             authors = series.authors,
             intro = series.intro,
@@ -225,8 +246,13 @@ local function syncVolumeMeta(series, series_id, entries)
             series = series.title,
             -- cover 不继承：卷封面走源自己的 chapter-cover 接口。
         }
+        if not untouched(BookDB.get(ID, stable_id), row) then
+            rows[#rows + 1] = row
+        end
     end
+    if #rows == 0 then return 0 end
     require("book.store").rememberMany(rows)
+    return #rows
 end
 
 --- 服务端已读回填成本地进度（远端版，本地脏行不覆盖），书架 /「最近阅读」/「已读」都看得到。
@@ -256,7 +282,9 @@ local function backfillRead(source_id, series_list)
             local _toc, progressed = progressedVolumes(source_id, stable_id, ProgressDB)
             if #progressed > 0 then
                 -- 读过的卷行继承容器元数据（作者 / 简介 / 分类），否则最近阅读里那几卷是未知作者。
-                syncVolumeMeta(require("book.books_db").get(source_id, stable_id), stable_id, progressed)
+                -- 对齐计入 changed：同步只会报「变了」的域，首页 / 图书馆据此重画。
+                changed = changed + syncVolumeMeta(
+                    require("book.books_db").get(source_id, stable_id), stable_id, progressed)
                 -- 真实进度在卷行上；容器行的 series 级占位是多余的（旧版回填过就清掉）。
                 if here and ProgressDB.dropRemote(source_id, stable_id) then
                     changed = changed + 1
@@ -675,7 +703,10 @@ function Source:openBookAsync(identity, _opts, cb)
             job = self:openEntry(identity, entry, toc, name, finish)
             return
         end
-        local series = identity.book or { stable_id = series_id }
+        -- fetchToc 会把 series 级作者 / 简介写回容器行，而 identity.book 是开书那一刻的旧快照：
+        -- 这里重读一次容器行，免得新 series 第一次打开时卷行被写成「未知作者」。
+        local series = require("book.books_db").get(self.id, series_id)
+            or identity.book or { stable_id = series_id }
         pickVolume(series, toc, function(entry)
             if cancelled then return end
             if not entry then return finish(nil, _("已取消")) end
