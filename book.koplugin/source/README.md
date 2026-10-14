@@ -77,7 +77,7 @@ source/
 内置源登记在 `registry.lua` 的 `BUILTIN`，不扫 `source/` 目录，顺序即选择器顺序：本地、其余在线源。
 第三方源由已启用 KOReader 插件根目录的 `moon_source.lua` 登记，排在内置源之后（契约见 `docs/source/external.md`，示例 `examples/moonsource-demo.koplugin/`）。
 
-- 每个 id 一个缓存实例；活跃源只是配置 id（`common.active_source`），`current()` 就是 `resolve(activeId())`，不做静默 fallback；存的 id 已下线（如 kindle）时 `activeId()` 退回 local。
+- 每个 id 一个缓存实例；活跃源只是配置 id（`common.active_source`），`current()` 就是 `resolve(activeId())`，不做静默 fallback；存的 id 当前不可用（如不在 Kindle 上的 kindle、卸载的第三方源）时 `activeId()` 退回 local。
 - `resolve(id)` 按书的 `source_id` 取属主实例，不改用户当前选择。
 - 源模块加载失败直接抛出，不从列表里藏掉。
 - `common.enabled_sources == nil` 表示全开；集合里没有的 id（后装的源）也算启用，只有显式 `false` 是禁用。活跃源禁止禁用。
@@ -190,3 +190,11 @@ cookie 登录（扫码在 `qrlogin.lua`）。正文不走网页 HTML，走 App r
 - 自己造了 `FanqieAsyncHandle`，而 HTTP 层已经返回 `{ cancel }`。
 
 协议常量留在 `fanqie/fanqie.lua`，加解密留在 `reading/`。不要把这套对象包装再复制到新源。
+
+### kindle — Kindle 书库（`book`）
+
+只在越狱 Kindle 上、有 `/var/local/cc.db` **且**装了 kindle.koplugin（`package.loaded["lua/open_file_ext"].prepareKnownKindlePath` 是函数）时出现在源列表里，每次用都重新检查。
+
+书架只读 cc.db：已下载、在主页可见、未归档的 KFX（`x-kfx-ebook`），以及带 DRM（`p_isDRMProtected = 1`）的 mobi / azw3（`x-mobipocket-ebook`、`x-mobi8-ebook`）；无 DRM 的 mobi 族归本地源扫盘（本地扫盘反过来跳过带 DRM 的），两边不重复，在 SQL 里过滤。`stable_id` 是 `p_uuid`；文件路径用 kindle.koplugin 的缓存 EPUB（`cache_manager:getCachePaths`，已转换时），否则用 `p_location`。封面是 `p_thumbnail`，小于 4096 字节的是亚马逊占位图，丢掉。
+
+开书按 uuid 查 `p_location`，未转换的 KFX 先提示可能要几分钟，下一拍 pcall `prepareKnownKindlePath`：拿到路径 `Store.touch` 后走我们自己的阅读器，失败原样显示它的错误文案。月读不判断格式和 DRM，也不碰解密。进度、笔记、统计不同步。

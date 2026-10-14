@@ -1,7 +1,7 @@
 --[[--
 Source 注册表：源 id 清单、实例缓存（每个 id 一个实例）、活跃源与启用源配置。
 活跃源只是配置里的 id，实例与其它源共用同一张缓存表。
-不做静默 fallback；唯一例外是已下线的源 id（如 kindle，或卸载了的第三方源），activeId 退回 local。
+不做静默 fallback；唯一例外是当前不可用的源 id（如不在 Kindle 上的 kindle，或卸载了的第三方源），activeId 退回 local。
 
 第三方源：任何已启用的 KOReader 插件根目录里放 `moon_source.lua` 即登记一个源（契约见 docs/source/external.md），
 按 PluginLoader.enabled_plugins 扫描，排在内置源之后；插件全部加载完后才缓存扫描结果。
@@ -69,6 +69,11 @@ local function sourceIds()
     for i, id in ipairs(BUILTIN) do
         list[i] = id
         seen[id] = true
+    end
+    -- Kindle 书库只在有系统 cc.db 且装了 kindle.koplugin 时出现，排在内置源末尾。
+    if require("source.kindle").available() then
+        list[#list + 1] = "kindle"
+        seen.kindle = true
     end
     local plugins = require("pluginloader").enabled_plugins
     if not pluginsLoaded(plugins) then
