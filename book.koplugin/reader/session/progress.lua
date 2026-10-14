@@ -340,7 +340,7 @@ local function applyChosenPos(ui, id, pos, pct, show_msg)
 end
 
 --- xpointer 里的 `DocFragment[D]`（spine = D-1）；无返回 nil。
---- 页级源（Kavita）用它把本地位置与远端 pageNum 对齐到同一 spine。
+--- 页级源用它把本地位置与远端 pageNum 对齐到同一 spine。
 ---@param locator string|nil
 ---@return integer|nil
 local function docFragmentIndex(locator)
@@ -419,7 +419,7 @@ end
 ---@param remote_pos ProgressPosition
 ---@param id BookIdentity
 ---@param snapshot ReaderSessionSnapshot
----@param page_level boolean|nil 远端是页/spine 级（Kavita）：比例不参与比较
+---@param page_level boolean|nil 远端是页/spine 级：比例不参与比较
 ---@return boolean
 local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
     -- 精确坐标一致就是同一个位置，不必再拿会漂移的比例去比。
@@ -428,7 +428,7 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
         return false
     end
     if page_level then
-        -- page 级源（Kavita）按 spine 序号 + spine 内元素路径判，绝不按百分比：
+        -- 页级源按 spine 序号 + spine 内元素路径判，绝不按百分比：
         -- 远端的比例是「第几个 spine」，本地是全书的渲染页比例，两者不可比。
         -- 同 spine 内判不出先后（远端只有 spine 粒度、或元素路径不可比）就算同一位置，交回本地。
         local cmp = spineCmp(local_pos, remote_pos)
@@ -462,10 +462,7 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
     return math.abs(local_frac - remote_pos.fraction) >= 0.01
 end
 
---- 采用云端进度：覆盖本地记录并跳过去（提示跳到了哪里）。
----@param id BookIdentity
----@param remote_pos ProgressPosition
---- 采纳云端位置时的落库坐标：页级源（Kavita）的远端只有 spine 粒度，同 spine 时
+--- 采纳云端位置时的落库坐标：页级源的远端只有 spine 粒度，同 spine 时
 --- 位置用远端（锚点可能更精确），但「已读% / 页码 / 章内比例」这些**内容页口径**的字段保留本地
 --- ——远端的比例是 spine 比例，混进来会让书架百分比跳变、页码丢失，而本地这几个数描述的
 --- 就是这条里的同一段；跨 spine 或取不到 spine 时整套用远端（本地那几个数描述的是别处）。

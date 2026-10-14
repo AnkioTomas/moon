@@ -424,6 +424,19 @@ kavitaPull({ fraction = 0.30, total_pages = 22, locator = "/body/DocFragment[15]
 Assert.len(adopted, 1, "同 spine 内云端更靠后要跟")
 Assert.eq(adopted[1].locator, "/body/DocFragment[15]/body/p[260]")
 
+-- 本地有 spine、远端没有（远端没给 locator）：spineCmp 判不出，退回「一页」容差比比例。
+kavitaPull({ fraction = 0.62, total_pages = 22 },
+    { fraction = 0.61, locator = spine15_190, sync_status = 1,
+      synced = { fraction = 0.61, locator = spine15_190 } })
+Assert.eq(#shown, 0, "一页容差内不算冲突")
+Assert.eq(#adopted, 0, "容差内不动本地")
+kavitaPull({ fraction = 0.90, total_pages = 22 },
+    { fraction = 0.61, page = 209, locator = spine15_190, sync_status = 1,
+      synced = { fraction = 0.61, locator = spine15_190 } })
+Assert.len(adopted, 1, "超出容差且本地没动过就跟云端")
+Assert.eq(adopted[1].fraction, 0.90, "取不到同 spine 时整套用远端")
+Assert.is_nil(adopted[1].page, "不保留本地页码")
+
 -- 拉失败只记日志，不弹窗：离线开缓存书必须能继续读
 Progress.clearConflicts()
 shown = {}
