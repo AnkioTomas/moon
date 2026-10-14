@@ -308,17 +308,105 @@ local function applyChosenPos(ui, id, pos, pct, show_msg)
     end
 end
 
---- 当前阅读位置与 freshly pulled 远端进度是否冲突（≥1%）。
+--- xpointer 里的 `DocFragment[D]`（spine = D-1）；无返回 nil。
+--- 页级源（Kavita）用它把本地位置与远端 pageNum 对齐到同一 spine。
+---@param locator string|nil
+---@return integer|nil
+local function docFragmentIndex(locator)
+    if type(locator) ~= "string" then return nil end
+    local d = locator:match("DocFragment%[(%d+)%]")
+    if d then return tonumber(d) - 1 end
+    if locator:match("/DocFragment/") then return 0 end
+    return nil
+end
+
+--- xpointer 里 `DocFragment/body` 之后的元素路径（忽略 `text()` 与文本偏移）；取不到返回 nil。
+---@param locator string|nil
+---@return string|nil
+local function locatorElementPath(locator)
+    if type(locator) ~= "string" then return nil end
+    local rest = locator:match("DocFragment%[%d+%]/body%[%d+%](.*)$")
+        or locator:match("DocFragment%[%d+%]/body(.*)$")
+        or locator:match("DocFragment/body(.*)$")
+    if not rest or rest == "" then return nil end
+    local parts = {}
+    for seg in rest:gmatch("([^/]+)") do
+        if not seg:match("^text%(") then
+            local name, index = seg:match("^([%w:_%-]+)%[(%d+)%]$")
+            if not name then name = seg:match("^([%w:_%-]+)") end
+            if name then parts[#parts + 1] = name .. "[" .. (index or "1") .. "]" end
+        end
+    end
+    if #parts == 0 then return nil end
+    return table.concat(parts, "/")
+end
+
+--- 元素路径 a 是否在 b 之后（逐段比：同名同级按下标数值；前缀相同则更长者更靠后）。
+--- 首段元素名就不同（如 `div[2]/p[5]` vs `p[190]`）属于不可比，返回 false。
+---@param a string|nil
+---@param b string|nil
+---@return boolean
+local function elementPathAfter(a, b)
+    if not a or not b then return false end
+    local sa, sb = {}, {}
+    for seg in a:gmatch("[^/]+") do sa[#sa + 1] = seg end
+    for seg in b:gmatch("[^/]+") do sb[#sb + 1] = seg end
+    local n = math.min(#sa, #sb)
+    for i = 1, n do
+        if sa[i] ~= sb[i] then
+            local na, ia = sa[i]:match("^([%w:_%-]+)%[(%d+)%]$")
+            local nb, ib = sb[i]:match("^([%w:_%-]+)%[(%d+)%]$")
+            if na and na == nb and ia and ib then
+                return tonumber(ia) > tonumber(ib)
+            end
+            return false
+        end
+    end
+    return #sa > #sb
+end
+
+--- 页级源位置比较（**只按 spine 序号 + spine 内元素路径**；比例是「第几个 spine」，
+--- 与本地内容页比例口径不同，绝不能拿来比）。
+--- 返回 1=远端更靠后，-1=本地更靠后，0=同位或同 spine 内判不出先后，nil=两端取不到 spine。
+---@param local_pos ProgressPosition|nil
+---@param remote_pos ProgressPosition
+---@return integer|nil
+local function spineCmp(local_pos, remote_pos)
+    local ls = docFragmentIndex(local_pos and local_pos.locator)
+    local rs = docFragmentIndex(remote_pos and remote_pos.locator)
+    if not ls or not rs then return nil end
+    if rs ~= ls then return rs > ls and 1 or -1 end
+    local le = locatorElementPath(local_pos.locator)
+    local re = locatorElementPath(remote_pos.locator)
+    if elementPathAfter(re, le) then return 1 end
+    if elementPathAfter(le, re) then return -1 end
+    return 0
+end
+
+--- 当前阅读位置与 freshly pulled 远端进度是否冲突。
 ---@param local_pos ProgressPosition|nil
 ---@param remote_pos ProgressPosition
 ---@param id BookIdentity
 ---@param snapshot ReaderSessionSnapshot
+---@param page_level boolean|nil 远端是页/spine 级（Kavita）：比例不参与比较
 ---@return boolean
-local function progressDiffers(local_pos, remote_pos, id, snapshot)
+local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
     -- 精确坐标一致就是同一个位置，不必再拿会漂移的比例去比。
     local here = local_pos and local_pos.locator
     if here and here == remote_pos.locator then
         return false
+    end
+    if page_level then
+        -- page 级源（Kavita）按 spine 序号 + spine 内元素路径判，绝不按百分比：
+        -- 远端的比例是「第几个 spine」，本地是全书的渲染页比例，两者不可比。
+        -- 同 spine 内判不出先后（远端只有 spine 粒度、或元素路径不可比）就算同一位置，交回本地。
+        local cmp = spineCmp(local_pos, remote_pos)
+        if cmp ~= nil then return cmp ~= 0 end
+        -- 两端都取不到 spine（没定位 / 单文档）才退回「一页」容差兜底。
+        local tol = 0.01
+        local total = tonumber(remote_pos.total_pages)
+        if total and total > 0 then tol = math.max(tol, 1 / total) end
+        return math.abs((local_pos and local_pos.fraction or 0) - (remote_pos.fraction or 0)) >= tol
     end
     local toc = chapterToc(snapshot)
     if toc then
@@ -344,6 +432,31 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot)
 end
 
 --- 采用云端进度：覆盖本地记录并跳过去（提示跳到了哪里）。
+---@param id BookIdentity
+---@param remote_pos ProgressPosition
+--- 采纳云端位置时的落库坐标：页级源（Kavita）的远端只有 spine 粒度，同 spine 时
+--- 位置用远端（锚点可能更精确），但「已读% / 页码 / 章内比例」这些**内容页口径**的字段保留本地
+--- ——远端的比例是 spine 比例，混进来会让书架百分比跳变、页码丢失，而本地这几个数描述的
+--- 就是这条里的同一段；跨 spine 或取不到 spine 时整套用远端（本地那几个数描述的是别处）。
+---@param local_pos ProgressPosition|nil
+---@param remote_pos ProgressPosition
+---@param page_level boolean|nil
+---@return ProgressPosition
+local function adoptPosition(local_pos, remote_pos, page_level)
+    if not page_level or not local_pos then return remote_pos end
+    local local_spine = docFragmentIndex(local_pos.locator)
+    if not local_spine or local_spine ~= docFragmentIndex(remote_pos.locator) then return remote_pos end
+    local pos = {}
+    for k, v in pairs(remote_pos) do pos[k] = v end
+    pos.fraction = local_pos.fraction or remote_pos.fraction
+    pos.page = local_pos.page
+    pos.total_pages = local_pos.total_pages
+    pos.chapter_idx = local_pos.chapter_idx or remote_pos.chapter_idx
+    pos.chapter_fraction = local_pos.chapter_fraction
+    return pos
+end
+
+--- 采用云端进度：落库位置过 adoptPosition（页级源保本地内容页口径），然后跳过去。
 ---@param id BookIdentity
 ---@param remote_pos ProgressPosition
 local function adoptCloud(id, remote_pos)
@@ -452,19 +565,25 @@ function ReaderProgress.pull(snapshot, opts)
         end
         local local_position = localProgressForPull(id, snapshot)
         local row = ProgressDB.get(id.source_id, id.stable_id)
-        if progressDiffers(local_position, remote_pos, id, snapshot) then
+        local page_level = type(meta) == "table" and meta.page_level == true
+        if progressDiffers(local_position, remote_pos, id, snapshot, page_level) then
             -- 只有两边自上次同步后都动过才问；手动拉取是用户要看对比，照常问。
-            local cloud_moved = not (row and row.synced) or progressDiffers(row.synced, remote_pos, id, snapshot)
-            if manual or (cloud_moved and not (row and row.sync_status == 1)) then
+            local cloud_moved = not (row and row.synced)
+                or progressDiffers(row.synced, remote_pos, id, snapshot, page_level)
+            -- 页级源：本地读得更靠后（spine 更大 / 同 spine 内元素更后）时不往回拽。
+            local local_ahead = page_level and spineCmp(local_position, remote_pos) == -1
+            if manual or (cloud_moved and not (row and row.sync_status == 1) and not local_ahead) then
                 logger.dbg("book.progress reader pull conflict", id.source_id, id.stable_id)
                 askProgressConflict(id, snapshot, local_position, remote_pos)
-            elseif cloud_moved then
+            elseif cloud_moved and not local_ahead then
                 logger.dbg("book.progress reader pull adopt", id.source_id, id.stable_id)
-                adoptCloud(id, remote_pos)
+                adoptCloud(id, adoptPosition(local_position, remote_pos, page_level))
             elseif row.sync_status == 0 and source.syncProgressAsync then
-                -- 云端还是本机上次同步的位置，只是本地新读的还没推上去。
+                -- 云端还是本机上次同步的位置（或比本机更靠前），只是本地新读的还没推上去。
                 logger.dbg("book.progress reader pull stale cloud", id.source_id, id.stable_id)
                 source:syncProgressAsync({ identity = id, dirty_only = true }, function() end)
+            else
+                logger.dbg("book.progress reader pull keep-local", id.source_id, id.stable_id)
             end
             return
         end
@@ -478,6 +597,10 @@ function ReaderProgress.pull(snapshot, opts)
         elseif remote_pos.chapter_fraction == nil and chapterToc(snapshot) then
             -- 云端只记到章：落库会把本地章内位置冲成章首，保留本地。
             logger.dbg("book.progress reader pull done", id.source_id, id.stable_id, "chapter only")
+            return
+        elseif page_level and locatorElementPath(remote_pos.locator) == nil then
+            -- 页级源同 spine 且远端只有 spine 粒度：别拿它盖掉本地页内坐标。
+            logger.dbg("book.progress reader pull done", id.source_id, id.stable_id, "spine only")
             return
         elseif not ProgressDB.upsertRemote(id.source_id, id.stable_id, remote_pos) then
             logger.warn("book.progress save remote failed", id.stable_id)
