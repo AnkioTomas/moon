@@ -99,6 +99,10 @@ function Maintenance:cacheRow(desktop)
                             if desktop.closed then return end
                             if ok then
                                 page.cache_size_label = "0"
+                                -- 后台重扫一次，让本地书封面自动重新生成（扫盘在子进程里跑，不阻塞）；
+                                -- 先解除本地源 60 秒自动同步节流，否则刚同步过就会被跳过。
+                                if desktop.source then desktop.source._auto_sync_at = nil end
+                                require("desktop.sync").open(desktop)
                                 desktop:onEvent("home_refresh")
                                 desktop:onEvent("shelf_changed")
                                 desktop:updateView()

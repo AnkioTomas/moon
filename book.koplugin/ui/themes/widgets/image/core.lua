@@ -105,6 +105,15 @@ local function bitmap(path, w, h)
     return bb
 end
 
+--- 整体作废位图缓存（清理缓存后调用）：缓存过的路径都标成「已替换」，之后重新生成的同名文件
+--- 不会命中 KOReader ImageWidget 按路径缓存的旧位图。
+function Image.invalidateAll()
+    for key, item in pairs(bitmaps) do
+        replaced[item.path] = true
+        dropBitmap(key)
+    end
+end
+
 --- 标记文件内容已被替换（刮削换封面），之后显示该路径不再命中旧位图。
 ---@param path string
 function Image.invalidate(path)

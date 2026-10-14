@@ -58,6 +58,11 @@ local function blocked(url)
     return true
 end
 
+--- 清空失败退避表（清理缓存后调用），让封面立即重新下载，不必等 FAILED_TTL。
+function Download.resetFailed()
+    failed = {}
+end
+
 --- 已缓存的网络图路径；未命中返回 nil。
 ---@param url string
 ---@return string|nil

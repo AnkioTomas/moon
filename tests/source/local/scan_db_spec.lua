@@ -55,6 +55,12 @@ Assert.is_false(index["/b/a.epub"].cover)
 Assert.is_nil(index["/b/x.txt"])
 Assert.eq(index["/b/new.pdf"].md5, "m-n")
 
+-- 清缓存后：「试过补封面」全部复位，指纹 / md5 不动
+Assert.is_true(ScanDB.resetCovers())
+index = ScanDB.all()
+Assert.is_false(index["/b/new.pdf"].cover)
+Assert.eq(index["/b/new.pdf"].md5, "m-n")
+
 -- 盘上清空：全删
 Assert.is_true(ScanDB.save(index, {}))
 Assert.is_nil(next(ScanDB.all()))

@@ -91,6 +91,7 @@ end
 
 package.preload["utils.paths"] = function()
     return {
+        ensureDir = function() return true end,
         root = function()
             return "/data/.moon"
         end,
