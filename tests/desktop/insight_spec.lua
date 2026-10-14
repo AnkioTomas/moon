@@ -191,6 +191,17 @@ Assert.eq(chart_opts.points[wday].value, 600, "今天落在对应星期")
 nav = Kit.buttons(view)
 Assert.is_false(nav[#nav].enabled)
 
+-- 左右滑 / 物理翻页键：末页再往后不动，往前回到第 3 页；首页再往前不动。
+insight:onEvent("swipe", { direction = "west" })
+Assert.eq(insight.ui_page, 4)
+insight:onEvent("swipe", { direction = "east" })
+Assert.eq(insight.ui_page, 3)
+insight.ui_page = 1
+insight:onEvent("swipe", { direction = "east" })
+Assert.eq(insight.ui_page, 1)
+insight:onEvent("swipe", { direction = "west" })
+Assert.eq(insight.ui_page, 2)
+
 -- 换源重置回未加载。
 insight:onEvent("source_changed")
 Assert.is_nil(insight.state)

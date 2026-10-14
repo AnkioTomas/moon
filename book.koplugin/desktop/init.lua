@@ -230,6 +230,17 @@ function Desktop:init()
         TapBar = Gesture.range("tap", function() return Screen:getHeight() - Tabbar.height() end, Tabbar.height),
         Swipe = Gesture.range("swipe", TopBar.height, function() return self:contentHeight() end),
     }
+    -- 物理翻页键（Kindle / Kobo 侧键，安卓开启音量键翻页后也映射到这里）翻当前页签。
+    -- 反转翻页键、横屏键位旋转由 KOReader 设备层处理，这里收到的已是最终方向。
+    -- 方向键只给键多的设备，和 ReaderPaging 一致，少键设备不占用。
+    if Device:hasKeys() then
+        local fwd, back = { "RPgFwd", "LPgFwd" }, { "RPgBack", "LPgBack" }
+        if not Device:hasFewKeys() then
+            fwd[#fwd + 1], back[#back + 1] = "Right", "Left"
+        end
+        self.key_events.DesktopPageNext = { { fwd }, event = "DesktopTurn", args = 1 }
+        self.key_events.DesktopPagePrev = { { back }, event = "DesktopTurn", args = -1 }
+    end
     self:build()
 end
 
@@ -349,6 +360,17 @@ function Desktop:onSwipe(_arg, ges_ev)
     notify(self[self.tab], "onEvent", "swipe", {
         direction = BD.flipDirectionIfMirroredUILayout(ges_ev.direction),
     })
+    return true
+end
+
+--- 物理翻页键：按「下一页 / 上一页」语义转成当前页签的左右滑（不做 RTL 翻转，按键不是物理方向）。
+--- 吃掉按键，不漏给下层文件管理器翻文件列表。弹窗在栈顶时按键到不了这里。
+--- 「桌面物理翻页键」关闭时不处理、返回 false，按键照旧交给下层；按键时读设置，切换立即生效。
+---@param dir integer 1 下一页，-1 上一页
+---@return boolean
+function Desktop:onDesktopTurn(dir)
+    if MoonSettings.get("desktop").page_keys == false then return false end
+    notify(self[self.tab], "onEvent", "swipe", { direction = dir > 0 and "west" or "east" })
     return true
 end
 
