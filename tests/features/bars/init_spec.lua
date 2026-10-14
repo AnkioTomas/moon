@@ -44,6 +44,7 @@ package.preload["features.bars.layout"] = function()
         get = function(which) return layouts[which] end,
         setReplace = function() end,
         topHeight = function() return 12 end,
+        BAR_HORIZONTAL_PADDING = 12,
         fontSize = function(_which, fs) return fs and fs.text_font_size or 14 end,
     }
 end
@@ -243,6 +244,52 @@ Assert.eq(dirty[1].widget, "reader-dialog")
 Assert.eq(dirty[1].rect.h, 28 + 12, "顶栏 = 页眉 + 额外高度")
 Assert.eq(dirty[2].rect.y, 768 - 4, "底栏向上让出内缩")
 Assert.eq(dirty[2].rect.h, 32 + 4)
+
+-- 绘制：字体现取月读界面字体（ffont），不复用 footer_text_face；进度条高度不复用
+-- ReaderFooter.progress_bar.height（KOReader 关掉原生进度条时为 0）。
+do
+    local Session = require("reader.session")
+    Session.toc = function() return {} end
+    Session.chapterPages = function() return nil end
+    Session.chapterTitle = function() return "" end
+    Session.chapterIndex = function() return 1 end
+    Session.remainingSeconds = function() return nil end
+    session_current = { identity = {}, percent = 0.5 }
+    local painted = {}
+    package.loaded["features.bars.items"] = {
+        paint = function(_bb, x, _y, w, h, _layout, _ctx, opts)
+            painted[#painted + 1] = { x = x, w = w, h = h, opts = opts }
+        end,
+    }
+    local faces = {}
+    package.loaded["ui/font"] = {
+        getFace = function(_, name, size)
+            faces[#faces + 1] = name
+            return { name = name, size = size }
+        end,
+    }
+    local layout_mod = require("features.bars.layout")
+    layout_mod.icons = function() return false end
+    ui_top.view.footer.settings = { text_font_size = 14, progress_margin_width = 10, text_font_face = "stale" }
+    ui_top.view.footer.horizontal_margin = 4
+    ui_top.view.footer.footer_text_face = "stale-face"
+    ui_top.view.footer.progress_bar = { height = 0 }
+    ui_top.view.footer_visible = true
+    Bars.ui = ui_top
+    Bars:paintTo({ paintRect = function() end }, 0, 0)
+    Assert.len(painted, 2)
+    for _idx, name in ipairs(faces) do
+        Assert.eq(name, "ffont", "栏字体跟随月读界面字体")
+    end
+    Assert.eq(painted[2].opts.face.name, "ffont")
+    Assert.is_nil(painted[2].opts.bar_h, "不吃原生进度条的 0 高度")
+    Assert.eq(painted[2].h, 32, "底栏内容区 = 条带（扣掉内缩）")
+    Assert.eq(painted[1].x, 12, "顶栏水平留白")
+    Assert.eq(painted[2].x, 12, "底栏与顶栏同一水平留白，不叠加 footer 边距")
+    Assert.eq(painted[2].w, 600 - 24)
+    package.loaded["features.bars.items"] = nil
+    package.loaded["ui/font"] = nil
+end
 dirty = {}
 session_current = nil
 Bars.events.Charging(plugin)
