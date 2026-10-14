@@ -9,8 +9,13 @@ Kavita 书源（整本模式）。
 是进度上报所需 id 的唯一来源；离线时目录过期也照用旧的。
 
 进度：epub 按 spine（Kavita pageNum）+ bookScrollId，pdf/cbz 按页。
-远端与本地落在同一 spine / 页时交回本地位置：Kavita 的精度只到 spine，
-不能因此把本地章内位置判成冲突。
+远端只有 spine 粒度（网页端没带锚点、或锚点在本机 epub 里解不出）且本地在同一 spine / 页时
+交回本地位置：Kavita 的精度只到 spine，不能拿它把本地章内位置判成冲突、把人拽回节首。
+远端能给得出页内锚点时必须用远端：网页端在同一条里往后读几页就是这种情况，
+先返回本地会让 core 的 synced 基线永远判不出「云端动过」。
+关书 / 切章 / 休眠各推一次，另在阅读期做「进度心跳」（间隔见设置项 heartbeat_interval，0 可关）：
+Kavita 的阅读会话按相邻两次进度写入的间隔计时，只在关书推一次时长恒为 0 秒；而且它只在
+pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「位置一变就补推」而非纯定时。
 书架：快照指纹不变就跳过对账；对账后后台逐本补简介 / 作者；漫画 series 的已读页回填成本地进度。
 划线：epub 的划线按段落文本在本地 epub 里找锚点，新建 / 改备注推到 Kavita，注解 id 存在笔记快照里。
 漫画：装了 kamare 插件且在线时交它在线看（开书回调 handled），否则下载 cbz 用内置阅读器。
@@ -21,16 +26,21 @@ Kavita 书源（整本模式）。
 local Client = require("moonsource_kavita.client")
 local Position = require("moonsource_kavita.position")
 local SourceBase = require("source.base")
+local logger = require("utils.log")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
 local ID = "ext.kavita"
 local PAGE_SIZE = 500
+-- 书架快照格式版本：参与指纹计算。改了写入字段（如补 series / inserted_at）时 +1，
+-- 让老库下次同步重对账一次，否则只在本地存过的指纹会一直跳过。
+local SHELF_SNAPSHOT_VERSION = "v3"
 local FORMATS = { [0] = "image", [1] = "cbz", [3] = "epub", [4] = "pdf" }
 local MAGIC = { epub = "PK\3\4", cbz = "PK\3\4", pdf = "%PDF" }
 
 ---@class KavitaSource : SourceBase
 ---@field client KavitaClient
+---@field _heartbeat KavitaHeartbeat|nil 阅读期进度心跳；无则未在跑
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -132,38 +142,168 @@ local function withMetadata(row, metadata)
     return row
 end
 
---- Kavita 的时间是不带时区的 UTC（`2026-09-29T20:07:19.193`）。
+--- Kwita 的 ISO 时间（不带时区）→ 按本地时钟解析成 epoch；解析不了返回 nil。
+---@param value any
+---@return integer|nil
+local function parseWall(value)
+    local y, mo, d, h, mi, s = tostring(value or ""):match("^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
+    if not y or tonumber(y) < 1971 then return nil end
+    return os.time({ year = tonumber(y), month = tonumber(mo), day = tonumber(d),
+        hour = tonumber(h), min = tonumber(mi), sec = tonumber(s) })
+end
+
+--- 客户端时区偏移（秒）：os.time 按本地解析 UTC 时钟得到的差值。
+---@return integer
+local function clientOffset()
+    local now = os.time()
+    return now - os.time(os.date("!*t", now) --[[@as osdate]])
+end
+
+--- `xxxUtc` 字段是真的 UTC（`2026-09-29T20:07:19.193`）：按本地解析后补回客户端偏移。
 ---@param value any
 ---@return integer|nil
 local function utcTime(value)
-    local y, mo, d, h, mi, s = tostring(value or ""):match("^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
-    if not y or tonumber(y) < 1971 then return nil end
-    local now = os.time()
-    local offset = now - os.time(os.date("!*t", now) --[[@as osdate]])
-    return os.time({ year = tonumber(y), month = tonumber(mo), day = tonumber(d),
-        hour = tonumber(h), min = tonumber(mi), sec = tonumber(s) }) + offset
+    local t = parseWall(value)
+    if not t then return nil end
+    return t + clientOffset()
 end
 
---- 漫画 series 的已读页数回填成本地进度（远端版，本地脏行不覆盖），书架上直接看得到进度。
---- epub/pdf 不回填：series 级页数是 spine 数，粒度太粗，会盖掉本地的精确位置。
+--- 服务器时区偏移（秒）：Kavita 同时给 `lastChapterAdded`（服务器本地）与
+--- `lastChapterAddedUtc`（UTC），两者差值就是服务器时区（实测服务器在 UTC+8 时为 28800）。
+---@param series table Kavita SeriesDto
+---@return integer
+local function serverOffset(series)
+    local local_t, utc_t = parseWall(series.lastChapterAdded), parseWall(series.lastChapterAddedUtc)
+    if not (local_t and utc_t) then return 0 end
+    return local_t - utc_t
+end
+
+--- 阅读时间：`latestReadDate` 没有 Utc 后缀 —— 它是**服务器本地时间**，不是 UTC。
+--- 按 UTC 解析会存成 8 小时后的「未来」时间，刚读完的书反而被它压在下面。
+---@param series table Kavita SeriesDto
+---@return integer|nil
+local function readTime(series)
+    local t = parseWall(series.latestReadDate)
+    if not t then return nil end
+    return t - serverOffset(series) + clientOffset()
+end
+
+--- series 的目录缓存（打开过才有）+ 其中已经在本地读过（有进度）的卷。
+--- 多卷 series 的进度分别记在各卷行上（stable_id = seriesId:chapterId）：
+--- 回填要跳过容器行，而读过的卷行要继承容器元数据。
 ---@param source_id string
----@param comics table[] Kavita SeriesDto
+---@param series_id string
+---@param ProgressDB table
+---@return table[]|nil toc
+---@return table[] progressed 读过的卷表项
+local function progressedVolumes(source_id, series_id, ProgressDB)
+    local toc = require("source.toc").read(source_id, series_id)
+    if type(toc) ~= "table" or #toc < 2 then return nil, {} end
+    local out = {}
+    for _idx, entry in ipairs(toc) do
+        local chapter_id = entry.chapterId or entry.uid
+        if chapter_id ~= nil and ProgressDB.get(source_id, series_id .. ":" .. tostring(chapter_id)) then
+            out[#out + 1] = entry
+        end
+    end
+    return toc, out
+end
+
+--- 卷行继承的元数据字段。
+local VOLUME_META_FIELDS = { "title", "authors", "intro", "category", "series" }
+
+--- 源这行写下去会不会真的改动库里的行。nil 字段经 COALESCE 不覆盖（同 BookDB.upsertRemote），
+--- 本地脏行（sync_status=0）书库一律保留远端盖不动 —— 两种情况都不算变更。
+---@param cur Book|nil 库里的卷行
+---@param row table 待写的元数据字段
+---@return boolean
+local function untouched(cur, row)
+    if not cur then return false end
+    if cur.sync_status == 0 then return true end
+    for _idx, field in ipairs(VOLUME_META_FIELDS) do
+        if row[field] ~= nil and cur[field] ~= row[field] then return false end
+    end
+    return true
+end
+
+--- 读过的卷行继承容器元数据（作者 / 简介 / 分类 / 系列）。
+--- Kavita 只在 series 级给这些字段，而最近阅读列的是卷行：卷行空着就是「未知作者」。
+--- 容器补全后卷行也跟着对齐（每次同步跑一遍，幂等）。只写真会改动库的行，并把改动的行数
+--- 回给调用方：对齐不算进同步变更的话，首页「当前阅读」收不到 shelf_changed，
+--- 卡片会一直停在未知作者（库里其实已经补上了）。
+---@param series Book|nil 容器书行
+---@param series_id string
+---@param entries table[] 读过的卷表项
+---@return integer changed 真正改动的卷行数
+local function syncVolumeMeta(series, series_id, entries)
+    if not series or #entries == 0 then return 0 end
+    local BookDB = require("book.books_db")
+    local rows = {}
+    for _idx, entry in ipairs(entries) do
+        local stable_id = series_id .. ":" .. tostring(entry.chapterId or entry.uid)
+        local row = {
+            source_id = ID,
+            stable_id = stable_id,
+            title = T("%1 · %2", series.title or "", entry.title or ""),
+            authors = series.authors,
+            intro = series.intro,
+            category = series.category,
+            series = series.title,
+            -- cover 不继承：卷封面走源自己的 chapter-cover 接口。
+        }
+        if not untouched(BookDB.get(ID, stable_id), row) then
+            rows[#rows + 1] = row
+        end
+    end
+    if #rows == 0 then return 0 end
+    require("book.store").rememberMany(rows)
+    return #rows
+end
+
+--- 服务端已读回填成本地进度（远端版，本地脏行不覆盖），书架 /「最近阅读」/「已读」都看得到。
+--- Kavita 只在 series 级记 pagesRead/pages 与 latestReadDate：
+---   - 漫画：series 级页数就是阅读页，本地同页不重写。
+---   - 书籍：series 级页数是 spine 比例，粒度太粗；只在本地还没有这本书进度时补一条占位
+---     （网页端 / 别的设备读过的书也能进「最近阅读」并标已读），绝不用它覆盖本地精确位置。
+---@param source_id string
+---@param series_list table[] Kavita SeriesDto
 ---@return integer changed
-local function backfillComics(source_id, comics)
+local function backfillRead(source_id, series_list)
     local ProgressDB = require("book.progress_db")
+    local now = os.time()
     local changed = 0
-    for _idx, series in ipairs(comics) do
+    for _idx, series in ipairs(series_list) do
         local pages, read = tonumber(series.pages) or 0, tonumber(series.pagesRead) or 0
-        local stable_id = tostring(series.id)
-        local here = ProgressDB.get(source_id, stable_id)
-        if pages > 0 and read > 0 and not (here and here.page == read)
-            and ProgressDB.upsertRemote(source_id, stable_id, {
-                fraction = math.min(1, read / pages),
-                page = read,
-                total_pages = pages,
-                updated_at = utcTime(series.latestReadDate),
-            }) then
-            changed = changed + 1
+        if pages > 0 and read > 0 then
+            local stable_id = tostring(series.id)
+            local comic = tonumber(series.format) == 1
+            local here = ProgressDB.get(source_id, stable_id)
+            local at = readTime(series)
+            -- 旧版把 latestReadDate（服务器本地时间）当 UTC 解析，存成了 8 小时后的「未来」时间，
+            -- 结果刚读完的书被它挤到后面；显式拉回来（只降不升，只动干净行）。
+            if here and at and (tonumber(here.updated_at) or 0) > now + 60 then
+                ProgressDB.fixRemoteTime(source_id, stable_id, at)
+            end
+            local _toc, progressed = progressedVolumes(source_id, stable_id, ProgressDB)
+            if #progressed > 0 then
+                -- 读过的卷行继承容器元数据（作者 / 简介 / 分类），否则最近阅读里那几卷是未知作者。
+                -- 对齐计入 changed：同步只会报「变了」的域，首页 / 图书馆据此重画。
+                changed = changed + syncVolumeMeta(
+                    require("book.books_db").get(source_id, stable_id), stable_id, progressed)
+                -- 真实进度在卷行上；容器行的 series 级占位是多余的（旧版回填过就清掉）。
+                if here and ProgressDB.dropRemote(source_id, stable_id) then
+                    changed = changed + 1
+                end
+            elseif (comic and not (here and here.page == read)) or (not comic and here == nil) then
+                if ProgressDB.upsertRemote(source_id, stable_id, {
+                    fraction = math.min(1, read / pages),
+                    page = comic and read or nil,
+                    total_pages = comic and pages or nil,
+                    updated_at = at,
+                }) then
+                    changed = changed + 1
+                end
+            end
         end
     end
     return changed
@@ -171,7 +311,7 @@ end
 
 --- 后台逐本补简介 / 作者（all-v2 不带，metadata 一本一请求）。已有简介的跳过；
 --- 补过的 series 记在 settings/moonsource_kavita_meta.lua（书库把空简介存成 NULL，
---- 没简介的书靠它才不会每次同步都重拉）。任一请求失败就停，下次书架同步再接着补。
+--- 没简介的书靠它才不会每次同步都重拉）。单本失败跳过，连续失败才当网络问题整轮收工。
 ---@param series_ids string[]
 function Source:backfillMeta(series_ids)
     if self.backfill then self.backfill.cancel() end
@@ -179,7 +319,7 @@ function Source:backfillMeta(series_ids)
     local UIManager = require("ui/uimanager")
     local state = require("luasettings"):open(require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua")
     local done = state:readSetting("done", {})
-    local index, cancelled, job, timer = 0, false, nil, nil
+    local index, fails, cancelled, job, timer = 0, 0, false, nil, nil
     local function stop()
         self.backfill = nil
         state:flush()
@@ -194,7 +334,15 @@ function Source:backfillMeta(series_ids)
         if not series_id or not online() then return stop() end
         job = self.client:json("GET", "/api/Series/metadata", { seriesId = series_id }, nil, function(metadata)
             if cancelled then return end
-            if not metadata then return stop() end
+            if not metadata then
+                -- 单本失败不拖住后面：连续失败才当网络问题整轮收工，下次同步接着补。
+                fails = fails + 1
+                if fails >= 3 then return stop() end
+                timer = step
+                UIManager:scheduleIn(0.3, timer)
+                return
+            end
+            fails = 0
             require("book.store").rememberMany({
                 withMetadata({ source_id = self.id, stable_id = series_id }, metadata),
             })
@@ -226,7 +374,135 @@ function Source:getDetailAsync(identity, cb)
         end)
 end
 
+--- Kavita 的阅读会话时长 = 相邻两次进度写入的时间跨度（10 分钟无写入即封会话）。
+--- 月读只在关书 / 切章 / 休眠各推一次，单次写入在 Kavita 侧就是 StartTime == EndTime 的
+--- 「0 秒会话」（字数也会被 Kavita 的锚点 diff 误算成到页尾的一大段）。阅读期补推当前位置，
+--- 一个阅读时段在 Kavita 侧才有多次写入、时长和字数才算得准；补推要跟在真实位置变化上
+--- （见 heartbeat_interval）：Kavita 对同位置的写入直接 early-return，纯定时的整拍等于没推。
+--- 会话开始时间 = 第一次有效写入，所以 heartbeat_interval 也是会话起点的最大滞后。
+--- 兜底拍间隔下限（秒）：慢读没有翻页事件时也定期补推被节流掉的位置变化。
+local HEARTBEAT_INTERVAL = 60
+--- 两次补推之间的最小间隔默认值（秒），也是设置项 heartbeat_interval 的默认值。
+--- 把密集翻页合并成最多一拍一次，别每页一发。0 = 关闭阅读期心跳。
+local DEFAULT_HEARTBEAT_INTERVAL = 30
+
+--- 阅读期进度心跳的补推间隔（秒）。设置项 heartbeat_interval：默认 30；
+--- 0 = 关闭阅读期心跳（关书 / 切章 / 休眠的推送不受影响）。
+---@return integer
+local function heartbeatInterval()
+    local value = tonumber(require("utils.settings").getSource(ID).heartbeat_interval)
+    if value == nil then return DEFAULT_HEARTBEAT_INTERVAL end
+    value = math.floor(value)
+    return value > 0 and value or 0
+end
+
+---@class KavitaHeartbeat
+---@field identity BookIdentity 正在读的书
+---@field position ProgressPosition 最近一次事件报来的位置
+---@field pushed string|nil 上次推上去的位置标识（位置没变就别推，Kavita 也会丢）
+---@field last_push integer 上次补推的 Unix 时间戳（建表即当作刚推过，避开开书拉取的竞态）
+---@field interval integer 本会话的补推最小间隔（秒），起心跳时从设置读入
+---@field tick function 兜底定时器（慢读没有翻页事件时也定期补推）
+---@field busy boolean|nil 上一拍还在飞，本拍跳过（不补报）
+
+--- 停掉阅读期进度心跳。
+---@param self KavitaSource
+local function stopHeartbeat(self)
+    local hb = self._heartbeat
+    if not hb then return end
+    self._heartbeat = nil
+    require("ui/uimanager"):unschedule(hb.tick)
+end
+
+--- 位置的标识：epub 用锚点，其余用页码 / 比例。
+---@param position ProgressPosition
+---@return string
+local function positionKey(position)
+    return position.locator or tostring(position.page or position.fraction or "")
+end
+
+--- 推一次当前位置。开书拉取未落定（前 interval 秒）/ 并发 / 离线 / 距上次太近 / 位置没变，
+--- 都跳过，这次的位置留给下一拍。
+---@param self KavitaSource
+---@param hb KavitaHeartbeat
+local function pushProgress(self, hb)
+    if self._heartbeat ~= hb then return end
+    if hb.busy or not online() then return end
+    if os.time() - hb.last_push < hb.interval then return end
+    local key = positionKey(hb.position)
+    if key == hb.pushed then return end
+    hb.busy, hb.last_push, hb.pushed = true, os.time(), key
+    logger.dbg("kavita heartbeat push", hb.identity.stable_id, key)
+    self:putProgressAsync(hb.identity, hb.position, function(ok, err)
+        hb.busy = false
+        if ok ~= true then
+            hb.pushed = nil -- 失败留个待重试的位置，下一拍再补
+            logger.warn("kavita progress heartbeat failed", hb.identity.stable_id, err)
+        end
+    end)
+end
+
+--- 兜底拍：慢读没有翻页事件时也定期补推一次当前位置。间隔取 max(60, 补推间隔)：
+--- 不会比节流间隔更频繁，设置调大后也不白醒。
+---@param self KavitaSource
+---@param hb KavitaHeartbeat
+local function beat(self, hb)
+    if self._heartbeat ~= hb then return end
+    require("ui/uimanager"):scheduleIn(math.max(HEARTBEAT_INTERVAL, hb.interval), hb.tick)
+    pushProgress(self, hb)
+end
+
+--- 翻页 / 切章 / 唤醒：起或续阅读期进度心跳，并更新最近位置。换书 / 间隔改了则先停旧心跳。
+---@param self KavitaSource
+---@param identity BookIdentity|nil
+---@param position ProgressPosition|nil
+local function touchHeartbeat(self, identity, position)
+    if not identity or not self:configured() then return end
+    local interval = heartbeatInterval()
+    if interval <= 0 then
+        stopHeartbeat(self)
+        return
+    end
+    local hb = self._heartbeat
+    if hb and (hb.identity.stable_id ~= identity.stable_id or hb.interval ~= interval) then
+        stopHeartbeat(self)
+        hb = nil
+    end
+    if not hb then
+        hb = {
+            identity = identity,
+            position = position or { fraction = 0 },
+            last_push = os.time(),
+            interval = interval,
+            tick = require("ui.guard").wrap("kavita heartbeat", function() beat(self, hb) end),
+        }
+        self._heartbeat = hb
+        require("ui/uimanager"):scheduleIn(math.max(HEARTBEAT_INTERVAL, interval), hb.tick)
+    end
+    hb.identity = identity
+    hb.position = position or hb.position
+    -- 位置刚变过就立刻推：Kavita 认的是写入之间的跨度，定时拍若整拍都撞在同一个位置
+    -- 上等于没推，会话仍会退化成 0 秒。
+    pushProgress(self, hb)
+end
+
+--- 翻页 / 切章 / 唤醒起进度心跳并更新位置，关书 / 休眠停掉；其余事件交给基类。
+---@param event string
+---@param payload table|nil
+function Source:onEvent(event, payload)
+    if event == "page_changed" or event == "chapter_changed" or event == "reading_resumed" then
+        if payload then touchHeartbeat(self, payload.identity, payload.position) end
+        return
+    end
+    if event == "reading_stopped" then
+        stopHeartbeat(self)
+        return
+    end
+    return SourceBase.onEvent(self, event, payload)
+end
+
 function Source:close()
+    stopHeartbeat(self)
     if self.backfill then self.backfill.cancel() end
 end
 
@@ -249,7 +525,8 @@ function Source:syncBooksAsync(opts, cb)
     end
     table.sort(libraries)
     local report = opts.on_progress or function() end
-    local books, comics, prints, lib_index, page, cancelled = {}, {}, { table.concat(libraries, ",") }, 1, 1, false
+    local books, reads, prints, lib_index, page, cancelled =
+        {}, {}, { SHELF_SNAPSHOT_VERSION, table.concat(libraries, ",") }, 1, 1, false
     ---@type HttpJob
     local job
 
@@ -257,21 +534,26 @@ function Source:syncBooksAsync(opts, cb)
         local settings = require("utils.settings")
         local cfg = settings.getSource(ID)
         local fingerprint = require("ffi/sha2").md5(table.concat(prints, "\n"))
-        local result, err
-        if not opts.force and cfg.shelf_fingerprint == fingerprint
-            and #require("book.books_db").libraryStableIdsBySource(self.id) > 0 then
+        local BookDB = require("book.books_db")
+        local result, err, ids
+        if not opts.force and cfg.shelf_fingerprint == fingerprint then
+            ids = BookDB.libraryStableIdsBySource(self.id)
+        end
+        if ids and #ids > 0 then
             result = { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
         else
-            result, err = require("source.shelf").reconcile(self.id, books, opts.force)
+            result, err = require("source.shelf").reconcile(self.id, books, opts.force, true)
             if not result then return cb(nil, err) end
             cfg.shelf_fingerprint = fingerprint
             settings.saveSource(ID, cfg)
-            local ids = {}
+            ids = {}
             for idx, book in ipairs(books) do ids[idx] = book.stable_id end
-            self:backfillMeta(ids)
         end
-        -- 跳过对账时只有漫画进度可能变了，计进 pulled 让书架重绘。
-        result.pulled = result.pulled + backfillComics(self.id, comics)
+        -- 简介 / 作者是逐本后台补的，跟快照变不变无关：换源 / 断网中断过，下次同步必须接着补，
+        -- 否则没补到的书永远停在「未知作者」。
+        self:backfillMeta(ids)
+        -- 服务端已读进度同理：网页端 / 别的设备读过，书架也得进「最近阅读」与「已读」。
+        result.pulled = result.pulled + backfillRead(self.id, reads)
         cb(result)
     end
 
@@ -292,11 +574,17 @@ function Source:syncBooksAsync(opts, cb)
                     stable_id = tostring(series.id),
                     title = series.name,
                     category = series.libraryName,
+                    -- Kavita 的书架一行就是一个 series：系列列填自己的名字，
+                    -- 否则图书馆的「系列」页签把整库都归到「无系列」。
+                    series = series.name,
+                    -- 「最近添加」按 Kavita 的最近更新排，而不是全库同一次同步的上架时间。
+                    -- lastChapterAddedUtc 是真的 UTC（created 没有 Utc 后缀、是服务器本地时间，不拿来做时间）。
+                    inserted_at = utcTime(series.lastChapterAddedUtc),
                     meta = { words = series.wordCount },
                 }
                 prints[#prints + 1] = table.concat({ series.id, series.name or "", series.libraryName or "",
-                    tonumber(series.wordCount) or 0 }, "\31")
-                if tonumber(series.format) == 1 then comics[#comics + 1] = series end
+                    tonumber(series.wordCount) or 0, series.lastChapterAddedUtc or "" }, "\31")
+                if (tonumber(series.pagesRead) or 0) > 0 then reads[#reads + 1] = series end
             end
             if #list >= PAGE_SIZE then
                 page = page + 1
@@ -548,15 +836,21 @@ function Source:openBookAsync(identity, _opts, cb)
             job = self:openEntry(identity, entry, toc, name, finish)
             return
         end
-        local series = identity.book or { stable_id = series_id }
+        -- fetchToc 会把 series 级作者 / 简介写回容器行，而 identity.book 是开书那一刻的旧快照：
+        -- 这里重读一次容器行，免得新 series 第一次打开时卷行被写成「未知作者」。
+        local series = require("book.books_db").get(self.id, series_id)
+            or identity.book or { stable_id = series_id }
         pickVolume(series, toc, function(entry)
             if cancelled then return end
             if not entry then return finish(nil, _("已取消")) end
             local ref = { source_id = self.id, stable_id = series_id .. ":" .. entry.chapterId }
+            -- 卷行继承容器（series 级）元数据：Kavita 只在 series 级给作者 / 简介 / 分类，
+            -- 卷行自己空着，最近阅读里就是「未知作者」。每次开书对齐一次，容器补全后立刻生效。
             require("book.store").rememberMany({ {
                 source_id = self.id, stable_id = ref.stable_id,
                 title = T("%1 · %2", series.title or "", entry.title),
                 authors = series.authors, series = series.title,
+                intro = series.intro, category = series.category,
             } })
             job = self:openEntry(ref, entry, toc, series.title or entry.title, finish)
         end)
@@ -589,9 +883,18 @@ function Source:position(identity, entry, remote)
     local here = require("book.progress_db").get(self.id, identity.stable_id)
     if entry.format == "epub" then
         local spine = math.min(page_num, pages - 1)
-        if here and Position.spine(here.locator) == spine then return here end
         local book = require("book.books_db").get(self.id, identity.stable_id)
         local scroll = Position.resolveScrollId(book and book.path, spine, remote.bookScrollId)
+        if here and Position.spine(here.locator) == spine then
+            -- 同一 spine：远端只有 spine 粒度（没带锚点 / 锚点解不出），或锚点与本机上次同步的位置
+            -- 一样——Kavita 的粒度不足以把同一条内的差异判成冲突，交回本地位置，不把读者拽回节首。
+            -- 只有远端锚点真的变了才用远端：网页端在同一条里往后读几页正是这种情况，
+            -- 旧写法一律返回本地，core 的 synced 基线就永远看不到「云端动过」。
+            local base = here.synced and here.synced.locator
+            if not scroll or Position.spine(base) ~= spine or Position.toScrollId(base) == scroll then
+                return here
+            end
+        end
         return { fraction = fraction, locator = Position.toXPointer(spine, scroll, pages) }
     end
     local page = math.max(1, math.min(page_num + 1, pages))
@@ -613,7 +916,9 @@ function Source:getProgressAsync(identity, cb)
                     return cb(nil, nil, { empty = true })
                 end
                 if not remote then return cb(nil, perr) end
-                cb(self:position(identity, entry, remote))
+                -- page_level：远端只有 spine（epub）/ 页码（pdf）粒度，比例是「第几个 spine」，
+                -- 与本地内容页比例口径不同 → core 不能按百分比判，得按 spine 判。
+                cb(self:position(identity, entry, remote), nil, { page_level = true })
             end)
     end)
     return { cancel = function()
@@ -762,4 +1067,4 @@ function Source:pushNotesAsync(identity, annotations, cb)
     end }
 end
 
-return { meta = meta, new = new }
+return { meta = meta, new = new, DEFAULT_HEARTBEAT_INTERVAL = DEFAULT_HEARTBEAT_INTERVAL }

@@ -88,6 +88,19 @@ Assert.eq(BookDB.get("moon", "ghost").inserted_at, 1800000002, "远端在架行�
 Assert.is_true(BookDB.upsertRemote({ source_id = "moon", stable_id = "old", deleted = 0, inserted_at = 1900000000 }))
 Assert.eq(BookDB.get("moon", "old").inserted_at, 1700000000, "回填的旧时间不被远端覆盖")
 
+-- 源声明行自带权威加入时间（reconcile 的 inserted_at_from_row，如 Kavita 的 lastChapterAddedUtc）：
+-- 整库一次同步上架的时间在全库都相同，得允许源覆盖成真实时间，否则「最近添加」只能按 id 排。
+Assert.is_true(BookDB.reconcile("moon", {
+    { stable_id = "old", title = "旧书", deleted = 0, inserted_at = 2000000000 },
+    { stable_id = "ghost", title = "G", deleted = 0 },
+}, { inserted_at_from_row = true }))
+Assert.eq(BookDB.get("moon", "old").inserted_at, 2000000000, "源给的加入时间覆盖占位值")
+Assert.eq(BookDB.get("moon", "ghost").inserted_at, 1800000002, "没带日期的行仍走原规则（不覆盖）")
+Assert.is_true(BookDB.reconcile("moon", {
+    { stable_id = "old", title = "旧书", deleted = 0, inserted_at = 2100000000 },
+}, { inserted_at_from_row = false }))
+Assert.eq(BookDB.get("moon", "old").inserted_at, 2000000000, "不声明时仍不改已有时间")
+
 Assert.is_true(BookDB.setToc("wechat", "w1", "[]"))
 Assert.is_true(BookDB.upsertLocal({ source_id = "wechat", stable_id = "w1", title = "W", inserted_at = 1800000003 }))
 Assert.eq(BookDB.get("wechat", "w1").inserted_at, 1800000003, "upsertLocal 同样补写")

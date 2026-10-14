@@ -50,6 +50,7 @@ package.preload["utils.log"] = function()
 end
 
 local purge_ok = true
+local fake_dirs = {} -- path → {name=true}；lfs.dir 用，缺省空目录
 package.preload["libs/libkoreader-lfs"] = function()
     return {
         attributes = function(_, field)
@@ -57,6 +58,18 @@ package.preload["libs/libkoreader-lfs"] = function()
             return nil
         end,
         mkdir = function() return true end,
+        dir = function(path)
+            local list, entries = {}, fake_dirs[path]
+            if entries then
+                for name in pairs(entries) do list[#list + 1] = name end
+                table.sort(list)
+            end
+            local i = 0
+            return function()
+                i = i + 1
+                return list[i]
+            end
+        end,
     }
 end
 package.preload["ffi/util"] = function()
@@ -480,6 +493,45 @@ do
     book_rows_by_id["local\0/lib/x.epub"] = nil
     book_rows_by_id["local\0/cache2/y.epub"] = nil
     touch_calls = {}
+end
+
+-- ── clearCache：把 KOReader 的 .sdr 边车搬回工作目录，正文照删 ──
+do
+    local renames = {}
+    local original_rename = os.rename
+    local original_remove = os.remove
+    os.rename = function(from, to)
+        renames[#renames + 1] = { from, to }
+        return true
+    end
+    os.remove = function() return true end
+    package.loaded["book.cache"] = { purgeAsync = function() end }
+
+    fake_dirs["/cache/local/dav/keep"] = {
+        ["book.epub"] = true, ["book.sdr"] = true, ["page.jpg"] = true,
+    }
+    book_rows_by_id["local\0dav/keep"] = {
+        source_id = "local", stable_id = "dav/keep",
+        path = "/cache/local/book/dav/keep/book.epub",
+    }
+    Assert.is_true(Store.clearCache("local", "dav/keep"))
+
+    os.rename = original_rename
+    os.remove = original_remove
+    package.loaded["book.cache"] = nil
+    fake_dirs = {}
+    book_rows_by_id["local\0dav/keep"] = nil
+    touch_calls = {}
+    -- 工作目录先整体改名进 .trash，边车再单独搬回原位
+    Assert.eq(renames[1][1], "/cache/local/dav/keep")
+    Assert.matches(renames[1][2], "/%.trash/")
+    local restored
+    for _idx, r in ipairs(renames) do
+        if r[1]:match("book%.sdr$") and r[2] == "/cache/local/dav/keep/book.sdr" then
+            restored = true
+        end
+    end
+    Assert.is_true(restored, "边车必须搬回书的工作目录")
 end
 
 -- ── touch：章节详情和路径在同一事务登记；目录不经这里 ──

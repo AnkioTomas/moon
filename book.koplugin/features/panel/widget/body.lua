@@ -53,7 +53,7 @@ end
 ---@field addable (fun(): BookQuickPanelEditAddOption[])|nil 可添加动作列表工厂
 ---@field show_parent table|nil 原生菜单宿主，供滑杆脏区使用
 ---@field dimen table|nil 当前内容绝对尺寸
----@field ges_events table|nil 非编辑态挂长按进编辑
+---@field ges_events table 非编辑态挂长按进编辑；编辑态为空表（不能是 nil，手势会 pairs(nil) 崩）
 ---@field updateView fun(self: BookQuickPanelBody)
 
 local Body = InputContainer:extend{

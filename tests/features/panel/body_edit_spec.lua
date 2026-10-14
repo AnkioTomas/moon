@@ -125,6 +125,8 @@ local editing = Body:new{
 Assert.eq(wraps, 2)
 Assert.eq(dones, 1)
 Assert.eq(adds, 1)
+-- 编辑态不挂长按，但必须是空表而不是 nil：InputContainer:onGesture 会 pairs(self.ges_events)。
+Assert.not_nil(editing.ges_events)
 Assert.is_nil(editing.ges_events.HoldPanelEdit)
 
 -- 前移 / 后移按可见顺序找邻居：完整启用列表里可能夹着当前不可用的项，不能交给 ±1。

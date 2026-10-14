@@ -85,6 +85,8 @@ local function query(opts, key) return opts.url:match("[?&]" .. key .. "=([^&]*)
 
 -- 书库：books 行（path）、目录缓存、本地进度。
 local books, tocs, stale, progress, remembered, touched, reconciled = {}, {}, {}, {}, {}, {}, nil
+local fixed = {}
+local dropped = {}
 local toc_fresh = true
 local shelf_ids, written = {}, {}
 package.loaded["book.books_db"] = {
@@ -96,6 +98,14 @@ package.loaded["book.progress_db"] = {
     get = function(_sid, id) return progress[id] end,
     upsertRemote = function(_sid, id, pos)
         written[id] = pos
+        return true
+    end,
+    fixRemoteTime = function(_sid, id, at)
+        fixed[id] = at
+        return true
+    end,
+    dropRemote = function(_sid, id)
+        dropped[#dropped + 1] = id
         return true
     end,
 }
@@ -123,6 +133,8 @@ package.loaded["source.shelf"] = {
     end,
 }
 local WORK = Config.dir() .. "/kavita_spec"
+-- 后台补简介的 done 状态落在沙箱 settings 里：上一轮跑挂留下的状态会让本轮跳过补全。
+os.remove(require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua")
 os.execute("rm -rf '" .. WORK .. "'")
 package.loaded["utils.paths"] = {
     ensureBookWork = function(id) os.execute("mkdir -p '" .. WORK .. "/" .. id .. "'") end,
@@ -138,6 +150,7 @@ local source = Registry.resolve("ext.kavita")
 Assert.is_true(source:configured())
 Assert.eq(Registry.external("ext.kavita").setting, require("moonsource_kavita.setting"))
 Assert.eq(Registry.external("ext.kavita").home[1], on_deck)
+Assert.eq(require("moonsource_kavita.source").DEFAULT_HEARTBEAT_INTERVAL, 30, "设置页读的默认心跳间隔")
 
 ---@return any, any, any
 local function run(method, ...)
@@ -152,7 +165,8 @@ end
 
 -- 书架：按库分页拉 series，库名即分类；Key 去空白、地址去尾斜杠。
 local series_page = {}
-for i = 1, 500 do series_page[i] = { id = i, name = "S" .. i, libraryName = "小说", wordCount = i == 1 and 120000 or 0 } end
+for i = 1, 500 do series_page[i] = { id = i, name = "S" .. i, libraryName = "小说", wordCount = i == 1 and 120000 or 0,
+    lastChapterAddedUtc = i == 1 and "2026-01-02T03:04:05.123" or nil } end
 routes["POST /api/Series/all-v2"] = function(opts)
     local body = JSON.decode(opts.body)
     local lib, page = body.Statements[1].Value, query(opts, "pageNumber")
@@ -168,8 +182,11 @@ Assert.eq(reconciled.source_id, "ext.kavita")
 Assert.eq(reconciled.books[502].category, "漫画")
 Assert.eq(reconciled.books[1].stable_id, "1")
 Assert.eq(reconciled.books[1].meta.words, 120000, "书架带字数（0 = 未知，入库时丢掉）")
+Assert.eq(reconciled.books[1].series, "S1", "系列列填 Kavita series 名，否则图书馆系列页签全是「无系列」")
+Assert.eq(reconciled.books[1].inserted_at, 1767323045, "加入时间用 lastChapterAddedUtc，图书馆「最近添加」才跟 Kavita 一致")
 Assert.eq(calls[1].headers["x-api-key"], "k")
 Assert.matches(calls[1].url, "^http://kav/api/Series/all%-v2%?")
+Assert.eq(calls[1].timeout, 60, "拉书架带足够长的超时，慢设备不会一拉就 30s 超时")
 Assert.is_true(run("syncBooksAsync", { dirty_only = true }).skipped, "没有删书接口，只推脏行时跳过")
 cfg.libraries = {}
 local none, err = run("syncBooksAsync", nil)
@@ -246,13 +263,25 @@ run("syncBooksAsync", { force = true })
 Assert.len(meta_calls, 0, "补过的不再补")
 local done_file = require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua"
 Assert.is_true(require("luasettings"):open(done_file):readSetting("done")["2"])
+-- 指纹没变（不对账）也要接着补：换源 / 断网中断过的书不能永远停在未知作者。
+meta_calls, remembered["3"] = {}, nil
+books["2"], books["3"] = { intro = "已有" }, {}
+os.remove(done_file)
+Assert.is_true(run("syncBooksAsync", nil).skipped == false, "快照没变也跑完整同步（补简介）")
+Assert.eq(table.concat(meta_calls, ","), "3", "没补过的接着补")
+Assert.eq(remembered["3"].authors, "甲 / 乙")
 os.remove(done_file)
 routes["GET /api/Series/metadata"] = function(opts)
-    meta_calls[#meta_calls + 1] = query(opts, "seriesId")
-    return { code = 500, body = "" }
+    local sid = query(opts, "seriesId")
+    meta_calls[#meta_calls + 1] = sid
+    -- 只有 2 号失败：后面的 3 号不能被一个坏请求拖住。
+    if sid == "2" then return { code = 500, body = "" } end
+    return metadata_route
 end
+meta_calls, remembered["3"], books["2"] = {}, nil, {}
 run("syncBooksAsync", { force = true })
-Assert.eq(table.concat(meta_calls, ","), "2", "失败就停，下次同步再补")
+Assert.eq(table.concat(meta_calls, ","), "2,3", "单本失败跳过，后面继续补")
+Assert.eq(remembered["3"].authors, "甲 / 乙")
 online = false
 meta_calls = {}
 source:backfillMeta({ "2" })
@@ -323,7 +352,32 @@ Stubs.flush()
 Assert.eq(opened, WORK .. "/20:2002/2002.epub")
 Assert.eq(remembered["20:2002"].title, "合集 · 第二卷")
 Assert.eq(remembered["20:2002"].series, "合集")
+Assert.eq(remembered["20:2002"].authors, "丙", "卷行继承容器作者，最近阅读里不再是未知作者")
 Assert.is_nil(remembered["20:2002"].deleted, "卷行不上书架")
+
+-- 容器行的作者是 fetchToc 在这次开书里才写回的，identity.book 是开书那一刻的旧快照：
+-- 选卷要用重读后的容器行，否则新 series 第一次打开写下的卷行又是「未知作者」。
+books["21"] = { stable_id = "21", title = "合集21", authors = "丁" }
+routes["GET /api/Series/21"] = json({ id = 21, name = "合集21", libraryId = 2 })
+local volumes_route = routes["GET /api/Series/volumes"]
+routes["GET /api/Series/volumes"] = function(opts)
+    if query(opts, "seriesId") == "21" then
+        return json({
+            { id = 210, name = "1", chapters = { { id = 2101, titleName = "上", format = 3, pages = 5 } } },
+            { id = 211, name = "2", chapters = { { id = 2102, titleName = "下", format = 3, pages = 5 } } },
+        })
+    end
+    return volumes_route(opts)
+end
+source:openBookAsync(
+    { source_id = "ext.kavita", stable_id = "21", book = { stable_id = "21", title = "合集21" } },
+    nil, function() end)
+Stubs.flush()
+Themed.choose(Themed.last("list"), 1)
+Stubs.flush()
+Assert.eq(remembered["21:2101"].authors, "丁", "卷行取重读后的容器行，不用开书时的旧快照")
+routes["GET /api/Series/volumes"] = volumes_route
+books["21"] = nil
 
 -- 关掉选卷列表 = 取消。
 source:openBookAsync(multi, nil, function(p, e) opened, oerr = p, e end)
@@ -340,15 +394,35 @@ Assert.eq(cover.url, "http://kav/api/Image/series-cover?seriesId=10")
 Assert.eq(cover.headers["x-api-key"], "k")
 Assert.eq(source:coverRequest({ stable_id = "20:2002" }).url, "http://kav/api/Image/chapter-cover?chapterId=2002")
 
--- 拉进度：远端 spine + 锚点 → xpointer；同一 spine 交回本地行；没读过算空。
+-- 拉进度：远端 spine + 锚点 → xpointer；没读过算空。
 local volume = { source_id = "ext.kavita", stable_id = "20:2002" }
 local remote = { pageNum = 3, bookScrollId = "//body/div[1]/p[5]" }
 routes["GET /api/Reader/get-progress"] = function() return json(remote) end
-local pos = run("getProgressAsync", volume)
+local pos, _err, meta = run("getProgressAsync", volume)
 Assert.eq(pos.locator, "/body/DocFragment[4]/body/div/p[5]")
 Assert.eq(pos.fraction, 0.3)
 Assert.is_nil(pos.page, "epub 不给页码：Kavita 的页是 spine，不是渲染页")
-progress["20:2002"] = { locator = "/body/DocFragment[4]/body/p[9]/text().3", fraction = 0.34 }
+Assert.is_true(meta and meta.page_level == true, "页级源必须声明 page_level：core 才不按百分比判")
+Assert.is_nil(_err)
+-- 同一 spine：锚点与本机上次同步的位置不同（网页端在同一条里往后读了几页）→ 用远端坐标，
+-- 不能返回本地行——否则 core 的 synced 基线永远看不到「云端动过」。
+progress["20:2002"] = {
+    locator = "/body/DocFragment[4]/body/p[9]/text().3",
+    fraction = 0.34,
+    synced = { locator = "/body/DocFragment[4]/body/p[3]/text().0" },
+}
+local moved = run("getProgressAsync", volume)
+Assert.eq(moved.locator, "/body/DocFragment[4]/body/div/p[5]", "同 spine 锚点变了就要跟远端")
+Assert.eq(moved.fraction, 0.3)
+-- 同一 spine 且锚点就是上次同步的位置 → 交回本地行（粒度噪声不当冲突，也不跳）
+progress["20:2002"].synced = { locator = "/body/DocFragment[4]/body/div[1]/p[5]" }
+Assert.eq(run("getProgressAsync", volume), progress["20:2002"])
+-- 同一 spine 但远端只有 spine 粒度（没带锚点 / 锚点解不出）→ 交回本地行，不把人拽回节首。
+routes["GET /api/Reader/get-progress"] = function() return json({ pageNum = 3 }) end
+Assert.eq(run("getProgressAsync", volume), progress["20:2002"])
+-- 旧行没有基线（synced 为空）→ 保守交回本地行，不拿不可比的粒度去判
+routes["GET /api/Reader/get-progress"] = function() return json(remote) end
+progress["20:2002"].synced = nil
 Assert.eq(run("getProgressAsync", volume), progress["20:2002"])
 remote = { pageNum = 0 }
 local empty, _e, meta = run("getProgressAsync", volume)
@@ -546,5 +620,201 @@ Assert.eq(run("openBookAsync", { source_id = "ext.kavita", stable_id = "60:6000"
     "下载过的直接开，不再走 kamare")
 Assert.len(viewers, 2)
 os.remove(require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua")
+
+-- 服务端已读回填：网页端 / 别的设备读过的 epub 也要进「最近阅读」并可能标已读。
+-- series 级 pagesRead/pages 对 epub 只是 spine 比例，只补本地没有进度的书，绝不覆盖精确位置。
+local shelf_route = routes["POST /api/Series/all-v2"]
+local read_route = json({
+    { id = 700, name = "读过一半", libraryName = "书籍", format = 3, pages = 200, pagesRead = 50,
+      -- Kavita 同时给本地与 UTC 两个口径：差值 = 服务器时区（这里 UTC+8）。
+      lastChapterAdded = "2026-02-03T11:05:06.1", lastChapterAddedUtc = "2026-02-03T03:05:06.1",
+      latestReadDate = "2026-02-03T04:05:06.123" },
+    { id = 701, name = "读完了", libraryName = "书籍", format = 3, pages = 10, pagesRead = 10,
+      lastChapterAdded = "2026-02-03T11:05:06.1", lastChapterAddedUtc = "2026-02-03T03:05:06.1",
+      latestReadDate = "2026-02-03T04:05:06.123" },
+    { id = 710, name = "多卷书", libraryName = "书籍", format = 3, pages = 300, pagesRead = 90,
+      lastChapterAdded = "2026-02-03T11:05:06.1", lastChapterAddedUtc = "2026-02-03T03:05:06.1",
+      latestReadDate = "2026-02-03T04:05:06.123" },
+})
+-- 多卷 series：卷行上已经有进度 → 不再往容器行回填（否则最近阅读会多一条没阅读位置的重复条目），
+-- 早先回填过的容器占位行也要清掉。
+tocs["710"] = { { chapterId = 7101, title = "上" }, { chapterId = 7102, title = "下" } }
+progress["710:7101"] = { fraction = 0.3, updated_at = os.time() - 3600 }
+progress["710"] = { fraction = 0.5, updated_at = os.time() - 3600 }
+books["710"] = { title = "多卷书", authors = "甲", intro = "简介", category = "书籍" }
+routes["POST /api/Series/all-v2"] = read_route
+written = {}
+local vol_result = run("syncBooksAsync", { force = true })
+Assert.eq(written["700"].fraction, 0.25)
+Assert.is_nil(written["700"].page, "epub 不写页码：Kavita 的页是 spine")
+-- latestReadDate 是服务器本地时间（04:05 CST = 20:05Z 前一天），不是 UTC；
+-- 按 UTC 解析会存成 1770091506（8 小时后的未来），刚读完的书就会被它压在下面。
+Assert.eq(written["700"].updated_at, 1770062706, "latestReadDate 按服务器时区换成真 epoch")
+Assert.eq(written["701"].fraction, 1, "读完的写满比例，进步进「已读」")
+Assert.is_nil(written["710"], "按卷读的书不再往容器行回填，避免重复条目")
+Assert.eq(remembered["710:7101"].authors, "甲", "读过的卷行继承容器作者，不再显示未知作者")
+Assert.eq(remembered["710:7101"].title, "多卷书 · 上")
+Assert.eq(remembered["710:7101"].category, "书籍")
+-- 对齐必须算进同步变更：pulled 全 0 时桌面不发 shelf_changed，首页「当前阅读」不重画，
+-- 卡片会一直停在未知作者（对账 3 本 + 回填 700/701 各 1 + 卷行对齐 1 + 清容器占位 1）。
+Assert.eq(vol_result.pulled, 7, "卷行元数据对齐算一次变更，首页才会重画")
+-- 卷行按真实书库落库后（rememberMany 会写库），重复同步不再是变更，否则每次同步都白刷首页。
+books["710:7101"] = remembered["710:7101"]
+local vol_again = run("syncBooksAsync", { force = true })
+Assert.eq(vol_result.pulled - vol_again.pulled, 1, "已对齐的卷行不再重复计入变更")
+dropped = {}
+run("syncBooksAsync", { force = true })
+Assert.eq(dropped[1], "710", "容器行残留的占位进度被清掉")
+written = {}
+progress["700"] = { fraction = 0.4 }
+run("syncBooksAsync", { force = true })
+Assert.is_nil(written["700"], "本地有进度就不回填，不覆盖精确位置")
+
+-- 旧版已经写进库的未来时间：同步时拉回真实时间（只降不升）。
+written, fixed = {}, {}
+progress["700"] = { fraction = 0.4, updated_at = os.time() + 8 * 3600 }
+run("syncBooksAsync", { force = true })
+Assert.eq(fixed["700"], 1770062706, "库里的未来时间被拉回 Kavita 的真实阅读时间")
+progress["700"] = nil
+routes["POST /api/Series/all-v2"] = shelf_route
+
+-- 阅读期进度心跳：Kavita 的阅读会话时长按相邻两次进度写入的间隔算，只在关书推一次，
+-- Kavita 那边就是一个 StartTime == EndTime 的 0 秒会话。翻页 / 切章 / 唤醒起心跳：位置一变
+-- 就补推（节流合并密集翻页），另有兜底定时拍照顾慢读；离线或上一拍未回就跳过这一拍；
+-- 关书 / 休眠 / 关源即停。
+do
+    local UIManager = require("ui/uimanager")
+    local real_in, real_un, real_time = UIManager.scheduleIn, UIManager.unschedule, os.time
+    local scheduled = {}
+    UIManager.scheduleIn = function(_self, delay, fn) scheduled[#scheduled + 1] = { delay = delay, fn = fn } end
+    UIManager.unschedule = function(_self, fn)
+        for i = #scheduled, 1, -1 do
+            if scheduled[i].fn == fn then table.remove(scheduled, i) end
+        end
+    end
+    local now = 1800000000
+    os.time = function(t) return t and real_time(t) or now end
+    local function advance(seconds) now = now + seconds end
+    local function fire() table.remove(scheduled, 1).fn(); Stubs.flush() end
+
+    sent = nil
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.4, locator = "/body/DocFragment[5]/body/div/p[1]/text().0" },
+    })
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.5, locator = "/body/DocFragment[6]/body/div/p[2]/text().0" },
+    })
+    Assert.len(scheduled, 1, "同一本书只有一个心跳")
+    Assert.eq(scheduled[1].delay, 60, "兜底拍间隔明显小于 Kavita 的 10 分钟会话超时")
+    Assert.is_nil(sent, "起心跳不当场发请求（避开开书拉取）")
+
+    -- 位置一变就补推：Kavita 认的是两次写入之间的跨度，必须真的把新位置写上去。
+    advance(31)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.55, locator = "/body/DocFragment[6]/body/div/p[3]/text().0" },
+    })
+    Stubs.flush()
+    Assert.eq(sent.pageNum, 5, "翻页后推新位置（spine）")
+    Assert.eq(sent.bookScrollId, "//body/div[1]/p[3]")
+    Assert.len(scheduled, 1, "补推不另起定时器")
+
+    -- 距上次不足 MIN_PUSH_GAP 的翻页：合并，交给下一拍，不每页一发。
+    sent = nil
+    advance(10)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.6, locator = "/body/DocFragment[7]/body/p[1]/text().0" },
+    })
+    Assert.is_nil(sent, "翻页密集时合并")
+
+    -- 兜底定时拍到点：推最近一次的位置。
+    advance(120)
+    fire()
+    Assert.eq(sent.pageNum, 6, "定时拍推最近位置")
+    Assert.len(scheduled, 1, "一拍结束后重排下一拍")
+
+    -- 位置没变的兜底拍：跳过，别白推（Kavita 对同位置也会 early-return）。
+    sent = nil
+    advance(200)
+    fire()
+    Assert.is_nil(sent, "位置没变不推")
+    Assert.len(scheduled, 1)
+
+    -- 离线只跳过这一拍，不补报，但心跳继续（重排已经发生）。
+    online, sent = false, nil
+    advance(200)
+    fire()
+    Assert.is_nil(sent, "离线不发")
+    Assert.len(scheduled, 1)
+    online = true
+
+    -- 上一拍回包还没落地：busy 未清，本拍跳过，不重复发也不丢位置。
+    local before = #calls
+    advance(61)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.7, locator = "/body/DocFragment[8]/body/p[1]/text().0" },
+    })
+    Assert.is_true(source._heartbeat.busy, "第一拍在飞")
+    sent = nil
+    advance(61)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.8, locator = "/body/DocFragment[9]/body/p[1]/text().0" },
+    })
+    Stubs.flush()
+    Assert.eq(#calls, before + 1, "上一拍未回，本拍不发")
+    Assert.eq(sent.pageNum, 7, "推的是飞出去那一拍的位置")
+    Assert.is_true(not source._heartbeat.busy, "回包落地后 busy 复位")
+
+    -- 换书：停旧心跳，为新书重排。
+    local other = { source_id = "ext.kavita", stable_id = "20:2001" }
+    source:onEvent("page_changed", { identity = other, position = { fraction = 0.1 } })
+    Assert.len(scheduled, 1, "换书只留一个心跳")
+    Assert.eq(source._heartbeat.identity.stable_id, "20:2001")
+
+    -- 关书 / 休眠停掉，不再有调度。
+    source:onEvent("reading_stopped", { identity = other })
+    Assert.len(scheduled, 0, "关书 / 休眠停心跳")
+    Assert.is_nil(source._heartbeat)
+
+    -- 关源也要停（换源时旧实例可能还挂着）。
+    source:onEvent("chapter_changed", { identity = volume, position = { fraction = 0.2 } })
+    Assert.len(scheduled, 1)
+    source:close()
+    Assert.len(scheduled, 0, "关源停心跳")
+
+    -- 心跳间隔可配置：调大后按新间隔节流，兜底拍跟着放大；0 = 关闭阅读期心跳。
+    cfg.heartbeat_interval = 120
+    source:onEvent("page_changed", { identity = volume, position = { fraction = 0.9 } })
+    Assert.len(scheduled, 1, "改间隔后起心跳")
+    Assert.eq(scheduled[1].delay, 120, "兜底拍跟到新间隔，不白醒")
+    sent = nil
+    advance(31)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.91, locator = "/body/DocFragment[6]/body/p[9]/text().0" },
+    })
+    Stubs.flush()
+    Assert.is_nil(sent, "120s 间隔内不推")
+    advance(100)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.92, locator = "/body/DocFragment[6]/body/p[10]/text().0" },
+    })
+    Stubs.flush()
+    Assert.is_true(sent ~= nil, "超过 120s 后补推")
+
+    cfg.heartbeat_interval = 0
+    source:onEvent("page_changed", { identity = volume, position = { fraction = 0.93 } })
+    Assert.len(scheduled, 0, "0 = 关闭心跳，不再调度")
+    Assert.is_nil(source._heartbeat)
+    cfg.heartbeat_interval = nil
+
+    UIManager.scheduleIn, UIManager.unschedule, os.time = real_in, real_un, real_time
+end
 
 os.execute("rm -rf '" .. WORK .. "'")

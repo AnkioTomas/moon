@@ -10,9 +10,11 @@
 
 ```text
 关书/suspend → ReaderProgress.save → ProgressDB.upsert(sync_status=0) → 源 syncProgressAsync(dirty_only)
-开书        → ReaderProgress.pull → 源 getProgressAsync（不预判在线，失败只记日志）→ 对比 → 冲突 ConfirmBox
+开书        → ReaderProgress.applyLocalPending（本地记录回落位置）→ ReaderProgress.pull → 源 getProgressAsync（不预判在线，失败只记日志）→ 对比 → 冲突 ConfirmBox
 关书/脏     → 只推；禁止立刻回拉（远端收敛延迟会盖新值）
 ```
+
+`applyLocalPending` 按章书用同章 locator 恢复章内位置；整本书没有 `.sdr`（清缓存后重下、换设备）时文档会停在开头，用本地记录回落，避免关书把开头位置写脏上推。
 
 `updated_at` 用进程内 `Progress.nextRevision()`（`max(os.time(), last+1)`），避免同一秒多次写入撞号。`markSynced` 带乐观锁：推送期间若本地又更新，不会被误标已同步。
 

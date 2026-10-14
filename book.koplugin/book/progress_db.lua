@@ -245,8 +245,9 @@ function ProgressDB.unsynced(source_id)
     ))
 end
 
---- 当前书库中有阅读进度的书，按进度更新时间倒序。
---- books 只负责成员资格；最近阅读的准入与排序完全由 pending_progress 决定。
+--- 有阅读进度的书，按进度更新时间倒序。
+--- books 只负责身份有效性：在架书，以及 Kavita 卷行这种「非书架成员但仍是有效身份」的行
+--- （读书进度就记在卷行上）；墓碑不算。准入与排序完全由 pending_progress 决定。
 --- source_id 可为单源字符串，或已启用源 id 列表（混合模式）。
 ---@param source_id string|string[]
 ---@param limit number|nil
@@ -260,7 +261,7 @@ function ProgressDB.recent(source_id, limit)
             AND EXISTS (
               SELECT 1 FROM books b
                WHERE b.source_id=p.source_id AND b.stable_id=p.stable_id
-                 AND b.deleted=0
+                 AND ]] .. require("book.books_db").readableClause("b") .. [[
             )
           ORDER BY p.updated_at DESC, p.stable_id ASC LIMIT ?;]],
         unpack(args)
@@ -281,6 +282,31 @@ function ProgressDB.markSynced(source_id, stable_id, updated_at, pos)
         stable_id,
         updated_at
     ) ~= nil and (tonumber(DB.rowexec("SELECT changes();")) or 0) > 0
+end
+
+--- 远端时间口径纠正：源意识到自已把远端时间解析错了（例如把服务器本地时间当成了 UTC）时，
+--- 把已经写进库的「未来时间」显式拉回。
+--- 其它写入口的 updated_at 都用 MAX 保修订号单调（markSynced 靠它做乐观锁），
+--- 所以这里只能显式覆盖，并且**只降不升、只动干净行**（脏行的时间归本地 revision）。
+---@param source_id string
+---@param stable_id string
+---@param updated_at integer 纠正后的时间（小于库里存的才生效）
+---@return boolean
+function ProgressDB.fixRemoteTime(source_id, stable_id, updated_at)
+    return DB.exec([[UPDATE pending_progress SET updated_at=?
+        WHERE source_id=? AND stable_id=? AND sync_status=1 AND updated_at>?;]],
+        updated_at, source_id, stable_id, updated_at) ~= nil
+end
+
+--- 丢掉源的远端占位进度：源发现这条进度不该存在时用（例如多卷 series 的容器行占位，
+--- 真实进度在各自的卷行上）。只删干净且无精确定位的行——脏行是本地真实阅读，留给正常推送。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function ProgressDB.dropRemote(source_id, stable_id)
+    return DB.exec([[DELETE FROM pending_progress
+        WHERE source_id=? AND stable_id=? AND sync_status=1 AND locator IS NULL;]],
+        source_id, stable_id) ~= nil
 end
 
 --- 手动标已读（BookDB.setRead）：补一条 100% 的待上传进度。

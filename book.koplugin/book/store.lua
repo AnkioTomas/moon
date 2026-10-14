@@ -58,16 +58,37 @@ end
 
 local trash_seq = 0
 
+--- 工作目录里的 KOReader 边车目录名（`book.sdr` / `1.sdr`…）：清缓存保留，删书一起清。
+---@param dir string
+---@param lfs table
+---@return string[]
+local function sidecarDirs(dir, lfs)
+    local out = {}
+    if type(lfs.dir) ~= "function" then return out end
+    local iter, state = lfs.dir(dir)
+    if type(iter) ~= "function" then return out end
+    for name in iter, state do
+        if name ~= "." and name ~= ".." and name:match("%.sdr$") then
+            out[#out + 1] = name
+        end
+    end
+    return out
+end
+
 --- 删单书工作目录（整本/章节/图片）与封面文件，并撤掉目录下的章节登记。
+--- keep_sidecar 为真（清缓存）时先把 `.sdr` 边车搬回重建成的工作目录：正文重下路径不变，
+--- 阅读位置、书签、标注原样可用，符合「清理缓存只删可重新生成的缓存」。
 ---@param source_id string
 ---@param stable_id string
+---@param keep_sidecar boolean|nil
 ---@return boolean ok 章节登记是否撤掉
 ---@return string|nil leftover purge 失败时为 "partial"
-local function purgeBookFiles(source_id, stable_id)
+local function purgeBookFiles(source_id, stable_id, keep_sidecar)
     local dir = Paths.bookWorkDir(stable_id, source_id)
     local leftover
     local lfs = require("libs/libkoreader-lfs")
     if lfs.attributes(dir, "mode") == "directory" then
+        local keep = keep_sidecar and sidecarDirs(dir, lfs) or nil
         -- 漫画工作目录动辄上千张图，同步删要卡好几秒：同盘改名移走即刻生效，再分 tick 慢慢删。
         -- 改名失败才退回同步删；中途关机留下的 .trash 由「清空缓存」一并清掉。
         trash_seq = trash_seq + 1
@@ -75,6 +96,11 @@ local function purgeBookFiles(source_id, stable_id)
         local moved = trash .. "/" .. os.time() .. "-" .. trash_seq
         lfs.mkdir(trash)
         if os.rename(dir, moved) then
+            if keep and #keep > 0 and lfs.mkdir(dir) then
+                for _idx, name in ipairs(keep) do
+                    os.rename(moved .. "/" .. name, dir .. "/" .. name)
+                end
+            end
             require("book.cache").purgeAsync(moved)
         elseif not require("ffi/util").purgeDir(dir) then
             logger.warn("book cache purge failed", dir)
@@ -105,7 +131,7 @@ end
 ---@return boolean ok 路径登记是否清干净
 ---@return string|nil leftover purge 失败时为 "partial"
 function Store.clearCache(source_id, stable_id)
-    local ok, leftover = purgeBookFiles(source_id, stable_id)
+    local ok, leftover = purgeBookFiles(source_id, stable_id, true)
     local row = BookDB.get(source_id, stable_id)
     if not row then return ok, leftover end
     local cached_cover = require("ui.themes.widgets.image.download").cached(row.cover)
