@@ -80,19 +80,40 @@ function Client.decode(raw, err)
     return wire
 end
 
+--- GET JSON。令牌失效（HTTP 401，如在别处登录后被挤掉）时用本地保存的账号密码重登一次再重试。
 ---@param path string
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:_getJson(path, cb)
-    return require("http.request").get(self.base_url .. path, {
-        accept = "application/json",
-        headers = Client.headers(self.token),
-        allow_redirects = true,
-        timeout = 60,
-        connect_timeout = 30,
-    }, function(raw, err)
-        cb(Client.decode(raw, err))
-    end)
+    local expired = _("拷贝漫画登录已失效，请在设置里重新登录")
+    local active
+    local function send(may_relogin)
+        active = require("http.request").get(self.base_url .. path, {
+            accept = "application/json",
+            headers = Client.headers(self.token),
+            allow_redirects = true,
+            timeout = 60,
+            connect_timeout = 30,
+        }, function(raw, err, res)
+            if not (res and res.code == 401) then
+                cb(Client.decode(raw, err))
+                return
+            end
+            local Auth = require("source.copymanga.auth")
+            local username, password = Auth.credentials()
+            if not (may_relogin and username) then
+                cb(nil, expired)
+                return
+            end
+            active = Auth.loginAsync(username, password, function(ok)
+                if not ok then cb(nil, expired); return end
+                self.token = require("utils.settings").getSource("copymanga").token
+                send(false)
+            end)
+        end)
+    end
+    send(true)
+    return { cancel = function() if active then active.cancel() end end }
 end
 
 ---@param stable_id string
