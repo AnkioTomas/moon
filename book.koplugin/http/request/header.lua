@@ -46,4 +46,28 @@ function Header.forDownload(extra)
     })
 end
 
+--- 拆开被合并成一行的多条 Set-Cookie。
+--- 只在「逗号 + 空白 + name=」处切，expires=Wed, 21 Oct … 里的逗号后面不是 name=，不会被切开。
+---@param line string
+---@return string[]
+function Header.splitSetCookie(line)
+    local out = {}
+    if type(line) ~= "string" or line == "" then return out end
+    local start, pos = 1, 1
+    while true do
+        local comma = line:find(",", pos, true)
+        if not comma then break end
+        local rest = line:sub(comma + 1)
+        if rest:match("^%s*[^%s;,=]+=") then
+            local part = line:sub(start, comma - 1):match("^%s*(.-)%s*$")
+            if part ~= "" then out[#out + 1] = part end
+            start = comma + 1
+        end
+        pos = comma + 1
+    end
+    local last = line:sub(start):match("^%s*(.-)%s*$")
+    if last ~= "" then out[#out + 1] = last end
+    return out
+end
+
 return Header
