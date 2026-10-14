@@ -22,11 +22,6 @@ function Setting.rowStatus()
     if path ~= "" then
         return path, true
     end
-    -- 未配置时扫盘默认用 KOReader 主目录，状态里照实显示。
-    local root = require("source.local.common").rootPath(cfg)
-    if root ~= "" then
-        return root .. " " .. _("（默认）"), true
-    end
     return _("未配置"), false
 end
 
@@ -35,13 +30,7 @@ function Setting.rows(plugin)
     local Row = require("ui.themes.widgets.row")
     local Text = require("utils.text")
     local function localPathRow(iw)
-        local cfg = require("utils.settings").getSource(SOURCE_ID)
-        local path = cfg.path or ""
-        if path == "" then
-            -- 未设置时扫盘用 KOReader 主目录，标明是默认值。
-            local root = require("source.local.common").rootPath(cfg)
-            if root ~= "" then path = root .. " " .. _("（默认）") end
-        end
+        local path = require("utils.settings").getSource(SOURCE_ID).path or ""
         return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "folder",
             title = _("本地书库目录"), status = path ~= "" and path or _("未设置"), status_on = path ~= "",
             callback = Setting.open })
@@ -100,9 +89,8 @@ function Setting.open()
     local cfg = MoonSettings.getSource(SOURCE_ID)
     local start_path = cfg.path
     if type(start_path) ~= "string" or start_path == "" then
-        -- 从主目录本身开始（Kindle 即 /mnt/us/documents），而不是它的上一级。
         local home = G_reader_settings:readSetting("home_dir")
-        start_path = type(home) == "string" and home:gsub("/+$", "") or nil
+        start_path = type(home) == "string" and home or nil
         if not start_path or start_path == "" then
             local ffiUtil = require("ffi/util")
             local data = require("datastorage"):getFullDataDir()

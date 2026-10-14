@@ -13,8 +13,6 @@ local _ = require("gettext")
 local defer = require("source.base").defer
 
 local SOURCE_ID = "local"
---- 扫盘最多下钻的目录层数（根为 1）：防止误选 / 之类的大目录时无止境遍历。
-local MAX_DEPTH = 8
 
 local BOOK_EXT = {
     pdf = true,
@@ -34,78 +32,30 @@ local BOOK_EXT = {
     pdb = true,
     chm = true,
     md = true,
-    -- KOReader（crengine）也能开的：Kindle 老格式、网页、Office、压缩 fb2/html。
     prc = true,
     htm = true,
     xhtml = true,
     doc = true,
     odt = true,
-    epub3 = true,
     ["fb2.zip"] = true,
-    ["htm.zip"] = true,
-    ["html.zip"] = true,
 }
-
---- DocumentRegistry 登记了、但不是书的后缀：图片（PicDocument / MuPDF）、表格演示、日志与通用容器。
-local NOT_BOOK_EXT = {
-    gif = true, jpg = true, jpeg = true, png = true, webp = true, svg = true, bmp = true,
-    tif = true, tiff = true, hdp = true, wdp = true, jxr = true, j2k = true, jp2 = true,
-    pam = true, pbm = true, pgm = true, pnm = true, ppm = true,
-    xml = true, log = true, ["log.zip"] = true, tar = true, zip = true, cfb = true,
-    xlsx = true, pptx = true,
-}
-
---- 文件名后缀（小写）；fb2.zip 这类复合后缀整体返回，与 DocumentRegistry 的寻址一致。
----@param name string
----@return string|nil
-local function bookSuffix(name)
-    local lower = string.lower(name)
-    local compound = lower:match("%.([%w]+%.zip)$")
-    if compound then return compound end
-    return lower:match("%.([^.]+)$")
-end
-
---- KOReader 已登记的文档后缀表；拿不到（测试 / 未初始化）返回 nil，退回静态白名单。
----@return table<string, any>|nil
-local function registeredSuffixes()
-    local ok, Registry = pcall(require, "document/documentregistry")
-    if ok and type(Registry) == "table" and type(Registry.filetype_provider) == "table"
-        and next(Registry.filetype_provider) ~= nil then
-        return Registry.filetype_provider
-    end
-    return nil
-end
 
 --- 判断文件是否为可打开的书籍。
 ---@param name string
 ---@return boolean
 local function isBookFile(name)
-    local ext = bookSuffix(name)
-    if not ext or NOT_BOOK_EXT[ext] then
+    local ext = name:lower():match("%.(fb2%.zip)$") or name:match("%.([^.]+)$")
+    if not ext then
         return false
     end
-    if BOOK_EXT[ext] then
-        return true
-    end
-    -- 用 KOReader 自己的格式登记表判定（只按后缀查表，不走 hasProvider 的 sidecar 磁盘读取）。
-    local registered = registeredSuffixes()
-    return registered ~= nil and registered[ext] ~= nil
+    return BOOK_EXT[string.lower(ext)] == true
 end
 
 --- 书库根目录：去尾部空白与斜杠。
 ---@param cfg table|nil
 ---@return string
 local function rootPath(cfg)
-    local path = Text.rtrimSlashes(Text.rtrim(cfg and cfg.path))
-    -- 没配置书库目录（且不是 WebDAV）时默认用 KOReader 的主目录（Kindle 的 /mnt/us/documents 等）。
-    if path == "" and not (cfg and type(cfg.webdav_url) == "string" and cfg.webdav_url ~= "") then
-        local home = G_reader_settings and G_reader_settings:readSetting("home_dir")
-        home = type(home) == "string" and Text.rtrimSlashes(home) or ""
-        if home ~= "" and lfs.attributes(home, "mode") == "directory" then
-            path = home
-        end
-    end
-    return path
+    return Text.rtrimSlashes(Text.rtrim(cfg and cfg.path))
 end
 
 --- WebDAV 模式下的本地书库目录（书按需下载到这里）；没配置或不可用时为 nil。
@@ -344,22 +294,12 @@ end
 local function scanFiles(root)
     local files = {}
     --- 递归遍历一层目录，把书籍文件连同继承来的分类/系列收进 files。
-    --- 跳过 . 前缀项与 .sdr 边车目录；分类 / 系列只取前两级目录名，更深的子目录照样下钻（至多 MAX_DEPTH 层）。
-    --- 按 realpath 去重，软链接成环或指回已扫目录时不重复进入。
-    local visited = {}
-    local ok_util, ffiUtil = pcall(require, "ffi/util")
-    local function realKey(path)
-        local real = ok_util and type(ffiUtil.realpath) == "function" and ffiUtil.realpath(path)
-        return type(real) == "string" and real or path
-    end
+    --- 跳过 . 前缀项与 .sdr 边车目录；分类 / 系列取前两级，更深沿用，至多下钻 8 层。
     ---@param dir string 当前目录绝对路径
     ---@param category string|nil 继承的分类（一级子目录名）
     ---@param series string|nil 继承的系列（二级子目录名）
     ---@param depth number 当前层级，根为 1
     local function walk(dir, category, series, depth)
-        local key = realKey(dir)
-        if visited[key] then return end
-        visited[key] = true
         for name in lfs.dir(dir) do
             -- 跳过 . .. 及一切 . 前缀项（.moon 等隐藏目录/文件）
             if name:sub(1, 1) ~= "." then
@@ -368,13 +308,13 @@ local function scanFiles(root)
                 if attr then
                     if attr.mode == "directory" then
                         -- KOReader 的 .sdr 边车目录不是书籍分类，不下钻
-                        if name:sub(-4) ~= ".sdr" and depth < MAX_DEPTH then
-                            -- 根下的一级目录名是分类，分类下的二级目录名是系列，再深沿用
+                        if name:sub(-4) ~= ".sdr" then
+                            -- 下钻：根下的一级目录名是分类，分类下的二级目录名是系列
                             if depth == 1 then
                                 walk(path, name, nil, depth + 1)
                             elseif depth == 2 then
                                 walk(path, category, name, depth + 1)
-                            else
+                            elseif depth < 8 then
                                 walk(path, category, series, depth + 1)
                             end
                         end
