@@ -707,7 +707,7 @@ do
         position = { fraction = 0.5, locator = "/body/DocFragment[6]/body/div/p[2]/text().0" },
     })
     Assert.len(scheduled, 1, "同一本书只有一个心跳")
-    Assert.eq(scheduled[1].delay, 60, "兜底拍间隔明显小于 Kavita 的 10 分钟会话超时")
+    Assert.eq(scheduled[1].delay, 30, "拍间隔就是设置的心跳间隔（默认 30 秒）")
     Assert.is_nil(sent, "起心跳不当场发请求（避开开书拉取）")
 
     -- 位置一变就补推：Kavita 认的是两次写入之间的跨度，必须真的把新位置写上去。

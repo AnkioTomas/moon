@@ -380,8 +380,6 @@ end
 --- 一个阅读时段在 Kavita 侧才有多次写入、时长和字数才算得准；补推要跟在真实位置变化上
 --- （见 heartbeat_interval）：Kavita 对同位置的写入直接 early-return，纯定时的整拍等于没推。
 --- 会话开始时间 = 第一次有效写入，所以 heartbeat_interval 也是会话起点的最大滞后。
---- 兜底拍间隔下限（秒）：慢读没有翻页事件时也定期补推被节流掉的位置变化。
-local HEARTBEAT_INTERVAL = 60
 --- 两次补推之间的最小间隔默认值（秒），也是设置项 heartbeat_interval 的默认值。
 --- 把密集翻页合并成最多一拍一次，别每页一发。0 = 关闭阅读期心跳。
 local DEFAULT_HEARTBEAT_INTERVAL = 30
@@ -448,7 +446,7 @@ end
 ---@param hb KavitaHeartbeat
 local function beat(self, hb)
     if self._heartbeat ~= hb then return end
-    require("ui/uimanager"):scheduleIn(math.max(HEARTBEAT_INTERVAL, hb.interval), hb.tick)
+    require("ui/uimanager"):scheduleIn(hb.interval, hb.tick)
     pushProgress(self, hb)
 end
 
@@ -477,7 +475,7 @@ local function touchHeartbeat(self, identity, position)
             tick = require("ui.guard").wrap("kavita heartbeat", function() beat(self, hb) end),
         }
         self._heartbeat = hb
-        require("ui/uimanager"):scheduleIn(math.max(HEARTBEAT_INTERVAL, interval), hb.tick)
+        require("ui/uimanager"):scheduleIn(interval, hb.tick)
     end
     hb.identity = identity
     hb.position = position or hb.position
