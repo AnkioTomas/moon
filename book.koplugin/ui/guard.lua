@@ -45,6 +45,14 @@ local function show(label, trace)
                     Toast:new{ text = _("已复制"), timeout = 2 }:show()
                 end,
             },
+            {
+                -- 出错后不想继续用：关掉错误页和所有月读窗口（与退出兜底同一路径），回到 KOReader 文件管理器。
+                text = _("关闭月读"),
+                callback = function()
+                    dialog:close()
+                    require("ui.exit_windows").close()
+                end,
+            },
         },
     }
     dialog:show()
