@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "variant": "tessdata_fast",
+  "source": "https://github.com/tesseract-ocr/tessdata_fast",
+  "license": "Apache-2.0",
+  "models": [
+    {
+      "id": "chi_sim",
+      "name": "简体中文",
+      "file": "chi_sim.traineddata",
+      "size": 2469156,
+      "sha256": "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730"
+    },
+    {
+      "id": "chi_tra",
+      "name": "繁体中文",
+      "file": "chi_tra.traineddata",
+      "size": 2366642,
+      "sha256": "529c5b5797d64b126065cd55f2bb4c7fd7b15790798091b1ff259941a829330b"
+    },
+    {
+      "id": "eng",
+      "name": "英语",
+      "file": "eng.traineddata",
+      "size": 4113088,
+      "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+    },
+    {
+      "id": "jpn",
+      "name": "日语",
+      "file": "jpn.traineddata",
+      "size": 2471260,
+      "sha256": "1f5de9236d2e85f5fdf4b3c500f2d4926f8d9449f28f5394472d9e8d83b91b4d"
+    },
+    {
+      "id": "chi_sim_vert",
+      "name": "简体中文（竖排）",
+      "file": "chi_sim_vert.traineddata",
+      "size": 1927902,
+      "sha256": "20590de84725bab69cde93bd6e8ed360a13cc5421a7e7364ddeb93e9af53d6da"
+    },
+    {
+      "id": "chi_tra_vert",
+      "name": "繁体中文（竖排）",
+      "file": "chi_tra_vert.traineddata",
+      "size": 1824756,
+      "sha256": "1df02a4b210e5c217b783819538b63e9dfe6904e2b5e53b62664f1b9f7a989d0"
+    }
+  ]
+}
