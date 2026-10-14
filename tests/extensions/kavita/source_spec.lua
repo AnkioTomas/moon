@@ -353,6 +353,30 @@ Assert.eq(remembered["20:2002"].series, "合集")
 Assert.eq(remembered["20:2002"].authors, "丙", "卷行继承容器作者，最近阅读里不再是未知作者")
 Assert.is_nil(remembered["20:2002"].deleted, "卷行不上书架")
 
+-- 容器行的作者是 fetchToc 在这次开书里才写回的，identity.book 是开书那一刻的旧快照：
+-- 选卷要用重读后的容器行，否则新 series 第一次打开写下的卷行又是「未知作者」。
+books["21"] = { stable_id = "21", title = "合集21", authors = "丁" }
+routes["GET /api/Series/21"] = json({ id = 21, name = "合集21", libraryId = 2 })
+local volumes_route = routes["GET /api/Series/volumes"]
+routes["GET /api/Series/volumes"] = function(opts)
+    if query(opts, "seriesId") == "21" then
+        return json({
+            { id = 210, name = "1", chapters = { { id = 2101, titleName = "上", format = 3, pages = 5 } } },
+            { id = 211, name = "2", chapters = { { id = 2102, titleName = "下", format = 3, pages = 5 } } },
+        })
+    end
+    return volumes_route(opts)
+end
+source:openBookAsync(
+    { source_id = "ext.kavita", stable_id = "21", book = { stable_id = "21", title = "合集21" } },
+    nil, function() end)
+Stubs.flush()
+Themed.choose(Themed.last("list"), 1)
+Stubs.flush()
+Assert.eq(remembered["21:2101"].authors, "丁", "卷行取重读后的容器行，不用开书时的旧快照")
+routes["GET /api/Series/volumes"] = volumes_route
+books["21"] = nil
+
 -- 关掉选卷列表 = 取消。
 source:openBookAsync(multi, nil, function(p, e) opened, oerr = p, e end)
 Stubs.flush()
@@ -618,7 +642,7 @@ progress["710"] = { fraction = 0.5, updated_at = os.time() - 3600 }
 books["710"] = { title = "多卷书", authors = "甲", intro = "简介", category = "书籍" }
 routes["POST /api/Series/all-v2"] = read_route
 written = {}
-run("syncBooksAsync", { force = true })
+local vol_result = run("syncBooksAsync", { force = true })
 Assert.eq(written["700"].fraction, 0.25)
 Assert.is_nil(written["700"].page, "epub 不写页码：Kavita 的页是 spine")
 -- latestReadDate 是服务器本地时间（04:05 CST = 20:05Z 前一天），不是 UTC；
@@ -629,6 +653,13 @@ Assert.is_nil(written["710"], "按卷读的书不再往容器行回填，避免�
 Assert.eq(remembered["710:7101"].authors, "甲", "读过的卷行继承容器作者，不再显示未知作者")
 Assert.eq(remembered["710:7101"].title, "多卷书 · 上")
 Assert.eq(remembered["710:7101"].category, "书籍")
+-- 对齐必须算进同步变更：pulled 全 0 时桌面不发 shelf_changed，首页「当前阅读」不重画，
+-- 卡片会一直停在未知作者（对账 3 本 + 回填 700/701 各 1 + 卷行对齐 1 + 清容器占位 1）。
+Assert.eq(vol_result.pulled, 7, "卷行元数据对齐算一次变更，首页才会重画")
+-- 卷行按真实书库落库后（rememberMany 会写库），重复同步不再是变更，否则每次同步都白刷首页。
+books["710:7101"] = remembered["710:7101"]
+local vol_again = run("syncBooksAsync", { force = true })
+Assert.eq(vol_result.pulled - vol_again.pulled, 1, "已对齐的卷行不再重复计入变更")
 dropped = {}
 run("syncBooksAsync", { force = true })
 Assert.eq(dropped[1], "710", "容器行残留的占位进度被清掉")
