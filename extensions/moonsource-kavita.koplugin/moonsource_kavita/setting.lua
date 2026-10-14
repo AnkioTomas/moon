@@ -111,6 +111,82 @@ local function pickLibraries()
     end)
 end
 
+--- 请求超时（秒）：全量书架（all-v2）在慢设备 / 慢服务器上一次要几十秒，
+--- 硬上限会让整轮同步中断、书架永远加载不出来。留个设置行按设备调大。
+---@return fun(iw: number): table
+local function timeoutRow()
+    return function(iw)
+        local client = require("moonsource_kavita.client")
+        local value = tonumber(config().timeout) or client.DEFAULT_TIMEOUT
+        return require("ui.themes.widgets.row").widget({
+            width = iw, chevron = true,
+            kind = "nav", icon = "hourglass_top", title = _("请求超时"),
+            status = T(_("%1 秒"), value),
+            status_on = value ~= client.DEFAULT_TIMEOUT,
+            callback = function()
+                local cfg = config()
+                require("ui.themes.widgets.input"):new{
+                    title = _("请求超时"),
+                    fields = { {
+                        text = tostring(tonumber(cfg.timeout) or client.DEFAULT_TIMEOUT),
+                        hint = _("秒，慢设备 / 慢服务器调大"),
+                        input_type = "number",
+                    } },
+                    ok_text = _("保存"),
+                    callback = function(input)
+                        local seconds = math.floor(tonumber(input) or 0)
+                        -- 空 / 非正数回默认值；正数交给 Client 收敛到合法区间（5–600）。
+                        cfg.timeout = seconds > 0 and seconds or nil
+                        save(cfg)
+                    end,
+                }:show()
+            end,
+        })
+    end
+end
+
+--- 进度心跳间隔（秒）：Kavita 的阅读会话时长 = 相邻两次进度写入的间隔，只在关书推一次会是
+--- 0 秒会话；阅读期按这个间隔补推当前位置。0 = 关闭（关书 / 切章 / 休眠的推送不受影响）。
+---@return fun(iw: number): table
+local function heartbeatRow()
+    return function(iw)
+        local Source = require("moonsource_kavita.source")
+        local default = Source.DEFAULT_HEARTBEAT_INTERVAL
+        local value = tonumber(config().heartbeat_interval) or default
+        return require("ui.themes.widgets.row").widget({
+            width = iw, chevron = true,
+            kind = "nav", icon = "favorite", title = _("进度心跳间隔"),
+            -- 行副标题是单行截断的（TextWidget 带 max_width 不换行），这行还有状态与箭头，
+            -- 右边留给文字的位置很窄：副标题必须短，长解释放不进来。
+            subtitle = _("阅读时补推进度，0 关闭"),
+            status = value > 0 and T(_("%1 秒"), value) or _("已关闭"),
+            status_on = value > 0,
+            callback = function()
+                local cfg = config()
+                require("ui.themes.widgets.input"):new{
+                    title = _("进度心跳间隔"),
+                    fields = { {
+                        text = tostring(tonumber(cfg.heartbeat_interval) or default),
+                        hint = _("秒，0 = 关闭；Kavita 按写入间隔算阅读时长"),
+                        input_type = "number",
+                    } },
+                    ok_text = _("保存"),
+                    callback = function(input)
+                        local seconds = tonumber(input)
+                        -- 空 / 非数字回默认值；0（或负数）交给源当成关闭。
+                        if not seconds or seconds < 0 then
+                            cfg.heartbeat_interval = nil
+                        else
+                            cfg.heartbeat_interval = math.floor(seconds)
+                        end
+                        save(cfg)
+                    end,
+                }:show()
+            end,
+        })
+    end
+end
+
 local function testConnection()
     withServer(function(client, done)
         client:request("GET", "/api/Plugin/version", { apiKey = client.api_key }, nil, function(version, err)
@@ -165,6 +241,8 @@ function Setting.rows()
         field("base_url", _("服务器地址"), "https://kavita.example.com", false, normalizeUrl, "dns"),
         field("api_key", _("API Key"), _("Kavita 用户设置 → API Key"), true, Text.stripWhitespace, "key"),
         libraryRow(),
+        heartbeatRow(),
+        timeoutRow(),
         testRow(),
     }
 end

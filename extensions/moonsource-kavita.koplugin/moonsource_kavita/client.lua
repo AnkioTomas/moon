@@ -11,18 +11,33 @@ local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+--- 单次请求默认超时（秒）。全量书架（`all-v2`）在慢设备 / 慢服务器上 30s 拉不完，
+--- 一个请求超时就会中断整轮同步、书架永远加载不出来，所以默认给足，并允许在设置里调大。
+local DEFAULT_TIMEOUT = 60
+--- 设置里的合法区间：太小等于次次超时，太大等于卡住没法恢复。
+local MIN_TIMEOUT = 5
+local MAX_TIMEOUT = 600
+
 ---@class KavitaClient
 ---@field base_url string
 ---@field api_key string
+---@field timeout integer 单次请求超时秒（含下载）
 local Client = {}
 Client.__index = Client
+Client.DEFAULT_TIMEOUT = DEFAULT_TIMEOUT
+Client.MIN_TIMEOUT = MIN_TIMEOUT
+Client.MAX_TIMEOUT = MAX_TIMEOUT
 
----@param cfg { base_url: string|nil, api_key: string|nil }
+---@param cfg { base_url: string|nil, api_key: string|nil, timeout: integer|string|nil }
 ---@return KavitaClient
 function Client.new(cfg)
+    local timeout = math.floor(tonumber(cfg.timeout) or DEFAULT_TIMEOUT)
+    if timeout < MIN_TIMEOUT then timeout = MIN_TIMEOUT end
+    if timeout > MAX_TIMEOUT then timeout = MAX_TIMEOUT end
     return setmetatable({
         base_url = Text.rtrimSlashes(cfg.base_url),
         api_key = Text.stripWhitespace(cfg.api_key),
+        timeout = timeout,
     }, Client)
 end
 
@@ -62,7 +77,7 @@ function Client:request(method, path, query, body, cb)
         payload = JSON.encode(body)
     end
     return Request.request({
-        url = self:url(path, query), method = method, headers = headers, body = payload, timeout = 30,
+        url = self:url(path, query), method = method, headers = headers, body = payload, timeout = self.timeout,
     }, function(res, err)
         if err or not res then
             cb(nil, err and tostring(err) or _("网络请求失败"))
@@ -115,7 +130,7 @@ end
 function Client:download(chapter_id, dest, on_progress, cb)
     return Request.download({
         url = self:url("/api/Download/chapter", { chapterId = chapter_id }),
-        headers = self:headers(), timeout = 30, on_progress = on_progress,
+        headers = self:headers(), timeout = self.timeout, on_progress = on_progress,
     }, dest, function(ok, err, res)
         if ok and not Request.ok(res and res.code) then
             os.remove(dest)

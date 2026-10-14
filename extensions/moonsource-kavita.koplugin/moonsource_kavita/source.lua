@@ -13,7 +13,7 @@ Kavita 书源（整本模式）。
 交回本地位置：Kavita 的精度只到 spine，不能拿它把本地章内位置判成冲突、把人拽回节首。
 远端能给得出页内锚点时必须用远端：网页端在同一条里往后读几页就是这种情况，
 先返回本地会让 core 的 synced 基线永远判不出「云端动过」。
-关书 / 切章 / 休眠各推一次，另在阅读期做「进度心跳」（见 HEARTBEAT_INTERVAL / MIN_PUSH_GAP）：
+关书 / 切章 / 休眠各推一次，另在阅读期做「进度心跳」（间隔见设置项 heartbeat_interval，0 可关）：
 Kavita 的阅读会话按相邻两次进度写入的间隔计时，只在关书推一次时长恒为 0 秒；而且它只在
 pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「位置一变就补推」而非纯定时。
 书架：快照指纹不变就跳过对账；对账后后台逐本补简介 / 作者；漫画 series 的已读页回填成本地进度。
@@ -378,18 +378,30 @@ end
 --- 月读只在关书 / 切章 / 休眠各推一次，单次写入在 Kavita 侧就是 StartTime == EndTime 的
 --- 「0 秒会话」（字数也会被 Kavita 的锚点 diff 误算成到页尾的一大段）。阅读期补推当前位置，
 --- 一个阅读时段在 Kavita 侧才有多次写入、时长和字数才算得准；补推要跟在真实位置变化上
---- （见 MIN_PUSH_GAP）：Kavita 对同位置的写入直接 early-return，纯定时的整拍等于没推。
---- 会话开始时间 = 第一次有效写入，所以 MIN_PUSH_GAP 也是会话起点的最大滞后。
+--- （见 heartbeat_interval）：Kavita 对同位置的写入直接 early-return，纯定时的整拍等于没推。
+--- 会话开始时间 = 第一次有效写入，所以 heartbeat_interval 也是会话起点的最大滞后。
+--- 兜底拍间隔下限（秒）：慢读没有翻页事件时也定期补推被节流掉的位置变化。
 local HEARTBEAT_INTERVAL = 60
---- 两次补推之间的最小间隔（秒）。Kavita 只在 pageNum / bookScrollId 真的变了才建会话、续会话，
---- 所以真正管用的是「位置一变就推」；这个间隔把密集翻页合并成最多一拍一次，别每页一发。
-local MIN_PUSH_GAP = 30
+--- 两次补推之间的最小间隔默认值（秒），也是设置项 heartbeat_interval 的默认值。
+--- 把密集翻页合并成最多一拍一次，别每页一发。0 = 关闭阅读期心跳。
+local DEFAULT_HEARTBEAT_INTERVAL = 30
+
+--- 阅读期进度心跳的补推间隔（秒）。设置项 heartbeat_interval：默认 30；
+--- 0 = 关闭阅读期心跳（关书 / 切章 / 休眠的推送不受影响）。
+---@return integer
+local function heartbeatInterval()
+    local value = tonumber(require("utils.settings").getSource(ID).heartbeat_interval)
+    if value == nil then return DEFAULT_HEARTBEAT_INTERVAL end
+    value = math.floor(value)
+    return value > 0 and value or 0
+end
 
 ---@class KavitaHeartbeat
 ---@field identity BookIdentity 正在读的书
 ---@field position ProgressPosition 最近一次事件报来的位置
 ---@field pushed string|nil 上次推上去的位置标识（位置没变就别推，Kavita 也会丢）
 ---@field last_push integer 上次补推的 Unix 时间戳（建表即当作刚推过，避开开书拉取的竞态）
+---@field interval integer 本会话的补推最小间隔（秒），起心跳时从设置读入
 ---@field tick function 兜底定时器（慢读没有翻页事件时也定期补推）
 ---@field busy boolean|nil 上一拍还在飞，本拍跳过（不补报）
 
@@ -409,14 +421,14 @@ local function positionKey(position)
     return position.locator or tostring(position.page or position.fraction or "")
 end
 
---- 推一次当前位置。开书拉取未落定（前 MIN_PUSH_GAP 秒）/ 并发 / 离线 / 距上次太近 / 位置没变，
+--- 推一次当前位置。开书拉取未落定（前 interval 秒）/ 并发 / 离线 / 距上次太近 / 位置没变，
 --- 都跳过，这次的位置留给下一拍。
 ---@param self KavitaSource
 ---@param hb KavitaHeartbeat
 local function pushProgress(self, hb)
     if self._heartbeat ~= hb then return end
     if hb.busy or not online() then return end
-    if os.time() - hb.last_push < MIN_PUSH_GAP then return end
+    if os.time() - hb.last_push < hb.interval then return end
     local key = positionKey(hb.position)
     if key == hb.pushed then return end
     hb.busy, hb.last_push, hb.pushed = true, os.time(), key
@@ -430,23 +442,29 @@ local function pushProgress(self, hb)
     end)
 end
 
---- 兜底拍：慢读没有翻页事件时也定期补推一次当前位置。
+--- 兜底拍：慢读没有翻页事件时也定期补推一次当前位置。间隔取 max(60, 补推间隔)：
+--- 不会比节流间隔更频繁，设置调大后也不白醒。
 ---@param self KavitaSource
 ---@param hb KavitaHeartbeat
 local function beat(self, hb)
     if self._heartbeat ~= hb then return end
-    require("ui/uimanager"):scheduleIn(HEARTBEAT_INTERVAL, hb.tick)
+    require("ui/uimanager"):scheduleIn(math.max(HEARTBEAT_INTERVAL, hb.interval), hb.tick)
     pushProgress(self, hb)
 end
 
---- 翻页 / 切章 / 唤醒：起或续阅读期进度心跳，并更新最近位置。换书则先停旧心跳。
+--- 翻页 / 切章 / 唤醒：起或续阅读期进度心跳，并更新最近位置。换书 / 间隔改了则先停旧心跳。
 ---@param self KavitaSource
 ---@param identity BookIdentity|nil
 ---@param position ProgressPosition|nil
 local function touchHeartbeat(self, identity, position)
     if not identity or not self:configured() then return end
+    local interval = heartbeatInterval()
+    if interval <= 0 then
+        stopHeartbeat(self)
+        return
+    end
     local hb = self._heartbeat
-    if hb and hb.identity.stable_id ~= identity.stable_id then
+    if hb and (hb.identity.stable_id ~= identity.stable_id or hb.interval ~= interval) then
         stopHeartbeat(self)
         hb = nil
     end
@@ -455,10 +473,11 @@ local function touchHeartbeat(self, identity, position)
             identity = identity,
             position = position or { fraction = 0 },
             last_push = os.time(),
+            interval = interval,
             tick = require("ui.guard").wrap("kavita heartbeat", function() beat(self, hb) end),
         }
         self._heartbeat = hb
-        require("ui/uimanager"):scheduleIn(HEARTBEAT_INTERVAL, hb.tick)
+        require("ui/uimanager"):scheduleIn(math.max(HEARTBEAT_INTERVAL, interval), hb.tick)
     end
     hb.identity = identity
     hb.position = position or hb.position
@@ -1048,4 +1067,4 @@ function Source:pushNotesAsync(identity, annotations, cb)
     end }
 end
 
-return { meta = meta, new = new }
+return { meta = meta, new = new, DEFAULT_HEARTBEAT_INTERVAL = DEFAULT_HEARTBEAT_INTERVAL }
