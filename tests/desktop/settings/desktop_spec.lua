@@ -7,6 +7,8 @@ package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
 local book_settings = { drawer_opens_desktop = true }
+local has_keys = false
+package.preload["device"] = function() return { hasKeys = function() return has_keys end } end
 local open_on_start
 package.preload["utils.settings"] = function()
     return {
@@ -36,6 +38,17 @@ Assert.is_true(drawer.toggle)
 drawer.callback()
 Assert.eq(book_settings.drawer_opens_desktop, false)
 Assert.is_false(rows[2](600).toggle)
+
+-- 有键设备才显示「桌面物理翻页键」；缺省开，点一下关。
+has_keys = true
+rows = Settings:rows(desktop, false)
+Assert.len(rows, 3)
+local keys = rows[3](600)
+Assert.eq(keys.title, "桌面物理翻页键")
+Assert.is_true(keys.toggle, "缺省开")
+keys.callback()
+Assert.eq(book_settings.page_keys, false)
+Assert.is_false(rows[3](600).toggle)
 
 
 return true

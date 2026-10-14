@@ -13,7 +13,7 @@ local DesktopSettings = {}
 ---@param open_on boolean
 ---@return table
 function DesktopSettings:rows(desktop, open_on)
-    return {
+    local rows = {
         function(iw)
             return Row.widget({
                 width = iw,
@@ -41,6 +41,24 @@ function DesktopSettings:rows(desktop, open_on)
             })
         end,
     }
+    -- 纯触屏设备没有翻页键，不显示。
+    if require("device"):hasKeys() then
+        rows[#rows + 1] = function(iw)
+            local keys_on = Settings.get("desktop").page_keys ~= false
+            return Row.widget({
+                width = iw,
+                icon = "swap_horiz", title = _("桌面物理翻页键"),
+                subtitle = _("用侧键或音量键翻图书馆、书城、首页、统计的页"),
+                toggle = keys_on,
+                callback = function()
+                    Settings.get("desktop").page_keys = not keys_on
+                    Settings.save("desktop")
+                    desktop:updateView()
+                end,
+            })
+        end
+    end
+    return rows
 end
 
 return DesktopSettings

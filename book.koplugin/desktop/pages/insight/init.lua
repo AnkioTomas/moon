@@ -29,6 +29,7 @@ local _ = require("gettext")
 ---@field state table|nil 已加载的洞察；nil 表示下次进页重读
 ---@field fetch_cancel table|nil 在飞读取
 ---@field ui_page number
+---@field ui_pages number|nil 上次构建时的总页数，翻页时钳位用
 local Insight = {}
 Insight.__index = Insight
 
@@ -57,12 +58,27 @@ Insight.destroy = Insight.cancel
 Insight.onCancel = Insight.cancel
 
 ---@param event string
-function Insight:onEvent(event)
+function Insight:onEvent(event, payload)
     if event == "source_changed" then
         self:reset()
     elseif event == "stats_changed" then
         self.state = nil
+    elseif event == "swipe" then
+        if payload.direction == "west" then
+            self:turn(1)
+        elseif payload.direction == "east" then
+            self:turn(-1)
+        end
     end
+end
+
+--- 底部翻页条翻页（按钮、左右滑、物理翻页键共用）；到头不动不重绘。
+---@param dir integer 1 下一页，-1 上一页
+function Insight:turn(dir)
+    local page = math.max(1, math.min((self.ui_page or 1) + dir, self.ui_pages or 1))
+    if page == self.ui_page then return end
+    self.ui_page = page
+    self.desktop:updateView()
 end
 
 --- 统计页点书：只认 books 表里已有的行，缺元数据就提示，不联网补全。
@@ -121,7 +137,7 @@ function Insight:build()
     local labels = { _("概览"), _("今日总览"), _("连续记录"), _("阅读时段") }
     local pages = state.has_data and not state.error and #labels or 1
     local page = math.max(1, math.min(self.ui_page, pages))
-    self.ui_page = page
+    self.ui_page, self.ui_pages = page, pages
     local body = buildPage(self, page, state, content_w, inner_h)
     return Box:new{
         style = { bg = t.color.page },
@@ -144,8 +160,8 @@ function Insight:build()
                 page = page,
                 pages = pages,
                 title = labels[page],
-                on_prev = function() self.ui_page = page - 1; desktop:updateView() end,
-                on_next = function() self.ui_page = page + 1; desktop:updateView() end,
+                on_prev = function() self:turn(-1) end,
+                on_next = function() self:turn(1) end,
             }),
         },
     }
