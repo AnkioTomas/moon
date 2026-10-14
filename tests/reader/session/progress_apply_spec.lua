@@ -157,6 +157,69 @@ do
     Assert.eq(log.flushed, 0)
 end
 
+-- ── 整本书：sidecar 缺失（停在开头）时用本地记录回落 ─────────
+do
+    local book_identity = { source_id = "moon", stable_id = "b9" }
+    local log, ui = rollingUI({ ["xp:saved"] = true })
+    pending_row = { fraction = 0.4, locator = "xp:saved" }
+    Progress.applyLocalPending({ identity = book_identity, ui = ui, doc_fraction = 0 })
+
+    Assert.len(log.goto_xpointer, 1)
+    Assert.eq(log.goto_xpointer[1], "xp:saved")
+    Assert.eq(log.saved.percent_finished, 0.4)
+end
+
+-- ── 整本书：文档已被 sidecar 放到位，不再动它 ───────────────
+do
+    local book_identity = { source_id = "moon", stable_id = "b9" }
+    local log, ui = rollingUI({ ["xp:saved"] = true })
+    pending_row = { fraction = 0.4, locator = "xp:saved" }
+    Progress.applyLocalPending({ identity = book_identity, ui = ui, doc_fraction = 0.4 })
+
+    Assert.len(log.goto_xpointer, 0)
+    Assert.eq(log.flushed, 0)
+end
+
+-- ── 整本书：本地记录就在开头 → 不动文档 ─────────────────────
+do
+    local book_identity = { source_id = "moon", stable_id = "b9" }
+    local log, ui = rollingUI({})
+    pending_row = { fraction = 0 }
+    Progress.applyLocalPending({ identity = book_identity, ui = ui, doc_fraction = 0 })
+
+    Assert.len(log.goto_xpointer, 0)
+    Assert.eq(log.flushed, 0)
+end
+
+-- ── 整本书（固定版式）：第 1 页的比例是 1/总页数，也算「停在开头」────
+do
+    local book_identity = { source_id = "moon", stable_id = "b9" }
+    local log, ui = pagingUI(300)
+    pending_row = { fraction = 0.5, page = 42, total_pages = 300 }
+    Progress.applyLocalPending({
+        identity = book_identity, ui = ui,
+        page = 1, total_pages = 300, doc_fraction = 1 / 300,
+    })
+
+    Assert.len(log.events, 1)
+    Assert.eq(log.events[1].name, "GotoPage")
+    Assert.eq(log.events[1].args[1], 42)
+end
+
+-- ── 整本书：文档已在别处（page > 1）→ 不回落，交给 sidecar ─────
+do
+    local book_identity = { source_id = "moon", stable_id = "b9" }
+    local log, ui = pagingUI(300)
+    pending_row = { fraction = 0.5, page = 42, total_pages = 300 }
+    Progress.applyLocalPending({
+        identity = book_identity, ui = ui,
+        page = 42, total_pages = 300, doc_fraction = 0.14,
+    })
+
+    Assert.len(log.events, 0)
+    Assert.eq(log.flushed, 0)
+end
+
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",
     "reader.session.toc", "reader.session", "logger",

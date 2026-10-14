@@ -122,16 +122,47 @@ local function applyPosition(ui, pos, pct)
     saveDocSettings(ui, pct)
 end
 
---- 冷打开：pending 章序号与当前身份一致时恢复章内位置。
---- 同章才敢用 locator——它是章节文件内的坐标，跨章无意义。
+--- 阅读器是否还停在文档开头（sidecar 没能给出位置）。
+--- 固定版式的「第 1 页」换算出的比例是 1/总页数，不是 0，不能当成「已在别处」，
+--- 否则整本 PDF / 未分页文档的回落永远不会触发。
+---@param snapshot ReaderSessionSnapshot
+---@return boolean
+local function atDocumentStart(snapshot)
+    if (tonumber(snapshot.page) or 1) > 1 then return false end
+    local frac = Progress.clampFraction(snapshot.doc_fraction)
+    local total = tonumber(snapshot.total_pages) or 0
+    local eps = (total > 0 and 1 / total or 0) + 1e-9
+    return frac <= eps
+end
+
+--- 冷打开：用本地记录恢复阅读位置。
+--- 按章书：pending 章序号与当前身份一致时恢复章内位置——locator 是章节文件内的坐标，跨章无意义。
+--- 整本书：KOReader 的 `.sdr` 边车缺失（清缓存后重下、换设备）时文档会停在开头，
+--- 用本地记录回落，避免「打开毫无反应」、随后关书又把开头位置写脏上推。
 ---@param snapshot ReaderSessionSnapshot
 function ReaderProgress.applyLocalPending(snapshot)
     local id = snapshot and snapshot.identity
-    if not id or not id.chapter_idx or not snapshot.ui then return end
+    if not id or not snapshot.ui then return end
     local row = ProgressDB.get(id.source_id, id.stable_id)
-    if not row or tonumber(row.chapter_idx) ~= tonumber(id.chapter_idx) then return end
-    if row.locator == nil and row.chapter_fraction == nil then return end
-    applyPosition(snapshot.ui, row, row.chapter_fraction or 0)
+    if not row then return end
+    if id.chapter_idx then
+        if tonumber(row.chapter_idx) ~= tonumber(id.chapter_idx) then return end
+        if row.locator == nil and row.chapter_fraction == nil then return end
+        applyPosition(snapshot.ui, row, row.chapter_fraction or 0)
+        return
+    end
+    -- 整本：sidecar 已把文档放到位时不动，只补「停在开头」的情况。
+    if not atDocumentStart(snapshot) then
+        logger.dbg("book.progress apply local skip: document positioned", id.source_id, id.stable_id)
+        return
+    end
+    local pct = Progress.clampFraction(row.fraction)
+    if pct <= 0 then
+        logger.dbg("book.progress apply local skip: no local position", id.source_id, id.stable_id)
+        return
+    end
+    logger.dbg("book.progress apply local", id.source_id, id.stable_id, "pct", pct)
+    applyPosition(snapshot.ui, row, pct)
 end
 
 --- 保存当前文档进度。写入完成前不发网络请求，避免同步旧快照。
