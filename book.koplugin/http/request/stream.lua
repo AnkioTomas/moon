@@ -123,7 +123,7 @@ function Stream.open(opts, handlers)
             end, self, emit)
         end
 
-        local fetched, future = pcall(client.fetch, client, opts.url, Fetch.options(opts, 180))
+        local fetched, future = pcall(client.fetch, client, opts.url, Fetch.options(opts, 6))
         if not fetched then
             return finish(future)
         end

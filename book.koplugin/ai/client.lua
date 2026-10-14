@@ -169,7 +169,8 @@ function Client.chat(messages, opts, cb)
         return nil
     end
     -- 连接与整包共用同一预算；推理模型首包可能较慢。
-    local timeout = opts.timeout or Client.DEFAULT_TIMEOUT
+    -- 调用方用 Timeout.ai(倍率) 传入；不传 = 「AI 请求超时」本身。
+    local timeout = opts.timeout or require("http.timeout").ai()
     local max_tokens = opts.max_tokens or 2000
     local current, cancelled
 

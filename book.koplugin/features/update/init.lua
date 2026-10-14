@@ -59,7 +59,7 @@ local MIRRORS = {
     "https://gh.llkk.cc/https://github.com",
 }
 local PROBE_MIRRORS = 5
-local PROBE_TIMEOUT = 10
+local PROBE_TIMEOUT_RATIO = 1 / 3 -- × 「网络超时」，缺省 10 秒
 
 --- candidate 是 parseRelease 验过的 x.y.z；installed 解析不出（开发版）一律视为更旧。
 local function newer(candidate, installed)
@@ -136,7 +136,7 @@ end
 function Update.check(cb)
     if Update._job then return cb(nil, "busy") end
     Update._job = Request.get(API_URL, {
-        timeout = 30,
+        timeout = require("http.timeout").net(1),
         headers = {
             Accept = "application/vnd.github+json",
             ["X-GitHub-Api-Version"] = "2022-11-28",
@@ -180,7 +180,7 @@ local function pickDownloadUrl(release, cb)
     end
     for i, prefix in ipairs(prefixes) do
         local url = prefix .. path
-        jobs[i] = Request.stream({ url = url, timeout = PROBE_TIMEOUT, allow_redirects = true }, {
+        jobs[i] = Request.stream({ url = url, timeout = require("http.timeout").net(PROBE_TIMEOUT_RATIO), allow_redirects = true }, {
             on_headers = function(code, headers)
                 if code ~= 200 then return end
                 local length = tonumber((headers:get("Content-Length", true)))
@@ -213,7 +213,7 @@ local function installFrom(url, release, plugin_root, done, on_progress, on_inst
     os.remove(archive)
     Update._job = Request.download({
         url = url,
-        timeout = 300,
+        timeout = require("http.timeout").net(10),
         allow_redirects = true,
         max_bytes = MAX_ARCHIVE_BYTES,
         on_progress = on_progress,
@@ -281,7 +281,7 @@ function Update.installArchive(archive, plugin_root, cb)
     end, {
         name = "plugin.update",
         kind = "heavy",
-        timeout = 120,
+        timeout = require("http.timeout").net(4),
         on_done = function()
             settle()
             cb(true)

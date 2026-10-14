@@ -42,13 +42,34 @@ package.preload["ai"] = function()
     }
 end
 
+local spins = {}
+package.preload["ui.themes.widgets.spin"] = function()
+    return { new = function(_, o) o.show = function(self) spins[#spins + 1] = self end; return o end }
+end
+local ai_timeout = 120
+package.preload["http.timeout"] = function()
+    return { AI_MIN = 10, AI_MAX = 600, AI_STEP = 10,
+        aiSeconds = function() return ai_timeout end, ai = function(r) return ai_timeout * (r or 1) end,
+        setAiSeconds = function(v) ai_timeout = v end }
+end
+
 local AI = require("desktop.pages.setting.ai")
 local desktop = { updateView = function() end, lifecycle = { state = "Resume" } }
 local rows = AI:rows(desktop)
-Assert.len(rows, 4)
+Assert.len(rows, 5)
 
--- 第 4 行是测试连接
+-- 第 4 行是 AI 请求超时：spin 选值后写入设置。
 rows[4](400)
+Assert.eq(built.title, "AI 请求超时")
+Assert.eq(built.status, "120 秒")
+built.callback()
+Assert.eq(spins[1].fields[1].min, 10)
+Assert.eq(spins[1].fields[1].max, 600)
+spins[1].callback(60)
+Assert.eq(ai_timeout, 60)
+
+-- 第 5 行是测试连接
+rows[5](400)
 Assert.eq(built.title, "测试连接")
 Assert.eq(built.icon, "network_check")
 Assert.eq(built.kind, "action")

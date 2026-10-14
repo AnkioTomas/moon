@@ -198,7 +198,7 @@ function Webdav:getAsync(path, dest, opts, cb)
         headers = Header.forDownload(opts.headers),
         auth_username = self.username,
         auth_password = self.password,
-        timeout = opts.timeout or 300,
+        timeout = opts.timeout or require("http.timeout").net(10),
         on_progress = opts.on_progress,
     }, dest, function(ok, err, res)
         if ok then
@@ -236,7 +236,7 @@ function Webdav:putFileAsync(path, local_path, cb)
         method = "PUT",
         headers = Header.forRequest({ ["Content-Type"] = "application/octet-stream" }),
         body = body,
-        timeout = 300,
+        timeout = require("http.timeout").net(10),
     }, function(res, err)
         cb(res and true, err)
     end)

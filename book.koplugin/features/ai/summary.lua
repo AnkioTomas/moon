@@ -94,7 +94,7 @@ local function enqueue(identity, idx, title, text)
         title = T(_("章节摘要：%1"), title),
         restartable = true,
         run = function(_report, done)
-            return require("ai").chat(messages, { max_tokens = 800, timeout = 90 }, function(content, err)
+            return require("ai").chat(messages, { max_tokens = 800, timeout = require("http.timeout").ai(0.75) }, function(content, err)
                 local summary = content and require("features.ai.explain").plain(content) or ""
                 if summary == "" then
                     done({ ok = false, err = err })

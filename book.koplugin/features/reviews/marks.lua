@@ -74,7 +74,7 @@ local function locateAsync(source, hotspots, html, cb)
     local job = Job.run(function() return source:locateHotspots(hotspots, html) end, {
         name = "reviews.locate",
         kind = "light",
-        timeout = 60,
+        timeout = require("http.timeout").net(2),
         on_done = function(spots) cb(spots) end,
         on_failed = function(err) cb(nil, err) end,
     })

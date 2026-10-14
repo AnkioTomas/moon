@@ -66,7 +66,7 @@ function Digest.run(quote, items)
         end,
     }
     loading:show()
-    handle = require("ai").chat(Digest.messages(quote, items), { max_tokens = 800, timeout = 60 },
+    handle = require("ai").chat(Digest.messages(quote, items), { max_tokens = 800, timeout = require("http.timeout").ai(0.5) },
         function(content, err)
             handle = nil
             loading:close()

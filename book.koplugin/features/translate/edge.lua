@@ -93,8 +93,8 @@ function Edge.translateListAsync(texts, target_lang, source_lang, callback)
     return Request.post(endpoint, body, {
         accept = "application/json",
         content_type = "application/json",
-        connect_timeout = 30,
-        timeout = 60,
+        connect_timeout = require("http.timeout").net(1),
+        timeout = require("http.timeout").net(2),
     }, function(content, err)
         if err then
             logger.warn("book.translate edge failed", err)

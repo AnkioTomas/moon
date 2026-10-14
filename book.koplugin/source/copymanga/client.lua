@@ -128,8 +128,8 @@ function Client:_getJson(path, cb)
             accept = "application/json",
             headers = Client.headers(sent),
             allow_redirects = true,
-            timeout = 60,
-            connect_timeout = 30,
+            timeout = require("http.timeout").net(2),
+            connect_timeout = require("http.timeout").net(1),
         }, function(raw, err, res)
             if cancelled then return end
             if not (res and res.code == 401) then
@@ -262,8 +262,8 @@ function Client:setCollectAsync(comic_id, collect, cb)
             accept = "application/json",
             headers = Client.headers(self.token),
             content_type = "application/x-www-form-urlencoded;charset=utf-8",
-            timeout = 30,
-            connect_timeout = 30,
+            timeout = require("http.timeout").net(1),
+            connect_timeout = require("http.timeout").net(1),
         },
         function(raw, err)
             cb(Client.decode(raw, err))

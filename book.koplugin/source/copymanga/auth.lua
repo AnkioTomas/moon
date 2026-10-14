@@ -114,8 +114,8 @@ function Auth.loginAsync(username, password, cb)
         method = "POST",
         body = body,
         headers = headers,
-        timeout = 30,
-        connect_timeout = 30,
+        timeout = require("http.timeout").net(1),
+        connect_timeout = require("http.timeout").net(1),
     }, function(res, err)
         local wire, decode_err = Client.decode(res and res.body, err)
         if not wire then

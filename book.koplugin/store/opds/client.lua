@@ -74,7 +74,7 @@ function Client:downloadAsync(url, dest, on_progress, cb)
     return Request.download({
         url = url,
         headers = Header.forDownload(),
-        timeout = 300,
+        timeout = require("http.timeout").net(10),
         allow_redirects = true,
         auth_username = self.cfg.username,
         auth_password = self.cfg.password,

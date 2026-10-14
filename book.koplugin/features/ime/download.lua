@@ -235,7 +235,7 @@ function M.ensure(method, cb, on_progress)
     end
 
     report("manifest")
-    Request.get(base_url .. "/manifest.json", { timeout = 30 }, function(body, err)
+    Request.get(base_url .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
         if err then
             done(false, err)
             return
@@ -287,7 +287,7 @@ downloadParts = function(method, base_url, manifest, idx, dest, done, report, do
     Request.download({
         url = base_url .. "/" .. part.file,
         method = "GET",
-        timeout = 300,
+        timeout = require("http.timeout").net(10),
         allow_redirects = true,
         on_progress = total > 0 and function(written)
             report("part", done_bytes + written, total, idx, #parts)
@@ -321,7 +321,7 @@ assembleInJob = function(method, manifest, dest, done, report)
         name = "features.ime." .. method .. ".assemble",
         -- medium 每 2s 收一次管道：进度条要能看出在动，heavy 的 5s 太钝。
         kind = "medium",
-        timeout = 300,
+        timeout = require("http.timeout").net(10),
         on_progress = function(bytes)
             report("assemble", bytes, size, nil, count)
         end,
