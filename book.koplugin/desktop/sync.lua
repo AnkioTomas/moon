@@ -17,10 +17,14 @@ local T = require("ffi/util").template
 
 local Sync = {}
 
-local STATS_REFRESH_INTERVAL = 5 * 60
+-- 打开桌面时后台同步的节流（秒）：统计，以及混合模式下全部源的书架；手动刷新不受限。
+local BACKGROUND_SYNC_INTERVAL = 5 * 60
 
 ---@type table<string, number> 源 id → 最近一次统计同步尝试时间
 local stats_at = {}
+
+---@type table<string, number> 源 id → 混合模式最近一次书架后台同步时间
+local books_at = {}
 
 ---@type table<string, string> 源 id → 已提示过的书架同步错误；同步干净成功后清掉
 local reported = {}
@@ -168,7 +172,7 @@ local function syncStats(desktop, source, force)
         return
     end
     local last = stats_at[source.id]
-    if not force and last and os.time() - last < STATS_REFRESH_INTERVAL then
+    if not force and last and os.time() - last < BACKGROUND_SYNC_INTERVAL then
         logger.dbg("book stats sync skipped", source.id, "throttled")
         return
     end
@@ -191,9 +195,16 @@ end
 --- 桌面变为可见（新开 / 换源）：后台同步统计（5 分钟节流）与书架。首页先读本地数据，成功后由回调刷新。
 ---@param desktop table
 function Sync.open(desktop)
+    local is_mixed = mixed()
     for _idx, source in ipairs(targets(desktop)) do
         syncStats(desktop, source)
-        syncBooks(desktop, source)
+        local last = books_at[source.id]
+        if is_mixed and last and os.time() - last < BACKGROUND_SYNC_INTERVAL then
+            logger.dbg("book shelf refresh skipped", source.id, "throttled")
+        else
+            if is_mixed then books_at[source.id] = os.time() end
+            syncBooks(desktop, source)
+        end
     end
 end
 
@@ -218,8 +229,14 @@ function Sync.refresh(desktop)
         return
     end
     local list = targets(desktop)
+    if #list == 0 then
+        -- 混合模式下一个已配置的源都没有：说明原因，不要毫无反应。
+        require("ui.themes.widgets.toast"):new{ text = _("请先完成数据源设置，再刷新书库。") }:show()
+        return
+    end
     for _idx, target in ipairs(list) do
         syncStats(desktop, target, true)
+        books_at[target.id] = os.time()
         syncBooks(desktop, target, true, #list == 1)
     end
     if #list > 1 then
