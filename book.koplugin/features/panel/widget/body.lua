@@ -157,12 +157,11 @@ function Body:updateView()
 
     self[1] = group
     self.dimen = Geom:new{ w = self.width, h = group:getSize().h }
-    self.ges_events = nil
+    -- 不能设为 nil：InputContainer:onGesture 会直接 pairs(self.ges_events)。
+    self.ges_events = {}
     if not editing and self.on_enter_edit then
-        self.ges_events = {
-            HoldPanelEdit = {
-                GestureRange:new{ ges = "hold", range = function() return self.dimen end },
-            },
+        self.ges_events.HoldPanelEdit = {
+            GestureRange:new{ ges = "hold", range = function() return self.dimen end },
         }
     end
 end
