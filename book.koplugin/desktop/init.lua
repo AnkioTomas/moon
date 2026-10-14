@@ -65,9 +65,8 @@ local Tabbar = require("ui.themes.widgets.tabbar")
 ---@field settings_overlay BookSettingsOverlay|nil
 ---@field _tabs table[]
 ---@field _shell string|nil 外壳签名：屏幕尺寸 / 主题 / 缩放
----@field _books_sync_request table|nil 在飞书架同步的请求令牌（desktop.sync）
----@field _books_sync_cancel { cancel: fun(self) }|nil 在飞书架同步句柄
----@field _stats_sync_pending boolean|nil 统计同步在飞
+---@field _books_sync table<string, { cancel: { cancel: fun(self) }|nil }> 源 id → 在飞书架同步（desktop.sync）
+---@field _stats_sync table<string, boolean> 源 id → 统计同步在飞
 local Desktop = InputContainer:extend{
     name = "book_desktop",
     covers_fullscreen = true,
@@ -217,6 +216,7 @@ end
 --- 建各页与手势区，拼出第一帧（显示与刷屏由调用方 UIManager:show 负责）。
 function Desktop:init()
     self.active = false
+    self._books_sync, self._stats_sync = {}, {}
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.home = Home:new{ desktop = self, name = "home" }
     self.library = Library:new{ desktop = self, name = "library" }
