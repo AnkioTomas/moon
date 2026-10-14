@@ -742,6 +742,48 @@ loadConfig().then(function (config) {
             });
         });
     }
+    // ── 通用进度对话框（复用上传进度 #upprog）：删除 / 复制 / 移动 / 打包 ──
+    var op = { active: false, cancelled: false, onCancel: null };
+    function progOpen(title, onCancel) {
+        op.active = true;
+        op.cancelled = false;
+        op.onCancel = onCancel || null;
+        el('pg-title').textContent = title;
+        el('pg-sub').textContent = '进行中';
+        el('pg-name').textContent = '';
+        el('pg-stats').textContent = '0%';
+        el('pg-fill').style.width = '0%';
+        el('pg-cancel').disabled = false;
+        el('upprog').querySelector('.pg-track').classList.remove('indeterminate');
+        showOverlay(el('upprog'), true);
+    }
+    function progStep(name, done, total) {
+        var pct = total ? Math.min(100, Math.floor(done * 100 / total)) : 0;
+        el('pg-name').textContent = name;
+        el('pg-fill').style.width = pct + '%';
+        el('pg-stats').textContent = pct + '%';
+    }
+    function progBusy(name) {
+        el('pg-name').textContent = name;
+        el('pg-stats').textContent = '';
+        el('upprog').querySelector('.pg-track').classList.add('indeterminate');
+    }
+    function progClose() {
+        op.active = false;
+        op.onCancel = null;
+        el('upprog').querySelector('.pg-track').classList.remove('indeterminate');
+        showOverlay(el('upprog'), false);
+    }
+    // 收尾：关进度框、刷新列表、提示汇总；有失败时列出失败项
+    function opSummary(okMsg, partMsg, failures, cancelledLeft) {
+        progClose();
+        if (!failures.length && !cancelledLeft) { say(okMsg); return; }
+        say(partMsg);
+        var lines = failures.map(function (f) { return f.name + ': ' + f.err; });
+        if (cancelledLeft) lines.push(t('已取消，剩余 %1 项未处理', cancelledLeft));
+        dialog({ title: '部分项目未完成', msg: lines.join('\n'), ok: '知道了' });
+    }
+
     function deleteSelected() {
         var paths = selectedPaths();
         if (!paths.length || busy || anyProtected()) return;
@@ -749,20 +791,23 @@ loadConfig().then(function (config) {
         dialog({ title: '删除', msg: msg + '目录将递归删除，不可恢复。', ok: '删除', danger: true }).then(function (yes) {
             if (!yes) return;
             setBusy(true);
-            var i = 0, failed = 0;
+            var i = 0, failures = [];
+            progOpen('正在删除...', function () { op.cancelled = true; el('pg-sub').textContent = '正在取消…'; el('pg-cancel').disabled = true; });
             (function next() {
-                if (i >= paths.length) {
+                if (i >= paths.length || op.cancelled) {
+                    var left = paths.length - i;
+                    progStep(i ? baseName(paths[i - 1]) : '', i, paths.length);
                     setBusy(false);
-                    say(failed ? '删除完成，' + failed + ' 项失败' : '删除成功');
                     clearSelection();
                     load(cur, true);
+                    opSummary('删除成功', t('删除完成，%1 项失败', failures.length + (op.cancelled ? left : 0)), failures, op.cancelled ? left : 0);
                     return;
                 }
-                var p = paths[i++];
+                var p = paths[i];
+                progStep(baseName(p), i, paths.length);
                 post('/api/delete?path=' + encodeURIComponent(p)).catch(function (err) {
-                    failed++;
-                    say('删除失败: ' + p + ': ' + errText(err));
-                }).then(next);
+                    failures.push({ name: baseName(p), err: errText(err) });
+                }).then(function () { i++; progStep(baseName(p), i, paths.length); next(); });
             })();
         });
     }
@@ -861,41 +906,45 @@ loadConfig().then(function (config) {
     }
     function paste(dest) {
         if (!clip || busy) return;
-        var op = clip.op === 'cut' ? 'move' : 'copy';
-        if (op === 'move' && dirName(clip.items[0]) === dest) {
+        var mode = clip.op === 'cut' ? 'move' : 'copy';
+        if (mode === 'move' && dirName(clip.items[0]) === dest) {
             dialog({ title: '无法粘贴', msg: '不能移动到同一目录', ok: '知道了' });
             return;
         }
         var items = clip.items.slice();
         var sticky = null, i = 0, done = 0, failed = 0;
+        var failures = [];
         setBusy(true);
-        say((op === 'move' ? '移动中' : '复制中') + '…');
-        function finish() {
+        progOpen(mode === 'move' ? '正在移动...' : '正在复制...', function () { op.cancelled = true; el('pg-sub').textContent = '正在取消…'; el('pg-cancel').disabled = true; });
+        function finish(left) {
+            left = left || 0;
             setBusy(false);
-            say((op === 'move' ? '移动' : '复制') + (failed ? '完成，' + failed + ' 项失败' : '成功') + '（' + done + ' 项）');
-            if (op === 'move') clip = null;
+            if (mode === 'move' && !failures.length && !left) clip = null;
             updateClip();
             load(cur, true);
+            failed = failures.length + left;
+            opSummary((mode === 'move' ? '移动' : '复制') + '成功（' + done + ' 项）', (mode === 'move' ? '移动' : '复制') + '完成，' + failed + ' 项失败（' + done + ' 项）', failures, left);
         }
         function attempt(src, conflict) {
-            if (op === 'copy' && dirName(src) === dest && !conflict) conflict = 'rename';
-            return post('/api/' + op + '?' + q({ path: src, to: join(dest, baseName(src)), conflict: conflict || 'ask' }));
+            if (mode === 'copy' && dirName(src) === dest && !conflict) conflict = 'rename';
+            return post('/api/' + mode + '?' + q({ path: src, to: join(dest, baseName(src)), conflict: conflict || 'ask' }));
         }
         (function next() {
+            if (op.cancelled) return finish(items.length - i);
+            progStep(i ? baseName(items[i - 1]) : '', i, items.length);
             if (i >= items.length) return finish();
             var src = items[i++];
+            progStep(baseName(src), i - 1, items.length);
             attempt(src, sticky).then(function () { done++; next(); }).catch(function (err) {
                 if (err.status !== 409) {
-                    failed++;
-                    say((op === 'move' ? '移动失败: ' : '复制失败: ') + src + ': ' + errText(err));
+                    failures.push({ name: baseName(src), err: errText(err) });
                     return next();
                 }
                 askConflict(baseName(src)).then(function (r) {
-                    if (!r.choice) { failed += items.length - i + 1; return finish(); }
+                    if (!r.choice) return finish(items.length - i + 1);
                     if (r.all) sticky = r.choice;
                     attempt(src, r.choice).then(function () { done++; next(); }).catch(function (e2) {
-                        failed++;
-                        say('失败: ' + src + ': ' + errText(e2));
+                        failures.push({ name: baseName(src), err: errText(e2) });
                         next();
                     });
                 });
@@ -913,14 +962,21 @@ loadConfig().then(function (config) {
     }
     function zipDownload(paths) {
         var name = paths.length === 1 ? baseName(paths[0]) + '.zip' : (cur === '/' ? 'root' : baseName(cur)) + '.zip';
-        say('打包下载准备中…');
         setBusy(true);
+        // 打包在设备后台一次完成，没有逐项进度：显示不定进度条；取消即放弃结果（不再下载）
+        progOpen('正在打包...', function () { op.cancelled = true; setBusy(false); progClose(); say('已取消打包下载'); });
+        progBusy(name);
         post('/api/zip', JSON.stringify({ paths: paths, name: name })).then(function (r) {
+            if (op.cancelled) return;
             setBusy(false);
+            progStep(name, 1, 1);
+            progClose();
             say('打包完成，开始下载 ' + r.name);
             triggerDownload('/api/zip?id=' + encodeURIComponent(r.id), r.name);
         }).catch(function (err) {
+            if (op.cancelled) return;
             setBusy(false);
+            progClose();
             dialog({ title: '打包下载准备失败', msg: errText(err), ok: '知道了' });
         });
     }
@@ -1365,6 +1421,8 @@ loadConfig().then(function (config) {
         upCancelled = false;
         setBusy(true);
         renderQueue();
+        el('pg-title').textContent = '正在上传...';
+        el('pg-cancel').disabled = false;
         el('pg-sub').textContent = '进行中';
         prog.name = '';
         prog.loaded = prog.total = prog.speed = 0;
@@ -1403,6 +1461,7 @@ loadConfig().then(function (config) {
     }
     el('up-start').onclick = startUploads;
     el('pg-cancel').onclick = function () {
+        if (op.active && op.onCancel) { op.onCancel(); return; }
         upCancelled = true;
         el('pg-sub').textContent = '正在取消…';
         queue.forEach(function (it) { if (it.xhr) it.xhr.abort(); });

@@ -119,7 +119,8 @@ function el(id) { return document.getElementById(id); }
 function say(s) {
     var log = el('log');
     if (!log) return;
-    log.textContent += s + '\n';
+    // 每行单独文本节点，才能逐句翻译
+    log.appendChild(document.createTextNode(I18N.tr(String(s)) + '\n'));
 }
 function setState(node, text, kind) {
     if (!node) return;

@@ -1503,6 +1503,32 @@ do
     end
 end
 
+-- ── 文件操作进度对话框：删除 / 复制 / 移动 / 打包复用上传进度框 ──
+
+do
+    local c = newClient({ "GET /file.js HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c))
+    local _code, js = parseResponse(c:output())
+    for _, s in ipairs({ "function progOpen", "function progStep", "function opSummary",
+        "'正在删除...'", "'正在复制...'", "'正在移动...'", "'正在打包...'", "'部分项目未完成'",
+        "op.cancelled", "/api/delete?path=" }) do
+        has(js, s)
+    end
+    local c_html = newClient({ "GET /file.html HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_html))
+    local _ch, html = parseResponse(c_html:output())
+    for _, id in ipairs({ 'id="upprog"', 'id="pg-title"', 'id="pg-name"', 'id="pg-fill"', 'id="pg-stats"', 'id="pg-cancel"' }) do
+        has(html, id)
+    end
+    -- 新文案有英文/繁体翻译
+    local en = require("features.remote.l10n.web.en")
+    local tw = require("features.remote.l10n.web.zh_TW")
+    for _, k in ipairs({ "正在删除...", "正在复制...", "正在移动...", "正在打包...", "部分项目未完成", "已取消，剩余 %1 项未处理", "已取消打包下载" }) do
+        Assert.is_true(type(en[k]) == "string" and en[k] ~= "", "en: " .. k)
+        Assert.is_true(type(tw[k]) == "string" and tw[k] ~= "", "zh_TW: " .. k)
+    end
+end
+
 -- ── /api/logs.zip：一键下载日志 ───────────────────────
 
 do
