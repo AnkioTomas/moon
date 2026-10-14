@@ -84,7 +84,7 @@ end
 --- 是否已配置本地路径。
 ---@return boolean
 function Client:configured()
-    return self:isWebdav() or rootPath(self.cfg) ~= ""
+    return self:isWebdav() or Text.stripWhitespace(self.cfg.path) ~= ""
 end
 
 --- 本地路径是否有效（存在、是目录、且不在插件数据目录内）。
