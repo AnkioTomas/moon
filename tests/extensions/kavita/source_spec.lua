@@ -676,4 +676,116 @@ Assert.eq(fixed["700"], 1770062706, "库里的未来时间被拉回 Kavita 的�
 progress["700"] = nil
 routes["POST /api/Series/all-v2"] = shelf_route
 
+-- 阅读期进度心跳：Kavita 的阅读会话时长按相邻两次进度写入的间隔算，只在关书推一次，
+-- Kavita 那边就是一个 StartTime == EndTime 的 0 秒会话。翻页 / 切章 / 唤醒起心跳：位置一变
+-- 就补推（节流合并密集翻页），另有兜底定时拍照顾慢读；离线或上一拍未回就跳过这一拍；
+-- 关书 / 休眠 / 关源即停。
+do
+    local UIManager = require("ui/uimanager")
+    local real_in, real_un, real_time = UIManager.scheduleIn, UIManager.unschedule, os.time
+    local scheduled = {}
+    UIManager.scheduleIn = function(_self, delay, fn) scheduled[#scheduled + 1] = { delay = delay, fn = fn } end
+    UIManager.unschedule = function(_self, fn)
+        for i = #scheduled, 1, -1 do
+            if scheduled[i].fn == fn then table.remove(scheduled, i) end
+        end
+    end
+    local now = 1800000000
+    os.time = function(t) return t and real_time(t) or now end
+    local function advance(seconds) now = now + seconds end
+    local function fire() table.remove(scheduled, 1).fn(); Stubs.flush() end
+
+    sent = nil
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.4, locator = "/body/DocFragment[5]/body/div/p[1]/text().0" },
+    })
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.5, locator = "/body/DocFragment[6]/body/div/p[2]/text().0" },
+    })
+    Assert.len(scheduled, 1, "同一本书只有一个心跳")
+    Assert.eq(scheduled[1].delay, 60, "兜底拍间隔明显小于 Kavita 的 10 分钟会话超时")
+    Assert.is_nil(sent, "起心跳不当场发请求（避开开书拉取）")
+
+    -- 位置一变就补推：Kavita 认的是两次写入之间的跨度，必须真的把新位置写上去。
+    advance(31)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.55, locator = "/body/DocFragment[6]/body/div/p[3]/text().0" },
+    })
+    Stubs.flush()
+    Assert.eq(sent.pageNum, 5, "翻页后推新位置（spine）")
+    Assert.eq(sent.bookScrollId, "//body/div[1]/p[3]")
+    Assert.len(scheduled, 1, "补推不另起定时器")
+
+    -- 距上次不足 MIN_PUSH_GAP 的翻页：合并，交给下一拍，不每页一发。
+    sent = nil
+    advance(10)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.6, locator = "/body/DocFragment[7]/body/p[1]/text().0" },
+    })
+    Assert.is_nil(sent, "翻页密集时合并")
+
+    -- 兜底定时拍到点：推最近一次的位置。
+    advance(120)
+    fire()
+    Assert.eq(sent.pageNum, 6, "定时拍推最近位置")
+    Assert.len(scheduled, 1, "一拍结束后重排下一拍")
+
+    -- 位置没变的兜底拍：跳过，别白推（Kavita 对同位置也会 early-return）。
+    sent = nil
+    advance(200)
+    fire()
+    Assert.is_nil(sent, "位置没变不推")
+    Assert.len(scheduled, 1)
+
+    -- 离线只跳过这一拍，不补报，但心跳继续（重排已经发生）。
+    online, sent = false, nil
+    advance(200)
+    fire()
+    Assert.is_nil(sent, "离线不发")
+    Assert.len(scheduled, 1)
+    online = true
+
+    -- 上一拍回包还没落地：busy 未清，本拍跳过，不重复发也不丢位置。
+    local before = #calls
+    advance(61)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.7, locator = "/body/DocFragment[8]/body/p[1]/text().0" },
+    })
+    Assert.is_true(source._heartbeat.busy, "第一拍在飞")
+    sent = nil
+    advance(61)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.8, locator = "/body/DocFragment[9]/body/p[1]/text().0" },
+    })
+    Stubs.flush()
+    Assert.eq(#calls, before + 1, "上一拍未回，本拍不发")
+    Assert.eq(sent.pageNum, 7, "推的是飞出去那一拍的位置")
+    Assert.is_true(not source._heartbeat.busy, "回包落地后 busy 复位")
+
+    -- 换书：停旧心跳，为新书重排。
+    local other = { source_id = "ext.kavita", stable_id = "20:2001" }
+    source:onEvent("page_changed", { identity = other, position = { fraction = 0.1 } })
+    Assert.len(scheduled, 1, "换书只留一个心跳")
+    Assert.eq(source._heartbeat.identity.stable_id, "20:2001")
+
+    -- 关书 / 休眠停掉，不再有调度。
+    source:onEvent("reading_stopped", { identity = other })
+    Assert.len(scheduled, 0, "关书 / 休眠停心跳")
+    Assert.is_nil(source._heartbeat)
+
+    -- 关源也要停（换源时旧实例可能还挂着）。
+    source:onEvent("chapter_changed", { identity = volume, position = { fraction = 0.2 } })
+    Assert.len(scheduled, 1)
+    source:close()
+    Assert.len(scheduled, 0, "关源停心跳")
+
+    UIManager.scheduleIn, UIManager.unschedule, os.time = real_in, real_un, real_time
+end
+
 os.execute("rm -rf '" .. WORK .. "'")

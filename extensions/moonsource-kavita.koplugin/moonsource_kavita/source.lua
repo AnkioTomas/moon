@@ -13,6 +13,9 @@ Kavita 书源（整本模式）。
 交回本地位置：Kavita 的精度只到 spine，不能拿它把本地章内位置判成冲突、把人拽回节首。
 远端能给得出页内锚点时必须用远端：网页端在同一条里往后读几页就是这种情况，
 先返回本地会让 core 的 synced 基线永远判不出「云端动过」。
+关书 / 切章 / 休眠各推一次，另在阅读期做「进度心跳」（见 HEARTBEAT_INTERVAL / MIN_PUSH_GAP）：
+Kavita 的阅读会话按相邻两次进度写入的间隔计时，只在关书推一次时长恒为 0 秒；而且它只在
+pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「位置一变就补推」而非纯定时。
 书架：快照指纹不变就跳过对账；对账后后台逐本补简介 / 作者；漫画 series 的已读页回填成本地进度。
 划线：epub 的划线按段落文本在本地 epub 里找锚点，新建 / 改备注推到 Kavita，注解 id 存在笔记快照里。
 漫画：装了 kamare 插件且在线时交它在线看（开书回调 handled），否则下载 cbz 用内置阅读器。
@@ -23,6 +26,7 @@ Kavita 书源（整本模式）。
 local Client = require("moonsource_kavita.client")
 local Position = require("moonsource_kavita.position")
 local SourceBase = require("source.base")
+local logger = require("utils.log")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -36,6 +40,7 @@ local MAGIC = { epub = "PK\3\4", cbz = "PK\3\4", pdf = "%PDF" }
 
 ---@class KavitaSource : SourceBase
 ---@field client KavitaClient
+---@field _heartbeat KavitaHeartbeat|nil 阅读期进度心跳；无则未在跑
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -369,7 +374,116 @@ function Source:getDetailAsync(identity, cb)
         end)
 end
 
+--- Kavita 的阅读会话时长 = 相邻两次进度写入的时间跨度（10 分钟无写入即封会话）。
+--- 月读只在关书 / 切章 / 休眠各推一次，单次写入在 Kavita 侧就是 StartTime == EndTime 的
+--- 「0 秒会话」（字数也会被 Kavita 的锚点 diff 误算成到页尾的一大段）。阅读期补推当前位置，
+--- 一个阅读时段在 Kavita 侧才有多次写入、时长和字数才算得准；补推要跟在真实位置变化上
+--- （见 MIN_PUSH_GAP）：Kavita 对同位置的写入直接 early-return，纯定时的整拍等于没推。
+--- 会话开始时间 = 第一次有效写入，所以 MIN_PUSH_GAP 也是会话起点的最大滞后。
+local HEARTBEAT_INTERVAL = 60
+--- 两次补推之间的最小间隔（秒）。Kavita 只在 pageNum / bookScrollId 真的变了才建会话、续会话，
+--- 所以真正管用的是「位置一变就推」；这个间隔把密集翻页合并成最多一拍一次，别每页一发。
+local MIN_PUSH_GAP = 30
+
+---@class KavitaHeartbeat
+---@field identity BookIdentity 正在读的书
+---@field position ProgressPosition 最近一次事件报来的位置
+---@field pushed string|nil 上次推上去的位置标识（位置没变就别推，Kavita 也会丢）
+---@field last_push integer 上次补推的 Unix 时间戳（建表即当作刚推过，避开开书拉取的竞态）
+---@field tick function 兜底定时器（慢读没有翻页事件时也定期补推）
+---@field busy boolean|nil 上一拍还在飞，本拍跳过（不补报）
+
+--- 停掉阅读期进度心跳。
+---@param self KavitaSource
+local function stopHeartbeat(self)
+    local hb = self._heartbeat
+    if not hb then return end
+    self._heartbeat = nil
+    require("ui/uimanager"):unschedule(hb.tick)
+end
+
+--- 位置的标识：epub 用锚点，其余用页码 / 比例。
+---@param position ProgressPosition
+---@return string
+local function positionKey(position)
+    return position.locator or tostring(position.page or position.fraction or "")
+end
+
+--- 推一次当前位置。开书拉取未落定（前 MIN_PUSH_GAP 秒）/ 并发 / 离线 / 距上次太近 / 位置没变，
+--- 都跳过，这次的位置留给下一拍。
+---@param self KavitaSource
+---@param hb KavitaHeartbeat
+local function pushProgress(self, hb)
+    if self._heartbeat ~= hb then return end
+    if hb.busy or not online() then return end
+    if os.time() - hb.last_push < MIN_PUSH_GAP then return end
+    local key = positionKey(hb.position)
+    if key == hb.pushed then return end
+    hb.busy, hb.last_push, hb.pushed = true, os.time(), key
+    logger.dbg("kavita heartbeat push", hb.identity.stable_id, key)
+    self:putProgressAsync(hb.identity, hb.position, function(ok, err)
+        hb.busy = false
+        if ok ~= true then
+            hb.pushed = nil -- 失败留个待重试的位置，下一拍再补
+            logger.warn("kavita progress heartbeat failed", hb.identity.stable_id, err)
+        end
+    end)
+end
+
+--- 兜底拍：慢读没有翻页事件时也定期补推一次当前位置。
+---@param self KavitaSource
+---@param hb KavitaHeartbeat
+local function beat(self, hb)
+    if self._heartbeat ~= hb then return end
+    require("ui/uimanager"):scheduleIn(HEARTBEAT_INTERVAL, hb.tick)
+    pushProgress(self, hb)
+end
+
+--- 翻页 / 切章 / 唤醒：起或续阅读期进度心跳，并更新最近位置。换书则先停旧心跳。
+---@param self KavitaSource
+---@param identity BookIdentity|nil
+---@param position ProgressPosition|nil
+local function touchHeartbeat(self, identity, position)
+    if not identity or not self:configured() then return end
+    local hb = self._heartbeat
+    if hb and hb.identity.stable_id ~= identity.stable_id then
+        stopHeartbeat(self)
+        hb = nil
+    end
+    if not hb then
+        hb = {
+            identity = identity,
+            position = position or { fraction = 0 },
+            last_push = os.time(),
+            tick = require("ui.guard").wrap("kavita heartbeat", function() beat(self, hb) end),
+        }
+        self._heartbeat = hb
+        require("ui/uimanager"):scheduleIn(HEARTBEAT_INTERVAL, hb.tick)
+    end
+    hb.identity = identity
+    hb.position = position or hb.position
+    -- 位置刚变过就立刻推：Kavita 认的是写入之间的跨度，定时拍若整拍都撞在同一个位置
+    -- 上等于没推，会话仍会退化成 0 秒。
+    pushProgress(self, hb)
+end
+
+--- 翻页 / 切章 / 唤醒起进度心跳并更新位置，关书 / 休眠停掉；其余事件交给基类。
+---@param event string
+---@param payload table|nil
+function Source:onEvent(event, payload)
+    if event == "page_changed" or event == "chapter_changed" or event == "reading_resumed" then
+        if payload then touchHeartbeat(self, payload.identity, payload.position) end
+        return
+    end
+    if event == "reading_stopped" then
+        stopHeartbeat(self)
+        return
+    end
+    return SourceBase.onEvent(self, event, payload)
+end
+
 function Source:close()
+    stopHeartbeat(self)
     if self.backfill then self.backfill.cancel() end
 end
 
