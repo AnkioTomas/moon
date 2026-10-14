@@ -149,6 +149,9 @@ local function persistCover(book, path)
     os.rename(tmp, target)
 end
 
+--- 远程封面落盘到本地封面缓存（锁屏海报预取复用）。
+Book.persistCover = persistCover
+
 --- 取书名；缺省回退文件 id 或「?」。
 ---@param book Book|table|nil 当前操作或展示的书籍数据
 ---@return string
