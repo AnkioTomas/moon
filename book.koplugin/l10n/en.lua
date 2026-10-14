@@ -115,6 +115,7 @@ return {
     ["京东扫码登录"] = "Sign in to JD with QR code",
     ["京东登录失败"] = "JD sign-in failed",
     ["京东登录校验失败"] = "JD sign-in validation failed",
+    ["重新获取二维码"] = "Get a new QR code",
     ["京东读书"] = "JD Read",
     ["京东读书响应无效"] = "Invalid JD Read response",
     ["京东读书网页协议读不到本章，请在京东读书 App 内阅读"] = "This chapter is not available via the JD Read web protocol. Please read it in the JD Read app.",

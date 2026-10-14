@@ -37,6 +37,7 @@ local ticket_reply = '{"returnCode":0,"url":"https://e.m.jd.com/"}'
 local paired, shows = false, 0
 -- hop：校验这一跳不带 Set-Cookie，会话在 url / Location 上。
 local hop_mode = nil
+local hop_urls = {}
 package.preload["http.request"] = function()
     local Request = {}
     function Request.randomUA() return "test-agent" end
@@ -69,13 +70,31 @@ package.preload["http.request"] = function()
                 or ('{"code":' .. code .. ',"msg":"waiting"}')
             cb(callback .. "(" .. data .. ")", nil, res)
         elseif url:find("qrCodeTicketValidation", 1, true) then
-            if not hop_mode then
+            if hop_mode == "merged" then
+                -- 多条 Set-Cookie 被合并成一行，expires 里自带逗号。
+                res.headers["Set-Cookie"] = "thor=session; expires=Wed, 21 Oct 2026 07:28:00 GMT; Domain=.jd.com, "
+                    .. "pin=tester; Path=/, pt_key=key; expires=Thu, 22 Oct 2026 07:28:00 GMT"
+            elseif hop_mode == "junk" or hop_mode == "relay" then
+                res.headers["Set-Cookie"] = { "__jda=track; Domain=.jd.com" }
+            elseif not hop_mode then
                 res.headers["Set-Cookie"] = {
                     "thor=session; Domain=.jd.com",
                     "pin=tester; Domain=.jd.com",
                 }
             end
             cb(ticket_reply, nil, res)
+        elseif hop_mode == "junk" then
+            hop_urls[#hop_urls + 1] = url
+            res.headers["Set-Cookie"] = { "__jdb=track; Domain=.jd.com" }
+            cb("<html></html>", nil, res)
+        elseif hop_mode == "relay" and url == "http://passport.jd.com/relay/loginRelay" then
+            res.code = 302
+            res.headers.Location = "https://passport.jd.com/relay/loginRelay"
+            cb(nil, "HTTP 302", res)
+        elseif hop_mode == "relay" and url == "https://passport.jd.com/relay/loginRelay" then
+            cb('<script>window.location.href = "https://e.m.jd.com/relay-done";</script>', nil, res)
+        elseif hop_mode == "relay" and not url:find("relay-done", 1, true) then
+            cb("<html></html>", nil, res)
         elseif hop_mode == "redirect" and url:find("e.m.jd.com", 1, true) and not url:find("/home", 1, true) then
             res.code = 302
             res.headers.Location = "https://e.m.jd.com/home"
@@ -206,4 +225,49 @@ do
     end)
     Assert.is_nil(err)
     Assert.matches(cfg.cookie, "thor=session")
+end
+
+-- 多条 Set-Cookie 合并成一行（逗号分隔，expires 内含逗号）：每条都要进 jar。
+do
+    hop_mode = "merged"
+    ticket_reply = '{"returnCode":0,"url":"https://e.m.jd.com/"}'
+    Auth.clearSession()
+    local user, err
+    Auth.completeQrLoginAsync({ ticket = "ticket", jar = {} }, function(value, e) user, err = value, e end)
+    Assert.is_nil(err)
+    Assert.matches(cfg.cookie, "thor=session")
+    Assert.matches(cfg.cookie, "pin=tester")
+    Assert.matches(cfg.cookie, "pt_key=key")
+    Assert.is_false(cfg.cookie:find("GMT", 1, true) ~= nil)
+end
+
+-- 只有埋点 cookie 不算登录成功：跳转有上限，最终报错且不写会话。
+do
+    hop_mode = "junk"
+    hop_urls = {}
+    Auth.clearSession()
+    local user, err
+    Auth.completeQrLoginAsync({ ticket = "ticket", jar = {} }, function(value, e) user, err = value, e end)
+    Assert.is_nil(user)
+    Assert.eq(err, "登录未拿到会话 Cookie")
+    Assert.is_false(Auth.hasSession())
+    Assert.is_true(#hop_urls <= 5)
+end
+
+-- 日志里的真实链路：data.url 是 http relay → 302 https relay → 200 中转页 JS 跳转 → 拿到 thor。
+do
+    hop_mode = "relay"
+    ticket_reply = '{"returnCode":0,"url":"http://passport.jd.com/relay/loginRelay"}'
+    Auth.clearSession()
+    local user, err
+    Auth.completeQrLoginAsync({ ticket = "ticket", jar = {} }, function(value, e) user, err = value, e end)
+    Assert.is_nil(err)
+    Assert.matches(cfg.cookie, "thor=session")
+end
+
+do
+    Assert.is_false(Auth._hasLoginCookie({ __jda = "x", QRCodeKey = "y" }))
+    Assert.is_true(Auth._hasLoginCookie({ pt_key = "k" }))
+    Assert.eq(Auth._pageRedirect('<meta http-equiv="refresh" content="0;url=https://e.m.jd.com/a?x=1&amp;y=2">'),
+        "https://e.m.jd.com/a?x=1&y=2")
 end

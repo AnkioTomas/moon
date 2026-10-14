@@ -101,13 +101,22 @@ begin_cb(nil, "获取失败")
 Assert.is_true(placeholder.closed)
 Assert.eq(Themed.last("toast").text, "获取失败")
 
--- 校验成功但没拿到会话：提示之后立刻换新码，别让用户扫已作废的那张。
+-- 校验成功但没拿到会话：不自动换码，留框显示原因，点「重新获取二维码」才重来。
 login()
 begin_cb({ qr_path = "qr-old.png", token = "t", jar = {} })
 local begins = begin_count
 wait_cb({ ticket = "ticket", jar = {} }, nil, "ok")
 Assert.not_nil(complete_cb)
 complete_cb(nil, "登录未拿到会话 Cookie")
-Assert.eq(Themed.last("toast").text, "登录未拿到会话 Cookie")
-Assert.eq(begin_count, begins + 1, "失败后自动换新码")
+Assert.eq(begin_count, begins, "失败后不自动换码")
+local failed = Themed.last("sheet")
+Assert.is_true(failed.shown)
+Assert.is_false(failed.closed == true)
+Assert.eq(content(failed).text, "登录未拿到会话 Cookie")
+local retry = failed.items[2]
+Assert.eq(retry.text, "重新获取二维码")
+-- 与真实 Sheet 一致：先关框再回调。
+failed:close()
+retry.callback()
+Assert.eq(begin_count, begins + 1)
 Assert.eq(content(Themed.last("sheet")).text, "正在获取二维码…")

@@ -29,7 +29,7 @@ local function showQrLogin()
 
     NetworkMgr:runWhenOnline(function()
         local cancelled = false
-        local dialog, begin_job, wait_job, complete_job
+        local dialog, begin_job, wait_job, complete_job, showFailure
         local qr_size = math.floor(math.min(Screen:getWidth(), Screen:getHeight()) * 0.55)
 
         --- 代码主动关窗：先摘掉引用，close_callback 就不会当成用户取消。
@@ -57,17 +57,22 @@ local function showQrLogin()
         end
 
         ---@param content fun(): table
-        local function showDialog(content)
+        ---@param retry fun()|nil 有值时在取消前加「重新获取二维码」
+        local function showDialog(content, retry)
             closeDialog()
+            local items = {
+                { widget = function(width)
+                    return CenterContainer:new{ dimen = Geom:new{ w = width, h = qr_size }, content() }
+                end },
+            }
+            if retry then
+                items[#items + 1] = { text = _("重新获取二维码"), variant = "primary", callback = retry }
+            end
+            items[#items + 1] = { text = _("取消") }
             local d
             d = Sheet:new{
                 title = _("京东扫码登录"),
-                items = {
-                    { widget = function(width)
-                        return CenterContainer:new{ dimen = Geom:new{ w = width, h = qr_size }, content() }
-                    end },
-                    { text = _("取消") },
-                },
+                items = items,
                 close_callback = function()
                     if dialog ~= d then return end
                     dialog = nil
@@ -78,7 +83,17 @@ local function showQrLogin()
             d:show()
         end
 
-        local function startLogin()
+        local startLogin
+        --- 失败留框：显示原因 + 重新获取二维码。按钮会先关框（触发 cancel），再重置 cancelled 重新开始。
+        ---@param reason string
+        showFailure = function(reason)
+            showDialog(function() return Text.line("body", reason) end, function()
+                cancelled = false
+                startLogin()
+            end)
+        end
+
+        startLogin = function()
             -- 点击即出框盖住入口：二维码要等一次网络往返，没有反馈用户会连点出多个登录流程。
             showDialog(function() return Text.line("body", _("正在获取二维码…")) end)
             begin_job = Auth.beginQrLoginAsync(function(started, err)
@@ -99,20 +114,18 @@ local function showQrLogin()
                     wait_job = nil
                     if cancelled then return end
                     if status ~= "ok" or not info then
-                        closeDialog()
-                        Toast:new{ text = wait_err or _("二维码已失效，请重新登录") }:show()
+                        showFailure(wait_err or _("二维码已失效，请重新登录"))
                         return
                     end
                     complete_job = Auth.completeQrLoginAsync(info, function(user, complete_err)
                         complete_job = nil
                         if cancelled then return end
-                        closeDialog()
                         if not user then
-                            Toast:new{ text = complete_err or _("京东登录校验失败") }:show()
-                            -- 这张码的 ticket 已经用过，关框后立刻换新码，别让用户扫废码。
-                            startLogin()
+                            -- 不自动换码：留在框里讲清原因，由用户点「重新获取二维码」。
+                            showFailure(complete_err or _("京东登录校验失败"))
                             return
                         end
+                        closeDialog()
                         Toast:new{ text = _("登录成功"), timeout = 2 }:show()
                         require("source.registry").reload()
                     end)

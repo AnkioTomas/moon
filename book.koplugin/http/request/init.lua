@@ -71,6 +71,48 @@ function Request.header(res, name)
     return Fetch.getHeader(headers, name)
 end
 
+--- 读同名响应头的全部值（大小写不敏感），总返回数组。
+--- Turbo HTTPHeaders 直接遍历 _fields；普通 table 的值可能是数组或合并后的一行。
+--- Set-Cookie 被合并成一行时按 Header.splitSetCookie 拆开。
+---@param res table|nil
+---@param name string
+---@return string[]
+function Request.headerAll(res, name)
+    local headers = res and res.headers
+    local raw = {}
+    if type(headers) == "table" then
+        local lower = name:lower()
+        if type(headers._fields) == "table" then
+            for _idx, field in ipairs(headers._fields) do
+                if type(field) == "table" and type(field[1]) == "string" and field[1]:lower() == lower then
+                    raw[#raw + 1] = field[2]
+                end
+            end
+        elseif type(headers.get) == "function" then
+            raw[1] = headers:get(name, true)
+        else
+            for key, value in pairs(headers) do
+                if type(key) == "string" and key:lower() == lower then raw[#raw + 1] = value end
+            end
+        end
+    end
+    local out = {}
+    local split = name:lower() == "set-cookie" and require("http.request.header").splitSetCookie
+    local function add(value)
+        if type(value) == "table" then
+            for _idx, v in ipairs(value) do add(v) end
+        elseif type(value) == "string" and value ~= "" then
+            if split then
+                for _idx, v in ipairs(split(value)) do out[#out + 1] = v end
+            else
+                out[#out + 1] = value
+            end
+        end
+    end
+    for _idx, value in ipairs(raw) do add(value) end
+    return out
+end
+
 --- 非阻塞 HTTP。err 非 nil 时不要信任 res.body。
 ---@param opts HttpRequest
 ---@param cb fun(res: table|nil, err: any)

@@ -57,3 +57,13 @@ do
     Assert.is_nil(h["User-Agent"])
     Assert.is_nil(h["Accept"])
 end
+
+-- 合并成一行的 Set-Cookie：只在「, name=」处切，expires 里的逗号不切。
+do
+    local parts = Header.splitSetCookie("a=1; expires=Wed, 21 Oct 2026 07:28:00 GMT; Path=/, b=2, c=; Max-Age=0")
+    Assert.len(parts, 3)
+    Assert.eq(parts[1], "a=1; expires=Wed, 21 Oct 2026 07:28:00 GMT; Path=/")
+    Assert.eq(parts[2], "b=2")
+    Assert.eq(parts[3], "c=; Max-Age=0")
+    Assert.len(Header.splitSetCookie(nil), 0)
+end

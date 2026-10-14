@@ -9,6 +9,7 @@ local Request = require("http.request")
 local Image = require("utils.image")
 local Text = require("utils.text")
 local _ = require("gettext")
+local logger = require("utils.log")
 
 local Auth = {}
 
@@ -16,6 +17,9 @@ local LOGIN_PAGE = "https://passport.jd.com/new/login.aspx?ReturnUrl=https%3A%2F
 local HOME = "https://e.m.jd.com/"
 local LOGIN_UA = Request.randomUA()
 local QR_COOKIE_KEYS = { "QRCodeKey", "wlfstk_smdl", "guid" }
+-- 真正代表已登录的 cookie：至少要有其一才算成功，其余埋点 cookie 不算。
+local LOGIN_COOKIE_KEYS = { "thor", "pt_key", "pin", "pt_pin" }
+local MAX_HOPS = 5
 local qr_seq = 0
 local qr_file
 
@@ -41,17 +45,35 @@ local function saveCfg(patch)
     Settings.saveSource("jdread", current)
 end
 
+--- 全部 Set-Cookie 行：优先 Request.headerAll（Turbo 多值 / 合并行都拆好），否则退回单值读取。
+---@param res table|nil
+---@return string[]
+local function setCookieLines(res)
+    if Request.headerAll then return Request.headerAll(res, "Set-Cookie") end
+    local values = Request.header(res, "Set-Cookie")
+    local out = {}
+    local split = require("http.request.header").splitSetCookie
+    for _idx, value in ipairs(type(values) == "table" and values or { values }) do
+        for _j, line in ipairs(split(value)) do out[#out + 1] = line end
+    end
+    return out
+end
+
+--- 合并响应里的每一条 Set-Cookie；返回本跳设置的 cookie 名（只名字，不含值，供日志）。
 ---@param jar table
 ---@param res table|nil
+---@return string[] names
 local function mergeCookies(jar, res)
-    local values = Request.header(res, "Set-Cookie")
-    if type(values) == "string" then values = { values } end
-    for _idx, line in ipairs(type(values) == "table" and values or {}) do
+    local names = {}
+    for _idx, line in ipairs(setCookieLines(res)) do
         local key, value = line:match("^%s*([^=;]+)=([^;]*)")
         if key then
-            if value == "" then jar[key] = nil else jar[key] = value end
+            key = key:match("^%s*(.-)%s*$")
+            if value == "" or value == "deleted" then jar[key] = nil else jar[key] = value end
+            names[#names + 1] = key
         end
     end
+    return names
 end
 
 ---@param jar table
@@ -106,22 +128,6 @@ local function dropQrCookies(jar)
     for _idx, key in ipairs(QR_COOKIE_KEYS) do
         jar[key] = nil
     end
-end
-
---- 去掉扫码临时 cookie 之后还剩什么；不改 jar。
----@param jar table
----@return string|nil
-local function sessionCookie(jar)
-    local saved = {}
-    for _idx, key in ipairs(QR_COOKIE_KEYS) do
-        saved[key] = jar[key]
-        jar[key] = nil
-    end
-    local cookie = cookieHeader(jar)
-    for key, value in pairs(saved) do
-        jar[key] = value
-    end
-    return cookie
 end
 
 ---@param base string
@@ -259,7 +265,52 @@ function Auth.waitQrLoginAsync(login, cb)
         end }
 end
 
+---@param jar table
+---@return boolean
+local function hasLoginCookie(jar)
+    for _idx, key in ipairs(LOGIN_COOKIE_KEYS) do
+        local value = jar[key]
+        if type(value) == "string" and value ~= "" then return true end
+    end
+    return false
+end
+Auth._hasLoginCookie = hasLoginCookie
+
+--- jar 里的 cookie 名（排序），日志用，绝不含值。
+---@param jar table
+---@return string
+local function cookieNames(jar)
+    local keys = {}
+    for key in pairs(jar) do keys[#keys + 1] = key end
+    table.sort(keys)
+    return table.concat(keys, ",")
+end
+
+--- 去掉 query / fragment（ticket 等敏感参数在 query 里）。
+---@param url string|nil
+---@return string
+local function safeUrl(url)
+    if type(url) ~= "string" then return "-" end
+    return (url:gsub("[?#].*$", ""))
+end
+
+--- 200 中转页里的 JS / meta 跳转目标。
+---@param body string|nil
+---@return string|nil
+local function pageRedirect(body)
+    if type(body) ~= "string" or body == "" then return nil end
+    local target = body:match("[Hh][Tt][Tt][Pp]%-[Ee][Qq][Uu][Ii][Vv]%s*=%s*[\"']?[Rr]efresh[\"']?[^>]-[Uu][Rr][Ll]%s*=%s*([^\"'>%s]+)")
+        or body:match("location%.replace%s*%(%s*[\"']([^\"']+)[\"']")
+        or body:match("location%.href%s*=%s*[\"']([^\"']+)[\"']")
+        or body:match("location%s*=%s*[\"']([^\"']+)[\"']")
+    if target then target = target:gsub("&amp;", "&") end
+    return target
+end
+Auth._pageRedirect = pageRedirect
+
 --- 使用扫码 ticket 换取登录 Cookie 并原子保存源配置。
+--- 成功 = jar 里出现 thor/pt_key/pin 等登录 cookie；校验之后跟 Location / data.url / 页面跳转最多 5 跳，
+--- 都没拿到再补一跳 e.m.jd.com。每一步只记 cookie 名，不记值。
 ---@param info { ticket: string, jar: table } waitQrLoginAsync 的结果
 ---@param cb fun(user: { user_name: string }|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -268,15 +319,27 @@ function Auth.completeQrLoginAsync(info, cb)
     local cancelled = false
     local job
     local hops = 0
+    local visited = {}
+
+    ---@param step string
+    ---@param res table|nil
+    ---@param names string[]
+    ---@param extra string|nil
+    local function trace(step, url, res, names, extra)
+        logger.dbg("jdread login", step, safeUrl(url), "status", res and res.code or "-",
+            "set-cookie", #names, "names", table.concat(names, ","),
+            "location", safeUrl(Request.header(res, "Location")), extra or "")
+    end
 
     local function persist()
         dropQrCookies(jar)
-        local cookie = cookieHeader(jar)
-        if not cookie then
+        if not hasLoginCookie(jar) then
+            logger.warn("jdread login no session cookie", "hops", hops, "jar", cookieNames(jar))
             clearQrFile()
             cb(nil, _("登录未拿到会话 Cookie"))
             return
         end
+        local cookie = cookieHeader(jar)
         local Settings = require("utils.settings")
         local current = Settings.getSource("jdread")
         local name = Text.urlDecode(jar.unick or jar.pin or "") or ""
@@ -285,25 +348,44 @@ function Auth.completeQrLoginAsync(info, cb)
             and current.uuid or ("h5" .. require("ffi/sha2").md5(require("utils.device_id").ensure()))
         current.user_name = name
         Settings.saveSource("jdread", current)
+        logger.info("jdread login ok", "hops", hops, "jar", cookieNames(jar))
         clearQrFile()
         cb({ user_name = name })
     end
 
-    --- 校验成功但这一跳没 Set-Cookie：跟 JSON.url / Location，最多两跳。
+    local follow
+    --- 下一跳：Location → 页面跳转 → 兜底首页；都用过了返回 nil。
+    local function nextUrl(base, body, res)
+        if hops >= MAX_HOPS then return nil end
+        -- 候选可能为 nil，不能用 ipairs。
+        local candidates = {
+            absUrl(base, Request.header(res, "Location")) or false,
+            absUrl(base, pageRedirect(body)) or false,
+            HOME,
+        }
+        for i = 1, #candidates do
+            local url = candidates[i]
+            if url and not visited[url] then return url end
+        end
+        return nil
+    end
+
     --- 不走 Request.allow_redirects，302 的 Set-Cookie 在 res 里。
-    local function follow(url)
+    follow = function(url)
         hops = hops + 1
+        visited[url] = true
         job = Request.get(url, {
             headers = browserHeaders(jar),
             timeout = require("http.timeout").net(1),
-        }, function(_body, _err, res)
+        }, function(body, _err, res)
             if cancelled then return end
-            mergeCookies(jar, res)
-            if sessionCookie(jar) then
+            local names = mergeCookies(jar, res)
+            trace("hop " .. hops, url, res, names)
+            if hasLoginCookie(jar) then
                 persist()
                 return
             end
-            local next_url = hops < 2 and absUrl(url, Request.header(res, "Location"))
+            local next_url = nextUrl(url, body, res)
             if next_url then
                 follow(next_url)
                 return
@@ -321,26 +403,30 @@ function Auth.completeQrLoginAsync(info, cb)
         timeout = require("http.timeout").net(1),
     }, function(raw, err, res)
         if cancelled then return end
-        mergeCookies(jar, res)
+        local names = mergeCookies(jar, res)
+        local ok, data = pcall(JSON.decode, raw or "")
+        local code = ok and type(data) == "table" and tonumber(data.returnCode) or nil
+        trace("validate", url, res, names, "returnCode " .. tostring(code)
+            .. " url " .. safeUrl(type(data) == "table" and data.url or nil))
         if not raw then
+            logger.warn("jdread login validate failed", tostring(err))
             clearQrFile()
             cb(nil, err or _("京东登录校验失败"))
             return
         end
-        local ok, data = pcall(JSON.decode, raw)
-        local code = ok and type(data) == "table" and tonumber(data.returnCode) or nil
         if code ~= 0 then
+            logger.warn("jdread login validate rejected", "returnCode", tostring(code))
             clearQrFile()
             local msg = _(TICKET_ERRORS[code] or "京东登录校验失败")
             cb(nil, code and (msg .. " (" .. code .. ")") or msg)
             return
         end
-        if sessionCookie(jar) then
+        if hasLoginCookie(jar) then
             persist()
             return
         end
         local hop = data.url
-        follow(type(hop) == "string" and hop ~= "" and hop or HOME)
+        follow(absUrl(url, type(hop) == "string" and hop ~= "" and hop or nil) or HOME)
     end)
     return { cancel = function()
             cancelled = true
