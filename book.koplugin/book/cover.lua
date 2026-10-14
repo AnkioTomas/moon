@@ -37,6 +37,9 @@ function Cover.save(doc, target)
             bb = scaled
         end
     end
+    -- 清理缓存会删掉 cache/<source>/image 目录；任何源（含扫盘子进程）补封面前都要先建好。
+    local dir = target:match("^(.*)/[^/]+$")
+    if dir then require("utils.paths").ensureDir(dir) end
     local tmp = target .. ".part"
     local ok = pcall(function() bb:writePNG(tmp) end)
     pcall(function() bb:free() end)

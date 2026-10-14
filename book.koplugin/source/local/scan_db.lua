@@ -56,4 +56,11 @@ function ScanDB.save(old, files)
     end) ~= nil
 end
 
+--- 清空「试过补封面」标记：封面缓存（.moon/cache）被整体清掉后调用，下一轮扫盘对缺封面的书重新提取。
+--- 不动 fp / md5，扫盘仍走指纹快路径，不会整库重算。
+---@return boolean
+function ScanDB.resetCovers()
+    return DB.exec("UPDATE local_scan SET cover=0 WHERE cover<>0;") ~= nil
+end
+
 return ScanDB

@@ -109,7 +109,9 @@ function Cache.clearAsync(cb)
     -- 只清 cache 目录下的路径登记；本地源外部文件路径与书籍元数据必须保留。
     -- 先清 DB 再删文件：即使文件删除失败，DB 记录已干净，不会产生孤立引用。
     -- db.* 不抛错，失败只体现在返回值上。
-    if not (ChapterDB.deleteUnder(dir) and BookDB.clearPathsUnder(dir)) then
+    -- 本地源扫盘索引里的「试过补封面」标记也要清：封面就在 cache 里，不清的话扫盘认为已试过、永不重新提取。
+    if not (ChapterDB.deleteUnder(dir) and BookDB.clearPathsUnder(dir)
+        and require("source.local.scan_db").resetCovers()) then
         logger.warn("book cache db clear failed, skipping file purge")
         cb(false, "db clear failed")
         return { cancel = function() end }
@@ -126,6 +128,9 @@ function Cache.clearAsync(cb)
             return
         end
         Paths.ensureCacheRoot()
+        -- 内存侧随磁盘一起作废：位图缓存与下载失败退避，封面按需重新下载 / 提取。
+        require("ui.themes.widgets.image.core").invalidateAll()
+        require("ui.themes.widgets.image.download").resetFailed()
         logger.info("book cache cleared", dir)
         cb(true)
     end)

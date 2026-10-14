@@ -79,3 +79,11 @@ Assert.eq(scaled_to, "666x1000")
 Assert.eq(read(target), "png")
 Assert.eq(freed, 2, "原图与缩图都释放")
 os.remove(target)
+
+-- 清理缓存删掉了封面目录：补封面时自动重建目录。
+local gone = dir .. "/cleared/image"
+local gone_target = gone .. "/c.png"
+os.remove(gone_target); os.remove(gone); os.remove(dir .. "/cleared")
+Cover.save(doc(image), gone_target)
+Assert.eq(read(gone_target), "png")
+os.remove(gone_target); os.remove(gone); os.remove(dir .. "/cleared")

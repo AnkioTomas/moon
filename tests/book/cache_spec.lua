@@ -122,6 +122,18 @@ package.preload["book.chapters_db"] = function()
     }
 end
 
+local mem_resets = 0
+package.preload["ui.themes.widgets.image.core"] = function()
+    return { invalidateAll = function() mem_resets = mem_resets + 1 end }
+end
+package.preload["ui.themes.widgets.image.download"] = function()
+    return { resetFailed = function() mem_resets = mem_resets + 10 end, cached = function() return nil end }
+end
+local cover_resets = 0
+package.preload["source.local.scan_db"] = function()
+    return { resetCovers = function() cover_resets = cover_resets + 1; return true end }
+end
+
 package.loaded["book.cache"] = nil
 local Cache = require("book.cache")
 
@@ -196,6 +208,8 @@ do
     -- 只清 cache 内的路径登记；本地书路径与元数据不是缓存。
     Assert.contains(db_log.chapter_delete_under, CACHE)
     Assert.contains(db_log.book_clear_under, CACHE)
+    Assert.eq(cover_resets, 1, "本地扫盘的「试过补封面」标记随缓存一起复位")
+    Assert.eq(mem_resets, 11, "位图缓存与下载失败退避一起作废")
     Assert.eq(#book_rows, 1)
     Assert.eq(book_rows[1].path, "/books/local.epub")
     Assert.eq(book_rows[1].title, "本地书")
@@ -277,6 +291,9 @@ for _, name in ipairs({
     "book.books_db",
     "book.chapters_db",
     "ui.themes.widgets.image",
+    "source.local.scan_db",
+    "ui.themes.widgets.image.core",
+    "ui.themes.widgets.image.download",
     "book.cache",
 }) do
     package.preload[name] = nil
