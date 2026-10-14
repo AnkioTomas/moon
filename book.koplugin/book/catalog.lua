@@ -352,7 +352,14 @@ function Catalog.listBooks(source_id, opts)
     if opts.downloaded then
         where = where .. " AND " .. BookDB.downloadedClause(opts.chapter_sources, args)
     end
-    local total = tonumber(DB.rowexec("SELECT COUNT(*) FROM books b WHERE " .. where .. ";", unpack(args))) or 0
+    -- 「最近阅读」是「读过的书按最近一次读排序」：没进度行的书根本没读过，
+    -- 不该混在列表里（否则整库都会排在后面）。其余排序保持 LEFT JOIN，全库都列。
+    local join = " LEFT JOIN pending_progress p ON p.source_id=b.source_id AND p.stable_id=b.stable_id"
+    if opts.sort == "recent_read" then
+        join = " JOIN pending_progress p ON p.source_id=b.source_id AND p.stable_id=b.stable_id"
+    end
+    local total = tonumber(DB.rowexec("SELECT COUNT(*) FROM books b" .. join .. " WHERE " .. where .. ";",
+        unpack(args))) or 0
     if total == 0 then
         return {}, 0
     end
@@ -373,8 +380,7 @@ function Catalog.listBooks(source_id, opts)
                         COALESCE(p.fraction * 100, 0),
                         b.category, b.series, b.intro, b.cover, b.inserted_at,
                         b.read_state, b.path, ]] .. downloaded .. [[
-                   FROM books b LEFT JOIN pending_progress p
-                     ON p.source_id=b.source_id AND p.stable_id=b.stable_id
+                   FROM books b]] .. join .. [[
                    WHERE ]] .. where .. " ORDER BY " .. order
     for _idx, v in ipairs(args) do sel_args[#sel_args + 1] = v end
     if limit > 0 then

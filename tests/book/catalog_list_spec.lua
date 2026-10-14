@@ -199,6 +199,23 @@ do
     Assert.eq(calls[1].args[2], "wechat")
     Assert.eq(calls[1].args[3], "jdread")
 
+    -- 「最近阅读」只列读过的书：计数与列表都用 INNER JOIN，没进度行的书不进来。
+    calls = {}
+    Catalog.listBooks("local", { sort = "recent_read", limit = 24 })
+    Assert.is_true(calls[1].sql:find("FROM books b JOIN pending_progress p", 1, true) ~= nil,
+        "计数也按「读过」筛")
+    Assert.is_nil(calls[1].sql:find("LEFT JOIN pending_progress", 1, true))
+    Assert.is_true(calls[2].sql:find("FROM books b JOIN pending_progress p", 1, true) ~= nil)
+    Assert.is_true(calls[2].sql:find("ORDER BY COALESCE(p.updated_at, 0) DESC", 1, true) ~= nil,
+        "按最近一次读排序")
+    -- 其它排序仍 LEFT JOIN：按书名 / 加入时间排要列出全库。
+    calls = {}
+    Catalog.listBooks("local", { sort = "title" })
+    Assert.is_true(calls[1].sql:find("LEFT JOIN pending_progress", 1, true) ~= nil)
+    calls = {}
+    Catalog.listBooks("local", { sort = "recent_added" })
+    Assert.is_true(calls[1].sql:find("LEFT JOIN pending_progress", 1, true) ~= nil)
+
     DbBase.close()
     clearMods()
 end
