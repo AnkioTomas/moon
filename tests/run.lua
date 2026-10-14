@@ -85,6 +85,10 @@ local function snapshot(t)
     return s
 end
 
+-- ffi 必须先于基线加载：若被卸载后再 require，luaopen_ffi 会重建 ctype 表，
+-- 旧 cdata 的 ctypeid 越界，GC 回收时读野内存 → 偶发段错误（CI exit 139）。
+require("ffi")
+
 local base_preload = snapshot(package.preload)
 local base_loaded = snapshot(package.loaded)
 local base_os = snapshot(os)
