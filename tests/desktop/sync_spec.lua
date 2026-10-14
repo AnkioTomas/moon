@@ -328,6 +328,19 @@ do
     holds["local"]({ skipped = true })
     holds.wechat({ skipped = true })
 
+    -- 混合模式打开桌面的书架后台同步有节流：刚同步过（含手动刷新）不再发起。
+    synced = {}
+    Sync.open(desk)
+    Assert.eq(#synced, 0, "混合模式书架后台同步节流")
+
+    -- 一个已配置的源都没有：手动刷新要说明原因。
+    pool["local"].configured = function() return false end
+    pool.wechat.configured = function() return false end
+    Themed.last("toast").text = nil
+    Sync.refresh(desk)
+    Assert.eq(#synced, 0)
+    Assert.eq(Themed.last("toast").text, "请先完成数据源设置，再刷新书库。")
+
     for k, fn in pairs(saved) do Registry[k] = fn end
     MoonSettings.get("source").library_mixed = was_mixed
 end
