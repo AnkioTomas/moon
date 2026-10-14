@@ -450,7 +450,7 @@ end
 local function extractFile(f, dir)
     local section, count, header = openBook(f)
     if not header then return nil end
-    if u16(header, 12) ~= 0 then error("DRM-encrypted AZW3 is not supported") end
+    if require("utils.mobi").encryption(header) ~= 0 then error("DRM-encrypted AZW3 is not supported") end
     local fdstidx = u32(header, 0xC0)
     local first_image = u32(header, 0x6C)
     local ncxidx = u32(header, 0xF4)
