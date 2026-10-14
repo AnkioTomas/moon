@@ -307,7 +307,7 @@ end
 --- 书库分页查询：books 筛选 + LEFT JOIN pending_progress 取进度与最近阅读排序；每行带 downloaded。
 ---@param source_id string|string[]
 ---@param opts table|nil limit/offset/sort/sort_desc/chapter_sources 及 BookListOpts 的筛选项
----@return table[] rows, number count
+---@return table[] rows, number count, string|nil err 查询出错时 rows 为空表、err 非空（区别于真的 0 本）
 function Catalog.listBooks(source_id, opts)
     opts = opts or {}
     local DB = require("utils.db")
@@ -352,7 +352,11 @@ function Catalog.listBooks(source_id, opts)
     if opts.downloaded then
         where = where .. " AND " .. BookDB.downloadedClause(opts.chapter_sources, args)
     end
-    local total = tonumber(DB.rowexec("SELECT COUNT(*) FROM books b WHERE " .. where .. ";", unpack(args))) or 0
+    local count_raw = DB.rowexec("SELECT COUNT(*) FROM books b WHERE " .. where .. ";", unpack(args))
+    if count_raw == nil then
+        return {}, 0, "query failed"
+    end
+    local total = tonumber(count_raw) or 0
     if total == 0 then
         return {}, 0
     end
@@ -383,6 +387,9 @@ function Catalog.listBooks(source_id, opts)
         sel_args[#sel_args + 1] = math.max(0, offset)
     end
     local result, nrows = DB.query(sel .. ";", unpack(sel_args))
+    if not result then
+        return {}, 0, "query failed"
+    end
     local rows = {}
     for i = 1, nrows do
         rows[i] = {
@@ -415,7 +422,7 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
     local page = math.max(1, tonumber(opts.page) or 1)
     local page_size = math.max(1, tonumber(opts.page_size) or 24)
     return deferScoped(source_id, cb, function(scope)
-        local rows, count = Catalog.listBooks(scope, {
+        local rows, count, err = Catalog.listBooks(scope, {
             category = opts.category,
             uncategorized = opts.uncategorized,
             series = opts.series,
@@ -432,6 +439,11 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             limit = page_size,
             offset = (page - 1) * page_size,
         })
+        if err then
+            -- 库查询出错不能显示成「0 本」：交给图书馆页显示「加载失败」。
+            cb(nil, _("加载失败"))
+            return
+        end
         cb(Catalog.toList(rows, count, type(scope) == "string" and scope or nil))
     end)
 end
