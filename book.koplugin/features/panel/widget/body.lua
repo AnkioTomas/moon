@@ -53,7 +53,7 @@ end
 ---@field addable (fun(): BookQuickPanelEditAddOption[])|nil 可添加动作列表工厂
 ---@field show_parent table|nil 原生菜单宿主，供滑杆脏区使用
 ---@field dimen table|nil 当前内容绝对尺寸
----@field ges_events table|nil 非编辑态挂长按进编辑
+---@field ges_events table 非编辑态挂长按进编辑；编辑态为空表（不能是 nil，手势会 pairs(nil) 崩）
 ---@field updateView fun(self: BookQuickPanelBody)
 
 local Body = InputContainer:extend{
@@ -157,7 +157,9 @@ function Body:updateView()
 
     self[1] = group
     self.dimen = Geom:new{ w = self.width, h = group:getSize().h }
-    self.ges_events = nil
+    -- 不挂长按也要给空表：InputContainer:onGesture 会 pairs(self.ges_events)，
+    -- nil 会被任意手势打成 pairs(nil) 报错（现场编辑态 / 宿主不支持编辑时就是这个状态）。
+    self.ges_events = {}
     if not editing and self.on_enter_edit then
         self.ges_events = {
             HoldPanelEdit = {

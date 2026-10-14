@@ -125,7 +125,11 @@ local editing = Body:new{
 Assert.eq(wraps, 2)
 Assert.eq(dones, 1)
 Assert.eq(adds, 1)
-Assert.is_nil(editing.ges_events)
+-- 编辑态不挂长按，但必须是空表而不是 nil：InputContainer:onGesture 会 pairs(self.ges_events)，
+-- nil 被任意手势碰到就是 pairs(nil) 报错（真机上报「月读出错了」）。
+Assert.not_nil(editing.ges_events)
+Assert.is_nil(editing.ges_events.HoldPanelEdit)
+Assert.eq(#editing.ges_events, 0, "编辑态手势表为空：既不挂长按也不会让 pairs 崩")
 
 -- 前移 / 后移按可见顺序找邻居：完整启用列表里可能夹着当前不可用的项，不能交给 ±1。
 local swaps = {}
