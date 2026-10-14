@@ -86,6 +86,7 @@ local function query(opts, key) return opts.url:match("[?&]" .. key .. "=([^&]*)
 -- 书库：books 行（path）、目录缓存、本地进度。
 local books, tocs, stale, progress, remembered, touched, reconciled = {}, {}, {}, {}, {}, {}, nil
 local fixed = {}
+local dropped = {}
 local toc_fresh = true
 local shelf_ids, written = {}, {}
 package.loaded["book.books_db"] = {
@@ -101,6 +102,10 @@ package.loaded["book.progress_db"] = {
     end,
     fixRemoteTime = function(_sid, id, at)
         fixed[id] = at
+        return true
+    end,
+    dropRemote = function(_sid, id)
+        dropped[#dropped + 1] = id
         return true
     end,
 }
@@ -345,6 +350,7 @@ Stubs.flush()
 Assert.eq(opened, WORK .. "/20:2002/2002.epub")
 Assert.eq(remembered["20:2002"].title, "合集 · 第二卷")
 Assert.eq(remembered["20:2002"].series, "合集")
+Assert.eq(remembered["20:2002"].authors, "丙", "卷行继承容器作者，最近阅读里不再是未知作者")
 Assert.is_nil(remembered["20:2002"].deleted, "卷行不上书架")
 
 -- 关掉选卷列表 = 取消。
@@ -580,7 +586,16 @@ local read_route = json({
     { id = 701, name = "读完了", libraryName = "书籍", format = 3, pages = 10, pagesRead = 10,
       lastChapterAdded = "2026-02-03T11:05:06.1", lastChapterAddedUtc = "2026-02-03T03:05:06.1",
       latestReadDate = "2026-02-03T04:05:06.123" },
+    { id = 710, name = "多卷书", libraryName = "书籍", format = 3, pages = 300, pagesRead = 90,
+      lastChapterAdded = "2026-02-03T11:05:06.1", lastChapterAddedUtc = "2026-02-03T03:05:06.1",
+      latestReadDate = "2026-02-03T04:05:06.123" },
 })
+-- 多卷 series：卷行上已经有进度 → 不再往容器行回填（否则最近阅读会多一条没阅读位置的重复条目），
+-- 早先回填过的容器占位行也要清掉。
+tocs["710"] = { { chapterId = 7101, title = "上" }, { chapterId = 7102, title = "下" } }
+progress["710:7101"] = { fraction = 0.3, updated_at = os.time() - 3600 }
+progress["710"] = { fraction = 0.5, updated_at = os.time() - 3600 }
+books["710"] = { title = "多卷书", authors = "甲", intro = "简介", category = "书籍" }
 routes["POST /api/Series/all-v2"] = read_route
 written = {}
 run("syncBooksAsync", { force = true })
@@ -590,6 +605,13 @@ Assert.is_nil(written["700"].page, "epub 不写页码：Kavita 的页是 spine")
 -- 按 UTC 解析会存成 1770091506（8 小时后的未来），刚读完的书就会被它压在下面。
 Assert.eq(written["700"].updated_at, 1770062706, "latestReadDate 按服务器时区换成真 epoch")
 Assert.eq(written["701"].fraction, 1, "读完的写满比例，进步进「已读」")
+Assert.is_nil(written["710"], "按卷读的书不再往容器行回填，避免重复条目")
+Assert.eq(remembered["710:7101"].authors, "甲", "读过的卷行继承容器作者，不再显示未知作者")
+Assert.eq(remembered["710:7101"].title, "多卷书 · 上")
+Assert.eq(remembered["710:7101"].category, "书籍")
+dropped = {}
+run("syncBooksAsync", { force = true })
+Assert.eq(dropped[1], "710", "容器行残留的占位进度被清掉")
 written = {}
 progress["700"] = { fraction = 0.4 }
 run("syncBooksAsync", { force = true })

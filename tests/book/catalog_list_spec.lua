@@ -205,16 +205,20 @@ do
     Assert.is_true(calls[1].sql:find("FROM books b JOIN pending_progress p", 1, true) ~= nil,
         "计数也按「读过」筛")
     Assert.is_nil(calls[1].sql:find("LEFT JOIN pending_progress", 1, true))
+    Assert.is_true(calls[1].sql:find("(b.deleted=0 OR b.sync_status=1)", 1, true) ~= nil,
+        "卷行这种非书架成员也要列进最近阅读")
     Assert.is_true(calls[2].sql:find("FROM books b JOIN pending_progress p", 1, true) ~= nil)
     Assert.is_true(calls[2].sql:find("ORDER BY COALESCE(p.updated_at, 0) DESC", 1, true) ~= nil,
         "按最近一次读排序")
-    -- 其它排序仍 LEFT JOIN：按书名 / 加入时间排要列出全库。
+    -- 其它排序仍 LEFT JOIN + 只在架：按书名 / 加入时间排要列出全库。
     calls = {}
     Catalog.listBooks("local", { sort = "title" })
     Assert.is_true(calls[1].sql:find("LEFT JOIN pending_progress", 1, true) ~= nil)
+    Assert.is_true(calls[1].sql:find("b.deleted=0", 1, true) ~= nil)
     calls = {}
     Catalog.listBooks("local", { sort = "recent_added" })
     Assert.is_true(calls[1].sql:find("LEFT JOIN pending_progress", 1, true) ~= nil)
+    Assert.is_true(calls[1].sql:find("b.deleted=0", 1, true) ~= nil)
 
     DbBase.close()
     clearMods()

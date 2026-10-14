@@ -181,6 +181,52 @@ local function readTime(series)
     return t - serverOffset(series) + clientOffset()
 end
 
+--- series 的目录缓存（打开过才有）+ 其中已经在本地读过（有进度）的卷。
+--- 多卷 series 的进度分别记在各卷行上（stable_id = seriesId:chapterId）：
+--- 回填要跳过容器行，而读过的卷行要继承容器元数据。
+---@param source_id string
+---@param series_id string
+---@param ProgressDB table
+---@return table[]|nil toc
+---@return table[] progressed 读过的卷表项
+local function progressedVolumes(source_id, series_id, ProgressDB)
+    local toc = require("source.toc").read(source_id, series_id)
+    if type(toc) ~= "table" or #toc < 2 then return nil, {} end
+    local out = {}
+    for _idx, entry in ipairs(toc) do
+        local chapter_id = entry.chapterId or entry.uid
+        if chapter_id ~= nil and ProgressDB.get(source_id, series_id .. ":" .. tostring(chapter_id)) then
+            out[#out + 1] = entry
+        end
+    end
+    return toc, out
+end
+
+--- 读过的卷行继承容器元数据（作者 / 简介 / 分类 / 系列）。
+--- Kavita 只在 series 级给这些字段，而最近阅读列的是卷行：卷行空着就是「未知作者」。
+--- 容器补全后卷行也跟着对齐（每次同步跑一遍，幂等）。
+---@param series Book|nil 容器书行
+---@param series_id string
+---@param entries table[] 读过的卷表项
+local function syncVolumeMeta(series, series_id, entries)
+    if not series or #entries == 0 then return end
+    local rows = {}
+    for _idx, entry in ipairs(entries) do
+        local chapter_id = entry.chapterId or entry.uid
+        rows[#rows + 1] = {
+            source_id = ID,
+            stable_id = series_id .. ":" .. tostring(chapter_id),
+            title = T("%1 · %2", series.title or "", entry.title or ""),
+            authors = series.authors,
+            intro = series.intro,
+            category = series.category,
+            series = series.title,
+            -- cover 不继承：卷封面走源自己的 chapter-cover 接口。
+        }
+    end
+    require("book.store").rememberMany(rows)
+end
+
 --- 服务端已读回填成本地进度（远端版，本地脏行不覆盖），书架 /「最近阅读」/「已读」都看得到。
 --- Kavita 只在 series 级记 pagesRead/pages 与 latestReadDate：
 ---   - 漫画：series 级页数就是阅读页，本地同页不重写。
@@ -205,7 +251,15 @@ local function backfillRead(source_id, series_list)
             if here and at and (tonumber(here.updated_at) or 0) > now + 60 then
                 ProgressDB.fixRemoteTime(source_id, stable_id, at)
             end
-            if (comic and not (here and here.page == read)) or (not comic and here == nil) then
+            local _toc, progressed = progressedVolumes(source_id, stable_id, ProgressDB)
+            if #progressed > 0 then
+                -- 读过的卷行继承容器元数据（作者 / 简介 / 分类），否则最近阅读里那几卷是未知作者。
+                syncVolumeMeta(require("book.books_db").get(source_id, stable_id), stable_id, progressed)
+                -- 真实进度在卷行上；容器行的 series 级占位是多余的（旧版回填过就清掉）。
+                if here and ProgressDB.dropRemote(source_id, stable_id) then
+                    changed = changed + 1
+                end
+            elseif (comic and not (here and here.page == read)) or (not comic and here == nil) then
                 if ProgressDB.upsertRemote(source_id, stable_id, {
                     fraction = math.min(1, read / pages),
                     page = comic and read or nil,
@@ -624,10 +678,13 @@ function Source:openBookAsync(identity, _opts, cb)
             if cancelled then return end
             if not entry then return finish(nil, _("已取消")) end
             local ref = { source_id = self.id, stable_id = series_id .. ":" .. entry.chapterId }
+            -- 卷行继承容器（series 级）元数据：Kavita 只在 series 级给作者 / 简介 / 分类，
+            -- 卷行自己空着，最近阅读里就是「未知作者」。每次开书对齐一次，容器补全后立刻生效。
             require("book.store").rememberMany({ {
                 source_id = self.id, stable_id = ref.stable_id,
                 title = T("%1 · %2", series.title or "", entry.title),
                 authors = series.authors, series = series.title,
+                intro = series.intro, category = series.category,
             } })
             job = self:openEntry(ref, entry, toc, series.title or entry.title, finish)
         end)
