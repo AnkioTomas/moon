@@ -42,6 +42,7 @@ end
 
 do
     local calls = {}
+    local fail_count = false
     local connection = {
         exec = function() end,
         close = function() end,
@@ -55,6 +56,7 @@ do
                     return self
                 end,
                 step = function()
+                    if fail_count then error("database is locked") end
                     if sql:find("COUNT", 1, true) then
                         return { 7 }, { "COUNT(*)" }
                     end
@@ -198,6 +200,15 @@ do
     Assert.eq(calls[1].args[1], "local")
     Assert.eq(calls[1].args[2], "wechat")
     Assert.eq(calls[1].args[3], "jdread")
+
+
+    -- 查询出错：不能当成 0 本，带 err 返回
+    fail_count = true
+    local err_rows, err_count, err = Catalog.listBooks("local", { limit = 24 })
+    fail_count = false
+    Assert.len(err_rows, 0)
+    Assert.eq(err_count, 0)
+    Assert.not_nil(err, "库查询出错要带错误，图书馆页据此显示「加载失败」")
 
     DbBase.close()
     clearMods()

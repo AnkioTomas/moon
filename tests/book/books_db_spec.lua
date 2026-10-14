@@ -450,6 +450,26 @@ do
     clearMods()
 end
 
+-- ── reconcile 空快照：自动同步不下架；allow_empty（手动刷新 / 本地扫盘）照常下架 ──
+do
+    local connection, calls = makeConn({ resultset = function() return { {} }, 0 end })
+    local DbBase, BookDB = loadBook(connection)
+    local function deactivated()
+        for _, call in ipairs(calls) do
+            if call.sql:find("UPDATE books SET deleted=1", 1, true) then return true end
+        end
+        return false
+    end
+    local ok, hidden = BookDB.reconcile("moon", {})
+    Assert.is_true(ok)
+    Assert.eq(hidden, 0)
+    Assert.is_false(deactivated(), "自动同步拿到空书架不下架")
+    Assert.is_true(BookDB.reconcile("moon", {}, { allow_empty = true }))
+    Assert.is_true(deactivated(), "手动刷新认空快照")
+    DbBase.close()
+    clearMods()
+end
+
 -- ── markDeleted / pendingDeleteIds：本地软删入脏队列 ──
 do
     local connection, calls = makeConn({

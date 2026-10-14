@@ -192,7 +192,8 @@ local function commitFiles(files, known, full_snapshot)
         end
     end
     if not full_snapshot then return true end
-    if not BookDB.reconcile(SOURCE_ID, files, { clear_missing_paths = true }) then return false end
+    -- 盘上就是真相：扫盘成功（列目录失败会整轮报错）时空目录也要下架。
+    if not BookDB.reconcile(SOURCE_ID, files, { clear_missing_paths = true, allow_empty = true }) then return false end
     -- 库目录就是纯本地书的“远端”：扫到即确认。不清脏的话文件被外部删掉后 reconcile 永远不下架它。
     -- 库目录外开过的书不在快照里，保持脏行，不被下架。
     local ids = {}

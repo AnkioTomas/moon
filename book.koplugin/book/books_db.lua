@@ -335,11 +335,15 @@ end
 --- 远端书架快照入库：先把当前在架标软删，再 upsert 远端成员。
 ---@param source_id string
 ---@param books table[]
----@param opts { clear_missing_paths: boolean|nil, force: boolean|nil }|nil force：用户强制刷新，快照里的 meta 覆盖已有键
+---@param opts { clear_missing_paths: boolean|nil, force: boolean|nil, allow_empty: boolean|nil }|nil force：用户强制刷新，快照里的 meta 覆盖已有键；allow_empty：空快照也照常下架（手动刷新 / 本地扫盘）
 ---@return boolean ok
 ---@return integer|nil hidden 原本在架、本次快照里缺席的行数
 function BookDB.reconcile(source_id, books, opts)
     opts = opts or {}
+    -- 自动同步拿到空书架多半是接口抖动 / 会话失效：不下架，免得书架整个变空；用户手动刷新才认空快照。
+    if #books == 0 and not opts.allow_empty then
+        return true, 0
+    end
     local hidden = DB.transaction(function()
         local incoming = {}
         for _idx, book in ipairs(books) do

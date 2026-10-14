@@ -27,7 +27,7 @@ local Shelf = {}
 ---@return SyncResult|nil result
 ---@return string|nil err
 function Shelf.reconcile(source_id, books, force)
-    local ok, hidden = require("book.books_db").reconcile(source_id, books, { force = force })
+    local ok, hidden = require("book.books_db").reconcile(source_id, books, { force = force, allow_empty = force })
     if not ok then return nil, "failed to reconcile books" end
     return { pulled = #books, pushed = 0, hidden = hidden, conflicts = 0, skipped = false }
 end
