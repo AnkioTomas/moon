@@ -749,13 +749,21 @@ do
     Assert.eq(code6, 500)
     has(body6, "disk full")
 
-    -- 缺省冲突策略是询问：目标已存在 → 409，不落位
+    -- 显式 ask：目标已存在 → 409，不落位
     local h7, calls7 = fakeHandlers({ ["/inbox"] = {} })
     h7.path_exists = function(path) return path == "/inbox/x" end
-    local c7 = newClient({ "PUT /upload?dir=/inbox&name=x HTTP/1.1\r\nContent-Length: 1\r\n\r\nZ" })
+    local c7 = newClient({ "PUT /upload?dir=/inbox&name=x&conflict=ask HTTP/1.1\r\nContent-Length: 1\r\n\r\nZ" })
     drain(serve(c7, h7))
     Assert.eq((parseResponse(c7:output())), 409)
     Assert.is_nil(calls7.save)
+
+    -- 缺省冲突策略是直接覆盖：目标已存在也落位
+    local h8, calls8 = fakeHandlers({ ["/inbox"] = {} })
+    h8.path_exists = function(path) return path == "/inbox/x" end
+    local c8 = newClient({ "PUT /upload?dir=/inbox&name=x HTTP/1.1\r\nContent-Length: 1\r\n\r\nZ" })
+    drain(serve(c8, h8))
+    Assert.eq((parseResponse(c8:output())), 200)
+    Assert.not_nil(calls8.save)
 end
 
 -- Expect: 100-continue 也必须走部分写缓冲，不能靠一次 send 碰运气。
