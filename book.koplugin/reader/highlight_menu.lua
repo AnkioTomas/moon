@@ -211,6 +211,10 @@ local function patchShowMenu()
         if not self.selected_text then
             return
         end
+        -- 扫描页选区没有文字层：先 OCR，按钮才拿得到文字；识别不出来就提示并不弹菜单。
+        if not require("features.ocr").fillSelection(self) then
+            return
+        end
         forgetMissing(self)
         local ButtonDialog = require("ui/widget/buttondialog")
         local UIManager = require("ui/uimanager")
