@@ -64,6 +64,16 @@ Assert.is_true(Bars.timeText(0):match("^%d%d:%d%d$") ~= nil)
 Assert.is_true(Bars.timeText():match("^%d%d:%d%d$") ~= nil)
 
 -- remainingText：不足一分钟为空；分钟 / 小时 + 分钟
+-- 按章打开：用目录字数估全书页码；缺字数沿用文档页码。
+do
+    local toc = { { words = 1000 }, { words = 2000 }, { words = 1000 } }
+    local p, t = Bars.estimatePages(toc, 2, 3, 10)
+    Assert.eq(p, 8)
+    Assert.eq(t, 20)
+    Assert.is_nil((Bars.estimatePages({ { words = 1000 }, {} }, 1, 1, 5)))
+    Assert.is_nil((Bars.estimatePages(toc, 2, 0, 10)))
+    Assert.is_nil((Bars.estimatePages(nil, 1, 1, 5)))
+end
 Assert.eq(Bars.remainingText(nil), "")
 Assert.eq(Bars.remainingText(59), "")
 Assert.eq(Bars.remainingText(60), "约 1 分钟")

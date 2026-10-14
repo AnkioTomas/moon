@@ -403,6 +403,31 @@ function Bars:startClock()
     UIManager:scheduleIn(61 - tonumber(os.date("%S")), tick)
 end
 
+--- 按章打开的书（微信读书等）每章一个文档，文档页数只是本章页数。
+--- 用目录字数估全书页码：每字页数 = 本章页数 / 本章字数。缺字数时返回 nil，沿用文档页码。
+---@param toc table[]|nil 章节目录（条目带 words）
+---@param idx integer|nil 当前章序号（toc 下标）
+---@param page integer|nil 本章当前页
+---@param pages integer|nil 本章页数
+---@return integer|nil page, integer|nil total
+function Bars.estimatePages(toc, idx, page, pages)
+    idx, page, pages = tonumber(idx), tonumber(page), tonumber(pages)
+    if type(toc) ~= "table" or not idx or not page or not pages or page <= 0 or pages <= 0 then return nil end
+    local cur = toc[idx]
+    local cur_words = cur and tonumber(cur.words)
+    if not cur_words or cur_words <= 0 then return nil end
+    local before, total = 0, 0
+    for i, ch in ipairs(toc) do
+        local w = tonumber(ch.words)
+        if not w or w <= 0 then return nil end
+        total = total + w
+        if i < idx then before = before + w end
+    end
+    local ratio = pages / cur_words
+    local est_total = math.max(math.floor(total * ratio + 0.5), math.floor(before * ratio + 0.5) + pages)
+    return math.floor(before * ratio + 0.5) + page, est_total
+end
+
 --- 当前阅读会话给栏组件用的上下文；章节标题、序号、目录长度同一时刻现算，不混用翻页快照。
 ---@return table|nil
 local function liveContext()
@@ -414,6 +439,11 @@ local function liveContext()
     local book = cur.identity.book
     local toc = Session.toc()
     local chapter_page, chapter_pages = Session.chapterPages(cur)
+    local page, total_pages = cur.page, cur.total_pages
+    if cur.identity.chapter_idx ~= nil then
+        local p, t = Bars.estimatePages(toc, cur.identity.chapter_idx, cur.page, cur.total_pages)
+        if p then page, total_pages = p, t end
+    end
     return {
         chapter = Session.chapterTitle(cur) or "",
         title = book and book.title or "",
@@ -421,8 +451,8 @@ local function liveContext()
         percent = cur.percent,
         chapter_idx = Session.chapterIndex(cur) or cur.identity.chapter_idx,
         chapter_count = toc and #toc or nil,
-        page = cur.page,
-        total_pages = cur.total_pages,
+        page = page,
+        total_pages = total_pages,
         chapter_page = chapter_page,
         chapter_pages = chapter_pages,
         remaining = Bars.remainingText(Session.remainingSeconds()),
