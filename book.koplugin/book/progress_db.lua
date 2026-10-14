@@ -283,6 +283,20 @@ function ProgressDB.markSynced(source_id, stable_id, updated_at, pos)
     ) ~= nil and (tonumber(DB.rowexec("SELECT changes();")) or 0) > 0
 end
 
+--- 远端时间口径纠正：源意识到自已把远端时间解析错了（例如把服务器本地时间当成了 UTC）时，
+--- 把已经写进库的「未来时间」显式拉回。
+--- 其它写入口的 updated_at 都用 MAX 保修订号单调（markSynced 靠它做乐观锁），
+--- 所以这里只能显式覆盖，并且**只降不升、只动干净行**（脏行的时间归本地 revision）。
+---@param source_id string
+---@param stable_id string
+---@param updated_at integer 纠正后的时间（小于库里存的才生效）
+---@return boolean
+function ProgressDB.fixRemoteTime(source_id, stable_id, updated_at)
+    return DB.exec([[UPDATE pending_progress SET updated_at=?
+        WHERE source_id=? AND stable_id=? AND sync_status=1 AND updated_at>?;]],
+        updated_at, source_id, stable_id, updated_at) ~= nil
+end
+
 --- 手动标已读（BookDB.setRead）：补一条 100% 的待上传进度。
 ---@param source_id string
 ---@param stable_id string

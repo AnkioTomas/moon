@@ -85,6 +85,7 @@ local function query(opts, key) return opts.url:match("[?&]" .. key .. "=([^&]*)
 
 -- 书库：books 行（path）、目录缓存、本地进度。
 local books, tocs, stale, progress, remembered, touched, reconciled = {}, {}, {}, {}, {}, {}, nil
+local fixed = {}
 local toc_fresh = true
 local shelf_ids, written = {}, {}
 package.loaded["book.books_db"] = {
@@ -96,6 +97,10 @@ package.loaded["book.progress_db"] = {
     get = function(_sid, id) return progress[id] end,
     upsertRemote = function(_sid, id, pos)
         written[id] = pos
+        return true
+    end,
+    fixRemoteTime = function(_sid, id, at)
+        fixed[id] = at
         return true
     end,
 }
@@ -569,8 +574,11 @@ os.remove(require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lu
 local shelf_route = routes["POST /api/Series/all-v2"]
 local read_route = json({
     { id = 700, name = "读过一半", libraryName = "书籍", format = 3, pages = 200, pagesRead = 50,
+      -- Kavita 同时给本地与 UTC 两个口径：差值 = 服务器时区（这里 UTC+8）。
+      lastChapterAdded = "2026-02-03T11:05:06.1", lastChapterAddedUtc = "2026-02-03T03:05:06.1",
       latestReadDate = "2026-02-03T04:05:06.123" },
     { id = 701, name = "读完了", libraryName = "书籍", format = 3, pages = 10, pagesRead = 10,
+      lastChapterAdded = "2026-02-03T11:05:06.1", lastChapterAddedUtc = "2026-02-03T03:05:06.1",
       latestReadDate = "2026-02-03T04:05:06.123" },
 })
 routes["POST /api/Series/all-v2"] = read_route
@@ -578,12 +586,20 @@ written = {}
 run("syncBooksAsync", { force = true })
 Assert.eq(written["700"].fraction, 0.25)
 Assert.is_nil(written["700"].page, "epub 不写页码：Kavita 的页是 spine")
-Assert.eq(written["700"].updated_at, 1770091506, "用 latestReadDate 排「最近阅读」")
+-- latestReadDate 是服务器本地时间（04:05 CST = 20:05Z 前一天），不是 UTC；
+-- 按 UTC 解析会存成 1770091506（8 小时后的未来），刚读完的书就会被它压在下面。
+Assert.eq(written["700"].updated_at, 1770062706, "latestReadDate 按服务器时区换成真 epoch")
 Assert.eq(written["701"].fraction, 1, "读完的写满比例，进步进「已读」")
 written = {}
 progress["700"] = { fraction = 0.4 }
 run("syncBooksAsync", { force = true })
 Assert.is_nil(written["700"], "本地有进度就不回填，不覆盖精确位置")
+
+-- 旧版已经写进库的未来时间：同步时拉回真实时间（只降不升）。
+written, fixed = {}, {}
+progress["700"] = { fraction = 0.4, updated_at = os.time() + 8 * 3600 }
+run("syncBooksAsync", { force = true })
+Assert.eq(fixed["700"], 1770062706, "库里的未来时间被拉回 Kavita 的真实阅读时间")
 progress["700"] = nil
 routes["POST /api/Series/all-v2"] = shelf_route
 
