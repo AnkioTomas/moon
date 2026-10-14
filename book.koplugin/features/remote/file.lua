@@ -173,7 +173,7 @@ end
 ---@param headers table 已小写化的请求头
 ---@param dir string|nil 落位目录绝对路径
 ---@param name string|nil 文件名（斜杠会被替换成下划线）
----@param conflict string|nil 重名策略：缺省 ask，先 409 让客户端选择
+---@param conflict string|nil 重名策略：缺省 overwrite 直接覆盖；显式 ask 时先 409 让客户端选择
 ---@return true|nil true=已进 body 状态；nil=已排错误响应
 function File.upload(self, conn, method, headers, dir, name, conflict)
     if method ~= "PUT" and method ~= "POST" then
@@ -190,7 +190,7 @@ function File.upload(self, conn, method, headers, dir, name, conflict)
     if name == "" or name == "." or name == ".." then
         return self:_fail(conn, 400, "Bad name")
     end
-    conflict = conflict or "ask"
+    conflict = conflict or "overwrite"
     if conflict ~= "ask" and conflict ~= "overwrite" and conflict ~= "skip" and conflict ~= "rename" then
         return self:_fail(conn, 400, "Bad conflict policy")
     end

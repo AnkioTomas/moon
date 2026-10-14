@@ -1359,7 +1359,7 @@ loadConfig().then(function (config) {
             prog.t0 = Date.now();
             prog.l0 = 0;
             renderProgress();
-            xhr.open('PUT', '/upload?' + q({ dir: it.dir, name: it.name, conflict: conflict || 'ask' }));
+            xhr.open('PUT', '/upload?' + q({ dir: it.dir, name: it.name, conflict: conflict || 'overwrite' }));
             xhr.upload.onprogress = function (e) {
                 if (!e.lengthComputable) return;
                 var now = Date.now();
