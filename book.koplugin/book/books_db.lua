@@ -765,6 +765,18 @@ function BookDB.markSyncedMany(source_id, stable_ids)
     end) ~= nil
 end
 
+--- 「有效身份」条件：在架，或**非书架成员但仍是有效身份行**。
+--- 远端源会给非书架行建身份（如 Kavita 多卷 series 的卷行：读书进度记在卷行上，
+--- 它故意不上架）；墓碑（deleted=1 + sync_status=0，本地删了等推云端）不算。
+--- 已知取舍：远端对账下架的行也会落成「非成员身份行」，它会连同进度留在最近阅读里，
+--- 直到云端删除被确认、行被撕掉。
+---@param alias string|nil books 表别名，缺省 b
+---@return string SQL 片段
+function BookDB.readableClause(alias)
+    alias = alias or "b"
+    return "(" .. alias .. ".deleted=0 OR " .. alias .. ".sync_status=1)"
+end
+
 --- 已下载条件（唯一口径）：章节源从当前阅读章（pending_progress.chapter_idx，无则第 1 章）起，
 --- 登记的章节连续无缺口（当前章已缓存，往后去重章数 = 最大章号 - 当前章 + 1），之前的章不管；
 --- 其余源有 path。不看目录长度：连载更新、目录缓存过期都不该把已缓存的书变成未下载。

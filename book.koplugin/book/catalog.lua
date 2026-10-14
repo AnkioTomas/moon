@@ -314,7 +314,11 @@ function Catalog.listBooks(source_id, opts)
     local BookDB = require("book.books_db")
     require("book.progress_db")
     local where, args = DB.sourceClause("b.source_id", source_id)
-    where = where .. " AND b.deleted=0"
+    -- 「最近阅读」列的是读过的书：Kavita 卷行这种「非书架成员但仍是有效身份」的也算；
+    -- 其它排序 / 筛选只列在架书。
+    where = where .. (opts.sort == "recent_read"
+        and " AND " .. BookDB.readableClause("b")
+        or " AND b.deleted=0")
     if type(opts.source_id) == "string" and opts.source_id ~= "" then
         where = where .. " AND b.source_id=?"
         args[#args + 1] = opts.source_id

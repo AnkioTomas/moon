@@ -295,7 +295,9 @@ do
     local q = calls[#calls]
     Assert.is_true(q.sql:find("FROM pending_progress p", 1, true) ~= nil)
     Assert.is_true(q.sql:find("EXISTS", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("b.deleted=0", 1, true) ~= nil)
+    -- 卷行（deleted=1 + sync_status=1，非书架成员但仍是有效身份）也要能进最近阅读；
+    -- 墓碑（sync_status=0）不算。
+    Assert.is_true(q.sql:find("(b.deleted=0 OR b.sync_status=1)", 1, true) ~= nil)
     Assert.is_true(q.sql:find("in_library", 1, true) == nil)
     Assert.is_true(q.sql:find("last_open", 1, true) == nil)
     Assert.is_true(q.sql:find("ORDER BY p.updated_at DESC, p.stable_id ASC", 1, true) ~= nil)
