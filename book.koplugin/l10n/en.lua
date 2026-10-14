@@ -1334,4 +1334,7 @@ Current version: ",
     ["Kindle 书库里找不到这本书"] = "This book was not found in the Kindle library",
     ["需要先安装并启用 kindle.koplugin"] = "Install and enable kindle.koplugin first",
     ["首次打开需要转换，可能要几分钟，请耐心等待"] = "First open needs conversion and may take a few minutes, please wait",
+    ["这是 Kindle 的 documents 目录，里面有系统文件、.sdr 边车和 Kindle 书库的书，扫描会慢且杂。建议在里面新建一个子文件夹专门放书。"] = "This is the Kindle documents folder. It holds system files, .sdr sidecars and Kindle library books, so scanning is slow and noisy. Create a subfolder inside it just for your books.",
+    ["仍然使用"] = "Use anyway",
+    ["重新选择"] = "Pick again",
 }

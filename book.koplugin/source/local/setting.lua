@@ -99,6 +99,13 @@ function Setting.rows(plugin)
     }
 end
 
+--- 是否 Kindle 默认的 documents 目录（忽略结尾斜杠）。
+---@param path string|nil
+---@return boolean
+function Setting.isKindleDocuments(path)
+    return type(path) == "string" and path:gsub("/+$", "") == "/mnt/us/documents"
+end
+
 --- 目录选择列表：逐层浏览（原地换项），首行「使用此目录」确认当前目录。
 function Setting.open()
     local lfs = require("libs/libkoreader-lfs")
@@ -131,11 +138,25 @@ function Setting.open()
     ---@param path string
     ---@return table[]
     local function entries(path)
-        local items = { { text = _("使用此目录"), icon = "check", callback = function()
+        local function save()
             cfg.path = path
             MoonSettings.saveSource(SOURCE_ID, cfg)
             require("ui.themes.widgets.toast"):new{ text = _("已保存"), timeout = 2 }:show()
             require("source.registry").reload()
+        end
+        -- Kindle 的 documents 先劝一句：列表不关，「重新选择」接着挑子目录
+        local warn = Setting.isKindleDocuments(path)
+        local items = { { text = _("使用此目录"), icon = "check", keep_open = warn, callback = function()
+            if not warn then return save() end
+            require("ui.themes.widgets.confirm"):new{
+                text = _("这是 Kindle 的 documents 目录，里面有系统文件、.sdr 边车和 Kindle 书库的书，扫描会慢且杂。建议在里面新建一个子文件夹专门放书。"),
+                ok_text = _("仍然使用"),
+                cancel_text = _("重新选择"),
+                ok_callback = function()
+                    list:close()
+                    save()
+                end,
+            }:show()
         end } }
         if path ~= "/" then
             local parent = path:match("^(.*)/[^/]+$")
