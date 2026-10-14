@@ -26,6 +26,9 @@ local T = require("ffi/util").template
 
 local ID = "ext.kavita"
 local PAGE_SIZE = 500
+-- 书架快照格式版本：参与指纹计算。改了写入字段（如补 series / inserted_at）时 +1，
+-- 让老库下次同步重对账一次，否则只在本地存过的指纹会一直跳过。
+local SHELF_SNAPSHOT_VERSION = "v3"
 local FORMATS = { [0] = "image", [1] = "cbz", [3] = "epub", [4] = "pdf" }
 local MAGIC = { epub = "PK\3\4", cbz = "PK\3\4", pdf = "%PDF" }
 
@@ -144,26 +147,33 @@ local function utcTime(value)
         hour = tonumber(h), min = tonumber(mi), sec = tonumber(s) }) + offset
 end
 
---- 漫画 series 的已读页数回填成本地进度（远端版，本地脏行不覆盖），书架上直接看得到进度。
---- epub/pdf 不回填：series 级页数是 spine 数，粒度太粗，会盖掉本地的精确位置。
+--- 服务端已读回填成本地进度（远端版，本地脏行不覆盖），书架 /「最近阅读」/「已读」都看得到。
+--- Kavita 只在 series 级记 pagesRead/pages 与 latestReadDate：
+---   - 漫画：series 级页数就是阅读页，本地同页不重写。
+---   - 书籍：series 级页数是 spine 比例，粒度太粗；只在本地还没有这本书进度时补一条占位
+---     （网页端 / 别的设备读过的书也能进「最近阅读」并标已读），绝不用它覆盖本地精确位置。
 ---@param source_id string
----@param comics table[] Kavita SeriesDto
+---@param series_list table[] Kavita SeriesDto
 ---@return integer changed
-local function backfillComics(source_id, comics)
+local function backfillRead(source_id, series_list)
     local ProgressDB = require("book.progress_db")
     local changed = 0
-    for _idx, series in ipairs(comics) do
+    for _idx, series in ipairs(series_list) do
         local pages, read = tonumber(series.pages) or 0, tonumber(series.pagesRead) or 0
-        local stable_id = tostring(series.id)
-        local here = ProgressDB.get(source_id, stable_id)
-        if pages > 0 and read > 0 and not (here and here.page == read)
-            and ProgressDB.upsertRemote(source_id, stable_id, {
-                fraction = math.min(1, read / pages),
-                page = read,
-                total_pages = pages,
-                updated_at = utcTime(series.latestReadDate),
-            }) then
-            changed = changed + 1
+        if pages > 0 and read > 0 then
+            local stable_id = tostring(series.id)
+            local comic = tonumber(series.format) == 1
+            local here = ProgressDB.get(source_id, stable_id)
+            if (comic and not (here and here.page == read)) or (not comic and here == nil) then
+                if ProgressDB.upsertRemote(source_id, stable_id, {
+                    fraction = math.min(1, read / pages),
+                    page = comic and read or nil,
+                    total_pages = comic and pages or nil,
+                    updated_at = utcTime(series.latestReadDate),
+                }) then
+                    changed = changed + 1
+                end
+            end
         end
     end
     return changed
@@ -171,7 +181,7 @@ end
 
 --- 后台逐本补简介 / 作者（all-v2 不带，metadata 一本一请求）。已有简介的跳过；
 --- 补过的 series 记在 settings/moonsource_kavita_meta.lua（书库把空简介存成 NULL，
---- 没简介的书靠它才不会每次同步都重拉）。任一请求失败就停，下次书架同步再接着补。
+--- 没简介的书靠它才不会每次同步都重拉）。单本失败跳过，连续失败才当网络问题整轮收工。
 ---@param series_ids string[]
 function Source:backfillMeta(series_ids)
     if self.backfill then self.backfill.cancel() end
@@ -179,7 +189,7 @@ function Source:backfillMeta(series_ids)
     local UIManager = require("ui/uimanager")
     local state = require("luasettings"):open(require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua")
     local done = state:readSetting("done", {})
-    local index, cancelled, job, timer = 0, false, nil, nil
+    local index, fails, cancelled, job, timer = 0, 0, false, nil, nil
     local function stop()
         self.backfill = nil
         state:flush()
@@ -194,7 +204,15 @@ function Source:backfillMeta(series_ids)
         if not series_id or not online() then return stop() end
         job = self.client:json("GET", "/api/Series/metadata", { seriesId = series_id }, nil, function(metadata)
             if cancelled then return end
-            if not metadata then return stop() end
+            if not metadata then
+                -- 单本失败不拖住后面：连续失败才当网络问题整轮收工，下次同步接着补。
+                fails = fails + 1
+                if fails >= 3 then return stop() end
+                timer = step
+                UIManager:scheduleIn(0.3, timer)
+                return
+            end
+            fails = 0
             require("book.store").rememberMany({
                 withMetadata({ source_id = self.id, stable_id = series_id }, metadata),
             })
@@ -249,7 +267,8 @@ function Source:syncBooksAsync(opts, cb)
     end
     table.sort(libraries)
     local report = opts.on_progress or function() end
-    local books, comics, prints, lib_index, page, cancelled = {}, {}, { table.concat(libraries, ",") }, 1, 1, false
+    local books, reads, prints, lib_index, page, cancelled =
+        {}, {}, { SHELF_SNAPSHOT_VERSION, table.concat(libraries, ",") }, 1, 1, false
     ---@type HttpJob
     local job
 
@@ -257,21 +276,26 @@ function Source:syncBooksAsync(opts, cb)
         local settings = require("utils.settings")
         local cfg = settings.getSource(ID)
         local fingerprint = require("ffi/sha2").md5(table.concat(prints, "\n"))
-        local result, err
-        if not opts.force and cfg.shelf_fingerprint == fingerprint
-            and #require("book.books_db").libraryStableIdsBySource(self.id) > 0 then
+        local BookDB = require("book.books_db")
+        local result, err, ids
+        if not opts.force and cfg.shelf_fingerprint == fingerprint then
+            ids = BookDB.libraryStableIdsBySource(self.id)
+        end
+        if ids and #ids > 0 then
             result = { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
         else
-            result, err = require("source.shelf").reconcile(self.id, books, opts.force)
+            result, err = require("source.shelf").reconcile(self.id, books, opts.force, true)
             if not result then return cb(nil, err) end
             cfg.shelf_fingerprint = fingerprint
             settings.saveSource(ID, cfg)
-            local ids = {}
+            ids = {}
             for idx, book in ipairs(books) do ids[idx] = book.stable_id end
-            self:backfillMeta(ids)
         end
-        -- 跳过对账时只有漫画进度可能变了，计进 pulled 让书架重绘。
-        result.pulled = result.pulled + backfillComics(self.id, comics)
+        -- 简介 / 作者是逐本后台补的，跟快照变不变无关：换源 / 断网中断过，下次同步必须接着补，
+        -- 否则没补到的书永远停在「未知作者」。
+        self:backfillMeta(ids)
+        -- 服务端已读进度同理：网页端 / 别的设备读过，书架也得进「最近阅读」与「已读」。
+        result.pulled = result.pulled + backfillRead(self.id, reads)
         cb(result)
     end
 
@@ -292,11 +316,17 @@ function Source:syncBooksAsync(opts, cb)
                     stable_id = tostring(series.id),
                     title = series.name,
                     category = series.libraryName,
+                    -- Kavita 的书架一行就是一个 series：系列列填自己的名字，
+                    -- 否则图书馆的「系列」页签把整库都归到「无系列」。
+                    series = series.name,
+                    -- 「最近添加」按 Kavita 的最近更新排，而不是全库同一次同步的上架时间。
+                    -- lastChapterAddedUtc 是真的 UTC（created 没有 Utc 后缀、是服务器本地时间，不拿来做时间）。
+                    inserted_at = utcTime(series.lastChapterAddedUtc),
                     meta = { words = series.wordCount },
                 }
                 prints[#prints + 1] = table.concat({ series.id, series.name or "", series.libraryName or "",
-                    tonumber(series.wordCount) or 0 }, "\31")
-                if tonumber(series.format) == 1 then comics[#comics + 1] = series end
+                    tonumber(series.wordCount) or 0, series.lastChapterAddedUtc or "" }, "\31")
+                if (tonumber(series.pagesRead) or 0) > 0 then reads[#reads + 1] = series end
             end
             if #list >= PAGE_SIZE then
                 page = page + 1

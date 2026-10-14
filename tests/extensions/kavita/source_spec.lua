@@ -123,6 +123,8 @@ package.loaded["source.shelf"] = {
     end,
 }
 local WORK = Config.dir() .. "/kavita_spec"
+-- 后台补简介的 done 状态落在沙箱 settings 里：上一轮跑挂留下的状态会让本轮跳过补全。
+os.remove(require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua")
 os.execute("rm -rf '" .. WORK .. "'")
 package.loaded["utils.paths"] = {
     ensureBookWork = function(id) os.execute("mkdir -p '" .. WORK .. "/" .. id .. "'") end,
@@ -152,7 +154,8 @@ end
 
 -- 书架：按库分页拉 series，库名即分类；Key 去空白、地址去尾斜杠。
 local series_page = {}
-for i = 1, 500 do series_page[i] = { id = i, name = "S" .. i, libraryName = "小说", wordCount = i == 1 and 120000 or 0 } end
+for i = 1, 500 do series_page[i] = { id = i, name = "S" .. i, libraryName = "小说", wordCount = i == 1 and 120000 or 0,
+    lastChapterAddedUtc = i == 1 and "2026-01-02T03:04:05.123" or nil } end
 routes["POST /api/Series/all-v2"] = function(opts)
     local body = JSON.decode(opts.body)
     local lib, page = body.Statements[1].Value, query(opts, "pageNumber")
@@ -168,6 +171,8 @@ Assert.eq(reconciled.source_id, "ext.kavita")
 Assert.eq(reconciled.books[502].category, "漫画")
 Assert.eq(reconciled.books[1].stable_id, "1")
 Assert.eq(reconciled.books[1].meta.words, 120000, "书架带字数（0 = 未知，入库时丢掉）")
+Assert.eq(reconciled.books[1].series, "S1", "系列列填 Kavita series 名，否则图书馆系列页签全是「无系列」")
+Assert.eq(reconciled.books[1].inserted_at, 1767323045, "加入时间用 lastChapterAddedUtc，图书馆「最近添加」才跟 Kavita 一致")
 Assert.eq(calls[1].headers["x-api-key"], "k")
 Assert.matches(calls[1].url, "^http://kav/api/Series/all%-v2%?")
 Assert.is_true(run("syncBooksAsync", { dirty_only = true }).skipped, "没有删书接口，只推脏行时跳过")
@@ -246,13 +251,25 @@ run("syncBooksAsync", { force = true })
 Assert.len(meta_calls, 0, "补过的不再补")
 local done_file = require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua"
 Assert.is_true(require("luasettings"):open(done_file):readSetting("done")["2"])
+-- 指纹没变（不对账）也要接着补：换源 / 断网中断过的书不能永远停在未知作者。
+meta_calls, remembered["3"] = {}, nil
+books["2"], books["3"] = { intro = "已有" }, {}
+os.remove(done_file)
+Assert.is_true(run("syncBooksAsync", nil).skipped == false, "快照没变也跑完整同步（补简介）")
+Assert.eq(table.concat(meta_calls, ","), "3", "没补过的接着补")
+Assert.eq(remembered["3"].authors, "甲 / 乙")
 os.remove(done_file)
 routes["GET /api/Series/metadata"] = function(opts)
-    meta_calls[#meta_calls + 1] = query(opts, "seriesId")
-    return { code = 500, body = "" }
+    local sid = query(opts, "seriesId")
+    meta_calls[#meta_calls + 1] = sid
+    -- 只有 2 号失败：后面的 3 号不能被一个坏请求拖住。
+    if sid == "2" then return { code = 500, body = "" } end
+    return metadata_route
 end
+meta_calls, remembered["3"], books["2"] = {}, nil, {}
 run("syncBooksAsync", { force = true })
-Assert.eq(table.concat(meta_calls, ","), "2", "失败就停，下次同步再补")
+Assert.eq(table.concat(meta_calls, ","), "2,3", "单本失败跳过，后面继续补")
+Assert.eq(remembered["3"].authors, "甲 / 乙")
 online = false
 meta_calls = {}
 source:backfillMeta({ "2" })
@@ -546,5 +563,28 @@ Assert.eq(run("openBookAsync", { source_id = "ext.kavita", stable_id = "60:6000"
     "下载过的直接开，不再走 kamare")
 Assert.len(viewers, 2)
 os.remove(require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua")
+
+-- 服务端已读回填：网页端 / 别的设备读过的 epub 也要进「最近阅读」并可能标已读。
+-- series 级 pagesRead/pages 对 epub 只是 spine 比例，只补本地没有进度的书，绝不覆盖精确位置。
+local shelf_route = routes["POST /api/Series/all-v2"]
+local read_route = json({
+    { id = 700, name = "读过一半", libraryName = "书籍", format = 3, pages = 200, pagesRead = 50,
+      latestReadDate = "2026-02-03T04:05:06.123" },
+    { id = 701, name = "读完了", libraryName = "书籍", format = 3, pages = 10, pagesRead = 10,
+      latestReadDate = "2026-02-03T04:05:06.123" },
+})
+routes["POST /api/Series/all-v2"] = read_route
+written = {}
+run("syncBooksAsync", { force = true })
+Assert.eq(written["700"].fraction, 0.25)
+Assert.is_nil(written["700"].page, "epub 不写页码：Kavita 的页是 spine")
+Assert.eq(written["700"].updated_at, 1770091506, "用 latestReadDate 排「最近阅读」")
+Assert.eq(written["701"].fraction, 1, "读完的写满比例，进步进「已读」")
+written = {}
+progress["700"] = { fraction = 0.4 }
+run("syncBooksAsync", { force = true })
+Assert.is_nil(written["700"], "本地有进度就不回填，不覆盖精确位置")
+progress["700"] = nil
+routes["POST /api/Series/all-v2"] = shelf_route
 
 os.execute("rm -rf '" .. WORK .. "'")

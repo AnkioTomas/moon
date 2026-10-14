@@ -24,10 +24,14 @@ local Shelf = {}
 ---@param source_id string
 ---@param books Book[]
 ---@param force boolean|nil 用户强制刷新：快照里的 meta 覆盖本地已有键
+---@param inserted_at_from_row boolean|nil 快照行自带权威加入时间（如 Kavita 的 lastChapterAddedUtc）
 ---@return SyncResult|nil result
 ---@return string|nil err
-function Shelf.reconcile(source_id, books, force)
-    local ok, hidden = require("book.books_db").reconcile(source_id, books, { force = force })
+function Shelf.reconcile(source_id, books, force, inserted_at_from_row)
+    local ok, hidden = require("book.books_db").reconcile(source_id, books, {
+        force = force,
+        inserted_at_from_row = inserted_at_from_row,
+    })
     if not ok then return nil, "failed to reconcile books" end
     return { pulled = #books, pushed = 0, hidden = hidden, conflicts = 0, skipped = false }
 end
