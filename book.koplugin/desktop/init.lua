@@ -69,6 +69,8 @@ local Tabbar = require("ui.themes.widgets.tabbar")
 ---@field _stats_sync table<string, boolean> 源 id → 统计同步在飞
 local Desktop = InputContainer:extend{
     name = "book_desktop",
+    -- 月读自己的窗口：退出兜底（BookPlugin:onExit）按此标记清理残留
+    book_window = true,
     covers_fullscreen = true,
     plugin = nil,
     source = nil,
@@ -275,15 +277,28 @@ function Desktop:destroy()
     if self.closed then return end
     if self.active then self:deactivate() end
     self.closed = true
-    if self.settings_overlay then self.settings_overlay:close() end
+    -- 桌面打开的子窗口一并关掉，否则退出时残留在窗口栈上，KOReader 等不到空栈不退出。
+    -- 先摘引用再关：子窗口的 close_callback 见 desktop.closed 直接返回，不会回头重画桌面。
+    local overlay, detail = self.settings_overlay, self.detail
+    self.settings_overlay, self.detail = nil, nil
+    if overlay then overlay:close() end
+    if detail and not detail.closed then detail:close() end
     broadcast(self, "destroy")
     local plugin = self.plugin
     if plugin and plugin.desktop == self then
         plugin.desktop = nil
     end
 end
---- 系统退出广播直达（窗口在栈上）。
-Desktop.onExit = Desktop.destroy
+--- 系统退出广播直达（窗口在栈上）：销毁并真正关窗。
+--- 只 destroy 不关窗会把已销毁的桌面留在栈上：普通「退出」靠空栈收尾（UIManager:_gated_quit），
+--- 于是 KOReader 永不退出、界面假死；「重启」走 quit(85) 清栈才不受影响。
+--- 返回 false：广播继续送给下层 FileManager / ReaderUI（DeviceListener 才是真正的退出动作）。
+---@return boolean
+function Desktop:onExit()
+    if not self.closed then self:destroy() end
+    UIManager:close(self)
+    return false
+end
 
 --- 桌面盖住 FileManager 后 UIManager 只把手势发给栈顶；月读控件没消费的手势再交给文件管理器已配置动作。
 --- 顺序不能反：KOReader 默认把左下角点按绑成开关前光，会吞掉「首页」Tab。
@@ -297,7 +312,7 @@ local function route(desktop, event)
 end
 
 --- 桌面所有事件的入口，经 guard 隔离：页面里的 bug 弹错误页，不带崩 KOReader。
---- 已销毁的桌面可能还在窗口栈上（Exit 广播只 destroy 不关窗），事件一律放行给下层。
+--- 已销毁、尚未出栈的桌面（关窗过程中）事件一律放行给下层。
 --- 原始输入可能不是 Event、没有 handler，见 Modal:handleEvent。
 ---@param event table|string KOReader 事件
 ---@return boolean|nil

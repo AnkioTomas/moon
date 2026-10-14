@@ -49,6 +49,8 @@ local Screen = Device.screen
 ---@field show_parent table|nil 嵌进别的窗口时所在的顶层窗口
 ---@field theme table 构造时的主题令牌
 local Modal = InputContainer:extend{
+    -- 月读自己的窗口：退出兜底（BookPlugin:onExit）按此标记清理残留
+    book_window = true,
     dismissable = true,
     close_on_tap = false,
     anchor = "center",
