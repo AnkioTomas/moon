@@ -368,15 +368,35 @@ Assert.eq(cover.url, "http://kav/api/Image/series-cover?seriesId=10")
 Assert.eq(cover.headers["x-api-key"], "k")
 Assert.eq(source:coverRequest({ stable_id = "20:2002" }).url, "http://kav/api/Image/chapter-cover?chapterId=2002")
 
--- 拉进度：远端 spine + 锚点 → xpointer；同一 spine 交回本地行；没读过算空。
+-- 拉进度：远端 spine + 锚点 → xpointer；没读过算空。
 local volume = { source_id = "ext.kavita", stable_id = "20:2002" }
 local remote = { pageNum = 3, bookScrollId = "//body/div[1]/p[5]" }
 routes["GET /api/Reader/get-progress"] = function() return json(remote) end
-local pos = run("getProgressAsync", volume)
+local pos, _err, meta = run("getProgressAsync", volume)
 Assert.eq(pos.locator, "/body/DocFragment[4]/body/div/p[5]")
 Assert.eq(pos.fraction, 0.3)
 Assert.is_nil(pos.page, "epub 不给页码：Kavita 的页是 spine，不是渲染页")
-progress["20:2002"] = { locator = "/body/DocFragment[4]/body/p[9]/text().3", fraction = 0.34 }
+Assert.is_true(meta and meta.page_level == true, "页级源必须声明 page_level：core 才不按百分比判")
+Assert.is_nil(_err)
+-- 同一 spine：锚点与本机上次同步的位置不同（网页端在同一条里往后读了几页）→ 用远端坐标，
+-- 不能返回本地行——否则 core 的 synced 基线永远看不到「云端动过」。
+progress["20:2002"] = {
+    locator = "/body/DocFragment[4]/body/p[9]/text().3",
+    fraction = 0.34,
+    synced = { locator = "/body/DocFragment[4]/body/p[3]/text().0" },
+}
+local moved = run("getProgressAsync", volume)
+Assert.eq(moved.locator, "/body/DocFragment[4]/body/div/p[5]", "同 spine 锚点变了就要跟远端")
+Assert.eq(moved.fraction, 0.3)
+-- 同一 spine 且锚点就是上次同步的位置 → 交回本地行（粒度噪声不当冲突，也不跳）
+progress["20:2002"].synced = { locator = "/body/DocFragment[4]/body/div[1]/p[5]" }
+Assert.eq(run("getProgressAsync", volume), progress["20:2002"])
+-- 同一 spine 但远端只有 spine 粒度（没带锚点 / 锚点解不出）→ 交回本地行，不把人拽回节首。
+routes["GET /api/Reader/get-progress"] = function() return json({ pageNum = 3 }) end
+Assert.eq(run("getProgressAsync", volume), progress["20:2002"])
+-- 旧行没有基线（synced 为空）→ 保守交回本地行，不拿不可比的粒度去判
+routes["GET /api/Reader/get-progress"] = function() return json(remote) end
+progress["20:2002"].synced = nil
 Assert.eq(run("getProgressAsync", volume), progress["20:2002"])
 remote = { pageNum = 0 }
 local empty, _e, meta = run("getProgressAsync", volume)

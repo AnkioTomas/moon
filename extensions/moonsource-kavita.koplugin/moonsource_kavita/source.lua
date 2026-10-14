@@ -9,8 +9,10 @@ Kavita 书源（整本模式）。
 是进度上报所需 id 的唯一来源；离线时目录过期也照用旧的。
 
 进度：epub 按 spine（Kavita pageNum）+ bookScrollId，pdf/cbz 按页。
-远端与本地落在同一 spine / 页时交回本地位置：Kavita 的精度只到 spine，
-不能因此把本地章内位置判成冲突。
+远端只有 spine 粒度（网页端没带锚点、或锚点在本机 epub 里解不出）且本地在同一 spine / 页时
+交回本地位置：Kavita 的精度只到 spine，不能拿它把本地章内位置判成冲突、把人拽回节首。
+远端能给得出页内锚点时必须用远端：网页端在同一条里往后读几页就是这种情况，
+先返回本地会让 core 的 synced 基线永远判不出「云端动过」。
 书架：快照指纹不变就跳过对账；对账后后台逐本补简介 / 作者；漫画 series 的已读页回填成本地进度。
 划线：epub 的划线按段落文本在本地 epub 里找锚点，新建 / 改备注推到 Kavita，注解 id 存在笔记快照里。
 漫画：装了 kamare 插件且在线时交它在线看（开书回调 handled），否则下载 cbz 用内置阅读器。
@@ -717,9 +719,18 @@ function Source:position(identity, entry, remote)
     local here = require("book.progress_db").get(self.id, identity.stable_id)
     if entry.format == "epub" then
         local spine = math.min(page_num, pages - 1)
-        if here and Position.spine(here.locator) == spine then return here end
         local book = require("book.books_db").get(self.id, identity.stable_id)
         local scroll = Position.resolveScrollId(book and book.path, spine, remote.bookScrollId)
+        if here and Position.spine(here.locator) == spine then
+            -- 同一 spine：远端只有 spine 粒度（没带锚点 / 锚点解不出），或锚点与本机上次同步的位置
+            -- 一样——Kavita 的粒度不足以把同一条内的差异判成冲突，交回本地位置，不把读者拽回节首。
+            -- 只有远端锚点真的变了才用远端：网页端在同一条里往后读几页正是这种情况，
+            -- 旧写法一律返回本地，core 的 synced 基线就永远看不到「云端动过」。
+            local base = here.synced and here.synced.locator
+            if not scroll or Position.spine(base) ~= spine or Position.toScrollId(base) == scroll then
+                return here
+            end
+        end
         return { fraction = fraction, locator = Position.toXPointer(spine, scroll, pages) }
     end
     local page = math.max(1, math.min(page_num + 1, pages))
@@ -741,7 +752,9 @@ function Source:getProgressAsync(identity, cb)
                     return cb(nil, nil, { empty = true })
                 end
                 if not remote then return cb(nil, perr) end
-                cb(self:position(identity, entry, remote))
+                -- page_level：远端只有 spine（epub）/ 页码（pdf）粒度，比例是「第几个 spine」，
+                -- 与本地内容页比例口径不同 → core 不能按百分比判，得按 spine 判。
+                cb(self:position(identity, entry, remote), nil, { page_level = true })
             end)
     end)
     return { cancel = function()
