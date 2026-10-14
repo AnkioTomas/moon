@@ -8,6 +8,7 @@ local UIManager = require("ui/uimanager")
 local Sheet = require("ui.themes.widgets.sheet")
 local Position = require("desktop.pages.setting.position")
 local Row = require("ui.themes.widgets.row")
+local Spin = require("ui.themes.widgets.spin")
 local Bars = require("features.bars")
 local Items = require("features.bars.items")
 local Layout = require("features.bars.layout")
@@ -34,6 +35,23 @@ local function refreshReaderUi()
     local ui = readerUi()
     if ui and ui.dialog then
         UIManager:setDirty(ui.dialog, "ui")
+    end
+end
+
+local footerSettings = Preview.footerSettings
+
+--- 底栏字号写回 KOReader 状态栏，两边保持一致。没开过书、全局也没有 footer 设置时只存月读这份，
+--- 不凭空造一张不完整的 footer 表。
+---@param size number
+local function writeFooterFont(size)
+    local settings, footer = footerSettings()
+    if not settings then return end
+    settings.text_font_size = size
+    if footer then
+        if footer.updateFooterFont then footer:updateFooterFont() end
+        if footer.refreshFooter then footer:refreshFooter(true, true) end
+    elseif G_reader_settings and G_reader_settings.saveSetting then
+        G_reader_settings:saveSetting("footer", settings)
     end
 end
 
@@ -121,7 +139,7 @@ function ReaderBar:page(desktop, which)
     for _idx, item in ipairs(Items.catalog(which)) do
         item_rows[#item_rows + 1] = itemRow(desktop, item, which)
     end
-    return {
+    local page = {
         preview = function(iw)
             return Preview.build(iw, which)
         end,
@@ -179,6 +197,34 @@ function ReaderBar:page(desktop, which)
                             end,
                         })
                     end,
+                    function(iw)
+                        local size = Layout.fontSize(which, (footerSettings()))
+                        local status = tostring(size)
+                        if top and not Layout.topFontCustom() then
+                            status = T(_("跟随底栏 · %1"), size)
+                        end
+                        return Row.widget({
+                            width = iw,
+                            kind = "nav",
+                            icon = "format_size",
+                            title = _("文字大小"),
+                            subtitle = top and _("顶栏文字字号；未设置时跟随底栏")
+                                or _("底栏文字字号，与 KOReader 状态栏同步"),
+                            status = status,
+                            status_on = true,
+                            callback = function()
+                                Spin:new{
+                                    title = _("文字大小"),
+                                    fields = { { value = size, min = Layout.FONT_MIN, max = Layout.FONT_MAX } },
+                                    callback = function(v)
+                                        Layout.setFontSize(which, v)
+                                        if not top then writeFooterFont(v) end
+                                        refresh(desktop)
+                                    end,
+                                }:show()
+                            end,
+                        })
+                    end,
                 },
             },
             {
@@ -187,6 +233,32 @@ function ReaderBar:page(desktop, which)
             },
         },
     }
+    if top then
+        -- 顶栏高度：插在「组件图标」「文字大小」之后。
+        table.insert(page.sections[1].rows, function(iw)
+            local h = Layout.topHeight()
+            return Row.widget({
+                width = iw,
+                kind = "nav",
+                icon = "height",
+                title = _("高度"),
+                subtitle = _("顶栏比系统页头额外增加的高度"),
+                status = tostring(h),
+                status_on = true,
+                callback = function()
+                    Spin:new{
+                        title = _("高度"),
+                        fields = { { value = h, min = Layout.TOP_HEIGHT_MIN, max = Layout.TOP_HEIGHT_MAX, step = 2 } },
+                        callback = function(v)
+                            Layout.setTopHeight(v)
+                            refresh(desktop)
+                        end,
+                    }:show()
+                end,
+            })
+        end)
+    end
+    return page
 end
 
 return ReaderBar

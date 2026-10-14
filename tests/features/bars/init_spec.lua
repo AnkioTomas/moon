@@ -43,6 +43,8 @@ package.preload["features.bars.layout"] = function()
         replace = function(which) return replace[which] end,
         get = function(which) return layouts[which] end,
         setReplace = function() end,
+        topHeight = function() return 12 end,
+        fontSize = function(_which, fs) return fs and fs.text_font_size or 14 end,
     }
 end
 local session_current = nil

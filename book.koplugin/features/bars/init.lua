@@ -19,8 +19,6 @@ local Guard = require("ui.guard")
 local _ = require("gettext")
 local Screen = Device.screen
 
---- 比 CRE 原生页头额外增加的固定高度，不跟文档页边距变化。
-local TOP_BAR_EXTRA_HEIGHT = 12
 --- 顶栏固定水平留白，不跟书籍左右页边距变化。
 local TOP_BAR_HORIZONTAL_PADDING = 12
 --- 底栏文字向屏幕内侧偏移，避免视觉上贴住边缘。
@@ -227,7 +225,7 @@ local function topRect(ui, x, y)
         x = x,
         y = y,
         w = ui.view.dimen.w,
-        h = header_h + Screen:scaleBySize(TOP_BAR_EXTRA_HEIGHT),
+        h = header_h + Screen:scaleBySize(Layout.topHeight()),
     }
 end
 
@@ -293,13 +291,13 @@ local function refreshBars(ui)
     end
 end
 
---- 顶栏文字 face：与底栏同字体同字号；超出条带高度时等比缩小。
+--- 顶栏文字 face：与底栏同字体；字号用顶栏自己的设置（未设置跟随底栏）；超出条带高度时等比缩小。
 ---@param footer table ReaderFooter
 ---@param bar_h number
 ---@return table
 local function topTextFace(footer, bar_h)
     local s = footer.settings
-    local size = s.text_font_size
+    local size = Layout.fontSize("top", s)
     local scaled = Screen:scaleBySize(size)
     if bar_h > 2 and scaled > bar_h - 2 then
         size = math.max(8, math.floor(size * (bar_h - 2) / scaled))
