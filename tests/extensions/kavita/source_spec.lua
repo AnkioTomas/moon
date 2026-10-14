@@ -150,6 +150,7 @@ local source = Registry.resolve("ext.kavita")
 Assert.is_true(source:configured())
 Assert.eq(Registry.external("ext.kavita").setting, require("moonsource_kavita.setting"))
 Assert.eq(Registry.external("ext.kavita").home[1], on_deck)
+Assert.eq(require("moonsource_kavita.source").DEFAULT_HEARTBEAT_INTERVAL, 30, "设置页读的默认心跳间隔")
 
 ---@return any, any, any
 local function run(method, ...)
@@ -185,6 +186,7 @@ Assert.eq(reconciled.books[1].series, "S1", "系列列填 Kavita series 名，�
 Assert.eq(reconciled.books[1].inserted_at, 1767323045, "加入时间用 lastChapterAddedUtc，图书馆「最近添加」才跟 Kavita 一致")
 Assert.eq(calls[1].headers["x-api-key"], "k")
 Assert.matches(calls[1].url, "^http://kav/api/Series/all%-v2%?")
+Assert.eq(calls[1].timeout, 60, "拉书架带足够长的超时，慢设备不会一拉就 30s 超时")
 Assert.is_true(run("syncBooksAsync", { dirty_only = true }).skipped, "没有删书接口，只推脏行时跳过")
 cfg.libraries = {}
 local none, err = run("syncBooksAsync", nil)
@@ -784,6 +786,33 @@ do
     Assert.len(scheduled, 1)
     source:close()
     Assert.len(scheduled, 0, "关源停心跳")
+
+    -- 心跳间隔可配置：调大后按新间隔节流，兜底拍跟着放大；0 = 关闭阅读期心跳。
+    cfg.heartbeat_interval = 120
+    source:onEvent("page_changed", { identity = volume, position = { fraction = 0.9 } })
+    Assert.len(scheduled, 1, "改间隔后起心跳")
+    Assert.eq(scheduled[1].delay, 120, "兜底拍跟到新间隔，不白醒")
+    sent = nil
+    advance(31)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.91, locator = "/body/DocFragment[6]/body/p[9]/text().0" },
+    })
+    Stubs.flush()
+    Assert.is_nil(sent, "120s 间隔内不推")
+    advance(100)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.92, locator = "/body/DocFragment[6]/body/p[10]/text().0" },
+    })
+    Stubs.flush()
+    Assert.is_true(sent ~= nil, "超过 120s 后补推")
+
+    cfg.heartbeat_interval = 0
+    source:onEvent("page_changed", { identity = volume, position = { fraction = 0.93 } })
+    Assert.len(scheduled, 0, "0 = 关闭心跳，不再调度")
+    Assert.is_nil(source._heartbeat)
+    cfg.heartbeat_interval = nil
 
     UIManager.scheduleIn, UIManager.unschedule, os.time = real_in, real_un, real_time
 end
