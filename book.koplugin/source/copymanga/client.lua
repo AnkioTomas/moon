@@ -80,40 +80,83 @@ function Client.decode(raw, err)
     return wire
 end
 
+--- 进行中的自动重登：等待者回调列表；nil = 空闲。全进程只发一次登录，免得并发 401 各自登录、互相挤掉令牌。
+---@type fun(ok: boolean|nil, err: string|nil, rejected: boolean|nil)[]|nil
+local relogin_waiters
+
+--- 用本地保存的账号密码重登（单飞）。没存密码时立即 cb(nil, nil, true)。
+--- 不随单个请求取消：登录结果要分给所有等待者。
+---@param cb fun(ok: boolean|nil, err: string|nil, rejected: boolean|nil)
+local function relogin(cb)
+    if relogin_waiters then
+        relogin_waiters[#relogin_waiters + 1] = cb
+        return
+    end
+    local Auth = require("source.copymanga.auth")
+    local username, password = Auth.credentials()
+    if not username then
+        cb(nil, nil, true)
+        return
+    end
+    relogin_waiters = { cb }
+    Auth.loginAsync(username, password, function(ok, err, rejected)
+        local waiters = relogin_waiters or {}
+        relogin_waiters = nil
+        for _idx, waiter in ipairs(waiters) do waiter(ok, err, rejected) end
+    end)
+end
+
+--- 设置里的最新令牌（别的实例重登后写进去的），没有就用本实例的。
+---@return string
+function Client:_latestToken()
+    local token = require("utils.settings").getSource("copymanga").token
+    if type(token) == "string" and token ~= "" then self.token = token end
+    return self.token
+end
+
 --- GET JSON。令牌失效（HTTP 401，如在别处登录后被挤掉）时用本地保存的账号密码重登一次再重试。
+--- 别的请求已经换过令牌时直接用新令牌重试，不再登录。重登被服务端拒绝才提示重新登录，网络错误原样回传。
 ---@param path string
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:_getJson(path, cb)
     local expired = _("拷贝漫画登录已失效，请在设置里重新登录")
-    local active
+    local active, cancelled
     local function send(may_relogin)
+        local sent = self:_latestToken()
         active = require("http.request").get(self.base_url .. path, {
             accept = "application/json",
-            headers = Client.headers(self.token),
+            headers = Client.headers(sent),
             allow_redirects = true,
             timeout = 60,
             connect_timeout = 30,
         }, function(raw, err, res)
+            if cancelled then return end
             if not (res and res.code == 401) then
                 cb(Client.decode(raw, err))
                 return
             end
-            local Auth = require("source.copymanga.auth")
-            local username, password = Auth.credentials()
-            if not (may_relogin and username) then
+            if not may_relogin then
                 cb(nil, expired)
                 return
             end
-            active = Auth.loginAsync(username, password, function(ok)
-                if not ok then cb(nil, expired); return end
-                self.token = require("utils.settings").getSource("copymanga").token
+            if self:_latestToken() ~= sent then
                 send(false)
+                return
+            end
+            active = nil
+            relogin(function(ok, login_err, rejected)
+                if cancelled then return end
+                if ok then send(false); return end
+                cb(nil, rejected and expired or (login_err or _("请求失败")))
             end)
         end)
     end
     send(true)
-    return { cancel = function() if active then active.cancel() end end }
+    return { cancel = function()
+        cancelled = true
+        if active then active.cancel() end
+    end }
 end
 
 ---@param stable_id string
