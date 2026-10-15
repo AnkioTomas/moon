@@ -10,7 +10,7 @@
 下载逐片走 Request.download（Turbo，不堵 UI）；拼接/分片 SHA-256/落位放 Job 子进程
 （大文件 IO，主进程做会卡 UI）。
 
-落盘文件名由 Paths.imeDictPath 决定。
+落盘文件名由 Paths.imeDictPath 决定。生僻字注音词库（features.rare）复用 ``M.install``，同一套 manifest + 分片格式。
 
 @module koplugin.book.features.ime.download
 --]]
@@ -41,15 +41,15 @@ function M.downloading()
 end
 
 --- 分片续传用的临时目录。
----@param method string
+---@param spec BookDictSpec
 ---@return string
-local function tmpDir(method)
-    return Paths.root() .. "/ime_" .. method .. "_dict.dl"
+local function tmpDir(spec)
+    return spec.tmp or spec.dest .. ".dl"
 end
 
 --- 删掉临时目录及其中全部分片；目录不存在时无操作。
-local function cleanupTmp(method)
-    local dir = tmpDir(method)
+local function cleanupTmp(spec)
+    local dir = tmpDir(spec)
     local ok, iter, dir_obj = pcall(lfs.dir, dir)
     if not ok or not iter then
         return
@@ -100,8 +100,8 @@ end
 --- 临时分片必须属于同一版 manifest，不能把新旧词库拼在一起。
 ---@param manifest table 至少含 built_at 与 raw_sha256
 ---@return boolean, string|nil
-local function syncTmpManifest(manifest, method)
-    local path = tmpDir(method) .. "/.manifest.json"
+local function syncTmpManifest(manifest, spec)
+    local path = tmpDir(spec) .. "/.manifest.json"
     local f = io.open(path, "rb")
     if f then
         local body = f:read("*a")
@@ -110,10 +110,10 @@ local function syncTmpManifest(manifest, method)
         if not ok or type(saved) ~= "table"
             or saved.built_at ~= manifest.built_at
             or saved.raw_sha256 ~= manifest.raw_sha256 then
-            cleanupTmp(method)
+            cleanupTmp(spec)
         end
     end
-    if lfs.attributes(tmpDir(method), "mode") ~= "directory" and not lfs.mkdir(tmpDir(method)) then
+    if lfs.attributes(tmpDir(spec), "mode") ~= "directory" and not lfs.mkdir(tmpDir(spec)) then
         return false, "cannot create dictionary temp directory"
     end
     local encoded = JSON.encode({
@@ -136,8 +136,8 @@ end
 --- 分片是否已完整落在临时目录（只比字节数，内容由拼接期 sha256 把关）。
 ---@param part table manifest 分片项（file / size）
 ---@return boolean
-local function partComplete(part, method)
-    local attr = lfs.attributes(tmpDir(method) .. "/" .. part.file)
+local function partComplete(part, spec)
+    local attr = lfs.attributes(tmpDir(spec) .. "/" .. part.file)
     return attr and attr.mode == "file" and attr.size == tonumber(part.size)
 end
 
@@ -200,21 +200,29 @@ local function assemble(manifest, dir, dest, progress)
     return nil
 end
 
+--- 一份可下载词库的描述。
+---@class BookDictSpec
+---@field name string 日志与 Job 名
+---@field base_url string manifest.json 与分片所在目录
+---@field dest string 落盘路径（续传目录为 dest .. ".dl"）
+---@field installed string|nil 已装版本的 built_at
+---@field tmp string|nil 续传目录，缺省 dest .. ".dl"
+---@field on_installed fun(manifest: table) 落位成功后记版本、重置缓存
+
 --- 按 manifest 下载有更新的分片并落位。重复请求通过 cb 返回失败，不并发写同一目标。
----@param method "pinyin"|"wubi"|"cangjie"|"zhuyin"
+---@param spec BookDictSpec
 ---@param cb fun(ok: boolean, err: any)|nil
 ---@param on_progress fun(stage: string, done: number|nil, total: number|nil, idx: number|nil, count: number|nil)|nil
-function M.ensure(method, cb, on_progress)
+function M.install(spec, cb, on_progress)
     cb = cb or function() end
     if M._downloading then
         cb(false, "already downloading")
         return
     end
-    local dest = Paths.imeDictPath(method)
-    local base_url = BASE_ROOT .. (method == "pinyin" and "/pinyin" or "/ime/" .. method)
+    local dest = spec.dest
     local started_at = Perf.now()
     M._downloading = true
-    logger.dbg("book ime dict download start", method, dest)
+    logger.dbg("book dict download start", spec.name, dest)
     --- 转发进度给调用方（未传 on_progress 时静默丢弃）。
     ---@param ... any 阶段名及可选的进度数值
     local function report(...)
@@ -227,15 +235,15 @@ function M.ensure(method, cb, on_progress)
     local function done(ok, err)
         M._downloading = false
         if ok then
-            logger.dbg("book ime dict download done", method, Perf.elapsedMs(started_at), "ms")
+            logger.dbg("book dict download done", spec.name, Perf.elapsedMs(started_at), "ms")
         else
-            logger.warn("book ime dict download failed", method, Perf.elapsedMs(started_at), "ms", err)
+            logger.warn("book dict download failed", spec.name, Perf.elapsedMs(started_at), "ms", err)
         end
         cb(ok, err)
     end
 
     report("manifest")
-    Request.get(base_url .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
+    Request.get(spec.base_url .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
         if err then
             done(false, err)
             return
@@ -251,74 +259,94 @@ function M.ensure(method, cb, on_progress)
             return
         end
         local attr = lfs.attributes(dest)
-        local installed = MoonSettings.get("features.ime").ime_dict_built_at[method]
         if attr and attr.mode == "file" and attr.size == tonumber(manifest.raw_size)
-            and installed == manifest.built_at then
+            and spec.installed == manifest.built_at then
             done(true)
             return
         end
         report("manifest", 0, total, 0, #manifest.parts)
         Paths.ensureDir(Paths.root())
-        local synced, sync_err = syncTmpManifest(manifest, method)
+        local synced, sync_err = syncTmpManifest(manifest, spec)
         if not synced then
             done(false, sync_err)
             return
         end
-        downloadParts(method, base_url, manifest, 1, dest, done, report, 0, total)
+        downloadParts(spec, manifest, 1, done, report, 0, total)
     end)
 end
 
+--- 输入法词库：按方法 id 拼出 spec 交给 install。
+---@param method "pinyin"|"wubi"|"cangjie"|"zhuyin"
+---@param cb fun(ok: boolean, err: any)|nil
+---@param on_progress function|nil
+function M.ensure(method, cb, on_progress)
+    M.install({
+        name = "ime." .. method,
+        base_url = BASE_ROOT .. (method == "pinyin" and "/pinyin" or "/ime/" .. method),
+        dest = Paths.imeDictPath(method),
+        tmp = Paths.root() .. "/ime_" .. method .. "_dict.dl",
+        installed = MoonSettings.get("features.ime").ime_dict_built_at[method],
+        on_installed = function(manifest)
+            require("features.ime.registry").reset(method)
+            local c = MoonSettings.get("features.ime")
+            c.ime_dict_built_at[method] = manifest.built_at
+            MoonSettings.save("features.ime", c)
+            logger.info("book ime dict installed:", method, manifest.tag, manifest.entries)
+        end,
+    }, cb, on_progress)
+end
+
 -- 前向声明的实现。
-downloadParts = function(method, base_url, manifest, idx, dest, done, report, done_bytes, total)
+downloadParts = function(spec, manifest, idx, done, report, done_bytes, total)
     local parts = manifest.parts
     if idx > #parts then
-        assembleInJob(method, manifest, dest, done, report)
+        assembleInJob(spec, manifest, done, report)
         return
     end
     local part = parts[idx]
-    if partComplete(part, method) then
+    if partComplete(part, spec) then
         local size = tonumber(part.size)
         report("part", done_bytes + size, total, idx, #parts)
-        downloadParts(method, base_url, manifest, idx + 1, dest, done, report, done_bytes + size, total)
+        downloadParts(spec, manifest, idx + 1, done, report, done_bytes + size, total)
         return
     end
     -- 网络响应尚未返回时也先通知当前分片，避免进度框长时间停在上一阶段。
     report("part", done_bytes, total, idx, #parts)
+    local file = tmpDir(spec) .. "/" .. part.file
     Request.download({
-        url = base_url .. "/" .. part.file,
+        url = spec.base_url .. "/" .. part.file,
         method = "GET",
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
         on_progress = total > 0 and function(written)
             report("part", done_bytes + written, total, idx, #parts)
         end or nil,
-    }, tmpDir(method) .. "/" .. part.file, function(ok, err)
+    }, file, function(ok, err)
         if not ok then
-            os.remove(tmpDir(method) .. "/" .. part.file)
+            os.remove(file)
             done(false, err)
             return
         end
-        if not partComplete(part, method) then
-            os.remove(tmpDir(method) .. "/" .. part.file)
+        if not partComplete(part, spec) then
+            os.remove(file)
             done(false, "part size mismatch: " .. part.file)
             return
         end
-        downloadParts(method, base_url, manifest, idx + 1, dest, done, report,
-            done_bytes + tonumber(part.size), total)
+        downloadParts(spec, manifest, idx + 1, done, report, done_bytes + tonumber(part.size), total)
     end)
 end
 
-assembleInJob = function(method, manifest, dest, done, report)
+assembleInJob = function(spec, manifest, done, report)
     local size, count = tonumber(manifest.raw_size), #manifest.parts
     report("assemble", 0, size, nil, count)
-    local dir = tmpDir(method)
+    local dir = tmpDir(spec)
     Job.run(function(progress)
-        local err = assemble(manifest, dir, dest, progress)
+        local err = assemble(manifest, dir, spec.dest, progress)
         if err then
             error(err)
         end
     end, {
-        name = "features.ime." .. method .. ".assemble",
+        name = "features." .. spec.name .. ".assemble",
         -- medium 每 2s 收一次管道：进度条要能看出在动，heavy 的 5s 太钝。
         kind = "medium",
         timeout = require("http.timeout").net(10),
@@ -326,12 +354,8 @@ assembleInJob = function(method, manifest, dest, done, report)
             report("assemble", bytes, size, nil, count)
         end,
         on_done = function()
-            cleanupTmp(method)
-            require("features.ime.registry").reset(method)
-            local c = MoonSettings.get("features.ime")
-            c.ime_dict_built_at[method] = manifest.built_at
-            MoonSettings.save("features.ime", c)
-            logger.info("book ime dict installed:", method, manifest.tag, manifest.entries)
+            cleanupTmp(spec)
+            spec.on_installed(manifest)
             done(true)
         end,
         on_failed = function(err)

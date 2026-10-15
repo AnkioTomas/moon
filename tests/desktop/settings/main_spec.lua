@@ -204,7 +204,7 @@ local desktop = {
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 28)
+Assert.len(built_rows, 29)
 Assert.eq(table.concat(section_titles, ","), "书库,桌面,阅读,系统,维护")
 
 local expected = {
