@@ -236,3 +236,20 @@ do
     Assert.is_nil(page)
     Assert.eq(err, "offline")
 end
+
+do -- 已删除段评（无 review 体）和匿名作者不让整页崩溃
+    local client = fakeClient()
+    local page, err
+    Reviews.pageAsync(client, "b", "4", "1-2", 0, function(p, e) page, err = p, e end)
+    client.reviews_cb({ reviews = { {
+        totalCount = 2, maxIdx = 2, hasMore = 0,
+        pageReviews = {
+            { reviewId = "gone" },
+            { reviewId = "anon", review = { content = "hi", createTime = 1 } },
+        },
+    } } })
+    Assert.is_nil(err)
+    Assert.len(page.items, 1)
+    Assert.eq(page.items[1].id, "anon")
+    Assert.eq(page.items[1].author, "")
+end

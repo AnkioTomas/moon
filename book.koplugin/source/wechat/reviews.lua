@@ -90,7 +90,7 @@ function Reviews.item(entry)
     local review = entry.review
     return {
         id = entry.reviewId,
-        author = review.author.name,
+        author = type(review.author) == "table" and review.author.name or "",
         content = review.content,
         likes = tonumber(entry.likesCount) or 0,
         time = tonumber(review.createTime) or 0,
@@ -218,7 +218,10 @@ function Reviews.pageAsync(client, book_id, chapter_uid, range, max_idx, cb)
         end
         local items = {}
         for _idx, review in ipairs(entry.pageReviews or {}) do
-            items[#items + 1] = Reviews.item(review)
+            -- 已删除的段评只剩 reviewId，没有 review 体。
+            if type(review) == "table" and type(review.review) == "table" then
+                items[#items + 1] = Reviews.item(review)
+            end
         end
         cb({
             items = items,
