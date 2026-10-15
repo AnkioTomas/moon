@@ -1,4 +1,4 @@
---[[-- features.rare.overlay：注音布局（字号、缩放、居中、夹边、同行避让）与绘制管线（桩 CRE）。 --]]
+--[[-- features.rare.overlay：注音布局（全屏统一字号、居中、夹边）、点按开查词面板与绘制管线（桩 CRE）。 --]]
 
 local Assert = require("support.assert")
 
@@ -34,35 +34,92 @@ local Overlay = require("features.rare.overlay")
 
 local function measure(text, size) return #text * size / 2 end
 
-do
-    -- 字号 = 行高 × 比例；居中在框上方；基线在框顶。
-    local items = Overlay.layout({ { ann = "dá", box = { x = 100, y = 50, w = 30, h = 30 } } },
-        { ratio = 0.5, screen_w = 600, measure = measure })
-    Assert.len(items, 1)
-    Assert.eq(items[1].size, 15)
-    Assert.eq(items[1].y, 50)
-    -- "dá" 3 字节 × 7.5 = 22.5 宽，居中：100 + (30 - 22.5) / 2
-    Assert.eq(items[1].x, 103)
+-- 管线测试用固定排版尺寸（真机从页面像素量）。行内墨迹 [top, bottom] 相对行顶。
+local C = { pitch = 40, top = 7, bottom = 34 }
+local realCalibrate = Overlay.calibrate
+Overlay.calibrate = function() return C end
+Overlay.annInk = function() return { em = 1.3, bottom_em = 0.3 } end
+
+local function geo(size)
+    return { size = size, pitch = C.pitch, top = C.top, ann_bottom = math.ceil(0.3 * size), screen_w = 600, measure = measure }
 end
 
 do
-    -- 过宽缩字号，但不小于六成；靠右越界夹回屏内；顶行基线不出屏。
-    local items = Overlay.layout({ { ann = "zhuàng", box = { x = 580, y = 0, w = 20, h = 40 } } },
-        { ratio = 0.5, screen_w = 600, measure = measure })
-    Assert.eq(items[1].size, 12)
-    Assert.eq(items[1].y, 12)
-    Assert.is_true(items[1].x + measure("zhuàng", 12) <= 600)
+    -- 统一字号 = min(正文 × 比例, 行间空隙放得下的)，不低于 FLOOR。
+    Assert.eq(Overlay.size(30, 0.5), 15)
+    Assert.eq(Overlay.size(30, 0.5, 40, 1.3), 15, "空隙够大按比例")
+    Assert.eq(Overlay.size(30, 0.5, 12, 1.3), 7, "空隙小按空隙收")
+    Assert.eq(Overlay.size(30, 0.5, 3, 1.3), Overlay.FLOOR, "放不下也按下限画")
+    Assert.eq(Overlay.size(8, 0.5), Overlay.FLOOR)
 end
 
 do
-    -- 同一行与前一个重叠的跳过，换行不受影响。
+    -- 量页面：pitch 取最矮框（段首高框排除），墨迹取各词合并的最高 / 最低行。
+    local dark = {}
+    local function ink(x, y) dark[y * 1000 + x] = true end
+    for x = 10, 20 do ink(x, 107); ink(x, 125) end     -- 词 1：行顶 100，墨迹 7..25
+    for x = 60, 70 do ink(x, 112); ink(x, 134) end     -- 词 2：下伸部到 34
+    for x = 200, 210 do ink(x, 300) end                 -- 段首高框里的不算
+    local bb = {
+        getWidth = function() return 600 end, getHeight = function() return 800 end,
+        getPixel = function(_s, x, y) return { getColor8 = function() return { a = dark[y * 1000 + x] and 0 or 255 } end } end,
+    }
+    local c = realCalibrate(bb, {
+        { x = 10, y = 100, w = 20, h = 40 }, { x = 60, y = 100, w = 20, h = 40 }, { x = 200, y = 270, w = 20, h = 60 },
+    })
+    Assert.eq(c.pitch, 40)
+    Assert.eq(c.top, 7)
+    Assert.eq(c.bottom, 34)
+end
+
+do
+    -- 同屏所有注音同一字号；段首高框按底部 pitch 算，与同行普通框同基线。
     local items = Overlay.layout({
-        { ann = "aaaaaa", box = { x = 0, y = 10, w = 20, h = 20 } },
-        { ann = "bbbbbb", box = { x = 20, y = 10, w = 20, h = 20 } },
-        { ann = "cccccc", box = { x = 20, y = 40, w = 20, h = 20 } },
-    }, { ratio = 0.5, screen_w = 600, measure = measure })
-    Assert.len(items, 2)
-    Assert.eq(items[2].text, "cccccc")
+        { ann = "dá", key = "龘", box = { x = 100, y = 50, w = 30, h = 40 } },
+        { ann = "zhuàng", key = "撞", box = { x = 300, y = 10, w = 10, h = 80 } },
+        { ann = "zhuàng", key = "撞", box = { x = 590, y = 90, w = 10, h = 40 } },
+    }, geo(7))
+    Assert.len(items, 3)
+    for _idx, item in ipairs(items) do Assert.eq(item.size, 7) end
+    Assert.eq(items[1].x, 109)
+    Assert.eq(items[1].y, 54)
+    Assert.eq(items[2].y, 54, "段首高框同一行基线")
+    Assert.eq(items[3].y, 94)
+    Assert.is_true(items[3].x + items[3].w <= 600)
+end
+
+do
+    -- 不碰上一行（含下伸部，留 MARGIN）也不压本行字：各种行距下按算出的字号布局后检查。
+    for pitch = 28, 70 do
+        local top, bottom = 3, 26
+        local size = Overlay.size(30, 0.5, pitch - (bottom - top + 1), 1.3)
+        local ann_bottom = math.ceil(0.3 * size)
+        local item = Overlay.layout({ { ann = "a", key = "a", box = { x = 0, y = 200, w = 20, h = pitch } } },
+            { size = size, pitch = pitch, top = top, ann_bottom = ann_bottom, screen_w = 600, measure = measure })[1]
+        local above_bottom = 200 - pitch + bottom
+        local ann_top = item.y - (1.3 - 0.3) * size
+        if size > Overlay.FLOOR then
+            Assert.is_true(ann_top >= above_bottom + Overlay.MARGIN, "pitch " .. pitch .. " 不碰上一行")
+        end
+        Assert.is_true(item.y + ann_bottom <= 200 + top, "pitch " .. pitch .. " 不压本行字")
+    end
+end
+
+do
+    -- 同行相邻注音不重叠：词框内能右推就推，推不下跳过后一个；字号不变、纵向不变。
+    local items = Overlay.layout({
+        { ann = "dá", key = "龘", box = { x = 100, y = 50, w = 30, h = 40 } },
+        { ann = "pǔ", key = "普", box = { x = 118, y = 50, w = 34, h = 40 } },
+        { ann = "zhuàng", key = "撞", box = { x = 150, y = 50, w = 20, h = 40 } },
+        { ann = "pǔ", key = "普", box = { x = 118, y = 120, w = 34, h = 40 } },
+    }, geo(15))
+    Assert.len(items, 3, "推不下的同行注音被跳过")
+    Assert.eq(items[1].x, 103)
+    Assert.eq(items[2].x, 127.5, "右推到前一个之后留间距")
+    Assert.is_true(items[2].x + items[2].w <= 118 + 34, "仍在本词框内")
+    Assert.eq(items[2].y, items[1].y)
+    Assert.eq(items[3].key, "普")
+    Assert.eq(items[3].x, 123, "不同行不推")
 end
 
 local function newUi(matches)
@@ -130,4 +187,24 @@ do
     -- 段首、段尾没有前后字符也算整词。
     text = "obdurate"
     Assert.is_true(Overlay.wholeWord(doc, { start = 1, ["end"] = 9 }))
+end
+
+do
+    -- 点注音或被注音的字：开查词面板，带读音与屏上所在句子；关掉注音不接。
+    local shown
+    package.loaded["features.rare.lookup"] = { open = function(opts) shown = opts end }
+    package.loaded["reader.context"].sentence = function(text, word) return "句子:" .. word end
+    local o = Overlay.new({})
+    o.items = { { text = "dá", key = "龘", x = 10, y = 90, w = 20, size = 15, box = { x = 10, y = 100, w = 30, h = 30 } } }
+    Assert.is_true(o:tap({ x = 15, y = 85 }), "点注音")
+    Assert.eq(shown.text, "龘")
+    Assert.eq(shown.reading, "dá")
+    Assert.eq(shown.context.sentence, "句子:龘")
+    shown = nil
+    Assert.is_true(o:tap({ x = 20, y = 115 }), "点字")
+    Assert.eq(shown.text, "龘")
+    Assert.is_false(o:tap({ x = 300, y = 300 }))
+    settings.rare_enabled = false
+    Assert.is_false(o:tap({ x = 20, y = 115 }))
+    settings.rare_enabled = true
 end
