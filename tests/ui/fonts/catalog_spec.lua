@@ -26,12 +26,15 @@ package.preload["fontlist"] = function()
             [root .. "/WenKai.ttf"] = { { name = "LXGW WenKai" } },
             [root .. "/Plain.otf"] = { { name = "Plain Sans" } },
             [root .. "/KaiCN.ttf"] = { { name = "Kai CN", names = { ["zh-cn"] = { [1] = "简体楷" } } } },
+            -- 粗体/斜体变体：CRE 只能按族名切字体，选了等于没选，不列
+            [root .. "/sub/Bare-Bold.ttf"] = { { name = "Bare", bold = true } },
+            [root .. "/sub/Bare-Italic.ttf"] = { { name = "Bare", italic = true } },
         },
     }
     function FontList:getFontList() return self.fontlist end
     function FontList:_readList(dir, _mark)
         for _idx, file in ipairs({ "WenKai.ttf", "Plain.otf", "KaiCN.ttf", "skip.woff",
-            "sub/Bare-Font.ttf", "sub/Plain.otf" }) do
+            "sub/Bare-Font.ttf", "sub/Plain.otf", "sub/Bare-Bold.ttf", "sub/Bare-Italic.ttf" }) do
             table.insert(self.fontlist, dir .. "/" .. file)
         end
     end

@@ -65,6 +65,8 @@ local function scanInstalledFonts()
         seen[file] = true
         local info = FontList.fontinfo[path]
         info = info and info[1]
+        -- 粗体/斜体是同族变体：阅读页按族名 setFontFace 只会落到常规体，列出来选了也不生效
+        if info and (info.bold or info.italic) then return end
         local name = FontList:getLocalizedFontName(path, 0) or (zh and info and chineseName(info.names))
             or (info and info.name) or file:gsub("%.[^%.]+$", "")
         table.insert(groups[kind], { id = file, name = name, kind = kind })
