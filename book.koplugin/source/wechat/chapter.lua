@@ -156,15 +156,19 @@ end
 --- 原书脚注是 ``<img class="qqreader-footnote" alt="注文">``，注文只在 alt 里，点了没东西可弹。
 --- 图标原样包进 noteref 链接，注文放进 body 末尾的 footnote aside，交给 KOReader 脚注弹窗。
 --- 不加 ``<p>``、不动正文文字：段落序号与字偏移不变，划线 range 照旧对得上。
+--- 图标尺寸写成行内 style：整书样式表拉取失败 / 缺规则时 CRE 会按 PNG 原始像素×DPI 画成两行高的大方块。
 ---@param html string
 ---@return string
+local FOOTNOTE_STYLE = "height:0.8em;width:auto;vertical-align:super;border:0"
 local function linkFootnotes(html)
     if not html:find("qqreader-footnote", 1, true) then return html end
     local notes = {}
     html = html:gsub("<img%s[^>]*>", function(tag)
         local class = tag:match('class="([^"]*)"') or ""
         local alt = tag:match('alt="([^"]*)"') or ""
-        if not class:find("qqreader-footnote", 1, true) or alt == "" then return nil end
+        if not class:find("qqreader-footnote", 1, true) then return nil end
+        tag = tag:gsub('%sstyle="[^"]*"', ""):gsub("%s*/?>$", ' style="' .. FOOTNOTE_STYLE .. '" />')
+        if alt == "" then return tag end
         notes[#notes + 1] = alt
         local n = #notes
         return string.format('<a href="#wr-fn%d" id="wr-fnref%d" epub:type="noteref">%s</a>', n, n, tag)

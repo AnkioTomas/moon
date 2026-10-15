@@ -129,10 +129,13 @@ do
     Assert.is_nil(payload.html)
     local note = '<img class="qqreader-footnote" alt="注" src="../Images/note.png" />'
     local expected = FULL:gsub("https://res%.weread%.qq%.com/x%.png", "images/x.png")
-        :gsub(note:gsub("%p", "%%%0"), '<a href="#wr-fn1" id="wr-fnref1" epub:type="noteref">' .. note .. '</a>')
+        :gsub(note:gsub("%p", "%%%0"), '<a href="#wr-fn1" id="wr-fnref1" epub:type="noteref">'
+            .. '<img class="qqreader-footnote" alt="注" src="../Images/note.png" style="height:0.8em;width:auto;vertical-align:super;border:0" /></a>')
         -- 两份拼接文档：aside 进最后一个 body。
         :gsub("<p>第二段文档</p></body>", '<p>第二段文档</p><aside id="wr-fn1" epub:type="footnote">注</aside>\n</body>')
     Assert.eq(payload.document, expected)
+    -- 脚注图标尺寸不依赖整书样式表：行内 style 压到 0.8em 上标，原有 style 被替换。
+    Assert.is_true(payload.document:find('height:0.8em', 1, true) ~= nil)
 
     txt = true
     Chapter.fetchContentAsync("book", { uid = "c2", title = "第2章 想<整>我" }, function(p) payload = p end)
