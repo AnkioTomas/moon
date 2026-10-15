@@ -3,7 +3,7 @@
 
   set(id, name)       只写 ui.ui_font / ui_font_name，绝不碰 Font.fontmap
   applyCurrent()      唯一改 Font.fontmap 的入口；onCreate 每进程只调一次，设置页换字体后再调
-  faceForId / faceNameForId  解析字体名（前者顺带注册进 CRE）
+  faceForId / faceNameForId  解析字体名（前者顺带注册进 CRE）；pathForId 只给文件路径
 
 字源：
   id == ""                         恢复首次备份的 fontmap（配置空值；选择器不提供此项）
@@ -146,6 +146,22 @@ local function ensureFontInfo(path)
     if FontList.fontinfo[path] then
         return FontList.fontinfo[path]
     end
+    -- 只读这一个文件：_readList 会把整个目录的字体逐个打开（几十个大 CJK 字体在 Kindle 上要十几秒）。
+    -- collectFaceInfo 是 fontlist 的局部函数，从 _readList 的上值里取；取不到退回整目录读。
+    local collect
+    for i = 1, math.huge do
+        local name, value = debug.getupvalue(FontList._readList, i)
+        if not name then break end
+        if name == "collectFaceInfo" then collect = value break end
+    end
+    if collect then
+        local fi = collect(path)
+        if fi and next(fi) then
+            fi.change = lfs.attributes(path, "change")
+            FontList.fontinfo[path] = fi
+        end
+        return FontList.fontinfo[path]
+    end
     local dir = path:match("^(.*)/[^/]+$")
     if not dir then
         return nil
@@ -168,6 +184,11 @@ local function resolvePath(id)
     registerFontPath(path)
     return path
 end
+
+--- 字体 id → 字体文件路径（登记进 FontList）；不读字体信息，自绘只要文件时用这个。
+---@param id string
+---@return string|nil path, string|nil err
+Fonts.pathForId = resolvePath
 
 --- 字体 id → CRE 字体名与字体文件路径；不触发 CRE 注册，用于偏好比较和保存。
 ---@param id string

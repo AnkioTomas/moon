@@ -270,3 +270,18 @@ Assert.eq(Fonts.faceNameForId("late"), "Late Demo")
 Assert.eq(#FontList.fontlist, before + 1, "只多出 late.ttf 一条")
 Assert.eq(FontList.fontlist[1], "/tmp/fonts/late.ttf")
 Assert.eq(FontReader.currentId({ doc_settings = { readSetting = function() end } }), "")
+
+-- 能取到 fontlist 的 collectFaceInfo 时只读选中的这一个文件，不扫整个目录
+local collected, walked = {}, false
+local function collectFaceInfo(path)
+    collected[#collected + 1] = path
+    return { { name = "Solo Demo" } }
+end
+FontList._readList = function()
+    walked = true
+    return collectFaceInfo
+end
+files["/tmp/fonts/solo.ttf"] = true
+Assert.eq(Fonts.faceNameForId("solo"), "Solo Demo")
+Assert.eq(table.concat(collected, ","), "/tmp/fonts/solo.ttf", "只读这一个文件的字体信息")
+Assert.is_false(walked, "不走整目录 _readList")
