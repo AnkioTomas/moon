@@ -332,3 +332,56 @@ do
     Assert.eq(logs[#logs], "book.reviews unmatched differs", "记下对不上的原因")
     Log.info = info
 end
+
+-- 候选章上限可调（借段评取 8）
+do
+    local many = {}
+    for i = 1, 20 do many[i] = { idx = i, uid = tostring(i), title = "x" .. i, words = 1 } end
+    Assert.len(Linked.candidates(many, {}, 0.5), 2)
+    local wide = {}
+    for i = 1, 100 do wide[i] = { idx = i, uid = tostring(i), title = "y" .. i, words = 1 } end
+    Assert.len(Linked.candidates(wide, {}, 0.5), 6, "默认 6 章")
+    Assert.len(Linked.candidates(wide, {}, 0.5, 8), 8)
+end
+
+-- 本章锚点：按字数取章中点；没字数按章序号
+do
+    local at, title = Linked.anchorOf({ { idx = 1, words = 100, title = "一" }, { idx = 2, words = 300, title = "二" } }, 2)
+    Assert.eq(at, 0.625)
+    Assert.eq(title, "二")
+    Assert.eq(Linked.anchorOf({ { idx = 1 }, { idx = 2 }, { idx = 3 }, { idx = 4 } }, 2), 0.375)
+    Assert.eq(Linked.anchorOf({}, 2), 0)
+end
+
+-- 章会话关联按书存（settings/reviews.lua 的 chapter_links），不跟着章文件
+do
+    local id = { source_id = "jdread", stable_id = "jd1", chapter_idx = 3 }
+    Assert.is_nil(Linked.getFor(id))
+    Linked.setFor(id, { book_id = "pub1", title = "书" })
+    Assert.eq(Linked.getFor({ source_id = "jdread", stable_id = "jd1", chapter_idx = 9 }).book_id, "pub1", "换章仍在")
+    Assert.is_nil(Linked.getFor({ source_id = "wechat", stable_id = "jd1" }), "键带源 id")
+    Linked.setFor(id, nil)
+    Assert.is_nil(Linked.getFor(id))
+end
+
+-- 借热点：属主源目录算锚点，到关联书目录挑章，热点记上归属章
+do
+    local own = { toc = { { idx = 1, words = 50, title = "一" }, { idx = 2, words = 50, title = "二" } } }
+    function own:loadTocAsync(_book, cb) cb(self.toc); return { cancel = function() end } end
+    local wechat = { id = "wechat", asked = {} }
+    function wechat:loadTocAsync(_book, cb) cb({ { idx = 5, uid = "u5", title = "二", words = 10 } }); return { cancel = function() end } end
+    function wechat:isTocCurrent() return true end
+    function wechat:paragraphHotspotsAsync(identity, cb)
+        self.asked[#self.asked + 1] = identity
+        cb({ { range = "3-4", text = "句" } })
+        return { cancel = function() end }
+    end
+    local got
+    Linked.chapterHotspotsAsync(wechat, { source_id = "jdread", stable_id = "jd1", chapter_idx = 2, source = own },
+        { book_id = "pub1" }, function(list) got = list end)
+    Assert.len(wechat.asked, 1)
+    Assert.eq(wechat.asked[1].stable_id, "pub1")
+    Assert.eq(wechat.asked[1].chapter_idx, 5, "章名对上")
+    Assert.eq(got[1].chapter_idx, 5)
+end
+

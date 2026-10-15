@@ -209,3 +209,55 @@ marks.current[1].tap()
 Assert.eq(opened.identity, link_identity)
 Assert.eq(opened.spot, spot)
 Linked.target = real_target
+
+-- 借段评（贡献者设计）：本章自己没有热点且关联了书城版 → 借关联书的热点；点开用关联书那一章的身份。
+local real_get_for, real_borrow = Linked.getFor, Linked.chapterHotspotsAsync
+local borrows = {}
+Linked.getFor = function(id) return id.stable_id ~= "jd2" and { book_id = "pub1" } or nil end
+Linked.chapterHotspotsAsync = function(src, id, link, cb)
+    borrows[#borrows + 1] = { src = src, id = id, link = link }
+    cb({ { range = "1-5", text = "甲", total = 2, pos0 = "a0", pos1 = "a1", chapter_idx = 7 } })
+    return { cancel = function() end }
+end
+source.enabled = true
+identity = { source_id = "wechat", stable_id = "CB_1", chapter_idx = 6, source = source }
+session = { identity = identity }
+marks:updateView()
+source.fetches[#source.fetches].cb({})
+marks:updateView()
+Assert.len(borrows, 1, "本章为空才借")
+Assert.eq(borrows[1].src, source)
+Assert.len(marks.current, 1)
+marks.current[1].tap()
+Assert.eq(opened.identity.stable_id, "pub1", "借来的句子用关联书身份")
+Assert.eq(opened.identity.chapter_idx, 7, "且是热点所属章")
+
+-- 本章自己有热点：不借
+identity = { source_id = "wechat", stable_id = "CB_1", chapter_idx = 8, source = source }
+session = { identity = identity }
+marks:updateView()
+source.fetches[#source.fetches].cb({ { range = "9-9", text = "乙", total = 1, pos0 = "a0", pos1 = "a1" } })
+marks:updateView()
+Assert.len(borrows, 1)
+marks.current[1].tap()
+Assert.eq(opened.identity, identity)
+
+-- 京东读书章会话：自己没有段评，关联了就直接借微信书城版
+local wechat = { id = "wechat" }
+function wechat:configured() return true end
+function wechat:paragraphReviewsEnabled() return true end
+function wechat:locateHotspots(hotspots) return hotspots end
+local real_registry = package.loaded["source.registry"]
+package.loaded["source.registry"] = { resolve = function() return wechat end }
+session = { identity = { source_id = "jdread", stable_id = "jd1", chapter_idx = 2, source = {} } }
+marks:updateView()
+Assert.len(borrows, 2)
+Assert.eq(borrows[2].src, wechat, "借段评走微信源")
+Assert.len(marks.current, 1)
+marks.current[1].tap()
+Assert.eq(opened.identity.source, wechat)
+session = { identity = { source_id = "jdread", stable_id = "jd2", chapter_idx = 2, source = {} } }
+marks:updateView()
+Assert.len(marks:marks(), 0, "没关联不标")
+package.loaded["source.registry"] = real_registry
+Linked.getFor, Linked.chapterHotspotsAsync = real_get_for, real_borrow

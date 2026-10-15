@@ -25,11 +25,38 @@ local function repaint(ui)
     UIManager:setDirty(ui.dialog, "ui")
 end
 
+---@return BookIdentity|nil
+local function identityOf()
+    local cur = require("reader.session").current()
+    return cur and cur.identity
+end
+
+--- 章会话（微信读书、京东读书）每章是独立文档，关联按书存；本地书存 doc_settings。
+---@param ui table ReaderUI
+---@param identity BookIdentity|nil
+---@return ReviewLink|nil
+local function readLink(ui, identity)
+    if identity and identity.chapter_idx then return Linked.getFor(identity) end
+    return Linked.get(ui)
+end
+
+---@param ui table ReaderUI
+---@param identity BookIdentity|nil
+---@param link ReviewLink|nil nil = 解除关联
+local function writeLink(ui, identity, link)
+    if identity and identity.chapter_idx then
+        Linked.setFor(identity, link)
+    else
+        Linked.set(ui, link)
+    end
+end
+
 ---@param ui table
 ---@param source ParagraphReviewSource
 ---@param book WechatSearchBook
-local function choose(ui, source, book)
-    Linked.set(ui, { book_id = book.book_id, title = book.title, author = book.author })
+---@param identity BookIdentity|nil
+local function choose(ui, source, book, identity)
+    writeLink(ui, identity, { book_id = book.book_id, title = book.title, author = book.author })
     repaint(ui)
     if source:paragraphReviewsEnabled() then
         toast(T(_("已关联「%1」"), book.title))
@@ -41,7 +68,8 @@ end
 --- 输入书名 → 搜索 → 选书。
 ---@param ui table
 ---@param source ParagraphReviewSource
-local function search(ui, source)
+---@param identity BookIdentity|nil
+local function search(ui, source, identity)
     local props = ui.doc_props or {}
     require("ui.themes.widgets.input"):new{
         title = _("搜索微信读书书目"),
@@ -65,7 +93,7 @@ local function search(ui, source)
                     items[i] = {
                         text = book.title,
                         mandatory = book.author,
-                        callback = function() choose(ui, source, book) end,
+                        callback = function() choose(ui, source, book, identity) end,
                     }
                 end
                 require("ui.themes.widgets.list"):new{ title = _("选择微信读书书目"), items = items }:show()
@@ -74,13 +102,12 @@ local function search(ui, source)
     }:show()
 end
 
---- 当前文档能关联：不是微信读书自己的章会话，且是排版引擎文档（EPUB、AZW3、TXT、FB2…，不含 PDF / 漫画）。
+--- 当前文档能关联：排版引擎文档（EPUB、AZW3、TXT、FB2…，不含 PDF / 漫画）。
+--- 微信读书的书也放开：自己上传的书在平台上没有段评，要借正版那本；本章自己有段评时不借。
 ---@param ui table ReaderUI
 ---@return boolean
 function Link.available(ui)
-    local cur = require("reader.session").current()
-    local identity = cur and cur.identity
-    if not identity or identity.source_id == "wechat" then return false end
+    if not identityOf() then return false end
     return Linked.supported(ui.document)
 end
 
@@ -92,18 +119,19 @@ function Link.open(ui)
         toast(_("请先扫码登录微信读书"))
         return
     end
-    local link = Linked.get(ui)
+    local identity = identityOf()
+    local link = readLink(ui, identity)
     if not link then
-        search(ui, source)
+        search(ui, source, identity)
         return
     end
     require("ui.themes.widgets.list"):new{
         centered = true,
         title = T(_("已关联：%1"), link.title),
         items = {
-            { text = _("更换关联"), callback = function() search(ui, source) end },
+            { text = _("更换关联"), callback = function() search(ui, source, identity) end },
             { text = _("解除关联"), callback = function()
-                Linked.set(ui, nil)
+                writeLink(ui, identity, nil)
                 repaint(ui)
                 toast(_("已解除关联"))
             end },
