@@ -351,21 +351,38 @@ local function reset()
     scan_rows = {}
 end
 
--- ── 子目录列不出来：整次扫盘失败，不按残缺快照 reconcile 软删其中的书 ──────
+-- ── 子目录列不出来：记日志跳过，扫盘照常成功；其下原有的书当“未知”保留，不软删 ──────
 do
     reset()
     db_rows[rowKey("local", "/books/sub/c.pdf")] = {
         source_id = "local", stable_id = "/books/sub/c.pdf", title = "c", path = "/books/sub/c.pdf",
+        deleted = 0, sync_status = 1,
     }
+    db_rows[rowKey("local", "/books/gone.epub")] = {
+        source_id = "local", stable_id = "/books/gone.epub", title = "gone", path = "/books/gone.epub",
+        deleted = 0, sync_status = 1,
+    }
+    local log, warns = require("utils.log"), {}
+    local realWarn = log.warn
+    log.warn = function(...) warns[#warns + 1] = table.concat({ ... }, " ") end
     DENIED_DIRS["/books/sub"] = true
     local ok, err
     Client.new({ path = "/books" }):scanAsync(function(o, e) ok, err = o, e end)
     Stubs.flush()
     DENIED_DIRS["/books/sub"] = nil
-    Assert.is_false(ok)
-    Assert.matches(tostring(err), "Permission denied")
-    Assert.len(removed, 0)
-    Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].path, "/books/sub/c.pdf")
+    log.warn = realWarn
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.matches(table.concat(warns, "\n"), "book local scan skip unreadable dir /books/sub")
+    Assert.matches(table.concat(warns, "\n"), "Permission denied")
+    -- 读不了的目录里的书原样在架
+    local c = db_rows[rowKey("local", "/books/sub/c.pdf")]
+    Assert.eq(c.deleted, 0)
+    Assert.eq(c.path, "/books/sub/c.pdf")
+    Assert.is_false(hasValue(removed, "/books/sub/c.pdf"))
+    -- 可读的兄弟照扫，真没了的照下架
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 0)
+    Assert.is_true(hasValue(removed, "/books/gone.epub"))
 end
 
 -- ── 扫盘 → 解析写库（失败回退文件名）→ 清失效 ──────
@@ -753,12 +770,12 @@ do
     Assert.eq(job_runs, 3)
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].title, "a")
 
-    -- 不在打开文档时失败（如目录列不出来）：不重试，照常报错
+    -- 不在打开文档时失败（如书库根列不出来）：不重试，照常报错
     reset()
-    DENIED_DIRS["/books/sub"] = true
+    DENIED_DIRS["/books"] = true
     Client.new({ path = "/books" }):scanAsync(function(o, e) ok, err = o, e end)
     Stubs.flush()
-    DENIED_DIRS["/books/sub"] = nil
+    DENIED_DIRS["/books"] = nil
     Assert.is_false(ok)
     Assert.eq(job_runs, 1)
 end
