@@ -596,6 +596,14 @@ do
     book_fraction = 1
     Session.onPageUpdate(plugin, 200)
     Assert.eq(calls.book[#calls.book][1], "complete", "100% 必须覆盖手动未读")
+    -- 没有 book 缓存可回写：末页反复翻页只写一次库。
+    local saved_book = cur.identity.book
+    cur.identity.book = nil
+    local n = #calls.book
+    Session.onPageUpdate(plugin, 200)
+    Session.onPageUpdate(plugin, 200)
+    Assert.eq(#calls.book, n + 1, "末页不在每次翻页时重复写库")
+    cur.identity.book = saved_book
     Assert.eq(cur.identity.book.read_state, 1)
     book_fraction = 0.25
 
