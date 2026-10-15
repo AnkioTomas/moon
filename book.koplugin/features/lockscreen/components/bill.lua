@@ -144,7 +144,7 @@ function M.blocks(rect)
             radius = 1, shadow = 2, color = Blitbuffer.COLOR_WHITE,
         },
         {
-            kind = "image", file = U.LOGO_PATH,
+            kind = "image", file = U.LOGO_PATH, keep = true,
             x = inner_x, y = logo_y,
             width = logo_size, height = logo_size, scale_factor = 0, alpha = false,
         },

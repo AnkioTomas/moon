@@ -220,6 +220,17 @@ local function lightenRounded(bb, x, y, width, height, radius, by)
     bb:lightenRect(x, y + radius, width, height - radius * 2, by)
 end
 
+-- keep 图块（锁屏 logo）解码一次常驻：每次锁屏都画同一张小图，不必重复解码。只存小图，按文件一份。
+local kept = {}
+---@param file string
+---@return BlitBuffer
+local function keptImage(file)
+    if not kept[file] then
+        kept[file] = assert(require("ui/renderimage"):renderImageFile(file, false), "cannot decode image: " .. file)
+    end
+    return kept[file]
+end
+
 --- 分发非文本图形块：线、柱、卡片、票根缺口、图片和离屏 widget。
 --- 封面 / 进度条不再走 DSL；主体通过 kind=widget 复用 ui.widgets。
 ---@param bb BlitBuffer 目标 Blitbuffer
@@ -278,7 +289,9 @@ local function paintShape(bb, block, w, h, background)
         end
     elseif block.kind == "image" then
         local image = ImageWidget:new{
-            file = assert(block.file, "image block file required"),
+            file = not block.keep and assert(block.file, "image block file required") or nil,
+            image = block.keep and keptImage(block.file) or nil,
+            image_disposable = not block.keep,
             -- 海报墙一次几十张封面；进全局 ImageCache 会挤掉阅读器 / 桌面的缓存，画完就没用了。
             file_do_cache = false,
             width = width,
