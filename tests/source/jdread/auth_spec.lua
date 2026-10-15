@@ -270,4 +270,8 @@ do
     Assert.is_true(Auth._hasLoginCookie({ pt_key = "k" }))
     Assert.eq(Auth._pageRedirect('<meta http-equiv="refresh" content="0;url=https://e.m.jd.com/a?x=1&amp;y=2">'),
         "https://e.m.jd.com/a?x=1&y=2")
+    -- 协议相对跳转（loginRelay 页里的 //aq.jd.com/...）不能拼到 passport 后面
+    Assert.eq(Auth._absUrl("https://passport.jd.com/relay/loginRelay", "//aq.jd.com/certified/index"),
+        "https://aq.jd.com/certified/index")
+    Assert.eq(Auth._absUrl("https://passport.jd.com/a", "/b"), "https://passport.jd.com/b")
 end

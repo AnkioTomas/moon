@@ -136,6 +136,11 @@ end
 local function absUrl(base, loc)
     if type(loc) ~= "string" or loc == "" then return nil end
     if loc:find("^https?://") then return loc end
+    -- 协议相对地址 //host/path：沿用当前协议，不能拼在当前 host 后面。
+    if loc:sub(1, 2) == "//" then
+        local scheme = type(base) == "string" and base:match("^(https?):") or "https"
+        return scheme .. ":" .. loc
+    end
     local origin = type(base) == "string" and base:match("^(https?://[^/]+)")
     if not origin then return nil end
     if loc:sub(1, 1) == "/" then return origin .. loc end
@@ -307,6 +312,7 @@ local function pageRedirect(body)
     return target
 end
 Auth._pageRedirect = pageRedirect
+Auth._absUrl = absUrl
 
 --- 使用扫码 ticket 换取登录 Cookie 并原子保存源配置。
 --- 成功 = jar 里出现 thor/pt_key/pin 等登录 cookie；校验之后跟 Location / data.url / 页面跳转最多 5 跳，
@@ -336,7 +342,13 @@ function Auth.completeQrLoginAsync(info, cb)
         if not hasLoginCookie(jar) then
             logger.warn("jdread login no session cookie", "hops", hops, "jar", cookieNames(jar))
             clearQrFile()
-            cb(nil, _("登录未拿到会话 Cookie"))
+            -- 中转页跳 aq.jd.com/certified：京东风控要求账号安全验证，扫码这条路拿不到会话。
+            local certified = false
+            for url in pairs(visited) do
+                if url:find("^https?://aq%.jd%.com/certified") then certified = true end
+            end
+            cb(nil, certified and _("京东要求先完成账号安全验证，请在京东 App 或网页登录一次完成验证后再扫码")
+                or _("登录未拿到会话 Cookie"))
             return
         end
         local cookie = cookieHeader(jar)
