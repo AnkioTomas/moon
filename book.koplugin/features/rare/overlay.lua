@@ -288,9 +288,14 @@ end
 ---@return boolean
 function Overlay:tap(pos)
     if not require("utils.settings").get("features.rare").rare_enabled then return false end
+    -- 只认本视口算出的注音：翻页 / 重排后还没重画（或重算出错）时旧坐标作废。
+    if not self.key or self.key ~= PageMarks.viewKey(self.ui, revision) then return false end
     for _idx, item in ipairs(self.items) do
+        local b = item.box
         local on_ann = pos.x >= item.x and pos.x <= item.x + item.w and pos.y >= item.y - item.size and pos.y <= item.y
-        if on_ann or PageMarks.hit(pos, item.box) then
+        -- 字框本身，不用 PageMarks.hit 的上方半行容错：那半行是上一行的正文。
+        local on_char = pos.x >= b.x and pos.x <= b.x + b.w and pos.y >= b.y and pos.y <= b.y + b.h
+        if on_ann or on_char then
             local screen = require("reader.context").visibleText(self.ui) or ""
             local sentence = require("reader.context").sentence(screen, item.key)
             require("features.rare.lookup").open{
@@ -311,6 +316,8 @@ function Overlay:paint(bb)
     if not key then return end
     if key ~= self.key then
         local started_at = Perf.now()
+        -- 先作废旧结果：compute 出错时不留上一屏的坐标给 tap。
+        self.items, self.key = {}, nil
         self.items = compute(self, bb)
         self.key = key
         logger.dbg("book.perf rare.view", Perf.elapsedMs(started_at), "ms items", #self.items)

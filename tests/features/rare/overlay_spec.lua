@@ -194,8 +194,17 @@ do
     local shown
     package.loaded["features.rare.lookup"] = { open = function(opts) shown = opts end }
     package.loaded["reader.context"].sentence = function(text, word) return "句子:" .. word end
-    local o = Overlay.new({})
+    local ui = newUi({})
+    local o = Overlay.new(ui)
     o.items = { { text = "dá", key = "龘", x = 10, y = 90, w = 20, size = 15, box = { x = 10, y = 100, w = 30, h = 30 } } }
+    o.key = require("reader.page_marks").viewKey(ui, 0)
+    Assert.is_false(o:tap({ x = 20, y = 115 }), "注音修订号不符：旧坐标作废")
+    Overlay.invalidate()
+    o.key = nil
+    Assert.is_false(o:tap({ x = 20, y = 115 }), "未画过本视口")
+    local item = o.items[1]
+    o:paint({})
+    o.items = { item }
     Assert.is_true(o:tap({ x = 15, y = 85 }), "点注音")
     Assert.eq(shown.text, "龘")
     Assert.eq(shown.reading, "dá")
@@ -204,6 +213,12 @@ do
     Assert.is_true(o:tap({ x = 20, y = 115 }), "点字")
     Assert.eq(shown.text, "龘")
     Assert.is_false(o:tap({ x = 300, y = 300 }))
+    Assert.is_false(o:tap({ x = 35, y = 88 }), "上一行正文（原半行容错区）不接")
+    Assert.is_false(o:tap({ x = 45, y = 115 }), "同行旁边的普通字不接")
+    -- 翻页后还没重画：旧坐标不接，点按交给翻页。
+    ui.document.getCurrentPos = function() return 1 end
+    Assert.is_false(o:tap({ x = 20, y = 115 }), "视口变了")
+    ui.document.getCurrentPos = function() return 0 end
     settings.rare_enabled = false
     Assert.is_false(o:tap({ x = 20, y = 115 }))
     settings.rare_enabled = true
