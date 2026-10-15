@@ -61,6 +61,23 @@ end
 
 -- 父进程：逐个拉起子进程，汇总结果（子进程设 MOON_TEST_CHILD=1）
 if os.getenv("MOON_TEST_CHILD") ~= "1" then
+    -- 与 tests/run.sh 一致地建沙箱：直接 `lua tests/run.lua`（含临时 worktree）时
+    -- 缺 common.lua 会让依赖沙箱的 spec 全部 skip。
+    local home = (os.getenv("KO_HOME") or ""):gsub("/+$", "")
+    if home == "" then home = ROOT .. "/test" end
+    os.execute("mkdir -p " .. shellQuote(home .. "/.moon/settings") .. " "
+        .. shellQuote(home .. "/.moon/cache") .. " " .. shellQuote(home .. "/settings"))
+    local common = home .. "/.moon/settings/common.lua"
+    local probe = io.open(common, "r")
+    if probe then
+        probe:close()
+    else
+        local f = io.open(common, "w")
+        if f then
+            f:write("-- " .. common .. "\nreturn {}\n")
+            f:close()
+        end
+    end
     local passed, skipped, failed, total_asserts = 0, 0, 0, 0
     local self = arg[0]
     for _, path in ipairs(specs) do
@@ -124,6 +141,26 @@ if f then
         ko .. "/base/?/init.lua",
         package.path,
     }, ";")
+end
+
+-- 模拟器构建（git 忽略）里的 lua-ljsqlite3 + ffi.loadlib：有就让 sqlite spec 真跑。
+do
+    local probe = io.popen("ls -d " .. shellQuote(ko) .. "/koreader-emulator-*/koreader 2>/dev/null | sort -r")
+    local emu = probe and probe:read("*l")
+    if probe then probe:close() end
+    local lib = emu and io.open(emu .. "/common/lua-ljsqlite3/init.lua", "r")
+    if lib then
+        lib:close()
+        local ffi = require("ffi")
+        if not ffi.loadlib then
+            ffi.log = function() end
+            dofile(emu .. "/ffi/loadlib.lua")
+        end
+        -- 只放出 sqlite 一个模块：整个 common/ 进 path 会让真 turbo/ssl 顶掉测试桩。
+        package.preload["lua-ljsqlite3/init"] = function()
+            return dofile(emu .. "/common/lua-ljsqlite3/init.lua")
+        end
+    end
 end
 
 require("support.stubs").install()
