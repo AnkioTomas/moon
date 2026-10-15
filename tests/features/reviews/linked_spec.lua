@@ -305,3 +305,30 @@ Assert.is_false(Linked.supported({ getPageXPointer = function() end }), "PDF 没
 Linked.set(ui, nil)
 Assert.is_nil(Linked.get(ui))
 Assert.is_nil(Linked.target(ui, Linked.newCache(), redraw))
+
+-- 诡秘之主第一章那段长段评：本地 ASCII 省略号、全角缩进、跨页开头都能对上；两版有错字时记日志不标。
+do
+    local para = "　　看来我还没有真醒，还在梦里......等下说不定还会出现自以为已经醒了，实际依然在睡的情况......对类似遭遇不算陌生的周明瑞竭力集中意志，以彻底摆脱黑暗和迷幻的桎梏。\n"
+    local quote = "看来我还没有真醒，还在梦里……等下说不定还会出现自以为已经醒了，实际依然在睡的情况……对类似遭遇不算陌生的周明瑞竭力集中意志，以彻底摆脱黑暗和迷幻的桎梏。"
+    local cut = para:find("等下", 1, true)
+    local book = { "前一页的文字。\n" .. para:sub(1, cut - 1), para:sub(cut) .. "　　然而，半睡半醒之时。\n", "后一页。" }
+    local logs, Log = {}, package.loaded["utils.log"]
+    local info = Log.info
+    Log.info = function(...) logs[#logs + 1] = table.concat({ ... }, " ", 1, 2) end
+    local pattern
+    local doc = setmetatable({ page = 2, getPageCount = function() return #book end,
+        getTextFromXPointers = function(_self, a) return book[tonumber(a)] end,
+        getPageXPointer = function(_self, p) return tostring(p) end,
+        findText = function(_self, pat) pattern = pat return { { start = "1", ["end"] = "2" } } end,
+        getPageFromXPointer = function(_self, xp) return tonumber(xp) end,
+    }, { __index = document })
+    local view = { document = doc, view = ui.view, getCurrentPage = function() return doc.page end }
+    for _idx, case in ipairs({ { quote, 1 }, { quote:gsub("……", "..."), 1 } }) do
+        Assert.len(Linked.place(view, { entry(case[1]) }, Linked.newCache()), case[2], "长原句跨页、省略号不同仍标")
+        Assert.eq(pattern, para:sub(7, -5), "截回本地原文交 findText（去首尾标点）")
+    end
+    local typo = entry((quote:gsub("桎梏", "桔梏")))
+    Assert.len(Linked.place(view, { typo }, Linked.newCache()), 0, "错字对不上不标")
+    Assert.eq(logs[#logs], "book.reviews unmatched differs", "记下对不上的原因")
+    Log.info = info
+end
