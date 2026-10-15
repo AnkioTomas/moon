@@ -167,7 +167,7 @@ function Source:syncBooksAsync(opts, cb)
         return self._client:scanWebdavAsync(done,
             { refresh = opts.force, dirty_only = opts.dirty_only, on_progress = opts.on_progress })
     end
-    return self._client:scanAsync(done, opts.on_progress)
+    return self._client:scanAsync(done, opts.on_progress, opts.force)
 end
 
 --- 纯本地目录没有远端：进度域直接 skipped；WebDAV 走通用 book.progress（开书拉取 + 冲突弹窗，关书推脏）。

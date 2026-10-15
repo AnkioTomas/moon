@@ -102,12 +102,13 @@ end
 ---@param skip table<string, boolean> 曾让子进程崩溃的书，不再打开
 ---@param index LocalScanIndex 上轮扫盘索引（local_scan 表）：指纹没变就沿用 md5，内容没变就沿用「试过补封面」
 ---@param progress fun(value: string|false)
+---@param retry_covers boolean|nil 手动刷新：不认「试过补封面」，缺封面的书再提一次
 ---@return table f 原表，补上 md5/changed/cover_tried，需解析时再补 title/authors/intro
-local function parseFile(f, known, digests, skip, index, progress)
+local function parseFile(f, known, digests, skip, index, progress, retry_covers)
     local open = not skip[f.path]
     local seen = index[f.path]
     f.md5 = seen and f.fp and seen.fp == f.fp and seen.md5 or util.partialMD5(f.path)
-    f.cover_tried = seen and f.md5 and seen.md5 == f.md5 and seen.cover or nil
+    f.cover_tried = not retry_covers and seen and f.md5 and seen.md5 == f.md5 and seen.cover or nil
     local old = digests[f.path]
     f.changed = f.md5 ~= nil and old ~= nil and old ~= f.md5
     if f.changed then
@@ -216,8 +217,9 @@ end
 ---@param self LocalClient
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@param report fun(text: string, done: integer|nil, total: integer|nil)|nil 真实步骤上报
+---@param retry_covers boolean|nil 手动刷新时为 true：之前没提到封面的书再试一次
 ---@return { cancel: fun() }
-function Scan.scanAsync(self, cb, report)
+function Scan.scanAsync(self, cb, report, retry_covers)
     local valid, path_err = self:validatePath()
     if not valid then return defer(cb, false, path_err) end
     report = report or function() end
@@ -236,7 +238,7 @@ function Scan.scanAsync(self, cb, report)
             local files, skipped = scanFiles(root, self.cfg.folder_category == false)
             for i = 1, #files do
                 progress({ i, #files, files[i].name })
-                files[i] = parseFile(files[i], known, digests, skip, index, progress)
+                files[i] = parseFile(files[i], known, digests, skip, index, progress, retry_covers)
             end
             return { files = files, skipped = skipped }
         end, {
