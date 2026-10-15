@@ -147,6 +147,9 @@ function Server:start()
     return true
 end
 
+--- 静态资源内存缓存（停服即释放，512MB 机器上不常驻）。
+local _asset_cache = {} ---@type table<string, { body: string, stamp: string|nil }>
+
 --- 关停：断开全部在途连接并关闭监听 socket；可重复调用。
 function Server:stop()
     for _idx, conn in ipairs(self._conns) do
@@ -161,6 +164,7 @@ function Server:stop()
         self._sock:close()
         self._sock = nil
     end
+    _asset_cache = {}
 end
 
 --- UIManager 轮询入口：一小片工作，nil=本轮结束。
@@ -355,8 +359,6 @@ local ASSETS = {
     ["/settings.js"] = { "settings.js", "application/javascript; charset=utf-8" },
     ["/update.js"] = { "update.js", "application/javascript; charset=utf-8" },
 }
-
-local _asset_cache = {} ---@type table<string, { body: string, stamp: string|nil }>
 
 --- 文件戳（mtime+size）；取不到 lfs（离线测试）时返回 nil，退化为永久缓存。
 ---@param path string
