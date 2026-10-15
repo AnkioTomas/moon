@@ -40,7 +40,8 @@ function M.redact(s)
     for _idx, key in ipairs(SECRET_KEYS) do
         local k = ci(key):gsub("%-", "%%-")
         -- "key": "value" / key = value / key: value / ?key=value
-        s = s:gsub("([%w_]*" .. k .. "[%w_]*[\"']?%s*[:=]%s*[\"']?)(" .. VALUE .. ")", function(prefix, v)
+        -- %f 只从词首起配：不加的话每个字符都起一次 [%w_]*，长 base64 段是 O(n²)，Kindle 上能卡几十分钟
+        s = s:gsub("(%f[%w_][%w_]*" .. k .. "[%w_]*[\"']?%s*[:=]%s*[\"']?)(" .. VALUE .. ")", function(prefix, v)
             if v == MASK then return prefix .. v end
             return prefix .. MASK
         end)

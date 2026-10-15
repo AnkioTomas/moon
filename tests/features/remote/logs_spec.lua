@@ -34,6 +34,16 @@ has(r, '"model": "gpt"')
 has(r, "normal line 42")
 has(r, "***")
 
+-- 长词元（base64 封面、长 Cookie）不能触发 O(n²) 回溯：旧模式 16KB 要十几秒，Kindle 上打包超时成 0KB
+do
+    local blob = ("A"):rep(64 * 1024)
+    local t0 = os.clock()
+    local out = Logs.redact("img=" .. blob .. " token=SECRET\n")
+    Assert.is_true(os.clock() - t0 < 1, "redact must be linear on long words")
+    hasnt(out, "SECRET")
+    has(out, blob)
+end
+
 -- 文件名
 Assert.is_true(Logs.fileName(os.time()):match("^moon%-logs%-%d%d%d%d%d%d%d%d%-%d%d%d%d%.zip$") ~= nil, "file name")
 
