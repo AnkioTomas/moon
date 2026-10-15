@@ -125,8 +125,19 @@ do -- 长按进编辑：翻页条中间换成「添加 / 完成」；添加塞�
     desktop:updateView()
     drain()
     Assert.is_true(home.visible.recent_list)
+    local function arrows()
+        local n = 0
+        for _, b in ipairs(Kit.buttons(desktop.root)) do
+            if b.icon == "chevron_left" or b.icon == "chevron_right" then n = n + 1 end
+        end
+        return n
+    end
+    Assert.eq(home.pages, 1)
+    Assert.eq(arrows(), 0, "只有一页的非编辑态不显示翻页")
+    Assert.eq(desktop.root:getSize().h, 800, "隐藏翻页条保留占位，整页高度不变")
     desktop.root:onHoldHomeEdit()
     Assert.is_true(home.editing)
+    Assert.eq(arrows(), 2, "编辑态仍显示左右翻页")
     Assert.is_nil(desktop.root.onHoldHomeEdit, "编辑态不再挂长按")
     local texts = {}
     for _, b in ipairs(Kit.buttons(desktop.root)) do texts[#texts + 1] = b.text or b.icon end
