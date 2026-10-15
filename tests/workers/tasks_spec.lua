@@ -313,6 +313,38 @@ do
     next_task.runs[1].done({ ok = true })
 end
 
+-- convert（双语对照 / 重新排版）：与任何类型并行；同一本书只一个；取消停掉句柄；完成 / 失败都调 on_done。
+do
+    local sync = Tasks.enqueue(spec("conv-sync", "sync"))
+    local results = {}
+    local tr = Tasks.enqueue(spec("bilingual\0local\0a", "convert", {
+        restartable = true,
+        on_done = function(result) results[#results + 1] = result end,
+    }))
+    Assert.eq(#tr.runs, 1, "不等书架同步")
+    local dup, why = Tasks.enqueue(spec("bilingual\0local\0a", "convert"))
+    Assert.is_nil(dup)
+    Assert.eq(why, "running")
+    tr.runs[1].report("正在翻译…", 3, 10)
+    Assert.eq(Tasks.get(tr.key).count, 3)
+    tr.cancel()
+    Assert.is_true(tr.runs[1].cancelled)
+    Assert.eq(tr.state, "cancelled")
+    Assert.is_nil(Tasks.get(tr.key))
+    Assert.len(results, 0, "取消不调 on_done")
+    local again = Tasks.enqueue(spec("bilingual\0local\0a", "convert", {
+        on_done = function(result) results[#results + 1] = result end,
+    }))
+    again.runs[1].done({ ok = false, err = "HTTP 500" })
+    Assert.is_false(results[1].ok)
+    local rf = Tasks.enqueue(spec("reflow\0local\0a", "convert", {
+        on_done = function(result) results[#results + 1] = result end,
+    }))
+    rf.runs[1].done({ ok = true, file = "/x" })
+    Assert.is_true(results[2].ok)
+    sync.runs[1].done({ ok = true })
+end
+
 -- 未结束任务满 64 个后拒绝入队，带 queue_full（同类并行时在跑的也算）。
 do
     local accepted, reason = 0, nil

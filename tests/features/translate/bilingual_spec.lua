@@ -171,7 +171,19 @@ Assert.eq(results3[1].err, "HTTP 500")
 Assert.is_nil(read(failing.dest))
 Assert.not_nil(read(failing.source))
 
--- 入口：前台进度窗，不入队、不能取消也不能转后台、返回键不关；失败关窗并提示
+-- 取消：停掉在途请求，之后的应答不再结束任务；半截 .part 删掉，已译段落留在缓存
+requests = {}
+local cancelling = input("cancel")
+local handle4, _r4, results4 = start(cancelling)
+write(cancelling.dest .. ".part", "half")
+Assert.len(requests, 1)
+handle4.cancel()
+Assert.is_true(requests[1].cancelled)
+requests[1].cb({ "你好", "世界" })
+Assert.len(results4, 0, "取消后应答不再结束任务")
+Assert.is_nil(read(cancelling.dest .. ".part"))
+
+-- 入口：入后台任务队列（每本书一个 key，可取消、可转后台）；正在跑时再点入口只跟随进度
 do
     local Themed = require("support.theme_stubs")
     Themed.install()
@@ -182,6 +194,13 @@ do
         return { displayName = function(_translator, code) return code end }
     end
     package.preload["ai"] = function() return { isConfigured = function() return false end } end
+    local started, followed, running
+    package.preload["workers.ui.task_dialog"] = function()
+        return { start = function(spec) started = spec end, follow = function(task) followed = task end }
+    end
+    package.preload["workers.tasks"] = function() return { get = function(key) return running and running.key == key and running or nil end } end
+    local reader_instance = {}
+    package.preload["apps/reader/readerui"] = function() return reader_instance end
     session = { identity = { source_id = "local", stable_id = "/books/bilingual-entry.epub",
         source = { type = "book" }, book = { title = "书" } } }
     local ui = { rolling = {}, document = {
@@ -191,16 +210,30 @@ do
     Bilingual.show(ui)
     local sheet = Themed.last("sheet")
     Assert.eq(sheet.items[2].text, "用 Edge 翻译全书")
-    local dialog
-    Themed.on_show = function(o) if o.kind == "progress_dialog" then dialog = o end end
     sheet.items[2].callback()
-    Assert.eq(dialog.title, "书（双语）")
-    Assert.is_false(dialog.dismissable)
-    Assert.is_nil(dialog.on_cancel)
-    Assert.is_nil(dialog.on_background)
-    Assert.eq(dialog.updates[1][1], "正在分析全书段落")
-    Assert.is_true(dialog.closed, "原书不存在：分析失败即关窗")
+    Assert.eq(started.key, "bilingual\0local\0/books/bilingual-entry.epub")
+    Assert.eq(started.kind, "convert")
+    Assert.eq(started.title, "书（双语）")
+    Assert.is_true(started.restartable, "可取消、休眠断网后续跑")
+    local reports, result = {}, nil
+    local h = started.run(function(text) reports[#reports + 1] = text end, function(r) result = r end)
+    Assert.eq(reports[1], "正在分析全书段落")
+    Assert.is_false(result.ok, "原书不存在：分析失败")
+    Assert.not_nil(h.cancel)
+    started.on_done(result)
     Assert.matches(Themed.last("toast").text, "双语翻译失败")
+    -- 完成：书已关（或换了书）只提示；还在读原书则询问打开
+    started.on_done({ ok = true, file = "/x" })
+    Assert.eq(Themed.last("toast").text, "双语对照已生成")
+    reader_instance.instance = ui
+    started.on_done({ ok = true, file = "/x" })
+    Assert.eq(Themed.last("confirm").text, "双语对照已生成，现在打开？")
+    -- 重复：同一本书正在翻译，入口不再弹菜单，直接跟随
+    running = { key = started.key }
+    local sheets = #Themed.made
+    Bilingual.show(ui)
+    Assert.eq(followed, running)
+    Assert.eq(#Themed.made, sheets)
     require("ffi/util").purgeDir(require("utils.paths").bookWorkDir(session.identity.stable_id, "local"))
 end
 

@@ -2,10 +2,10 @@
 后台任务队列：用户发起、耗时长的操作，按 kind 分五类：
 `download` 资源下载（书城、字典、输入法词库）、`sync` 书库同步、`cache` 书籍缓存、
 `online` ankio.net 公共接口（天气 / 一言 / 摸鱼日报 / 必应；自动入队，不弹进度窗）、
-`ai` 逐段调用 AI 的整书分析（X-Ray 全书分析）。
+`ai` 逐段调用 AI 的整书分析（X-Ray 全书分析）、`convert` 生成整书衍生版（双语对照、重新排版）。
 
 同类可以并行，异类互斥：有任务在跑（或退避占位）时只放行同类；队首排队的是异类时后面的同类不插队，
-免得异类饿死。`ai` 例外：一跑几小时、每次只是一条串行请求，不占执行权，与任何类型并行。key 必填且唯一：同 key 还在排队的旧任务被新任务替换（旧的按取消处理），已在执行的拒绝新任务。
+免得异类饿死。`ai` / `convert` 例外：一跑几小时、跟着一本书走，不占执行权，与任何类型并行。key 必填且唯一：同 key 还在排队的旧任务被新任务替换（旧的按取消处理），已在执行的拒绝新任务。
 任务只活在本进程；断点靠各业务自己的落盘状态（已缓存章节、脏标记），不持久化队列。
 队列不认识业务：进度文案、完成提示、可否重试都由任务自己给；download 类的 count/total 是字节数。
 前台弹窗 / 转后台 / 被拒提示由 `workers/ui/task_dialog`（`start` / `follow`）负责，队列本身零 UI。
@@ -34,7 +34,7 @@ local Guard = require("ui.guard")
 
 local Tasks = {}
 
----@alias BookTaskKind "download"|"sync"|"cache"|"online"|"ai"
+---@alias BookTaskKind "download"|"sync"|"cache"|"online"|"ai"|"convert"
 
 ---@class BookTask
 ---@field key string
@@ -61,9 +61,9 @@ local MAX_ATTEMPTS = 3
 local RETRY_DELAY_SECONDS = 15
 local MAX_PENDING = 64
 local MAX_FINISHED = 10
-local KINDS = { download = true, sync = true, cache = true, online = true, ai = true }
+local KINDS = { download = true, sync = true, cache = true, online = true, ai = true, convert = true }
 --- 不占执行权、也不被别人挡住的类型。
-local SHARED = { ai = true }
+local SHARED = { ai = true, convert = true }
 
 ---@type BookTask[] 未结束任务，入队顺序
 local list = {}

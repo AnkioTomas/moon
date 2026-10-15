@@ -236,8 +236,9 @@ end
 ---@field lang string
 
 --- 任务体：分析 → 翻译缺的段落 → 生成双语版 → 写 meta。返回 run(report, done)，done 恰好一次。
+--- run 返回 { cancel }：取消时停掉在途请求与子进程、删半截的 .part；已译段落留在缓存，下次接着翻。
 ---@param input BilingualInput
----@return fun(report: fun(text: string, count: integer|nil, total: integer|nil), done: fun(result: table))
+---@return fun(report: fun(text: string, count: integer|nil, total: integer|nil), done: fun(result: table)): { cancel: fun() }
 local function task(input)
     local engine = ENGINES[input.engine]
     return function(report, done)
@@ -317,6 +318,10 @@ local function task(input)
             report(_("正在翻译…"), finished, found.total)
             pump()
         end)
+        return { cancel = function()
+            halt()
+            os.remove(input.dest .. ".part")
+        end }
     end
 end
 
@@ -393,8 +398,15 @@ local function prepare(ui, identity, engine, lang)
     return input
 end
 
---- 整书翻译：前台进度窗，不入队、不能转后台、不能取消（窗口占住阅读页，期间书不会被换掉）。
---- 失败后重来时已译段落从缓存续上。
+---@param identity BookIdentity
+---@return string
+local function taskKey(identity)
+    return "bilingual\0" .. identity.source_id .. "\0" .. identity.stable_id
+end
+
+--- 整书翻译：入后台任务队列，一本书同时只有一个；前台跟随进度，可取消、可转后台（顶栏看进度）。
+--- 关书不影响任务（只读工作目录里的文件）；完成时若还在读原书就询问打开，否则只提示。
+--- 失败、取消后重来时已译段落从缓存续上。
 ---@param ui table
 ---@param identity BookIdentity
 ---@param engine "edge"|"ai"
@@ -406,30 +418,40 @@ local function start(ui, identity, engine, lang)
         return
     end
     local input = prepare(ui, identity, engine, lang)
-    local dialog = require("ui.themes.widgets.progress_dialog"):new{
-        title = T(_("%1（双语）"), identity.book and identity.book.title or ""),
-        dismissable = false,
-    }
-    -- 整书翻译常比自动休眠时长还久，休眠断网整次就失败了。AutoSuspend（Kindle 上是重置 powerd 的 t1）
-    -- 按最后一次 InputEvent 计时：每报一次进度就算一次操作，翻译结束自然恢复，不留开关状态。
+    local run = task(input)
+    -- 整书翻译常比自动休眠时长还久。AutoSuspend（Kindle 上是重置 powerd 的 t1）按最后一次 InputEvent 计时：
+    -- 每报一次进度就算一次操作，翻译结束自然恢复，不留开关状态。
     local event_hook = require("ui/uimanager").event_hook
-    dialog:showWhile(task(input), function(text, count, total)
-        event_hook:execute("InputEvent")
-        dialog:update(text, count, total)
-    end, function(result)
-        dialog:close()
-        if not result.ok then
-            Toast:new{ text = T(_("双语翻译失败：%1"), tostring(result.err):match("[^\n]*")) }:show()
-            return
-        end
-        require("ui.themes.widgets.confirm"):new{
-            text = _("双语对照已生成，现在打开？"),
-            ok_text = _("打开"),
-            ok_callback = function()
-                switchTo(ui, identity, input.dest, ui.document:getXPointer())
-            end,
-        }:show()
-    end)
+    require("workers.ui.task_dialog").start{
+        key = taskKey(identity),
+        kind = "convert",
+        title = T(_("%1（双语）"), identity.book and identity.book.title or ""),
+        restartable = true,
+        run = function(report, done)
+            return run(function(text, count, total)
+                event_hook:execute("InputEvent")
+                report(text, count, total)
+            end, done)
+        end,
+        on_done = function(result)
+            if not result.ok then
+                Toast:new{ text = T(_("双语翻译失败：%1"), tostring(result.err):match("[^\n]*")) }:show()
+                return
+            end
+            local reader = require("apps/reader/readerui").instance
+            if not (reader and reader.document and reader.document.file == input.origin) then
+                Toast:new{ text = _("双语对照已生成") }:show()
+                return
+            end
+            require("ui.themes.widgets.confirm"):new{
+                text = _("双语对照已生成，现在打开？"),
+                ok_text = _("打开"),
+                ok_callback = function()
+                    switchTo(reader, identity, input.dest, reader.document:getXPointer())
+                end,
+            }:show()
+        end,
+    }
 end
 
 --- 正在读双语版（面板按钮高亮）。
@@ -451,14 +473,20 @@ function Bilingual.available(ui)
     return DerivedNote.originOf(ui.document.file) == nil or Bilingual.active(ui)
 end
 
---- 快捷面板入口：读双语版时直接切回原文；读原文时选择打开已有双语版或用某个引擎翻译全书。
+--- 快捷面板入口：读双语版时直接切回原文；这本书正在翻译时跟随进度；
+--- 否则选择打开已有双语版或用某个引擎翻译全书。
 ---@param ui table
 function Bilingual.show(ui)
     local identity = require("reader.session").current().identity
+    local running = require("workers.tasks").get(taskKey(identity))
     local meta = readMeta(workDir(identity))
     local xpointer = ui.document:getXPointer()
     if meta and ui.document.file == meta.file then
         switchTo(ui, identity, meta.origin, originalXPointer(ui.document, xpointer))
+        return
+    end
+    if running then
+        require("workers.ui.task_dialog").follow(running)
         return
     end
     local Languages = require("features.translate.languages")

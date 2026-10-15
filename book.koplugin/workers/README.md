@@ -75,7 +75,7 @@ job:cancel()
 ```lua
 local task, reason = require("workers.tasks").enqueue{
     key = "cache\0wechat\0123",          -- 必填且唯一
-    kind = "cache",                      -- download | sync | cache
+    kind = "cache",                      -- download | sync | cache | online | ai | convert
     title = "书名",
     restartable = true,                  -- 可省；见下文
     run = function(report, done)
