@@ -189,6 +189,34 @@ function Lockscreen:rows(desktop)
             icon = "view_module", title = _("海报风格"), status = Poster.styleLabel(style),
             items = Poster.styleOptions(), current = style, apply = Settings.setPosterStyle,
         })
+    elseif background == "typo" then
+        local Typo = require("features.lockscreen.typo")
+        local style = Typo.style()
+        rows[#rows + 1] = choiceRow(desktop, {
+            icon = "view_module", title = _("海报版式"), status = Typo.styleLabel(style),
+            items = Typo.styleOptions(), current = style, apply = Settings.setTypoStyle,
+        })
+        -- 海报字体：自动（优先宋体）或从字体选择器里挑（在线 / 用户 / 本地 / 系统）
+        local auto = Typo.fontId() == ""
+        rows[#rows + 1] = choiceRow(desktop, {
+            icon = "text_fields", title = _("海报字体"), status = Typo.fontLabel(),
+            items = {
+                { text = _("自动（优先宋体）"), value = "auto" },
+                { text = _("选择字体…"), value = "pick" },
+            },
+            current = auto and "auto" or nil,
+            apply = function(value)
+                if value == "auto" then return Settings.setTypoFont("") end
+                require("ui.widgets.fontpicker").open{
+                    title = _("海报字体"),
+                    current_id = Typo.fontId,
+                    on_select = function(_item, id, name)
+                        Settings.setTypoFont(id, name)
+                        refreshAfterChange(desktop)
+                    end,
+                }
+            end,
+        })
     end
 
     local component_label = _("无")

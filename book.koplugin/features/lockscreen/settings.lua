@@ -197,6 +197,23 @@ function M.setPosterStyle(style)
     if require("features.lockscreen.poster").validStyle(style) then save("lock_screen_poster_style", style) end
 end
 
+--- 设置文字海报版式。
+---@param style string
+function M.setTypoStyle(style)
+    if require("features.lockscreen.typo").validStyle(style) then save("lock_screen_typo_style", style) end
+end
+
+--- 设置文字海报字体；空 id 表示自动（优先宋体）。
+---@param id string 字体 id（字体文件名或微信读书字体 id）
+---@param name string|nil 显示名
+function M.setTypoFont(id, name)
+    local c = MoonSettings.get("features.lockscreen")
+    invalidate()
+    c.lock_screen_typo_font = id ~= "" and id or nil
+    c.lock_screen_typo_font_name = id ~= "" and name or nil
+    MoonSettings.save("features.lockscreen")
+end
+
 --- 设置自定义背景图路径（路径选择器选出的真实文件）。
 ---@param path string
 function M.setCustomImage(path)
