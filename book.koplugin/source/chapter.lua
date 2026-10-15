@@ -423,7 +423,8 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
         end
         -- closeDialog 先置空句柄再关窗；close_callback 见到句柄仍在即用户关的（取消键 / 点外 / 返回键）。
         dialog = require("ui.themes.widgets.progress_dialog"):new{
-            title = book.title or identity.stable_id,
+            -- 冷启动打开时 identity.book 可能还没有，不能直接取 book.title。
+            title = book and book.title or identity.stable_id,
             on_cancel = userCancel,
             close_callback = function()
                 if dialog then userCancel() end

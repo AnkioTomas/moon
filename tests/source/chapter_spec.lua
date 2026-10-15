@@ -299,6 +299,18 @@ Assert.eq(toc_cancelled, 1)
 Assert.eq(user_err, "已取消")
 progress_ui.shown = 0
 
+-- 没有 book（冷启动直接按 identity 打开）：准备框标题退回 stable_id，不能报错。
+os.remove(tmp .. "/2.html")
+Chapter.openWithUi({ type = "chapter" }, identity, nil, { chapter_idx = 2 }, {
+    loadToc = function() return { cancel = function() end } end,
+    fetchContent = function() end,
+}, function() end)
+Stubs.flush()
+local bare = Themed.last("progress_dialog")
+Assert.eq(bare.title, identity.stable_id)
+bare:dismiss()
+progress_ui.shown = 0
+
 -- 未连网：直接失败给出提示，不走 runWhenOnline（用户拒开 Wi-Fi 时它永不回调）。
 network.connected = false
 progress_ui.shown = 0
