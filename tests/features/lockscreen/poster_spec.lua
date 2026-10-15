@@ -7,6 +7,11 @@ lockscreen 海报墙：各风格铺满整屏、循环补位，倾斜走三次剪
 
 local Assert = require("support.assert")
 
+-- 预取会联网、拉起图片组件，海报布局测试不关心，桩掉。
+package.preload["features.lockscreen.components.cover_prefetch"] = function()
+    return { run = function() end }
+end
+
 package.preload["features.lockscreen.components.library"] = function()
     local Library = dofile(package.searchpath("features.lockscreen.components.library", package.path))
     Library.activeSourceId = function() return "moon" end
