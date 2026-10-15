@@ -112,6 +112,13 @@ local BACKGROUNDS = {
         -- 日报是一整张长图，裁掉就缺内容。
         contain = true,
     },
+    danxiangli = {
+        id = "danxiangli",
+        label = _("单向历"),
+        -- 本地自绘日历页；农历读摸鱼日报缓存（ensure 不阻塞），没有就不画。
+        blocks = function(rect) return require("features.lockscreen.danxiangli").blocks(rect) end,
+        cache_key = function() return require("features.lockscreen.danxiangli").cache_key() end,
+    },
     typo = {
         id = "typo",
         label = _("文字海报"),
@@ -130,7 +137,7 @@ local BACKGROUNDS = {
     none = { id = "none", label = _("无") },
 }
 
-local BACKGROUND_IDS = { "custom", "bing", "myrl", "cover", "folder", "poster", "typo", "none" }
+local BACKGROUND_IDS = { "custom", "bing", "myrl", "danxiangli", "cover", "folder", "poster", "typo", "none" }
 
 --- 判断背景设置值是否合法。
 ---@param mode string|nil

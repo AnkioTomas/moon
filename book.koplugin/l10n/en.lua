@@ -326,6 +326,7 @@ return {
     ["密码"] = "Password",
     ["海报墙"] = "Poster wall",
     ["海报风格"] = "Poster style",
+    ["单向历"] = "One-Way Calendar",
     ["文字海报"] = "Typographic poster",
     ["海报版式"] = "Poster layout",
     ["随机"] = "Random",
