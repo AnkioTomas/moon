@@ -141,6 +141,34 @@ function Patch.apply()
         end
     end)
 
+    -- HTTPParser:get 大小写不敏感分支用的 strncasecmp 靠 io.popen("uname") 选定；
+    -- Android 上 popen 拿不到 uname，它是 nil，每个响应头查询都炸（turbo 自己的 HTTPClient 也走这里）。
+    local httputil = optional("turbo.httputil")
+    wrap(httputil and httputil.HTTPParser, "get", function(orig)
+        local ffi = require("ffi")
+        return function(self, key, caseinsensitive)
+            if caseinsensitive == false then
+                return orig(self, key, false)
+            end
+            local lower, value, count = key:lower(), nil, 0
+            for i = 0, (tonumber(self.tpw.hkv_sz) or 0) - 1 do
+                local field = self.tpw.hkv[i]
+                if ffi.string(field.key, field.key_sz):lower() == lower then
+                    local str = ffi.string(field.value, field.value_sz)
+                    count = count + 1
+                    if value == nil then
+                        value = str
+                    elseif type(value) == "string" then
+                        value = { value, str }
+                    else
+                        value[#value + 1] = str
+                    end
+                end
+            end
+            return value, count
+        end
+    end)
+
     -- 所有连接失败最终都汇到这里：丢弃该主机的 DNS 缓存，坏 IP 不会卡满 TTL。
     -- LuaSocket 异步失败回调是 (client, -1, err)，官方只取第二参，提示成「Could not connect: -1」。
     wrap(HTTPClient, "_handle_connect_fail", function(orig)
