@@ -148,23 +148,26 @@ function M.vertical(ch) return VERTICAL[ch] or ch end
 M.WORDS_PATH = (debug.getinfo(1, "S").source:match("^@(.*)/[^/]+$") or ".") .. "/typo_words.txt"
 local dict
 
---- 懒加载词表：词 → { 频次桶, 词性 }。
----@return table<string, table>
+--- 懒加载词表：词 → 频次桶 * 256 + 词性字节（一个数，省掉 4 万个小表）。
+---@return table<string, number>
 function M.dict()
     if dict then return dict end
     local f = assert(io.open(M.WORDS_PATH, "r"))
     local d, b, p = {}, nil, nil
     for line in f:lines() do
         if line:match("^@%l%a$") then
-            b, p = line:byte(2) - 97, line:sub(3, 3)
+            b, p = line:byte(2) - 97, line:byte(3)
         elseif b and line:sub(1, 1) ~= "#" then
-            for w in line:gmatch("%S+") do d[w] = { b, p } end
+            for w in line:gmatch("%S+") do d[w] = b * 256 + p end
         end
     end
     f:close()
     dict = d
     return d
 end
+
+--- 释放词表（约 3MB），画完一张海报即调；下次用时重读。
+function M.release() dict = nil end
 
 local function isHan(ch) return #ch == 3 and ch >= "\228\184\128" and ch <= "\233\191\191" end
 
@@ -181,8 +184,9 @@ function M.segment(text)
             best[i], from[i] = best[i - 1] - 24, i - 1
             for len = 2, math.min(4, i) do
                 local e = d[table.concat(run, "", i - len + 1, i)]
-                if e and best[i - len] + e[1] - 26 > best[i] then
-                    best[i], from[i] = best[i - len] + e[1] - 26, i - len
+                local b = e and math.floor(e / 256)
+                if b and best[i - len] + b - 26 > best[i] then
+                    best[i], from[i] = best[i - len] + b - 26, i - len
                 end
             end
         end
@@ -228,9 +232,10 @@ function M.rankWords(text)
     for _idx, w in ipairs(segs) do seen[w] = (seen[w] or 0) + 1 end
     for i, w in ipairs(segs) do
         local e = d[w]
-        if e and not STOP[w] and POS[e[2]] then
-            local b = e[1]
-            local s = POS[e[2]] + (#w == 12 and 0.3 or 0)
+        local pos = e and POS[string.char(e % 256)]
+        if pos and not STOP[w] then
+            local b = math.floor(e / 256)
+            local s = pos + (#w == 12 and 0.3 or 0)
                 + math.min(11, math.max(0, 16 - b)) * 0.3 - (b < 5 and (5 - b) * 0.4 or 0)
                 + 0.8 * i / #segs + (seen[w] - 1) * 1.5
             if not best[w] or s > best[w] then best[w], at[w] = s, i end

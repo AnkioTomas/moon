@@ -562,14 +562,28 @@ function M.prefetchKeyword(text)
     end)
 end
 
+local pools = {}
+--- 6–max 字的短划线；不传 items 时按 notes 表戳缓存，免得每次锁屏解码全库划线。
+---@param max number
+---@param items table[]|nil
+---@return table[]
+function M.shortQuotes(max, items)
+    local stamp = not items and require("book.note_db").stamp()
+    local hit = pools[max]
+    if hit and hit.stamp == stamp then return hit.list end
+    local list = {}
+    for _idx, item in ipairs(items or require("book.highlights").collectAll()) do
+        local n = #T.chars(item.text or "")
+        if n >= 6 and n <= max then list[#list + 1] = { text = item.text, title = item.title, author = item.author } end
+    end
+    if stamp then pools[max] = { stamp = stamp, list = list } end
+    return list
+end
+
 --- 随机一条短划线（6–60 字）；没有就用内置句子。
 ---@return table
 function M.pickQuote()
-    local items = {}
-    for _idx, item in ipairs(require("book.highlights").collectAll()) do
-        local n = #T.chars(item.text or "")
-        if n >= 6 and n <= 60 then items[#items + 1] = item end
-    end
+    local items = M.shortQuotes(60)
     if #items == 0 then items = M.FALLBACK end
     return items[math.random(#items)]
 end
@@ -783,6 +797,7 @@ function M.blocks(rect)
     local q = { text = picked.text, title = picked.title, author = picked.author, keyword = M.cachedKeyword(picked.text) }
     M.prefetchKeyword(picked.text)
     local ops = M.plan(style, q, w, h, measure)
+    T.release()
     local widget = {}
     function widget:getSize() return { w = w, h = h } end
     function widget:paintTo(bb, x, y) M.paint(bb, ops, x, y, face, synthetic) end

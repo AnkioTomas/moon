@@ -87,4 +87,11 @@ do -- 关键词：标记优先；否则分词打分取实词
     Assert.eq(T.strip("人是【奥秘】"), "人是奥秘")
 end
 
+do -- 词表值是数（桶 * 256 + 词性），release 后重读结果不变
+    Assert.eq(type(T.dict()["意义"]), "number")
+    local before = T.keyword("人活着，就是要在虚无之中找出意义")
+    T.release()
+    Assert.eq(T.keyword("人活着，就是要在虚无之中找出意义"), before)
+end
+
 return true

@@ -173,6 +173,13 @@ function NoteDB.allWithBook()
     return out
 end
 
+--- 表内容戳（行数 + 最新更新时间），变了才需重读全表。
+---@return string
+function NoteDB.stamp()
+    local result, nrows = DB.query("SELECT COUNT(*), MAX(updated_at) FROM notes;")
+    return nrows > 0 and (tostring(result[1][1]) .. ":" .. tostring(result[2][1])) or ""
+end
+
 --- 列出未同步的本地注解快照。
 ---@param source_id string|nil
 ---@return table[]
