@@ -606,7 +606,7 @@ function ReaderProgress.pull(snapshot, opts)
             elseif cloud_moved and not local_ahead then
                 logger.dbg("book.progress reader pull adopt", id.source_id, id.stable_id)
                 adoptCloud(id, adoptPosition(local_position, remote_pos, page_level))
-            elseif row.sync_status == 0 and source.syncProgressAsync then
+            elseif row and row.sync_status == 0 and source.syncProgressAsync then
                 -- 云端还是本机上次同步的位置（或比本机更靠前），只是本地新读的还没推上去。
                 logger.dbg("book.progress reader pull stale cloud", id.source_id, id.stable_id)
                 source:syncProgressAsync({ identity = id, dirty_only = true }, function() end)

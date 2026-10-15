@@ -308,6 +308,30 @@ do
     clearMods()
 end
 
+-- ── 最近阅读口径（合同）：被远端 reconcile 下架（deleted=1, sync_status=1）但有进度的书仍列出；
+-- 墓碑（sync_status=0）不列；没有进度行的书由 FROM pending_progress 天然排除。
+do
+    local connection, calls = makeConn({ resultset = function() return {}, 0 end })
+    local DbBase, ProgressDB = loadProgress(connection)
+    ProgressDB.recent("moon", 24)
+    local sql = calls[#calls].sql
+    Assert.is_true(sql:find("FROM pending_progress p", 1, true) ~= nil, "没进度行的书进不来")
+    local clause = require("book.books_db").readableClause("b")
+    Assert.is_true(sql:find(clause, 1, true) ~= nil, "recent 用 readableClause 判准入")
+    -- 把 SQL 谓词按行求值，钉住语义而不只是字符串。
+    local function admits(deleted, sync_status)
+        local expr = clause:gsub("b%.deleted", tostring(deleted))
+            :gsub("b%.sync_status", tostring(sync_status))
+            :gsub("=", "=="):gsub(" OR ", " or ")
+        return load("return " .. expr)()
+    end
+    Assert.is_true(admits(0, 0), "在架的书")
+    Assert.is_true(admits(1, 1), "被远端下架但有进度的书仍在最近阅读")
+    Assert.is_false(admits(1, 0), "本地删掉的墓碑不列")
+    DbBase.close()
+    clearMods()
+end
+
 -- ── markSynced：版本键绑定；非法输入拒绝且不碰 DB ─────────
 do
     local connection, calls = makeConn()

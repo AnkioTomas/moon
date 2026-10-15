@@ -23,7 +23,9 @@ local function request(book)
     local owner = require("source.registry").resolve(book.source_id)
     if owner and type(owner.coverRequest) == "function" then
         local ok, req = pcall(owner.coverRequest, owner, book)
-        if ok and type(req) == "table" and type(req.url) == "string"
+        if not ok then
+            logger.warn("book.lockscreen coverRequest failed", book.source_id, req)
+        elseif type(req) == "table" and type(req.url) == "string"
             and req.url:match("^https?://") then
             return req
         end
@@ -44,8 +46,8 @@ end
 --- 为缺封面的书发起后台下载；未联网时什么都不做。
 ---@param shelf table[] poster 书单（shelfBook）
 function M.run(shelf)
-    local ok, NetworkMgr = pcall(require, "ui/network/manager")
-    if not ok or not NetworkMgr:isConnected() then return end
+    local NetworkMgr = require("ui/network/manager")
+    if not NetworkMgr:isConnected() then return end
     local Image = require("ui.themes.widgets.image")
     local Book = require("ui.widgets.book")
     for _idx, book in ipairs(shelf or {}) do
