@@ -62,6 +62,7 @@ local AHEAD = 2
 ---@field scanned table<integer, integer> 页 → 扫它时的热点数（热点多了要重扫；随排版失效）
 ---@field hash integer|nil pages / scanned 对应的排版指纹
 ---@field timer function|nil 待执行的下一页预扫
+---@field logged table<WechatReviewHotspot, boolean> 已记过「对不上」日志的原句
 
 ---@param ui table ReaderUI
 ---@return ReviewLink|nil
@@ -88,7 +89,7 @@ end
 
 ---@return ReviewLinkCache
 function Linked.newCache()
-    return { hotspots = {}, loading = {}, squashed = {}, pos = {}, pages = {}, scanned = {} }
+    return { hotspots = {}, loading = {}, squashed = {}, pos = {}, pages = {}, scanned = {}, logged = {} }
 end
 
 --- 取消在飞拉取与预扫（已拉到的热点、已定位的原句保留）。
@@ -307,14 +308,28 @@ local function scan(ui, entries, cache, p)
         end
         local s, e = nil, nil
         if not cache.pos[spot] and #needle >= MIN_BYTES then s, e = text:find(needle, 1, true) end
-        if s and from[s] <= cur1 and to[e] >= cur0 and not text:find(needle, s + 1, true) then
-            searched = true
-            for _match_idx, match in ipairs(document:findText(raw:sub(from[s], to[e]), 0, 0, false, nil, false, 10) or {}) do
-                if document:getPageFromXPointer(match.start) <= p and document:getPageFromXPointer(match["end"]) >= p then
-                    cache.pos[spot] = { match.start, match["end"] }
-                    break
+        local why
+        if s and from[s] <= cur1 and to[e] >= cur0 then
+            if text:find(needle, s + 1, true) then
+                why = "ambiguous"
+            else
+                searched = true
+                for _match_idx, match in ipairs(document:findText(raw:sub(from[s], to[e]), 0, 0, false, nil, false, 10) or {}) do
+                    if document:getPageFromXPointer(match.start) <= p and document:getPageFromXPointer(match["end"]) >= p then
+                        cache.pos[spot] = { match.start, match["end"] }
+                        break
+                    end
                 end
+                if not cache.pos[spot] then why = "findText miss" end
             end
+        elseif not s and not cache.pos[spot] and #needle >= MIN_BYTES then
+            -- 开头对上、整句对不上：两版文字有出入（错字、增删），记下好比对。
+            local hs = text:find(needle:sub(1, MIN_BYTES), 1, true)
+            if hs and from[hs] <= cur1 then why = "differs" end
+        end
+        if why and not cache.logged[spot] then
+            cache.logged[spot] = true
+            logger.info("book.reviews unmatched", why, "page", p, "quote", spot.text)
         end
     end
     -- findText 会把最后一次命中写进排版引擎的选区，留着会画成高亮。
@@ -408,6 +423,7 @@ function Linked.entries(ui, source, book_id, toc, cache, redraw)
                 end
                 cache.loading[key] = nil
                 cache.hotspots[key] = fetched
+                logger.info("book.reviews chapter", chapter.idx, chapter.title, "hotspots", #fetched)
                 redraw()
             end)
             if not done then cache.loading[key] = job end
