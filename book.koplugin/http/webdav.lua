@@ -124,16 +124,16 @@ end
 local function parseList(xml, folder_url, folder_path)
     local folder_href = trimSlashes(util.urlDecode(folder_url:match("^https?://[^/]*(.*)$") or folder_url))
     local entries = {}
-    for item in xml:gmatch("<[^:]*:response[^>]*>(.-)</[^:]*:response>") do
-        local href = item:match("<[^:]*:href[^>]*>(.-)</[^:]*:href>")
+    for item in xml:gmatch("<[%w_]*:?response[^>]*>(.-)</[%w_]*:?response>") do
+        local href = item:match("<[%w_]*:?href[^>]*>(.-)</[%w_]*:?href>")
         if href then
             local full = util.urlDecode(href) or href
             full = util.htmlEntitiesToUtf8(full)
             local name = ffiUtil.basename(full)
-            local is_empty_type = item:find("<[^:]*:resourcetype%s*/>")
-                or item:find("<[^:]*:resourcetype>%s*</[^:]*:resourcetype>")
-            local is_collection = item:find("<[^:]*:collection[^<]*/>")
-                or item:find("<[^:]*:collection>%s*</[^:]*:collection>")
+            local is_empty_type = item:find("<[%w_]*:?resourcetype%s*/>")
+                or item:find("<[%w_]*:?resourcetype>%s*</[%w_]*:?resourcetype>")
+            local is_collection = item:find("<[%w_]*:?collection[^<]*/>")
+                or item:find("<[%w_]*:?collection>%s*</[%w_]*:?collection>")
             local is_dir = not is_empty_type and is_collection ~= nil
 
             -- Depth:1 回包里第一条是被列目录自身，跳过。
@@ -144,9 +144,9 @@ local function parseList(xml, folder_url, folder_path)
                     href = full,
                     is_dir = is_dir,
                     size = is_dir and 0
-                        or tonumber(item:match("<[^:]*:getcontentlength[^>]*>(%d+)</[^:]*:getcontentlength>")) or 0,
+                        or tonumber(item:match("<[%w_]*:?getcontentlength[^>]*>(%d+)</[%w_]*:?getcontentlength>")) or 0,
                     mtime = not is_dir
-                        and httpDate(item:match("<[^:]*:getlastmodified[^>]*>(.-)</[^:]*:getlastmodified>")) or nil,
+                        and httpDate(item:match("<[%w_]*:?getlastmodified[^>]*>(.-)</[%w_]*:?getlastmodified>")) or nil,
                 }
             end
         end
