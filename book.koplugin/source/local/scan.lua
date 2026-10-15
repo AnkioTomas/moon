@@ -74,12 +74,12 @@ end
 ---@param rows table<string, Book> 本源全部行
 ---@param flat boolean|nil 关闭「按文件夹分类」：分类 / 系列不由目录派生，不参与比较
 ---@return boolean
-local function upToDate(files, known, rows, flat)
+local function upToDate(files, known, rows, flat, kept)
     local shelved = 0
     for _id, row in pairs(rows) do
         if row.deleted == 0 and row.sync_status == 1 then shelved = shelved + 1 end
     end
-    if shelved ~= #files then return false end
+    if shelved ~= #files + #kept then return false end
     for _idx, f in ipairs(files) do
         local row = known[f.path]
         if not row or f.changed or row.md5 ~= f.md5 or row.deleted ~= 0 or row.sync_status ~= 1
@@ -154,15 +154,16 @@ end
 ---@param files table[] parseFile 产物
 ---@param known table<string, Book>
 ---@param full_snapshot boolean|nil
+---@param kept Book[]|nil 读不了的子目录下原有的在架行：不在快照里也照留
 ---@return boolean
-local function commitFiles(files, known, full_snapshot)
+local function commitFiles(files, known, full_snapshot, kept)
     local BookDB = require("book.books_db")
     for _idx, f in ipairs(files) do
         local cached = known[f.path]
         local moved = not cached and movedFrom(f)
         if moved then
             if not BookDB.renameStableId(SOURCE_ID, moved.stable_id, f.path, f.category, f.series) then
-                return false
+                return false, "rename " .. f.path
             end
             moveBookArtifacts(moved.stable_id, f.path)
         end
@@ -174,7 +175,7 @@ local function commitFiles(files, known, full_snapshot)
         if cached and not f.changed then
             if not full_snapshot and cached.deleted ~= 0
                 and not BookDB.setLibraryMembership(SOURCE_ID, f.path, true) then
-                return false
+                return false, "restore " .. f.path
             end
         -- knownBooks 只把解析过的行交给 worker；移动过来的旧行也会
         -- 在这里用本次解析结果补齐。不要把“已存在”误当成“无需更新”。
@@ -185,20 +186,27 @@ local function commitFiles(files, known, full_snapshot)
             category = f.category, series = f.series,
             inserted_at = moved and moved.inserted_at or os.time(), path = f.path,
         }) then
-            return false
+            return false, "upsert " .. f.path
         end
         if f.changed then
             require("ui.themes.widgets.image").invalidate(coverPath(f.path))
         end
     end
     if not full_snapshot then return true end
-    -- 盘上就是真相：扫盘成功（列目录失败会整轮报错）时空目录也要下架。
-    if not BookDB.reconcile(SOURCE_ID, files, { clear_missing_paths = true, allow_empty = true }) then return false end
+    -- 盘上就是真相：扫盘成功时空目录也要下架；读不了的子目录下原有的书由 kept 保留。
+    local snapshot = files
+    if kept and kept[1] then
+        snapshot = {}
+        for i, f in ipairs(files) do snapshot[i] = f end
+        for _idx, row in ipairs(kept) do snapshot[#snapshot + 1] = row end
+    end
+    if not BookDB.reconcile(SOURCE_ID, snapshot, { clear_missing_paths = true, allow_empty = true }) then return false, "reconcile" end
     -- 库目录就是纯本地书的“远端”：扫到即确认。不清脏的话文件被外部删掉后 reconcile 永远不下架它。
     -- 库目录外开过的书不在快照里，保持脏行，不被下架。
     local ids = {}
     for i, f in ipairs(files) do ids[i] = f.path end
-    return BookDB.markSyncedMany(SOURCE_ID, ids)
+    if not BookDB.markSyncedMany(SOURCE_ID, ids) then return false, "mark synced" end
+    return true
 end
 
 --- 扫盘写库（不查询），供 syncBooksAsync 使用。遍历与解析在子进程，落库在主进程，cancel 杀子进程。
@@ -225,12 +233,12 @@ function Scan.scanAsync(self, cb, report)
         local opening, count
         report(_("正在扫描书库…"))
         job = Job.run(function(progress)
-            local files = scanFiles(root, self.cfg.folder_category == false)
+            local files, skipped = scanFiles(root, self.cfg.folder_category == false)
             for i = 1, #files do
                 progress({ i, #files, files[i].name })
                 files[i] = parseFile(files[i], known, digests, skip, index, progress)
             end
-            return files
+            return { files = files, skipped = skipped }
         end, {
             name = "local.scan",
             kind = "medium",
@@ -245,18 +253,32 @@ function Scan.scanAsync(self, cb, report)
                     report(T(_("正在解析 %1"), count[3]), count[1], count[2])
                 end
             end,
-            on_done = function(files)
+            on_done = function(result)
+                local files = result.files
+                -- 读不了的子目录是“未知”不是“没有”：其下原有的在架行原样保留
+                local kept = {}
+                for _id, row in pairs(rows) do
+                    for _idx, dir in ipairs(result.skipped) do
+                        if row.deleted == 0 and type(row.path) == "string" and row.path:sub(1, #dir + 1) == dir .. "/" then
+                            kept[#kept + 1] = row
+                            break
+                        end
+                    end
+                end
                 if not ScanDB.save(index, files) then
                     require("utils.log").warn("book local scan index save failed")
                 end
-                local unchanged = upToDate(files, known, rows, self.cfg.folder_category == false)
-                if unchanged or commitFiles(files, known, true) then
+                local unchanged = upToDate(files, known, rows, self.cfg.folder_category == false, kept)
+                local committed, step = true, nil
+                if not unchanged then committed, step = commitFiles(files, known, true, kept) end
+                if committed then
                     require("utils.log").dbg("book.perf local.scan", Perf.elapsedMs(started_at), "ms",
                         "files", #files, unchanged and "unchanged" or "committed")
                     cb(true)
                 else
-                    require("utils.log").warn("book local scan commit failed")
-                    cb(false, "failed to commit local scan")
+                    -- 进度满格后才失败的就是这里：写库哪一步失败要写清楚，便于对日志
+                    require("utils.log").warn("book local scan commit failed at", step, "files", #files)
+                    cb(false, "failed to commit local scan: " .. tostring(step))
                 end
             end,
             on_failed = function(err)

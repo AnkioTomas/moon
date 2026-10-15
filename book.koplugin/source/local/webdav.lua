@@ -173,7 +173,10 @@ local function scanLocal(self, run, done)
     if not root then return done() end
     run.report(_("正在扫描本地书库…"))
     run.active = Job.run(function()
-        return scanFiles(root)
+        -- 同步合并会把“本地没有”的条目删掉：有子目录读不了就整轮中止
+        local files, skipped = scanFiles(root)
+        if skipped[1] then error("cannot open " .. skipped[1], 0) end
+        return files
     end, {
         name = "local.webdav.scan",
         kind = "medium",

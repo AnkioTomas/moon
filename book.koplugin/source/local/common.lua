@@ -298,15 +298,16 @@ end
 --- 目录遍历（最多 3 层），产出按路径排序的书籍文件列表。
 --- 根目录直属文件无分类无系列；一级子目录名 = 分类；二级子目录名 = 系列；更深忽略。
 --- 同步阻塞，只在子进程里跑。
---- 任一目录列不出来就抛错：扫盘结果要按全量快照 reconcile，漏一个目录等于软删其中所有书。
+--- 根目录列不出来就抛错；子目录列不出来（无权限）记一行日志跳过，收进 skipped：
+--- 调用方按全量快照 reconcile 时要把 skipped 下已入库的书当“未知”保留，不能软删。
 --- fp = 文件指纹（大小:修改时间），没变就不重算内容 md5。
 --- flat=true（关闭「按文件夹分类」）：不看目录结构、不派生分类 / 系列（库里的手动编辑保留），不限层数下钻；
 --- 软链接目录跳过，免得成环。
 ---@param root string
 ---@param flat boolean|nil
----@return { name: string, path: string, category: string|nil, series: string|nil, fp: string }[]
+---@return { name: string, path: string, category: string|nil, series: string|nil, fp: string }[], string[] skipped
 local function scanFiles(root, flat)
-    local files = {}
+    local files, skipped = {}, {}
     --- 递归遍历一层目录，把书籍文件连同继承来的分类/系列收进 files。
     --- 跳过 . 前缀项与 .sdr 边车目录；depth 超过 2 不再下钻（flat 时不限）。
     ---@param dir string 当前目录绝对路径
@@ -314,20 +315,25 @@ local function scanFiles(root, flat)
     ---@param series string|nil 继承的系列（二级子目录名）
     ---@param depth number 当前层级，根为 1
     local function walk(dir, category, series, depth)
-        for name in lfs.dir(dir) do
+        local ok, iter, state = pcall(lfs.dir, dir)
+        if not ok then
+            if depth == 1 then error(iter, 0) end
+            require("utils.log").warn("book local scan skip unreadable dir", dir, iter)
+            skipped[#skipped + 1] = dir
+            return
+        end
+        for name in iter, state do
             -- 跳过 . .. 及一切 . 前缀项（.moon 等隐藏目录/文件）
             if name:sub(1, 1) ~= "." then
                 local path = dir .. "/" .. name
                 local attr = lfs.attributes(path)
                 if attr then
                     if attr.mode == "directory" then
-                        -- KOReader 的 .sdr 边车目录不是书籍分类，不下钻
-                        if name:sub(-4) ~= ".sdr" then
+                        -- KOReader 的 .sdr 边车目录不是书籍分类，不下钻；软链接目录也不跟（可能指回上级，扫出根外）
+                        if name:sub(-4) ~= ".sdr" and lfs.symlinkattributes(path, "mode") ~= "link" then
                             -- 下钻：根下的一级目录名是分类，分类下的二级目录名是系列
                             if flat then
-                                if lfs.symlinkattributes(path, "mode") ~= "link" then
-                                    walk(path, category, series, depth + 1)
-                                end
+                                walk(path, category, series, depth + 1)
                             elseif depth == 1 then
                                 walk(path, name, nil, depth + 1)
                             elseif depth == 2 then
@@ -351,7 +357,7 @@ local function scanFiles(root, flat)
     table.sort(files, function(a, b)
         return a.path < b.path
     end)
-    return files
+    return files, skipped
 end
 
 --- 远端 .Moon+ 下的路径。

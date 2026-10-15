@@ -106,6 +106,26 @@ function Setting.isKindleDocuments(path)
     return type(path) == "string" and path:gsub("/+$", "") == "/mnt/us/documents"
 end
 
+--- 列出可作书库的子目录名（排序，跳过 .sdr）；目录不可读（如 Android 的 /storage）返回 nil, err。
+---@param path string
+---@return string[]|nil, string|nil
+function Setting.subdirs(path)
+    local lfs = require("libs/libkoreader-lfs")
+    local ok, iter, state = pcall(lfs.dir, path)
+    if not ok then return nil, tostring(iter) end
+    local names = {}
+    for name in iter, state do
+        -- KOReader 的 .sdr 边车目录不是书库目录，不列出
+        local full = path == "/" and "/" .. name or path .. "/" .. name
+        if name ~= "." and name ~= ".." and name:sub(-4) ~= ".sdr"
+            and lfs.attributes(full, "mode") == "directory" then
+            names[#names + 1] = name
+        end
+    end
+    table.sort(names)
+    return names
+end
+
 --- 目录选择列表：逐层浏览（原地换项），首行「使用此目录」确认当前目录。
 function Setting.open()
     local lfs = require("libs/libkoreader-lfs")
@@ -138,6 +158,11 @@ function Setting.open()
     ---@param path string
     ---@return table[]
     local function entries(path)
+        local names, err = Setting.subdirs(path)
+        if not names then
+            require("utils.log").warn("book local picker skip unreadable dir", path, err)
+            return nil
+        end
         local function save()
             cfg.path = path
             MoonSettings.saveSource(SOURCE_ID, cfg)
@@ -158,20 +183,13 @@ function Setting.open()
                 end,
             }:show()
         end } }
-        if path ~= "/" then
-            local parent = path:match("^(.*)/[^/]+$")
+        local parent = path ~= "/" and (path:match("^(.*)/[^/]+$") or "")
+        if parent == "" then parent = "/" end
+        -- Android 的 /storage 等上级目录不可读：读不了就不给「..」，停在可读的根
+        if parent and Setting.subdirs(parent) then
             items[#items + 1] = { text = "..", icon = "arrow_upward", keep_open = true,
-                callback = function() enter(parent ~= "" and parent or "/") end }
+                callback = function() enter(parent) end }
         end
-        local names = {}
-        for name in lfs.dir(path) do
-            -- KOReader 的 .sdr 边车目录不是书库目录，不列出
-            if name ~= "." and name ~= ".." and name:sub(-4) ~= ".sdr"
-                and lfs.attributes(join(path, name), "mode") == "directory" then
-                names[#names + 1] = name
-            end
-        end
-        table.sort(names)
         for _idx, name in ipairs(names) do
             items[#items + 1] = { text = name, icon = "folder", keep_open = true,
                 callback = function() enter(join(path, name)) end }
@@ -180,11 +198,15 @@ function Setting.open()
     end
     ---@param path string
     enter = function(path)
+        -- 读不了就原地不动（日志在 entries 里）
+        local items = entries(path)
+        if not items then return end
         list.subtitle = path
         list.page = 1
-        list:setItems(entries(path))
+        list:setItems(items)
     end
-    list = List:new{ title = _("选择书库目录"), subtitle = start_path, items = entries(start_path) }
+    if not Setting.subdirs(start_path) then start_path = "/" end
+    list = List:new{ title = _("选择书库目录"), subtitle = start_path, items = entries(start_path) or {} }
     list:show()
 end
 
