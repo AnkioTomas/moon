@@ -720,8 +720,8 @@ function M.metrics()
 end
 
 -- 坐标哈希噪声（确定性，0..1）：同一张图每次画出来颗粒一样。
+local bit = require("bit")
 local function noise(x, y)
-    local bit = require("bit")
     local n = bit.bxor(x * 374761393, y * 668265263)
     n = bit.bxor(n, bit.rshift(n, 13)) * 1274126177
     return bit.band(bit.bxor(n, bit.rshift(n, 16)), 0xFFFF) / 0xFFFF
@@ -746,6 +746,10 @@ local function paintGrain(bb, op, ox, oy, f, synthetic, cw, ch)
     local xmax = math.min(bb:getWidth(), ox + (cw or bb:getWidth())) - 1
     local ymax = math.min(bb:getHeight(), oy + (ch or bb:getHeight())) - 1
     local depth = 255 - op.gray
+    -- 离屏灰度画布直接按指针读写（逐点 getPixel/setPixel 会造 Color 对象）；其他类型走通用接口
+    local dst = bb:getType() == Blitbuffer.TYPE_BB8 and bb:getRotation() == 0 and bb:getInverse() == 0
+        and ffi.cast("uint8_t*", bb.data)
+    local dstride = dst and tonumber(bb.stride)
     for y = 0, th - 1 do
         local ty = y0 + y
         if ty >= ymin and ty <= ymax then
@@ -758,8 +762,12 @@ local function paintGrain(bb, op, ox, oy, f, synthetic, cw, ch)
                     local k = 0.78 + coarse * 0.32 + (fine - 0.5) * 0.28
                     if fine < 0.025 or (coarse < 0.07 and fine < 0.5) then k = 0.15 end
                     local v = 255 - math.min(255, depth * k) * cov / 255
-                    local cur = bb:getPixel(tx, ty):getColor8().a
-                    if v < cur then bb:setPixel(tx, ty, Blitbuffer.Color8(fmt(v))) end
+                    if dst then
+                        local i = ty * dstride + tx
+                        if v < dst[i] then dst[i] = fmt(v) end
+                    elseif v < bb:getPixel(tx, ty):getColor8().a then
+                        bb:setPixel(tx, ty, Blitbuffer.Color8(fmt(v)))
+                    end
                 end
             end
         end

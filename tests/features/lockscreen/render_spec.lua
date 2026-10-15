@@ -70,11 +70,16 @@ package.preload["ui/font"] = function()
     return { getFace = function() return {} end }
 end
 
-local image_cache_flag
+local image_cache_flag, image_opts
+local decodes = 0
+package.preload["ui/renderimage"] = function()
+    return { renderImageFile = function() decodes = decodes + 1; return { decoded = true } end }
+end
 package.preload["ui/widget/imagewidget"] = function()
     return {
         new = function(_, opts)
             image_cache_flag = opts.file_do_cache
+            image_opts = opts
             return {
                 paintTo = function() image_paints = image_paints + 1 end,
                 free = function() image_frees = image_frees + 1 end,
@@ -217,6 +222,18 @@ local ok_run, err_run = pcall(function()
     Assert.eq(image_paints, 1)
     Assert.eq(image_frees, 1)
     Assert.is_false(image_cache_flag, "封面等一次性大图不得进全局 ImageCache")
+
+    -- keep 图块（锁屏 logo）只解码一次，跨次合成复用，ImageWidget 不得释放它。
+    for _i = 1, 2 do
+        reset()
+        ok = Render.write("/tmp/compose.png", nil, {
+            { kind = "image", file = "/plugin/logo.png", keep = true, x = 10, y = 10, width = 32, height = 32 },
+        })
+        Assert.is_true(ok)
+        Assert.is_true(image_opts.image.decoded)
+        Assert.is_false(image_opts.image_disposable)
+    end
+    Assert.eq(decodes, 1, "logo 只解码一次")
 
     -- 无框文字不得整块贴 TextBoxWidget 白底：黑字蒙版反相后按块颜色 colorblit。
     reset()

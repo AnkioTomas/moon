@@ -103,7 +103,7 @@ function M.blocks(rect, book)
             radius = 2, shadow = 2, color = Blitbuffer.COLOR_WHITE,
         },
         {
-            kind = "image", file = U.LOGO_PATH,
+            kind = "image", file = U.LOGO_PATH, keep = true,
             x = x, y = logo_y, width = logo_size, height = logo_size,
             scale_factor = 0, alpha = false,
         },
