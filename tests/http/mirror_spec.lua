@@ -77,3 +77,27 @@ do -- 全部失败时回报最后的错误，check 不过也算失败
     Assert.eq(err, "size mismatch")
     Assert.eq(#calls, #Mirror.templates())
 end
+
+do -- 同步失败立刻换源时，cancel 取消的是正在进行的那个请求
+    package.loaded["http.mirror"] = nil
+    local M = require("http.mirror")
+    local cancelled, n = {}, 0
+    local handle = (function()
+        local chainStart = function(url, next_cb)
+            n = n + 1
+            local me = n
+            if me == 1 then next_cb("sync fail") end
+            return { cancel = function() cancelled[#cancelled + 1] = me end }
+        end
+        return chainStart
+    end)()
+    -- 通过 download 走 chain：桩 Request.download 换成同步首败
+    local Req = require("http.request")
+    local orig = Req.download
+    Req.download = function(opts, _dest, cb) return handle(opts.url, function(err) if err then cb(false, err) end end) end
+    local h = M.download("assets/sync.bin", {}, "/tmp/__mirror_sync_spec", function() end)
+    h.cancel()
+    Req.download = orig
+    Assert.eq(#cancelled, 1)
+    Assert.eq(cancelled[1], 2)
+end

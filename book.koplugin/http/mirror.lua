@@ -144,8 +144,8 @@ local function chain(path, start, cb)
         idx = idx + 1
         local template = list[idx]
         if not template then return cb(nil, last_err or "no mirror") end
-        local url = expand(template, path)
-        job = start(url, function(err, ...)
+        local url, attempt = expand(template, path), idx
+        local handle = start(url, function(err, ...)
             if cancelled then return end
             if err then
                 last_err = err
@@ -155,6 +155,8 @@ local function chain(path, start, cb)
             markOk(template)
             cb(true, nil, ...)
         end)
+        -- 同步失败时 try() 已递归发出下一个请求，不能用旧句柄覆盖它。
+        if attempt == idx then job = handle end
     end
     try()
     return { cancel = function()
