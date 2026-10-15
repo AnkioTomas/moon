@@ -9,7 +9,7 @@ package.preload["book.books_db"] = function()
     return { unsynced = function() return books end }
 end
 package.preload["book.note_db"] = function()
-    return { unsynced = function() return notes end }
+    return { hasUnsynced = function() return #notes > 0 end }
 end
 package.preload["book.stats_db"] = function()
     return { unsyncedBySource = function() return stats_rows end }
@@ -158,4 +158,11 @@ do
     pending_cb({ pushed = 1 })
     Assert.eq(#source.calls, 0, "取消后不推进度")
     Assert.is_false(finished)
+end
+
+-- 只有待上传笔记也算脏（经存在性查询，不读 payload）。
+do
+    books, notes, stats_rows, progress = {}, { { stable_id = "n1" } }, {}, {}
+    Assert.is_true(SourceBase.hasDirty("moon"))
+    notes = {}
 end

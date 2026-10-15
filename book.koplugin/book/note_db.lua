@@ -229,4 +229,11 @@ function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at, payloa
     ) ~= nil
 end
 
+--- 是否有待上传快照：只查存在性，不把整份 payload 读进内存（本地源笔记永远是待上传）。
+---@param source_id string
+---@return boolean
+function NoteDB.hasUnsynced(source_id)
+    return DB.rowexec("SELECT 1 FROM notes WHERE sync_status=0 AND source_id=? LIMIT 1;", source_id) ~= nil
+end
+
 return NoteDB
