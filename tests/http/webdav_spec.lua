@@ -310,6 +310,25 @@ do
     Assert.eq(req.auth_password, "p")
 end
 
+-- ── listAsync：默认命名空间（无前缀）的 multistatus 也能解析 ─────
+do
+    local dav = Webdav.new({ url = "http://example.com/dav/", username = "u", password = "p" })
+    canned_res = { code = 207, body = [[<?xml version="1.0"?>
+<multistatus xmlns="DAV:">
+<response><href>/dav/</href><propstat><prop><resourcetype><collection/></resourcetype></prop></propstat></response>
+<response><href>/dav/sub/</href><propstat><prop><resourcetype><collection/></resourcetype></prop></propstat></response>
+<response><href>/dav/b.epub</href><propstat><prop><resourcetype/><getcontentlength>42</getcontentlength></prop></propstat></response>
+</multistatus>]] }
+    canned_err = nil
+    local entries
+    dav:listAsync(nil, function(e) entries = e end)
+    Assert.len(entries, 2)
+    Assert.eq(entries[1].name, "sub")
+    Assert.is_true(entries[1].is_dir)
+    Assert.eq(entries[2].name, "b.epub")
+    Assert.eq(entries[2].size, 42)
+end
+
 -- ── 还原现场（不影响后续 spec 文件）────────────────────────
 package.preload["http.request"] = nil
 package.loaded["http.request"] = nil
