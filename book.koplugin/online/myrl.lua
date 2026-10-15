@@ -1,6 +1,6 @@
 --[[--
 摸鱼日报：JSON 落 cache/online/myrl.json，图落 myrl.png，到午夜过期。
-JSON 给首页农历 / 节日 / 新闻 / 历史；图给锁屏。
+JSON 给首页农历 / 节日、单向历的干支 / 生肖 / 节气 / 新闻 / 历史；图给锁屏。
 
 @module koplugin.book.online.myrl
 --]]
@@ -44,8 +44,15 @@ function Myrl:parse(body)
     local date = type(payload.date) == "table" and payload.date or {}
     local holiday = type(payload.holiday) == "table" and payload.holiday or {}
     local quote = type(payload.quote) == "table" and payload.quote or {}
+    -- 黄历字段在 almanac；旧版接口放在 date 里。
+    local almanac = type(payload.almanac) == "table" and payload.almanac or date
     local daily = {
+        ymd = Online.nonempty(date.ymd),
         lunar = Online.nonempty(date.lunar),
+        ganzhi = Online.nonempty(almanac.ganzhi),
+        animal = Online.nonempty(almanac.animal),
+        term = Online.nonempty(almanac.term),
+        festival = Online.nonempty(almanac.festival),
         holiday = Online.nonempty(holiday.label),
         quote_text = Online.nonempty(quote.hitokoto),
         quote_from = Online.nonempty(quote.from),
