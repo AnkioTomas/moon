@@ -131,38 +131,24 @@ Assert.eq(ReaderHighlight.long_press_action[1][1], "Translate")
 Assert.eq(Dispatcher:getNameFromItem("wikipedia_lookup"), "百度百科查询")
 Assert.eq(Dispatcher:getNameFromItem("show_menu"), "native:show_menu")
 
-ReaderWikipedia:lookupWikipedia("第一次")
-Assert.eq(requests[1].word, "第一次")
-Assert.is_false(shown_progress[1].closed)
-
-ReaderWikipedia:lookupWikipedia("第二次")
-Assert.is_true(requests[1].job.cancelled)
-Assert.is_true(shown_progress[1].closed)
-Assert.is_false(shown_progress[2].closed)
-requests[1].callback({ title = "过期", definition = "不应显示" })
-Assert.len(shown_results, 0)
-requests[2].callback({ title = "第二次", definition = "有效" })
-Assert.len(shown_results, 1)
-Assert.eq(shown_results[1].results[1].word, "第二次")
-Assert.is_false(shown_results[1].is_wiki)
-Assert.is_true(ReaderWikipedia.is_wiki)
-Assert.is_true(shown_progress[2].closed)
-
-ReaderWikipedia:lookupWikipedia("关闭前")
-ReaderWikipedia:onCloseDocument()
-Assert.is_true(requests[3].job.cancelled)
-Assert.is_true(shown_progress[3].closed)
-requests[3].callback({ title = "过期", definition = "不应显示" })
-Assert.len(shown_results, 1)
-
-offline = true
-ReaderWikipedia:lookupWikipedia("离线查询")
-Assert.not_nil(online_retry)
-Assert.len(requests, 3)
-ReaderWikipedia:onCloseDocument()
-offline = false
-online_retry()
-Assert.len(requests, 3)
+-- 划词菜单 / 高亮弹窗 / 长按 / 手势的百科都走 lookupWikipedia：开四合一面板停在「百科」栏，不再弹原生词典窗。
+local opened = {}
+package.loaded["features.rare.lookup"] = { open = function(opts) opened[#opened + 1] = opts end }
+ReaderWikipedia.ui = { highlight = { selected_text = { text = "选区" } } }
+ReaderWikipedia:lookupWikipedia("词条", true, { { x = 1, y = 2, w = 3, h = 4 } })
+Assert.len(opened, 1)
+Assert.eq(opened[1].source, "baike")
+Assert.eq(opened[1].text, "词条")
+Assert.is_true(opened[1].from_highlight)
+Assert.eq(opened[1].word_box.x, 1)
+Assert.len(shown_results, 0, "不弹原生词典窗")
+Assert.len(requests, 0, "请求交给面板")
+ReaderWikipedia.ui = {}
+ReaderWikipedia:lookupWikipedia("手势")
+Assert.is_false(opened[2].from_highlight)
+Assert.is_nil(opened[2].word_box)
+ReaderWikipedia:lookupWikipedia("")
+Assert.len(opened, 2, "空选区不开")
 
 local pool = DictQuickLookup:_getButtonPool()
 Assert.eq(pool.wikipedia.text, "百度百科")
