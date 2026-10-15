@@ -83,13 +83,14 @@ do -- 高度：当前项打勾；自定义走 Spin，按 10 步进、上限夹�
     Assert.eq(Themed.last("spin").fields[1].value, 150)
 end
 
-do -- 添加：候选逐行
+do -- 添加：候选走居中分页列表（组件多时翻页，不溢出）
     local picked
     Edit.showAddDialog({ { id = "news", label = "热点新闻" }, { id = "stats", label = "阅读统计" } },
         function(id) picked = id end)
-    local sheet = Themed.last("sheet")
-    Assert.eq(sheet.title, "添加组件")
-    Assert.len(sheet.items, 2)
-    sheet.items[2].callback()
+    local list = Themed.last("list")
+    Assert.eq(list.title, "添加组件")
+    Assert.is_true(list.centered)
+    Assert.len(list.items, 2)
+    Themed.choose(list, 2)
     Assert.eq(picked, "stats")
 end
