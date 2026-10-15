@@ -18,7 +18,6 @@ package.preload["ui/elements/filemanager_menu_order"] = function() return filema
 
 local manage_calls = 0
 local download_calls = 0
-local pick_opts
 local manage_changed_callback
 package.preload["features.dictionary.ui"] = function()
     return {
@@ -27,7 +26,6 @@ package.preload["features.dictionary.ui"] = function()
             manage_changed_callback = changed_callback
         end,
         download = function() download_calls = download_calls + 1 end,
-        pick = function(_, opts) pick_opts = opts end,
     }
 end
 
@@ -61,26 +59,11 @@ package.preload["apps/reader/modules/readerdictionary"] = function()
     return ReaderDictionary
 end
 
-local DictQuickLookup = {
-    results = { { dict = "牛津", word = "test", definition = "x" } },
-    dictionary = "牛津",
-    word = "hello",
-    is_wiki = false,
-    displaydictname = "牛津",
-    updated = 0,
-    update = function(self) self.updated = self.updated + 1 end,
-    onClose = function() end,
-    onTap = function(...) return "native tap" end,
-    changeDictionary = function(self, index, skip_update)
-        if not self.results[index] then return end
-        self.dictionary = self.results[index].dict
-        self.displaydictname = self.dictionary
-        if not skip_update then self:update() end
-    end,
-}
-package.preload["ui/widget/dictquicklookup"] = function()
-    return DictQuickLookup
+local shown
+package.preload["features.rare.lookup"] = function()
+    return { open = function(opts) shown = opts end }
 end
+ReaderDictionary.onLookupWord = function() return "native lookup" end
 
 package.loaded["features.dictionary"] = nil
 local DictInit = require("features.dictionary")
@@ -109,17 +92,16 @@ download_item.callback()
 Assert.eq(download_calls, 1)
 Assert.eq(native_download_calls, 0)
 
-DictQuickLookup:changeDictionary(1)
-Assert.eq(DictQuickLookup.displaydictname, "牛津 ▼")
-Assert.eq(DictQuickLookup.updated, 1)
-
-local title = { dimen = {} }
-DictQuickLookup.dict_title = title
-Assert.is_true(DictQuickLookup:onTap(nil, {
-    pos = { intersectWith = function(_, dimen) return dimen == title.dimen end },
-}))
-Assert.eq(pick_opts.word, "hello")
-Assert.eq(pick_opts.current_name, "牛津")
+-- 查词改开多来源面板；维基（ui.dictionary 不是自己）走原生
+local reader_ui = {}
+local dict = setmetatable({ ui = reader_ui, cleanSelection = function(_, w) return w .. "!" end }, { __index = ReaderDictionary })
+reader_ui.dictionary = dict
+Assert.is_true(dict:onLookupWord("moon", false, nil, {}))
+Assert.eq(shown.text, "moon!")
+Assert.eq(shown.ui, reader_ui)
+Assert.is_true(shown.from_highlight)
+local wiki = setmetatable({ ui = reader_ui }, { __index = ReaderDictionary })
+Assert.eq(wiki:onLookupWord("moon"), "native lookup")
 
 settings.dictionary_enabled = false
 Assert.is_false(DictInit.isEnabled())
@@ -132,6 +114,4 @@ native_menu_items.dictionary_settings.sub_item_table[2].sub_item_table_func()
 Assert.eq(native_download_calls, 1)
 Assert.eq(ReaderDictionary.showDictionariesMenu({ ui = {} }), "native manage")
 Assert.eq(native_show_calls, 1)
-Assert.eq(DictQuickLookup:onTap(nil, {
-    pos = { intersectWith = function() return true end },
-}), "native tap")
+Assert.eq(dict:onLookupWord("moon"), "native lookup", "关闭后查词回退原生")

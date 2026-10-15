@@ -2,7 +2,7 @@
 翻译注入：把 Edge 请求接入 KOReader 的翻译 UI。
 
 Edge 请求和插件行为分开：`features.translate.edge` 只负责传输与响应解析，
-本模块负责联网恢复与 Translator 注入；弹窗见 features.translate.popup。
+本模块负责联网恢复与 Translator 注入；弹窗是多来源查词面板 features.rare.lookup 的「翻译」栏。
 
 @module koplugin.book.features.translate.init
 --]]
@@ -40,7 +40,9 @@ local function showTranslation(translator, text, detailed_view, source_lang, tar
     end) then
         return
     end
-    require("features.translate.popup").open{
+    require("features.rare.lookup").open{
+        ui = require("apps/reader/readerui").instance,
+        source = "translate",
         translator = translator,
         text = text,
         source_lang = source_lang or translator:getSourceLanguage(),

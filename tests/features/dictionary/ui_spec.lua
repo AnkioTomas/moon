@@ -101,15 +101,3 @@ Themed.choose(Themed.last("list"), 1)
 Themed.last("confirm").ok_callback()
 Assert.eq(install_dir, "/dict")
 
--- 查词弹窗切换：激活、关窗、重查当前词。
-local looked, closed_window
-local ui = { dictionary = { data_dir = "/tmp", onLookupWord = function(_, word) looked = word end } }
-Dictionary.pick(ui, { word = "moon", current_name = "demo", close_window = function() closed_window = true end })
-local pick = Themed.last("list")
-Assert.is_true(pick.items[1].checked)
-Assert.eq(pick.subtitle, "选择后重新查询当前词")
-activated = nil
-Themed.choose(pick, 1)
-Assert.eq(activated, installed_paths[1])
-Assert.is_true(closed_window)
-Assert.eq(looked, "moon")

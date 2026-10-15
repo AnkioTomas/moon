@@ -240,48 +240,4 @@ function Dictionary.download(ui)
     end)
 end
 
---- 查词弹窗内切换词典：选中后激活并重查当前词（对齐翻译切语言）。
----@param ui table ReaderUI / FileManager
----@param opts { word: string|nil, current_name: string|nil, close_window: fun()|nil }
-function Dictionary.pick(ui, opts)
-    local dictionary = ui.dictionary
-    local Manager = require("features.dictionary.manager")
-    local paths = Manager.list(dictionary.data_dir)
-    if #paths == 0 then
-        info(_("尚未安装字典"))
-        Dictionary.download(ui)
-        return
-    end
-    table.sort(paths, function(a, b) return bookName(a) < bookName(b) end)
-    local items = {}
-    local current_name = opts.current_name
-    for index = 1, #paths do
-        local path = paths[index]
-        local name = bookName(path)
-        local active = (current_name and name == current_name)
-            or (not current_name and not (dictionary.dicts_disabled and dictionary.dicts_disabled[path]))
-        items[#items + 1] = {
-            text = name,
-            value = path,
-            checked = active,
-            mandatory = active and _("当前") or nil,
-            icon = "book",
-        }
-    end
-    List:new{
-        title = _("切换词典"),
-        subtitle = _("选择后重新查询当前词"),
-        centered = true,
-        items = items,
-        on_select = function(path)
-            Manager.activate(dictionary, path)
-            if opts.close_window then opts.close_window() end
-            local word = opts.word
-            if type(word) == "string" and word ~= "" and dictionary.onLookupWord then
-                dictionary:onLookupWord(word, true)
-            end
-        end,
-    }:show()
-end
-
 return Dictionary

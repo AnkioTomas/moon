@@ -2,7 +2,7 @@
 把 KOReader 原生词典管理换成 Book 词典下载/切换。
 
 保留查词事件与划词按钮；开启时接管「管理词典 / 下载词典」菜单，
-查词弹窗点标题栏可切换词典（对齐翻译弹窗切语言）。关闭后完整回退原生。
+查词结果改在多来源查词面板（features.rare.lookup）里按词典分栏显示。关闭后完整回退原生。
 
 @module koplugin.book.features.dictionary.init
 --]]
@@ -75,34 +75,18 @@ function DictInit.onCreate()
         end
     end
 
-    local DictQuickLookup = require("ui/widget/dictquicklookup")
-    local native_on_tap = DictQuickLookup.onTap
-    local native_change = DictQuickLookup.changeDictionary
-    -- 标题追加 ▼，提示可点按切换（对齐翻译语言按钮）；原生每次都会重设 displaydictname。
-    DictQuickLookup.changeDictionary = function(self, index, skip_update)
-        if not self.results[index] then return end
-        native_change(self, index, true)
-        if DictInit.isEnabled() and not self.is_wiki then
-            self.displaydictname = self.displaydictname .. " ▼"
+    -- 查词（划词「查词」、长按单词）改开多来源查词面板；维基百科（ReaderWikipedia 继承本类）不接管。
+    local native_lookup = ReaderDictionary.onLookupWord
+    ReaderDictionary.onLookupWord = function(self, word, is_sane, boxes, highlight, link, dict_close_callback)
+        if not (DictInit.isEnabled() and self.ui and self.ui.dictionary == self) then
+            return native_lookup(self, word, is_sane, boxes, highlight, link, dict_close_callback)
         end
-        if not skip_update then
-            self:update()
-        end
-    end
-    -- 点标题栏：切词典并重查当前词（关闭时回退原生「偏好词典」切换）。
-    DictQuickLookup.onTap = function(self, arg, ges_ev)
-        if DictInit.isEnabled() and not self.is_wiki
-            and ges_ev.pos:intersectWith(self.dict_title.dimen) then
-            require("ui.guard").call("dictionary pick", require("features.dictionary.ui").pick, self.ui, {
-                word = self.word,
-                current_name = self.dictionary,
-                close_window = function()
-                    self:onClose(true)
-                end,
-            })
-            return true
-        end
-        return native_on_tap(self, arg, ges_ev)
+        require("ui.guard").call("dictionary lookup", function()
+            word = self.cleanSelection and self:cleanSelection(word, is_sane) or word
+            require("features.rare.lookup").open{ ui = self.ui, text = word, from_highlight = highlight ~= nil,
+                word_box = type(boxes) == "table" and boxes[1] or nil }
+        end)
+        return true
     end
 end
 
