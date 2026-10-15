@@ -21,6 +21,7 @@ function Topbar.items()
             icon = "bluetooth",
             bar_icon = "bluetooth",
             max_ratio = 0.25,
+            after = "wifi",
             watch = function(cb) return require("features.bluetooth").watch(cb) end,
             read = function() return require("features.bluetooth").topbar() end,
             tap = function() require("features.bluetooth.devices").show() end,

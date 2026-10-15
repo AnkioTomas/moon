@@ -138,9 +138,11 @@ do -- 后台任务：执行中数量 / 未结束总数；点按开任务列表
     Assert.eq(icon, "download")
 end
 
-do -- feature 的项经 features/<name>/topbar.lua 收集，排在核心项之后，带设置页元数据
+do -- feature 的项经 features/<name>/topbar.lua 收集，按 after 插位（蓝牙紧跟 Wi-Fi），带设置页元数据
     local items = TopBar.items()
-    Assert.eq(items[#items].id, "bluetooth")
+    local ids = {}
+    for i, item in ipairs(items) do ids[item.id] = i end
+    Assert.eq(ids.bluetooth, ids.wifi + 1)
     Assert.eq(TopBar.find("bluetooth").label, "蓝牙")
     Assert.eq(TopBar.find("battery").label, "电池")
     Assert.eq(TopBar.find("clock").sample, "12:34")

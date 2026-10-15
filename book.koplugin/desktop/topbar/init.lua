@@ -53,6 +53,7 @@ local _ = require("gettext")
 ---@field icon string 设置页行图标
 ---@field sample string|nil 设置页预览的样例文字
 ---@field bar_icon string|nil 设置页预览画的图标
+---@field after string|nil 功能项插到这个 id 之后（缺失则排末尾）
 
 --- 非充电用 battery_android_0..6 / full，充电用电量档位图标。
 ---@param pct number 电量百分比 0..100
@@ -193,7 +194,11 @@ function TopBar.items()
     local items = { unpack(ITEMS) }
     for _idx, name in ipairs(require("features").scan("topbar")) do
         for _i, item in ipairs(require("features." .. name .. ".topbar").items()) do
-            items[#items + 1] = item
+            local at = #items + 1
+            for i, it in ipairs(items) do
+                if it.id == item.after then at = i + 1 end
+            end
+            table.insert(items, at, item)
         end
     end
     for _idx, item in ipairs(items) do
