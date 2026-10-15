@@ -8,12 +8,12 @@ OCR 识别模型（Tesseract traineddata）管理：清单、下载校验、原�
 --]]
 
 local JSON = require("json")
-local Request = require("http.request")
+local Mirror = require("http.mirror")
 local Job = require("workers.job")
 local lfs = require("libs/libkoreader-lfs")
 
 local Manager = {}
-Manager.BASE_URL = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/ocr"
+Manager.BASE_PATH = "assets/ocr"
 local OWNED_FILE = ".book-ocr.json"
 local SUFFIX = ".traineddata"
 
@@ -55,7 +55,7 @@ end
 ---@param cb fun(items: table[]|nil, err: any)
 ---@return table
 function Manager.catalog(cb)
-    return Request.get(Manager.BASE_URL .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
+    return Mirror.get(Manager.BASE_PATH .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
         if not body then cb(nil, err); return end
         local ok, manifest = pcall(JSON.decode, body)
         if not ok then cb(nil, manifest); return end
@@ -182,9 +182,7 @@ function Manager.install(item, dir, cb, on_progress)
     if not made then cb(false, make_err); return end
     local part = dir .. "/" .. item.id .. SUFFIX .. ".part"
     local target = dir .. "/" .. item.id .. SUFFIX
-    return Request.download({
-        url = Manager.BASE_URL .. "/" .. item.file,
-        method = "GET",
+    return Mirror.download(Manager.BASE_PATH .. "/" .. item.file, {
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
         on_progress = function(bytes) report("download", bytes, item.size) end,

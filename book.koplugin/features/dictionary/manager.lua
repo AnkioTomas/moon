@@ -7,13 +7,13 @@ StarDict 词典管理：清单、分片下载校验、原子安装、切换与�
 --]]
 
 local JSON = require("json")
-local Request = require("http.request")
+local Mirror = require("http.mirror")
 local Paths = require("utils.paths")
 local Job = require("workers.job")
 local lfs = require("libs/libkoreader-lfs")
 
 local Manager = {}
-local BASE_URL = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/dict"
+local BASE_PATH = "assets/dict"
 --- 校验字典 id：清单来自网络，id 会拼进目录名与分片文件名，
 --- 只放行 `[%w_-]`，否则 `../` 之类能写到数据目录外。
 ---@return string|nil 合法时返回原值
@@ -66,7 +66,7 @@ end
 ---@param cb fun(items: table[]|nil, err: any)
 ---@return table
 function Manager.catalog(cb)
-    return Request.get(BASE_URL .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
+    return Mirror.get(BASE_PATH .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
         if not body then cb(nil, err); return end
         local ok, manifest = pcall(JSON.decode, body)
         if not ok then cb(nil, manifest); return end
@@ -242,18 +242,19 @@ local function downloadParts(item, dir, idx, completed, done, report)
         downloadParts(item, dir, idx + 1, completed, done, report)
         return
     end
-    Request.download({
-        url = BASE_URL .. "/" .. part.file,
-        method = "GET",
+    Mirror.download(BASE_PATH .. "/" .. part.file, {
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
         on_progress = function(bytes)
             report("part", completed + bytes, item.size, idx, #item.parts)
         end,
+        check = function()
+            if partComplete(dir, part) then return true end
+            return false, "part size mismatch"
+        end,
     }, dir .. "/" .. part.file, function(ok, err)
-        if not ok or not partComplete(dir, part) then
-            os.remove(dir .. "/" .. part.file)
-            done.callback(false, err or "part size mismatch")
+        if not ok then
+            done.callback(false, err)
             return
         end
         completed = completed + tonumber(part.size)

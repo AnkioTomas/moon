@@ -136,13 +136,16 @@ download_call.cb(true)
 Assert.eq(progress[3][1], "part")
 Assert.eq(progress[4][1], "install")
 
--- 下载失败：删坏片、复位在飞标记并回调失败。
+-- 下载失败（所有镜像都失败）：删坏片、复位在飞标记并回调失败。
 part_present = false
 local failed
 local removed_part
 os.remove = function(path) removed_part = path; return true end
 Manager.install(item, "/dict", function(ok, err) failed = { ok, err } end)
-download_call.cb(false, "HTTP 404")
+for _i = 1, #require("http.mirror").DEFAULTS do
+    if failed then break end
+    download_call.cb(false, "HTTP 404")
+end
 os.remove = original_remove
 Assert.is_false(failed[1])
 Assert.eq(failed[2], "HTTP 404")

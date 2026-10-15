@@ -1,7 +1,7 @@
 --[[--
 生僻字注音词库目录：可下载词库清单、安装 / 删除、按设置加载已启用的词库。
 
-托管与输入法词库相同：仓库 assets/rare/<id>/ 下 manifest.json + 分片，设备经 jsdelivr 拉取，
+托管与输入法词库相同：仓库 assets/rare/<id>/ 下 manifest.json + 分片，设备经 http.mirror 多源拉取，
 下载、校验、落位全走 features.ime.download.install。落盘在 $DATA/.moon/rare/<id>.tsv；
 用户自制词库同格式放进这个目录（文件名即 id）也会出现在列表里。
 
@@ -13,7 +13,7 @@ local lfs = require("libs/libkoreader-lfs")
 local Paths = require("utils.paths")
 local MoonSettings = require("utils.settings")
 
-local BASE_ROOT = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/rare"
+local BASE_ROOT = "assets/rare"
 
 local Catalog = {}
 
@@ -121,7 +121,7 @@ function Catalog.download(id, cb, on_progress)
     Paths.ensureDir(Catalog.dir())
     require("features.ime.download").install({
         name = "rare." .. id,
-        base_url = BASE_ROOT .. "/" .. id,
+        base_path = BASE_ROOT .. "/" .. id,
         dest = Catalog.path(id),
         installed = MoonSettings.get("features.rare").rare_built_at[id],
         on_installed = function(manifest)

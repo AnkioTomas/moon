@@ -30,34 +30,8 @@ local GITHUB = "https://github.com"
 local ASSET_PREFIX = "^https://github%.com/AnkioTomas/moon/releases/download/"
 local MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 
---- Release 公益加速前缀（同步自 XIU2/UserScript「Github 增强 - 高速下载」），前缀 + github.com 之后的路径即加速地址。
 --- 镜像不可信：包体只靠 Release 接口（api.ankio.net 转发的 GitHub API）给的 sha256 把关，校验值绝不走镜像。
-local MIRRORS = {
-    "https://gh-proxy.org/https://github.com",
-    "https://cdn.gh-proxy.org/https://github.com",
-    "https://edgeone.gh-proxy.org/https://github.com",
-    "https://cors.isteed.cc/github.com",
-    "https://ghproxy.it/https://github.com",
-    "https://github.boki.moe/https://github.com",
-    "https://gh.jasonzeng.dev/https://github.com",
-    "https://gh.monlor.com/https://github.com",
-    "https://github.ednovas.xyz/https://github.com",
-    "https://ghfile.geekertao.top/https://github.com",
-    "https://ghp.keleyaa.com/https://github.com",
-    "https://gh.chjina.com/https://github.com",
-    "https://cdn.crashmc.com/https://github.com",
-    "https://git.yylx.win/https://github.com",
-    "https://gitproxy.mrhjx.cn/https://github.com",
-    "https://ghproxy.cxkpro.top/https://github.com",
-    "https://down.npee.cn/?https://github.com",
-    "https://xget.xi-xu.me/gh",
-    "https://gh.zwy.one/https://github.com",
-    "https://ghproxy.monkeyray.net/https://github.com",
-    "https://ghproxy.net/https://github.com",
-    "https://ghfast.top/https://github.com",
-    "https://wget.la/https://github.com",
-    "https://gh.llkk.cc/https://github.com",
-}
+local MIRRORS = require("http.mirror").RELEASE_PROXIES
 local PROBE_MIRRORS = 5
 local PROBE_TIMEOUT_RATIO = 1 / 3 -- × 「网络超时」，缺省 10 秒
 
