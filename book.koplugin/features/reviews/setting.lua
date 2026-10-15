@@ -11,8 +11,10 @@ local _ = require("gettext")
 local Setting = {}
 
 -- book_reviews_mark_style：dashed 虚线 / solid 实线。
+-- chapter_links：章会话的书（微信读书、京东读书）借段评用的关联，按「源 id\0书目 id」记，见 features.reviews.linked。
 Setting.defaults = {
     book_reviews_mark_style = "dashed",
+    chapter_links = {},
 }
 
 ---@param desktop BookDesktop

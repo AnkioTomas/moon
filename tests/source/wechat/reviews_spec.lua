@@ -135,6 +135,18 @@ do
     os.time = real_time
     Assert.len(client.calls, 1)
 
+    -- 空结果只缓存 5 分钟：一次抖动不至于锁一周
+    client = fakeClient()
+    Reviews.hotspotsAsync(client, "b", "empty", function() end)
+    client.underlines_cb({ underlines = {} })
+    client = fakeClient()
+    Reviews.hotspotsAsync(client, "b", "empty", function() end)
+    Assert.len(client.calls, 0, "5 分钟内走缓存")
+    os.time = function() return real_time() + 301 end
+    Reviews.hotspotsAsync(client, "b", "empty", function() end)
+    os.time = real_time
+    Assert.len(client.calls, 1, "过 5 分钟重拉")
+
     -- 热点多时分批（整批过大服务端 3 秒超时）：40/40/40/5，同时最多 3 批在飞，结果按批次顺序合并。
     client = fakeClient()
     got = nil

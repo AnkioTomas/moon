@@ -20,6 +20,8 @@ local BATCH_SIZE = 40
 local CONCURRENCY = 3
 -- 热点原句与段评数变得慢，缓存一周（cache/wechat/reviews/<bookId>/<章 uid>.json）。
 local CACHE_TTL = 7 * 24 * 3600
+-- 拉到 0 条多半是网络抖动或接口偶发（整批 3 秒超时）：存一周会让七天一条都看不到，只留 5 分钟再试。
+local EMPTY_TTL = 300
 
 local Reviews = {}
 
@@ -124,7 +126,8 @@ local function writeCache(book_id, chapter_uid, hotspots)
     Paths.ensureDir(path:match("(.+)/[^/]+$"))
     local f = io.open(path, "wb")
     if not f then return end
-    f:write(JSON.encode({ expire = os.time() + CACHE_TTL, hotspots = hotspots }))
+    local ttl = #hotspots > 0 and CACHE_TTL or EMPTY_TTL
+    f:write(JSON.encode({ expire = os.time() + ttl, hotspots = hotspots }))
     f:close()
 end
 

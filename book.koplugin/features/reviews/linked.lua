@@ -241,8 +241,9 @@ end
 ---@param chapters BookChapter[] 微信目录（带 words）
 ---@param titles string[] 当前页的本地目录标题
 ---@param at number
+---@param limit integer|nil 候选章上限，默认 MAX_CHAPTERS
 ---@return BookChapter[]
-function Linked.candidates(chapters, titles, at)
+function Linked.candidates(chapters, titles, at, limit)
     local out, seen = {}, {}
     for _idx, chapter in ipairs(Linked.byTitle(chapters, titles)) do
         seen[chapter] = true
@@ -263,7 +264,7 @@ function Linked.candidates(chapters, titles, at)
         table.sort(near, function(x, y) return x.distance < y.distance end)
         for _idx, item in ipairs(near) do out[#out + 1] = item.chapter end
     end
-    for i = #out, MAX_CHAPTERS + 1, -1 do out[i] = nil end
+    for i = #out, (limit or MAX_CHAPTERS) + 1, -1 do out[i] = nil end
     return out
 end
 
@@ -469,6 +470,95 @@ function Linked.target(ui, cache, redraw)
             return Linked.place(ui, Linked.entries(ui, source, link.book_id, toc, cache, redraw), cache)
         end,
     }
+end
+
+---@param identity BookIdentity
+---@return string
+local function linkKey(identity)
+    return tostring(identity.source_id or "") .. "\0" .. tostring(identity.stable_id)
+end
+
+--- 章会话的关联：每章是一个独立文档，doc_settings 一章一份存不住，按书存进 settings/reviews.lua 的 chapter_links。
+---@param identity BookIdentity
+---@return ReviewLink|nil
+function Linked.getFor(identity)
+    if not (identity and identity.stable_id) then return nil end
+    local links = require("utils.settings").get("features.reviews").chapter_links or {}
+    return links[linkKey(identity)]
+end
+
+---@param identity BookIdentity
+---@param link ReviewLink|nil nil = 解除关联
+function Linked.setFor(identity, link)
+    if not (identity and identity.stable_id) then return end
+    local MoonSettings = require("utils.settings")
+    local data = MoonSettings.get("features.reviews")
+    data.chapter_links = data.chapter_links or {}
+    data.chapter_links[linkKey(identity)] = link
+    MoonSettings.save("features.reviews", data)
+end
+
+--- 本章在全书的位置比例（按 words 累计取章中点；目录没有字数时按章序号）与章名。
+---@param chapters BookChapter[]|nil
+---@param chapter_idx number|nil
+---@return number at 0..1
+---@return string|nil title
+function Linked.anchorOf(chapters, chapter_idx)
+    chapters = chapters or {}
+    local total, acc, title, pos = 0, 0, nil, nil
+    for i, chapter in ipairs(chapters) do
+        total = total + (chapter.words or 0)
+        if chapter.idx == chapter_idx then pos, title = i, chapter.title end
+    end
+    if not pos then return 0, nil end
+    if total <= 0 then return (pos - 0.5) / #chapters, title end
+    for i = 1, pos - 1 do acc = acc + (chapters[i].words or 0) end
+    return (acc + (chapters[pos].words or 0) / 2) / total, title
+end
+
+--- 章会话借关联书目的段评：按本章位置与章名到关联书目录里挑章（最多 8 章），
+--- 拉这些章的热点并记上归属章 ``spot.chapter_idx``（未定位，由调用方定位到本章 HTML）。
+---@param source ParagraphReviewSource 微信读书源
+---@param identity BookIdentity 本章身份（带 chapter_idx 与属主源）
+---@param link ReviewLink
+---@param cb fun(hotspots: WechatReviewHotspot[]|nil)
+---@return { cancel: fun() }
+function Linked.chapterHotspotsAsync(source, identity, link, cb)
+    local cancelled, jobs = false, {}
+    local function cancel()
+        cancelled = true
+        for _idx, job in ipairs(jobs) do if job.cancel then job.cancel() end end
+    end
+    local owner = identity.source or source
+    local own = { source_id = identity.source_id, stable_id = identity.stable_id, source = owner }
+    local own_job = owner:loadTocAsync(own, function(toc)
+        if cancelled then return end
+        local at, title = Linked.anchorOf(toc, tonumber(identity.chapter_idx))
+        jobs[#jobs + 1] = Linked.tocAsync(source, link.book_id, function(remote)
+            if cancelled then return end
+            if not remote then cb(nil); return end
+            -- 两本书分章对不上时多对几章（章名对上的排在最前）
+            local chapters = Linked.candidates(remote, title and { title } or {}, at, 8)
+            local collected, pending = {}, #chapters
+            if pending == 0 then cb(collected); return end
+            for _idx, chapter in ipairs(chapters) do
+                jobs[#jobs + 1] = source:paragraphHotspotsAsync({
+                    source_id = source.id, stable_id = link.book_id, chapter_idx = chapter.idx, source = source,
+                }, function(hotspots)
+                    if cancelled or pending <= 0 then return end
+                    for _spot_idx, spot in ipairs(hotspots or {}) do
+                        -- 段评归属章：翻段评要用这一章的身份，range 才有效
+                        spot.chapter_idx = chapter.idx
+                        collected[#collected + 1] = spot
+                    end
+                    pending = pending - 1
+                    if pending == 0 then cb(collected) end
+                end)
+            end
+        end)
+    end)
+    if own_job then jobs[#jobs + 1] = own_job end
+    return { cancel = cancel }
 end
 
 return Linked
