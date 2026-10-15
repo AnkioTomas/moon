@@ -19,6 +19,7 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
+local VerticalSpan = require("ui/widget/verticalspan")
 local Layout = require("desktop.pages.home.layout")
 local Components = require("desktop.pages.home.registry")
 local Widgets = require("desktop.pages.home.placements")
@@ -331,7 +332,9 @@ local function assemble(self)
             VerticalGroup:new{
                 align = "left",
                 body,
-                Pager.widget({
+                -- 只有一页且非编辑态：不显示翻页条，留同高占位，正文高度不变、不跳动
+                (self.pages <= 1 and not self.editing) and VerticalSpan:new{ width = Theme.px(t.control.height) }
+                    or Pager.widget({
                     width = w,
                     page = self.page,
                     pages = self.pages,
