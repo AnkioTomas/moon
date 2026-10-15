@@ -224,7 +224,7 @@ end
 local function dirtyDomains(id)
     local out = {}
     if #require("book.books_db").unsynced(id) > 0 then out[#out + 1] = "syncBooksAsync" end
-    if #require("book.note_db").unsynced(id) > 0 then out[#out + 1] = "syncNotesAsync" end
+    if require("book.note_db").hasUnsynced(id) then out[#out + 1] = "syncNotesAsync" end
     if #require("book.stats_db").unsyncedBySource(id, 1) > 0 then out[#out + 1] = "syncStatsAsync" end
     if #require("book.progress_db").unsynced(id) > 0 then out[#out + 1] = "syncProgressAsync" end
     return out
