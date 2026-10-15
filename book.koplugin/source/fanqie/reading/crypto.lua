@@ -14,6 +14,18 @@ local HARDCODED_KEY = Aes.from_hex("ac25c67ddd8f38c1b37a2348828e222e")
 local AID = 1967
 
 local function le64(n)
+    -- device_id 常是 19 位十进制串，超过 2^53，转成 Lua 数字会丢低位；串按 uint64 精确累加。
+    if type(n) == "string" and n:match("^%d+$") then
+        local ffi = require("ffi")
+        local v = ffi.new("uint64_t", 0)
+        for d in n:gmatch("%d") do v = v * 10 + tonumber(d) end
+        local out = {}
+        for i = 1, 8 do
+            out[i] = string.char(tonumber(v % 256))
+            v = v / 256
+        end
+        return table.concat(out)
+    end
     n = tonumber(n) or 0
     local out = {}
     for i = 1, 8 do

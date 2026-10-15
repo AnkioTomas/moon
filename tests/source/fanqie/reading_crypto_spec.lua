@@ -27,6 +27,15 @@ Assert.eq(Aes.to_hex(ct), "64fd9775e48333728345235490bca65492c8c2ccd7832564732fb
 local content = Crypto.build_register_content(643680972856619, 0, "1234567890123456")
 Assert.eq(content, "MTIzNDU2Nzg5MDEyMzQ1NmT9l3XkgzNyg0UjVJC8plSSyMLM14MlZHMvtUg5WT/i")
 
+-- 19 位 device_id 串超过 2^53：小端 8 字节必须逐位精确
+do
+    local b64 = Crypto.build_register_content("7342475219212192830", 0, "1234567890123456")
+    local raw = require("utils.text").base64Decode(b64)
+    local plain_id = Aes.cbc_decrypt(raw:sub(17), key, raw:sub(1, 16), true)
+    Assert.eq(Aes.to_hex(plain_id:sub(1, 8)), "3e4c404d4fb6e565")
+    Assert.eq(Crypto.build_register_content("643680972856619", 0, "1234567890123456"), content)
+end
+
 -- decrypt_server_key roundtrip
 local session = Aes.from_hex("00112233445566778899aabbccddeeff")
 local iv2 = "0123456789abcdef"
