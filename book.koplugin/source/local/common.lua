@@ -258,8 +258,10 @@ local function withDocument(path, fn)
         pcall(function() doc:close() end)
         return nil
     end
-    local result = fn(doc)
+    -- fn 抛错也要关文档：crengine 文档不关会一直占着内存。
+    local ok, result = pcall(fn, doc)
     pcall(function() doc:close() end)
+    if not ok then error(result, 0) end
     return result
 end
 

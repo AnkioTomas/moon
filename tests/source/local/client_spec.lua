@@ -1105,3 +1105,19 @@ do
     package.loaded["document/documentregistry"] = real_registry
     package.loaded["book.cover"] = real_cover
 end
+
+-- ── 取元数据中途抛错：文档照样关闭（crengine 不关会一直占内存） ──────
+do
+    local real_registry = package.loaded["document/documentregistry"]
+    local closed = 0
+    package.loaded["document/documentregistry"] = {
+        hasProvider = function() return true end,
+        openDocument = function()
+            return { getProps = function() error("boom") end, close = function() closed = closed + 1 end }
+        end,
+    }
+    local Common = require("source.local.common")
+    Assert.is_nil(Common.parseBookProps("/books/bad.epub"))
+    Assert.eq(closed, 1)
+    package.loaded["document/documentregistry"] = real_registry
+end
