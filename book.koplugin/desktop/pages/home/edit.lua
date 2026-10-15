@@ -151,15 +151,15 @@ function Edit.showHeightDialog(opts)
     }:show()
 end
 
---- 添加组件列表。
+--- 添加组件列表：居中分页列表，组件多时翻页而不是溢出屏幕。
 ---@param candidates { id: string, label: string }[]
 ---@param on_pick fun(id: string)
 function Edit.showAddDialog(candidates, on_pick)
     local items = {}
     for _i, comp in ipairs(candidates) do
-        items[#items + 1] = { text = comp.label, callback = function() on_pick(comp.id) end }
+        items[#items + 1] = { text = comp.label, value = comp.id }
     end
-    Sheet:new{ title = _("添加组件"), items = items }:show()
+    require("ui.themes.widgets.list"):new{ title = _("添加组件"), centered = true, items = items, on_select = on_pick }:show()
 end
 
 return Edit

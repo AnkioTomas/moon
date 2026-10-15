@@ -146,11 +146,11 @@ do -- 长按进编辑：翻页条中间换成「添加 / 完成」；添加塞�
     Assert.len(Kit.find(desktop.root, function(w) return w.onHomeEditShieldTap ~= nil end), 2, "每个组件盖遮罩")
 
     for _, b in ipairs(Kit.buttons(desktop.root)) do if b.text == "添加" then b.callback() end end
-    local sheet = Themed.last("sheet")
-    Assert.eq(sheet.title, "添加组件")
-    Assert.len(sheet.items, #IDS - 2, "只列未摆上的组件")
+    local list = Themed.last("list")
+    Assert.eq(list.title, "添加组件")
+    Assert.len(list.items, #IDS - 2, "只列未摆上的组件")
     heights.news = 700
-    for _, item in ipairs(sheet.items) do if item.text == "news" then item.callback() end end
+    for i, item in ipairs(list.items) do if item.text == "news" then Themed.choose(list, i) end end
     local news = placements()[3]
     Assert.eq(news.id, "news")
     Assert.eq(news.page, 2, "当前页塞不下落新页")
