@@ -14,6 +14,7 @@ local remote_upserted = {}
 local adopted = {}
 local pulled = 0
 local pending_row
+local live_xpointer -- 测试桩会话的 rolling.xpointer（页级源无进度行时的本地位置）
 local goto_calls = {}
 local current_identity = {
     source_id = "wechat",
@@ -52,7 +53,8 @@ package.preload["reader.session"] = function()
         current = function()
             return {
                 identity = current_identity,
-                ui = { document = { getPageCount = function() return 10 end }, handleEvent = function() end },
+                ui = { document = { getPageCount = function() return 10 end }, handleEvent = function() end,
+                    rolling = live_xpointer and { xpointer = live_xpointer } },
                 chapter = { toc = { {}, {}, {}, {}, {} } },
                 doc_fraction = 0,
             }
@@ -436,6 +438,13 @@ kavitaPull({ fraction = 0.90, total_pages = 22 },
 Assert.len(adopted, 1, "超出容差且本地没动过就跟云端")
 Assert.eq(adopted[1].fraction, 0.90, "取不到同 spine 时整套用远端")
 Assert.is_nil(adopted[1].page, "不保留本地页码")
+
+-- 页级源、库里还没有进度行、本地 spine 比远端靠后：不能对 nil 行取字段，也不弹冲突框。
+live_xpointer = "/body/DocFragment[15]/body/p[3]"
+kavitaPull({ fraction = 0.30, total_pages = 22, locator = "/body/DocFragment[13]/body/p[5]" }, nil)
+live_xpointer = nil
+Assert.eq(#shown, 0, "无进度行时本地更靠后不弹窗")
+Assert.eq(#adopted, 0, "不把读者往回拽")
 
 -- 拉失败只记日志，不弹窗：离线开缓存书必须能继续读
 Progress.clearConflicts()

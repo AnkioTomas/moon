@@ -218,6 +218,8 @@ do
     Assert.is_nil(calls[1].sql:find("LEFT JOIN pending_progress", 1, true))
     Assert.is_true(calls[1].sql:find("(b.deleted=0 OR b.sync_status=1)", 1, true) ~= nil,
         "卷行这种非书架成员也要列进最近阅读")
+    Assert.is_nil(calls[2].sql:find("b.deleted=0 AND", 1, true),
+        "被远端下架但有进度的书不能被「只在架」条件挡掉")
     Assert.is_true(calls[2].sql:find("FROM books b JOIN pending_progress p", 1, true) ~= nil)
     Assert.is_true(calls[2].sql:find("ORDER BY COALESCE(p.updated_at, 0) DESC", 1, true) ~= nil,
         "按最近一次读排序")
