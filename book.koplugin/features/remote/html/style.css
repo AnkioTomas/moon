@@ -1349,7 +1349,7 @@ td.n a .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-spac
         inset: -6px -3px;
     }
     .crumb-action::after, .file-list .row-more::after { inset: -8px }
-    .crumb-bar .crumb, .crumb-action { position: relative }
+    .crumb-bar .crumb, .crumb-action, .file-list .row-more, .up-act { position: relative }
 }
 @media (max-width: 720px) {
     .file-main { margin: 0 }
