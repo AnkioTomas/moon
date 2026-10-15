@@ -1,5 +1,5 @@
 --[[--
-X-Ray 阅读 UI：底部分栏主菜单、TextViewer 详情、划词补全。
+X-Ray 阅读 UI：底部分栏主菜单、弹窗详情（主题 TextViewer，带遮罩）、划词补全、后台生成任务。
 
 @module koplugin.book.features.xray.ui
 --]]
@@ -120,42 +120,48 @@ local function refreshMainTab(holder)
     holder.menu:setItems(rowsForTab(holder.menu.tabs.active, holder.identity))
 end
 
---- 跑一次综合拉取：显示可取消的进行中提示（一轮最长 3 分钟、可能连两轮），完成后报数、失效页内标记并刷新当前分栏。
----@param ui table ReaderUI
+--- 这本书 X-Ray 实体任务的 key：「按当前位置更新」与「分析全书」共用，同一时间只跑一个。
 ---@param identity BookIdentity
----@param force boolean|nil 为真则忽略已有缓存重新生成
-local function runFetch(ui, identity, force)
-    local Fetch = require("features.xray.fetch")
-    local handle, cancelled
-    local loading = ProgressDialog:new{
-        title = _("X-Ray"),
-        text = force and _("正在重新生成 X-Ray…") or _("正在生成 X-Ray…"),
-        dismissable = false,
-        on_cancel = function()
-            cancelled = true
-            if handle then handle.cancel() end
-        end,
-    }
-    --- 拉取回调：关掉进行中提示，成功报三类数量，失败提示原因。
-    ---@param result table|nil
-    local cb = function(result, err)
-        if cancelled then return end
-        loading:close()
-        if not result then
-            info(T(_("X-Ray 失败：%1"), tostring(err or _("未知错误"))))
-            return
-        end
-        info(T(_("X-Ray 已更新：人物 %1，地点 %2，专有名词 %3"),
-            tostring(#result.characters),
-            tostring(#result.locations),
-            tostring(#result.terms)))
-        require("features.xray.marks").invalidate()
-        refreshMainTab(main_holder)
-    end
-    handle = loading:showWhile(Fetch.comprehensive, ui, identity, { force = force == true }, cb)
+---@return string
+local function taskKey(identity)
+    return "xray\0" .. identity.source_id .. "\0" .. identity.stable_id
 end
 
---- 强制重新生成当前书籍的 X-Ray。
+--- 已有同 key 任务就跟随它的进度，返回 true。
+---@param key string
+---@return boolean
+local function followRunning(key)
+    local running = require("workers.tasks").get(key)
+    if running then require("workers.ui.task_dialog").follow(running) end
+    return running ~= nil
+end
+
+--- 任务体包一层取字：在任务里取出全书正文（可取消），再交给 make(text) 生成的任务体。
+---@param ui table ReaderUI
+---@param make fun(text: string): fun(report: function, done: function): table|nil
+---@return fun(report: function, done: function): table
+local function withText(ui, make)
+    return function(report, done)
+        local inner
+        local outer = require("features.reflow.extract").run(ui, function(text, err)
+            if not text then done({ ok = false, err = err }); return end
+            inner = make(text)(report, done)
+        end, report)
+        return { cancel = function()
+            outer.cancel()
+            if inner then inner.cancel() end
+        end }
+    end
+end
+
+---@param identity BookIdentity
+---@return string
+local function bookTitle(identity)
+    local title = Text.trim((identity.book or {}).title)
+    return title ~= "" and title or _("X-Ray")
+end
+
+--- 强制按当前位置重新生成 X-Ray（后台任务，可取消、可转后台）；完成报三类数量并刷新标记与分栏。
 ---@param ui table|nil
 ---@param identity BookIdentity|nil
 function UI.refresh(ui, identity)
@@ -164,50 +170,58 @@ function UI.refresh(ui, identity)
         info(_("当前书籍没有可用身份"))
         return
     end
-    if not ensureReady() then return end
-    runFetch(ui, identity, true)
+    local key = taskKey(identity)
+    if followRunning(key) or not ensureReady() then return end
+    require("workers.ui.task_dialog").start{
+        key = key,
+        kind = "ai",
+        title = bookTitle(identity),
+        restartable = true,
+        run = function(report, done)
+            report(_("正在重新生成 X-Ray…"))
+            return require("features.xray.fetch").comprehensive(ui, identity, { force = true }, function(result, err)
+                done({ ok = result ~= nil, data = result, err = err })
+            end)
+        end,
+        on_done = function(result)
+            if not result.ok then
+                info(T(_("X-Ray 失败：%1"), tostring(result.err or _("未知错误"))))
+                return
+            end
+            local data = result.data
+            info(T(_("X-Ray 已更新：人物 %1，地点 %2，专有名词 %3"),
+                tostring(#data.characters), tostring(#data.locations), tostring(#data.terms)))
+            require("features.xray.marks").invalidate()
+            refreshMainTab(main_holder)
+        end,
+    }
 end
 
---- 分析全书：前台取出全书正文（不可取消），再交给后台任务逐段请求 AI；
---- 这本书已在分析就只跟随它的进度；上次没分析完的从断点接着来（游标见 features.xray.db）。
+--- 分析全书：取字与逐段请求 AI 都在后台任务里（可取消、可转后台）；
+--- 这本书已有 X-Ray 任务就只跟随它的进度；上次没分析完的从断点接着来（游标见 features.xray.db）。
 ---@param ui table ReaderUI
 ---@param identity BookIdentity
 function UI.scanBook(ui, identity)
-    if not ensureReady() then return end
-    local TaskDialog = require("workers.ui.task_dialog")
-    local key = "xray\0" .. identity.source_id .. "\0" .. identity.stable_id
-    local running = require("workers.tasks").get(key)
-    if running then
-        TaskDialog.follow(running)
-        return
-    end
+    local key = taskKey(identity)
+    if followRunning(key) or not ensureReady() then return end
     local function start()
-        local dialog = ProgressDialog:new{ title = _("X-Ray"), dismissable = false }
-        dialog:showWhile(require("features.reflow.extract").run, ui, function(text, err)
-            dialog:close()
-            if not text then
-                info(T(_("X-Ray 失败：%1"), tostring(err)))
-                return
-            end
-            local title = Text.trim((identity.book or {}).title)
-            TaskDialog.start{
-                key = key,
-                kind = "ai",
-                title = title ~= "" and title or _("X-Ray"),
-                restartable = true,
-                run = require("features.xray.fetch").scanBook(identity, text),
-                retryable = function() return true end,
-                on_done = function(result)
-                    if not result.ok then
-                        info(T(_("X-Ray 全书分析中断：%1。再次分析会从断点继续"),
-                            tostring(result.err or _("未知错误")):match("[^\n]*")))
-                        return
-                    end
-                    info(_("X-Ray 全书分析完成"))
-                    refreshMainTab(main_holder)
-                end,
-            }
-        end, function(step, done, total) dialog:update(step, done, total) end)
+        require("workers.ui.task_dialog").start{
+            key = key,
+            kind = "ai",
+            title = bookTitle(identity),
+            restartable = true,
+            run = withText(ui, function(text) return require("features.xray.fetch").scanBook(identity, text) end),
+            retryable = function() return true end,
+            on_done = function(result)
+                if not result.ok then
+                    info(T(_("X-Ray 全书分析中断：%1。再次分析会从断点继续"),
+                        tostring(result.err or _("未知错误")):match("[^\n]*")))
+                    return
+                end
+                info(_("X-Ray 全书分析完成"))
+                refreshMainTab(main_holder)
+            end,
+        }
     end
     local resume = require("features.xray.fetch").scanProgress(identity)
     require("ui.themes.widgets.confirm"):new{
@@ -275,9 +289,19 @@ function UI.lookup(ui, word)
         return
     end
     if not ensureReady() then return end
-    local loading = ProgressDialog:new{ title = word, text = _("X-Ray 查询中…"), dismissable = false }
+    local handle, cancelled
+    local loading = ProgressDialog:new{
+        title = word,
+        text = _("X-Ray 查询中…"),
+        dismissable = false,
+        on_cancel = function()
+            cancelled = true
+            if handle then handle.cancel() end
+        end,
+    }
     loading:show()
-    Fetch.lookupWord(ui, identity, word, function(entity, err)
+    handle = Fetch.lookupWord(ui, identity, word, function(entity, err)
+        if cancelled then return end
         loading:close()
         if not entity then
             info(T(_("未找到：%1"), tostring(err or word)))
