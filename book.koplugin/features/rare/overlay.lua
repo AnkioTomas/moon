@@ -1,5 +1,5 @@
 --[[--
-生僻字注音绘制层：挂在 reader.page_marks 上（只画字，不占位、不接点按）。
+生僻字注音绘制层：挂在 reader.page_marks 上（只画字，不占位；点注音或被注音的字开查词面板 lookup）。
 
 每屏：取屏上文字 → 各启用词库按阈值找生僻词 → 逐词 findText 取屏幕框 → 在框上方画注音。
 没命中的屏只花一次取字 + 查表；有命中时超过 BUDGET 秒就停止取框，剩下的不画。
@@ -14,6 +14,8 @@ local logger = require("utils.log")
 
 local BUDGET_MS = 250
 local MAX_WORDS = 80
+-- 注音用拉丁字体：界面字体若是中文字体（如方正兰亭黑），带声调字母是全角宽，拼音会被拉散。
+local FACE = "NotoSans-Regular.ttf"
 
 local Overlay = {}
 Overlay.__index = Overlay
@@ -27,34 +29,155 @@ function Overlay.invalidate()
     if ui and ui.dialog then require("ui/uimanager"):setDirty(ui.dialog, "ui") end
 end
 
---- 纯布局：命中框 → 注音位置。字号取行高 × ratio，宽于框 1.5 倍时缩到不小于六成；
---- 同一行与上一个注音重叠的跳过；横向夹在屏内。
----@param hits { ann: string, box: table }[]
----@param opts { ratio: number, screen_w: number, measure: fun(text: string, size: integer): number }
----@return { text: string, x: integer, y: integer, size: integer }[] y 为基线
+--- 注音字号下限（像素）：行间空隙再小也按这个画（宁小勿缺，此时可能贴上一行）。
+Overlay.FLOOR = 6
+--- 注音与上一行字形底（含英文下伸部）之间至少留的像素。
+Overlay.MARGIN = 1
+
+--- 全屏统一字号（像素）：min(正文字号 × ratio, 行间空隙能放下的字号)，不小于 FLOOR。
+--- gap = 行距 − 正文字形墨迹高（顶到下伸部底）；注音墨迹高 = size × ann_em。
+---@param body_size number 正文字号（像素）
+---@param ratio number
+---@param gap number|nil 行间空隙（像素）；nil 不限
+---@param ann_em number|nil 注音字体墨迹高 / 字号
+---@return integer
+function Overlay.size(body_size, ratio, gap, ann_em)
+    local size = math.floor(body_size * ratio + 0.5)
+    if gap and ann_em and ann_em > 0 then
+        -- 再减 1：基线取整最多吃掉 1px。
+        size = math.min(size, math.floor((gap - Overlay.MARGIN - 1) / ann_em))
+    end
+    return math.max(Overlay.FLOOR, size)
+end
+
+--- 同行相邻注音的最小间距（像素）。
+local GAP = 2
+
+--- 纯布局：命中框 → 注音位置。全屏同一字号；注音墨迹底贴着本行字形顶，放在行间空隙里。
+--- 行模型：行框底部 pitch 高是本行（段首框更高，多出的是段前距），字形墨迹在本行内 [top, bottom]。
+--- 横向夹在屏内；同行相邻的不重叠：在词框内右推，推不下跳过后一个。
+---@param hits { ann: string, key: string, box: table }[]
+---@param opts { size: integer, pitch: number, top: number, ann_bottom: number, screen_w: number, measure: fun(text: string, size: integer): number }
+---@return { text: string, key: string, box: table, x: integer, y: integer, w: number, size: integer }[] y 为基线
 function Overlay.layout(hits, opts)
-    local out, last = {}, nil
+    local out, size = {}, opts.size
     for _idx, hit in ipairs(hits) do
         local box = hit.box
-        local size = math.max(8, math.floor(box.h * opts.ratio + 0.5))
         local w = opts.measure(hit.ann, size)
-        local max_w = box.w * 1.5
-        if w > max_w then
-            local shrunk = math.max(math.floor(size * 0.6), 8, math.floor(size * max_w / w))
-            if shrunk < size then
-                size = shrunk
-                w = opts.measure(hit.ann, size)
-            end
-        end
         local x = math.floor(box.x + (box.w - w) / 2)
         x = math.max(0, math.min(x, opts.screen_w - w))
-        local y = math.max(size, box.y)
-        if not (last and last.y == y and x < last.right) then
-            out[#out + 1] = { text = hit.ann, x = x, y = y, size = size }
-            last = { y = y, right = x + w + 2 }
+        local line_top = box.y + box.h - math.min(opts.pitch, box.h)
+        local y = math.max(size, math.floor(line_top + opts.top - opts.ann_bottom))
+        -- 同行相邻注音不许重叠：在本词框内右推，推不下就跳过这个。
+        local prev = out[#out]
+        if prev and math.abs((prev.box.y + prev.box.h) - (box.y + box.h)) < opts.pitch / 2 and x < prev.x + prev.w + GAP then
+            x = prev.x + prev.w + GAP
+            if x + w > math.min(box.x + box.w, opts.screen_w) then x = nil end
+        end
+        if x then
+            out[#out + 1] = { text = hit.ann, key = hit.key, box = box, x = x, y = y, w = w, size = size }
         end
     end
     return out
+end
+
+--- 从排好的页面量行距与字形墨迹：pitch = 命中框最矮的高（段首高框被排除）；
+--- 在这些框里扫已画好的正文像素，得墨迹相对行顶的最高 / 最低行（多个词合起来，含英文下伸部）。
+---@param bb table 已画正文的屏幕 Blitbuffer
+---@param boxes table[] 命中词的屏幕框
+---@return { pitch: number, top: number, bottom: number }|nil
+function Overlay.calibrate(bb, boxes)
+    local pitch
+    for _idx, box in ipairs(boxes) do pitch = math.min(pitch or box.h, box.h) end
+    if not pitch then return nil end
+    local W, H = bb:getWidth(), bb:getHeight()
+    local top, bottom
+    for _idx, box in ipairs(boxes) do
+        if box.h == pitch then
+            for y = math.max(0, box.y), math.min(H - 1, box.y + box.h - 1) do
+                for x = math.max(0, box.x), math.min(W - 1, box.x + box.w - 1) do
+                    if bb:getPixel(x, y):getColor8().a < 128 then
+                        top = math.min(top or y - box.y, y - box.y)
+                        bottom = math.max(bottom or y - box.y, y - box.y)
+                        break
+                    end
+                end
+            end
+        end
+    end
+    if not top then return nil end
+    return { pitch = pitch, top = top, bottom = bottom }
+end
+
+--- 注音字体文件（KOReader 自带在 fonts/noto/）。
+---@return string
+local function facePath()
+    local dir = require("fontlist").fontdir
+    local noto = dir .. "/noto/" .. FACE
+    return require("libs/libkoreader-lfs").attributes(noto, "mode") == "file" and noto or dir .. "/" .. FACE
+end
+
+local faces = {}
+--- 按像素取注音字体（Font:getFace 会按 DPI 再缩放，这里要精确像素）。
+---@param px integer
+---@return table face
+local function annFace(px)
+    if not faces[px] then
+        local Font = require("ui/font")
+        local ok, ftsize = pcall(function()
+            return require("ffi/freetype").newFaceSize(facePath(), px)
+        end)
+        faces[px] = ok and { ftsize = ftsize, hash = FACE .. "@px" .. px, orig_font = FACE, realname = FACE, size = px, orig_size = px }
+            or Font:getFace(FACE, px)
+    end
+    return faces[px]
+end
+Overlay.annFace = annFace
+
+--- 字形墨迹：基线以上最高 / 以下最深（像素）。缺字的跳过。
+---@param ftsize table
+---@param codes integer[]
+---@return number top, number bottom
+local function ink(ftsize, codes)
+    local top, bottom = 0, 0
+    for _idx, code in ipairs(codes) do
+        if ftsize:hasGlyph(code) then
+            local g = ftsize:renderGlyph(code)
+            top = math.max(top, g.t)
+            bottom = math.max(bottom, g.bb:getHeight() - g.t)
+        end
+    end
+    return top, bottom
+end
+-- 注音：带声调字母、IPA 的升部与下伸部。
+local ANN_CODES = { 0x1CE, 0x1D8, 0xC1, 100, 108, 0x2C8, 103, 106, 112, 121, 0x14B, 0x283 }
+
+local ann_ink
+--- 注音字体墨迹高 / 字号（em，含声调与下伸部），量一次。
+---@return { em: number, bottom_em: number }
+function Overlay.annInk()
+    if not ann_ink then
+        local ok, at, ab = pcall(function()
+            local ann = require("ffi/freetype").newFaceSize(facePath(), 100)
+            local t, b = ink(ann, ANN_CODES)
+            ann:done()
+            return t, b
+        end)
+        ann_ink = ok and { em = (at + ab) / 100, bottom_em = ab / 100 } or { em = 1.3, bottom_em = 0.3 }
+    end
+    return ann_ink
+end
+
+-- 排版尺寸缓存：只在字体 / 字号 / 行距等排版设置变化时重量（翻页不变，字号跨页稳定）。
+local calib_key, calib
+--- 当前排版设置的键。
+---@param document table CreDocument
+---@return string
+function Overlay.layoutKey(document)
+    local c = document.configurable or {}
+    return table.concat({ tostring(document.getFontFace and document:getFontFace()),
+        tostring(document.getFontSize and document:getFontSize()), tostring(c.line_spacing),
+        tostring(c.font_gamma), tostring(c.word_spacing and table.concat(c.word_spacing, ",")) }, "|")
 end
 
 ---@param ui table ReaderUI
@@ -93,7 +216,7 @@ local function locate(self, words)
             if not word.ci or Overlay.wholeWord(document, match) then
                 for _b, box in ipairs(document:getScreenBoxesFromPositions(match.start, match["end"], true) or {}) do
                     if PageMarks.intersects(box, width, height) then
-                        hits[#hits + 1] = { ann = word.ann, box = box }
+                        hits[#hits + 1] = { ann = word.ann, box = box, key = word.key }
                     end
                 end
             end
@@ -111,7 +234,7 @@ end
 --- 重算本屏注音。
 ---@param self table
 ---@return table[]
-local function compute(self)
+local function compute(self, bb)
     local document = self.ui.document
     if not (self.ui.rolling and document and document.findText and document.getScreenBoxesFromPositions) then
         return {}
@@ -130,14 +253,26 @@ local function compute(self)
         end
     end
     if #words == 0 then return {} end
-    local Font = require("ui/font")
     local RenderText = require("ui/rendertext")
     local width = PageMarks.screenSize(self.ui)
-    return Overlay.layout(locate(self, words), {
-        ratio = settings.rare_size,
-        screen_w = width,
-        measure = function(t, size)
-            return RenderText:sizeUtf8Text(0, width, Font:getFace("cfont", size), t, true, false).x
+    local hits = locate(self, words)
+    local key = Overlay.layoutKey(document)
+    if key ~= calib_key then
+        local boxes = {}
+        for _idx, hit in ipairs(hits) do boxes[#boxes + 1] = hit.box end
+        local c = Overlay.calibrate(bb, boxes)
+        if not c then return {} end
+        calib_key, calib = key, c
+        logger.dbg("book.rare calibrate", key, c.pitch, c.top, c.bottom)
+    end
+    local ann = Overlay.annInk()
+    local body = document.getFontSize and document:getFontSize() or 22
+    local size = Overlay.size(body, settings.rare_size, calib.pitch - (calib.bottom - calib.top + 1), ann.em)
+    return Overlay.layout(hits, {
+        size = size, pitch = calib.pitch, top = calib.top,
+        ann_bottom = math.ceil(ann.bottom_em * size), screen_w = width,
+        measure = function(t, px)
+            return RenderText:sizeUtf8Text(0, width, annFace(px), t, true, false).x
         end,
     })
 end
@@ -148,6 +283,26 @@ function Overlay:marks()
     return {}
 end
 
+--- 点按注音或被注音的字：开多来源查词面板（上下文取屏上文字里该词所在的句子）。
+---@param pos table
+---@return boolean
+function Overlay:tap(pos)
+    if not require("utils.settings").get("features.rare").rare_enabled then return false end
+    for _idx, item in ipairs(self.items) do
+        local on_ann = pos.x >= item.x and pos.x <= item.x + item.w and pos.y >= item.y - item.size and pos.y <= item.y
+        if on_ann or PageMarks.hit(pos, item.box) then
+            local screen = require("reader.context").visibleText(self.ui) or ""
+            local sentence = require("reader.context").sentence(screen, item.key)
+            require("features.rare.lookup").open{
+                ui = self.ui, word_box = item.box, text = item.key, reading = item.text,
+                context = { sentence = sentence, paragraph = "" },
+            }
+            return true
+        end
+    end
+    return false
+end
+
 --- PageMarks 绘制钩子（外层已经 Guard.paint）。
 ---@param bb any Blitbuffer
 function Overlay:paint(bb)
@@ -156,16 +311,15 @@ function Overlay:paint(bb)
     if not key then return end
     if key ~= self.key then
         local started_at = Perf.now()
-        self.items = compute(self)
+        self.items = compute(self, bb)
         self.key = key
         logger.dbg("book.perf rare.view", Perf.elapsedMs(started_at), "ms items", #self.items)
     end
     if #self.items == 0 then return end
-    local Font = require("ui/font")
     local RenderText = require("ui/rendertext")
     local color = require("ffi/blitbuffer").COLOR_DARK_GRAY
     for _idx, item in ipairs(self.items) do
-        RenderText:renderUtf8Text(bb, item.x, item.y, Font:getFace("cfont", item.size), item.text, true, false, color)
+        RenderText:renderUtf8Text(bb, item.x, item.y, annFace(item.size), item.text, true, false, color)
     end
 end
 

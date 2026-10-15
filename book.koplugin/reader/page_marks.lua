@@ -22,7 +22,8 @@ local Guard = require("ui.guard")
 --- 标记图层：每帧调用 ``marks``，返回当前屏上标记（无则空表）。
 ---@class PageMarkLayer
 ---@field marks fun(self: PageMarkLayer): PageMark[]
----@field paint fun(self: PageMarkLayer, bb: any)|nil 可选：自绘内容（如注音），不占位、不接点按
+---@field paint fun(self: PageMarkLayer, bb: any)|nil 可选：自绘内容（如注音），不占位
+---@field tap fun(self: PageMarkLayer, pos: table): boolean|nil 可选：自绘内容的点按，所有标记都没命中后才问；命中返回 true
 
 ---@class PageMarks
 ---@field ui table ReaderUI
@@ -235,6 +236,9 @@ function PageMarks:onTap(ges)
                 return true
             end
         end
+    end
+    for _idx, entry in ipairs(self.layers) do
+        if entry.layer.tap and entry.layer:tap(ges.pos) then return true end
     end
     return false
 end

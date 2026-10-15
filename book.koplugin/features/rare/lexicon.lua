@@ -16,7 +16,7 @@ local Lexicon = {}
 --- 档位在 levels 里的下标。
 Lexicon.LEVELS = { rarest = 1, rare = 2, all = 3 }
 
-local DEFAULT_LEVELS = { zh = { 6500, 3500, 0 }, en = { 20000, 8000, 0 } }
+local DEFAULT_LEVELS = { zh = { 6500, 3500, 0 }, en = { 20000, 8000, 3000 } }
 
 ---@class RareLexicon
 ---@field meta table<string, string>

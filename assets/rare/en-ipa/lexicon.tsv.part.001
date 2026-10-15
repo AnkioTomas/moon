@@ -2,7 +2,7 @@
 #lang=en
 #version=2026.10.15
 #license=MIT (skywind3000/ECDICT)
-#levels=20000,8000,0
+#levels=20000,8000,3000
 the	/ðә/	1
 and	/ænd/	3
 have	/hæv/	8
