@@ -62,7 +62,7 @@ local TaskDialog = Modal:extend{}
 ---@param kind BookTaskKind
 ---@return string
 function TaskDialog.label(kind)
-    return ({ download = _("下载"), sync = _("同步书架"), cache = _("缓存"), online = _("在线"), ai = _("AI 分析") })[kind]
+    return ({ download = _("下载"), sync = _("同步书架"), cache = _("缓存"), online = _("在线"), ai = _("AI 分析"), convert = _("生成") })[kind]
 end
 
 --- 「类型：书名」，没有书名只给类型。

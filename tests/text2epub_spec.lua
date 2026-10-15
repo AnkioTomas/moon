@@ -298,21 +298,6 @@ do
     handle.cancel()
     Assert.is_true(cancelled)
 
-    -- chaptersAsync：只回传标题与 toc，正文不出子进程；进度按整数百分比节流
-    local chapters
-    steps = {}
-    local many = {}
-    for i = 1, 300 do many[#many + 1] = "第" .. i .. "章\n正文" end
-    Text2Epub.chaptersAsync({ text = table.concat(many, "\n"), title = "书" },
-        function(list, e) chapters, err = list, e end,
-        function(text, done, total) steps[#steps + 1] = done end)
-    Assert.eq(job_name, "epub.chapters")
-    Assert.len(chapters, 300)
-    Assert.eq(chapters[2].title, "第2章")
-    Assert.is_true(chapters[2].toc)
-    Assert.is_nil(chapters[2].html)
-    Assert.eq(#steps, 101, "300 节只按 0..100% 报 101 次")
-
     -- 给了 text 就不读文件
     os.remove(path)
     ok, err = nil, nil

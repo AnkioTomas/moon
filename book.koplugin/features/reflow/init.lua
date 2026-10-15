@@ -7,7 +7,7 @@
 
 文字来源：TXT 直接读文件（保留原始换行，章节识别最准）；其余格式从打开的文档逐页取字（见 extract），
 流式文档与带文字层的 PDF/DjVu 都行。读文件、章节识别、打包都在子进程里（整本书在 UI 线程上要跑几十秒），
-子进程只把目录标题传回来。提取得到的全文由预览持有，确认后原样交给转换，不重复提取；TXT 生成时子进程重读原文件。
+取字、识别、打包串成一个后台任务，不再预览目录确认。
 章节：原文档自带目录（`ui.toc`）的标题整行命中即切章，没有目录或标题对不上的再按常见章节写法识别。
 
 身份：排版版是同一本书的另一个文件。切换前 `Store.touch` 把 books.path 指过去，开书时按路径解析回
@@ -28,11 +28,6 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 
 local Reflow = {}
-
----@class ReflowPreview
----@field text string|nil 从文档提取的全文；TXT 为 nil（生成时读原文件）
----@field headings string[] 原文档目录的标题
----@field titles string[] 识别出的目录标题
 
 ---@param identity BookIdentity
 ---@return string
@@ -67,19 +62,6 @@ function Reflow.available(ui)
     return ui.rolling ~= nil or ui.document.getPageTextBoxes ~= nil
 end
 
----@param chapters { title: string, toc: boolean|nil }[]
----@return string[]
-local function tocTitles(chapters)
-    local titles = {}
-    for _idx, chapter in ipairs(chapters) do
-        if chapter.toc ~= false then
-            titles[#titles + 1] = chapter.title ~= "" and chapter.title
-                or ("#" .. (#titles + 1))
-        end
-    end
-    return titles
-end
-
 ---@param origin string 原书路径
 ---@param identity BookIdentity
 ---@param headings string[]
@@ -108,66 +90,67 @@ local function tocHeadings(ui)
     return headings
 end
 
---- 读出全文并识别章节，供预览目录使用。不可取消：取字期间界面仍响应，但由进度窗占住。
+--- 取全文、识别章节、打包成 EPUB 写进工作目录并记下 meta，完成后回调排版版路径。原书不动。
+--- 目录标题与原书路径开头就取好；TXT 由子进程读原文件，其余格式在 UI 线程上分批取字（批间让出输入），
+--- 取字中途关书报「文档已关闭」。打包先写 `book.epub.part` 成功再改名（html2epub）：
+--- 取消停掉当前一步并删掉半截 .part，已有的排版版不受影响。可取消，取消后 cb 不再触发。
 ---@param ui table ReaderUI，正在读原书
 ---@param identity BookIdentity
----@param cb fun(preview: ReflowPreview|nil, err: string|nil)
----@param on_progress fun(text: string, done: integer, total: integer) 当前步骤与进度
-function Reflow.analyzeAsync(ui, identity, cb, on_progress)
-    local origin = ui.document.file
-    local opts = buildOpts(origin, identity, tocHeadings(ui))
-    ---@param text string|nil nil 时子进程读原文件
-    local function analyze(text)
-        opts.text = text
-        Text2Epub.chaptersAsync(opts, function(chapters, err)
-            if not chapters then return cb(nil, err) end
-            cb({ text = text, headings = opts.headings, titles = tocTitles(chapters) })
-        end, on_progress)
-    end
-    if origin:lower():match("%.txt$") then return analyze(nil) end
-    require("features.reflow.extract").run(ui, function(text, err)
-        if not text then return cb(nil, err) end
-        analyze(text)
-    end, on_progress)
-end
-
---- 把预览得到的全文转成 EPUB 写进工作目录并记下 meta，完成后回调排版版路径。原书不动。
----@param identity BookIdentity
----@param origin string 原书路径
----@param preview ReflowPreview `analyzeAsync` 的结果
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@param on_progress fun(text: string, done: integer, total: integer) 当前步骤与进度
 ---@return { cancel: fun() }
-function Reflow.applyAsync(identity, origin, preview, cb, on_progress)
+function Reflow.runAsync(ui, identity, cb, on_progress)
     local Paths = require("utils.paths")
+    local origin = ui.document.file
+    local opts = buildOpts(origin, identity, tocHeadings(ui))
     local dir = workDir(identity)
-    Paths.ensureBookWork(identity.stable_id, identity.source_id)
-    assert(Paths.ensureDir(dir))
-    local opts = buildOpts(origin, identity, preview.headings)
-    opts.dest = dir .. "/book.epub"
-    opts.text = preview.text
-    return Text2Epub.build(opts, function(ok, err)
-        if not ok then
-            cb(nil, err or _("排版失败"))
-            return
-        end
+    local dest = dir .. "/book.epub"
+    opts.dest = dest
+    local current, cancelled
+
+    local function finish(ok, err)
+        if not ok then return cb(nil, err or _("排版失败")) end
         -- 重新排版写回同一路径，sidecar 按路径跟着新文件：旧划线的 xpointer 指向旧结构，连同基线一起清掉，
         -- 原书的划线、只在排版版里的划线，下次打开排版版时都按文字重新搜进来。
-        DerivedNote.purge(opts.dest)
+        DerivedNote.purge(dest)
         -- 这里跑在 job 回调里，抛错会被吞掉、cb 永远不来，调用方的进度窗就关不掉：失败一律走 cb。
-        local part = dir .. "/meta.json.part"
-        local f, err_open = io.open(part, "wb")
+        local meta_part = dir .. "/meta.json.part"
+        local f, err_open = io.open(meta_part, "wb")
         if not f then return cb(nil, err_open) end
-        local written, err_write = f:write(JSON.encode({ origin = origin, file = opts.dest }))
+        local written, err_write = f:write(JSON.encode({ origin = origin, file = dest }))
         f:close()
         local renamed, err_rename = nil, err_write
-        if written then renamed, err_rename = os.rename(part, dir .. "/meta.json") end
+        if written then renamed, err_rename = os.rename(meta_part, dir .. "/meta.json") end
         if not renamed then
-            os.remove(part)
+            os.remove(meta_part)
             return cb(nil, err_rename)
         end
-        cb(opts.dest)
-    end, on_progress)
+        cb(dest)
+    end
+
+    ---@param text string|nil nil 时子进程读原文件
+    local function build(text)
+        if cancelled then return end
+        Paths.ensureBookWork(identity.stable_id, identity.source_id)
+        local ok, err = Paths.ensureDir(dir)
+        if not ok then return cb(nil, err) end
+        opts.text = text
+        current = Text2Epub.build(opts, finish, on_progress)
+    end
+
+    if origin:lower():match("%.txt$") then
+        build(nil)
+    else
+        current = require("features.reflow.extract").run(ui, function(text, err)
+            if not text then return cb(nil, err) end
+            build(text)
+        end, on_progress)
+    end
+    return { cancel = function()
+        cancelled = true
+        current.cancel()
+        os.remove(dest .. ".part")
+    end }
 end
 
 --- 把排版、落位写进目标文件的 sidecar 再换文档。两版 xpointer 不通用：清掉目标的 last_xpointer，
@@ -204,80 +187,64 @@ local function switchTo(ui, identity, target, fraction)
     ui:switchDocument(target)
 end
 
---- 分析 → 预览目录 → 生成排版版 → 切过去。
+---@param identity BookIdentity
+---@return string
+local function taskKey(identity)
+    return "reflow\0" .. identity.source_id .. "\0" .. identity.stable_id
+end
+
+--- 取字、识别章节、生成排版版整个是一个后台任务（可取消、可转后台）→ 完成后询问切过去。
+--- 完成时若还在读原书就询问打开，否则只提示。
 ---@param ui table ReaderUI，正在读原书
 ---@param identity BookIdentity
 local function start(ui, identity)
-    local List = require("ui.themes.widgets.list")
     local Toast = require("ui.themes.widgets.toast")
     local origin = ui.document.file
 
-    --- 任务同款进度窗：没有取消 / 后台按钮，返回键也不关；结果回来时调用方关窗。
-    ---@return BookThemeProgressDialog dialog, fun(text: string, done: integer, total: integer) progress
-    local function progressDialog()
-        local dialog = require("ui.themes.widgets.progress_dialog"):new{ title = _("优化排版"), dismissable = false }
-        return dialog, function(text, done, total) dialog:update(text, done, total) end
-    end
-
-    ---@param err any
-    local function fail(err)
-        Toast:new{ text = err and tostring(err):match("[^\n]*") or _("排版失败") }:show()
-    end
-
-    ---@param preview ReflowPreview
-    local function apply(preview)
-        local dialog, progress = progressDialog()
-        dialog:showWhile(Reflow.applyAsync, identity, origin, preview, function(path, err)
-            dialog:close()
-            if not path then return fail(err) end
-            switchTo(ui, identity, path, require("reader.session").current().fraction)
-        end, progress)
-    end
-
-    --- 首行确认优化，其余章节只读；右上角关闭即放弃。未识别到章节只提示不弹表。
-    ---@param preview ReflowPreview
-    local function showPreview(preview)
-        if #preview.titles == 0 then
-            Toast:new{ text = _("未识别到章节") }:show()
-            return
-        end
-        local list
-        local items = { { text = _("确认优化"), icon = "check", keep_open = true, callback = function()
-            list:close()
-            apply(preview)
-        end } }
-        for _idx, title in ipairs(preview.titles) do
-            items[#items + 1] = { text = title, enabled = false }
-        end
-        list = List:new{
-            title = _("排版预览"),
-            subtitle = T(_("识别到 %1 章；排版版另存，原书保留不变"), #preview.titles),
-            items = items,
+    local function run()
+        require("workers.ui.task_dialog").start{
+            key = taskKey(identity),
+            kind = "convert",
+            title = T(_("%1（排版）"), identity.book and identity.book.title or ""),
+            restartable = true,
+            run = function(report, done)
+                return Reflow.runAsync(ui, identity, function(path, err)
+                    done({ ok = path ~= nil, file = path, err = err })
+                end, report)
+            end,
+            on_done = function(result)
+                if not result.ok then
+                    Toast:new{ text = result.err and tostring(result.err):match("[^\n]*") or _("排版失败") }:show()
+                    return
+                end
+                local reader = require("apps/reader/readerui").instance
+                if not (reader and reader.document and reader.document.file == origin) then
+                    Toast:new{ text = _("排版版已生成") }:show()
+                    return
+                end
+                require("ui.themes.widgets.confirm"):new{
+                    text = _("排版版已生成，现在打开？"),
+                    ok_text = _("打开"),
+                    ok_callback = function()
+                        switchTo(reader, identity, result.file, require("reader.session").current().fraction)
+                    end,
+                }:show()
+            end,
         }
-        list:show()
-    end
-
-    local function runAnalyze()
-        local dialog, progress = progressDialog()
-        dialog:showWhile(Reflow.analyzeAsync, ui, identity, function(preview, err)
-            dialog:close()
-            if not preview then return fail(err) end
-            showPreview(preview)
-        end, progress)
     end
 
     if origin:lower():match("%.txt$") then
-        runAnalyze()
+        run()
         return
     end
     require("ui.themes.widgets.confirm"):new{
         text = _("只保留文字并重新识别章节，图片、脚注和原排版会丢失；排版版另存，原书保留不变。继续？"),
         ok_text = _("继续"),
-        ok_callback = runAnalyze,
+        ok_callback = run,
     }:show()
 end
 
---- 快捷面板入口：读排版版时切回原书；读原书时打开已有排版版或重新排版。
+--- 快捷面板入口：读排版版时切回原书；这本书正在生成排版版时跟随进度；读原书时打开已有排版版或重新排版。
 ---@param ui table
 function Reflow.show(ui)
     local identity = require("reader.session").current().identity
@@ -285,6 +252,11 @@ function Reflow.show(ui)
     local meta = readMeta(workDir(identity))
     if meta and ui.document.file == meta.file then
         switchTo(ui, identity, meta.origin, fraction)
+        return
+    end
+    local running = require("workers.tasks").get(taskKey(identity))
+    if running then
+        require("workers.ui.task_dialog").follow(running)
         return
     end
     if not (meta and meta.origin == ui.document.file and isFile(meta.file)) then
@@ -296,7 +268,5 @@ function Reflow.show(ui)
         { text = _("重新排版"), callback = function() start(ui, identity) end },
     } }:show()
 end
-
-Reflow._tocTitles = tocTitles
 
 return Reflow

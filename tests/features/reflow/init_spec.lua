@@ -81,6 +81,16 @@ package.preload["workers.job"] = function()
     }
 end
 
+local started, followed, running
+package.preload["workers.ui.task_dialog"] = function()
+    return { start = function(spec) started = spec end, follow = function(task) followed = task end }
+end
+package.preload["workers.tasks"] = function()
+    return { get = function(key) return running and running.key == key and running or nil end }
+end
+local reader_instance = {}
+package.preload["apps/reader/readerui"] = function() return reader_instance end
+
 local Reflow = require("features.reflow")
 local Text2Epub = require("convert.text2epub")
 local Paths = require("utils.paths")
@@ -121,58 +131,11 @@ session = nil
 Assert.is_false(Reflow.available(reader("/books/a.epub", "rolling")))
 session = { identity = identity, fraction = 0.4 }
 
--- 目录标题
-local titles = Reflow._tocTitles(Text2Epub.parse("第一章 开始\n正文\n\n第二章 继续\n更多", { title = "测试", reflow = true }).chapters)
-Assert.eq(table.concat(titles, "|"), "第一章 开始|第二章 继续")
-
--- TXT：子进程读文件、识别章节，只传回目录标题
+-- 生成：TXT 子进程读原文件；EPUB 和 meta 都在工作目录 reflow/ 下，原书不动
 local txt = os.tmpname() .. ".txt"
 local f = io.open(txt, "w")
 f:write("第一章 开始\n正文\n\n第二章 继续\n更多")
 f:close()
-local preview, err
-local steps = {}
-local function progress(text, done, total) steps[#steps + 1] = text .. " " .. done .. "/" .. total end
-Reflow.analyzeAsync(reader(txt, "rolling"), identity, function(p, e) preview, err = p, e end, progress)
-Assert.is_nil(preview, "识别在子进程里，不在调用栈上同步完成")
-Stubs.flush()
-Assert.is_nil(err)
-Assert.eq(jobs[#jobs].name, "epub.chapters")
-Assert.is_nil(preview.text, "TXT 全文不进主进程，生成时子进程重读原文件")
-Assert.eq(table.concat(preview.titles, "|"), "第一章 开始|第二章 继续")
-Assert.is_nil(extracted_ui, "TXT 不走逐页提取")
-Assert.eq(table.concat(steps, ","), "正在识别章节 1/2,正在识别章节 2/2", "子进程按节报进度")
-
-f = io.open(txt, "wb")
-f:write("\255\254bad")
-f:close()
-Reflow.analyzeAsync(reader(txt, "rolling"), identity, function(p, e) preview, err = p, e end, progress)
-Stubs.flush()
-Assert.is_nil(preview)
-Assert.not_nil(err)
-
--- 其它格式：从打开的文档逐页提取
-local pdf_ui = reader("/books/a.pdf", "pdf")
-Reflow.analyzeAsync(pdf_ui, identity, function(p, e) preview, err = p, e end, progress)
-Stubs.flush()
-Assert.eq(extracted_ui, pdf_ui)
-Assert.eq(preview.text, "第一章 开始\n正文\n第二章 继续\n更多", "预览持有提取的全文，确认后原样交给转换")
-Assert.len(preview.titles, 2)
-
--- 原文档带目录：标题整行命中即切章（不是「第 X 章」写法也认），开头的内嵌目录不切出空章
-toc_titles = { "（1970）双剑交锋（1）", "（1971）亮出底牌（1）" }
-local toc_txt = os.tmpname() .. ".txt"
-f = io.open(toc_txt, "wb")
-f:write("目录\n（1970）双剑交锋（1）\n（1971）亮出底牌（1）\n（1970）双剑交锋（1）\n春天。\n（1971）亮出底牌（1）\n北戴河。")
-f:close()
-Reflow.analyzeAsync(reader(toc_txt, "rolling"), identity, function(p, e) preview, err = p, e end, progress)
-Stubs.flush()
-Assert.eq(table.concat(preview.titles, "|"), "（1970）双剑交锋（1）|（1971）亮出底牌（1）")
-Assert.eq(table.concat(preview.headings, "|"), "（1970）双剑交锋（1）|（1971）亮出底牌（1）")
-toc_titles = {}
-os.remove(toc_txt)
-
--- 生成：EPUB 和 meta 都在工作目录 reflow/ 下，原书不动
 local original_build = Text2Epub.build
 local built
 Text2Epub.build = function(opts, cb)
@@ -183,29 +146,63 @@ Text2Epub.build = function(opts, cb)
     cb(true)
     return { cancel = function() end }
 end
-local path
+local path, err
 sidecars[dir .. "/book.epub"] = { annotations = { { pos0 = "/body/old" } }, book_note_linked = { a = true } }
-Reflow.applyAsync(identity, txt, { text = "全文", headings = { "甲" }, titles = {} }, function(p, e) path, err = p, e end)
+toc_titles = { "甲" }
+Reflow.runAsync(reader(txt, "rolling"), identity, function(p, e) path, err = p, e end, function() end)
+toc_titles = {}
 Assert.is_nil(err)
 Assert.eq(path, dir .. "/book.epub")
+Assert.is_nil(extracted_ui, "TXT 不走逐页提取")
+Assert.is_nil(built.text, "TXT 全文不进主进程，子进程读原文件")
 Assert.is_nil(sidecars[path].annotations, "重新排版同一路径：旧划线坐标指向旧结构，清掉")
 Assert.is_nil(sidecars[path].book_note_linked)
-Assert.eq(built.text, "全文")
 Assert.eq(built.headings[1], "甲", "原文档目录标题带到转换")
 Assert.eq(built.source, txt, "书名 / 作者仍可从原书文件名推断")
 Assert.is_true(built.reflow)
 local meta = require("support.json_stub").decode(assert(io.open(dir .. "/meta.json")):read("*a"))
 Assert.eq(meta.origin, txt)
 Assert.eq(meta.file, dir .. "/book.epub")
-Assert.eq(assert(io.open(txt, "rb")):read("*a"), "\255\254bad", "原书原样保留")
+
+-- 其它格式：先从打开的文档逐页取字，再交给转换
+local pdf_ui = reader("/books/a.pdf", "pdf")
+Reflow.runAsync(pdf_ui, identity, function(p, e) path, err = p, e end, function() end)
+Assert.eq(extracted_ui, pdf_ui)
+Assert.eq(built.text, "第一章 开始\n正文\n第二章 继续\n更多")
+Reflow.runAsync(reader(txt, "rolling"), identity, function(p, e) path, err = p, e end, function() end)
 
 -- 生成失败：回调错误，meta 不变
 Text2Epub.build = function(opts, cb) cb(nil, "磁盘满") return { cancel = function() end } end
-Reflow.applyAsync(identity, "/books/other.epub", { text = "全文", headings = {}, titles = {} }, function(p, e) path, err = p, e end)
+Reflow.runAsync(reader("/books/other.txt", "rolling"), identity, function(p, e) path, err = p, e end, function() end)
 Assert.is_nil(path)
 Assert.eq(err, "磁盘满")
 meta = require("support.json_stub").decode(assert(io.open(dir .. "/meta.json")):read("*a"))
-Assert.eq(meta.origin, txt)
+Assert.eq(meta.origin, txt, "失败不改 meta")
+-- 取消：杀子进程、删半截 .part，已有排版版与 meta 不动
+local build_cancelled
+Text2Epub.build = function(opts, cb)
+    local out = assert(io.open(opts.dest .. ".part", "wb"))
+    out:write("half")
+    out:close()
+    return { cancel = function() build_cancelled = true end }
+end
+path, err = nil, nil
+local handle = Reflow.runAsync(reader(txt, "rolling"), identity, function(p, e) path, err = p, e end, function() end)
+handle.cancel()
+Assert.is_true(build_cancelled)
+Assert.is_nil(io.open(dir .. "/book.epub.part"))
+Assert.eq(assert(io.open(dir .. "/book.epub", "rb")):read("*a"), "epub", "旧排版版不受影响")
+Assert.is_nil(path)
+-- 取字中取消：不再进入转换
+local extract_cb
+package.loaded["features.reflow.extract"] = { run = function(ui, cb) extract_cb = cb return { cancel = function() end } end }
+built = nil
+Text2Epub.build = function(opts, cb) built = opts return { cancel = function() end } end
+handle = Reflow.runAsync(reader("/books/a.epub", "rolling"), identity, function(p, e) path, err = p, e end, function() end)
+handle.cancel()
+extract_cb("全文")
+Assert.is_nil(built, "取消后不再打包")
+package.loaded["features.reflow.extract"] = nil
 Text2Epub.build = original_build
 
 -- 读原书、已有排版版：面板给出「打开排版版 / 重新排版」，打开时按比例落位、搬排版
@@ -261,24 +258,40 @@ Assert.eq(Themed.last("confirm").ok_text, "继续")
 Assert.matches(Themed.last("confirm").text, "原书保留不变")
 Assert.is_true(#Themed.made > shown_before)
 
--- 分析进度窗：任务同款，不能取消也不能转后台、返回键不关；显示步骤与进度，结果回来自动关
+-- 整个排版是一个后台任务（每本书一个 key，可取消、可转后台），不再弹预览
 local fresh_txt = os.tmpname() .. ".txt"
 f = assert(io.open(fresh_txt, "wb"))
 f:write("第一章 开始\n正文\n\n第二章 继续\n更多")
 f:close()
-Reflow.show(reader(fresh_txt, "rolling"))
-local dialog = Themed.last("progress_dialog")
-Assert.is_true(dialog.shown)
-Assert.eq(dialog.title, "优化排版")
-Assert.is_false(dialog.dismissable)
-Assert.is_nil(dialog.on_cancel)
-Assert.is_nil(dialog.on_background)
-Stubs.flush()
-Assert.eq(dialog.updates[1][1], "正在识别章节")
-Assert.eq(dialog.updates[#dialog.updates][2], 2)
-Assert.eq(dialog.updates[#dialog.updates][3], 2)
-Assert.is_true(dialog.closed)
-Assert.eq(Themed.last("list").title, "排版预览")
+local fresh_ui = reader(fresh_txt, "rolling")
+Reflow.show(fresh_ui)
+Assert.eq(started.key, "reflow\0local\0" .. identity.stable_id)
+Assert.eq(started.kind, "convert")
+Assert.eq(started.title, "测试（排版）")
+Assert.is_true(started.restartable)
+local result
+Text2Epub.build = function(opts, cb) cb(true) return { cancel = function() end } end
+local task_handle = started.run(function() end, function(r) result = r end)
+Text2Epub.build = original_build
+Assert.not_nil(task_handle.cancel)
+Assert.is_true(result.ok)
+Assert.eq(result.file, dir .. "/book.epub")
+-- 完成：书已关只提示；还在读原书询问打开；失败提示原因
+started.on_done(result)
+Assert.eq(Themed.last("toast").text, "排版版已生成")
+reader_instance.instance = fresh_ui
+started.on_done(result)
+Assert.eq(Themed.last("confirm").text, "排版版已生成，现在打开？")
+started.on_done({ ok = false, err = "磁盘满\nstack" })
+Assert.eq(Themed.last("toast").text, "磁盘满")
+
+-- 重复：生成中再点入口只跟随进度，不重新分析
+running = { key = started.key }
+local lists = #Themed.made
+Reflow.show(fresh_ui)
+Assert.eq(followed, running)
+Assert.eq(#Themed.made, lists)
+running = nil
 os.remove(fresh_txt)
 
 os.remove(txt)

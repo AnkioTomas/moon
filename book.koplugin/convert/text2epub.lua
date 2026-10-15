@@ -523,24 +523,6 @@ local function load(opts)
     return Text2Epub.read(opts.source)
 end
 
---- 异步识别章节，只回传标题（全文与正文 HTML 不出子进程）。opts 同 `build`。
----@param opts table
----@param cb fun(chapters: { title: string, toc: boolean }[]|nil, err: any)
----@param on_progress fun(text: string, done: integer, total: integer)|nil
----@return { cancel: fun() }
-function Text2Epub.chaptersAsync(opts, cb, on_progress)
-    return runJob("epub.chapters", function(report)
-        local text, err = load(opts)
-        if not text then return { err = err } end
-        local book = Text2Epub.parse(text, opts, function(done, total) report(_("正在识别章节"), done, total) end)
-        local chapters = {}
-        for index, chapter in ipairs(book.chapters) do
-            chapters[index] = { title = chapter.title, toc = chapter.toc }
-        end
-        return { chapters = chapters }
-    end, function(result, err) cb(result and result.chapters, err) end, on_progress)
-end
-
 --- 异步构建 EPUB，读文件、解析、打包都在子进程里。
 --- opts.text 是全文；没给就读 opts.source（`Text2Epub.read`）。opts.source 也用于从文件名推断书名 / 作者。
 ---@param opts {
