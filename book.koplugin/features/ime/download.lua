@@ -6,8 +6,8 @@
   manifest.json                { tag, built_at, entries, raw_sha256, raw_size, parts:[{file,size,sha256}] }
   dictionary.sqlite3.part.NNN  原始 SQLite 二进制分片，按序拼出原始 sqlite
 
-设备经 jsdelivr 按仓库文件拉取；单文件有大小上限，所以切片。
-下载逐片走 Request.download（Turbo，不堵 UI）；拼接/分片 SHA-256/落位放 Job 子进程
+设备经 http.mirror 按仓库文件拉取（多源回落）；jsDelivr 单文件有大小上限，所以切片。
+下载逐片走 Mirror.download（Turbo，不堵 UI）；拼接/分片 SHA-256/落位放 Job 子进程
 （大文件 IO，主进程做会卡 UI）。
 
 落盘文件名由 Paths.imeDictPath 决定。生僻字注音词库（features.rare）复用 ``M.install``，同一套 manifest + 分片格式。
@@ -18,14 +18,14 @@
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("utils.log")
 local JSON = require("json")
-local Request = require("http.request")
+local Mirror = require("http.mirror")
 local Paths = require("utils.paths")
 local Perf = require("utils.perf")
 local MoonSettings = require("utils.settings")
 local Job = require("workers.job")
 
--- 拼音保留旧 CDN 路径，避免已发布插件访问 main 时失效。
-local BASE_ROOT = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets"
+-- 拼音保留旧仓库路径，避免已发布插件访问 main 时失效。
+local BASE_ROOT = "assets"
 
 local M = {
     _downloading = false,
@@ -203,7 +203,7 @@ end
 --- 一份可下载词库的描述。
 ---@class BookDictSpec
 ---@field name string 日志与 Job 名
----@field base_url string manifest.json 与分片所在目录
+---@field base_path string manifest.json 与分片所在的仓库内目录（经 http.mirror 取）
 ---@field dest string 落盘路径（续传目录为 dest .. ".dl"）
 ---@field installed string|nil 已装版本的 built_at
 ---@field tmp string|nil 续传目录，缺省 dest .. ".dl"
@@ -243,7 +243,7 @@ function M.install(spec, cb, on_progress)
     end
 
     report("manifest")
-    Request.get(spec.base_url .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
+    Mirror.get(spec.base_path .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
         if err then
             done(false, err)
             return
@@ -282,7 +282,7 @@ end
 function M.ensure(method, cb, on_progress)
     M.install({
         name = "ime." .. method,
-        base_url = BASE_ROOT .. (method == "pinyin" and "/pinyin" or "/ime/" .. method),
+        base_path = BASE_ROOT .. (method == "pinyin" and "/pinyin" or "/ime/" .. method),
         dest = Paths.imeDictPath(method),
         tmp = Paths.root() .. "/ime_" .. method .. "_dict.dl",
         installed = MoonSettings.get("features.ime").ime_dict_built_at[method],
@@ -313,23 +313,19 @@ downloadParts = function(spec, manifest, idx, done, report, done_bytes, total)
     -- 网络响应尚未返回时也先通知当前分片，避免进度框长时间停在上一阶段。
     report("part", done_bytes, total, idx, #parts)
     local file = tmpDir(spec) .. "/" .. part.file
-    Request.download({
-        url = spec.base_url .. "/" .. part.file,
-        method = "GET",
+    Mirror.download(spec.base_path .. "/" .. part.file, {
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
         on_progress = total > 0 and function(written)
             report("part", done_bytes + written, total, idx, #parts)
         end or nil,
+        check = function()
+            if partComplete(part, spec) then return true end
+            return false, "part size mismatch: " .. part.file
+        end,
     }, file, function(ok, err)
         if not ok then
-            os.remove(file)
             done(false, err)
-            return
-        end
-        if not partComplete(part, spec) then
-            os.remove(file)
-            done(false, "part size mismatch: " .. part.file)
             return
         end
         downloadParts(spec, manifest, idx + 1, done, report, done_bytes + tonumber(part.size), total)

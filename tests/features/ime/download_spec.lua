@@ -87,7 +87,6 @@ package.preload["http.request"] = function()
             local data = dest:match("part%.001$") and part1 or part2
             local f = assert(io.open(dest, "wb"))
             if fail_part_once and dest:match("part%.002$") then
-                fail_part_once = false
                 f:write(data:sub(1, 3))
                 f:close()
                 require("ui/uimanager"):nextTick(function()
@@ -162,7 +161,7 @@ local ok_run, err_run = pcall(function()
     Assert.is_false(Download.downloading())
     manifest.parts = original_parts
 
-    -- 第一轮第二片失败：第一片必须保留，重试只拉失败的那片。
+    -- 第一轮第二片在所有镜像都失败：逐个源回落后才报错，第一片必须保留，重试只拉失败的那片。
     fail_part_once = true
     local failed, failed_err
     Download.ensure("pinyin", function(ok, err)
@@ -172,7 +171,10 @@ local ok_run, err_run = pcall(function()
     Stubs.flush()
     Assert.is_true(failed)
     Assert.matches(failed_err, "network failed")
-    Assert.eq(#downloads, 2)
+    local mirrors = #require("http.mirror").templates()
+    Assert.eq(#downloads, 1 + mirrors)
+    Assert.is_true(downloads[2] ~= downloads[3])
+    fail_part_once = false
     Assert.is_true(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/ime_pinyin_dict.dl/" .. manifest.parts[1].file) ~= nil)
     Assert.is_nil(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/ime_pinyin_dict.dl/" .. manifest.parts[2].file))
 
@@ -192,9 +194,9 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(done)
     Assert.is_true(ok_cb)
 
-    -- 续传只下载失败的第二片，URL 走 jsdelivr
+    -- 续传只下载失败的第二片；全部源都在冷却时按默认顺序，首选 fastly 节点
     Assert.len(downloads, 1)
-    Assert.is_true(downloads[1]:find("cdn%.jsdelivr%.net") ~= nil)
+    Assert.is_true(downloads[1]:find("fastly%.jsdelivr%.net") ~= nil)
     Assert.is_true(downloads[1]:find("part%.002") ~= nil)
 
     -- manifest 在拿到大小后再次回报，进度框可无缝接到分片下载。

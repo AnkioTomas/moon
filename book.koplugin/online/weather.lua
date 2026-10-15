@@ -8,7 +8,6 @@
 local Online = require("online.base")
 local Text = require("utils.text")
 
-local ICON_URL = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/weather/"
 local ICONS = {
     sunny = "sunny.png",
     cloud = "dyun.png",
@@ -162,7 +161,7 @@ end
 ---@param key string|nil
 ---@return string
 function Weather.iconUrl(key)
-    return ICON_URL .. (ICONS[key] or ICONS.unknown)
+    return require("http.mirror").url("assets/weather/" .. (ICONS[key] or ICONS.unknown))
 end
 
 ---@param code string|nil

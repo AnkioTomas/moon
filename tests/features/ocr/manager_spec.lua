@@ -80,7 +80,7 @@ local result
 Manager.install(item, dir, function(ok, err) result = { ok = ok, err = err } end)
 Assert.len(downloads, 1)
 Assert.eq(downloads[1].dest, dir .. "/chi_sim.traineddata.part")
-Assert.eq(downloads[1].opts.url, Manager.BASE_URL .. "/chi_sim.traineddata")
+Assert.eq(downloads[1].opts.url, require("http.mirror").url(Manager.BASE_PATH .. "/chi_sim.traineddata"))
 local f = assert(io.open(downloads[1].dest, "wb")); f:write(body); f:close()
 downloads[1].cb(true)
 Assert.is_true(result.ok)
@@ -99,10 +99,11 @@ Assert.is_false(result.ok)
 Assert.is_false(Manager.isInstalled(dir, "jpn"))
 Assert.is_nil(io.open(dir .. "/jpn.traineddata.part", "rb"))
 
--- 下载失败：清掉半截 .part。
+-- 下载失败（所有镜像都失败）：清掉半截 .part。
+result = nil
 Manager.install(tampered, dir, function(ok, err) result = { ok = ok, err = err } end)
 f = assert(io.open(downloads[3].dest, "wb")); f:write("half"); f:close()
-downloads[3].cb(false, "timeout")
+while not result do downloads[#downloads].cb(false, "timeout") end
 Assert.eq(result.err, "timeout")
 Assert.is_nil(io.open(dir .. "/jpn.traineddata.part", "rb"))
 

@@ -63,7 +63,7 @@ do -- 有城市 + 默认 TTL + 丰富字段
     Assert.eq(got.latitude, 31.239)
     Assert.eq(got.longitude, 121.504)
     Assert.eq(got.icon, "overcast")
-    Assert.eq(got.image, "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/weather/yin.png")
+    Assert.eq(got.image, require("http.mirror").url("assets/weather/yin.png"))
     Assert.len(got.days, 2)
     Assert.eq(got.days[2].date, "2026-09-10")
     Assert.eq(got.days[2].icon, "rain")
@@ -136,8 +136,7 @@ end
 do -- 关键词兜底
     Assert.eq(Weather.iconKey(nil, "大雾"), "fog")
     Assert.eq(Weather.iconKey(nil, "Haze"), "haze")
-    Assert.eq(Weather.iconUrl("unknown"),
-        "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/weather/unknow.png")
+    Assert.matches(Weather.iconUrl("unknown"), "assets/weather/unknow%.png$")
 end
 
 return true

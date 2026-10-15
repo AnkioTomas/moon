@@ -42,7 +42,7 @@ do
     local ok
     Catalog.download("zh-pinyin", function(r) ok = r end)
     Assert.is_true(ok)
-    Assert.matches(spec_seen.base_url, "assets/rare/zh%-pinyin$")
+    Assert.matches(spec_seen.base_path, "^assets/rare/zh%-pinyin$")
     Assert.eq(spec_seen.dest, Catalog.path("zh-pinyin"))
     Assert.is_true(Catalog.installed("zh-pinyin"))
     Assert.is_true(Catalog.enabled("zh-pinyin"))
