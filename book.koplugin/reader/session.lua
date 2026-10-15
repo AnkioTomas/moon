@@ -33,13 +33,19 @@ local function updateReadState(session, complete)
     local read_state = tonumber(book and book.read_state) or 0
     local finished = complete == true or (tonumber(session.fraction) or 0) >= 1
     local BookDB = require("book.books_db")
-    local ok
-    if finished and read_state ~= 1 then
+    local ok, kind
+    -- 写库失败或没有 book 缓存可回写时，同一会话不再每次翻页重试。
+    local tried = session.read_marks or {}
+    session.read_marks = tried
+    if finished and read_state ~= 1 and not tried.complete then
+        kind = "complete"
         ok = BookDB.markReadComplete(session.identity.source_id, session.identity.stable_id)
-    elseif not finished and session.percent >= 99 and read_state == 0
+    elseif not finished and session.percent >= 99 and read_state == 0 and not tried.auto
         and require("utils.settings").get("reader").auto_mark_read_at_99 == true then
+        kind = "auto"
         ok = BookDB.markReadAutomatically(session.identity.source_id, session.identity.stable_id)
     end
+    if kind and not (ok and book) then tried[kind] = true end
     if ok and book then book.read_state = 1 end
 end
 
