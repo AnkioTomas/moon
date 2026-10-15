@@ -282,6 +282,10 @@ function Request.download(opts, dest, cb)
         on_done = function(err)
             local closed, close_err = file:close()
             err = write_err or err or (not closed and close_err) or nil
+            -- 连接中途断开时 turbo 未必报错：按 Content-Length 校验，半截包不落位（压缩传输时长度不可比）。
+            if not err and total and written < total and not Request.header(response, "Content-Encoding") then
+                err = "download incomplete: " .. written .. "/" .. total
+            end
             local moved, rename_err
             if not err then moved, rename_err = os.rename(tmp, dest) end
             if not moved then
