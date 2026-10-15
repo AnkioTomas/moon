@@ -57,7 +57,7 @@ function M.run(shelf)
             local req = request(book)
             if req then
                 pending = pending + 1
-                local started = pcall(Image.fetchAsync, req.url, req.headers, function(path, err)
+                local started, start_err = pcall(Image.fetchAsync, req.url, req.headers, function(path, err)
                     if path then
                         Book.persistCover(book, path)
                         if require("features.lockscreen.components.library")
@@ -69,7 +69,10 @@ function M.run(shelf)
                     end
                     finish()
                 end)
-                if not started then finish() end
+                if not started then
+                    logger.warn("book.lockscreen poster cover fetch failed", book.stable_id, start_err)
+                    finish()
+                end
             end
         end
     end

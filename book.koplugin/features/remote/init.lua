@@ -1212,9 +1212,11 @@ local function buildLogsZip()
     local Paths = require("utils.paths")
     local lfs = require("libs/libkoreader-lfs")
     local Device = require("device")
+    local notes = {}
     local function is(name)
         local f = Device[name]
         local ok, v = pcall(function() return f and f(Device) end)
+        if not ok then notes[#notes + 1] = "Device." .. name .. " failed: " .. tostring(v) end
         return ok and v
     end
     local KO = { "^crash.*%.log$", "^crash%.log%.old$", "^crash%.log%.%d+$", "^reader%.log$", "^koreader.*%.log$" }
@@ -1239,13 +1241,12 @@ local function buildLogsZip()
         spec[#spec + 1] = { dir = "/mnt/ext1/system/logs", prefix = "pocketbook/", patterns = { "%.log$" } }
     end
     local files, missing = Logs.collect(lfs, spec)
-    local notes = {}
     for _idx, dir in ipairs(missing) do notes[#notes + 1] = "skipped (not found): " .. dir end
 
     local extras = {}
     -- 设置只导出键名，不含值（凭证都在值里）
     local ok_s, keys = pcall(function() return Logs.settingsKeys(G_reader_settings and G_reader_settings.data) end)
-    if ok_s then extras[#extras + 1] = { name = "koreader-settings-keys.txt", text = keys } end
+    extras[#extras + 1] = { name = "koreader-settings-keys.txt", text = ok_s and keys or ("error: " .. tostring(keys)) }
     if is("isAndroid") then
         -- 应用只能读到自己进程的 logcat；取不到就记 skipped
         local ok_l, text = pcall(function()
@@ -1255,13 +1256,13 @@ local function buildLogsZip()
             h:close()
             return t
         end)
-        extras[#extras + 1] = { name = "android-logcat.txt", text = ok_l and text or "" }
+        extras[#extras + 1] = { name = "android-logcat.txt", text = ok_l and text or ("error: " .. tostring(text)) }
     end
 
     local ok_v, Version = pcall(require, "version")
     local info = {
         plugin_version = require("bookversion"),
-        koreader_version = ok_v and Version:getCurrentRevision() or "?",
+        koreader_version = ok_v and Version:getCurrentRevision() or ("? (" .. tostring(Version) .. ")"),
         device = tostring(Device.model or "?"),
         language = require("gettext").current_lang or G_reader_settings:readSetting("language") or "C",
     }

@@ -210,8 +210,7 @@ function M.cache_key()
     local parts = {}
     local shelf = books(SHELF_LIMIT)
     -- 没开过的网络书本地没封面：联网时后台补下载，落盘后键变化，下次锁屏重画。
-    -- 预取失败不能影响锁屏生成。
-    pcall(function() require("features.lockscreen.components.cover_prefetch").run(shelf) end)
+    require("features.lockscreen.components.cover_prefetch").run(shelf)
     for _idx, book in ipairs(shelf) do
         parts[#parts + 1] = (book.source_id or "") .. "\0" .. book.stable_id .. (book.cover and "+" or "-")
     end

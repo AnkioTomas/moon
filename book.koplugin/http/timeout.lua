@@ -13,11 +13,18 @@
 
 local Timeout = {}
 
---- 读配置表；拿不到（如精简的测试桩）就当空表，走缺省值。
+local warned = {}
+
+--- 读配置表；拿不到（设置模块未就绪、精简的测试桩）就当空表走缺省值，每个 owner 只告警一次。
+--- 超时是每个请求的必经路径，读设置出错不该让请求本身失败。
 ---@param owner string
 ---@return table
 local function conf(owner)
     local ok, cfg = pcall(function() return require("utils.settings").get(owner) end)
+    if not ok and not warned[owner] then
+        warned[owner] = true
+        require("logger").warn("book.http timeout settings unavailable, using defaults", owner, cfg)
+    end
     return ok and type(cfg) == "table" and cfg or {}
 end
 
