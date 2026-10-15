@@ -1583,3 +1583,18 @@ do
     has(b_idx, 'href="/api/logs.zip"')
     has(b_idx, "下载日志")
 end
+
+-- ── 路径边界：.. 越界、同前缀兄弟目录、根本身 ───────────
+do
+    local s = Server.new({ root = "/mnt/us/books", roots = { "/mnt/us/books", "/mnt/us/shots" }, handlers = {} })
+    Assert.eq(s:_safePath("/mnt/us/books/a/../b.epub"), "/mnt/us/books/b.epub")
+    Assert.eq(s:_safePath("/mnt/us/books//./x"), "/mnt/us/books/x")
+    Assert.is_nil(s:_safePath("/mnt/us/books/../../etc/passwd"))
+    Assert.is_nil(s:_safePath("/mnt/us/books2/x"), "同前缀兄弟目录不算在内")
+    Assert.is_nil(s:_safePath("mnt/us/books/x"), "相对路径")
+    Assert.is_nil(s:_safePath("/.."))
+    Assert.is_nil(s:_safePath(nil))
+    Assert.eq(s:_safePath("/mnt/us/shots"), "/mnt/us/shots")
+    Assert.is_nil(s:_parent("/mnt/us/books"), "root 没有上级")
+    Assert.eq(s:_parent("/mnt/us/books/a"), "/mnt/us/books")
+end
