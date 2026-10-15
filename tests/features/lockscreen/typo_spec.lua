@@ -155,4 +155,19 @@ do -- 短划线池按 notes 表戳缓存：戳不变不重读全库
     NoteDB.stamp, Highlights.collectAll = stamp_fn, collect_fn
 end
 
+do -- 用户选的字体只解析文件路径，不读整目录字体信息（大 CJK 字体目录在 Kindle 上要十几秒）
+    local loaded = package.loaded["ui.fonts"]
+    local id_fn, sib_fn = Typo.fontId, Typo.boldSibling
+    package.loaded["ui.fonts"] = {
+        pathForId = function(id) return "/fonts/" .. id .. ".ttf" end,
+        faceNameForId = function() error("faceNameForId 会读整目录字体信息") end,
+    }
+    Typo.fontId = function() return "KingHwa_OldSong" end
+    Typo.boldSibling = function() return nil end
+    local regular, bold = Typo.font()
+    Assert.eq(regular, "/fonts/KingHwa_OldSong.ttf")
+    Assert.is_nil(bold)
+    package.loaded["ui.fonts"], Typo.fontId, Typo.boldSibling = loaded, id_fn, sib_fn
+end
+
 return true

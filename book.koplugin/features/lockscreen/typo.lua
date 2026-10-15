@@ -678,7 +678,8 @@ end
 function M.font()
     local id = M.fontId()
     if id ~= "" then
-        local _face, err, path = require("ui.fonts").faceNameForId(id)
+        -- 只要文件路径：faceNameForId 会读整个字体目录的字体信息，几十个大 CJK 字体在 Kindle 上要十几秒
+        local path, err = require("ui.fonts").pathForId(id)
         if path then return path, M.boldSibling(path) end
         require("utils.log").warn("book typo font missing, fallback auto", id, err)
     end
