@@ -112,6 +112,12 @@ local BACKGROUNDS = {
         -- 日报是一整张长图，裁掉就缺内容。
         contain = true,
     },
+    typo = {
+        id = "typo",
+        label = _("文字海报"),
+        blocks = function(rect) return require("features.lockscreen.typo").blocks(rect) end,
+        cache_key = function() return require("features.lockscreen.typo").cache_key() end,
+    },
     custom = { id = "custom", label = _("自定义"), path = M.customImage },
     cover = { id = "cover", label = _("当前阅读书籍封面"), path = coverPath },
     folder = { id = "folder", label = _("文件夹壁纸"), path = folderPick },
@@ -124,7 +130,7 @@ local BACKGROUNDS = {
     none = { id = "none", label = _("无") },
 }
 
-local BACKGROUND_IDS = { "custom", "bing", "myrl", "cover", "folder", "poster", "none" }
+local BACKGROUND_IDS = { "custom", "bing", "myrl", "cover", "folder", "poster", "typo", "none" }
 
 --- 判断背景设置值是否合法。
 ---@param mode string|nil
