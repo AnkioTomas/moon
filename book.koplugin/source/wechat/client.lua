@@ -17,6 +17,9 @@ local Text = require("utils.text")
 local _ = require("gettext")
 
 local WEB = "https://weread.qq.com"
+-- 本人想法每页条数与翻页上限（hasMore=1 时按回包 maxIdx 续拉）
+local MY_REVIEWS_PAGE = 100
+local MY_REVIEWS_MAX_PAGES = 20
 
 --- 无状态：方法保留冒号形式，模块表本身就是 ``source.shelf`` 要的远端。
 ---@class WechatClient
@@ -130,26 +133,39 @@ end
 ---@param cb fun(data: table|nil, err: any)
 function Client:putProgressAsync(bookId, opts, cb)
     local chapter_uid = tostring(opts.chapter_uid)
-    local reader = Context.reader(bookId, chapter_uid)
-    local payload = Protocol.makeEnterReadPayload({
-        book_id = bookId,
-        chapter_uid = chapter_uid,
-        chapter_idx = opts.chapter_idx,
-        chapter_offset = opts.chapter_offset,
-        summary = opts.summary,
-        progress = opts.progress,
-        psvts = reader.psvts,
-        pclts = reader.pclts,
-    })
-    return self:reportReadAsync(payload, Protocol.readerUrl(bookId, chapter_uid), function(data, err)
-        if data then
-            reader.entered = true
-            cb({ ok = true })
-        else
-            logger.warn("weread putProgress", err)
-            cb(nil, err)
+    local cancelled, job = false, nil
+    -- 与时长心跳共用真实阅读页会话：伪造的 ps / pc 服务端收下 rt 却不记进度。
+    job = Context.sessionAsync(self, bookId, false, function(session, session_err)
+        if cancelled then return end
+        if not session then
+            logger.warn("weread putProgress session", bookId, session_err)
+            cb(nil, session_err)
+            return
         end
+        local payload = Protocol.makeEnterReadPayload({
+            book_id = bookId,
+            chapter_uid = chapter_uid,
+            chapter_idx = opts.chapter_idx,
+            chapter_offset = opts.chapter_offset,
+            summary = opts.summary,
+            progress = opts.progress,
+            psvts = session.psvts,
+            pclts = session.pclts,
+        })
+        job = self:reportReadAsync(payload, Protocol.readerUrl(bookId, chapter_uid), function(data, err)
+            if data then
+                session.entered = true
+                cb({ ok = true })
+            else
+                logger.warn("weread putProgress", err)
+                cb(nil, err)
+            end
+        end)
     end)
+    return { cancel = function()
+            cancelled = true
+            if job then job.cancel() end
+        end }
 end
 
 --- 打开网页阅读页，取时长上报会话参数 psvts / pclts / token（weread.koplugin 同款正则）。
@@ -239,33 +255,59 @@ end
 --- 本人在该书的想法与点评（含划线想法的 ``range``）。
 ---
 --- Eink ``/review/list`` 会混入别的书的想法（实测按 range 挂进当前书造成串书），
---- 回包里 ``bookId`` 不是这本书的条目剔掉；totalCount / hasMore 保持原值，
---- 全量判定仍按服务端口径。
+--- 回包里 ``bookId`` 不是这本书的条目剔掉；totalCount 保持原值，全量判定仍按服务端口径。
+--- ``hasMore=1`` 时带回包 ``maxIdx`` 续拉并按 reviewId 去重；中途失败交回已拿到的部分（hasMore 仍为 1）。
 ---@param bookId string
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:myReviewsAsync(bookId, cb)
-    return Eink.callAsync("GET", "/review/list", {
-        query = {
-            bookId = bookId,
-            listType = 1,
-            listMode = 0,
-            mine = 1,
-            synckey = 0,
-            count = 100,
-        },
-    }, function(data, err)
-        if type(data) == "table" and type(data.reviews) == "table" then
-            local own = {}
+    local own, seen, first, job = {}, {}, nil, nil
+    local cancelled = false
+    local function fetch(max_idx, pages)
+        job = Eink.callAsync("GET", "/review/list", {
+            query = {
+                bookId = bookId,
+                listType = 1,
+                listMode = 0,
+                mine = 1,
+                synckey = 0,
+                count = MY_REVIEWS_PAGE,
+                maxIdx = max_idx,
+            },
+        }, function(data, err)
+            if cancelled then return end
+            if type(data) ~= "table" or type(data.reviews) ~= "table" then
+                -- 翻页失败时交回已拿到的部分，hasMore 保持 1，全量判定不会误判
+                if first then cb(first) else cb(data, err) end
+                return
+            end
+            first = first or data
+            local added = 0
             for _idx, entry in ipairs(data.reviews) do
                 local review = type(entry) == "table" and (entry.review or entry) or nil
                 local owner = type(review) == "table" and review.bookId
-                if owner == nil or tostring(owner) == bookId then own[#own + 1] = entry end
+                local id = type(review) == "table" and (review.reviewId or entry.reviewId)
+                if (owner == nil or tostring(owner) == bookId) and not (id and seen[id]) then
+                    if id then seen[id] = true end
+                    own[#own + 1] = entry
+                end
+                added = added + 1
             end
-            data.reviews = own
-        end
-        cb(data, err)
-    end)
+            first.reviews, first.hasMore = own, data.hasMore
+            local next_idx = tonumber(data.maxIdx)
+            if tonumber(data.hasMore) == 1 and added > 0 and next_idx and next_idx ~= max_idx
+                    and pages < MY_REVIEWS_MAX_PAGES then
+                fetch(next_idx, pages + 1)
+                return
+            end
+            cb(first)
+        end)
+    end
+    fetch(0, 1)
+    return { cancel = function()
+            cancelled = true
+            if job then job.cancel() end
+        end }
 end
 
 --- 发表划线下想法。

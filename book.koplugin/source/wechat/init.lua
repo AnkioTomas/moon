@@ -122,7 +122,8 @@ local function report(self, session, position, cb)
         sendTime()
         return
     end
-    self._client:reportReadAsync(Protocol.makeEnterReadPayload(position), referer, function()
+    self._client:reportReadAsync(Protocol.makeEnterReadPayload(position), referer, function(data, err)
+        if not data then logger.warn("wechat heartbeat enter failed", position.book_id, err) end
         session.entered = true
         sendTime()
     end)

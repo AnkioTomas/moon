@@ -66,6 +66,17 @@ package.preload["source.wechat.eink"] = function()
                     },
                     chapters = { { chapterUid = 4, chapterIdx = 4 } },
                 })
+            elseif path == "/review/list" and opts.query.bookId == "77" then
+                -- 翻页：hasMore=1 带 maxIdx 续拉，重复 reviewId 去重
+                if opts.query.maxIdx == 0 then
+                    cb({ totalCount = 2, hasMore = 1, maxIdx = 5,
+                        reviews = { { review = { reviewId = "a", range = "1-2", content = "甲" } } } })
+                else
+                    cb({ hasMore = 0, reviews = {
+                        { review = { reviewId = "a", range = "1-2", content = "甲" } },
+                        { review = { reviewId = "b", range = "3-4", content = "乙" } },
+                    } })
+                end
             elseif path == "/review/list" then
                 cb({
                     totalCount = 3,
@@ -214,6 +225,12 @@ do
     Assert.eq(wire.reviews[2].review.content, "无 bookId 保留")
     Assert.eq(wire.totalCount, 3, "全量判定保留服务端口径")
     Assert.not_nil(wire)
+
+    client:myReviewsAsync("77", function(data) wire = data end)
+    Assert.eq(posted.eink.query.maxIdx, 5, "hasMore=1 时按回包 maxIdx 续拉")
+    Assert.eq(#wire.reviews, 2)
+    Assert.eq(wire.reviews[2].review.content, "乙")
+    Assert.eq(wire.hasMore, 0)
 end
 
 do
@@ -239,10 +256,12 @@ end
 
 do
     local entered_payload
+    local session = { psvts = "psvts-token", pclts = "pclts-token" }
     package.preload["source.wechat.context"] = function()
         return {
-            reader = function()
-                return { psvts = "psvts-token", pclts = "pclts-token" }
+            -- 进度走真实阅读页会话（与时长心跳共用），不再用本地伪造的 reader 状态
+            sessionAsync = function(_client, _book_id, _force, cb)
+                cb(session)
             end,
         }
     end
@@ -286,7 +305,9 @@ do
     Assert.is_true(posted.url:find("/web/book/read", 1, true) ~= nil)
     Assert.is_true(posted.raw:find("signed", 1, true) ~= nil)
     Assert.not_nil(ok)
-    Assert.eq(entered_payload.pclts, "pclts-token", "进度上报必须带 reader 状态的 pclts")
+    Assert.eq(entered_payload.pclts, "pclts-token", "进度上报必须带阅读页会话的 pclts")
+    Assert.eq(entered_payload.psvts, "psvts-token")
+    Assert.is_true(session.entered, "进度 enter 成功后心跳不再重复 enter")
 
     -- 没有 succ / synckey 的回包是「收下但没记账」：不能当成功确认，否则数据静默丢失。
     read_reply = {}
