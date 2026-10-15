@@ -1,4 +1,4 @@
---[[-- X-Ray 刷新入口强制重新生成当前书籍数据。 --]]
+--[[-- X-Ray 入口：刷新 / 分析全书都走后台任务，划词查询可取消。 --]]
 
 local Assert = require("support.assert")
 
@@ -58,6 +58,7 @@ package.preload["reader.session"] = function()
 end
 
 local captured
+package.preload["features.xray.marks"] = function() return { invalidate = function() end } end
 local local_entities = {}
 local looked_up
 local scan_progress
@@ -72,11 +73,12 @@ package.preload["features.xray.fetch"] = function()
             Assert.eq(current, identity)
             return local_entities[word]
         end,
-        lookupWord = function(ui, current, word)
+        lookupWord = function(ui, current, word, cb)
             looked_up = word
+            return { cancel = function() looked_up = "cancelled" end }
         end,
         scanBook = function(current, text)
-            return { identity = current, text = text }
+            return function() return { cancel = function() end } end
         end,
     }
 end
@@ -89,7 +91,7 @@ package.preload["ui.themes.widgets.confirm"] = function()
 end
 local extract_cb
 package.preload["features.reflow.extract"] = function()
-    return { run = function(_ui, cb) extract_cb = cb end }
+    return { run = function(_ui, cb) extract_cb = cb; return { cancel = function() end } end }
 end
 local running_task
 package.preload["workers.tasks"] = function()
@@ -105,23 +107,25 @@ end
 
 local ui = {}
 require("features.xray.ui").refresh(ui)
-
+-- 按当前位置更新：ai 类后台任务，与全书分析共用 key
+Assert.eq(started.kind, "ai")
+Assert.eq(started.key, "xray\0moon\0book-1")
+Assert.is_true(started.restartable)
+local done_result
+local handle = started.run(function() end, function(r) done_result = r end)
 Assert.eq(captured.ui, ui)
-Assert.eq(captured.identity, identity)
 Assert.is_true(captured.opts.force)
-Assert.eq(dialogs[#dialogs].text, "正在重新生成 X-Ray…")
-Assert.eq(dialogs[#dialogs].dismissable, false, "返回键不关")
--- 取消：撤掉在飞请求，迟到的结果不再提示
-local toast_count = #toasts
-dialogs[#dialogs].on_cancel()
+handle.cancel()
 Assert.is_true(captured.cancelled)
-captured.cb(nil, "cancelled")
-Assert.eq(#toasts, toast_count)
+captured.cb({ characters = { 1 }, locations = {}, terms = {} })
+Assert.is_true(done_result.ok)
+started.on_done(done_result)
+Assert.eq(toasts[#toasts], "X-Ray 已更新：人物 %1，地点 %2，专有名词 %3")
 
--- 离线：立即提示，不拉取。
-captured, connected = nil, false
+-- 离线：立即提示，不入队。
+started, connected = nil, false
 require("features.xray.ui").refresh(ui)
-Assert.is_nil(captured)
+Assert.is_nil(started)
 Assert.eq(toasts[#toasts], "网络不可用，请先连接 Wi-Fi")
 connected = true
 
@@ -146,20 +150,23 @@ Assert.eq(toasts[#toasts], "网络不可用，请先连接 Wi-Fi")
 connected = true
 require("features.xray.ui").lookup(ui, "爷爷")
 Assert.eq(looked_up, "爷爷")
+dialogs[#dialogs].on_cancel()
+Assert.eq(looked_up, "cancelled", "查询中可取消")
 
--- 分析全书：确认 → 前台取字 → 入后台任务队列（ai 类、可重跑）
+-- 分析全书：确认 → 入后台任务（ai 类、可重跑），取字在任务里
+started = nil
 require("features.xray.ui").scanBook(ui, identity)
-Assert.is_nil(extract_cb, "确认前不取字")
+Assert.is_nil(started, "确认前不入队")
 confirm.ok_callback()
-extract_cb(nil, "文档没有可提取的文字")
-Assert.is_nil(started)
-Assert.eq(toasts[#toasts], "X-Ray 失败：%1")
-extract_cb("全书正文")
 Assert.eq(started.kind, "ai")
 Assert.eq(started.key, "xray\0moon\0book-1")
 Assert.is_true(started.restartable)
-Assert.eq(started.run.text, "全书正文")
 Assert.is_true(started.retryable({ ok = false }))
+Assert.is_nil(extract_cb, "入队前不取字")
+local scan_done
+started.run(function() end, function(r) scan_done = r end)
+extract_cb(nil, "文档没有可提取的文字")
+Assert.is_false(scan_done.ok)
 
 -- 上次没分析完：确认框报断点
 scan_progress = { done = 3, total = 10 }
