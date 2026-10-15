@@ -128,3 +128,13 @@ do
     Assert.is_false(PageMarks.intersects({ x = 0, y = 0, w = 0, h = 10 }, 100, 100))
     Assert.is_false(PageMarks.intersects(nil, 100, 100))
 end
+
+do
+    -- 图层可选 paint：画完下划线后自绘，不占位。
+    local ui = newUi()
+    local painted = 0
+    local inst = PageMarks.add(ui, "rare", 30, { marks = function() return {} end, paint = function() painted = painted + 1 end })
+    inst:paintTo(newBB())
+    Assert.eq(painted, 1)
+    Assert.len(inst.painted, 0)
+end

@@ -22,6 +22,7 @@ local Guard = require("ui.guard")
 --- 标记图层：每帧调用 ``marks``，返回当前屏上标记（无则空表）。
 ---@class PageMarkLayer
 ---@field marks fun(self: PageMarkLayer): PageMark[]
+---@field paint fun(self: PageMarkLayer, bb: any)|nil 可选：自绘内容（如注音），不占位、不接点按
 
 ---@class PageMarks
 ---@field ui table ReaderUI
@@ -209,6 +210,7 @@ local function paintLayer(entry, bb, taken, painted)
             painted[#painted + 1] = { mark = mark, pieces = pieces }
         end
     end
+    if entry.layer.paint then entry.layer:paint(bb) end
 end
 
 --- 作为 view module 被调用；每个图层各自经 guard 隔离，一层画坏不影响其它层。

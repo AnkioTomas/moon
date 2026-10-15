@@ -76,6 +76,7 @@ Features.list = {
     "xray",
     "ai",
     "reviews",
+    "rare",
     "translate",
     "reflow",
     "animation",
