@@ -103,134 +103,42 @@ configured = false
 Assert.is_false(button.show_in_highlight_dialog_func())
 configured = true
 
--- 成功：小段上下文，提示词带书名、选中词与正文；等待是进度窗，结果是弹窗卡片
+-- 划词 AI 解释：开多来源查词面板，停在「AI 释义」栏，带选区上下文
+local looked_up
+package.loaded["features.rare.lookup"] = { open = function(opts) looked_up = opts end }
 button.callback()
 Assert.is_true(closed_dialog)
-Assert.eq(context_limit, 2000)
-Assert.len(requests, 1)
-local prompt = requests[1].messages[2].content
-Assert.matches(prompt, "《边城》（作者：沈从文）")
 Assert.eq(selected_pos, "/body/p[3]/text().4", "选区位置要交给上下文取段落")
+Assert.eq(looked_up.source, "ai")
+Assert.eq(looked_up.text, "月色")
+Assert.is_true(looked_up.from_highlight)
+Assert.eq(looked_up.context.sentence, "他望着那片月色。")
+Assert.len(requests, 0, "AI 请求由面板切到该栏时才发")
+
+-- 请求消息：小段上下文，提示词带书名、选中词、句子、段落与正文
+ui.document = ui.document or {}
+local messages = Explain.messages(ui, looked_up.context)
+Assert.eq(context_limit, 2000)
+local prompt = messages[2].content
+Assert.matches(prompt, "《边城》（作者：沈从文）")
 Assert.matches(prompt, "「月色」")
 Assert.matches(prompt, "所在句子：\n他望着那片月色。")
 Assert.matches(prompt, "所在段落：\n整段：他望着那片月色。")
 Assert.matches(prompt, "前文若干")
 Assert.is_nil(prompt:find("STORY SO FAR", 1, true), "不在任何章：不带前文摘要")
-Assert.matches(requests[1].messages[1].content, "不要 Markdown")
-Assert.matches(requests[1].messages[1].content, "不要输出思考过程")
-Assert.eq(shown[1].kind, "progress_dialog")
-Assert.eq(shown[1].title, "月色")
-Assert.eq(shown[1].text, "AI 解释中…")
-pending("  **月色**：这里指夜晚的月光。  ")
-Assert.is_true(shown[1].closed)
-Assert.eq(shown[2].kind, "text_viewer")
-Assert.is_false(shown[2].fullscreen)
-Assert.eq(shown[2].title, "月色")
-Assert.eq(shown[2].text, "月色：这里指夜晚的月光。", "Markdown 标记剥掉")
-Assert.len(shown[2].buttons, 2, "关闭走右上角 ×；选区已没了，不出存为笔记")
-Assert.eq(shown[2].buttons[1].text, "追问")
-Assert.eq(shown[2].buttons[2].text, "复制")
-Assert.eq(clears, 0, "结果卡片还开着，选区留着")
-shown[2]:close()
-Assert.eq(clears, 1, "关掉结果卡片清选区")
-
--- 选区还在：可存为笔记，交给 KOReader 原生 addNote（建划线 + 预填笔记编辑框）
-local noted
-ui.highlight.selected_text = { text = "月色", pos0 = "a", pos1 = "b" }
-ui.highlight.addNote = function(_hl, text) noted = text end
-Explain.run(ui, { text = "月色" })
-pending("夜晚的月光。")
-local answer_card = shown[#shown]
-Assert.len(answer_card.buttons, 3)
-Assert.eq(answer_card.buttons[1].text, "存为笔记")
-clears = 0
-answer_card.buttons[1].callback()
-Assert.is_true(answer_card.closed)
-Assert.eq(noted, "夜晚的月光。")
-Assert.eq(clears, 0, "存为笔记要用选区，由 addNote 自己清")
-
--- 追问：带上整条对话（含上一轮回答）再问；空问题不发
-Explain.run(ui, { text = "月色" })
-pending("夜晚的月光。")
-answer_card = shown[#shown]
-local before_followup = #requests
-answer_card.buttons[2].callback()
-local input = Themed.last("input")
-Assert.eq(input.title, "追问")
-input.callback("   ")
-Assert.eq(#requests, before_followup, "空追问不发请求")
-clears = 0
-input.callback("为什么用月色？")
-Assert.is_true(answer_card.closed)
-Assert.eq(clears, 0, "追问的结果卡片接着用选区")
-local chain = requests[#requests].messages
-Assert.len(chain, 4)
-Assert.eq(chain[3].role, "assistant")
-Assert.eq(chain[3].content, "夜晚的月光。")
-Assert.eq(chain[4].role, "user")
-Assert.eq(chain[4].content, "为什么用月色？")
-Assert.len(requests[#requests - 1].messages, 2, "上一轮的对话不被改写")
-pending("营造清冷氛围。")
-Assert.eq(shown[#shown].text, "营造清冷氛围。")
-Assert.eq(shown[#shown].buttons[1].text, "存为笔记", "追问后的结果仍可存为笔记")
-ui.highlight.selected_text = nil
-
--- 追问时断网：立即提示，不发请求
-shown[#shown].buttons[2].callback()
-connected = false
-before_followup = #requests
-Themed.last("input").callback("还有呢")
-connected = true
-Assert.eq(#requests, before_followup)
-Assert.eq(shown[#shown].text, "网络不可用，请先连接 Wi-Fi")
+Assert.matches(messages[1].content, "不要 Markdown")
+Assert.matches(messages[1].content, "不要输出思考过程")
 
 -- 在第 4 章：提示词末尾带前三章的摘要
 chapter_idx = 4
-Explain.run(ui, { text = "月色" })
-Assert.matches(requests[#requests].messages[2].content, "STORY SO FAR（前几章摘要）:\n第3章\n翠翠长大了。$")
-pending("解释")
+Assert.matches(Explain.messages(ui, looked_up.context)[2].content, "STORY SO FAR（前几章摘要）:\n第3章\n翠翠长大了。$")
 chapter_idx = nil
 
--- 失败：提示错误原因，清选区
-Explain.run(ui, { text = "月色" })
-clears = 0
-pending(nil, "timeout")
-Assert.eq(shown[#shown].kind, "toast")
-Assert.matches(shown[#shown].text, "timeout")
-Assert.eq(clears, 1)
-
--- 只剩 Markdown 空壳也算失败
-Explain.run(ui, { text = "月色" })
-pending("```\n```")
-Assert.eq(shown[#shown].kind, "toast")
-
--- 等待窗：返回键关不掉，但有取消按钮；取消撤掉请求、清选区，迟到的回答不再出卡片
-Explain.run(ui, { text = "月色" })
-Assert.eq(shown[#shown].kind, "progress_dialog")
-Assert.eq(shown[#shown].dismissable, false)
-local shown_before = #shown
-clears = 0
-shown[#shown].on_cancel()
-Assert.eq(cancelled, 1)
-Assert.eq(clears, 1)
-pending("收尾")
-Assert.eq(#shown, shown_before)
-cancelled = 0
-
--- 离线：立即提示，不发请求、不弹等待卡片
-connected = false
-local offline_before, offline_shown = #requests, #shown
-Explain.run(ui, { text = "月色" })
-connected = true
-Assert.eq(#requests, offline_before)
-Assert.eq(#shown, offline_shown + 1)
-Assert.eq(shown[#shown].kind, "toast")
-Assert.eq(shown[#shown].text, "网络不可用，请先连接 Wi-Fi")
-
--- 空选中不发请求
-local before = #requests
+-- 空选中不开面板，清选区
+looked_up, clears = nil, 0
 Explain.run(ui, { text = "   " })
-Assert.eq(#requests, before)
+Assert.is_nil(looked_up)
+Assert.eq(clears, 1)
 
 -- 纯文本清洗：标题、加粗、斜体、行内代码、代码块、引用、分隔线、链接去掉，列表符号换成圆点
 Assert.eq(Explain.plain(table.concat({

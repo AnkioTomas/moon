@@ -211,22 +211,32 @@ local function bookInfo(chapters)
     return Text.trim(book.title), Text.trim(book.authors or book.author), recap
 end
 
---- 请求 AI 解释选中内容并弹窗展示。
+--- 解释选中内容的请求消息：带所在句子 / 段落、当前页与前文、前几章摘要（ui 为空时只带选区）。
+---@param ui table|nil ReaderUI
+---@param selection { text: string, sentence: string, paragraph: string }
+---@return table[]
+function Explain.messages(ui, selection)
+    local ctx = ui and ui.document and require("reader.context").forAnalysis(ui, CONTEXT_LIMIT)
+        or { current_page = "", prior_text = "" }
+    local title, author, recap = bookInfo(RECAP_CHAPTERS)
+    return {
+        { role = "system", content = SYSTEM },
+        { role = "user", content = Explain.prompt(selection, title, author, ctx.current_page, ctx.prior_text, recap) },
+    }
+end
+
+--- 划词「AI 解释」：开多来源查词面板，停在「AI 释义」栏。
 ---@param ui table ReaderUI
 ---@param selected { text: string, pos0: string|table|nil } 划词选区（text 已清理）
 function Explain.run(ui, selected)
-    local Context = require("reader.context")
-    local selection = Context.selection(ui, selected)
-    if selection.text == "" or not online() then
+    local selection = require("reader.context").selection(ui, selected)
+    if selection.text == "" then
         ui.highlight:clear()
         return
     end
-    local ctx = Context.forAnalysis(ui, CONTEXT_LIMIT)
-    local title, author, recap = bookInfo(RECAP_CHAPTERS)
-    ask(ui, Text.truncateUtf8(selection.text, TITLE_LIMIT), {
-        { role = "system", content = SYSTEM },
-        { role = "user", content = Explain.prompt(selection, title, author, ctx.current_page, ctx.prior_text, recap) },
-    }, true)
+    require("features.rare.lookup").open{
+        ui = ui, text = selection.text, context = selection, source = "ai", from_highlight = true,
+    }
 end
 
 --- 问书：弹输入框，就已读内容提问，回答卡片同划词解释（可追问、复制）。

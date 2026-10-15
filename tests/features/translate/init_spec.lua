@@ -8,7 +8,7 @@ local Assert = require("support.assert")
 
 package.preload["l10n"] = function() return { apply = function() end } end
 local popup_opts
-package.preload["features.translate.popup"] = function()
+package.preload["features.rare.lookup"] = function()
     return { open = function(opts) popup_opts = opts end }
 end
 package.preload["features.translate.edge"] = function()
@@ -16,6 +16,7 @@ package.preload["features.translate.edge"] = function()
         translateAsync = function() error("not called by install") end,
     }
 end
+package.preload["apps/reader/readerui"] = function() return { instance = nil } end
 local reader = { edge_translation_enabled = true }
 package.preload["utils.settings"] = function()
     return { get = function(name) assert(name == "features.translate"); return reader end }
@@ -55,3 +56,4 @@ translator.getTargetLanguage = function() return "en" end
 translator:showTranslation("整页文本", false)
 Assert.is_true(popup_opts.full_page)
 Assert.eq(popup_opts.text, "整页文本")
+Assert.eq(popup_opts.source, "translate")

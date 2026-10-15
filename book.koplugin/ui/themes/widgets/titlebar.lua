@@ -33,7 +33,7 @@ function TitleBar.height()
     return Theme.px(t.control.height) + Theme.px(t.space.sm) * 2 + Theme.px(t.row.divider)
 end
 
----@param opts table width/title/subtitle/left_icon/left_callback/right_icon/right_callback/divider
+---@param opts table width/title/subtitle/subtitle_face/left_icon/left_callback/right_icon/right_callback/divider
 ---@return table
 function TitleBar.widget(opts)
     local t = Theme.current()
@@ -50,7 +50,7 @@ function TitleBar.widget(opts)
     local mid_w = math.max(1, opts.width - slot * 2)
     local title = VerticalGroup:new{ align = "center", Text.line("title", opts.title or "", { width = mid_w }) }
     if opts.subtitle then
-        title[#title + 1] = Text.line("caption", opts.subtitle, { width = mid_w, color = t.color.muted })
+        title[#title + 1] = Text.line("caption", opts.subtitle, { width = mid_w, color = t.color.muted, face = opts.subtitle_face })
     end
     local bar = VerticalGroup:new{
         align = "left",

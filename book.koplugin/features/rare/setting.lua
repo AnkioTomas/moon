@@ -9,12 +9,13 @@ local T = require("ffi/util").template
 
 local Setting = {}
 
--- rare_level：rarest / rare / all，对应词库 levels 三档；rare_size：注音字号 / 正文行高；
+-- rare_level：rarest / rare / all，对应词库 levels 三档；rare_size：注音字号 / 正文字号（全屏统一）；rare_lookup_source：查词面板上次用的来源；
 -- rare_lexicons：已启用词库 id → true；rare_built_at：已装词库版本（manifest built_at）。
 Setting.defaults = {
     rare_enabled = false,
     rare_level = "rare",
     rare_size = 0.5,
+    rare_lookup_source = "",
     rare_lexicons = {},
     rare_built_at = {},
 }

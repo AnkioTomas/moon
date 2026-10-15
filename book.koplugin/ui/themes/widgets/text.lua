@@ -37,14 +37,14 @@ end
 --- 单行文字。
 ---@param role string caption/body/title/hero
 ---@param text string
----@param opts table|nil width/color/bold
+---@param opts table|nil width/color/bold/face
 ---@return table TextWidget
 function Text.line(role, text, opts)
     opts = opts or {}
     local theme = Theme.current()
     return TextWidget:new{
         text = text,
-        face = Text.face(role),
+        face = opts.face or Text.face(role),
         bold = bold(opts, role),
         max_width = opts.width,
         fgcolor = Blitbuffer.Color8(opts.color or theme.color.ink),
@@ -57,7 +57,7 @@ end
 ---@param role string caption/body/title/hero
 ---@param text string
 ---@param width number 物理像素
----@param opts table|nil color/bg/bold/align/height/ellipsis/max_lines
+---@param opts table|nil color/bg/bold/face/align/height/ellipsis/max_lines
 ---@return table TextBoxWidget 放没放下看 getAllLineCount() > getVisLineCount()
 function Text.box(role, text, width, opts)
     opts = opts or {}
@@ -65,7 +65,7 @@ function Text.box(role, text, width, opts)
     local function build(height)
         return TextBoxWidget:new{
             text = text,
-            face = Text.face(role),
+            face = opts.face or Text.face(role),
             bold = bold(opts, role),
             width = width,
             height = height,

@@ -51,6 +51,7 @@ package.preload["features.sidebar.info"] = function()
     return { build = function(_, w, h) return Leaf:new{ width = w, height = h } end }
 end
 Kit.sections.reader = {}
+Kit.sections.rare = { rare_lookup_source = "" }
 Kit.sections.xray = { book_xray_enabled = true }
 Kit.sections.sidebar = { sidebar_hidden_tabs = {} }
 require("device").hasClipboard = function() return false end
@@ -87,12 +88,13 @@ local bb = Kit.canvas()
 results:paintTo(bb, 0, 0)
 Assert.eq(bb.pixels, 0, "整屏页不画网状遮罩")
 
--- 翻译弹窗：居中，宽度字段不与 Modal.width 撞名（布局仍整屏）
-local Popup = require("features.translate.popup")
-local popup = Popup.TranslatePopup:new{ translator = {}, text = "原文", translated = "译文" }
+-- 查词面板：居中卡片，宽度字段不与 Modal.width 撞名（布局仍整屏）
+package.preload["features.rare.catalog"] = function() return { active = function() return {} end } end
+local popup = require("features.rare.lookup"):new{ text = "原文" }
 assertModal(popup)
-Assert.eq(popup.popup_w, math.floor(math.min(Kit.SCREEN_W, Kit.SCREEN_H) * 0.88))
 Assert.eq(popup.panel_x, math.floor((Kit.SCREEN_W - popup[1]:getSize().w) / 2))
+Assert.eq(popup.panel_y, math.floor((Kit.SCREEN_H - popup[1]:getSize().h) / 2), "居中")
+Assert.not_nil(popup.ges_events.TapModal, "点遮罩关闭仍在")
 popup:paintTo(Kit.canvas(), 0, 0)
 
 -- 阅读侧栏：面板贴左上、整屏；点遮罩关
