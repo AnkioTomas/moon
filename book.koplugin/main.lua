@@ -113,8 +113,10 @@ end
 --- 退出：停更新任务、远程服务；桌面在窗口栈上时自行收 Exit（销毁并关窗），这里再兜底清残留。
 function BookPlugin:onExit()
     logger.info("book plugin exit")
+    require("ui.exit_windows").exiting = true
     Features.emit("onExit", self)
     Guard.call("exit.closeWindows", require("ui.exit_windows").close)
+    logger.info("book plugin exit done")
     logger.flush()
 end
 

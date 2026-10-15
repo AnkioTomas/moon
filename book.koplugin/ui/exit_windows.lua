@@ -12,6 +12,9 @@ local logger = require("utils.log")
 
 local M = {}
 
+--- 退出广播已收到：Modal 不再上栈（ReaderUI 关书在下一 tick，晚于本兜底）。
+M.exiting = false
+
 --- 关闭残留的月读窗口
 ---@return integer 关掉的窗口数
 function M.close()

@@ -193,3 +193,25 @@ do
     Assert.eq(ExitWindows.close(), 1)
     Assert.eq(depth(), 0)
 end
+
+-- 6) 退出开始后（ReaderUI 关书在下一 tick）再弹的月读窗口（关书出错的错误页等）不上栈，否则等不到空栈而假死
+do
+    reset()
+    for _, name in ipairs({
+        "ui/widget/horizontalgroup", "ui/widget/horizontalspan", "ui/widget/verticalgroup",
+        "ui/widget/verticalspan", "ui.themes.widgets.button", "ui.themes.widgets.mask", "ui.themes.widgets.text",
+    }) do
+        package.preload[name] = package.preload[name] or ctorModule
+    end
+    package.loaded["ui.themes.widgets.modal"] = nil
+    local Modal = require("ui.themes.widgets.modal")
+    local before = setmetatable({}, { __index = Modal })
+    before:show()
+    Assert.eq(depth(), 1)
+    reset()
+    ExitWindows.exiting = true
+    local late = setmetatable({}, { __index = Modal })
+    late:show()
+    ExitWindows.exiting = false
+    Assert.eq(depth(), 0, "Modal shown after Exit must not stay on the stack")
+end

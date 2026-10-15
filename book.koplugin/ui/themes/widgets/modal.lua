@@ -189,6 +189,11 @@ end
 
 --- 网点遮罩叠在旧像素上，局刷会留残影：带遮罩（且设置开着网点）弹出时全刷。
 function Modal:show()
+    -- 退出已开始：此后再弹的窗口（关书时的错误页、提示）会让 KOReader 等不到空栈而假死
+    if require("ui.exit_windows").exiting then
+        require("utils.log").warn("book exit suppressed window", self.name or self.title)
+        return
+    end
     UIManager:show(self, self._mask and MoonSettings.get("ui").mesh_mask and "full" or "ui")
 end
 
