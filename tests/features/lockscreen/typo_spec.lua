@@ -136,4 +136,23 @@ do -- 设置
     Assert.eq(#Typo.styleOptions(), 6)
 end
 
+do -- 短划线池按 notes 表戳缓存：戳不变不重读全库
+    local NoteDB, Highlights = require("book.note_db"), require("book.highlights")
+    local stamp_fn, collect_fn = NoteDB.stamp, Highlights.collectAll
+    local stamp, reads = "s1", 0
+    NoteDB.stamp = function() return stamp end
+    Highlights.collectAll = function()
+        reads = reads + 1
+        return { { text = "一二三四五六七" }, { text = "短" } }
+    end
+    Assert.eq(#Typo.shortQuotes(60), 1)
+    Assert.eq(#Typo.shortQuotes(60), 1)
+    Assert.eq(reads, 1)
+    stamp = "s2"
+    Typo.shortQuotes(60)
+    Assert.eq(reads, 2)
+    Assert.eq(#Typo.shortQuotes(60, { { text = "一二三四五六" } }), 1)
+    NoteDB.stamp, Highlights.collectAll = stamp_fn, collect_fn
+end
+
 return true

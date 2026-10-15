@@ -221,11 +221,7 @@ end
 ---@param items table[]|nil 默认全库划线
 ---@return table
 function M.pickQuote(c, items)
-    local pool = {}
-    for _idx, item in ipairs(items or require("book.highlights").collectAll()) do
-        local n = #T.chars(item.text or "")
-        if n >= 6 and n <= 80 then pool[#pool + 1] = item end
-    end
+    local pool = Typo.shortQuotes(80, items)
     if #pool == 0 then pool = Typo.FALLBACK end
     local seed = c.year * 400 + c.yday
     return pool[seed % #pool + 1]
@@ -240,6 +236,7 @@ function M.blocks(rect)
     local c = M.day(os.date("*t"))
     local face, measure, synthetic = Typo.metrics()
     local ops = M.plan(c, M.pickQuote(c), w, h, measure)
+    T.release()
     local widget = {}
     function widget:getSize() return { w = w, h = h } end
     function widget:paintTo(bb, x, y) Typo.paint(bb, ops, x, y, face, synthetic) end
