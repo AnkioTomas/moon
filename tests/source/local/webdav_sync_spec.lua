@@ -1009,7 +1009,8 @@ do
         return {
             hasProvider = function() return true end,
             openDocument = function()
-                return { loadDocument = function() return true end,
+                -- 真 CreDocument 载入后 _loaded = true
+                return { _loaded = true, loadDocument = function() return true end,
                     getDocumentFormat = function() return "Unknown format" end,
                     getProps = function() return { title = "ERROR: Error reading PDB format" } end,
                     getCoverPageImage = function() return nil end, close = function() end }

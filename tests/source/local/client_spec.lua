@@ -604,6 +604,16 @@ do
     Assert.len(opened, 0)
     Assert.len(hashed, 0)
 
+    -- 手动刷新：没提到封面的书再试一次，内容没变不重算 md5
+    c:scanAsync(function() end, nil, true)
+    Stubs.flush()
+    Assert.is_true(#opened > 0)
+    Assert.len(hashed, 0)
+    opened = {}
+    c:scanAsync(function() end)
+    Stubs.flush()
+    Assert.len(opened, 0, "普通扫盘仍认「试过补封面」")
+
     -- 改过一本（修改时间变了）：只重算它的 md5；内容没变就仍不开文档
     MTIMES["/books/sub/c.pdf"] = 99
     c:scanAsync(function() end)
@@ -1065,4 +1075,33 @@ for _, name in ipairs({
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil
+end
+
+-- ── AZW3 只探文件头（引擎没载文档，格式恒为 Unknown format）：仍取元数据和封面；引擎真加载失败才放弃 ──────
+do
+    local real_registry = package.loaded["document/documentregistry"]
+    local Registry = { hasProvider = function() return true end }
+    package.loaded["document/documentregistry"] = Registry
+    local real_cover = package.loaded["book.cover"]
+    local saved = 0
+    package.loaded["book.cover"] = { save = function() saved = saved + 1 end }
+    local function fakeDoc(loaded)
+        return {
+            _loaded = loaded,
+            loadDocument = function() return true end,
+            getDocumentFormat = function() return "Unknown format" end,
+            getProps = function() return { title = "鬼", description = "" } end,
+            close = function() end,
+        }
+    end
+    local Common = require("source.local.common")
+    Registry.openDocument = function() return fakeDoc(nil) end
+    local props = Common.parseBookProps("/books/z.azw3", "/books/z-probe.azw3")
+    Assert.eq(props and props.title, "鬼")
+    Assert.eq(saved, 1)
+    Registry.openDocument = function() return fakeDoc(true) end
+    Assert.is_nil(Common.parseBookProps("/books/z.azw3", "/books/z-err.azw3"))
+    Assert.eq(saved, 1)
+    package.loaded["document/documentregistry"] = real_registry
+    package.loaded["book.cover"] = real_cover
 end

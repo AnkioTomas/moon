@@ -250,9 +250,10 @@ local function withDocument(path, fn)
     if not doc then
         return nil
     end
-    -- crengine 读不了时 loadDocument 仍返回 true，换成一份标题为 "ERROR: ..." 的错误文档，格式记为 Unknown format
+    -- crengine 读不了时 loadDocument 仍返回 true，换成一份标题为 "ERROR: ..." 的错误文档，格式记为 Unknown format。
+    -- 只在引擎真加载过（_loaded）时看格式：AZW3 提供者只探文件头（EXTH 元数据 + 封面）时引擎没载文档，格式恒为 Unknown format
     if doc.loadDocument and not doc:loadDocument(false)
-        or doc.getDocumentFormat and doc:getDocumentFormat() == "Unknown format" then
+        or doc._loaded and doc.getDocumentFormat and doc:getDocumentFormat() == "Unknown format" then
         -- crengine 加载失败后调其它方法会 segfault，必须直接 close
         pcall(function() doc:close() end)
         return nil
