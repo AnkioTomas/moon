@@ -69,9 +69,9 @@ local function navRow(opts)
     end
 end
 
---- 单选行：点开列表，选中新值写配置并重出图。
+--- 单选行：点开列表，选中新值写配置并重出图；apply 返回 false 表示还没定（如另开了选择器），不重出图。
 ---@param desktop table
----@param opts { icon: string, title: string, status: string, items: table[], current: string, apply: fun(value: string) }
+---@param opts { icon: string, title: string, status: string, items: table[], current: string, apply: fun(value: string): boolean|nil }
 ---@return fun(iw: number): table
 local function choiceRow(desktop, opts)
     return navRow{
@@ -81,7 +81,7 @@ local function choiceRow(desktop, opts)
                 title = opts.title, items = opts.items, current = opts.current, centered = true,
                 on_select = function(value)
                     if not value or value == opts.current then return end
-                    opts.apply(value)
+                    if opts.apply(value) == false then return end
                     refreshAfterChange(desktop)
                 end,
             }:show()
@@ -215,6 +215,7 @@ function Lockscreen:rows(desktop)
                         refreshAfterChange(desktop)
                     end,
                 }
+                return false
             end,
         })
     end

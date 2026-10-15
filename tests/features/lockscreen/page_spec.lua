@@ -42,6 +42,7 @@ package.preload["features.lockscreen.settings"] = function()
         setPosterStyle = function(value) log[#log + 1] = "poster:" .. value end,
         setCustomImage = function(value) log[#log + 1] = "image:" .. value end,
         setFolder = function(value) log[#log + 1] = "folder:" .. value end,
+        setTypoFont = function(id) log[#log + 1] = "font:" .. id end,
     }
 end
 local component_id = "current"
@@ -168,5 +169,28 @@ Assert.eq(chooser.path, "/")
 Assert.is_nil(chooser.filter)
 chooser.on_select("/mnt/us/walls")
 Assert.eq(log[#log - 2], "folder:/mnt/us/walls")
+
+-- 文字海报：「选择字体…」只打开字体选择器，选定字体后才写配置并重出图。
+local picker
+package.preload["ui.widgets.fontpicker"] = function() return { open = function(opts) picker = opts end } end
+package.preload["features.lockscreen.typo"] = function()
+    return {
+        style = function() return "random" end, styleLabel = function() return "随机" end,
+        styleOptions = function() return {} end, fontId = function() return "" end,
+        fontLabel = function() return "自动" end,
+    }
+end
+background_mode = "typo"
+local font_row = Lockscreen:rows(desktop)[4]({})
+Assert.eq(font_row.title, "海报字体")
+font_row.callback()
+ticks, log = {}, {}
+Themed.last("list").on_select("pick")
+Assert.not_nil(picker)
+Assert.len(ticks, 0, "打开字体选择器时不重出图")
+Assert.len(log, 0)
+picker.on_select({}, "syst", "思源宋体")
+Assert.eq(log[1], "font:syst")
+Assert.len(ticks, 1, "选定字体后才重出图")
 
 return true
