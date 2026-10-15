@@ -240,6 +240,29 @@ do
     Assert.is_nil(io.open(dest .. ".part", "rb"))
 end
 
+-- 连接中途断开但流未报错：字节数不足 Content-Length 时判失败，不把半截包落位。
+do
+    local original_stream = Request.stream
+    local dest = Config.dir() .. "/.moon/test_download_short.bin"
+    os.remove(dest) -- 清掉旧运行残留，否则断言测的是历史文件
+    Request.stream = function(_, h)
+        h.on_headers(200, { ["Content-Length"] = "10" })
+        h.on_data("pay")
+        h.on_done()
+        return { cancel = function() end }
+    end
+    local ok_d, err_d
+    Request.download({ url = "https://example.test/file" }, dest, function(ok, err)
+        ok_d, err_d = ok, err
+    end)
+    Request.stream = original_stream
+
+    Assert.is_false(ok_d)
+    Assert.eq(err_d, "download incomplete: 3/10")
+    Assert.is_nil(io.open(dest, "rb"))
+    Assert.is_nil(io.open(dest .. ".part", "rb"))
+end
+
 -- ── SNI 补丁：turbo 握手前对域名补 SNI（无 SNI 时 Cloudflare 类主机直接挂起到超时）──
 do
     local UIManager = require("ui/uimanager")

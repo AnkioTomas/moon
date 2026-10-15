@@ -139,5 +139,25 @@ list()
 Assert.eq(installed(), "user:KaiCN.ttf=Kai CN,user:Plain.otf=Plain Sans,user:WenKai.ttf=霞鹜文楷,"
     .. "local:Bare-Font.ttf=Bare-Font,system:System.ttf=System Sans")
 
+-- 下载到的不是 zip（强制门户 / CDN 错误页以 200 返回）：解压前按魔数拒绝，删掉残包，回调失败
+do
+    local dir = Config.dir() .. "/font_list_spec_absent"
+    os.execute("mkdir -p '" .. dir .. "'")
+    require("http.request").download = function(_opts, dest, cb)
+        local f = assert(io.open(dest, "wb"))
+        f:write("<html>blocked</html>")
+        f:close()
+        cb(true)
+        return { cancel = function() end }
+    end
+    local ok, e
+    Catalog.ensureInstalledAsync({ kind = "weread", id = "f1", url = "https://x/f1.zip" }, nil,
+        function(r, er) ok, e = r, er end)
+    Assert.is_nil(ok)
+    Assert.eq(e, "字体解压失败")
+    Assert.is_nil(io.open(dir .. "/f1.zip", "rb"), "残包已删")
+    os.execute("rm -rf '" .. dir .. "'")
+end
+
 GetText.current_lang = saved_lang
 return true
