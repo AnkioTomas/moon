@@ -67,6 +67,14 @@ shelf("cloud", 100, 10)
 shelf("cloud", 100, nil)
 Assert.eq(tonumber(Base.rowexec("SELECT read_at FROM books WHERE stable_id='cloud';")), 1700005000)
 
+-- 下架后换身份重新上架的书：旧行（非成员、有进度）与在架行同名，只列在架那本
+Assert.is_true(BookDB.upsertRemote({ source_id = "wechat", stable_id = "old_id", title = "never_old" }))
+Assert.not_nil(Base.exec([[INSERT INTO pending_progress (source_id, stable_id, fraction, updated_at)
+    VALUES ('wechat', 'old_id', 0.3, 1700007000);]]))
+rows, count = Catalog.listBooks("wechat", { sort = "recent_read" })
+Assert.eq(count, 7, "同名在架行存在时旧身份行不再重复出现")
+for _idx, row in ipairs(rows) do Assert.is_true(row.stable_id ~= "old_id") end
+
 -- 其它排序不受影响
 local _rows, all = Catalog.listBooks("wechat", { sort = "title" })
 Assert.eq(all, 6, "其它排序只列在架书")

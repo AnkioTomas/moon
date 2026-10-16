@@ -317,7 +317,10 @@ function Catalog.listBooks(source_id, opts)
     -- 「最近阅读」列整个书架：在架书全列；Kavita 卷行这种「非书架成员但仍是有效身份」的
     -- 只在有进度时进来（进度记在卷行上）。其它排序 / 筛选只列在架书。
     where = where .. (opts.sort == "recent_read"
-        and " AND (b.deleted=0 OR (" .. BookDB.readableClause("b") .. " AND p.stable_id IS NOT NULL))"
+        and " AND (b.deleted=0 OR (" .. BookDB.readableClause("b") .. " AND p.stable_id IS NOT NULL"
+            -- 下架后换了身份重新上架的书（同源同名的在架行）只列在架那本，旧行不再像重复条目
+            .. " AND NOT EXISTS (SELECT 1 FROM books s WHERE s.source_id=b.source_id"
+            .. " AND s.deleted=0 AND s.title=b.title)))"
         or " AND b.deleted=0")
     if type(opts.source_id) == "string" and opts.source_id ~= "" then
         where = where .. " AND b.source_id=?"
