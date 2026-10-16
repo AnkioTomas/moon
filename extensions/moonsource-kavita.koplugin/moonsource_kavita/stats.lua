@@ -15,7 +15,7 @@ Kavita 阅读统计纯核心：reading-history 条目 + 身份 / 时区上下文
 账户日桶 `__kv:day:<当天零点>` 的页数按天**先求和再钳制**（`max(0, ·)`）：服务端 pagesRead
 实测有负数（退页），逐条钳制会让 +1 / -1 相抵的当天凭空多出 1 页。
 
-全量重拉：日桶 / 总量行按「前缀 + 覆盖到拉取时刻的时间窗」替换；单书行按「上次 ∪ 本次身份」
+全量重拉：日桶 / 总量行按「前缀 + 覆盖到最后观测日日终的时间窗」替换；单书行按「上次 ∪ 本次身份」
 精确替换，顺带清掉身份漂移（单卷 ↔ 多卷、系列重建）遗留的孤儿行。
 
 纯函数：无 IO、无全局状态；目录与「上次身份」由源钩子经 ctx 注入。
@@ -130,6 +130,7 @@ function Stats.fromHistory(entries, ctx)
     local book_totals = {} ---@type table<string, number>
     local day_durations = {} ---@type table<number, number>
     local day_pages = {} ---@type table<number, number>
+    local last_day = 0 ---@type number 本次回包里最晚的观测日（零点）
     local identities, known, warned_series = {}, {}, {}
 
     --- 记下本次出现的身份。零时长条目也记：它上次可能有行，靠 replace.books 清掉。
@@ -154,6 +155,7 @@ function Stats.fromHistory(entries, ctx)
             if not day then
                 logger.warn("kavita stats entry without usable localDate", series_id)
             else
+                if day > last_day then last_day = day end
                 local chapters = type(entry.chapters) == "table" and entry.chapters or {}
                 local entry_duration = 0
                 for _ci, chapter in ipairs(chapters) do
@@ -240,9 +242,10 @@ function Stats.fromHistory(entries, ctx)
         replace = {
             mode = "ranges",
             ranges = {
-                -- 全量重拉：窗口一直连到拉取时刻，清掉本次回包里已消失的日桶。
-                -- 日桶 start_time 是「当天零点」，正常时区下不会晚于拉取时刻。
-                { stable_prefix = DAY_PREFIX, from_ts = 0, to_ts = fetched_at },
+                -- 全量重拉：窗口一直连到最后观测日的日终，清掉本次回包里已消失的日桶。
+                -- 上界不能只取拉取时刻：时区回退 UTC 且设备为负偏移时，服务端的「当天」比设备
+                -- 本地的拉取时刻晚，桶零点会落在窗口外、当天桶清不掉（残留到下一轮）。
+                { stable_prefix = DAY_PREFIX, from_ts = 0, to_ts = math.max(fetched_at, last_day + 86399) },
                 { stable_prefix = TOTAL_ID, from_ts = 0, to_ts = 0 },
             },
             -- 上次 ∪ 本次：身份漂移后旧身份不再出现在回包里，只能按它精确清。

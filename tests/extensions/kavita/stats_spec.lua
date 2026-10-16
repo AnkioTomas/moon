@@ -194,6 +194,30 @@ do
 end
 
 do
+    -- 时区回退（UTC）下服务端的「日」可能晚于设备本地的拉取时刻（设备为负偏移）：
+    -- 日桶清理窗口的上界要盖到最后观测日的日终，否则当天桶清不掉，会残留到下一轮。
+    local last_day = dayTs(2026, 10, 16)
+    local fetched = last_day - 600 -- 设备本地 23:50，比最后观测日的零点还早
+    local result = Stats.fromHistory({
+        { seriesId = 21, localDate = "2026-10-16T00:00:00",
+            chapters = { { chapterId = 1, durationSeconds = 300, pagesRead = 1 } } },
+    }, { source_id = "ext.kavita", fetched_at = fetched, volumes = { [21] = 2 } })
+    local day_range
+    for _idx, range in ipairs(result.replace.ranges) do
+        if range.stable_prefix == "__kv:day:" then day_range = range end
+    end
+    Assert.not_nil(day_range)
+    Assert.eq(day_range.from_ts, 0, "窗口下界仍是 0（全量重拉）")
+    Assert.eq(day_range.to_ts, last_day + 86399, "上界盖到最后观测日的日终")
+    for _idx, row in ipairs(result.rows) do
+        if row.record_type == "day" then
+            Assert.is_true(row.start_time <= day_range.to_ts, "日桶落在清理窗口内")
+        end
+    end
+    Assert.eq(day_range.stable_prefix:sub(1, 5), "__kv:", "范围只匹配本源的合成行，本地记录不受影响")
+end
+
+do
     -- 零时长条目整条丢弃（连页数一起）：Kavita 会给「打开没读」建 0 时长会话。
     -- 本次身份照交回，好让 replace.books 清掉它上次留下的行。
     local d = dayTs(2026, 10, 3)
