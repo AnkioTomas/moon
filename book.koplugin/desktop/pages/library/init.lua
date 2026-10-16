@@ -58,6 +58,7 @@ local LIST_ROW_H = 120
 ---@field total number
 ---@field state table|nil
 ---@field fetch_cancel CancelHandle|nil
+---@field random_cancel CancelHandle|nil 随机一本的在飞查询
 ---@field filter_cancel CancelHandle|nil
 ---@field _opening_cover table|nil
 ---@field _opening_bar table|nil
@@ -496,6 +497,11 @@ function Library:bookTools()
         Button:new{ icon = "search", variant = "ghost", size = "small", callback = function() self:showSearch() end },
         Button:new{ icon = "refresh", variant = "ghost", size = "small", callback = function() self:rescan() end },
     }
+    if self.total > 0 then
+        table.insert(tools, 3, Button:new{
+            icon = "casino", variant = "ghost", size = "small", callback = function() self:openRandom() end,
+        })
+    end
     if self.filter.search then
         tools[#tools + 1] = Button:new{
             icon = "search_off", variant = "ghost", size = "small",
@@ -600,23 +606,8 @@ function Library:fetch()
 
     self:syncPageSize()
     local source = self.desktop.source
-    local f = self.filter
     if not source then done({}, _("当前数据源不可用")); return end
-    self.fetch_cancel = require("book.catalog").listLibraryAsync(source.id, {
-        page = self.page,
-        page_size = self.page_size,
-        search = f.search or "",
-        category = f.category or "",
-        uncategorized = not not f.uncategorized,
-        series = f.series or "",
-        unseries = not not f.unseries,
-        author = f.author or "",
-        unauthor = not not f.unauthor,
-        read_status = f.read_status,
-        downloaded = f.downloaded,
-        source_id = f.source_id or "",
-        sort = self.sort,
-    }, function(res, err)
+    self.fetch_cancel = require("book.catalog").listLibraryAsync(source.id, self:query(), function(res, err)
         self.fetch_cancel = nil
         if self.desktop.closed or self.desktop.tab ~= "library"
             or self.desktop.source ~= source then
@@ -636,6 +627,46 @@ function Library:fetch()
         end
         done(res.data)
     end)
+end
+
+--- 当前页的书库查询参数：分页 + 筛选 + 排序。
+---@return BookListOpts
+function Library:query()
+    local f = self.filter
+    return {
+        page = self.page,
+        page_size = self.page_size,
+        search = f.search or "",
+        category = f.category or "",
+        uncategorized = not not f.uncategorized,
+        series = f.series or "",
+        unseries = not not f.unseries,
+        author = f.author or "",
+        unauthor = not not f.unauthor,
+        read_status = f.read_status,
+        downloaded = f.downloaded,
+        source_id = f.source_id or "",
+        sort = self.sort,
+    }
+end
+
+--- 从当前筛选结果里随机打开一本：按总数随机一页、每页一本，只取那一行。
+function Library:openRandom()
+    local source = self.desktop.source
+    if not source or self.total < 1 then return end
+    if self.random_cancel then self.random_cancel:cancel() end
+    local opts = self:query()
+    opts.page, opts.page_size = math.random(self.total), 1
+    local done = false
+    local handle = require("book.catalog").listLibraryAsync(source.id, opts, function(res)
+        done, self.random_cancel = true, nil
+        local book = res and res.data[1]
+        if book and not self.desktop.closed and self.desktop.source == source then
+            require("desktop.open").book(self.desktop.plugin, book)
+        end
+    end)
+    -- 同步回调时句柄已作废，不能再记成在飞。
+    if not done then self.random_cancel = handle end
 end
 
 --- 按当前视图容量同步 page_size。
@@ -745,6 +776,10 @@ function Library:cancel()
     if self.filter_cancel then
         self.filter_cancel:cancel()
         self.filter_cancel = nil
+    end
+    if self.random_cancel then
+        self.random_cancel:cancel()
+        self.random_cancel = nil
     end
 end
 
