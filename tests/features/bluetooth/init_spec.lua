@@ -94,9 +94,15 @@ do
     Bluetooth.refresh()
     Stubs.flush()
     text, icon = Bluetooth.topbar()
-    Assert.eq(text, "BLE-M3")
+    Assert.eq(text, "BLE-", "顶栏名字截到 4 个字")
     Assert.eq(icon, "bluetooth_connected")
     Assert.is_true(Bluetooth.isConnected(Bluetooth.current(), "AA:BB"))
+
+    routes["/status"] = '{"ok":true,"daemon_running":true,"devices":[],'
+        .. '"connections":[{"address":"EE:FF","protocol":"ble","name":"小米蓝牙键盘"}]}'
+    Bluetooth.refresh()
+    Stubs.flush()
+    Assert.eq((Bluetooth.topbar()), "小米蓝牙", "按字符而不是字节截断")
 
     routes["/status"] = ON_TWO
     Bluetooth.refresh()
