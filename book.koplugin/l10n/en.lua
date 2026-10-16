@@ -451,7 +451,7 @@ return {
     ["排版失败"] = "Layout conversion failed",
     ["%1 token"] = "%1 tokens",
     ["AI token 上限"] = "AI token limit",
-    ["X-Ray、AI 解释用它"] = "Used by X-Ray and AI Explain",
+    ["X-Ray 查询，AI 解释最大上限"] = "Max limit for X-Ray lookup and AI Explain",
     ["接口地址"] = "Endpoint URL",
     ["搜索"] = "Search",
     ["搜索中..."] = "Searching...",
