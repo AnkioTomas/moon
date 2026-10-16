@@ -577,6 +577,19 @@ do
     -- 缺 chapter_uid 无法上传
     Assert.is_nil(put({}))
     Assert.is_nil(put(nil))
+    -- 没有章节的行：未读完 → 永久失败；读完（手动标已读）→ 按末章读完上报
+    local perm
+    src:putProgressAsync(REF, { fraction = 0.5 }, function(_, _, meta) perm = meta end)
+    require("support.stubs").flush()
+    Assert.is_true(perm and perm.permanent)
+    local done
+    src:putProgressAsync(REF, { fraction = 1 }, function(v) done = v end)
+    require("support.stubs").flush()
+    Assert.is_true(done)
+    Assert.eq(captured.chapter_uid, "42")
+    Assert.eq(captured.chapter_offset, 10000)
+    Assert.eq(captured.progress, 100)
+    require("source.toc").clear()
     -- stable_id 透传
     Assert.eq(captured.stable_id, "b1")
     -- 仅有 chapter_idx、无 uid 且目录拉取失败时不上传

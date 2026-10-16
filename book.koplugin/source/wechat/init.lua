@@ -527,13 +527,33 @@ function Source:putProgressAsync(identity, pos, cb)
             end
         end)
     end
+    local missing = _("缺少章节信息")
     if chapter_uid then
         startPush(chapter_uid)
+    elseif not (tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)) then
+        -- 手动标已读写入的 100% 行没有章节：按末章读完上报；其余没有章节的行永远推不上，标为永久失败让同步丢弃。
+        if frac < 1 then
+            require("ui/uimanager"):nextTick(function()
+                if not cancelled then cb(nil, missing, { permanent = true }) end
+            end)
+        else
+            resolve_job = self:loadTocAsync(identity, function(toc)
+                if cancelled then return end
+                local last = type(toc) == "table" and #toc or 0
+                local uid = last > 0 and Toc.uid(identity.source_id, identity.stable_id, last) or nil
+                if not uid then
+                    cb(nil, missing, { permanent = true })
+                    return
+                end
+                chapter_idx, offset, progress = last, 10000, 100
+                startPush(uid)
+            end)
+        end
     else
         resolve_job = resolveChapterUidAsync(self, identity, chapter_idx, function(uid, err)
             if cancelled then return end
             if not uid then
-                cb(nil, err or _("缺少章节信息"))
+                cb(nil, err or missing)
                 return
             end
             startPush(uid)

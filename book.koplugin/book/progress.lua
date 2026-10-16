@@ -155,22 +155,34 @@ local function syncOnce(source, opts, cb)
         if cancelled then return end
         local identity = identities[index]
         index = index + 1
-        if not identity then finish(result); return end
+        if not identity then
+            if result.push_error and not opts.dirty_only then
+                finish(nil, result.push_error)
+            else
+                finish(result)
+            end
+            return
+        end
 
         local row = ProgressDB.get(source.id, identity.stable_id)
         if row and row.sync_status == 0 then
             local pos = Progress.rowPosition(row)
-            current_job = source:putProgressAsync(identity, pos, function(ok, err)
+            current_job = source:putProgressAsync(identity, pos, function(ok, err, meta)
                 current_job = nil
                 if cancelled then return end
+                if ok ~= true and type(meta) == "table" and meta.permanent then
+                    -- 源判定这行永远推不上（如没有章节信息）：标为已同步丢弃，不再每次同步重试。
+                    logger.warn("book.progress push dropped", source.id, identity.stable_id, err)
+                    ProgressDB.markSynced(source.id, identity.stable_id, row.updated_at, pos)
+                    result.dropped = (result.dropped or 0) + 1
+                    nextIdentity()
+                    return
+                end
                 if ok ~= true then
-                    if opts.dirty_only then
-                        result.push_error = err or "progress push failed"
-                        logger.warn("book.progress push failed; keep dirty", source.id, identity.stable_id, result.push_error)
-                        nextIdentity()
-                        return
-                    end
-                    finish(nil, err or "progress push failed")
+                    -- 单本失败不中止整次同步：其余书照推；全量模式最后仍报失败。
+                    result.push_error = result.push_error or err or "progress push failed"
+                    logger.warn("book.progress push failed; keep dirty", source.id, identity.stable_id, err)
+                    nextIdentity()
                     return
                 end
                 -- 按推送时的修订号确认：推送期间写入的新版本保持脏

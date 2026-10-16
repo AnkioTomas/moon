@@ -134,6 +134,35 @@ Assert.eq(starts, 2)
 callbacks[2](true)
 Assert.eq(restarted.pushed, 1)
 
+-- 全量同步：永久失败的行标为已同步丢弃；单本暂时失败不中止，其余照推，最后整体报失败。
+do
+    for _, id in ipairs({ "m1", "m2", "m3" }) do
+        rows[#rows + 1] = { source_id = "multi", stable_id = id, fraction = 0.5, updated_at = 40, sync_status = 0 }
+    end
+    local tried = {}
+    local multi = {
+        id = "multi",
+        putProgressAsync = function(_, identity, _, cb)
+            tried[#tried + 1] = identity.stable_id
+            if identity.stable_id == "m1" then cb(nil, "缺少章节信息", { permanent = true })
+            elseif identity.stable_id == "m2" then cb(nil, "offline")
+            else cb(true) end
+            return { cancel = function() end }
+        end,
+    }
+    local res, err
+    Progress.syncAsync(multi, {}, function(r, e) res, err = r, e end)
+    Stubs.flush()
+    Assert.eq(table.concat(tried, ","), "m1,m2,m3", "单本失败不中止整次同步")
+    Assert.is_nil(res)
+    Assert.eq(err, "offline")
+    local status = {}
+    for _, row in ipairs(rows) do if row.source_id == "multi" then status[row.stable_id] = row.sync_status end end
+    Assert.eq(status.m1, 1, "永久失败的行不再重试")
+    Assert.eq(status.m2, 0)
+    Assert.eq(status.m3, 1)
+end
+
 -- 修订号严格递增：同一秒连续取号也不重复。
 local r1 = Progress.nextRevision()
 Assert.is_true(Progress.nextRevision() > r1)
