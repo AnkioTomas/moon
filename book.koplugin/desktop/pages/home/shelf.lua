@@ -12,6 +12,7 @@ local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local LeftContainer = require("ui/widget/container/leftcontainer")
 local MoonSettings = require("utils.settings")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -169,8 +170,14 @@ function M:createWidget()
         desktop.library:reset()
         desktop:switchTab("library")
     end)
-    local label = Text.line("caption", (count or 0) > 0 and T(_("书架 · %1"), count) or _("书架"),
-        { width = math.max(1, w - more:getSize().w), color = t.color.muted, bold = true })
+    local more_size = more:getSize()
+    local label_w = math.max(1, w - more_size.w)
+    -- TextWidget 的 width 只是上限：外包定宽容器，「更多 ›」才能靠右。
+    local label = LeftContainer:new{
+        dimen = Geom:new{ w = label_w, h = more_size.h },
+        Text.line("caption", (count or 0) > 0 and T(_("书架 · %1"), count) or _("书架"),
+            { width = label_w, color = t.color.muted, bold = true }),
+    }
     return VerticalGroup:new{
         align = "left",
         HorizontalGroup:new{ align = "center", label, more },
