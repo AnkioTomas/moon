@@ -9,6 +9,9 @@ AI 接口与阅读助手的配置声明（settings/ai.lua，经 `utils.settings.
 return {
     defaults = {
         ai_endpoint = "", ai_api_key = "", ai_model = "",
+        -- AI token 上限（默认生成 token 数，界面在 AI 接口设置）：调用方未显式传 max_tokens 时的兜底值。推理模型的
+        -- 思考过程也计入这个额度，过小会把正文挤掉、回答被截断（见 ai/client.lua 的放大重试）。
+        ai_max_tokens = 4000,
         -- AI 请求超时（秒）：各 AI 功能按倍率 × 它；120 = 原先的缺省，见 http/timeout.lua。
         ai_timeout = 120,
         -- 读完一章自动让 AI 写摘要（花 API 费用，默认关）。

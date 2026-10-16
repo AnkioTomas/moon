@@ -123,6 +123,46 @@ local function timeoutRow(desktop)
     end
 end
 
+--- 「AI token 上限」（ai_max_tokens）的可调范围与步长（token）。
+local MAX_TOKENS_MIN, MAX_TOKENS_MAX, MAX_TOKENS_STEP = 100, 65536, 100
+--- 兜底默认值，与 ai/setting.lua 的声明一致；正常由默认值补齐，仅无配置时用到。
+local MAX_TOKENS_FALLBACK = 4000
+
+--- 当前生效的 AI token 上限：非法值回退默认，并夹进可调范围，供步进器起手。
+---@return integer
+local function currentMaxTokens()
+    local n = tonumber(Settings.get("ai").ai_max_tokens)
+    n = (n and n > 0) and math.floor(n) or MAX_TOKENS_FALLBACK
+    return math.max(MAX_TOKENS_MIN, math.min(MAX_TOKENS_MAX, n))
+end
+
+--- 「AI token 上限」：数值步进（每次 ±100），落盘的是请求里的 max_tokens。
+---@param desktop table
+---@return function
+local function maxTokensRow(desktop)
+    return function(iw)
+        local value = currentMaxTokens()
+        return Row.widget({
+            width = iw,
+            kind = "nav", icon = "straighten", title = _("AI token 上限"),
+            subtitle = _("X-Ray、AI 解释用它"),
+            status = T(_("%1 token"), value), status_on = true,
+            callback = function()
+                require("ui.themes.widgets.spin"):new{
+                    title = _("AI token 上限"),
+                    fields = { { value = value, min = MAX_TOKENS_MIN, max = MAX_TOKENS_MAX, step = MAX_TOKENS_STEP,
+                        format = function(v) return T(_("%1 token"), v) end } },
+                    callback = function(v)
+                        Settings.get("ai").ai_max_tokens = v
+                        Settings.save("ai")
+                        desktop:updateView()
+                    end,
+                }:show()
+            end,
+        })
+    end
+end
+
 ---@param desktop table
 ---@return table
 function AI:rows(desktop)
@@ -133,6 +173,7 @@ function AI:rows(desktop)
             function(value) return Text.trim(value) end),
         row(desktop, "ai_model", _("模型"), _("输入模型名"), false,
             function(value) return Text.trim(value) end),
+        maxTokensRow(desktop),
         timeoutRow(desktop),
         testRow(desktop),
     }

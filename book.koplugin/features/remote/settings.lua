@@ -50,6 +50,11 @@ local BUILTIN = {
                 normalize = function(v) return Text.rtrimSlashes(Text.trim(v)) end },
             { key = "ai_api_key", label = "API 密钥", secret = true, placeholder = "sk-…" },
             { key = "ai_model", label = "模型", placeholder = "gpt-4o-mini" },
+            { key = "ai_max_tokens", label = "AI token 上限", placeholder = "4000",
+                normalize = function(v)
+                    local n = tonumber(Text.trim(v))
+                    return n and n > 0 and tostring(math.floor(n)) or ""
+                end },
         },
     },
     {
