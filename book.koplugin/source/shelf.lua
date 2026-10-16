@@ -79,13 +79,26 @@ end
 ---@param report ShelfReport
 ---@param cb fun(pushed: integer)
 ---@return { cancel: fun() }
+---@type table<string, boolean> 源 id → 正在推删（启动 pushDirty 与书架同步并发时同一本只推一次）
+local deleting = {}
+
 function Shelf.pushDeletes(source_id, remove_one, report, cb)
     local BookDB = require("book.books_db")
-    return pushEach(BookDB.pendingDeleteIds(source_id), function(stable_id, done)
+    -- 已有一轮在推：本轮跳过。没推完的墓碑是脏行，reconcile 不会把它复活。
+    if deleting[source_id] then return SourceBase.defer(cb, 0) end
+    deleting[source_id] = true
+    local job = pushEach(BookDB.pendingDeleteIds(source_id), function(stable_id, done)
         return remove_one(stable_id, function(ok)
             done(ok and BookDB.remove(source_id, stable_id))
         end)
-    end, _("正在同步删除的书"), report, cb)
+    end, _("正在同步删除的书"), report, function(pushed)
+        deleting[source_id] = nil
+        cb(pushed)
+    end)
+    return { cancel = function()
+        deleting[source_id] = nil
+        job:cancel()
+    end }
 end
 
 --- 本地新加架（脏行）上行。remote_ids 里已有的直接标已同步，不再发请求。

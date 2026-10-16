@@ -129,6 +129,13 @@ end
 -- onEvent 延迟加载的 UI 依赖：记录调用
 local sync = { push_calls = 0, last_source = nil, push_args = nil }
 
+-- 全量拉书架前会清列表缓存；单测不碰真 sqlite，只记清了什么。
+local cache_cleared = {}
+package.preload["http.cache"] = function()
+    return { clear = function(substr) cache_cleared[#cache_cleared + 1] = substr end }
+end
+package.loaded["http.cache"] = nil
+
 package.preload["book.stats"] = function()
     return {
         syncAsync = function(self, _, cb)
@@ -253,6 +260,7 @@ do
     require("support.stubs").flush()
     Assert.eq(rec.query.page, 1)
     Assert.eq(rec.query.pageSize, 200)
+    Assert.eq(cache_cleared[#cache_cleared], "/index/book/list", "全量同步前清列表缓存")
     Assert.eq(rec.query.search, "")
     Assert.eq(rec.query.series, "")
     Assert.eq(rec.query.category, "")
@@ -539,6 +547,16 @@ do
     require("support.stubs").flush()
     Assert.eq(rec.delete_books[1], "a.epub")
     Assert.eq(rec.removed.stable_id, "a.epub")
+
+    -- 服务端答「不存在」：删除目的已达成，照样撕墓碑；其它错误保留墓碑下轮重试
+    rec.removed, rec.delete_err = nil, "书籍不存在"
+    src:syncBooksAsync({ dirty_only = true }, function() end)
+    require("support.stubs").flush()
+    Assert.eq(rec.removed.stable_id, "a.epub")
+    rec.removed, rec.delete_err = nil, "请求失败 (HTTP 500)"
+    src:syncBooksAsync({ dirty_only = true }, function() end)
+    require("support.stubs").flush()
+    Assert.is_nil(rec.removed)
 
     -- 离线删除：只落本地墓碑并立即回调成功，不入队、不发请求、不撕墓碑
     resetRec()
