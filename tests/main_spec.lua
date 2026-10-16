@@ -156,8 +156,9 @@ stub("ui.guard", {
         end
     end,
 })
-local feature_hooks = {}
+local feature_hooks, feature_loads = {}, 0
 stub("features", {
+    load = function() feature_loads = feature_loads + 1 end,
     emit = function(hook, host) feature_hooks[#feature_hooks + 1] = hook .. ":" .. host.path end,
     scan = function() return {} end,
     listeners = function() return {} end,
@@ -192,6 +193,7 @@ Assert.eq(table.concat(source_hooks, ","), "pushDirty:moon", "启动有网就推
 Assert.eq(calls.attach, 1)
 Assert.eq(table.concat(dispatcher_actions, ","), "book_open_shelf", "feature 的手势由各自 onCreate 登记")
 Assert.is_nil(calls.boot, "init 不直接挂功能，全部进 features")
+Assert.eq(feature_loads, 1, "加载器在 main 顶层调一次")
 Assert.eq(table.concat(feature_hooks, ","), "onCreate:book.koplugin")
 Assert.eq(table.concat(online_hooks, ","), "onNetworkConnected:book.koplugin", "启动有网才刷 online")
 feature_hooks = {}

@@ -12,7 +12,7 @@
   |-----------------------------------------------|
   | Tabbar 首页|图书馆|[Z站]|[OPDS]|统计|[拓展]|设置 |
   +-----------------------------------------------+
-  「拓展」不是页：点它在格子上方弹出第三方插件入口（features.extensions）。
+  方括号内的格子来自扩展点 desktop.tabs（utils.extension）：有 create 的是页，只有 tap 的不是页（点它自己弹东西）。
   updateView：外壳（屏幕尺寸 / 主题 / 缩放）变了整壳重建；否则只换内容层和底栏层，刷顶栏以下。
   顶栏读数变化由 TopBar 自己经 updateTopbar 换第 2 层，只刷顶栏。
   手势：控件自己的点按优先（底栏格、顶栏项）；没被消费的底栏点按在这里吞掉，
@@ -30,6 +30,7 @@ local Gesture = require("desktop.gesture")
 local Sync = require("desktop.sync")
 local Guard = require("ui.guard")
 local MoonSettings = require("utils.settings")
+local Ext = require("utils.extension")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
@@ -59,6 +60,7 @@ local Tabbar = require("ui.themes.widgets.tabbar")
 ---@field opds BookStorePage OPDS 目录
 ---@field insight BookInsight
 ---@field settings BookSettings
+---@field ext_pages table<string, table> 扩展页签 id → 页实例（按需建，扩展关掉即销毁）
 ---@field topbar BookTopBar
 ---@field layers table|nil 三层 OverlapGroup
 ---@field detail BookDetailPage|nil
@@ -102,6 +104,26 @@ end
 ---@param ... any 原样传给接收方法的参数
 local function broadcast(self, method, ...)
     for _idx, key in ipairs(CHILDREN) do notify(self[key], method, ...) end
+    for _idx, page in pairs(self.ext_pages or {}) do notify(page, method, ...) end
+end
+
+--- 已启用的扩展页签（desktop.tabs），按登记顺序。
+---@return table[]
+local function extTabs()
+    local out = {}
+    for _idx, tab in ipairs(Ext.list("desktop.tabs")) do
+        if not tab.enabled or tab.enabled() then out[#out + 1] = tab end
+    end
+    return out
+end
+
+--- 扩展页签定义；没启用返回 nil。
+---@param id string
+---@return table|nil
+local function extTab(id)
+    for _idx, tab in ipairs(extTabs()) do
+        if tab.id == id then return tab end
+    end
 end
 
 --- 按开关生成 Desktop 底栏 Tab（Z-Library / OPDS 默认关）。统计页始终在。
@@ -119,8 +141,13 @@ local function desktopTabs()
         tabs[#tabs + 1] = { id = "opds", text = _("OPDS"), icon = "rss_feed" }
     end
     tabs[#tabs + 1] = { id = "insight", text = _("统计"), icon = "bar_chart" }
-    if MoonSettings.get("features.extensions").enabled then
-        tabs[#tabs + 1] = { id = "extensions", text = _("拓展"), icon = "extension" }
+    -- 扩展页签：插在 after 指定的格子后（同一 after 按登记顺序），没写 after 就排在「设置」前。
+    for _idx, ext in ipairs(extTabs()) do
+        local at = #tabs + 1
+        for i, t in ipairs(tabs) do
+            if ext.after and (t.id == ext.after or t.after == ext.after) then at = i + 1 end
+        end
+        table.insert(tabs, at, { id = ext.id, text = ext.text, icon = ext.icon, after = ext.after })
     end
     tabs[#tabs + 1] = { id = "settings", text = _("设置"), icon = "settings" }
     return tabs
@@ -130,6 +157,13 @@ end
 ---@param self BookDesktop
 local function syncTabs(self)
     self._tabs = desktopTabs()
+    -- 扩展页签关掉后丢掉它的页（连同缓存与在飞请求）。
+    for id, page in pairs(self.ext_pages) do
+        if not extTab(id) then
+            notify(page, "destroy")
+            self.ext_pages[id] = nil
+        end
+    end
     for _idx, t in ipairs(self._tabs) do
         if t.id == self.tab then return end
     end
@@ -148,7 +182,7 @@ end
 ---@param self BookDesktop
 ---@return table
 local function content(self)
-    local widget = self[self.tab]:updateView()
+    local widget = self:page(self.tab):updateView()
     local w, h = self.dimen.w, self:contentHeight()
     if widget.dimen then
         widget.dimen.w, widget.dimen.h = w, h
@@ -168,8 +202,9 @@ local function tabbar(self)
         tabs = self._tabs,
         active = self.tab,
         on_tab = function(id, rect)
-            if id == "extensions" then
-                require("features.extensions").show(self.plugin, rect)
+            local ext = extTab(id)
+            if ext and not ext.create and ext.tap then
+                ext.tap(self, rect)
             else
                 self:switchTab(id)
             end
@@ -220,6 +255,7 @@ function Desktop:init()
     self.active = false
     self._books_sync, self._stats_sync = {}, {}
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
+    self.ext_pages = {}
     self.home = Home:new{ desktop = self, name = "home" }
     self.library = Library:new{ desktop = self, name = "library" }
     self.store = StorePage:new{ desktop = self, name = "store", store_id = "zlib", empty_text = _("Z站暂无内容") }
@@ -251,13 +287,9 @@ function Desktop:activate()
     if self.closed then return end
     self.active = true
     notify(self.topbar, "activate")
-    notify(self[self.tab], "activate")
-    -- 插件更新检查、NTP 校时走桌面 Resume，不在插件 init / 网络回调里抢跑。
-    local root = self.plugin and self.plugin.path
-    if root then
-        require("features.update").autoCheck(root)
-    end
-    require("features.clock").autoSync()
+    notify(self:page(self.tab), "activate")
+    -- 扩展的前台维护（更新检查、校时等）走桌面 Resume，不在插件 init / 网络回调里抢跑。
+    Ext.emit("desktop.activated", self)
 end
 
 Desktop.onResume = Desktop.activate
@@ -338,7 +370,7 @@ end
 ---@return boolean
 function Desktop:onSwipeTopBar(_arg, ges_ev)
     if ges_ev.direction == "south" then
-        require("features.panel.native").show("desktop")
+        Ext.call("quickpanel.show", "desktop")
     end
     return true
 end
@@ -372,7 +404,7 @@ end
 ---@param ges_ev table|nil KOReader 手势数据，含方向和位置
 ---@return boolean
 function Desktop:onSwipe(_arg, ges_ev)
-    notify(self[self.tab], "onEvent", "swipe", {
+    notify(self:page(self.tab), "onEvent", "swipe", {
         direction = BD.flipDirectionIfMirroredUILayout(ges_ev.direction),
     })
     return true
@@ -385,18 +417,33 @@ end
 ---@return boolean
 function Desktop:onDesktopTurn(dir)
     if MoonSettings.get("desktop").page_keys == false then return false end
-    notify(self[self.tab], "onEvent", "swipe", { direction = dir > 0 and "west" or "east" })
+    notify(self:page(self.tab), "onEvent", "swipe", { direction = dir > 0 and "west" or "east" })
     return true
+end
+
+--- 按 id 取页：核心页直接是字段；扩展页签（desktop.tabs 带 create）按需建，没启用返回 nil。
+---@param id string
+---@return table|nil
+function Desktop:page(id)
+    if PAGES[id] then return self[id] end
+    local page = self.ext_pages[id]
+    if page then return page end
+    local ext = extTab(id)
+    if ext and ext.create then
+        page = ext.create({ desktop = self, name = id })
+        self.ext_pages[id] = page
+    end
+    return page
 end
 
 --- 切换底栏 Tab。页数据跟着页对象走；壳用 updateView 换内容层。
 ---@param id string 底栏 Tab 标识，须在 PAGES 内
 function Desktop:switchTab(id)
-    if not PAGES[id] then return end
+    if not PAGES[id] and not self:page(id) then return end
     local changed = self.tab ~= id
-    if changed then notify(self[self.tab], "deactivate") end
+    if changed then notify(self:page(self.tab), "deactivate") end
     self.tab = id
-    notify(self[self.tab], "activate", changed)
+    notify(self:page(id), "activate", changed)
     self:updateView()
 end
 
@@ -509,6 +556,8 @@ function Desktop.open(plugin)
     UIManager:setDirty(desk, "ui")
     desk:activate()
     Sync.open(desk)
+    -- 扩展的打开后任务（open 前已关书，阅读中不会触发）。
+    Ext.emit("desktop.opened", desk)
 end
 
 --- 本进程是否自动开桌面：nil 还没见过 FM / true 待开 / false 不再自动开

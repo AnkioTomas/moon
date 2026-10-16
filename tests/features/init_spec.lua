@@ -84,9 +84,41 @@ require("support.modal_stub").install()
 local Features = require("features")
 
 -- 真实 list 的每个条目都能加载。不调用钩子：锁屏/远程的 onCreate 会拉起真实服务。
-Assert.eq(table.concat(Features.list, ","), "clock,nightmode,panel,azw3,bars,sidebar,xray,ai,reviews,rare,translate,reflow,animation,dictionary,ocr,baike,lockscreen,passcode,keyboard,ime,remote,update")
+Assert.eq(table.concat(Features.list, ","), "clock,nightmode,panel,azw3,bars,sidebar,xray,ai,reviews,rare,translate,reflow,animation,dictionary,ocr,baike,lockscreen,passcode,keyboard,ime,remote,update,extensions")
 for _, name in ipairs(Features.list) do
     Assert.eq(type(require("features." .. name)), "table")
+end
+
+-- 加载器：feature 在自己 init 里登记扩展点；约定文件与 onReaderReady 由加载器代登记；重复调用不重复登记
+do
+    local Ext = require("utils.extension")
+    Features.load()
+    Features.load()
+    local tabs = {}
+    for _, t in ipairs(Ext.list("desktop.tabs")) do tabs[#tabs + 1] = t.id .. ">" .. t.after end
+    Assert.eq(table.concat(tabs, ","), "extensions>insight")
+    Assert.eq(type(Ext.last("quickpanel.show")), "function")
+    Assert.eq(type(Ext.last("topbar.light_percent")), "function")
+    Assert.eq(type(Ext.last("highlight.fill_selection")), "function")
+    Assert.len(Ext.list("highlight.relabel"), 1)
+    Assert.len(Ext.list("desktop.activated"), 2, "校时 + 更新检查")
+    Assert.len(Ext.list("desktop.opened"), 0)
+    Assert.len(Ext.list("reader.doc_settings"), 1)
+    Assert.len(Ext.list("reader.preferences"), 1)
+    Assert.len(Ext.list("reader.ready"), 1)
+    Assert.eq(Ext.list("note.markup_classes")[1], "moon-tr")
+    Assert.len(Ext.list("setting.groups"), 0)
+    Assert.is_true(#Ext.list("setting.entries") > 10)
+    Assert.is_true(#Ext.list("topbar.items") >= 1)
+    local names = {}
+    for _, e in ipairs(Ext.list("setting.entries")) do names[#names + 1] = e.name end
+    Assert.eq(table.concat(names, ","), table.concat((function()
+        local out = {}
+        for _, n in ipairs(Features.scan("setting")) do
+            if require("features." .. n .. ".setting").entries then out[#out + 1] = n end
+        end
+        return out
+    end)(), ","), "setting.entries 按目录名")
 end
 
 -- 顺序即 list 顺序（不按字母）；缺钩子的 feature 跳过

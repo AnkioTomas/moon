@@ -20,7 +20,7 @@ function Reader.onCreate(plugin)
     ui._book_reader_attached = true
 
     -- 面板、顶底栏和侧栏要在首绘之前装上。
-    require("features").emit("onReaderReady", plugin)
+    require("utils.extension").emit("reader.ready", plugin)
     if ui.handleEvent then
         ui:handleEvent(Event:new("UpdatePos"))
     end

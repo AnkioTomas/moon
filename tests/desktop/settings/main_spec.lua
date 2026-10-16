@@ -201,6 +201,8 @@ local desktop = {
     contentHeight = function() return 800 end,
     updateView = function() end,
 }
+-- 真机由 main.lua 调 features 加载器：设置条目由加载器代登记
+require("features").registerConventions()
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()

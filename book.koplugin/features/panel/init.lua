@@ -18,4 +18,9 @@ function Panel.onReaderReady(plugin)
     require("features.panel.native").onCreate(plugin.ui, { reader = true })
 end
 
+-- 扩展点登记（features 加载器 require 本模块时执行一次；见 utils/extension.lua）。
+local Ext = require("utils.extension")
+Ext.add("quickpanel.show", function(scope) return require("features.panel.native").show(scope) end)
+Ext.add("topbar.light_percent", function(kind) return require("features.panel.desktop").lightPercent(kind) end)
+
 return Panel

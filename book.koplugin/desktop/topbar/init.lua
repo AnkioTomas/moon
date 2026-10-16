@@ -9,9 +9,10 @@
 读数任一变化就整条重建、只刷顶栏这一条；定时器与订阅归顶栏，恢复时挂、暂停时拆。
 点按：有 tap 的项优先（子控件先收事件），其余位置打开快捷面板。
 
-feature 的顶栏项写在 `features/<name>/topbar.lua`：`items()` 返回 BookTopBarItem 数组，
-首次用到时经 Features.scan 收集，追加在核心项之后（按目录名）。id 不能和核心项、其它 feature 重复。
-第三方扩展的项（Features.external("topbar")）再排在后面：id 自动加 `<扩展 id>.` 前缀，read / watch / tap 经 Features.wrap 隔离，
+其它顶栏项经扩展点 `topbar.items`（utils.extension）登记：每项是 `fn() → BookTopBarItem[]`，
+首次用到时按登记顺序收集，追加在核心项之后（after 指定插位）。id 不能和核心项、其它项重复。
+前光读数经单一提供者扩展点 `topbar.light_percent` 取；点空白处开快捷面板经 `quickpanel.show`。
+第三方扩展的项（utils.external.collect("topbar")）再排在后面：id 自动加 `<扩展 id>.` 前缀，read / watch / tap 经 External.wrap 隔离，
 缺 id / read / label、撞名只记日志跳过；插件没加载完时不缓存。已保存的 home_topbar_items 里多出的 id 无害。
 顶层不要 require 重模块，放进 read / watch / tap 里延迟加载。设置页与预览读同一份数据，不用再登记。
 
@@ -26,6 +27,7 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local MoonSettings = require("utils.settings")
+local Ext = require("utils.extension")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local SourceRegistry = require("source.registry")
@@ -152,7 +154,7 @@ local ITEMS = {
         events = { FrontlightStateChanged = true },
         read = function()
             if not Device:hasFrontlight() then return nil end
-            return string.format("%d%%", require("features.panel.desktop").lightPercent("brightness")), "brightness_6"
+            return string.format("%d%%", Ext.call("topbar.light_percent", "brightness") or 0), "brightness_6"
         end,
     },
     {
@@ -194,8 +196,9 @@ local all_items
 function TopBar.items()
     if all_items then return all_items end
     local items = { unpack(ITEMS) }
-    for _idx, name in ipairs(require("features").scan("topbar")) do
-        for _i, item in ipairs(require("features." .. name .. ".topbar").items()) do
+    local Hooks = require("utils.external")
+    for _idx, source in ipairs(Ext.list("topbar.items")) do
+        for _i, item in ipairs(source()) do
             local at = #items + 1
             for i, it in ipairs(items) do
                 if it.id == item.after then at = i + 1 end
@@ -203,14 +206,13 @@ function TopBar.items()
             table.insert(items, at, item)
         end
     end
-    local Features = require("features")
     local seen = {}
     for _idx, item in ipairs(items) do seen[item.id] = true end
-    local ext_items, ready = Features.external("topbar")
+    local ext_items, ready = Hooks.collect("topbar")
     for _idx, ext in ipairs(ext_items) do
-        local list = Features.try(ext.id .. " topbar", ext.mod.items)
+        local list = Hooks.try(ext.id .. " topbar", ext.mod.items)
         for _i, raw in ipairs(type(list) == "table" and list or {}) do
-            local id = type(raw) == "table" and Features.prefix(ext.id, raw.id)
+            local id = type(raw) == "table" and Hooks.prefix(ext.id, raw.id)
             if not id or type(raw.read) ~= "function" or not raw.label or seen[id] then
                 require("utils.log").err("feature external topbar rejected", ext.id, id)
             else
@@ -218,9 +220,9 @@ function TopBar.items()
                 local item = {}
                 for key, value in pairs(raw) do item[key] = value end
                 item.id, item.after = id, nil
-                item.read = Features.wrap(label, raw.read)
-                item.watch = Features.wrap(label, raw.watch)
-                item.tap = Features.wrap(label, raw.tap)
+                item.read = Hooks.wrap(label, raw.read)
+                item.watch = Hooks.wrap(label, raw.watch)
+                item.tap = Hooks.wrap(label, raw.tap)
                 seen[id] = true
                 items[#items + 1] = item
             end
@@ -348,7 +350,7 @@ function TopBar:build(width)
     return BarWidget:new{
         bar = self,
         Tap.wrap(TopBar.row(width, TopBar.height(), left, right), function()
-            require("features.panel.native").show("desktop")
+            Ext.call("quickpanel.show", "desktop")
         end),
     }
 end

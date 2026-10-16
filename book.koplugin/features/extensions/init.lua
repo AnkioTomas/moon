@@ -204,4 +204,12 @@ function Extensions.show(plugin, anchor)
     popup(_("拓展"), items, anchor)
 end
 
+-- 扩展点登记（features 加载器 require 本模块时执行一次；见 utils/extension.lua）。
+require("utils.extension").add("desktop.tabs", {
+    id = "extensions", text = _("拓展"), icon = "extension", after = "insight",
+    enabled = function() return MoonSettings.get("features.extensions").enabled and true or false end,
+    -- 不是页：点格子在上方弹出第三方插件入口。
+    tap = function(desk, rect) Extensions.show(desk.plugin, rect) end,
+})
+
 return Extensions

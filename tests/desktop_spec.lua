@@ -10,6 +10,7 @@ local Kit = require("support.widget_stubs")
 Kit.install("paper")
 Kit.sections.store = {}
 Kit.sections.extensions = {}
+Kit.sections.subscribe = {}
 Kit.sections.clock = { ntp_auto = false }
 
 local Widget = require("ui/widget/widget")
@@ -59,17 +60,22 @@ package.preload["desktop.topbar"] = function()
     return T
 end
 
+-- 扩展点（真机由各 feature 的 init 登记；桌面只认通用挂点）
+local Ext = require("utils.extension")
 local panels, checks = {}, {}
-package.preload["features.panel.native"] = function()
-    return { show = function(id) panels[#panels + 1] = id end }
-end
+Ext.add("quickpanel.show", function(id) panels[#panels + 1] = id end)
 local popups = {}
-package.preload["features.extensions"] = function()
-    return { show = function(p, rect) popups[#popups + 1] = { plugin = p, rect = rect } end }
-end
-package.preload["features.update"] = function()
-    return { autoCheck = function(root) checks[#checks + 1] = root end }
-end
+Ext.add("desktop.tabs", { id = "extensions", text = "拓展", icon = "extension", after = "insight",
+    enabled = function() return Kit.sections.extensions.enabled and true or false end,
+    tap = function(desk, rect) popups[#popups + 1] = { plugin = desk.plugin, rect = rect } end })
+local sub_pages = 0
+Ext.add("desktop.tabs", { id = "subscribe", text = "订阅", icon = "subscriptions", after = "library",
+    enabled = function() return Kit.sections.subscribe.enabled and true or false end,
+    create = function(opts)
+        sub_pages = sub_pages + 1
+        return package.loaded["features.subscribe.page"]:new(opts)
+    end })
+Ext.add("desktop.activated", function(desk) checks[#checks + 1] = desk.plugin.path end)
 package.preload["utils.log"] = function()
     return { dbg = function() end, info = function() end, error = function() end, flush = function() end }
 end
@@ -185,6 +191,23 @@ do -- 拓展格：开关打开才出现；点它在格子上弹层，不切页
     Kit.sections.extensions.enabled = nil
     desk:updateView()
     Assert.eq(ids(), "home,library,insight,settings")
+    drain()
+end
+
+do -- 订阅格：总开关打开才出现在图书馆旁；关掉时在订阅页会退回首页
+    package.loaded["features.subscribe.page"] = page("subscribe")
+    Kit.sections.subscribe.enabled = true
+    desk:updateView()
+    Assert.eq(ids(), "home,library,subscribe,insight,settings")
+    desk:switchTab("subscribe")
+    Assert.eq(desk.tab, "subscribe")
+    Assert.eq(desk.layers[1].page, "subscribe")
+    Kit.sections.subscribe.enabled = nil
+    desk:updateView()
+    Assert.eq(desk.tab, "home")
+    Assert.eq(ids(), "home,library,insight,settings")
+    Assert.is_nil(desk.ext_pages.subscribe, "关掉后订阅页释放")
+    Assert.eq(sub_pages, 1, "页按需建一次")
     drain()
 end
 

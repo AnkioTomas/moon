@@ -23,6 +23,8 @@ package.loaded["json"] = nil
 
 local Paths = require("utils.paths")
 local SessionNote = require("reader.session.note")
+-- 译文元素 class 经扩展点 note.markup_classes 给（真机由翻译 feature 登记）
+require("utils.extension").add("note.markup_classes", "moon-tr")
 
 local P = "/body/DocFragment/body/p[2]"
 local SPAN = P .. "/span"

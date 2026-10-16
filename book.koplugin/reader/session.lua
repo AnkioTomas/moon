@@ -177,7 +177,7 @@ end
 ---@param document table
 function Session.onDocSettingsLoad(_plugin, doc_settings, document)
     require("reader.prefs").inject(doc_settings, document)
-    require("features.bars").injectStatusLine(doc_settings, document)
+    require("utils.extension").emit("reader.doc_settings", doc_settings, document)
     applyChapterBookTitle(doc_settings, document)
 end
 
@@ -348,7 +348,7 @@ function Session.onResume(plugin)
     end
     -- KOReader 在唤醒时可能重新应用 ReaderFooter/status_line 设置。
     -- 月读的用户偏好是持久状态，恢复阅读时必须再次收敛原生栏状态。
-    require("features.bars").applyPreferences(plugin.ui)
+    require("utils.extension").emit("reader.preferences", plugin.ui)
     local session = Session._snapshot
     if not session then return end
     require("reader.session.stats").start(session)

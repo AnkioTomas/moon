@@ -221,15 +221,13 @@ package.preload["reader.page"] = function()
 end
 local bar_apply_count = 0
 local current_resume_plugin
-package.preload["features.bars"] = function()
-    return {
-        applyPreferences = function(ui)
-            bar_apply_count = bar_apply_count + 1
-            Assert.eq(ui, current_resume_plugin and current_resume_plugin.ui)
-        end,
-        injectStatusLine = function(doc_settings) injected[#injected + 1] = "bars:" .. doc_settings.id end,
-    }
-end
+-- 扩展点（真机由状态栏 feature 登记）
+local Ext = require("utils.extension")
+Ext.add("reader.preferences", function(ui)
+    bar_apply_count = bar_apply_count + 1
+    Assert.eq(ui, current_resume_plugin and current_resume_plugin.ui)
+end)
+Ext.add("reader.doc_settings", function(doc_settings) injected[#injected + 1] = "bars:" .. doc_settings.id end)
 local Themed = require("support.theme_stubs")
 Themed.install()
 Themed.on_show = function(o) require("ui/uimanager"):show(o) end

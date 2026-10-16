@@ -403,4 +403,11 @@ function Update.autoCheck(plugin_root)
     end)
 end
 
+-- 扩展点登记（features 加载器 require 本模块时执行一次；见 utils/extension.lua）。
+-- 插件更新检查走桌面回到前台，不在插件 init / 网络回调里抢跑。
+require("utils.extension").add("desktop.activated", function(desk)
+    local root = desk.plugin and desk.plugin.path
+    if root then Update.autoCheck(root) end
+end)
+
 return Update
