@@ -398,3 +398,25 @@ Assert.eq(view_updates, 1)
 source.syncBooksAsync = nil
 library:rescan()
 Assert.eq(emitted, 1)
+
+-- 随机一本：有书才出骰子；按总数随机一页、每页一本，沿用当前筛选排序，取到即开书。
+local dice_page = render({ book }, 0)
+for _idx, b in ipairs(Kit.buttons(dice_page)) do Assert.is_false(b.icon == "casino", "空库不出骰子") end
+library.filter, library.sort = { read_status = "unread", author = "刘慈欣" }, "title"
+dice_page = render({ book }, 5)
+local asked
+catalog.listLibraryAsync = function(_, opts, cb)
+    asked = opts
+    cb({ data = { book }, count = 5 })
+    return { cancel = function() end }
+end
+opened_book = nil
+button(dice_page, "casino").callback()
+Assert.eq(asked.page_size, 1)
+Assert.is_true(asked.page >= 1 and asked.page <= 5)
+Assert.eq(asked.read_status, "unread")
+Assert.eq(asked.author, "刘慈欣")
+Assert.eq(asked.sort, "title")
+Assert.eq(opened_book, book)
+Assert.is_nil(library.random_cancel)
+catalog.listLibraryAsync = real_list
