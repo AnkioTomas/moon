@@ -788,7 +788,7 @@ end
 
 
 --- GET /api/logs.zip：一键打包日志（插件日志 + KOReader crash.log + info.txt，已脱敏）。
---- 后台建临时 zip，打开后即 unlink，以附件 moon-logs-YYYYMMDD-HHMM.zip 流式发完自动回收。
+--- 后台建临时 zip，以附件 moon-logs-YYYYMMDD-HHMM.zip 流式发出，发完/断开时由 _kill 删除。
 ---@param conn table
 ---@param method string
 function Server:_routeLogs(conn, method)
@@ -811,14 +811,22 @@ function Server:_routeLogs(conn, method)
             conn.resp = Server.errorResp(500, err or "logs archive failed")
             return
         end
+        -- 发完（或断开）由 _kill 删：Kindle 的 /mnt/us 是 FUSE，打开后立即 unlink 再读会读到 0 字节
         local file = io.open(output, "rb")
-        os.remove(output)
         if not file then
+            os.remove(output)
             conn.resp = Server.errorResp(500, "Archive gone")
             return
         end
         local size = file:seek("end") or 0
+        if size == 0 then
+            file:close()
+            os.remove(output)
+            conn.resp = Server.errorResp(500, "empty logs archive")
+            return
+        end
         file:seek("set", 0)
+        conn.temp = output
         conn.resp = {
             code = 200,
             ctype = "application/zip",

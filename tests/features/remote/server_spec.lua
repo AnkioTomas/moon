@@ -1562,6 +1562,37 @@ do
     Assert.eq(body, "PK\3\4fake-zip")
     Assert.is_nil(io.open(tmp, "rb"), "temp zip removed after send")
 
+    -- 发送中临时文件不能提前 unlink（Kindle FUSE 上会读成 0 字节）：读 body 时文件还在
+    local tmp2 = os.tmpname()
+    local f2 = assert(io.open(tmp2, "wb"))
+    f2:write("PK\3\4second")
+    f2:close()
+    local h_live = fakeHandlers({})
+    local alive_after_cb
+    h_live.logs_zip = function(cb)
+        cb(tmp2)
+        local still = io.open(tmp2, "rb")
+        alive_after_cb = still ~= nil
+        if still then still:close() end
+    end
+    local c_live = newClient({ "GET /api/logs.zip HTTP/1.1\r\n\r\n" })
+    local srv_live = serve(c_live, h_live)
+    drain(srv_live)
+    Assert.is_true(alive_after_cb, "zip still on disk while sending")
+    local code_live, body_live = parseResponse(c_live:output())
+    Assert.eq(code_live, 200)
+    Assert.eq(body_live, "PK\3\4second")
+    Assert.is_nil(io.open(tmp2, "rb"), "temp zip removed after send")
+
+    -- 空包 → 500，不发 0 字节附件
+    local tmp0 = os.tmpname()
+    local h_empty = fakeHandlers({})
+    h_empty.logs_zip = function(cb) cb(tmp0) end
+    local c_empty = newClient({ "GET /api/logs.zip HTTP/1.1\r\n\r\n" })
+    drain(serve(c_empty, h_empty))
+    Assert.eq((parseResponse(c_empty:output())), 500)
+    Assert.is_nil(io.open(tmp0, "rb"), "empty zip removed")
+
     -- 打包失败 → 500 + 原因
     local h_err = fakeHandlers({})
     h_err.logs_zip = function(cb) cb(nil, "disk full") end
