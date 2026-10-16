@@ -1229,20 +1229,33 @@ do
     }
     routes["GET /api/Stats/reading-history"] = function()
         events[#events + 1] = "http"
-        return json({ { seriesId = 8661, localDate = "2026-10-10T00:00:00",
-            chapters = { { chapterId = 12763, durationSeconds = 120, pagesRead = 0 } } } },
-            { Pagination = pagination_header(1, 1) })
+        return json({
+            { seriesId = 8661, localDate = "2026-10-10T00:00:00",
+                chapters = { { chapterId = 12763, durationSeconds = 120, pagesRead = 0 } } },
+            -- 云端读过、本机没有书行的卷：物化补身份行，写入数一并回给核心（只为触发统计刷新）。
+            { seriesId = 10560, localDate = "2026-10-10T00:00:00",
+                chapters = { { chapterId = 16493, durationSeconds = 60, pagesRead = 0 } } },
+        }, { Pagination = pagination_header(1, 1) })
     end
+    books["10560"] = { title = "镖人", authors = "丰" }
+    remembered = {}
 
     local result = run("syncStatsAsync", nil)
     Assert.eq(marked[1], 21, "先本地确认本地待同步行")
     Assert.eq(replaced.source_id, "ext.kavita")
-    Assert.eq(replaced.rows[1].stable_id, "8661", "拉取的行按云端快照入库")
+    local pulled_8661 = false
+    for _idx, row in ipairs(replaced.rows) do
+        if row.stable_id == "8661" then pulled_8661 = true end
+    end
+    Assert.is_true(pulled_8661, "拉取的行按云端快照入库")
     Assert.not_nil(replaced.replace, "替换指令一并交给核心")
     Assert.eq(events[1], "mark", "先推后拉：确认落在拉取之前")
     Assert.eq(events[#events], "replace", "最后是落库")
     Assert.eq(result.pushed, 1)
     Assert.eq(result.pulled, #replaced.rows)
+    Assert.eq(remembered["10560:16493"] and remembered["10560:16493"].title, "镖人 · 一",
+        "物化标题取状态文件里的持久化卷名")
+    Assert.eq(result.materialized, 1, "物化写入的行数回给核心（桌面据此判断统计变了）")
 
     -- dirty_only（推脏队列）：只做本地确认，不发请求——拉取挂在打开 / 切换与手动刷新上。
     pending_stats = { {
