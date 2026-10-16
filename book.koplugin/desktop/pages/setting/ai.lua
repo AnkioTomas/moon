@@ -145,7 +145,7 @@ local function maxTokensRow(desktop)
         return Row.widget({
             width = iw,
             kind = "nav", icon = "straighten", title = _("AI token 上限"),
-            subtitle = _("X-Ray、AI 解释用它"),
+            subtitle = _("X-Ray 查询，AI 解释最大上限"),
             status = T(_("%1 token"), value), status_on = true,
             callback = function()
                 require("ui.themes.widgets.spin"):new{
