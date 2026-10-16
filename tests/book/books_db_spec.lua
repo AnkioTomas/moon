@@ -112,7 +112,7 @@ local function loadBook(connection, dependents)
     local DbBase = require("utils.db")
     local BookDB = require("book.books_db")
     if dependents then
-        require("utils.event").init()
+        require("utils.event").init(require("features").listeners("events"))
     end
     DbBase.open()
     return DbBase, BookDB

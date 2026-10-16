@@ -147,3 +147,8 @@ Assert.contains(settings, "xray")
 for i = 2, #settings do Assert.is_true(settings[i - 1] < settings[i], "按目录名排序") end
 Assert.len(Features.scan("no_such_file"), 0)
 Assert.eq(Features.scan("events"), Features.scan("events"), "同一文件只扫一次，返回同一张表")
+
+-- listeners：按扫描顺序 require 出各 feature 的约定文件
+local listeners = Features.listeners("events")
+Assert.len(listeners, 1)
+Assert.eq(listeners[1], require("features.xray.events"))
