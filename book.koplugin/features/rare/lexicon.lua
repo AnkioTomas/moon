@@ -8,7 +8,7 @@
   #levels=6500,3500,0  三档阈值：最生僻 / 生僻 / 全部；rank 大于阈值才注音
   字<TAB>注音<TAB>rank
 
-rank 越大越生僻：汉字用《通用规范汉字表》序号，表外字 9000；英文用词频排名。
+rank 越大越生僻：汉字用《通用规范汉字表》序号，表外字 9000，繁体字随对应简体字（tools/build_rare_pinyin.py）；英文用词频排名。
 levels 缺省 zh 6500,3500,0、en 20000,8000,0。en 查不到时依次试去掉 s / es / ies→y / ed / ing。
 自制词库按同格式存为 $DATA/.moon/rare/<id>.tsv（id 只含字母数字 _-），设置页会列出。
 
@@ -136,6 +136,50 @@ function Lexicon.match(lex, text, threshold, limit)
                 local e = lex.entries[key]
                 if e then
                     hit(key, e)
+                    step = n
+                    break
+                end
+            end
+        end
+        i = i + step
+    end
+    return out
+end
+
+--- 屏上逐字单元的全部命中（不去重，每处都注音）：{ i, n, key, ann }，i..i+n-1 是命中占的单元。
+--- zh：非 ASCII 字最长匹配；en：连续字母 / 撇号成词，≥3 字母才查（带撇号的如 obdurate's 查不到就不注）。
+--- force[key] 为真的词（如生字本里的词或字）不看阈值，词库里有读音就注。
+---@param lex RareLexicon
+---@param units string[] 逐字文本
+---@param threshold number
+---@param force table<string, boolean>|nil
+---@param limit integer|nil 最多返回几处
+---@return { i: integer, n: integer, key: string, ann: string }[]
+function Lexicon.scan(lex, units, threshold, force, limit)
+    local out = {}
+    limit = limit or math.huge
+    force = force or {}
+    local function want(key, e) return e[2] > threshold or force[key] or force[key:lower()] end
+    local i, total = 1, #units
+    while i <= total and #out < limit do
+        local step = 1
+        if lex.lang == "en" then
+            if units[i]:match("^[%a']$") then
+                local j = i
+                while j + 1 <= total and units[j + 1]:match("^[%a']$") do j = j + 1 end
+                local word = table.concat(units, "", i, j)
+                if #word >= 3 and not word:find("'", 1, true) then
+                    local e = lookupWord(lex, word)
+                    if e and want(word, e) then out[#out + 1] = { i = i, n = j - i + 1, key = word, ann = e[1] } end
+                end
+                step = j - i + 1
+            end
+        elseif #units[i] > 1 then
+            for n = math.min(lex.max_len, total - i + 1), 1, -1 do
+                local key = table.concat(units, "", i, i + n - 1)
+                local e = lex.entries[key]
+                if e then
+                    if want(key, e) then out[#out + 1] = { i = i, n = n, key = key, ann = e[1] } end
                     step = n
                     break
                 end

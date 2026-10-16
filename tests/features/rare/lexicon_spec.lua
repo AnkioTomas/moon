@@ -67,3 +67,50 @@ do
     Assert.eq(hits[4].key, "Lugubrious")
     Assert.len(Lexicon.match(lex, "ubiquitous lugubrious", 20000), 1)
 end
+
+do
+    -- scan：逐字单元上每一处命中都给（不去重），带位置；force 的词不看阈值；en 按字母成词、带撇号的不查。
+    local zh = Lexicon.parse("#lang=zh\n一\tyī\t1\n龘\tdá\t9000\n觊觎\tjì yú\t7000\n觊\tjì\t7000")
+    local hits = Lexicon.scan(zh, { "a", "一", "龘", "觊", "觎", "龘" }, 3500)
+    local got = {}
+    for _, h in ipairs(hits) do got[#got + 1] = h.key .. "@" .. h.i .. "+" .. h.n end
+    Assert.eq(table.concat(got, ","), "龘@3+1,觊觎@4+2,龘@6+1")
+    Assert.len(Lexicon.scan(zh, { "一", "一" }, 0), 2, "全部档每处都注")
+    Assert.len(Lexicon.scan(zh, { "一", "一" }, 3500), 0)
+    Assert.len(Lexicon.scan(zh, { "一", "一" }, 3500, { ["一"] = true }), 2, "生字本里的字不看阈值")
+    Assert.len(Lexicon.scan(zh, { "龘", "龘", "龘" }, 0, nil, 2), 2, "limit")
+    local en = Lexicon.parse("#lang=en\nobdurate\tˈɒbdjʊrət\t30000\nstudy\tˈstʌdi\t500")
+    -- 逐字单元里空白已去掉，用标点隔开测整词。
+    local units = {}
+    for c in ("an,Obdurate,obdurately,obdurate's,studies"):gmatch(".") do units[#units + 1] = c end
+    hits = Lexicon.scan(en, units, 8000)
+    Assert.len(hits, 1)
+    Assert.eq(hits[1].key, "Obdurate")
+    Assert.eq(hits[1].i, 4)
+    Assert.eq(hits[1].n, 8)
+    Assert.len(Lexicon.scan(en, units, 8000, { studies = true }), 2, "生字本英文词（含词形还原）")
+end
+
+
+do
+    -- 仓库里的汉字拼音词库（tools/build_rare_pinyin.py 生成）：含繁体字与繁体词组，读音取繁体本字，rank 随简体。
+    local f = assert(io.open("assets/rare/zh-pinyin/lexicon.tsv.part.001", "rb"))
+    local text = f:read("*a")
+    f:close()
+    local lex = Lexicon.parse(text)
+    Assert.eq(lex.lang, "zh")
+    for _idx, pair in ipairs({ { "時", "时" }, { "尋", "寻" }, { "讀", "读" }, { "無", "无" } }) do
+        local t, s = lex.entries[pair[1]], lex.entries[pair[2]]
+        Assert.not_nil(t, pair[1])
+        Assert.eq(t[1], s[1], pair[1])
+        Assert.eq(t[2], s[2], pair[1] .. " rank 随简体")
+    end
+    Assert.eq(lex.entries["乾"][1], "qián", "繁体读音取本字，不照抄简体「干」")
+    local hits = Lexicon.scan(lex, { "時", "無", "讀" }, Lexicon.threshold(lex, "all"))
+    Assert.len(hits, 3, "「全部」档繁体字都注音")
+    Assert.is_true(#text < 400 * 1024, "词库保持小体积（512MB Kindle 常驻内存）")
+    local mf = assert(io.open("assets/rare/zh-pinyin/manifest.json", "rb"))
+    local manifest = mf:read("*a")
+    mf:close()
+    Assert.matches(manifest, '"raw_size": ' .. #text)
+end

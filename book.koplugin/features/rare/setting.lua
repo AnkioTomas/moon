@@ -10,7 +10,8 @@ local T = require("ffi/util").template
 local Setting = {}
 
 -- rare_level：rarest / rare / all，对应词库 levels 三档；rare_size：注音字号 / 正文字号（全屏统一）；rare_lookup_source：查词面板上次用的来源；
--- rare_lexicons：已启用词库 id → true；rare_built_at：已装词库版本（manifest built_at）。
+-- rare_lexicons：已启用词库 id → true；rare_built_at：已装词库版本（manifest built_at）；
+-- rare_vocab：KOReader 生字本里的字词不看档位也注音。
 Setting.defaults = {
     rare_enabled = false,
     rare_level = "rare",
@@ -18,6 +19,7 @@ Setting.defaults = {
     rare_lookup_source = "",
     rare_lexicons = {},
     rare_built_at = {},
+    rare_vocab = false,
 }
 
 --- 无默认值的持久键：查词面板上次用的词典。
@@ -186,6 +188,14 @@ local function sections(desktop)
                         width = iw, chevron = true, kind = "nav", icon = "tune",
                         title = _("注音范围"), status = label(levels(), s.rare_level), status_on = true,
                         callback = function() pick(desktop, _("注音范围"), levels(), "rare_level") end,
+                    })
+                end,
+                function(iw)
+                    return Row.widget({
+                        width = iw, chevron = false, kind = "toggle", icon = "bookmark",
+                        title = _("生字本也注音"), subtitle = _("KOReader 生字本里的字词不看范围也注音"),
+                        status = s.rare_vocab and _("开") or _("关"), status_on = s.rare_vocab,
+                        callback = function() save(desktop, "rare_vocab", not s.rare_vocab) end,
                     })
                 end,
                 function(iw)
