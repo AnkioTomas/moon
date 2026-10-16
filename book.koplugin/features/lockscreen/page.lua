@@ -280,7 +280,6 @@ local function showFullscreen(path)
     local Modal = require("ui.themes.widgets.modal")
     local pw, ph = Layout.portraitSize()
     local viewer = Modal:new{
-        mask = false,
         close_on_tap = true,
         covers_fullscreen = true,
         close_callback = function() UIManager:setDirty(nil, "full") end,

@@ -54,7 +54,7 @@ local QUOTE_LINES = 6
 ---@field job { cancel: fun() }|nil
 ---@field turn_after_load boolean 用户在末页点了下一页，续拉回来后翻过去
 local Sheet = Modal:extend{
-    mask = false,
+    covers_fullscreen = true,
     identity = nil,
     spot = nil,
 }

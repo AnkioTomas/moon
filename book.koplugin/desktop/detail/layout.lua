@@ -39,7 +39,6 @@ function Detail:showMenu(tools)
     local slot = Theme.px(self.theme.control.height)
     List:new{
         centered = true,
-        mask = false,
         inner_width = Theme.px(MENU_W),
         anchor = { x = self.dimen.w - slot, y = 0, w = slot, h = TitleBar.height() },
         items = items,

@@ -58,7 +58,6 @@ end
 
 local Results = Modal:extend{
     name = "book_scrape_results",
-    mask = false,
     covers_fullscreen = true,
     results = nil,
     source = nil,

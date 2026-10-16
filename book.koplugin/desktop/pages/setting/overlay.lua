@@ -39,7 +39,6 @@ local TitleBar = require("ui.themes.widgets.titlebar")
 local Overlay = Modal:extend{
     name = "book_settings_overlay",
     covers_fullscreen = true,
-    mask = false,
     spec = nil,
     page = 1,
 }

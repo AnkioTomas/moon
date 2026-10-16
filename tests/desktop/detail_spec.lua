@@ -192,7 +192,6 @@ Assert.eq(Kit.buttons(page)[1].icon, "arrow_back")
 Assert.eq(cover_args.w, math.floor((600 - 32) * 0.38), "封面占内容宽 38%")
 buttonBy(page, "more_horiz"):onTapThemeButton()
 local menu = Themed.last("list")
-Assert.is_false(menu.mask)
 Assert.is_true(menu.centered, "贴按钮的窄下拉，不是全屏列表")
 local menu_texts = {}
 for i, item in ipairs(menu.items) do menu_texts[i] = item.text end

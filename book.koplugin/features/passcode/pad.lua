@@ -46,7 +46,6 @@ local KEYS = {
 ---@field on_submit fun(pin: string): true|string
 local Pad = Modal:extend{
     name = "book_passcode_pad",
-    mask = false,
     covers_fullscreen = true,
     title = nil,
     on_submit = nil,

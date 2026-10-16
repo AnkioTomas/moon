@@ -17,7 +17,7 @@
       { text = "删除", variant = "primary", callback = fn, enabled = true },
   } }:show()
 
-  贴着按钮弹出的菜单：Sheet:new{ anchor = button.dimen, mask = false, items = … }
+  贴着按钮弹出的菜单：Sheet:new{ anchor = button.dimen, items = … }
 
 @module koplugin.book.ui.themes.widgets.sheet
 --]]

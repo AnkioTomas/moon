@@ -82,7 +82,7 @@ local List = Modal:extend{
 }
 
 function List:init()
-    self.mask = self.centered
+    self.covers_fullscreen = not self.centered
     Modal.init(self)
     local t = self.theme
     local pad = Theme.px(t.space.lg)

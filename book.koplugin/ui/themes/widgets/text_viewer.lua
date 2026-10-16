@@ -45,7 +45,6 @@ local TitleBar = require("ui.themes.widgets.titlebar")
 ---@field fill integer 正文下方补的空白（全屏把内容撑满屏高；卡片为 0）
 ---@field buttons table[]|nil 底栏按钮 { text, variant, callback }；缺省只有标题栏关闭
 local TextViewer = Modal:extend{
-    mask = false,
     fullscreen = true,
     title = nil,
     text = nil,
@@ -56,7 +55,7 @@ local TextViewer = Modal:extend{
 local CARD_MAX_HEIGHT = 0.9
 
 function TextViewer:init()
-    if not self.fullscreen then self.mask = true end
+    self.covers_fullscreen = self.fullscreen
     Modal.init(self)
     local t = self.theme
     self.frame = self.fullscreen and 0 or Theme.px(t.dialog.border or 0)
