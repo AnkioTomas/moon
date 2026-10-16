@@ -98,6 +98,18 @@ do
     Assert.is_nil(Registry.external("ext.old"))
 end
 
+-- 第三方 new() 抛错：create 返回错误，不向上抛。
+do
+    local desc = Registry.external("ext.demo")
+    local orig = desc.new
+    desc.new = function() error("boom") end
+    local src, err = Registry.create("ext.demo")
+    Assert.is_nil(src)
+    Assert.eq(type(err), "string")
+    desc.new = orig
+    Assert.is_true(Registry.create("ext.demo").created)
+end
+
 -- 已勾选过启用源（集合里没有后装的第三方源）：后装的源默认启用，显式 false 才禁用。
 do
     common.enabled_sources = { moon = true, wechat = false }
