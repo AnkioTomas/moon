@@ -9,6 +9,9 @@ KOReader 根、字体、插件、设置、Book 数据及书籍根目录不可删
 下载和单次元数据查询直接落 lfs/os；目录扫描、递归删除、跨设备复制串行跑 worker。
 上传先落临时文件再移入目标目录（重名加 " (n)"，跨设备退化为后台流式复制）。
 
+受管根全部 realpath，堵软链逃逸。Kindle 防火墙打孔端口记 _punched_port，stop 必须用它拆规则（改端口先拆旧孔）。
+suspend 停服、resume 按标记恢复；停服时释放静态资源缓存。
+
 @module koplugin.book.features.remote.init
 --]]
 

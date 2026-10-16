@@ -27,6 +27,11 @@ restartable 的任务归队列所有，队列可以随时中断并从头重跑�
   }
   task.cancel()
 
+run 跑在主进程，必须发起异步操作后立刻返回：等网络走 http.request，重计算走 workers.job。
+多阶段任务（下载 → Job 解压）返回的句柄要始终指向当前阶段，否则取消后子进程成孤儿；迟到的 done 按 token 丢弃。
+进度只报 report(text, count, total)，百分比由界面算；省略的 count / total 沿用上次值；download 类所有阶段都报字节。
+未结束任务上限 64（queue_full）；退避 15s、30s…；状态 queued → running → finished，旁路 retry_wait / waiting / cancelled。
+
 @module koplugin.book.workers.tasks
 --]]
 

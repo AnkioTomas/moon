@@ -8,6 +8,14 @@
 全量同步：本地优先 push，再 pull。进度 pull 仅开书（冲突让用户选）；笔记有网即推、开书再拉。
 本源脏行由 pushDirty 作为后台任务推送（main 在启动、唤醒、联网时触发）：书架、笔记、统计，进度最后。
 
+IO 一律 XxxAsync(..., cb) 返回 { cancel }，取消后不回调；当场能回的结果也用 SourceBase.defer(cb, ...) 下一帧回调，
+不支持的域用 SourceBase.skipped(cb, reason)。无 IO 的 capabilities / configured / coverRequest 保持同步。
+capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 SourceCapabilities.supports* 判断），
+不是「有没有这个函数」；全本缓存看有没有 cacheAllChaptersAsync，进度双向看 get/putProgressAsync 是否都在。
+源外代码只碰 source.<id>（经 registry）和 source.<id>.setting；require("source.<id>")，禁止写 .init。
+新增内置源：source/<id>/init.lua（meta + new）、可选 setting.lua、registry 的 BUILTIN 加一项，测试放 tests/source/<id>/。
+标准拉快照 + add/remove 书架用 source.shelf；推墓碑一律 Shelf.pushDeletes。模块顶层不 require KOReader UI。
+
 @module koplugin.book.source.base
 --]]
 

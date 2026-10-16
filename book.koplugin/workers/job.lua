@@ -9,6 +9,10 @@
 Job.run 对 fork 任务只做发布；workers.system 按设备性能限流。
 子进程禁止碰 sqlite；库操作必须走 instant。
 
+结果经 JSON 回传（函数 / userdata / 循环引用传不回，单帧上限 Protocol.MAX_FRAME 4MB）；progress 每调一次写一帧，调用方自己节流。
+on_done / on_failed / on_cancelled 恰好触发一个；排队中的 fork 任务也能取消。子进程里 Job.inSubProcess() 为真。
+并发：每 32MB MemAvailable 一个槽，夹在 1–20，读不到 /proc/meminfo 按 4。句柄挂在拥有者实例上，模块级 _job 视为缺陷。
+
 @module koplugin.book.workers.job
 --]]
 

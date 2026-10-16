@@ -1,6 +1,10 @@
 --[[--
 微信读书数据源门面（仅异步网络）
 
+两套会话别混：eink.lua 扫码拿 accessToken / refreshToken（设置页走这条），auth.lua 网页 cookie（正文、笔记、部分统计）。
+开章发「进入阅读」须早于时长上报；开书拉进度期间先挂起，免得抢在冲突选择前写云端位置。
+时长走 30 秒心跳（开章 / 翻页 / 唤醒起，关书 / 休眠停），离线跳拍不补报。划线经 notes.lua / annotations.lua 与网页 range 互定位。
+
 @module koplugin.book.source.wechat
 --]]
 

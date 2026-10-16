@@ -2,6 +2,11 @@
 AES-128/192/256（ECB/CBC）+ PKCS7。纯 LuaJIT。
 密钥 16/24/32 字节。ECB 加密默认填充；`pad == false` 表示数据已对齐。
 
+crypto 没有 init.lua，按文件名 require（crypto.aes / crypto.sm2 …）；全是无状态模块函数。
+密钥、密文、摘要都是原始字节，十六进制用 crypto.hex 转；不解析 PEM / ASN.1。
+Aes.pkcs7_pad / pkcs7_unpad / from_hex / to_hex 就是 crypto.pad / crypto.hex 的同一批函数（旧调用不用改）。
+去填充只看末字节给出的长度，不逐字节核对填充内容。SM4 同名函数在 crypto.sm4 上，密钥 16 字节。
+
 @module koplugin.book.crypto.aes
 --]]
 

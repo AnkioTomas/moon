@@ -1,6 +1,10 @@
 --[[--
 京东读书数据源门面。
 
+cookie + 设备 uuid，签名与章节 AES 在 protocol.lua。书架用 source.shelf；进度双向，无笔记、无统计。
+目录只认下载协议版本 5（EPUB 按文件成章）和 3（网文），其余版本作废重拉。没有 ebook_id 的详情不进缓存。
+段评借用微信读书同一本书（chapter_links），只在本章自己没有段评时借。
+
 @module koplugin.book.source.jdread
 --]]
 

@@ -1,5 +1,5 @@
 --[[--
-月读第三方书源描述：Kavita。契约见月读仓库 docs/source/external.md。
+月读第三方书源描述：Kavita。契约见月读仓库 examples/moonsource-demo.koplugin/moon_source.lua。
 实现在 moonsource_kavita/（带前缀：所有插件共用一个 package.path）。
 --]]
 

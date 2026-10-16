@@ -12,6 +12,14 @@
 ui/themes 自成一体：除 KOReader 自带模块与 utils.settings / l10n 外不依赖插件其他 UI 组件。
 缩放沿用设置 ui.ui_scale（百分比，100–180，缺省 130），与旧桌面同一个键。
 
+组件在 widgets/：基础件 box / text / icon / button / tap / progress / image / mask；布局件 row / titlebar / tabbar / pager / sections；
+弹窗都继承 modal（confirm / toast / sheet / list / input / spin / icon_picker / path_picker / progress_dialog / qr / text_viewer），:show() / :close()。
+组件内部取 Theme.current()，调用方不传主题；opts 的 width / height 是物理像素（文件头注明逻辑像素的除外）。
+Modal 定位 anchor = center / top / 某个矩形（下拉，配 mask = false）；dismissable、close_on_tap 控制点外关窗。
+progress_dialog 点按不关窗，转后台只是关窗；后台任务的前台进度走 workers/ui/task_dialog.follow。
+新增组件：放 widgets/，值一律从令牌取、不写死像素，不引用 ui/widgets；新增令牌三套主题同时加（init_spec 校验）。
+新增主题：<id>.lua 键集合一致，再加进 Theme.ids。演示页在 book.koplugin/demo/（打包剔除）。
+
 @module koplugin.book.ui.themes
 --]]
 

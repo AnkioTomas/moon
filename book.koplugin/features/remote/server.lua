@@ -10,6 +10,9 @@
 - 收发全零超时非阻塞，单次 waitEvent 自限时间片（默认 25ms），传大文件不冻 UI；
 - 文件系统 IO 全经 handlers 注入，本模块只管 HTTP 协议。
 
+新增 API：在 file.lua / input.lua / 新模块写路由函数（首参即 server 实例），server.lua 顶部挂成 Server._routeXxx 并在 Server:_route 分派；
+路由模块不反向 require server。路径必须落在受管根内，前缀检查用 realpath 后的路径。server 核心禁止 require Widget / NetworkMgr。
+
 @module koplugin.book.features.remote.server
 --]]
 

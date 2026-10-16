@@ -1,6 +1,9 @@
 --[[--
 turbo 类补丁 + 主机名 DNS 缓存（会话内只打一次，由 http.turbo 建 loop 时调用）。
 
+补丁：SNI、CA、connect_fail、int64，以及 HTTPParser.get 的 strncasecmp 回退
+（turbo 靠 io.popen("uname") 选平台绑定，Android 上 popen 失败留 nil，一读响应头就崩）。
+
 @module koplugin.book.http.turbo.patch
 --]]
 

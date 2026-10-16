@@ -7,6 +7,9 @@ reading_stats 是本地唯一事实来源：本地采集写成待同步记录，
 远端拉取（capabilities.stats_pull）写成已同步记录；有云端日桶的日期展示以云端为准。
 网络状态、同步时机、重试和 wire 协议由 Source 负责。
 
+页计时 <1s 或 page<1 丢弃。推送批次 200；同一源同时只一批在飞（令牌按 source.id，迟到回调不清新令牌），
+防止关书推送与联网重推重叠把同一批行报两遍。stats_pull=false 时 pull 返回 skipped，不伪造空成功。
+
 @module koplugin.book.book.stats
 --]]
 

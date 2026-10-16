@@ -4,6 +4,9 @@
 这里的代码只被具体数据源调用：目录缓存、章节正文落盘和本地进度选择
 都属于源的 materialization，不属于阅读会话。
 
+起始章：pending_progress 的 chapter_idx（或 fraction×目录折算），否则第 1 章，夹到 [1, #toc]；远端进度不参与选章，开书 pull 后收敛。
+正文先写 .part 再 rename，Store.touch 成功才把 path 交给调用方；本地缓存快开也要 touch。工作目录 Paths.bookWorkDir（md5(stable_id)）。
+
 @module koplugin.book.source.chapter
 --]]
 

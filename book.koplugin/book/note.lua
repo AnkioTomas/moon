@@ -4,6 +4,10 @@
 本地 notes 表是唯一的上传来源，避免异步回调发送已被修改的内存表。
 阅读器侧的快照保存 / 应用在 ``reader.session.note``。
 
+chapter_idx 0 是整本桶，正整数是章分片；payload 是 KOReader 注解完整快照，不是增量。
+merge：远端空列表与字段缺失无法区分，宁可漏掉云端删除也不清本地划线；只有 authoritative 快照才把缺失分片视为空。
+分页文档（PDF 等）的划线按页码与坐标内容去重，不比表地址。编排层对笔记域永远 dirty_only。
+
 @module koplugin.book.book.note
 --]]
 

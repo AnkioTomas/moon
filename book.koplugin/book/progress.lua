@@ -2,6 +2,11 @@
 阅读进度数据：ProgressPosition 形态、钳制、修订号与 pending_progress 上行同步。
 阅读器侧的采样、开书拉取与冲突处理在 ``reader.session.progress``。
 
+关书 / 休眠只推 dirty，禁止立刻回拉（远端收敛延迟会盖新值）；pull 只在开书，差 ≥1% 让用户选一次。
+updated_at 用 nextRevision()（max(os.time(), last+1)）防同秒撞号。syncAsync 以源 + 书 + 章 + 模式为键合并并发请求。
+markFinished（手动标已读）插入的行可能没有章节：源能按末章上报就上报（如微信先拉目录报最后一章读完），
+源判定永远推不上的行标为已同步丢弃、不再重试；全量同步单条失败不中止整批。
+
 @module koplugin.book.book.progress
 --]]
 

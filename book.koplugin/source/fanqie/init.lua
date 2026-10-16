@@ -1,6 +1,9 @@
 --[[--
 番茄小说官方数据源。
 
+正文走 App reading API：registerkey → batch_full → 解密（reading/）。书架只拉不推（dirty_only 直接 skipped），进度双向，无笔记、统计。
+封面用 fanqie.lua 的 mobileCover 稳定路径（网页签名 thumb_url 会过期）。19 位设备 id 按 uint64 精确编码；Cookie 没变不重写设置。
+
 @module koplugin.book.source.fanqie
 --]]
 

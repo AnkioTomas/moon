@@ -3,6 +3,9 @@
 
 用户确认书名 -> 搜索 -> 选择结果 -> 写 books 表 + 下封面 -> 通知属主源上行 -> 通知调用方刷新
 
+入口先过 SourceCapabilities.supportsScrape(source)，不支持就不显示按钮。封面先写 .part 再 rename。
+写库用 upsertLocal，不走远端 upsert，免得盖掉本地脏元数据语义。
+
 @module koplugin.book.desktop.detail.scrape.ui
 --]]
 

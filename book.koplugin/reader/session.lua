@@ -7,6 +7,9 @@ ReaderSessionSnapshot 随单个文档 ReaderReady/CloseDocument 创建和销毁�
 ReaderChapterSession 跨 switchDocument 保留到真正关书。物理路径解析出的 BookIdentity
 是身份真相，目录、下载和入库由属主源负责，本模块只编排阅读生命周期与切章。
 
+关书与休眠对 progress / notes / stats 一律只推不拉；切章带 skip_pull。
+已读：fraction>=1 或 EndOfBook 标记；可选 99% 自动标记。源事件发给 identity.source，不回落 current。
+
 @module koplugin.book.reader.session
 --]]
 

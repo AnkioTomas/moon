@@ -1,10 +1,25 @@
 --[[--
-月读第三方书源示例：一本三章的静态书，不联网。契约见月读仓库 docs/source/external.md。
+月读第三方书源示例：一本三章的静态书，不联网。契约就写在本文件头注释里。
 
 KOReader 加载完全部插件后，月读在首次访问源注册表时 dofile 本文件，此时所有插件目录都已在 package.path 上，
 可以直接 require 月读的 source.base / source.chapter / source.shelf / source.toc。
 自己的子模块放进带唯一前缀的目录（如 moonsource_demo/client.lua → require("moonsource_demo.client")），
 别用 client / utils 这类通用名：所有插件共用一个 package.path，同名模块谁先加载算谁的。
+
+契约（第三方书源 = 独立 KOReader 插件：_meta.lua、返回空 WidgetContainer 的 main.lua、本文件）：
+- 描述表 { api, meta, new, setting?, home? }。api 必须等于月读的 Registry.API；meta() 无 IO；new() 返回继承 source.base 的实例。
+- id 必须是 ext.<name>（字母数字 _-），写进书库和配置文件名，发布后不能改；重名时先加载的生效。不合约定只记日志不加载。
+- type 只有 book（交整本文件）和 chapter（按章交 HTML）。Book 至少有 source_id / stable_id / title，stable_id 同样不能改。
+- 至少实现 configured()、syncBooksAsync（快照交 source.shelf.reconcile；dirty_only 无删除接口就 skipped）、
+  openBookAsync（book：下载后 book.store.touch 再回调路径；chapter：source.chapter.openWithUi；自己展示了就 cb(nil, nil, { handled = true })）、
+  chapter 型的 loadTocAsync（source.toc 缓存）。可选：getDetailAsync、prefetch / cacheAllChaptersAsync、get/putProgressAsync、
+  push/pullNotesAsync（私有字段要活过保存再实现 cleanAnnotations / prepareLocalAnnotations）、pushStatsAsync、coverRequest、onEvent、close。
+- 只依赖这些月读模块：source.base / shelf / chapter / toc、book.store（touch、rememberMany）、book.books_db（只读）、
+  book.progress_db（get、upsertRemote）、book.note.normalize、utils.paths / settings / log / text、http.request、
+  ui.themes.widgets.*、ui.widgets.book、desktop.pages.home.base。顶层不 require KOReader UI，离线判断用 isConnected。
+- setting：rows(plugin) 自画整节，或 open(plugin) + 可选 rowStatus / rowTitle / rowIcon；remote 字段数组会出现在远程管理「连接配置」（secret = true 脱敏）。
+- home：首页组件数组，id 以 ext. 开头，继承 desktop.pages.home.base，请求在 onActivate 发、onDeactivate 取消。
+- 新装默认启用；卸载后若是当前源退回本地，书留在书库不显示，重装同一 id 恢复。
 --]]
 
 local SourceBase = require("source.base")
