@@ -274,7 +274,10 @@ function Bluetooth.topbar()
     if status.state ~= "on" then return nil, "bluetooth_disabled" end
     local conns = status.connections
     if #conns == 0 then return nil, "bluetooth" end
-    return #conns == 1 and Bluetooth.name(conns[1]) or tostring(#conns), "bluetooth_connected"
+    if #conns > 1 then return tostring(#conns), "bluetooth_connected" end
+    -- 顶栏只留前 4 个字（按 UTF-8 字符数）
+    local name = Bluetooth.name(conns[1])
+    return name:match("^" .. ("[%z\1-\127\194-\244][\128-\191]*"):rep(4)) or name, "bluetooth_connected"
 end
 
 return Bluetooth
