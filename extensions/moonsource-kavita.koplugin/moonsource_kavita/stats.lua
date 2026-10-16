@@ -1,9 +1,10 @@
 --[[--
 Kavita 阅读统计纯核心：reading-history 条目 + 身份 / 时区上下文 → reading_stats 行与替换指令。
 
-条目是「会话 × 系列」切片。日归属直接用服务端在请求时区下给出的 `localDate`，不按会话起始
-时刻自行分桶：两种时区对不上时，自行分桶会把时长挪到别的日子，而展示端又按本地日聚合，
-两边长期对不上账。
+条目是「会话 × 系列」切片。日 / 时归属按服务端给的 UTC 时刻（`startTimeUtc`）在**设备本地时区**
+自行分桶：展示端（SQLite `localtime`、`os.date`）用的是同一个进程时区，两边同一真源才对得上账。
+服务端 `localDate` 是它按请求的 `TimeZoneId` 预先算的日期，映射不上时回退 UTC 会把整段挪一天，
+所以它只当拿不到 `startTimeUtc` 时的兜底。
 
 时长取各章活动段之和（有效阅读时间，不含会话内空档，与本地计时语义一致）；
 条目级与聚合结果 `<= 0` 一律丢弃 —— Kavita 会把「打开没读」的会话也写一条 0 时长记录。
@@ -15,8 +16,12 @@ Kavita 阅读统计纯核心：reading-history 条目 + 身份 / 时区上下文
 账户日桶 `__kv:day:<当天零点>` 的页数按天**先求和再钳制**（`max(0, ·)`）：服务端 pagesRead
 实测有负数（退页），逐条钳制会让 +1 / -1 相抵的当天凭空多出 1 页。
 
-全量重拉：日桶 / 总量行按「前缀 + 覆盖到最后观测日日终的时间窗」替换；单书行按「上次 ∪ 本次身份」
-精确替换，顺带清掉身份漂移（单卷 ↔ 多卷、系列重建）遗留的孤儿行。
+账户时段桶 `__kv:hour:<整点>`：每条活动行的时长记在它起始时刻所在的那个本地整点（跨整点的活动行
+整体算起始小时，与「跨零点的会话整体算起始日」同一口径），供「阅读时段」图用；云端只有这一层
+粒度，再细就要按跨度分摊，而活动行的跨度含空档，分摊反而把空档算到隔壁小时。
+
+全量重拉：日桶 / 时段桶 / 总量行按「前缀 + 覆盖到最后观测桶的时间窗」替换；单书行按「上次 ∪ 本次
+身份」精确替换，顺带清掉身份漂移（单卷 ↔ 多卷、系列重建）遗留的孤儿行。
 
 纯函数（无文件 / 网络 IO、无全局状态，只经 `logger` 写日志）：目录、卷名与「上次身份」由源钩子经 ctx 注入。
 
@@ -28,11 +33,13 @@ local logger = require("utils.log")
 local Stats = {}
 
 local DAY_PREFIX = "__kv:day:"
+local HOUR_PREFIX = "__kv:hour:"
 local TOTAL_ID = "__kv:total"
 
 --- features/clock/init.lua 的 Clock.TIMEZONES 的 19 项 POSIX 串 → Kavita 的 TimeZoneId。
 --- 只查表：不读 /etc/localtime（KOReader 设备上不保证存在，读到的也未必是用户选的时区），
---- 不按偏移猜地区。映射不上就让调用方按 UTC 请求：宁可与设备差一天，不要静默用错时区。
+--- 不按偏移猜地区。映射不上就按 UTC 请求 —— 只影响 `localDate` 这个兜底（正常条目都带
+--- `startTimeUtc`，分日 / 分时按设备本地时区自行换算，见 utcEpoch / dayStart）。
 local IANA_BY_POSIX = {
     ["HST10"] = "Pacific/Honolulu",
     ["AKST9AKDT,M3.2.0,M11.1.0"] = "America/Anchorage",
@@ -96,6 +103,42 @@ local function localMidnight(local_date)
     return os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 0 })
 end
 
+--- 服务端 UTC 时间戳（"2026-10-15T23:51:47.4527045"）→ 设备本地 epoch；解不出返回 nil。
+--- os.time 按进程 TZ（POSIX 串，自带夏令时规则）解释墙钟，所以先把 UTC 墙钟当本地算出 E'，
+--- 再补回一个用 E' 处的本地偏移量的差。偏移的表必须重建：os.date 给的表带 `isdst`，直接回喂
+--- os.time 会把夏令时钉成标准时、整整差一小时（跨夏令时切换的时区实测过）。
+---@param text any
+---@return number|nil
+local function utcEpoch(text)
+    local y, mo, d, h, mi, s = tostring(text):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)")
+    if not y then return nil end
+    local as_local = os.time({ year = tonumber(y), month = tonumber(mo), day = tonumber(d),
+        hour = tonumber(h), min = tonumber(mi), sec = tonumber(s) })
+    if not as_local then return nil end
+    local u = os.date("!*t", as_local)
+    local back = os.time({ year = u.year, month = u.month, day = u.day, hour = u.hour, min = u.min, sec = u.sec })
+    return as_local + os.difftime(as_local, back)
+end
+
+--- 设备本地时区的当日零点。`isdst` 取自本地分解，跨切换的零点不会被挪一小时。
+---@param epoch number
+---@return number
+local function dayStart(epoch)
+    local t = os.date("*t", epoch)
+    return os.time({ year = t.year, month = t.month, day = t.day, hour = 0, isdst = t.isdst })
+end
+
+--- 时段桶键：`day` 那天的、`epoch` 所在小时。跨零点的活动行仍记在条目那天（取小时、换日期），
+--- 这样「日页面逐格之和 = 当日日桶」，不会出现某天的时段和比标题少一截。
+---@param day number 当日零点
+---@param epoch number 活动行起始时刻
+---@return number
+local function hourBucket(day, epoch)
+    local d = os.date("*t", day)
+    local a = os.date("*t", epoch)
+    return os.time({ year = d.year, month = d.month, day = d.day, hour = a.hour, isdst = a.isdst })
+end
+
 --- 本地目录章数：1 = 单卷（读在 series 行），>1 = 多卷（读在卷行）；拿不到返回 nil。
 --- 数字 / 字符串键都收：状态文件里的 seriesId 可能两种写法。
 ---@param volumes table
@@ -130,7 +173,9 @@ function Stats.fromHistory(entries, ctx)
     local book_totals = {} ---@type table<string, number>
     local day_durations = {} ---@type table<number, number>
     local day_pages = {} ---@type table<number, number>
+    local hour_durations = {} ---@type table<number, number> 整点 → 秒（账户时段桶）
     local last_day = 0 ---@type number 本次回包里最晚的观测日（零点）
+    local last_hour = 0 ---@type number 本次回包里最晚的观测整点
     local identities, known, warned_series = {}, {}, {}
 
     --- 记下本次出现的身份。零时长条目也记：它上次可能有行，靠 replace.books 清掉。
@@ -151,9 +196,17 @@ function Stats.fromHistory(entries, ctx)
                 logger.warn("kavita stats skip series without volume info", series_id)
             end
         else
-            local day = localMidnight(entry.localDate)
+            -- 有 UTC 时刻就按设备本地分日 / 分时；没有才退服务端按请求时区算好的 localDate（无小时）。
+            local anchor = utcEpoch(entry.startTimeUtc)
+            local day
+            if anchor then
+                day = dayStart(anchor)
+            else
+                day = localMidnight(entry.localDate)
+                if day then logger.warn("kavita stats entry without usable startTimeUtc", series_id) end
+            end
             if not day then
-                logger.warn("kavita stats entry without usable localDate", series_id)
+                logger.warn("kavita stats entry without usable day", series_id)
             else
                 if day > last_day then last_day = day end
                 local chapters = type(entry.chapters) == "table" and entry.chapters or {}
@@ -185,6 +238,13 @@ function Stats.fromHistory(entries, ctx)
                             days[day] = (days[day] or 0) + duration
                             book_totals[identity] = (book_totals[identity] or 0) + duration
                             day_durations[day] = (day_durations[day] or 0) + duration
+                            -- 时段桶：按活动行自己的起始小时；拿不到就退回条目起始时刻。
+                            local chapter_epoch = utcEpoch(chapter.startTimeUtc) or anchor
+                            if chapter_epoch then
+                                local bucket = hourBucket(day, chapter_epoch)
+                                hour_durations[bucket] = (hour_durations[bucket] or 0) + duration
+                                if bucket > last_hour then last_hour = bucket end
+                            end
                         end
                         day_pages[day] = (day_pages[day] or 0) + (tonumber(chapter.pagesRead) or 0)
                     end
@@ -212,6 +272,11 @@ function Stats.fromHistory(entries, ctx)
             local row = statsRow(source_id, DAY_PREFIX .. tostring(day), "day", day, duration, fetched_at)
             row.event_count = math.max(0, day_pages[day] or 0)
             rows[#rows + 1] = row
+        end
+    end
+    for hour, duration in pairs(hour_durations) do
+        if duration > 0 then
+            rows[#rows + 1] = statsRow(source_id, HOUR_PREFIX .. tostring(hour), "hour", hour, duration, fetched_at)
         end
     end
     if grand_total > 0 then
@@ -242,10 +307,11 @@ function Stats.fromHistory(entries, ctx)
         replace = {
             mode = "ranges",
             ranges = {
-                -- 全量重拉：窗口一直连到最后观测日的日终，清掉本次回包里已消失的日桶。
-                -- 上界不能只取拉取时刻：时区回退 UTC 且设备为负偏移时，服务端的「当天」比设备
-                -- 本地的拉取时刻晚，桶零点会落在窗口外、当天桶清不掉（残留到下一轮）。
+                -- 全量重拉：窗口一直连到最后观测日 / 整点的桶止，清掉本次回包里已消失的桶。
+                -- 上界不能只取拉取时刻：服务端「当天」可能晚于设备本地的拉取时刻（设备为负偏移），
+                -- 桶零点会落在窗口外、清不掉（残留到下一轮）。
                 { stable_prefix = DAY_PREFIX, from_ts = 0, to_ts = math.max(fetched_at, last_day + 86399) },
+                { stable_prefix = HOUR_PREFIX, from_ts = 0, to_ts = math.max(fetched_at, last_hour + 3599) },
                 { stable_prefix = TOTAL_ID, from_ts = 0, to_ts = 0 },
             },
             -- 上次 ∪ 本次：身份漂移后旧身份不再出现在回包里，只能按它精确清。

@@ -8,7 +8,7 @@ UI 页面按需加载：
   1. insight/overview.lua - 概览与日历
   2. insight/day.lua      - 当日书单
   3. insight/records.lua  - 连续记录与年度图表
-  4. insight/hours.lua    - 阅读时段（仅本机记录）
+  4. insight/hours.lua    - 阅读时段（本机记录 + 云端时段桶）
 
 @module koplugin.book.desktop.pages.insight
 --]]
