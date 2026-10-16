@@ -292,6 +292,8 @@ return {
     ["识别语言已安装"] = "OCR language installed",
     ["识别语言已安装，并用于当前书"] = "OCR language installed and applied to current book",
     ["默认"] = "Default",
+    ["反转翻页键"] = "Invert page-turn keys",
+    ["交换前进与后退键，与 KOReader 设置同步"] = "Swap forward/back keys (synced with KOReader)",
     ["桌面物理翻页键"] = "Desktop page-turn keys",
     ["用侧键或音量键翻图书馆、书城、首页、统计的页"] = "Use side or volume keys to turn pages in Library, Store, Home and Stats",
     ["启动打开桌面时，点击顶部菜单的抽屉图标回到月读"] = "When opening on start, tapping the drawer icon in the top menu returns to 月读",
