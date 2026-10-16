@@ -22,6 +22,25 @@ package.preload["utils.settings"] = function()
     }
 end
 
+-- CI 无 KOReader 的 frontend/dump.lua：打桩成等价的 Lua 字面量序列化
+package.loaded["dump"] = nil
+package.preload["dump"] = function()
+    local function dump(value)
+        local kind = type(value)
+        if kind == "string" then return string.format("%q", value) end
+        if kind ~= "table" then return tostring(value) end
+        local keys = {}
+        for key in pairs(value) do keys[#keys + 1] = key end
+        table.sort(keys, function(x, y) return tostring(x) < tostring(y) end)
+        local parts = {}
+        for _, key in ipairs(keys) do
+            parts[#parts + 1] = "[" .. dump(key) .. "]=" .. dump(value[key])
+        end
+        return "{" .. table.concat(parts, ",") .. "}"
+    end
+    return dump
+end
+
 local Backup = require("features.remote.backup")
 local encoded
 package.loaded["json"] = { encode = function(v) encoded = v return "{}" end }
@@ -123,3 +142,6 @@ Assert.eq(fail[1], 400)
 Assert.is_nil(restarted)
 Backup.route(server, {}, "DELETE", {})
 Assert.eq(fail[1], 405)
+
+package.preload["dump"] = nil
+package.loaded["dump"] = nil
