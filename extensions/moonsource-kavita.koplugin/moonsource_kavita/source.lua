@@ -742,8 +742,10 @@ function Source:pullStatsAsync(cb)
         })
         -- 缺行卷物化（12 号票）：身份与条目都已就绪，用同一批数据补本机没有书行的卷，
         -- 展示端（洞察当日书单 / 单书详情 / 锁屏账单）才有书名。不进书架同步结果、不调对账。
-        -- 写入数随结果回给核心：纯书行物化也要让桌面知道「统计变了」（stats_changed）。
-        result.materialized = materializeVolumes(result.identities, titles)
+        -- 不做独立变更信号：物化行只在统计视图里可见，可见的前提是同一次拉取写入了统计行 →
+        -- pulled > 0 已让桌面发 stats_changed；零统计行的纯物化没有任何可见变化。
+        -- 也不为此改核心：spec 硬约束「核心插件零改动，只以扩展接入既有契约」。
+        materializeVolumes(result.identities, titles)
         -- 落库成功（核心的 result.commit）才更新状态：失败不前进，
         -- 上次身份还在，身份漂移留下的孤儿行下次还能清。
         result.commit = function()

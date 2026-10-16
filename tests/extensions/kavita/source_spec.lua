@@ -1232,7 +1232,7 @@ do
         return json({
             { seriesId = 8661, localDate = "2026-10-10T00:00:00",
                 chapters = { { chapterId = 12763, durationSeconds = 120, pagesRead = 0 } } },
-            -- 云端读过、本机没有书行的卷：物化补身份行，写入数一并回给核心（只为触发统计刷新）。
+            -- 云端读过、本机没有书行的卷：同一次同步的拉取照常物化补身份行（12 号票语义）。
             { seriesId = 10560, localDate = "2026-10-10T00:00:00",
                 chapters = { { chapterId = 16493, durationSeconds = 60, pagesRead = 0 } } },
         }, { Pagination = pagination_header(1, 1) })
@@ -1255,7 +1255,6 @@ do
     Assert.eq(result.pulled, #replaced.rows)
     Assert.eq(remembered["10560:16493"] and remembered["10560:16493"].title, "镖人 · 一",
         "物化标题取状态文件里的持久化卷名")
-    Assert.eq(result.materialized, 1, "物化写入的行数回给核心（桌面据此判断统计变了）")
 
     -- dirty_only（推脏队列）：只做本地确认，不发请求——拉取挂在打开 / 切换与手动刷新上。
     pending_stats = { {
