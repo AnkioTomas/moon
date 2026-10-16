@@ -53,7 +53,9 @@ end
 ---@param fail_msg string|nil 回包没给错误时的提示
 ---@param ok fun(wire: table)
 function Push:call(start, fail_msg, ok)
-    self.job = start(function(wire, err)
+    self.seq = (self.seq or 0) + 1
+    local seq = self.seq
+    local handle = start(function(wire, err)
         self.job = nil
         if self.cancelled then return end
         if not wire then
@@ -62,6 +64,8 @@ function Push:call(start, fail_msg, ok)
         end
         ok(wire)
     end)
+    -- 回调同步触发时已发出下一个请求，不能用旧句柄覆盖它（同 http/mirror）。
+    if self.seq == seq then self.job = handle end
 end
 
 --- 逐个串行处理：step 完成后调 next 进下一个，全部完成调 done；step 失败不调 next 即中止。

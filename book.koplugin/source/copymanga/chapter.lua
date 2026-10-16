@@ -140,7 +140,8 @@ function Chapter.materializeAsync(client, identity, chapter, on_progress, cb)
                 require("ui/uimanager"):nextTick(require("ui.guard").wrap("copymanga image", nextImage))
                 return
             end
-            state.active = require("http.request").download({
+            local mine = current
+            local handle = require("http.request").download({
                 url = url,
                 headers = Client.headers(client.token),
                 timeout = require("http.timeout").net(3),
@@ -157,6 +158,8 @@ function Chapter.materializeAsync(client, identity, chapter, on_progress, cb)
                 current = current + 1
                 nextImage()
             end)
+            -- 回调同步触发时已发出下一个请求，不能用旧句柄覆盖它（同 http/mirror）。
+            if current == mine then state.active = handle end
         end
         nextImage()
     end)

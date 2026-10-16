@@ -101,10 +101,15 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     --- 取一个正文分片（st=0）；已取消则丢弃回包。
     ---@param endpoint string 正文接口路径
     ---@param done fun(raw: string|nil, err: any) 原始 JSON 串
+    local seq = 0
     local function shard(endpoint, done)
-        active_job = requestShard(bookId, uid, psvts, endpoint, false, function(raw, err)
+        seq = seq + 1
+        local mine = seq
+        local handle = requestShard(bookId, uid, psvts, endpoint, false, function(raw, err)
             if not cancelled then done(raw, err) end
         end)
+        -- 回调同步触发时已发出下一个请求，不能用旧句柄覆盖它（同 http/mirror）。
+        if seq == mine then active_job = handle end
     end
     shard("/web/book/chapter/e_0", function(e0, e0err)
         if not e0 then

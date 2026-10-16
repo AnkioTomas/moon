@@ -102,7 +102,8 @@ function Client:shelfSyncAsync(cb)
             batch[#batch + 1] = ids[i]
         end
         index = index + #batch
-        active = self:apiGetAsync(
+        local mine = index
+        local handle = self:apiGetAsync(
             "/jdread/api/ebooks/lite/" .. table.concat(batch, ","),
             nil,
             function(wire, err)
@@ -113,9 +114,11 @@ function Client:shelfSyncAsync(cb)
                 nextBatch()
             end
         )
+        -- 回调同步触发时已发出下一个请求，不能用旧句柄覆盖它（同 http/mirror）。
+        if index == mine then active = handle end
     end
 
-    active = self:apiGetAsync("/jdread/api/bookshelf/sort", nil, function(wire, err)
+    local first = self:apiGetAsync("/jdread/api/bookshelf/sort", nil, function(wire, err)
         if cancelled then return end
         if not wire then cb(nil, err); return end
         local data = type(wire.data) == "table" and wire.data or {}
@@ -130,6 +133,8 @@ function Client:shelfSyncAsync(cb)
         end
         nextBatch()
     end)
+    -- 同步回包时 nextBatch 已登记了分批请求，不能用书架排序的旧句柄覆盖。
+    if not active then active = first end
     return { cancel = function()
             cancelled = true
             active.cancel()
@@ -188,8 +193,11 @@ function Client:catalogAsync(book_id, cb)
     ---@type { cancel: fun() }
     local active
 
+    local seq = 0
     local function nextPage()
-        active = self:apiGetAsync(path, { page_size = CATALOG_PAGE_SIZE, index = #rows }, function(wire, err)
+        seq = seq + 1
+        local mine = seq
+        local handle = self:apiGetAsync(path, { page_size = CATALOG_PAGE_SIZE, index = #rows }, function(wire, err)
             if cancelled then return end
             if not wire then cb(nil, err); return end
             local data = type(wire.data) == "table" and wire.data or {}
@@ -203,6 +211,8 @@ function Client:catalogAsync(book_id, cb)
             wire.data = data
             cb(wire)
         end)
+        -- 回调同步触发时已发出下一个请求，不能用旧句柄覆盖它（同 http/mirror）。
+        if seq == mine then active = handle end
     end
     nextPage()
     return { cancel = function()
