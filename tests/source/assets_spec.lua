@@ -106,3 +106,17 @@ do
     Assert.eq(f:read("*a"), data)
     f:close()
 end
+
+do -- 首图同步失败立刻拉下一张时，cancel 取消的是正在下载的那张，而不是已结束的旧句柄
+    local cancelled, n = {}, 0
+    local job = Assets.localizeAsync('<img src="http://a/1.png"/><img src="http://a/2.png"/>', images_dir,
+        function(_url, cb)
+            n = n + 1
+            local me = n
+            if me == 1 then cb(nil, "sync fail") end
+            return { cancel = function() cancelled[#cancelled + 1] = me end }
+        end, function() end)
+    job.cancel()
+    Assert.eq(#cancelled, 1)
+    Assert.eq(cancelled[1], 2)
+end

@@ -119,11 +119,12 @@ function Assets.localizeAsync(html, images_dir, download, cb)
         if cancelled then return end
         local url = urls[index]
         index = index + 1
+        local mine = index
         if not url then
             cb(Assets.rewriteImageSources(html, url_hrefs))
             return
         end
-        active_job = download(url, function(raw)
+        local handle = download(url, function(raw)
             if cancelled then return end
             if raw then
                 local href = Assets.materializeImage(images_dir, raw)
@@ -133,6 +134,8 @@ function Assets.localizeAsync(html, images_dir, download, cb)
             end
             nextUrl()
         end)
+        -- 回调同步触发时已发出下一个请求，不能用旧句柄覆盖它（同 http/mirror）。
+        if index == mine then active_job = handle end
     end
     nextUrl()
     return { cancel = function()
