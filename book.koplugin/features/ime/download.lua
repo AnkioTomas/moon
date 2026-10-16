@@ -161,22 +161,29 @@ local function assemble(manifest, dir, dest, progress)
         for _idx, part in ipairs(manifest.parts) do
             local f = assert(io.open(dir .. "/" .. part.file, "rb"))
             local part_hash = sha256()
-            while true do
-                local data, read_err = f:read(256 * 1024)
-                if not data then
-                    assert(not read_err, read_err)
-                    break
+            -- 读写出错也要先关两个句柄再抛
+            local read_ok, read_fail = pcall(function()
+                while true do
+                    local data, read_err = f:read(256 * 1024)
+                    if not data then
+                        assert(not read_err, read_err)
+                        break
+                    end
+                    part_hash(data)
+                    full_hash(data)
+                    assert(out:write(data))
+                    total = total + #data
+                    if total >= next_report then
+                        progress(total)
+                        next_report = total + step
+                    end
                 end
-                part_hash(data)
-                full_hash(data)
-                assert(out:write(data))
-                total = total + #data
-                if total >= next_report then
-                    progress(total)
-                    next_report = total + step
-                end
+            end)
+            f:close()
+            if not read_ok then
+                out:close()
+                error(read_fail, 0)
             end
-            assert(f:close())
             if part_hash() ~= part.sha256:lower() then
                 -- 只丢掉坏片，保留其它已完成分片供下次续传。
                 out:close()

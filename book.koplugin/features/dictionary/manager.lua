@@ -146,18 +146,25 @@ local function assembleAndExtract(item, dir, target)
         local part_path = dir .. "/" .. part.file
         local file = assert(io.open(part_path, "rb"))
         local part_hash, part_size = sha256(), 0
-        while true do
-            local data, read_err = file:read(256 * 1024)
-            if not data then
-                assert(not read_err, read_err)
-                break
+        -- 读写出错也要先关两个句柄再抛
+        local ok, err = pcall(function()
+            while true do
+                local data, read_err = file:read(256 * 1024)
+                if not data then
+                    assert(not read_err, read_err)
+                    break
+                end
+                part_hash(data)
+                full_hash(data)
+                assert(output:write(data))
+                part_size = part_size + #data
             end
-            part_hash(data)
-            full_hash(data)
-            assert(output:write(data))
-            part_size = part_size + #data
-        end
+        end)
         file:close()
+        if not ok then
+            output:close()
+            error(err, 0)
+        end
         if part_size ~= tonumber(part.size) or part_hash() ~= part.sha256:lower() then
             output:close()
             os.remove(part_path)
