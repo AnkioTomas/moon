@@ -174,3 +174,18 @@ do
     pos = Mapper.progress({ book = { chapterUid = "u7", progress = 1 } })
     Assert.is_nil(pos.chapter_fraction)
 end
+
+-- 云端最近阅读时间：书行 readUpdateTime 与 bookProgress.updateTime 取较新的
+do
+    local b = Mapper.book({ bookId = "wx-r", title = "R", readUpdateTime = 1700000000 })
+    Assert.eq(b.read_at, 1700000000)
+    Mapper.applyProgress(b, { bookId = "wx-r", progress = 10, updateTime = 1700000500 })
+    Assert.eq(b.read_at, 1700000500)
+    Mapper.applyProgress(b, { bookId = "wx-r", progress = 10, updateTime = 1600000000 })
+    Assert.eq(b.read_at, 1700000500, "旧的不覆盖新的")
+    local list = Mapper.shelfList({
+        books = { { bookId = "a", title = "A" } },
+        bookProgress = { { bookId = "a", progress = 5, updateTime = 1234 } },
+    })
+    Assert.eq(list.data[1].read_at, 1234)
+end

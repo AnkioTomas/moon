@@ -314,10 +314,10 @@ function Catalog.listBooks(source_id, opts)
     local BookDB = require("book.books_db")
     require("book.progress_db")
     local where, args = DB.sourceClause("b.source_id", source_id)
-    -- 「最近阅读」列的是读过的书：Kavita 卷行这种「非书架成员但仍是有效身份」的也算；
-    -- 其它排序 / 筛选只列在架书。
+    -- 「最近阅读」列整个书架：在架书全列；Kavita 卷行这种「非书架成员但仍是有效身份」的
+    -- 只在有进度时进来（进度记在卷行上）。其它排序 / 筛选只列在架书。
     where = where .. (opts.sort == "recent_read"
-        and " AND " .. BookDB.readableClause("b")
+        and " AND (b.deleted=0 OR (" .. BookDB.readableClause("b") .. " AND p.stable_id IS NOT NULL))"
         or " AND b.deleted=0")
     if type(opts.source_id) == "string" and opts.source_id ~= "" then
         where = where .. " AND b.source_id=?"
@@ -356,12 +356,9 @@ function Catalog.listBooks(source_id, opts)
     if opts.downloaded then
         where = where .. " AND " .. BookDB.downloadedClause(opts.chapter_sources, args)
     end
-    -- 「最近阅读」是「读过的书按最近一次读排序」：没进度行的书根本没读过，
-    -- 不该混在列表里（否则整库都会排在后面）。其余排序保持 LEFT JOIN，全库都列。
+    -- 一律 LEFT JOIN：「最近阅读」按 max(本机进度时间, 云端最近阅读时间 b.read_at) 倒序，
+    -- 都没有的书排在后面按加入时间倒序。首页「最近阅读 / 当前阅读」走 ProgressDB.recent，仍只列有进度的书。
     local join = " LEFT JOIN pending_progress p ON p.source_id=b.source_id AND p.stable_id=b.stable_id"
-    if opts.sort == "recent_read" then
-        join = " JOIN pending_progress p ON p.source_id=b.source_id AND p.stable_id=b.stable_id"
-    end
     local count_raw = DB.rowexec("SELECT COUNT(*) FROM books b" .. join .. " WHERE " .. where .. ";", unpack(args))
     if count_raw == nil then
         return {}, 0, "query failed"
@@ -375,7 +372,7 @@ function Catalog.listBooks(source_id, opts)
     local sort_sql = {
         title = "COALESCE(b.title, '') COLLATE NOCASE %s, b.stable_id ASC",
         author = "COALESCE(b.authors, '') COLLATE NOCASE %s, COALESCE(b.title, '') COLLATE NOCASE %s, b.stable_id ASC",
-        recent_read = "COALESCE(p.updated_at, 0) DESC, b.stable_id ASC",
+        recent_read = "MAX(COALESCE(p.updated_at, 0), b.read_at) DESC, b.inserted_at DESC, b.stable_id ASC",
         recent_added = "b.inserted_at DESC, b.stable_id ASC",
     }
     local order = (sort_sql[opts.sort] or sort_sql.recent_added)

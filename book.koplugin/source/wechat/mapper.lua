@@ -82,6 +82,7 @@ function Mapper.book(row)
         category = book.category,
         series = book.series,
         cover = cover,
+        read_at = tonumber(book.readUpdateTime),
         -- publishTime 形如 "2022-01-01 00:00:00"；newRating 是千分制推荐值（955 = 95.5%）。
         -- 规范化（只留年月、10 分制一位小数）在 BookDB 入库时做。
         meta = {
@@ -155,6 +156,9 @@ function Mapper.applyProgress(book, p)
     if p.finishReading == 1 or p.finishReading == true then
         book.percent = 100
     end
+    -- bookProgress.updateTime：任一设备最近一次读这本书的时间（秒）
+    local at = tonumber(p.updateTime)
+    if at and at > (tonumber(book.read_at) or 0) then book.read_at = at end
     return book
 end
 
