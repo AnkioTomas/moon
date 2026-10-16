@@ -12,7 +12,7 @@ Kit.install("paper")
 local BUILTIN = {
     "clock", "weather", "clock_weather", "weather_forecast", "stats", "heatmap", "hitokoto", "excerpt",
     "history", "news",
-    "recent_hero", "recent_list", "recent_cards",
+    "recent_hero", "recent_list", "recent_cards", "random", "shelf",
 }
 for _idx, id in ipairs(BUILTIN) do
     package.preload["desktop.pages.home." .. id] = function() return { id = id, label = id } end
@@ -36,7 +36,7 @@ local Registry = require("desktop.pages.home.registry")
 Assert.eq(listed, 0, "加载模块时不碰源注册表：KOReader 加载插件期间第三方源还扫不全")
 local components = Registry.list()
 Assert.len(components, #BUILTIN + 1)
-Assert.eq(components[#BUILTIN].id, "recent_cards", "内置在前")
+Assert.eq(components[#BUILTIN].id, "shelf", "内置在前")
 Assert.eq(components[#BUILTIN + 1], deck)
 Assert.eq(Registry.list(), components, "只收集一次")
 Assert.eq(listed, 1)

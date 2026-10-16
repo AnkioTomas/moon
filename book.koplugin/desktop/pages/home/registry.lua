@@ -16,7 +16,7 @@ local M = {}
 local COMPONENT_MODULES = {
     "clock", "weather", "clock_weather", "weather_forecast", "stats", "heatmap", "hitokoto", "excerpt",
     "history", "news",
-    "recent_hero", "recent_list", "recent_cards",
+    "recent_hero", "recent_list", "recent_cards", "random", "shelf",
 }
 
 ---@type BookHomeComponent[]|nil
