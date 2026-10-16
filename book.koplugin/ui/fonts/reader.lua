@@ -1,5 +1,5 @@
 --[[--
-把月读字体应用到当前阅读文档：切 CRE 字体、写 sidecar、落全书排版偏好。
+把月读字体应用到当前阅读文档：切 CRE 字体、写 sidecar。
 
 @module koplugin.book.ui.fonts.reader
 --]]
@@ -23,7 +23,7 @@ function FontReader.currentId(ui)
     return ui.doc_settings:readSetting("book_reader_font_id") or ""
 end
 
---- 把字体应用到当前文档，写入 sidecar，并把全书排版偏好落库。
+--- 把字体应用到当前文档并写入 sidecar；全书排版偏好由调用方落库（ui 层不反向依赖 reader）。
 ---@param ui table|nil
 ---@param id string
 ---@param name string|nil
@@ -49,7 +49,6 @@ function FontReader.apply(ui, id, name)
     ui.doc_settings:saveSetting("book_reader_font_name", name or id)
     ui.doc_settings:flush()
     logger.dbg("book font applied", ui.document.file or "", "id=" .. tostring(id), "face=" .. face)
-    require("reader.prefs").captureAndSave(ui)
     require("ui/uimanager"):setDirty(ui.dialog, "ui")
     return true
 end

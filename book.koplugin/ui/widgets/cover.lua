@@ -32,8 +32,9 @@ end
 --- 点封面打开书的回调：封面盖「正在打开」条，打开结束或改开另一本时揭掉。
 ---@param owner table 持有 _opening_cover/_opening_bar/_open_token 的视图实例
 ---@param ctx table 构建上下文，提供插件与桌面宿主
+---@param open fun(plugin: BookPlugin, book: Book, done: fun()) 打开书（由调用方注入，ui 层不反向依赖 desktop）
 ---@return fun(book: Book, cover: table, cw: number, ch: number)
-function CoverCell.opener(owner, ctx)
+function CoverCell.opener(owner, ctx, open)
     return function(book, cover, cw, ch)
         local desktop = ctx.desktop
         local plugin = ctx.plugin or (desktop and desktop.plugin)
@@ -47,7 +48,7 @@ function CoverCell.opener(owner, ctx)
         if desktop then UIManager:setDirty(desktop, "ui") end
         UIManager:nextTick(require("ui.guard").wrap("open book", function()
             if owner._open_token ~= token then return end
-            require("desktop.open").book(plugin, book, function()
+            open(plugin, book, function()
                 if owner._open_token ~= token then return end
                 owner._open_token = nil
                 clearOpening(owner)

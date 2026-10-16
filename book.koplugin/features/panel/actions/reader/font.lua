@@ -2,7 +2,6 @@
 @module koplugin.book.features.panel.actions.reader.font
 --]]
 
-local UIManager = require("ui/uimanager")
 local FontReader = require("ui.fonts.reader")
 local T = require("ffi/util").template
 local _ = require("gettext")
@@ -19,6 +18,7 @@ local function pickerOpts(ui)
         on_select = function(_item, id, name)
             local ok, err = FontReader.apply(ui, id, name)
             if ok then
+                require("reader.prefs").captureAndSave(ui)
                 require("ui.themes.widgets.toast"):new{
                     text = T(_("已选择：%1"), name),
                     timeout = 2,
