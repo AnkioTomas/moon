@@ -3,10 +3,15 @@ Source 注册表：源 id 清单、实例缓存（每个 id 一个实例）、�
 活跃源只是配置里的 id，实例与其它源共用同一张缓存表。
 不做静默 fallback；唯一例外是当前不可用的源 id（如不在 Kindle 上的 kindle，或卸载了的第三方源），activeId 退回 local。
 
-第三方源：任何已启用的 KOReader 插件根目录里放 `moon_source.lua` 即登记一个源（契约见 examples/moonsource-demo.koplugin/moon_source.lua），
-按 PluginLoader.enabled_plugins 扫描，排在内置源之后；插件全部加载完后才缓存扫描结果。
+第三方插件：任何已启用的 KOReader 插件根目录里放 `moon_source.lua` 即登记一个月读扩展（契约见
+examples/moonsource-demo.koplugin/moon_source.lua），按 PluginLoader.enabled_plugins 扫描，排在内置源之后；插件全部加载完后才缓存扫描结果。
+扩展自己声明能力：
+  - 描述表带 `provides` 表：只有 provides.source == true 才登记为书源；provides.home_widgets 是首页组件数组。
+  - 没有 provides（旧描述文件）：除非顶层 `source = false`，一律当书源；首页组件取顶层 `home`。
+  - 书源要 meta() / new()，id 取 meta().id；非书源不要求 meta/new，id 取描述表的 `id`。id 都必须是 ext.<name>。
+Registry.extensions() 按加载顺序列出全部扩展（含非书源），供桌面等上层读取首页组件；本模块不 require 桌面。
 
-描述文件不合约定（api ~= Registry.API、缺 meta/new、id 不是 ext.<name>、与已登记 id 重名、加载抛错）或 new() 抛错：
+描述文件不合约定（api ~= Registry.API、书源缺 meta/new、id 不是 ext.<name>、与已登记 id 重名、加载抛错）或 new() 抛错：
 记错误日志并跳过，第三方代码不拖垮内置源。enabled_sources 为 nil 或集合里没有的 id 算启用，只有显式 false 是禁用；活跃源不能禁用。
 resolve(id) 取书的属主实例，不改活跃源（打开旧书不串源的关键）；登录态或连接配置变了用 reload()。
 
@@ -34,20 +39,46 @@ local ids
 local known = {}
 ---@type table<SourceId, table> 第三方源 id → 描述表 { api, meta, new, setting? }
 local external = {}
+---@class MoonExtension
+---@field id string 扩展 id（ext.<name>）
+---@field desc table 描述表
+---@field source boolean 是否登记为书源
+---@field home_widgets table[] 声明的首页组件（未校验）
+
+---@type MoonExtension[]
+local extensions = {}
 
 ---@type table<SourceId, BookSource>
 local instances = {}
 
+--- 描述表声明的能力：有 provides 表时按它声明；旧描述文件默认是书源（顶层 source = false 除外）。
+---@param desc table
+---@return boolean is_source, table[] home_widgets
+function Registry.capabilities(desc)
+    local provides = desc.provides
+    if type(provides) == "table" then
+        local widgets = provides.home_widgets
+        return provides.source == true, type(widgets) == "table" and widgets or {}
+    end
+    return desc.source ~= false, type(desc.home) == "table" and desc.home or {}
+end
+
 --- 读一个第三方描述文件，不合约定就抛错。
 ---@param path string
----@return SourceId id, table desc
+---@return SourceId id, table desc, boolean is_source, table[] home_widgets
 local function readDescriptor(path)
     local desc = dofile(path)
     assert(type(desc) == "table" and desc.api == Registry.API, "api mismatch, want " .. Registry.API)
-    assert(type(desc.meta) == "function" and type(desc.new) == "function", "meta() and new() required")
-    local id = desc.meta().id
+    local is_source, widgets = Registry.capabilities(desc)
+    local id
+    if is_source then
+        assert(type(desc.meta) == "function" and type(desc.new) == "function", "meta() and new() required")
+        id = desc.meta().id
+    else
+        id = desc.id
+    end
     assert(type(id) == "string" and id:match("^ext%.[%w_%-]+$"), "id must look like ext.<name>")
-    return id, desc
+    return id, desc, is_source, widgets
 end
 
 --- 本插件根目录，与 PluginLoader 给的 plugin.path 同一字符串（模块经 `<plugin.path>/?.lua` 加载）。
@@ -80,8 +111,9 @@ local function sourceIds()
         seen.kindle = true
     end
     local plugins = require("pluginloader").enabled_plugins
+    local exts = {}
     if not pluginsLoaded(plugins) then
-        known, external = seen, ext
+        known, external, extensions = seen, ext, exts
         return list
     end
     local lfs = require("libs/libkoreader-lfs")
@@ -89,19 +121,26 @@ local function sourceIds()
         local path = plugin.path .. "/" .. DESCRIPTOR
         if lfs.attributes(path, "mode") == "file" then
             -- 第三方代码不归月读管：坏一个只记日志跳过，不能拖垮内置源和整个桌面。
-            local ok, id, desc = pcall(readDescriptor, path)
+            local ok, id, desc, is_source, widgets = pcall(readDescriptor, path)
             if not ok then
                 logger.err("book.source external rejected", path, id)
             elseif seen[id] then
                 logger.err("book.source external duplicate id", path, id)
             else
-                list[#list + 1] = id
                 seen[id] = true
-                ext[id] = desc
+                exts[#exts + 1] = { id = id, desc = desc, source = is_source, home_widgets = widgets }
+                if is_source then
+                    list[#list + 1] = id
+                    ext[id] = desc
+                end
             end
         end
     end
-    ids, known, external = list, seen, ext
+    -- known 只收书源：非书源扩展的 id 只用来防重名
+    for _idx, item in ipairs(exts) do
+        if not item.source then seen[item.id] = nil end
+    end
+    ids, known, external, extensions = list, seen, ext, exts
     return ids
 end
 
@@ -118,6 +157,13 @@ end
 function Registry.external(id)
     sourceIds()
     return external[id]
+end
+
+--- 全部第三方扩展（含非书源），按插件加载顺序；KOReader 加载插件期间为空表。
+---@return MoonExtension[]
+function Registry.extensions()
+    sourceIds()
+    return extensions
 end
 
 --- 持久化的活跃源 id（common.active_source）；未配置或该源已下线时为 "local"。
