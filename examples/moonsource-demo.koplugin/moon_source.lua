@@ -6,8 +6,12 @@ KOReader 加载完全部插件后，月读在首次访问源注册表时 dofile 
 自己的子模块放进带唯一前缀的目录（如 moonsource_demo/client.lua → require("moonsource_demo.client")），
 别用 client / utils 这类通用名：所有插件共用一个 package.path，同名模块谁先加载算谁的。
 
-契约（第三方书源 = 独立 KOReader 插件：_meta.lua、返回空 WidgetContainer 的 main.lua、本文件）：
-- 描述表 { api, meta, new, setting?, home? }。api 必须等于月读的 Registry.API；meta() 无 IO；new() 返回继承 source.base 的实例。
+契约（月读扩展 = 独立 KOReader 插件：_meta.lua、返回空 WidgetContainer 的 main.lua、本文件）：
+- 扩展自己声明能力：描述表 { api, provides = { source = true|false, home_widgets = {...} }, ... }。
+  有 provides 时只有 source == true 才是书源；没有 provides 的旧描述文件默认是书源（顶层 source = false 除外），
+  首页组件取顶层 home。不是书源的扩展（只加首页组件等）写 { api, id = "ext.<name>", provides = { source = false, home_widgets = {...} } }，
+  不需要 meta / new，完整示例见 examples/moonwidget-demo.koplugin。
+- 书源描述表 { api, provides?, meta, new, setting? }。api 必须等于月读的 Registry.API；meta() 无 IO；new() 返回继承 source.base 的实例。
 - id 必须是 ext.<name>（字母数字 _-），写进书库和配置文件名，发布后不能改；重名时先加载的生效。不合约定只记日志不加载。
 - type 只有 book（交整本文件）和 chapter（按章交 HTML）。Book 至少有 source_id / stable_id / title，stable_id 同样不能改。
 - 至少实现 configured()、syncBooksAsync（快照交 source.shelf.reconcile；dirty_only 无删除接口就 skipped）、
@@ -18,7 +22,12 @@ KOReader 加载完全部插件后，月读在首次访问源注册表时 dofile 
   book.progress_db（get、upsertRemote）、book.note.normalize、utils.paths / settings / log / text、http.request、
   ui.themes.widgets.*、ui.widgets.book、desktop.pages.home.base。顶层不 require KOReader UI，离线判断用 isConnected。
 - setting：rows(plugin) 自画整节，或 open(plugin) + 可选 rowStatus / rowTitle / rowIcon；remote 字段数组会出现在远程管理「连接配置」（secret = true 脱敏）。
-- home：首页组件数组，id 以 ext. 开头，继承 desktop.pages.home.base，请求在 onActivate 发、onDeactivate 取消。
+- home_widgets（旧写法 home）：首页组件数组，出现在首页编辑的「添加组件」里，跟内置组件一样摆放。两种写法：
+  · 简写表 { id, title, build = fun(ctx, w, h): widget, icon?, height? 或 heightRange = fun(ctx, opts): { height }, settings? = fun(desktop, id) }，
+    id 可只写短名，月读补成 <扩展 id>.<短名>；build 用 ui.themes.widgets.* 拼控件，返回的控件占满 w × h。
+  · 完整组件类：继承 desktop.pages.home.base，id 写全名 <扩展 id>.<名>，请求在 onActivate 发、onDeactivate 取消。
+  组件代码出错只记日志、画空白，不影响首页；id 不以 <扩展 id>. 开头或重名的不加载。
+  插件卸载 / 禁用后组件不显示，首页布局里的位置保留，重装后回到原处。
 - 新装默认启用；卸载后若是当前源退回本地，书留在书库不显示，重装同一 id 恢复。
 --]]
 
@@ -111,8 +120,29 @@ local function meta()
     return { id = ID, name = _("示例书源"), type = "chapter" }
 end
 
+--- 首页组件（简写表）：一行提示，点一下打开示例书。
+local hello = {
+    id = "hello", -- 月读补成 ext.demo.hello
+    title = _("示例书源提示"),
+    icon = "menu_book",
+    build = function(ctx, w, h)
+        local CenterContainer = require("ui/widget/container/centercontainer")
+        local Geom = require("ui/geometry")
+        local Tap = require("ui.themes.widgets.tap")
+        local Text = require("ui.themes.widgets.text")
+        local label = Text.line("body", _("来自示例书源的首页组件 · 点我打开示例书"), { width = w })
+        return Tap.wrap(CenterContainer:new{ dimen = Geom:new{ w = w, h = h }, label }, function()
+            require("desktop.pages.home.base").openBook(ctx, demoBook())
+        end)
+    end,
+    heightRange = function()
+        return { height = require("ui.themes.widgets.text").line("body", "国"):getSize().h * 2 }
+    end,
+}
+
 return {
     api = 1,
+    provides = { source = true, home_widgets = { hello } },
     meta = meta,
     new = function()
         return setmetatable(meta(), Source)
