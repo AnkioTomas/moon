@@ -120,4 +120,10 @@ function Baike.onCreate()
     end
 end
 
+-- 扩展点登记（features 加载器 require 本模块时执行一次；见 utils/extension.lua）。
+-- 百科接管划词菜单的「维基百科」按钮（事件 id 不变），只改按钮名。
+require("utils.extension").add("highlight.relabel", function(key)
+    if key == "wikipedia" and Baike.isEnabled() then return _("百度百科") end
+end)
+
 return Baike

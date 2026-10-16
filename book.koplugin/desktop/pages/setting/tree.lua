@@ -1,17 +1,17 @@
 --[[--
 设置树：分组 → 页面 → 分节，三层按 order 合并。
 
-条目来自两处，格式相同：核心在 `desktop/pages/setting/init.lua` 声明；feature 经 `Features.scan`
-扫描 `features/*/setting.lua`，取其 `entries(desktop)`（没有 entries 的只放配置默认值，跳过）。
+条目来自两处，格式相同：核心在 `desktop/pages/setting/init.lua` 声明；其余经扩展点 `setting.entries`
+（utils.extension）登记 `{ name, entries = fn(desktop) }`，按登记顺序收集。本模块不知道谁登记。
 
 每条必须有数字 `order`，且 `group` / `parent` 二选一：
   - `group = 分组 id`：挂到根页该分组下。带 `page`（title、可选 preview / sections）是导航行，点开叠层；
     带 `row = fn(iw)` 是直接放在分组里的行。
   - `parent = 页面 id`：往该页追加分节，`sections = fn() → BookThemeSection[]`，排在页面自带 sections 之后。
-同层按 order 升序；order 相同按收集顺序（核心在前，feature 按目录名）。
-feature 的页面 id 是 `feature:<name>:<id>`（id 省略用序号），核心页面用自己写的 id；parent 引用的就是这个 id。
-第三方扩展（Features.external("setting")）排在内置 feature 之后，页面 id 是 `feature:<扩展 id>:<id>`；
-回调经 Features.wrap 隔离，条目不合格（含未知分组 / 父页面）只记日志跳过，不像核心那样报错。
+同层按 order 升序；order 相同按收集顺序（核心在前，扩展点按登记顺序）。
+扩展点条目的页面 id 是 `feature:<name>:<id>`（id 省略用序号），核心页面用自己写的 id；parent 引用的就是这个 id。
+第三方扩展（utils.external.collect("setting")）排在其后，页面 id 是 `feature:<扩展 id>:<id>`；
+回调经 External.wrap 隔离，条目不合格（含未知分组 / 父页面）只记日志跳过，不像核心那样报错。
 
 @module koplugin.book.desktop.pages.setting.tree
 --]]
@@ -59,15 +59,16 @@ local function copy(t)
     return out
 end
 
---- 扫描收集 feature 条目；页面 id 加 `feature:<name>:` 前缀，不改 feature 返回的表。
+--- 收集扩展点条目；页面 id 加 `feature:<name>:` 前缀，不改登记方返回的表。
 ---@param desktop BookDesktop
 ---@return BookSettingEntry[]
 function Tree.features(desktop)
     local out = {}
-    for _idx, name in ipairs(require("features").scan("setting")) do
-        local mod = require("features." .. name .. ".setting")
-        if mod.entries then
-            local entries = mod.entries(desktop)
+    local Hooks = require("utils.external")
+    for _idx, source in ipairs(require("utils.extension").list("setting.entries")) do
+        local name = source.name
+        if source.entries then
+            local entries = source.entries(desktop)
             -- 单条也必须是数组。误返回一条设置表时不能静默丢掉。
             if type(entries) ~= "table" or entries.order or entries.page or entries.row or entries.sections then
                 error("feature " .. name .. " setting: entries must return a list")
@@ -80,9 +81,8 @@ function Tree.features(desktop)
             end
         end
     end
-    local Features = require("features")
-    for _idx, ext in ipairs(Features.external("setting")) do
-        local entries = Features.try(ext.id .. " setting", ext.mod.entries, desktop)
+    for _idx, ext in ipairs(Hooks.collect("setting")) do
+        local entries = Hooks.try(ext.id .. " setting", ext.mod.entries, desktop)
         if type(entries) ~= "table" or entries.order or entries.page or entries.row or entries.sections then
             require("utils.log").err("feature external setting rejected: entries must return a list", ext.id)
         else
@@ -91,13 +91,13 @@ function Tree.features(desktop)
                     local item = copy(entry)
                     local label = ext.id .. " setting"
                     item.owner, item.external = ext.id, true
-                    item.row = Features.wrap(label, entry.row)
-                    item.sections = Features.wrap(label, entry.sections)
+                    item.row = Hooks.wrap(label, entry.row)
+                    item.sections = Hooks.wrap(label, entry.sections)
                     if type(entry.page) == "table" then
                         item.id = "feature:" .. ext.id .. ":" .. (entry.id or i)
                         item.page = copy(entry.page)
-                        item.page.sections = Features.wrap(label, entry.page.sections)
-                        item.page.preview = Features.wrap(label, entry.page.preview)
+                        item.page.sections = Hooks.wrap(label, entry.page.sections)
+                        item.page.preview = Hooks.wrap(label, entry.page.preview)
                     end
                     out[#out + 1] = item
                 end

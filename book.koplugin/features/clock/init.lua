@@ -198,4 +198,7 @@ function Clock.onExit(_plugin)
     Clock._job = nil
 end
 
+-- 扩展点登记（features 加载器 require 本模块时执行一次；见 utils/extension.lua）。
+require("utils.extension").add("desktop.activated", function() Clock.autoSync() end)
+
 return Clock

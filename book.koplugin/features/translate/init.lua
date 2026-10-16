@@ -72,4 +72,7 @@ function Translate.onCreate()
     end
 end
 
+-- 扩展点登记（features 加载器 require 本模块时执行一次；见 utils/extension.lua）。
+require("utils.extension").add("note.markup_classes", require("features.translate.markup").CLASS)
+
 return Translate

@@ -1,6 +1,11 @@
 --[[--
 Feature 生命周期分发。
 
+加载：main.lua 顶层调 `Features.load()`（不点名任何 feature），按 list 顺序 require 各 feature 的 init。
+核心下层不认识 feature：feature 在自己 init 的模块顶层往 `utils.extension` 的通用挂点登记（底栏页签、
+桌面前台 / 打开后、快捷面板、顶栏读数、划词菜单、阅读器就绪 / 文档设置 / 偏好、页内标记 class 等，清单见该模块 POINTS）；
+setting.lua / topbar.lua 两种约定文件由加载器代为登记到 setting.entries / topbar.items。
+
 `list` 是唯一登记处：条目为目录名，对应模块 `features.<name>`；顺序即调用顺序
 （monkey-patch 同一 KOReader 方法的 feature 靠它定先后），不扫目录。
 
@@ -58,7 +63,6 @@ demo/ 不登记、打包时剔除。
 --]]
 
 local Guard = require("ui.guard")
-local logger = require("utils.log")
 
 local Features = {}
 
@@ -80,6 +84,14 @@ function Features.scan(file)
     table.sort(names)
     scanned[file] = names
     return names
+end
+
+--- 取某个 feature 的约定文件模块（名字来自 Features.scan），核心经端口拿到后用它，不自己拼模块路径。
+---@param name string
+---@param file string
+---@return table
+function Features.module(name, file)
+    return require("features." .. name .. "." .. file)
 end
 
 -- 顺序即 onCreate 先后。bars / sidebar 没有 onCreate，排前面只影响设置页里的行序。
@@ -106,61 +118,45 @@ Features.list = {
     "ime",
     "remote",
     "update",
+    "extensions",
 }
 
-local function settle(label, ok, ...)
-    if ok then return ... end
-    logger.err("feature external failed", label, (...))
+local External = require("utils.external")
+local Ext = require("utils.extension")
+
+-- 第三方挂点工具在核心 utils.external；这里保留旧名给 features 内部用。
+Features.try = External.try
+Features.wrap = External.wrap
+Features.prefix = External.prefix
+Features.external = External.collect
+
+local loaded = false
+
+--- 加载器：main.lua 顶层调一次（不点名任何 feature）。
+---   1. 按 list 顺序 require 每个 feature 的 init：模块顶层自己往 utils.extension 的挂点登记；
+---   2. 约定文件 setting.lua（有 entries 的）/ topbar.lua 代为登记到 setting.entries / topbar.items（按目录名）；
+---   3. 把本层的 onReaderReady 分发登记到 reader.ready。
+--- 重复调用无副作用。
+function Features.load()
+    if loaded then return end
+    loaded = true
+    for _idx, name in ipairs(Features.list) do Guard.call("feature " .. name .. " load", require, "features." .. name) end
+    Features.registerConventions()
 end
 
---- 跑一个第三方回调：出错只记日志并返回 nil。
----@param label string
----@param fn function
-function Features.try(label, fn, ...)
-    if type(fn) ~= "function" then return end
-    return settle(label, pcall(fn, ...))
-end
-
---- 把第三方回调包成隔离版本；不是函数原样返回（nil 仍是 nil）。
----@param label string
----@param fn any
-function Features.wrap(label, fn)
-    if type(fn) ~= "function" then return fn end
-    return function(...) return Features.try(label, fn, ...) end
-end
-
---- 给第三方项 id 加 `<扩展 id>.` 前缀；不是非空字符串返回 nil。
----@param ext_id string
----@param id any
----@return string|nil
-function Features.prefix(ext_id, id)
-    if type(id) ~= "string" or id == "" then return nil end
-    if id:sub(1, #ext_id + 1) == ext_id .. "." then return id end
-    return ext_id .. "." .. id
-end
-
---- 第三方扩展声明的某类 feature 挂点，按插件加载顺序：{ id = 扩展 id, mod = 解析后的表 }。
---- 模块名在这里 require，失败记日志跳过。不缓存；第二返回值为假表示插件还没加载完，调用方别缓存结果。
----@param kind "setting"|"panel"|"topbar"|"events"|"hooks"
----@return { id: string, mod: table }[] items, boolean ready
-function Features.external(kind)
-    local out = {}
-    -- 拿不到注册表（离线测试没有 pluginloader 等）就当没有第三方扩展。
-    local ok, Registry = pcall(require, "source.registry")
-    local exts = ok and Features.try("source.registry extensions", Registry.extensions)
-    if type(exts) ~= "table" then return out, true end
-    for _idx, ext in ipairs(exts) do
-        local spec = ext.features and ext.features[kind]
-        if spec ~= nil then
-            local mod = type(spec) == "string" and Features.try(ext.id .. " " .. kind, require, spec) or spec
-            if type(mod) == "table" then
-                out[#out + 1] = { id = ext.id, mod = mod }
-            else
-                logger.err("feature external rejected", ext.id, kind)
-            end
+--- 约定文件代登记（load 的第 2、3 步；单测只要设置 / 顶栏条目时也可单独调）。
+function Features.registerConventions()
+    for _idx, name in ipairs(Features.scan("setting")) do
+        if Features.module(name, "setting").entries then
+            Ext.add("setting.entries", { name = name, entries = function(desktop)
+                return Features.module(name, "setting").entries(desktop)
+            end })
         end
     end
-    return out, Registry.extensionsReady()
+    for _idx, name in ipairs(Features.scan("topbar")) do
+        Ext.add("topbar.items", function() return Features.module(name, "topbar").items() end)
+    end
+    Ext.add("reader.ready", function(plugin) Features.emit("onReaderReady", plugin) end)
 end
 
 ---@param hook string

@@ -36,4 +36,7 @@ function Ocr.fillSelection(highlight)
     return false
 end
 
+-- 扩展点登记（features 加载器 require 本模块时执行一次；见 utils/extension.lua）。
+require("utils.extension").add("highlight.fill_selection", function(highlight) return Ocr.fillSelection(highlight) end)
+
 return Ocr

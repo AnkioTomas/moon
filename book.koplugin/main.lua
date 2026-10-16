@@ -29,6 +29,9 @@ local boot_ok, boot_err = pcall(logger.boot)
 if not boot_ok then logger.warn("book boot banner failed", boot_err) end
 require("l10n")
 
+-- feature 加载器：各 feature 在自己的 init 里往 utils.extension 的通用挂点登记；这里不点名任何 feature。
+require("features").load()
+
 local SourceRegistry = require("source.registry")
 local Desktop = require("desktop")
 local Features = require("features")

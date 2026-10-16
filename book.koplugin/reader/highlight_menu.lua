@@ -11,6 +11,7 @@
 require("l10n").apply()
 
 local MoonSettings = require("utils.settings")
+local Ext = require("utils.extension")
 local _ = require("gettext")
 
 ---@class BookReaderHighlightMenu
@@ -144,9 +145,13 @@ local function wrapFactory(fn, key)
         if not button then
             return button
         end
-        if key == "wikipedia" and MoonSettings.get("features.baike").baike_enabled then
-            -- 事件 id 保持不变，实际处理已由 features.baike 接管。
-            button.text = _("百度百科")
+        -- 事件 id 保持不变；按钮行为被扩展接管时由它给新名字。
+        for _idx, relabel in ipairs(Ext.list("highlight.relabel")) do
+            local text = relabel(key)
+            if text then
+                button.text = text
+                break
+            end
         end
         local orig_show = button.show_in_highlight_dialog_func
         button.show_in_highlight_dialog_func = function()
@@ -212,7 +217,8 @@ local function patchShowMenu()
             return
         end
         -- 扫描页选区没有文字层：先 OCR，按钮才拿得到文字；识别不出来就提示并不弹菜单。
-        if not require("features.ocr").fillSelection(self) then
+        local fill = Ext.last("highlight.fill_selection")
+        if fill and not fill(self) then
             return
         end
         forgetMissing(self)

@@ -1,5 +1,5 @@
 --[[--
-设置树：经 Features.scan 收集 setting.lua 条目（id 前缀、单条误返回报错），
+设置树：经扩展点 setting.entries 收集条目（id 前缀、单条误返回报错），
 按 分组 → 页面 → 分节 三层合并，同层按 order 排序，非法条目直接报错。
 
 @module tests.desktop.settings.tree_spec
@@ -17,24 +17,18 @@ end
 
 local GROUPS = { { id = "reader", title = "阅读" }, { id = "system", title = "系统" } }
 
--- ── 收集：按 Features.scan 的顺序；页面 id 加前缀，不改 feature 返回的表 ──
-package.preload["features"] = function()
-    return {
-        scan = function(file) assert(file == "setting") return { "a", "b", "plain" } end,
-        external = function() return {}, true end,
-    }
-end
+-- ── 收集：按 setting.entries 的登记顺序；页面 id 加前缀，不改登记方返回的表 ──
+package.loaded["utils.external"] = { collect = function() return {}, true end }
+local Ext = require("utils.extension")
 local b_entries = {
     { id = "main", group = "reader", order = 5, title = "乙", page = { title = "乙", sections = sections("乙") } },
     { parent = "feature:a:1", order = 1, sections = sections("乙追加") },
 }
-package.preload["features.b.setting"] = function() return { entries = function() return b_entries end } end
-package.preload["features.a.setting"] = function()
-    return { entries = function()
-        return { { group = "system", order = 1, title = "甲", page = { title = "甲", sections = sections("甲") } } }
-    end }
+local a_entries = function()
+    return { { group = "system", order = 1, title = "甲", page = { title = "甲", sections = sections("甲") } } }
 end
-package.preload["features.plain.setting"] = function() return { defaults = { x = 1 } } end
+Ext.add("setting.entries", { name = "a", entries = function(...) return a_entries(...) end })
+Ext.add("setting.entries", { name = "b", entries = function() return b_entries end })
 
 local collected = Tree.features({})
 Assert.len(collected, 3)
@@ -105,14 +99,8 @@ Assert.errors(function()
     })
 end, "duplicate page x")
 
--- feature 误返回单条设置表
-package.preload["features.a.setting"] = function()
-    return { entries = function() return { group = "reader", order = 1, page = page } end }
-end
-package.loaded["features.a.setting"] = nil
+-- 登记方误返回单条设置表
+a_entries = function() return { group = "reader", order = 1, page = page } end
 Assert.errors(function() Tree.features({}) end, "must return a list")
-
-for _idx, name in ipairs({ "a", "b", "plain" }) do
-    package.preload["features." .. name .. ".setting"] = nil
-    package.loaded["features." .. name .. ".setting"] = nil
-end
+Ext.reset()
+package.loaded["utils.external"] = nil

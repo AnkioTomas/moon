@@ -559,4 +559,9 @@ function Bars.onReaderReady(plugin)
     Bars:startClock()
 end
 
+-- 扩展点登记（features 加载器 require 本模块时执行一次；见 utils/extension.lua）。
+local Ext = require("utils.extension")
+Ext.add("reader.doc_settings", function(doc_settings, document) return Bars.injectStatusLine(doc_settings, document) end)
+Ext.add("reader.preferences", function(ui) return Bars.applyPreferences(ui) end)
+
 return Bars

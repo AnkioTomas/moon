@@ -19,11 +19,15 @@ local SessionNote = {}
 ---@param xpointer string
 ---@return string|nil paragraph, string|nil span
 local function translationOf(document, xpointer)
-    local prefix = '<span class="' .. require("features.translate.markup").CLASS .. '"'
+    local classes = require("utils.extension").list("note.markup_classes")
+    if #classes == 0 then return nil end
     for at, segment in xpointer:gmatch("()/(span[%[%d%]]*)") do
         local span = xpointer:sub(1, at - 1) .. "/" .. segment
         local html = document:getHTMLFromXPointer(span, 0)
-        if html and html:sub(1, #prefix) == prefix then return xpointer:sub(1, at - 1), span end
+        for _idx, class in ipairs(classes) do
+            local prefix = '<span class="' .. class .. '"'
+            if html and html:sub(1, #prefix) == prefix then return xpointer:sub(1, at - 1), span end
+        end
     end
 end
 

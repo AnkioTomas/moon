@@ -60,11 +60,12 @@ SourceRegistry.extensions = function()
             }
         end } } } }
 end
-package.preload["features.panel.desktop"] = function() return { lightPercent = function() return 37 end } end
+-- 扩展点：前光读数 / 快捷面板 / feature 顶栏项（真机由 features 加载器登记，这里直接登记）
+local Ext = require("utils.extension")
+Ext.add("topbar.light_percent", function() return 37 end)
 local panels = {}
-package.preload["features.panel.native"] = function()
-    return { show = function(id) panels[#panels + 1] = id end }
-end
+Ext.add("quickpanel.show", function(id) panels[#panels + 1] = id end)
+Ext.add("topbar.items", function() return require("features.bluetooth.topbar").items() end)
 local dialogs = 0
 package.preload["workers.ui.task_dialog"] = function()
     return {
@@ -160,7 +161,7 @@ do -- 第三方项排在最后，读数与点按出错只记日志
     Assert.eq(items[#items].id, "ext.demo.pages")
 end
 
-do -- feature 的项经 features/<name>/topbar.lua 收集，按 after 插位（蓝牙紧跟 Wi-Fi），带设置页元数据
+do -- feature 的项经扩展点 topbar.items 收集，按 after 插位（蓝牙紧跟 Wi-Fi），带设置页元数据
     local items = TopBar.items()
     local ids = {}
     for i, item in ipairs(items) do ids[item.id] = i end

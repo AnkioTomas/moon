@@ -150,14 +150,14 @@ local ui = {
 local plugin = { ui = ui }
 
 local Reader = require("reader.page")
+-- 真机由 features 加载器把 onReaderReady 分发登记到 reader.ready
+require("utils.extension").add("reader.ready", function(p) require("features").emit("onReaderReady", p) end)
 local PanelReader = require("features.panel.reader")
 local actions = PanelReader.actions(ui)
-Assert.len(actions, 4)
-Assert.eq(actions[1].id, "toc")
+local action_ids = {}
+for _, a in ipairs(actions) do action_ids[#action_ids + 1] = a.id end
+Assert.eq(table.concat(action_ids, ","), "toc,highlights,xray,xray_refresh")
 Assert.eq(actions[1].icon, "menu_book")
-Assert.eq(actions[2].id, "highlights")
-Assert.eq(actions[3].id, "xray")
-Assert.eq(actions[4].id, "xray_refresh")
 
 Assert.is_false(PanelReader.executeAction("missing", ui))
 

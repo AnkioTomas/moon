@@ -200,13 +200,22 @@ function Settings:updateView()
     local desktop = self.desktop
     local entries = coreEntries(desktop)
     for _idx, entry in ipairs(Tree.features(desktop)) do entries[#entries + 1] = entry end
-    local groups = Tree.build({
+    local roots = {
         { id = "library", title = _("书库") },
         { id = "desktop", title = _("桌面") },
         { id = "reader", title = _("阅读") },
         { id = "system", title = _("系统") },
         { id = "maintenance", title = _("维护") },
-    }, entries)
+    }
+    -- 扩展分组（setting.groups）插在 after 指定的分组后，没写 after 排在最后。
+    for _idx, g in ipairs(require("utils.extension").list("setting.groups")) do
+        local at = #roots + 1
+        for i, r in ipairs(roots) do
+            if g.after and (r.id == g.after or r.after == g.after) then at = i + 1 end
+        end
+        table.insert(roots, at, { id = g.id, title = g.title, after = g.after })
+    end
+    local groups = Tree.build(roots, entries)
     local sections = {}
     for _idx, group in ipairs(groups) do
         local rows = {}
