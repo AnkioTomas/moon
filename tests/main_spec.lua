@@ -160,6 +160,7 @@ local feature_hooks = {}
 stub("features", {
     emit = function(hook, host) feature_hooks[#feature_hooks + 1] = hook .. ":" .. host.path end,
     scan = function() return {} end,
+    listeners = function() return {} end,
 })
 local online_hooks = {}
 stub("online", {

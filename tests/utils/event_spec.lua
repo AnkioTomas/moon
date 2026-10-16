@@ -1,5 +1,5 @@
 --[[--
-utils.event：init 按 Features.scan 的顺序登记 events.lua；emit 同步派发，任一订阅方失败即停；
+utils.event：init 按传入顺序登记订阅表；emit 同步派发，任一订阅方失败即停；
 init 只登记一次；未 init 时没有订阅方。
 
 @module tests.utils.event_spec
@@ -8,15 +8,6 @@ init 只登记一次；未 init 时没有订阅方。
 local Assert = require("support.assert")
 
 local scans = 0
-package.preload["features"] = function()
-    return {
-        scan = function(file)
-            assert(file == "events")
-            scans = scans + 1
-            return { "a", "b" }
-        end,
-    }
-end
 
 local seen = {}
 package.preload["features.a.events"] = function()
@@ -52,11 +43,15 @@ local Event = require("utils.event")
 Assert.is_true(Event.emit("e", "x", "y"))
 Assert.len(seen, 0)
 
-Event.init()
-Event.init() -- FM / Reader 两个实例都会调，只登记一次
-Assert.eq(scans, 1)
+local function listeners()
+    scans = scans + 1
+    return { require("features.a.events"), require("features.b.events") }
+end
+Event.init(listeners())
+Event.init(listeners()) -- FM / Reader 两个实例都会调，只登记一次
+Assert.eq(scans, 2)
 
--- 按扫描顺序派发并透传参数
+-- 按传入顺序派发并透传参数
 Assert.is_true(Event.emit("e", "x", "y"))
 Assert.eq(table.concat(seen, ","), "a:xy,b:xy")
 

@@ -125,4 +125,13 @@ function Features.handleEvent(event, plugin)
     return false
 end
 
+--- 各 feature 的某个约定文件（如 events）按扫描顺序 require 出来。
+---@param file string
+---@return table[]
+function Features.listeners(file)
+    local out = {}
+    for _idx, name in ipairs(Features.scan(file)) do out[#out + 1] = require("features." .. name .. "." .. file) end
+    return out
+end
+
 return Features
