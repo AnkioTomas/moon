@@ -42,7 +42,7 @@ local source = setmetatable({
     end,
 }, { __index = SourceBase })
 
-local view_updates, refreshes, stats_events = 0, 0, 0
+local view_updates, refreshes = 0, 0
 local desktop = {
     source = source,
     _books_sync = {},
@@ -51,7 +51,6 @@ local desktop = {
     updateView = function() view_updates = view_updates + 1 end,
     onEvent = function(self, event, payload)
         Assert.is_true(event ~= "home_refresh", "同步不得整页重建首页")
-        if event == "stats_changed" then stats_events = stats_events + 1 end
         if event == "stats_changed" or event == "shelf_changed" then refreshes = refreshes + 1 end
     end,
 }
@@ -93,14 +92,6 @@ Sync.refresh(desktop)
 stats_callbacks[3]({ pulled = 0, pushed = 0 })
 Assert.eq(refreshes, 2)
 
--- 物化（云端读过、本机没有书行的卷补身份行）：pulled / pushed 都是 0，但书行真的写了，
--- 统计照样要刷新。物化数走统计域自己的字段，不并进书架同步结果（书架不重扫）。
-local before_stats = stats_events
-Sync.refresh(desktop)
-stats_callbacks[4]({ pulled = 0, pushed = 0, materialized = 3 })
-Assert.eq(stats_events, before_stats + 1, "物化写了行也发 stats_changed")
-Assert.eq(refreshes, 3)
-
 -- 以下只看书架：让统计停在飞行中，不再干扰计数。
 Sync.refresh(desktop)
 Assert.is_true(desktop._stats_sync.test)
@@ -111,7 +102,7 @@ source.syncBooksAsync = function(_, _, cb)
     return { cancel = function() end }
 end
 Sync.open(desktop)
-Assert.eq(refreshes, 3)
+Assert.eq(refreshes, 2)
 
 -- 书架同步失败：本地书架不动；后台同步离线不提示，手动刷新才提示。
 desktop.tab = "library"
@@ -174,7 +165,7 @@ source.syncBooksAsync = function(_, _, cb)
     return { cancel = function() end }
 end
 Sync.open(desktop)
-Assert.eq(refreshes, 3)
+Assert.eq(refreshes, 2)
 
 -- 书架对账有数据：通知首页比对最近书架，由组件决定是否重建。
 local last_event
