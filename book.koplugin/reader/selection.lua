@@ -364,8 +364,17 @@ function Handles:onSetDimensions(dimen)
     self:layout()
 end
 
+--- 叠层没有子控件。不下发：实例 [1] 为空时会经 __index 取到类链上的 [1]，成环就栈溢出。
+function Handles:propagateEvent()
+    return false
+end
+
 --- 独立上屏、不是 Modal：自己的手势处理经 guard，出错算已处理；没接住的照常转给原生划词菜单。
+--- 转发期间再收到事件（菜单又把事件绕回来）直接放行，避免互相递归。
 function Handles:handleEvent(event)
+    if self._forwarding then
+        return false
+    end
     local ok, handled = Guard.call("selection " .. tostring(event.handler or event), function()
         return true, InputContainer.handleEvent(self, event)
     end)
@@ -373,9 +382,16 @@ function Handles:handleEvent(event)
         return true
     end
     local dialog = self.highlight and self.highlight.highlight_dialog
-    if dialog then
-        return dialog:handleEvent(event)
+    if not dialog or dialog == self then
+        return false
     end
+    self._forwarding = true
+    local fok, res = pcall(dialog.handleEvent, dialog, event)
+    self._forwarding = nil
+    if not fok then
+        error(res, 0)
+    end
+    return res
 end
 
 function Handles:onCloseWidget()
