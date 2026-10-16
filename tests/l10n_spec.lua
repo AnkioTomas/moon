@@ -98,16 +98,31 @@ do
         end))
     end
 
-    local pipe = assert(io.popen(string.format(
-        "find %s/book.koplugin -name '*.lua' -not -path '*/l10n/*' -not -path '*/types/*'",
-        root)))
-    local sources = {}
-    for path in pipe:lines() do
-        local fh = assert(io.open(path, "rb"))
-        sources[#sources + 1] = fh:read("*a")
-        fh:close()
+    --- 读若干目录树下的全部源码文本，跳过 l10n 目录（目录自己）与 types 桩。
+    ---@param dirs string[]
+    ---@return string[]
+    local function sourceTexts(dirs)
+        local pipe = assert(io.popen(string.format(
+            "find %s -name '*.lua' -not -path '*/l10n/*' -not -path '*/types/*'",
+            table.concat(dirs, " "))))
+        local out = {}
+        for path in pipe:lines() do
+            local fh = assert(io.open(path, "rb"))
+            out[#out + 1] = fh:read("*a")
+            fh:close()
+        end
+        pipe:close()
+        return out
     end
-    pipe:close()
+
+    local sources = sourceTexts({ root .. "/book.koplugin" })
+    local extension_sources = sourceTexts({ root .. "/extensions" })
+    -- 扩展（extensions/）文案正按票逐条纳入目录：正向「源码 msgid 全覆盖」仍只按核心插件查
+    -- （扩展存量文案还没翻完），但反向「残留键」必须一并收扩展源码——否则刚纳入的扩展键
+    -- 会被误判成源码里已不用。
+    local literal_sources = {}
+    for _idx, src in ipairs(sources) do literal_sources[#literal_sources + 1] = src end
+    for _idx, src in ipairs(extension_sources) do literal_sources[#literal_sources + 1] = src end
 
     local missing, seen = {}, {}
     for _, src in ipairs(sources) do
@@ -127,7 +142,7 @@ do
     -- 反向：目录键必须作为完整字符串存在于源码。不能用裸 substring 搜索，
     -- 否则「账号」会被「微信读书账号」冒充使用，注释也会掩盖废弃键。
     local source_literals = {}
-    for _, src in ipairs(sources) do
+    for _, src in ipairs(literal_sources) do
         for literal in src:gmatch('"([^"\n]*)"') do
             source_literals[unescape(literal)] = true
         end
@@ -135,6 +150,10 @@ do
             source_literals[unescape(literal)] = true
         end
     end
+    -- 拿一条只存在于扩展源码里的键钉住「扩展也是目录键的合法来源」。
+    Assert.is_true(source_literals["多设备统计合并"] == true,
+        "扩展源码没进残留键判定：extensions/ 下的文案会被误报为残留键")
+
     local stale = {}
     for key in pairs(en) do
         if not source_literals[key] then stale[#stale + 1] = key end
