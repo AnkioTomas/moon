@@ -214,7 +214,9 @@ do
     calls = {}
     Catalog.listBooks("local", { sort = "recent_read", limit = 24 })
     Assert.is_true(calls[1].sql:find("LEFT JOIN pending_progress p", 1, true) ~= nil, "没进度的书也要计数")
-    Assert.is_true(calls[1].sql:find("(b.deleted=0 OR ((b.deleted=0 OR b.sync_status=1) AND p.stable_id IS NOT NULL))", 1, true) ~= nil,
+    Assert.is_true(calls[1].sql:find("(b.deleted=0 OR ((b.deleted=0 OR b.sync_status=1) AND p.stable_id IS NOT NULL"
+            .. " AND NOT EXISTS (SELECT 1 FROM books s WHERE s.source_id=b.source_id"
+            .. " AND s.deleted=0 AND s.title=b.title)))", 1, true) ~= nil,
         "卷行有进度才列进最近阅读")
     Assert.is_true(calls[2].sql:find("ORDER BY MAX(COALESCE(p.updated_at, 0), b.read_at) DESC, b.inserted_at DESC", 1, true) ~= nil,
         "按本机 / 云端最近阅读时间排，没读过的按加入时间")
