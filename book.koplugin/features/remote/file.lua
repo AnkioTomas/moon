@@ -368,7 +368,7 @@ File.MAX_ZIP_ITEMS = 1000
 ---@param conn table
 ---@param text string
 local function finishZip(self, conn, text)
-    local payload = JSON.decode(text ~= "" and text or "{}")
+    local payload = require("utils.json").decode(text ~= "" and text or "{}")
     local list = type(payload) == "table" and payload.paths
     if type(list) ~= "table" or #list == 0 or #list > File.MAX_ZIP_ITEMS then
         return self:_fail(conn, 400, "Bad paths")

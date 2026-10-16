@@ -14,7 +14,7 @@ local Route = {}
 ---@param conn table
 ---@param text string 收齐的请求体 JSON 文本
 function Route.finishSettings(self, conn, text)
-    local payload, err = JSON.decode(text ~= "" and text or "{}")
+    local payload, err = require("utils.json").decode(text ~= "" and text or "{}")
     if not payload then
         return self:_fail(conn, 400, err or "invalid json")
     end
