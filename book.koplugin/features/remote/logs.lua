@@ -200,7 +200,41 @@ function M.build(output, files, info, Writer, extras, notes)
     end
     writer:addFileFromMemory("info.txt", M.infoText(info, included, notes), now)
     writer:close()
+    M.fixPerms(output)
     return output
+end
+
+--- KOReader 的 Writer:addFileFromMemory 把权限写成十进制 0644（= 八进制 1204，即 --w----r-T），
+--- macOS / Linux 解压后日志不可读。就地把中央目录里每个条目的外部属性改成 0100644。
+---@param path string zip 路径
+---@return boolean
+function M.fixPerms(path)
+    local f = io.open(path, "r+b")
+    if not f then return false end
+    local size = f:seek("end")
+    local tail_len = math.min(size, 22 + 65535)
+    f:seek("set", size - tail_len)
+    local tail = f:read(tail_len) or ""
+    local eocd
+    for i = #tail - 21, 1, -1 do
+        if tail:sub(i, i + 3) == "PK\5\6" then eocd = i break end
+    end
+    if not eocd then f:close() return false end
+    local function u16(str, i) local a, b = str:byte(i, i + 1) return a + b * 256 end
+    local function u32(str, i) return u16(str, i) + u16(str, i + 2) * 65536 end
+    local count, cd_off = u16(tail, eocd + 10), u32(tail, eocd + 16)
+    local attr = string.char(0, 0, 0xA4, 0x81) -- 0100644 << 16，小端
+    local pos = cd_off
+    for _idx = 1, count do
+        f:seek("set", pos)
+        local head = f:read(46)
+        if not head or #head < 46 or head:sub(1, 4) ~= "PK\1\2" then break end
+        f:seek("set", pos + 38)
+        f:write(attr)
+        pos = pos + 46 + u16(head, 29) + u16(head, 31) + u16(head, 33)
+    end
+    f:close()
+    return true
 end
 
 --- 下载文件名：moon-logs-YYYYMMDD-HHMM.zip

@@ -173,3 +173,26 @@ do
     has(info2, "skipped (empty): empty.txt")
     os.execute("rm -rf '" .. d .. "'")
 end
+
+-- fixPerms：KOReader 写成十进制 0644 的外部属性，改回 0100644，别的字节不动
+do
+    local function u16(n) return string.char(n % 256, math.floor(n / 256) % 256) end
+    local function u32(n) return u16(n % 65536) .. u16(math.floor(n / 65536)) end
+    local name, data = "a.txt", "hi"
+    local lfh = "PK\3\4" .. u16(20) .. u16(0) .. u16(0) .. u16(0) .. u16(0) .. u32(0)
+        .. u32(#data) .. u32(#data) .. u16(#name) .. u16(0) .. name .. data
+    local bad = string.char(0, 0, 0x84, 0x02) -- 1204(八进制) << 16
+    local cdh = "PK\1\2" .. u16(0x031E) .. u16(20) .. u16(0) .. u16(0) .. u16(0) .. u16(0) .. u32(0)
+        .. u32(#data) .. u32(#data) .. u16(#name) .. u16(0) .. u16(0) .. u16(0) .. u16(0) .. bad .. u32(0) .. name
+    local eocd = "PK\5\6" .. u16(0) .. u16(0) .. u16(1) .. u16(1) .. u32(#cdh) .. u32(#lfh) .. u16(0)
+    local path = os.tmpname()
+    local f = io.open(path, "wb"); f:write(lfh .. cdh .. eocd); f:close()
+    Assert.eq(Logs.fixPerms(path), true)
+    f = io.open(path, "rb"); local out = f:read("*a"); f:close()
+    os.remove(path)
+    Assert.eq(#out, #lfh + #cdh + #eocd)
+    local at = #lfh + 38
+    Assert.eq(out:sub(at + 1, at + 4), string.char(0, 0, 0xA4, 0x81))
+    Assert.eq(out:sub(1, at) .. out:sub(at + 5), (lfh .. cdh .. eocd):sub(1, at) .. (lfh .. cdh .. eocd):sub(at + 5))
+    Assert.eq(Logs.fixPerms(path .. ".missing"), false)
+end
