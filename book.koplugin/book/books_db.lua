@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS books (
   deleted INTEGER NOT NULL DEFAULT 1, sync_status INTEGER NOT NULL DEFAULT 1,
   reader_prefs TEXT, toc TEXT, toc_fetched_at INTEGER NOT NULL DEFAULT 0,
   read_state INTEGER NOT NULL DEFAULT 0, meta TEXT,
+  read_at INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (source_id, stable_id)
 );
 ]]) then return false end
@@ -125,6 +126,8 @@ CREATE TABLE IF NOT EXISTS books (
         { "toc_fetched_at", "toc_fetched_at INTEGER NOT NULL DEFAULT 0" },
         { "read_state", "read_state INTEGER NOT NULL DEFAULT 0" },
         { "meta", "meta TEXT" },
+        -- 云端最近阅读时间（秒）：源书架快照给了才有，图书馆「最近阅读」排序用
+        { "read_at", "read_at INTEGER NOT NULL DEFAULT 0" },
     }
     if columns then
         for i = 1, nrows do
@@ -249,10 +252,20 @@ function BookDB.upsert(row)
     ) ~= nil and BookDB.setMeta(row, true)
 end
 
+--- 秒级时间戳；毫秒值（> 1e11）折成秒，无效为 0。
+---@param value any
+---@return integer
+local function readAt(value)
+    local n = tonumber(value) or 0
+    if n > 1e11 then n = n / 1000 end
+    return n > 0 and math.floor(n) or 0
+end
+
 --- 远端书架行写入。本地脏行（sync_status=0）保留展示字段。
 ---@param row table
 ---@param overwrite boolean|nil 用户强制刷新：meta 覆盖已有键，否则只补缺
 ---@param dated boolean|nil 快照行自带权威加入时间：为真且 row.inserted_at 有值时覆盖已有的占位值
+--- row.read_at：云端最近阅读时间（秒），只增不减。
 ---@return boolean
 function BookDB.upsertRemote(row, overwrite, dated)
     local source_id = row.source_id
@@ -268,8 +281,8 @@ function BookDB.upsertRemote(row, overwrite, dated)
     return DB.exec(
         [[INSERT INTO books (
             source_id, stable_id, md5, title, authors, category,
-            series, intro, cover, inserted_at, path, deleted, sync_status
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)
+            series, intro, cover, inserted_at, path, deleted, sync_status, read_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             md5=COALESCE(excluded.md5, books.md5),
             title=CASE WHEN books.sync_status=0
@@ -284,6 +297,7 @@ function BookDB.upsertRemote(row, overwrite, dated)
                 THEN books.intro ELSE COALESCE(excluded.intro, books.intro) END,
             cover=COALESCE(NULLIF(excluded.cover, ''), books.cover),
             path=COALESCE(excluded.path, books.path),
+            read_at=MAX(books.read_at, excluded.read_at),
             inserted_at=CASE
                 WHEN excluded.deleted=0 AND (?=1 OR books.inserted_at=0)
                     THEN excluded.inserted_at
@@ -298,7 +312,7 @@ function BookDB.upsertRemote(row, overwrite, dated)
                 ELSE books.sync_status END;]],
         source_id, stable_id, row.md5, row.title, row.authors,
         row.category, row.series, row.intro, row.cover, now, row.path,
-        deleted,
+        deleted, readAt(row.read_at),
         authored and 1 or 0,
         has_membership and 1 or 0, has_membership and 1 or 0
     ) ~= nil and BookDB.setMeta(row, overwrite)
