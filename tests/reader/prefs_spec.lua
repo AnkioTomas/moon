@@ -11,6 +11,7 @@ local Assert = require("support.assert")
 local global_data, flushed = {}, 0
 _G.G_reader_settings = {
     readSetting = function(_self, key) return global_data[key] end,
+    has = function(_self, key) return global_data[key] ~= nil end,
     saveSetting = function(_self, key, value) global_data[key] = value end,
     delSetting = function(_self, key) global_data[key] = nil end,
     flush = function() flushed = flushed + 1 end,
@@ -185,6 +186,8 @@ Assert.is_true(type(saved_payload) == "string" and #saved_payload > 0)
 saved_payload = nil
 local blank = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
 Assert.is_false(ReaderPrefs.inject(blank, { file = "/x.epub", setFontFace = function() end }))
+Assert.eq(blank.data.copt_embedded_fonts, 0)
+blank.data.copt_embedded_fonts = nil
 Assert.is_nil(next(blank.data))
 
 ui.document.configurable.h_page_margins = { 40, 40 }
@@ -209,7 +212,19 @@ local whole_book = { source_id = "moon", stable_id = "book-1" }
 Assert.is_false(ReaderPrefs.captureAndSave(ui, whole_book))
 local whole_book_settings = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
 Assert.is_false(ReaderPrefs.inject(whole_book_settings, { file = "/x.epub", setFontFace = function() end }))
+-- 内嵌字体默认关（防大 EPUB OOM）；本书已显式开启或全局「设为默认」过则保留
+Assert.eq(whole_book_settings.data.copt_embedded_fonts, 0)
+whole_book_settings.data.copt_embedded_fonts = nil
 Assert.is_nil(next(whole_book_settings.data))
+local on_book = { data = { copt_embedded_fonts = 1 }, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
+ReaderPrefs.inject(on_book, { file = "/x.epub", setFontFace = function() end })
+Assert.eq(on_book.data.copt_embedded_fonts, 1)
+local saved_g = _G.G_reader_settings
+_G.G_reader_settings = { has = function(_, k) return k == "copt_embedded_fonts" end, readSetting = function() end }
+local g_default = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
+ReaderPrefs.inject(g_default, { file = "/x.epub", setFontFace = function() end })
+Assert.is_nil(g_default.data.copt_embedded_fonts)
+_G.G_reader_settings = saved_g
 
 -- 整本书无需注入跨章节偏好，但冷启动时必须按 sidecar 的 id 重新注册插件字体。
 local cold_book_settings = {
