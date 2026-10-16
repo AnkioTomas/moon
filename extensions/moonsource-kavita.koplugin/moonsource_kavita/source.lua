@@ -18,7 +18,7 @@ Kavita 的阅读会话按相邻两次进度写入的间隔计时，只在关书�
 pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「位置一变就补推」而非纯定时。
 书架：快照指纹不变就跳过对账；对账后后台逐本补简介 / 作者；漫画 series 的已读页回填成本地进度。
 统计：纯本地确认推送（Kavita 自己按会话记录），另全量拉取服务端阅读历史 → 按「身份 × 日」的行
-与替换指令写成本地统计快照；身份判定（单卷 / 多卷）与上次身份记在扩展状态文件里。
+与替换指令写成本地统计快照；身份判定（单卷 / 多卷）与上次身份、卷名记在扩展状态文件里。
 划线：epub 的划线按段落文本在本地 epub 里找锚点，新建 / 改备注推到 Kavita，注解 id 存在笔记快照里。
 漫画：装了 kamare 插件且在线时交它在线看（开书回调 handled），否则下载 cbz 用内置阅读器。
 
@@ -44,7 +44,7 @@ local MAGIC = { epub = "PK\3\4", cbz = "PK\3\4", pdf = "%PDF" }
 -- 上限只是分页头异常（缺失 / 乱报）时的兜底，不让拉取死循环。
 local STATS_PAGE_SIZE = 200
 local STATS_MAX_PAGES = 50
--- 统计状态文件（与书架指纹 / 回填 done 同机制）：上次身份 + 每系列章数判定。
+-- 统计状态文件（与书架指纹 / 回填 done 同机制）：上次身份 + 每系列章数判定 + 卷名。
 local STATS_STATE_FILE = "/moonsource_kavita_stats.lua"
 
 ---@class KavitaSource : SourceBase
@@ -248,7 +248,7 @@ end
 --- 封面不继承：卷封面走源自己的 chapter-cover 接口。
 ---@param series Book|table 容器书行
 ---@param stable_id string "seriesId:chapterId"
----@param volume_title string|nil 卷名；拿不到（本轮没查目录）时退容器名，宁可重复也不留裸 ID
+---@param volume_title string|nil 卷名；拿不到时退容器名，宁可重复也不留裸 ID
 ---@return table
 local function volumeRow(series, stable_id, volume_title)
     return {
@@ -260,6 +260,24 @@ local function volumeRow(series, stable_id, volume_title)
         category = series.category,
         series = series.title,
     }
+end
+
+--- 状态文件里的卷名表（seriesId → chapterId → 卷名）规范成字符串键：dump 会把数字键写成 `[7453]`，
+--- 读回来就是数字键，而条目 / 身份侧的 id 全是字符串。
+---@param raw table|nil
+---@return table<string, table<string, string>>
+local function normalizeTitles(raw)
+    local out = {}
+    for series_key, names in pairs(type(raw) == "table" and raw or {}) do
+        local named = {}
+        if type(names) == "table" then
+            for chapter_key, name in pairs(names) do
+                if type(name) == "string" and name ~= "" then named[tostring(chapter_key)] = name end
+            end
+        end
+        out[tostring(series_key)] = named
+    end
+    return out
 end
 
 --- 读过的卷行继承容器元数据（作者 / 简介 / 分类 / 系列）。
@@ -291,9 +309,11 @@ end
 --- 锁屏账单就只能显示裸 ID。写入形状同卷行先例（volumeRow），书库按 upsertRemote 的默认把它落成
 --- deleted=1 + sync_status=1 的隐藏身份行：不进书架、不影响对账，也压不掉本地脏行（同 untouched）。
 --- 容器行缺失时跳过（连标题都拼不出来），统计行不受影响、照常落库。
+--- 兜底标题（容器名）只用于新行 / 本来就是兜底的旧行：既有行的真实标题（本机开过、或上一轮
+--- 用卷名物化的）不因本轮拿不到卷名而被改写。
 --- 物化只服务统计展示刷新（本次同步的 stats_changed），不回调对账、不进书架同步结果。
 ---@param identities string[] 本次拉取出现的身份（单卷 = seriesId，多卷 = seriesId:chapterId）
----@param titles table<string, table<string, string>> seriesId → chapterId → 卷名（身份判定时顺带记下）
+---@param titles table<string, table<string, string>> seriesId → chapterId → 卷名（身份判定时记下并持久化）
 ---@return integer written 真正写入的行数
 local function materializeVolumes(identities, titles)
     local BookDB = require("book.books_db")
@@ -302,8 +322,13 @@ local function materializeVolumes(identities, titles)
         local series_id, chapter_id = identity:match("^(%d+):(%d+)$")
         local series = series_id and BookDB.get(ID, series_id)
         if series then
-            local row = volumeRow(series, identity, titles[series_id] and titles[series_id][chapter_id])
-            if not untouched(BookDB.get(ID, identity), row) then rows[#rows + 1] = row end
+            local named = titles[series_id]
+            local volume_title = named and chapter_id and named[chapter_id]
+            local row = volumeRow(series, identity, volume_title)
+            local cur = BookDB.get(ID, identity)
+            if volume_title or not (cur and cur.title and cur.title ~= row.title) then
+                if not untouched(cur, row) then rows[#rows + 1] = row end
+            end
         end
     end
     if #rows == 0 then return 0 end
@@ -695,10 +720,10 @@ function Source:pullStatsAsync(cb)
     if type(volumes) ~= "table" then volumes = {} end
     local seen = state:readSetting("identities", {})
     if type(seen) ~= "table" then seen = {} end
+    -- 卷名（seriesId → chapterId → 卷名）：章数判定时目录已到手，顺带记下、随 commit 落盘。
+    -- 后续轮次章数已知 → 不再读目录，物化标题靠它才不会退容器名（「系列 · 系列」）。
+    local titles = normalizeTitles(state:readSetting("titles", {}))
     local entries, pending, pending_idx = {}, {}, 1
-    --- 身份判定时目录已到手：物化标题「系列 · 卷名」的卷名顺带记下（seriesId → chapterId → 卷名），
-    --- 不再为它请求一次目录；记不到的退容器名。
-    local titles = {}
     local cancelled = false
     ---@type HttpJob|nil
     local job
@@ -722,6 +747,7 @@ function Source:pullStatsAsync(cb)
         -- 上次身份还在，身份漂移留下的孤儿行下次还能清。
         result.commit = function()
             state:saveSetting("volumes", volumes)
+            state:saveSetting("titles", titles)
             state:saveSetting("identities", result.identities)
             state:flush()
         end
@@ -740,14 +766,18 @@ function Source:pullStatsAsync(cb)
             local count = type(toc) == "table" and #toc or 0
             if count > 0 then
                 volumes[series_id] = count
-                local named = {}
+                -- 目录已到手：卷名顺带记下（已有的同名卷名保留：目录缓存过期时不会反而丢名字）。
+                local named = titles[series_id]
+                if not named then
+                    named = {}
+                    titles[series_id] = named
+                end
                 for _i, item in ipairs(toc) do
                     local chapter_id = item.chapterId or item.uid
                     if chapter_id ~= nil and item.title ~= nil then
                         named[tostring(chapter_id)] = item.title
                     end
                 end
-                titles[series_id] = named
             else
                 -- 判不出单卷 / 多卷的系列整条跳过：身份是错的比缺行更糟（Stats 侧也会记一条）。
                 logger.warn("kavita stats series toc unavailable", series_id, toc_err)
