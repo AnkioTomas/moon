@@ -53,10 +53,10 @@ local T = require("ffi/util").template
 ---@field names string[] 过滤后的名字
 ---@field page integer
 local IconPicker = Modal:extend{
+    covers_fullscreen = true,
     title = nil,
     current = nil,
     on_select = nil,
-    mask = false,
 }
 
 --- 搜索词规范化：小写、去首尾空白、中间空白当下划线（图标名的分词符）。

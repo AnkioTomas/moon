@@ -42,7 +42,7 @@ local Screen = Device.screen
 ---@field dismissable boolean 点面板外 / 返回键是否关闭
 ---@field close_on_tap boolean 面板内外任意点按都直接关窗（提示、二维码这类无交互面板）；dismissable=false 时不生效
 ---@field anchor string|table center/top，或锚点矩形 {x,y,w,h}（物理像素，如按钮 dimen）
----@field mask boolean 是否画网状遮罩；全屏页传 false
+---@field mask boolean 只读：是否画网状遮罩，由 covers_fullscreen 推出（弹窗不能自行关闭，只受全局 ui.mesh_mask）
 ---@field close_callback fun()|nil
 ---@field width number|nil 布局宽度（物理像素）；缺省整屏
 ---@field height number|nil 布局高度（物理像素）；缺省整屏
@@ -54,7 +54,6 @@ local Modal = InputContainer:extend{
     dismissable = true,
     close_on_tap = false,
     anchor = "center",
-    mask = true,
     close_callback = nil,
     width = nil,
     height = nil,
@@ -72,6 +71,7 @@ function Modal:init()
     self.theme = Theme.current()
     local screen = Screen:getSize()
     self.dimen = Geom:new{ x = 0, y = 0, w = self.width or screen.w, h = self.height or screen.h }
+    self.mask = not self.covers_fullscreen
     if self.mask then
         self._mask = Mask:new{ dimen = self.dimen }
     end

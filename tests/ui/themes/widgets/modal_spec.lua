@@ -142,15 +142,13 @@ Assert.eq(log[1], "copy:true")
 
 -- 锚点矩形：贴下方弹出、水平对中并夹进屏内；下方放不下翻到上方。
 local function anchored(rect)
-    local s = Sheet:new{ anchor = rect, mask = false, items = { { text = "a" }, { text = "b" } } }
+    local s = Sheet:new{ anchor = rect, items = { { text = "a" }, { text = "b" } } }
     return s, paint(s)
 end
 local s, p = anchored{ x = 100, y = 100, w = 40, h = 30 }
 Assert.eq(p.y, 130, "锚点下方")
 Assert.eq(p.x, 8, "左侧夹到 sm 边距")
-bb = Kit.canvas()
-s:paintTo(bb, 0, 0)
-Assert.eq(bb.pixels, 0, "mask=false 不画遮罩")
+Assert.is_true(s.mask, "贴锚点的下拉也带遮罩")
 s, p = anchored{ x = 560, y = 760, w = 40, h = 40 }
 Assert.eq(p.y + p.h, 760, "下方放不下：贴锚点上沿")
 Assert.eq(p.x + p.w, 600 - 8, "右侧夹到 sm 边距")

@@ -45,7 +45,6 @@ local storeBackend = require("desktop.detail.common").storeBackend
 local Detail = Modal:extend{
     name = "book_detail",
     covers_fullscreen = true,
-    mask = false,
     book = nil,
     plugin = nil,
     source = nil,

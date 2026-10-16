@@ -79,7 +79,7 @@ end
 
 -- 全屏展示页：标题栏 + 内容，内容由 body(page, t, width) 构建，状态变化时 page:refresh() 重建。
 local Gallery = Modal:extend{
-    mask = false,
+    covers_fullscreen = true,
     title = nil,
     body = nil,
 }
@@ -213,7 +213,7 @@ end
 
 --- 贴着按钮弹出的菜单（按钮上屏后 dimen 带坐标）。
 local function menuFrom(button)
-    Sheet:new{ anchor = button.dimen, mask = false, items = {
+    Sheet:new{ anchor = button.dimen, items = {
         { text = "按书名", callback = function() say("按书名") end },
         { text = "按作者", callback = function() say("按作者") end },
         { text = "按最近阅读", callback = function() say("按最近阅读") end },

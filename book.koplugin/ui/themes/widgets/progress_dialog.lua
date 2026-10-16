@@ -50,7 +50,6 @@ local ProgressDialog = Modal:extend{
     text = nil,
     on_background = nil,
     on_cancel = nil,
-    mask = false,
 }
 
 function ProgressDialog:init()
