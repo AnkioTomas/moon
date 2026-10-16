@@ -193,7 +193,15 @@ function Registry.create(id)
     if not known[id] then
         return nil, T(_("未知数据源: %1"), id)
     end
-    return sourceModule(id).new()
+    local mod = sourceModule(id)
+    if not external[id] then return mod.new() end
+    -- 第三方源的 new() 抛错不能拖垮书库 / 桌面：记日志，按源不可用处理。
+    local ok, source, err = pcall(mod.new)
+    if not ok then
+        logger.err("book.source external new failed", id, source)
+        return nil, T(_("数据源初始化失败: %1"), id)
+    end
+    return source, err
 end
 
 --- 关闭并丢弃全部缓存实例（下次 resolve / current 按新配置重建）。
