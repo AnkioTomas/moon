@@ -124,3 +124,11 @@ do
     Assert.is_nil(Normalize.decode("num"), "非表返回 nil")
     package.loaded["json"] = nil
 end
+
+do -- 分页文档：远端与本地是两份不同的 pos 表，内容相同即去重
+    local function hl() return { page = 3, drawer = "lighten", text = "t",
+        pos0 = { page = 3, x = 10, y = 20 }, pos1 = { page = 3, x = 30, y = 20 } } end
+    Assert.len(Normalize.merge({ hl() }, { hl() }, true), 1)
+    local moved = hl(); moved.pos1.x = 31
+    Assert.len(Normalize.merge({ hl() }, { moved }, true), 2)
+end
