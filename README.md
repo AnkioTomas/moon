@@ -455,6 +455,26 @@ Release 里另有两个独立插件包，需要同时安装月读才能使用：
 
 模块契约写在各模块头注释里（表结构在各 `*_db.lua` 表模块头注释里），开发文档见[月读文档站](https://moon.ankio.net/develop)的「开发文档」。
 
+### 扩展开发
+
+扩展是独立的 KOReader 插件（`_meta.lua` + 返回空 `WidgetContainer` 的 `main.lua` + 根目录的 `moon_source.lua`），月读在 KOReader 加载完全部插件后扫描并登记。扩展用 `provides` 自己声明能力：
+
+```lua
+return {
+    api = 1,                    -- 必须等于 Registry.API
+    id = "ext.greeting",        -- 非书源写在这里；书源取 meta().id
+    provides = { source = false, home_widgets = { widget } },
+}
+```
+
+- **书源与非书源：** `provides.source = true` 才是书源，需要 `meta()` / `new()`，出现在数据源列表里；`source = false` 的扩展（例如只加首页组件）不需要 meta/new，也不能当活跃源。没写 `provides` 的旧描述文件仍按书源处理（顶层 `source = false` 除外），首页组件取顶层 `home`。
+- **首页组件：** 出现在首页编辑的「添加组件」里，与内置组件一样摆放。简写表 `{ id, title, build(ctx, w, h), icon?, height? / heightRange?, settings?(desktop, id) }`，用 `ui.themes.widgets.*` 拼控件；需要请求、刷新和生命周期时写继承 `desktop.pages.home.base` 的完整组件类。
+- **id 规则：** 扩展 id 必须是 `ext.<name>`（字母数字 `_-`），写进书库与配置，发布后不能改，重名时先加载的生效；组件 id 必须以 `<扩展 id>.` 开头，简写表可只写短名，月读自动补前缀。
+- **出错处理：** 描述文件不合约定、组件 id 不合规或重名只记日志并跳过；组件运行时抛错被 pcall 隔离，记日志后画空白占位，不影响首页和内置源。
+- **保存的布局：** 扩展卸载或禁用后组件不再显示，但首页布局里的位置保留，重装后回到原处。
+
+示例：书源 [`examples/moonsource-demo.koplugin`](examples/moonsource-demo.koplugin/moon_source.lua)（书源 + 首页组件），非书源 [`examples/moonwidget-demo.koplugin`](examples/moonwidget-demo.koplugin/moon_source.lua)（只加首页组件）。分步指南见文档站[扩展插件](https://moon.ankio.net/develop/extend/plugin)、[接一个数据源](https://moon.ankio.net/develop/extend/source)与[锁屏与首页组件](https://moon.ankio.net/develop/extend/components)。
+
 ## 版本与发布
 
 版本文件是 `book.koplugin/bookversion.lua`，源码树中默认显示 `0.0.0-dev`。
