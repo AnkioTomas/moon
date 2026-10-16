@@ -42,13 +42,21 @@ Assert.is_false(rows[2](600).toggle)
 -- 有键设备才显示「桌面物理翻页键」；缺省开，点一下关。
 has_keys = true
 rows = Settings:rows(desktop, false)
-Assert.len(rows, 3)
+Assert.len(rows, 4)
 local keys = rows[3](600)
 Assert.eq(keys.title, "桌面物理翻页键")
 Assert.is_true(keys.toggle, "缺省开")
 keys.callback()
 Assert.eq(book_settings.page_keys, false)
 Assert.is_false(rows[3](600).toggle)
+
+-- 「反转翻页键」读 KOReader 的 input_invert_page_turn_keys
+local saved_g = _G.G_reader_settings
+_G.G_reader_settings = { isTrue = function(_, k) return k == "input_invert_page_turn_keys" end }
+local inv = rows[4](600)
+Assert.eq(inv.title, "反转翻页键")
+Assert.is_true(inv.toggle)
+_G.G_reader_settings = saved_g
 
 
 return true

@@ -57,8 +57,37 @@ function DesktopSettings:rows(desktop, open_on)
                 end,
             })
         end
+        -- 与 KOReader「反转翻页键」同一设置与 Device:invertButtons()，桌面/阅读器共用 event_map。
+        rows[#rows + 1] = function(iw)
+            local inverted = G_reader_settings:isTrue("input_invert_page_turn_keys")
+            return Row.widget({
+                width = iw,
+                icon = "swap_vert", title = _("反转翻页键"),
+                subtitle = _("交换前进与后退键，与 KOReader 设置同步"),
+                toggle = inverted,
+                callback = function()
+                    DesktopSettings.swapPageKeys(require("device"), G_reader_settings)
+                    desktop:updateView()
+                end,
+            })
+        end
     end
     return rows
+end
+
+--- 照抄 DeviceListener:onSwapPageTurnButtons() 的全局分支：先撤销单侧反转，再整体翻转。
+---@param device table
+---@param gs table G_reader_settings
+function DesktopSettings.swapPageKeys(device, gs)
+    for _, side in ipairs({ "Left", "Right" }) do
+        local key = "input_invert_" .. side:lower() .. "_page_turn_keys"
+        if gs:isTrue(key) then
+            gs:makeFalse(key)
+            device["invertButtons" .. side](device)
+        end
+    end
+    gs:flipNilOrFalse("input_invert_page_turn_keys")
+    device:invertButtons()
 end
 
 return DesktopSettings
