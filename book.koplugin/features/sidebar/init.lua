@@ -1,5 +1,5 @@
 --[[--
-阅读页左侧栏：书籍 / 目录 / 阅读字体 / 书摘 / X-Ray / 阅读票根，右侧网状遮罩压暗正文。
+阅读页左侧栏：书籍 / 目录 / 阅读字体 / 书摘 / X-Ray / 阅读票根 / 统计，右侧网状遮罩压暗正文。
 阅读字体仅在文档支持换字体时出现，复用字体选择器菜单。
 页面清单与顺序在 setting.lua 的 TABS；用户隐藏的页记在 sidebar_hidden_tabs。
 书籍页右上角关闭按钮退出本书；票根页复用锁屏票根并可分享。
@@ -61,6 +61,7 @@ local Sidebar = Modal:extend{}
 local AVAILABLE = {
     font = function(ui) return require("ui.fonts.reader").supports(ui) end,
     xray = function() return MoonSettings.get("features.xray").book_xray_enabled end,
+    stats = function(ui) return require("features.sidebar.stats").available(ui) end,
 }
 
 --- 各列表页的原有入口（与快捷面板同一条路径，整书 / 连续章节的分流都在入口内部）。
@@ -262,6 +263,17 @@ function Sidebar:render()
                     function() self:exitBook() end),
             },
         }
+    elseif id == "stats" then
+        local pad = Theme.px(t.space.lg)
+        body = Box:new{
+            style = surface,
+            width = self.panel_w,
+            height = body_h,
+            OverlapGroup:new{
+                dimen = Geom:new{ w = self.panel_w - pad * 2, h = body_h - pad * 2 },
+                require("features.sidebar.stats").build(self.ui, self.panel_w - pad * 2),
+            },
+        }
     elseif id == "ticket" then
         body = Box:new{
             style = surface,
@@ -296,16 +308,22 @@ function Sidebar:render()
     local panel = VerticalGroup:new{
         align = "left",
         body,
-        Tabbar.widget({
+        -- 页签按 floor(宽/个数) 等分会剩几像素，选中标记那一行也只画中间短线：铺底，别露出遮罩
+        Box:new{
+            style = surface,
             width = self.panel_w,
-            active = id,
-            tabs = self.bar_tabs,
-            on_tab = function(tab_id)
-                for index, other in ipairs(self.tabs) do
-                    if other == tab_id then self:goTab(index) end
-                end
-            end,
-        }),
+            height = Tabbar.height(),
+            Tabbar.widget({
+                width = self.panel_w,
+                active = id,
+                tabs = self.bar_tabs,
+                on_tab = function(tab_id)
+                    for index, other in ipairs(self.tabs) do
+                        if other == tab_id then self:goTab(index) end
+                    end
+                end,
+            }),
+        },
     }
     self:setPanel(HorizontalGroup:new{
         align = "top",
