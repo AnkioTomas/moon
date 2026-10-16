@@ -17,6 +17,8 @@ Kavita 书源（整本模式）。
 Kavita 的阅读会话按相邻两次进度写入的间隔计时，只在关书推一次时长恒为 0 秒；而且它只在
 pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「位置一变就补推」而非纯定时。
 书架：快照指纹不变就跳过对账；对账后后台逐本补简介 / 作者；漫画 series 的已读页回填成本地进度。
+统计：纯本地确认推送（Kavita 自己按会话记录），另全量拉取服务端阅读历史 → 按「身份 × 日」的行
+与替换指令写成本地统计快照；身份判定（单卷 / 多卷）与上次身份记在扩展状态文件里。
 划线：epub 的划线按段落文本在本地 epub 里找锚点，新建 / 改备注推到 Kavita，注解 id 存在笔记快照里。
 漫画：装了 kamare 插件且在线时交它在线看（开书回调 handled），否则下载 cbz 用内置阅读器。
 
@@ -25,6 +27,7 @@ pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「
 
 local Client = require("moonsource_kavita.client")
 local Position = require("moonsource_kavita.position")
+local Stats = require("moonsource_kavita.stats")
 local SourceBase = require("source.base")
 local logger = require("utils.log")
 local _ = require("gettext")
@@ -37,6 +40,12 @@ local PAGE_SIZE = 500
 local SHELF_SNAPSHOT_VERSION = "v3"
 local FORMATS = { [0] = "image", [1] = "cbz", [3] = "epub", [4] = "pdf" }
 local MAGIC = { epub = "PK\3\4", cbz = "PK\3\4", pdf = "%PDF" }
+-- 阅读历史分页大小（服务端上限实测 200）与页数上限：全量只有 2 页，
+-- 上限只是分页头异常（缺失 / 乱报）时的兜底，不让拉取死循环。
+local STATS_PAGE_SIZE = 200
+local STATS_MAX_PAGES = 50
+-- 统计状态文件（与书架指纹 / 回填 done 同机制）：上次身份 + 每系列章数判定。
+local STATS_STATE_FILE = "/moonsource_kavita_stats.lua"
 
 ---@class KavitaSource : SourceBase
 ---@field client KavitaClient
@@ -58,6 +67,14 @@ end
 
 function Source:configured()
     return self.client:configured()
+end
+
+--- 能力：书架 + 统计拉取（推送是纯本地确认，见 pushStatsAsync），其余走基类默认（全 false）。
+---@return SourceCapabilities
+function Source:capabilities()
+    local caps = SourceBase.capabilities(self)
+    caps.stats_pull = true
+    return caps
 end
 
 ---@return boolean
@@ -598,6 +615,128 @@ function Source:syncBooksAsync(opts, cb)
     return { cancel = function()
         cancelled = true
         job:cancel()
+    end }
+end
+
+--- 本地统计行只在本地确认，不发请求（先例微信）。
+---
+--- Kavita 的阅读历史是服务端按会话自己记的，本机没有对应的上报接口；确认后这些行不再是脏行，
+--- 展示仍按「云端快照 + 拉取后本地新读」合并。
+---@param rows BookStatsRow[]|nil
+---@param cb fun(data: BookStatsPushResult|nil, err: string|nil)
+---@return nil
+function Source:pushStatsAsync(rows, cb)
+    local ids = {}
+    for _idx, row in ipairs(rows or {}) do ids[#ids + 1] = row.id end
+    cb({ ok = true, synced_ids = ids })
+    return nil
+end
+
+--- 拉取 Kavita 全局阅读历史（全量）→ reading_stats 行 + 替换指令。
+---
+--- 分页：`PageSize=200`，按响应头 `Pagination` 循环（页数上限兜底）；`Libraries` 必传（重复键，
+--- 逗号串会被服务端当成一个库、恒返回 0 条），时区取设备时钟映射（未知回退 UTC），不带日期范围。
+--- 身份：单卷系列读在 series 行、多卷逐卷（1 章 = 单卷，见 Stats），判定结果与「本次身份」记在
+--- 扩展状态文件里，避免每轮重复请求目录；目录不可得的系列本轮跳过，不中断其它系列。
+--- 失败一律 cb(nil, err) 静默（本地统计不受影响，下次同步自然重试），取消后不回调。
+---@param cb fun(result: BookStatsPullResult|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:pullStatsAsync(cb)
+    local libraries = {}
+    for id in pairs(require("utils.settings").getSource(ID).libraries or {}) do
+        libraries[#libraries + 1] = id
+    end
+    if not self:configured() or #libraries == 0 then
+        return SourceBase.defer(cb, nil, _("请先在设置里填写 Kavita 服务器并选择书库"))
+    end
+    table.sort(libraries)
+    local timezone = Stats.ianaTimezone(require("utils.settings").get("features.clock").timezone)
+    -- 快照时刻取发起拉取的时刻：展示端以它为界把「拉取后本地新读」叠加在云端快照上。
+    local fetched_at = os.time()
+    local state = require("luasettings"):open(
+        require("datastorage"):getSettingsDir() .. STATS_STATE_FILE)
+    --- 系列 → 本地目录章数（1 = 单卷）：上次判定 + 本轮新判定，注给 Stats 用。
+    --- 状态文件被写坏（不是表）时当作没判过：本轮全部重新判定，别让索引报错断掉整次拉取。
+    local volumes = state:readSetting("volumes", {})
+    if type(volumes) ~= "table" then volumes = {} end
+    local seen = state:readSetting("identities", {})
+    if type(seen) ~= "table" then seen = {} end
+    local entries, pending, pending_idx = {}, {}, 1
+    local cancelled = false
+    ---@type HttpJob|nil
+    local job
+
+    --- 终结：取消后不回调。
+    local function finish(result, err)
+        if cancelled then return end
+        cb(result, err)
+    end
+
+    --- 身份定完 → 纯核心聚合。12 号票的「缺行卷物化」挂在这一步：身份与条目都已就绪，
+    --- 物化要用的 series / 章节信息也能从同一批数据里取。
+    local function build()
+        local result = Stats.fromHistory(entries, {
+            source_id = self.id, fetched_at = fetched_at, volumes = volumes, seen = seen,
+        })
+        -- 落库成功（核心的 result.commit）才更新状态：失败不前进，
+        -- 上次身份还在，身份漂移留下的孤儿行下次还能清。
+        result.commit = function()
+            state:saveSetting("volumes", volumes)
+            state:saveSetting("identities", result.identities)
+            state:flush()
+        end
+        finish(result)
+    end
+
+    --- 逐个判定待定系列的章数：状态文件里有的不请求，缺的走 Source:toc
+    --- （新鲜缓存 > 在线拉目录 > 离线过期缓存）。
+    local function resolveNext()
+        if cancelled then return end
+        local series_id = pending[pending_idx]
+        pending_idx = pending_idx + 1
+        if not series_id then return build() end
+        job = self:toc(series_id, function(toc, toc_err)
+            if cancelled then return end
+            local count = type(toc) == "table" and #toc or 0
+            if count > 0 then
+                volumes[series_id] = count
+            else
+                -- 判不出单卷 / 多卷的系列整条跳过：身份是错的比缺行更糟（Stats 侧也会记一条）。
+                logger.warn("kavita stats series toc unavailable", series_id, toc_err)
+            end
+            resolveNext()
+        end)
+    end
+
+    --- 一页历史。分页头不可信（缺失 / 解析不出）时按「本页拉满就还有下一页」续拉，
+    --- 仍受页数上限约束，异常头不会无限循环。
+    local function fetchPage(page)
+        job = self.client:jsonPaged("GET", "/api/Stats/reading-history", {
+            TimeZoneId = timezone, Libraries = libraries, PageNumber = page, PageSize = STATS_PAGE_SIZE,
+        }, nil, function(list, err, _code, pages)
+            if cancelled then return end
+            if not list then return finish(nil, err) end
+            for _idx, entry in ipairs(list) do entries[#entries + 1] = entry end
+            local more = pages and page < pages or (not pages and #list >= STATS_PAGE_SIZE)
+            if more and page < STATS_MAX_PAGES then return fetchPage(page + 1) end
+            if more then logger.warn("kavita stats pull hit page cap", STATS_MAX_PAGES) end
+            -- 分页合并完了才知道全量里有哪些系列：这里收集章数还不知道的，逐个判定。
+            local added = {}
+            for _idx, entry in ipairs(entries) do
+                local series_id = entry.seriesId ~= nil and tostring(entry.seriesId) or nil
+                if series_id and not volumes[series_id] and not added[series_id] then
+                    added[series_id] = true
+                    pending[#pending + 1] = series_id
+                end
+            end
+            resolveNext()
+        end)
+    end
+
+    fetchPage(1)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job:cancel() end
     end }
 end
 
