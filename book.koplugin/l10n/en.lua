@@ -1379,4 +1379,8 @@ Current version: ",
     ["微信读书登录已失效"] = "WeRead sign-in has expired",
     ["%1 登录已失效，请重新登录。后台同步会暂停该数据源，直到重新登录。"] = "%1 sign-in has expired. Please sign in again. Background sync is paused for this source until you do.",
     ["重新登录"] = "Sign in again",
+    ["保存为默认配置"] = "Save as default",
+    ["将当前排版和字体保存为新书的默认配置？"] = "Save the current layout and font as the default for new books?",
+    ["已保存为默认配置"] = "Saved as default",
+    ["当前文档不支持保存默认配置"] = "This document does not support saving defaults",
 }

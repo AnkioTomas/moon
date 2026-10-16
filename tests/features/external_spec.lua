@@ -14,7 +14,7 @@ for _idx, id in ipairs({ "night", "wifi", "rotate", "refresh", "screenshot", "fr
         return { id = id, title = id, icon = "x", scope = "desktop" }
     end
 end
-for _idx, id in ipairs({ "toc", "font", "highlights", "bookorbit", "push_progress", "pull_progress" }) do
+for _idx, id in ipairs({ "toc", "font", "highlights", "bookorbit", "push_progress", "pull_progress", "save_default" }) do
     package.preload["features.panel.actions.reader." .. id] = function()
         return { id = id, title = id, icon = "x", scope = "reader" }
     end
