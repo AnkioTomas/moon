@@ -18,7 +18,7 @@ Kavita 阅读统计纯核心：reading-history 条目 + 身份 / 时区上下文
 全量重拉：日桶 / 总量行按「前缀 + 覆盖到最后观测日日终的时间窗」替换；单书行按「上次 ∪ 本次身份」
 精确替换，顺带清掉身份漂移（单卷 ↔ 多卷、系列重建）遗留的孤儿行。
 
-纯函数：无 IO、无全局状态；目录与「上次身份」由源钩子经 ctx 注入。
+纯函数（无文件 / 网络 IO、无全局状态，只经 `logger` 写日志）：目录、卷名与「上次身份」由源钩子经 ctx 注入。
 
 @module moonsource_kavita.stats
 --]]
@@ -255,8 +255,5 @@ function Stats.fromHistory(entries, ctx)
         identities = identities,
     }
 end
-
-Stats.DAY_PREFIX = DAY_PREFIX
-Stats.TOTAL_ID = TOTAL_ID
 
 return Stats
