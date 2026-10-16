@@ -22,6 +22,9 @@
 # Agent instructions (local only)
 AGENTS.md
 
+# 本地设计笔记与工作文档（spec / map / issues / PR 说明，一律不提交）
+/.scratch/
+
 # 拼音整库仅 Release 分发，勿提交（分片在 assets/pinyin/）
 /assets/pinyin/dictionary.sqlite3
 
