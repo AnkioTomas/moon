@@ -26,6 +26,9 @@ Xray.events = {
         require("features.xray.ui").refresh(plugin.ui)
         return true
     end,
+    CloseDocument = function(plugin)
+        require("features.xray.marks").release(plugin.ui)
+    end,
 }
 
 ---@param plugin BookPlugin

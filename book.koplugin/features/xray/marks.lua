@@ -286,9 +286,6 @@ function Marks.invalidate()
     if Marks.ui and Marks.ui.dialog then
         UIManager:setDirty(Marks.ui.dialog, "ui")
     end
-    if Marks.view then
-        UIManager:setDirty(Marks.view, "ui")
-    end
 end
 
 --- 当前视口变化时排一次页内扫描；绘制路径自身不执行文本搜索。
@@ -350,6 +347,14 @@ local function registerHighlight(ui)
             end),
         }
     end)
+end
+
+--- 关书时放掉对旧 ReaderUI 与实体缓存的引用，并取消排队中的扫描。
+---@param ui table
+function Marks.release(ui)
+    if Marks.ui ~= ui then return end
+    resetMarks(Marks)
+    Marks.ui, Marks._entity_cache_key, Marks._entity_cache = nil, nil, nil
 end
 
 --- 挂载页内标记、点击与划词 X-Ray。

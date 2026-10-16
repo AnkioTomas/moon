@@ -86,7 +86,6 @@ Marks.ui = {
         end,
     },
 }
-Marks.view = Marks.ui.view
 Marks._render_key = nil
 Marks:updateView()
 Assert.len(Marks._marks, 0, "首帧不能执行文本搜索")
@@ -171,7 +170,6 @@ Marks.ui = {
         },
     },
 }
-Marks.view = Marks.ui.view
 package.preload["features.xray.db"] = function()
     return { list = function() return { { kind = "term", name = "Whitby", aliases = {} } } end }
 end
@@ -238,3 +236,12 @@ Assert.eq(registered_module.module, ui._book_page_marks)
 Assert.eq(ui._book_page_marks.layers[1].layer, Marks)
 Assert.eq(registered_touch_zones[1].id, "book_page_marks_tap")
 Assert.is_false(registered_touch_zones[1].handler({ pos = { x = 9999, y = 9999 } }))
+
+-- 关书后不再持有旧 ReaderUI；别的 ui 关闭不影响当前挂载
+Marks._entity_cache_key, Marks._entity_cache = "k", {}
+Marks.release({})
+Assert.eq(Marks.ui, ui)
+Marks.release(ui)
+Assert.eq(Marks.ui, nil)
+Assert.eq(Marks._entity_cache, nil)
+Assert.eq(#Marks._marks, 0)
