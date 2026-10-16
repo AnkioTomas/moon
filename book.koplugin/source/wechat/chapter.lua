@@ -19,6 +19,27 @@ local _ = require("gettext")
 
 local Chapter = {}
 
+--- e_0 回 "{}" 的重试：服务端对正常可读的章节也会偶发回空对象（同一章几秒后再拉就有正文），
+--- 按指数退避重拉（0.5s 起翻倍、单次封顶 8s、加少量抖动），最多 EMPTY_RETRIES 次；仍为空才算失败。
+local EMPTY_RETRIES = 10
+local EMPTY_RETRY_BASE = 0.5
+local EMPTY_RETRY_CAP = 8
+local EMPTY_RETRY_JITTER = 0.2
+
+--- 第 n 次重试（从 0 计）前的等待秒数。
+---@param n integer
+---@return number
+function Chapter._retryDelay(n)
+    return math.min(EMPTY_RETRY_CAP, EMPTY_RETRY_BASE * 2 ^ n) + math.random() * EMPTY_RETRY_JITTER
+end
+
+--- 延时执行；测试可替换。
+---@param sec number
+---@param fn fun()
+function Chapter._schedule(sec, fn)
+    require("ui/uimanager"):scheduleIn(sec, fn)
+end
+
 --- 请求一个正文分片端点；空对象回包（"{}"）按失败处理，交由调用方换端点重试。
 --- st=0 回正文；st=1 回整书样式表（e_0/e_1/e_3 拼起来、或单独 e_2 都是同一份），实测。
 ---@param bookId string
@@ -111,8 +132,16 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
         -- 回调同步触发时已发出下一个请求，不能用旧句柄覆盖它（同 http/mirror）。
         if seq == mine then active_job = handle end
     end
-    shard("/web/book/chapter/e_0", function(e0, e0err)
+    local function onE0(e0, e0err, tries)
         if not e0 then
+            if tries < EMPTY_RETRIES and e0err == "/web/book/chapter/e_0 empty" then
+                logger.dbg("weread chapter e_0 empty, retry", bookId, tries + 1)
+                Chapter._schedule(Chapter._retryDelay(tries), function()
+                    if cancelled then return end
+                    shard("/web/book/chapter/e_0", function(raw, err) onE0(raw, err, tries + 1) end)
+                end)
+                return
+            end
             fail(e0err)
             return
         end
@@ -154,7 +183,8 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                 end
             end)
         end)
-    end)
+    end
+    shard("/web/book/chapter/e_0", function(e0, e0err) onE0(e0, e0err, 0) end)
     return { cancel = cancel }
 end
 

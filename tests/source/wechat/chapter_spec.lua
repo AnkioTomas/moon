@@ -16,6 +16,7 @@ end
 
 local txt = false
 local gets = 0
+local empty_e0 = 0
 
 package.preload["source.wechat.auth"] = function()
     return {
@@ -25,7 +26,10 @@ package.preload["source.wechat.auth"] = function()
             return { cancel = function() end }
         end,
         webPostAsync = function(url, _, _, cb)
-            if url:match("/e_0$") then
+            if url:match("/e_0$") and empty_e0 > 0 then
+                empty_e0 = empty_e0 - 1
+                cb("{}")
+            elseif url:match("/e_0$") then
                 cb(txt and '{"bookId":"1"}' or "e0")
             elseif url:match("/e_2$") then
                 cb("e2")
@@ -155,4 +159,44 @@ do
     trial = false
     Assert.is_nil(payload)
     Assert.matches(err, "试读")
+end
+
+do
+    -- e_0 偶发回 "{}"（同一章稍后重拉就有正文）：延时重拉，不直接判失败。
+    local delays = {}
+    Chapter._schedule = function(sec, fn) delays[#delays + 1] = sec; fn() end
+    empty_e0 = 2
+    local html_out, err
+    Chapter.fetchHtmlAsync("book", { uid = "flaky" }, function(h, e) html_out, err = h, e end)
+    Assert.is_nil(err)
+    Assert.eq(html_out, FULL)
+    Assert.len(delays, 2)
+
+    -- 退避：0.5s 起翻倍，单次封顶 8s，抖动不超过 0.2s。
+    local base = { 0.5, 1, 2, 4, 8, 8, 8, 8, 8, 8 }
+    for i, b in ipairs(base) do
+        local d = Chapter._retryDelay(i - 1)
+        Assert.is_true(d >= b and d <= b + 0.2, "delay " .. i)
+    end
+
+    -- 重试 10 次用尽仍为空才报错。
+    delays = {}
+    empty_e0 = 11
+    html_out, err = nil, nil
+    Chapter.fetchHtmlAsync("book", { uid = "flaky" }, function(h, e) html_out, err = h, e end)
+    Assert.is_nil(html_out)
+    Assert.matches(err, "empty")
+    Assert.len(delays, 10)
+    empty_e0 = 0
+
+    -- 取消后不再重拉。
+    local pending
+    Chapter._schedule = function(_, fn) pending = fn end
+    empty_e0 = 1
+    local called = false
+    local job = Chapter.fetchHtmlAsync("book", { uid = "flaky" }, function() called = true end)
+    job:cancel()
+    pending()
+    Assert.is_false(called)
+    empty_e0 = 0
 end
