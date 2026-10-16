@@ -86,6 +86,11 @@ Assert.matches(err3, "404")
 local d4, err4 = post({ code = 401, body = "{}" })
 Assert.is_nil(d4)
 Assert.matches(err4, "令牌")
+Assert.is_true(require("source.auth").expired("moon"), "401 标记登录失效")
+-- 成功请求清掉失效标记
+response = { res = { code = 200, body = "{}" } }
+client:_jsonAsync("POST", "/x", nil, function() end)
+Assert.is_false(require("source.auth").expired("moon"))
 
 -- 传输失败
 local d5, err5 = post(nil, "timeout")

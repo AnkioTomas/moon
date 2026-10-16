@@ -277,6 +277,7 @@ end
 
 --- 关闭并丢弃全部缓存实例（下次 resolve / current 按新配置重建）。
 function Registry.invalidate()
+    require("source.auth").reset()
     for id, source in pairs(instances) do
         instances[id] = nil
         source:close()

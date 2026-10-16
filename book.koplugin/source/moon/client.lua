@@ -15,6 +15,7 @@ local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
 local md5 = require("ffi/sha2").md5
+local Auth = require("source.auth")
 
 ---@class MoonClient
 ---@field base_url string
@@ -154,8 +155,9 @@ function Client:_jsonAsync(method, path, opts, cb)
                 done(nil, T(_("响应不是 JSON (HTTP %1) %2"), tostring(code), (raw:gsub("%s+", " ")):sub(1, 120)))
                 return
             end
+            -- 长期令牌没有续期接口：401 直接标记失效，由上层引导重新填写令牌。
             if code == 401 or data.code == 401 then
-                done(nil, data.msg or _("令牌无效或未登录"))
+                done(nil, Auth.expire("moon", data.msg or _("令牌无效或未登录")))
                 return
             end
             -- 非 2xx 一律失败。服务端 5xx/4xx 的错误页有时也是 JSON 且不带业务
@@ -168,6 +170,7 @@ function Client:_jsonAsync(method, path, opts, cb)
                 done(nil, data.msg or T(_("错误码 %1"), tostring(data.code)))
                 return
             end
+            Auth.ok("moon")
             done(data)
         end)
     end, cb)
