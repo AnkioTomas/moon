@@ -20,6 +20,9 @@ Setting.defaults = {
     rare_built_at = {},
 }
 
+--- 无默认值的持久键：查词面板上次用的词典。
+Setting.keys = { "rare_lookup_dict" }
+
 local function levels()
     return {
         { value = "rarest", text = _("最生僻") },

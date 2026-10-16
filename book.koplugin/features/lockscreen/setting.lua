@@ -19,10 +19,10 @@ Setting.defaults = {
     lock_screen_custom_message = "读书不觉已春深，一寸光阴一寸金。",
 }
 
---- 无默认值的持久键：当天生成标记、高亮轮换、用户选的自定义图 / 壁纸文件夹、背景主体拆分迁移标记。
+--- 无默认值的持久键：当天生成标记、高亮轮换、用户选的自定义图 / 壁纸文件夹、背景主体拆分迁移标记、文字海报版式与字体。
 Setting.keys = {
     "lock_screen_day", "lock_screen_quote_index", "lock_screen_custom_image", "lock_screen_folder",
-    "lock_screen_split",
+    "lock_screen_split", "lock_screen_typo_style", "lock_screen_typo_font", "lock_screen_typo_font_name",
 }
 
 ---@param desktop BookDesktop

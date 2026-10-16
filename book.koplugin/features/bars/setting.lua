@@ -27,6 +27,9 @@ Setting.defaults = {
     },
 }
 
+--- 无默认值的持久键：顶栏高度（读取时由 features.bars.layout 夹到合法范围）。
+Setting.keys = { "book_reader_top_bar_height" }
+
 ---@param desktop BookDesktop
 ---@return BookSettingEntry[]
 function Setting.entries(desktop)
