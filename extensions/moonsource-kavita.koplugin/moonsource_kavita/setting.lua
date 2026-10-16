@@ -187,6 +187,25 @@ local function heartbeatRow()
     end
 end
 
+--- 多设备统计合并：打开后每天取云端与本地较大值，补上离线阅读的差额（核心合并 SQL 只认 true）。
+--- 开关状态由 Row.widget 的 toggle 行画成「开 / 关」；行里放不下长解释，副标题只留一句。
+---@return fun(iw: number): table
+local function mergeRow()
+    return function(iw)
+        local on = config().merge_local_stats == true
+        return require("ui.themes.widgets.row").widget({
+            width = iw, kind = "toggle", icon = "history", title = _("多设备统计合并"),
+            subtitle = _("按天取较大值，补上离线阅读"),
+            toggle = on,
+            callback = function()
+                local cfg = config()
+                cfg.merge_local_stats = not on
+                save(cfg)
+            end,
+        })
+    end
+end
+
 local function testConnection()
     withServer(function(client, done)
         client:request("GET", "/api/Plugin/version", { apiKey = client.api_key }, nil, function(version, err)
@@ -243,6 +262,7 @@ function Setting.rows()
         libraryRow(),
         heartbeatRow(),
         timeoutRow(),
+        mergeRow(),
         testRow(),
     }
 end
