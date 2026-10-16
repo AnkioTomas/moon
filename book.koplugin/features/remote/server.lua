@@ -61,6 +61,7 @@ local STATUS = {
 ---@field set_clipboard fun(text: string) 写入设备剪贴板并同步进激活输入框
 ---@field get_status fun(): table 首页设备状态快照
 ---@field install_update fun(temp: string, cb: fun(ok: boolean, err: string|nil)) 安装上传的月读插件包（临时文件所有权移交）
+---@field settings_restored fun()|nil 配置备份已恢复：设备提示并重启
 
 --- 一切非 2xx 响应都是 JSON {"error": msg}：页面能把真实原因显示出来，
 --- 而不是 r.json() 解析纯文本炸出 SyntaxError 掩盖问题。
@@ -76,6 +77,7 @@ local Clipboard = require("features.remote.clipboard")
 local Status = require("features.remote.status")
 local SettingsRoute = require("features.remote.settings_route")
 local UpdateRoute = require("features.remote.update")
+local BackupRoute = require("features.remote.backup")
 Server._routeList = File.list
 Server._routeDownload = File.download
 Server._routeUpload = File.upload
@@ -91,6 +93,7 @@ Server._routeClipboard = Clipboard.route
 Server._routeStatus = Status.route
 Server._routeSettings = SettingsRoute.settings
 Server._routeUpdate = UpdateRoute.route
+Server._routeBackup = BackupRoute.route
 
 --- idle_timeout：连续这么多秒没有任何在途连接就调一次 on_idle（nil = 不检测）。
 ---@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil, idle_timeout: number|nil, on_idle: fun()|nil }
@@ -589,6 +592,8 @@ function Server:_route(conn, head)
         return self:_routeSettings(conn, method, headers, query)
     elseif path == "/api/update" then
         return self:_routeUpdate(conn, method, headers)
+    elseif path == "/api/backup" then
+        return self:_routeBackup(conn, method, headers)
     end
     return self:_fail(conn, 404, "Not Found")
 end

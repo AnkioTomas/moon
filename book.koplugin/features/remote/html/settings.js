@@ -77,6 +77,28 @@ function renderForms(list, external) {
                 saveGroup(group, payload).then(function () {
                     setState(state, '已保存', 'ok');
                     return loadSettings();
+
+/* 配置备份恢复：上传 /api/backup 下载的文件，设备校验后写入并重启。 */
+(function () {
+    var input = el('bkfile');
+    var pick = el('bkpick');
+    var state = el('bkstate');
+    el('bkdl').onclick = function () { location.href = '/api/backup'; };
+    pick.onclick = function () { input.click(); };
+    input.onchange = function () {
+        var file = input.files[0];
+        input.value = '';
+        if (!file || !window.confirm(t('恢复会覆盖设备上的月读配置，并重启 KOReader，继续吗？'))) return;
+        pick.disabled = true;
+        setState(state, '正在恢复…', '');
+        jfetch('/api/backup', { method: 'POST', body: file }).then(function () {
+            setState(state, '已恢复 ✓ KOReader 正在重启，稍后可重新连接。', 'ok');
+        }).catch(function (err) {
+            setState(state, t('恢复失败：%1', err.status === 400 ? t('不是有效的月读配置备份') : (err.message || String(err))), 'err');
+            pick.disabled = false;
+        });
+    };
+})();
                 }).catch(function (err) {
                     setState(state, String(err), 'err');
                 });

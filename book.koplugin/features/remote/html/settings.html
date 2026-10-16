@@ -23,6 +23,17 @@
 <div id="loadstate" class="state" role="status" aria-live="polite">加载中…</div>
 
 <div class="settings-grid"></div>
+
+<section id="bkpanel" class="panel" aria-labelledby="bk-title">
+<h2 id="bk-title">配置备份</h2>
+<p class="state">备份月读的阅读、界面和功能设置；不含登录信息、密钥和锁屏密码。恢复后 KOReader 自动重启。</p>
+<div id="bkstate" class="state" role="status" aria-live="polite"></div>
+<input type="file" id="bkfile" accept=".lua,text/plain" hidden>
+<div class="btns">
+<button type="button" id="bkdl">下载备份</button>
+<button type="button" id="bkpick" class="primary">上传备份并恢复</button>
+</div>
+</section>
 </main>
 
 <footer class="site-footer"><span>月读 · 作者 Ankio</span><span class="footer-sep" aria-hidden="true">·</span><a href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net</a><span class="footer-note">仅限可信局域网使用</span></footer>
