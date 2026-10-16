@@ -172,7 +172,7 @@ Assert.eq(guarded[1].label, "feature e1.events.Boom")
 
 -- scan：扫真实 features/ 目录，返回提供某约定文件的目录名（按名字排序，不看 list），同一文件只扫一次
 Assert.eq(table.concat(Features.scan("events"), ","), "xray")
-Assert.eq(table.concat(Features.scan("panel"), ","), "ai,animation,bluetooth,demo,nightmode,reflow,remote,reviews,translate,xray")
+Assert.eq(table.concat(Features.scan("panel"), ","), "ai,animation,bluetooth,demo,nightmode,rare,reflow,remote,reviews,translate,xray")
 local settings = Features.scan("setting")
 Assert.contains(settings, "nightmode")
 Assert.contains(settings, "xray")

@@ -1,8 +1,10 @@
 --[[--
 生僻字注音绘制层：挂在 reader.page_marks 上（只画字，不占位；点注音或被注音的字开查词面板 lookup）。
 
-每屏：取屏上文字 → 各启用词库按阈值找生僻词 → 逐词 findText 取屏幕框 → 在框上方画注音。
-没命中的屏只花一次取字 + 查表；有命中时超过 BUDGET 秒就停止取框，剩下的不画。
+每屏：取屏上首末位置 → 逐个可见字走一遍（只走本屏，和书多大无关）→ 各启用词库按阈值（生字本里的不看阈值）
+找出每一处命中 → 按命中的字位置取屏幕框 → 在框上方画注音。
+不用 findText：它每个词都从本页往后扫几页正文，词多（「全部」档）或书大时会撞上时间预算，后面的字就不注了。
+总耗时超过 BUDGET_MS 才停止取框（记日志），正常屏幕远不到。
 结果按 PageMarks.viewKey 缓存，翻页 / 改排版 / 改设置（revision）才重算。
 
 @module koplugin.book.features.rare.overlay
@@ -12,8 +14,10 @@ local PageMarks = require("reader.page_marks")
 local Perf = require("utils.perf")
 local logger = require("utils.log")
 
-local BUDGET_MS = 250
-local MAX_WORDS = 80
+local BUDGET_MS = 1500
+-- 每屏最多走的字数 / 注音处数：只防异常文档跑飞，正常一屏远不到。
+local MAX_UNITS = 6000
+local MAX_HITS = 3000
 -- 注音用拉丁字体：界面字体若是中文字体（如方正兰亭黑），带声调字母是全角宽，拼音会被拉散。
 local FACE = "NotoSans-Regular.ttf"
 
@@ -186,44 +190,61 @@ function Overlay.new(ui)
     return setmetatable({ ui = ui, key = nil, items = {} }, Overlay)
 end
 
---- 英文整词：命中前后紧邻字符不能是字母或撇号（否则是更长单词的一部分）。
----@param document table CreDocument
----@param match { start: string, ["end"]: string }
----@return boolean
-function Overlay.wholeWord(document, match)
-    local prev = document:getPrevVisibleChar(match.start)
-    local before = prev and document:getTextFromXPointers(prev, match.start) or ""
-    local next = document:getNextVisibleChar(match["end"])
-    local after = next and document:getTextFromXPointers(match["end"], next) or ""
-    return not (before:sub(-1):match("[%a']") or after:sub(1, 1):match("[%a']"))
+--- xpointer 后移一个字（同一文本节点内偏移 +1）；不是文本偏移形式返回 nil。
+---@param xp string
+---@return string|nil
+local function nextOffset(xp)
+    local base, off = xp:match("^(.-%.)(%d+)$")
+    if base then return base .. (tonumber(off) + 1) end
 end
 
---- 当前屏命中词的屏幕框（按 y、x 排序）。
+--- 本屏逐字：从 pos0 起 getNextVisibleChar 走到 pos1（含），每个可见字一个单元 { text, xp, stop }。
+--- stop 是该字之后的位置（取框用的终点）。空白不成单元。
+---@param document table CreDocument
+---@param pos0 string
+---@param pos1 string
+---@return { text: string, xp: string, stop: string }[]
+function Overlay.walk(document, pos0, pos1)
+    local units, xp = {}, pos0
+    while xp and #units < MAX_UNITS do
+        local order = document:compareXPointers(xp, pos1)
+        if not order or order < 0 then break end
+        local nx = document:getNextVisibleChar(xp)
+        local stop = nextOffset(xp) or nx
+        local text = stop and document:getTextFromXPointers(xp, stop) or ""
+        text = text:gsub("%s+", "")
+        if text ~= "" then
+            -- 偶有一次取到多个字（节点边界）：只取第一个字，位置仍按这一格。
+            units[#units + 1] = { text = text:match("^[%z\1-\127\194-\244][\128-\191]*"), xp = xp, stop = stop }
+        end
+        if not nx or nx == xp then break end
+        xp = nx
+    end
+    return units
+end
+
+--- 本屏命中处的屏幕框（按 y、x 排序）。
 ---@param self table
----@param words { key: string, ann: string, ci: boolean }[]
----@return { ann: string, box: table }[]
-local function locate(self, words)
+---@param units table[] Overlay.walk 的结果
+---@param found { i: integer, n: integer, key: string, ann: string }[]
+---@param started_at number
+---@return { ann: string, key: string, box: table }[]
+local function locate(self, units, found, started_at)
     local document = self.ui.document
     local width, height = PageMarks.screenSize(self.ui)
-    local started_at = Perf.now()
     local hits = {}
-    for _idx, word in ipairs(words) do
+    for _idx, f in ipairs(found) do
         if Perf.elapsedMs(started_at) > BUDGET_MS then
-            logger.dbg("book.rare budget exceeded, drawn", #hits)
+            logger.warn("book.rare budget exceeded, drawn", #hits, "of", #found)
             break
         end
-        for _m, match in ipairs(document:findText(word.key, 0, 0, word.ci, nil, false, 5000, 0) or {}) do
-            if not word.ci or Overlay.wholeWord(document, match) then
-                for _b, box in ipairs(document:getScreenBoxesFromPositions(match.start, match["end"], true) or {}) do
-                    if PageMarks.intersects(box, width, height) then
-                        hits[#hits + 1] = { ann = word.ann, box = box, key = word.key }
-                    end
-                end
+        local first, last = units[f.i], units[f.i + f.n - 1]
+        for _b, box in ipairs(document:getScreenBoxesFromPositions(first.xp, last.stop, true) or {}) do
+            if PageMarks.intersects(box, width, height) then
+                hits[#hits + 1] = { ann = f.ann, box = box, key = f.key }
             end
         end
     end
-    -- findText 会把最后一次命中写进原生 selection，只要坐标。
-    if document.clearSelection then document:clearSelection() end
     table.sort(hits, function(a, b)
         if a.box.y ~= b.box.y then return a.box.y < b.box.y end
         return a.box.x < b.box.x
@@ -236,26 +257,33 @@ end
 ---@return table[]
 local function compute(self, bb)
     local document = self.ui.document
-    if not (self.ui.rolling and document and document.findText and document.getScreenBoxesFromPositions) then
+    if not (self.ui.rolling and document and document.getTextFromPositions and document.getNextVisibleChar
+        and document.compareXPointers and document.getScreenBoxesFromPositions) then
         return {}
     end
     local settings = require("utils.settings").get("features.rare")
     local lexicons = require("features.rare.catalog").active()
     if #lexicons == 0 then return {} end
-    local text = require("reader.context").visibleText(self.ui)
-    if not text then return {} end
+    local started_at = Perf.now()
+    local width, height = PageMarks.screenSize(self.ui)
+    local ok, range = pcall(document.getTextFromPositions, document, { x = 0, y = 0 }, { x = width, y = height }, true)
+    if not (ok and range and range.pos0 and range.pos1) then return {} end
+    local units = Overlay.walk(document, range.pos0, range.pos1)
+    if #units == 0 then return {} end
+    local texts = {}
+    for i, u in ipairs(units) do texts[i] = u.text end
+    local force = settings.rare_vocab and require("features.rare.vocab").set() or nil
     local Lexicon = require("features.rare.lexicon")
-    local words = {}
+    local found = {}
     for _idx, lex in ipairs(lexicons) do
-        for _w, word in ipairs(Lexicon.match(lex, text, Lexicon.threshold(lex, settings.rare_level), MAX_WORDS)) do
-            word.ci = lex.lang == "en"
-            words[#words + 1] = word
+        for _f, f in ipairs(Lexicon.scan(lex, texts, Lexicon.threshold(lex, settings.rare_level), force, MAX_HITS - #found)) do
+            found[#found + 1] = f
         end
     end
-    if #words == 0 then return {} end
+    if #found == 0 then return {} end
     local RenderText = require("ui/rendertext")
-    local width = PageMarks.screenSize(self.ui)
-    local hits = locate(self, words)
+    local hits = locate(self, units, found, started_at)
+    if #hits == 0 then return {} end
     local key = Overlay.layoutKey(document)
     if key ~= calib_key then
         local boxes = {}
@@ -324,7 +352,8 @@ function Overlay:paint(bb)
     end
     if #self.items == 0 then return end
     local RenderText = require("ui/rendertext")
-    local color = require("ffi/blitbuffer").COLOR_DARK_GRAY
+    -- 纯黑：灰色在墨水屏上偏淡，小字号注音看不清。
+    local color = require("ffi/blitbuffer").COLOR_BLACK
     for _idx, item in ipairs(self.items) do
         RenderText:renderUtf8Text(bb, item.x, item.y, annFace(item.size), item.text, true, false, color)
     end

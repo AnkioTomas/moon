@@ -22,13 +22,12 @@ local rendered = {}
 package.preload["ui/rendertext"] = function()
     return {
         sizeUtf8Text = function(_self, _x, _w, face, text) return { x = #text * face.size / 2 } end,
-        renderUtf8Text = function(_self, _bb, x, y, face, text)
-            rendered[#rendered + 1] = { x = x, y = y, size = face.size, text = text }
+        renderUtf8Text = function(_self, _bb, x, y, face, text, _k, _b, color)
+            rendered[#rendered + 1] = { x = x, y = y, size = face.size, text = text, color = color }
         end,
     }
 end
 package.preload["apps/reader/readerui"] = function() return {} end
-package.preload["ffi/blitbuffer"] = function() return { COLOR_DARK_GRAY = 1 } end
 
 local Overlay = require("features.rare.overlay")
 
@@ -122,41 +121,84 @@ do
     Assert.eq(items[3].x, 123, "不同行不推")
 end
 
-local function newUi(matches)
-    local finds = 0
+-- 桩 CRE：屏上文字逐字一个 xpointer "t.<序号>"；字框横排，每字 30px。
+package.loaded["ffi/blitbuffer"] = { COLOR_DARK_GRAY = 1, COLOR_BLACK = 0 }
+local function newUi()
+    local calls = { boxes = 0, walks = 0 }
+    local function chars()
+        local out = {}
+        for c in screen_text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do out[#out + 1] = c end
+        return out
+    end
+    local function idx(xp) return tonumber(xp:match("(%d+)$")) end
     local doc = {
-        findText = function(_self, key)
-            finds = finds + 1
-            return matches[key]
+        getTextFromPositions = function()
+            calls.walks = calls.walks + 1
+            return { text = screen_text, pos0 = "t.0", pos1 = "t." .. (#chars() - 1) }
         end,
-        getScreenBoxesFromPositions = function(_self, s) return { s } end,
+        compareXPointers = function(_self, a, b)
+            if idx(a) == idx(b) then return 0 end
+            return idx(a) < idx(b) and 1 or -1
+        end,
+        getNextVisibleChar = function(_self, xp)
+            local n = idx(xp) + 1
+            if n < #chars() then return "t." .. n end
+        end,
+        getTextFromXPointers = function(_self, a, b)
+            return table.concat(chars(), "", idx(a) + 1, idx(b))
+        end,
+        getScreenBoxesFromPositions = function(_self, a, b)
+            calls.boxes = calls.boxes + 1
+            return { { x = idx(a) * 30, y = 100, w = (idx(b) - idx(a)) * 30, h = 30 } }
+        end,
         getCurrentPos = function() return 0 end,
-        clearSelection = function() end,
     }
     local ui = { rolling = {}, document = doc, view = { dimen = { w = 600, h = 800 } } }
-    return ui, function() return finds end
+    return ui, calls
 end
 
 do
-    lex = require("features.rare.lexicon").parse("#lang=zh\n龘\tdá\t9000\n普\tpǔ\t100")
-    local ui, finds = newUi({ ["龘"] = { { start = { x = 10, y = 100, w = 30, h = 30 }, ["end"] = {} } } })
+    lex = require("features.rare.lexicon").parse("#lang=zh\n龘\tdá\t9000\n普\tpǔ\t100\n通\ttōng\t50\n文\twén\t20\n字\tzì\t30")
+    local ui, calls = newUi()
     local o = Overlay.new(ui)
     o:paint({})
     Assert.len(rendered, 1)
     Assert.eq(rendered[1].text, "dá")
-    Assert.eq(finds(), 1)
-    -- 同一视口走缓存，不再 findText。
+    Assert.eq(rendered[1].color, 0, "注音纯黑")
+    Assert.eq(calls.boxes, 1, "只给命中的字取框")
+    -- 同一视口走缓存，不再走字。
     rendered = {}
     o:paint({})
     Assert.len(rendered, 1)
-    Assert.eq(finds(), 1)
-    -- 没有生僻字：不调 findText，不画。
+    Assert.eq(calls.walks, 1)
+    -- 没有生僻字：不取框，不画。
     screen_text = "普通文字"
     Overlay.invalidate()
     rendered = {}
     o:paint({})
     Assert.len(rendered, 0)
-    Assert.eq(finds(), 1)
+    Assert.eq(calls.boxes, 1)
+    -- 「全部」：屏上每个字都注（不再有 80 词 / findText 预算上限）。
+    settings.rare_level = "all"
+    screen_text = string.rep("普通文字", 40)
+    Overlay.invalidate()
+    o:paint({})
+    Assert.eq(calls.boxes, 1 + 160, "160 个字每处都取框")
+    settings.rare_level = "rare"
+    -- 生字本：生字本里的字不看档位也注。
+    package.loaded["features.rare.vocab"] = { set = function() return { ["通"] = true } end }
+    settings.rare_vocab = true
+    screen_text = "普通文字"
+    Overlay.invalidate()
+    rendered = {}
+    o:paint({})
+    Assert.len(rendered, 1)
+    Assert.eq(rendered[1].text, "tōng")
+    settings.rare_vocab = false
+    Overlay.invalidate()
+    rendered = {}
+    o:paint({})
+    Assert.len(rendered, 0, "关掉生字本就按档位")
     -- 关闭开关：不画。
     screen_text = "龘"
     settings.rare_enabled = false
@@ -164,36 +206,31 @@ do
     o:paint({})
     Assert.len(rendered, 0)
     settings.rare_enabled = true
+    screen_text = "普通文字龘"
 end
 
 do
-    -- 英文整词：前后紧邻是字母或撇号的命中不算（findText 是子串搜索）。
-    local text = "an obdurate, obdurately; the obdurate's x"
+    -- 走字：空白不成单元，止于 pos1（含）；取框终点是同节点偏移 +1。
+    local text = { "a", " ", "b", "c", "d" }
+    local function n(xp) return tonumber(xp:match("%d+$")) end
     local doc = {
-        getPrevVisibleChar = function(_self, i) if i > 1 then return i - 1 end end,
-        getNextVisibleChar = function(_self, i) if i <= #text then return i + 1 end end,
-        getTextFromXPointers = function(_self, a, b) return text:sub(a, b - 1) end,
+        compareXPointers = function(_self, a, b)
+            return n(a) == n(b) and 0 or (n(a) < n(b) and 1 or -1)
+        end,
+        getNextVisibleChar = function(_self, xp) if n(xp) < #text - 1 then return "p/text()." .. (n(xp) + 1) end end,
+        getTextFromXPointers = function(_self, a, b) return table.concat(text, "", n(a) + 1, n(b)) end,
     }
-    local function hit(from)
-        local s = text:find("obdurate", from, true)
-        return { start = s, ["end"] = s + #"obdurate" }, s
-    end
-    local m1, s1 = hit(1)
-    Assert.is_true(Overlay.wholeWord(doc, m1))
-    local m2, s2 = hit(s1 + 1)
-    Assert.is_true(not Overlay.wholeWord(doc, m2))
-    local m3 = hit(s2 + 1)
-    Assert.is_true(not Overlay.wholeWord(doc, m3))
-    -- 段首、段尾没有前后字符也算整词。
-    text = "obdurate"
-    Assert.is_true(Overlay.wholeWord(doc, { start = 1, ["end"] = 9 }))
+    local units = Overlay.walk(doc, "p/text().0", "p/text().3")
+    local got = {}
+    for _, u in ipairs(units) do got[#got + 1] = u.text .. "@" .. u.xp .. ">" .. u.stop end
+    Assert.eq(table.concat(got, ","), "a@p/text().0>p/text().1,b@p/text().2>p/text().3,c@p/text().3>p/text().4")
 end
 
 do
     -- 点注音或被注音的字：开查词面板，带读音与屏上所在句子；关掉注音不接。
     local shown
     package.loaded["features.rare.lookup"] = { open = function(opts) shown = opts end }
-    package.loaded["reader.context"].sentence = function(text, word) return "句子:" .. word end
+    require("reader.context").sentence = function(text, word) return "句子:" .. word end
     local ui = newUi({})
     local o = Overlay.new(ui)
     o.items = { { text = "dá", key = "龘", x = 10, y = 90, w = 20, size = 15, box = { x = 10, y = 100, w = 30, h = 30 } } }
