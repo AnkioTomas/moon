@@ -15,7 +15,7 @@
 books.path 即用户最后选的版本：复用 books.path 的源从桌面重开仍是双语版，本地书总开原书；
 双语版在缓存目录里，清缓存会连它一起删掉并撤 path，下次开书由源重新登记原书。
 
-章节源（`type == "chapter"`）的书不做：章节文件各自独立，没有整本可译。
+章节源（`type == "chapter"`）的书按章翻译，见 features.translate.chapter；这里只出面板。
 
 @module koplugin.book.features.translate.bilingual
 --]]
@@ -284,6 +284,8 @@ local function task(input)
         local function produce()
             report(_("正在生成双语版"))
             job("bilingual.build", function() return build(input) end, function()
+                -- 章节：原章就是 source，不删也不写 meta（按书开关决定开哪份）。
+                if input.chapter then return finish({ ok = true, file = input.dest }) end
                 -- job 回调里抛错会被吞掉、finish 不来，前台进度窗就关不掉：写盘失败按任务失败结束。
                 local ok, err = pcall(writeFile, input.dir .. "/meta.json",
                     JSON.encode({ origin = input.origin, file = input.dest }))
@@ -330,7 +332,8 @@ end
 ---@param identity BookIdentity
 ---@param target string
 ---@param xpointer string
-local function switchTo(ui, identity, target, xpointer)
+---@param touch_opts table|nil 章节：{ chapter_idx }
+local function switchTo(ui, identity, target, xpointer, touch_opts)
     local Toast = require("ui.themes.widgets.toast")
     if require("libs/libkoreader-lfs").attributes(target, "mode") ~= "file" then
         Toast:new{ text = _("文件不存在") }:show()
@@ -343,7 +346,7 @@ local function switchTo(ui, identity, target, xpointer)
     settings:saveSetting("last_xpointer", xpointer)
     settings:saveSetting("cre_dom_version", ui.doc_settings:readSetting("cre_dom_version"))
     settings:flush()
-    local ok, err = require("book.store").touch(target, identity)
+    local ok, err = require("book.store").touch(target, identity, touch_opts)
     if not ok then
         Toast:new{ text = err }:show()
         return
@@ -411,13 +414,14 @@ end
 ---@param identity BookIdentity
 ---@param engine "edge"|"ai"
 ---@param lang string 目标语言
-local function start(ui, identity, engine, lang)
+---@param chapter { input: BilingualInput, touch: table }|nil 章节源：只翻本章，完成后重开本章
+local function start(ui, identity, engine, lang, chapter)
     local Toast = require("ui.themes.widgets.toast")
     if not require("ui/network/manager"):isConnected() then
         Toast:new{ text = _("网络不可用，请先连接 Wi-Fi") }:show()
         return
     end
-    local input = prepare(ui, identity, engine, lang)
+    local input = chapter and chapter.input or prepare(ui, identity, engine, lang)
     local run = task(input)
     -- 整书翻译常比自动休眠时长还久。AutoSuspend（Kindle 上是重置 powerd 的 t1）按最后一次 InputEvent 计时：
     -- 每报一次进度就算一次操作，翻译结束自然恢复，不留开关状态。
@@ -447,7 +451,7 @@ local function start(ui, identity, engine, lang)
                 text = _("双语对照已生成，现在打开？"),
                 ok_text = _("打开"),
                 ok_callback = function()
-                    switchTo(reader, identity, input.dest, reader.document:getXPointer())
+                    switchTo(reader, identity, input.dest, reader.document:getXPointer(), chapter and chapter.touch)
                 end,
             }:show()
         end,
@@ -458,19 +462,79 @@ end
 ---@param ui table
 ---@return boolean
 function Bilingual.active(ui)
+    local identity = require("reader.session").current().identity
+    if identity.source and identity.source.type == "chapter" then
+        return require("features.translate.chapter").get(identity) ~= nil
+    end
     local meta = readMeta(workDir(require("reader.session").current().identity))
     return meta ~= nil and meta.file == ui.document.file
 end
 
---- 整书 CREngine 文档才能做；章节源的书（含全本缓存后的）一律不做；属主源已卸载（第三方源插件）的也不做。
+--- CREngine 文档才能做（章节源按章做，漫画 CBZ 不是 CREngine）；属主源已卸载（第三方源插件）的也不做。
 --- 读别的衍生版（如排版版）时不做：衍生版的划线只会和它的原书收敛，再套一层就回不到笔记库。
 ---@param ui table
 ---@return boolean
 function Bilingual.available(ui)
     local session = require("reader.session").current()
     local source = session and session.identity.source
-    if source == nil or source.type == "chapter" or ui.rolling == nil then return false end
+    if source == nil or ui.rolling == nil then return false end
+    if source.type == "chapter" then return true end
     return DerivedNote.originOf(ui.document.file) == nil or Bilingual.active(ui)
+end
+
+--- 章节源：按书开关。开启后就绪的双语章立即切过去，否则后台翻译；关闭时在双语章上切回原章。
+---@param ui table
+---@param identity BookIdentity
+local function showChapter(ui, identity)
+    local running = require("workers.tasks").get(taskKey(identity))
+    if running then
+        require("workers.ui.task_dialog").follow(running)
+        return
+    end
+    local ChapterBi = require("features.translate.chapter")
+    local Paths = require("utils.paths")
+    local Languages = require("features.translate.languages")
+    local translator = require("ui/translator")
+    local lang = translator:getTargetLanguage() --[[@as string]]
+    local origin = Paths.chapterOrigin(ui.document.file)
+    local touch = { chapter_idx = tonumber(identity.chapter_idx) }
+    local items = {
+        { text = T(_("目标语言：%1"), Languages.displayName(translator, lang)), callback = function()
+            Languages.pick(translator, _("目标语言"), false, lang, function(code)
+                Languages.applyTarget(code)
+                Bilingual.show(ui)
+            end)
+        end },
+    }
+    -- 与整书同一流程：本章双语章就绪直接切过去，否则进度窗翻译本章（可转后台），完成询问重开。
+    local function enable(engine)
+        local conf = { engine = engine, lang = lang }
+        ChapterBi.set(identity, conf)
+        local dest = touch.chapter_idx and ChapterBi.resolve(identity, touch.chapter_idx, origin)
+        if dest then
+            if dest ~= ui.document.file then
+                switchTo(ui, identity, dest, originalXPointer(ui.document, ui.document:getXPointer()), touch)
+            end
+            return
+        end
+        start(ui, identity, engine, lang, { input = ChapterBi.input(identity, origin, conf), touch = touch })
+    end
+    if ChapterBi.get(identity) then
+        items[#items + 1] = { text = _("关闭双语对照"), callback = function()
+            ChapterBi.set(identity, nil)
+            if origin ~= ui.document.file then
+                switchTo(ui, identity, origin, originalXPointer(ui.document, ui.document:getXPointer()), touch)
+            end
+        end }
+    end
+    items[#items + 1] = { text = _("用 Edge 开启双语对照"), callback = function() enable("edge") end }
+    local ai = require("ai").isConfigured()
+    items[#items + 1] = {
+        text = ai and _("用 AI 开启双语对照") or _("用 AI 开启双语对照（未配置 AI）"),
+        enabled = ai,
+        callback = function() enable("ai") end,
+    }
+    require("ui.themes.widgets.sheet"):new{ title = _("双语对照"), items = items }:show()
 end
 
 --- 快捷面板入口：读双语版时直接切回原文；这本书正在翻译时跟随进度；
@@ -478,6 +542,7 @@ end
 ---@param ui table
 function Bilingual.show(ui)
     local identity = require("reader.session").current().identity
+    if identity.source and identity.source.type == "chapter" then return showChapter(ui, identity) end
     local running = require("workers.tasks").get(taskKey(identity))
     local meta = readMeta(workDir(identity))
     local xpointer = ui.document:getXPointer()
@@ -515,6 +580,8 @@ function Bilingual.show(ui)
     require("ui.themes.widgets.sheet"):new{ title = _("双语对照"), items = items }:show()
 end
 
+Bilingual.ENGINES = ENGINES
+Bilingual._appendCache = appendCache
 Bilingual._batches = batches
 Bilingual._task = task
 Bilingual._originalXPointer = originalXPointer

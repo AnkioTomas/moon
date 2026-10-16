@@ -91,7 +91,8 @@ end
 local function chapterTarget(self, identity, source)
     local owner = identity.source --[[@as ParagraphReviewSource]]
     -- 回包时文档可能已关（document 为 nil）或已切到别的章文件，只能用发起时这一章。
-    local file = self.ui.document.file
+    -- 双语章按原章定位：译文元素只追加在段尾，原文 xpointer 两版通用。
+    local file = require("utils.paths").chapterOrigin(self.ui.document.file)
     local fetch = function(cb)
         local locate, borrowed
         local function onHotspots(hotspots, err)
