@@ -40,12 +40,25 @@ KOReader 事件（Dispatcher 动作、FrontlightStateChanged 这类广播）写�
 
 onCreate 每次开书、关书都会再调（FM / Reader 各建实例），monkey-patch KOReader 的 feature 用模块级标记防重入。
 只有写进 list 的才加载。新增 feature：复制 demo/ 为 <name>/ 删掉不用的钩子，加进 list，测试放 tests/features/<name>/；
-demo/ 不登记、打包时剔除。阅读会话、后台任务、源生命周期这类有返回值或顺序约束的核心编排不走这里，留在 main.lua。
+demo/ 不登记、打包时剔除。
+
+第三方 feature：KOReader 插件的 moon_source.lua 写 `provides.features = { setting, panel, topbar, events, hooks }`，
+每个值是表，或插件内的模块名（字符串，用到时才 require）；形状与对应约定文件相同：
+  setting = { entries = fn(desktop) }、panel = { actions = fn() }、topbar = { items = fn() }、
+  events = { [数据事件名] = fn(...) }、hooks = { onReaderReady = fn(plugin) }。
+`Features.external(kind)` 收集它们，由四个收集点（设置树、快捷面板注册表、桌面顶栏、main 传给 utils.event）追加在内置项之后。
+只开放 onReaderReady：其余生命周期与 KOReader 事件第三方插件自己的实例就能收到，月读不转发；补丁与页内标记不开放。
+规则：
+  - 页面 / 开关 / 顶栏项 id 自动加 `<扩展 id>.` 前缀（已带则不重复加），撞名的记日志跳过；
+  - 配置存 utils.settings.getSource(<扩展 id>)（settings/ext.<name>.lua，不参与旧分区迁移），别用 get / save；
+  - 每个回调经 Features.try 隔离：出错只记日志（不弹错误页），读数类回调返回 nil，数据事件订阅方出错不中断核心派发；
+  - 插件卸载后已保存的开关 / 顶栏 id 找不到就静默跳过；插件未加载完（extensionsReady 为假）时收集方不缓存。阅读会话、后台任务、源生命周期这类有返回值或顺序约束的核心编排不走这里，留在 main.lua。
 
 @module koplugin.book.features
 --]]
 
 local Guard = require("ui.guard")
+local logger = require("utils.log")
 
 local Features = {}
 
@@ -95,12 +108,71 @@ Features.list = {
     "update",
 }
 
+local function settle(label, ok, ...)
+    if ok then return ... end
+    logger.err("feature external failed", label, (...))
+end
+
+--- 跑一个第三方回调：出错只记日志并返回 nil。
+---@param label string
+---@param fn function
+function Features.try(label, fn, ...)
+    if type(fn) ~= "function" then return end
+    return settle(label, pcall(fn, ...))
+end
+
+--- 把第三方回调包成隔离版本；不是函数原样返回（nil 仍是 nil）。
+---@param label string
+---@param fn any
+function Features.wrap(label, fn)
+    if type(fn) ~= "function" then return fn end
+    return function(...) return Features.try(label, fn, ...) end
+end
+
+--- 给第三方项 id 加 `<扩展 id>.` 前缀；不是非空字符串返回 nil。
+---@param ext_id string
+---@param id any
+---@return string|nil
+function Features.prefix(ext_id, id)
+    if type(id) ~= "string" or id == "" then return nil end
+    if id:sub(1, #ext_id + 1) == ext_id .. "." then return id end
+    return ext_id .. "." .. id
+end
+
+--- 第三方扩展声明的某类 feature 挂点，按插件加载顺序：{ id = 扩展 id, mod = 解析后的表 }。
+--- 模块名在这里 require，失败记日志跳过。不缓存；第二返回值为假表示插件还没加载完，调用方别缓存结果。
+---@param kind "setting"|"panel"|"topbar"|"events"|"hooks"
+---@return { id: string, mod: table }[] items, boolean ready
+function Features.external(kind)
+    local out = {}
+    -- 拿不到注册表（离线测试没有 pluginloader 等）就当没有第三方扩展。
+    local ok, Registry = pcall(require, "source.registry")
+    local exts = ok and Features.try("source.registry extensions", Registry.extensions)
+    if type(exts) ~= "table" then return out, true end
+    for _idx, ext in ipairs(exts) do
+        local spec = ext.features and ext.features[kind]
+        if spec ~= nil then
+            local mod = type(spec) == "string" and Features.try(ext.id .. " " .. kind, require, spec) or spec
+            if type(mod) == "table" then
+                out[#out + 1] = { id = ext.id, mod = mod }
+            else
+                logger.err("feature external rejected", ext.id, kind)
+            end
+        end
+    end
+    return out, Registry.extensionsReady()
+end
+
 ---@param hook string
 ---@param plugin BookPlugin
 function Features.emit(hook, plugin)
     for _idx, name in ipairs(Features.list) do
         local fn = require("features." .. name)[hook]
         if fn then Guard.call("feature " .. name .. "." .. hook, fn, plugin) end
+    end
+    if hook ~= "onReaderReady" then return end
+    for _idx, item in ipairs(Features.external("hooks")) do
+        Features.try(item.id .. "." .. hook, item.mod[hook], plugin)
     end
 end
 
@@ -129,13 +201,29 @@ function Features.handleEvent(event, plugin)
     return false
 end
 
---- 各 feature 的某个约定文件（如 events）按扫描顺序 require 出来。
+--- 各 feature 的某个约定文件（如 events）按扫描顺序 require 出来；events 再追加第三方订阅方
+--- （出错只记日志并当作成功，不中断核心派发、不触发回滚）。
 ---@param file string
----@return table[]
+---@return table[] listeners, boolean ready 第三方扩展已收全
 function Features.listeners(file)
     local out = {}
     for _idx, name in ipairs(Features.scan(file)) do out[#out + 1] = require("features." .. name .. "." .. file) end
-    return out
+    if file ~= "events" then return out, true end
+    local items, ready = Features.external("events")
+    for _idx, item in ipairs(items) do
+        local map = {}
+        for event, fn in pairs(item.mod) do
+            if type(event) == "string" and type(fn) == "function" then
+                local label = item.id .. ".events." .. event
+                map[event] = function(...)
+                    Features.try(label, fn, ...)
+                    return true
+                end
+            end
+        end
+        out[#out + 1] = map
+    end
+    return out, ready
 end
 
 return Features

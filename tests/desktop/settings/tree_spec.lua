@@ -19,7 +19,10 @@ local GROUPS = { { id = "reader", title = "阅读" }, { id = "system", title = "
 
 -- ── 收集：按 Features.scan 的顺序；页面 id 加前缀，不改 feature 返回的表 ──
 package.preload["features"] = function()
-    return { scan = function(file) assert(file == "setting") return { "a", "b", "plain" } end }
+    return {
+        scan = function(file) assert(file == "setting") return { "a", "b", "plain" } end,
+        external = function() return {}, true end,
+    }
 end
 local b_entries = {
     { id = "main", group = "reader", order = 5, title = "乙", page = { title = "乙", sections = sections("乙") } },

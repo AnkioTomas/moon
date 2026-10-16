@@ -11,6 +11,8 @@
 
 feature 的顶栏项写在 `features/<name>/topbar.lua`：`items()` 返回 BookTopBarItem 数组，
 首次用到时经 Features.scan 收集，追加在核心项之后（按目录名）。id 不能和核心项、其它 feature 重复。
+第三方扩展的项（Features.external("topbar")）再排在后面：id 自动加 `<扩展 id>.` 前缀，read / watch / tap 经 Features.wrap 隔离，
+缺 id / read / label、撞名只记日志跳过；插件没加载完时不缓存。已保存的 home_topbar_items 里多出的 id 无害。
 顶层不要 require 重模块，放进 read / watch / tap 里延迟加载。设置页与预览读同一份数据，不用再登记。
 
 @module koplugin.book.desktop.topbar
@@ -201,10 +203,33 @@ function TopBar.items()
             table.insert(items, at, item)
         end
     end
+    local Features = require("features")
+    local seen = {}
+    for _idx, item in ipairs(items) do seen[item.id] = true end
+    local ext_items, ready = Features.external("topbar")
+    for _idx, ext in ipairs(ext_items) do
+        local list = Features.try(ext.id .. " topbar", ext.mod.items)
+        for _i, raw in ipairs(type(list) == "table" and list or {}) do
+            local id = type(raw) == "table" and Features.prefix(ext.id, raw.id)
+            if not id or type(raw.read) ~= "function" or not raw.label or seen[id] then
+                require("utils.log").err("feature external topbar rejected", ext.id, id)
+            else
+                local label = "topbar " .. id
+                local item = {}
+                for key, value in pairs(raw) do item[key] = value end
+                item.id, item.after = id, nil
+                item.read = Features.wrap(label, raw.read)
+                item.watch = Features.wrap(label, raw.watch)
+                item.tap = Features.wrap(label, raw.tap)
+                seen[id] = true
+                items[#items + 1] = item
+            end
+        end
+    end
     for _idx, item in ipairs(items) do
         for event in pairs(item.events or {}) do BarWidget["on" .. event] = onBarEvent end
     end
-    all_items = items
+    if ready then all_items = items end
     return items
 end
 

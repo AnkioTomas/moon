@@ -58,7 +58,7 @@ Assert.errors(function() Registry.desktopOrder() end, "already registered")
 local function withPanel(actions)
     package.loaded["features.panel.actions.registry"] = nil
     package.loaded["features"] = nil
-    package.preload["features"] = function() return { scan = function() return { "fake" } end } end
+    package.preload["features"] = function() return { scan = function() return { "fake" } end, external = function() return {}, true end } end
     package.loaded["features.fake.panel"] = nil
     package.preload["features.fake.panel"] = function() return { actions = function() return actions end } end
     return require("features.panel.actions.registry")
