@@ -101,7 +101,7 @@ function Edge.translateListAsync(texts, target_lang, source_lang, callback)
             callback(nil, nil, err)
             return
         end
-        local decoded, payload = pcall(JSON.decode, content, JSON.decode.simple)
+        local decoded, payload = pcall(require("utils.json").decode, content, JSON.decode.simple)
         if not decoded then
             logger.warn("invalid Edge translator response:", payload)
             callback(nil, nil, "invalid JSON response")
