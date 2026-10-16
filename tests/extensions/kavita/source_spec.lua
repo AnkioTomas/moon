@@ -1011,6 +1011,90 @@ do
     routes["GET /api/Series/volumes"] = volumes_route
 end
 
+-- 缺行卷物化：云端读过、本机没有书行的卷（seriesId:chapterId）补一条轻量身份行 —— 标题
+-- 「系列 · 卷名」、继承容器行的作者 / 简介 / 分类 / 系列，不写封面。洞察「当日书单」、单书详情、
+-- 锁屏账单才有书名而不是裸 ID。隐藏身份行（库里落成 deleted=1 + sync_status=1）不上架、
+-- 不触发书架对账、不进书架同步结果，写库只由本次统计同步的 stats_changed 带走；
+-- 容器行缺失时跳过物化（统计行照写）。
+do
+    local day = os.time({ year = 2026, month = 10, day = 10, hour = 0 })
+    local function findRow(rows, record_type, stable_id)
+        for _idx, row in ipairs(rows) do
+            if row.record_type == record_type and row.stable_id == stable_id then return row end
+        end
+    end
+    routes["GET /api/Stats/reading-history"] = function()
+        return json({
+            { seriesId = 8801, localDate = "2026-10-10T00:00:00",
+                chapters = { { chapterId = 88010, durationSeconds = 600, pagesRead = 1 } } },
+            { seriesId = 8802, localDate = "2026-10-10T00:00:00",
+                chapters = { { chapterId = 88020, durationSeconds = 300, pagesRead = 0 } } },
+            { seriesId = 8803, localDate = "2026-10-10T00:00:00",
+                chapters = { { chapterId = 88030, durationSeconds = 120, pagesRead = 0 } } },
+            { seriesId = 8804, localDate = "2026-10-10T00:00:00",
+                chapters = { { chapterId = 88040, durationSeconds = 60, pagesRead = 0 } } },
+        }, { Pagination = pagination_header(1, 1) })
+    end
+    tocs["8801"] = { { chapterId = 88010, title = "第二卷" }, { chapterId = 88011, title = "第三卷" } }
+    tocs["8802"] = { { chapterId = 88020, title = "上" }, { chapterId = 88021, title = "下" } }
+    tocs["8803"] = { { chapterId = 88030, title = "全" } }
+    -- 卷名拿不到的老目录（只剩 chapterId）：物化标题的卷名退容器名，不留裸 ID / 空标题。
+    tocs["8804"] = { { chapterId = 88040 }, { chapterId = 88041 } }
+    books["8801"] = { title = "合集", authors = "甲", intro = "简介", category = "书籍" }
+    books["8803"] = { title = "单卷书", authors = "乙", category = "书籍" }
+    books["8804"] = { title = "太空漫游", authors = "丙", category = "书籍" }
+
+    reconciled, remembered = nil, {}
+    local pulled = run("pullStatsAsync")
+    local material = remembered["8801:88010"]
+    Assert.eq(material and material.title, "合集 · 第二卷", "标题 = 系列 · 卷名（卷名取目录条目）")
+    Assert.eq(material and material.authors, "甲", "作者继承容器行")
+    Assert.eq(material and material.intro, "简介", "简介继承容器行")
+    Assert.eq(material and material.category, "书籍", "分类继承容器行")
+    Assert.eq(material and material.series, "合集", "系列列继承容器行")
+    Assert.is_nil(material and material.cover, "封面不写：卷封面走源既有取图链路")
+    Assert.is_nil(material and material.path, "不是下载行")
+    Assert.is_nil(material and material.deleted, "不带书架成员标记 → 落库即隐藏身份行，不上架")
+    Assert.is_nil(remembered["8801:88011"], "本次没读到的卷不物化")
+    Assert.is_nil(remembered["8802:88020"], "容器行缺失 → 跳过物化")
+    Assert.eq(findRow(pulled.rows, "book_day", "8802:88020").duration, 300, "容器缺失不影响统计行（照写）")
+    Assert.is_nil(remembered["8803"], "单卷系列读在容器行上，不另补行")
+    Assert.eq(remembered["8804:88040"] and remembered["8804:88040"].title, "太空漫游 · 太空漫游",
+        "目录条目没有卷名时退容器名（fetchToc 给不出时也别留裸 ID）")
+    Assert.is_nil(reconciled, "物化不触发书架对账")
+    Assert.is_nil(pulled.pulled, "物化不进书架同步结果（只由 stats_changed 刷新展示）")
+
+    -- 物化后卷行真实入库（rememberMany 会落库）：下一轮已存在且无变更 → 不重写（幂等）。
+    books["8801:88010"] = remembered["8801:88010"]
+    remembered = {}
+    run("pullStatsAsync")
+    Assert.is_nil(remembered["8801:88010"], "已存在的卷行不重写")
+
+    -- 本地脏行（sync_status=0，本地改过）：物化不动它（沿用卷行先例的 untouched 守卫）。
+    books["8801:88010"] = { title = "本地改名", authors = "本地作者", sync_status = 0 }
+    remembered = {}
+    run("pullStatsAsync")
+    Assert.is_nil(remembered["8801:88010"], "本地脏行不重写")
+    Assert.eq(books["8801:88010"].title, "本地改名", "本地改的标题留着")
+
+    -- 干净行但字段缺（容器后补的作者还没对齐）：按容器补齐 —— 已存在且**有**变更照写，
+    -- 否则首次物化之后容器才补上的作者永远传不到卷行上。
+    books["8801:88010"] = { title = "合集 · 第二卷", sync_status = 1 }
+    remembered = {}
+    run("pullStatsAsync")
+    Assert.eq(remembered["8801:88010"] and remembered["8801:88010"].authors, "甲",
+        "字段与容器不一致的行对齐一次")
+
+    books["8801"], books["8801:88010"] = nil, nil
+    tocs["8801"], tocs["8802"], tocs["8803"], tocs["8804"] = nil, nil, nil, nil
+    books["8803"], books["8804"] = nil, nil
+    routes["GET /api/Stats/reading-history"] = function()
+        return json({ { seriesId = 8661, localDate = "2026-10-10T00:00:00",
+            chapters = { { chapterId = 12763, durationSeconds = 60, pagesRead = 0 } } } },
+            { Pagination = pagination_header(1, 1) })
+    end
+end
+
 -- 落库时序 / 失败 / 取消 / 页数上限：状态只由 commit 推进，失败与取消都不动它。
 do
     local day = os.time({ year = 2026, month = 10, day = 10, hour = 0 })

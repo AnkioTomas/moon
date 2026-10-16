@@ -243,8 +243,26 @@ local function untouched(cur, row)
     return true
 end
 
+--- 卷行的元数据形状（先例 syncVolumeMeta / openBookAsync）：标题「系列 · 卷名」，其余继承容器。
+--- Kavita 只在 series 级给作者 / 简介 / 分类，而展示列的是卷行：卷行空着就是「未知作者」。
+--- 封面不继承：卷封面走源自己的 chapter-cover 接口。
+---@param series Book|table 容器书行
+---@param stable_id string "seriesId:chapterId"
+---@param volume_title string|nil 卷名；拿不到（本轮没查目录）时退容器名，宁可重复也不留裸 ID
+---@return table
+local function volumeRow(series, stable_id, volume_title)
+    return {
+        source_id = ID,
+        stable_id = stable_id,
+        title = T("%1 · %2", series.title or "", volume_title or series.title or ""),
+        authors = series.authors,
+        intro = series.intro,
+        category = series.category,
+        series = series.title,
+    }
+end
+
 --- 读过的卷行继承容器元数据（作者 / 简介 / 分类 / 系列）。
---- Kavita 只在 series 级给这些字段，而最近阅读列的是卷行：卷行空着就是「未知作者」。
 --- 容器补全后卷行也跟着对齐（每次同步跑一遍，幂等）。只写真会改动库的行，并把改动的行数
 --- 回给调用方：对齐不算进同步变更的话，首页「当前阅读」收不到 shelf_changed，
 --- 卡片会一直停在未知作者（库里其实已经补上了）。
@@ -258,18 +276,34 @@ local function syncVolumeMeta(series, series_id, entries)
     local rows = {}
     for _idx, entry in ipairs(entries) do
         local stable_id = series_id .. ":" .. tostring(entry.chapterId or entry.uid)
-        local row = {
-            source_id = ID,
-            stable_id = stable_id,
-            title = T("%1 · %2", series.title or "", entry.title or ""),
-            authors = series.authors,
-            intro = series.intro,
-            category = series.category,
-            series = series.title,
-            -- cover 不继承：卷封面走源自己的 chapter-cover 接口。
-        }
+        local row = volumeRow(series, stable_id, entry.title)
         if not untouched(BookDB.get(ID, stable_id), row) then
             rows[#rows + 1] = row
+        end
+    end
+    if #rows == 0 then return 0 end
+    require("book.store").rememberMany(rows)
+    return #rows
+end
+
+--- 缺行卷物化：本次拉取里读到、但本机没有书行的卷补一条轻量身份行。
+--- 云端读过的卷可能在本机从未下载 / 打开过：没有书行，洞察「当日书单」、单书详情（补齐才进得去）、
+--- 锁屏账单就只能显示裸 ID。写入形状同卷行先例（volumeRow），书库按 upsertRemote 的默认把它落成
+--- deleted=1 + sync_status=1 的隐藏身份行：不进书架、不影响对账，也压不掉本地脏行（同 untouched）。
+--- 容器行缺失时跳过（连标题都拼不出来），统计行不受影响、照常落库。
+--- 物化只服务统计展示刷新（本次同步的 stats_changed），不回调对账、不进书架同步结果。
+---@param identities string[] 本次拉取出现的身份（单卷 = seriesId，多卷 = seriesId:chapterId）
+---@param titles table<string, table<string, string>> seriesId → chapterId → 卷名（身份判定时顺带记下）
+---@return integer written 真正写入的行数
+local function materializeVolumes(identities, titles)
+    local BookDB = require("book.books_db")
+    local rows = {}
+    for _idx, identity in ipairs(identities) do
+        local series_id, chapter_id = identity:match("^(%d+):(%d+)$")
+        local series = series_id and BookDB.get(ID, series_id)
+        if series then
+            local row = volumeRow(series, identity, titles[series_id] and titles[series_id][chapter_id])
+            if not untouched(BookDB.get(ID, identity), row) then rows[#rows + 1] = row end
         end
     end
     if #rows == 0 then return 0 end
@@ -662,6 +696,9 @@ function Source:pullStatsAsync(cb)
     local seen = state:readSetting("identities", {})
     if type(seen) ~= "table" then seen = {} end
     local entries, pending, pending_idx = {}, {}, 1
+    --- 身份判定时目录已到手：物化标题「系列 · 卷名」的卷名顺带记下（seriesId → chapterId → 卷名），
+    --- 不再为它请求一次目录；记不到的退容器名。
+    local titles = {}
     local cancelled = false
     ---@type HttpJob|nil
     local job
@@ -678,6 +715,9 @@ function Source:pullStatsAsync(cb)
         local result = Stats.fromHistory(entries, {
             source_id = self.id, fetched_at = fetched_at, volumes = volumes, seen = seen,
         })
+        -- 缺行卷物化（12 号票）：身份与条目都已就绪，用同一批数据补本机没有书行的卷，
+        -- 展示端（洞察当日书单 / 单书详情 / 锁屏账单）才有书名。不进书架同步结果、不调对账。
+        materializeVolumes(result.identities, titles)
         -- 落库成功（核心的 result.commit）才更新状态：失败不前进，
         -- 上次身份还在，身份漂移留下的孤儿行下次还能清。
         result.commit = function()
@@ -700,6 +740,14 @@ function Source:pullStatsAsync(cb)
             local count = type(toc) == "table" and #toc or 0
             if count > 0 then
                 volumes[series_id] = count
+                local named = {}
+                for _i, item in ipairs(toc) do
+                    local chapter_id = item.chapterId or item.uid
+                    if chapter_id ~= nil and item.title ~= nil then
+                        named[tostring(chapter_id)] = item.title
+                    end
+                end
+                titles[series_id] = named
             else
                 -- 判不出单卷 / 多卷的系列整条跳过：身份是错的比缺行更糟（Stats 侧也会记一条）。
                 logger.warn("kavita stats series toc unavailable", series_id, toc_err)
@@ -983,12 +1031,7 @@ function Source:openBookAsync(identity, _opts, cb)
             local ref = { source_id = self.id, stable_id = series_id .. ":" .. entry.chapterId }
             -- 卷行继承容器（series 级）元数据：Kavita 只在 series 级给作者 / 简介 / 分类，
             -- 卷行自己空着，最近阅读里就是「未知作者」。每次开书对齐一次，容器补全后立刻生效。
-            require("book.store").rememberMany({ {
-                source_id = self.id, stable_id = ref.stable_id,
-                title = T("%1 · %2", series.title or "", entry.title),
-                authors = series.authors, series = series.title,
-                intro = series.intro, category = series.category,
-            } })
+            require("book.store").rememberMany({ volumeRow(series, ref.stable_id, entry.title) })
             job = self:openEntry(ref, entry, toc, series.title or entry.title, finish)
         end)
     end)
