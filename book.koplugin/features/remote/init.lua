@@ -855,6 +855,14 @@ local function installUpdate(temp, cb)
     end)
 end
 
+--- 配置备份已恢复：提示后重启，让各模块按新配置重新加载（留一秒把响应发回浏览器）。
+local function settingsRestored()
+    require("ui.themes.widgets.toast"):new{
+        text = _("配置已通过远程管理恢复，正在重启 KOReader…"),
+    }:show()
+    require("ui/uimanager"):scheduleIn(1, require("features.update").restart)
+end
+
 --- 上传临时落盘路径：缓存目录下 upload-<时间>-<序号>.part，进程内自增保证不撞名。
 ---@return string
 local function tempPath()
@@ -1349,6 +1357,7 @@ function Remote.start()
             set_clipboard = setClipboard,
             get_status = getStatus,
             install_update = installUpdate,
+            settings_restored = settingsRestored,
         },
     }
     local started, serr = server:start()

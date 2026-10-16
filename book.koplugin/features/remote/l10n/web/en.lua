@@ -313,4 +313,13 @@ return {
     ["部分项目未完成"] = "Some items were not completed",
     ["已取消，剩余 %1 项未处理"] = "Cancelled, %1 items left unprocessed",
     ["已取消打包下载"] = "ZIP download cancelled",
+    ["配置备份"] = "Settings backup",
+    ["备份月读的阅读、界面和功能设置；不含登录信息、密钥和锁屏密码。恢复后 KOReader 自动重启。"] = "Back up Moon's reading, interface and feature settings. Logins, keys and the lock passcode are not included. KOReader restarts after a restore.",
+    ["下载备份"] = "Download backup",
+    ["上传备份并恢复"] = "Upload and restore",
+    ["恢复会覆盖设备上的月读配置，并重启 KOReader，继续吗？"] = "Restoring overwrites Moon's settings on the device and restarts KOReader. Continue?",
+    ["正在恢复…"] = "Restoring…",
+    ["已恢复 ✓ KOReader 正在重启，稍后可重新连接。"] = "Restored ✓ KOReader is restarting; reconnect shortly.",
+    ["恢复失败：%1"] = "Restore failed: %1",
+    ["不是有效的月读配置备份"] = "Not a valid Moon settings backup",
 }
