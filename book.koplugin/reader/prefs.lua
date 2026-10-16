@@ -142,6 +142,12 @@ function M.inject(doc_settings, document)
     if type(persisted_font_id) == "string" and persisted_font_id ~= "" then
         Fonts.faceForId(persisted_font_id)
     end
+    -- 大 EPUB 内嵌中文字体会让 CRE 按字号/字重各缓存一份，512MB 设备易 OOM：默认关闭内嵌字体；
+    -- 本书已设置或用户「设为默认」过（G_reader_settings）则尊重原值。
+    if doc_settings:readSetting("copt_embedded_fonts") == nil
+        and not (G_reader_settings and G_reader_settings:has("copt_embedded_fonts")) then
+        doc_settings:saveSetting("copt_embedded_fonts", 0)
+    end
     local identity = Store.identityFor(document.file)
     if not (identity and identity.chapter_idx) then
         return false
