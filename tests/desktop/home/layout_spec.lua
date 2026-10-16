@@ -35,7 +35,7 @@ end
 for _, id in ipairs({
     "clock", "weather", "clock_weather", "weather_forecast", "stats", "heatmap", "hitokoto", "excerpt",
     "history", "news",
-    "recent_hero", "recent_list", "recent_cards",
+    "recent_hero", "recent_list", "recent_cards", "random", "shelf",
 }) do
     package.preload["desktop.pages.home." .. id] = function()
         return stubComponent(id)
@@ -46,7 +46,7 @@ local Base = require("desktop.pages.home.registry")
 local Layout = require("desktop.pages.home.layout")
 local Widgets = require("desktop.pages.home.placements")
 
-Assert.len(Base.list(), 13)
+Assert.len(Base.list(), 15)
 local defaults = Base.enabledLayout()
 Assert.len(defaults, 2)
 Assert.eq(defaults[1], "recent_hero")
