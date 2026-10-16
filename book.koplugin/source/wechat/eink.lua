@@ -144,7 +144,7 @@ end
 ---@return table|nil
 local function decode(raw)
     if type(raw) ~= "string" or raw == "" then return nil end
-    local ok, data = pcall(JSON.decode, raw)
+    local ok, data = pcall(require("utils.json").decode, raw)
     if ok and type(data) == "table" then return data end
     return nil
 end
@@ -329,6 +329,12 @@ end
 --- 在飞续期的等待者；并发请求共享同一次 /login。
 ---@type fun(ok: boolean, err: string|nil)[]|nil
 local mint_waiters
+
+--- 是否有续期在飞（调用方据此排队而不是另起 / 走冷却）。
+---@return boolean
+function Eink.refreshing()
+    return mint_waiters ~= nil
+end
 
 --- 用 refreshToken 换新 accessToken 并落盘。
 ---@param cb fun(ok: boolean, err: string|nil)

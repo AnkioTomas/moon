@@ -10,7 +10,7 @@
 @module koplugin.book.source.wechat.auth
 --]]
 
-local JSON = require("json")
+local Json = require("utils.json")
 local logger = require("utils.log")
 local Request = require("http.request")
 local Header = require("http.request.header")
@@ -121,7 +121,7 @@ end
 ---@param raw string
 ---@return table|nil
 local function decodeJson(raw)
-    local ok, data = pcall(JSON.decode, raw)
+    local ok, data = pcall(Json.decode, raw)
     return ok and type(data) == "table" and data or nil
 end
 
@@ -145,8 +145,14 @@ local function isAuthFailure(data, http_code)
 end
 
 --- 自动续期；冷却内不再打 /login，直接让调用方用现有令牌重试一次。
+--- 单飞由 Eink.refreshAsync 负责：续期在飞时后来的请求排进同一次 /login 等结果，不能拿旧令牌立刻重试
+--- （否则旧令牌必然再回失效 errcode，被当成「续期救不回来」而误判登录失效），所以在飞时不看冷却。
 ---@param cb fun(ok: boolean, err: string|nil)
 local function renewAsync(cb)
+    if Eink.refreshing() then
+        Eink.refreshAsync(cb)
+        return
+    end
     local now = os.time()
     if now - renewed_at < RENEW_COOLDOWN then
         cb(true)
@@ -156,6 +162,13 @@ local function renewAsync(cb)
     Eink.refreshAsync(cb)
 end
 
+--- 当前令牌（判断请求发出后令牌是否已被别的请求续期换掉）。
+---@return string|nil
+local function currentToken()
+    local creds = Eink.credentials()
+    return creds and creds.access_token
+end
+
 ---@class WechatRequestOpts
 ---@field headers table|nil
 ---@field accept string|nil
@@ -163,6 +176,7 @@ end
 ---@field timeout number|nil 缺省 45 秒
 ---@field allow_redirects boolean|nil
 ---@field skip_auth_retry boolean|nil 不把 401/403 当会话失效（CDN 图片等）
+---@field no_expire boolean|nil 续期重试后仍被拒也不判登录失效（公众号接口会因风控回失效 errcode，而书架等接口照常可用）
 
 --- 带会话失效自动 renewal + 单次重试的 HTTP 请求。
 ---@param method string
@@ -180,6 +194,7 @@ local function sessionRequest(method, url, body, opts, cb)
     -- 续期后重试换了请求：句柄跟着换，取消要能杀掉当前这一次。
     local cancelled, job = false, nil
     local function attempt(retried)
+        local sent_token = currentToken()
         local headers = Auth.sessionHeaders(opts.headers)
         if opts.accept then
             headers["Accept"] = opts.accept
@@ -202,8 +217,15 @@ local function sessionRequest(method, url, body, opts, cb)
             end
             local code = res and res.code
             local raw = res and res.body or ""
-            if not opts.skip_auth_retry and not retried
-                    and isAuthFailure(mayCarryErrCode(raw) and decodeJson(raw) or nil, code) then
+            -- 只解一次：带 errcode 的 JSON 解出来既判失效、也经 res.json 交给调用方，免得再解一遍。
+            local data = mayCarryErrCode(raw) and decodeJson(raw) or nil
+            if not opts.skip_auth_retry and not retried and isAuthFailure(data, code) then
+                logger.dbg("wechat auth failure", url:match("^[^?]*"), code, #raw < 200 and raw or #raw)
+                -- 请求在飞期间别的请求已续期换了令牌：直接用新令牌重试，不再打 /login
+                if sent_token ~= currentToken() then
+                    attempt(true)
+                    return
+                end
                 renewAsync(function(renewed, renew_err)
                     if cancelled then return end
                     if renewed then
@@ -216,9 +238,13 @@ local function sessionRequest(method, url, body, opts, cb)
             end
             -- 续期重试后回包仍明确是会话失效 errcode：静默续期救不回来。
             -- 裸 401/403（WAF 拦截等）不算，免得误判暂停同步。
-            local data = retried and not opts.skip_auth_retry and mayCarryErrCode(raw) and decodeJson(raw)
-            if data and isAuthFailure(data, nil) then
-                cb(nil, require("source.auth").expire("wechat", _("微信读书登录已失效")), res)
+            if retried and not opts.skip_auth_retry and data and isAuthFailure(data, nil) then
+                logger.warn("wechat auth failure after renew", url:match("^[^?]*"), #raw < 200 and raw or #raw)
+                if opts.no_expire then
+                    cb(nil, _("微信读书拒绝了请求，请稍后再试"), res)
+                else
+                    cb(nil, require("source.auth").expire("wechat", _("微信读书登录已失效")), res)
+                end
                 return
             end
             if not Request.ok(code) then
@@ -226,6 +252,7 @@ local function sessionRequest(method, url, body, opts, cb)
                 return
             end
             if not opts.skip_auth_retry then require("source.auth").ok("wechat") end
+            if res then res.json = data end
             cb(raw, nil, res)
         end)
     end

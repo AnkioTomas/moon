@@ -112,7 +112,7 @@ local function readCache(book_id, chapter_uid)
     local f = io.open(cachePath(book_id, chapter_uid), "rb")
     if not f then return nil end
     -- 写到一半断电留下的残文件：当没有缓存，重新拉一次覆盖。
-    local ok, data = pcall(JSON.decode, f:read("*a"))
+    local ok, data = pcall(require("utils.json").decode, f:read("*a"))
     f:close()
     if ok and type(data) == "table" and (data.expire or 0) > os.time() then return data.hotspots end
     return nil

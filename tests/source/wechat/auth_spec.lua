@@ -83,6 +83,20 @@ local function freshAuth(cfg, eink)
     state.cfg = cfg or {}
     state.saved = nil
     package.loaded["source.wechat.auth"] = nil
+    if eink and not eink.refreshing then
+        -- 真实 Eink.refreshAsync 自带单飞（并发续期共用一次 /login）；桩照此包一层。
+        local raw, waiters = eink.refreshAsync, nil
+        eink.refreshing = function() return waiters ~= nil end
+        eink.refreshAsync = function(cb)
+            if waiters then waiters[#waiters + 1] = cb return end
+            waiters = { cb }
+            raw(function(ok, err)
+                local list = waiters
+                waiters = nil
+                for _idx, w in ipairs(list) do w(ok, err) end
+            end)
+        end
+    end
     package.loaded["source.wechat.eink"] = eink
     return require("source.wechat.auth")
 end
@@ -300,12 +314,13 @@ do
         end
         return { cancel = function() end }
     end
-    local data, err
-    auth.webGetAsync("https://weread.qq.com/web/retry", nil, function(d, e)
-        data, err = d, e
+    local data, err, resp
+    auth.webGetAsync("https://weread.qq.com/web/retry", nil, function(d, e, r)
+        data, err, resp = d, e, r
     end)
     Assert.is_nil(err)
     Assert.eq(data, '{"errcode":0,"ok":1}')
+    Assert.eq(resp.json.ok, 1, "判失效时解过的 JSON 经 res.json 交给调用方，不必再解")
     Assert.eq(refreshed, 1)
     Assert.eq(#cookies, 2)
     Assert.is_true(cookies[1]:find("wr_skey=old", 1, true) ~= nil)
@@ -406,6 +421,90 @@ do
     Assert.is_nil(data)
     Assert.eq(err, "登录失败 -2013")
 end
+
+-- 只有真失效才判登录失效：记下 expire 调用（替身，用完还原）
+local real_source_auth = package.loaded["source.auth"]
+local expired = {}
+package.loaded["source.auth"] = {
+    expire = function(id, msg) expired[#expired + 1] = id; return msg end,
+    ok = function() end,
+}
+local AUTH_FAIL = '{"errcode":-2012,"errmsg":"登录态失效"}'
+
+-- 并发竞态（日志 22:14:17）：A 回失效触发续期，续期在飞时 B 也回失效。
+-- B 必须等续期结果再用新令牌重试；以前冷却直接让 B 拿旧令牌重试 → 再失效 → 误判登录失效。
+do
+    local finish, refreshed = nil, 0
+    local auth = freshAuth(loggedIn({ wr_skey = "old" }), {
+        hasSession = function() return true end,
+        credentials = function() return { vid = state.cfg.wr_vid, access_token = state.cfg.wr_skey } end,
+        refreshAsync = function(cb) refreshed = refreshed + 1; finish = cb end,
+    })
+    state.json_map = { [AUTH_FAIL] = { errcode = -2012, errmsg = "登录态失效" } }
+    local cookies = {}
+    state.request_impl = function(opts, cb)
+        cookies[#cookies + 1] = opts.headers["Cookie"]
+        cb({ code = 200, body = opts.headers["Cookie"]:find("wr_skey=old", 1, true) and AUTH_FAIL or "ok" })
+        return { cancel = function() end }
+    end
+    local got = {}
+    auth.webGetAsync("https://weread.qq.com/web/shelf/sync", nil, function(d, e) got[#got + 1] = d or e end)
+    auth.webGetAsync("https://weread.qq.com/web/mp/articles", nil, function(d, e) got[#got + 1] = d or e end)
+    Assert.eq(refreshed, 1, "只续期一次")
+    Assert.len(got, 0, "B 在等续期，没有拿旧令牌重试")
+    state.cfg.wr_skey = "newkey"
+    finish(true)
+    Assert.eq(table.concat(got, ","), "ok,ok")
+    Assert.len(cookies, 4)
+    Assert.len(expired, 0, "没有误判登录失效")
+end
+
+-- 请求在飞时令牌已被别的请求续期换掉：回失效就直接用新令牌重试，不再打 /login
+do
+    local refreshed = 0
+    local auth = freshAuth(loggedIn({ wr_skey = "old" }), {
+        hasSession = function() return true end,
+        credentials = function() return { vid = state.cfg.wr_vid, access_token = state.cfg.wr_skey } end,
+        refreshAsync = function(cb) refreshed = refreshed + 1; cb(true) end,
+    })
+    state.json_map = { [AUTH_FAIL] = { errcode = -2012, errmsg = "登录态失效" } }
+    local pending = {}
+    state.request_impl = function(opts, cb)
+        pending[#pending + 1] = { cookie = opts.headers["Cookie"], cb = cb }
+        return { cancel = function() end }
+    end
+    local data
+    auth.webGetAsync("https://weread.qq.com/web/x2", nil, function(d) data = d end)
+    state.cfg.wr_skey = "rotated"
+    pending[1].cb({ code = 200, body = AUTH_FAIL })
+    Assert.eq(refreshed, 0)
+    Assert.is_true(pending[2].cookie:find("wr_skey=rotated", 1, true) ~= nil)
+    pending[2].cb({ code = 200, body = "fine" })
+    Assert.eq(data, "fine")
+end
+
+-- no_expire（公众号接口）：续期重试后仍回失效 errcode → 只回错误，不判整个微信读书登录失效
+do
+    local auth = freshAuth(loggedIn(), {
+        hasSession = function() return true end,
+        credentials = function() return { vid = state.cfg.wr_vid, access_token = state.cfg.wr_skey } end,
+        refreshAsync = function(cb) cb(true) end,
+    })
+    state.json_map = { [AUTH_FAIL] = { errcode = -2012, errmsg = "登录态失效" } }
+    state.request_impl = function(_opts, cb)
+        cb({ code = 200, body = AUTH_FAIL })
+        return { cancel = function() end }
+    end
+    local err
+    auth.webGetAsync("https://weread.qq.com/web/mp/articles", { no_expire = true }, function(_d, e) err = e end)
+    Assert.eq(err, "微信读书拒绝了请求，请稍后再试")
+    Assert.len(expired, 0)
+    -- 普通接口照旧判失效
+    auth.webGetAsync("https://weread.qq.com/web/shelf/sync", nil, function(_d, e) err = e end)
+    Assert.eq(err, "微信读书登录已失效")
+    Assert.eq(table.concat(expired, ","), "wechat")
+end
+package.loaded["source.auth"] = real_source_auth
 
 ------------------------------------------------------------------------
 -- 清理：恢复本文件改动的 preload / loaded，避免污染同进程后续用例

@@ -36,7 +36,7 @@ local function webWire(url, cb)
             cb(nil, err)
             return
         end
-        local ok, data = pcall(JSON.decode, raw)
+        local ok, data = pcall(require("utils.json").decode, raw)
         if not ok or type(data) ~= "table" then
             logger.warn("weread web: unexpected response", url, raw:sub(1, 120))
             cb(nil, _("返回非 JSON"))
