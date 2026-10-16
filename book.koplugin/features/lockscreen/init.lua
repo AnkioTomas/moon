@@ -34,7 +34,7 @@ function M.refresh(cb, force, reason)
     end
     local plan = Compose.plan()
     if Compose.cacheValid(plan, force) then
-        Settings.applyCover(plan.output_path)
+        Settings.applyCover(plan.output_path, MoonSettings.get("features.lockscreen").lock_screen_transparent)
         logger.dbg("book.lockscreen refresh skipped", reason, "cache_hit",
             plan.asset.id, plan.component.id, plan.output_path)
         if cb then cb(true) end
@@ -53,7 +53,7 @@ function M.refresh(cb, force, reason)
         plan.wide and "wide" or "narrow")
     local generation = Settings.revision()
     local build
-    build = Compose.build(plan, function(ok, err)
+    build = Compose.build(plan, function(ok, err, transparent)
         if job == build then job = nil end
         if not Settings.isCompose() or generation ~= Settings.revision() then
             logger.dbg("book.lockscreen refresh discarded", reason,
@@ -66,9 +66,11 @@ function M.refresh(cb, force, reason)
             if cb then cb(false, err) end
             return
         end
-        MoonSettings.get("features.lockscreen").lock_screen_day = Compose.dayKey(plan)
+        local c = MoonSettings.get("features.lockscreen")
+        c.lock_screen_day = Compose.dayKey(plan)
+        c.lock_screen_transparent = transparent or nil
         MoonSettings.save("features.lockscreen")
-        Settings.applyCover(plan.output_path)
+        Settings.applyCover(plan.output_path, transparent)
         logger.dbg("book.lockscreen refresh done", reason,
             Perf.elapsedMs(started_at), "ms", plan.output_path)
         if cb then cb(true) end

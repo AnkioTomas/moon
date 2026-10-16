@@ -330,6 +330,19 @@ local ok_run, err_run = pcall(function()
     Assert.is_false(ok)
     Assert.is_true(screen.night_mode, "出错后恢复夜间模式")
     screen.night_mode = false
+
+    -- 透明检测：只看 RGB32 的 alpha，有一个非不透明像素即为透明
+    local has_ffi, ffi = pcall(require, "ffi")
+    local function px(alpha)
+        local data = ffi.new("uint8_t[8]", { 0, 0, 0, 255, 0, 0, 0, alpha })
+        return { data = data, stride = 8, getType = function() return 2 end,
+            getWidth = function() return 2 end, getHeight = function() return 1 end }
+    end
+    if has_ffi then
+        Assert.is_false(Render.hasAlpha(px(255)))
+        Assert.is_true(Render.hasAlpha(px(0)))
+    end
+    Assert.is_false(Render.hasAlpha({ decoded = true }), "非 RGB32 / 无类型一律不透明")
 end)
 
 os.rename = real_rename

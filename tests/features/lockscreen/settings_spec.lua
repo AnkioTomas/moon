@@ -66,6 +66,35 @@ local ok_run, err_run = pcall(function()
     Assert.is_false(saved.screensaver_show_message)
     os.remove(cover_path)
 
+    -- 透明图：不铺底不拉伸；换回不透明图时还原用户值，clearCover 也还原
+    saved.screensaver_img_background = "white"
+    saved.screensaver_stretch_images = true
+    local t_file = assert(io.open(cover_path, "wb"))
+    t_file:write("cover")
+    t_file:close()
+    Settings.applyCover(cover_path, true)
+    Assert.eq(saved.screensaver_img_background, "none")
+    Assert.is_false(saved.screensaver_stretch_images)
+    Settings.applyCover(cover_path)
+    Assert.eq(saved.screensaver_img_background, "white")
+    Assert.is_true(saved.screensaver_stretch_images)
+    Settings.applyCover(cover_path, true)
+    Settings.clearCover()
+    Assert.eq(saved.screensaver_img_background, "white")
+    Assert.is_true(saved.screensaver_stretch_images)
+
+    -- 旧版快照缺新键：首次写入前补记用户原值
+    saved.book_lockscreen_previous_screensaver = {
+        screensaver_type = { present = true, value = "cover" },
+        screensaver_document_cover = { present = false },
+        screensaver_show_message = { present = true, value = true },
+    }
+    Settings.applyCover(cover_path, true)
+    Settings.clearCover()
+    Assert.eq(saved.screensaver_img_background, "white", "旧快照升级后仍要还原底色")
+    saved.screensaver_img_background, saved.screensaver_stretch_images = nil, nil
+    os.remove(cover_path)
+
     -- 没接管过（无快照）时 clearCover 不许乱动用户配置
     saved.screensaver_type = "random_image"
     Settings.clearCover()
