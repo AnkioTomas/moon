@@ -373,8 +373,12 @@ local function headAtXPointer(flow, pos)
     if type(pos) ~= "string" then
         return nil
     end
+    -- 先拆出路径与偏移再逐个比对，避免对整章每个字都拼一次 xpointer 字符串。
+    local path, offset = pos:match("^(.*)%.(%d+)$")
+    offset = tonumber(offset)
+    if not path then return nil end
     for i = 1, flow.count do
-        if xpointerAt(flow, i) == pos then
+        if flow.ends[i] - 1 == offset and flow.paths[flow.starts[i]] == path then
             return i
         end
     end

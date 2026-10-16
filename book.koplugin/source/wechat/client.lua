@@ -153,6 +153,7 @@ function Client:putProgressAsync(bookId, opts, cb)
             pclts = session.pclts,
         })
         job = self:reportReadAsync(payload, Protocol.readerUrl(bookId, chapter_uid), function(data, err)
+            if cancelled then return end
             if data then
                 session.entered = true
                 cb({ ok = true })

@@ -519,6 +519,7 @@ function Source:putProgressAsync(identity, pos, cb)
             chapter_offset = offset,
             summary = summary,
         }, function(wire, push_err)
+            if cancelled then return end
             if wire then
                 cb(true)
             else
