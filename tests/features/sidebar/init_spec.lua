@@ -47,7 +47,7 @@ end
 package.preload["ui/geometry"] = function() return { new = function(_, o) return o end } end
 local function plain() return { new = function(_, o) return o or {} end } end
 for _, name in ipairs({
-    "ui/gesturerange", "ui/widget/horizontalgroup",
+    "ui/gesturerange", "ui/widget/horizontalgroup", "ui/widget/horizontalspan", "ui/widget/verticalspan",
     "ui/widget/linewidget", "ui/widget/overlapgroup", "ui/widget/verticalgroup", "ui.themes.widgets.box",
 }) do
     package.preload[name] = plain
@@ -109,6 +109,9 @@ package.preload["ui.themes"] = function()
 end
 package.preload["ui.themes.widgets.text"] = function()
     return { line = function(_, text) return { muted = text } end }
+end
+package.preload["ui.themes.widgets.icon"] = function()
+    return { new = function(_, o) return o or {} end, getSize = function() return { w = 0, h = 0 } end }
 end
 package.preload["ui.themes.widgets.mask"] = function()
     return { new = function(_, opts) return { mesh = true, dimen = opts.dimen } end }
@@ -403,7 +406,7 @@ Assert.eq(other.tab, 1)
 -- 底栏图标：每页一格、当前页高亮，点哪格直达哪页，不经过中间页。
 do
     local jump = Sidebar:new{ ui = ui, snapshot = state.snapshot }
-    local strip = jump[1][1][2].strip
+    local strip = jump[1][1][2][1].strip
     Assert.eq(strip.width, 510)
     Assert.eq(strip.active, "info")
     Assert.len(strip.tabs, 5)
@@ -414,7 +417,7 @@ do
     Assert.eq(jump.tab, 5)
     Assert.len(state.opened, opened, "跳过目录 / 书摘，不借它们的菜单")
     Assert.len(state.tickets, tickets + 1)
-    Assert.eq(jump[1][1][2].strip.active, "ticket")
+    Assert.eq(jump[1][1][2][1].strip.active, "ticket")
     jump:onClose()
 end
 
@@ -423,7 +426,7 @@ do
     state.sidebar.sidebar_hidden_tabs = { "toc", "ticket" }
     local trimmed = Sidebar:new{ ui = ui, snapshot = state.snapshot }
     Assert.eq(table.concat(trimmed.tabs, ","), "info,notes,xray")
-    local strip = trimmed[1][1][2].strip
+    local strip = trimmed[1][1][2][1].strip
     Assert.len(strip.tabs, 3)
     Assert.eq(strip.tabs[3].id, "xray")
 
@@ -431,7 +434,7 @@ do
     state.xray = { book_xray_enabled = false }
     local fallback = Sidebar:new{ ui = ui, snapshot = state.snapshot }
     Assert.eq(table.concat(fallback.tabs, ","), "info", "只剩不可用的 X-Ray：退回书籍页")
-    Assert.eq(fallback[1][1][2].strip.tabs[1].id, "info")
+    Assert.eq(fallback[1][1][2][1].strip.tabs[1].id, "info")
 
     state.sidebar.sidebar_hidden_tabs = {}
     state.xray = { book_xray_enabled = true }
