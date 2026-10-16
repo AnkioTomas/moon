@@ -150,6 +150,38 @@ function P.chapterPath(stable_id, idx, id)
     return P.bookWorkDir(stable_id, id) .. "/" .. idx .. ".html"
 end
 
+--- 章节的双语版：与原章同目录（相对图片路径照样有效），tag 为 `<engine>-<lang>`。
+---@param path string 原章路径
+---@param tag string
+---@return string
+function P.bilingualChapterPath(path, tag)
+    return (path:gsub("%.html$", "")) .. ".bi-" .. tag .. ".html"
+end
+
+--- 双语章 → 原章；不是双语章原样返回。
+---@param path string
+---@return string
+function P.chapterOrigin(path)
+    return (path:gsub("%.bi%-[^/]+%.html$", ".html"))
+end
+
+--- 同一章的其它版本（原章与各双语章，存在的），不含 path 自己。
+---@param path string
+---@return string[]
+function P.chapterVariants(path)
+    local origin = P.chapterOrigin(path)
+    local dir, idx = origin:match("^(.*)/(%d+)%.html$")
+    local out = {}
+    if not dir then return out end
+    if origin ~= path and lfs.attributes(origin, "mode") == "file" then out[1] = origin end
+    local pattern = "^" .. idx .. "%.bi%-.+%.html$"
+    for name in lfs.dir(dir) do
+        local file = dir .. "/" .. name
+        if file ~= path and name:match(pattern) then out[#out + 1] = file end
+    end
+    return out
+end
+
 --- 插件 SQLite 路径：$DATA/.moon/book.sqlite3
 ---@return string
 function P.dbPath()

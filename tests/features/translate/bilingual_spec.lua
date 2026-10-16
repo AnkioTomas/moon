@@ -38,16 +38,15 @@ end
 
 local Bilingual = require("features.translate.bilingual")
 
--- 可用：整本源的流式文档；章节源（含全本缓存后的整本）、固定版式、无会话一律不可用。
+-- 可用：流式文档（整本源与章节源）；固定版式（含漫画 CBZ）、无会话不可用。
 local rolling = { rolling = {}, document = { file = "/books/bilingual-spec.epub" } }
 Assert.is_false(Bilingual.available(rolling))
 session = { identity = { source = { type = "book" } } }
 Assert.is_true(Bilingual.available(rolling))
 Assert.is_false(Bilingual.available({}))
-session = { identity = { source = { type = "chapter" } } }
-Assert.is_false(Bilingual.available(rolling))
 session = { identity = { source = { type = "chapter" }, chapter_idx = 3 } }
-Assert.is_false(Bilingual.available(rolling))
+Assert.is_true(Bilingual.available(rolling))
+Assert.is_false(Bilingual.available({ document = { file = "/x/1.cbz" } }), "漫画不是流式文档")
 session = { identity = {} }
 Assert.is_false(Bilingual.available(rolling), "属主源已卸载（第三方源插件）不可用，不能抛错")
 
@@ -157,6 +156,21 @@ local again = input("resume")
 local _h2, _r2, results2 = start(again)
 Assert.len(requests, 0)
 Assert.is_true(results2[1].ok)
+
+-- 章节源（input.chapter）：同一任务流程翻单章；原章（source）保留，不写 meta。
+do
+    os.remove(dir .. "/meta.json")
+    local ch = input("chapter")
+    ch.chapter = true
+    local _hc, _rc, results_c = start(ch)
+    Assert.len(requests, 1)
+    requests[1].cb({ "章", "你好", "世界" })
+    requests = {}
+    Assert.is_true(results_c[1].ok)
+    has(read(ch.dest), "你好")
+    Assert.not_nil(read(ch.source), "原章不删")
+    Assert.is_nil(read(dir .. "/meta.json"), "章节不写整书 meta")
+end
 
 -- 失败：回调错误，已成功的批次留在缓存里，重来时续跑。
 requests = {}

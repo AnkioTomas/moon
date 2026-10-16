@@ -39,6 +39,18 @@ local _ = require("gettext")
 ---@alias ChapterFetchContent fun(identity: BookIdentity, chapter: BookChapter, cb: function): CancelHandle|nil
 
 local Chapter = {}
+
+--- 章节变体（双语对照）：上层注入 fun(identity, idx, path): string|nil，返回要打开的替代文件。
+---@type fun(identity: BookIdentity, idx: integer, path: string): string|nil
+Chapter.variant = nil
+
+---@param identity BookIdentity
+---@param idx integer
+---@param path string
+---@return string
+local function variant(identity, idx, path)
+    return Chapter.variant and Chapter.variant(identity, idx, path) or path
+end
 local lfs = require("libs/libkoreader-lfs")
 local ready_cache = {}
 local READY_CACHE_LIMIT = 512
@@ -335,6 +347,7 @@ function Chapter.openAsync(source, identity, book, opts, ops, cb)
                 return ensure(identity, toc, idx, ops, done)
             end, function(path, e)
                 if not path then cb(nil, e); return end
+                path = variant(identity, idx, path)
                 progress(3)
                 local ok, db_err = require("book.store").touch(path, identity, {
                     chapter_idx = idx,
@@ -385,6 +398,7 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
 
     local local_path, local_idx = existingLocalPath(identity, opts)
     if local_path then
+        local_path = variant(identity, local_idx, local_path)
         local touched, touch_err = require("book.store").touch(local_path, identity, {
             chapter_idx = local_idx,
         })

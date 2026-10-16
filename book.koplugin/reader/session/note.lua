@@ -14,6 +14,62 @@ local DerivedNote = require("reader.session.derived_note")
 
 local SessionNote = {}
 
+--- 双语章里端点所在的译文元素：返回 (所在段落, 译文元素)，不在译文里返回 nil。
+---@param document table
+---@param xpointer string
+---@return string|nil paragraph, string|nil span
+local function translationOf(document, xpointer)
+    local prefix = '<span class="' .. require("features.translate.markup").CLASS .. '"'
+    for at, segment in xpointer:gmatch("()/(span[%[%d%]]*)") do
+        local span = xpointer:sub(1, at - 1) .. "/" .. segment
+        local html = document:getHTMLFromXPointer(span, 0)
+        if html and html:sub(1, #prefix) == prefix then return xpointer:sub(1, at - 1), span end
+    end
+end
+
+--- 译文元素前的原文末尾：原章没有译文元素（元素 xpointer 原章里找不到，划线不显示），
+--- 取译文前最后一个可见字的下一位；取不到再退回译文元素本身。
+---@param document table
+---@param span string
+---@return string
+local function endBefore(document, span)
+    local prev = document.getPrevVisibleChar and document:getPrevVisibleChar(span)
+    if type(prev) ~= "string" or translationOf(document, prev) then return span end
+    local base, offset = prev:match("^(.-)%.(%d+)$")
+    return base and (base .. "." .. (tonumber(offset) + 1)) or prev
+end
+
+--- 双语章：落在译文里的端点退回段内原文（起点退到段首，终点退到译文前），文字随之换成原文。
+--- 原文 xpointer 两版通用，存库、上传微信读书、原章 sidecar 都认。
+---@param document table
+---@param items table[] 就地改
+function SessionNote._untranslate(document, items)
+    for _idx, item in ipairs(items) do
+        if type(item.pos0) == "string" and type(item.pos1) == "string" then
+            local para0 = translationOf(document, item.pos0)
+            local _para1, span1 = translationOf(document, item.pos1)
+            if para0 or span1 then
+                item.pos0 = para0 or item.pos0
+                item.pos1 = span1 and endBefore(document, span1) or item.pos1
+                item.page = item.pos0
+                local text = document:getTextFromXPointers(item.pos0, item.pos1)
+                if text then item.text = require("utils.text").trim(text) end
+            end
+        end
+    end
+end
+
+--- 按章源：注解写到同一章其它版本（原章 / 双语章）的 sidecar，两版的划线、书签、删改一致。
+---@param file string
+---@param items table[]
+local function mirror(file, items)
+    for _idx, other in ipairs(require("utils.paths").chapterVariants(file)) do
+        local settings = require("docsettings"):open(other)
+        settings:saveSetting("annotations", items)
+        settings:flush()
+    end
+end
+
 --- 取文档总页数：优先问 document，退回 doc_settings 里的 doc_pages，都没有算 0。
 ---@param ui table ReaderUI
 ---@return integer
@@ -38,12 +94,20 @@ function SessionNote.save(ui, identity, done)
         if done then done(true) end
         return
     end
+    local file = ui.document and ui.document.file
+    local bilingual = identity.chapter_idx ~= nil and file
+        and require("utils.paths").chapterOrigin(file) ~= file
+    if bilingual and ui.annotation then
+        SessionNote._untranslate(ui.document, ui.annotation.annotations)
+        ui.doc_settings:saveSetting("annotations", ui.annotation.annotations)
+    end
     ui.doc_settings:flush()
     -- ReaderAnnotation 只在 SaveSettings 时才把内存数组写进 doc_settings。
     -- AnnotationsModified 和 CloseDocument 阶段直接读 doc_settings 会拿到旧快照。
     local items = ui.annotation and ui.annotation.annotations
         or ui.doc_settings:readSetting("annotations")
         or {}
+    if identity.chapter_idx ~= nil and file then mirror(file, items) end
     local total_pages = pageCount(ui)
     local source_id = identity.source_id
     local stable_id = identity.stable_id
