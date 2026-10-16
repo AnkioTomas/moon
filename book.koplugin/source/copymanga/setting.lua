@@ -138,4 +138,7 @@ function Setting.rowStatus()
     return Client.normalizeBaseUrl(cfg.base_url), true
 end
 
+--- 登录失效提示的「重新登录」直达入口（desktop.sync.promptLogin）。
+Setting.login = showLogin
+
 return Setting

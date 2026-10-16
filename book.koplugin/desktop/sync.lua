@@ -9,6 +9,7 @@
 
 local MoonSettings = require("utils.settings")
 local Registry = require("source.registry")
+local Auth = require("source.auth")
 local SourceCapabilities = require("source.base").SourceCapabilities
 local Tasks = require("workers.tasks")
 local logger = require("utils.log")
@@ -37,15 +38,19 @@ end
 --- 本轮要同步的已配置源：混合模式 = 全部已启用源，否则只有活跃源。加载失败的源跳过。
 ---@param desktop table
 ---@return BookSource[]
-local function targets(desktop)
+---@param background boolean|nil 后台同步：跳过登录已失效的源（等用户重新登录或手动刷新）
+local function targets(desktop, background)
+    local function usable(source)
+        return source and source:configured() and not (background and Auth.expired(source.id))
+    end
     local list = {}
     if not mixed() then
-        if desktop.source and desktop.source:configured() then list[1] = desktop.source end
+        if usable(desktop.source) then list[1] = desktop.source end
         return list
     end
     for _idx, meta in ipairs(Registry.listEnabled()) do
         local source = Registry.resolve(meta.id)
-        if source and source:configured() then list[#list + 1] = source end
+        if usable(source) then list[#list + 1] = source end
     end
     return list
 end
@@ -67,6 +72,8 @@ end
 ---@param err any
 local function report(source, force, err)
     if not err then reported[source.id] = nil; return end
+    -- 登录失效由 Sync.promptLogin 的弹窗负责，后台不再叠加 toast。
+    if not force and Auth.expired(source.id) then return end
     err = tostring(err)
     if not force and (reported[source.id] == err or not require("ui/network/manager"):isConnected()) then return end
     reported[source.id] = err
@@ -196,7 +203,7 @@ end
 ---@param desktop table
 function Sync.open(desktop)
     local is_mixed = mixed()
-    for _idx, source in ipairs(targets(desktop)) do
+    for _idx, source in ipairs(targets(desktop, true)) do
         syncStats(desktop, source)
         local last = books_at[source.id]
         if is_mixed and last and os.time() - last < BACKGROUND_SYNC_INTERVAL then
@@ -244,6 +251,31 @@ function Sync.refresh(desktop)
             text = T(_("正在同步 %1 个数据源，可在顶栏查看进度"), #list), timeout = 2,
         }:show()
     end
+end
+
+--- 源登录失效（静默续期失败）时引导重新登录。由 main 经 ``source.auth`` 注入；
+--- 每个源每次运行最多弹一次（见 source.auth）；源设置有 login / open 就给直达按钮。
+---@param plugin table
+---@param id string
+---@param msg string|nil
+function Sync.promptLogin(plugin, id, msg)
+    require("ui/uimanager"):nextTick(function()
+        local meta = Registry.meta(id)
+        local name = meta and meta.name or id
+        local text = T(_("%1 登录已失效，请重新登录。后台同步会暂停该数据源，直到重新登录。"), name)
+        if msg and msg ~= "" then text = text .. "\n\n" .. msg end
+        local setting = require("desktop.pages.setting.source").loadSetting(id)
+        local login = setting and (setting.login or setting.open)
+        if type(login) == "function" then
+            require("ui.themes.widgets.confirm"):new{
+                text = text,
+                ok_text = _("重新登录"),
+                ok_callback = function() login(plugin) end,
+            }:show()
+        else
+            require("ui.themes.widgets.toast"):new{ text = text }:show()
+        end
+    end)
 end
 
 return Sync

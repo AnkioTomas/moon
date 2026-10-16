@@ -1372,4 +1372,7 @@ Current version: ",
     ["生僻字注音"] = "Rare word annotation",
     ["英语音标"] = "English IPA",
     ["请先在下方下载注音词库"] = "Download a pronunciation lexicon below first",
+    ["微信读书登录已失效"] = "WeRead sign-in has expired",
+    ["%1 登录已失效，请重新登录。后台同步会暂停该数据源，直到重新登录。"] = "%1 sign-in has expired. Please sign in again. Background sync is paused for this source until you do.",
+    ["重新登录"] = "Sign in again",
 }

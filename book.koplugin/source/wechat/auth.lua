@@ -209,15 +209,23 @@ local function sessionRequest(method, url, body, opts, cb)
                     if renewed then
                         attempt(true)
                     else
-                        cb(nil, renew_err, res)
+                        cb(nil, require("source.auth").expire("wechat", renew_err or _("微信读书登录已失效")), res)
                     end
                 end)
+                return
+            end
+            -- 续期重试后回包仍明确是会话失效 errcode：静默续期救不回来。
+            -- 裸 401/403（WAF 拦截等）不算，免得误判暂停同步。
+            local data = retried and not opts.skip_auth_retry and mayCarryErrCode(raw) and decodeJson(raw)
+            if data and isAuthFailure(data, nil) then
+                cb(nil, require("source.auth").expire("wechat", _("微信读书登录已失效")), res)
                 return
             end
             if not Request.ok(code) then
                 cb(nil, "HTTP " .. tostring(code), res)
                 return
             end
+            if not opts.skip_auth_retry then require("source.auth").ok("wechat") end
             cb(raw, nil, res)
         end)
     end

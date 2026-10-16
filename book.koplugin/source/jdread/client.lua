@@ -30,8 +30,13 @@ local function decodeApi(raw, err)
     local ok, wire = pcall(JSON.decode, raw)
     if not ok or type(wire) ~= "table" then return nil, _("京东读书响应无效") end
     if tonumber(wire.result_code) ~= 0 then
+        -- 网页 Cookie 没有续期接口：提示含「登录」即视为会话失效，由上层引导重新扫码。
+        if tostring(wire.message or ""):find("登录", 1, true) then
+            return nil, require("source.auth").expire("jdread", wire.message)
+        end
         return nil, wire.message or (_("京东读书错误 ") .. tostring(wire.result_code))
     end
+    require("source.auth").ok("jdread")
     return wire
 end
 

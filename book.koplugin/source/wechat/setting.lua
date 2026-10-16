@@ -183,4 +183,7 @@ function Setting.rows(plugin)
     return rows
 end
 
+--- 登录失效提示的「重新登录」直达入口（desktop.sync.promptLogin）。
+Setting.login = showQrLogin
+
 return Setting

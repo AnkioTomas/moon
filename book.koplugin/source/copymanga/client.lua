@@ -9,6 +9,7 @@
 local JSON = require("json")
 local Text = require("utils.text")
 local _ = require("gettext")
+local Auth = require("source.auth")
 
 ---@class CopymangaClient
 ---@field base_url string
@@ -137,7 +138,7 @@ function Client:_getJson(path, cb)
                 return
             end
             if not may_relogin then
-                cb(nil, expired)
+                cb(nil, Auth.expire("copymanga", expired))
                 return
             end
             if self:_latestToken() ~= sent then
@@ -147,8 +148,8 @@ function Client:_getJson(path, cb)
             active = nil
             relogin(function(ok, login_err, rejected)
                 if cancelled then return end
-                if ok then send(false); return end
-                cb(nil, rejected and expired or (login_err or _("请求失败")))
+                if ok then Auth.ok("copymanga"); send(false); return end
+                cb(nil, rejected and Auth.expire("copymanga", expired) or (login_err or _("请求失败")))
             end)
         end)
     end

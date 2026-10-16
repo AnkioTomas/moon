@@ -195,10 +195,18 @@ local function jsonAsync(self, method, url, extra_headers, body, cb)
         end
         absorbCookies(self, res)
         local code = tonumber(res.code)
+        -- 番茄扫码登录的 Cookie 没有续期接口：会话失效直接标记，由上层引导重新扫码。
+        local Auth = require("source.auth")
+        if isAuthError(code, res.body, res) then
+            local msg = httpError(method, url, code, res.body, res)
+            cb(nil, Auth.expire("fanqie", msg))
+            return
+        end
         if not Request.ok(code) then
             cb(nil, httpError(method, url, code, res.body, res))
             return
         end
+        Auth.ok("fanqie")
         cb(decodeJson(res.body))
     end)
 end
