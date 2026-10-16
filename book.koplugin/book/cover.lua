@@ -17,9 +17,10 @@ local MAX_SIDE = 1000
 --- os.remove/os.rename 不抛异常，无需 pcall；取图与写盘是引擎调用，失败按“无封面”处理。
 ---@param doc table KOReader Document
 ---@param target string
+---@return boolean|nil saved 目标文件已在或刚写成
 function Cover.save(doc, target)
     if lfs.attributes(target, "mode") == "file" then
-        return
+        return true
     end
     local ok_cover, bb = pcall(function()
         return doc:getCoverPageImage()
@@ -50,7 +51,9 @@ function Cover.save(doc, target)
     os.remove(target)
     if not os.rename(tmp, target) then
         os.remove(tmp)
+        return
     end
+    return true
 end
 
 return Cover
