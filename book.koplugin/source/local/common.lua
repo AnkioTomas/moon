@@ -233,7 +233,17 @@ end
 --- 从已打开的文档提取封面并落盘为 PNG；封面缓存独立于 books 元数据缓存。
 ---@param doc table
 ---@param path string 封面缓存键（stable_id）
+--- 用户在 KOReader 里给书设过自定义封面（sidecar 里的 cover.*）时优先用它，和文件管理器显示的一致。
+---@param doc table
+---@param path string 封面缓存键（stable_id，本地书即文件路径）
 local function saveDocumentCover(doc, path)
+    local ok, custom = pcall(function() return require("docsettings"):findCustomCoverFile(path) end)
+    local cover_doc = ok and custom and require("document/documentregistry"):openDocument(custom)
+    if cover_doc then
+        local saved_ok, saved = pcall(require("book.cover").save, cover_doc, coverPath(path))
+        pcall(function() cover_doc:close() end)
+        if saved_ok and saved then return end
+    end
     require("book.cover").save(doc, coverPath(path))
 end
 

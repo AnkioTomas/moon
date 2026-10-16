@@ -1121,3 +1121,35 @@ do
     Assert.eq(closed, 1)
     package.loaded["document/documentregistry"] = real_registry
 end
+
+-- ── KOReader 自定义封面（sidecar cover.*）优先于书内封面；没设过就照常取书内封面 ──────
+do
+    local real_registry = package.loaded["document/documentregistry"]
+    local real_cover = package.loaded["book.cover"]
+    local real_ds = package.loaded["docsettings"]
+    local from, closed = {}, 0
+    package.loaded["book.cover"] = { save = function(d, target)
+        from[#from + 1] = d.name
+        return d.name == "custom"
+    end }
+    local custom
+    package.loaded["docsettings"] = { findCustomCoverFile = function(_, p) return custom and p .. ".sdr/cover.jpg" end }
+    package.loaded["document/documentregistry"] = {
+        hasProvider = function() return true end,
+        openDocument = function(_, p)
+            local name = p:match("cover%.jpg$") and "custom" or "book"
+            return { name = name, getProps = function() return { title = "t" } end,
+                close = function() closed = closed + 1 end }
+        end,
+    }
+    local Common = require("source.local.common")
+    Common.parseBookProps("/books/c1.mobi")
+    Assert.eq(table.concat(from, ","), "book")
+    from, custom = {}, true
+    Common.parseBookProps("/books/c2.mobi")
+    Assert.eq(table.concat(from, ","), "custom", "自定义封面落盘后不再取书内封面")
+    Assert.eq(closed, 3, "封面图文档与书都关闭")
+    package.loaded["document/documentregistry"] = real_registry
+    package.loaded["book.cover"] = real_cover
+    package.loaded["docsettings"] = real_ds
+end
