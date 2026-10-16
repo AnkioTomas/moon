@@ -186,7 +186,10 @@ local function syncStats(desktop, source, force)
             logger.warn("book stats sync failed", source.id, err)
             return
         end
-        if result.skipped or (result.pulled or 0) + (result.pushed or 0) == 0 then return end
+        -- 统计域的变更信号：拉取 / 上报的统计行数，加上物化写入的书行数（隐蔽身份行，
+        -- 不进书架同步结果 —— 书行变了展示也要重读，书架不因此重扫）。
+        local changed = (result.pulled or 0) + (result.pushed or 0) + (result.materialized or 0)
+        if result.skipped or changed == 0 then return end
         desktop:onEvent("stats_changed")
         if desktop.tab == "insight" then desktop:updateView() end
     end)

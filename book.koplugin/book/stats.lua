@@ -136,6 +136,9 @@ function Stats.pull(source, done)
             if result.commit then result.commit() end
             saved.skipped = saved.skipped + invalid
             saved.failed = 0
+            -- 源的纯书行物化（如 Kavita 的缺行卷身份行）：写入的不是 reading_stats 行，
+            -- 但展示要跟着刷新，单独计数回给同步结果（不进书架同步结果）。
+            saved.materialized = tonumber(result.materialized) or 0
             if done then done(true, saved) end
         else
             if done then done(false, "failed to save pulled reading stats") end
@@ -195,6 +198,7 @@ function Stats.syncAsync(source, opts, cb)
                 return
             end
             result.pulled = pulled.imported
+            result.materialized = pulled.materialized or 0
             result.push_error = push_error
             finish(result)
         end)
