@@ -15,6 +15,13 @@ local Config = require("support.config")
 local Json = require("support.json_stub")
 local Stubs = require("support.stubs")
 
+-- 日 / 时归属按进程时区（POSIX TZ）计算：钉死 CST-8，与 fixture 拉取时用的 Asia/Shanghai 对齐，
+-- 断言就不会随宿主机时区漂移。
+local ffi = require("ffi")
+ffi.cdef[[ int setenv(const char*, const char*, int); void tzset(void); ]]
+ffi.C.setenv("TZ", "CST-8", 1)
+ffi.C.tzset()
+
 local sqlite_ok = pcall(require, "lua-ljsqlite3/init")
 if not sqlite_ok then
     Assert.skip("当前离线环境没有 ljsqlite3 Lua 模块")
@@ -319,13 +326,19 @@ Assert.eq(sample_day_count, 7, "只列有数据的日子（零时长日不出现
 for ymd, seconds in pairs(sample_days) do Assert.eq(sample_rows[ymd], seconds, "单书逐日 " .. ymd) end
 Assert.eq(book_days("7453:11271")["2026-09-29"], 316)
 
--- ④ 时段：只有本地页记录，云端数据不进小时分布。
+-- ④ 时段：云端时段桶 + 本机逐页记录，合并口径与按天一致。
 local hourly = StatsDB.hourlyBySource("ext.kavita")
 local hourly_days = 0
 for _ymd in pairs(hourly) do hourly_days = hourly_days + 1 end
-Assert.eq(hourly["2026-10-14"][22], 900, "只算本机 21 点那 900s（当天云端 11,665s 不进时段）")
-Assert.eq(hourly_days, 1, "云端日/其它日期没有小时分布")
-Assert.is_nil(hourly["2026-09-18"], "纯云端的日子不凭空造分布")
+Assert.eq(hourly["2026-10-14"][22], 1043, "10-14 21 点：云端该格 1043s（本机同格已上报，不叠加）")
+Assert.eq(hourly_days, 28, "有云端时长的每天都有时段分布")
+Assert.eq(hourly["2026-09-18"][18], 738, "纯云端的日子也有时段（21 点 174 + 17 点 738 …）")
+-- 日页面「标题时长 = 时段图逐格之和」：逐日必须对得上
+for _idx, row in ipairs(StatsDB.dailyBySource("ext.kavita")) do
+    local sum = 0
+    for h = 1, 24 do sum = sum + (hourly[row.ymd] and hourly[row.ymd][h] or 0) end
+    Assert.eq(sum, row.seconds, "时段逐日之和 = 日历 " .. row.ymd)
+end
 
 -- ⑤ 拉取后本地新读：云端快照 + 增量，两边都不双计。
 local L2_T = FETCHED + 5 * 3600
@@ -349,7 +362,8 @@ local again = calendar()
 Assert.is_nil(again["2026-09-18"], "上一轮的云端日桶被全量重拉清掉")
 Assert.eq(again["2026-10-14"].seconds, 6734, "样本日重写为本次回包值")
 Assert.eq(again["2026-10-17"].seconds, 90, "本地逐页记录不受替换影响")
-Assert.eq(StatsDB.hourlyBySource("ext.kavita")["2026-10-14"][22], 900, "本地页记录不动")
+Assert.eq(StatsDB.hourlyBySource("ext.kavita")["2026-10-14"][22], 716, "时段格重写为本次回包值（本机同格已上报，不叠加）")
+Assert.is_nil(StatsDB.hourlyBySource("ext.kavita")["2026-09-18"], "回包里消失的时段格清掉")
 
 -- 12 号票物化标题的第二轮回归：二次拉取时章数已判定（不再读目录），卷名必须取自状态文件里的
 -- 持久化卷名 —— 不能退容器名，更不能把上一轮物化出的好标题改写成「太空漫游 · 太空漫游」。

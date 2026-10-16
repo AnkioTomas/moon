@@ -6,7 +6,7 @@ sync_status=0 表示待上传，1 表示已与远端同步，2 表示从 KOReade
 
 身份即 BookIdentity(source_id + stable_id)，天然按源隔离。
 
-record_type：page / page_rollup 为本地采集；day / total 为账户合成桶；book_total / book_day 为云端单书
+record_type：page / page_rollup 为本地采集；day / hour / total 为账户合成桶；book_total / book_day 为云端单书
 （stable_id 为真实书 id）；book 为旧版周排行，已不再写入。
 
 不变量：
@@ -32,6 +32,7 @@ local StatsDB = {
 }
 
 local DAY_RECORD = "day"
+local HOUR_RECORD = "hour"
 local ROLLUP_RECORD = "page_rollup"
 local LOCAL_RECORDS = { page = true, [ROLLUP_RECORD] = true }
 
@@ -123,7 +124,7 @@ end
 --- 云端 pull 覆盖前的清理：**只删本次回包时间窗口内的合成行**。
 ---
 --- 两条边界都是数据事故的教训，不能放宽：
---- 1. 只删合成行（`__*:day:*` / `__*:book:*` / `__*:total*`）。本地逐页记录推送成功后也是
+--- 1. 只删合成行（`__*:day:*` / `__*:hour:*` / `__*:book:*` / `__*:total*`）。本地逐页记录推送成功后也是
 ---    `sync_status=1`，按 sync_status 删会把用户自己设备采集的阅读历史一起删掉。
 --- 2. 只删窗口内。回包通常只覆盖近一个月，删整源等于每同步一次就抹掉更早的历史。
 ---@param source_id string
@@ -138,7 +139,7 @@ local function deleteSyntheticInRange(source_id, from_ts, to_ts, prefix)
         return false
     end
     local sql = [[DELETE FROM reading_stats
-          WHERE source_id=? AND record_type IN ('day','book','total')
+          WHERE source_id=? AND record_type IN ('day','hour','book','total')
             AND start_time>=? AND start_time<=?]]
     if prefix ~= nil then
         return DB.exec(sql .. " AND stable_id LIKE ?;", source_id, from_n, to_n, prefix .. "%") ~= nil
@@ -520,30 +521,79 @@ function StatsDB.summaryByBook(source_id, stable_id)
     }
 end
 
---- 本机记录按（本地日期，小时）汇总的阅读秒数。云端只有日桶、不知道几点读的，不在内。
---- page_rollup 的 start_time 是整点，压缩后仍落在原小时。
+--- 单源：云端时段桶 + 本机逐页记录按（本地日期，小时）合并，口径与按天一致
+--- （有云端桶的小时 = 云端 + 拉取后本机新读的；merge_local_stats 打开时再与本机该小时取较大值；
+--- 没有云端桶的小时只有本机）。page_rollup 的 start_time 是整点，压缩后仍落在原小时。
+---@param source_id string
+---@return table<string, number[]> ymd → 24 格秒数（[1] 为 0 点）
+local function hourlyRowsOne(source_id)
+    local fetched_at = tonumber(DB.rowexec(
+        "SELECT MAX(last_time) FROM reading_stats WHERE source_id=? AND record_type='hour';",
+        source_id
+    )) or 0
+    local result, nrows = DB.query(
+        [[SELECT strftime('%Y-%m-%d', start_time,'unixepoch','localtime') AS day,
+                 CAST(strftime('%H', start_time,'unixepoch','localtime') AS INTEGER) AS hour,
+                 record_type,
+                 COALESCE(SUM(duration),0),
+                 COALESCE(SUM(CASE WHEN ]] .. FRESH_LOCAL .. [[ THEN duration ELSE 0 END),0)
+          FROM reading_stats WHERE source_id=? AND record_type IN ('hour','page','page_rollup')
+          GROUP BY day, hour, record_type;]],
+        fetched_at, fetched_at, source_id
+    )
+    local cloud, local_hours, fresh, slots = {}, {}, {}, {}
+    for i = 1, nrows do
+        local key = result[1][i] .. "#" .. tostring(result[2][i])
+        slots[key] = { ymd = result[1][i], hour = (tonumber(result[2][i]) or 0) + 1 }
+        if result[3][i] == HOUR_RECORD then
+            cloud[key] = tonumber(result[4][i]) or 0
+        else
+            local_hours[key] = (local_hours[key] or 0) + (tonumber(result[4][i]) or 0)
+            fresh[key] = (fresh[key] or 0) + (tonumber(result[5][i]) or 0)
+        end
+    end
+    local merge = require("utils.settings").getSource(source_id).merge_local_stats == true
+    local out = {}
+    for key, slot in pairs(slots) do
+        local local_seconds = local_hours[key] or 0
+        local seconds
+        if cloud[key] then
+            seconds = cloud[key] + (fresh[key] or 0)
+            if merge then seconds = math.max(seconds, local_seconds) end
+        else
+            seconds = local_seconds
+        end
+        if seconds > 0 then
+            local hours = out[slot.ymd]
+            if not hours then
+                hours = {}
+                for h = 1, 24 do hours[h] = 0 end
+                out[slot.ymd] = hours
+            end
+            hours[slot.hour] = hours[slot.hour] + seconds
+        end
+    end
+    return out
+end
+
+--- 按（本地日期，小时）汇总的阅读秒数；多源先单源合并再逐格相加。
 ---@param source_id string|string[]
 ---@return table<string, number[]> ymd → 24 格秒数（[1] 为 0 点）
 function StatsDB.hourlyBySource(source_id)
-    local src, args = DB.sourceClause("source_id", source_id)
-    local result, nrows = DB.query(
-        [[SELECT date(start_time,'unixepoch','localtime'),
-                 CAST(strftime('%H', start_time,'unixepoch','localtime') AS INTEGER), SUM(duration)
-          FROM reading_stats WHERE ]] .. src .. [[ AND record_type IN ('page','page_rollup')
-          GROUP BY 1, 2;]],
-        unpack(args)
-    )
+    if type(source_id) ~= "table" then
+        return hourlyRowsOne(source_id)
+    end
     local out = {}
-    for i = 1, nrows do
-        local ymd = result[1][i]
-        local hours = out[ymd]
-        if not hours then
-            hours = {}
-            for h = 1, 24 do hours[h] = 0 end
-            out[ymd] = hours
+    for _idx, id in ipairs(source_id) do
+        for ymd, hours in pairs(hourlyRowsOne(id)) do
+            local target = out[ymd]
+            if not target then
+                target = {}
+                for h = 1, 24 do target[h] = 0 end
+                out[ymd] = target
+            end
+            for h = 1, 24 do target[h] = target[h] + hours[h] end
         end
-        local h = (tonumber(result[2][i]) or 0) + 1
-        hours[h] = hours[h] + (tonumber(result[3][i]) or 0)
     end
     return out
 end

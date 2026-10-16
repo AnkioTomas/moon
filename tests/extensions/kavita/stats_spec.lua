@@ -9,6 +9,13 @@ moonsource_kavita.stats：reading-history 条目 → reading_stats 行 / 替换�
 local Assert = require("support.assert")
 local Config = require("support.config")
 
+-- 日 / 时归属按进程时区（POSIX TZ）计算：钉死 CST-8，与 fixture 拉取时用的 Asia/Shanghai 对齐，
+-- 断言就不会随宿主机时区漂移。
+local ffi = require("ffi")
+ffi.cdef[[ int setenv(const char*, const char*, int); void tzset(void); ]]
+ffi.C.setenv("TZ", "CST-8", 1)
+ffi.C.tzset()
+
 local warnings = {}
 package.preload["utils.log"] = function()
     return {
@@ -31,6 +38,11 @@ local FETCHED = 1792152000
 --- 当天设备本地零点。日期本身来自服务端；期望时差另有 research §3 表兜底。
 local function dayTs(y, m, d)
     return os.time({ year = y, month = m, day = d, hour = 0 })
+end
+
+--- 当天设备本地整点（时段桶键）。
+local function hourTs(y, m, d, h)
+    return os.time({ year = y, month = m, day = d, hour = h })
 end
 
 --- 按记录身份找行（不依赖 rows 顺序）。
@@ -89,6 +101,31 @@ do
     end
     Assert.eq(day_rows, 8, "只有有有效时长的日子落桶")
     Assert.eq(day_sum, 14237, "账户累计 = 各日之和")
+
+    -- 时段桶：每条活动行按自己的本地起始小时归档（跨零点的活动行取小时、仍记在条目那天）。
+    local hour_rows, hour_total = 0, 0
+    local hour_by_day = {}
+    for _idx, row in ipairs(result.rows) do
+        if row.record_type == "hour" then
+            hour_rows = hour_rows + 1
+            hour_total = hour_total + row.duration
+            Assert.eq(row.stable_id, "__kv:hour:" .. row.start_time, "时段桶按整点做身份")
+            Assert.eq(row.last_time, FETCHED, "时段桶 last_time = 拉取时刻")
+            local d = os.date("%Y-%m-%d", row.start_time)
+            hour_by_day[d] = (hour_by_day[d] or 0) + row.duration
+        end
+    end
+    Assert.eq(hour_rows, 27, "样本 27 个整点有阅读")
+    Assert.eq(hour_total, 14237, "时段之和 = 账户累计")
+    Assert.eq(find(result.rows, "hour", "__kv:hour:" .. hourTs(2026, 10, 14, 11)).duration, 1352, "10-14 11 点")
+    Assert.eq(find(result.rows, "hour", "__kv:hour:" .. hourTs(2026, 10, 14, 14)).duration, 1812, "10-14 14 点")
+    Assert.eq(find(result.rows, "hour", "__kv:hour:" .. hourTs(2026, 9, 29, 18)).duration, 316, "9-29 18 点")
+    Assert.eq(find(result.rows, "hour", "__kv:hour:" .. hourTs(2026, 10, 15, 21)).duration, 845, "10-15 21 点")
+    -- 日页面「标题时长 = 时段图逐格之和」：逐日必须对得上
+    for _idx, d in ipairs(days) do
+        Assert.eq(hour_by_day[ymd(dayTs(d[1], d[2], d[3]))], d[4],
+            "时段逐日之和 = 日桶 " .. d[1] .. "-" .. d[2] .. "-" .. d[3])
+    end
     -- 零时长会话（10-06 的 4 条等）整条丢弃，不留日桶
     for _idx, d in ipairs({ { 2026, 10, 6 }, { 2026, 10, 9 }, { 2026, 10, 10 }, { 2026, 10, 12 } }) do
         local ts = dayTs(d[1], d[2], d[3])
@@ -127,19 +164,26 @@ do
 
     -- 替换：账户桶按前缀 + 覆盖全量重拉窗口的时间窗；单书按上次 ∪ 本次身份精确清。
     Assert.eq(result.replace.mode, "ranges")
-    Assert.eq(#result.replace.ranges, 2)
-    local day_range, total_range = result.replace.ranges[1], result.replace.ranges[2]
-    if day_range.stable_prefix == "__kv:total" then day_range, total_range = total_range, day_range end
-    Assert.eq(day_range.stable_prefix, "__kv:day:")
+    Assert.eq(#result.replace.ranges, 3)
+    local ranges = {}
+    for _idx, range in ipairs(result.replace.ranges) do ranges[range.stable_prefix] = range end
+    local day_range, hour_range, total_range =
+        ranges["__kv:day:"], ranges["__kv:hour:"], ranges["__kv:total"]
+    Assert.not_nil(day_range, "日桶清理范围")
+    Assert.not_nil(hour_range, "时段桶清理范围")
+    Assert.not_nil(total_range, "总量行清理范围")
     Assert.eq(day_range.from_ts, 0)
     Assert.eq(day_range.to_ts, FETCHED)
-    Assert.eq(total_range.stable_prefix, "__kv:total")
+    Assert.eq(hour_range.from_ts, 0)
+    Assert.eq(hour_range.to_ts, FETCHED)
     Assert.eq(total_range.from_ts, 0)
     Assert.eq(total_range.to_ts, 0)
-    -- 全量重拉的清理窗口必须盖住本次写出的每个日桶，否则消失的日桶会残留
+    -- 全量重拉的清理窗口必须盖住本次写出的每个桶，否则消失的桶会残留
     for _idx, row in ipairs(result.rows) do
         if row.record_type == "day" then
             Assert.is_true(row.start_time <= day_range.to_ts, "日桶落在清理窗口内")
+        elseif row.record_type == "hour" then
+            Assert.is_true(row.start_time <= hour_range.to_ts, "时段桶落在清理窗口内")
         end
     end
     Assert.eq(#result.replace.books, 3, "上次身份 ∪ 本次身份（含漂移孤儿）")
@@ -169,10 +213,37 @@ do
     Assert.eq(day_row.duration, 220, "账户日是各章之和")
     Assert.eq(day_row.event_count, 1, "当天页数先求和：2 + (-1) + 0")
     Assert.eq(find(result.rows, "total", "__kv:total", 0).duration, 220)
+    -- 没有 startTimeUtc 的条目退回 localDate 分日；造不出小时就不造，绝不凭空补一个整点。
+    for _idx, row in ipairs(result.rows) do
+        Assert.is_true(row.record_type ~= "hour", "缺 startTimeUtc 不造时段桶")
+    end
     Assert.len(result.identities, 3)
     Assert.contains(result.identities, "55:11")
     Assert.contains(result.identities, "55:12")
     Assert.contains(result.identities, "66")
+end
+
+do
+    -- 分日 / 分时按服务端 UTC 时刻在设备本地（CST-8）换算，不信服务端按请求时区给的 localDate。
+    local result = Stats.fromHistory({
+        -- 本地 10-16 07:59（UTC 10-15 23:59）：服务端若按 UTC 算 localDate 会给 10-15，差一天。
+        { seriesId = 31, startTimeUtc = "2026-10-15T23:59:00.1", localDate = "2026-10-15T00:00:00",
+            chapters = { { chapterId = 1, startTimeUtc = "2026-10-15T23:59:00.1", durationSeconds = 60, pagesRead = 1 } } },
+        -- 本地 10-17 00:30 起、23:50 又读了一段：日桶在 10-17，两个时段格也都算 10-17 这天。
+        { seriesId = 32, startTimeUtc = "2026-10-16T16:30:00", localDate = "2026-10-17T00:00:00",
+            chapters = {
+                { chapterId = 1, startTimeUtc = "2026-10-16T16:30:00", durationSeconds = 40, pagesRead = 0 },
+                { chapterId = 1, startTimeUtc = "2026-10-17T15:50:00", durationSeconds = 60, pagesRead = 0 },
+            } },
+    }, { source_id = "ext.kavita", fetched_at = FETCHED, volumes = { [31] = 2, [32] = 2, [33] = 2 } })
+    local d16, d17 = dayTs(2026, 10, 16), dayTs(2026, 10, 17)
+    Assert.eq(find(result.rows, "day", "__kv:day:" .. d16, d16).duration, 60, "本地 07:59 落本地当天")
+    Assert.eq(find(result.rows, "hour", "__kv:hour:" .. hourTs(2026, 10, 16, 7)).duration, 60, "本地 7 点格")
+    Assert.eq(find(result.rows, "day", "__kv:day:" .. d17, d17).duration, 100, "本地 0:30 起的那条落 10-17")
+    Assert.eq(find(result.rows, "hour", "__kv:hour:" .. hourTs(2026, 10, 17, 0)).duration, 40, "0 点格")
+    Assert.eq(find(result.rows, "hour", "__kv:hour:" .. hourTs(2026, 10, 17, 23)).duration, 60, "23 点格")
+    Assert.is_nil(find(result.rows, "hour", "__kv:hour:" .. hourTs(2026, 10, 18, 0)),
+        "跨零点前的活动行不另起一天")
 end
 
 do
@@ -249,7 +320,7 @@ do
     Assert.len(empty.rows, 0)
     Assert.len(empty.identities, 0)
     Assert.len(empty.replace.books, 0)
-    Assert.eq(#empty.replace.ranges, 2)
+    Assert.eq(#empty.replace.ranges, 3)
 end
 
 do
