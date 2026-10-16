@@ -92,10 +92,17 @@ end
 ---@param paging boolean|nil 目标文档是否分页文档（决定注解形态）
 ---@return table[]
 function Normalize.merge(remote, local_items, paging)
+    -- 分页文档的 pos 是 {x,y,page} 表：tostring 只得到地址，远端/本地同一条永远对不上。
+    local function pos(p)
+        if type(p) == "table" then
+            return tostring(p.page) .. "," .. tostring(p.x) .. "," .. tostring(p.y)
+        end
+        return tostring(p or "")
+    end
     local function key(item)
         if item.page == nil then return nil end
         return table.concat({
-            tostring(item.page), tostring(item.pos0 or ""), tostring(item.pos1 or ""),
+            tostring(item.page), pos(item.pos0), pos(item.pos1),
             tostring(item.text or ""), tostring(item.note or ""),
         }, "\31")
     end

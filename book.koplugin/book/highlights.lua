@@ -36,14 +36,20 @@ end
 --- 拼串用 \0 分隔，避免字段内容里的分隔符造成误撞。
 ---@param item table 注解条目（会话 annotation 或 notes 表反序列化结果）
 ---@return string
+--- 分页文档的 pos 是表，tostring 只得到地址，内容相同的两条去不了重。
+local function posKey(p)
+    if type(p) == "table" then return tostring(p.page) .. "," .. tostring(p.x) .. "," .. tostring(p.y) end
+    return tostring(p or "")
+end
+
 local function highlightKey(item)
     local id = item.id or item.annotation_id
     if id ~= nil then return "id:" .. tostring(id) end
     return table.concat({
         item.text, chapterOf(item) or "",
         tostring(item.pageno or item.page or ""),
-        tostring(item.pos0 or item.start or ""),
-        tostring(item.pos1 or item.finish or ""),
+        posKey(item.pos0 or item.start),
+        posKey(item.pos1 or item.finish),
     }, "\0")
 end
 
