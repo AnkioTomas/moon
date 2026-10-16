@@ -30,6 +30,11 @@ package.preload["ui.fonts.reader"] = function()
     }
 end
 
+local captured
+package.preload["reader.prefs"] = function()
+    return { captureAndSave = function(ui) captured = ui end }
+end
+
 package.preload["ui/uimanager"] = function()
     return { show = function() end }
 end
@@ -56,3 +61,5 @@ Assert.eq(picker_opts.current_id(), "demo.ttf")
 picker_opts.on_select({ id = "demo.ttf", name = "Demo" }, "demo.ttf", "Demo")
 Assert.eq(applied.id, "demo.ttf")
 Assert.eq(applied.name, "Demo")
+-- 应用成功后由动作（而不是 ui 层）把全书排版偏好落库
+Assert.eq(captured, reader_ui)

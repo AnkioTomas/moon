@@ -291,7 +291,7 @@ function M:createWidget()
         ctx.on_detail = function(book)
             require("desktop.detail").open(ctx.desktop, "library", book)
         end
-        grid, used, page, pages = buildGrid(ctx, books, w, grid_h, self.page or 1, CoverCell.opener(self, ctx))
+        grid, used, page, pages = buildGrid(ctx, books, w, grid_h, self.page or 1, CoverCell.opener(self, ctx, require("desktop.open").book))
         content = VerticalGroup:new{ align = "left", grid, VerticalSpan:new{ width = math.max(0, grid_h - used) } }
     else
         content = CenterContainer:new{

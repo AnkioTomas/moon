@@ -560,7 +560,7 @@ function Library:buildPage(ctx)
     end
     local state = self.state or {}
     local books = state.books
-    local on_open = CoverCell.opener(self, ctx)
+    local on_open = CoverCell.opener(self, ctx, require("desktop.open").book)
     local on_detail = function(book) require("desktop.detail").open(ctx.desktop, "library", book) end
     local body
     if not books or #books == 0 then
