@@ -62,7 +62,7 @@ local enabled = {
         plugin("broken", "error('boom')"),
         plugin("garbage", "return 42"),
         -- 自己声明能力：非书源扩展不要 meta/new，id 写在顶层；provides 里不写 source 就不是书源
-        plugin("widgets", [[return { api = 1, id = "ext.widgets", provides = { source = false, home_widgets = { { id = "w" } } } }]]),
+        plugin("widgets", [[return { api = 1, id = "ext.widgets", provides = { source = false, home_widgets = { { id = "w" } }, features = { panel = "x.panel" } } }]]),
         plugin("implicit", [[return { api = 1, id = "ext.implicit", provides = { home_widgets = {} } }]]),
         plugin("declared", [[return { api = 1, provides = { source = true, home_widgets = { { id = "d" } } },
             meta = function() return { id = "ext.declared", name = "D", type = "book" } end,
@@ -105,6 +105,9 @@ do
     for _idx, ext in ipairs(exts) do got[#got + 1] = ext.id .. (ext.source and "+" or "-") end
     Assert.eq(table.concat(got, ","), "ext.demo+,ext.widgets-,ext.implicit-,ext.declared+,ext.legacyoff-")
     Assert.eq(exts[2].home_widgets[1].id, "w")
+    Assert.eq(exts[2].features.panel, "x.panel", "provides.features 原样记下")
+    Assert.is_nil(exts[1].features)
+    Assert.eq(Registry.extensionsReady(), true)
     Assert.eq(exts[5].home_widgets[1].id, "l", "旧写法 home 仍然认")
     Assert.len(exts[1].home_widgets, 0)
     Assert.is_nil(Registry.meta("ext.widgets"))

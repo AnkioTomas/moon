@@ -28,6 +28,9 @@ KOReader 加载完全部插件后，月读在首次访问源注册表时 dofile 
   · 完整组件类：继承 desktop.pages.home.base，id 写全名 <扩展 id>.<名>，请求在 onActivate 发、onDeactivate 取消。
   组件代码出错只记日志、画空白，不影响首页；id 不以 <扩展 id>. 开头或重名的不加载。
   插件卸载 / 禁用后组件不显示，首页布局里的位置保留，重装后回到原处。
+- features（可选）：往月读自己的挂点加功能 { setting, panel, topbar, events, hooks = { onReaderReady } }，
+  值是表或插件内模块名（延迟 require），形状同 features/<name>/ 下的约定文件；契约见 book.koplugin/features/init.lua 头注释，
+  示例见 examples/moonwidget-demo.koplugin。
 - 新装默认启用；卸载后若是当前源退回本地，书留在书库不显示，重装同一 id 恢复。
 --]]
 

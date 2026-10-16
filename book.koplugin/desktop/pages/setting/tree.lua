@@ -10,6 +10,8 @@
   - `parent = 页面 id`：往该页追加分节，`sections = fn() → BookThemeSection[]`，排在页面自带 sections 之后。
 同层按 order 升序；order 相同按收集顺序（核心在前，feature 按目录名）。
 feature 的页面 id 是 `feature:<name>:<id>`（id 省略用序号），核心页面用自己写的 id；parent 引用的就是这个 id。
+第三方扩展（Features.external("setting")）排在内置 feature 之后，页面 id 是 `feature:<扩展 id>:<id>`；
+回调经 Features.wrap 隔离，条目不合格（含未知分组 / 父页面）只记日志跳过，不像核心那样报错。
 
 @module koplugin.book.desktop.pages.setting.tree
 --]]
@@ -33,6 +35,7 @@ feature 的页面 id 是 `feature:<name>:<id>`（id 省略用序号），核心�
 ---@field row (fun(iw: number): table)|nil 直接放在分组里的行
 ---@field sections (fun(): table[])|nil 第三层追加的分节
 ---@field owner string|nil 报错用的来源标签
+---@field external boolean|nil 第三方条目：不合格记日志跳过
 
 --- 合并后的第二层条目：page 已换成叠层规格。
 ---@class BookSettingNode
@@ -77,6 +80,30 @@ function Tree.features(desktop)
             end
         end
     end
+    local Features = require("features")
+    for _idx, ext in ipairs(Features.external("setting")) do
+        local entries = Features.try(ext.id .. " setting", ext.mod.entries, desktop)
+        if type(entries) ~= "table" or entries.order or entries.page or entries.row or entries.sections then
+            require("utils.log").err("feature external setting rejected: entries must return a list", ext.id)
+        else
+            for i, entry in ipairs(entries) do
+                if type(entry) == "table" then
+                    local item = copy(entry)
+                    local label = ext.id .. " setting"
+                    item.owner, item.external = ext.id, true
+                    item.row = Features.wrap(label, entry.row)
+                    item.sections = Features.wrap(label, entry.sections)
+                    if type(entry.page) == "table" then
+                        item.id = "feature:" .. ext.id .. ":" .. (entry.id or i)
+                        item.page = copy(entry.page)
+                        item.page.sections = Features.wrap(label, entry.page.sections)
+                        item.page.preview = Features.wrap(label, entry.page.preview)
+                    end
+                    out[#out + 1] = item
+                end
+            end
+        end
+    end
     return out
 end
 
@@ -88,29 +115,40 @@ end
 function Tree.build(groups, entries)
     local by_group, pages, children, seq = {}, {}, {}, {}
     for _idx, group in ipairs(groups) do by_group[group.id] = {} end
-    for i, raw in ipairs(entries) do
-        local entry = copy(raw)
+    local logger = require("utils.log")
+    --- 校验并登记一条；核心 / 内置 feature 不合格直接报错，第三方返回错误让调用方记日志跳过。
+    local function add(entry, i)
         local who = (entry.owner or "core") .. " setting"
-        seq[entry] = i
-        if type(entry.order) ~= "number" then error(who .. ": entry needs order") end
+        local function bad(msg)
+            if not entry.external then error(who .. ": " .. msg) end
+            return msg
+        end
+        if type(entry.order) ~= "number" then return bad("entry needs order") end
         if entry.group then
             local list = by_group[entry.group]
-            if not list then error(who .. ": unknown group " .. tostring(entry.group)) end
+            if not list then return bad("unknown group " .. tostring(entry.group)) end
             if entry.page then
-                if not entry.id or not entry.page.title then error(who .. ": page needs id and title") end
-                if pages[entry.id] then error(who .. ": duplicate page " .. entry.id) end
+                if not entry.id or not entry.page.title then return bad("page needs id and title") end
+                if pages[entry.id] then return bad("duplicate page " .. entry.id) end
+                if entry.external and not entry.page.sections then return bad("page needs sections") end
                 pages[entry.id] = entry
             elseif type(entry.row) ~= "function" then
-                error(who .. ": group entry needs page or row")
+                return bad("group entry needs page or row")
             end
+            seq[entry] = i
             list[#list + 1] = entry
         elseif entry.parent then
-            if type(entry.sections) ~= "function" then error(who .. ": parent entry needs sections") end
+            if type(entry.sections) ~= "function" then return bad("parent entry needs sections") end
+            seq[entry] = i
             children[entry.parent] = children[entry.parent] or {}
             table.insert(children[entry.parent], entry)
         else
-            error(who .. ": entry needs group or parent")
+            return bad("entry needs group or parent")
         end
+    end
+    for i, raw in ipairs(entries) do
+        local why = add(copy(raw), i)
+        if why then logger.err("feature external setting rejected", raw.owner, why) end
     end
 
     local function sort(list)
@@ -120,8 +158,18 @@ function Tree.build(groups, entries)
         end)
     end
     for parent, list in pairs(children) do
-        if not pages[parent] then error((list[1].owner or "core") .. " setting: unknown parent " .. parent) end
-        sort(list)
+        if not pages[parent] then
+            for i = #list, 1, -1 do
+                if list[i].external then
+                    logger.err("feature external setting rejected", list[i].owner, "unknown parent " .. parent)
+                    table.remove(list, i)
+                end
+            end
+            if list[1] then error((list[1].owner or "core") .. " setting: unknown parent " .. parent) end
+            children[parent] = nil
+        else
+            sort(list)
+        end
     end
     for id, entry in pairs(pages) do
         local page, extra = entry.page, children[id] or {}
@@ -134,7 +182,7 @@ function Tree.build(groups, entries)
                 local out = {}
                 for _idx, section in ipairs(page.sections and page.sections() or {}) do out[#out + 1] = section end
                 for _idx, child in ipairs(extra) do
-                    for _i, section in ipairs(child.sections()) do out[#out + 1] = section end
+                    for _i, section in ipairs(child.sections() or {}) do out[#out + 1] = section end
                 end
                 return out
             end,

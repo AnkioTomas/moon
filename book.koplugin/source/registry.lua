@@ -9,7 +9,10 @@ examples/moonsource-demo.koplugin/moon_source.lua），按 PluginLoader.enabled_
   - 描述表带 `provides` 表：只有 provides.source == true 才登记为书源；provides.home_widgets 是首页组件数组。
   - 没有 provides（旧描述文件）：除非顶层 `source = false`，一律当书源；首页组件取顶层 `home`。
   - 书源要 meta() / new()，id 取 meta().id；非书源不要求 meta/new，id 取描述表的 `id`。id 都必须是 ext.<name>。
-Registry.extensions() 按加载顺序列出全部扩展（含非书源），供桌面等上层读取首页组件；本模块不 require 桌面。
+  - provides.features：往月读自己的挂点加功能，`{ setting, panel, topbar, events, hooks }`，值是表或延迟 require 的模块名，
+    这里只原样记下（MoonExtension.features），解析、加前缀、校验与隔离都在 features/init.lua（Features.external）。
+Registry.extensions() 按加载顺序列出全部扩展（含非书源），供桌面等上层读取首页组件与 feature；本模块不 require 桌面 / features。
+Registry.extensionsReady() 为假（KOReader 还在加载插件）时上层不要缓存扩展收集结果。
 
 描述文件不合约定（api ~= Registry.API、书源缺 meta/new、id 不是 ext.<name>、与已登记 id 重名、加载抛错）或 new() 抛错：
 记错误日志并跳过，第三方代码不拖垮内置源。enabled_sources 为 nil 或集合里没有的 id 算启用，只有显式 false 是禁用；活跃源不能禁用。
@@ -44,6 +47,7 @@ local external = {}
 ---@field desc table 描述表
 ---@field source boolean 是否登记为书源
 ---@field home_widgets table[] 声明的首页组件（未校验）
+---@field features table|nil provides.features 原样（未校验）
 
 ---@type MoonExtension[]
 local extensions = {}
@@ -61,6 +65,15 @@ function Registry.capabilities(desc)
         return provides.source == true, type(widgets) == "table" and widgets or {}
     end
     return desc.source ~= false, type(desc.home) == "table" and desc.home or {}
+end
+
+--- 描述表声明的 feature 挂点（provides.features）；未声明或不是表为 nil。
+---@param desc table
+---@return table|nil
+function Registry.features(desc)
+    local provides = desc.provides
+    local features = type(provides) == "table" and provides.features
+    return type(features) == "table" and features or nil
 end
 
 --- 读一个第三方描述文件，不合约定就抛错。
@@ -128,7 +141,8 @@ local function sourceIds()
                 logger.err("book.source external duplicate id", path, id)
             else
                 seen[id] = true
-                exts[#exts + 1] = { id = id, desc = desc, source = is_source, home_widgets = widgets }
+                exts[#exts + 1] = { id = id, desc = desc, source = is_source, home_widgets = widgets,
+                    features = Registry.features(desc) }
                 if is_source then
                     list[#list + 1] = id
                     ext[id] = desc
@@ -164,6 +178,13 @@ end
 function Registry.extensions()
     sourceIds()
     return extensions
+end
+
+--- KOReader 已加载完全部插件、extensions() 是完整清单（之后才可缓存收集结果）。
+---@return boolean
+function Registry.extensionsReady()
+    sourceIds()
+    return ids ~= nil
 end
 
 --- 持久化的活跃源 id（common.active_source）；未配置或该源已下线时为 "local"。

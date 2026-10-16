@@ -1,4 +1,7 @@
 --[[-- 快捷动作注册表：内置动作加载与调度辅助。
+第三方扩展的开关（Features.external("panel")）追加在内置 feature 之后：id 自动加 `<扩展 id>.` 前缀，
+回调经 Features.wrap 隔离；缺字段、未知 scope、撞名只记日志跳过。插件还没加载完时不缓存，下次重收。
+已保存但插件已卸载的 id，get 返回 nil、available 为假，列表静默跳过。
 @module koplugin.book.features.panel.actions.registry
 --]]
 
@@ -78,6 +81,42 @@ local function featureActions()
     return out
 end
 
+--- 第三方扩展的开关：校验、加前缀、包隔离；不合格记日志跳过。
+---@return BookQuickPanelAction[] actions, boolean ready
+local function externalActions()
+    local Features = require("features")
+    local logger = require("utils.log")
+    local out = {}
+    local items, ready = Features.external("panel")
+    for _idx, ext in ipairs(items) do
+        local actions = Features.try(ext.id .. " panel", ext.mod.actions)
+        if type(actions) ~= "table" or actions.id or actions.scope then
+            logger.err("feature external panel rejected: actions must return a list", ext.id)
+            actions = {}
+        end
+        for _i, raw in ipairs(actions) do
+            local id = type(raw) == "table" and Features.prefix(ext.id, raw.id)
+            local why = not id and "action needs id"
+                or not SCOPES[raw.scope] and "unknown scope " .. tostring(raw.scope)
+                or not (raw.title and raw.icon) and "action needs title and icon"
+                or not (raw.run or raw.event) and "action needs run or event"
+            if why then
+                logger.err("feature external panel rejected", ext.id, why)
+            else
+                local label = "quick action " .. id
+                local action = {}
+                for key, value in pairs(raw) do action[key] = value end
+                action.id = id
+                action.run = Features.wrap(label, raw.run)
+                action.available = Features.wrap(label, raw.available)
+                action.active = Features.wrap(label, raw.active)
+                out[#out + 1] = action
+            end
+        end
+    end
+    return out, ready
+end
+
 --- 一次性加载内置动作，再追加 feature 开关。失败不置 loaded，下次重试不会叠一份。
 local function ensureLoaded()
     if loaded then return end
@@ -97,8 +136,18 @@ local function ensureLoaded()
         local bucket = action.scope == "reader" and read or desk
         bucket[#bucket + 1] = action.id
     end
+    local ext_actions, ready = externalActions()
+    for _idx, action in ipairs(ext_actions) do
+        if builtin_map[action.id] or extra_map[action.id] then
+            require("utils.log").err("feature external panel rejected: duplicate id", action.id)
+        else
+            extra_map[action.id] = action
+            local bucket = action.scope == "reader" and read or desk
+            bucket[#bucket + 1] = action.id
+        end
+    end
     builtins, extra, extra_desktop, extra_reader = builtin_map, extra_map, desk, read
-    loaded = true
+    loaded = ready
 end
 
 --- 内置顺序后面接上该 scope 的 feature 开关。

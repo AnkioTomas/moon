@@ -48,6 +48,18 @@ package.preload["source.registry"] = function()
         meta = function(id) return { id = id, name = "书库" } end,
     }
 end
+-- 第三方扩展的顶栏项（provides.features.topbar）：加前缀、隔离、不合格跳过
+local SourceRegistry = require("source.registry")
+SourceRegistry.extensionsReady = function() return true end
+SourceRegistry.extensions = function()
+        return { { id = "ext.demo", features = { topbar = { items = function()
+            return {
+                { id = "pages", label = "页数", read = function() error("boom") end, tap = function() error("tap") end },
+                { id = "nolabel", read = function() return "x" end },
+                { id = "ext.demo.pages", label = "dup", read = function() return "y" end },
+            }
+        end } } } }
+end
 package.preload["features.panel.desktop"] = function() return { lightPercent = function() return 37 end } end
 local panels = {}
 package.preload["features.panel.native"] = function()
@@ -136,6 +148,16 @@ do -- 后台任务：执行中数量 / 未结束总数；点按开任务列表
     local text, icon = Cache.read()
     Assert.eq(text, "空闲")
     Assert.eq(icon, "download")
+end
+
+do -- 第三方项排在最后，读数与点按出错只记日志
+    local item = TopBar.find("ext.demo.pages")
+    Assert.eq(item.label, "页数")
+    Assert.is_nil(TopBar.find("ext.demo.nolabel"))
+    Assert.is_nil(item.read())
+    item.tap(nil)
+    local items = TopBar.items()
+    Assert.eq(items[#items].id, "ext.demo.pages")
 end
 
 do -- feature 的项经 features/<name>/topbar.lua 收集，按 after 插位（蓝牙紧跟 Wi-Fi），带设置页元数据
