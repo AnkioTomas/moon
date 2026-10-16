@@ -9,6 +9,8 @@
 格式是 Lua 表（与 settings 文件同一 dump，类型无损），恢复时在空环境、限步数下执行，
 整份校验通过后才逐个分区就地改写（不换表，持有旧引用的模块不会把旧值刷回去），随后重启 KOReader。
 
+dump 是 KOReader 自带模块，离线 / CI 测试没有 KOReader 时要打桩。
+
 @module koplugin.book.features.remote.backup
 --]]
 

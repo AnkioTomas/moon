@@ -3,6 +3,14 @@ HTTP 请求原语（Turbo，非阻塞，唯一网络栈）：回调 + `{ cancel 
 
 禁止 luasocket / socket.http / socketutil 超时路径。清缓存用 `http.cache` 的 `Cache.clear`。
 
+入口只查网卡（NetworkMgr:isConnected），禁用 isOnline（UI 线程同步解析 DNS）。
+GET 的 cache_ttl > 0 走 http 缓存表（带 auth_username 时按用户隔离）；自己解析回包的客户端用
+Cache.fetch(key, ttl, load, cb) 缓存解码结果，别手写「读缓存 → 请求 → 写缓存」。
+回调 cb(body, err, res)：成功 body 为字符串；状态码 / 响应头看 res。取消后不回调。
+句柄约定：回调可能在调用返回前同步触发（命中缓存、当场失败），调用方别在调用返回后
+无条件把返回值写回自己的句柄字段，否则会用过期句柄覆盖回调里已发起的新请求，取消就停不掉在途请求。
+日志里的 URL 剥掉 query / fragment / userinfo。仓库资源下载走 http.mirror（多镜像回落）。
+
 @module koplugin.book.http.request
 --]]
 

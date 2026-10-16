@@ -3,6 +3,9 @@ RSA PKCS#1 v1.5。n、e、d 都是无符号大端，不带 ASN.1 的符号字节
 密文和签名与 n 等长。签名摘要支持 md5、sha1、sha256，默认 sha256。
 e 缺省 65537。随机填充缺省读 /dev/urandom。
 
+明文最长 #n - 11（00 02 + 至少 8 字节非 0 填充 + 00）。rng(n) 必须返回恰好 n 个非 0 字节。
+verify 长度不对报错、内容不匹配返回 false。keypair(bits, e) 的 bits 为 32 的倍数，512–4096。
+
 @module koplugin.book.crypto.rsa
 --]]
 

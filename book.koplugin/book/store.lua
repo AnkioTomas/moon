@@ -10,6 +10,9 @@ books/chapters → db.*（book.sqlite3）
 .moon 内的文件拒开（必须从月读桌面打开），.moon 外的文件登记为 local 书。
 各源只有在物理文件落地后调用 Store.touch（同步写库），成功后才打开文件。
 
+touch 新建行 deleted=1（只登记身份 / 路径，不上架）；touch 失败就停止打开链路。
+清缓存保留工作目录里的 KOReader .sdr 边车（阅读位置、书签、标注）；删书（markDeleted）连边车一起清。
+
 @module koplugin.book.book.store
 --]]
 

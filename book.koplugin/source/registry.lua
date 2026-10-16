@@ -3,8 +3,12 @@ Source 注册表：源 id 清单、实例缓存（每个 id 一个实例）、�
 活跃源只是配置里的 id，实例与其它源共用同一张缓存表。
 不做静默 fallback；唯一例外是当前不可用的源 id（如不在 Kindle 上的 kindle，或卸载了的第三方源），activeId 退回 local。
 
-第三方源：任何已启用的 KOReader 插件根目录里放 `moon_source.lua` 即登记一个源（契约见 docs/source/external.md），
+第三方源：任何已启用的 KOReader 插件根目录里放 `moon_source.lua` 即登记一个源（契约见 examples/moonsource-demo.koplugin/moon_source.lua），
 按 PluginLoader.enabled_plugins 扫描，排在内置源之后；插件全部加载完后才缓存扫描结果。
+
+描述文件不合约定（api ~= Registry.API、缺 meta/new、id 不是 ext.<name>、与已登记 id 重名、加载抛错）或 new() 抛错：
+记错误日志并跳过，第三方代码不拖垮内置源。enabled_sources 为 nil 或集合里没有的 id 算启用，只有显式 false 是禁用；活跃源不能禁用。
+resolve(id) 取书的属主实例，不改活跃源（打开旧书不串源的关键）；登录态或连接配置变了用 reload()。
 
 @module koplugin.book.source.registry
 --]]

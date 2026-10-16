@@ -1,6 +1,10 @@
 --[[--
 组合锁屏：背景 × 主体组件 × 布局合成为 compose.png。
 
+流水线：plan → Background.ensure（与主体 ensureText 并行）→ Layout.panel → components/<id>.blocks → render。
+direct 资源直接出原图路径。先写完整新文件再替换，失败保留上一张；设置 revision 变了丢弃过期回调。
+新增主体：components/<id>.lua（blocks，可选 cache_key）+ components/base.lua 的 COMPONENT_MODULES 登记，设置页经 options() 自动出现。
+
 @module koplugin.book.features.lockscreen.compose
 --]]
 

@@ -7,6 +7,8 @@
 
 manifest 也走镜像链。
 
+换源前先取消正在进行的请求；调用方取消后整条回落链停止，不再请求下一个源。
+
 @module koplugin.book.http.mirror
 --]]
 

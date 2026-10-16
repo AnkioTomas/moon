@@ -38,6 +38,10 @@ KOReader 事件（Dispatcher 动作、FrontlightStateChanged 这类广播）写�
 可选 `features/<name>/topbar.lua`：`items()` 返回桌面顶栏项数组（BookTopBarItem，见 desktop/topbar），
 由顶栏首次用到时收集，追加在核心项之后；设置页的开关与预览读同一份数据。
 
+onCreate 每次开书、关书都会再调（FM / Reader 各建实例），monkey-patch KOReader 的 feature 用模块级标记防重入。
+只有写进 list 的才加载。新增 feature：复制 demo/ 为 <name>/ 删掉不用的钩子，加进 list，测试放 tests/features/<name>/；
+demo/ 不登记、打包时剔除。阅读会话、后台任务、源生命周期这类有返回值或顺序约束的核心编排不走这里，留在 main.lua。
+
 @module koplugin.book.features
 --]]
 

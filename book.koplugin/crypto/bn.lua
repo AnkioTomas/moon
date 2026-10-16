@@ -3,6 +3,8 @@
 SM2 的域和阶是 32 字节素数。RSA 的模是合数，只能用 pow，不能用 inv
 （inv 是费马小定理，只对素数模成立）。
 
+业务代码直接用 crypto.sm2 / crypto.rsa，不要直接用 bn。
+
 @module koplugin.book.crypto.bn
 --]]
 

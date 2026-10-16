@@ -3,6 +3,9 @@ Book (moon) 数据源门面
   client：HTTP wire（仅异步）
   mapper：wire → 领域对象
 
+书架分页拉全量，先 Shelf.pushDeletes 再 reconcile；没有加书 API，本地新加的书推不上去。
+进度、笔记、统计双向；统计 pull 是账户级快照，入库前按 replace 清掉已同步行，避免与本地页记录双计。
+
 @module koplugin.book.source.moon
 --]]
 

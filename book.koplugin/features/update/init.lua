@@ -3,6 +3,9 @@
 
 自动检查只提示可用版本，不会自动下载或安装。
 
+包体唯一信任根是 Release 接口给的资产 digest，镜像只搬运字节，校验不过回落直连。
+先解压到同级暂存目录，换位失败回滚，不留半替换的 book.koplugin/。版本文件必须叫 bookversion.lua（version.lua 与 KOReader 冲突）。
+
 @module koplugin.book.features.update
 --]]
 

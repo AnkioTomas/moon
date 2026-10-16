@@ -1,6 +1,9 @@
 --[[--
 拷贝漫画数据源门面。
 
+书架是收藏列表：删除 = 查 comic_id 再取消收藏，交给 Shelf.pushDeletes；没有加架上行。进度双向（章粒度），无笔记、统计。
+一章是一组图片 URL，章节 CBZ 按章节 uuid 命名（分组拼接后章号会整体后移）。重登后用最新 token。
+
 @module koplugin.book.source.copymanga
 --]]
 

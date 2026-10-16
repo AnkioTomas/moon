@@ -1,6 +1,9 @@
 --[[--
 按书籍身份解析属主源，并打开源返回的物理文档。
 
+Open.generation + pending_job：新的打开会取消尚未交接给 Reader 的旧打开，过期回调丢弃，调用方不必防抖。
+用 book.source_id 解析属主源，不用 Registry.current()（换源串书的根因）；关桌面排在 Reader 入栈之后一拍，避免闪 FM。
+
 @module koplugin.book.desktop.open
 --]]
 

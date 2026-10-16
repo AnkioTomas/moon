@@ -1,12 +1,16 @@
 --[[--
 生僻字注音词库：解析、查找、屏上文字匹配。纯函数，不碰 UI 与文件以外的东西。
 
-词库文件是 UTF-8 文本（格式见同目录 README.md）：
+词库文件是 UTF-8 文本：
 
   #name=汉字拼音      元信息，# 开头，key=value
   #lang=zh           zh：逐字匹配 + 多字词组最长匹配；en：按字母切词、小写、简单词形还原
   #levels=6500,3500,0  三档阈值：最生僻 / 生僻 / 全部；rank 大于阈值才注音
   字<TAB>注音<TAB>rank
+
+rank 越大越生僻：汉字用《通用规范汉字表》序号，表外字 9000；英文用词频排名。
+levels 缺省 zh 6500,3500,0、en 20000,8000,0。en 查不到时依次试去掉 s / es / ies→y / ed / ing。
+自制词库按同格式存为 $DATA/.moon/rare/<id>.tsv（id 只含字母数字 _-），设置页会列出。
 
 @module koplugin.book.features.rare.lexicon
 --]]
