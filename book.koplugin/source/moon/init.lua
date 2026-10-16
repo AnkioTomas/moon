@@ -264,7 +264,15 @@ function Source:syncBooksAsync(opts, cb)
     if opts.force then clearCaches() end
     local report = opts.on_progress or function(...) end
     local function removeOne(stable_id, done)
-        return self._client:deleteBooksAsync({ stable_id }, done)
+        return self._client:deleteBooksAsync({ stable_id }, function(res, err)
+            if res then return done(res) end
+            require("utils.log").warn("book moon delete failed", stable_id, err)
+            -- 服务端已经没有这本书：删除目的已达成，撕掉墓碑，免得每次启动都重推。
+            local gone = type(err) == "string" and (err:find("不存在", 1, true) or err:find("已删除", 1, true)
+                or err:lower():find("not found", 1, true))
+            if gone then require("http.cache").clear("/index/book/list") end
+            done(gone and true or nil)
+        end)
     end
 
     --- dirty_only：只推待删，不拉书架。
@@ -274,6 +282,8 @@ function Source:syncBooksAsync(opts, cb)
         end)
     end
 
+    -- 全量拉取不吃 5 分钟列表缓存：旧页与新页混拼会漏书 / 复活已删的书。
+    require("http.cache").clear("/index/book/list")
     local cancelled, job, delete_job = false, nil, nil
     local deleted_n = 0
     local page, page_size = 1, 200

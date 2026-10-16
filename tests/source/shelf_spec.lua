@@ -72,6 +72,25 @@ do
     Assert.is_nil(got)
 end
 
+-- 同源已有一轮在推（启动 pushDirty 与书架同步并发）：第二轮不重复推同一本，推完才放行
+do
+    pending, removed = { "a" }, {}
+    local requests, first_done, second = 0, nil, nil
+    Shelf.pushDeletes("y", function(_stable_id, done)
+        requests = requests + 1
+        first_done = done
+        return { cancel = noop }
+    end, noop, noop)
+    Shelf.pushDeletes("y", function() error("不该重复推删") end, noop, function(n) second = n end)
+    Stubs.flush()
+    Assert.eq(second, 0)
+    Assert.eq(requests, 1)
+    first_done({ ok = true })
+    local again = 0
+    Shelf.pushDeletes("y", function(_stable_id, done) again = again + 1; done({ ok = true }) end, noop, noop)
+    Assert.eq(again, 1)
+end
+
 package.preload["book.books_db"] = nil
 package.loaded["book.books_db"] = nil
 package.loaded["source.shelf"] = nil
