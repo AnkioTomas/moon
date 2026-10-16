@@ -351,6 +351,20 @@ Assert.eq(again["2026-10-14"].seconds, 6734, "样本日重写为本次回包值"
 Assert.eq(again["2026-10-17"].seconds, 90, "本地逐页记录不受替换影响")
 Assert.eq(StatsDB.hourlyBySource("ext.kavita")["2026-10-14"][22], 900, "本地页记录不动")
 
+-- 12 号票物化标题的第二轮回归：二次拉取时章数已判定（不再读目录），卷名必须取自状态文件里的
+-- 持久化卷名 —— 不能退容器名，更不能把上一轮物化出的好标题改写成「太空漫游 · 太空漫游」。
+Assert.eq(BookDB.get("ext.kavita", "7453:11271").title, "太空漫游 · 2001：太空漫游", "二次拉取后标题不回退")
+Assert.eq(BookDB.get("ext.kavita", "7453:11273").title, "太空漫游 · 2010：太空漫游")
+
+-- 升级路径：老状态文件只有章数、没有卷名（本机第一轮物化时还没有持久化）。此时兜底标题
+-- 只能用于新行，不得覆盖既有行的真实标题。
+local stats_state = require("luasettings"):open(STATS_STATE)
+stats_state:saveSetting("titles", {})
+stats_state:flush()
+pulled = pull()
+Assert.eq(BookDB.get("ext.kavita", "7453:11271").title, "太空漫游 · 2001：太空漫游",
+    "没有持久化卷名时，兜底标题不覆盖既有标题")
+
 os.time = real_time
 Base.close()
 for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end

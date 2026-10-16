@@ -149,8 +149,9 @@ local WORK = Config.dir() .. "/kavita_spec"
 -- 后台补简介的 done 状态落在沙箱 settings 里：上一轮跑挂留下的状态会让本轮跳过补全。
 os.remove(require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua")
 -- 统计状态（上次身份 + 系列章数）同理：留着会让本轮读不到「首次拉取」的行为。
+-- .old 备份一起去掉：主文件被删时 LuaSettings 会回落它（别的 spec 中断留下的档就活过来了）。
 local STATS_STATE = require("datastorage"):getSettingsDir() .. "/moonsource_kavita_stats.lua"
-os.remove(STATS_STATE)
+for _idx, suffix in ipairs({ "", ".old" }) do os.remove(STATS_STATE .. suffix) end
 os.execute("rm -rf '" .. WORK .. "'")
 package.loaded["utils.paths"] = {
     ensureBookWork = function(id) os.execute("mkdir -p '" .. WORK .. "/" .. id .. "'") end,
@@ -1065,10 +1066,36 @@ do
     Assert.is_nil(pulled.pulled, "物化不进书架同步结果（只由 stats_changed 刷新展示）")
 
     -- 物化后卷行真实入库（rememberMany 会落库）：下一轮已存在且无变更 → 不重写（幂等）。
+    -- 第二轮必须让核心调 commit 推进状态（真实链路：入库成功才 commit）。状态不前进的话
+    -- 章数判定不落盘、目录每轮重读，测不出「第二轮拿不到卷名」的标题回退（旧用例的盲区）。
     books["8801:88010"] = remembered["8801:88010"]
+    local state_before_commit = readFile(STATS_STATE)
+    Assert.not_nil(state_before_commit, "前一段已经写过状态文件")
+    pulled.commit()
+
+    -- 第二轮起目录缓存全清（目录接口也不可用）：卷名只能来自状态文件里的持久化卷名。
+    tocs["8801"], tocs["8802"], tocs["8803"], tocs["8804"] = nil, nil, nil, nil
+    local history_route = routes["GET /api/Stats/reading-history"]
+    routes["GET /api/Stats/reading-history"] = function()
+        return json({
+            { seriesId = 8801, localDate = "2026-10-10T00:00:00",
+                chapters = {
+                    { chapterId = 88010, durationSeconds = 600, pagesRead = 1 },
+                    -- 本轮新读到的卷：本机还没有书行，标题只能靠持久化卷名
+                    { chapterId = 88011, durationSeconds = 300, pagesRead = 0 },
+                } },
+        }, { Pagination = pagination_header(1, 1) })
+    end
     remembered = {}
     run("pullStatsAsync")
     Assert.is_nil(remembered["8801:88010"], "已存在的卷行不重写")
+    Assert.eq(remembered["8801:88011"] and remembered["8801:88011"].title, "合集 · 第三卷",
+        "第二轮物化标题取状态文件里的持久化卷名，不退容器名")
+    local committed = require("luasettings"):open(STATS_STATE)
+    local committed_titles = committed:readSetting("titles")
+    Assert.eq(committed_titles and committed_titles["8801"] and committed_titles["8801"]["88011"], "第三卷",
+        "身份判定时顺带记下的卷名落进状态文件（下次不用再读目录）")
+    routes["GET /api/Stats/reading-history"] = history_route
 
     -- 本地脏行（sync_status=0，本地改过）：物化不动它（沿用卷行先例的 untouched 守卫）。
     books["8801:88010"] = { title = "本地改名", authors = "本地作者", sync_status = 0 }
@@ -1085,9 +1112,21 @@ do
     Assert.eq(remembered["8801:88010"] and remembered["8801:88010"].authors, "甲",
         "字段与容器不一致的行对齐一次")
 
-    books["8801"], books["8801:88010"] = nil, nil
+    -- 兜底标题只用于新行：目录 / 状态都给不出卷名时，不能拿容器名盖既有行的真实标题
+    -- （升级路径：老状态文件只有章数、没有卷名）。
+    books["8804:88040"] = { title = "太空漫游 · 1001", sync_status = 1 }
+    remembered = {}
+    run("pullStatsAsync")
+    Assert.is_nil(remembered["8804:88040"], "无卷名时兜底标题不改写既有标题")
+    Assert.eq(books["8804:88040"].title, "太空漫游 · 1001", "既有真实标题保留")
+
+    books["8801"], books["8801:88010"], books["8804:88040"] = nil, nil, nil
     tocs["8801"], tocs["8802"], tocs["8803"], tocs["8804"] = nil, nil, nil, nil
     books["8803"], books["8804"] = nil, nil
+    -- 状态恢复成这次 commit 之前的样子：后面的用例（落库时序 / 失败 / 取消）断言的是上段状态。
+    local restore = assert(io.open(STATS_STATE, "w"))
+    restore:write(state_before_commit)
+    restore:close()
     routes["GET /api/Stats/reading-history"] = function()
         return json({ { seriesId = 8661, localDate = "2026-10-10T00:00:00",
             chapters = { { chapterId = 12763, durationSeconds = 60, pagesRead = 0 } } } },
