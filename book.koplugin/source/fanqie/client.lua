@@ -95,7 +95,11 @@ local function absorbCookies(self, res)
     local set_cookie = Request.header(res, "Set-Cookie")
     if not set_cookie then return end
     local cookies = self.settings:get("cookies", {})
-    self.settings:set("cookies", Cookie.merge_set_cookie(cookies, set_cookie))
+    local before = Cookie.to_header(cookies)
+    local merged = Cookie.merge_set_cookie(cookies, set_cookie)
+    -- 书架详情一次并发几十个请求，值没变就不每次落盘。
+    if Cookie.to_header(merged) == before then return end
+    self.settings:set("cookies", merged)
     self.settings:flush()
 end
 

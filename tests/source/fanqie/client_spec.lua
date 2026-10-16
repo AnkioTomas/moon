@@ -121,4 +121,34 @@ Assert.is_nil(err)
 Assert.len(data.data.detail_list, 10)
 Assert.eq(data.data.detail_list[10].book_id, "110")
 
+do -- Set-Cookie 值没变不落盘；变了才 flush 一次
+    local set_cookie = "ttwid=a; Path=/"
+    package.loaded["http.request"] = {
+        header = function(_res, name) if name == "Set-Cookie" then return set_cookie end end,
+        ok = function(code) return code >= 200 and code < 300 end,
+        request = function(_opts, cb)
+            cb({ code = 200, body = '{"code":0,"data":{}}' })
+            return { cancel = function() end }
+        end,
+    }
+    package.loaded["source.fanqie.client"] = nil
+    local C = require("source.fanqie.client")
+    local store, flushes = {}, 0
+    local s = {
+        get = function(_, key, default) return store[key] or default end,
+        set = function(_, key, value) store[key] = value end,
+        flush = function() flushes = flushes + 1 end,
+    }
+    local c = C:new(s)
+    c:fetchReadProgressAsync(function() end)
+    c:fetchReadProgressAsync(function() end)
+    Assert.eq(flushes, 1, "同值 Set-Cookie 不重复写设置")
+    set_cookie = "ttwid=b; Path=/"
+    c:fetchReadProgressAsync(function() end)
+    Assert.eq(flushes, 2)
+    Assert.eq(store.cookies.ttwid, "b")
+    package.loaded["http.request"] = nil
+    package.loaded["source.fanqie.client"] = nil
+end
+
 return true
