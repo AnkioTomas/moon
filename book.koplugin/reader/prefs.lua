@@ -136,7 +136,9 @@ function M.inject(doc_settings, document)
     end
     -- 整本书不需要跨文件偏好注入，但插件字体仍须在原生 ReadSettings 前重新注册。
     -- 否则 sidecar 虽保留 font_face，CRE 冷启动时找不到该字体，只会静默回退默认字体。
+    -- 新书没有自己的字体 id 时，用「保存为默认配置」记下的默认插件字体。
     local persisted_font_id = doc_settings:readSetting("book_reader_font_id")
+        or G_reader_settings:readSetting("book_reader_default_font_id")
     if type(persisted_font_id) == "string" and persisted_font_id ~= "" then
         Fonts.faceForId(persisted_font_id)
     end
@@ -166,6 +168,36 @@ function M.write(doc_settings, prefs)
         doc_settings:saveSetting("book_reader_font_id", font_id)
         doc_settings:saveSetting("book_reader_font_name", prefs.font_name or font_id)
     end
+end
+
+--- 当前排版存为新书默认：同 KOReader ConfigDialog「设为默认」，逐项写 G_reader_settings 的
+--- `<prefix>_<name>`（CRE 为 copt，PDF/DjVu 为 kopt）；字体同 ReaderFont 写 cre_font。
+---@param ui table ReaderUI
+---@return boolean
+function M.saveDefaults(ui)
+    local config = ui and ui.document and ui.document.configurable
+    local prefix = ui and ui.config and ui.config.options and ui.config.options.prefix
+    if not (config and prefix) then
+        return false
+    end
+    for key, value in pairs(config) do
+        local value_type = type(value)
+        if key ~= SKIP_COPT_KEY
+            and (value_type == "number" or value_type == "string" or value_type == "table") then
+            G_reader_settings:saveSetting(prefix .. "_" .. key, copyValue(value))
+        end
+    end
+    local prefs = M.capture(ui)
+    if prefs and type(prefs.font_face) == "string" and prefs.font_face ~= "" then
+        G_reader_settings:saveSetting("cre_font", prefs.font_face)
+        if prefs.font_id then
+            G_reader_settings:saveSetting("book_reader_default_font_id", prefs.font_id)
+        else
+            G_reader_settings:delSetting("book_reader_default_font_id")
+        end
+    end
+    G_reader_settings:flush()
+    return true
 end
 
 return M

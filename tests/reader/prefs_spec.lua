@@ -7,6 +7,15 @@ reader.prefs 离线用例：捕获、落库与应用。
 
 local Assert = require("support.assert")
 
+-- 全局设置桩：saveDefaults 写这里，inject 从这里读默认插件字体。
+local global_data, flushed = {}, 0
+_G.G_reader_settings = {
+    readSetting = function(_self, key) return global_data[key] end,
+    saveSetting = function(_self, key, value) global_data[key] = value end,
+    delSetting = function(_self, key) global_data[key] = nil end,
+    flush = function() flushed = flushed + 1 end,
+}
+
 local saved_payload
 local fail_write
 local warnings = {}
@@ -239,5 +248,25 @@ fail_write = true
 Assert.is_false(ReaderPrefs.captureAndSave(ui, identity))
 Assert.eq(#warnings, 1)
 Assert.matches(warnings[1][1], "reader_prefs save failed")
+
+-- 保存为默认配置：同 ConfigDialog 写 <prefix>_<name>，字体写 cre_font；临时键不落。
+ui.config = { options = { prefix = "copt" } }
+ui.document.configurable.book_font_face = "tmp"
+ui.font.font_face = "Demo Face"
+ui.doc_settings.data.book_reader_font_id = "demo.ttf"
+Assert.is_true(ReaderPrefs.saveDefaults(ui))
+Assert.eq(global_data.cre_font, "Demo Face")
+Assert.eq(global_data.book_reader_default_font_id, "demo.ttf")
+Assert.is_nil(global_data.copt_book_font_face)
+for key, value in pairs(ui.document.configurable) do
+    local vt = type(value)
+    if key ~= "book_font_face" and (vt == "number" or vt == "string") then Assert.eq(global_data["copt_" .. key], value) end
+end
+Assert.eq(flushed, 1)
+-- 新书 sidecar 没有字体 id 时，按默认插件字体注册。
+resolved_font_ids = {}
+ReaderPrefs.inject({ data = {}, readSetting = function() end, saveSetting = function() end }, { file = "/x.epub", setFontFace = function() end })
+Assert.eq(resolved_font_ids[1], "demo.ttf")
+Assert.is_false(ReaderPrefs.saveDefaults({ document = {} }))
 
 return true
