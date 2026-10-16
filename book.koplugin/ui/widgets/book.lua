@@ -133,15 +133,24 @@ local function persistCover(book, path)
     Paths.ensureLayout(source_id)
     local src = io.open(path, "rb")
     if not src then return end
-    local data = src:read("*a")
-    src:close()
-    if type(data) ~= "string" or data == "" then return end
     local tmp = target .. ".part"
     local dst = io.open(tmp, "wb")
-    if not dst then return end
-    local ok = pcall(function() dst:write(data) end)
+    if not dst then
+        src:close()
+        return
+    end
+    -- 分块拷贝，不把整张封面读进内存；空文件也算失败
+    local ok, size = pcall(function()
+        local n = 0
+        for chunk in function() return src:read(64 * 1024) end do
+            assert(dst:write(chunk))
+            n = n + #chunk
+        end
+        return n
+    end)
+    src:close()
     dst:close()
-    if not ok then
+    if not ok or size == 0 then
         os.remove(tmp)
         return
     end

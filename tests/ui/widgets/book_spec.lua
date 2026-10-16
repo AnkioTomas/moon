@@ -332,4 +332,27 @@ Assert.eq(named[5][1].text, "甲")
 Assert.eq(#unknown, 3)
 Assert.eq(unknown[3][1].text, "未知作者")
 
+-- persistCover：分块拷贝到封面缓存；空源文件不落盘、不留 .part
+do
+    local Paths = require("utils.paths")
+    local old = Paths.coverPath
+    local dir = os.tmpname()
+    os.remove(dir)
+    local src, empty, target = dir .. ".src", dir .. ".empty", dir .. ".cover"
+    Paths.coverPath = function() return target end
+    local big = string.rep("0123456789abcdef", 10000) -- 160KB，跨多块
+    local f = assert(io.open(src, "wb")); f:write(big); f:close()
+    f = assert(io.open(empty, "wb")); f:close()
+    local book = { source_id = "s", stable_id = "b" }
+    Book.persistCover(book, empty)
+    Assert.is_nil(io.open(target, "rb"))
+    Assert.is_nil(io.open(target .. ".part", "rb"))
+    Book.persistCover(book, src)
+    f = assert(io.open(target, "rb"))
+    Assert.eq(f:read("*a"), big)
+    f:close()
+    os.remove(src); os.remove(empty); os.remove(target)
+    Paths.coverPath = old
+end
+
 package.loaded["ui.widgets.book"] = nil
