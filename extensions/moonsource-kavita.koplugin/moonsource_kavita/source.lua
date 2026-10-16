@@ -681,14 +681,14 @@ end
 ---
 --- Kavita 的阅读历史是服务端按会话自己记的，本机没有对应的上报接口；确认后这些行不再是脏行，
 --- 展示仍按「云端快照 + 拉取后本地新读」合并。
+--- 当场就能回也走 defer 下一帧回调（源契约）：调用方先拿到可取消句柄，取消后不再回调。
 ---@param rows BookStatsRow[]|nil
 ---@param cb fun(data: BookStatsPushResult|nil, err: string|nil)
----@return nil
+---@return { cancel: fun() }
 function Source:pushStatsAsync(rows, cb)
     local ids = {}
     for _idx, row in ipairs(rows or {}) do ids[#ids + 1] = row.id end
-    cb({ ok = true, synced_ids = ids })
-    return nil
+    return SourceBase.defer(cb, { ok = true, synced_ids = ids })
 end
 
 --- 拉取 Kavita 全局阅读历史（全量）→ reading_stats 行 + 替换指令。

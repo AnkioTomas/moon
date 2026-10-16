@@ -845,13 +845,23 @@ do
     local confirmed, returned
     local before_calls = #calls
     returned = source:pushStatsAsync({ { id = 7 }, { id = 8 } }, function(data) confirmed = data end)
+    Assert.is_nil(confirmed, "当场能回的结果也下一帧回调（源契约：defer，cancel 句柄先于回调成立）")
+    Assert.not_nil(returned and returned.cancel, "返回可取消句柄（在飞取消是契约的一部分）")
+    Stubs.flush()
     Assert.eq(confirmed.synced_ids[1], 7, "确认回本批行 id（框架据此标 sync_status=1）")
     Assert.eq(confirmed.synced_ids[2], 8)
     Assert.eq(#calls, before_calls, "本地确认不发请求")
-    Assert.is_nil(returned, "无网络任务，不返回可取消句柄（先例微信）")
     confirmed = nil
     source:pushStatsAsync(nil, function(data) confirmed = data end)
+    Stubs.flush()
     Assert.eq(#confirmed.synced_ids, 0, "空批次也回空表，不报错")
+
+    -- 取消：下一帧之前取消，回调不再到达。
+    local reached = false
+    returned = source:pushStatsAsync({ { id = 9 } }, function() reached = true end)
+    returned:cancel()
+    Stubs.flush()
+    Assert.is_false(reached, "取消后不回调")
 end
 
 -- 拉取全量阅读历史：按分页头展开两页；参数形态（Libraries 重复键 / TimeZoneId / PageSize=200 /
