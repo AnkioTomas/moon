@@ -67,7 +67,8 @@ end
 function Source:getDetailAsync(identity, cb)
     return self._client:bookInfoAsync(identity.stable_id, function(wire, err)
         if not wire then cb(nil, err); return end
-        if type(wire.data) ~= "table" then cb(nil, _("书籍详情为空")); return end
+        -- 没有 ebook_id 时 Mapper.book 会得到 stable_id "nil"，不能写进缓存。
+        if type(wire.data) ~= "table" or wire.data.ebook_id == nil then cb(nil, _("书籍详情为空")); return end
         local book = Mapper.book(wire.data)
         local existing = require("book.books_db").get(self.id, book.stable_id)
         if existing then
