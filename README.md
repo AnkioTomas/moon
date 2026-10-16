@@ -472,8 +472,9 @@ return {
 - **id 规则：** 扩展 id 必须是 `ext.<name>`（字母数字 `_-`），写进书库与配置，发布后不能改，重名时先加载的生效；组件 id 必须以 `<扩展 id>.` 开头，简写表可只写短名，月读自动补前缀。
 - **出错处理：** 描述文件不合约定、组件 id 不合规或重名只记日志并跳过；组件运行时抛错被 pcall 隔离，记日志后画空白占位，不影响首页和内置源。
 - **保存的布局：** 扩展卸载或禁用后组件不再显示，但首页布局里的位置保留，重装后回到原处。
+- **功能挂点：** `provides.features = { setting, panel, topbar, events, hooks }` 往月读的设置页（`entries(desktop)`）、快捷面板（`actions()`）、桌面顶栏（`items()`）、数据事件（`book_identity_changed` / `book_removed`）和阅读页就绪（`hooks.onReaderReady(plugin)`）加功能，形状与内置 `features/<name>/` 的约定文件相同；值可以是表，也可以是插件内模块名（用到时才 require）。开关、顶栏项、设置页 id 自动加 `<扩展 id>.` 前缀，回调出错只记日志，配置用 `utils.settings.getSource(<扩展 id>)`。其它 KOReader 事件、菜单和手势由扩展插件自己的 `main.lua` 处理。
 
-示例：书源 [`examples/moonsource-demo.koplugin`](examples/moonsource-demo.koplugin/moon_source.lua)（书源 + 首页组件），非书源 [`examples/moonwidget-demo.koplugin`](examples/moonwidget-demo.koplugin/moon_source.lua)（只加首页组件）。分步指南见文档站[扩展插件](https://moon.ankio.net/develop/extend/plugin)、[接一个数据源](https://moon.ankio.net/develop/extend/source)与[锁屏与首页组件](https://moon.ankio.net/develop/extend/components)。
+示例：书源 [`examples/moonsource-demo.koplugin`](examples/moonsource-demo.koplugin/moon_source.lua)（书源 + 首页组件），非书源 [`examples/moonwidget-demo.koplugin`](examples/moonwidget-demo.koplugin/moon_source.lua)（首页组件 + 设置 / 快捷面板 / 顶栏开关）。分步指南见文档站[扩展插件](https://moon.ankio.net/develop/extend/plugin)、[接一个数据源](https://moon.ankio.net/develop/extend/source)与[锁屏与首页组件](https://moon.ankio.net/develop/extend/components)。
 
 ## 版本与发布
 
