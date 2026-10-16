@@ -65,7 +65,7 @@ end
 ---@param height number 目标高度，单位像素
 ---@param paint fun(bb: BlitBuffer)
 ---@return boolean, any
-local function writePNG(path, width, height, paint)
+local function writePNG(path, width, height, paint, transparent)
     assert(width > 0 and width == math.floor(width), "invalid image width")
     assert(height > 0 and height == math.floor(height), "invalid image height")
     local bb
@@ -76,11 +76,12 @@ local function writePNG(path, width, height, paint)
     local night = Screen.night_mode
     Screen.night_mode = false
     local ok, err = xpcall(function()
-        -- 灰度屏用 BB8：整屏画布 RGB32 要 8 MiB，灰度 PNG 也小得多。
-        bb = Blitbuffer.new(width, height, Screen:isColorEnabled() and Blitbuffer.TYPE_BBRGB32 or Blitbuffer.TYPE_BB8)
+        -- 灰度屏用 BB8：整屏画布 RGB32 要 8 MiB，灰度 PNG 也小得多。透明背景只有 RGB32 带 alpha。
+        bb = Blitbuffer.new(width, height,
+            (transparent or Screen:isColorEnabled()) and Blitbuffer.TYPE_BBRGB32 or Blitbuffer.TYPE_BB8)
         ---@diagnostic disable-next-line: cast-type-mismatch
         ---@cast bb BlitBuffer
-        bb:fill(Blitbuffer.COLOR_WHITE)
+        if not transparent then bb:fill(Blitbuffer.COLOR_WHITE) end
         paint(bb)
         if bb:writePNG(tmp) == false then error("PNG write failed") end
         local renamed, reason = os.rename(tmp, path)
@@ -118,8 +119,8 @@ end
 ---@param fill table|nil 纯色底颜色，缺省白色
 ---@param contain boolean|nil 整图缩进画布、两侧留底色；缺省铺满裁切
 ---@return boolean, any
-local function paintBackground(bb, path, w, h, fill, contain)
-    bb:fill(fill or Blitbuffer.COLOR_WHITE)
+local function paintBackground(bb, path, w, h, fill, contain, decoded, transparent)
+    if not transparent then bb:fill(fill or Blitbuffer.COLOR_WHITE) end
     if not path then
         return true
     end
@@ -130,7 +131,7 @@ local function paintBackground(bb, path, w, h, fill, contain)
     local source
     local image
     local ok, err = pcall(function()
-        source = RenderImage:renderImageFile(path, false)
+        source = decoded or RenderImage:renderImageFile(path, false)
         if not source then
             error("cannot decode background: " .. tostring(path))
         end
@@ -144,7 +145,8 @@ local function paintBackground(bb, path, w, h, fill, contain)
             width = w,
             height = h,
             scale_factor = (contain and math.min or math.max)(w / iw, h / ih),
-            alpha = true,
+            -- 透明底直接拷贝（含 alpha），混合会保留画布的全透明。
+            alpha = not transparent,
         }
         image:paintTo(bb, 0, 0)
     end)
@@ -334,6 +336,55 @@ function M.paintBlock(bb, block, w, h, background)
     end
 end
 
+--- 解码后的背景是否带透明像素：只有 RGB32 有 alpha，遇到第一个非不透明像素即停。
+---@param source BlitBuffer
+---@return boolean
+function M.hasAlpha(source)
+    if not source.getType or source:getType() ~= Blitbuffer.TYPE_BBRGB32 then return false end
+    local data = require("ffi").cast("uint8_t *", source.data)
+    for y = 0, source:getHeight() - 1 do
+        local row = y * tonumber(source.stride)
+        for x = 0, source:getWidth() - 1 do
+            if data[row + x * 4 + 3] < 255 then return true end
+        end
+    end
+    return false
+end
+
+--- 预乘 alpha 像素压到白底（不透明），主体照常画在白底上；返回对应的白底值。
+local function onWhite(c, a) return c + 255 - a end
+
+--- 透明背景两遍处理：first=true 时把透明背景压白（bb 变不透明，bg 留原样）；
+--- first=false 时，主体没画过的像素（仍等于压白值）还原成背景的直通 alpha，画过的保持不透明。
+---@param bb BlitBuffer
+---@param bg BlitBuffer
+---@param first boolean
+local function alphaPass(bb, bg, first)
+    local ffi = require("ffi")
+    local d = ffi.cast("uint8_t *", bb.data)
+    local s = ffi.cast("uint8_t *", bg.data)
+    local stride = tonumber(bb.stride)
+    for y = 0, bb:getHeight() - 1 do
+        for x = 0, bb:getWidth() - 1 do
+            local i = y * stride + x * 4
+            local a = s[i + 3]
+            if a < 255 then
+                local r, g, b = onWhite(s[i], a), onWhite(s[i + 1], a), onWhite(s[i + 2], a)
+                if first then
+                    d[i], d[i + 1], d[i + 2], d[i + 3] = r, g, b, 255
+                elseif d[i] == r and d[i + 1] == g and d[i + 2] == b then
+                    -- MuPDF 给的是预乘值，PNG 要直通 alpha
+                    local k = a > 0 and 255 / a or 0
+                    d[i] = math.min(255, math.floor(s[i] * k + 0.5))
+                    d[i + 1] = math.min(255, math.floor(s[i + 1] * k + 0.5))
+                    d[i + 2] = math.min(255, math.floor(s[i + 2] * k + 0.5))
+                    d[i + 3] = a
+                end
+            end
+        end
+    end
+end
+
 --- 生成 PNG，成功后原子替换。
 --- 原子替换保证 KOReader 不会读到半张 compose.png。
 --- 背景 = 图片（path，contain 时整图缩进）+ 自绘块（blocks，如海报墙）；主体 blocks 画在其上，
@@ -342,16 +393,28 @@ end
 ---@param background {path: string|nil, contain: boolean|nil, blocks: table[]|nil}|nil
 ---@param blocks table[]
 ---@param fill table|nil 无背景图时的底色，缺省白色
----@return boolean, any
+--- 背景图带透明像素时输出带 alpha 的 PNG：背景透明处、且主体没画到的地方保持透明，
+--- 第三个返回值为 true；主体自己画的卡片/文字都不透明。
+---@return boolean, any, boolean|nil
 function M.write(path, background, blocks, fill)
     Paths.ensureScreensaverDir()
     local w, h = Layout.portraitSize()
     local backdrop = background and background.blocks or {}
-    local background_copy
+    local background_copy, alpha_bg, source
+    local bg_path = background and background.path
+    if bg_path then
+        source = require("ui/renderimage"):renderImageFile(bg_path, false)
+    end
+    local transparent = source ~= nil and M.hasAlpha(source)
     local ok, err = writePNG(path, w, h, function(bb)
-        local bg_ok, bg_err = paintBackground(bb, background and background.path, w, h, fill,
-            background and background.contain)
+        local bg_ok, bg_err = paintBackground(bb, bg_path, w, h, fill,
+            background and background.contain, source, transparent)
+        source = nil -- 已交给 ImageWidget 释放
         if not bg_ok then error(bg_err) end
+        if transparent then
+            alpha_bg = bb:copy()
+            alphaPass(bb, alpha_bg, true)
+        end
         for _idx, block in ipairs(backdrop) do M.paintBlock(bb, block, w, h) end
         for _idx, block in ipairs(blocks) do
             if block.kind == "cutout_circle" then
@@ -362,11 +425,14 @@ function M.write(path, background, blocks, fill)
         for _idx, block in ipairs(blocks) do
             M.paintBlock(bb, block, w, h, background_copy)
         end
-    end)
+        if alpha_bg then alphaPass(bb, alpha_bg, false) end
+    end, transparent)
+    if source then source:free() end
+    if alpha_bg then alpha_bg:free() end
     freeWidgets(backdrop)
     freeWidgets(blocks)
     if background_copy then background_copy:free() end
-    return ok, err
+    return ok, err, ok and transparent or nil
 end
 
 return M

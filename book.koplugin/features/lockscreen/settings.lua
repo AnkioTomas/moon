@@ -18,25 +18,41 @@ end
 --- 接管前的 screensaver_* 快照存放键（照 pinyin 的布局快照做法）。
 local PREVIOUS_KEY = "book_lockscreen_previous_screensaver"
 --- 被接管的 KOReader 设置键
-local KEYS = { "screensaver_type", "screensaver_document_cover", "screensaver_show_message" }
+local KEYS = { "screensaver_type", "screensaver_document_cover", "screensaver_show_message",
+    "screensaver_img_background", "screensaver_stretch_images" }
 
 --- 首次接管时记下用户原本的 screensaver 配置。
---- 已有快照就不动：接管期间的中间值不是用户的选择。
+--- 已记的键不动：接管期间的中间值不是用户的选择；旧版快照缺的新键在首次写入前补记。
 local function snapshot()
-    if G_reader_settings:readSetting(PREVIOUS_KEY) ~= nil then
-        return
-    end
-    local saved = {}
+    local saved = G_reader_settings:readSetting(PREVIOUS_KEY) or {}
+    local changed = false
     for _idx, key in ipairs(KEYS) do
-        local value = G_reader_settings:readSetting(key)
-        saved[key] = { present = value ~= nil, value = value }
+        if saved[key] == nil then
+            local value = G_reader_settings:readSetting(key)
+            saved[key] = { present = value ~= nil, value = value }
+            changed = true
+        end
     end
-    G_reader_settings:saveSetting(PREVIOUS_KEY, saved)
+    if changed then G_reader_settings:saveSetting(PREVIOUS_KEY, saved) end
+end
+
+--- 把一项接管键还原成快照里的用户值。
+---@param saved table
+---@param key string
+local function restore(saved, key)
+    local entry = saved[key]
+    if entry and entry.present then
+        G_reader_settings:saveSetting(key, entry.value)
+    else
+        G_reader_settings:delSetting(key)
+    end
 end
 
 --- 将有效锁屏图片交给 KOReader 的 document_cover screensaver。
+--- 透明图：KOReader 不铺底色也不拉伸，透明处露出当前页；否则这两项保持用户自己的值。
 ---@param path string|nil
-function M.applyCover(path)
+---@param transparent boolean|nil
+function M.applyCover(path, transparent)
     -- 快照必须在任何写入之前：下面两条早退路径也会改 screensaver_show_message，
     -- 不先记就等于改了用户配置又没留还原的依据。
     snapshot()
@@ -48,6 +64,14 @@ function M.applyCover(path)
     G_reader_settings:saveSetting("screensaver_type", "document_cover")
     G_reader_settings:saveSetting("screensaver_document_cover", path)
     G_reader_settings:saveSetting("screensaver_show_message", false)
+    if transparent then
+        G_reader_settings:saveSetting("screensaver_img_background", "none")
+        G_reader_settings:saveSetting("screensaver_stretch_images", false)
+    else
+        local saved = G_reader_settings:readSetting(PREVIOUS_KEY)
+        restore(saved, "screensaver_img_background")
+        restore(saved, "screensaver_stretch_images")
+    end
 end
 
 --- 撤下插件对系统 screensaver 的接管，恢复接管前的配置。
@@ -57,14 +81,7 @@ end
 function M.clearCover()
     local saved = G_reader_settings:readSetting(PREVIOUS_KEY) --[[@as table<string, { present: boolean, value: any }>|nil]]
     if type(saved) == "table" then
-        for _idx, key in ipairs(KEYS) do
-            local entry = saved[key]
-            if entry and entry.present then
-                G_reader_settings:saveSetting(key, entry.value)
-            else
-                G_reader_settings:delSetting(key)
-            end
-        end
+        for _idx, key in ipairs(KEYS) do restore(saved, key) end
         G_reader_settings:delSetting(PREVIOUS_KEY)
     end
     -- 没有快照说明本插件还没接管过（或历史版本已经改过、原值无从得知）：

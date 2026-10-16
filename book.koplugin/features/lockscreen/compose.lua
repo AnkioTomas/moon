@@ -132,7 +132,7 @@ end
 --- 背景就绪后合成。
 --- 返回值是可取消任务；本地背景在本次调用中同步完成，返回 nil。
 ---@param plan table
----@param cb fun(ok: boolean, err: any)
+---@param cb fun(ok: boolean, err: any, transparent: boolean|nil)
 ---@return table|nil
 function M.build(plan, cb)
     local cancelled, done = false, false
@@ -145,12 +145,12 @@ function M.build(plan, cb)
         local sw, sh = Layout.portraitSize()
         local backdrop = plan.asset.blocks and plan.asset.blocks({ x = 0, y = 0, w = sw, h = sh, pad = 0 })
         local blocks = buildBlocks(plan.component, plan.position, plan.wide)
-        local ok, render_err = require("features.lockscreen.render").write(COMPOSE_PATH,
+        local ok, render_err, transparent = require("features.lockscreen.render").write(COMPOSE_PATH,
             { path = path, contain = plan.asset.contain, blocks = backdrop }, blocks)
         if not ok and path and tostring(render_err):find("cannot decode background", 1, true) then
             Background.invalidate(plan.asset)
         end
-        cb(ok, render_err)
+        cb(ok, render_err, transparent)
     end)
     if done then return nil end
     return { cancel = function()
