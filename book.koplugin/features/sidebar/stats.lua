@@ -34,8 +34,7 @@ local ICONS = { "schedule", "timer", "calendar_month", "avg_time", "event", "his
 function Stats.available(ui)
     -- 订阅文章（ephemeral 源）不记统计，这页没意义。
     local cur = require("reader.session").current()
-    local source = cur and cur.identity and cur.identity.source
-    if source and source.ephemeral then return false end
+    if cur and cur.identity and cur.identity.ephemeral then return false end
     local stat = ui and ui.statistics
     return stat ~= nil and stat.isEnabled ~= nil and stat:isEnabled() and stat.id_curr_book ~= nil
 end

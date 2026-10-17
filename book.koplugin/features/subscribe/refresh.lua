@@ -12,6 +12,7 @@
 @module koplugin.book.features.subscribe.refresh
 --]]
 
+local Guard = require("ui.guard")
 local Tasks = require("workers.tasks")
 local logger = require("utils.log")
 local T = require("ffi/util").template
@@ -43,7 +44,7 @@ local function settle()
 end
 
 local function notify(finished)
-    for _idx, fn in ipairs(listeners) do pcall(fn, status, finished) end
+    for _idx, fn in ipairs(listeners) do Guard.call("subscribe.refresh listener", fn, status, finished) end
 end
 
 --- 监听进度（订阅页重画）；返回取消函数。
@@ -142,7 +143,7 @@ local function run(report, finish)
             done_count = done_count + 1
             if err then failed = tostring(feed.title) .. ": " .. tostring(err) end
             if isMpAuth(err) then mp_auth = true end
-            if entry.on_feed then pcall(entry.on_feed, feed, added, err) end
+            if entry.on_feed then Guard.call("subscribe.refresh on_feed", entry.on_feed, feed, added, err) end
             require("ui/uimanager"):nextTick(step)
         end)
     end
@@ -156,7 +157,7 @@ local function run(report, finish)
             current = nil
             queue, status, done_count, total = nil, nil, 0, 0
             for _idx, e in ipairs(rest) do
-                if e.on_feed then pcall(e.on_feed, e.feed, nil, _("已取消")) end
+                if e.on_feed then Guard.call("subscribe.refresh on_feed", e.on_feed, e.feed, nil, _("已取消")) end
             end
             notify(true)
         end,

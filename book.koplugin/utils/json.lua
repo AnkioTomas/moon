@@ -20,16 +20,15 @@ function Json.fixSurrogates(s)
     end))
 end
 
-local function repair(v, seen)
+local function repair(v)
     local t = type(v)
     if t == "string" then return Json.fixSurrogates(v) end
-    if t ~= "table" or seen[v] then return v end
-    seen[v] = true
+    if t ~= "table" then return v end
     local fixed = {}
     for k, val in pairs(v) do
         local nk = type(k) == "string" and Json.fixSurrogates(k) or k
         if nk ~= k then fixed[#fixed + 1] = { k, nk } end
-        v[k] = repair(val, seen)
+        v[k] = repair(val)
     end
     for _idx, kk in ipairs(fixed) do
         v[kk[2]], v[kk[1]] = v[kk[1]], nil
@@ -45,7 +44,7 @@ function Json.decode(text, opts)
     local JSON = require("json") -- 每次取：测试 / 热替换 json 模块后不拿旧引用
     local v, err
     if opts ~= nil then v, err = JSON.decode(text, opts) else v, err = JSON.decode(text) end
-    return repair(v, {}), err
+    return repair(v), err
 end
 
 return Json

@@ -38,6 +38,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 ---@field chapter_idx number|nil 章节文件时为章号；整本书为 nil
 ---@field book Book|nil books 表元数据行；刚登记/未入库时可能为内存行或 nil
 ---@field source BookSource|nil 属主源实例；仅 ensureIdentity（打开时）解析，identityFor 不挂
+---@field ephemeral boolean|nil 属主源只读不记（订阅）：不存进度、不记统计；仅 ensureIdentity 设置
 ---@field title string|nil 展示书名；内存身份上可能有，books 行在 book 字段里
 ---@field cover string|nil 封面 URL（部分源直接挂在身份上）
 ---@field cover_url string|nil 封面 URL 别名

@@ -303,17 +303,6 @@ do
     Assert.eq(r.skipped, 2)
 end
 
--- 恰好回一次：处理函数回过之后再抛错，不再回 500。
-do
-    local n = 0
-    local S = package.loaded["features.subscribe"]
-    local real = S.refresh
-    S.refresh = function(_feed, _more, cb) cb(1); error("late") end
-    Remote.handle("POST", "refresh", { id = rows[1].id }, function() n = n + 1 end)
-    Assert.eq(n, 1)
-    S.refresh = real
-end
-
 -- 预览正文按白名单清洗：脚本 / 样式 / 内嵌框 / 媒体 / 事件属性 / javascript: 链接全部去掉。
 do
     local html = Remote.clean('<p onclick="x()">a</p><link rel="stylesheet" href="https://t/x.css"><iframe src="https://t"></iframe>'

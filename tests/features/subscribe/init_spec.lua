@@ -269,3 +269,41 @@ do
     Assert.eq(calls, 2, "30 分钟内不重复")
     Subscribe.syncMp = real
 end
+
+-- 图片下载：公网文章的图片不许经跳转落到内网；局域网文章（自建 RSSHub）不限。
+do
+    local asked, answers = {}, {}
+    local Req = package.loaded["http.request"]
+    local real_request, real_assets = Req.request, package.loaded["source.assets"]
+    Req.request = function(opts, cb)
+        asked[#asked + 1] = opts.url
+        local to = redirects[opts.url]
+        if to then cb({ code = 302, headers = { Location = to } }) else cb({ code = 200, body = "IMG" }) end
+        return { cancel = function() end }
+    end
+    local downloader
+    package.loaded["source.assets"] = { localizeAsync = function(_html, _dir, dl, cb) downloader = dl; cb("") return {} end }
+    local long = "<p>" .. string.rep("字", 3000) .. "</p>"
+    summaries["img"] = long
+    local function download(feed_link, url)
+        asked, answers = {}, {}
+        Subscribe.providers.rss.content({ id = 1, kind = "rss" }, { guid = "img", link = feed_link }, "/tmp/x", function() end)
+        downloader(url, function(data) answers[#answers + 1] = data or false end)
+    end
+    redirects["https://cdn.test/a.png"] = "http://192.168.1.2/x.png"
+    download("https://a.com/p", "https://cdn.test/a.png")
+    Assert.eq(#asked, 1)
+    Assert.eq(answers[1], false)
+    download("https://a.com/p", "https://cdn.test/b.png")
+    Assert.eq(answers[1], "IMG")
+    redirects["https://cdn.test/a.png"] = "/c.png"
+    download("https://a.com/p", "https://cdn.test/a.png")
+    Assert.eq(asked[2], "https://cdn.test/c.png")
+    Assert.eq(answers[1], "IMG")
+    redirects["https://cdn.test/a.png"] = "http://192.168.1.2/x.png"
+    download("http://192.168.1.5/p", "https://cdn.test/a.png")
+    Assert.eq(asked[2], "http://192.168.1.2/x.png")
+    Assert.eq(answers[1], "IMG")
+    redirects["https://cdn.test/a.png"] = nil
+    Req.request, package.loaded["source.assets"] = real_request, real_assets
+end

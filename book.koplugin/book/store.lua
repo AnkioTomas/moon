@@ -299,6 +299,7 @@ function Store.ensureIdentity(path)
     local id = Store.identityFor(path)
     if id then
         id.source = registry.resolve(id.source_id)
+        id.ephemeral = id.source and id.source.ephemeral or false
         -- 路径已在库里；章节文件可能绕过桌面（KOReader 历史）打开，books.path 跟到这一章
         if not BookDB.touchPath(id.source_id, id.stable_id, path) then
             logger.warn("book identity touch failed", id.source_id, id.stable_id, path)

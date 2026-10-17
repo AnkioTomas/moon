@@ -171,7 +171,7 @@ end
 function ReaderProgress.save(snapshot, cb)
     local id = snapshot and snapshot.identity
     -- ephemeral 源（订阅）不记进度
-    if not id or not id.source_id or not id.stable_id or (id.source and id.source.ephemeral) then
+    if not id or not id.source_id or not id.stable_id or id.ephemeral then
         if cb then cb(false) end
         return
     end

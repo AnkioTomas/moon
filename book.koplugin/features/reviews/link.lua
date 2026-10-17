@@ -109,7 +109,7 @@ end
 function Link.available(ui)
     local identity = identityOf()
     -- 订阅文章（ephemeral 源）不是书，没有可关联的书目。
-    if not identity or (identity.source and identity.source.ephemeral) then return false end
+    if not identity or identity.ephemeral then return false end
     return Linked.supported(ui.document)
 end
 

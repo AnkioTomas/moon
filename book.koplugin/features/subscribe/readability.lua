@@ -612,8 +612,7 @@ local function getArticleTitle(doc)
 end
 
 local function getJSONLD(doc, titleFn)
-    local ok_json, json = pcall(require, "json")
-    if not ok_json then return {} end
+    local json = require("utils.json")
     for _idx, s in ipairs(byTag(doc, "script")) do
         if attr(s, "type") == "application/ld+json" then
             local ok, parsed = pcall(json.decode, (textContent(s):gsub("^%s*<!%[CDATA%[", ""):gsub("%]%]>%s*$", "")))
@@ -1311,21 +1310,18 @@ end
 local function simplifyNestedElements(article)
     local node = article
     while node do
-        if node.parent and (node.tag == "div" or node.tag == "section")
-            and not idOf(node):find("^readability") then
-            if isElementWithoutContent(node) then
-                node = removeAndGetNext(node)
-                goto continue
-            elseif hasSingleTagInsideElement(node, "div") or hasSingleTagInsideElement(node, "section") then
-                local child = elementChildren(node)[1]
-                for k, v in pairs(node.attrs) do child.attrs[k] = v end
-                replaceChild(child, node)
-                node = child
-                goto continue
-            end
+        local removable = node.parent and (node.tag == "div" or node.tag == "section")
+            and not idOf(node):find("^readability")
+        if removable and isElementWithoutContent(node) then
+            node = removeAndGetNext(node)
+        elseif removable and (hasSingleTagInsideElement(node, "div") or hasSingleTagInsideElement(node, "section")) then
+            local child = elementChildren(node)[1]
+            for k, v in pairs(node.attrs) do child.attrs[k] = v end
+            replaceChild(child, node)
+            node = child
+        else
+            node = getNextNode(node)
         end
-        node = getNextNode(node)
-        ::continue::
     end
 end
 
@@ -1406,7 +1402,7 @@ end
 ---@return string|nil content
 ---@return table|nil meta parse_article 的结果
 function R.extract(html, url)
-    local ok, result = pcall(R.parse_article, tostring(html or ""), url)
+    local ok, result = pcall(R.parse_article, html, url)
     if not ok then
         require("utils.log").warn("readability failed", result)
         return nil
