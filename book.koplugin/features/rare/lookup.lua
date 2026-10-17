@@ -410,7 +410,7 @@ function Lookup:actions()
         end }
     end
     -- 原生生词本（vocabbuilder 插件）装着才有；手动添加不看它的「自动添加」开关，已有的词由它弹详情。
-    if self.ui and self.ui.vocabulary_builder and self:isWord() then
+    if self.ui and self.ui.vocabbuilder and self:isWord() then
         row[#row + 1] = { text = _("加入生词本"), callback = function()
             local props = self.ui.doc_props
             local book = props and props.display_title or _("查词")

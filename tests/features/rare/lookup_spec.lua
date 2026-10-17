@@ -257,7 +257,7 @@ Assert.eq(clears, 1)
 -- 加入生词本：装了原生生词本插件才有按钮，发 WordLookedUp（手动，不看自动开关）
 do
     local sent
-    local vb_ui = { dictionary = ui.dictionary, vocabulary_builder = {}, doc_props = { display_title = "书名" },
+    local vb_ui = { dictionary = ui.dictionary, vocabbuilder = {}, doc_props = { display_title = "书名" },
         handleEvent = function(_, ev) sent = ev end }
     local vp = Lookup.open{ ui = vb_ui, text = "彘", source = "dict" }
     for _idx, b in ipairs(Kit.buttons(vp[1])) do
