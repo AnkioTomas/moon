@@ -8,6 +8,8 @@ require("support.theme_stubs").install()
 
 local settings = { rare_lookup_source = "" }
 Kit.sections.rare = settings
+local dict_settings = { dictionary_load_all = false }
+Kit.sections.dictionary = dict_settings
 require("utils.settings").save = function() end
 require("device").hasClipboard = function() return true end
 require("device").input = { setClipboardText = function() end }
@@ -86,6 +88,32 @@ local groups = Lookup.groupResults({
 Assert.len(groups, 2)
 Assert.eq(groups[1].name, "现代汉语")
 Assert.eq(groups[1].text, "猪\n古称\n\n彘肩\n猪腿", "与查的词相同的词条名不重复")
+
+-- 加载所有词典：查全部已安装词典（含已停用），无结果的排在后面并标 empty
+do
+    local dir = os.tmpname()
+    os.remove(dir)
+    os.execute("mkdir -p " .. dir .. "/a")
+    local f = io.open(dir .. "/a/a.ifo", "w")
+    f:write("StarDict's dict ifo file\nbookname=甲\nsametypesequence=m\n")
+    f:close()
+    f = io.open(dir .. "/a/b.ifo", "w")
+    f:write("StarDict's dict ifo file\nbookname=乙\nsametypesequence=m\n")
+    f:close()
+    local asked
+    local ui = { dictionary = { enabled_dict_names = { "甲" }, data_dir = dir,
+        startSdcv = function(_s, _word, names) asked = names; return { { dict = "乙", word = "彘", definition = "猪" } } end } }
+    dict_settings.dictionary_load_all = true
+    local all = Lookup.queryDicts(ui, "彘")
+    Assert.eq(table.concat(asked, ","), "乙,甲", "不看启用状态，查全部")
+    Assert.eq(all[1].name, "乙")
+    Assert.is_nil(all[1].empty)
+    Assert.eq(all[2].name, "甲")
+    Assert.is_true(all[2].empty, "无结果的也留一项")
+    dict_settings.dictionary_load_all = false
+    Assert.len(Lookup.queryDicts(ui, "彘"), 1, "关闭时只查已启用的")
+    os.execute("rm -rf " .. dir)
+end
 
 -- 一个居中窗口，底部四个图标 Tab；默认词典 Tab；标题带读音
 local sdcv_word

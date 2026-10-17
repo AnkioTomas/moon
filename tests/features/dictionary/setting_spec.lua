@@ -6,7 +6,7 @@ local Assert = require("support.assert")
 package.preload["gettext"] = function()
     return setmetatable({}, { __call = function(_self, text) return text end })
 end
-local settings = { dictionary_enabled = true }
+local settings = { dictionary_enabled = true, dictionary_load_all = true }
 package.preload["utils.settings"] = function()
     return { get = function() return settings end, save = function() end }
 end
@@ -29,13 +29,13 @@ local Setting = require("features.dictionary.setting")
 local entry = Setting.entries({ updateView = function() end })[1]
 Assert.eq(entry.parent, "lookup")
 local rows = entry.sections()[1].rows
-Assert.len(rows, 3)
-rows[2](100).callback()
+Assert.len(rows, 4)
 rows[3](100).callback()
+rows[4](100).callback()
 Assert.eq(calls[1][1], "download")
 Assert.eq(calls[1][2], file_manager.instance, "桌面上没有阅读器：用文件管理器的词典实例刷新缓存")
 Assert.eq(calls[2][2], file_manager.instance)
 
 reader.instance = { name = "reader" }
-rows[3](100).callback()
+rows[4](100).callback()
 Assert.eq(calls[3][2], reader.instance, "阅读器开着时用阅读器的实例")

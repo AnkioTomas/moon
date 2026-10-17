@@ -8,7 +8,8 @@ local _ = require("gettext")
 
 local Setting = {}
 
-Setting.defaults = { dictionary_enabled = true }
+-- dictionary_load_all：查词面板列出全部已安装词典（含已停用、无结果的），可自行切换。
+Setting.defaults = { dictionary_enabled = true, dictionary_load_all = true }
 
 --- 桌面开在文件管理器上（阅读器已关），它也挂着一份 ReaderDictionary；
 --- 必须用真实实例，安装 / 切换后才能刷新 KOReader 的词典缓存与 sdcv 参数。
@@ -48,6 +49,24 @@ function Setting.entries(desktop)
                     end,
                 }
                 if enabled then
+                    rows[#rows + 1] = function(iw)
+                        local on = current.dictionary_load_all
+                        return require("ui.themes.widgets.row").widget({
+                            width = iw,
+                            chevron = false,
+                            kind = "toggle",
+                            icon = "book",
+                            title = _("加载所有词典"),
+                            subtitle = _("无论是否启用、有无结果，都列在查词菜单里供切换"),
+                            status = on and _("开") or _("关"),
+                            status_on = on,
+                            callback = function()
+                                current.dictionary_load_all = not on
+                                MoonSettings.save("features.dictionary", current)
+                                desktop:updateView()
+                            end,
+                        })
+                    end
                     rows[#rows + 1] = function(iw)
                         return require("ui.themes.widgets.row").widget({
                             width = iw,

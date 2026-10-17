@@ -180,18 +180,34 @@ function Lookup.readingOf(word)
     end
 end
 
---- 在 ui 的已启用词典里查（同步，sdcv 自带进度提示）；没词典或文字太长时空表。
+--- 在 ui 的词典里查（同步，sdcv 自带进度提示）；文字太长或没词典时空表。
+--- 「加载所有词典」开着时查全部已安装词典（含已停用），无结果的也占一项（empty = true，排在有结果的后面）。
 ---@param ui table|nil
 ---@param word string
----@return { name: string, text: string }[]
+---@return { name: string, text: string, empty: boolean|nil }[]
 function Lookup.queryDicts(ui, word)
     local dict = ui and ui.dictionary
-    if not (dict and dict.startSdcv and dict.enabled_dict_names and #dict.enabled_dict_names > 0)
-        or #word > DICT_MAX or word:find("\n") then
+    if not (dict and dict.startSdcv and dict.enabled_dict_names) or #word > DICT_MAX or word:find("\n") then
         return {}
     end
-    return Lookup.groupResults(dict:startSdcv(word, dict.enabled_dict_names, false), word,
-        Lookup.ifoInfo(dict.data_dir))
+    local names = dict.enabled_dict_names
+    local load_all = require("utils.settings").get("features.dictionary").dictionary_load_all
+    if load_all then
+        ifo_cache[dict.data_dir] = nil
+        names = {}
+        for name in pairs(Lookup.ifoInfo(dict.data_dir)) do names[#names + 1] = name end
+        table.sort(names)
+    end
+    if #names == 0 then return {} end
+    local out = Lookup.groupResults(dict:startSdcv(word, names, false), word, Lookup.ifoInfo(dict.data_dir))
+    if load_all then
+        local hit = {}
+        for _idx, d in ipairs(out) do hit[d.name] = true end
+        for _idx, name in ipairs(names) do
+            if not hit[name] then out[#out + 1] = { name = name, text = _("该词典没有查到这个词。"), empty = true } end
+        end
+    end
+    return out
 end
 
 --- 底部 Tab（固定四个）。
@@ -247,7 +263,7 @@ function Lookup:initialSource(wanted)
     local last = require("utils.settings").get("features.rare").rare_lookup_source
     if wanted and ids[wanted] then return wanted end
     if last and ids[last] then return last end
-    return #self.dicts > 0 and "dict" or "ai"
+    return self.dicts[1] and not self.dicts[1].empty and "dict" or "ai"
 end
 
 --- 切 Tab：记住它，没内容就按需请求，重画整个窗口栈。
@@ -274,7 +290,7 @@ end
 function Lookup:pickDict(anchor)
     local items = {}
     for _idx, d in ipairs(self.dicts) do
-        items[#items + 1] = { text = (d.name == self:currentDict().name and "✓ " or "") .. d.name, callback = function()
+        items[#items + 1] = { text = (d.name == self:currentDict().name and "✓ " or "") .. d.name .. (d.empty and _("（无结果）") or ""), callback = function()
             self.dict_name = d.name
             self.body_page = 1
             local MoonSettings = require("utils.settings")
