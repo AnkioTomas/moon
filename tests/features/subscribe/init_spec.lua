@@ -77,6 +77,29 @@ Assert.eq(got.title, "源")
 Subscribe.probe("rss", "https://none.com", nil, function(feed, err) got = { feed, err } end)
 Assert.eq(got[1], nil)
 
+-- 网页订阅（page）订阅的是网页本身：一个条目，链接是页面地址；正文不变 guid 不变，变了才出新条目。
+do
+    web["https://page.test/"] = "<html><head><title>公告</title></head><body><article><p>第一版</p><a href='/x1'>这是一条足够长的链接标题</a></article></body></html>"
+    local function items()
+        local out
+        Subscribe.providers.page.fetch({ url = "https://page.test/" }, nil, function(i) out = i end)
+        return out
+    end
+    local a, b = items(), items()
+    Assert.len(a, 1)
+    Assert.eq(a[1].title, "公告")
+    Assert.eq(a[1].link, "https://page.test/")
+    Assert.eq(a[1].guid, b[1].guid)
+    web["https://page.test/"] = web["https://page.test/"]:gsub("第一版", "第二版")
+    Assert.is_true(items()[1].guid ~= a[1].guid, "正文变了出新条目")
+    -- 网站订阅（site）取页面里的文章链接
+    web["https://page.test/"] = "<body><a href='/x1'>这是一条足够长的链接标题</a></body>"
+    local links
+    Subscribe.providers.site.fetch({ url = "https://page.test/", filter = "" }, nil, function(i) links = i end)
+    Assert.eq(links[1].link, "https://page.test/x1")
+    web["https://page.test/"] = nil
+end
+
 -- 跳转自己跟：相对 Location（ghfast.top 的 `/https://github.com/...`）按当前地址补全，保留路径里的 //；最多 5 跳。
 do
     redirects["https://ghfast.top/https://github.com/o/r/releases/latest/download/all.opml"] = "/https://github.com/o/r/releases/download/v1/all.opml"

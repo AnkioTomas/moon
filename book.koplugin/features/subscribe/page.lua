@@ -2,13 +2,13 @@
 桌面「订阅」页：订阅列表（按分组）→ 点开一个源看条目（新到旧，每页最多 20）→ 点条目打开文章。
 
   +-----------------------------------------------+
-  | [⟳]            订阅                     [+]   |   ⟳ 刷新全部，+ 添加（RSS / 网站 / 公众号）
+  | [⟳]            订阅                     [⇅][+] |   ⟳ 刷新全部，⇅ 排序（分组 / 最近阅读 / 未读最多 / 最近更新 / 名称），+ 添加（RSS / 网站 / 公众号）
   | 科技                                          |
   | [rss] 少数派                         12  >    |   右侧是未读数
   | 未分组                                        |
   | [mp]  某公众号                        3  >    |
   +-----------------------------------------------+
-  | [<]            少数派                   [⋯]   |   ⋯ 刷新 / 全部已读 / 重命名 / 分组 / 删除
+  | [<]          少数派             [≡][⋯]   |   ≡ 筛选（全部 → 仅未读 → 仅已读），⋯ 刷新 / 全部已读 / 重命名 / 修改分组 / 取消订阅
   | ● 标题一                                      |
   |   2026-10-16 12:00                            |
   | [加载更早的文章]                              |   公众号翻到最后一页时
@@ -38,6 +38,14 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 
 local PAGE_MAX = 20
+--- 订阅列表排序：group = 按分组（组内手动顺序），其余是不分组的平铺，按 key 降序（name 升序）。
+local ORDERS = {
+    { id = "group", label = function() return _("按分组") end },
+    { id = "recent", label = function() return _("最近阅读") end, key = "read_at" },
+    { id = "unread", label = function() return _("未读最多") end, key = "unread" },
+    { id = "updated", label = function() return _("最近更新") end, key = "updated_at" },
+    { id = "name", label = function() return _("名称") end },
+}
 
 ---@class BookSubscribePage
 ---@field desktop BookDesktop
@@ -48,12 +56,8 @@ local PAGE_MAX = 20
 ---@field job table|nil
 local Page = {}
 
---- 条目筛选（本次运行内记住，所有源共用）：all / unread / read。
-local FILTERS = {
-    all = { label = "全部" },
-    unread = { label = "未读", read = false, tag = "仅未读" },
-    read = { label = "已读", read = true, tag = "仅已读" },
-}
+--- 条目筛选（本次运行内记住，所有源共用）：nil = 全部，false = 仅未读，true = 仅已读；标题栏图标依次切换。
+Page.read_filter = nil
 Page.__index = Page
 
 function Page:new(opts)
@@ -134,7 +138,7 @@ function Page:addUrl(kind)
     end
     fields[#fields + 1] = { label = _("分组（可选）"), hint = _("留空为未分组") }
     Input:new{
-        title = kind == "rss" and _("添加 RSS") or _("添加网站"),
+        title = kind == "rss" and _("添加 RSS") or kind == "page" and _("添加网页") or _("添加网站"),
         fields = fields,
         callback = function(url, a, b)
             local filter, grp = kind == "site" and a or nil, kind == "site" and b or a
@@ -211,7 +215,8 @@ end
 function Page:showAdd()
     require("ui.themes.widgets.sheet"):new{ title = _("添加订阅"), items = {
         { text = _("RSS / Atom"), callback = function() self:addUrl("rss") end },
-        { text = _("任意网站"), callback = function() self:addUrl("site") end },
+        { text = _("网站文章链接"), callback = function() self:addUrl("site") end },
+        { text = _("网页本身"), callback = function() self:addUrl("page") end },
         { text = _("微信读书公众号"), callback = function() self:addMp() end },
     } }:show()
 end
@@ -228,14 +233,13 @@ function Page:showManage(feed)
     end
     require("ui.themes.widgets.sheet"):new{ title = feed.title, items = {
         { text = _("刷新"), callback = function() self:refresh({ feed }, false, true) end },
-        { text = T(_("筛选：%1"), _(FILTERS[Page.filter or "all"].label)), callback = function() self:showFilter() end },
         { text = _("全部标为已读"), callback = function()
             SubDB.markRead(feed.id)
             self:redraw()
         end },
+        { separator = true },
         { text = _("重命名"), callback = function() edit(_("重命名"), "title") end },
         { text = _("修改分组"), callback = function() edit(_("修改分组"), "grp") end },
-        { separator = true },
         { text = _("取消订阅"), callback = function()
             require("ui.themes.widgets.confirm"):new{
                 text = T(_("取消订阅「%1」？已缓存的文章一并删除。"), feed.title),
@@ -263,29 +267,73 @@ end
 --- 订阅列表分节：分组 → 源。
 function Page:feedSections()
     local sections, by = {}, {}
-    for _idx, feed in ipairs(SubDB.feeds()) do
-        local key = feed.grp ~= "" and feed.grp or _("未分组")
-        if not by[key] then
-            by[key] = { title = key, rows = {} }
-            sections[#sections + 1] = by[key]
-        end
+    local feeds = SubDB.feeds()
+    local function row(feed)
         local provider = Subscribe.providers[feed.kind]
-        table.insert(by[key].rows, function(iw)
+        return function(iw)
             return Row.widget({
                 width = iw, icon = provider and provider.icon, title = feed.title,
                 subtitle = provider and provider.label,
                 status = feed.unread > 0 and tostring(feed.unread) or nil, status_on = feed.unread > 0,
                 callback = function() self:openFeed(feed.id) end,
             })
-        end)
+        end
     end
-    if #sections == 0 then
+    local total, order = #feeds, self:order()
+    if order.id ~= "group" then
+        if order.key then
+            table.sort(feeds, function(a, b)
+                if a[order.key] ~= b[order.key] then return a[order.key] > b[order.key] end
+                return a.title < b.title
+            end)
+        else
+            table.sort(feeds, function(a, b) return a.title < b.title end)
+        end
+        local rows = {}
+        for i, feed in ipairs(feeds) do rows[i] = row(feed) end
+        sections[1] = { title = order.label(), rows = rows }
+        feeds = {}
+    end
+    for _idx, feed in ipairs(feeds) do
+        local key = feed.grp ~= "" and feed.grp or _("未分组")
+        if not by[key] then
+            by[key] = { title = key, rows = {} }
+            sections[#sections + 1] = by[key]
+        end
+        table.insert(by[key].rows, row(feed))
+    end
+    if total == 0 then
         sections[1] = { title = _("订阅"), rows = { function(iw)
             return Row.widget({ width = iw, icon = "add", title = _("还没有订阅"),
                 subtitle = _("点右上角添加 RSS、网站或公众号"), callback = function() self:showAdd() end })
         end } }
     end
     return sections
+end
+
+--- 当前排序方式（设置里没存或存了已不认识的 id 时按分组）。
+---@return table
+function Page:order()
+    local id = Subscribe.settings().order
+    for _idx, order in ipairs(ORDERS) do
+        if order.id == id then return order end
+    end
+    return ORDERS[1]
+end
+
+function Page:showOrder()
+    local current, items = self:order(), {}
+    for _idx, order in ipairs(ORDERS) do
+        items[#items + 1] = {
+            text = order.label(), variant = order == current and "primary" or nil,
+            callback = function()
+                Subscribe.settings().order, self.page = order.id, 1
+                require("utils.settings").save("features.subscribe")
+                self:redraw()
+            end,
+        }
+    end
+    require("ui.themes.widgets.sheet"):new{ title = _("排序"), items = items }:show()
 end
 
 ---@param w integer
@@ -295,6 +343,7 @@ function Page:feedsView(w, h)
     local bar = TitleBar.widget({
         width = w, title = _("订阅"), subtitle = self:status(),
         left_icon = "refresh", left_callback = function() self:refresh(SubDB.feeds(), false, true) end,
+        extra_icon = "sort", extra_callback = function() self:showOrder() end,
         right_icon = "add", right_callback = function() self:showAdd() end,
     })
     local body_h = h - bar:getSize().h
@@ -306,16 +355,16 @@ function Page:feedsView(w, h)
     return VerticalGroup:new{ align = "left", bar, body }
 end
 
-function Page:showFilter()
-    local items = {}
-    for _i, key in ipairs({ "all", "unread", "read" }) do
-        items[#items + 1] = { text = _(FILTERS[key].label), variant = (Page.filter or "all") == key and "primary" or nil, callback = function()
-            Page.filter = key ~= "all" and key or nil
-            self.page = 1
-            self:redraw()
-        end }
+--- 发布时间，读过的再带上读的时间。
+---@param item table
+---@return string|nil
+local function itemSubtitle(item)
+    local text = item.time > 0 and os.date("%Y-%m-%d %H:%M", item.time) or nil
+    if item.read_at > 0 then
+        local read = T(_("读于 %1"), os.date("%m-%d %H:%M", item.read_at))
+        text = text and (text .. " · " .. read) or read
     end
-    require("ui.themes.widgets.sheet"):new{ title = _("筛选"), items = items }:show()
+    return text
 end
 
 ---@param feed table
@@ -325,12 +374,21 @@ end
 function Page:itemsView(feed, w, h)
     local t = Theme.current()
     local subtitle = self:status() or (feed.unread > 0 and T(_("%1 篇未读"), feed.unread) or nil)
-    local tag = FILTERS[Page.filter or "all"].tag
-    if tag and not self:status() then subtitle = subtitle and (subtitle .. " · " .. _(tag)) or _(tag) end
+    if Page.read_filter ~= nil and not self:status() then
+        local label = Page.read_filter and _("仅已读") or _("仅未读")
+        subtitle = subtitle and (subtitle .. " · " .. label) or label
+    end
     local bar = TitleBar.widget({
         width = w, title = feed.title,
         subtitle = subtitle,
         left_icon = "arrow_back", left_callback = function() self:openFeed(nil) end,
+        extra_icon = "filter_list", extra_callback = function()
+            if Page.read_filter == nil then Page.read_filter = false
+            elseif Page.read_filter == false then Page.read_filter = true
+            else Page.read_filter = nil end
+            self.page = 1
+            self:redraw()
+        end,
         right_icon = "more_horiz", right_callback = function() self:showManage(feed) end,
     })
     local pager_h = Theme.px(t.control.height)
@@ -341,7 +399,7 @@ function Page:itemsView(feed, w, h)
     -- 公众号还有更早的文章时留一行给「加载更早的文章」。
     local more = (feed.cursor or 0) > 0
     local size = math.max(1, math.min(PAGE_MAX, math.floor(avail / row_h) - (more and 1 or 0)))
-    local read = FILTERS[Page.filter or "all"].read
+    local read = Page.read_filter
     local _first, total = SubDB.items(feed.id, 1, 0, read)
     self.pages = math.max(1, math.ceil(total / size))
     self.page = math.max(1, math.min(self.page, self.pages))
@@ -350,7 +408,7 @@ function Page:itemsView(feed, w, h)
     for _idx, item in ipairs(items) do
         list[#list + 1] = Row.widget({
             width = w, title = (item.read and "" or "● ") .. item.title,
-            subtitle = item.time > 0 and os.date("%Y-%m-%d %H:%M", item.time) or nil,
+            subtitle = itemSubtitle(item),
             selected = false,
             callback = function() self:openItem(feed, item) end,
         })

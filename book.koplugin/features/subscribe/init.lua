@@ -257,6 +257,27 @@ Subscribe.providers = {
             return fetchArticle(item.link, images_dir, cb, nil, feed.public)
         end,
     },
+    page = {
+        icon = "public",
+        label = _("网页"),
+        -- 「网页」订阅的是网页本身：一个条目 = 页面正文的一个版本（guid 带正文摘要），内容变了才出新条目。
+        fetch = function(feed, _cursor, cb)
+            return get(feed.url, function(body, err)
+                if not body then return cb(nil, nil, err) end
+                local text = Text.stripHtml(Parse.article(body) or body)
+                local title = Parse.title(body)
+                cb({ {
+                    guid = feed.url .. "#" .. require("ffi/sha2").md5(text),
+                    title = title ~= "" and title or feed.url,
+                    link = feed.url,
+                    time = os.time(),
+                } }, nil, nil, title)
+            end, { public = feed.public })
+        end,
+        content = function(feed, _item, images_dir, cb)
+            return fetchArticle(feed.url, images_dir, cb, nil, feed.public)
+        end,
+    },
     mp = {
         icon = "newspaper",
         label = _("公众号"),
@@ -282,7 +303,7 @@ end
 
 --- 添加前试拉一次：确认能解析、拿到标题。RSS 地址给的是网页时按 <link rel="alternate"> 找订阅源。
 --- public 为真（远程管理网页发起）只许公网地址。alternate 绕回已试过的地址（A→B→A）即停。
----@param kind "rss"|"site"
+---@param kind "rss"|"site"|"page"
 ---@param url string
 ---@param filter string|nil
 ---@param cb fun(feed: table|nil, err: any)
