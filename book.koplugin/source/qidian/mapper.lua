@@ -86,7 +86,41 @@ function Mapper.shelfList(rows)
     return books
 end
 
+--- 目录 uT（东八区 `YYYY-MM-DD HH:MM:SS`）→ unix 秒。上传进度要这个数，日期字符串服务端直接 500。
+---@param text string|nil
+---@return integer|nil
+function Mapper.chapterTime(text)
+    if type(text) ~= "string" then return nil end
+    local year, month, day, hour, minute, second = text:match("^(%d+)%-(%d+)%-(%d+) (%d+):(%d+):(%d+)$")
+    if not year then
+        year, month, day, hour, minute = text:match("^(%d+)%-(%d+)%-(%d+) (%d+):(%d+)$")
+        second = "0"
+    end
+    year, month, day = tonumber(year), tonumber(month), tonumber(day)
+    hour, minute, second = tonumber(hour), tonumber(minute), tonumber(second)
+    if not year or month < 1 or month > 12 or day < 1 or day > 31 then return nil end
+    -- Howard Hinnant days_from_civil，再减去东八区。
+    local y = year - (month <= 2 and 1 or 0)
+    local era = math.floor((y >= 0 and y or y - 399) / 400)
+    local yoe = y - era * 400
+    local doy = math.floor((153 * (month + (month > 2 and -3 or 9)) + 2) / 5) + day - 1
+    local doe = yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy
+    local days = era * 146097 + doe - 719468
+    return days * 86400 + hour * 3600 + minute * 60 + second - 8 * 3600
+end
+
+--- 书架行里的阅读位置。没有 readCid 就是没读过。
+---@param row table|nil
+---@return { uid: string, title: string|nil }|nil
+function Mapper.readChapter(row)
+    local uid = type(row) == "table" and row.readCid
+    if uid == nil or tostring(uid) == "" or tonumber(uid) == 0 then return nil end
+    local title = row.readCname
+    return { uid = tostring(uid), title = type(title) == "string" and title or nil }
+end
+
 --- 目录页 vs[].cs[] → 目录。卷名不是章；VIP 章（sS=0）也进目录，打开时再看是否已购买。
+--- updated 是章节更新时间的 unix 秒，进度上传要带上，空字符串会把阅读状态写坏。
 ---@param data table|nil
 ---@return BookChapter[]
 function Mapper.toc(data)
@@ -100,6 +134,8 @@ function Mapper.toc(data)
                     uid = tostring(row.id),
                     title = row.cN,
                     words = tonumber(row.cnt),
+                    updated = Mapper.chapterTime(row.uT),
+                    vip = tonumber(row.sS) == 0,
                 }
             end
         end

@@ -3,6 +3,8 @@
 
 详情、目录、章节走手机站 SSR 页面（m.qidian.com，页面内嵌 pageContext JSON）。
 www.qidian.com 有 WAF，不用。书架是 /webcommon/bookshelf/*，要带 Cookie 里的 _csrfToken。
+进度是章：拉书架行的 readCid；上传 /webcommon/chapter/updReadStatus。
+chapterUpdateTime 必须是章节更新时间的 unix 秒，空字符串会把 getReadStatus 写坏，日期字符串直接 500。
 免费章匿名可读（isBuy 仍是 0）。VIP 章 vipStatus=1 且 isBuy 不是 1 时只有预览。
 
 @module koplugin.book.source.qidian.client
@@ -256,6 +258,43 @@ function Client.addAsync(book_id, cb)
         if not data then cb(nil, data_err); return end
         local added, add_err = bookOk(book_id, data)
         cb(added and true or nil, add_err)
+    end)
+end
+
+--- 上报读到哪一章。updated 是章节更新时间的 unix 秒，不是「现在」。
+---@param book_id string
+---@param chapter_id string
+---@param chapter_name string|nil
+---@param is_vip integer|boolean|nil
+---@param updated integer|string
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client.updateReadAsync(book_id, chapter_id, chapter_name, is_vip, updated, cb)
+    local cookie = Client.cookie()
+    if not cookie then return SourceBase.defer(cb, nil, _("未登录起点")) end
+    if not Client.csrf(cookie) then return SourceBase.defer(cb, nil, _("起点 Cookie 缺少登录凭证")) end
+    if updated == nil or tostring(updated) == "" then
+        return SourceBase.defer(cb, nil, _("起点章节时间缺失"))
+    end
+    return Request.post(WEB .. "/webcommon/chapter/updReadStatus?" .. query(cookie), Text.formEncode({
+        bookId = book_id,
+        chapterId = chapter_id,
+        chapterName = chapter_name or "",
+        isVip = (is_vip == true or tonumber(is_vip) == 1) and "1" or "0",
+        chapterUpdateTime = tostring(updated),
+    }), {
+        content_type = "application/x-www-form-urlencoded",
+        headers = headers(cookie),
+        timeout = require("http.timeout").net(1),
+    }, function(raw, err)
+        if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
+        local ok, wire = pcall(JSON.decode, raw)
+        if not ok or type(wire) ~= "table" then cb(nil, _("响应无效")); return end
+        -- 成功时 data 不是表（常为空）。不能走 okData，否则 code=0 也会被当成失败。
+        if tonumber(wire.code) == 0 then cb(true); return end
+        local msg = type(wire.msg) == "string" and wire.msg ~= "" and wire.msg or _("响应无效")
+        if tonumber(wire.code) == 1403 then msg = expired(cookie, _("起点登录已失效")) end
+        cb(nil, msg)
     end)
 end
 

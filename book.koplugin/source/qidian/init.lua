@@ -3,7 +3,8 @@
 
 详情 / 目录 / 章节走手机站页面（client.lua）。登录是浏览器登录态的 Cookie（setting.lua）；
 登录后书架双向同步（source.shelf）：拉取、本地加入上行、本地删除上行。
-起点网页没有进度 / 笔记 / 统计接口：这三个域只在本地。VIP 章未购买时打开失败。
+进度只到章：开书从书架行的 readCid 拉，关书经 updReadStatus 推。笔记和统计没有接口。
+VIP 章未购买时打开失败。
 
 @module koplugin.book.source.qidian
 --]]
@@ -120,24 +121,88 @@ function Source:syncBooksAsync(opts, cb)
     return Shelf.syncAsync(self.id, Remote, Mapper.shelfList, opts, cb)
 end
 
-function Source:syncProgressAsync(_opts, cb)
-    return SourceBase.skipped(cb, "qidian has no remote")
-end
-
 function Source:syncNotesAsync(_opts, cb)
-    return SourceBase.skipped(cb, "qidian has no remote")
+    return SourceBase.skipped(cb, "qidian has no notes")
 end
 
 function Source:syncStatsAsync(_opts, cb)
-    return SourceBase.skipped(cb, "qidian has no remote")
+    return SourceBase.skipped(cb, "qidian has no stats")
 end
 
-function Source:getProgressAsync(_identity, cb)
-    return SourceBase.defer(cb, nil, nil, { empty = true })
+--- 书架行的 readCid 才是用户看到的进度。getReadStatus 在查询章等于已读章时会把章号省掉。
+function Source:getProgressAsync(identity, cb)
+    if not self:configured() then return SourceBase.defer(cb, nil, _("未登录起点")) end
+    local cancelled, job = false, nil
+    job = Client.shelfAsync(Client.cookie(), function(rows, err)
+        if cancelled then return end
+        if not rows then cb(nil, err); return end
+        local row
+        for _idx, item in ipairs(rows) do
+            if tostring(item.bid) == tostring(identity.stable_id) then row = item; break end
+        end
+        local read = Mapper.readChapter(row)
+        if not read then cb(nil, nil, { empty = true }); return end
+        job = self:loadTocAsync(identity, function(toc, reason)
+            if cancelled then return end
+            if not toc or #toc == 0 then cb(nil, reason or _("起点目录为空")); return end
+            local idx = Toc.index(self.id, identity.stable_id, read.uid)
+            if not idx then cb(nil, nil, { empty = true }); return end
+            cb({
+                chapter_idx = idx,
+                chapter_title = read.title,
+                fraction = (idx - 1) / #toc,
+                extra = { chapter_uid = read.uid, chapter_idx = idx },
+            })
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
 end
 
-function Source:putProgressAsync(_identity, _pos, cb)
-    return SourceBase.defer(cb, true)
+function Source:putProgressAsync(identity, pos, cb)
+    if not self:configured() then return SourceBase.defer(cb, nil, _("未登录起点")) end
+    local cancelled, job = false, nil
+    local function send(chapter)
+        if not chapter.updated then
+            cb(nil, _("起点章节时间缺失"))
+            return
+        end
+        job = Client.updateReadAsync(identity.stable_id, chapter.uid, chapter.title, chapter.vip, chapter.updated,
+            function(ok, err)
+                if cancelled then return end
+                cb(ok and true or nil, err)
+            end)
+    end
+    job = self:loadTocAsync(identity, function(toc, err)
+        if cancelled then return end
+        if not toc then cb(nil, err); return end
+        local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
+        local chapter = idx and toc[idx]
+        if not chapter or not chapter.uid then
+            cb(nil, _("缺少起点章节位置"))
+            return
+        end
+        if chapter.updated then send(chapter); return end
+        -- 旧目录缓存没有章节更新时间。不带时间上传会把阅读状态写坏，先补拉目录。
+        job = Client.catalogAsync(identity.stable_id, function(data, reason)
+            if cancelled then return end
+            local fresh = data and Mapper.toc(data)
+            if fresh and #fresh > 0 then Toc.put(self.id, identity.stable_id, fresh) end
+            local hit
+            for _ch, item in ipairs(fresh or {}) do
+                if item.uid == chapter.uid then hit = item; break end
+            end
+            if not hit then cb(nil, reason or _("缺少起点章节位置")); return end
+            if not hit.updated then cb(nil, _("起点章节时间缺失")); return end
+            send(hit)
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
 end
 
 function Source:getDetailAsync(identity, cb)

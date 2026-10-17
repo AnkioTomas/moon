@@ -3,7 +3,8 @@
 
 搜索 / 目录 / 正文走匿名 App 接口（protocol / client，正文解密，按章落盘走公共 source/chapter）；
 登录是 PC 网页的 token（setting.lua），登录后书架双向同步（source.shelf，网页书架接口）。
-网页没有进度 / 笔记 / 统计接口：这三个域只在本地。书由书城页（store/qimao）搜索后加入本地书库。
+进度只到章：开书从书架行的 latest_read_chapter_id 拉，关书用同一条书架同步接口改这一行。
+笔记和统计没有接口。书由书城页（store/qimao）搜索后加入本地书库。
 
 @module koplugin.book.source.qimao
 --]]
@@ -75,24 +76,77 @@ function Source:syncBooksAsync(opts, cb)
     return Shelf.syncAsync(self.id, Remote, Mapper.shelfList, opts, cb)
 end
 
-function Source:syncProgressAsync(_opts, cb)
-    return SourceBase.skipped(cb, "qimao has no remote")
-end
-
 function Source:syncNotesAsync(_opts, cb)
-    return SourceBase.skipped(cb, "qimao has no remote")
+    return SourceBase.skipped(cb, "qimao has no notes")
 end
 
 function Source:syncStatsAsync(_opts, cb)
-    return SourceBase.skipped(cb, "qimao has no remote")
+    return SourceBase.skipped(cb, "qimao has no stats")
 end
 
-function Source:getProgressAsync(_identity, cb)
-    return SourceBase.defer(cb, nil, nil, { empty = true })
+function Source:getProgressAsync(identity, cb)
+    if not self:configured() then return SourceBase.defer(cb, nil, _("未登录七猫")) end
+    local cancelled, job = false, nil
+    job = Client.shelfSyncAsync(function(rows, err)
+        if cancelled then return end
+        if not rows then cb(nil, err); return end
+        local row
+        for _idx, item in ipairs(rows) do
+            if tostring(item.book_id) == tostring(identity.stable_id) then row = item; break end
+        end
+        local read = Mapper.readChapter(row)
+        if not read then cb(nil, nil, { empty = true }); return end
+        job = self:loadTocAsync(identity, function(toc, reason)
+            if cancelled then return end
+            if not toc or #toc == 0 then cb(nil, reason or _("七猫目录为空")); return end
+            local idx = Toc.index(self.id, identity.stable_id, read.uid)
+            if not idx then cb(nil, nil, { empty = true }); return end
+            cb({
+                chapter_idx = idx,
+                chapter_title = read.title,
+                fraction = (idx - 1) / #toc,
+                extra = { chapter_uid = read.uid, chapter_idx = idx },
+            })
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
 end
 
-function Source:putProgressAsync(_identity, _pos, cb)
-    return SourceBase.defer(cb, true)
+function Source:putProgressAsync(identity, pos, cb)
+    if not self:configured() then return SourceBase.defer(cb, nil, _("未登录七猫")) end
+    local cancelled, job = false, nil
+    job = self:loadTocAsync(identity, function(toc, err)
+        if cancelled then return end
+        if not toc then cb(nil, err); return end
+        local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
+        local chapter = idx and toc[idx]
+        if not chapter or not chapter.uid then
+            cb(nil, _("缺少七猫章节位置"))
+            return
+        end
+        job = Client.shelfSyncAsync(function(rows, reason)
+            if cancelled then return end
+            if not rows then cb(nil, reason); return end
+            local row
+            for _item, item in ipairs(rows) do
+                if tostring(item.book_id) == tostring(identity.stable_id) then row = item; break end
+            end
+            if not row then cb(nil, _("这本书不在七猫书架上")); return end
+            job = Client.shelfPushAsync({ Mapper.progressItem(row, {
+                uid = chapter.uid, title = chapter.title, idx = idx,
+            }) }, function(wire, push_err)
+                if cancelled then return end
+                cb(wire and true or nil, push_err)
+            end)
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
 end
 
 --- 书库里已有的元数据；七猫详情只在书城预览时才需要拉（见 store/qimao）。

@@ -72,6 +72,37 @@ function Mapper.shelfItem(stable_id, row, push_type)
     }
 end
 
+--- 书架行里的阅读位置。没有章号就是没读过。
+---@param row table|nil
+---@return { uid: string, title: string|nil }|nil
+function Mapper.readChapter(row)
+    local uid = type(row) == "table" and row.latest_read_chapter_id
+    if uid == nil or tostring(uid) == "" or tonumber(uid) == 0 then return nil end
+    local title = row.latest_read_chapter_name
+    return { uid = tostring(uid), title = type(title) == "string" and title or nil }
+end
+
+--- 用书架上的原行改阅读位置再上行，避免空字段把书名、分组清掉。
+--- 章没变就留着原来的段内偏移；换章则清掉，段内位置同步不了。
+---@param row table
+---@param chapter { uid: string, title: string|nil, idx: integer }
+---@return table
+function Mapper.progressItem(row, chapter)
+    local item = {}
+    for key, value in pairs(row) do item[key] = value end
+    local same = tostring(row.latest_read_chapter_id or "") == chapter.uid
+    item.push_type = "1"
+    item.latest_read_chapter_id = chapter.uid
+    item.latest_read_chapter_name = chapter.title or ""
+    item.latest_read_chapter_index = tostring(chapter.idx)
+    item.updated_at = tostring(os.time())
+    if not same then
+        item.page_offset = ""
+        item.paragraph_index = "0"
+    end
+    return item
+end
+
 --- 搜索回包。高亮标签只出现在 title / author，原始值在 original_*。
 ---@param wire table|nil
 ---@return Book[]

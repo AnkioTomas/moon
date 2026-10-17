@@ -83,13 +83,24 @@ end
 
 do
     local toc = Mapper.toc({ vs = {
-        { vN = "卷一", cs = { { id = 11, cN = "第一章", cnt = 10, sS = 1 } } },
-        { vN = "卷二", cs = { { id = 22, cN = "VIP", cnt = 20, sS = 0 } } },
+        { vN = "卷一", cs = { { id = 11, cN = "第一章", cnt = 10, sS = 1, uT = "2022-10-07 10:22:55" } } },
+        { vN = "卷二", cs = { { id = 22, cN = "VIP", cnt = 20, sS = 0, uT = "bad" } } },
     } })
     Assert.len(toc, 2)
     Assert.eq(toc[1].uid, "11")
+    Assert.eq(toc[1].updated, 1665109375)
+    Assert.is_false(toc[1].vip)
     Assert.eq(toc[2].idx, 2)
     Assert.eq(toc[2].title, "VIP")
+    Assert.is_nil(toc[2].updated)
+    Assert.is_true(toc[2].vip)
+    Assert.eq(Mapper.chapterTime("2022-10-07 10:22"), 1665109320)
+    Assert.is_nil(Mapper.chapterTime("2022-10-07"))
+    local read = Mapper.readChapter({ readCid = 730944635, readCname = "第一章" })
+    Assert.eq(read.uid, "730944635")
+    Assert.eq(read.title, "第一章")
+    Assert.is_nil(Mapper.readChapter({ readCid = 0 }))
+    Assert.is_nil(Mapper.readChapter({}))
 end
 
 do
@@ -151,4 +162,31 @@ do
     Assert.is_true(ok)
     Assert.matches(requests[1].url, "/webcommon/bookshelf/addbooks%?")
     Assert.eq(requests[1].body, "bookId=9")
+end
+
+-- 进度上传带章节更新时间的 unix 秒。空时间不发请求，避免把阅读状态写坏。
+do
+    local Stubs = require("support.stubs")
+    cfg.cookie = "ywkey=k; _csrfToken=tok"
+    requests, replies = {}, {}
+    local ok, err
+    Client.updateReadAsync("9", "11", "c1", false, "", function(v, e) ok, err = v, e end)
+    Stubs.flush()
+    Assert.is_nil(ok)
+    Assert.eq(err, "起点章节时间缺失")
+    Assert.len(requests, 0)
+
+    requests, replies = {}, { { body = '{"code":0}' } }
+    Client.updateReadAsync("9", "11", "c1", true, 1665109375, function(v, e) ok, err = v, e end)
+    Assert.is_true(ok)
+    Assert.matches(requests[1].url, "/webcommon/chapter/updReadStatus%?")
+    Assert.matches(requests[1].body, "chapterUpdateTime=1665109375")
+    Assert.matches(requests[1].body, "isVip=1")
+    Assert.matches(requests[1].body, "chapterId=11")
+
+    requests, replies, expired = {}, { { body = '{"code":1403,"msg":"登录失效"}' } }, nil
+    Client.updateReadAsync("9", "11", "c1", 0, "1665109375", function(v, e) ok, err = v, e end)
+    Assert.is_nil(ok)
+    Assert.eq(err, "起点登录已失效")
+    Assert.eq(expired, "起点登录已失效")
 end

@@ -104,6 +104,25 @@ do
     local item = Mapper.shelfItem("7", books[1], "1")
     Assert.eq(item.image_link, "/bookimg/a.jpg")
     Assert.eq(item.push_type, "1")
+    Assert.is_nil(Mapper.readChapter({ latest_read_chapter_id = "" }))
+    local row = {
+        book_id = "7", book_title = "书", group_name = "在读",
+        latest_read_chapter_id = "19", latest_read_chapter_name = "第19章",
+        page_offset = "12", paragraph_index = "3",
+    }
+    Assert.eq(Mapper.readChapter(row).uid, "19")
+    local same = Mapper.progressItem(row, { uid = "19", title = "第19章", idx = 19 })
+    Assert.eq(same.book_title, "书")
+    Assert.eq(same.group_name, "在读")
+    Assert.eq(same.page_offset, "12")
+    Assert.eq(same.paragraph_index, "3")
+    Assert.eq(same.push_type, "1")
+    local moved = Mapper.progressItem(row, { uid = "20", title = "第20章", idx = 20 })
+    Assert.eq(moved.latest_read_chapter_id, "20")
+    Assert.eq(moved.latest_read_chapter_index, "20")
+    Assert.eq(moved.page_offset, "")
+    Assert.eq(moved.paragraph_index, "0")
+    Assert.eq(moved.book_title, "书")
 end
 
 -- 登录输入：裸 token、Bearer 前缀、浏览器 userinfo JSON。

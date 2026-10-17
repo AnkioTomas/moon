@@ -3,7 +3,7 @@
 
 书的元数据 / 目录 / 免费章正文走匿名 App 接口，VIP 章与个人收藏走手机网页 Cookie（client.lua）。
 登录是浏览器登录态的 Cookie（setting.lua）；登录后收藏双向同步（source.shelf）：拉取、本地删除上行。
-晋江没有进度 / 笔记 / 统计接口：这三个域只在本地。
+最近阅读页能读到章，但没有确认能写回的接口，进度不接，避免只拉不推。笔记和统计没有接口。
 
 @module koplugin.book.source.jjwxc
 --]]
