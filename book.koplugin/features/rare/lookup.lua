@@ -409,6 +409,14 @@ function Lookup:actions()
             else ui.highlight:addNote(text) end
         end }
     end
+    -- 原生生词本（vocabbuilder 插件）装着才有；手动添加不看它的「自动添加」开关，已有的词由它弹详情。
+    if self.ui and self.ui.vocabulary_builder and self:isWord() then
+        row[#row + 1] = { text = _("加入生词本"), callback = function()
+            local props = self.ui.doc_props
+            local book = props and props.display_title or _("查词")
+            self.ui:handleEvent(require("ui/event"):new("WordLookedUp", self.text, book, true))
+        end }
+    end
     if self.active == "ai" and self.content.ai then
         row[#row + 1] = { text = _("追问"), callback = function() self:followUp() end }
     end
