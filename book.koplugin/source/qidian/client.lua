@@ -1,0 +1,319 @@
+--[[--
+起点中文网 HTTP 客户端（仅异步）。
+
+详情、目录、章节走手机站 SSR 页面（m.qidian.com，页面内嵌 pageContext JSON）。
+www.qidian.com 有 WAF，不用。书架是 /webcommon/bookshelf/*，要带 Cookie 里的 _csrfToken。
+免费章匿名可读（isBuy 仍是 0）。VIP 章 vipStatus=1 且 isBuy 不是 1 时只有预览。
+
+@module koplugin.book.source.qidian.client
+--]]
+
+require("l10n").apply()
+local JSON = require("json")
+local Mapper = require("source.qidian.mapper")
+local Request = require("http.request")
+local SourceBase = require("source.base")
+local Text = require("utils.text")
+local _ = require("gettext")
+
+local Client = {}
+
+local SOURCE_ID = "qidian"
+local WEB = "https://m.qidian.com"
+local UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+    .. "Version/16.0 Mobile/15E148 Safari/604.1"
+local PAGE_SIZE = 20
+local MAX_PAGES = 50
+
+---@return string|nil
+function Client.cookie()
+    local cookie = require("utils.settings").getSource(SOURCE_ID).cookie
+    return type(cookie) == "string" and cookie ~= "" and cookie or nil
+end
+
+--- Cookie 请求头里的 _csrfToken。没有它书架接口一律 403。
+---@param cookie string
+---@return string|nil
+function Client.csrf(cookie)
+    local token = type(cookie) == "string" and (
+        cookie:match("^_csrfToken=([^;]+)") or cookie:match(";%s*_csrfToken=([^;]+)"))
+    if not token or token == "" then return nil end
+    return token
+end
+
+---@param cookie string|nil
+---@return table
+local function headers(cookie)
+    return {
+        Cookie = cookie,
+        ["User-Agent"] = UA,
+        Referer = WEB .. "/bookshelf/my/",
+        Origin = WEB,
+    }
+end
+
+---@param cookie string
+---@param params table|nil
+---@return string
+local function query(cookie, params)
+    local parts = {}
+    for key, value in pairs(params or {}) do
+        parts[#parts + 1] = Text.urlEncode(key) .. "=" .. Text.urlEncode(value)
+    end
+    local token = Client.csrf(cookie)
+    if token then parts[#parts + 1] = "_csrfToken=" .. Text.urlEncode(token) end
+    table.sort(parts)
+    return table.concat(parts, "&")
+end
+
+--- 登录态失效只标记当前已保存的 Cookie，校验新 Cookie 时不污染旧登录态。
+---@param cookie string
+---@param msg string
+---@return string
+local function expired(cookie, msg)
+    if cookie ~= "" and cookie == Client.cookie() then
+        return require("source.auth").expire(SOURCE_ID, msg)
+    end
+    return msg
+end
+
+---@param path string
+---@param cookie string|nil
+---@param cb fun(html: string|nil, err: string|nil)
+---@return HttpJob
+local function webGet(path, cookie, cb)
+    return Request.get(WEB .. path, {
+        headers = headers(cookie),
+        timeout = require("http.timeout").net(1),
+    }, function(raw, err, res)
+        if not raw then
+            local code = res and tonumber(res.code)
+            if code == 302 or code == 403 then
+                cb(nil, expired(cookie or "", _("起点登录已失效")))
+            else
+                cb(nil, err and tostring(err) or _("请求失败"))
+            end
+            return
+        end
+        cb(raw)
+    end)
+end
+
+---@param wire table|nil
+---@param cookie string
+---@return table|nil data
+---@return string|nil err
+local function okData(wire, cookie)
+    if tonumber(wire.code) == 0 and type(wire.data) == "table" then return wire.data end
+    local msg = type(wire.msg) == "string" and wire.msg ~= "" and wire.msg or _("响应无效")
+    if tonumber(wire.code) == 1403 then msg = expired(cookie, _("起点登录已失效")) end
+    return nil, msg
+end
+
+---@param path string
+---@param params table
+---@param cookie string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return HttpJob
+local function apiGet(path, params, cookie, cb)
+    return Request.get(WEB .. path .. "?" .. query(cookie, params), {
+        accept = "application/json",
+        headers = headers(cookie),
+        timeout = require("http.timeout").net(1),
+    }, function(raw, err, res)
+        if not raw then
+            local code = res and tonumber(res.code)
+            if code == 302 or code == 403 then
+                cb(nil, expired(cookie, _("起点登录已失效")))
+            else
+                cb(nil, err and tostring(err) or _("请求失败"))
+            end
+            return
+        end
+        local ok, wire = pcall(JSON.decode, raw)
+        if not ok or type(wire) ~= "table" then cb(nil, _("响应无效")); return end
+        cb(okData(wire, cookie))
+    end)
+end
+
+---@param book_id string
+---@param data table|nil
+---@return boolean ok
+---@return string|nil err
+local function bookOk(book_id, data)
+    local row = type(data) == "table" and (data[book_id] or data[tostring(book_id)])
+    if type(row) == "table" and tonumber(row.code) ~= 0 then
+        return false, row.message or _("请求失败")
+    end
+    return true
+end
+
+--- 拉书架。先拉默认分组，再拉其余有书的分组，按书号去重。
+---@param cookie string
+---@param cb fun(rows: table[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client.shelfAsync(cookie, cb)
+    if type(cookie) ~= "string" or cookie == "" then
+        return SourceBase.defer(cb, nil, _("未登录起点"))
+    end
+    if not Client.csrf(cookie) then
+        return SourceBase.defer(cb, nil, _("起点 Cookie 缺少登录凭证"))
+    end
+    local cancelled, job = false, nil
+    local books, seen, groups = {}, {}, nil
+    local fetchPage
+    local function addRows(list)
+        for _idx, row in ipairs(type(list) == "table" and list or {}) do
+            local id = row.bid and tostring(row.bid)
+            if id and not seen[id] then
+                seen[id] = true
+                books[#books + 1] = row
+            end
+        end
+    end
+    local function finish(err)
+        if cancelled then return end
+        if err then cb(nil, err) else cb(books) end
+    end
+    local function nextGroup()
+        local gid = groups and table.remove(groups, 1)
+        if not gid then finish(); return end
+        fetchPage(gid, 1)
+    end
+    fetchPage = function(gid, page)
+        if cancelled then return end
+        if page > MAX_PAGES then nextGroup(); return end
+        job = apiGet("/webcommon/bookshelf/mlist", {
+            gid = gid, sort = 0, pageNum = page, pageSize = PAGE_SIZE, sortChange = 0,
+        }, cookie, function(data, err)
+            if cancelled then return end
+            if not data then finish(err); return end
+            addRows(data.list)
+            if groups == nil then
+                groups = {}
+                for _idx, group in ipairs(type(data.groups) == "table" and data.groups or {}) do
+                    local id = tonumber(group.groupId)
+                    if id and id ~= -100 and tonumber(group.bookCount) ~= 0 then
+                        groups[#groups + 1] = id
+                    end
+                end
+            end
+            local info = type(data.page) == "table" and data.page or {}
+            local list = type(data.list) == "table" and data.list or {}
+            if info.isLast == 1 or info.isLast == true or #list < PAGE_SIZE then
+                nextGroup()
+            else
+                fetchPage(gid, page + 1)
+            end
+        end)
+    end
+    fetchPage(-100, 1)
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
+end
+
+--- 校验 Cookie：书架页 200 且 pageData.user.isLogin。cookie 显式传入，登录入口先校验再保存。
+---@param cookie string
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client.loginCheckAsync(cookie, cb)
+    if type(cookie) ~= "string" or cookie == "" then
+        return SourceBase.defer(cb, nil, _("没有读到 Cookie"))
+    end
+    if not Client.csrf(cookie) then
+        return SourceBase.defer(cb, nil, _("起点 Cookie 缺少登录凭证"))
+    end
+    return webGet("/bookshelf/my/", cookie, function(html, err)
+        if not html then cb(nil, err); return end
+        local user = (Mapper.pageData(html) or {}).user
+        if not (type(user) == "table" and (user.isLogin == true or user.login == true)) then
+            cb(nil, expired(cookie, _("起点登录已失效")))
+            return
+        end
+        if cookie == Client.cookie() then require("source.auth").ok(SOURCE_ID) end
+        cb(true)
+    end)
+end
+
+---@param book_id string
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client.addAsync(book_id, cb)
+    local cookie = Client.cookie()
+    if not cookie then return SourceBase.defer(cb, nil, _("未登录起点")) end
+    if not Client.csrf(cookie) then return SourceBase.defer(cb, nil, _("起点 Cookie 缺少登录凭证")) end
+    return Request.post(WEB .. "/webcommon/bookshelf/addbooks?" .. query(cookie), Text.formEncode({ bookId = book_id }), {
+        content_type = "application/x-www-form-urlencoded",
+        headers = headers(cookie),
+        timeout = require("http.timeout").net(1),
+    }, function(raw, err)
+        if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
+        local ok, wire = pcall(JSON.decode, raw)
+        if not ok or type(wire) ~= "table" then cb(nil, _("响应无效")); return end
+        local data, data_err = okData(wire, cookie)
+        if not data then cb(nil, data_err); return end
+        local added, add_err = bookOk(book_id, data)
+        cb(added and true or nil, add_err)
+    end)
+end
+
+---@param book_id string
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client.removeAsync(book_id, cb)
+    local cookie = Client.cookie()
+    if not cookie then return SourceBase.defer(cb, nil, _("未登录起点")) end
+    return apiGet("/webcommon/bookshelf/delbook", { bids = book_id, gid = -100 }, cookie, function(data, err)
+        if not data then cb(nil, err); return end
+        local removed, remove_err = bookOk(book_id, data)
+        cb(removed and true or nil, remove_err)
+    end)
+end
+
+---@param book_id string
+---@param cb fun(info: table|nil, err: string|nil)
+---@return HttpJob
+function Client.detailAsync(book_id, cb)
+    return webGet("/book/" .. book_id .. "/", Client.cookie(), function(html, err)
+        if not html then cb(nil, err); return end
+        local info = (Mapper.pageData(html) or {}).bookInfo
+        if type(info) ~= "table" or not info.bookName then
+            cb(nil, _("起点书籍信息为空"))
+            return
+        end
+        cb(info)
+    end)
+end
+
+---@param book_id string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return HttpJob
+function Client.catalogAsync(book_id, cb)
+    return webGet("/book/" .. book_id .. "/catalog/", Client.cookie(), function(html, err)
+        if not html then cb(nil, err); return end
+        local data = Mapper.pageData(html)
+        if not data then cb(nil, _("起点目录为空")); return end
+        cb(data)
+    end)
+end
+
+--- 一章正文。未购买的 VIP（vipStatus=1 且 isBuy 不是 1）只有预览，不当正文。
+---@param book_id string
+---@param chapter_id string
+---@param cb fun(text: string|nil, err: string|nil)
+---@return HttpJob
+function Client.contentAsync(book_id, chapter_id, cb)
+    return webGet("/chapter/" .. book_id .. "/" .. chapter_id .. "/", Client.cookie(), function(html, err)
+        if not html then cb(nil, err); return end
+        local info = (Mapper.pageData(html) or {}).chapterInfo
+        if type(info) ~= "table" then cb(nil, _("起点章节内容为空")); return end
+        if Mapper.locked(info) then cb(nil, _("起点 VIP 章节未购买")); return end
+        local text = Mapper.chapterText(info.content)
+        if not text then cb(nil, _("起点章节内容为空")); return end
+        cb(text)
+    end)
+end
+
+return Client
