@@ -1,10 +1,9 @@
 --[[--
-配置备份 / 恢复：GET /api/backup 下载月读的分区配置，POST /api/backup 上传恢复。
+配置备份 / 恢复：GET /api/backup 下载月读的全部配置，POST /api/backup 上传恢复。
 
-范围：settings/ 下各拥有者分区（`<拥有者>/setting.lua` 的末段，见 utils.settings）。
-不含：源 / 书城配置（source/<id>/、store/<id>/ 下的登录态、Cookie、令牌）、
-锁屏密码分区（passcode），以及分区顶层键名像密钥的项（*_key、token、password…）。
-恢复时这些键保留设备现值；备份里没有的分区不动。
+范围：settings/ 目录下全部分区文件（各模块设置、源 / 书城 / 第三方扩展配置），
+**包含登录态、Cookie、令牌、API Key、WebDAV 密码、锁屏密码哈希等密钥**——备份文件等同账号凭据，由用户自己保管。
+恢复时备份里出现的分区整表替换（备份里没有的键被清掉），备份里没有的分区不动。
 
 格式是 Lua 表（与 settings 文件同一 dump，类型无损），恢复时在空环境、限步数下执行，
 整份校验通过后才逐个分区就地改写（不换表，持有旧引用的模块不会把旧值刷回去），随后重启 KOReader。
@@ -18,48 +17,26 @@ local Backup = {}
 
 Backup.FORMAT = "moon-settings-backup"
 Backup.VERSION = 1
-Backup.BODY_LIMIT = 1024 * 1024
+Backup.BODY_LIMIT = 8 * 1024 * 1024
 
-local EXCLUDED = { passcode = true }
-local SECRET_WORDS = { "key", "apikey", "token", "secret", "password", "passwd", "cookie", "cookies", "session", "salt", "hash", "auth" }
-
-local PLUGIN_ROOT = debug.getinfo(1, "S").source:match("^@(.*)/features/remote/backup%.lua$") or "."
-
----@param key any
+--- 分区名就是 settings/<名>.lua 的文件名；恢复时据此拼路径，必须是单层安全名（扩展 id 含点，如 ext.kavita）。
+---@param name any
 ---@return boolean
-function Backup.isSecret(key)
-    if type(key) ~= "string" then return false end
-    key = key:lower()
-    for _idx, word in ipairs(SECRET_WORDS) do
-        if key == word or key:sub(-#word - 1) == "_" .. word then return true end
-    end
-    return false
+function Backup.validName(name)
+    return type(name) == "string" and name:match("^[%w_%-][%w_%.%-]*$") ~= nil and not name:find("..", 1, true)
 end
 
-local _sections
-
---- 可备份的分区名：插件内 setting.lua 的末段目录名，跳过源 / 书城子目录与排除名单。
---- 插件文件运行中不变（更新后会重启），扫一次即缓存。
----@return table<string, boolean>
+--- 设备上现有的分区名：settings 目录下的 *.lua。
+---@return string[]
 function Backup.sections()
-    if _sections then return _sections end
     local lfs = require("libs/libkoreader-lfs")
-    local out = {}
-    local function walk(dir, rel)
-        for name in lfs.dir(dir) do
-            if name ~= "." and name ~= ".." then
-                local path, sub = dir .. "/" .. name, rel == "" and name or rel .. "/" .. name
-                if lfs.attributes(path, "mode") == "directory" then
-                    if not sub:match("^source/[^/]+$") and not sub:match("^store/[^/]+$") then walk(path, sub) end
-                elseif name == "setting.lua" and rel ~= "" then
-                    local section = rel:match("[^/]+$")
-                    if not EXCLUDED[section] then out[section] = true end
-                end
-            end
-        end
+    local dir, out = require("utils.paths").settingsDir(), {}
+    if lfs.attributes(dir, "mode") ~= "directory" then return out end
+    for file in lfs.dir(dir) do
+        local name = file:match("^(.+)%.lua$")
+        if name and Backup.validName(name) then out[#out + 1] = name end
     end
-    walk(PLUGIN_ROOT, "")
-    _sections = out
+    table.sort(out)
     return out
 end
 
@@ -67,12 +44,9 @@ end
 ---@return string text Lua 源文本
 function Backup.build()
     local sections = {}
-    for name in pairs(Backup.sections()) do
-        local data, copy = require("utils.settings").getSource(name), {}
-        for key, value in pairs(data) do
-            if not Backup.isSecret(key) then copy[key] = value end
-        end
-        if next(copy) then sections[name] = copy end
+    for _idx, name in ipairs(Backup.sections()) do
+        local data = require("utils.settings").getSource(name)
+        if next(data) then sections[name] = data end
     end
     return "-- 月读配置备份\nreturn " .. require("dump")({
         format = Backup.FORMAT, version = Backup.VERSION, created = os.time(), sections = sections,
@@ -109,27 +83,24 @@ local function parse(text)
     return doc
 end
 
---- 校验整份备份后恢复：只写可备份的分区，密钥键保留现值。
+--- 校验整份备份后恢复：每个分区整表替换。
 ---@param text string
 ---@return string[]|nil restored 已恢复的分区名, string|nil err
 function Backup.restore(text)
     local doc, err = parse(text)
     if not doc then return nil, err end
-    local allowed, names = Backup.sections(), {}
+    local names = {}
     for name, values in pairs(doc.sections) do
-        if allowed[name] and type(values) == "table" then names[#names + 1] = name end
+        if not (Backup.validName(name) and type(values) == "table") then return nil, "invalid backup" end
+        names[#names + 1] = name
     end
     if #names == 0 then return nil, "backup has no settings" end
     table.sort(names)
     local Settings = require("utils.settings")
     for _idx, name in ipairs(names) do
         local data = Settings.getSource(name)
-        for key in pairs(data) do
-            if not Backup.isSecret(key) then data[key] = nil end
-        end
-        for key, value in pairs(doc.sections[name]) do
-            if not Backup.isSecret(key) then data[key] = value end
-        end
+        for key in pairs(data) do data[key] = nil end
+        for key, value in pairs(doc.sections[name]) do data[key] = value end
         Settings.saveSource(name)
     end
     return names
