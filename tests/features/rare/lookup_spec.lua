@@ -254,6 +254,25 @@ end
 Assert.eq(noted, "大猪", "存当前（上次选的）词典释义")
 Assert.eq(clears, 1)
 
+-- 加入生词本：装了原生生词本插件才有按钮，发 WordLookedUp（手动，不看自动开关）
+do
+    local sent
+    local vb_ui = { dictionary = ui.dictionary, vocabulary_builder = {}, doc_props = { display_title = "书名" },
+        handleEvent = function(_, ev) sent = ev end }
+    local vp = Lookup.open{ ui = vb_ui, text = "彘", source = "dict" }
+    for _idx, b in ipairs(Kit.buttons(vp[1])) do
+        if b.text == "加入生词本" then b.callback() end
+    end
+    Assert.eq(sent.name, "WordLookedUp")
+    Assert.eq(sent.args[1], "彘")
+    Assert.eq(sent.args[2], "书名")
+    Assert.eq(sent.args[3], true)
+    vp:close()
+    local plain = Lookup.open{ ui = ui, text = "彘", source = "dict" }
+    for _idx, b in ipairs(Kit.buttons(plain[1])) do Assert.is_true(b.text ~= "加入生词本") end
+    plain:close()
+end
+
 -- 同一时刻只留一个面板：再次打开先关掉旧的
 local first = Lookup.open{ ui = ui, text = "彘" }
 local closed_before = #Kit.closed
