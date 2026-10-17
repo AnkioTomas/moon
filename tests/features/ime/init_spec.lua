@@ -114,6 +114,13 @@ fake_settings.pinyin_enabled = false
 Assert.is_false(install_opts.enabled(), "enabled 必须跟随开关变化")
 fake_settings.pinyin_enabled = true
 
+-- 开关开着但布局列表被重置：onCreate 补回 en / zh_CN，否则地球键无处可切
+saved.keyboard_layouts = nil
+Pinyin.onCreate()
+Assert.eq(saved.keyboard_layouts[2], "zh_CN", "onCreate 补回 zh_CN 布局")
+saved.keyboard_layouts = nil
+saved.book_pinyin_previous_keyboard_layouts = nil
+
 -- ── setEnabled(true)：替代布局 + 装候选栏，不自动下载词库 ──
 Assert.is_false(Pinyin.setEnabled(true), "词库不存在时不允许开启")
 dict_available = true
@@ -127,7 +134,7 @@ Assert.eq(saved.book_pinyin_previous_keyboard_layouts[1], "de")
 Assert.eq(saved.book_pinyin_previous_keyboard_layouts[2], "en")
 Assert.eq(saved.book_pinyin_previous_keyboard_layouts[3], "ru")
 Assert.eq(ensure_calls, 0)
-Assert.eq(install_calls, 2)
+Assert.eq(install_calls, 3)
 
 -- 重复开启仍为相同布局。
 local n_layouts = #layouts
