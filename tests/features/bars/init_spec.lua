@@ -280,14 +280,20 @@ do
     }
     local layout_mod = require("features.bars.layout")
     layout_mod.icons = function() return false end
+    local divided = { top = true, bottom = false }
+    layout_mod.divider = function(which) return divided[which] end
     ui_top.view.footer.settings = { text_font_size = 14, progress_margin_width = 10, text_font_face = "stale" }
     ui_top.view.footer.horizontal_margin = 4
     ui_top.view.footer.footer_text_face = "stale-face"
     ui_top.view.footer.progress_bar = { height = 0 }
     ui_top.view.footer_visible = true
     Bars.ui = ui_top
-    Bars:paintTo({ paintRect = function() end }, 0, 0)
+    local rects = {}
+    Bars:paintTo({ paintRect = function(_bb, x, y, w, h) rects[#rects + 1] = { x = x, y = y, w = w, h = h } end }, 0, 0)
     Assert.len(painted, 2)
+    local lines = 0
+    for _idx, r in ipairs(rects) do if r.h == 1 then lines = lines + 1 end end
+    Assert.eq(lines, 1, "只有开了分割线的顶栏画一条 1px 线")
     for _idx, name in ipairs(faces) do
         Assert.eq(name, "ffont", "栏字体跟随月读界面字体")
     end

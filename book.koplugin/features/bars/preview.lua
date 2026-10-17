@@ -65,6 +65,10 @@ function Preview.build(width, which)
     }
     function inner:paintTo(bb, x, y)
         bb:paintRect(x, y, self.dimen.w, self.dimen.h, Blitbuffer.Color8(t.color.page))
+        if Layout.divider(which) then
+            bb:paintRect(x, which == "top" and y + self.dimen.h - 1 or y, self.dimen.w, 1,
+                Blitbuffer.Color8(t.color.ink))
+        end
         local ctx = Items.sampleContext()
         local pad = require("device").screen:scaleBySize(Layout.BAR_HORIZONTAL_PADDING)
         Items.paint(bb, x + pad, y, math.max(1, self.dimen.w - pad * 2), self.dimen.h, Layout.get(which), ctx, {

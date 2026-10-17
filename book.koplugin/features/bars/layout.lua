@@ -146,6 +146,23 @@ function Layout.setIcons(on)
     MoonSettings.save("features.bars", bars)
 end
 
+local DIVIDER_KEY = { top = "book_reader_top_bar_divider", bottom = "book_reader_bottom_bar_divider" }
+
+--- 栏与正文之间是否画分割线。
+---@param which string "top"|"bottom"
+---@return boolean
+function Layout.divider(which)
+    return MoonSettings.get("features.bars")[DIVIDER_KEY[which]]
+end
+
+---@param which string
+---@param on boolean
+function Layout.setDivider(which, on)
+    local bars = MoonSettings.get("features.bars")
+    bars[DIVIDER_KEY[which]] = on
+    MoonSettings.save("features.bars", bars)
+end
+
 --- 文字字号范围与缺省（与 KOReader 状态栏「Item font size」一致，未缩放的 pt）。
 Layout.FONT_MIN, Layout.FONT_MAX, Layout.FONT_DEFAULT = 8, 36, 14
 --- 顶栏比 CRE 原生页头额外增加的高度范围与缺省（未缩放像素）。
