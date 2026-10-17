@@ -39,6 +39,7 @@ local toc_payload = {}
 stub("book.books_db", function()
     return {
         reconcile = function() return true, 0 end,
+        stableIdsBySource = function() return {} end,
         get = function() return existing_book end,
         getToc = function(_, stable_id) return toc_payload[stable_id] end,
         setToc = function(_, stable_id, payload)

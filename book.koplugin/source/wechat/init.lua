@@ -252,10 +252,17 @@ function Source:coverRequest(identity)
     }
 end
 
+--- 本进程是否已清过旧版同步进书库的公众号行（Mp.dropLegacyBooks）。
+local legacy_mp_dropped = false
+
 ---@param opts { dirty_only?: boolean, force?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return table
 function Source:syncBooksAsync(opts, cb)
+    if not legacy_mp_dropped then
+        legacy_mp_dropped = true
+        require("source.wechat.mp").dropLegacyBooks(require("book.books_db"))
+    end
     return Shelf.syncAsync(self.id, self._client, function(wire)
         return Mapper.shelfList(wire, function(id, url) rememberCover(self, id, url) end).data
     end, opts, cb)

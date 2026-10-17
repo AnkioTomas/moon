@@ -158,6 +158,43 @@ local function downloadBinaryAsync(url, referer, cb)
     end)
 end
 
+--- 单张公众号图片上限：降到 640 档后一般几十到几百 KB，超过的多半是动图，不落地。
+local MAX_ARTICLE_IMAGE = 2 * 1024 * 1024
+
+--- 公众号文章图（mmbiz CDN）：不带微信读书会话 Cookie，Referer 用公众号站点（CDN 防盗链认它）。
+---@param url string
+---@param cb fun(data: string|nil)
+---@return table|nil
+local function downloadArticleImageAsync(url, cb)
+    return require("http.request").request({
+        url = url,
+        method = "GET",
+        headers = {
+            ["Accept"] = "image/jpeg,image/png,image/gif,image/*;q=0.8",
+            ["Referer"] = "https://mp.weixin.qq.com/",
+        },
+        timeout = require("http.timeout").net(3),
+        allow_redirects = true,
+    }, function(res, err)
+        local body = res and res.code == 200 and res.body
+        if not body or body == "" or #body > MAX_ARTICLE_IMAGE then
+            logger.dbg("wechat mp image skipped", url, err or (res and res.code), body and #body)
+            cb(nil)
+            return
+        end
+        cb(body)
+    end)
+end
+
+--- 公众号文章正文里的远程图逐张落到 images_dir（打开该篇时才下），改写成相对路径。
+---@param images_dir string
+---@param html string
+---@param cb fun(html: string)
+---@return { cancel: fun() }
+function Assets.localizeArticleAsync(images_dir, html, cb)
+    return Shared.localizeAsync(html, images_dir, downloadArticleImageAsync, cb)
+end
+
 --- 下载章节 tar 包，提取图片写入 images/ 并返回 src 映射。
 ---@param tar string
 ---@param referer string|nil

@@ -191,7 +191,8 @@ local function appendShelfRows(into, seen, rows)
         local book = unwrapBookRow(row)
         if type(book) == "table" then
             local id = book.bookId or book.id or book.book_id
-            if id ~= nil then
+            -- 公众号只走订阅导入（features.subscribe 直接读书架 wire），不进书库。
+            if id ~= nil and tostring(id):sub(1, 7) ~= "MP_WXS_" then
                 id = tostring(id)
                 if not seen[id] then
                     seen[id] = true

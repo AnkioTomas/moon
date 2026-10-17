@@ -188,4 +188,9 @@ do
         bookProgress = { { bookId = "a", progress = 5, updateTime = 1234 } },
     })
     Assert.eq(list.data[1].read_at, 1234)
+
+    -- 公众号只走订阅导入，书架同步不收进书库
+    local mixed = Mapper.shelfList({ books = { { bookId = "a", title = "A" }, { bookId = "MP_WXS_1", title = "号" } } })
+    Assert.len(mixed.data, 1)
+    Assert.eq(mixed.data[1].stable_id, "a")
 end
