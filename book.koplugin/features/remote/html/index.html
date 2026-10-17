@@ -34,6 +34,16 @@
 <a href="/update.html" class="setting-row"><span class="row-icon tile-purple" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z"/></svg></span><span class="row-text"><span class="row-title">月读更新</span><span class="row-sub">上传月读安装包，设备自动安装并重启 KOReader。</span></span><span class="row-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8.6 16.6 13.2 12 8.6 7.4 10 6l6 6-6 6z"/></svg></span></a>
 <a href="/api/logs.zip" download id="logs-dl" class="setting-row"><span class="row-icon tile-red" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 7V3.5L18.5 9H13zM12 19l-4-4h2.5v-4h3v4H16l-4 4z"/></svg></span><span class="row-text"><span class="row-title">下载日志</span><span class="row-sub">一键打包插件日志与 KOReader 崩溃日志（已脱敏），反馈问题时附上。</span></span><span class="row-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8.6 16.6 13.2 12 8.6 7.4 10 6l6 6-6 6z"/></svg></span></a>
 </nav>
+<section id="bkpanel" class="panel" aria-labelledby="bk-title">
+<h2 id="bk-title">备份与恢复</h2>
+<p class="state">打包月读数据目录（书库、笔记、进度、统计、全部配置），不含日志和缓存。配置里有各书源登录信息、Cookie、密钥和锁屏密码，请妥善保管备份文件。恢复会覆盖设备上的月读数据并自动重启 KOReader。</p>
+<div id="bkstate" class="state" role="status" aria-live="polite"></div>
+<input type="file" id="bkfile" accept=".zip,application/zip" hidden>
+<div class="btns">
+<button type="button" id="bkdl">下载备份</button>
+<button type="button" id="bkpick" class="primary">上传备份并恢复</button>
+</div>
+</section>
 </main>
 <footer class="site-footer"><span>月读 · 作者 Ankio</span><span class="footer-sep" aria-hidden="true">·</span><a href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net</a><span class="footer-note">仅限可信局域网使用</span></footer>
 <script src="/js.js"></script>

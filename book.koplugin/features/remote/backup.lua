@@ -1,139 +1,212 @@
 --[[--
-配置备份 / 恢复：GET /api/backup 下载月读的全部配置，POST /api/backup 上传恢复。
+备份与恢复：GET /api/backup 下载整个 .moon 目录的 zip，POST /api/backup 上传恢复。
 
-范围：settings/ 目录下全部分区文件（各模块设置、源 / 书城 / 第三方扩展配置），
-**包含登录态、Cookie、令牌、API Key、WebDAV 密码、锁屏密码哈希等密钥**——备份文件等同账号凭据，由用户自己保管。
-恢复时备份里出现的分区整表替换（备份里没有的键被清掉），备份里没有的分区不动。
+范围：.moon 下除日志与缓存外的全部内容（book.sqlite3 书库 / 笔记 / 进度 / 统计、settings/ 全部配置，
+**含登录态、Cookie、令牌、API Key、WebDAV 密码、锁屏密码哈希**——备份等同账号凭据，由用户自己保管）、
+锁屏资源、字体、输入法词库。不含：book.log*、cache/（可重新下载）、backups/（补丁原文件，与 KOReader 版本绑定）、
+sqlite 的 -wal / -shm（下载前主进程已 checkpoint，只带主库文件）。
 
-格式是 Lua 表（与 settings 文件同一 dump，类型无损），恢复时在空环境、限步数下执行，
-整份校验通过后才逐个分区就地改写（不换表，持有旧引用的模块不会把旧值刷回去），随后重启 KOReader。
+恢复先整包解到 .moon/restore.part，校验通过（带 MARKER、路径安全）后逐个顶层条目整体替换，失败不动现有数据。
+文件系统部分跑在 IO 子进程里；关库、重载配置与重启由调用方（init.lua）在主进程完成。
 
-dump 是 KOReader 自带模块，离线 / CI 测试没有 KOReader 时要打桩。
+ffi/archiver 的 Writer / Reader 与 lfs 由调用方传入，离线测试可替身。
 
 @module koplugin.book.features.remote.backup
 --]]
 
 local Backup = {}
 
-Backup.FORMAT = "moon-settings-backup"
-Backup.VERSION = 1
-Backup.BODY_LIMIT = 8 * 1024 * 1024
+Backup.MARKER = "moon-backup.txt"
+Backup.MAX_BYTES = 4 * 1024 * 1024 * 1024
+Backup.MAX_ENTRIES = 200000
+Backup.STAGING = "restore.part"
 
---- 分区名就是 settings/<名>.lua 的文件名；恢复时据此拼路径，必须是单层安全名（扩展 id 含点，如 ext.kavita）。
----@param name any
+--- 相对 .moon 的路径是否不进备份。
+---@param rel string
 ---@return boolean
-function Backup.validName(name)
-    return type(name) == "string" and name:match("^[%w_%-][%w_%.%-]*$") ~= nil and not name:find("..", 1, true)
+function Backup.skip(rel)
+    local top = rel:match("^[^/]+")
+    return top == "cache" or top == "backups" or top == Backup.STAGING
+        or rel:match("^book%.log") ~= nil
+        or rel:match("%-wal$") ~= nil or rel:match("%-shm$") ~= nil
 end
 
---- 设备上现有的分区名：settings 目录下的 *.lua。
----@return string[]
-function Backup.sections()
-    local lfs = require("libs/libkoreader-lfs")
-    local dir, out = require("utils.paths").settingsDir(), {}
-    if lfs.attributes(dir, "mode") ~= "directory" then return out end
-    for file in lfs.dir(dir) do
-        local name = file:match("^(.+)%.lua$")
-        if name and Backup.validName(name) then out[#out + 1] = name end
+--- 备份文件名 moon-backup-YYYYMMDD-HHMM.zip
+---@return string
+function Backup.fileName()
+    return os.date("moon-backup-%Y%m%d-%H%M.zip")
+end
+
+---@param lfs table
+---@param root string
+---@return { name: string, path: string }[]
+function Backup.collect(lfs, root)
+    local out = {}
+    local function walk(dir, prefix)
+        for child in lfs.dir(dir) do
+            if child ~= "." and child ~= ".." then
+                local rel, path = prefix .. child, dir .. "/" .. child
+                local attr = lfs.symlinkattributes(path)
+                if attr and not Backup.skip(rel) then
+                    if attr.mode == "directory" then
+                        walk(path, rel .. "/")
+                    elseif attr.mode == "file" then
+                        out[#out + 1] = { name = rel, path = path }
+                    end
+                end
+            end
+        end
     end
-    table.sort(out)
+    if lfs.attributes(root, "mode") == "directory" then walk(root, "") end
+    table.sort(out, function(a, b) return a.name < b.name end)
     return out
 end
 
---- 序列化当前配置（取 utils.settings 的内存实例，未落盘的改动也在内）。
----@return string text Lua 源文本
-function Backup.build()
-    local sections = {}
-    for _idx, name in ipairs(Backup.sections()) do
-        local data = require("utils.settings").getSource(name)
-        if next(data) then sections[name] = data end
+--- 把 .moon 打成 zip。
+---@param output string
+---@param root string
+---@param Writer table ffi/archiver 的 Writer 类
+---@param lfs table
+---@return string|nil output, string|nil err
+function Backup.build(output, root, Writer, lfs)
+    local files = Backup.collect(lfs, root)
+    local writer = Writer:new()
+    if not writer:open(output, "zip") then
+        return nil, writer.err or "cannot create archive"
     end
-    return "-- 月读配置备份\nreturn " .. require("dump")({
-        format = Backup.FORMAT, version = Backup.VERSION, created = os.time(), sections = sections,
-    }, nil, true) .. "\n"
-end
-
---- 值只许字符串 / 数字 / 布尔 / 表（键为字符串或数字）。
-local function plain(v, depth)
-    local t = type(v)
-    if t == "string" or t == "number" or t == "boolean" then return true end
-    if t ~= "table" or depth > 32 then return false end
-    for k, nested in pairs(v) do
-        local kt = type(k)
-        if (kt ~= "string" and kt ~= "number") or not plain(nested, depth + 1) then return false end
+    writer:setZipCompression("deflate")
+    local function fail()
+        local err = writer.err
+        writer:close()
+        os.remove(output)
+        return nil, err or "archive write failed"
     end
-    return true
+    local now = os.time()
+    local mark = string.format("moon-backup 1\ncreated=%d\n", now)
+    if not writer:addFileFromMemory(Backup.MARKER, mark, now) then return fail() end
+    for _idx, file in ipairs(files) do
+        if not writer:addPath(file.name, file.path, false) then return fail() end
+    end
+    writer:close()
+    require("features.remote.logs").fixPerms(output)
+    return output
 end
 
---- 在空环境里解释执行备份文本，限 100 万条指令（防死循环）。
----@param text string
----@return table|nil doc, string|nil err
-local function parse(text)
-    if type(text) ~= "string" or text == "" or text:byte(1) == 27 then return nil, "invalid backup" end
-    local fn = loadstring(text, "=backup")
-    if not fn then return nil, "invalid backup" end
-    setfenv(fn, {})
-    if jit then jit.off(fn, true) end -- 编译后的循环不触发计数钩子
-    debug.sethook(function() error("backup too complex") end, "", 1e6)
-    local ok, doc = pcall(fn)
-    debug.sethook()
-    if not ok or type(doc) ~= "table" or doc.format ~= Backup.FORMAT then return nil, "invalid backup" end
-    if doc.version ~= Backup.VERSION then return nil, "unsupported backup version" end
-    if type(doc.sections) ~= "table" or not plain(doc.sections, 0) then return nil, "invalid backup" end
-    return doc
+---@param lfs table
+---@param path string
+local function rmtree(lfs, path)
+    local attr = lfs.symlinkattributes(path)
+    if not attr then return end
+    if attr.mode == "directory" then
+        for child in lfs.dir(path) do
+            if child ~= "." and child ~= ".." then rmtree(lfs, path .. "/" .. child) end
+        end
+        lfs.rmdir(path)
+    else
+        os.remove(path)
+    end
 end
 
---- 校验整份备份后恢复：每个分区整表替换。
----@param text string
----@return string[]|nil restored 已恢复的分区名, string|nil err
-function Backup.restore(text)
-    local doc, err = parse(text)
-    if not doc then return nil, err end
+--- 条目路径必须是相对、不含 .. 的 / 分隔路径。
+---@param path any
+---@return boolean
+local function safe(path)
+    return type(path) == "string" and path ~= ""
+        and path:sub(1, 1) ~= "/" and not path:find("\\", 1, true) and not path:match("^%a:")
+        and path ~= ".." and not path:match("^%.%./") and not path:match("/%.%./") and not path:match("/%.%.$")
+end
+
+--- 解包并替换 .moon 对应条目。
+---@param archive string
+---@param root string
+---@param Reader table ffi/archiver 的 Reader 类
+---@param lfs table
+---@return string[]|nil restored 被替换的顶层条目名, string|nil err
+function Backup.restore(archive, root, Reader, lfs)
+    local staging = root .. "/" .. Backup.STAGING
+    rmtree(lfs, staging)
+    if not lfs.mkdir(staging) then return nil, "cannot create staging" end
+    local reader = Reader:new()
+    local function fail(err)
+        reader:close()
+        rmtree(lfs, staging)
+        return nil, err
+    end
+    if not reader:open(archive) then return fail("not a moon backup") end
+    local count = 0
+    for entry in reader:iterate() do
+        count = count + 1
+        if count > Backup.MAX_ENTRIES then return fail("too many archive entries") end
+        if not safe(entry.path) then return fail("unsafe archive path") end
+        if entry.mode ~= "file" and entry.mode ~= "directory" then return fail("unsupported archive entry") end
+        if not Backup.skip(entry.path) and not reader:extractToPath(entry.path, staging .. "/" .. entry.path) then
+            return fail(reader.err or "archive extraction failed")
+        end
+    end
+    local iterate_err = reader.err
+    reader:close()
+    if iterate_err then
+        rmtree(lfs, staging)
+        return nil, iterate_err
+    end
+    if lfs.attributes(staging .. "/" .. Backup.MARKER, "mode") ~= "file" then
+        rmtree(lfs, staging)
+        return nil, "not a moon backup"
+    end
+    os.remove(staging .. "/" .. Backup.MARKER)
+
     local names = {}
-    for name, values in pairs(doc.sections) do
-        if not (Backup.validName(name) and type(values) == "table") then return nil, "invalid backup" end
-        names[#names + 1] = name
+    for name in lfs.dir(staging) do
+        if name ~= "." and name ~= ".." then names[#names + 1] = name end
     end
-    if #names == 0 then return nil, "backup has no settings" end
     table.sort(names)
-    local Settings = require("utils.settings")
-    for _idx, name in ipairs(names) do
-        local data = Settings.getSource(name)
-        for key in pairs(data) do data[key] = nil end
-        for key, value in pairs(doc.sections[name]) do data[key] = value end
-        Settings.saveSource(name)
+    if #names == 0 then
+        rmtree(lfs, staging)
+        return nil, "backup is empty"
     end
+    for _idx, name in ipairs(names) do
+        local dest = root .. "/" .. name
+        rmtree(lfs, dest)
+        if name:match("%.sqlite3$") then -- 旧库的 WAL 套不到新库上
+            os.remove(dest .. "-wal")
+            os.remove(dest .. "-shm")
+        end
+        local moved, err = os.rename(staging .. "/" .. name, dest)
+        if not moved then
+            rmtree(lfs, staging)
+            return nil, err
+        end
+    end
+    rmtree(lfs, staging)
     return names
 end
 
---- 备份文件名 moon-settings-YYYYMMDD-HHMM.lua
----@return string
-function Backup.fileName()
-    return os.date("moon-settings-%Y%m%d-%H%M.lua")
-end
+local ERROR_CODES = {
+    ["not a moon backup"] = 400,
+    ["unsafe archive path"] = 400,
+    ["unsupported archive entry"] = 400,
+    ["too many archive entries"] = 400,
+    ["backup is empty"] = 400,
+}
 
---- 路由：GET 下载、POST 恢复（恢复成功后 handlers.settings_restored 负责提示并重启）。
+--- 路由：GET 下载、POST 上传恢复（恢复成功后设备提示并重启，由 handlers.restore_backup 负责）。
 ---@param conn table
 ---@param method string
 ---@param headers table
 function Backup.route(self, conn, method, headers)
     if method == "GET" then
-        return self:_queueResponse(conn, {
-            code = 200, ctype = "text/plain; charset=utf-8", body = Backup.build(),
-            extra = {
-                "Content-Disposition: attachment; filename*=UTF-8''" .. Backup.fileName(),
-                "Cache-Control: no-store",
-            },
-        })
+        return self:_sendBuiltZip(conn, self.handlers.backup_zip, Backup.fileName())
     end
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    return self:_acceptText(conn, headers, Backup.BODY_LIMIT, function(server, c, text)
-        local names, err = Backup.restore(text)
-        if not names then return server:_fail(c, 400, err) end
-        server:_json(c, 200, require("json").encode({ ok = true, sections = names }))
-        if server.handlers.settings_restored then server.handlers.settings_restored() end
+    return self:_acceptFile(conn, headers, Backup.MAX_BYTES, function(temp, reply)
+        self.handlers.restore_backup(temp, function(ok, err)
+            if not ok then
+                return reply(self.errorResp(ERROR_CODES[err] or 500, err))
+            end
+            reply(self.jsonResp(200, '{"ok":true}'))
+        end)
     end)
 end
 

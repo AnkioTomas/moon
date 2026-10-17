@@ -1,149 +1,186 @@
 --[[--
-features.remote.backup 离线测试：全分区含密钥、恢复校验与就地写入、路由。
+features.remote.backup 离线测试：打包范围（不含日志 / 缓存 / wal）、恢复校验与整体替换、路由。
 
 @module tests.features.remote.backup_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field
 
 local Assert = require("support.assert")
-
-local store = {}
-local saved = {}
-package.preload["utils.settings"] = function()
-    return {
-        getSource = function(name)
-            store[name] = store[name] or {}
-            return store[name]
-        end,
-        saveSource = function(name, values)
-            Assert.is_nil(values, "恢复必须就地改表")
-            saved[#saved + 1] = name
-        end,
-    }
-end
-
--- CI 无 KOReader 的 frontend/dump.lua：打桩成等价的 Lua 字面量序列化
-package.loaded["dump"] = nil
-package.preload["dump"] = function()
-    local function dump(value)
-        local kind = type(value)
-        if kind == "string" then return string.format("%q", value) end
-        if kind ~= "table" then return tostring(value) end
-        local keys = {}
-        for key in pairs(value) do keys[#keys + 1] = key end
-        table.sort(keys, function(x, y) return tostring(x) < tostring(y) end)
-        local parts = {}
-        for _, key in ipairs(keys) do
-            parts[#parts + 1] = "[" .. dump(key) .. "]=" .. dump(value[key])
-        end
-        return "{" .. table.concat(parts, ",") .. "}"
-    end
-    return dump
-end
-
 local Config = require("support.config")
-local dir = Config.dir() .. "/backup_spec_settings"
-os.execute("rm -rf '" .. dir .. "' && mkdir -p '" .. dir .. "'")
-for _idx, f in ipairs({ "ai.lua", "reader.lua", "wechat.lua", "ext.kavita.lua", "note.txt" }) do
-    io.open(dir .. "/" .. f, "w"):close()
-end
-package.loaded["utils.paths"] = { settingsDir = function() return dir end }
+local Stubs = require("support.stubs")
+local lfs = require("libs/libkoreader-lfs")
 
 local Backup = require("features.remote.backup")
-local encoded
-package.loaded["json"] = { encode = function(v) encoded = v return "{}" end }
 
--- 范围：settings 目录下全部 *.lua（含源 / 扩展配置），其它文件不算
-Assert.eq(table.concat(Backup.sections(), ","), "ai,ext.kavita,reader,wechat")
-Assert.is_true(Backup.validName("ext.kavita"))
-for _idx, bad_name in ipairs({ "", "../x", "a/b", ".hidden", "a..b" }) do
-    Assert.is_false(Backup.validName(bad_name), bad_name)
+local base = Config.dir() .. "/backup_spec_root"
+local root = base .. "/.moon"
+
+local function sh(cmd) assert(os.execute(cmd)) end
+local function write(path, text)
+    sh("mkdir -p '" .. path:match("^(.*)/[^/]+$") .. "'")
+    local f = assert(io.open(path, "wb"))
+    f:write(text)
+    f:close()
+end
+local function read(path)
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    local text = f:read("*a")
+    f:close()
+    return text
+end
+local function fresh()
+    sh("rm -rf '" .. base .. "'")
+    sh("mkdir -p '" .. root .. "'")
 end
 
--- 备份：密钥原样带上，空分区不写
-store.ai = { ai_endpoint = "https://x", ai_api_key = "sk-secret", ai_timeout = 120 }
-store.reader = { list = { 3, 1, 2 }, [5] = "five" }
-store.wechat = { cookie = "SESSION" }
-local text = Backup.build()
-Assert.is_true(text:find("sk-secret", 1, true) ~= nil)
-Assert.is_true(text:find("SESSION", 1, true) ~= nil)
-Assert.is_nil(text:find("ext.kavita", 1, true))
+-- ── 打包范围 ───────────────────────────────────────────
+fresh()
+write(root .. "/book.sqlite3", "DB")
+write(root .. "/book.sqlite3-wal", "WAL")
+write(root .. "/book.sqlite3-shm", "SHM")
+write(root .. "/book.log", "log")
+write(root .. "/book.log.1", "log1")
+write(root .. "/settings/ui.lua", "return {}")
+write(root .. "/settings/wechat.lua", "return {cookie='x'}")
+write(root .. "/screensaver/custom.png", "PNG")
+write(root .. "/cache/wechat/book/a/1.html", "html")
+write(root .. "/backups/patches/x/orig.lua", "orig")
+write(root .. "/restore.part/stale", "stale")
 
--- 恢复：类型无损，分区整表替换（含密钥），备份外的分区不动
-store.ai = { ai_endpoint = "https://old", ai_api_key = "sk-now", stale = true }
-store.reader = {}
-store.wechat = { cookie = "OLD" }
-store.untouched = { v = 1 }
-saved = {}
-local names = assert(Backup.restore(text))
-Assert.eq(table.concat(names, ","), "ai,reader,wechat")
-Assert.eq(table.concat(saved, ","), "ai,reader,wechat")
-Assert.eq(store.ai.ai_endpoint, "https://x")
-Assert.eq(store.ai.ai_api_key, "sk-secret")
-Assert.eq(store.ai.ai_timeout, 120)
-Assert.is_nil(store.ai.stale)
-Assert.eq(store.wechat.cookie, "SESSION")
-Assert.eq(store.reader.list[3], 2)
-Assert.eq(store.reader[5], "five")
-Assert.eq(store.untouched.v, 1)
+local names = {}
+for _idx, file in ipairs(Backup.collect(lfs, root)) do names[#names + 1] = file.name end
+Assert.eq(table.concat(names, ","), "book.sqlite3,screensaver/custom.png,settings/ui.lua,settings/wechat.lua",
+    "含库与全部配置，不含日志 / 缓存 / 补丁备份 / wal / 暂存")
 
--- 篡改：分区名不是单层安全名整份拒绝
-saved = {}
-local forged = 'return { format = "moon-settings-backup", version = 1, sections = { ["../evil"] = { a = 1 } } }'
-Assert.is_nil(Backup.restore(forged))
-Assert.len(saved, 0)
+local added, memory = {}, {}
+local Writer = {}
+Writer.__index = Writer
+function Writer:new() return setmetatable({}, Writer) end
+function Writer:open() return true end
+function Writer:setZipCompression() end
+function Writer:addFileFromMemory(name, text) memory[name] = text; return true end
+function Writer:addPath(name, path) added[#added + 1] = name .. "=" .. read(path); return true end
+function Writer:close() end
 
--- 非法输入一律拒绝且不写
-saved = {}
-local bad = {
-    "",
-    "not lua (",
-    "\27LuaJ",
-    "return 1",
-    'return { format = "other", version = 1, sections = {} }',
-    'return { format = "moon-settings-backup", version = 2, sections = { ai = {} } }',
-    'return { format = "moon-settings-backup", version = 1, sections = { ai = { f = function() end } } }',
-    'return { format = "moon-settings-backup", version = 1, sections = { ai = { [true] = 1 } } }',
-    'return os.exit()',
-    'while true do end',
-    'local function f() while true do end end f()',
-    'return { format = "moon-settings-backup", version = 1, sections = { ["a/b"] = { a = 1 } } }',
-}
-for _idx, input in ipairs(bad) do
-    local ok, err = Backup.restore(input)
-    Assert.is_nil(ok, "应拒绝: " .. input)
-    Assert.is_true(type(err) == "string")
+local out = base .. "/out.zip"
+write(out, "")
+Assert.eq(Backup.build(out, root, Writer, lfs), out)
+Assert.is_true(memory[Backup.MARKER]:find("moon-backup", 1, true) ~= nil, "带标记文件")
+Assert.eq(added[1], "book.sqlite3=DB")
+Assert.eq(#added, 4)
+
+local failing = setmetatable({}, { __index = Writer })
+failing.__index = failing
+function failing:new() return setmetatable({ err = "disk full" }, failing) end
+function failing:addPath() return false end
+write(out, "x")
+local built, err = Backup.build(out, root, failing, lfs)
+Assert.is_nil(built)
+Assert.eq(err, "disk full")
+Assert.is_nil(read(out), "失败不留半成品")
+
+-- ── 恢复 ───────────────────────────────────────────────
+--- 条目表 → Reader：extractToPath 真写文件。
+local function reader(entries)
+    local R = {}
+    R.__index = R
+    function R:new() return setmetatable({}, R) end
+    function R:open() return not entries.unreadable end
+    function R:iterate()
+        local i = 0
+        return function()
+            i = i + 1
+            return entries[i] and { path = entries[i].path, mode = entries[i].mode or "file" }
+        end
+    end
+    function R:extractToPath(path, dest)
+        for _idx, entry in ipairs(entries) do
+            if entry.path == path then
+                if entry.mode == "directory" then sh("mkdir -p '" .. dest .. "'") else write(dest, entry.text or "") end
+            end
+        end
+        return true
+    end
+    function R:close() end
+    return R
 end
-Assert.len(saved, 0)
 
--- 路由：GET 附件下载；POST 收齐后恢复并通知设备；其它方法 405
-local resp, fail, restarted
+local function seed()
+    fresh()
+    write(root .. "/book.sqlite3", "OLD")
+    write(root .. "/book.sqlite3-wal", "OLDWAL")
+    write(root .. "/book.sqlite3-shm", "OLDSHM")
+    write(root .. "/book.log", "keep-log")
+    write(root .. "/settings/old.lua", "return {}")
+    write(root .. "/cache/keep.txt", "keep-cache")
+end
+
+seed()
+local restored, rerr = Backup.restore("ignored.zip", root, reader({
+    { path = Backup.MARKER, text = "moon-backup 1" },
+    { path = "book.sqlite3", text = "NEW" },
+    { path = "settings", mode = "directory" },
+    { path = "settings/wechat.lua", text = "return {cookie='x'}" },
+    { path = "cache/evil.txt", text = "ignored" },
+}), lfs)
+Assert.is_nil(rerr)
+Assert.eq(table.concat(restored, ","), "book.sqlite3,settings")
+Assert.eq(read(root .. "/book.sqlite3"), "NEW")
+Assert.is_nil(read(root .. "/book.sqlite3-wal"), "旧 WAL 不能套到新库")
+Assert.is_nil(read(root .. "/book.sqlite3-shm"))
+Assert.is_nil(read(root .. "/settings/old.lua"), "settings 整体替换，备份里没有的分区被清掉")
+Assert.eq(read(root .. "/settings/wechat.lua"), "return {cookie='x'}")
+Assert.eq(read(root .. "/book.log"), "keep-log", "日志不动")
+Assert.eq(read(root .. "/cache/keep.txt"), "keep-cache", "缓存不动")
+Assert.is_nil(read(root .. "/cache/evil.txt"), "备份里的缓存条目被忽略")
+Assert.is_nil(lfs.attributes(root .. "/" .. Backup.STAGING), "暂存目录清掉")
+Assert.is_nil(read(root .. "/" .. Backup.MARKER))
+
+-- 非法备份：现有数据原封不动
+local function rejected(entries, expect)
+    seed()
+    local ok, e = Backup.restore("ignored.zip", root, reader(entries), lfs)
+    Assert.is_nil(ok)
+    Assert.eq(e, expect)
+    Assert.eq(read(root .. "/book.sqlite3"), "OLD", expect .. "：失败不动现有数据")
+    Assert.is_nil(lfs.attributes(root .. "/" .. Backup.STAGING), expect .. "：暂存清掉")
+end
+rejected({ { path = "book.sqlite3", text = "NEW" } }, "not a moon backup")
+rejected({ unreadable = true }, "not a moon backup")
+rejected({ { path = Backup.MARKER }, { path = "../evil", text = "x" } }, "unsafe archive path")
+rejected({ { path = Backup.MARKER }, { path = "/abs", text = "x" } }, "unsafe archive path")
+rejected({ { path = Backup.MARKER }, { path = "a/../../b", text = "x" } }, "unsafe archive path")
+rejected({ { path = Backup.MARKER }, { path = "link", mode = "link" } }, "unsupported archive entry")
+rejected({ { path = Backup.MARKER }, { path = "cache/only.txt", text = "x" } }, "backup is empty")
+
+-- ── 路由 ───────────────────────────────────────────────
+local sent, failed
 local server = {
-    handlers = { settings_restored = function() restarted = true end },
-    _queueResponse = function(_self, _conn, r) resp = r end,
-    _fail = function(_self, _conn, code, msg) fail = { code, msg } end,
-    _json = function(_self, _conn, code, body) resp = { code = code, body = body } end,
-    _acceptText = function(self, conn, _headers, limit, finish)
-        Assert.eq(limit, Backup.BODY_LIMIT)
-        finish(self, conn, self.body)
+    handlers = {
+        backup_zip = function() end,
+        restore_backup = function(temp, cb) cb(temp == "T", temp == "T" and nil or "not a moon backup") end,
+    },
+    errorResp = function(code, msg) return { code = code, msg = msg } end,
+    jsonResp = function(code, body) return { code = code, body = body } end,
+    _sendBuiltZip = function(_self, _conn, build, name) sent = { build = build, name = name } end,
+    _fail = function(_self, _conn, code) failed = code end,
+    _acceptFile = function(_self, _conn, _headers, limit, commit)
+        local resp
+        commit("T", function(r) resp = r end)
+        commit("bad", function(r) resp = { first = resp, second = r } end)
+        return limit, resp
     end,
 }
 Backup.route(server, {}, "GET", {})
-Assert.eq(resp.code, 200)
-Assert.is_true(resp.extra[1]:find("moon%-settings%-%d+%-%d+%.lua") ~= nil)
-Assert.is_true(resp.body:find("moon-settings-backup", 1, true) ~= nil)
-server.body = text
-Backup.route(server, {}, "POST", {})
-Assert.eq(resp.code, 200)
-Assert.eq(table.concat(encoded.sections, ","), "ai,reader,wechat")
-Assert.is_true(restarted)
-restarted = nil
-server.body = "garbage"
-Backup.route(server, {}, "POST", {})
-Assert.eq(fail[1], 400)
-Assert.is_nil(restarted)
+Assert.eq(sent.build, server.handlers.backup_zip)
+Assert.matches(sent.name, "^moon%-backup%-%d+%-%d+%.zip$")
 Backup.route(server, {}, "DELETE", {})
-Assert.eq(fail[1], 405)
+Assert.eq(failed, 405)
+local _limit, resp = Backup.route(server, {}, "POST", {})
+Assert.eq(_limit, Backup.MAX_BYTES)
+Assert.eq(resp.first.code, 200)
+Assert.eq(resp.second.code, 400, "校验失败映射 400")
 
-package.preload["dump"] = nil
-package.loaded["dump"] = nil
+sh("rm -rf '" .. base .. "'")
+Stubs.flush()
