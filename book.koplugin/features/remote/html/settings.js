@@ -83,7 +83,26 @@ function renderForms(list, external) {
     var input = el('bkfile');
     var pick = el('bkpick');
     var state = el('bkstate');
-    el('bkdl').onclick = function () { location.href = '/api/backup'; };
+    var dl = el('bkdl');
+    dl.onclick = function () {
+        dl.disabled = true;
+        setState(state, '正在生成备份，请稍候…', '');
+        fetch('/api/backup').then(function (res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            var name = /filename\*=UTF-8''([^;]+)/.exec(res.headers.get('Content-Disposition') || '');
+            return res.blob().then(function (blob) {
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = name ? decodeURIComponent(name[1]) : 'moon-backup.lua';
+                a.click();
+                URL.revokeObjectURL(a.href);
+            });
+        }).then(function () {
+            setState(state, '备份已下载 ✓', 'ok');
+        }).catch(function (err) {
+            setState(state, t('下载失败：%1', err.message || String(err)), 'err');
+        }).then(function () { dl.disabled = false; });
+    };
     pick.onclick = function () { input.click(); };
     input.onchange = function () {
         var file = input.files[0];
