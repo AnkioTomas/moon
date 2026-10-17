@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<!-- 订阅管理页（features/subscribe 经 web.routes 开放的静态文件；顶栏入口由 /js.js 按 /api/pages 补上；逻辑在 /subscribe.js，共享函数在 /js.js，接口 /api/subscribe/*） -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>订阅管理 - 远程管理</title>
+<link rel="icon" href="/favicon.ico?v=2" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<meta name="theme-color" content="#263a52">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/subscribe.css">
+<script>try{var t=localStorage.getItem('moon-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);var l=localStorage.getItem('moon-lang');if(l&&!/^zh_CN/.test(l))document.documentElement.classList.add('i18n-wait')}catch(e){}</script>
+</head>
+<body class="file-page sub-page">
+<header class="appbar"><div class="appbar-inner">
+<a class="appbar-brand" href="/"><img src="/logo.jpg" alt="" width="28" height="28"><span>月读远程管理</span></a>
+<nav class="appbar-nav" aria-label="页面导航"><a href="/"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span>首页</span></a><a href="/file.html"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg><span>文件</span></a><a href="/input.html"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M20 5H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z"/></svg><span>输入</span></a><a href="/clipboard.html"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1S9.6 1.84 9.18 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm5 14H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg><span>剪贴板</span></a><a href="/settings.html"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.47.47 0 0 0-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/></svg><span>配置</span></a><a href="/update.html"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z"/></svg><span>更新</span></a></nav>
+<button type="button" id="theme-toggle" class="icon-btn" aria-label="切换主题" title="主题：跟随系统"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18V4a8 8 0 0 1 0 16z"/></svg></button>
+</div></header>
+<main class="file-main">
+<div class="tab-strip sub-strip">
+<div class="file-action-toolbar sub-toolbar" role="toolbar" aria-label="订阅操作">
+<div class="fa-group fa-left">
+<label class="sub-search"><span class="visually-hidden">搜索订阅</span><input id="q" type="search" placeholder="搜索标题或地址" autocomplete="off"></label>
+<select id="sort" aria-label="排序方式"><option value="manual">手动排序</option><option value="title">按标题</option><option value="unread">按未读</option><option value="updated">按更新时间</option></select>
+</div>
+<div class="fa-group fa-right">
+<button type="button" id="add" class="file-action primary">添加订阅</button>
+<button type="button" id="refresh-all" class="file-action">全部刷新</button>
+<button type="button" id="bulk-open" class="file-action">文本编辑</button>
+<button type="button" id="import" class="file-action">导入 OPML</button>
+<a id="export" class="file-action" href="/api/subscribe/opml" download>导出 OPML</a>
+<input type="file" id="import-file" accept=".opml,.xml,text/xml,text/x-opml" hidden>
+</div>
+</div>
+</div>
+<div id="batch" class="sub-batch" role="toolbar" aria-label="批量操作" hidden>
+<span id="batch-count" class="count-badge"></span>
+<button type="button" id="b-move" class="file-action">移到分组</button>
+<button type="button" id="b-refresh" class="file-action">刷新</button>
+<button type="button" id="b-delete" class="file-action danger-text">删除</button>
+<button type="button" id="b-clear" class="file-action">取消选择</button>
+</div>
+<div id="banner" class="sub-banner" hidden></div>
+
+<div class="explorer-shell">
+<aside class="explorer-sidebar sub-sidebar" aria-label="分组">
+<div class="sidebar-title">分组</div>
+<div id="groups" class="quick-list sub-groups"></div>
+<button type="button" id="new-group" class="sub-new-group">＋ 新建分组</button>
+<div class="sidebar-credit">月读 · Ankio · <a href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net</a></div>
+</aside>
+
+<section class="explorer-content" aria-labelledby="list-title">
+<h1 id="list-title" class="visually-hidden">订阅列表</h1>
+<div class="table-wrap" id="listwrap">
+<table class="sub-list">
+<tbody id="list"><tr><td class="empty">正在加载…</td></tr></tbody>
+</table>
+</div>
+</section>
+</div>
+</main>
+
+<div id="toasts" class="sub-toasts" aria-live="polite"></div>
+
+<div id="ov" class="overlay" hidden>
+<div id="dlg" class="dialog" role="dialog" aria-modal="true" aria-labelledby="dt">
+<h2 id="dt"></h2>
+<p id="dm"></p>
+<label id="dilabel" class="visually-hidden" for="di">输入</label>
+<input id="di" type="text" hidden>
+<div class="btns">
+<button type="button" id="dc">取消</button>
+<button type="button" id="dk" class="primary">确定</button>
+</div>
+</div>
+</div>
+
+<div id="feed-dlg" class="overlay up-overlay" hidden>
+<form id="feed-form" class="dialog sub-dialog" role="dialog" aria-modal="true" aria-labelledby="fd-title">
+<h2 id="fd-title">添加订阅</h2>
+<div id="fd-kinds" class="sub-kinds" role="radiogroup" aria-label="订阅类型">
+<label class="opt"><input type="radio" name="kind" value="rss" checked><span><strong>RSS / Atom</strong><small>填订阅源地址，或带订阅源的网页</small></span></label>
+<label class="opt"><input type="radio" name="kind" value="site"><span><strong>任意网站</strong><small>抓取网页里的文章链接</small></span></label>
+</div>
+<div class="field"><label for="fd-url">地址</label>
+<div class="sub-url-row"><input id="fd-url" type="url" required placeholder="https://" spellcheck="false"><button type="button" id="fd-test">测试</button></div></div>
+<div class="field"><label for="fd-name">名称</label><input id="fd-name" type="text" placeholder="留空使用订阅源标题"></div>
+<div class="field"><label for="fd-group">分组</label><input id="fd-group" type="text" list="group-names" placeholder="未分组"><datalist id="group-names"></datalist></div>
+<div id="fd-kind-note" class="sheet-note" hidden>公众号来自微信读书书架，地址不可修改。</div>
+<div id="fd-preview" class="sub-preview" hidden></div>
+<div id="fd-state" class="state" role="status"></div>
+<div class="btns">
+<button type="button" id="fd-cancel">取消</button>
+<button type="submit" id="fd-ok" class="primary">添加</button>
+</div>
+</form>
+</div>
+
+<div id="articles" class="fullscreen sub-articles" role="dialog" aria-modal="true" aria-labelledby="ar-title" hidden>
+<header class="ed-header">
+<button type="button" id="ar-close" class="icon-btn" aria-label="关闭">✕</button>
+<h2 id="ar-title" translate="no" class="ed-title"></h2>
+<span id="ar-count" class="ed-msg"></span>
+<select id="ar-filter" aria-label="筛选"><option value="">全部</option><option value="0">未读</option><option value="1">已读</option></select>
+<button type="button" id="ar-readall">全部标为已读</button>
+<button type="button" id="ar-refresh">刷新</button>
+</header>
+<div class="sub-reader">
+<ul id="ar-list" class="sub-art-list"></ul>
+<div class="sub-art-view"><p id="ar-hint" class="empty">选择一篇文章预览</p><article id="ar-body" class="sub-art-body" hidden></article></div>
+</div>
+</div>
+
+<div id="bulk" class="fullscreen sub-bulk" role="dialog" aria-modal="true" aria-labelledby="bk-title" hidden>
+<header class="ed-header">
+<button type="button" id="bk-close" class="icon-btn" aria-label="关闭">✕</button>
+<h2 id="bk-title" class="ed-title">文本编辑</h2>
+<button type="button" id="bk-reset">还原</button>
+<button type="button" id="bk-preview" class="primary">预览变更</button>
+</header>
+<p class="sub-bulk-help">每行一个订阅：只写网址即可，标题和类型会自动识别；也可以写「标题 | 网址」或「网址 | 分组」。用「# 分组名」开始一个分组。删掉一行就是取消订阅；公众号行只能移组、排序或删除。</p>
+<textarea id="bk-text" spellcheck="false" wrap="off" aria-label="订阅文本" translate="no"></textarea>
+</div>
+
+<div id="plan" class="overlay up-overlay" hidden>
+<div class="dialog sub-dialog" role="dialog" aria-modal="true" aria-labelledby="pl-title">
+<h2 id="pl-title">确认变更</h2>
+<div id="pl-body" class="sub-plan"></div>
+<div id="pl-state" class="state" role="status"></div>
+<div class="btns">
+<button type="button" id="pl-cancel">返回修改</button>
+<button type="button" id="pl-ok" class="primary">应用</button>
+</div>
+</div>
+</div>
+
+<div id="prog" class="overlay up-overlay" hidden>
+<div class="dialog progress-dialog" role="dialog" aria-modal="true" aria-labelledby="pg-title">
+<h2 id="pg-title" class="pg-title">正在刷新…</h2>
+<div id="pg-name" translate="no" class="pg-name"></div>
+<div class="pg-track" role="progressbar" aria-label="刷新进度"><div id="pg-fill" class="pg-fill"></div></div>
+<div id="pg-stats" class="pg-stats"></div>
+<div class="btns"><button type="button" id="pg-cancel" class="btn-outline">停止</button></div>
+</div>
+</div>
+
+<script src="/js.js"></script>
+<script src="/subscribe.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+﻿<?xml version='1.0' encoding='utf-8'?>
+<opml version="2.0">
+  <head>
+    <title>Tidings Curated RSS — Complete Collection</title>
+    <dateCreated>2026-08-13</dateCreated>
+    <dateModified>2026-08-13</dateModified>
+    <ownerName>Tidings RSS Community</ownerName>
+    <docs>http://opml.org/spec2.opml</docs>
+  </head>
+  <body>
+    <outline text="🤖 Artificial Intelligence" title="🤖 Artificial Intelligence">
+      <outline text="AI" title="AI" type="rss" xmlUrl="https://blog.google/technology/ai/rss/" htmlUrl="https://blog.google/innovation-and-ai/technology/ai/" />
+      <outline text="AI Musings by Mu" title="AI Musings by Mu" type="rss" xmlUrl="https://kelvinmu.substack.com/feed" htmlUrl="https://kelvinmu.substack.com" />
+      <outline text="AI 开发者日报" title="AI 开发者日报" type="rss" xmlUrl="https://ainews.liduos.com/rss.xml" htmlUrl="https://ainews.liduos.com" />
+    </outline>
+    <outline text="🛠️ Engineering &amp; Technology" title="🛠️ Engineering &amp; Technology">
+      <outline text="1A23 Studio" title="1A23 Studio" type="rss" xmlUrl="https://1a23.com/feed/" htmlUrl="https://1a23.com/" />
+      <outline text="251 的魔法实验室" title="251 的魔法实验室" type="rss" xmlUrl="https://blog.251.sh/feed/" htmlUrl="https://blog.251.sh/" />
+      <outline text="49th LunaSea" title="49th LunaSea" type="rss" xmlUrl="https://maki49.github.io/feed.xml" htmlUrl="https://maki49.github.io/" />
+    </outline>
+  </body>
+</opml>

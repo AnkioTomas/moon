@@ -118,6 +118,7 @@ Features.list = {
     "ime",
     "remote",
     "update",
+    "subscribe",
     "extensions",
 }
 
