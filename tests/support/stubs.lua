@@ -283,7 +283,7 @@ end
 
 local function installLeafStubs()
     installIfMissing("ffi/blitbuffer", function()
-        return { COLOR_BLACK = 0, COLOR_WHITE = 255 }
+        return { COLOR_BLACK = 0, COLOR_WHITE = 255, COLOR_GRAY = 170, COLOR_GRAY_E = 238 }
     end)
     installIfMissing("ffi/posix", function()
         return {}
