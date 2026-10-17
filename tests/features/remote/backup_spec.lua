@@ -1,5 +1,5 @@
 --[[--
-features.remote.backup 离线测试：分区范围、密钥剔除、恢复校验与就地写入、路由。
+features.remote.backup 离线测试：全分区含密钥、恢复校验与就地写入、路由。
 
 @module tests.features.remote.backup_spec
 --]]
@@ -41,55 +41,57 @@ package.preload["dump"] = function()
     return dump
 end
 
+local Config = require("support.config")
+local dir = Config.dir() .. "/backup_spec_settings"
+os.execute("rm -rf '" .. dir .. "' && mkdir -p '" .. dir .. "'")
+for _idx, f in ipairs({ "ai.lua", "reader.lua", "wechat.lua", "ext.kavita.lua", "note.txt" }) do
+    io.open(dir .. "/" .. f, "w"):close()
+end
+package.loaded["utils.paths"] = { settingsDir = function() return dir end }
+
 local Backup = require("features.remote.backup")
 local encoded
 package.loaded["json"] = { encode = function(v) encoded = v return "{}" end }
 
--- 范围：拥有者分区在内；源 / 书城子目录（登录态）与锁屏密码不在
-local sections = Backup.sections()
-for _idx, name in ipairs({ "ai", "reader", "desktop", "home", "remote", "source", "store", "ui" }) do
-    Assert.is_true(sections[name], "应可备份: " .. name)
-end
-for _idx, name in ipairs({ "wechat", "jdread", "fanqie", "moon", "copymanga", "zlib", "opds", "passcode", "common" }) do
-    Assert.is_nil(sections[name], "不应备份: " .. name)
+-- 范围：settings 目录下全部 *.lua（含源 / 扩展配置），其它文件不算
+Assert.eq(table.concat(Backup.sections(), ","), "ai,ext.kavita,reader,wechat")
+Assert.is_true(Backup.validName("ext.kavita"))
+for _idx, bad_name in ipairs({ "", "../x", "a/b", ".hidden", "a..b" }) do
+    Assert.is_false(Backup.validName(bad_name), bad_name)
 end
 
-Assert.is_true(Backup.isSecret("ai_api_key"))
-Assert.is_true(Backup.isSecret("token"))
-Assert.is_true(Backup.isSecret("Password"))
-Assert.is_false(Backup.isSecret("page_keys"))
-Assert.is_false(Backup.isSecret("home_widgets"))
-
--- 备份：剔除密钥键，空分区不写
+-- 备份：密钥原样带上，空分区不写
 store.ai = { ai_endpoint = "https://x", ai_api_key = "sk-secret", ai_timeout = 120 }
 store.reader = { list = { 3, 1, 2 }, [5] = "five" }
 store.wechat = { cookie = "SESSION" }
 local text = Backup.build()
-Assert.is_nil(text:find("sk-secret", 1, true))
-Assert.is_nil(text:find("SESSION", 1, true))
+Assert.is_true(text:find("sk-secret", 1, true) ~= nil)
+Assert.is_true(text:find("SESSION", 1, true) ~= nil)
+Assert.is_nil(text:find("ext.kavita", 1, true))
 
--- 恢复：类型无损，密钥保留现值，备份外的键被替换掉
+-- 恢复：类型无损，分区整表替换（含密钥），备份外的分区不动
 store.ai = { ai_endpoint = "https://old", ai_api_key = "sk-now", stale = true }
 store.reader = {}
+store.wechat = { cookie = "OLD" }
+store.untouched = { v = 1 }
 saved = {}
 local names = assert(Backup.restore(text))
-Assert.eq(table.concat(names, ","), "ai,reader")
-Assert.eq(table.concat(saved, ","), "ai,reader")
+Assert.eq(table.concat(names, ","), "ai,reader,wechat")
+Assert.eq(table.concat(saved, ","), "ai,reader,wechat")
 Assert.eq(store.ai.ai_endpoint, "https://x")
-Assert.eq(store.ai.ai_api_key, "sk-now")
+Assert.eq(store.ai.ai_api_key, "sk-secret")
 Assert.eq(store.ai.ai_timeout, 120)
 Assert.is_nil(store.ai.stale)
+Assert.eq(store.wechat.cookie, "SESSION")
 Assert.eq(store.reader.list[3], 2)
 Assert.eq(store.reader[5], "five")
+Assert.eq(store.untouched.v, 1)
 
--- 篡改：不在范围的分区忽略，备份里的密钥不生效
+-- 篡改：分区名不是单层安全名整份拒绝
 saved = {}
-local forged = 'return { format = "moon-settings-backup", version = 1, sections = { '
-    .. 'wechat = { cookie = "evil" }, ai = { ai_api_key = "sk-evil", ai_model = "m" } } }'
-assert(Backup.restore(forged))
-Assert.eq(store.wechat.cookie, "SESSION")
-Assert.eq(store.ai.ai_api_key, "sk-now")
-Assert.eq(store.ai.ai_model, "m")
+local forged = 'return { format = "moon-settings-backup", version = 1, sections = { ["../evil"] = { a = 1 } } }'
+Assert.is_nil(Backup.restore(forged))
+Assert.len(saved, 0)
 
 -- 非法输入一律拒绝且不写
 saved = {}
@@ -105,7 +107,7 @@ local bad = {
     'return os.exit()',
     'while true do end',
     'local function f() while true do end end f()',
-    'return { format = "moon-settings-backup", version = 1, sections = { wechat = { a = 1 } } }',
+    'return { format = "moon-settings-backup", version = 1, sections = { ["a/b"] = { a = 1 } } }',
 }
 for _idx, input in ipairs(bad) do
     local ok, err = Backup.restore(input)
@@ -133,7 +135,7 @@ Assert.is_true(resp.body:find("moon-settings-backup", 1, true) ~= nil)
 server.body = text
 Backup.route(server, {}, "POST", {})
 Assert.eq(resp.code, 200)
-Assert.eq(table.concat(encoded.sections, ","), "ai,reader")
+Assert.eq(table.concat(encoded.sections, ","), "ai,reader,wechat")
 Assert.is_true(restarted)
 restarted = nil
 server.body = "garbage"
