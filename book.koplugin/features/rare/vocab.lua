@@ -49,7 +49,8 @@ function Vocab.set()
     end)
     if not ok then
         logger.warn("book.rare vocab read failed", err)
-        return {}
+        cache_mtime, cache_set = mtime, {}
+        return cache_set
     end
     cache_mtime, cache_set = mtime, Vocab.toSet(words)
     return cache_set

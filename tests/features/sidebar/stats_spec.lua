@@ -68,7 +68,7 @@ Assert.eq(Stats.available(ui), false, "统计已关闭")
 stat.enabled, stat.id_curr_book = true, nil
 Assert.eq(Stats.available(ui), false, "本书未入库")
 stat.id_curr_book = 7
-session = { identity = { source = { ephemeral = true } } }
+session = { identity = { ephemeral = true } }
 Assert.eq(Stats.available(ui), false, "订阅文章不显示统计页")
 session = nil
 Assert.not_nil(Stats.build(ui, 400))

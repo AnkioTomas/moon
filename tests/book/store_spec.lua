@@ -282,6 +282,7 @@ do
     Assert.eq(#chapter_upserts, 0)
     Assert.eq(#book_upserts, 0) -- 命中身份不写 books 元数据
     Assert.eq(id.source.id, "moon") -- ensureIdentity 附属主源
+    Assert.is_false(id.ephemeral)
     chapter_rows[path] = nil
     touch_calls = {}
     chapter_upserts = {}

@@ -73,7 +73,7 @@ function SessionStats.start(snapshot)
     SessionStats.stop()
     -- ephemeral 源（订阅）不记统计
     local identity = snapshot and snapshot.identity
-    if not identity or (identity.source and identity.source.ephemeral) then return end
+    if not identity or identity.ephemeral then return end
     SessionStats.session = {
         identity = snapshot.identity,
         page = tonumber(snapshot.page) or 0,

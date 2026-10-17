@@ -651,25 +651,18 @@ end
 
 function GET.text(_q, cb) cb(200, { text = Remote.serialize() }) end
 
---- 分发。
+--- 分发；回调只回一次由调用方（remote/ext_route）保证。
 ---@param method "GET"|"POST"
 ---@param action string
 ---@param params table query（GET）或 JSON body（POST）
 ---@param cb fun(status: integer, result: table)
 function Remote.handle(method, action, params, cb)
-    -- 恰好回一次：处理函数回过之后再抛错（或异步重复回调）都丢掉。
-    local answered = false
-    local function once(status, result)
-        if answered then return end
-        answered = true
-        cb(status, result)
-    end
     local fn = (method == "GET" and GET or POST)[action]
-    if not fn then return once(404, { error = _("接口不存在") }) end
-    local ok, err = pcall(fn, params or {}, once)
+    if not fn then return cb(404, { error = _("接口不存在") }) end
+    local ok, err = pcall(fn, params or {}, cb)
     if not ok then
         require("utils.log").warn("subscribe remote failed", action, err)
-        once(500, { error = tostring(err) })
+        cb(500, { error = tostring(err) })
     end
 end
 

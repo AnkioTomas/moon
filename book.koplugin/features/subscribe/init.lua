@@ -126,19 +126,37 @@ end
 --- 下载文本（跟随跳转、限大小）；OPML 地址导入用。public 为真只许公网地址。
 Subscribe.fetchText = function(url, cb, public) return get(url, cb, { public = public }) end
 
---- 普通网页图片：Referer 用文章地址（不少图床认它）。
+--- 普通网页图片：Referer 用文章地址（不少图床认它）。图片地址来自第三方正文：文章本身来自公网时，跳转自己跟、每一跳都不许落到内网（局域网自建 RSSHub 的文章不限）。
 ---@param referer string
 ---@return fun(url: string, cb: fun(data: string|nil)): table|nil
 local function imageDownloader(referer)
+    local lan = Subscribe.privateHost(referer)
     return function(url, cb)
-        return require("http.request").request({
-            url = url, method = "GET", allow_redirects = true,
-            headers = { ["Accept"] = "image/*", ["Referer"] = referer },
-            timeout = require("http.timeout").net(3),
-        }, function(res)
-            local body = res and res.code == 200 and res.body
-            cb(body and body ~= "" and #body <= MAX_IMAGE and body or nil)
-        end)
+        local job = { cancelled = false }
+        local function fetch(target, hops)
+            if not lan and Subscribe.privateHost(target) then return cb(nil) end
+            job.inner = require("http.request").request({
+                url = target, method = "GET",
+                headers = { ["Accept"] = "image/*", ["Referer"] = referer },
+                timeout = require("http.timeout").net(3),
+            }, function(res)
+                if job.cancelled then return end
+                local code = res and res.code
+                if code and code >= 300 and code < 400 then
+                    local loc = require("http.request").header(res, "Location")
+                    if not loc or loc == "" or hops >= 5 then return cb(nil) end
+                    return fetch(Text.absoluteUrl(target, Text.trim(loc)), hops + 1)
+                end
+                local body = code == 200 and res.body
+                cb(body and body ~= "" and #body <= MAX_IMAGE and body or nil)
+            end)
+        end
+        fetch(url, 0)
+        function job:cancel()
+            self.cancelled = true
+            if self.inner and self.inner.cancel then self.inner:cancel() end
+        end
+        return job
     end
 end
 
