@@ -13,8 +13,11 @@ package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
 package.preload["logger"] = function() return { err = function() end } end
 package.preload["device"] = function()
-    return { isTouchDevice = function() return true end }
+    return { isTouchDevice = function() return true end, hasBattery = function() return false end }
 end
+package.preload["datetime"] = function() return { secondsToHour = function() return "12:34" end } end
+package.preload["ui/bidi"] = function() return { wrap = function(t) return t end } end
+_G.G_reader_settings = { isTrue = function() return false end }
 local full_repaints = 0
 package.preload["ui/uimanager"] = function()
     return {
@@ -94,6 +97,7 @@ end
 local icon_synced
 -- 回调里看到的 switchMenuTab 必须是被临时换掉的 noop，不能是原生实现
 local switch_seen
+local time_text
 local raise
 local TouchMenu = {
     cur_tab = 1,
@@ -108,6 +112,7 @@ local TouchMenu = {
     show_parent = "all",
     footer_top_margin = {},
     footer = {},
+    time_info = { setText = function(_, text) time_text = text end },
     page_info_text = { setText = function() end },
     page_info_left_chev = { showHide = function() end },
     page_info_right_chev = { showHide = function() end },
@@ -179,6 +184,9 @@ Assert.eq(body_show_parent, TouchMenu.show_parent, "动态子控件必须把窗�
 Assert.is_false(switch_seen == native_switch, "回调期间 switchMenuTab 必须是 noop")
 Assert.eq(switch_calls, 0, "noop 期间的切 tab 不得真的执行")
 Assert.eq(TouchMenu.switchMenuTab, native_switch, "回调结束必须还原 switchMenuTab")
+
+-- 面板分支不走原生 updateItems：页脚时间要自己写（首次直接落在面板 Tab 时曾一直为空）
+Assert.eq(time_text, "12:34")
 
 -- 换 tab：跟着 cur_tab 走，不是永远调第一个
 TouchMenu.cur_tab = 2

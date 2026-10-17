@@ -209,6 +209,26 @@ local function syncBarSeparator(menu)
     if not ok then error(err, 0) end
 end
 
+--- 页脚右下角的时间与电量。原生只在自己的 updateItems 里写这个按钮，面板分支不走那里：
+--- 首次直接落在面板 Tab 时它一直是空的。文案规则同原生 TouchMenu:updateItems。
+---@param menu table
+local function updateTimeInfo(menu)
+    local BD = require("ui/bidi")
+    local text = require("datetime").secondsToHour(os.time(), G_reader_settings:isTrue("twelve_hour_clock"))
+    if Device:hasBattery() then
+        local powerd = Device:getPowerDevice()
+        local level = powerd:getCapacity()
+        local symbol = powerd:getBatterySymbol(powerd:isCharged(), powerd:isCharging(), level)
+        text = BD.wrap(text) .. " " .. BD.wrap("⌁") .. BD.wrap(symbol) .. BD.wrap(level .. "%")
+        if Device:hasAuxBattery() and powerd:isAuxBatteryConnected() then
+            local aux = powerd:getAuxCapacity()
+            local aux_symbol = powerd:getBatterySymbol(powerd:isAuxCharged(), powerd:isAuxCharging(), aux)
+            text = text .. " " .. BD.wrap("+") .. BD.wrap(aux_symbol) .. BD.wrap(aux .. "%")
+        end
+    end
+    menu.time_info:setText(text)
+end
+
 --- 替换 TouchMenu 的 item 列表为月读面板自绘内容。
 ---@param menu table
 local function renderPanelContent(menu)
@@ -224,6 +244,7 @@ local function renderPanelContent(menu)
     table.insert(menu.item_group, buildPanel(menu, W))
     table.insert(menu.item_group, menu.footer_top_margin)
     table.insert(menu.item_group, menu.footer)
+    updateTimeInfo(menu)
     menu.page_info_text:setText("")
     menu.page_info_left_chev:showHide(false)
     menu.page_info_right_chev:showHide(false)
