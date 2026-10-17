@@ -179,6 +179,20 @@ local function utf8char(cp)
     return ""
 end
 
+--- 去掉 KOReader 字体画不出的 emoji（只会成空白方块）：U+1F000–1FFFF 图形（含肤色、区旗字母）、
+--- 标签字符 U+E0020–E007F、变体选择符 FE0E/FE0F、零宽连接 200D、键帽 20E3。
+--- ★ ✓ ♥ 这类 U+2000–2BFF 符号字体里有，保留。不改空白，HTML 片段也能直接用；别用于按原文匹配的字符串。
+---@param s string|nil
+---@return string|nil
+function Text.stripEmoji(s)
+    if type(s) ~= "string" or s == "" then return s end
+    return (s:gsub("\240\159[\128-\191][\128-\191]", "")
+        :gsub("\243\160[\128-\129][\128-\191]", "")
+        :gsub("\239\184[\142\143]", "")
+        :gsub("\226\128\141", "")
+        :gsub("\226\131\163", ""))
+end
+
 --- XML/HTML 实体解码：命名实体（lt/gt/quot/apos/amp）+ 十/十六进制数字实体。
 ---@return string
 function Text.xmlDecode(s)
@@ -254,6 +268,8 @@ function Text.absoluteUrl(base, ref)
     if lead == "?" then return origin .. path .. ref end
     local merged = lead == "/" and ref or ((path:match("^(.*/)") or "/") .. ref)
     local rel, tail = merged:match("^([^?#]*)(.*)$")
+    -- 没有 . / .. 段就原样拼：路径里的 `//` 有意义（镜像代理 `/https://host/...`）。
+    if not rel:find("/%.%.?/") and not rel:match("/%.%.?$") then return origin .. rel .. tail end
     local segs = {}
     for seg in rel:gmatch("[^/]+") do
         if seg == ".." then

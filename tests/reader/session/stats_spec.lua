@@ -32,6 +32,12 @@ local function ui(file, page, pages)
     }
 end
 
+-- ephemeral 源（订阅）不开计时。
+do
+    Tracker.start({ identity = { source_id = "subscribe", stable_id = "1", source = { ephemeral = true } }, page = 1 })
+    Assert.is_nil(Tracker.session)
+end
+
 -- stop 回调只能发生在最后一段成功落库之后。
 do
     added = {}

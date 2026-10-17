@@ -137,6 +137,24 @@ function NoteDB.get(source_id, stable_id, chapter_idx)
     }
 end
 
+--- 章号重排（订阅目录刷新后文章换了位置）：map[旧章号] = 新章号，map 里没有的章（文章已淘汰）删掉。
+--- 先挪到负号再翻正，避免新旧章号互相撞主键。
+---@param source_id string
+---@param stable_id string
+---@param map table<integer, integer>
+---@return boolean
+function NoteDB.remapChapters(source_id, stable_id, map)
+    return DB.transaction(function()
+        for old, new in pairs(map) do
+            if DB.exec("UPDATE notes SET chapter_idx=? WHERE source_id=? AND stable_id=? AND chapter_idx=?;",
+                -new, source_id, stable_id, old) == nil then return false end
+        end
+        return DB.exec("DELETE FROM notes WHERE source_id=? AND stable_id=? AND chapter_idx>0;", source_id, stable_id) ~= nil
+            and DB.exec("UPDATE notes SET chapter_idx=-chapter_idx WHERE source_id=? AND stable_id=? AND chapter_idx<0;",
+                source_id, stable_id) ~= nil
+    end)
+end
+
 --- 列出指定源（再给 stable_id 则只取这本书各章）的本地注解快照。
 ---@param source_id string|nil
 ---@param stable_id string|nil

@@ -107,7 +107,9 @@ end
 ---@param ui table ReaderUI
 ---@return boolean
 function Link.available(ui)
-    if not identityOf() then return false end
+    local identity = identityOf()
+    -- 订阅文章（ephemeral 源）不是书，没有可关联的书目。
+    if not identity or (identity.source and identity.source.ephemeral) then return false end
     return Linked.supported(ui.document)
 end
 

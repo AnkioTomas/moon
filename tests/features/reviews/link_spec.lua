@@ -19,6 +19,8 @@ Assert.is_true(Link.available(ui), "京东读书可关联")
 identity = { source_id = "local", stable_id = "/a.epub" }
 Assert.is_true(Link.available(ui))
 Assert.is_false(Link.available({ document = { getPageXPointer = function() end } }), "PDF 不行")
+identity = { source_id = "subscribe", stable_id = "3", chapter_idx = 1, source = { ephemeral = true } }
+Assert.is_false(Link.available(ui), "订阅文章不能关联")
 identity = nil
 Assert.is_false(Link.available(ui))
 package.loaded["reader.session"] = real_session

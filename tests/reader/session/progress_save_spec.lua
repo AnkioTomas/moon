@@ -63,4 +63,12 @@ ReaderProgress.save({ identity = { source_id = "moon" } }, function(ok) bad_ok =
 Assert.is_false(bad_ok)
 Assert.len(saved, 2)
 
+-- ephemeral 源（订阅）不记进度。
+local eph_ok
+---@diagnostic disable-next-line: missing-fields
+ReaderProgress.save({ identity = { source_id = "subscribe", stable_id = "1", source = { ephemeral = true } } },
+    function(ok) eph_ok = ok end)
+Assert.is_false(eph_ok)
+Assert.len(saved, 2)
+
 return true

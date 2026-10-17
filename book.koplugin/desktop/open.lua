@@ -72,7 +72,8 @@ end
 ---@param plugin table
 ---@param book Book
 ---@param on_done fun(ok: boolean)|nil 异步结束（成功开阅读器或失败）后回调；被更新一代打开取消时不调用
-function Open.book(plugin, book, on_done)
+---@param opts table|nil 交给源 openBookAsync（如 chapter_idx 指定打开哪章）
+function Open.book(plugin, book, on_done, opts)
     --- 只在本代打开仍有效时通知调用方。
     ---@param ok boolean
     local function done(ok)
@@ -106,7 +107,7 @@ function Open.book(plugin, book, on_done)
         book = book,
     }
     local started_at = Perf.now()
-    Open.pending_job = source:openBookAsync(identity, nil, function(path, open_err, meta)
+    Open.pending_job = source:openBookAsync(identity, opts, function(path, open_err, meta)
         if generation ~= Open.generation then return end
         Open.pending_job = nil
         logger.dbg("book.perf open.source", Perf.elapsedMs(started_at), "ms", book.source_id, path ~= nil)

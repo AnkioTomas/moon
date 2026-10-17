@@ -71,7 +71,9 @@ end
 ---@param snapshot ReaderSessionSnapshot
 function SessionStats.start(snapshot)
     SessionStats.stop()
-    if not snapshot or not snapshot.identity then return end
+    -- ephemeral 源（订阅）不记统计
+    local identity = snapshot and snapshot.identity
+    if not identity or (identity.source and identity.source.ephemeral) then return end
     SessionStats.session = {
         identity = snapshot.identity,
         page = tonumber(snapshot.page) or 0,
