@@ -115,6 +115,7 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 ---@field type BookSourceType 阅读形态
 ---@field pushDirty fun(self: BookSource) 推本源脏行（入后台任务队列）
 ---@field onEvent fun(self: BookSource, event: string, payload: table|nil) 业务事件（见 SourceBase:onEvent）
+---@field ephemeral boolean|nil 只读不记：阅读会话不存进度、不记统计（订阅）
 ---@field capabilities fun(self: BookSource): SourceCapabilities 能力表
 ---@field configured fun(self: BookSource): boolean 是否已配置到可请求
 ---@field close fun(self: BookSource)|nil 释放资源

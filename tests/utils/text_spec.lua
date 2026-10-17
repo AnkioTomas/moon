@@ -65,6 +65,8 @@ do
     local base = "http://h:8083/opds/new?page=2#top"
     Assert.eq(Text.absoluteUrl(base, "https://x.org/a"), "https://x.org/a")
     Assert.eq(Text.absoluteUrl(base, "//cdn.org/c.jpg"), "http://cdn.org/c.jpg")
+    Assert.eq(Text.absoluteUrl("https://ghfast.top/https://github.com/x", "/https://github.com/o/r/a.opml"),
+        "https://ghfast.top/https://github.com/o/r/a.opml", "镜像代理路径里的 // 保留")
     Assert.eq(Text.absoluteUrl(base, "/opds/books"), "http://h:8083/opds/books")
     Assert.eq(Text.absoluteUrl(base, "?page=3"), "http://h:8083/opds/new?page=3")
     Assert.eq(Text.absoluteUrl(base, "#x"), "http://h:8083/opds/new?page=2#x")
@@ -221,3 +223,11 @@ do
     -- URL-safe 字符与缺失填充
     Assert.eq(Text.base64Decode("YWI"), "ab")
 end
+
+-- stripEmoji：图形 emoji、ZWJ 序列、肤色、VS16、国旗、键帽去掉；★ 与空白、普通文字不动
+Assert.eq(Text.stripEmoji("a \240\159\152\128 b"), "a  b")
+Assert.eq(Text.stripEmoji("\240\159\145\168\226\128\141\240\159\145\169\240\159\145\141\240\159\143\189好"), "好")
+Assert.eq(Text.stripEmoji("\240\159\135\168\240\159\135\179中1\239\184\143\226\131\163"), "中1")
+Assert.eq(Text.stripEmoji("\226\152\133\226\157\164\239\184\143"), "\226\152\133\226\157\164")
+Assert.eq(Text.stripEmoji(""), "")
+Assert.is_nil(Text.stripEmoji(nil))

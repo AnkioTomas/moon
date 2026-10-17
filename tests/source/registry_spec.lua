@@ -118,6 +118,17 @@ do
     Assert.is_false(caps.edit)
 end
 
+-- 隐藏源（订阅）：能 meta / create，不进源清单。
+do
+    Registry.registerHidden("hidden_x", function()
+        return { meta = function() return { id = "hidden_x", name = "x", type = "chapter" } end,
+            new = function() return { id = "hidden_x" } end }
+    end)
+    Assert.eq(Registry.meta("hidden_x").type, "chapter")
+    Assert.eq(Registry.create("hidden_x").id, "hidden_x")
+    for _idx, meta in ipairs(Registry.list()) do Assert.is_true(meta.id ~= "hidden_x", "不进清单") end
+end
+
 do
     Assert.eq(Registry.meta("wechat").type, "chapter")
     Assert.eq(Registry.meta("jdread").type, "chapter")

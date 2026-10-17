@@ -55,6 +55,16 @@ local extensions = {}
 ---@type table<SourceId, BookSource>
 local instances = {}
 
+---@type table<SourceId, fun(): table> 隐藏源 id → 取门面模块（meta + new）
+local hidden = {}
+
+--- 登记隐藏源（上层注入，如订阅）：能 resolve / meta，不进源清单、书库范围与选择器，也不能设为活跃源。
+---@param id SourceId
+---@param module fun(): table 延迟取门面模块
+function Registry.registerHidden(id, module)
+    hidden[id] = module
+end
+
 --- 描述表声明的能力：有 provides 表时按它声明；旧描述文件默认是书源（顶层 source = false 除外）。
 ---@param desc table
 ---@return boolean is_source, table[] home_widgets
@@ -199,6 +209,7 @@ end
 ---@param id SourceId
 ---@return BookSourceMeta|nil
 function Registry.meta(id)
+    if hidden[id] then return hidden[id]().meta() end
     sourceIds()
     return known[id] and sourceModule(id).meta() or nil
 end
@@ -260,6 +271,7 @@ end
 ---@param id SourceId
 ---@return BookSource|nil, string|nil
 function Registry.create(id)
+    if hidden[id] then return hidden[id]().new() end
     sourceIds()
     if not known[id] then
         return nil, T(_("未知数据源: %1"), id)

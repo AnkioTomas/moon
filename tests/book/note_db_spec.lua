@@ -94,5 +94,17 @@ Assert.eq(q.args[3], 0)
 Assert.is_false(q.sql:find("book'1", 1, true) ~= nil)
 Assert.eq(row.payload, "[{}]")
 Assert.eq(row.sync_status, 0)
+-- 章号重排：先挪到负号（新号），删掉没挪的（淘汰文章），再翻正。
+calls = {}
+Assert.is_true(NoteDB.remapChapters("subscribe", "3", { [1] = 2 }) and true)
+local sqls = {}
+for _idx, c in ipairs(calls) do
+    if c.sql:find("notes") then sqls[#sqls + 1] = c end
+end
+Assert.matches(sqls[1].sql, "SET chapter_idx=%?")
+Assert.eq(sqls[1].args[1], -2)
+Assert.eq(sqls[1].args[4], 1)
+Assert.matches(sqls[2].sql, "^DELETE FROM notes .-chapter_idx>0")
+Assert.matches(sqls[3].sql, "chapter_idx=%-chapter_idx .-chapter_idx<0")
 Base.close()
 clearMods()
