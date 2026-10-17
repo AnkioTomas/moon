@@ -509,4 +509,21 @@ function Text.textToBody(text)
     return table.concat(parts, "\n")
 end
 
+--- 纯文本章节 → 带章名的 HTML。段首的全角空格 / 空白去掉（CSS 已给 2em 缩进，保留会双份缩进）。
+---@param title string
+---@param text string
+---@return string
+function Text.chapterHtml(title, text)
+    local lines = {}
+    for line in (Text.normalizeNewlines(text) .. "\n"):gmatch("(.-)\n") do
+        local rest = line
+        repeat
+            line = rest
+            rest = line:gsub("^%s+", ""):gsub("^\227\128\128", ""):gsub("^\194\160", "")
+        until rest == line
+        lines[#lines + 1] = line
+    end
+    return "<h1>" .. Text.xmlEscape(title) .. "</h1>\n" .. Text.textToBody(table.concat(lines, "\n"))
+end
+
 return Text

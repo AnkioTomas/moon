@@ -125,7 +125,7 @@ local function contentFetcher()
     return function(identity, chapter, done)
         return Client.contentAsync(identity.stable_id, chapter.uid, function(text, err)
             if not text then done(nil, err); return end
-            done({ title = chapter.title, text = text })
+            done({ title = chapter.title, html = require("utils.text").chapterHtml(chapter.title, text) })
         end)
     end
 end
