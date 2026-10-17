@@ -23,6 +23,8 @@ local ScanDB = require("source.local.scan_db")
 
 local Scan = {}
 
+local SCAN_BATCH = 100
+
 --- 从文件名解析标题与作者（引擎解析失败时的兜底，保证扫到的书都入库）。
 --- 支持格式："作者 - 书名.ext" / "书名 - 作者.ext" / "书名.ext"
 ---@param filename string
@@ -233,18 +235,29 @@ function Scan.scanAsync(self, cb, report, retry_covers)
     local skip = self._crashed
     local function start()
         local opening, count
+        local parsed = {}
         report(_("正在扫描书库…"))
         job = Job.run(function(progress)
             local files, skipped = scanFiles(root, self.cfg.folder_category == false)
+            -- 结果帧有 4MB 上限，几千本一次回传必超：解析产物分批经 progress 送回，结果只带 skipped。
+            local batch = {}
             for i = 1, #files do
                 progress({ i, #files, files[i].name })
-                files[i] = parseFile(files[i], known, digests, skip, index, progress, retry_covers)
+                batch[#batch + 1] = parseFile(files[i], known, digests, skip, index, progress, retry_covers)
+                if #batch >= SCAN_BATCH or i == #files then
+                    progress({ files = batch })
+                    batch = {}
+                end
             end
-            return { files = files, skipped = skipped }
+            return { skipped = skipped }
         end, {
             name = "local.scan",
             kind = "medium",
             on_progress = function(value)
+                if type(value) == "table" and value.files then
+                    for _idx, f in ipairs(value.files) do parsed[#parsed + 1] = f end
+                    return
+                end
                 if type(value) == "table" then
                     count = value
                     report(T(_("正在检查 %1"), value[3]), value[1], value[2])
@@ -256,7 +269,7 @@ function Scan.scanAsync(self, cb, report, retry_covers)
                 end
             end,
             on_done = function(result)
-                local files = result.files
+                local files = parsed
                 -- 读不了的子目录是“未知”不是“没有”：其下原有的在架行原样保留
                 local kept = {}
                 for _id, row in pairs(rows) do
