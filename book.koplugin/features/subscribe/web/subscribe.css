@@ -1,0 +1,187 @@
+/* 订阅管理页样式（/subscribe.css）；外壳沿用远程管理的 /style.css。 */
+/* ── 订阅管理（subscribe.html）：沿用文件管理的外壳（工具栏 / 侧栏 / 列表 / 对话框 / 全屏层） ── */
+.sub-toolbar { flex-wrap: wrap; gap: 8px }
+.sub-toolbar select { min-height: 32px; font-size: 13px }
+.sub-search input { width: min(280px, 46vw); min-height: 32px; font-size: 13px }
+.sub-toolbar a.file-action { display: inline-flex; align-items: center; text-decoration: none }
+.sub-batch {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 6px 12px; border-bottom: 1px solid var(--row-rule); background: var(--accent-soft);
+}
+.sub-batch[hidden], .sub-banner[hidden] { display: none }
+.sub-banner { padding: 8px 14px; border-bottom: 1px solid var(--row-rule); background: #fff4e5; color: #8a4b00; font-size: 13px }
+.sub-groups button { display: flex; align-items: center; gap: 6px }
+.sub-groups button::before { flex: 0 0 auto }
+.sub-groups button[data-all]::before { background: var(--accent) }
+.sub-groups button .g-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis }
+.sub-groups button .g-count { color: var(--dim); font-size: 12px; font-weight: 400 }
+.sub-groups button .g-unread { padding: 0 6px; border-radius: 9px; background: var(--accent); color: var(--on-accent); font-size: 11px; line-height: 18px }
+.sub-groups button.drop-target { outline: 2px dashed var(--accent); outline-offset: -2px }
+.sub-groups .g-more { visibility: hidden; padding: 0 4px; border: 0; background: transparent; color: var(--dim); min-height: 0 }
+.sub-groups button:hover .g-more, .sub-groups button.active .g-more { visibility: visible }
+.sub-new-group { margin: 8px 4px 0; border-style: dashed; background: transparent; color: var(--accent); font-size: 13px }
+.sub-list td { vertical-align: middle }
+.sub-list tr.dragging { opacity: .45 }
+.sub-list tr.drop-before td { box-shadow: inset 0 2px 0 var(--accent) }
+.sub-list td.handle { width: 22px; padding: 0 0 0 8px; color: var(--dim); cursor: grab; user-select: none }
+.sub-list td.ico { width: 34px; padding-right: 0 }
+.sub-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: #fff; font-size: 12px; font-weight: 600 }
+.sub-icon.rss { background: #f2994a }
+.sub-icon.site { background: #5079aa }
+.sub-icon.mp { background: #2e9d5b }
+.sub-list .f-title { display: block; overflow: hidden; color: var(--fg); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; cursor: pointer }
+.sub-list .f-title:hover { color: var(--accent) }
+.sub-list .f-url { display: block; overflow: hidden; color: var(--dim); font-size: 12px; text-overflow: ellipsis; white-space: nowrap }
+.sub-list .f-err { display: block; color: var(--danger); font-size: 12px }
+.sub-badge { display: inline-block; padding: 1px 8px; border: 1px solid var(--pill-border); border-radius: 10px; background: var(--pill-bg); color: var(--dim); font-size: 11px; white-space: nowrap }
+.sub-unread { min-width: 22px; padding: 1px 7px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 12px; text-align: center }
+.sub-list td.meta { width: 1%; color: var(--dim); font-size: 12px; white-space: nowrap }
+.sub-list td.ops { width: 1%; white-space: nowrap }
+.sub-list td.ops button { min-height: 28px; padding: 0 10px; font-size: 12px }
+.sub-list td.empty { padding: 48px 14px }
+.sub-empty strong { display: block; margin-bottom: 6px; color: var(--fg); font-size: 15px; font-weight: 500 }
+.sub-empty button { margin-top: 12px }
+.sub-dialog { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto }
+.sub-dialog .field { margin: 10px 0 }
+.sub-dialog .field label { display: block; margin-bottom: 4px; color: var(--dim); font-size: 13px }
+.sub-dialog .field input { width: 100%; margin: 0 }
+.sub-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 6px 0 4px }
+.sub-kinds[hidden] { display: none }
+.sub-kinds .opt { display: flex; gap: 8px; align-items: flex-start; padding: 10px; border: 1px solid var(--rule); border-radius: var(--radius); cursor: pointer }
+.sub-kinds .opt:has(input:checked) { border-color: var(--accent); background: var(--accent-soft) }
+.sub-kinds strong { display: block; font-size: 14px; font-weight: 500 }
+.sub-kinds small { color: var(--dim); font-size: 12px }
+.sub-url-row { display: flex; gap: 6px }
+.sub-url-row input { flex: 1 }
+.sub-preview { margin-top: 10px; padding: 12px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--surface); font-size: 13px }
+.sub-preview h3 { margin: 0 0 6px; font-size: 15px; font-weight: 500 }
+.sub-preview ol { margin: 6px 0; padding-left: 20px }
+.sub-preview blockquote { max-height: 140px; margin: 8px 0 0; padding: 8px 10px; overflow: auto; border-left: 3px solid var(--accent); background: var(--panel); color: var(--dim); white-space: pre-wrap }
+.sub-toasts { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: grid; gap: 8px; max-width: min(360px, calc(100vw - 32px)) }
+.sub-toast { padding: 10px 14px; border-radius: var(--radius); background: var(--bar); color: var(--bar-fg); box-shadow: var(--shadow-dialog); font-size: 13px; animation: sub-in .18s ease-out }
+.sub-toast.err { background: var(--danger) }
+@keyframes sub-in { from { opacity: 0; transform: translateY(6px) } }
+.sub-reader { display: grid; flex: 1; grid-template-columns: minmax(240px, 34%) 1fr; min-height: 0 }
+.sub-art-list { margin: 0; padding: 0; overflow: auto; border-right: 1px solid var(--row-rule); list-style: none }
+.sub-art-list li { padding: 10px 14px; border-bottom: 1px solid var(--row-rule); cursor: pointer }
+.sub-art-list li:hover { background: var(--hover) }
+.sub-art-list li.active { background: var(--accent-soft) }
+.sub-art-list li .a-title { display: block; font-weight: 500 }
+.sub-art-list li.read .a-title { color: var(--dim); font-weight: 400 }
+.sub-art-list li .a-time { color: var(--dim); font-size: 12px }
+.sub-art-list li.more { color: var(--accent); text-align: center }
+.sub-art-view { padding: 18px 24px; overflow: auto; line-height: 1.7 }
+.sub-art-view h1 { font-size: 22px; font-weight: 500 }
+.sub-art-view img { max-width: 100% }
+@media (max-width: 720px) {
+    .sub-search input { width: 100% }
+    .sub-toolbar .fa-left { flex: 1 1 100% }
+    .sub-groups { display: flex; gap: 6px; overflow-x: auto }
+    .sub-groups .g-more { visibility: visible }
+    .sub-new-group { display: none }
+    .sub-list td.handle, .sub-list td.meta.upd { display: none }
+    .sub-list td.ops button.op-edit { display: none }
+    .sub-kinds { grid-template-columns: 1fr }
+    .sub-reader { grid-template-columns: 1fr; grid-template-rows: 40% 1fr }
+    .sub-art-list { border-right: 0; border-bottom: 1px solid var(--row-rule) }
+    .sub-art-view { padding: 14px }
+}
+@media (prefers-color-scheme: dark) { .sub-banner { background: #3a2a10; color: #ffcf8a } }
+.sub-art-view { display: flex; flex-direction: column; min-height: 0; padding: 0; overflow: hidden }
+.sub-art-view > #ar-hint { padding: 18px 24px }
+.sub-art-body { flex: 1; min-height: 0; overflow: auto; padding: 20px 24px; font: 16px/1.75 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color: var(--fg, inherit); overflow-wrap: anywhere }
+.sub-art-body > * { max-width: 720px; margin-left: auto; margin-right: auto }
+.sub-art-body h1, .sub-art-body h2, .sub-art-body h3 { line-height: 1.4; font-weight: 600 }
+.sub-art-body h1 { font-size: 22px }
+.sub-art-body p { margin: 0 auto 1em }
+.sub-art-body img { display: block; max-width: 100%; height: auto; margin: 12px auto }
+.sub-art-body a { color: var(--accent); text-decoration: underline }
+.sub-art-body blockquote { margin: 1em auto; padding: 4px 12px; border-left: 3px solid var(--accent); color: var(--dim) }
+.sub-art-body pre { overflow: auto; padding: 10px; background: var(--hover); white-space: pre-wrap }
+.sub-art-body table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse }
+.sub-art-body td, .sub-art-body th { padding: 4px 8px; border: 1px solid var(--row-rule) }
+@media (max-width: 720px) { .sub-art-body { padding: 14px } }
+.sub-art-body { flex: 1; min-height: 0; overflow: auto; padding: 20px 24px; font: 16px/1.75 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; overflow-wrap: anywhere }
+.sub-art-body > * { max-width: 720px; margin-left: auto; margin-right: auto }
+.sub-art-body h1 { font-size: 22px; font-weight: 500; line-height: 1.4 }
+.sub-art-body p { margin: 0 auto .9em }
+.sub-art-body a { color: var(--accent) }
+.sub-art-body img, .sub-art-body video { max-width: 100%; height: auto }
+.sub-art-body pre { overflow: auto; padding: 10px 12px; background: var(--hover); white-space: pre-wrap }
+.sub-art-body blockquote { margin: 0 auto .9em; padding: 4px 12px; border-left: 3px solid var(--accent); color: var(--dim) }
+.sub-art-body table { border-collapse: collapse; display: block; overflow: auto }
+.sub-art-body td, .sub-art-body th { padding: 4px 8px; border: 1px solid var(--row-rule) }
+.sub-list { table-layout: auto }
+.sub-list td.sel { width: 36px; padding: 0 0 0 12px }
+.sub-list td.n { max-width: 0; width: 100% }
+.sub-list tbody tr.selected td { background: var(--accent-soft) }
+.sub-toolbar .file-action.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent) }
+@media (max-width: 720px) {
+    .sub-toolbar .fa-right { flex-wrap: wrap; gap: 6px }
+    .sub-list, .sub-list tbody { display: block }
+    .sub-list tr {
+        display: grid; grid-template-columns: 28px 36px minmax(0, 1fr) auto; align-items: center;
+        grid-template-areas: "sel ico n unr" "sel ico meta ops"; column-gap: 6px; padding: 10px 10px 10px 4px;
+    }
+    .sub-list tr + tr td { border-top: 0 }
+    .sub-list tr + tr { border-top: 1px solid var(--row-rule) }
+    .sub-list td { display: block; height: auto; padding: 0 }
+    .sub-list td.sel { grid-area: sel; width: auto; padding: 0 0 0 6px }
+    .sub-list td.handle { display: none }
+    .sub-list td.ico { grid-area: ico; width: auto }
+    .sub-list td.n { grid-area: n; max-width: none; width: auto }
+    .sub-list td.unr { grid-area: unr }
+    .sub-list td.kind { grid-area: meta }
+    .sub-list td.upd { display: none }
+    .sub-list td.ops { grid-area: ops; width: auto; margin-top: 4px }
+    .sub-list td.empty { display: block; padding: 40px 14px }
+}
+.sub-list td::after { content: none !important }
+@media (max-width: 720px) {
+    .sub-page .explorer-sidebar.sub-sidebar { display: flex !important; padding: 6px 8px }
+    .sub-sidebar .sidebar-title, .sub-sidebar .sidebar-credit { display: none }
+    .sub-groups { flex-wrap: nowrap; padding-bottom: 2px }
+    .sub-groups button { flex: 0 0 auto; border: 1px solid var(--rule) }
+    .sub-toolbar { flex-direction: column; align-items: stretch }
+    .sub-toolbar .fa-group { flex-wrap: wrap; overflow: visible; margin: 0; padding: 0; -webkit-mask-image: none; mask-image: none }
+    .sub-toolbar .fa-left > * { flex: 1 1 0 }
+    .sub-toolbar .fa-right .file-action { flex: 1 1 40% }
+}
+@media (max-width: 720px) {
+    .sub-page .file-action-toolbar.sub-toolbar { display: flex; flex-direction: column !important; align-items: stretch; height: auto; padding: 0 }
+    .sub-page .sub-toolbar .fa-right { display: grid; grid-template-columns: 1fr 1fr; width: 100%; overflow: visible }
+    .sub-page .sub-toolbar .fa-left { display: flex; width: 100% }
+    .sub-page .sub-groups { overflow-x: auto; scrollbar-width: none }
+}
+@media (max-width: 720px) { .sub-page .sub-toolbar .fa-group { margin: 0 !important; padding: 0 !important; position: static !important; transform: none !important; left: auto !important } }
+@media (max-width: 720px) { .sub-page .file-action-toolbar.sub-toolbar { flex-wrap: nowrap } .sub-page .sub-toolbar .fa-left { flex-wrap: nowrap } .sub-page .sub-search { flex: 1 1 auto; min-width: 0 } .sub-page .sub-toolbar select { flex: 0 0 auto } }
+.sub-bulk-help { margin: 0; padding: 10px 16px; border-bottom: 1px solid var(--row-rule); color: var(--dim); font-size: 13px }
+#bk-text { flex: 1; width: 100%; padding: 14px 16px; border: 0; border-radius: 0; background: var(--panel); font: 14px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: none }
+.sub-plan h3 { margin: 12px 0 4px; font-size: 14px; font-weight: 500 }
+.sub-plan ul { max-height: 160px; margin: 0; padding-left: 20px; overflow: auto; font-size: 13px }
+.sub-plan .add { color: var(--ok) } .sub-plan .del { color: var(--danger) }
+#export { justify-content: center }
+#plan, #ov, #prog { z-index: 80 }
+
+/* 订阅页留白：工具栏放进 .tab-strip（与文件页同一套内边距），列表行、分组条、批量栏都离面板边留 12px。 */
+.sub-page .sub-strip { padding: 12px 14px; }
+.sub-page .sub-batch { padding: 8px 14px; }
+.sub-page .sub-banner { padding: 10px 14px; }
+.sub-list td:last-child { padding-right: 14px }
+@media (max-width: 720px) {
+    .sub-page .sub-strip { padding: 10px 12px; }
+    .sub-page .sub-sidebar { padding: 8px 12px; }
+    .sub-page .sub-list tr { padding: 12px 12px 12px 8px; }
+    .sub-page .sub-list td:last-child { padding-right: 0 }
+}
+/* 全屏层（文章 / 文本编辑）的顶栏：按钮不换行不被挤成竖排，标题让位省略；内容区留白。 */
+.sub-page .fullscreen .ed-header { gap: 8px; padding-left: 12px; padding-right: 12px }
+.sub-page .fullscreen .ed-header > button:not(.icon-btn) { flex: 0 0 auto; white-space: nowrap; padding: 0 12px }
+.sub-page .fullscreen .ed-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.sub-page #bk-text { padding: 14px 18px }
+@media (max-width: 720px) {
+    .sub-page .fullscreen .ed-header { display: flex; flex-wrap: nowrap; padding: 4px 8px; padding-top: max(4px, env(safe-area-inset-top)) }
+    .sub-page .fullscreen .ed-msg { display: none }
+    .sub-page .sub-bulk-help { padding: 10px 12px }
+    .sub-page #bk-text { padding: 12px }
+}

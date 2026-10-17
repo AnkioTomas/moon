@@ -62,6 +62,7 @@ stub("ui/network/manager", { isConnected = function() return connected end })
 --- 除当前源外的其他启用源（混合模式）；值为 false 表示已启用但加载失败。
 local other_sources = {}
 stub("source.registry", {
+    registerHidden = function() end,
     current = function() return current_source end,
     listEnabled = function()
         local out = current_source and { { id = current_source.id } } or {}

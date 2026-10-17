@@ -84,7 +84,7 @@ require("support.modal_stub").install()
 local Features = require("features")
 
 -- 真实 list 的每个条目都能加载。不调用钩子：锁屏/远程的 onCreate 会拉起真实服务。
-Assert.eq(table.concat(Features.list, ","), "clock,nightmode,panel,azw3,bars,sidebar,xray,ai,reviews,rare,translate,reflow,animation,dictionary,ocr,baike,lockscreen,passcode,keyboard,ime,remote,update,extensions")
+Assert.eq(table.concat(Features.list, ","), "clock,nightmode,panel,azw3,bars,sidebar,xray,ai,reviews,rare,translate,reflow,animation,dictionary,ocr,baike,lockscreen,passcode,keyboard,ime,remote,update,subscribe,extensions")
 for _, name in ipairs(Features.list) do
     Assert.eq(type(require("features." .. name)), "table")
 end
@@ -96,18 +96,18 @@ do
     Features.load()
     local tabs = {}
     for _, t in ipairs(Ext.list("desktop.tabs")) do tabs[#tabs + 1] = t.id .. ">" .. t.after end
-    Assert.eq(table.concat(tabs, ","), "extensions>insight")
+    Assert.eq(table.concat(tabs, ","), "subscribe>library,extensions>insight")
     Assert.eq(type(Ext.last("quickpanel.show")), "function")
     Assert.eq(type(Ext.last("topbar.light_percent")), "function")
     Assert.eq(type(Ext.last("highlight.fill_selection")), "function")
     Assert.len(Ext.list("highlight.relabel"), 1)
     Assert.len(Ext.list("desktop.activated"), 2, "校时 + 更新检查")
-    Assert.len(Ext.list("desktop.opened"), 0)
+    Assert.len(Ext.list("desktop.opened"), 1)
     Assert.len(Ext.list("reader.doc_settings"), 1)
     Assert.len(Ext.list("reader.preferences"), 1)
     Assert.len(Ext.list("reader.ready"), 1)
     Assert.eq(Ext.list("note.markup_classes")[1], "moon-tr")
-    Assert.len(Ext.list("setting.groups"), 0)
+    Assert.eq(Ext.list("setting.groups")[1].id, "subscribe")
     Assert.is_true(#Ext.list("setting.entries") > 10)
     Assert.is_true(#Ext.list("topbar.items") >= 1)
     local names = {}

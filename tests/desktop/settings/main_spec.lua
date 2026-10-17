@@ -67,6 +67,7 @@ package.preload["source.registry"] = function()
         activeId = function() return "local" end,
         list = function() return { { id = "local", name = "本地" } } end,
         listEnabled = function() return { { id = "local", name = "本地" } } end,
+        registerHidden = function() end,
     }
 end
 package.preload["ui/language"] = function()
@@ -201,13 +202,20 @@ local desktop = {
     contentHeight = function() return 800 end,
     updateView = function() end,
 }
--- 真机由 main.lua 调 features 加载器：设置条目由加载器代登记
+-- 真机由 main.lua 调 features 加载器：订阅分组由订阅 init 登记，设置条目由加载器代登记
+require("features.subscribe")
 require("features").registerConventions()
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 29)
-Assert.eq(table.concat(section_titles, ","), "书库,桌面,阅读,系统,维护")
+Assert.len(built_rows, 31)
+Assert.eq(table.concat(section_titles, ","), "书库,订阅,桌面,阅读,系统,维护")
+-- 订阅的开关直接放在根页「订阅」组，不另开子页。
+local sub_rows = {}
+for _, row in ipairs(built_rows) do
+    if row.title == "启用订阅" or row.title == "下载文章图片" then sub_rows[#sub_rows + 1] = row.title end
+end
+Assert.eq(table.concat(sub_rows, ","), "启用订阅,下载文章图片")
 
 local expected = {
     { title = "书籍来源", id = "sources" },
@@ -268,12 +276,12 @@ Assert.eq(sectionTitles(pages.lookup), "选区,翻译,X-Ray,段评,词典,文字
 Assert.eq(sectionTitles(pages.popup_menu), "按钮")
 Assert.eq(sectionTitles(pages.display), "启动,显示,夜间与亮度")
 
--- 维护组：update feature 的两行按 order 插在调试日志与关于之间
+-- 根页上的开关 / 动作行：订阅两行在前，维护组里 update feature 的两行按 order 插在调试日志与关于之间
 local maintenance = {}
 for _, row in ipairs(built_rows) do
     if row.kind == "action" or row.kind == "toggle" or row.toggle ~= nil then maintenance[#maintenance + 1] = row.title end
 end
-Assert.eq(table.concat(maintenance, ","), "清理缓存,清除当前源统计,导入 KOReader 统计,调试日志,自动检查更新,检查更新,关于,关闭桌面")
+Assert.eq(table.concat(maintenance, ","), "启用订阅,下载文章图片,清理缓存,清除当前源统计,导入 KOReader 统计,调试日志,自动检查更新,检查更新,关于,关闭桌面")
 
 _G.G_reader_settings = previous_settings
 
