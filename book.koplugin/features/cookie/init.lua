@@ -15,7 +15,7 @@ Ext.add("web.routes", {
     assets = { "cookie.html", "cookie.js", "cookie.css" },
     page = {
         href = "/cookie.html", title = "浏览器登录", title_long = "浏览器授权登录", tile = "tile-green",
-        desc = "用浏览器扩展把网页登录态交给数据源（如七猫）。",
+        desc = "用浏览器扩展把网页登录态交给数据源（如七猫、京东读书）。",
         icon = "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1 17.9A8 8 0 0 1 4.1 13H8v1a2 2 0 0 0 2 2v3.9zM17.9 17A2 2 0 0 0 16 16h-1v-3a1 1 0 0 0-1-1H8v-2h2a1 1 0 0 0 1-1V7h2a2 2 0 0 0 2-2v-.4A8 8 0 0 1 19.9 11H19a1 1 0 0 0-1 1v5z",
     },
     l10n = "features.cookie.l10n.web",

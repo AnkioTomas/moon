@@ -148,10 +148,8 @@ a { color: inherit; text-decoration: none }
     justify-content: flex-end;
     gap: 2px;
     min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
 }
-.appbar-nav::-webkit-scrollbar { display: none }
+.appbar-nav:not(.appbar-nav-ready) { visibility: hidden }
 .appbar-nav a {
     display: flex;
     flex: 0 0 auto;
@@ -167,6 +165,56 @@ a { color: inherit; text-decoration: none }
 }
 .appbar-nav a:hover { background: var(--bar-hover); color: var(--bar-fg) }
 .appbar-nav a[aria-current=page] { background: var(--bar-active); color: var(--bar-fg); font-weight: 500 }
+.appbar-current {
+    display: flex;
+    flex: 0 1 auto;
+    align-items: center;
+    min-width: 0;
+    padding: 0 12px;
+    overflow: hidden;
+    border-radius: 18px;
+    background: var(--bar-active);
+    color: var(--bar-fg);
+    font-size: 14px;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.appbar-menu { position: relative; flex: 0 0 auto }
+.appbar-menu summary {
+    display: flex;
+    width: 40px;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 18px;
+    color: var(--bar-dim);
+    cursor: pointer;
+    list-style: none;
+}
+.appbar-menu summary::-webkit-details-marker { display: none }
+.appbar-menu summary:hover, .appbar-menu[open] summary { background: var(--bar-hover); color: var(--bar-fg) }
+.appbar-menu-links {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 30;
+    display: grid;
+    min-width: 190px;
+    padding: 6px;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--panel);
+    box-shadow: var(--shadow-panel);
+}
+.appbar-nav .appbar-menu-links a {
+    height: 40px;
+    padding: 0 10px;
+    border-radius: 7px;
+    color: var(--fg);
+}
+.appbar-nav .appbar-menu-links a:hover { background: var(--hover); color: var(--fg) }
+.appbar-menu-links a[aria-current=page] { background: var(--hover); color: var(--fg); font-weight: 500 }
 .icon-btn {
     display: flex;
     flex: 0 0 40px;
@@ -1037,29 +1085,25 @@ tbody tr.is-hidden td.n a { opacity: .6 }
     .quick-list button { min-height: 40px }
 }
 @media (max-width: 720px) {
-    /* 顶栏：入口（含扩展页面）等分成一行图标 + 文字，不再横向溢出 */
+    /* 顶栏只保留首页、当前页和菜单，不再把所有入口铺成一排。 */
     .appbar-nav {
-        display: grid;
-        grid-auto-flow: column;
-        grid-auto-columns: minmax(0, 1fr);
-        gap: 2px;
+        display: flex;
+        justify-content: flex-start;
         margin: 0 -8px 0 -14px;
         padding: 0 6px 6px;
         overflow: visible;
     }
     .appbar-nav a {
-        flex-direction: column;
-        justify-content: center;
-        gap: 2px;
-        height: auto;
-        min-height: 48px;
-        padding: 4px 0;
-        border-radius: 10px;
-        font-size: 11px;
-        white-space: nowrap;
+        flex-direction: row;
+        height: 40px;
+        min-height: 40px;
+        padding: 0 10px;
+        font-size: 13px;
     }
-    .appbar-nav a svg { width: 20px; height: 20px; margin: 0 }
+    .appbar-nav a svg { width: 18px; height: 18px; margin: 0 }
     .appbar-nav a span { max-width: 100%; overflow: hidden; text-overflow: ellipsis }
+    .appbar-current { height: 40px; max-width: 55vw; padding: 0 10px; font-size: 13px }
+    .appbar-menu summary { width: 40px; height: 40px }
     .appbar-brand { height: 48px }
     .page { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); padding-bottom: max(4px, env(safe-area-inset-bottom)) }
 

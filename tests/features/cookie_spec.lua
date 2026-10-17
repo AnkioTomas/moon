@@ -41,13 +41,15 @@ io.open = function(path, mode)
     return real_open(path, mode)
 end
 
-local applied = 0
+local applied, authorized = 0, false
 package.preload["desktop.pages.setting.source"] = function()
     return {
         loadSetting = function()
             return { browser = {
                 domain = "www.qimao.com", scope = "local", login = "https://www.qimao.com/login",
                 check = "https://www.qimao.com/user/bookshelf",
+                icon = "https://cdn-front.qimao.com/global/static/images/favicon2022.ico",
+                isAuthorized = function() return authorized end,
                 apply = function(payload, cb) applied = applied + 1; cb(payload["local"] ~= nil) end,
             } }
         end,
@@ -69,12 +71,20 @@ end
 
 local _s, sources = call("GET", "sources", {})
 Assert.eq(sources.sources[1].id, "qimao")
+Assert.eq(sources.sources[1].icon, "https://cdn-front.qimao.com/global/static/images/favicon2022.ico")
+Assert.is_false(sources.sources[1].authorized)
 
 random_bytes = string.rep(string.char(0xfb), 32)
 local odd_status, odd_ticket = call("POST", "ticket", { source = "qimao" })
 Assert.eq(odd_status, 200)
 Assert.is_true(odd_ticket.ticket:find("+", 1, true) == nil, "ticket uses base64url alphabet")
 Assert.is_true(odd_ticket.ticket:find("/", 1, true) == nil, "ticket is slash-free")
+
+authorized = true
+local _status, authorized_sources = call("GET", "sources", {})
+Assert.is_true(authorized_sources.sources[1].authorized)
+Assert.eq((call("POST", "ticket", { source = "qimao" })), 409)
+authorized = false
 
 random_bytes = {}
 for i = 0, 31 do random_bytes[#random_bytes + 1] = string.char(i) end

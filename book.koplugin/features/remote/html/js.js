@@ -286,6 +286,62 @@ function dialog(o) {
     };
 })();
 
+/* 收拢顶栏：常驻首页、当前页名和主题按钮，其余入口放进下拉菜单。 */
+window.collapseRemoteNav = function () {
+    var nav = document.querySelector('.appbar-nav');
+    if (!nav || nav.dataset.compact === 'true') return;
+
+    var links = Array.prototype.slice.call(nav.querySelectorAll(':scope > a'));
+    var home = links.find(function (a) { return new URL(a.href, location.origin).pathname === '/'; });
+    var current = links.find(function (a) { return a.getAttribute('aria-current') === 'page'; })
+        || links.find(function (a) { return new URL(a.href, location.origin).pathname === location.pathname; });
+    var currentName = current && current.querySelector('span')
+        ? current.querySelector('span').textContent.trim()
+        : document.title.replace(/\s*-\s*远程管理$/, '');
+    var more = document.createElement('details');
+    more.className = 'appbar-menu';
+
+    var summary = document.createElement('summary');
+    summary.setAttribute('aria-label', t('更多页面'));
+    var icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    icon.setAttribute('viewBox', '0 0 24 24');
+    icon.setAttribute('width', '20');
+    icon.setAttribute('height', '20');
+    icon.setAttribute('fill', 'currentColor');
+    icon.setAttribute('aria-hidden', 'true');
+    path.setAttribute('d', 'M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z');
+    icon.appendChild(path);
+    summary.appendChild(icon);
+    more.appendChild(summary);
+
+    var menu = document.createElement('div');
+    menu.className = 'appbar-menu-links';
+    links.forEach(function (a) {
+        if (a !== home && a !== current) menu.appendChild(a);
+    });
+    more.appendChild(menu);
+
+    nav.replaceChildren();
+    if (home) nav.appendChild(home);
+    if (currentName && current !== home) {
+        var title = document.createElement('span');
+        title.className = 'appbar-current';
+        title.setAttribute('aria-current', 'page');
+        title.textContent = currentName;
+        nav.appendChild(title);
+    }
+    if (menu.childElementCount) nav.appendChild(more);
+    nav.dataset.compact = 'true';
+    nav.classList.add('appbar-nav-ready');
+
+    document.addEventListener('click', function (event) {
+        if (!more.contains(event.target)) more.open = false;
+    });
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') more.open = false;
+    });
+};
 
 /* 扩展页面：功能模块经 web.routes 登记的页面（/api/pages → [{href, title, desc, icon, tile}]），
    补进顶栏导航与首页入口列表（插在「配置」前）。远程管理本身不认识任何具体功能。 */
@@ -323,5 +379,7 @@ function dialog(o) {
                 insert(list.parentNode, row);
             }
         });
-    }).catch(function () {});
+    }).catch(function () {}).finally(function () {
+        window.collapseRemoteNav();
+    });
 })();
