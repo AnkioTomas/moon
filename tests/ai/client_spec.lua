@@ -60,6 +60,19 @@ Assert.eq(sent.opts.content_type, "application/json")
 Assert.eq(sent.opts.timeout, Client.DEFAULT_TIMEOUT)
 Assert.eq(sent.opts.connect_timeout, Client.DEFAULT_TIMEOUT)
 Assert.eq(Client.DEFAULT_TIMEOUT, 120)
+-- 回答上限：默认取 DEFAULT_MAX_TOKENS，ai_max_tokens 配置优先，非法或非正值回退
+Assert.eq(Client.DEFAULT_MAX_TOKENS, 4000)
+Assert.eq(encoded.max_tokens, 4000)
+Assert.eq(Client.defaultMaxTokens(), 4000)
+settings.ai_max_tokens = 1234
+Assert.eq(Client.defaultMaxTokens(), 1234)
+settings.ai_max_tokens = "2600.9"
+Assert.eq(Client.defaultMaxTokens(), 2600)
+settings.ai_max_tokens = "bad"
+Assert.eq(Client.defaultMaxTokens(), 4000)
+settings.ai_max_tokens = 0
+Assert.eq(Client.defaultMaxTokens(), 4000)
+settings.ai_max_tokens = nil
 Assert.eq(content, "ok")
 Assert.is_nil(failure)
 
@@ -88,7 +101,8 @@ Assert.is_nil(failure)
 replies, posts = { "length", "length" }, {}
 Client.chat({ { role = "user", content = "hello" } }, nil, function(value, err) content, failure = value, err end)
 Assert.len(posts, 2, "只重试一次")
-Assert.eq(posts[2].payload.max_tokens, 8000)
+Assert.eq(posts[1].payload.max_tokens, 4000, "默认走回答上限")
+Assert.eq(posts[2].payload.max_tokens, 16000, "4 倍放大")
 Assert.is_nil(content)
 Assert.eq(failure, "回答被截断：输出长度上限不够")
 replies, posts = { "length" }, {}

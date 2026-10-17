@@ -1,5 +1,5 @@
 --[[--
-book.stats_db：merge_local_stats 打开时按天取云端与本地较大值，补上离线阅读；关闭时云端优先。真实 sqlite 执行。
+book.stats_db：merge_local_stats 打开时按天（与按时段）取云端与本地较大值，补上离线阅读；关闭时云端优先。真实 sqlite 执行。
 
 @module tests.book.stats_db_merge_spec
 --]]
@@ -73,6 +73,32 @@ Assert.eq(StatsDB.summaryBySource("wechat").total_seconds, 5700 + 7200 + 600 + 1
 cfg.merge_local_stats = true
 Assert.is_true(Base.exec("UPDATE reading_stats SET duration=20000 WHERE record_type='day';") ~= nil)
 Assert.eq(day("2026-10-10"), 20000 + 100)
+
+-- ── 时段（hour）：与按天同一套合并口径 ──────────────────────────────────────
+-- 云端 10-10 的 05 点 600s、22 点 400s；本机 05 点已上报 900s（不叠加）、07 点离线 300s
+-- （云端没有这一格）、22 点拉取后新读 300s（补在云端格上）。
+local H = os.time({ year = 2026, month = 10, day = 10, hour = 0 })
+local function cloudHour(hour, duration)
+    Assert.is_true(StatsDB.add({ source_id = "wechat", stable_id = "__wx:hour:" .. (H + hour * 3600),
+        record_type = "hour", page = 0, start_time = H + hour * 3600, duration = duration,
+        total_pages = 0, last_time = FETCHED }, StatsDB.SYNCED))
+end
+cloudHour(5, 600)
+cloudHour(22, 400)
+page(H + 5 * 3600 + 1800, 900) -- 快照里已含（已上报）：不叠加
+page(H + 7 * 3600 + 1800, 300) -- 云端没有这一格（离线读）
+page(FETCHED + 300, 300) -- 拉取之后才读的 22:05
+
+cfg.merge_local_stats = false
+local by_hour = StatsDB.hourlyBySource("wechat")["2026-10-10"]
+Assert.eq(by_hour[6], 600, "05 点：云端 600，本机已上报的 900 不叠加")
+Assert.eq(by_hour[8], 300, "07 点：没有云端格，用本机离线 300")
+Assert.eq(by_hour[23], 700, "22 点：云端 400 + 拉取后新读 300")
+cfg.merge_local_stats = true
+by_hour = StatsDB.hourlyBySource("wechat")["2026-10-10"]
+Assert.eq(by_hour[6], 900, "合并打开：05 点取本机 900")
+Assert.eq(by_hour[8], 300, "合并打开：07 点仍是本机 300")
+Assert.eq(by_hour[23], 700, "合并打开：22 点云端 + 增量比本机大，不往下压")
 
 Base.close()
 for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end

@@ -1,7 +1,8 @@
 --[[--
 统计页第 4 页：阅读时段（按小时、按星期）。
 
-只统计本机记录：云端同步来的只有按天的时长，不知道几点读的。
+本机逐页记录 + 云端时段桶：云端按活动行起始整点归档（跨整点的活动行整体算起始小时），
+与本机记录同一套合并口径（见 book.stats_db.hourlyBySource）。
 
 @module koplugin.book.desktop.pages.insight.hours
 --]]
