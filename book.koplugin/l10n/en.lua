@@ -400,6 +400,7 @@ return {
     ["开始阅读"] = "Start reading",
     ["开机自启"] = "Start on launch",
     ["空闲自动关闭"] = "Stop when idle",
+    ["截图分享后自动删除"] = "Delete screenshot after shared download",
     ["开启顶栏"] = "Show top bar",
     ["开启底栏"] = "Show bottom bar",
     ["当前"] = "Current",

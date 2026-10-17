@@ -53,6 +53,7 @@ local STATUS = {
 ---@field list_dir fun(path: string, cb: fun(entries: table[]|nil, err: any)) 异步目录列表
 ---@field is_dir fun(path: string): boolean 路径是否为目录（上传前单次校验）
 ---@field resolve_download fun(path: string): string|nil 存在且是普通文件才返回路径
+---@field downloaded fun(path: string)|nil 文件整份发完后回调（下载中途断开不触发）
 ---@field path_exists fun(path: string): boolean 路径是否已存在（上传重名预检）
 ---@field save fun(temp: string, dir: string, name: string, cb: fun(ok: boolean|nil, err: any), conflict: "overwrite"|"skip"|"rename"|nil) 上传落位（可异步）
 ---@field mkdir fun(path: string, cb: fun(ok: boolean|nil, err: any))
@@ -913,7 +914,7 @@ end
 
 --- 拼响应头并转 respond 状态；带 file 时只发头，body 由 _write 分块读发。
 ---@param conn table
----@param resp { code: number, ctype: string|nil, body: string|nil, extra: string[]|nil, file: any|nil, size: number|nil }
+---@param resp { code: number, ctype: string|nil, body: string|nil, extra: string[]|nil, file: any|nil, size: number|nil, on_sent: fun()|nil }
 function Server:_queueResponse(conn, resp)
     local lines = {
         string.format("HTTP/1.1 %d %s\r\n", resp.code, STATUS[resp.code] or "Unknown"),
@@ -929,6 +930,7 @@ function Server:_queueResponse(conn, resp)
     if resp.file then
         lines[#lines + 1] = string.format("Content-Length: %d\r\n", resp.size or 0)
         conn.body_file = resp.file
+        conn.on_sent = resp.on_sent
     else
         lines[#lines + 1] = string.format("Content-Length: %d\r\n", #(resp.body or ""))
     end
@@ -951,7 +953,9 @@ function Server:_write(conn)
             else
                 conn.body_file:close()
                 conn.body_file = nil
+                local on_sent = conn.on_sent
                 self:_kill(conn) -- 发完：Connection: close
+                if on_sent then on_sent() end
                 return true
             end
         else

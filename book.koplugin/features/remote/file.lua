@@ -162,6 +162,7 @@ function File.download(self, conn, method, path, inline)
         extra = extra,
         file = file,
         size = size,
+        on_sent = self.handlers.downloaded and function() self.handlers.downloaded(real) end,
     })
 end
 
