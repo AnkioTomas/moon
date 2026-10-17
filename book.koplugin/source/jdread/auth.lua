@@ -447,4 +447,50 @@ function Auth.completeQrLoginAsync(info, cb)
         end }
 end
 
+--- Validate and save a browser-captured JD session without replacing the QR login flow.
+---@param payload table
+---@param cb fun(ok: boolean, err: string|nil)
+---@return { cancel: fun() }|nil
+function Auth.importBrowserAsync(payload, cb)
+    local cookies = type(payload.cookies) == "table" and payload.cookies or {}
+    local jar = {}
+    for _idx, cookie in ipairs(cookies) do
+        if type(cookie) == "table" then
+            local domain = type(cookie.domain) == "string" and cookie.domain:gsub("^%.", ""):lower()
+            local name, value = cookie.name, cookie.value
+            local jd_domain = domain == "jd.com" or domain == "e.m.jd.com"
+            if jd_domain and type(name) == "string" and name:match("^[%w_%-]+$")
+                and type(value) == "string" and value ~= ""
+                and not value:find("[;\r\n]") then
+                jar[name] = value
+            end
+        end
+    end
+    dropQrCookies(jar)
+    if not hasLoginCookie(jar) then
+        cb(false, _("登录未拿到会话 Cookie"))
+        return nil
+    end
+
+    local current = cfg()
+    local uuid = current.uuid
+    if type(uuid) ~= "string" or uuid == "" then
+        uuid = "h5" .. require("ffi/sha2").md5(require("utils.device_id").ensure())
+    end
+    local cookie = cookieHeader(jar)
+    local client = require("source.jdread.client"):new{ cookie = cookie, uuid = uuid }
+    return client:apiGetAsync("/jdread/api/bookshelf/sort", nil, function(wire, err)
+        if not wire then
+            cb(false, err or _("京东登录校验失败"))
+            return
+        end
+        current = require("utils.settings").getSource("jdread")
+        current.cookie = cookie
+        current.uuid = uuid
+        current.user_name = Text.urlDecode(jar.unick or jar.pin or jar.pt_pin or "") or ""
+        require("utils.settings").saveSource("jdread", current)
+        cb(true)
+    end)
+end
+
 return Auth

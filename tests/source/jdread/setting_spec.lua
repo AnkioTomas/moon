@@ -32,7 +32,7 @@ package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
 
-local begin_cb, wait_cb, complete_cb
+local begin_cb, wait_cb, complete_cb, browser_payload
 local begin_cancels, wait_cancels, begin_count = 0, 0, 0
 package.preload["source.jdread.auth"] = function()
     return {
@@ -51,6 +51,9 @@ package.preload["source.jdread.auth"] = function()
             complete_cb = cb
             return { cancel = function() end }
         end,
+        importBrowserAsync = function(payload, cb)
+            cb(payload == browser_payload)
+        end,
     }
 end
 
@@ -62,6 +65,14 @@ end
 package.loaded["source.jdread.setting"] = nil
 local Setting = require("source.jdread.setting")
 local login = Setting.rows()[1]().callback
+
+browser_payload = {}
+Assert.eq(Setting.browser.domain, "e.m.jd.com")
+Assert.eq(Setting.browser.scope, "cookie")
+Assert.eq(Setting.browser.login, Setting.browser.check)
+local browser_ok
+Setting.browser.apply(browser_payload, function(ok) browser_ok = ok end)
+Assert.is_true(browser_ok)
 
 -- 点击即同步出占位框盖住入口，不等取码网络往返。
 login()

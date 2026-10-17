@@ -3,6 +3,7 @@
 
 @module tests.source.jdread.auth_spec
 --]]
+---@diagnostic disable: undefined-field
 
 local Assert = require("support.assert")
 local Config = require("support.config")
@@ -13,6 +14,7 @@ package.preload["json"] = function()
     return { decode = JSONStub.decode, encode = JSONStub.encode }
 end
 
+---@type table<string, any>
 local cfg = {}
 package.preload["utils.settings"] = function()
     return {
@@ -274,4 +276,82 @@ do
     Assert.eq(Auth._absUrl("https://passport.jd.com/relay/loginRelay", "//aq.jd.com/certified/index"),
         "https://aq.jd.com/certified/index")
     Assert.eq(Auth._absUrl("https://passport.jd.com/a", "/b"), "https://passport.jd.com/b")
+end
+
+-- 浏览器授权只导入适用于 e.m.jd.com 的京东会话 Cookie，并先用签名 API 校验。
+do
+    local request, response, response_err, saved, api_calls = nil, nil, nil, false, 0
+    package.loaded["source.jdread.client"] = nil
+    package.preload["source.jdread.client"] = function()
+        return {
+            new = function(_, options)
+                request = options
+                return {
+                    apiGetAsync = function(_, path, extra, cb)
+                        api_calls = api_calls + 1
+                        Assert.eq(path, "/jdread/api/bookshelf/sort")
+                        Assert.is_nil(extra)
+                        cb(response, response_err)
+                        return { cancel = function() end }
+                    end,
+                }
+            end,
+        }
+    end
+    package.loaded["utils.settings"] = nil
+    package.preload["utils.settings"] = function()
+        return {
+            getSource = function() return cfg end,
+            saveSource = function(_, value) cfg, saved = value, true end,
+        }
+    end
+
+    cfg = { uuid = "existing-uuid", user_name = "old", other = "kept" }
+    response, response_err, saved = { data = {} }, nil, false
+    local result
+    Auth.importBrowserAsync({ cookies = {
+        { domain = ".jd.com", name = "thor", value = "session" },
+        { domain = "e.m.jd.com", name = "pin", value = "reader" },
+        { domain = ".jd.com", name = "QRCodeKey", value = "temporary" },
+        { domain = ".evil.jd.com", name = "pt_key", value = "wrong-domain" },
+        "malformed cookie entry",
+        { domain = ".jd.com", name = "bad", value = "bad;cookie" },
+    } }, function(ok, err)
+        result = ok
+        Assert.is_nil(err)
+    end)
+    Assert.is_true(result)
+    Assert.is_true(saved)
+    Assert.eq(request.uuid, "existing-uuid")
+    Assert.matches(request.cookie, "thor=session")
+    Assert.matches(request.cookie, "pin=reader")
+    Assert.is_false(request.cookie:find("QRCodeKey", 1, true) ~= nil)
+    Assert.is_false(request.cookie:find("wrong-domain", 1, true) ~= nil)
+    Assert.is_false(request.cookie:find("bad=bad", 1, true) ~= nil)
+    Assert.eq(cfg.user_name, "reader")
+    Assert.eq(cfg.other, "kept")
+
+    cfg, saved = { cookie = "old-session", user_name = "old" }, false
+    local previous_calls = api_calls
+    Auth.importBrowserAsync({ cookies = {
+        { domain = ".evil.jd.com", name = "thor", value = "wrong-domain" },
+    } }, function(ok, err)
+        result = ok
+        Assert.not_nil(err)
+    end)
+    Assert.is_false(result)
+    Assert.is_false(saved)
+    Assert.eq(api_calls, previous_calls)
+
+    cfg = { cookie = "old-session", user_name = "old" }
+    response, response_err, saved, result = nil, "expired session", false, nil
+    Auth.importBrowserAsync({ cookies = {
+        { domain = ".jd.com", name = "thor", value = "new-session" },
+    } }, function(ok, err)
+        result = ok
+        Assert.not_nil(err)
+    end)
+    Assert.is_false(result)
+    Assert.is_false(saved)
+    Assert.eq(cfg.cookie, "old-session")
 end

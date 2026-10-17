@@ -136,6 +136,22 @@ local function showQrLogin()
     end)
 end
 
+--- 浏览器扩展登录是扫码之外的备用入口；只申请京东站点 Cookie，成功后由 API 验证再保存。
+Setting.browser = {
+    domain = "e.m.jd.com",
+    scope = "cookie",
+    login = "https://e.m.jd.com/",
+    check = "https://e.m.jd.com/",
+    icon = "https://e.m.jd.com/toc-web/ico.png",
+    isAuthorized = function()
+        return require("source.jdread.auth").hasSession()
+            and not require("source.auth").expired("jdread")
+    end,
+    apply = function(payload, cb)
+        require("source.jdread.auth").importBrowserAsync(payload, cb)
+    end,
+}
+
 --- 设置页行：账号（扫码）；已登录时追加退出。
 ---@return table[]
 function Setting.rows()

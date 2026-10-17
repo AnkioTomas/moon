@@ -1,11 +1,11 @@
 --[[--
 浏览器授权登录的远程管理接口（/api/cookie/*），协议见浏览器扩展 moon-cookie-storage 的 README「远程管理接入协议 v1」。
 
-  GET  sources                 支持浏览器登录的数据源 [{ id, name, login }]
+  GET  sources                 支持浏览器登录的数据源 [{ id, name, icon, authorized }]
   POST ticket {source}         签发一次性 ticket，回扩展要的任务参数 { domain, scope, login, check, ticket, callback }
   GET  login?data=<信封>       扩展回调：解密 → 数据源 apply → { ok, close, ticketId }
 
-数据源在 setting.lua 声明 `Setting.browser = { domain, scope, login, check, apply(payload, cb(ok, err)) }`：
+数据源在 setting.lua 声明 `Setting.browser = { domain, scope, login, check, icon, isAuthorized, apply(payload, cb(ok, err)) }`：
 payload 是扩展采集的明文（cookies / local / session），apply 负责校验登录态并保存。
 ticket 只在内存里：10 分钟过期；成功后保留回执 2 分钟，重复回调返回同一确认（幂等）。
 
@@ -61,17 +61,22 @@ local function sources()
     for _idx, meta in ipairs(Registry.list()) do
         local setting = SourceSetting.loadSetting(meta.id)
         if setting and type(setting.browser) == "table" then
-            out[#out + 1] = { id = meta.id, name = meta.name, login = setting.browser.login, browser = setting.browser }
+            local browser = setting.browser
+            out[#out + 1] = {
+                id = meta.id, name = meta.name, login = browser.login, icon = browser.icon,
+                authorized = type(browser.isAuthorized) == "function" and browser.isAuthorized() or false,
+                browser = browser,
+            }
         end
     end
     return out
 end
 
 ---@param id string
----@return table|nil
+---@return table|nil, table|nil
 local function findSource(id)
     for _idx, item in ipairs(sources()) do
-        if item.id == id then return item.browser end
+        if item.id == id then return item.browser, item end
     end
 end
 
@@ -127,11 +132,16 @@ end
 function Remote.handle(method, action, params, cb)
     if action == "sources" and method == "GET" then
         local out = {}
-        for _idx, item in ipairs(sources()) do out[#out + 1] = { id = item.id, name = item.name } end
+        for _idx, item in ipairs(sources()) do
+            out[#out + 1] = {
+                id = item.id, name = item.name, icon = item.icon, authorized = item.authorized,
+            }
+        end
         return cb(200, { sources = out })
     elseif action == "ticket" and method == "POST" then
-        local browser = findSource(tostring(params.source or ""))
+        local browser, item = findSource(tostring(params.source or ""))
         if not browser then return cb(404, { error = _("该数据源不支持浏览器登录") }) end
+        if item.authorized then return cb(409, { error = _("该数据源已授权") }) end
         local now = os.time()
         sweep(now)
         local ticket = randomTicket()

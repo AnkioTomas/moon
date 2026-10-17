@@ -46,6 +46,7 @@ local function saveToken(token, cb)
         local cfg = settings.getSource(SOURCE_ID)
         cfg.token = token
         settings.saveSource(SOURCE_ID, cfg)
+        require("source.auth").ok(SOURCE_ID)
         require("source.registry").reload()
         cb(true)
     end)
@@ -72,6 +73,10 @@ Setting.browser = {
     scope = "local",
     login = "https://www.qimao.com/login",
     check = "https://www.qimao.com/user/bookshelf",
+    icon = "https://cdn-front.qimao.com/global/static/images/favicon2022.ico",
+    isAuthorized = function()
+        return loggedIn() and not require("source.auth").expired(SOURCE_ID)
+    end,
     apply = function(payload, cb)
         local storage = payload["local"]
         local raw = type(storage) == "table" and storage.ls_qimao_global_userinfo_data

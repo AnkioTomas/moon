@@ -6,6 +6,10 @@
     var pending = {};
     var seq = 0;
     var list = el('list');
+    var authorizedSources = Object.create(null);
+    var sourceUi = Object.create(null);
+    var authPoll = null;
+    var authPollTimeout = null;
 
     function setStatus(state, message) {
         var status = el('ext-state');
@@ -25,18 +29,71 @@
     function updateButtons() {
         var disabled = !extReady || launching || started;
         list.querySelectorAll('.cookie-connect').forEach(function (button) {
-            button.disabled = disabled;
+            button.disabled = button.dataset.authorized === 'true' || disabled;
         });
+    }
+
+    function setAuthorized(id, authorized) {
+        authorizedSources[id] = authorized;
+        var ui = sourceUi[id];
+        if (!ui) return;
+        ui.card.classList.toggle('is-authorized', authorized);
+        ui.button.dataset.authorized = authorized ? 'true' : 'false';
+        ui.button.textContent = authorized ? t('已授权') : t('继续授权');
+        updateButtons();
+    }
+
+    function stopAuthorizationPoll() {
+        if (authPoll) window.clearInterval(authPoll);
+        if (authPollTimeout) window.clearTimeout(authPollTimeout);
+        authPoll = null;
+        authPollTimeout = null;
+    }
+
+    function pollAuthorization(id) {
+        stopAuthorizationPoll();
+        authPoll = window.setInterval(function () {
+            jfetch('/api/cookie/sources', { cache: 'no-store' }).then(function (data) {
+                var source = (Array.isArray(data.sources) ? data.sources : []).find(function (item) {
+                    return item.id === id;
+                });
+                if (!source || source.authorized !== true) return;
+                stopAuthorizationPoll();
+                setAuthorized(id, true);
+                started = false;
+                setResult('success', t('已完成授权'));
+                updateButtons();
+            }).catch(function (error) {
+                setResult('error', t('读取授权状态失败：%1', (error && error.message) || String(error)));
+            });
+        }, 2000);
+        authPollTimeout = window.setTimeout(function () {
+            stopAuthorizationPoll();
+            started = false;
+            setResult('error', t('授权尚未完成，请稍后重试。'));
+            updateButtons();
+        }, 10 * 60 * 1000);
     }
 
     function addSource(source) {
         var card = document.createElement('article');
         card.className = 'cookie-source-card';
+        var authorized = source.authorized === true;
+        if (authorized) card.classList.add('is-authorized');
 
         var mark = document.createElement('span');
         mark.className = 'cookie-source-mark';
         mark.setAttribute('aria-hidden', 'true');
-        mark.textContent = source.name.slice(0, 1);
+        if (source.icon) {
+            var icon = document.createElement('img');
+            icon.className = 'cookie-source-icon';
+            icon.src = source.icon;
+            icon.alt = '';
+            icon.loading = 'lazy';
+            icon.referrerPolicy = 'no-referrer';
+            icon.addEventListener('error', function () { icon.remove(); });
+            mark.appendChild(icon);
+        }
 
         var copy = document.createElement('span');
         copy.className = 'cookie-source-copy';
@@ -50,18 +107,21 @@
         var button = document.createElement('button');
         button.type = 'button';
         button.className = 'cookie-connect';
-        button.disabled = !extReady;
-        button.textContent = t('继续授权');
+        button.dataset.authorized = authorized ? 'true' : 'false';
+        button.disabled = authorized || !extReady;
+        button.textContent = authorized ? t('已授权') : t('继续授权');
         button.addEventListener('click', function () { start(source.id); });
 
         card.appendChild(mark);
         card.appendChild(copy);
         card.appendChild(button);
         list.appendChild(card);
+        sourceUi[source.id] = { card: card, button: button };
+        setAuthorized(source.id, authorized);
     }
 
     function start(id) {
-        if (!extReady || launching || started) return;
+        if (!extReady || launching || started || authorizedSources[id]) return;
         launching = true;
         setResult('working', t('正在创建安全授权…'));
         updateButtons();
@@ -71,7 +131,7 @@
             body: JSON.stringify({ source: id }),
         }).then(function (request) {
             var requestId = 'r' + (++seq) + '-' + Date.now();
-            pending[requestId] = true;
+            pending[requestId] = id;
             window.postMessage({
                 type: 'MOON_LOGIN_REQUEST',
                 requestId: requestId,
@@ -92,6 +152,7 @@
             return;
         }
         if (event.data.type !== 'MOON_LOGIN_RESULT' || !pending[event.data.requestId]) return;
+        var sourceId = pending[event.data.requestId];
         delete pending[event.data.requestId];
         launching = false;
         if (!event.data.ok) {
@@ -99,6 +160,7 @@
         } else {
             started = true;
             setResult('success', t('授权窗口已打开，请按新页面提示继续。'));
+            pollAuthorization(sourceId);
         }
         updateButtons();
     });
@@ -114,7 +176,7 @@
     loading.className = 'cookie-list-loading';
     loading.textContent = t('正在读取可用的数据源…');
     list.appendChild(loading);
-    jfetch('/api/cookie/sources').then(function (data) {
+    jfetch('/api/cookie/sources', { cache: 'no-store' }).then(function (data) {
         list.textContent = '';
         var sources = Array.isArray(data.sources) ? data.sources : [];
         if (!sources.length) {

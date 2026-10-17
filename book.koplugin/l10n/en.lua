@@ -1505,4 +1505,5 @@ Current version: ",
     ["授权域名与数据源不符"] = "Authorized domain does not match the source",
     ["登录校验失败"] = "Login verification failed",
     ["该数据源不支持浏览器登录"] = "This source does not support browser login",
+    ["该数据源已授权"] = "This source is already authorized",
 }
