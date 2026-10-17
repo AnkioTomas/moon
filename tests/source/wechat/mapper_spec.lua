@@ -88,6 +88,21 @@ do
 end
 
 do
+    local list = Mapper.shelfList({
+        books = {
+            { bookId = "1", title = "A", category = "官方" },
+            { bookId = "2", title = "B", category = "官方" },
+        },
+        archive = {
+            { name = "我的", bookIds = { 1 } },
+            { name = "其它", bookIds = { 1 } },
+        },
+    })
+    Assert.eq(list.data[1].category, "我的")
+    Assert.eq(list.data[2].category, "官方")
+end
+
+do
     local chapters = Mapper.chapters({
         data = {
             {

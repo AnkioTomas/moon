@@ -179,6 +179,19 @@ function Mapper.progressByBookId(shelf)
     return map
 end
 
+--- 书架 archive（用户自建分组）→ bookId→分组名；一本书在多个分组时取第一个。
+---@param shelf table|nil
+---@return table<string, string>
+function Mapper.groupByBookId(shelf)
+    local map = {}
+    for _idx, archive in ipairs(type(shelf) == "table" and type(shelf.archive) == "table" and shelf.archive or {}) do
+        if type(archive) == "table" and type(archive.name) == "string" and type(archive.bookIds) == "table" then
+            for _i, id in ipairs(archive.bookIds) do map[tostring(id)] = map[tostring(id)] or archive.name end
+        end
+    end
+    return map
+end
+
 --- 合并书架各列表并按 bookId 去重。
 ---@param into table[]
 ---@param seen table<string, boolean>
@@ -209,6 +222,7 @@ end
 ---@return BookListResult
 function Mapper.shelfList(shelf, on_cover)
     local prog_map = Mapper.progressByBookId(shelf)
+    local groups = Mapper.groupByBookId(shelf)
     local books = {}
     local list, seen = {}, {}
     appendShelfRows(list, seen, shelf.books)
@@ -219,6 +233,7 @@ function Mapper.shelfList(shelf, on_cover)
         local b, cover = Mapper.book(row)
         if b then
             Mapper.applyProgress(b, prog_map[b.stable_id])
+            b.category = groups[b.stable_id] or b.category
             if cover and on_cover then
                 on_cover(b.stable_id, cover)
             end

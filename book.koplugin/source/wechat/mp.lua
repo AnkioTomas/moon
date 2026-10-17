@@ -78,12 +78,7 @@ end
 ---@return { id: string, title: string, group: string }[]
 function Mp.accounts(shelf)
     shelf = type(shelf) == "table" and shelf or {}
-    local groups = {}
-    for _idx, archive in ipairs(type(shelf.archive) == "table" and shelf.archive or {}) do
-        if type(archive) == "table" and type(archive.name) == "string" and type(archive.bookIds) == "table" then
-            for _i, id in ipairs(archive.bookIds) do groups[tostring(id)] = groups[tostring(id)] or archive.name end
-        end
-    end
+    local groups = require("source.wechat.mapper").groupByBookId(shelf)
     local out, seen = {}, {}
     local function add(rows)
         if type(rows) ~= "table" then return end
