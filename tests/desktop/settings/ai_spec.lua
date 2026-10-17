@@ -21,7 +21,7 @@ package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) built = opts; return opts end }
 end
 
-local settings = { ai_endpoint = "", ai_api_key = "", ai_model = "" }
+local settings = { ai_endpoint = "", ai_api_key = "", ai_model = "", ai_max_tokens = 4000 }
 package.preload["utils.settings"] = function()
     return { get = function() return settings end, save = function() end }
 end
@@ -56,20 +56,35 @@ end
 local AI = require("desktop.pages.setting.ai")
 local desktop = { updateView = function() end, lifecycle = { state = "Resume" } }
 local rows = AI:rows(desktop)
-Assert.len(rows, 5)
+Assert.len(rows, 6)
 
--- 第 4 行是 AI 请求超时：spin 选值后写入设置。
+-- 第 4 行是 AI token 上限：数值步进（每次 ±100），确定后落盘。
 rows[4](400)
+Assert.eq(built.title, "AI token 上限")
+Assert.eq(built.kind, "nav")
+Assert.eq(built.status, "4000 token")
+Assert.eq(built.subtitle, "X-Ray 查询，AI 解释最大上限")
+built.callback()
+Assert.eq(spins[1].title, "AI token 上限")
+Assert.eq(spins[1].fields[1].value, 4000)
+Assert.eq(spins[1].fields[1].min, 100)
+Assert.eq(spins[1].fields[1].max, 65536)
+Assert.eq(spins[1].fields[1].step, 100)
+spins[1].callback(8000)
+Assert.eq(settings.ai_max_tokens, 8000)
+
+-- 第 5 行是 AI 请求超时：spin 选值后写入设置。
+rows[5](400)
 Assert.eq(built.title, "AI 请求超时")
 Assert.eq(built.status, "120 秒")
 built.callback()
-Assert.eq(spins[1].fields[1].min, 10)
-Assert.eq(spins[1].fields[1].max, 600)
-spins[1].callback(60)
+Assert.eq(spins[2].fields[1].min, 10)
+Assert.eq(spins[2].fields[1].max, 600)
+spins[2].callback(60)
 Assert.eq(ai_timeout, 60)
 
--- 第 5 行是测试连接
-rows[5](400)
+-- 第 6 行是测试连接
+rows[6](400)
 Assert.eq(built.title, "测试连接")
 Assert.eq(built.icon, "network_check")
 Assert.eq(built.kind, "action")

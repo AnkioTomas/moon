@@ -17,6 +17,8 @@ Kavita 书源（整本模式）。
 Kavita 的阅读会话按相邻两次进度写入的间隔计时，只在关书推一次时长恒为 0 秒；而且它只在
 pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「位置一变就补推」而非纯定时。
 书架：快照指纹不变就跳过对账；对账后后台逐本补简介 / 作者；漫画 series 的已读页回填成本地进度。
+统计：纯本地确认推送（Kavita 自己按会话记录），另全量拉取服务端阅读历史 → 按「身份 × 日」的行
+与替换指令写成本地统计快照；身份判定（单卷 / 多卷）与上次身份、卷名记在扩展状态文件里。
 划线：epub 的划线按段落文本在本地 epub 里找锚点，新建 / 改备注推到 Kavita，注解 id 存在笔记快照里。
 漫画：装了 kamare 插件且在线时交它在线看（开书回调 handled），否则下载 cbz 用内置阅读器。
 
@@ -25,6 +27,7 @@ pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「
 
 local Client = require("moonsource_kavita.client")
 local Position = require("moonsource_kavita.position")
+local Stats = require("moonsource_kavita.stats")
 local SourceBase = require("source.base")
 local logger = require("utils.log")
 local _ = require("gettext")
@@ -37,6 +40,12 @@ local PAGE_SIZE = 500
 local SHELF_SNAPSHOT_VERSION = "v3"
 local FORMATS = { [0] = "image", [1] = "cbz", [3] = "epub", [4] = "pdf" }
 local MAGIC = { epub = "PK\3\4", cbz = "PK\3\4", pdf = "%PDF" }
+-- 阅读历史分页大小（服务端上限实测 200）与页数上限：全量只有 2 页，
+-- 上限只是分页头异常（缺失 / 乱报）时的兜底，不让拉取死循环。
+local STATS_PAGE_SIZE = 200
+local STATS_MAX_PAGES = 50
+-- 统计状态文件（与书架指纹 / 回填 done 同机制）：上次身份 + 每系列章数判定 + 卷名。
+local STATS_STATE_FILE = "/moonsource_kavita_stats.lua"
 
 ---@class KavitaSource : SourceBase
 ---@field client KavitaClient
@@ -58,6 +67,14 @@ end
 
 function Source:configured()
     return self.client:configured()
+end
+
+--- 能力：书架 + 统计拉取（推送是纯本地确认，见 pushStatsAsync），其余走基类默认（全 false）。
+---@return SourceCapabilities
+function Source:capabilities()
+    local caps = SourceBase.capabilities(self)
+    caps.stats_pull = true
+    return caps
 end
 
 ---@return boolean
@@ -226,8 +243,44 @@ local function untouched(cur, row)
     return true
 end
 
+--- 卷行的元数据形状（先例 syncVolumeMeta / openBookAsync）：标题「系列 · 卷名」，其余继承容器。
+--- Kavita 只在 series 级给作者 / 简介 / 分类，而展示列的是卷行：卷行空着就是「未知作者」。
+--- 封面不继承：卷封面走源自己的 chapter-cover 接口。
+---@param series Book|table 容器书行
+---@param stable_id string "seriesId:chapterId"
+---@param volume_title string|nil 卷名；拿不到时退容器名，宁可重复也不留裸 ID
+---@return table
+local function volumeRow(series, stable_id, volume_title)
+    return {
+        source_id = ID,
+        stable_id = stable_id,
+        title = T("%1 · %2", series.title or "", volume_title or series.title or ""),
+        authors = series.authors,
+        intro = series.intro,
+        category = series.category,
+        series = series.title,
+    }
+end
+
+--- 状态文件里的卷名表（seriesId → chapterId → 卷名）规范成字符串键：dump 会把数字键写成 `[7453]`，
+--- 读回来就是数字键，而条目 / 身份侧的 id 全是字符串。
+---@param raw table|nil
+---@return table<string, table<string, string>>
+local function normalizeTitles(raw)
+    local out = {}
+    for series_key, names in pairs(type(raw) == "table" and raw or {}) do
+        local named = {}
+        if type(names) == "table" then
+            for chapter_key, name in pairs(names) do
+                if type(name) == "string" and name ~= "" then named[tostring(chapter_key)] = name end
+            end
+        end
+        out[tostring(series_key)] = named
+    end
+    return out
+end
+
 --- 读过的卷行继承容器元数据（作者 / 简介 / 分类 / 系列）。
---- Kavita 只在 series 级给这些字段，而最近阅读列的是卷行：卷行空着就是「未知作者」。
 --- 容器补全后卷行也跟着对齐（每次同步跑一遍，幂等）。只写真会改动库的行，并把改动的行数
 --- 回给调用方：对齐不算进同步变更的话，首页「当前阅读」收不到 shelf_changed，
 --- 卡片会一直停在未知作者（库里其实已经补上了）。
@@ -241,18 +294,41 @@ local function syncVolumeMeta(series, series_id, entries)
     local rows = {}
     for _idx, entry in ipairs(entries) do
         local stable_id = series_id .. ":" .. tostring(entry.chapterId or entry.uid)
-        local row = {
-            source_id = ID,
-            stable_id = stable_id,
-            title = T("%1 · %2", series.title or "", entry.title or ""),
-            authors = series.authors,
-            intro = series.intro,
-            category = series.category,
-            series = series.title,
-            -- cover 不继承：卷封面走源自己的 chapter-cover 接口。
-        }
+        local row = volumeRow(series, stable_id, entry.title)
         if not untouched(BookDB.get(ID, stable_id), row) then
             rows[#rows + 1] = row
+        end
+    end
+    if #rows == 0 then return 0 end
+    require("book.store").rememberMany(rows)
+    return #rows
+end
+
+--- 缺行卷物化：本次拉取里读到、但本机没有书行的卷补一条轻量身份行。
+--- 云端读过的卷可能在本机从未下载 / 打开过：没有书行，洞察「当日书单」、单书详情（补齐才进得去）、
+--- 锁屏账单就只能显示裸 ID。写入形状同卷行先例（volumeRow），书库按 upsertRemote 的默认把它落成
+--- deleted=1 + sync_status=1 的隐藏身份行：不进书架、不影响对账，也压不掉本地脏行（同 untouched）。
+--- 容器行缺失时跳过（连标题都拼不出来），统计行不受影响、照常落库。
+--- 兜底标题（容器名）只用于新行 / 本来就是兜底的旧行：既有行的真实标题（本机开过、或上一轮
+--- 用卷名物化的）不因本轮拿不到卷名而被改写。
+--- 物化只服务统计展示刷新（本次同步的 stats_changed），不回调对账、不进书架同步结果。
+---@param identities string[] 本次拉取出现的身份（单卷 = seriesId，多卷 = seriesId:chapterId）
+---@param titles table<string, table<string, string>> seriesId → chapterId → 卷名（身份判定时记下并持久化）
+---@return integer written 真正写入的行数
+local function materializeVolumes(identities, titles)
+    local BookDB = require("book.books_db")
+    local rows = {}
+    for _idx, identity in ipairs(identities) do
+        local series_id, chapter_id = identity:match("^(%d+):(%d+)$")
+        local series = series_id and BookDB.get(ID, series_id)
+        if series then
+            local named = titles[series_id]
+            local volume_title = named and chapter_id and named[chapter_id]
+            local row = volumeRow(series, identity, volume_title)
+            local cur = BookDB.get(ID, identity)
+            if volume_title or not (cur and cur.title and cur.title ~= row.title) then
+                if not untouched(cur, row) then rows[#rows + 1] = row end
+            end
         end
     end
     if #rows == 0 then return 0 end
@@ -601,6 +677,150 @@ function Source:syncBooksAsync(opts, cb)
     end }
 end
 
+--- 本地统计行只在本地确认，不发请求（先例微信）。
+---
+--- Kavita 的阅读历史是服务端按会话自己记的，本机没有对应的上报接口；确认后这些行不再是脏行，
+--- 展示仍按「云端快照 + 拉取后本地新读」合并。
+--- 当场就能回也走 defer 下一帧回调（源契约）：调用方先拿到可取消句柄，取消后不再回调。
+---@param rows BookStatsRow[]|nil
+---@param cb fun(data: BookStatsPushResult|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:pushStatsAsync(rows, cb)
+    local ids = {}
+    for _idx, row in ipairs(rows or {}) do ids[#ids + 1] = row.id end
+    return SourceBase.defer(cb, { ok = true, synced_ids = ids })
+end
+
+--- 拉取 Kavita 全局阅读历史（全量）→ reading_stats 行 + 替换指令。
+---
+--- 分页：`PageSize=200`，按响应头 `Pagination` 循环（页数上限兜底）；`Libraries` 必传（重复键，
+--- 逗号串会被服务端当成一个库、恒返回 0 条），时区取设备时钟映射（未知回退 UTC），不带日期范围。
+--- 身份：单卷系列读在 series 行、多卷逐卷（1 章 = 单卷，见 Stats），判定结果与「本次身份」记在
+--- 扩展状态文件里，避免每轮重复请求目录；目录不可得的系列本轮跳过，不中断其它系列。
+--- 失败一律 cb(nil, err) 静默（本地统计不受影响，下次同步自然重试），取消后不回调。
+---@param cb fun(result: BookStatsPullResult|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:pullStatsAsync(cb)
+    local libraries = {}
+    for id in pairs(require("utils.settings").getSource(ID).libraries or {}) do
+        libraries[#libraries + 1] = id
+    end
+    if not self:configured() or #libraries == 0 then
+        return SourceBase.defer(cb, nil, _("请先在设置里填写 Kavita 服务器并选择书库"))
+    end
+    table.sort(libraries)
+    local timezone = Stats.ianaTimezone(require("utils.settings").get("features.clock").timezone)
+    -- 快照时刻取发起拉取的时刻：展示端以它为界把「拉取后本地新读」叠加在云端快照上。
+    local fetched_at = os.time()
+    local state = require("luasettings"):open(
+        require("datastorage"):getSettingsDir() .. STATS_STATE_FILE)
+    --- 系列 → 本地目录章数（1 = 单卷）：上次判定 + 本轮新判定，注给 Stats 用。
+    --- 状态文件被写坏（不是表）时当作没判过：本轮全部重新判定，别让索引报错断掉整次拉取。
+    local volumes = state:readSetting("volumes", {})
+    if type(volumes) ~= "table" then volumes = {} end
+    local seen = state:readSetting("identities", {})
+    if type(seen) ~= "table" then seen = {} end
+    -- 卷名（seriesId → chapterId → 卷名）：章数判定时目录已到手，顺带记下、随 commit 落盘。
+    -- 后续轮次章数已知 → 不再读目录，物化标题靠它才不会退容器名（「系列 · 系列」）。
+    local titles = normalizeTitles(state:readSetting("titles", {}))
+    local entries, pending, pending_idx = {}, {}, 1
+    local cancelled = false
+    ---@type HttpJob|nil
+    local job
+
+    --- 终结：取消后不回调。
+    local function finish(result, err)
+        if cancelled then return end
+        cb(result, err)
+    end
+
+    --- 身份定完 → 纯核心聚合。12 号票的「缺行卷物化」挂在这一步：身份与条目都已就绪，
+    --- 物化要用的 series / 章节信息也能从同一批数据里取。
+    local function build()
+        local result = Stats.fromHistory(entries, {
+            source_id = self.id, fetched_at = fetched_at, volumes = volumes, seen = seen,
+        })
+        -- 缺行卷物化（12 号票）：身份与条目都已就绪，用同一批数据补本机没有书行的卷，
+        -- 展示端（洞察当日书单 / 单书详情 / 锁屏账单）才有书名。不进书架同步结果、不调对账。
+        -- 不做独立变更信号：物化行只在统计视图里可见，可见的前提是同一次拉取写入了统计行 →
+        -- pulled > 0 已让桌面发 stats_changed；零统计行的纯物化没有任何可见变化。
+        -- 也不为此改核心：spec 硬约束「核心插件零改动，只以扩展接入既有契约」。
+        materializeVolumes(result.identities, titles)
+        -- 落库成功（核心的 result.commit）才更新状态：失败不前进，
+        -- 上次身份还在，身份漂移留下的孤儿行下次还能清。
+        result.commit = function()
+            state:saveSetting("volumes", volumes)
+            state:saveSetting("titles", titles)
+            state:saveSetting("identities", result.identities)
+            state:flush()
+        end
+        finish(result)
+    end
+
+    --- 逐个判定待定系列的章数：状态文件里有的不请求，缺的走 Source:toc
+    --- （新鲜缓存 > 在线拉目录 > 离线过期缓存）。
+    local function resolveNext()
+        if cancelled then return end
+        local series_id = pending[pending_idx]
+        pending_idx = pending_idx + 1
+        if not series_id then return build() end
+        job = self:toc(series_id, function(toc, toc_err)
+            if cancelled then return end
+            local count = type(toc) == "table" and #toc or 0
+            if count > 0 then
+                volumes[series_id] = count
+                -- 目录已到手：卷名顺带记下（已有的同名卷名保留：目录缓存过期时不会反而丢名字）。
+                local named = titles[series_id]
+                if not named then
+                    named = {}
+                    titles[series_id] = named
+                end
+                for _i, item in ipairs(toc) do
+                    local chapter_id = item.chapterId or item.uid
+                    if chapter_id ~= nil and item.title ~= nil then
+                        named[tostring(chapter_id)] = item.title
+                    end
+                end
+            else
+                -- 判不出单卷 / 多卷的系列整条跳过：身份是错的比缺行更糟（Stats 侧也会记一条）。
+                logger.warn("kavita stats series toc unavailable", series_id, toc_err)
+            end
+            resolveNext()
+        end)
+    end
+
+    --- 一页历史。分页头不可信（缺失 / 解析不出）时按「本页拉满就还有下一页」续拉，
+    --- 仍受页数上限约束，异常头不会无限循环。
+    local function fetchPage(page)
+        job = self.client:jsonPaged("GET", "/api/Stats/reading-history", {
+            TimeZoneId = timezone, Libraries = libraries, PageNumber = page, PageSize = STATS_PAGE_SIZE,
+        }, nil, function(list, err, _code, pages)
+            if cancelled then return end
+            if not list then return finish(nil, err) end
+            for _idx, entry in ipairs(list) do entries[#entries + 1] = entry end
+            local more = pages and page < pages or (not pages and #list >= STATS_PAGE_SIZE)
+            if more and page < STATS_MAX_PAGES then return fetchPage(page + 1) end
+            if more then logger.warn("kavita stats pull hit page cap", STATS_MAX_PAGES) end
+            -- 分页合并完了才知道全量里有哪些系列：这里收集章数还不知道的，逐个判定。
+            local added = {}
+            for _idx, entry in ipairs(entries) do
+                local series_id = entry.seriesId ~= nil and tostring(entry.seriesId) or nil
+                if series_id and not volumes[series_id] and not added[series_id] then
+                    added[series_id] = true
+                    pending[#pending + 1] = series_id
+                end
+            end
+            resolveNext()
+        end)
+    end
+
+    fetchPage(1)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job:cancel() end
+    end }
+end
+
 --- series 的卷目录：series（取 libraryId）→ volumes → metadata（作者 / 简介写回书库，失败不影响目录）。
 ---@param series_id string
 ---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
@@ -844,12 +1064,7 @@ function Source:openBookAsync(identity, _opts, cb)
             local ref = { source_id = self.id, stable_id = series_id .. ":" .. entry.chapterId }
             -- 卷行继承容器（series 级）元数据：Kavita 只在 series 级给作者 / 简介 / 分类，
             -- 卷行自己空着，最近阅读里就是「未知作者」。每次开书对齐一次，容器补全后立刻生效。
-            require("book.store").rememberMany({ {
-                source_id = self.id, stable_id = ref.stable_id,
-                title = T("%1 · %2", series.title or "", entry.title),
-                authors = series.authors, series = series.title,
-                intro = series.intro, category = series.category,
-            } })
+            require("book.store").rememberMany({ volumeRow(series, ref.stable_id, entry.title) })
             job = self:openEntry(ref, entry, toc, series.title or entry.title, finish)
         end)
     end)

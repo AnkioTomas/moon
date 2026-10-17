@@ -18,6 +18,9 @@ local Client = {}
 --- 默认请求超时（秒）；推理模型首包可能较慢。
 Client.DEFAULT_TIMEOUT = 120
 
+--- AI token 上限的内置默认值（生成 token 数）；调用方未显式传 max_tokens 时用。
+Client.DEFAULT_MAX_TOKENS = 4000
+
 --- AI 请求默认 User-Agent；部分 OpenAI 兼容网关按 UA 分流/限流。
 local DEFAULT_UA = "opencode/1.2.3 ai-sdk/amazon-bedrock/3.0.73 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5"
 
@@ -51,6 +54,16 @@ end
 ---@return boolean
 function Client.isConfigured()
     return credentials() ~= nil
+end
+
+--- AI token 上限：优先取 ai_max_tokens 配置，非法或缺失时回退 DEFAULT_MAX_TOKENS。
+---@return integer
+function Client.defaultMaxTokens()
+    local configured = tonumber(Settings.get("ai").ai_max_tokens)
+    if configured and configured > 0 then
+        return math.floor(configured)
+    end
+    return Client.DEFAULT_MAX_TOKENS
 end
 
 --- 截断响应体便于日志（首尾截断，控制长度）。
@@ -171,7 +184,7 @@ function Client.chat(messages, opts, cb)
     -- 连接与整包共用同一预算；推理模型首包可能较慢。
     -- 调用方用 Timeout.ai(倍率) 传入；不传 = 「AI 请求超时」本身。
     local timeout = opts.timeout or require("http.timeout").ai()
-    local max_tokens = opts.max_tokens or 2000
+    local max_tokens = opts.max_tokens or Client.defaultMaxTokens()
     local current, cancelled
 
     ---@param think_off boolean
