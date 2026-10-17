@@ -507,3 +507,7 @@ return {
 ## 许可证
 
 本项目采用 [GNU GPLv3](LICENSE)。
+
+## 社区
+
+感谢 [LINUX DO](https://linux.do/) 社区的支持与认可。
