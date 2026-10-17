@@ -1,7 +1,7 @@
 --[[--
 阅读页左侧栏：书籍 / 目录 / 阅读字体 / 书摘 / X-Ray / 阅读票根 / 统计，右侧网状遮罩压暗正文。
 阅读字体仅在文档支持换字体时出现，复用字体选择器菜单。
-页面清单与顺序在 setting.lua 的 TABS；用户隐藏的页记在 sidebar_hidden_tabs。
+页面清单在 setting.lua 的 TABS，用户顺序 sidebar_tab_order（Setting.orderedTabs）；用户隐藏的页记在 sidebar_hidden_tabs。
 书籍页右上角关闭按钮退出本书；票根页复用锁屏票根并可分享。
 
 目录、书摘、X-Ray、字体不自己画：借用各自原有入口弹出的全屏列表（KOReader 原生目录的折叠/搜索、
@@ -45,7 +45,7 @@ local PANEL_RATIO = 0.85
 ---@class BookReaderSidebar : BookThemeModal
 ---@field ui table ReaderUI
 ---@field snapshot ReaderSessionSnapshot
----@field tabs string[] 显示的页 id，顺序同 Setting.TABS
+---@field tabs string[] 显示的页 id，顺序同 Setting.orderedTabs
 ---@field bar_tabs table[] 与 tabs 一一对应的页定义，交给底栏
 ---@field tab integer
 ---@field menus table<string, table|false> 借来的 Menu；false = 入口没弹 Menu
@@ -141,9 +141,10 @@ end
 function Sidebar:init()
     Modal.init(self)
     self.panel_w = math.floor(self.dimen.w * PANEL_RATIO)
-    local hidden = Setting.hiddenTabs(MoonSettings.get("features.sidebar"))
+    local settings = MoonSettings.get("features.sidebar")
+    local hidden = Setting.hiddenTabs(settings)
     self.tabs, self.bar_tabs = {}, {}
-    for _idx, tab in ipairs(Setting.TABS) do
+    for _idx, tab in ipairs(Setting.orderedTabs(settings)) do
         local available = AVAILABLE[tab.id]
         if not hidden[tab.id] and (not available or available(self.ui)) then
             self.tabs[#self.tabs + 1] = tab.id

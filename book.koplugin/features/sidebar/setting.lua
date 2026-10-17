@@ -35,8 +35,27 @@ Setting.TABS = {
     { id = "stats", text = _("统计"), icon = "insights", note = _("开启 KOReader 阅读统计后显示") },
 }
 
--- sidebar_gesture 取 GESTURES 的 value；sidebar_hidden_tabs 记隐藏的页 id（新加的页缺省显示）。
-Setting.defaults = { sidebar_gesture = "edge", sidebar_hidden_tabs = {} }
+-- sidebar_gesture 取 GESTURES 的 value；sidebar_hidden_tabs 记隐藏的页 id（新加的页缺省显示）；
+-- sidebar_tab_order 记用户排的页 id 顺序（空 = 按 TABS，TABS 里新加的页追加在末尾）。
+Setting.defaults = { sidebar_gesture = "edge", sidebar_hidden_tabs = {}, sidebar_tab_order = {} }
+
+--- 按用户顺序排好的页定义（含隐藏页）。
+---@param settings table
+---@return table[]
+function Setting.orderedTabs(settings)
+    local by_id, ordered = {}, {}
+    for _idx, tab in ipairs(Setting.TABS) do by_id[tab.id] = tab end
+    for _idx, id in ipairs(settings.sidebar_tab_order) do
+        if by_id[id] then
+            ordered[#ordered + 1] = by_id[id]
+            by_id[id] = nil
+        end
+    end
+    for _idx, tab in ipairs(Setting.TABS) do
+        if by_id[tab.id] then ordered[#ordered + 1] = tab end
+    end
+    return ordered
+end
 
 ---@param settings table
 ---@return table<string, boolean>
@@ -64,7 +83,7 @@ local function pickTabs(settings, desktop)
     local MoonSettings = require("utils.settings")
     local hidden = Setting.hiddenTabs(settings)
     local items = {}
-    for index, tab in ipairs(Setting.TABS) do
+    for index, tab in ipairs(Setting.orderedTabs(settings)) do
         items[index] = { text = tab.text, value = tab.id, mandatory = tab.note, checked = not hidden[tab.id] }
     end
     require("ui.themes.widgets.list"):new{
@@ -86,6 +105,62 @@ local function pickTabs(settings, desktop)
         end,
         close_callback = function() desktop:updateView() end,
     }:show()
+end
+
+--- 调整页面顺序：每行右侧上移 / 下移按钮，点一下即落盘并就地刷新（翻页由列表负责）。
+---@param settings table
+---@param desktop BookDesktop
+local function pickOrder(settings, desktop)
+    local MoonSettings = require("utils.settings")
+    local Button = require("ui.themes.widgets.button")
+    local HorizontalGroup = require("ui/widget/horizontalgroup")
+    local HorizontalSpan = require("ui/widget/horizontalspan")
+    local Theme = require("ui.themes")
+    local tabs = Setting.orderedTabs(settings)
+    local list
+    local items
+    local function move(index, delta)
+        tabs[index], tabs[index + delta] = tabs[index + delta], tabs[index]
+        local ids = {}
+        for _idx, tab in ipairs(tabs) do ids[#ids + 1] = tab.id end
+        settings.sidebar_tab_order = ids
+        MoonSettings.save("features.sidebar", settings)
+        list:setItems(items())
+    end
+    local function arrow(icon, index, delta)
+        local size = Theme.px(36)
+        return Button:new{
+            icon = icon, variant = "ghost", width = size, height = size,
+            enabled = index + delta >= 1 and index + delta <= #tabs,
+            callback = function() move(index, delta) end,
+        }
+    end
+    items = function()
+        local result = {}
+        for index, tab in ipairs(tabs) do
+            result[index] = {
+                text = tab.text,
+                icon = tab.icon,
+                keep_open = true,
+                callback = function() end,
+                widget = function()
+                    return HorizontalGroup:new{
+                        align = "center",
+                        arrow("arrow_upward", index, -1),
+                        HorizontalSpan:new{ width = Theme.px(4) },
+                        arrow("arrow_downward", index, 1),
+                    }
+                end,
+            }
+        end
+        return result
+    end
+    list = require("ui.themes.widgets.list"):new{
+        title = _("页面顺序"),
+        items = items(),
+        close_callback = function() desktop:updateView() end,
+    }
+    list:show()
 end
 
 ---@param desktop BookDesktop
@@ -138,6 +213,17 @@ function Setting.entries(desktop)
                                     subtitle = _("选择侧栏底部显示哪些页面"),
                                     status = tabsStatus(settings),
                                     callback = function() pickTabs(settings, desktop) end,
+                                })
+                            end,
+                            function(iw)
+                                return Row.widget({
+                                    width = iw,
+                                    chevron = true,
+                                    kind = "nav",
+                                    icon = "swap_vert",
+                                    title = _("页面顺序"),
+                                    subtitle = _("调整侧栏底部页面的排列顺序"),
+                                    callback = function() pickOrder(settings, desktop) end,
                                 })
                             end,
                         },

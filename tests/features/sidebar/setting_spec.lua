@@ -9,7 +9,7 @@ local Assert = require("support.assert")
 
 package.preload["gettext"] = function() return function(text) return text end end
 
-local sidebar = { sidebar_gesture = "edge", sidebar_hidden_tabs = {} }
+local sidebar = { sidebar_gesture = "edge", sidebar_hidden_tabs = {}, sidebar_tab_order = {} }
 local saved
 package.preload["utils.settings"] = function()
     return {
@@ -73,3 +73,30 @@ Assert.eq(table.concat(sidebar.sidebar_hidden_tabs, ","), "info,font,notes,xray,
 updates = 0
 tabs.close_callback()
 Assert.eq(updates, 1, "关窗刷新设置页")
+
+-- 页面顺序：每行右侧上移 / 下移按钮，顺序落盘；排序后的列表用同一份顺序。
+local Themed = require("support.theme_stubs")
+package.preload["ui.themes.widgets.button"] = function()
+    return { new = function(_, opts) return opts end }
+end
+package.preload["ui/widget/horizontalgroup"] = function()
+    return { new = function(_, group) return group end }
+end
+package.preload["ui/widget/horizontalspan"] = function()
+    return { new = function(_, span) return span end }
+end
+package.preload["ui.themes"] = function() return { px = function(n) return n end } end
+entry.sections()[1].rows[3](600).callback()
+local order = Themed.last("list")
+Assert.eq(order.items[1].text, "书籍")
+local first = order.items[1].widget()
+Assert.is_false(first[1].enabled, "第一页不能上移")
+first[3].callback()
+Assert.eq(table.concat(sidebar.sidebar_tab_order, ",", 1, 2), "toc,info")
+Assert.eq(order.items[1].text, "目录")
+Assert.eq(Setting.orderedTabs(sidebar)[2].id, "info")
+sidebar.sidebar_tab_order = { "stats", "bogus" }
+local ordered = Setting.orderedTabs(sidebar)
+Assert.eq(#ordered, 7)
+Assert.eq(ordered[1].id, "stats")
+Assert.eq(ordered[2].id, "info")

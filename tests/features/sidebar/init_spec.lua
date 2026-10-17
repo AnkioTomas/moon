@@ -9,7 +9,7 @@ X-Ray 开关决定页数、借用原生菜单（尺寸压进侧栏、改挂 show
 local Assert = require("support.assert")
 
 local state = {
-    sidebar = { sidebar_gesture = "edge", sidebar_hidden_tabs = {} },
+    sidebar = { sidebar_gesture = "edge", sidebar_hidden_tabs = {}, sidebar_tab_order = {} },
     xray = { book_xray_enabled = true },
     snapshot = nil,
     shown = {},
@@ -235,11 +235,11 @@ Assert.is_false(swipe("east", 200), "中间右滑仍是原生上一页")
 Assert.is_true(swipe("east", 60))
 Assert.len(state.shown, 1)
 
-state.sidebar = { sidebar_gesture = "full", sidebar_hidden_tabs = {} }
+state.sidebar = { sidebar_gesture = "full", sidebar_hidden_tabs = {}, sidebar_tab_order = {} }
 Assert.is_true(swipe("east", 500))
 Assert.len(state.shown, 2)
 
-state.sidebar = { sidebar_gesture = "off", sidebar_hidden_tabs = {} }
+state.sidebar = { sidebar_gesture = "off", sidebar_hidden_tabs = {}, sidebar_tab_order = {} }
 Assert.is_false(swipe("east", 10))
 Assert.len(state.shown, 2)
 
@@ -429,6 +429,11 @@ do
     local strip = trimmed[1][1][2][1].strip
     Assert.len(strip.tabs, 3)
     Assert.eq(strip.tabs[3].id, "xray")
+
+    state.sidebar.sidebar_tab_order = { "xray", "notes" }
+    local reordered = Sidebar:new{ ui = ui, snapshot = state.snapshot }
+    Assert.eq(table.concat(reordered.tabs, ","), "xray,notes,info")
+    state.sidebar.sidebar_tab_order = {}
 
     state.sidebar.sidebar_hidden_tabs = { "info", "toc", "font", "notes", "ticket" }
     state.xray = { book_xray_enabled = false }
