@@ -73,7 +73,15 @@ local function pick(desktop, title, items, key)
         items = items,
         current = require("utils.settings").get("features.rare")[key],
         centered = true,
-        on_select = function(value) save(desktop, key, value) end,
+        on_select = function(value)
+            save(desktop, key, value)
+            if key == "rare_level" and value == "all" then
+                require("ui.themes.widgets.toast"):new{
+                    text = _("全部范围注音每页命中很多，可能拖慢翻页，一般建议用“生僻”"),
+                    timeout = 4,
+                }:show()
+            end
+        end,
     }:show()
 end
 
