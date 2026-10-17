@@ -279,7 +279,7 @@ do
 
     local escaped
     server_opts.handlers.delete(book .. "/shelf/..", function(_, e) escaped = e end)
-    Assert.eq(escaped, "path outside managed roots")
+    Assert.eq(escaped, "bad path")
     links = {}
 end
 
