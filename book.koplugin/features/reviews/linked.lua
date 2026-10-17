@@ -56,12 +56,12 @@ local AHEAD = 2
 ---@class ReviewLinkCache
 ---@field hotspots table<string, WechatReviewHotspot[]> 「bookId\0章 uid」→ 热点
 ---@field loading table<string, { cancel: fun() }|integer> 在飞句柄，或失败时刻（秒）
----@field squashed table<WechatReviewHotspot, string> 原句去空白标点
 ---@field pos table<WechatReviewHotspot, string[]> 已定位的原句 { pos0, pos1 }
 ---@field pages table<WechatReviewHotspot, integer[]> 已定位原句的 { 起页, 止页 }（随排版失效）
 ---@field scanned table<integer, integer> 页 → 扫它时的热点数（热点多了要重扫；随排版失效）
 ---@field hash integer|nil pages / scanned 对应的排版指纹
 ---@field timer function|nil 待执行的下一页预扫
+---@field job { job: { cancel: fun() }, page: integer }|nil 在飞的扫页子进程
 ---@field logged table<WechatReviewHotspot, boolean> 已记过「对不上」日志的原句
 
 ---@param ui table ReaderUI
@@ -89,7 +89,7 @@ end
 
 ---@return ReviewLinkCache
 function Linked.newCache()
-    return { hotspots = {}, loading = {}, squashed = {}, pos = {}, pages = {}, scanned = {}, logged = {} }
+    return { hotspots = {}, loading = {}, pos = {}, pages = {}, scanned = {}, logged = {} }
 end
 
 --- 取消在飞拉取与预扫（已拉到的热点、已定位的原句保留）。
@@ -98,6 +98,10 @@ function Linked.cancel(cache)
     if cache.timer then
         UIManager:unschedule(cache.timer)
         cache.timer = nil
+    end
+    if cache.job then
+        cache.job.job:cancel()
+        cache.job = nil
     end
     for key, job in pairs(cache.loading) do
         if type(job) == "table" then job.cancel() end
@@ -286,55 +290,105 @@ local function pageText(ui, p, page, count)
     return range and range.text or ""
 end
 
---- 扫第 p 页：前一页 + 本页 + 后一页文字里找未定位的原句，唯一且与本页重叠的交 findText 换成 xpointer。
+--- 扫第 p 页（在子进程里跑：要访问排版引擎，只读，结果经 JSON 回主进程）：
+--- 前一页 + 本页 + 后一页文字里找未定位的原句，唯一且与本页重叠的交 findText 换成 xpointer。
 ---@param ui table ReaderUI
 ---@param entries ReviewEntry[]
 ---@param cache ReviewLinkCache
 ---@param p integer
+---@return { found: table<integer, string[]>, why: table<integer, string> } 按热点序号
 local function scan(ui, entries, cache, p)
-    cache.scanned[p] = #entries
     local document = ui.document
     local page, count = PageMarks.currentPage(ui), document:getPageCount()
     local prev, cur = pageText(ui, p - 1, page, count), pageText(ui, p, page, count)
     local raw = prev .. cur .. pageText(ui, p + 1, page, count)
     local cur0, cur1 = #prev + 1, #prev + #cur
     local text, from, to = squash(raw)
-    local searched = false
-    for _idx, entry in ipairs(entries) do
+    local result = { found = {}, why = {} }
+    for i, entry in ipairs(entries) do
         local spot = entry.spot
-        local needle = cache.squashed[spot]
-        if not needle then
-            needle = squash(spot.text)
-            cache.squashed[spot] = needle
-        end
+        local needle = squash(spot.text)
         local s, e = nil, nil
         if not cache.pos[spot] and #needle >= MIN_BYTES then s, e = text:find(needle, 1, true) end
-        local why
         if s and from[s] <= cur1 and to[e] >= cur0 then
             if text:find(needle, s + 1, true) then
-                why = "ambiguous"
+                result.why[i] = "ambiguous"
             else
-                searched = true
                 for _match_idx, match in ipairs(document:findText(raw:sub(from[s], to[e]), 0, 0, false, nil, false, 10) or {}) do
                     if document:getPageFromXPointer(match.start) <= p and document:getPageFromXPointer(match["end"]) >= p then
-                        cache.pos[spot] = { match.start, match["end"] }
+                        result.found[i] = { match.start, match["end"] }
                         break
                     end
                 end
-                if not cache.pos[spot] then why = "findText miss" end
+                if not result.found[i] then result.why[i] = "findText miss" end
             end
         elseif not s and not cache.pos[spot] and #needle >= MIN_BYTES then
             -- 开头对上、整句对不上：两版文字有出入（错字、增删），记下好比对。
             local hs = text:find(needle:sub(1, MIN_BYTES), 1, true)
-            if hs and from[hs] <= cur1 then why = "differs" end
+            if hs and from[hs] <= cur1 then result.why[i] = "differs" end
         end
-        if why and not cache.logged[spot] then
+    end
+    return result
+end
+
+--- 收下一页的扫描结果。排版已变（指纹对不上）的只收 xpointer（与排版无关），不记「已扫」。
+---@param entries ReviewEntry[]
+---@param cache ReviewLinkCache
+---@param p integer
+---@param hash integer
+---@param result { found: table<integer, string[]>, why: table<integer, string> }|nil nil = 子进程失败
+---@return integer 新定位的句子数
+local function apply(entries, cache, p, hash, result)
+    result = result or { found = {}, why = {} }
+    local located = 0
+    for i, pos in pairs(result.found) do
+        cache.pos[entries[i].spot] = pos
+        located = located + 1
+    end
+    for i, why in pairs(result.why) do
+        local spot = entries[i].spot
+        if not cache.logged[spot] then
             cache.logged[spot] = true
             logger.info("book.reviews unmatched", why, "page", p, "quote", spot.text)
         end
     end
-    -- findText 会把最后一次命中写进排版引擎的选区，留着会画成高亮。
-    if searched then document:clearSelection() end
+    -- 失败也记已扫：否则每次重绘都再开一个必败的子进程。
+    if cache.hash == hash then cache.scanned[p] = #entries end
+    return located
+end
+
+--- 起一个子进程扫第 p 页，同一时刻只有一个；扫完收下结果，有新定位就重画，再排后几页的预扫。
+---@param ui table ReaderUI
+---@param entries ReviewEntry[]
+---@param cache ReviewLinkCache
+---@param p integer
+---@param page integer 当前页
+---@param redraw fun()
+local function startScan(ui, entries, cache, p, page, redraw)
+    if cache.job then
+        if cache.job.page == p then return end
+        cache.job.job:cancel()
+        cache.job = nil
+    end
+    local hash = cache.hash
+    local function finish(result)
+        cache.job = nil
+        if not ui.document then return end
+        if apply(entries, cache, p, hash, result) > 0 then redraw() end
+        -- 翻走了就不接着排旧页的预扫，下次绘制会重排。
+        if PageMarks.currentPage(ui) == page then Linked.scheduleScan(ui, entries, cache, page, redraw) end
+    end
+    local job = require("workers.job").run(function() return scan(ui, entries, cache, p) end, {
+        name = "reviews.scan",
+        kind = "light",
+        timeout = 30,
+        on_done = finish,
+        on_failed = function(err)
+            logger.warn("book.reviews scan failed", err)
+            finish(nil)
+        end,
+    })
+    if not job.settled then cache.job = { job = job, page = p } end
 end
 
 --- 空闲后逐页预扫当前页之后 AHEAD 页里没扫过的；视口变了（翻页、关书）就作废。
@@ -342,7 +396,8 @@ end
 ---@param entries ReviewEntry[]
 ---@param cache ReviewLinkCache
 ---@param page integer 当前页
-local function scheduleScan(ui, entries, cache, page)
+---@param redraw fun()
+function Linked.scheduleScan(ui, entries, cache, page, redraw)
     if cache.timer then UIManager:unschedule(cache.timer) end
     cache.timer = nil
     local last = math.min(page + AHEAD, ui.document:getPageCount())
@@ -353,25 +408,27 @@ local function scheduleScan(ui, entries, cache, page)
     cache.timer = require("ui.guard").wrap("reviews scan", function()
         cache.timer = nil
         if not key or PageMarks.viewKey(ui, 0) ~= key then return end
-        scan(ui, entries, cache, p)
-        scheduleScan(ui, entries, cache, page)
+        startScan(ui, entries, cache, p, page, redraw)
     end)
     UIManager:scheduleIn(IDLE, cache.timer)
 end
 
---- 当前屏的段评：当前页没扫过先扫，再按页码筛出已定位的句子取屏幕框；之后排后几页的预扫。
+--- 当前屏的段评：当前页没扫过先后台扫（扫完重画），再按页码筛出已定位的句子取屏幕框；之后排后几页的预扫。
 ---@param ui table ReaderUI
 ---@param entries ReviewEntry[]
 ---@param cache ReviewLinkCache
+---@param redraw fun() 新定位了句子，重画
 ---@return ReviewPlacement[]
-function Linked.place(ui, entries, cache)
+function Linked.place(ui, entries, cache, redraw)
     local document = ui.document
     local hash = document:getDocumentRenderingHash()
     if cache.hash ~= hash then
         cache.hash, cache.pages, cache.scanned = hash, {}, {}
     end
     local page = PageMarks.currentPage(ui)
-    if cache.scanned[page] ~= #entries then scan(ui, entries, cache, page) end
+    if cache.scanned[page] ~= #entries then
+        startScan(ui, entries, cache, page, page, redraw)
+    end
     -- 双栏、滚动模式一屏最多跨两页。
     local width, height = PageMarks.screenSize(ui)
     local out = {}
@@ -390,7 +447,7 @@ function Linked.place(ui, entries, cache)
             if #boxes > 0 then out[#out + 1] = { entry = entry, boxes = boxes } end
         end
     end
-    scheduleScan(ui, entries, cache, page)
+    if not cache.job then Linked.scheduleScan(ui, entries, cache, page, redraw) end
     return out
 end
 
@@ -467,7 +524,7 @@ function Linked.target(ui, cache, redraw)
         key = "link\0" .. link.book_id,
         fetch = function(cb) return Linked.tocAsync(source, link.book_id, cb) end,
         place = function(toc)
-            return Linked.place(ui, Linked.entries(ui, source, link.book_id, toc, cache, redraw), cache)
+            return Linked.place(ui, Linked.entries(ui, source, link.book_id, toc, cache, redraw), cache, redraw)
         end,
     }
 end
