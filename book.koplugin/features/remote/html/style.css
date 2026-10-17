@@ -1036,10 +1036,11 @@ tbody tr.is-hidden td.n a { opacity: .6 }
     .quick-list button { min-height: 40px }
 }
 @media (max-width: 720px) {
-    /* 顶栏：6 个入口等分成一行图标 + 文字，不再横向溢出 */
+    /* 顶栏：入口（含扩展页面）等分成一行图标 + 文字，不再横向溢出 */
     .appbar-nav {
         display: grid;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(0, 1fr);
         gap: 2px;
         margin: 0 -8px 0 -14px;
         padding: 0 6px 6px;

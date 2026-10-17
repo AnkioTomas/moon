@@ -151,7 +151,8 @@ Assert.eq(#found, 0, "下层依赖了 feature（改成下层声明通用扩展�
 -- ── 扩展点：用到的名字都已声明；声明的名字以下层命名空间开头、不含 feature 名 ──
 package.path = ROOT .. "/?.lua;" .. package.path
 local Ext = require("utils.extension")
-local NAMESPACES = { desktop = true, topbar = true, setting = true, reader = true, highlight = true, note = true, quickpanel = true }
+local NAMESPACES = { desktop = true, topbar = true, setting = true, reader = true, highlight = true, note = true, quickpanel = true,
+    web = true } -- web.*：远程管理网页的接口挂点（提供者登记 /api/<name>/*，不含 feature 名）
 local bad = {}
 for point in pairs(Ext.POINTS) do
     local ns = point:match("^([%w_]+)%.")
@@ -182,3 +183,28 @@ for _idx, path in ipairs(all) do
 end
 Assert.is_true(used > 15, "扫到扩展点调用")
 Assert.eq(#bad, 0, table.concat(bad, "\n"))
+
+-- 远程管理是通用外壳：features/remote 下任何文件（含 html/js/css、网页文案）都不得出现具体功能的字眼，
+-- 订阅、公众号、微信等一律经 web.routes 由各自 feature 注册（含注释，防止再写死回来）。
+do
+    local FORBID = { "subscri", "%f[%w]mp%f[%W]", "%f[%w]mp_", "wechat", "weixin", "weread", "feed", "opml", "rss",
+        "订阅", "公众号", "微信" }
+    local bad = {}
+    local pipe = assert(io.popen('find ' .. ROOT .. '/features/remote -type f | sort'))
+    for path in pipe:lines() do
+        if not path:match("%.png$") and not path:match("%.jpg$") and not path:match("%.ico$") then
+            local f = assert(io.open(path, "rb"))
+            local lineno = 0
+            for line in f:lines() do
+                lineno = lineno + 1
+                local low = line:lower()
+                for _i, p in ipairs(FORBID) do
+                    if low:find(p) then bad[#bad + 1] = path .. ":" .. lineno .. " 含「" .. p .. "」" end
+                end
+            end
+            f:close()
+        end
+    end
+    pipe:close()
+    Assert.eq(#bad, 0, table.concat(bad, "\n"))
+end

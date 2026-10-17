@@ -2,7 +2,7 @@
 核心扩展点注册表：下层（桌面、顶栏、设置树、阅读器、划词菜单、会话）声明通用挂点，
 上层（features/、第三方）往里登记实现。下层只按挂点名取用，不知道谁登记、也不写任何 feature 名。
 
-挂点名一律以下层自己的命名空间开头（desktop.* / topbar.* / setting.* / reader.* / highlight.* / note.*），
+挂点名一律以下层自己的命名空间开头（desktop.* / topbar.* / setting.* / reader.* / highlight.* / note.* / web.*），
 完整清单与各项形状见下方 `POINTS`；登记未声明的挂点直接报错，防止拼错名静默失效。
 
     Ext.add("desktop.activated", function(desktop) ... end)   -- 追加一项
@@ -30,6 +30,7 @@ Ext.POINTS = {
     ["reader.ready"] = "阅读页就绪 fn(plugin)",
     ["reader.doc_settings"] = "开书前改文档设置 fn(doc_settings, document)",
     ["reader.preferences"] = "开书后套用偏好 fn(ui)",
+    ["web.routes"] = "远程管理接口 { name, handle(method, action, params, cb(status, table)), download?(action) -> { ctype, filename, body }|nil, dir?: string, assets?: string[], page?: { href, title, title_long?, desc?, icon, tile? }, l10n?: string }（/api/<name>/<action>；assets 为 dir 下开放的静态文件；page 进顶栏与首页；l10n 为网页文案模块前缀）",
     ["note.markup_classes"] = "页内插入的译文类元素 class（字符串）；划线端点落在其中时回退到原文",
 }
 
