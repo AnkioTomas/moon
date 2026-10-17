@@ -50,7 +50,7 @@ local Registry = require("source.registry")
 
 local meta = Registry.meta("ext.demo")
 Assert.eq(meta.type, "chapter")
-Assert.eq(Registry.list()[8].id, "ext.demo", "第三方源排在 7 个内置源之后")
+Assert.eq(Registry.list()[9].id, "ext.demo", "第三方源排在 8 个内置源之后")
 
 local source = Registry.resolve("ext.demo")
 Assert.eq(source.id, "ext.demo")
