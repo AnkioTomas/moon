@@ -93,7 +93,7 @@ local BUILTIN = {
             { key = "username", label = "用户名（可选）" },
             { key = "password", label = "密码（可选）", secret = true },
         },
-        --- 规范化、清 feed 缓存都在 store.opds.setting.save；地址空 / 非空决定底栏有没有 OPDS 页签。
+        --- 规范化、清目录缓存都在 store.opds.setting.save；地址空 / 非空决定底栏有没有 OPDS 页签。
         commit = function(cfg, values)
             local function pick(key)
                 if values[key] == nil then return cfg[key] end

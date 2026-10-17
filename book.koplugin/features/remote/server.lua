@@ -34,6 +34,7 @@ local MAX_CONNS = 32
 
 local STATUS = {
     [200] = "OK",
+    [201] = "Created",
     [400] = "Bad Request",
     [403] = "Forbidden",
     [404] = "Not Found",
@@ -41,9 +42,11 @@ local STATUS = {
     [409] = "Conflict",
     [411] = "Length Required",
     [413] = "Payload Too Large",
+    [422] = "Unprocessable Content",
     [431] = "Request Header Fields Too Large",
     [500] = "Internal Server Error",
     [501] = "Not Implemented",
+    [502] = "Bad Gateway",
 }
 
 ---@class RemoteHandlers
@@ -81,6 +84,7 @@ local Status = require("features.remote.status")
 local SettingsRoute = require("features.remote.settings_route")
 local UpdateRoute = require("features.remote.update")
 local BackupRoute = require("features.remote.backup")
+local ExtRoute = require("features.remote.ext_route")
 Server._routeList = File.list
 Server._routeDownload = File.download
 Server._routeUpload = File.upload
@@ -97,6 +101,7 @@ Server._routeStatus = Status.route
 Server._routeSettings = SettingsRoute.settings
 Server._routeUpdate = UpdateRoute.route
 Server._routeBackup = BackupRoute.route
+Server._routeExt = ExtRoute.route
 
 --- idle_timeout：连续这么多秒没有任何在途连接就调一次 on_idle（nil = 不检测）。
 ---@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil, idle_timeout: number|nil, on_idle: fun()|nil }
@@ -382,16 +387,17 @@ end
 ---@param name string
 ---@return string|nil body
 ---@return string|nil err
-local function readAsset(name)
-    local path = HTML_DIR .. "/" .. name
+---@param full string|nil 绝对路径（扩展提供者开放的文件）；缺省读 html 目录
+local function readAsset(name, full)
+    local path = full or HTML_DIR .. "/" .. name
     local stamp = assetStamp(path)
-    local hit = _asset_cache[name]
+    local hit = _asset_cache[path]
     if hit and hit.stamp == stamp then return hit.body end
     local f, err = io.open(path, "rb")
     if not f then return nil, err end
     local s = f:read("*all")
     f:close()
-    _asset_cache[name] = { body = s, stamp = stamp }
+    _asset_cache[path] = { body = s, stamp = stamp }
     return s
 end
 
@@ -530,11 +536,12 @@ function Server:_route(conn, head)
     local query = parseQuery(qs)
 
     local asset = ASSETS[path]
+    if not asset then asset = ExtRoute.asset(path) end
     if asset then
         if method ~= "GET" then
             return self:_fail(conn, 405, "Method Not Allowed")
         end
-        local body, err = readAsset(asset[1])
+        local body, err = readAsset(asset[1], asset[3])
         if not body then
             return self:_fail(conn, 500, err)
         end
@@ -559,6 +566,11 @@ function Server:_route(conn, head)
             home = self.home,
             shortcuts = self.shortcuts,
         }))
+    elseif path == "/api/pages" then
+        if method ~= "GET" then
+            return self:_fail(conn, 405, "Method Not Allowed")
+        end
+        return self:_json(conn, 200, JSON.encode(ExtRoute.pages()))
     elseif path == "/api/i18n" then
         return self:_routeI18n(conn, method)
     elseif path == "/api/logs.zip" then
@@ -597,6 +609,11 @@ function Server:_route(conn, head)
         return self:_routeUpdate(conn, method, headers)
     elseif path == "/api/backup" then
         return self:_routeBackup(conn, method, headers)
+    end
+    local ext_name, ext_action = path:match("^/api/([%w_]+)/([%w_]+)$")
+    local ext = ext_name and ExtRoute.find(ext_name)
+    if ext then
+        return self:_routeExt(conn, method, headers, query, ext, ext_action)
     end
     return self:_fail(conn, 404, "Not Found")
 end
@@ -866,6 +883,7 @@ function Server:_routeI18n(conn, method)
         if name ~= "zh_CN" then
             local ok_web, web = pcall(require, "features.remote.l10n.web." .. name)
             if ok_web and type(web) == "table" then merge(web) end
+            for _idx, web_ext in ipairs(ExtRoute.l10n(name)) do merge(web_ext) end
         end
         -- 简体中文 strings 为空（可能编码成 []），前端按「无译文」处理
         local body = JSON.encode({ lang = name, html = html, strings = strings })

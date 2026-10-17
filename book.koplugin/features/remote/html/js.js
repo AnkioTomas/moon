@@ -285,3 +285,43 @@ function dialog(o) {
         show(next);
     };
 })();
+
+
+/* 扩展页面：功能模块经 web.routes 登记的页面（/api/pages → [{href, title, desc, icon, tile}]），
+   补进顶栏导航与首页入口列表（插在「配置」前）。远程管理本身不认识任何具体功能。 */
+(function () {
+    function svg(path, size) {
+        var ns = 'http://www.w3.org/2000/svg', s = document.createElementNS(ns, 'svg'), p = document.createElementNS(ns, 'path');
+        s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', size); s.setAttribute('height', size);
+        s.setAttribute('fill', 'currentColor'); s.setAttribute('aria-hidden', 'true');
+        p.setAttribute('d', path || ''); s.appendChild(p);
+        return s;
+    }
+    function span(cls, text) { var e = document.createElement('span'); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+    function insert(parent, node) {
+        var ref = parent.querySelector('a[href="/settings.html"]');
+        parent.insertBefore(node, ref);
+    }
+    jfetch('/api/pages').then(function (pages) {
+        (pages || []).forEach(function (pg) {
+            var nav = document.querySelector('.appbar-nav');
+            if (nav && !nav.querySelector('a[href="' + pg.href + '"]')) {
+                var a = document.createElement('a');
+                a.href = pg.href;
+                if (location.pathname === pg.href) a.setAttribute('aria-current', 'page');
+                a.appendChild(svg(pg.icon, 18)); a.appendChild(span(null, t(pg.title)));
+                insert(nav, a);
+            }
+            var list = document.querySelector('.setting-row[href="/settings.html"]');
+            if (list && pg.desc && !list.parentNode.querySelector('.setting-row[href="' + pg.href + '"]')) {
+                var row = document.createElement('a');
+                row.href = pg.href; row.className = 'setting-row';
+                var ic = span('row-icon ' + (pg.tile || 'tile-slate')); ic.setAttribute('aria-hidden', 'true'); ic.appendChild(svg(pg.icon, 24));
+                var tx = span('row-text'); tx.appendChild(span('row-title', t(pg.title_long || pg.title))); tx.appendChild(span('row-sub', t(pg.desc)));
+                var ch = span('row-chevron'); ch.setAttribute('aria-hidden', 'true'); ch.appendChild(svg('M8.6 16.6 13.2 12 8.6 7.4 10 6l6 6-6 6z', 18));
+                row.appendChild(ic); row.appendChild(tx); row.appendChild(ch);
+                insert(list.parentNode, row);
+            }
+        });
+    }).catch(function () {});
+})();
