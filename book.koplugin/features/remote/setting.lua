@@ -8,7 +8,7 @@ local _ = require("gettext")
 
 local Setting = {}
 
-Setting.defaults = { remote_port = 9528, remote_autostart = false, remote_idle_stop = true }
+Setting.defaults = { remote_port = 9528, remote_autostart = false, remote_idle_stop = true, remote_delete_after_share = false }
 
 ---@param desktop BookDesktop
 ---@return function[]
@@ -92,6 +92,17 @@ local function rows(desktop)
                 status = on and _("开") or _("关"), status_on = on,
                 callback = function()
                     Remote.setIdleStop(not on)
+                    rebuild()
+                end,
+            })
+        end,
+        function(iw)
+            local on = Remote.deleteAfterShareOn()
+            return Row.widget({
+                width = iw, kind = "toggle", chevron = false, icon = "delete", title = _("截图分享后自动删除"),
+                status = on and _("开") or _("关"), status_on = on,
+                callback = function()
+                    Remote.setDeleteAfterShare(not on)
                     rebuild()
                 end,
             })

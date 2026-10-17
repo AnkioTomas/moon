@@ -245,6 +245,18 @@ function Remote.setAutostart(on)
     Settings.save("features.remote", c)
 end
 
+---@return boolean
+function Remote.deleteAfterShareOn()
+    return Settings.get("features.remote").remote_delete_after_share
+end
+
+---@param on boolean
+function Remote.setDeleteAfterShare(on)
+    local c = Settings.get("features.remote")
+    c.remote_delete_after_share = on and true or false
+    Settings.save("features.remote", c)
+end
+
 --- 空闲自动关闭的时长（秒）：无任何网页/客户端连接持续这么久就停服。
 Remote.IDLE_STOP = 5 * 60
 
@@ -1352,6 +1364,14 @@ function Remote.start()
             list_dir = listDirAsync,
             is_dir = isDir,
             resolve_download = resolveDownload,
+            downloaded = function(real)
+                if Remote._once[real] then
+                    Remote._once[real] = nil
+                    deleteRecursiveAsync(real, function(ok, err)
+                        logger.info("book remote delete shared file", real, ok, err)
+                    end)
+                end
+            end,
             save = saveUpload,
             path_exists = pathExists,
             mkdir = function(path, cb)
@@ -1488,6 +1508,9 @@ local function localIP()
     return ip
 end
 
+--- 分享链接下载完整后要删掉的文件（开关「分享后自动删除」开启时登记）。
+Remote._once = {}
+
 --- 启动服务并给受控文件生成局域网下载地址。
 ---@param path string
 ---@return string|nil url
@@ -1510,6 +1533,9 @@ function Remote.shareUrl(path)
     local ip = localIP()
     if not ip then
         return nil, "local IP unavailable"
+    end
+    if Remote.deleteAfterShareOn() then
+        Remote._once[real] = true
     end
     return string.format("http://%s:%d/download?path=%s", ip, Remote.port(), Text.urlEncode(real))
 end

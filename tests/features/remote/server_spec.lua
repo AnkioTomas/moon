@@ -842,6 +842,8 @@ do
     handlers.resolve_download = function(p)
         return p == "/dl/ok.bin" and real or nil
     end
+    local done_path
+    handlers.downloaded = function(p) done_path = p end
     local c1 = newClient({ "GET /download?path=/dl/ok.bin HTTP/1.1\r\n\r\n" })
     drain(serve(c1, handlers))
     local code, body, head = parseResponse(c1:output())
@@ -849,6 +851,7 @@ do
     Assert.eq(body, "BYTES0123")
     has(head, "Content-Disposition: attachment")
     has(head, "Content-Length: 9")
+    Assert.eq(done_path, real)
     os.remove(real)
 
     -- 不是文件（目录/不存在）→ 404；相对路径 → 400
