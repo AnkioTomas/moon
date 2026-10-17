@@ -3,7 +3,7 @@
    接口：/api/subscribe/<action>，失败回 {error}。文案全部走 t()，由 /api/i18n 翻译。 */
 (function () {
     var API = '/api/subscribe/';
-    var KIND = { rss: 'RSS', site: '网站', mp: '公众号' };
+    var KIND = { rss: 'RSS', site: '网站', page: '网页', mp: '公众号' };
     var ALL = '\u0000all';
     var data = { feeds: [], groups: [], enabled: true };
     var cur = ALL;

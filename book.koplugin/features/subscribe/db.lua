@@ -32,6 +32,22 @@ CREATE INDEX IF NOT EXISTS idx_sub_items_order ON sub_items(feed_id, time DESC, 
 ]]) ~= nil
 end)
 
+--- 阅读时间：源的 read_at = 最近读它的时间（订阅页「最近阅读」），条目的 read_at = 读到它的时间；0 = 没读过。
+--- 老库没有这两列，补上（只加列，已有数据照旧）。
+DB.schema("sub_read_at", function()
+    for _idx, table_name in ipairs({ "sub_feeds", "sub_items" }) do
+        local columns, nrows = DB.query("PRAGMA table_info(" .. table_name .. ");")
+        local present = false
+        for i = 1, columns and nrows or 0 do
+            if columns[2][i] == "read_at" then present = true end
+        end
+        if not present and not DB.exec("ALTER TABLE " .. table_name .. " ADD COLUMN read_at INTEGER NOT NULL DEFAULT 0;") then
+            return false
+        end
+    end
+    return true
+end)
+
 --- 同一篇换了 guid 也只留一条：公众号同一篇文章在不同请求下回两种 reviewId（短 id / WR1A… 长 id），
 --- RSS 也可能改 guid / 链接。同源内「标题 + 时间」（时间有效时）唯一。建索引前先清掉历史重复：
 --- 每组留已读的那条（其正文缓存按 guid 存，也就跟着保留），都没读留最早入库的。
@@ -47,7 +63,7 @@ end
 DB.schema("sub_items_dedupe", dedupe)
 SubDB._dedupe = dedupe
 
-local FEED_COLS = { "id", "kind", "url", "title", "grp", "filter", "cursor", "updated_at", "sort", "error", "unread" }
+local FEED_COLS = { "id", "kind", "url", "title", "grp", "filter", "cursor", "updated_at", "sort", "error", "read_at", "unread" }
 
 --- 列式结果 → 行表。
 local function rows(result, n, cols)
@@ -61,7 +77,7 @@ local function rows(result, n, cols)
 end
 
 local FEED_SQL = [[
-SELECT f.id, f.kind, f.url, f.title, f.grp, f.filter, f.cursor, f.updated_at, f.sort, f.error,
+SELECT f.id, f.kind, f.url, f.title, f.grp, f.filter, f.cursor, f.updated_at, f.sort, f.error, f.read_at,
   (SELECT COUNT(*) FROM sub_items i WHERE i.feed_id = f.id AND i.read = 0)
 FROM sub_feeds f ]]
 
@@ -71,6 +87,7 @@ local function feedRows(where, ...)
     for _idx, f in ipairs(out) do
         f.id, f.unread, f.updated_at = tonumber(f.id), tonumber(f.unread) or 0, tonumber(f.updated_at) or 0
         f.cursor, f.sort, f.error = tonumber(f.cursor), tonumber(f.sort) or 0, f.error or ""
+        f.read_at = tonumber(f.read_at) or 0
     end
     return out
 end
@@ -188,10 +205,10 @@ end
 function SubDB.items(feed_id, page, size, read)
     local where = read == nil and "" or (read and " AND read=1" or " AND read=0")
     local total = tonumber(DB.rowexec("SELECT COUNT(*) FROM sub_items WHERE feed_id=?" .. where .. ";", feed_id)) or 0
-    local result, n = DB.query([[SELECT guid, title, link, time, read FROM sub_items WHERE feed_id=?]] .. where .. " " .. [[ORDER BY time DESC, seq DESC LIMIT ? OFFSET ?;]], feed_id, size, (page - 1) * size)
-    local out = rows(result, n, { "guid", "title", "link", "time", "read" })
+    local result, n = DB.query([[SELECT guid, title, link, time, read, read_at FROM sub_items WHERE feed_id=?]] .. where .. " " .. [[ORDER BY time DESC, seq DESC LIMIT ? OFFSET ?;]], feed_id, size, (page - 1) * size)
+    local out = rows(result, n, { "guid", "title", "link", "time", "read", "read_at" })
     for _idx, item in ipairs(out) do
-        item.time, item.read = tonumber(item.time) or 0, tonumber(item.read) == 1
+        item.time, item.read, item.read_at = tonumber(item.time) or 0, tonumber(item.read) == 1, tonumber(item.read_at) or 0
     end
     return out, total
 end
@@ -202,12 +219,21 @@ function SubDB.summary(feed_id, guid)
     return DB.rowexec("SELECT summary FROM sub_items WHERE feed_id=? AND guid=?;", feed_id, guid)
 end
 
---- 标已读；guid 为 nil 时整个源全部已读。
-function SubDB.markRead(feed_id, guid)
-    if guid then
-        DB.exec("UPDATE sub_items SET read=1 WHERE feed_id=? AND guid=?;", feed_id, guid)
-    else
+--- 标已读；guid 为 nil 时整个源全部已读。read_at 给了就是「读过」：记下条目与源的阅读时间（远程标已读、全部已读不传）。
+---@param feed_id integer
+---@param guid string|nil
+---@param read_at integer|nil
+function SubDB.markRead(feed_id, guid, read_at)
+    if not guid then
         DB.exec("UPDATE sub_items SET read=1 WHERE feed_id=?;", feed_id)
+    elseif read_at then
+        DB.transaction(function()
+            DB.exec("UPDATE sub_items SET read=1, read_at=? WHERE feed_id=? AND guid=?;", read_at, feed_id, guid)
+            DB.exec("UPDATE sub_feeds SET read_at=? WHERE id=?;", read_at, feed_id)
+            return true
+        end)
+    else
+        DB.exec("UPDATE sub_items SET read=1 WHERE feed_id=? AND guid=?;", feed_id, guid)
     end
 end
 

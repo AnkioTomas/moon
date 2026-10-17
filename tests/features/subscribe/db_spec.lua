@@ -56,6 +56,19 @@ Assert.eq(feed.updated_at, 5)
 SubDB.markRead(id)
 Assert.eq(SubDB.feed(id).unread, 0)
 
+-- 阅读时间：带时间标已读才记条目与源的 read_at；全部已读、远程标已读不算「读过」。
+Assert.eq(SubDB.feed(id).read_at, 0)
+SubDB.merge(id, { { guid = "r1", title = "读" }, { guid = "r2", title = "没读" } })
+SubDB.markRead(id, "r2")
+Assert.eq(SubDB.feed(id).read_at, 0, "无时间不记")
+SubDB.markRead(id, "r1", 1234)
+Assert.eq(SubDB.feed(id).read_at, 1234)
+local read_items = SubDB.items(id, 1, 20)
+local by_guid = {}
+for _idx, item in ipairs(read_items) do by_guid[item.guid] = item end
+Assert.eq(by_guid.r1.read_at, 1234)
+Assert.eq(by_guid.r2.read_at, 0)
+
 -- 上限：超出 KEEP 的最旧已读条目被删，未读不删。
 SubDB.KEEP = 3
 SubDB.markRead(mp, "a")

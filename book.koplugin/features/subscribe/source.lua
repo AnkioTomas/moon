@@ -182,7 +182,7 @@ function Source:onEvent(event, payload)
     local identity = payload and payload.identity
     local idx = identity and tonumber(identity.chapter_idx)
     local item = idx and (require("source.toc").read(M.ID, identity.stable_id) or {})[idx]
-    if item then SubDB.markRead(tonumber(identity.stable_id), item.uid) end
+    if item then SubDB.markRead(tonumber(identity.stable_id), item.uid, os.time()) end
 end
 
 return M

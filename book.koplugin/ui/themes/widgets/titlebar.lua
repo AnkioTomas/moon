@@ -9,6 +9,8 @@
   TitleBar.widget({ width = w, title = "…", subtitle = "…",
       left_icon = "arrow_back", left_callback = fn, right_icon = "close", right_callback = fn })
 
+  右侧可再加一个图标（extra_icon / extra_callback，排在 right_icon 左边），左侧补等宽空位，标题仍居中。
+
 @module koplugin.book.ui.themes.widgets.titlebar
 --]]
 
@@ -33,7 +35,7 @@ function TitleBar.height()
     return Theme.px(t.control.height) + Theme.px(t.space.sm) * 2 + Theme.px(t.row.divider)
 end
 
----@param opts table width/title/subtitle/subtitle_face/left_icon/left_callback/right_icon/right_callback/divider
+---@param opts table width/title/subtitle/subtitle_face/left_icon/left_callback/right_icon/right_callback/extra_icon/extra_callback/divider
 ---@return table
 function TitleBar.widget(opts)
     local t = Theme.current()
@@ -47,20 +49,20 @@ function TitleBar.widget(opts)
         if not icon then return HorizontalSpan:new{ width = slot } end
         return Button:new{ icon = icon, variant = "ghost", width = slot, height = slot, callback = callback }
     end
-    local mid_w = math.max(1, opts.width - slot * 2)
+    local sides = opts.extra_icon and 4 or 2
+    local mid_w = math.max(1, opts.width - slot * sides)
     local title = VerticalGroup:new{ align = "center", Text.line("title", opts.title or "", { width = mid_w }) }
     if opts.subtitle then
         title[#title + 1] = Text.line("caption", opts.subtitle, { width = mid_w, color = t.color.muted, face = opts.subtitle_face })
     end
-    local bar = VerticalGroup:new{
-        align = "left",
-        HorizontalGroup:new{
-            align = "center",
-            CenterContainer:new{ dimen = Geom:new{ w = slot, h = bar_h }, side(opts.left_icon, opts.left_callback) },
-            CenterContainer:new{ dimen = Geom:new{ w = mid_w, h = bar_h }, title },
-            CenterContainer:new{ dimen = Geom:new{ w = slot, h = bar_h }, side(opts.right_icon, opts.right_callback) },
-        },
-    }
+    local line = HorizontalGroup:new{ align = "center" }
+    local function cell(w, widget) line[#line + 1] = CenterContainer:new{ dimen = Geom:new{ w = w, h = bar_h }, widget } end
+    cell(slot, side(opts.left_icon, opts.left_callback))
+    if opts.extra_icon then cell(slot, HorizontalSpan:new{ width = slot }) end
+    cell(mid_w, title)
+    if opts.extra_icon then cell(slot, side(opts.extra_icon, opts.extra_callback)) end
+    cell(slot, side(opts.right_icon, opts.right_callback))
+    local bar = VerticalGroup:new{ align = "left", line }
     local divider = Theme.px(t.row.divider)
     if divider > 0 and opts.divider ~= false then
         bar[#bar + 1] = LineWidget:new{

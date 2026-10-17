@@ -132,7 +132,8 @@ function Remote.parseOpml(text)
         else
             local a = attrs(raw)
             local url = Text.trim(a.xmlurl or "")
-            local kind = (a.type or ""):lower() == "site" and "site" or "rss"
+            local type_ = (a.type or ""):lower()
+            local kind = (type_ == "site" or type_ == "page") and type_ or "rss"
             if url ~= "" and url:match("^https?://") and not seen[url] then
                 seen[url] = true
                 local title = Text.trim(a.title or a.text or "")
@@ -303,7 +304,7 @@ function POST.article(q, cb)
 end
 
 function POST.preview(b, cb)
-    if b.kind ~= "rss" and b.kind ~= "site" then return cb(400, { error = _("不支持的订阅类型") }) end
+    if b.kind ~= "rss" and b.kind ~= "site" and b.kind ~= "page" then return cb(400, { error = _("不支持的订阅类型") }) end
     local url, uerr = publicUrl(b.url)
     if not url then return cb(400, { error = uerr }) end
     local Subscribe = S()
@@ -338,7 +339,7 @@ function POST.preview(b, cb)
 end
 
 function POST.add(b, cb)
-    if b.kind ~= "rss" and b.kind ~= "site" then return cb(400, { error = _("不支持的订阅类型") }) end
+    if b.kind ~= "rss" and b.kind ~= "site" and b.kind ~= "page" then return cb(400, { error = _("不支持的订阅类型") }) end
     local url, uerr = publicUrl(b.url)
     if not url then return cb(400, { error = uerr }) end
     local function insert(feed)
