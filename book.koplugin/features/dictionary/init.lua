@@ -83,7 +83,7 @@ function DictInit.onCreate()
         end
         require("ui.guard").call("dictionary lookup", function()
             word = self.cleanSelection and self:cleanSelection(word, is_sane) or word
-            require("features.rare.lookup").open{ ui = self.ui, text = word, from_highlight = highlight ~= nil,
+            require("features.rare.lookup").open{ ui = self.ui, text = word, source = "dict", from_highlight = highlight ~= nil,
                 word_box = type(boxes) == "table" and boxes[1] or nil }
         end)
         return true
