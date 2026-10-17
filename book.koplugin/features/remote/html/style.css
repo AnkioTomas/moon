@@ -347,6 +347,7 @@ textarea { width: 100%; resize: vertical }
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
     gap: 16px;
+    margin-bottom: 16px;
 }
 .cfg-form { margin: 0 }
 .field { margin: 0 0 12px }
