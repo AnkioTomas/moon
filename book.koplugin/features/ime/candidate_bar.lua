@@ -143,6 +143,12 @@ local function applyKeyboardLabels(profile)
     for key in pairs(layout.keys) do layout.keys[key] = nil end
     for key, value in pairs(restored) do layout.keys[key] = value end
     if not profile then return end
+    if profile.rows then
+        local rows = profile.rows(layout.keys)
+        for i = #layout.keys, 1, -1 do layout.keys[i] = nil end
+        for i, row in ipairs(rows) do layout.keys[i] = row end
+        return
+    end
     if profile.id == "zhuyin" then
         applyZhuyinKeys(layout.keys)
     end

@@ -60,6 +60,14 @@ local METHODS = {
         label = _("拼音"),
         mapKey = letterKey,
     },
+    t9 = {
+        id = "t9",
+        dictionary = "pinyin",
+        label = _("九宫格拼音"),
+        mapKey = function(key) return require("features.ime.t9").mapKey(key) end,
+        query = function(dictionary, code) return require("features.ime.t9").lookup(dictionary, code) end,
+        rows = function(base) return require("features.ime.t9").rows(base) end,
+    },
     xiaohe = {
         id = "xiaohe",
         dictionary = "pinyin",
@@ -94,7 +102,7 @@ local METHODS = {
     },
 }
 
-local ORDER = { "pinyin", "xiaohe", "wubi", "cangjie", "zhuyin" }
+local ORDER = { "pinyin", "t9", "xiaohe", "wubi", "cangjie", "zhuyin" }
 
 local M = {}
 
@@ -118,12 +126,14 @@ end
 
 -- M.isAvailable/fileExists/lookup/entries/builtAt/reset(method, ...)：method 为 profile 或 id，
 -- 转发到该方法所用词库（profile.dictionary）的 table_dictionary 实例。
--- 声明了 toCode 的方法（双拼）查词前先把键码翻译成词库码。
+-- 声明了 toCode 的方法（双拼）查词前先把键码翻译成词库码；声明了 query 的（九宫格）自己展开多个词库码。
 for _idx, name in ipairs({ "isAvailable", "fileExists", "lookup", "entries", "builtAt", "reset" }) do
     M[name] = function(method, ...)
         local profile = M.get(type(method) == "table" and method.id or method)
         local dictionary = require("features.ime." .. profile.dictionary .. ".dictionary")
-        if name == "lookup" and profile.toCode then
+        if name == "lookup" and profile.query then
+            return profile.query(dictionary, (...))
+        elseif name == "lookup" and profile.toCode then
             return dictionary:lookup(profile.toCode((...)))
         end
         return dictionary[name](dictionary, ...)

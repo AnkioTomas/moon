@@ -7,7 +7,7 @@ VerticalGroup 只要求 getSize/paintTo，事件经 WidgetContainer.propagateEve
 
 布局规则（setCells）：
 - cell = { tw?, w, callback? }，纯数据：◀▶ 是带回调的 cell，空档是只有宽度
-  的 cell。w > 0 的 cell 各自画白底，缝透键盘框底色 = 分割线（与其他行同机制）。
+  的 cell。整条浅灰底 + 底部细线，cell 不画格子，词间靠内边距分隔。
 - 候选词按自然文本宽度 + 内边距从左排；剩余预算放不下的词整词不占槽
   （不截断——0/过小的 max_width 会让 xtext makeLine 抛错，Kindle 真机崩过）。
 - 队列没坐满 7 个槽（词少或有词放不下）时整体居中：余量均分到两侧空档；
@@ -22,6 +22,8 @@ local Guard = require("ui.guard")
 
 -- 候选词 cell 的最小左右内边距：词与词保持呼吸距，不是贴边绘制。
 local CELL_PAD = 10
+-- 候选条底色：浅灰整条，与键盘白键区分；词之间靠内边距分隔，不画格子。
+local BAR_BG = Blitbuffer.COLOR_GRAY_E
 
 local Strip = {}
 Strip.__index = Strip
@@ -60,9 +62,10 @@ local function paint(self, bb, x, y)
     local d = self.dimen
     d.x, d.y = x, y
     local cx = x
+    bb:paintRect(x, y, d.w, d.h, BAR_BG)
+    bb:paintRect(x, y + d.h - 1, d.w, 1, Blitbuffer.COLOR_GRAY)
     for _idx, cell in ipairs(self.cells) do
         if cell.w > 0 then
-            bb:paintRoundedRect(cx, y, cell.w, d.h, Blitbuffer.COLOR_WHITE)
             if cell.tw then
                 -- 文本在 cell 内水平居中（cell 恰好是文本宽时退化为 padding）
                 local tw_size = cell.tw:getSize()
@@ -140,8 +143,9 @@ function Strip:setCells(words, opts)
     local shown = {}
     local left = self.budget
     local words_w = 0
-    for _idx, word in ipairs(words) do
-        local tw = TextWidget:new{ text = word, face = self.face, bold = self.bold }
+    for idx, word in ipairs(words) do
+        -- 首选词加粗：回车 / 空格上屏的就是它
+        local tw = TextWidget:new{ text = word, face = self.face, bold = self.bold or (idx == 1 and opts.page == 1) }
         local w = tw:getSize().w + 2 * CELL_PAD
         if w <= left then
             left = left - w

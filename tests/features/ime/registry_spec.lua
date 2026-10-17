@@ -14,12 +14,13 @@ end
 
 local Registry = require("features.ime.registry")
 local methods = Registry.list()
-Assert.len(methods, 5)
+Assert.len(methods, 6)
 Assert.eq(methods[1].id, "pinyin")
-Assert.eq(methods[2].id, "xiaohe")
-Assert.eq(methods[3].id, "wubi")
-Assert.eq(methods[4].id, "cangjie")
-Assert.eq(methods[5].id, "zhuyin")
+Assert.eq(methods[2].id, "t9")
+Assert.eq(methods[3].id, "xiaohe")
+Assert.eq(methods[4].id, "wubi")
+Assert.eq(methods[5].id, "cangjie")
+Assert.eq(methods[6].id, "zhuyin")
 for _, method in ipairs(methods) do
     Assert.is_true(type(method.dictionary) == "string")
 end
