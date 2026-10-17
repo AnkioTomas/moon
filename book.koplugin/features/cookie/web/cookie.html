@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<!-- 浏览器授权登录页（features/cookie 经 web.routes 开放；逻辑在 /cookie.js，接口 /api/cookie/*） -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>浏览器登录 - 远程管理</title>
+<link rel="icon" href="/favicon.ico?v=2" sizes="16x16 32x32 48x48">
+<meta name="theme-color" content="#263a52">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/cookie.css">
+<script>try{var t=localStorage.getItem('moon-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);var l=localStorage.getItem('moon-lang');if(l&&!/^zh_CN/.test(l))document.documentElement.classList.add('i18n-wait')}catch(e){}</script>
+</head>
+<body class="cookie-page">
+<header class="appbar"><div class="appbar-inner">
+<a class="appbar-brand" href="/"><img src="/logo.jpg" alt="" width="28" height="28"><span>月读远程管理</span></a>
+<nav class="appbar-nav" aria-label="页面导航">
+<a href="/"><span>首页</span></a><a href="/file.html"><span>文件</span></a><a href="/input.html"><span>输入</span></a><a href="/clipboard.html"><span>剪贴板</span></a><a href="/settings.html"><span>配置</span></a><a href="/update.html"><span>更新</span></a>
+</nav>
+<button type="button" id="theme-toggle" class="icon-btn" aria-label="切换主题" title="主题：跟随系统"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18V4a8 8 0 0 1 0 16z"/></svg></button>
+</div></header>
+<main class="page single-page cookie-main">
+<section class="panel cookie-flow" aria-labelledby="flow-title">
+<div class="panel-head"><h1 id="flow-title">授权流程</h1><span class="panel-sub">密码只提交给对应官网，登录状态通过加密回传</span></div>
+<div class="cookie-steps">
+<div class="cookie-step"><span class="cookie-step-no">1</span><span><strong>选择数据源</strong><small>确认要连接的账号</small></span></div>
+<div class="cookie-step"><span class="cookie-step-no">2</span><span><strong>在官网登录</strong><small>登录信息留在官网页面</small></span></div>
+<div class="cookie-step"><span class="cookie-step-no">3</span><span><strong>完成授权</strong><small>验证后自动返回</small></span></div>
+</div>
+</section>
+
+<section class="panel cookie-sources" aria-labelledby="sources-title">
+<div class="cookie-section-head">
+<div><h2 id="sources-title">选择数据源</h2><p>授权仅用于同步你选择的数据源账号。</p></div>
+<div id="ext-state" class="cookie-extension-state" data-state="checking" role="status" aria-live="polite"><span class="cookie-state-dot"></span><span id="ext-state-text">正在检测浏览器扩展…</span></div>
+</div>
+<a id="extension-install" class="cookie-install-link" href="https://github.com/AnkioTomas/moon-cookie-storage" target="_blank" rel="noopener noreferrer" hidden>尚未安装扩展？前往 GitHub 安装 moon-cookie-storage ↗</a>
+
+<div id="list" class="cookie-source-list" aria-live="polite"></div>
+<div id="result" class="cookie-result" data-state="idle" role="status" aria-live="polite" hidden></div>
+</section>
+</main>
+<script src="/js.js"></script>
+<script src="/cookie.js"></script>
+</body>
+</html>
