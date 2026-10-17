@@ -53,7 +53,7 @@ end
 Kit.sections.reader = {}
 Kit.sections.rare = { rare_lookup_source = "" }
 Kit.sections.xray = { book_xray_enabled = true }
-Kit.sections.sidebar = { sidebar_hidden_tabs = {} }
+Kit.sections.sidebar = { sidebar_hidden_tabs = {}, sidebar_tab_order = {} }
 require("device").hasClipboard = function() return false end
 
 local Modal = require("ui.themes.widgets.modal")
