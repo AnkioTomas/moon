@@ -114,4 +114,13 @@ function M.saveSource(id, values)
     file:flush()
 end
 
+--- 磁盘上的配置被整体换掉后（恢复备份）：已打开的文件就地重读，持有旧引用的模块看到新值。
+function M.reload()
+    for path, file in pairs(_files) do
+        local fresh = LuaSettings:open(path).data
+        for key in pairs(file.data) do file.data[key] = nil end
+        for key, value in pairs(fresh) do file.data[key] = value end
+    end
+end
+
 return M

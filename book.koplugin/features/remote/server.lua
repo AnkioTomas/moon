@@ -67,7 +67,8 @@ local STATUS = {
 ---@field set_clipboard fun(text: string) 写入设备剪贴板并同步进激活输入框
 ---@field get_status fun(): table 首页设备状态快照
 ---@field install_update fun(temp: string, cb: fun(ok: boolean, err: string|nil)) 安装上传的月读插件包（临时文件所有权移交）
----@field settings_restored fun()|nil 配置备份已恢复：设备提示并重启
+---@field backup_zip fun(cb: fun(output: string|nil, err: any))|nil 打包 .moon（不含日志与缓存）
+---@field restore_backup fun(temp: string, cb: fun(ok: boolean, err: string|nil))|nil 用上传的备份包替换 .moon，成功后设备提示并重启
 
 --- 一切非 2xx 响应都是 JSON {"error": msg}：页面能把真实原因显示出来，
 --- 而不是 r.json() 解析纯文本炸出 SyntaxError 掩盖问题。
@@ -805,18 +806,23 @@ end
 
 
 --- GET /api/logs.zip：一键打包日志（插件日志 + KOReader crash.log + info.txt，已脱敏）。
---- 后台建临时 zip，以附件 moon-logs-YYYYMMDD-HHMM.zip 流式发出，发完/断开时由 _kill 删除。
 ---@param conn table
 ---@param method string
 function Server:_routeLogs(conn, method)
     if method ~= "GET" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    local build = self.handlers.logs_zip
+    return self:_sendBuiltZip(conn, self.handlers.logs_zip, require("features.remote.logs").fileName())
+end
+
+--- 后台建临时 zip，以附件 name 流式发出，发完/断开时由 _kill 删除。
+---@param conn table
+---@param build fun(cb: fun(output: string|nil, err: any))|nil
+---@param name string 下载文件名
+function Server:_sendBuiltZip(conn, build, name)
     if not build then
         return self:_fail(conn, 404, "Not Found")
     end
-    local name = require("features.remote.logs").fileName()
     conn.state = "pending"
     build(function(output, err)
         if conn.dead then
@@ -824,8 +830,8 @@ function Server:_routeLogs(conn, method)
             return
         end
         if not output then
-            logger.warn("book remote logs zip failed", err)
-            conn.resp = Server.errorResp(500, err or "logs archive failed")
+            logger.warn("book remote zip build failed", name, err)
+            conn.resp = Server.errorResp(500, err or "archive failed")
             return
         end
         -- 发完（或断开）由 _kill 删：Kindle 的 /mnt/us 是 FUSE，打开后立即 unlink 再读会读到 0 字节
@@ -839,7 +845,7 @@ function Server:_routeLogs(conn, method)
         if size == 0 then
             file:close()
             os.remove(output)
-            conn.resp = Server.errorResp(500, "empty logs archive")
+            conn.resp = Server.errorResp(500, "empty archive")
             return
         end
         file:seek("set", 0)

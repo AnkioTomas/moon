@@ -149,3 +149,19 @@ Assert.eq(Paths.root(), Config.dir() .. "/.moon")
 Assert.eq(Paths.commonPath(), Config.dir() .. "/.moon/settings/common.lua")
 Assert.eq(Paths.sectionPath("ui"), Config.dir() .. "/.moon/settings/ui.lua")
 Assert.eq(Paths.logPath(), Config.dir() .. "/.moon/book.log")
+
+-- reload：磁盘被整体换掉后，已持有的表就地变成磁盘内容
+do
+    local data = Settings.getSource("reload_spec")
+    data.kept, data.dropped = 1, 2
+    Settings.saveSource("reload_spec")
+    local path = Paths.sourcePath("reload_spec")
+    local f = assert(io.open(path, "wb"))
+    f:write("return { kept = 9, added = true }\n")
+    f:close()
+    Settings.reload()
+    Assert.eq(data.kept, 9)
+    Assert.eq(data.added, true)
+    Assert.is_nil(data.dropped, "磁盘上没有的键被清掉")
+    os.remove(path)
+end

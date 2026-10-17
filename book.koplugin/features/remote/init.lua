@@ -858,14 +858,6 @@ local function installUpdate(temp, cb)
     end)
 end
 
---- 配置备份已恢复：提示后重启，让各模块按新配置重新加载（留一秒把响应发回浏览器）。
-local function settingsRestored()
-    require("ui.themes.widgets.toast"):new{
-        text = _("配置已通过远程管理恢复，正在重启 KOReader…"),
-    }:show()
-    require("ui/uimanager"):scheduleIn(1, require("features.update").restart)
-end
-
 --- 上传临时落盘路径：缓存目录下 upload-<时间>-<序号>.part，进程内自增保证不撞名。
 ---@return string
 local function tempPath()
@@ -1280,6 +1272,41 @@ local function buildLogsZip()
     return Logs.build(tempPath() .. ".zip", files, info, require("ffi/archiver").Writer, extras, notes)
 end
 
+--- 打包 .moon（不含日志与缓存）。先把 WAL 并回主库、日志刷盘，子进程只做文件打包。
+---@param cb fun(output: string|nil, err: any)
+local function backupZip(cb)
+    require("utils.db").exec("PRAGMA wal_checkpoint(TRUNCATE);")
+    require("utils.log").flush()
+    local output = tempPath() .. ".zip"
+    runFilesystem("remote-backup", function()
+        return require("features.remote.backup").build(
+            output, require("utils.paths").root(), require("ffi/archiver").Writer, require("libs/libkoreader-lfs"))
+    end, cb)
+end
+
+--- 用上传的备份包替换 .moon：先关库（子进程换文件时不许有连接握着旧库），换完重载配置，
+--- 提示后重启，让各模块按新数据重新加载（留一秒把响应发回浏览器）。
+---@param temp string
+---@param cb fun(ok: boolean, err: string|nil)
+local function restoreBackup(temp, cb)
+    local DB = require("utils.db")
+    DB.close()
+    runFilesystem("remote-restore", function()
+        return require("features.remote.backup").restore(
+            temp, require("utils.paths").root(), require("ffi/archiver").Reader, require("libs/libkoreader-lfs"))
+    end, function(names, err)
+        os.remove(temp)
+        if not names then return cb(false, err) end
+        DB.close() -- 恢复期间若被重新打开，握的是被换掉的旧文件
+        require("utils.settings").reload()
+        cb(true)
+        require("ui.themes.widgets.toast"):new{
+            text = _("备份已通过远程管理恢复，正在重启 KOReader…"),
+        }:show()
+        require("ui/uimanager"):scheduleIn(1, require("features.update").restart)
+    end)
+end
+
 -- ── 启停 ─────────────────────────────────────────────
 
 --- Kindle 防火墙打孔（照 httpinspector 语义：start 打、stop 堵）。
@@ -1360,7 +1387,8 @@ function Remote.start()
             set_clipboard = setClipboard,
             get_status = getStatus,
             install_update = installUpdate,
-            settings_restored = settingsRestored,
+            backup_zip = backupZip,
+            restore_backup = restoreBackup,
         },
     }
     local started, serr = server:start()
