@@ -18,6 +18,7 @@ local BUDGET_MS = 1500
 -- 每屏最多走的字数 / 注音处数：只防异常文档跑飞，正常一屏远不到。
 local MAX_UNITS = 6000
 local MAX_HITS = 3000
+local CALIBRATE_BOXES = 24
 -- 注音用拉丁字体：界面字体若是中文字体（如方正兰亭黑），带声调字母是全角宽，拼音会被拉散。
 local FACE = "NotoSans-Regular.ttf"
 
@@ -95,9 +96,11 @@ function Overlay.calibrate(bb, boxes)
     for _idx, box in ipairs(boxes) do pitch = math.min(pitch or box.h, box.h) end
     if not pitch then return nil end
     local W, H = bb:getWidth(), bb:getHeight()
-    local top, bottom
+    local top, bottom, scanned = nil, nil, 0
     for _idx, box in ipairs(boxes) do
-        if box.h == pitch then
+        -- 逐像素扫很慢：「全部」档命中成百上千，取前几十处足够量出墨迹范围。
+        if box.h == pitch and scanned < CALIBRATE_BOXES then
+            scanned = scanned + 1
             for y = math.max(0, box.y), math.min(H - 1, box.y + box.h - 1) do
                 for x = math.max(0, box.x), math.min(W - 1, box.x + box.w - 1) do
                     if bb:getPixel(x, y):getColor8().a < 128 then
@@ -252,18 +255,15 @@ local function locate(self, units, found, started_at)
     return hits
 end
 
---- 重算本屏注音。
+--- 本屏命中处的取框（子进程里跑：走字、匹配、取框都是对排好版的文档的重活）。
+--- 返回的 hits 只含 { ann, key, box } 纯数据，经 JSON 回主进程。
 ---@param self table
----@return table[]
-local function compute(self, bb)
+---@param lexicons RareLexicon[]
+---@param level string
+---@param force table<string, boolean>|nil
+---@return { ann: string, key: string, box: table }[]
+local function scanHits(self, lexicons, level, force)
     local document = self.ui.document
-    if not (self.ui.rolling and document and document.getTextFromPositions and document.getNextVisibleChar
-        and document.compareXPointers and document.getScreenBoxesFromPositions) then
-        return {}
-    end
-    local settings = require("utils.settings").get("features.rare")
-    local lexicons = require("features.rare.catalog").active()
-    if #lexicons == 0 then return {} end
     local started_at = Perf.now()
     local width, height = PageMarks.screenSize(self.ui)
     local ok, range = pcall(document.getTextFromPositions, document, { x = 0, y = 0 }, { x = width, y = height }, true)
@@ -272,18 +272,27 @@ local function compute(self, bb)
     if #units == 0 then return {} end
     local texts = {}
     for i, u in ipairs(units) do texts[i] = u.text end
-    local force = settings.rare_vocab and require("features.rare.vocab").set() or nil
     local Lexicon = require("features.rare.lexicon")
     local found = {}
     for _idx, lex in ipairs(lexicons) do
-        for _f, f in ipairs(Lexicon.scan(lex, texts, Lexicon.threshold(lex, settings.rare_level), force, MAX_HITS - #found)) do
+        for _f, f in ipairs(Lexicon.scan(lex, texts, Lexicon.threshold(lex, level), force, MAX_HITS - #found)) do
             found[#found + 1] = f
         end
     end
     if #found == 0 then return {} end
+    return locate(self, units, found, started_at)
+end
+
+--- 命中框 → 注音布局（主进程：要读屏幕像素量字形，量一次按排版设置缓存）。
+---@param self table
+---@param hits { ann: string, key: string, box: table }[]
+---@param bb any 已画好正文的屏幕 Blitbuffer
+---@return table[]
+local function arrange(self, hits, bb)
+    local document = self.ui.document
+    local settings = require("utils.settings").get("features.rare")
+    local width = PageMarks.screenSize(self.ui)
     local RenderText = require("ui/rendertext")
-    local hits = locate(self, units, found, started_at)
-    if #hits == 0 then return {} end
     local key = Overlay.layoutKey(document)
     if key ~= calib_key then
         local boxes = {}
@@ -305,25 +314,94 @@ local function compute(self, bb)
     })
 end
 
+local SCAN_DEBOUNCE = 0.2
+
+--- 取消排队的计时器和在飞的子进程。
+---@param self table
+local function cancelScan(self)
+    if self.timer then
+        require("ui/uimanager"):unschedule(self.timer)
+        self.timer = nil
+    end
+    if self.job then
+        self.job:cancel()
+        self.job = nil
+    end
+    self.scheduled = nil
+end
+
+--- 重算本视口注音：防抖后在子进程取框（走字 / 匹配 / 取框不占主线程），
+--- 回主进程量字形、排布局并请求重绘。翻页这一帧只排队，不画旧注音。
+---@param key string 排队时的视口键
+function Overlay:refresh(key)
+    local ui = self.ui
+    local document = ui.document
+    if not (ui.rolling and document and document.getTextFromPositions and document.getNextVisibleChar
+        and document.compareXPointers and document.getScreenBoxesFromPositions) then
+        self.key = key
+        return
+    end
+    local settings = require("utils.settings").get("features.rare")
+    local lexicons = require("features.rare.catalog").active()
+    if #lexicons == 0 then
+        self.key = key
+        return
+    end
+    local level = settings.rare_level
+    -- 生字本读库：只能在主进程取，子进程拿结果副本。
+    local force = settings.rare_vocab and require("features.rare.vocab").set() or nil
+    local started_at = Perf.now()
+    local job = require("workers.job").run(function()
+        return scanHits(self, lexicons, level, force)
+    end, {
+        name = "features.rare.scan",
+        kind = "light",
+        timeout = 30,
+        on_done = function(hits)
+            if self.scheduled ~= key then return end
+            self.job, self.scheduled = nil, nil
+            if ui.document == nil or key ~= PageMarks.viewKey(ui, revision) then return end
+            -- 先占住 key：排布局出错时不会每次重绘都重试。
+            self.items, self.key = {}, key
+            self.items = arrange(self, hits or {}, require("device").screen.bb)
+            logger.dbg("book.perf rare.view", Perf.elapsedMs(started_at), "ms items", #self.items)
+            if #self.items > 0 then require("ui/uimanager"):setDirty(ui.dialog, "ui") end
+        end,
+        on_failed = function(err)
+            if self.scheduled ~= key then return end
+            self.job, self.scheduled = nil, nil
+            self.items, self.key = {}, key
+            logger.warn("book.rare scan failed", err)
+        end,
+    })
+    if self.scheduled == key and not job.settled then self.job = job end
+end
+
 --- PageMarks 图层接口：本层只画不标，marks 为空。
 ---@return PageMark[]
 function Overlay:marks()
     return {}
 end
 
---- PageMarks 绘制钩子（外层已经 Guard.paint）。
+--- PageMarks 绘制钩子（外层已经 Guard.paint）。视口变了只排队，本帧不画旧注音。
 ---@param bb any Blitbuffer
 function Overlay:paint(bb)
     if not require("utils.settings").get("features.rare").rare_enabled then return end
     local key = PageMarks.viewKey(self.ui, revision)
     if not key then return end
     if key ~= self.key then
-        local started_at = Perf.now()
-        -- 先作废旧结果：compute 出错时不留上一屏的注音。
         self.items, self.key = {}, nil
-        self.items = compute(self, bb)
-        self.key = key
-        logger.dbg("book.perf rare.view", Perf.elapsedMs(started_at), "ms items", #self.items)
+        if self.scheduled ~= key then
+            cancelScan(self)
+            self.scheduled = key
+            local UIManager = require("ui/uimanager")
+            self.timer = require("ui.guard").wrap("rare refresh", function()
+                self.timer = nil
+                if self.scheduled == key then self:refresh(key) end
+            end)
+            UIManager:scheduleIn(SCAN_DEBOUNCE, self.timer)
+        end
+        return
     end
     if #self.items == 0 then return end
     local RenderText = require("ui/rendertext")

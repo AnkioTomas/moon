@@ -29,7 +29,24 @@ package.preload["ui/rendertext"] = function()
 end
 package.preload["apps/reader/readerui"] = function() return {} end
 
+-- 子进程桩：同步跑 worker 再回调（真机 fork 后 JSON 回传）。
+package.preload["workers.job"] = function()
+    return { run = function(worker, opts)
+        local ok, result = pcall(worker)
+        if ok then opts.on_done(result) else opts.on_failed(result) end
+        return { settled = true, cancel = function() end }
+    end }
+end
+package.preload["device"] = function() return { screen = { bb = {} } } end
+local Stubs = require("support.stubs")
 local Overlay = require("features.rare.overlay")
+
+--- 视口变了：这一帧排队，下一 tick 重算，再画一帧。
+local function draw(o)
+    o:paint({})
+    Stubs.flush()
+    o:paint({})
+end
 
 local function measure(text, size) return #text * size / 2 end
 
@@ -162,6 +179,10 @@ do
     local ui, calls = newUi()
     local o = Overlay.new(ui)
     o:paint({})
+    Assert.len(rendered, 0, "翻页这一帧只排队，不同步重算")
+    Assert.eq(calls.walks, 0)
+    Stubs.flush()
+    o:paint({})
     Assert.len(rendered, 1)
     Assert.eq(rendered[1].text, "dá")
     Assert.eq(rendered[1].color, 0, "注音纯黑")
@@ -175,14 +196,14 @@ do
     screen_text = "普通文字"
     Overlay.invalidate()
     rendered = {}
-    o:paint({})
+    draw(o)
     Assert.len(rendered, 0)
     Assert.eq(calls.boxes, 1)
     -- 「全部」：屏上每个字都注（不再有 80 词 / findText 预算上限）。
     settings.rare_level = "all"
     screen_text = string.rep("普通文字", 40)
     Overlay.invalidate()
-    o:paint({})
+    draw(o)
     Assert.eq(calls.boxes, 1 + 160, "160 个字每处都取框")
     settings.rare_level = "rare"
     -- 生字本：生字本里的字不看档位也注。
@@ -191,19 +212,19 @@ do
     screen_text = "普通文字"
     Overlay.invalidate()
     rendered = {}
-    o:paint({})
+    draw(o)
     Assert.len(rendered, 1)
     Assert.eq(rendered[1].text, "tōng")
     settings.rare_vocab = false
     Overlay.invalidate()
     rendered = {}
-    o:paint({})
+    draw(o)
     Assert.len(rendered, 0, "关掉生字本就按档位")
     -- 关闭开关：不画。
     screen_text = "龘"
     settings.rare_enabled = false
     Overlay.invalidate()
-    o:paint({})
+    draw(o)
     Assert.len(rendered, 0)
     settings.rare_enabled = true
     screen_text = "普通文字龘"
