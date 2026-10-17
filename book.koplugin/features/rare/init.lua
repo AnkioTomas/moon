@@ -5,7 +5,7 @@
 lexicon 解析与匹配（纯函数）；overlay 逐字走本屏 → 匹配（vocab：KOReader 生字本可当个人生僻字）→ 按字位置取框 → 绘制，按视口缓存；
 panel 阅读快捷面板开关；
 catalog 词库清单与下载（复用 features.ime.download.install，assets/rare/<id>/ manifest + 分片，落 .moon/rare/<id>.tsv）。
-只有点到注音或被注音的字才开查词窗口，点普通文字不拦截。下载失败不影响阅读，只是没有注音。
+注音不接点按。下载失败不影响阅读，只是没有注音。
 
 @module koplugin.book.features.rare.init
 --]]
