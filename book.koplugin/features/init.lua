@@ -119,6 +119,7 @@ Features.list = {
     "remote",
     "update",
     "subscribe",
+    "cookie",
     "extensions",
 }
 

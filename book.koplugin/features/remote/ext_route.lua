@@ -80,10 +80,11 @@ end
 local function dispatch(self, conn, item, method, action, params)
     conn.state = "pending"
     local answered = false
-    item.handle(method, action, params, function(status, result)
+    item.handle(method, action, params, function(status, result, extra)
         if answered or conn.dead then return end
         answered = true
         conn.resp = self.jsonResp(status, JSON.encode(result or {}))
+        if extra then conn.resp.extra = extra end
     end)
 end
 

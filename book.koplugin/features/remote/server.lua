@@ -21,7 +21,7 @@ local logger = require("utils.log")
 local JSON = require("json")
 local Text = require("utils.text")
 
-local HEADER_LIMIT = 16 * 1024
+local HEADER_LIMIT = 32 * 1024 -- 扩展回调的 GET 查询串最长 16 KiB（cookie 登录态），另留请求头余量
 local CHUNK = 32 * 1024
 --- 无字节进展的连接存活上限（秒）；pending 状态（写入中）用 PENDING_TIMEOUT
 local IDLE_TIMEOUT = 120

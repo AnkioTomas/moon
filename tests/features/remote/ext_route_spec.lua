@@ -15,7 +15,7 @@ Ext.add("web.routes", {
     l10n = "demo_l10n",
     handle = function(method, action, params, cb)
         calls[#calls + 1] = method .. ":" .. action .. ":" .. tostring(params.id)
-        cb(200, { ok = true })
+        cb(200, { ok = true }, { "Cache-Control: no-store" })
         cb(500, { error = "again" })
     end,
     download = function(action)
@@ -59,6 +59,7 @@ local conn = {}
 ExtRoute.route(server, conn, "GET", {}, { id = "3" }, item, "list")
 Assert.eq(calls[1], "GET:list:3")
 Assert.eq(conn.resp.code, 200, "第二次回调被丢掉")
+Assert.eq(conn.resp.extra[1], "Cache-Control: no-store", "回调响应保留自定义头")
 
 -- POST 读 JSON body
 conn = {}
