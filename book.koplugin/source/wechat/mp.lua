@@ -9,6 +9,7 @@
 
 local Auth = require("source.wechat.auth")
 local Assets = require("source.wechat.assets")
+local Request = require("http.request")
 local Text = require("utils.text")
 local _ = require("gettext")
 
@@ -231,6 +232,55 @@ function Mp.extractBody(html)
     return Text.stripEmoji(rewriteImages(body))
 end
 
+--- 网页端 /web/login/renewal 回包头里的公众号凭据（x-wr-ticket / x-wrpa-0）：缺了会被风控回 -2041 或「验证」页。
+--- 只在内存里留：进程重启后第一次被拒时再续一次。
+local mp_headers = {}
+
+--- 续期公众号凭据并记下回包里的 ticket / wrpa 头；失败也回调（调用方照旧重试，由重试结果判生死）。
+---@param cb fun()
+---@return { cancel: fun() }|nil
+function Mp.renewAsync(cb)
+    return Auth.webPostAsync(WEB .. "/web/login/renewal", '{"rq":"%2Fweb%2Fbook%2Fread","ql":false}',
+        { skip_auth_retry = true }, function(_raw, _err, res)
+            for _idx, name in ipairs({ "x-wr-ticket", "x-wrpa-0" }) do
+                local value = Request.header(res, name)
+                if value and value ~= "" then mp_headers[name] = value end
+            end
+            cb()
+        end)
+end
+
+--- 带公众号凭据头的 GET；回 -2041 时续期一次再重试。
+---@param url string
+---@param opts table
+---@param cb fun(raw: string|nil, err: any, res: table|nil)
+---@return { cancel: fun() }
+local function mpGetAsync(url, opts, cb)
+    local cancelled, job = false, nil
+    local function go(renewed)
+        local headers = {}
+        for k, v in pairs(opts.headers or {}) do headers[k] = v end
+        for k, v in pairs(mp_headers) do headers[k] = v end
+        local sent = {}
+        for k, v in pairs(opts) do sent[k] = v end
+        sent.headers = headers
+        job = Auth.webGetAsync(url, sent, function(raw, err, res)
+            if cancelled then return end
+            local data = res and res.json
+            if not renewed and type(data) == "table" and tonumber(data.errcode or data.errCode) == -2041 then
+                job = Mp.renewAsync(function() if not cancelled then go(true) end end)
+                return
+            end
+            cb(raw, err, res)
+        end)
+    end
+    go(false)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job:cancel() end
+    end }
+end
+
 --- 一页文章列表；offset 当 maxIdx 传（已拉到的篇数）。只传 offset 不带 maxIdx/count 时服务端回 errCode -2041。
 ---@param book_id string MP_WXS_ 开头
 ---@param offset integer
@@ -238,7 +288,7 @@ end
 ---@return { cancel: fun() }|nil
 function Mp.fetchArticlesAsync(book_id, offset, cb)
     local url = WEB .. "/web/mp/articles?" .. Text.formEncode({ bookId = book_id, maxIdx = offset or 0, count = Mp.PAGE })
-    return Auth.webGetAsync(url, { no_expire = true }, function(raw, err, res)
+    return mpGetAsync(url, { no_expire = true }, function(raw, err, res)
         -- 会话层已为判失效解过的直接用，只解一次；utils.json 修好标题里 emoji 的代理对。
         local data = res and res.json
         local body = raw or (res and res.body)
@@ -283,7 +333,7 @@ function Mp.fetchContentAsync(review_id, images_dir, cb)
     local fetch
     fetch = function()
         tries = tries + 1
-        job = Auth.webGetAsync(WEB .. "/web/mp/content?reviewId=" .. Text.urlEncode(tostring(review_id or "")), {
+        job = mpGetAsync(WEB .. "/web/mp/content?reviewId=" .. Text.urlEncode(tostring(review_id or "")), {
             accept = "text/html,application/xhtml+xml,*/*",
             no_expire = true, -- 公众号接口被风控回失效 errcode 时不判整个微信读书登录失效
             headers = { ["Referer"] = WEB .. "/" },
@@ -303,8 +353,15 @@ function Mp.fetchContentAsync(review_id, images_dir, cb)
             local verify = not body and raw:find("<title>%s*验证%s*</title>") ~= nil
             raw = nil
             if verify and tries < Mp.VERIFY_TRIES then
-                job = nil
-                return Mp.later(2 * tries, function() if not cancelled then fetch() end end)
+                local function retry() Mp.later(2 * tries, function() if not cancelled then fetch() end end) end
+                -- 第一次被拦先续期拿 ticket / wrpa，再退避重拉
+                if tries == 1 then
+                    job = Mp.renewAsync(retry)
+                else
+                    job = nil
+                    retry()
+                end
+                return
             end
             if not body then
                 cb(nil, verify and _("微信读书要求验证，请稍后再试") or _("正文解析失败"))

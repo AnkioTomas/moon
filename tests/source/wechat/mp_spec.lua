@@ -7,7 +7,14 @@ package.loaded["json"] = { decode = require("support.json_stub").decode }
 
 local pages, urls = {}, {}
 local localized = {}
+local renewals = 0
 package.loaded["source.wechat.auth"] = {
+    webPostAsync = function(url, _body, _opts, cb)
+        renewals = renewals + 1
+        Assert.matches(url, "/web/login/renewal")
+        cb("{}", nil, { headers = { ["X-WR-Ticket"] = "T1", ["x-wrpa-0"] = "W1" } })
+        return { cancel = function() end }
+    end,
     webGetAsync = function(url, _opts, cb)
         urls[#urls + 1] = url
         cb(pages[url:match("reviewId=(.*)$") or "list"])
@@ -171,6 +178,29 @@ calls, seq = 0, {}
 Mp.fetchContentAsync("v", nil, function(p, e) got, err = p, e end)
 Assert.eq(calls, Mp.VERIFY_TRIES); Assert.eq(got, nil); Assert.matches(err, "验证")
 package.loaded["source.wechat.auth"].webGetAsync = real
+
+-- 回 -2041：续期拿到 ticket / wrpa 头后带头重试；之后的请求直接带头。
+do
+    local real = package.loaded["source.wechat.auth"].webGetAsync
+    local sent = {}
+    package.loaded["source.wechat.auth"].webGetAsync = function(_url, opts, cb)
+        sent[#sent + 1] = opts.headers or {}
+        if #sent == 1 then
+            cb(nil, "x", { json = { errcode = -2041 } })
+        else
+            cb("{...}", nil, { json = wire({ { "r6", 6, "六" } }) })
+        end
+        return { cancel = function() end }
+    end
+    local items
+    renewals = 0
+    Mp.fetchArticlesAsync("MP_WXS_1", 0, function(list) items = list end)
+    Assert.eq(renewals, 1)
+    Assert.eq(items[1].guid, "r6")
+    Assert.eq(sent[2]["x-wr-ticket"], "T1")
+    Assert.eq(sent[2]["x-wrpa-0"], "W1")
+    package.loaded["source.wechat.auth"].webGetAsync = real
+end
 
 -- 只解一次：会话层已解过（res.json）就直接用，不再 decode。
 do
