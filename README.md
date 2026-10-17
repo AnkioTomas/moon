@@ -50,6 +50,7 @@
 | 元数据刮削与封面缓存 | X-Ray、统一查词窗口（词典 / 翻译 / AI / 百科）、整书双语对照、段评、生僻字注音 | 进度冲突处理与离线补推 | 局域网文件、输入、配置与更新管理 |
 | Z-Library 与 OPDS 书城、订阅（RSS / 网页 / 公众号） | 重新排版（另存，原书不动）、AZW3 | 热力图、阅读时段、读完预测、年度记录 | 快捷面板与 14 种翻页动画 |
 | 后台任务列表、单书缓存清理 | 按章书的全书笔记列表、章节缓存范围 | 导入 KOReader 自带统计 | 自动夜间、自动亮度、时区与 NTP 校时 |
+| 游戏：小黑屋、阿页的阁楼（可选插件） | | | |
 
 ## 目录
 
@@ -237,6 +238,15 @@ AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址�
 - **HTTP 代理：** 与 KOReader 原生「HTTP 代理」是同一份设置，月读的网络请求也会走代理；只支持 `http://` 代理，HTTPS 请求经隧道转发，保存前会经代理实测一次。
 - **在线更新：** 检查 GitHub Release，直连与公益镜像竞速下载，只信任 GitHub 给出的 SHA-256；自动检查每天最多一次，只提示不自动安装。词典、词库、OCR 等资源下载也会在多个镜像间自动切换，优先用上次成功的源。
 
+### 10. 游戏
+
+读累了可以玩两把。两个游戏是独立的 KOReader 插件，不装月读也能从「工具」菜单玩；装了月读后会多出入口。完整说明见[官网文档：游戏](https://moon.ankio.net/manual/library/games)。
+
+- **小黑屋**（[ko-adarkroom](https://github.com/AnkioTomas/ko-adarkroom)）：《A Dark Room》的完整 Lua 中文移植，从生火开始，建村、远征、战斗、登上星舰直到结局，可带声望重开。自动存档，远征中途关掉也能续上。
+- **阿页的阁楼**（[ko-paper-sprite](https://github.com/AnkioTomas/ko-paper-sprite)）：书签变成的小纸灵「阿页」按真实时间自己出门旅行，寄回黑白明信片、带回特产；读书翻页攒灵感去小铺换东西，没有失败惩罚。月读里配置了 AI 时，明信片文案可由 AI 现写。
+- **在月读里的入口：** 首页组件（小黑屋存档卡片；阿页的状态卡、阁楼、明信片、纪念物柜）和桌面快捷面板开关，点一下全屏打开。
+- **存档：** `.moon/game/adarkroom/save.lua`、`.moon/game/paper-sprite/`，KOReader 菜单和月读两边共用同一份。安装见[游戏（可选）](#游戏可选)。
+
 ## 完整功能
 
 ### 书库与书籍管理
@@ -325,6 +335,17 @@ Release 里另有两个独立插件包，需要同时安装月读才能使用：
 | `moonsource-bookorbit.koplugin-<版本>.zip` | BookOrbit 服务器 |
 
 解压后把 `moonsource-xxx.koplugin/` 目录和 `book.koplugin/` 一样放进 `plugins/`，重启 KOReader 后在月读的数据源里选择。
+
+### 游戏（可选）
+
+两个独立的离线小游戏，同样是单独的 KOReader 插件，从各自仓库的 Release 下载，解压后把 `*.koplugin/` 放进 `plugins/`，重启 KOReader：
+
+| 游戏 | 插件包 |
+|---|---|
+| 小黑屋（《A Dark Room》中文移植） | [`adarkroom.koplugin.zip`](https://github.com/AnkioTomas/ko-adarkroom/releases) |
+| 阿页的阁楼（书签纸灵养成） | [`paper-sprite.koplugin.zip`](https://github.com/AnkioTomas/ko-paper-sprite/releases) |
+
+用法见[增强了什么](#10-游戏)。
 
 ### 从源码安装
 
