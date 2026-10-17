@@ -77,6 +77,33 @@ function renderForms(list, external) {
                 saveGroup(group, payload).then(function () {
                     setState(state, '已保存', 'ok');
                     return loadSettings();
+                }).catch(function (err) {
+                    setState(state, String(err), 'err');
+                });
+            });
+        }
+        src.fields.forEach(function (f) {
+            el(formId + '-' + f.key).value = f.value;
+        });
+    });
+}
+
+/* 空列表经 Lua JSON 编码成 {}，不是数组。 */
+function formList(v) {
+    return Array.isArray(v) ? v : [];
+}
+
+function loadSettings() {
+    return jfetch('/api/settings').then(function (data) {
+        renderForms(formList(data.builtin), false);
+        renderForms(formList(data.external), true);
+        setState(el('loadstate'), '已加载设备配置', 'ok');
+    }).catch(function (err) {
+        setState(el('loadstate'), String(err), 'err');
+    });
+}
+
+loadSettings();
 
 /* 配置备份恢复：上传 /api/backup 下载的文件，设备校验后写入并重启。 */
 (function () {
@@ -118,30 +145,3 @@ function renderForms(list, external) {
         });
     };
 })();
-                }).catch(function (err) {
-                    setState(state, String(err), 'err');
-                });
-            });
-        }
-        src.fields.forEach(function (f) {
-            el(formId + '-' + f.key).value = f.value;
-        });
-    });
-}
-
-/* 空列表经 Lua JSON 编码成 {}，不是数组。 */
-function formList(v) {
-    return Array.isArray(v) ? v : [];
-}
-
-function loadSettings() {
-    return jfetch('/api/settings').then(function (data) {
-        renderForms(formList(data.builtin), false);
-        renderForms(formList(data.external), true);
-        setState(el('loadstate'), '已加载设备配置', 'ok');
-    }).catch(function (err) {
-        setState(el('loadstate'), String(err), 'err');
-    });
-}
-
-loadSettings();
