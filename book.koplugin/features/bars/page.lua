@@ -198,6 +198,23 @@ function ReaderBar:page(desktop, which)
                         })
                     end,
                     function(iw)
+                        local on = Layout.divider(which)
+                        return Row.widget({
+                            width = iw,
+                            chevron = false,
+                            kind = "toggle",
+                            icon = "horizontal_rule",
+                            title = _("分割线"),
+                            subtitle = top and _("顶栏与正文之间画一条细线") or _("底栏与正文之间画一条细线"),
+                            status = on and _("开") or _("关"),
+                            status_on = on,
+                            callback = function()
+                                Layout.setDivider(which, not on)
+                                refresh(desktop)
+                            end,
+                        })
+                    end,
+                    function(iw)
                         local size = Layout.fontSize(which, (footerSettings()))
                         local status = tostring(size)
                         if top and not Layout.topFontCustom() then

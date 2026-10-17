@@ -37,6 +37,7 @@ package.preload["features.bars.layout"] = function()
         topHeight = function() return top_height end,
         get = function() return {} end,
         icons = function() return true end,
+        divider = function() return false end,
     }
 end
 package.preload["ui/font"] = function()

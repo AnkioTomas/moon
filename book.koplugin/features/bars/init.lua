@@ -481,6 +481,9 @@ local function paint(self, bb, x, y)
     if top then
         local header_h, rect = topRect(ui, x, y)
         bb:paintRect(rect.x, rect.y, rect.w, rect.h, bg)
+        if Layout.divider("top") then
+            bb:paintRect(rect.x, rect.y + rect.h - 1, rect.w, 1, Blitbuffer.COLOR_BLACK)
+        end
         local margin = Screen:scaleBySize(Layout.BAR_HORIZONTAL_PADDING)
         Items.paint(
             bb, rect.x + margin, rect.y, math.max(1, rect.w - margin * 2), rect.h,
@@ -498,6 +501,9 @@ local function paint(self, bb, x, y)
     if rect then
         local footer = ui.view.footer
         bb:paintRect(rect.x, rect.y, rect.w, rect.h, bg)
+        if Layout.divider("bottom") then
+            bb:paintRect(rect.x, rect.y, rect.w, 1, Blitbuffer.COLOR_BLACK)
+        end
         -- 与顶栏同一固定水平留白。不用 ReaderFooter 的 horizontal_margin + progress_margin_width：
         -- 两者叠加约 20px，progress_margin_width 还可能跟随书籍页边距，Android 缺省值又被再缩放一次。
         local margin = Screen:scaleBySize(Layout.BAR_HORIZONTAL_PADDING)
