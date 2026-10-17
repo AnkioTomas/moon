@@ -14,7 +14,8 @@ local PageMarks = require("reader.page_marks")
 local Perf = require("utils.perf")
 local logger = require("utils.log")
 
-local BUDGET_MS = 1500
+-- 子进程里跑，不卡界面；只防异常文档拖死，须小于 Job 的 timeout（30 秒）。
+local BUDGET_MS = 20000
 -- 每屏最多走的字数 / 注音处数：只防异常文档跑飞，正常一屏远不到。
 local MAX_UNITS = 6000
 local MAX_HITS = 3000
