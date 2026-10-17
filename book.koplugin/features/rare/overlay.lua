@@ -1,5 +1,5 @@
 --[[--
-生僻字注音绘制层：挂在 reader.page_marks 上（只画字，不占位；点注音或被注音的字开查词面板 lookup）。
+生僻字注音绘制层：挂在 reader.page_marks 上（只画字，不占位、不接点按）。
 
 每屏：取屏上首末位置 → 逐个可见字走一遍（只走本屏，和书多大无关）→ 各启用词库按阈值（生字本里的不看阈值）
 找出每一处命中 → 按命中的字位置取屏幕框 → 在框上方画注音。
@@ -311,31 +311,6 @@ function Overlay:marks()
     return {}
 end
 
---- 点按注音或被注音的字：开多来源查词面板（上下文取屏上文字里该词所在的句子）。
----@param pos table
----@return boolean
-function Overlay:tap(pos)
-    if not require("utils.settings").get("features.rare").rare_enabled then return false end
-    -- 只认本视口算出的注音：翻页 / 重排后还没重画（或重算出错）时旧坐标作废。
-    if not self.key or self.key ~= PageMarks.viewKey(self.ui, revision) then return false end
-    for _idx, item in ipairs(self.items) do
-        local b = item.box
-        local on_ann = pos.x >= item.x and pos.x <= item.x + item.w and pos.y >= item.y - item.size and pos.y <= item.y
-        -- 字框本身，不用 PageMarks.hit 的上方半行容错：那半行是上一行的正文。
-        local on_char = pos.x >= b.x and pos.x <= b.x + b.w and pos.y >= b.y and pos.y <= b.y + b.h
-        if on_ann or on_char then
-            local screen = require("reader.context").visibleText(self.ui) or ""
-            local sentence = require("reader.context").sentence(screen, item.key)
-            require("features.rare.lookup").open{
-                ui = self.ui, word_box = item.box, text = item.key, reading = item.text,
-                context = { sentence = sentence, paragraph = "" },
-            }
-            return true
-        end
-    end
-    return false
-end
-
 --- PageMarks 绘制钩子（外层已经 Guard.paint）。
 ---@param bb any Blitbuffer
 function Overlay:paint(bb)
@@ -344,7 +319,7 @@ function Overlay:paint(bb)
     if not key then return end
     if key ~= self.key then
         local started_at = Perf.now()
-        -- 先作废旧结果：compute 出错时不留上一屏的坐标给 tap。
+        -- 先作废旧结果：compute 出错时不留上一屏的注音。
         self.items, self.key = {}, nil
         self.items = compute(self, bb)
         self.key = key
