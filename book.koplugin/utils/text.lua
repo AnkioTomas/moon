@@ -160,7 +160,10 @@ end
 ---@param cp number
 ---@return string
 local function utf8char(cp)
-    if cp < 0x80 then
+    -- NUL 会截断字符串，代理区不是合法字符：都丢掉。
+    if cp == 0 or (cp >= 0xD800 and cp < 0xE000) then
+        return ""
+    elseif cp < 0x80 then
         return string.char(cp)
     elseif cp < 0x800 then
         return string.char(0xC0 + math.floor(cp / 0x40), 0x80 + cp % 0x40)

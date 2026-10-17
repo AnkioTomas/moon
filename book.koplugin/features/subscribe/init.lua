@@ -113,7 +113,9 @@ local function get(url, cb, opts)
             if err then return cb(nil, err) end
             local body = table.concat(chunks)
             chunks = nil
-            cb(body)
+            local text, charset = require("utils.charset").toUtf8(body, Request.header(res, "Content-Type"))
+            if not text then return cb(nil, string.format(_("不支持的网页编码：%s"), charset)) end
+            cb(text)
         end,
     })
     function job:cancel()
