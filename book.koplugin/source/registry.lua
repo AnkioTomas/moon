@@ -34,7 +34,7 @@ local DESCRIPTOR = "moon_source.lua"
 
 -- 选择器为「混合 → 本地 → 其余在线源 → 第三方源」
 ---@type SourceId[]
-local BUILTIN = { "local", "moon", "wechat", "jdread", "copymanga", "fanqie", "qimao", "jjwxc", "qidian" }
+local BUILTIN = { "local", "moon", "wechat", "jdread", "copymanga", "fanqie", "qimao", "jjwxc", "qidian", "qqreader" }
 
 ---@type SourceId[]|nil
 local ids
