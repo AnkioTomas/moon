@@ -598,19 +598,18 @@ do
     local c1 = newClient({ "GET /api/list?path=/managed HTTP/1.1\r\n\r\n" })
     drain(serve(c1, handlers, { root = "/managed" }))
     local d1 = require("support.json_stub").decode(select(2, parseResponse(c1:output())))
-    Assert.is_nil(d1.parent)
+    Assert.eq(d1.parent, "/")
     Assert.is_true(d1.entries[1].protected)
 
-    -- 直接越界和通过 .. 越界都拒绝。
+    -- 快捷入口之外的路径可以列；不存在的目录是 404，不是越界 403。
     local c2 = newClient({ "GET /api/list?path=/etc HTTP/1.1\r\n\r\n" })
     drain(serve(c2, handlers, { root = "/managed" }))
     local code2, ebody2 = parseResponse(c2:output())
-    Assert.eq(code2, 403)
-    -- 错误体必须是 JSON {"error": ...}（页面靠它显示真实原因，不再是裸文本）
-    Assert.eq(require("support.json_stub").decode(ebody2).error, "Path outside managed roots")
+    Assert.eq(code2, 404)
+    Assert.eq(require("support.json_stub").decode(ebody2).error, "not a directory")
     local c3 = newClient({ "GET /api/list?path=/managed/../etc HTTP/1.1\r\n\r\n" })
     drain(serve(c3, handlers, { root = "/managed" }))
-    Assert.eq((parseResponse(c3:output())), 403)
+    Assert.eq((parseResponse(c3:output())), 404)
 
     -- 慢目录扫描允许异步完成，连接在回调前保持 pending。
     local delayed_cb
@@ -1618,17 +1617,18 @@ do
     has(b_idx, "下载日志")
 end
 
--- ── 路径边界：.. 越界、同前缀兄弟目录、根本身 ───────────
+-- ── 路径规范化：.. 消掉，相对路径拒绝；不按 roots 截断 ──
 do
     local s = Server.new({ root = "/mnt/us/books", roots = { "/mnt/us/books", "/mnt/us/shots" }, handlers = {} })
     Assert.eq(s:_safePath("/mnt/us/books/a/../b.epub"), "/mnt/us/books/b.epub")
     Assert.eq(s:_safePath("/mnt/us/books//./x"), "/mnt/us/books/x")
-    Assert.is_nil(s:_safePath("/mnt/us/books/../../etc/passwd"))
-    Assert.is_nil(s:_safePath("/mnt/us/books2/x"), "同前缀兄弟目录不算在内")
+    Assert.eq(s:_safePath("/mnt/us/books/../../etc/passwd"), "/mnt/etc/passwd")
+    Assert.eq(s:_safePath("/mnt/us/books2/x"), "/mnt/us/books2/x")
     Assert.is_nil(s:_safePath("mnt/us/books/x"), "相对路径")
     Assert.is_nil(s:_safePath("/.."))
     Assert.is_nil(s:_safePath(nil))
     Assert.eq(s:_safePath("/mnt/us/shots"), "/mnt/us/shots")
-    Assert.is_nil(s:_parent("/mnt/us/books"), "root 没有上级")
+    Assert.eq(s:_parent("/mnt/us/books"), "/mnt/us")
     Assert.eq(s:_parent("/mnt/us/books/a"), "/mnt/us/books")
+    Assert.is_nil(s:_parent("/"))
 end

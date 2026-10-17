@@ -38,7 +38,7 @@ local Remote = {
 
 --- 构造可访问根、快捷入口和保护路径。全部转成真实绝对路径，堵住软链接逃逸。
 --- 注意字体/插件/本插件目录在部分环境是软链（模拟器指向源码树）：
---- roots/快捷入口必须落 realpath 后的路径，否则快捷入口永远被 containment 拒掉。
+--- roots/快捷入口落 realpath，避免快捷入口和真实目录各显示一份。
 local function storageLayout()
     local DataStorage = require("datastorage")
     local ffiUtil = require("ffi/util")
@@ -146,45 +146,29 @@ local function layout()
     return Remote._layout
 end
 
---- 路径是否落在任一 managed root 之内。
----@param path string 真实绝对路径
----@return boolean
-local function allowed(path)
-    for _idx, root in ipairs(layout().roots) do
-        if Text.pathContains(root, path) then
-            return true
-        end
-    end
-    return false
-end
-
---- 已存在路径的范围校验：先 realpath（堵软链逃逸）再查 roots，越界返回 nil 并记警告。
+--- 已存在路径解析成真实路径。不存在返回 nil。软链解析到目标，用来读内容。
 ---@param path string
 ---@return string|nil 真实绝对路径
 local function existingPath(path)
-    local real = require("ffi/util").realpath(path)
-    if real and allowed(real) then
-        return real
-    end
-    logger.warn("book remote reject:", path, "→", real)
+    return require("ffi/util").realpath(path)
 end
 
---- 以真实父目录校验范围、基名原样保留：新建目标与删除/改名的源都用它，
---- 软链接本身才是被操作对象，不能解析成它指向的文件。
+--- 新建、删除、改名用真实父目录 + 原基名。软链接本身才是被操作对象，不能解析成它指向的文件。
 ---@param path string
 ---@return string|nil 真实父目录 + 原基名
+---@return string|nil err
 local function newPath(path)
     local ffiUtil = require("ffi/util")
     path = path:gsub("/+$", "")
     local name = ffiUtil.basename(path)
     if name == "" or name == "." or name == ".." then
         logger.warn("book remote reject name:", path)
-        return nil
+        return nil, "bad path"
     end
     local parent = ffiUtil.realpath(ffiUtil.dirname(path))
-    if not parent or not allowed(parent) then
-        logger.warn("book remote reject new:", path, "→", parent)
-        return nil
+    if not parent then
+        logger.warn("book remote reject new:", path)
+        return nil, "not found"
     end
     return parent .. "/" .. ffiUtil.basename(path)
 end
@@ -364,7 +348,7 @@ local function listDir(path)
     local lfs = require("libs/libkoreader-lfs")
     local resolved = existingPath(path)
     if not resolved then
-        return nil, "path outside managed roots"
+        return nil, "not found"
     end
     path = resolved
     local attr = lfs.attributes(path)
@@ -467,7 +451,7 @@ local function saveUpload(temp, dir, name, cb, conflict)
     local lfs = require("libs/libkoreader-lfs")
     local resolved = existingPath(dir)
     if not resolved then
-        cb(nil, "path outside managed roots")
+        cb(nil, "not found")
         return
     end
     dir = resolved
@@ -539,9 +523,9 @@ end
 ---@return boolean|nil, any
 local function mkdirOne(path)
     local lfs = require("libs/libkoreader-lfs")
-    local resolved = newPath(path)
+    local resolved, reason = newPath(path)
     if not resolved then
-        return nil, "path outside managed roots"
+        return nil, reason
     end
     path = resolved
     if lfs.attributes(path) then
@@ -583,9 +567,9 @@ local function deleteRecursive(path)
     if isProtected(path) then
         return nil, "protected path"
     end
-    local entry = newPath(path)
+    local entry, reason = newPath(path)
     if not entry then
-        return nil, "path outside managed roots"
+        return nil, reason
     end
     if isSecret(entry) then
         return nil, "protected path"
@@ -715,9 +699,10 @@ local function renameTo(path, to)
     if isProtected(path) or isProtected(to) then
         return nil, "protected path"
     end
-    local src, dst = newPath(path), newPath(to)
+    local src, src_err = newPath(path)
+    local dst, dst_err = newPath(to)
     if not src or not dst then
-        return nil, "path outside managed roots"
+        return nil, src_err or dst_err
     end
     path, to = src, dst
     -- isProtected 只挡配置目录本身及其祖先，挡不住目录里的单个文件。
@@ -966,9 +951,10 @@ local function transfer(op, path, to, conflict)
     if (op == "move" and isProtected(path)) or isProtected(to) then
         return nil, "protected path"
     end
-    local src, dst = newPath(path), newPath(to)
+    local src, src_err = newPath(path)
+    local dst, dst_err = newPath(to)
     if not src or not dst then
-        return nil, "path outside managed roots"
+        return nil, src_err or dst_err
     end
     if isSecret(src) or isSecret(dst) then
         return nil, "protected path"
@@ -1032,9 +1018,9 @@ end
 ---@return table|nil, any
 local function statPath(path)
     local lfs = require("libs/libkoreader-lfs")
-    local entry = newPath(path)
+    local entry, reason = newPath(path)
     if not entry then
-        return nil, "path outside managed roots"
+        return nil, reason
     end
     local attr = lfs.symlinkattributes(entry)
     if not attr then
@@ -1110,9 +1096,9 @@ local function writeText(path, text, create)
     if isProtected(path) then
         return nil, "protected path"
     end
-    local target = newPath(path)
+    local target, reason = newPath(path)
     if not target then
-        return nil, "path outside managed roots"
+        return nil, reason
     end
     if isSecret(target) then
         return nil, "protected path"
@@ -1187,9 +1173,9 @@ local function zipPaths(paths)
         return true
     end
     for _idx, path in ipairs(paths) do
-        local real = newPath(path)
+        local real, reason = newPath(path)
         if not real then
-            return nil, "path outside managed roots"
+            return nil, reason
         end
         if not lfs.symlinkattributes(real) then
             return nil, "not found"
@@ -1516,8 +1502,7 @@ Remote._once = {}
 ---@return string|nil url
 ---@return string|nil err
 function Remote.shareUrl(path)
-    -- 截图目录可在服务运行期间被用户修改；分享时以当前配置重建范围，
-    -- 否则新目录会被旧 roots 快照误判为越界。
+    -- 截图目录和保护路径可在服务运行期间被改；分享时重建布局，快捷入口和保护名单跟着走。
     Remote._layout = storageLayout()
     if Remote._server then
         Remote._server:updateLayout(Remote._layout)

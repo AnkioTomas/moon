@@ -20,7 +20,7 @@ File.MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 --- handler 错误串 → HTTP 状态码；不在表里的都是 500。
 local ERROR_CODES = {
     ["protected path"] = 403,
-    ["path outside managed roots"] = 403,
+    ["bad path"] = 400,
     ["not found"] = 404,
     ["already exists"] = 409,
     ["target exists"] = 409,
@@ -56,19 +56,15 @@ local function listBody(path, parent, entries)
         .. "}"
 end
 
---- 查询串路径 → managed roots 内的规范路径；非法已排 400、越界已排 403，返回 nil。
+--- 查询串路径规范化。非法已排 400，返回 nil。
 ---@param conn table
 ---@param path string|nil
 ---@param bad string 400 的错误说明
 ---@return string|nil
 local function resolveTarget(self, conn, path, bad)
-    local target = self.cleanPath(path)
+    local target = self:_safePath(path)
     if not target then
         return self:_fail(conn, 400, bad)
-    end
-    target = self:_safePath(target)
-    if not target then
-        return self:_fail(conn, 403, "Path outside managed roots")
     end
     return target
 end
@@ -94,7 +90,7 @@ end
 -- ── 路由 ─────────────────────────────────────────────
 
 --- GET /api/list?path=：列目录，逐项标注 protected。
---- path 缺省列 server.root；非 GET 405，越界 403，非目录/不存在 404。
+--- path 缺省列 server.root；非 GET 405，路径非法 400，非目录/不存在 404。
 ---@param conn table
 ---@param method string
 ---@param path string|nil 目标目录绝对路径
@@ -108,7 +104,7 @@ function File.list(self, conn, method, path)
     else
         dir = self:_safePath(path)
         if not dir then
-            return self:_fail(conn, 403, "Path outside managed roots")
+            return self:_fail(conn, 400, "Bad path")
         end
     end
     conn.state = "pending"
@@ -127,7 +123,7 @@ function File.list(self, conn, method, path)
 end
 
 --- GET /download?path=：以 attachment 流式下发单个普通文件。
---- 非 GET 405，路径非法 400，越界 403，不是文件或打开失败 404。
+--- 非 GET 405，路径非法 400，不是文件或打开失败 404。
 ---@param conn table
 ---@param method string
 ---@param path string|nil 目标文件绝对路径
@@ -168,7 +164,7 @@ end
 
 --- PUT|POST /upload?dir=&name=（raw body 流式落盘，body 读取在 server 状态机）。
 --- 校验目标后交给 server:_acceptFile 流式落盘，收齐再由 handlers.save 落位。
---- 方法不符 405，dir/name 非法 400，越界 403，其余长度类错误见 _acceptFile。
+--- 方法不符 405，dir/name 非法 400，其余长度类错误见 _acceptFile。
 ---@param conn table
 ---@param method string
 ---@param headers table 已小写化的请求头
@@ -211,7 +207,7 @@ function File.upload(self, conn, method, headers, dir, name, conflict)
 end
 
 --- POST /api/mkdir|delete?path=（无请求体的单路径变更操作公共壳）。
---- 非 POST 405，路径非法 400，越界/删 root 或受保护路径 403；
+--- 非 POST 405，路径非法 400，删 root 或受保护路径 403；
 --- 不存在 404、冲突 409，其余 handler 失败 500。
 ---@param conn table
 ---@param method string
@@ -233,8 +229,8 @@ function File.mutate(self, conn, method, path, op)
     return true
 end
 
---- POST /api/rename?path=&to=：重命名/移动，源与目标都必须在 managed roots 内。
---- 非 POST 405，路径非法 400，越界或源是 root、源/目标受保护 403；
+--- POST /api/rename?path=&to=：重命名/移动。
+--- 非 POST 405，路径非法 400，源是 root、源/目标受保护 403；
 --- 不存在 404、冲突 409，其余 handler 失败 500。
 ---@param conn table
 ---@param method string
@@ -246,10 +242,6 @@ function File.rename(self, conn, method, query)
     local from, to = self.cleanPath(query.path), self.cleanPath(query.to)
     if not from or not to then
         return self:_fail(conn, 400, "Bad path")
-    end
-    from, to = self:_safePath(from), self:_safePath(to)
-    if not from or not to then
-        return self:_fail(conn, 403, "Path outside managed roots")
     end
     if self:_isRoot(from) or self.handlers.is_protected(from) or self.handlers.is_protected(to) then
         return self:_fail(conn, 403, "Protected path")
@@ -282,7 +274,7 @@ local CONFLICTS = { ask = true, skip = true, rename = true, overwrite = true }
 
 --- POST /api/copy|move?path=&to=&conflict=：复制或移动一个条目到完整目标路径。
 --- conflict 缺省 ask（目标存在回 409，由网页选择保留两份 / 替换 / 跳过）。
---- 非 POST 405，路径非法 400，越界 403；移动的源、任一目标受保护 403。
+--- 非 POST 405，路径非法 400；移动的源、任一目标受保护 403。
 ---@param conn table
 ---@param method string
 ---@param query table
@@ -294,10 +286,6 @@ function File.transfer(self, conn, method, query, op)
     local from, to = self.cleanPath(query.path), self.cleanPath(query.to)
     if not from or not to then
         return self:_fail(conn, 400, "Bad path")
-    end
-    from, to = self:_safePath(from), self:_safePath(to)
-    if not from or not to then
-        return self:_fail(conn, 403, "Path outside managed roots")
     end
     local conflict = query.conflict or "ask"
     if not CONFLICTS[conflict] then
@@ -379,10 +367,6 @@ local function finishZip(self, conn, text)
         local target = type(p) == "string" and self.cleanPath(p)
         if not target then
             return self:_fail(conn, 400, "Bad path")
-        end
-        target = self:_safePath(target)
-        if not target then
-            return self:_fail(conn, 403, "Path outside managed roots")
         end
         paths[i] = target
     end

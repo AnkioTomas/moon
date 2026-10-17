@@ -440,32 +440,21 @@ end
 -- 路由模块（features.remote.file）以 self.cleanPath 使用
 Server.cleanPath = cleanPath
 
+--- 只做路径规范化。不按 managed roots 截断：文件管理可以走出快捷入口。
 ---@return string|nil
 function Server:_safePath(p)
-    local path = cleanPath(p)
-    if not path then
-        return nil
-    end
-    for _idx, root in ipairs(self.roots) do
-        if Text.pathContains(root, path) then
-            return path
-        end
-    end
-    return nil
+    return cleanPath(p)
 end
 
---- 取上级目录；path 本身是某个 managed root 或越界时返回 nil。
+--- 取上级目录。只有 `/` 没有上级。
 ---@param path string
 ---@return string|nil
 function Server:_parent(path)
-    if self:_isRoot(path) then
-        return nil
-    end
     local parent = path:match("^(.*)/[^/]+$")
     if parent == "" then
         parent = "/"
     end
-    return self:_safePath(parent)
+    return parent and self:_safePath(parent) or nil
 end
 
 --- 路径是否正好是某个 managed root。
