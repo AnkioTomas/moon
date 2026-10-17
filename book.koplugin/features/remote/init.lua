@@ -1194,7 +1194,7 @@ local function zipPaths(paths)
     end
     writer:setZipCompression("store")
     for _idx, item in ipairs(entries) do
-        if not writer:addPath(item[1], item[2], false) then
+        if not writer:addPath(item[1], item[2], false) and writer.err then
             local err = writer.err
             writer:close()
             os.remove(output)

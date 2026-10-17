@@ -85,7 +85,8 @@ function Backup.build(output, root, Writer, lfs)
     local mark = string.format("moon-backup 1\ncreated=%d\n", now)
     if not writer:addFileFromMemory(Backup.MARKER, mark, now) then return fail() end
     for _idx, file in ipairs(files) do
-        if not writer:addPath(file.name, file.path, false) then return fail() end
+        -- addPath 正常结束时内部状态是 EOF，返回值为假；只有 err 非空才是真失败
+        if not writer:addPath(file.name, file.path, false) and writer.err then return fail() end
     end
     writer:close()
     require("features.remote.logs").fixPerms(output)

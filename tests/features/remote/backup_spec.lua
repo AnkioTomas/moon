@@ -60,7 +60,7 @@ function Writer:new() return setmetatable({}, Writer) end
 function Writer:open() return true end
 function Writer:setZipCompression() end
 function Writer:addFileFromMemory(name, text) memory[name] = text; return true end
-function Writer:addPath(name, path) added[#added + 1] = name .. "=" .. read(path); return true end
+function Writer:addPath(name, path) added[#added + 1] = name .. "=" .. read(path); return false end -- 真实现正常结束也返回 false
 function Writer:close() end
 
 local out = base .. "/out.zip"
