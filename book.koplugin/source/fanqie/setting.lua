@@ -39,4 +39,31 @@ function M.open()
     end)
 end
 
+--- 设置页行：账号（扫码）与阅读选项。
+---@param plugin table|nil
+---@return table[]
+function M.rows(plugin)
+    local Row = require("ui.themes.widgets.row")
+    return {
+        function(iw)
+            local status, status_on = M.rowStatus()
+            return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "account_circle",
+                title = M.rowTitle(), status = status, status_on = status_on,
+                callback = function() M.open() end })
+        end,
+        function(iw)
+            local settings = require("source.fanqie.settings"):new()
+            local on = settings:get("show_paragraph_reviews", false) == true
+            return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = "forum",
+                title = _("显示段评"), subtitle = _("阅读时给有他人段评的段落末尾画线，点按查看；需联网"),
+                status = on and _("开") or _("关"), status_on = on,
+                callback = function()
+                    settings:set("show_paragraph_reviews", not on)
+                    settings:flush()
+                    if plugin and plugin.desktop then plugin.desktop:updateView() end
+                end })
+        end,
+    }
+end
+
 return M

@@ -91,6 +91,8 @@ local function signedAsync(device, name, path, build_query, build_body, cb)
     end)
 end
 
+Reading.signedAsync = signedAsync
+
 ---@param device table
 ---@param cb fun(v1_key: string|nil, err: string|nil)
 ---@return CancelHandle

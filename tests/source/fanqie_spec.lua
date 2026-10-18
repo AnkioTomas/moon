@@ -20,6 +20,12 @@ end
 package.loaded["source.base"] = nil
 local progress_wire = { data = {} }
 local put_args, put_wire = nil, { code = 0 }
+local shelf_actions, pending_adds = {}, {}
+local search_wire = { code = 0, data = { ret_data = {
+    { book_id = "111", title = "搜到的书", author = "某人", abstract = "简介", category = "玄幻",
+      thumb_url = "https://p6-tt.bytecdn.cn/novel-pic/abc~tplv-shrink:640:0.image" },
+    { title = "没有书号" },
+} } }
 package.preload["source.fanqie.settings"] = function()
     return {
         new = function()
@@ -69,6 +75,15 @@ package.preload["source.fanqie.client"] = function()
                     end)
                     return { cancel = function() end }
                 end,
+                shelfActionAsync = function(_, action, book_id, cb)
+                    shelf_actions[#shelf_actions + 1] = action .. ":" .. book_id
+                    require("ui/uimanager"):nextTick(function() cb({ code = 0 }) end)
+                    return { cancel = function() end }
+                end,
+                searchAsync = function(_, _keyword, cb)
+                    require("ui/uimanager"):nextTick(function() cb(search_wire) end)
+                    return { cancel = function() end }
+                end,
                 fetchReadProgressAsync = function(_, cb)
                     require("ui/uimanager"):nextTick(function()
                         cb(progress_wire)
@@ -105,6 +120,9 @@ package.preload["book.books_db"] = function()
             stored = books
             return true, 0
         end,
+        pendingDeleteIds = function() return {} end,
+        pendingShelfAddIds = function() return pending_adds end,
+        markSynced = function() return true end,
         get = function(_source_id, stable_id)
             return stored and stored[1] and stored[1].stable_id == stable_id and stored[1] or nil
         end,
@@ -234,8 +252,54 @@ do
     src:syncBooksAsync({ dirty_only = true }, function(r) result = r end)
     Assert.is_nil(result)
     drain()
-    Assert.is_true(result.skipped)
     Assert.eq(result.pushed, 0)
+    Assert.len(shelf_actions, 0)
+
+    -- 本地新加架的书经网页接口上行
+    pending_adds = { "555" }
+    src:syncBooksAsync({ dirty_only = true }, function(r) result = r end)
+    drain()
+    Assert.eq(result.pushed, 1)
+    Assert.eq(shelf_actions[1], "add:555")
+    pending_adds = {}
+end
+
+-- 书城搜索：只留有书号的行，封面归一到手机 CDN
+do
+    local res
+    src:searchAsync("关键字", function(r) res = r end)
+    drain()
+    Assert.len(res.data, 1)
+    Assert.eq(res.data[1].stable_id, "111")
+    Assert.eq(res.data[1].authors, "某人")
+    Assert.eq(res.data[1].category, "玄幻")
+    Assert.matches(res.data[1].cover, "p6%-novel%.byteimg%.com")
+end
+
+-- 阅读中定时上传：开章起计时，没到点不发；到点且联网才发一次
+do
+    package.preload["ui/network/manager"] = function()
+        return { isConnected = function() return true end }
+    end
+    local pos = { chapter_idx = 1, chapter_fraction = 0.5 }
+    local ev = { identity = ref, position = pos }
+    put_args = nil
+    src:onEvent("page_changed", ev)
+    Assert.is_nil(put_args)
+    src:onEvent("chapter_changed", ev)
+    src:onEvent("page_changed", ev)
+    drain()
+    Assert.is_nil(put_args)
+    src._next_put = os.time() - 1
+    put_wire = { code = 0 }
+    src:onEvent("page_changed", ev)
+    drain()
+    Assert.eq(put_args.item_id, "9876543210987654321")
+    put_args = nil
+    src:onEvent("page_changed", ev)
+    Assert.is_nil(put_args)
+    package.preload["ui/network/manager"] = nil
+    package.loaded["ui/network/manager"] = nil
 end
 
 -- 封面走基类：查书库 cover（同步书架时写入的手机 CDN 地址）

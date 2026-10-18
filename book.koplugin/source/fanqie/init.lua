@@ -1,13 +1,17 @@
 --[[--
 番茄小说官方数据源。
 
-正文走 App reading API：registerkey → batch_full → 解密（reading/）。书架只拉不推（dirty_only 直接 skipped），进度双向，无笔记、统计。
+正文走 App reading API：registerkey → batch_full → 解密（reading/）。书架双向（加架 / 移出架经番茄网页接口，Shelf.syncAsync 编排），搜索走免登录端点，进度双向，无笔记、统计。
 封面用 fanqie.lua 的 mobileCover 稳定路径（网页签名 thumb_url 会过期）。19 位设备 id 按 uint64 精确编码；Cookie 没变不重写设置。
 
 @module koplugin.book.source.fanqie
 --]]
 
 local Base = require("source.base")
+local Assets = require("source.assets")
+local Comic = require("source.fanqie.comic")
+local Paths = require("utils.paths")
+local logger = require("utils.log")
 require("l10n").apply()
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -17,6 +21,8 @@ local M = {}
 ---@class FanqieSource : BookSource
 ---@field settings FanqieSettings
 ---@field client FanqieClient
+---@field _next_put integer|nil 下次阅读中上传进度的时刻
+---@field _putting boolean|nil
 
 local Source = setmetatable({}, { __index = Base })
 Source.__index = Source
@@ -72,53 +78,104 @@ local function errMsg(err)
     return tostring(err or _("番茄请求失败"))
 end
 
+---@param wire table fetchShelfDetailAsync 的回包
+---@return Book[]
+local function shelfBooks(wire)
+    local books = {}
+    for _idx, row in ipairs(wire.data.detail_list) do
+        books[#books + 1] = {
+            source_id = "fanqie",
+            stable_id = tostring(row.book_id),
+            title = row.book_name,
+            authors = row.author_name,
+            intro = require("utils.text").stripHtml(row.abstract),
+            cover = row.thumb_url,
+        }
+    end
+    return books
+end
+
+--- 书架远端：Shelf.syncAsync 要的三个冒号方法。
+---@param self FanqieSource
+---@param force boolean|nil
+local function shelfRemote(self, force)
+    local remote = {}
+    function remote.shelfSyncAsync(_remote, cb)
+        return self.client:fetchShelfDetailAsync(force, function(wire, err)
+            if not wire then
+                cb(nil, errMsg(err))
+            elseif type(wire.data) ~= "table" or type(wire.data.detail_list) ~= "table" then
+                cb(nil, _("番茄书架响应不完整，保留本地书架"))
+            else
+                require("utils.paths").ensureLayout("fanqie")
+                cb(wire)
+            end
+        end)
+    end
+    function remote.addToShelfAsync(_remote, stable_id, cb)
+        return self.client:shelfActionAsync("add", stable_id, cb)
+    end
+    function remote.removeFromShelfAsync(_remote, stable_id, cb)
+        return self.client:shelfActionAsync("delete", stable_id, cb)
+    end
+    return remote
+end
+
 ---@param opts { force?: boolean, dirty_only?: boolean, on_progress?: fun(text: string|nil, done: integer|nil, total: integer|nil) }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return CancelHandle|nil
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
-    -- 番茄暂无书架删/加推送；dirty_only 不得全量 pull。
-    if opts.dirty_only then
-        return Base.skipped(cb, "no dirty shelf push")
-    end
     if not self:configured() then
+        if opts.dirty_only then return Base.skipped(cb, "fanqie not logged in") end
         return Base.defer(cb, nil, _("请在数据源设置中扫码登录番茄小说"))
     end
+    return require("source.shelf").syncAsync(self.id, shelfRemote(self, opts.force), shelfBooks, opts, cb)
+end
 
-    local report = opts.on_progress or function(...) end
-    local h = handle()
-    report(_("正在拉取书架…"))
-    h.job = self.client:fetchShelfDetailAsync(opts.force, function(wire, err)
-        if h.cancelled then return end
+--- 未登录时书库就是唯一真相：标删后直接撕墓碑；登录后走基类三段式，由书架同步推删。
+---@param identity BookIdentity
+---@param cb fun(ok: boolean, err: string|nil)
+---@return { cancel: fun() }
+function Source:deleteBookAsync(identity, cb)
+    if self:configured() then return Base.deleteBookAsync(self, identity, cb) end
+    if not require("book.store").markDeleted(self.id, identity.stable_id) then
+        return Base.defer(cb, false, _("删除本书失败"))
+    end
+    if not require("book.books_db").remove(self.id, identity.stable_id) then
+        require("utils.log").warn("book fanqie tombstone remove failed", identity.stable_id)
+    end
+    return Base.defer(cb, true)
+end
+
+--- 书城搜索：免登录端点，字段比书架少（没有字数 / 最新章）。
+---@param keyword string
+---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:searchAsync(keyword, cb)
+    return self.client:searchAsync(keyword, function(wire, err)
         if not wire then
             cb(nil, errMsg(err))
             return
         end
-        local rows = wire.data and wire.data.detail_list
-        if type(rows) ~= "table" then
-            cb(nil, _("番茄书架响应不完整，保留本地书架"))
-            return
-        end
-        require("utils.paths").ensureLayout("fanqie")
+        local FanQie = require("source.fanqie.fanqie")
         local books = {}
-        for _idx, row in ipairs(rows) do
-            local id = row.book_id or row.bookId or row.id
-            if id then
+        local list = type(wire.data) == "table" and wire.data.ret_data
+        for _idx, row in ipairs(type(list) == "table" and list or {}) do
+            if row.book_id then
                 books[#books + 1] = {
-                    source_id = "fanqie",
-                    stable_id = tostring(id),
-                    title = row.book_name or row.title or row.name,
-                    authors = row.author_name or row.author or "",
-                    intro = require("utils.text").stripHtml(row.description or row.desc or row.abstract),
-                    cover = row.thumb_url or row.coverUrl or row.cover or row.cover_url,
+                    source_id = self.id,
+                    stable_id = tostring(row.book_id),
+                    title = row.title,
+                    authors = row.author or "",
+                    category = row.category,
+                    intro = row.abstract,
+                    cover = FanQie.mobileCover(row.thumb_url) or FanQie.mobileCover(row.audio_thumb_uri),
                 }
             end
         end
-        report(T(_("正在写入书架（%1 本）"), #books))
-        local result, reason = require("source.shelf").reconcile(self.id, books)
-        cb(result, reason)
+        cb({ data = books })
     end)
-    return h
 end
 
 function Source:getDetailAsync(identity, cb)
@@ -142,14 +199,7 @@ function Source:loadTocAsync(identity, cb)
         local rows = Content.readable_chapters(Content.normalize_chapters(wire))
         local toc = {}
         for _idx, row in ipairs(rows) do
-            local uid = row.itemId or row.item_id
-            if uid then
-                toc[#toc + 1] = {
-                    idx = #toc + 1,
-                    uid = tostring(uid),
-                    title = row.title or row.item_title or ("第" .. (#toc + 1) .. "章"),
-                }
-            end
+            toc[#toc + 1] = { idx = #toc + 1, uid = tostring(row.itemId), title = row.title }
         end
         if #toc == 0 then
             cb(nil, _("番茄目录为空"))
@@ -173,10 +223,25 @@ local function fetch(self, identity, chapter, cb)
             cb(nil, errMsg(err))
             return
         end
-        cb({
-            title = result.title ~= "" and result.title or chapter.title,
-            html = Content.decode_pua_content(result.content),
-        })
+        local title = result.title ~= "" and result.title or chapter.title
+        local pages, key = Comic.parse(result.content)
+        if not pages then
+            cb({ title = title, html = Content.decode_pua_content(result.content) })
+            return
+        end
+        local images_dir = Paths.bookWorkDir(identity.stable_id, "fanqie") .. "/images"
+        h.job = Assets.localizeAsync(pages, images_dir, function(url, got)
+            return require("http.request").request({
+                url = url,
+                method = "GET",
+                timeout = require("http.timeout").net(3),
+                allow_redirects = true,
+            }, function(res)
+                got(res and res.code == 200 and res.body and Comic.decrypt(res.body, key) or nil)
+            end)
+        end, function(html)
+            if not h.cancelled then cb({ title = title, html = html }) end
+        end)
     end)
     return h
 end
@@ -290,6 +355,78 @@ function Source:putProgressAsync(identity, pos, cb)
             end)
     end)
     return h
+end
+
+-- 阅读中的进度上传间隔（秒）：番茄有风控，只防中途断电 / 被杀丢进度，不逐页上传。
+local PROGRESS_INTERVAL = 120
+
+--- 开章起计时（开书拉进度 / 冲突对话期间不抢先覆盖云端）；翻页到点且已联网才上传当前位置。
+---@param event string
+---@param payload table|nil
+function Source:onEvent(event, payload)
+    if event == "chapter_changed" then
+        self._next_put = os.time() + PROGRESS_INTERVAL
+    elseif event == "page_changed" and payload.position and self._next_put and os.time() >= self._next_put
+        and not self._putting and self:configured() and require("ui/network/manager"):isConnected() then
+        self._putting = true
+        self._next_put = os.time() + PROGRESS_INTERVAL
+        self:putProgressAsync(payload.identity, payload.position, function(ok, err)
+            self._putting = false
+            if not ok then logger.warn("fanqie periodic progress failed", err) end
+        end)
+    end
+end
+
+--- 阅读页是否显示他人段评（设置页开关，默认关）。
+---@return boolean
+function Source:paragraphReviewsEnabled()
+    return self.settings:get("show_paragraph_reviews", false) == true
+end
+
+--- 章节序号 → 番茄 item_id，目录来自缓存或在线拉取。
+local function withChapterUid(self, identity, cb, start)
+    local h = handle()
+    h.job = self:loadTocAsync(identity, function(toc, err)
+        if h.cancelled then return end
+        local chapter = toc and toc[tonumber(identity.chapter_idx)]
+        if not chapter then
+            cb(nil, err or _("缺少番茄章节位置"))
+            return
+        end
+        h.job = start(chapter.uid, cb)
+    end)
+    return h
+end
+
+--- 本章有评论的段落（未定位）。
+---@param identity BookIdentity
+---@param cb fun(hotspots: FanqieReviewHotspot[]|nil, err: string|nil)
+---@return CancelHandle
+function Source:paragraphHotspotsAsync(identity, cb)
+    return withChapterUid(self, identity, cb, function(uid, done)
+        return require("source.fanqie.reviews").hotspotsAsync(self.settings, uid, done)
+    end)
+end
+
+--- 段落按段末文字定位到章节 HTML（子进程里跑，不碰实例状态）。
+---@param hotspots FanqieReviewHotspot[]
+---@param html string
+---@return table[]
+function Source:locateHotspots(hotspots, html)
+    return require("source.fanqie.reviews").locate(hotspots, html)
+end
+
+--- 某段的一页评论；range 是段落序号，max_idx 是游标偏移（首页 0）。
+---@param identity BookIdentity
+---@param range string
+---@param max_idx integer
+---@param cb fun(page: WechatReviewPage|nil, err: string|nil)
+---@return CancelHandle
+function Source:paragraphReviewPageAsync(identity, range, max_idx, cb)
+    return withChapterUid(self, identity, cb, function(uid, done)
+        return require("source.fanqie.reviews").pageAsync(
+            self.settings, identity.stable_id, uid, tonumber(range), max_idx, done)
+    end)
 end
 
 return M

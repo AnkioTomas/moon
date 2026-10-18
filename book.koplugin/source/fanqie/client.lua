@@ -20,6 +20,8 @@ Client.__index = Client
 ---@field updateReadProgressAsync fun(self: FanqieClient, book_id: string, item_id: string, index: number, progress: number, cb: function): CancelHandle|nil
 ---@field fetchChapterDirectoryAsync fun(self: FanqieClient, book_id: string, cb: function): CancelHandle|nil
 ---@field fetchShelfDetailAsync fun(self: FanqieClient, force_refresh: boolean|nil, cb: function): CancelHandle|nil
+---@field searchAsync fun(self: FanqieClient, keyword: string, cb: function): { cancel: fun() }
+---@field shelfActionAsync fun(self: FanqieClient, action: "add"|"delete", book_id: string, cb: function): { cancel: fun() }
 ---@field officialGetContentAsync fun(self: FanqieClient, book_id: string, item_id: string, cb: function): CancelHandle|nil
 
 local TIMEOUT_RATIO = 0.5 -- × 「网络超时」，缺省 15 秒
@@ -76,17 +78,6 @@ end
 ---@return FanqieClient
 function Client:new(settings)
     return setmetatable({ settings = settings }, self)
-end
-
----@param cookies table
----@return string
-local function cookieHash(cookies)
-    local parts = {}
-    for k, v in pairs(cookies or {}) do
-        parts[#parts + 1] = k .. "=" .. tostring(v)
-    end
-    table.sort(parts)
-    return table.concat(parts, ";")
 end
 
 ---@param self FanqieClient
@@ -262,7 +253,7 @@ end
 function Client:fetchShelfDetailAsync(force_refresh, cb)
     local now = os.time()
     local cookies = self.settings:get("cookies", {})
-    local cache_key = next(cookies) and cookieHash(cookies) or "default"
+    local cache_key = next(cookies) and Cookie.to_header(cookies) or "default"
     local cached = SHELF_CACHE[cache_key]
     if not force_refresh and cached and (now - cached.timestamp) < SHELF_CACHE_TTL then
         require("ui/uimanager"):nextTick(function() cb(cached.data) end)
@@ -315,8 +306,8 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
 
         -- web multidetail 无作者；手机端 multi-detail 现已空响应。
         -- 用 /api/book/info 拿书名/作者，封面走手机 CDN（thumb_uri 稳定、不签名过期）。
-        -- 接口答了但无详情 = 下架/失效，不进列表（reconcile 软删不标脏，恢复后重新上架）；
-        -- 请求本身失败则整次失败：剔掉会把书从本地书架藏起来。
+        -- 接口答了但无详情（网页端查无此书，App 里仍在书架上）：走书架 multidetail 取书名，
+        -- 再失败才用书号占位保留在书架；请求本身失败则整次失败：剔掉会把书从本地书架藏起来。
         local by_id, next_idx, active, failed = {}, 0, 0, nil
         local function finish()
             if failed then
@@ -336,9 +327,38 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
         end
 
         local pump
+        local function settle()
+            active = active - 1
+            if cancelled then return end
+            if active == 0 and (failed or next_idx >= #shelf_book_ids) then
+                finish()
+            else
+                pump()
+            end
+        end
+        -- 网页端 book/info 查无此书时，改用书架 multidetail 取书名封面（只返回在架的书，正好）。
+        local function fallbackDetail(book_id)
+            local body = JSON.encode({ books = { { book_id = book_id, item_id = "0" } } })
+            detail_jobs[book_id] = jsonAsync(self, "POST", FanQie.bookshelf_multidetail_url(), {
+                ["Content-Type"] = "application/json;charset=UTF-8",
+                ["Origin"] = FanQie.BASE_URL,
+            }, body, function(wire)
+                detail_jobs[book_id] = nil
+                if cancelled then return end
+                local list = type(wire) == "table" and type(wire.data) == "table" and wire.data.detail_list
+                local d = type(list) == "table" and list[1] or {}
+                by_id[book_id] = {
+                    book_id = book_id,
+                    book_name = d.book_name or ("番茄书籍 " .. book_id),
+                    author_name = "",
+                    abstract = d.abstract or "",
+                    thumb_url = FanQie.mobileCover(d.thumb_url),
+                }
+                settle()
+            end)
+        end
         local function onInfo(book_id, info, info_err)
             detail_jobs[book_id] = nil
-            active = active - 1
             if cancelled then return end
             if not info then
                 failed = failed or info_err or "番茄书籍详情请求失败"
@@ -346,19 +366,17 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
                 local d = info.data
                 by_id[book_id] = {
                     book_id = book_id,
-                    book_name = d.bookName or d.book_name or d.title,
-                    author_name = d.authorName or d.author_name or d.author or "",
-                    abstract = d.abstract or d.description or "",
-                    thumb_url = FanQie.mobileCover(d.thumbUri or d.thumb_uri or d.thumbUrl),
+                    book_name = d.bookName,
+                    author_name = d.authorName or "",
+                    abstract = d.description or "",
+                    thumb_url = FanQie.mobileCover(d.thumbUri),
                 }
             else
                 logger.warn("fanqie book info", book_id, businessError(info, "invalid"))
+                fallbackDetail(book_id)
+                return
             end
-            if active == 0 and (failed or next_idx >= #shelf_book_ids) then
-                finish()
-            else
-                pump()
-            end
+            settle()
         end
         pump = function()
             while not failed and active < DETAIL_LIMIT and next_idx < #shelf_book_ids do
@@ -372,6 +390,65 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
         pump()
     end)
     return handle
+end
+
+--- 免登录搜索，只取第一页（接口的 has_more / offset 此处不用）。
+---@param keyword string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:searchAsync(keyword, cb)
+    return Request.request({
+        url = FanQie.searchUrl(keyword),
+        method = "GET",
+        headers = { ["User-Agent"] = FanQie.APP_UA, ["Accept"] = "application/json, text/plain, */*" },
+        timeout = require("http.timeout").net(TIMEOUT_RATIO),
+    }, function(res, err)
+        if err or not res then
+            cb(nil, err and tostring(err))
+            return
+        end
+        if not Request.ok(tonumber(res.code)) then
+            cb(nil, httpError("GET", FanQie.searchUrl(keyword), tonumber(res.code), res.body, res))
+            return
+        end
+        local data, derr = decodeJson(res.body)
+        if not data then
+            cb(nil, derr)
+        elseif tonumber(data.code) ~= 0 then
+            cb(nil, businessError(data, "番茄搜索失败"))
+        else
+            cb(data)
+        end
+    end)
+end
+
+--- 加入 / 移出书架。成功后丢掉书架短缓存，紧接着的重新拉取才看得到变化。
+---@param action "add"|"delete"
+---@param book_id string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:shelfActionAsync(action, book_id, cb)
+    local item = { book_id = tostring(book_id) }
+    local body = { identify_data = { item } }
+    if action == "add" then
+        item.asterisked = false
+        item.modify_time = os.time() * 1000
+        item.book_type = 0
+        body.add_book_source = 0
+    end
+    return jsonAsync(self, "POST", FanQie.shelfActionUrl(action), {
+        ["Content-Type"] = "application/json;charset=UTF-8",
+        ["Origin"] = FanQie.BASE_URL,
+    }, JSON.encode(body), function(data, err)
+        if not data then
+            cb(nil, err)
+        elseif tonumber(data.code) ~= 0 then
+            cb(nil, businessError(data, "番茄书架操作失败"))
+        else
+            SHELF_CACHE = {}
+            cb(data)
+        end
+    end)
 end
 
 ---@param book_id string
