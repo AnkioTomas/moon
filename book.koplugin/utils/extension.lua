@@ -2,7 +2,7 @@
 核心扩展点注册表：下层（桌面、顶栏、设置树、阅读器、划词菜单、会话）声明通用挂点，
 上层（features/、第三方）往里登记实现。下层只按挂点名取用，不知道谁登记、也不写任何 feature 名。
 
-挂点名一律以下层自己的命名空间开头（desktop.* / topbar.* / setting.* / reader.* / highlight.* / note.* / web.*），
+挂点名一律以下层自己的命名空间开头（desktop.* / modal.* / topbar.* / setting.* / reader.* / highlight.* / note.* / web.*），
 完整清单与各项形状见下方 `POINTS`；登记未声明的挂点直接报错，防止拼错名静默失效。
 
     Ext.add("desktop.activated", function(desktop) ... end)   -- 追加一项
@@ -18,6 +18,8 @@ local Ext = {}
 --- 已声明的挂点：名字 → 说明。新增挂点 = 在这里加一行，并在下层取用处写清形状。
 Ext.POINTS = {
     ["desktop.tabs"] = "底栏页签 { id, text, icon, after?, enabled():bool, create?(opts):page, tap?(desktop, rect) }",
+    ["desktop.backdrop"] = "单一提供者：桌面背景 { content(page), tabbar(bar), wrap(w, h, child) -> widget }（透底 / 垫在三层之下）",
+    ["modal.backdrop"] = "单一提供者：主题弹窗在遮罩之下先画背景 fn(modal, bb, x, y)",
     ["desktop.activated"] = "桌面回到前台 fn(desktop)",
     ["desktop.opened"] = "桌面打开并显示后 fn(desktop)",
     ["quickpanel.show"] = "单一提供者：打开快捷面板 fn(scope)",

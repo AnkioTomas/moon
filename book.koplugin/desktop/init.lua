@@ -190,6 +190,8 @@ local function content(self)
         widget.dimen = Geom:new{ w = w, h = h }
     end
     widget.overlap_offset = { 0, TopBar.height() }
+    local backdrop = Ext.last("desktop.backdrop")
+    if backdrop then backdrop.content(widget) end
     return widget
 end
 
@@ -211,6 +213,8 @@ local function tabbar(self)
         end,
     }
     bar.overlap_offset = { 0, self.dimen.h - Tabbar.height() }
+    local backdrop = Ext.last("desktop.backdrop")
+    if backdrop then backdrop.tabbar(bar) end
     return bar
 end
 
@@ -460,11 +464,12 @@ function Desktop:build()
         content(self), top, tabbar(self),
     }
     local old = self[1] --[[@as WidgetContainer|nil]]
+    local backdrop = Ext.last("desktop.backdrop")
     self[1] = Box:new{
         style = { bg = Theme.current().color.page },
         width = self.dimen.w,
         height = self.dimen.h,
-        self.layers,
+        backdrop and backdrop.wrap(self.dimen.w, self.dimen.h, self.layers) or self.layers,
     }
     if old then old:free() end
     logger.dbg("book.perf desktop.build", Perf.elapsedMs(started_at), "ms", self.tab)

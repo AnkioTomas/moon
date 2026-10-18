@@ -111,6 +111,15 @@ package.preload["features.lockscreen.page"] = function()
         preview = function() return { dimen = { h = 20 } } end,
     }
 end
+package.preload["features.wallpaper"] = function()
+    return { anyEnabled = function() return false end }
+end
+package.preload["features.wallpaper.page"] = function()
+    return {
+        rows = function() return {} end,
+        preview = function() return { dimen = { h = 20 } } end,
+    }
+end
 package.preload["desktop.pages.setting.desktop"] = function()
     return { rows = function() return {} end }
 end
@@ -208,7 +217,7 @@ require("features").registerConventions()
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 31)
+Assert.len(built_rows, 32)
 Assert.eq(table.concat(section_titles, ","), "书库,订阅,桌面,阅读,系统,维护")
 -- 订阅的开关直接放在根页「订阅」组，不另开子页。
 local sub_rows = {}
@@ -225,6 +234,7 @@ local expected = {
     { title = "桌面快捷面板", id = "feature:panel:desktop" },
     { title = "底栏拓展", id = "feature:extensions:main" },
     { title = "锁屏壁纸", id = "feature:lockscreen:main" },
+    { title = "界面壁纸", id = "feature:wallpaper:main" },
     { title = "阅读行为", id = "reader_behavior" },
     { title = "划词与查询", id = "lookup" },
     { title = "划词菜单", id = "popup_menu" },
