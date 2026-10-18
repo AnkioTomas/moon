@@ -92,7 +92,7 @@ function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_t
         if status then
             -- 未下载优先，已下载显示阅读进度条。
             if book.downloaded == false then
-                opts.status_text = _("未下载")
+                opts.status_icon = "cloud_download"
             else
                 opts.status_pct = Book.isRead(book) and 100 or Book.pct(book)
             end

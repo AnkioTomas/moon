@@ -18,6 +18,7 @@ local CenterContainer = require("ui/widget/container/centercontainer")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -594,7 +595,7 @@ end
 
 --- 纯书籍卡片：封面，其下书名，作者仅在 opts.show_author 时出现。
 --- opts.show_title 缺省显示；opts.slot_w 缺省等于封面宽。其余 opts 交给封面（角标、更多、阴影）。
---- opts.status_row 为真时封面下多一行（Kobo 风格：左 opts.status_text 或 opts.status_pct 进度条，右 opts.status_more 的「更多」，可点）。
+--- opts.status_row 为真时封面下多一行（Kobo 风格：左 opts.status_icon 图标或 opts.status_pct 进度条，右 opts.status_more 的「更多」，可点）。
 ---@param plugin table|nil
 ---@param source table|nil
 ---@param book table|nil
@@ -623,12 +624,18 @@ function Book.widget(plugin, source, book, cw, ch, opts)
         local left_w = cw - icon_w
         local left
         if opts.status_pct then
-            left = CenterContainer:new{
-                dimen = Geom:new{ w = left_w, h = row_h },
-                require("ui.themes.widgets.progress"):new{ width = left_w - gap, percent = opts.status_pct },
+            local pct = Text.line("caption", string.format("%d%%", opts.status_pct), { face = authorFace() })
+            local bar_w = left_w - pct:getSize().w - gap * 2
+            left = HorizontalGroup:new{
+                CenterContainer:new{
+                    dimen = Geom:new{ w = bar_w, h = row_h },
+                    require("ui.themes.widgets.progress"):new{ width = bar_w, percent = opts.status_pct },
+                },
+                HorizontalSpan:new{ width = gap },
+                pct,
             }
         else
-            left = Text.line("caption", opts.status_text or "", { width = left_w, face = authorFace() })
+            left = Icon.widget{ name = opts.status_icon, size = size, color = Blitbuffer.Color8(t.color.ink), box = false }
         end
         local row = HorizontalGroup:new{ LeftContainer:new{ dimen = Geom:new{ w = left_w, h = row_h }, left } }
         if opts.status_more then
