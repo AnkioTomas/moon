@@ -93,6 +93,7 @@ end
 function Client.contentAsync(book_url, index, cb)
     return get("/getBookContent", { url = book_url, index = index }, 1, function(data, err)
         if type(data) ~= "string" or data == "" then
+            require("utils.log").warn("legado empty chapter", book_url, index, type(data), err)
             cb(nil, err or (_("阅读章节内容为空") .. " #" .. (index + 1)))
             return
         end
