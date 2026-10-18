@@ -21,7 +21,8 @@
     "ignoreDir": [
       ".git",
       "screenshots",
-      "koreader"
+      "koreader",
+      "book.koplugin/source/qidian/fock_wasm.lua"
     ],
     "checkThirdParty": "Disable"
   },
