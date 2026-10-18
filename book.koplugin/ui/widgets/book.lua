@@ -17,6 +17,8 @@ local Geom = require("ui/geometry")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local LeftContainer = require("ui/widget/container/leftcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Widget = require("ui/widget/widget")
@@ -543,21 +545,56 @@ function Book.cover(plugin, source, book, cw, ch, opts)
     return cover, cw, ch
 end
 
---- 封面下说明占用的高度：书名一行，show_author 再加一行。都不要时为 0。
----@param show_title boolean|nil 缺省显示
----@param show_author boolean|nil 缺省不显示
+--- 作者行字号：比书名小 1 号。
+---@return table
+local function authorFace()
+    return Theme.face("xx_smallinfofont", math.max(8, Theme.current().font.caption - 1))
+end
+
+--- 小字号（作者 / 状态行）一行的高度。
 ---@return number
-function Book.captionExtra(show_title, show_author)
-    local n = (show_title ~= false and 1 or 0) + (show_author and 1 or 0)
-    if n == 0 then return 0 end
-    local line = Text.line("caption", "M")
+local function smallLineH()
+    local line = Text.line("caption", "M", { face = authorFace() })
     local h = line:getSize().h
     line:free()
-    return n * (Theme.px(Theme.current().space.xs) + h)
+    return h
+end
+
+--- 作者行上方的缝：紧跟书名时只留 1px，否则（直接在封面或状态行下）留常规间距。
+---@param with_title boolean|nil
+---@return number
+local function authorGap(with_title)
+    return with_title and 0 or Theme.px(Theme.current().space.xs)
+end
+
+--- 作者行占用的高度（含上方的缝）。
+---@param with_title boolean|nil
+---@return number
+local function authorExtra(with_title)
+    return authorGap(with_title) + smallLineH()
+end
+
+--- 封面下说明占用的高度：状态行（show_status）、书名各一行，show_author 再加一行。都不要时为 0。
+---@param show_title boolean|nil 缺省显示
+---@param show_author boolean|nil 缺省不显示
+---@param show_status boolean|nil 缺省不显示（封面下方的进度 / 已读 / 详情按钮行）
+---@return number
+function Book.captionExtra(show_title, show_author, show_status)
+    local gap = Theme.px(Theme.current().space.xs)
+    local total = show_author and authorExtra(show_title ~= false) or 0
+    -- 状态行与作者同字号；状态行贴封面，书名紧跟状态行。
+    if show_status then total = total + Theme.px(2) + smallLineH() end
+    if show_title ~= false then
+        local line = Text.line("caption", "M")
+        total = total + (show_status and 0 or gap) + line:getSize().h
+        line:free()
+    end
+    return total
 end
 
 --- 纯书籍卡片：封面，其下书名，作者仅在 opts.show_author 时出现。
 --- opts.show_title 缺省显示；opts.slot_w 缺省等于封面宽。其余 opts 交给封面（角标、更多、阴影）。
+--- opts.status_row 为真时封面下多一行（Kobo 风格：左 opts.status_text 或 opts.status_pct 进度条，右 opts.status_more 的「更多」，可点）。
 ---@param plugin table|nil
 ---@param source table|nil
 ---@param book table|nil
@@ -579,8 +616,35 @@ function Book.widget(plugin, source, book, cw, ch, opts)
     }
     local t = Theme.current()
     local gap = Theme.px(t.space.xs)
+    if opts.status_row then
+        local row_h = smallLineH()
+        local size = t.font.caption - 1
+        local icon_w = opts.status_more and Theme.px(size) + gap or 0
+        local left_w = cw - icon_w
+        local left
+        if opts.status_pct then
+            left = CenterContainer:new{
+                dimen = Geom:new{ w = left_w, h = row_h },
+                require("ui.themes.widgets.progress"):new{ width = left_w - gap, percent = opts.status_pct },
+            }
+        else
+            left = Text.line("caption", opts.status_text or "", { width = left_w, face = authorFace() })
+        end
+        local row = HorizontalGroup:new{ LeftContainer:new{ dimen = Geom:new{ w = left_w, h = row_h }, left } }
+        if opts.status_more then
+            local icon = CenterContainer:new{
+                dimen = Geom:new{ w = icon_w, h = row_h },
+                Icon.widget{ name = "more_horiz", size = size, color = Blitbuffer.Color8(t.color.ink), box = false },
+            }
+            local tap = Book.tappable(icon_w, row_h, opts.status_more)
+            tap[1] = icon
+            row[#row + 1] = tap
+        end
+        kids[#kids + 1] = VerticalSpan:new{ width = Theme.px(2) }
+        kids[#kids + 1] = CenterContainer:new{ dimen = Geom:new{ w = slot_w, h = row_h }, row }
+    end
     if show_title then
-        kids[#kids + 1] = VerticalSpan:new{ width = gap }
+        kids[#kids + 1] = VerticalSpan:new{ width = opts.status_row and 0 or gap }
         kids[#kids + 1] = CenterContainer:new{
             dimen = Geom:new{ w = slot_w, h = Book.captionExtra(true, false) - gap },
             Text.line("caption", Book.title(book), { width = slot_w }),
@@ -588,11 +652,11 @@ function Book.widget(plugin, source, book, cw, ch, opts)
     end
     if show_author then
         local author = Book.author(book)
-        kids[#kids + 1] = VerticalSpan:new{ width = gap }
+        kids[#kids + 1] = VerticalSpan:new{ width = authorGap(show_title) }
         kids[#kids + 1] = CenterContainer:new{
-            dimen = Geom:new{ w = slot_w, h = Book.captionExtra(true, false) - gap },
+            dimen = Geom:new{ w = slot_w, h = authorExtra(show_title) - authorGap(show_title) },
             Text.line("caption", author ~= "" and author or _("未知作者"), {
-                width = slot_w, color = t.color.muted,
+                width = slot_w, color = t.color.muted, face = authorFace(),
             }),
         }
     end

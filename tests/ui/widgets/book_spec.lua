@@ -92,6 +92,7 @@ end
 package.preload["ui.themes"] = function()
     return {
         px = function(n) return n end,
+        face = function(name, size) return { name = name, size = size } end,
         current = function()
             return {
                 color = { ink = 1, page = 0, muted = 2, faint = 3 },

@@ -18,6 +18,7 @@ local _ = require("gettext")
 local Tree = require("desktop.pages.setting.tree")
 local Source = require("desktop.pages.setting.source")
 local Display = require("desktop.pages.setting.display")
+local LibrarySettings = require("desktop.pages.setting.library")
 local DesktopSettings = require("desktop.pages.setting.desktop")
 local TopbarSettings = require("desktop.pages.setting.topbar")
 local Language = require("desktop.pages.setting.language")
@@ -109,6 +110,14 @@ local function coreEntries(desktop)
             page = {
                 title = _("账号与登录"),
                 sections = function() return Source:configSections{ desktop = desktop, plugin = plugin } end,
+            },
+        },
+        {
+            group = "library", order = 30, id = "library_display", icon = "grid_view", title = _("图书馆显示"),
+            subtitle = _("封面风格、文字显示与点击动作"),
+            page = {
+                title = _("图书馆显示"),
+                sections = function() return {{ title = _("封面"), rows = LibrarySettings:rows(desktop) }} end,
             },
         },
         {

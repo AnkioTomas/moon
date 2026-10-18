@@ -162,7 +162,8 @@ end
 ---@return number cell_h
 local function gridMetrics(width, area_h)
     local cols = M.cols()
-    local extra = Book.captionExtra(M.showTitle())
+    local lib = CoverCell.libraryConf()
+    local extra = Book.captionExtra(M.showTitle(), lib.author, lib.kobo)
     -- 单行时宽度决定封面尺寸；用剩余高度压缩会留下无意义的横向空隙。
     -- 多行才需要受区域高度约束，避免整组网格溢出。
     local max_h = M.rows() == 1 and math.huge or CoverCell.gridCoverMaxH(area_h)
@@ -237,6 +238,7 @@ end
 ---@return number
 local function buildGrid(ctx, books, width, grid_h, page, on_open)
     local slot_w, cw, ch, cols, gap, row_gap, cell_h = gridMetrics(width, grid_h)
+    local lib = CoverCell.libraryConf()
     local rows = M.rows()
     local page_size = math.max(1, cols * rows)
     local pages = math.max(1, math.ceil(#books / page_size))
@@ -264,7 +266,7 @@ local function buildGrid(ctx, books, width, grid_h, page, on_open)
         if col > 0 then
             table.insert(row, HorizontalSpan:new{ width = gap })
         end
-        table.insert(row, (CoverCell.build(ctx, books[i], slot_w, cw, ch, on_open, true, M.showTitle())))
+        table.insert(row, (CoverCell.build(ctx, books[i], slot_w, cw, ch, on_open, true, M.showTitle(), lib.author, lib)))
         col = col + 1
         if col == cols then flushRow() end
     end

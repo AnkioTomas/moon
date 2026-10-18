@@ -86,6 +86,8 @@ package.preload["book.store"] = function()
 end
 local display = Kit.display
 display.library_sort = "recent_added"
+display.library_title, display.library_author = true, false
+display.library_style, display.library_tap = "kindle", "open"
 package.preload["utils.settings"] = function()
     return {
         get = function() return display end,
