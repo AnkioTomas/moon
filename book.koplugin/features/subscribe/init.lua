@@ -26,6 +26,23 @@ local MAX_PAGE = 3 * 1024 * 1024
 local MAX_IMAGE = 2 * 1024 * 1024
 --- RSS 自带正文去掉标签后超过这么多字节才当全文（约 500 个汉字）；否则当摘要、去抓原文。
 local FULL_TEXT = 1500
+--- 摘要结尾带这些就是被截断的（省略号 / 阅读全文 / WordPress 的 "appeared first on"），不管多长都去抓原文。
+local TRUNCATED = { "…$", "%.%.%.$", "%[%.%.%.%]$", "%[…%]$", "阅读全文$", "阅读更多$", "查看全文$", "查看更多$",
+    "[Rr]ead [Mm]ore$", "[Cc]ontinue [Rr]eading$", "[Rr]ead [Tt]he [Ff]ull", "appeared first on" }
+
+--- RSS 自带的正文是不是全文：够长且结尾没有被截断的迹象。
+---@param summary string|nil
+---@return boolean
+local function isFullText(summary)
+    local text = Text.trim(Text.stripHtml(summary or ""))
+    if #text < FULL_TEXT then return false end
+    local tail = text:sub(-120)
+    for _idx, pattern in ipairs(TRUNCATED) do
+        if tail:find(pattern) then return false end
+    end
+    return true
+end
+
 --- 打开订阅页时，超过这么久没刷新的源自动刷新（秒）。
 Subscribe.STALE = 3600
 
@@ -204,7 +221,8 @@ local function fetchArticle(link, images_dir, cb, fallback, public)
     local job, cancelled
     local function finish(html, meta, err)
         if cancelled then return end
-        if not html and fallback then html = fallback end
+        -- 抓到的页面不一定比 RSS 摘要完整（SSR 只吐一截、要登录 / 验证码）：比摘要还短就用摘要。
+        if fallback and (not html or #Text.stripHtml(html) < #Text.stripHtml(fallback)) then html = fallback end
         if not html then return cb(nil, err or _("正文解析失败")) end
         job = finishPage(html, link, images_dir, function(out) cb(out, nil, meta) end)
     end
@@ -235,7 +253,7 @@ Subscribe.providers = {
         content = function(feed, item, images_dir, cb)
             -- 自带全文直接用；只有摘要（或很短）就抓原文跑 Readability，抓不到再用摘要。
             local summary = SubDB.summary(feed.id, item.guid)
-            if summary and (#Text.stripHtml(summary) >= FULL_TEXT or item.link == "") then
+            if summary and (isFullText(summary) or item.link == "") then
                 return finishPage(summary, item.link ~= "" and item.link or feed.url, images_dir, cb)
             end
             if item.link == "" then return cb(nil, _("条目没有正文")) end

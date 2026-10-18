@@ -3,7 +3,7 @@
 
 全进程只有一个刷新任务（固定 key）：在跑或排队时再要刷新的源并进去（同一个源不重复），不另起并发；
 单个源（点某个源刷新 / 网页端单源刷新）插到队首，下一个就刷它，不用等前面整轮刷完。
-逐个源串行拉条目列表（只拉列表，不下载正文），内存里只有待刷新的行。手动刷新 follow 时弹前台进度窗（可转后台），
+最多 CONCURRENCY 个源并发拉条目列表（只拉列表，不下载正文），内存里只有待刷新的行。手动刷新 follow 时弹前台进度窗（可转后台），
 自动刷新（打开某个过期的源时只刷它）静默入队、在任务列表里看进度。每个源刷完、整轮结束都通知 watch 的监听者（订阅页重画）。
 队列满时退回直接跑。
 
@@ -21,6 +21,9 @@ local _ = require("gettext")
 local Refresh = {}
 
 Refresh.KEY = "sync\0subscribe"
+
+--- 同时在飞的源数（各源多在不同主机，串行时总耗时 = 各源延迟之和）。
+Refresh.CONCURRENCY = 4
 
 ---@type { feed: table, more: boolean|nil, on_feed: function|nil }[]|nil 本轮待刷新；nil = 没有在跑
 local queue
@@ -121,40 +124,51 @@ local function promptMpAuth()
 end
 
 local function run(report, finish)
-    local cancelled, job, failed, current = false, nil, nil, nil
+    local cancelled, failed = false, nil
     local mp_auth = false
-    local function step()
-        if cancelled then return end
-        local entry = queue and table.remove(queue, 1)
-        if not entry then
-            queue, status, done_count, total = nil, nil, 0, 0
-            notify(true)
-            if mp_auth then promptMpAuth() end
-            return finish({ ok = failed == nil, err = failed })
-        end
-        current = entry
+    ---@type table<table, table|boolean> 在飞的条目 → 取消句柄
+    local active, running = {}, 0
+    local pump
+
+    local function launch(entry)
         local feed = entry.feed
         status = T(_("正在刷新 %1…"), feed.title)
         report(status, done_count, total)
         notify(false)
-        job = require("features.subscribe").refresh(feed, entry.more, function(added, err)
+        running = running + 1
+        active[entry] = true
+        local job = require("features.subscribe").refresh(feed, entry.more, function(added, err)
             if cancelled then return end
-            job, current = nil, nil
+            active[entry] = nil
+            running = running - 1
             done_count = done_count + 1
-            if err then failed = tostring(feed.title) .. ": " .. tostring(err) end
+            if err then failed = failed or (tostring(feed.title) .. ": " .. tostring(err)) end
             if isMpAuth(err) then mp_auth = true end
             if entry.on_feed then Guard.call("subscribe.refresh on_feed", entry.on_feed, feed, added, err) end
-            require("ui/uimanager"):nextTick(step)
+            require("ui/uimanager"):nextTick(pump)
         end)
+        if active[entry] then active[entry] = job or true end
     end
-    step()
+
+    pump = function()
+        if cancelled then return end
+        while queue and #queue > 0 and running < Refresh.CONCURRENCY do launch(table.remove(queue, 1)) end
+        if running > 0 then return end
+        queue, status, done_count, total = nil, nil, 0, 0
+        notify(true)
+        if mp_auth then promptMpAuth() end
+        finish({ ok = failed == nil, err = failed })
+    end
+
+    pump()
     return {
         cancel = function()
             cancelled = true
-            if job and job.cancel then job:cancel() end
             local rest = queue or {}
-            if current then table.insert(rest, 1, current) end
-            current = nil
+            for entry, job in pairs(active) do
+                if type(job) == "table" and job.cancel then job:cancel() end
+                table.insert(rest, 1, entry)
+            end
             queue, status, done_count, total = nil, nil, 0, 0
             for _idx, e in ipairs(rest) do
                 if e.on_feed then Guard.call("subscribe.refresh on_feed", e.on_feed, e.feed, nil, _("已取消")) end
