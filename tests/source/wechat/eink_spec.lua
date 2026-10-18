@@ -60,6 +60,14 @@ do
     Assert.eq(state.cfg.eink.device_id, id)
 end
 
+-- 旧版 "eink…" 设备 ID 登录时换成数字 ID（手机渠道配它续期会被风控）。
+do
+    reset({ eink = { device_id = "eink3346912251234" } })
+    local id = Eink.deviceId()
+    Assert.matches(id, "^[1-9]%d+$")
+    Assert.eq(state.cfg.eink.device_id, id)
+end
+
 -- 签名 = sha256(毫秒时间戳 .. deviceId .. random)，时间戳不能出现科学计数法。
 do
     Assert.eq(Eink.signature(1790000000123, "dev", 7), sha256("1790000000123dev7"))
@@ -67,7 +75,7 @@ end
 
 -- 扫码换令牌：请求体字段与签名自洽，令牌落 wr_vid/wr_skey，续期令牌落 cfg.eink。
 do
-    reset({ eink = { device_id = "dev-9" } })
+    reset({ eink = { device_id = "99" } })
     state.responder = function()
         return reply(200, { vid = 1001, accessToken = "at", refreshToken = "rt" })
     end
@@ -83,22 +91,22 @@ do
     Assert.matches(req.headers["User-Agent"], "WeRead/10.2.2")
     local body = JsonStub.decode(req.body)
     Assert.eq(body.code, "code-1")
-    Assert.eq(body.deviceId, "dev-9")
+    Assert.eq(body.deviceId, "99")
     Assert.eq(body.deviceType, 1)
     Assert.eq(body.isFromQrcode, 1)
-    Assert.eq(body.signature, Eink.signature(body.timestamp, "dev-9", body.random))
+    Assert.eq(body.signature, Eink.signature(body.timestamp, "99", body.random))
     Assert.eq(user.user_id, "1001")
     Assert.eq(state.cfg.wr_skey, "at")
     Assert.eq(state.cfg.wr_vid, "1001")
     Assert.eq(state.cfg.user_id, "1001")
     Assert.eq(state.cfg.eink.refresh_token, "rt")
-    Assert.eq(state.cfg.eink.device_id, "dev-9")
+    Assert.eq(state.cfg.eink.device_id, "99")
     Assert.eq(Eink.credentials().access_token, "at")
 end
 
 -- 登录回包缺令牌按失败，不落盘。
 do
-    reset({ eink = { device_id = "dev-9" } })
+    reset({ eink = { device_id = "99" } })
     state.responder = function() return reply(200, { errCode = -1, errMsg = "bad" }) end
     local user, err
     Eink.completeQrLoginAsync({ wx_code = "c" }, function(u, e) user, err = u, e end)
@@ -166,7 +174,7 @@ end
 
 -- 扫码登录回包缺 refreshToken 仍按失败。
 do
-    reset({ eink = { device_id = "dev-9" } })
+    reset({ eink = { device_id = "99" } })
     state.responder = function() return reply(200, { vid = 1, accessToken = "at" }) end
     local user
     Eink.completeQrLoginAsync({ wx_code = "c" }, function(u) user = u end)

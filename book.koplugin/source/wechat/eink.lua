@@ -88,10 +88,11 @@ function Eink.newDeviceId()
 end
 
 --- 已落盘设备 ID；没有就生成并落盘。重新登录沿用同一设备，避免在账号里堆设备。
+--- 墨水屏时代的 "eink…" 前缀 ID 配手机渠道，续期会被风控回 -2041，登录时换成数字 ID。
 ---@return string
 function Eink.deviceId()
     local eink = Eink.config().eink or {}
-    if type(eink.device_id) == "string" and eink.device_id ~= "" then
+    if type(eink.device_id) == "string" and eink.device_id:match("^%d+$") then
         return eink.device_id
     end
     eink.device_id = Eink.newDeviceId()
