@@ -76,6 +76,8 @@ local function walkAsync(root, visit, done, protected)
     return { cancel = function() cancelled = true end }
 end
 
+Cache.walkAsync = walkAsync
+
 --- Cooperative cache size scan. Never walk the cache tree during widget build.
 --- 缓存目录字节数之外再计入 sqlite 库文件本身；无法 stat 的项直接跳过。
 ---@param cb fun(bytes: number)

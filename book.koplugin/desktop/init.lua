@@ -64,6 +64,8 @@ local Tabbar = require("ui.themes.widgets.tabbar")
 ---@field layers table|nil 三层 OverlapGroup
 ---@field detail BookDetailPage|nil
 ---@field settings_overlay BookSettingsOverlay|nil
+---@field storage_usage { at: integer, list: table[], total: number }|nil 存储空间页的统计缓存（features/storage）
+---@field storage_job { cancel: fun() }|nil
 ---@field _tabs table[]
 ---@field _shell string|nil 外壳签名：屏幕尺寸 / 主题 / 缩放
 ---@field _books_sync table<string, { cancel: { cancel: fun(self) }|nil }> 源 id → 在飞书架同步（desktop.sync）
