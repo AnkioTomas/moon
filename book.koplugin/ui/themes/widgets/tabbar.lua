@@ -65,7 +65,8 @@ function Tabbar.widget(opts)
         local cell = VerticalGroup:new{
             align = "center",
             Box:new{
-                style = { bg = active and sel.bg or t.color.page },
+                -- 选中格多带一个 border 键：壁纸只摘「只有 bg」的页底色，选中底色不能被摘掉。
+                style = active and { bg = sel.bg, border = 0 } or { bg = t.color.page },
                 width = cell_w,
                 height = cell_h - mark,
                 label,
