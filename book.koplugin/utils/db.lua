@@ -221,6 +221,8 @@ function DB.open()
     conn:exec("PRAGMA busy_timeout=5000;")
     conn:exec("PRAGMA synchronous=NORMAL;")
     conn:exec("PRAGMA cache_size=-512;")
+    -- Kindle 的 /tmp 是小内存盘，排序 / 子查询的临时表落盘会报 database or disk is full
+    conn:exec("PRAGMA temp_store=MEMORY;")
     local schema_ok, schema_err = ensureSchema()
     if not schema_ok then
         logger.warn("book.db schema init failed", schema_err)
