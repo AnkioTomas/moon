@@ -34,8 +34,9 @@ end
 --- 按本轮扫盘结果收敛：有变化的行写入，盘上没了的删掉；没变化不写。
 ---@param old LocalScanIndex 扫盘前 all() 的结果
 ---@param files { path: string, fp: string, md5: string|nil, cover_tried: boolean|nil }[]
+---@param partial boolean|nil 扫盘中途的一批：只写有变化的行并同步进 old，不删盘上没了的（后面的批次还没到）
 ---@return boolean
-function ScanDB.save(old, files)
+function ScanDB.save(old, files, partial)
     return DB.transaction(function()
         local seen = {}
         for _idx, f in ipairs(files) do
@@ -48,7 +49,9 @@ function ScanDB.save(old, files)
             ) then
                 return nil
             end
+            old[f.path] = { fp = f.fp, md5 = f.md5, cover = cover }
         end
+        if partial then return true end
         for path in pairs(old) do
             if not seen[path] and not DB.exec("DELETE FROM local_scan WHERE path=?;", path) then return nil end
         end

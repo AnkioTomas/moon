@@ -256,6 +256,8 @@ function Scan.scanAsync(self, cb, report, retry_covers)
             on_progress = function(value)
                 if type(value) == "table" and value.files then
                     for _idx, f in ipairs(value.files) do parsed[#parsed + 1] = f end
+                    -- 指纹 / md5 逐批落盘：几千本整轮要几十分钟，取消或子进程崩溃不能让已算的 md5 白费
+                    ScanDB.save(index, value.files, true)
                     return
                 end
                 if type(value) == "table" then
