@@ -28,18 +28,24 @@ package.loaded["workers.job"] = {
 
 local Usage = require("features.storage.usage")
 
-Assert.eq(Usage.bucket("book.sqlite3-wal"), "database")
-Assert.eq(Usage.bucket("cache/local/image/a.png"), "cache/local/image")
-Assert.eq(Usage.bucket("cache/local/other.bin"), "cache/local")
-Assert.eq(Usage.bucket("cache/online/w.json"), "cache/online")
-Assert.eq(Usage.bucket("backups/patches/x/f.lua"), "backups")
-Assert.eq(Usage.label("cache/local/image"), "local 封面与图片")
+local function cls(rel) return { Usage.classify(rel) } end
+Assert.eq(cls("book.sqlite3-wal")[1], "database")
+Assert.eq(cls("settings/ui.lua")[1], "database")
+Assert.eq(cls("cache/local/image/a.png")[1], "image")
+Assert.eq(cls("cache/image/a.png")[1], "image")
+Assert.eq(cls("cache/local/other.bin")[1], "cache")
+Assert.eq(cls("cache/online/w.json")[1], "online")
+Assert.eq(cls("backups/patches/x/f.lua")[1], "other")
+Assert.eq(cls("dictionary-wubi.sqlite3")[1], "dict")
+local cat, source, slug = Usage.classify("cache/local/book/x/1.html")
+Assert.eq(cat, "book")
+Assert.eq(source, "local")
+Assert.eq(slug, "x")
 
-local got, got_total
-Usage.measureAsync(function(list, total) got, got_total = list, total end)
-Assert.eq(got_total, 195)
-Assert.eq(got[1][1], "cache/local/image")
-Assert.eq(got[1][2], 150)
-Assert.eq(got[2][1], "database")
-Assert.eq(got[2][2], 35)
-Assert.len(got, 5)
+local got
+Usage.measureAsync(function(result) got = result end)
+Assert.eq(got.total, 195)
+Assert.eq(got.cats.image, 150)
+Assert.eq(got.cats.database, 35)
+Assert.eq(got.cats.book, 7)
+Assert.eq(got.books["local"].x, 7)

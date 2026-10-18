@@ -1,7 +1,8 @@
 --[[--
-月读数据目录（$DATA/.moon）的占用统计：按用途归类，供设置页「存储空间」列出。
+月读数据目录（$DATA/.moon）的占用统计：按目录归类，供设置页「存储空间」展示。
 
-遍历走 `book.cache.walkAsync`（分 tick，不卡 UI）；归类只看相对路径，是纯函数。
+子进程里走 `book.cache.walkFiles` 遍历一次，按 `Usage.classify` 归类并累加；书籍内容再细到「源 / 书目录」。
+归类只看相对路径，是纯函数；不碰数据库（标题由主进程按目录名对回书库）。
 
 @module koplugin.book.features.storage.usage
 --]]
@@ -9,77 +10,71 @@
 require("l10n").apply()
 
 local _ = require("gettext")
-local T = require("ffi/util").template
 
 local Usage = {}
 
---- 相对 .moon 的路径 → 归类键。缓存按「源 / 子目录」细分（封面、书籍文件），其余按顶层名。
----@param rel string
----@return string
-function Usage.bucket(rel)
-    local top, second, third = rel:match("^([^/]+)/?([^/]*)/?([^/]*)")
-    if top == "cache" then
-        if second == "" then return "cache" end
-        if second == "online" or second == "image" then return "cache/" .. second end
-        if third == "image" or third == "book" then return "cache/" .. second .. "/" .. third end
-        return "cache/" .. second
-    end
-    if top:match("^book%.sqlite3") then return "database" end
-    if top:match("^book%.log") then return "log" end
-    if top:match("^dictionary") then return "ime" end
-    return top
-end
-
-local NAMES = {
-    database = _("书库数据库"),
-    log = _("运行日志"),
-    ime = _("输入法词库"),
-    backups = _("补丁备份"),
-    screensaver = _("锁屏资源"),
-    wallpapers = _("壁纸"),
-    settings = _("设置"),
-    ["cache/online"] = _("在线数据缓存"),
-    ["cache/image"] = _("网络图片缓存"),
+--- 展示顺序之外的元信息；`clearable` = 属于 .moon/cache，可经「清理缓存」安全重建。
+---@type { id: string, name: string, clearable: boolean }[]
+Usage.CATEGORIES = {
+    { id = "book", name = _("书籍内容"), clearable = true },
+    { id = "image", name = _("封面与图片"), clearable = true },
+    { id = "online", name = _("在线数据"), clearable = true },
+    { id = "cache", name = _("其它缓存"), clearable = true },
+    { id = "dict", name = _("输入法词库"), clearable = false },
+    { id = "fonts", name = _("字体"), clearable = false },
+    { id = "database", name = _("书库与设置"), clearable = false },
+    { id = "log", name = _("运行日志"), clearable = false },
+    { id = "other", name = _("其它"), clearable = false },
 }
 
---- 归类键 → 显示名；没登记的缓存按源名、其余原样显示键。
----@param key string
----@return string
-function Usage.label(key)
-    if NAMES[key] then return NAMES[key] end
-    local src, kind = key:match("^cache/([^/]+)/?(.*)$")
-    if not src then return key end
-    if kind == "image" then return T(_("%1 封面与图片"), src) end
-    if kind == "book" then return T(_("%1 书籍与章节文件"), src) end
-    return T(_("%1 其它缓存"), src)
+--- 相对 .moon 的路径 → 类别 id；书籍内容另给 源 id 与书目录名（slug）。
+---@param rel string
+---@return string cat
+---@return string|nil source
+---@return string|nil slug
+function Usage.classify(rel)
+    local top, second, third, fourth = rel:match("^([^/]+)/?([^/]*)/?([^/]*)/?([^/]*)")
+    if top == "cache" then
+        if second == "online" then return "online" end
+        if second == "image" or third == "image" then return "image" end
+        if third == "book" then return "book", second, fourth ~= "" and fourth or nil end
+        return "cache"
+    end
+    if top:match("^book%.sqlite3") or top == "settings" then return "database" end
+    if top:match("^book%.log") then return "log" end
+    if top:match("^dictionary") then return "dict" end
+    if top == "fonts" then return "fonts" end
+    return "other"
 end
 
---- 统计（子进程里遍历，不占主线程）；cb 收 `{ { key, bytes }... 按体积降序 }, 合计`，失败时记日志并给空结果。
----@param cb fun(list: { [1]: string, [2]: number }[], total: number)
+--- 统计（子进程里遍历，不占主线程）。
+--- cb 收 `{ cats = { [类别] = 字节 }, books = { [源] = { [slug] = 字节 } }, total }`；失败时记日志并回调 nil。
+---@param cb fun(result: nil|{ cats: table<string, number>, books: table<string, table<string, number>>, total: number })
 ---@return { cancel: fun() }
 function Usage.measureAsync(cb)
     local root = require("utils.paths").root()
     return require("workers.job").run(function()
-        local sizes, total = {}, 0
+        local cats, books, total = {}, {}, 0
         require("book.cache").walkFiles(root, function(path, attr)
-            local key = Usage.bucket(path:sub(#root + 2))
+            local rel = path:sub(#root + 2)
+            if rel:sub(1, 13) == "cache/.trash/" then return end -- 删书后待后台清除的残留，不算占用
             local size = tonumber(attr.size) or 0
-            sizes[key] = (sizes[key] or 0) + size
+            local cat, source, slug = Usage.classify(rel)
+            cats[cat] = (cats[cat] or 0) + size
+            if slug then
+                local per = books[source] or {}
+                books[source] = per
+                per[slug] = (per[slug] or 0) + size
+            end
             total = total + size
         end)
-        local list = {}
-        for key, bytes in pairs(sizes) do list[#list + 1] = { key, bytes } end
-        table.sort(list, function(a, b)
-            if a[2] ~= b[2] then return a[2] > b[2] end
-            return a[1] < b[1]
-        end)
-        return { list = list, total = total }
+        return { cats = cats, books = books, total = total }
     end, {
         name = "storage.usage", kind = "light",
-        on_done = function(result) cb(result.list, result.total) end,
+        on_done = cb,
         on_failed = function(err)
             require("utils.log").warn("book storage usage failed", err)
-            cb({}, 0)
+            cb(nil)
         end,
     })
 end

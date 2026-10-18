@@ -187,7 +187,6 @@ package.preload["desktop.pages.setting.maintenance"] = function()
         end
     end
     return {
-        cacheRow = function() return row("清理缓存") end,
         clearStatsRow = function() return row("清除当前源统计") end,
         importKoreaderStatsRow = function() return row("导入 KOReader 统计") end,
         debugLogRow = function() return row("调试日志") end,
@@ -217,7 +216,7 @@ require("features").registerConventions()
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 36)
+Assert.len(built_rows, 35)
 Assert.eq(table.concat(section_titles, ","), "书库,订阅,桌面,阅读,系统,维护")
 -- 订阅的开关直接放在根页「订阅」组，不另开子页。
 local sub_rows = {}
@@ -266,7 +265,7 @@ end
 Assert.eq(nav, #expected + 1)
 
 for _, title in ipairs({
-    "语言", "清理缓存", "调试日志", "自动检查更新", "检查更新", "关于", "关闭桌面",
+    "语言", "调试日志", "自动检查更新", "检查更新", "关于", "关闭桌面",
 }) do
     local found = false
     for _, row in ipairs(built_rows) do
@@ -294,7 +293,7 @@ local maintenance = {}
 for _, row in ipairs(built_rows) do
     if row.kind == "action" or row.kind == "toggle" or row.toggle ~= nil then maintenance[#maintenance + 1] = row.title end
 end
-Assert.eq(table.concat(maintenance, ","), "启用订阅,下载文章图片,清理缓存,清除当前源统计,导入 KOReader 统计,自动检查更新,检查更新,调试日志,关于,关闭桌面")
+Assert.eq(table.concat(maintenance, ","), "启用订阅,下载文章图片,清除当前源统计,导入 KOReader 统计,自动检查更新,检查更新,调试日志,关于,关闭桌面")
 
 _G.G_reader_settings = previous_settings
 

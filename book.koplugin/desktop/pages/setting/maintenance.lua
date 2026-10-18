@@ -64,63 +64,33 @@ local function showAbout()
     Sheet:new{ title = _("关于"), items = items }:show()
 end
 
---- 造「清理缓存」设置行的构造器。
---- 缓存体积异步测量，结果缓存在设置页实例上，首次显示「计算中…」并在算完后重建设置页；
---- 清理会连带作废首页与书库状态，因为封面等资源就在 cache 里。
+--- 清空 .moon/cache：库先清、文件后删，成功后重扫书架并刷新桌面；同一时刻只跑一个。
 ---@param desktop table 桌面实例
----@return fun(iw: number): table
-function Maintenance:cacheRow(desktop)
+---@param done fun()|nil 成功清理后回调（调用方重新测量体积）
+function Maintenance:clearCache(desktop, done)
     local page = desktop.settings
-    --- 异步量一次缓存体积，结果写回设置页实例并重建设置页刷新状态文本。
-    local function measure()
-        if page.cache_size_job then return end
-        page.cache_size_label = nil
-        page.cache_size_job = Cache.sizeBytesAsync(function(bytes)
-            page.cache_size_job = nil
-            if desktop.closed then return end
-            page.cache_size_label = bytes > 0
-                and (require("util").getFriendlySize(bytes) or tostring(bytes)) or "0"
-            if desktop.tab == "settings" then desktop:updateView() end
-        end)
-    end
-    return function(iw)
-        local cache_size = page.cache_size_label or _("计算中…")
-        if page.cache_size_label == nil then measure() end
-        return Row.widget({
-            width = iw,
-            chevron = false,
-            kind = "action", icon = "delete", title = _("清理缓存"), status = cache_size, status_on = true,
-            callback = function()
-                Confirm:new{
-                    text = T(_("删除 .moon/cache（%1）？"), cache_size), ok_text = _("清理"),
-                    ok_callback = function()
-                        if page.cache_clear_job then return end
-                        Toast:new{ text = _("正在清理缓存…"), timeout = 1 }:show()
-                        local running = true
-                        local job = Cache.clearAsync(function(ok)
-                            running = false
-                            page.cache_clear_job = nil
-                            if desktop.closed then return end
-                            if ok then
-                                -- 边车（.sdr）会保留，体积不为零，下面重新量一次而不是直接写 0。
-                                -- 后台重扫一次，让本地书封面自动重新生成（扫盘在子进程里跑，不阻塞）；
-                                -- 先解除本地源 60 秒自动同步节流，否则刚同步过就会被跳过。
-                                if desktop.source then desktop.source._auto_sync_at = nil end
-                                require("desktop.sync").open(desktop)
-                                desktop:onEvent("home_refresh")
-                                desktop:onEvent("shelf_changed")
-                                desktop:updateView()
-                                measure()
-                            end
-                            Toast:new{ text = ok and _("已清理") or _("清理失败"), timeout = 2 }:show()
-                        end)
-                        -- 库清理失败时 clearAsync 同步回调，不能留下已结束的句柄挡住重试。
-                        if running then page.cache_clear_job = job end
-                    end,
-                }:show()
-            end,
-        })
-    end
+    if page.cache_clear_job then return end
+    Toast:new{ text = _("正在清理缓存…"), timeout = 1 }:show()
+    local running = true
+    local job = Cache.clearAsync(function(ok)
+        running = false
+        page.cache_clear_job = nil
+        if desktop.closed then return end
+        if ok then
+            -- 边车（.sdr）会保留，体积不为零，调用方重新量一次而不是直接写 0。
+            -- 后台重扫一次，让本地书封面自动重新生成（扫盘在子进程里跑，不阻塞）；
+            -- 先解除本地源 60 秒自动同步节流，否则刚同步过就会被跳过。
+            if desktop.source then desktop.source._auto_sync_at = nil end
+            require("desktop.sync").open(desktop)
+            desktop:onEvent("home_refresh")
+            desktop:onEvent("shelf_changed")
+            desktop:updateView()
+            if done then done() end
+        end
+        Toast:new{ text = ok and _("已清理") or _("清理失败"), timeout = 2 }:show()
+    end)
+    -- 库清理失败时 clearAsync 同步回调，不能留下已结束的句柄挡住重试。
+    if running then page.cache_clear_job = job end
 end
 
 --- 清除当前源的本地阅读统计；不向远端发送删除请求。
