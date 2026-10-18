@@ -98,7 +98,7 @@ local initial_menu = Panel.menuActions()
 Assert.eq(initial_menu[1].id, "night")
 Assert.eq(initial_menu[1].icon, "dark_mode")
 Assert.eq(initial_menu[2].id, "wifi")
-Assert.eq(initial_menu[2].icon, "signal_wifi_4_bar")
+Assert.eq(initial_menu[2].icon, "wifi")
 
 -- 滑杆按设备能力生成，并携带显示百分比。
 local sliders = Panel.sliders()

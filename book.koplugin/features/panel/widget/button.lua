@@ -2,7 +2,7 @@
 
   bare    无框图标，开着的项垫 primary 底（paper）
   circle  圆形底座，文字在圆外（soft）
-  block   方块磁贴，圆角 / 阴影取 card，文字在内（bold）
+  block   灰色胶囊磁贴，文字在内（bold）
 
 @module koplugin.book.features.panel.widget.button
 --]]
@@ -49,25 +49,22 @@ local function surface(t, v, radius)
     }
 end
 
---- 方块磁贴：图标和文字都在块里，阴影从宽高里扣，网格不会被撑宽。
+--- 灰色胶囊磁贴：未选浅灰 0xEE、选中中灰 0xC4，图标和文字都在里面。
 ---@param self BookQuickPanelActionButton
 ---@param t table
----@param v table
+---@param active boolean
 ---@return table
-local function block(self, t, v)
-    local style = surface(t, v, t.card.radius)
-    style.shadow, style.shadow_color = t.card.shadow, t.card.shadow_color
-    local shadow = Theme.px(t.card.shadow)
+local function block(self, t, active)
     return Box:new{
-        style = style,
-        width = self.width - shadow,
-        height = self.height - shadow,
+        style = { bg = active and 0xC4 or 0xEE, radius = 999 },
+        width = self.width,
+        height = self.height,
         Icon.label{
             name = self.icon,
             text = self.title,
             direction = "column",
             size = t.control.icon,
-            color = Blitbuffer.Color8(v.ink),
+            color = Blitbuffer.Color8(t.color.ink),
             font_size = t.font.caption,
             max_width = math.max(Theme.px(36), self.width - Theme.px(t.space.sm)),
             gap = Theme.px(2),
@@ -119,7 +116,7 @@ function ActionButton:init()
     local v = active and t.button.primary or t.button.normal
     local shape = t.tile.shape
     if shape == "block" then
-        self[1] = block(self, t, v)
+        self[1] = block(self, t, active)
     else
         self[1] = badge(self, t, v, active, shape)
     end
