@@ -6,7 +6,7 @@
 锁屏资源、字体、输入法词库。不含：book.log*、cache/（可重新下载）、backups/（补丁原文件，与 KOReader 版本绑定）、
 sqlite 的 -wal / -shm（下载前主进程已 checkpoint，只带主库文件）。
 
-恢复先整包解到 .moon/restore.part，校验通过（带 MARKER、路径安全）后逐个顶层条目整体替换，失败不动现有数据。
+恢复先整包解到 .moon/restore.part，校验通过（带 MARKER、路径安全）后逐个顶层条目整体替换（fonts 例外：主进程 mmap 着字体，只补缺不删，见 mergeFonts），失败不动现有数据。
 文件系统部分跑在 IO 子进程里；关库、重载配置与重启由调用方（init.lua）在主进程完成。
 
 ffi/archiver 的 Writer / Reader 与 lfs 由调用方传入，离线测试可替身。
@@ -117,6 +117,30 @@ local function safe(path)
         and path ~= ".." and not path:match("^%.%./") and not path:match("/%.%./") and not path:match("/%.%.$")
 end
 
+--- 字体由主进程的 FreeType / CRE 一直 mmap 着，整目录删掉再换会让主进程在下一次绘制时 SIGBUS
+--- （KOReader 在恢复中途崩溃）。字体按 id 命名、内容固定：已有的原样保留，只补备份里多出来的。
+---@param lfs table
+---@param from string
+---@param to string
+local function mergeFonts(lfs, from, to)
+    for file in lfs.dir(from) do
+        if file ~= "." and file ~= ".." and not lfs.attributes(to .. "/" .. file, "mode") then
+            os.rename(from .. "/" .. file, to .. "/" .. file)
+        end
+    end
+end
+
+--- 整体替换一个顶层条目。
+---@return boolean|nil moved, string|nil err
+local function replace(lfs, from, dest, name)
+    rmtree(lfs, dest)
+    if name:match("%.sqlite3$") then -- 旧库的 WAL 套不到新库上
+        os.remove(dest .. "-wal")
+        os.remove(dest .. "-shm")
+    end
+    return os.rename(from, dest)
+end
+
 --- 解包并替换 .moon 对应条目。
 ---@param archive string
 ---@param root string
@@ -167,15 +191,14 @@ function Backup.restore(archive, root, Reader, lfs)
     end
     for _idx, name in ipairs(names) do
         local dest = root .. "/" .. name
-        rmtree(lfs, dest)
-        if name:match("%.sqlite3$") then -- 旧库的 WAL 套不到新库上
-            os.remove(dest .. "-wal")
-            os.remove(dest .. "-shm")
-        end
-        local moved, err = os.rename(staging .. "/" .. name, dest)
-        if not moved then
-            rmtree(lfs, staging)
-            return nil, err
+        if name == "fonts" and lfs.attributes(dest, "mode") == "directory" then
+            mergeFonts(lfs, staging .. "/" .. name, dest)
+        else
+            local moved, err = replace(lfs, staging .. "/" .. name, dest, name)
+            if not moved then
+                rmtree(lfs, staging)
+                return nil, err
+            end
         end
     end
     rmtree(lfs, staging)

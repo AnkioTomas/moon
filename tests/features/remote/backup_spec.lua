@@ -137,6 +137,18 @@ Assert.is_nil(read(root .. "/cache/evil.txt"), "备份里的缓存条目被忽�
 Assert.is_nil(lfs.attributes(root .. "/" .. Backup.STAGING), "暂存目录清掉")
 Assert.is_nil(read(root .. "/" .. Backup.MARKER))
 
+-- 字体被主进程 mmap：已有文件不删不换，只补缺
+seed()
+write(root .. "/fonts/a.ttf", "MAPPED")
+Backup.restore("ignored.zip", root, reader({
+    { path = Backup.MARKER, text = "moon-backup 1" },
+    { path = "fonts", mode = "directory" },
+    { path = "fonts/a.ttf", text = "FROM-BACKUP" },
+    { path = "fonts/b.ttf", text = "NEW-FONT" },
+}), lfs)
+Assert.eq(read(root .. "/fonts/a.ttf"), "MAPPED", "已有字体不能被删或换")
+Assert.eq(read(root .. "/fonts/b.ttf"), "NEW-FONT", "备份里多出来的字体补上")
+
 -- 非法备份：现有数据原封不动
 local function rejected(entries, expect)
     seed()
