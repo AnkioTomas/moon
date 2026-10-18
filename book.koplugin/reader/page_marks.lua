@@ -17,6 +17,7 @@ local Guard = require("ui.guard")
 ---@class PageMark
 ---@field boxes table[] 屏幕框（每行一段）
 ---@field solid boolean|nil 实线下划线（缺省虚线）
+---@field badge string|nil 有则不画下划线，在末行文字右侧画带这行字的气泡（只用最后一个框），点按气泡
 ---@field tap fun() 点按回调
 
 --- 标记图层：每帧调用 ``marks``，返回当前屏上标记（无则空表）。
@@ -198,6 +199,42 @@ local function underline(bb, rect, solid)
     end
 end
 
+--- 在末行文字末尾画对话气泡（圆角框 + 朝下的小尖角指向文字末），返回点按矩形；超出右边缘就整体左移。
+---@param bb any Blitbuffer
+---@param box table 末行屏幕框
+---@param text string
+---@return table rect
+local function bubble(bb, box, text)
+    local Blitbuffer = require("ffi/blitbuffer")
+    local dark, white = Blitbuffer.COLOR_DARK_GRAY, Blitbuffer.COLOR_WHITE
+    local label = require("ui/widget/textwidget"):new{
+        text = text,
+        face = require("ui/font"):getFace("cfont", math.max(7, math.floor(box.h * 0.26))),
+        fgcolor = dark,
+    }
+    local size = label:getSize()
+    local pad = 5
+    local w, h = size.w + pad * 2, size.h
+    local tail = 3
+    local radius = math.floor(h / 4)
+    -- 紧跟段末文字，垂直居中，只描边；尖角在左下
+    local x = math.min(box.x + box.w + 4, bb:getWidth() - w - 2)
+    local y = box.y + math.floor((box.h - h) / 2) - 1
+    bb:paintRoundedRect(x, y, w, h, white, radius)
+    bb:paintBorder(x, y, w, h, 1, dark, radius)
+    -- 尖角：从底边向下收成一点，顶行擦掉底边的一段再补两条斜边
+    local tx = x + radius + tail
+    for r = 0, tail do
+        local half, row = tail - r, y + h - 1 + r
+        if half >= 1 then bb:paintRect(tx - half + 1, row, 2 * half - 1, 1, white) end
+        bb:paintRect(tx - half, row, 1, 1, dark)
+        bb:paintRect(tx + half, row, 1, 1, dark)
+    end
+    label:paintTo(bb, x + pad, y)
+    label:free()
+    return { x = x, y = y, w = w, h = h + tail }
+end
+
 --- 画一个图层：逐条占位，画剩余段，记入本帧已画列表。
 ---@param entry { layer: PageMarkLayer }
 ---@param bb any Blitbuffer
@@ -205,11 +242,14 @@ end
 ---@param painted table[]
 local function paintLayer(entry, bb, taken, painted)
     for _idx, mark in ipairs(entry.layer:marks()) do
-        local pieces = claim(mark, taken)
-        if #pieces > 0 then
+        local pieces
+        if mark.badge then
+            pieces = { bubble(bb, mark.boxes[#mark.boxes], mark.badge) }
+        else
+            pieces = claim(mark, taken)
             for _piece_idx, piece in ipairs(pieces) do underline(bb, piece, mark.solid) end
-            painted[#painted + 1] = { mark = mark, pieces = pieces }
         end
+        if #pieces > 0 then painted[#painted + 1] = { mark = mark, pieces = pieces } end
     end
     if entry.layer.paint then entry.layer:paint(bb) end
 end

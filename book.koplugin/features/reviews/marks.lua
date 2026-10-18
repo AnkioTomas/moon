@@ -254,6 +254,7 @@ function ReviewMarks:updateView()
         marks[#marks + 1] = {
             spot = entry.spot,
             boxes = placement.boxes,
+            badge = entry.spot.badge,
             tap = function() require("features.reviews.sheet").open(entry.identity, entry.spot) end,
         }
     end
