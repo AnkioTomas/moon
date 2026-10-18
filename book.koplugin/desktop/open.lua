@@ -40,6 +40,15 @@ local function cancelPending()
     if job and job.cancel then job:cancel() end
 end
 
+--- 超大 EPUB 且从没开过（没有 sidecar）：首次排版最容易把设备内存吃光。
+---@param path string
+---@return boolean
+local function isHeavyFirstOpen(path)
+    if not path:lower():match("%.epub$") then return false end
+    local size = require("libs/libkoreader-lfs").attributes(path, "size") or 0
+    return size >= require("reader.prefs").BIG_BOOK_BYTES and not require("docsettings"):hasSidecarFile(path)
+end
+
 --- 下一拍打开阅读器；用户已切到其他文档时丢弃本次交接。
 ---@param plugin table
 ---@param path string
@@ -56,15 +65,28 @@ local function showReader(plugin, path, generation, done)
             return
         end
         local desktop = plugin and plugin.desktop
-        logger.info("desktop.open reader", path)
-        done(true)
-        ReaderUI:showReader(path, nil, nil, nil, function()
-            -- KOReader 在此回调返回后才把 ReaderUI 放入窗口栈；再排一拍，
-            -- 避免先关全屏桌面导致底层 FileManager 被重绘出来。
-            UIManager:nextTick(require("ui.guard").wrap("open document", function()
-                closeDesktop(plugin, desktop)
-            end))
-        end)
+        local function open()
+            logger.info("desktop.open reader", path)
+            done(true)
+            ReaderUI:showReader(path, nil, nil, nil, function()
+                -- KOReader 在此回调返回后才把 ReaderUI 放入窗口栈；再排一拍，
+                -- 避免先关全屏桌面导致底层 FileManager 被重绘出来。
+                UIManager:nextTick(require("ui.guard").wrap("open document", function()
+                    closeDesktop(plugin, desktop)
+                end))
+            end)
+        end
+        if isHeavyFirstOpen(path) then
+            require("ui.themes.widgets.confirm"):new{
+                text = _("这本书文件很大（超过 20 MB），首次打开时 KOReader 的排版引擎可能占满内存，导致卡死甚至被系统强制结束。这不是月读的问题，而是 KOReader 排版引擎处理超大文件的限制。已默认关闭内嵌字体与内嵌样式以减轻负担；若仍卡死，建议先拆分书籍或压缩其中的图片。\n\n仍要打开吗？"),
+                ok_text = _("仍然打开"),
+                cancel_text = _("取消"),
+                ok_callback = open,
+                cancel_callback = function() done(false) end,
+            }:show()
+            return
+        end
+        open()
     end))
 end
 

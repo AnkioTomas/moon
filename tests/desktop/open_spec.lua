@@ -58,6 +58,10 @@ package.preload["apps/reader/readerui"] = function()
     return ReaderUI
 end
 
+package.preload["reader.prefs"] = function() return { BIG_BOOK_BYTES = 20 * 1024 * 1024 } end
+local sidecar = false
+package.preload["docsettings"] = function() return { hasSidecarFile = function() return sidecar end } end
+
 local Open = require("desktop.open")
 local book = {
     source_id = "moon",
@@ -151,3 +155,43 @@ Assert.is_true(done_ok)
 Assert.len(shown, shown_before)
 Assert.len(Themed.all("toast"), toasts)
 Assert.is_true(handled_plugin.desktop ~= nil)
+
+-- 超大 EPUB 首次打开（没有 sidecar）：先弹确认，说明是 KOReader 排版引擎的限制；确认后才交给 Reader。
+do
+    local lfs = require("libs/libkoreader-lfs")
+    local real_attributes = lfs.attributes
+    lfs.attributes = function(path, what)
+        if path == "/library/huge.epub" and what == "size" then return 40 * 1024 * 1024 end
+        return real_attributes(path, what)
+    end
+    ReaderUI.instance = nil
+    local before = #shown
+    done_ok = nil
+    Open.book({ desktop = {} }, book, function(ok) done_ok = ok end)
+    open_callbacks[#open_callbacks]("/library/huge.epub")
+    Stubs.flush()
+    Assert.len(shown, before)
+    local confirm = Themed.last("confirm")
+    Assert.matches(confirm.text, "不是月读的问题")
+    Assert.matches(confirm.text, "KOReader 排版引擎")
+    confirm.cancel_callback()
+    Assert.is_false(done_ok)
+    Assert.len(shown, before)
+
+    Open.book({ desktop = {} }, book, function(ok) done_ok = ok end)
+    open_callbacks[#open_callbacks]("/library/huge.epub")
+    Stubs.flush()
+    Themed.last("confirm").ok_callback()
+    Assert.is_true(done_ok)
+    Assert.eq(shown[#shown], "/library/huge.epub")
+
+    -- 开过的书（有 sidecar）不再提示
+    sidecar = true
+    local confirms = #Themed.all("confirm")
+    Open.book({ desktop = {} }, book)
+    open_callbacks[#open_callbacks]("/library/huge.epub")
+    Stubs.flush()
+    Assert.len(Themed.all("confirm"), confirms)
+    Assert.eq(shown[#shown], "/library/huge.epub")
+    lfs.attributes = real_attributes
+end

@@ -224,6 +224,25 @@ _G.G_reader_settings = { has = function(_, k) return k == "copt_embedded_fonts" 
 local g_default = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
 ReaderPrefs.inject(g_default, { file = "/x.epub", setFontFace = function() end })
 Assert.is_nil(g_default.data.copt_embedded_fonts)
+-- 大文件：全局默认开着也强制关内嵌字体 / 样式；本书自己设过的不动
+local lfs = require("libs/libkoreader-lfs")
+local real_attributes = lfs.attributes
+lfs.attributes = function(path, what)
+    if path == "/big.epub" and what == "size" then return 40 * 1024 * 1024 end
+    return real_attributes(path, what)
+end
+local big_book = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
+ReaderPrefs.inject(big_book, { file = "/big.epub", setFontFace = function() end })
+Assert.eq(big_book.data.copt_embedded_fonts, 0)
+Assert.eq(big_book.data.copt_embedded_css, 0)
+local big_on = { data = { copt_embedded_fonts = 1, copt_embedded_css = 1 }, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
+ReaderPrefs.inject(big_on, { file = "/big.epub", setFontFace = function() end })
+Assert.eq(big_on.data.copt_embedded_fonts, 1)
+Assert.eq(big_on.data.copt_embedded_css, 1)
+local small = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
+ReaderPrefs.inject(small, { file = "/x.epub", setFontFace = function() end })
+Assert.is_nil(small.data.copt_embedded_css)
+lfs.attributes = real_attributes
 _G.G_reader_settings = saved_g
 
 -- 整本书无需注入跨章节偏好，但冷启动时必须按 sidecar 的 id 重新注册插件字体。

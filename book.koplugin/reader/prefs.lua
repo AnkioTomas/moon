@@ -7,6 +7,7 @@
 --]]
 
 local JSON = require("json")
+local lfs = require("libs/libkoreader-lfs")
 local BookDB = require("book.books_db")
 local Fonts = require("ui.fonts")
 local FontReader = require("ui.fonts.reader")
@@ -14,6 +15,9 @@ local Store = require("book.store")
 local logger = require("utils.log")
 
 local M = {}
+
+-- 超过此大小的书（几十 MB 插图合集）按「重」处理：默认不用内嵌字体和样式。
+M.BIG_BOOK_BYTES = 20 * 1024 * 1024
 
 --- native_font.lua 为渲染字体选项塞进 configurable 的临时键，不属于排版偏好。
 local SKIP_COPT_KEY = "book_font_face"
@@ -144,9 +148,14 @@ function M.inject(doc_settings, document)
     end
     -- 大 EPUB 内嵌中文字体会让 CRE 按字号/字重各缓存一份，512MB 设备易 OOM：默认关闭内嵌字体；
     -- 本书已设置或用户「设为默认」过（G_reader_settings）则尊重原值。
+    -- 大文件（插图合集等）连全局默认也不认，内嵌字体与内嵌样式都关；本书自己设过的照旧。
+    local big = (lfs.attributes(document.file, "size") or 0) >= M.BIG_BOOK_BYTES
     if doc_settings:readSetting("copt_embedded_fonts") == nil
-        and not (G_reader_settings and G_reader_settings:has("copt_embedded_fonts")) then
+        and (big or not (G_reader_settings and G_reader_settings:has("copt_embedded_fonts"))) then
         doc_settings:saveSetting("copt_embedded_fonts", 0)
+    end
+    if big and doc_settings:readSetting("copt_embedded_css") == nil then
+        doc_settings:saveSetting("copt_embedded_css", 0)
     end
     local identity = Store.identityFor(document.file)
     if not (identity and identity.chapter_idx) then
