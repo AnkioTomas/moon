@@ -263,8 +263,9 @@ end
 ---@param w number 可用宽度，单位像素
 ---@param h number 可用高度，单位像素
 ---@param head_h number|nil 工具条上方另占的高度（图书馆的分组页签），书城不传
+---@param lib table|nil CoverCell.libraryConf()；书城不传
 ---@return table
-function Library.gridMetrics(w, h, head_h)
+function Library.gridMetrics(w, h, head_h, lib)
     local t = Theme.current()
     w = math.max(1, w)
     h = math.max(1, h)
@@ -273,7 +274,8 @@ function Library.gridMetrics(w, h, head_h)
     local grid_h = math.max(1, h - (head_h or 0) - top_h - bottom_h)
     local avail = math.max(1, w - pad * 2)
     local slot_w, cw, ch, cols, gap, row_gap, cell_h = CoverCell.denseCoverMetrics(avail, grid_h, {
-        title_extra = require("ui.widgets.book").captionExtra(),
+        title_extra = lib and require("ui.widgets.book").captionExtra(lib.title, lib.author, lib.kobo)
+            or require("ui.widgets.book").captionExtra(),
     })
     local rows = math.max(1, math.floor((grid_h + row_gap) / (cell_h + row_gap)))
     return {
@@ -321,7 +323,7 @@ function Library:metrics()
     local desktop = self.desktop
     local w, h = desktop.dimen.w, desktop:contentHeight()
     if self.view == "list" then return Library.listMetrics(w, h) end
-    return Library.gridMetrics(w, h, Library.tabsHeight())
+    return Library.gridMetrics(w, h, Library.tabsHeight(), CoverCell.libraryConf())
 end
 
 --- 按网格度量铺满一页封面格子（放不下的整行丢弃）。
@@ -330,8 +332,9 @@ end
 ---@param m table 预先计算的网格布局尺寸
 ---@param on_open fun(book: table, cover: table, cw: number, ch: number)
 ---@param show_status boolean|nil 是否显示书籍状态信息
+---@param lib table|nil CoverCell.libraryConf()；书城不传
 ---@return table
-local function buildGrid(ctx, books, m, on_open, show_status)
+local function buildGrid(ctx, books, m, on_open, show_status, lib)
     local grid = VerticalGroup:new{ align = "left" }
     local rows = math.min(m.rows, math.ceil(#books / m.cols))
     for r = 1, rows do
@@ -341,7 +344,10 @@ local function buildGrid(ctx, books, m, on_open, show_status)
             local book = books[(r - 1) * m.cols + c]
             if not book then break end
             if c > 1 then row[#row + 1] = HorizontalSpan:new{ width = m.gap } end
-            row[#row + 1] = CoverCell.build(ctx, book, m.slot_w, m.cw, m.ch, on_open, show_status)
+            row[#row + 1] = CoverCell.build(
+                ctx, book, m.slot_w, m.cw, m.ch, on_open, show_status,
+                lib and lib.title, lib and lib.author, lib
+            )
         end
         grid[#grid + 1] = row
     end
@@ -586,7 +592,10 @@ function Library:buildPage(ctx)
         end
     else
         ctx.on_detail = on_detail
-        body = buildGrid(ctx, books, m, on_open, true)
+        local lib = CoverCell.libraryConf()
+        local on_tap = on_open
+        if lib.tap_detail then on_tap = function(book) on_detail(book) end end
+        body = buildGrid(ctx, books, m, on_tap, true, lib)
     end
     return frame(w, h, { tabs, toolbar(w, m.top_h, left, self:bookTools()) }, body, m.grid_h, pager)
 end

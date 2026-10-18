@@ -11,6 +11,7 @@ local MoonSettings = require("utils.settings")
 local UIManager = require("ui/uimanager")
 local Theme = require("ui.themes")
 local Tap = require("ui.themes.widgets.tap")
+local _ = require("gettext")
 
 local CoverCell = {}
 
@@ -69,10 +70,11 @@ end
 ---@param show_status boolean|nil 是否显示书籍状态信息，缺省显示
 ---@param show_title boolean|nil 是否在封面下显示书名，缺省显示
 ---@param show_author boolean|nil 是否在书名下显示作者，缺省不显示
+---@param lib table|nil CoverCell.libraryConf() 的结果；缺省为首页 / 书城的固定样式
 ---@return table, number
-function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_title, show_author)
+function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_title, show_author, lib)
     local status = show_status ~= false
-    local card, _card_h, cover = Book.widget(ctx.plugin, ctx.source, book, cw, ch, {
+    local opts = {
         slot_w = slot_w,
         show_title = show_title,
         show_author = show_author == true,
@@ -82,9 +84,36 @@ function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_t
         -- 图书馆右下角「更多」进详情（角标自带点击区，先于整卡收到点按）；书城整卡即详情，不画「更多」。
         more = status and function() ctx.on_detail(book) end,
         show_parent = ctx.desktop,
-    })
+    }
+    if lib and lib.kobo then
+        -- Kobo：封面上不留东西，下载状态 / 进度 / 更多都收到封面下一行。
+        opts.badge, opts.ribbon, opts.download, opts.more = false, false, false, false
+        opts.status_row = status
+        if status then
+            -- 未下载优先，已下载显示阅读进度条。
+            if book.downloaded == false then
+                opts.status_text = _("未下载")
+            else
+                opts.status_pct = Book.isRead(book) and 100 or Book.pct(book)
+            end
+            opts.status_more = function() ctx.on_detail(book) end
+        end
+    end
+    local card, _card_h, cover = Book.widget(ctx.plugin, ctx.source, book, cw, ch, opts)
     local tap = Tap.wrap(card, function() on_open(book, cover, cw, ch) end)
     return tap, tap:getSize().h
+end
+
+--- 图书馆网格的显示配置（settings/ui.lua 的 library_*）；kobo 为真时用 Kobo 风格。
+---@return table
+function CoverCell.libraryConf()
+    local conf = MoonSettings.get("ui")
+    return {
+        title = conf.library_title,
+        author = conf.library_author,
+        kobo = conf.library_style == "kobo",
+        tap_detail = conf.library_tap == "detail",
+    }
 end
 
 local GRID_MIN, GRID_MAX, GRID_DEFAULT = 3, 8, 4
