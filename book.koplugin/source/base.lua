@@ -127,6 +127,7 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 ---@field mergeAnnotations fun(self: BookSource, remote: table[], current: table[], paging: boolean|nil, authoritative: boolean): table[]|nil 按源身份语义合并注解
 ---@field syncStatsAsync fun(self: BookSource, opts: { dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛统计
 ---@field deleteBookAsync fun(self: BookSource, identity: BookIdentity, cb: fun(ok: boolean, err: string|nil)): table|nil 本地优先删除（清缓存 + 墓碑），远端真删归 syncBooksAsync
+---@field searchAsync fun(self: BookSource, keyword: string, cb: fun(res: { data: Book[] }|nil, err: string|nil)): table|nil 书城搜索（可选；有这个方法就是可搜索源，书城页按此列出）
 ---@field getDetailAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: Book|nil, err: string|nil)): table|nil 书籍详情
 ---@field openBookAsync fun(self: BookSource, identity: BookIdentity, opts: table|nil, cb: fun(path: string|nil, err: string|nil, meta: { handled?: boolean }|nil)): table|nil 根据书籍身份解析、落盘并登记物理文档；按章源通过 opts.chapter_idx 指定章节；取消后不回调；源已自行展示（如在线漫画查看器）时回调 `nil, nil, { handled = true }`，桌面不开阅读器也不提示
 ---@field loadTocAsync fun(self: BookSource, identity: BookIdentity, cb: fun(toc: BookChapter[]|nil, err: string|nil)): table|nil 拉取并持久化章节目录

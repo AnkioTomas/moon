@@ -143,6 +143,20 @@ local function fetchTocAsync(self, identity, cb)
         end }
 end
 
+--- 书城搜索：回包形状同 listStoreAsync。
+---@param keyword string
+---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:searchAsync(keyword, cb)
+    return self._client:searchAsync(keyword, function(wire, err)
+        if not wire then
+            cb(nil, err)
+            return
+        end
+        cb({ data = Mapper.search(wire) })
+    end)
+end
+
 function Source:getDetailAsync(identity, cb)
     local cancelled, job = false, nil
     job = self._client:detailAsync(identity.stable_id, function(wire, err)

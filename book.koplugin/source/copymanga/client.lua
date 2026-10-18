@@ -167,6 +167,13 @@ function Client:detailAsync(stable_id, cb)
     return self:_getJson("/api/v3/comic2/" .. Text.urlEncode(stable_id) .. "?platform=1", cb)
 end
 
+---@param keyword string
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:searchAsync(keyword, cb)
+    return self:_getJson("/api/v3/search/comic?limit=30&offset=0&platform=1&q_type=&q=" .. Text.urlEncode(keyword), cb)
+end
+
 --- 云端浏览记录（需登录）。browse 为 null 表示从未读过。
 ---@param stable_id string
 ---@param cb fun(wire: table|nil, err: string|nil)
