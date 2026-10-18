@@ -144,7 +144,7 @@ local function shortDate(ts)
     return date(ts, ts and os.date("%Y", ts) == os.date("%Y") and "%m-%d" or "%Y-%m-%d")
 end
 
---- 按进度比例外推剩余时长，再按最近有记录的这段日历天数（没读的日子也算）摊出日均，推出读完日期。
+--- 按进度比例外推剩余时长；读完日期见 require("utils.forecast").finishDate。
 ---@param percent number 0..100
 ---@param total_seconds number 累计时长
 ---@param daily table[] StatsDB.dailyByBook（日期倒序）
@@ -154,16 +154,7 @@ local function estimate(percent, total_seconds, daily)
     local fraction = percent / 100
     if fraction <= 0 or fraction >= 1 or total_seconds <= 0 then return nil end
     local remaining = math.floor(total_seconds * (1 - fraction) / fraction)
-    local sum = 0
-    for _idx, r in ipairs(daily) do sum = sum + r.seconds end
-    if sum <= 0 then return remaining end
-    local y, m, d = tostring(daily[#daily].ymd):match("^(%d+)%-(%d+)%-(%d+)$")
-    if not y then return remaining end
-    local today = os.date("*t")
-    local now = os.time{ year = today.year, month = today.month, day = today.day, hour = 12 }
-    local span = math.floor((now - os.time{ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 })
-        / 86400 + 0.5) + 1
-    return remaining, now + math.ceil(remaining / (sum / span)) * 86400
+    return remaining, require("utils.forecast").finishDate(remaining, daily)
 end
 
 --- 一行三张 KPI 卡。

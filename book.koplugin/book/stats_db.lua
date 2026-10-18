@@ -483,7 +483,7 @@ end
 --- 快照前已上传的本地时长已含在快照里，不能再加。没有快照时就是本地累计。
 ---@param source_id string
 ---@param stable_id string
----@return { total_seconds: number, pages: number, last_read: number, first_read: number }
+---@return { total_seconds: number, local_seconds: number, total_pages: number, pages: number, last_read: number, first_read: number }
 function StatsDB.summaryByBook(source_id, stable_id)
     local snapshot, fetched_at = DB.rowexec(
         [[SELECT duration, start_time FROM reading_stats
@@ -491,12 +491,13 @@ function StatsDB.summaryByBook(source_id, stable_id)
         source_id,
         stable_id
     )
-    local local_seconds, fresh_seconds, pages, last_read = DB.rowexec(
+    local local_seconds, fresh_seconds, pages, last_read, total_pages = DB.rowexec(
         [[SELECT COALESCE(SUM(duration),0),
                  COALESCE(SUM(CASE WHEN sync_status=0 OR start_time>=? THEN duration ELSE 0 END),0),
                  COALESCE(SUM(event_count),0),
                  COALESCE(MAX(CASE WHEN record_type='page_rollup'
-                    THEN last_time ELSE start_time END),0)
+                    THEN last_time ELSE start_time END),0),
+                 COALESCE(MAX(total_pages),0)
           FROM reading_stats WHERE source_id=? AND stable_id=?
             AND record_type IN ('page','page_rollup');]],
         tonumber(fetched_at) or 0,
@@ -515,6 +516,8 @@ function StatsDB.summaryByBook(source_id, stable_id)
     )
     return {
         total_seconds = total_seconds,
+        local_seconds = tonumber(local_seconds) or 0,
+        total_pages = tonumber(total_pages) or 0,
         pages = tonumber(pages) or 0,
         last_read = tonumber(last_read) or 0,
         first_read = tonumber(first_read) or 0,
