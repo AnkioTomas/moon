@@ -1371,6 +1371,39 @@ do
     books = {}
 end
 
+-- 上传传输层失败（超时 / 断网）：本轮不再试后面的书，失败的书冷却期内不重传。
+do
+    local L = require("support.config").dir() .. "/webdav-scenario-fail"
+    Paths.ensureDir(L)
+    for _idx, name in ipairs({ "a.epub", "b.epub" }) do
+        local f = assert(io.open(L .. "/" .. name, "wb"))
+        f:write("book")
+        f:close()
+    end
+    local dav = fakeDav()
+    putSync(dav, {})
+    local puts = 0
+    local put = dav.putFileAsync
+    function dav:putFileAsync(path, local_path, cb)
+        if path:find("%.epub$") then
+            puts = puts + 1
+            return cb(nil, "timeout")
+        end
+        return put(self, path, local_path, cb)
+    end
+    local s = source(deviceClient(dav, "A", L))
+    sync(s)
+    Assert.eq(puts, 1, "传输层失败后本轮停手")
+    sync(s)
+    Assert.eq(puts, 2, "a 在冷却期，轮到 b")
+    sync(s)
+    Assert.eq(puts, 2, "都在冷却期，不再重传")
+    dav.putFileAsync = put
+    os.remove(L .. "/a.epub")
+    os.remove(L .. "/b.epub")
+    books = {}
+end
+
 -- 场景 2：手动编辑 / 刮削。先写本地库（立即生效），再经 book_meta_changed 立即上行书目与封面；
 -- 离线没推成保留脏行，联网推脏补上；另一台设备日常同步拿到新元数据。
 do

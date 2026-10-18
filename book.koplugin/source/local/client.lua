@@ -49,7 +49,7 @@ end
 ---@param cfg table|nil
 ---@return LocalClient
 function Client.new(cfg)
-    return setmetatable({ cfg = cfg or {} }, Client)
+    return setmetatable({ cfg = cfg or {}, upload_failed = {} }, Client)
 end
 
 ---@return boolean

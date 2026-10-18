@@ -217,7 +217,7 @@ end
 --- 上传本地文件到 WebDAV。
 ---@param path string
 ---@param local_path string
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, code: number|nil) code 非 nil 表示服务器回了状态码，nil 是传输层失败
 ---@return HttpJob|nil
 function Webdav:putFileAsync(path, local_path, cb)
     local file, open_err = io.open(local_path, "rb")
@@ -237,8 +237,8 @@ function Webdav:putFileAsync(path, local_path, cb)
         headers = Header.forRequest({ ["Content-Type"] = "application/octet-stream" }),
         body = body,
         timeout = require("http.timeout").net(10),
-    }, function(res, err)
-        cb(res and true, err)
+    }, function(res, err, code)
+        cb(res and true, err, code)
     end)
 end
 
