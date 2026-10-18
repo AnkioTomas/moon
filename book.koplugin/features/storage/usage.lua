@@ -54,29 +54,34 @@ function Usage.label(key)
     return T(_("%1 其它缓存"), src)
 end
 
---- 异步统计；cb 收 `{ { key, bytes }... 按体积降序 }, 合计`。
+--- 统计（子进程里遍历，不占主线程）；cb 收 `{ { key, bytes }... 按体积降序 }, 合计`，失败时记日志并给空结果。
 ---@param cb fun(list: { [1]: string, [2]: number }[], total: number)
 ---@return { cancel: fun() }
 function Usage.measureAsync(cb)
     local root = require("utils.paths").root()
-    local sizes, total = {}, 0
-    return require("book.cache").walkAsync(root, function(path, attr)
-        if attr.mode == "file" then
+    return require("workers.job").run(function()
+        local sizes, total = {}, 0
+        require("book.cache").walkFiles(root, function(path, attr)
             local key = Usage.bucket(path:sub(#root + 2))
             local size = tonumber(attr.size) or 0
             sizes[key] = (sizes[key] or 0) + size
             total = total + size
-        end
-        return true
-    end, function()
+        end)
         local list = {}
         for key, bytes in pairs(sizes) do list[#list + 1] = { key, bytes } end
         table.sort(list, function(a, b)
             if a[2] ~= b[2] then return a[2] > b[2] end
             return a[1] < b[1]
         end)
-        cb(list, total)
-    end)
+        return { list = list, total = total }
+    end, {
+        name = "storage.usage", kind = "light",
+        on_done = function(result) cb(result.list, result.total) end,
+        on_failed = function(err)
+            require("utils.log").warn("book storage usage failed", err)
+            cb({}, 0)
+        end,
+    })
 end
 
 return Usage
