@@ -480,6 +480,11 @@ local function uploadLocal(self, run, done)
     end
     local member = {}
     for _idx, rel in ipairs(run.files) do member[rel] = true end
+    local failed, first_err = 0, nil
+    local function fail(err)
+        failed = failed + 1
+        first_err = first_err or err
+    end
     eachAsync(pending, function(rel, next_item, i)
         run.report(T(_("正在上传 %1"), rel), i, #pending)
         local item, stable_id = run.local_files[rel], remoteStableId(rel)
@@ -489,14 +494,14 @@ local function uploadLocal(self, run, done)
                 if run.cancelled then return end
                 if not ok_dir then
                     require("utils.log").warn("book webdav upload mkdir failed", rel, dir_err)
-                    run.push_error = run.push_error or dir_err
+                    fail(dir_err)
                     return next_item()
                 end
                 run.active = self.dav:putFileAsync(self:webdavPath() .. "/" .. rel, item.path, function(ok, err)
                     if run.cancelled then return end
                     if not ok then
                         require("utils.log").warn("book webdav upload failed", rel, err)
-                        run.push_error = run.push_error or err
+                        fail(err)
                         return next_item()
                     end
                     adoptLocal(item, stable_id)
@@ -515,7 +520,12 @@ local function uploadLocal(self, run, done)
                     next_item()
                 end)
             end)
-    end, done)
+    end, function(err)
+        if failed > 0 then
+            run.push_error = T(_("%1 本书上传失败：%2"), failed, tostring(first_err))
+        end
+        done(err)
+    end)
 end
 
 --- 同步步骤：远端缺封面、本地有的，补传。
