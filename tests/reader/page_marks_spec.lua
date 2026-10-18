@@ -2,7 +2,7 @@
 
 local Assert = require("support.assert")
 
-package.preload["ffi/blitbuffer"] = function() return { COLOR_DARK_GRAY = 1 } end
+package.preload["ffi/blitbuffer"] = function() return { COLOR_DARK_GRAY = 1, COLOR_WHITE = 0 } end
 package.preload["ui/size"] = function() return { line = { thick = 2 } } end
 local reported = {}
 package.preload["ui.guard"] = function()
@@ -137,4 +137,32 @@ do
     inst:paintTo(newBB())
     Assert.eq(painted, 1)
     Assert.len(inst.painted, 0)
+end
+
+do
+    -- badge：不画下划线、不占位，对话气泡画在末行末尾（贴右边缘不越界），点按只认气泡。
+    package.preload["ui/widget/textwidget"] = function()
+        return { new = function(_cls, opts)
+            return { text = opts.text, getSize = function() return { w = 16, h = 12 } end,
+                paintTo = function() end, free = function() end }
+        end }
+    end
+    package.preload["ui/font"] = function() return { getFace = function() return {} end } end
+    local ui = newUi()
+    local tapped = 0
+    local inst = PageMarks.add(ui, "reviews", 20, layer({ {
+        boxes = { { x = 10, y = 20, w = 30, h = 20 }, { x = 10, y = 40, w = 185, h = 20 } },
+        badge = "9",
+        tap = function() tapped = tapped + 1 end,
+    } }))
+    local bb = newBB()
+    bb.getWidth = function() return 200 end
+    bb.paintRoundedRect = function() end
+    bb.paintBorder = function() end
+    inst:paintTo(bb)
+    local rect = inst.painted[1].pieces[1]
+    Assert.is_true(rect.x + rect.w <= 200, "气泡不越过屏幕右缘")
+    Assert.is_true(inst:onTap({ pos = { x = rect.x + 1, y = rect.y + 1 } }))
+    Assert.eq(tapped, 1)
+    Assert.is_false(inst:onTap({ pos = { x = 12, y = 25 } }), "气泡之外不响应")
 end
