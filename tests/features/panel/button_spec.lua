@@ -108,15 +108,15 @@ base = parts(button{ active = true })
 Assert.eq(base.style.bg, 0)
 Assert.eq(base[1].color, 255)
 
--- block（bold）：灰色胶囊，未选 0xEE、选中 0xC4。
+-- block（bold）：卡片的圆角与阴影；阴影从宽高里扣掉，网格不被撑宽。
 shape = "block"
 local tile = button{ active = true }[1]
-Assert.eq(tile.style.radius, 999)
-Assert.eq(tile.style.bg, 0xC4)
-Assert.eq(button()[1].style.bg, 0xEE)
-Assert.eq(tile.width, 80)
-Assert.eq(tile.height, 76)
+Assert.eq(tile.style.radius, 0)
+Assert.eq(tile.style.shadow, 3)
+Assert.eq(tile.width, 77)
+Assert.eq(tile.height, 73)
 Assert.eq(tile[1].text, "夜间", "文字在块内")
+Assert.eq(tile[1].color, 255)
 
 -- 点按执行、长按交给上层进入编辑。
 local tapped
