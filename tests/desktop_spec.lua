@@ -28,6 +28,7 @@ local function page(name)
         self.root = w
         return w
     end
+    function P.providers() return Kit.sections.store.zlib_enabled and { {} } or {} end
     function P:id() return self.name or name end
     function P:activate(changed) log[#log + 1] = self:id() .. ".resume" .. (changed and "!" or "") end
     function P:deactivate() log[#log + 1] = self:id() .. ".pause" end
@@ -233,8 +234,8 @@ do -- 换源：广播给各子件，重算 Tab，回首页
     Assert.eq(desk.tab, "home")
     Assert.eq(drain(),
         "topbar:source_changed,home:source_changed,library:source_changed,store:source_changed,"
-        .. "opds:source_changed,insight:source_changed,settings:source_changed,settings.pause,home.resume!")
-    Assert.eq(desk.opds.last_payload, source)
+        .. "insight:source_changed,settings:source_changed,settings.pause,home.resume!")
+    Assert.eq(desk.store.last_payload, source)
 end
 
 do -- KOReader 系统事件沿控件树直达顶栏控件，桌面不截留、不转成子页 onEvent
@@ -259,7 +260,7 @@ end
 do -- 系统 Suspend 广播直达桌面 → Pause，之后不刷屏
     desk:handleEvent(require("ui/event"):new("Suspend"))
     Assert.is_false(desk.active)
-    Assert.eq(drain(), "topbar.pause,home.pause,library.pause,store.pause,opds.pause,insight.pause,settings.pause")
+    Assert.eq(drain(), "topbar.pause,home.pause,library.pause,store.pause,insight.pause,settings.pause")
     local n = #Kit.dirty
     desk:updateView()
     desk:updateTopbar()
@@ -278,7 +279,7 @@ do -- Destroy：活跃时先补 Pause；关叠层、清 plugin.desktop；只做�
     Assert.eq(Kit.closed[#Kit.closed], desk)
     local out = drain()
     Assert.matches(out, "^topbar%.pause,home%.pause")
-    Assert.matches(out, "topbar%.destroy,home%.destroy,library%.destroy,store%.destroy,opds%.destroy,insight%.destroy,settings%.destroy$")
+    Assert.matches(out, "topbar%.destroy,home%.destroy,library%.destroy,store%.destroy,insight%.destroy,settings%.destroy$")
     desk:handleEvent(require("ui/event"):new("Exit"))
     desk:onEvent("home_changed")
     desk:activate()

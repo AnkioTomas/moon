@@ -184,12 +184,29 @@ function Source:configSections(ctx)
     end
 
     local store = MoonSettings.get("store")
+    sections[#sections + 1] = {
+        title = _("书城"),
+        rows = { function(iw)
+            local on = store.enabled
+            return Row.widget({
+                width = iw,
+                icon = "storefront", title = _("书城"),
+                subtitle = _("底栏显示书城，搜索已启用的书源与 Z站、OPDS"),
+                toggle = on,
+                callback = function()
+                    store.enabled = not on
+                    MoonSettings.save("store")
+                    SourceRegistry.notifyChanged()
+                end,
+            })
+        end },
+    }
     for _idx, def in ipairs({
         { id = "zlib", title = _("Z-Library"), icon = "storefront",
-          subtitle = _("底栏显示 Z站；下载后导入本地书库"),
+          subtitle = _("在书城中搜索 Z站；下载后导入本地书库"),
           entry = _("Z-Library 账号"), entry_icon = "vpn_key" },
         { id = "opds", title = _("OPDS"), icon = "rss_feed",
-          subtitle = _("底栏显示 OPDS；Calibre、Komga、Kavita 等书库，下载后导入本地书库"),
+          subtitle = _("在书城中搜索 OPDS；Calibre、Komga、Kavita 等书库，下载后导入本地书库"),
           entry = _("OPDS 目录"), entry_icon = "link" },
     }) do
         local key = def.id .. "_enabled"

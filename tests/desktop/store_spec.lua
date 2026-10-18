@@ -1,4 +1,4 @@
---[[-- Z-Library 工具栏与搜索状态离线用例。 @module tests.desktop.pages.store_spec --]]
+--[[-- 书城：来源切换、默认不加载、搜索与分页离线用例。 @module tests.desktop.pages.store_spec --]]
 
 local Assert = require("support.assert")
 
@@ -45,6 +45,35 @@ package.preload["gettext"] = function()
     return function(value) return value end
 end
 
+local saved = 0
+local store_settings = { enabled = true, zlib_enabled = true, opds_enabled = false, provider = "" }
+package.preload["utils.settings"] = function()
+    return {
+        get = function() return store_settings end,
+        save = function() saved = saved + 1 end,
+    }
+end
+local source_searches = {}
+local searchable = {
+    id = "wechat",
+    searchAsync = function(_, keyword, cb)
+        source_searches[#source_searches + 1] = keyword
+        cb({ data = { { source_id = "wechat", stable_id = "w1", title = "书" } } })
+        return { cancel = function() end }
+    end,
+}
+package.preload["source.registry"] = function()
+    return {
+        listEnabled = function() return { { id = "local", name = "本地" }, { id = "wechat", name = "微信读书" } } end,
+        resolve = function(id) return id == "wechat" and searchable or {} end,
+    }
+end
+local picker
+package.preload["ui.themes.widgets.list"] = function()
+    return { new = function(_, opts) picker = opts; return { show = function() end } end }
+end
+package.preload["ui.themes"] = function() return { px = function(n) return n end } end
+
 local requests = 0
 local request_opts
 package.preload["store.zlib"] = function()
@@ -71,7 +100,7 @@ local desktop = {
     ctx = function(self) return { desktop = self } end,
 }
 desktop.library = require("desktop.pages.library"):new{ desktop = desktop }
-local store = Store:new{ desktop = desktop, name = "store", store_id = "zlib", empty_text = "Z站暂无内容" }
+local store = Store:new{ desktop = desktop, name = "store" }
 Assert.eq(store.name, "store")
 Assert.eq(store.desktop, desktop)
 desktop.store = store
@@ -82,7 +111,24 @@ Assert.is_true(build_opts.search_only)
 Assert.is_false(build_opts.show_status)
 Assert.is_true(type(build_opts.on_search) == "function")
 Assert.is_nil(build_opts.on_clear)
-Assert.eq(build_opts.empty_text, "Z站暂无内容")
+Assert.eq(build_opts.empty_text, "点击搜索按钮查找书籍")
+Assert.eq(build_opts.provider.text, "Z站")
+
+-- 来源 = 启用的书城后端 + 带 searchAsync 的启用书源（local 没有就不列）。
+local providers = Store.providers()
+Assert.len(providers, 2)
+Assert.eq(providers[1].id, "zlib")
+Assert.eq(providers[2].id, "wechat")
+
+-- 总开关关闭：没有任何来源，底栏不显示书城。
+store_settings.enabled = false
+Assert.len(Store.providers(), 0)
+store_settings.enabled = true
+
+-- 默认不加载：没搜索词不发请求。
+store:updateView()
+Assert.eq(requests, 0)
+Assert.len(store.state.books, 0)
 
 -- 搜索由本页接管：留在 store tab、回第一页并丢弃旧结果。
 build_opts.on_search()
@@ -97,6 +143,22 @@ Assert.eq(view_updates, 1)
 search_apply("")
 Assert.is_nil(store.search)
 Assert.eq(view_updates, 2)
+
+-- 切来源：记住选择、保留搜索词、对新来源重搜。
+store.search = "Lua"
+build_opts.provider.on_pick({})
+picker.items[2].callback()
+Assert.eq(store.provider_id, "wechat")
+Assert.eq(store_settings.provider, "wechat")
+Assert.eq(saved, 1)
+Assert.eq(store.search, "Lua")
+Assert.is_nil(store.state)
+store:fetch()
+Assert.eq(source_searches[1], "Lua")
+Assert.eq(store.books[1].stable_id, "w1")
+Assert.eq(requests, 0)
+picker.items[1].callback()
+store.search = nil
 
 -- 后端固定只请求第一页最多 200 本，后续页在内存中切片；不依赖当前源。
 desktop.source = { id = "wechat" }
@@ -159,13 +221,14 @@ local detail_opened
 package.preload["desktop.detail"] = function()
     return { open = function(_, origin, book) detail_opened = { origin, book } end }
 end
-desktop.tab = "opds"
-local opds = Store:new{ desktop = desktop, name = "opds", store_id = "opds", empty_text = "目录暂无内容" }
+store_settings.opds_enabled = true
+local opds = Store:new{ desktop = desktop, name = "store" }
+opds.provider_id = "opds"
+desktop.tab = "store"
 opds:fetch()
 Assert.is_nil(opds_requests[1].feed)
 Assert.len(opds.books, 2)
 opds:build({ desktop = desktop }, {}, {})
-Assert.eq(build_opts.empty_text, "目录暂无内容")
 Assert.is_nil(build_opts.on_back)
 
 build_opts.on_open(opds.books[2])

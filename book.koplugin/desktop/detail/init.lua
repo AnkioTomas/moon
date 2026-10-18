@@ -108,7 +108,7 @@ end
 ---@return Book|nil row books 行；书城书 / 未入库返回 nil
 function Detail:mergeStored()
     local book = self.book
-    if self.origin ~= "library" or not (book.source_id and book.stable_id) then return nil end
+    if storeBackend(book) or not (book.source_id and book.stable_id) then return nil end
     local BookDB = require("book.books_db")
     local row = BookDB.get(book.source_id, book.stable_id)
     if row then book.meta = row.meta end

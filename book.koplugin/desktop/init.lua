@@ -57,7 +57,6 @@ local Tabbar = require("ui.themes.widgets.tabbar")
 ---@field home BookHome
 ---@field library BookLibrary
 ---@field store BookStorePage Z-Library
----@field opds BookStorePage OPDS 目录
 ---@field insight BookInsight
 ---@field settings BookSettings
 ---@field ext_pages table<string, table> 扩展页签 id → 页实例（按需建，扩展关掉即销毁）
@@ -86,8 +85,8 @@ local Desktop = InputContainer:extend{
 ---@field source BookSource|nil
 ---@field desktop BookDesktop
 
-local PAGES = { home = true, library = true, store = true, opds = true, insight = true, settings = true }
-local CHILDREN = { "topbar", "home", "library", "store", "opds", "insight", "settings" }
+local PAGES = { home = true, library = true, store = true, insight = true, settings = true }
+local CHILDREN = { "topbar", "home", "library", "store", "insight", "settings" }
 local CONTENT, TOP, BAR = 1, 2, 3
 
 --- 调用指定子视图的事件或生命周期方法；不存在的接收者直接跳过。
@@ -126,19 +125,15 @@ local function extTab(id)
     end
 end
 
---- 按开关生成 Desktop 底栏 Tab（Z-Library / OPDS 默认关）。统计页始终在。
+--- 按开关生成 Desktop 底栏 Tab（书城：有可搜索来源才出现）。统计页始终在。
 ---@return table
 local function desktopTabs()
     local tabs = {
         { id = "home", text = _("首页"), icon = "home" },
         { id = "library", text = _("图书馆"), icon = "local_library" },
     }
-    local store = MoonSettings.get("store")
-    if store.zlib_enabled then
-        tabs[#tabs + 1] = { id = "store", text = _("Z站"), icon = "storefront" }
-    end
-    if store.opds_enabled then
-        tabs[#tabs + 1] = { id = "opds", text = _("OPDS"), icon = "rss_feed" }
+    if #StorePage.providers() > 0 then
+        tabs[#tabs + 1] = { id = "store", text = _("书城"), icon = "storefront" }
     end
     tabs[#tabs + 1] = { id = "insight", text = _("统计"), icon = "bar_chart" }
     -- 扩展页签：插在 after 指定的格子后（同一 after 按登记顺序），没写 after 就排在「设置」前。
@@ -262,8 +257,7 @@ function Desktop:init()
     self.ext_pages = {}
     self.home = Home:new{ desktop = self, name = "home" }
     self.library = Library:new{ desktop = self, name = "library" }
-    self.store = StorePage:new{ desktop = self, name = "store", store_id = "zlib", empty_text = _("Z站暂无内容") }
-    self.opds = StorePage:new{ desktop = self, name = "opds", store_id = "opds", empty_text = _("目录暂无内容") }
+    self.store = StorePage:new{ desktop = self, name = "store" }
     self.insight = Insight:new{ desktop = self, name = "insight" }
     self.settings = Settings:new{ desktop = self }
     self.topbar = TopBar:new{ desktop = self }

@@ -1,11 +1,13 @@
 --[[--
-书城 Tab（Z-Library / OPDS）：浏览 / 搜索目录，下载后导入本地书库。
-后端由 store_id 决定（`store.<store_id>` 提供 listStoreAsync / installAsync）；
+书城 Tab：Z-Library / OPDS 与各启用书源的搜索。默认不加载任何书，只有搜索按钮；
+工具条左侧的下拉切换搜索来源（见 Store.providers）。
+Z-Library / OPDS 是书城后端（`store.<id>` 提供 listStoreAsync / installAsync，下载后导入本地书库）；
+书源是带 `searchAsync` 的启用源，结果进详情页后加入本地书库（脏行，由源同步上行）。
 OPDS 导航项带 feed，点开压入 trail 下钻，「上级」出栈。
 
 布局（同 Library.build）：
   +-----------------------------------------------+
-  | [←上级] [🔍搜索] [清除]             共N       |
+  | [来源▾] [←上级] [🔍搜索]            共N       |
   | +----+ +----+ +----+ +----+                   |
   | |封面| |封面| |封面| |封面|                   |
   | |书名| |书名| |书名| |书名|                   |
@@ -18,14 +20,14 @@ OPDS 导航项带 feed，点开压入 trail 下钻，「上级」出栈。
 
 local Library = require("desktop.pages.library")
 local BookStore = require("book.store")
+local MoonSettings = require("utils.settings")
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 
 ---@class BookStorePage
 ---@field desktop BookDesktop
----@field name "store"|"opds" 所在 Tab
----@field store_id "zlib"|"opds" 书城后端
----@field empty_text string 空结果占位文案
+---@field name "store" 所在 Tab
+---@field provider_id string|nil 当前搜索来源 id（zlib / opds / 书源 id）；nil = 取第一个可用来源
 ---@field trail { title: string, feed: string }[] 已下钻的导航项，栈顶即当前 feed
 ---@field state table|nil
 ---@field books table[]|nil
@@ -42,9 +44,44 @@ Store.__index = Store
 
 local MAX_RESULTS = 200
 
+---@class StoreProvider
+---@field id string
+---@field name string
+---@field store boolean|nil 是书城后端（store.<id>）；否则是书源
+---@field source BookSource|nil
+
+--- 可搜索来源：已启用的 Z-Library / OPDS，再接已启用且带 searchAsync 的书源。
+---@return StoreProvider[]
+function Store.providers()
+    local settings = MoonSettings.get("store")
+    local list = {}
+    if not settings.enabled then return list end
+    if settings.zlib_enabled then list[#list + 1] = { id = "zlib", name = _("Z站"), store = true } end
+    if settings.opds_enabled then list[#list + 1] = { id = "opds", name = _("OPDS"), store = true } end
+    local Registry = require("source.registry")
+    for _idx, meta in ipairs(Registry.listEnabled()) do
+        local source = Registry.resolve(meta.id)
+        if source and source.searchAsync then
+            list[#list + 1] = { id = meta.id, name = meta.name, source = source }
+        end
+    end
+    return list
+end
+
+--- 当前来源；记住的 id 不在可用列表里（被禁用）就退回第一个。
+---@return StoreProvider|nil
+function Store:provider()
+    local list = Store.providers()
+    for _idx, p in ipairs(list) do
+        if p.id == self.provider_id then return p end
+    end
+    return list[1]
+end
+
 ---@param opts table
 ---@return BookStorePage
 function Store:new(opts)
+    opts.provider_id = MoonSettings.get("store").provider
     opts.page = 1
     opts.page_size = 12
     opts.total = 0
@@ -107,7 +144,12 @@ end
 ---@param opts table
 ---@return table
 function Store:build(ctx, state, opts)
-    opts.empty_text = self.empty_text
+    opts.empty_text = self.search and _("没有找到相关书籍") or _("点击搜索按钮查找书籍")
+    local current = self:provider()
+    opts.provider = current and {
+        text = current.name,
+        on_pick = function(anchor) self:pickProvider(anchor) end,
+    } or nil
     opts.search_only = true
     opts.show_status = false
     opts.on_open = function(item)
@@ -125,6 +167,33 @@ function Store:build(ctx, state, opts)
         self:showSearch()
     end
     return ctx.desktop.library:build(ctx, state, opts)
+end
+
+--- 来源下拉；换来源保留搜索词，对新来源重搜。
+---@param anchor table 按钮矩形
+function Store:pickProvider(anchor)
+    local current = self:provider()
+    local items = {}
+    for i, p in ipairs(Store.providers()) do
+        items[i] = {
+            text = p.name,
+            checked = current and p.id == current.id,
+            callback = function()
+                self.provider_id = p.id
+                local settings = MoonSettings.get("store")
+                settings.provider = p.id
+                MoonSettings.save("store")
+                self.trail = {}
+                self:browse()
+            end,
+        }
+    end
+    require("ui.themes.widgets.list"):new{
+        centered = true,
+        anchor = anchor,
+        inner_width = require("ui.themes").px(160),
+        items = items,
+    }:show()
 end
 
 --- 丢弃已加载结果回第一页并重建；change 在清空后改写 trail。
@@ -203,12 +272,9 @@ function Store:fetch()
         self.desktop:updateView()
     end
 
-    self.fetch_cancel = require("store." .. self.store_id):listStoreAsync({
-        page = 1,
-        page_size = MAX_RESULTS,
-        search = search,
-        feed = top and top.feed,
-    }, function(res, err)
+    local provider = self:provider()
+    if not provider then return end
+    local function onResult(res, err)
         if desktop.closed or desktop.tab ~= self.name
             or (self.search or "") ~= search
             or self.trail[#self.trail] ~= top then
@@ -229,7 +295,17 @@ function Store:fetch()
         self.page = math.min(self.page, self:pages())
         self.state = { books = self:pageBooks() }
         self.desktop:updateView()
-    end)
+    end
+    if provider.store then
+        self.fetch_cancel = require("store." .. provider.id):listStoreAsync({
+            page = 1,
+            page_size = MAX_RESULTS,
+            search = search,
+            feed = top and top.feed,
+        }, onResult)
+    else
+        self.fetch_cancel = provider.source:searchAsync(search, onResult)
+    end
 end
 
 --- 书城 widget。
@@ -240,6 +316,11 @@ function Store:updateView()
     local state = self.state
     if not state and self.books then
         state = { books = self:pageBooks() }
+        self.state = state
+    end
+    -- 默认不加载：没搜索词也没下钻就只给空页。
+    if not state and not self.search and #self.trail == 0 then
+        state = { books = {} }
         self.state = state
     end
     if not state then
