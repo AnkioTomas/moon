@@ -5,13 +5,15 @@
 www.qidian.com 有 WAF，不用。书架是 /webcommon/bookshelf/*，要带 Cookie 里的 _csrfToken。
 进度是章：拉书架行的 readCid；上传 /webcommon/chapter/updReadStatus。
 chapterUpdateTime 必须是章节更新时间的 unix 秒，空字符串会把 getReadStatus 写坏，日期字符串直接 500。
-免费章匿名可读（isBuy 仍是 0）。VIP 章 vipStatus=1 且 isBuy 不是 1 时只有预览。
+免费章匿名可读（isBuy 仍是 0）。VIP 章 vipStatus=1 且 isBuy 不是 1 时只有预览；已购 VIP 的 content 是密文（cES / fEnS 非 0），由 fock.lua 解密（密钥 = Cookie 的 ywguid + 页面 fkp）。
 
 @module koplugin.book.source.qidian.client
 --]]
 
 require("l10n").apply()
+local Fock = require("source.qidian.fock")
 local JSON = require("json")
+local logger = require("logger")
 local Mapper = require("source.qidian.mapper")
 local Request = require("http.request")
 local SourceBase = require("source.base")
@@ -349,7 +351,24 @@ function Client.contentAsync(book_id, chapter_id, cb)
         local info = (Mapper.pageData(html) or {}).chapterInfo
         if type(info) ~= "table" then cb(nil, _("起点章节内容为空")); return end
         if Mapper.locked(info) then cb(nil, _("起点 VIP 章节未购买")); return end
-        local text = Mapper.chapterText(info.content)
+        local content = info.content
+        if Mapper.encrypted(info) then
+            local cookie = Client.cookie()
+            local uid = cookie and cookie:match("ywguid=(%d+)")
+            -- fkp 是 base64 的 `window.onkeyfocus("<密钥池>", <版本>)`，只取参数，不执行
+            local keypool, version = Text.base64Decode(tostring(info.fkp or ""))
+                :match('onkeyfocus%("([^"]+)",%s*(%d+)%)')
+            if not (uid and keypool and version and type(content) == "string") then
+                cb(nil, _("起点 VIP 章节解密失败：缺少登录信息，请重新登录起点")); return
+            end
+            local plain, derr = Fock.decrypt(content, chapter_id, keypool, version, uid)
+            if not plain then
+                logger.warn("qidian fock decrypt failed:", derr)
+                cb(nil, _("起点 VIP 章节解密失败")); return
+            end
+            content = plain
+        end
+        local text = Mapper.chapterText(content)
         if not text then cb(nil, _("起点章节内容为空")); return end
         cb(text)
     end)

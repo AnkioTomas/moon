@@ -150,6 +150,13 @@ function Mapper.locked(info)
     return type(info) == "table" and tonumber(info.vipStatus) == 1 and tonumber(info.isBuy) ~= 1
 end
 
+--- 已购 VIP 的正文是密文（cES / fEnS 非 0，官方前端 JS 解密 + 字体映射），Lua 端解不了，不能当正文。
+---@param info table|nil
+---@return boolean
+function Mapper.encrypted(info)
+    return type(info) == "table" and ((tonumber(info.cES) or 0) ~= 0 or (tonumber(info.fEnS) or 0) ~= 0)
+end
+
 --- 章节 HTML → 纯文本。起点用 <p> 分段，且不保证闭合。
 ---@param html string|nil
 ---@return string|nil

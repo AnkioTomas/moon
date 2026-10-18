@@ -107,6 +107,8 @@ do
     Assert.eq(Mapper.chapterText("<p>　　甲<p>　　乙&amp;丙"), "\n　　甲\n　　乙&丙")
     Assert.is_nil(Mapper.chapterText(""))
     Assert.is_false(Mapper.locked({ vipStatus = 0, isBuy = 0, content = "<p>甲" }))
+    Assert.is_true(Mapper.encrypted({ vipStatus = 1, isBuy = 1, cES = "2", content = "密文" }))
+    Assert.is_false(Mapper.encrypted({ cES = "0", fEnS = "0", content = "<p>甲" }))
     Assert.is_true(Mapper.locked({ vipStatus = 1, isBuy = 0 }))
     Assert.is_false(Mapper.locked({ vipStatus = 1, isBuy = 1 }))
 end
