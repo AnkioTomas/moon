@@ -3,6 +3,7 @@
 
 入口取自插件在文件管理器里的实例（`ui[插件名]`）：调它的 addToMainMenu 往空表里登记，
 收集有文案、能点的项，id = `<插件名>:<菜单键>`（菜单键是插件自己定的稳定标识，可持久化）。
+固定入口 `pinned`（最多 MAX_PINNED 个、受屏宽限制）会替换「拓展」格，每个一格，点一下直接执行。
 显示哪些由设置 `shown[id]` 决定；没选过的按默认：第三方显示，KOReader 自带插件隐藏
 （名单抄自 frontend/pluginloader.lua 的 BUILTIN_PLUGINS，那张表是局部变量，取不到）。
 
@@ -73,10 +74,11 @@ function Extensions.entries(plugin)
     return out
 end
 
---- 入口是否显示在弹层里：用户选过以选择为准，否则第三方显示、自带隐藏。
+--- 入口是否显示在弹层里：开了固定模式后，固定的入口不进弹层（二选一）；否则用户选过以选择为准，第三方显示、自带隐藏。
 ---@param entry BookExtensionEntry
 ---@return boolean
 function Extensions.isShown(entry)
+    if Extensions.pinMode() and Extensions.isPinned(entry) then return false end
     local chosen = MoonSettings.get("features.extensions").shown[entry.id]
     if chosen == nil then return not entry.builtin end
     return chosen
@@ -88,6 +90,76 @@ function Extensions.toggle(entry)
     local settings = MoonSettings.get("features.extensions")
     settings.shown[entry.id] = not Extensions.isShown(entry)
     MoonSettings.save("features.extensions")
+end
+
+--- 固定到底栏的入口最多几个（实际还受屏宽限制，见 Extensions.cells）。
+Extensions.MAX_PINNED = 2
+
+--- 固定模式：开了底栏只显示固定入口（替换「拓展」格），关了只有「拓展」格、固定设置不生效。
+---@return boolean
+function Extensions.pinMode()
+    return MoonSettings.get("features.extensions").pin_mode == true
+end
+
+---@param id string
+---@return integer|nil 在固定列表里的位置
+local function pinnedIndex(id)
+    for i, pin in ipairs(MoonSettings.get("features.extensions").pinned) do
+        if pin.id == id then return i end
+    end
+end
+
+---@param entry BookExtensionEntry
+---@return boolean
+function Extensions.isPinned(entry)
+    return pinnedIndex(entry.id) ~= nil
+end
+
+--- 固定 / 取消固定入口并落盘；固定满了返回 false。
+---@param entry BookExtensionEntry
+---@return boolean ok
+function Extensions.togglePin(entry)
+    local settings = MoonSettings.get("features.extensions")
+    local at = pinnedIndex(entry.id)
+    if at then
+        table.remove(settings.pinned, at)
+    elseif #settings.pinned >= Extensions.MAX_PINNED then
+        return false
+    else
+        settings.pinned[#settings.pinned + 1] = { id = entry.id, text = entry.text, icon = "extension" }
+    end
+    MoonSettings.save("features.extensions")
+    return true
+end
+
+---@param entry BookExtensionEntry
+---@return string 固定入口的图标名，未固定返回默认图标
+function Extensions.pinIcon(entry)
+    local at = pinnedIndex(entry.id)
+    return at and MoonSettings.get("features.extensions").pinned[at].icon or "extension"
+end
+
+--- 给已固定的入口换底栏图标并落盘。
+---@param entry BookExtensionEntry
+---@param icon string
+function Extensions.setPinIcon(entry, icon)
+    local settings = MoonSettings.get("features.extensions")
+    settings.pinned[pinnedIndex(entry.id)].icon = icon
+    MoonSettings.save("features.extensions")
+end
+
+--- 底栏格：有固定入口时替换「拓展」格，每个固定入口一格（点一下直接执行）。
+--- room = 屏宽还能多放几格；没开固定模式返回 nil（仍是「拓展」一格），开了但没固定入口则底栏不放格子。
+---@param room integer
+---@return { id: string, text: string, icon: string }[]|nil
+function Extensions.cells(room)
+    if not Extensions.pinMode() then return nil end
+    local out = {}
+    for i, pin in ipairs(MoonSettings.get("features.extensions").pinned) do
+        if i > room + 1 then break end
+        out[#out + 1] = { id = "extensions:" .. pin.id, text = pin.text, icon = pin.icon or "extension" }
+    end
+    return out
 end
 
 --- 原生菜单项的勾选标记；不是勾选项返回 nil。
@@ -204,12 +276,34 @@ function Extensions.show(plugin, anchor)
     popup(_("拓展"), items, anchor)
 end
 
+--- 点固定格：子菜单入口弹层逐层进入，叶子入口直接执行；插件已卸载则退回完整弹层。
+---@param plugin BookPlugin
+---@param id string 入口 id
+---@param anchor table
+function Extensions.run(plugin, id, anchor)
+    for _idx, entry in ipairs(Extensions.entries(plugin)) do
+        if entry.id == id then
+            local item = entry.item
+            local sub = item.sub_item_table_func and item.sub_item_table_func() or item.sub_item_table
+            if sub then return popup(entry.text, sub, anchor) end
+            local menu = { closeMenu = function() end, updateItems = function() end, backToUpperMenu = function() end }
+            local callback = item.callback_func and item.callback_func() or item.callback
+            return callback(menu)
+        end
+    end
+    Extensions.show(plugin, anchor)
+end
+
 -- 扩展点登记（features 加载器 require 本模块时执行一次；见 utils/extension.lua）。
 require("utils.extension").add("desktop.tabs", {
     id = "extensions", text = _("拓展"), icon = "extension", after = "insight",
     enabled = function() return MoonSettings.get("features.extensions").enabled and true or false end,
     -- 不是页：点格子在上方弹出第三方插件入口。
-    tap = function(desk, rect) Extensions.show(desk.plugin, rect) end,
+    tap = function(desk, rect, cell_id)
+        if cell_id then return Extensions.run(desk.plugin, cell_id:sub(#"extensions:" + 1), rect) end
+        Extensions.show(desk.plugin, rect)
+    end,
+    cells = Extensions.cells,
 })
 
 return Extensions

@@ -108,6 +108,9 @@ local function broadcast(self, method, ...)
     for _idx, page in pairs(self.ext_pages or {}) do notify(page, method, ...) end
 end
 
+--- 底栏一格的最小宽度（逻辑像素），决定扩展页签能多占几格。
+local MIN_CELL = 64
+
 --- 已启用的扩展页签（desktop.tabs），按登记顺序。
 ---@return table[]
 local function extTabs()
@@ -139,12 +142,22 @@ local function desktopTabs()
     end
     tabs[#tabs + 1] = { id = "insight", text = _("统计"), icon = "bar_chart" }
     -- 扩展页签：插在 after 指定的格子后（同一 after 按登记顺序），没写 after 就排在「设置」前。
-    for _idx, ext in ipairs(extTabs()) do
+    -- 页签可带 cells(room)：按屏宽剩余的空格数换成多个格子（替换自己那一格），没有就是它自己。
+    local exts = extTabs()
+    local room = math.floor(Screen:getWidth() / Theme.px(MIN_CELL)) - (#tabs + #exts + 1)
+    for _idx, ext in ipairs(exts) do
         local at = #tabs + 1
         for i, t in ipairs(tabs) do
             if ext.after and (t.id == ext.after or t.after == ext.after) then at = i + 1 end
         end
-        table.insert(tabs, at, { id = ext.id, text = ext.text, icon = ext.icon, after = ext.after })
+        local cells = ext.cells and ext.cells(math.max(room, 0))
+        if cells then
+            for i, cell in ipairs(cells) do
+                table.insert(tabs, at + i - 1, { id = cell.id, text = cell.text, icon = cell.icon, after = ext.after, owner = ext.id })
+            end
+        else
+            table.insert(tabs, at, { id = ext.id, text = ext.text, icon = ext.icon, after = ext.after })
+        end
     end
     tabs[#tabs + 1] = { id = "settings", text = _("设置"), icon = "settings" }
     return tabs
@@ -201,9 +214,13 @@ local function tabbar(self)
         tabs = self._tabs,
         active = self.tab,
         on_tab = function(id, rect)
-            local ext = extTab(id)
+            local cell
+            for _idx, t in ipairs(self._tabs) do
+                if t.id == id then cell = t break end
+            end
+            local ext = extTab(cell and cell.owner or id)
             if ext and not ext.create and ext.tap then
-                ext.tap(self, rect)
+                ext.tap(self, rect, cell and cell.owner and id or nil)
             else
                 self:switchTab(id)
             end
