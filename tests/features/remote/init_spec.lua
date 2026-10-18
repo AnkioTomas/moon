@@ -86,6 +86,8 @@ end
 local zmqs = {}
 package.preload["ui/uimanager"] = function()
     return {
+        _window_stack = {},
+        setDirty = function() end,
         insertZMQ = function(_self, zmq) zmqs[zmq] = true end,
         removeZMQ = function(_self, zmq) zmqs[zmq] = nil end,
     }
@@ -338,5 +340,20 @@ Assert.is_nil(zmq:waitEvent())
 Assert.eq(reported[1], "remote server")
 Assert.is_false(Remote.isRunning())
 Assert.is_nil(zmqs[zmq], "出错后摘掉轮询，不再每 50ms 重抛")
+
+-- 主题 Input 面板：焦点字段（inputs[focus_idx]）才是远程输入的目标。
+Assert.is_true(Remote.start())
+local UI = require("ui/uimanager")
+local typed = {}
+local field = {
+    addChars = function(_self, text) typed[#typed + 1] = text end,
+    getText = function() return "abc" end,
+}
+UI._window_stack[1] = { widget = { inputs = { { addChars = function() end }, field }, focus_idx = 2 } }
+Assert.eq(server_opts.handlers.get_input().text, "abc")
+Assert.is_true(server_opts.handlers.set_input("x"))
+Assert.eq(typed[1], "x")
+UI._window_stack[1] = nil
+Assert.is_false(server_opts.handlers.get_input().active)
 
 return true
