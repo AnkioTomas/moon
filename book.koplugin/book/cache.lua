@@ -76,24 +76,49 @@ local function walkAsync(root, visit, done, protected)
     return { cancel = function() cancelled = true end }
 end
 
-Cache.walkAsync = walkAsync
+--- 同步递归遍历，只给子进程用（主线程禁用：大目录会卡 UI）；visit 只收文件。
+---@param root string
+---@param visit fun(path: string, attr: table)
+function Cache.walkFiles(root, visit)
+    local stack = { root }
+    while #stack > 0 do
+        local dir = table.remove(stack)
+        local iter, state = lfs.dir(dir)
+        if type(iter) == "function" then
+            for name in iter, state do
+                if name ~= "." and name ~= ".." then
+                    local path = dir .. "/" .. name
+                    local attr = lfs.attributes(path)
+                    if attr and attr.mode == "directory" then
+                        stack[#stack + 1] = path
+                    elseif attr then
+                        visit(path, attr)
+                    end
+                end
+            end
+        end
+    end
+end
 
---- Cooperative cache size scan. Never walk the cache tree during widget build.
---- 缓存目录字节数之外再计入 sqlite 库文件本身；无法 stat 的项直接跳过。
+--- 缓存体积统计：几千个文件的遍历放子进程，不占主线程；再计入 sqlite 库文件本身。
 ---@param cb fun(bytes: number)
 ---@return { cancel: fun() }
 function Cache.sizeBytesAsync(cb)
-    local total = 0
-    return walkAsync(Paths.cacheDir(), function(_path, attr)
-        if attr.mode == "file" then total = total + (tonumber(attr.size) or 0) end
-        return true
-    end, function()
-        local db_attr = lfs.attributes(Paths.dbPath())
-        if db_attr and db_attr.mode == "file" then
-            total = total + (tonumber(db_attr.size) or 0)
-        end
-        cb(total)
-    end)
+    local cache_dir, db_path = Paths.cacheDir(), Paths.dbPath()
+    return require("workers.job").run(function()
+        local total = 0
+        Cache.walkFiles(cache_dir, function(_path, attr) total = total + (tonumber(attr.size) or 0) end)
+        local db_attr = lfs.attributes(db_path)
+        if db_attr and db_attr.mode == "file" then total = total + (tonumber(db_attr.size) or 0) end
+        return total
+    end, {
+        name = "cache.size", kind = "light",
+        on_done = cb,
+        on_failed = function(err)
+            logger.warn("book cache size failed", err)
+            cb(0)
+        end,
+    })
 end
 
 --- 后台分 tick 删除一个已脱离书库的目录（删书时改名移走的工作目录）；失败只记日志。

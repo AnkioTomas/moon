@@ -11,7 +11,7 @@ local lfs = require("libs/libkoreader-lfs")
 
 local Cover = {}
 
-local MAX_SIDE = 1000
+local MAX_SIDE = 600
 
 local MOBI_EXT = { mobi = true, prc = true, azw = true }
 

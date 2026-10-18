@@ -15,10 +15,13 @@ local files = {
     ["/data/.moon/book.log"] = 2,
 }
 package.loaded["book.cache"] = {
-    walkAsync = function(_root, visit, done)
-        visit("/data/.moon/cache", { mode = "directory", size = 4096 })
+    walkFiles = function(_root, visit)
         for path, size in pairs(files) do visit(path, { mode = "file", size = size }) end
-        done(true)
+    end,
+}
+package.loaded["workers.job"] = {
+    run = function(worker, opts)
+        opts.on_done(worker())
         return { cancel = function() end }
     end,
 }
@@ -34,7 +37,7 @@ Assert.eq(Usage.label("cache/local/image"), "local 封面与图片")
 
 local got, got_total
 Usage.measureAsync(function(list, total) got, got_total = list, total end)
-Assert.eq(got_total, 195, "目录不计入")
+Assert.eq(got_total, 195)
 Assert.eq(got[1][1], "cache/local/image")
 Assert.eq(got[1][2], 150)
 Assert.eq(got[2][1], "database")

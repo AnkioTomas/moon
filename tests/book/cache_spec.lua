@@ -137,7 +137,14 @@ end
 package.loaded["book.cache"] = nil
 local Cache = require("book.cache")
 
--- ── sizeBytesAsync：递归统计 + 含 db 文件大小 ───────────
+-- ── sizeBytesAsync：子进程里遍历（这里换成同步替身）+ 含 db 文件大小 ───
+package.loaded["workers.job"] = {
+    run = function(worker, opts)
+        local ok, result = pcall(worker)
+        if ok then opts.on_done(result) else opts.on_failed(result) end
+        return { cancel = function() end }
+    end,
+}
 do
     resetTree()
     writeFile(CACHE .. "/moon/book/aaa/1.html", 100)
@@ -149,34 +156,29 @@ do
     Cache.sizeBytesAsync(function(n)
         got = n
     end)
-    Assert.is_nil(got) -- flush 前不得回调
-    Stubs.flush()
     Assert.eq(got, 197) -- 100+50+30+17
 end
 
--- ── sizeBytesAsync：空树且无 db 文件 → 0 ───────────────
+-- 空树且无 db 文件 → 0
 do
     resetTree()
     local got
     Cache.sizeBytesAsync(function(n)
         got = n
     end)
-    Stubs.flush()
     Assert.eq(got, 0)
 end
 
--- ── sizeBytesAsync：cancel 后不再回调 ──────────────────
+-- 子进程失败：记日志并回 0，调用方不会一直停在「计算中」
 do
     resetTree()
-    writeFile(CACHE .. "/moon/book/aaa/1.html", 10)
+    package.loaded["workers.job"].run = function(_worker, opts)
+        opts.on_failed("boom")
+        return { cancel = function() end }
+    end
     local got
-    local job = Cache.sizeBytesAsync(function(n)
-        got = n
-    end)
-    job.cancel()
-    Stubs.flush()
-    Assert.is_nil(got)
-    Assert.eq(lfs.attributes(CACHE .. "/moon/book/aaa/1.html", "mode"), "file") -- 未误删
+    Cache.sizeBytesAsync(function(n) got = n end)
+    Assert.eq(got, 0)
 end
 
 -- ── clearAsync→purgeDirAsync：递归删除 + db 先清 + 根目录重建 ──
