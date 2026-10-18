@@ -312,12 +312,6 @@ do
     Assert.is_nil(data)
     Assert.eq(err, "boom", "一本都没成功就报错，行留作脏行")
 
-    src.cfg.sync_reading_time = false
-    posted = {}
-    src:pushStatsAsync(rows, function(value) data = value end)
-    Assert.len(posted, 0, "关闭同步阅读时间只在本地确认")
-    Assert.len(data.synced_ids, 3)
-
     fake_client.guestTokenAsync, fake_client.reportAppReadAsync = nil, nil
     Eink.credentials, Eink.installId = real_creds, real_install
 end
@@ -332,6 +326,10 @@ do
         require("source.wechat.context").reader(book_id, opts.chapter_uid).entered = true
         cb({ ok = true })
     end
+    local stats_pushes = {}
+    stub("book.stats", function()
+        return { push = function(source) stats_pushes[#stats_pushes + 1] = source end }
+    end)
     local identity = { source_id = "wechat", stable_id = "bp", chapter_idx = 1 }
     src:onEvent("chapter_changed", {
         identity = identity,
@@ -340,6 +338,7 @@ do
     require("support.stubs").flush()
     Assert.len(entered, 1, "开读章节立即进入阅读")
     Assert.eq(entered[1].chapter_uid, "u1")
+    Assert.len(stats_pushes, 1, "开章时顺手补报上一章已落库的时长")
 
     -- 开书拉云端进度期间挂起 enter，拉取回调之后再发，避免 enter 写的位置吞掉进度冲突。
     local pull_cb

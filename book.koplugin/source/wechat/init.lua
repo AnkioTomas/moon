@@ -91,7 +91,7 @@ local function enterReading(self, payload)
     end)
 end
 
---- 开读章节时进入阅读会话；其余事件交给基类。阅读时长不在这里报：本地采集的统计行经 pushStatsAsync 按 App 协议上报。
+--- 开读章节时进入阅读会话；其余事件交给基类。阅读时长不实时报：本地采集的统计行经 pushStatsAsync 按 App 协议上报，开章（上一章已落库）、关书、唤醒、联网时推。
 ---@param event string
 ---@param payload table|nil
 function Source:onEvent(event, payload)
@@ -102,6 +102,10 @@ function Source:onEvent(event, payload)
             pull.enter = payload
         else
             enterReading(self, payload)
+        end
+        -- 上一章的时长这时已落库：有网就顺手补报（Stats.push 自带在飞去重，没网留作脏行）。
+        if self:configured() and require("ui/network/manager"):isConnected() then
+            require("book.stats").push(self)
         end
         return
     end
@@ -461,17 +465,11 @@ end
 --- 按 App 协议（``/book/read``）上报本地阅读时长，一本书一个请求，时长按小时分桶，
 --- 离线攒下的时段联网后照原时间补报。成功的书确认其全部行，失败就停，其余行留给下一轮。
 --- 书目录没缓存（定位不到章节）的行无法上报，直接确认丢弃，免得卡住队首。
---- 关闭「同步阅读时间」时只在本地确认。
 ---@param rows table[]|nil
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Source:pushStatsAsync(rows, cb)
     local synced = {}
-    if self.cfg.sync_reading_time == false then
-        for _idx, row in ipairs(rows or {}) do synced[#synced + 1] = row.id end
-        cb({ ok = true, synced_ids = synced })
-        return nil
-    end
     local order, books = {}, {}
     for _idx, row in ipairs(rows or {}) do
         local book = books[row.stable_id]
