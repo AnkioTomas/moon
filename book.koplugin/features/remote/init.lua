@@ -823,8 +823,9 @@ local function getStatus()
         status.charging = Device.powerd:isCharging() and true or false
     end
     local DataStorage = require("datastorage")
-    local _total, _free, available = require("ffi/util").df(DataStorage:getDataDir())
-    status.storage_available = available
+    -- 旧版 KOReader 的 df 只返回 total, free，没有第三个 available
+    local _total, free, available = require("ffi/util").df(DataStorage:getDataDir())
+    status.storage_available = available or free
 
     local session = require("reader.session").current()
     if session then

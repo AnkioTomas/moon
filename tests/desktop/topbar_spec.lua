@@ -29,7 +29,9 @@ MoonSettings.get = function(section)
 end
 
 local avail_disk = 10 * 1000 * 1000 * 1000
-require("ffi/util").df = function() return 0, 0, avail_disk end
+require("ffi/util").df = function()
+    if avail_disk then return 0, 0, avail_disk end
+end
 
 package.preload["datetime"] = function()
     return { secondsToHour = function(_, twelve) return twelve and "1:23 PM" or "13:23" end }
