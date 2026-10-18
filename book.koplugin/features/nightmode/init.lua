@@ -218,7 +218,7 @@ NightMode.sense = Guard.wrap("nightmode sense", function()
     if daylight then NightMode.refreshWeather() end
 end)
 
---- 取当前天气（只读缓存；过期由 ensure 入队）。离线拿到空，倍率回落到 1。
+--- 取当前天气（只读缓存并订阅，不自己拉网：首页放了天气组件才会有数据）。没有数据时倍率为 1。
 function NightMode.refreshWeather()
     local Weather = require("online.weather")
     Weather.city = Text.trim(MoonSettings.get("desktop.pages.home").home_weather_city)
@@ -228,13 +228,11 @@ function NightMode.refreshWeather()
         gain = g
         NightMode.sense()
     end
-    local wx = Weather:current()
-    if wx then apply(wx) end
+    apply(Weather:current())
     if not wx_watch then
         wx_watch = apply
         Weather:watch(wx_watch)
     end
-    Weather:ensure()
 end
 
 --- 前光变化（FrontlightStateChanged，同步广播）：灯亮着且亮度不是自动设的值，就是用户手动调了，关掉自动亮度。

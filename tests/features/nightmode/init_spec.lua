@@ -373,7 +373,7 @@ end
 do -- 天气：白天时段乘倍率，每小时重看；夜间不看天气；离线取不到回落到 1
     lights = {}
     night.auto_light_periods = { 3, 8, 15, 20, 18, 12, 7, 3 }
-    weather_reply = { code = "rain" }
+    weather_current = { code = "rain" }
     fake_now = { hour = 12, min = 0, sec = 0 }
     NightMode.setLight(true)
     Assert.eq(lights[#lights], 0.32, "中午 20% × 雨天 1.6")
@@ -382,7 +382,7 @@ do -- 天气：白天时段乘倍率，每小时重看；夜间不看天气；�
     local count = #lights
     NightMode.sense()
     Assert.len(lights, count, "天气没变不重设")
-    weather_reply = { code = "overcast" }
+    weather_current = { code = "overcast" }
     NightMode.sense()
     Assert.eq(lights[#lights], 0.3, "转阴 20% × 1.5")
     night.auto_light_periods[4] = 80
@@ -393,12 +393,12 @@ do -- 天气：白天时段乘倍率，每小时重看；夜间不看天气；�
     fake_now = { hour = 23, min = 0, sec = 0 }
     NightMode.sense()
     Assert.eq(lights[#lights], 0.03, "深夜不乘倍率")
-    Assert.eq(weather_fetches, 0, "夜间不取天气")
+    Assert.eq(weather_fetches, 0, "不自己拉网")
     Assert.eq(scheduled[NightMode.sense], 3600, "深夜到零点")
-    weather_reply = {}
+    weather_current = nil
     fake_now = { hour = 9, min = 0, sec = 0 }
     NightMode.sense()
-    Assert.eq(lights[#lights], 0.15, "离线取不到天气按原值")
+    Assert.eq(lights[#lights], 0.15, "没有天气数据按原值")
     NightMode.setLight(false)
 end
 
