@@ -1,5 +1,5 @@
 --[[--
-online.onNetworkConnected：过期才拉天气 / 一言 / 摸鱼日报 / 必应。
+各端点 ensure：过期才拉天气 / 一言 / 摸鱼日报 / 必应。
 @module tests.online.init_spec
 --]]
 
@@ -74,26 +74,25 @@ package.preload["workers.tasks"] = function()
     }
 end
 
-local labels = {}
 package.preload["ui.guard"] = function()
     return {
-        call = function(label, fn, ...)
-            labels[#labels + 1] = label
+        call = function(_label, fn, ...)
             return fn(...)
         end,
     }
 end
 
-local Online = require("online")
-Assert.is_nil(Online.onResume)
-local plugin = { path = "book.koplugin" }
-Online.onNetworkConnected(plugin)
+local function ensureAll()
+    for _idx, name in ipairs({ "weather", "hitokoto", "myrl", "bing" }) do
+        require("online." .. name):ensure()
+    end
+end
+ensureAll()
 Assert.eq(#requests, 4)
 Assert.eq(requests[1].url, "https://api.ankio.net/weather?city=")
 Assert.eq(requests[2].url, "https://api.ankio.net/hitokoto")
 Assert.eq(requests[3].url, "https://api.ankio.net/myrl?type=json")
 Assert.eq(requests[4].url, "https://api.ankio.net/bing?type=json")
-Assert.eq(table.concat(labels, ","), "online.weather,online.hitokoto,online.myrl,online.bing")
 
 requests[1].cb('{"current_condition":[{"temp_C":"1","weatherCode":"113","weatherDesc":[{"value":"Sunny"}]}]}')
 requests[2].cb('{"hitokoto":"月"}')
@@ -109,8 +108,8 @@ Assert.is_true(tostring(requests[5].url):find("myrl", 1, true) ~= nil)
 Assert.eq(requests[6].kind, "download")
 Assert.eq(requests[6].url, "https://www.bing.com/th?id=OHR.x.jpg")
 
-requests, labels = {}, {}
-Online.onNetworkConnected(plugin)
+requests = {}
+ensureAll()
 Assert.eq(#requests, 0, "未过期不拉网")
 
 os.execute("rm -rf '" .. cache_dir .. "'")

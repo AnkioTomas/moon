@@ -5,7 +5,7 @@ KOReader 会为 FileManager 和 Reader 各建一个插件实例；
 关书后 FM 侧实例才是开桌面的宿主。
 
 本文件只做接线：init 时挂 KOReader 外壳（菜单 / 手势 / 启动项在 menu.lua，开机自动开桌面在
-Desktop.autoOpen），其余是生命周期转发：阅读会话 / 启用源推脏行 / online.onNetworkConnected / features / 后台任务。
+Desktop.autoOpen），其余是生命周期转发：阅读会话 / 启用源推脏行 / features / 后台任务。
 业务规则在 book/、reader/session、source/。
 
 @module koplugin.book
@@ -35,7 +35,6 @@ require("features").load()
 local SourceRegistry = require("source.registry")
 local Desktop = require("desktop")
 local Features = require("features")
-local Online = require("online")
 local Guard = require("ui.guard")
 local Menu = require("menu")
 local Session = require("reader.session")
@@ -81,7 +80,6 @@ local function init(self)
     Menu.onCreate(self)
     require("source.auth").onExpired(function(id, msg) require("desktop.sync").promptLogin(self, id, msg) end)
     Guard.call("sources.pushDirty", pushDirty)
-    Guard.call("online.onNetworkConnected", Online.onNetworkConnected, self)
     Features.emit("onCreate", self)
 end
 BookPlugin.init = Guard.wrap("init", init)
@@ -104,12 +102,11 @@ function BookPlugin:onResume()
     Features.emit("onResume", self)
 end
 
---- 网络恢复：续跑等网络的后台任务、源推脏、online 补拉、feature 自己刷新。
+--- 网络恢复：续跑等网络的后台任务、源推脏、feature 自己刷新。
 function BookPlugin:onNetworkConnected()
     logger.info("book lifecycle network_connected")
     Guard.call("tasks.onNetworkConnected", Tasks.onNetworkConnected)
     Guard.call("sources.pushDirty", pushDirty)
-    Guard.call("online.onNetworkConnected", Online.onNetworkConnected, self)
     Features.emit("onNetworkConnected", self)
 end
 

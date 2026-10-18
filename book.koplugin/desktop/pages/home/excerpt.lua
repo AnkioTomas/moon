@@ -26,6 +26,9 @@ function M:sample()
     return quote
 end
 
+--- 书摘只用已缓存的一言做回退，不为它拉网。
+function M:onActivate() end
+
 --- 创建书摘引言；有书籍身份时整块可点开该书。
 ---@return table
 function M:createWidget()
