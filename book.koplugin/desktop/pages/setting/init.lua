@@ -31,8 +31,6 @@ local HttpSetting = require("http.proxy.setting")
 ---@field desktop BookDesktop
 ---@field page integer
 ---@field source BookSettingsSource 顶栏点源名经此换源
----@field cache_size_label string|nil 缓存体积文案；nil 时维护行重新测量
----@field cache_size_job { cancel: fun() }|nil 缓存体积测量任务
 ---@field cache_clear_job { cancel: fun() }|nil 清理缓存任务（不随页面取消，清理必须落地）
 local Settings = {}
 Settings.__index = Settings
@@ -48,14 +46,9 @@ end
 function Settings:activate(changed)
     if changed == nil then return end
     self:reset()
-    self.cache_size_label = nil
 end
 
 function Settings:destroy()
-    if self.cache_size_job then
-        self.cache_size_job.cancel()
-        self.cache_size_job = nil
-    end
 end
 
 --- 回到设置根页并关闭功能叠层。
@@ -192,7 +185,6 @@ local function coreEntries(desktop)
             page = { title = _("AI 接口"), sections = function() return {{ title = _("AI"), rows = AISettings:rows(desktop) }} end },
         },
         network,
-        { group = "maintenance", order = 20, row = Maintenance:cacheRow(desktop) },
         { group = "maintenance", order = 30, row = Maintenance:clearStatsRow(desktop) },
         { group = "maintenance", order = 40, row = Maintenance:importKoreaderStatsRow(desktop) },
         { group = "maintenance", order = 70, row = Maintenance:debugLogRow(desktop) },
