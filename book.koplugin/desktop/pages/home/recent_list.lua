@@ -175,7 +175,7 @@ local function gridMetrics(width, area_h)
     })
     if ch > max_h then
         ch = max_h
-        cw = math.max(1, math.min(slot_w, math.floor(ch * 2 / 3)))
+        cw = CoverCell.stretchW(slot_w, math.max(1, math.min(slot_w, math.floor(ch * 2 / 3))), ch)
         cell_h = ch + extra
     end
     area_h = area_h or 0
@@ -186,7 +186,7 @@ local function gridMetrics(width, area_h)
         if need > area_h then
             local fit_cell = math.max(1, math.floor((area_h - gaps) / rows))
             ch = math.max(1, math.min(ch, fit_cell - extra))
-            cw = math.max(1, math.min(slot_w, math.floor(ch * 2 / 3)))
+            cw = CoverCell.stretchW(slot_w, math.max(1, math.min(slot_w, math.floor(ch * 2 / 3))), ch)
             cell_h = math.min(ch + extra, fit_cell)
         end
     end

@@ -185,7 +185,17 @@ function CoverCell.denseCoverMetrics(avail_w, budget_h, opts)
             cell_h = ch + title_extra
         end
     end
+    cw = CoverCell.stretchW(slot_w, cw, ch)
     return slot_w, cw, ch, cols, gap, row_gap, cell_h
+end
+
+--- 封面按高度压矮后，宽度向槽宽拉伸（最宽 3:4），免得列间空隙过大。
+---@param slot_w number
+---@param cw number
+---@param ch number
+---@return number
+function CoverCell.stretchW(slot_w, cw, ch)
+    return math.max(cw, math.min(slot_w, math.floor(ch * 3 / 4)))
 end
 
 --- 主角封面：超过最大高度则压高度并回缩宽度，保持约 2:3。

@@ -18,6 +18,7 @@ end
 package.preload["ui.widgets.cover"] = function()
     return {
         gridCoverMaxH = function() return 200 end,
+        stretchW = function(_, cw) return cw end,
         denseCoverMetrics = function(_, _, opts)
             return 100, 100, 150, opts.min_cols, 8, 10, 150 + opts.title_extra
         end,

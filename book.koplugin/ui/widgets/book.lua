@@ -487,6 +487,8 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         width = cover_w,
         height = cover_h,
         alpha = false,
+        -- 封面框比 2:3 宽（格子留给封面拉宽）时拉伸铺满，免得框里留白边。
+        stretch = cover_w * 3 > cover_h * 2 + 2,
         style = {},
         fallback = PlainCover:new{
             title = title,
