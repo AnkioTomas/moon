@@ -11,7 +11,6 @@ local Base = require("source.base")
 local Assets = require("source.assets")
 local Comic = require("source.fanqie.comic")
 local Paths = require("utils.paths")
-local logger = require("utils.log")
 require("l10n").apply()
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -21,8 +20,6 @@ local M = {}
 ---@class FanqieSource : BookSource
 ---@field settings FanqieSettings
 ---@field client FanqieClient
----@field _next_put integer|nil 下次阅读中上传进度的时刻
----@field _putting boolean|nil
 
 local Source = setmetatable({}, { __index = Base })
 Source.__index = Source
@@ -355,26 +352,6 @@ function Source:putProgressAsync(identity, pos, cb)
             end)
     end)
     return h
-end
-
--- 阅读中的进度上传间隔（秒）：番茄有风控，只防中途断电 / 被杀丢进度，不逐页上传。
-local PROGRESS_INTERVAL = 120
-
---- 开章起计时（开书拉进度 / 冲突对话期间不抢先覆盖云端）；翻页到点且已联网才上传当前位置。
----@param event string
----@param payload table|nil
-function Source:onEvent(event, payload)
-    if event == "chapter_changed" then
-        self._next_put = os.time() + PROGRESS_INTERVAL
-    elseif event == "page_changed" and payload.position and self._next_put and os.time() >= self._next_put
-        and not self._putting and self:configured() and require("ui/network/manager"):isConnected() then
-        self._putting = true
-        self._next_put = os.time() + PROGRESS_INTERVAL
-        self:putProgressAsync(payload.identity, payload.position, function(ok, err)
-            self._putting = false
-            if not ok then logger.warn("fanqie periodic progress failed", err) end
-        end)
-    end
 end
 
 --- 阅读页是否显示他人段评（设置页开关，默认关）。

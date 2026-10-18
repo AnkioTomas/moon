@@ -276,32 +276,6 @@ do
     Assert.matches(res.data[1].cover, "p6%-novel%.byteimg%.com")
 end
 
--- 阅读中定时上传：开章起计时，没到点不发；到点且联网才发一次
-do
-    package.preload["ui/network/manager"] = function()
-        return { isConnected = function() return true end }
-    end
-    local pos = { chapter_idx = 1, chapter_fraction = 0.5 }
-    local ev = { identity = ref, position = pos }
-    put_args = nil
-    src:onEvent("page_changed", ev)
-    Assert.is_nil(put_args)
-    src:onEvent("chapter_changed", ev)
-    src:onEvent("page_changed", ev)
-    drain()
-    Assert.is_nil(put_args)
-    src._next_put = os.time() - 1
-    put_wire = { code = 0 }
-    src:onEvent("page_changed", ev)
-    drain()
-    Assert.eq(put_args.item_id, "9876543210987654321")
-    put_args = nil
-    src:onEvent("page_changed", ev)
-    Assert.is_nil(put_args)
-    package.preload["ui/network/manager"] = nil
-    package.loaded["ui/network/manager"] = nil
-end
-
 -- 封面走基类：查书库 cover（同步书架时写入的手机 CDN 地址）
 Assert.matches(src:coverRequest(ref).url, "p6%-novel%.byteimg%.com")
 
