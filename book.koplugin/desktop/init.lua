@@ -249,6 +249,12 @@ function Desktop:onSourceChanged()
     Sync.open(self)
 end
 
+--- KOReader 事件 StoreChanged（书城开关 / 来源地址变了）：只重置书城页并刷新底栏，不换源、不跳首页。
+function Desktop:onStoreChanged()
+    self.store:reset()
+    self:updateView()
+end
+
 --- 建各页与手势区，拼出第一帧（显示与刷屏由调用方 UIManager:show 负责）。
 function Desktop:init()
     self.active = false

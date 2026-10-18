@@ -52,7 +52,7 @@ function Setting.open()
         callback = function(url, username, password)
             Setting.save(url, username, password)
             require("ui.themes.widgets.toast"):new{ text = _("已保存"), timeout = 2 }:show()
-            require("source.registry").notifyChanged()
+            require("ui/uimanager"):broadcastEvent(require("ui/event"):new("StoreChanged"))
         end,
     }:show()
 end

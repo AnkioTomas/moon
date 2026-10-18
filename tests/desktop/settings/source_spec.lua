@@ -55,7 +55,11 @@ package.preload["source.local.setting"] = function()
     }
 end
 package.preload["ui/widget/infomessage"] = function() return { new = function(_, o) return o end } end
-package.preload["ui/uimanager"] = function() return { show = function() end } end
+local broadcasts = {}
+package.preload["ui/uimanager"] = function()
+    return { show = function() end, broadcastEvent = function(_self, ev) broadcasts[#broadcasts + 1] = ev.name end }
+end
+package.preload["ui/event"] = function() return { new = function(_self, name) return { name = name } end } end
 local Themed = require("support.theme_stubs")
 Themed.install()
 package.preload["ui.themes.widgets.row"] = function()
@@ -126,6 +130,7 @@ Assert.is_false(config[#config].rows[1]().toggle)
 config[#config].rows[1]().callback()
 Assert.eq(saved[#saved], "store")
 Assert.is_true(store_cfg.opds_enabled)
+Assert.eq(broadcasts[#broadcasts], "StoreChanged")
 local opds_rows = src:configSections{ desktop = desktop, plugin = nil }
 opds_rows = opds_rows[#opds_rows].rows
 Assert.len(opds_rows, 2)

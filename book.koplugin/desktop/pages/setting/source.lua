@@ -196,7 +196,7 @@ function Source:configSections(ctx)
                 callback = function()
                     store.enabled = not on
                     MoonSettings.save("store")
-                    SourceRegistry.notifyChanged()
+                    require("ui/uimanager"):broadcastEvent(require("ui/event"):new("StoreChanged"))
                 end,
             })
         end },
@@ -219,7 +219,7 @@ function Source:configSections(ctx)
                 callback = function()
                     store[key] = not on
                     MoonSettings.save("store")
-                    SourceRegistry.notifyChanged()
+                    require("ui/uimanager"):broadcastEvent(require("ui/event"):new("StoreChanged"))
                 end,
             })
         end }
