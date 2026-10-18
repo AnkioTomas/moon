@@ -117,13 +117,14 @@ end
 
 --- 固定 / 取消固定入口并落盘；固定满了返回 false。
 ---@param entry BookExtensionEntry
+---@param limit integer|nil 屏宽允许的个数（桌面 cellCapacity），缺省只受 MAX_PINNED 限制
 ---@return boolean ok
-function Extensions.togglePin(entry)
+function Extensions.togglePin(entry, limit)
     local settings = MoonSettings.get("features.extensions")
     local at = pinnedIndex(entry.id)
     if at then
         table.remove(settings.pinned, at)
-    elseif #settings.pinned >= Extensions.MAX_PINNED then
+    elseif #settings.pinned >= math.min(Extensions.MAX_PINNED, limit or Extensions.MAX_PINNED) then
         return false
     else
         settings.pinned[#settings.pinned + 1] = { id = entry.id, text = entry.text, icon = "extension" }

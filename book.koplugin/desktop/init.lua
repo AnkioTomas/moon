@@ -160,13 +160,13 @@ local function desktopTabs()
         end
     end
     tabs[#tabs + 1] = { id = "settings", text = _("设置"), icon = "settings" }
-    return tabs
+    return tabs, room
 end
 
 --- 重算 Tab；当前 tab 不在列表中则回退 home（换源 / 书城开关）。
 ---@param self BookDesktop
 local function syncTabs(self)
-    self._tabs = desktopTabs()
+    self._tabs, self._room = desktopTabs()
     -- 扩展页签关掉后丢掉它的页（连同缓存与在飞请求）。
     for id, page in pairs(self.ext_pages) do
         if not extTab(id) then
@@ -492,6 +492,12 @@ function Desktop:build()
     }
     if old then old:free() end
     logger.dbg("book.perf desktop.build", Perf.elapsedMs(started_at), "ms", self.tab)
+end
+
+--- 一个扩展页签最多能展开成几格（按屏宽；至少 1）。
+---@return integer
+function Desktop:cellCapacity()
+    return math.max(self._room, 0) + 1
 end
 
 --- 刷新：外壳变了整壳重建全刷；否则换内容层和底栏层，只刷顶栏以下。
