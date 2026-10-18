@@ -1,7 +1,8 @@
 --[[--
-iRead 源设置：个人 Token。
+iRead 源设置：登录。
 
-在 iread.ankio.net 登录后打开「个人 Token」页创建 Token，复制粘贴进来；粘贴时先向服务端校验，通过才保存并重载源。
+两种进法：远程管理里的「浏览器登录」（浏览器扩展交网页 Cookie），或在 iread.ankio.net 创建「个人 Token」粘贴进来。
+两条路都先向服务端校验，通过才保存并重载源；Token 优先于 Cookie，换一种登录会清掉另一种。
 
 @module koplugin.book.source.iread.setting
 --]]
@@ -15,7 +16,7 @@ local Setting = {}
 
 ---@return boolean
 local function loggedIn()
-    return require("source.iread.client").token() ~= nil
+    return require("source.iread.client").credential() ~= nil
 end
 
 ---@return string, boolean
@@ -31,6 +32,63 @@ function Setting.parseToken(input)
     return (require("utils.text").trim(input):gsub("^[Bb]earer%s+", ""))
 end
 
+---@param name any
+---@param value any
+---@return boolean
+local function validPair(name, value)
+    return type(name) == "string" and name:match("^[%w_%-%.]+$") ~= nil
+        and type(value) == "string" and value ~= "" and not value:find("[;\r\n]")
+end
+
+--- 浏览器扩展交来的 payload.cookies → Cookie 请求头；只收发往 iread.ankio.net 的 Cookie（本站与 ankio.net 父域）。
+---@param payload table
+---@return string
+function Setting.fromPayload(payload)
+    local pairs_list = {}
+    for _idx, cookie in ipairs(type(payload.cookies) == "table" and payload.cookies or {}) do
+        local domain = type(cookie) == "table" and type(cookie.domain) == "string"
+            and cookie.domain:gsub("^%.", ""):lower()
+        if (domain == "iread.ankio.net" or domain == "ankio.net") and validPair(cookie.name, cookie.value) then
+            pairs_list[#pairs_list + 1] = cookie.name .. "=" .. cookie.value
+        end
+    end
+    table.sort(pairs_list)
+    return table.concat(pairs_list, "; ")
+end
+
+--- 校验凭据，通过才保存（Token 与 Cookie 互斥）并重载源。
+---@param cred IReadCredential
+---@param cb fun(user: table|nil, err: string|nil)
+local function save(cred, cb)
+    require("source.iread.client").userAsync(cred, function(user, err)
+        if not user then return cb(nil, err or _("登录失败")) end
+        local settings = require("utils.settings")
+        local cfg = settings.getSource(SOURCE_ID)
+        cfg.token, cfg.cookie = cred.token, cred.cookie
+        settings.saveSource(SOURCE_ID, cfg)
+        require("source.auth").ok(SOURCE_ID)
+        require("source.registry").reload()
+        cb(user)
+    end)
+end
+
+--- 浏览器扩展登录（features/cookie）。
+Setting.browser = {
+    domain = "iread.ankio.net",
+    scope = "cookie",
+    login = "https://iread.ankio.net/user/token",
+    check = "https://iread.ankio.net/user/token",
+    icon = "https://iread.ankio.net/static/icons/favicon-32x32.png",
+    isAuthorized = function()
+        return loggedIn() and not require("source.auth").expired(SOURCE_ID)
+    end,
+    apply = function(payload, cb)
+        local cookie = Setting.fromPayload(payload)
+        if cookie == "" then return cb(false, _("没有读到 Cookie")) end
+        save({ cookie = cookie }, function(user, err) cb(user ~= nil, err) end)
+    end,
+}
+
 ---@param token string
 local function verify(token)
     local Toast = require("ui.themes.widgets.toast")
@@ -39,17 +97,12 @@ local function verify(token)
             title = _("iRead"), text = _("正在校验 Token…"), dismissable = false,
         }
         waiting:show()
-        require("source.iread.client").userAsync(token, function(user, err)
+        save({ token = token }, function(user, err)
             waiting:close()
             if not user then
                 Toast:new{ text = err or _("Token 无效"), timeout = 3 }:show()
                 return
             end
-            local settings = require("utils.settings")
-            local cfg = settings.getSource(SOURCE_ID)
-            cfg.token = token
-            settings.saveSource(SOURCE_ID, cfg)
-            require("source.registry").reload()
             Toast:new{ text = T(_("已登录：%1"), user.nickname), timeout = 2 }:show()
         end)
     end)
@@ -92,7 +145,7 @@ function Setting.rows()
                     ok_callback = function()
                         local settings = require("utils.settings")
                         local cfg = settings.getSource(SOURCE_ID)
-                        cfg.token = nil
+                        cfg.token, cfg.cookie = nil, nil
                         settings.saveSource(SOURCE_ID, cfg)
                         require("ui.themes.widgets.toast"):new{ text = _("已退出登录"), timeout = 2 }:show()
                         require("source.registry").reload()

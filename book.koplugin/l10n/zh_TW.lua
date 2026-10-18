@@ -1585,7 +1585,7 @@ return {
     ["iRead 账号"] = "iRead 帳號",
     ["iRead 账号信息为空"] = "iRead 帳號資訊為空",
     ["iRead 个人 Token"] = "iRead 個人 Token",
-    ["iRead 登录已失效，请重新填写个人 Token"] = "iRead 登入已失效，請重新填寫個人 Token",
+    ["iRead 登录已失效，请重新登录"] = "iRead 登入已失效，請重新登入",
     ["iRead 目录为空"] = "iRead 目錄為空",
     ["iRead 章节内容为空"] = "iRead 章節內容為空",
     ["Token 无效"] = "Token 無效",

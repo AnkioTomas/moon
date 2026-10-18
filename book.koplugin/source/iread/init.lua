@@ -36,7 +36,7 @@ end
 
 ---@return boolean
 function Source:configured()
-    return Client.token() ~= nil
+    return Client.credential() ~= nil
 end
 
 ---@param rows table[]

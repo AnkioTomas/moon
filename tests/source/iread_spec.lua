@@ -63,7 +63,7 @@ do
     rows = nil
     Client.shelfAsync(function(v, e) rows, err = v, e end)
     Assert.is_nil(rows)
-    Assert.eq(err, "iRead 登录已失效，请重新填写个人 Token")
+    Assert.eq(err, "iRead 登录已失效，请重新登录")
     Assert.is_true(Auth.expired("iread"))
 end
 
@@ -80,6 +80,30 @@ do
     Client.chaptersAsync({ name = "书" }, function(_, e) err = e end)
     Assert.len(requests, 0)
     cfg.token = "a1b2"
+end
+
+-- Cookie 登录（浏览器扩展）：只发 Cookie，不带 Bearer；Token 优先。
+do
+    cfg.token, cfg.cookie = nil, "NovaSession=abc"
+    requests = {}
+    replies = { '{"code":200,"data":[{"name":"书"}]}' }
+    Client.shelfAsync(function() end)
+    Assert.eq(requests[1].opts.headers.Cookie, "NovaSession=abc")
+    Assert.is_nil(requests[1].opts.headers.Authorization)
+    cfg.token = "a1b2"
+    requests = {}
+    replies = { '{"code":200,"data":[{"name":"书"}]}' }
+    Client.shelfAsync(function() end)
+    Assert.eq(requests[1].opts.headers.Authorization, "Bearer a1b2")
+    cfg.cookie = nil
+
+    local Setting = require("source.iread.setting")
+    Assert.eq(Setting.fromPayload({ cookies = {
+        { domain = ".ankio.net", name = "b", value = "2" },
+        { domain = "iread.ankio.net", name = "a", value = "1" },
+        { domain = "evil.com", name = "x", value = "9" },
+        { domain = "iread.ankio.net", name = "bad", value = "v;w" },
+    } }), "a=1; b=2")
 end
 
 -- 进度：整行带回，只改位置字段；嵌套表按 PHP 的 a[b] / a[0] 摊平。

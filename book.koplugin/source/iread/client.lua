@@ -21,12 +21,25 @@ local Client = {}
 local SOURCE_ID = "iread"
 Client.BASE = "https://iread.ankio.net"
 
---- 个人 Token；没登录返回 nil。
----@return string|nil
-function Client.token()
-    local token = require("utils.settings").getSource(SOURCE_ID).token
-    if type(token) ~= "string" or token == "" then return nil end
-    return token
+---@class IReadCredential
+---@field token string|nil 个人 Token（Bearer）
+---@field cookie string|nil 网页登录 Cookie 请求头
+
+--- 已保存的登录凭据，Token 优先；没登录返回 nil。
+---@return IReadCredential|nil
+function Client.credential()
+    local cfg = require("utils.settings").getSource(SOURCE_ID)
+    if type(cfg.token) == "string" and cfg.token ~= "" then return { token = cfg.token } end
+    if type(cfg.cookie) == "string" and cfg.cookie ~= "" then return { cookie = cfg.cookie } end
+    return nil
+end
+
+--- 发请求用的凭据是不是当前已保存的那份（校验新凭据时的回包不能动已保存的登录态）。
+---@param cred IReadCredential
+---@return boolean
+local function isCurrent(cred)
+    local saved = Client.credential()
+    return saved ~= nil and saved.token == cred.token and saved.cookie == cred.cookie
 end
 
 --- 嵌套表按 PHP 的 `a[b]` 写法摊平成表单键（数组用 0 基下标，PHP 侧才是列表）；布尔 / 数字转字符串，nil 丢弃。
@@ -55,38 +68,39 @@ end
 --- 解回包：返回 data。401 / 403 视为登录失效。
 ---@param raw string|nil
 ---@param err any
----@param token string 发请求时用的 Token
+---@param cred IReadCredential 发请求时用的凭据
 ---@return any|nil data, string|nil err
-function Client.decode(raw, err, token)
+function Client.decode(raw, err, cred)
     if not raw then return nil, err and tostring(err) or _("请求失败") end
     local ok, wire = pcall(JSON.decode, raw)
     if not ok or type(wire) ~= "table" then return nil, _("响应无效") end
     local code = tonumber(wire.code)
     if code == 200 then
-        if token == Client.token() then require("source.auth").ok(SOURCE_ID) end
+        if isCurrent(cred) then require("source.auth").ok(SOURCE_ID) end
         return wire.data == nil and {} or wire.data
     end
-    if (code == 401 or code == 403) and token == Client.token() then
-        return nil, require("source.auth").expire(SOURCE_ID, _("iRead 登录已失效，请重新填写个人 Token"))
+    if (code == 401 or code == 403) and isCurrent(cred) then
+        return nil, require("source.auth").expire(SOURCE_ID, _("iRead 登录已失效，请重新登录"))
     end
     return nil, type(wire.msg) == "string" and wire.msg ~= "" and wire.msg or _("请求失败")
 end
 
 ---@param path string
 ---@param form table<string, any>
----@param token string
+---@param cred IReadCredential
 ---@param ratio number 超时倍率
 ---@param cb fun(data: any|nil, err: string|nil, res: table|nil)
 ---@param session string|nil 服务端会话 Cookie（搜索结果存在会话里，轮询必须带回）
 ---@return { cancel: fun() }
-local function post(path, form, token, ratio, cb, session)
+local function post(path, form, cred, ratio, cb, session)
     return Request.post(Client.BASE .. path, encode(form), {
         accept = "application/json",
-        headers = { Authorization = "Bearer " .. token, Cookie = session },
+        headers = cred.cookie and { Cookie = cred.cookie }
+            or { Authorization = "Bearer " .. cred.token, Cookie = session },
         content_type = "application/x-www-form-urlencoded",
         timeout = require("http.timeout").net(ratio),
     }, function(raw, err, res)
-        local data, decode_err = Client.decode(raw, err, token)
+        local data, decode_err = Client.decode(raw, err, cred)
         cb(data, decode_err, res)
     end)
 end
@@ -99,17 +113,17 @@ end
 ---@param session string|nil
 ---@return { cancel: fun() }
 local function call(path, form, ratio, cb, session)
-    local token = Client.token()
-    if not token then return require("source.base").defer(cb, nil, _("未登录 iRead")) end
-    return post(path, form, token, ratio, cb, session)
+    local cred = Client.credential()
+    if not cred then return require("source.base").defer(cb, nil, _("未登录 iRead")) end
+    return post(path, form, cred, ratio, cb, session)
 end
 
---- 校验 Token 并取账号信息（设置页用，Token 由调用方显式给）。
----@param token string
+--- 校验凭据并取账号信息（设置页用，凭据由调用方显式给）。
+---@param cred IReadCredential
 ---@param cb fun(user: table|nil, err: string|nil)
 ---@return { cancel: fun() }
-function Client.userAsync(token, cb)
-    return post("/user/home", {}, token, 0.5, function(data, err)
+function Client.userAsync(cred, cb)
+    return post("/user/home", {}, cred, 0.5, function(data, err)
         if type(data) ~= "table" or data.nickname == nil then cb(nil, err or _("iRead 账号信息为空")); return end
         cb(data)
     end)
