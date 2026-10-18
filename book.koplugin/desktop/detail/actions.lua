@@ -131,6 +131,7 @@ function Detail:installStoreBook()
     local book = self.book
     local store = storeBackend(book)
     if not store then
+        self:addToShelf()
         return
     end
     if store.hasCredentials and not store.hasCredentials() then
@@ -171,6 +172,23 @@ function Detail:installStoreBook()
             end
         end,
     }
+end
+
+--- 书源搜索结果：本地先入库（脏行），在线且源已配置时顺手推上云端书架；离线不弹联网，等下次 pushDirty。
+function Detail:addToShelf()
+    local book = self.book
+    Store.rememberMany({ book })
+    if not require("book.books_db").upsertLocal(book) then
+        Toast:new{ text = _("加入书库失败") }:show()
+        return
+    end
+    Toast:new{ text = T(_("已加入书库：%1"), Book.title(book)), timeout = 3 }:show()
+    local source = bookOwnerSource(book, nil)
+    if source and source:configured() and require("ui/network/manager"):isConnected() then
+        source:pushDirty()
+    end
+    local desk = self.desktop
+    if desk and not desk.closed then desk:onEvent("shelf_changed") end
 end
 
 --- 手动切换已读 / 未读（语义与图书馆长按菜单相同）。

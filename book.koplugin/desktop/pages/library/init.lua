@@ -448,7 +448,7 @@ end
 --- 构建书城页（网格 + 上级/搜索 + 总数）；清空搜索框再搜即退出搜索。
 ---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
 ---@param state table 当前页面的数据和分页状态
----@param opts table on_open 接管点击；on_back 出现「上级」；on_search；show_status=false 不画角标
+---@param opts table on_open 接管点击；on_back 出现「上级」；on_search；provider={text,on_pick(anchor)} 工具条左侧的切换按钮；show_status=false 不画角标
 ---@return table
 function Library:build(ctx, state, opts)
     local t = Theme.current()
@@ -457,6 +457,14 @@ function Library:build(ctx, state, opts)
     local left = {}
     if opts.on_back then
         left[#left + 1] = Button:new{ icon = "arrow_back", text = _("上级"), size = "small", callback = opts.on_back }
+    end
+    if opts.provider then
+        local pick
+        pick = Button:new{
+            text = opts.provider.text, icon = "arrow_drop_down", trailing = true, size = "small",
+            callback = function() opts.provider.on_pick(pick.dimen) end,
+        }
+        left[#left + 1] = pick
     end
     left[#left + 1] = Button:new{ icon = "search", variant = "ghost", size = "small", callback = opts.on_search }
     local total = Text.line("caption", T(_("共%1"), opts.total or 0), { color = t.color.muted })
