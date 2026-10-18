@@ -139,10 +139,26 @@ local function sections(desktop)
     local Row = require("ui.themes.widgets.row")
     local method = Registry.current()
     local dict_path = Paths.imeDictPath(method.dictionary)
-    return {
-        {
-            title = _("输入法"),
-            rows = {
+    local keycaps_row = function(iw)
+        local on = require("utils.settings").get("features.ime").ime_keycaps
+        return Row.widget({
+            width = iw,
+            chevron = false,
+            kind = "toggle",
+            icon = "keyboard",
+            title = _("显示字根键帽"),
+            status = on and _("开") or _("关"),
+            status_on = on,
+            callback = function()
+                local Settings = require("utils.settings")
+                local settings = Settings.get("features.ime")
+                settings.ime_keycaps = not settings.ime_keycaps
+                Settings.save("features.ime", settings)
+                desktop:updateView()
+            end,
+        })
+    end
+    local rows = {
                 function(iw)
                     return Row.widget({
                         width = iw,
@@ -208,20 +224,22 @@ local function sections(desktop)
                         "若在线下载过慢，可到 GitHub Release（%1）下载对应词库，直接放入：%2"
                     ), RELEASES_URL, dict_path))
                 end,
-            },
-        },
     }
+    if method.optional_labels then table.insert(rows, 3, keycaps_row) end
+    return { { title = _("输入法"), rows = rows } }
 end
 
 local Setting = {}
 
 -- pinyin_enabled 是总开关（键名沿用拼音时代）；ime_layout 取 registry 的方法 id；
--- ime_dict_built_at 按词库记已装版本；ime_script 是候选词字形（keep / simplified / traditional）。
+-- ime_dict_built_at 按词库记已装版本；ime_script 是候选词字形（keep / simplified / traditional）；
+-- ime_keycaps 为真时五笔 / 仓颉 / 小鹤键盘把键帽换成字根 / 韵母。
 Setting.defaults = {
     pinyin_enabled = false,
     ime_layout = "pinyin",
     ime_dict_built_at = {},
     ime_script = "keep",
+    ime_keycaps = false,
 }
 
 ---@param desktop BookDesktop
