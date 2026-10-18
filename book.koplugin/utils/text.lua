@@ -196,21 +196,30 @@ function Text.stripEmoji(s)
         :gsub("\226\131\163", ""))
 end
 
---- XML/HTML 实体解码：命名实体（lt/gt/quot/apos/amp）+ 十/十六进制数字实体。
+-- 常见 HTML 命名实体（RSS 正文里常见；XML 只有前五个）。
+local NAMED_ENTITIES = {
+    lt = "<", gt = ">", quot = '"', apos = "'", amp = "&",
+    nbsp = "\194\160", ensp = "\226\128\130", emsp = "\226\128\131", thinsp = "\226\128\137",
+    ndash = "\226\128\147", mdash = "\226\128\148", hellip = "\226\128\166", middot = "\194\183",
+    lsquo = "\226\128\152", rsquo = "\226\128\153", ldquo = "\226\128\156", rdquo = "\226\128\157",
+    laquo = "\194\171", raquo = "\194\187", bull = "\226\128\162", copy = "\194\169",
+    reg = "\194\174", trade = "\226\132\162", deg = "\194\176", times = "\195\151",
+    divide = "\195\183", yen = "\194\165", euro = "\226\130\172", pound = "\194\163",
+    cent = "\194\162", sect = "\194\167", para = "\194\182", plusmn = "\194\177",
+    larr = "\226\134\144", rarr = "\226\134\146", uarr = "\226\134\145", darr = "\226\134\147",
+    zwj = "\226\128\141", zwnj = "\226\128\140",
+}
+
+--- XML/HTML 实体解码：命名实体（NAMED_ENTITIES）+ 十/十六进制数字实体，一趟扫描（&amp;lt; 只解一层），未知实体原样保留。
 ---@return string
 function Text.xmlDecode(s)
-    s = tostring(s or "")
-    s = s:gsub("&#(%d+);", function(n)
-        return utf8char(tonumber(n) or 0)
-    end)
-    s = s:gsub("&#[xX](%x+);", function(n)
-        return utf8char(tonumber(n, 16) or 0)
-    end)
-    return (s:gsub("&lt;", "<")
-        :gsub("&gt;", ">")
-        :gsub("&quot;", '"')
-        :gsub("&apos;", "'")
-        :gsub("&amp;", "&"))
+    return (tostring(s or ""):gsub("&(#?[%w]+);", function(name)
+        local hex = name:match("^#[xX](%x+)$")
+        if hex then return utf8char(tonumber(hex, 16) or 0) end
+        local dec = name:match("^#(%d+)$")
+        if dec then return utf8char(tonumber(dec) or 0) end
+        return NAMED_ENTITIES[name]
+    end))
 end
 
 local BLOCK_TAGS = {
@@ -236,7 +245,7 @@ end
 ---@param s string|nil
 ---@return string
 function Text.stripHtml(s)
-    s = Text.xmlDecode(dropTags(Text.normalizeNewlines(s))):gsub("&nbsp;", " ")
+    s = Text.xmlDecode(dropTags(Text.normalizeNewlines(s))):gsub("\194\160", " ")
     local lines = {}
     for line in dropTags(s):gmatch("[^\n]+") do
         line = Text.trim((line:gsub("%s+", " ")))
