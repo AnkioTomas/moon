@@ -9,7 +9,10 @@ Kit.install("paper")
 
 local quote_text = "old"
 package.preload["online.hitokoto"] = function()
-    return { random = function() return { text = quote_text, author = "who", title = "work" } end }
+    return {
+        ensure = function() end,
+        random = function() return { text = quote_text, author = "who", title = "work" } end,
+    }
 end
 local excerpt
 package.preload["book.highlights"] = function()

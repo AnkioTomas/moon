@@ -164,10 +164,6 @@ stub("features", {
     scan = function() return {} end,
     listeners = function() return {} end,
 })
-local online_hooks = {}
-stub("online", {
-    onNetworkConnected = function(host) online_hooks[#online_hooks + 1] = "onNetworkConnected:" .. host.path end,
-})
 
 _G.G_reader_settings = {
     isTrue = function() return true end,
@@ -196,9 +192,7 @@ Assert.eq(table.concat(dispatcher_actions, ","), "book_open_shelf", "feature 的
 Assert.is_nil(calls.boot, "init 不直接挂功能，全部进 features")
 Assert.eq(feature_loads, 1, "加载器在 main 顶层调一次")
 Assert.eq(table.concat(feature_hooks, ","), "onCreate:book.koplugin")
-Assert.eq(table.concat(online_hooks, ","), "onNetworkConnected:book.koplugin", "启动有网才刷 online")
 feature_hooks = {}
-online_hooks = {}
 
 -- 主菜单：demo/ 目录存在才转发给演示模块（打包剔除 demo/ 后不出现）
 do
@@ -238,7 +232,6 @@ do
     Assert.eq(source_hooks[#source_hooks], "pushDirty:moon")
     Assert.eq(#source_hooks - before, 1, "联网推脏行")
     Assert.eq(calls.lock_refresh, 0, "锁屏刷新由 feature onNetworkConnected 负责")
-    Assert.eq(online_hooks[#online_hooks], "onNetworkConnected:book.koplugin", "离线没刷的 online 联网补拉")
     Assert.eq(feature_hooks[#feature_hooks], "onNetworkConnected:book.koplugin")
     Assert.eq(calls.update_check, 0, "自动更新检查只在 Desktop:activate")
     -- 桌面在窗口栈上，自己收 UIManager 的 NetworkConnected 广播；插件再转就重复了。
@@ -300,7 +293,6 @@ Assert.eq(calls.lock_refresh, 0)
 calls.session = nil
 plugin:onResume()
 Assert.is_true(calls.session.resume)
-Assert.eq(online_hooks[#online_hooks], "onNetworkConnected:book.koplugin", "唤醒不刷 online")
 Assert.eq(feature_hooks[#feature_hooks], "onResume:book.koplugin", "唤醒经 features 通知夜间模式")
 Assert.eq(source_hooks[#source_hooks], "pushDirty:local", "唤醒有网就推脏行（Wi-Fi 常开时不会再有联网事件）")
 
@@ -334,8 +326,6 @@ Assert.is_nil(calls.desktop_destroy, "退出不经插件转，桌面自收 Exit 
 resumed_desktop:onExit()
 Assert.eq(table.concat(feature_hooks, ","),
     "onNetworkConnected:book.koplugin,onResume:book.koplugin,onSuspend:book.koplugin,onResume:book.koplugin,onResume:book.koplugin,onExit:book.koplugin")
-Assert.eq(table.concat(online_hooks, ","),
-    "onNetworkConnected:book.koplugin")
 
 version_current = 202606000000
 local attach_count = calls.attach
@@ -380,7 +370,6 @@ for _, label in ipairs({
     "init", "onShow", "addToMainMenu", "openShelf",
     "tasks.onSuspend", "session.onSuspend", "tasks.onResume", "session.onResume",
     "tasks.onNetworkConnected", "sources.pushDirty",
-    "online.onNetworkConnected",
 }) do
     Assert.is_true(guard_labels[label] or false, label .. " 经 guard")
 end

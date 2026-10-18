@@ -79,6 +79,11 @@ function M:createWidget()
     return VerticalGroup:new(kids)
 end
 
+--- 组件在页上才拉一言；没放一言组件的用户不产生后台任务。
+function M:onActivate()
+    Hitokoto:ensure()
+end
+
 function M:onDeactivate()
     self.current = nil
 end
