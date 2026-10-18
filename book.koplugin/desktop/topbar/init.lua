@@ -135,7 +135,9 @@ local ITEMS = {
         label = _("剩余存储"), icon = "hard_drive", sample = "2.1G", bar_icon = "hard_drive",
         interval = 600,
         read = function()
-            local _total, _used, avail = ffiUtil.df(DataStorage:getDataDir())
+            -- 旧版 KOReader 的 df 只返回 total, free，没有第三个 available
+            local _total, free, avail = ffiUtil.df(DataStorage:getDataDir())
+            avail = avail or free
             if avail == nil then return nil end
             return util.getFriendlySize(avail), "hard_drive"
         end,
