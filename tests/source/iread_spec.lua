@@ -22,9 +22,11 @@ package.preload["http.request"] = function()
     return {
         post = function(url, body, opts, cb)
             requests[#requests + 1] = { url = url, body = body, opts = opts }
-            cb(table.remove(replies, 1))
+            local reply = table.remove(replies, 1)
+            if type(reply) == "table" then cb(reply.body, nil, reply) else cb(reply) end
             return { cancel = function() end }
         end,
+        header = function(res) return res and res.cookie end,
     }
 end
 
@@ -143,4 +145,20 @@ end
 do
     Assert.eq(Mapper.text("<p>甲</p><p>乙</p>"), "甲\n乙")
     Assert.eq(Mapper.text("1 < 2"), "1 < 2")
+end
+
+-- 搜索：提交与轮询共用服务端会话 Cookie，否则取结果 500。
+do
+    requests = {}
+    replies = {
+        { body = '{"code":200,"data":{"task":"search/1/x","total":2}}', cookie = "sid=abc; path=/; HttpOnly" },
+        '{"code":200,"data":{"remaining":0,"result":[{"name":"书"}]}}',
+    }
+    local rows
+    Client.searchAsync("斗罗", function(v) rows = v end)
+    Assert.len(rows, 1)
+    Assert.eq(requests[1].url, "https://iread.ankio.net/book/search")
+    Assert.matches(requests[1].body, "bookname=")
+    Assert.eq(requests[2].url, "https://iread.ankio.net/book/search/result")
+    Assert.eq(requests[2].opts.headers.Cookie, "sid=abc")
 end

@@ -12,6 +12,7 @@ local Charset = require("utils.charset")
 local JSON = require("json")
 local Mapper = require("source.jjwxc.mapper")
 local Request = require("http.request")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local Client = {}
@@ -39,14 +40,15 @@ end
 ---@param params table<string, any>
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return HttpJob
-local function appGet(path, params, cb)
+---@param ratio number|nil 超时倍率，缺省 0.5
+local function appGet(path, params, cb, ratio)
     local query = {}
     for key, value in pairs(params) do query[#query + 1] = key .. "=" .. tostring(value) end
     table.sort(query)
     return Request.get(APP .. path .. "?" .. table.concat(query, "&"), {
         accept = "application/json",
         headers = APP_HEADERS,
-        timeout = require("http.timeout").net(0.5),
+        timeout = require("http.timeout").net(ratio or 0.5),
     }, function(raw, err)
         if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
         local ok, wire = pcall(JSON.decode, raw)
@@ -105,6 +107,13 @@ function Client.favRemoveAsync(novel_id, cb)
     return webGet("/my/delBookSure?novelid=" .. novel_id, cookie, function(html, err)
         cb(html and true or nil, err)
     end)
+end
+
+---@param keyword string
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return HttpJob
+function Client.searchAsync(keyword, cb)
+    return appGet("/search", { keyword = Text.urlEncode(keyword), type = 1, page = 1, versionCode = 206 }, cb, 1)
 end
 
 ---@param novel_id string

@@ -831,6 +831,20 @@ function Source:searchBooksAsync(keyword, cb)
     end)
 end
 
+--- 书城搜索：回包形状同 listStoreAsync。
+---@param keyword string
+---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:searchAsync(keyword, cb)
+    return self._client:searchAsync(keyword, function(wire, err)
+        if not wire then
+            cb(nil, err)
+            return
+        end
+        cb({ data = Mapper.searchList(wire) })
+    end)
+end
+
 --- 本章有段评的热点原句（未定位）。
 ---@param identity BookIdentity 微信书身份，chapter_idx 为微信目录序号
 ---@param cb fun(hotspots: WechatReviewHotspot[]|nil, err: string|nil)

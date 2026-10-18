@@ -215,6 +215,20 @@ function Client.updateReadAsync(book_id, chapter_id, cb)
     end)
 end
 
+--- 搜索：官网没有 JSON 搜索接口，取服务端渲染的 /so/<关键词> 页（匿名，一页 10 条）。
+---@param keyword string
+---@param cb fun(books: Book[]|nil, err: string|nil)
+---@return HttpJob
+function Client.searchAsync(keyword, cb)
+    return Request.get(WEB .. "/so/" .. Text.urlEncode(keyword), {
+        headers = headers(nil),
+        timeout = require("http.timeout").net(1),
+    }, function(raw, err)
+        if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
+        cb(Mapper.searchHtml(raw))
+    end)
+end
+
 ---@param book_id string
 ---@param cb fun(info: table|nil, err: string|nil)
 ---@return HttpJob

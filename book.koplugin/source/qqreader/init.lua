@@ -184,6 +184,20 @@ function Source:putProgressAsync(identity, pos, cb)
     end }
 end
 
+--- 书城搜索：回包形状同 listStoreAsync。
+---@param keyword string
+---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:searchAsync(keyword, cb)
+    return Client.searchAsync(keyword, function(books, err)
+        if not books then
+            cb(nil, err)
+            return
+        end
+        cb({ data = books })
+    end)
+end
+
 function Source:getDetailAsync(identity, cb)
     return SourceBase.defer(cb, identity.book or require("book.books_db").get(self.id, identity.stable_id))
 end

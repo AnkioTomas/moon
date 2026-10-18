@@ -192,3 +192,21 @@ do
     Assert.eq(err, "起点登录已失效")
     Assert.eq(expired, "起点登录已失效")
 end
+
+do
+    local books = Mapper.search({ bookInfo = { records = {
+        { bid = 7, bName = "甲", bAuth = "乙...", cat = "玄幻", desc = "简<br>介" },
+        { bid = 8, bName = "丙", bAuth = "丁" },
+    } } })
+    Assert.len(books, 2)
+    Assert.eq(books[1].stable_id, "7")
+    Assert.is_nil(books[1].authors)
+    Assert.eq(books[1].intro, "简\n介")
+    Assert.eq(books[2].authors, "丁")
+
+    requests, replies = {}, { { body = page({ bookInfo = { records = {} } }) } }
+    local got
+    Client.searchAsync("斗罗", function(v) got = v end)
+    Assert.matches(requests[1].url, "/soushu/%%E6%%96%%97%%E7%%BD%%97%.html$")
+    Assert.is_true(got.bookInfo ~= nil)
+end

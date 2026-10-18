@@ -200,3 +200,16 @@ do
     Assert.eq(text, "　　甲\r\n　　乙")
     Assert.is_nil(err)
 end
+
+do
+    local item = '<a title="%s" href="//book.qq.com/book-detail/%s" class="wrap"><p class="intro">简&amp;介</p>'
+        .. '<a href="//book.qq.com/book-writer/1"><span>%s</span></a></a></div>'
+    local books = Mapper.searchHtml(item:format("甲", "11", "乙") .. item:format("丙", "12", "丁...")
+        .. item:format("甲", "11", "乙"))
+    Assert.len(books, 2)
+    Assert.eq(books[1].stable_id, "11")
+    Assert.eq(books[1].authors, "乙")
+    Assert.eq(books[1].intro, "简&介")
+    Assert.is_nil(books[2].authors)
+    Assert.eq(books[1].cover, "https://wfqqreader-1252317822.image.myqcloud.com/cover/11/11/b_11.jpg")
+end

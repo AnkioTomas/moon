@@ -140,6 +140,20 @@ function Source:putProgressAsync(_identity, _pos, cb)
 end
 
 --- 书库里已有的元数据（收藏同步时已补全）。
+--- 书城搜索：匿名 App 接口，只取第一页。
+---@param keyword string
+---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:searchAsync(keyword, cb)
+    return Client.searchAsync(keyword, function(wire, err)
+        if not wire then
+            cb(nil, err)
+            return
+        end
+        cb({ data = Mapper.search(wire) })
+    end)
+end
+
 function Source:getDetailAsync(identity, cb)
     return SourceBase.defer(cb, identity.book or require("book.books_db").get(self.id, identity.stable_id))
 end

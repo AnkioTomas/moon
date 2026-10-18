@@ -7,10 +7,37 @@ QQ阅读数据映射（纯函数）：详情 / 书架行 / 目录 → 领域对�
 @module koplugin.book.source.qqreader.mapper
 --]]
 
+local Text = require("utils.text")
+
 local Mapper = {}
 
 local SOURCE_ID = "qqreader"
 local COVER = "https://wfqqreader-1252317822.image.myqcloud.com/cover/%d/%s/b_%s.jpg"
+
+--- 搜索结果页（SSR HTML）→ Book[]：每条是 `<a title=书名 href=…/book-detail/书号>` 后跟简介段。
+--- 作者名被站点截断成「xx...」，只在完整时才用。
+---@param html string
+---@return Book[]
+function Mapper.searchHtml(html)
+    local out, seen = {}, {}
+    for title, id, rest in html:gmatch('<a title="([^"]*)" href="[^"]*/book%-detail/(%d+)"(.-)</a></div>') do
+        if not seen[id] then
+            seen[id] = true
+            local intro = rest:match('<p class="intro"[^>]*>(.-)</p>')
+            local author = rest:match('/book%-writer/%d+"[^>]*>(.-)</a>')
+            author = author and Text.stripHtml(author)
+            out[#out + 1] = {
+                source_id = SOURCE_ID,
+                stable_id = id,
+                title = Text.xmlDecode(title),
+                authors = author and not author:find("%.%.%.$") and author or nil,
+                intro = intro and Text.stripHtml(intro),
+                cover = Mapper.coverUrl(id),
+            }
+        end
+    end
+    return out
+end
 
 ---@param value any
 ---@return boolean

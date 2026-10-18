@@ -36,6 +36,26 @@ function Mapper.book(info)
     }
 end
 
+--- 搜索 wire → Book[]（按 novelid / novelname 取，只留有书号的）。
+---@param wire table
+---@return Book[]
+function Mapper.search(wire)
+    local out = {}
+    for _idx, item in ipairs(type(wire.items) == "table" and wire.items or {}) do
+        if item.novelid then
+            out[#out + 1] = {
+                source_id = SOURCE_ID,
+                stable_id = tostring(item.novelid),
+                title = item.novelname,
+                authors = item.authorname,
+                intro = item.novelintroshort and Text.stripHtml(item.novelintroshort),
+                cover = cover(item.ebookurl),
+            }
+        end
+    end
+    return out
+end
+
 --- 收藏页 HTML → { id, title, author }[]；找不到收藏列表（页面改版 / 不是收藏页）返回 nil。
 --- 页面上的书名被截断，只作详情拉不到时的兜底。
 ---@param html string

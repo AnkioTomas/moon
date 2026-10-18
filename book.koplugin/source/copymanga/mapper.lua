@@ -58,6 +58,19 @@ function Mapper.book(row)
     }
 end
 
+--- 搜索 wire → Book[]。
+---@param wire table
+---@return Book[]
+function Mapper.search(wire)
+    local out = {}
+    local rows = resultsOf(wire).list
+    for _idx, row in ipairs(type(rows) == "table" and rows or {}) do
+        local book = Mapper.book(row)
+        if book then out[#out + 1] = book end
+    end
+    return out
+end
+
 --- 收藏行（见 Client:collectAllAsync）→ 在架书。
 ---@param rows table[]
 ---@return Book[]

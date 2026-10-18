@@ -73,3 +73,13 @@ do
     local book = Mapper.book({ novelId = 1, novelName = "x", novelCover = "https://i9-static.jjwxc.net/novelimage.php?novelid=1&coverid=2&ver=abc" })
     Assert.eq(book.cover, "https://i9-static.jjwxc.net/novelimage.php?novelid=1&coverid=2")
 end
+
+do
+    local books = Mapper.search({ items = {
+        { novelid = 5, novelname = "甲", authorname = "乙", novelintroshort = "简介" },
+    } })
+    Assert.len(books, 1)
+    Assert.eq(books[1].stable_id, "5")
+    Assert.eq(books[1].title, "甲")
+    Assert.eq(books[1].authors, "乙")
+end

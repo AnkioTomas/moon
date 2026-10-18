@@ -360,6 +360,20 @@ function Mapper.searchBooks(data)
     return out
 end
 
+--- 搜索 wire → Book[]（书城用；公众号等没有 bookInfo 的条目被 Mapper.book 滤掉）。
+---@param data table
+---@return Book[]
+function Mapper.searchList(data)
+    local out = {}
+    for _idx, entry in ipairs(data.books or {}) do
+        if type(entry.bookInfo) == "table" then
+            local book = Mapper.book(entry)
+            if book then out[#out + 1] = book end
+        end
+    end
+    return out
+end
+
 --- 进度 wire → ProgressPosition（getProgress 的进度在 book 子对象里）。
 ---@param data table
 ---@return ProgressPosition, string|nil chapter_uid

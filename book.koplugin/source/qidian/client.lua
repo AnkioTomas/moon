@@ -313,6 +313,19 @@ function Client.removeAsync(book_id, cb)
     end)
 end
 
+--- 搜索：匿名取手机站 SSR 搜索页（一页 20 条）。
+---@param keyword string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return HttpJob
+function Client.searchAsync(keyword, cb)
+    return webGet("/soushu/" .. Text.urlEncode(keyword) .. ".html", nil, function(html, err)
+        if not html then cb(nil, err); return end
+        local data = Mapper.pageData(html)
+        if not data then cb(nil, _("起点书籍信息为空")); return end
+        cb(data)
+    end)
+end
+
 ---@param book_id string
 ---@param cb fun(info: table|nil, err: string|nil)
 ---@return HttpJob

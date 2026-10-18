@@ -50,6 +50,27 @@ function Mapper.book(info)
     }
 end
 
+--- 搜索页 pageData.bookInfo.records → Book[]。作者名被站点截成「xx...」，不完整就留空等详情补。
+---@param data table
+---@return Book[]
+function Mapper.search(data)
+    local out = {}
+    for _idx, row in ipairs((data.bookInfo or {}).records or {}) do
+        local id = tostring(row.bid)
+        local author = row.bAuth
+        out[#out + 1] = {
+            source_id = SOURCE_ID,
+            stable_id = id,
+            title = row.bName,
+            authors = type(author) == "string" and not author:find("%.%.%.$") and author or nil,
+            category = row.cat,
+            intro = row.desc and Text.stripHtml(row.desc),
+            cover = Mapper.coverUrl(id),
+        }
+    end
+    return out
+end
+
 --- 书架行 → Book。没有简介，封面按书号拼。
 ---@param row table
 ---@return Book

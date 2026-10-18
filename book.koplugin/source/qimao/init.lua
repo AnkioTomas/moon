@@ -4,7 +4,7 @@
 搜索 / 目录 / 正文走匿名 App 接口（protocol / client，正文解密，按章落盘走公共 source/chapter）；
 登录是 PC 网页的 token（setting.lua），登录后书架双向同步（source.shelf，网页书架接口）。
 进度只到章：开书从书架行的 latest_read_chapter_id 拉，关书用同一条书架同步接口改这一行。
-笔记和统计没有接口。书由书城页（store/qimao）搜索后加入本地书库。
+笔记和统计没有接口。书由书城页按源搜索后加入本地书库。
 
 @module koplugin.book.source.qimao
 --]]
@@ -149,7 +149,21 @@ function Source:putProgressAsync(identity, pos, cb)
     end }
 end
 
---- 书库里已有的元数据；七猫详情只在书城预览时才需要拉（见 store/qimao）。
+--- 书城搜索：匿名接口，只取第一页。
+---@param keyword string
+---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:searchAsync(keyword, cb)
+    return Client.searchAsync(keyword, 1, function(wire, err)
+        if not wire then
+            cb(nil, err)
+            return
+        end
+        cb({ data = Mapper.search(wire) })
+    end)
+end
+
+--- 书库里已有的元数据；详情只在书城预览时才需要拉。
 function Source:getDetailAsync(identity, cb)
     return SourceBase.defer(cb, identity.book or require("book.books_db").get(self.id, identity.stable_id))
 end

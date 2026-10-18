@@ -76,27 +76,32 @@ end
 ---@param form table<string, any>
 ---@param token string
 ---@param ratio number 超时倍率
----@param cb fun(data: any|nil, err: string|nil)
+---@param cb fun(data: any|nil, err: string|nil, res: table|nil)
+---@param session string|nil 服务端会话 Cookie（搜索结果存在会话里，轮询必须带回）
 ---@return { cancel: fun() }
-local function post(path, form, token, ratio, cb)
+local function post(path, form, token, ratio, cb, session)
     return Request.post(Client.BASE .. path, encode(form), {
         accept = "application/json",
-        headers = { Authorization = "Bearer " .. token },
+        headers = { Authorization = "Bearer " .. token, Cookie = session },
         content_type = "application/x-www-form-urlencoded",
         timeout = require("http.timeout").net(ratio),
-    }, function(raw, err) cb(Client.decode(raw, err, token)) end)
+    }, function(raw, err, res)
+        local data, decode_err = Client.decode(raw, err, token)
+        cb(data, decode_err, res)
+    end)
 end
 
 --- 带已保存 Token 的请求；没登录直接报错。
 ---@param path string
 ---@param form table<string, any>
 ---@param ratio number
----@param cb fun(data: any|nil, err: string|nil)
+---@param cb fun(data: any|nil, err: string|nil, res: table|nil)
+---@param session string|nil
 ---@return { cancel: fun() }
-local function call(path, form, ratio, cb)
+local function call(path, form, ratio, cb, session)
     local token = Client.token()
     if not token then return require("source.base").defer(cb, nil, _("未登录 iRead")) end
-    return post(path, form, token, ratio, cb)
+    return post(path, form, token, ratio, cb, session)
 end
 
 --- 校验 Token 并取账号信息（设置页用，Token 由调用方显式给）。
@@ -165,6 +170,49 @@ function Client.saveProgressAsync(row, pos, cb)
     body.durChapterTitle = pos.title or ""
     body.durChapterTime = os.time() * 1000
     return call("/book/process", body, 0.5, function(data, err) cb(data ~= nil or nil, err) end)
+end
+
+local SEARCH_INTERVAL = 2
+local SEARCH_TRIES = 30
+
+--- 搜索：官网的协议是「提交 → 轮询」，两步要用同一个会话 Cookie（否则取结果 500）。POST /book/search 返回 task（各书源并行搜），
+--- 再每 2 秒 POST /book/search/result 取增量 result[] 直到 remaining 为 0。回调完整行数组（同书架行）。
+---@param keyword string
+---@param cb fun(rows: table[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client.searchAsync(keyword, cb)
+    local UIManager = require("ui/uimanager")
+    local job, tick, done = nil, nil, false
+    local rows, tries = {}, 0
+    local function poll(task, session)
+        tries = tries + 1
+        job = call("/book/search/result", { task = task }, 0.5, function(data, err)
+            if done then return end
+            if type(data) ~= "table" then cb(nil, err); return end
+            for _idx, row in ipairs(data.result or {}) do rows[#rows + 1] = row end
+            if (tonumber(data.remaining) or 0) == 0 or tries >= SEARCH_TRIES then
+                done = true
+                cb(rows)
+                return
+            end
+            tick = function() poll(task, session) end
+            UIManager:scheduleIn(SEARCH_INTERVAL, tick)
+        end, session)
+    end
+    job = call("/book/search", { bookname = keyword }, 0.5, function(data, err, res)
+        if done then return end
+        if type(data) ~= "table" or type(data.task) ~= "string" then cb(nil, err or _("请求失败")); return end
+        local set_cookie = Request.header(res, "Set-Cookie")
+        local session = type(set_cookie) == "table" and set_cookie[1] or set_cookie
+        poll(data.task, session and session:match("^([^;]+)"))
+    end)
+    return {
+        cancel = function()
+            done = true
+            if tick then UIManager:unschedule(tick) end
+            job.cancel()
+        end,
+    }
 end
 
 --- 把书移出书架。/book/favourite 是开关，调用方必须先确认书还在书架上。

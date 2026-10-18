@@ -1,7 +1,7 @@
 --[[--
 iRead（iread.ankio.net）数据源。
 
-个人 Token 鉴权（setting.lua）。书架是服务端的收藏记录，只拉不加（书在网站上搜索收藏），本地删除会上行；
+个人 Token 鉴权（setting.lua）。书架是服务端的收藏记录，书城搜索的书加入书库时经 /book/favourite 收藏，本地删除会上行；
 目录 / 正文按章落盘走公共 source/chapter；进度只到章，开书拉取、关书上报。笔记和统计没有接口。
 服务端的书记录（bookUrl / sourceId 等）是目录、正文接口的必要参数，源实例按书名缓存最近一次书架行，缺了再拉。
 
@@ -24,6 +24,7 @@ end
 
 ---@class IReadSource : SourceBase
 ---@field rows table<string, table>|nil 书名 → 最近一次书架行
+---@field found table<string, table>|nil 书名 → 最近一次搜索行（收藏时整行带回）
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -61,13 +62,26 @@ function Source:fetchShelf(cb)
     end)
 end
 
---- 书架远端：Shelf.syncAsync 要的三个冒号方法。书只能在网站上收藏，本地没有「加入」入口。
+--- 书架远端：Shelf.syncAsync 要的三个冒号方法。收藏接口是开关，加入前先确认远端还没有这本书。
 local Remote = {}
 
 function Remote:shelfSyncAsync(cb) return self.source:fetchShelf(cb) end
 
-function Remote:addToShelfAsync(_stable_id, cb)
-    return SourceBase.defer(cb, nil, _("请在 iRead 网站上收藏书籍"))
+--- 要收藏的行来自搜索缓存（`found`）；没有缓存（只在本地加过、没搜过）无法收藏。
+function Remote:addToShelfAsync(stable_id, cb)
+    local row = self.source.found and self.source.found[stable_id]
+    if not row then return SourceBase.defer(cb, nil, _("请先搜索这本书再加入书库")) end
+    local cancelled, job = false, nil
+    job = Client.shelfAsync(function(rows, err)
+        if cancelled then return end
+        if not rows then cb(nil, err); return end
+        if findRow(rows, stable_id) then cb(true); return end
+        job = Client.removeAsync(row, cb)
+    end)
+    return { cancel = function()
+        cancelled = true
+        job.cancel()
+    end }
 end
 
 --- 远端已经没有这本书就算删除完成（收藏接口是开关，不能盲调）。
@@ -98,6 +112,27 @@ end
 
 function Source:syncStatsAsync(_opts, cb)
     return SourceBase.skipped(cb, "iread has no stats")
+end
+
+--- 书城搜索：回包形状同 listStoreAsync。搜索行同书架行，缓存起来供目录 / 正文接口使用。
+---@param keyword string
+---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:searchAsync(keyword, cb)
+    if not self:configured() then return SourceBase.defer(cb, nil, _("未登录 iRead")) end
+    return Client.searchAsync(keyword, function(rows, err)
+        if not rows then cb(nil, err); return end
+        self.found = self.found or {}
+        local uniq, seen = {}, {}
+        for _idx, row in ipairs(rows) do
+            if not seen[row.name] then
+                seen[row.name] = true
+                self.found[row.name] = row
+                uniq[#uniq + 1] = row
+            end
+        end
+        cb({ data = Mapper.shelfList(uniq) })
+    end)
 end
 
 --- 取书架行再交给 fn(row)（返回它发起的任务，取消时一并取消）；fresh 为真强制重拉书架
