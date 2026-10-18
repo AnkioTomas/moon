@@ -216,6 +216,49 @@ function Client:reportReadAsync(body, referer, cb)
     end)
 end
 
+--- App 防重放签名用的 guest_token（``/feature`` 配置里的同名项），进程内缓存。
+---@type string|nil
+local guest_token
+
+---@param cb fun(token: string|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:guestTokenAsync(cb)
+    if guest_token then
+        cb(guest_token)
+        return nil
+    end
+    return Eink.callAsync("GET", "/feature", { query = { synckey = 0 } }, function(data, err)
+        if not data then
+            cb(nil, err)
+            return
+        end
+        -- 万一拿不到就用空串签，由服务端决定收不收。
+        local token = type(data.feature) == "table" and data.feature.guest_token
+        guest_token = type(token) == "string" and token or ""
+        cb(guest_token)
+    end)
+end
+
+--- 上报阅读时长（App ``/book/read``，按小时分桶，可补报离线时段）。
+--- 写请求不自动重放：续期后由调用方下一轮重推（未确认的行仍是脏行）。
+---@param body table 已签名的请求体
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:reportAppReadAsync(body, cb)
+    return Eink.callAsync("POST", "/book/read", { body = body }, function(data, err)
+        if not data then
+            cb(nil, err)
+            return
+        end
+        if tonumber(data.succ) ~= 1 then
+            logger.warn("weread app report not accepted")
+            cb(nil, _("上报响应异常"))
+            return
+        end
+        cb(data)
+    end)
+end
+
 --- 拉取阅读统计明细（Eink ``/readdata/detail``）。
 ---@param mode string|nil 统计口径，缺省 "monthly"
 ---@param base_time number|nil 基准时间戳（秒），大于 0 才带上

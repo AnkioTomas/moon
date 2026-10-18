@@ -19,7 +19,8 @@ local Reviews = require("source.wechat.reviews")
 local SourceBase = require("source.base")
 local Shelf = require("source.shelf")
 local Progress = require("book.progress")
-local Protocol = require("source.wechat.protocol")
+local App = require("source.wechat.app")
+local Eink = require("source.wechat.eink")
 local logger = require("utils.log")
 local _ = require("gettext")
 
@@ -35,7 +36,6 @@ end
 ---@field cfg table
 ---@field _client table
 ---@field _covers table<string, string>
----@field _heartbeat WechatHeartbeat|nil
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -81,11 +81,7 @@ function Source:configured()
     return Auth.hasSession()
 end
 
---- 阅读时长心跳间隔（秒），也是每拍上报的 rt；对齐 weread.koplugin。
-local HEARTBEAT_INTERVAL = 30
-
 --- 章节开读即发「进入阅读」（putProgressAsync 就是 enter 上报）。
---- 服务端只认距本会话上次上报的真实间隔：拖到推时长时才 enter，紧跟的 rt 会被当成 0 秒。
 ---@param self WechatSource
 ---@param payload { identity: BookIdentity, position: ProgressPosition|nil }
 local function enterReading(self, payload)
@@ -95,112 +91,7 @@ local function enterReading(self, payload)
     end)
 end
 
----@class WechatHeartbeat
----@field identity BookIdentity 正在读的书
----@field position ProgressPosition 最近一次翻页的位置
----@field tick fun()
----@field busy boolean|nil 有请求在飞；停掉后迟到的回包只改这张作废的表
-
---- 停掉阅读时长心跳。
----@param self WechatSource
-local function stopHeartbeat(self)
-    local hb = self._heartbeat
-    if not hb then return end
-    self._heartbeat = nil
-    require("ui/uimanager"):unschedule(hb.tick)
-end
-
---- 在会话上报一拍：会话未进入先 enter（结果不看），紧跟 rt = 心跳间隔。
----@param self WechatSource
----@param session WechatReportSession
----@param position table makeReadPayload 的位置字段
----@param cb fun(data: table|nil, err: string|nil)
-local function report(self, session, position, cb)
-    local referer = Protocol.readerUrl(position.book_id)
-    position.psvts, position.pclts, position.token = session.psvts, session.pclts, session.token
-    local function sendTime()
-        position.elapsed_seconds = HEARTBEAT_INTERVAL
-        self._client:reportReadAsync(Protocol.makeReadPayload(position), referer, cb)
-    end
-    if session.entered then
-        sendTime()
-        return
-    end
-    self._client:reportReadAsync(Protocol.makeEnterReadPayload(position), referer, function(data, err)
-        if not data then logger.warn("wechat heartbeat enter failed", position.book_id, err) end
-        session.entered = true
-        sendTime()
-    end)
-end
-
---- 一拍心跳，对齐 weread.koplugin：离线 / 上一拍未回 / 目录未就绪就跳过（这段不补报）；
---- 上报失败强制重建会话（重开阅读页、重新进入）再报一次；回包有没有 synckey 只记日志。
----@param self WechatSource
----@param hb WechatHeartbeat
-local function beat(self, hb)
-    if self._heartbeat ~= hb then return end
-    require("ui/uimanager"):scheduleIn(HEARTBEAT_INTERVAL, hb.tick)
-    if hb.busy or not require("ui/network/manager"):isConnected() then return end
-    local identity, pos = hb.identity, hb.position
-    local chapter_idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
-    local uid = chapter_idx and Toc.uid(identity.source_id, identity.stable_id, chapter_idx)
-    if not uid then return end
-    local book_id = identity.stable_id
-    local position = {
-        book_id = book_id,
-        chapter_uid = uid,
-        chapter_idx = Toc.sourceIndex(identity.source_id, book_id, chapter_idx) or chapter_idx,
-        chapter_offset = math.floor(Progress.clampFraction(pos.chapter_fraction) * 10000),
-        summary = pos.chapter_title or "",
-        progress = math.floor(Progress.clampFraction(pos.fraction) * 100 + 0.5),
-    }
-    local Context = require("source.wechat.context")
-    hb.busy = true
-    local function attempt(force)
-        Context.sessionAsync(self._client, book_id, force, function(session, err)
-            if not session then
-                hb.busy = false
-                logger.warn("wechat heartbeat session failed", book_id, err)
-                return
-            end
-            report(self, session, position, function(data, report_err)
-                if not data and not force then
-                    attempt(true)
-                    return
-                end
-                hb.busy = false
-                if not data then
-                    logger.warn("wechat heartbeat failed", book_id, report_err)
-                elseif data.synckey == nil then
-                    logger.info("wechat heartbeat without synckey", book_id)
-                end
-            end)
-        end)
-    end
-    attempt(false)
-end
-
---- 开读 / 翻页：心跳没在跑（或换了书）就起一个，并记下最新位置。
----@param self WechatSource
----@param identity BookIdentity
----@param position ProgressPosition|nil
-local function touchHeartbeat(self, identity, position)
-    if self.cfg.sync_reading_time == false or not self:configured() then return end
-    local hb = self._heartbeat
-    if hb and hb.identity.stable_id ~= identity.stable_id then
-        stopHeartbeat(self)
-        hb = nil
-    end
-    if not hb then
-        hb = { identity = identity, position = { fraction = 0 }, tick = require("ui.guard").wrap("wechat heartbeat", function() beat(self, hb) end) }
-        self._heartbeat = hb
-        require("ui/uimanager"):scheduleIn(HEARTBEAT_INTERVAL, hb.tick)
-    end
-    hb.identity = identity
-    hb.position = position or hb.position
-end
-
---- 开读章节时进入阅读会话；开章 / 翻页 / 唤醒起时长心跳并更新位置，关书 / 休眠停掉；其余事件交给基类。
+--- 开读章节时进入阅读会话；其余事件交给基类。阅读时长不在这里报：本地采集的统计行经 pushStatsAsync 按 App 协议上报。
 ---@param event string
 ---@param payload table|nil
 function Source:onEvent(event, payload)
@@ -212,24 +103,14 @@ function Source:onEvent(event, payload)
         else
             enterReading(self, payload)
         end
-        touchHeartbeat(self, payload.identity, payload.position)
-        return
-    end
-    if event == "page_changed" or event == "reading_resumed" then
-        touchHeartbeat(self, payload.identity, payload.position)
-        return
-    end
-    if event == "reading_stopped" then
-        stopHeartbeat(self)
         return
     end
     return SourceBase.onEvent(self, event, payload)
 end
 
---- 关闭这个实例：停掉时长心跳、清实例自己的封面表。Context（psvts）与 Toc 是进程级的，
+--- 关闭这个实例：清实例自己的封面表。Context（psvts）与 Toc 是进程级的，
 --- 换源时关旧实例若把它们一起清了，正在阅读那本书的上报会报「请先打开该章节」。
 function Source:close()
-    stopHeartbeat(self)
     self._covers = {}
 end
 
@@ -577,18 +458,99 @@ function Source:putProgressAsync(identity, pos, cb)
         end }
 end
 
---- 本地统计行只在本地确认，不发请求。
----
---- 微信侧时长由阅读中的心跳（见 onEvent）实时上报：服务端按距上次上报的真实间隔记 rt，
---- 离线攒下的时长事后补报记不上。确认后这些行不再是脏行，展示仍按「云端 + 拉取后本地新读」合并。
+--- 按 App 协议（``/book/read``）上报本地阅读时长，一本书一个请求，时长按小时分桶，
+--- 离线攒下的时段联网后照原时间补报。成功的书确认其全部行，失败就停，其余行留给下一轮。
+--- 书目录没缓存（定位不到章节）的行无法上报，直接确认丢弃，免得卡住队首。
+--- 关闭「同步阅读时间」时只在本地确认。
 ---@param rows table[]|nil
 ---@param cb fun(data: table|nil, err: string|nil)
----@return nil
+---@return { cancel: fun() }|nil
 function Source:pushStatsAsync(rows, cb)
-    local ids = {}
-    for _idx, row in ipairs(rows or {}) do ids[#ids + 1] = row.id end
-    cb({ ok = true, synced_ids = ids })
-    return nil
+    local synced = {}
+    if self.cfg.sync_reading_time == false then
+        for _idx, row in ipairs(rows or {}) do synced[#synced + 1] = row.id end
+        cb({ ok = true, synced_ids = synced })
+        return nil
+    end
+    local order, books = {}, {}
+    for _idx, row in ipairs(rows or {}) do
+        local book = books[row.stable_id]
+        if not book then
+            book = { id = row.stable_id, rows = {} }
+            books[row.stable_id] = book
+            order[#order + 1] = book
+        end
+        book.rows[#book.rows + 1] = row
+    end
+    local cancelled, job = false, nil
+    local function finish(err)
+        if #synced == 0 and err then
+            cb(nil, err)
+        else
+            cb({ ok = true, synced_ids = synced })
+        end
+    end
+    local function confirm(book)
+        for _idx, row in ipairs(book.rows) do synced[#synced + 1] = row.id end
+    end
+    job = self._client:guestTokenAsync(function(token, token_err)
+        if cancelled then return end
+        if not token then
+            finish(token_err)
+            return
+        end
+        local creds = Eink.credentials()
+        if not creds then
+            finish(_("请先扫码登录微信读书墨水屏"))
+            return
+        end
+        local index = 0
+        local function nextBook()
+            index = index + 1
+            local book = order[index]
+            if not book then
+                finish()
+                return
+            end
+            local last = book.rows[#book.rows]
+            local chapter_idx = last.chapter_idx
+            local uid = chapter_idx and Toc.uid("wechat", book.id, chapter_idx)
+            if not uid then
+                logger.warn("wechat stats skipped without toc", book.id)
+                confirm(book)
+                nextBook()
+                return
+            end
+            local fraction = Progress.clampFraction(last.chapter_fraction)
+            local body = App.readBody({
+                vid = creds.vid,
+                device_id = creds.device_id,
+                install_id = Eink.installId(),
+                guest_token = token,
+                book_id = book.id,
+                chapter_uid = tonumber(uid) or 0,
+                chapter_idx = Toc.sourceIndex("wechat", book.id, chapter_idx) or chapter_idx,
+                chapter_offset = math.floor(fraction * 10000),
+                chapter_progress = math.floor(fraction * 100),
+                hours = App.hours(book.rows, App.timeZone()),
+            })
+            job = self._client:reportAppReadAsync(body, function(data, err)
+                if cancelled then return end
+                if not data then
+                    logger.warn("wechat app report failed", book.id, err)
+                    finish(err)
+                    return
+                end
+                confirm(book)
+                nextBook()
+            end)
+        end
+        nextBook()
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
 end
 
 --- 每次统计同步最多补拉 readinfo 的书数；首次同步整个书架分几轮补齐。

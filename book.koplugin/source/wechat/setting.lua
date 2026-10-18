@@ -151,7 +151,7 @@ function Setting.rows(plugin)
                 end })
         end
     end
-    toggle("sync_reading_time", true, "timer", _("同步阅读时间"), _("阅读时必须联网，微信读书才会计入时长"))
+    toggle("sync_reading_time", true, "timer", _("同步阅读时间"), _("离线阅读的时长，联网后补报给微信读书"))
     toggle("merge_local_stats", false, "history", _("合并本地阅读时长"),
         _("关闭时以云端为准；打开后每天取云端与本地中较大的，补上离线阅读。只影响月读里的统计"))
     toggle("show_paragraph_reviews", false, "forum", _("显示段评"), _("阅读时给有他人段评的句子画线，点按查看；需联网"))

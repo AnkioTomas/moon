@@ -1,10 +1,10 @@
 --[[--
-微信读书墨水屏（Eink 2.1.2）客户端 API：扫码登录、令牌续期与 ``i.weread.qq.com`` 请求。
+微信读书 App 协议（手机 App 10.2.2 身份）客户端 API：扫码登录、令牌续期与 ``i.weread.qq.com`` 请求。
 
 协议移植自 weread-omni（profile.ts / device-ua.ts / auth/qrlogin.ts / auth/token.ts / api/mobile.ts）：
   GET  /wxticket → 微信 qrconnect 取 uuid → 长轮询 long.open.weixin.qq.com 拿 wx_code
   → POST /login（wx_code 换 accessToken/refreshToken）；过期后 POST /login 带 refreshToken 续期。
-请求头固定为 ``vid`` / ``accessToken`` 加 BOOX 设备版本头。vid/accessToken 同时就是网页会话
+请求头固定为 ``vid`` / ``accessToken`` 加 App 版本头。vid/accessToken 同时就是网页会话
 （当 wr_vid/wr_skey Cookie 可用），直接落在这两个字段；``eink`` 字段只存 refresh_token 与 device_id。
 网络仅异步：Request.request。
 
@@ -24,19 +24,19 @@ local Eink = {}
 local API = "https://i.weread.qq.com"
 local WX_APPID = "wxab9b71ad2b90ff34"
 local WX_SCOPE = "snsapi_userinfo,snsapi_timeline,snsapi_friend"
-local DEVICE_ID_PREFIX = "eink334691225"
-local DEVICE_NAME = "BOOX"
-local DEVICE_TYPE = 3
+local DEVICE_NAME = "Xiaomi"
+local DEVICE_TYPE = 1
 local QR_DEADLINE = 5 * 60
 local QR_POLL_TIMEOUT = 65
 
+-- 官方手机 App 10.2.2 的身份（抓包取得）；/book/read 的防重放签名只有这个渠道会下发 guest_token。
 local VERSION_HEADERS = {
-    ["User-Agent"] = "WeRead/2.1.2 WRBrand/Onyx wr_eink Dalvik/2.1.0 (Linux; U; Android 11; BOOX Build/onyx)",
-    baseapi = "30",
-    appver = "2.1.2.10245900",
-    basever = "2.1.2.10245900",
-    osver = "11",
-    channelId = "900",
+    ["User-Agent"] = "WeRead/10.2.2 WRBrand/xiaomi Dalvik/2.1.0 (Linux; U; Android 17; 25128PNA1C Build/CP2A.260605.016)",
+    baseapi = "37",
+    appver = "10.2.2.10167650",
+    basever = "10.2.2.10167650",
+    osver = "17",
+    channelId = "12",
 }
 
 ---@class WechatEinkCredentials
@@ -81,10 +81,10 @@ local function digits(n)
     return table.concat(out)
 end
 
---- 设备 ID：前缀 + 19 位非负 int63（首位不超过 8 即落在 int63 内）。
+--- 设备 ID：App 的是 38 位数字串，首位非零。
 ---@return string
 function Eink.newDeviceId()
-    return DEVICE_ID_PREFIX .. tostring(math.random(0, 8)) .. digits(18)
+    return tostring(math.random(1, 9)) .. digits(37)
 end
 
 --- 已落盘设备 ID；没有就生成并落盘。重新登录沿用同一设备，避免在账号里堆设备。
@@ -97,6 +97,17 @@ function Eink.deviceId()
     eink.device_id = Eink.newDeviceId()
     Eink.save({ eink = eink })
     return eink.device_id
+end
+
+--- 已落盘安装 ID（App 上报时长要带）；没有就生成并落盘。
+---@return string
+function Eink.installId()
+    local eink = Eink.config().eink or {}
+    if type(eink.install_id) ~= "string" or eink.install_id == "" then
+        eink.install_id = "31" .. digits(26)
+        Eink.save({ eink = eink })
+    end
+    return eink.install_id
 end
 
 --- 登录与续期共用的签名：sha256(毫秒时间戳 .. deviceId .. random)。
@@ -303,7 +314,7 @@ function Eink.completeQrLoginAsync(info, cb)
         code = info.wx_code,
         deviceId = device_id,
         deviceName = DEVICE_NAME,
-        installId = "eink31" .. digits(26),
+        installId = Eink.installId(),
         isAutoLogout = 0,
         isFromQrcode = 1,
         random = random,
