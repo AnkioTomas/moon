@@ -74,7 +74,7 @@ function Setting.entries(desktop)
     return {
         {
             group = "maintenance",
-            order = 65,
+            order = 10,
             id = "storage", icon = "storage", title = _("存储空间"),
             subtitle = _("查看设备空间与月读各类数据的占用"),
             page = { title = _("存储空间"), sections = function() return sections(desktop) end },

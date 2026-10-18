@@ -90,7 +90,7 @@ local function coreEntries(desktop)
     local plugin = desktop.plugin
     local active_id, active_name = activeSource()
     local network = HttpSetting.entry(desktop)
-    network.group, network.order = "system", 30
+    network.group, network.order = "system", 40
     return {
         {
             group = "library", order = 10, id = "sources", icon = "source", title = _("书籍来源"),
@@ -113,35 +113,52 @@ local function coreEntries(desktop)
             },
         },
         {
-            group = "library", order = 30, id = "library_display", icon = "grid_view", title = _("图书馆显示"),
-            subtitle = _("封面风格、文字显示与点击动作"),
-            page = {
-                title = _("图书馆显示"),
-                sections = function() return {{ title = _("封面"), rows = LibrarySettings:rows(desktop) }} end,
-            },
-        },
-        {
-            group = "desktop", order = 10, id = "display", icon = "display_settings", title = _("界面显示"),
-            subtitle = _("字体缩放、夜间、亮度"),
+            group = "desktop", order = 10, id = "appearance", icon = "palette", title = _("外观"),
+            subtitle = _("界面风格、字体、缩放"),
             status = string.format("%d%%", Theme.scale()), status_on = true,
             page = {
-                title = _("界面显示"),
+                title = _("外观"),
                 sections = function()
-                    return {
-                        { title = _("启动"), rows = DesktopSettings:rows(desktop, require("menu").openOnStart()) },
-                        {
-                            title = _("显示"),
-                            rows = Display:rows{
-                                desktop = desktop, font_name = Fonts.currentName(), scale = Theme.scale(),
-                                grid_max_cols = require("ui.widgets.cover").gridCols(),
-                            },
+                    return {{
+                        title = _("外观"),
+                        rows = Display:appearanceRows{
+                            desktop = desktop, font_name = Fonts.currentName(), scale = Theme.scale(),
                         },
-                    }
+                    }}
                 end,
             },
         },
         {
-            group = "desktop", order = 20, id = "topbar", icon = "toolbar", title = _("桌面顶栏"),
+            group = "desktop", order = 20, id = "display", icon = "display_settings", title = _("屏幕与亮度"),
+            subtitle = _("屏幕刷新、夜间、亮度"),
+            page = {
+                title = _("屏幕与亮度"),
+                sections = function()
+                    local rows = Display:screenRows{ desktop = desktop }
+                    return #rows > 0 and {{ title = _("屏幕"), rows = rows }} or {}
+                end,
+            },
+        },
+        {
+            group = "desktop", order = 30, id = "startup", icon = "keyboard", title = _("启动与按键"),
+            subtitle = _("启动进入月读、翻页键"),
+            page = {
+                title = _("启动与按键"),
+                sections = function()
+                    return {{ title = _("启动"), rows = DesktopSettings:rows(desktop, require("menu").openOnStart()) }}
+                end,
+            },
+        },
+        {
+            group = "desktop", order = 40, id = "library_display", icon = "grid_view", title = _("书架显示"),
+            subtitle = _("图书馆、最近阅读、书架的每行数量与封面风格"),
+            page = {
+                title = _("书架显示"),
+                sections = function() return {{ title = _("书架"), rows = LibrarySettings:rows(desktop) }} end,
+            },
+        },
+        {
+            group = "desktop", order = 50, id = "topbar", icon = "toolbar", title = _("桌面顶栏"),
             subtitle = _("时钟、电量等状态项"),
             page = {
                 title = _("桌面顶栏"),
@@ -161,7 +178,7 @@ local function coreEntries(desktop)
         },
         { parent = "lookup", order = 10, sections = function() return ReaderSettings:lookupSections(desktop) end },
         {
-            group = "reader", order = 25, id = "popup_menu", icon = "touch_long", title = _("划词菜单"),
+            group = "reader", order = 30, id = "popup_menu", icon = "touch_long", title = _("划词菜单"),
             subtitle = _("按钮开关、顺序与来源"),
             page = {
                 title = _("划词菜单"),
@@ -170,17 +187,17 @@ local function coreEntries(desktop)
         },
         { group = "system", order = 10, row = Language:row() },
         {
-            group = "system", order = 20, id = "ai", icon = "psychology", title = _("AI 接口"),
+            group = "system", order = 30, id = "ai", icon = "psychology", title = _("AI 接口"),
             subtitle = _("X-Ray 使用的大模型接口"),
             page = { title = _("AI 接口"), sections = function() return {{ title = _("AI"), rows = AISettings:rows(desktop) }} end },
         },
         network,
-        { group = "maintenance", order = 10, row = Maintenance:cacheRow(desktop) },
-        { group = "maintenance", order = 20, row = Maintenance:clearStatsRow(desktop) },
-        { group = "maintenance", order = 25, row = Maintenance:importKoreaderStatsRow(desktop) },
-        { group = "maintenance", order = 30, row = Maintenance:debugLogRow(desktop) },
-        { group = "maintenance", order = 60, row = Maintenance:aboutRow() },
-        { group = "maintenance", order = 70, row = Maintenance:closeRow(desktop) },
+        { group = "maintenance", order = 20, row = Maintenance:cacheRow(desktop) },
+        { group = "maintenance", order = 30, row = Maintenance:clearStatsRow(desktop) },
+        { group = "maintenance", order = 40, row = Maintenance:importKoreaderStatsRow(desktop) },
+        { group = "maintenance", order = 70, row = Maintenance:debugLogRow(desktop) },
+        { group = "maintenance", order = 80, row = Maintenance:aboutRow() },
+        { group = "maintenance", order = 90, row = Maintenance:closeRow(desktop) },
     }
 end
 

@@ -21,7 +21,7 @@ function Setting.entries(desktop)
         {
             id = "main",
             group = "desktop",
-            order = 40,
+            order = 70,
             icon = "extension",
             title = _("底栏拓展"),
             subtitle = _("在底栏列出其它插件的入口"),

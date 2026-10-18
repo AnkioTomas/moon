@@ -17,8 +17,8 @@ function Setting.entries(desktop)
     return {
         {
             id = "main",
-            group = "system",
-            order = 120,
+            group = "desktop",
+            order = 100,
             icon = "lock",
             title = _("锁屏密码"),
             subtitle = _("开机和唤醒时需要输入数字密码"),

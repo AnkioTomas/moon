@@ -100,7 +100,7 @@ package.preload["desktop.pages.setting.source"] = function()
     }
 end
 package.preload["desktop.pages.setting.display"] = function()
-    return { rows = function() return {} end }
+    return { appearanceRows = function() return {} end, screenRows = function() return { function() end } end }
 end
 package.preload["features.nightmode.page"] = function()
     return { rows = function() return {} end }
@@ -217,7 +217,7 @@ require("features").registerConventions()
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 34)
+Assert.len(built_rows, 36)
 Assert.eq(table.concat(section_titles, ","), "书库,订阅,桌面,阅读,系统,维护")
 -- 订阅的开关直接放在根页「订阅」组，不另开子页。
 local sub_rows = {}
@@ -229,24 +229,27 @@ Assert.eq(table.concat(sub_rows, ","), "启用订阅,下载文章图片")
 local expected = {
     { title = "书籍来源", id = "sources" },
     { title = "账号与登录", id = "source_config" },
-    { title = "界面显示", id = "display" },
+    { title = "外观", id = "appearance" },
+    { title = "屏幕与亮度", id = "display" },
+    { title = "启动与按键", id = "startup" },
+    { title = "书架显示", id = "library_display" },
     { title = "桌面顶栏", id = "topbar" },
     { title = "桌面快捷面板", id = "feature:panel:desktop" },
     { title = "底栏拓展", id = "feature:extensions:main" },
-    { title = "锁屏壁纸", id = "feature:lockscreen:main" },
     { title = "界面壁纸", id = "feature:wallpaper:main" },
+    { title = "锁屏壁纸", id = "feature:lockscreen:main" },
+    { title = "锁屏密码", id = "feature:passcode:main" },
     { title = "阅读行为", id = "reader_behavior" },
     { title = "划词与查询", id = "lookup" },
     { title = "划词菜单", id = "popup_menu" },
-    { title = "阅读快捷面板", id = "feature:panel:reader" },
     { title = "阅读页顶栏", id = "feature:bars:top" },
     { title = "阅读页底栏", id = "feature:bars:bottom" },
+    { title = "阅读快捷面板", id = "feature:panel:reader" },
     { title = "时间与日期", id = "feature:clock:main" },
     { title = "AI 接口", id = "ai" },
     { title = "网络", id = "network" },
     { title = "中文输入法增强", id = "feature:ime:main" },
     { title = "远程管理", id = "feature:remote:main" },
-    { title = "锁屏密码", id = "feature:passcode:main" },
 }
 local pages = {}
 local nav = 1
@@ -284,14 +287,14 @@ end
 Assert.eq(sectionTitles(behavior), "行为,翻页动画,阅读侧栏")
 Assert.eq(sectionTitles(pages.lookup), "选区,翻译,X-Ray,段评,词典,文字识别（OCR）,百科")
 Assert.eq(sectionTitles(pages.popup_menu), "按钮")
-Assert.eq(sectionTitles(pages.display), "启动,显示,夜间与亮度")
+Assert.eq(sectionTitles(pages.display), "屏幕,夜间与亮度")
 
--- 根页上的开关 / 动作行：订阅两行在前，维护组里 update feature 的两行按 order 插在调试日志与关于之间
+-- 根页上的开关 / 动作行：订阅两行在前，维护组里 update feature 的两行按 order 排在统计与调试日志之间
 local maintenance = {}
 for _, row in ipairs(built_rows) do
     if row.kind == "action" or row.kind == "toggle" or row.toggle ~= nil then maintenance[#maintenance + 1] = row.title end
 end
-Assert.eq(table.concat(maintenance, ","), "启用订阅,下载文章图片,清理缓存,清除当前源统计,导入 KOReader 统计,调试日志,自动检查更新,检查更新,关于,关闭桌面")
+Assert.eq(table.concat(maintenance, ","), "启用订阅,下载文章图片,清理缓存,清除当前源统计,导入 KOReader 统计,自动检查更新,检查更新,调试日志,关于,关闭桌面")
 
 _G.G_reader_settings = previous_settings
 

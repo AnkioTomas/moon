@@ -1,5 +1,5 @@
 --[[--
-自动夜间 / 自动亮度的设置行（追加在桌面「界面显示」页，入口见 setting.lua）。
+自动夜间 / 自动亮度的设置行（追加在桌面「屏幕与亮度」页，入口见 setting.lua）。
 
 @module koplugin.book.features.nightmode.page
 --]]

@@ -250,7 +250,7 @@ function Setting.entries(desktop)
         {
             id = "main",
             group = "system",
-            order = 100,
+            order = 50,
             icon = "keyboard",
             title = _("中文输入法增强"),
             subtitle = _("键盘布局"),

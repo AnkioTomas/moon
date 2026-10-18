@@ -227,7 +227,7 @@ function Setting.entries(desktop)
         {
             id = "main",
             group = "reader",
-            order = 200,
+            order = 70,
             icon = "translate",
             title = _("生僻字注音"),
             subtitle = _("拼音、英语音标"),
