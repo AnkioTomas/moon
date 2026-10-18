@@ -180,6 +180,9 @@ do -- 固定到底栏：最多 MAX_PINNED 个；按屏宽剩余空格数取前�
     local entries = Extensions.entries(plugin)
     local function find(id) for _idx, e in ipairs(entries) do if e.id == id then return e end end end
     Assert.is_nil(Extensions.cells(5))
+    Assert.is_true(Extensions.togglePin(find("alpha:alpha"), 1))
+    Assert.is_false(Extensions.togglePin(find("zeta:zeta"), 1), "屏宽只容一个时拒绝第二个")
+    Assert.is_true(Extensions.togglePin(find("alpha:alpha"), 1))
     Assert.is_true(Extensions.togglePin(find("alpha:alpha")))
     Assert.is_true(Extensions.togglePin(find("zeta:zeta")))
     Assert.is_false(Extensions.togglePin(find("calibre:calibre")), "固定满了拒绝")

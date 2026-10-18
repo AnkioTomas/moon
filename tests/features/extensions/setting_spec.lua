@@ -30,7 +30,7 @@ end
 
 local Setting = require("features.extensions.setting")
 local updates = 0
-local desktop = { plugin = {}, updateView = function() updates = updates + 1 end }
+local desktop = { plugin = {}, cellCapacity = function() return 2 end, updateView = function() updates = updates + 1 end }
 
 local function build()
     local out = {}
