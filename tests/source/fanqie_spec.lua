@@ -109,6 +109,8 @@ package.preload["utils.paths"] = function()
         imageDir = function() return "missing" end,
         coverPath = function() return "missing/cover.jpg" end,
         ensureLayout = function() end,
+        bookWorkDir = function() return "work" end,
+        ensureBookWork = function() end,
     }
 end
 

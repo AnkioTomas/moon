@@ -1,5 +1,5 @@
 --[[--
-番茄漫画章节：JSON 页清单 → <img>，页图 AES-GCM 解密（只解 CTR 流）。
+番茄漫画章节：JSON 页清单 → 页图地址，页图 AES-GCM 解密（只解 CTR 流）。
 
 @module tests.source.fanqie.comic_spec
 --]]
@@ -15,10 +15,11 @@ local Aes = require("crypto.aes")
 local Comic = require("source.fanqie.comic")
 
 local key_hex = string.rep("00", 32)
-local html, key = Comic.parse('{"picInfos":[{"picUrl":"https://x/a.jpg?a=1&b=2"},{"picUrl":"https://x/b.jpg"}],'
+local urls, key = Comic.parse('{"picInfos":[{"picUrl":"https://x/a.jpg?a=1&b=2"},{"picUrl":"https://x/b.jpg"}],'
     .. '"encrypt":true,"encrypt_key":"' .. key_hex .. '"}')
-Assert.matches(html, 'src="https://x/a.jpg%?a=1&amp;b=2"')
-Assert.matches(html, 'src="https://x/b.jpg"')
+Assert.len(urls, 2)
+Assert.eq(urls[1], "https://x/a.jpg?a=1&b=2")
+Assert.eq(urls[2], "https://x/b.jpg")
 Assert.eq(key, string.rep("\0", 32))
 
 local _, plain_key = Comic.parse('{"picInfos":[{"picUrl":"https://x/a.jpg"}]}')

@@ -8,7 +8,7 @@
 --]]
 
 local Base = require("source.base")
-local Assets = require("source.assets")
+local Cbz = require("source.cbz")
 local Comic = require("source.fanqie.comic")
 local Paths = require("utils.paths")
 require("l10n").apply()
@@ -211,9 +211,20 @@ function Source:loadTocAsync(identity, cb)
     return h
 end
 
+local function comicPath(identity, chapter)
+    return Paths.bookWorkDir(identity.stable_id, identity.source_id) .. "/" .. chapter.uid .. ".cbz"
+end
+
 local function fetch(self, identity, chapter, cb)
     local Content = require("source.fanqie.content")
     local h = handle()
+    Paths.ensureBookWork(identity.stable_id, identity.source_id)
+    -- 已打好的漫画章节不再联网（也免去正文接口风控）
+    local archive = comicPath(identity, chapter)
+    if Cbz.ready(archive) then
+        Base.defer(cb, { file = archive })
+        return h
+    end
     h.job = self.client:officialGetContentAsync(identity.stable_id, chapter.uid, function(result, err)
         if h.cancelled then return end
         if not result then
@@ -221,23 +232,14 @@ local function fetch(self, identity, chapter, cb)
             return
         end
         local title = result.title ~= "" and result.title or chapter.title
-        local pages, key = Comic.parse(result.content)
-        if not pages then
+        local urls, key = Comic.parse(result.content)
+        if not urls then
             cb({ title = title, html = Content.decode_pua_content(result.content) })
             return
         end
-        local images_dir = Paths.bookWorkDir(identity.stable_id, "fanqie") .. "/images"
-        h.job = Assets.localizeAsync(pages, images_dir, function(url, got)
-            return require("http.request").request({
-                url = url,
-                method = "GET",
-                timeout = require("http.timeout").net(3),
-                allow_redirects = true,
-            }, function(res)
-                got(res and res.code == 200 and res.body and Comic.decrypt(res.body, key) or nil)
-            end)
-        end, function(html)
-            if not h.cancelled then cb({ title = title, html = html }) end
+        h.job = Comic.materializeAsync(urls, key, comicPath(identity, chapter), function(path, err_msg)
+            if h.cancelled then return end
+            if path then cb({ title = title, file = path }) else cb(nil, err_msg) end
         end)
     end)
     return h
