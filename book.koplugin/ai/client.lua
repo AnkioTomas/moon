@@ -169,6 +169,55 @@ local function finish(response, err, raw)
     return content, decode_err
 end
 
+local KEEP_NAMES = "實體名稱（name、aliases）須與書中原文逐字一致，不做簡繁或語言轉換；只有敘述性文字使用指定語言。"
+local KEEP_NAMES_EN = " Entity names (name, aliases) must match the book text verbatim, without translation or script conversion; only descriptive text uses the chosen language."
+
+--- AI 回答语言 / 地区风格（有序，设置页按此列出）。label 是各语言自称，不走翻译；name 替换提示词里写死的「简体中文」。
+Client.LANGUAGES = {
+    { id = "zh_CN", label = "简体中文（中国大陆）", name = "简体中文",
+        rule = "\n\n一律使用简体中文与中国大陆通行用语，不要使用繁体字。实体名称（name、aliases）须与书中原文逐字一致，不做简繁或语言转换；只有叙述性文字使用指定语言。" },
+    { id = "zh_TW", label = "繁體中文（台灣）", name = "繁體中文",
+        rule = "\n\n一律使用繁體中文與台灣慣用語（例如「軟體」「資訊」「網路」「品質」），不要使用簡體字或大陸用語。" .. KEEP_NAMES },
+    { id = "zh_HK", label = "繁體中文（香港）", name = "繁體中文",
+        rule = "\n\n一律使用繁體中文與香港慣用語，不要使用簡體字或大陸用語。" .. KEEP_NAMES },
+    { id = "en_US", label = "English (US)", name = "English",
+        rule = "\n\nAlways reply in natural American English, with American spelling and idioms." .. KEEP_NAMES_EN },
+    { id = "en_GB", label = "English (UK)", name = "English",
+        rule = "\n\nAlways reply in natural British English, with British spelling and idioms." .. KEEP_NAMES_EN },
+}
+
+--- 界面语言（l10n 目录名）对应的默认回答语言；其它界面语言不加约束。
+local FOLLOW_UI = { zh_CN = "zh_CN", zh_TW = "zh_TW", en = "en_US" }
+
+--- 当前回答语言条目：设置 ai_language（缺省 / auto = 跟随界面语言）；跟随到没有对应条目时为 nil。
+---@return table|nil
+function Client.language()
+    local id = Settings.get("ai").ai_language
+    if not id or id == "auto" then id = FOLLOW_UI[require("l10n").catalog()] end
+    for _idx, lang in ipairs(Client.LANGUAGES) do
+        if lang.id == id then return lang end
+    end
+end
+
+--- opts.localize 时：system 提示词按回答语言替换写死的语言名并追加语言 / 用语要求（提示词本身是简体源串）。
+---@param messages table[]
+---@return table[]
+local function localize(messages)
+    local lang = Client.language()
+    if not lang then return messages end
+    local out = {}
+    for idx, message in ipairs(messages) do
+        if message.role == "system" then
+            local copy = {}
+            for k, v in pairs(message) do copy[k] = v end
+            copy.content = message.content:gsub("简体中文", lang.name) .. lang.rule
+            message = copy
+        end
+        out[idx] = message
+    end
+    return out
+end
+
 --- 非流式 Chat Completions；cb(content, err)。
 ---@param messages table[]
 ---@param opts table|nil
@@ -186,6 +235,7 @@ function Client.chat(messages, opts, cb)
     local timeout = opts.timeout or require("http.timeout").ai()
     local max_tokens = opts.max_tokens or Client.defaultMaxTokens()
     local current, cancelled
+    if opts.localize then messages = localize(messages) end
 
     ---@param think_off boolean
     ---@param budget number

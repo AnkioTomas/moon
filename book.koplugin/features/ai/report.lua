@@ -214,7 +214,7 @@ local function generate(ui, identity, percent)
         title = title,
         restartable = true,
         run = function(_report, done)
-            return require("ai").chat(messages, { max_tokens = 2000, timeout = require("http.timeout").ai(1.5) }, function(content, err)
+            return require("ai").chat(messages, { localize = true, max_tokens = 2000, timeout = require("http.timeout").ai(1.5) }, function(content, err)
                 local text = Text.trim(content)
                 if text == "" then
                     done({ ok = false, err = err })
