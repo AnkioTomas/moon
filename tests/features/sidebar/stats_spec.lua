@@ -1,6 +1,5 @@
 --[[--
-features.sidebar.stats 离线用例：统计插件可用判定、先落库再取书籍统计、
-去掉书名作者两行与展开箭头、插件报错时返回空。
+features.sidebar.stats 离线用例：读月读本地统计库、订阅文章不出现、无记录时为空。
 
 @module tests.features.sidebar.stats_spec
 --]]
@@ -30,46 +29,32 @@ package.preload["ui.themes.widgets.text"] = function()
     return { line = line, box = w }
 end
 
-local session
+local session = { identity = { source_id = "local", stable_id = "b1" } }
 package.loaded["reader.session"] = { current = function() return session end }
+package.loaded["book.catalog"] = { formatDuration = function(sec) return sec .. "s" end }
+local sum = { total_seconds = 600, pages = 12, first_read = 1790000000, last_read = 1790100000 }
+local days = { { ymd = "a" }, { ymd = "b" } }
+package.loaded["book.stats_db"] = {
+    summaryByBook = function() return sum end,
+    dailyByBook = function() return days end,
+}
 local Stats = require("features.sidebar.stats")
 
-Assert.eq(Stats.available({}), false, "未加载统计插件")
-local calls = {}
-local stat = {
-    enabled = true,
-    id_curr_book = 7,
-    isEnabled = function(self) return self.enabled end,
-    insertDB = function() calls[#calls + 1] = "insert" end,
-    getBookStat = function(_self, id)
-        calls[#calls + 1] = "get" .. id
-        return {
-            { "Title", "T" }, { "Author(s)", "A", separator = true },
-            { "Total time", "11:47:54" },
-            { "Days reading ▸", 10, callback = function() end, separator = true },
-        }
-    end,
-}
-local ui = { statistics = stat }
-Assert.is_true(Stats.available(ui))
-local rows = Stats.rows(ui)
-Assert.eq(table.concat(calls, ","), "insert,get7", "先落库再查")
-Assert.len(rows, 2)
-Assert.eq(rows[1][1], "Total time")
-Assert.eq(rows[2][1], "Days reading")
-Assert.eq(rows[2][2], "10")
-Assert.is_true(rows[2][3])
-Assert.not_nil(Stats.build(ui, 400))
+Assert.is_true(Stats.available())
+local rows = Stats.rows()
+Assert.len(rows, 6)
+Assert.eq(rows[1][2], "600s")
+Assert.eq(rows[2][2], "2", "阅读天数")
+Assert.eq(rows[3][2], "300s", "日均 = 总时长 / 天数")
+Assert.eq(rows[4][2], "12")
+Assert.matches(rows[5][2], "^%d%d%d%d%-%d%d%-%d%d$")
+Assert.not_nil(Stats.build(400))
 
-stat.getBookStat = function() error("boom") end
-Assert.len(Stats.rows(ui), 0, "插件报错不抛")
-stat.enabled = false
-Assert.eq(Stats.available(ui), false, "统计已关闭")
-stat.enabled, stat.id_curr_book = true, nil
-Assert.eq(Stats.available(ui), false, "本书未入库")
-stat.id_curr_book = 7
+sum = { total_seconds = 0, pages = 0, first_read = 0, last_read = 0 }
+Assert.len(Stats.rows(), 0, "没有记录")
 session = { identity = { ephemeral = true } }
-Assert.eq(Stats.available(ui), false, "订阅文章不显示统计页")
+Assert.eq(Stats.available(), false, "订阅文章不显示统计页")
+Assert.len(Stats.rows(), 0)
 session = nil
-Assert.not_nil(Stats.build(ui, 400))
-package.loaded["reader.session"] = nil
+Assert.eq(Stats.available(), false)
+package.loaded["reader.session"], package.loaded["book.stats_db"], package.loaded["book.catalog"] = nil, nil, nil

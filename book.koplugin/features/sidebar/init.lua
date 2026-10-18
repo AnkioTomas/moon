@@ -61,7 +61,7 @@ local Sidebar = Modal:extend{}
 local AVAILABLE = {
     font = function(ui) return require("ui.fonts.reader").supports(ui) end,
     xray = function() return MoonSettings.get("features.xray").book_xray_enabled end,
-    stats = function(ui) return require("features.sidebar.stats").available(ui) end,
+    stats = function() return require("features.sidebar.stats").available() end,
 }
 
 --- 各列表页的原有入口（与快捷面板同一条路径，整书 / 连续章节的分流都在入口内部）。
@@ -272,7 +272,7 @@ function Sidebar:render()
             height = body_h,
             OverlapGroup:new{
                 dimen = Geom:new{ w = self.panel_w - pad * 2, h = body_h - pad * 2 },
-                require("features.sidebar.stats").build(self.ui, self.panel_w - pad * 2),
+                require("features.sidebar.stats").build(self.panel_w - pad * 2),
             },
         }
     elseif id == "ticket" then
