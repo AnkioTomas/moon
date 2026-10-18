@@ -171,9 +171,10 @@ local function imageDownloader(referer)
             end)
         end
         fetch(url, 0)
-        function job:cancel()
-            self.cancelled = true
-            if self.inner and self.inner.cancel then self.inner:cancel() end
+        -- assets 以 handle.cancel() 调用（不带 self），闭包写法两种调法都行。
+        job.cancel = function()
+            job.cancelled = true
+            if job.inner and job.inner.cancel then job.inner:cancel() end
         end
         return job
     end
