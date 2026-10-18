@@ -719,22 +719,24 @@ local function renameTo(path, to)
     return os.rename(path, to)
 end
 
---- 当前激活的输入框：窗口栈自上而下找第一个鸭子判定命中的 InputDialog
---- （._input_widget 带可调用的 addChars）。两点注意：
---- 1) 不能只查栈顶——用户正在输入时栈顶是 VirtualKeyboard（独立 widget）；
---- 2) 调试模式下 KOReader dbg:guard 把方法包成 __call 表，type 检查会误杀，
----    必须用可调用判定而不是 type=="function"。
+--- 当前激活的输入框：窗口栈自上而下找第一个带输入框的窗口。
+--- 主题 Input 面板（.inputs 数组 + .focus_idx 焦点字段）和原生 InputDialog（._input_widget）两种都认。
+--- 不能只查栈顶——用户正在输入时栈顶是 VirtualKeyboard（独立 widget）。
+--- 调试模式下 KOReader dbg:guard 把方法包成 __call 表，type 检查会误杀，
+--- 必须用可调用判定而不是 type=="function"。
 ---@return table|nil InputText 实例
 local function activeInputWidget()
     local UIManager = require("ui/uimanager")
     for i = #UIManager._window_stack, 1, -1 do
         local w = UIManager._window_stack[i].widget
-        local iw = w and w._input_widget
-        if not w.invisible and type(iw) == "table" then
-            local f = iw.addChars
-            local mt = type(f) == "table" and getmetatable(f)
-            if type(f) == "function" or (mt and mt.__call) then
-                return iw
+        if w and not w.invisible then
+            local iw = type(w.inputs) == "table" and w.inputs[w.focus_idx or 1] or w._input_widget
+            if type(iw) == "table" then
+                local f = iw.addChars
+                local mt = type(f) == "table" and getmetatable(f)
+                if type(f) == "function" or (mt and mt.__call) then
+                    return iw
+                end
             end
         end
     end
