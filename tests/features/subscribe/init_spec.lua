@@ -340,6 +340,10 @@ do
     download("https://a.com/p", "https://cdn.test/a.png")
     Assert.eq(#asked, 1)
     Assert.eq(answers[1], false)
+    -- assets 以 handle.cancel() 调用（不带 self），不能崩
+    local handle = downloader("https://cdn.test/z.png", function() end)
+    handle.cancel()
+    handle:cancel()
     download("https://a.com/p", "https://cdn.test/b.png")
     Assert.eq(answers[1], "IMG")
     redirects["https://cdn.test/a.png"] = "/c.png"
