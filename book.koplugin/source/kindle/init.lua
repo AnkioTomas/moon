@@ -72,7 +72,7 @@ function Kindle.query(where, ...)
     local ok, conn = pcall(require("lua-ljsqlite3/init").open, Kindle.CC_DB, "ro")
     if not ok then return nil, tostring(conn) end
     local sql = "SELECT " .. COLUMNS .. " FROM Entries WHERE " .. FILTER
-        .. (where and (" AND " .. where) or "") .. " ORDER BY p_titles_0_collation"
+        .. (where and (" AND " .. where) or "") .. " ORDER BY p_titles_0_collation COLLATE BINARY" -- 列声明 icu 排序规则，KOReader 的 sqlite 没有
     local rows = {}
     local done, err = pcall(function(...)
         local stmt = conn:prepare(sql)
