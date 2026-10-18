@@ -10,7 +10,7 @@ local _ = require("gettext")
 
 local Setting = {}
 
-Setting.defaults = { enabled = false, shown = {} }
+Setting.defaults = { enabled = false, shown = {}, pinned = {}, pin_mode = false }
 
 ---@param desktop BookDesktop
 ---@return BookSettingEntry[]
@@ -32,10 +32,42 @@ function Setting.entries(desktop)
                 sections = function()
                     local Extensions = require("features.extensions")
                     local Row = require("ui.themes.widgets.row")
-                    local user, builtin = {}, {}
+                    local user, builtin, pinned = {}, {}, {}
                     for _idx, entry in ipairs(Extensions.entries(desktop.plugin)) do
+                        local is_pinned = settings.pin_mode and Extensions.isPinned(entry)
+                        if settings.pin_mode then pinned[#pinned + 1] = function(iw)
+                            return Row.widget({
+                                width = iw, title = entry.text,
+                                toggle = Extensions.isPinned(entry),
+                                callback = function()
+                                    if not Extensions.togglePin(entry) then
+                                        require("ui.themes.widgets.toast"):new{
+                                            text = string.format(_("最多固定 %d 个"), Extensions.MAX_PINNED), timeout = 2,
+                                        }:show()
+                                    end
+                                    desktop:updateView()
+                                end,
+                            })
+                        end end
+                        if is_pinned then
+                            pinned[#pinned + 1] = function(iw)
+                                local icon = Extensions.pinIcon(entry)
+                                return Row.widget({
+                                    width = iw, icon = icon, title = "    " .. _("图标"), status = icon,
+                                    callback = function()
+                                        require("ui.themes.widgets.icon_picker"):new{
+                                            title = entry.text, current = icon,
+                                            on_select = function(name)
+                                                Extensions.setPinIcon(entry, name)
+                                                desktop:updateView()
+                                            end,
+                                        }:show()
+                                    end,
+                                })
+                            end
+                        end
                         local rows = entry.builtin and builtin or user
-                        rows[#rows + 1] = function(iw)
+                        if not is_pinned then rows[#rows + 1] = function(iw)
                             return Row.widget({
                                 width = iw, title = entry.text,
                                 toggle = Extensions.isShown(entry),
@@ -44,7 +76,7 @@ function Setting.entries(desktop)
                                     desktop:updateView()
                                 end,
                             })
-                        end
+                        end end
                     end
                     if #user == 0 then
                         user[1] = function(iw)
@@ -62,9 +94,23 @@ function Setting.entries(desktop)
                                     desktop:updateView()
                                 end,
                             })
+                        end, function(iw)
+                            return Row.widget({
+                                width = iw, icon = "push_pin", title = _("固定到底栏"),
+                                subtitle = _("开启后底栏只显示固定的入口，不再显示拓展格"),
+                                toggle = settings.pin_mode,
+                                callback = function()
+                                    settings.pin_mode = not settings.pin_mode
+                                    MoonSettings.save("features.extensions")
+                                    desktop:updateView()
+                                end,
+                            })
                         end } },
-                        { title = _("用户插件"), rows = user },
                     }
+                    if settings.pin_mode then
+                        sections[#sections + 1] = { title = _("选择固定的入口"), rows = pinned }
+                    end
+                    sections[#sections + 1] = { title = _("用户插件"), rows = user }
                     if #builtin > 0 then
                         sections[#sections + 1] = { title = _("KOReader 自带"), rows = builtin }
                     end

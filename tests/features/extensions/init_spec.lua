@@ -18,7 +18,7 @@ local warned = {}
 package.preload["utils.log"] = function()
     return { warn = function(...) warned[#warned + 1] = { ... } end }
 end
-local cfg, saved = { enabled = true, shown = {} }, 0
+local cfg, saved = { enabled = true, shown = {}, pinned = {} }, 0
 package.preload["utils.settings"] = function()
     return {
         get = function(owner) assert(owner == "features.extensions") return cfg end,
@@ -173,4 +173,41 @@ do -- 全部隐藏：一行置灰提示
     local list = Themed.last("list")
     Assert.len(list.items, 1)
     Assert.eq(list.items[1].enabled, false)
+end
+
+do -- 固定到底栏：最多 MAX_PINNED 个；按屏宽剩余空格数取前几个，替换拓展格；没固定仍是一格
+    cfg.shown = {}
+    local entries = Extensions.entries(plugin)
+    local function find(id) for _idx, e in ipairs(entries) do if e.id == id then return e end end end
+    Assert.is_nil(Extensions.cells(5))
+    Assert.is_true(Extensions.togglePin(find("alpha:alpha")))
+    Assert.is_true(Extensions.togglePin(find("zeta:zeta")))
+    Assert.is_false(Extensions.togglePin(find("calibre:calibre")), "固定满了拒绝")
+    Assert.len(cfg.pinned, 2)
+    Assert.is_nil(Extensions.cells(5), "没开固定模式仍是拓展格")
+    Assert.is_true(Extensions.isShown(find("alpha:alpha")), "没开固定模式时固定入口仍在菜单里")
+    cfg.pin_mode = true
+    Assert.is_false(Extensions.isShown(find("alpha:alpha")), "开了固定模式，固定入口不进菜单")
+    Extensions.setPinIcon(find("alpha:alpha"), "star")
+    Assert.eq(Extensions.pinIcon(find("alpha:alpha")), "star")
+    local cells = Extensions.cells(1)
+    Assert.len(cells, 2)
+    Assert.eq(cells[1].id, "extensions:alpha:alpha")
+    Assert.eq(cells[1].icon, "star")
+    Assert.len(Extensions.cells(0), 1, "没有空格时只留一个，等于替换原来那一格")
+    Assert.is_true(Extensions.togglePin(find("alpha:alpha")))
+    Assert.eq(cfg.pinned[1].id, "zeta:zeta")
+    cfg.pinned = {}
+    Assert.len(Extensions.cells(5), 0, "开了固定模式但没固定入口：不放格子")
+    cfg.pin_mode = false
+end
+
+do -- 点固定格：叶子直接执行；有子菜单弹层；入口没了退回完整弹层
+    Extensions.run(plugin, "calibre:calibre", rect)
+    Assert.eq(ran[#ran], "calibre")
+    local before = #Themed.all("list")
+    Extensions.run(plugin, "zeta:zeta", rect)
+    Assert.eq(#Themed.all("list"), before + 1)
+    Extensions.run(plugin, "gone:x", rect)
+    Assert.eq(#Themed.all("list"), before + 2)
 end
