@@ -29,6 +29,7 @@
 ---@field xpointer string|nil KOReader 文档目录定位点
 ---@field tar string|nil 微信章节资源包 URL
 ---@field words integer|nil 微信章节字数（按篇幅对齐本地书用）
+---@field raw string|nil iRead 章节对象原样 JSON（开章接口要整个带回）
 
 local Paths = require("utils.paths")
 local Progress = require("book.progress")
