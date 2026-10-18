@@ -169,7 +169,10 @@ local function contentFetcher()
     return function(identity, chapter, done)
         return Client.contentAsync(identity.stable_id, tonumber(chapter.uid), function(text, err)
             if not text then done(nil, err); return end
-            done({ title = chapter.title, html = require("utils.text").chapterHtml(chapter.title, text) })
+            local html = require("utils.text").chapterHtml(chapter.title, text)
+            -- 只有 <h1> 没有段落 = 服务器给的是空白正文，不能当成功落盘缓存。
+            if not html:find("<p", 1, true) then done(nil, _("阅读章节内容为空")); return end
+            done({ title = chapter.title, html = html })
         end)
     end
 end
