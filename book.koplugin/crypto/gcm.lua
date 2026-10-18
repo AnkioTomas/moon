@@ -131,4 +131,24 @@ function Gcm.decrypt(key, iv, aad, sealed)
     return table.concat(plain)
 end
 
+--- 只解 CTR 流、不校验标签：96 位 IV 的 GCM 密文就是从计数器 2 起的 CTR 流。
+--- 用于番茄漫画页图（几百 KB 一张），纯 Lua 的 GHASH 在墨水屏上太慢；图片的完整性由后续按文件头识别图片兜底。
+---@param key string
+---@param iv string 12 字节
+---@param ct string 密文（不含标签）
+---@return string
+function Gcm.ctr(key, iv, ct)
+    local counters = {}
+    for i = 1, math.ceil(#ct / 16) do
+        local n = i + 1
+        counters[i] = iv .. string.char(band(rshift(n, 24), 255), band(rshift(n, 16), 255), band(rshift(n, 8), 255), band(n, 255))
+    end
+    local stream = Aes.ecb_encrypt(table.concat(counters), key, false)
+    local plain = {}
+    for i = 1, #ct do
+        plain[i] = string.char(bxor(ct:byte(i), stream:byte(i)))
+    end
+    return table.concat(plain)
+end
+
 return Gcm
