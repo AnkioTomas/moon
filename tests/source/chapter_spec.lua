@@ -393,6 +393,17 @@ Assert.eq(span(ten, { chapter_idx = 99 }), "9,1")
 Assert.eq(span(ten, { chapter_idx = 0 }), "0,10")
 Assert.eq(span({}, { chapter_idx = 3 }), "0,0", "空目录")
 
+-- 源自己落好的章节文件（漫画 CBZ）原样登记，不写 HTML
+do
+    local got
+    Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 1 }, {
+        loadToc = ops.loadToc,
+        fetchContent = function(_, _item, cb) cb({ file = "/x/ch.cbz" }) end,
+    }, function(p) got = p end)
+    Assert.eq(got, "/x/ch.cbz")
+    Assert.eq(touches[#touches].path, "/x/ch.cbz")
+end
+
 for name in lfs.dir(tmp) do
     if name ~= "." and name ~= ".." then os.remove(tmp .. "/" .. name) end
 end

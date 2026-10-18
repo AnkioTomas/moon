@@ -4,77 +4,14 @@
 @module koplugin.book.source.copymanga.chapter
 --]]
 
-local Archiver = require("ffi/archiver")
+local Cbz = require("source.cbz")
 local Client = require("source.copymanga.client")
 local Image = require("utils.image")
 local Paths = require("utils.paths")
 local Protocol = require("source.copymanga.protocol")
-local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
 
 local Chapter = {}
-
----@param path string
----@return boolean
-local function fileReady(path)
-    local attr = lfs.attributes(path)
-    return attr ~= nil and attr.mode == "file" and (tonumber(attr.size) or 0) > 0
-end
-
----@param paths string[]
----@param archive_path string
----@param state table
----@param cb fun(path: string|nil, err: string|nil)
-local function buildArchive(paths, archive_path, state, cb)
-    local tmp = archive_path .. ".part"
-    os.remove(tmp)
-    local writer = Archiver.Writer:new()
-    --- 打包中途失败：关 writer、删半截文件后回调错误。
-    local function fail(err)
-        writer:close()
-        state.writer = nil
-        os.remove(tmp)
-        cb(nil, err)
-    end
-    if not writer:open(tmp, "zip") or not writer:setZipCompression("store") then
-        fail(writer.err or _("无法创建漫画文件"))
-        return
-    end
-    state.writer = writer
-    local index = 1
-    local function nextFile()
-        if state.cancelled then return end
-        local path = paths[index]
-        if not path then
-            writer:close()
-            state.writer = nil
-            local ok, err = os.rename(tmp, archive_path)
-            if not ok then
-                os.remove(tmp)
-                cb(nil, err or _("无法保存漫画文件"))
-                return
-            end
-            for _idx, image_path in ipairs(paths) do os.remove(image_path) end
-            cb(archive_path)
-            return
-        end
-        local file, err = io.open(path, "rb")
-        if not file then
-            fail(err or _("无法读取漫画图片"))
-            return
-        end
-        local data = file:read("*a")
-        file:close()
-        local name = path:match("([^/\\]+)$") or tostring(index)
-        if not writer:addFileFromMemory(name, data) then
-            fail(writer.err or _("无法写入漫画文件"))
-            return
-        end
-        index = index + 1
-        require("ui/uimanager"):nextTick(require("ui.guard").wrap("copymanga write", nextFile))
-    end
-    require("ui/uimanager"):nextTick(require("ui.guard").wrap("copymanga write", nextFile))
-end
 
 --- 章节 CBZ 路径。按章节 uuid 命名：多分组漫画更新后连续章序号会整体后移，按序号命名会串章。
 ---@param identity BookIdentity
@@ -90,7 +27,7 @@ end
 ---@return string|nil
 function Chapter.existing(identity, chapter)
     local path = Chapter.archivePath(identity, chapter)
-    return fileReady(path) and path or nil
+    return Cbz.ready(path) and path or nil
 end
 
 --- 下载并打包一个漫画章节；已有 CBZ 直接复用。
@@ -105,7 +42,7 @@ function Chapter.materializeAsync(client, identity, chapter, on_progress, cb)
     local archive_path = Chapter.archivePath(identity, chapter)
     ---@type { cancelled: boolean, active: CancelHandle|nil, writer: ArchiverWriter|nil }
     local state = { cancelled = false, active = nil, writer = nil }
-    if fileReady(archive_path) then
+    if Cbz.ready(archive_path) then
         require("ui/uimanager"):nextTick(require("ui.guard").wrap("copymanga callback", function()
             if not state.cancelled then cb(archive_path) end
         end))
@@ -130,7 +67,7 @@ function Chapter.materializeAsync(client, identity, chapter, on_progress, cb)
             if state.cancelled then return end
             local url = urls[current]
             if not url then
-                buildArchive(paths, archive_path, state, cb)
+                Cbz.build(paths, archive_path, state, cb)
                 return
             end
             local path = paths[current]
