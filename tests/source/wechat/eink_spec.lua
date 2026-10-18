@@ -47,7 +47,7 @@ local function reset(cfg)
 end
 
 local function logged_in()
-    reset({ wr_vid = "42", wr_skey = "at-1", eink = { refresh_token = "rt-1", device_id = "dev-1" } })
+    reset({ wr_vid = "42", wr_skey = "at-1", eink = { refresh_token = "rt-1", device_id = "dev-1", guest_token = "gt" } })
 end
 
 -- 设备 ID：前缀 + 19 位数字，首次生成后落盘并复用。
@@ -137,6 +137,7 @@ end
 -- GET 遇 -2012：续期（refreshToken + kickType）后用新令牌重放一次，新凭据落盘。
 do
     logged_in()
+    state.cfg.eink.install_id = "inst"
     local calls = 0
     state.responder = function(opts)
         if opts.url:find("/login", 1, true) then
@@ -152,12 +153,16 @@ do
     local mint = JsonStub.decode(state.requests[2].body)
     Assert.eq(mint.refreshToken, "rt-1")
     Assert.eq(mint.kickType, 1)
-    Assert.eq(mint.signature, Eink.signature(mint.timestamp, "dev-1", mint.random))
+    local App = require("source.wechat.app")
+    Assert.eq(mint.signature, App.sign({ "gt", "dev-1", string.format("%.0f", mint.timestamp), tostring(mint.random), "rt-1" }))
+    Assert.is_nil(mint.deviceType, "App 续期体没有 deviceType")
+    Assert.eq(mint.wxToken, 0)
     Assert.eq(state.requests[3].headers.accessToken, "at-2")
     Assert.eq(data.ok, 1)
     Assert.eq(state.cfg.wr_skey, "at-2")
     Assert.eq(state.cfg.eink.refresh_token, "rt-2")
     Assert.eq(state.cfg.eink.device_id, "dev-1")
+    Assert.eq(state.cfg.eink.install_id, "inst", "续期不丢安装 ID")
 end
 
 -- 续期回包不带 refreshToken（线上常态）：沿用旧 refreshToken，仍算成功。

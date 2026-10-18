@@ -16,6 +16,7 @@ local logger = require("utils.log")
 local Request = require("http.request")
 local Header = require("http.request.header")
 local Text = require("utils.text")
+local App = require("source.wechat.app")
 local sha256 = require("ffi/sha2").sha256
 local _ = require("gettext")
 
@@ -65,11 +66,13 @@ end
 ---@param refresh_token string
 ---@param device_id string
 local function saveSession(vid, access_token, refresh_token, device_id)
+    local eink = Eink.config().eink or {}
+    eink.refresh_token, eink.device_id = refresh_token, device_id
     Eink.save({
         wr_vid = vid,
         wr_skey = access_token,
         user_id = vid,
-        eink = { refresh_token = refresh_token, device_id = device_id },
+        eink = eink,
     })
 end
 
@@ -348,6 +351,39 @@ function Eink.refreshing()
     return mint_waiters ~= nil
 end
 
+--- App 防重放签名用的 guest_token（``/feature`` 配置同名项），落 cfg.eink.guest_token。
+---@param token string
+function Eink.setGuestToken(token)
+    local eink = Eink.config().eink or {}
+    eink.guest_token = token
+    Eink.save({ eink = eink })
+end
+
+---@param creds WechatEinkCredentials
+---@param cb fun(token: string)
+local function withGuestToken(creds, cb)
+    local cached = (Eink.config().eink or {}).guest_token
+    if type(cached) == "string" and cached ~= "" then
+        cb(cached)
+        return
+    end
+    Request.request({
+        url = API .. "/feature?synckey=0",
+        method = "GET",
+        headers = versionHeaders({ vid = creds.vid, accessToken = creds.access_token }),
+        timeout = require("http.timeout").net(1),
+    }, function(res, err)
+        local data = not err and res and Request.ok(res.code) and decode(res.body) or nil
+        local token = data and type(data.feature) == "table" and data.feature.guest_token
+        if type(token) == "string" and token ~= "" then
+            Eink.setGuestToken(token)
+            cb(token)
+        else
+            cb("")
+        end
+    end)
+end
+
 --- 用 refreshToken 换新 accessToken 并落盘。
 --- rejected 只在服务器明确拒绝（有回包且非 5xx）时为真；超时 / 断网 / 5xx 不能当成登录失效。
 ---@param cb fun(ok: boolean, err: string|nil, rejected: boolean|nil)
@@ -362,7 +398,9 @@ function Eink.refreshAsync(cb)
         return
     end
     mint_waiters = { cb }
-    local timestamp, random = nowMs(), math.random(1, 1000)
+    local timestamp, random = nowMs(), math.random(0, 999)
+    -- App 续期的防重放签名要 guest_token；没缓存时取一次（拿不到就空串，由服务端决定）。
+    withGuestToken(creds, function(guest_token)
     postLogin({
         deviceId = creds.device_id,
         deviceName = DEVICE_NAME,
@@ -371,10 +409,12 @@ function Eink.refreshAsync(cb)
         random = random,
         refCgi = "",
         refreshToken = creds.refresh_token,
-        signature = Eink.signature(timestamp, creds.device_id, random),
+        signature = App.sign({
+            guest_token, creds.device_id, string.format("%.0f", timestamp), tostring(random), creds.refresh_token,
+        }),
         timestamp = timestamp,
         trackId = "",
-        deviceType = DEVICE_TYPE,
+        wxToken = 0,
     }, function(res, err)
         local data, login_err = loginResult(res, err, creds.refresh_token)
         if data then
@@ -387,6 +427,7 @@ function Eink.refreshAsync(cb)
         mint_waiters = nil
         local rejected = data == nil and not err and res ~= nil and (tonumber(res.code) or 0) < 500
         for _idx, waiter in ipairs(waiters) do waiter(data ~= nil, login_err, rejected) end
+    end)
     end)
 end
 

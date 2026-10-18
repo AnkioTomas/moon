@@ -235,6 +235,7 @@ function Client:guestTokenAsync(cb)
         -- 万一拿不到就用空串签，由服务端决定收不收。
         local token = type(data.feature) == "table" and data.feature.guest_token
         guest_token = type(token) == "string" and token or ""
+        if guest_token ~= "" then Eink.setGuestToken(guest_token) end
         cb(guest_token)
     end)
 end
