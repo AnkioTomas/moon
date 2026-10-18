@@ -15,6 +15,7 @@ local built = 0
 package.preload["ui.widgets.cover"] = function()
     return {
         gridCoverMaxH = function() return 90 end,
+        stretchW = function(_, cw) return cw end,
         denseCoverMetrics = function() return 100, 60, 90, 4, 10, 10, 110 end,
         opener = function(_, _, open) return function(book) open(nil, book) end end,
         build = function(_, book, w, _, _, on_open)

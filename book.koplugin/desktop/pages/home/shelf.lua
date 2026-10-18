@@ -98,7 +98,7 @@ local function metrics(width)
     })
     if ch > max_h then
         ch = max_h
-        cw = math.max(1, math.min(slot_w, math.floor(ch * 2 / 3)))
+        cw = CoverCell.stretchW(slot_w, math.max(1, math.min(slot_w, math.floor(ch * 2 / 3))), ch)
         cell_h = ch + extra
     end
     return slot_w, cw, ch, gap, row_gap, cell_h

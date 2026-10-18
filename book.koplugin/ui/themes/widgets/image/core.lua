@@ -18,6 +18,7 @@
     invert_in_night = false,  -- 单色字形图随夜间模式反色；默认保持原色
     fallback = widget,        -- 下载中/失败/无图时居中显示的控件（本地文件解码前留白）；省略则空白占位
     on_ready = function(path) end,  -- 可选：下载并替换完成后
+    stretch = true,           -- 拉伸铺满目标框（不保比例）；缺省按比例缩进
   }
 
 UI 图标请用 ui.themes.widgets.icon（Material Icons 字体），不要走本组件。
@@ -303,8 +304,9 @@ end
 ---@param on_ready fun(path: string|nil)|nil
 ---@param fallback_src string|nil 远程下载失败时使用的本地图片
 ---@param invert_in_night boolean|nil 夜间模式下是否随屏幕反色
+---@param stretch boolean|nil 拉伸铺满目标框（不保比例），缺省按比例缩进
 ---@return table
-local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, invert_in_night)
+local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, invert_in_night, stretch)
     -- 本地文件解码前留白：冷启动整屏封面排队解码，先画占位再换图会像整架重新加载。
     local path = resolve(src)
     local box = WidgetContainer:new{
@@ -333,6 +335,7 @@ local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, i
     box._inner_h = h
     box._alpha = alpha
     box._invert_in_night = invert_in_night
+    box._stretch = stretch
 
     --- 把本张图片标记为落定，并且仅一次通知等待该图片的批次。
     function box:_settle()
@@ -426,6 +429,7 @@ local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, i
                 width = self._inner_w,
                 height = self._inner_h,
                 alpha = self._alpha and true or false,
+                scale_factor = self._stretch and 0 or nil,
                 original_in_nightmode = not self._invert_in_night,
             }
             widget:getSize()
@@ -492,7 +496,7 @@ function Image.widget(opts)
     end
     return asyncBox(
         opts.src, opts.headers, w, h, alpha, opts.fallback,
-        opts.on_ready, opts.fallback_src, opts.invert_in_night == true
+        opts.on_ready, opts.fallback_src, opts.invert_in_night == true, opts.stretch == true
     )
 end
 
