@@ -417,6 +417,7 @@ Assert.is_true(asked.page >= 1 and asked.page <= 5)
 Assert.eq(asked.read_status, "unread")
 Assert.eq(asked.author, "刘慈欣")
 Assert.eq(asked.sort, "title")
-Assert.eq(opened_book, book)
+Assert.eq(opened_detail, book, "随机先开详情页")
+Assert.is_nil(opened_book, "不直接开书")
 Assert.is_nil(library.random_cancel)
 catalog.listLibraryAsync = real_list

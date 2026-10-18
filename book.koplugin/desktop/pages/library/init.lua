@@ -650,7 +650,7 @@ function Library:query()
     }
 end
 
---- 从当前筛选结果里随机打开一本：按总数随机一页、每页一本，只取那一行。
+--- 从当前筛选结果里随机抽一本并打开它的介绍页：按总数随机一页、每页一本，只取那一行。
 function Library:openRandom()
     local source = self.desktop.source
     if not source or self.total < 1 then return end
@@ -662,7 +662,7 @@ function Library:openRandom()
         done, self.random_cancel = true, nil
         local book = res and res.data[1]
         if book and not self.desktop.closed and self.desktop.source == source then
-            require("desktop.open").book(self.desktop.plugin, book)
+            require("desktop.detail").open(self.desktop, "library", book)
         end
     end)
     -- 同步回调时句柄已作废，不能再记成在飞。
