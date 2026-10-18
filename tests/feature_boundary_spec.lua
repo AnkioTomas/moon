@@ -151,7 +151,7 @@ Assert.eq(#found, 0, "下层依赖了 feature（改成下层声明通用扩展�
 -- ── 扩展点：用到的名字都已声明；声明的名字以下层命名空间开头、不含 feature 名 ──
 package.path = ROOT .. "/?.lua;" .. package.path
 local Ext = require("utils.extension")
-local NAMESPACES = { desktop = true, topbar = true, setting = true, reader = true, highlight = true, note = true, quickpanel = true,
+local NAMESPACES = { desktop = true, topbar = true, setting = true, reader = true, highlight = true, note = true, quickpanel = true, modal = true,
     web = true } -- web.*：远程管理网页的接口挂点（提供者登记 /api/<name>/*，不含 feature 名）
 local bad = {}
 for point in pairs(Ext.POINTS) do

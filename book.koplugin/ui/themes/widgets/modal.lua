@@ -30,6 +30,7 @@ local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Guard = require("ui.guard")
+local Ext = require("utils.extension")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
@@ -158,6 +159,7 @@ end
 ---@return true
 local function paint(self, bb, x, y)
     self.dimen.x, self.dimen.y = x, y
+    Ext.call("modal.backdrop", self, bb, x, y)
     if self._mask then self._mask:paintTo(bb, x, y) end
     self[1]:paintTo(bb, x + self.panel_x, y + self.panel_y)
     return true
