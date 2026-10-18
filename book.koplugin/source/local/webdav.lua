@@ -26,6 +26,9 @@ local progressRemotePath, notesRemotePath = Common.progressRemotePath, Common.no
 
 local Webdav = {}
 
+-- 上传失败的书多久内不再自动重传（秒）；每轮同步都重传整个失败批次会拖垮网络
+local UPLOAD_COOLDOWN = 3600
+
 --- books.sync 的 category 首部系列前缀：`<系列>\n#编号#\n`。
 local SERIES_PREFIX = "^<(.-)>%s*\n%s*#(.-)#%s*\n"
 
@@ -474,18 +477,24 @@ local function uploadLocal(self, run, done)
         local item, row = run.local_files[rel], rows[ids[i]]
         if remote[rel] then
             if not row or row.path ~= item.path then adoptLocal(item, ids[i]) end
-        elseif not (row and row.deleted == 1 and row.sync_status == 0) then
+        elseif not (row and row.deleted == 1 and row.sync_status == 0)
+            and os.time() - (self.upload_failed[rel] or 0) > UPLOAD_COOLDOWN then
             pending[#pending + 1] = rel
         end
     end
     local member = {}
     for _idx, rel in ipairs(run.files) do member[rel] = true end
     local failed, first_err = 0, nil
-    local function fail(err)
+    local stopped = false
+    -- 传输层失败（超时 / 断网）说明后面的书也传不上去，本轮停手，别把 Wi-Fi 拖垮
+    local function fail(rel, err, transport)
         failed = failed + 1
         first_err = first_err or err
+        self.upload_failed[rel] = os.time()
+        if transport then stopped = true end
     end
     eachAsync(pending, function(rel, next_item, i)
+        if stopped then return next_item() end
         run.report(T(_("正在上传 %1"), rel), i, #pending)
         local item, stable_id = run.local_files[rel], remoteStableId(rel)
         local parent = rel:match("^(.+)/[^/]+$")
@@ -494,14 +503,14 @@ local function uploadLocal(self, run, done)
                 if run.cancelled then return end
                 if not ok_dir then
                     require("utils.log").warn("book webdav upload mkdir failed", rel, dir_err)
-                    fail(dir_err)
+                    fail(rel, dir_err, true)
                     return next_item()
                 end
-                run.active = self.dav:putFileAsync(self:webdavPath() .. "/" .. rel, item.path, function(ok, err)
+                run.active = self.dav:putFileAsync(self:webdavPath() .. "/" .. rel, item.path, function(ok, err, code)
                     if run.cancelled then return end
                     if not ok then
                         require("utils.log").warn("book webdav upload failed", rel, err)
-                        fail(err)
+                        fail(rel, err, code == nil)
                         return next_item()
                     end
                     adoptLocal(item, stable_id)
