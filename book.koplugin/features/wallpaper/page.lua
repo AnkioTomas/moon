@@ -153,6 +153,15 @@ function Page:rows(desktop)
         })
     end
 
+    local opacity = Core.opacity()
+    local levels = {}
+    for pct = 100, 10, -10 do levels[#levels + 1] = { text = pct .. "%", value = tostring(pct) } end
+    rows[#rows + 1] = choiceRow(desktop, {
+        icon = "image", title = _("壁纸透明度"), status = opacity .. "%",
+        items = levels, current = tostring(opacity),
+        apply = function(value) Core.setOpacity(tonumber(value)) end,
+    })
+
     local bars = Core.bars()
     rows[#rows + 1] = toggleRow(desktop, {
         icon = "space_bar", title = _("顶栏显示壁纸"),

@@ -18,6 +18,7 @@ Setting.defaults = {
     wallpaper_topbar = true,
     wallpaper_tabbar = true,
     wallpaper_contain = false,
+    wallpaper_opacity = 100,
 }
 
 --- 无默认值的持久键：用户选的自定义图 / 壁纸文件夹。

@@ -134,6 +134,20 @@ function M.contain()
     return SOURCES[M.mode()].contain == true
 end
 
+--- 壁纸不透明度（百分比，10~100，缺省 100）。
+---@return integer
+function M.opacity()
+    return conf().wallpaper_opacity
+end
+
+---@param percent integer
+function M.setOpacity(percent)
+    local c = conf()
+    c.wallpaper_opacity = percent
+    MoonSettings.save("features.wallpaper", c)
+    M.invalidate()
+end
+
 --- 切铺法。
 ---@param on boolean
 function M.setContain(on)
@@ -266,7 +280,8 @@ local function surface(w, h, bpp)
     local path = M.path()
     if not path then return nil end
     local contain = M.contain()
-    local key = table.concat({ path, w, h, contain and "contain" or "cover", bpp or "auto" }, "|")
+    local opacity = M.opacity()
+    local key = table.concat({ path, w, h, contain and "contain" or "cover", bpp or "auto", opacity }, "|")
     if cache.key == key then return cache.bb end
     ---@type BlitBuffer|nil
     local bb
@@ -290,6 +305,7 @@ local function surface(w, h, bpp)
         bb:fill(Blitbuffer.COLOR_WHITE)
         image:paintTo(bb, 0, 0)
         image:free()
+        if opacity < 100 then bb:lightenRect(0, 0, w, h, 1 - opacity / 100) end
     end)
     if not ok then
         if bb and bb.free then bb:free() end
