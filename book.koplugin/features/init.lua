@@ -119,6 +119,7 @@ Features.list = {
     "ime",
     "remote",
     "update",
+    "storage",
     "subscribe",
     "cookie",
     "extensions",
