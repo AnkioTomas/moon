@@ -346,32 +346,40 @@ end
 ---@param cb fun(text: string|nil, err: string|nil)
 ---@return HttpJob
 function Client.contentAsync(book_id, chapter_id, cb)
-    return webGet("/chapter/" .. book_id .. "/" .. chapter_id .. "/", Client.cookie(), function(html, err)
+    local decrypting
+    local function finish(content)
+        local text = Mapper.chapterText(content)
+        if not text then cb(nil, _("起点章节内容为空")); return end
+        cb(text)
+    end
+    local fetch = webGet("/chapter/" .. book_id .. "/" .. chapter_id .. "/", Client.cookie(), function(html, err)
         if not html then cb(nil, err); return end
         local info = (Mapper.pageData(html) or {}).chapterInfo
         if type(info) ~= "table" then cb(nil, _("起点章节内容为空")); return end
         if Mapper.locked(info) then cb(nil, _("起点 VIP 章节未购买")); return end
         local content = info.content
-        if Mapper.encrypted(info) then
-            local cookie = Client.cookie()
-            local uid = cookie and cookie:match("ywguid=(%d+)")
-            -- fkp 是 base64 的 `window.onkeyfocus("<密钥池>", <版本>)`，只取参数，不执行
-            local keypool, version = Text.base64Decode(tostring(info.fkp or ""))
-                :match('onkeyfocus%("([^"]+)",%s*(%d+)%)')
-            if not (uid and keypool and version and type(content) == "string") then
-                cb(nil, _("起点 VIP 章节解密失败：缺少登录信息，请重新登录起点")); return
-            end
-            local plain, derr = Fock.decrypt(content, chapter_id, keypool, version, uid)
+        if not Mapper.encrypted(info) then finish(content); return end
+        local cookie = Client.cookie()
+        local uid = cookie and cookie:match("ywguid=(%d+)")
+        -- fkp 是 base64 的 `window.onkeyfocus("<密钥池>", <版本>)`，只取参数，不执行
+        local keypool, version = Text.base64Decode(tostring(info.fkp or ""))
+            :match('onkeyfocus%("([^"]+)",%s*(%d+)%)')
+        if not (uid and keypool and version and type(content) == "string") then
+            cb(nil, _("起点 VIP 章节解密失败：缺少登录信息，请重新登录起点")); return
+        end
+        decrypting = Fock.decryptAsync(content, chapter_id, keypool, version, uid, function(plain, derr)
+            decrypting = nil
             if not plain then
                 logger.warn("qidian fock decrypt failed:", derr)
                 cb(nil, _("起点 VIP 章节解密失败")); return
             end
-            content = plain
-        end
-        local text = Mapper.chapterText(content)
-        if not text then cb(nil, _("起点章节内容为空")); return end
-        cb(text)
+            finish(plain)
+        end)
     end)
+    return { cancel = function()
+        fetch.cancel()
+        if decrypting then decrypting:cancel() end
+    end }
 end
 
 return Client

@@ -6,12 +6,14 @@
 这里只给出解密路径用得到的那几个常量），再按网页同样的顺序调用：
 ctors + main，再 `fock_i(uid)` → `fock_a(keypool, version)` → `fock_u(content, chapterId)`。
 
-每次解密新建一份 16MB 内存，用完交给 GC。
+解密要 16MB 内存且纯 Lua 解释执行，在主进程做会拖慢 UI、抬高 KOReader 内存峰值（设备上可被系统杀掉重启），
+所以 `decryptAsync` 放进 fork 子进程，主进程只收明文；`decrypt` 是子进程里跑的同步实现。
 
 @module source.qidian.fock
 --]]--
 
 local ffi = require("ffi")
+local Job = require("workers.job")
 local Text = require("utils.text")
 
 local Fock = {}
@@ -119,6 +121,24 @@ function Fock.decrypt(content, chapter_id, keypool, version, uid)
     if not result then return nil, "no result" end
     if result[1] ~= 0 then return nil, "code " .. result[1] end
     return ffi.string(mem + result[2], result[3])
+end
+
+--- 在子进程里解密；回调拿明文或错误。
+---@return BookJob
+function Fock.decryptAsync(content, chapter_id, keypool, version, uid, cb)
+    return Job.run(function()
+        -- 转译出的巨型函数让 ARM 上的 LuaJIT 编译器段错误，子进程里关掉 JIT（只影响这个子进程）
+        jit.off()
+        local plain, err = Fock.decrypt(content, chapter_id, keypool, version, uid)
+        return { text = plain, err = err }
+    end, {
+        name = "qidian_fock",
+        kind = "light",
+        timeout = 60,
+        on_done = function(res) cb(res.text, res.err) end,
+        on_failed = function(err) cb(nil, tostring(err)) end,
+        on_cancelled = function() end,
+    })
 end
 
 return Fock
