@@ -30,10 +30,14 @@ package.preload["ui.themes.widgets.text"] = function()
 end
 
 local session = { identity = { source_id = "local", stable_id = "b1" } }
-package.loaded["reader.session"] = { current = function() return session end }
+package.loaded["reader.session"] = { current = function() return session end, remainingSeconds = function() return 7200 end }
 package.loaded["book.catalog"] = { formatDuration = function(sec) return sec .. "s" end }
-local sum = { total_seconds = 600, pages = 12, first_read = 1790000000, last_read = 1790100000 }
-local days = { { ymd = "a" }, { ymd = "b" } }
+local sum = { total_seconds = 600, local_seconds = 500, total_pages = 40, pages = 12, first_read = 1790000000, last_read = 1790100000 }
+local days = { { ymd = os.date("%Y-%m-%d"), seconds = 600 } }
+package.loaded["book.note_db"] = { all = function() return { { payload = "x" } } end }
+package.loaded["book.note.normalize"] = {
+    decode = function() return { { drawer = "lighten", note = "n" }, { drawer = "lighten" } } end,
+}
 package.loaded["book.stats_db"] = {
     summaryByBook = function() return sum end,
     dailyByBook = function() return days end,
@@ -42,11 +46,15 @@ local Stats = require("features.sidebar.stats")
 
 Assert.is_true(Stats.available())
 local rows = Stats.rows()
-Assert.len(rows, 6)
+Assert.len(rows, 12)
 Assert.eq(rows[1][2], "600s")
-Assert.eq(rows[2][2], "2", "阅读天数")
-Assert.eq(rows[3][2], "300s", "日均 = 总时长 / 天数")
-Assert.eq(rows[4][2], "12")
+Assert.eq(rows[2][2], "500s")
+Assert.eq(rows[3][2], "1", "阅读天数")
+Assert.eq(rows[4][2], "600s", "日均 = 总时长 / 天数")
+Assert.eq(rows[8][2], "12")
+Assert.eq(rows[10][2], "2", "划线数")
+Assert.eq(rows[11][2], "1", "笔记数")
+Assert.matches(rows[12][2], "^%d%d%d%d%-%d%d%-%d%d$", "预计读完")
 Assert.matches(rows[5][2], "^%d%d%d%d%-%d%d%-%d%d$")
 Assert.not_nil(Stats.build(400))
 

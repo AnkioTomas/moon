@@ -21,7 +21,8 @@ local _ = require("gettext")
 local Stats = {}
 
 --- 行图标，与 Stats.rows 的行序对应。
-local ICONS = { "schedule", "calendar_month", "avg_time", "auto_stories", "event", "history" }
+local ICONS = { "schedule", "timer", "calendar_month", "avg_time", "event", "history",
+    "menu_book", "auto_stories", "avg_pace", "ink_highlighter", "edit_note", "flag" }
 
 --- 当前书的身份；订阅文章（ephemeral 源）不记统计，这页没意义。
 ---@return BookIdentity|nil
@@ -37,7 +38,7 @@ function Stats.available()
     return identity() ~= nil
 end
 
---- 本机阅读库里的单书统计：累计时长、阅读天数、日均、已读页数、首次 / 最近阅读。
+--- 本机阅读库里的单书统计：时长、天数、日均、首次 / 最近阅读、页数、每页均时、划线与笔记数。
 ---@return table[] { label, value }
 function Stats.rows()
     local id = identity()
@@ -45,15 +46,31 @@ function Stats.rows()
     local StatsDB = require("book.stats_db")
     local sum = StatsDB.summaryByBook(id.source_id, id.stable_id)
     if sum.total_seconds <= 0 and sum.pages <= 0 then return {} end
-    local days = #StatsDB.dailyByBook(id.source_id, id.stable_id, 100000)
+    local daily = StatsDB.dailyByBook(id.source_id, id.stable_id, 100000)
+    local days = #daily
+    local remaining = require("reader.session").remainingSeconds()
+    local finish = remaining and require("utils.forecast").finishDate(remaining, daily)
+    local highlights, notes = 0, 0
+    for _idx, row in ipairs(require("book.note_db").all(id.source_id, id.stable_id)) do
+        for _i, item in ipairs(require("book.note.normalize").decode(row.payload) or {}) do
+            if item.drawer then highlights = highlights + 1 end
+            if item.note and item.note ~= "" then notes = notes + 1 end
+        end
+    end
     local function date(ts) return ts > 0 and os.date("%Y-%m-%d", ts) or "—" end
     return {
         { _("累计时长"), Catalog.formatDuration(sum.total_seconds) },
+        { _("阅读时长"), Catalog.formatDuration(sum.local_seconds) },
         { _("阅读天数"), tostring(days) },
         { _("日均时长"), Catalog.formatDuration(days > 0 and sum.total_seconds / days or 0) },
-        { _("已读页数"), tostring(sum.pages) },
         { _("首次阅读"), date(sum.first_read) },
         { _("最近阅读"), date(sum.last_read) },
+        { _("总页数"), tostring(sum.total_pages) },
+        { _("已读页数"), tostring(sum.pages) },
+        { _("每页均时"), Catalog.formatDuration(sum.pages > 0 and sum.total_seconds / sum.pages or 0) },
+        { _("划线"), tostring(highlights) },
+        { _("笔记"), tostring(notes) },
+        { _("预计读完"), finish and date(finish) or "—" },
     }
 end
 
