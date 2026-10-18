@@ -18,6 +18,11 @@ int iconv_close(iconv_t cd);
 ]]
 
 local lib
+
+local function utf8Char(cp)
+    if cp < 0x800 then return string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64) end
+    return string.char(0xE0 + math.floor(cp / 4096), 0x80 + math.floor(cp / 64) % 64, 0x80 + cp % 64)
+end
 --- glibc / bionic 在 libc 里；macOS 的在 libiconv。
 local function iconvLib()
     if lib == nil then
@@ -78,6 +83,52 @@ local function convert(body, from)
     return ffi.string(outbuf, cap - tonumber(outleft[0]))
 end
 
+local GBK_PATH = debug.getinfo(1, "S").source:match("^@(.*)/[^/]+$") .. "/gbk.bin"
+local gbk_table
+
+--- GBK 双字节 → UCS-2 表（lead 0x81-0xFE × trail 0x40-0xFE，小端，0 = 无映射），按需读入。
+local function gbkTable()
+    if gbk_table == nil then
+        local f = io.open(GBK_PATH, "rb")
+        gbk_table = f and f:read("*a") or false
+        if f then f:close() end
+    end
+    return gbk_table
+end
+
+--- 设备 libc 没有 GBK 的 iconv 模块时的纯 Lua 兜底；4 字节 GB18030 与无映射字节跳过。
+---@param body string
+---@return string|nil
+function Charset.gbkToUtf8(body)
+    local map = gbkTable()
+    if not map then return nil end
+    local out, n, i, len = {}, 0, 1, #body
+    while i <= len do
+        local b = body:byte(i)
+        if b < 0x80 then
+            local j = i
+            while j < len and body:byte(j + 1) < 0x80 do j = j + 1 end
+            n = n + 1
+            out[n] = body:sub(i, j)
+            i = j + 1
+        else
+            local t = body:byte(i + 1)
+            if b >= 0x81 and b <= 0xFE and t and t >= 0x40 and t <= 0xFE and t ~= 0x7F then
+                local pos = ((b - 0x81) * 191 + (t - 0x40)) * 2 + 1
+                local cp = map:byte(pos) + map:byte(pos + 1) * 256
+                if cp > 0 then
+                    n = n + 1
+                    out[n] = utf8Char(cp)
+                end
+                i = i + 2
+            else
+                i = i + 1
+            end
+        end
+    end
+    return table.concat(out)
+end
+
 --- 转成 UTF-8（去 BOM）。UTF-8 / ASCII / 没声明的原样返回；转不了返回 nil 与编码名。
 ---@param body string
 ---@param content_type string|nil HTTP Content-Type
@@ -88,7 +139,9 @@ function Charset.toUtf8(body, content_type)
     if not name or name == "utf-8" or name == "utf8" or name == "us-ascii" or name == "ascii" then
         return (body:gsub("^\239\187\191", ""))
     end
-    local text = convert(body, ALIAS[name] or name)
+    local iconv_name = ALIAS[name] or name
+    local text = convert(body, iconv_name)
+    if not text and iconv_name == "GB18030" then text = Charset.gbkToUtf8(body) end
     if not text then return nil, name end
     return text
 end

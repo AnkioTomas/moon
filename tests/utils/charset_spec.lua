@@ -22,4 +22,8 @@ local text, name = Charset.toUtf8("abc", "text/html; charset=no-such-charset")
 Assert.is_nil(text)
 Assert.eq(name, "no-such-charset", "转不了如实报编码名")
 
+-- 设备 libc 缺 GBK 模块时的纯 Lua 兜底，要和 iconv 结果一致。
+Assert.eq(Charset.gbkToUtf8("a" .. gbk .. "\255\255b" .. "\163\172"), "a中文b，", "兜底：ASCII / 双字节 / 坏字节跳过")
+Assert.eq(Charset.gbkToUtf8("\176\161\200\254"), "啊叁", "兜底：区边界字")
+
 Assert.eq(Text.xmlDecode("a&#0;b&#xD800;c&#20013;"), "abc中", "NUL 与代理区丢掉")
