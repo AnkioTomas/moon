@@ -33,7 +33,7 @@ function Setting.entries(desktop)
         {
             id = "main",
             group = "desktop",
-            order = 110,
+            order = 80,
             icon = "wallpaper",
             title = _("界面壁纸"),
             subtitle = _("桌面页、弹窗"),

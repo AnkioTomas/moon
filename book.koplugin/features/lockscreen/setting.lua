@@ -34,7 +34,7 @@ function Setting.entries(desktop)
         {
             id = "main",
             group = "desktop",
-            order = 100,
+            order = 90,
             icon = "wallpaper",
             title = _("锁屏壁纸"),
             subtitle = _("替代系统锁屏"),

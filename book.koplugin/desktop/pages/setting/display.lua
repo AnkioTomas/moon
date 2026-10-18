@@ -1,4 +1,4 @@
---[[-- 显示设置项。
+--[[-- 外观（风格 / 字体 / 缩放 / 遮罩）与屏幕（刷新 / 彩屏）设置项。
 @module koplugin.book.desktop.pages.setting.display
 --]]
 
@@ -100,10 +100,10 @@ end
 
 ---@param ctx table
 ---@return table
-function Display:rows(ctx)
+function Display:appearanceRows(ctx)
     local desktop = ctx.desktop
-    local font_name, scale, grid_max_cols = ctx.font_name, ctx.scale, ctx.grid_max_cols
-    local rows = {
+    local font_name, scale = ctx.font_name, ctx.scale
+    return {
         function(iw)
             local id = Theme.id()
             return Row.widget({
@@ -164,26 +164,6 @@ function Display:rows(ctx)
             })
         end,
         function(iw)
-            return Row.widget({
-                width = iw,
-                kind = "nav", icon = "grid_view", title = _("书架每行数量"),
-                subtitle = _("调整书库和 Z站 每行显示的卡片数"),
-                status = tostring(grid_max_cols), status_on = true,
-                callback = function()
-                    local CoverCell = require("ui.widgets.cover")
-                    Spin:new{
-                        title = _("书架每行数量"),
-                        fields = { { value = CoverCell.gridCols(), min = CoverCell.gridColsMin(),
-                            max = CoverCell.gridColsMax() } },
-                        callback = function(v)
-                            CoverCell.setGridCols(v)
-                            desktop:updateView()
-                        end,
-                    }:show()
-                end,
-            })
-        end,
-        function(iw)
             local conf = MoonSettings.get("ui")
             return Row.widget({
                 width = iw,
@@ -198,6 +178,14 @@ function Display:rows(ctx)
             })
         end,
     }
+end
+
+--- 墨水屏刷新与彩屏条件行；夜间与亮度在 nightmode feature。
+---@param ctx table
+---@return table
+function Display:screenRows(ctx)
+    local rows = {}
+    local desktop = ctx.desktop
     local refresh = refreshRow(desktop)
     if refresh then rows[#rows + 1] = refresh end
     local color = colorRow(desktop)

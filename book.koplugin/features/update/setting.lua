@@ -19,7 +19,7 @@ function Setting.entries(desktop)
     return {
         {
             group = "maintenance",
-            order = 40,
+            order = 50,
             --- 只自动查询并提示，不自动安装。
             row = function(iw)
                 local MoonSettings = require("utils.settings")
@@ -40,7 +40,7 @@ function Setting.entries(desktop)
         },
         {
             group = "maintenance",
-            order = 50,
+            order = 60,
             row = function(iw)
                 return require("ui.themes.widgets.row").widget({
                     width = iw, chevron = false,
