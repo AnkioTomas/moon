@@ -27,6 +27,7 @@ local function flush()
     for _, fn in ipairs(ticks) do fn() end
 end
 
+package.loaded["features.sidebar.stats"] = { available = function() return false end }
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(s) return s end end
 package.preload["device"] = function()

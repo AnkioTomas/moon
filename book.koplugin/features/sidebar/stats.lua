@@ -1,8 +1,6 @@
 --[[--
-侧栏「统计」页：当前书在 KOReader 阅读统计插件里的书籍信息（同其「书籍信息」页，去掉书名作者）。
-
-数据直接取 ui.statistics:getBookStat（文案、时长格式随 KOReader 设置），打开本页时查一次；
-统计插件未启用或本书未入库时整页不出现（见 init.lua 的 AVAILABLE）。
+侧栏「统计」页：当前书在月读自己的 reading_stats 表里的汇总（不依赖 KOReader 统计插件），
+打开本页时查一次；订阅文章不记统计，整页不出现（见 init.lua 的 AVAILABLE）。
 
 @module koplugin.book.features.sidebar.stats
 --]]
@@ -10,65 +8,65 @@
 require("l10n").apply()
 
 local Blitbuffer = require("ffi/blitbuffer")
-local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
-local LineWidget = require("ui/widget/linewidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Icon = require("ui.themes.widgets.icon")
 local Text = require("ui.themes.widgets.text")
 local Theme = require("ui.themes")
+local Catalog = require("book.catalog")
 local _ = require("gettext")
 
 local Stats = {}
 
---- 行图标，按 getBookStat 去掉书名作者后的行序：总时长、阅读时长、天数、日均、开始、最后、
---- 页数、已读页、每页均时、高亮、笔记。
-local ICONS = { "schedule", "timer", "calendar_month", "avg_time", "event", "history",
-    "menu_book", "auto_stories", "avg_pace", "ink_highlighter", "edit_note" }
+--- 行图标，与 Stats.rows 的行序对应。
+local ICONS = { "schedule", "calendar_month", "avg_time", "auto_stories", "event", "history" }
 
---- 统计插件可用且当前书已入库。
----@param ui table ReaderUI
----@return boolean
-function Stats.available(ui)
-    -- 订阅文章（ephemeral 源）不记统计，这页没意义。
+--- 当前书的身份；订阅文章（ephemeral 源）不记统计，这页没意义。
+---@return BookIdentity|nil
+local function identity()
     local cur = require("reader.session").current()
-    if cur and cur.identity and cur.identity.ephemeral then return false end
-    local stat = ui and ui.statistics
-    return stat ~= nil and stat.isEnabled ~= nil and stat:isEnabled() and stat.id_curr_book ~= nil
+    local id = cur and cur.identity
+    if id and not id.ephemeral then return id end
 end
 
---- 先把本次会话的页时长落库，再取书籍统计；去掉书名 / 作者两行和「读这本书的天数」的展开箭头。
----@param ui table ReaderUI
----@return table[] { label, value, separator }
-function Stats.rows(ui)
-    if not Stats.available(ui) then return {} end
-    local stat = ui.statistics
-    pcall(stat.insertDB, stat)
-    local ok, kv = pcall(stat.getBookStat, stat, stat.id_curr_book)
-    if not ok or type(kv) ~= "table" then return {} end
-    local rows = {}
-    for i = 3, #kv do
-        local item = kv[i]
-        -- 箭头是多字节字符，不能放进 [] 字符类
-        local label = tostring(item[1] or ""):gsub("%s*▸$", ""):gsub("%s*◂$", "")
-        rows[#rows + 1] = { label, tostring(item[2] or ""), item.separator }
-    end
-    return rows
+--- 当前书有可统计的身份。
+---@return boolean
+function Stats.available()
+    return identity() ~= nil
 end
 
----@param ui table ReaderUI
+--- 本机阅读库里的单书统计：累计时长、阅读天数、日均、已读页数、首次 / 最近阅读。
+---@return table[] { label, value }
+function Stats.rows()
+    local id = identity()
+    if not id then return {} end
+    local StatsDB = require("book.stats_db")
+    local sum = StatsDB.summaryByBook(id.source_id, id.stable_id)
+    if sum.total_seconds <= 0 and sum.pages <= 0 then return {} end
+    local days = #StatsDB.dailyByBook(id.source_id, id.stable_id, 100000)
+    local function date(ts) return ts > 0 and os.date("%Y-%m-%d", ts) or "—" end
+    return {
+        { _("累计时长"), Catalog.formatDuration(sum.total_seconds) },
+        { _("阅读天数"), tostring(days) },
+        { _("日均时长"), Catalog.formatDuration(days > 0 and sum.total_seconds / days or 0) },
+        { _("已读页数"), tostring(sum.pages) },
+        { _("首次阅读"), date(sum.first_read) },
+        { _("最近阅读"), date(sum.last_read) },
+    }
+end
+
 ---@param width number
 ---@return table
-function Stats.build(ui, width)
+function Stats.build(width)
     local t = Theme.current()
     local gap = Theme.px(t.space.sm)
     local icon_size = t.font.body + 4
     local icon_w = Theme.px(icon_size) + gap
     local avail = width - icon_w
     local col = VerticalGroup:new{ align = "left" }
-    local rows = Stats.rows(ui)
+    local rows = Stats.rows()
     if #rows == 0 then
         col[1] = Text.line("body", _("暂无阅读统计"), { width = width, color = t.color.muted })
         return col
@@ -87,13 +85,6 @@ function Stats.build(ui, width)
             Text.box("body", row[2], value_w, { align = "right" }),
         }
         col[#col + 1] = VerticalSpan:new{ width = gap }
-        if row[3] and i < #rows then
-            col[#col + 1] = LineWidget:new{
-                dimen = Geom:new{ w = width, h = math.max(1, Theme.px(t.row.divider)) },
-                background = Blitbuffer.Color8(t.color.muted),
-            }
-            col[#col + 1] = VerticalSpan:new{ width = gap }
-        end
     end
     return col
 end
