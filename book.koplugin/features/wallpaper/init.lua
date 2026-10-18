@@ -268,6 +268,7 @@ local function surface(w, h, bpp)
     local contain = M.contain()
     local key = table.concat({ path, w, h, contain and "contain" or "cover", bpp or "auto" }, "|")
     if cache.key == key then return cache.bb end
+    ---@type BlitBuffer|nil
     local bb
     local ok, err = pcall(function()
         local source = require("ui/renderimage"):renderImageFile(path, false)
