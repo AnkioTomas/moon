@@ -1616,4 +1616,7 @@ Current version: ",
     ["铺满"] = "Fill",
     ["铺满裁切"] = "Fill and crop",
     ["顶栏显示壁纸"] = "Show wallpaper on top bar",
+    ["存储空间不足"] = "Low storage",
+    ["设备可用空间只剩 %1 MB，继续使用可能导致书库写入失败。请清理不用的书籍或缓存。"] = "Only %1 MB of free space is left. The library may fail to save. Please remove unused books or cache.",
+    ["忽略"] = "Ignore",
 }
