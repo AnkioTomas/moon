@@ -40,9 +40,10 @@ function Setting.entries(desktop)
                                 width = iw, title = entry.text,
                                 toggle = Extensions.isPinned(entry),
                                 callback = function()
-                                    if not Extensions.togglePin(entry) then
+                                    local limit = math.min(Extensions.MAX_PINNED, desktop:cellCapacity())
+                                    if not Extensions.togglePin(entry, limit) then
                                         require("ui.themes.widgets.toast"):new{
-                                            text = string.format(_("最多固定 %d 个"), Extensions.MAX_PINNED), timeout = 2,
+                                            text = string.format(_("最多固定 %d 个"), limit), timeout = 2,
                                         }:show()
                                     end
                                     desktop:updateView()
