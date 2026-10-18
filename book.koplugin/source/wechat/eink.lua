@@ -337,7 +337,8 @@ function Eink.refreshing()
 end
 
 --- 用 refreshToken 换新 accessToken 并落盘。
----@param cb fun(ok: boolean, err: string|nil)
+--- rejected 只在服务器明确拒绝（有回包且非 5xx）时为真；超时 / 断网 / 5xx 不能当成登录失效。
+---@param cb fun(ok: boolean, err: string|nil, rejected: boolean|nil)
 function Eink.refreshAsync(cb)
     if mint_waiters then
         mint_waiters[#mint_waiters + 1] = cb
@@ -372,7 +373,8 @@ function Eink.refreshAsync(cb)
         end
         local waiters = mint_waiters
         mint_waiters = nil
-        for _idx, waiter in ipairs(waiters) do waiter(data ~= nil, login_err) end
+        local rejected = data == nil and not err and res ~= nil and (tonumber(res.code) or 0) < 500
+        for _idx, waiter in ipairs(waiters) do waiter(data ~= nil, login_err, rejected) end
     end)
 end
 

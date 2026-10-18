@@ -90,10 +90,10 @@ local function freshAuth(cfg, eink)
         eink.refreshAsync = function(cb)
             if waiters then waiters[#waiters + 1] = cb return end
             waiters = { cb }
-            raw(function(ok, err)
+            raw(function(ok, err, rejected)
                 local list = waiters
                 waiters = nil
-                for _idx, w in ipairs(list) do w(ok, err) end
+                for _idx, w in ipairs(list) do w(ok, err, rejected) end
             end)
         end
     end
@@ -430,6 +430,25 @@ package.loaded["source.auth"] = {
     ok = function() end,
 }
 local AUTH_FAIL = '{"errcode":-2012,"errmsg":"登录态失效"}'
+
+-- 续期失败的归因：服务器明确拒绝才判登录失效；超时 / 断网只回错误。
+for _idx, case in ipairs({ { rejected = true, expect = 1 }, { rejected = nil, expect = 0 } }) do
+    expired = {}
+    local auth = freshAuth(loggedIn({ wr_skey = "old" }), {
+        hasSession = function() return true end,
+        credentials = function() return { vid = state.cfg.wr_vid, access_token = state.cfg.wr_skey } end,
+        refreshAsync = function(cb) cb(false, "boom", case.rejected) end,
+    })
+    state.json_map = { [AUTH_FAIL] = { errcode = -2012, errmsg = "登录态失效" } }
+    state.request_impl = function(_opts, cb)
+        cb({ code = 200, body = AUTH_FAIL })
+        return { cancel = function() end }
+    end
+    local err
+    auth.webGetAsync("https://weread.qq.com/web/x", nil, function(_d, e) err = e end)
+    Assert.eq(err, "boom")
+    Assert.len(expired, case.expect)
+end
 
 -- 并发竞态（日志 22:14:17）：A 回失效触发续期，续期在飞时 B 也回失效。
 -- B 必须等续期结果再用新令牌重试；以前冷却直接让 B 拿旧令牌重试 → 再失效 → 误判登录失效。

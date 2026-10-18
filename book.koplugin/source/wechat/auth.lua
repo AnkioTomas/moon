@@ -226,12 +226,14 @@ local function sessionRequest(method, url, body, opts, cb)
                     attempt(true)
                     return
                 end
-                renewAsync(function(renewed, renew_err)
+                renewAsync(function(renewed, renew_err, rejected)
                     if cancelled then return end
                     if renewed then
                         attempt(true)
-                    else
+                    elseif rejected then
                         cb(nil, require("source.auth").expire("wechat", renew_err or _("微信读书登录已失效")), res)
+                    else
+                        cb(nil, renew_err or _("请求失败"), res)
                     end
                 end)
                 return
