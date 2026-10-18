@@ -201,6 +201,11 @@ end
 ---@param cb fun(path: string|nil, err: string|nil) 成功回传落盘路径
 ---@return { cancel: fun() }|nil
 local function write(path, payload, cb, opts)
+    -- 源已把章节落成自己的文件（漫画 CBZ），原样登记
+    if type(payload) == "table" and payload.file then
+        cb(payload.file)
+        return
+    end
     local html = render(payload, opts)
     if html == "" then
         cb(nil, _("章节内容为空"))

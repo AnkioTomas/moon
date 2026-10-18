@@ -96,6 +96,7 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 ---@field book_title string|nil 书名（写入 HTML <title>，供阅读器/第三方插件认书）
 ---@field html string|nil HTML/XHTML 正文片段（优先）
 ---@field text string|nil 纯文本（无 html 时由宿主转段落）
+---@field file string|nil 源已落盘的章节文件（如漫画 CBZ）：宿主原样登记，不写 HTML，优先于其余字段
 ---@field document string|nil 完整 HTML/XHTML 文档：宿主原样落盘，不套外壳、不改内容（优先于 html/text）
 
 --- 统一数据源实例接口。
