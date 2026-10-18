@@ -526,7 +526,8 @@ end
 ---@return string|nil
 function M.cachedKeyword(text)
     local kw = keywordStore():readSetting(T.strip(text))
-    return kw ~= "" and kw or nil
+    -- 旧版 validKeyword 按字节剥标点，会把「云」这类字削成半个字符并缓存下来，读到就当没有
+    return kw ~= "" and require("utils.text").isValidUtf8(kw) and kw or nil
 end
 
 --- AI 回答是否可用：原句里连续出现的 1–6 个字。
@@ -534,7 +535,11 @@ end
 ---@param body string
 ---@return string|nil
 function M.validKeyword(answer, body)
-    local kw = tostring(answer or ""):gsub("[%s%p「」『』“”《》【】，。！？]", "")
+    local kept = {}
+    for _idx, ch in ipairs(T.chars(answer)) do
+        if not (T.isPunct(ch) or ch:match("^%s$")) then kept[#kept + 1] = ch end
+    end
+    local kw = table.concat(kept)
     local n = #T.chars(kw)
     if n >= 1 and n <= 6 and body:find(kw, 1, true) then return kw end
     return nil

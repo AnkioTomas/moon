@@ -93,6 +93,7 @@ do -- AI 关键词校验：必须是原句子串
     Assert.eq(Typo.validKeyword(" 「虚无」。\n", "人活着，就是要在虚无之中找出意义"), "虚无")
     Assert.is_nil(Typo.validKeyword("荒诞", "人活着，就是要在虚无之中找出意义"))
     Assert.is_nil(Typo.validKeyword("", "人活着"))
+    Assert.eq(Typo.validKeyword("牧云", "牧云开口回应道"), "牧云", "云的尾字节 0x91 与【】相同，不能被按字节剥掉")
 end
 
 do -- 散落关键词：巨字整字落在页内、不压正文框、彼此不叠
