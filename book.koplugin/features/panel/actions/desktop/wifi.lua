@@ -10,7 +10,7 @@ local _ = require("gettext")
 return {
     id = "wifi",
     title = _("Wi-Fi"),
-    icon = "signal_wifi_4_bar",
+    icon = "wifi",
     scope = "desktop",
     event = "ToggleWifi",
     keep_open = true,
