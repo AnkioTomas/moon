@@ -82,7 +82,7 @@ do
     replies = { '{"isSuccess":true,"data":""}' }
     local err
     Client.contentAsync("u", 0, function(_, e) err = e end)
-    Assert.eq(err, "阅读章节内容为空")
+    Assert.eq(err, "阅读章节内容为空 #1")
 end
 
 -- 进度上报：JSON 体带 0 基章序号。
