@@ -9,7 +9,7 @@ local Assert = require("support.assert")
 
 package.loaded["source.wechat.mapper"] = nil
 package.loaded["source.wechat.notes"] = nil
-package.loaded["source.wechat.annotations"] = nil
+package.loaded["book.annotations"] = nil
 -- 本地目录：书 820954 的微信 uid 4 对应本地第 4 章；其余书未缓存。
 package.loaded["source.toc"] = {
     index = function(_source_id, stable_id, uid)
@@ -19,7 +19,7 @@ package.loaded["source.toc"] = {
 
 local Mapper = require("source.wechat.mapper")
 local Notes = require("source.wechat.notes")
-local Annotations = require("source.wechat.annotations")
+local Annotations = require("book.annotations")
 
 do
     local anns = Notes.toAnnotations({

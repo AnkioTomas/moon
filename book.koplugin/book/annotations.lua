@@ -1,11 +1,11 @@
 --[[--
-微信读书 ``range`` ↔ 章节正文文本互转。
+章节正文文本 ↔ xpointer 定位，以及微信读书 ``range`` 互转（番茄段评也用 ``locateBatch`` 定位）。
 
 微信 ``range`` 是原始章节 HTML（含标签）上的 0-based 半开区间 rune 索引，
 与本地章节 HTML 无关。定位划线一律用已解码的 ``markText``
 在可见正文里匹配，``range`` 只用于重复文本消歧；不能按可见文本去切片 ``range``。
 
-@module koplugin.book.source.wechat.annotations
+@module koplugin.book.book.annotations
 --]]
 
 local Annotations = {}

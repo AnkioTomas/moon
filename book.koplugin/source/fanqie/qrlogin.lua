@@ -78,24 +78,12 @@ function QRLogin.new(_class, settings, plugin)
     return self
 end
 
-function QRLogin:toast(text)
-    Toast:new{ text = tostring(text) }:show()
-end
-
-function QRLogin:_close_dialog()
-    if self.dialog then
-        local d = self.dialog
-        self.dialog = nil
-        d:close()
-    end
-end
-
-function QRLogin:_close_retry_dialog()
-    if self.retry_dialog then
-        local d = self.retry_dialog
-        self.retry_dialog = nil
-        d:close()
-    end
+--- 关掉并清空 self[field] 指向的弹窗。
+---@param field "dialog"|"retry_dialog"
+function QRLogin:_close(field)
+    local d = self[field]
+    self[field] = nil
+    if d then d:close() end
 end
 
 function QRLogin:_cancel_job()
@@ -109,8 +97,8 @@ function QRLogin:cancel()
     self.generation = self.generation + 1
     self.login_completed = false
     self:_cancel_job()
-    self:_close_dialog()
-    self:_close_retry_dialog()
+    self:_close("dialog")
+    self:_close("retry_dialog")
     self.jar = {}
     self.started = 0
     self.poll_failures = 0
@@ -224,7 +212,7 @@ function QRLogin:start()
                     if self.dialog == dialog then self.dialog = nil end
                     if gen == self.generation and not self.login_completed then
                         self:cancel()
-                        self:toast(_("已取消登录"))
+                        Toast:new{ text = _("已取消登录") }:show()
                     end
                 end,
             }
@@ -386,7 +374,7 @@ function QRLogin:_finish_login_success(gen)
     self.login_completed = true
     self.generation = self.generation + 1
     self:_cancel_job()
-    self:_close_dialog()
+    self:_close("dialog")
     local keys = {}
     for k in pairs(jar) do keys[#keys + 1] = k end
     table.sort(keys)
@@ -394,7 +382,7 @@ function QRLogin:_finish_login_success(gen)
     self.settings:set("cookies", jar)
     self.settings:flush()
     self.jar = jar
-    self:toast(_("登录成功"))
+    Toast:new{ text = _("登录成功") }:show()
     if type(self.plugin.onLoginSuccess) == "function" then
         self.plugin:onLoginSuccess()
     end
@@ -403,7 +391,7 @@ end
 function QRLogin:show_retry(msg)
     self.generation = self.generation + 1
     self:_cancel_job()
-    self:_close_dialog()
+    self:_close("dialog")
     local dialog
     dialog = Confirm:new{
         text = tostring(msg),

@@ -9,7 +9,7 @@
 
 local logger = require("utils.log")
 local Notes = require("source.wechat.notes")
-local Annotations = require("source.wechat.annotations")
+local Annotations = require("book.annotations")
 local Toc = require("source.wechat.toc")
 local WChapter = require("source.wechat.chapter")
 local Context = require("source.wechat.context")

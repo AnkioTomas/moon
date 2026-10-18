@@ -8,7 +8,7 @@
 @module koplugin.book.source.wechat.reviews
 --]]
 
-local Annotations = require("source.wechat.annotations")
+local Annotations = require("book.annotations")
 local JSON = require("json")
 local Paths = require("utils.paths")
 local _ = require("gettext")

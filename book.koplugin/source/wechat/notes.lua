@@ -5,7 +5,7 @@
 --]]
 
 local Text = require("utils.text")
-local Annotations = require("source.wechat.annotations")
+local Annotations = require("book.annotations")
 local Toc = require("source.wechat.toc")
 local Normalize = require("book.note.normalize")
 
