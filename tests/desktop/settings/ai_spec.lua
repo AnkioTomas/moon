@@ -56,7 +56,7 @@ end
 local AI = require("desktop.pages.setting.ai")
 local desktop = { updateView = function() end, lifecycle = { state = "Resume" } }
 local rows = AI:rows(desktop)
-Assert.len(rows, 6)
+Assert.len(rows, 7)
 
 -- 第 4 行是 AI token 上限：数值步进（每次 ±100），确定后落盘。
 rows[4](400)

@@ -143,7 +143,7 @@ local function ask(ui, title, messages, selection)
         end,
     }
     -- 上限走「AI token 上限」配置（ai_max_tokens）：解释属长答案，写死小值会被推理 token 挤掉。
-    handle = loading:showWhile(require("ai").chat, messages, { timeout = require("http.timeout").ai(0.5) }, function(content, err)
+    handle = loading:showWhile(require("ai").chat, messages, { localize = true, timeout = require("http.timeout").ai(0.5) }, function(content, err)
         if cancelled then return end
         loading:close()
         local answer = content and Explain.plain(content) or ""

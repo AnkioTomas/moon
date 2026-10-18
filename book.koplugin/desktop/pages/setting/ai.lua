@@ -163,6 +163,39 @@ local function maxTokensRow(desktop)
     end
 end
 
+--- 「回答语言」：AI 解释、摘要、报告、X-Ray 统一的语言与地区用语。
+---@param desktop table
+---@return function
+local function languageRow(desktop)
+    return function(iw)
+        local Client = require("ai.client")
+        local current = Settings.get("ai").ai_language or "auto"
+        local lang = Client.language()
+        local status = current == "auto" and _("跟随界面语言") or lang and lang.label or _("跟随界面语言")
+        return Row.widget({
+            width = iw,
+            kind = "nav", icon = "translate", title = _("回答语言"),
+            subtitle = _("AI 回答的语言和地区用语，对 AI 解释、摘要、报告、X-Ray 都生效"),
+            status = status, status_on = true,
+            callback = function()
+                local function choose(id)
+                    return function()
+                        Settings.get("ai").ai_language = id
+                        Settings.save("ai")
+                        desktop:updateView()
+                    end
+                end
+                local items = { { text = _("跟随界面语言"), callback = choose("auto") } }
+                for _idx, entry in ipairs(Client.LANGUAGES) do
+                    items[#items + 1] = { text = entry.label, callback = choose(entry.id) }
+                end
+                items[#items + 1] = { text = _("关闭") }
+                require("ui.themes.widgets.sheet"):new{ title = _("回答语言"), items = items }:show()
+            end,
+        })
+    end
+end
+
 ---@param desktop table
 ---@return table
 function AI:rows(desktop)
@@ -176,6 +209,7 @@ function AI:rows(desktop)
         maxTokensRow(desktop),
         timeoutRow(desktop),
         testRow(desktop),
+        languageRow(desktop),
     }
 end
 

@@ -18,5 +18,7 @@ return {
         ai_chapter_summary = false,
         -- 隔几天再开书时弹前情提要（只读本地摘要，不调 AI）。
         ai_recap = true,
+        -- AI 回答语言 / 地区用语：auto = 跟随界面语言，其余见 ai/client.lua 的 LANGUAGES。
+        ai_language = "auto",
     },
 }

@@ -180,3 +180,33 @@ Assert.is_nil(Client.decodeResponse('{"choices":[{"message":{"reasoning_details"
 
 settings.ai_api_key = ""
 Assert.is_false(Client.isConfigured())
+
+-- 繁体界面 + localize：system 提示词改要求繁體中文，其余消息与默认路径不动
+settings.ai_api_key = "secret"
+local GetText = require("gettext")
+local old_lang = GetText.current_lang
+GetText.current_lang = "zh_TW"
+posts = {}
+Client.chat({ { role = "system", content = "用简体中文回答" }, { role = "user", content = "hi" } },
+    { localize = true }, function() end)
+Assert.matches(posts[1].payload.messages[1].content, "繁體中文回答")
+Assert.matches(posts[1].payload.messages[1].content, "台灣慣用語")
+Assert.eq(posts[1].payload.messages[2].content, "hi")
+posts = {}
+Client.chat({ { role = "system", content = "用简体中文回答" } }, nil, function() end)
+Assert.eq(posts[1].payload.messages[1].content, "用简体中文回答")
+GetText.current_lang = old_lang
+
+-- 回答语言：显式选择优先于界面语言；英文替换写死的语言名；auto 跟随界面
+GetText.current_lang = "zh_CN"
+settings.ai_language = "en_GB"
+posts = {}
+Client.chat({ { role = "system", content = "用简体中文回答" } }, { localize = true }, function() end)
+Assert.matches(posts[1].payload.messages[1].content, "^用English回答")
+Assert.matches(posts[1].payload.messages[1].content, "British English")
+settings.ai_language = "auto"
+posts = {}
+Client.chat({ { role = "system", content = "用简体中文回答" } }, { localize = true }, function() end)
+Assert.matches(posts[1].payload.messages[1].content, "中国大陆")
+settings.ai_language = nil
+GetText.current_lang = old_lang
