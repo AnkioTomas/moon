@@ -216,6 +216,29 @@ Assert.matches(g2, "短摘要二")
 Assert.is_nil(g2:find("<section", 1, true), "section 换成 div，CRE 不在标题后分页")
 Assert.matches(g2, "</div>")
 Assert.matches(g2, "<h2>小标题</h2>", "正文 h1 降级，CRE 不在它前面分页")
+-- 摘要够长但以省略号结尾 = 被截断：仍抓原文；够长且没截断才直接用；抓到的比摘要还短就用摘要。
+do
+    local long = string.rep("这是一段很长的摘要。", 80)
+    summaries["g3"] = "<p>" .. long .. "…</p>"
+    local function bigPage()
+        local ps = {}
+        for i = 1, 40 do ps[i] = "<p>" .. para .. "第" .. i .. "段，模拟真实文章。</p>" end
+        return table.concat(ps)
+    end
+    web["https://a.com/big"] = "<html><body><article>" .. bigPage() .. "</article></body></html>"
+    local g3
+    Subscribe.content(rss_feed, { guid = "g3", title = "三", link = "https://a.com/big" }, function(h) g3 = h end)
+    Assert.matches(g3, "模拟真实文章", "被截断的长摘要去抓原文")
+    summaries["g4"] = "<p>" .. long .. "</p>"
+    local g4
+    Subscribe.content(rss_feed, { guid = "g4", title = "四", link = "https://a.com/big" }, function(h) g4 = h end)
+    Assert.matches(g4, "这是一段很长的摘要", "完整的长正文直接用")
+    Assert.is_nil(g4:find("模拟真实文章", 1, true))
+    summaries["g5"] = "<p>" .. long .. "…</p>"
+    local g5
+    Subscribe.content(rss_feed, { guid = "g5", title = "五", link = "https://a.com/1" }, function(h) g5 = h end)
+    Assert.matches(g5, "这是一段很长的摘要", "抓到的比摘要还短，用摘要")
+end
 os.execute("rm -rf '" .. dir .. "'")
 
 -- 删订阅：订阅库、缓存、目录、隐藏书行（及依附的章节 / 注解记录）一并清掉。

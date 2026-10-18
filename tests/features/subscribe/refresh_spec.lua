@@ -28,6 +28,7 @@ package.loaded["features.subscribe"] = {
 }
 package.loaded["features.subscribe.refresh"] = nil
 local Refresh = require("features.subscribe.refresh")
+Refresh.CONCURRENCY = 1
 
 local events = {}
 local unwatch = Refresh.watch(function(text, finished) events[#events + 1] = finished and "done" or text end)
@@ -118,5 +119,19 @@ do
     Refresh.start({ { id = 23, title = "R" } })
     pending[4](nil, "HTTP 500"); Stubs.flush()
     Assert.len(shown, 1, "别的错误不弹")
+end
+-- 并发：同时在飞 CONCURRENCY 个，一个回来补一个，全部回来才算结束
+do
+    Refresh.CONCURRENCY = 2
+    Refresh._reset(); calls, pending = {}, {}
+    Refresh.start({ { id = 31, title = "P1" }, { id = 32, title = "P2" }, { id = 33, title = "P3" } })
+    Assert.eq(table.concat(calls, ","), "31,32", "同时在飞 2 个")
+    pending[2](1); Stubs.flush()
+    Assert.eq(table.concat(calls, ","), "31,32,33", "回来一个补一个")
+    pending[1](0); Stubs.flush()
+    Assert.is_true(Refresh.running(), "还有一个在飞")
+    pending[3](0); Stubs.flush()
+    Assert.is_false(Refresh.running())
+    Refresh.CONCURRENCY = 1
 end
 unwatch()
