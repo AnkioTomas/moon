@@ -247,7 +247,7 @@ return {
     ["右中"] = "Middle right",
     ["同步失败"] = "Sync failed",
     ["同步阅读时间"] = "Sync reading time",
-    ["阅读时必须联网，微信读书才会计入时长"] = "Stay online while reading, or WeChat Read won't count the time",
+    ["离线阅读的时长，联网后补报给微信读书"] = "Reading time spent offline is reported to WeChat Read once you are back online",
     ["合并本地阅读时长"] = "Merge local reading time",
     ["关闭时以云端为准；打开后每天取云端与本地中较大的，补上离线阅读。只影响月读里的统计"] = "Off: use the cloud numbers. On: take the larger of cloud and local for each day to include offline reading. Only affects stats in Moon Reader",
     ["多设备统计合并"] = "Merge multi-device stats",
