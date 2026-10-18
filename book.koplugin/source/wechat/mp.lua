@@ -261,7 +261,12 @@ local function mpGetAsync(url, opts, cb)
         sent.headers = headers
         job = Auth.webGetAsync(url, sent, function(raw, err, res)
             if cancelled then return end
+            -- 会话层续期重试后仍被拒时 raw 为 nil、res.json 也没填，回包只在 res.body 里
             local data = res and res.json
+            if data == nil and res and res.body and res.body:find("2041", 1, true) then
+                local ok, decoded = pcall(require("utils.json").decode, res.body)
+                data = ok and decoded or nil
+            end
             if not renewed and type(data) == "table" and tonumber(data.errcode or data.errCode) == -2041 then
                 job = Mp.renewAsync(function() if not cancelled then go(true) end end)
                 return

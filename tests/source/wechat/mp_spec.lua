@@ -202,6 +202,28 @@ do
     package.loaded["source.wechat.auth"].webGetAsync = real
 end
 
+-- 会话层续期重试后仍被拒：raw=nil、res 只有 body，也要走公众号凭据续期再重试。
+do
+    local real = package.loaded["source.wechat.auth"].webGetAsync
+    local sent = {}
+    package.loaded["source.wechat.auth"].webGetAsync = function(_url, opts, cb)
+        sent[#sent + 1] = opts.headers or {}
+        if #sent == 1 then
+            cb(nil, "微信读书拒绝了请求，请稍后再试", { body = '{"errCode":-2041,"errMsg":"-2041"}' })
+        else
+            cb("{...}", nil, { json = wire({ { "r7", 7, "七" } }) })
+        end
+        return { cancel = function() end }
+    end
+    local items
+    renewals = 0
+    Mp.fetchArticlesAsync("MP_WXS_1", 0, function(list) items = list end)
+    Assert.eq(renewals, 1)
+    Assert.eq(items[1].guid, "r7")
+    Assert.eq(sent[2]["x-wr-ticket"], "T1")
+    package.loaded["source.wechat.auth"].webGetAsync = real
+end
+
 -- 只解一次：会话层已解过（res.json）就直接用，不再 decode。
 do
     local real = package.loaded["source.wechat.auth"].webGetAsync
