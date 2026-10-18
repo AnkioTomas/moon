@@ -48,7 +48,7 @@ end
 Assert.eq(by_bg[tostring(t.color.ink)], 1, "最长的一天（今天）最深")
 Assert.eq(by_bg[tostring(math.floor(t.progress.track + (t.color.ink - t.progress.track) * 2 / 4 + 0.5))], 1,
     "一半时长落第 2 档")
-Assert.eq(by_bg["nil"], 6 - (now.wday + 5) % 7, "本周今天之后留空")
+Assert.eq(by_bg["nil"] or 0, 6 - (now.wday + 5) % 7, "本周今天之后留空")
 Assert.matches(table.concat(Kit.texts(slot), "|"), "· 900", "标题只算显示区间内的时长")
 
 local first = slot[1]
