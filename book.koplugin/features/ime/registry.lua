@@ -74,6 +74,7 @@ local METHODS = {
         label = _("小鹤双拼"),
         labels = XIAOHE,
         show_codes = true,
+        optional_labels = true,
         mapKey = letterKey,
         toCode = function(code) return require("features.ime.xiaohe").toPinyin(code) end,
     },
@@ -83,6 +84,7 @@ local METHODS = {
         label = _("五笔"),
         labels = WUBI,
         show_codes = true,
+        optional_labels = true,
         mapKey = letterKey,
     },
     cangjie = {
@@ -91,6 +93,7 @@ local METHODS = {
         label = _("仓颉"),
         labels = CANGJIE,
         show_codes = true,
+        optional_labels = true,
         mapKey = letterKey,
     },
     zhuyin = {

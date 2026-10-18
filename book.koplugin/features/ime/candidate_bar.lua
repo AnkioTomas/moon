@@ -154,6 +154,10 @@ local function applyKeyboardLabels(profile)
     end
     local labels = profile.labels
     if type(labels) ~= "table" then return end
+    -- 字根 / 韵母键帽可关：关上保留原生字母键帽。
+    if profile.optional_labels and not require("utils.settings").get("features.ime").ime_keycaps then
+        return
+    end
     for _idx, row in ipairs(layout.keys) do
         for _idx, key in ipairs(row) do
             if type(key) == "table" then
