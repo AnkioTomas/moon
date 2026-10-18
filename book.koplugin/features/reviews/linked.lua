@@ -341,12 +341,13 @@ end
 local function apply(entries, cache, p, hash, result)
     result = result or { found = {}, why = {} }
     local located = 0
-    for i, pos in pairs(result.found) do
-        cache.pos[entries[i].spot] = pos
+    -- 子进程结果走 JSON，稀疏的热点序号回来是字符串键
+    for key, pos in pairs(result.found) do
+        cache.pos[entries[tonumber(key)].spot] = pos
         located = located + 1
     end
-    for i, why in pairs(result.why) do
-        local spot = entries[i].spot
+    for key, why in pairs(result.why) do
+        local spot = entries[tonumber(key)].spot
         if not cache.logged[spot] then
             cache.logged[spot] = true
             logger.info("book.reviews unmatched", why, "page", p, "quote", spot.text)

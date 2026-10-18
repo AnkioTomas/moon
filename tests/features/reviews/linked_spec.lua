@@ -125,7 +125,17 @@ local scan_redraws = 0
 -- 子进程桩：同步跑 worker 再回调（真机 fork 后 JSON 回传）。
 package.loaded["workers.job"] = { run = function(worker, opts)
     local ok, result = pcall(worker)
-    if ok then opts.on_done(result) else opts.on_failed(result) end
+    -- 真机结果走 JSON：稀疏整数键回来是字符串键
+    if ok then
+        for _idx, field in ipairs({ "found", "why" }) do
+            local wire = {}
+            for i, v in pairs(result[field]) do wire[tostring(i)] = v end
+            result[field] = wire
+        end
+        opts.on_done(result)
+    else
+        opts.on_failed(result)
+    end
     return { settled = true, cancel = function() end }
 end }
 local function place(view, list, c) return Linked.place(view, list, c, function() scan_redraws = scan_redraws + 1 end) end
