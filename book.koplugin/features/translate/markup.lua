@@ -35,7 +35,7 @@ end
 ---@param inner string
 ---@return string
 local function plain(inner)
-    local s = Text.xmlDecode((inner:gsub("<[^>]*>", ""))):gsub("&nbsp;", " "):gsub("%s+", " ")
+    local s = Text.xmlDecode((inner:gsub("<[^>]*>", ""))):gsub("\194\160", " "):gsub("%s+", " ")
     return Text.trim(s)
 end
 

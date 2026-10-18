@@ -95,8 +95,10 @@ do
     Assert.eq(Text.xmlDecode("&#x4E2D;"), "中")
     -- 超范围码点 → 空串
     Assert.eq(Text.xmlDecode("&#99999999;"), "")
-    -- 未知命名实体原样保留
-    Assert.eq(Text.xmlDecode("&nbsp;"), "&nbsp;")
+    -- 常见 HTML 命名实体解码；未知的原样保留；只解一层
+    Assert.eq(Text.xmlDecode("a&nbsp;b&mdash;c&hellip;&ldquo;d&rdquo;"), "a\194\160b—c…“d”")
+    Assert.eq(Text.xmlDecode("&unknown;"), "&unknown;")
+    Assert.eq(Text.xmlDecode("&amp;lt;"), "&lt;")
     Assert.eq(Text.xmlDecode(nil), "")
     -- 往返
     Assert.eq(Text.xmlDecode(Text.xmlEscape([[<a x="&">]])), [[<a x="&">]])
