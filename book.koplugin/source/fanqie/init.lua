@@ -310,11 +310,13 @@ function Source:getProgressAsync(identity, cb)
                 cb(nil, nil, { empty = true })
                 return
             end
-            -- 没有 read_progress 就是只记到章：留 nil，别写成 0 让开书对比误判为章首。
+            -- 服务端 read_progress 是整数（万分比）：我们推的 0..1 小数被截断成 0/1，
+            -- 回读永远是 0，当章首会每次开书都采纳云端、跳回章首。≤1 视为没有章内位置，留 nil。
             local within = tonumber(row.read_progress)
-            if within then
-                if within > 1 then within = within / 10000 end
-                within = math.max(0, math.min(1, within))
+            if within and within > 1 then
+                within = math.min(1, within / 10000)
+            else
+                within = nil
             end
             cb({
                 chapter_idx = idx,
