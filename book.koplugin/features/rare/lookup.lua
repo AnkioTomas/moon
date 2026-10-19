@@ -289,8 +289,9 @@ end
 ---@param anchor table|nil 按钮矩形
 function Lookup:pickDict(anchor)
     local items = {}
+    local current = self:currentDict().name
     for _idx, d in ipairs(self.dicts) do
-        items[#items + 1] = { text = (d.name == self:currentDict().name and "✓ " or "") .. d.name .. (d.empty and _("（无结果）") or ""), callback = function()
+        items[#items + 1] = { text = d.name .. (d.empty and _("（无结果）") or ""), checked = d.name == current, callback = function()
             self.dict_name = d.name
             self.body_page = 1
             local MoonSettings = require("utils.settings")
@@ -300,7 +301,7 @@ function Lookup:pickDict(anchor)
             if not self._gone then self:refreshView() end
         end }
     end
-    require("ui.themes.widgets.sheet"):new{ title = _("选择词典"), anchor = anchor, items = items }:show()
+    require("ui.themes.widgets.list"):new{ title = _("选择词典"), centered = true, anchor = anchor, items = items }:show()
 end
 
 --- 某来源结果回来：存下，正看着就刷新。

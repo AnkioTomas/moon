@@ -138,19 +138,18 @@ local function languageRow(desktop)
             subtitle = _("AI 回答的语言和地区用语，对 AI 解释、摘要、报告、X-Ray 都生效"),
             status = status, status_on = true,
             callback = function()
-                local function choose(id)
-                    return function()
+                local items = { { text = _("跟随界面语言"), value = "auto" } }
+                for _idx, entry in ipairs(Client.LANGUAGES) do
+                    items[#items + 1] = { text = entry.label, value = entry.id }
+                end
+                require("ui.themes.widgets.list"):new{
+                    title = _("回答语言"), centered = true, items = items, current = current,
+                    on_select = function(id)
                         Settings.get("ai").ai_language = id
                         Settings.save("ai")
                         desktop:updateView()
-                    end
-                end
-                local items = { { text = _("跟随界面语言"), callback = choose("auto") } }
-                for _idx, entry in ipairs(Client.LANGUAGES) do
-                    items[#items + 1] = { text = entry.label, callback = choose(entry.id) }
-                end
-                items[#items + 1] = { text = _("关闭") }
-                require("ui.themes.widgets.sheet"):new{ title = _("回答语言"), items = items }:show()
+                    end,
+                }:show()
             end,
         })
     end

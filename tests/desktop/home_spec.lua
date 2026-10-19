@@ -172,7 +172,7 @@ do -- 编辑工具：删除 / 移动 / 高度；设置按钮只给有 showSettin
 
     bars = Kit.find(desktop.root, function(w) return w.onHomeEditBarTap ~= nil end)
     Kit.buttons(bars[1])[3].callback()
-    Themed.last("sheet").items[2].callback()
+    Themed.last("list").items[2].callback()
     Assert.eq(Registry.widgets()[1].height, "fill")
 
     drain()

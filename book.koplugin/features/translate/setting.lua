@@ -64,13 +64,13 @@ function Setting.entries(desktop)
                             callback = function()
                                 local items = {}
                                 for _idx, option in ipairs(options) do
-                                    items[#items + 1] = { text = label(option), callback = function()
+                                    items[#items + 1] = { text = label(option), checked = option == translate[key], callback = function()
                                         translate[key] = option
                                         MoonSettings.save("features.translate", translate)
                                         desktop:updateView()
                                     end }
                                 end
-                                require("ui.themes.widgets.sheet"):new{ title = title, items = items }:show()
+                                require("ui.themes.widgets.list"):new{ title = title, centered = true, items = items }:show()
                             end,
                         })
                     end
