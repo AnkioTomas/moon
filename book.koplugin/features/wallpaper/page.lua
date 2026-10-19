@@ -20,12 +20,16 @@ local Page = {}
 ---@field title string
 ---@field subtitle string
 
---- 两个作用面。
+--- 各界面；顺序即设置页顺序。
 local SCOPES = {
-    { id = "desktop", icon = "web_asset", title = _("月读页面"),
-        subtitle = _("桌面、书架、书城、统计、设置") },
-    { id = "dialog", icon = "chat_bubble", title = _("弹窗与详情"),
-        subtitle = _("弹窗、设置叠层、书籍详情") },
+    { id = "home", icon = "home", title = _("桌面"), subtitle = _("首页") },
+    { id = "library", icon = "local_library", title = _("书架"), subtitle = _("图书馆") },
+    { id = "store", icon = "storefront", title = _("书城"), subtitle = _("书城") },
+    { id = "insight", icon = "bar_chart", title = _("统计"), subtitle = _("阅读统计") },
+    { id = "settings", icon = "settings", title = _("设置"), subtitle = _("设置页字看不清时调低透明度或关掉") },
+    { id = "dialog", icon = "chat_bubble", title = _("弹窗与详情"), subtitle = _("弹窗、书籍详情") },
+    { id = "reader", icon = "menu_book", title = _("阅读页"),
+        subtitle = _("下次打开书生效，仅 EPUB / TXT 等排版文档；建议调低透明度") },
 }
 
 --- 改完设置重画所有用到壁纸的界面（updateView 末尾会顺带重建设置叠层）。
@@ -104,89 +108,173 @@ local function toggleRow(desktop, opts)
     end
 end
 
+local FOLLOW = "follow"
+
+--- 透明度选项；with_follow 时多一项「跟随全局」。
+---@param with_follow boolean
+---@return table[]
+local function opacityItems(with_follow)
+    local items = with_follow and { { text = _("跟随全局"), value = FOLLOW } } or {}
+    for pct = 100, 10, -10 do items[#items + 1] = { text = pct .. "%", value = tostring(pct) } end
+    return items
+end
+
+---@param with_follow boolean
+---@return table[]
+local function layoutItems(with_follow)
+    local items = with_follow and { { text = _("跟随全局"), value = FOLLOW } } or {}
+    items[#items + 1] = { text = _("铺满裁切"), value = "cover" }
+    items[#items + 1] = { text = _("整图缩进"), value = "contain" }
+    return items
+end
+
+---@param contain boolean
+---@return string
+local function layoutLabel(contain)
+    return contain and _("整图") or _("铺满")
+end
+
+--- 图片行：没选过 / 选了文件名；点开选图。
 ---@param desktop table
----@return table
-function Page:rows(desktop)
-    local mode = Core.mode()
+---@param opts { title: string, path: string|nil, empty: string, apply: fun(path: string), clear: (fun())|nil }
+---@return fun(iw: number): table
+local function imageRow(desktop, opts)
+    local function pick()
+        choosePath(desktop, opts.path or require("apps/filemanager/filemanagerutil").getHomeFolder(), true, opts.apply)
+    end
+    return navRow{
+        icon = "image", title = opts.title,
+        status = opts.path and opts.path:match("[^/]*$") or opts.empty,
+        subtitle = opts.path,
+        callback = function()
+            if not (opts.path and opts.clear) then return pick() end
+            List:new{
+                title = opts.title, centered = true,
+                items = { { text = _("换一张图"), value = "pick" }, { text = _("跟随全局"), value = "clear" } },
+                on_select = function(action)
+                    if action == "pick" then
+                        pick()
+                    elseif action == "clear" then
+                        opts.clear()
+                        repaint(desktop)
+                    end
+                end,
+            }:show()
+        end,
+    }
+end
+
+---@param desktop table
+---@param scope BookWallpaperScope
+---@return table[]
+local function scopeRows(desktop, scope)
+    local id = scope.id
+    local contain, opacity = Core.override(id, "contain"), Core.override(id, "opacity")
+    local own_image = Core.override(id, "image")
+    local rows = {
+        toggleRow(desktop, {
+            icon = scope.icon, title = _("显示壁纸"), subtitle = scope.subtitle,
+            on = Core.scopeOn(id),
+            apply = function(on) Core.setScope(id, on) end,
+        }),
+        imageRow(desktop, {
+            title = _("壁纸图片"), path = own_image, empty = _("跟随全局"),
+            apply = function(path) Core.setOverride(id, "image", path) end,
+            clear = function() Core.setOverride(id, "image", nil) end,
+        }),
+        choiceRow(desktop, {
+            icon = "crop", title = _("铺法"),
+            status = contain == nil and _("跟随全局") or layoutLabel(contain),
+            items = layoutItems(true),
+            current = contain == nil and FOLLOW or (contain and "contain" or "cover"),
+            apply = function(value)
+                Core.setOverride(id, "contain", value ~= FOLLOW and value == "contain" or nil)
+            end,
+        }),
+        choiceRow(desktop, {
+            icon = "opacity", title = _("壁纸透明度"),
+            status = opacity and opacity .. "%" or _("跟随全局"),
+            items = opacityItems(true), current = opacity and tostring(opacity) or FOLLOW,
+            apply = function(value) Core.setOverride(id, "opacity", tonumber(value)) end,
+        }),
+    }
+    return rows
+end
+
+---@param desktop table
+---@return table 主页面叠层规格
+function Page.spec(desktop)
+    return {
+        title = _("界面壁纸"),
+        preview = function(width) return Page.preview(width) end,
+        sections = function() return Page.sections(desktop) end,
+    }
+end
+
+--- 某个界面的子页；返回时回到主页。
+---@param desktop table
+---@param scope BookWallpaperScope
+local function openScope(desktop, scope)
+    require("desktop.pages.setting.overlay").open(desktop, {
+        title = scope.title,
+        on_close = function()
+            if not desktop.closed then require("desktop.pages.setting.overlay").open(desktop, Page.spec(desktop)) end
+        end,
+        sections = function() return { { title = scope.title, rows = scopeRows(desktop, scope) } } end,
+    })
+end
+
+---@param desktop table
+---@return table[]
+function Page.sections(desktop)
     local rows = {
         toggleRow(desktop, {
             icon = "wallpaper", title = _("启用界面壁纸"),
-            subtitle = _("关上就整个不画，下面的开关原样留着"),
+            subtitle = _("关上就整个不画，各界面的设置原样留着"),
             on = Core.isOn(),
             apply = function(on) Core.setOn(on) end,
         }),
     }
-    if not Core.isOn() then
-        return rows
-    end
+    if not Core.isOn() then return { { title = _("全局"), rows = rows } } end
 
-    rows[#rows + 1] = choiceRow(desktop, {
-        icon = "image", title = _("壁纸图源"), status = Core.label(mode),
-        items = Core.options(), current = mode,
-        apply = function(value) Core.setMode(value) end,
+    rows[#rows + 1] = imageRow(desktop, {
+        title = _("壁纸图片"), path = Core.image(), empty = _("未选择"), apply = Core.setImage,
     })
-    if mode == "none" then
-        return rows
-    end
-
-    if mode == "custom" then
-        local path = Core.customImage()
-        rows[#rows + 1] = navRow{
-            icon = "image", title = _("选择图片"), subtitle = path,
-            callback = function() choosePath(desktop, path, true, Core.setCustomImage) end,
-        }
-    elseif mode == "folder" then
-        local path = Core.folder()
-        rows[#rows + 1] = navRow{
-            icon = "folder", title = _("选择文件夹"), subtitle = path,
-            callback = function() choosePath(desktop, path, false, Core.setFolder) end,
-        }
-    end
-
-    if mode ~= "none" then
-        local contain = Core.contain()
-        rows[#rows + 1] = choiceRow(desktop, {
-            icon = "crop", title = _("铺法"), status = contain and _("整图") or _("铺满"),
-            items = { { text = _("铺满裁切"), value = "cover" }, { text = _("整图缩进"), value = "contain" } },
-            current = contain and "contain" or "cover",
-            apply = function(value) Core.setContain(value == "contain") end,
-        })
-    end
-
-    local opacity = Core.opacity()
-    local levels = {}
-    for pct = 100, 10, -10 do levels[#levels + 1] = { text = pct .. "%", value = tostring(pct) } end
+    local contain = Core.contain()
     rows[#rows + 1] = choiceRow(desktop, {
-        icon = "image", title = _("壁纸透明度"), status = opacity .. "%",
-        items = levels, current = tostring(opacity),
+        icon = "crop", title = _("铺法"), status = layoutLabel(contain),
+        items = layoutItems(false), current = contain and "contain" or "cover",
+        apply = function(value) Core.setContain(value == "contain") end,
+    })
+    local opacity = Core.opacity()
+    rows[#rows + 1] = choiceRow(desktop, {
+        icon = "opacity", title = _("壁纸透明度"), status = opacity .. "%",
+        items = opacityItems(false), current = tostring(opacity),
         apply = function(value) Core.setOpacity(tonumber(value)) end,
     })
-
     local bars = Core.bars()
     rows[#rows + 1] = toggleRow(desktop, {
-        icon = "space_bar", title = _("顶栏显示壁纸"),
-        subtitle = _("关上顶栏用页面底色"),
-        on = bars.top,
-        apply = function(on) Core.setBar("top", on) end,
+        icon = "space_bar", title = _("顶栏显示壁纸"), subtitle = _("关上顶栏用页面底色"),
+        on = bars.top, apply = function(on) Core.setBar("top", on) end,
     })
     rows[#rows + 1] = toggleRow(desktop, {
-        icon = "space_bar", title = _("底栏显示壁纸"),
-        subtitle = _("关上底栏用页面底色"),
-        on = bars.bottom,
-        apply = function(on) Core.setBar("bottom", on) end,
+        icon = "space_bar", title = _("底栏显示壁纸"), subtitle = _("关上底栏用页面底色"),
+        on = bars.bottom, apply = function(on) Core.setBar("bottom", on) end,
     })
 
+    local scope_rows = {}
     for _idx, scope in ipairs(SCOPES) do
         local on = Core.enabled(scope.id)
-        rows[#rows + 1] = toggleRow(desktop, {
+        local custom = Core.override(scope.id, "image") ~= nil or Core.override(scope.id, "contain") ~= nil
+            or Core.override(scope.id, "opacity") ~= nil
+        scope_rows[#scope_rows + 1] = navRow{
             icon = scope.icon, title = scope.title,
-            subtitle = scope.subtitle,
-            on = on,
-            apply = function(value) Core.setScope(scope.id, value) end,
-        })
+            subtitle = custom and _("已单独调整") or _("跟随全局"),
+            status = on and _("开") or _("关"), status_on = on,
+            callback = function() openScope(desktop, scope) end,
+        }
     end
-
-    return rows
+    return { { title = _("全局"), rows = rows }, { title = _("各界面"), rows = scope_rows } }
 end
 
 --- 已选壁纸缩略；没开 / 没图走占位。

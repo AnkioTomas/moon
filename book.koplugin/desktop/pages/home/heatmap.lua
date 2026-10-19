@@ -123,7 +123,7 @@ function M:createWidget()
             if d > 1 then col[#col + 1] = VerticalSpan:new{ width = gap } end
             local level = column[d]
             local bg = level and math.floor(track + (ink - track) * level / 4 + 0.5) or nil
-            col[#col + 1] = Box:new{ style = { bg = bg }, width = cell, height = cell }
+            col[#col + 1] = Box:new{ style = { bg = bg }, width = cell, height = cell, keep_bg = true }
         end
         grid[#grid + 1] = col
     end

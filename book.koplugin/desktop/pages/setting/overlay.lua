@@ -32,6 +32,7 @@ local TitleBar = require("ui.themes.widgets.titlebar")
 ---@field title string
 ---@field preview (fun(width: number): table)|nil
 ---@field sections fun(): BookThemeSection[]
+---@field on_close (fun())|nil
 
 ---@class BookSettingsOverlay : BookThemeModal
 ---@field spec BookSettingsOverlaySpec
@@ -72,6 +73,7 @@ function Overlay.open(desktop, spec)
         close_callback = function()
             desktop.settings_overlay = nil
             if not desktop.closed then UIManager:setDirty(desktop, "ui") end
+            if spec.on_close then spec.on_close() end
         end,
     }
     desktop.settings_overlay:show()

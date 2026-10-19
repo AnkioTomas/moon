@@ -1,15 +1,17 @@
 --[[--
 界面壁纸：把一张图铺在月读自己的各个界面之下。
 
-图源只留用户自己的图（自定义 / 文件夹壁纸），独立于锁屏配置；一个总开关加上
-两个作用面开关：
-  desktop  月读桌面与各页（首页 / 图书馆 / 书城 / 统计 / 设置）
-  dialog   弹窗、设置叠层、详情等主题窗口（画在遮罩之下）
+全局设一张图、铺法、透明度，独立于锁屏配置；总开关之外每个界面可单独开关，并可单独换图 /
+换铺法 / 换透明度（没覆盖的项跟随全局；墨水屏上某张图在首页清楚、在设置页看不清字时单独调）：
+  home / library / store / insight  桌面各页签
+  settings  设置叠层
+  dialog    其余弹窗、详情等主题窗口（画在遮罩之下）
 
-阅读页不铺：crengine 把正文整屏铺满不透明，垫在下面看不见，叠加又会压低文字
-对比度，实测（epub / html）都不理想，索性不做。
+阅读页（reader，默认关）：crengine 把正文整屏铺满不透明，垫在下面看不见，所以改用它自带的
+平铺背景图接口：按屏幕尺寸渲染成 PNG 交给 `document:setBackgroundImage`，正文直接画在图上。
+只有 crengine 文档（EPUB / TXT / HTML 等）有这个接口，PDF / 漫画不生效；打开书时设置，改开关下次开书生效。
 
-位图按「路径 + 尺寸 + 铺法」只缓存一张：两个作用面尺寸不同会来回换，但界面
+位图按「路径 + 尺寸 + 铺法 + 透明度」只缓存一张：两个作用面尺寸不同会来回换，但界面
 一次只画一处，换一次解一次可接受；改设置经 invalidate 丢弃。
 
 界面上「铺满整片的底色」不止一层：页根一层、Sections 正文框又一层（所以只摘
@@ -26,140 +28,88 @@ local Image = require("utils.image")
 local MoonSettings = require("utils.settings")
 local Paths = require("utils.paths")
 local logger = require("utils.log")
-local _ = require("gettext")
 local Screen = Device.screen
 
 local M = {}
 
---- 两个作用面；键是配置后缀。
-local SCOPE_KEYS = { desktop = "wallpaper_desktop", dialog = "wallpaper_dialog" }
-M.SCOPES = { "desktop", "dialog" }
+--- 作用面：桌面各页签（id 同页签 id）、设置叠层、其余弹窗、阅读页。
+M.SCOPES = require("features.wallpaper.setting").SCOPES
+--- 旧版只有 desktop（各页签）与 dialog（设置叠层和其余弹窗）两个开关：新键没存过就沿用旧键。
+local LEGACY = { home = "desktop", library = "desktop", store = "desktop", insight = "desktop", settings = "dialog" }
 
 ---@return table
 local function conf()
     return MoonSettings.get("features.wallpaper")
 end
 
--- ── 图源 ──────────────────────────────
-
---- 用户选的自定义图；没选过用 .moon/screensaver/wallpaper.png。
----@return string
-function M.customImage()
-    return conf().wallpaper_custom_image or Paths.screensaverDir() .. "/wallpaper.png"
-end
-
---- 用户选的壁纸文件夹；没选过用 .moon/screensaver/wallpapers（与锁屏同一个）。
----@return string
-function M.folder()
-    return conf().wallpaper_folder or Paths.screensaverDir() .. "/wallpapers"
-end
-
-local folder_cache = {}
-
---- 目录及其修改时间未变时复用已排序的图片路径。
----@param dir string
----@return string[]
-local function folderFiles(dir)
-    local modification = lfs.attributes(dir, "modification")
-    if not modification then return {} end
-    if folder_cache.dir == dir and folder_cache.modification == modification then
-        return folder_cache.files
-    end
-    local files = {}
-    for name in lfs.dir(dir) do
-        local path = dir .. "/" .. name
-        if Image.suffix(name) and lfs.attributes(path, "mode") == "file" then files[#files + 1] = path end
-    end
-    table.sort(files)
-    folder_cache = { dir = dir, modification = modification, files = files }
-    return files
-end
-
---- 按日期依次轮换文件夹里的图：同一天固定一张，不落盘任何状态。
----@return string|nil
-local function folderPick()
-    local files = folderFiles(M.folder())
-    if #files == 0 then return nil end
-    local t = os.date("*t")
-    ---@cast t osdate
-    local day = math.floor(os.time{ year = t.year, month = t.month, day = t.day, hour = 12 } / 86400)
-    return files[day % #files + 1]
-end
-
---- 页面壁纸只用用户自己的图：在线日报 / 封面都是拿来当封面的，铺到页面上太花。
-local SOURCES = {
-    none = { id = "none", label = _("无") },
-    custom = { id = "custom", label = _("自定义"), path = function() return M.customImage() end },
-    folder = { id = "folder", label = _("文件夹壁纸"), path = folderPick },
-}
-local SOURCE_IDS = { "none", "custom", "folder" }
-
---- 当前图源 id。
----@return string
-function M.mode()
-    local mode = conf().wallpaper_source
-    return SOURCES[mode] and mode or "none"
-end
-
---- 切换图源；非法值忽略。改完丢掉缓存，下一次绘制重新解图。
----@param mode string
-function M.setMode(mode)
-    if not SOURCES[mode] then return end
-    local c = conf()
-    if c.wallpaper_source == mode then return end
-    c.wallpaper_source = mode
-    MoonSettings.save("features.wallpaper", c)
+local function save()
+    MoonSettings.save("features.wallpaper", conf())
     M.invalidate()
 end
 
---- 图源的显示名。
----@param mode string|nil
----@return string
-function M.label(mode)
-    return (mode and SOURCES[mode] or SOURCES.none).label
+-- ── 全局：图 / 铺法 / 透明度 ──────────────
+
+--- 全局壁纸图；没选过且旧版图源是「自定义」时用 .moon/screensaver/wallpaper.png。
+---@return string|nil
+function M.image()
+    local c = conf()
+    if c.wallpaper_custom_image then return c.wallpaper_custom_image end
+    if c.wallpaper_source == "custom" then return Paths.screensaverDir() .. "/wallpaper.png" end
 end
 
---- 图源的设置页选项。
----@return {text: string, value: string}[]
-function M.options()
-    local out = {}
-    for _idx, id in ipairs(SOURCE_IDS) do out[#out + 1] = { text = SOURCES[id].label, value = id } end
-    return out
+---@param path string
+function M.setImage(path)
+    conf().wallpaper_custom_image = path
+    save()
 end
 
---- 是否整图缩进（两侧留底色）；缺省铺满裁切。
+--- 某个界面的覆盖值（图 / 铺法 / 透明度），nil = 跟随全局。
+---@param scope string
+---@param field "image"|"contain"|"opacity"
+---@return string|boolean|integer|nil
+function M.override(scope, field)
+    return conf()["wallpaper_" .. field .. "_" .. scope]
+end
+
+---@param scope string
+---@param field "image"|"contain"|"opacity"
+---@param value string|boolean|integer|nil nil = 清除覆盖
+function M.setOverride(scope, field, value)
+    conf()["wallpaper_" .. field .. "_" .. scope] = value
+    save()
+end
+
+--- 铺法：整图缩进（两侧留底色）为 true，缺省铺满裁切。scope 有覆盖用覆盖。
+---@param scope string|nil
 ---@return boolean
-function M.contain()
-    if conf().wallpaper_contain == true then return true end
-    return SOURCES[M.mode()].contain == true
+function M.contain(scope)
+    local own = scope and M.override(scope, "contain")
+    if own ~= nil then return own end
+    return conf().wallpaper_contain == true
 end
 
---- 壁纸不透明度（百分比，10~100，缺省 100）。
+---@param on boolean
+function M.setContain(on)
+    conf().wallpaper_contain = on == true
+    save()
+end
+
+--- 壁纸不透明度（百分比，10~100，缺省 100）。scope 有覆盖用覆盖。
+---@param scope string|nil
 ---@return integer
-function M.opacity()
-    return conf().wallpaper_opacity
+function M.opacity(scope)
+    return scope and M.override(scope, "opacity") or conf().wallpaper_opacity
 end
 
 ---@param percent integer
 function M.setOpacity(percent)
-    local c = conf()
-    c.wallpaper_opacity = percent
-    MoonSettings.save("features.wallpaper", c)
-    M.invalidate()
-end
-
---- 切铺法。
----@param on boolean
-function M.setContain(on)
-    local c = conf()
-    c.wallpaper_contain = on == true
-    MoonSettings.save("features.wallpaper", c)
-    M.invalidate()
+    conf().wallpaper_opacity = percent
+    save()
 end
 
 -- ── 总开关与顶栏 / 底栏 ──────────────────
 
---- 总开关。关上就整个不画，两个作用面的开关原样留着（再开就回来）。
+--- 总开关。关上就整个不画，各界面的开关原样留着（再开就回来）。
 ---@return boolean
 function M.isOn()
     return conf().wallpaper_enabled ~= false
@@ -167,10 +117,8 @@ end
 
 ---@param on boolean
 function M.setOn(on)
-    local c = conf()
-    c.wallpaper_enabled = on == true
-    MoonSettings.save("features.wallpaper", c)
-    M.invalidate()
+    conf().wallpaper_enabled = on == true
+    save()
 end
 
 --- 顶栏 / 底栏要不要跟着透出壁纸；关的那条补回页面底色。
@@ -183,69 +131,51 @@ end
 ---@param which string top / bottom
 ---@param on boolean
 function M.setBar(which, on)
-    local key = which == "bottom" and "wallpaper_tabbar" or "wallpaper_topbar"
-    local c = conf()
-    c[key] = on == true
-    MoonSettings.save("features.wallpaper", c)
-    M.invalidate()
+    conf()[which == "bottom" and "wallpaper_tabbar" or "wallpaper_topbar"] = on == true
+    save()
 end
 
--- ── 作用面开关 ──────────────────────────
+-- ── 各界面开关 ──────────────────────────
 
---- 某个作用面是否铺壁纸。
----@param scope string|nil
+--- 某个界面是否铺壁纸：总开关开、该界面开关开、且有图。
+---@param scope string|nil 页签 id / settings / dialog / reader；不认识的页签（扩展页签）算旧版的 desktop
 ---@return boolean
 function M.enabled(scope)
-    local key = SCOPE_KEYS[scope]
-    if not key or M.mode() == "none" then return false end
-    return M.isOn() and conf()[key] == true
+    if not scope or not M.isOn() then return false end
+    return M.scopeOn(scope) and (M.override(scope, "image") or M.image()) ~= nil
 end
 
---- 任一作用面开着（总开关关了就不算）。
+--- 该界面自己的开关（不看总开关与有没有图）。
+---@param scope string
+---@return boolean
+function M.scopeOn(scope)
+    local c = conf()
+    local value = c["wallpaper_" .. scope]
+    -- 阅读页是新增的，没开过就不开：沿用旧开关会让升级用户的书页突然铺上壁纸。
+    if value == nil and scope ~= "reader" then value = c["wallpaper_" .. (LEGACY[scope] or "desktop")] end
+    return value == true
+end
+
+--- 任一界面开着（总开关关了就不算）。
 ---@return boolean
 function M.anyEnabled()
-    if not M.isOn() then return false end
     for _idx, scope in ipairs(M.SCOPES) do
         if M.enabled(scope) then return true end
     end
     return false
 end
 
---- 开关某个作用面。
 ---@param scope string
 ---@param on boolean
 function M.setScope(scope, on)
-    local key = SCOPE_KEYS[scope]
-    if not key then return end
-    local c = conf()
-    c[key] = on == true
-    MoonSettings.save("features.wallpaper", c)
-    M.invalidate()
-end
-
---- 设置自定义图路径。
----@param path string
-function M.setCustomImage(path)
-    local c = conf()
-    c.wallpaper_custom_image = path
-    MoonSettings.save("features.wallpaper", c)
-    M.invalidate()
-end
-
---- 设置壁纸文件夹路径。
----@param path string
-function M.setFolder(path)
-    local c = conf()
-    c.wallpaper_folder = path
-    MoonSettings.save("features.wallpaper", c)
-    folder_cache = {}
-    M.invalidate()
+    conf()["wallpaper_" .. scope] = on == true
+    save()
 end
 
 -- ── 解析与缓存 ──────────────────────────
 
 local revision = 0
-local resolved = { revision = -1, day = "", path = false }
+local resolved = { revision = -1 }
 local cache = { key = nil, bb = nil }
 
 --- 丢掉已解析的路径与位图；改了任何设置之后调用。
@@ -255,19 +185,21 @@ function M.invalidate()
     cache.key, cache.bb = nil, nil
 end
 
---- 当前壁纸文件。图不存在时返回 nil。
---- 结果按 revision 与日期记忆：绘制是热路径，不能每次都开文件读头。
+--- 该界面实际用的壁纸文件（专用图优先，专用图读不了回全局图）；scope 缺省取全局图。图不可读返回 nil。
+--- 结果按 revision 记忆：绘制是热路径，不能每次都开文件读头。
+---@param scope string|nil
 ---@return string|nil
-function M.path()
-    local day = os.date("%Y-%m-%d")
-    if resolved.revision == revision and resolved.day == day then
-        return resolved.path or nil
+function M.path(scope)
+    if resolved.revision ~= revision then resolved = { revision = revision } end
+    local id = scope or ""
+    if resolved[id] == nil then
+        local path
+        for _idx, candidate in ipairs({ scope and M.override(scope, "image") or false, M.image() or false }) do
+            if candidate and Image.ok(candidate) then path = candidate break end
+        end
+        resolved[id] = path or false
     end
-    local asset = SOURCES[M.mode()]
-    local path = asset.path and asset.path()
-    if path and not Image.ok(path) then path = nil end
-    resolved = { revision = revision, day = day, path = path or false }
-    return path
+    return resolved[id] or nil
 end
 
 --- 按目标尺寸取铺好的位图；解图失败返回 nil（表层保留底色）。
@@ -275,12 +207,13 @@ end
 ---@param w number
 ---@param h number
 ---@param bpp integer|nil 缺省按屏幕是否彩色选 BB8 / RGB32
+---@param scope string 界面（专用图按它取）
 ---@return table|nil
-local function surface(w, h, bpp)
-    local path = M.path()
+local function surface(w, h, bpp, scope)
+    local path = M.path(scope)
     if not path then return nil end
-    local contain = M.contain()
-    local opacity = M.opacity()
+    local contain = M.contain(scope)
+    local opacity = M.opacity(scope)
     local key = table.concat({ path, w, h, contain and "contain" or "cover", bpp or "auto", opacity }, "|")
     if cache.key == key then return cache.bb end
     ---@type BlitBuffer|nil
@@ -329,13 +262,14 @@ function M.paintTo(bb, x, y, w, h, scope)
     if not M.enabled(scope) then return false end
     w, h = math.floor(w), math.floor(h)
     if w <= 0 or h <= 0 then return false end
-    local img = surface(w, h, bb.getType and bb:getType() or nil)
+    local img = surface(w, h, bb.getType and bb:getType() or nil, scope)
     if not img then return false end
     bb:blitFrom(img, x, y, 0, 0, w, h)
     return true
 end
 
 --- 把这层方块的底色摘掉（只摘「只有 bg」的那层），记在 out 里好还原。
+--- 底色本身就是内容的方块（热力图格子）设 keep_bg = true 跳过。
 ---@param widget table
 ---@param out table[]
 ---@param depth number
@@ -343,7 +277,7 @@ local function hollowTree(widget, out, depth)
     if type(widget) ~= "table" or depth > 24 then return end
     if widget.box_w ~= nil then
         local style = widget.style
-        if type(style) == "table" and style.bg ~= nil and not widget._hollow_style then
+        if type(style) == "table" and style.bg ~= nil and not widget._hollow_style and not widget.keep_bg then
             local only_bg = true
             for key in pairs(style) do
                 if key ~= "bg" then only_bg = false break end
@@ -441,7 +375,7 @@ function M.paintWindow(bb, x, y, w, h, scope)
     local sx, sy = math.max(0, math.floor(x)), math.max(0, math.floor(y))
     w, h = math.min(w, sw - sx), math.min(h, sh - sy)
     if w <= 0 or h <= 0 then return false end
-    local img = surface(sw, sh, bb.getType and bb:getType() or nil)
+    local img = surface(sw, sh, bb.getType and bb:getType() or nil, scope)
     if not img then return false end
     bb:blitFrom(img, sx, sy, sx, sy, w, h)
     return true
@@ -459,17 +393,40 @@ function M.wrap(scope, w, h, child)
     }
 end
 
+local reader_key
+
+--- 阅读页壁纸：把整屏位图写成 PNG 交给 crengine 平铺（尺寸正好等于屏幕，一张铺满）。
+--- 同一张图 / 尺寸 / 铺法 / 透明度本进程只写一次。
+---@param plugin BookPlugin
+function M.onReaderReady(plugin)
+    local document = plugin.ui.document
+    if not (document and document.setBackgroundImage and M.enabled("reader")) then return end
+    local w, h = Screen:getWidth(), Screen:getHeight()
+    local path = M.path("reader")
+    local img = path and surface(w, h, nil, "reader")
+    if not img then return end
+    Paths.ensureCacheRoot()
+    local file = Paths.cacheDir() .. "/wallpaper_reader.png"
+    local key = table.concat({ path, w, h, M.contain("reader") and "contain" or "cover", M.opacity("reader") }, "|")
+    if reader_key ~= key or not lfs.attributes(file, "mode") then
+        img:writePNG(file)
+        reader_key = key
+    end
+    document:setBackgroundImage(file)
+end
+
 local Ext = require("utils.extension")
 
 Ext.add("desktop.backdrop", {
-    content = function(widget) M.hollow(widget, "desktop") end,
-    tabbar = function(bar) M.hollowBars(bar, "desktop", M.bars().bottom) end,
-    wrap = function(w, h, child) return M.wrap("desktop", w, h, child) end,
+    content = function(widget, tab) M.hollow(widget, tab) end,
+    tabbar = function(bar, tab) M.hollowBars(bar, tab, M.bars().bottom) end,
+    wrap = function(w, h, child, tab) return M.wrap(tab, w, h, child) end,
 })
 
 Ext.add("modal.backdrop", function(modal, bb, x, y)
-    local painted = M.paintWindow(bb, x, y, modal.dimen.w, modal.dimen.h, "dialog")
-    if painted then M.hollow(modal[1], "dialog") else M.restore(modal[1]) end
+    local scope = modal.name == "book_settings_overlay" and "settings" or "dialog"
+    local painted = M.paintWindow(bb, x, y, modal.dimen.w, modal.dimen.h, scope)
+    if painted then M.hollow(modal[1], scope) else M.restore(modal[1]) end
 end)
 
 return M
