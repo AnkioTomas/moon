@@ -88,6 +88,7 @@ local display = Kit.display
 display.library_sort = "recent_added"
 display.library_title, display.library_author = true, false
 display.library_style, display.library_tap = "kindle", "open"
+display.library_random = true
 package.preload["utils.settings"] = function()
     return {
         get = function() return display end,
@@ -423,3 +424,31 @@ Assert.eq(opened_detail, book, "随机先开详情页")
 Assert.is_nil(opened_book, "不直接开书")
 Assert.is_nil(library.random_cancel)
 catalog.listLibraryAsync = real_list
+
+-- 筛选没限定阅读状态：按随机范围抽；范围内没有就提示，不退回已读。
+library.filter = {}
+dice_page = render({ book }, 5)
+local asks = {}
+local counts = { new = 3, unread = 0 }
+catalog.listLibraryAsync = function(_, opts, cb)
+    asks[#asks + 1] = { read_status = opts.read_status, page = opts.page }
+    cb({ data = { book }, count = counts[opts.read_status] or 5 })
+    return { cancel = function() end }
+end
+button(dice_page, "casino").callback()
+Assert.eq(#asks, 2)
+Assert.eq(asks[2].read_status, "new")
+Assert.is_true(asks[2].page >= 1 and asks[2].page <= 3)
+asks, counts.new = {}, 0
+button(dice_page, "casino").callback()
+Assert.eq(#asks, 1, "默认范围只问未读")
+display.random_scope = "reading"
+counts.unread = 2
+asks = {}
+button(dice_page, "casino").callback()
+Assert.eq(asks[2].read_status, "unread", "含阅读中时再问阅读中")
+display.random_scope = "new"
+catalog.listLibraryAsync = real_list
+display.library_random = false
+for _idx, b in ipairs(Kit.buttons(render({ book }, 5))) do Assert.is_false(b.icon == "casino", "开关关闭不出骰子") end
+display.library_random = true

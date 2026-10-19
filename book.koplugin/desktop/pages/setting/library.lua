@@ -13,6 +13,10 @@ local STYLES = {
     { value = "kindle", text = _("Kindle") },
     { value = "kobo", text = _("Kobo") },
 }
+local RANDOM_SCOPES = {
+    { value = "new", text = _("未读") },
+    { value = "reading", text = _("未读 + 阅读中") },
+}
 local TAPS = {
     { value = "open", text = _("打开书籍") },
     { value = "detail", text = _("进入详情") },
@@ -106,6 +110,10 @@ function Library:rows(desktop)
             _("Kindle：状态叠在封面上；Kobo：封面干净，下载状态、进度和更多收在封面下方"), STYLES),
         toggleRow(desktop, "library_title", "title", _("显示名称"), _("封面下方显示书名")),
         toggleRow(desktop, "library_author", "person", _("显示作者"), _("书名下方显示作者")),
+        toggleRow(desktop, "library_random", "casino", _("显示随机一本"),
+            _("书库工具栏显示骰子，优先从未读的书里随机抽一本")),
+        choiceRow(desktop, "random_scope", "casino", _("随机范围"),
+            _("书库与首页的随机一本从哪些书里抽，已读完的不会抽到"), RANDOM_SCOPES),
         choiceRow(desktop, "library_tap", "touch_app", _("点击书籍"), _("点封面时的动作"), TAPS),
     }
 end

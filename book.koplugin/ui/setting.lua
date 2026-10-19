@@ -15,6 +15,9 @@ return {
         library_author = false,
         library_style = "kindle",
         library_tap = "open",
+        library_random = true,
+        -- 随机一本的范围：new = 只抽没开始读的，reading = 再包含阅读中的。
+        random_scope = "new",
     },
     -- ui_theme 为 nil = 默认主题，见 ui.themes。
     keys = { "ui_theme" },

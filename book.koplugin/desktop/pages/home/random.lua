@@ -1,5 +1,5 @@
 --[[--
-主体：随机一本。英雄卡显示一本在架书（优先未读），点按开书，右上骰子换一本。
+主体：随机一本。英雄卡显示一本没读完的在架书（优先没开始读的），点按开书，右上骰子换一本。
 每次回到可见换一本，同一次可见期内重建不换；只查计数和一行，不读整库。
 
 @module koplugin.book.desktop.pages.home.random
@@ -27,7 +27,14 @@ function M:heightRange()
     return { height = Theme.px(148) }
 end
 
---- 随机一本在架书，优先未读；只做计数加按偏移取一行，不读整库。库里不止一本时避开 exclude。
+--- 随机范围（ui 设置 random_scope）对应的阅读状态，按优先级：只抽没开始读的，或再包含阅读中。
+---@return string[]
+function M.statuses()
+    local scope = require("utils.settings").get("ui").random_scope
+    return scope == "reading" and { "new", "unread" } or { "new" }
+end
+
+--- 随机一本在架书：按 `M.statuses()` 先抽没读过的，范围含阅读中时没有再抽读到一半的，已读完的不抽；只做计数加按偏移取一行，不读整库。库里不止一本时避开 exclude。
 ---@param source_id string|nil
 ---@param exclude string|nil
 ---@return Book|nil
@@ -35,8 +42,8 @@ function M.randomBook(source_id, exclude)
     local Catalog = require("book.catalog")
     local scope = Catalog.libraryScope(source_id)
     if not (type(scope) == "string" and scope ~= "" or type(scope) == "table" and #scope > 0) then return nil end
-    for _idx, status in ipairs({ "unread", "any" }) do
-        local opts = { read_status = status ~= "any" and status or nil, limit = 1 }
+    for _idx, status in ipairs(M.statuses()) do
+        local opts = { read_status = status, limit = 1 }
         local rows, count = Catalog.listBooks(scope, opts)
         if count > 0 then
             opts.offset = math.random(count) - 1

@@ -357,6 +357,8 @@ function Catalog.listBooks(source_id, opts)
         where = where .. " AND b.read_state<>1"
     end
     if opts.downloaded then
+    elseif opts.read_status == "new" then
+        where = where .. " AND b.read_state<>1 AND COALESCE(p.fraction, 0)<=0"
         where = where .. " AND " .. BookDB.downloadedClause(opts.chapter_sources, args)
     end
     -- 一律 LEFT JOIN：「最近阅读」按 max(本机进度时间, 云端最近阅读时间 b.read_at) 倒序，
