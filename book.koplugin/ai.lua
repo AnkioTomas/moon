@@ -43,7 +43,7 @@ function AI.priorSummaries(identity, current_idx, chapters)
     return table.concat(parts, "\n\n")
 end
 
---- 非流式 JSON 抽取；cb(table|nil, err)。
+--- 非流式 JSON 抽取；cb(table|nil, err)。opts.partial：输出被截断时保留已完整的部分。
 ---@param messages table[]
 ---@param opts table|nil
 ---@param cb fun(result: table|nil, err: any)
@@ -58,7 +58,7 @@ function AI.jsonExtract(messages, opts, cb)
             cb(nil, err)
             return
         end
-        local result, decode_err = AiJson.decode(content)
+        local result, decode_err = AiJson.decode(content, opts and opts.partial)
         cb(result, decode_err)
     end)
 end
