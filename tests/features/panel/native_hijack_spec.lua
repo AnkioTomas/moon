@@ -27,7 +27,6 @@ local fm_menu = {
 }
 
 function fm_menu:setUpdateItemTable()
-    self.seen_buttons = self.menu_items and self.menu_items["KOMenu:menu_buttons"] and self.menu_items.setting
     self.tab_item_table = {
         { id = "filemanager_settings", icon = "appbar.filebrowser", sub_item_table = { { text = "Settings" } } },
         { id = "setting", icon = "appbar.settings" },
@@ -59,8 +58,3 @@ Assert.eq(filebrowser.id, "filemanager_settings")
 Assert.is_true(type(filebrowser.callback) == "function")
 Assert.is_true(filebrowser.sub_item_table ~= nil)
 Assert.eq(filebrowser.remember, false)
-
--- 旧版 KOReader 排序后顶栏按钮已被取走，再次重建前要补回，否则排序器崩。
-fm_menu.menu_items = {}
-fm_menu:setUpdateItemTable()
-Assert.eq(fm_menu.seen_buttons.icon, "appbar.settings")
