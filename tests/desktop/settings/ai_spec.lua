@@ -56,7 +56,7 @@ end
 local AI = require("desktop.pages.setting.ai")
 local desktop = { updateView = function() end, lifecycle = { state = "Resume" } }
 local rows = AI:rows(desktop)
-Assert.len(rows, 6)
+Assert.len(rows, 7)
 
 -- 第 4 行是 AI 请求超时：spin 选值后写入设置。
 rows[4](400)
