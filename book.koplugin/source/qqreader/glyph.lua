@@ -126,6 +126,15 @@ local function reference(ref_path, cache_path)
         out:write(ffi.string(sigs, size))
         out:close()
         os.rename(tmp, cache_path)
+        -- 同目录里别的版本 / 别的参考字体留下的旧缓存不会再被读到，顺手清掉
+        local dir, name = cache_path:match("^(.*)/([^/]+)$")
+        local prefix = name:match("^(qqreader_glyph_)")
+        local lfs = require("libs/libkoreader-lfs")
+        for entry in lfs.dir(dir) do
+            if entry ~= name and entry:sub(1, #prefix) == prefix and entry:match("%.bin$") then
+                os.remove(dir .. "/" .. entry)
+            end
+        end
     end
     return chars, sigs
 end
