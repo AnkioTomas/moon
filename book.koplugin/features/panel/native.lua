@@ -430,6 +430,14 @@ local function patchDrawerTab(menu)
     end
 end
 
+local FM_MENU_BUTTONS = {
+    filemanager_settings = "appbar.filebrowser",
+    setting = "appbar.settings",
+    tools = "appbar.tools",
+    search = "appbar.search",
+    main = "appbar.menu",
+}
+
 --- 一次性 patch 文件管理器菜单，注入桌面面板 Tab。
 local function installFileManagerMenu()
     local FMMenu = require("apps/filemanager/filemanagermenu")
@@ -437,6 +445,12 @@ local function installFileManagerMenu()
     FMMenu._book_desktop_panel_patched = true
     local original = FMMenu.setUpdateItemTable
     FMMenu.setUpdateItemTable = function(self, ...)
+        -- 旧版 KOReader 只在 init 里放顶栏按钮，排序会把它们从 menu_items 取走；
+        -- tab_item_table 被清空后（如蓝牙键盘通知）再重建会因缺顶栏按钮崩，这里补回。
+        if self.menu_items and self.menu_items["KOMenu:menu_buttons"] == nil then
+            self.menu_items["KOMenu:menu_buttons"] = {}
+            for id, icon in pairs(FM_MENU_BUTTONS) do self.menu_items[id] = { icon = icon } end
+        end
         original(self, ...)
         injectDesktopTab(self)
         patchDrawerTab(self)
