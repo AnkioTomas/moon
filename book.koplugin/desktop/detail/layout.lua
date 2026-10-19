@@ -24,7 +24,7 @@ local ACTIONS = {
     read = "toggleRead",
     unread = "toggleRead",
     clear_cache = "clearCache",
-    soft_delete = "softDelete",
+    restore = "restore",
     delete = "deleteBook",
 }
 

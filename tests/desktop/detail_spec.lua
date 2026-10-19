@@ -74,7 +74,7 @@ package.preload["source.registry"] = function()
         end,
     }
 end
-local set_read, db_row, upserted
+local set_read, db_row, upserted, hidden_set
 local upsert_ok = true
 local downloaded = {} -- stable_id → true
 package.preload["book.books_db"] = function()
@@ -88,6 +88,10 @@ package.preload["book.books_db"] = function()
         isDownloaded = function(_source_id, stable_id) return downloaded[stable_id] == true end,
         setRead = function(source_id, stable_id, value)
             set_read = { source_id, stable_id, value }
+            return true
+        end,
+        setHidden = function(source_id, stable_id, value)
+            hidden_set = { source_id, stable_id, value }
             return true
         end,
         get = function() return db_row end,
@@ -135,7 +139,7 @@ Assert.eq(ids(tools), "download,unread,delete")
 Assert.eq(primary.text, "开始阅读")
 read_book.cached = true
 tools = Detail.actionPlan(read_book, chapter_src)
-Assert.eq(ids(tools), "download,clear_cache,soft_delete,unread,delete", "章节源已缓存仍可继续缓存后面的章")
+Assert.eq(ids(tools), "download,clear_cache,unread,delete", "章节源已缓存仍可继续缓存后面的章")
 
 -- 整本书源：没登记文件给下载（WebDAV / moon 未下载），离线副本在 cache 内给清理，已在本地书库目录两者都没有
 local online_book_src = setmetatable({ id = "moon", type = "book" }, SourceDefaults)
@@ -144,7 +148,7 @@ tools = Detail.actionPlan(moon_book, online_book_src)
 Assert.eq(ids(tools), "download_book,read,delete")
 moon_book.cached = true
 tools = Detail.actionPlan(moon_book, online_book_src)
-Assert.eq(ids(tools), "clear_cache,soft_delete,read,delete")
+Assert.eq(ids(tools), "clear_cache,read,delete")
 local dav_book = { source_id = "local", stable_id = "webdav://a.epub", read_state = 0 }
 Assert.eq(ids(Detail.actionPlan(dav_book, local_src)), "edit,scrape,download_book,read,delete")
 downloaded["webdav://a.epub"] = true
@@ -197,7 +201,7 @@ local menu_texts = {}
 for i, item in ipairs(menu.items) do menu_texts[i] = item.text end
 Assert.eq(table.concat(menu_texts, ","), "编辑,刮削,已读,删除")
 menu.items[4].callback()
-Assert.eq(Themed.last("confirm").text, "确定删除《书一》？", "菜单项走详情页同名动作")
+Assert.eq(Themed.last("sheet").title, "删除", "菜单项走详情页同名动作")
 
 -- 返回键关窗：清引用，数据没变只重画桌面。
 Kit.dirty = {}
@@ -263,14 +267,28 @@ Assert.eq(Themed.last("toast").text, "清理缓存失败")
 clear_result = { true }
 Assert.eq(cleared[3], false, "清理缓存连封面一起清")
 
--- 软删除：只删文档，保留封面
-page:softDelete()
+-- 软删除：清文档保封面，并把书标成隐藏（留库不显示）
+page:deleteBook()
+Themed.last("sheet").items[1].callback()
 confirm = Themed.last("confirm")
-Assert.eq(confirm.text, "删除《书一》的本地文档？\n书架条目、封面与阅读进度保留，需要时可重新下载。")
+Assert.eq(confirm.text, "软删除《书一》？\n本地文档会被清理，书从书架隐藏，数据保留，可在筛选「软删除」中恢复。")
 confirm.ok_callback()
 Assert.eq(cleared[1], "wechat")
 Assert.is_true(cleared[3])
-Assert.eq(Themed.last("toast").text, "文档已删除")
+Assert.eq(Themed.last("toast").text, "已软删除")
+Assert.eq(hidden_set[3], true)
+Assert.is_true(page.closed)
+
+-- 恢复：软删除的书出现「恢复」，点后取消隐藏
+local tools = Detail.actionPlan({ source_id = "wechat", stable_id = "w2", hidden = 1 }, resolved)
+Assert.matches(ids(tools), "restore")
+Assert.is_nil(ids(Detail.actionPlan({ source_id = "wechat", stable_id = "w2" }, resolved)):find("restore", 1, true))
+Detail.open(desktop, "library", { source_id = "wechat", stable_id = "w2", title = "书一", hidden = 1 })
+desktop.detail:restore()
+Assert.eq(hidden_set[3], false)
+desktop.detail:close()
+Detail.open(desktop, "library", { source_id = "wechat", stable_id = "w2", title = "书一", read_state = 0 })
+page = desktop.detail
 
 -- 全本缓存：入队跟随，进度来自源回调；同书在缓存时再入队拒绝、清理缓存拒绝。
 resolved = chapter_src
@@ -392,6 +410,9 @@ resolved = {
 }
 desktop.events = {}
 page:deleteBook()
+local choice = Themed.last("sheet")
+Assert.eq(#choice.items, 2)
+choice.items[2].callback()
 Assert.eq(Themed.last("confirm").text, "确定删除《书一》？")
 Themed.last("confirm").ok_callback()
 Assert.eq(deleted.source_id, "wechat")
@@ -405,7 +426,7 @@ Assert.eq(desktop.events[1], "shelf_changed")
 resolved = { deleteBookAsync = function(_, _, cb) cb(false, "云端拒绝") end }
 Detail.open(desktop, "library", { source_id = "wechat", stable_id = "w2", title = "书一" })
 page = desktop.detail
-page:deleteBook()
+page:hardDelete()
 Themed.last("confirm").ok_callback()
 Assert.eq(Themed.last("toast").text, "云端拒绝")
 Assert.is_nil(page.closed)

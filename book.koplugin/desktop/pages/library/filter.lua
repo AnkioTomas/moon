@@ -1,5 +1,5 @@
 --[[--
-图书馆工具条的两个下拉：排序、筛选（阅读状态 / 已下载，混合源时加数据源）。
+图书馆工具条的两个下拉：排序、筛选（阅读状态 / 已下载 / 软删除，混合源时加数据源）。
 主题 List 居中面板贴着按钮弹出（带遮罩、点外面关），当前项画单选圈，点选即关窗回调新值。
 分类 / 系列 / 作者归顶部分组页签，不在这里。
 
@@ -37,14 +37,15 @@ function Filter.sorts()
     }
 end
 
---- 阅读状态项：互斥单选，各项同时决定 read_status 与 downloaded 两个字段。
----@return { id: string, text: string, read_status: string|nil, downloaded: boolean|nil }[]
+--- 阅读状态项：互斥单选，各项同时决定 read_status / downloaded / hidden 三个字段。
+---@return { id: string, text: string, read_status: string|nil, downloaded: boolean|nil, hidden: boolean|nil }[]
 function Filter.statuses()
     return {
         { id = "all", text = _("全部") },
         { id = "unread", text = _("未读"), read_status = "unread" },
         { id = "read", text = _("已读"), read_status = "read" },
         { id = "downloaded", text = _("已下载"), downloaded = true },
+        { id = "hidden", text = _("软删除"), hidden = true },
     }
 end
 
@@ -54,7 +55,8 @@ end
 function Filter.status(filter)
     local list = Filter.statuses()
     for _idx, s in ipairs(list) do
-        if s.read_status == filter.read_status and s.downloaded == filter.downloaded then return s end
+        if s.read_status == filter.read_status and s.downloaded == filter.downloaded
+            and s.hidden == filter.hidden then return s end
     end
     return list[1]
 end
@@ -101,7 +103,7 @@ end
 ---@param on_pick fun(filter: table)
 ---@return table list
 function Filter.openStatus(anchor, data, filter, on_pick)
-    local counts = { read = 0, unread = 0, downloaded = data.downloaded_count or 0 }
+    local counts = { read = 0, unread = 0, downloaded = data.downloaded_count or 0, hidden = data.hidden_count or 0 }
     for _idx, row in ipairs(data.read_counts or {}) do
         counts[row.status] = tonumber(row.count) or 0
     end
@@ -113,7 +115,7 @@ function Filter.openStatus(anchor, data, filter, on_pick)
             checked = s.id == current,
             callback = function()
                 local f = copy(filter)
-                f.read_status, f.downloaded = s.read_status, s.downloaded
+                f.read_status, f.downloaded, f.hidden = s.read_status, s.downloaded, s.hidden
                 on_pick(f)
             end,
         }

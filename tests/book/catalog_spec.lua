@@ -55,6 +55,7 @@ package.preload["book.books_db"] = function()
             FakeBooks.count_chapter_sources = chapter_sources
             return 3
         end,
+        hiddenCountBySource = function() return 2 end,
         sourceCountsBySource = function() return FakeBooks.source_counts end,
         get = function(source_id, stable_id)
             return FakeBooks.meta and FakeBooks.meta[source_id .. "\n" .. tostring(stable_id)]
@@ -144,6 +145,7 @@ do -- filtersAsync
     Assert.eq(got.data.author_counts[1].authors, "刘慈欣")
     Assert.eq(got.data.read_counts[1].status, "read")
     Assert.eq(got.data.downloaded_count, 3)
+    Assert.eq(got.data.hidden_count, 2)
     Assert.eq(FakeBooks.count_chapter_sources[1], "wechat")
     Assert.is_nil(got.data.source_counts)
 end
