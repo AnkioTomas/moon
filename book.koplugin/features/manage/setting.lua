@@ -1,5 +1,5 @@
 --[[--
-精简功能设置页（维护组）：列出可删除的 feature，点按标记 / 取消标记，重启 KOReader 后生效。
+功能开关设置页（维护组）：列出可停用的 feature，点按停用 / 再启用，重启 KOReader 后生效。
 
 @module koplugin.book.features.manage.setting
 --]]
@@ -9,53 +9,49 @@ local T = require("ffi/util").template
 
 local Setting = {}
 
---- removed：已标记要删的 feature 目录名。
-Setting.defaults = { removed = {} }
+--- disabled：已停用的 feature 目录名。
+Setting.defaults = { disabled = {} }
 
 ---@param desktop BookDesktop
 ---@return table[]
 local function sections(desktop)
     local Manage = require("features.manage")
     local Row = require("ui.themes.widgets.row")
-    local dir = require("features").DIR
     local rows = {}
     for _idx, item in ipairs(Manage.ITEMS) do
         local marked = Manage.isMarked(item.id)
-        local present = Manage.exists(dir, item.id)
-        if present or marked then
-            rows[#rows + 1] = function(iw)
-                return Row.widget({
-                    width = iw, chevron = false, kind = "action", icon = "delete", title = item.label,
-                    subtitle = item.subtitle,
-                    status = not present and _("已删除") or marked and _("重启后删除") or "", status_on = marked,
-                    callback = function()
-                        if marked then
+        rows[#rows + 1] = function(iw)
+            return Row.widget({
+                width = iw, chevron = false, kind = "action", icon = "delete", title = item.label,
+                subtitle = item.subtitle,
+                status = marked and _("重启后停用") or "", status_on = marked,
+                callback = function()
+                    if marked then
+                        Manage.toggle(item.id)
+                        desktop:updateView()
+                        return
+                    end
+                    local with = {}
+                    for idx, id in ipairs(Manage.closure(item.id)) do
+                        if idx > 1 and not Manage.isMarked(id) then with[#with + 1] = Manage.label(id) end
+                    end
+                    local text = T(_("停用「%1」？重启 KOReader 后生效，可随时再启用。"), item.label)
+                    if #with > 0 then
+                        text = text .. "\n" .. T(_("依赖它的功能也会一并停用：%1"), table.concat(with, "、"))
+                    end
+                    require("ui.themes.widgets.confirm"):new{
+                        text = text,
+                        ok_text = _("停用"),
+                        ok_callback = function()
                             Manage.toggle(item.id)
                             desktop:updateView()
-                            return
-                        end
-                        local with = {}
-                        for idx, id in ipairs(Manage.closure(item.id)) do
-                            if idx > 1 and not Manage.isMarked(id) then with[#with + 1] = Manage.label(id) end
-                        end
-                        local text = T(_("删除「%1」？重启 KOReader 后生效，之后更新月读也不会再装回来。"), item.label)
-                        if #with > 0 then
-                            text = text .. "\n" .. T(_("依赖它的功能也会一并删除：%1"), table.concat(with, "、"))
-                        end
-                        require("ui.themes.widgets.confirm"):new{
-                            text = text,
-                            ok_text = _("删除"),
-                            ok_callback = function()
-                                Manage.toggle(item.id)
-                                desktop:updateView()
-                            end,
-                        }:show()
-                    end,
-                })
-            end
+                        end,
+                    }:show()
+                end,
+            })
         end
     end
-    return { { title = _("可删除的功能（再点一次取消，会连带恢复它依赖的功能；已删除的取消后更新月读即可找回）"), rows = rows } }
+    return { { title = _("可停用的功能（再点一次取消停用，会连带恢复它依赖的功能）"), rows = rows } }
 end
 
 ---@param desktop BookDesktop
@@ -65,9 +61,9 @@ function Setting.entries(desktop)
         {
             group = "maintenance",
             order = 20,
-            id = "manage", icon = "delete_sweep", title = _("精简功能"),
-            subtitle = _("删除用不到的功能，减小体积与内存占用"),
-            page = { title = _("精简功能"), sections = function() return sections(desktop) end },
+            id = "manage", icon = "delete_sweep", title = _("功能开关"),
+            subtitle = _("停用用不到的功能，减少内存占用"),
+            page = { title = _("功能开关"), sections = function() return sections(desktop) end },
         },
     }
 end

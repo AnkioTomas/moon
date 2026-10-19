@@ -69,6 +69,7 @@ local Features = {}
 local DIR = debug.getinfo(1, "S").source:match("^@(.*)/[^/]+$")
 Features.DIR = DIR
 local scanned = {}
+local off = {} -- 用户停用的 feature（启动时由 Manage.apply 取得），目录扫描跳过
 
 --- 扫描 features/ 下提供 `<file>.lua` 的目录名，按名字排序；每种文件本进程只扫一次。
 ---@param file string 约定文件名（不带 .lua），如 "setting" / "events" / "panel"
@@ -78,7 +79,7 @@ function Features.scan(file)
     local lfs = require("libs/libkoreader-lfs")
     local names = {}
     for name in lfs.dir(DIR) do
-        if name:sub(1, 1) ~= "." and lfs.attributes(DIR .. "/" .. name .. "/" .. file .. ".lua", "mode") == "file" then
+        if name:sub(1, 1) ~= "." and not off[name] and lfs.attributes(DIR .. "/" .. name .. "/" .. file .. ".lua", "mode") == "file" then
             names[#names + 1] = name
         end
     end
@@ -138,7 +139,7 @@ Features.external = External.collect
 local loaded = false
 
 --- 加载器：main.lua 顶层调一次（不点名任何 feature）。
----   0. 先删掉用户在「精简功能」里标记的 feature 目录（features/manage），并从 list 去掉；
+---   0. 先把用户在「功能开关」里停用的 feature 从 list 去掉并记下（features/manage）；
 ---   1. 按 list 顺序 require 每个 feature 的 init：模块顶层自己往 utils.extension 的挂点登记；
 ---   2. 约定文件 setting.lua（有 entries 的）/ topbar.lua 代为登记到 setting.entries / topbar.items（按目录名）；
 ---   3. 把本层的 onReaderReady 分发登记到 reader.ready。
@@ -146,7 +147,7 @@ local loaded = false
 function Features.load()
     if loaded then return end
     loaded = true
-    Guard.call("feature manage purge", require("features.manage").purge, DIR, Features.list)
+    off = Guard.call("feature manage apply", require("features.manage").apply, Features.list) or off
     for _idx, name in ipairs(Features.list) do Guard.call("feature " .. name .. " load", require, "features." .. name) end
     Features.registerConventions()
 end
