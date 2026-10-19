@@ -84,12 +84,15 @@ package.preload["device"] = function()
     }
 end
 local zmqs = {}
+local scheduled = {}
 package.preload["ui/uimanager"] = function()
     return {
         _window_stack = {},
         setDirty = function() end,
         insertZMQ = function(_self, zmq) zmqs[zmq] = true end,
         removeZMQ = function(_self, zmq) zmqs[zmq] = nil end,
+        unschedule = function() end,
+        scheduleIn = function(_self, _delay, fn) scheduled[#scheduled + 1] = fn end,
     }
 end
 

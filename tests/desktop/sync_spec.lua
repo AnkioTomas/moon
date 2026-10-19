@@ -345,4 +345,27 @@ do
     MoonSettings.get("source").library_mixed = was_mixed
 end
 
+-- 本地文件变了（远程上传）：只重扫本地书籍源，别的源不动
+do
+    local scanned = {}
+    local function fake(id)
+        return setmetatable({
+            id = id, name = id, configured = function() return true end,
+            syncBooksAsync = function(_, opts, cb)
+                scanned[#scanned + 1] = id .. (opts.force and ":force" or "")
+                cb({ pulled = 1 })
+                return { cancel = function() end }
+            end,
+        }, { __index = SourceBase })
+    end
+    local desk = { source = fake("local"), _books_sync = {}, _stats_sync = {}, tab = "library",
+        updateView = function() end, onEvent = function() end }
+    Sync.rescan(desk)
+    Assert.eq(scanned[1], "local:force")
+    desk.source = fake("wechat")
+    scanned = {}
+    Sync.rescan(desk)
+    Assert.eq(#scanned, 0)
+end
+
 return true
