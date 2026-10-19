@@ -26,12 +26,15 @@ local function rows(desktop)
 
     --- 起服并提示结果（失败给原因，成功给访问地址）。
     local function start()
-        local ok, err = Remote.start()
-        if ok then
-            Toast:new{ text = T(_("服务已启动：%1"), Remote.status()), timeout = 4 }:show()
-        else
-            Toast:new{ text = T(_("启动失败：%1"), tostring(err)), timeout = 3 }:show()
-        end
+        require("ui/network/manager"):runWhenConnected(function()
+            local ok, err = Remote.start()
+            if ok then
+                Toast:new{ text = T(_("服务已启动：%1"), Remote.status()), timeout = 4 }:show()
+            else
+                Toast:new{ text = T(_("启动失败：%1"), tostring(err)), timeout = 3 }:show()
+            end
+            rebuild()
+        end)
     end
 
     return {
