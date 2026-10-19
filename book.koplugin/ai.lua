@@ -58,7 +58,7 @@ function AI.jsonExtract(messages, opts, cb)
             cb(nil, err)
             return
         end
-        local result, decode_err = AiJson.decode(content, opts and opts.partial)
+        local result, decode_err = AiJson.decode(content)
         cb(result, decode_err)
     end)
 end
