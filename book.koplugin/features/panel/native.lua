@@ -14,13 +14,13 @@ local UIManager = require("ui/uimanager")
 
 local MoonSettings = require("utils.settings")
 local Guard = require("ui.guard")
+local ReaderExit = require("desktop.reader_exit")
 local Menu = require("features.panel.menu")
 local NativeSettings = require("features.panel.native_settings")
 
 ---@class BookQuickPanelNative
 ---@field show fun(mode: "desktop"|"reader"): boolean
 ---@field onCreate fun(host_ui: table|nil, opts: table|nil)
----@field closeToDesktop fun(ui: table|nil)
 
 local Native = {}
 
@@ -74,27 +74,6 @@ local function ensureWidgets()
     }
     return Widgets
 end
-
---- 顶部菜单抽屉（文件浏览器）图标是否改开月读桌面：启动项为月读且设置未关闭。
----@return boolean
-local function drawerOpensDesktop()
-    return require("menu").openOnStart() and MoonSettings.get("desktop").drawer_opens_desktop == true
-end
-
---- 下一 tick 关闭文档并回到月读桌面，而不是 KOReader 原生文件管理器。
----@param ui table|nil
-local function closeToDesktop(ui)
-    UIManager:nextTick(require("ui.guard").wrap("close to desktop", function()
-        if ui and ui.onClose then ui:onClose() end
-        local FileManager = require("apps/filemanager/filemanager")
-        -- 打开书时 ReaderUI 会关掉 FileManager；这里先重建，否则关闭文档后窗口栈为空直接退出。
-        if not FileManager.instance then
-            FileManager:showFiles()
-        end
-        require("desktop").open(FileManager.instance.book)
-    end))
-end
-Native.closeToDesktop = closeToDesktop
 
 --- 用页面底色的主题 Box 包裹面板主体（主体宽度已扣除两侧 pad，居中即内边距）。
 ---@param body table
@@ -180,7 +159,7 @@ local function buildPanel(menu, W)
             height = W.Theme.px(52),
             on_exit = function()
                 Menu.close(menu)
-                closeToDesktop(ui)
+                ReaderExit.closeToDesktop(ui)
             end,
         }
         body_opts.actions = W.ReaderPanel.actions(ui)
@@ -415,7 +394,7 @@ local function patchDrawerTab(menu)
             local native = tab.callback
             tab.callback = function()
                 local plugin = menu.ui and menu.ui.book
-                if plugin and not plugin.desktop and drawerOpensDesktop() then
+                if plugin and not plugin.desktop and ReaderExit.drawerOpensDesktop() then
                     -- switchMenuTab 在回调后还要渲染本 Tab，关菜单推迟到下一 tick。
                     UIManager:nextTick(require("ui.guard").wrap("open desktop", function()
                         menu:onCloseFileManagerMenu()
@@ -456,25 +435,6 @@ local function tabIndex(menu, marker)
     end
 end
 
---- 阅读模式下抽屉（filemanager）Tab 按设置重定向到月读桌面，否则走原生文件浏览器。
----@param ReaderMenu table
-local function patchFileBrowserButton(ReaderMenu)
-    local original = ReaderMenu.getDefaultMenuButtons
-    ReaderMenu.getDefaultMenuButtons = function(self)
-        local buttons = original(self)
-        local fm = buttons and buttons.filemanager
-        if fm and type(fm.callback) == "function" then
-            local native = fm.callback
-            fm.callback = function()
-                if not drawerOpensDesktop() then return native() end
-                self:onTapCloseMenu()
-                closeToDesktop(self.ui)
-            end
-        end
-        return buttons
-    end
-end
-
 --- 一次性 patch 阅读菜单，注入桌面/阅读面板 Tab 与原生设置项。
 local function installReaderMenu()
     local ReaderMenu = require("apps/reader/modules/readermenu")
@@ -485,7 +445,6 @@ local function installReaderMenu()
     if G_reader_settings:readSetting("show_bottom_menu") == nil then
         G_reader_settings:saveSetting("show_bottom_menu", false)
     end
-    patchFileBrowserButton(ReaderMenu)
     local original = ReaderMenu.setUpdateItemTable
     ReaderMenu.setUpdateItemTable = function(self, ...)
         original(self, ...)

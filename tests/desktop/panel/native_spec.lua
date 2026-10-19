@@ -147,26 +147,3 @@ Assert.eq(native_drawer_calls, 2)
 NativePanel.onCreate({ menu = drawer_menu })
 drawer.callback()
 Assert.eq(native_drawer_calls, 3)
-
--- 阅读菜单抽屉按钮：开关关走原生文件浏览器，开则回月读桌面。
-local native_reader_fm = 0
-function ReaderMenu:getDefaultMenuButtons()
-    return { filemanager = { callback = function() native_reader_fm = native_reader_fm + 1 end } }
-end
-local previous_settings = _G.G_reader_settings
-_G.G_reader_settings = { readSetting = function() return false end }
-NativePanel.onCreate(nil, { reader = true })
-_G.G_reader_settings = previous_settings
-local reader_buttons = setmetatable({ ui = {} }, { __index = ReaderMenu }):getDefaultMenuButtons()
-reader_buttons.filemanager.callback()
-Assert.eq(native_reader_fm, 1)
-
-local closed_reader_menu = 0
-drawer_enabled = true
-local tapped = setmetatable({
-    ui = {},
-    onTapCloseMenu = function() closed_reader_menu = closed_reader_menu + 1 end,
-}, { __index = ReaderMenu })
-tapped:getDefaultMenuButtons().filemanager.callback()
-Assert.eq(closed_reader_menu, 1)
-Assert.eq(native_reader_fm, 1)
