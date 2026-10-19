@@ -106,10 +106,10 @@ Assert.eq(posts[2].payload.max_tokens, 16000, "4 倍放大")
 Assert.is_nil(content)
 Assert.eq(failure, "回答被截断：输出长度上限不够")
 replies, posts = { "length" }, {}
-Client.chat({ { role = "user", content = "hello" } }, { max_tokens = 8000 }, function() end)
-Assert.eq(posts[2].payload.max_tokens, 16384, "放大重试封顶")
+Client.chat({ { role = "user", content = "hello" } }, { max_tokens = 10000 }, function() end)
+Assert.eq(posts[2].payload.max_tokens, 32768, "放大重试封顶")
 replies, posts = { "length" }, {}
-Client.chat({ { role = "user", content = "hello" } }, { max_tokens = 20000 }, function(value, err)
+Client.chat({ { role = "user", content = "hello" } }, { max_tokens = 40000 }, function(value, err)
     content, failure = value, err
 end)
 Assert.len(posts, 1, "已到封顶不再重试")
