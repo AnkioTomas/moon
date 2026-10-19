@@ -188,10 +188,8 @@ local function finish(response, err, raw)
             detail = decoded_ok and type(decoded) == "table" and decoded.error
             detail = type(detail) == "table" and detail.message or nil
         end
-        if not detail then
-            logger.warn("ai.client: request failed err=", err, "code=",
-                raw and raw.code, "body=", snip(raw and raw.body, 200))
-        end
+        logger.warn("ai.client: request failed err=", err, "code=",
+            raw and raw.code, "body=", snip(raw and raw.body, 300))
         return nil, detail or err
     end
     local content, decode_err = Client.decodeResponse(response)
