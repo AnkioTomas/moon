@@ -10,6 +10,7 @@ Stubs.install()
 Stubs.reset()
 
 local resolved_id
+local touched
 local opened_identity
 local shown = {}
 local open_callbacks = {}
@@ -35,7 +36,7 @@ end
 local Themed = require("support.theme_stubs")
 Themed.install()
 package.preload["book.store"] = function()
-    return { rememberMany = function() end }
+    return { rememberMany = function() end, touch = function(path) touched = path return true end }
 end
 package.preload["reader.session"] = function()
     error("desktop.open must not load reader session")
@@ -194,4 +195,31 @@ do
     Assert.len(Themed.all("confirm"), confirms)
     Assert.eq(shown[#shown], "/library/huge.epub")
     lfs.attributes = real_attributes
+end
+
+-- 上次读的是排版版（衍生版）：源返回原书路径，改回上次的版本并重新登记。
+do
+    local dir = os.tmpname()
+    os.remove(dir)
+    os.execute("mkdir -p " .. dir)
+    local origin, derived = dir .. "/a.epub", dir .. "/reflow.epub"
+    io.open(derived, "w"):close()
+    package.loaded["reader.session.derived_note"] = { originOf = function(file) return file == derived and origin or nil end }
+    package.loaded["book.books_db"] = { get = function() return { path = derived } end }
+    ReaderUI.instance = nil
+    Open.book({ desktop = {} }, book)
+    open_callbacks[#open_callbacks](origin)
+    Stubs.flush()
+    Assert.eq(shown[#shown], derived)
+    Assert.eq(touched, derived)
+
+    -- 上次的文件不是这本书的衍生版：照源返回的路径开。
+    package.loaded["book.books_db"] = { get = function() return { path = "/else/b.epub" } end }
+    Open.book({ desktop = {} }, book)
+    open_callbacks[#open_callbacks](origin)
+    Stubs.flush()
+    Assert.eq(shown[#shown], origin)
+    package.loaded["book.books_db"] = nil
+    package.loaded["reader.session.derived_note"] = nil
+    os.execute("rm -rf " .. dir)
 end

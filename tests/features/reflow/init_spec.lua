@@ -224,6 +224,49 @@ Assert.eq(touched.path, dir .. "/book.epub")
 Assert.eq(touched.identity, identity)
 Assert.eq(switched, dir .. "/book.epub")
 
+-- 两边都是 CREngine：记下当前页开头文字，目标打开后按文字落位（搜不到保留比例落点）
+do
+    local ui = reader(txt, "rolling")
+    ui.rolling = { current_page = 3 }
+    ui.document.getPageCount = function() return 10 end
+    ui.document.getPageXPointer = function(_, page) return "xp" .. page end
+    ui.document.getTextFromXPointers = function(_, from) return from == "xp3" and "  第三页的开头文字很长很长很长很长\n后面" or "" end
+    sidecars[dir .. "/book.epub"] = {}
+    local epub = assert(io.open(dir .. "/book.epub", "wb"))
+    epub:write("epub")
+    epub:close()
+    Reflow.show(ui)
+    Assert.eq(Themed.last("sheet").items[1].text, "打开排版版")
+    Themed.last("sheet").items[1].callback()
+    Assert.eq(switched, dir .. "/book.epub")
+    local anchor = sidecars[dir .. "/book.epub"].moon_reflow_anchor
+    Assert.eq(anchor.text, "第三页的开头文字很长很长很长很长")
+    Assert.eq(anchor.fraction, 0.4)
+
+    local located, goto_xp
+    local DerivedNote = require("reader.session.derived_note")
+    local original_locate = DerivedNote.locate
+    DerivedNote.locate = function(_, text, fraction) located = { text, fraction } return "/body/hit" end
+    package.preload["ui/event"] = function()
+        return { new = function(_, name, xp) return { name = name, xp = xp } end }
+    end
+    local settings = sidecars[dir .. "/book.epub"]
+    local target_ui = {
+        rolling = {}, document = {},
+        doc_settings = {
+            readSetting = function(_, key) return settings[key] end,
+            delSetting = function(_, key) settings[key] = nil end,
+        },
+        handleEvent = function(_, event) goto_xp = event end,
+    }
+    Reflow.onReaderReady({ ui = target_ui })
+    Stubs.flush()
+    Assert.eq(located[1], anchor.text)
+    Assert.eq(goto_xp.xp, "/body/hit")
+    Assert.is_nil(settings.moon_reflow_anchor, "锚点用一次就清")
+    DerivedNote.locate = original_locate
+end
+
 -- 读排版版：面板高亮，点一下直接切回原书；原书不是 CREngine 时不搬排版
 local reflowed_ui = reader(dir .. "/book.epub", "rolling")
 Assert.is_true(Reflow.active(reflowed_ui))

@@ -153,8 +153,44 @@ function Reflow.runAsync(ui, identity, cb, on_progress)
     end }
 end
 
+local ANCHOR_KEY = "moon_reflow_anchor"
+local ANCHOR_CHARS = 16
+
+--- 当前页开头的一小段文字，两版排版都是 CREngine 时用它在对侧搜出准确落点（比例会因图片、封面页、断行合并而偏）。
+---@param ui table ReaderUI
+---@return string|nil
+local function anchorText(ui)
+    local document = ui.document
+    local page = ui.rolling and ui.rolling.current_page
+    if not page or page >= document:getPageCount() then return nil end
+    local text = document:getTextFromXPointers(document:getPageXPointer(page), document:getPageXPointer(page + 1))
+    local line = require("utils.text").trim(text or ""):match("^[^\n]+")
+    if not line then return nil end
+    local chars = {}
+    for char in line:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+        chars[#chars + 1] = char
+        if #chars == ANCHOR_CHARS then break end
+    end
+    return table.concat(chars)
+end
+
+--- 目标文档就绪后按锚点文字落位；搜不到就保留按比例的落点。
+---@param plugin BookPlugin
+function Reflow.onReaderReady(plugin)
+    local ui = plugin.ui
+    local anchor = ui.doc_settings:readSetting(ANCHOR_KEY)
+    if not anchor then return end
+    ui.doc_settings:delSetting(ANCHOR_KEY)
+    if not ui.rolling then return end
+    require("ui/uimanager"):nextTick(require("ui.guard").wrap("reflow anchor", function()
+        local xp = DerivedNote.locate(ui.document, anchor.text, anchor.fraction)
+        if xp then ui:handleEvent(require("ui/event"):new("GotoXPointer", xp)) end
+    end))
+end
+
 --- 把排版、落位写进目标文件的 sidecar 再换文档。两版 xpointer 不通用：清掉目标的 last_xpointer，
---- 按全书比例落位（流式文档读 last_percent，固定版式读 last_page）。
+--- 按全书比例落位（流式文档读 last_percent，固定版式读 last_page）；两边都是 CREngine 时再记一段
+--- 当前页开头的文字，打开后按文字精确落位。
 ---@param ui table ReaderUI
 ---@param identity BookIdentity
 ---@param target string
@@ -171,6 +207,8 @@ local function switchTo(ui, identity, target, fraction)
     local provider = require("document/documentregistry"):getProvider(target)
     if prefs and provider and provider.provider == "crengine" then
         require("reader.prefs").write(settings, prefs)
+        local text = anchorText(ui)
+        settings:saveSetting(ANCHOR_KEY, text and { text = text, fraction = fraction } or nil)
     end
     settings:delSetting("last_xpointer")
     settings:saveSetting("last_percent", fraction)
