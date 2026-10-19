@@ -22,6 +22,8 @@ local M = {}
 local _files = {}
 ---@type table<string, string> 文件名 → 已打开它的拥有者
 local _owners = {}
+-- 拥有者 → LuaSettings：get 在绘制热路径上，不能每次拼路径。存文件对象而不是 data：save 可能 reset 换掉 data。
+local _adopted = {}
 
 --- 复制默认值，递归拷贝表，避免嵌套配置共享声明里的子表。
 local function copyValue(value)
@@ -78,12 +80,16 @@ end
 ---@param owner string 拥有者模块路径，声明在 `<owner>.setting`
 ---@return table
 function M.get(owner)
+    local cached = _adopted[owner]
+    if cached then return cached.data end
     local name = owner:match("[^.]+$")
     local file = openFile(Paths.sectionPath(name))
     local current = _owners[name]
-    if current == owner then return file.data end
-    if current then error("settings file " .. name .. ".lua owned by both " .. current .. " and " .. owner) end
-    adopt(owner, name, file)
+    if current and current ~= owner then
+        error("settings file " .. name .. ".lua owned by both " .. current .. " and " .. owner)
+    end
+    if not current then adopt(owner, name, file) end
+    _adopted[owner] = file
     return file.data
 end
 
@@ -92,7 +98,7 @@ end
 ---@param values table|nil nil 表示只 flush 现有内容
 function M.save(owner, values)
     local data = M.get(owner)
-    local file = openFile(Paths.sectionPath(owner:match("[^.]+$")))
+    local file = _adopted[owner]
     if values and values ~= data then file:reset(values) end
     file:flush()
 end
