@@ -114,10 +114,10 @@ Assert.is_true(visible.stats)
 Assert.is_true(visible.recent_list)
 Assert.is_true(build_log[2].height > build_log[1].height)
 
--- 屏幕变矮放不下的钉页顺延成多页，钉页记录不动；编辑态仍按钉页。
-ranges.clock = { height = 60 }
-ranges.stats = { height = 60 }
-ranges.recent_list = { height = 60 }
+-- 屏幕变矮放不下（超出 25% 以上，略超由压缩消化）的钉页顺延成多页，钉页记录不动；编辑态仍按钉页。
+ranges.clock = { height = 80 }
+ranges.stats = { height = 80 }
+ranges.recent_list = { height = 80 }
 build_log = {}
 _, page, pages = Layout.build({ width = 320, height = 140 }, components, 2, { body_height = 140 })
 Assert.eq(pages, 3)
@@ -141,6 +141,17 @@ local packs = Layout.paginate({
     { id = "b", height = 50 },
 }, 50, 8)
 Assert.len(packs, 2)
+
+-- 自定义像素高与 allocate 一致：内容高放不下，但设定高放得下就不分页（编辑态与浏览态一致）。
+Assert.len(Layout.paginate({
+    { id = "a", height = 80, placement = { height = 20 } },
+    { id = "b", height = 80, placement = { height = 20 } },
+}, 50, 8), 1)
+-- 自定义更高时按内容高切页，不拆开（放不下由 allocate 压缩）。
+Assert.len(Layout.paginate({
+    { id = "a", height = 20, placement = { height = 80 } },
+    { id = "b", height = 20, placement = { height = 80 } },
+}, 50, 8), 1)
 
 Assert.is_true(Widgets.canFit({ 20 }, 20, 50, 8))
 Assert.is_false(Widgets.canFit({ 20, 20 }, 20, 50, 8))

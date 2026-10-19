@@ -259,7 +259,9 @@ local function showAdd(self, body_h, width)
         for _i, place in ipairs(page_items) do
             local spec = self.components[place.id] or Components.find(place.id)
             if spec then
-                mins[#mins + 1] = spec:heightRange(ctx, { width = inner_w, height = inner_h }).height
+                local range = spec:heightRange(ctx, { width = inner_w, height = inner_h })
+                range.placement = place
+                mins[#mins + 1] = Layout.packHeight(range)
             end
         end
         local spec = Components.find(id)
