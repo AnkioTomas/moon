@@ -29,6 +29,9 @@ function Myrl:imageUrl()
     if w > h then
         w, h = h, w
     end
+    -- 接口只接受 240-2560 的整数，越界直接 400
+    w = math.max(240, math.min(2560, math.floor(w)))
+    h = math.max(240, math.min(2560, math.floor(h)))
     local q = string.format("width=%d&height=%d", w, h)
     if not Device.screen:isColorEnabled() then
         q = q .. "&ink=1"
