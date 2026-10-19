@@ -155,10 +155,36 @@ function Fetch.options(opts, timeout_ratio)
         allow_redirects = opts.allow_redirects,
         user_agent = user_agent and tostring(user_agent),
         on_headers = function(headers)
+            if opts.body_size then headers:add("Content-Length", opts.body_size) end
             addHeaders(headers, opts.headers)
             addHeaders(headers, auth)
         end,
     }
+end
+
+local BODY_CHUNK = 64 * 1024
+
+--- turbo 只收整段字符串 body（拼接 + 写缓冲，峰值约 3 倍文件）。这里让 client 先发请求头，
+--- 再 64KB 一块读文件、等上一块刷出再写下一块，内存恒定。Content-Length 由 opts.body_size 经 on_headers 写入。
+---@param client table
+---@param path string
+function Fetch.streamBody(client, path)
+    client._send_http_request = function(self)
+        local head = self:_prepare_http_request()
+        if head == -1 then
+            return
+        end
+        local file = io.open(path, "rb")
+        local function pump()
+            local chunk = file and file:read(BODY_CHUNK)
+            if chunk then
+                return self.iostream:write(chunk, pump)
+            end
+            if file then file:close() end
+            self:_headers_written_cb()
+        end
+        self.iostream:write(head, pump)
+    end
 end
 
 --- 取消时先拆 turbo 的连接/请求超时和已入队回调，再关 iostream。

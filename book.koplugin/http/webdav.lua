@@ -225,9 +225,9 @@ function Webdav:putFileAsync(path, local_path, cb)
         cb(nil, open_err or _("无法读取待上传文件"))
         return nil
     end
-    local body = file:read("*a")
+    local size = file:seek("end")
     file:close()
-    if type(body) ~= "string" or body == "" then
+    if not size or size == 0 then
         cb(nil, _("待上传文件为空"))
         return nil
     end
@@ -235,7 +235,8 @@ function Webdav:putFileAsync(path, local_path, cb)
         url = self:join(path, false),
         method = "PUT",
         headers = Header.forRequest({ ["Content-Type"] = "application/octet-stream" }),
-        body = body,
+        body_file = local_path,
+        body_size = size,
         timeout = require("http.timeout").net(10),
     }, function(res, err, code)
         cb(res and true, err, code)

@@ -271,7 +271,8 @@ do
     local req = captured[#captured]
     Assert.eq(req.method, "PUT")
     Assert.eq(req.url, "http://example.com/dav/%E4%B9%A6.epub")
-    Assert.eq(req.body, "epub-data")
+    Assert.eq(req.body_file, path)
+    Assert.eq(req.body_size, 9)
     Assert.eq(req.auth_username, "u")
     Assert.eq(req.auth_password, "p")
 end

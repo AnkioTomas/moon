@@ -37,6 +37,8 @@ Cache.fetch(key, ttl, load, cb) 缓存解码结果，别手写「读缓存 → �
 ---@field url string
 ---@field method string|nil 默认 GET
 ---@field body string|nil
+---@field body_file string|nil 从该文件分块流式发送（配 body_size），不把整文件读进内存；与 body 互斥
+---@field body_size number|nil body_file 的字节数，写进 Content-Length
 ---@field proxy string|nil 仅 request：明文 HTTP 代理，覆盖 KOReader 设置（设置页实测用）
 
 --- 未完成的请求句柄。cancel 幂等。
@@ -159,6 +161,9 @@ function Request.request(opts, cb)
             return
         end
         state.client = client
+        if opts.body_file then
+            Fetch.streamBody(client, opts.body_file)
+        end
         local fetched, future = pcall(client.fetch, client, opts.url, Fetch.options(opts, 1))
         if not fetched then
             settle(nil, future)
