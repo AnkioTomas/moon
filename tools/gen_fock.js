@@ -16,7 +16,7 @@ const fs = require("fs");
 const [, , srcPath, outPath] = process.argv;
 const src = fs.readFileSync(srcPath, "utf8");
 const a = src.indexOf("this.exports=function(A){");
-const e = src.indexOf("}(A)}(J)},instantiate");
+const e = src.search(/\}\(A\)\}\(\w+\)\},instantiate/);
 if (a < 0 || e < 0) throw new Error("找不到 wasm2js 导出函数");
 const code = "(" + src.slice(a + "this.exports=".length, e + "}(A)}".length) + ")";
 const ast = acorn.parse(code, { ecmaVersion: 2020 });
@@ -24,8 +24,33 @@ const outer = ast.body[0].expression;
 const inner = outer.body.body.find((n) => n.type === "ReturnStatement").argument.callee;
 const top = inner.body.body;
 
-const HEAP = { n: "I8", o: "I16", i: "I32", f: "U8", l: "U16", b: "U32", v: "F64" };
-const TOPVAR = { g: "imul", p: "math.abs", d: "clz32", h: "abort", k: "imp_b", y: "imp_c", w: "imp_d", C: "imp_e", E: "imp_f", B: "B", I: "Iv", a: "rf_a", u: "rf_u", c: "rf_c", s: "rf_s" };
+// 变量名每个构建都不同：从模块头的 var 声明按位置推。顺序固定为
+// 七个堆视图、imul、abs、clz32、abort、导入 b..f、栈指针 B、一个恒 0 的全局 Iv。
+const HEAP_KIND = { Int8Array: "I8", Int16Array: "I16", Int32Array: "I32", Uint8Array: "U8", Uint16Array: "U16", Uint32Array: "U32", Float64Array: "F64" };
+const HEAP = {};
+const TOPVAR = { a: "rf_a", u: "rf_u", c: "rf_c", s: "rf_s" };
+let STACK_INIT = 0;
+(function header() {
+    const decl = top.find((s) => s.type === "VariableDeclaration");
+    const plain = [];
+    for (const d of decl.declarations) {
+        const init = d.init;
+        if (init && init.type === "NewExpression" && HEAP_KIND[init.callee.name]) HEAP[d.id.name] = HEAP_KIND[init.callee.name];
+        else if (init && init.type === "MemberExpression" && init.object.type === "Identifier" && init.object.name === "A" && init.property.name !== "buffer") TOPVAR[d.id.name] = init.property.name === "abort" ? "abort" : "imp_" + init.property.name;
+        else if (init && init.type === "MemberExpression" && init.object.name === "Math") TOPVAR[d.id.name] = "math.abs";
+        else if (init && init.type === "Identifier") plain.push(d.id.name);
+        else if (init && init.type === "Literal") plain.push(d);
+    }
+    const idents = plain.filter((x) => typeof x === "string");
+    TOPVAR[idents[0]] = "imul";
+    TOPVAR[idents[1]] = "clz32";
+    const lits = plain.filter((x) => typeof x !== "string");
+    TOPVAR[lits[0].id.name] = "B";
+    STACK_INIT = lits[0].init.value;
+    TOPVAR[lits[1].id.name] = "Iv";
+})();
+const tableDecl = top.find((s) => s.type === "VariableDeclaration" && s.declarations.length === 2 && !s.declarations[0].init);
+const TABLE = new Set(tableDecl.declarations.map((d) => d.id.name));
 const fnNames = new Set(top.filter((s) => s.type === "FunctionDeclaration").map((s) => s.id.name));
 const fnRef = (n) => "F.f" + n.replace(/\$/g, "S_");
 
@@ -61,7 +86,7 @@ class Fn {
         if (this.scope.all.has(id)) return "v_" + id;
         if (HEAP[id]) throw new Error("heap view used as value: " + id);
         if (TOPVAR[id]) return TOPVAR[id];
-        if (id === "UA" || id === "YA") return id;
+        if (TABLE.has(id)) return "UA";
         if (fnNames.has(id)) return fnRef(id);
         throw new Error("unresolved identifier " + id);
     }
@@ -151,7 +176,7 @@ class Fn {
 
     member(node) {
         if (!node.computed) {
-            if (code.slice(node.start, node.end) === "e.byteLength") return { s: "16777216", t: "n" };
+            if (node.property.name === "byteLength") return { s: "16777216", t: "n" };
             throw new Error("非计算成员访问 " + code.slice(node.start, node.end));
         }
         const idx = this.operands([node.property])[0];
@@ -544,7 +569,7 @@ function fnSource(node, header) {
 }
 
 const lines = [];
-lines.push("-- 由 tools/gen_fock.js 从起点 Fock（wasm2js）转译生成，勿手改。");
+lines.push("-- 由 tools/gen_fock.js 从起点 / QQ阅读的 Fock（wasm2js）转译生成，勿手改。");
 lines.push("-- 运行环境见 fock.lua；env = { mem = ffi uint8_t*, imp = { b, c, d, e, f, abort } }。");
 lines.push("local bit = require(\"bit\")");
 lines.push("local ffi = require(\"ffi\")");
@@ -576,7 +601,7 @@ lines.push("local abort, imp_b, imp_c, imp_d, imp_e, imp_f = env.imp.abort, env.
 lines.push("local I8, I16, I32 = ffi.cast(\"int8_t*\", mem), ffi.cast(\"int16_t*\", mem), ffi.cast(\"int32_t*\", mem)");
 lines.push("local U8, U16, U32 = ffi.cast(\"uint8_t*\", mem), ffi.cast(\"uint16_t*\", mem), ffi.cast(\"uint32_t*\", mem)");
 lines.push("local F64 = ffi.cast(\"double*\", mem)");
-lines.push("local B, Iv = 5274992, 0");
+lines.push(`local B, Iv = ${STACK_INIT}, 0`);
 lines.push("local scratch = ffi.new(\"int32_t[4]\")");
 lines.push("local scratch_f = ffi.cast(\"double*\", scratch)");
 lines.push("local function rf_a(i) return scratch[i] end");
@@ -596,7 +621,6 @@ for (const s of top) {
 }
 
 // 函数表
-const tableDecl = top.find((s) => s.type === "VariableDeclaration" && s.declarations.some((d) => d.id.name === "UA"));
 let arrayNode = null;
 (function find(n) {
     if (!n || typeof n.type !== "string" || arrayNode) return;
@@ -615,7 +639,7 @@ arrayNode.elements.forEach((el, k) => {
 lines.push("");
 
 // 数据段
-const dataStmt = top.find((s) => s.type === "ExpressionStatement" && /^t\(/.test(code.slice(s.start, s.start + 3)));
+const dataStmt = top.find((s) => s.type === "ExpressionStatement" && [].concat(s.expression.type === "SequenceExpression" ? s.expression.expressions : [s.expression]).every((c) => c.type === "CallExpression" && c.arguments.length === 3 && c.arguments[2].type === "Literal" && typeof c.arguments[2].value === "string"));
 const calls = dataStmt.expression.type === "SequenceExpression" ? dataStmt.expression.expressions : [dataStmt.expression];
 lines.push("local DATA = {");
 for (const c of calls) {
@@ -632,7 +656,7 @@ lines.push("local exports = {}");
 for (const p of ret.argument.properties) {
     const key = p.key.name;
     if (p.value.type === "FunctionExpression") lines.push(fnSource(p.value, `exports.${key} = function`));
-    else if (p.value.type === "Identifier" && p.value.name === "YA") lines.push(`exports.${key} = YA`);
+    else if (p.value.type === "Identifier" && TABLE.has(p.value.name)) lines.push(`exports.${key} = UA`);
     else if (p.value.type === "Identifier") lines.push(`exports.${key} = ${fnRef(p.value.name)}`);
     else throw new Error("不支持的导出 " + key);
 }

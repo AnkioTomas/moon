@@ -3,7 +3,7 @@ QQ阅读 HTTP 客户端（仅异步）。
 
 接口在 https://book.qq.com/api/ ，code 0 成功，-4 是登录失效（HTTP 仍是 200）。
 目录和免费章匿名可读。付费章同样 code 0，但只有预览：chapterVipFlag=1 且 authStatus 不是 1。
-encrypt / fontEncrypt 为真是字体加密，直接失败。
+encrypt / fontEncrypt 为真是 Fock 加密 + 乱序字体（已购章），解密见 fock.lua / scramble.lua / glyph.lua。
 书架分页 pageNo / pageSize / hasNext，置顶和普通列表拼在一起。
 进度只到章：POST bookshelf/update/reading/process，只传 bid 和 lastReadChapterId。
 
@@ -11,7 +11,9 @@ encrypt / fontEncrypt 为真是字体加密，直接失败。
 --]]
 
 require("l10n").apply()
+local Fock = require("source.qqreader.fock")
 local JSON = require("json")
+local logger = require("logger")
 local Mapper = require("source.qqreader.mapper")
 local Request = require("http.request")
 local SourceBase = require("source.base")
@@ -252,21 +254,70 @@ function Client.catalogAsync(book_id, cb)
     end)
 end
 
---- 一章正文。未授权的付费章只有预览，字体加密的章直接失败。
+---@param book_id string
+---@param chapter_id string
+---@param fuid string|nil 加密章要带 piracy 给的 fuid，密文跟它绑定
+---@param cb fun(info: table|nil, err: string|nil)
+---@return HttpJob
+local function readAsync(book_id, chapter_id, fuid, cb)
+    return call("GET", "/book/read", { bid = book_id, cid = chapter_id, fuid = fuid }, nil, Client.cookie(),
+        function(wire, err)
+            if not wire then cb(nil, err); return end
+            cb(type(wire.data) == "table" and wire.data or {})
+        end)
+end
+
+--- 一章正文。未授权的付费章只有预览；已购章是 Fock 加密 + 乱序字体，解出后还原成纯文本。
+--- 密钥池与 fuid 在 user/index/piracy（网页的 fkp，`window.onkeyfocus("<密钥池>", <版本>)` 的 base64，只取参数不执行）。
 ---@param book_id string
 ---@param chapter_id string
 ---@param cb fun(text: string|nil, err: string|nil)
----@return HttpJob
+---@return table handle { cancel }
 function Client.contentAsync(book_id, chapter_id, cb)
-    return call("GET", "/book/read", { bid = book_id, cid = chapter_id }, nil, Client.cookie(), function(wire, err)
-        if not wire then cb(nil, err); return end
-        local info = wire.data
-        if Mapper.encrypted(info) then cb(nil, _("QQ阅读章节已加密")); return end
-        if Mapper.locked(info) then cb(nil, _("QQ阅读 VIP 章节未购买")); return end
-        local text = type(info) == "table" and info.content
+    local current
+    local function finish(text)
         if type(text) ~= "string" or Text.trim(text) == "" then cb(nil, _("QQ阅读章节内容为空")); return end
         cb(text)
+    end
+    local function decrypt(info, pirate)
+        local keypool, version = Text.base64Decode(tostring(pirate.fkp or ""))
+            :match('onkeyfocus%("([^"]+)",%s*(%d+)%)')
+        local font = type(info.fontResponse) == "table" and info.fontResponse or {}
+        if not (keypool and version and type(info.content) == "string" and pirate.fuid) then
+            cb(nil, _("QQ阅读章节解密失败")); return
+        end
+        local function run(fixed_font)
+            current = Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, tostring(pirate.fuid),
+                function(text, derr)
+                    current = nil
+                    if not text then
+                        logger.warn("qqreader fock decrypt failed:", derr)
+                        cb(nil, _("QQ阅读章节解密失败")); return
+                    end
+                    finish(text)
+                end)
+        end
+        if not Mapper.fontEncrypted(info) then run(nil); return end
+        if type(font.fixedFontTtf) ~= "string" then cb(nil, _("QQ阅读章节解密失败")); return end
+        current = Request.get(font.fixedFontTtf, { timeout = require("http.timeout").net(1) }, function(ttf, ferr)
+            if not ttf then cb(nil, ferr and tostring(ferr) or _("请求失败")); return end
+            run(ttf)
+        end)
+    end
+    current = readAsync(book_id, chapter_id, nil, function(info, err)
+        if not info then cb(nil, err); return end
+        if Mapper.locked(info) then cb(nil, _("QQ阅读 VIP 章节未购买")); return end
+        if not Mapper.encrypted(info) then finish(info.content); return end
+        current = call("GET", "/user/index/piracy", nil, nil, Client.cookie(), function(wire, perr)
+            if not wire then cb(nil, perr); return end
+            local pirate = type(wire.data) == "table" and wire.data or {}
+            current = readAsync(book_id, chapter_id, pirate.fuid, function(enc, rerr)
+                if not enc then cb(nil, rerr); return end
+                decrypt(enc, pirate)
+            end)
+        end)
     end)
+    return { cancel = function() if current then current:cancel() end end }
 end
 
 return Client

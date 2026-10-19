@@ -187,12 +187,18 @@ do
     Assert.is_nil(text)
     Assert.eq(err, "QQ阅读 VIP 章节未购买")
 
+    -- 加密章：先读（发现加密）→ piracy 取 fuid / fkp → 带 fuid 重读；fkp 无效就明确失败
+    local enc = '{"code":0,"data":{"content":"乱码","encrypt":true,"fontEncrypt":false,"chapterVipFlag":0,"authStatus":1}}'
     requests, replies = {}, {
-        { body = '{"code":0,"data":{"content":"乱码","encrypt":true,"fontEncrypt":false,"chapterVipFlag":0,"authStatus":1}}' },
+        { body = enc },
+        { body = '{"code":0,"data":{"fkp":"","fuid":"u1"}}' },
+        { body = enc },
     }
     Client.contentAsync("9", "1", function(v, e) text, err = v, e end)
     Assert.is_nil(text)
-    Assert.eq(err, "QQ阅读章节已加密")
+    Assert.eq(err, "QQ阅读章节解密失败")
+    Assert.matches(requests[2].url, "/user/index/piracy")
+    Assert.matches(requests[3].url, "fuid=u1")
 
     requests, replies = {}, {
         { body = '{"code":0,"data":{"content":"　　甲\\r\\n　　乙","chapterVipFlag":0,"authStatus":1,"encrypt":false}}' },

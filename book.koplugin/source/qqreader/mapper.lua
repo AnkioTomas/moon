@@ -143,18 +143,25 @@ function Mapper.toc(rows)
     return toc
 end
 
---- 字体加密。抽到的章是明文；为真就失败，不要写解密。
+--- Fock 加密 / 乱序字体：content 是密文，要先解密再还原。
 ---@param info table|nil
 ---@return boolean
 function Mapper.encrypted(info)
     return type(info) == "table" and (on(info.encrypt) or on(info.fontEncrypt))
 end
 
---- 未授权的付费章接口仍 code=0，并带约 200 字预览。不能看正文非空。
+--- 正文还套了乱序字体（要下载 fixedFont 还原字形）。
+---@param info table
+---@return boolean
+function Mapper.fontEncrypted(info)
+    return on(info.fontEncrypt)
+end
+
+--- 未授权的付费章接口仍 code=0，并带约 200 字预览。不能看正文非空。authStatus：0 未授权，1 已购，2 会员。
 ---@param info table|nil
 ---@return boolean
 function Mapper.locked(info)
-    return type(info) == "table" and on(info.chapterVipFlag) and not on(info.authStatus)
+    return type(info) == "table" and on(info.chapterVipFlag) and (tonumber(info.authStatus) or 0) == 0
 end
 
 return Mapper

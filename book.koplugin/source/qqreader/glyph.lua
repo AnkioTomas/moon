@@ -1,0 +1,201 @@
+--[[--
+QQ阅读乱序字体还原：把章节字体里的字形认回真字。
+
+反盗版有两层：randomFont 把最常用的一批字换成生僻码位（CJK 扩展 A）；fixedFont 把次常用的 2000 字
+码位不变、字形互换（码位“陵”画出来是“李”）。都没有码位→字的表，所以只能“看”：把字形和候选字（GB2312 一二级，用 KOReader 自带 Noto Sans CJK 画）
+按外框归一后缩到 16x16 比相关系数。字形可能被镜像（页面 CSS 再翻回来），两种朝向都比，取高者。
+先 8x8 粗筛取前几名再用 16x16 精排；得分低于 THRESHOLD 的不认（宁缺勿错）。
+
+@module source.qqreader.glyph
+--]]--
+
+local ffi = require("ffi")
+
+local Glyph = {}
+
+local CHAR = "[%z\1-\127\194-\244][\128-\191]*"
+
+local CANDIDATES = require("source.qqreader.glyph_chars")
+local PX = 56
+local FINE, COARSE = 16, 8
+local SHORTLIST = 12
+local THRESHOLD = 0.75
+local CONFIDENT = 0.95
+local SCALE = 127
+
+--- 一个字形 → 归一化向量 n*n（外框裁剪、面积平均缩放、去均值、单位长）。
+local function signature(size, code, n)
+    local ok, g = pcall(size.renderGlyph, size, code)
+    if not ok then return nil end
+    local bb = g.bb
+    local w, h = bb:getWidth(), bb:getHeight()
+    if w == 0 or h == 0 then return nil end
+    local buf = ffi.cast("uint8_t*", bb.data)
+    local stride = bb.stride
+    local x0, x1, y0, y1 = w, -1, h, -1
+    for y = 0, h - 1 do
+        for x = 0, w - 1 do
+            if buf[y * stride + x] > 40 then
+                if x < x0 then x0 = x end
+                if x > x1 then x1 = x end
+                if y < y0 then y0 = y end
+                if y > y1 then y1 = y end
+            end
+        end
+    end
+    if x1 < 0 then return nil end
+    local cw, ch = x1 - x0 + 1, y1 - y0 + 1
+    local v, sum = {}, 0
+    for j = 0, n - 1 do
+        local ya, yb = y0 + j * ch / n, y0 + (j + 1) * ch / n
+        for i = 0, n - 1 do
+            local xa, xb = x0 + i * cw / n, x0 + (i + 1) * cw / n
+            local acc, cnt = 0, 0
+            for y = math.floor(ya), math.max(math.ceil(yb) - 1, math.floor(ya)) do
+                for x = math.floor(xa), math.max(math.ceil(xb) - 1, math.floor(xa)) do
+                    acc = acc + buf[y * stride + x]
+                    cnt = cnt + 1
+                end
+            end
+            local val = acc / cnt
+            v[j * n + i + 1] = val
+            sum = sum + val
+        end
+    end
+    local mean, norm = sum / (n * n), 0
+    for k = 1, n * n do
+        v[k] = v[k] - mean
+        norm = norm + v[k] * v[k]
+    end
+    norm = math.sqrt(norm)
+    if norm < 1e-6 then return nil end
+    local q = ffi.new("int8_t[?]", n * n)
+    for k = 1, n * n do q[k - 1] = math.floor(v[k] / norm * SCALE + 0.5) end
+    return q
+end
+
+local function flipped(v, n)
+    local out = ffi.new("int8_t[?]", n * n)
+    for j = 0, n - 1 do
+        for i = 0, n - 1 do out[j * n + i] = v[j * n + (n - 1 - i)] end
+    end
+    return out
+end
+
+local function dot(a, a_off, b, b_off, len)
+    local s = 0
+    for k = 0, len - 1 do s = s + a[a_off + k] * b[b_off + k] end
+    return s
+end
+
+-- 参考字的签名每章都一样：第一次算好落盘（候选序固定，每字 FINE² + COARSE² 字节），之后直接读。
+local STRIDE = FINE * FINE + COARSE * COARSE
+
+---@return string[] chars
+local function candidateChars()
+    local chars = {}
+    for ch in CANDIDATES:gmatch(CHAR) do chars[#chars + 1] = ch end
+    return chars
+end
+
+---@return table chars, ffi.cdata* sigs 每字 STRIDE 字节：前 FINE² 是精排、后 COARSE² 是粗筛；字形渲染不出来的全 0
+local function reference(ref_path, cache_path)
+    local chars = candidateChars()
+    local size = #chars * STRIDE
+    local file = io.open(cache_path, "rb")
+    local raw = file and file:read("*a")
+    if file then file:close() end
+    if raw and #raw == size then
+        local sigs = ffi.new("int8_t[?]", size)
+        ffi.copy(sigs, raw, size)
+        return chars, sigs
+    end
+    local rsize = require("ffi/freetype").newFaceSize(ref_path, PX)
+    local sigs = ffi.new("int8_t[?]", size)
+    for k, ch in ipairs(chars) do
+        local code = Glyph.codepoint(ch)
+        local fine, coarse = signature(rsize, code, FINE), signature(rsize, code, COARSE)
+        if fine then
+            ffi.copy(sigs + (k - 1) * STRIDE, fine, FINE * FINE)
+            ffi.copy(sigs + (k - 1) * STRIDE + FINE * FINE, coarse, COARSE * COARSE)
+        end
+    end
+    local tmp = cache_path .. ".tmp"
+    local out = io.open(tmp, "wb")
+    if out then
+        out:write(ffi.string(sigs, size))
+        out:close()
+        os.rename(tmp, cache_path)
+    end
+    return chars, sigs
+end
+
+--- 一种字体里要认的字。limit：候选字只取 GB2312 序的前多少个（一级 3755 字，全集 6763）。
+--- 不能按字体 cmap 收窄：字形互换后，字体画出的真字集合和它的码位集合并不相同。
+---@class QQGlyphTask
+---@field font_path string
+---@field codes integer[]
+---@field limit integer
+
+--- 把各字体里指定码位的字形认成真字。
+---@param ref_path string 参考字体（Noto Sans CJK SC）
+---@param cache_path string 参考字签名缓存文件
+---@param tasks QQGlyphTask[]
+---@return table<integer, string|false>[] maps 与 tasks 同序，码位 → 真字；字体里有字形但认不出是 false，字体没有该码位不在表里
+function Glyph.recognize(ref_path, cache_path, tasks)
+    local FT = require("ffi/freetype")
+    local chars, sigs = reference(ref_path, cache_path)
+
+    local maps = {}
+    for t_idx, task in ipairs(tasks) do
+        local gsize = FT.newFaceSize(task.font_path, PX)
+        local cands = {}
+        for k = 1, math.min(task.limit, #chars) do
+            local base = (k - 1) * STRIDE
+            local keep = dot(sigs, base + FINE * FINE, sigs, base + FINE * FINE, COARSE * COARSE) > 0
+            if keep then cands[#cands + 1] = k end
+        end
+        local out = {}
+        for _i, cp in ipairs(task.codes) do
+            local gf0 = gsize:hasGlyph(cp) and signature(gsize, cp, FINE)
+            local gc0 = gf0 and signature(gsize, cp, COARSE)
+            local best_char, best_score = nil, -1
+            for mirror = 0, gf0 and 1 or -1 do
+                -- 原朝向已经认得很准就不必再试镜像
+                if mirror == 1 and best_score >= CONFIDENT then break end
+                local gf, gc = gf0, gc0
+                if mirror == 1 then gf, gc = flipped(gf0, FINE), flipped(gc0, COARSE) end
+                local top, floor = {}, -math.huge
+                for _c, k in ipairs(cands) do
+                    local s = dot(gc, 0, sigs, (k - 1) * STRIDE + FINE * FINE, COARSE * COARSE)
+                    if s > floor then
+                        top[#top + 1] = { s, k }
+                        table.sort(top, function(a, b) return a[1] > b[1] end)
+                        if #top > SHORTLIST then top[#top] = nil end
+                        if #top == SHORTLIST then floor = top[#top][1] end
+                    end
+                end
+                for _j, entry in ipairs(top) do
+                    local s = dot(gf, 0, sigs, (entry[2] - 1) * STRIDE, FINE * FINE) / (SCALE * SCALE)
+                    if s > best_score then best_score, best_char = s, chars[entry[2]] end
+                end
+            end
+            if gf0 then out[cp] = best_score >= THRESHOLD and best_char or false end
+        end
+        maps[t_idx] = out
+    end
+    return maps
+end
+
+--- UTF-8 单字 → 码位。
+---@param ch string
+---@return integer
+function Glyph.codepoint(ch)
+    local b = ch:byte(1)
+    if b < 0x80 then return b end
+    if b < 0xE0 then return (b - 0xC0) * 64 + ch:byte(2) - 0x80 end
+    if b < 0xF0 then return (b - 0xE0) * 4096 + (ch:byte(2) - 0x80) * 64 + ch:byte(3) - 0x80 end
+    return (b - 0xF0) * 262144 + (ch:byte(2) - 0x80) * 4096 + (ch:byte(3) - 0x80) * 64 + ch:byte(4) - 0x80
+end
+
+return Glyph

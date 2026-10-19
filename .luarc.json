@@ -22,7 +22,8 @@
       ".git",
       "screenshots",
       "koreader",
-      "book.koplugin/source/qidian/fock_wasm.lua"
+      "book.koplugin/source/qidian/fock_wasm.lua",
+      "book.koplugin/source/qqreader/fock_wasm.lua"
     ],
     "checkThirdParty": "Disable"
   },
