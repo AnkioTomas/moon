@@ -65,7 +65,8 @@ function System:memAvailableMB()
     return kb and (kb / 1024) or nil
 end
 
---- 同时允许的 fork 数：每 32MB 可用内存一个槽，夹在 1～20。
+--- 同时允许的 fork 数：先给主进程留 48MB 余量，其余每 32MB 一个槽，夹在 1～8。
+--- 每个子进程都带着阅读器的页表和各自的解析缓冲，256MB 设备上并发太多会触发 OOM killer 杀掉 KOReader。
 --- 读不到 /proc/meminfo 按 4。
 ---@return number
 function System:concurrency()
@@ -73,7 +74,7 @@ function System:concurrency()
     if not mem then
         return 4
     end
-    return math.max(1, math.min(20, math.floor(mem / 32)))
+    return math.max(1, math.min(8, math.floor((mem - 48) / 32)))
 end
 
 return System
