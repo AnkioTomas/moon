@@ -405,7 +405,6 @@ function Fetch.lookupWord(ui, identity, word, cb)
         { role = "user", content = Prompts.singleWord(
             word, title, author, ctx.current_page, ctx.prior_text, existing, storySoFar(identity)) },
     }
-    -- 选词补全量小，上限走「AI token 上限」配置（ai_max_tokens）。
     return AI.jsonExtract(messages, { localize = true }, function(decoded, err)
         if not decoded then cb(nil, err); return end
         if decoded.is_valid == false then
