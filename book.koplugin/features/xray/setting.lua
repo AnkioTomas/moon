@@ -1,5 +1,5 @@
 --[[--
-X-Ray 配置键（settings/xray.lua）与设置：往桌面「划词与查询」页追加「X-Ray」分节。
+X-Ray 配置键（settings/xray.lua）与设置：往桌面「查词」页追加「X-Ray」分节。
 
 @module koplugin.book.features.xray.setting
 --]]

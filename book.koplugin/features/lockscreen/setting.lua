@@ -33,8 +33,8 @@ function Setting.entries(desktop)
     return {
         {
             id = "main",
-            group = "desktop",
-            order = 90,
+            group = "security",
+            order = 10,
             icon = "wallpaper",
             title = _("锁屏壁纸"),
             subtitle = _("替代系统锁屏"),

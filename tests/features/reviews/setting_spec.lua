@@ -1,4 +1,4 @@
---[[-- 段评设置：「划词与查询」页追加「段评」分节，下划线样式落盘到 features.reviews 并重画阅读页。 --]]
+--[[-- 段评设置：「查词」页追加「段评」分节，下划线样式落盘到 features.reviews 并重画阅读页。 --]]
 
 local Assert = require("support.assert")
 

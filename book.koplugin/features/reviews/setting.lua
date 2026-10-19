@@ -1,5 +1,5 @@
 --[[--
-段评配置键（settings/reviews.lua）与设置：往桌面「划词与查询」页追加「段评」分节。
+段评配置键（settings/reviews.lua）与设置：往桌面「查词」页追加「段评」分节。
 
 显示开关归微信读书源（`show_paragraph_reviews`，在源设置页），这里只管画线样式。
 

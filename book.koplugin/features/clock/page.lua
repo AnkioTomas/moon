@@ -1,5 +1,5 @@
 --[[--
-「时间与日期」设置页：时区；设备能改系统时间时再给手动设置与 NTP 校时。
+「时间」设置页：时区；设备能改系统时间时再给手动设置与 NTP 校时。
 
 @module koplugin.book.features.clock.page
 --]]

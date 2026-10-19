@@ -217,7 +217,7 @@ local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
 Assert.len(built_rows, 35)
-Assert.eq(table.concat(section_titles, ","), "书库,订阅,桌面,阅读,系统,维护")
+Assert.eq(table.concat(section_titles, ","), "书库,订阅,桌面,阅读,系统,安全,维护")
 -- 订阅的开关直接放在根页「订阅」组，不另开子页。
 local sub_rows = {}
 for _, row in ipairs(built_rows) do
@@ -227,28 +227,28 @@ Assert.eq(table.concat(sub_rows, ","), "启用订阅,下载文章图片")
 
 local expected = {
     { title = "书籍来源", id = "sources" },
-    { title = "账号与登录", id = "source_config" },
-    { title = "外观", id = "appearance" },
-    { title = "屏幕与亮度", id = "display" },
-    { title = "启动与按键", id = "startup" },
+    { title = "账号", id = "source_config" },
     { title = "书架显示", id = "library_display" },
+    { title = "外观", id = "appearance" },
+    { title = "界面壁纸", id = "feature:wallpaper:main" },
     { title = "桌面顶栏", id = "topbar" },
     { title = "桌面快捷面板", id = "feature:panel:desktop" },
     { title = "底栏拓展", id = "feature:extensions:main" },
-    { title = "界面壁纸", id = "feature:wallpaper:main" },
-    { title = "锁屏壁纸", id = "feature:lockscreen:main" },
-    { title = "锁屏密码", id = "feature:passcode:main" },
+    { title = "启动", id = "startup" },
     { title = "阅读行为", id = "reader_behavior" },
-    { title = "划词与查询", id = "lookup" },
-    { title = "划词菜单", id = "popup_menu" },
     { title = "阅读页顶栏", id = "feature:bars:top" },
     { title = "阅读页底栏", id = "feature:bars:bottom" },
     { title = "阅读快捷面板", id = "feature:panel:reader" },
-    { title = "时间与日期", id = "feature:clock:main" },
-    { title = "AI 接口", id = "ai" },
+    { title = "查词", id = "lookup" },
+    { title = "划词菜单", id = "popup_menu" },
+    { title = "屏幕", id = "display" },
     { title = "网络", id = "network" },
-    { title = "中文输入法增强", id = "feature:ime:main" },
+    { title = "时间", id = "feature:clock:main" },
+    { title = "输入法", id = "feature:ime:main" },
+    { title = "AI 接口", id = "ai" },
     { title = "远程管理", id = "feature:remote:main" },
+    { title = "锁屏壁纸", id = "feature:lockscreen:main" },
+    { title = "锁屏密码", id = "feature:passcode:main" },
 }
 local pages = {}
 local nav = 1

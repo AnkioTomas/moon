@@ -41,7 +41,7 @@ function Setting.entries(desktop)
         {
             id = "main",
             group = "desktop",
-            order = 80,
+            order = 20,
             icon = "wallpaper",
             title = _("界面壁纸"),
             subtitle = _("全局设置，各界面可单独调整"),

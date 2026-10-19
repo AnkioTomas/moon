@@ -1,4 +1,4 @@
---[[-- X-Ray / 翻译设置：往「划词与查询」页追加分节，开关落盘到各自 feature 分区。 --]]
+--[[-- X-Ray / 翻译设置：往「查词」页追加分节，开关落盘到各自 feature 分区。 --]]
 
 local Assert = require("support.assert")
 

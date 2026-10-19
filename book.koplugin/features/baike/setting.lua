@@ -1,5 +1,5 @@
 --[[--
-百度百科设置：往桌面「划词与查询」页追加「百科」分节。
+百度百科设置：往桌面「查词」页追加「百科」分节。
 
 @module koplugin.book.features.baike.setting
 --]]
