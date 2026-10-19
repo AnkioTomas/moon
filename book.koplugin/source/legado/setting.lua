@@ -29,7 +29,7 @@ local function save(address)
     cfg.server_address = address
     local Client = require("source.legado.client")
     local waiting = require("ui.themes.widgets.progress_dialog"):new{
-        title = _("阅读"), text = _("正在连接阅读服务…"), dismissable = false,
+        title = _("开源阅读"), text = _("正在连接阅读服务…"), dismissable = false,
     }
     waiting:show()
     -- 先落盘才能让 Client 读到新地址；校验失败再还原。
