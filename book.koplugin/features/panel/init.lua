@@ -6,12 +6,30 @@
 @module koplugin.book.features.panel
 --]]
 
+require("l10n").apply()
+local _ = require("gettext")
+
 local Panel = {}
 
 ---@param plugin BookPlugin
 function Panel.onCreate(plugin)
     require("features.panel.native").onCreate(plugin.ui)
+    require("dispatcher"):registerAction("book_close_to_desktop", {
+        category = "none",
+        event = "BookCloseToDesktop",
+        title = _("退出阅读回到月读"),
+        reader = true,
+    })
 end
+
+Panel.events = {
+    ---@param plugin BookPlugin
+    BookCloseToDesktop = function(plugin)
+        if not plugin.ui.document then return false end
+        require("features.panel.native").closeToDesktop(plugin.ui)
+        return true
+    end,
+}
 
 ---@param plugin BookPlugin
 function Panel.onReaderReady(plugin)
