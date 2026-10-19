@@ -292,6 +292,20 @@ function Book.readRibbon(cw)
     function ribbon:paintTo(bb, x, y)
         local ink = statusInk()
         paintSash(bb, x, y, size, self.band, ink)
+        -- 旋转后的白字像素逐点计算很贵（每个已读封面每次重绘），按 ink 缓存成相对偏移，之后只写点。
+        local gray = Theme.current().color.ink
+        if self.dots_ink ~= gray then
+            self.dots, self.dots_ink = self:rotatedDots(ink), gray
+        end
+        local dots = self.dots
+        for i = 1, #dots, 2 do
+            bb:setPixelClamped(x + dots[i], y + dots[i + 1], Blitbuffer.COLOR_WHITE)
+        end
+    end
+    --- 文字旋转 45° 后的白像素相对缎带左上角的偏移（x1, y1, x2, y2 …）。
+    ---@param ink any 缎带底色
+    ---@return number[]
+    function ribbon:rotatedDots(ink)
         ---@type BlitBuffer
         ---@diagnostic disable-next-line: assign-type-mismatch
         local src = Blitbuffer.new(ts.w, ts.h)
@@ -300,10 +314,17 @@ function Book.readRibbon(cw)
         local ix, iy, iw, ih = inkRect(src)
         local dw = math.ceil((iw + ih) * 0.70710678)
         -- 缎带平行四边形中心：中线 x=y+band/2，长度中点再收 band/4。
-        local ox = x + math.floor(size / 2 + self.band / 4 - dw / 2)
-        local oy = y + math.floor(size / 2 - self.band / 4 - dw / 2)
-        blitInk45(bb, src, ox, oy, ix, iy, iw, ih)
+        local ox = math.floor(size / 2 + self.band / 4 - dw / 2)
+        local oy = math.floor(size / 2 - self.band / 4 - dw / 2)
+        local dots = {}
+        local collector = {
+            setPixelClamped = function(_self, px, py)
+                dots[#dots + 1], dots[#dots + 2] = px, py
+            end,
+        }
+        blitInk45(collector, src, ox, oy, ix, iy, iw, ih)
         src:free()
+        return dots
     end
     --- 释放缎带拥有的文字控件。
     function ribbon:free()
