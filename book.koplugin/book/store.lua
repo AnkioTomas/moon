@@ -84,9 +84,10 @@ end
 ---@param source_id string
 ---@param stable_id string
 ---@param keep_sidecar boolean|nil
+---@param keep_cover boolean|nil 保留封面文件
 ---@return boolean ok 章节登记是否撤掉
 ---@return string|nil leftover purge 失败时为 "partial"
-local function purgeBookFiles(source_id, stable_id, keep_sidecar)
+local function purgeBookFiles(source_id, stable_id, keep_sidecar, keep_cover)
     local dir = Paths.bookWorkDir(stable_id, source_id)
     local leftover
     local lfs = require("libs/libkoreader-lfs")
@@ -110,7 +111,7 @@ local function purgeBookFiles(source_id, stable_id, keep_sidecar)
             leftover = "partial"
         end
     end
-    os.remove(Paths.coverPath(stable_id, source_id))
+    if not keep_cover then os.remove(Paths.coverPath(stable_id, source_id)) end
     return ChapterDB.deleteUnder(dir), leftover
 end
 
@@ -129,15 +130,17 @@ end
 
 --- 清单书本地缓存：工作目录、封面、封面网络图，以及 .moon/cache 内的 books.path。
 --- 元数据、目录、进度、统计保留；.moon/cache 外的原书（本地源）不动。
+--- keep_cover 为真（软删除）只删文档，封面文件与封面网络图也留着。
 ---@param source_id string
 ---@param stable_id string
+---@param keep_cover boolean|nil
 ---@return boolean ok 路径登记是否清干净
 ---@return string|nil leftover purge 失败时为 "partial"
-function Store.clearCache(source_id, stable_id)
-    local ok, leftover = purgeBookFiles(source_id, stable_id, true)
+function Store.clearCache(source_id, stable_id, keep_cover)
+    local ok, leftover = purgeBookFiles(source_id, stable_id, true, keep_cover)
     local row = BookDB.get(source_id, stable_id)
     if not row then return ok, leftover end
-    local cached_cover = require("ui.themes.widgets.image.download").cached(row.cover)
+    local cached_cover = not keep_cover and require("ui.themes.widgets.image.download").cached(row.cover)
     if cached_cover then os.remove(cached_cover) end
     if inCache(row.path) then
         os.remove(row.path)

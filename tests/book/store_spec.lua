@@ -468,6 +468,15 @@ do
     Assert.eq(#touch_calls, 1)
     Assert.is_nil(touch_calls[1].path)
 
+    -- 软删除：文档照删，封面文件与封面网络图留着
+    removed = {}
+    touch_calls = {}
+    Assert.is_true(Store.clearCache("local", "dav/a.epub", true))
+    Assert.contains(removed, "/cache/local/book/webdav/a.epub")
+    for _, p in ipairs(removed) do
+        Assert.is_true(p ~= "/cache/local/dav/a.epub.jpg" and p ~= "/cache/image/abc.jpg")
+    end
+
     removed = {}
     touch_calls = {}
     book_rows_by_id["local\0/lib/x.epub"] = {
