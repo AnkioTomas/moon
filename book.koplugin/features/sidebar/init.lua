@@ -241,7 +241,7 @@ end
 --- 书籍页关闭按钮：先关侧栏，再关书回月读桌面。
 function Sidebar:exitBook()
     self:onClose()
-    require("features.panel.native").closeToDesktop(self.ui)
+    require("desktop.reader_exit").closeToDesktop(self.ui)
 end
 
 function Sidebar:render()

@@ -162,7 +162,7 @@ package.preload["ui.widgets.fontpicker"] = function()
         UIManager:show(list)
     end }
 end
-package.preload["features.panel.native"] = function()
+package.preload["desktop.reader_exit"] = function()
     return { closeToDesktop = function(ui) state.exited = ui end }
 end
 --- 票根：出图回调由测试手动触发，模拟封面异步落定。

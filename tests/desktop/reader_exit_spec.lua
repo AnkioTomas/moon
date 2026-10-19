@@ -24,6 +24,7 @@ package.preload["apps/filemanager/filemanagermenu"] = function()
     return { setUpdateItemTable = function() end }
 end
 
+local drawer_on = true
 local opened_desktop = 0
 package.preload["desktop"] = function()
     return { open = function() opened_desktop = opened_desktop + 1 end }
@@ -35,7 +36,7 @@ package.preload["apps/filemanager/filemanager"] = function()
 end
 package.preload["apps/reader/readerui"] = function() return { instance = nil } end
 package.preload["utils.settings"] = function()
-    return { get = function() return { drawer_opens_desktop = true } end }
+    return { get = function() return { drawer_opens_desktop = drawer_on } end }
 end
 package.preload["menu"] = function()
     return { openOnStart = function() return true end }
@@ -62,8 +63,7 @@ function ReaderMenu:setUpdateItemTable() end
 function ReaderMenu:onTapCloseMenu() self.closed = true end
 package.preload["apps/reader/modules/readermenu"] = function() return ReaderMenu end
 
-local Native = require("features.panel.native")
-Native.onCreate({}, { reader = true })
+require("desktop.reader_exit").install()
 
 local reader_closed = 0
 local menu = setmetatable({
@@ -83,6 +83,11 @@ Assert.eq(opened_desktop, 0)
 Assert.not_nil(next_tick)
 next_tick()
 Assert.eq(reader_closed, 1)
+Assert.eq(opened_desktop, 1)
+
+-- 开关关：走原生文件浏览器，不回桌面。
+drawer_on = false
+Assert.eq(menu:getDefaultMenuButtons().filemanager.callback(), "native")
 Assert.eq(opened_desktop, 1)
 
 _G.G_reader_settings = previous_settings

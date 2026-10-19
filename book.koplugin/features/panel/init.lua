@@ -26,7 +26,7 @@ Panel.events = {
     ---@param plugin BookPlugin
     BookCloseToDesktop = function(plugin)
         if not plugin.ui.document then return false end
-        require("features.panel.native").closeToDesktop(plugin.ui)
+        require("desktop.reader_exit").closeToDesktop(plugin.ui)
         return true
     end,
 }

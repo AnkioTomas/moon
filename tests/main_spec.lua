@@ -57,6 +57,7 @@ end
 --- 有脏行的源 id；没登记的源不该被建实例。
 local dirty = { moon = true, ["local"] = true, wechat = true, jdread = true }
 local connected = true
+stub("desktop.reader_exit", { install = function() end })
 stub("source.base", { hasDirty = function(id) return dirty[id] == true end })
 stub("ui/network/manager", { isConnected = function() return connected end })
 --- 除当前源外的其他启用源（混合模式）；值为 false 表示已启用但加载失败。
