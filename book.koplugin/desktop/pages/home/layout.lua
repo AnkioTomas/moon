@@ -23,6 +23,10 @@ local Box = require("ui.themes.widgets.box")
 
 local Layout = {}
 
+-- 浏览态钉页容忍的超高比例：略超（组件加载后变高、自定义高度）由 allocate 等比压缩，与编辑态一致；
+-- 超得多（横屏）才顺延成多页。
+Layout.OVERFLOW_SLACK = 1.25
+
 --- 正文区内框与组件间距：四周留 space.md，组件之间 space.sm。
 ---@param width number 正文宽
 ---@param body_h number 正文高
@@ -40,6 +44,16 @@ end
 ---@return number
 local function specHeight(raw)
     return math.max(1, math.floor(raw.height))
+end
+
+--- 切页用的高度：内容高与自定义像素高取小。自定义更矮时按它算（allocate 就是按它排的）；
+--- 自定义更高时仍按内容高，放不下由 allocate 等比压缩，不把页拆开。
+---@param raw BookHomeHeightSpec
+---@return number
+function Layout.packHeight(raw)
+    local mode = raw.placement and raw.placement.height
+    local h = specHeight(raw)
+    return type(mode) == "number" and math.min(mode, h) or h
 end
 
 --- 钉页分配：default 用内容高，自定义用像素，剩余均分给 fill；放不下时整体等比压缩。
@@ -94,7 +108,7 @@ end
 function Layout.paginate(ranges, available, gap)
     local pages, cur, used = {}, {}, 0
     for _idx, raw in ipairs(ranges) do
-        local h = specHeight(raw)
+        local h = Layout.packHeight(raw)
         if #cur > 0 and used + gap + h > available then
             pages[#pages + 1] = cur
             cur, used = {}, 0
@@ -140,7 +154,7 @@ function Layout.build(ctx, components, page, opts)
         if opts.wrap then
             display[#display + 1] = ranges
         else
-            for _idx, pack in ipairs(Layout.paginate(ranges, inner_h, gap)) do display[#display + 1] = pack end
+            for _idx, pack in ipairs(Layout.paginate(ranges, math.floor(inner_h * Layout.OVERFLOW_SLACK), gap)) do display[#display + 1] = pack end
         end
     end
     local pages = #display
