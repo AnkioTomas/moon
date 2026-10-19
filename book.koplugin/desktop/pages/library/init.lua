@@ -511,7 +511,7 @@ function Library:bookTools()
         Button:new{ icon = "search", variant = "ghost", size = "small", callback = function() self:showSearch() end },
         Button:new{ icon = "refresh", variant = "ghost", size = "small", callback = function() self:rescan() end },
     }
-    if self.total > 0 then
+    if self.total > 0 and MoonSettings.get("ui").library_random then
         table.insert(tools, 3, Button:new{
             icon = "casino", variant = "ghost", size = "small", callback = function() self:openRandom() end,
         })
@@ -669,21 +669,42 @@ end
 
 --- 从当前筛选结果里随机抽一本并打开它的介绍页：按总数随机一页、每页一本，只取那一行。
 function Library:openRandom()
+--- 筛选没限定阅读状态时按随机范围设置抽（见 home.random.statuses），范围内没有书就提示。
     local source = self.desktop.source
     if not source or self.total < 1 then return end
     if self.random_cancel then self.random_cancel:cancel() end
-    local opts = self:query()
-    opts.page, opts.page_size = math.random(self.total), 1
-    local done = false
-    local handle = require("book.catalog").listLibraryAsync(source.id, opts, function(res)
-        done, self.random_cancel = true, nil
-        local book = res and res.data[1]
-        if book and not self.desktop.closed and self.desktop.source == source then
-            require("desktop.detail").open(self.desktop, "library", book)
+    local Catalog = require("book.catalog")
+    local function run(opts, fn)
+        local done = false
+        local handle = Catalog.listLibraryAsync(source.id, opts, function(res)
+            done, self.random_cancel = true, nil
+            if not self.desktop.closed and self.desktop.source == source then fn(res) end
+        end)
+        -- 同步回调时句柄已作废，不能再记成在飞。
+        if not done then self.random_cancel = handle end
+    end
+    local function pick(opts, total)
+        opts.page, opts.page_size = math.random(total), 1
+        run(opts, function(res)
+            local book = res and res.data[1]
+            if book then require("desktop.detail").open(self.desktop, "library", book) end
+        end)
+    end
+    if self.filter.read_status then return pick(self:query(), self.total) end
+    local statuses = require("desktop.pages.home.random").statuses()
+    local function probe(idx)
+        if not statuses[idx] then
+            require("ui.themes.widgets.toast"):new{ text = _("没有符合随机范围的书") }:show()
+            return
         end
-    end)
-    -- 同步回调时句柄已作废，不能再记成在飞。
-    if not done then self.random_cancel = handle end
+        local opts = self:query()
+        opts.read_status, opts.page, opts.page_size = statuses[idx], 1, 1
+        run(opts, function(res)
+            local count = res and res.count or 0
+            if count > 0 then pick(opts, count) else probe(idx + 1) end
+        end)
+    end
+    probe(1)
 end
 
 --- 按当前视图容量同步 page_size。
