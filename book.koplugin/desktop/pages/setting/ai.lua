@@ -173,19 +173,18 @@ local function providerRow(desktop)
             subtitle = _("决定怎么关闭推理模型的思考，避免回答被思考过程吃光而截断"),
             status = status, status_on = true,
             callback = function()
-                local function choose(id)
-                    return function()
+                local items = { { text = _("自动识别"), value = "auto" } }
+                for _idx, entry in ipairs(Client.PROVIDERS) do
+                    items[#items + 1] = { text = entry.label, value = entry.id }
+                end
+                require("ui.themes.widgets.list"):new{
+                    title = _("服务商"), centered = true, items = items, current = current,
+                    on_select = function(id)
                         Settings.get("ai").ai_provider = id
                         Settings.save("ai")
                         desktop:updateView()
-                    end
-                end
-                local items = { { text = _("自动识别"), callback = choose("auto") } }
-                for _idx, entry in ipairs(Client.PROVIDERS) do
-                    items[#items + 1] = { text = entry.label, callback = choose(entry.id) }
-                end
-                items[#items + 1] = { text = _("关闭") }
-                require("ui.themes.widgets.sheet"):new{ title = _("服务商"), items = items }:show()
+                    end,
+                }:show()
             end,
         })
     end
