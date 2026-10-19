@@ -242,13 +242,16 @@ local function setLayer(self, index, widget)
     if old ~= widget then old:free() end
 end
 
---- 换源：更新 Tab，广播给各页自己复位，再回到首页。
+--- 换源：广播给各页自己复位，留在当前页签重新激活（页签不可用时 syncTabs 回首页）。
 ---@param self BookDesktop 当前视图或布局实例
 ---@param source BookSource|nil 书籍所属数据源实例
 local function applySource(self, source)
     self.source = source
     broadcast(self, "onEvent", "source_changed", source)
-    self:switchTab("home")
+    syncTabs(self)
+    local page = self:page(self.tab)
+    notify(page, "activate", true)
+    self:updateView()
 end
 
 --- 只广播给各页。

@@ -219,7 +219,7 @@ do -- 非法 Tab 忽略
     Assert.eq(#Kit.dirty, n)
 end
 
-do -- 换源：广播给各子件，重算 Tab，回首页
+do -- 换源：广播给各子件，留在当前页签
     desk:switchTab("settings")
     drain()
     local source = { id = "next" }
@@ -231,10 +231,10 @@ do -- 换源：广播给各子件，重算 Tab，回首页
     Assert.eq(#synced, synced_before + 1)
     Assert.eq(synced[#synced], desk, "换源后对新源做桌面打开同步")
     Assert.eq(ids(), "home,library,insight,settings")
-    Assert.eq(desk.tab, "home")
-    Assert.eq(drain(),
-        "topbar:source_changed,home:source_changed,library:source_changed,store:source_changed,"
-        .. "insight:source_changed,settings:source_changed,settings.pause,home.resume!")
+    Assert.eq(desk.tab, "settings")
+    drain()
+    desk:switchTab("home")
+    drain()
     Assert.eq(desk.store.last_payload, source)
 end
 
