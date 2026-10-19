@@ -67,6 +67,7 @@ local Guard = require("ui.guard")
 local Features = {}
 
 local DIR = debug.getinfo(1, "S").source:match("^@(.*)/[^/]+$")
+Features.DIR = DIR
 local scanned = {}
 
 --- 扫描 features/ 下提供 `<file>.lua` 的目录名，按名字排序；每种文件本进程只扫一次。
@@ -137,6 +138,7 @@ Features.external = External.collect
 local loaded = false
 
 --- 加载器：main.lua 顶层调一次（不点名任何 feature）。
+---   0. 先删掉用户在「精简功能」里标记的 feature 目录（features/manage），并从 list 去掉；
 ---   1. 按 list 顺序 require 每个 feature 的 init：模块顶层自己往 utils.extension 的挂点登记；
 ---   2. 约定文件 setting.lua（有 entries 的）/ topbar.lua 代为登记到 setting.entries / topbar.items（按目录名）；
 ---   3. 把本层的 onReaderReady 分发登记到 reader.ready。
@@ -144,6 +146,7 @@ local loaded = false
 function Features.load()
     if loaded then return end
     loaded = true
+    Guard.call("feature manage purge", require("features.manage").purge, DIR, Features.list)
     for _idx, name in ipairs(Features.list) do Guard.call("feature " .. name .. " load", require, "features." .. name) end
     Features.registerConventions()
 end
