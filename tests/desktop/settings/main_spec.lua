@@ -116,7 +116,7 @@ package.preload["features.wallpaper"] = function()
 end
 package.preload["features.wallpaper.page"] = function()
     return {
-        rows = function() return {} end,
+        spec = function() return { title = "wallpaper", sections = function() return {} end } end,
         preview = function() return { dimen = { h = 20 } } end,
     }
 end
@@ -284,7 +284,7 @@ local function sectionTitles(page)
     return table.concat(titles, ",")
 end
 Assert.eq(sectionTitles(behavior), "行为,翻页动画,阅读侧栏")
-Assert.eq(sectionTitles(pages.lookup), "选区,翻译,X-Ray,段评,词典,文字识别（OCR）,百科")
+Assert.eq(sectionTitles(pages.lookup), "选区,翻译,双语对照,X-Ray,段评,词典,文字识别（OCR）,百科")
 Assert.eq(sectionTitles(pages.popup_menu), "按钮")
 Assert.eq(sectionTitles(pages.display), "屏幕,夜间与亮度")
 

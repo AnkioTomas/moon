@@ -527,8 +527,12 @@ function Desktop:updateView()
         syncTabs(self)
         setLayer(self, BAR, tabbar(self))
         setLayer(self, CONTENT, content(self))
+        -- 壁纸底座按页签取各界面的壁纸设置；换页后顶栏底下的壁纸也要跟着换
+        local backdrop = self[1][1]
+        local rescoped = backdrop ~= self.layers and backdrop.scope ~= self.tab
+        if rescoped then backdrop.scope = self.tab end
         if self.active then
-            local top_h = TopBar.height()
+            local top_h = rescoped and 0 or TopBar.height()
             UIManager:setDirty(self, "ui", Geom:new{ x = 0, y = top_h, w = self.dimen.w, h = self.dimen.h - top_h })
         end
     end
