@@ -215,6 +215,18 @@ function Sync.open(desktop)
     end
 end
 
+--- 本地文件有变（远程管理上传 / 删除等）：悄悄重扫本地书籍源，书架不用手动刷新。
+--- 不弹进度窗；本地源的同步已在执行时跳过（那一轮之后下次打开桌面会再扫）。
+---@param desktop table
+function Sync.rescan(desktop)
+    for _idx, source in ipairs(targets(desktop)) do
+        if source.id == "local" then
+            local running = Tasks.get("books\0local")
+            if not (running and running.state ~= "queued") then syncBooks(desktop, source, true) end
+        end
+    end
+end
+
 --- 图书馆手动刷新：强制同步。单源模式下源未配置时说明原因，源有设置入口就提供直达按钮；
 --- 混合模式只刷已配置的源，多个源一起刷时不逐个弹进度窗，进度看顶栏任务。
 ---@param desktop table

@@ -1333,6 +1333,38 @@ local function kindleHole(add)
         verb, port))
 end
 
+local RESCAN_DELAY = 3
+
+--- 文件有变：停手 3 秒后让桌面重扫本地书籍（批量上传只扫一次）。
+local function libraryChanged()
+    local UIManager = require("ui/uimanager")
+    UIManager:unschedule(Remote._rescan)
+    UIManager:scheduleIn(RESCAN_DELAY, Remote._rescan)
+end
+
+function Remote._rescan()
+    local UIManager = require("ui/uimanager")
+    for _idx, entry in ipairs(UIManager._window_stack) do
+        if entry.widget.name == "book_desktop" then require("desktop.sync").rescan(entry.widget) end
+    end
+end
+
+--- 变更类 handler 成功后通知书架重扫。
+---@param handler function
+---@param at integer cb 是第几个参数
+---@return function
+local function watched(handler, at)
+    return function(...)
+        local args, n = { ... }, math.max(select("#", ...), at)
+        local cb = args[at]
+        args[at] = function(ok, ...)
+            if ok then libraryChanged() end
+            return cb(ok, ...)
+        end
+        return handler(unpack(args, 1, n))
+    end
+end
+
 --- 启动服务（幂等）。
 ---@return boolean ok, string|nil err
 function Remote.start()
@@ -1361,17 +1393,17 @@ function Remote.start()
                     end)
                 end
             end,
-            save = saveUpload,
+            save = watched(saveUpload, 4),
             path_exists = pathExists,
             mkdir = function(path, cb)
                 cb(mkdirOne(path))
             end,
-            delete = deleteRecursiveAsync,
-            rename = function(path, to, cb)
+            delete = watched(deleteRecursiveAsync, 2),
+            rename = watched(function(path, to, cb)
                 cb(renameTo(path, to))
-            end,
-            extract = extractZipAsync,
-            transfer = transferAsync,
+            end, 3),
+            extract = watched(extractZipAsync, 2),
+            transfer = watched(transferAsync, 5),
             stat = statAsync,
             write_text = function(path, text, create, cb)
                 runFilesystem("remote-write", function()
