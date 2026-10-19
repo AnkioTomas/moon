@@ -662,14 +662,15 @@ function Library:query()
         unauthor = not not f.unauthor,
         read_status = f.read_status,
         downloaded = f.downloaded,
+        hidden = f.hidden,
         source_id = f.source_id or "",
         sort = self.sort,
     }
 end
 
 --- 从当前筛选结果里随机抽一本并打开它的介绍页：按总数随机一页、每页一本，只取那一行。
-function Library:openRandom()
 --- 筛选没限定阅读状态时按随机范围设置抽（见 home.random.statuses），范围内没有书就提示。
+function Library:openRandom()
     local source = self.desktop.source
     if not source or self.total < 1 then return end
     if self.random_cancel then self.random_cancel:cancel() end

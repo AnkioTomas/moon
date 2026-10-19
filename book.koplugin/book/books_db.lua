@@ -6,7 +6,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
   成员：deleted（0=在架有效，1=软删/非成员）；sync_status（0 待上传，1 已同步）
   展示：title/authors/category/series/intro/cover
   扩展元数据：meta（JSON 对象，见 BookMeta；入库前由 normalizeMeta 规范成可直接展示的值）
-  本地-only：reader_prefs、toc、toc_fetched_at、read_state
+  本地-only：reader_prefs、toc、toc_fetched_at、read_state、hidden（软删除：书留库不显示，远端同步不碰）
   进度真源在 pending_progress；本表不存 percent，进度禁止写回本表。
 
 不变量：
@@ -74,6 +74,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 ---@field file_size number|nil 文件大小（字节，蛇形）
 ---@field size number|nil 文件大小（字节，泛用）
 ---@field chapter table|nil 当前章元数据（阅读态）
+---@field hidden integer|nil 1=软删除（留库不显示）
 ---@field read_state integer|nil 0=未读且可自动标记，1=已读，2=用户强制未读
 ---@field reader_prefs string|nil 全书排版偏好 JSON（仅本地）
 ---@field toc string|nil 目录缓存 JSON（仅本地）
@@ -111,7 +112,7 @@ CREATE TABLE IF NOT EXISTS books (
   deleted INTEGER NOT NULL DEFAULT 1, sync_status INTEGER NOT NULL DEFAULT 1,
   reader_prefs TEXT, toc TEXT, toc_fetched_at INTEGER NOT NULL DEFAULT 0,
   read_state INTEGER NOT NULL DEFAULT 0, meta TEXT,
-  read_at INTEGER NOT NULL DEFAULT 0,
+  read_at INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (source_id, stable_id)
 );
 ]]) then return false end
@@ -129,6 +130,8 @@ CREATE TABLE IF NOT EXISTS books (
         { "meta", "meta TEXT" },
         -- 云端最近阅读时间（秒）：源书架快照给了才有，图书馆「最近阅读」排序用
         { "read_at", "read_at INTEGER NOT NULL DEFAULT 0" },
+        -- 软删除：书留在库里（元数据、进度、标注都在），默认不在书架显示，只在「软删除」筛选里列出
+        { "hidden", "hidden INTEGER NOT NULL DEFAULT 0" },
     }
     if columns then
         for i = 1, nrows do
@@ -456,11 +459,11 @@ function BookDB.pendingShelfAddIds(source_id)
 end
 
 local COLUMNS =
-    "source_id, stable_id, md5, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state, meta"
+    "source_id, stable_id, md5, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state, meta, hidden"
 
 --- rowexec 位置参数 → Book 表
 ---@return Book|nil
-local function rowToBook(source_id_r, stable_id_r, digest, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state, meta)
+local function rowToBook(source_id_r, stable_id_r, digest, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state, meta, hidden)
     if not source_id_r then
         return nil
     end
@@ -480,6 +483,7 @@ local function rowToBook(source_id_r, stable_id_r, digest, title, authors, categ
         deleted = del,
         sync_status = tonumber(sync_status) or 1,
         read_state = tonumber(read_state) or 0,
+        hidden = tonumber(hidden) or 0,
         percent = 0,
         meta = meta and JSON.decode(meta) or nil,
     }
@@ -846,7 +850,7 @@ function BookDB.countsBy(column, source_id)
     local where, args = DB.sourceClause("source_id", source_id)
     local bucket = "CASE WHEN " .. column .. " IS NULL OR " .. column .. "='' THEN '' ELSE " .. column .. " END"
     local result, nrows = DB.query(
-        "SELECT " .. bucket .. ", COUNT(*) FROM books WHERE " .. where .. " AND deleted=0"
+        "SELECT " .. bucket .. ", COUNT(*) FROM books WHERE " .. where .. " AND deleted=0 AND hidden=0"
             .. " GROUP BY " .. bucket
             .. " ORDER BY CASE WHEN " .. column .. " IS NULL OR " .. column .. "='' THEN 1 ELSE 0 END, "
             .. column .. ";",
@@ -867,7 +871,7 @@ function BookDB.sourceCountsBySource(source_id)
     local result, nrows = DB.query(
         [[SELECT source_id, COUNT(*)
           FROM books
-          WHERE ]] .. where .. [[ AND deleted=0
+          WHERE ]] .. where .. [[ AND deleted=0 AND hidden=0
           GROUP BY source_id
           ORDER BY source_id;]],
         unpack(args)
@@ -891,7 +895,7 @@ function BookDB.readStatusCountsBySource(source_id)
                  END,
                  COUNT(*)
           FROM books
-          WHERE ]] .. where .. [[ AND deleted=0
+          WHERE ]] .. where .. [[ AND deleted=0 AND hidden=0
           GROUP BY CASE
                      WHEN read_state=1 THEN 'read'
                      ELSE 'unread'
@@ -914,8 +918,27 @@ end
 ---@return integer
 function BookDB.downloadedCountBySource(source_id, chapter_sources)
     local where, args = DB.sourceClause("b.source_id", source_id)
-    where = where .. " AND b.deleted=0 AND " .. BookDB.downloadedClause(chapter_sources, args)
+    where = where .. " AND b.deleted=0 AND b.hidden=0 AND " .. BookDB.downloadedClause(chapter_sources, args)
     return tonumber(DB.rowexec("SELECT COUNT(*) FROM books b WHERE " .. where .. ";", unpack(args))) or 0
+end
+
+--- 软删除书架数（deleted=0 且 hidden=1）。
+---@param source_id string|string[]
+---@return integer
+function BookDB.hiddenCountBySource(source_id)
+    local where, args = DB.sourceClause("source_id", source_id)
+    return tonumber(DB.rowexec("SELECT COUNT(*) FROM books WHERE " .. where .. " AND deleted=0 AND hidden=1;",
+        unpack(args))) or 0
+end
+
+--- 软删除 / 恢复：只改本地 hidden 列，不碰同步状态。
+---@param source_id string
+---@param stable_id string
+---@param hidden boolean
+---@return boolean
+function BookDB.setHidden(source_id, stable_id, hidden)
+    return DB.exec([[UPDATE books SET hidden=? WHERE source_id=? AND stable_id=?;]],
+        hidden and 1 or 0, source_id, stable_id) ~= nil
 end
 
 --- 撕墓碑：远端确认删除后删掉 books 行，依附表（核心表 + 经 book_removed 的 feature 表）一并清掉。

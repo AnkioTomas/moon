@@ -107,7 +107,7 @@ do
 
     calls = {}
     Assert.eq(BookDB.downloadedCountBySource({ "local", "wechat" }, { "wechat" }), 7)
-    Assert.is_true(calls[1].sql:find("b.deleted=0 AND (CASE WHEN b.source_id=? THEN", 1, true) ~= nil)
+    Assert.is_true(calls[1].sql:find("b.deleted=0 AND b.hidden=0 AND (CASE WHEN b.source_id=? THEN", 1, true) ~= nil)
     Assert.eq(calls[1].args[3], "wechat")
 
     local category_counts = BookDB.countsBy("category", "local")

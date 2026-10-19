@@ -46,11 +46,12 @@ Assert.eq(Filter.sortText("bogus"), "最近添加", "未知排序回退第一项
 local data = {
     read_counts = { { status = "read", count = 4 }, { status = "unread", count = 7 } },
     downloaded_count = 2,
+    hidden_count = 3,
 }
 local current = { search = "三体", author = "刘慈欣", read_status = "read" }
 local got
 list = Filter.openStatus(anchor, data, current, function(f) got = f end)
-Assert.eq(table.concat(texts(list), ","), "全部,未读（7）,已读（4）,已下载（2）")
+Assert.eq(table.concat(texts(list), ","), "全部,未读（7）,已读（4）,已下载（2）,软删除（3）")
 Assert.eq(table.concat(checked(list), ","), "已读（4）")
 Themed.choose(list, 4)
 Assert.is_nil(got.read_status)
@@ -58,22 +59,27 @@ Assert.is_true(got.downloaded)
 Assert.eq(got.search, "三体")
 Assert.eq(got.author, "刘慈欣")
 Assert.eq(current.read_status, "read", "不改调用方的筛选表")
+Themed.choose(list, 5)
+Assert.is_true(got.hidden)
+Assert.is_nil(got.downloaded)
+Assert.eq(Filter.status(got).id, "hidden")
 Themed.choose(list, 1)
 Assert.is_nil(got.read_status)
 Assert.is_nil(got.downloaded)
+Assert.is_nil(got.hidden)
 Assert.eq(Filter.status({ downloaded = true }).id, "downloaded")
 Assert.eq(Filter.status({}).id, "all")
 
 -- 单一源没有数据源项；混合源接着列出（带源图标），已选源再点取消。
-Assert.is_nil(list.items[5])
+Assert.is_nil(list.items[6])
 data.source_counts = {
     { source_id = "local", name = "本地书籍", count = 3 },
     { source_id = "wechat", name = "微信读书", count = 5 },
 }
 list = Filter.openStatus(anchor, data, { source_id = "wechat" }, function(f) got = f end)
-Assert.eq(list.items[5].icon, "source")
+Assert.eq(list.items[6].icon, "source")
 Assert.eq(table.concat(checked(list), ","), "全部,微信读书（5）")
-Themed.choose(list, 5)
-Assert.eq(got.source_id, "local")
 Themed.choose(list, 6)
+Assert.eq(got.source_id, "local")
+Themed.choose(list, 7)
 Assert.is_nil(got.source_id)

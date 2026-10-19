@@ -230,6 +230,14 @@ do
     Assert.is_true(calls[1].sql:find("LEFT JOIN pending_progress", 1, true) ~= nil)
     Assert.is_true(calls[1].sql:find("b.deleted=0", 1, true) ~= nil)
 
+    -- 软删除：默认隐藏，hidden 筛选只列软删除的书。
+    calls = {}
+    Catalog.listBooks("local", {})
+    Assert.is_true(calls[1].sql:find("b.hidden=0", 1, true) ~= nil)
+    calls = {}
+    Catalog.listBooks("local", { hidden = true })
+    Assert.is_true(calls[1].sql:find("b.hidden=1", 1, true) ~= nil)
+
     DbBase.close()
     clearMods()
 end

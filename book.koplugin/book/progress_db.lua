@@ -261,7 +261,7 @@ function ProgressDB.recent(source_id, limit)
             AND EXISTS (
               SELECT 1 FROM books b
                WHERE b.source_id=p.source_id AND b.stable_id=p.stable_id
-                 AND ]] .. require("book.books_db").readableClause("b") .. [[
+                 AND ]] .. require("book.books_db").readableClause("b") .. [[ AND b.hidden=0
             )
           ORDER BY p.updated_at DESC, p.stable_id ASC LIMIT ?;]],
         unpack(args)

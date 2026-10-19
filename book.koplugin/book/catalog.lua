@@ -13,7 +13,7 @@ reading_stats 提供统计。
 
 --- 图书馆筛选项与分类索引。
 ---@class BookFiltersResult
----@field data { category_counts: { category: string, count: integer }[]|nil, series_counts: { series: string, count: integer }[]|nil, author_counts: { authors: string, count: integer }[]|nil, read_counts: { status: string, count: integer }[]|nil, downloaded_count: integer|nil, source_counts: { source_id: string, name: string, count: integer }[]|nil }|nil
+---@field data { category_counts: { category: string, count: integer }[]|nil, series_counts: { series: string, count: integer }[]|nil, author_counts: { authors: string, count: integer }[]|nil, read_counts: { status: string, count: integer }[]|nil, downloaded_count: integer|nil, hidden_count: integer|nil, source_counts: { source_id: string, name: string, count: integer }[]|nil }|nil
 
 --- 图书馆 / 书城列表查询参数。
 --- 未使用的筛选项传 nil 或空串；源不支持的项可忽略。
@@ -29,6 +29,7 @@ reading_stats 提供统计。
 ---@field author string|nil 按作者筛选（authors 整串精确匹配）
 ---@field unauthor boolean|nil 只查询 authors 为 NULL/空串的未知作者桶
 ---@field read_status "read"|"unread"|nil 按独立阅读状态筛选
+---@field hidden boolean|nil 只查软删除的书；缺省只查未软删除的
 ---@field downloaded boolean|nil 只查询已下载到本地的书（口径同 BookDB.isDownloaded）
 ---@field source_id string|nil 混合模式下按书行所属源筛选
 ---@field force boolean|nil 强制重扫、忽略扫描缓存（本地源手动刷新）
@@ -322,6 +323,7 @@ function Catalog.listBooks(source_id, opts)
             .. " AND NOT EXISTS (SELECT 1 FROM books s WHERE s.source_id=b.source_id"
             .. " AND s.deleted=0 AND s.title=b.title)))"
         or " AND b.deleted=0")
+    where = where .. (opts.hidden and " AND b.hidden=1" or " AND b.hidden=0")
     if type(opts.source_id) == "string" and opts.source_id ~= "" then
         where = where .. " AND b.source_id=?"
         args[#args + 1] = opts.source_id
@@ -355,10 +357,10 @@ function Catalog.listBooks(source_id, opts)
         where = where .. " AND b.read_state=1"
     elseif opts.read_status == "unread" then
         where = where .. " AND b.read_state<>1"
-    end
-    if opts.downloaded then
     elseif opts.read_status == "new" then
         where = where .. " AND b.read_state<>1 AND COALESCE(p.fraction, 0)<=0"
+    end
+    if opts.downloaded then
         where = where .. " AND " .. BookDB.downloadedClause(opts.chapter_sources, args)
     end
     -- 一律 LEFT JOIN：「最近阅读」按 max(本机进度时间, 云端最近阅读时间 b.read_at) 倒序，
@@ -443,6 +445,7 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             search = opts.search,
             read_status = opts.read_status,
             downloaded = opts.downloaded,
+            hidden = opts.hidden,
             chapter_sources = chapterSources(),
             source_id = opts.source_id,
             sort = opts.sort,
@@ -483,6 +486,7 @@ function Catalog.filtersAsync(source_id, cb)
             author_counts = BookDB.countsBy("authors", scope),
             read_counts = BookDB.readStatusCountsBySource(scope),
             downloaded_count = BookDB.downloadedCountBySource(scope, chapterSources()),
+            hidden_count = BookDB.hiddenCountBySource(scope),
         }
         -- 仅多源混合时给出源分组；顺序跟已启用列表，册数来自聚合。
         if type(scope) == "table" then
