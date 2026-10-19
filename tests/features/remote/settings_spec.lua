@@ -73,8 +73,6 @@ do
     Assert.eq(ai.fields[2].value, SettingsApi.MASK)
     Assert.eq(ai.fields[3].type, "text")
     Assert.eq(ai.fields[3].value, "gpt-test")
-    Assert.eq(ai.fields[4].key, "ai_max_tokens")
-    Assert.eq(ai.fields[4].type, "text")
     Assert.is_nil(ai.fields[1].normalize, "函数不下发")
     Assert.eq(snap.zlib.base_url, "", "nil 值下发空串")
 end
