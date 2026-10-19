@@ -342,9 +342,12 @@ local function apply(entries, cache, p, hash, result)
     result = result or { found = {}, why = {} }
     local located = 0
     -- 子进程结果走 JSON，稀疏的热点序号回来是字符串键
+    -- 序号稀疏时 rapidjson 编成数组，空位解成 json.null（函数值），只收 xpointer 对。
     for key, pos in pairs(result.found) do
-        cache.pos[entries[tonumber(key)].spot] = pos
-        located = located + 1
+        if type(pos) == "table" then
+            cache.pos[entries[tonumber(key)].spot] = pos
+            located = located + 1
+        end
     end
     for key, why in pairs(result.why) do
         local spot = entries[tonumber(key)].spot
