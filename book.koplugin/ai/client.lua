@@ -25,8 +25,8 @@ Client.DEFAULT_MAX_TOKENS = 4000
 local DEFAULT_UA = "opencode/1.2.3 ai-sdk/amazon-bedrock/3.0.73 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5"
 
 local TRUNCATED = _("回答被截断：输出长度上限不够")
---- 截断后放大重试的上限：常见模型的输出上限在 8K～16K，再大端点会直接 400。
-local RETRY_MAX_TOKENS = 16384
+--- 截断后放大重试的上限；再大端点可能直接 400。
+local RETRY_MAX_TOKENS = 32768
 
 --- 规范化 Chat Completions URL；已带路径则原样返回。
 ---@param base string|nil
