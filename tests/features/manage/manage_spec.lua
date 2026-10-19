@@ -1,12 +1,10 @@
---[[-- features.manage：标记 / 取消标记，启动时只删 ITEMS 里的已标记目录并从 list 去掉。 --]]
+--[[-- features.manage：停用 / 再启用，启动时只把 ITEMS 里已停用的 feature 从 list 去掉（不删文件）。 --]]
 local Assert = require("support.assert")
-local store = { removed = {} }
-local purged = {}
+local store = { disabled = {} }
 package.loaded["utils.settings"] = {
     get = function() return store end,
     save = function() end,
 }
-package.loaded["ffi/util"] = { purgeDir = function(path) purged[#purged + 1] = path end }
 package.loaded["libs/libkoreader-lfs"] = { attributes = function() return "directory" end }
 
 local Manage = require("features.manage")
@@ -15,10 +13,11 @@ Assert.is_false(Manage.isMarked("ocr"))
 Assert.is_true(Manage.toggle("ocr"))
 Assert.is_true(Manage.isMarked("ocr"))
 
-store.removed[#store.removed + 1] = "manage" -- 不在 ITEMS 里：篡改配置也不能删核心目录
+store.disabled[#store.disabled + 1] = "manage" -- 不在 ITEMS 里：篡改配置也不能停用核心
 local list = { "manage", "ocr", "ai" }
-Manage.purge("/p/features", list)
-Assert.eq(table.concat(purged, ","), "/p/features/ocr")
+local off = Manage.apply(list)
+Assert.is_true(off.ocr)
+Assert.is_nil(off.manage)
 Assert.eq(table.concat(list, ","), "manage,ai")
 
 Assert.is_false(Manage.toggle("ocr"), "再点一次取消标记")
@@ -26,7 +25,7 @@ Assert.is_false(Manage.isMarked("ocr"))
 
 -- 连带删除：删被引用方带走引用它的（递归），取消时反向恢复
 do
-    store.removed = {}
+    store.disabled = {}
     Assert.eq(table.concat(Manage.closure("lockscreen"), ","), "lockscreen,panel,sidebar,bars,nightmode")
     Assert.is_true(Manage.toggle("lockscreen"))
     for _, id in ipairs({ "lockscreen", "panel", "sidebar", "bars", "nightmode" }) do

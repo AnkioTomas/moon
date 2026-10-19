@@ -1,13 +1,12 @@
 --[[--
-精简功能：用户可以把不用的 feature 整个目录删掉，减小体积与内存占用。
+功能开关：用户可以停用不用的 feature（不加载，省内存与启动时间），文件不动，随时可再启用。
 
-被别的 feature 引用的 feature 一起删：`DEPENDENTS[x]` 列出直接引用 x 的 feature，删 x 就连带删它们（递归）；
-恢复时反过来，恢复 x 要把 x 依赖的那些也一并恢复。表由 `tests/features/manage/manage_spec.lua` 扫源码校验，
-新增跨 feature 引用必须同步改这里。
+被别的 feature 引用的 feature 一起停用：`DEPENDENTS[x]` 列出直接引用 x 的 feature，停 x 就连带停它们（递归）；
+再启用时反过来，启用 x 要把 x 依赖的那些也一并启用。表由 `tests/features/manage/manage_spec.lua` 扫源码校验，
+新增跨 feature 引用必须同步改这里。`update` 不开放停用，保证用户始终能自更新。
 
-设置里只记「要删谁」（`features.manage.removed`，已含连带项），真正的删除发生在下次启动加载器之前：
-当前进程里已加载的模块还要用到自己的文件，不能当场删。记录一直保留，所以更新月读把目录装回来后
-下次启动会再删一次；在设置页取消记录再更新月读即可找回。
+设置里只记「停用谁」（`features.manage.disabled`，已含连带项），下次启动加载器按它跳过这些 feature：
+当前进程里已加载的模块还在用，不能当场卸载。
 
 @module koplugin.book.features.manage
 --]]
@@ -49,7 +48,6 @@ Manage.ITEMS = {
     { id = "storage", label = _("存储空间"), subtitle = _("占用查看与清理") },
     { id = "subscribe", label = _("订阅"), subtitle = _("RSS 与网页订阅") },
     { id = "translate", label = _("翻译"), subtitle = _("划词翻译与双语对照") },
-    { id = "update", label = _("插件更新"), subtitle = _("检查并安装月读新版本") },
     { id = "wallpaper", label = _("壁纸"), subtitle = _("每日壁纸") },
     { id = "xray", label = _("X-Ray"), subtitle = _("人物与地点标注") },
 }
@@ -69,7 +67,6 @@ Manage.DEPENDENTS = {
     remote = { "lockscreen", "sidebar" },
     subscribe = { "storage" },
     translate = { "rare" },
-    update = { "remote" },
     xray = { "sidebar" },
 }
 
@@ -102,7 +99,7 @@ end
 
 ---@return string[]
 local function marked()
-    return require("utils.settings").get("features.manage").removed
+    return require("utils.settings").get("features.manage").disabled
 end
 
 ---@param id string
@@ -112,14 +109,6 @@ function Manage.isMarked(id)
         if name == id then return true end
     end
     return false
-end
-
---- 目录是否还在（已被启动时的清理删掉就是 false）。
----@param dir string features 目录
----@param id string
----@return boolean
-function Manage.exists(dir, id)
-    return require("libs/libkoreader-lfs").attributes(dir .. "/" .. id, "mode") == "directory"
 end
 
 ---@param id string
@@ -148,7 +137,7 @@ function Manage.toggle(id)
         end
     end
     local keep = {}
-    for _idx, name in ipairs(s.removed) do
+    for _idx, name in ipairs(s.disabled) do
         if not drop[name] then keep[#keep + 1] = name end
     end
     if not was then
@@ -156,23 +145,25 @@ function Manage.toggle(id)
             if not Manage.isMarked(name) then keep[#keep + 1] = name end
         end
     end
-    s.removed = keep
+    s.disabled = keep
     MoonSettings.save("features.manage", s)
     return not was
 end
 
---- 加载器在 require 任何 feature 之前调：删掉已标记的目录，并把它们从 list 里去掉。
----@param dir string features 目录
+--- 加载器在 require 任何 feature 之前调：把已停用的从 list 里去掉，返回停用集合（目录扫描用）。
 ---@param list string[] Features.list（就地修改）
-function Manage.purge(dir, list)
+---@return table<string, boolean>
+function Manage.apply(list)
+    local off = {}
     for _idx, id in ipairs(marked()) do
         if removable(id) then
-            if Manage.exists(dir, id) then require("ffi/util").purgeDir(dir .. "/" .. id) end
+            off[id] = true
             for i = #list, 1, -1 do
                 if list[i] == id then table.remove(list, i) end
             end
         end
     end
+    return off
 end
 
 return Manage
