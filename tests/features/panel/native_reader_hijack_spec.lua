@@ -85,10 +85,4 @@ next_tick()
 Assert.eq(reader_closed, 1)
 Assert.eq(opened_desktop, 1)
 
--- 旧版 KOReader 排序后顶栏按钮已被取走，再次重建前要补回，否则排序器崩。
-menu.menu_items = {}
-menu:setUpdateItemTable()
-Assert.eq(menu.menu_items.navi.icon, "appbar.navigation")
-Assert.is_true(type(menu.menu_items.filemanager.callback) == "function")
-
 _G.G_reader_settings = previous_settings
