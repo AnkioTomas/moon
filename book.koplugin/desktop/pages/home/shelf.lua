@@ -65,14 +65,13 @@ function M:showSettings(desktop)
         desktop:onEvent("home_refresh")
     end
     local function opt(n, label)
-        return { text = rows == n and "✓ " .. label or label, callback = function() pick(n) end }
+        return { text = label, checked = rows == n, callback = function() pick(n) end }
     end
-    require("ui.themes.widgets.sheet"):new{
-        title = M.label,
+    require("ui.themes.widgets.list"):new{
+        title = M.label, centered = true,
         items = {
-            { buttons = { opt(1, _("一行")), opt(2, _("两行")) } },
-            { buttons = { opt(3, _("三行")), opt(4, _("四行")), opt(0, _("自动")) } },
-            { text = T(_("每行 %1 本"), M.cols()), callback = function()
+            opt(1, _("一行")), opt(2, _("两行")), opt(3, _("三行")), opt(4, _("四行")), opt(0, _("自动")),
+            { text = T(_("每行 %1 本"), M.cols()), chevron = true, callback = function()
                 require("ui.themes.widgets.spin"):new{
                     title = _("每行数量"),
                     fields = { { value = M.cols(), min = MIN_COLS, max = MAX_COLS } },

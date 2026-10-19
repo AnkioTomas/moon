@@ -62,11 +62,12 @@ do -- 高度：当前项打勾；自定义走 Spin，按 10 步进、上限夹�
             label = "时钟", range = { height = 90, limit = 400 }, current = current,
             on_apply = function(v) applied[#applied + 1] = v end,
         })
-        return Themed.last("sheet")
+        return Themed.last("list")
     end
     local sheet = open("fill")
     Assert.eq(sheet.items[1].text, "默认高度")
-    Assert.eq(sheet.items[2].text, "✓ 占满剩余")
+    Assert.eq(sheet.items[2].text, "占满剩余")
+    Assert.is_true(sheet.items[2].checked)
     Assert.eq(sheet.items[3].text, "自定义高度…")
     sheet.items[1].callback()
     Assert.eq(applied[1], "default")
@@ -78,7 +79,8 @@ do -- 高度：当前项打勾；自定义走 Spin，按 10 步进、上限夹�
     Themed.last("spin").callback(123.6)
     Assert.eq(applied[2], 123)
     sheet = open(150)
-    Assert.eq(sheet.items[3].text, "✓ 自定义（150）")
+    Assert.eq(sheet.items[3].text, "自定义（150）")
+    Assert.is_true(sheet.items[3].checked)
     sheet.items[3].callback()
     Assert.eq(Themed.last("spin").fields[1].value, 150)
 end

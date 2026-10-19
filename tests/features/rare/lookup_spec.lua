@@ -141,7 +141,7 @@ local picker
 for _idx, b in ipairs(Kit.buttons(panel[1])) do if b.text == "现代汉语 ▼" then picker = b end end
 Assert.not_nil(picker, "词典选择按钮")
 picker.callback()
-local sheet = require("support.theme_stubs").last("sheet")
+local sheet = require("support.theme_stubs").last("list")
 Assert.len(sheet.items, 2)
 sheet.items[2].callback()
 Assert.eq(panel.text_box.text, "大猪")

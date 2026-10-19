@@ -133,14 +133,14 @@ function Edit.showHeightDialog(opts)
     local natural = range.height
     local limit = math.max(natural, range.limit or natural)
     local custom = type(opts.current) == "number"
-    Sheet:new{
-        title = _("设置高度"),
+    require("ui.themes.widgets.list"):new{
+        title = _("设置高度"), centered = true,
         items = {
-            { text = opts.current == "default" and _("✓ 默认高度") or _("默认高度"),
+            { text = _("默认高度"), checked = opts.current == "default",
                 callback = function() opts.on_apply("default") end },
-            { text = opts.current == "fill" and _("✓ 占满剩余") or _("占满剩余"),
+            { text = _("占满剩余"), checked = opts.current == "fill",
                 callback = function() opts.on_apply("fill") end },
-            { text = custom and T(_("✓ 自定义（%1）"), opts.current) or _("自定义高度…"), callback = function()
+            { text = custom and T(_("自定义（%1）"), opts.current) or _("自定义高度…"), checked = custom, callback = function()
                 Spin:new{
                     title = opts.label or _("高度"),
                     fields = { { value = custom and opts.current or natural, min = 1, max = limit, step = HEIGHT_STEP } },
