@@ -24,21 +24,17 @@ end
 ---@param on_url fun()|nil 拿到链接、弹二维码之前调用（让出全屏的上一步页面）
 function M.share(path, on_url)
     local _ = require("gettext")
-    -- 分享走局域网下载，只要求已拿到网络连接；不能用 isOnline，
-    -- 否则无外网/DNS 的局域网会被误判为不可分享。
-    if not require("ui/network/manager"):isConnected() then
-        require("ui.themes.widgets.toast"):new{
-            text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3,
-        }:show()
-        return
-    end
-    local url, err = require("features.remote").shareUrl(path)
-    if not url then
-        require("ui.themes.widgets.toast"):new{ text = tostring(err), timeout = 3 }:show()
-        return
-    end
-    if on_url then on_url() end
-    require("ui.themes.widgets.qr"):new{ title = _("通过远程管理分享"), text = url }:show()
+    -- 分享走局域网下载，只要求已拿到网络连接（没连时先问是否开 Wi-Fi）；
+    -- 不能用 isOnline，否则无外网/DNS 的局域网会被误判为不可分享。
+    require("ui/network/manager"):runWhenConnected(function()
+        local url, err = require("features.remote").shareUrl(path)
+        if not url then
+            require("ui.themes.widgets.toast"):new{ text = tostring(err), timeout = 3 }:show()
+            return
+        end
+        if on_url then on_url() end
+        require("ui.themes.widgets.qr"):new{ title = _("通过远程管理分享"), text = url }:show()
+    end)
 end
 
 --- 挂截图确认框的「通过远程管理分享」按钮（幂等）。

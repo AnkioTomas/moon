@@ -554,6 +554,9 @@ function Stubs.install()
             runWhenOnline = function(_, fn)
                 if fn then fn() end
             end,
+            runWhenConnected = function(_, fn)
+                if fn then fn() end
+            end,
         }
     end)
     -- 真实 pluginloader 顶层会拉起整套 UI；源注册表只读 enabled_plugins，用例按需塞 { path = ... }。
