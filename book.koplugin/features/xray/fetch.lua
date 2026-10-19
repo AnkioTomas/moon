@@ -124,7 +124,7 @@ end
 local function cleanPayload(decoded)
     local incoming = {}
     for section_index, section in ipairs(payload_sections) do
-        for item_index, item in ipairs(decoded[section.key]) do
+        for item_index, item in ipairs(decoded[section.key] or {}) do
             local row = cleanEntity(section.kind, item)
             if row then incoming[#incoming + 1] = row end
         end

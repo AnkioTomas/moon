@@ -260,7 +260,8 @@ Assert.is_true(not outcome.progressed)
 -- 下次重新点「分析全书」：新建的任务体按游标从第二段开始
 prompts = {}
 scan = Fetch.scanBook(identity, chunk_a .. "\n" .. chunk_b)
-replies = { { characters = { { name = "Lucy", aliases = {} } }, locations = {}, terms = {} } }
+-- 输出被截断时后面的段缺失（nil），只处理有的部分
+replies = { { characters = { { name = "Lucy", aliases = {} } } } }
 attempt()
 Assert.eq(outcome.ok, true)
 Assert.is_nil(scan_cursor, "全部完成删游标")

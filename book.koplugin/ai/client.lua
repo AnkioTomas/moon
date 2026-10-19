@@ -238,7 +238,11 @@ function Client.chat(messages, opts, cb)
             max_tokens = budget,
         }
         -- Qwen3.5 这类混合推理模型默认先写一大段思考，吃光 max_tokens，回答被截断。
-        if think_off then payload.chat_template_kwargs = { enable_thinking = false } end
+        -- OpenRouter 不认 chat_template_kwargs，用统一的 reasoning 参数关思考；不认的端点 400 后整组去掉。
+        if think_off then
+            payload.chat_template_kwargs = { enable_thinking = false }
+            payload.reasoning = { enabled = false }
+        end
         local encoded, body = pcall(JSON.encode, payload)
         if not encoded then
             cb(nil, body)
