@@ -63,19 +63,31 @@ function Markup.blocks(html)
     return blocks
 end
 
+--- 译文样式：颜色（`#RRGGBB`，空 = 跟随原文）与字号百分比（0 = 跟随原文）。
+---@param translate { bilingual_color: string, bilingual_scale: integer }
+---@return string|nil
+function Markup.style(translate)
+    local css = {}
+    if translate.bilingual_color ~= "" then css[#css + 1] = "color:" .. translate.bilingual_color end
+    if translate.bilingual_scale > 0 then css[#css + 1] = "font-size:" .. translate.bilingual_scale .. "%" end
+    return #css > 0 and table.concat(css, ";") or nil
+end
+
 --- 在每个有译文的叶子块尾插入译文。
 --- 原文已是目标语言时译文只多出几个空白（Edge 会在中文句号后补空格），不算译文，不插。
 ---@param html string
 ---@param lookup table<string, string> 原文 → 译文
+---@param style string|nil 译文的附加内嵌样式（`color:#555555;font-size:90%;`），nil 跟随原文
 ---@return string html
 ---@return integer count 插入的段数
-function Markup.inject(html, lookup)
+function Markup.inject(html, lookup, style)
+    local open = '<br/><span class="' .. Markup.CLASS .. '" style="display:block' .. (style and (";" .. style) or "") .. '">'
     local out, pos, count = {}, 1, 0
     for _idx, block in ipairs(Markup.blocks(html)) do
         local translated = lookup[block.text]
         if translated and translated:gsub("%s+", "") ~= block.text:gsub("%s+", "") then
             out[#out + 1] = html:sub(pos, block.close - 1)
-            out[#out + 1] = '<br/><span class="' .. Markup.CLASS .. '" style="display:block">' .. Text.xmlEscape(translated) .. "</span>"
+            out[#out + 1] = open .. Text.xmlEscape(translated) .. "</span>"
             pos = block.close
             count = count + 1
         end

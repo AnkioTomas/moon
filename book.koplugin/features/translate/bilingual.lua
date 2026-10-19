@@ -182,7 +182,7 @@ local function rewriteEpub(input, map, dest)
     for entry in reader:iterate() do
         if entry.mode == "file" and entry.path ~= "mimetype" then
             local data = assert(reader:extractToMemory(entry.path), reader.err)
-            if isHtml(entry.path) then data = Markup.inject(data, map) end
+            if isHtml(entry.path) then data = Markup.inject(data, map, input.style) end
             assert(writer:addFileFromMemory(entry.path, data, mtime), writer.err)
         end
     end
@@ -197,7 +197,7 @@ local function build(input)
     local tmp = input.dest .. ".part"
     if input.kind == "dom" then
         local f = assert(io.open(tmp, "wb"))
-        assert(f:write((Markup.inject(assert(readFile(input.source)), map))))
+        assert(f:write((Markup.inject(assert(readFile(input.source)), map, input.style))))
         assert(f:close())
     else
         rewriteEpub(input, map, tmp)
@@ -234,6 +234,7 @@ end
 ---@field dir string
 ---@field engine "edge"|"ai"
 ---@field lang string
+---@field style string|nil 译文附加样式（`Markup.style`），任务开始时取自设置
 
 --- 任务体：分析 → 翻译缺的段落 → 生成双语版 → 写 meta。返回 run(report, done)，done 恰好一次。
 --- run 返回 { cancel }：取消时停掉在途请求与子进程、删半截的 .part；已译段落留在缓存，下次接着翻。
@@ -422,6 +423,7 @@ local function start(ui, identity, engine, lang, chapter)
         return
     end
     local input = chapter and chapter.input or prepare(ui, identity, engine, lang)
+    input.style = Markup.style(require("utils.settings").get("features.translate"))
     local run = task(input)
     -- 整书翻译常比自动休眠时长还久。AutoSuspend（Kindle 上是重置 powerd 的 t1）按最后一次 InputEvent 计时：
     -- 每报一次进度就算一次操作，翻译结束自然恢复，不留开关状态。
