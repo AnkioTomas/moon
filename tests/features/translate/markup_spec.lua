@@ -54,3 +54,10 @@ Assert.eq(twice, '<p>A<br/><span class="moon-tr" style="display:block">甲</span
 -- 没有可插的块：原样返回。
 Assert.eq((Markup.inject("<p>A</p>", {})), "<p>A</p>")
 Assert.eq((Markup.inject("", { A = "甲" })), "")
+
+-- 译文样式：颜色与字号可单独设置，默认不加。
+Assert.eq(Markup.style({ bilingual_color = "", bilingual_scale = 0 }), nil)
+local style = Markup.style({ bilingual_color = "#555555", bilingual_scale = 90 })
+Assert.eq(style, "color:#555555;font-size:90%")
+Assert.eq((Markup.inject("<p>A</p>", { A = "甲" }, style)),
+    '<p>A<br/><span class="moon-tr" style="display:block;color:#555555;font-size:90%">甲</span></p>')

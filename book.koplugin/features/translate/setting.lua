@@ -10,6 +10,8 @@ local Setting = {}
 
 Setting.defaults = {
     edge_translation_enabled = true,
+    bilingual_color = "",
+    bilingual_scale = 0,
     translate_languages = { "en", "zh", "ja", "fr", "de", "ko", "es", "ru", "zh_TW" },
 }
 
@@ -52,7 +54,33 @@ function Setting.entries(desktop)
                         })
                     end
                 end
-                return { { title = _("翻译"), rows = rows } }
+                local style = {}
+                local function choice(key, title, icon, options, label)
+                    return function(iw)
+                        return Row.widget({
+                            width = iw, chevron = true,
+                            kind = "nav", icon = icon, title = title,
+                            status = label(translate[key]),
+                            callback = function()
+                                local items = {}
+                                for _idx, option in ipairs(options) do
+                                    items[#items + 1] = { text = label(option), callback = function()
+                                        translate[key] = option
+                                        MoonSettings.save("features.translate", translate)
+                                        desktop:updateView()
+                                    end }
+                                end
+                                require("ui.themes.widgets.sheet"):new{ title = title, items = items }:show()
+                            end,
+                        })
+                    end
+                end
+                local colors = { [""] = _("跟随原文"), ["#333333"] = _("深灰"), ["#555555"] = _("灰"), ["#777777"] = _("浅灰") }
+                style[#style + 1] = choice("bilingual_color", _("双语译文颜色"), "palette",
+                    { "", "#333333", "#555555", "#777777" }, function(v) return colors[v] end)
+                style[#style + 1] = choice("bilingual_scale", _("双语译文字号"), "format_size",
+                    { 0, 80, 90, 100, 110 }, function(v) return v == 0 and _("跟随原文") or v .. "%" end)
+                return { { title = _("翻译"), rows = rows }, { title = _("双语对照"), rows = style } }
             end,
         },
     }
