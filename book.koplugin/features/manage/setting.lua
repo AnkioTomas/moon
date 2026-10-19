@@ -34,8 +34,16 @@ local function sections(desktop)
                             desktop:updateView()
                             return
                         end
+                        local with = {}
+                        for idx, id in ipairs(Manage.closure(item.id)) do
+                            if idx > 1 and not Manage.isMarked(id) then with[#with + 1] = Manage.label(id) end
+                        end
+                        local text = T(_("删除「%1」？重启 KOReader 后生效，之后更新月读也不会再装回来。"), item.label)
+                        if #with > 0 then
+                            text = text .. "\n" .. T(_("依赖它的功能也会一并删除：%1"), table.concat(with, "、"))
+                        end
                         require("ui.themes.widgets.confirm"):new{
-                            text = T(_("删除「%1」？重启 KOReader 后生效，之后更新月读也不会再装回来。"), item.label),
+                            text = text,
                             ok_text = _("删除"),
                             ok_callback = function()
                                 Manage.toggle(item.id)
@@ -47,7 +55,7 @@ local function sections(desktop)
             end
         end
     end
-    return { { title = _("可删除的功能（再点一次取消；已删除的取消后更新月读即可找回）"), rows = rows } }
+    return { { title = _("可删除的功能（再点一次取消，会连带恢复它依赖的功能；已删除的取消后更新月读即可找回）"), rows = rows } }
 end
 
 ---@param desktop BookDesktop
