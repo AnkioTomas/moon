@@ -31,14 +31,7 @@ local function sections(desktop)
                         desktop:updateView()
                         return
                     end
-                    local with = {}
-                    for idx, id in ipairs(Manage.closure(item.id)) do
-                        if idx > 1 and not Manage.isMarked(id) then with[#with + 1] = Manage.label(id) end
-                    end
                     local text = T(_("停用「%1」？重启 KOReader 后生效，可随时再启用。"), item.label)
-                    if #with > 0 then
-                        text = text .. "\n" .. T(_("依赖它的功能也会一并停用：%1"), table.concat(with, "、"))
-                    end
                     require("ui.themes.widgets.confirm"):new{
                         text = text,
                         ok_text = _("停用"),
@@ -51,7 +44,7 @@ local function sections(desktop)
             })
         end
     end
-    return { { title = _("可停用的功能（再点一次取消停用，会连带恢复它依赖的功能）"), rows = rows } }
+    return { { title = _("可停用的功能（再点一次取消停用）"), rows = rows } }
 end
 
 ---@param desktop BookDesktop
