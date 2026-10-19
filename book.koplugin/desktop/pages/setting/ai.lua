@@ -156,6 +156,41 @@ local function languageRow(desktop)
     end
 end
 
+--- 「服务商」：各家关闭推理模型思考的请求字段不同，选对才能关掉。
+---@param desktop table
+---@return function
+local function providerRow(desktop)
+    return function(iw)
+        local Client = require("ai.client")
+        local current = Settings.get("ai").ai_provider or "auto"
+        local status = _("自动识别")
+        for _idx, entry in ipairs(Client.PROVIDERS) do
+            if entry.id == current then status = entry.label end
+        end
+        return Row.widget({
+            width = iw,
+            kind = "nav", icon = "cloud", title = _("服务商"),
+            subtitle = _("决定怎么关闭推理模型的思考，避免回答被思考过程吃光而截断"),
+            status = status, status_on = true,
+            callback = function()
+                local function choose(id)
+                    return function()
+                        Settings.get("ai").ai_provider = id
+                        Settings.save("ai")
+                        desktop:updateView()
+                    end
+                end
+                local items = { { text = _("自动识别"), callback = choose("auto") } }
+                for _idx, entry in ipairs(Client.PROVIDERS) do
+                    items[#items + 1] = { text = entry.label, callback = choose(entry.id) }
+                end
+                items[#items + 1] = { text = _("关闭") }
+                require("ui.themes.widgets.sheet"):new{ title = _("服务商"), items = items }:show()
+            end,
+        })
+    end
+end
+
 ---@param desktop table
 ---@return table
 function AI:rows(desktop)
@@ -169,6 +204,7 @@ function AI:rows(desktop)
         timeoutRow(desktop),
         testRow(desktop),
         languageRow(desktop),
+        providerRow(desktop),
     }
 end
 

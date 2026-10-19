@@ -17,5 +17,7 @@ return {
         ai_recap = true,
         -- AI 回答语言 / 地区用语：auto = 跟随界面语言，其余见 ai/client.lua 的 LANGUAGES。
         ai_language = "auto",
+        -- 服务商：决定怎么关闭推理模型的思考；auto = 按接口地址识别，见 ai/client.lua 的 PROVIDERS。
+        ai_provider = "auto",
     },
 }

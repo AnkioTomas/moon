@@ -130,8 +130,50 @@ function Client.decodeResponse(body)
     return content
 end
 
---- 端点不认 chat_template_kwargs（返回过 400 / 422）的，本进程内不再带。
+--- 端点不认关思考参数（返回过 400 / 422）的，本进程内不再带。
 local no_think_param = {}
+
+--- 各家关闭思考的请求字段互不通用：按服务商发各自的那一组。host 用于「自动识别」按接口地址匹配；
+--- 没有 host 的条目（自建、其它）只能手选。auto 认不出时发 generic（Qwen 与 OpenRouter 两种写法，不认就 400 回退）。
+Client.PROVIDERS = {
+    { id = "openrouter", label = "OpenRouter", host = "openrouter.ai", think_off = { reasoning = { enabled = false } } },
+    { id = "openai", label = "OpenAI", host = "api.openai.com", think_off = { reasoning_effort = "minimal" } },
+    { id = "gemini", label = "Gemini", host = "generativelanguage.googleapis.com", think_off = { reasoning_effort = "none" } },
+    { id = "deepseek", label = "DeepSeek", host = "api.deepseek.com", think_off = { thinking = { type = "disabled" } } },
+    { id = "zhipu", label = "智谱 GLM", host = "bigmodel.cn", think_off = { thinking = { type = "disabled" } } },
+    { id = "volcengine", label = "火山引擎 / 豆包", host = "volces.com", think_off = { thinking = { type = "disabled" } } },
+    { id = "dashscope", label = "阿里云百炼 / 通义", host = "aliyuncs.com", think_off = { enable_thinking = false } },
+    { id = "siliconflow", label = "SiliconFlow", host = "siliconflow", think_off = { enable_thinking = false } },
+    { id = "vllm", label = "vLLM / Ollama 等自建", think_off = { chat_template_kwargs = { enable_thinking = false } } },
+    { id = "none", label = _("其它（不发送）") },
+}
+
+local GENERIC_THINK_OFF = { chat_template_kwargs = { enable_thinking = false }, reasoning = { enabled = false } }
+
+--- 当前服务商条目：设置 ai_provider 手选的优先；auto 按接口地址认，认不出为 nil。
+---@param endpoint string
+---@return table|nil
+function Client.provider(endpoint)
+    local id = Settings.get("ai").ai_provider
+    if id and id ~= "auto" then
+        for _idx, entry in ipairs(Client.PROVIDERS) do
+            if entry.id == id then return entry end
+        end
+    end
+    local host = endpoint:match("^%w+://([^/]+)") or ""
+    for _idx, entry in ipairs(Client.PROVIDERS) do
+        if entry.host and host:find(entry.host, 1, true) then return entry end
+    end
+end
+
+--- 关闭思考要合进请求体的字段；选了「不发送」为 nil。
+---@param endpoint string
+---@return table|nil
+local function thinkOff(endpoint)
+    local provider = Client.provider(endpoint)
+    if not provider then return GENERIC_THINK_OFF end
+    return provider.think_off
+end
 
 --- 处理一次 Chat Completions 响应，返回 content, err。
 ---@param response string|nil
@@ -237,11 +279,10 @@ function Client.chat(messages, opts, cb)
             temperature = opts.temperature or 0.2,
             max_tokens = budget,
         }
-        -- Qwen3.5 这类混合推理模型默认先写一大段思考，吃光 max_tokens，回答被截断。
-        -- OpenRouter 不认 chat_template_kwargs，用统一的 reasoning 参数关思考；不认的端点 400 后整组去掉。
-        if think_off then
-            payload.chat_template_kwargs = { enable_thinking = false }
-            payload.reasoning = { enabled = false }
+        -- 混合推理模型默认先写一大段思考，吃光 max_tokens，回答被截断：按服务商关掉。
+        local fields = think_off and thinkOff(endpoint)
+        if fields then
+            for key, value in pairs(fields) do payload[key] = value end
         end
         local encoded, body = pcall(JSON.encode, payload)
         if not encoded then
@@ -275,7 +316,7 @@ function Client.chat(messages, opts, cb)
         end)
     end
 
-    current = send(not no_think_param[endpoint], max_tokens)
+    current = send(not no_think_param[endpoint] and thinkOff(endpoint) ~= nil, max_tokens)
     if not current then return nil end
     return { cancel = function()
         cancelled = true

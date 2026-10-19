@@ -51,8 +51,8 @@ end)
 Assert.eq(sent.url, "https://example.test/v1/chat/completions")
 Assert.eq(sent.body, "model-x")
 Assert.is_nil(encoded.enable_thinking)
-Assert.eq(encoded.chat_template_kwargs.enable_thinking, false, "默认关掉混合推理模型的思考")
-Assert.eq(encoded.reasoning.enabled, false, "OpenRouter 用 reasoning 参数关思考")
+Assert.eq(encoded.chat_template_kwargs.enable_thinking, false, "认不出服务商：两种写法都发")
+Assert.eq(encoded.reasoning.enabled, false)
 Assert.eq(sent.opts.headers.Authorization, "Bearer secret")
 Assert.eq(sent.opts.headers["User-Agent"],
     "opencode/1.2.3 ai-sdk/amazon-bedrock/3.0.73 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5")
@@ -197,3 +197,25 @@ Client.chat({ { role = "system", content = "用简体中文回答" } }, { locali
 Assert.matches(posts[1].payload.messages[1].content, "中国大陆")
 settings.ai_language = nil
 GetText.current_lang = old_lang
+
+-- 服务商：auto 按接口地址认；手选优先；「不发送」不带任何关思考字段
+local function think_payload(endpoint, provider)
+    settings.ai_endpoint, settings.ai_provider = endpoint, provider
+    posts = {}
+    Client.chat({ { role = "user", content = "x" } }, nil, function() end)
+    return posts[1].payload
+end
+local p = think_payload("https://openrouter.ai/api/v1", nil)
+Assert.eq(p.reasoning.enabled, false)
+Assert.is_nil(p.chat_template_kwargs)
+p = think_payload("https://api.deepseek.com/v1", "auto")
+Assert.eq(p.thinking.type, "disabled")
+p = think_payload("https://dashscope.aliyuncs.com/compatible-mode/v1", "auto")
+Assert.eq(p.enable_thinking, false)
+p = think_payload("https://vllm.test/v1", "vllm")
+Assert.eq(p.chat_template_kwargs.enable_thinking, false)
+Assert.is_nil(p.reasoning)
+p = think_payload("https://openrouter.ai/api/v1", "none")
+Assert.is_nil(p.reasoning)
+Assert.is_nil(p.thinking)
+settings.ai_provider = nil
