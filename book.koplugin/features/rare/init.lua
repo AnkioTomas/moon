@@ -32,4 +32,15 @@ function Rare.toggle()
     return s.rare_enabled
 end
 
+--- 切换注音范围并确保已打开（快捷面板用）。
+---@param level string rarest / rare / all
+function Rare.setLevel(level)
+    local MoonSettings = require("utils.settings")
+    local s = MoonSettings.get("features.rare")
+    s.rare_level = level
+    MoonSettings.save("features.rare", s)
+    require("features.rare.overlay").invalidate()
+    if not s.rare_enabled then Rare.toggle() end
+end
+
 return Rare
