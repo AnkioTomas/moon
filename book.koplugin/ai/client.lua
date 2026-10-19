@@ -186,7 +186,14 @@ local function finish(response, err, raw)
         if raw and type(raw.body) == "string" then
             local decoded_ok, decoded = pcall(JSON.decode, raw.body)
             detail = decoded_ok and type(decoded) == "table" and decoded.error
-            detail = type(detail) == "table" and detail.message or nil
+            if type(detail) == "table" then
+                -- OpenRouter 的 message 常只有 "Provider returned error"，上游原话在 metadata.raw。
+                local upstream = type(detail.metadata) == "table" and detail.metadata.raw
+                detail = detail.message and (upstream and detail.message .. ": " .. tostring(upstream) or detail.message)
+            else
+                detail = nil
+            end
+            if detail and raw.code then detail = "HTTP " .. raw.code .. " " .. detail end
         end
         logger.warn("ai.client: request failed err=", err, "code=",
             raw and raw.code, "body=", snip(raw and raw.body, 300))

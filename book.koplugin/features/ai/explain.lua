@@ -149,7 +149,7 @@ local function ask(ui, title, messages, selection)
         if answer == "" then
             release()
             require("ui.themes.widgets.toast"):new{
-                text = T(_("AI 解释失败：%1"), tostring(err or _("未知错误"))), timeout = 3,
+                text = T(_("AI 解释失败：%1"), tostring(err or _("未知错误"))), timeout = 8,
             }:show()
             return
         end

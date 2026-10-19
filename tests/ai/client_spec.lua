@@ -27,6 +27,8 @@ package.preload["http.request"] = function()
                 sent.cb = cb
             elseif reply == "length" then
                 cb('{"choices":[{"finish_reason":"length","message":{"content":"","reasoning_content":"..."}}]}', nil, {})
+            elseif type(reply) == "table" then
+                cb(nil, "HTTP " .. reply[1], { code = reply[1], body = reply[2] })
             elseif reply then
                 cb(nil, "HTTP " .. reply, { code = reply, body = '{"error":{"message":"Unrecognized request argument"}}' })
             else
@@ -114,7 +116,7 @@ replies, posts = { 401 }, {}
 Client.chat({ { role = "user", content = "hello" } }, nil, function(value, err) content, failure = value, err end)
 Assert.len(posts, 1)
 Assert.is_nil(content)
-Assert.eq(failure, "Unrecognized request argument")
+Assert.eq(failure, "HTTP 401 Unrecognized request argument")
 replies, posts = { "hold" }, {}
 local handle = Client.chat({ { role = "user", content = "hello" } }, nil, function() error("cancelled request must not call back") end)
 handle:cancel()
@@ -125,6 +127,14 @@ handle = Client.chat({ { role = "user", content = "hello" } }, nil, function() e
 handle:cancel()
 posts[1].cb('{"choices":[{"message":{"content":"late"}}]}', nil, {})
 
+-- OpenRouter：message 只有 "Provider returned error"，上游原话在 metadata.raw
+do
+    settings.ai_endpoint = "https://or.test/v1"
+    replies, posts = { { 429, '{"error":{"message":"Provider returned error","metadata":{"raw":"rate limited"}}}' } }, {}
+    Client.chat({ { role = "user", content = "hello" } }, nil, function(_value, err) failure = err end)
+    Assert.eq(failure, "HTTP 429 Provider returned error: rate limited")
+end
+
 -- 放大额度后的 400 是额度超上限，不是端点不认关思考参数
 settings.ai_endpoint = "https://third.test/v1"
 replies, posts = { "length", 400 }, {}
@@ -132,7 +142,7 @@ Client.chat({ { role = "user", content = "hello" } }, { max_tokens = 800 }, func
     content, failure = value, err
 end)
 Assert.len(posts, 2)
-Assert.eq(failure, "Unrecognized request argument")
+Assert.eq(failure, "HTTP 400 Unrecognized request argument")
 posts = {}
 Client.chat({ { role = "user", content = "hello" } }, nil, function() end)
 Assert.not_nil(posts[1].payload.chat_template_kwargs, "仍然关思考")
