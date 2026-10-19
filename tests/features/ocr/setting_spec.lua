@@ -1,4 +1,4 @@
---[[-- features.ocr.setting：「划词与查询」页词典之后追加「文字识别（OCR）」分节。 --]]
+--[[-- features.ocr.setting：「查词」页词典之后追加「文字识别（OCR）」分节。 --]]
 
 local Assert = require("support.assert")
 

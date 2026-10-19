@@ -1,5 +1,5 @@
 --[[--
-自动夜间 / 自动亮度配置键（settings/nightmode.lua）与设置：往桌面「屏幕与亮度」页追加「夜间与亮度」分节。
+自动夜间 / 自动亮度配置键（settings/nightmode.lua）与设置：往桌面「屏幕」页追加「夜间与亮度」分节。
 
 @module koplugin.book.features.nightmode.setting
 --]]

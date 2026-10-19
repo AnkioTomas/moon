@@ -165,7 +165,7 @@ local function sections(desktop)
                         chevron = false,
                         kind = "toggle",
                         icon = "translate",
-                        title = _("中文输入法增强"),
+                        title = _("输入法"),
                         status = IME.isEnabled() and _("开") or _("关"),
                         status_on = IME.isEnabled(),
                         callback = function()
@@ -250,14 +250,14 @@ function Setting.entries(desktop)
         {
             id = "main",
             group = "system",
-            order = 50,
+            order = 40,
             icon = "keyboard",
-            title = _("中文输入法增强"),
+            title = _("输入法"),
             subtitle = _("键盘布局"),
             status = on and _("开") or _("关"),
             status_on = on,
             page = {
-                title = _("中文输入法增强"),
+                title = _("输入法"),
                 sections = function() return sections(desktop) end,
             },
         },

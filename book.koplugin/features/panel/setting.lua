@@ -24,7 +24,7 @@ function Setting.entries(desktop)
     local T = require("ffi/util").template
     return {
         {
-            id = "desktop", group = "desktop", order = 60,
+            id = "desktop", group = "desktop", order = 40,
             icon = "dashboard_customize", title = _("桌面快捷面板"), subtitle = _("面板开关与顺序"),
             status = T(_("已启用 %1 项"), QuickPanel.enabledCount("desktop")), status_on = true,
             page = {
@@ -34,7 +34,7 @@ function Setting.entries(desktop)
             },
         },
         {
-            id = "reader", group = "reader", order = 60,
+            id = "reader", group = "reader", order = 40,
             icon = "dashboard_customize", title = _("阅读快捷面板"), subtitle = _("面板按钮与顺序"),
             status = T(_("已启用 %1 项"), QuickPanel.enabledCount("reader")), status_on = true,
             page = {

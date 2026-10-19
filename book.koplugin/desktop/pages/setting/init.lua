@@ -83,7 +83,7 @@ local function coreEntries(desktop)
     local plugin = desktop.plugin
     local active_id, active_name = activeSource()
     local network = HttpSetting.entry(desktop)
-    network.group, network.order = "system", 40
+    network.group, network.order = "system", 20
     return {
         {
             group = "library", order = 10, id = "sources", icon = "source", title = _("书籍来源"),
@@ -98,10 +98,10 @@ local function coreEntries(desktop)
             },
         },
         {
-            group = "library", order = 20, id = "source_config", icon = "tune", title = _("账号与登录"),
+            group = "library", order = 20, id = "source_config", icon = "tune", title = _("账号"),
             subtitle = _("书源账号、本地目录、Z-Library / OPDS 书城"),
             page = {
-                title = _("账号与登录"),
+                title = _("账号"),
                 sections = function() return Source:configSections{ desktop = desktop, plugin = plugin } end,
             },
         },
@@ -122,10 +122,10 @@ local function coreEntries(desktop)
             },
         },
         {
-            group = "desktop", order = 20, id = "display", icon = "display_settings", title = _("屏幕与亮度"),
+            group = "system", order = 10, id = "display", icon = "display_settings", title = _("屏幕"),
             subtitle = _("屏幕刷新、夜间、亮度"),
             page = {
-                title = _("屏幕与亮度"),
+                title = _("屏幕"),
                 sections = function()
                     local rows = Display:screenRows{ desktop = desktop }
                     return #rows > 0 and {{ title = _("屏幕"), rows = rows }} or {}
@@ -133,17 +133,17 @@ local function coreEntries(desktop)
             },
         },
         {
-            group = "desktop", order = 30, id = "startup", icon = "keyboard", title = _("启动与按键"),
+            group = "desktop", order = 60, id = "startup", icon = "keyboard", title = _("启动"),
             subtitle = _("启动进入月读、翻页键"),
             page = {
-                title = _("启动与按键"),
+                title = _("启动"),
                 sections = function()
                     return {{ title = _("启动"), rows = DesktopSettings:rows(desktop, require("menu").openOnStart()) }}
                 end,
             },
         },
         {
-            group = "desktop", order = 40, id = "library_display", icon = "grid_view", title = _("书架显示"),
+            group = "library", order = 30, id = "library_display", icon = "grid_view", title = _("书架显示"),
             subtitle = _("图书馆、最近阅读、书架的每行数量与封面风格"),
             page = {
                 title = _("书架显示"),
@@ -151,7 +151,7 @@ local function coreEntries(desktop)
             },
         },
         {
-            group = "desktop", order = 50, id = "topbar", icon = "toolbar", title = _("桌面顶栏"),
+            group = "desktop", order = 30, id = "topbar", icon = "toolbar", title = _("桌面顶栏"),
             subtitle = _("时钟、电量等状态项"),
             page = {
                 title = _("桌面顶栏"),
@@ -165,22 +165,22 @@ local function coreEntries(desktop)
             page = { title = _("阅读行为"), sections = function() return ReaderSettings:sections(desktop) end },
         },
         {
-            group = "reader", order = 20, id = "lookup", icon = "format_ink_highlighter", title = _("划词与查询"),
+            group = "reader", order = 50, id = "lookup", icon = "format_ink_highlighter", title = _("查词"),
             subtitle = _("翻译、X-Ray、词典、百科"),
-            page = { title = _("划词与查询") },
+            page = { title = _("查词") },
         },
         { parent = "lookup", order = 10, sections = function() return ReaderSettings:lookupSections(desktop) end },
         {
-            group = "reader", order = 30, id = "popup_menu", icon = "touch_long", title = _("划词菜单"),
+            group = "reader", order = 60, id = "popup_menu", icon = "touch_long", title = _("划词菜单"),
             subtitle = _("按钮开关、顺序与来源"),
             page = {
                 title = _("划词菜单"),
                 sections = function() return {{ title = _("按钮"), rows = ReaderSettings:popupRows(desktop) }} end,
             },
         },
-        { group = "system", order = 10, row = Language:row() },
+        { group = "system", order = 70, row = Language:row() },
         {
-            group = "system", order = 30, id = "ai", icon = "psychology", title = _("AI 接口"),
+            group = "system", order = 50, id = "ai", icon = "psychology", title = _("AI 接口"),
             subtitle = _("X-Ray 使用的大模型接口"),
             page = { title = _("AI 接口"), sections = function() return {{ title = _("AI"), rows = AISettings:rows(desktop) }} end },
         },
@@ -223,6 +223,7 @@ function Settings:updateView()
         { id = "desktop", title = _("桌面") },
         { id = "reader", title = _("阅读") },
         { id = "system", title = _("系统") },
+        { id = "security", title = _("安全") },
         { id = "maintenance", title = _("维护") },
     }
     -- 扩展分组（setting.groups）插在 after 指定的分组后，没写 after 排在最后。

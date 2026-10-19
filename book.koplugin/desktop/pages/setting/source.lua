@@ -148,7 +148,7 @@ function Source:configSections(ctx)
             if mod and (type(mod.rows) == "function" or type(mod.open) == "function") then
                 local status, status_on
                 if type(mod.rowStatus) == "function" then status, status_on = mod.rowStatus() end
-                local title = (mod.rowTitle and mod.rowTitle()) or _("账号与登录")
+                local title = (mod.rowTitle and mod.rowTitle()) or _("账号")
                 local icon = (mod.rowIcon and mod.rowIcon()) or "dns"
                 local rows = type(mod.rows) == "function" and mod.rows(plugin) or { function(iw)
                     return Row.widget({

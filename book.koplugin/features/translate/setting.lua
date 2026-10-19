@@ -1,5 +1,5 @@
 --[[--
-Edge 翻译配置键（settings/translate.lua）与设置：往桌面「划词与查询」页追加「翻译」分节。
+Edge 翻译配置键（settings/translate.lua）与设置：往桌面「查词」页追加「翻译」分节。
 
 @module koplugin.book.features.translate.setting
 --]]

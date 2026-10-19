@@ -1,5 +1,5 @@
 --[[--
-时间与时区配置键（settings/clock.lua）与设置入口：根页系统组「时间与日期」。
+时间与时区配置键（settings/clock.lua）与设置入口：根页系统组「时间」。
 
 @module koplugin.book.features.clock.setting
 --]]
@@ -23,14 +23,14 @@ function Setting.entries(desktop)
         {
             id = "main",
             group = "system",
-            order = 20,
+            order = 30,
             icon = "schedule",
-            title = _("时间与日期"),
+            title = _("时间"),
             subtitle = _("时区、系统时间与网络校时"),
             status = os.date("%H:%M"),
             status_on = true,
             page = {
-                title = _("时间与日期"),
+                title = _("时间"),
                 sections = function() return require("features.clock.page").sections(desktop) end,
             },
         },

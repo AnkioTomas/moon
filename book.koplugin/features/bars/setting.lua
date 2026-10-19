@@ -55,8 +55,8 @@ function Setting.entries(desktop)
         }
     end
     return {
-        item("top", "top", 40, "vertical_align_top", _("阅读页顶栏"), _("页面顶部的信息组件")),
-        item("bottom", "bottom", 50, "horizontal_rule", _("阅读页底栏"), _("进度条、百分比等")),
+        item("top", "top", 20, "vertical_align_top", _("阅读页顶栏"), _("页面顶部的信息组件")),
+        item("bottom", "bottom", 30, "horizontal_rule", _("阅读页底栏"), _("进度条、百分比等")),
     }
 end
 
