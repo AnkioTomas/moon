@@ -242,29 +242,45 @@ function Detail:deleteBook()
     }:show()
 end
 
---- 清理本书本地缓存：正文、章节、图片、封面需重新下载；书籍元数据与进度保留。
---- 本书在后台缓存队列里时拒绝，避免边写边删。
-function Detail:clearCache()
+--- 清理本书本地文档：keep_cover 为真（软删除）保留封面，否则连封面一起清。
+--- 书籍元数据、进度、标注保留；本书在后台缓存队列里时拒绝，避免边写边删。
+---@param self table
+---@param keep_cover boolean
+---@param text string 确认文案
+---@param ok_text string
+---@param done_text string
+local function purgeLocal(self, keep_cover, text, ok_text, done_text)
     local book = self.book
     Confirm:new{
-        text = T(_("清理《%1》的本地缓存？\n正文、章节与图片需重新下载。"), Book.title(book)),
-        ok_text = _("清理"),
+        text = T(text, Book.title(book)),
+        ok_text = ok_text,
         ok_callback = function()
             if require("workers.tasks").get(cacheKey(book)) then
                 Toast:new{ text = _("本书正在后台缓存，请稍后再试"), timeout = 3 }:show()
                 return
             end
-            local ok, leftover = Store.clearCache(book.source_id, book.stable_id)
-            local text = _("缓存已清理")
+            local ok, leftover = Store.clearCache(book.source_id, book.stable_id, keep_cover)
+            local result = done_text
             if not ok then
-                text = _("清理缓存失败")
+                result = _("清理缓存失败")
             elseif leftover then
-                text = _("部分缓存文件未能删除")
+                result = _("部分缓存文件未能删除")
             end
-            Toast:new{ text = text, timeout = 3 }:show()
+            Toast:new{ text = result, timeout = 3 }:show()
             self:reload()
         end,
     }:show()
+end
+
+--- 清理本书本地缓存：正文、章节、图片、封面需重新下载；书籍元数据与进度保留。
+function Detail:clearCache()
+    purgeLocal(self, false, _("清理《%1》的本地缓存？\n正文、章节与图片需重新下载。"), _("清理"), _("缓存已清理"))
+end
+
+--- 软删除：只删本书的本地文档，书架条目、元数据、封面、进度都留着，想读时重新下载。
+function Detail:softDelete()
+    purgeLocal(self, true, _("删除《%1》的本地文档？\n书架条目、封面与阅读进度保留，需要时可重新下载。"),
+        _("删除文档"), _("文档已删除"))
 end
 
 --- 库内书底栏动作：工具行 + 最后一行阅读主按钮。
@@ -292,6 +308,7 @@ function Detail.actionPlan(book, owner)
     end
     if cached then
         tools[#tools + 1] = { id = "clear_cache", icon = "cleaning_services", text = _("清理缓存") }
+        tools[#tools + 1] = { id = "soft_delete", icon = "delete_sweep", text = _("删除文档") }
     end
     if book.source_id and book.stable_id then
         if tonumber(book.read_state) == 1 then

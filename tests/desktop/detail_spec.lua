@@ -40,8 +40,8 @@ package.preload["book.store"] = function()
     return {
         rememberMany = function() end,
         isCached = function(book) return book and book.cached == true end,
-        clearCache = function(source_id, stable_id)
-            cleared = { source_id, stable_id }
+        clearCache = function(source_id, stable_id, keep_cover)
+            cleared = { source_id, stable_id, keep_cover }
             return clear_result[1], clear_result[2]
         end,
     }
@@ -135,7 +135,7 @@ Assert.eq(ids(tools), "download,unread,delete")
 Assert.eq(primary.text, "开始阅读")
 read_book.cached = true
 tools = Detail.actionPlan(read_book, chapter_src)
-Assert.eq(ids(tools), "download,clear_cache,unread,delete", "章节源已缓存仍可继续缓存后面的章")
+Assert.eq(ids(tools), "download,clear_cache,soft_delete,unread,delete", "章节源已缓存仍可继续缓存后面的章")
 
 -- 整本书源：没登记文件给下载（WebDAV / moon 未下载），离线副本在 cache 内给清理，已在本地书库目录两者都没有
 local online_book_src = setmetatable({ id = "moon", type = "book" }, SourceDefaults)
@@ -144,7 +144,7 @@ tools = Detail.actionPlan(moon_book, online_book_src)
 Assert.eq(ids(tools), "download_book,read,delete")
 moon_book.cached = true
 tools = Detail.actionPlan(moon_book, online_book_src)
-Assert.eq(ids(tools), "clear_cache,read,delete")
+Assert.eq(ids(tools), "clear_cache,soft_delete,read,delete")
 local dav_book = { source_id = "local", stable_id = "webdav://a.epub", read_state = 0 }
 Assert.eq(ids(Detail.actionPlan(dav_book, local_src)), "edit,scrape,download_book,read,delete")
 downloaded["webdav://a.epub"] = true
@@ -261,6 +261,16 @@ page:clearCache()
 Themed.last("confirm").ok_callback()
 Assert.eq(Themed.last("toast").text, "清理缓存失败")
 clear_result = { true }
+Assert.eq(cleared[3], false, "清理缓存连封面一起清")
+
+-- 软删除：只删文档，保留封面
+page:softDelete()
+confirm = Themed.last("confirm")
+Assert.eq(confirm.text, "删除《书一》的本地文档？\n书架条目、封面与阅读进度保留，需要时可重新下载。")
+confirm.ok_callback()
+Assert.eq(cleared[1], "wechat")
+Assert.is_true(cleared[3])
+Assert.eq(Themed.last("toast").text, "文档已删除")
 
 -- 全本缓存：入队跟随，进度来自源回调；同书在缓存时再入队拒绝、清理缓存拒绝。
 resolved = chapter_src
