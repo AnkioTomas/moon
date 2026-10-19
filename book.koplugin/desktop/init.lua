@@ -201,7 +201,7 @@ local function content(self)
     end
     widget.overlap_offset = { 0, TopBar.height() }
     local backdrop = Ext.last("desktop.backdrop")
-    if backdrop then backdrop.content(widget) end
+    if backdrop then backdrop.content(widget, self.tab) end
     return widget
 end
 
@@ -228,7 +228,7 @@ local function tabbar(self)
     }
     bar.overlap_offset = { 0, self.dimen.h - Tabbar.height() }
     local backdrop = Ext.last("desktop.backdrop")
-    if backdrop then backdrop.tabbar(bar) end
+    if backdrop then backdrop.tabbar(bar, self.tab) end
     return bar
 end
 
@@ -366,6 +366,22 @@ local function route(desktop, event)
     return Gesture.fm(desktop, event.args[1])
 end
 
+--- 旋转屏幕：FileManager 在同一次广播里转屏，桌面等下一 tick 屏幕尺寸稳定后整壳重建。
+--- 返回 false 让广播继续送给下层 FileManager。
+---@return boolean
+function Desktop:onSetRotationMode()
+    UIManager:nextTick(function()
+        if self.closed or shellKey() == self._shell then return end
+        Guard.call("desktop rotate", function()
+            self:build()
+            UIManager:setDirty(self, "full")
+        end)
+    end)
+    return false
+end
+
+Desktop.onScreenResize = Desktop.onSetRotationMode
+
 --- 桌面所有事件的入口，经 guard 隔离：页面里的 bug 弹错误页，不带崩 KOReader。
 --- 已销毁、尚未出栈的桌面（关窗过程中）事件一律放行给下层。
 --- 原始输入可能不是 Event、没有 handler，见 Modal:handleEvent。
@@ -488,7 +504,7 @@ function Desktop:build()
         style = { bg = Theme.current().color.page },
         width = self.dimen.w,
         height = self.dimen.h,
-        backdrop and backdrop.wrap(self.dimen.w, self.dimen.h, self.layers) or self.layers,
+        backdrop and backdrop.wrap(self.dimen.w, self.dimen.h, self.layers, self.tab) or self.layers,
     }
     if old then old:free() end
     logger.dbg("book.perf desktop.build", Perf.elapsedMs(started_at), "ms", self.tab)

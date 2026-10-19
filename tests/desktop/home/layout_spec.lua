@@ -114,6 +114,21 @@ Assert.is_true(visible.stats)
 Assert.is_true(visible.recent_list)
 Assert.is_true(build_log[2].height > build_log[1].height)
 
+-- 屏幕变矮放不下的钉页顺延成多页，钉页记录不动；编辑态仍按钉页。
+ranges.clock = { height = 60 }
+ranges.stats = { height = 60 }
+ranges.recent_list = { height = 60 }
+build_log = {}
+_, page, pages = Layout.build({ width = 320, height = 140 }, components, 2, { body_height = 140 })
+Assert.eq(pages, 3)
+Assert.eq(page, 2)
+Assert.eq(build_log[1].id, "stats")
+Assert.len(build_log, 1)
+_, _, pages = Layout.build({ width = 320, height = 140 }, components, 1, {
+    body_height = 140, wrap = function(widget) return widget end,
+})
+Assert.eq(pages, 2)
+
 -- 正文内框：四周 space.md，组件间 space.sm。
 local inner_w, inner_h, inner_gap = Layout.metrics(320, 140)
 Assert.eq(inner_w, 296)
