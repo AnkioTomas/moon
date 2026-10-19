@@ -431,43 +431,12 @@ local function patchDrawerTab(menu)
 end
 
 local FM_MENU_BUTTONS = {
-    filemanager_settings = { icon = "appbar.filebrowser" },
-    setting = { icon = "appbar.settings" },
-    tools = { icon = "appbar.tools" },
-    search = { icon = "appbar.search" },
-    main = { icon = "appbar.menu" },
+    filemanager_settings = "appbar.filebrowser",
+    setting = "appbar.settings",
+    tools = "appbar.tools",
+    search = "appbar.search",
+    main = "appbar.menu",
 }
-
-local function readerMenuButtons(menu)
-    return {
-        navi = { icon = "appbar.navigation" },
-        typeset = { icon = "appbar.typeset" },
-        setting = { icon = "appbar.settings" },
-        tools = { icon = "appbar.tools" },
-        search = { icon = "appbar.search" },
-        main = { icon = "appbar.menu" },
-        filemanager = {
-            icon = "appbar.filebrowser",
-            remember = false,
-            callback = function()
-                menu:onTapCloseMenu()
-                local file = menu.ui.document.file
-                menu.ui:onClose()
-                menu.ui:showFileManager(file)
-            end,
-        },
-    }
-end
-
--- 旧版 KOReader 只在 init 里放顶栏按钮，排序会把它们从 menu_items 取走；
--- tab_item_table 被清空后（蓝牙键盘通知、其它插件重置）再重建会因缺顶栏按钮崩，这里补回。
-local function restoreMenuButtons(menu, buttons)
-    local items = menu.menu_items
-    if items and items["KOMenu:menu_buttons"] == nil then
-        items["KOMenu:menu_buttons"] = {}
-        for id, entry in pairs(buttons) do items[id] = entry end
-    end
-end
 
 --- 一次性 patch 文件管理器菜单，注入桌面面板 Tab。
 local function installFileManagerMenu()
@@ -476,7 +445,12 @@ local function installFileManagerMenu()
     FMMenu._book_desktop_panel_patched = true
     local original = FMMenu.setUpdateItemTable
     FMMenu.setUpdateItemTable = function(self, ...)
-        restoreMenuButtons(self, FM_MENU_BUTTONS)
+        -- 旧版 KOReader 只在 init 里放顶栏按钮，排序会把它们从 menu_items 取走；
+        -- tab_item_table 被清空后（如蓝牙键盘通知）再重建会因缺顶栏按钮崩，这里补回。
+        if self.menu_items and self.menu_items["KOMenu:menu_buttons"] == nil then
+            self.menu_items["KOMenu:menu_buttons"] = {}
+            for id, icon in pairs(FM_MENU_BUTTONS) do self.menu_items[id] = { icon = icon } end
+        end
         original(self, ...)
         injectDesktopTab(self)
         patchDrawerTab(self)
@@ -528,7 +502,6 @@ local function installReaderMenu()
     patchFileBrowserButton(ReaderMenu)
     local original = ReaderMenu.setUpdateItemTable
     ReaderMenu.setUpdateItemTable = function(self, ...)
-        restoreMenuButtons(self, readerMenuButtons(self))
         original(self, ...)
         NativeSettings.inject(self)
         injectDesktopTab(self)
