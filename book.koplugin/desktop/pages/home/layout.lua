@@ -121,21 +121,31 @@ function Layout.build(ctx, components, page, opts)
     local w = ctx.width
     local body_h = opts.body_height or ctx.height
     local placements = Registry.widgets()
-    local pages = Widgets.pageCount(placements)
-    page = math.max(1, math.min(pages, page))
-
     local inner_w, inner_h, gap = Layout.metrics(w, body_h)
-    local ranges = {}
-    for _idx, place in ipairs(Widgets.onPage(placements, page)) do
-        local comp = components[place.id]
-        if comp then
-            local range = comp:heightRange(ctx, { width = inner_w, height = inner_h })
-            range.comp = comp
-            range.id = place.id
-            range.placement = place
-            ranges[#ranges + 1] = range
+
+    -- 钉页是按创建时的屏幕定的；屏幕变矮（横屏）放不下的页顺延成多页，钉页记录不动。编辑态只认钉页。
+    local display = {}
+    for pinned = 1, Widgets.pageCount(placements) do
+        local ranges = {}
+        for _idx, place in ipairs(Widgets.onPage(placements, pinned)) do
+            local comp = components[place.id]
+            if comp then
+                local range = comp:heightRange(ctx, { width = inner_w, height = inner_h })
+                range.comp = comp
+                range.id = place.id
+                range.placement = place
+                ranges[#ranges + 1] = range
+            end
+        end
+        if opts.wrap then
+            display[#display + 1] = ranges
+        else
+            for _idx, pack in ipairs(Layout.paginate(ranges, inner_h, gap)) do display[#display + 1] = pack end
         end
     end
+    local pages = #display
+    page = math.max(1, math.min(pages, page))
+    local ranges = display[page]
 
     local selected, heights, unused = Layout.allocate(ranges, inner_h, gap)
     local kids = { align = "left" }

@@ -110,6 +110,14 @@ function BookPlugin:onNetworkConnected()
     Features.emit("onNetworkConnected", self)
 end
 
+--- 转屏：KOReader 的 IterateRotation 等动作只把 SetRotationMode / SetDimensions 送给 FileManager 或
+--- ReaderUI（含本插件），桌面和弹窗是独立窗口收不到，这里转给窗口栈上要重排的窗口。
+function BookPlugin:onSetDimensions()
+    for _idx, win in ipairs(require("ui/uimanager")._window_stack) do
+        local widget = win.widget
+        if widget.relayout or widget.name == "book_desktop" then widget:onScreenResize() end
+    end
+end
 
 --- 退出：停更新任务、远程服务；桌面在窗口栈上时自行收 Exit（销毁并关窗），这里再兜底清残留。
 function BookPlugin:onExit()

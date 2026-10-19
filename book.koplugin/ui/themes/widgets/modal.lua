@@ -203,6 +203,31 @@ function Modal:close()
     UIManager:close(self, "ui")
 end
 
+--- 旋转屏幕后按新屏幕重排。dimen 与遮罩、点按区共用同一张表，原地改尺寸即可；
+--- 有 updateView 的整屏页（设置叠层、详情）重建内容，其余弹窗保持面板、重新居中。
+--- 旋转由 FileManager 在同一次广播里完成，所以等下一 tick 屏幕尺寸才是新的。
+function Modal:relayout()
+    if self.closed then return end
+    local screen = Screen:getSize()
+    local w, h = self.width or screen.w, self.height or screen.h
+    if self.dimen.w == w and self.dimen.h == h then return end
+    self.dimen.w, self.dimen.h = w, h
+    if self.updateView then
+        self:updateView()
+    else
+        self:setPanel(self[1])
+    end
+    UIManager:setDirty(self, "full")
+end
+
+local function scheduleRelayout(self)
+    UIManager:nextTick(function() Guard.call("modal relayout", self.relayout, self) end)
+    return false
+end
+
+Modal.onSetRotationMode = scheduleRelayout
+Modal.onScreenResize = scheduleRelayout
+
 --- 用户放弃（点面板外 / 返回键）；子类覆盖为取消语义。
 function Modal:dismiss()
     self:close()

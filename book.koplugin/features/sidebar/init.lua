@@ -337,6 +337,13 @@ function Sidebar:render()
     self.panel_x, self.panel_y = 0, 0
 end
 
+--- 旋转后由 Modal:relayout 调用：列表页按旧宽度借来的，丢掉重借。
+function Sidebar:updateView()
+    self.panel_w = math.floor(self.dimen.w * PANEL_RATIO)
+    self.menus = {}
+    self:render()
+end
+
 ---@param tab integer
 function Sidebar:goTab(tab)
     if tab < 1 or tab > #self.tabs or tab == self.tab then return end

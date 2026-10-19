@@ -49,6 +49,18 @@ Assert.eq(buttons[1].text, "取消")
 Assert.eq(buttons[2].text, "确定")
 Assert.eq(buttons[2].variant, "primary")
 
+-- 旋转屏幕：遮罩 / 点按区共用的 dimen 按新屏重排，面板重新居中，并全刷。
+Kit.SCREEN_W, Kit.SCREEN_H = 800, 600
+Assert.is_false(confirm:onSetRotationMode(), "事件继续往下层窗口广播")
+Assert.eq(confirm.dimen.w, 800)
+Assert.eq(confirm.dimen.h, 600)
+Assert.eq(confirm.panel_x, math.floor((800 - confirm[1]:getSize().w) / 2))
+Assert.eq(Kit.dirty[#Kit.dirty].mode, "full")
+Kit.SCREEN_W, Kit.SCREEN_H = 600, 800
+confirm:onScreenResize()
+Assert.eq(confirm.dimen.w, 600)
+panel = paint(confirm)
+
 -- 点面板内空白：吞掉不关。
 Assert.is_true(confirm:onTapModal(nil, Kit.tap(panel.x + 1, panel.y + 1)))
 Assert.len(Kit.closed, 0)
