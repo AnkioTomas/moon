@@ -109,6 +109,7 @@ package.preload["features.lockscreen"] = function()
     return { refresh = function() error("翻页不得重绘锁屏") end }
 end
 package.preload["features.translate"] = function() return {} end
+package.preload["features.reflow"] = function() return { available = function() return false end, active = function() return false end } end
 package.preload["features.animation"] = function()
     return { isEnabled = function() return false end }
 end

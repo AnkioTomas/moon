@@ -93,6 +93,7 @@ do
     Assert.is_true(Mapper.locked(preview))
     Assert.is_false(Mapper.encrypted(preview))
     Assert.is_false(Mapper.locked({ chapterVipFlag = 1, authStatus = 1, content = "已购" }))
+    Assert.is_false(Mapper.locked({ chapterVipFlag = 1, authStatus = 2, content = "会员" }))
     Assert.is_false(Mapper.locked({ chapterVipFlag = 0, authStatus = 1, content = "免费" }))
     Assert.is_true(Mapper.encrypted({ encrypt = true, content = "乱码" }))
     Assert.is_true(Mapper.encrypted({ fontEncrypt = 1 }))

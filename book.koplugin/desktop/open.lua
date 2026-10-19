@@ -92,6 +92,19 @@ end
 
 --- 打开书籍：Book 身份决定属主源，源负责返回已登记的物理文档。
 ---@param plugin table
+--- 上次读的是原书的衍生版（排版 / 双语）且文件还在：源登记的是原书路径，这里改回上次的版本。
+---@param identity BookIdentity
+---@param last_path string|nil 开书前 books.path
+---@param path string 源返回的路径
+---@return string
+local function rememberDerived(identity, last_path, path)
+    if not last_path or last_path == path then return path end
+    if require("reader.session.derived_note").originOf(last_path) ~= path then return path end
+    if require("libs/libkoreader-lfs").attributes(last_path, "mode") ~= "file" then return path end
+    if not Store.touch(last_path, identity) then return path end
+    return last_path
+end
+
 ---@param book Book
 ---@param on_done fun(ok: boolean)|nil 异步结束（成功开阅读器或失败）后回调；被更新一代打开取消时不调用
 ---@param opts table|nil 交给源 openBookAsync（如 chapter_idx 指定打开哪章）
@@ -129,6 +142,8 @@ function Open.book(plugin, book, on_done, opts)
         book = book,
     }
     local started_at = Perf.now()
+    local last = require("book.books_db").get(book.source_id, book.stable_id)
+    local last_path = last and last.path
     Open.pending_job = source:openBookAsync(identity, opts, function(path, open_err, meta)
         if generation ~= Open.generation then return end
         Open.pending_job = nil
@@ -142,7 +157,7 @@ function Open.book(plugin, book, on_done, opts)
             done(false)
             return
         end
-        showReader(plugin, path, generation, done)
+        showReader(plugin, rememberDerived(identity, last_path, path), generation, done)
     end)
 end
 
