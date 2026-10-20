@@ -16,7 +16,10 @@ package.preload["device"] = function()
     return { screen = { getWidth = function() return 600 end, getHeight = function() return 800 end } }
 end
 package.preload["ui.themes.widgets.text"] = function()
-    return { line = function(_, text) return { text = text } end }
+    return { box = function(_, text, width) return { text = text, width = width } end }
+end
+package.preload["ui.themes"] = function()
+    return { current = function() return { dialog = { bg = 0 } } end }
 end
 local invalidated
 package.preload["ui.themes.widgets.image"] = function()

@@ -25,6 +25,7 @@ local function showQrLogin()
     local Image = require("ui.themes.widgets.image")
     local Sheet = require("ui.themes.widgets.sheet")
     local Text = require("ui.themes.widgets.text")
+    local Theme = require("ui.themes")
     local Toast = require("ui.themes.widgets.toast")
 
     NetworkMgr:runWhenOnline(function()
@@ -56,13 +57,18 @@ local function showQrLogin()
             end
         end
 
-        ---@param content fun(): table
+        -- 原因可能很长（风控提示），单行会溢出弹窗：按弹窗内宽折行居中。
+        local function message(text, width)
+            return Text.box("body", text, width, { align = "center", bg = Theme.current().dialog.bg })
+        end
+
+        ---@param content fun(width: number): table
         ---@param retry fun()|nil 有值时在取消前加「重新获取二维码」
         local function showDialog(content, retry)
             closeDialog()
             local items = {
                 { widget = function(width)
-                    return CenterContainer:new{ dimen = Geom:new{ w = width, h = qr_size }, content() }
+                    return CenterContainer:new{ dimen = Geom:new{ w = width, h = qr_size }, content(width) }
                 end },
             }
             if retry then
@@ -87,7 +93,7 @@ local function showQrLogin()
         --- 失败留框：显示原因 + 重新获取二维码。按钮会先关框（触发 cancel），再重置 cancelled 重新开始。
         ---@param reason string
         showFailure = function(reason)
-            showDialog(function() return Text.line("body", reason) end, function()
+            showDialog(function(width) return message(reason, width) end, function()
                 cancelled = false
                 startLogin()
             end)
@@ -95,7 +101,7 @@ local function showQrLogin()
 
         startLogin = function()
             -- 点击即出框盖住入口：二维码要等一次网络往返，没有反馈用户会连点出多个登录流程。
-            showDialog(function() return Text.line("body", _("正在获取二维码…")) end)
+            showDialog(function(width) return message(_("正在获取二维码…"), width) end)
             begin_job = Auth.beginQrLoginAsync(function(started, err)
                 begin_job = nil
                 if cancelled then return end
