@@ -111,11 +111,8 @@ do
                 read_bytes = function(_, count, callback, arg, streaming, streaming_arg)
                     local data = string.rep("x", count)
                     if streaming then
-                        if streaming_arg then
-                            streaming(streaming_arg, data)
-                        else
-                            streaming(data)
-                        end
+                        -- turbo 2.1.5：流式回调恒带 arg 作首参，arg 为 nil 时 chunk 落在第二参。
+                        streaming(streaming_arg, data)
                     end
                     callback(arg, streaming and "" or data)
                 end,
