@@ -24,6 +24,7 @@ local TopbarSettings = require("desktop.pages.setting.topbar")
 local Language = require("desktop.pages.setting.language")
 local Maintenance = require("desktop.pages.setting.maintenance")
 local AISettings = require("desktop.pages.setting.ai")
+local DeviceSettings = require("desktop.pages.setting.device")
 local ReaderSettings = require("desktop.pages.setting.reader")
 local HttpSetting = require("http.proxy.setting")
 
@@ -179,6 +180,11 @@ local function coreEntries(desktop)
             },
         },
         { group = "system", order = 70, row = Language:row() },
+        {
+            group = "system", order = 15, id = "device", icon = "devices", title = _("设备"),
+            subtitle = _("设备名称与头像"),
+            page = { title = _("设备"), sections = function() return {{ title = _("设备"), rows = DeviceSettings:rows(desktop) }} end },
+        },
         {
             group = "system", order = 50, id = "ai", icon = "psychology", title = _("AI 接口"),
             subtitle = _("X-Ray 使用的大模型接口"),

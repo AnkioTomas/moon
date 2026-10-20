@@ -14,18 +14,26 @@
 
 on_submit(pin) 返回 true 关窗；返回字符串则清空输入、显示该提示。
 dismissable=false（解锁）时返回键、点空白都被吞掉；true（设置页）时多一个取消按钮，返回键也能取消。
+header=true（解锁）时左上角画设备头像 + 设备名称；on_forgot 给了、且 forgot() 为真时底部出现「忘记了设备密码？」。
+刚按下的那一位明文显示 REVEAL 秒再变回圆点；每位占固定宽度的格子，换字符时整行不抖。
 
 @module koplugin.book.features.passcode.pad
 --]]
 
+local BottomContainer = require("ui/widget/container/bottomcontainer")
+local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
+local FrameContainer = require("ui/widget/container/framecontainer")
+local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local OverlapGroup = require("ui/widget/overlapgroup")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
+local Image = require("ui.themes.widgets.image")
 local Modal = require("ui.themes.widgets.modal")
 local Text = require("ui.themes.widgets.text")
 local Theme = require("ui.themes")
@@ -43,31 +51,53 @@ local KEYS = {
 
 ---@class BookPasscodePad : BookThemeModal
 ---@field title string
+---@field header boolean|nil 左上角画设备头像与名称
+---@field forgot fun(): boolean|nil 为真时底部显示「忘记了设备密码？」
+---@field on_forgot fun()|nil
 ---@field on_submit fun(pin: string): true|string
 local Pad = Modal:extend{
     name = "book_passcode_pad",
     covers_fullscreen = true,
     title = nil,
+    header = false,
+    forgot = nil,
+    on_forgot = nil,
     on_submit = nil,
 }
 
 Pad.MIN_LEN = 4
 Pad.MAX_LEN = 6
+Pad.REVEAL = 1 -- 刚输入的那位明文显示多少秒
 
 function Pad:init()
     Modal.init(self)
     self.pin = ""
     self.message = nil
+    self.reveal = false
+    self.mask = function()
+        self.reveal = false
+        self:refresh()
+    end
     self:updateView()
+end
+
+function Pad:onCloseWidget()
+    UIManager:unschedule(self.mask)
+    Modal.onCloseWidget(self)
 end
 
 ---@param key string 数字或 del / ok
 function Pad:press(key)
     if key == "ok" then return self:submit() end
-    if key == "del" then
-        self.pin = self.pin:sub(1, -2)
-    elseif #self.pin < Pad.MAX_LEN then
-        self.pin = self.pin .. key
+    if key == "del" or #self.pin < Pad.MAX_LEN then
+        UIManager:unschedule(self.mask)
+        self.reveal = key ~= "del"
+        if self.reveal then
+            self.pin = self.pin .. key
+            UIManager:scheduleIn(Pad.REVEAL, self.mask)
+        else
+            self.pin = self.pin:sub(1, -2)
+        end
     end
     self.message = nil
     self:refresh()
@@ -82,7 +112,8 @@ end
 --- 清空输入。
 ---@param message string|nil 清空后显示的提示
 function Pad:clear(message)
-    self.pin, self.message = "", message
+    UIManager:unschedule(self.mask)
+    self.pin, self.message, self.reveal = "", message, false
     self:refresh()
 end
 
@@ -113,6 +144,67 @@ function Pad:key(key, w, h)
     return Button:new(spec)
 end
 
+--- 圆点行：每格固定宽度（取圆点与各数字里最宽的），刚输入的那位在格内换成数字，整行不抖。
+---@return table HorizontalGroup
+function Pad:dots()
+    local n = #self.pin
+    local cells = {}
+    for i = 1, Pad.MAX_LEN do
+        cells[i] = i < n and "●" or i == n and (self.reveal and self.pin:sub(-1) or "●") or "○"
+    end
+    if not self.cell_w then
+        self.cell_w, self.cell_h = 0, 0
+        for _idx, glyph in ipairs({ "●", "○", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" }) do
+            local probe = Text.line("hero", glyph)
+            local size = probe:getSize()
+            self.cell_w, self.cell_h = math.max(self.cell_w, size.w), math.max(self.cell_h, size.h)
+            probe:free()
+        end
+    end
+    local row = HorizontalGroup:new{}
+    for _idx, glyph in ipairs(cells) do
+        row[#row + 1] = CenterContainer:new{
+            dimen = Geom:new{ w = self.cell_w, h = self.cell_h },
+            Text.line("hero", glyph),
+        }
+    end
+    return row
+end
+
+--- 左上角：圆形设备头像 + 设备名称。
+---@return table
+function Pad:headerWidget()
+    local t = self.theme
+    local size = Theme.px(t.control.height)
+    local round = {}
+    for key, value in pairs(t.image) do round[key] = value end
+    round.border, round.radius, round.shadow = 0, 999, 0
+    local info = require("utils.device")
+    return FrameContainer:new{
+        bordersize = 0,
+        padding = Theme.px(t.space.lg),
+        HorizontalGroup:new{
+            align = "center",
+            Image.widget({ width = size, height = size, src = info.logo(), style = round }),
+            HorizontalSpan:new{ width = Theme.px(t.space.md) },
+            Text.line("body", info.name()),
+        },
+    }
+end
+
+--- 底部：连续输错后的「忘记了设备密码？」。
+---@return table
+function Pad:forgotWidget()
+    local t = self.theme
+    return BottomContainer:new{
+        dimen = Geom:new{ w = Screen:getWidth(), h = Screen:getHeight() },
+        VerticalGroup:new{
+            Button:new{ text = _("忘记了设备密码？"), variant = "ghost", callback = self.on_forgot },
+            VerticalSpan:new{ width = Theme.px(t.space.lg) * 2 },
+        },
+    }
+end
+
 function Pad:updateView()
     local t = self.theme
     local w, h = Screen:getWidth(), Screen:getHeight()
@@ -124,7 +216,7 @@ function Pad:updateView()
         align = "center",
         Text.line("title", self.title),
         VerticalSpan:new{ width = Theme.px(t.space.lg) },
-        Text.line("hero", string.rep("●", #self.pin) .. string.rep("○", Pad.MAX_LEN - #self.pin)),
+        self:dots(),
         VerticalSpan:new{ width = Theme.px(t.space.sm) },
         Text.line("caption", self.message or " ", { color = t.color.muted }),
         VerticalSpan:new{ width = Theme.px(t.space.lg) },
@@ -144,7 +236,13 @@ function Pad:updateView()
             callback = function() self:close() end,
         }
     end
-    self:setPanel(Box:new{ style = { bg = t.color.page }, width = w, height = h, col })
+    local screen = OverlapGroup:new{
+        dimen = Geom:new{ w = w, h = h },
+        CenterContainer:new{ dimen = Geom:new{ w = w, h = h }, col },
+    }
+    if self.header then screen[#screen + 1] = self:headerWidget() end
+    if self.on_forgot and self.forgot and self.forgot() then screen[#screen + 1] = self:forgotWidget() end
+    self:setPanel(Box:new{ style = { bg = t.color.page }, width = w, height = h, screen })
 end
 
 return Pad
