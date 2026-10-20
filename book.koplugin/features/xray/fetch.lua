@@ -22,17 +22,22 @@ local Fetch = {}
 local MIN_GROUND_LEN = 2
 local INTRO_LIMIT = 1500
 local LOOKUP_PRIOR_LIMIT = 2000
---- 提示词最多带前面几章的摘要。
-local RECAP_CHAPTERS = 5
+--- 一次产出人物、地点、术语三段 JSON，推理模型的思考还要占额度，8K 实测会被截断。
+local BULK_MAX_TOKENS = 16000
+--- 识别档位（book_xray_quality）：前情摘要章数、是否带本页之前的正文、每次实体数量上限、输出 token 上限、附加规则。
+local PROFILES = {
+    save = { recap = 0, prior = false, caps = { 10, 5, 5 }, max_tokens = 10000,
+        rule = "description 不超过 40 字，aliases 最多 2 个；只输出本页新出现或有重要新信息的实体。" },
+    standard = { recap = 5, prior = true, caps = { 15, 10, 10 }, max_tokens = BULK_MAX_TOKENS },
+    high = { recap = 10, prior = true, caps = { 25, 15, 15 }, max_tokens = BULK_MAX_TOKENS,
+        rule = "description 写详实（80 到 150 字）：身份、与其他人物的关系、关键经历；有别名或译名变体务必收全。" },
+}
 
---- 「省 token」：不带前情摘要、实体上限收紧。
-local function lean()
-    return require("utils.settings").get("features.xray").book_xray_save_tokens and true or false
+local function profile()
+    return PROFILES[require("utils.settings").get("features.xray").book_xray_quality] or PROFILES.standard
 end
 --- 全书分析每段正文的字节上限。
 local SCAN_CHUNK = 32000
---- 一次产出人物、地点、术语三段 JSON，推理模型的思考还要占额度，8K 实测会被截断。
-local BULK_MAX_TOKENS = 16000
 
 local payload_sections = {
     { kind = "character", key = "characters" },
@@ -177,7 +182,8 @@ end
 ---@return string|nil
 local function storySoFar(identity)
     local idx = require("reader.session").chapterIndex()
-    return idx and not lean() and AI.priorSummaries(identity, idx, RECAP_CHAPTERS) or nil
+    local recap = profile().recap
+    return idx and recap > 0 and AI.priorSummaries(identity, idx, recap) or nil
 end
 
 ---@return integer 1..100
@@ -200,13 +206,16 @@ local function fromContext(ui, identity, existing, cb)
         return nil
     end
     local title, author = bookMeta(identity)
+    if not profile().prior then
+        ctx.prior_text = ""
+    end
     local messages = {
         { role = "system", content = Prompts.system },
         { role = "user", content = Prompts.comprehensive(
             title, author, progressPercent(), ctx.current_page, ctx.prior_text, Store.promptSnapshot(existing),
-            storySoFar(identity), lean()) },
+            storySoFar(identity), profile()) },
     }
-    return AI.jsonExtract(messages, { localize = true, max_tokens = BULK_MAX_TOKENS, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
+    return AI.jsonExtract(messages, { localize = true, max_tokens = profile().max_tokens, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
         if not decoded then cb(nil, err); return end
         persist(identity, filterGrounded(cleanPayload(decoded), readingContext(ctx)), cb)
     end)
@@ -342,9 +351,9 @@ function Fetch.scanBook(identity, text)
                 { role = "system", content = Prompts.system },
                 { role = "user", content = Prompts.comprehensive(
                     title, author, math.floor(index * 100 / #chunks), chunk, "", Store.promptSnapshot(existing),
-                    nil, lean()) },
+                    nil, profile()) },
             }
-            request = AI.jsonExtract(messages, { localize = true, max_tokens = BULK_MAX_TOKENS, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
+            request = AI.jsonExtract(messages, { localize = true, max_tokens = profile().max_tokens, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
                 if not decoded then finish({ ok = false, err = err }); return end
                 local ok, save_err = pcall(mergeAndSave, identity, filterGrounded(cleanPayload(decoded), chunk))
                 if not ok then finish({ ok = false, err = save_err }); return end

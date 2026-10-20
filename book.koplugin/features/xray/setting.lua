@@ -8,12 +8,20 @@ local _ = require("gettext")
 
 local Setting = {}
 
+-- book_xray_quality：save 节约 / standard 标准 / high 高质量。
 -- book_xray_mark_style：dashed 虚线 / solid 实线。
 Setting.defaults = {
     book_xray_enabled = true,
     book_xray_show_marks = true,
-    book_xray_save_tokens = false,
+    book_xray_quality = "standard",
     book_xray_mark_style = "dashed",
+}
+
+local QUALITY_NEXT = { save = "standard", standard = "high", high = "save" }
+local QUALITY_LABEL = {
+    save = function() return _("节约") end,
+    standard = function() return _("标准") end,
+    high = function() return _("高质量") end,
 }
 
 --- 改了画线相关设置：作废标注缓存并重画打开中的阅读页。
@@ -71,14 +79,14 @@ function Setting.entries(desktop)
                                 })
                             end,
                             function(iw)
-                                local lean = xray.book_xray_save_tokens
+                                local quality = QUALITY_NEXT[xray.book_xray_quality] and xray.book_xray_quality or "standard"
                                 return Row.widget({
-                                    width = iw, chevron = false,
-                                    kind = "toggle", icon = "savings", title = _("X-Ray 省 token"),
-                                    subtitle = _("不带前几章摘要，每次识别的人物、地点、术语更少"),
-                                    status = lean and _("开") or _("关"), status_on = lean,
+                                    width = iw, chevron = true,
+                                    kind = "nav", icon = "savings", title = _("X-Ray 识别档位"),
+                                    subtitle = _("节约：只看当前页；标准：带本章前文与前 5 章摘要；高质量：前 10 章摘要，实体更多"),
+                                    status = QUALITY_LABEL[quality](),
                                     callback = function()
-                                        xray.book_xray_save_tokens = not lean
+                                        xray.book_xray_quality = QUALITY_NEXT[quality]
                                         save()
                                     end,
                                 })
