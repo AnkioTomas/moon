@@ -497,6 +497,26 @@ do
     Assert.is_nil(sent.Authorization)
 end
 
+-- streamBody：只发 setup 阶段备好的 self.req，不再 _prepare（重复 Host/Content-Length 会让服务器不回应）。
+do
+    local Fetch = require("http.request.fetch")
+    local path = Config.dir() .. "/stream_body.bin"
+    local f = assert(io.open(path, "wb"))
+    f:write(("x"):rep(70 * 1024))
+    f:close()
+    local writes, prepared = {}, 0
+    local client = { req = "HEAD", _prepare_http_request = function() prepared = prepared + 1 end }
+    client.iostream = { write = function(_, data, cb) writes[#writes + 1] = #data; cb() end }
+    client._headers_written_cb = function() writes.done = true end
+    Fetch.streamBody(client, path)
+    client:_send_http_request()
+    os.remove(path)
+    Assert.eq(prepared, 0, "不重复生成请求头")
+    Assert.eq(writes[1], 4, "先发请求头")
+    Assert.eq(writes[2] + writes[3], 70 * 1024, "文件分块发完")
+    Assert.is_true(writes.done)
+end
+
 -- 本机回环不看网卡（蓝牙守护进程接口在 Wi-Fi 关着时也要能连）。
 do
     network_connected = false
