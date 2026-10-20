@@ -249,7 +249,7 @@ end
 ---@return number
 function Store:syncPageSize()
     local desktop = self.desktop
-    local head_h = #self:chipGroups() * Library.chipRowHeight()
+    local head_h = Library.chipHeight(desktop.dimen.w, self:chipGroups())
     local n = Library.gridMetrics(desktop.dimen.w, desktop:contentHeight(), head_h).page_size
     if self.page_size ~= n then
         self.page_size = n
