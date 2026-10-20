@@ -2,15 +2,13 @@
 微信读书段评（他人在本章某句下的点评）：本章热点与按句分页。
 
 热点 = ``/web/book/underlines`` 的全部 range，分批并发 ``readReviews``（每句只要 1 条）换回原句
-``abstract`` 与段评总数，按章缓存到磁盘。拉取与定位分开：章会话在本章 HTML 上定位，关联书按页查找原句。
+``abstract`` 与段评总数，缓存由 `book.review_cache` 统一做。拉取与定位分开：章会话在本章 HTML 上定位，关联书按页查找原句。
 原句经 ``Annotations.locateBatch`` 落到 HTML 的 xpointer，定位不了（找不到 / 重复无法消歧）的直接丢弃，不画错位置。
 
 @module koplugin.book.source.wechat.reviews
 --]]
 
 local Annotations = require("book.annotations")
-local JSON = require("json")
-local Paths = require("utils.paths")
 local _ = require("gettext")
 
 local PAGE_SIZE = 30
@@ -18,10 +16,6 @@ local PAGE_SIZE = 30
 local BATCH_SIZE = 40
 -- 同时在飞的批数：串行时一章 8 批要 10 秒以上。
 local CONCURRENCY = 3
--- 热点原句与段评数变得慢，缓存一周（cache/wechat/reviews/<bookId>/<章 uid>.json）。
-local CACHE_TTL = 7 * 24 * 3600
--- 拉到 0 条多半是网络抖动或接口偶发（整批 3 秒超时）：存一周会让七天一条都看不到，只留 5 分钟再试。
-local EMPTY_TTL = 300
 
 local Reviews = {}
 
@@ -98,41 +92,7 @@ function Reviews.item(entry)
     }
 end
 
----@param book_id string
----@param chapter_uid string
----@return string
-local function cachePath(book_id, chapter_uid)
-    return Paths.sourceCacheDir("wechat") .. "/reviews/" .. book_id .. "/" .. chapter_uid .. ".json"
-end
-
---- 未过期的本章热点缓存；没有、过期或损坏时 nil。
----@param book_id string
----@param chapter_uid string
----@return WechatReviewHotspot[]|nil
-local function readCache(book_id, chapter_uid)
-    local f = io.open(cachePath(book_id, chapter_uid), "rb")
-    if not f then return nil end
-    -- 写到一半断电留下的残文件：当没有缓存，重新拉一次覆盖。
-    local ok, data = pcall(require("utils.json").decode, f:read("*a"))
-    f:close()
-    if ok and type(data) == "table" and (data.expire or 0) > os.time() then return data.hotspots end
-    return nil
-end
-
----@param book_id string
----@param chapter_uid string
----@param hotspots WechatReviewHotspot[]
-local function writeCache(book_id, chapter_uid, hotspots)
-    local path = cachePath(book_id, chapter_uid)
-    Paths.ensureDir(path:match("(.+)/[^/]+$"))
-    local f = io.open(path, "wb")
-    if not f then return end
-    local ttl = #hotspots > 0 and CACHE_TTL or EMPTY_TTL
-    f:write(JSON.encode({ expire = os.time() + ttl, hotspots = hotspots }))
-    f:close()
-end
-
---- 拉本章热点：磁盘缓存 → underlines → 并发分批 readReviews。
+--- 拉本章热点：underlines → 并发分批 readReviews。
 ---@param client WechatClient
 ---@param book_id string
 ---@param chapter_uid string
@@ -144,13 +104,6 @@ function Reviews.hotspotsAsync(client, book_id, chapter_uid, cb)
     local function cancel()
         cancelled = true
         for _key, job in pairs(jobs) do job.cancel() end
-    end
-    local cached = readCache(book_id, chapter_uid)
-    if cached then
-        require("ui/uimanager"):nextTick(function()
-            if not cancelled then cb(cached) end
-        end)
-        return { cancel = cancel }
     end
     jobs.underlines = client:underlinesAsync(book_id, chapter_uid, function(data, err)
         jobs.underlines = nil
@@ -175,7 +128,6 @@ function Reviews.hotspotsAsync(client, book_id, chapter_uid, cb)
                 for _entry_idx, entry in ipairs(reviews) do collected[#collected + 1] = entry end
             end
             local hotspots = Reviews.hotspots({ reviews = collected })
-            writeCache(book_id, chapter_uid, hotspots)
             cb(hotspots)
         end
         local function launch()

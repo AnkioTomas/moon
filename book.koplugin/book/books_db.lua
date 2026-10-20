@@ -687,7 +687,7 @@ end
 
 --- 挂在书身份上的核心表模块；note / progress / stats 顶层 require 本模块，只能延迟加载。
 local IDENTITY_MODULES = {
-    "book.chapters_db", "book.note_db", "book.progress_db", "book.stats_db", "ai.summary_db",
+    "book.chapters_db", "book.note_db", "book.progress_db", "book.stats_db", "book.review_cache", "ai.summary_db",
 }
 
 --- 依附表跟着迁身份：先核心表，再发事件给 feature 的表。须在调用方事务内。

@@ -262,15 +262,10 @@ function Sheet:refresh()
     UIManager:setDirty(self, "ui")
 end
 
---- 拉下一批并追加；未联网立即提示，不留悬挂状态。
+--- 拉下一批并追加；命中本地缓存不联网，没命中又没网时源会立即回错，不留悬挂状态。
 function Sheet:load()
     if self.job or not self.more then return end
     local Toast = require("ui.themes.widgets.toast")
-    if not require("ui/network/manager"):isConnected() then
-        Toast:new{ text = _("未联网，无法加载段评"), timeout = 2 }:show()
-        self.turn_after_load = false
-        return
-    end
     local source = self.identity.source --[[@as ParagraphReviewSource]]
     local done = false
     local job = source:paragraphReviewPageAsync(self.identity, self.spot.range, self.max_idx, function(page, err)
@@ -323,14 +318,10 @@ function Sheet:onSwipeSheet(_arg, ges)
     return true
 end
 
---- 打开某句的段评；未联网立即提示。
+--- 打开某句的段评；首页走本地缓存，没缓存且未联网由源立即回错。
 ---@param identity BookIdentity 章会话身份（属主源提供 paragraphReviewPageAsync）
 ---@param spot { range: string, text: string, total: integer }
 function Sheet.open(identity, spot)
-    if not require("ui/network/manager"):isConnected() then
-        require("ui.themes.widgets.toast"):new{ text = _("未联网，无法加载段评"), timeout = 2 }:show()
-        return
-    end
     Sheet:new{ identity = identity, spot = spot }:show()
 end
 

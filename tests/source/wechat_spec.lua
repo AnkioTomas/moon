@@ -113,6 +113,12 @@ stub("source.wechat.chapter", function()
         end,
     }
 end)
+stub("book.review_cache", function()
+    return {
+        hotspotsAsync = function(_, fetch, cb) return fetch(cb) end,
+        pageAsync = function(_, _, _, fetch, cb) return fetch(cb) end,
+    }
+end)
 stub("ui/network/manager", function()
     return { runWhenOnline = function(_, fn) fn() end, isConnected = function() return true end }
 end)

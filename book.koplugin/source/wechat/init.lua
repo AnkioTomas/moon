@@ -16,6 +16,7 @@ local Notes = require("source.wechat.notes")
 local NotesPush = require("source.wechat.notes_push")
 local Toc = require("source.wechat.toc")
 local Reviews = require("source.wechat.reviews")
+local ReviewCache = require("book.review_cache")
 local Browse = require("source.browse")
 local SourceBase = require("source.base")
 local Shelf = require("source.shelf")
@@ -871,9 +872,11 @@ end
 ---@param cb fun(hotspots: WechatReviewHotspot[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:paragraphHotspotsAsync(identity, cb)
-    return withChapterUid(self, identity, cb, function(chapter_uid, done)
-        return Reviews.hotspotsAsync(self._client, identity.stable_id, chapter_uid, done)
-    end)
+    return ReviewCache.hotspotsAsync(identity, function(done)
+        return withChapterUid(self, identity, done, function(chapter_uid, finish)
+            return Reviews.hotspotsAsync(self._client, identity.stable_id, chapter_uid, finish)
+        end)
+    end, cb)
 end
 
 --- 热点按原句定位到 html（xpointer 以该 HTML 的根为起点）；定位不了的丢弃。
@@ -891,9 +894,11 @@ end
 ---@param cb fun(page: WechatReviewPage|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:paragraphReviewPageAsync(identity, range, max_idx, cb)
-    return withChapterUid(self, identity, cb, function(chapter_uid, done)
-        return Reviews.pageAsync(self._client, identity.stable_id, chapter_uid, range, max_idx, done)
-    end)
+    return ReviewCache.pageAsync(identity, range, max_idx, function(done)
+        return withChapterUid(self, identity, done, function(chapter_uid, finish)
+            return Reviews.pageAsync(self._client, identity.stable_id, chapter_uid, range, max_idx, finish)
+        end)
+    end, cb)
 end
 
 return WeChat

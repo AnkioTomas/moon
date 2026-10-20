@@ -10,7 +10,6 @@ Stubs.install()
 package.preload["json"] = function() return require("support.json_stub") end
 package.loaded["json"] = nil
 local Reviews = require("source.wechat.reviews")
-os.execute("rm -rf '" .. require("utils.paths").sourceCacheDir("wechat") .. "/reviews'")
 
 local html = table.concat({
     "<html><body><h1>一</h1>",
@@ -112,40 +111,6 @@ do
     Assert.eq(reviews[1].maxIdx, 0)
     client.reviews_cb({ reviews = { hit_entry } })
     Assert.len(got, 1)
-
-    -- 落盘缓存：同章再拉不发请求，下一 tick 回调。
-    client = fakeClient()
-    got = nil
-    Reviews.hotspotsAsync(client, "b", "c1", function(spots) got = spots end)
-    Assert.len(client.calls, 0)
-    Assert.is_nil(got, "缓存命中也异步回调")
-    Stubs.flush()
-    Assert.len(got, 1)
-    Assert.eq(got[1].range, "386-407")
-    Assert.eq(got[1].total, 83)
-    -- 回调前取消：不再回调。
-    got = nil
-    Reviews.hotspotsAsync(client, "b", "c1", function(spots) got = spots end).cancel()
-    Stubs.flush()
-    Assert.is_nil(got)
-    -- 过期缓存重拉。
-    local real_time = os.time
-    os.time = function() return real_time() + 8 * 24 * 3600 end
-    Reviews.hotspotsAsync(client, "b", "c1", function() end)
-    os.time = real_time
-    Assert.len(client.calls, 1)
-
-    -- 空结果只缓存 5 分钟：一次抖动不至于锁一周
-    client = fakeClient()
-    Reviews.hotspotsAsync(client, "b", "empty", function() end)
-    client.underlines_cb({ underlines = {} })
-    client = fakeClient()
-    Reviews.hotspotsAsync(client, "b", "empty", function() end)
-    Assert.len(client.calls, 0, "5 分钟内走缓存")
-    os.time = function() return real_time() + 301 end
-    Reviews.hotspotsAsync(client, "b", "empty", function() end)
-    os.time = real_time
-    Assert.len(client.calls, 1, "过 5 分钟重拉")
 
     -- 热点多时分批（整批过大服务端 3 秒超时）：40/40/40/5，同时最多 3 批在飞，结果按批次顺序合并。
     client = fakeClient()

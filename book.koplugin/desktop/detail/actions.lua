@@ -34,6 +34,11 @@ local function notifyCached(result)
     else
         text = result.err or _("缓存失败")
     end
+    local reviews = result.reviews
+    if reviews then
+        text = text .. "\n" .. (reviews.ok and T(_("段评已缓存 %1 章"), reviews.done)
+            or T(_("段评缓存到第 %1 章中止：%2"), reviews.done, reviews.err or _("失败")))
+    end
     Toast:new{ text = text, timeout = 5 }:show()
 end
 
@@ -46,32 +51,45 @@ function Detail:openBook()
 end
 
 --- 选择缓存范围：全本 / 当前进度到结尾 / 当前进度往后 N 章（当前章取本地进度，无进度即第 1 章）。
-function Detail:chooseCacheRange()
+--- 源支持段评时多一个开关：同时缓存段评（章数封顶 Prefetch.MAX_CHAPTERS，请求频繁有封号风险）。
+function Detail:chooseCacheRange(with_reviews)
     if self.closed then return end
     local book = self.book
     local pos = require("book.progress_db").get(book.source_id, book.stable_id) or {}
     local function from(count)
         return function()
-            self:cacheAllChapters({ chapter_idx = pos.chapter_idx, fraction = pos.fraction, count = count })
+            self:cacheAllChapters({ chapter_idx = pos.chapter_idx, fraction = pos.fraction, count = count }, with_reviews)
         end
     end
     local function ahead(count)
         return { text = T(_("往后 %1 章"), count), callback = from(count) }
     end
-    require("ui.themes.widgets.sheet"):new{
-        title = _("缓存章节"),
-        items = {
-            { text = _("全本缓存"), callback = function() self:cacheAllChapters() end },
-            { text = _("从当前进度缓存到结尾"), callback = from(nil) },
-            { buttons = { ahead(10), ahead(20) } },
-            { buttons = { ahead(50), ahead(100) } },
-        },
-    }:show()
+    local items = {
+        { text = _("全本缓存"), callback = function() self:cacheAllChapters(nil, with_reviews, pos) end },
+        { text = _("从当前进度缓存到结尾"), callback = from(nil) },
+        { buttons = { ahead(10), ahead(20) } },
+        { buttons = { ahead(50), ahead(100) } },
+    }
+    local Prefetch = require("book.review_prefetch")
+    if Prefetch.supported(bookOwnerSource(book, self.source)) then
+        table.insert(items, 1, {
+            text = (with_reviews and "[✓] " or "[  ] ") .. T(_("同时缓存段评（从当前章起至多 %1 章）"), Prefetch.MAX_CHAPTERS),
+            callback = function() self:chooseCacheRange(not with_reviews) end,
+        })
+        if with_reviews then
+            table.insert(items, 2, { widget = function(width)
+                return require("ui.themes.widgets.text").box("body", _("段评请求频繁，可能导致账号被风控封号，请谨慎使用。"), width)
+            end })
+        end
+    end
+    require("ui.themes.widgets.sheet"):new{ title = _("缓存章节"), items = items }:show()
 end
 
---- 缓存章节正文：入队并前台显示进度（同一本书已在缓存时拒绝并提示）。
+--- 缓存章节正文（可带段评）：入队并前台显示进度（同一本书已在缓存时拒绝并提示）。
 ---@param range ChapterCacheRange|nil 缺省全本
-function Detail:cacheAllChapters(range)
+---@param with_reviews boolean|nil 正文缓存完后接着缓存段评
+---@param review_range ChapterCacheRange|nil 段评起点；缺省沿用 range（全本缓存时传当前进度，不从第 1 章起）
+function Detail:cacheAllChapters(range, with_reviews, review_range)
     if self.closed then return end
     local book = self.book
     local source = bookOwnerSource(book, self.source)
@@ -89,11 +107,24 @@ function Detail:cacheAllChapters(range)
         end,
         on_done = notifyCached,
         run = function(report, done)
-            return source:cacheAllChaptersAsync(identity, function(cached, total)
+            -- 句柄始终指向当前阶段：正文 → 段评。
+            local stage
+            local function reviews(result)
+                if not (with_reviews and result.ok) then return done(result) end
+                local limit = review_range or range
+                stage = require("book.review_prefetch").run(source, identity, limit, function(n, total)
+                    report(_("缓存段评"), n, total)
+                end, function(ok, n, total, err)
+                    result.reviews = { ok = ok, done = n, total = total, err = err }
+                    done(result)
+                end)
+            end
+            stage = source:cacheAllChaptersAsync(identity, function(cached, total)
                 report(nil, cached, total)
             end, function(ok, cached, err, total, failed)
-                done({ ok = ok, cached = cached, total = total, failed = failed, err = err })
+                reviews({ ok = ok, cached = cached, total = total, failed = failed, err = err })
             end, range)
+            return { cancel = function() if stage then stage.cancel() end end }
         end,
     }
 end

@@ -13,6 +13,7 @@ local Assets = require("source.assets")
 local Cbz = require("source.cbz")
 local Comic = require("source.fanqie.comic")
 local Paths = require("utils.paths")
+local ReviewCache = require("book.review_cache")
 require("l10n").apply()
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -438,9 +439,11 @@ end
 ---@param cb fun(hotspots: FanqieReviewHotspot[]|nil, err: string|nil)
 ---@return CancelHandle
 function Source:paragraphHotspotsAsync(identity, cb)
-    return withChapterUid(self, identity, cb, function(uid, done)
-        return require("source.fanqie.reviews").hotspotsAsync(self.settings, uid, done)
-    end)
+    return ReviewCache.hotspotsAsync(identity, function(done)
+        return withChapterUid(self, identity, done, function(uid, finish)
+            return require("source.fanqie.reviews").hotspotsAsync(self.settings, uid, finish)
+        end)
+    end, cb)
 end
 
 --- 段落按段末文字定位到章节 HTML（子进程里跑，不碰实例状态）。
@@ -458,10 +461,12 @@ end
 ---@param cb fun(page: WechatReviewPage|nil, err: string|nil)
 ---@return CancelHandle
 function Source:paragraphReviewPageAsync(identity, range, max_idx, cb)
-    return withChapterUid(self, identity, cb, function(uid, done)
-        return require("source.fanqie.reviews").pageAsync(
-            self.settings, identity.stable_id, uid, tonumber(range), max_idx, done)
-    end)
+    return ReviewCache.pageAsync(identity, range, max_idx, function(done)
+        return withChapterUid(self, identity, done, function(uid, finish)
+            return require("source.fanqie.reviews").pageAsync(
+                self.settings, identity.stable_id, uid, tonumber(range), max_idx, finish)
+        end)
+    end, cb)
 end
 
 return M
