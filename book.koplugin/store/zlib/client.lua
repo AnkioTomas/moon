@@ -13,7 +13,8 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 
 -- 官方种子镜像（不带尾斜杠）。前排入口来自上游域名清单，并经
--- eAPI /info/ok 实测可用；旧入口保留作地区性回退。
+-- eAPI /info/ok 实测可用；旧入口保留作地区性回退；末尾补自 zlibrary.koplugin
+-- 的 domains.json 与 Android 种子（未逐个实测）。
 local SEED_URLS = {
     "https://zlib.bz",
     "https://lexlib.tw",
@@ -39,7 +40,30 @@ local SEED_URLS = {
     "https://z-lib.sk",
     "https://german-books.sk",
     "https://zh.z2026.ru",
-    "https://sss101.ru"
+    "https://sss101.ru",
+    "https://1lib.sk",
+    "https://z-lib.fm",
+    "https://z-lib.gd",
+    "https://z-lib.gl",
+    "https://z-lib.bz",
+    "https://z-lib.do",
+    "https://z-lib.fo",
+    "https://z-library.hn",
+    "https://japanese-books.sk",
+    "https://1lib.su",
+    "https://zlib.by",
+    "https://101ml.su",
+    "https://zlib.re",
+    "https://article.sk",
+    "https://articles.sk",
+    "https://z-lib.gs",
+    "https://z-library.do",
+    "https://z-library.rs",
+    "https://singlelogin.re",
+    "https://library-oceania.sk",
+    "https://library-latin.sk",
+    "https://library-asia.sk",
+    "https://lib-africa.sk"
 }
 
 local USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
