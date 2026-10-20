@@ -12,6 +12,7 @@ local Setting = {}
 Setting.defaults = {
     book_xray_enabled = true,
     book_xray_show_marks = true,
+    book_xray_save_tokens = false,
     book_xray_mark_style = "dashed",
 }
 
@@ -65,6 +66,19 @@ function Setting.entries(desktop)
                                         if not on then return end
                                         xray.book_xray_show_marks = not marks_on
                                         refreshMarks()
+                                        save()
+                                    end,
+                                })
+                            end,
+                            function(iw)
+                                local lean = xray.book_xray_save_tokens
+                                return Row.widget({
+                                    width = iw, chevron = false,
+                                    kind = "toggle", icon = "savings", title = _("X-Ray 省 token"),
+                                    subtitle = _("不带前几章摘要，每次识别的人物、地点、术语更少"),
+                                    status = lean and _("开") or _("关"), status_on = lean,
+                                    callback = function()
+                                        xray.book_xray_save_tokens = not lean
                                         save()
                                     end,
                                 })

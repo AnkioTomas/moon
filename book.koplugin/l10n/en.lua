@@ -40,6 +40,8 @@ return {
     ["X-Ray 失败：%1"] = "X-Ray failed: %1",
     ["X-Ray 实体画线"] = "Underline X-Ray entities",
     ["X-Ray 下划线样式"] = "X-Ray underline style",
+    ["X-Ray 省 token"] = "X-Ray token saver",
+    ["不带前几章摘要，每次识别的人物、地点、术语更少"] = "No earlier chapter summaries; fewer characters, places and terms per pass",
     ["实线"] = "Solid",
     ["虚线"] = "Dashed",
     ["X-Ray 已更新：人物 %1，地点 %2，专有名词 %3"] = "X-Ray updated: %1 characters, %2 locations, %3 terms",

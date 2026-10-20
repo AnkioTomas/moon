@@ -272,3 +272,15 @@ Assert.eq(reports[#reports][2], 2)
 names_after = {}
 for _idx, row in ipairs(entity_rows) do names_after[row.name] = true end
 Assert.is_true(names_after.Lucy)
+
+-- 省 token：不带前情摘要，提示词里的实体上限收紧
+local xray_conf = require("utils.settings").get("features.xray")
+xray_conf.book_xray_save_tokens = true
+chapter_idx, recap, recap_asked = 7, "第六章\n伯爵来到了惠特比。", nil
+run({ { kind = "character", name = "Mina", aliases = {}, description = "x" } }, { { characters = {}, locations = {}, terms = {} } })
+Assert.is_nil(recap_asked, "省 token 时不取前情摘要")
+Assert.matches(prompts[1], "人物不超过 10，地点不超过 5，专有名词不超过 5")
+xray_conf.book_xray_save_tokens = false
+run({ { kind = "character", name = "Mina", aliases = {}, description = "x" } }, { { characters = {}, locations = {}, terms = {} } })
+Assert.matches(prompts[1], "人物不超过 15，地点不超过 10，专有名词不超过 10")
+chapter_idx, recap = nil, nil

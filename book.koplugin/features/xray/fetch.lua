@@ -24,6 +24,11 @@ local INTRO_LIMIT = 1500
 local LOOKUP_PRIOR_LIMIT = 2000
 --- 提示词最多带前面几章的摘要。
 local RECAP_CHAPTERS = 5
+
+--- 「省 token」：不带前情摘要、实体上限收紧。
+local function lean()
+    return require("utils.settings").get("features.xray").book_xray_save_tokens and true or false
+end
 --- 全书分析每段正文的字节上限。
 local SCAN_CHUNK = 32000
 --- 一次产出人物、地点、术语三段 JSON，推理模型的思考还要占额度，8K 实测会被截断。
@@ -172,7 +177,7 @@ end
 ---@return string|nil
 local function storySoFar(identity)
     local idx = require("reader.session").chapterIndex()
-    return idx and AI.priorSummaries(identity, idx, RECAP_CHAPTERS) or nil
+    return idx and not lean() and AI.priorSummaries(identity, idx, RECAP_CHAPTERS) or nil
 end
 
 ---@return integer 1..100
@@ -199,7 +204,7 @@ local function fromContext(ui, identity, existing, cb)
         { role = "system", content = Prompts.system },
         { role = "user", content = Prompts.comprehensive(
             title, author, progressPercent(), ctx.current_page, ctx.prior_text, Store.promptSnapshot(existing),
-            storySoFar(identity)) },
+            storySoFar(identity), lean()) },
     }
     return AI.jsonExtract(messages, { localize = true, max_tokens = BULK_MAX_TOKENS, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
         if not decoded then cb(nil, err); return end
@@ -336,7 +341,8 @@ function Fetch.scanBook(identity, text)
             local messages = {
                 { role = "system", content = Prompts.system },
                 { role = "user", content = Prompts.comprehensive(
-                    title, author, math.floor(index * 100 / #chunks), chunk, "", Store.promptSnapshot(existing)) },
+                    title, author, math.floor(index * 100 / #chunks), chunk, "", Store.promptSnapshot(existing),
+                    nil, lean()) },
             }
             request = AI.jsonExtract(messages, { localize = true, max_tokens = BULK_MAX_TOKENS, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
                 if not decoded then finish({ ok = false, err = err }); return end
