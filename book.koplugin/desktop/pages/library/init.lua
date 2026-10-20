@@ -507,6 +507,7 @@ local function chipLayout(w, groups, on_pick)
     end
 
     local sep = gap * 2
+    if #built == 0 then return {} end
     local rows = { {} }
     local used = 0
     --- 当前行（from 已用）还能给第 gi 组的宽度；最后一行要扣掉后面各组「更多」的位置。
@@ -562,7 +563,6 @@ end
 ---@param groups table[]
 ---@return number
 function Library.chipHeight(w, groups)
-    if #groups == 0 then return 0 end
     local row_h = Button.heightOf("small") + Theme.px(Theme.current().space.sm)
     return #chipLayout(w, groups) * row_h
 end
