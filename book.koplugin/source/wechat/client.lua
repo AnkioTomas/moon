@@ -79,6 +79,24 @@ function Client:searchAsync(keyword, cb)
     return getWebAsync("/web/search/global", { keyword = keyword, maxIdx = 0, fragmentSize = 120, count = 20 }, cb)
 end
 
+--- 书城榜单与分类目录：``data[]`` 分组，``categories[]`` 里 CategoryId / title / sublist（公开接口，无需登录）。
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:storeCategoriesAsync(cb)
+    return getWebAsync("/web/categories", {}, cb)
+end
+
+--- 榜单 / 分类下的书：``books[]`` 同搜索（bookInfo），一次 20 本，maxIndex 是偏移，hasMore=1 还有。
+---@param category_id string
+---@param offset integer
+---@param ranking boolean 榜单必须带 rank=1，分类带了反而是空
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:storeBooksAsync(category_id, offset, ranking, cb)
+    local query = { maxIndex = offset, rank = ranking and 1 or nil }
+    return getWebAsync("/web/bookListInCategory/" .. Text.urlEncode(category_id), query, cb)
+end
+
 --- 全量拉取书架（synckey=0 表示不做增量）。
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil

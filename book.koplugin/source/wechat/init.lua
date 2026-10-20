@@ -805,6 +805,74 @@ function Source:searchAsync(keyword, cb)
     end)
 end
 
+--- 书城浏览：三行 chip（榜单 / 分类 / 所选分类的子分类）+ 所选节点的书，节点是榜单或分类 id，缺省是第一个榜单。
+--- 目录树只在实例上缓存精简版；榜单页每次现拉。
+---@param opts { node?: string, limit?: integer }
+---@param cb fun(res: { data: Book[], groups: table[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:browseAsync(opts, cb)
+    local handle = {}
+    local function load(tree)
+        local node = opts.node or (tree.rankings[1] and tree.rankings[1].id)
+        if not node then
+            cb(nil, _("没有可浏览的榜单"))
+            return
+        end
+        local ranking, top
+        for _idx, row in ipairs(tree.rankings) do
+            if row.id == node then ranking = row end
+        end
+        for _idx, cat in ipairs(tree.categories) do
+            if cat.id == node then top = cat end
+            for _idx2, sub in ipairs(cat.subs) do
+                if sub.id == node then top = cat end
+            end
+        end
+        local groups = {
+            { chips = tree.rankings, active = ranking and node },
+            { chips = tree.categories, active = top and top.id },
+        }
+        if top then
+            local subs = { { id = top.id, title = _("全部") } }
+            for _idx, sub in ipairs(top.subs) do subs[#subs + 1] = sub end
+            groups[3] = { chips = subs, active = node }
+        end
+        local books, limit = {}, opts.limit or 60
+        local function more()
+            handle.inner = self._client:storeBooksAsync(node, #books, ranking ~= nil, function(wire, err)
+                if not wire then
+                    cb(nil, err)
+                    return
+                end
+                local page = Mapper.searchList(wire)
+                for _idx, book in ipairs(page) do books[#books + 1] = book end
+                if #books < limit and #page > 0 and wire.hasMore == 1 then
+                    more()
+                    return
+                end
+                cb({ data = books, groups = groups })
+            end)
+        end
+        more()
+    end
+    if self._store_tree then
+        load(self._store_tree)
+    else
+        handle.inner = self._client:storeCategoriesAsync(function(wire, err)
+            if not wire then
+                cb(nil, err)
+                return
+            end
+            self._store_tree = Mapper.storeTree(wire)
+            load(self._store_tree)
+        end)
+    end
+    function handle.cancel()
+        if handle.inner then handle.inner:cancel() end
+    end
+    return handle
+end
+
 --- 本章有段评的热点原句（未定位）。
 ---@param identity BookIdentity 微信书身份，chapter_idx 为微信目录序号
 ---@param cb fun(hotspots: WechatReviewHotspot[]|nil, err: string|nil)

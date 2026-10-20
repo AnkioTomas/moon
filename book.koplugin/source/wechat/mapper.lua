@@ -374,6 +374,31 @@ function Mapper.searchList(data)
     return out
 end
 
+--- 榜单 / 分类目录 wire → 精简树，原始 JSON 带大量封面字段，不留。
+--- 榜单是 ranklist=1 的项；分类是其余带子分类的项（讲书榜、有声榜等无子分类的不要）。
+---@param data table
+---@return { rankings: { id: string, title: string }[], categories: { id: string, title: string, subs: { id: string, title: string }[] }[] }
+function Mapper.storeTree(data)
+    local tree = { rankings = {}, categories = {} }
+    for _idx, group in ipairs(data.data or {}) do
+        for _idx2, row in ipairs(group.categories or {}) do
+            local id = row.CategoryId and tostring(row.CategoryId)
+            if id and type(row.title) == "string" then
+                if row.ranklist == 1 then
+                    tree.rankings[#tree.rankings + 1] = { id = id, title = row.title }
+                elseif #(row.sublist or {}) > 0 then
+                    local subs = {}
+                    for _idx3, sub in ipairs(row.sublist) do
+                        subs[#subs + 1] = { id = tostring(sub.CategoryId), title = sub.title }
+                    end
+                    tree.categories[#tree.categories + 1] = { id = id, title = row.title, subs = subs }
+                end
+            end
+        end
+    end
+    return tree
+end
+
 --- 进度 wire → ProgressPosition（getProgress 的进度在 book 子对象里）。
 ---@param data table
 ---@return ProgressPosition, string|nil chapter_uid

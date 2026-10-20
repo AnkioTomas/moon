@@ -43,6 +43,8 @@ local Store = {}
 Store.__index = Store
 
 local MAX_RESULTS = 200
+-- 浏览（榜单 / 分类）每次只取这么多：源按页顺序拉，墨水屏上多拉一页就多等一轮网络。
+local BROWSE_RESULTS = 60
 
 ---@class StoreProvider
 ---@field id string
@@ -78,6 +80,19 @@ function Store:provider()
     return list[1]
 end
 
+--- 当前来源能浏览（带 browseAsync 的书源）：没搜索词时展示它的 chip 分组 + 书列表。
+---@return StoreProvider|nil
+function Store:browsable()
+    local provider = self:provider()
+    return provider and provider.source and provider.source.browseAsync and provider or nil
+end
+
+--- 工具条下要画的 chip 分组；搜索中不显示。
+---@return table[]
+function Store:chipGroups()
+    return not self.search and self.groups or {}
+end
+
 ---@param opts table
 ---@return BookStorePage
 function Store:new(opts)
@@ -101,6 +116,7 @@ function Store:reset()
     self.state = nil
     self.books = nil
     self.search = nil
+    self.node, self.groups = nil, nil
     self.trail = {}
     self.page = 1
     self.total = 0
@@ -145,6 +161,11 @@ end
 ---@return table
 function Store:build(ctx, state, opts)
     opts.empty_text = self.search and _("没有找到相关书籍") or _("点击搜索按钮查找书籍")
+    opts.groups = self:chipGroups()
+    opts.on_chip = function(id)
+        self.node = id
+        self:browse()
+    end
     local current = self:provider()
     opts.provider = current and {
         text = current.name,
@@ -183,7 +204,7 @@ function Store:pickProvider(anchor)
                 local settings = MoonSettings.get("store")
                 settings.provider = p.id
                 MoonSettings.save("store")
-                self.trail = {}
+                self.trail, self.node, self.groups = {}, nil, nil
                 self:browse()
             end,
         }
@@ -212,7 +233,7 @@ end
 ---@param query string|nil
 function Store:applySearch(query)
     self.search = query and query ~= "" and query or nil
-    self.trail = {}
+    self.trail, self.node = {}, nil
     self:browse()
 end
 
@@ -227,7 +248,8 @@ end
 ---@return number
 function Store:syncPageSize()
     local desktop = self.desktop
-    local n = Library.gridMetrics(desktop.dimen.w, desktop:contentHeight()).page_size
+    local head_h = #self:chipGroups() * Library.chipRowHeight()
+    local n = Library.gridMetrics(desktop.dimen.w, desktop:contentHeight(), head_h).page_size
     if self.page_size ~= n then
         self.page_size = n
         self.state = nil
@@ -274,6 +296,7 @@ function Store:fetch()
 
     local provider = self:provider()
     if not provider then return end
+    local browsing = search == "" and self:browsable() ~= nil
     local function onResult(res, err)
         if desktop.closed or desktop.tab ~= self.name
             or (self.search or "") ~= search
@@ -285,6 +308,7 @@ function Store:fetch()
             fail(err or _("加载失败"))
             return
         end
+        if browsing then self.groups = res.groups end
         local books = {}
         for i = 1, math.min(#(res.data or {}), MAX_RESULTS) do
             books[#books + 1] = res.data[i]
@@ -296,7 +320,9 @@ function Store:fetch()
         self.state = { books = self:pageBooks() }
         self.desktop:updateView()
     end
-    if provider.store then
+    if browsing then
+        self.fetch_cancel = provider.source:browseAsync({ node = self.node, limit = BROWSE_RESULTS }, onResult)
+    elseif provider.store then
         self.fetch_cancel = require("store." .. provider.id):listStoreAsync({
             page = 1,
             page_size = MAX_RESULTS,
@@ -319,7 +345,7 @@ function Store:updateView()
         self.state = state
     end
     -- 默认不加载：没搜索词也没下钻就只给空页。
-    if not state and not self.search and #self.trail == 0 then
+    if not state and not self.search and #self.trail == 0 and not self:browsable() then
         state = { books = {} }
         self.state = state
     end

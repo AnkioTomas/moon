@@ -32,6 +32,10 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 
 --- 能力是用户可用功能，不是「模块里有没有函数」。
 --- 仅保留 UI 实际读取的开关；Source 基础契约和阅读形态不放在能力表中。
+---@class StoreChipGroup
+---@field chips { id: string, title: string }[]
+---@field active string|nil
+
 ---@class SourceCapabilities
 ---@field scrape boolean 支持把外部元数据写入本地书籍记录（仅 local 为 true）
 ---@field edit boolean 支持编辑展示元信息（仅 local 为 true）
@@ -129,6 +133,7 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 ---@field syncStatsAsync fun(self: BookSource, opts: { dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛统计
 ---@field deleteBookAsync fun(self: BookSource, identity: BookIdentity, cb: fun(ok: boolean, err: string|nil)): table|nil 本地优先删除（清缓存 + 墓碑），远端真删归 syncBooksAsync
 ---@field searchAsync fun(self: BookSource, keyword: string, cb: fun(res: { data: Book[] }|nil, err: string|nil)): table|nil 书城搜索（可选；有这个方法就是可搜索源，书城页按此列出）
+---@field browseAsync fun(self: BookSource, opts: { node?: string, limit?: integer }, cb: fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)): table|nil 书城浏览（可选；无搜索词时书城页按 groups 画 chip 行、按 data 画书。node 是 chip 的 id，缺省由源选默认；源每次返回完整 groups 并标出 active，书城页不认识榜单 / 分类）
 ---@field getDetailAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: Book|nil, err: string|nil)): table|nil 书籍详情
 ---@field openBookAsync fun(self: BookSource, identity: BookIdentity, opts: table|nil, cb: fun(path: string|nil, err: string|nil, meta: { handled?: boolean }|nil)): table|nil 根据书籍身份解析、落盘并登记物理文档；按章源通过 opts.chapter_idx 指定章节；取消后不回调；源已自行展示（如在线漫画查看器）时回调 `nil, nil, { handled = true }`，桌面不开阅读器也不提示
 ---@field loadTocAsync fun(self: BookSource, identity: BookIdentity, cb: fun(toc: BookChapter[]|nil, err: string|nil)): table|nil 拉取并持久化章节目录

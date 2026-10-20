@@ -22,6 +22,7 @@ package.preload["desktop.pages.library"] = function()
     function Library:showSearch(apply)
         search_apply = apply
     end
+    function Library.chipRowHeight() return 0 end
     function Library.gridMetrics()
         return { page_size = 2 }
     end

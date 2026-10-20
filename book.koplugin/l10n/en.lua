@@ -1741,4 +1741,5 @@ Current version: ",
     ["RSS 与网页订阅"] = "RSS and web subscriptions",
     ["划词翻译与双语对照"] = "Translate selections and bilingual view",
     ["人物与地点标注"] = "Mark people and places",
+    ["没有可浏览的榜单"] = "No rankings available",
 }

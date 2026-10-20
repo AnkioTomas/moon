@@ -463,15 +463,85 @@ local function tabStrip(w, active, on_tab)
     }
 end
 
+--- 一行 chip 的高度；书城每个分组占一行。
+---@return number
+function Library.chipRowHeight()
+    return Button.heightOf("small") + Theme.px(Theme.current().space.sm)
+end
+
+--- 分组 chip 行：选中项实心；一行放不下时只留放得下的前几个（选中项必在其中）+「更多」，点开列出全部。
+---@param w number
+---@param group { title: string|nil, chips: { id: string, title: string }[], active: string|nil }
+---@param on_pick fun(id: string)
+---@return table
+local function chipRow(w, group, on_pick)
+    local t = Theme.current()
+    local pad, gap = Theme.px(t.space.md), Theme.px(t.space.sm)
+    local chips = group.chips
+    local widgets, total = {}, 0
+    for i, chip in ipairs(chips) do
+        widgets[i] = Button:new{
+            text = chip.title, size = "small", variant = chip.id == group.active and "primary" or "ghost",
+            callback = function() on_pick(chip.id) end,
+        }
+        total = total + widgets[i]:getSize().w + (i > 1 and gap or 0)
+    end
+    local avail = w - pad * 2
+    local shown = widgets
+    local more
+    if total > avail then
+        local more_btn
+        more_btn = Button:new{
+            text = _("更多"), icon = "arrow_drop_down", trailing = true, size = "small",
+            callback = function()
+                local items = {}
+                for i, chip in ipairs(chips) do
+                    items[i] = { text = chip.title, checked = chip.id == group.active, callback = function() on_pick(chip.id) end }
+                end
+                require("ui.themes.widgets.list"):new{
+                    centered = true, anchor = more_btn.dimen, inner_width = Theme.px(160), items = items,
+                }:show()
+            end,
+        }
+        more = more_btn
+        local room, fit = avail - more_btn:getSize().w, 0
+        local used = 0
+        for i, widget in ipairs(widgets) do
+            used = used + widget:getSize().w + gap
+            if used > room then break end
+            fit = i
+        end
+        shown = {}
+        for i = 1, fit do shown[i] = widgets[i] end
+        for i, chip in ipairs(chips) do
+            if chip.id == group.active and i > fit then
+                if fit == 0 then fit = 1 end
+                shown[fit] = widgets[i]
+            end
+        end
+    end
+    local row = HorizontalGroup:new{ align = "center", HorizontalSpan:new{ width = pad } }
+    for i, widget in ipairs(shown) do
+        if i > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
+        row[#row + 1] = widget
+    end
+    if more then
+        row[#row + 1] = HorizontalSpan:new{ width = gap }
+        row[#row + 1] = more
+    end
+    return CenterContainer:new{ dimen = Geom:new{ w = w, h = Library.chipRowHeight() }, row }
+end
+
 --- 构建书城页（网格 + 上级/搜索 + 总数）；清空搜索框再搜即退出搜索。
 ---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
 ---@param state table 当前页面的数据和分页状态
----@param opts table on_open 接管点击；on_back 出现「上级」；on_search；provider={text,on_pick(anchor)} 工具条左侧的切换按钮；show_status=false 不画角标
+---@param opts table groups = { { chips, active }... } 工具条下的 chip 行（点选回调 on_chip(id)）；on_open 接管点击；on_back 出现「上级」；on_search；provider={text,on_pick(anchor)} 工具条左侧的切换按钮；show_status=false 不画角标
 ---@return table
 function Library:build(ctx, state, opts)
     local t = Theme.current()
     local w, h = ctx.width, ctx.height
-    local m = Library.gridMetrics(w, h)
+    local groups = opts.groups or {}
+    local m = Library.gridMetrics(w, h, #groups * Library.chipRowHeight())
     local left = {}
     if opts.on_back then
         left[#left + 1] = Button:new{ icon = "arrow_back", text = _("上级"), size = "small", callback = opts.on_back }
@@ -493,7 +563,9 @@ function Library:build(ctx, state, opts)
     else
         body = emptyBody(w, m.grid_h, not books and _("加载中…") or state.err or opts.empty_text or _("没有书籍"))
     end
-    return frame(w, h, { toolbar(w, m.top_h, left, { total }) }, body, m.grid_h, {
+    local head = { toolbar(w, m.top_h, left, { total }) }
+    for _idx, group in ipairs(groups) do head[#head + 1] = chipRow(w, group, opts.on_chip) end
+    return frame(w, h, head, body, m.grid_h, {
         page = opts.page or 1,
         pages = opts.pages or 1,
         on_prev = opts.on_prev,
