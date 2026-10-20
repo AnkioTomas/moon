@@ -371,12 +371,24 @@ end
 --- 不能对拼好的 HorizontalGroup 调 getSize 再追加：它会缓存子件偏移，后追加的子件绘制时偏移是 nil。
 ---@param w number
 ---@param h number
----@param left table[]
----@param right table[]
+---@param left table[]|fun(avail: number): table[] 函数形式：按右侧用掉后剩余的宽度构建
+---@param right table[]|fun(compact: boolean): table[] 函数形式：放不下时以 compact=true 重建
 ---@return table
 local function toolbar(w, h, left, right)
     local t = Theme.current()
     local pad, gap = Theme.px(t.space.md), Theme.px(t.space.sm)
+    local function sum(list)
+        local n = gap * math.max(0, #list - 1)
+        for _idx, child in ipairs(list) do n = n + child:getSize().w end
+        return n
+    end
+    if type(right) == "function" then
+        local build = right
+        right = build(false)
+        local lw = type(left) == "function" and 0 or sum(left)
+        if pad * 2 + gap + lw + sum(right) > w then right = build(true) end
+    end
+    if type(left) == "function" then left = left(w - pad * 2 - gap * 2 - sum(right)) end
     local bar = HorizontalGroup:new{ align = "center", HorizontalSpan:new{ width = pad } }
     local used = pad * 2
     local function put(list)
@@ -491,16 +503,27 @@ end
 
 --- 书籍视图的工具条右侧：排序、筛选、视图切换、搜索、刷新，搜索中再加清除。
 ---@return table[]
-function Library:bookTools()
+function Library:bookTools(compact)
     local sort_btn, status_btn
-    sort_btn = Button:new{
-        text = Filter.sortText(self.sort), icon = "arrow_drop_down", trailing = true, size = "small",
-        callback = function() self:showSort(sort_btn.dimen) end,
-    }
-    status_btn = Button:new{
-        text = Filter.status(self.filter).text, icon = "arrow_drop_down", trailing = true, size = "small",
-        callback = function() self:showStatus(status_btn.dimen) end,
-    }
+    if compact then
+        sort_btn = Button:new{
+            icon = "sort", variant = "ghost", size = "small",
+            callback = function() self:showSort(sort_btn.dimen) end,
+        }
+        status_btn = Button:new{
+            icon = "filter_list", variant = "ghost", size = "small",
+            callback = function() self:showStatus(status_btn.dimen) end,
+        }
+    else
+        sort_btn = Button:new{
+            text = Filter.sortText(self.sort), icon = "arrow_drop_down", trailing = true, size = "small",
+            callback = function() self:showSort(sort_btn.dimen) end,
+        }
+        status_btn = Button:new{
+            text = Filter.status(self.filter).text, icon = "arrow_drop_down", trailing = true, size = "small",
+            callback = function() self:showStatus(status_btn.dimen) end,
+        }
+    end
     local tools = {
         sort_btn,
         status_btn,
@@ -574,7 +597,10 @@ function Library:buildPage(ctx)
             callback = function() self:closeGroup() end,
         }
         local name = self.filter[g.key] or g.empty
-        left = { back, Text.line("body", name, { bold = true, width = math.floor(w / 4) }) }
+        left = function(avail)
+            local room = avail - back:getSize().w - Theme.px(t.space.sm)
+            return { back, Text.line("body", name, { bold = true, width = math.max(Theme.px(t.space.md), room) }) }
+        end
     else
         left = { Text.line("caption", T(_("%1 本书"), self.total), muted) }
     end
@@ -597,7 +623,7 @@ function Library:buildPage(ctx)
         if lib.tap_detail then on_tap = function(book) on_detail(book) end end
         body = buildGrid(ctx, books, m, on_tap, true, lib)
     end
-    return frame(w, h, { tabs, toolbar(w, m.top_h, left, self:bookTools()) }, body, m.grid_h, pager)
+    return frame(w, h, { tabs, toolbar(w, m.top_h, left, function(compact) return self:bookTools(compact) end) }, body, m.grid_h, pager)
 end
 
 --- 异步拉取图书馆列表。
