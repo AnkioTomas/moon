@@ -51,6 +51,7 @@ local BROWSE_RESULTS = 60
 ---@field name string
 ---@field store boolean|nil 是书城后端（store.<id>）；否则是书源
 ---@field source BookSource|nil
+---@field backend table 当前来源的实现（书城后端模块或书源），可选带 browseAsync
 
 --- 可搜索来源：已启用的 Z-Library / OPDS，再接已启用且带 searchAsync 的书源。
 ---@return StoreProvider[]
@@ -58,13 +59,13 @@ function Store.providers()
     local settings = MoonSettings.get("store")
     local list = {}
     if not settings.enabled then return list end
-    if settings.zlib_enabled then list[#list + 1] = { id = "zlib", name = _("Z站"), store = true } end
-    if settings.opds_enabled then list[#list + 1] = { id = "opds", name = _("OPDS"), store = true } end
+    if settings.zlib_enabled then list[#list + 1] = { id = "zlib", name = _("Z站"), store = true, backend = require("store.zlib") } end
+    if settings.opds_enabled then list[#list + 1] = { id = "opds", name = _("OPDS"), store = true, backend = require("store.opds") } end
     local Registry = require("source.registry")
     for _idx, meta in ipairs(Registry.listEnabled()) do
         local source = Registry.resolve(meta.id)
         if source and source.searchAsync then
-            list[#list + 1] = { id = meta.id, name = meta.name, source = source }
+            list[#list + 1] = { id = meta.id, name = meta.name, source = source, backend = source }
         end
     end
     return list
@@ -84,7 +85,7 @@ end
 ---@return StoreProvider|nil
 function Store:browsable()
     local provider = self:provider()
-    return provider and provider.source and provider.source.browseAsync and provider or nil
+    return provider and provider.backend and provider.backend.browseAsync and provider or nil
 end
 
 --- 工具条下要画的 chip 分组；搜索中不显示。
@@ -321,7 +322,7 @@ function Store:fetch()
         self.desktop:updateView()
     end
     if browsing then
-        self.fetch_cancel = provider.source:browseAsync({ node = self.node, limit = BROWSE_RESULTS }, onResult)
+        self.fetch_cancel = provider.backend:browseAsync({ node = self.node, limit = BROWSE_RESULTS }, onResult)
     elseif provider.store then
         self.fetch_cancel = require("store." .. provider.id):listStoreAsync({
             page = 1,

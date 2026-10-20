@@ -8,6 +8,7 @@ iRead（iread.ankio.net）数据源。
 @module koplugin.book.source.iread
 --]]
 
+local Browse = require("source.browse")
 local Client = require("source.iread.client")
 local Mapper = require("source.iread.mapper")
 local Shelf = require("source.shelf")
@@ -133,6 +134,58 @@ function Source:searchAsync(keyword, cb)
         end
         cb({ data = Mapper.shelfList(uniq) })
     end)
+end
+
+--- 书城浏览：服务端每次随机给一个书源的「发现」入口（榜单 / 分类），入口就是 chip，节点是「书源 id:入口序号」；
+--- 书源规则缓存在实例上，「换一批」重取规则。结果行与搜索同形，进 self.found 供加书架。
+---@param opts { node?: string }
+---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:browseAsync(opts, cb)
+    if not self:configured() then return SourceBase.defer(cb, nil, _("未登录 iRead")) end
+    local handle = {}
+    function handle.cancel()
+        if handle.inner then handle.inner.cancel() end
+    end
+    local function explore(rule, node)
+        local chips, picked = {}, nil
+        for idx, entry in ipairs(rule.exploreUrl) do
+            if entry.url and entry.url ~= "" then
+                local id = rule.id .. ":" .. idx
+                chips[#chips + 1] = { id = id, title = entry.title }
+                if id == node then picked = entry end
+            end
+        end
+        local groups = { Browse.group(chips, node), { chips = { { id = "next", title = _("换一批书源") } } } }
+        if not picked then
+            cb({ data = {}, groups = groups })
+            return
+        end
+        handle.inner = Client.exploreAsync(rule.id, picked.url, function(rows, err)
+            if not rows then cb(nil, err); return end
+            self.found = self.found or {}
+            for _idx, row in ipairs(rows) do self.found[row.name] = row end
+            cb({ data = Mapper.shelfList(rows), groups = groups })
+        end)
+    end
+    local sid = tonumber((opts.node or ""):match("^(%d+):"))
+    local cached = sid and self.explore_rules and self.explore_rules[sid]
+    if cached then
+        explore(cached, opts.node)
+        return handle
+    end
+    handle.inner = Client.exploreRulesAsync(function(rules, err)
+        if not rules then cb(nil, err); return end
+        local rule
+        for _idx, candidate in ipairs(rules) do
+            if type(candidate.exploreUrl) == "table" and #candidate.exploreUrl > 0 then rule = candidate end
+        end
+        if not rule then cb(nil, _("iRead 暂无发现入口")); return end
+        self.explore_rules = self.explore_rules or {}
+        self.explore_rules[rule.id] = rule
+        explore(rule, nil)
+    end)
+    return handle
 end
 
 --- 取书架行再交给 fn(row)（返回它发起的任务，取消时一并取消）；fresh 为真强制重拉书架

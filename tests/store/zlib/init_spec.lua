@@ -17,8 +17,8 @@ function fake:listPopularAsync(cb)
     } })
     return { cancel = function() end }
 end
-function fake:searchAsync(query, page, size, cb, language)
-    fake.search = { query, page, size, language }
+function fake:searchAsync(query, page, size, cb, language, filters)
+    fake.search = { query, page, size, language, filters }
     cb({ books = { { id = 9, hash = "z", title = "Z" } }, pagination = { total_items = 7 } })
     return { cancel = function() end }
 end
@@ -67,6 +67,23 @@ Assert.eq(fake.search[4], "chinese")
 Assert.eq(result.count, 7)
 Assert.len(result.data, 1)
 Assert.eq(result.data[1].title, "Z")
+
+-- 浏览：节点三段（排序:语言:格式）翻成搜索过滤；chip 只换自己那一位，"-" 表示不限。
+do
+    local res
+    Zlib:browseAsync({ node = "date:chinese:epub", limit = 1 }, function(v) res = v end)
+    Assert.eq(fake.search[1], "")
+    Assert.eq(fake.search[4], "chinese")
+    Assert.eq(fake.search[5].order, "date")
+    Assert.eq(fake.search[5].extension, "epub")
+    Assert.len(res.data, 1)
+    Assert.len(res.groups, 3)
+    Assert.eq(res.groups[1].active, "date:chinese:epub")
+    Assert.eq(res.groups[3].chips[1].id, "date:chinese:-")
+    Zlib:browseAsync({ node = "popular:-:-", limit = 1 }, function(v) res = v end)
+    Assert.is_nil(fake.search[4])
+    Assert.is_nil(fake.search[5].extension)
+end
 
 Zlib:listStoreAsync({ search = "lua", page = 3, page_size = 8 }, function(v) result = v end)
 Assert.eq(fake.search[1], "lua")

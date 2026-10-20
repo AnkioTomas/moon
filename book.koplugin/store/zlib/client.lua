@@ -390,12 +390,15 @@ end
 ---@param limit number|nil
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@param language string|nil Z-Library 搜索语言键
+---@param filters { order?: string, extension?: string }|nil 排序（popular / date）与文件格式
 ---@return { cancel: fun() }
-function Client:searchAsync(query, page, limit, cb, language)
+function Client:searchAsync(query, page, limit, cb, language, filters)
     local form = { message = query or "", page = page or 1, limit = limit or 12 }
     if type(language) == "string" and language ~= "" then
         form["languages[0]"] = language
     end
+    if filters and filters.order then form.order = filters.order end
+    if filters and filters.extension then form["extensions[0]"] = filters.extension end
     return self:_jsonAsync("POST", "/eapi/book/search", {
         session = true,
         form = form,
