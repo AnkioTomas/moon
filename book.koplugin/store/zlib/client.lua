@@ -69,7 +69,8 @@ local SEED_URLS = {
 local USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
 
 local MAX_REDIRECT_HOPS = 5
-local MAX_BASE_ATTEMPTS = 3
+local RACE_WIDTH = 5 -- 并发竞速：同时请求的镜像数
+local SERIAL_ATTEMPTS = 3 -- 不能并发的请求（消耗下载额度）依次试的镜像数
 
 -- 钉住的镜像 origin（重定向跨主机或故障转移成功时更新，本次会话有效）
 local pinned_base
@@ -96,10 +97,11 @@ end
 -- 镜像选择与故障转移
 -- ---------------------------------------------------------------------------
 
---- 候选 base 列表：用户配置 > 钉住 > 种子；去重，最多 MAX_BASE_ATTEMPTS 个
+--- 候选 base 列表：用户配置 > 钉住 > 种子；去重，最多 cap 个
 ---@param cfg table|nil
+---@param cap number
 ---@return string[]
-local function baseCandidates(cfg)
+local function baseCandidates(cfg, cap)
     local out, seen = {}, {}
     --- 归一化一个候选地址（去空白、去尾部斜杠、补 https 前缀）后按去重追加。
     ---@param u string|nil 候选地址，非字符串或归一化后为空则跳过
@@ -117,7 +119,7 @@ local function baseCandidates(cfg)
     add(pinned_base)
     for _idx, seed in ipairs(SEED_URLS) do add(seed) end
     local capped = {}
-    for i = 1, math.min(MAX_BASE_ATTEMPTS, #out) do capped[i] = out[i] end
+    for i = 1, math.min(cap, #out) do capped[i] = out[i] end
     return capped
 end
 
@@ -237,16 +239,22 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:_jsonAsync(method, path, opts, cb)
-    local bases = baseCandidates(self.cfg)
-    local cancelled = false
-    local job
+    local race = not opts.serial
+    local bases = baseCandidates(self.cfg, race and RACE_WIDTH or SERIAL_ATTEMPTS)
+    local cancelled, settled = false, false
+    local lanes = {}
     local cache_job
     local result = {}
-    --- 取消在途请求：置位取消标记，并中断缓存读取与当前 HTTP 请求。
+    local function stopLanes()
+        for _idx, lane in ipairs(lanes) do
+            if lane.job then lane.job.cancel() end
+        end
+    end
+    --- 取消在途请求：置位取消标记，并中断缓存读取与所有镜像请求。
     function result.cancel()
         cancelled = true
         if cache_job then cache_job.cancel() end
-        if job then job.cancel() end
+        stopLanes()
     end
 
     local body = opts.form and Text.formEncode(opts.form) or nil
@@ -259,60 +267,72 @@ function Client:_jsonAsync(method, path, opts, cb)
         headers["X-Requested-With"] = "XMLHttpRequest"
     end
     local last_err = _("网络请求失败")
-    local bi = 0
-    local current_base
+    local next_base = 0
+    local pending = 0
 
     local issue
-    local tryNextBase
-    --- 当前镜像不可用：记下错误并换下一个候选。
-    ---@param err string
-    local function failover(err, ...)
-        last_err = err
-        logger.dbg("book.zlib failover", method, path, current_base, ...)
-        tryNextBase()
+    local launch
+    --- 第一个给出确定答案的镜像胜出，其余请求取消；只回调一次。
+    local function finish(data, err)
+        if settled or cancelled then return end
+        settled = true
+        stopLanes()
+        deliver(data, err)
     end
 
-    --- 请求下一个候选镜像；候选耗尽时只回调一次最终错误。
-    tryNextBase = function()
-        if cancelled then return end
-        bi = bi + 1
-        if bi > #bases then
-            logger.warn("book.zlib request failed", method, path,
-                "attempts", #bases, last_err)
-            deliver(nil, last_err)
-            return
+    --- 这条请求的镜像不可用：记下错误；没有在途请求了就换下一个候选，候选耗尽则回调最终错误。
+    ---@param lane table
+    ---@param err string
+    local function failover(lane, err, ...)
+        if settled or cancelled then return end
+        last_err = err
+        pending = pending - 1
+        logger.dbg("book.zlib failover", method, path, lane.base, ...)
+        if pending > 0 then return end
+        if next_base < #bases then
+            pending = 1
+            launch()
+        else
+            logger.warn("book.zlib request failed", method, path, "attempts", #bases, last_err)
+            finish(nil, last_err)
         end
-        current_base = bases[bi]
-        local url = current_base .. path
+    end
+
+    launch = function()
+        next_base = next_base + 1
+        local lane = { base = bases[next_base], index = next_base }
+        lanes[#lanes + 1] = lane
+        local url = lane.base .. path
         logger.dbg("book.zlib mirror attempt", method, path,
-            "attempt", bi, "of", #bases, current_base,
+            "attempt", lane.index, "of", #bases, lane.base,
             "timeout", opts.timeout or require("http.timeout").net(1))
-        issue(url, method, body, headers, { [url] = true }, 0)
+        issue(lane, url, method, body, headers, { [url] = true }, 0)
     end
 
     --- 发出单次请求或继续跟随重定向。
+    ---@param lane table
     ---@param url string
     ---@param m string
     ---@param req_body string|nil
     ---@param headers table<string, string>
     ---@param seen table<string, boolean> 已请求过的 URL（重定向循环检测）
     ---@param hops number 已跟随的跳数
-    issue = function(url, m, req_body, headers, seen, hops)
-        job = Request.request({
+    issue = function(lane, url, m, req_body, headers, seen, hops)
+        lane.job = Request.request({
             url = url,
             method = m,
             body = req_body,
             headers = headers,
             timeout = opts.timeout or require("http.timeout").net(1),
         }, function(res, err)
-            if cancelled then return end
+            if cancelled or settled then return end
             local code = res and tonumber(res.code) or nil
 
-            -- 传输层失败：换下一个候选镜像
+            -- 传输层失败：这条镜像作废
             if not code then
                 if originOf(url) == pinned_base then pinned_base = nil end
                 local transport_err = classifyTransportError(res, err)
-                return failover(transport_err, "transport", transport_err)
+                return failover(lane, transport_err, "transport", transport_err)
             end
             ---@cast res table
 
@@ -321,10 +341,10 @@ function Client:_jsonAsync(method, path, opts, cb)
                 -- 30x 的 Location 允许是相对地址（RFC 9110）
                 local target = Text.absoluteUrl(url, Request.header(res, "location"))
                 if not target then
-                    return failover(T(_("HTTP %1"), code), "invalid_redirect", code)
+                    return failover(lane, T(_("HTTP %1"), code), "invalid_redirect", code)
                 end
                 if seen[target] or hops + 1 > MAX_REDIRECT_HOPS then
-                    return failover(_("重定向过多"), "redirect_loop", target)
+                    return failover(lane, _("重定向过多"), "redirect_loop", target)
                 end
                 seen[target] = true
                 -- 跨主机 = 镜像迁移；成功后按实际请求 URL 钉住新 origin。
@@ -342,25 +362,25 @@ function Client:_jsonAsync(method, path, opts, cb)
                             kept[k] = v
                         end
                     end
-                    issue(target, "GET", nil, kept, seen, hops + 1)
+                    issue(lane, target, "GET", nil, kept, seen, hops + 1)
                 else
-                    issue(target, m, req_body, headers, seen, hops + 1)
+                    issue(lane, target, m, req_body, headers, seen, hops + 1)
                 end
                 return
             end
 
             -- 5xx 是镜像自己病了：换下一个
             if code >= 500 then
-                return failover(T(_("HTTP %1"), code), "status", code)
+                return failover(lane, T(_("HTTP %1"), code), "status", code)
             end
 
             -- bot 挑战页：不是 JSON，是拦截页；换镜像才可能有用
             if looksLikeChallenge(res.body) then
-                return failover(_("服务器拒绝自动访问，正在尝试其它镜像"), "bot_challenge")
+                return failover(lane, _("服务器拒绝自动访问，正在尝试其它镜像"), "bot_challenge")
             end
 
-            -- 这个 base 能用：钉住（故障转移选中的镜像，下次直接用）
-            local selected = originOf(url) or current_base
+            -- 这个 base 能用：钉住（胜出的镜像，下次排在最前）
+            local selected = originOf(url) or lane.base
             if selected ~= pinned_base then
                 logger.dbg("book.zlib mirror selected", selected)
             end
@@ -370,28 +390,32 @@ function Client:_jsonAsync(method, path, opts, cb)
             if not Request.ok(code) then
                 local api_err = apiError(data, T(_("HTTP %1"), code))
                 logger.dbg("book.zlib request rejected", method, path,
-                    "attempt", bi, "of", #bases, selected,
+                    "attempt", lane.index, "of", #bases, selected,
                     "status", code, api_err)
-                deliver(nil, api_err)
+                finish(nil, api_err)
                 return
             end
             if not data then
                 logger.dbg("book.zlib invalid response", method, path,
-                    "attempt", bi, "of", #bases, selected,
+                    "attempt", lane.index, "of", #bases, selected,
                     "status", code, "bytes",
                     type(res.body) == "string" and #res.body or 0, decode_err)
-                deliver(nil, decode_err)
+                finish(nil, decode_err)
                 return
             end
             logger.dbg("book.zlib request success", method, path,
-                "attempt", bi, "of", #bases, selected, "status", code)
-            deliver(data)
+                "attempt", lane.index, "of", #bases, selected, "status", code)
+            finish(data)
         end)
     end
 
     cache_job = Cache.fetch(cache_key, cache_ttl, function(done)
         deliver = done
-        tryNextBase()
+        pending = race and #bases or 1
+        for _idx = 1, pending do
+            if settled then break end
+            launch()
+        end
     end, cb)
     return result
 end
@@ -481,6 +505,7 @@ end
 function Client:downloadLinkAsync(id, hash, cb)
     return self:_jsonAsync("GET", string.format("/eapi/book/%s/%s/file", id, hash), {
         session = true,
+        serial = true, -- 取链接会消耗下载额度，不并发
     }, function(data, err)
         local file = data and data.file
         if not data or tonumber(data.success) ~= 1 or type(file) ~= "table" then
