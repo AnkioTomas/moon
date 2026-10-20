@@ -34,6 +34,25 @@ function Mapper.book(row)
     }
 end
 
+--- search/v2 的 product_search_infos → Book[]。
+---@param wire table
+---@return Book[]
+function Mapper.search(wire)
+    local books = {}
+    for _idx, row in ipairs(wire.data and wire.data.product_search_infos or {}) do
+        books[#books + 1] = Mapper.book({
+            ebook_id = row.product_id,
+            name = row.product_name,
+            author = row.author,
+            image_url = row.logo,
+            info = row.content_info,
+            word_count = row.word_count,
+            cate_third_names = row.cate_third_names,
+        })
+    end
+    return books
+end
+
 --- 京东书架 ebooks/lite 行数组 → Book[]。
 ---@param rows table[]
 ---@return Book[]

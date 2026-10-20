@@ -67,6 +67,17 @@ function Source:syncBooksAsync(opts, cb)
     return Shelf.syncAsync(self.id, self._client, Mapper.shelfList, opts, cb)
 end
 
+--- 书城搜索：只取第一页。
+---@param keyword string
+---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:searchAsync(keyword, cb)
+    return self._client:searchAsync(keyword, 1, 20, function(wire, err)
+        if not wire then cb(nil, err); return end
+        cb({ data = Mapper.search(wire) })
+    end)
+end
+
 local RANK_PAGE = 20
 
 --- 书城浏览：榜单类别（出版 / 男生 / 女生）、榜单、周期、分类四行 chip，节点是「类别:榜单:周期:分类」，

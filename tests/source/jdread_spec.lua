@@ -619,3 +619,17 @@ do
     Assert.eq(res.groups[3].chips[2].title, "玄幻频道")
     Assert.eq(types_calls, 1)
 end
+
+-- 书城搜索：product_search_infos 映射成 Book，源因此出现在书城来源下拉里
+do
+    fake_client.searchAsync = function(_, keyword, page, size, cb)
+        Assert.eq(keyword .. page .. size, "斗120")
+        cb({ data = { product_search_infos = { { product_id = 7, product_name = "斗破", author = "土豆", content_info = "简介" } } } })
+        return { cancel = function() end }
+    end
+    local res
+    Jdread.new():searchAsync("斗", function(r) res = r end)
+    Assert.eq(res.data[1].stable_id, "7")
+    Assert.eq(res.data[1].title, "斗破")
+    Assert.eq(res.data[1].intro, "简介")
+end

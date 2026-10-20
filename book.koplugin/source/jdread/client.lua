@@ -146,6 +146,18 @@ function Client:shelfSyncAsync(cb)
         end }
 end
 
+--- 关键词搜索（不带 order_by，网页端带分号的排序值需要特殊编码）。
+---@param keyword string
+---@param page integer
+---@param page_size integer
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:searchAsync(keyword, page, page_size, cb)
+    return self:apiGetAsync("/jdread/api/search/v2", {
+        keyword = keyword, page = page, page_size = page_size, cv = "3.4.0",
+    }, cb)
+end
+
 --- 榜单菜单：出版 / 男生 / 女生，每类下是榜单及其周期。
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
