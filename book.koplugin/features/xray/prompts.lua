@@ -103,9 +103,10 @@ end
 ---@param prior_text string|nil
 ---@param existing table|nil
 ---@param recap string|nil 当前章之前的章节摘要
----@param lean boolean|nil 省 token：实体上限收紧
+---@param limits { caps: integer[], rule: string|nil }|nil 档位：实体数量上限与附加规则
 ---@return string
-function Prompts.comprehensive(title, author, progress, current_page, prior_text, existing, recap, lean)
+function Prompts.comprehensive(title, author, progress, current_page, prior_text, existing, recap, limits)
+    local caps = limits and limits.caps or { 15, 10, 10 }
     local book_line = bookLine(title, author)
     return string.format([[书籍：%s
 阅读进度：约 %d%%
@@ -150,7 +151,8 @@ CURRENT PAGE:
 
 PRIOR CONTEXT:
 %s]], book_line, progress or 0,
-        lean and "- 人物不超过 10，地点不超过 5，专有名词不超过 5。" or "- 人物不超过 15，地点不超过 10，专有名词不超过 10。",
+        string.format("- 人物不超过 %d，地点不超过 %d，专有名词不超过 %d。%s",
+            caps[1], caps[2], caps[3], limits and limits.rule or ""),
         formatExisting(existing),
         current_page or "", prior_text or "") .. storySoFar(recap)
 end

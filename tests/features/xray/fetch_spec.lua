@@ -273,14 +273,23 @@ names_after = {}
 for _idx, row in ipairs(entity_rows) do names_after[row.name] = true end
 Assert.is_true(names_after.Lucy)
 
--- 省 token：不带前情摘要，提示词里的实体上限收紧
+-- 识别档位：节约不带摘要与前文、上限收紧；高质量放宽
 local xray_conf = require("utils.settings").get("features.xray")
-xray_conf.book_xray_save_tokens = true
-chapter_idx, recap, recap_asked = 7, "第六章\n伯爵来到了惠特比。", nil
-run({ { kind = "character", name = "Mina", aliases = {}, description = "x" } }, { { characters = {}, locations = {}, terms = {} } })
-Assert.is_nil(recap_asked, "省 token 时不取前情摘要")
+local function runQuality(q)
+    xray_conf.book_xray_quality = q
+    chapter_idx, recap, recap_asked = 7, "第六章\n伯爵来到了惠特比。", nil
+    run({ { kind = "character", name = "Mina", aliases = {}, description = "x" } }, { { characters = {}, locations = {}, terms = {} } })
+end
+runQuality("save")
+Assert.is_nil(recap_asked, "节约档不取前情摘要")
 Assert.matches(prompts[1], "人物不超过 10，地点不超过 5，专有名词不超过 5")
-xray_conf.book_xray_save_tokens = false
-run({ { kind = "character", name = "Mina", aliases = {}, description = "x" } }, { { characters = {}, locations = {}, terms = {} } })
+Assert.is_nil(prompts[1]:find("prior", 1, true), "节约档不带本页之前的正文")
+Assert.matches(prompts[1], "description 不超过 40 字")
+runQuality("standard")
 Assert.matches(prompts[1], "人物不超过 15，地点不超过 10，专有名词不超过 10")
+Assert.eq(recap_asked.chapters, 5)
+runQuality("high")
+Assert.matches(prompts[1], "人物不超过 25，地点不超过 15，专有名词不超过 15")
+Assert.eq(recap_asked.chapters, 10)
+Assert.matches(prompts[1], "description 写详实")
 chapter_idx, recap = nil, nil
