@@ -28,6 +28,9 @@ package.preload["http.cache"] = function()
     return { key = function() return "k" end, fetch = function(_key, _ttl, load, cb) return load(cb) or { cancel = function() end } end }
 end
 
+local saved = 0
+package.loaded["utils.settings"] = { saveSource = function() saved = saved + 1 end }
+
 package.loaded["store.zlib.client"] = nil
 local Client = require("store.zlib.client")
 local client = Client.new({ base_url = "https://a.example" })
@@ -44,6 +47,11 @@ Assert.eq(data.success, 1)
 Assert.is_true(cancelled[pending[2].url] and cancelled[pending[4].url] and cancelled[pending[5].url])
 pending[5].cb({ code = 200, body = '{"success":1}' })
 Assert.eq(calls, 1, "胜出后迟到的回包不再回调")
+
+-- 同场失败的镜像被落盘拉黑，胜出的不拉黑
+Assert.eq(saved, 1)
+Assert.is_true(client.cfg.dead_bases[pending[1].url:match("^https://[^/]+")] ~= nil)
+Assert.is_nil(client.cfg.dead_bases[pending[3].url:match("^https://[^/]+")])
 
 -- 已有胜出镜像：后续请求不再竞速，只发给它
 pending = {}
@@ -62,6 +70,17 @@ client:_jsonAsync("GET", "/eapi/x", {}, function(_d, e) calls = calls + 1; err =
 for _idx = 1, #pending do pending[_idx].cb({ code = 503 }) end
 Assert.eq(calls, 1)
 Assert.matches(err, "503")
+
+-- 拉黑的镜像下次竞速不再尝试
+pending = {}
+package.loaded["store.zlib.client"] = nil
+Client = require("store.zlib.client")
+local dead = { ["https://a.example"] = os.time() }
+client = Client.new({ dead_bases = dead })
+client:_jsonAsync("GET", "/eapi/z", {}, function() end)
+for _idx = 1, #pending do
+    Assert.is_true(pending[_idx].url:find("a.example", 1, true) == nil)
+end
 
 -- serial：一次只发一个，失败才换下一个，最多 3 个
 pending = {}

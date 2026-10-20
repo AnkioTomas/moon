@@ -72,6 +72,8 @@ local MAX_REDIRECT_HOPS = 5
 local RACE_WIDTH = 5 -- 首次（尚无可用镜像）并发竞速的镜像数
 local SERIAL_ATTEMPTS = 3 -- 已选定镜像 / 消耗下载额度的请求，依次试的镜像数
 
+local DEAD_TTL = 7 * 24 * 3600 -- 竞速中失败的镜像在这段时间内不再尝试
+
 -- 钉住的镜像 origin（重定向跨主机或故障转移成功时更新，本次会话有效）
 local pinned_base
 
@@ -103,6 +105,8 @@ end
 ---@return string[]
 local function baseCandidates(cfg, cap)
     local out, seen = {}, {}
+    local dead = cfg and cfg.dead_bases or {}
+    local now = os.time()
     --- 归一化一个候选地址（去空白、去尾部斜杠、补 https 前缀）后按去重追加。
     ---@param u string|nil 候选地址，非字符串或归一化后为空则跳过
     local function add(u)
@@ -110,7 +114,9 @@ local function baseCandidates(cfg, cap)
         u = u:gsub("%s+", ""):gsub("/+$", "")
         if u == "" then return end
         if not u:match("^[hH][tT][tT][pP][sS]?://") then u = "https://" .. u end
-        if not seen[u] then
+        local died = dead[u]
+        local skip = died and now - died < DEAD_TTL and u ~= (cfg and cfg.base_url) and u ~= pinned_base
+        if not seen[u] and not skip then
             seen[u] = true
             out[#out + 1] = u
         end
@@ -118,6 +124,10 @@ local function baseCandidates(cfg, cap)
     add(cfg and cfg.base_url)
     add(pinned_base)
     for _idx, seed in ipairs(SEED_URLS) do add(seed) end
+    if #out == 0 and next(dead) then
+        cfg.dead_bases = nil
+        return baseCandidates(cfg, cap)
+    end
     local capped = {}
     for i = 1, math.min(cap, #out) do capped[i] = out[i] end
     return capped
@@ -238,6 +248,26 @@ end
 ---@param opts table session、form、cache_ttl、timeout
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
+--- 竞速有镜像胜出（说明网络通）时，把同场失败的镜像落盘拉黑；胜出的镜像移出黑名单。
+---@param lanes table[]
+function Client:_blacklistFailed(lanes)
+    local dead = self.cfg.dead_bases or {}
+    local now, changed = os.time(), false
+    for _idx, lane in ipairs(lanes) do
+        if lane.failed and lane.base ~= pinned_base then
+            dead[lane.base] = now
+            changed = true
+        end
+    end
+    if pinned_base and dead[pinned_base] then
+        dead[pinned_base] = nil
+        changed = true
+    end
+    if not changed then return end
+    self.cfg.dead_bases = dead
+    require("utils.settings").saveSource("zlib", self.cfg)
+end
+
 function Client:_jsonAsync(method, path, opts, cb)
     local race = not opts.serial and not pinned_base -- 只在还没选定镜像时竞速，之后固定用胜出的那个
     local bases = baseCandidates(self.cfg, race and RACE_WIDTH or SERIAL_ATTEMPTS)
@@ -277,6 +307,7 @@ function Client:_jsonAsync(method, path, opts, cb)
         if settled or cancelled then return end
         settled = true
         stopLanes()
+        if race and data then self:_blacklistFailed(lanes) end
         deliver(data, err)
     end
 
@@ -286,6 +317,7 @@ function Client:_jsonAsync(method, path, opts, cb)
     local function failover(lane, err, ...)
         if settled or cancelled then return end
         last_err = err
+        lane.failed = true
         pending = pending - 1
         logger.dbg("book.zlib failover", method, path, lane.base, ...)
         if pending > 0 then return end
