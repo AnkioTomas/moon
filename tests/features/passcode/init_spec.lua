@@ -84,8 +84,10 @@ Assert.is_true(conf.hash ~= old_hash)
 
 -- 连错 5 次冷却；冷却中输对也不放行；过期后输对清零。
 for _i = 1, 4 do Assert.eq(select(2, Passcode.verify("9999")), "密码错误") end
+Assert.is_false(Passcode.tooManyFails(), "没到 5 次不给忘记密码入口")
 Assert.eq(select(2, Passcode.verify("9999")), "密码错误，请 30 秒后再试")
 Assert.eq(conf.locked_until, 1030)
+Assert.is_true(Passcode.tooManyFails())
 now = 1010
 ok, err = Passcode.verify("1234")
 Assert.is_false(ok)
@@ -177,3 +179,13 @@ Passcode.onResume()
 Assert.is_false(isLocked())
 Assert.len(pads, 4)
 Assert.is_true(saves > 0)
+
+-- 忘记密码：密码文件还在时 000000 只是普通错误输入；USB 删掉文件后 000000 解锁并关闭密码。
+local path = Paths.sectionPath("passcode")
+Passcode.setPin("1234")
+local fh = assert(io.open(path, "w"))
+fh:close()
+Assert.is_false((Passcode.verify("000000")))
+os.remove(path)
+Assert.is_true(Passcode.verify("000000"))
+Assert.is_false(Passcode.hasPin())

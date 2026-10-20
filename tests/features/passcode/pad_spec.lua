@@ -7,6 +7,7 @@ local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
 
+local UIManager = require("ui/uimanager")
 local Modal = require("ui.themes.widgets.modal")
 local Pad = require("features.passcode.pad")
 
@@ -15,6 +16,11 @@ local Pad = require("features.passcode.pad")
 local function press(pad, key)
     local index = ({ del = 10, ["0"] = 11, ok = 12, cancel = 13 })[key] or tonumber(key)
     Kit.buttons(pad)[index]:onTapThemeButton()
+end
+
+--- 圆点行六格拼成一串（texts 第 1 项是标题）。
+local function dots(p)
+    return table.concat(Kit.texts(p), "", 2, 1 + Pad.MAX_LEN)
 end
 
 local submitted = {}
@@ -44,8 +50,24 @@ Assert.len(submitted, 0)
 -- 最多 6 位；删除退一位。
 for _i, key in ipairs({ "4", "5", "6", "7" }) do press(pad, key) end
 Assert.eq(pad.pin, "123456")
-Assert.contains(Kit.texts(pad), "●●●●●●")
+Assert.eq(dots(pad), "●●●●●6", "刚按下的一位明文")
+UIManager:unschedule(pad.mask)
+pad.mask()
+Assert.eq(dots(pad), "●●●●●●", "到时间变回圆点")
 press(pad, "del")
+press(pad, "0")
+Assert.eq(pad.pin, "123450")
+
+-- 按下 / 删除都先撤掉上一位的定时遮盖；满位再按不重新明文。
+press(pad, "0")
+Assert.eq(dots(pad), "●●●●●0")
+press(pad, "5")
+Assert.eq(dots(pad), "●●●●●0", "满位多按一下不动")
+pad.mask()
+press(pad, "5")
+Assert.eq(dots(pad), "●●●●●●", "满位多按一下不重新明文")
+press(pad, "del")
+Assert.eq(dots(pad), "●●●●●○")
 press(pad, "0")
 Assert.eq(pad.pin, "123450")
 
@@ -54,7 +76,7 @@ press(pad, "ok")
 Assert.eq(submitted[1], "123450")
 Assert.eq(pad.pin, "")
 Assert.contains(Kit.texts(pad), "密码错误")
-Assert.contains(Kit.texts(pad), "○○○○○○")
+Assert.eq(dots(pad), "○○○○○○")
 Assert.is_false(Kit.buttons(pad)[10].enabled, "空输入时删除键置灰")
 
 -- 解锁窗口吞掉返回键与点按，不关窗。
@@ -67,7 +89,7 @@ Assert.eq(#Kit.closed, closed)
 press(pad, "9")
 pad:clear()
 Assert.eq(pad.pin, "")
-Assert.contains(Kit.texts(pad), "○○○○○○")
+Assert.eq(dots(pad), "○○○○○○")
 
 -- 再输就清掉提示；通过后关窗。
 press(pad, "1")

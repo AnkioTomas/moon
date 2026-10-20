@@ -19,6 +19,7 @@ PIN 只存 sha256(salt .. pin)，只为不落明文：位数太少，拿到文�
 local Guard = require("ui.guard")
 local MoonSettings = require("utils.settings")
 local Paths = require("utils.paths")
+local lfs = require("libs/libkoreader-lfs")
 local sha2 = require("ffi/sha2")
 require("l10n").apply()
 local _ = require("gettext")
@@ -27,6 +28,7 @@ local T = require("ffi/util").template
 local OWNER = "features.passcode"
 local MAX_FAILS = 5
 local COOLDOWN = 30
+local RESET_PIN = "000000"
 
 local Passcode = {}
 
@@ -75,6 +77,11 @@ end
 ---@return string|nil err
 function Passcode.verify(pin)
     local conf = MoonSettings.get(OWNER)
+    -- 忘记密码：USB 删掉密码文件后输 000000 解锁，免得卡在锁屏没法重启；文件还在就当普通输入。
+    if pin == RESET_PIN and not lfs.attributes(Paths.sectionPath("passcode"), "mode") then
+        Passcode.clear()
+        return true
+    end
     local now = os.time()
     local wait = (conf.locked_until or now) - now
     if wait > 0 and wait <= COOLDOWN then
@@ -96,6 +103,12 @@ function Passcode.verify(pin)
     return false, _("密码错误")
 end
 
+--- 是否连续输错到了上限，此时解锁页给出「忘记密码」入口。
+---@return boolean
+function Passcode.tooManyFails()
+    return (MoonSettings.get(OWNER).fails or 0) >= MAX_FAILS
+end
+
 --- 解锁后执行 fn；没锁就立即执行。同 key 重复排队只留最后一个。
 ---@param key string
 ---@param fn fun()
@@ -109,6 +122,16 @@ local function showPad()
     pad = require("features.passcode.pad"):new{
         title = _("输入密码解锁"),
         dismissable = false,
+        header = true,
+        forgot = Passcode.tooManyFails,
+        on_forgot = function()
+            require("ui.themes.widgets.confirm"):new{
+                title = _("忘记了设备密码？"),
+                text = T(_("不需要输入密码：用 USB 连接电脑，删除 %1 和 %1.old，然后在密码页输入 000000 即可解锁并关闭密码。"),
+                    Paths.sectionPath("passcode")),
+                ok_text = _("知道了"),
+            }:show()
+        end,
         on_submit = function(pin)
             local ok, err = Passcode.verify(pin)
             if not ok then return err end
