@@ -316,6 +316,21 @@ do
     Subscribe.syncMp = real
 end
 
+-- 纯图摘要（报纸 / 漫画）直接当正文，不去抓原文页（那页可能就是一张图）
+do
+    local Req = package.loaded["http.request"]
+    local real_stream, real_assets = Req.stream, package.loaded["source.assets"]
+    local fetched = 0
+    Req.stream = function() fetched = fetched + 1 return { cancel = function() end } end
+    package.loaded["source.assets"] = { localizeAsync = function(html, _dir, _dl, cb) cb(html) return {} end }
+    summaries["pic"] = '<p><img src="https://a.com/1.png"></p>'
+    local out
+    Subscribe.providers.rss.content({ id = 1, kind = "rss" }, { guid = "pic", link = "https://a.com/p" }, "/tmp/x", function(html) out = html end)
+    Assert.eq(fetched, 0)
+    Assert.matches(out, "1%.png")
+    Req.stream, package.loaded["source.assets"] = real_stream, real_assets
+end
+
 -- 图片下载：公网文章的图片不许经跳转落到内网；局域网文章（自建 RSSHub）不限。
 do
     local asked, answers = {}, {}
