@@ -1,5 +1,5 @@
 --[[--
-键盘收起键：每个虚拟键盘的最后一行加一个收起键（键盘 + 向下箭头图标），点了收起键盘（等同实体返回键）。
+虚拟键盘收起键：每个虚拟键盘的最后一行加一个收起键（键盘 + 向下箭头图标），点了收起键盘（等同实体返回键）。
 
 KOReader 的键盘只有实体返回键能收起，没有返回键的触屏设备只能点输入框外面。
 
@@ -9,12 +9,12 @@ KOReader 的键盘只有实体返回键能收起，没有返回键的触屏设�
 换一份最后一行的拷贝，从最宽的键让出 1 格宽插在回车前。最宽的键不到 2 格的布局不加。
 收起键的字符是私有区码位，在 addChar 截下，不会写进输入框。
 
-开关在「输入法」设置页（`features.keyboard.enabled`，默认开），下次弹出键盘生效。
+开关在「输入法」设置页（`features.ime.hide_key`，默认开），下次弹出键盘生效。
 
 收起做的事同 VirtualKeyboard:onCloseWithKey（KOReader 2026.08 才有，插件最低支持 2026.07）：
 关键盘，再告诉输入框所在窗口键盘没了，让它重新排版。
 
-@module koplugin.book.features.keyboard
+@module koplugin.book.features.ime.hide_key
 --]]
 
 local Guard = require("ui.guard")
@@ -74,7 +74,7 @@ function Keyboard.onCreate()
     local VK = require("ui/widget/virtualkeyboard")
     local orig_addKeys, orig_addChar = VK.addKeys, VK.addChar
     VK.addKeys = function(self, ...)
-        if not self.KEYS._with_hide and require("utils.settings").get("features.keyboard").enabled then
+        if not self.KEYS._with_hide and require("utils.settings").get("features.ime").hide_key then
             self.KEYS = Guard.call("keyboard hide key", Keyboard.withHideKey, self.KEYS) or self.KEYS
         end
         return orig_addKeys(self, ...)

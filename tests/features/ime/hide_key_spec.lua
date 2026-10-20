@@ -1,10 +1,10 @@
 --[[--
-features.keyboard 离线用例：VirtualKeyboard / Guard 全 stub。
+features.ime.hide_key 离线用例：VirtualKeyboard / Guard 全 stub。
 
 验证：末行最宽键让出 1 格放「收起」（插在末键前）、不改原布局、没有可让的键时原样返回；
 addKeys 只改一次；收起键关键盘并通知输入框父窗口，其余键透传。
 
-@module tests.features.keyboard.init_spec
+@module tests.features.ime.hide_key_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field
 
@@ -16,15 +16,15 @@ function VK:addKeys() orig_add_keys = orig_add_keys + 1 end
 function VK:addChar(key) passed[#passed + 1] = key end
 function VK:onClose() closed = closed + 1 end
 package.preload["ui/widget/virtualkeyboard"] = function() return VK end
-local cfg = { enabled = true }
+local cfg = { hide_key = true }
 package.preload["utils.settings"] = function()
-    return { get = function(owner) assert(owner == "features.keyboard") return cfg end }
+    return { get = function(owner) assert(owner == "features.ime") return cfg end }
 end
 package.preload["ui.guard"] = function()
     return { call = function(_label, fn, ...) return fn(...) end }
 end
 
-local Keyboard = require("features.keyboard")
+local Keyboard = require("features.ime.hide_key")
 
 local function layout()
     return {
@@ -74,12 +74,12 @@ Assert.len(kb.KEYS[2], 5)
 Assert.eq(orig_add_keys, 2)
 
 -- 开关关：不加收起键
-cfg.enabled = false
+cfg.hide_key = false
 local plain = setmetatable({ KEYS = layout() }, { __index = VK })
 plain:addKeys()
 Assert.len(plain.KEYS[2], 4)
 Assert.is_nil(plain.KEYS._with_hide)
-cfg.enabled = true
+cfg.hide_key = true
 
 -- 收起：关键盘 + 通知父窗口；普通键透传
 local notified = 0

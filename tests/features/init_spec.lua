@@ -84,7 +84,7 @@ require("support.modal_stub").install()
 local Features = require("features")
 
 -- 真实 list 的每个条目都能加载。不调用钩子：锁屏/远程的 onCreate 会拉起真实服务。
-Assert.eq(table.concat(Features.list, ","), "clock,nightmode,panel,azw3,bars,sidebar,xray,ai,reviews,rare,translate,reflow,animation,dictionary,ocr,baike,lockscreen,wallpaper,passcode,keyboard,ime,remote,update,storage,subscribe,cookie,extensions")
+Assert.eq(table.concat(Features.list, ","), "clock,nightmode,panel,azw3,bars,sidebar,xray,ai,reviews,rare,translate,reflow,animation,dictionary,ocr,baike,lockscreen,wallpaper,passcode,ime,remote,update,storage,subscribe,cookie,extensions")
 for _, name in ipairs(Features.list) do
     Assert.eq(type(require("features." .. name)), "table")
 end

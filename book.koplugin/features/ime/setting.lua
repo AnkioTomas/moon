@@ -208,6 +208,23 @@ local function sections(desktop)
                     })
                 end,
                 function(iw)
+                    local settings = require("utils.settings").get("features.ime")
+                    return Row.widget({
+                        width = iw,
+                        chevron = false,
+                        kind = "toggle",
+                        icon = "keyboard_hide",
+                        title = _("键盘收起键"),
+                        status = settings.hide_key and _("开") or _("关"),
+                        status_on = settings.hide_key,
+                        callback = function()
+                            settings.hide_key = not settings.hide_key
+                            require("utils.settings").save("features.ime", settings)
+                            desktop:updateView()
+                        end,
+                    })
+                end,
+                function(iw)
                     return Row.widget({
                         width = iw,
                         chevron = true,
@@ -240,6 +257,7 @@ Setting.defaults = {
     ime_dict_built_at = {},
     ime_script = "keep",
     ime_keycaps = false,
+    hide_key = true, -- 虚拟键盘末行的收起键，与中文输入法开关无关
 }
 
 ---@param desktop BookDesktop
