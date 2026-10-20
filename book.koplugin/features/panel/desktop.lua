@@ -13,6 +13,7 @@ local _ = require("gettext")
 
 local ActionList = require("features.panel.action_list")
 local Registry = require("features.panel.actions.registry")
+local MoonSettings = require("utils.settings")
 
 ---@class BookQuickPanelDesktop
 ---@field lightPercent fun(kind: "brightness"|"warmth"): number
@@ -97,10 +98,10 @@ Panel.swap = list.swap
 ---@return BookQuickPanelSlider[]
 function Panel.sliders()
     local sliders = {}
-    if Device:hasFrontlight() then
+    if Device:hasFrontlight() and MoonSettings.get("features.panel").quick_panel_brightness then
         sliders[#sliders + 1] = { kind = "brightness", title = _("亮度"), value = Panel.lightPercent("brightness") }
     end
-    if Device:hasNaturalLight() then
+    if Device:hasNaturalLight() and MoonSettings.get("features.panel").quick_panel_warmth then
         sliders[#sliders + 1] = { kind = "warmth", title = _("冷暖色调"), value = Panel.lightPercent("warmth") }
     end
     return sliders

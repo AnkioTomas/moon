@@ -14,6 +14,8 @@ Setting.defaults = {
     quick_panel_actions = {
         "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "autolight", "suspend",
     },
+    quick_panel_brightness = true,
+    quick_panel_warmth = true,
     quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "bookorbit", "xray", "page_turn" },
 }
 

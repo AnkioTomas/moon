@@ -72,6 +72,22 @@ package.preload["ffi/util"] = function()
     return { template = function(value, position) return value:gsub("%%1", tostring(position)) end }
 end
 
+local lights = { hasNaturalLight = false, hasFrontlight = false }
+package.preload["device"] = function()
+    return {
+        hasNaturalLight = function() return lights.hasNaturalLight end,
+        hasFrontlight = function() return lights.hasFrontlight end,
+    }
+end
+local panel_settings = { quick_panel_warmth = true, quick_panel_brightness = true }
+local panel_saved = 0
+package.preload["utils.settings"] = function()
+    return {
+        get = function() return panel_settings end,
+        save = function() panel_saved = panel_saved + 1 end,
+    }
+end
+
 local QuickPanel = require("features.panel.settings")
 local desktop = { updateView = function() end }
 local desktop_rows = QuickPanel.rows("desktop", desktop)
@@ -79,6 +95,20 @@ local reader_rows = QuickPanel.rows("reader", desktop)
 
 Assert.len(desktop_rows, 2)
 Assert.len(reader_rows, 1)
+
+-- 有前光 / 色温的设备多出两个滑块开关，点一下翻转并落盘。
+lights.hasNaturalLight, lights.hasFrontlight = true, true
+local with_toggles = QuickPanel.rows("desktop", desktop)
+Assert.len(with_toggles, 4)
+Assert.len(QuickPanel.rows("reader", desktop), 1)
+with_toggles[1](400)
+Assert.eq(built.title, "亮度滑块")
+built.callback()
+Assert.eq(panel_settings.quick_panel_brightness, false)
+Assert.eq(panel_saved, 1)
+with_toggles[2](400)
+Assert.eq(built.title, "冷暖色调滑块")
+lights.hasNaturalLight, lights.hasFrontlight = false, false
 
 -- 桌面动作与其他动作一样可配置。
 desktop_rows[1](400)
