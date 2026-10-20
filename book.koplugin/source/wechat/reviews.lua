@@ -41,6 +41,7 @@ local Reviews = {}
 ---@field author string
 ---@field content string
 ---@field likes integer
+---@field images { url: string, width: integer, height: integer }[]|nil 评论配图（目前只有番茄）
 ---@field time integer 秒
 
 ---@class WechatReviewPage

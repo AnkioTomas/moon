@@ -72,6 +72,37 @@ function Reviews.hotspotsAsync(settings, item_id, cb)
     end)
 end
 
+--- 设备解不了 HEIC（用户上传图）：改成同一张图的 800 宽 webp 缩略图（该地址不带签名）。
+--- 路径不是用户图的（表情等）原样返回。
+---@param url string
+---@return string
+local function displayUrl(url)
+    if not url:find("~tplv%-[%w%-]+jpeg%.heic") then return url end
+    local head = url:gsub("%?.*$", ""):match("^https?://[^/]+(/[^~]+)~tplv")
+    if head and (head:match("^/tos%-cn%-i%-[%w]+/[^/]+$") or head:match("^/img/novel%-static/[^/]+$")) then
+        return "https://p3-novel.byteimg.com" .. head .. "~tplv-1yzifmftcy-expand:800:0:0.webp"
+    end
+    return url
+end
+
+--- 评论里的图：`image_data_list.image_data` 是图数组（兼容直接是数组 / 单个对象）。
+---@param content table
+---@return { url: string, width: integer, height: integer }[]
+local function images(content)
+    local list = content.image_data_list
+    if type(list) ~= "table" then return {} end
+    local raw = list.image_data or list
+    if raw.web_url then raw = { raw } end
+    local out = {}
+    for _idx, img in ipairs(raw) do
+        local url = img.web_url or img.dynamic_url or img.expand_web_url
+        if type(url) == "string" and url ~= "" then
+            out[#out + 1] = { url = displayUrl(url), width = tonumber(img.width) or 0, height = tonumber(img.height) or 0 }
+        end
+    end
+    return out
+end
+
 ---@param item table commentapi 评论条目
 ---@return WechatReview
 local function item(entry)
@@ -87,6 +118,7 @@ local function item(entry)
         author = tostring(base.user_name or common.user_name or ""),
         content = tostring(content.text or common.text or ""),
         likes = tonumber(stat.digg_count) or 0,
+        images = images(content),
         time = created > 1e11 and math.floor(created / 1000) or created,
     }
 end

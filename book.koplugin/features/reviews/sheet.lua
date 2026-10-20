@@ -32,6 +32,7 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Icon = require("ui.themes.widgets.icon")
+local Image = require("ui.themes.widgets.image")
 local Modal = require("ui.themes.widgets.modal")
 local Pager = require("ui.themes.widgets.pager")
 local Text = require("ui.themes.widgets.text")
@@ -40,6 +41,8 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 
 local QUOTE_LINES = 6
+local MAX_THUMBS = 3
+local IMAGE_HEADERS = { Referer = "https://fanqienovel.com/" }
 
 ---@class ReviewSheet : BookThemeModal
 ---@field identity BookIdentity
@@ -142,15 +145,42 @@ function Sheet:card(i)
         meta,
     }
     local space = Theme.px(t.space.xs)
+    local pics = self:thumbs(item.images or {})
+    local pics_h = pics and pics:getSize().h + space or 0
     local content = Text.box("body", item.content, w)
-    local room = self.body_h - head:getSize().h - space
+    local room = self.body_h - head:getSize().h - space - pics_h
     if content:getSize().h > room then
         local lines = math.max(1, math.floor(room / content:getLineHeight()))
         content:free()
         content = Text.box("body", item.content, w, { max_lines = lines })
     end
-    self.cards[i] = VerticalGroup:new{ align = "left", head, VerticalSpan:new{ width = space }, content }
+    local card = VerticalGroup:new{ align = "left", head, VerticalSpan:new{ width = space }, content }
+    if pics then
+        card[#card + 1] = VerticalSpan:new{ width = space }
+        card[#card + 1] = pics
+    end
+    self.cards[i] = card
     return self.cards[i]
+end
+
+--- 评论配图缩略图一行（固定方块，保证分页高度可算）；至多 MAX_THUMBS 张，多出的在末尾标张数。
+---@param images { url: string }[]
+---@return table|nil
+function Sheet:thumbs(images)
+    if #images == 0 then return nil end
+    local t = self.theme
+    local gap = Theme.px(t.space.sm)
+    local size = math.min(math.floor((self.inner_w - gap * (MAX_THUMBS - 1)) / MAX_THUMBS), math.floor(self.body_h / 5))
+    local row = HorizontalGroup:new{ align = "center" }
+    for n = 1, math.min(#images, MAX_THUMBS) do
+        if n > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
+        row[#row + 1] = Image.widget{ src = images[n].url, headers = IMAGE_HEADERS, width = size, height = size }
+    end
+    if #images > MAX_THUMBS then
+        row[#row + 1] = HorizontalSpan:new{ width = gap }
+        row[#row + 1] = Text.line("caption", T(_("共 %1 张"), #images), { color = t.color.faint })
+    end
+    return row
 end
 
 --- 按卡片高度贪心分页；首页先放原句。没有段评时也保留一页。

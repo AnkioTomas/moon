@@ -56,7 +56,10 @@ do
     reply = { data = {
         data_list = { { comment = {
             comment_id = "c1",
-            common = { user_info = { base_info = { user_name = "书友" } }, content = { text = "好看" },
+            common = { user_info = { base_info = { user_name = "书友" } }, content = { text = "好看", image_data_list = { image_data = {
+                    { web_url = "https://p3-novel.byteimg.com/tos-cn-i-abc/xyz~tplv-q:300:0.awebp?sig=1" },
+                    { web_url = "https://p3-novel.byteimg.com/tos-cn-i-abc/up123~tplv-q-jpeg.heic?sig=2" },
+                } } },
                 create_timestamp = 1700000000000 },
             stat = { digg_count = 9 },
         } } },
@@ -71,6 +74,10 @@ do
     Assert.eq(page.items[1].author, "书友")
     Assert.eq(page.items[1].content, "好看")
     Assert.eq(page.items[1].likes, 9)
+    Assert.len(page.items[1].images, 2)
+    Assert.matches(page.items[1].images[1].url, "awebp%?sig=1")
+    Assert.eq(page.items[1].images[2].url,
+        "https://p3-novel.byteimg.com/tos-cn-i-abc/up123~tplv-1yzifmftcy-expand:800:0:0.webp")
     Assert.eq(page.items[1].time, 1700000000)
     Assert.eq(page.total, 33)
     Assert.eq(page.max_idx, 20)
