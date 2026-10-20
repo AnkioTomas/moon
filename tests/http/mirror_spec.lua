@@ -6,7 +6,7 @@ http.mirror：模板展开、优先级（上次成功 → 默认，冷却垫底�
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
 
-local cfg = { mirror_last = "" }
+local cfg = { mirror_last = "", mirror_dead = {} }
 package.preload["utils.settings"] = function()
     return {
         get = function(name) assert(name == "http"); return cfg end,
@@ -63,9 +63,13 @@ do -- 失败与 HTML 首页都换下一个源；成功源记为 mirror_last，�
     Assert.eq(Mirror.url("assets/a.png"), url(3, "assets/a.png"))
     local list = Mirror.templates()
     Assert.eq(list[1], Mirror.DEFAULTS[3])
-    -- 冷却中的源垫底
-    Assert.eq(list[#list], Mirror.DEFAULTS[2])
-    Assert.eq(list[#list - 1], Mirror.DEFAULTS[1])
+    -- 同场有源成功：先失败的两个落盘拉黑，不再出现在候选里
+    Assert.is_true(Mirror.isDead(Mirror.DEFAULTS[1]) and Mirror.isDead(Mirror.DEFAULTS[2]))
+    Assert.eq(#list, #Mirror.DEFAULTS - 2)
+    Assert.is_true(cfg.mirror_dead[Mirror.DEFAULTS[1]] ~= nil)
+    -- 过期后解除
+    cfg.mirror_dead[Mirror.DEFAULTS[1]] = os.time() - Mirror.DEAD_TTL - 1
+    Assert.is_false(Mirror.isDead(Mirror.DEFAULTS[1]))
 end
 
 do -- 全部失败时回报最后的错误，check 不过也算失败

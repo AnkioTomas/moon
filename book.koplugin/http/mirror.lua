@@ -62,6 +62,9 @@ Mirror.RELEASE_PROXIES = {
 --- 失败源的冷却秒数。
 Mirror.COOLDOWN = 30 * 60
 
+--- 失败源落盘拉黑的秒数。
+Mirror.DEAD_TTL = 7 * 24 * 3600
+
 --- 模板 → 最近失败时间（只在内存，重启即清）。
 local failed = {}
 
@@ -69,6 +72,28 @@ local failed = {}
 local function conf()
     local ok, cfg = pcall(function() return require("utils.settings").get("http") end)
     return ok and type(cfg) == "table" and cfg or {}
+end
+
+--- 源（模板或加速前缀）是否在落盘黑名单里。
+---@param key string
+---@return boolean
+function Mirror.isDead(key)
+    local at = (conf().mirror_dead or {})[key]
+    return at ~= nil and os.time() - at < Mirror.DEAD_TTL
+end
+
+--- 落盘拉黑一批源，同时清掉过期条目。只应在同场有源成功（网络确实通）时调用，免得断网把全部源拉黑。
+---@param keys string[]
+function Mirror.markDead(keys)
+    if #keys == 0 then return end
+    local cfg, now = conf(), os.time()
+    local dead = {}
+    for key, at in pairs(cfg.mirror_dead or {}) do
+        if now - at < Mirror.DEAD_TTL then dead[key] = at end
+    end
+    for _idx, key in ipairs(keys) do dead[key] = now end
+    cfg.mirror_dead = dead
+    pcall(function() require("utils.settings").save("http") end)
 end
 
 --- 按优先级排好的模板列表：上次成功 → 其余默认；冷却中的源垫底。
@@ -82,11 +107,19 @@ function Mirror.templates()
     for _idx, t in ipairs(Mirror.DEFAULTS) do
         if t == cfg.mirror_last then add(t) end
     end
-    local cooling = {}
+    local cooling, dead = {}, {}
     for _idx, t in ipairs(Mirror.DEFAULTS) do
-        if failed[t] and now - failed[t] < Mirror.COOLDOWN then cooling[#cooling + 1] = t else add(t) end
+        if Mirror.isDead(t) then
+            dead[#dead + 1] = t
+        elseif failed[t] and now - failed[t] < Mirror.COOLDOWN then
+            cooling[#cooling + 1] = t
+        else
+            add(t)
+        end
     end
     for _idx, t in ipairs(cooling) do add(t) end
+    -- 黑名单源只在其余都没了时才兜底，避免全被拉黑后无源可用
+    if #list == 0 then for _idx, t in ipairs(dead) do add(t) end end
     return list
 end
 
@@ -110,6 +143,7 @@ end
 
 local function markOk(template)
     failed[template] = nil
+    if Mirror.isDead(template) then conf().mirror_dead[template] = nil end
     local cfg = conf()
     if cfg.mirror_last ~= template then
         cfg.mirror_last = template
@@ -140,7 +174,7 @@ end
 ---@return table handle { cancel }
 local function chain(path, start, cb)
     local list, idx, job, cancelled = Mirror.templates(), 0, nil, false
-    local last_err
+    local last_err, bad = nil, {}
     local function try()
         if cancelled then return end
         idx = idx + 1
@@ -151,10 +185,12 @@ local function chain(path, start, cb)
             if cancelled then return end
             if err then
                 last_err = err
+                bad[#bad + 1] = template
                 markFail(template, url, err)
                 return try()
             end
             markOk(template)
+            Mirror.markDead(bad)
             cb(true, nil, ...)
         end)
         -- 同步失败时 try() 已递归发出下一个请求，不能用旧句柄覆盖它。
