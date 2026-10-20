@@ -73,8 +73,15 @@ do
     ReviewCache.hotspotsAsync(ident, f.fetch, function(v) got = v end)
     Stubs.flush()
     Assert.eq(f.calls, 1, "命中不再请求")
-    Assert.eq(got[1].range, "1-2")
+    Assert.len(got, 0, "离线只留首页评论已缓存的句子")
     Assert.eq(ReviewCache.hotspots(ident)[1].total, 5)
+
+    connected = true
+    ReviewCache.pageAsync(ident, "1-2", 0, fetcher({ items = { { id = "1" } }, max_idx = 1 }).fetch, function() end)
+    connected, got = false, nil
+    ReviewCache.hotspotsAsync(ident, f.fetch, function(v) got = v end)
+    Stubs.flush()
+    Assert.eq(got[1].range, "1-2")
 
     -- 回调前取消：不回调。
     got = nil
@@ -141,7 +148,9 @@ local function fakeSource(fail_at)
             if fail_at and src.pages == fail_at then
                 done(nil, "限流")
             else
-                done({ items = { { id = "x" } }, total = 99, max_idx = max_idx + 1, more = true })
+                local items = {}
+                for i = 1, 30 do items[i] = { id = tostring(i) } end
+                done({ items = items, total = 99, max_idx = max_idx + 1, more = true })
             end
             return { cancel = function() end }
         end, cb)
@@ -154,23 +163,41 @@ require("ui/uimanager").scheduleIn = function(_self, _delay, fn) fn() end
 local function drain() end
 
 do
-    -- 上限：50 章 × 10 句 × 2 页；第 11、12 热的句不拉。
+    -- 全本：80 章 × 12 句，每句只拉首页并只存前 10 条。
     rows = {}
     connected = true
     local src = fakeSource()
     local ok, done_n, total_n
-    Prefetch.run(src, { source_id = "wechat", stable_id = "cap" }, { chapter_idx = 1 }, nil, function(o, n, t)
+    Prefetch.run(src, { source_id = "wechat", stable_id = "cap" }, nil, nil, function(o, n, t)
         ok, done_n, total_n = o, n, t
     end)
     drain()
     Assert.is_true(ok)
-    Assert.eq(total_n, 50)
-    Assert.eq(src.hot, 50)
-    Assert.eq(src.pages, 50 * 10 * 2)
+    Assert.eq(total_n, 80)
+    Assert.eq(src.hot, 80)
+    Assert.eq(src.pages, 80 * 12)
+    local cached = ReviewCache.page({ source_id = "wechat", stable_id = "cap", chapter_idx = 5 }, "r3", 0)
+    Assert.len(cached.items, 10)
+    Assert.is_true(cached.partial)
+    Assert.is_false(cached.more)
+
+    -- 离线读到 10 条；联网读到 partial 当没有，重拉完整页。
+    local pager = fetcher({ items = { { id = "a" }, { id = "b" } }, total = 2, max_idx = 2, more = false })
+    local got
+    local ci = { source_id = "wechat", stable_id = "cap", chapter_idx = 5 }
+    connected = false
+    ReviewCache.pageAsync(ci, "r3", 0, pager.fetch, function(v) got = v end)
+    Stubs.flush()
+    Assert.len(got.items, 10)
+    Assert.eq(pager.calls, 0)
+    connected = true
+    ReviewCache.pageAsync(ci, "r3", 0, pager.fetch, function(v) got = v end)
+    Assert.eq(pager.calls, 1)
+    Assert.len(got.items, 2)
 
     -- 再跑一遍：全部命中缓存，不发请求。
     local again = fakeSource()
-    Prefetch.run(again, { source_id = "wechat", stable_id = "cap" }, { chapter_idx = 1 }, nil, function() end)
+    Prefetch.run(again, { source_id = "wechat", stable_id = "cap" }, nil, nil, function() end)
     drain()
     Assert.eq(again.hot + again.pages, 0)
 end

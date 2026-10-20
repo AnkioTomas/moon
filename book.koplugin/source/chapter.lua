@@ -508,7 +508,7 @@ end
 ---   interval_seconds: number|nil,
 ---   persist_book: boolean|nil,
 --- }
----@param cb fun(cached: integer, total: integer, failed: integer, err: any)|nil 完成统计
+---@param cb fun(cached: integer, total: integer, failed: integer, err: any, failed_idx: integer[]|nil)|nil 完成统计（failed_idx：失败章节序号）
 ---@return { cancel: fun() }
 function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
     from_idx = tonumber(from_idx) or 0
@@ -516,6 +516,7 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
     local cancelled = false
     local active
     local cached_count, failed_count = 0, 0
+    local failed_idx = {}
     local last_error
     local indices = {}
     if count > 0 and type(toc) == "table" and #toc > 0 then
@@ -550,8 +551,9 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
             UIManager:nextTick(require("ui.guard").wrap("chapter prefetch", nextIndex))
         end
     end
-    local function failed(err)
+    local function failed(err, idx)
         failed_count = failed_count + 1
+        failed_idx[#failed_idx + 1] = idx
         last_error = err or last_error
         report()
         continueNext()
@@ -564,7 +566,7 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
         local idx = indices[pos]
         pos = pos + 1
         if not idx then
-            if cb then cb(cached_count, #indices, failed_count, last_error) end
+            if cb then cb(cached_count, #indices, failed_count, last_error, failed_idx) end
             return
         end
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
@@ -576,28 +578,28 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
         end
         local item = toc[idx]
         if not item then
-            failed(_("章节信息缺失") .. " #" .. tostring(idx))
+            failed(_("章节信息缺失") .. " #" .. tostring(idx), idx)
             return
         end
         active = ops.fetchContent(identity, item, function(payload, err)
             if cancelled then return end
             active = nil
             if not payload then
-                failed(err or (_("章节内容获取失败") .. " #" .. tostring(idx)))
+                failed(err or (_("章节内容获取失败") .. " #" .. tostring(idx)), idx)
                 return
             end
             active = write(path, payload, function(wpath, write_err)
                 active = nil
                 if cancelled then return end
                 if not wpath then
-                    failed(write_err or (_("章节保存失败") .. " #" .. tostring(idx)))
+                    failed(write_err or (_("章节保存失败") .. " #" .. tostring(idx)), idx)
                     return
                 end
                 local store_opts = { chapter_idx = idx }
                 if ops.persist_book ~= false then store_opts.book = book end
                 local touched, touch_err = require("book.store").touch(wpath, identity, store_opts)
                 if not touched then
-                    failed(touch_err)
+                    failed(touch_err, idx)
                     return
                 end
                 cached_count = cached_count + 1
@@ -647,7 +649,7 @@ end
 ---@param identity BookIdentity
 ---@param fetchContent ChapterFetchContent
 ---@param on_progress fun(done: integer, total: integer)|nil
----@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
+---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer, failed_idx: integer[]|nil)
 ---@param interval_seconds number|nil 两次正文请求的间隔，缺省 1.5；风控严的源传更大值
 ---@param range ChapterCacheRange|nil 缺省全本
 ---@return { cancel: fun() }
@@ -663,9 +665,9 @@ function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb, 
             progress = on_progress,
             -- 全本缓存让服务端有喘息时间；阅读期预取仍保持无间隔。
             interval_seconds = interval_seconds or 1.5,
-        }, function(cached, total, failed, last_err)
+        }, function(cached, total, failed, last_err, failed_idx)
             if not cancelled then
-                cb(failed == 0, cached, last_err, total, failed)
+                cb(failed == 0, cached, last_err, total, failed, failed_idx)
             end
         end)
     end)
