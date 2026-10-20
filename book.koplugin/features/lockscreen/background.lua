@@ -1,7 +1,7 @@
 --[[--
 锁屏图片资源管理。
 
-本地背景（自定义 / 封面 / 文件夹）在这里解析；海报墙自绘。必应 / 摸鱼日报图归 online，
+本地背景（自定义 / 封面 / 文件夹）在这里解析；海报墙自绘。必应 / 摸鱼日报 / 今日报纸图归 online，
 这里只读路径、问 ensureImage。整屏铺底的都是背景，主体组件只画在背景之上。
 
 @module koplugin.book.features.lockscreen.background
@@ -112,6 +112,13 @@ local BACKGROUNDS = {
         -- 日报是一整张长图，裁掉就缺内容。
         contain = true,
     },
+    paper = {
+        id = "paper",
+        label = _("今日报纸"),
+        path = function() return require("online.paper"):imageFile() end,
+        endpoint = "paper",
+        network = true,
+    },
     danxiangli = {
         id = "danxiangli",
         label = _("单向历"),
@@ -137,7 +144,7 @@ local BACKGROUNDS = {
     none = { id = "none", label = _("无") },
 }
 
-local BACKGROUND_IDS = { "custom", "bing", "myrl", "danxiangli", "cover", "folder", "poster", "typo", "none" }
+local BACKGROUND_IDS = { "custom", "bing", "myrl", "paper", "danxiangli", "cover", "folder", "poster", "typo", "none" }
 
 --- 判断背景设置值是否合法。
 ---@param mode string|nil

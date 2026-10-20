@@ -485,6 +485,7 @@ return {
     ["搜索失败"] = "Search failed",
     ["搜索失败: %1"] = "Search failed: %1",
     ["摸鱼日报"] = "Moyu Daily",
+    ["今日报纸"] = "Daily Paper",
     ["数据源"] = "Source",
     ["数据源不可用"] = "Source unavailable",
     ["文件夹壁纸"] = "Folder wallpaper",
