@@ -16,6 +16,8 @@ FanQie.MOBILE_COVER_CDN = "https://p6-novel.byteimg.com"
 -- 免登录搜索：免签名、免 Cookie，只要 aid / offset / q；App UA 才不被拒。
 FanQie.APP_UA = "com.dragon.read/6.5.3.32 (Linux; U; Android 13; zh_CN; VDE-AL10; Build/TP1A.220624.014;tt-ok/3.10.0.2)"
 
+FanQie.WEB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 ---@param keyword string
 ---@return string
 function FanQie.searchUrl(keyword)

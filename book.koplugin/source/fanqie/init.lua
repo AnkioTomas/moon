@@ -8,6 +8,7 @@
 --]]
 
 local Base = require("source.base")
+local Browse = require("source.browse")
 local Assets = require("source.assets")
 local Cbz = require("source.cbz")
 local Comic = require("source.fanqie.comic")
@@ -173,6 +174,38 @@ function Source:searchAsync(keyword, cb)
             end
         end
         cb({ data = books })
+    end)
+end
+
+--- 书城浏览：网页榜单，榜单（阅读榜 / 新书榜）× 频道（男 / 女）× 分类；节点是「频道:榜单:分类」，缺省男频阅读榜首个分类。
+--- 页面只带前 10 本（分页接口要签名），分类列表取自页面本身。
+---@param opts { node?: string }
+---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:browseAsync(opts, cb)
+    local gender, kind, category = (opts.node or "1:2:"):match("^(%d):(%d):(%d*)$")
+    return self.client:rankAsync(gender .. "_" .. kind .. (category ~= "" and "_" .. category or ""), function(html, err)
+        local rank = html and require("source.fanqie.rank").state(html)
+        if not rank then
+            cb(nil, err and errMsg(err) or _("加载失败"))
+            return
+        end
+        local cats, first = {}, nil
+        for _idx, cat in ipairs(rank.rankCategoryTypeList[gender == "1" and "male" or "female"] or {}) do
+            first = first or cat.id
+            cats[#cats + 1] = { id = gender .. ":" .. kind .. ":" .. cat.id, title = cat.name }
+        end
+        local node = gender .. ":" .. kind .. ":" .. (category ~= "" and category or first or "")
+        cb({
+            data = require("source.fanqie.rank").books(rank, self.id),
+            groups = {
+                Browse.group({ { id = gender .. ":2:", title = _("阅读榜") }, { id = gender .. ":1:", title = _("新书榜") } },
+                    gender .. ":" .. kind .. ":"),
+                Browse.group({ { id = "1:" .. kind .. ":", title = _("男频") }, { id = "0:" .. kind .. ":", title = _("女频") } },
+                    gender .. ":" .. kind .. ":"),
+                Browse.group(cats, node),
+            },
+        })
     end)
 end
 

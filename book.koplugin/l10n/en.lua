@@ -1799,4 +1799,5 @@ Current version: ",
     ["最新"] = "Latest",
     ["热门"] = "Popular",
     ["西班牙语"] = "Spanish",
+    ["阅读榜"] = "Reading chart",
 }

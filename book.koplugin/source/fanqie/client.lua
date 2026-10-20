@@ -422,6 +422,29 @@ function Client:searchAsync(keyword, cb)
     end)
 end
 
+--- 网页榜单一页（服务端渲染，页面内嵌 __INITIAL_STATE__；分页接口要 a_bogus 签名，这里只取首屏 10 本）。
+--- path 形如 "1_2_1141"（频道_榜单_分类，分类可省）。
+---@param path string
+---@param cb fun(html: string|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:rankAsync(path, cb)
+    local url = FanQie.BASE_URL .. "/rank/" .. path
+    return Request.request({
+        url = url,
+        method = "GET",
+        headers = { ["User-Agent"] = FanQie.WEB_UA, ["Accept"] = "text/html" },
+        timeout = require("http.timeout").net(TIMEOUT_RATIO),
+    }, function(res, err)
+        if err or not res then
+            cb(nil, err and tostring(err))
+        elseif not Request.ok(tonumber(res.code)) then
+            cb(nil, httpError("GET", url, tonumber(res.code), res.body, res))
+        else
+            cb(res.body)
+        end
+    end)
+end
+
 --- 加入 / 移出书架。成功后丢掉书架短缓存，紧接着的重新拉取才看得到变化。
 ---@param action "add"|"delete"
 ---@param book_id string
