@@ -8,6 +8,7 @@
 --]]
 
 local Base = require("source.base")
+local Assets = require("source.assets")
 local Cbz = require("source.cbz")
 local Comic = require("source.fanqie.comic")
 local Paths = require("utils.paths")
@@ -215,6 +216,20 @@ local function comicPath(identity, chapter)
     return Paths.bookWorkDir(identity.stable_id, identity.source_id) .. "/" .. chapter.uid .. ".cbz"
 end
 
+---@param url string
+---@param cb fun(data: string|nil, err: any)
+---@return { cancel: fun() }|nil
+local function downloadImage(url, cb)
+    return require("http.request").get(url, {
+        accept = "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        headers = { ["Referer"] = "https://fanqienovel.com/" },
+        timeout = require("http.timeout").net(3),
+        allow_redirects = true,
+    }, function(raw, err)
+        if raw and raw ~= "" then cb(raw) else cb(nil, err) end
+    end)
+end
+
 local function fetch(self, identity, chapter, cb)
     local Content = require("source.fanqie.content")
     local h = handle()
@@ -234,7 +249,13 @@ local function fetch(self, identity, chapter, cb)
         local title = result.title ~= "" and result.title or chapter.title
         local urls, key = Comic.parse(result.content)
         if not urls then
-            cb({ title = title, html = Content.decode_pua_content(result.content) })
+            -- 正文里的远程插图落到书籍工作目录；下不下来的图保留原地址，不拖垮整章。
+            h.job = Assets.localizeAsync(Content.decode_pua_content(result.content),
+                Paths.bookWorkDir(identity.stable_id, identity.source_id) .. "/images", downloadImage,
+                function(html)
+                    if h.cancelled then return end
+                    cb({ title = title, html = html })
+                end)
             return
         end
         h.job = Comic.materializeAsync(urls, key, comicPath(identity, chapter), function(path, err_msg)
