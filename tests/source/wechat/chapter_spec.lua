@@ -119,6 +119,8 @@ do
     Assert.eq(range_source, PLAIN)
     Assert.eq(format, "txt")
     Assert.is_true(body:find("<p>", 1, true) ~= nil)
+    -- 段首空白只在显示用 HTML 里剥掉，缩进统一由 CSS 给。
+    Assert.is_true(body:find("<p>第二行</p>", 1, true) ~= nil)
     Assert.eq(gets, 0)
 end
 
