@@ -467,7 +467,7 @@ end
 local MAX_CHIP_ROWS = 2
 
 --- chip 分组排成至多两行（靠左）：分组依次接在当前行后；放不下就换行，
---- 最后一行放不下的分组折成「当前项 ▾」下拉（点开列出全部），并给后面分组的下拉留出位置。
+--- 最后一行放不下的分组只留放得下的前几项（选中项必在其中）+「更多 ▾」（点开列出全部），并给后面分组的「更多」留出位置。
 ---@param w number
 ---@param groups { title: string|nil, chips: { id: string, title: string }[], active: string|nil }[]
 ---@param on_pick fun(id: string)|nil
@@ -486,13 +486,12 @@ local function chipLayout(w, groups, on_pick)
             }
             g.full = g.full + g.chips[i]:getSize().w + (i > 1 and gap or 0)
         end
-        local active_title = _("更多")
-        for _idx, chip in ipairs(group.chips) do
-            if chip.id == group.active then active_title = chip.title end
+        for i, chip in ipairs(group.chips) do
+            if chip.id == group.active then g.active_idx = i end
         end
         local dropdown
         dropdown = Button:new{
-            text = active_title, icon = "arrow_drop_down", trailing = true, size = "small", variant = "ghost",
+            text = _("更多"), icon = "arrow_drop_down", trailing = true, size = "small", variant = "ghost",
             callback = function()
                 local items = {}
                 for i, chip in ipairs(group.chips) do
@@ -510,24 +509,44 @@ local function chipLayout(w, groups, on_pick)
     local sep = gap * 2
     local rows = { {} }
     local used = 0
-    local function fits(gi, from)
-        local need = from + (from > 0 and sep or 0) + built[gi].full
+    --- 当前行（from 已用）还能给第 gi 组的宽度；最后一行要扣掉后面各组「更多」的位置。
+    local function room(gi, from)
+        local left = avail - from - (from > 0 and sep or 0)
         if #rows == MAX_CHIP_ROWS then
-            for k = gi + 1, #built do need = need + sep + built[k].dropdown:getSize().w end
+            for k = gi + 1, #built do left = left - sep - built[k].dropdown:getSize().w end
         end
-        return need <= avail
+        return left
+    end
+    --- 只留放得下的前几项 + 「更多」；选中项挤掉最后一个可见项。
+    local function collapse(g, space)
+        local more = g.dropdown
+        space = space - more:getSize().w - gap
+        local fit, w = 0, 0
+        for i, widget in ipairs(g.chips) do
+            local nw = w + (i > 1 and gap or 0) + widget:getSize().w
+            if nw > space then break end
+            w, fit = nw, i
+        end
+        local shown = {}
+        for i = 1, fit do shown[i] = g.chips[i] end
+        local a = g.active_idx
+        if a and a > fit then
+            if fit > 0 then
+                shown[fit] = g.chips[a]
+            elseif g.chips[a]:getSize().w <= space then
+                shown[1] = g.chips[a]
+            end
+        end
+        shown[#shown + 1] = more
+        return shown
     end
     for gi, g in ipairs(built) do
-        local items
-        if fits(gi, used) then
-            items = g.chips
-        elseif used > 0 and #rows < MAX_CHIP_ROWS then
+        if g.full > room(gi, used) and used > 0 and #rows < MAX_CHIP_ROWS then
             rows[#rows + 1] = {}
             used = 0
-            items = fits(gi, 0) and g.chips or { g.dropdown }
-        else
-            items = { g.dropdown }
         end
+        local space = room(gi, used)
+        local items = g.full <= space and g.chips or collapse(g, space)
         local row = rows[#rows]
         for i, widget in ipairs(items) do
             local before = i > 1 and gap or (used > 0 and sep or 0)
