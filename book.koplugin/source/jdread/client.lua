@@ -146,6 +146,37 @@ function Client:shelfSyncAsync(cb)
         end }
 end
 
+--- 榜单菜单：出版 / 男生 / 女生，每类下是榜单及其周期。
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:rankTypesAsync(cb)
+    return self:apiGetAsync("/jdread/api/rank/type", nil, cb)
+end
+
+--- 分类树：根节点按出版 / 男生原创 / 女生原创分开，榜单的 catid 只认根下一级。
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:categoriesAsync(cb)
+    return self:apiGetAsync("/jdread/api/category", nil, cb)
+end
+
+--- 榜单一页；catid 为空表示不按分类筛。
+---@param kind string|number
+---@param period string week / mouth / all（京东原拼写）
+---@param catid string|nil
+---@param page integer
+---@param page_size integer
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:rankAsync(kind, period, catid, page, page_size, cb)
+    return self:apiGetAsync("/jdread/api/rank/" .. tostring(kind), {
+        period = period,
+        catid = catid ~= "" and catid or nil,
+        page = page,
+        page_size = page_size,
+    }, cb)
+end
+
 --- 拉取书籍元数据。
 ---@param book_id string|number
 ---@param cb fun(data: table|nil, err: string|nil)

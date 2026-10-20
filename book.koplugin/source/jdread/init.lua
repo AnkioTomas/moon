@@ -16,6 +16,7 @@ local Paths = require("utils.paths")
 local Request = require("http.request")
 local SourceBase = require("source.base")
 local Shelf = require("source.shelf")
+local Browse = require("source.browse")
 local Progress = require("book.progress")
 local logger = require("utils.log")
 local _ = require("gettext")
@@ -29,6 +30,7 @@ end
 
 ---@class JdreadSource : SourceBase
 ---@field _client JdreadClient
+---@field _rank_menu { types: table[], categories: table<string, table[]> }|nil
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -63,6 +65,84 @@ end
 ---@return { cancel: fun() }
 function Source:syncBooksAsync(opts, cb)
     return Shelf.syncAsync(self.id, self._client, Mapper.shelfList, opts, cb)
+end
+
+local RANK_PAGE = 20
+
+--- 书城浏览：榜单类别（出版 / 男生 / 女生）、榜单、周期、分类四行 chip，节点是「类别:榜单:周期:分类」，
+--- 缺省出版首个榜单的周榜。菜单与分类树取一次缓存在实例上；分类 id 只认对应类别根下一级。
+---@param opts { node?: string, limit?: integer }
+---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:browseAsync(opts, cb)
+    local handle = {}
+    local function show(menu)
+        local tid, kid, period, cat = (opts.node or ""):match("^(%d+):(%d+):(%a+):(%d*)$")
+        local function pick(rows, key, want)
+            for _idx, row in ipairs(rows) do
+                if tostring(row[key]) == want then return row end
+            end
+            return rows[1]
+        end
+        local rtype = pick(menu.types, "type", tid)
+        local kind = pick(rtype.kinds, "kind", kid)
+        local per = pick(kind.periods, "period", period)
+        cat = cat or ""
+        local function id(t, k, p, c)
+            return t.type .. ":" .. k.kind .. ":" .. p.period .. ":" .. c
+        end
+        local node = id(rtype, kind, per, cat)
+        local types, kinds, periods = {}, {}, {}
+        for _idx, t in ipairs(menu.types) do
+            types[#types + 1] = { id = id(t, t.kinds[1], t.kinds[1].periods[1], ""), title = t.name }
+        end
+        for _idx, k in ipairs(rtype.kinds) do
+            kinds[#kinds + 1] = { id = id(rtype, k, pick(k.periods, "period", per.period), cat), title = k.name }
+        end
+        for _idx, p in ipairs(kind.periods) do
+            periods[#periods + 1] = { id = id(rtype, kind, p, cat), title = p.name }
+        end
+        local cats = { { id = id(rtype, kind, per, ""), title = _("全部") } }
+        for _idx, sub in ipairs(menu.categories[rtype.name] or {}) do
+            cats[#cats + 1] = { id = id(rtype, kind, per, tostring(sub.id)), title = sub.name }
+        end
+        local groups = {
+            Browse.group(types, id(rtype, rtype.kinds[1], rtype.kinds[1].periods[1], "")),
+            Browse.group(kinds, node),
+            Browse.group(cats, node),
+        }
+        if #periods > 1 then table.insert(groups, 3, Browse.group(periods, node)) end
+        handle.inner = Browse.pages(function(page, done)
+            return self._client:rankAsync(kind.kind, per.period, cat, page, RANK_PAGE, function(wire, err)
+                if not wire then
+                    done(nil, err)
+                    return
+                end
+                local rows = type(wire.data) == "table" and wire.data or {}
+                done(Mapper.shelfList(rows), nil, #rows >= RANK_PAGE)
+            end)
+        end, opts.limit or 40, groups, cb)
+    end
+    if self._rank_menu then
+        show(self._rank_menu)
+        return handle
+    end
+    handle.inner = self._client:rankTypesAsync(function(types, err)
+        if not types then cb(nil, err); return end
+        handle.inner = self._client:categoriesAsync(function(tree, err2)
+            if not tree then cb(nil, err2); return end
+            local categories = {}
+            for _idx, root in ipairs(tree.data.category_list) do
+                categories[root.show_name] = root.sub_category
+            end
+            self._rank_menu = { types = types.data, categories = categories }
+            show(self._rank_menu)
+        end)
+    end)
+    function handle.cancel()
+        if handle.inner then handle.inner.cancel() end
+    end
+    return handle
 end
 
 ---@param identity BookIdentity

@@ -572,3 +572,50 @@ do
 
     Toc.read, Toc.put, Chapter.openWithUi = orig_read, orig_put, orig_open
 end
+
+-- 书城浏览：榜单类别 / 榜单 / 周期 / 分类四行 chip，选项树只取一次
+do
+    local calls, types_calls = {}, 0
+    fake_client.rankTypesAsync = function(_, cb)
+        types_calls = types_calls + 1
+        cb({ data = {
+            { name = "出版", type = 1, kinds = {
+                { name = "畅销榜", kind = 1, periods = { { name = "周榜", period = "week" }, { name = "总榜", period = "all" } } },
+                { name = "飙升榜", kind = 6, periods = { { name = "周榜", period = "week" } } },
+            } },
+            { name = "男生", type = 2, kinds = { { name = "人气榜", kind = 13, periods = { { name = "周榜", period = "week" } } } } },
+        } })
+        return { cancel = function() end }
+    end
+    fake_client.categoriesAsync = function(_, cb)
+        cb({ data = { category_list = {
+            { show_name = "出版", sub_category = { { id = 10846, name = "经济管理" } } },
+            { show_name = "男生", sub_category = { { id = 10944, name = "玄幻频道" } } },
+        } } })
+        return { cancel = function() end }
+    end
+    fake_client.rankAsync = function(_, kind, period, cat, page, size, cb)
+        calls[#calls + 1] = table.concat({ kind, period, cat, page, size }, ",")
+        cb({ data = { { ebook_id = 1, name = "书" } } })
+        return { cancel = function() end }
+    end
+
+    local src = Jdread.new()
+    local res
+    src:browseAsync({}, function(r) res = r end)
+    Assert.eq(calls[1], "1,week,,1,20")
+    Assert.len(res.data, 1)
+    Assert.len(res.groups, 4)
+    Assert.eq(res.groups[2].active, "1:1:week:")
+    Assert.eq(res.groups[1].active, "1:1:week:")
+
+    src:browseAsync({ node = "1:1:all:10846" }, function(r) res = r end)
+    Assert.eq(calls[#calls], "1,all,10846,1,20")
+    Assert.eq(res.groups[4].active, "1:1:all:10846")
+
+    -- 切到只有一个周期的男生榜：周期行不出现，分类换成男生的
+    src:browseAsync({ node = "2:13:week:10944" }, function(r) res = r end)
+    Assert.len(res.groups, 3)
+    Assert.eq(res.groups[3].chips[2].title, "玄幻频道")
+    Assert.eq(types_calls, 1)
+end

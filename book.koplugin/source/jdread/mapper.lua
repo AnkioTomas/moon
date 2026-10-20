@@ -29,6 +29,7 @@ function Mapper.book(row)
         authors = row.author,
         category = type(row.cate_third_names) == "table" and table.concat(row.cate_third_names, ", ") or nil,
         cover = imageUrl(row.image_url),
+        intro = row.info,
         meta = { words = row.word_count },
     }
 end
