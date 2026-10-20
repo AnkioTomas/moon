@@ -547,6 +547,7 @@ function Stubs.install()
         installLeafStubs()
     end
     installUIManager()
+    installIfMissing("pluginshare", function() return {} end)
     installIfMissing("ui/network/manager", function()
         return {
             isOnline = function() return true end,
