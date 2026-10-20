@@ -10,7 +10,7 @@ package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
 local conf = {
-    xray = { book_xray_enabled = true, book_xray_show_marks = true, book_xray_mark_style = "dashed" },
+    xray = { book_xray_enabled = true, book_xray_show_marks = true, book_xray_mark_style = "dashed", book_xray_save_tokens = false },
     translate = { edge_translation_enabled = false },
 }
 local saved = {}
@@ -36,13 +36,17 @@ Assert.eq(xray[1].parent, "lookup")
 Assert.eq(xray[1].order, 40)
 local section = xray[1].sections()[1]
 Assert.eq(section.title, "X-Ray")
-Assert.len(section.rows, 3)
-Assert.eq(section.rows[3](600).status, "虚线")
+Assert.len(section.rows, 4)
+Assert.eq(section.rows[3](600).status, "关")
 section.rows[3](600).callback()
+Assert.is_true(conf.xray.book_xray_save_tokens)
+Assert.eq(invalidated, 0, "省 token 不影响画线")
+Assert.eq(section.rows[4](600).status, "虚线")
+section.rows[4](600).callback()
 Assert.eq(conf.xray.book_xray_mark_style, "solid")
 Assert.eq(saved[#saved], "features.xray")
 Assert.eq(invalidated, 1)
-Assert.eq(updates, 1)
+Assert.eq(updates, 2)
 section = xray[1].sections()[1]
 section.rows[1](600).callback()
 Assert.is_false(conf.xray.book_xray_enabled)

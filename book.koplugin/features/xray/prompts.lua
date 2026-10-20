@@ -103,8 +103,9 @@ end
 ---@param prior_text string|nil
 ---@param existing table|nil
 ---@param recap string|nil 当前章之前的章节摘要
+---@param lean boolean|nil 省 token：实体上限收紧
 ---@return string
-function Prompts.comprehensive(title, author, progress, current_page, prior_text, existing, recap)
+function Prompts.comprehensive(title, author, progress, current_page, prior_text, existing, recap, lean)
     local book_line = bookLine(title, author)
     return string.format([[书籍：%s
 阅读进度：约 %d%%
@@ -123,7 +124,7 @@ TASK: 为当前阅读位置更新 X-Ray。只输出一个 JSON 对象。
 - description 是该实体在全书中的整体描述（身份、性格、经历、在故事中的作用），不是本章摘要，不要写“本章中……”。
 - 更新已收录实体时，以 EXISTING 中的原描述为基础，把正文里的新信息融合进去，输出完整的新描述；不得丢掉原描述中的信息，没有新信息就不要输出该实体。
 - 每个实体的 name，或其 aliases 中至少一项，必须在 CURRENT PAGE 或 PRIOR CONTEXT 中逐字出现；不得使用文中未出现的名称。
-- 人物不超过 15，地点不超过 10，专有名词不超过 10。
+%s
 - 新实体：可新增；人物用正式全名，aliases 最多 3 个。
 - 不要输出正文中未出现的实体。
 
@@ -148,7 +149,9 @@ CURRENT PAGE:
 %s
 
 PRIOR CONTEXT:
-%s]], book_line, progress or 0, formatExisting(existing),
+%s]], book_line, progress or 0,
+        lean and "- 人物不超过 10，地点不超过 5，专有名词不超过 5。" or "- 人物不超过 15，地点不超过 10，专有名词不超过 10。",
+        formatExisting(existing),
         current_page or "", prior_text or "") .. storySoFar(recap)
 end
 
