@@ -35,6 +35,7 @@ local TRUNCATED = { "…$", "%.%.%.$", "%[%.%.%.%]$", "%[…%]$", "阅读全文$
 ---@return boolean
 local function isFullText(summary)
     local text = Text.trim(Text.stripHtml(summary or ""))
+    if text == "" and summary and summary:find("<img", 1, true) then return true end -- 纯图条目（报纸、漫画），原文页抓不出更多
     if #text < FULL_TEXT then return false end
     local tail = text:sub(-120)
     for _idx, pattern in ipairs(TRUNCATED) do
