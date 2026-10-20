@@ -365,6 +365,8 @@
     var editing = null;
     var checked = null;
     function kindValue() { var r = document.querySelector('input[name=kind]:checked'); return r ? r.value : 'rss'; }
+    function filterValue() { return kindValue() === 'site' ? el('fd-filter').value.trim() : ''; }
+    function syncFilterRow() { el('fd-filter-row').hidden = !!editing || kindValue() !== 'site'; }
     function fdState(text, kind) { setState(el('fd-state'), text, kind); }
     function openFeedDialog(f) {
         editing = f || null;
@@ -376,6 +378,8 @@
         el('fd-test').hidden = !!f;
         el('fd-url').value = f ? f.url : '';
         el('fd-url').readOnly = !!f;
+        el('fd-filter').value = '';
+        syncFilterRow();
         el('fd-name').value = f ? f.title : '';
         el('fd-group').value = f ? f.group : (cur !== ALL ? cur : '');
         el('fd-kind-note').hidden = !(f && f.kind === 'mp');
@@ -397,7 +401,8 @@
         else if (!el('articles').hidden) closeArticles();
     });
     el('fd-url').oninput = function () { checked = null; };
-    Array.prototype.forEach.call(document.querySelectorAll('input[name=kind]'), function (r) { r.onchange = function () { checked = null; }; });
+    Array.prototype.forEach.call(document.querySelectorAll('input[name=kind]'), function (r) { r.onchange = function () { checked = null; syncFilterRow(); }; });
+    el('fd-filter').oninput = function () { checked = null; };
     function renderPreview(p) {
         var box = el('fd-preview');
         box.textContent = '';
@@ -439,7 +444,7 @@
         if (!url) { fdState(t('请填写订阅地址'), 'err'); return Promise.resolve(null); }
         fdState(t('正在测试…'));
         el('fd-test').disabled = el('fd-ok').disabled = true;
-        return post('preview', { kind: kindValue(), url: url }).then(function (p) {
+        return post('preview', { kind: kindValue(), url: url, filter: filterValue() }).then(function (p) {
             if (p.opml) { offerOpml(p); return null; }
             checked = p;
             renderPreview(p);
@@ -464,7 +469,7 @@
             if (!p) return;
             fdState(t('正在添加…'));
             return post('add', {
-                kind: p.kind, url: p.url, checked: true, title: el('fd-name').value.trim() || p.title,
+                kind: p.kind, url: p.url, filter: filterValue(), checked: true, title: el('fd-name').value.trim() || p.title,
                 group: el('fd-group').value.trim()
             }).then(function () {
                 closeFeedDialog();
