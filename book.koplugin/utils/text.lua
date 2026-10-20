@@ -485,7 +485,7 @@ end
 --- 章节模板已用 CSS text-indent 统一首行缩进，正文自带的缩进会叠加成双倍。
 ---@param text string|nil
 ---@return string
-function Text.stripLineIndent(text)
+local function stripLineIndent(text)
     return (Text.normalizeNewlines(text):gsub("[^\n]+", function(line)
         local i = 1
         while true do
@@ -507,7 +507,7 @@ end
 ---@param text string|nil
 ---@return string
 function Text.textToBody(text)
-    text = Text.normalizeNewlines(text)
+    text = stripLineIndent(text)
     local parts = {}
     for line in (text .. "\n"):gmatch("(.-)\n") do
         line = Text.rtrim(line)
@@ -518,21 +518,12 @@ function Text.textToBody(text)
     return table.concat(parts, "\n")
 end
 
---- 纯文本章节 → 带章名的 HTML。段首的全角空格 / 空白去掉（CSS 已给 2em 缩进，保留会双份缩进）。
+--- 纯文本章节 → 带章名的 HTML。
 ---@param title string
 ---@param text string
 ---@return string
 function Text.chapterHtml(title, text)
-    local lines = {}
-    for line in (Text.normalizeNewlines(text) .. "\n"):gmatch("(.-)\n") do
-        local rest = line
-        repeat
-            line = rest
-            rest = line:gsub("^%s+", ""):gsub("^\227\128\128", ""):gsub("^\194\160", "")
-        until rest == line
-        lines[#lines + 1] = line
-    end
-    return "<h1>" .. Text.xmlEscape(title) .. "</h1>\n" .. Text.textToBody(table.concat(lines, "\n"))
+    return "<h1>" .. Text.xmlEscape(title) .. "</h1>\n" .. Text.textToBody(text)
 end
 
 return Text

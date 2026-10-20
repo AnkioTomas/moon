@@ -156,8 +156,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                     if not plain then
                         fail(decode_err or _("txt 章节解码失败"))
                     else
-                        -- 正文只有部分段首带全角空格，剥掉后统一交给章节模板的 text-indent；range 仍按原文。
-                        cb(Text.textToBody(Text.stripLineIndent(plain)), nil, plain, "txt")
+                        cb(Text.textToBody(plain), nil, plain, "txt")
                     end
                 end)
             end)

@@ -126,15 +126,9 @@ function Mapper.chapters(wire)
     return downloadChapters(root.chapter_info, imageUrl(root.image_url))
 end
 
----@param content string
----@return string
-local function netBody(content)
-    return Text.textToBody(Text.stripLineIndent(content))
-end
-
 --- download/chapter 正文 wire → 标准章节内容。
 --- txt 网文正文 content_type = "net"，是 \r\n 分段的纯文本，
---- 行首全角缩进时有时无，统一剥掉交给章节模板的 text-indent。
+--- 行首全角缩进时有时无，textToBody 统一剥掉，交给章节模板的 text-indent。
 --- 网页版封面页去掉了图只剩空 body，传入 cover 时用封面图补成一页，否则落盘会报章节内容为空。
 ---@param wire table
 ---@param title string|nil
@@ -144,7 +138,7 @@ function Mapper.content(wire, title, cover)
     local data = type(wire.data) == "table" and wire.data or wire
     local parts = data.chapter
     if type(parts) ~= "table" then return nil end
-    local toBody = data.content_type == "net" and netBody or Text.htmlBodyFragment
+    local toBody = data.content_type == "net" and Text.textToBody or Text.htmlBodyFragment
     local html = {}
     for _idx, part in ipairs(parts) do
         if type(part) == "table" and part.can_read == false then

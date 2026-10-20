@@ -174,6 +174,25 @@ end
 
 local DEFAULT_CSS = "body{margin:5%;line-height:1.8;text-align:justify;}p{text-indent:2em;margin:.45em 0;}img{max-width:100%;}"
 
+local BLANKS = { "\227\128\128", "\194\160", "&nbsp;", "&#160;", "&#12288;", "&#x3000;", "[ \t\r\n]" }
+
+--- 去掉 <p> 开头的空格 / 全角空格 / &nbsp;：缩进只由外壳 CSS 的 text-indent 给，源正文自带的会叠成双倍。
+---@param html string
+---@return string
+local function stripParagraphIndent(html)
+    return (html:gsub("(<p%f[^%w][^>]*>)(.-)</p>", function(open, inner)
+        local rest, n = inner, 1
+        while n > 0 do
+            n = 0
+            for _idx, pat in ipairs(BLANKS) do
+                local cut, hit = rest:gsub("^" .. pat, "")
+                if hit > 0 then rest, n = cut, 1 end
+            end
+        end
+        return open .. rest .. "</p>"
+    end))
+end
+
 --- 源交来的完整文档原样返回；片段 / 纯文本套上宿主外壳。
 ---@param payload ChapterContentPayload|string|nil
 ---@param opts table|nil
@@ -184,6 +203,7 @@ local function render(payload, opts)
     end
     local title, content = body(payload)
     if content == "" then return "" end
+    content = stripParagraphIndent(content)
     -- <title> 必须是书名：KOReader doc_props 和第三方划线插件都认这个，章名写进去会变成「夏.夏」。
     local book_title = (opts and opts.book_title)
         or (type(payload) == "table" and payload.book_title)
