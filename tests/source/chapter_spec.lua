@@ -83,7 +83,7 @@ local ops = {
     loadToc = function(_, cb) cb(toc) end,
     fetchContent = function(_, item, cb)
         fetched[#fetched + 1] = item.idx
-        cb({ title = item.title, text = "正文" .. item.idx })
+        cb({ title = item.title, html = '<p class="a">　&nbsp; 正文' .. item.idx .. '</p><pre>  代码</pre>' })
     end,
 }
 
@@ -101,7 +101,9 @@ f:close()
 Assert.is_true(html:find("<title>书</title>", 1, true) ~= nil, "章节 HTML 的 title 必须是书名")
 Assert.is_nil(html:find("<title>二</title>", 1, true))
 Assert.is_nil(html:find("<h1", 1, true))
-Assert.is_true(html:find("<p>正文2</p>", 1, true) ~= nil)
+-- 段首空白 / 全角空格 / &nbsp; 剥掉（缩进归 CSS）；<pre> 不碰。
+Assert.is_true(html:find('<p class="a">正文2</p>', 1, true) ~= nil)
+Assert.is_true(html:find("<pre>  代码</pre>", 1, true) ~= nil)
 
 -- 完整文档原样落盘：不套外壳、不改 title、不转段落（含百分号，不能走 string.format）。
 local DOC = '<?xml version="1.0"?>\n<html><head><title></title><style>.poem{width:50%}</style></head>'

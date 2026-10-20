@@ -196,18 +196,12 @@ do
     Assert.eq(Text.htmlBodyFragment(nil), "")
 
     Assert.eq(Text.textToBody("hello\nworld"), "<p>hello</p>\n<p>world</p>")
-    -- 空行跳过、行尾空白剥除、行首保留、内容转义
-    Assert.eq(Text.textToBody("a  \n\n  b<c"), "<p>a</p>\n<p>  b&lt;c</p>")
-    -- CRLF 规范化
+    -- 空行跳过、行首行尾空白（含全角空格 / NBSP / tab）剥除、内容转义
+    Assert.eq(Text.textToBody("a  \n\n  b<c"), "<p>a</p>\n<p>b&lt;c</p>")
+    Assert.eq(Text.textToBody("　　甲　乙\n\t \194\160　丙 \n　　"), "<p>甲　乙</p>\n<p>丙</p>")
     Assert.eq(Text.textToBody("a\r\nb"), "<p>a</p>\n<p>b</p>")
     Assert.eq(Text.textToBody(nil), "")
 
-    -- stripLineIndent：逐行剥 ASCII 空白 / 全角空格 / NBSP，行中与行尾不动，空行保留
-    Assert.eq(Text.stripLineIndent("　　甲　乙\r\n\t 丙 \n\194\160　丁\n\n"), "甲　乙\n丙 \n丁\n\n")
-    Assert.eq(Text.stripLineIndent("无缩进"), "无缩进")
-    Assert.eq(Text.stripLineIndent("　　"), "")
-    Assert.eq(Text.stripLineIndent(""), "")
-    Assert.eq(Text.stripLineIndent(nil), "")
 end
 
 -- base64 编解码：空串、单字节、双字节、三字节尾、多字节 UTF-8 与 URL-safe 解码
