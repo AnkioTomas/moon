@@ -94,7 +94,7 @@ function M.setContain(on)
     save()
 end
 
---- 壁纸不透明度（百分比，10~100，缺省 100）。scope 有覆盖用覆盖。
+--- 壁纸不透明度（百分比，10~100，缺省 30）。scope 有覆盖用覆盖。
 ---@param scope string|nil
 ---@return integer
 function M.opacity(scope)
