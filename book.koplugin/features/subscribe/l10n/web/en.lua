@@ -5,6 +5,8 @@ return {
     ["添加、分组、删除订阅，刷新与 OPML 导入导出。"] = "Add, group and remove subscriptions; refresh; OPML import/export.",
     ["任意网站"] = "Any website",
     ["抓取网页里的文章链接"] = "Collect article links from a web page",
+    ["链接包含（可选）"] = "Include in link (optional)",
+    ["只收地址里含这段文字的链接，如 /article/"] = "Only keep links whose address contains this text, e.g. /article/",
     ["网站文章链接"] = "Website article links",
     ["网页本身"] = "The page itself",
     ["网页"] = "Page",
