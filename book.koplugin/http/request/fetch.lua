@@ -164,16 +164,13 @@ end
 
 local BODY_CHUNK = 64 * 1024
 
---- turbo 只收整段字符串 body（拼接 + 写缓冲，峰值约 3 倍文件）。这里让 client 先发请求头，
+--- turbo 只收整段字符串 body（拼接 + 写缓冲，峰值约 3 倍文件）。这里让 client 先发 setup 阶段已备好的请求头（self.req，不能再 _prepare 一次：Host/Content-Length 会重复，服务器不回应），
 --- 再 64KB 一块读文件、等上一块刷出再写下一块，内存恒定。Content-Length 由 opts.body_size 经 on_headers 写入。
 ---@param client table
 ---@param path string
 function Fetch.streamBody(client, path)
     client._send_http_request = function(self)
-        local head = self:_prepare_http_request()
-        if head == -1 then
-            return
-        end
+        local head = self.req
         local file = io.open(path, "rb")
         local function pump()
             local chunk = file and file:read(BODY_CHUNK)
