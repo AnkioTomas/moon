@@ -150,6 +150,40 @@ function Client.searchAsync(keyword, page, cb)
     }, nil, cb)
 end
 
+local WWW = "https://www.qimao.com"
+
+---@param path string
+---@param params table<string, any>|nil
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return HttpJob
+local function wwwGet(path, params, cb)
+    local url = WWW .. path
+    if params then url = url .. "?" .. Text.formEncode(params) end
+    return Request.get(url, {
+        accept = "application/json",
+        headers = { Referer = WWW .. "/shuku/a-a-a-a-a-a-a-click-1/" },
+        timeout = require("http.timeout").net(0.5),
+    }, function(raw, err) cb(Client.decode(raw, err)) end)
+end
+
+--- 书库筛选项：频道、排序、分类树（匿名网页接口）。
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return HttpJob
+function Client.classifyOptionsAsync(cb)
+    return wwwGet("/api/classify/select-option", nil, cb)
+end
+
+--- 书库列表一页（15 本）。query: channel / category1 / category2 / order / page。
+---@param query table<string, any>
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return HttpJob
+function Client.classifyAsync(query, cb)
+    return wwwGet("/api/classify/book-list", {
+        channel = query.channel, category1 = query.category1, category2 = query.category2,
+        order = query.order, page = query.page, words = "a", update_time = "a", is_vip = "a", is_over = "a",
+    }, cb)
+end
+
 ---@param book_id string
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return HttpJob

@@ -115,6 +115,19 @@ function Mapper.search(wire)
     return out
 end
 
+--- 书库列表 → Book[]，并给出是否还有下一页。
+---@param wire table|nil
+---@return Book[], boolean
+function Mapper.classify(wire)
+    local data = wire and wire.data or {}
+    local out = {}
+    for _idx, row in ipairs(type(data.book_list) == "table" and data.book_list or {}) do
+        out[#out + 1] = book(row)
+    end
+    local paging = data.page_data or {}
+    return out, (tonumber(paging.page) or 0) * (tonumber(paging.page_size) or 0) < (tonumber(paging.count) or 0)
+end
+
 ---@param wire table|nil
 ---@return Book|nil
 function Mapper.detail(wire)

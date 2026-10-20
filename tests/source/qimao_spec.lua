@@ -25,6 +25,11 @@ end
 local requests, replies = {}, {}
 package.preload["http.request"] = function()
     return {
+        get = function(url, opts, cb)
+            requests[#requests + 1] = { url = url, opts = opts }
+            cb(table.remove(replies, 1))
+            return { cancel = function() end }
+        end,
         post = function(url, body, opts, cb)
             requests[#requests + 1] = { url = url, body = body, opts = opts }
             cb(table.remove(replies, 1))
@@ -55,6 +60,23 @@ do
     Assert.eq(requests[1].opts.headers.Authorization, "tk-1")
     Assert.matches(requests[1].url, "api%-bs%.wtzw%.com/pcapi/v1/user/local$")
     Assert.matches(requests[2].body, "page=2")
+end
+
+-- 书库列表：分页字段决定是否还有下一页，书取书库行字段。
+do
+    requests, replies = {}, { '{"data":{"book_list":[{"book_id":"9","title":"甲","author":"乙","image_link":"http://c/x.jpg"}],'
+        .. '"page_data":{"count":"31","page":"2","page_size":"15"}}}' }
+    local wire
+    Client.classifyAsync({ channel = "0", category1 = "202", category2 = "a", order = "click", page = 2 },
+        function(v) wire = v end)
+    Assert.matches(requests[1].url, "^https://www%.qimao%.com/api/classify/book%-list%?")
+    Assert.matches(requests[1].url, "category1=202")
+    local books, more = Mapper.classify(wire)
+    Assert.eq(books[1].stable_id, "9")
+    Assert.eq(books[1].authors, "乙")
+    Assert.is_true(more)
+    wire.data.page_data.page = "3"
+    Assert.is_true(not select(2, Mapper.classify(wire)))
 end
 
 -- 登录态被拒：标失效并把服务端文案交给调用方。

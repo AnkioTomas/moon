@@ -9,6 +9,7 @@
 @module koplugin.book.source.qimao
 --]]
 
+local Browse = require("source.browse")
 local Client = require("source.qimao.client")
 local Mapper = require("source.qimao.mapper")
 local Shelf = require("source.shelf")
@@ -161,6 +162,70 @@ function Source:searchAsync(keyword, cb)
         end
         cb({ data = Mapper.search(wire) })
     end)
+end
+
+--- 书城浏览：排序 / 频道 / 分类 / 子分类四行 chip（选项来自书库筛选接口），节点是「频道:分类:子分类:排序」，
+--- 缺省男生原创按点击量；选项树缓存在实例上。
+---@param opts { node?: string, limit?: integer }
+---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:browseAsync(opts, cb)
+    local handle = {}
+    local function load(options)
+        local channel, cat1, cat2, order = (opts.node or "0:a:a:click"):match("^(%w+):(%w+):(%w+):(%w+)$")
+        local function chips(rows, id_of)
+            local out = {}
+            for _idx, row in ipairs(rows) do
+                if row.value ~= "a" then out[#out + 1] = { id = id_of(row.value), title = row.label } end
+            end
+            return out
+        end
+        local orders = chips(options.filters.order, function(v) return channel .. ":" .. cat1 .. ":" .. cat2 .. ":" .. v end)
+        local channels = chips(options.filters.channel, function(v) return v .. ":a:a:" .. order end)
+        local tops, subs = { { id = channel .. ":a:a:" .. order, title = _("全部") } }, nil
+        for _idx, cat in ipairs(options.category) do
+            if cat.type == channel then
+                tops[#tops + 1] = { id = channel .. ":" .. cat.id .. ":a:" .. order, title = cat.name }
+                if cat.id == cat1 then
+                    subs = { { id = channel .. ":" .. cat1 .. ":a:" .. order, title = _("全部") } }
+                    for _idx2, sub in ipairs(cat.children) do
+                        subs[#subs + 1] = { id = channel .. ":" .. cat1 .. ":" .. sub.id .. ":" .. order, title = sub.name }
+                    end
+                end
+            end
+        end
+        local node = channel .. ":" .. cat1 .. ":" .. cat2 .. ":" .. order
+        local groups = { Browse.group(orders, node), Browse.group(channels, channel .. ":a:a:" .. order),
+            Browse.group(tops, channel .. ":" .. cat1 .. ":a:" .. order) }
+        if subs then groups[4] = Browse.group(subs, node) end
+        handle.inner = Browse.pages(function(page, done)
+            return Client.classifyAsync({ channel = channel, category1 = cat1, category2 = cat2, order = order, page = page },
+                function(wire, err)
+                    if not wire then
+                        done(nil, err)
+                        return
+                    end
+                    local books, more = Mapper.classify(wire)
+                    done(books, nil, more)
+                end)
+        end, opts.limit or 60, groups, cb)
+    end
+    if self._classify then
+        load(self._classify)
+    else
+        handle.inner = Client.classifyOptionsAsync(function(wire, err)
+            if not wire then
+                cb(nil, err)
+                return
+            end
+            self._classify = wire.data
+            load(self._classify)
+        end)
+    end
+    function handle.cancel()
+        if handle.inner then handle.inner.cancel() end
+    end
+    return handle
 end
 
 --- 书库里已有的元数据；详情只在书城预览时才需要拉。
