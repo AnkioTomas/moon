@@ -39,6 +39,7 @@ _G.G_reader_settings = {
 -- candidate_bar 假实现：记录 install
 local install_calls = 0
 local install_opts
+package.preload["features.ime.hide_key"] = function() return { onCreate = function() end } end
 package.preload["features.ime.candidate_bar"] = function()
     return {
         install = function(opts)
