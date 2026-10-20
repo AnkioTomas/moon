@@ -74,6 +74,11 @@ function Stream.open(opts, handlers)
             self.iostream:read_until("\r\n", self._handle_chunked_encoding, self)
         end
 
+        -- turbo 2.1.5 起流式回调同步调用且恒带 arg 作首参（arg 为 nil 时 chunk 会落到第二参，整段被丢）：必须传非 nil 的 arg。
+        local function onChunk(_arg, chunk)
+            emit(chunk)
+        end
+
         --- 读完 body 后统一收尾（payload 置空：数据已经 emit 出去了）。
         local function complete(self_)
             self_.payload = ""
@@ -108,14 +113,6 @@ function Stream.open(opts, handlers)
                 self._read_buffer = buffer()
                 return self.iostream:read_until("\r\n", self._handle_chunked_encoding, self)
             end
-            -- turbo 的 _read_buffer_size 在 luasocket 路径上是 size_t cdata，math.min(number, cdata) 抛错，
-            -- 流式回调整个被吞掉（body 已随头部到达时必现，表现为 download incomplete: 0/N）。
-            local iostream = self.iostream
-            local read_from_buffer = iostream._read_from_buffer
-            iostream._read_from_buffer = function(io)
-                io._read_buffer_size = tonumber(io._read_buffer_size)
-                return read_from_buffer(io)
-            end
             -- get() 可能多返回值；第二值进 tonumber 会当成进制。
             local content_length = tonumber((headers:get("Content-Length", true)))
             -- 长度为 0 必须当场收尾：keep-alive 连接不会关，read_until_close 会挂到超时。
@@ -123,12 +120,12 @@ function Stream.open(opts, handlers)
                 return complete(self)
             end
             if content_length then
-                return self.iostream:read_bytes(content_length, complete, self, emit)
+                return self.iostream:read_bytes(content_length, complete, self, onChunk, state)
             end
             self.iostream:read_until_close(function(self_, final_data)
                 emit(final_data)
                 complete(self_)
-            end, self, emit)
+            end, self, onChunk, state)
         end
 
         local fetched, future = pcall(client.fetch, client, opts.url, Fetch.options(opts, 6))
