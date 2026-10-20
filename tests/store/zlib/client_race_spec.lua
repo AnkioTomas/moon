@@ -45,8 +45,17 @@ Assert.is_true(cancelled[pending[2].url] and cancelled[pending[4].url] and cance
 pending[5].cb({ code = 200, body = '{"success":1}' })
 Assert.eq(calls, 1, "胜出后迟到的回包不再回调")
 
--- 全部失败：只回调一次最终错误
+-- 已有胜出镜像：后续请求不再竞速，只发给它
 pending = {}
+client:_jsonAsync("GET", "/eapi/y", {}, function() end)
+Assert.eq(#pending, 1)
+Assert.eq(pending[1].url, "https://a.example/eapi/y")
+
+-- 全部失败：只回调一次最终错误（先清掉固定镜像）
+pending = {}
+package.loaded["store.zlib.client"] = nil
+Client = require("store.zlib.client")
+client = Client.new({ base_url = "https://a.example" })
 local err
 calls = 0
 client:_jsonAsync("GET", "/eapi/x", {}, function(_d, e) calls = calls + 1; err = e end)

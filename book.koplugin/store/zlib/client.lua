@@ -69,8 +69,8 @@ local SEED_URLS = {
 local USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
 
 local MAX_REDIRECT_HOPS = 5
-local RACE_WIDTH = 5 -- 并发竞速：同时请求的镜像数
-local SERIAL_ATTEMPTS = 3 -- 不能并发的请求（消耗下载额度）依次试的镜像数
+local RACE_WIDTH = 5 -- 首次（尚无可用镜像）并发竞速的镜像数
+local SERIAL_ATTEMPTS = 3 -- 已选定镜像 / 消耗下载额度的请求，依次试的镜像数
 
 -- 钉住的镜像 origin（重定向跨主机或故障转移成功时更新，本次会话有效）
 local pinned_base
@@ -239,7 +239,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:_jsonAsync(method, path, opts, cb)
-    local race = not opts.serial
+    local race = not opts.serial and not pinned_base -- 只在还没选定镜像时竞速，之后固定用胜出的那个
     local bases = baseCandidates(self.cfg, race and RACE_WIDTH or SERIAL_ATTEMPTS)
     local cancelled, settled = false, false
     local lanes = {}
