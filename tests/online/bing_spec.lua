@@ -140,6 +140,17 @@ do -- 图坏了必须重下，JSON 不用重拉
     Assert.is_true(Bing:imageReady())
 end
 
+do -- ensureImage：下完图回 (path, nil)，不能带错误（锁屏据此判成败）
+    os.remove(cache_dir .. "/bing.jpg")
+    Bing._image_url = nil
+    requests, by_key = {}, {}
+    local got_path, got_err, called
+    Bing:ensureImage(function(path, err) got_path, got_err, called = path, err, true end)
+    Assert.is_true(called)
+    Assert.eq(got_path, cache_dir .. "/bing.jpg")
+    Assert.is_nil(got_err)
+end
+
 do -- 损坏内容不能记成当天图
     local dest = cache_dir .. "/bing.jpg"
     os.remove(dest)
