@@ -73,6 +73,8 @@ local MAX_BASE_ATTEMPTS = 3
 
 -- 钉住的镜像 origin（重定向跨主机或故障转移成功时更新，本次会话有效）
 local pinned_base
+-- 种子窗口起点：一轮候选全军覆没就整体后移，下次请求试后面的镜像（本次会话有效）
+local seed_offset = 0
 
 local Client = {}
 Client.__index = Client
@@ -96,7 +98,7 @@ end
 -- 镜像选择与故障转移
 -- ---------------------------------------------------------------------------
 
---- 候选 base 列表：用户配置 > 钉住 > 种子；去重，最多 MAX_BASE_ATTEMPTS 个
+--- 候选 base 列表：用户配置 > 钉住 > 种子（从 seed_offset 轮转）；去重，最多 MAX_BASE_ATTEMPTS 个
 ---@param cfg table|nil
 ---@return string[]
 local function baseCandidates(cfg)
@@ -115,7 +117,7 @@ local function baseCandidates(cfg)
     end
     add(cfg and cfg.base_url)
     add(pinned_base)
-    for _idx, seed in ipairs(SEED_URLS) do add(seed) end
+    for i = 1, #SEED_URLS do add(SEED_URLS[(seed_offset + i - 1) % #SEED_URLS + 1]) end
     local capped = {}
     for i = 1, math.min(MAX_BASE_ATTEMPTS, #out) do capped[i] = out[i] end
     return capped
@@ -277,6 +279,7 @@ function Client:_jsonAsync(method, path, opts, cb)
         if cancelled then return end
         bi = bi + 1
         if bi > #bases then
+            seed_offset = (seed_offset + MAX_BASE_ATTEMPTS) % #SEED_URLS
             logger.warn("book.zlib request failed", method, path,
                 "attempts", #bases, last_err)
             deliver(nil, last_err)
