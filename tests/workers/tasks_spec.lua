@@ -63,6 +63,28 @@ Assert.eq(online_ok.kind, "online")
 online_ok.runs[1].done({ ok = true })
 Assert.eq(#Tasks.tasks(), 0)
 
+-- 有未结束任务（非 waiting）时压住自动休眠，空了 / 只剩 waiting 撤回。
+do
+    local function settle()
+        local fns = scheduled
+        scheduled = {}
+        for _idx, item in ipairs(fns) do item.fn() end
+    end
+    local share = require("pluginshare")
+    local busy = Tasks.enqueue(spec("awake", "download", { restartable = true }))
+    settle()
+    Assert.is_true(share.pause_auto_suspend)
+    Tasks.onSuspend()
+    settle()
+    Assert.is_false(share.pause_auto_suspend, "只剩 waiting 不拦休眠")
+    Tasks.onResume()
+    settle()
+    Assert.is_true(share.pause_auto_suspend)
+    busy.runs[#busy.runs].done({ ok = true })
+    settle()
+    Assert.is_false(share.pause_auto_suspend)
+end
+
 -- 同类并行；异类等执行权；队首是异类时后面的同类不插队。
 local c1 = Tasks.enqueue(spec("c1", "cache"))
 local c2 = Tasks.enqueue(spec("c2", "cache"))

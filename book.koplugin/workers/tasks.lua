@@ -30,7 +30,8 @@ restartable 的任务归队列所有，队列可以随时中断并从头重跑�
 run 跑在主进程，必须发起异步操作后立刻返回：等网络走 http.request，重计算走 workers.job。
 多阶段任务（下载 → Job 解压）返回的句柄要始终指向当前阶段，否则取消后子进程成孤儿；迟到的 done 按 token 丢弃。
 进度只报 report(text, count, total)，百分比由界面算；省略的 count / total 沿用上次值；download 类所有阶段都报字节。
-未结束任务上限 64（queue_full）；退避 15s、30s…；状态 queued → running → finished，旁路 retry_wait / waiting / cancelled。
+有任务在跑 / 排队 / 退避时置 `PluginShare.pause_auto_suspend`，KOReader 不自动休眠；
+只剩 waiting 任务时撤回。未结束任务上限 64（queue_full）；退避 15s、30s…；状态 queued → running → finished，旁路 retry_wait / waiting / cancelled。
 
 @module koplugin.book.workers.tasks
 --]]
@@ -81,9 +82,24 @@ local change_scheduled = false
 --- 休眠中：restartable 任务不启动。
 local suspended = false
 
+--- 是否由我们按下了自动休眠的暂停（与 keepalive 等插件共用 PluginShare，只撤自己按下的）。
+local holding_awake = false
+
+--- 有任务在跑 / 排队 / 退避时不让 KOReader 自动休眠；waiting（等网络 / 唤醒）不算，否则永远睡不下去。
+local function syncAwake()
+    local busy = false
+    for _idx, task in ipairs(list) do
+        if task.state ~= "waiting" then busy = true break end
+    end
+    if busy == holding_awake then return end
+    holding_awake = busy
+    require("pluginshare").pause_auto_suspend = busy
+end
+
 --- 通知观察者；订阅者只是 UI，绝不拥有或取消任务。
 local function flushChanged()
     change_scheduled = false
+    syncAwake()
     for callback in pairs(watchers) do
         Guard.call("tasks watcher", callback)
     end
