@@ -89,9 +89,10 @@ package.preload["utils.paths"] = function()
 end
 package.preload["utils.settings"] = function()
     local update = { auto_update_check = false, update_last_checked_at = 0 }
+    local http = { mirror_dead = {} }
     return {
-        get = function(name) assert(name == "features.update"); return update end,
-        save = function(name) assert(name == "features.update") end,
+        get = function(name) assert(name == "features.update" or name == "http"); return name == "http" and http or update end,
+        save = function(name) assert(name == "features.update" or name == "http") end,
     }
 end
 local job_opts, job_worker
@@ -260,6 +261,12 @@ probes[5].handlers.on_headers(200, headers())
 flush()
 Assert.eq(download_opts.url, probes[4].url)
 for _, probe in ipairs(probes) do Assert.is_true(probe.cancelled) end
+-- 同场被拒的镜像落盘拉黑，胜出的不拉黑
+local dead = require("utils.settings").get("http").mirror_dead
+Assert.is_true(next(dead) ~= nil)
+local function prefixOf(probe) return probe.url:gsub("/AnkioTomas/.*$", "") end
+Assert.is_true(dead[(prefixOf(probes[2]))] ~= nil)
+Assert.is_nil(dead[(prefixOf(probes[4]))])
 download_opts.on_progress(1024)
 Assert.eq(shown[3].progress, 1024)
 Assert.eq(shown[3].progress_max, 4096)

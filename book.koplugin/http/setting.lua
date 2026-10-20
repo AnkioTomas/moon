@@ -10,5 +10,7 @@ return {
         network_timeout = 30,
         -- 上次下载成功的默认源模板，下次优先尝试。
         mirror_last = "",
+        -- 竞速 / 回落中失败过的源 → 失败时间；Mirror.DEAD_TTL 内不再尝试。
+        mirror_dead = {},
     },
 }

@@ -137,7 +137,11 @@ end
 ---@return table handle { cancel }
 local function pickDownloadUrl(release, cb)
     local path = release.url:sub(#GITHUB + 1)
-    local pool = { unpack(MIRRORS) }
+    local Mirror = require("http.mirror")
+    local pool = {}
+    for _idx, prefix in ipairs(MIRRORS) do
+        if not Mirror.isDead(prefix) then pool[#pool + 1] = prefix end
+    end
     local prefixes = { GITHUB }
     for i = 1, math.min(PROBE_MIRRORS, #pool) do
         local j = math.random(i, #pool)
@@ -145,6 +149,13 @@ local function pickDownloadUrl(release, cb)
         prefixes[#prefixes + 1] = pool[i]
     end
     local jobs, pending, settled = {}, #prefixes, false
+    local bad, flagged = {}, {}
+    local function flag(i)
+        if i > 1 and not settled and not flagged[i] then
+            flagged[i] = true
+            bad[#bad + 1] = prefixes[i]
+        end
+    end
     local function cancelAll()
         settled = true
         for _idx, job in ipairs(jobs) do job:cancel() end
@@ -152,6 +163,8 @@ local function pickDownloadUrl(release, cb)
     local function settle(url)
         if settled then return end
         cancelAll()
+        -- 有源胜出说明网络通：同场已确定失败的镜像（不含直连）落盘拉黑
+        if url ~= release.url then Mirror.markDead(bad) end
         logger.dbg("book.update download from", url)
         cb(url)
     end
@@ -159,15 +172,17 @@ local function pickDownloadUrl(release, cb)
         local url = prefix .. path
         jobs[i] = Request.stream({ url = url, timeout = require("http.timeout").net(PROBE_TIMEOUT_RATIO), allow_redirects = true }, {
             on_headers = function(code, headers)
-                if code ~= 200 then return end
+                local function reject() flag(i) end
+                if code ~= 200 then return reject() end
                 local length = tonumber((headers:get("Content-Length", true)))
-                if length and release.size and length ~= release.size then return end
+                if length and release.size and length ~= release.size then return reject() end
                 -- 死镜像常回 200 + 自家首页且不带长度，只凭长度拦不住。
                 local mime = headers:get("Content-Type", true)
-                if mime and mime:lower():find("text/html", 1, true) then return end
+                if mime and mime:lower():find("text/html", 1, true) then return reject() end
                 UIManager:nextTick(require("ui.guard").wrap("update settle", function() settle(url) end))
             end,
-            on_done = function()
+            on_done = function(err)
+                if err then flag(i) end
                 pending = pending - 1
                 if pending == 0 then UIManager:nextTick(require("ui.guard").wrap("update settle", function() settle(release.url) end)) end
             end,
