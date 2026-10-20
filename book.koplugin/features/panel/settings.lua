@@ -109,7 +109,36 @@ end
 ---@param desktop table
 ---@return BookQuickPanelSettingRowFactory[]
 function QuickPanel.rows(scope, desktop)
-    return optionRows(desktop, PANELS[scope].options())
+    local rows = optionRows(desktop, PANELS[scope].options())
+    if scope == "desktop" then
+        local Device = require("device")
+        local toggles = {
+            { key = "quick_panel_warmth", on = Device:hasNaturalLight(), icon = "brightness_medium",
+              title = _("冷暖色调滑块"), subtitle = _("面板顶部的色温滑块") },
+            { key = "quick_panel_brightness", on = Device:hasFrontlight(), icon = "brightness_6",
+              title = _("亮度滑块"), subtitle = _("面板顶部的亮度滑块") },
+        }
+        for _idx, toggle in ipairs(toggles) do
+            if toggle.on then
+                table.insert(rows, 1, function(iw)
+                    local MoonSettings = require("utils.settings")
+                    local settings = MoonSettings.get("features.panel")
+                    local enabled = settings[toggle.key]
+                    return Row.widget({
+                        width = iw, chevron = false,
+                        kind = "toggle", icon = toggle.icon, title = toggle.title, subtitle = toggle.subtitle,
+                        status = enabled and _("开") or _("关"), status_on = enabled,
+                        callback = function()
+                            settings[toggle.key] = not enabled
+                            MoonSettings.save("features.panel", settings)
+                            desktop:updateView()
+                        end,
+                    })
+                end)
+            end
+        end
+    end
+    return rows
 end
 
 --- 已启用动作的图标条，一行放不下就折行；不实例化面板主体。

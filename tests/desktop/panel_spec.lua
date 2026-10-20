@@ -6,7 +6,7 @@ desktop.panel 离线用例：快捷动作配置、能力过滤与灯光范围换
 
 local Assert = require("support.assert")
 
-local settings = { quick_panel_actions = { "night", "wifi" } }
+local settings = { quick_panel_actions = { "night", "wifi" }, quick_panel_brightness = true, quick_panel_warmth = true }
 local saved = 0
 package.preload["utils.settings"] = function()
     return {
@@ -107,6 +107,17 @@ Assert.eq(sliders[1].kind, "brightness")
 Assert.eq(sliders[1].value, 25)
 Assert.eq(sliders[2].kind, "warmth")
 Assert.eq(sliders[2].value, 25)
+
+-- 两个滑块可分别关掉。
+settings.quick_panel_warmth = false
+sliders = Panel.sliders()
+Assert.len(sliders, 1)
+Assert.eq(sliders[1].kind, "brightness")
+settings.quick_panel_brightness = false
+Assert.len(Panel.sliders(), 0)
+settings.quick_panel_warmth = true
+Assert.eq(Panel.sliders()[1].kind, "warmth")
+settings.quick_panel_brightness = true
 
 -- 暖色本身已是 0..100，避免原生刻度往返在非整倍值上丢精度。
 powerd.warmth = 10
