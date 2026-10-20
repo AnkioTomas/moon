@@ -14,14 +14,15 @@ Setting.SCOPES = { "home", "library", "store", "insight", "settings", "dialog", 
 Setting.defaults = {
     -- 总开关：关上就整个不画，各界面的开关原样留着。
     wallpaper_enabled = true,
-    -- 旧版的两个作用面开关：没单独存过的界面沿用它们。
-    wallpaper_desktop = true,
-    wallpaper_dialog = true,
+    -- 旧版的两个作用面开关：没单独存过的界面沿用它们。默认关：选了图也不该铺满所有界面，由用户逐个打开。
+    wallpaper_desktop = false,
+    wallpaper_dialog = false,
     -- 顶栏 / 底栏要不要跟着透出壁纸；关的那条补回页面底色。
     wallpaper_topbar = true,
     wallpaper_tabbar = true,
     wallpaper_contain = false,
-    wallpaper_opacity = 100,
+    -- 默认淡一点：选了图铺满各界面时不至于盖住内容。
+    wallpaper_opacity = 30,
 }
 
 --- 无默认值的持久键：全局图，以及各界面的开关与图 / 铺法 / 透明度覆盖（没设 = 跟随全局）。
