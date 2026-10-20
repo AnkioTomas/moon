@@ -191,10 +191,10 @@ local SEARCH_TRIES = 30
 
 --- 搜索：官网的协议是「提交 → 轮询」，两步要用同一个会话 Cookie（否则取结果 500）。POST /book/search 返回 task（各书源并行搜），
 --- 再每 2 秒 POST /book/search/result 取增量 result[] 直到 remaining 为 0。回调完整行数组（同书架行）。
----@param keyword string
+---@param form table<string, any> 提交表单（搜索是 bookname，发现是 type / url / id）
 ---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
-function Client.searchAsync(keyword, cb)
+local function runAsync(form, cb)
     local UIManager = require("ui/uimanager")
     local job, tick, done = nil, nil, false
     local rows, tries = {}, 0
@@ -213,7 +213,7 @@ function Client.searchAsync(keyword, cb)
             UIManager:scheduleIn(SEARCH_INTERVAL, tick)
         end, session)
     end
-    job = call("/book/search", { bookname = keyword }, 0.5, function(data, err, res)
+    job = call("/book/search", form, 0.5, function(data, err, res)
         if done then return end
         if type(data) ~= "table" or type(data.task) ~= "string" then cb(nil, err or _("请求失败")); return end
         local set_cookie = Request.header(res, "Set-Cookie")
@@ -227,6 +227,29 @@ function Client.searchAsync(keyword, cb)
             job.cancel()
         end,
     }
+end
+
+---@param keyword string
+---@param cb fun(rows: table[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client.searchAsync(keyword, cb)
+    return runAsync({ bookname = keyword }, cb)
+end
+
+--- 书源「发现」页的一个入口（规则里的 url 模板），回包同搜索。
+---@param source_id integer
+---@param url string
+---@param cb fun(rows: table[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client.exploreAsync(source_id, url, cb)
+    return runAsync({ type = "explore", url = url, id = source_id }, cb)
+end
+
+--- 服务端当次挑出的一个书源的发现规则（每次调用换一个）。
+---@param cb fun(rules: table[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client.exploreRulesAsync(cb)
+    return call("/kindle/exploreRules", {}, 0.5, cb)
 end
 
 --- 把书移出书架。/book/favourite 是开关，调用方必须先确认书还在书架上。

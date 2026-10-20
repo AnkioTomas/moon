@@ -5,6 +5,7 @@
 @module koplugin.book.store.zlib
 --]]
 
+local Browse = require("source.browse")
 local Client = require("store.zlib.client")
 local Mapper = require("store.zlib.mapper")
 local Paths = require("utils.paths")
@@ -81,6 +82,48 @@ function Zlib:listStoreAsync(opts, cb)
         for i = first, math.min(#all.data, first + page_size - 1) do books[#books + 1] = all.data[i] end
         cb({ data = books, count = #all.data })
     end)
+end
+
+local BROWSE_ORDERS = { { "popular", _("热门") }, { "date", _("最新") } }
+local BROWSE_LANGUAGES = {
+    { "-", _("全部") }, { "chinese", _("中文") }, { "english", _("英语") }, { "japanese", _("日语") }, { "korean", _("韩语") },
+    { "french", _("法语") }, { "german", _("德语") }, { "russian", _("俄语") }, { "spanish", _("西班牙语") },
+}
+local BROWSE_FORMATS = {
+    { "-", _("全部") }, { "epub", "EPUB" }, { "mobi", "MOBI" }, { "azw3", "AZW3" }, { "pdf", "PDF" }, { "txt", "TXT" },
+}
+
+--- 书城浏览：排序 / 语言 / 格式三行 chip，空关键词搜索即榜单；节点是「排序:语言:格式」，"-" 表示不限。
+---@param opts { node?: string, limit?: integer }
+---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Zlib:browseAsync(opts, cb)
+    local order, language, format = (opts.node or ""):match("^([%w-]+):([%w -]+):([%w-]+)$")
+    if not order then order, language, format = "popular", storeLanguage() or "-", "-" end
+    local node = order .. ":" .. language .. ":" .. format
+    --- 只换 slot 位的值，其余沿用当前节点。
+    local function chips(rows, slot)
+        local out = {}
+        for _idx, row in ipairs(rows) do
+            local key = { order, language, format }
+            key[slot] = row[1]
+            out[#out + 1] = { id = table.concat(key, ":"), title = row[2] }
+        end
+        return out
+    end
+    local groups = {
+        Browse.group(chips(BROWSE_ORDERS, 1), node),
+        Browse.group(chips(BROWSE_LANGUAGES, 2), node),
+        Browse.group(chips(BROWSE_FORMATS, 3), node),
+    }
+    local api = client()
+    local filters = { order = order, extension = format ~= "-" and format or nil }
+    return Browse.pages(function(page, done)
+        return api:searchAsync("", page, 24, function(wire, err)
+            if not wire then done(nil, err); return end
+            done(Mapper.list(wire).data)
+        end, language ~= "-" and language or nil, filters)
+    end, opts.limit or 48, groups, cb)
 end
 
 --- 用书城条目的稳定身份拉取并归一化完整详情。
