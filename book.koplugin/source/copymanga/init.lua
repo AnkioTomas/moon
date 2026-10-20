@@ -158,7 +158,7 @@ function Source:searchAsync(keyword, cb)
     end)
 end
 
-local PERIODS = { { "1", _("日榜") }, { "2", _("周榜") }, { "3", _("月榜") }, { "4", _("总榜") } }
+local PERIODS = { { "day", _("日榜") }, { "week", _("周榜") }, { "month", _("月榜") }, { "total", _("总榜") } }
 local AUDIENCES = { { "all", _("全部") }, { "male", _("男频") }, { "female", _("女频") } }
 
 --- 书城浏览：榜单周期 × 受众两行 chip，节点是「周期:受众」，缺省日榜全部。每页 20 部。
@@ -166,7 +166,7 @@ local AUDIENCES = { { "all", _("全部") }, { "male", _("男频") }, { "female",
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:browseAsync(opts, cb)
-    local period, audience = (opts.node or "1:all"):match("^(%d):(%a+)$")
+    local period, audience = (opts.node or "day:all"):match("^(%a+):(%a+)$")
     local periods, audiences = {}, {}
     for _idx, row in ipairs(PERIODS) do periods[#periods + 1] = { id = row[1] .. ":" .. audience, title = row[2] } end
     for _idx, row in ipairs(AUDIENCES) do audiences[#audiences + 1] = { id = period .. ":" .. row[1], title = row[2] } end
