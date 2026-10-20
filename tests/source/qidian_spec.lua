@@ -194,6 +194,22 @@ do
 end
 
 do
+    requests, replies = {}, { { body = page({ records = { { bid = 7, bName = "甲", bAuth = "乙", cat = "玄幻" } } }) } }
+    local got
+    Client.rankAsync("/rank/yuepiao/catid21/", function(v) got = v end)
+    Assert.matches(requests[1].url, "/rank/yuepiao/catid21/$")
+    local books = Mapper.rank(got)
+    Assert.eq(books[1].stable_id, "7")
+    Assert.eq(books[1].authors, "乙")
+
+    replies = { { body = "<html>nope</html>" } }
+    local err
+    Client.rankAsync("/rank/x/", function(v, e) got, err = v, e end)
+    Assert.is_nil(got)
+    Assert.is_true(err ~= nil)
+end
+
+do
     local books = Mapper.search({ bookInfo = { records = {
         { bid = 7, bName = "甲", bAuth = "乙...", cat = "玄幻", desc = "简<br>介" },
         { bid = 8, bName = "丙", bAuth = "丁" },

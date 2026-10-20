@@ -8,6 +8,7 @@
 @module koplugin.book.source.jjwxc
 --]]
 
+local Browse = require("source.browse")
 local Client = require("source.jjwxc.client")
 local Mapper = require("source.jjwxc.mapper")
 local Shelf = require("source.shelf")
@@ -151,6 +152,34 @@ function Source:searchAsync(keyword, cb)
             return
         end
         cb({ data = Mapper.search(wire) })
+    end)
+end
+
+local RANKS = {
+    { "5", _("月度榜") }, { "6", _("季度榜") }, { "30", _("半年榜") }, { "58", _("完结金榜") },
+    { "64", _("总分榜") }, { "42", _("霸王票总榜") }, { "44", _("读者栽培榜") },
+}
+
+--- 书城浏览：榜单 / 频道两行 chip，节点是「榜单号:频道序号」，缺省月度榜第一个频道。
+--- 榜单页一次给齐各频道各 20 本，频道 chip 由页面解析得出；这里的书只有书名和书号。
+---@param opts { node?: string, limit?: integer }
+---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:browseAsync(opts, cb)
+    local rank, idx = (opts.node or RANKS[1][1] .. ":1"):match("^(%d+):(%d+)$")
+    return Client.rankAsync(rank, function(sections, err)
+        if not sections then
+            cb(nil, err)
+            return
+        end
+        local ranks, channels = {}, {}
+        for _idx, row in ipairs(RANKS) do ranks[#ranks + 1] = { id = row[1] .. ":" .. idx, title = row[2] } end
+        for i, section in ipairs(sections) do
+            channels[#channels + 1] = { id = rank .. ":" .. i, title = (section.title:gsub("排行$", "")) }
+        end
+        local node = rank .. ":" .. idx
+        local section = sections[tonumber(idx)] or sections[1]
+        cb({ data = section.books, groups = { Browse.group(ranks, node), Browse.group(channels, node) } })
     end)
 end
 

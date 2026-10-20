@@ -7,6 +7,7 @@
 @module koplugin.book.source.copymanga
 --]]
 
+local Browse = require("source.browse")
 local Client = require("source.copymanga.client")
 local Mapper = require("source.copymanga.mapper")
 local SourceBase = require("source.base")
@@ -155,6 +156,32 @@ function Source:searchAsync(keyword, cb)
         end
         cb({ data = Mapper.search(wire) })
     end)
+end
+
+local PERIODS = { { "1", _("日榜") }, { "2", _("周榜") }, { "3", _("月榜") }, { "4", _("总榜") } }
+local AUDIENCES = { { "all", _("全部") }, { "male", _("男频") }, { "female", _("女频") } }
+
+--- 书城浏览：榜单周期 × 受众两行 chip，节点是「周期:受众」，缺省日榜全部。每页 20 部。
+---@param opts { node?: string, limit?: integer }
+---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:browseAsync(opts, cb)
+    local period, audience = (opts.node or "1:all"):match("^(%d):(%a+)$")
+    local periods, audiences = {}, {}
+    for _idx, row in ipairs(PERIODS) do periods[#periods + 1] = { id = row[1] .. ":" .. audience, title = row[2] } end
+    for _idx, row in ipairs(AUDIENCES) do audiences[#audiences + 1] = { id = period .. ":" .. row[1], title = row[2] } end
+    local node = period .. ":" .. audience
+    local groups = { Browse.group(periods, node), Browse.group(audiences, node) }
+    return Browse.pages(function(page, done)
+        return self._client:rankAsync(period, audience ~= "all" and audience or nil, (page - 1) * 20,
+            function(wire, err)
+                if not wire then
+                    done(nil, err)
+                    return
+                end
+                done(Mapper.search(wire))
+            end)
+    end, opts.limit or 60, groups, cb)
 end
 
 function Source:getDetailAsync(identity, cb)

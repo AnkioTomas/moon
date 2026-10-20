@@ -26,6 +26,18 @@ do
 end
 
 do
+    local html = '<span> 【言情排行】 </span><div><ul><li><a href="/book2/1" class="track" data-x=\'{"a":1}\'>甲&amp;乙</a></li></ul></div>'
+        .. '<span>【纯爱排行】</span><ul><li><a href="/book2/2">丙</a></li><li><a href="/book2/3">丁</a></li></ul>'
+    local sections = Mapper.rankSections(html)
+    Assert.len(sections, 2)
+    Assert.eq(sections[1].title, "言情排行")
+    Assert.eq(sections[1].books[1].stable_id, "1")
+    Assert.eq(sections[1].books[1].title, "甲&乙")
+    Assert.len(sections[2].books, 2)
+    Assert.len(Mapper.rankSections("<html></html>"), 0)
+end
+
+do
     local books = Mapper.shelfList({
         { id = "1", title = "短…", info = { novelId = 1, novelName = "全名", authorName = "甲", novelSize = "271,300", novelCover = "" } },
         { id = "2", title = "截断", local_book = { stable_id = "2", title = "本地全名" } },

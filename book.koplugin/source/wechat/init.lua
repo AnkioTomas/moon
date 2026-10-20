@@ -16,6 +16,7 @@ local Notes = require("source.wechat.notes")
 local NotesPush = require("source.wechat.notes_push")
 local Toc = require("source.wechat.toc")
 local Reviews = require("source.wechat.reviews")
+local Browse = require("source.browse")
 local SourceBase = require("source.base")
 local Shelf = require("source.shelf")
 local Progress = require("book.progress")
@@ -837,23 +838,15 @@ function Source:browseAsync(opts, cb)
             for _idx, sub in ipairs(top.subs) do subs[#subs + 1] = sub end
             groups[3] = { chips = subs, active = node }
         end
-        local books, limit = {}, opts.limit or 60
-        local function more()
-            handle.inner = self._client:storeBooksAsync(node, #books, ranking ~= nil, function(wire, err)
+        handle.inner = Browse.pages(function(page, done)
+            return self._client:storeBooksAsync(node, (page - 1) * 20, ranking ~= nil, function(wire, err)
                 if not wire then
-                    cb(nil, err)
+                    done(nil, err)
                     return
                 end
-                local page = Mapper.searchList(wire)
-                for _idx, book in ipairs(page) do books[#books + 1] = book end
-                if #books < limit and #page > 0 and wire.hasMore == 1 then
-                    more()
-                    return
-                end
-                cb({ data = books, groups = groups })
+                done(Mapper.searchList(wire), nil, wire.hasMore == 1)
             end)
-        end
-        more()
+        end, opts.limit or 60, groups, cb)
     end
     if self._store_tree then
         load(self._store_tree)

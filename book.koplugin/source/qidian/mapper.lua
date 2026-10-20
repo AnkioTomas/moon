@@ -71,6 +71,13 @@ function Mapper.search(data)
     return out
 end
 
+--- 榜单页 pageData.records → Book[]（行形状同搜索）。
+---@param data table
+---@return Book[]
+function Mapper.rank(data)
+    return Mapper.search({ bookInfo = { records = data.records } })
+end
+
 --- 书架行 → Book。没有简介，封面按书号拼。
 ---@param row table
 ---@return Book

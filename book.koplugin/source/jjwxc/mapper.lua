@@ -56,6 +56,21 @@ function Mapper.search(wire)
     return out
 end
 
+--- 手机榜单页 HTML → { title, books }[]：按「【xx排行】」分节，每节只有书名和书号（作者、封面等详情补）。
+---@param html string
+---@return { title: string, books: Book[] }[]
+function Mapper.rankSections(html)
+    local sections = {}
+    for title, body in html:gmatch("【(.-)】(.-)</ul>") do
+        local books = {}
+        for id, name in body:gmatch('<a href="/book2/(%d+)"[^>]*>([^<]*)</a>') do
+            books[#books + 1] = { source_id = SOURCE_ID, stable_id = id, title = Text.xmlDecode(name) }
+        end
+        if #books > 0 then sections[#sections + 1] = { title = title, books = books } end
+    end
+    return sections
+end
+
 --- 收藏页 HTML → { id, title, author }[]；找不到收藏列表（页面改版 / 不是收藏页）返回 nil。
 --- 页面上的书名被截断，只作详情拉不到时的兜底。
 ---@param html string

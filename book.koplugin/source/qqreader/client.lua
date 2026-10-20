@@ -222,7 +222,15 @@ end
 ---@param cb fun(books: Book[]|nil, err: string|nil)
 ---@return HttpJob
 function Client.searchAsync(keyword, cb)
-    return Request.get(WEB .. "/so/" .. Text.urlEncode(keyword), {
+    return Client.listAsync("/so/" .. Text.urlEncode(keyword), cb)
+end
+
+--- 书城列表页（搜索 / 榜单 / 分类同一种 HTML 卡片）→ Book[]。
+---@param path string
+---@param cb fun(books: Book[]|nil, err: string|nil)
+---@return HttpJob
+function Client.listAsync(path, cb)
+    return Request.get(WEB .. path, {
         headers = headers(nil),
         timeout = require("http.timeout").net(1),
     }, function(raw, err)

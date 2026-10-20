@@ -59,7 +59,7 @@ end
 
 --- 带登录态取网页，回调 UTF-8 的 HTML。302 = Cookie 失效。
 ---@param path string
----@param cookie string
+---@param cookie string|nil
 ---@param cb fun(html: string|nil, err: string|nil)
 ---@return HttpJob
 local function webGet(path, cookie, cb)
@@ -94,6 +94,19 @@ function Client.favAsync(cookie, cb)
         if not rows then cb(nil, _("晋江收藏页无法解析")); return end
         if cookie == Client.cookie() then require("source.auth").ok(SOURCE_ID) end
         cb(rows)
+    end)
+end
+
+--- 手机榜单页：/rank/naturalmore/<榜单号>，一页按频道分好几节，每节 20 本。
+---@param rank_id string
+---@param cb fun(sections: table[]|nil, err: string|nil)
+---@return HttpJob
+function Client.rankAsync(rank_id, cb)
+    return webGet("/rank/naturalmore/" .. rank_id, nil, function(html, err)
+        if not html then cb(nil, err); return end
+        local sections = Mapper.rankSections(html)
+        if #sections == 0 then cb(nil, _("晋江榜单无法解析")); return end
+        cb(sections)
     end)
 end
 

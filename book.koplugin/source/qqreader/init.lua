@@ -10,6 +10,7 @@ QQ阅读数据源。
 --]]
 
 require("l10n").apply()
+local Browse = require("source.browse")
 local Client = require("source.qqreader.client")
 local Mapper = require("source.qqreader.mapper")
 local Shelf = require("source.shelf")
@@ -196,6 +197,45 @@ function Source:searchAsync(keyword, cb)
         end
         cb({ data = books })
     end)
+end
+
+local RANKS = {
+    { id = "rank:male-sell", title = _("男生热门榜") }, { id = "rank:male-new", title = _("男生新书榜") },
+    { id = "rank:male-free", title = _("男生免费榜") }, { id = "rank:male-finish", title = _("男生完结榜") },
+    { id = "rank:male-god", title = _("男生封神榜") }, { id = "rank:female-sell", title = _("女生热门榜") },
+    { id = "rank:female-new", title = _("女生新书榜") }, { id = "rank:female-free", title = _("女生免费榜") },
+    { id = "rank:female-finish", title = _("女生完结榜") }, { id = "rank:female-god", title = _("女生封神榜") },
+    { id = "rank:publish-sell", title = _("出版热门榜") }, { id = "rank:publish-new", title = _("出版新书榜") },
+    { id = "rank:publish-knowledge", title = _("出版新知榜") },
+}
+local CATS = {
+    { id = "cate:0", title = _("全部") }, { id = "cate:20001", title = _("玄幻") },
+    { id = "cate:20005", title = _("奇幻") }, { id = "cate:20010", title = _("武侠") },
+    { id = "cate:20014", title = _("仙侠") }, { id = "cate:20019", title = _("都市") },
+    { id = "cate:20065", title = _("现实") }, { id = "cate:20028", title = _("历史") },
+    { id = "cate:20032", title = _("军事") }, { id = "cate:20050", title = _("游戏") },
+    { id = "cate:20054", title = _("体育") }, { id = "cate:20042", title = _("科幻") },
+    { id = "cate:20037", title = _("悬疑") }, { id = "cate:20059", title = _("轻小说") },
+    { id = "cate:20109", title = _("诸天无限") }, { id = "cate:20076", title = _("短篇") },
+}
+
+--- 书城浏览：榜单 / 分类两行 chip，节点是「rank:榜单名」或「cate:分类号」，缺省男生热门榜。每页 20 本。
+---@param opts { node?: string, limit?: integer }
+---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:browseAsync(opts, cb)
+    local node = opts.node or RANKS[1].id
+    local kind, name = node:match("^(%a+):(.+)$")
+    local groups = { Browse.group(RANKS, node), Browse.group(CATS, node) }
+    return Browse.pages(function(page, done)
+        local path
+        if kind == "rank" then
+            path = "/book-rank/" .. name .. "/cycle-1" .. (page > 1 and "-" .. page or "")
+        else
+            path = "/book-cate/" .. name .. "-0-0-0-0-0-0-" .. page
+        end
+        return Client.listAsync(path, done)
+    end, opts.limit or 60, groups, cb)
 end
 
 function Source:getDetailAsync(identity, cb)

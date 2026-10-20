@@ -326,6 +326,19 @@ function Client.searchAsync(keyword, cb)
     end)
 end
 
+--- 榜单页（手机网页 SSR，一页 20 本）。path 如 /rank/yuepiao/catid21/。
+---@param path string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return HttpJob
+function Client.rankAsync(path, cb)
+    return webGet(path, nil, function(html, err)
+        if not html then cb(nil, err); return end
+        local data = Mapper.pageData(html)
+        if not data or type(data.records) ~= "table" then cb(nil, _("起点榜单为空")); return end
+        cb(data)
+    end)
+end
+
 ---@param book_id string
 ---@param cb fun(info: table|nil, err: string|nil)
 ---@return HttpJob

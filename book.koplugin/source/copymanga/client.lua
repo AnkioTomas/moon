@@ -174,6 +174,18 @@ function Client:searchAsync(keyword, cb)
     return self:_getJson("/api/v3/search/comic?limit=30&offset=0&platform=1&q_type=&q=" .. Text.urlEncode(keyword), cb)
 end
 
+--- 排行榜一页（20 部）。audience 为 male / female，nil 是全部；date_type 1 日 2 周 3 月 4 总。
+---@param date_type string
+---@param audience string|nil
+---@param offset integer
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:rankAsync(date_type, audience, offset, cb)
+    local path = "/api/v3/ranks?limit=20&type=1&platform=1&offset=" .. offset .. "&date_type=" .. date_type
+    if audience then path = path .. "&audience_type=" .. audience end
+    return self:_getJson(path, cb)
+end
+
 --- 云端浏览记录（需登录）。browse 为 null 表示从未读过。
 ---@param stable_id string
 ---@param cb fun(wire: table|nil, err: string|nil)

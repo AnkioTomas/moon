@@ -10,6 +10,7 @@ VIP 章未购买时打开失败。
 --]]
 
 require("l10n").apply()
+local Browse = require("source.browse")
 local Client = require("source.qidian.client")
 local Mapper = require("source.qidian.mapper")
 local Shelf = require("source.shelf")
@@ -216,6 +217,43 @@ function Source:searchAsync(keyword, cb)
             return
         end
         cb({ data = Mapper.search(data) })
+    end)
+end
+
+local RANKS = {
+    { key = "yuepiao", title = _("月票榜") },
+    { key = "hotsales", title = _("畅销榜") },
+    { key = "readindex", title = _("阅读指数榜") },
+    { key = "newfans", title = _("新人榜") },
+    { key = "update", title = _("更新榜") },
+    { key = "newbook", title = _("新书榜") },
+    { key = "newauthor", title = _("新作者榜") },
+}
+local CATS = {
+    { id = "-1", title = _("全站") }, { id = "21", title = _("玄幻") }, { id = "1", title = _("奇幻") },
+    { id = "2", title = _("武侠") }, { id = "22", title = _("仙侠") }, { id = "4", title = _("都市") },
+    { id = "15", title = _("现实") }, { id = "6", title = _("军事") }, { id = "5", title = _("历史") },
+    { id = "7", title = _("游戏") }, { id = "8", title = _("体育") }, { id = "9", title = _("科幻") },
+    { id = "10", title = _("悬疑灵异") }, { id = "20109", title = _("诸天无限") }, { id = "12", title = _("轻小说") },
+}
+
+--- 书城浏览：榜单 × 分类两行 chip，节点是「榜单键:分类号」，缺省月票榜全站。榜单页只有一页（20 本）。
+---@param opts { node?: string, limit?: integer }
+---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:browseAsync(opts, cb)
+    local key, cat = (opts.node or RANKS[1].key .. ":-1"):match("^(%w+):(-?%d+)$")
+    local ranks, cats = {}, {}
+    for _idx, rank in ipairs(RANKS) do ranks[#ranks + 1] = { id = rank.key .. ":" .. cat, title = rank.title } end
+    for _idx, row in ipairs(CATS) do cats[#cats + 1] = { id = key .. ":" .. row.id, title = row.title } end
+    local node = key .. ":" .. cat
+    local groups = { Browse.group(ranks, node), Browse.group(cats, node) }
+    return Client.rankAsync("/rank/" .. key .. "/" .. (cat == "-1" and "" or "catid" .. cat .. "/"), function(data, err)
+        if not data then
+            cb(nil, err)
+            return
+        end
+        cb({ data = Mapper.rank(data), groups = groups })
     end)
 end
 
