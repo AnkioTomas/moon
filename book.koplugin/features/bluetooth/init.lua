@@ -72,11 +72,20 @@ function Bluetooth.isConnected(st, address)
     return false
 end
 
+--- 设备自带的名字；没有为 nil。必须 rawget：JSON 解出的对象带元表，缺 name 键时
+--- 会顺着 __index 取到同名方法（一个函数），而不是 nil。
+---@param dev BookBluetoothDevice
+---@return string|nil
+local function ownName(dev)
+    local name = rawget(dev, "name")
+    return type(name) == "string" and name ~= "" and name or nil
+end
+
 --- 设备显示名：没名字用地址。
 ---@param dev BookBluetoothDevice
 ---@return string
 function Bluetooth.name(dev)
-    return (dev.name and dev.name ~= "") and dev.name or dev.address
+    return ownName(dev) or dev.address
 end
 
 --- GET 接口。守护进程回 ok=false 时把它的 error 当错误。
@@ -245,7 +254,8 @@ end
 function Bluetooth.pair(dev, cb)
     local handle = { inner = nil }
     local path = "/pair?addr=" .. Text.urlEncode(dev.address) .. "&protocol=" .. Text.urlEncode(dev.protocol or "ble")
-    if dev.name and dev.name ~= "" then path = path .. "&name=" .. Text.urlEncode(dev.name) end
+    local name = ownName(dev)
+    if name then path = path .. "&name=" .. Text.urlEncode(name) end
     local job = get(path, function(_data, err)
         if err then return cb(false, err) end
         handle.inner = poll("/pair-status", MAX_STEPS, function(data, poll_err, last)
@@ -266,7 +276,7 @@ function Bluetooth.pair(dev, cb)
     return handle
 end
 
---- 顶栏读数：还没读过（没装就不会读）不显示；连上一台显示名字，多台显示台数。
+--- 顶栏读数：还没读过（没装就不会读）不显示；连上一台显示名字（没名字只显示图标），多台显示台数。
 ---@return string|nil text
 ---@return string|nil icon
 function Bluetooth.topbar()
@@ -276,7 +286,8 @@ function Bluetooth.topbar()
     if #conns == 0 then return nil, "bluetooth" end
     if #conns > 1 then return tostring(#conns), "bluetooth_connected" end
     -- 顶栏只留前 4 个字（按 UTF-8 字符数）
-    local name = Bluetooth.name(conns[1])
+    local name = ownName(conns[1])
+    if not name then return nil, "bluetooth_connected" end
     return name:match("^" .. ("[%z\1-\127\194-\244][\128-\191]*"):rep(4)) or name, "bluetooth_connected"
 end
 

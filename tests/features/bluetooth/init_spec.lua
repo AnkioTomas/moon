@@ -89,6 +89,9 @@ do
     Assert.is_nil(text)
     Assert.eq(icon, "bluetooth")
     Assert.eq(Bluetooth.name(Bluetooth.current().devices[2]), "CC:DD")
+    -- 真机 JSON 对象带元表，缺 name 键时 __index 会给出同名函数
+    local dev = setmetatable({ address = "EE:FF" }, { __index = { name = function() end } })
+    Assert.eq(Bluetooth.name(dev), "EE:FF")
 
     routes["/status"] = ON_ONE
     Bluetooth.refresh()
@@ -103,6 +106,14 @@ do
     Bluetooth.refresh()
     Stubs.flush()
     Assert.eq((Bluetooth.topbar()), "小米蓝牙", "按字符而不是字节截断")
+
+    routes["/status"] = '{"ok":true,"daemon_running":true,"devices":[],'
+        .. '"connections":[{"address":"EE:FF","protocol":"ble"}]}'
+    Bluetooth.refresh()
+    Stubs.flush()
+    text, icon = Bluetooth.topbar()
+    Assert.is_nil(text, "没名字顶栏不显示文字")
+    Assert.eq(icon, "bluetooth_connected")
 
     routes["/status"] = ON_TWO
     Bluetooth.refresh()
