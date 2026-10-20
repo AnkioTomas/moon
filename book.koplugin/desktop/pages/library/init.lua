@@ -24,6 +24,7 @@ local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -463,73 +464,107 @@ local function tabStrip(w, active, on_tab)
     }
 end
 
---- 一行 chip 的高度；书城每个分组占一行。
----@return number
-function Library.chipRowHeight()
-    return Button.heightOf("small") + Theme.px(Theme.current().space.sm)
-end
+local MAX_CHIP_ROWS = 2
 
---- 分组 chip 行：选中项实心；一行放不下时只留放得下的前几个（选中项必在其中）+「更多」，点开列出全部。
+--- chip 分组排成至多两行（靠左）：分组依次接在当前行后；放不下就换行，
+--- 最后一行放不下的分组折成「当前项 ▾」下拉（点开列出全部），并给后面分组的下拉留出位置。
 ---@param w number
----@param group { title: string|nil, chips: { id: string, title: string }[], active: string|nil }
----@param on_pick fun(id: string)
----@return table
-local function chipRow(w, group, on_pick)
+---@param groups { title: string|nil, chips: { id: string, title: string }[], active: string|nil }[]
+---@param on_pick fun(id: string)|nil
+---@return table[][] rows 每行是 { widget, gap_before }[]
+local function chipLayout(w, groups, on_pick)
     local t = Theme.current()
     local pad, gap = Theme.px(t.space.md), Theme.px(t.space.sm)
-    local chips = group.chips
-    local widgets, total = {}, 0
-    for i, chip in ipairs(chips) do
-        widgets[i] = Button:new{
-            text = chip.title, size = "small", variant = chip.id == group.active and "primary" or "ghost",
-            callback = function() on_pick(chip.id) end,
-        }
-        total = total + widgets[i]:getSize().w + (i > 1 and gap or 0)
-    end
     local avail = w - pad * 2
-    local shown = widgets
-    local more
-    if total > avail then
-        local more_btn
-        more_btn = Button:new{
-            text = _("更多"), icon = "arrow_drop_down", trailing = true, size = "small",
+    local built = {}
+    for gi, group in ipairs(groups) do
+        local g = { chips = {}, full = 0 }
+        for i, chip in ipairs(group.chips) do
+            g.chips[i] = Button:new{
+                text = chip.title, size = "small", variant = chip.id == group.active and "primary" or "ghost",
+                callback = function() on_pick(chip.id) end,
+            }
+            g.full = g.full + g.chips[i]:getSize().w + (i > 1 and gap or 0)
+        end
+        local active_title = _("更多")
+        for _idx, chip in ipairs(group.chips) do
+            if chip.id == group.active then active_title = chip.title end
+        end
+        local dropdown
+        dropdown = Button:new{
+            text = active_title, icon = "arrow_drop_down", trailing = true, size = "small", variant = "ghost",
             callback = function()
                 local items = {}
-                for i, chip in ipairs(chips) do
+                for i, chip in ipairs(group.chips) do
                     items[i] = { text = chip.title, checked = chip.id == group.active, callback = function() on_pick(chip.id) end }
                 end
                 require("ui.themes.widgets.list"):new{
-                    centered = true, anchor = more_btn.dimen, inner_width = Theme.px(160), items = items,
+                    centered = true, anchor = dropdown.dimen, inner_width = Theme.px(160), items = items,
                 }:show()
             end,
         }
-        more = more_btn
-        local room, fit = avail - more_btn:getSize().w, 0
-        local used = 0
-        for i, widget in ipairs(widgets) do
-            used = used + widget:getSize().w + gap
-            if used > room then break end
-            fit = i
+        g.dropdown = dropdown
+        built[gi] = g
+    end
+
+    local sep = gap * 2
+    local rows = { {} }
+    local used = 0
+    local function fits(gi, from)
+        local need = from + (from > 0 and sep or 0) + built[gi].full
+        if #rows == MAX_CHIP_ROWS then
+            for k = gi + 1, #built do need = need + sep + built[k].dropdown:getSize().w end
         end
-        shown = {}
-        for i = 1, fit do shown[i] = widgets[i] end
-        for i, chip in ipairs(chips) do
-            if chip.id == group.active and i > fit then
-                if fit == 0 then fit = 1 end
-                shown[fit] = widgets[i]
-            end
+        return need <= avail
+    end
+    for gi, g in ipairs(built) do
+        local items
+        if fits(gi, used) then
+            items = g.chips
+        elseif used > 0 and #rows < MAX_CHIP_ROWS then
+            rows[#rows + 1] = {}
+            used = 0
+            items = fits(gi, 0) and g.chips or { g.dropdown }
+        else
+            items = { g.dropdown }
+        end
+        local row = rows[#rows]
+        for i, widget in ipairs(items) do
+            local before = i > 1 and gap or (used > 0 and sep or 0)
+            row[#row + 1] = { widget, before }
+            used = used + before + widget:getSize().w
         end
     end
-    local row = HorizontalGroup:new{ align = "center", HorizontalSpan:new{ width = pad } }
-    for i, widget in ipairs(shown) do
-        if i > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
-        row[#row + 1] = widget
+    return rows
+end
+
+--- chip 区总高度（行数随宽度变化，书城据此算网格容量）。
+---@param w number
+---@param groups table[]
+---@return number
+function Library.chipHeight(w, groups)
+    if #groups == 0 then return 0 end
+    local row_h = Button.heightOf("small") + Theme.px(Theme.current().space.sm)
+    return #chipLayout(w, groups) * row_h
+end
+
+---@param w number
+---@param groups table[]
+---@param on_pick fun(id: string)
+---@return table[] 每行一个靠左容器
+local function chipRows(w, groups, on_pick)
+    local pad = Theme.px(Theme.current().space.md)
+    local row_h = Button.heightOf("small") + Theme.px(Theme.current().space.sm)
+    local out = {}
+    for _idx, items in ipairs(chipLayout(w, groups, on_pick)) do
+        local row = HorizontalGroup:new{ align = "center", HorizontalSpan:new{ width = pad } }
+        for _idx2, item in ipairs(items) do
+            if item[2] > 0 then row[#row + 1] = HorizontalSpan:new{ width = item[2] } end
+            row[#row + 1] = item[1]
+        end
+        out[#out + 1] = LeftContainer:new{ dimen = Geom:new{ w = w, h = row_h }, row }
     end
-    if more then
-        row[#row + 1] = HorizontalSpan:new{ width = gap }
-        row[#row + 1] = more
-    end
-    return CenterContainer:new{ dimen = Geom:new{ w = w, h = Library.chipRowHeight() }, row }
+    return out
 end
 
 --- 构建书城页（网格 + 上级/搜索 + 总数）；清空搜索框再搜即退出搜索。
@@ -541,7 +576,7 @@ function Library:build(ctx, state, opts)
     local t = Theme.current()
     local w, h = ctx.width, ctx.height
     local groups = opts.groups or {}
-    local m = Library.gridMetrics(w, h, #groups * Library.chipRowHeight())
+    local m = Library.gridMetrics(w, h, Library.chipHeight(w, groups))
     local left = {}
     if opts.on_back then
         left[#left + 1] = Button:new{ icon = "arrow_back", text = _("上级"), size = "small", callback = opts.on_back }
@@ -564,7 +599,7 @@ function Library:build(ctx, state, opts)
         body = emptyBody(w, m.grid_h, not books and _("加载中…") or state.err or opts.empty_text or _("没有书籍"))
     end
     local head = { toolbar(w, m.top_h, left, { total }) }
-    for _idx, group in ipairs(groups) do head[#head + 1] = chipRow(w, group, opts.on_chip) end
+    for _idx, row in ipairs(chipRows(w, groups, opts.on_chip)) do head[#head + 1] = row end
     return frame(w, h, head, body, m.grid_h, {
         page = opts.page or 1,
         pages = opts.pages or 1,
