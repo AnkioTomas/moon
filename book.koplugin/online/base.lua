@@ -212,14 +212,14 @@ function Online:ensureImage(cb)
     end
     if not require("ui/network/manager"):isConnected() then
         local path = self:imagePath()
-        cb(path, path and nil or "offline")
+        if path then cb(path) else cb(nil, "offline") end
         return
     end
     local function on(_data, err)
         if self:imageReady() or err then
             self:unwatch(on)
             local path = self:imagePath()
-            cb(path, path and nil or (err or "image"))
+            if path then cb(path) else cb(nil, err or "image") end
         end
     end
     self:watch(on)
