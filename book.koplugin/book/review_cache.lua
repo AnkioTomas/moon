@@ -6,7 +6,8 @@ kind = "hot"（key 为空串，payload 是热点数组）或 "page"（key = rang
 不缓存图片。有内容的行存 TTL（180 天）；空结果（多半是网络抖动 / 接口偶发）只存 EMPTY_TTL 就重来。
 过期行读到时当没有，下次写入覆盖。
 
-`through`（内部）是读写收口：命中直接回（不看网络），没命中且未联网立即失败，联网才请求并落库。
+预缓存（identity.prefetch）的评论页只存前 PREFETCH_ITEMS 条并标 partial：离线直接用，联网读到就当没有、重拉完整页。
+`through`（内部）是读写收口：命中直接回（不看网络；离线时热点只留首页已缓存的句子），没命中且未联网立即失败，联网才请求并落库。
 依附书身份：改名 / 撕墓碑由 books_db 经 IDENTITY_MODULES 调 moveIdentity / removeIdentity。
 
 @module koplugin.book.book.review_cache
@@ -20,6 +21,9 @@ local ReviewCache = {}
 
 local TTL = 180 * 24 * 3600
 local EMPTY_TTL = 300
+
+--- 预缓存每句只留前 PREFETCH_ITEMS 条评论。
+ReviewCache.PREFETCH_ITEMS = 10
 
 DB.schema("review_cache", function()
     return DB.exec([[
@@ -57,6 +61,11 @@ end
 ---@param key string
 ---@param value table
 local function write(identity, kind, key, value)
+    if identity.prefetch and kind == "page" and #value.items > ReviewCache.PREFETCH_ITEMS then
+        local trimmed = { total = value.total, max_idx = value.max_idx, more = false, partial = true, items = {} }
+        for i = 1, ReviewCache.PREFETCH_ITEMS do trimmed.items[i] = value.items[i] end
+        value = trimmed
+    end
     local count = value.items and #value.items or #value
     DB.exec(
         [[INSERT OR REPLACE INTO review_cache (source_id, stable_id, chapter_idx, kind, key, payload, expire)
@@ -102,7 +111,9 @@ local function through(identity, kind, key, fetch, cb)
         if job then job.cancel() end
     end }
     local hit = read(identity, kind, key)
-    local online = hit ~= nil or require("ui/network/manager"):isConnected()
+    local connected = require("ui/network/manager"):isConnected()
+    if hit and hit.partial and connected then hit = nil end
+    local online = hit ~= nil or connected
     if not online then
         require("ui/uimanager"):nextTick(function()
             if not cancelled then cb(nil, _("未联网，无法加载段评")) end
@@ -123,9 +134,19 @@ local function through(identity, kind, key, fetch, cb)
     return handle
 end
 
---- 热点：本章热点缓存或请求。
+--- 热点：本章热点缓存或请求。离线时只留首页评论已缓存的句子（预缓存只拉最热几句，
+--- 其余点开只会报未联网，不如不画标记）。
 function ReviewCache.hotspotsAsync(identity, fetch, cb)
-    return through(identity, "hot", "", fetch, cb)
+    return through(identity, "hot", "", fetch, function(list, err)
+        if list and not require("ui/network/manager"):isConnected() then
+            local kept = {}
+            for _idx, spot in ipairs(list) do
+                if ReviewCache.page(identity, spot.range, 0) then kept[#kept + 1] = spot end
+            end
+            list = kept
+        end
+        cb(list, err)
+    end)
 end
 
 --- 评论页：缓存或请求。
