@@ -340,6 +340,15 @@ function Catalog.listBooks(source_id, opts)
         where = where .. " AND b.series=?"
         args[#args + 1] = opts.series
     end
+    if type(opts.dir) == "string" and opts.dir ~= "" then
+        -- 只取该目录下直接放的书；substr 按字符计，前缀长度也要按字符数。
+        local prefix = opts.dir .. "/"
+        local chars = select(2, prefix:gsub("[^\128-\191]", ""))
+        where = where .. " AND substr(b.path, 1, ?)=? AND instr(substr(b.path, ?), '/')=0"
+        args[#args + 1] = chars
+        args[#args + 1] = prefix
+        args[#args + 1] = chars + 1
+    end
     if opts.unauthor then
         where = where .. " AND (b.authors IS NULL OR b.authors='')"
     elseif opts.author and opts.author ~= "" then
@@ -459,6 +468,83 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             return
         end
         cb(Catalog.toList(rows, count, type(scope) == "string" and scope or nil))
+    end)
+end
+
+local FOLDER_COVERS = { "cover.jpg", "cover.jpeg", "cover.png" }
+
+--- 文件夹约定封面：目录里的 cover.jpg / cover.png。
+---@param dir string
+---@return string|nil
+local function folderCover(dir)
+    local lfs = require("libs/libkoreader-lfs")
+    for _idx, name in ipairs(FOLDER_COVERS) do
+        local path = dir .. "/" .. name
+        if lfs.attributes(path, "mode") == "file" then return path end
+    end
+end
+
+--- 本地书库的文件夹视图一页：先列 dir 下的子文件夹（按名称），再列直接放在 dir 里的书。
+--- 子文件夹以 { is_folder = true, title, dir, cover } 条目返回，cover 取目录里的 cover.jpg / cover.png。
+---@param source_id string
+---@param opts { dir: string, page: number|nil, page_size: number|nil, sort: string|nil }
+---@param cb fun(data: BookListResult|nil, err: string|nil)
+---@return { cancel: fun() }
+function Catalog.folderPageAsync(source_id, opts, cb)
+    local page = math.max(1, tonumber(opts.page) or 1)
+    local page_size = math.max(1, tonumber(opts.page_size) or 24)
+    local dir = opts.dir
+    return deferScoped(source_id, cb, function(scope)
+        local DB = require("utils.db")
+        local where, args = DB.sourceClause("source_id", scope)
+        local prefix = dir .. "/"
+        -- 范围比较取出前缀下的全部路径（\255 大于任何 UTF-8 字节）。
+        args[#args + 1] = prefix
+        args[#args + 1] = prefix .. "\255"
+        local result, nrows = DB.query(
+            "SELECT path FROM books WHERE " .. where
+                .. " AND source_id='local' AND deleted=0 AND hidden=0 AND path>=? AND path<?;",
+            unpack(args)
+        )
+        local counts, names = {}, {}
+        for i = 1, nrows or 0 do
+            local name = tostring(result[1][i] or ""):sub(#prefix + 1):match("^([^/]+)/")
+            if name then
+                if not counts[name] then names[#names + 1] = name end
+                counts[name] = (counts[name] or 0) + 1
+            end
+        end
+        table.sort(names, function(a, b)
+            local la, lb = a:lower(), b:lower()
+            if la ~= lb then return la < lb end
+            return a < b
+        end)
+        local start = (page - 1) * page_size
+        local entries = {}
+        for i = start + 1, math.min(#names, start + page_size) do
+            local full = prefix .. names[i]
+            entries[#entries + 1] = {
+                is_folder = true, title = names[i], dir = full, cover = folderCover(full), count = counts[names[i]],
+            }
+        end
+        local need = page_size - #entries
+        local rows, total, err = Catalog.listBooks(scope, {
+            dir = dir,
+            source_id = "local",
+            sort = opts.sort,
+            limit = need > 0 and need or 1,
+            offset = need > 0 and math.max(0, start - #names) or 0,
+        })
+        if err then
+            cb(nil, _("加载失败"))
+            return
+        end
+        if need > 0 then
+            for _idx, book in ipairs(Catalog.toList(rows, total, type(scope) == "string" and scope or nil).data) do
+                entries[#entries + 1] = book
+            end
+        end
+        cb(Catalog.listResult(entries, #names + (tonumber(total) or 0)))
     end)
 end
 

@@ -83,6 +83,40 @@ local function choiceRow(desktop, key, icon, title, subtitle, items)
     end
 end
 
+--- 书库显示哪些分组页签：多选弹窗，勾选即存，书籍页签恒显示。
+---@param desktop table
+---@return fun(iw: number): table
+local function tabsRow(desktop)
+    return function(iw)
+        local conf = MoonSettings.get("ui")
+        return Row.widget({
+            width = iw, kind = "nav", icon = "tab", title = _("书库页签"),
+            subtitle = _("选择书库顶部显示哪些分组；文件夹页签仅本地书库有"),
+            status = tostring(#conf.library_tabs), status_on = true,
+            callback = function()
+                local chosen, items = {}, {}
+                for _idx, id in ipairs(conf.library_tabs) do chosen[id] = true end
+                for _idx, tab in ipairs(require("desktop.pages.library").tabOptions()) do
+                    items[#items + 1] = { text = tab.text, value = tab.id,
+                        checked = tab.id == "books" or chosen[tab.id] == true, enabled = tab.id ~= "books" }
+                end
+                require("ui.themes.widgets.list"):new{
+                    title = _("书库页签"), multi = true, items = items, centered = true,
+                    close_callback = function()
+                        local ids = {}
+                        for _idx, item in ipairs(items) do
+                            if item.checked then ids[#ids + 1] = item.value end
+                        end
+                        conf.library_tabs = ids
+                        MoonSettings.save("ui", conf)
+                        desktop:updateView()
+                    end,
+                }:show()
+            end,
+        })
+    end
+end
+
 ---@param desktop table
 ---@return table
 function Library:rows(desktop)
@@ -110,6 +144,7 @@ function Library:rows(desktop)
             _("Kindle：状态叠在封面上；Kobo：封面干净，下载状态、进度和更多收在封面下方"), STYLES),
         toggleRow(desktop, "library_title", "title", _("显示名称"), _("封面下方显示书名")),
         toggleRow(desktop, "library_author", "person", _("显示作者"), _("书名下方显示作者")),
+        tabsRow(desktop),
         toggleRow(desktop, "library_random", "casino", _("显示随机一本"),
             _("书库工具栏显示骰子，优先从未读的书里随机抽一本")),
         choiceRow(desktop, "random_scope", "casino", _("随机范围"),
