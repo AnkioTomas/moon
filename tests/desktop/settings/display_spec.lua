@@ -48,7 +48,7 @@ package.preload["ui/uimanager"] = function()
     }
 end
 package.preload["utils.settings"] = function()
-    return { get = function() return { mesh_mask = true } end }
+    return { get = function() return { mesh_mask = true, swipe_dismiss = "off" } end, save = function() end }
 end
 _G.G_reader_settings = {
     isTrue = function() return false end,
@@ -65,7 +65,9 @@ Assert.eq(rows[2](600).title, "界面字体")
 Assert.eq(rows[3](600).title, "界面缩放")
 Assert.eq(rows[4](600).title, "背景遮罩")
 Assert.is_true(rows[4](600).toggle)
-Assert.len(rows, 4, "夜间与亮度不在外观分节")
+Assert.eq(rows[5](600).title, "弹窗关闭手势")
+Assert.eq(rows[5](600).status, "关闭")
+Assert.len(rows, 5, "夜间与亮度不在外观分节")
 Assert.eq(screen[1](600).title, "屏幕刷新")
 Assert.eq(screen[1](600).status, "每 6 页")
 Assert.eq(screen[2](600).title, "彩色屏幕支持")

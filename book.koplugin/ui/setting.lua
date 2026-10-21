@@ -1,5 +1,5 @@
 --[[--
-界面显示的配置声明（settings/ui.lua，经 `utils.settings.get("ui")` 读写）：主题、缩放、字体、封面网格、遮罩、图书馆封面显示（library_*）。
+界面显示的配置声明（settings/ui.lua，经 `utils.settings.get("ui")` 读写）：主题、缩放、字体、封面网格、遮罩、弹窗关闭手势、图书馆封面显示（library_*）。
 
 @module koplugin.book.ui.setting
 --]]
@@ -11,6 +11,7 @@ return {
         ui_font_name = "",
         grid_max_cols = 4,
         mesh_mask = true,
+        swipe_dismiss = "down",
         library_title = true,
         library_author = false,
         library_style = "kindle",
