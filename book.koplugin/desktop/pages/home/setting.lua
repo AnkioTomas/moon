@@ -14,6 +14,9 @@ return {
         -- 第一本 = 最近读的那本；列表默认留给「当前阅读」大卡片，堆叠卡片默认放中间。
         home_recent_list_show_first = false,
         home_recent_cards_show_first = true,
+        -- 一言 / 书摘引言风格：plain / center / bar / mark。
+        home_hitokoto_style = "plain",
+        home_excerpt_style = "plain",
         -- 书架：行数 1–4，0 = 自动按分配高度；每行 3–8 本。
         home_shelf_rows = 1,
         home_shelf_cols = 4,
