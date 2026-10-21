@@ -96,7 +96,7 @@ local function chapterReady(path)
     local head = f and f:read(64)
     if f then f:close() end
     -- nil 表示读文件失败，同样按未就绪处理。
-    local ready = head ~= nil and head:find("^%s*<") ~= nil and not head:find(TEMP_MARK, 1, true)
+    local ready = head ~= nil and Text.stripBom(head):find("^%s*<") ~= nil and not head:find(TEMP_MARK, 1, true)
         and Text.hasRemoteImageSrcInFile(path) == false
     cacheReady(path, { signature = signature, ready = ready })
     return ready
