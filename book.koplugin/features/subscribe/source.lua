@@ -123,7 +123,8 @@ function Source:loadTocAsync(identity, cb, force)
     for i, item in ipairs(items) do
         toc[i] = { idx = i, uid = item.guid, title = item.title ~= "" and item.title or _("无标题"), link = item.link }
     end
-    local old = Toc.read(M.ID, identity.stable_id)
+    -- 旧目录是章节文件 / 注解现行章号的基线，过了 TTL 也得用：丢了基线就不挪，章号错位后划线串到别的文章上。
+    local old = Toc.read(M.ID, identity.stable_id, true)
     local same = old and #old == #toc
     for i = 1, same and #toc or 0 do
         if old[i].uid ~= toc[i].uid then same = false break end
@@ -181,7 +182,7 @@ function Source:onEvent(event, payload)
     if event ~= "chapter_changed" then return end
     local identity = payload and payload.identity
     local idx = identity and tonumber(identity.chapter_idx)
-    local item = idx and (require("source.toc").read(M.ID, identity.stable_id) or {})[idx]
+    local item = idx and (require("source.toc").read(M.ID, identity.stable_id, true) or {})[idx]
     if item then SubDB.markRead(tonumber(identity.stable_id), item.uid, os.time()) end
 end
 

@@ -16,7 +16,7 @@ package.loaded["features.subscribe.db"] = {
 }
 local tocs, dropped = {}, {}
 package.loaded["source.toc"] = {
-    read = function(_s, id) return tocs[id] end,
+    read = function(_s, id, stale) Assert.is_true(stale, "章号基线必须不看 TTL"); return tocs[id] end,
     put = function(_s, id, list) tocs[id] = list; return true end,
 }
 package.loaded["book.chapters_db"] = { deleteUnder = function(dir) dropped[#dropped + 1] = dir end }
