@@ -16,10 +16,9 @@ local ReaderExit = {}
 function ReaderExit.closeToDesktop(ui)
     UIManager:nextTick(require("ui.guard").wrap("close to desktop", function()
         if ui and ui.onClose then ui:onClose() end
-        local FileManager = require("apps/filemanager/filemanager")
         -- 打开书时 ReaderUI 会关掉 FileManager；这里先重建，否则关闭文档后窗口栈为空直接退出。
-        if not FileManager.instance then FileManager:showFiles() end
-        require("desktop").open(FileManager.instance.book)
+        local Desktop = require("desktop")
+        Desktop.open(Desktop.ensureFileManager().book)
     end))
 end
 

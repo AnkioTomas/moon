@@ -563,7 +563,6 @@ function Desktop:onClose()
     self:destroy()
     logger.flush()
     UIManager:close(self, "ui")
-    Desktop.restoreFileList(self.plugin)
     return true
 end
 
@@ -580,9 +579,7 @@ end
 function Desktop.open(plugin)
     if plugin.ui and plugin.ui.document then
         plugin.ui:onClose()
-        local FileManager = require("apps/filemanager/filemanager")
-        if not FileManager.instance then FileManager:showFiles() end
-        Desktop.open(FileManager.instance.book)
+        Desktop.open(Desktop.ensureFileManager().book)
         return
     end
 
@@ -617,29 +614,32 @@ end
 --- 本进程是否自动开桌面：nil 还没见过 FM / true 待开 / false 不再自动开
 local want_auto_open = nil
 
---- 启动即开桌面时跳过 FM 的首次列目录：桌面用不到这份列表，而 FM 会列整个书库目录、
---- 渲染条目（CoverBrowser、平铺视图还会递归），慢存储冷缓存下要几分钟，期间界面白屏无响应。
---- 离开桌面时由 restoreFileList 补列。
----@param plugin BookPlugin
-function Desktop.deferFileList(plugin)
-    if want_auto_open ~= nil or plugin.ui.document or not require("menu").openOnStart() then return end
-    local FileChooser = require("ui/widget/filechooser")
-    local original = FileChooser.genItemTableFromPath
-    FileChooser.genItemTableFromPath = function(chooser, path)
-        FileChooser.genItemTableFromPath = original
-        plugin.file_list_deferred = true
-        return chooser:genItemTable({}, {}, path)
-    end
+--- FM 在桌面之下停留的空目录（KOReader 数据目录下的 ko-empty，不存在则创建）。
+---@return string
+local function emptyDir()
+    local path = require("datastorage"):getDataDir() .. "/ko-empty"
+    require("libs/libkoreader-lfs").mkdir(path)
+    return path
 end
 
---- 补列被 deferFileList 跳过的 FM 目录；没跳过则什么也不做。
+--- 启动即开桌面时 FM 改列空目录：FM 在 init 里同步列出整个书库目录，
+--- 慢存储冷缓存下要几分钟，期间界面白屏无响应。必须在 FM setupLayout 之前调用（插件 init 里）。
 ---@param plugin BookPlugin
-function Desktop.restoreFileList(plugin)
-    if not plugin.file_list_deferred then return end
-    plugin.file_list_deferred = nil
-    local started_at = Perf.now()
-    plugin.ui.file_chooser:refreshPath()
-    Perf.slow("fm.refreshPath", started_at)
+function Desktop.startInDataDir(plugin)
+    if plugin.ui.document or want_auto_open ~= nil or not require("menu").openOnStart() then return end
+    plugin.ui.root_path = emptyDir()
+end
+
+--- 阅读中回桌面：重建 FM 同样只列空目录，并还原 lastdir（不改用户的原生起始目录）。
+---@return table FileManager 实例
+function Desktop.ensureFileManager()
+    local FileManager = require("apps/filemanager/filemanager")
+    if not FileManager.instance then
+        local lastdir = G_reader_settings:readSetting("lastdir")
+        FileManager:showFiles(emptyDir())
+        G_reader_settings:saveSetting("lastdir", lastdir)
+    end
+    return FileManager.instance
 end
 
 --- FM 显示时按启动项自动开桌面，本进程只开一次；Reader 实例忽略。
@@ -652,7 +652,6 @@ function Desktop.autoOpen(plugin)
     if not want_auto_open then return end
     want_auto_open = false
     Desktop.open(plugin)
-    if not plugin.desktop then Desktop.restoreFileList(plugin) end
 end
 
 return Desktop
