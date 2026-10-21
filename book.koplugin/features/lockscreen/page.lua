@@ -5,6 +5,7 @@
 local lfs = require("libs/libkoreader-lfs")
 local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
+local Confirm = require("ui.themes.widgets.confirm")
 local Input = require("ui.themes.widgets.input")
 local List = require("ui.themes.widgets.list")
 local Toast = require("ui.themes.widgets.toast")
@@ -21,6 +22,8 @@ local Image = require("utils.image")
 local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
+
+local ADS_URL = "https://moon.ankio.net/jailbreak/ads"
 
 ---@class BookSettingsLockscreen
 local Lockscreen = {}
@@ -158,6 +161,27 @@ function Lockscreen:rows(desktop)
             })
         end,
     }
+    if Settings.hasAds() then
+        rows[#rows + 1] = navRow{
+            icon = "info", title = _("去除锁屏广告"),
+            subtitle = _("广告版 Kindle 上锁屏壁纸不会生效，点击一键去除"),
+            callback = function()
+                Confirm:new{
+                    title = _("去除锁屏广告"),
+                    text = _("将删除本机广告缓存并关闭广告开关，完成后 Kindle 会自动重启。不影响书籍和账号。"),
+                    ok_text = _("去除并重启"),
+                    ok_callback = function()
+                        if not Settings.removeAds() then
+                            return Toast:new{ text = _("去除失败，请按教程手动操作：") .. ADS_URL, timeout = 5 }:show()
+                        end
+                        Toast:new{ text = _("广告已去除，5 秒后重启"), timeout = 5 }:show()
+                        G_reader_settings:flush()
+                        UIManager:scheduleIn(5, function() os.execute("reboot") end)
+                    end,
+                }:show()
+            end,
+        }
+    end
     if not enabled then
         return rows
     end
