@@ -24,6 +24,7 @@ local Progress = require("book.progress")
 local App = require("source.wechat.app")
 local Eink = require("source.wechat.eink")
 local logger = require("utils.log")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local WeChat = {}
@@ -279,6 +280,23 @@ local function fetchContent(r, chapter, done)
     return WChapter.fetchContentAsync(r.stable_id, chapter, done)
 end
 
+--- 用户点开的章取不到正文：进入一页临时提示文档（不当缓存，下次打开重新拉），不挡在阅读器外面。
+--- 没登录不算（要走登录流程）；预取 / 整本缓存不用它，照常失败。
+---@param r BookIdentity
+---@param chapter BookChapter
+---@param done fun(payload: ChapterContentPayload|nil, err: any)
+local function openContent(r, chapter, done)
+    return WChapter.fetchContentAsync(r.stable_id, chapter, function(payload, err)
+        if payload or not Auth.hasSession() then
+            done(payload, err)
+            return
+        end
+        local title = chapter.title or ""
+        local notice = string.format(_("这一章暂时无法加载：%s\n请稍后重试。"), tostring(err))
+        done({ title = title, html = Text.chapterHtml(title, notice), temporary = true })
+    end)
+end
+
 --- 按章打开：目录与正文都交给 source.chapter 的带 UI 流程。
 ---@param identity BookIdentity
 ---@param opts table|nil 可含 chapter_idx 指定章节
@@ -287,7 +305,7 @@ end
 function Source:openBookAsync(identity, opts, cb)
     return require("source.chapter").openWithUi(self, identity, identity.book, opts, {
         loadToc = function(r, done) return self:loadTocAsync(r, done) end,
-        fetchContent = fetchContent,
+        fetchContent = openContent,
     }, cb)
 end
 

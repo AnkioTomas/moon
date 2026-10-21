@@ -111,6 +111,10 @@ stub("source.wechat.chapter", function()
             cb(chapter_range_html, nil, chapter_range_html, "html")
             return { cancel = function() end }
         end,
+        fetchContentAsync = function(_, _, cb)
+            cb(nil, "试读")
+            return { cancel = function() end }
+        end,
     }
 end)
 stub("book.review_cache", function()
@@ -144,6 +148,7 @@ stub("source.chapter", function()
             ops.progress(1)
             ops.progress(4)
             dialog:close()
+            chapter_open.ops = ops
             cb(chapter_open.path, chapter_open.err)
             return { cancel = function() chapter_open.cancelled = true end }
         end,
@@ -455,6 +460,13 @@ do
     Assert.eq(err, "下载失败")
     Assert.eq(progress_ui.shown, 2)
     Assert.eq(progress_ui.closed, 2)
+
+    -- 用户点开的章取不到正文：给临时提示页，不是失败；预取 / 整本缓存不经这里。
+    local payload, fetch_err
+    chapter_open.ops.fetchContent(REF, { title = "第二章" }, function(p, e) payload, fetch_err = p, e end)
+    Assert.is_nil(fetch_err)
+    Assert.is_true(payload.temporary)
+    Assert.matches(payload.html, "试读")
 end
 
 -- putProgressAsync：fraction → percent（0/1 边界、四舍五入、缺进度兜底）
