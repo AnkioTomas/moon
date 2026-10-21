@@ -150,6 +150,8 @@ function Push:preflight()
             self.job = nil
             if self.cancelled then return end
             if type(reviews) ~= "table" then
+                -- 没有远端想法清单就认不回上轮已成功的想法，新想法此轮不推（否则重复）。
+                self.reviews_unknown = true
                 reviews = { reviews = {}, hasMore = 1 }
             end
             -- 只拿到一页时保留 id：误清会让 addReviewAsync 在云端重建重复想法。
@@ -303,7 +305,13 @@ end
 
 --- 串行推想法：已有 reviewId 走 edit，否则 add。
 function Push:reviews()
+    local deferred = false
     self:each(Notes.notePushCandidates(self.annotations), function(item, next)
+        if not item.wr_review_id and self.reviews_unknown then
+            deferred = true
+            next()
+            return
+        end
         if not item.wr_review_id and not self.confirmed[item] and not item.wr_review_only then
             self:finish(nil, _("远端划线未确认，不能上传想法"))
             return
@@ -338,7 +346,13 @@ function Push:reviews()
             item.wr_review_id = review_id
             next()
         end)
-    end, function() self:finish(true) end)
+    end, function()
+        if deferred then
+            self:finish(nil, _("想法列表暂不可用，稍后重试"))
+        else
+            self:finish(true)
+        end
+    end)
 end
 
 --- 推送一章注解。

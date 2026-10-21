@@ -398,3 +398,20 @@ do
     local version = Mapper.bookVersion({ book = { version = 123 } })
     Assert.eq(version, 123)
 end
+
+do -- 想法列表没拿到：本地已有的想法接回拉下来的划线，review-only 条目保留
+    local anns = {
+        { text = "a", wr_bookmark_id = "b1" },
+        { text = "c", wr_bookmark_id = "b2" },
+    }
+    local out = Notes.keepLocalReviews(anns, {
+        { text = "a", note = "想法A", wr_bookmark_id = "b1", wr_review_id = "r1" },
+        { text = "x", note = "只有想法", wr_review_id = "r2", wr_review_only = true },
+        { text = "gone", note = "无关", wr_review_id = "r3" },
+    })
+    Assert.eq(out[1].note, "想法A")
+    Assert.eq(out[1].wr_review_id, "r1")
+    Assert.is_nil(out[2].note)
+    Assert.eq(#out, 3)
+    Assert.eq(out[3].wr_review_id, "r2")
+end

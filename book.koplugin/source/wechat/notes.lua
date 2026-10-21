@@ -489,6 +489,30 @@ function Notes.toAnnotations(wire, chapter_uid, reviews, source_id, stable_id)
     return out
 end
 
+--- 想法列表没拿到时，拉回来的划线都不带想法：把本地快照里已有的想法接回去，
+--- 否则远端快照覆盖本地、想法丢失，下一轮上行还会把它当成「用户删了想法」去删云端。
+---@param annotations table[] toAnnotations 的结果（就地改）
+---@param local_items table[] 本地快照里的条目
+---@return table[]
+function Notes.keepLocalReviews(annotations, local_items)
+    local by_bookmark, known = {}, {}
+    for _idx, ann in ipairs(annotations) do
+        if ann.wr_bookmark_id then by_bookmark[tostring(ann.wr_bookmark_id)] = ann end
+        if ann.wr_review_id then known[tostring(ann.wr_review_id)] = true end
+    end
+    for _idx, old in ipairs(local_items) do
+        if type(old) == "table" and old.wr_review_id and not known[tostring(old.wr_review_id)] then
+            local ann = old.wr_bookmark_id and by_bookmark[tostring(old.wr_bookmark_id)] or nil
+            if ann then
+                ann.note, ann.wr_review_id = old.note, old.wr_review_id
+            elseif old.wr_review_only then
+                annotations[#annotations + 1] = old
+            end
+        end
+    end
+    return annotations
+end
+
 ---@param item table
 ---@return boolean
 local function hasNote(item)

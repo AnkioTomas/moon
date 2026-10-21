@@ -94,3 +94,15 @@ do -- 想法列表预检失败只跳过想法对账，不阻断划线：已有 r
     Assert.eq(item.wr_review_id, "rv1")
     Assert.is_nil(item.wr_bookmark_id)
 end
+
+do -- 想法清单拿不到：新想法不推（认不回上轮已成功的会重复），报失败留脏；划线与已有想法照常
+    local client = fakeClient({ bookmarkListAsync = { updated = {} }, myReviewsAsync = false })
+    local item = { drawer = "lighten", text = "t", note = "想法", wr_review_only = true, wr_range = "1-2" }
+    local ok, err
+    NotesPush.run(client, identity, "c1", nil, { item }, function(o, e) ok, err = o, e end)
+    Stubs.flush()
+    Assert.is_nil(ok)
+    Assert.not_nil(err)
+    Assert.is_nil(item.wr_review_id)
+    for _, name in ipairs(client.calls) do Assert.is_true(name ~= "addReviewAsync", "不得重复新增想法") end
+end

@@ -708,6 +708,16 @@ function Source:pullNotesAsync(identity, cb)
                 local annotations = Notes.toAnnotations(
                     wire, nil, reviews, identity.source_id, identity.stable_id
                 )
+                if not reviews then
+                    local local_items = {}
+                    for _idx, row in ipairs(require("book.note_db").all(identity.source_id, identity.stable_id)) do
+                        for _j, item in ipairs((require("book.note.normalize").decode(row.payload)) or {}) do
+                            item.chapter_idx = item.chapter_idx or (row.chapter_idx > 0 and row.chapter_idx or nil)
+                            local_items[#local_items + 1] = item
+                        end
+                    end
+                    Notes.keepLocalReviews(annotations, local_items)
+                end
                 cb(annotations, nil, { authoritative = Notes.reviewsComplete(reviews) })
             end)
         end)
