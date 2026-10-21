@@ -93,6 +93,53 @@ Assert.is_true(confirm:onClose())
 Assert.eq(#Kit.closed, closed)
 Assert.len(log, 2)
 
+-- 下滑关闭：默认跟随全局开关 ui.swipe_dismiss（默认 "down"），注册时装 ges_events；
+-- 实例显式 swipe_dismiss="off" 强制关（不受全局开关影响）；开启后面板内外下滑都触发 dismiss 语义，
+-- 非下滑方向只吞事件不关窗；dismissable=false 时只吞事件；swipe_dismiss="up" 换成上滑关闭。
+confirm = Confirm:new{ text = "x", cancel_callback = function() end }
+Assert.is_true(confirm.ges_events.SwipeModal ~= nil, "全局开关默认 down，未覆盖的实例跟随生效")
+confirm = Confirm:new{ text = "x", swipe_dismiss = "off", cancel_callback = function() end }
+Assert.is_nil(confirm.ges_events.SwipeModal, "实例显式 swipe_dismiss=\"off\" 优先于全局开关")
+log = {}
+confirm = Confirm:new{ text = "x", swipe_dismiss = "down", cancel_callback = function() log[#log + 1] = "cancel" end }
+paint(confirm)
+closed = #Kit.closed
+Assert.is_true(confirm:onSwipeModal(nil, { direction = "east" }), "非下滑方向只吞事件")
+Assert.eq(#Kit.closed, closed)
+Assert.len(log, 0)
+Assert.is_true(confirm:onSwipeModal(nil, { direction = "north" }), "swipe_dismiss=down 时上滑不关")
+Assert.eq(#Kit.closed, closed)
+Assert.len(log, 0)
+Assert.is_true(confirm:onSwipeModal(nil, { direction = "south" }))
+Assert.eq(log[1], "cancel", "下滑走取消语义，和点面板外一致")
+Assert.eq(Kit.closed[#Kit.closed], confirm)
+local locked_swipe = Confirm:new{ text = "x", swipe_dismiss = "down", dismissable = false,
+    cancel_callback = function() log[#log + 1] = "no" end }
+closed = #Kit.closed
+Assert.is_true(locked_swipe:onSwipeModal(nil, { direction = "south" }))
+Assert.eq(#Kit.closed, closed, "dismissable=false 时下滑只吞事件")
+Assert.len(log, 1)
+
+-- swipe_dismiss="up"：换成上滑关闭，下滑这时只吞事件。
+log = {}
+local up_swipe = Confirm:new{ text = "x", swipe_dismiss = "up",
+    cancel_callback = function() log[#log + 1] = "cancel" end }
+closed = #Kit.closed
+Assert.is_true(up_swipe:onSwipeModal(nil, { direction = "south" }), "swipe_dismiss=up 时下滑不关")
+Assert.eq(#Kit.closed, closed)
+Assert.len(log, 0)
+Assert.is_true(up_swipe:onSwipeModal(nil, { direction = "north" }))
+Assert.eq(log[1], "cancel")
+Assert.eq(Kit.closed[#Kit.closed], up_swipe)
+
+-- 全局开关关闭：没显式设过 swipe_dismiss 的实例跟着不生效；显式设 "up" 的实例仍生效（实例覆盖优先于全局开关）。
+Kit.display.swipe_dismiss = "off"
+confirm = Confirm:new{ text = "x" }
+Assert.is_nil(confirm.ges_events.SwipeModal, "全局开关关闭后未覆盖的实例跟随不生效")
+confirm = Confirm:new{ text = "x", swipe_dismiss = "up" }
+Assert.is_true(confirm.ges_events.SwipeModal ~= nil, "实例显式开启优先于全局开关")
+Kit.display.swipe_dismiss = "down"
+
 -- 提示：onShow 按 timeout 定时；到点关窗，关窗时撤销定时。
 local toast = Toast:new{ text = "已保存", timeout = 2 }
 toast:onShow()

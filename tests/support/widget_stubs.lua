@@ -251,7 +251,7 @@ end
 ---@param theme string|nil 主题 id，缺省 paper
 function Kit.install(theme)
     -- ui_scale = 100 且 scaleBySize 恒等：逻辑像素 = 物理像素，断言可以直接写令牌值。
-    Kit.display = { ui_theme = theme or "paper", ui_scale = 100, mesh_mask = true, library_tabs = { "books", "author", "series", "category", "folder" } }
+    Kit.display = { ui_theme = theme or "paper", ui_scale = 100, mesh_mask = true, swipe_dismiss = "down", library_tabs = { "books", "author", "series", "category", "folder" } }
     -- 主题边框和 FrameContainer 一样读 KOReader 的「界面抗锯齿」；离线没有这个全局时按默认开。
     _G.G_reader_settings = _G.G_reader_settings or { nilOrTrue = function() return true end }
     Kit.shown, Kit.closed, Kit.dirty, Kit.scheduled, Kit.unscheduled = {}, {}, {}, {}, {}

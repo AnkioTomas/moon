@@ -13,6 +13,7 @@
 
 子类在 init 里先 Modal.init(self)，再 setDialog{...}（标准面板）或 setPanel(box)（自定义）。
 点面板外 / 返回键：dismissable 时走 dismiss()（默认关窗，子类覆盖为「取消」语义），否则只吞事件。
+下滑关闭默认跟随全局开关 ui.swipe_dismiss（设置页「显示」，默认下滑），实例可显式设 swipe_dismiss 覆盖。
 关窗后 close_callback 调一次。
 给了 width / height 时按该尺寸布局（缺省整屏），可嵌进别的窗口：宿主设 show_parent 为所在顶层窗口，
 子类重画时 setDirty(show_parent)；绘制时记下自身坐标，点击范围跟着走。
@@ -42,6 +43,8 @@ local Screen = Device.screen
 ---@class BookThemeModal : InputContainer
 ---@field dismissable boolean 点面板外 / 返回键是否关闭
 ---@field close_on_tap boolean 面板内外任意点按都直接关窗（提示、二维码这类无交互面板）；dismissable=false 时不生效
+---@field swipe_dismiss string|nil 面板内外下滑直接关窗（走 dismiss 语义）："down"（下滑）/"up"（上滑）/"off"（关闭）；
+---  nil（默认）跟随全局开关 ui.swipe_dismiss，显式值覆盖全局开关；子类内容自己消费下滑手势时（如内嵌 List）应显式设 "off"
 ---@field anchor string|table center/top，或锚点矩形 {x,y,w,h}（物理像素，如按钮 dimen）
 ---@field mask boolean 只读：是否画网状遮罩，由 covers_fullscreen 推出（弹窗不能自行关闭，只受全局 ui.mesh_mask）
 ---@field close_callback fun()|nil
@@ -68,6 +71,18 @@ function Modal.dialogWidth()
     return math.min(Screen:getWidth() - Theme.px(t.space.lg) * 4, Theme.px(480))
 end
 
+--- 下滑关闭是否生效：实例显式设过 swipe_dismiss 时优先，否则跟随全局开关 ui.swipe_dismiss。
+---@param self BookThemeModal
+---@return string|nil "south"/"north"（对应手势方向），nil 表示不生效
+local SWIPE_DISMISS_DIRECTIONS = { down = "south", up = "north" }
+local function swipeDismissDirection(self)
+    local mode = self.swipe_dismiss
+    if mode == nil then
+        mode = MoonSettings.get("ui").swipe_dismiss
+    end
+    return SWIPE_DISMISS_DIRECTIONS[mode]
+end
+
 function Modal:init()
     self.theme = Theme.current()
     local screen = Screen:getSize()
@@ -82,6 +97,12 @@ function Modal:init()
     self.ges_events.TapModal = {
         GestureRange:new{ ges = "tap", range = self.dimen },
     }
+    self._swipe_direction = swipeDismissDirection(self)
+    if self._swipe_direction then
+        self.ges_events.SwipeModal = {
+            GestureRange:new{ ges = "swipe", range = self.dimen },
+        }
+    end
 end
 
 --- 放入面板并按 anchor 定位。
@@ -243,6 +264,17 @@ function Modal:onTapModal(_arg, ges)
     end
     if ges.pos:intersectWith(self[1].dimen) then return true end
     if self.dismissable then self:dismiss() end
+    return true
+end
+
+--- 下滑关闭（面板内外都触发，和点按不同：点面板内容是故意要能拖拽关闭）。
+---@param _arg any
+---@param ges table
+---@return boolean
+function Modal:onSwipeModal(_arg, ges)
+    if self.dismissable and ges.direction == self._swipe_direction then
+        self:dismiss()
+    end
     return true
 end
 
