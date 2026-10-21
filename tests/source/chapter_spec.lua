@@ -180,6 +180,34 @@ Assert.is_true(temp_path ~= nil)
 Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, temp_ops, function() end)
 Assert.eq(temp_n, 2)
 
+-- VIP 取正文：成功记已购；用户点开的未购章给临时提示，预取照常失败。
+do
+    local marks = {}
+    local real_toc = package.loaded["source.toc"]
+    package.loaded["source.toc"] = { markPaid = function(_, _, uid, paid) marks[uid] = paid end }
+    local source = { id = "x", name = "某站" }
+    local function fetcher(open)
+        return Chapter.vipFetcher(source, function(_, uid, cb)
+            if uid == "paid" then cb("正文") elseif uid == "unpaid" then cb(nil, "没买", "unpaid") else cb(nil, "断网") end
+        end, open)
+    end
+    local got
+    fetcher(true)(identity, { uid = "paid", title = "甲", vip = true }, function(p) got = p end)
+    Assert.is_nil(got.temporary)
+    Assert.eq(marks.paid, true)
+    fetcher(true)(identity, { uid = "unpaid", title = "乙", vip = true }, function(p) got = p end)
+    Assert.is_true(got.temporary)
+    Assert.matches(got.html, "某站")
+    Assert.eq(marks.unpaid, false)
+    local err
+    fetcher(false)(identity, { uid = "unpaid", title = "乙", vip = true }, function(p, e) got, err = p, e end)
+    Assert.is_nil(got)
+    Assert.eq(err, "没买")
+    fetcher(true)(identity, { uid = "off", title = "丙" }, function(p, e) got, err = p, e end)
+    Assert.eq(err, "断网")
+    package.loaded["source.toc"] = real_toc
+end
+
 -- 未指定章时优先使用本地 pending_progress。
 pending = { chapter_idx = 3 }
 Chapter.openAsync({ type = "chapter" }, identity, {}, nil, ops, function(p) path = p end)

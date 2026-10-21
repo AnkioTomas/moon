@@ -187,20 +187,6 @@ function Source:getDetailAsync(identity, cb)
     return SourceBase.defer(cb, identity.book or require("book.books_db").get(self.id, identity.stable_id))
 end
 
---- 记下一章 VIP 的购买状态（目录里显示「已购 / 未购」）；变了才落库。
----@param identity BookIdentity
----@param uid string
----@param paid boolean
-local function recordPaid(identity, uid, paid)
-    local toc = Toc.read("jjwxc", identity.stable_id)
-    local idx = Toc.index("jjwxc", identity.stable_id, uid)
-    local chapter = toc and idx and toc[idx]
-    if chapter and chapter.vip and chapter.paid ~= paid then
-        chapter.paid = paid
-        Toc.put("jjwxc", identity.stable_id, toc)
-    end
-end
-
 --- 目录里还没问过的 VIP 章逐章问一遍购买状态（只在已登录时），问完落库一次；失败（断网 / Cookie 失效）就停。
 ---@param self BookSource
 ---@param identity BookIdentity
@@ -256,48 +242,26 @@ function Source:loadTocAsync(identity, cb)
     end }
 end
 
---- open = true（用户点开的章）：没买的 VIP 章不报错，给一页临时提示文档（不当缓存，买了再开会重新拉）。
----@param open boolean
----@return ChapterFetchContent
-local function contentFetcher(open)
-    local Text = require("utils.text")
-    return function(identity, chapter, done)
-        return Client.contentAsync(identity.stable_id, chapter.uid, function(text, err, kind)
-            if text then
-                if chapter.vip then recordPaid(identity, chapter.uid, true) end
-                done({ title = chapter.title, html = Text.chapterHtml(chapter.title, text) })
-            elseif open and kind == "unpaid" then
-                recordPaid(identity, chapter.uid, false)
-                done({
-                    title = chapter.title,
-                    html = Text.chapterHtml(chapter.title, _("这是 VIP 章节，你还没有购买。\n请先在晋江购买本章，再回来阅读。")),
-                    temporary = true,
-                })
-            else
-                done(nil, err)
-            end
-        end)
-    end
-end
-
 function Source:openBookAsync(identity, opts, cb)
     local Chapter = require("source.chapter")
     local open = opts and opts.chapter_idx and Chapter.openAsync or Chapter.openWithUi
     return open(self, identity, identity.book, opts, {
         loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
-        fetchContent = contentFetcher(true),
+        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, true),
     }, cb)
 end
 
 function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
-    return require("source.chapter").prefetchAsync(identity, identity.book, toc, from_idx, count, {
-        fetchContent = contentFetcher(false),
+    local Chapter = require("source.chapter")
+    return Chapter.prefetchAsync(identity, identity.book, toc, from_idx, count, {
+        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, false),
         interval_seconds = FETCH_INTERVAL,
     }, cb)
 end
 
 function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
-    return require("source.chapter").cacheAllAsync(self, identity, contentFetcher(false), on_progress, cb,
+    local Chapter = require("source.chapter")
+    return Chapter.cacheAllAsync(self, identity, Chapter.vipFetcher(self, Client.contentAsync, false), on_progress, cb,
         FETCH_INTERVAL, range)
 end
 

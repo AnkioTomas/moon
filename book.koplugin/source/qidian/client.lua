@@ -369,7 +369,7 @@ end
 --- 一章正文。未购买的 VIP（vipStatus=1 且 isBuy 不是 1）只有预览，不当正文。
 ---@param book_id string
 ---@param chapter_id string
----@param cb fun(text: string|nil, err: string|nil)
+---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil) kind = "unpaid"：这章没买
 ---@return HttpJob
 function Client.contentAsync(book_id, chapter_id, cb)
     local decrypting
@@ -382,7 +382,7 @@ function Client.contentAsync(book_id, chapter_id, cb)
         if not html then cb(nil, err); return end
         local info = (Mapper.pageData(html) or {}).chapterInfo
         if type(info) ~= "table" then cb(nil, _("起点章节内容为空")); return end
-        if Mapper.locked(info) then cb(nil, _("起点 VIP 章节未购买")); return end
+        if Mapper.locked(info) then cb(nil, _("起点 VIP 章节未购买"), "unpaid"); return end
         local content = info.content
         if not Mapper.encrypted(info) then finish(content); return end
         local cookie = Client.cookie()

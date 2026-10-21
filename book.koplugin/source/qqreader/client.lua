@@ -279,7 +279,7 @@ end
 --- 密钥池与 fuid 在 user/index/piracy（网页的 fkp，`window.onkeyfocus("<密钥池>", <版本>)` 的 base64，只取参数不执行）。
 ---@param book_id string
 ---@param chapter_id string
----@param cb fun(text: string|nil, err: string|nil)
+---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil) kind = "unpaid"：这章没买
 ---@return table handle { cancel }
 function Client.contentAsync(book_id, chapter_id, cb)
     local current
@@ -314,7 +314,7 @@ function Client.contentAsync(book_id, chapter_id, cb)
     end
     current = readAsync(book_id, chapter_id, nil, function(info, err)
         if not info then cb(nil, err); return end
-        if Mapper.locked(info) then cb(nil, _("QQ阅读 VIP 章节未购买")); return end
+        if Mapper.locked(info) then cb(nil, _("QQ阅读 VIP 章节未购买"), "unpaid"); return end
         if not Mapper.encrypted(info) then finish(info.content); return end
         current = call("GET", "/user/index/piracy", nil, nil, Client.cookie(), function(wire, perr)
             if not wire then cb(nil, perr); return end

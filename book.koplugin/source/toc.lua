@@ -118,6 +118,21 @@ function Toc.put(source_id, stable_id, list)
     return true
 end
 
+--- 记下一章 VIP 的购买状态（目录里显示「已购 / 未购」）；变了才落库。
+---@param source_id string
+---@param stable_id string
+---@param uid string
+---@param paid boolean
+function Toc.markPaid(source_id, stable_id, uid, paid)
+    local list = Toc.read(source_id, stable_id)
+    local idx = Toc.index(source_id, stable_id, uid)
+    local chapter = list and idx and list[idx]
+    if chapter and chapter.vip and chapter.paid ~= paid then
+        chapter.paid = paid
+        Toc.put(source_id, stable_id, list)
+    end
+end
+
 --- 按 chapter.uid 反查 chapter.idx。
 ---@param source_id string
 ---@param stable_id string

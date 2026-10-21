@@ -4,7 +4,7 @@ QQ阅读数据源。
 目录 / 章节走 book.qq.com 的 JSON 接口（client.lua）。登录是浏览器登录态的 Cookie（setting.lua）；
 登录后书架双向同步（source.shelf）：拉取、本地加入上行、本地删除上行。
 进度只到章：开书从详情的 lastReadChapterId 拉，关书经 update/reading/process 推。书不在书架上不推，也不加回去。
-笔记和统计没有接口。付费章未授权、或字体加密时打开失败。
+笔记和统计没有接口。付费章未授权时打开一页临时提示，目录标注已购 / 未购（打开过才知道）。
 
 @module koplugin.book.source.qqreader
 --]]
@@ -262,34 +262,26 @@ function Source:loadTocAsync(identity, cb)
     end }
 end
 
----@return ChapterFetchContent
-local function contentFetcher()
-    return function(identity, chapter, done)
-        return Client.contentAsync(identity.stable_id, chapter.uid, function(text, err)
-            if not text then done(nil, err); return end
-            done({ title = chapter.title, html = require("utils.text").chapterHtml(chapter.title, text) })
-        end)
-    end
-end
-
 function Source:openBookAsync(identity, opts, cb)
     local Chapter = require("source.chapter")
     local open = opts and opts.chapter_idx and Chapter.openAsync or Chapter.openWithUi
     return open(self, identity, identity.book, opts, {
         loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
-        fetchContent = contentFetcher(),
+        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, true),
     }, cb)
 end
 
 function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
-    return require("source.chapter").prefetchAsync(identity, identity.book, toc, from_idx, count, {
-        fetchContent = contentFetcher(),
+    local Chapter = require("source.chapter")
+    return Chapter.prefetchAsync(identity, identity.book, toc, from_idx, count, {
+        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, false),
         interval_seconds = FETCH_INTERVAL,
     }, cb)
 end
 
 function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
-    return require("source.chapter").cacheAllAsync(self, identity, contentFetcher(), on_progress, cb,
+    local Chapter = require("source.chapter")
+    return Chapter.cacheAllAsync(self, identity, Chapter.vipFetcher(self, Client.contentAsync, false), on_progress, cb,
         FETCH_INTERVAL, range)
 end
 
