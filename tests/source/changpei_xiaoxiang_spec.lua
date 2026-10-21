@@ -224,7 +224,7 @@ do
     Client.chaptersAsync("1", function(_wire, e) err = e end)
     Assert.eq(seen.headers.Cookie, "PHPSESSID=T1")
     Assert.eq(seen.headers.Client, "pc")
-    Assert.eq(err, "请先登录")
+    Assert.matches(err, "扫码登录")
     Assert.is_true(Auth.expired("changpei"))
     cfg.cookie = nil
     Settings.saveSource("changpei", cfg)

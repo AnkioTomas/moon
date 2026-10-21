@@ -110,6 +110,10 @@ local function reply(cookie, cb, retry)
         if wire.code ~= 200 then
             local msg = wire.msg or _("响应无效")
             if wire.code == LOGIN_REQUIRED and cookie and cookie == Client.cookie() then
+                -- 只有 PHPSESSID 的 Cookie 登录是服务端会话，闲置（休眠）一阵就丢，没有续期凭据
+                if not (cookie:match("moon_refresh=") or cookie:match("ukey=")) then
+                    msg = _("长佩登录已失效。网页 Cookie 登录无法自动续期，请改用扫码登录")
+                end
                 if retry then
                     -- token 过期：用 refresh_token 换新的再重发一次；换不到才算登录失效
                     Client.renewAsync(function(renewed)
