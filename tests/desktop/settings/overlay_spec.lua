@@ -87,3 +87,20 @@ Kit.dirty = {}
 desktop.settings_overlay:close()
 Assert.is_nil(desktop.settings_overlay)
 Assert.is_false(dirtied(desktop))
+
+-- 二级页面：push 叠在上一层之上，返回时回到上一层并重算它；closeAll 整条链一起关。
+desktop.closed = nil
+desktop.settings_overlay = nil
+Overlay.open(desktop, spec)
+local root = desktop.settings_overlay
+local before = built
+Overlay.push(desktop, { title = "子页", sections = spec.sections, right_icon = "checklist", right_callback = function() end })
+local child = desktop.settings_overlay
+Assert.eq(child.parent, root)
+Assert.contains(Kit.texts(child), "子页")
+child:close()
+Assert.eq(desktop.settings_overlay, root)
+Assert.is_true(built > before, "返回上一层时重算设置项")
+Overlay.push(desktop, spec)
+Overlay.closeAll(desktop)
+Assert.is_nil(desktop.settings_overlay)

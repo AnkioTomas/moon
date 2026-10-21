@@ -33,9 +33,12 @@ local TitleBar = require("ui.themes.widgets.titlebar")
 ---@field preview (fun(width: number): table)|nil
 ---@field sections fun(): BookThemeSection[]
 ---@field on_close (fun())|nil
+---@field right_icon string|nil 标题栏右上角图标
+---@field right_callback (fun())|nil
 
 ---@class BookSettingsOverlay : BookThemeModal
 ---@field spec BookSettingsOverlaySpec
+---@field parent BookSettingsOverlay|nil 二级页面的上一层
 ---@field page integer
 local Overlay = Modal:extend{
     name = "book_settings_overlay",
@@ -67,16 +70,45 @@ end
 ---@param desktop BookDesktop
 ---@param spec BookSettingsOverlaySpec
 function Overlay.open(desktop, spec)
-    if desktop.settings_overlay then desktop.settings_overlay:close() end
-    desktop.settings_overlay = Overlay:new{
+    Overlay.closeAll(desktop)
+    Overlay.push(desktop, spec)
+end
+
+--- 在当前叠层之上再开一层（二级页面）：返回时回到上一层并重算它的设置项。
+---@param desktop BookDesktop
+---@param spec BookSettingsOverlaySpec
+function Overlay.push(desktop, spec)
+    local parent = desktop.settings_overlay
+    local overlay
+    overlay = Overlay:new{
         spec = spec,
+        parent = parent,
         close_callback = function()
-            desktop.settings_overlay = nil
-            if not desktop.closed then UIManager:setDirty(desktop, "ui") end
+            desktop.settings_overlay = overlay.parent
+            if desktop.closed then
+                if overlay.parent then overlay.parent:close() end
+            elseif overlay.parent then
+                overlay.parent:updateView()
+            else
+                UIManager:setDirty(desktop, "ui")
+            end
             if spec.on_close then spec.on_close() end
         end,
     }
-    desktop.settings_overlay:show()
+    desktop.settings_overlay = overlay
+    overlay:show()
+end
+
+--- 关掉整条叠层链（根页导航切换、换源时用）。
+---@param desktop BookDesktop
+function Overlay.closeAll(desktop)
+    local overlay = desktop.settings_overlay
+    while overlay do
+        local parent = overlay.parent
+        overlay.parent = nil
+        overlay:close()
+        overlay = parent
+    end
 end
 
 function Overlay:init()
@@ -93,6 +125,7 @@ function Overlay:rebuild()
     local bar = TitleBar.widget({
         width = w, title = self.spec.title,
         left_icon = "arrow_back", left_callback = function() self:close() end,
+        right_icon = self.spec.right_icon, right_callback = self.spec.right_callback,
     })
     local page = VerticalGroup:new{ align = "left", bar }
     local head_h = bar:getSize().h

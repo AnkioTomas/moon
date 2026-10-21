@@ -104,46 +104,39 @@ Assert.eq(saved[#saved], "source")
 Assert.eq(set_active, "moon")
 Assert.is_false(source_cfg.library_mixed)
 
-local scope = src:scopeSections{
-    desktop = desktop,
-    plugin = nil,
-    active_id = "wechat",
-    active_name = "微信读书",
+package.loaded["desktop.pages.setting.overlay"] = {
+    push = function(d, spec) d.settings_overlay = { spec = spec } end,
 }
-Assert.eq(#scope, 1)
-Assert.eq(scope[1].title, "书籍来源")
-Assert.eq(scope[1].rows[1]().status, "微信读书")
-Assert.eq(scope[1].rows[1]().title, "当前数据源")
-Assert.eq(scope[1].rows[2]().title, "已启用的数据源")
-
 local config = src:configSections{
     desktop = desktop,
     plugin = nil,
 }
-Assert.is_true(#config >= 2)
-Assert.eq(config[1].title, "Moon")
-Assert.eq(config[#config - 1].title, "Z-Library")
-Assert.eq(config[#config].title, "OPDS")
--- 和 Z-Library 一样：开关默认关，关着只有开关一行；打开后才出现目录配置入口。
-Assert.len(config[#config].rows, 1)
-Assert.is_false(config[#config].rows[1]().toggle)
-config[#config].rows[1]().callback()
+-- 账号页：书源一行一个入口（本地书籍在最前），书城后端另成一节；都不展开内容。
+Assert.len(config, 2)
+Assert.eq(config[1].title, "书籍来源")
+Assert.eq(config[1].rows[1]().title, "本地书籍")
+Assert.eq(config[2].title, "书城")
+local store_rows = config[2].rows
+Assert.eq(store_rows[#store_rows - 1]().title, "Z-Library")
+Assert.eq(store_rows[#store_rows]().title, "OPDS")
+-- OPDS：未开启；二级页面里先只有开关一行，开启后才出现目录配置入口。
+Assert.eq(store_rows[#store_rows]().status, "未开启")
+store_rows[#store_rows]().callback()
+local page = desktop.settings_overlay.spec
+Assert.eq(page.title, "OPDS")
+local opds_rows = page.sections()[1].rows
+Assert.len(opds_rows, 1)
+Assert.is_false(opds_rows[1]().toggle)
+opds_rows[1]().callback()
 Assert.eq(saved[#saved], "store")
 Assert.is_true(store_cfg.opds_enabled)
 Assert.eq(broadcasts[#broadcasts], "StoreChanged")
-local opds_rows = src:configSections{ desktop = desktop, plugin = nil }
-opds_rows = opds_rows[#opds_rows].rows
+opds_rows = page.sections()[1].rows
 Assert.len(opds_rows, 2)
 Assert.is_true(opds_rows[1]().toggle)
 Assert.eq(opds_rows[2]().title, "OPDS 目录")
 Assert.eq(opds_rows[2]().status, "未配置")
 store_cfg.opds_enabled = false
-for i = 1, #config do
-    local first = config[i].rows[1]
-    if first then
-        Assert.is_true(first().title ~= "混合模式", config[i].title)
-    end
-end
 
 -- 源设置模块：没有文件即没有；模块自身抛错必须冒出来。
 Assert.is_nil(src.loadSetting("nosuch"))
@@ -154,11 +147,11 @@ Assert.errors(function() src.loadSetting("broken") end, "boom")
 Assert.eq(src.loadSetting("ext.demo").rows()[1]().id, "ext-row")
 enabled[#enabled + 1] = { id = "ext.demo", name = "Demo" }
 local with_ext = src:configSections{ desktop = desktop, plugin = nil }
-local ext_section
-for _idx, section in ipairs(with_ext) do
-    if section.title == "Demo" then ext_section = section end
+local found
+for _idx, row in ipairs(with_ext[1].rows) do
+    if row().title == "Demo" then found = true end
 end
-Assert.eq(ext_section.rows[1]().id, "ext-row")
+Assert.is_true(found)
 enabled[#enabled] = nil
 
 return true
