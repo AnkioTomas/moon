@@ -166,6 +166,7 @@ return {
     ["后天"] = "In 2 days",
     ["竖线"] = "Bar",
     ["引号"] = "Quote mark",
+    ["想法列表暂不可用，稍后重试"] = "Review list unavailable, will retry later",
     ["显示第一本"] = "Show first book",
     ["✓ 显示第一本"] = "✓ Show first book",
     ["俄语"] = "Russian",
