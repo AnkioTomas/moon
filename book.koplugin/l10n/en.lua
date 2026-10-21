@@ -1855,4 +1855,7 @@ Current version: ",
     ["用长佩 App 扫一扫"] = "Scan with the Changpei app",
     ["长佩扫码登录"] = "Changpei QR sign-in",
     ["已在手机上拒绝登录"] = "Sign-in rejected on the phone",
+    ["未登录长佩"] = "Not signed in to Changpei",
+    ["缺少长佩章节位置"] = "Changpei chapter position missing",
+    ["长佩榜单为空"] = "Changpei rankings are empty",
 }
