@@ -198,6 +198,12 @@ function Fonts.faceNameForId(id)
     if not path then return nil, err end
     local info = ensureFontInfo(path)
     if not info or not info[1] or not info[1].name then
+        local f = io.open(path, "rb")
+        local magic = f and f:read(4) or ""
+        if f then f:close() end
+        logger.warn("book font unreadable", path, "magic=" .. string.format("%q", magic))
+        -- 已下载的微信读书字体读不出就是坏文件：删掉，下次选择时重新下载，不再永远卡在「已下载」。
+        if path == Fonts.wereadPath(id) then os.remove(path) end
         return nil, _("应用字体失败")
     end
     return info[1].name, nil, path
