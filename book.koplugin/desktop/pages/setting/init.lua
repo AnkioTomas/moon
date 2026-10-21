@@ -55,8 +55,7 @@ end
 --- 回到设置根页并关闭功能叠层。
 function Settings:reset()
     self.page = 1
-    local overlay = self.desktop.settings_overlay
-    if overlay then overlay:close() end
+    Overlay.closeAll(self.desktop)
 end
 
 --- 换源后关掉叠层，避免停在过期的来源页。
@@ -82,27 +81,26 @@ end
 ---@return BookSettingEntry[]
 local function coreEntries(desktop)
     local plugin = desktop.plugin
-    local active_id, active_name = activeSource()
     local network = HttpSetting.entry(desktop)
     network.group, network.order = "system", 20
     return {
         {
-            group = "library", order = 10, id = "sources", icon = "source", title = _("书籍来源"),
-            subtitle = _("切换和启用书源"), status = active_name, status_on = true,
-            page = {
-                title = _("书籍来源"),
-                sections = function()
-                    return Source:scopeSections{
-                        desktop = desktop, plugin = plugin, active_id = active_id, active_name = active_name,
-                    }
-                end,
-            },
+            group = "library", order = 10,
+            row = function(iw)
+                return Row.widget({
+                    width = iw, kind = "nav", icon = "source", title = _("书籍来源"),
+                    subtitle = _("切换当前书源或混合模式"), status = select(2, activeSource()), status_on = true,
+                    callback = function() Source:pickActive() end,
+                })
+            end,
         },
         {
             group = "library", order = 20, id = "source_config", icon = "tune", title = _("账号"),
-            subtitle = _("书源账号、本地目录、Z-Library / OPDS 书城"),
+            subtitle = _("本地书籍、书源账号、Z-Library / OPDS 书城"),
             page = {
                 title = _("账号"),
+                right_icon = "checklist",
+                right_callback = function() Source.pickEnabled(desktop) end,
                 sections = function() return Source:configSections{ desktop = desktop, plugin = plugin } end,
             },
         },

@@ -178,6 +178,8 @@ function Tree.build(groups, entries)
             id = id,
             title = page.title,
             preview = page.preview,
+            right_icon = page.right_icon,
+            right_callback = page.right_callback,
             sections = function()
                 local out = {}
                 for _idx, section in ipairs(page.sections and page.sections() or {}) do out[#out + 1] = section end

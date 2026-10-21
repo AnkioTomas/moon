@@ -104,140 +104,145 @@ local function pickEnabledSources(desktop)
     }:show()
 end
 
---- 书籍来源：当前源 + 启用哪些。
----@param ctx table
----@return table
-function Source:scopeSections(ctx)
-    local desktop = ctx.desktop
-    local active_name = ctx.active_name
-    local enabled = SourceRegistry.listEnabled()
-    return {{
-        title = _("书籍来源"),
-        rows = {
-            function(iw)
-                return Row.widget({
-                    width = iw,
-                    kind = "nav", icon = "source", title = _("当前数据源"),
-                    status = Source.displayName(active_name), status_on = true,
-                    callback = function() Source:pickActive() end,
-                })
-            end,
-            function(iw)
-                return Row.widget({
-                    width = iw,
-                    kind = "nav", icon = "checklist", title = _("已启用的数据源"),
-                    subtitle = _("决定书库中可以切换哪些书籍来源"),
-                    status = T(_("已启用 %1/%2"), #enabled, #SourceRegistry.list()),
-                    status_on = true,
-                    callback = function() pickEnabledSources(desktop) end,
-                })
-            end,
-        },
-    }}
+--- 账号页每个书源自己的图标（Material 名）；第三方源用设置模块的 rowIcon，都没有则 dns。
+local SOURCE_ICONS = {
+    ["local"] = "folder", wechat = "chat", jdread = "shopping_bag", fanqie = "eco",
+    qidian = "auto_stories", qimao = "import_contacts", qqreader = "face", jjwxc = "favorite",
+    changpei = "local_florist", iread = "headphones", xiaoxiang = "forest", legado = "android",
+    moon = "nightlight", kindle = "tablet_mac", copymanga = "photo_library",
+}
+
+--- 一个设置模块能不能出现在账号页：有 rows 或 open 就行。
+---@param mod table|nil
+---@return boolean
+local function configurable(mod)
+    return mod ~= nil and (type(mod.rows) == "function" or type(mod.open) == "function")
 end
 
---- 来源配置：各源账号 / 本地目录 / Z-Lib。一页展开，不按源再钻一层。
+--- 账号页上的一行：点开二级页面（模块有 rows），只有 open 的直接调 open。
+---@param desktop table
+---@param plugin table|nil
+---@param mod table
+---@param title string
+---@param icon string
+---@return fun(iw: number): table
+local function entryRow(desktop, plugin, mod, title, icon)
+    return function(iw)
+        local status, status_on
+        if type(mod.rowStatus) == "function" then status, status_on = mod.rowStatus() end
+        return Row.widget({
+            width = iw, kind = "nav", icon = icon, title = title,
+            status = status, status_on = status_on,
+            callback = function()
+                if type(mod.rows) ~= "function" then return mod.open(plugin) end
+                require("desktop.pages.setting.overlay").push(desktop, {
+                    title = title,
+                    sections = function() return {{ title = title, rows = mod.rows(plugin) }} end,
+                })
+            end,
+        })
+    end
+end
+
+--- 书城后端（Z-Library / OPDS）：开关 + 开启后的配置入口，放在二级页面里。
+---@param desktop table
+---@param plugin table|nil
+---@param def table
+---@return fun(iw: number): table
+local function storeRow(desktop, plugin, def)
+    local store = MoonSettings.get("store")
+    local key = def.id .. "_enabled"
+    local setting = require("store." .. def.id .. ".setting")
+    return function(iw)
+        return Row.widget({
+            width = iw, kind = "nav", icon = def.icon, title = def.title,
+            status = store[key] and _("已开启") or _("未开启"), status_on = store[key],
+            callback = function()
+                require("desktop.pages.setting.overlay").push(desktop, {
+                    title = def.title,
+                    sections = function()
+                        local rows = { function(w)
+                            local on = store[key]
+                            return Row.widget({
+                                width = w, icon = def.icon, title = def.title, subtitle = def.subtitle,
+                                toggle = on,
+                                callback = function()
+                                    store[key] = not on
+                                    MoonSettings.save("store")
+                                    require("ui/uimanager"):broadcastEvent(require("ui/event"):new("StoreChanged"))
+                                end,
+                            })
+                        end }
+                        if store[key] then
+                            rows[2] = function(w)
+                                local status, status_on = setting.rowStatus()
+                                return Row.widget({
+                                    width = w, kind = "nav", icon = def.entry_icon, title = def.entry,
+                                    status = status, status_on = status_on,
+                                    callback = function() setting.open(plugin) end,
+                                })
+                            end
+                        end
+                        return {{ title = def.title, rows = rows }}
+                    end,
+                })
+            end,
+        })
+    end
+end
+
+--- 账号页：本地书籍与各已启用书源各一行，点开进二级页面；书城后端同样。
+--- 右上角的多选窗口决定哪些书源出现在这里。
 ---@param ctx table
 ---@return table
 function Source:configSections(ctx)
-    local plugin = ctx.plugin
-    local sections = {}
+    local desktop, plugin = ctx.desktop, ctx.plugin
+    local sources = {}
+    local local_mod = Source.loadSetting("local")
+    if configurable(local_mod) then
+        sources[1] = entryRow(desktop, plugin, local_mod, _("本地书籍"), SOURCE_ICONS["local"])
+    end
     for _idx, meta in ipairs(SourceRegistry.listEnabled()) do
-        if meta.id ~= "local" then
-            local mod = Source.loadSetting(meta.id)
-            if mod and (type(mod.rows) == "function" or type(mod.open) == "function") then
-                local status, status_on
-                if type(mod.rowStatus) == "function" then status, status_on = mod.rowStatus() end
-                local title = (mod.rowTitle and mod.rowTitle()) or _("账号")
-                local icon = (mod.rowIcon and mod.rowIcon()) or "dns"
-                local rows = type(mod.rows) == "function" and mod.rows(plugin) or { function(iw)
-                    return Row.widget({
-                        width = iw,
-                        kind = "nav", icon = icon, title = title,
-                        status = status, status_on = status_on,
-                        callback = function() mod.open(plugin) end,
-                    })
-                end }
-                sections[#sections + 1] = {
-                    title = meta.name or meta.id,
-                    rows = rows,
-                }
-            end
+        local mod = Source.loadSetting(meta.id)
+        if meta.id ~= "local" and configurable(mod) then
+            sources[#sources + 1] = entryRow(desktop, plugin, mod, meta.name or meta.id,
+                SOURCE_ICONS[meta.id] or (mod.rowIcon and mod.rowIcon()) or "dns")
         end
     end
 
-    local local_setting = Source.loadSetting("local")
-    if local_setting and (type(local_setting.rows) == "function" or type(local_setting.open) == "function") then
-        local status, status_on = local_setting.rowStatus()
-        local rows = type(local_setting.rows) == "function" and local_setting.rows(plugin) or { function(iw)
-            return Row.widget({
-                width = iw,
-                kind = "nav", icon = "folder", title = _("本地目录"),
-                status = status, status_on = status_on,
-                callback = function() local_setting.open(plugin) end,
-            })
-        end }
-        sections[#sections + 1] = {
-            title = _("本地"),
-            rows = rows,
-        }
-    end
-
     local store = MoonSettings.get("store")
-    sections[#sections + 1] = {
-        title = _("书城"),
-        rows = { function(iw)
-            local on = store.enabled
-            return Row.widget({
-                width = iw,
-                icon = "storefront", title = _("书城"),
-                subtitle = _("底栏显示书城，搜索已启用的书源与 Z站、OPDS"),
-                toggle = on,
-                callback = function()
-                    store.enabled = not on
-                    MoonSettings.save("store")
-                    require("ui/uimanager"):broadcastEvent(require("ui/event"):new("StoreChanged"))
-                end,
-            })
-        end },
-    }
+    local stores = { function(iw)
+        local on = store.enabled
+        return Row.widget({
+            width = iw,
+            icon = "storefront", title = _("书城"),
+            subtitle = _("底栏显示书城，搜索已启用的书源与 Z站、OPDS"),
+            toggle = on,
+            callback = function()
+                store.enabled = not on
+                MoonSettings.save("store")
+                require("ui/uimanager"):broadcastEvent(require("ui/event"):new("StoreChanged"))
+            end,
+        })
+    end }
     for _idx, def in ipairs({
-        { id = "zlib", title = _("Z-Library"), icon = "storefront",
+        { id = "zlib", title = _("Z-Library"), icon = "library_books",
           subtitle = _("在书城中搜索 Z站；下载后导入本地书库"),
           entry = _("Z-Library 账号"), entry_icon = "vpn_key" },
         { id = "opds", title = _("OPDS"), icon = "rss_feed",
           subtitle = _("在书城中搜索 OPDS；Calibre、Komga、Kavita 等书库，下载后导入本地书库"),
           entry = _("OPDS 目录"), entry_icon = "link" },
     }) do
-        local key = def.id .. "_enabled"
-        local rows = { function(iw)
-            local on = store[key]
-            return Row.widget({
-                width = iw,
-                icon = def.icon, title = def.title, subtitle = def.subtitle,
-                toggle = on,
-                callback = function()
-                    store[key] = not on
-                    MoonSettings.save("store")
-                    require("ui/uimanager"):broadcastEvent(require("ui/event"):new("StoreChanged"))
-                end,
-            })
-        end }
-        if store[key] then
-            local setting = require("store." .. def.id .. ".setting")
-            local status, status_on = setting.rowStatus()
-            rows[2] = function(iw)
-                return Row.widget({
-                    width = iw,
-                    kind = "nav", icon = def.entry_icon, title = def.entry,
-                    status = status, status_on = status_on,
-                    callback = function() setting.open(plugin) end,
-                })
-            end
-        end
-        sections[#sections + 1] = { title = def.title, rows = rows }
+        stores[#stores + 1] = storeRow(desktop, plugin, def)
     end
-    return sections
+    return {
+        { title = _("书籍来源"), rows = sources },
+        { title = _("书城"), rows = stores },
+    }
 end
+
+--- 右上角多选窗口：启用哪些书源。
+---@param desktop table
+Source.pickEnabled = pickEnabledSources
 
 return Source

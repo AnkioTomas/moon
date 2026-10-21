@@ -94,7 +94,6 @@ end
 
 package.preload["desktop.pages.setting.source"] = function()
     return {
-        scopeSections = function() return {} end,
         configSections = function() return {} end,
         displayName = function(name) return name end,
     }
@@ -229,7 +228,6 @@ end
 Assert.eq(table.concat(sub_rows, ","), "启用订阅,下载文章图片")
 
 local expected = {
-    { title = "书籍来源", id = "sources" },
     { title = "账号", id = "source_config" },
     { title = "书架显示", id = "library_display" },
     { title = "外观", id = "appearance" },
