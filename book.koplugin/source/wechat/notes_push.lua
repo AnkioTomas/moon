@@ -145,9 +145,13 @@ function Push:preflight()
             end
         end
         self:confirm(Notes.reconcileBookmarks(self.annotations, wire, self.chapter_uid))
-        self:call(function(done)
-            return self.client:myReviewsAsync(self.book_id, done)
-        end, _("想法上传失败"), function(reviews)
+        -- 想法列表被服务端拒绝（如 -2003）不能拖死划线上传：按「只拿到一页」处理，保留已有 id。
+        local job = self.client:myReviewsAsync(self.book_id, function(reviews)
+            self.job = nil
+            if self.cancelled then return end
+            if type(reviews) ~= "table" then
+                reviews = { reviews = {}, hasMore = 1 }
+            end
             -- 只拿到一页时保留 id：误清会让 addReviewAsync 在云端重建重复想法。
             if Notes.reviewsComplete(reviews) then
                 local review_ids = Notes.reviewIds(reviews)
@@ -163,6 +167,7 @@ function Push:preflight()
             Notes.preparePush(self.annotations)
             self:locate()
         end)
+        if self.job == nil and not self.cancelled then self.job = job end
     end)
 end
 

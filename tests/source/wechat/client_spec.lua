@@ -68,7 +68,7 @@ package.preload["source.wechat.eink"] = function()
                 })
             elseif path == "/review/list" and opts.query.bookId == "77" then
                 -- 翻页：hasMore=1 带 maxIdx 续拉，重复 reviewId 去重
-                if opts.query.maxIdx == 0 then
+                if opts.query.maxIdx == nil then
                     cb({ totalCount = 2, hasMore = 1, maxIdx = 5,
                         reviews = { { review = { reviewId = "a", range = "1-2", content = "甲" } } } })
                 else
@@ -76,6 +76,13 @@ package.preload["source.wechat.eink"] = function()
                         { review = { reviewId = "a", range = "1-2", content = "甲" } },
                         { review = { reviewId = "b", range = "3-4", content = "乙" } },
                     } })
+                end
+            elseif path == "/review/list" and opts.query.bookId == "88" then
+                -- App 同款参数被拒（-2003），listType=11 能通
+                if opts.query.listType == 1 then
+                    cb(nil, "-2003 参数格式错误")
+                else
+                    cb({ hasMore = 0, reviews = { { review = { reviewId = "c", content = "丙" } } } })
                 end
             elseif path == "/review/list" then
                 cb({
@@ -231,6 +238,10 @@ do
     Assert.eq(#wire.reviews, 2)
     Assert.eq(wire.reviews[2].review.content, "乙")
     Assert.eq(wire.hasMore, 0)
+
+    client:myReviewsAsync("88", function(data) wire = data end)
+    Assert.eq(posted.eink.query.listType, 11, "首页被拒改用 listType=11 重试")
+    Assert.eq(wire.reviews[1].review.content, "丙")
 end
 
 do

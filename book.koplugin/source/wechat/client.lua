@@ -326,20 +326,26 @@ end
 function Client:myReviewsAsync(bookId, cb)
     local own, seen, first, job = {}, {}, nil, nil
     local cancelled = false
-    local function fetch(max_idx, pages)
-        job = Eink.callAsync("GET", "/review/list", {
-            query = {
-                bookId = bookId,
-                listType = 1,
-                listMode = 0,
-                mine = 1,
-                synckey = 0,
-                count = MY_REVIEWS_PAGE,
-                maxIdx = max_idx,
-            },
-        }, function(data, err)
+    local function fetch(max_idx, pages, legacy)
+        -- 部分书（含 CB_ 自传书）用 App 同款参数会被回 -2003；首页失败时改用社区通用的 listType=11 再试一次。
+        local query = legacy and {
+            bookId = bookId, listType = 11, listMode = 0, mine = 1, synckey = 0,
+        } or {
+            bookId = bookId,
+            listType = 1,
+            listMode = 0,
+            mine = 1,
+            synckey = 0,
+            count = MY_REVIEWS_PAGE,
+            maxIdx = max_idx > 0 and max_idx or nil,
+        }
+        job = Eink.callAsync("GET", "/review/list", { query = query }, function(data, err)
             if cancelled then return end
             if type(data) ~= "table" or type(data.reviews) ~= "table" then
+                if not first and not legacy then
+                    fetch(0, 1, true)
+                    return
+                end
                 -- 翻页失败时交回已拿到的部分，hasMore 保持 1，全量判定不会误判
                 if first then cb(first) else cb(data, err) end
                 return

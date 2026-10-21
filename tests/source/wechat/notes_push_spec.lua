@@ -83,3 +83,14 @@ do -- 取消：在途请求被取消，迟到回包不回调
     Assert.is_false(called)
     Assert.eq(client.calls[2], "cancel:bookmarkListAsync")
 end
+
+do -- 想法列表预检失败只跳过想法对账，不阻断划线：已有 review id 保留
+    local client = fakeClient({ bookmarkListAsync = { updated = {} }, myReviewsAsync = false })
+    local item = { drawer = "lighten", text = "t", wr_bookmark_id = "gone", wr_review_id = "rv1" }
+    local ok, err
+    NotesPush.run(client, identity, "c1", nil, { item }, function(o, e) ok, err = o, e end)
+    Stubs.flush()
+    Assert.is_nil(err)
+    Assert.eq(item.wr_review_id, "rv1")
+    Assert.is_nil(item.wr_bookmark_id)
+end
