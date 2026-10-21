@@ -342,20 +342,37 @@ do -- 开机自动开桌面：按启动项、进程内只开一次；Reader 实�
     D.autoOpen({ ui = {} })
     Assert.len(opened, 0, "启动项不是月读不自动开")
 
-    -- 启动即开桌面：FM 首次列目录被跳过，离开桌面才补列；只跳一次
+    -- 启动即开桌面：FM 改列 KOReader 数据目录；只在进程首个 FM、启动项为月读时
+    package.loaded["datastorage"] = { getDataDir = function() return "/data" end }
     on_start = true
     D, opened = boot()
-    local FileChooser = { genItemTable = function() return "empty" end }
-    FileChooser.genItemTableFromPath = function() return "full" end
-    package.loaded["ui/widget/filechooser"] = FileChooser
-    local refreshed = 0
-    local p = { ui = { file_chooser = { refreshPath = function() refreshed = refreshed + 1 end } } }
-    D.deferFileList(p)
-    Assert.eq(FileChooser.genItemTableFromPath(FileChooser, "/x"), "empty", "首次列目录被跳过")
-    Assert.eq(FileChooser.genItemTableFromPath(FileChooser, "/x"), "full", "只跳一次")
-    D.restoreFileList(p)
-    D.restoreFileList(p)
-    Assert.eq(refreshed, 1, "补列一次")
+    local p = { ui = {} }
+    D.startInDataDir(p)
+    Assert.eq(p.ui.root_path, "/data/ko-empty", "启动即开桌面列空目录")
+    local reader = { ui = { document = {} } }
+    D.startInDataDir(reader)
+    Assert.is_nil(reader.ui.root_path, "Reader 实例不动")
+    D.autoOpen({ ui = {} })
+    local later = { ui = {} }
+    D.startInDataDir(later)
+    Assert.is_nil(later.ui.root_path, "启动已过不再改")
+    on_start = false
+    D = boot()
+    local off = { ui = {} }
+    D.startInDataDir(off)
+    Assert.is_nil(off.ui.root_path, "启动项不是月读不改")
+
+    -- 阅读中回桌面重建 FM：列空目录，lastdir 还原
+    local saved = { lastdir = "/books" }
+    _G.G_reader_settings = {
+        readSetting = function(_s, k) return saved[k] end,
+        saveSetting = function(_s, k, v) saved[k] = v end,
+    }
+    local FM = { showFiles = function(self, path) self.instance = { listed = path } end }
+    package.loaded["apps/filemanager/filemanager"] = FM
+    D = boot()
+    Assert.eq(D.ensureFileManager().listed, "/data/ko-empty")
+    Assert.eq(saved.lastdir, "/books", "lastdir 不被改")
 end
 
 return true

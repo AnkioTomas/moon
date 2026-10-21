@@ -27,7 +27,10 @@ end
 local drawer_on = true
 local opened_desktop = 0
 package.preload["desktop"] = function()
-    return { open = function() opened_desktop = opened_desktop + 1 end }
+    return {
+        open = function() opened_desktop = opened_desktop + 1 end,
+        ensureFileManager = function() return { book = {} } end,
+    }
 end
 package.preload["apps/filemanager/filemanager"] = function()
     return {
