@@ -59,11 +59,11 @@ end
 
 -- ── 插件生命周期 ─────────────────
 
---- 有网时让有脏行的启用源推脏行（混合模式下它们都在用）；没脏行的源不建实例，加载失败的源跳过。
+--- 有网时让有脏行的源推脏行：混合模式是全部启用源，否则只有当前源；没脏行的源不建实例，加载失败的源跳过。
 local function pushDirty()
     if not require("ui/network/manager"):isConnected() then return end
     local SourceBase = require("source.base")
-    for _idx, meta in ipairs(SourceRegistry.listEnabled()) do
+    for _idx, meta in ipairs(SourceRegistry.syncScope()) do
         local source = SourceBase.hasDirty(meta.id) and SourceRegistry.resolve(meta.id)
         if source and source:configured() then source:pushDirty() end
     end

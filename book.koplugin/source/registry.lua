@@ -248,6 +248,13 @@ function Registry.listEnabled()
     return out
 end
 
+--- 本轮后台同步（推脏行）的源范围：混合模式 = 全部启用源，否则只有当前活跃源，与书库展示范围一致。
+---@return BookSourceMeta[]
+function Registry.syncScope()
+    if MoonSettings.get("source").library_mixed == true then return Registry.listEnabled() end
+    return { Registry.meta(Registry.activeId()) }
+end
+
 --- 启用/禁用源并持久化。禁止禁用活跃源（UI 层也该用 enabled=false 挡住）。
 ---@param id SourceId
 ---@param on boolean
