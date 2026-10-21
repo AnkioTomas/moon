@@ -23,6 +23,8 @@
 ---@field toc_version integer|nil 目录缓存格式版本（仅首章携带）
 ---@field source_idx string|nil 源端非连续章节号
 ---@field uid string|nil 源侧章节身份
+---@field vip boolean|nil VIP 章（付费章）
+---@field paid boolean|nil VIP 章是否已购；nil = 还没问过（目录里不标注）
 ---@field title string 章节标题
 ---@field name string|nil 章节标题别名（部分源/目录）
 ---@field page number|nil KOReader 文档目录起始页
@@ -53,6 +55,8 @@ local function variant(identity, idx, path)
     return Chapter.variant and Chapter.variant(identity, idx, path) or path
 end
 local lfs = require("libs/libkoreader-lfs")
+-- 临时文档（如未购买提示）以此打头：能打开，但不算缓存，下次仍会重新拉正文。
+local TEMP_MARK = "<!--moon:temp-->"
 local ready_cache = {}
 local READY_CACHE_LIMIT = 512
 local ready_cache_size = 0
@@ -92,7 +96,7 @@ local function chapterReady(path)
     local head = f and f:read(64)
     if f then f:close() end
     -- nil 表示读文件失败，同样按未就绪处理。
-    local ready = head ~= nil and head:find("^%s*<") ~= nil
+    local ready = head ~= nil and head:find("^%s*<") ~= nil and not head:find(TEMP_MARK, 1, true)
         and Text.hasRemoteImageSrcInFile(path) == false
     cacheReady(path, { signature = signature, ready = ready })
     return ready
@@ -233,6 +237,7 @@ local function write(path, payload, cb, opts)
     end
     local dir_ok, dir_err = Paths.ensureDir(path:match("(.+)/[^/]+$"))
     if not dir_ok then cb(nil, dir_err); return end
+    if type(payload) == "table" and payload.temporary then html = TEMP_MARK .. html end
     local tmp = path .. ".part"
     os.remove(tmp)
     local f, err = io.open(tmp, "wb")
@@ -259,7 +264,7 @@ local function write(path, payload, cb, opts)
         if attr then
             cacheReady(path, {
                 signature = tostring(attr.size or "") .. ":" .. tostring(attr.modification or ""),
-                ready = not Text.hasRemoteImageSrc(html),
+                ready = not Text.hasRemoteImageSrc(html) and html:sub(1, #TEMP_MARK) ~= TEMP_MARK,
             })
         end
         cb(path)

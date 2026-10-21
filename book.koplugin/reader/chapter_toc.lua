@@ -32,8 +32,11 @@ function ChapterToc.show(toc, current_idx, on_select)
             targets[page] = { idx = chapter.idx, anchor = anchor }
             return page
         end
-        chapter_pages[tonumber(chapter.idx)] = addNode(
-            chapter.title or ("#" .. tostring(chapter.idx)), chapter.depth)
+        local title = chapter.title or ("#" .. tostring(chapter.idx))
+        if chapter.vip and chapter.paid ~= nil then
+            title = title .. (chapter.paid and _("（已购）") or _("（未购）"))
+        end
+        chapter_pages[tonumber(chapter.idx)] = addNode(title, chapter.depth)
         for _idx, anchor in ipairs(chapter.anchors or {}) do
             addNode(anchor.title, anchor.depth, anchor)
         end
