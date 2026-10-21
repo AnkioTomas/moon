@@ -1,194 +1,77 @@
 --[[--
-desktop.detail.scrape.search 离线用例：假 douban / weread，测多源编排与 cancel 语义
+desktop.detail.scrape.search 离线用例：假 douban / novel，测按来源分派与 cancel 语义
 
 @module tests.desktop.detail.scrape.search_spec
 --]]
----@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch
 
 local Assert = require("support.assert")
 
--- ── 假数据源：记录调用，回调挂起由测试手动触发 ─────────
-local function makeFake()
-    return {
-        calls = 0,
-        pending = nil,
-        cancels = 0,
-    }
+local calls = {}
+local pending
+package.preload["desktop.detail.scrape.douban"] = function()
+    return { searchAsync = function(q, cb)
+        calls[#calls + 1] = "douban:" .. q
+        pending = cb
+        return { cancel = function() calls.cancelled = true end }
+    end }
 end
-
-local DoubanFake = makeFake()
-local WereadFake = makeFake()
-
-local function installFakes()
-    package.preload["desktop.detail.scrape.douban"] = function()
-        return {
-            searchAsync = function(_, cb)
-                DoubanFake.calls = DoubanFake.calls + 1
-                DoubanFake.pending = cb
-                return {
-                    cancel = function()
-                        DoubanFake.cancels = DoubanFake.cancels + 1
-                    end,
-                }
-            end,
-        }
-    end
-    package.preload["desktop.detail.scrape.novel"] = function()
-        return {
-            viaSource = function(_, _, cb)
-                WereadFake.calls = WereadFake.calls + 1
-                WereadFake.pending = cb
-                return {
-                    cancel = function()
-                        WereadFake.cancels = WereadFake.cancels + 1
-                    end,
-                }
-            end,
-        }
-    end
-    for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.novel", "desktop.detail.scrape.search" }) do
-        package.loaded[name] = nil
-    end
+package.preload["desktop.detail.scrape.novel"] = function()
+    return { viaSource = function(id, q, cb, label)
+        calls[#calls + 1] = id .. ":" .. q .. ":" .. tostring(label)
+        pending = cb
+        return { cancel = function() end }
+    end }
 end
-
-local function resetFakes()
-    DoubanFake.calls, DoubanFake.pending, DoubanFake.cancels = 0, nil, 0
-    WereadFake.calls, WereadFake.pending, WereadFake.cancels = 0, nil, 0
+for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.novel", "desktop.detail.scrape.search" }) do
+    package.loaded[name] = nil
 end
-
-local function cleanup()
-    for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.novel", "desktop.detail.scrape.search" }) do
-        package.preload[name] = nil
-        package.loaded[name] = nil
-    end
-end
-
-installFakes()
 local Search = require("desktop.detail.scrape.search")
 
---- 收集 cb 调用
 local function recorder()
     local r = { n = 0 }
     return r, function(results, err, source)
-        r.n = r.n + 1
-        r.results = results
-        r.err = err
-        r.source = source
+        r.n, r.results, r.err, r.source = r.n + 1, results, err, source
     end
 end
 
--- ── 空关键词由协调器直接拒绝，不触发任何源 ─────────────
+-- 空关键词、未知来源直接拒绝，不触发任何源
 do
-    resetFakes()
     local rec, cb = recorder()
-    local job = Search.searchAsync("  ", cb)
-    Assert.is_nil(job)
-    Assert.eq(rec.n, 1)
+    Assert.is_nil(Search.searchAsync("  ", "douban", cb))
     Assert.eq(rec.err, "搜索关键词为空")
-    Assert.eq(DoubanFake.calls, 0)
-    Assert.eq(WereadFake.calls, 0)
+    Assert.is_nil(Search.searchAsync("活着", "nope", cb))
+    Assert.eq(rec.err, "未知数据源")
+    Assert.len(calls, 0)
 end
 
--- ── 豆瓣成功：直接回调，不回落 weread ──────────────────
+-- 只查选中的来源；成功带回来源 id
 do
-    resetFakes()
     local rec, cb = recorder()
-    local job = Search.searchAsync("活着", cb)
-    Assert.eq(type(job.cancel), "function")
-    Assert.eq(DoubanFake.calls, 1)
-
-    local rows = { { title = "活着", source = "douban" } }
-    DoubanFake.pending(rows, nil)
-    Assert.eq(rec.n, 1)
+    local job = Search.searchAsync(" 活着 ", "douban", cb)
+    Assert.eq(calls[1], "douban:活着")
+    local rows = { { title = "活着" } }
+    pending(rows, nil)
     Assert.eq(rec.results, rows)
-    Assert.is_nil(rec.err)
     Assert.eq(rec.source, "douban")
-    Assert.eq(WereadFake.calls, 0)
+    job.cancel()
+    Assert.is_true(calls.cancelled)
 end
 
--- ── 豆瓣报错：回落 weread ─────────────────────────────
+-- 微信读书经 wechat 数据源，结果来源标记 weread；空结果 / 报错都是错误
 do
-    resetFakes()
     local rec, cb = recorder()
-    Search.searchAsync("活着", cb)
-    DoubanFake.pending(nil, "网络请求失败 (418)")
-    Assert.eq(WereadFake.calls, 1)
-    Assert.eq(rec.n, 0)
-
-    local rows = { { title = "活着", source = "weread" } }
-    WereadFake.pending(rows, nil)
-    Assert.eq(rec.n, 1)
-    Assert.eq(rec.results, rows)
-    Assert.is_nil(rec.err)
-    Assert.eq(rec.source, "weread")
-end
-
--- ── 豆瓣空结果（无错误）：同样回落 weread ──────────────
-do
-    resetFakes()
-    local rec, cb = recorder()
-    Search.searchAsync("活着", cb)
-    DoubanFake.pending({}, nil)
-    Assert.eq(WereadFake.calls, 1)
-
-    local rows = { { title = "x" } }
-    WereadFake.pending(rows, nil)
-    Assert.eq(rec.n, 1)
-    Assert.eq(rec.source, "weread")
-end
-
--- ── 两个源都失败：报错回调，source 为 nil ──────────────
-do
-    resetFakes()
-    local rec, cb = recorder()
-    Search.searchAsync("活着", cb)
-    DoubanFake.pending(nil, "豆瓣挂了")
-    WereadFake.pending(nil, "weread 也挂了")
-    Assert.eq(rec.n, 1)
-    Assert.is_nil(rec.results)
-    Assert.eq(rec.err, "weread 也挂了")
-    Assert.is_nil(rec.source)
-end
-
--- ── 两个源都空：兜底错误文案 ───────────────────────────
-do
-    resetFakes()
-    local rec, cb = recorder()
-    Search.searchAsync("活着", cb)
-    DoubanFake.pending({}, nil)
-    WereadFake.pending({}, nil)
-    Assert.eq(rec.n, 1)
-    Assert.is_nil(rec.results)
+    Search.searchAsync("活着", "weread", cb)
+    Assert.eq(calls[2], "wechat:活着:weread")
+    pending({}, nil)
     Assert.eq(rec.err, "无搜索结果")
     Assert.is_nil(rec.source)
+    Search.searchAsync("活着", "weread", cb)
+    pending(nil, "挂了")
+    Assert.eq(rec.err, "挂了")
 end
 
--- ── cancel：阻断豆瓣回调与回落，并取消当前 job ─────────
-do
-    resetFakes()
-    local rec, cb = recorder()
-    local job = Search.searchAsync("活着", cb)
-    job.cancel()
-    Assert.eq(DoubanFake.cancels, 1)
-
-    DoubanFake.pending({ { title = "活着" } }, nil)
-    Assert.eq(rec.n, 0)
-    Assert.eq(WereadFake.calls, 0)
+for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.novel", "desktop.detail.scrape.search" }) do
+    package.preload[name] = nil
+    package.loaded[name] = nil
 end
-
--- ── 回落途中 cancel：取消的是 weread 的 job，回调被吞 ──
-do
-    resetFakes()
-    local rec, cb = recorder()
-    local job = Search.searchAsync("活着", cb)
-    DoubanFake.pending(nil, "豆瓣挂了")
-    Assert.eq(WereadFake.calls, 1)
-
-    job.cancel()
-    Assert.eq(WereadFake.cancels, 1)
-
-    WereadFake.pending({ { title = "活着" } }, nil)
-    Assert.eq(rec.n, 0)
-end
-
-cleanup()

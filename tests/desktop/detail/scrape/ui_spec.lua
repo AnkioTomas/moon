@@ -37,7 +37,7 @@ local search_pending
 package.preload["desktop.detail.scrape.search"] = function()
     return {
         SOURCES = { { id = "douban", name = "豆瓣" } },
-        searchAsync = function(_, cb)
+        searchAsync = function(_, _, cb)
             if search_pending then
                 search_pending.cb = cb
                 return { cancel = function() search_pending.cancelled = true end }
@@ -75,7 +75,7 @@ end
 package.preload["book.books_db"] = function()
     return {
         get = function()
-            return { category = "原分类", percent = 37, md5 = "digest" }
+            return { title = "库里书名", category = "原分类", percent = 37, md5 = "digest" }
         end,
         upsert = function()
             error("scrape must use upsertLocal", 2)
@@ -144,6 +144,9 @@ local function startAndPick()
     list.items[2].callback()
     local results = shown[#shown]
     results.on_pick(results.results[1])
+    local preview = shown[#shown]
+    Assert.eq(preview.title, "确认修改")
+    preview.items[1].callback()
     Assert.is_nil(owner.scrape_job, "同步完成的搜索不留句柄")
 end
 
@@ -171,7 +174,7 @@ Assert.eq(db_row.md5, "digest")
 Assert.is_nil(db_row.percent, "upsertLocal 不再写 percent")
 Assert.eq(db_row.meta.publisher, "重庆出版社")
 Assert.eq(db_row.meta.published, "2008-1")
-Assert.eq(db_row.meta.rating.score, "8.8")
+Assert.eq(db_row.meta.rating.score, 8.8)
 Assert.eq(db_row.meta.rating.by, "douban", "评分记下来源")
 Assert.is_nil(db_row.meta.isbn)
 Assert.eq(fetch_calls, 1)
@@ -213,6 +216,41 @@ owner.scrape_job.cancel()
 Assert.is_true(search_pending.cancelled)
 Assert.is_true(searching.closed)
 search_pending = nil
+
+-- 预览逐行列出「字段：旧 → 新」；点掉的行不写库（也不换封面），再点恢复；全点掉则不应用。
+db_ok = true
+db_row = nil
+fetch_calls = 0
+write(cover_path, "old-cover")
+shown = {}
+ScrapeUI.start(identity, "原书名", nil, owner)
+shown[#shown].items[2].callback()
+shown[#shown].on_pick(shown[#shown].results[1])
+local preview = shown[#shown]
+Assert.eq(preview.items[2].text, "书名：库里书名 → 刮削标题")
+Assert.eq(preview.items[2].icon, "close")
+preview.items[2].callback()
+Assert.eq(preview.items[2].icon, "undo")
+Assert.eq(preview.items[2].mandatory, "已取消")
+local last = #preview.items
+Assert.eq(preview.items[last].text, "封面：更换为新封面")
+preview.items[last].callback()
+preview.items[1].callback()
+Assert.eq(db_row.title, "库里书名", "取消的行保持库里现值")
+Assert.eq(db_row.authors, "刮削作者")
+Assert.eq(fetch_calls, 0, "取消封面不下载")
+Assert.eq(read(cover_path), "old-cover")
+
+shown = {}
+db_row = nil
+ScrapeUI.start(identity, "原书名", nil, owner)
+shown[#shown].items[2].callback()
+shown[#shown].on_pick(shown[#shown].results[1])
+preview = shown[#shown]
+for i = 2, #preview.items do preview.items[i].callback() end
+preview.items[1].callback()
+Assert.eq(shown[#shown].text, "没有选中任何修改")
+Assert.is_nil(db_row)
 
 -- 书名行改写后列表跟着更新；书名为空不发搜索。
 shown = {}

@@ -1,7 +1,7 @@
 --[[--
 刮削 UI 流程
 
-书名行 + 候选数据来源列表 -> 点来源搜索 -> 选择结果 -> 写 books 表 + 下封面 -> 通知属主源上行 -> 通知调用方刷新
+书名行 + 候选数据来源列表 -> 点来源搜索 -> 选择结果 -> 修改预览（逐行可取消）-> 写 books 表 + 下封面 -> 通知属主源上行 -> 通知调用方刷新
 
 入口先过 SourceCapabilities.supportsScrape(source)，不支持就不显示按钮。封面先写 .part 再 rename。
 写库用 upsertLocal，不走远端 upsert，免得盖掉本地脏元数据语义。
@@ -54,40 +54,163 @@ local function saveCover(identity, url, headers, done)
     end)
 end
 
---- 写 books 表 + 拉封面，两件事都落地后回调。
+--- 刮削能改的字段（顺序即预览顺序）。old 取库里现值，new 取结果；same 判「实质没变」。
+local function digits(v) return (v:gsub("[^%dXx]", "")):upper() end
+local function year(v) return v:match("^%d%d%d%d") or v end
+local FIELDS = {
+    { key = "title", label = _("书名"), old = function(b) return b.title end, new = function(r) return r.title end },
+    { key = "author", label = _("作者"), old = function(b) return b.authors end, new = function(r) return r.author end },
+    { key = "intro", label = _("简介"), old = function(b) return b.intro end, new = function(r) return r.intro end },
+    { key = "series", label = _("系列"), old = function(b) return b.series end, new = function(r) return r.series end },
+    { key = "publisher", label = _("出版社"), old = function(b) return b.meta.publisher end,
+        new = function(r) return r.publisher end },
+    { key = "year", label = _("出版年份"), old = function(b) return b.meta.published end,
+        new = function(r) return r.year end, norm = year },
+    { key = "isbn", label = "ISBN", old = function(b) return b.meta.isbn end,
+        new = function(r) return r.isbn end, norm = digits },
+    { key = "rating", label = _("评分"),
+        old = function(b) return b.meta.rating and string.format("%.1f", b.meta.rating.score) or "" end,
+        new = function(r) return r.rating end },
+}
+
+--- 超长文本截成前 max 个字符加省略号（按 UTF-8 字符数）。
+---@param s string
+---@param max integer
+---@return string
+local function clip(s, max)
+    s = s:gsub("%s+", " ")
+    local n, pos = 0, 1
+    for p in s:gmatch("()[%z\1-\127\194-\244][\128-\191]*") do
+        n = n + 1
+        if n > max then return s:sub(1, p - 1) .. "…" end
+        pos = p
+    end
+    return s
+end
+
+--- 对比库里现值与刮削结果，列出会变的字段（结果为空或与现值相同的不列）。
+---@param existing table|nil
+---@param result table
+---@return { key: string, label: string, old: string, new: string }[]
+local function diff(existing, result)
+    local book = existing or {}
+    book.meta = book.meta or {}
+    local out = {}
+    for _idx, f in ipairs(FIELDS) do
+        local old, new = Text.trim(tostring(f.old(book) or "")), Text.trim(tostring(f.new(result) or ""))
+        local norm = f.norm or function(v) return v end
+        if new ~= "" and norm(old) ~= norm(new) then
+            out[#out + 1] = { key = f.key, label = f.label, old = old, new = new }
+        end
+    end
+    if result.cover_url ~= "" then
+        out[#out + 1] = { key = "cover", label = _("封面"), old = "", new = _("更换为新封面") }
+    end
+    return out
+end
+
+--- 写 books 表 + 拉封面，两件事都落地后回调。只落 pick 里勾选的字段，其余保持库里现值。
 ---@param identity BookIdentity
 ---@param result table
+---@param pick table<string, boolean>
 ---@param done fun(err: string|nil)
-local function applyResult(identity, result, done)
+local function applyResult(identity, result, pick, done)
     -- 分类归本地目录/用户，刮削只补元数据，不覆盖
-    local existing = BookDB.get(identity.source_id, identity.stable_id)
+    local existing = BookDB.get(identity.source_id, identity.stable_id) or {}
+    local function chosen(key, new, old)
+        if pick[key] then return new end
+        return old
+    end
     local ok = BookDB.upsertLocal({
         source_id = identity.source_id,
         stable_id = identity.stable_id,
-        title = result.title,
-        authors = result.author,
-        intro = result.intro,
-        category = existing and existing.category or nil,
-        series = result.series,
-        md5 = existing and existing.md5 or nil,
+        title = chosen("title", result.title, existing.title or result.title),
+        authors = chosen("author", result.author, existing.authors),
+        intro = chosen("intro", result.intro, existing.intro),
+        category = existing.category,
+        series = chosen("series", result.series, existing.series),
+        md5 = existing.md5,
         meta = {
-            publisher = result.publisher,
-            published = result.year,
-            isbn = result.isbn,
-            rating = { score = result.rating, by = result.source },
+            publisher = chosen("publisher", result.publisher),
+            published = chosen("year", result.year),
+            isbn = chosen("isbn", result.isbn),
+            rating = pick.rating and { score = tonumber(result.rating), by = result.source } or nil,
         },
     })
     if not ok then
         done(_("元数据更新失败"))
         return
     end
-    saveCover(identity, result.cover_url, result.cover_headers, function()
+    local function finish()
         require("source.registry").resolve(identity.source_id):onEvent("book_meta_changed", {
             identity = identity,
-            cover = result.cover_url ~= "",
+            cover = pick.cover == true,
         })
         done()
-    end)
+    end
+    if pick.cover then
+        saveCover(identity, result.cover_url, result.cover_headers, finish)
+    else
+        finish()
+    end
+end
+
+--- 修改预览：逐行列出「字段：旧 → 新」，点行首 × 取消该项（再点恢复），首行「应用所选修改」落库，点面板外放弃。
+---@param identity BookIdentity
+---@param result table
+---@param done fun()
+local function showPreview(identity, result, done)
+    local changes = diff(BookDB.get(identity.source_id, identity.stable_id), result)
+    if #changes == 0 then
+        Toast:new{ text = _("元数据已是最新，无需修改"), timeout = 2 }:show()
+        return
+    end
+    local off = {}
+    local preview
+
+    local function apply()
+        local pick, count = {}, 0
+        for _idx, c in ipairs(changes) do
+            if not off[c.key] then
+                pick[c.key] = true
+                count = count + 1
+            end
+        end
+        if count == 0 then
+            Toast:new{ text = _("没有选中任何修改"), timeout = 2 }:show()
+            return
+        end
+        preview:close()
+        applyResult(identity, result, pick, function(err)
+            Toast:new{ text = err or _("元数据已更新"), timeout = 1.5 }:show()
+            done()
+        end)
+    end
+
+    local function build()
+        local items = { { text = _("应用所选修改"), icon = "check", keep_open = true, callback = apply } }
+        for _idx, c in ipairs(changes) do
+            local line = c.old == "" and c.new or (clip(c.old, 12) .. " → " .. clip(c.new, 12))
+            items[#items + 1] = {
+                text = c.label .. "：" .. line,
+                icon = off[c.key] and "undo" or "close",
+                mandatory = off[c.key] and _("已取消") or nil,
+                keep_open = true,
+                callback = function()
+                    off[c.key] = not off[c.key] or nil
+                    preview:setItems(build())
+                end,
+            }
+        end
+        return items
+    end
+
+    preview = List:new{
+        title = _("确认修改"),
+        centered = true,
+        items = build(),
+    }
+    preview:show()
 end
 
 --- 显示搜索结果选择页。取消回到来源列表（可换来源再搜），选中落库后 on_done。
@@ -99,15 +222,9 @@ local function showResults(identity, results, source, on_done)
     local page = Results:new{
         results = results,
         source = source,
-        -- 选中后落库与下封面都完成才通知调用方刷新
+        -- 选中后先预览改动，确认后落库与下封面都完成才通知调用方刷新
         on_pick = function(result)
-            applyResult(identity, result, function(err)
-                Toast:new{
-                    text = err or _("元数据已更新"),
-                    timeout = 1.5,
-                }:show()
-                on_done()
-            end)
+            showPreview(identity, result, on_done)
         end,
     }
     page:show()
@@ -120,7 +237,7 @@ end
 ---@param identity BookIdentity
 ---@param query string
 ---@param owner table
----@param source_id string|nil 空 = 自动（豆瓣 → 微信读书）
+---@param source_id string
 ---@param on_done fun()
 local function performSearch(identity, query, owner, source_id, on_done)
     local info = require("ui.themes.widgets.progress_dialog"):new{
@@ -129,7 +246,7 @@ local function performSearch(identity, query, owner, source_id, on_done)
     info:show()
 
     local done = false
-    local job = Search.searchAsync(query, function(results, err, source)
+    local job = Search.searchAsync(query, source_id, function(results, err, source)
         done = true
         owner.scrape_job = nil
         info:close()
@@ -145,7 +262,7 @@ local function performSearch(identity, query, owner, source_id, on_done)
 
         logger.info("scrape: got results from", source)
         showResults(identity, assert(results), assert(source), on_done)
-    end, source_id)
+    end)
     if job and not done then
         owner.scrape_job = { cancel = function()
             info:close()
@@ -193,7 +310,7 @@ function ScrapeUI.start(identity, default_title, on_close, owner)
                     end,
                 }:show()
             end,
-        }, { text = _("自动（豆瓣 → 微信读书）"), keep_open = true, callback = function() search(nil) end } }
+        } }
         for _idx, src in ipairs(Search.SOURCES) do
             items[#items + 1] = { text = src.name, keep_open = true, callback = function() search(src.id) end }
         end
