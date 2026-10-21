@@ -157,6 +157,21 @@ local function recognize(random_font, fixed_font, rare, han)
     return maps[1], maps[2]
 end
 
+--- 解出的 HTML 段落还原成纯文本：把乱序码位 / 互换字形按下发字体认回真字。潇湘同一套字体反盗版，共用这里。
+---@param plain string Fock 解出的正文
+---@param font table fontResponse（css、randomFont）
+---@param fixed_font string|nil fontResponse.fixedFontTtf 下载下来的字节；没有字体加密的章为 nil，不还原字形
+---@return string
+function Fock.restore(plain, font, fixed_font)
+    local Scramble = require("source.qqreader.scramble")
+    local paragraphs = Scramble.paragraphs(plain, font.css or "")
+    if #paragraphs == 0 then return plain end
+    local rare, han = Scramble.codes(paragraphs)
+    local rare_map, han_map = {}, {}
+    if fixed_font and #rare + #han > 0 then rare_map, han_map = recognize(font.randomFont, fixed_font, rare, han) end
+    return Scramble.text(paragraphs, rare_map, han_map)
+end
+
 --- 在子进程里解密并还原乱序，回调拿正文纯文本或错误。
 ---@param info table /book/read 的 data（content、fontResponse）
 ---@param fixed_font string|nil fontResponse.fixedFontTtf 下载下来的字节；没有字体加密的章为 nil，不还原字形
@@ -170,13 +185,7 @@ function Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, fuid,
         jit.on()
         if not plain then return { err = err } end
         local font = type(info.fontResponse) == "table" and info.fontResponse or {}
-        local Scramble = require("source.qqreader.scramble")
-        local paragraphs = Scramble.paragraphs(plain, font.css or "")
-        if #paragraphs == 0 then return { text = plain } end
-        local rare, han = Scramble.codes(paragraphs)
-        local rare_map, han_map = {}, {}
-        if fixed_font and #rare + #han > 0 then rare_map, han_map = recognize(font.randomFont, fixed_font, rare, han) end
-        return { text = Scramble.text(paragraphs, rare_map, han_map) }
+        return { text = Fock.restore(plain, font, fixed_font) }
     end, {
         name = "qqreader_fock",
         kind = "light",

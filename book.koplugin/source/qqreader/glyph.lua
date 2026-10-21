@@ -5,6 +5,8 @@ QQ阅读乱序字体还原：把章节字体里的字形认回真字。
 码位不变、字形互换（码位“陵”画出来是“李”）。都没有码位→字的表，所以只能“看”：把字形和候选字（GB2312 一二级，用 KOReader 自带 Noto Sans CJK 画）
 按外框归一后缩到 16x16 比相关系数。字形可能被镜像（页面 CSS 再翻回来），两种朝向都比，取高者。
 先 8x8 粗筛取前几名再用 16x16 精排；得分低于 THRESHOLD 的不认（宁缺勿错）。
+标点（，。“” 等）不在 GB2312 汉字里，且外框归一后形状几乎一样，只能靠外框在字面里的位置认：
+网页字体与参考字体是同一套 Noto 字形，同一个标点的外框位置几乎重合。
 
 @module source.qqreader.glyph
 --]]--
@@ -88,6 +90,44 @@ local function dot(a, a_off, b, b_off, len)
     return s
 end
 
+local PUNCTUATION = "，。、；：？！“”‘’（）《》…「」『』【】"
+local PUNCT_TOLERANCE = 0.035
+
+--- 字形外框占字面（PX）的比例 { 左, 下, 右, 上 }；渲染不出来返回 nil。
+local function extent(size, code)
+    local ok, g = pcall(size.renderGlyph, size, code)
+    if not ok then return nil end
+    local w, h = g.bb:getWidth(), g.bb:getHeight()
+    if w == 0 or h == 0 then return nil end
+    return { g.l / PX, (g.t - h) / PX, (g.l + w) / PX, g.t / PX }
+end
+
+--- 参考字体里各标点的外框。
+local function punctuationRefs(ref_path)
+    local size = require("ffi/freetype").newFaceSize(ref_path, PX)
+    local refs = {}
+    for ch in PUNCTUATION:gmatch(CHAR) do
+        local box = extent(size, Glyph.codepoint(ch))
+        if box then refs[#refs + 1] = { ch = ch, box = box } end
+    end
+    return refs
+end
+
+--- 外框与某个标点的四边偏差都在容差内就认作它（取偏差总和最小）。
+local function matchPunctuation(refs, box)
+    local best, best_dist = nil, math.huge
+    for _idx, ref in ipairs(refs) do
+        local dist, fit = 0, true
+        for k = 1, 4 do
+            local d = math.abs(box[k] - ref.box[k])
+            if d > PUNCT_TOLERANCE then fit = false; break end
+            dist = dist + d
+        end
+        if fit and dist < best_dist then best, best_dist = ref.ch, dist end
+    end
+    return best
+end
+
 -- 参考字的签名每章都一样：第一次算好落盘（候选序固定，每字 FINE² + COARSE² 字节），之后直接读。
 local STRIDE = FINE * FINE + COARSE * COARSE
 
@@ -154,6 +194,7 @@ end
 function Glyph.recognize(ref_path, cache_path, tasks)
     local FT = require("ffi/freetype")
     local chars, sigs = reference(ref_path, cache_path)
+    local puncts = punctuationRefs(ref_path)
 
     local maps = {}
     for t_idx, task in ipairs(tasks) do
@@ -169,7 +210,9 @@ function Glyph.recognize(ref_path, cache_path, tasks)
             local gf0 = gsize:hasGlyph(cp) and signature(gsize, cp, FINE)
             local gc0 = gf0 and signature(gsize, cp, COARSE)
             local best_char, best_score = nil, -1
-            for mirror = 0, gf0 and 1 or -1 do
+            local punct = gf0 and matchPunctuation(puncts, extent(gsize, cp))
+            if punct then best_char, best_score = punct, 1 end
+            for mirror = 0, (gf0 and not punct) and 1 or -1 do
                 -- 原朝向已经认得很准就不必再试镜像
                 if mirror == 1 and best_score >= CONFIDENT then break end
                 local gf, gc = gf0, gc0

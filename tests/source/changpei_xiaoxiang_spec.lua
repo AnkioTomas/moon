@@ -90,10 +90,110 @@ do
 end
 
 do
-    Assert.eq(Xiaoxiang.content('<main id="content" class="a"><p>甲&amp;乙</p><p> </p><p>丙</p></main>'), "甲&乙\n丙")
-    local _t, kind = Xiaoxiang.content('<main id="content" class="a lock-mask"><p>预览</p></main>')
+    local html = '<a href="/book/25866531901067904" style="" class="details-part" data-bookid="25866531901067904" data-v-1>'
+        .. '<div class="common-img" data-v-1><div><img src="//bookcover.yuewen.com/a/90.webp" alt="x"></div></div>'
+        .. '<div class="common-info"><p class="book-title" data-v-1>来日&amp;有信</p><p class="book-profile" data-v-1>简介</p>'
+        .. '<p class="book-module" data-v-1>千山茶客<span class="pipe">·</span>连载中<span class="pipe">·</span>21万字</p></div></a>'
+        .. '<a href="/book/2" data-bookid="2" data-v-1><div class="common-img"><img src="//c/2.webp"></div>'
+        .. '<div class="common-info"><p class="book-title">乙</p><p class="book-module">丙<span>·</span>完结</p></div></a>'
+    local books = Xiaoxiang.rank(html)
+    Assert.len(books, 2)
+    Assert.eq(books[1].stable_id, "25866531901067904")
+    Assert.eq(books[1].title, "来日&有信")
+    Assert.eq(books[1].authors, "千山茶客")
+    Assert.eq(books[1].cover, "https://bookcover.yuewen.com/a/90.webp")
+    Assert.eq(books[2].title, "乙")
+    Assert.len(Xiaoxiang.rank("<html></html>"), 0)
+end
+
+do
+    local function wire(chapter) return { data = { chapterContents = { chapter } } } end
+    Assert.eq(Xiaoxiang.content(wire({ chapterPrice = "0", auth = true, chapterContent = "\r\n\227\128\128甲\r\n\227\128\128\r\n\227\128\128乙" })), "甲\n乙")
+    local free, kind = Xiaoxiang.content(wire({ chapterPrice = "9", auth = false, chapterContent = "预览" }))
+    Assert.is_nil(free)
     Assert.eq(kind, "unpaid")
-    Assert.is_nil((Xiaoxiang.content("<html></html>")))
+    Assert.eq(Xiaoxiang.content(wire({ chapterPrice = "9", auth = true, chapterContent = "全文" })), "全文")
+    Assert.is_nil((Xiaoxiang.content({ data = {} })))
+    local cipher, ckind, chapter = Xiaoxiang.content(wire({ chapterPrice = "20", auth = true, encrypt = true, chapterContent = "9HHP" }))
+    Assert.is_nil(cipher)
+    Assert.eq(ckind, "encrypted")
+    Assert.eq(chapter.chapterContent, "9HHP")
+
+    local rows = { { bookid = "35554414603847007", title = " 书 ", author = "甲", ccid = "35554414603847008", restype = 1 },
+        { bookid = "2", title = "乙", author = "丙", ccid = "0" } }
+    local books = Xiaoxiang.shelfList(rows)
+    Assert.eq(books[1].stable_id, "35554414603847007")
+    Assert.eq(books[1].title, "书")
+    Assert.eq(books[1].cover, "https://bookcover.yuewen.com/qdbimg/349573/c_35554414603847007/180")
+    local progress = Xiaoxiang.progress(rows)
+    Assert.eq(progress["35554414603847007"], "35554414603847008")
+    Assert.is_nil(progress["2"])
+end
+
+do
+    local seen = {}
+    package.loaded["http.request"] = nil
+    package.preload["http.request"] = function()
+        return {
+            get = function(url, opts, cb)
+                seen.url, seen.headers = url, opts.headers
+                cb(seen.reply)
+                return {}
+            end,
+            post = function(url, body, opts, cb)
+                seen.post_url, seen.body, seen.headers = url, body, opts.headers
+                cb(seen.reply)
+                return {}
+            end,
+        }
+    end
+    package.loaded["source.xiaoxiang.client"] = nil
+    local Settings = require("utils.settings")
+    local cfg = Settings.getSource("xiaoxiang")
+    cfg.cookie = "csrfToken=C1; ywKey=K"
+    Settings.saveSource("xiaoxiang", cfg)
+    local Client = require("source.xiaoxiang.client")
+    require("source.auth").reset()
+
+    seen.reply = '{"code":0,"data":{"isLogin":0}}'
+    local err
+    Client.shelfRemoveAsync("35554414603847007", function(_wire, e) err = e end)
+    Assert.is_true(require("source.auth").expired("xiaoxiang"))
+    Assert.is_nil(seen.post_url)
+
+    seen.reply = '{"code":0,"data":{"isLogin":1}}'
+    Client.userAsync("a=1", function(info) seen.info = info end)
+    Assert.eq(seen.info.isLogin, 1)
+    Assert.eq(seen.headers.Cookie, "a=1; csrfToken=moon")
+    Assert.matches(seen.url, "_csrfToken=moon")
+
+    local replies = { '{"code":0,"data":{"isLogin":1}}', '{"code":0,"msg":"ok","data":null}' }
+    package.loaded["source.auth"].reset()
+    seen.reply = nil
+    local n = 0
+    package.loaded["http.request"] = nil
+    package.preload["http.request"] = function()
+        return {
+            get = function(url, opts, cb) n = n + 1; seen.url = url; cb(replies[1]) return {} end,
+            post = function(url, body, opts, cb) seen.post_url, seen.body = url, body; cb(replies[2]) return {} end,
+        }
+    end
+    package.loaded["source.xiaoxiang.client"] = nil
+    Client = require("source.xiaoxiang.client")
+    local ok
+    Client.shelfRemoveAsync("35554414603847007", function(wire) ok = wire ~= nil end)
+    Assert.is_true(ok)
+    Assert.matches(seen.post_url, "/bookshelf/delete%?_csrfToken=C1")
+    Assert.matches(seen.body, '"bookId":"35554414603847007"')
+
+    replies[2] = '{"code":0,"data":{"chapterContents":[{"ccid":35554414603847008,"chapterPrice":"0","auth":true,"chapterContent":"甲"}]}}'
+    local text
+    Client.contentAsync("35554414603847007", "35554414603847008", function(t) text = t end)
+    Assert.eq(text, "甲")
+    Assert.matches(seen.body, '"ccids":%["35554414603847008"%]')
+    cfg.cookie = nil
+    Settings.saveSource("xiaoxiang", cfg)
+    package.loaded["source.xiaoxiang.client"] = nil
 end
 
 do
@@ -205,8 +305,81 @@ do
     Assert.eq(poll[1], 4)
     Assert.eq(poll[3], token)
     Assert.eq(next(QRLogin.decode("")), nil)
+    -- login_res(2){ status 1, web_data(4){ token(1) } }
+    local login = QRLogin.fields("\8\1\34\4\10\2tk")
+    Assert.eq(login[1], 1)
+    Assert.eq(QRLogin.fields(login[4])[1], "tk")
 end
 
+do
+    local seen
+    package.loaded["http.request"] = nil
+    package.preload["http.request"] = function()
+        return { get = function(_url, opts, cb) seen = opts.headers; cb('{"code":200,"data":{}}') return {} end }
+    end
+    package.loaded["source.changpei.client"] = nil
+    require("source.changpei.client").userAsync("PHPSESSID=a; moon_token=TK", function() end)
+    Assert.eq(seen.token, "TK")
+    Assert.eq(seen.Cookie, "PHPSESSID=a")
+end
+
+
+-- token 过期（9996）：用 refresh_token 换新 token 写回 Cookie 再重发；换不到才算登录失效
+do
+    local grpc_status, renew_calls, tokens = "0", 0, {}
+    package.loaded["http.request"] = nil
+    package.preload["http.request"] = function()
+        return {
+            header = function(res, name) return res and res[name] end,
+            get = function(_url, opts, cb)
+                tokens[#tokens + 1] = opts.headers.token
+                if opts.headers.token == "OLD" then cb('{"code":9996,"msg":"请先登录"}') else cb('{"code":200,"data":{}}') end
+                return {}
+            end,
+            post = function(url, body, opts, cb)
+                renew_calls = renew_calls + 1
+                Assert.matches(url, "get_token")
+                Assert.eq(body, "\0\0\0\0\4\42\2RF")
+                Assert.eq(opts.headers.imei, "dev")
+                cb("\0\0\0\0\6\26\4NEW1", nil, { ["grpc-status"] = grpc_status })
+                return {}
+            end,
+        }
+    end
+    package.loaded["source.changpei.client"] = nil
+    local Client = require("source.changpei.client")
+    local Auth = require("source.auth")
+    local settings = require("utils.settings")
+    settings.saveSource("changpei", { cookie = "PHPSESSID=a; _c_n_=dev; moon_token=OLD; moon_refresh=RF" })
+    Auth.reset()
+
+    local wire
+    Client.historyAsync(function(w) wire = w end)
+    Assert.not_nil(wire)
+    Assert.eq(renew_calls, 1)
+    Assert.eq(tokens[#tokens], "NEW1")
+    Assert.matches(settings.getSource("changpei").cookie, "moon_token=NEW1")
+    Assert.matches(settings.getSource("changpei").cookie, "moon_refresh=RF")
+    Assert.is_false(Auth.expired("changpei"))
+
+    settings.saveSource("changpei", { cookie = "PHPSESSID=a; _c_n_=dev; moon_token=OLD; moon_refresh=RF" })
+    grpc_status = "16"
+    local failed
+    Client.historyAsync(function(w, err) failed = { w, err } end)
+    Assert.is_nil(failed[1])
+    Assert.eq(failed[2], "请先登录")
+    Assert.is_true(Auth.expired("changpei"))
+
+    settings.saveSource("changpei", { cookie = "PHPSESSID=a; _c_n_=dev; moon_token=OLD" })
+    Auth.reset()
+    renew_calls = 0
+    Client.historyAsync(function() end)
+    Assert.eq(renew_calls, 0, "没有 refresh_token 不请求")
+    Assert.is_true(Auth.expired("changpei"))
+    settings.saveSource("changpei", {})
+    Auth.reset()
+    package.preload["http.request"] = nil
+end
 
 -- 书城榜单：rankingNav → 两行 chip，节点取榜单 + 子榜
 do

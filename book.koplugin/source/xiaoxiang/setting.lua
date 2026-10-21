@@ -1,8 +1,8 @@
 --[[--
 潇湘源设置：登录。
 
-潇湘手机站的登录态是网页 Cookie：在电脑浏览器登录后，把 m.xxsy.net 请求里的 Cookie 请求头粘贴进来。
-站点没有公开的账号校验接口，这里只做格式检查就保存；Cookie 过期表现为已购 VIP 章重新变成「未购」，重新粘贴即可。
+潇湘账号在新站 www.xxsypro.com（阅文通行证，只有 QQ / 微信 / 阅文账号，没有扫码）。登录态是网页 Cookie：
+浏览器扩展授权（check 靠 personal 接口 data.isLogin），或在电脑浏览器登录后把请求里的 Cookie 请求头粘贴进来。拿到 Cookie 先校验再保存。
 
 @module koplugin.book.source.xiaoxiang.setting
 --]]
@@ -33,24 +33,72 @@ function Setting.parseCookie(input)
     return text:find("^[^=%s;]+=") and text or ""
 end
 
+--- 拉一次账号接口校验 Cookie，通过才保存并重载源。
+---@param cookie string
+---@param cb fun(ok: boolean, err: string|nil)
+local function saveCookie(cookie, cb)
+    require("source.xiaoxiang.client").userAsync(cookie, function(info, err)
+        if not info then return cb(false, err or _("登录失败")) end
+        local settings = require("utils.settings")
+        local cfg = settings.getSource(SOURCE_ID)
+        cfg.cookie = cookie
+        settings.saveSource(SOURCE_ID, cfg)
+        require("source.auth").ok(SOURCE_ID)
+        require("source.registry").reload()
+        cb(true)
+    end)
+end
+
+---@param cookie string
+local function verify(cookie)
+    local Toast = require("ui.themes.widgets.toast")
+    require("ui/network/manager"):runWhenOnline(function()
+        local waiting = require("ui.themes.widgets.progress_dialog"):new{
+            title = _("潇湘账号"), text = _("正在校验登录…"), dismissable = false,
+        }
+        waiting:show()
+        saveCookie(cookie, function(ok, err)
+            waiting:close()
+            Toast:new{ text = ok and _("登录成功") or err, timeout = ok and 2 or 3 }:show()
+        end)
+    end)
+end
+
+--- 浏览器扩展登录（features/cookie）。personal 接口一律 code 0，靠 data.isLogin 判登录。
+Setting.browser = {
+    domain = "www.xxsypro.com",
+    scope = "cookie",
+    login = "https://www.xxsypro.com/",
+    check = "https://www.xxsypro.com/api/user/auth/personal",
+    check_json = { path = "data.isLogin", ok = { 1 } },
+    icon = "https://www.xxsypro.com/favicon.ico",
+    isAuthorized = function()
+        return loggedIn() and not require("source.auth").expired(SOURCE_ID)
+    end,
+    apply = function(payload, cb)
+        local parts = {}
+        for _idx, cookie in ipairs(type(payload.cookies) == "table" and payload.cookies or {}) do
+            if type(cookie.name) == "string" and type(cookie.value) == "string" and cookie.value ~= "" then
+                parts[#parts + 1] = cookie.name .. "=" .. cookie.value
+            end
+        end
+        if #parts == 0 then return cb(false, _("没有读到 Cookie")) end
+        saveCookie(table.concat(parts, "; "), cb)
+    end,
+}
+
 local function showLogin()
     require("ui.themes.widgets.input"):new{
         title = _("潇湘登录 Cookie"),
-        fields = { { text = "", hint = _("在电脑浏览器登录潇湘书院手机版后粘贴 Cookie") } },
+        fields = { { text = "", hint = _("登录 www.xxsypro.com 后，从开发者工具网络面板复制请求头里的 Cookie") } },
         ok_text = _("登录"),
         callback = function(value)
-            local Toast = require("ui.themes.widgets.toast")
             local cookie = Setting.parseCookie(value or "")
             if cookie == "" then
-                Toast:new{ text = _("没有读到 Cookie"), timeout = 3 }:show()
+                require("ui.themes.widgets.toast"):new{ text = _("没有读到 Cookie"), timeout = 3 }:show()
                 return
             end
-            local settings = require("utils.settings")
-            local cfg = settings.getSource(SOURCE_ID)
-            cfg.cookie = cookie
-            settings.saveSource(SOURCE_ID, cfg)
-            require("source.registry").reload()
-            Toast:new{ text = _("已保存登录 Cookie"), timeout = 2 }:show()
+            verify(cookie)
         end,
     }:show()
 end

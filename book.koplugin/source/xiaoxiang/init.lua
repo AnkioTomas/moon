@@ -1,8 +1,9 @@
 --[[--
 潇湘书院数据源。
 
-搜索走 PC 站、目录与正文走手机站页面（client.lua）：免费章匿名可读，登录（setting.lua 粘贴手机站 Cookie）后已购 VIP 章可读。没有远端书架 / 进度，
-书由书城页搜索后加入本地书库，书库就是唯一真相。没买的 VIP 章开章给临时提示页，目录标「未购」。
+搜索、目录、榜单走 PC / 手机站页面，账号、正文、书架、进度走新站 xxsypro.com 的 JSON 接口（client.lua）。
+登录态是新站 Cookie（阅文通行证，只有 QQ / 微信 / 阅文账号，没有扫码）：浏览器扩展授权，或粘贴 Cookie（setting.lua）。
+书架双向同步（Shelf.syncAsync），进度按章：读书架行的 ccid，写 readingProcess/add。没买的 VIP 章开章给临时提示页，目录标「未购」。
 
 @module koplugin.book.source.xiaoxiang
 --]]
@@ -10,6 +11,8 @@
 local Client = require("source.xiaoxiang.client")
 local Mapper = require("source.xiaoxiang.mapper")
 local SourceBase = require("source.base")
+local Browse = require("source.browse")
+local Shelf = require("source.shelf")
 local Toc = require("source.toc")
 local _ = require("gettext")
 
@@ -33,17 +36,27 @@ function Xiaoxiang.new()
     return setmetatable({ id = meta.id, name = meta.name, type = meta.type }, Source)
 end
 
---- 不需要登录，随时可用。
+--- 搜索 / 目录 / 榜单匿名可用，书架、进度和已购 VIP 章要登录 Cookie。
 ---@return boolean
 function Source:configured()
-    return true
+    return Client.cookie() ~= nil
 end
 
---- 没有远端书架：标删后直接撕墓碑。
+--- 书架远端：Shelf.syncAsync 要的三个冒号方法。
+local Remote = {}
+
+function Remote:shelfSyncAsync(cb) return Client.shelfAsync(cb) end
+
+function Remote:addToShelfAsync(stable_id, cb) return Client.shelfAddAsync(stable_id, cb) end
+
+function Remote:removeFromShelfAsync(stable_id, cb) return Client.shelfRemoveAsync(stable_id, cb) end
+
+--- 未登录时书库就是唯一真相：标删后直接撕墓碑；登录后走基类三段式，由书架同步推删。
 ---@param identity BookIdentity
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return { cancel: fun() }
 function Source:deleteBookAsync(identity, cb)
+    if self:configured() then return SourceBase.deleteBookAsync(self, identity, cb) end
     if not require("book.store").markDeleted(self.id, identity.stable_id) then
         return SourceBase.defer(cb, false, _("删除本书失败"))
     end
@@ -53,28 +66,62 @@ function Source:deleteBookAsync(identity, cb)
     return SourceBase.defer(cb, true)
 end
 
-function Source:syncBooksAsync(_opts, cb)
-    return SourceBase.skipped(cb, "xiaoxiang has no remote")
-end
-
-function Source:syncProgressAsync(_opts, cb)
-    return SourceBase.skipped(cb, "xiaoxiang has no remote")
+function Source:syncBooksAsync(opts, cb)
+    if not self:configured() then return SourceBase.skipped(cb, "xiaoxiang not logged in") end
+    return Shelf.syncAsync(self.id, Remote, Mapper.shelfList, opts, cb)
 end
 
 function Source:syncNotesAsync(_opts, cb)
-    return SourceBase.skipped(cb, "xiaoxiang has no remote")
+    return SourceBase.skipped(cb, "xiaoxiang has no notes")
 end
 
 function Source:syncStatsAsync(_opts, cb)
-    return SourceBase.skipped(cb, "xiaoxiang has no remote")
+    return SourceBase.skipped(cb, "xiaoxiang has no stats")
 end
 
-function Source:getProgressAsync(_identity, cb)
-    return SourceBase.defer(cb, nil, nil, { empty = true })
+--- 进度只到章：读书架行里这本书最近读到的章（ccid）。
+function Source:getProgressAsync(identity, cb)
+    if not self:configured() then return SourceBase.defer(cb, nil, _("未登录潇湘")) end
+    local cancelled, job = false, nil
+    job = Client.shelfAsync(function(rows, err)
+        if cancelled then return end
+        if not rows then cb(nil, err); return end
+        local uid = Mapper.progress(rows)[tostring(identity.stable_id)]
+        if not uid then cb(nil, nil, { empty = true }); return end
+        job = self:loadTocAsync(identity, function(toc, reason)
+            if cancelled then return end
+            if not toc or #toc == 0 then cb(nil, reason or _("潇湘目录为空")); return end
+            local idx = Toc.index(self.id, identity.stable_id, uid)
+            if not idx then cb(nil, nil, { empty = true }); return end
+            cb({
+                chapter_idx = idx,
+                chapter_title = toc[idx].title,
+                fraction = (idx - 1) / #toc,
+                extra = { chapter_uid = uid, chapter_idx = idx },
+            })
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
 end
 
-function Source:putProgressAsync(_identity, _pos, cb)
-    return SourceBase.defer(cb, true)
+function Source:putProgressAsync(identity, pos, cb)
+    if not self:configured() then return SourceBase.defer(cb, nil, _("未登录潇湘")) end
+    local cancelled, job = false, nil
+    job = self:loadTocAsync(identity, function(toc, err)
+        if cancelled then return end
+        if not toc then cb(nil, err); return end
+        local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
+        local chapter = idx and toc[idx]
+        if not chapter then cb(nil, _("缺少潇湘章节位置")); return end
+        job = Client.progressAsync(identity.stable_id, chapter.uid, function(wire, perr) cb(wire and true, perr) end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
 end
 
 ---@param keyword string
@@ -87,6 +134,32 @@ function Source:searchAsync(keyword, cb)
             return
         end
         cb({ data = books })
+    end)
+end
+
+-- 手机站 /rank/<id> 的榜单，顺序同网页。
+local RANKS = {
+    { id = "xxyuepiao", title = "潇湘票榜" },
+    { id = "bestsales", title = "畅销榜" },
+    { id = "finish", title = "完结榜" },
+    { id = "reading", title = "阅读榜" },
+    { id = "collections", title = "收藏榜" },
+}
+
+---@param opts { node?: string, limit?: integer }
+---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:browseAsync(opts, cb)
+    local rank = RANKS[1]
+    for _idx, row in ipairs(RANKS) do
+        if row.id == opts.node then rank = row end
+    end
+    local chips = {}
+    for _idx, row in ipairs(RANKS) do chips[#chips + 1] = { id = row.id, title = _(row.title) } end
+    local groups = { Browse.group(chips, rank.id) }
+    return Client.rankAsync(rank.id, function(books, err)
+        if not books then cb(nil, err); return end
+        cb({ data = books, groups = groups })
     end)
 end
 

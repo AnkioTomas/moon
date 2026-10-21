@@ -35,6 +35,29 @@ function Mapper.search(html)
     return out
 end
 
+--- 手机站榜单页 HTML → Book[]。每本是一个 `<a href="/book/ID">`，封面 alt 是书名，book-module 是「作者·状态·字数」。
+---@param html string
+---@return Book[]
+function Mapper.rank(html)
+    local out = {}
+    for id, item in html:gmatch('<a href="/book/(%d+)"[^>]*data%-bookid=.-(<div class="common%-img".-)</a>') do
+        local title = item:match('class="book%-title"[^>]*>([^<]*)<')
+        if title then
+            local module = item:match('class="book%-module"[^>]*>(.-)</p>') or ""
+            local cover = item:match('<img src="([^"]*)"')
+            out[#out + 1] = {
+                source_id = SOURCE_ID,
+                stable_id = id,
+                title = Text.xmlDecode(title),
+                authors = Text.trim(Text.xmlDecode(module:match("^([^<]*)") or "")),
+                intro = Text.trim(Text.xmlDecode(item:match('class="book%-profile"[^>]*>([^<]*)<') or "")),
+                cover = cover and (cover:gsub("^//", "https://")),
+            }
+        end
+    end
+    return out
+end
+
 --- 目录缓存格式版本。
 Mapper.TOC_VERSION = 1
 
@@ -61,21 +84,55 @@ function Mapper.toc(html)
     return toc
 end
 
---- 章节页 → 正文纯文本；没买的 VIP 章页面只有预览（正文容器带 lock-mask）返回 nil, "unpaid"。
----@param html string
+--- 章节接口回包 → 正文纯文本。没买的 VIP 章（价格 > 0 且 auth 不为真）只有 130 字预览，返回 nil, "unpaid"。
+--- 正文段落以 \r\n 分隔、每段前有全角缩进。
+---@param wire table
 ---@return string|nil text
 ---@return "unpaid"|nil kind
-function Mapper.content(html)
-    local attrs, body = html:match('<main id="content"([^>]*)>(.-)</main>')
-    if not body then return nil end
-    if attrs:find("lock-mask", 1, true) then return nil, "unpaid" end
+function Mapper.content(wire)
+    local chapters = type(wire.data) == "table" and wire.data.chapterContents
+    local chapter = chapters and chapters[1]
+    if type(chapter) ~= "table" then return nil end
+    if (tonumber(chapter.chapterPrice) or 0) > 0 and chapter.auth ~= true then return nil, "unpaid" end
+    if chapter.encrypt == true then return nil, "encrypted", chapter end
     local lines = {}
-    for paragraph in body:gmatch("<p>(.-)</p>") do
-        local line = Text.trim(Text.xmlDecode((paragraph:gsub("<[^>]*>", ""))))
+    for line in tostring(chapter.chapterContent or ""):gmatch("[^\r\n]+") do
+        line = Text.trim(line)
+        while line:sub(1, 3) == "\227\128\128" do line = Text.trim(line:sub(4)) end
         if line ~= "" then lines[#lines + 1] = line end
     end
     if #lines == 0 then return nil end
     return table.concat(lines, "\n")
+end
+
+--- 书架行 → Book[]。封面按书 id 拼（书架接口不给）。
+---@param rows table[]
+---@return Book[]
+function Mapper.shelfList(rows)
+    local out = {}
+    for _idx, row in ipairs(rows) do
+        local id = tostring(row.bookid)
+        out[#out + 1] = {
+            source_id = SOURCE_ID,
+            stable_id = id,
+            title = Text.trim(row.title or ""),
+            authors = Text.trim(row.author or ""),
+            cover = "https://bookcover.yuewen.com/qdbimg/349573/c_" .. id .. "/180",
+        }
+    end
+    return out
+end
+
+--- 书架行 → 书 id → 最近读到的章 id（ccid 为 "0" 表示没读过）。
+---@param rows table[]
+---@return table<string, string>
+function Mapper.progress(rows)
+    local out = {}
+    for _idx, row in ipairs(rows) do
+        local ccid = tostring(row.ccid or "0")
+        if ccid ~= "0" then out[tostring(row.bookid)] = ccid end
+    end
+    return out
 end
 
 return Mapper
