@@ -2,10 +2,10 @@
 浏览器授权登录的远程管理接口（/api/cookie/*），协议见浏览器扩展 moon-cookie-storage 的 README「远程管理接入协议 v1」。
 
   GET  sources                 支持浏览器登录的数据源 [{ id, name, icon, authorized }]
-  POST ticket {source}         签发一次性 ticket，回扩展要的任务参数 { domain, scope, login, check, ticket, callback }
+  POST ticket {source}         签发一次性 ticket，回扩展要的任务参数 { domain, scope, login, check, check_json?, ticket, callback }
   GET  login?data=<信封>       扩展回调：解密 → 数据源 apply → { ok, close, ticketId }
 
-数据源在 setting.lua 声明 `Setting.browser = { domain, scope, login, check, icon, isAuthorized, apply(payload, cb(ok, err)) }`：
+数据源在 setting.lua 声明 `Setting.browser = { domain, scope, login, check, check_json?, icon, isAuthorized, apply(payload, cb(ok, err)) }`：
 payload 是扩展采集的明文（cookies / local / session），apply 负责校验登录态并保存。
 ticket 只在内存里：10 分钟过期；成功后保留回执 2 分钟，重复回调返回同一确认（幂等）。
 
@@ -147,7 +147,7 @@ function Remote.handle(method, action, params, cb)
         local ticket = randomTicket()
         tickets[b64url(Sha256.hash(ticket))] = { ticket = ticket, source = params.source, expires = now + TICKET_TTL }
         return cb(200, {
-            domain = browser.domain, scope = browser.scope, login = browser.login, check = browser.check,
+            domain = browser.domain, scope = browser.scope, login = browser.login, check = browser.check, check_json = browser.check_json,
             ticket = ticket, callback = CALLBACK,
         })
     elseif action == "login" and method == "GET" then

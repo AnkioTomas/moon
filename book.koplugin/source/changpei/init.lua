@@ -1,7 +1,7 @@
 --[[--
 长佩文学网数据源。
 
-网页 JSON 接口（client.lua）：搜索、目录、免费章正文；登录（setting.lua 粘贴网页 token）后已购 VIP 章可读。没有远端书架 / 进度，
+网页 JSON 接口（client.lua）：搜索、目录、免费章正文；登录（setting.lua 粘贴网页 Cookie）后已购 VIP 章可读。没有远端书架 / 进度，
 书由书城页搜索后加入本地书库，书库就是唯一真相。没买的 VIP 章开章给临时提示页，目录标「未购」。
 
 @module koplugin.book.source.changpei

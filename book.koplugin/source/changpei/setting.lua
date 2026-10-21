@@ -1,8 +1,9 @@
 --[[--
 长佩源设置：登录。
 
-长佩网页的登录态是 sessionStorage 里的 token（不是 Cookie，浏览器扩展拿不到）：在电脑浏览器登录
-gongzicp.com，开发者工具控制台执行 `sessionStorage.token` 复制出来粘贴。先拉一次账号信息校验，通过才保存。
+长佩网页的登录态是 Cookie（PHPSESSID 等，含 HttpOnly）。没有登录态时服务端要求人机验证、不给正文。
+登录三条路：扫码（长佩 App 扫，qrlogin.lua）、浏览器扩展授权（check 靠 JSON code 判定）、或在电脑浏览器登录后把请求里的 Cookie 请求头粘贴进来。
+拿到 Cookie 先拉一次账号信息校验，通过才保存。
 
 @module koplugin.book.source.changpei.setting
 --]]
@@ -15,7 +16,7 @@ local Setting = {}
 
 ---@return boolean
 local function loggedIn()
-    return require("source.changpei.client").token() ~= nil
+    return require("source.changpei.client").cookie() ~= nil
 end
 
 ---@return string, boolean
@@ -24,50 +25,87 @@ function Setting.rowStatus()
     return on and _("已登录") or _("未登录 · 点此登录"), on
 end
 
---- 控制台复制出来的 token 常带引号或空白。
+--- 浏览器复制的 Cookie 请求头（可带 `Cookie:` 前缀）→ 请求头值；没有 `name=value` 返回空串。
 ---@param input string
 ---@return string
-function Setting.parseToken(input)
-    return (tostring(input):gsub("^[%s\"']+", ""):gsub("[%s\"']+$", ""))
+function Setting.parseCookie(input)
+    local text = tostring(input):gsub("^%s*[Cc]ookie%s*:%s*", ""):gsub("[\r\n]+", " ")
+    text = text:gsub("^%s+", ""):gsub("%s+$", "")
+    return text:find("^[^=%s;]+=") and text or ""
 end
 
----@param token string
-local function verify(token)
+--- 拉一次账号接口校验 Cookie，通过才保存并重载源。
+---@param cookie string
+---@param cb fun(ok: boolean, err: string|nil)
+local function saveCookie(cookie, cb)
+    require("source.changpei.client").userAsync(cookie, function(info, err)
+        if not info then return cb(false, err or _("登录失败")) end
+        local settings = require("utils.settings")
+        local cfg = settings.getSource(SOURCE_ID)
+        cfg.cookie = cookie
+        settings.saveSource(SOURCE_ID, cfg)
+        require("source.auth").ok(SOURCE_ID)
+        require("source.registry").reload()
+        cb(true)
+    end)
+end
+
+---@param cookie string
+local function verify(cookie)
     local Toast = require("ui.themes.widgets.toast")
     require("ui/network/manager"):runWhenOnline(function()
         local waiting = require("ui.themes.widgets.progress_dialog"):new{
             title = _("长佩账号"), text = _("正在校验登录…"), dismissable = false,
         }
         waiting:show()
-        require("source.changpei.client").userAsync(token, function(info, err)
+        saveCookie(cookie, function(ok, err)
             waiting:close()
-            if not info then
-                Toast:new{ text = err or _("登录失败"), timeout = 3 }:show()
-                return
-            end
-            local settings = require("utils.settings")
-            local cfg = settings.getSource(SOURCE_ID)
-            cfg.token = token
-            settings.saveSource(SOURCE_ID, cfg)
-            require("source.auth").ok(SOURCE_ID)
-            require("source.registry").reload()
-            Toast:new{ text = _("登录成功"), timeout = 2 }:show()
+            Toast:new{ text = ok and _("登录成功") or err, timeout = ok and 2 or 3 }:show()
         end)
+    end)
+end
+
+--- 浏览器扩展登录（features/cookie）。getUserInfo 一律 HTTP 200，靠 JSON code 判登录（未登录 9996）。
+Setting.browser = {
+    domain = "www.gongzicp.com",
+    scope = "cookie",
+    login = "https://www.gongzicp.com/login/signin",
+    check = "https://www.gongzicp.com/webapi/user/getUserInfo",
+    check_json = { path = "code", ok = { 200 } },
+    icon = "https://www.gongzicp.com/favicon.ico",
+    isAuthorized = function()
+        return loggedIn() and not require("source.auth").expired(SOURCE_ID)
+    end,
+    apply = function(payload, cb)
+        local parts = {}
+        for _idx, cookie in ipairs(type(payload.cookies) == "table" and payload.cookies or {}) do
+            if type(cookie.name) == "string" and type(cookie.value) == "string" and cookie.value ~= "" then
+                parts[#parts + 1] = cookie.name .. "=" .. cookie.value
+            end
+        end
+        if #parts == 0 then return cb(false, _("没有读到 Cookie")) end
+        saveCookie(table.concat(parts, "; "), cb)
+    end,
+}
+
+local function startQR()
+    require("ui/network/manager"):runWhenOnline(function()
+        require("source.changpei.qrlogin"):new(verify):start()
     end)
 end
 
 local function showLogin()
     require("ui.themes.widgets.input"):new{
-        title = _("长佩登录 token"),
-        fields = { { text = "", hint = _("电脑浏览器登录长佩后，控制台执行 sessionStorage.token 并粘贴") } },
+        title = _("长佩登录 Cookie"),
+        fields = { { text = "", hint = _("登录长佩后，从开发者工具网络面板复制请求头里的 Cookie") } },
         ok_text = _("登录"),
         callback = function(value)
-            local token = Setting.parseToken(value or "")
-            if token == "" then
-                require("ui.themes.widgets.toast"):new{ text = _("没有读到 token"), timeout = 3 }:show()
+            local cookie = Setting.parseCookie(value or "")
+            if cookie == "" then
+                require("ui.themes.widgets.toast"):new{ text = _("没有读到 Cookie"), timeout = 3 }:show()
                 return
             end
-            verify(token)
+            verify(cookie)
         end,
     }:show()
 end
@@ -80,10 +118,16 @@ function Setting.rows()
             local status, status_on = Setting.rowStatus()
             return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "account_circle",
                 title = _("长佩账号"), status = status, status_on = status_on,
-                callback = function() showLogin() end })
+                callback = function() startQR() end })
         end,
     }
-    if not loggedIn() then return rows end
+    if not loggedIn() then
+        rows[#rows + 1] = function(iw)
+            return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "content_paste",
+                title = _("粘贴 Cookie"), callback = function() showLogin() end })
+        end
+        return rows
+    end
     rows[#rows + 1] = function(iw)
         return Row.widget({ width = iw, chevron = false, kind = "action", icon = "logout", title = _("退出登录"),
             callback = function()
@@ -93,7 +137,7 @@ function Setting.rows()
                     ok_callback = function()
                         local settings = require("utils.settings")
                         local cfg = settings.getSource(SOURCE_ID)
-                        cfg.token = nil
+                        cfg.cookie = nil
                         settings.saveSource(SOURCE_ID, cfg)
                         require("ui.themes.widgets.toast"):new{ text = _("已退出登录"), timeout = 2 }:show()
                         require("source.registry").reload()
@@ -105,6 +149,6 @@ function Setting.rows()
 end
 
 --- 登录失效提示的「重新登录」直达入口（desktop.sync.promptLogin）。
-Setting.login = showLogin
+Setting.login = startQR
 
 return Setting

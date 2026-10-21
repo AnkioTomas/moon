@@ -94,8 +94,8 @@ end
 
 do
     local CpSetting = require("source.changpei.setting")
-    Assert.eq(CpSetting.parseToken(' "abc.def" \n'), "abc.def")
-    Assert.eq(CpSetting.parseToken("  "), "")
+    Assert.eq(CpSetting.parseCookie("Cookie: PHPSESSID=x; _c_n_=y\n"), "PHPSESSID=x; _c_n_=y")
+    Assert.eq(CpSetting.parseCookie("  "), "")
 
     local XxSetting = require("source.xiaoxiang.setting")
     Assert.eq(XxSetting.parseCookie("Cookie: a=1; b=2\n"), "a=1; b=2")
@@ -111,22 +111,41 @@ do
     package.loaded["source.changpei.client"] = nil
     local Settings = require("utils.settings")
     local cfg = Settings.getSource("changpei")
-    cfg.token = "T1"
+    cfg.cookie = "PHPSESSID=T1"
     Settings.saveSource("changpei", cfg)
     local Client = require("source.changpei.client")
     local Auth = require("source.auth")
     Auth.reset()
     local err
     Client.chaptersAsync("1", function(_wire, e) err = e end)
-    Assert.eq(seen.headers.token, "T1")
-    Assert.eq(seen.headers.Client, "h5")
+    Assert.eq(seen.headers.Cookie, "PHPSESSID=T1")
+    Assert.eq(seen.headers.Client, "pc")
     Assert.eq(err, "请先登录")
     Assert.is_true(Auth.expired("changpei"))
-    cfg.token = nil
+    cfg.cookie = nil
     Settings.saveSource("changpei", cfg)
     Auth.reset()
     Client.searchAsync("x", function() end)
-    Assert.is_nil(seen.headers.token)
+    Assert.is_nil(seen.headers.Cookie)
     Assert.is_true(not Auth.expired("changpei"))
     package.preload["http.request"] = nil
 end
+
+-- 扫码登录：gRPC-web 帧与 protobuf 顶层字段
+local QRLogin = require("source.changpei.qrlogin")
+
+do
+    Assert.eq(QRLogin.frame("Login"), "\0\0\0\0\7\10\5Login")
+end
+
+do
+    local token = ("a"):rep(32)
+    local fields = QRLogin.decode("\0\0\0\0\35\10\32" .. token .. "\16\200\1")
+    Assert.eq(fields[1], token)
+    Assert.eq(fields[2], 200)
+    local poll = QRLogin.decode("\0\0\0\0\36\8\4\26\32" .. token)
+    Assert.eq(poll[1], 4)
+    Assert.eq(poll[3], token)
+    Assert.eq(next(QRLogin.decode("")), nil)
+end
+

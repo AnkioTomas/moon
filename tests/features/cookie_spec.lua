@@ -48,6 +48,7 @@ package.preload["desktop.pages.setting.source"] = function()
             return { browser = {
                 domain = "www.qimao.com", scope = "local", login = "https://www.qimao.com/login",
                 check = "https://www.qimao.com/user/bookshelf",
+                check_json = { path = "code", ok = { 200 } },
                 icon = "https://cdn-front.qimao.com/global/static/images/favicon2022.ico",
                 isAuthorized = function() return authorized end,
                 apply = function(payload, cb) applied = applied + 1; cb(payload["local"] ~= nil) end,
@@ -93,6 +94,7 @@ local status, req = call("POST", "ticket", { source = "qimao" })
 Assert.eq(status, 200)
 Assert.eq(req.ticket, TICKET)
 Assert.eq(req.domain, "www.qimao.com")
+Assert.eq(req.check_json.path, "code")
 Assert.eq(req.callback, "/api/cookie/login")
 Assert.eq((call("POST", "ticket", { source = "nope" })), 404)
 
