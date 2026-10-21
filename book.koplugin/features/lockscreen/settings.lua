@@ -10,6 +10,29 @@ local MoonSettings = require("utils.settings")
 local M = {}
 local revision = 0
 
+--- 广告版 Kindle：KOReader 接管不了锁屏。去广告脚本会删掉这两处广告缓存，还在就是没去。
+local AD_PATHS = { "/var/local/adunits", "/mnt/us/.assets" }
+
+---@return boolean
+function M.hasAds()
+    if not require("device"):isKindle() then return false end
+    for _idx, path in ipairs(AD_PATHS) do
+        if lfs.attributes(path, "mode") then return true end
+    end
+    return false
+end
+
+--- 与 scriptlets 的 Disable ADs 同一套动作：删广告缓存、关掉系统的广告开关。
+--- 命令全是固定串，没有用户输入。
+---@return boolean ok
+function M.removeAds()
+    for _idx, path in ipairs(AD_PATHS) do
+        os.execute("rm -rf " .. path)
+    end
+    local code = os.execute([[sqlite3 /var/local/appreg.db 'update properties set value = "false" where name = "adunit.viewable";']])
+    return (code == 0 or code == true) and not M.hasAds()
+end
+
 --- 当前生效的主体配置；位置和宽窄是否可改由它的能力位决定。
 local function component()
     return require("features.lockscreen.compose").component()

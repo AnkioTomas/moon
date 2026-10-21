@@ -9,11 +9,13 @@ package.preload["ffi/util"] = function()
 end
 
 local log = {}
+local scheduled = {}
 local ticks = {}
 package.preload["ui/uimanager"] = function()
     return {
         tickAfterNext = function(_, fn) ticks[#ticks + 1] = fn end,
         show = function() end,
+        scheduleIn = function(_, _delay, fn) scheduled[#scheduled + 1] = fn end,
     }
 end
 package.preload["ui/network/manager"] = function() return {} end
@@ -35,9 +37,15 @@ package.preload["features.lockscreen"] = function()
         running = function() return running end,
     }
 end
+local has_ads = false
+local remove_ok, rebooted = true, 0
+os.execute = function(cmd) if cmd == "reboot" then rebooted = rebooted + 1 end end
+_G.G_reader_settings = { flush = function() end }
 package.preload["features.lockscreen.settings"] = function()
     return {
         isCompose = function() return true end,
+        hasAds = function() return has_ads end,
+        removeAds = function() return remove_ok end,
         setBackgroundMode = function(value) log[#log + 1] = "set:" .. value end,
         setPosterStyle = function(value) log[#log + 1] = "poster:" .. value end,
         setCustomImage = function(value) log[#log + 1] = "image:" .. value end,
@@ -97,6 +105,23 @@ local desktop = {
     updateView = function() log[#log + 1] = "desktop.updateView" end,
     settings_overlay = { updateView = function() overlay_updates = overlay_updates + 1 end },
 }
+
+has_ads = true
+local ad_rows = Lockscreen:rows(desktop)
+Assert.len(ad_rows, 4, "广告版 Kindle 多一行去广告提醒")
+ad_rows[2]({}).callback()
+local ad_confirm = Themed.last("confirm")
+remove_ok = false
+ad_confirm.ok_callback()
+Assert.matches(Themed.last("toast").text, "moon.ankio.net/jailbreak/ads")
+Assert.eq(rebooted, 0)
+remove_ok = true
+ad_confirm.ok_callback()
+Assert.eq(#scheduled, 1)
+scheduled[1]()
+Assert.eq(rebooted, 1)
+log = {}
+has_ads = false
 
 local rows = Lockscreen:rows(desktop)
 Assert.len(rows, 3, "非海报墙背景没有「海报风格」行")
