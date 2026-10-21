@@ -452,3 +452,20 @@ catalog.listLibraryAsync = real_list
 display.library_random = false
 for _idx, b in ipairs(Kit.buttons(render({ book }, 5))) do Assert.is_false(b.icon == "casino", "开关关闭不出骰子") end
 display.library_random = true
+
+do -- 页签按设置显示，书籍恒在；取消当前页签后落回书籍
+    local function ids()
+        local out = {}
+        for _idx, g in ipairs(library:visibleTabs()) do out[#out + 1] = g.id end
+        return table.concat(out, ",")
+    end
+    local saved = display.library_tabs
+    display.library_tabs = { "books", "author", "series", "category", "folder" }
+    Assert.eq(ids(), "books,author,series,category")
+    display.library_tabs = { "category" }
+    Assert.eq(ids(), "books,category")
+    library.group = "series"
+    library:normalizeGroup()
+    Assert.eq(library.group, "books")
+    display.library_tabs = saved
+end

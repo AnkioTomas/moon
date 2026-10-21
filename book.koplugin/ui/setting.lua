@@ -16,6 +16,8 @@ return {
         library_style = "kindle",
         library_tap = "open",
         library_random = true,
+        -- 书库显示哪些分组页签（书籍恒显示）；文件夹只对本地源生效。
+        library_tabs = { "books", "author", "series", "category", "folder" },
         -- 随机一本的范围：new = 只抽没开始读的，reading = 再包含阅读中的。
         random_scope = "new",
     },

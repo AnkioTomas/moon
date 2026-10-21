@@ -52,6 +52,7 @@ local LIST_ROW_H = 120
 ---@field sort string
 ---@field view "grid"|"list"
 ---@field group string 当前分组页签 id
+---@field dir string|nil 文件夹页签当前目录，nil 为书库根目录
 ---@field groups { rows: { value: string, count: integer }[], err: string|nil }|nil 当前页签的分组缓存
 ---@field group_page number
 ---@field page number
@@ -79,7 +80,57 @@ local function groupTabs()
             column = "series", empty = _("无系列") },
         { id = "category", text = _("分类"), key = "category", flag = "uncategorized",
             column = "category", empty = _("未分类") },
+        { id = "folder", text = _("文件夹") },
     }
+end
+
+Library.tabOptions = groupTabs
+
+--- 本地书库目录；没配置（纯 WebDAV）为空串。
+---@return string
+local function localRoot()
+    return require("source.local.common").rootPath(MoonSettings.getSource("local"))
+end
+
+--- 当前可见的页签：按设置 ui.library_tabs 选（书籍恒有）；文件夹只在本地源且配了目录时有。
+---@return table[]
+function Library:visibleTabs()
+    local chosen = {}
+    for _idx, id in ipairs(MoonSettings.get("ui").library_tabs) do chosen[id] = true end
+    local source = self.desktop and self.desktop.source
+    local folder = source and source.id == "local" and localRoot() ~= ""
+    local tabs = {}
+    for _idx, g in ipairs(groupTabs()) do
+        if (g.id == "books" or chosen[g.id]) and (g.id ~= "folder" or folder) then tabs[#tabs + 1] = g end
+    end
+    return tabs
+end
+
+--- 当前页签被设置或换源隐藏后，落到第一个可见页签（不触发查询，随后 updateView 会补拉）。
+function Library:normalizeGroup()
+    local tabs = self:visibleTabs()
+    for _idx, g in ipairs(tabs) do
+        if g.id == self.group then return end
+    end
+    -- 搜索结果显示在书籍页签，书籍页签恒在，不会走到这里。
+    for _idx, g in ipairs(groupTabs()) do
+        if g.key then self.filter[g.key], self.filter[g.flag] = nil, nil end
+    end
+    self.group, self.group_page, self.groups = tabs[1].id, 1, nil
+    self.dir, self.page, self.state = nil, 1, nil
+end
+
+--- 文件夹视图当前所在目录（默认书库根目录）。
+---@return string
+function Library:currentDir()
+    return self.dir or localRoot()
+end
+
+--- 进入文件夹；dir 为 nil 回根目录。
+---@param dir string|nil
+function Library:openDir(dir)
+    self.dir = dir
+    self:refetch()
 end
 
 --- 创建图书馆实例，独立持有筛选、分页和请求句柄。
@@ -141,7 +192,7 @@ function Library:selectGroup(id)
     for _idx, g in ipairs(groupTabs()) do
         if g.key then self.filter[g.key], self.filter[g.flag] = nil, nil end
     end
-    self.group, self.group_page, self.groups = id, 1, nil
+    self.group, self.group_page, self.groups, self.dir = id, 1, nil, nil
     self:refetch()
 end
 
@@ -323,7 +374,7 @@ end
 function Library:metrics()
     local desktop = self.desktop
     local w, h = desktop.dimen.w, desktop:contentHeight()
-    if self.view == "list" then return Library.listMetrics(w, h) end
+    if self.view == "list" and self.group ~= "folder" then return Library.listMetrics(w, h) end
     return Library.gridMetrics(w, h, Library.tabsHeight(), CoverCell.libraryConf())
 end
 
@@ -336,6 +387,7 @@ end
 ---@param lib table|nil CoverCell.libraryConf()；书城不传
 ---@return table
 local function buildGrid(ctx, books, m, on_open, show_status, lib)
+    -- 文件夹条目没有详情 / 状态角标，整卡只用来进目录。
     local grid = VerticalGroup:new{ align = "left" }
     local rows = math.min(m.rows, math.ceil(#books / m.cols))
     for r = 1, rows do
@@ -346,7 +398,7 @@ local function buildGrid(ctx, books, m, on_open, show_status, lib)
             if not book then break end
             if c > 1 then row[#row + 1] = HorizontalSpan:new{ width = m.gap } end
             row[#row + 1] = CoverCell.build(
-                ctx, book, m.slot_w, m.cw, m.ch, on_open, show_status,
+                ctx, book, m.slot_w, m.cw, m.ch, on_open, show_status and not book.is_folder,
                 lib and lib.title, lib and lib.author, lib
             )
         end
@@ -431,12 +483,12 @@ end
 
 --- 分组页签条：当前页签粗体加下划线。
 ---@param w number
+---@param tabs table[]
 ---@param active string
 ---@param on_tab fun(id: string)
 ---@return table
-local function tabStrip(w, active, on_tab)
+local function tabStrip(w, tabs, active, on_tab)
     local t = Theme.current()
-    local tabs = groupTabs()
     local tab_w = math.floor(w / #tabs)
     local line = Theme.px(2)
     local text_h = Theme.px(t.control.height) - line
@@ -680,7 +732,7 @@ end
 function Library:buildPage(ctx)
     local t = Theme.current()
     local w, h = ctx.width, ctx.height
-    local tabs = tabStrip(w, self.group, function(id) self:selectGroup(id) end)
+    local tabs = tabStrip(w, self:visibleTabs(), self.group, function(id) self:selectGroup(id) end)
     local muted = { color = t.color.muted }
     local pager = {
         page = self:currentPage(),
@@ -727,6 +779,25 @@ function Library:buildPage(ctx)
             local room = avail - back:getSize().w - Theme.px(t.space.sm)
             return { back, Text.line("body", name, { bold = true, width = math.max(Theme.px(t.space.md), room) }) }
         end
+    elseif g.id == "folder" then
+        local root = localRoot()
+        local dir = self:currentDir()
+        if dir ~= root then
+            local back = Button:new{
+                icon = "arrow_back", variant = "ghost", size = "small",
+                callback = function()
+                    local parent = dir:match("^(.*)/[^/]+$")
+                    self:openDir(parent and #parent > #root and parent or nil)
+                end,
+            }
+            local name = dir:match("([^/]+)$") or dir
+            left = function(avail)
+                local room = avail - back:getSize().w - Theme.px(t.space.sm)
+                return { back, Text.line("body", name, { bold = true, width = math.max(Theme.px(t.space.md), room) }) }
+            end
+        else
+            left = { Text.line("caption", T(_("%1 项"), self.total), muted) }
+        end
     else
         left = { Text.line("caption", T(_("%1 本书"), self.total), muted) }
     end
@@ -737,7 +808,7 @@ function Library:buildPage(ctx)
     local body
     if not books or #books == 0 then
         body = emptyBody(w, m.grid_h, not books and _("加载中…") or state.err or _("没有书籍"))
-    elseif self.view == "list" then
+    elseif self.view == "list" and g.id ~= "folder" then
         body = VerticalGroup:new{ align = "left" }
         for i = 1, math.min(#books, m.rows) do
             body[i] = Rows.book(ctx, books[i], w, m.row_h, on_open, on_detail)
@@ -747,9 +818,22 @@ function Library:buildPage(ctx)
         local lib = CoverCell.libraryConf()
         local on_tap = on_open
         if lib.tap_detail then on_tap = function(book) on_detail(book) end end
+        if g.id == "folder" then
+            local tap_book = on_tap
+            on_tap = function(book, ...)
+                if book.is_folder then self:openDir(book.dir) else tap_book(book, ...) end
+            end
+        end
         body = buildGrid(ctx, books, m, on_tap, true, lib)
     end
-    return frame(w, h, { tabs, toolbar(w, m.top_h, left, function(compact) return self:bookTools(compact) end) }, body, m.grid_h, pager)
+    local right = function(compact) return self:bookTools(compact) end
+    if g.id == "folder" then
+        right = {
+            Button:new{ icon = "search", variant = "ghost", size = "small", callback = function() self:showSearch() end },
+            Button:new{ icon = "refresh", variant = "ghost", size = "small", callback = function() self:rescan() end },
+        }
+    end
+    return frame(w, h, { tabs, toolbar(w, m.top_h, left, right) }, body, m.grid_h, pager)
 end
 
 --- 异步拉取图书馆列表。
@@ -776,7 +860,13 @@ function Library:fetch()
     self:syncPageSize()
     local source = self.desktop.source
     if not source then done({}, _("当前数据源不可用")); return end
-    self.fetch_cancel = require("book.catalog").listLibraryAsync(source.id, self:query(), function(res, err)
+    local Catalog = require("book.catalog")
+    local request, query = Catalog.listLibraryAsync, self:query()
+    if self.group == "folder" then
+        request = Catalog.folderPageAsync
+        query = { dir = self:currentDir(), page = self.page, page_size = self.page_size, sort = self.sort }
+    end
+    self.fetch_cancel = request(source.id, query, function(res, err)
         self.fetch_cancel = nil
         if self.desktop.closed or self.desktop.tab ~= "library"
             or self.desktop.source ~= source then
@@ -942,6 +1032,7 @@ end
 --- Desktop 入口：同步 page_size、缺数据就下一 tick 补拉、拼页面。
 ---@return table
 function Library:updateView()
+    self:normalizeGroup()
     self:syncPageSize()
     local load
     if self:inGroupList() then
@@ -983,6 +1074,7 @@ function Library:reset()
     self.total = 0
     self.state = nil
     self.groups = nil
+    self.dir = nil
 end
 
 -- 取消、暂停、销毁都只需停掉在飞查询，避免离开页面后旧结果继续更新界面。
