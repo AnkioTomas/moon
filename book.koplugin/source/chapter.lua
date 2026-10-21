@@ -682,4 +682,28 @@ function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb, 
         end }
 end
 
+--- 带 VIP 章的源取正文：成功记「已购」；open（用户点开的章）遇到没买的 VIP 章不报错，
+--- 记「未购」并给一页临时提示文档（不当缓存，买了再开会重新拉）。预取 / 整本缓存传 open = false，照常失败。
+---@param source BookSource
+---@param content_async fun(book_id: string, chapter_id: string, cb: fun(text: string|nil, err: string|nil, kind: "unpaid"|nil)): table
+---@param open boolean
+---@return ChapterFetchContent
+function Chapter.vipFetcher(source, content_async, open)
+    local Toc = require("source.toc")
+    return function(identity, chapter, done)
+        return content_async(identity.stable_id, chapter.uid, function(text, err, kind)
+            if text then
+                if chapter.vip then Toc.markPaid(source.id, identity.stable_id, chapter.uid, true) end
+                done({ title = chapter.title, html = Text.chapterHtml(chapter.title, text) })
+            elseif open and kind == "unpaid" then
+                Toc.markPaid(source.id, identity.stable_id, chapter.uid, false)
+                local notice = string.format(_("这是 VIP 章节，你还没有购买。\n请先在%s购买本章，再回来阅读。"), source.name)
+                done({ title = chapter.title, html = Text.chapterHtml(chapter.title, notice), temporary = true })
+            else
+                done(nil, err)
+            end
+        end)
+    end
+end
+
 return Chapter
