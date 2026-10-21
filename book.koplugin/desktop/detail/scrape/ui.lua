@@ -1,7 +1,7 @@
 --[[--
 刮削 UI 流程
 
-用户确认书名 -> 搜索 -> 选择结果 -> 写 books 表 + 下封面 -> 通知属主源上行 -> 通知调用方刷新
+书名行 + 候选数据来源列表 -> 点来源搜索 -> 选择结果 -> 写 books 表 + 下封面 -> 通知属主源上行 -> 通知调用方刷新
 
 入口先过 SourceCapabilities.supportsScrape(source)，不支持就不显示按钮。封面先写 .part 再 rename。
 写库用 upsertLocal，不走远端 upsert，免得盖掉本地脏元数据语义。
@@ -21,7 +21,7 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 local Input = require("ui.themes.widgets.input")
 local Toast = require("ui.themes.widgets.toast")
-local Sheet = require("ui.themes.widgets.sheet")
+local List = require("ui.themes.widgets.list")
 
 local ScrapeUI = {}
 
@@ -90,12 +90,12 @@ local function applyResult(identity, result, done)
     end)
 end
 
---- 显示搜索结果选择页
+--- 显示搜索结果选择页。取消回到来源列表（可换来源再搜），选中落库后 on_done。
 ---@param identity BookIdentity
 ---@param results table[]
 ---@param source string
----@param on_close fun()|nil
-local function showResults(identity, results, source, on_close)
+---@param on_done fun()
+local function showResults(identity, results, source, on_done)
     local page = Results:new{
         results = results,
         source = source,
@@ -106,23 +106,23 @@ local function showResults(identity, results, source, on_close)
                     text = err or _("元数据已更新"),
                     timeout = 1.5,
                 }:show()
-                if on_close then on_close() end
+                on_done()
             end)
         end,
-        close_callback = on_close,
     }
     page:show()
-    -- 全屏页盖住详情页：不强制整屏刷新，只会有零星区域被重画
+    -- 全屏页盖住来源列表：不强制整屏刷新，只会有零星区域被重画
     UIManager:setDirty(page, "full")
 end
 
 --- 执行搜索。在飞句柄挂在 owner.scrape_job 上，owner 关闭时取消（连同「搜索中」提示）。
+--- 失败 / 无结果只提示，留在来源列表。
 ---@param identity BookIdentity
 ---@param query string
----@param on_close fun()|nil
 ---@param owner table
 ---@param source_id string|nil 空 = 自动（豆瓣 → 微信读书）
-local function performSearch(identity, query, on_close, owner, source_id)
+---@param on_done fun()
+local function performSearch(identity, query, owner, source_id, on_done)
     local info = require("ui.themes.widgets.progress_dialog"):new{
         title = _("搜索结果"), text = _("搜索中..."), dismissable = false,
     }
@@ -140,12 +140,11 @@ local function performSearch(identity, query, on_close, owner, source_id)
                 text = T(_("搜索失败: %1"), err),
                 timeout = 2,
             }:show()
-            if on_close then on_close() end
             return
         end
 
         logger.info("scrape: got results from", source)
-        showResults(identity, assert(results), assert(source), on_close)
+        showResults(identity, assert(results), assert(source), on_done)
     end, source_id)
     if job and not done then
         owner.scrape_job = { cancel = function()
@@ -155,48 +154,59 @@ local function performSearch(identity, query, on_close, owner, source_id)
     end
 end
 
---- 启动刮削流程（调用方已按属主源确认可刮削）
+--- 启动刮削流程（调用方已按属主源确认可刮削）：
+--- 顶部一行是书名（点按改写），下面依次列出候选数据来源，点哪个搜哪个，取消结果页回到这里换下一个。
 ---@param identity BookIdentity
 ---@param default_title string|nil 默认书名
----@param on_close fun()|nil 完成回调
+---@param on_close fun()|nil 结束回调（元数据已更新或直接关闭）
 ---@param owner table 搜索句柄的持有者（详情页），关闭时调 owner.scrape_job.cancel()
 function ScrapeUI.start(identity, default_title, on_close, owner)
-    Input:new{
-        title = _("确认书名"),
-        fields = { { text = default_title or "", hint = _("请输入要搜索的书名") } },
-        ok_text = _("搜索"),
-        cancel_callback = on_close,
-        callback = function(text)
-            local query = Text.trim(text)
-            if query == "" then
-                Toast:new{
-                    text = _("书名不能为空"),
-                    timeout = 2,
+    local query = Text.trim(default_title or "")
+    local list
+
+    local function finish()
+        list.close_callback = nil
+        list:close()
+        if on_close then on_close() end
+    end
+
+    local function search(source_id)
+        if query == "" then
+            Toast:new{ text = _("书名不能为空"), timeout = 2 }:show()
+            return
+        end
+        performSearch(identity, query, owner, source_id, finish)
+    end
+
+    local function build()
+        local items = { {
+            text = _("书名"), icon = "search", mandatory = query ~= "" and query or _("点按输入"),
+            chevron = true, keep_open = true,
+            callback = function()
+                Input:new{
+                    title = _("确认书名"),
+                    fields = { { text = query, hint = _("请输入要搜索的书名") } },
+                    ok_text = _("确定"),
+                    callback = function(text)
+                        query = Text.trim(text)
+                        list:setItems(build())
+                    end,
                 }:show()
-                if on_close then on_close() end
-                return
-            end
-            local picked = false
-            local items = { { text = _("自动（豆瓣 → 微信读书）"), id = nil } }
-            for _idx, src in ipairs(Search.SOURCES) do items[#items + 1] = { text = src.name, id = src.id } end
-            for _idx, item in ipairs(items) do
-                item.callback = function()
-                    picked = true
-                    performSearch(identity, query, on_close, owner, item.id)
-                end
-            end
-            Sheet:new{
-                title = _("选择数据来源"),
-                items = items,
-                -- Sheet 先关窗再回调选项，下一 tick 才能区分「选了」与「取消」
-                close_callback = function()
-                    UIManager:nextTick(function()
-                        if not picked and on_close then on_close() end
-                    end)
-                end,
-            }:show()
-        end,
-    }:show()
+            end,
+        }, { text = _("自动（豆瓣 → 微信读书）"), keep_open = true, callback = function() search(nil) end } }
+        for _idx, src in ipairs(Search.SOURCES) do
+            items[#items + 1] = { text = src.name, keep_open = true, callback = function() search(src.id) end }
+        end
+        return items
+    end
+
+    list = List:new{
+        title = _("刮削"),
+        subtitle = _("选择数据来源"),
+        items = build(),
+        close_callback = on_close,
+    }
+    list:show()
 end
 
 return ScrapeUI
