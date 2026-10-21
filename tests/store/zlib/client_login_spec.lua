@@ -11,7 +11,7 @@ package.preload["json"] = function()
     return { decode = require("support.json_stub").decode }
 end
 
-local replies, urls = {}, {}
+local replies, urls, sent = {}, {}, {}
 package.loaded["http.request"] = nil
 package.preload["http.request"] = function()
     return {
@@ -19,6 +19,7 @@ package.preload["http.request"] = function()
         header = function() end,
         request = function(opts, cb)
             urls[#urls + 1] = opts.url
+            sent[#urls] = opts.headers
             cb({ code = 200, body = replies[#urls] })
             return { cancel = function() end }
         end,
@@ -63,5 +64,15 @@ Assert.eq(err, "Incorrect email or password")
 ok, err = login('{"errors":["Too many logins #2. Try again later."]}')
 Assert.is_nil(ok)
 Assert.eq(#urls, 1, "被限流不再试第二个入口")
+
+-- 门禁镜像带 Basic，其它镜像不带
+local function loginAt(base)
+    replies, urls, sent = { '{"response":{"user_id":1,"user_key":"k"}}' }, {}, {}
+    Client.new({ email = "a", password = "p", base_url = base }):loginAsync(function() end)
+end
+loginAt("https://iread.ink")
+Assert.matches(sent[1].Authorization, "^Basic ")
+loginAt("https://m.example")
+Assert.is_nil(sent[1].Authorization)
 
 return true
