@@ -563,6 +563,7 @@ function Desktop:onClose()
     self:destroy()
     logger.flush()
     UIManager:close(self, "ui")
+    Desktop.restoreFileList(self.plugin)
     return true
 end
 
@@ -616,6 +617,31 @@ end
 --- 本进程是否自动开桌面：nil 还没见过 FM / true 待开 / false 不再自动开
 local want_auto_open = nil
 
+--- 启动即开桌面时跳过 FM 的首次列目录：桌面用不到这份列表，而 FM 会列整个书库目录、
+--- 渲染条目（CoverBrowser、平铺视图还会递归），慢存储冷缓存下要几分钟，期间界面白屏无响应。
+--- 离开桌面时由 restoreFileList 补列。
+---@param plugin BookPlugin
+function Desktop.deferFileList(plugin)
+    if want_auto_open ~= nil or plugin.ui.document or not require("menu").openOnStart() then return end
+    local FileChooser = require("ui/widget/filechooser")
+    local original = FileChooser.genItemTableFromPath
+    FileChooser.genItemTableFromPath = function(chooser, path)
+        FileChooser.genItemTableFromPath = original
+        plugin.file_list_deferred = true
+        return chooser:genItemTable({}, {}, path)
+    end
+end
+
+--- 补列被 deferFileList 跳过的 FM 目录；没跳过则什么也不做。
+---@param plugin BookPlugin
+function Desktop.restoreFileList(plugin)
+    if not plugin.file_list_deferred then return end
+    plugin.file_list_deferred = nil
+    local started_at = Perf.now()
+    plugin.ui.file_chooser:refreshPath()
+    Perf.slow("fm.refreshPath", started_at)
+end
+
 --- FM 显示时按启动项自动开桌面，本进程只开一次；Reader 实例忽略。
 ---@param plugin BookPlugin
 function Desktop.autoOpen(plugin)
@@ -626,6 +652,7 @@ function Desktop.autoOpen(plugin)
     if not want_auto_open then return end
     want_auto_open = false
     Desktop.open(plugin)
+    if not plugin.desktop then Desktop.restoreFileList(plugin) end
 end
 
 return Desktop

@@ -341,6 +341,21 @@ do -- 开机自动开桌面：按启动项、进程内只开一次；Reader 实�
     D, opened = boot()
     D.autoOpen({ ui = {} })
     Assert.len(opened, 0, "启动项不是月读不自动开")
+
+    -- 启动即开桌面：FM 首次列目录被跳过，离开桌面才补列；只跳一次
+    on_start = true
+    D, opened = boot()
+    local FileChooser = { genItemTable = function() return "empty" end }
+    FileChooser.genItemTableFromPath = function() return "full" end
+    package.loaded["ui/widget/filechooser"] = FileChooser
+    local refreshed = 0
+    local p = { ui = { file_chooser = { refreshPath = function() refreshed = refreshed + 1 end } } }
+    D.deferFileList(p)
+    Assert.eq(FileChooser.genItemTableFromPath(FileChooser, "/x"), "empty", "首次列目录被跳过")
+    Assert.eq(FileChooser.genItemTableFromPath(FileChooser, "/x"), "full", "只跳一次")
+    D.restoreFileList(p)
+    D.restoreFileList(p)
+    Assert.eq(refreshed, 1, "补列一次")
 end
 
 return true

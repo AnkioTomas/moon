@@ -79,6 +79,7 @@ local function init(self)
     end
     require("utils.event").init(require("features").listeners("events"))
     logger.info("book plugin init", self.ui.document and "reader" or "filemanager")
+    Desktop.deferFileList(self)
     local started_at = Perf.now()
     require("ui.fonts").onCreate()
     Perf.slow("init fonts", started_at)
