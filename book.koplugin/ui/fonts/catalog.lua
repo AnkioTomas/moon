@@ -203,10 +203,12 @@ local function extractInstalledFont(zip_path, dest)
             err = "open zip failed: " .. tostring(arc.err)
         end
         arc:close()
-        if not (not err and Fonts.finalizeWoff(woff, dest)) then
-            os.remove(woff)
-            err = err or "finalize failed"
+        if not err then
+            -- 新下载转换失败不能把原 WOFF 改名成 .ttf 冒充已安装：FreeType 读不出，且之后永远判为已下载。
+            local ok, convert_err = require("ui.fonts.woff").toSfnt(woff, dest)
+            if not ok then err = "woff convert failed: " .. tostring(convert_err) end
         end
+        os.remove(woff)
     end
     os.remove(zip_path)
     return err
