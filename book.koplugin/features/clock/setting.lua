@@ -23,7 +23,7 @@ function Setting.entries(desktop)
         {
             id = "main",
             group = "system",
-            order = 30,
+            order = 20,
             icon = "schedule",
             title = _("时间"),
             subtitle = _("时区、系统时间与网络校时"),

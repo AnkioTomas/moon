@@ -122,7 +122,7 @@ function Setting.entries(desktop)
         {
             id = "main",
             group = "system",
-            order = 60,
+            order = 40,
             icon = "dns",
             title = _("远程管理"),
             subtitle = _("浏览器管理文件、输入"),
