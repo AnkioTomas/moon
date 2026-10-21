@@ -118,38 +118,45 @@ local function tabsRow(desktop)
 end
 
 ---@param desktop table
----@return table
-function Library:rows(desktop)
+---@return BookThemeSection[]
+function Library:sections(desktop)
+    local function gridRow(iw)
+        local CoverCell = require("ui.widgets.cover")
+        return Row.widget({
+            width = iw, kind = "nav", icon = "grid_view", title = _("书架每行数量"),
+            subtitle = _("调整书库和 Z站 每行显示的卡片数"),
+            status = tostring(CoverCell.gridCols()), status_on = true,
+            callback = function()
+                require("ui.themes.widgets.spin"):new{
+                    title = _("书架每行数量"),
+                    fields = { { value = CoverCell.gridCols(), min = CoverCell.gridColsMin(),
+                        max = CoverCell.gridColsMax() } },
+                    callback = function(v)
+                        CoverCell.setGridCols(v)
+                        desktop:updateView()
+                    end,
+                }:show()
+            end,
+        })
+    end
     return {
-        function(iw)
-            local CoverCell = require("ui.widgets.cover")
-            return Row.widget({
-                width = iw, kind = "nav", icon = "grid_view", title = _("书架每行数量"),
-                subtitle = _("调整书库和 Z站 每行显示的卡片数"),
-                status = tostring(CoverCell.gridCols()), status_on = true,
-                callback = function()
-                    require("ui.themes.widgets.spin"):new{
-                        title = _("书架每行数量"),
-                        fields = { { value = CoverCell.gridCols(), min = CoverCell.gridColsMin(),
-                            max = CoverCell.gridColsMax() } },
-                        callback = function(v)
-                            CoverCell.setGridCols(v)
-                            desktop:updateView()
-                        end,
-                    }:show()
-                end,
-            })
-        end,
-        choiceRow(desktop, "library_style", "style", _("封面风格"),
-            _("Kindle：状态叠在封面上；Kobo：封面干净，下载状态、进度和更多收在封面下方"), STYLES),
-        toggleRow(desktop, "library_title", "title", _("显示名称"), _("封面下方显示书名")),
-        toggleRow(desktop, "library_author", "person", _("显示作者"), _("书名下方显示作者")),
-        tabsRow(desktop),
-        toggleRow(desktop, "library_random", "casino", _("显示随机一本"),
-            _("书库工具栏显示骰子，优先从未读的书里随机抽一本")),
-        choiceRow(desktop, "random_scope", "casino", _("随机范围"),
-            _("书库与首页的随机一本从哪些书里抽，已读完的不会抽到"), RANDOM_SCOPES),
-        choiceRow(desktop, "library_tap", "touch_app", _("点击书籍"), _("点封面时的动作"), TAPS),
+        { title = _("封面"), rows = {
+            gridRow,
+            choiceRow(desktop, "library_style", "style", _("封面风格"),
+                _("Kindle：状态叠在封面上；Kobo：封面干净，下载状态、进度和更多收在封面下方"), STYLES),
+            toggleRow(desktop, "library_title", "title", _("显示名称"), _("封面下方显示书名")),
+            toggleRow(desktop, "library_author", "person", _("显示作者"), _("书名下方显示作者")),
+        } },
+        { title = _("书库"), rows = {
+            tabsRow(desktop),
+            choiceRow(desktop, "library_tap", "touch_app", _("点击书籍"), _("点封面时的动作"), TAPS),
+        } },
+        { title = _("随机一本"), rows = {
+            toggleRow(desktop, "library_random", "casino", _("显示随机一本"),
+                _("书库工具栏显示骰子，优先从未读的书里随机抽一本")),
+            choiceRow(desktop, "random_scope", "casino", _("随机范围"),
+                _("书库与首页的随机一本从哪些书里抽，已读完的不会抽到"), RANDOM_SCOPES),
+        } },
     }
 end
 

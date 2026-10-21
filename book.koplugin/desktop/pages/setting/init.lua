@@ -146,7 +146,7 @@ local function coreEntries(desktop)
             subtitle = _("图书馆、最近阅读、书架的每行数量与封面风格"),
             page = {
                 title = _("书架显示"),
-                sections = function() return {{ title = _("书架"), rows = LibrarySettings:rows(desktop) }} end,
+                sections = function() return LibrarySettings:sections(desktop) end,
             },
         },
         {
