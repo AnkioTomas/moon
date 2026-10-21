@@ -10,6 +10,7 @@
 
 local Charset = require("utils.charset")
 local Font = require("source.jjwxc.font")
+local Job = require("workers.job")
 local JSON = require("json")
 local Mapper = require("source.jjwxc.mapper")
 local Request = require("http.request")
@@ -173,30 +174,58 @@ function Client.contentAsync(novel_id, chapter_id, cb)
         end
         job = webGet("/vip/" .. novel_id .. "/" .. chapter_id, cookie, function(html, web_err, kind)
             if cancelled then return end
-            local text = html and Mapper.webContent(html)
-            if html and not text and html:find('id="contentvars"', 1, true) then
-                cb(nil, _("晋江 VIP 章节解密失败"))
+            if not html then
+                cb(nil, web_err or _("晋江 VIP 章节未购买"), kind and "unpaid" or nil)
                 return
             end
-            if not text then
-                cb(nil, web_err or _("晋江 VIP 章节未购买"), (kind or html) and "unpaid" or nil)
-                return
-            end
-            local font = html:match("jjwxcfont_%w+")
-            if not (font and text:find("[\238\239][\128-\191][\128-\191]")) then cb(text); return end
-            job = Request.get(FONT_URL:format(font), {
-                timeout = require("http.timeout").net(0.5),
-            }, function(ttf, font_err)
-                if cancelled then return end
-                local map = ttf and Font.mapping(ttf)
-                if not map then cb(nil, font_err and tostring(font_err) or _("晋江 VIP 章节字体无法解析")); return end
-                cb(Font.decode(text, map))
-            end)
+            -- AES 解密与字体解析都是纯 Lua 重活，放子进程，免得卡 UI
+            local bj = Job.run(function() return { text = Mapper.webContent(html) } end, {
+                name = "jjwxc_vip",
+                kind = "light",
+                timeout = 60,
+                on_done = function(res)
+                    if cancelled then return end
+                    local text = res.text
+                    if not text then
+                        if html:find('id="contentvars"', 1, true) then
+                            cb(nil, _("晋江 VIP 章节解密失败"))
+                        else
+                            cb(nil, _("晋江 VIP 章节未购买"), "unpaid")
+                        end
+                        return
+                    end
+                    local font = html:match("jjwxcfont_%w+")
+                    if not (font and text:find("[\238\239][\128-\191][\128-\191]")) then cb(text); return end
+                    job = Request.get(FONT_URL:format(font), {
+                        timeout = require("http.timeout").net(0.5),
+                    }, function(ttf, font_err)
+                        if cancelled then return end
+                        if not ttf then cb(nil, font_err and tostring(font_err) or _("晋江 VIP 章节字体无法解析")); return end
+                        job = Job.run(function()
+                            local map = Font.mapping(ttf)
+                            return { text = map and Font.decode(text, map) }
+                        end, {
+                            name = "jjwxc_font",
+                            kind = "light",
+                            timeout = 60,
+                            on_done = function(res2)
+                                if cancelled then return end
+                                if res2.text then cb(res2.text) else cb(nil, _("晋江 VIP 章节字体无法解析")) end
+                            end,
+                            on_failed = function(err) if not cancelled then cb(nil, tostring(err)) end end,
+                            on_cancelled = function() end,
+                        })
+                    end)
+                end,
+                on_failed = function(err) if not cancelled then cb(nil, tostring(err)) end end,
+                on_cancelled = function() end,
+            })
+            job = bj
         end)
     end)
     return { cancel = function()
         cancelled = true
-        job.cancel()
+        job:cancel()
     end }
 end
 
