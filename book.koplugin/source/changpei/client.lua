@@ -45,11 +45,55 @@ local function headers(cookie)
     local token = cookie and cookie:match("moon_token=([^;%s]+)")
     if token then
         -- 扫码登录拿到的是网页端 sessionStorage 里的 token（请求头 token），不是 Cookie；借 Cookie 串带着存
-        out["Cookie"] = cookie:gsub(";?%s*moon_token=[^;%s]+", ""):gsub("^;%s*", "")
+        out["Cookie"] = cookie:gsub(";?%s*moon_token=[^;%s]+", ""):gsub(";?%s*moon_refresh=[^;%s]+", ""):gsub("^;%s*", "")
         out["token"] = token
     end
     for key, value in pairs(HEADERS) do out[key] = value end
     return out
+end
+
+---@type (fun(ok: boolean))[]|nil 正在换 token 时排队的回调；并发的 9996 只换一次
+local renewing
+
+--- 登录 token 过期：用 refresh_token（扫码登录存的 moon_refresh，或浏览器 Cookie 里的 ukey）换新 token，
+--- 写回已保存的 Cookie。没有 refresh_token 或服务端拒绝返回 false。
+---@param cb fun(ok: boolean)
+function Client.renewAsync(cb)
+    if renewing then renewing[#renewing + 1] = cb; return end
+    local cookie = Client.cookie()
+    local refresh = cookie and (cookie:match("moon_refresh=([^;%s]+)") or cookie:match("ukey=([^;%s]+)"))
+    local imei = cookie and cookie:match("_c_n_=([^;%s]+)")
+    if not refresh or not imei then cb(false); return end
+    renewing = { cb }
+    local QRLogin = require("source.changpei.qrlogin")
+    local function finish(ok)
+        local waiters = renewing
+        renewing = nil
+        for _idx, waiter in ipairs(waiters) do waiter(ok) end
+    end
+    Request.post("https://www.gongzicp.com/cp.UserExternal/get_token", QRLogin.frame(refresh, 5), {
+        headers = {
+            ["Content-Type"] = "application/grpc-web+proto",
+            ["X-Grpc-Web"] = "1",
+            ["Client"] = "pc",
+            ["version"] = "1",
+            ["imei"] = imei,
+            ["Referer"] = "https://www.gongzicp.com/",
+            ["User-Agent"] = Client.USER_AGENT,
+        },
+        content_type = "application/grpc-web+proto",
+        timeout = require("http.timeout").net(0.5),
+    }, function(body, _err, res)
+        -- get_token 回包：token(3)。grpc-status 非 0 = refresh_token 也失效
+        local token = body and (tonumber(Request.header(res, "grpc-status")) or 0) == 0 and QRLogin.decode(body)[3]
+        if type(token) ~= "string" or token == "" then finish(false); return end
+        local settings = require("utils.settings")
+        local cfg = settings.getSource(SOURCE_ID)
+        local saved = cfg.cookie:gsub(";?%s*moon_token=[^;%s]+", "")
+        cfg.cookie = saved .. "; moon_token=" .. token
+        settings.saveSource(SOURCE_ID, cfg)
+        finish(true)
+    end)
 end
 
 --- cookie 显式传入：登录入口要先校验再保存，校验用的新 Cookie 失效不能污染已保存的登录态。
@@ -58,7 +102,7 @@ end
 ---@param cookie string|nil
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return HttpJob
-local function reply(cookie, cb)
+local function reply(cookie, cb, retry)
     return function(raw, err)
         if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
         local ok, wire = pcall(JSON.decode, raw)
@@ -66,6 +110,13 @@ local function reply(cookie, cb)
         if wire.code ~= 200 then
             local msg = wire.msg or _("响应无效")
             if wire.code == LOGIN_REQUIRED and cookie and cookie == Client.cookie() then
+                if retry then
+                    -- token 过期：用 refresh_token 换新的再重发一次；换不到才算登录失效
+                    Client.renewAsync(function(renewed)
+                        if renewed then retry() else cb(nil, require("source.auth").expire(SOURCE_ID, msg)) end
+                    end)
+                    return
+                end
                 msg = require("source.auth").expire(SOURCE_ID, msg)
             end
             cb(nil, msg)
@@ -76,12 +127,20 @@ local function reply(cookie, cb)
     end
 end
 
-local function get(path, query, cookie, cb)
-    return Request.get(API .. path .. "?" .. query, {
+local function get(path, query, cookie, cb, renewed)
+    local cancelled, job = false, nil
+    local retry = cookie and not renewed and function()
+        if not cancelled then job = get(path, query, Client.cookie(), cb, true) end
+    end
+    job = Request.get(API .. path .. "?" .. query, {
         accept = "application/json",
         headers = headers(cookie),
         timeout = require("http.timeout").net(0.5),
-    }, reply(cookie, cb))
+    }, reply(cookie, cb, retry))
+    return { cancel = function()
+        cancelled = true
+        job.cancel()
+    end }
 end
 
 -- 网页端非 GET 请求的签名：md5(固定前缀 .. 按键名排序的 &k=v .. &服务器时间)，params 的值是已渲染的字符串。
@@ -106,9 +165,12 @@ end
 ---@param body string
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return { cancel: fun() }
-local function post(path, params, body, cb)
+local function post(path, params, body, cb, renewed)
     local cookie = Client.cookie()
     local cancelled, job = false, nil
+    local retry = cookie and not renewed and function()
+        if not cancelled then job = post(path, params, body, cb, true) end
+    end
     job = get("/system/init", "", nil, function(init, err)
         if cancelled then return end
         local timestamp = init and type(init.data) == "table" and init.data.timestamp
@@ -122,7 +184,7 @@ local function post(path, params, body, cb)
             headers = head,
             content_type = "application/json",
             timeout = require("http.timeout").net(0.5),
-        }, reply(cookie, cb))
+        }, reply(cookie, cb, retry))
     end)
     return { cancel = function()
         cancelled = true

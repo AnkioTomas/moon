@@ -24,11 +24,12 @@ local DEADLINE = 180
 
 local STATUS_WAITING_AUTH, STATUS_REJECT, STATUS_APPROVED = 2, 3, 4
 
---- 一帧 gRPC-web：0x00 + 4 字节长度 + protobuf。只有一个字符串字段（1，< 128 字节）。
+--- 一帧 gRPC-web：0x00 + 4 字节长度 + protobuf。只有一个字符串字段（默认 1，字段号 < 16、值 < 128 字节）。
 ---@param value string
+---@param field? integer
 ---@return string
-function QRLogin.frame(value)
-    local msg = "\10" .. string.char(#value) .. value
+function QRLogin.frame(value, field)
+    local msg = string.char((field or 1) * 8 + 2, #value) .. value
     local n = #msg
     return string.char(0, 0, 0, math.floor(n / 256), n % 256) .. msg
 end
@@ -167,12 +168,14 @@ function QRLogin:_poll(gen, token, started)
         local status = fields[1]
         if status == STATUS_APPROVED then
             local cookie = self.jar.PHPSESSID and cookieHeader(self.jar)
-            -- login_res(2).web_data(4).token(1)：网页端后续请求靠它认人
+            -- login_res(2).web_data(4).token(1)：网页端后续请求靠它认人；refresh_token(2) 在 token 失效时换新的
             local login = type(fields[2]) == "string" and QRLogin.fields(fields[2]) or {}
             local web = type(login[4]) == "string" and QRLogin.fields(login[4]) or {}
-            require("utils.log").info("changpei qr approved", "login_status", login[1], "token", web[1] and #web[1] or 0)
+            require("utils.log").info("changpei qr approved", "login_status", login[1], "token", web[1] and #web[1] or 0,
+                "refresh", type(web[2]) == "string" and #web[2] or 0)
             if cookie and type(web[1]) == "string" and web[1] ~= "" then
                 cookie = cookie .. "; moon_token=" .. web[1]
+                if type(web[2]) == "string" and web[2] ~= "" then cookie = cookie .. "; moon_refresh=" .. web[2] end
             end
             self:cancel()
             if not cookie then self:toast(_("登录失败：未获取到登录态")); return end
