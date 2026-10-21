@@ -3,12 +3,13 @@
 
 书的元数据、目录、免费章正文走匿名 App JSON 接口（app-cdn.jjwxc.net/androidapi）；
 登录态是手机网页的 Cookie，只用于两件事：个人收藏（m.jjwxc.com/my/fav，GBK 的 HTML）与 VIP 章正文
-（m.jjwxc.com/book2/<书>/<章>，已购章节才有正文）。Cookie 失效时网页 302 到登录页。
+（m.jjwxc.com/vip/<书>/<章>，已购章节才有正文，正文用反爬字体，见 font.lua）。Cookie 失效时网页 302 到登录页。
 
 @module koplugin.book.source.jjwxc.client
 --]]
 
 local Charset = require("utils.charset")
+local Font = require("source.jjwxc.font")
 local JSON = require("json")
 local Mapper = require("source.jjwxc.mapper")
 local Request = require("http.request")
@@ -25,6 +26,7 @@ local APP_HEADERS = {
         .. "Chrome/39.0.0.0 Mobile Safari/537.36/JINJIANG-Android/206(Lenovo;android 5.1;Scale/2.0)",
     ["Referer"] = "http://android.jjwxc.net?v=206",
 }
+local FONT_URL = "https://static.jjwxc.net/tmp/fonts/%s.ttf"
 local WEB_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) "
     .. "Version/16.0 Mobile/15E148 Safari/604.1"
 -- 接口回包里「该章是 VIP 章」的 code。
@@ -57,10 +59,10 @@ local function appGet(path, params, cb, ratio)
     end)
 end
 
---- 带登录态取网页，回调 UTF-8 的 HTML。302 = Cookie 失效。
+--- 带登录态取网页，回调 UTF-8 的 HTML。302 到登录页 = Cookie 失效。
 ---@param path string
 ---@param cookie string|nil
----@param cb fun(html: string|nil, err: string|nil)
+---@param cb fun(html: string|nil, err: string|nil, kind: "unpaid"|nil)
 ---@return HttpJob
 local function webGet(path, cookie, cb)
     return Request.get(WEB .. path, {
@@ -68,7 +70,11 @@ local function webGet(path, cookie, cb)
         timeout = require("http.timeout").net(0.5),
     }, function(raw, err, res)
         if not raw then
-            if res and tonumber(res.code) == 302 then
+            local location = res and tonumber(res.code) == 302 and Request.header(res, "Location")
+            if location and not location:find("login", 1, true) then
+                -- 跳到非登录页（如未购买章节的订阅页）说明 Cookie 有效
+                cb(nil, _("晋江 VIP 章节未购买"), "unpaid")
+            elseif location then
                 -- 校验新 Cookie 时不能污染已保存的登录态。
                 local msg = _("晋江登录已失效")
                 cb(nil, cookie == Client.cookie() and require("source.auth").expire(SOURCE_ID, msg) or msg)
@@ -150,7 +156,7 @@ end
 --- 一章正文（纯文本，段落以换行分隔）。App 接口只给免费章；VIP 章在已登录时改走网页（已购才有正文）。
 ---@param novel_id string
 ---@param chapter_id string
----@param cb fun(text: string|nil, err: string|nil)
+---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil) kind = "unpaid"：Cookie 有效但这章没买
 ---@return { cancel: fun() }
 function Client.contentAsync(novel_id, chapter_id, cb)
     local cancelled, job = false, nil
@@ -165,17 +171,48 @@ function Client.contentAsync(novel_id, chapter_id, cb)
             cb(nil, err or (wire and wire.message) or _("晋江章节内容为空"))
             return
         end
-        job = webGet("/book2/" .. novel_id .. "/" .. chapter_id, cookie, function(html, web_err)
+        job = webGet("/vip/" .. novel_id .. "/" .. chapter_id, cookie, function(html, web_err, kind)
             if cancelled then return end
             local text = html and Mapper.webContent(html)
-            if not text then cb(nil, web_err or _("晋江 VIP 章节未购买")); return end
-            cb(text)
+            if html and not text and html:find('id="contentvars"', 1, true) then
+                cb(nil, _("晋江 VIP 章节解密失败"))
+                return
+            end
+            if not text then
+                cb(nil, web_err or _("晋江 VIP 章节未购买"), (kind or html) and "unpaid" or nil)
+                return
+            end
+            local font = html:match("jjwxcfont_%w+")
+            if not (font and text:find("[\238\239][\128-\191][\128-\191]")) then cb(text); return end
+            job = Request.get(FONT_URL:format(font), {
+                timeout = require("http.timeout").net(0.5),
+            }, function(ttf, font_err)
+                if cancelled then return end
+                local map = ttf and Font.mapping(ttf)
+                if not map then cb(nil, font_err and tostring(font_err) or _("晋江 VIP 章节字体无法解析")); return end
+                cb(Font.decode(text, map))
+            end)
         end)
     end)
     return { cancel = function()
         cancelled = true
         job.cancel()
     end }
+end
+
+--- 这章 VIP 买了没有：true 已购、false 未购、nil 没问出来（未登录 / 网络 / Cookie 失效）。
+---@param novel_id string
+---@param chapter_id string
+---@param cb fun(paid: boolean|nil)
+---@return HttpJob|nil
+function Client.paidAsync(novel_id, chapter_id, cb)
+    local cookie = Client.cookie()
+    if not cookie then cb(nil); return nil end
+    return webGet("/vip/" .. novel_id .. "/" .. chapter_id, cookie, function(html, _err, kind)
+        if kind == "unpaid" then cb(false)
+        elseif html and html:find('id="contentvars"', 1, true) then cb(true)
+        else cb(nil) end
+    end)
 end
 
 return Client

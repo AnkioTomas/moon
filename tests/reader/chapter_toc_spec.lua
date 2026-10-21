@@ -30,7 +30,9 @@ local adapter = ChapterToc.show({
         depth = 1,
         anchors = { { title = "第一章", depth = 2 } },
     },
-    { idx = 2, title = "第二章", depth = 2 },
+    { idx = 2, title = "第二章", depth = 2, vip = true, paid = true },
+    { idx = 3, title = "第三章", vip = true, paid = false },
+    { idx = 4, title = "第四章", vip = true },
 }, 2, function(idx, anchor)
     selected = idx
     selected_anchor = anchor
@@ -44,7 +46,9 @@ Assert.eq(shown.toc[1].title, "道经")
 Assert.eq(shown.toc[1].page, 1)
 Assert.eq(shown.toc[2].title, "第一章")
 Assert.eq(shown.toc[2].depth, 2)
-Assert.eq(shown.toc[3].title, "第二章")
+Assert.eq(shown.toc[3].title, "第二章（已购）")
+Assert.eq(shown.toc[4].title, "第三章（未购）")
+Assert.eq(shown.toc[5].title, "第四章")
 Assert.eq(shown:getTitle(), "目录")
 Assert.eq(selected, 1)
 Assert.eq(selected_anchor.title, "第一章")

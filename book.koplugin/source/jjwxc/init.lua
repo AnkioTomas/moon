@@ -187,9 +187,57 @@ function Source:getDetailAsync(identity, cb)
     return SourceBase.defer(cb, identity.book or require("book.books_db").get(self.id, identity.stable_id))
 end
 
+--- 记下一章 VIP 的购买状态（目录里显示「已购 / 未购」）；变了才落库。
+---@param identity BookIdentity
+---@param uid string
+---@param paid boolean
+local function recordPaid(identity, uid, paid)
+    local toc = Toc.read("jjwxc", identity.stable_id)
+    local idx = Toc.index("jjwxc", identity.stable_id, uid)
+    local chapter = toc and idx and toc[idx]
+    if chapter and chapter.vip and chapter.paid ~= paid then
+        chapter.paid = paid
+        Toc.put("jjwxc", identity.stable_id, toc)
+    end
+end
+
+--- 目录里还没问过的 VIP 章逐章问一遍购买状态（只在已登录时），问完落库一次；失败（断网 / Cookie 失效）就停。
+---@param self BookSource
+---@param identity BookIdentity
+---@param toc BookChapter[]
+local function probePaid(self, identity, toc)
+    if not Client.cookie() or self.probing then return end
+    local todo = {}
+    for _idx, chapter in ipairs(toc) do
+        if chapter.vip and chapter.paid == nil then todo[#todo + 1] = chapter end
+    end
+    if #todo == 0 then return end
+    self.probing = true
+    local pos, changed = 0, false
+    local function nextChapter()
+        pos = pos + 1
+        local chapter = todo[pos]
+        if not chapter then
+            self.probing = nil
+            if changed then Toc.put(self.id, identity.stable_id, toc) end
+            return
+        end
+        Client.paidAsync(identity.stable_id, chapter.uid, function(paid)
+            if paid == nil then
+                pos = #todo
+            else
+                chapter.paid, changed = paid, true
+            end
+            nextChapter()
+        end)
+    end
+    nextChapter()
+end
+
 function Source:loadTocAsync(identity, cb)
     local cached = Toc.read(self.id, identity.stable_id)
-    if cached and #cached > 0 then
+    if cached and #cached > 0 and cached[1].toc_version == Mapper.TOC_VERSION then
+        probePaid(self, identity, cached)
         return SourceBase.defer(cb, cached)
     end
     local cancelled, job = false, nil
@@ -200,6 +248,7 @@ function Source:loadTocAsync(identity, cb)
         if #toc == 0 then cb(nil, _("晋江目录为空")); return end
         if not Toc.put(self.id, identity.stable_id, toc) then cb(nil, _("章节目录保存失败")); return end
         cb(toc)
+        probePaid(self, identity, toc)
     end)
     return { cancel = function()
         cancelled = true
@@ -207,12 +256,26 @@ function Source:loadTocAsync(identity, cb)
     end }
 end
 
+--- open = true（用户点开的章）：没买的 VIP 章不报错，给一页临时提示文档（不当缓存，买了再开会重新拉）。
+---@param open boolean
 ---@return ChapterFetchContent
-local function contentFetcher()
+local function contentFetcher(open)
+    local Text = require("utils.text")
     return function(identity, chapter, done)
-        return Client.contentAsync(identity.stable_id, chapter.uid, function(text, err)
-            if not text then done(nil, err); return end
-            done({ title = chapter.title, html = require("utils.text").chapterHtml(chapter.title, text) })
+        return Client.contentAsync(identity.stable_id, chapter.uid, function(text, err, kind)
+            if text then
+                if chapter.vip then recordPaid(identity, chapter.uid, true) end
+                done({ title = chapter.title, html = Text.chapterHtml(chapter.title, text) })
+            elseif open and kind == "unpaid" then
+                recordPaid(identity, chapter.uid, false)
+                done({
+                    title = chapter.title,
+                    html = Text.chapterHtml(chapter.title, _("这是 VIP 章节，你还没有购买。\n请先在晋江购买本章，再回来阅读。")),
+                    temporary = true,
+                })
+            else
+                done(nil, err)
+            end
         end)
     end
 end
@@ -222,19 +285,19 @@ function Source:openBookAsync(identity, opts, cb)
     local open = opts and opts.chapter_idx and Chapter.openAsync or Chapter.openWithUi
     return open(self, identity, identity.book, opts, {
         loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
-        fetchContent = contentFetcher(),
+        fetchContent = contentFetcher(true),
     }, cb)
 end
 
 function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
     return require("source.chapter").prefetchAsync(identity, identity.book, toc, from_idx, count, {
-        fetchContent = contentFetcher(),
+        fetchContent = contentFetcher(false),
         interval_seconds = FETCH_INTERVAL,
     }, cb)
 end
 
 function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
-    return require("source.chapter").cacheAllAsync(self, identity, contentFetcher(), on_progress, cb,
+    return require("source.chapter").cacheAllAsync(self, identity, contentFetcher(false), on_progress, cb,
         FETCH_INTERVAL, range)
 end
 

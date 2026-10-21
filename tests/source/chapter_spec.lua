@@ -164,6 +164,22 @@ Assert.eq(remote_n, 1)
 Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, remote_ops, function() end)
 Assert.eq(remote_n, 2)
 
+-- temporary 载荷（如未购买提示）能打开，但不算缓存，再开仍要重拉。
+local temp_n = 0
+local temp_ops = {
+    loadToc = function(_, cb) cb(toc) end,
+    fetchContent = function(_, item, cb)
+        temp_n = temp_n + 1
+        cb({ title = item.title, html = "<p>未购买</p>", temporary = true })
+    end,
+}
+os.remove(tmp .. "/2.html")
+local temp_path
+Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, temp_ops, function(p) temp_path = p end)
+Assert.is_true(temp_path ~= nil)
+Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, temp_ops, function() end)
+Assert.eq(temp_n, 2)
+
 -- 未指定章时优先使用本地 pending_progress。
 pending = { chapter_idx = 3 }
 Chapter.openAsync({ type = "chapter" }, identity, {}, nil, ops, function(p) path = p end)

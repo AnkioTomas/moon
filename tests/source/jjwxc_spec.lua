@@ -55,16 +55,61 @@ do
         { chapterid = "0", chaptertype = "1", chaptername = "卷一", islock = "0" },
         { chapterid = "1", chaptertype = "0", chaptername = "第一章", islock = "0", chaptersize = "100" },
         { chapterid = "2", chaptertype = "0", chaptername = "锁定", islock = "1" },
-        { chapterid = "3", chaptertype = "0", chaptername = "第三章", islock = "0" },
+        { chapterid = "3", chaptertype = "0", chaptername = "第三章", islock = "0", isvip = 2 },
     } })
     Assert.len(toc, 2)
     Assert.eq(toc[2].uid, "3")
     Assert.eq(toc[2].idx, 2)
+    Assert.is_true(toc[2].vip)
+    Assert.is_nil(toc[1].vip)
+    Assert.eq(toc[1].toc_version, Mapper.TOC_VERSION)
 end
 
 do
     Assert.eq(Mapper.webContent('<ul class="content_ul"><li class="x">甲<br>乙&amp;丙</li></ul>'), "甲\n乙&丙")
     Assert.is_nil(Mapper.webContent("<h1>提示</h1>"))
+    Assert.eq(Mapper.webContent('<ul class="content_ul"><li>甲<script>var a = "x";</script>乙</li></ul>'), "甲乙")
+    local vip = '<ul class="content_ul"><li><div id="content_1">vip内容加载中...</div><div id="contentvars">'
+        .. '<input type="hidden" name="novelid" value="9942287"><input type="hidden" name="chapterid" value="23">'
+        .. '<input type="hidden" name="readerid" value="85927522"><input type="hidden" name="accessKey" value="PxowDj">'
+        .. '<input type="hidden" name="cryptInfo" value="UahebT8I2W5DVP5RtJTyCv1C6busic0hCivj23MPTk2HT99HFI3DvvCodX1QFhgRjU3iX1mxo8d2Gew/rq0qmDncXWCcbF7pIJ8MOhTRzV8=">'
+        .. '<input type="hidden" name="content" value="Emlwl6ggvu2rApuyRLY0AEkcBQrKkbdlc4dnnXiyv2GlVkdadO7XU7ajVLp7r4yNKJsCzyUFsnFXtjXtpHOMCMWh7YMzOwF/YC/3uid37ZFyJcrWtkoot1B5mGTJYe5s0Vdy+pJl3IwBMXuHFH88vVgUfiXj+mxoaeYo/Znglqk="></div></li></ul>'
+    Assert.eq(Mapper.webContent(vip), "　　甲&乙\n\n　　丙\238\129\132丁")
+    Assert.is_nil(Mapper.webContent(vip:gsub("PxowDj", "xxxxxx")))
+end
+
+do
+    -- key / iv 取摘要里任意偏移的窗口，正文也可能是未编码的 UTF-8。
+    local Aes, Md5, Text = require("crypto.aes"), require("crypto.md5"), require("utils.text")
+    local function enc(plain, source, key_off, iv_off)
+        local d = Md5.hex(source)
+        d = d .. d
+        return Text.base64Encode(Aes.cbc_encrypt(plain, d:sub(key_off + 1, key_off + 16), d:sub(iv_off + 1, iv_off + 16)))
+    end
+    local meta = Text.base64Encode('{"time":1792544104,"key":"HqgOwYk","ver":"20250926"}')
+    local body = "　　沈玄宁讪讪一笑，道：“我是路过的。”<br><br>　　他转身走了，留下一句话：好自为之。"
+    local page = '<div id="contentvars"><input name="novelid" value="9942287"><input name="chapterid" value="23">'
+        .. '<input name="readerid" value="85927522"><input name="accessKey" value="AcsRWK">'
+        .. '<input name="cryptInfo" value="' .. enc(meta, "9942287.23.85927522.AcsRWK", 27, 11) .. '">'
+        .. '<input name="content" value="' .. enc(body, "HqgOwYk179254410485927522", 12, 28) .. '"></div>'
+    Assert.eq(require("source.jjwxc.vip").content(page), body)
+end
+
+do
+    package.loaded["source.jjwxc.font"] = nil
+    local Font = require("source.jjwxc.font")
+    local fh = assert(io.open("tests/fixtures/jjwxcfont_9eo8b.ttf", "rb"))
+    local ttf = fh:read("*a")
+    fh:close()
+    local map = Font.mapping(ttf)
+    local n = 0
+    for _code in pairs(map) do n = n + 1 end
+    Assert.eq(n, 200)
+    Assert.eq(map[0xE044], "他")
+    Assert.eq(map[0xE9BE], "已")
+    -- 私有区字 → 真字；字后的零宽占位去掉；未命中的私有区字原样保留。
+    Assert.eq(Font.decode("\u{E044}\u{200B}说\u{E9BE}\u{FEFF}\u{F8F0}", map), "他说已\u{F8F0}")
+    Assert.is_nil(Font.mapping("not a font"))
 end
 
 do

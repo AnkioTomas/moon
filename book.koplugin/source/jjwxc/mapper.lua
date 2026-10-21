@@ -5,6 +5,7 @@
 --]]
 
 local Text = require("utils.text")
+local Vip = require("source.jjwxc.vip")
 
 local Mapper = {}
 
@@ -110,6 +111,9 @@ function Mapper.shelfList(rows)
     return books
 end
 
+--- 目录缓存格式版本：2 起章节带 vip 标记。
+Mapper.TOC_VERSION = 2
+
 --- chapterList → 目录。卷标题（chaptertype 1）与审核中被锁的章不进目录；章号（uid）是接口里的 chapterid。
 ---@param wire table|nil
 ---@return BookChapter[]
@@ -123,9 +127,11 @@ function Mapper.toc(wire)
                 uid = tostring(row.chapterid),
                 title = row.chaptername,
                 words = tonumber(row.chaptersize),
+                vip = (tonumber(row.isvip) or 0) > 0 or nil,
             }
         end
     end
+    if toc[1] then toc[1].toc_version = Mapper.TOC_VERSION end
     return toc
 end
 
@@ -133,8 +139,10 @@ end
 ---@param html string
 ---@return string|nil
 function Mapper.webContent(html)
-    local body = html:match('<ul class="content_ul">%s*<li[^>]*>(.-)</li>')
+    local body = html:find('id="contentvars"', 1, true) and Vip.content(html)
+        or not html:find('id="contentvars"', 1, true) and html:match('<ul class="content_ul">%s*<li[^>]*>(.-)</li>')
     if not body then return nil end
+    body = body:gsub("<script.-</script>", ""):gsub("&zwnj;", ""):gsub("&#([xX]%x+);?", "&#%1;")
     local text = Text.xmlDecode((body:gsub("<[Bb][Rr]%s*/?>", "\n"):gsub("<[^>]*>", "")))
     return Text.trim(text) ~= "" and text or nil
 end
