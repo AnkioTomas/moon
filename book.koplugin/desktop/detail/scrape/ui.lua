@@ -21,6 +21,7 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 local Input = require("ui.themes.widgets.input")
 local Toast = require("ui.themes.widgets.toast")
+local Sheet = require("ui.themes.widgets.sheet")
 
 local ScrapeUI = {}
 
@@ -120,7 +121,8 @@ end
 ---@param query string
 ---@param on_close fun()|nil
 ---@param owner table
-local function performSearch(identity, query, on_close, owner)
+---@param source_id string|nil 空 = 自动（豆瓣 → 微信读书）
+local function performSearch(identity, query, on_close, owner, source_id)
     local info = require("ui.themes.widgets.progress_dialog"):new{
         title = _("搜索结果"), text = _("搜索中..."), dismissable = false,
     }
@@ -144,7 +146,7 @@ local function performSearch(identity, query, on_close, owner)
 
         logger.info("scrape: got results from", source)
         showResults(identity, assert(results), assert(source), on_close)
-    end)
+    end, source_id)
     if job and not done then
         owner.scrape_job = { cancel = function()
             info:close()
@@ -174,7 +176,25 @@ function ScrapeUI.start(identity, default_title, on_close, owner)
                 if on_close then on_close() end
                 return
             end
-            performSearch(identity, query, on_close, owner)
+            local picked = false
+            local items = { { text = _("自动（豆瓣 → 微信读书）"), id = nil } }
+            for _idx, src in ipairs(Search.SOURCES) do items[#items + 1] = { text = src.name, id = src.id } end
+            for _idx, item in ipairs(items) do
+                item.callback = function()
+                    picked = true
+                    performSearch(identity, query, on_close, owner, item.id)
+                end
+            end
+            Sheet:new{
+                title = _("选择数据来源"),
+                items = items,
+                -- Sheet 先关窗再回调选项，下一 tick 才能区分「选了」与「取消」
+                close_callback = function()
+                    UIManager:nextTick(function()
+                        if not picked and on_close then on_close() end
+                    end)
+                end,
+            }:show()
         end,
     }:show()
 end

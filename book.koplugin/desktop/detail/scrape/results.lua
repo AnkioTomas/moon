@@ -155,7 +155,7 @@ function Results:updateView()
     local t = Theme.current()
     local pad = Theme.px(t.space.lg)
     local content_w = w - pad * 2
-    local source_name = self.source == "douban" and _("豆瓣") or _("微信读书")
+    local source_name = require("desktop.detail.scrape.search").name(self.source)
 
     local title_bar = TitleBar.widget({
         width = w,
