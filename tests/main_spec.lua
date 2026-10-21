@@ -62,6 +62,7 @@ stub("source.base", { hasDirty = function(id) return dirty[id] == true end })
 stub("ui/network/manager", { isConnected = function() return connected end })
 --- 除当前源外的其他启用源（混合模式）；值为 false 表示已启用但加载失败。
 local other_sources = {}
+local mixed_mode = false
 stub("source.registry", {
     registerHidden = function() end,
     current = function() return current_source end,
@@ -69,6 +70,10 @@ stub("source.registry", {
         local out = current_source and { { id = current_source.id } } or {}
         for _idx, id in ipairs(other_sources) do out[#out + 1] = { id = id } end
         return out
+    end,
+    syncScope = function()
+        if mixed_mode then return require("source.registry").listEnabled() end
+        return { { id = current_source.id } }
     end,
     resolve = function(id)
         if current_source and current_source.id == id then return current_source end
@@ -301,6 +306,7 @@ Assert.eq(source_hooks[#source_hooks], "pushDirty:local", "唤醒有网就推脏
 -- 混合模式：所有有脏行的已配置启用源都推；没脏行的不建实例，加载失败、未登录的跳过；离线谁都不推
 do
     local resolved_ids = {}
+    mixed_mode = true
     dirty.moon_off = true
     other_sources = { "wechat", "jdread", "moon_off", "copymanga", wechat = mkSource({ id = "wechat" }), jdread = false,
         moon_off = mkSource({ id = "moon_off", unconfigured = true }), copymanga = mkSource({ id = "copymanga" }) }
@@ -316,6 +322,11 @@ do
     plugin:onResume()
     Assert.eq(#source_hooks, before, "离线不推，等联网")
     connected = true
+    mixed_mode = false
+    before = #source_hooks
+    plugin:onResume()
+    Assert.eq(table.concat(source_hooks, ",", before + 1), "pushDirty:local", "非混合模式只推当前源，其它源的脏行等切过去再推")
+    feature_hooks[#feature_hooks] = nil
     registry.resolve = resolve
     other_sources = {}
     feature_hooks[#feature_hooks] = nil
