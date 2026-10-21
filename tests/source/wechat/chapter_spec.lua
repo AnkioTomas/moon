@@ -50,6 +50,7 @@ local FULL = '<?xml version="1.0"?><html><head><title></title>'
 local PLAIN = "\239\187\191第一行 <b>\n  第二行"
 local TRIAL = "“第四路，已过浔阳！”\n这是李善德发明的脚程格眼。..."
 local trial = false
+local bom = false
 local signed_with = {}
 local styles = {}
 
@@ -64,6 +65,7 @@ package.preload["source.wechat.protocol"] = function()
         decodeShards = function(first)
             if first == "e2" then return ".content{text-indent:2em}" end
             if trial then return TRIAL end
+            if bom then return "\239\187\191" .. FULL end
             return txt and PLAIN or FULL
         end,
     }
@@ -161,6 +163,16 @@ do
     trial = false
     Assert.is_nil(payload)
     Assert.matches(err, "试读")
+end
+
+do
+    -- 服务端给 XHTML 带 UTF-8 BOM：是正文，不能当试读片段拒掉。
+    bom = true
+    local payload, err = nil, nil
+    Chapter.fetchContentAsync("book", { uid = "bom", title = "第一章" }, function(p, e) payload, err = p, e end)
+    bom = false
+    Assert.is_nil(err)
+    Assert.is_true(payload ~= nil)
 end
 
 do

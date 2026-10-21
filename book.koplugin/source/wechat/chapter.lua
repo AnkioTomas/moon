@@ -175,7 +175,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                 local xhtml, decode_err = Protocol.decodeShards(e0, e1, e3)
                 if not xhtml then
                     fail(decode_err or _("章节解码失败"))
-                elseif not xhtml:find("^%s*<") then
+                elseif not Text.stripBom(xhtml):find("^%s*<") then
                     -- 无权阅读的付费章：服务端照样 200，回几百字纯文本试读片段（以「...」结尾）。
                     fail(_("该章需购买或付费会员卡，微信读书只返回了试读片段"))
                 else

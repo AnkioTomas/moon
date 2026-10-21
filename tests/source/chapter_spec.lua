@@ -129,6 +129,14 @@ Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 3 }, ops, 
 Assert.eq(path, tmp .. "/3.html")
 Assert.len(fetched, 1)
 
+-- 带 BOM 的 XHTML 缓存是合法正文，不能每次都重拉。
+local bom_cache = io.open(tmp .. "/3.html", "wb")
+bom_cache:write('\239\187\191<?xml version="1.0"?><html><body><p>正文</p></body></html>')
+bom_cache:close()
+Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 3 }, ops, function(p) path = p end)
+Assert.eq(path, tmp .. "/3.html")
+Assert.len(fetched, 1)
+
 -- 旧版本落盘的纯文本试读片段不算缓存，必须重拉。
 local trial = io.open(tmp .. "/3.html", "wb")
 trial:write("二月春风，柳色初青。...")
