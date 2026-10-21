@@ -1,5 +1,5 @@
 --[[--
-多源图书搜索协调器
+多源图书搜索协调器（豆瓣自带解析，其余全走数据源 searchAsync）
 
 默认豆瓣优先，失败或无结果 fallback 微信读书；也可指定单个站点搜索
 
@@ -7,7 +7,6 @@
 --]]
 
 local Douban = require("desktop.detail.scrape.douban")
-local Weread = require("desktop.detail.scrape.weread")
 local Novel = require("desktop.detail.scrape.novel")
 local logger = require("utils.log")
 local Text = require("utils.text")
@@ -18,7 +17,7 @@ local Search = {}
 --- 可单独指定的数据来源（顺序即选择列表顺序）。
 Search.SOURCES = {
     { id = "douban", name = _("豆瓣"), run = Douban.searchAsync },
-    { id = "weread", name = _("微信读书"), run = Weread.searchAsync },
+    { id = "weread", name = _("微信读书"), run = function(q, cb) return Novel.viaSource("wechat", q, cb, "weread") end },
     { id = "qimao", name = _("七猫小说"), run = function(q, cb) return Novel.viaSource("qimao", q, cb) end },
     { id = "jjwxc", name = _("晋江文学城"), run = function(q, cb) return Novel.viaSource("jjwxc", q, cb) end },
     { id = "qidian", name = _("起点中文网"), run = function(q, cb) return Novel.viaSource("qidian", q, cb) end },
@@ -69,14 +68,14 @@ function Search.searchAsync(query, cb, source_id)
     local function tryWeread()
         if cancelled then return end
         logger.info("scrape: fallback to weread")
-        current_job = Weread.searchAsync(query, function(results, err)
+        current_job = Novel.viaSource("wechat", query, function(results, err)
             if cancelled then return end
             if results and #results > 0 then
                 cb(results, nil, "weread")
             else
                 cb(nil, err or _("无搜索结果"), nil)
             end
-        end)
+        end, "weread")
     end
 
     logger.info("scrape: trying douban first")

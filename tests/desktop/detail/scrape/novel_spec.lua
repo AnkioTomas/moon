@@ -15,3 +15,15 @@ do
     Assert.eq(rows[1].tags[1], "玄幻")
     Assert.eq(rows[1].source, "qimao")
 end
+
+do
+    local rows = Novel.fromBooks("weread", { {
+        title = "书", authors = "乙", series = "系",
+        meta = { publisher = "社", published = "2022-01-01 00:00:00", isbn = "9", rating = { score = 9.55 } },
+    } })
+    Assert.eq(rows[1].publisher, "社")
+    Assert.eq(rows[1].year, "2022")
+    Assert.eq(rows[1].isbn, "9")
+    Assert.eq(rows[1].rating, "9.6")
+    Assert.eq(rows[1].series, "系")
+end
