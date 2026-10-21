@@ -51,6 +51,14 @@ function ChapterDB.get(path)
     }
 end
 
+--- 这本书是否登记过任何章节文件（不要求从当前章起连续）。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function ChapterDB.has(source_id, stable_id)
+    return DB.rowexec([[SELECT 1 FROM chapters WHERE source_id=? AND stable_id=? LIMIT 1;]], source_id, stable_id) ~= nil
+end
+
 --- 某源（或多源）登记过的全部章节文件路径。
 ---@param source_id string|string[]
 ---@return string[]
