@@ -214,7 +214,7 @@ do
     calls = {}
     Catalog.listBooks("local", { sort = "recent_read", limit = 24 })
     Assert.is_true(calls[1].sql:find("LEFT JOIN pending_progress p", 1, true) ~= nil, "没进度的书也要计数")
-    Assert.is_true(calls[1].sql:find("(b.deleted=0 OR ((b.deleted=0 OR b.sync_status=1) AND p.stable_id IS NOT NULL"
+    Assert.is_true(calls[1].sql:find("(b.deleted=0 OR ((b.deleted=0 OR (b.sync_status=1 AND NOT (b.source_id='local' AND b.path IS NULL))) AND p.stable_id IS NOT NULL"
             .. " AND NOT EXISTS (SELECT 1 FROM books s WHERE s.source_id=b.source_id"
             .. " AND s.deleted=0 AND s.title=b.title)))", 1, true) ~= nil,
         "卷行有进度才列进最近阅读")

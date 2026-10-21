@@ -85,6 +85,24 @@ res = page(root, 2, 2)
 Assert.eq(#res.data, 1)
 Assert.eq(res.data[1].title, "top.epub")
 
+-- WebDAV 远端还没下载的书 path 为空，按下载后会在的 root/相对路径归入文件夹
+Assert.is_true(BookDB.upsertRemote({ source_id = "local", stable_id = "webdav://儿童/笑猫/x.epub", title = "x",
+    deleted = 0, inserted_at = 1 }, false, true))
+local function pageRoot(dir)
+    local out
+    Catalog.folderPageAsync("local", { dir = dir, root = root, page = 1, page_size = 10, sort = "title" },
+        function(r) out = r end)
+    Stubs.flush()
+    return out
+end
+res = pageRoot(root)
+local names = {}
+for _idx, e in ipairs(res.data) do names[e.title] = true end
+Assert.is_true(names["儿童"], "未下载的 webdav 书所在文件夹也要列出")
+res = pageRoot(root .. "/儿童/笑猫")
+Assert.eq(res.count, 1)
+Assert.eq(res.data[1].title, "x")
+
 Base.close()
 os.execute("rm -rf '" .. root .. "'")
 for _idx, name in ipairs(mods) do package.loaded[name] = nil end

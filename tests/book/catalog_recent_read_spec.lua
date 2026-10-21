@@ -75,6 +75,13 @@ rows, count = Catalog.listBooks("wechat", { sort = "recent_read" })
 Assert.eq(count, 7, "同名在架行存在时旧身份行不再重复出现")
 for _idx, row in ipairs(rows) do Assert.is_true(row.stable_id ~= "old_id") end
 
+-- 本地书文件没了（下架并清空 path）：有进度也不留在最近阅读里
+Assert.is_true(BookDB.upsertRemote({ source_id = "local", stable_id = "/gone.epub", title = "gone" }))
+Assert.not_nil(Base.exec([[INSERT INTO pending_progress (source_id, stable_id, fraction, updated_at)
+    VALUES ('local', '/gone.epub', 0.3, 1700008000);]]))
+_rows, all = Catalog.listBooks("local", { sort = "recent_read" })
+Assert.eq(all, 0, "文件已删的本地书不进最近阅读")
+
 -- 其它排序不受影响
 local _rows, all = Catalog.listBooks("wechat", { sort = "title" })
 Assert.eq(all, 6, "其它排序只列在架书")

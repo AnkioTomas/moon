@@ -801,11 +801,13 @@ end
 --- 它故意不上架）；墓碑（deleted=1 + sync_status=0，本地删了等推云端）不算。
 --- 已知取舍：远端对账下架的行也会落成「非成员身份行」，它会连同进度留在最近阅读里，
 --- 直到云端删除被确认、行被撕掉。
+--- 本地源例外：它的「远端」就是磁盘，下架即文件没了（path 已清空），没有可读的东西，不能留进度行。
 ---@param alias string|nil books 表别名，缺省 b
 ---@return string SQL 片段
 function BookDB.readableClause(alias)
     alias = alias or "b"
-    return "(" .. alias .. ".deleted=0 OR " .. alias .. ".sync_status=1)"
+    return "(" .. alias .. ".deleted=0 OR (" .. alias .. ".sync_status=1 AND NOT ("
+        .. alias .. ".source_id='local' AND " .. alias .. ".path IS NULL)))"
 end
 
 --- 已下载条件（唯一口径）：章节源从当前阅读章（pending_progress.chapter_idx，无则第 1 章）起，
