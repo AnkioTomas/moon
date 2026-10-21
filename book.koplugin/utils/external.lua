@@ -13,7 +13,7 @@ local External = {}
 
 local function settle(label, ok, ...)
     if ok then return ... end
-    logger.err("feature external failed", label, (...))
+    logger.error("feature external failed", label, (...))
 end
 
 --- 跑一个第三方回调：出错只记日志并返回 nil。
@@ -59,7 +59,7 @@ function External.collect(kind)
             if type(mod) == "table" then
                 out[#out + 1] = { id = ext.id, mod = mod }
             else
-                logger.err("feature external rejected", ext.id, kind)
+                logger.error("feature external rejected", ext.id, kind)
             end
         end
     end
