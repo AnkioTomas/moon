@@ -109,6 +109,10 @@ package.preload["book.chapters_db"] = function()
             return chapter_upsert_ok
         end,
         deleteUnder = function() return true end,
+        has = function(source_id, stable_id)
+            downloaded_asks[#downloaded_asks + 1] = { source_id, stable_id, true }
+            return downloaded[source_id .. "\0" .. stable_id] == true
+        end,
     }
 end
 
@@ -214,7 +218,7 @@ end
 
 local Store = require("book.store")
 
--- ── isCached：章节源按库里口径（BookDB.isDownloaded）；整本源 path 须在 cache 内（本地原书恒 false）──
+-- ── isCached：章节源缓存过任意一章即算（ChapterDB.has，不要求从当前章起连续）；整本源 path 须在 cache 内（本地原书恒 false）──
 do
     downloaded["wechat\0cached-book"] = true
     Assert.is_true(Store.isCached({ source_id = "wechat", stable_id = "cached-book" }))

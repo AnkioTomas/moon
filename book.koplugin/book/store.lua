@@ -204,14 +204,15 @@ function Store.touch(path, identity, opts)
     return true
 end
 
---- 在线书是否已离线到 .moon/cache（可清理）：章节源看已下载口径（BookDB.downloadedClause），整本源看 path 落在 cache 内。
+--- 在线书是否已离线到 .moon/cache（可清理）：章节源只要缓存过任意一章（不要求从当前章起连续，
+--- 否则读到没缓存的章就没有清理入口），整本源看 path 落在 cache 内。
 --- 本地源原书在 cache 外，恒为 false。
 ---@param book Book
 ---@return boolean
 function Store.isCached(book)
     local meta = require("source.registry").meta(book.source_id)
     if meta and meta.type == "chapter" then
-        return BookDB.isDownloaded(book.source_id, book.stable_id, true)
+        return require("book.chapters_db").has(book.source_id, book.stable_id)
     end
     return inCache(book.path)
 end
