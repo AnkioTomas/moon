@@ -6,6 +6,7 @@
 local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
+Kit.sections.home = {}
 
 local quote_text = "old"
 package.preload["online.hitokoto"] = function()
@@ -75,6 +76,27 @@ do -- 一言：同一可见期重建不换句，暂停后下一次构建才换
     comp:refresh()
     Assert.matches(texts(slot), "new")
     comp:destroy()
+end
+
+do -- 引言风格：每种风格都出同样的文字；一言与书摘风格各存各的，未知值回退默认
+    local home = Kit.sections.home
+    local saved = { home.home_hitokoto_style, home.home_excerpt_style }
+    quote_text = "风格句"
+    for _, style in ipairs({ "plain", "center", "bar", "mark", "no-such-style" }) do
+        home.home_hitokoto_style = style
+        local comp, slot = mount("hitokoto")
+        Assert.matches(texts(slot), "风格句")
+        Assert.matches(texts(slot), "—— who · work")
+        comp:destroy()
+    end
+    home.home_hitokoto_style, home.home_excerpt_style = "bar", "center"
+    local hitokoto = require("desktop.pages.home.hitokoto"):new()
+    local excerpt_comp = require("desktop.pages.home.excerpt"):new()
+    Assert.eq(hitokoto:style(), "bar")
+    Assert.eq(excerpt_comp:style(), "center")
+    home.home_hitokoto_style = "no-such-style"
+    Assert.eq(hitokoto:style(), "plain")
+    home.home_hitokoto_style, home.home_excerpt_style = saved[1], saved[2]
 end
 
 do -- 书摘：有高亮用高亮，点按开书；空库回退一言

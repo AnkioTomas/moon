@@ -164,6 +164,8 @@ return {
     ["天气预报"] = "Weather forecast",
     ["每小时天气预报"] = "Hourly forecast",
     ["后天"] = "In 2 days",
+    ["竖线"] = "Bar",
+    ["引号"] = "Quote mark",
     ["显示第一本"] = "Show first book",
     ["✓ 显示第一本"] = "✓ Show first book",
     ["俄语"] = "Russian",
