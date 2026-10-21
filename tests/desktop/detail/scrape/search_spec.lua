@@ -33,9 +33,9 @@ local function installFakes()
             end,
         }
     end
-    package.preload["desktop.detail.scrape.weread"] = function()
+    package.preload["desktop.detail.scrape.novel"] = function()
         return {
-            searchAsync = function(_, cb)
+            viaSource = function(_, _, cb)
                 WereadFake.calls = WereadFake.calls + 1
                 WereadFake.pending = cb
                 return {
@@ -46,7 +46,7 @@ local function installFakes()
             end,
         }
     end
-    for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.weread", "desktop.detail.scrape.search" }) do
+    for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.novel", "desktop.detail.scrape.search" }) do
         package.loaded[name] = nil
     end
 end
@@ -57,7 +57,7 @@ local function resetFakes()
 end
 
 local function cleanup()
-    for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.weread", "desktop.detail.scrape.search" }) do
+    for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.novel", "desktop.detail.scrape.search" }) do
         package.preload[name] = nil
         package.loaded[name] = nil
     end
