@@ -139,12 +139,9 @@ local owner = {}
 local function startAndPick()
     shown = {}
     ScrapeUI.start(identity, "原书名", nil, owner)
-    local dialog = shown[#shown]
-    Assert.eq(dialog.fields[1].text, "原书名")
-    dialog.callback(dialog.fields[1].text)
-    local sheet = shown[#shown]
-    Assert.eq(sheet.items[1].id, nil, "第一项是自动")
-    sheet.items[1].callback()
+    local list = shown[#shown]
+    Assert.eq(list.items[1].mandatory, "原书名", "顶部是书名行")
+    list.items[2].callback()
     local results = shown[#shown]
     results.on_pick(results.results[1])
     Assert.is_nil(owner.scrape_job, "同步完成的搜索不留句柄")
@@ -209,14 +206,25 @@ Assert.eq(shown[#shown].text, "元数据已更新")
 search_pending = {}
 shown = {}
 ScrapeUI.start(identity, "原书名", nil, owner)
-shown[#shown].callback("原书名")
-shown[#shown].items[1].callback()
+shown[#shown].items[2].callback()
 local searching = shown[#shown]
 Assert.eq(searching.text, "搜索中...")
 owner.scrape_job.cancel()
 Assert.is_true(search_pending.cancelled)
 Assert.is_true(searching.closed)
 search_pending = nil
+
+-- 书名行改写后列表跟着更新；书名为空不发搜索。
+shown = {}
+ScrapeUI.start(identity, "原书名", nil, owner)
+local list = shown[#shown]
+list.items[1].callback()
+local input = shown[#shown]
+Assert.eq(input.fields[1].text, "原书名")
+input.callback("  ")
+Assert.eq(list.items[1].mandatory, "点按输入")
+list.items[2].callback()
+Assert.eq(shown[#shown].text, "书名不能为空")
 
 pcall(os.remove, Config.dir() .. "/scrape-source.png")
 pcall(os.remove, cover_path)
