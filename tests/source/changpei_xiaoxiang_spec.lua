@@ -52,6 +52,10 @@ do
     Assert.eq(text, "　　第一段\n　　第二段")
     local _t, _e, kind = Changpei.content({ data = { chapterInfo = { chapterPrice = 9, isSub = false, content = "" } } })
     Assert.eq(kind, "unpaid")
+    local _t0, e0, kind0 = Changpei.content({ code = 200, msg = "操作成功",
+        data = { chapterInfo = { chapterPrice = "25", isSub = "0", content = "" } } })
+    Assert.eq(kind0, "unpaid")
+    Assert.is_nil(e0)
     local bought = Changpei.content({ data = { chapterInfo = { chapterPrice = 9, isSub = true, content = seal("正文") } } })
     Assert.eq(bought, "正文")
     local _t2, _e2, verify = Changpei.content({ data = { check = 2, chapterInfo = { chapterPrice = 0, content = seal("乱码") } } })
@@ -131,6 +135,60 @@ do
     package.preload["http.request"] = nil
 end
 
+-- 书架 / 阅读历史 / 签名 POST
+do
+    local Cp = require("source.changpei.mapper")
+    local books = Cp.shelfList({ { id = 7, name = " 书 ", author = "甲", cover = "https://x/a.jpg?x-oss=1" } })
+    Assert.eq(books[1].stable_id, "7")
+    Assert.eq(books[1].title, "书")
+    Assert.eq(books[1].cover, "https://x/a.jpg")
+    local hist = Cp.history({ data = { list = { { list = {
+        { novel_id = 9, latest_read_cid = 123 }, { novel_id = 8, latest_read_cid = 0 },
+    } } } } })
+    Assert.eq(hist["9"], "123")
+    Assert.is_nil(hist["8"])
+
+    local pages, posted = {}, {}
+    package.loaded["http.request"] = nil
+    package.preload["http.request"] = function()
+        return {
+            get = function(url, _opts, cb)
+                if url:find("system/init", 1, true) then
+                    cb('{"code":200,"data":{"timestamp":1792556196}}')
+                else
+                    local n = tonumber(url:match("page=(%d+)"))
+                    pages[#pages + 1] = n
+                    cb(n == 1 and '{"code":200,"data":{"list":[{"type":"novel","id":5},{"type":"shelf","id":1}]}}'
+                        or '{"code":200,"data":{"list":[]}}')
+                end
+                return {}
+            end,
+            post = function(url, body, opts, cb)
+                posted = { url = url, body = body, headers = opts.headers }
+                cb('{"code":200,"data":[]}')
+                return {}
+            end,
+        }
+    end
+    package.loaded["source.changpei.client"] = nil
+    local Client = require("source.changpei.client")
+    local rows
+    Client.shelfAsync(function(r) rows = r end)
+    Assert.len(pages, 2)
+    Assert.eq(pages[2], 2)
+    Assert.len(rows, 1)
+    local ok
+    Client.shelfAddAsync("5", function(wire) ok = wire ~= nil end)
+    Assert.is_true(ok)
+    Assert.eq(posted.body, '{"module":"novel","cid":5,"status":1}')
+    Assert.eq(posted.headers.Timestamp, "1792556196")
+    Client.shelfAddAsync("2125021", function() end)
+    Assert.eq(posted.headers["Rand-Str"], "4d427f47b607d1d06ecd0d3a11fbcf7d")
+    Client.shelfRemoveAsync("5", function() end)
+    Assert.eq(posted.body, '{"module":"novel","cid":5,"status":0}')
+    package.preload["http.request"] = nil
+end
+
 -- 扫码登录：gRPC-web 帧与 protobuf 顶层字段
 local QRLogin = require("source.changpei.qrlogin")
 
@@ -149,3 +207,30 @@ do
     Assert.eq(next(QRLogin.decode("")), nil)
 end
 
+
+-- 书城榜单：rankingNav → 两行 chip，节点取榜单 + 子榜
+do
+    package.loaded["http.request"] = nil
+    package.preload["http.request"] = function()
+        return { get = function(url, _opts, cb)
+            if url:find("rankingNav", 1, true) then
+                cb('{"code":200,"data":[{"name":"畅销榜","rank_id":1,"type":[{"name":"昨日","value":1},{"name":"30天","value":3}]},'
+                    .. '{"name":"精品榜","rank_id":15,"url":"event/x","type":[]},'
+                    .. '{"name":"人气榜","rank_id":3,"type":[{"name":"7天","value":2}]}]}')
+            else
+                cb('{"code":200,"data":{"count":1,"list":[{"novel_id":9,"novel_name":"榜书","novel_author":"甲"}]}}')
+            end
+            return {}
+        end }
+    end
+    package.loaded["source.changpei.client"] = nil
+    package.loaded["source.changpei"] = nil
+    local source = require("source.changpei").new()
+    local res
+    source:browseAsync({ node = "1:3" }, function(r) res = r end)
+    Assert.eq(res.data[1].stable_id, "9")
+    Assert.len(res.groups[1].chips, 2)
+    Assert.eq(res.groups[1].active, "1:1")
+    Assert.eq(res.groups[2].active, "1:3")
+    package.preload["http.request"] = nil
+end

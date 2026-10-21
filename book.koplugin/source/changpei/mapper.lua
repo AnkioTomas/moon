@@ -6,6 +6,7 @@
 
 local Aes = require("crypto.aes")
 local Text = require("utils.text")
+local _ = require("gettext")
 
 local Mapper = {}
 
@@ -45,6 +46,51 @@ function Mapper.search(wire)
     return out
 end
 
+--- rankingNav → 榜单列表 { rid, name, types = { { value, name } } }；带 url 的是跳转活动页的入口、没有子榜的不收。
+---@param wire table
+---@return table[]
+function Mapper.ranks(wire)
+    local out = {}
+    for _idx, row in ipairs(type(wire.data) == "table" and wire.data or {}) do
+        if not row.url and type(row.type) == "table" and #row.type > 0 then
+            out[#out + 1] = { rid = row.rank_id, name = row.name, types = row.type }
+        end
+    end
+    return out
+end
+
+--- usercoll/getList 的书行 → 书架。
+---@param rows table[]
+---@return Book[]
+function Mapper.shelfList(rows)
+    local out = {}
+    for _idx, row in ipairs(rows) do
+        out[#out + 1] = {
+            source_id = SOURCE_ID,
+            stable_id = tostring(row.id),
+            title = Text.trim(row.name),
+            authors = Text.trim(row.author),
+            cover = cover(row.cover),
+        }
+    end
+    return out
+end
+
+--- getHistory（按日期分组的 list）→ novel_id → 最近读到的章 id。
+---@param wire table
+---@return table<string, string>
+function Mapper.history(wire)
+    local out = {}
+    local groups = type(wire.data) == "table" and wire.data.list or {}
+    for _idx, group in ipairs(groups) do
+        for _row, row in ipairs(group.list or {}) do
+            local cid = tonumber(row.latest_read_cid)
+            if row.novel_id and cid and cid > 0 then out[tostring(row.novel_id)] = tostring(cid) end
+        end
+    end
+    return out
+end
+
 --- 目录缓存格式版本。
 Mapper.TOC_VERSION = 1
 
@@ -78,10 +124,11 @@ function Mapper.content(wire)
     local info = type(wire.data) == "table" and wire.data.chapterInfo
     if type(info) ~= "table" then return nil, wire.msg end
     if (tonumber(wire.data.check) or 0) > 1 then return nil, nil, "verify" end
-    local locked = (tonumber(info.chapterPrice) or 0) > 0 and not info.isSub
+    -- isSub 在接口里是 "0" / "1" 字符串（"0" 在 Lua 里是真值）
+    local locked = (tonumber(info.chapterPrice) or 0) > 0 and not (info.isSub == true or tonumber(info.isSub) == 1)
     if type(info.content) ~= "string" or info.content == "" then
         if locked then return nil, nil, "unpaid" end
-        return nil, wire.msg
+        return nil, _("长佩章节内容为空")
     end
     local plain = Aes.cbc_decrypt(Text.base64Decode(info.content), KEY, IV)
     if not plain then return nil, nil, locked and "unpaid" or nil end

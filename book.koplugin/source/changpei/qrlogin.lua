@@ -4,7 +4,9 @@
 官网登录页的扫码走 gRPC-web（POST /cp.UserExternal/<方法>，请求头 version / imei 必带，否则回「系统繁忙」）：
 get_qrcode_token(scene="Login") → { token, uid }，二维码内容是固定的 transfer/login/middleware URL，用长佩 App 扫；
 qrcode_polling(token) → { status, login_res, token }，status 1 待扫 / 2 已扫待确认 / 3 拒绝 / 4 通过 / 5 失效，
-二维码过期时 grpc-status 非 0。通过后登录态是回包 Set-Cookie 下发的会话 Cookie，交给 on_cookie，由设置页走账号校验再保存。
+二维码过期时 grpc-status 非 0。登录态挂在服务端会话（PHPSESSID）上：先请求 webapi 拿到 PHPSESSID，
+轮询带着它，通过后这个会话即已登录。设备号 `_c_n_` 是网页端随机生成的 MD5（同时作 imei 请求头），这里照做。
+Cookie 交给 on_cookie，由设置页走账号校验再保存。
 
 @module koplugin.book.source.changpei.qrlogin
 --]]
@@ -105,7 +107,7 @@ function QRLogin:_call(method, value, cb)
         ["X-Grpc-Web"] = "1",
         ["Client"] = "pc",
         ["version"] = "1",
-        ["imei"] = "moon",
+        ["imei"] = self.jar._c_n_,
         ["Referer"] = ORIGIN .. "/",
         ["User-Agent"] = require("source.changpei.client").USER_AGENT,
     }
@@ -159,9 +161,9 @@ function QRLogin:_poll(gen, token, started)
         end
         local status = fields[1]
         if status == STATUS_APPROVED then
-            local cookie = cookieHeader(self.jar)
+            local cookie = self.jar.PHPSESSID and cookieHeader(self.jar)
             self:cancel()
-            if cookie == "" then self:toast(_("登录失败：未获取到登录态")); return end
+            if not cookie then self:toast(_("登录失败：未获取到登录态")); return end
             self.on_cookie(cookie)
         elseif status == STATUS_REJECT then
             self:_retry(_("已在手机上拒绝登录"))
@@ -182,32 +184,61 @@ end
 function QRLogin:start()
     self:cancel()
     local gen = self.generation
-    self.jar, self.scanned = {}, false
-    self:_call("get_qrcode_token", "Login", function(fields)
+    local device = ""
+    for _i = 1, 32 do device = device .. string.format("%x", math.random(0, 15)) end
+    self.jar, self.scanned = { _c_n_ = device, _c_n_n_ = device }, false
+    self:_session(function(ok)
         if gen ~= self.generation then return end
-        local token, uid = fields and fields[1], fields and fields[2]
-        if type(token) ~= "string" or token == "" then
+        if not ok then
             self:toast(_("获取二维码失败"))
             return
         end
-        local dialog
-        dialog = require("ui.themes.widgets.qr"):new{
-            title = _("长佩扫码登录"),
-            text = ORIGIN .. "/transfer/login/middleware?token=" .. token .. "&uid=" .. tostring(uid or 0)
-                .. "&pageType=app_qr_code_login",
-            caption = _("用长佩 App 扫一扫"),
-            close_callback = function()
-                if self.dialog == dialog then
-                    self.dialog = nil
-                    self:cancel()
-                    self:toast(_("已取消登录"))
-                end
-            end,
-        }
-        self.dialog = dialog
-        dialog:show()
-        self:_poll(gen, token, os.time())
+        self:_call("get_qrcode_token", "Login", function(fields)
+            if gen ~= self.generation then return end
+            self:_show(gen, fields)
+        end)
     end)
+end
+
+--- webapi 的任何接口都会下发 PHPSESSID。
+---@param cb fun(ok: boolean)
+function QRLogin:_session(cb)
+    local client = require("source.changpei.client")
+    self.job = Request.get(ORIGIN .. "/webapi/system/init", {
+        headers = { ["Client"] = "pc", ["User-Agent"] = client.USER_AGENT, ["Cookie"] = cookieHeader(self.jar) },
+        timeout = require("http.timeout").net(0.5),
+    }, function(_body, _err, res)
+        self.job = nil
+        if res then takeCookies(self.jar, res) end
+        cb(self.jar.PHPSESSID ~= nil)
+    end)
+end
+
+---@param gen integer
+---@param fields table|nil
+function QRLogin:_show(gen, fields)
+    local token, uid = fields and fields[1], fields and fields[2]
+    if type(token) ~= "string" or token == "" then
+        self:toast(_("获取二维码失败"))
+        return
+    end
+    local dialog
+    dialog = require("ui.themes.widgets.qr"):new{
+        title = _("长佩扫码登录"),
+        text = ORIGIN .. "/transfer/login/middleware?token=" .. token .. "&uid=" .. tostring(uid or 0)
+            .. "&pageType=app_qr_code_login",
+        caption = _("用长佩 App 扫一扫"),
+        close_callback = function()
+            if self.dialog == dialog then
+                self.dialog = nil
+                self:cancel()
+                self:toast(_("已取消登录"))
+            end
+        end,
+    }
+    self.dialog = dialog
+    dialog:show()
+    self:_poll(gen, token, os.time())
 end
 
 return QRLogin
