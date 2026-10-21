@@ -16,6 +16,8 @@ local T = require("ffi/util").template
 -- eAPI /info/ok 实测可用；旧入口保留作地区性回退；末尾补自 zlibrary.koplugin
 -- 的 domains.json 与 Android 种子（未逐个实测）。
 local SEED_URLS = {
+    "https://iread.ink",
+    "https://zh.per101.ru",
     "https://zlib.bz",
     "https://lexlib.tw",
     "https://librella.fi",
@@ -24,7 +26,6 @@ local SEED_URLS = {
     "https://bookabooki.fi",
     "https://librella.tw",
     "https://fuckfbi.ru",
-    "https://zh.chris101.ru",
     "https://zh.z-lib.gd",
     "https://z-library.la",
     "https://zh.z-library.sk",
@@ -33,16 +34,12 @@ local SEED_URLS = {
     "https://frenchbooks.sk",
     "https://portuguese-books.sk",
     "https://urdu-books.sk",
-    "https://z-library.ec",
     "https://spanish-books.sk",
     "https://italian-books.sk",
     "https://czechbooks.sk",
     "https://z-lib.sk",
     "https://german-books.sk",
-    "https://zh.z2026.ru",
-    "https://sss101.ru",
     "https://1lib.sk",
-    "https://z-lib.fm",
     "https://z-lib.gd",
     "https://z-lib.gl",
     "https://z-lib.bz",
@@ -54,12 +51,6 @@ local SEED_URLS = {
     "https://zlib.by",
     "https://101ml.su",
     "https://zlib.re",
-    "https://article.sk",
-    "https://articles.sk",
-    "https://z-lib.gs",
-    "https://z-library.do",
-    "https://z-library.rs",
-    "https://singlelogin.re",
     "https://library-oceania.sk",
     "https://library-latin.sk",
     "https://library-asia.sk",
@@ -93,6 +84,23 @@ local function originOf(url)
     local origin = scheme:lower() .. "://" .. host
     if port ~= "" then origin = origin .. ":" .. port end
     return origin, scheme:lower(), host
+end
+
+-- 带 HTTP Basic 门禁的镜像：凭据只发给同 origin 的请求，不随跨主机重定向或其它镜像泄露
+local MIRROR_AUTH = {
+    ["https://iread.ink"] = "iread:DGvG2h3JMOvEoS",
+}
+
+--- 给指向门禁镜像的请求补 Authorization；其它地址原样返回。
+---@param url string
+---@param headers table<string, string>
+---@return table<string, string>
+local function withMirrorAuth(url, headers)
+    local cred = MIRROR_AUTH[originOf(url)]
+    if not cred then return headers end
+    local out = { Authorization = "Basic " .. Text.base64Encode(cred) }
+    for k, v in pairs(headers) do out[k] = v end
+    return out
 end
 
 -- ---------------------------------------------------------------------------
@@ -354,7 +362,7 @@ function Client:_jsonAsync(method, path, opts, cb)
             url = url,
             method = m,
             body = req_body,
-            headers = headers,
+            headers = withMirrorAuth(url, headers),
             timeout = opts.timeout or require("http.timeout").net(1),
         }, function(res, err)
             if cancelled or settled then return end
@@ -618,7 +626,7 @@ function Client:downloadAsync(id, hash, dest, on_progress, cb)
         job = Request.download({
             url = link,
             method = "GET",
-            headers = self:headers(true),
+            headers = withMirrorAuth(link, self:headers(true)),
             timeout = require("http.timeout").net(6),
             -- CDN 直链常带 301/302：允许 Turbo 自动跟随
             allow_redirects = true,
