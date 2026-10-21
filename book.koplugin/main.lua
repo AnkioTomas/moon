@@ -20,7 +20,9 @@ local function allowInitModules(root)
         package.path = package.path .. ";" .. entry
     end
 end
-allowInitModules(debug.getinfo(1, "S").source:match("^@(.*)/"))
+local ROOT = debug.getinfo(1, "S").source:match("^@(.*)/")
+allowInitModules(ROOT)
+require("utils.modules").install(ROOT)
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger = require("utils.log")
