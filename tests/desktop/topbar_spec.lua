@@ -214,19 +214,20 @@ do -- Resume：轮询项共用一个分钟对齐心跳，外加订阅；读数�
     swaps = 0
     bar:activate()
     Assert.is_true(bar.active)
-    Assert.len(Kit.scheduled, 1, "时钟 / 内存 / 存储 / 电池共用一个心跳")
+    Assert.len(Kit.scheduled, 2, "时钟 / 内存 / 存储 / 电池共用一个心跳 + 唤醒补读")
     Assert.is_true(Kit.scheduled[1].delay >= 1 and Kit.scheduled[1].delay <= 61)
     Assert.eq(type(watch_cb), "function")
     Assert.eq(swaps, 0)
     bar:activate()
-    Assert.len(Kit.scheduled, 1, "重复 Resume 不重挂")
+    Assert.len(Kit.scheduled, 3, "重复 Resume 不重挂心跳，只重排唤醒补读")
+    Assert.len(Kit.unscheduled, 1)
 end
 
 do -- 心跳：读数变了才换顶栏，并续约下一跳
     local tick = Kit.scheduled[1]
     tick.fn()
     Assert.eq(swaps, 0)
-    Assert.len(Kit.scheduled, 2)
+    Assert.len(Kit.scheduled, 4)
     powerd.capacity = 80
     tick.fn()
     Assert.eq(swaps, 1)
@@ -253,12 +254,12 @@ do -- KOReader 广播沿树到顶栏控件：电源 / 网络 / 前光重读且�
 end
 
 do -- 设置变化：拆掉重挂（关掉的项不再订阅）
-    local before = #Kit.scheduled
+    local before, un_before = #Kit.scheduled, #Kit.unscheduled
     Kit.sections.desktop.home_topbar_items = { memory = false, cache = false }
     bar:onEvent("topbar_changed")
-    Assert.len(Kit.unscheduled, 1)
+    Assert.eq(#Kit.unscheduled - un_before, 3, "拆：心跳 + 补读；挂：重排补读")
     Assert.eq(watch_cancels, 1)
-    Assert.eq(#Kit.scheduled - before, 1, "仍有轮询项，重挂一个心跳")
+    Assert.eq(#Kit.scheduled - before, 2, "仍有轮询项，重挂心跳 + 唤醒补读")
     Assert.eq(swaps, 4, "内存与任务项消失，签名变化")
 end
 
@@ -266,17 +267,17 @@ do -- 轮询项全关：不挂心跳
     local before = #Kit.scheduled
     Kit.sections.desktop.home_topbar_items = { clock = false, memory = false, storage = false, battery = false }
     bar:onEvent("topbar_changed")
-    Assert.len(Kit.unscheduled, 2)
-    Assert.eq(#Kit.scheduled, before, "只剩事件驱动的项")
+    Assert.eq(#Kit.scheduled - before, 1, "没有心跳，只剩唤醒补读")
     Kit.sections.desktop.home_topbar_items = { memory = false, cache = false }
     bar:onEvent("topbar_changed")
-    Assert.eq(#Kit.scheduled - before, 1)
+    Assert.eq(#Kit.scheduled - before, 3)
 end
 
 do -- Pause：全部拆掉；之后心跳 / 事件不换顶栏
+    local un_before = #Kit.unscheduled
     bar:deactivate()
     Assert.is_false(bar.active)
-    Assert.len(Kit.unscheduled, 3)
+    Assert.eq(#Kit.unscheduled - un_before, 2, "心跳 + 唤醒补读")
     local swaps_before = swaps
     powerd.capacity = 20
     broadcast("Charging")

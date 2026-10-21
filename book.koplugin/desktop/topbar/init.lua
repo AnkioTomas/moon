@@ -364,6 +364,8 @@ function TopBar:refresh()
     if key ~= self.key then self.desktop:updateTopbar() end
 end
 
+local WAKE_RECHECK = 5
+
 --- 距下一分钟边界的秒数（1..61）。
 ---@return number
 local function untilNextMinute()
@@ -396,10 +398,18 @@ function TopBar:activate()
         if poll then schedule(self) end
     end
     self:refresh()
+    -- 唤醒瞬间 Wi-Fi 还在重连，读到的是旧状态；稍后补读一次。
+    if self.recheck then
+        UIManager:unschedule(self.recheck)
+    else
+        self.recheck = function() self:refresh() end
+    end
+    UIManager:scheduleIn(WAKE_RECHECK, self.recheck)
 end
 
 function TopBar:deactivate()
     self.active = false
+    if self.recheck then UIManager:unschedule(self.recheck) end
     for _idx, handle in ipairs(self.handles) do handle:cancel() end
     self.handles = {}
 end
