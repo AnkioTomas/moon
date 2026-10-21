@@ -19,7 +19,7 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 @module koplugin.book.source.base
 --]]
 
----@alias SourceId "moon"|"wechat"|"jdread"|"copymanga"|"fanqie"|"qimao"|"legado"|"jjwxc"|"qidian"|"qqreader"|"iread"|"local"|string
+---@alias SourceId "moon"|"wechat"|"jdread"|"copymanga"|"fanqie"|"qimao"|"legado"|"jjwxc"|"qidian"|"qqreader"|"iread"|"changpei"|"xiaoxiang"|"local"|string
 
 ---@alias BookSourceType
 ---| '"book"' # 整本文件

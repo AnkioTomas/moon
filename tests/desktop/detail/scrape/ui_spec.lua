@@ -36,6 +36,7 @@ end
 local search_pending
 package.preload["desktop.detail.scrape.search"] = function()
     return {
+        SOURCES = { { id = "douban", name = "豆瓣" } },
         searchAsync = function(_, cb)
             if search_pending then
                 search_pending.cb = cb
@@ -141,6 +142,9 @@ local function startAndPick()
     local dialog = shown[#shown]
     Assert.eq(dialog.fields[1].text, "原书名")
     dialog.callback(dialog.fields[1].text)
+    local sheet = shown[#shown]
+    Assert.eq(sheet.items[1].id, nil, "第一项是自动")
+    sheet.items[1].callback()
     local results = shown[#shown]
     results.on_pick(results.results[1])
     Assert.is_nil(owner.scrape_job, "同步完成的搜索不留句柄")
@@ -206,6 +210,7 @@ search_pending = {}
 shown = {}
 ScrapeUI.start(identity, "原书名", nil, owner)
 shown[#shown].callback("原书名")
+shown[#shown].items[1].callback()
 local searching = shown[#shown]
 Assert.eq(searching.text, "搜索中...")
 owner.scrape_job.cancel()
