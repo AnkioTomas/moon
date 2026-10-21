@@ -42,6 +42,12 @@ end
 ---@return table<string, string>
 local function headers(cookie)
     local out = { ["Cookie"] = cookie }
+    local token = cookie and cookie:match("moon_token=([^;%s]+)")
+    if token then
+        -- 扫码登录拿到的是网页端 sessionStorage 里的 token（请求头 token），不是 Cookie；借 Cookie 串带着存
+        out["Cookie"] = cookie:gsub(";?%s*moon_token=[^;%s]+", ""):gsub("^;%s*", "")
+        out["token"] = token
+    end
     for key, value in pairs(HEADERS) do out[key] = value end
     return out
 end

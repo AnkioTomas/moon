@@ -37,9 +37,14 @@ end
 ---@param body string
 ---@return table<integer, number|string>
 function QRLogin.decode(body)
-    local out = {}
-    if #body < 5 then return out end
-    local data, pos = body:sub(6), 1
+    return QRLogin.fields(#body < 5 and "" or body:sub(6))
+end
+
+--- 解一段裸 protobuf（不带 gRPC 帧头）。
+---@param data string
+---@return table<integer, number|string>
+function QRLogin.fields(data)
+    local out, pos = {}, 1
     local function varint()
         local value, shift = 0, 1
         while pos <= #data do
@@ -162,6 +167,13 @@ function QRLogin:_poll(gen, token, started)
         local status = fields[1]
         if status == STATUS_APPROVED then
             local cookie = self.jar.PHPSESSID and cookieHeader(self.jar)
+            -- login_res(2).web_data(4).token(1)：网页端后续请求靠它认人
+            local login = type(fields[2]) == "string" and QRLogin.fields(fields[2]) or {}
+            local web = type(login[4]) == "string" and QRLogin.fields(login[4]) or {}
+            require("utils.log").info("changpei qr approved", "login_status", login[1], "token", web[1] and #web[1] or 0)
+            if cookie and type(web[1]) == "string" and web[1] ~= "" then
+                cookie = cookie .. "; moon_token=" .. web[1]
+            end
             self:cancel()
             if not cookie then self:toast(_("登录失败：未获取到登录态")); return end
             self.on_cookie(cookie)
