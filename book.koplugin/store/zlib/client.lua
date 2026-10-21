@@ -503,7 +503,32 @@ function Client:detailAsync(id, hash, cb)
     end)
 end
 
+--- 登录响应里的会话：rpc.php 放在 response（user_id / user_key），旧 eAPI 放在 user（id / remix_userkey）。
+---@param data table
+---@return string|nil id, string|nil key
+local function sessionOf(data)
+    local user = type(data.response) == "table" and data.response or type(data.user) == "table" and data.user or {}
+    local id = tostring(user.id or user.user_id or "")
+    local key = tostring(user.remix_userkey or user.user_key or "")
+    if id == "" or key == "" then return nil end
+    return id, key
+end
+
+--- 登录失败时服务器给的文案（rpc.php 在 response.message 或 errors[]，其余同 apiError）。
+---@param data table|nil
+---@return string
+local function loginError(data)
+    local resp = type(data) == "table" and type(data.response) == "table" and data.response.message
+    if type(resp) == "string" and resp ~= "" then return resp end
+    local first = type(data) == "table" and type(data.errors) == "table" and data.errors[1]
+    if type(first) == "table" then first = first.message end
+    if type(first) == "string" and first ~= "" then return first end
+    return apiError(data, _("登录失败"))
+end
+
 --- 用配置中的账号登录，并持久化返回的会话 Cookie 字段。
+--- 先走网站自己用的 /rpc.php（/eapi/user/login 时好时坏，会对正确密码报 Authorization failed），
+--- 被拒再试 /eapi/user/login；登录只走一个镜像（并发登录会触发 Too many logins）。
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:loginAsync(cb)
@@ -512,21 +537,34 @@ function Client:loginAsync(cb)
         return nil
     end
     local cfg = self.cfg
-    return self:_jsonAsync("POST", "/eapi/user/login", {
-        form = { email = cfg.email, password = cfg.password },
-    }, function(data, err)
-        if not data or tonumber(data.success) ~= 1 then
-            cb(nil, err or apiError(data, _("登录失败")))
-            return
-        end
-        local user = data.user or data.response or {}
-        local id = tostring(user.id or user.user_id or "")
-        local key = tostring(user.remix_userkey or user.user_key or "")
-        if id == "" or key == "" then cb(nil, _("登录失败：无效会话")); return end
-        cfg.user_id, cfg.user_key = id, key
-        require("utils.settings").saveSource("zlib", cfg)
-        cb(true)
-    end)
+    local base = pinned_base or cfg.base_url or SEED_URLS[1]
+    local attempts = {
+        { path = "/rpc.php", form = {
+            isModal = "true", email = cfg.email, password = cfg.password, site_mode = "books",
+            action = "login", gg_json_mode = "1", redirectUrl = base .. "/",
+        } },
+        { path = "/eapi/user/login", form = { email = cfg.email, password = cfg.password } },
+    }
+    local result, first_err = {}, nil
+    local function try(i)
+        local at = attempts[i]
+        result.job = self:_jsonAsync("POST", at.path, { form = at.form, serial = true }, function(data, err)
+            local id, key
+            if data then id, key = sessionOf(data) end
+            if id then
+                cfg.user_id, cfg.user_key = id, key
+                require("utils.settings").saveSource("zlib", cfg)
+                cb(true)
+                return
+            end
+            local msg = err or loginError(data)
+            first_err = first_err or msg
+            if i < #attempts and not msg:find("Too many logins", 1, true) then return try(i + 1) end
+            cb(nil, first_err)
+        end)
+    end
+    try(1)
+    return { cancel = function() if result.job then result.job.cancel() end end }
 end
 
 --- 获取带会话授权的 CDN 下载直链。
