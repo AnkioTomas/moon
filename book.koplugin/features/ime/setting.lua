@@ -268,7 +268,7 @@ function Setting.entries(desktop)
         {
             id = "main",
             group = "system",
-            order = 40,
+            order = 30,
             icon = "keyboard",
             title = _("输入法"),
             subtitle = _("键盘布局"),

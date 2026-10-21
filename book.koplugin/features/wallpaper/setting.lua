@@ -41,7 +41,7 @@ function Setting.entries(desktop)
     return {
         {
             id = "main",
-            group = "desktop",
+            group = "appearance",
             order = 20,
             icon = "wallpaper",
             title = _("界面壁纸"),

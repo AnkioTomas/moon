@@ -26,7 +26,7 @@ function Setting.entries(desktop)
     local T = require("ffi/util").template
     return {
         {
-            id = "desktop", group = "desktop", order = 40,
+            id = "desktop", group = "desktop", order = 30,
             icon = "dashboard_customize", title = _("桌面快捷面板"), subtitle = _("面板开关与顺序"),
             status = T(_("已启用 %1 项"), QuickPanel.enabledCount("desktop")), status_on = true,
             page = {

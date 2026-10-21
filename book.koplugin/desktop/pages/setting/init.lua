@@ -82,7 +82,7 @@ end
 local function coreEntries(desktop)
     local plugin = desktop.plugin
     local network = HttpSetting.entry(desktop)
-    network.group, network.order = "system", 20
+    network.group, network.order = "system", 10
     return {
         {
             group = "library", order = 10,
@@ -105,7 +105,7 @@ local function coreEntries(desktop)
             },
         },
         {
-            group = "desktop", order = 10, id = "appearance", icon = "palette", title = _("外观"),
+            group = "appearance", order = 10, id = "appearance", icon = "palette", title = _("外观"),
             subtitle = _("界面风格、字体、缩放"),
             status = string.format("%d%%", Theme.scale()), status_on = true,
             page = {
@@ -121,7 +121,7 @@ local function coreEntries(desktop)
             },
         },
         {
-            group = "system", order = 10, id = "display", icon = "display_settings", title = _("屏幕"),
+            group = "appearance", order = 30, id = "display", icon = "display_settings", title = _("屏幕"),
             subtitle = _("屏幕刷新、夜间、亮度"),
             page = {
                 title = _("屏幕"),
@@ -132,12 +132,12 @@ local function coreEntries(desktop)
             },
         },
         {
-            group = "desktop", order = 60, id = "startup", icon = "keyboard", title = _("启动"),
+            group = "desktop", order = 10, id = "startup", icon = "keyboard", title = _("启动与按键"),
             subtitle = _("启动进入月读、翻页键"),
             page = {
-                title = _("启动"),
+                title = _("启动与按键"),
                 sections = function()
-                    return {{ title = _("启动"), rows = DesktopSettings:rows(desktop, require("menu").openOnStart()) }}
+                    return {{ title = _("启动与按键"), rows = DesktopSettings:rows(desktop, require("menu").openOnStart()) }}
                 end,
             },
         },
@@ -150,7 +150,7 @@ local function coreEntries(desktop)
             },
         },
         {
-            group = "desktop", order = 30, id = "topbar", icon = "toolbar", title = _("桌面顶栏"),
+            group = "desktop", order = 20, id = "topbar", icon = "toolbar", title = _("桌面顶栏"),
             subtitle = _("时钟、电量等状态项"),
             page = {
                 title = _("桌面顶栏"),
@@ -177,14 +177,14 @@ local function coreEntries(desktop)
                 sections = function() return {{ title = _("按钮"), rows = ReaderSettings:popupRows(desktop) }} end,
             },
         },
-        { group = "system", order = 70, row = Language:row() },
+        { group = "appearance", order = 40, row = Language:row() },
         {
-            group = "system", order = 15, id = "device", icon = "devices", title = _("设备"),
+            group = "system", order = 50, id = "device", icon = "devices", title = _("设备"),
             subtitle = _("设备名称与头像"),
             page = { title = _("设备"), sections = function() return {{ title = _("设备"), rows = DeviceSettings:rows(desktop) }} end },
         },
         {
-            group = "system", order = 50, id = "ai", icon = "psychology", title = _("AI 接口"),
+            group = "reader", order = 55, id = "ai", icon = "psychology", title = _("AI 接口"),
             subtitle = _("X-Ray 使用的大模型接口"),
             page = { title = _("AI 接口"), sections = function() return {{ title = _("AI"), rows = AISettings:rows(desktop) }} end },
         },
@@ -224,6 +224,7 @@ function Settings:updateView()
     for _idx, entry in ipairs(Tree.features(desktop)) do entries[#entries + 1] = entry end
     local roots = {
         { id = "library", title = _("书库") },
+        { id = "appearance", title = _("外观") },
         { id = "desktop", title = _("桌面") },
         { id = "reader", title = _("阅读") },
         { id = "system", title = _("系统") },
