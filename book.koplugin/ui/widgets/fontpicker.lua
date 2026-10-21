@@ -122,6 +122,34 @@ local function downloadAndSave(opts, item)
     end)
 end
 
+--- 已下载的在线字体：选「使用」或确认后删除文件；删的正是当前字体时恢复系统默认。
+---@param opts FontPickerOpts|table
+---@param item MoonFontItem|table
+---@param current_id string
+local function askUseOrDelete(opts, item, current_id)
+    local name = item.name or item.id
+    require("ui.themes.widgets.sheet"):new{
+        title = name,
+        items = {
+            { text = _("使用"), callback = function() saveSelection(opts, item.id, name, item) end },
+            { text = _("删除字体"), callback = function()
+                require("ui.themes.widgets.confirm"):new{
+                    text = T(_("删除已下载的字体 %1？需要时可重新下载。"), name),
+                    ok_text = _("删除"),
+                    ok_callback = function()
+                        if not Fonts.removeDownloaded(item.id) then
+                            Toast:new{ text = _("删除失败") }:show()
+                            return
+                        end
+                        if item.id == current_id and not opts.on_select then Fonts.set("") end
+                        Toast:new{ text = T(_("已删除：%1"), name), timeout = 2 }:show()
+                    end,
+                } :show()
+            end },
+        },
+    }:show()
+end
+
 --- 列表已就绪时直接弹选择菜单（阅读页侧栏自己拉列表、借走这个菜单）。
 ---@param opts FontPickerOpts|table
 ---@param items MoonFontItem[]|table|nil
@@ -166,8 +194,10 @@ function FontPicker.show(opts, items)
         tabs = { tabs = tabs, active = active, on_tab = rowsFor },
         --- 本地/系统/已安装的直接落盘，未安装的联网下载后再落盘。
         on_select = function(item)
-            if item.kind ~= "weread" or Fonts.downloadedPath(item.id) then
+            if item.kind ~= "weread" then
                 saveSelection(opts, item.id, item.name or item.id, item)
+            elseif Fonts.downloadedPath(item.id) then
+                askUseOrDelete(opts, item, cur)
             else
                 NetworkMgr:runWhenOnline(function() downloadAndSave(opts, item) end)
             end
