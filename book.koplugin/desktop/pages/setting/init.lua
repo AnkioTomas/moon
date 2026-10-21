@@ -88,7 +88,7 @@ local function coreEntries(desktop)
             group = "library", order = 10,
             row = function(iw)
                 return Row.widget({
-                    width = iw, kind = "nav", icon = "source", title = _("书籍来源"),
+                    width = iw, kind = "nav", icon = "source", title = _("当前书库"),
                     subtitle = _("切换当前书源或混合模式"), status = select(2, activeSource()), status_on = true,
                     callback = function() Source:pickActive() end,
                 })

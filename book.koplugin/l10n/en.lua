@@ -125,6 +125,7 @@ return {
     ["启动进入月读、翻页键"] = "Open on start, page keys",
     ["图书馆、最近阅读、书架的每行数量与封面风格"] = "Per-row count and cover style for library, recent and shelf",
     ["屏幕"] = "Screen",
+    ["当前书库"] = "Current library",
     ["书籍来源"] = "Book sources",
     ["书籍详情为空"] = "Empty book details",
     ["二"] = "Tu",
