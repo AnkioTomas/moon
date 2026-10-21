@@ -221,6 +221,19 @@ Assert.is_nil(registered["/tmp/fonts/wr.woff"])
 Assert.eq(Fonts.faceForId("wr"), "WeRead Demo")
 Assert.len(woff_calls, 1, "已转换的字体不再重复转换")
 
+-- 删除已下载字体：.ttf 与旧 .woff 都清掉，之后视为未下载
+local real_remove = os.remove
+os.remove = function(path) files[path] = nil return true end
+files["/tmp/fonts/wr.woff"] = true
+Assert.is_true(Fonts.removeDownloaded("wr"))
+Assert.is_nil(Fonts.downloadedPath("wr"))
+Assert.is_nil(files["/tmp/fonts/wr.ttf"])
+Assert.is_nil(files["/tmp/fonts/wr.woff"])
+Assert.eq(Fonts.removeDownloaded("wr"), false, "没有文件可删")
+os.remove = real_remove
+files["/tmp/fonts/wr.woff"] = true
+files["/tmp/fonts/wr.ttf"] = true
+
 -- 转换失败且改名也失败：退回原 WOFF，字体仍可用
 files["/tmp/fonts/bad.woff"] = true
 Assert.eq(Fonts.faceForId("bad"), "Bad Woff")

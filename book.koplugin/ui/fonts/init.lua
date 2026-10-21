@@ -68,6 +68,22 @@ function Fonts.downloadedPath(id)
     return Fonts.isFile(woff) and woff or nil
 end
 
+--- 删除已下载的微信读书字体文件（.ttf 与旧版 .woff）。
+---@param id string
+---@return boolean removed 至少删掉一个文件
+function Fonts.removeDownloaded(id)
+    local path = Fonts.wereadPath(id)
+    if not path then return false end
+    local removed = false
+    for _idx, file in ipairs({ path, (path:gsub("%.ttf$", ".woff")) }) do
+        if Fonts.isFile(file) then
+            removed = os.remove(file) == true or removed
+            _registered_fonts[file] = nil
+        end
+    end
+    return removed
+end
+
 --- WOFF 落成 path 处的 sfnt；WOFF2 或损坏时原样改名（FreeType 按内容识别），不再重复尝试。
 ---@param woff string
 ---@param path string
