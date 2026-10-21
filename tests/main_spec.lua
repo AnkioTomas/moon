@@ -80,6 +80,7 @@ stub("desktop", {
         calls.desktop_opened = p
     end,
     autoOpen = function(p) calls.auto_open[#calls.auto_open + 1] = p end,
+    deferFileList = function() end,
 })
 calls.auto_open = {}
 stub("utils.paths", { ensureLayout = function() end })
