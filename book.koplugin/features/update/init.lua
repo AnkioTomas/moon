@@ -27,7 +27,11 @@ local Update = {
     _job = nil,
 }
 
-local API_URL = "https://api.ankio.net/gh/repos/AnkioTomas/moon/releases/latest"
+-- api.ankio.net 是 GitHub API 的转发，挂了（522/552）就回落直连 GitHub。
+local API_URLS = {
+    "https://api.ankio.net/gh/repos/AnkioTomas/moon/releases/latest",
+    "https://api.github.com/repos/AnkioTomas/moon/releases/latest",
+}
 local CHECK_INTERVAL = 24 * 60 * 60
 local GITHUB = "https://github.com"
 local ASSET_PREFIX = "^https://github%.com/AnkioTomas/moon/releases/download/"
@@ -112,22 +116,29 @@ end
 ---@param cb fun(release: table|nil, err: any)
 function Update.check(cb)
     if Update._job then return cb(nil, "busy") end
-    Update._job = Request.get(API_URL, {
-        timeout = require("http.timeout").net(1),
-        headers = {
-            Accept = "application/vnd.github+json",
-            ["X-GitHub-Api-Version"] = "2022-11-28",
-        },
-    }, function(body, err)
-        Update._job = nil
-        if err then return cb(nil, err) end
-        local release, parse_err = parseRelease(body)
-        if not release then return cb(nil, parse_err) end
-        local settings = MoonSettings.get("features.update")
-        settings.update_last_checked_at = os.time()
-        MoonSettings.save("features.update", settings)
-        cb(release)
-    end)
+    local function fetch(idx)
+        Update._job = Request.get(API_URLS[idx], {
+            timeout = require("http.timeout").net(1),
+            headers = {
+                Accept = "application/vnd.github+json",
+                ["X-GitHub-Api-Version"] = "2022-11-28",
+            },
+        }, function(body, err)
+            Update._job = nil
+            if err and API_URLS[idx + 1] then
+                logger.warn("book.update api failed", API_URLS[idx], err)
+                return fetch(idx + 1)
+            end
+            if err then return cb(nil, err) end
+            local release, parse_err = parseRelease(body)
+            if not release then return cb(nil, parse_err) end
+            local settings = MoonSettings.get("features.update")
+            settings.update_last_checked_at = os.time()
+            MoonSettings.save("features.update", settings)
+            cb(release)
+        end)
+    end
+    fetch(1)
 end
 
 --- 并发探测直连与随机几个镜像：最先回 200 且长度对得上的胜出，全部失败回落直连。
