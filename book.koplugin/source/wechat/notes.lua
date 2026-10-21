@@ -63,6 +63,7 @@ local function tombstone(item, bookmark_id, review_id)
         chapter_idx = item.chapter_idx,
         wr_bookmark_id = bookmark_id,
         wr_review_id = review_id,
+        wr_range = item.wr_range,
         wr_deleted = true,
     }
 end
@@ -677,6 +678,21 @@ end
 
 --- 用 bookmarklist 的 canonical 字段回填本地注解。
 --- 已有 id 优先；无 id 时只接受 ``text + 当前 wire range`` 精确匹配，避免同文句串线。
+--- 按 range 找远端划线 id：只有想法的条目没记过 bookmarkId，删除时靠它连带删掉划线。
+---@param wire table|nil
+---@param chapter_uid string|number
+---@param range string
+---@return string|number|nil
+function Notes.bookmarkIdByRange(wire, chapter_uid, range)
+    for _idx, row in ipairs(type(wire) == "table" and wire.updated or {}) do
+        if type(row) == "table"
+                and tostring(row.chapterUid or row.chapter_uid or "") == tostring(chapter_uid)
+                and tostring(row.range or "") == range and Notes.isHighlightRow(row) then
+            return row.bookmarkId or row.id
+        end
+    end
+end
+
 ---@param annotations table[]
 ---@param wire table|nil
 ---@param chapter_uid string|number

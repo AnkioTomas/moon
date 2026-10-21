@@ -103,12 +103,7 @@ end
 function Push:deletes()
     local client = self.client
     self:each(Notes.deleteCandidates(self.annotations), function(item, next)
-        local function dropBookmark()
-            if not (item.wr_deleted and item.wr_bookmark_id) then
-                self:forget(item)
-                next()
-                return
-            end
+        local function removeBookmark()
             self:call(function(done)
                 return client:removeBookmarkAsync(item.wr_bookmark_id, done)
             end, _("划线上传失败"), function()
@@ -116,6 +111,30 @@ function Push:deletes()
                 self:forget(item)
                 next()
             end)
+        end
+        local function dropBookmark()
+            if not item.wr_deleted then
+                self:forget(item)
+                next()
+            elseif item.wr_bookmark_id then
+                removeBookmark()
+            elseif item.wr_range then
+                -- 只有想法的条目没记过划线 id；远端划线与想法同 range，删想法不会连带删它。
+                self:call(function(done)
+                    return client:bookmarkListAsync(self.book_id, done)
+                end, _("无法预检远端划线"), function(wire)
+                    item.wr_bookmark_id = Notes.bookmarkIdByRange(wire, self.chapter_uid, item.wr_range)
+                    if item.wr_bookmark_id then
+                        removeBookmark()
+                    else
+                        self:forget(item)
+                        next()
+                    end
+                end)
+            else
+                self:forget(item)
+                next()
+            end
         end
         if not item.wr_review_id then
             item.wr_delete_review = nil

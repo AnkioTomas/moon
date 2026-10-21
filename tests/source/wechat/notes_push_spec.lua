@@ -49,6 +49,22 @@ do -- 删除墓碑：先删想法再删划线，删完从注解里移除，后�
     Assert.len(annotations, 0)
 end
 
+do -- 只有想法的墓碑（没记过划线 id）：按 range 在远端找到划线一并删掉
+    local client = fakeClient({
+        bookmarkListAsync = { updated = { { chapterUid = "c1", range = "10-20", bookmarkId = "bm9" } } },
+        myReviewsAsync = { reviews = {} },
+    })
+    local annotations = { { wr_deleted = true, wr_review_id = "rv1", wr_range = "10-20" } }
+    local ok
+    NotesPush.run(client, identity, "c1", "<p>x</p>", annotations, function(o) ok = o end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.eq(client.calls[1], "deleteReviewAsync")
+    Assert.eq(client.calls[2], "bookmarkListAsync")
+    Assert.eq(client.calls[3], "removeBookmarkAsync")
+    Assert.len(annotations, 0)
+end
+
 do -- 预检失败：整轮失败，带上错误
     local client = fakeClient({ bookmarkListAsync = false })
     local ok, err
