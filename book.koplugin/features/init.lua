@@ -63,6 +63,7 @@ demo/ 不登记、打包时剔除。
 --]]
 
 local Guard = require("ui.guard")
+local Perf = require("utils.perf")
 
 local Features = {}
 
@@ -147,7 +148,11 @@ function Features.load()
     if loaded then return end
     loaded = true
     off = Guard.call("feature manage apply", require("features.manage").apply, Features.list) or off
-    for _idx, name in ipairs(Features.list) do Guard.call("feature " .. name .. " load", require, "features." .. name) end
+    for _idx, name in ipairs(Features.list) do
+        local started_at = Perf.now()
+        Guard.call("feature " .. name .. " load", require, "features." .. name)
+        Perf.slow("feature load " .. name, started_at)
+    end
     Features.registerConventions()
 end
 
@@ -170,8 +175,10 @@ end
 ---@param plugin BookPlugin
 function Features.emit(hook, plugin)
     for _idx, name in ipairs(Features.list) do
+        local started_at = Perf.now()
         local fn = require("features." .. name)[hook]
         if fn then Guard.call("feature " .. name .. "." .. hook, fn, plugin) end
+        Perf.slow("feature " .. name .. "." .. hook, started_at)
     end
     if hook ~= "onReaderReady" then return end
     for _idx, item in ipairs(Features.external("hooks")) do
