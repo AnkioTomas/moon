@@ -344,10 +344,17 @@ function Catalog.listBooks(source_id, opts)
         -- 只取该目录下直接放的书；substr 按字符计，前缀长度也要按字符数。
         local prefix = opts.dir .. "/"
         local chars = select(2, prefix:gsub("[^\128-\191]", ""))
-        where = where .. " AND substr(b.path, 1, ?)=? AND instr(substr(b.path, ?), '/')=0"
-        args[#args + 1] = chars
-        args[#args + 1] = prefix
-        args[#args + 1] = chars + 1
+        local expr, root_args = Catalog.folderPathExpr("b", opts.root)
+        where = where .. " AND substr(" .. expr .. ", 1, ?)=? AND instr(substr(" .. expr .. ", ?), '/')=0"
+        for i = 1, 2 do
+            for _idx, a in ipairs(root_args) do args[#args + 1] = a end
+            if i == 1 then
+                args[#args + 1] = chars
+                args[#args + 1] = prefix
+            else
+                args[#args + 1] = chars + 1
+            end
+        end
     end
     if opts.unauthor then
         where = where .. " AND (b.authors IS NULL OR b.authors='')"
@@ -484,6 +491,16 @@ local function folderCover(dir)
     end
 end
 
+--- 文件夹视图用的书路径：已落盘的取 path，WebDAV 远端未下载的书（path 为空）取下载后会在的 root/相对路径。
+---@param alias string
+---@param root string|nil
+---@return string expr, any[] args
+function Catalog.folderPathExpr(alias, root)
+    if not root or root == "" then return alias .. ".path", {} end
+    return "COALESCE(" .. alias .. ".path, CASE WHEN " .. alias .. ".stable_id LIKE 'webdav://%' THEN ? || '/' || substr("
+        .. alias .. ".stable_id, 10) END)", { root }
+end
+
 --- 本地书库的文件夹视图一页：先列 dir 下的子文件夹（按名称），再列直接放在 dir 里的书。
 --- 子文件夹以 { is_folder = true, title, dir, cover } 条目返回，cover 取目录里的 cover.jpg / cover.png。
 ---@param source_id string
@@ -499,12 +516,19 @@ function Catalog.folderPageAsync(source_id, opts, cb)
         local where, args = DB.sourceClause("source_id", scope)
         local prefix = dir .. "/"
         -- 范围比较取出前缀下的全部路径（\255 大于任何 UTF-8 字节）。
-        args[#args + 1] = prefix
-        args[#args + 1] = prefix .. "\255"
+        local expr, root_args = Catalog.folderPathExpr("books", opts.root)
+        local qargs = {}
+        local function push(list) for _idx, a in ipairs(list) do qargs[#qargs + 1] = a end end
+        push(root_args)
+        push(args)
+        push(root_args)
+        qargs[#qargs + 1] = prefix
+        push(root_args)
+        qargs[#qargs + 1] = prefix .. "\255"
         local result, nrows = DB.query(
-            "SELECT path FROM books WHERE " .. where
-                .. " AND source_id='local' AND deleted=0 AND hidden=0 AND path>=? AND path<?;",
-            unpack(args)
+            "SELECT " .. expr .. " FROM books WHERE " .. where
+                .. " AND source_id='local' AND deleted=0 AND hidden=0 AND " .. expr .. ">=? AND " .. expr .. "<?;",
+            unpack(qargs)
         )
         local counts, names = {}, {}
         for i = 1, nrows or 0 do
@@ -530,6 +554,7 @@ function Catalog.folderPageAsync(source_id, opts, cb)
         local need = page_size - #entries
         local rows, total, err = Catalog.listBooks(scope, {
             dir = dir,
+            root = opts.root,
             source_id = "local",
             sort = opts.sort,
             limit = need > 0 and need or 1,

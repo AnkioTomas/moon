@@ -297,7 +297,7 @@ do
     Assert.is_true(q.sql:find("EXISTS", 1, true) ~= nil)
     -- 卷行（deleted=1 + sync_status=1，非书架成员但仍是有效身份）也要能进最近阅读；
     -- 墓碑（sync_status=0）不算。
-    Assert.is_true(q.sql:find("(b.deleted=0 OR b.sync_status=1)", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("(b.deleted=0 OR (b.sync_status=1 AND NOT (", 1, true) ~= nil)
     Assert.is_true(q.sql:find("in_library", 1, true) == nil)
     Assert.is_true(q.sql:find("last_open", 1, true) == nil)
     Assert.is_true(q.sql:find("ORDER BY p.updated_at DESC, p.stable_id ASC", 1, true) ~= nil)
@@ -319,15 +319,19 @@ do
     local clause = require("book.books_db").readableClause("b")
     Assert.is_true(sql:find(clause, 1, true) ~= nil, "recent 用 readableClause 判准入")
     -- 把 SQL 谓词按行求值，钉住语义而不只是字符串。
-    local function admits(deleted, sync_status)
+    local function admits(deleted, sync_status, source_id, has_path)
         local expr = clause:gsub("b%.deleted", tostring(deleted))
             :gsub("b%.sync_status", tostring(sync_status))
-            :gsub("=", "=="):gsub(" OR ", " or ")
+            :gsub("b%.source_id", string.format("%q", source_id or "moon"))
+            :gsub("b%.path IS NULL", tostring(not has_path))
+            :gsub("=", "=="):gsub(" OR ", " or "):gsub(" AND ", " and "):gsub("NOT ", "not ")
         return load("return " .. expr)()
     end
     Assert.is_true(admits(0, 0), "在架的书")
     Assert.is_true(admits(1, 1), "被远端下架但有进度的书仍在最近阅读")
     Assert.is_false(admits(1, 0), "本地删掉的墓碑不列")
+    Assert.is_false(admits(1, 1, "local", false), "本地源文件没了（path 已清）不列")
+    Assert.is_true(admits(1, 1, "local", true))
     DbBase.close()
     clearMods()
 end

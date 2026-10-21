@@ -864,7 +864,7 @@ function Library:fetch()
     local request, query = Catalog.listLibraryAsync, self:query()
     if self.group == "folder" then
         request = Catalog.folderPageAsync
-        query = { dir = self:currentDir(), page = self.page, page_size = self.page_size, sort = self.sort }
+        query = { dir = self:currentDir(), root = localRoot(), page = self.page, page_size = self.page_size, sort = self.sort }
     end
     self.fetch_cancel = request(source.id, query, function(res, err)
         self.fetch_cancel = nil
