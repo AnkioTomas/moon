@@ -140,6 +140,26 @@ local function check(response)
     return got, got_err
 end
 
+-- 转发接口失败（HTTP 552）回落直连 GitHub，不报错。
+do
+    local got, got_err
+    Update.check(function(r, e) got, got_err = r, e end)
+    local before = gets
+    check_cb(nil, "HTTP 552")
+    Assert.eq(gets, before + 1)
+    Assert.is_nil(got_err)
+    check_cb(release("v1.2.4"))
+    Assert.is_true(got.available)
+end
+-- 两个入口都失败才报错。
+do
+    local got_err
+    Update.check(function(_r, e) got_err = e end)
+    check_cb(nil, "HTTP 552")
+    check_cb(nil, "HTTP 503")
+    Assert.eq(got_err, "HTTP 503")
+end
+
 -- 版本比较（当前 1.2.3）
 Assert.is_true(check(release("v1.2.4")).available)
 Assert.is_true(check(release("v2.0.0")).available)
