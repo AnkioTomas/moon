@@ -414,7 +414,7 @@ function Client:_jsonAsync(method, path, opts, cb)
             -- 这个 base 能用：钉住（胜出的镜像，下次排在最前）
             local selected = originOf(url) or lane.base
             if selected ~= pinned_base then
-                logger.dbg("book.zlib mirror selected", selected)
+                logger.info("book.zlib mirror selected", selected)
             end
             pinned_base = selected
 
@@ -551,6 +551,7 @@ function Client:loginAsync(cb)
         result.job = self:_jsonAsync("POST", at.path, { form = at.form, serial = true }, function(data, err)
             local id, key
             if data then id, key = sessionOf(data) end
+            logger.info("book.zlib login", at.path, pinned_base or base, id and "ok" or (err or loginError(data)))
             if id then
                 cfg.user_id, cfg.user_key = id, key
                 require("utils.settings").saveSource("zlib", cfg)
