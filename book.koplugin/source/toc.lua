@@ -77,15 +77,16 @@ end
 --- 取解码后的目录条目；未命中/过期/非法 JSON 一律返回 nil。
 ---@param source_id string
 ---@param stable_id string
+---@param stale boolean|nil 为真时不看 TTL
 ---@return SourceTocEntry|nil
-local function entry(source_id, stable_id)
+local function entry(source_id, stable_id, stale)
     local key = keyOf(source_id, stable_id)
     local hit = cache[key]
-    if hit and os.time() - hit.fetched_at < Toc.TTL then
+    if hit and (stale or os.time() - hit.fetched_at < Toc.TTL) then
         return hit
     end
     dropCache(key)
-    local payload, fetched_at = require("book.books_db").getToc(source_id, stable_id, Toc.TTL)
+    local payload, fetched_at = require("book.books_db").getToc(source_id, stable_id, not stale and Toc.TTL or nil)
     if not payload then
         return nil
     end
@@ -99,9 +100,10 @@ end
 --- 读取并解码目录缓存；未命中/过期/非法 JSON 一律返回 nil。
 ---@param source_id string
 ---@param stable_id string
+---@param stale boolean|nil 为真时过期的也要：调用方拿它当「章号编号基线」，不是当新鲜目录用
 ---@return BookChapter[]|nil
-function Toc.read(source_id, stable_id)
-    local hit = entry(source_id, stable_id)
+function Toc.read(source_id, stable_id, stale)
+    local hit = entry(source_id, stable_id, stale)
     return hit and hit.list
 end
 

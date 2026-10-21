@@ -18,7 +18,7 @@ package.preload["book.books_db"] = function()
         getToc = function(source_id, stable_id, max_age)
             reads = reads + 1
             local row = rows[source_id .. ":" .. stable_id]
-            if not row or now - row.at >= max_age then return nil end
+            if not row or (max_age and now - row.at >= max_age) then return nil end
             return row.payload, row.at
         end,
         setToc = function(source_id, stable_id, payload)
@@ -47,6 +47,14 @@ Assert.is_nil(Toc.read("fanqie", "book-1"))
 local before = reads
 Assert.eq(Toc.index("jdread", "book-1", "chapter-1"), 1)
 Assert.eq(reads, before)
+
+do -- stale：过了 TTL 仍能取到（订阅章号基线），普通读取仍判过期
+    Assert.is_true(Toc.put("subscribe", "9", { { idx = 1, uid = "g1" } }))
+    now = now + Toc.TTL + 1
+    Assert.is_nil(Toc.read("subscribe", "9"))
+    Assert.eq(Toc.read("subscribe", "9", true)[1].uid, "g1")
+    now = now - Toc.TTL - 1
+end
 
 do
     local list = {
