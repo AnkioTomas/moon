@@ -1948,4 +1948,6 @@ Current version: ",
     ["选择显示哪些页面与数据，其余自动拉伸"] = "Choose pages and data to show; the rest stretches to fit",
     ["统计页面"] = "Stats pages",
     ["各页显示的数据"] = "Data shown per page",
+    ["无法控制系统蓝牙"] = "Cannot control system Bluetooth",
+    ["蓝牙状态没有变化"] = "Bluetooth state did not change",
 }

@@ -1,5 +1,5 @@
 --[[--
-蓝牙的桌面快捷面板开关：开关蓝牙、打开蓝牙设备窗口。没装 kindle-hid-passthrough 不出现。
+蓝牙的桌面快捷面板开关：开关蓝牙、打开蓝牙设备窗口。没有蓝牙后端（kindle-hid-passthrough 或系统蓝牙）不出现。
 
 @module koplugin.book.features.bluetooth.panel
 --]]
