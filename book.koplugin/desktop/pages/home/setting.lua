@@ -17,7 +17,7 @@ return {
         -- 一言 / 书摘整个组件是否居中。
         home_hitokoto_center = false,
         home_excerpt_center = false,
-        -- 阅读统计卡片底色不透明度（百分比，0 = 全透明，露出壁纸）。
+        -- 阅读统计卡片底色不透明度（阅读统计、阅读小卡共用；百分比，0 = 全透明，露出壁纸）。
         home_stats_opacity = 100,
         -- 书架：行数 1–4，0 = 自动按分配高度；每行 3–8 本。
         home_shelf_rows = 1,

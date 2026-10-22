@@ -33,7 +33,7 @@ local function stubComponent(id)
 end
 
 for _, id in ipairs({
-    "clock", "weather", "clock_weather", "weather_forecast", "stats", "heatmap", "hitokoto", "excerpt",
+    "clock", "weather", "clock_weather", "weather_forecast", "stats", "tiles", "heatmap", "hitokoto", "excerpt",
     "history", "news",
     "recent_hero", "recent_list", "recent_cards", "random", "shelf",
 }) do
@@ -46,7 +46,7 @@ local Base = require("desktop.pages.home.registry")
 local Layout = require("desktop.pages.home.layout")
 local Widgets = require("desktop.pages.home.placements")
 
-Assert.len(Base.list(), 15)
+Assert.len(Base.list(), 16)
 local defaults = Base.enabledLayout()
 Assert.len(defaults, 2)
 Assert.eq(defaults[1], "recent_hero")

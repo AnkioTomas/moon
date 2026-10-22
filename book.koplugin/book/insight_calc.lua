@@ -270,14 +270,19 @@ local function daysIn(ym)
     return tonumber(os.date("%d", os.time{ year = tonumber(y), month = tonumber(m) + 1, day = 0 }))
 end
 
---- 本月挑战：目标 = 近 90 天日均 × 1.1 × 本月天数（取整到 5 分钟）；没有历史返回 nil。
+--- 本月挑战：目标 = 用户设的秒数；没设（nil / 0）就取近 90 天日均 × 1.1 × 本月天数（取整到 5 分钟），
+--- 这时没有历史返回 nil。
+---@param goal_seconds number|nil 用户设的本月目标
 ---@return table|nil { target, done, per_day, on_pace, ratio }
-function Calc.challenge(days, now)
-    local base = windowSum(days, now, 90, 1)
-    if base.seconds <= 0 then return nil end
+function Calc.challenge(days, now, goal_seconds)
     local ym, today = os.date("%Y-%m", now), ymdOf(now)
     local dim, elapsed = daysIn(ym), tonumber(today:sub(9, 10))
-    local target = math.max(300, math.floor(base.seconds / 90 * 1.1 * dim / 300 + 0.5) * 300)
+    local target = goal_seconds
+    if not target or target <= 0 then
+        local base = windowSum(days, now, 90, 1)
+        if base.seconds <= 0 then return nil end
+        target = math.max(300, math.floor(base.seconds / 90 * 1.1 * dim / 300 + 0.5) * 300)
+    end
     local done = 0
     for d = 1, elapsed do
         local info = days[string.format("%s-%02d", ym, d)]

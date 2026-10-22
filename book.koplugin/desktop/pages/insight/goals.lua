@@ -1,7 +1,8 @@
 --[[--
 统计页「进度」页：本月挑战、完成预测、连续记录与里程碑。
 
-本月挑战的目标由近 90 天日均 ×1.1 自动推算，不设配置；完成预测按每本书自己的速度和近 30 天日均。
+本月挑战的目标默认由近 90 天日均 ×1.1 自动推算，点挑战块可自己设本月时长与今年读完本数（首页小卡同用）；
+完成预测按每本书自己的速度和近 30 天日均。
 
 @module koplugin.book.desktop.pages.insight.goals
 --]]
@@ -13,6 +14,7 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Calc = require("book.insight_calc")
 local Catalog = require("book.catalog")
 local Layout = require("desktop.pages.insight.layout")
+local MoonSettings = require("utils.settings")
 local Parts = require("desktop.pages.insight.parts")
 local Records = require("desktop.pages.insight.records")
 local Ring = require("ui.widgets.ring")
@@ -34,16 +36,42 @@ function Goals:build(ctx)
     local xs, md = Theme.px(t.space.xs), Theme.px(t.space.md)
     local now = os.time()
     local days = state.calendar.days
-    local ch = Calc.challenge(days, now)
+    local goals = MoonSettings.get("desktop.pages.insight")
+    local ch = Calc.challenge(days, now, goals.month_goal_hours * 3600)
     local fc = Calc.forecast(days, state.reading or {}, state.finished or {}, now)
 
+    local function editGoals()
+        require("ui.themes.widgets.spin"):new{
+            title = _("阅读目标"),
+            fields = {
+                { label = _("本月（小时）"), value = goals.month_goal_hours, min = 0, max = 300,
+                    format = function(v) return v == 0 and _("自动") or tostring(v) end },
+                { label = _("今年读完（本）"), value = goals.year_goal_books, min = 0, max = 500,
+                    format = function(v) return v == 0 and _("不设") or tostring(v) end },
+            },
+            callback = function(hours, books)
+                goals.month_goal_hours, goals.year_goal_books = hours, books
+                MoonSettings.save("desktop.pages.insight", goals)
+                ctx.desktop:updateView()
+            end,
+        }:show()
+    end
+
     local function challengeBlock(extra)
-        if not ch then return nil end
+        local title = Parts.caption(T(_("%1月挑战"), tonumber(os.date("%m", now))), width)
+        if not ch then
+            return Tap.wrap(VerticalGroup:new{
+                align = "left",
+                title,
+                VerticalSpan:new{ width = xs },
+                Parts.caption(_("点按设置阅读目标"), width),
+            }, editGoals)
+        end
         local size = Theme.px(72) + extra
         local text_w = math.max(1, width - size - md)
-        return VerticalGroup:new{
+        return Tap.wrap(VerticalGroup:new{
             align = "left",
-            Parts.caption(T(_("%1月挑战"), tonumber(os.date("%m", now))), width),
+            title,
             VerticalSpan:new{ width = xs },
             HorizontalGroup:new{
                 align = "center",
@@ -59,11 +87,11 @@ function Goals:build(ctx)
                         { width = text_w, color = t.color.muted }),
                 },
             },
-        }
+        }, editGoals)
     end
 
     local function forecastBlock()
-        if #fc.books == 0 and fc.done == 0 then return nil end
+        if #fc.books == 0 and fc.done == 0 and goals.year_goal_books == 0 then return nil end
         local col = VerticalGroup:new{ align = "left" }
         if #fc.books > 0 then
             col[#col + 1] = Parts.caption(_("预计读完"), width)
@@ -77,7 +105,10 @@ function Goals:build(ctx)
                 ), function() open_book(item.book) end)
             end
         end
-        if fc.done > 0 then
+        if goals.year_goal_books > 0 then
+            col[#col + 1] = Parts.caption(
+                T(_("今年读完 %1 / %2 本，照此节奏全年约 %3 本"), fc.done, goals.year_goal_books, fc.projected), width)
+        elseif fc.done > 0 then
             col[#col + 1] = Parts.caption(T(_("今年已读完 %1 本，照此节奏全年约 %2 本"), fc.done, fc.projected), width)
         end
         return col

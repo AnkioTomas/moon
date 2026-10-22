@@ -61,7 +61,7 @@ package.preload["desktop.detail"] = function()
     return { open = function(desk, tab, book) opened = { desk = desk, tab = tab, book = book } end }
 end
 
-Kit.sections.insight = { hidden_pages = {}, hidden_cards = {} }
+Kit.sections.insight = { hidden_pages = {}, hidden_cards = {}, month_goal_hours = 0, year_goal_books = 0 }
 local Insight = require("desktop.pages.insight")
 
 --- 按文案找按钮 / 点击区所在子树。
