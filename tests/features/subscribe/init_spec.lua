@@ -46,6 +46,7 @@ package.loaded["http.timeout"] = { net = function() return 1 end }
 local merged, updates, summaries = {}, {}, {}
 package.loaded["features.subscribe.db"] = {
     merge = function(id, items) merged[id] = items; return #items end,
+    feed = function() return nil end,
     update = function(id, fields) updates[id] = fields end,
     summary = function(_id, guid) return summaries[guid] end,
 }
@@ -54,7 +55,8 @@ package.loaded["source.wechat.mp"] = {
     PAGE = 2,
     fetchArticlesAsync = function(_id, offset, cb)
         mp_calls[#mp_calls + 1] = offset
-        cb(offset == 0 and { { guid = "a" }, { guid = "b" } } or offset == 6 and { { guid = "c" }, { guid = "d" } } or offset == 8 and { { guid = "e" } } or {})
+        local items = offset == 0 and { { guid = "a" }, { guid = "b" } } or offset == 6 and { { guid = "c" }, { guid = "d" } } or offset == 8 and { { guid = "e" } } or {}
+        cb(items, nil, #items)
     end,
 }
 local dir = Config.dir() .. "/subscribe_init_spec"
@@ -165,7 +167,7 @@ do
     Assert.is_nil(feed)
 end
 
--- 公众号刷新：首页不把已翻到的游标拉回；翻更早一页时游标（= maxIdx，已拉篇数）按实际篇数往后走，不满一页即到底清零。
+-- 公众号刷新：首页不把已翻到的游标拉回；翻更早一页时游标（= offset，已拉推送组数）按实际组数往后走，不满一页即到底清零。
 local feed = { id = 1, kind = "mp", url = "MP_WXS_1", cursor = 6 }
 Subscribe.refresh(feed, false, function() end)
 Assert.eq(mp_calls[1], 0)

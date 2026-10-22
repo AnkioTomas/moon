@@ -281,13 +281,14 @@ local function mpGetAsync(url, opts, cb)
     end }
 end
 
---- 一页文章列表；offset 当 maxIdx 传（已拉到的篇数）。只传 offset 不带 maxIdx/count 时服务端回 errCode -2041。
+--- 一页文章列表。offset 以「推送」（reviews 一组，一组可含多篇）为单位，不是篇数；
+--- 旧的 maxIdx 参数服务端直接无视（永远回第一页）。cb 的第三个参数是这页的推送数，翻页游标按它累加。
 ---@param book_id string MP_WXS_ 开头
----@param offset integer
----@param cb fun(items: table[]|nil, err: any)
+---@param offset integer 已拉到的推送数
+---@param cb fun(items: table[]|nil, err: any, groups: integer|nil)
 ---@return { cancel: fun() }|nil
 function Mp.fetchArticlesAsync(book_id, offset, cb)
-    local url = WEB .. "/web/mp/articles?" .. Text.formEncode({ bookId = book_id, maxIdx = offset or 0, count = Mp.PAGE })
+    local url = WEB .. "/web/mp/articles?" .. Text.formEncode({ bookId = book_id, offset = offset or 0, count = Mp.PAGE })
     return mpGetAsync(url, { no_expire = true }, function(raw, err, res)
         -- 会话层已为判失效解过的直接用，只解一次；utils.json 修好标题里 emoji 的代理对。
         local data = res and res.json
@@ -309,7 +310,7 @@ function Mp.fetchArticlesAsync(book_id, offset, cb)
             cb(nil, data.errmsg or data.errMsg or _("加载失败"))
             return
         end
-        cb(Mp.articles(data))
+        cb(Mp.articles(data), nil, #(data.reviews or {}))
     end)
 end
 

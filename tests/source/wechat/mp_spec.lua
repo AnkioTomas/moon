@@ -47,14 +47,15 @@ Assert.eq(list[1].title, os.date("%Y-%m-%d", 200))
 Assert.eq(list[2].title, "一")
 Assert.len(Mp.articles({}), 0)
 
--- 分页：offset 当 maxIdx 传，必带 count（只传 offset 服务端回 -2041）。
+-- 分页：offset 以推送组为单位（maxIdx 被服务端无视），第三个回调参数是这页的组数。
 pages.list = '{"reviews":[{"createTime":9,"subReviews":[{"reviewId":"r9","review":{"reviewId":"r9","createTime":9,"mpInfo":{"title":"九"}}}]}]}'
-local got
-Mp.fetchArticlesAsync("MP_WXS_1", 40, function(items) got = items end)
+local got, groups
+Mp.fetchArticlesAsync("MP_WXS_1", 40, function(items, _e, n) got, groups = items, n end)
 Assert.eq(got[1].guid, "r9")
-Assert.matches(urls[#urls], "maxIdx=40")
+Assert.eq(groups, 1)
+Assert.matches(urls[#urls], "offset=40")
 Assert.matches(urls[#urls], "count=20")
-Assert.is_true(not urls[#urls]:find("offset=", 1, true), "不带 offset（服务端回 -2041）")
+Assert.is_true(not urls[#urls]:find("maxIdx", 1, true))
 pages.list = '{"errcode":-2010,"errmsg":"登录超时"}'
 local err
 Mp.fetchArticlesAsync("MP_WXS_1", 0, function(items, e) got, err = items, e end)

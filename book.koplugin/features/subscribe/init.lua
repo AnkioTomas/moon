@@ -303,9 +303,9 @@ Subscribe.providers = {
         label = _("公众号"),
         fetch = function(feed, cursor, cb)
             local Mp = require("source.wechat.mp")
-            return Mp.fetchArticlesAsync(feed.url, cursor or 0, function(items, err)
+            return Mp.fetchArticlesAsync(feed.url, cursor or 0, function(items, err, groups)
                 if not items then return cb(nil, nil, err) end
-                local next_cursor = #items >= Mp.PAGE and (cursor or 0) + #items or nil
+                local next_cursor = groups >= Mp.PAGE and (cursor or 0) + groups or nil
                 cb(items, next_cursor)
             end)
         end,
@@ -357,7 +357,8 @@ end
 ---@param cb fun(added: integer|nil, err: any)
 ---@return table|nil job
 function Subscribe.refresh(feed, more, cb)
-    local cursor = more and feed.cursor or nil
+    -- 排队的「更早」条目拿的是入队时的行；前面的刷新可能已推进游标，以库里为准。
+    local cursor = more and ((SubDB.feed(feed.id) or feed).cursor) or nil
     return Subscribe.providers[feed.kind].fetch(feed, cursor, function(items, next_cursor, err)
         if not items then
             logger.warn("subscribe refresh failed", feed.kind, feed.url, err)

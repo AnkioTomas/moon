@@ -187,8 +187,6 @@ function Refresh.start(feeds, opts)
     if #feeds == 0 then return false end
     settle()
     if queue then
-        -- 翻更早一页不排队（列表还在刷，等刷完再翻）。
-        if opts.more and not opts.on_feed then return false end
         push(feeds, opts, #feeds == 1)
         local task = Tasks.get(Refresh.KEY)
         if opts.follow and task and not task.done then require("workers.ui.task_dialog").follow(task) end
