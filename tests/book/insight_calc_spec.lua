@@ -9,7 +9,7 @@ local Assert = require("support.assert")
 local Calc = require("book.insight_calc")
 
 local now = os.time{ year = 2026, month = 6, day = 15, hour = 12 }
-local function ymd(off) return os.date("%Y-%m-%d", now - off * 86400) end
+local function ymd(off) return os.date("%Y-%m-%d", now - off * 86400) --[[@as string]] end
 local function day(seconds, pages) return { duration_seconds = seconds, pages = pages or 0 } end
 
 -- 没历史：环用兜底目标；连续天数当天没读就从昨天算。
@@ -103,7 +103,7 @@ Assert.eq(Calc.longest(fin, 5)[1].seconds, 100)
 Assert.len(Calc.longest(fin, 5), 2)
 
 -- 年月合计。
-local sum = Calc.sum(long, os.date("%Y", now))
+local sum = Calc.sum(long, os.date("%Y", now) --[[@as string]])
 Assert.is_true(sum.days > 0)
 Assert.eq(Calc.sum({}, "2026").days, 0)
 

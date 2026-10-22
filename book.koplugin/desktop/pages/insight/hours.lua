@@ -29,7 +29,7 @@ function Hours.aggregate(days, prefix)
     for ymd, info in pairs(days) do
         local y, m, d = ymd:match("^(%d+)%-(%d+)%-(%d+)$")
         if info.hours and y and ymd:sub(1, #prefix) == prefix then
-            local wday = os.date("*t", os.time{ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 }).wday
+            local wday = (os.date("*t", os.time{ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 }) --[[@as osdate]]).wday
             local idx = (wday + 5) % 7 + 1
             for h = 1, 24 do
                 local seconds = info.hours[h]

@@ -28,7 +28,7 @@ local T = require("ffi/util").template
 local Goals = {}
 
 --- 构建进度页：本月挑战、预计读完、连续记录；挑战环吃余量。
----@param ctx { state: table, width: number, height: number, open_book: fun(book: table) }
+---@param ctx { desktop: table, state: table, width: number, height: number, open_book: fun(book: table) }
 ---@return table
 function Goals:build(ctx)
     local state, width, open_book = ctx.state, ctx.width, ctx.open_book
