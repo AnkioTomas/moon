@@ -148,7 +148,7 @@ do
     local src, err = Registry.create("wechat")
     Assert.is_true(src ~= nil, err)
     Assert.is_false(src:capabilities().scrape)
-    Assert.is_false(src:capabilities().edit)
+    Assert.is_true(src:capabilities().edit)
 end
 
 do
