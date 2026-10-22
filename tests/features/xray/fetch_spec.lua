@@ -124,6 +124,14 @@ Assert.matches(prompts[2], "CURRENT PAGE")
 Assert.eq(#result.characters, 1)
 Assert.eq(result.characters[1].name, "Mina")
 
+-- 模型漏掉 aliases：不能抛错
+result, failure = run({}, {
+    { known = false },
+    { characters = { { name = "Mina" } }, locations = {}, terms = {} },
+})
+Assert.is_nil(failure)
+Assert.eq(result.characters[1].name, "Mina")
+
 -- 没有书名：直接走章节上下文
 result, failure = run({}, { full_reply }, { source_id = "moon", stable_id = "x", book = {} })
 Assert.is_nil(failure)
