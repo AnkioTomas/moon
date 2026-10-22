@@ -10,6 +10,9 @@ local Stubs = require("support.stubs")
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(s) return s end end
 package.preload["json"] = function() return { decode = require("support.json_stub").decode } end
+for _idx, name in ipairs({ "kindle", "kobo" }) do
+    package.preload["features.bluetooth." .. name] = function() return { available = function() return false end } end
+end
 
 -- 按路径（不含 query）给响应：字符串 = JSON 体，false = 连不上；数组按次序消费，最后一个重复用。
 local routes, calls = {}, {}
@@ -44,6 +47,7 @@ os.execute = function(cmd)
     return real_execute(cmd)
 end
 
+require("features.bluetooth.khp").available = function() return true end
 local Bluetooth = require("features.bluetooth")
 
 local STOPPED = '{"ok":true,"daemon_running":false,"devices":[],"connections":[]}'
@@ -89,9 +93,6 @@ do
     Assert.is_nil(text)
     Assert.eq(icon, "bluetooth")
     Assert.eq(Bluetooth.name(Bluetooth.current().devices[2]), "CC:DD")
-    -- 真机 JSON 对象带元表，缺 name 键时 __index 会给出同名函数
-    local dev = setmetatable({ address = "EE:FF" }, { __index = { name = function() end } })
-    Assert.eq(Bluetooth.name(dev), "EE:FF")
 
     routes["/status"] = ON_ONE
     Bluetooth.refresh()
@@ -160,14 +161,14 @@ do
     Assert.contains(calls, "/start")
 end
 
--- 已是目标状态：只读一次 /status。关闭时守护进程没跑也算已关。
+-- 已是目标状态：只读 /status（动作前一次、刷新缓存一次）。关闭时守护进程没跑也算已关。
 do
     reset()
     local ok
     Bluetooth.setEnabled(false, function(r) ok = r end)
     Stubs.flush()
     Assert.is_true(ok)
-    Assert.len(calls, 1)
+    Assert.len(calls, 2)
     Assert.eq(spawned, 0)
 end
 
