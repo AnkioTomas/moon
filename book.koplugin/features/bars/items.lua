@@ -82,6 +82,23 @@ local function brightness(ctx)
     return require("features.panel.desktop").lightPercent("brightness")
 end
 
+--- 系统剩余运存（MB）；读不到（非 Linux）返回 nil。
+---@param ctx table
+---@return number|nil
+local function freeMemory(ctx)
+    if ctx.memory then
+        return ctx.memory
+    end
+    local f = io.open("/proc/meminfo", "r")
+    if not f then
+        return nil
+    end
+    local raw = f:read("*a")
+    f:close()
+    local kb = tonumber(raw:match("MemAvailable:%s*(%d+)"))
+    return kb and kb / 1024 or nil
+end
+
 --- 「a/b」形式；开图标时省掉前后缀。
 ---@param a number|nil
 ---@param b number|nil
@@ -144,6 +161,16 @@ Items.CATALOG = {
         text = function(ctx)
             local level = brightness(ctx)
             return level and percentText(level) or ""
+        end,
+    },
+    {
+        id = "memory", label = _("剩余运存"), icon = "memory", top = true, bottom = true,
+        glyph = function(ctx) return freeMemory(ctx) and "memory" or nil end,
+        text = function(ctx, icons)
+            local mb = freeMemory(ctx)
+            if not mb then return "" end
+            local value = mb >= 1024 and string.format("%.1fG", mb / 1024) or string.format("%dM", mb)
+            return icons and value or _("运存") .. " " .. value
         end,
     },
     {
@@ -221,6 +248,7 @@ function Items.sampleContext()
         charging = false,
         wifi = true,
         brightness = 40,
+        memory = 512,
     }
 end
 

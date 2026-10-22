@@ -39,6 +39,7 @@ local DEFAULT_ALIGN = {
     battery = "right",
     wifi = "right",
     brightness = "right",
+    memory = "right",
     progress_bar = "left",
 }
 
