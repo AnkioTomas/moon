@@ -45,26 +45,28 @@ Assert.is_true(Refresh.running())
 -- 在跑时再要刷新：并进本轮（重复的源不再排），不另起任务
 Assert.is_false(Refresh.start({ { id = 2, title = "B" }, { id = 3, title = "C" } }))
 Assert.len(enqueued, 1, "不并发")
--- 翻更早一页在刷新时不排队
+-- 翻更早一页在刷新时也排队（插队到队首），不能静默丢掉点击
 Assert.is_false(Refresh.start({ { id = 1, title = "A" } }, { more = true }))
 
 pending[1](2); Stubs.flush()
-Assert.eq(table.concat(calls, ","), "1,2")
-pending[2](nil, "HTTP 500"); Stubs.flush()
-pending[3](0); Stubs.flush()
-Assert.eq(table.concat(calls, ","), "1,2,3")
+Assert.eq(table.concat(calls, ","), "1,1+", "更早一页紧跟其后")
+pending[2](1); Stubs.flush()
+Assert.eq(table.concat(calls, ","), "1,1+,2")
+pending[3](nil, "HTTP 500"); Stubs.flush()
+pending[4](0); Stubs.flush()
+Assert.eq(table.concat(calls, ","), "1,1+,2,3")
 Assert.is_true(enqueued[1].done)
 Assert.is_false(enqueued[1].result.ok)
 Assert.matches(enqueued[1].result.err, "B: HTTP 500")
 Assert.is_nil(Refresh.status())
 Assert.eq(events[#events], "done", "刷完通知订阅页重画")
-Assert.eq(enqueued[1].total, 3)
+Assert.eq(enqueued[1].total, 4)
 
 -- 网页单个刷新：per-feed 回调；跑完再起新一轮
 local got
 Assert.is_true(Refresh.start({ { id = 9, title = "W" } }, { on_feed = function(_f, added, err) got = { added, err } end }))
 Assert.len(enqueued, 2)
-pending[4](5); Stubs.flush()
+pending[5](5); Stubs.flush()
 Assert.eq(got[1], 5)
 
 -- 任务在排队时被取消（run 没跑）：残留的本轮被清掉，下次能重新起

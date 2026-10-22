@@ -48,6 +48,17 @@ DB.schema("sub_read_at", function()
     return true
 end)
 
+--- 公众号游标曾按篇数累加，服务端 offset 实际以推送组为单位（且旧的 maxIdx 被无视，翻页一直拿到第一页）。
+--- 加列只是一次性标记：加成功的这一次把旧游标清掉，下次刷新首页从组数重新起算。
+DB.schema("sub_mp_cursor_groups", function()
+    local columns, nrows = DB.query("PRAGMA table_info(sub_feeds);")
+    for i = 1, columns and nrows or 0 do
+        if columns[2][i] == "cursor_groups" then return true end
+    end
+    return DB.exec("ALTER TABLE sub_feeds ADD COLUMN cursor_groups INTEGER NOT NULL DEFAULT 1;")
+        and DB.exec("UPDATE sub_feeds SET cursor = NULL WHERE kind = 'mp';") ~= nil
+end)
+
 --- 同一篇换了 guid 也只留一条：公众号同一篇文章在不同请求下回两种 reviewId（短 id / WR1A… 长 id），
 --- RSS 也可能改 guid / 链接。同源内「标题 + 时间」（时间有效时）唯一。建索引前先清掉历史重复：
 --- 每组留已读的那条（其正文缓存按 guid 存，也就跟着保留），都没读留最早入库的。
