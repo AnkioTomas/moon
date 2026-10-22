@@ -113,6 +113,14 @@ function Log.flush()
     scheduleFlush(true)
 end
 
+--- 立刻同步写盘。只用于休眠 / 唤醒这类随时可能卡死、等不到下一次 UI tick 的节点。
+function Log.flushSync()
+    if flush_pending or #buffer == 0 or not start() then return end
+    local batch = buffer
+    buffer = {}
+    if not writeBatch(batch) then restoreBatch(batch) end
+end
+
 --- 启动横幅：月读 / KOReader 版本与设备型号，不受调试开关影响，反馈问题时先看这一行。
 function Log.boot()
     write("BOOT", "moon", require("bookversion"), "koreader", require("version"):getShortVersion(),
