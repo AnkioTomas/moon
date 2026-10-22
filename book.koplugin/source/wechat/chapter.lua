@@ -323,6 +323,19 @@ local function linkFootnotes(html)
     return html:sub(1, last - 1) .. block .. html:sub(last)
 end
 
+--- 原书脚注链接带原文件名（``part0012.html#note_1``），章节落盘后文件名变了，KOReader 报「无效或外部链接」。
+--- 锚点就在本章文档里的，改写成纯 ``#锚点``；锚点不在本章的（跨章）保持原样。
+---@param html string
+---@return string
+local function localizeAnchors(html)
+    return (html:gsub('href="([^"#:]+)#([^"]+)"', function(file, frag)
+        if html:find('id="' .. frag .. '"', 1, true) or html:find('name="' .. frag .. '"', 1, true) then
+            return 'href="#' .. frag .. '"'
+        end
+        return nil
+    end))
+end
+
 --- 章节载荷：EPUB 是服务端 XHTML 原文（只把图片 / 样式表引用换成本地文件、脚注接上弹窗），TXT 是段落化正文。
 ---@param bookId string
 ---@param chapter BookChapter
@@ -352,7 +365,7 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
             return fetchStyleAsync(bookId, chapter.uid, done)
         end, function(localized)
             if cancelled then return end
-            cb({ title = title, document = linkFootnotes(localized) })
+            cb({ title = title, document = linkFootnotes(localizeAnchors(localized)) })
         end)
     end)
     return { cancel = function()

@@ -156,6 +156,18 @@ do
 end
 
 do
+    -- 脚注链接带原文件名：锚点在本章里就改成 #锚点，不在的（跨章）原样保留
+    local saved = FULL
+    FULL = FULL:gsub("</body></html>\n<%?xml", '<p><a href="part0012.html#note_1">[1]</a><a href="part0013.html#other">[2]</a></p>'
+        .. '<p id="note_1">注文</p></body></html>\n<?xml', 1)
+    local payload
+    Chapter.fetchContentAsync("book", { uid = "chapter", title = "第一章" }, function(p) payload = p end)
+    FULL = saved
+    Assert.is_true(payload.document:find('<a href="#note_1">[1]</a>', 1, true) ~= nil)
+    Assert.is_true(payload.document:find('href="part0013.html#other"', 1, true) ~= nil)
+end
+
+do
     -- 无权阅读的付费章：EPUB 通道回纯文本试读片段，必须报错，不能当正文落盘。
     trial = true
     local payload, err = "untouched", nil
