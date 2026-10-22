@@ -8,6 +8,7 @@
 --]]
 
 local UIManager = require("ui/uimanager")
+local Perf = require("utils.perf")
 
 local ReaderExit = {}
 
@@ -15,10 +16,15 @@ local ReaderExit = {}
 ---@param ui table|nil ReaderUI
 function ReaderExit.closeToDesktop(ui)
     UIManager:nextTick(require("ui.guard").wrap("close to desktop", function()
+        local started_at = Perf.now()
         if ui and ui.onClose then ui:onClose() end
+        Perf.slow("exit onClose", started_at)
         -- 打开书时 ReaderUI 会关掉 FileManager；这里先重建，否则关闭文档后窗口栈为空直接退出。
         local Desktop = require("desktop")
-        Desktop.open(Desktop.ensureFileManager().book)
+        local fm = Desktop.ensureFileManager()
+        Perf.slow("exit ensureFileManager", started_at)
+        Desktop.open(fm.book)
+        Perf.slow("exit total", started_at)
     end))
 end
 
