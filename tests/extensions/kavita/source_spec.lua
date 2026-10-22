@@ -372,6 +372,14 @@ Assert.eq(remembered["20:2002"].series, "合集")
 Assert.eq(remembered["20:2002"].authors, "丙", "卷行继承容器作者，最近阅读里不再是未知作者")
 Assert.is_nil(remembered["20:2002"].deleted, "卷行不上书架")
 
+-- 多卷 series 的阅读统计都记在卷行上：容器详情用 statsIdentities 把各卷并进来。
+local ids = source:statsIdentities({ source_id = "ext.kavita", stable_id = "20" })
+Assert.eq(table.concat(ids or {}, ","), "20:2001,20:2002")
+Assert.is_nil(source:statsIdentities({ source_id = "ext.kavita", stable_id = "20:2002" }),
+    "卷行只看自己")
+Assert.is_nil(source:statsIdentities({ source_id = "ext.kavita", stable_id = "10" }),
+    "单卷 series 直接记在 series 行")
+
 -- 容器行的作者是 fetchToc 在这次开书里才写回的，identity.book 是开书那一刻的旧快照：
 -- 选卷要用重读后的容器行，否则新 series 第一次打开写下的卷行又是「未知作者」。
 books["21"] = { stable_id = "21", title = "合集21", authors = "丁" }

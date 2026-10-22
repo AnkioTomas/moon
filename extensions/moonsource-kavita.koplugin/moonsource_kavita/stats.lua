@@ -20,6 +20,10 @@ Kavita 阅读统计纯核心：reading-history 条目 + 身份 / 时区上下文
 整体算起始小时，与「跨零点的会话整体算起始日」同一口径），供「阅读时段」图用；云端只有这一层
 粒度，再细就要按跨度分摊，而活动行的跨度含空档，分摊反而把空档算到隔壁小时。
 
+阅读会话行（`cloud_session`）：每个「会话 × 章」切片的起始时刻与时长单独落一行，
+供书详情 / 统计页的「阅读记录」列出真的读了几点几分；时长不计入日 / 时段 / 总量行
+（那些桶已经包含它），只在 `sessionRows` 里读。
+
 全量重拉：日桶 / 时段桶 / 总量行按「前缀 + 覆盖到最后观测桶的时间窗」替换；单书行按「上次 ∪ 本次
 身份」精确替换，顺带清掉身份漂移（单卷 ↔ 多卷、系列重建）遗留的孤儿行。
 
@@ -35,6 +39,8 @@ local Stats = {}
 local DAY_PREFIX = "__kv:day:"
 local HOUR_PREFIX = "__kv:hour:"
 local TOTAL_ID = "__kv:total"
+--- 单条阅读会话（会话 × 章切片）——只给「阅读记录」列表用，不参与任何时长汇总。
+local SESSION_RECORD = "cloud_session"
 
 --- features/clock/init.lua 的 Clock.TIMEZONES 的 19 项 POSIX 串 → Kavita 的 TimeZoneId。
 --- 只查表：不读 /etc/localtime（KOReader 设备上不保证存在，读到的也未必是用户选的时区），
@@ -244,6 +250,11 @@ function Stats.fromHistory(entries, ctx)
                                 local bucket = hourBucket(day, chapter_epoch)
                                 hour_durations[bucket] = (hour_durations[bucket] or 0) + duration
                                 if bucket > last_hour then last_hour = bucket end
+                                -- 阅读会话行：详情「阅读记录」按真实起止时间列出这一段。
+                                local session = statsRow(source_id, identity, SESSION_RECORD,
+                                    chapter_epoch, duration, fetched_at)
+                                session.event_count = math.max(0, tonumber(chapter.pagesRead) or 0)
+                                rows[#rows + 1] = session
                             end
                         end
                         day_pages[day] = (day_pages[day] or 0) + (tonumber(chapter.pagesRead) or 0)

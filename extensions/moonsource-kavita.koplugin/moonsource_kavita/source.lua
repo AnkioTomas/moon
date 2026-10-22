@@ -891,6 +891,30 @@ function Source:toc(series_id, cb)
     return SourceBase.defer(cb, nil, _("网络不可用，请先连接 Wi-Fi"))
 end
 
+--- 详情页统计并入的卷身份：多卷 series 的时长 / 会话都记在 `seriesId:chapterId` 卷行上，
+--- 容器（series 行）自己没有统计。目录拿不到时返回 nil，只显示本行。
+---@param identity BookIdentity
+---@return string[]|nil
+function Source:statsIdentities(identity)
+    if type(identity) ~= "table" or type(identity.stable_id) ~= "string" then return nil end
+    local series_id, chapter_id = splitId(identity.stable_id)
+    if chapter_id then return nil end
+    local toc = require("source.toc").read(self.id, series_id)
+    if not toc then
+        local payload = require("book.books_db").getToc(self.id, series_id)
+        local ok, decoded = pcall(require("json").decode, payload or "")
+        if ok and type(decoded) == "table" then toc = decoded end
+    end
+    if type(toc) ~= "table" or #toc <= 1 then return nil end
+    local ids = {}
+    for _idx, entry in ipairs(toc) do
+        if entry.chapterId ~= nil then
+            ids[#ids + 1] = series_id .. ":" .. tostring(entry.chapterId)
+        end
+    end
+    return #ids > 1 and ids or nil
+end
+
 --- 身份对应的卷。series 行的卷号取自登记的文件名（<chapterId>.<ext>）。
 ---@param identity BookIdentity
 ---@param cb fun(entry: table|nil, err: string|nil)
