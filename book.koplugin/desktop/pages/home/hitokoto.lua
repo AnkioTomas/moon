@@ -96,7 +96,7 @@ function M:createWidget()
     local attr = attribution(quote)
 
     local kids = { align = "left",
-        Text.box("body", quote.text or "", width, { max_lines = 2, align = center and "center" or "left" }) }
+        Text.box("body", quote.text or "", width, { max_lines = 2, align = center and "center" or "left", transparent = true }) }
     if attr ~= "" then
         local line = Text.line("caption", attr, { width = width, color = t.color.muted, bold = true })
         kids[#kids + 1] = VerticalSpan:new{ width = Theme.px(t.space.xs) }

@@ -60,13 +60,15 @@ end
 ---@param w number 可用宽度，单位像素
 ---@param value string 数值文案
 ---@param label string 展示给用户的标签文字
+---@param bg_alpha number|nil 卡片底色不透明度百分比，缺省 100
 ---@return table, number 卡片 widget 与其高度
-function M.kpiCard(w, value, label)
+function M.kpiCard(w, value, label, bg_alpha)
     local t = Theme.current()
     local pad = Theme.px(t.space.sm)
     local inner = math.max(1, w - pad * 2)
     local card = Box:new{
         style = t.card,
+        bg_alpha = bg_alpha,
         width = w,
         padding = pad,
         VerticalGroup:new{

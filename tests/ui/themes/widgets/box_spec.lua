@@ -37,6 +37,12 @@ Assert.eq(painted.x, 10 + 40)
 Assert.eq(painted.y, 20 + 20)
 Assert.eq(card.dimen.x, 10, "绘制回写坐标，供点击命中")
 
+-- bg_alpha < 100：不铺底色，改为按比例提亮下层。
+bb = Kit.canvas()
+Box:new{ style = { bg = 0xFF }, width = 40, height = 20, bg_alpha = 30, child }:paintTo(bb, 5, 6)
+Assert.eq(bb.ops[1].op, "lighten")
+Assert.eq(bb.ops[1].w, 40)
+
 -- 不给宽高：按子件加内边距撑开。
 local auto = Box:new{ style = bold.card, padding = 5, child }
 Assert.eq(auto.box_w, 30)

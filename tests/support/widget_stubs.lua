@@ -165,6 +165,8 @@ local TextBoxWidget = Widget:extend{
     scrollDown = function(self) self.scrolled = (self.scrolled or 0) + 1 end,
     scrollUp = function(self) self.scrolled = (self.scrolled or 0) - 1 end,
     free = function() end,
+    dimen = geom{ w = 0, h = 0 },
+    _bb = { getHeight = function() return 20 end },
 }
 
 local InputText = InputContainer:extend{
@@ -235,6 +237,9 @@ function Kit.canvas()
         end,
         paintBorder = function(_, x, y, w, h, bw, c, r)
             ops[#ops + 1] = { op = "border", x = x, y = y, w = w, h = h, bw = bw, c = c, r = r }
+        end,
+        colorblitFrom = function(_, _source, x, y, _ox, _oy, w, h)
+            ops[#ops + 1] = { op = "colorblit", x = x, y = y, w = w, h = h }
         end,
         lightenRect = function(_, x, y, w, h)
             ops[#ops + 1] = { op = "lighten", x = x, y = y, w = w, h = h }
