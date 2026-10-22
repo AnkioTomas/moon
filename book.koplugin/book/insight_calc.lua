@@ -17,7 +17,7 @@ local SESSION_GAP = 600
 
 ---@param ts number
 ---@return string
-local function ymdOf(ts) return os.date("%Y-%m-%d", ts) end
+local function ymdOf(ts) return os.date("%Y-%m-%d", ts) --[[@as string]] end
 
 --- 取当天中午避开夏令时跳变。
 ---@param ymd string
@@ -275,7 +275,7 @@ end
 ---@param goal_seconds number|nil 用户设的本月目标
 ---@return table|nil { target, done, per_day, on_pace, ratio }
 function Calc.challenge(days, now, goal_seconds)
-    local ym, today = os.date("%Y-%m", now), ymdOf(now)
+    local ym, today = os.date("%Y-%m", now) --[[@as string]], ymdOf(now)
     local dim, elapsed = daysIn(ym), tonumber(today:sub(9, 10))
     local target = goal_seconds
     if not target or target <= 0 then
