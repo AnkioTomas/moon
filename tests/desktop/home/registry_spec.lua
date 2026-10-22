@@ -11,7 +11,7 @@ local Kit = require("support.widget_stubs")
 Kit.install("paper")
 
 local BUILTIN = {
-    "clock", "weather", "clock_weather", "weather_forecast", "stats", "heatmap", "hitokoto", "excerpt",
+    "clock", "weather", "clock_weather", "weather_forecast", "stats", "tiles", "heatmap", "hitokoto", "excerpt",
     "history", "news",
     "recent_hero", "recent_list", "recent_cards", "random", "shelf",
 }

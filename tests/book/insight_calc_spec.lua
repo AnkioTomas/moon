@@ -71,6 +71,9 @@ Assert.eq(today_cell.level, 1)
 
 -- 月挑战：没历史 nil；有历史目标 = 日均 × 1.1 × 本月天数。
 Assert.is_nil(Calc.challenge({}, now))
+local custom = Calc.challenge({}, now, 36000)
+Assert.eq(custom.target, 36000, "自定义目标没有历史也能用")
+Assert.eq(Calc.challenge(long, now, 36000).target, 36000, "自定义目标优先于推算")
 local ch = Calc.challenge(long, now)
 Assert.is_true(ch.target > 0 and ch.ratio >= 0 and ch.ratio <= 1)
 

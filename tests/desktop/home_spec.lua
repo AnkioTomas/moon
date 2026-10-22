@@ -16,7 +16,7 @@ local Base = require("desktop.pages.home.base")
 
 local log, heights, events = {}, {}, {}
 local IDS = {
-    "clock", "weather", "clock_weather", "weather_forecast", "stats", "heatmap", "hitokoto", "excerpt",
+    "clock", "weather", "clock_weather", "weather_forecast", "stats", "tiles", "heatmap", "hitokoto", "excerpt",
     "history", "news", "recent_hero", "recent_list", "recent_cards", "random", "shelf",
 }
 for _, id in ipairs(IDS) do

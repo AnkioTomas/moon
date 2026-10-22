@@ -91,6 +91,7 @@ end
 local function opacity()
     return MoonSettings.get("desktop.pages.home").home_stats_opacity
 end
+M.opacity = opacity
 
 --- 编辑态设置：卡片底色不透明度。
 ---@param desktop BookDesktop

@@ -10,5 +10,8 @@ return {
     defaults = {
         hidden_pages = {},
         hidden_cards = {},
+        -- 本月阅读目标（小时），0 = 按近 90 天日均自动推算；今年读完目标（本），0 = 不设。
+        month_goal_hours = 0,
+        year_goal_books = 0,
     },
 }
