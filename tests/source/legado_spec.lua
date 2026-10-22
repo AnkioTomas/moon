@@ -100,6 +100,13 @@ do
     Assert.matches(requests[1].body, '"url":"u1"')
 end
 
+-- 正文夹 <img>：真图留成标签、svg 懒加载占位丢弃、src 尾部请求头剥掉，其余文字照旧转义
+do
+    local html = Mapper.chapterHtml("章", 'a<b>\n<img src="data:image/svg+xml;base64,PHN2Zy8+">\n'
+        .. '<img src="http://h/x.jpg?a=1&amp;b=2,{&quot;h&quot;:1}" alt="x">')
+    Assert.eq(html, '<h1>章</h1>\n<p>a&lt;b&gt;</p>\n<p><img src="http://h/x.jpg?a=1&amp;b=2"/></p>')
+end
+
 -- 映射：bookUrl 是身份，封面走 /cover 代理，自定义封面优先；没有 bookUrl 的行丢弃。
 do
     local books = Mapper.shelfList("http://h:1122", {

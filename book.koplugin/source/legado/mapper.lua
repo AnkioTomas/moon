@@ -65,4 +65,21 @@ function Mapper.toc(rows)
     return toc
 end
 
+--- 正文纯文本里夹着 ``<img>``（图片章、网站插图）：图片留成真标签，其余照旧转义，否则标签原样显示。
+--- 懒加载占位用的 data:image/svg+xml 没有内容，直接丢掉；src 尾部 Legado 的 ``,{请求头 JSON}`` 剥掉。
+---@param title string
+---@param text string
+---@return string
+function Mapper.chapterHtml(title, text)
+    local imgs = {}
+    text = text:gsub("<img%s[^>]*>", function(tag)
+        local src = tag:match('src%s*=%s*"([^"]*)"') or tag:match("src%s*=%s*'([^']*)'")
+        src = src and src:gsub(",%s*{.*$", "")
+        if not src or src == "" or src:find("^data:image/svg") then return "" end
+        imgs[#imgs + 1] = '<img src="' .. Text.xmlEscape(Text.xmlDecode(src)) .. '"/>'
+        return "\1" .. #imgs .. "\1"
+    end)
+    return (Text.chapterHtml(title, text):gsub("\1(%d+)\1", function(n) return imgs[tonumber(n)] end))
+end
+
 return Mapper
