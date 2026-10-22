@@ -92,5 +92,8 @@ Assert.eq(Items.text("chapter_idx", ctx, true), "3/10")
 Assert.eq(Items.text("wifi", ctx, true), "")
 Assert.eq(Items.text("wifi", ctx), "Wi-Fi")
 Assert.eq(Items.text("battery", ctx), "85%")
+Assert.eq(Items.text("memory", { memory = 512 }), "运存 512M")
+Assert.eq(Items.text("memory", { memory = 1536 }, true), "1.5G", "开图标省前缀、超 1G 换算")
+Assert.eq(Items.glyph("memory", { memory = 512 }), "memory")
 
 return true

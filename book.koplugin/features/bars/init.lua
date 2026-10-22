@@ -26,7 +26,7 @@ local BOTTOM_CONTENT_INSET = 4
 --- 不读 ReaderFooter.footer_text_face：它在 footer init 时取一次，早于插件改 fontmap 或之后换字体都会过期。
 local BAR_FONT = "ffont"
 --- 不随翻页变化、要靠时钟或设备事件重画的组件。
-local LIVE_ITEMS = { clock = true, battery = true, wifi = true, brightness = true, remaining = true }
+local LIVE_ITEMS = { clock = true, battery = true, wifi = true, brightness = true, remaining = true, memory = true }
 
 ---@class BookReaderBars
 ---@field view table|nil
