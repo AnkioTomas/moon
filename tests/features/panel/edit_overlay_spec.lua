@@ -24,16 +24,16 @@ Assert.eq(#overlay, 3)
 
 local tools = Kit.buttons(overlay[3])
 Assert.len(tools, 3)
-Assert.eq(tools[1].icon, "chevron_left")
-Assert.eq(tools[2].icon, "chevron_right")
-Assert.eq(tools[3].icon, "close")
+Assert.eq(tools[1].icon, "delete")
+Assert.eq(tools[2].icon, "chevron_left")
+Assert.eq(tools[3].icon, "chevron_right")
 tools[1]:onTapThemeButton()
+Assert.eq(disables[1], "night")
+tools[2]:onTapThemeButton()
+tools[3]:onTapThemeButton()
 Assert.eq(moves[1].id, "night")
 Assert.eq(moves[1].delta, -1)
-tools[2]:onTapThemeButton()
 Assert.eq(moves[2].delta, 1)
-tools[3]:onTapThemeButton()
-Assert.eq(disables[1], "night")
 
 -- 仅一项时不可停用、不可移动：按钮灰显，点按不回调
 local lone_called = false

@@ -1,5 +1,10 @@
 --[[--
-快捷面板编辑叠层：盖在动作按钮上，吞掉点击，提供前移 / 后移 / 停用。
+快捷面板编辑叠层：风格同首页组件编辑。顶栏工具条，其余区域网状遮罩吞手势。
+
+  +------------------------------+
+  | [删] [<] [>]                 |
+  |░░░░░░░░ 动作按钮 ░░░░░░░░░░░░|
+  +------------------------------+
 
 @module koplugin.book.features.panel.edit_overlay
 --]]
@@ -14,6 +19,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
+local Mask = require("ui.themes.widgets.mask")
 local Sheet = require("ui.themes.widgets.sheet")
 local Theme = require("ui.themes")
 local _ = require("gettext")
@@ -38,62 +44,62 @@ local _ = require("gettext")
 ---@field showAddDialog fun(options: BookQuickPanelEditAddOption[], on_pick: fun(id: string)): nil
 local Edit = {}
 
---- 编辑工具按钮（图标 ghost 按钮）。
----@param name string Material 图标名
----@param enabled boolean 为假时灰显且吞掉点按
----@param on_tap fun() 点击回调
----@return table
-local function toolButton(name, enabled, on_tap)
-    local size = Theme.px(28)
-    return Button:new{
-        icon = name, variant = "ghost", enabled = enabled,
-        width = size, height = size, callback = on_tap,
-    }
+--- 在命中范围内吞掉点按 / 长按 / 滑动 / 拖动，不让底层动作收到。
+---@param host table
+---@param prefix string
+local function swallowEvents(host, prefix)
+    host.ges_events = {}
+    for _i, ges in ipairs({ "Tap", "Hold", "Swipe", "Pan" }) do
+        host.ges_events[prefix .. ges] = {
+            GestureRange:new{ ges = ges:lower(), range = function() return host.dimen end },
+        }
+        host["on" .. prefix .. ges] = function() return true end
+    end
 end
 
---- 把动作按钮包进编辑叠层（底层按钮 + 透明盾 + 顶栏工具钮）。
+--- 把动作按钮包进编辑模板。磁贴比工具条窄时缩小按钮，避免叠到邻居上。
 ---@param widget table 参与布局或绘制的动作按钮 Widget
 ---@param meta BookQuickPanelEditMeta 尺寸与列表位次
 ---@param handlers BookQuickPanelEditHandlers 移动与停用回调
 ---@return table OverlapGroup 叠层根节点
 function Edit.wrap(widget, meta, handlers)
+    local t = Theme.current()
     local w, h = meta.width, meta.height
+    local gap = Theme.px(t.space.xs)
+    local pad = Theme.px(t.space.xs)
+    local size = Theme.px(t.control.height)
+    local buttons = 3
+    local bar_w = size * buttons + gap * (buttons - 1) + pad * 2
+    if bar_w > w then
+        size = math.max(Theme.px(24), math.floor((w - pad * 2 - gap * (buttons - 1)) / buttons))
+    end
     local can_prev = meta.index > 1
     local can_next = meta.index < meta.count
-    local can_disable = meta.count > 1
-    local t = Theme.current()
-    local tools = Box:new{
-        style = { bg = t.color.page },
-        padding = Theme.px(2),
-        HorizontalGroup:new{
-            align = "center",
-            toolButton("chevron_left", can_prev, function() handlers.on_move(meta.id, -1) end),
-            HorizontalSpan:new{ width = Theme.px(t.space.xs) },
-            toolButton("chevron_right", can_next, function() handlers.on_move(meta.id, 1) end),
-            HorizontalSpan:new{ width = Theme.px(t.space.xs) },
-            toolButton("close", can_disable, function() handlers.on_disable(meta.id) end),
-        },
-    }
-    tools.overlap_align = "top"
+    local row = HorizontalGroup:new{ align = "center" }
+    local function add(icon, enabled, on_tap)
+        if #row > 0 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
+        row[#row + 1] = Button:new{
+            icon = icon, variant = "ghost", enabled = enabled,
+            width = size, height = size, callback = on_tap,
+        }
+    end
+    add("delete", meta.count > 1, function() handlers.on_disable(meta.id) end)
+    add("chevron_left", can_prev, function() handlers.on_move(meta.id, -1) end)
+    add("chevron_right", can_next, function() handlers.on_move(meta.id, 1) end)
+    local bar = Box:new{ style = t.raised, padding = pad, row }
+    local tools = InputContainer:new{ dimen = Geom:new{ w = bar:getSize().w, h = bar:getSize().h }, bar }
+    swallowEvents(tools, "PanelEditBar")
 
     local shield = InputContainer:new{
         dimen = Geom:new{ w = w, h = h },
-    }
-    shield[1] = Box:new{
-        style = { border = t.control.border, border_color = t.color.ink },
-        width = w,
-        height = h,
-    }
-    shield.ges_events = {
-        TapPanelEditShield = {
-            GestureRange:new{ ges = "tap", range = function() return shield.dimen end },
-        },
-        HoldPanelEditShield = {
-            GestureRange:new{ ges = "hold", range = function() return shield.dimen end },
+        Box:new{
+            style = { border = 1, border_color = t.color.ink },
+            width = w,
+            height = h,
+            Mask:new{ dimen = Geom:new{ w = math.max(0, w - 2), h = math.max(0, h - 2) } },
         },
     }
-    shield.onTapPanelEditShield = function() return true end
-    shield.onHoldPanelEditShield = function() return true end
+    swallowEvents(shield, "PanelEditShield")
 
     local overlay = OverlapGroup:new{
         allow_mirroring = false,
@@ -102,7 +108,7 @@ function Edit.wrap(widget, meta, handlers)
         shield,
         tools,
     }
-    --- 事件从顶到底：先工具钮，再遮罩，避免点击穿透到底层动作。
+    --- 事件从顶到底：先工具条，再遮罩，避免点击穿透到底层动作。
     ---@param event table KOReader 事件对象
     ---@return boolean 是否已消费
     function overlay:propagateEvent(event)

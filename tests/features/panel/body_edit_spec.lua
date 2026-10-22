@@ -31,7 +31,16 @@ package.preload["ffi/blitbuffer"] = function()
 end
 package.preload["ui/geometry"] = widget
 package.preload["ui/gesturerange"] = widget
-package.preload["ui/widget/horizontalgroup"] = widget
+package.preload["ui/widget/horizontalgroup"] = function()
+    local W = widget()
+    local original_new = W.new
+    W.new = function(_, opts)
+        local o = original_new(_, opts)
+        o.getSize = function() return { w = 80, h = 40 } end
+        return o
+    end
+    return W
+end
 package.preload["ui/widget/horizontalspan"] = widget
 package.preload["ui/widget/container/inputcontainer"] = widget
 package.preload["ui/widget/verticalgroup"] = function()
@@ -46,7 +55,10 @@ package.preload["ui/widget/verticalgroup"] = function()
 end
 package.preload["ui/widget/verticalspan"] = widget
 package.preload["ui.themes"] = function()
-    return { px = function(n) return n end, current = function() return {} end }
+    return {
+        px = function(n) return n end,
+        current = function() return { space = { sm = 8 } } end,
+    }
 end
 package.preload["ui.themes.widgets.icon"] = function()
     return {
@@ -82,7 +94,7 @@ package.preload["ui.themes.widgets.button"] = function()
     return {
         new = function(_, opts)
             if opts.text == "完成" then dones = dones + 1 end
-            if opts.text == "添加动作" then adds = adds + 1 end
+            if opts.text == "添加" then adds = adds + 1 end
             return opts
         end,
     }
@@ -90,7 +102,6 @@ end
 
 local Body = require("features.panel.widget.body")
 
-local entered = false
 local body = Body:new{
     width = 300,
     actions = {
@@ -99,14 +110,12 @@ local body = Body:new{
     },
     sliders = { { kind = "brightness", title = "亮度", value = 40 } },
     on_action = function() end,
-    on_enter_edit = function() entered = true end,
     addable = function() return { { id = "rotate", title = "旋转" } } end,
 }
 Assert.eq(wraps, 0)
 Assert.eq(dones, 0)
 Assert.not_nil(body.ges_events)
-Assert.is_true(body:onHoldPanelEdit())
-Assert.is_true(entered)
+Assert.is_nil(body.ges_events.HoldPanelEdit, "长按不再进入编辑")
 
 wraps, dones, adds = 0, 0, 0
 local editing = Body:new{
@@ -125,7 +134,11 @@ local editing = Body:new{
 Assert.eq(wraps, 2)
 Assert.eq(dones, 1)
 Assert.eq(adds, 1)
--- 编辑态不挂长按，但必须是空表而不是 nil：InputContainer:onGesture 会 pairs(self.ges_events)。
+local action_row = editing[1][#editing[1]][1]
+Assert.eq(action_row[1].icon, "add")
+Assert.eq(action_row[#action_row].icon, "check")
+Assert.eq(action_row[#action_row].variant, "primary")
+-- 必须是空表而不是 nil：InputContainer:onGesture 会 pairs(self.ges_events)。
 Assert.not_nil(editing.ges_events)
 Assert.is_nil(editing.ges_events.HoldPanelEdit)
 
@@ -144,7 +157,7 @@ Body:new{
     on_disable = function() end,
     addable = function() return {} end,
 }
-Assert.eq(adds, 1, "没有可添加项时不出「添加动作」")
+Assert.eq(adds, 1, "没有可添加项时不出「添加」")
 last_handlers.on_move("rotate", -1)
 last_handlers.on_move("rotate", 1)
 Assert.eq(swaps[1], "rotate>night")

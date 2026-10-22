@@ -5,7 +5,6 @@
 require("l10n").apply()
 
 local Geom = require("ui/geometry")
-local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
@@ -13,6 +12,7 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 
 local ActionButton = require("features.panel.widget.button")
+local CenterContainer = require("ui/widget/container/centercontainer")
 local Button = require("ui.themes.widgets.button")
 local Edit = require("features.panel.edit_overlay")
 local SliderRow = require("features.panel.widget.slider")
@@ -45,7 +45,6 @@ end
 ---@field editing boolean|nil 为真时进入现场编辑叠层
 ---@field on_action fun(id: string)|nil 非编辑态点击动作
 ---@field on_level fun(kind: string, fraction: number): boolean|nil 滑杆回调
----@field on_enter_edit fun()|nil 长按进入编辑
 ---@field on_exit_edit fun()|nil 「完成」退出编辑
 ---@field on_move fun(id: string, other_id: string)|nil 与可见的前 / 后邻居互换
 ---@field on_disable fun(id: string)|nil 停用动作
@@ -53,7 +52,7 @@ end
 ---@field addable (fun(): BookQuickPanelEditAddOption[])|nil 可添加动作列表工厂
 ---@field show_parent table|nil 原生菜单宿主，供滑杆脏区使用
 ---@field dimen table|nil 当前内容绝对尺寸
----@field ges_events table 非编辑态挂长按进编辑；编辑态为空表（不能是 nil，手势会 pairs(nil) 崩）
+---@field ges_events table 必须是表：InputContainer:onGesture 会 pairs(self.ges_events)
 ---@field updateView fun(self: BookQuickPanelBody)
 
 local Body = InputContainer:extend{
@@ -112,10 +111,6 @@ function Body:updateView()
             icon = action.icon,
             active = action.active,
             on_action = self.on_action,
-            on_hold = (not editing and self.on_enter_edit) and function()
-                self.on_enter_edit()
-                return true
-            end or nil,
         }
         if editing then
             button = Edit.wrap(button, {
@@ -131,15 +126,23 @@ function Body:updateView()
     if row then table.insert(group, row) end
 
     if editing then
+        local t = Theme.current()
+        local row = HorizontalGroup:new{ align = "center" }
         local addable = self.addable()
         if #addable > 0 then
-            table.insert(group, VerticalSpan:new{ width = Theme.px(8) })
-            table.insert(group, Button:new{ text = _("添加动作"), width = self.width, callback = function()
+            row[#row + 1] = Button:new{ icon = "add", text = _("添加"), callback = function()
                 Edit.showAddDialog(addable, self.on_add)
-            end })
+            end }
+            row[#row + 1] = HorizontalSpan:new{ width = Theme.px(t.space.sm) }
         end
-        table.insert(group, VerticalSpan:new{ width = Theme.px(8) })
-        table.insert(group, Button:new{ text = _("完成"), width = self.width, callback = self.on_exit_edit })
+        row[#row + 1] = Button:new{
+            icon = "check", text = _("完成"), variant = "primary", callback = self.on_exit_edit,
+        }
+        table.insert(group, VerticalSpan:new{ width = Theme.px(t.space.sm) })
+        table.insert(group, CenterContainer:new{
+            dimen = Geom:new{ w = self.width, h = row:getSize().h },
+            row,
+        })
     elseif #sliders > 0 then
         table.insert(group, VerticalSpan:new{ width = Theme.px(10) })
         for _idx, slider in ipairs(sliders) do
@@ -159,20 +162,6 @@ function Body:updateView()
     self.dimen = Geom:new{ w = self.width, h = group:getSize().h }
     -- 不能设为 nil：InputContainer:onGesture 会直接 pairs(self.ges_events)。
     self.ges_events = {}
-    if not editing and self.on_enter_edit then
-        self.ges_events.HoldPanelEdit = {
-            GestureRange:new{ ges = "hold", range = function() return self.dimen end },
-        }
-    end
-end
-
---- 长按空白区域进入现场编辑（按钮自身的 hold 另走 on_hold）。
----@param self BookQuickPanelBody
----@return boolean 是否已消费
-function Body:onHoldPanelEdit()
-    if self.editing or not self.on_enter_edit then return false end
-    self.on_enter_edit()
-    return true
 end
 
 ---@type BookQuickPanelBody
