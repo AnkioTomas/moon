@@ -21,11 +21,16 @@ end
 stub("ui/widget/container/widgetcontainer", WidgetContainer)
 stub("ui/uimanager", {
     nextTick = function(_, fn) fn() end,
+    scheduleIn = function(_, _delay, fn) fn() end,
     show = function(_, widget)
         calls.version_dialog = widget
     end,
     setDirty = function() end,
     close = function() end,
+})
+stub("utils.wake", {
+    GRACE = 0, boot = function() end, suspend = function() end, resume = function() end, exit = function() end,
+    timed = function(_label, fn, ...) return fn(...) end,
 })
 stub("ui/widget/infomessage", {
     new = function(_, fields) calls.version_dialog = fields return fields end,
