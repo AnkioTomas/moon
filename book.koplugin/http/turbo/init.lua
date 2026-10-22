@@ -116,6 +116,7 @@ function Turbo.acquire()
         }
         UIManager:insertZMQ(pump)
         UIManager:nextTick(kick)
+        logger.info("book turbo preventStandby")
         UIManager:preventStandby()
     end
     return loop
@@ -134,6 +135,7 @@ function Turbo.release()
     UIManager:unschedule(kick)
     UIManager:removeZMQ(pump)
     pump = nil
+    logger.info("book turbo allowStandby")
     UIManager:allowStandby()
 end
 

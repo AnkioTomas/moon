@@ -30,13 +30,14 @@ restartable 的任务归队列所有，队列可以随时中断并从头重跑�
 run 跑在主进程，必须发起异步操作后立刻返回：等网络走 http.request，重计算走 workers.job。
 多阶段任务（下载 → Job 解压）返回的句柄要始终指向当前阶段，否则取消后子进程成孤儿；迟到的 done 按 token 丢弃。
 进度只报 report(text, count, total)，百分比由界面算；省略的 count / total 沿用上次值；download 类所有阶段都报字节。
-有任务在跑 / 排队 / 退避时置 `PluginShare.pause_auto_suspend`，KOReader 不自动休眠；
-只剩 waiting 任务时撤回。未结束任务上限 64（queue_full）；退避 15s、30s…；状态 queued → running → finished，旁路 retry_wait / waiting / cancelled。
+有缓存（cache）任务在跑 / 排队 / 退避时置 `PluginShare.pause_auto_suspend`，KOReader 不自动休眠；
+其它类不拦，只剩 waiting 的缓存任务时撤回。未结束任务上限 64（queue_full）；退避 15s、30s…；状态 queued → running → finished，旁路 retry_wait / waiting / cancelled。
 
 @module koplugin.book.workers.tasks
 --]]
 
 local Guard = require("ui.guard")
+local logger = require("utils.log")
 
 local Tasks = {}
 
@@ -85,14 +86,15 @@ local suspended = false
 --- 是否由我们按下了自动休眠的暂停（与 keepalive 等插件共用 PluginShare，只撤自己按下的）。
 local holding_awake = false
 
---- 有任务在跑 / 排队 / 退避时不让 KOReader 自动休眠；waiting（等网络 / 唤醒）不算，否则永远睡不下去。
+--- 缓存任务在跑 / 排队 / 退避时不让 KOReader 自动休眠；waiting（等网络 / 唤醒）不算，否则永远睡不下去。
 local function syncAwake()
     local busy = false
     for _idx, task in ipairs(list) do
-        if task.state ~= "waiting" then busy = true break end
+        if task.kind == "cache" and task.state ~= "waiting" then busy = true break end
     end
     if busy == holding_awake then return end
     holding_awake = busy
+    logger.info("book tasks pause_auto_suspend", busy)
     require("pluginshare").pause_auto_suspend = busy
 end
 
@@ -308,6 +310,7 @@ end
 --- 休眠前：中断在跑的 restartable 任务放回 waiting，唤醒前不再启动它们。
 --- 退避中的任务不动：定时器唤醒后才会到点。
 function Tasks.onSuspend()
+    logger.info("book tasks suspend, pause_auto_suspend", holding_awake, "unfinished", #list)
     suspended = true
     for _idx, task in ipairs(list) do
         if task.restartable and task.state == "running" then

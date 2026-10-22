@@ -71,7 +71,7 @@ do
         for _idx, item in ipairs(fns) do item.fn() end
     end
     local share = require("pluginshare")
-    local busy = Tasks.enqueue(spec("awake", "download", { restartable = true }))
+    local busy = Tasks.enqueue(spec("awake", "cache", { restartable = true }))
     settle()
     Assert.is_true(share.pause_auto_suspend)
     Tasks.onSuspend()
@@ -83,6 +83,11 @@ do
     busy.runs[#busy.runs].done({ ok = true })
     settle()
     Assert.is_false(share.pause_auto_suspend)
+    local dl = Tasks.enqueue(spec("awake-dl", "download", { restartable = true }))
+    settle()
+    Assert.is_false(share.pause_auto_suspend, "非缓存任务不拦休眠")
+    dl.runs[#dl.runs].done({ ok = true })
+    settle()
 end
 
 -- 同类并行；异类等执行权；队首是异类时后面的同类不插队。
