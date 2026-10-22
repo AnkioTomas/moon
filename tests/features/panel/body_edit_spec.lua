@@ -43,6 +43,7 @@ package.preload["ui/widget/horizontalgroup"] = function()
 end
 package.preload["ui/widget/horizontalspan"] = widget
 package.preload["ui/widget/container/inputcontainer"] = widget
+package.preload["ui/widget/container/centercontainer"] = widget
 package.preload["ui/widget/verticalgroup"] = function()
     local W = widget()
     local original_new = W.new

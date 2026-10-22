@@ -101,7 +101,7 @@ function BookPlugin:onSuspend()
     Wake.suspend()
     Wake.timed("tasks.onSuspend", Guard.call, "tasks.onSuspend", Tasks.onSuspend)
     Wake.timed("session.onSuspend", Guard.call, "session.onSuspend", Session.onSuspend, self)
-    Wake.timed("features.onSuspend", Features.emit, "onSuspend", self)
+    Wake.timed("hooks.onSuspend", Features.emit, "onSuspend", self)
     logger.info("book lifecycle suspend done")
     logger.flush()
 end
@@ -114,7 +114,7 @@ function BookPlugin:onResume()
     Wake.timed("session.onResume", Guard.call, "session.onResume", Session.onResume, self)
     -- 推脏行要查网络、走远程请求，放到锁屏关闭之后，不阻塞唤醒。
     require("ui/uimanager"):scheduleIn(Wake.GRACE, function() Guard.call("sources.pushDirty", pushDirty) end)
-    Wake.timed("features.onResume", Features.emit, "onResume", self)
+    Wake.timed("hooks.onResume", Features.emit, "onResume", self)
 end
 
 --- 网络恢复：续跑等网络的后台任务、源推脏、feature 自己刷新。
