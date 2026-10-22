@@ -122,10 +122,6 @@ local function buildPanel(menu, W)
                 W.Desktop.executeAction(id, callbacks)
             end
         end,
-        on_enter_edit = function()
-            tab._book_panel_editing = true
-            Menu.refresh(menu)
-        end,
         on_exit_edit = function()
             tab._book_panel_editing = false
             Menu.refresh(menu)
@@ -208,6 +204,52 @@ local function updateTimeInfo(menu)
     menu.time_info:setText(text)
 end
 
+--- 页脚日期左边的笔：进入现场编辑。只挂在面板 Tab，离开时拆掉，不污染其它 Tab。
+---@param menu table
+---@param show boolean
+local function syncEditPen(menu, show)
+    local info = menu.device_info
+    if not info then return end
+    local pen = menu._book_edit_pen
+    local idx
+    if pen then
+        for i, child in ipairs(info) do
+            if child == pen then
+                idx = i
+                break
+            end
+        end
+    end
+    if not show then
+        if not idx then return end
+        table.remove(info, idx)
+        info._size = nil
+        return
+    end
+    if not pen then
+        local Theme = require("ui.themes")
+        local t = Theme.current()
+        local size = Theme.px(t.control.height)
+        pen = require("ui.themes.widgets.button"):new{
+            icon = "edit",
+            variant = "ghost",
+            size = "small",
+            width = size,
+            height = size,
+            callback = function()
+                local tab = menu.item_table
+                if not panelMode(tab) or tab._book_panel_editing then return end
+                tab._book_panel_editing = true
+                Menu.refresh(menu)
+            end,
+        }
+        menu._book_edit_pen = pen
+    end
+    if idx then return end
+    table.insert(info, 1, pen)
+    info._size = nil
+end
+
 --- 替换 TouchMenu 的 item 列表为月读面板自绘内容。
 ---@param menu table
 local function renderPanelContent(menu)
@@ -224,6 +266,7 @@ local function renderPanelContent(menu)
     table.insert(menu.item_group, menu.footer_top_margin)
     table.insert(menu.item_group, menu.footer)
     updateTimeInfo(menu)
+    syncEditPen(menu, true)
     menu.page_info_text:setText("")
     menu.page_info_left_chev:showHide(false)
     menu.page_info_right_chev:showHide(false)
@@ -272,6 +315,7 @@ local function patchTouchMenu()
         if panelMode(self.item_table) and Device:isTouchDevice() then
             Guard.call("quick panel render", renderPanelContent, self)
         else
+            syncEditPen(self, false)
             original(self, ...)
         end
         -- 网点按菜单下沿起算，叠画在下层旧像素上。菜单变高时原生只重画菜单自身，

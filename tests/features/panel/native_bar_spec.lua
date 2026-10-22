@@ -64,7 +64,20 @@ package.preload["ui.themes"] = function()
     return {
         px = function(n) return n end,
         current = function()
-            return { space = { sm = 8, lg = 16 }, color = { page = 255 } }
+            return {
+                space = { xs = 4, sm = 8, lg = 16 },
+                color = { page = 255 },
+                control = { icon = 22, height = 40 },
+            }
+        end,
+    }
+end
+local pens = {}
+package.preload["ui.themes.widgets.button"] = function()
+    return {
+        new = function(_, opts)
+            pens[#pens + 1] = opts
+            return opts
         end,
     }
 end
@@ -113,6 +126,7 @@ local TouchMenu = {
     footer_top_margin = {},
     footer = {},
     time_info = { setText = function(_, text) time_text = text end },
+    device_info = { { kind = "time" } },
     page_info_text = { setText = function() end },
     page_info_left_chev = { showHide = function() end },
     page_info_right_chev = { showHide = function() end },
@@ -187,6 +201,11 @@ Assert.eq(TouchMenu.switchMenuTab, native_switch, "回调结束必须还原 swit
 
 -- 面板分支不走原生 updateItems：页脚时间要自己写（首次直接落在面板 Tab 时曾一直为空）
 Assert.eq(time_text, "12:34")
+Assert.eq(TouchMenu.device_info[1].icon, "edit", "笔在日期左边")
+Assert.eq(TouchMenu.device_info[2].kind, "time")
+TouchMenu.device_info[1].callback()
+Assert.is_true(TouchMenu.item_table._book_panel_editing == true)
+TouchMenu.item_table._book_panel_editing = nil
 
 -- 换 tab：跟着 cur_tab 走，不是永远调第一个
 TouchMenu.cur_tab = 2
@@ -226,6 +245,9 @@ Assert.len(mesh_calls, 1)
 
 -- 遮罩开着、菜单高度变了（切 tab）：整屏重画 + 全刷，否则新旧网点错位叠黑
 TouchMenu.item_table = {}
+native_items_h = 400
+TouchMenu:updateItems()
+Assert.eq(TouchMenu.device_info[1].kind, "time", "离开面板 Tab 拆掉笔")
 native_items_h = 400
 full_repaints = 0
 TouchMenu.dimen.h = 300

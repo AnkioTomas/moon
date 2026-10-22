@@ -31,7 +31,6 @@ local BADGE_SIZE = { bare = 44, circle = 52 }
 ---@field icon string
 ---@field active boolean|nil
 ---@field on_action fun(id: string)
----@field on_hold fun(): boolean|nil
 
 local ActionButton = InputContainer:extend{}
 
@@ -112,7 +111,6 @@ function ActionButton:init()
     self.dimen = Geom:new{ w = self.width, h = self.height }
     self.ges_events = {
         Tap = { GestureRange:new{ ges = "tap", range = self.dimen } },
-        Hold = { GestureRange:new{ ges = "hold", range = self.dimen } },
     }
     local active = self.active == true
     local t = Theme.current()
@@ -131,14 +129,6 @@ end
 function ActionButton:onTap()
     self.on_action(self.id)
     return true
-end
-
---- 长按交给上层（用于进入现场编辑）。
----@param self BookQuickPanelActionButton
----@return boolean|nil 是否已消费
-function ActionButton:onHold()
-    if self.on_hold then return self.on_hold() end
-    return false
 end
 
 ---@type BookQuickPanelActionButton

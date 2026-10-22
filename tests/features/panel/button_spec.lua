@@ -118,11 +118,8 @@ Assert.eq(tile.height, 73)
 Assert.eq(tile[1].text, "夜间", "文字在块内")
 Assert.eq(tile[1].color, 255)
 
--- 点按执行、长按交给上层进入编辑。
+-- 点按执行。长按不进编辑，按钮不再接 hold。
 local tapped
 Assert.is_true(button{ on_action = function(id) tapped = id end }:onTap())
 Assert.eq(tapped, "night")
-local held = false
-Assert.is_true(button{ on_hold = function() held = true; return true end }:onHold())
-Assert.is_true(held)
-Assert.is_false(button():onHold())
+Assert.is_nil(button().ges_events.Hold)
