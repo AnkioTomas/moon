@@ -2,7 +2,7 @@
 桌面「订阅」页：订阅列表（按分组）→ 点开一个源看条目（新到旧，每页最多 20）→ 点条目打开文章。
 
   +-----------------------------------------------+
-  | [⟳]            订阅                     [⇅][+] |   ⟳ 刷新全部，⇅ 排序（分组 / 最近阅读 / 未读最多 / 最近更新 / 名称），+ 添加（RSS / 网站 / 公众号）
+  | [⟳]            订阅                     [⇅][+] |   ⟳ 刷新全部，⇅ 排序（分组 / 最近阅读 / 未读最多 / 最近更新 / 名称），+ 添加（RSS / 网站 / 公众号 / 推荐）
   | 科技                                          |
   | [rss] 少数派                         12  >    |   右侧是未读数
   | 未分组                                        |
@@ -212,12 +212,37 @@ function Page:addMp()
     end)
 end
 
+local RECOMMENDED = {
+    { title = "摸鱼日报", url = "https://api.ankio.net/myrl/rss" },
+    { title = "今日要闻", url = "https://api.ankio.net/paper/rss" },
+}
+
+--- 推荐源：标题已知，直接入库；已订阅的置灰。
+function Page:addRecommended()
+    local have = {}
+    for _idx, feed in ipairs(SubDB.feeds()) do
+        if feed.kind == "rss" then have[feed.url] = true end
+    end
+    local items = {}
+    for _idx, rec in ipairs(RECOMMENDED) do
+        items[#items + 1] = {
+            text = rec.title,
+            enabled = not have[rec.url],
+            callback = function()
+                self:insert({ kind = "rss", url = rec.url, title = rec.title })
+            end,
+        }
+    end
+    require("ui.themes.widgets.sheet"):new{ title = _("推荐"), items = items }:show()
+end
+
 function Page:showAdd()
     require("ui.themes.widgets.sheet"):new{ title = _("添加订阅"), items = {
         { text = _("RSS / Atom"), callback = function() self:addUrl("rss") end },
         { text = _("网站文章链接"), callback = function() self:addUrl("site") end },
         { text = _("网页本身"), callback = function() self:addUrl("page") end },
         { text = _("微信读书公众号"), callback = function() self:addMp() end },
+        { text = _("推荐"), callback = function() self:addRecommended() end },
     } }:show()
 end
 

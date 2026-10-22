@@ -299,7 +299,15 @@ function POST.article(q, cb)
     if feed.kind ~= "mp" then feed.public = true end
     S().content(feed, item, function(html, err)
         if not html then return cb(502, { error = tostring(err or _("正文获取失败")) }) end
-        cb(200, { title = item.title, link = item.link, html = Remote.clean(html) })
+        local out = Remote.clean(html)
+        -- 图已落到设备本地，clean 会把本地路径去掉：整篇没图可看时，改用订阅自带的远端图（没有就当链接本身是图）。
+        if not out:find("<img", 1, true) and html:find("<img", 1, true) then
+            local raw = SubDB.summary(feed.id, item.guid) or ""
+            local imgs = Remote.clean(raw):gmatch("<img[^>]*>")
+            local first = imgs()
+            out = out .. (first or Remote.clean('<img src="' .. tostring(item.link) .. '">'))
+        end
+        cb(200, { title = item.title, link = item.link, html = out })
     end)
 end
 

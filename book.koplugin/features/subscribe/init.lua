@@ -129,6 +129,9 @@ local function get(url, cb, opts)
                 return
             end
             if err then return cb(nil, err) end
+            local ctype = Request.header(res, "Content-Type") or ""
+            if ctype:find("^%s*image/") then return cb(nil, _("链接指向的不是网页"), "image") end
+            if ctype:find("^%s*audio/") or ctype:find("^%s*video/") then return cb(nil, _("链接指向的不是网页")) end
             local body = table.concat(chunks)
             chunks = nil
             local text, charset = require("utils.charset").toUtf8(body, Request.header(res, "Content-Type"))
@@ -228,7 +231,13 @@ local function fetchArticle(link, images_dir, cb, fallback, public)
         if not html then return cb(nil, err or _("正文解析失败")) end
         job = finishPage(html, link, images_dir, function(out) cb(out, nil, meta) end)
     end
-    job = get(link, function(body, err)
+    job = get(link, function(body, err, kind)
+        -- 链接本身就是一张图（如摸鱼日报）：不抽正文，直接把图当文章；不下图时退回摘要。
+        if kind == "image" and images_dir then
+            job = finishPage('<p><img src="' .. Text.xmlEscape(link) .. '"/></p>', link, images_dir,
+                function(out) if not cancelled then cb(out) end end)
+            return
+        end
         if not body then return finish(nil, nil, err) end
         job = Subscribe.extract(Parse.cfEmail(body), link, function(html, meta) finish(html, meta) end)
     end, { public = public })
@@ -254,7 +263,7 @@ Subscribe.providers = {
         end,
         content = function(feed, item, images_dir, cb)
             -- 自带全文直接用；只有摘要（或很短）就抓原文跑 Readability，抓不到再用摘要。
-            local summary = SubDB.summary(feed.id, item.guid)
+            local summary = item.summary or SubDB.summary(feed.id, item.guid)
             if summary and (isFullText(summary) or item.link == "") then
                 return finishPage(summary, item.link ~= "" and item.link or feed.url, images_dir, cb)
             end
