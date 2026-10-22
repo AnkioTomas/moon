@@ -99,6 +99,7 @@ function BookPlugin:onSuspend()
     Guard.call("tasks.onSuspend", Tasks.onSuspend)
     Guard.call("session.onSuspend", Session.onSuspend, self)
     Features.emit("onSuspend", self)
+    logger.info("book lifecycle suspend done")
     logger.flush()
 end
 
