@@ -582,6 +582,7 @@ function Bilingual.show(ui)
     require("ui.themes.widgets.sheet"):new{ title = _("双语对照"), items = items }:show()
 end
 
+Bilingual.switchTo = switchTo
 Bilingual.ENGINES = ENGINES
 Bilingual._appendCache = appendCache
 Bilingual._batches = batches
