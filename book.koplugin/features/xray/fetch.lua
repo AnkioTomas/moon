@@ -108,8 +108,9 @@ local function cleanEntity(kind, item)
     local name = Text.trim(item.name)
     if name == "" then return nil end
     local aliases = {}
-    if kind ~= "location" then
-        for index, alias in ipairs(item.aliases) do
+    -- 模型可能漏掉 aliases 或给成字符串
+    if kind ~= "location" and type(item.aliases) == "table" then
+        for _idx, alias in ipairs(item.aliases) do
             alias = Text.trim(alias)
             if alias ~= "" then aliases[#aliases + 1] = alias end
         end
