@@ -68,18 +68,18 @@ local function longestMatch(chars, map, max)
     return table.concat(out)
 end
 
---- 候选词表转成目标字形；保序，转换后重复的词只留第一个（如 乾 / 干 转简体后都是 干）。
----@param words string[]
+--- 文本列表逐条转成目标字形（按位对齐，不去重）。
+---@param texts string[]
 ---@param target "simplified"|"traditional"
 ---@return string[]
-function Script.convertWords(words, target)
+function Script.convertTexts(texts, target)
     local tbl = TABLES[target]
     open()
     local max = max_len[tbl]
     local split, keys, seen = {}, {}, {}
-    for w, word in ipairs(words) do
+    for w, text in ipairs(texts) do
         local chars = {}
-        for ch in word:gmatch(UTF8_CHAR) do chars[#chars + 1] = ch end
+        for ch in text:gmatch(UTF8_CHAR) do chars[#chars + 1] = ch end
         split[w] = chars
         for i = 1, #chars do
             for j = i, math.min(#chars, i + max - 1) do
@@ -92,9 +92,18 @@ function Script.convertWords(words, target)
         end
     end
     local map = fetch(tbl, keys)
+    local out = {}
+    for w = 1, #texts do out[w] = longestMatch(split[w], map, max) end
+    return out
+end
+
+--- 候选词表转成目标字形；保序，转换后重复的词只留第一个（如 乾 / 干 转简体后都是 干）。
+---@param words string[]
+---@param target "simplified"|"traditional"
+---@return string[]
+function Script.convertWords(words, target)
     local out, dup = {}, {}
-    for w = 1, #words do
-        local converted = longestMatch(split[w], map, max)
+    for _idx, converted in ipairs(Script.convertTexts(words, target)) do
         if not dup[converted] then
             dup[converted] = true
             out[#out + 1] = converted
