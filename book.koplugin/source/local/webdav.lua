@@ -264,7 +264,11 @@ local function pullBooksSync(self, run, done)
         -- 书目与远端列表都为空而本地书架非空：首次同步，或目录填错 / 服务端异常。本轮不下架任何书，
         -- 但照常上传本地书、写书目（meta_failed 只表示书目读不出、不能回写）。
         -- 只看远端：run.files 还含本地脏行，靠它判断会让一条未推的编辑把整个书架下架。
-        local live = BookDB.libraryStableIdsBySource(SOURCE_ID)
+        local live = {}
+        -- 本地入库的绝对路径身份不是云端的书，不算“本地书架非空”
+        for _idx, stable_id in ipairs(BookDB.libraryStableIdsBySource(SOURCE_ID)) do
+            if remoteRelativePath(stable_id) then live[#live + 1] = stable_id end
+        end
         if next(run.entries) == nil and next(run.remote or {}) == nil and #live > 0 then
             require("utils.log").warn("book webdav remote library empty; skip reconcile")
             run.reconcile_skipped = true
@@ -438,6 +442,14 @@ local function enrichCached(self, run, done)
     })
 end
 
+---@param path string
+---@return boolean
+local function isOpenInReader(path)
+    local ok, ReaderUI = pcall(require, "apps/reader/readerui")
+    local ui = ok and ReaderUI.instance
+    return ui and ui.document and ui.document.file == path or false
+end
+
 --- 本地目录里的文件收编为 webdav 身份：之前按绝对路径登记过（扫盘/从文件管理器打开）就整体并过来，
 --- 进度、笔记、统计跟着走；否则只登记物理路径。
 ---@param item table scanFiles 条目
@@ -454,7 +466,58 @@ local function adoptLocal(item, stable_id)
     return BookDB.adoptStableId(SOURCE_ID, item.path, stable_id, item.path)
 end
 
---- 同步步骤：合并本地书库目录。远端已有的收编身份；远端没有的上传到同一相对路径，上传成功才进书架与书目。
+--- 同步步骤：合并本地书库目录。远端已有的收编身份；远端没有的先在本地入库（按绝对路径登记，用户立刻能读），
+--- 并标记 run.upload_pending，整轮同步结束后由后台上传（见 backgroundUpload），传成功再并成 WebDAV 书。
+--- 入库是纯本地操作：远端书目读不出 / 远端为空被跳过时照常做，只是不收编、不上传（远端信息不可信）。
+--- 本地已有行（含用户在 KOReader 删过的）不再重复解析。
+---@param self LocalClient
+---@param run WebdavRun
+---@param done fun(err: string|nil)
+local function indexLocal(self, run, done)
+    local remote = run.remote or run.entries
+    local trusted = not (run.meta_failed or (run.reconcile_skipped and not run.remote))
+    local BookDB = require("book.books_db")
+    local rels = {}
+    for rel in pairs(run.local_files) do rels[#rels + 1] = rel end
+    table.sort(rels)
+    local ids, paths = {}, {}
+    for i, rel in ipairs(rels) do
+        ids[i] = remoteStableId(rel)
+        paths[i] = run.local_files[rel].path
+    end
+    local rows, local_rows = BookDB.getMany(SOURCE_ID, ids), BookDB.getMany(SOURCE_ID, paths)
+    local pending = {}
+    for i, rel in ipairs(rels) do
+        local item, row = run.local_files[rel], rows[ids[i]]
+        if remote[rel] then
+            if trusted and (not row or row.path ~= item.path) then adoptLocal(item, ids[i]) end
+        elseif not row and not local_rows[paths[i]] then
+            pending[#pending + 1] = item
+        end
+        if trusted and not remote[rel] and not (row and row.deleted == 1 and row.sync_status == 0)
+            and os.time() - (self.upload_failed[rel] or 0) > UPLOAD_COOLDOWN then
+            run.upload_pending = true
+        end
+    end
+    local first_err
+    eachAsync(pending, function(item, next_item, i)
+        run.report(T(_("正在入库 %1"), item.name), i, #pending)
+        run.active = self:indexOneAsync(item.path, function(ok, err)
+            if run.cancelled then return end
+            if not ok then
+                first_err = first_err or err
+                require("utils.log").warn("book webdav local index failed", item.path, err)
+            end
+            next_item()
+        end)
+    end, function(err)
+        if first_err then run.push_error = T(_("本地书入库失败：%1"), tostring(first_err)) end
+        done(err)
+    end)
+end
+
+--- 后台上传步骤：本地书库里远端没有的书上传到同一相对路径；成功后绝对路径身份并成 WebDAV 身份，进书目。
+--- 书在入库（indexLocal）时已可阅读，这里只负责上云，不阻塞用户。
 --- 刷新时「远端已有」以列出的远端文件为准（书目有条目、文件却丢了也补传）；日常同步不列目录，以书目为准。
 --- 用户在 KOReader 删过、删除还没推上去的（脏墓碑）不传。
 --- 日常同步遇到远端书库为空而本地书架非空（reconcile 被跳过）不传：此时写出的书目只含本地书，
@@ -513,7 +576,8 @@ local function uploadLocal(self, run, done)
                         fail(rel, err, code == nil)
                         return next_item()
                     end
-                    adoptLocal(item, stable_id)
+                    -- 正在阅读的书先不换身份（关书时进度会写回旧身份）；下一轮同步 indexLocal 再收编。
+                    if not isOpenInReader(item.path) then adoptLocal(item, stable_id) end
                     local row = BookDB.get(SOURCE_ID, stable_id)
                     BookDB.upsertRemote({
                         source_id = SOURCE_ID, stable_id = stable_id,
@@ -717,11 +781,11 @@ local function pushDeletes(self, run, done)
     end, done)
 end
 
---- 日常同步以 books.sync 为准，并扫本地书库目录、上传本地新书（扫在拉书目之后：别的设备删掉的书先删了本地那份，
+--- 日常同步以 books.sync 为准，并扫本地书库目录、本地新书先入库、整轮结束后台再上传（扫在拉书目之后：别的设备删掉的书先删了本地那份，
 --- 不会被当成新书传回去）；推脏只推删除与书目改动（改书目要先读远端）；刷新再列远端目录合并。
 local SYNC_STEPS = {
     pushDeletes, pullBooksSync, scanLocal, pullProgress, pullCovers,
-    uploadLocal, enrichCached, uploadCovers, pushBooksSync,
+    indexLocal, enrichCached, uploadCovers, pushBooksSync,
 }
 local DIRTY_STEPS = { pushDeletes, pullBooksSync, pushBooksSync }
 
@@ -737,8 +801,11 @@ end
 
 local REFRESH_STEPS = {
     pushDeletes, listBooks, scanLocal, pullBooksSync, pullProgress, pullCovers,
-    uploadLocal, enrichCached, uploadCovers, pushBooksSync, reconcileSkipped,
+    indexLocal, enrichCached, uploadCovers, pushBooksSync, reconcileSkipped,
 }
+
+--- 后台上传：重读书目再上传，不复用前台那一轮的快照（排队期间 books.sync 可能已被别的写入改过）。
+local UPLOAD_STEPS = { scanLocal, pullBooksSync, uploadLocal, uploadCovers, pushBooksSync, reconcileSkipped }
 
 --- books.sync 是整份读改写：两轮交错时后写的那份会盖掉先写的改动（删掉的书复活、新传的书丢条目）。
 --- 锁跟着远端书目文件走、不跟源实例走：换源 / 重载配置后旧实例的同步可能还在飞。
@@ -776,6 +843,43 @@ local function serial(self, start)
     end }
 end
 
+--- 前台同步结束后把本地新书传上云：与前台同经 serial 排队，同一时间只跑一个；用户不用等。
+--- 失败的书进冷却期，传输层失败本轮停手，下一次同步再试。
+---@param self LocalClient
+---@param remote table|nil 前台刷新列出的远端文件，传上来避免把远端已有的书重传
+---@param report fun(text: string|nil, done: integer|nil, total: integer|nil) 进度
+---@param done fun(err: string|nil) 整轮结束（含失败）
+---@return { cancel: fun() }|nil
+local function backgroundUpload(self, remote, report, done)
+    if self._uploading then done(); return end
+    self._uploading = true
+    return serial(self, function(release)
+        local run = { files = {}, entries = {}, covers = {}, cancelled = false, remote = remote, report = report }
+        local index = 0
+        local function finish(err)
+            self._uploading = false
+            release()
+            err = err or run.push_error
+            if err then require("utils.log").warn("book webdav background upload", err) end
+            done(err)
+        end
+        local function nextStep(step_err)
+            if run.cancelled then return end
+            if step_err then return finish(step_err) end
+            index = index + 1
+            local step = UPLOAD_STEPS[index]
+            if not step then return finish() end
+            step(self, run, nextStep)
+        end
+        nextStep()
+        return { cancel = function()
+            run.cancelled = true
+            self._uploading = false
+            if run.active and run.active.cancel then run.active:cancel() end
+        end }
+    end)
+end
+
 --- WebDAV 书库同步，布局与静读天下 / book 服务端共用：
 ---   <根>/[分类/]书文件                正文
 ---   <根>/.Moon+/books.sync            书目（zlib 压缩 JSON）；书架成员只以它为准
@@ -785,7 +889,7 @@ end
 --- 正文不下载，openWebdavAsync 按需拉到本地书库目录。
 --- 与单本上行同经 serial 排队：桌面同步、推脏、编辑上行不会交错读改写 books.sync。
 ---@param cb fun(ok: boolean, err: string|nil, push_error: string|nil) push_error=整轮跑完但有本地改动没推上去
----@param opts { refresh?: boolean, dirty_only?: boolean, on_progress?: fun(text: string, done: integer|nil, total: integer|nil) }|nil refresh=用户点刷新：另列远端文件合并；dirty_only=只推本地改动
+---@param opts { refresh?: boolean, dirty_only?: boolean, on_progress?: fun(text: string, done: integer|nil, total: integer|nil), on_background?: fun(start: fun(report: function, done: fun(err: string|nil)): { cancel: fun() }|nil) }|nil on_background=有本地新书要上传时把后台上传交给调用方排队并展示进度；refresh=用户点刷新：另列远端文件合并；dirty_only=只推本地改动
 ---@return { cancel: fun() }|nil
 ---@param self LocalClient
 function Webdav.scanWebdavAsync(self, cb, opts)
@@ -806,7 +910,19 @@ function Webdav.scanWebdavAsync(self, cb, opts)
             if step_err then release(); return cb(false, step_err) end
             index = index + 1
             local step = steps[index]
-            if not step then release(); return cb(true, nil, run.push_error) end
+            if not step then
+                release()
+                cb(true, nil, run.push_error)
+                if run.upload_pending and not run.cancelled then
+                    local function start(report, done) return backgroundUpload(self, run.remote, report, done) end
+                    if opts.on_background then
+                        opts.on_background(start)
+                    else
+                        start(function() end, function() end)
+                    end
+                end
+                return
+            end
             step(self, run, nextStep)
         end
         nextStep()

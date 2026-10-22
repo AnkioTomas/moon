@@ -38,6 +38,11 @@ function BookDB.getMany(_, ids)
     for _, id in ipairs(ids) do if books[id] then out[id] = copy(books[id]) end end
     return out
 end
+function BookDB.stableIdsBySource()
+    local out = {}
+    for id in pairs(books) do out[#out + 1] = id end
+    return out
+end
 function BookDB.upsertRemote(row)
     local cur = books[row.stable_id]
     if not cur then
@@ -166,6 +171,15 @@ for _, name in ipairs({ "book.books_db", "book.progress_db", "book.note_db", "js
 end
 local Client = require("source.local.client")
 local Paths = require("utils.paths")
+
+-- 本地入库（子进程解析）换成假实现：登记绝对路径身份、留脏行，记下被入库的路径。
+local indexed, index_title = {}, nil
+function Client.indexOneAsync(_, path, cb)
+    indexed[#indexed + 1] = path
+    books[path] = { stable_id = path, title = index_title or path:match("([^/]+)%.[^.]+$"), deleted = 0, sync_status = 0 }
+    require("ui/uimanager"):nextTick(function() cb(true) end)
+    return { cancel = function() end }
+end
 
 local function readFile(path)
     local f = io.open(path, "rb")
@@ -672,7 +686,7 @@ do
     books = {}
 end
 
--- 首次同步：远端空（无 books.sync），本地书架已有扫盘登记的书。不下架，但刷新要把本地书传上去并写书目。
+-- 远端空（无 books.sync）而本地书架已有云端身份的书：状态不明，不下架；日常同步不上传、不写书目，刷新才传上去。
 do
     local L = require("support.config").dir() .. "/webdav-first"
     Paths.ensureDir(L)
@@ -680,6 +694,7 @@ do
     f:write("first")
     f:close()
     books[L .. "/首.epub"] = { stable_id = L .. "/首.epub", title = "首", deleted = 0, sync_status = 1 }
+    books["webdav://旧云书.epub"] = { stable_id = "webdav://旧云书.epub", title = "旧云书", deleted = 0, sync_status = 1 }
     local dav = fakeDav()
     local c = Client.new({ webdav_url = "https://dav.example", path = L })
     c.dav = dav
@@ -696,8 +711,6 @@ do
     Assert.eq(dav.files[ROOT .. "/首.epub"].data, "first")
     Assert.eq(remoteEntries(dav)["首.epub"].bookName, "首")
     Assert.contains(steps, "正在检查远端目录…||")
-    Assert.contains(steps, "正在上传 首.epub|1|1", "上传逐本计数")
-    Assert.contains(steps, "正在更新书目（1 本）||")
     Assert.eq(books["webdav://首.epub"].deleted, 0)
     Assert.eq(books["webdav://首.epub"].path, L .. "/首.epub")
     os.remove(L .. "/首.epub")
@@ -759,7 +772,7 @@ do
     books = {}
 end
 
--- 服务端被清空后刷新：同一轮里本地书上传、解析出书名，远端和本地都没有的旧书按新书目下架。
+-- 服务端被清空后刷新：本地书先入库解析出书名、再后台上传，远端和本地都没有的旧书按新书目下架。
 do
     local L = require("support.config").dir() .. "/webdav-reset"
     Paths.ensureDir(L)
@@ -767,16 +780,7 @@ do
     f:write("new")
     f:close()
     books["webdav://幽灵.epub"] = { stable_id = "webdav://幽灵.epub", title = "幽灵", deleted = 0, sync_status = 1 }
-    package.preload["document/documentregistry"] = function()
-        return {
-            hasProvider = function() return true end,
-            openDocument = function()
-                return { getProps = function() return { title = "真书名", authors = "某人" } end,
-                    getCoverPageImage = function() return nil end, close = function() end }
-            end,
-        }
-    end
-    package.loaded["document/documentregistry"] = nil
+    index_title = "真书名"
     local dav = fakeDav()
     local c = Client.new({ webdav_url = "https://dav.example", path = L })
     c.dav = dav
@@ -785,8 +789,7 @@ do
     Assert.eq(remoteEntries(dav)["新.epub"].bookName, "真书名")
     Assert.eq(books["webdav://幽灵.epub"].deleted, 1, "不在新书目里的旧书下架")
     Assert.eq(books["webdav://新.epub"].deleted, 0)
-    package.preload["document/documentregistry"] = nil
-    package.loaded["document/documentregistry"] = nil
+    index_title = nil
     os.remove(L .. "/新.epub")
     books = {}
 end
@@ -1401,6 +1404,58 @@ do
     dav.putFileAsync = put
     os.remove(L .. "/a.epub")
     os.remove(L .. "/b.epub")
+    books = {}
+end
+
+-- 扫描不被上传阻塞：同步回调时本地新书已入库可读、尚未上传；后台随后才上传并并成 WebDAV 书。
+do
+    local L = require("support.config").dir() .. "/webdav-scenario-bg"
+    Paths.ensureDir(L)
+    local f = assert(io.open(L .. "/后台.epub", "wb"))
+    f:write("bg")
+    f:close()
+    local dav = fakeDav()
+    putSync(dav, { { filename = "已有.epub", bookName = "已有" } })
+    local c = deviceClient(dav, "A", L)
+    local at_done
+    c:scanWebdavAsync(function(ok)
+        Assert.is_true(ok)
+        at_done = { shelved = books[L .. "/后台.epub"] and books[L .. "/后台.epub"].deleted, uploaded = dav.files[ROOT .. "/后台.epub"] ~= nil }
+    end)
+    Stubs.flush()
+    Assert.eq(at_done.shelved, 0, "回调时已可读")
+    Assert.is_false(at_done.uploaded, "回调时还没上传")
+    Assert.eq(dav.files[ROOT .. "/后台.epub"].data, "bg", "随后后台上传")
+    Assert.not_nil(remoteEntries(dav)["后台.epub"])
+    Assert.eq(books["webdav://后台.epub"].path, L .. "/后台.epub")
+    Assert.is_nil(books[L .. "/后台.epub"], "上传后并成 WebDAV 身份")
+    os.remove(L .. "/后台.epub")
+    books = {}
+end
+
+-- 后台上传交给调用方（任务队列）：调用方没启动就不传；启动后逐本上报进度，结束回调。
+do
+    local L = require("support.config").dir() .. "/webdav-scenario-bg-progress"
+    Paths.ensureDir(L)
+    local f = assert(io.open(L .. "/进度.epub", "wb"))
+    f:write("p")
+    f:close()
+    local dav = fakeDav()
+    putSync(dav, { { filename = "已有.epub", bookName = "已有" } })
+    local c = deviceClient(dav, "A", L)
+    local start
+    c:scanWebdavAsync(function() end, { on_background = function(fn) start = fn end })
+    Stubs.flush()
+    Assert.not_nil(start, "有待传的书才交出后台上传")
+    Assert.is_nil(dav.files[ROOT .. "/进度.epub"], "调用方没启动就不上传")
+    local texts, finished = {}, false
+    start(function(text, done, total) texts[#texts + 1] = table.concat({ text, done or "", total or "" }, "|") end,
+        function(err) finished = err == nil end)
+    Stubs.flush()
+    Assert.is_true(finished)
+    Assert.contains(texts, "正在上传 进度.epub|1|1")
+    Assert.eq(dav.files[ROOT .. "/进度.epub"].data, "p")
+    os.remove(L .. "/进度.epub")
     books = {}
 end
 

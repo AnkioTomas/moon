@@ -147,6 +147,22 @@ local function syncBooks(desktop, source, force, follow)
                 if desktop._books_sync[source.id] ~= flight then return end
                 progress(text, done, total)
             end,
+            on_background = function(start)
+                -- 本地新书已入库可读；上传进任务队列，顶栏可见进度，传完刷新书架（身份并成云端书）。
+                local upload = Tasks.enqueue{
+                    key = "books-upload\0" .. tostring(source.id), kind = "sync",
+                    title = source.name .. " · " .. _("上传"),
+                    run = function(report, finish)
+                        return start(report, function(up_err)
+                            finish({ ok = up_err == nil, err = up_err })
+                            if desktop.closed then return end
+                            desktop:onEvent("shelf_changed")
+                            if desktop.tab == "library" then desktop:updateView() end
+                        end)
+                    end,
+                }
+                if not upload then start(function() end, function() end) end
+            end,
         }, function(result, err)
             finish({ ok = result ~= nil, err = err })
             onBooksSynced(desktop, source, flight, force, result, err)
