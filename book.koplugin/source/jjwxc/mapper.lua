@@ -138,10 +138,15 @@ end
 --- 章节网页 HTML → 正文纯文本；不是正文页（未购买的提示页等）返回 nil。
 ---@param html string
 ---@return string|nil
+---@return string|nil 加密页解不开时的失败阶段
 function Mapper.webContent(html)
-    local body = html:find('id="contentvars"', 1, true) and Vip.content(html)
-        or not html:find('id="contentvars"', 1, true) and html:match('<ul class="content_ul">%s*<li[^>]*>(.-)</li>')
-    if not body then return nil end
+    local body, why
+    if html:find('id="contentvars"', 1, true) then
+        body, why = Vip.content(html)
+    else
+        body = html:match('<ul class="content_ul">%s*<li[^>]*>(.-)</li>')
+    end
+    if not body then return nil, why end
     body = body:gsub("<script.-</script>", ""):gsub("&zwnj;", ""):gsub("&#([xX]%x+);?", "&#%1;")
     local text = Text.xmlDecode((body:gsub("<[Bb][Rr]%s*/?>", "\n"):gsub("<[^>]*>", "")))
     return Text.trim(text) ~= "" and text or nil

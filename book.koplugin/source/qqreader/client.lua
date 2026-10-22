@@ -13,7 +13,7 @@ encrypt / fontEncrypt 为真是 Fock 加密 + 乱序字体（已购章），解�
 require("l10n").apply()
 local Fock = require("source.qqreader.fock")
 local JSON = require("json")
-local logger = require("logger")
+local logger = require("utils.log")
 local Mapper = require("source.qqreader.mapper")
 local Request = require("http.request")
 local SourceBase = require("source.base")
@@ -292,6 +292,8 @@ function Client.contentAsync(book_id, chapter_id, cb)
             :match('onkeyfocus%("([^"]+)",%s*(%d+)%)')
         local font = type(info.fontResponse) == "table" and info.fontResponse or {}
         if not (keypool and version and type(info.content) == "string" and pirate.fuid) then
+            logger.warn("qqreader decrypt inputs missing: keypool", keypool ~= nil, "version", version ~= nil,
+                "content", type(info.content), "fuid", pirate.fuid ~= nil)
             cb(nil, _("QQ阅读章节解密失败")); return
         end
         local function run(fixed_font)
@@ -306,7 +308,10 @@ function Client.contentAsync(book_id, chapter_id, cb)
                 end)
         end
         if not Mapper.fontEncrypted(info) then run(nil); return end
-        if type(font.fixedFontTtf) ~= "string" then cb(nil, _("QQ阅读章节解密失败")); return end
+        if type(font.fixedFontTtf) ~= "string" then
+            logger.warn("qqreader decrypt: fixedFontTtf missing")
+            cb(nil, _("QQ阅读章节解密失败")); return
+        end
         current = Request.get(font.fixedFontTtf, { timeout = require("http.timeout").net(1) }, function(ttf, ferr)
             if not ttf then cb(nil, ferr and tostring(ferr) or _("请求失败")); return end
             run(ttf)

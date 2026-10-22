@@ -179,7 +179,7 @@ function Client.contentAsync(novel_id, chapter_id, cb)
                 return
             end
             -- AES 解密与字体解析都是纯 Lua 重活，放子进程，免得卡 UI
-            local bj = Job.run(function() return { text = Mapper.webContent(html) } end, {
+            local bj = Job.run(function() local text, why = Mapper.webContent(html); return { text = text, why = why } end, {
                 name = "jjwxc_vip",
                 kind = "light",
                 timeout = 60,
@@ -188,6 +188,11 @@ function Client.contentAsync(novel_id, chapter_id, cb)
                     local text = res.text
                     if not text then
                         if html:find('id="contentvars"', 1, true) then
+                            local scripts = {}
+                            for src in html:gmatch('<script[^>]-src="([^"]*)"') do scripts[#scripts + 1] = src end
+                            require("utils.log").warn("jjwxc vip decrypt failed", novel_id, chapter_id, res.why,
+                                "scripts", table.concat(scripts, " "),
+                                "contentvars", (html:match('id="contentvars".-</div>') or "none"):sub(1, 8000))
                             cb(nil, _("晋江 VIP 章节解密失败"))
                         else
                             cb(nil, _("晋江 VIP 章节未购买"), "unpaid")

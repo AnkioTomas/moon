@@ -13,7 +13,7 @@ chapterUpdateTime 必须是章节更新时间的 unix 秒，空字符串会把 g
 require("l10n").apply()
 local Fock = require("source.qidian.fock")
 local JSON = require("json")
-local logger = require("logger")
+local logger = require("utils.log")
 local Mapper = require("source.qidian.mapper")
 local Request = require("http.request")
 local SourceBase = require("source.base")
@@ -391,6 +391,8 @@ function Client.contentAsync(book_id, chapter_id, cb)
         local keypool, version = Text.base64Decode(tostring(info.fkp or ""))
             :match('onkeyfocus%("([^"]+)",%s*(%d+)%)')
         if not (uid and keypool and version and type(content) == "string") then
+            logger.warn("qidian decrypt inputs missing: uid", uid ~= nil, "keypool", keypool ~= nil, "version", version ~= nil,
+                "content", type(content))
             cb(nil, _("起点 VIP 章节解密失败：缺少登录信息，请重新登录起点")); return
         end
         decrypting = Fock.decryptAsync(content, chapter_id, keypool, version, uid, function(plain, derr)

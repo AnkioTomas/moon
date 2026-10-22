@@ -52,12 +52,17 @@ end
 
 --- @param html string
 --- @return string|nil 解出的 HTML 片段；不是加密正文页或解不开返回 nil
+--- @return string|nil 失败阶段（写日志用，不含密钥）
 function Vip.content(html)
     local vars = html:match('id="contentvars"(.-)</div>')
-    if not vars then return nil end
+    if not vars then return nil, "no contentvars" end
     local novel, chapter, reader = field(vars, "novelid"), field(vars, "chapterid"), field(vars, "readerid")
     local access, info, content = field(vars, "accessKey"), field(vars, "cryptInfo"), field(vars, "content")
-    if not (novel and chapter and reader and access and info and content) then return nil end
+    if not (novel and chapter and reader and access and info and content) then
+        return nil, ("missing fields novel=%s chapter=%s reader=%s access=%s info=%s content=%s"):format(
+            tostring(novel ~= nil), tostring(chapter ~= nil), tostring(reader ~= nil), tostring(access ~= nil),
+            tostring(info ~= nil), tostring(content ~= nil))
+    end
 
     --- 在摘要的 32 个偏移里找出让密文解成 `shape` 的 key 和 iv，返回去填充后的明文。
     local function decrypt(data, source, shape)
@@ -81,12 +86,13 @@ function Vip.content(html)
 
     local meta = decrypt(Text.base64Decode(info), novel .. "." .. chapter .. "." .. reader .. "." .. access,
         function(text) return text:find("^[%w+/=]+$") end)
-    if not meta then return nil end
+    if not meta then return nil, "cryptInfo undecryptable, info_len=" .. #info end
     local params = Text.base64Decode(meta)
     local key, time = params:match('"key":"([^"]*)"'), params:match('"time":(%d+)')
-    if not (key and time) then return nil end
+    local ver = params:match('"ver":"([^"]*)"')
+    if not (key and time) then return nil, "meta without key/time, ver=" .. tostring(ver) end
     local text = decrypt(Text.base64Decode(content), key .. time .. reader, looksText)
-    if not text then return nil end
+    if not text then return nil, "content undecryptable, ver=" .. tostring(ver) .. " content_len=" .. #content end
     if text:find("^[%w%%%-_.!~*'()]+$") then return Text.urlDecode(text) end
     return text
 end

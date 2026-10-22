@@ -11,7 +11,7 @@
 --]]
 
 local Job = require("workers.job")
-local logger = require("logger")
+local logger = require("utils.log")
 local JSON = require("json")
 local Mapper = require("source.xiaoxiang.mapper")
 local Request = require("http.request")
@@ -263,6 +263,8 @@ function Client.contentAsync(book_id, chapter_id, cb)
         local uid = (Client.cookie() or ""):match("ywGuid=(%d+)")
         local font = type(chapter.fontResponse) == "table" and chapter.fontResponse or {}
         if not (keypool and version and uid and type(chapter.chapterContent) == "string") then
+            logger.warn("xiaoxiang decrypt inputs missing: keypool", keypool ~= nil, "version", version ~= nil,
+                "uid", uid ~= nil, "content", type(chapter.chapterContent))
             cb(nil, _("潇湘章节解密失败")); return
         end
         local function run(fixed_font)
@@ -277,7 +279,10 @@ function Client.contentAsync(book_id, chapter_id, cb)
                 end)
         end
         if chapter.font ~= true then run(nil); return end
-        if type(font.fixedFontTtf) ~= "string" then cb(nil, _("潇湘章节解密失败")); return end
+        if type(font.fixedFontTtf) ~= "string" then
+            logger.warn("xiaoxiang decrypt: fixedFontTtf missing")
+            cb(nil, _("潇湘章节解密失败")); return
+        end
         current = Request.get(font.fixedFontTtf, { timeout = require("http.timeout").net(1) }, function(ttf, ferr)
             if not ttf then cb(nil, ferr and tostring(ferr) or _("请求失败")); return end
             run(ttf)

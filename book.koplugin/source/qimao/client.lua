@@ -211,7 +211,10 @@ function Client.contentAsync(book_id, chapter_id, cb)
             return
         end
         local text, decrypt_err = Protocol.decrypt(content)
-        if not text then cb(nil, decrypt_err); return end
+        if not text then
+            require("utils.log").warn("qimao decrypt failed", book_id, chapter_id, decrypt_err)
+            cb(nil, decrypt_err); return
+        end
         cb(text)
     end)
 end

@@ -113,6 +113,7 @@ local function registerKeyAsync(device, cb)
         end
         local ok, v1 = pcall(Crypto.decrypt_server_key, data.data.key)
         if not ok or not v1 then
+            logger.warn("fanqie decrypt v1_key failed", v1)
             cb(nil, "解密 v1_key 失败")
             return
         end
@@ -145,6 +146,7 @@ local function batchFullAsync(device, book_id, item_id, v1_key, cb)
         end
         local ok, text = pcall(Crypto.decode_chapter_item, item, v1_key)
         if not ok then
+            logger.warn("fanqie chapter decrypt failed", text)
             cb(nil, "章节解密失败: " .. tostring(text))
             return
         end
