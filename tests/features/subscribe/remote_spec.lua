@@ -34,6 +34,7 @@ package.loaded["features.subscribe.db"] = {
         _G.__sub_items_read = read
         return { { guid = "g1", title = "文一", link = "https://a/1", read = false } }, 1
     end,
+    summary = function() return nil end,
     markRead = function(id, guid) read_calls[#read_calls + 1] = id .. ":" .. tostring(guid) end,
 }
 local store = { enabled = true }
@@ -131,7 +132,8 @@ Assert.eq(items.total, 1)
 Assert.eq(call("GET", "article", { id = "1", guid = "g1" }), 404, "有副作用的接口不接受 GET")
 local _, art = call("POST", "article", { id = "1", guid = "g1" })
 Assert.is_nil(art.html:find("<script", 1, true))
-Assert.is_nil(art.html:find("<img", 1, true))
+-- 本地图路径被 clean 去掉后整篇没图：退回链接本身当图
+Assert.eq(art.html:match("<img[^>]*>"), '<img src="https://a/1" referrerpolicy="no-referrer" loading="lazy" alt="">')
 Assert.eq(call("POST", "article", { id = "1", guid = "nope" }), 404)
 call("POST", "read", { id = 1, guid = "g1" })
 call("POST", "read", { id = 1 })
