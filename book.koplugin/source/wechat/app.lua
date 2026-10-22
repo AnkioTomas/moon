@@ -140,6 +140,9 @@ end
 ---@field chapter_offset integer 章内偏移（0..10000）
 ---@field chapter_progress integer 章内百分比 0..100
 ---@field hours WechatAppHour[]
+---@field current_progress integer|nil 全书进度百分比 0..100（上报进度时带上）
+---@field summary string|nil 当前位置摘要
+---@field book_version integer|nil
 
 --- 组装已签名的 ``/book/read`` 请求体。
 ---@param opts WechatAppReadOpts
@@ -151,11 +154,12 @@ function App.readBody(opts)
         appId = opts.device_id,
         autoTime = 0,
         bookId = opts.book_id,
-        bookVersion = 0,
+        bookVersion = opts.book_version or 0,
         chapterIdx = opts.chapter_idx,
         chapterOffset = opts.chapter_offset,
         chapterProgress = opts.chapter_progress,
         chapterUid = opts.chapter_uid,
+        currentProgress = opts.current_progress,
         deviceId = opts.device_id,
         hours = opts.hours,
         installId = opts.install_id,
@@ -170,7 +174,7 @@ function App.readBody(opts)
         reviewId = "",
         risk = 0,
         sourceModule = "unknown",
-        summary = "",
+        summary = opts.summary or "",
         timestamp = os.time(),
         ttsTime = 0,
         voiceType = -1,

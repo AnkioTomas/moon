@@ -1,7 +1,6 @@
 --[[--
-微信读书章节正文：本地生成 psvts → 拉 e_0/e_1/e_3（或 t_0/t_1）→ 解码。
-
-对齐 weread 网页端通道。EPUB 章节交出服务端 XHTML 原文，除资源本地化（插图、脚注图标、
+微信读书章节正文：先走 App 通道（官方客户端同款 /book/chapterdownload 加密 zip），失败再退回网页通道
+（本地生成 psvts → 拉 e_0/e_1/e_3（或 t_0/t_1）→ 解码）。EPUB 章节交出服务端 XHTML 原文，除资源本地化（插图、脚注图标、
 整书样式表）和脚注接弹窗外不改一个字节；
 不写盘、不打 EPUB。个人划线通过 bookmarklist 同步为 KOReader 原生注解。
 
@@ -13,6 +12,10 @@ local logger = require("utils.log")
 local Auth = require("source.wechat.auth")
 local Protocol = require("source.wechat.protocol")
 local Context = require("source.wechat.context")
+local Eink = require("source.wechat.eink")
+local Job = require("workers.job")
+local Package = require("source.wechat.package")
+local Request = require("http.request")
 local Assets = require("source.wechat.assets")
 local Text = require("utils.text")
 local _ = require("gettext")
@@ -75,12 +78,61 @@ local function requestShard(bookId, uid, psvts, endpoint, style, done)
     )
 end
 
---- 整书样式表（章节 link 指向的 ../Styles/stylesheets.css）；失败回 nil，由调用方保留原 link。
+--- App 章节包：chapters 填章 uid（"0" 是整书资源：样式表、公共图片）；包内文件经口令解开。
+---@param bookId string
+---@param chapters string
+---@param pick fun(files: table<string, string>): string|nil, string|nil 在子进程里从解开的包取需要的那一份文本
+---@param cb fun(text: string|nil, err: any)
+---@return { cancel: fun() }
+local function downloadPackageAsync(bookId, chapters, pick, cb)
+    local job
+    local call = Eink.callAsync("GET", "/book/chapterdownload", {
+        raw = true,
+        query = {
+            bookId = bookId, chapters = chapters,
+            pf = "wechat_wx-2001-android-100-weread", pfkey = "pfKey", zoneId = "1",
+            bookVersion = "0", bookType = "epub", quote = "", release = "1",
+            stopAutoPayWhenBNE = "1", preload = "0", preview = "0", offline = "0",
+            giftPayingCard = "0", enVersion = "10.2.2", modernVersion = "10.2.2", teenmode = "0",
+        },
+    }, function(res, err)
+        if not res then
+            cb(nil, err)
+            return
+        end
+        local key = Request.header(res, "encryptKey")
+        local password = key and Package.password(Eink.credentials().vid, key)
+        if not password then
+            cb(nil, "chapterdownload: no encryptKey")
+            return
+        end
+        -- 解密 + 解压是逐字节纯 Lua，放子进程；包里的图片不回传（JSON 帧装不下二进制）
+        job = Job.run(function()
+            local files, zerr = Package.unzip(res.body, password)
+            if not files then return { err = zerr } end
+            local text, perr = pick(files)
+            return { text = text, err = perr }
+        end, {
+            name = "weread_chapter_package",
+            kind = "light",
+            timeout = 60,
+            on_done = function(out) cb(out.text, out.err) end,
+            on_failed = function(jerr) cb(nil, tostring(jerr)) end,
+            on_cancelled = function() end,
+        })
+    end)
+    return { cancel = function()
+            call:cancel()
+            if job then job:cancel() end
+        end }
+end
+
+--- 网页通道的整书样式表。
 ---@param bookId string
 ---@param uid string
 ---@param done fun(css: string|nil)
 ---@return { cancel: fun() }|nil
-local function fetchStyleAsync(bookId, uid, done)
+local function fetchWebStyleAsync(bookId, uid, done)
     return requestShard(bookId, uid, Context.reader(bookId, uid).psvts, "/web/book/chapter/e_2", true,
         function(raw, err)
             local css = raw and Protocol.decodeShards(raw)
@@ -93,6 +145,30 @@ local function fetchStyleAsync(bookId, uid, done)
         end)
 end
 
+--- 整书样式表（章节 link 指向的 ../Styles/stylesheets.css）：App 包优先，失败退回网页通道；
+--- 都失败回 nil，由调用方保留原 link。
+---@param bookId string
+---@param uid string
+---@param done fun(css: string|nil)
+---@return { cancel: fun() }|nil
+local function fetchStyleAsync(bookId, uid, done)
+    local web
+    local app = downloadPackageAsync(bookId, "0", function(files)
+        return files["Styles/stylesheets.css"]
+    end, function(css, err)
+        if css then
+            done(css)
+            return
+        end
+        logger.warn("weread stylesheet app fetch", bookId, err)
+        web = fetchWebStyleAsync(bookId, uid, done)
+    end)
+    return { cancel = function()
+            app:cancel()
+            if web then web:cancel() end
+        end }
+end
+
 --- 异步拉取章节 HTML 正文。
 --- 第三个回调参数是划线 range 的坐标原文：EPUB 为解码后的完整 xhtml，TXT 为解码后的纯文本
 --- （format 分别为 "html" / "txt"）；不能用清理或段落化后的正文，否则 range 整体偏移。
@@ -100,12 +176,8 @@ end
 ---@param chapter BookChapter
 ---@param cb fun(html: string|nil, err: any, range_source: string|nil, format: '"html"'|'"txt"'|nil)
 ---@return { cancel: fun() }
-function Chapter.fetchHtmlAsync(bookId, chapter, cb)
+local function fetchWebHtmlAsync(bookId, chapter, cb)
     local uid = chapter.uid
-    if type(uid) ~= "string" or uid == "" then
-        cb(nil, _("章节缺少 uid"))
-        return { cancel = function() end }
-    end
     local cancelled = false
     local active_job
     local psvts = Context.reader(bookId, uid).psvts
@@ -186,6 +258,37 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     end
     shard("/web/book/chapter/e_0", function(e0, e0err) onE0(e0, e0err, 0) end)
     return { cancel = cancel }
+end
+
+--- 异步拉取章节 HTML 正文：App 通道优先；包解不开、付费章、TXT 书等任何失败都退回网页通道。
+--- 回调约定同 fetchWebHtmlAsync。
+---@param bookId string
+---@param chapter BookChapter
+---@param cb fun(html: string|nil, err: any, range_source: string|nil, format: '"html"'|'"txt"'|nil)
+---@return { cancel: fun() }
+function Chapter.fetchHtmlAsync(bookId, chapter, cb)
+    local uid = chapter.uid
+    if type(uid) ~= "string" or uid == "" then
+        cb(nil, _("章节缺少 uid"))
+        return { cancel = function() end }
+    end
+    local cancelled, web = false, nil
+    local app = downloadPackageAsync(bookId, uid, function(files)
+        return Package.chapterHtml(files, uid)
+    end, function(xhtml, err)
+        if cancelled then return end
+        if xhtml and Text.stripBom(xhtml):find("^%s*<") then
+            cb(xhtml, nil, xhtml, "html")
+            return
+        end
+        logger.warn("weread chapter app fetch", bookId, chapter.idx, err)
+        web = fetchWebHtmlAsync(bookId, chapter, cb)
+    end)
+    return { cancel = function()
+            cancelled = true
+            app:cancel()
+            if web then web:cancel() end
+        end }
 end
 
 --- 原书脚注是 ``<img class="qqreader-footnote" alt="注文">``，注文只在 alt 里，点了没东西可弹。

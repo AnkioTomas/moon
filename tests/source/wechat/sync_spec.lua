@@ -334,7 +334,7 @@ do
     Assert.eq(body.chapterUid, 9)
     Assert.eq(body.bookVersion, 395275575)
     Assert.eq(body.range, "0-5")
-    Assert.eq(body.markText, require("utils.text").base64Encode("hello"))
+    Assert.eq(body.markText, "hello")
     Assert.eq(#Notes.pushCandidates({
         { drawer = "lighten", text = "a" },
         { drawer = "lighten", text = "note", note = "想法" },

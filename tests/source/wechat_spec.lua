@@ -172,7 +172,7 @@ local REF = { source_id = "wechat", stable_id = "b1", book = { title = "微信�
 do
     local caps = WeChat.new():capabilities()
     Assert.is_false(caps.scrape)
-    Assert.is_false(caps.edit)
+    Assert.is_true(caps.edit)
     Assert.is_true(caps.stats_pull)
 end
 
@@ -827,7 +827,7 @@ do
         return { cancel = function() end }
     end
     fake_client.addBookmarkAsync = function(_, _, _, body, cb)
-        local text = require("utils.text").base64Decode(body.markText)
+        local text = body.markText
         local remote_id = bookmark_ids[text]
         calls[#calls + 1] = {
             api = "addBookmark", range = body.range, chapter_idx = body.chapterIdx,

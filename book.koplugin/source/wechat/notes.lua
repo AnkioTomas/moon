@@ -759,8 +759,7 @@ function Notes.toBookmarkBody(book_id, chapter_uid, chapter_idx, book_version, a
         style = 1,
         colorStyle = Notes.colorStyle(annotation.color),
         range = range,
-        -- addBookmark 的 markText 需 base64(UTF-8)
-        markText = Text.base64Encode(text),
+        markText = text,
     }, nil
 end
 

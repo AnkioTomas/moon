@@ -73,7 +73,7 @@ end
 function Source:capabilities()
     return {
         scrape = false,
-        edit = false,
+        edit = true,
         stats_pull = true,
     }
 end
@@ -112,7 +112,61 @@ function Source:onEvent(event, payload)
         end
         return
     end
+    if event == "book_meta_changed" and self:configured() then
+        self:pushCategoryAsync(payload.identity.stable_id)
+        return
+    end
     return SourceBase.onEvent(self, event, payload)
+end
+
+--- 把本地分类上行成书架分组：同名分组加入，没有就新建；分类清空则退出所有分组。
+--- 新书不带分组，只有用户改分类才会走到这里。失败只记日志，分类留在本地。
+---@param stable_id string
+---@return { cancel: fun() }|nil
+function Source:pushCategoryAsync(stable_id)
+    local row = require("book.books_db").get(self.id, stable_id)
+    local category = row and row.category or nil
+    local client = self._client
+    return client:shelfSyncAsync(function(wire, err)
+        if not wire then
+            logger.warn("wechat group sync failed", err)
+            return
+        end
+        local steps = {}
+        local target, joined
+        for _idx, archive in ipairs(type(wire.archive) == "table" and wire.archive or {}) do
+            local ids, has = {}, false
+            for _i, id in ipairs(archive.bookIds or {}) do
+                if tostring(id) == stable_id then has = true else ids[#ids + 1] = tostring(id) end
+            end
+            if archive.name == category then
+                target = archive
+                joined = has
+            elseif has then
+                steps[#steps + 1] = { archive.archiveId, archive.name, ids }
+            end
+        end
+        if category and not joined then
+            local ids = {}
+            for _i, id in ipairs(target and target.bookIds or {}) do
+                if tostring(id) ~= stable_id then ids[#ids + 1] = tostring(id) end
+            end
+            ids[#ids + 1] = stable_id
+            steps[#steps + 1] = { target and target.archiveId or os.time(), category, ids }
+        end
+        local function run(index)
+            local step = steps[index]
+            if not step then return end
+            client:saveArchiveAsync(step[1], step[2], step[3], function(data, push_err)
+                if not data then
+                    logger.warn("wechat group push failed", push_err)
+                    return
+                end
+                run(index + 1)
+            end)
+        end
+        run(1)
+    end)
 end
 
 --- 关闭这个实例：清实例自己的封面表。Context（psvts）与 Toc 是进程级的，

@@ -1,8 +1,8 @@
 --[[--
 微信读书协议客户端：只返回 wire，不做领域转换（仅异步）。
 
-会话（Cookie + X-Vid + X-Skey）用于网页接口；Web 读不到的划线、想法、阅读统计
-走 Eink ``i.weread.qq.com``；写想法 / 划线走 ``weread.qq.com/web/*``。
+书架、进度、章节、想法、划线与统计都走 Eink ``i.weread.qq.com``（App 协议）；
+网页接口只留给没有 App 对应的书城榜单 / 分类、搜索与公众号。
 
 @module koplugin.book.source.wechat.client
 --]]
@@ -11,7 +11,6 @@ local JSON = require("json")
 local logger = require("utils.log")
 local Auth = require("source.wechat.auth")
 local Eink = require("source.wechat.eink")
-local Context = require("source.wechat.context")
 local Protocol = require("source.wechat.protocol")
 local Text = require("utils.text")
 local _ = require("gettext")
@@ -101,7 +100,9 @@ end
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
 function Client:shelfSyncAsync(cb)
-    return getWebAsync("/web/shelf/sync", { synckey = 0, teenmode = 0 }, cb)
+    return Eink.callAsync("GET", "/shelf/sync", {
+        query = { synckey = 0, teenmode = 0, album = 1, onlyBookid = 0, localBookCount = 0 },
+    }, cb)
 end
 
 --- 加入微信读书书架。
@@ -109,17 +110,29 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:addToShelfAsync(bookId, cb)
-    return postWebAsync("/web/shelf/add", { bookIds = { bookId } }, nil, cb)
+    return Eink.callAsync("POST", "/shelf/add", { body = { bookIds = { bookId }, albumIds = {} } }, cb)
 end
 
---- 从微信读书书架删除（移动端接口，带网页会话）。
+--- 从微信读书书架删除。
 ---@param bookId string
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:removeFromShelfAsync(bookId, cb)
-    local url = "https://i.weread.qq.com/shelf/delete"
-    return Auth.webPostAsync(url, JSON.encode({ bookIds = { bookId }, albumIds = {}, archiveIds = {} }), nil,
-        webWire(url, cb))
+    return Eink.callAsync("POST", "/shelf/delete", {
+        body = { bookIds = { bookId }, albumIds = {}, archiveIds = {} },
+    }, cb)
+end
+
+--- 写分组：同一 archiveId 带完整 bookIds 即整体替换成员；新分组的 archiveId 由客户端取秒级时间戳。
+---@param archive_id integer
+---@param name string
+---@param book_ids string[]
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:saveArchiveAsync(archive_id, name, book_ids, cb)
+    return Eink.callAsync("POST", "/shelf/archive", {
+        body = { albumIds = {}, archiveId = archive_id, bookIds = book_ids, name = name },
+    }, cb)
 end
 
 --- 拉取书籍详情（含书籍版本号）。
@@ -127,7 +140,9 @@ end
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
 function Client:bookInfoAsync(bookId, cb)
-    return getWebAsync("/web/book/info", { bookId = bookId }, cb)
+    return Eink.callAsync("GET", "/book/info", {
+        query = { bookId = bookId, myzy = 1, source = "reading", teenmode = 0 },
+    }, cb)
 end
 
 --- 拉取整本书的章节目录。
@@ -135,7 +150,10 @@ end
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
 function Client:chapterInfosAsync(bookId, cb)
-    return postWebAsync("/web/book/chapterInfos", { bookIds = { bookId } }, nil, cb)
+    return Eink.callAsync("POST", "/book/chapterInfos", {
+        body = { bookIds = { bookId }, synckeys = { 0 }, teenmode = 0 },
+        idempotent = true,
+    }, cb)
 end
 
 --- 拉取云端阅读进度；带毫秒时间戳参数避开中间层缓存。
@@ -143,41 +161,50 @@ end
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
 function Client:getProgressAsync(bookId, cb)
-    return getWebAsync("/web/book/getProgress", { bookId = bookId, _ = tostring(os.time() * 1000) }, cb)
+    return Eink.callAsync("GET", "/book/getProgress", { query = { bookId = bookId } }, cb)
 end
 
+--- 上报阅读进度：App ``/book/read``，不带时长桶（时长由统计同步补报）。
 ---@param bookId string
----@param opts { progress: number, chapter_uid: string|number, chapter_idx?: number, chapter_offset?: number, summary?: string }
+---@param opts { progress: number, chapter_uid: string|number, chapter_idx?: number, chapter_offset?: number, summary?: string, book_version?: integer }
 ---@param cb fun(data: table|nil, err: any)
+---@return { cancel: fun() }
 function Client:putProgressAsync(bookId, opts, cb)
-    local chapter_uid = tostring(opts.chapter_uid)
+    local creds = Eink.credentials()
+    if not creds then
+        require("ui/uimanager"):nextTick(function() cb(nil, _("请先扫码登录微信读书墨水屏")) end)
+        return { cancel = function() end }
+    end
     local cancelled, job = false, nil
-    -- 与时长心跳共用真实阅读页会话：伪造的 ps / pc 服务端收下 rt 却不记进度。
-    job = Context.sessionAsync(self, bookId, false, function(session, session_err)
+    job = self:guestTokenAsync(function(token, err)
         if cancelled then return end
-        if not session then
-            logger.warn("weread putProgress session", bookId, session_err)
-            cb(nil, session_err)
+        if not token then
+            cb(nil, err)
             return
         end
-        local payload = Protocol.makeEnterReadPayload({
+        local offset = opts.chapter_offset or 0
+        local body = require("source.wechat.app").readBody({
+            vid = creds.vid,
+            device_id = creds.device_id,
+            install_id = Eink.installId(),
+            guest_token = token,
             book_id = bookId,
-            chapter_uid = chapter_uid,
-            chapter_idx = opts.chapter_idx,
-            chapter_offset = opts.chapter_offset,
+            chapter_uid = tonumber(opts.chapter_uid) or 0,
+            chapter_idx = opts.chapter_idx or 0,
+            chapter_offset = offset,
+            chapter_progress = math.floor(offset / 100),
+            current_progress = opts.progress,
             summary = opts.summary,
-            progress = opts.progress,
-            psvts = session.psvts,
-            pclts = session.pclts,
+            book_version = opts.book_version,
+            hours = {},
         })
-        job = self:reportReadAsync(payload, Protocol.readerUrl(bookId, chapter_uid), function(data, err)
+        job = self:reportAppReadAsync(body, function(data, push_err)
             if cancelled then return end
             if data then
-                session.entered = true
                 cb({ ok = true })
             else
-                logger.warn("weread putProgress", err)
-                cb(nil, err)
+                logger.warn("weread putProgress", push_err)
+                cb(nil, push_err)
             end
         end)
     end)
@@ -209,28 +236,6 @@ function Client:readerStateAsync(bookId, cb)
             pclts = raw:match([["pclts"%s*:%s*"([^"]+)"]]),
             token = raw:match([["token"%s*:%s*"([^"]+)"]]),
         })
-    end)
-end
-
---- 上报阅读行为（进度与时长共用的 /web/book/read 接口）。
----@param body table 已签名的请求体
----@param referer string|nil Referer 头，缺省用站点首页
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Client:reportReadAsync(body, referer, cb)
-    return postWebAsync("/web/book/read", body, referer, function(data, err)
-        if not data then
-            cb(nil, err)
-            return
-        end
-        -- 服务端受理的回包带 succ=1 或 synckey；两者都没有是「收下但没记账」，
-        -- 当成功的话调用方会把这条进度/时长标记为已同步，数据静默丢失。
-        if not (data.succ == true or tonumber(data.succ) == 1 or data.synckey ~= nil) then
-            logger.warn("weread report read not accepted")
-            cb(nil, _("上报响应异常"))
-            return
-        end
-        cb(data)
     end)
 end
 
@@ -384,7 +389,7 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:addReviewAsync(body, cb)
-    return postWebAsync("/web/review/add", body, nil, cb)
+    return Eink.callAsync("POST", "/review/add", { body = body }, cb)
 end
 
 --- 修改划线下想法。
@@ -392,7 +397,7 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:editReviewAsync(body, cb)
-    return postWebAsync("/web/review/edit", body, nil, cb)
+    return Eink.callAsync("POST", "/review/useredit", { body = body }, cb)
 end
 
 --- 删除想法。
@@ -400,7 +405,7 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:deleteReviewAsync(review_id, cb)
-    return postWebAsync("/web/review/delete", { reviewId = tostring(review_id) }, nil, cb)
+    return Eink.callAsync("POST", "/review/delete", { body = { reviewId = tostring(review_id) } }, cb)
 end
 
 --- 更新划线样式和颜色。
@@ -408,7 +413,7 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:updateBookmarkAsync(body, cb)
-    return postWebAsync("/web/book/updateBookmark", body, nil, cb)
+    return Eink.callAsync("POST", "/book/updateBookmark", { body = body }, cb)
 end
 
 --- 删除划线。
@@ -416,7 +421,9 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:removeBookmarkAsync(bookmark_id, cb)
-    return postWebAsync("/web/book/removeBookmark", { bookmarkId = tostring(bookmark_id) }, nil, cb)
+    return Eink.callAsync("POST", "/book/removeBookmark", {
+        body = { bookmarkIds = { tostring(bookmark_id) } },
+    }, cb)
 end
 
 --- 上传单条划线。
@@ -426,7 +433,7 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:addBookmarkAsync(bookId, chapter_uid, body, cb)
-    return postWebAsync("/web/book/addBookmark", body, Protocol.readerUrl(bookId, chapter_uid), cb)
+    return Eink.callAsync("POST", "/book/addBookmark", { body = body }, cb)
 end
 
 --- 本章热门划线与段评锚点：``underlines[]`` 每条 ``{ range, count, type }``（type 0 = 只有段评）。
@@ -435,7 +442,9 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:underlinesAsync(bookId, chapter_uid, cb)
-    return getWebAsync("/web/book/underlines", { bookId = bookId, chapterUid = chapter_uid }, cb)
+    return Eink.callAsync("GET", "/book/underlines", {
+        query = { bookId = bookId, chapterUid = chapter_uid },
+    }, cb)
 end
 
 --- 按 range 批量拉段评：``reviews[]`` 每条 ``{ range, totalCount, maxIdx, hasMore, pageReviews[] }``。
@@ -446,11 +455,12 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:readReviewsAsync(bookId, chapter_uid, reviews, cb)
-    return postWebAsync("/web/book/readReviews", {
+    return Eink.callAsync("POST", "/book/readreviews", { body = {
         bookId = bookId,
         chapterUid = tonumber(chapter_uid) or chapter_uid,
+        cht2sMode = "",
         reviews = reviews,
-    }, nil, cb)
+    } }, cb)
 end
 
 return Client
