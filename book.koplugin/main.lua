@@ -29,6 +29,8 @@ local logger = require("utils.log")
 -- 启动横幅只是诊断信息，失败不能拖垮插件加载。
 local boot_ok, boot_err = pcall(logger.boot)
 if not boot_ok then logger.warn("book boot banner failed", boot_err) end
+local Wake = require("utils.wake")
+pcall(Wake.boot)
 require("l10n")
 
 -- feature 加载器：各 feature 在自己的 init 里往 utils.extension 的通用挂点登记；这里不点名任何 feature。
@@ -96,9 +98,10 @@ BookPlugin.init = Guard.wrap("init", init)
 --- 休眠前：结清阅读状态，生成锁屏图，停远程服务，暂停后台任务；桌面在窗口栈上时自行收 Suspend。
 function BookPlugin:onSuspend()
     logger.info("book lifecycle suspend")
-    Guard.call("tasks.onSuspend", Tasks.onSuspend)
-    Guard.call("session.onSuspend", Session.onSuspend, self)
-    Features.emit("onSuspend", self)
+    Wake.suspend()
+    Wake.timed("tasks.onSuspend", Guard.call, "tasks.onSuspend", Tasks.onSuspend)
+    Wake.timed("session.onSuspend", Guard.call, "session.onSuspend", Session.onSuspend, self)
+    Wake.timed("features.onSuspend", Features.emit, "onSuspend", self)
     logger.info("book lifecycle suspend done")
     logger.flush()
 end
@@ -106,10 +109,12 @@ end
 --- 唤醒：恢复阅读统计、后台服务与后台任务；桌面在窗口栈上时自行收 Resume。
 function BookPlugin:onResume()
     logger.info("book lifecycle resume")
-    Guard.call("tasks.onResume", Tasks.onResume)
-    Guard.call("session.onResume", Session.onResume, self)
-    Guard.call("sources.pushDirty", pushDirty)
-    Features.emit("onResume", self)
+    Wake.resume()
+    Wake.timed("tasks.onResume", Guard.call, "tasks.onResume", Tasks.onResume)
+    Wake.timed("session.onResume", Guard.call, "session.onResume", Session.onResume, self)
+    -- 推脏行要查网络、走远程请求，放到锁屏关闭之后，不阻塞唤醒。
+    require("ui/uimanager"):scheduleIn(Wake.GRACE, function() Guard.call("sources.pushDirty", pushDirty) end)
+    Wake.timed("features.onResume", Features.emit, "onResume", self)
 end
 
 --- 网络恢复：续跑等网络的后台任务、源推脏、feature 自己刷新。
@@ -137,6 +142,7 @@ function BookPlugin:onExit()
     Guard.call("exit.closeWindows", require("ui.exit_windows").close)
     logger.info("book plugin exit done")
     logger.flush()
+    Wake.exit()
 end
 
 -- ── 宿主入口：打开月读 ─────────────────
