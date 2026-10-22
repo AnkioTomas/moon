@@ -21,6 +21,7 @@ local Display = require("desktop.pages.setting.display")
 local LibrarySettings = require("desktop.pages.setting.library")
 local DesktopSettings = require("desktop.pages.setting.desktop")
 local TopbarSettings = require("desktop.pages.setting.topbar")
+local InsightSettings = require("desktop.pages.setting.insight")
 local Language = require("desktop.pages.setting.language")
 local Maintenance = require("desktop.pages.setting.maintenance")
 local AISettings = require("desktop.pages.setting.ai")
@@ -157,6 +158,11 @@ local function coreEntries(desktop)
                 preview = function(width) return TopbarSettings.preview(width) end,
                 sections = function() return {{ title = _("顶栏"), rows = TopbarSettings:rows(desktop) }} end,
             },
+        },
+        {
+            group = "desktop", order = 30, id = "insight", icon = "monitoring", title = _("统计页"),
+            subtitle = _("选择显示哪些页面与数据，其余自动拉伸"),
+            page = { title = _("统计页"), sections = function() return InsightSettings:sections(desktop) end },
         },
         {
             group = "reader", order = 10, id = "reader_behavior", icon = "touch_app", title = _("阅读行为"),

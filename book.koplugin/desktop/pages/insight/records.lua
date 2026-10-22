@@ -1,17 +1,14 @@
 --[[--
-统计页第 3 页：连续记录、年度总计和每月阅读时长图表。
+统计页「进度」页下半部：连续记录与里程碑指标卡；年度汇总与每月图表供本年页复用。
 
 @module koplugin.book.desktop.pages.insight.records
 --]]
 
-local HorizontalGroup = require("ui/widget/horizontalgroup")
-local HorizontalSpan = require("ui/widget/horizontalspan")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Chart = require("ui.widgets.chart")
-local Common = require("desktop.detail.common")
+local Parts = require("desktop.pages.insight.parts")
 local Theme = require("ui.themes")
-local Text = require("ui.themes.widgets.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -143,22 +140,7 @@ local function aggregate(state)
     }
 end
 
---- 将指标卡片排成一行。
----@param items table[] 每项包含 value 和 label。
----@param width number 行宽。
----@param gap number 卡片间距。
----@return table, number 行控件和高度。
-local function recordRow(items, width, gap)
-    local card_w = math.floor((width - gap * (#items - 1)) / #items)
-    local row, row_h = HorizontalGroup:new{ align = "center" }, 0
-    for i, item in ipairs(items) do
-        if i > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
-        local card, card_h = Common.kpiCard(card_w, item.value, item.label)
-        row_h = math.max(row_h, card_h)
-        table.insert(row, card)
-    end
-    return row, row_h
-end
+Records.aggregate = aggregate
 
 --- 构建当年每月阅读时长柱状图。
 ---@param stats table aggregate 的结果。
@@ -182,55 +164,32 @@ local function monthlyChart(stats, width, height, gap)
     })
 end
 
---- 构建连续记录页。
+Records.monthlyChart = monthlyChart
+
+--- 构建连续记录与里程碑指标卡。
 ---@param state table 统计状态。
 ---@param width number 内容宽度。
----@param avail_h number 可用高度。
 ---@return table
-function Records:build(state, width, avail_h)
+function Records:build(state, width)
     local stats = aggregate(state)
-    local t = Theme.current()
-    local gap, xs = Theme.px(t.space.sm), Theme.px(t.space.xs)
-    local col = VerticalGroup:new{ align = "left" }
-    local used = 0
-    --- 追加控件并累计高度。
-    ---@param widget table 子控件。
-    ---@param widget_h number 控件高度。
-    local function push(widget, widget_h)
-        table.insert(col, widget)
-        used = used + (widget_h or 0)
-    end
-
-    local year_row, year_h = recordRow({
-        { value = Catalog.formatDuration(stats.year_seconds), label = _("今年总阅读时长") },
-        { value = T(_("%1天"), stats.year_streak), label = _("今年连续阅读天数") },
-    }, width, gap)
-    push(year_row, year_h)
-    push(VerticalSpan:new{ width = gap }, gap)
-    local streak_row, streak_h = recordRow({
-        { value = T(_("%1周"), stats.week_streak), label = _("周连续") },
-        { value = T(_("%1个月"), stats.month_streak), label = _("月连续") },
-    }, width, gap)
-    push(streak_row, streak_h)
-    push(VerticalSpan:new{ width = gap }, gap)
-    local record_row, record_h = recordRow({
-        { value = Catalog.formatDuration(stats.week_record), label = _("每周记录") },
-        { value = Catalog.formatDuration(stats.day_record), label = _("每日记录") },
-    }, width, gap)
-    push(record_row, record_h)
-    push(VerticalSpan:new{ width = gap }, gap)
-    local mile_row, mile_h = recordRow({
-        { value = tostring(stats.pages_record), label = _("单日最多页数") },
-        milestone(state.total and state.total.total_seconds or 0),
-    }, width, gap)
-    push(mile_row, mile_h)
-    push(VerticalSpan:new{ width = gap }, gap)
-    local title = Text.line("caption", T(_("%1年每月阅读时长"), stats.year), { width = width, color = t.color.muted })
-    push(title, title:getSize().h)
-    push(VerticalSpan:new{ width = xs }, xs)
-    local chart_h = math.max(Theme.px(48), math.min(Theme.px(220), avail_h - used))
-    push(monthlyChart(stats, width, chart_h, xs), chart_h)
-    return col
+    local gap = Theme.px(Theme.current().space.sm)
+    return VerticalGroup:new{
+        align = "left",
+        Parts.cards({
+            { value = T(_("%1周"), stats.week_streak), label = _("周连续") },
+            { value = T(_("%1个月"), stats.month_streak), label = _("月连续") },
+        }, width, gap),
+        VerticalSpan:new{ width = gap },
+        Parts.cards({
+            { value = Catalog.formatDuration(stats.week_record), label = _("每周记录") },
+            { value = Catalog.formatDuration(stats.day_record), label = _("每日记录") },
+        }, width, gap),
+        VerticalSpan:new{ width = gap },
+        (Parts.cards({
+            { value = tostring(stats.pages_record), label = _("单日最多页数") },
+            milestone(state.total and state.total.total_seconds or 0),
+        }, width, gap)),
+    }
 end
 
 return Records

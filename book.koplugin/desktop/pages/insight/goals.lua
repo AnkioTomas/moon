@@ -1,0 +1,93 @@
+--[[--
+统计页「进度」页：本月挑战、完成预测、连续记录与里程碑。
+
+本月挑战的目标由近 90 天日均 ×1.1 自动推算，不设配置；完成预测按每本书自己的速度和近 30 天日均。
+
+@module koplugin.book.desktop.pages.insight.goals
+--]]
+
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
+local VerticalGroup = require("ui/widget/verticalgroup")
+local VerticalSpan = require("ui/widget/verticalspan")
+local Calc = require("book.insight_calc")
+local Catalog = require("book.catalog")
+local Layout = require("desktop.pages.insight.layout")
+local Parts = require("desktop.pages.insight.parts")
+local Records = require("desktop.pages.insight.records")
+local Ring = require("ui.widgets.ring")
+local Theme = require("ui.themes")
+local Tap = require("ui.themes.widgets.tap")
+local Text = require("ui.themes.widgets.text")
+local _ = require("gettext")
+local T = require("ffi/util").template
+
+---@class BookInsightGoals
+local Goals = {}
+
+--- 构建进度页：本月挑战、预计读完、连续记录；挑战环吃余量。
+---@param ctx { state: table, width: number, height: number, open_book: fun(book: table) }
+---@return table
+function Goals:build(ctx)
+    local state, width, open_book = ctx.state, ctx.width, ctx.open_book
+    local t = Theme.current()
+    local xs, md = Theme.px(t.space.xs), Theme.px(t.space.md)
+    local now = os.time()
+    local days = state.calendar.days
+    local ch = Calc.challenge(days, now)
+    local fc = Calc.forecast(days, state.reading or {}, state.finished or {}, now)
+
+    local function challengeBlock(extra)
+        if not ch then return nil end
+        local size = Theme.px(72) + extra
+        local text_w = math.max(1, width - size - md)
+        return VerticalGroup:new{
+            align = "left",
+            Parts.caption(T(_("%1月挑战"), tonumber(os.date("%m", now))), width),
+            VerticalSpan:new{ width = xs },
+            HorizontalGroup:new{
+                align = "center",
+                Ring:new{ size = size, rings = { { fraction = ch.ratio } } },
+                HorizontalSpan:new{ width = md },
+                VerticalGroup:new{
+                    align = "left",
+                    Text.line("body", T(_("%1 / %2"), Catalog.formatDuration(ch.done), Catalog.formatDuration(ch.target)),
+                        { width = text_w }),
+                    Text.line("caption", ch.done >= ch.target and _("已完成")
+                        or T(_("每天还需 %1 · %2"), Catalog.formatDuration(ch.per_day),
+                            ch.on_pace and _("节奏正常") or _("稍有落后")),
+                        { width = text_w, color = t.color.muted }),
+                },
+            },
+        }
+    end
+
+    local function forecastBlock()
+        if #fc.books == 0 and fc.done == 0 then return nil end
+        local col = VerticalGroup:new{ align = "left" }
+        if #fc.books > 0 then
+            col[#col + 1] = Parts.caption(_("预计读完"), width)
+            col[#col + 1] = VerticalSpan:new{ width = xs }
+            for i = 1, math.min(3, #fc.books) do
+                local item = fc.books[i]
+                local date = T("%1/%2", tonumber(item.date:sub(6, 7)), tonumber(item.date:sub(9, 10)))
+                col[#col + 1] = Tap.wrap(Parts.pair(
+                    item.book.title or item.book.stable_id,
+                    T(_("%1天后 · %2"), item.days_left, date), width, Theme.px(130)
+                ), function() open_book(item.book) end)
+            end
+        end
+        if fc.done > 0 then
+            col[#col + 1] = Parts.caption(T(_("今年已读完 %1 本，照此节奏全年约 %2 本"), fc.done, fc.projected), width)
+        end
+        return col
+    end
+
+    return Layout.stack("goals", {
+        { id = "challenge", hi = Theme.px(60), build = challengeBlock },
+        { id = "forecast", build = forecastBlock },
+        { id = "records", build = function() return Records:build(state, width) end },
+    }, width, ctx.height)
+end
+
+return Goals

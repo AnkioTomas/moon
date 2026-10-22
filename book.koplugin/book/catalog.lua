@@ -63,6 +63,9 @@ reading_stats 提供统计。
 ---@field has_data boolean 是否有统计；false 时 insight 页显示空态
 ---@field total StatsTotal 总览 KPI
 ---@field calendar StatsCalendar 月历与日书单
+---@field sessions table[] 近一年本机阅读段（Calc.sessions）
+---@field finished table[] 读完的书（StatsDB.progressBooks）
+---@field reading table[] 在读的书，最近阅读在前
 
 --- readingInsight 返回包装；失败走第二返回值 err。
 ---@class BookInsightResult
@@ -185,8 +188,10 @@ end
 ---@param daily table[]|nil
 ---@param daily_books table[]|nil
 ---@param hourly table<string, number[]>|nil StatsDB.hourlyBySource
+---@param extra table|nil { session_rows, finished, reading }
 ---@return StatsInsight
-function Catalog.toInsight(source_id, summary, daily, daily_books, hourly)
+function Catalog.toInsight(source_id, summary, daily, daily_books, hourly, extra)
+    extra = extra or {}
     local has_data = (tonumber(summary and summary.total_seconds) or 0) > 0
     local days = {}
     for _idx, d in ipairs(daily or {}) do
@@ -261,6 +266,9 @@ function Catalog.toInsight(source_id, summary, daily, daily_books, hourly)
             initial_ym = os.date("%Y-%m"),
             days = days,
         },
+        sessions = require("book.insight_calc").sessions(extra.session_rows or {}),
+        finished = extra.finished or {},
+        reading = extra.reading or {},
     }
 end
 
@@ -684,7 +692,12 @@ function Catalog.readingInsightAsync(source_id, cb)
                 StatsDB.summaryBySource(scope),
                 StatsDB.dailyBySource(scope),
                 StatsDB.dailyBooksBySource(scope),
-                StatsDB.hourlyBySource(scope)
+                StatsDB.hourlyBySource(scope),
+                {
+                    session_rows = StatsDB.sessionRows(scope, os.time() - 400 * 86400),
+                    finished = StatsDB.progressBooks(scope, true),
+                    reading = StatsDB.progressBooks(scope, false, 5),
+                }
             ),
         })
     end)

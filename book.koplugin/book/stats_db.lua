@@ -782,6 +782,79 @@ function StatsDB.periodBooks(source_id, start_ts, end_ts, limit)
     return rows
 end
 
+--- 本机逐页 / 压缩记录，按开始时间升序（洞察里切分阅读段、算速度用）。云端日桶没有逐页坐标，不在内。
+---@param source_id string|string[]
+---@param from_ts number 起（含）
+---@return table[] rows { source_id, stable_id, start_time, duration, pages }
+function StatsDB.sessionRows(source_id, from_ts)
+    local src, args = DB.sourceClause("source_id", source_id)
+    args[#args + 1] = tonumber(from_ts) or 0
+    local result, nrows = DB.query(
+        [[SELECT source_id, stable_id, start_time, duration, event_count FROM reading_stats
+          WHERE ]] .. src .. [[ AND record_type IN ('page','page_rollup') AND start_time>=?
+          ORDER BY start_time, id;]],
+        unpack(args)
+    )
+    local rows = {}
+    for i = 1, nrows do
+        rows[i] = {
+            source_id = result[1][i],
+            stable_id = result[2][i],
+            start_time = tonumber(result[3][i]) or 0,
+            duration = tonumber(result[4][i]) or 0,
+            pages = tonumber(result[5][i]) or 0,
+        }
+    end
+    return rows
+end
+
+--- 读完（finished=true）或在读的书，附带最后阅读时间和本机累计时长。
+--- 读完 = 手动已读，或未被标未读且进度 ≥ 99%；在读 = 有进度但没读完。
+--- 最后阅读时间取本机记录，没有就退回进度更新时间。
+---@param source_id string|string[]
+---@param finished boolean
+---@param limit number|nil 仅在读时有效，按最近阅读取前 N 本
+---@return table[] rows { source_id, stable_id, title, authors, category, fraction, last_time, seconds }
+function StatsDB.progressBooks(source_id, finished, limit)
+    local src, args = DB.sourceClause("b.source_id", source_id)
+    local cond = finished
+        and "(b.read_state=1 OR (b.read_state=0 AND COALESCE(p.fraction,0)>=0.99))"
+        or "(b.read_state=0 AND COALESCE(p.fraction,0)>0 AND p.fraction<0.99)"
+    local tail = ""
+    if not finished then
+        tail = " ORDER BY 7 DESC LIMIT ?"
+        args[#args + 1] = math.max(1, tonumber(limit) or 5)
+    end
+    local result, nrows = DB.query(
+        [[SELECT b.source_id, b.stable_id, b.title, b.authors, b.category,
+                 COALESCE(p.fraction, 0),
+                 COALESCE((SELECT MAX(r.start_time) FROM reading_stats r
+                           WHERE r.source_id=b.source_id AND r.stable_id=b.stable_id
+                             AND r.record_type IN ('page','page_rollup')), p.updated_at, 0),
+                 COALESCE((SELECT SUM(r.duration) FROM reading_stats r
+                           WHERE r.source_id=b.source_id AND r.stable_id=b.stable_id
+                             AND r.record_type IN ('page','page_rollup')), 0)
+          FROM books b LEFT JOIN pending_progress p
+            ON p.source_id=b.source_id AND p.stable_id=b.stable_id
+          WHERE ]] .. src .. " AND b.deleted=0 AND b.hidden=0 AND " .. cond .. tail .. ";",
+        unpack(args)
+    )
+    local rows = {}
+    for i = 1, nrows do
+        rows[i] = {
+            source_id = result[1][i],
+            stable_id = result[2][i],
+            title = result[3][i],
+            authors = result[4][i],
+            category = result[5][i],
+            fraction = tonumber(result[6][i]) or 0,
+            last_time = tonumber(result[7][i]) or 0,
+            seconds = tonumber(result[8][i]) or 0,
+        }
+    end
+    return rows
+end
+
 --- 把较老的已同步逐页记录按书籍和本地小时压成汇总行。
 --- 未同步行绝不参与；event_count 保留原页事件数，所有展示聚合口径不变。
 ---@param source_id string

@@ -81,6 +81,8 @@ package.preload["book.stats_db"] = function()
         dailyBySource = function() return FakeStats.daily end,
         dailyBooksBySource = function() return FakeStats.daily_books end,
         hourlyBySource = function() return FakeStats.hourly end,
+        sessionRows = function() return {} end,
+        progressBooks = function() return {} end,
     }
 end
 package.loaded["book.catalog"] = nil
