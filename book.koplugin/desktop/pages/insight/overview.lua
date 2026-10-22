@@ -1,5 +1,5 @@
 --[[--
-统计页第 1 页：总览 KPI 与月历。
+统计页「本月」页：当月指标、月历和当月阅读时段。
 
 @module koplugin.book.desktop.pages.insight.overview
 --]]
@@ -12,6 +12,11 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
+local Calc = require("book.insight_calc")
+local Catalog = require("book.catalog")
+local Hours = require("desktop.pages.insight.hours")
+local Layout = require("desktop.pages.insight.layout")
+local Parts = require("desktop.pages.insight.parts")
 local Pager = require("ui.themes.widgets.pager")
 local Tap = require("ui.themes.widgets.tap")
 local Text = require("ui.themes.widgets.text")
@@ -66,58 +71,6 @@ local function resolveDay(y, m, day_num, days_in_month)
     return ny, nm, day_num - days_in_month, true
 end
 
---- 构建总时长英雄区。
----@param t table 主题令牌
----@param state table 统计状态。
----@param width number 内容宽度。
----@return table
-local function buildHero(t, state, width)
-    local total_obj = state.total or {}
-    local total = total_obj.total_text
-    if state.error or not state.has_data or not total_obj.has_data or not total or total == "" then
-        total = "—"
-    end
-    local group = VerticalGroup:new{
-        align = "center",
-        Text.line("hero", tostring(total), { width = width }),
-        VerticalSpan:new{ width = Theme.px(t.space.xs) },
-        Text.line("caption", _("总阅读时长"), { width = width, color = t.color.muted }),
-    }
-    return CenterContainer:new{
-        dimen = Geom:new{ w = width, h = group:getSize().h + Theme.px(t.space.lg) * 2 },
-        group,
-    }
-end
-
---- 构建次级 KPI 三列。
----@param t table 主题令牌
----@param state table 统计状态。
----@param width number 内容宽度。
----@return table
-local function buildSecondary(t, state, width)
-    local total_obj = state.total or {}
-    local items = {
-        { _("近7天"), total_obj.last7_text },
-        { _("最长日"), total_obj.longest_day_text },
-        { _("总页数"), total_obj.total_pages },
-    }
-    local cell_w = math.floor(width / #items)
-    local text_w = cell_w - Theme.px(t.space.xs)
-    local row = HorizontalGroup:new{ align = "center" }
-    for _idx, item in ipairs(items) do
-        local value = item[2]
-        if value == nil or value == "" then value = "—" end
-        local cell = VerticalGroup:new{
-            align = "center",
-            Text.line("title", tostring(value), { width = text_w }),
-            VerticalSpan:new{ width = Theme.px(t.space.xs) },
-            Text.line("caption", item[1], { width = text_w, color = t.color.muted }),
-        }
-        row[#row + 1] = CenterContainer:new{ dimen = Geom:new{ w = cell_w, h = cell:getSize().h }, cell }
-    end
-    return row
-end
-
 --- 构建日历单格：有阅读的日子加粗并在下方点一个墨点，选中日描边。
 ---@param t table 主题令牌
 ---@param size number 单格边长。
@@ -148,9 +101,9 @@ end
 ---@param desktop table 桌面实例。
 ---@param state table 统计状态。
 ---@param width number 内容宽度。
----@param max_height number|nil 日历最大高度。
+---@param extra number 相对自然高度的增减，摊到每行格子上。
 ---@return table
-local function buildCalendar(desktop, state, width, max_height)
+local function buildCalendar(desktop, state, width, extra)
     local per_day = (state.calendar and state.calendar.days) or {}
     local ym = state.ym or (state.calendar and state.calendar.initial_ym) or os.date("%Y-%m")
     local selected = state.selected or ""
@@ -176,7 +129,6 @@ local function buildCalendar(desktop, state, width, max_height)
             desktop:updateView()
         end,
     })
-    local nav_h = nav:getSize().h
     local dow_h = Text.line("caption", DOW[1]):getSize().h
     local xs = Theme.px(t.space.xs)
 
@@ -187,11 +139,7 @@ local function buildCalendar(desktop, state, width, max_height)
     local days_in_month = tonumber(os.date("%d", os.time{ year = y, month = m + 1, day = 0 })) or 30
     local total = math.ceil((first_wday + days_in_month) / 7) * 7
     local rows = math.ceil(total / 7)
-    if max_height then
-        local fixed_h = nav_h + xs + dow_h + gap + gap * (rows - 1)
-        size = math.min(size, math.floor((max_height - fixed_h) / rows))
-    end
-    size = math.max(1, size)
+    size = math.max(1, math.min(col_w, size + math.floor(extra / rows)))
 
     local dow_row = HorizontalGroup:new{ align = "center" }
     for i, name in ipairs(DOW) do
@@ -222,7 +170,7 @@ local function buildCalendar(desktop, state, width, max_height)
         local cell = calCell(t, size, cd, seconds > 0, out, key == selected, function()
             state.selected = key
             if out then state.ym = string.format("%04d-%02d", cy, cm) end
-            desktop.insight.ui_page = 2
+            desktop.insight:goto("day")
             desktop:updateView()
         end)
         table.insert(row, CenterContainer:new{
@@ -242,31 +190,46 @@ local function buildCalendar(desktop, state, width, max_height)
     }
 end
 
---- 构建概览页。
----@param desktop table 桌面实例。
----@param state table 统计状态。
----@param width number 内容宽度。
----@param avail_h number 可用高度。
+--- 构建本月页：指标卡、月历、阅读时段，余量由 Layout.stack 分配（月历格子随之伸缩）。
+---@param ctx { desktop: table, state: table, width: number, height: number }
 ---@return table
-function Overview:build(desktop, state, width, avail_h)
+function Overview:build(ctx)
+    local desktop, state, width = ctx.desktop, ctx.state, ctx.width
     local t = Theme.current()
-    local hero = buildHero(t, state, width)
-    local col = VerticalGroup:new{ align = "left", hero }
-    local message = state.error or (not state.has_data and _("暂无阅读统计。上报后再查看。"))
-    if message then
-        col[#col + 1] = Text.box("body", message, width, { align = "center", color = t.color.muted })
-        return col
+    local xs, sm = Theme.px(t.space.xs), Theme.px(t.space.sm)
+    local days, ym = state.calendar.days, state.ym
+    local sum = Calc.sum(days, ym)
+    local finished = 0
+    for _idx, b in ipairs(state.finished or {}) do
+        if os.date("%Y-%m", b.last_time) == ym then finished = finished + 1 end
     end
-    local sm, lg = Theme.px(t.space.sm), Theme.px(t.space.lg)
-    local secondary = buildSecondary(t, state, width)
-    local hint = Text.line("caption", _("点选日期查看当日书单"), { width = width, color = t.color.muted })
-    local fixed_h = hero:getSize().h + secondary:getSize().h + lg + sm + hint:getSize().h
-    col[#col + 1] = secondary
-    col[#col + 1] = VerticalSpan:new{ width = lg }
-    col[#col + 1] = buildCalendar(desktop, state, width, math.max(1, avail_h - fixed_h))
-    col[#col + 1] = VerticalSpan:new{ width = sm }
-    col[#col + 1] = hint
-    return col
+    return Layout.stack("month", {
+        { id = "kpi", build = function()
+            return (Parts.cards({
+                { value = Catalog.formatDuration(sum.seconds), label = _("本月阅读时长") },
+                { value = T(_("%1天"), sum.days), label = _("阅读天数") },
+                { value = T(_("%1本"), finished), label = _("读完") },
+            }, width, sm))
+        end },
+        { id = "calendar", lo = -Theme.px(140), hi = Theme.px(120), build = function(extra)
+            return VerticalGroup:new{
+                align = "left",
+                buildCalendar(desktop, state, width, extra),
+                VerticalSpan:new{ width = sm },
+                Parts.caption(_("点选日期查看当日详情"), width),
+            }
+        end },
+        { id = "hours", lo = -Theme.px(20), hi = Theme.px(60), build = function(extra)
+            local chart = Hours.hourChart(days, ym, width, Theme.px(60) + extra)
+            if not chart then return nil end
+            return VerticalGroup:new{
+                align = "left",
+                Parts.caption(_("本月阅读时段"), width),
+                VerticalSpan:new{ width = xs },
+                chart,
+            }
+        end },
+    }, width, ctx.height)
 end
 
 return Overview

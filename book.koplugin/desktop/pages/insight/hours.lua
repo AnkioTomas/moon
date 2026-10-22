@@ -1,5 +1,5 @@
 --[[--
-统计页第 4 页：阅读时段（按小时、按星期）。
+统计页的阅读时段图表（按小时、按星期）；不是独立页面，本月页画按小时，趋势页画按星期。
 
 本机逐页记录 + 云端时段桶：云端按活动行起始整点归档（跨整点的活动行整体算起始小时），
 与本机记录同一套合并口径（见 book.stats_db.hourlyBySource）。
@@ -7,35 +7,28 @@
 @module koplugin.book.desktop.pages.insight.hours
 --]]
 
-local HorizontalGroup = require("ui/widget/horizontalgroup")
-local HorizontalSpan = require("ui/widget/horizontalspan")
-local VerticalGroup = require("ui/widget/verticalgroup")
-local VerticalSpan = require("ui/widget/verticalspan")
-local Catalog = require("book.catalog")
 local Chart = require("ui.widgets.chart")
-local Common = require("desktop.detail.common")
 local Theme = require("ui.themes")
-local Text = require("ui.themes.widgets.text")
 local _ = require("gettext")
-local T = require("ffi/util").template
 
 ---@class BookInsightHours
 local Hours = {}
 
 local WEEKDAYS = { _("一"), _("二"), _("三"), _("四"), _("五"), _("六"), _("日") }
 
---- 全部日子按小时、按星期（周一在前）累加。
+--- 日期键以 prefix 开头的日子按小时、按星期（周一在前）累加。
 ---@param days table<string, StatsCalendarDay>
+---@param prefix string YYYY 或 YYYY-MM；空串 = 全部
 ---@return number[] by_hour 24 格
 ---@return number[] by_wday 7 格
 ---@return number total
-local function aggregate(days)
+function Hours.aggregate(days, prefix)
     local by_hour, by_wday, total = {}, {}, 0
     for h = 1, 24 do by_hour[h] = 0 end
     for d = 1, 7 do by_wday[d] = 0 end
     for ymd, info in pairs(days) do
         local y, m, d = ymd:match("^(%d+)%-(%d+)%-(%d+)$")
-        if info.hours and y then
+        if info.hours and y and ymd:sub(1, #prefix) == prefix then
             local wday = os.date("*t", os.time{ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 }).wday
             local idx = (wday + 5) % 7 + 1
             for h = 1, 24 do
@@ -60,54 +53,29 @@ function Hours.points(hours)
     return points
 end
 
---- 构建阅读时段页。
----@param state table 统计状态
----@param width number 内容宽度
----@param avail_h number 可用高度
----@return table
-function Hours:build(state, width, avail_h)
-    local t = Theme.current()
-    local by_hour, by_wday, total = aggregate(state.calendar.days)
-    local function muted(text)
-        return Text.line("caption", text, { width = width, color = t.color.muted })
-    end
-    if total <= 0 then
-        return muted(_("暂无本机阅读记录"))
-    end
-    local gap, xs = Theme.px(t.space.sm), Theme.px(t.space.xs)
+--- 按小时柱图；没有本机记录返回 nil。
+---@param days table<string, StatsCalendarDay>
+---@param prefix string
+---@param width number
+---@param height number
+---@return table|nil
+function Hours.hourChart(days, prefix, width, height)
+    local by_hour, _by_wday, total = Hours.aggregate(days, prefix)
+    if total <= 0 then return nil end
+    return Chart.bars({ points = Hours.points(by_hour), width = width, height = height, gap = Theme.px(2) })
+end
 
-    local peak = 1
-    for h = 2, 24 do
-        if by_hour[h] > by_hour[peak] then peak = h end
-    end
-    local card_w = math.floor((width - gap) / 2)
-    local peak_card = Common.kpiCard(card_w, T(_("%1:00–%2:00"), peak - 1, peak % 24), _("最常阅读时段"))
-    local total_card = Common.kpiCard(card_w, Catalog.formatDuration(total), _("本机记录时长"))
-    local kpi = HorizontalGroup:new{ align = "center", peak_card, HorizontalSpan:new{ width = gap }, total_card }
-
-    local hint = muted(_("只统计本机记录，不含云端同步来的时长"))
-    local hour_title, wday_title = muted(_("按小时")), muted(_("按星期"))
-    local used = kpi:getSize().h + gap + hint:getSize().h + gap
-        + (hour_title:getSize().h + xs) * 2 + gap
-    local chart_h = math.max(Theme.px(48), math.min(Theme.px(180), math.floor((avail_h - used) / 2)))
-
-    local wday_points = {}
-    for d = 1, 7 do wday_points[d] = { value = by_wday[d], label = WEEKDAYS[d] } end
-
-    return VerticalGroup:new{
-        align = "left",
-        kpi,
-        VerticalSpan:new{ width = gap },
-        hint,
-        VerticalSpan:new{ width = gap },
-        hour_title,
-        VerticalSpan:new{ width = xs },
-        Chart.bars({ points = Hours.points(by_hour), width = width, height = chart_h, gap = Theme.px(2) }),
-        VerticalSpan:new{ width = gap },
-        wday_title,
-        VerticalSpan:new{ width = xs },
-        Chart.bars({ points = wday_points, width = width, height = chart_h, gap = xs }),
-    }
+--- 按星期柱图（周一在前）；没有本机记录返回 nil。
+---@param days table<string, StatsCalendarDay>
+---@param width number
+---@param height number
+---@return table|nil
+function Hours.weekdayChart(days, width, height)
+    local _by_hour, by_wday, total = Hours.aggregate(days, "")
+    if total <= 0 then return nil end
+    local points = {}
+    for d = 1, 7 do points[d] = { value = by_wday[d], label = WEEKDAYS[d] } end
+    return Chart.bars({ points = points, width = width, height = height, gap = Theme.px(4) })
 end
 
 return Hours

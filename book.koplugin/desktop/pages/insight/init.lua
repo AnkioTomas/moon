@@ -1,14 +1,17 @@
 --[[--
-统计页入口：经当前源读本地洞察，打开书籍详情，分发四页 UI。
+统计页入口：经当前源读本地洞察，打开书籍详情，分发六页 UI。
 
 不发起网络请求。读路径直查 book.catalog.readingInsightAsync（聚合本地库）；
-远端写入只由源侧 syncStatsAsync 完成。
+远端写入只由源侧 syncStatsAsync 完成。计算在 book/insight_calc.lua，页面只拼装。
 
+页面与页内卡片可在设置里开关（layout.lua 目录 + settings/insight.lua），余下的卡片自动拉伸填满。
 UI 页面按需加载：
-  1. insight/overview.lua - 概览与日历
-  2. insight/day.lua      - 当日书单
-  3. insight/records.lua  - 连续记录与年度图表
-  4. insight/hours.lua    - 阅读时段（本机记录 + 云端时段桶）
+  1. insight/day.lua      - 今日（选中日）：活动环、时段、阅读段、书单
+  2. insight/overview.lua - 本月：指标卡、月历、时段
+  3. insight/year.lua     - 本年：月图、热力图、读完封面墙
+  4. insight/ranks.lua    - 榜单：最长阅读、作者、题材
+  5. insight/trends.lua   - 趋势：90 天 vs 一年、本周 vs 上周
+  6. insight/goals.lua    - 进度：本月挑战、完成预测、连续记录
 
 @module koplugin.book.desktop.pages.insight
 --]]
@@ -18,6 +21,7 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local BookDB = require("book.books_db")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
+local Layout = require("desktop.pages.insight.layout")
 local Pager = require("ui.themes.widgets.pager")
 local Text = require("ui.themes.widgets.text")
 local Toast = require("ui.themes.widgets.toast")
@@ -99,26 +103,24 @@ function Insight:openBookDetail(hint)
     require("desktop.detail").open(desktop, "library", book)
 end
 
---- 构建当前页 UI；页面模块只在真正显示时加载。
----@param insight BookInsight
----@param page number 页码。
----@param state table 统计状态。
----@param width number 内容宽度。
----@param height number 内容高度。
----@return table
-local function buildPage(insight, page, state, width, height)
-    local desktop = insight.desktop
-    if page == 1 then
-        return require("desktop.pages.insight.overview"):build(desktop, state, width, height)
-    elseif page == 2 then
-        return require("desktop.pages.insight.day"):build(
-            desktop, state, width, height,
-            function(book) insight:openBookDetail(book) end
-        )
-    elseif page == 3 then
-        return require("desktop.pages.insight.records"):build(state, width, height)
+local PAGE_MODULES = {
+    day = "desktop.pages.insight.day",
+    month = "desktop.pages.insight.overview",
+    year = "desktop.pages.insight.year",
+    ranks = "desktop.pages.insight.ranks",
+    trends = "desktop.pages.insight.trends",
+    goals = "desktop.pages.insight.goals",
+}
+
+--- 跳到指定页面（日历点日期回今日页）；该页被隐藏就留在原地。
+---@param id string 页面 id，见 layout.lua
+function Insight:goto(id)
+    for i, page in ipairs(Layout.pages()) do
+        if page.id == id then
+            self.ui_page = i
+            return
+        end
     end
-    return require("desktop.pages.insight.hours"):build(state, width, height)
 end
 
 --- 构建统计 Tab 整页 UI：正文区（顶对齐）+ 以页名作标题的翻页条。
@@ -134,11 +136,24 @@ function Insight:build()
     local body_h = math.max(1, height - Theme.px(t.control.height))
     local inner_h = math.max(1, body_h - pad * 2)
 
-    local labels = { _("概览"), _("今日总览"), _("连续记录"), _("阅读时段") }
-    local pages = state.has_data and not state.error and #labels or 1
+    local specs = Layout.pages()
+    local usable = state.has_data and not state.error
+    local pages = usable and #specs or 1
     local page = math.max(1, math.min(self.ui_page, pages))
     self.ui_page, self.ui_pages = page, pages
-    local body = buildPage(self, page, state, content_w, inner_h)
+    local spec = specs[page]
+    local title = spec.label
+    local body
+    if usable then
+        if spec.id == "day" and state.selected ~= os.date("%Y-%m-%d") then title = _("当日") end
+        body = require(PAGE_MODULES[spec.id]):build({
+            desktop = desktop, state = state, width = content_w, height = inner_h,
+            open_book = function(book) self:openBookDetail(book) end,
+        })
+    else
+        body = Text.box("body", state.error or _("暂无阅读统计。上报后再查看。"), content_w,
+            { align = "center", color = t.color.muted })
+    end
     return Box:new{
         style = { bg = t.color.page },
         width = width,
@@ -159,7 +174,7 @@ function Insight:build()
                 width = width,
                 page = page,
                 pages = pages,
-                title = labels[page],
+                title = title,
                 on_prev = function() self:turn(-1) end,
                 on_next = function() self:turn(1) end,
             }),
@@ -218,6 +233,9 @@ function Insight:fetch()
             calendar = raw.calendar,
             ym = ym,
             selected = selected,
+            sessions = raw.sessions,
+            finished = raw.finished,
+            reading = raw.reading,
         })
     end)
     -- 源可能同步回调：已结束的句柄不能留下挡住下次读取。
