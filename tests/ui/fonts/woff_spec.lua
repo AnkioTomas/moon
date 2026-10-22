@@ -20,15 +20,6 @@ local function compress(data)
     assert(libz.compress2(buf, len, ffi.cast("const uint8_t *", data), #data, 9) == 0)
     return ffi.string(buf, len[0])
 end
-package.preload["ffi/zlib"] = function()
-    return { zlib_uncompress = function(zdata, datalen)
-        local buf = ffi.new("uint8_t[?]", datalen)
-        local len = ffi.new("unsigned long[1]", datalen)
-        assert(libz.uncompress(buf, len, ffi.cast("const uint8_t *", zdata), #zdata) == 0)
-        return ffi.string(buf, len[0])
-    end }
-end
-
 local Woff = require("ui.fonts.woff")
 
 local function be32(n)

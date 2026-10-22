@@ -9,6 +9,71 @@ FreeType 打开 WOFF 时会把整份字体解压到堆上，而 crengine 每个�
 
 local Woff = {}
 
+local CHUNK = 65536
+local libz_cache
+
+--- 逐条 cdef：同名声明可能已被别的模块（番茄 crypto）定义，重复声明报错不能连带丢掉其余声明。
+---@return table
+local function libz()
+    if libz_cache then return libz_cache end
+    local ffi = require("ffi")
+    for _idx, decl in ipairs({
+        [[typedef struct {
+            const unsigned char *next_in;
+            unsigned int avail_in;
+            unsigned long total_in;
+            unsigned char *next_out;
+            unsigned int avail_out;
+            unsigned long total_out;
+            const char *msg;
+            void *state;
+            void *(*zalloc)(void *, unsigned int, unsigned int);
+            void (*zfree)(void *, void *);
+            void *opaque;
+            int data_type;
+            unsigned long adler;
+            unsigned long reserved;
+        } moon_z_stream;]],
+        "int inflateInit2_(void *, int, const char *, int);",
+        "int inflate(void *, int);",
+        "int inflateEnd(void *);",
+    }) do
+        pcall(ffi.cdef, decl)
+    end
+    libz_cache = ffi.load("z")
+    return libz_cache
+end
+
+--- 把 data 里 [offset, offset+comp_len) 的 zlib 流分块解压写进 out，返回解出的字节数。
+--- 不整表分配缓冲区：大 CJK 字体的 glyf 表有几十 MB，一次性解压会在小内存设备上 OOM。
+---@param data string
+---@param offset integer 0 起始
+---@param comp_len integer
+---@param out file*
+---@return integer
+local function inflateTo(data, offset, comp_len, out)
+    local ffi, z = require("ffi"), libz()
+    local strm = ffi.new("moon_z_stream")
+    local zs = ffi.cast("void *", strm)
+    assert(z.inflateInit2_(zs, 15, "1.2.11", ffi.sizeof(strm)) == 0, "inflateInit failed")
+    local buf = ffi.new("unsigned char[?]", CHUNK)
+    strm.next_in = ffi.cast("const unsigned char *", data) + offset
+    strm.avail_in = comp_len
+    local total, ret = 0, 0
+    while ret == 0 do
+        strm.next_out = buf
+        strm.avail_out = CHUNK
+        ret = z.inflate(zs, 0)
+        if ret ~= 0 and ret ~= 1 then break end
+        local n = CHUNK - strm.avail_out
+        total = total + n
+        assert(out:write(ffi.string(buf, n)))
+    end
+    z.inflateEnd(zs)
+    assert(ret == 1, "inflate failed: " .. ret)
+    return total
+end
+
 ---@param s string
 ---@param pos integer 1 起始
 ---@param len integer 字节数
@@ -31,9 +96,9 @@ local function be(n, len)
     return string.char(unpack(bytes))
 end
 
---- 把 WOFF 内容解包成 sfnt 写进 out；格式错误、解压失败（ffi/zlib 直接 assert）、写盘失败一律抛错。
+--- 把 WOFF 内容解包成 sfnt 写进 out；格式错误、解压失败、写盘失败一律抛错。
 --- WOFF 目录按 tag 升序（规范要求），原样沿用为 sfnt 表记录顺序。
---- 逐表解压写盘，峰值内存 ≈ 源文件 + 2 × 最大单表（解压缓冲区 + 其 Lua 字符串拷贝）。
+--- 逐表分块解压写盘，峰值内存 ≈ 源文件 + 64KB。
 ---@param data string
 ---@param out file*
 local function writeSfnt(data, out)
@@ -58,12 +123,12 @@ local function writeSfnt(data, out)
     end
     assert(out:write(table.concat(header)))
     for _idx, e in ipairs(entries) do
-        local chunk = data:sub(e.offset + 1, e.offset + e.comp_len)
         if e.comp_len < e.orig_len then
-            chunk = require("ffi/zlib").zlib_uncompress(chunk, e.orig_len)
-            assert(#chunk == e.orig_len, "corrupt WOFF table " .. e.tag)
+            assert(inflateTo(data, e.offset, e.comp_len, out) == e.orig_len, "corrupt WOFF table " .. e.tag)
+        else
+            assert(out:write(data:sub(e.offset + 1, e.offset + e.comp_len)))
         end
-        assert(out:write(chunk, ("\0"):rep(-e.orig_len % 4)))
+        assert(out:write(("\0"):rep(-e.orig_len % 4)))
     end
     assert(out:flush())
 end
