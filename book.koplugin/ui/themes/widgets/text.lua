@@ -57,13 +57,14 @@ end
 ---@param role string caption/body/title/hero
 ---@param text string
 ---@param width number 物理像素
----@param opts table|nil color/bg/bold/face/align/height/ellipsis/max_lines
+---@param opts table|nil color/bg/transparent/bold/face/align/height/ellipsis/max_lines
 ---@return table TextBoxWidget 放没放下看 getAllLineCount() > getVisLineCount()
 function Text.box(role, text, width, opts)
     opts = opts or {}
     local theme = Theme.current()
+    local ink = Blitbuffer.Color8(opts.color or theme.color.ink)
     local function build(height)
-        return TextBoxWidget:new{
+        local box = TextBoxWidget:new{
             text = text,
             face = opts.face or Text.face(role),
             bold = bold(opts, role),
@@ -72,9 +73,17 @@ function Text.box(role, text, width, opts)
             height_adjust = height ~= nil,
             alignment = opts.align or "left",
             height_overflow_show_ellipsis = (opts.ellipsis or opts.max_lines) and true or nil,
-            fgcolor = Blitbuffer.Color8(opts.color or theme.color.ink),
-            bgcolor = Blitbuffer.Color8(opts.bg or theme.color.page),
+            -- 透明：白字黑底渲染成覆盖率蒙版，绘制时按它给目标画布上墨色，不铺底色。
+            fgcolor = opts.transparent and Blitbuffer.COLOR_WHITE or ink,
+            bgcolor = opts.transparent and Blitbuffer.COLOR_BLACK or Blitbuffer.Color8(opts.bg or theme.color.page),
         }
+        if opts.transparent then
+            function box:paintTo(bb, x, y)
+                self.dimen.x, self.dimen.y = x, y
+                bb:colorblitFrom(self._bb, x, y, 0, 0, self.width, self._bb:getHeight(), ink)
+            end
+        end
+        return box
     end
     local box = build(opts.height)
     if opts.max_lines and box:getAllLineCount() > opts.max_lines then

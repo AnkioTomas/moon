@@ -26,6 +26,7 @@ local Theme = require("ui.themes")
 ---@field padding number 物理像素内边距
 ---@field width number|nil 物理像素外框宽（不含阴影）
 ---@field height number|nil 物理像素外框高（不含阴影）
+---@field bg_alpha number|nil 底色不透明度百分比（缺省 100）；<100 时底色按比例叠在下层内容上，底色须为白
 ---@field box_w number 实际外框宽（init 算定，不含阴影）
 ---@field box_h number 实际外框高（init 算定，不含阴影）
 local Box = WidgetContainer:extend{
@@ -100,7 +101,12 @@ function Box:paintTo(bb, x, y)
     if self.shadow > 0 then
         bb:paintRoundedRect(x + self.shadow, y + self.shadow, w, h, Blitbuffer.Color8(s.shadow_color), r)
     end
-    if s.bg then
+    if s.bg and self.bg_alpha and self.bg_alpha < 100 then
+        -- 白底按比例向白提亮即「白色 + 透明度」；圆角外的像素还原。
+        local corners = r > 0 and snapshotCorners(bb, x, y, w, h, r) or nil
+        bb:lightenRect(x, y, w, h, self.bg_alpha / 100)
+        for _idx, pixel in ipairs(corners or {}) do bb:setPixel(pixel[1], pixel[2], pixel[3]) end
+    elseif s.bg then
         bb:paintRoundedRect(x, y, w, h, Blitbuffer.Color8(s.bg), r)
     end
     local border = Theme.px(s.border or 0)

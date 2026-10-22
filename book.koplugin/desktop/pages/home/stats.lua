@@ -9,6 +9,7 @@ local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local Common = require("desktop.detail.common")
+local MoonSettings = require("utils.settings")
 local Theme = require("ui.themes")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -86,6 +87,26 @@ local function cards(source)
     }
 end
 
+---@return number
+local function opacity()
+    return MoonSettings.get("desktop.pages.home").home_stats_opacity
+end
+
+--- 编辑态设置：卡片底色不透明度。
+---@param desktop BookDesktop
+function M:showSettings(desktop)
+    require("ui.themes.widgets.spin"):new{
+        title = _("卡片底色不透明度（%）"),
+        fields = { { value = opacity(), min = 0, max = 100, step = 10 } },
+        callback = function(value)
+            local home = MoonSettings.get("desktop.pages.home")
+            home.home_stats_opacity = value
+            MoonSettings.save("desktop.pages.home", home)
+            desktop:onEvent("home_refresh")
+        end,
+    }:show()
+end
+
 --- 一张卡的实测高度。
 ---@return BookHomeHeightSpec
 function M:heightRange()
@@ -104,7 +125,7 @@ function M:createWidget()
     local key = {}
     for i, item in ipairs(items) do
         if i > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
-        row[#row + 1] = (Common.kpiCard(card_w, item[1], item[2]))
+        row[#row + 1] = (Common.kpiCard(card_w, item[1], item[2], opacity()))
         key[i] = item[1]
     end
     self.key = table.concat(key, "\31")
