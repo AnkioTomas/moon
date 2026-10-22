@@ -271,11 +271,16 @@ end
 --- CloseDocument：结清阅读状态；切章保留目录，真正关书清除全部章节状态。
 ---@param plugin table Book 插件实例
 function Session.onCloseDocument(plugin)
+    local Perf = require("utils.perf")
+    local started_at = Perf.now()
     if Session._snapshot and plugin.ui then
         require("reader.prefs").captureAndSave(plugin.ui, Session._snapshot.identity)
     end
+    Perf.slow("close prefs", started_at)
     syncReading(plugin)
+    Perf.slow("close sync", started_at)
     require("reader.session.auto_toc").stop(Session._snapshot)
+    Perf.slow("close total", started_at)
     if ChapterMode.onCloseDocument(Session._snapshot) then
         require("reader.session.progress").clearConflicts()
     end
