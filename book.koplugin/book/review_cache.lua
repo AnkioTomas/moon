@@ -67,11 +67,13 @@ local function write(identity, kind, key, value)
         value = trimmed
     end
     local count = value.items and #value.items or #value
+    local now = os.time()
+    DB.exec([[DELETE FROM review_cache WHERE expire <= ?;]], now)
     DB.exec(
         [[INSERT OR REPLACE INTO review_cache (source_id, stable_id, chapter_idx, kind, key, payload, expire)
           VALUES (?,?,?,?,?,?,?);]],
         identity.source_id, identity.stable_id, tonumber(identity.chapter_idx), kind, key,
-        JSON.encode(value), os.time() + (count > 0 and TTL or EMPTY_TTL))
+        JSON.encode(value), now + (count > 0 and TTL or EMPTY_TTL))
 end
 
 ---@param range string
