@@ -82,21 +82,15 @@ local function brightness(ctx)
     return require("features.panel.desktop").lightPercent("brightness")
 end
 
---- 系统剩余运存（MB）；读不到（非 Linux）返回 nil。
+--- 系统剩余运存（MB）；和桌面顶栏同源（KOReader util.calcFreeMem），读不到返回 nil。
 ---@param ctx table
 ---@return number|nil
 local function freeMemory(ctx)
     if ctx.memory then
         return ctx.memory
     end
-    local f = io.open("/proc/meminfo", "r")
-    if not f then
-        return nil
-    end
-    local raw = f:read("*a")
-    f:close()
-    local kb = tonumber(raw:match("MemAvailable:%s*(%d+)"))
-    return kb and kb / 1024 or nil
+    local bytes = require("util").calcFreeMem()
+    return bytes and bytes / 1024 / 1024 or nil
 end
 
 --- 「a/b」形式；开图标时省掉前后缀。
