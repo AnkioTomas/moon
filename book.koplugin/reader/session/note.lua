@@ -87,9 +87,9 @@ end
 --- 保存当前文档的完整注解快照。写入完成前不发网络请求。
 ---@param ui table
 ---@param identity BookIdentity 当前 ReaderSession 身份
+---@param changed table|nil KOReader 的 AnnotationsModified 描述（可选，恒为倒数第二个参数）
 ---@param done fun(ok: boolean, updated_at: number|nil)|nil
----@param changed table|nil KOReader 的 AnnotationsModified 描述（可选）
-function SessionNote.save(ui, identity, done, changed)
+function SessionNote.save(ui, identity, changed, done)
     if not ui or not ui.doc_settings then
         if done then done(false) end
         return
@@ -262,7 +262,7 @@ function SessionNote.pull(ui, identity)
     local existing = NoteDB.get(identity.source_id, identity.stable_id, identity.chapter_idx)
     local current = ui.doc_settings:readSetting("annotations") or {}
     if existing or #current > 0 then
-        SessionNote.save(ui, identity, function(saved)
+        SessionNote.save(ui, identity, nil, function(saved)
             if saved then syncAndApply() end
         end)
     else

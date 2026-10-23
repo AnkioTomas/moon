@@ -30,7 +30,7 @@ package.preload["docsettings"] = function()
 end
 local saves = 0
 package.preload["reader.session.note"] = function()
-    return { save = function(_ui, _identity, done) saves = saves + 1; done(true) end }
+    return { save = function(_ui, _identity, _changed, done) saves = saves + 1; done(true) end }
 end
 
 local DerivedNote = require("reader.session.derived_note")
