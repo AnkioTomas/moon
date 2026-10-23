@@ -288,6 +288,7 @@ function Desktop:init()
     self.store = StorePage:new{ desktop = self, name = "store" }
     self.insight = Insight:new{ desktop = self, name = "insight" }
     self.settings = Settings:new{ desktop = self }
+    self:restoreView()
     self.topbar = TopBar:new{ desktop = self }
     self.ges_events = {
         SwipeTopBar = Gesture.range("swipe", function() return 0 end, TopBar.height),
@@ -331,8 +332,25 @@ function Desktop:onCancel()
     broadcast(self, "onCancel")
 end
 
+--- 上一次桌面的浏览位置：进程内留存，读书退出重开桌面时还原（页签、书架的分组 / 筛选 / 页码 / 目录）。
+---@type { source_id: string, tab: string, library: table }|nil
+local remembered = nil
+
+--- 重开桌面时还原上次位置；换了源不还原。页签不可用时 syncTabs 会落回首页。
+function Desktop:restoreView()
+    local last = remembered
+    remembered = nil
+    if not last or last.source_id ~= self.source.id then return end
+    if last.tab ~= "settings" then self.tab = last.tab end
+    for k, v in pairs(last.library) do self.library[k] = v end
+end
+
 function Desktop:destroy()
     if self.closed then return end
+    local lib = self.library
+    remembered = { source_id = self.source.id, tab = self.tab, library = {
+        group = lib.group, group_page = lib.group_page, page = lib.page, filter = lib.filter, dir = lib.dir,
+    } }
     if self.active then self:deactivate() end
     self.closed = true
     -- 桌面打开的子窗口一并关掉，否则退出时残留在窗口栈上，KOReader 等不到空栈不退出。
