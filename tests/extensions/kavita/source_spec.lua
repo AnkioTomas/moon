@@ -525,12 +525,14 @@ do
         return false
     end
 
-    -- 远端注解仓库：GET all 读它，create / update 往里写；属主固定成当前用户。
+    -- 远端注解仓库：GET all 读它，create / update 往里写，bulk-delete 从它删；属主固定成当前用户。
     local USER, next_id = 5, 101
-    local remote, created, updated = {}, {}, {}
+    local remote, created, updated, deleted = {}, {}, {}, {}
     local fail_list, fail_create, fail_update, blank_create, drop_create, create_fail_at
+    local fail_delete, reject_delete, list_calls = false, false, 0
     routes["GET /api/Users/me"] = json({ id = USER })
     routes["GET /api/Annotation/all"] = function(opts)
+        list_calls = list_calls + 1
         if fail_list then return { code = 500, body = "" } end
         local chapter = tonumber(query(opts, "chapterId")) or 0
         local out = {}
@@ -575,11 +577,28 @@ do
         persist(body, true)
         return json({ id = body.id })
     end
+    -- 删除：body 是裸 id 数组；不存在的 id 静默忽略（与 Kavita 一致）。
+    -- reject_delete 用来模拟「不是你的 / 服务端拒绝」的 400 分支。
+    routes["POST /api/Annotation/bulk-delete"] = function(opts)
+        local ids = JSON.decode(opts.body)
+        deleted[#deleted + 1] = ids
+        if fail_delete then return { code = 500, body = "" } end
+        if reject_delete then return { code = 400, body = "" } end
+        local wanted = {}
+        for _idx, id in ipairs(ids) do wanted[tonumber(id)] = true end
+        for _chapter, rows in pairs(remote) do
+            for i = #rows, 1, -1 do
+                if wanted[tonumber(rows[i].id)] then table.remove(rows, i) end
+            end
+        end
+        return { code = 200, body = "" }
+    end
     --- 每个场景从干净状态开始：远端仓库、写请求计数、故障开关。
     local function resetPush()
-        remote, next_id, created, updated = {}, 101, {}, {}
+        remote, next_id, created, updated, deleted = {}, 101, {}, {}, {}
         fail_list, fail_create, fail_update = false, false, false
         blank_create, drop_create, create_fail_at = false, false, nil
+        fail_delete, reject_delete, list_calls = false, false, 0
         push_warnings = {}
     end
 
@@ -742,13 +761,107 @@ do
     Assert.is_nil(ghost.kavita_local_note)
 
     -- 本批墓碑的 id 先剔出对账列表：删了又原地划一条同键的，不能认领到「即将删除」的那条。
+    -- 先写后删：新建成功后一次 bulk-delete 删掉旧 id，远端最终只剩新建的那条。
     remote[2002] = { { id = 37, ownerUserId = USER, chapterId = 2002, xPath = "//body/p[1]", endingXPath = "//body/p[1]",
         selectedText = "春眠\n不觉晓", commentHtml = "<p>旧</p>" } }
-    local tomb = { kavita_id = 37, kavita_deleted = true }
+    local tomb = { kavita_id = 37, kavita_deleted = true, datetime = "2026-10-01" }
     local redo = { drawer = "lighten", text = "春眠\n不觉晓", note = "新的", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
-    Assert.is_true(run("pushNotesAsync", volume, { tomb, redo }))
+    local redo_batch = { tomb, redo }
+    Assert.is_true(run("pushNotesAsync", volume, redo_batch))
     Assert.is_true(redo.kavita_id ~= 37, "墓碑那条不在认领范围内")
     Assert.eq(redo.kavita_id, 101, "同键的划线重建一条")
+    Assert.eq(#deleted, 1)
+    Assert.eq(deleted[1][1], 37, "body 是裸 id 数组")
+    Assert.eq(#redo_batch, 1, "删除成功后墓碑从 payload 出列")
+    Assert.eq(redo_batch[1], redo)
+    Assert.eq(#remote[2002], 1, "删一条 + 原地划一条同键：远端只剩新建的那条")
+    Assert.eq(remote[2002][1].id, 101)
+
+    -- 删除高亮：墓碑单独一批也能推（没有 create/update），200 即出列、远端少一条；
+    -- 墓碑出列后再推一轮是零请求。
+    resetPush()
+    remote[2002] = { { id = 51, ownerUserId = USER, chapterId = 2002, selectedText = "旧划线",
+        commentHtml = "", comment = "" } }
+    local only_tomb = { { kavita_id = 51, kavita_deleted = true, datetime = "2026-10-01" } }
+    local ok_del, _err_del, data_del = run("pushNotesAsync", volume, only_tomb)
+    Assert.is_true(ok_del)
+    Assert.eq(data_del.pushed, 0)
+    Assert.eq(data_del.deleted, 1, "deleted 如实计数")
+    Assert.eq(deleted[1][1], 51)
+    Assert.len(only_tomb, 0, "墓碑出列")
+    Assert.len(remote[2002], 0, "远端确实少一条")
+    local quiet_before = #calls
+    local ok_quiet, _err_quiet, data_quiet = run("pushNotesAsync", volume, only_tomb)
+    Assert.is_true(ok_quiet)
+    Assert.eq(data_quiet.deleted, 0)
+    Assert.eq(#calls, quiet_before, "墓碑已出列，再推零请求")
+
+    -- 远端早就没有这个 id（别处删过 / 从没推成功）：bulk-delete 回 200 一样出列，不报错。
+    resetPush()
+    local ghost_tomb = { { kavita_id = 999, kavita_deleted = true, datetime = "d" } }
+    local ok_idem, _err_idem, data_idem = run("pushNotesAsync", volume, ghost_tomb)
+    Assert.is_true(ok_idem)
+    Assert.eq(data_idem.deleted, 1)
+    Assert.len(ghost_tomb, 0, "远端已删的墓碑幂等出列")
+
+    -- 删除失败（非 400）：整批 cb(nil)，墓碑留在 payload 里；下轮重试成功才出列。
+    resetPush()
+    remote[2002] = { { id = 52, ownerUserId = USER, chapterId = 2002, selectedText = "旧",
+        commentHtml = "", comment = "" } }
+    local retry_tomb = { { kavita_id = 52, kavita_deleted = true, datetime = "d" } }
+    fail_delete = true
+    local ok_retry, err_retry = run("pushNotesAsync", volume, retry_tomb)
+    Assert.is_nil(ok_retry)
+    Assert.matches(err_retry, "500")
+    Assert.len(retry_tomb, 1, "失败时墓碑保留，快照留脏")
+    Assert.len(remote[2002], 1)
+    fail_delete = false
+    local ok_again_del, _err_again_del, data_again_del = run("pushNotesAsync", volume, retry_tomb)
+    Assert.is_true(ok_again_del)
+    Assert.eq(data_again_del.deleted, 1, "重试成功")
+    Assert.len(retry_tomb, 0)
+    Assert.len(remote[2002], 0)
+
+    -- 写失败时一个删除都不发：先写后删，写入不留半成品删除。
+    resetPush()
+    remote[2002] = { { id = 53, ownerUserId = USER, chapterId = 2002, selectedText = "旧",
+        commentHtml = "", comment = "" } }
+    fail_create = true
+    local write_fail_batch = {
+        { kavita_id = 53, kavita_deleted = true, datetime = "d" },
+        { drawer = "lighten", text = "春眠\n不觉晓", note = "a", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" },
+    }
+    local ok_wf, err_wf = run("pushNotesAsync", volume, write_fail_batch)
+    Assert.is_nil(ok_wf)
+    Assert.matches(err_wf, "500")
+    Assert.len(deleted, 0, "create 失败就不发删除")
+    Assert.len(write_fail_batch, 2, "墓碑保留")
+
+    -- 400（服务端拒绝 / 不是你的）→ 重拉一次该章列表，仍在那里的丢弃墓碑并记日志，不无限重试。
+    resetPush()
+    remote[2002] = { { id = 54, ownerUserId = USER, chapterId = 2002, selectedText = "删不掉",
+        commentHtml = "", comment = "" } }
+    reject_delete = true
+    local rejected_tomb = { { kavita_id = 54, kavita_deleted = true, datetime = "d" } }
+    local ok_rej, _err_rej, data_rej = run("pushNotesAsync", volume, rejected_tomb)
+    Assert.is_true(ok_rej, "400 按对账结果收尾，不让整批反复失败")
+    Assert.eq(data_rej.deleted, 0, "远端还在，不算删成功")
+    Assert.len(rejected_tomb, 0, "仍在列表里的墓碑丢弃，下轮不再重试")
+    Assert.is_true(warned("delete rejected"), "丢弃要有日志")
+    Assert.eq(list_calls, 2, "400 后重拉一次该章列表")
+    Assert.len(remote[2002], 1, "远端那条原样保留")
+    local after_rej = #calls
+    Assert.is_true(run("pushNotesAsync", volume, rejected_tomb))
+    Assert.eq(#calls, after_rej, "不再有墓碑就零请求")
+
+    -- 400 且 id 已不在列表里 → 目标态已达成，墓碑出列并计入 deleted。
+    resetPush()
+    reject_delete = true
+    local gone_tomb = { { kavita_id = 55, kavita_deleted = true, datetime = "d" } }
+    local ok_gone, _err_gone, data_gone = run("pushNotesAsync", volume, gone_tomb)
+    Assert.is_true(ok_gone)
+    Assert.eq(data_gone.deleted, 1, "不在列表里 = 已经删掉")
+    Assert.len(gone_tomb, 0)
 
     -- create 回空体（反代吞了 DTO）：按 key 回查一次，命中才回填；仍是 200 不算成功。
     resetPush()
@@ -848,7 +961,7 @@ do
     -- 否则一次普通保存就把「数据在、画不出」的云端条目洗掉。
     local previous = {
         { pos0 = "p", kavita_id = 71, kavita_note = "n" },
-        { pos0 = "gone", kavita_id = 9 },
+        { pos0 = "gone", kavita_id = 9, datetime = "d-gone" },
         { datetime = "d", text = "云端条", kavita_id = 72, kavita_note = "", kavita_xpath = "//body/p[9]" },
     }
     local current = source:prepareLocalAnnotations(previous,
@@ -863,6 +976,87 @@ do
     local deduped = source:prepareLocalAnnotations(previous,
         { { pos0 = "p", note = "新" }, { kavita_id = 72, text = "已经在快照里" } })
     Assert.eq(#deduped, 2, "快照里已有的 id 不重复搬")
+
+    -- 本地删除（spec §9.1）：被删条目按 pos0 在上一版里找到、且那条有 id → 追加墓碑。
+    -- 墓碑不带 pos/page（画不出来），但带 id 与基线备注；阅读器与 doc_settings 都不画它。
+    local with_id = source:prepareLocalAnnotations(previous,
+        { { pos0 = "p", note = "新" } }, { pos0 = "gone", text = "删了" })
+    Assert.eq(#with_id, 3, "剩余条目 + 未定位条目 + 墓碑")
+    local tomb = with_id[3]
+    Assert.is_true(tomb.kavita_deleted)
+    Assert.eq(tomb.kavita_id, 9, "墓碑按 pos0 取上一版那条的 id")
+    Assert.is_nil(tomb.pos0, "墓碑没有坐标")
+    Assert.eq(tomb.datetime, "d-gone")
+
+    -- 被删的是划线转笔记 / 只删备注：条目还在，删除事件判据不成立（changed 传 nil）→ 无墓碑。
+    local note_change = source:prepareLocalAnnotations(previous,
+        { { pos0 = "p", note = "改成笔记" }, { pos0 = "gone", note = "还在" } })
+    Assert.eq(#note_change, 3, "条目仍在快照里，不产生墓碑")
+    for _idx, item in ipairs(note_change) do Assert.is_nil(item.kavita_deleted) end
+
+    -- 没 id 的本地划线被删：本来就没推到远端 → 不产生墓碑；pos0 对不上 / 没 pos0 同理（只漏删不误删）。
+    local no_id_previous = { { pos0 = "local", text = "纯本地", datetime = "d" } }
+    local no_id = source:prepareLocalAnnotations(no_id_previous, {},
+        { pos0 = "local", text = "纯本地" })
+    Assert.len(no_id, 0, "无 id 的删除不生成墓碑")
+    local no_pos = source:prepareLocalAnnotations(previous, {}, { text = "没有坐标" })
+    Assert.len(no_pos, 1, "没有 pos0：只剩未定位条目，不生成墓碑")
+    local miss = source:prepareLocalAnnotations(previous, {}, { pos0 = "other", text = "对不上" })
+    Assert.len(miss, 1, "pos0 在上一版找不到就不生成墓碑")
+
+    -- 后续保存从上一版重新接上墓碑，直到推送成功把它清掉；已有 id 的不重复搬。
+    local with_tomb_previous = {
+        { pos0 = "p", kavita_id = 71, kavita_note = "n" },
+        { datetime = "d", kavita_id = 9, kavita_deleted = true },
+    }
+    local reattached = source:prepareLocalAnnotations(with_tomb_previous,
+        { { pos0 = "p", note = "新" } })
+    Assert.eq(#reattached, 2)
+    Assert.is_true(reattached[2].kavita_deleted)
+    Assert.eq(reattached[2].kavita_id, 9)
+end
+
+-- 远端删除回流（spec §9.2）：seen 按远端**全量** id 建，未定位条目仍占位；
+-- 输出只画可渲染的远端条目；本地带 id 但远端没有 → 丢弃并计入 dropped。
+do
+    local remote = {
+        { datetime = "d1", page = "/body/p[1].0", pos0 = "/body/p[1].0", pos1 = "/body/p[1].5",
+            drawer = "lighten", text = "远端还在", kavita_id = 1 },
+        { datetime = "d2", kavita_id = 2, kavita_xpath = "//body/p[2]", kavita_unlocated = true },
+    }
+    local current = {
+        { datetime = "d1", page = "/body/p[1].0", pos0 = "/body/p[1].0", pos1 = "/body/p[1].5",
+            drawer = "lighten", text = "远端还在", kavita_id = 1 },
+        { datetime = "d2", page = "/body/p[2].0", pos0 = "/body/p[2].0", pos1 = "/body/p[2].5",
+            drawer = "lighten", text = "本地定位过", kavita_id = 2 },
+        { datetime = "d3", page = "/body/p[3].0", pos0 = "/body/p[3].0", pos1 = "/body/p[3].5",
+            drawer = "lighten", text = "远端删了", kavita_id = 3 },
+        { datetime = "d4", page = "/body/p[4].0", pos0 = "/body/p[4].0", pos1 = "/body/p[4].5",
+            drawer = "lighten", text = "纯本地" },
+    }
+    local merged, dropped = source:mergeAnnotations(remote, current, nil, false)
+    Assert.eq(#merged, 3, "远端已定位 1 条 + 未定位的本地副本 + 纯本地 1 条")
+    Assert.eq(merged[1].kavita_id, 1)
+    Assert.eq(merged[2].kavita_id, 2, "未定位远端不画，但本地已定位的那条保留")
+    Assert.is_nil(merged[3].kavita_id)
+    Assert.eq(dropped, 1, "只有远端确实没有的 id 算 dropped")
+    for _idx, item in ipairs(merged) do Assert.is_true(item.kavita_id ~= 3) end
+
+    -- 远端条目与本地同 id 只画远端那份（本地被替换），不算删除。
+    local replaced, replaced_dropped = source:mergeAnnotations(
+        { remote[1] }, { { datetime = "d1", page = "old", pos0 = "old", pos1 = "old",
+            drawer = "lighten", text = "本地旧坐标", kavita_id = 1 } }, nil, false)
+    Assert.eq(#replaced, 1)
+    Assert.eq(replaced[1].page, "/body/p[1].0")
+    Assert.eq(replaced_dropped, 0)
+
+    -- 离线 / 未定位全败：远端列表为空但本地都没有 id 时一条都不丢。
+    local kept, kept_dropped = source:mergeAnnotations({}, {
+        { datetime = "d4", page = "/body/p[4].0", pos0 = "/body/p[4].0", pos1 = "/body/p[4].5",
+            drawer = "lighten", text = "纯本地" },
+    }, nil, false)
+    Assert.eq(#kept, 1)
+    Assert.eq(kept_dropped, 0, "离线没有 id 集合时不判删除")
 end
 
 -- 拉取：开书时把云端 epub 注解落库（入库不定位）。每章一次 GET，按 ownerUserId 收窄；

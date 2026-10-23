@@ -339,8 +339,8 @@ end
 
 --- 注解变化：落盘后已在线才 dirty push；离线留脏给源 onNetworkConnected，不弹联网提示。
 ---@param plugin table Book 插件实例
----@param _items table KOReader 变更描述；完整数据从 annotation.annotations 读取
-function Session.onAnnotationsModified(plugin, _items)
+---@param items table|nil KOReader 变更描述；完整数据从 annotation.annotations 读取，删除判据在 index_modified
+function Session.onAnnotationsModified(plugin, items)
     if not Session._snapshot then return end
     local identity = Session._snapshot.identity
     require("reader.session.note").save(plugin.ui, identity, function(ok)
@@ -349,7 +349,7 @@ function Session.onAnnotationsModified(plugin, _items)
         if not source or not source.syncNotesAsync then return end
         if not require("ui/network/manager"):isConnected() then return end
         source:syncNotesAsync({ identity = identity, dirty_only = true }, function() end)
-    end)
+    end, items)
 end
 
 --- 休眠前：结清计时并同步当前进度和注解；会话继续保留。

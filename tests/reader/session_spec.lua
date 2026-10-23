@@ -166,9 +166,9 @@ end
 
 package.preload["reader.session.note"] = function()
     return {
-        save = function(ui, identity, cb)
+        save = function(ui, identity, cb, changed)
             calls.notes = calls.notes or {}
-            calls.notes[#calls.notes + 1] = { identity, ui }
+            calls.notes[#calls.notes + 1] = { identity, ui, changed }
             if cb then cb(true) end
         end,
         applyLocal = function(ui, identity)
@@ -465,11 +465,13 @@ do
     plugin.ui.annotation = { annotations = { { text = "高亮" } } }
     Session.onReaderReady(plugin)
     local notes_before = #(calls.notes or {})
-    Session.onAnnotationsModified(plugin, { { text = "变更描述" } })
+    local changed = { { text = "变更描述" }, nb_highlights_added = -1, index_modified = -3 }
+    Session.onAnnotationsModified(plugin, changed)
     Stubs.flush()
     local saved = calls.notes[notes_before + 1]
     Assert.eq(saved[1].stable_id, "b1")
     Assert.eq(saved[2], plugin.ui)
+    Assert.eq(saved[3], changed, "变更描述要透传给 SessionNote.save（删除墓碑靠它判 index_modified）")
     local pushed = calls.notes[notes_before + 2]
     Assert.eq(pushed[1].stable_id, "b1")
     Assert.eq(pushed[2], "dirty")
