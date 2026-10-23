@@ -84,7 +84,7 @@ Assert.is_true(odd_ticket.ticket:find("/", 1, true) == nil, "ticket is slash-fre
 authorized = true
 local _status, authorized_sources = call("GET", "sources", {})
 Assert.is_true(authorized_sources.sources[1].authorized)
-Assert.eq((call("POST", "ticket", { source = "qimao" })), 409)
+Assert.eq((call("POST", "ticket", { source = "qimao" })), 200, "authorized source can be re-authorized")
 authorized = false
 
 random_bytes = {}

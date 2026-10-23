@@ -47,6 +47,10 @@ local function randomTicket()
     return b64url(bytes)
 end
 
+-- 每个源本进程内成功授权的次数。已授权的源重新授权时，网页靠它判断新一轮授权是否完成。
+---@type table<string, integer>
+local applied = {}
+
 local function sweep(now)
     for id, entry in pairs(tickets) do
         if entry.expires < now and not (entry.receipt_until and entry.receipt_until >= now) then tickets[id] = nil end
@@ -65,6 +69,7 @@ local function sources()
             out[#out + 1] = {
                 id = meta.id, name = meta.name, login = browser.login, icon = browser.icon,
                 authorized = type(browser.isAuthorized) == "function" and browser.isAuthorized() or false,
+                auth_seq = applied[meta.id] or 0,
                 browser = browser,
             }
         end
@@ -120,6 +125,7 @@ local function login(params, cb)
     browser.apply(payload, function(ok, apply_err)
         entry.applying = nil
         if not ok then return reply(400, { error = apply_err or _("登录校验失败") }) end
+        applied[entry.source] = (applied[entry.source] or 0) + 1
         entry.receipt_until = os.time() + RECEIPT_TTL
         reply(200, { ok = true, close = true, ticketId = ticket_id })
     end)
@@ -134,14 +140,13 @@ function Remote.handle(method, action, params, cb)
         local out = {}
         for _idx, item in ipairs(sources()) do
             out[#out + 1] = {
-                id = item.id, name = item.name, icon = item.icon, authorized = item.authorized,
+                id = item.id, name = item.name, icon = item.icon, authorized = item.authorized, auth_seq = item.auth_seq,
             }
         end
         return cb(200, { sources = out })
     elseif action == "ticket" and method == "POST" then
-        local browser, item = findSource(tostring(params.source or ""))
+        local browser = findSource(tostring(params.source or ""))
         if not browser then return cb(404, { error = _("该数据源不支持浏览器登录") }) end
-        if item.authorized then return cb(409, { error = _("该数据源已授权") }) end
         local now = os.time()
         sweep(now)
         local ticket = randomTicket()

@@ -7,6 +7,7 @@
     var seq = 0;
     var list = el('list');
     var authorizedSources = Object.create(null);
+    var authSeq = Object.create(null);
     var sourceUi = Object.create(null);
     var authPoll = null;
     var authPollTimeout = null;
@@ -29,7 +30,7 @@
     function updateButtons() {
         var disabled = !extReady || launching || started;
         list.querySelectorAll('.cookie-connect').forEach(function (button) {
-            button.disabled = button.dataset.authorized === 'true' || disabled;
+            button.disabled = disabled;
         });
     }
 
@@ -39,7 +40,7 @@
         if (!ui) return;
         ui.card.classList.toggle('is-authorized', authorized);
         ui.button.dataset.authorized = authorized ? 'true' : 'false';
-        ui.button.textContent = authorized ? t('已授权') : t('继续授权');
+        ui.button.textContent = authorized ? t('重新授权') : t('继续授权');
         updateButtons();
     }
 
@@ -52,12 +53,14 @@
 
     function pollAuthorization(id) {
         stopAuthorizationPoll();
+        var baseline = authSeq[id] || 0;
         authPoll = window.setInterval(function () {
             jfetch('/api/cookie/sources', { cache: 'no-store' }).then(function (data) {
                 var source = (Array.isArray(data.sources) ? data.sources : []).find(function (item) {
                     return item.id === id;
                 });
-                if (!source || source.authorized !== true) return;
+                if (!source || source.authorized !== true || (source.auth_seq || 0) === baseline) return;
+                authSeq[id] = source.auth_seq || 0;
                 stopAuthorizationPoll();
                 setAuthorized(id, true);
                 started = false;
@@ -79,6 +82,7 @@
         var card = document.createElement('article');
         card.className = 'cookie-source-card';
         var authorized = source.authorized === true;
+        authSeq[source.id] = source.auth_seq || 0;
         if (authorized) card.classList.add('is-authorized');
 
         var mark = document.createElement('span');
@@ -108,8 +112,8 @@
         button.type = 'button';
         button.className = 'cookie-connect';
         button.dataset.authorized = authorized ? 'true' : 'false';
-        button.disabled = authorized || !extReady;
-        button.textContent = authorized ? t('已授权') : t('继续授权');
+        button.disabled = !extReady;
+        button.textContent = authorized ? t('重新授权') : t('继续授权');
         button.addEventListener('click', function () { start(source.id); });
 
         card.appendChild(mark);
@@ -121,7 +125,7 @@
     }
 
     function start(id) {
-        if (!extReady || launching || started || authorizedSources[id]) return;
+        if (!extReady || launching || started) return;
         launching = true;
         setResult('working', t('正在创建安全授权…'));
         updateButtons();

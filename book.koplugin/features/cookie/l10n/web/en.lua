@@ -18,6 +18,7 @@ return {
     ["选择数据源"] = "Choose a source",
     ["授权只会用于同步该数据源的账号信息。"] = "Authorization is only used to sync this source's account information.",
     ["网页登录 · 加密同步登录状态"] = "Web sign-in · encrypted session sync",
+    ["重新授权"] = "Re-authorize",
     ["继续授权"] = "Continue",
     ["已授权"] = "Authorized",
     ["已完成授权"] = "Authorization complete",
