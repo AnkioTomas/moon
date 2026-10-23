@@ -126,6 +126,8 @@ Assert.is_true(keyOf({ xPath = "//body/p[9]" }) ~= keyOf({}))
 Assert.is_true(keyOf({ endingXPath = "//body/p[9]" }) ~= keyOf({}))
 Assert.is_true(keyOf({ chapterId = 8 }) ~= keyOf({}))
 Assert.eq(keyOf({}), "7" .. string.char(31) .. "//body/p[1]" .. string.char(31) .. "//body/p[2]" .. string.char(31) .. "选中 文本")
+-- 分隔符对外导出：源侧拼「同坐标」判定键用的是同一个字符，不各写一份字面量。
+Assert.eq(Annotation.KEY_SEP, string.char(31))
 -- pull 落库后的本地条目把选中文本叫 text。
 Assert.eq(
     Annotation.key({ chapterId = 7, xPath = "//body/p[1]", endingXPath = "//body/p[2]", text = "选中  文本" }),

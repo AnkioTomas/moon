@@ -72,13 +72,19 @@ local function saveRemoteBuckets(source, stable_id, annotations, authoritative, 
         if done then done(true) end
         return
     end
-    local revision = Note.nextRevision()
+    local revision
     local ok = true
     for key, items in pairs(buckets) do
         local chapter_idx = key > 0 and key or nil
         local clean = Note.clean(source, items)
         local encoded, payload = pcall(JSON.encode, Normalize.pack(clean, authoritative))
-        ok = encoded and NoteDB.upsertRemote(source_id, stable_id, chapter_idx, payload, revision)
+        -- 幂等：内容与库里那行逐字节相同就不再写。否则每次开书都刷新 updated_at，
+        -- 「什么都没变」会被编排层当成有新内容（重复 pull 必须不留痕）。
+        local existing = encoded and NoteDB.get(source_id, stable_id, chapter_idx) or nil
+        if not (encoded and existing and existing.payload == payload) then
+            revision = revision or Note.nextRevision()
+            ok = encoded and NoteDB.upsertRemote(source_id, stable_id, chapter_idx, payload, revision)
+        end
         if not ok then
             logger.warn("book.note remote bucket failed", stable_id, chapter_idx, not encoded and payload or nil)
             break

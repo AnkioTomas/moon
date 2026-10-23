@@ -14,7 +14,8 @@ local Text = require("utils.text")
 local Annotation = {}
 
 --- 键分隔符用 US（0x1F）：Kavita 的路径与选中文本里不会出现，天然不可撞。
-local KEY_SEP = string.char(31)
+--- 导出是为了让源侧拼「同坐标」判定键时用同一个字符，不各写一份字面量。
+Annotation.KEY_SEP = string.char(31)
 
 --- 排版上不可见、但字节上会破坏比较的字符：ZWSP / ZWNJ / ZWJ / BOM / WORD JOINER。
 local ZERO_WIDTH = { "\226\128\139", "\226\128\140", "\226\128\141", "\239\187\191", "\226\129\160" }
@@ -23,8 +24,7 @@ local ZERO_WIDTH = { "\226\128\139", "\226\128\140", "\226\128\141", "\239\187\1
 ---@param note string|nil
 ---@return string
 local function normalizeNote(note)
-    local text = tostring(note or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
-    return (text:gsub("\n+$", ""))
+    return (Text.normalizeNewlines(note):gsub("\n+$", ""))
 end
 
 --- 比较用归一：trim + 内部连续空白压成单空格 + 剔除零宽字符。
@@ -94,13 +94,6 @@ function Annotation.noteText(comment, comment_html, comment_plain_text)
     return text
 end
 
---- HTML 文本转义（Quill 只转这四个；& 必须第一个换，否则会把后面生成的 &amp; 再转一层）。
----@param s string
----@return string
-local function escapeHtml(s)
-    return (s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"))
-end
-
 --- 写回归一（create / update 共用）：与 Web 同构，`comment` 为 Quill Delta JSON、`commentHtml` 为对应 HTML。
 --- 空备注写 `"{}"` + `""`（Web「新建未输入」的原样），否则网页端 `JSON.parse(comment)` 会崩。
 ---@param note string|nil
@@ -112,7 +105,7 @@ function Annotation.toRemote(note)
     end
     local lines = {}
     for line in (text .. "\n"):gmatch("([^\n]*)\n") do
-        lines[#lines + 1] = line == "" and "<p><br></p>" or ("<p>" .. escapeHtml(line) .. "</p>")
+        lines[#lines + 1] = line == "" and "<p><br></p>" or ("<p>" .. Text.xmlEscape(line) .. "</p>")
     end
     return {
         comment = JSON.encode({ ops = { { insert = text .. "\n" } } }),
@@ -133,7 +126,7 @@ function Annotation.key(ann)
         tostring(ann.xPath or ""),
         tostring(ann.endingXPath or ""),
         comparisonText(selected),
-    }, KEY_SEP)
+    }, Annotation.KEY_SEP)
 end
 
 --- 在对账列表里找本地这条注解的远端对应：同键多条取 id 最小（网页端重扫可能留下重复），

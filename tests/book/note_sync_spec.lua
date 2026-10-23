@@ -169,7 +169,7 @@ source.syncNotesAsync = function(self, opts, cb)
     return Note.syncAsync(self, opts, cb)
 end
 
-SessionNote.save(ui, identity, function(ok)
+SessionNote.save(ui, identity, nil, function(ok)
     if ok then Note.syncAsync(source, { identity = identity }, function() end) end
 end)
 Stubs.flush()
@@ -182,7 +182,7 @@ Assert.eq(sent[1].annotations[1].text, "高亮文字")
 Assert.eq(sent[1].annotations[1].ignored, nil)
 
 annotations = {}
-SessionNote.save(ui, identity, function(ok)
+SessionNote.save(ui, identity, nil, function(ok)
     if ok then Note.syncAsync(source, { identity = identity }, function() end) end
 end)
 Stubs.flush()
@@ -191,7 +191,7 @@ Assert.eq(#sent[2].annotations, 0, "空快照必须上报以传播删除")
 
 -- 网络恢复只重试本地脏快照，不顺手拉远端。
 annotations = { { datetime = "2026-08-21", page = "/local-new" } }
-SessionNote.save(ui, identity, function(ok)
+SessionNote.save(ui, identity, nil, function(ok)
     if ok then Note.syncAsync(source, { identity = identity, dirty_only = true }, function() end) end
 end)
 Stubs.flush()
@@ -234,6 +234,71 @@ end)
 Stubs.flush()
 Assert.is_nil(sync_err, "只读源拉取不应因无法上传而失败")
 Assert.eq(pull_count, 1)
+
+-- 重复开书拉到同一份远端快照：payload 与库里那行逐字节相同就不写，
+-- 修订号（updated_at）不抖 —— 否则每次开书都像「有新内容」。
+-- 本 spec 的 JSON 桩每次 encode 都返回新的 `[snapshot-N]`，payload 永远不相等，
+-- 这条断言无从谈起；这一段临时换成「按内容稳定编码」的 JSON（decode 同步换），结束后恢复。
+-- 另外用独立的小书（pageCount=0）验：pageCount 非 0 时保存侧会给快照补 total_pages，
+-- 与 pull 落的桶本就不等，那是保存侧的差异，不该混进来干扰本条断言。
+do
+    local JSON = require("json")
+    local real_encode, real_decode = JSON.encode, JSON.decode
+    local encoded = {}
+    local function stable(value)
+        if type(value) ~= "table" then return tostring(value) end
+        local keys = {}
+        for key in pairs(value) do keys[#keys + 1] = key end
+        table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+        local parts = {}
+        for _idx, key in ipairs(keys) do
+            parts[#parts + 1] = tostring(key) .. "=" .. stable(value[key])
+        end
+        return "{" .. table.concat(parts, ",") .. "}"
+    end
+    JSON.encode = function(value)
+        local payload = stable(value)
+        encoded[payload] = value
+        return payload
+    end
+    JSON.decode = function(payload) return encoded[payload] end
+
+    -- 让 applyLocal 认得这本书，否则远端快照落不进 doc_settings，下一轮保存又把它当成本地改动。
+    open_files["/idem.epub"] = { source_id = "idem", stable_id = "idem.epub" }
+    local idem_annotations = {}
+    local idem_ui = {
+        document = { file = "/idem.epub", getPageCount = function() return 0 end },
+        doc_settings = {
+            flush = function() end,
+            readSetting = function(_, key)
+                if key == "annotations" then return idem_annotations end
+            end,
+            saveSetting = function(_, key, value)
+                if key == "annotations" then idem_annotations = value end
+            end,
+        },
+    }
+    local idem_source = {
+        id = "idem",
+        pushNotesAsync = function(_, _, _, cb) cb({ code = 200 }) end,
+        pullNotesAsync = function(_, _, cb) cb({ { datetime = "2026-09-01", page = "/idem" } }) end,
+    }
+    idem_source.syncNotesAsync = function(self, opts, cb) return Note.syncAsync(self, opts, cb) end
+    local idem_identity = { source_id = "idem", stable_id = "idem.epub", source = idem_source }
+
+    SessionNote.pull(idem_ui, idem_identity)
+    Stubs.flush()
+    local key = "idem:idem.epub:0"
+    Assert.not_nil(rows[key], "首次拉取要落库")
+    local revision = rows[key].updated_at
+    SessionNote.pull(idem_ui, idem_identity)
+    Stubs.flush()
+    Assert.eq(rows[key].updated_at, revision, "同一份快照重复拉取不刷新修订号")
+    SessionNote.pull(idem_ui, idem_identity)
+    Stubs.flush()
+    Assert.eq(rows[key].updated_at, revision, "再开一次也不抖")
+    JSON.encode, JSON.decode = real_encode, real_decode
+end
 
 -- 未定位的远端划线不能进 doc_settings：
 -- ReaderAnnotation:onReadSettings 按首条 page 的类型判定整份注解的格式，数字 page 会把
@@ -635,17 +700,17 @@ do
     -- 删除：阅读器数组里已经没有它了（annotation.annotations 是删除后的状态）。
     seed()
     current_annotations = {}
-    SessionNote.save(ui7, identity7, nil, { item, nb_highlights_added = -1, index_modified = -7 })
+    SessionNote.save(ui7, identity7, { item, nb_highlights_added = -1, index_modified = -7 })
     Assert.eq(seen[#seen].deleted, item, "被删条目就是 changed[1]")
 
     -- 划线转笔记 / 只删备注：条目还在，index_modified 非负 → 不传 deleted。
     seed()
     current_annotations = { item }
-    SessionNote.save(ui7, identity7, nil, { item, nb_highlights_added = -1, index_modified = 0 })
+    SessionNote.save(ui7, identity7, { item, nb_highlights_added = -1, index_modified = 0 })
     Assert.is_nil(seen[#seen].deleted)
     Assert.eq(#seen, 2)
 
-    -- 老调用方只传三个参数：changed 可选，不产生删除。
+    -- 老调用方不传 changed：它是可选参数，不产生删除。
     seed()
     current_annotations = { item }
     SessionNote.save(ui7, identity7, nil)

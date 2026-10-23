@@ -264,7 +264,7 @@ local function syncReading(plugin)
             progress_saved = ok
             pushProgress()
         end)
-        require("reader.session.note").save(plugin.ui, identity, function(ok)
+        require("reader.session.note").save(plugin.ui, identity, nil, function(ok)
             if ok and source.syncNotesAsync then
                 -- 关书只推脏注解；完整 pull 留给下次 ReaderReady，避免未收敛远端盖本地。
                 source:syncNotesAsync({
@@ -343,13 +343,13 @@ end
 function Session.onAnnotationsModified(plugin, items)
     if not Session._snapshot then return end
     local identity = Session._snapshot.identity
-    require("reader.session.note").save(plugin.ui, identity, function(ok)
+    require("reader.session.note").save(plugin.ui, identity, items, function(ok)
         if not ok then return end
         local source = identity and identity.source
         if not source or not source.syncNotesAsync then return end
         if not require("ui/network/manager"):isConnected() then return end
         source:syncNotesAsync({ identity = identity, dirty_only = true }, function() end)
-    end, items)
+    end)
 end
 
 --- 休眠前：结清计时并同步当前进度和注解；会话继续保留。
