@@ -58,6 +58,8 @@ local Page = {}
 
 --- 条目筛选（本次运行内记住，所有源共用）：nil = 全部，false = 仅未读，true = 仅已读；标题栏图标依次切换。
 Page.read_filter = nil
+--- 订阅列表分组筛选（本次运行内记住）：nil = 全部，"" = 未分组，其它 = 组名。
+Page.group_filter = nil
 Page.__index = Page
 
 function Page:new(opts)
@@ -293,6 +295,14 @@ end
 function Page:feedSections()
     local sections, by = {}, {}
     local feeds = SubDB.feeds()
+    local gf = Page.group_filter
+    if gf ~= nil then
+        local filtered = {}
+        for _i, feed in ipairs(feeds) do
+            if (feed.grp or "") == gf then filtered[#filtered + 1] = feed end
+        end
+        feeds = filtered
+    end
     local function row(feed)
         local provider = Subscribe.providers[feed.kind]
         return function(iw)
@@ -346,8 +356,36 @@ function Page:order()
     return ORDERS[1]
 end
 
+--- 分组筛选菜单：全部 / 未分组 / 各分组。
+function Page:showGroupFilter()
+    local current, items = Page.group_filter, {}
+    local function add(key, label)
+        items[#items + 1] = {
+            text = label, variant = current == key and "primary" or nil,
+            callback = function()
+                Page.group_filter, self.page = key, 1
+                self:redraw()
+            end,
+        }
+    end
+    add(nil, _("全部"))
+    add("", _("未分组"))
+    local seen, names = { [""] = true }, {}
+    for _i, feed in ipairs(SubDB.feeds()) do
+        local g = feed.grp or ""
+        if g ~= "" and not seen[g] then seen[g] = true; names[#names + 1] = g end
+    end
+    table.sort(names)
+    for _i, g in ipairs(names) do add(g, g) end
+    require("ui.themes.widgets.sheet"):new{ title = _("筛选分组"), items = items }:show()
+end
+
 function Page:showOrder()
     local current, items = self:order(), {}
+    items[#items + 1] = {
+        text = _("筛选分组"),
+        callback = function() self:showGroupFilter() end,
+    }
     for _idx, order in ipairs(ORDERS) do
         items[#items + 1] = {
             text = order.label(), variant = order == current and "primary" or nil,
@@ -365,8 +403,12 @@ end
 ---@param h integer
 ---@return table
 function Page:feedsView(w, h)
+    local subtitle = self:status()
+    if not subtitle and Page.group_filter ~= nil then
+        subtitle = Page.group_filter == "" and _("未分组") or Page.group_filter
+    end
     local bar = TitleBar.widget({
-        width = w, title = _("订阅"), subtitle = self:status(),
+        width = w, title = _("订阅"), subtitle = subtitle,
         left_icon = "refresh", left_callback = function() self:refresh(SubDB.feeds(), false, true) end,
         extra_icon = "sort", extra_callback = function() self:showOrder() end,
         right_icon = "add", right_callback = function() self:showAdd() end,
