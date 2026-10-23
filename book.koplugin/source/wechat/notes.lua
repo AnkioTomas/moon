@@ -261,6 +261,11 @@ function Notes.mergeAnnotations(remote, local_items, paging, authoritative)
         end
         return table.concat({ item.text, item.note }, "\31")
     end
+    -- 本地新划线上传后确认没回来（超时、断网）就没有 id / range，下次拉取时只能靠坐标认出它就是远端那条。
+    local function posKey(item)
+        if type(item.pos0) ~= "string" or type(item.pos1) ~= "string" then return nil end
+        return table.concat({ item.pos0, item.pos1 }, "\31")
+    end
     authoritative = authoritative == true
     local merged, seen = {}, {}
     for _idx, item in ipairs(remote or {}) do
@@ -269,19 +274,24 @@ function Notes.mergeAnnotations(remote, local_items, paging, authoritative)
             if item.wr_bookmark_id then seen["bookmark:" .. tostring(item.wr_bookmark_id)] = true end
             if item.wr_review_id then seen["review:" .. tostring(item.wr_review_id)] = true end
             local range_key, note_key = rangeKey(item), noteKey(item)
+            -- 同文同 range 的多条远端划线是同一处（重复上传留下的），手机端也只显示一条。
+            local twin = item.wr_range and range_key and seen["range:" .. range_key]
             if range_key then seen["range:" .. range_key] = true end
             if note_key then seen["note:" .. note_key] = true end
-            merged[#merged + 1] = item
+            local pos_key = posKey(item)
+            if pos_key then seen["pos:" .. pos_key] = true end
+            if not twin then merged[#merged + 1] = item end
         end
     end
     for _idx, item in ipairs(local_items or {}) do
         if type(item) == "table" then
-            local range_key, note_key = rangeKey(item), noteKey(item)
+            local range_key, note_key, pos_key = rangeKey(item), noteKey(item), posKey(item)
             local duplicate = item.wr_bookmark_id
                     and seen["bookmark:" .. tostring(item.wr_bookmark_id)]
                 or item.wr_review_id and seen["review:" .. tostring(item.wr_review_id)]
                 or range_key and seen["range:" .. range_key]
                 or note_key and seen["note:" .. note_key]
+                or not item.wr_bookmark_id and pos_key and seen["pos:" .. pos_key]
             local deleted_remote = authoritative and not duplicate
                 and (item.wr_bookmark_id or item.wr_review_id)
             if not duplicate and not deleted_remote and Normalize.renderable(item, paging) then

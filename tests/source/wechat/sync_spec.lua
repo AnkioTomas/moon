@@ -395,6 +395,18 @@ do
         wr_range = "300-302",
     } }
     Assert.len(Notes.mergeAnnotations(remote_note, local_note, false, true), 1)
+
+    local twins = {
+        { page = "/body/a", text = "同一处", wr_range = "10-20", wr_bookmark_id = "b1" },
+        { page = "/body/a", text = "同一处", wr_range = "10-20", wr_bookmark_id = "b2" },
+    }
+    Assert.len(Notes.mergeAnnotations(twins, { { page = "/body/a", text = "同一处", wr_range = "10-20", wr_bookmark_id = "b2" } }, false, true), 1)
+    -- 上传后确认没回来的本地划线（无 id / range）与远端同坐标：只留一条
+    local unconfirmed = { { page = "/body/a", pos0 = "/p.0", pos1 = "/p.9", text = "同一处", drawer = "lighten" } }
+    local pulled = { { page = "/body/a", pos0 = "/p.0", pos1 = "/p.9", text = "同一处", wr_range = "10-20", wr_bookmark_id = "b1" } }
+    local merged = Notes.mergeAnnotations(pulled, unconfirmed, false, true)
+    Assert.len(merged, 1)
+    Assert.eq(merged[1].wr_bookmark_id, "b1")
     local version = Mapper.bookVersion({ book = { version = 123 } })
     Assert.eq(version, 123)
 end
