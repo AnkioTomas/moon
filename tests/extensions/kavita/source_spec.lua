@@ -26,7 +26,7 @@ package.loaded["json"] = JSON
 Themed.install()
 local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
 -- 走 preload 不改 package.path：runner 只还原 preload/loaded，插件根上的 main.lua 会顶掉月读的 main。
-for _idx, name in ipairs({ "client", "position", "source", "setting", "kamare", "stats" }) do
+for _idx, name in ipairs({ "client", "position", "annotation", "source", "setting", "kamare", "stats" }) do
     package.preload["moonsource_kavita." .. name] = function()
         return dofile(PLUGIN .. "/moonsource_kavita/" .. name .. ".lua")
     end
@@ -563,22 +563,200 @@ Assert.is_nil(anns[3].kavita_id)
 -- 非 epub 不推。
 Assert.is_true(run("pushNotesAsync", pdf, { { drawer = "lighten", text = "图", pos0 = "x" } }))
 
--- 快照：清洗保留 Kavita id，保存时按 pos0 从上一版接过 id。
+-- 快照：清洗保留 Kavita 全字段（白名单漏一个就静默消失），保存时按 pos0 从上一版接过 id。
 local clean = source:cleanAnnotations({
-    { datetime = "d", page = 1, drawer = "lighten", text = "x", pos0 = "p", kavita_id = 71, kavita_note = "n", junk = 1 },
+    { datetime = "d", page = 1, drawer = "lighten", text = "x", pos0 = "p", kavita_id = 71, kavita_note = "n", junk = 1,
+        kavita_comment = "{}", kavita_comment_html = "", kavita_slot = 0, kavita_spoiler = false,
+        kavita_modified = "m", kavita_xpath = "//body/p[1]", kavita_ending_xpath = "//body/p[1]",
+        kavita_unlocated = true, kavita_local_note = "被远端覆盖的旧文本" },
     { text = "没有时间的丢掉" },
 }, 10)
 Assert.len(clean, 1)
 Assert.eq(clean[1].kavita_id, 71)
 Assert.eq(clean[1].kavita_note, "n")
+Assert.eq(clean[1].kavita_comment, "{}")
+Assert.eq(clean[1].kavita_comment_html, "")
+Assert.eq(clean[1].kavita_slot, 0)
+Assert.eq(clean[1].kavita_spoiler, false)
+Assert.eq(clean[1].kavita_modified, "m")
+Assert.eq(clean[1].kavita_xpath, "//body/p[1]")
+Assert.eq(clean[1].kavita_ending_xpath, "//body/p[1]")
+Assert.is_true(clean[1].kavita_unlocated)
+Assert.eq(clean[1].kavita_local_note, "被远端覆盖的旧文本")
 Assert.eq(clean[1].total_pages, 10)
-Assert.is_nil(clean[1].junk)
-local current = source:prepareLocalAnnotations(
-    { { pos0 = "p", kavita_id = 71, kavita_note = "n" }, { pos0 = "gone", kavita_id = 9 } },
+Assert.is_nil(clean[1].junk, "白名单外的字段仍丢弃")
+
+-- 无 page 的两类条目必须放行：未定位（只有 xPath）、墓碑（只有 kavita_deleted）。
+-- 靠「构造期用 xPath / 墓碑标记当占位」过 Normalize.clean，清洗后把占位清空。
+local unlocated = source:cleanAnnotations({
+    { datetime = "d", text = "云端条", note = "", kavita_id = 72, kavita_xpath = "//body/p[9]" },
+    { datetime = "d", kavita_id = 73, kavita_deleted = true },
+    { datetime = "d", text = "没有任何坐标" },
+}, 10)
+Assert.len(unlocated, 2, "无时间 / 无坐标的条目仍然丢掉")
+Assert.eq(unlocated[1].kavita_id, 72)
+Assert.eq(unlocated[1].kavita_xpath, "//body/p[9]", "未定位条目保留全部 kavita_* 字段")
+Assert.is_nil(unlocated[1].page, "占位只在构造期用，清洗后清空")
+Assert.eq(unlocated[1].total_pages, 10)
+Assert.eq(unlocated[2].kavita_id, 73)
+Assert.is_true(unlocated[2].kavita_deleted)
+Assert.is_nil(unlocated[2].page)
+
+-- 保存时：pos0 对得上的接过 id；没有 pos0 的未定位条目原样搬进新快照，
+-- 否则一次普通保存就把「数据在、画不出」的云端条目洗掉。
+local previous = {
+    { pos0 = "p", kavita_id = 71, kavita_note = "n" },
+    { pos0 = "gone", kavita_id = 9 },
+    { datetime = "d", text = "云端条", kavita_id = 72, kavita_note = "", kavita_xpath = "//body/p[9]" },
+}
+local current = source:prepareLocalAnnotations(previous,
     { { pos0 = "p", note = "新" }, { pos0 = "q" } })
 Assert.eq(current[1].kavita_id, 71)
 Assert.eq(current[1].kavita_note, "n", "备注差异留给推送时比对")
 Assert.is_nil(current[2].kavita_id)
+Assert.eq(#current, 3, "未定位条目搬进新快照")
+Assert.eq(current[3].kavita_id, 72)
+Assert.eq(current[3].kavita_xpath, "//body/p[9]")
+Assert.is_nil(current[3].pos0)
+local deduped = source:prepareLocalAnnotations(previous,
+    { { pos0 = "p", note = "新" }, { kavita_id = 72, text = "已经在快照里" } })
+Assert.eq(#deduped, 2, "快照里已有的 id 不重复搬")
+
+-- 拉取：开书时把云端 epub 注解落库（入库不定位）。每章一次 GET，按 ownerUserId 收窄；
+-- authoritative 恒 false（远端为空不代表本地该清空），失败就 cb(nil, err)，快照不动。
+local ann_calls = {}
+local remote_anns = {
+    {   -- 网页端写的：Delta + HTML + 纯文本都有；颜色槽 2 = blue。
+        id = 501, ownerUserId = 5, chapterId = 2002,
+        xPath = "//body/p[1]", endingXPath = "//body/p[1]",
+        selectedText = "春眠不觉晓",
+        comment = '{"ops":[{"insert":"记一笔\\n"}]}',
+        commentHtml = "<p>记一笔</p>", commentPlainText = "记一笔",
+        selectedSlotIndex = 2, containsSpoiler = true,
+        createdUtc = os.date("!%Y-%m-%dT%H:%M:%S", 1790000000) .. ".789",
+        lastModifiedUtc = "2026-10-04T05:06:07.890",
+        pageNumber = 1,
+    },
+    {   -- 别人的注解：账号开了「查看他人注解」时接口会混进来，拉取必须按 owner 过滤。
+        id = 502, ownerUserId = 9, chapterId = 2002,
+        xPath = "//body/p[2]", endingXPath = "//body/p[2]", selectedText = "别人的划线",
+        comment = "", commentHtml = "", selectedSlotIndex = 0,
+        createdUtc = "2026-10-03T05:00:00",
+    },
+    {   -- 裸高亮：没有备注，槽位越界 → yellow。
+        id = 503, ownerUserId = 5, chapterId = 2002,
+        xPath = "//body/p[2]", endingXPath = "//body/p[3]",
+        selectedText = "处处闻啼鸟",
+        comment = "", commentHtml = "", commentPlainText = "",
+        selectedSlotIndex = 9, containsSpoiler = false,
+        createdUtc = "2026-10-03T05:00:00",
+    },
+}
+routes["GET /api/Users/me"] = json({ id = 5, username = "me" })
+routes["GET /api/Annotation/all"] = function(opts)
+    ann_calls[#ann_calls + 1] = opts
+    return json(remote_anns)
+end
+local pulled, perr, pmeta = run("pullNotesAsync", volume)
+Assert.eq(#ann_calls, 1, "每章一次 GET")
+Assert.eq(query(ann_calls[1], "chapterId"), "2002")
+Assert.eq(#pulled, 2, "只留自己的注解")
+Assert.is_nil(perr)
+Assert.is_false(pmeta.authoritative, "authoritative 恒 false：远端为空不清本地")
+
+local web = pulled[1]
+Assert.eq(web.kavita_id, 501)
+Assert.eq(web.text, "春眠不觉晓")
+Assert.eq(web.note, "记一笔")
+Assert.eq(web.kavita_note, web.note, "kavita_note 与 note 必须字节相同，否则每轮判改过")
+Assert.eq(web.datetime, os.date("%Y-%m-%d %H:%M:%S", 1790000000), "createdUtc → 本地墙钟")
+Assert.eq(web.color, "blue", "槽位 2 → blue")
+Assert.eq(web.drawer, "lighten")
+Assert.eq(web.kavita_comment, remote_anns[1].comment)
+Assert.eq(web.kavita_comment_html, "<p>记一笔</p>")
+Assert.eq(web.kavita_slot, 2)
+Assert.eq(web.kavita_spoiler, true)
+Assert.eq(web.kavita_modified, "2026-10-04T05:06:07.890")
+Assert.eq(web.kavita_xpath, "//body/p[1]")
+Assert.eq(web.kavita_ending_xpath, "//body/p[1]")
+Assert.is_nil(web.pos0, "pull 不写坐标")
+Assert.is_nil(web.pos1)
+Assert.is_nil(web.page, "page 是定位阶段产物")
+Assert.is_nil(web.pageno)
+Assert.is_nil(web.chapter_idx, "整本桶")
+
+local bare = pulled[2]
+Assert.eq(bare.note, "")
+Assert.eq(bare.kavita_note, "", "空备注两边都空，推送侧才判等")
+Assert.eq(bare.color, "yellow", "槽位越界回落 yellow")
+
+-- createdUtc 解析不出（Kavita 的 0001 占位）就用当前时间，仍然要落库。
+routes["GET /api/Annotation/all"] = json({ {
+    id = 504, ownerUserId = 5, xPath = "//body/p[4]", endingXPath = "//body/p[4]",
+    selectedText = "无时间", comment = "", selectedSlotIndex = 0, createdUtc = "0001-01-01T00:00:00",
+} })
+local fallback = run("pullNotesAsync", volume)
+Assert.eq(#fallback, 1)
+local wall = fallback[1].datetime
+local wy, wmo, wd, wh, wmi, ws = wall:match("^(%d+)-(%d+)-(%d+) (%d+):(%d+):(%d+)$")
+Assert.not_nil(wy, "datetime 必须是可读墙钟：YYYY-MM-DD HH:MM:SS")
+Assert.is_true(math.abs(os.time({ year = tonumber(wy), month = tonumber(wmo), day = tonumber(wd),
+    hour = tonumber(wh), min = tonumber(wmi), sec = tonumber(ws) }) - os.time()) <= 2,
+    "解析失败回退当前时间")
+
+-- 同章重复拉取幂等：payload 逐字段稳定（owner 已缓存，不再请求 /Users/me）。
+routes["GET /api/Annotation/all"] = function(opts)
+    ann_calls[#ann_calls + 1] = opts
+    return json(remote_anns)
+end
+local function flatten(list)
+    local out = {}
+    for _idx, item in ipairs(list) do
+        local keys = {}
+        for key in pairs(item) do keys[#keys + 1] = key end
+        table.sort(keys)
+        local parts = {}
+        for _j, key in ipairs(keys) do parts[#parts + 1] = key .. "=" .. tostring(item[key]) end
+        out[#out + 1] = table.concat(parts, "&")
+    end
+    return table.concat(out, "||")
+end
+ann_calls = {}
+local again = run("pullNotesAsync", volume)
+Assert.eq(#ann_calls, 1, "owner 已缓存，不再请求 /Users/me")
+Assert.eq(flatten(again), flatten(pulled), "重复拉取 payload 稳定")
+
+-- 取不到当前用户（/api/Users/me 不可用）→ 不过滤 + 记日志，不能因此不落库。
+routes["GET /api/Users/me"] = { code = 404, body = "" }
+local fresh = require("moonsource_kavita.source").new()
+local warned = {}
+local log = require("utils.log")
+local real_warn = log.warn
+log.warn = function(...) warned[#warned + 1] = table.concat({ ... }, " ") end
+local unfiltered, ferr
+fresh:pullNotesAsync(volume, function(a, e) unfiltered, ferr = a, e end)
+Stubs.flush()
+log.warn = real_warn
+Assert.is_nil(ferr)
+Assert.eq(#unfiltered, 3, "拿不到 owner 就不做属主过滤")
+Assert.is_true(#warned >= 1, "降级要留一条日志")
+
+-- GET 失败 → cb(nil, err)；核心拿到 nil 直接收尾（note.lua 的 finish(nil, err)），不会写桶，
+-- 本地快照（含 sync_status=0 的脏行）保持原样。脏行保护在 NoteDB.upsertRemote
+-- （`WHERE notes.sync_status=1`）与 note_sync_spec 里已覆盖，源侧不碰 notes 表。
+routes["GET /api/Annotation/all"] = { code = 500, body = "" }
+local fail_list, fail_err = run("pullNotesAsync", volume)
+Assert.is_nil(fail_list)
+Assert.matches(fail_err, "500")
+routes["GET /api/Annotation/all"] = nil
+
+-- 非 epub（PDF / 漫画）没有 Kavita 注解：空数组 + authoritative=false，一个请求都不发。
+local before_pull = #calls
+local none_pulled, none_err, none_meta = run("pullNotesAsync", pdf)
+Assert.eq(#none_pulled, 0)
+Assert.is_nil(none_err)
+Assert.is_false(none_meta.authoritative)
+Assert.eq(#calls, before_pull, "非 epub 零请求")
 
 -- 详情：卷行取所属 series 的 metadata，写回这一行。
 routes["GET /api/Series/metadata"] = function(opts)
