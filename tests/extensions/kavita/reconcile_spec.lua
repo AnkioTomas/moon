@@ -222,7 +222,9 @@ Assert.eq(StatsDB.summaryByBook("ext.kavita", "7453:11271").total_seconds, 316, 
 Assert.eq(StatsDB.summaryByBook("ext.kavita", "7453").total_seconds, 0, "多卷系列不读在容器行上")
 Assert.eq(StatsDB.summaryByBook("ext.kavita", "8661").total_seconds, 3555, "单卷系列读在 series 行（§4）")
 Assert.eq(StatsDB.summaryByBook("ext.kavita", "7460:11285").total_seconds, 9517, "多章目录 → 逐卷身份（§4）")
-Assert.eq(StatsDB.summaryByBook("ext.kavita", "7453:11273").pages, 1, "单书页数维持本地口径：云端页数不进单书")
+-- 页数：云端会话的 pagesRead + 未被会话覆盖的本地页（18 号票）。10-14 的本地 1 页已上报、
+-- 当天有会话覆盖，不再加；22 是该卷各云端会话 pagesRead 之和。
+Assert.eq(StatsDB.summaryByBook("ext.kavita", "7453:11273").pages, 22, "单书页数 = 云端会话 pagesRead 之和")
 
 -- ② 日历逐日与 §2 一致；合计 = __kv:total。
 -- 页数口径与 §2 的 hist_p 在 9-19 / 9-24 / 9-29 差 1 / 1 / 2 页：那 4 页来自零时长条目，
