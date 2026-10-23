@@ -103,6 +103,7 @@ local open_files = {
     ["/a.epub"] = { source_id = "moon", stable_id = "小说.epub" },
     ["/b2.epub"] = { source_id = "unlocated", stable_id = "book2.epub" },
     ["/b3.epub"] = { source_id = "authoritative", stable_id = "book.epub", chapter_idx = 2 },
+    ["/b4.epub"] = { source_id = "dropped", stable_id = "book8.epub" },
 }
 package.preload["book.store"] = function()
     return { identityFor = function(file) return open_files[file] end }
@@ -547,6 +548,109 @@ do
     Stubs.flush()
     Assert.eq(result.pushed, 0, "源如实回 0 就按 0 记")
     Assert.eq(rows[key].sync_status, 1, "对账完的快照仍要清脏，否则每轮重推")
+end
+
+-- 远端删除穿过条数保护：源返回 dropped = 主动判定为「远端已删」的条数，
+-- 守卫要把它们算进来；老源没有第二返回值时行为不变（仍然不覆盖本地划线）。
+do
+    local JSON = require("json")
+    local kept = {
+        { datetime = "2026-10-04", page = "/body/a", pos0 = "/body/a", pos1 = "/body/b",
+            drawer = "lighten", text = "远端删了" },
+    }
+    rows["dropped:book8.epub:0"] = {
+        source_id = "dropped", stable_id = "book8.epub", chapter_idx = 0,
+        payload = JSON.encode(kept), updated_at = 9, sync_status = 1,
+    }
+    local current_annotations = kept
+    local ui8 = {
+        document = { file = "/b4.epub", getPageCount = function() return 10 end },
+        doc_settings = {
+            flush = function() end,
+            readSetting = function(_, name)
+                if name == "annotations" then return current_annotations end
+            end,
+            saveSetting = function(_, name, value)
+                if name == "annotations" then current_annotations = value end
+            end,
+        },
+    }
+    local dropping = {
+        id = "dropped",
+        mergeAnnotations = function(_, _remote, _current, _paging, _authoritative)
+            return {}, 1
+        end,
+    }
+    Assert.eq(SessionNote.applyLocal(ui8, {
+        source_id = "dropped", stable_id = "book8.epub", source = dropping,
+    }), 0)
+    Assert.eq(#current_annotations, 0, "dropped 计入守卫，合法删除不被条数保护拦住")
+
+    current_annotations = { kept[1] }
+    local legacy = {
+        id = "dropped",
+        mergeAnnotations = function() return {} end,
+    }
+    Assert.eq(SessionNote.applyLocal(ui8, {
+        source_id = "dropped", stable_id = "book8.epub", source = legacy,
+    }), 0)
+    Assert.eq(#current_annotations, 1, "没有 dropped 第二返回值时仍按条数保护跳过")
+end
+
+-- 删除事件判据（spec §9.1）：index_modified < 0 取 changed[1] 作被删条目传给源；
+-- 划线转笔记 / 只删备注时 nb_highlights_added 也是负的，但 index_modified 非负 → 不是删除。
+do
+    local JSON = require("json")
+    local seen = {}
+    local deleting = {
+        id = "deleting",
+        cleanAnnotations = function(_, items) return items end,
+        prepareLocalAnnotations = function(_, previous, current, deleted)
+            seen[#seen + 1] = { previous = previous, current = current, deleted = deleted }
+            return current
+        end,
+    }
+    local key = "deleting:book7.epub:0"
+    local item = { datetime = "2026-10-03", page = "/body/p[1].0", pos0 = "/body/p[1].0",
+        pos1 = "/body/p[1].5", drawer = "lighten", text = "划的线", note = "备注" }
+    local current_annotations = {}
+    local ui7 = {
+        document = { file = "/b5.epub", getPageCount = function() return 10 end },
+        doc_settings = {
+            flush = function() end,
+            readSetting = function(_, name)
+                if name == "annotations" then return current_annotations end
+            end,
+            saveSetting = function(_, name, value)
+                if name == "annotations" then current_annotations = value end
+            end,
+        },
+    }
+    local identity7 = { source_id = "deleting", stable_id = "book7.epub", source = deleting }
+    local function seed()
+        rows[key] = { source_id = "deleting", stable_id = "book7.epub", chapter_idx = 0,
+            payload = JSON.encode({ item }), updated_at = 1, sync_status = 1 }
+    end
+
+    -- 删除：阅读器数组里已经没有它了（annotation.annotations 是删除后的状态）。
+    seed()
+    current_annotations = {}
+    SessionNote.save(ui7, identity7, nil, { item, nb_highlights_added = -1, index_modified = -7 })
+    Assert.eq(seen[#seen].deleted, item, "被删条目就是 changed[1]")
+
+    -- 划线转笔记 / 只删备注：条目还在，index_modified 非负 → 不传 deleted。
+    seed()
+    current_annotations = { item }
+    SessionNote.save(ui7, identity7, nil, { item, nb_highlights_added = -1, index_modified = 0 })
+    Assert.is_nil(seen[#seen].deleted)
+    Assert.eq(#seen, 2)
+
+    -- 老调用方只传三个参数：changed 可选，不产生删除。
+    seed()
+    current_annotations = { item }
+    SessionNote.save(ui7, identity7, nil)
+    Assert.is_nil(seen[#seen].deleted)
+    Assert.eq(#seen, 3)
 end
 
 _G.G_reader_settings = previous_settings

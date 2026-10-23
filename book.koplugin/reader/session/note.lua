@@ -88,7 +88,8 @@ end
 ---@param ui table
 ---@param identity BookIdentity 当前 ReaderSession 身份
 ---@param done fun(ok: boolean, updated_at: number|nil)|nil
-function SessionNote.save(ui, identity, done)
+---@param changed table|nil KOReader 的 AnnotationsModified 描述（可选）
+function SessionNote.save(ui, identity, done, changed)
     if not ui or not ui.doc_settings then
         if done then done(false) end
         return
@@ -119,10 +120,15 @@ function SessionNote.save(ui, identity, done)
     local current = NoteDB.get(source_id, stable_id, chapter_idx)
     local source = identity.source
     local clean = Note.clean(source, items, total_pages)
+    -- 删除判据：KOReader 唯一的删除通道把被删条目放在 items[1]、index_modified 取负。
+    -- 不能只看 nb_highlights_added < 0：划线转笔记、只删备注时它也是负的，但条目还在。
+    local deleted
+    local modified = type(changed) == "table" and tonumber(changed.index_modified)
+    if modified and modified < 0 then deleted = changed[1] end
     if current then
         local previous = Normalize.decode(current.payload)
         if previous and source and type(source.prepareLocalAnnotations) == "function" then
-            source:prepareLocalAnnotations(previous, clean)
+            source:prepareLocalAnnotations(previous, clean, deleted)
         end
     end
     local ok, payload = pcall(require("json").encode, clean)
@@ -161,8 +167,10 @@ local function applySnapshot(ui, identity)
         return 0
     end
     -- 注解形态跟文档走：ReaderUI 只会挂 rolling 或 paging 其中之一
+    -- dropped = 源主动判定为「远端已删」的条数，用于给下面的条数保护放行（老源无第二值 ⇒ nil）。
+    local dropped
     if source and type(source.mergeAnnotations) == "function" then
-        annotations = source:mergeAnnotations(
+        annotations, dropped = source:mergeAnnotations(
             annotations, current, ui.paging ~= nil, authoritative
         )
     else
@@ -171,9 +179,10 @@ local function applySnapshot(ui, identity)
     -- 合并结果条数少于阅读器现有条数，说明本地有条目被判成不可渲染而被丢弃。
     -- 这里是整体覆盖 doc_settings，写下去就是永久删除用户划线：宁可这次不显示
     -- 云端划线，也不能删本地的。（分页文档的 page 是数字，曾经被误判过一次。）
-    if #annotations < #current and not authoritative then
+    -- dropped 是源对「远端已删」的明确判定，要算回来，否则合法删除永远被这道保险挡住。
+    if #annotations + (dropped or 0) < #current and not authoritative then
         logger.warn("book.note apply skip: merge would drop local annotations",
-            identity.stable_id, #current, #annotations)
+            identity.stable_id, #current, #annotations, dropped or 0)
         return 0
     end
     if #annotations == 0 and #current == 0 then
