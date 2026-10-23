@@ -15,6 +15,9 @@ local Text = require("utils.text")
 
 local Cache = {}
 
+--- 行数上限：超出时删过期的，再不够就删最早过期的（即将到期 / 已过期优先）。
+Cache.MAX_ROWS = 500
+
 DB.schema("http", function()
     return DB.exec([[
 CREATE TABLE IF NOT EXISTS http (
@@ -70,13 +73,20 @@ local function write(key, value, ttl)
         logger.warn("book.http.cache encode failed", key)
         return
     end
-    DB.exec([[DELETE FROM http WHERE expires <= ?;]], os.time())
+    local now = os.time()
+    DB.exec([[DELETE FROM http WHERE expires <= ?;]], now)
     local stored, err = DB.exec(
         [[INSERT INTO http (key, value, expires) VALUES (?,?,?)
           ON CONFLICT(key) DO UPDATE SET value=excluded.value, expires=excluded.expires;]],
-        key, encoded, os.time() + ttl)
+        key, encoded, now + ttl)
     if not stored then
         logger.warn("book.http cache set failed", key, err)
+        return
+    end
+    local n = tonumber(DB.rowexec([[SELECT COUNT(*) FROM http;]])) or 0
+    if n > Cache.MAX_ROWS then
+        DB.exec([[DELETE FROM http WHERE key IN (
+            SELECT key FROM http ORDER BY expires ASC LIMIT ?);]], n - Cache.MAX_ROWS)
     end
 end
 
