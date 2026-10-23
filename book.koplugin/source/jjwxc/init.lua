@@ -276,7 +276,7 @@ end
 --- 阅读页是否显示他人段评（设置页开关，默认关）。
 ---@return boolean
 function Source:paragraphReviewsEnabled()
-    return require("utils.settings").getSource(self.id).show_paragraph_reviews == true
+    return require("source.review_setting").enabled(self.id)
 end
 
 --- 章节序号 → 晋江章号，目录来自缓存或在线拉取；start 返回要取消的任务。

@@ -136,7 +136,7 @@ local function showLogin()
 end
 
 ---@return table[]
-function Setting.rows()
+function Setting.rows(plugin)
     local Row = require("ui.themes.widgets.row")
     local rows = {
         function(iw)
@@ -147,6 +147,7 @@ function Setting.rows()
                 callback = function() showLogin() end })
         end,
     }
+    rows[#rows + 1] = require("source.review_setting").row(SOURCE_ID, plugin)
     if not loggedIn() then return rows end
     rows[#rows + 1] = function(iw)
         return Row.widget({ width = iw, chevron = false, kind = "action", icon = "logout", title = _("退出登录"),

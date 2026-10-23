@@ -410,4 +410,40 @@ function Client.contentAsync(book_id, chapter_id, cb)
     end }
 end
 
+-- 段评接口匿名可读，但 Cookie 与参数里的 _csrfToken 必须一致（双提交），没登录就本地编一个。
+local anon_csrf
+---@return string
+local function reviewCookie()
+    if Client.cookie() then return Client.cookie() end
+    if not anon_csrf then
+        local hex = {}
+        for i = 1, 32 do hex[i] = string.format("%x", math.random(0, 15)) end
+        anon_csrf = "_csrfToken=" .. table.concat(hex)
+    end
+    return anon_csrf
+end
+
+--- 本章各段评论数；list[].paragraphId 从 1 数，-1 是章末总评；enableReview = 0 表示这本书没开段评。
+---@param book_id string
+---@param chapter_id string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return HttpJob
+function Client.reviewSummaryAsync(book_id, chapter_id, cb)
+    return apiGet("/webcommon/chapterreview/reviewsummary4m", { bookId = book_id, chapterId = chapter_id },
+        reviewCookie(), cb)
+end
+
+--- 某段的一页评论（page 从 1 起，每页 10 条左右）。
+---@param book_id string
+---@param chapter_id string
+---@param paragraph_id integer
+---@param page integer
+---@param cb fun(data: table|nil, err: string|nil)
+---@return HttpJob
+function Client.reviewListAsync(book_id, chapter_id, paragraph_id, page, cb)
+    return apiGet("/webcommon/chapterreview/reviewlist4m", {
+        bookId = book_id, chapterId = chapter_id, paragraphId = paragraph_id, page = page,
+    }, reviewCookie(), cb)
+end
+
 return Client

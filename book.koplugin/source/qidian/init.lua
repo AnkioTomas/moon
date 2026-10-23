@@ -13,6 +13,7 @@ require("l10n").apply()
 local Browse = require("source.browse")
 local Client = require("source.qidian.client")
 local Mapper = require("source.qidian.mapper")
+local ReviewCache = require("book.review_cache")
 local Shelf = require("source.shelf")
 local SourceBase = require("source.base")
 local Toc = require("source.toc")
@@ -302,6 +303,69 @@ function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
     local Chapter = require("source.chapter")
     return Chapter.cacheAllAsync(self, identity, Chapter.vipFetcher(self, Client.contentAsync, false), on_progress, cb,
         FETCH_INTERVAL, range)
+end
+
+--- 阅读页是否显示他人段评（设置页开关，默认关）。
+---@return boolean
+function Source:paragraphReviewsEnabled()
+    return require("source.review_setting").enabled(self.id)
+end
+
+--- 章节序号 → 起点章号，目录来自缓存或在线拉取；start 返回要取消的任务。
+---@param self QidianSource
+---@param identity BookIdentity
+---@param cb fun(value: any, err: string|nil)
+---@param start fun(chapter_id: string, finish: function): { cancel: fun() }|nil
+---@return { cancel: fun() }
+local function withChapterId(self, identity, cb, start)
+    local cancelled, job = false, nil
+    job = self:loadTocAsync(identity, function(toc, err)
+        if cancelled then return end
+        local chapter = toc and toc[tonumber(identity.chapter_idx)]
+        if not chapter then
+            cb(nil, err or _("缺少起点章节位置"))
+            return
+        end
+        job = start(chapter.uid, cb)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
+end
+
+--- 本章有评论的段落（未定位）。
+---@param identity BookIdentity
+---@param cb fun(hotspots: QidianReviewHotspot[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:paragraphHotspotsAsync(identity, cb)
+    return ReviewCache.hotspotsAsync(identity, function(done)
+        return withChapterId(self, identity, done, function(uid, finish)
+            return require("source.qidian.reviews").hotspotsAsync(identity.stable_id, uid, finish)
+        end)
+    end, cb)
+end
+
+--- 段落按段序定位到章节 HTML（子进程里跑，不碰实例状态）。
+---@param hotspots QidianReviewHotspot[]
+---@param html string
+---@return table[]
+function Source:locateHotspots(hotspots, html)
+    return require("source.qidian.reviews").locate(hotspots, html)
+end
+
+--- 某段的一页评论；range 是段落序号，max_idx 是已取页数（首页 0）。
+---@param identity BookIdentity
+---@param range string
+---@param max_idx integer
+---@param cb fun(page: WechatReviewPage|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:paragraphReviewPageAsync(identity, range, max_idx, cb)
+    return ReviewCache.pageAsync(identity, range, max_idx, function(done)
+        return withChapterId(self, identity, done, function(uid, finish)
+            return require("source.qidian.reviews").pageAsync(identity.stable_id, uid, tonumber(range), max_idx, finish)
+        end)
+    end, cb)
 end
 
 return Qidian

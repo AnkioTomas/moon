@@ -21,7 +21,6 @@ local STATS_PATH = "/novel/commentapi/idea/list/%s/v1/"
 local LIST_PATH = "/novel/commentapi/comment/list/%s/v1/"
 local PAGE_SIZE = 20
 -- 段评气泡跟在段末：只用段尾这么多个字定位（要唯一），气泡画在最后一行右侧。
-local MARK_RUNES = 24
 
 ---@class FanqieReviewHotspot
 ---@field range string 段落序号（blk p_idx）
@@ -170,20 +169,6 @@ function Reviews.pageAsync(settings, book_id, item_id, para_index, max_idx, cb)
     end)
 end
 
---- 取串尾最多 n 个字（UTF-8 按首字节计，不会切坏字符）。
----@param s string
----@param n integer
----@return string
-local function tail(s, n)
-    local count, at = 0, #s + 1
-    while at > 1 and count < n do
-        at = at - 1
-        while at > 1 and s:byte(at) >= 0x80 and s:byte(at) < 0xC0 do at = at - 1 end
-        count = count + 1
-    end
-    return s:sub(at)
-end
-
 --- 章节 HTML 里每段的纯文本，键为 blk p_idx。
 ---@param html string
 ---@return table<string, string>
@@ -196,33 +181,12 @@ local function paragraphs(html)
     return out
 end
 
---- 把有评论的段落定位到章节 HTML：按段末文字找 xpointer（气泡跟在段末），同文重复且无法按段序消歧的丢弃。
---- 返回的 text 是整段原文（评论页上方的引用）。
+--- 把有评论的段落定位到章节 HTML。
 ---@param hotspots FanqieReviewHotspot[]
 ---@param html string
----@return table[] spots { range, text, total, pos0, pos1 }
+---@return table[]
 function Reviews.locate(hotspots, html)
-    local paras = paragraphs(html)
-    local items = {}
-    for _idx, hotspot in ipairs(hotspots) do
-        local text = paras[hotspot.range]
-        if text and text ~= "" then
-            items[#items + 1] = { text = tail(text, MARK_RUNES), wr_range = hotspot.range, hotspot = hotspot, full = text }
-        end
-    end
-    local located = require("book.annotations").locateBatch(html, items)
-    local out = {}
-    for _idx, entry in ipairs(items) do
-        local hit = located[entry]
-        if hit then
-            local hotspot = entry.hotspot
-            out[#out + 1] = {
-                range = hotspot.range, text = entry.full, total = hotspot.total, pos0 = hit.pos0, pos1 = hit.pos1,
-                badge = hotspot.total > 99 and "99+" or tostring(hotspot.total),
-            }
-        end
-    end
-    return out
+    return require("book.review_locate").locate(paragraphs(html), hotspots, html)
 end
 
 return Reviews

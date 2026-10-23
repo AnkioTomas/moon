@@ -149,21 +149,7 @@ function Setting.rows(plugin)
                 callback = showAccountLogin })
         end,
     }
-    -- 段评接口匿名可读，不用登录
-    rows[#rows + 1] = function(iw)
-        local settings = require("utils.settings")
-        local on = settings.getSource(SOURCE_ID).show_paragraph_reviews == true
-        return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = "forum",
-            title = _("显示段评"), subtitle = _("阅读时给有他人段评的段落末尾画线，点按查看；需联网"),
-            status = on and _("开") or _("关"), status_on = on,
-            callback = function()
-                local cfg = settings.getSource(SOURCE_ID)
-                cfg.show_paragraph_reviews = not on
-                settings.saveSource(SOURCE_ID, cfg)
-                if plugin and plugin.desktop then plugin.desktop:updateView() end
-                        cfg.token = nil
-            end })
-    end
+    rows[#rows + 1] = require("source.review_setting").row(SOURCE_ID, plugin)
     if not loggedIn() then return rows end
     rows[#rows + 1] = function(iw)
         return Row.widget({ width = iw, chevron = false, kind = "action", icon = "logout", title = _("退出登录"),
@@ -172,6 +158,20 @@ function Setting.rows(plugin)
                     text = _("确定退出晋江账号？"),
                     ok_text = _("退出登录"),
                     ok_callback = function()
+                        local settings = require("utils.settings")
+                        local cfg = settings.getSource(SOURCE_ID)
+                        cfg.cookie = nil
+                        cfg.token = nil
+                        settings.saveSource(SOURCE_ID, cfg)
+                        require("ui.themes.widgets.toast"):new{ text = _("已退出登录"), timeout = 2 }:show()
+                        require("source.registry").reload()
+                    end,
+                }:show()
+            end })
+    end
+    return rows
+end
+
 ---@param token string
 local function saveToken(token)
     local settings = require("utils.settings")
@@ -262,19 +262,6 @@ local function showAccountLogin()
             showLogin(account, password)
         end,
     }:show()
-end
-
-                        local settings = require("utils.settings")
-                        local cfg = settings.getSource(SOURCE_ID)
-                        cfg.cookie = nil
-                        settings.saveSource(SOURCE_ID, cfg)
-                        require("ui.themes.widgets.toast"):new{ text = _("已退出登录"), timeout = 2 }:show()
-                        require("source.registry").reload()
-                    end,
-                }:show()
-            end })
-    end
-    return rows
 end
 
 --- 登录失效提示的「重新登录」直达入口（desktop.sync.promptLogin）。
