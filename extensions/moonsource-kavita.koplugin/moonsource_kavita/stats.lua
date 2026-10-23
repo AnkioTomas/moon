@@ -14,7 +14,8 @@ Kavita 阅读统计纯核心：reading-history 条目 + 身份 / 时区上下文
 否则会把《2001》的时长记到《2010》头上。
 
 账户日桶 `__kv:day:<当天零点>` 的页数按天**先求和再钳制**（`max(0, ·)`）：服务端 pagesRead
-实测有负数（退页），逐条钳制会让 +1 / -1 相抵的当天凭空多出 1 页。
+实测有负数（退页），逐条钳制会让 +1 / -1 相抵的当天凭空多出 1 页。漫画不用 pagesRead 求和，
+而是按最远进度算新推进的页数（见下），贡献本身已 >= 0。
 
 账户时段桶 `__kv:hour:<整点>`：每条活动行的时长记在它起始时刻所在的那个本地整点（跨整点的活动行
 整体算起始小时，与「跨零点的会话整体算起始日」同一口径），供「阅读时段」图用；云端只有这一层
@@ -22,8 +23,14 @@ Kavita 阅读统计纯核心：reading-history 条目 + 身份 / 时区上下文
 
 阅读会话行（`cloud_session`）：每个「会话 × 章」切片的起始时刻与时长单独落一行，
 供书详情 / 统计页的「阅读记录」列出真的读了几点几分；时长不计入日 / 时段 / 总量行
-（那些桶已经包含它），只在 `sessionRows` 里读。页数（`event_count` = pagesRead）不另写记录类型：
-核心从这一行累加单书页数，所以漫画另外补 `page = endPage` / `total_pages = 卷级总页数`。
+（那些桶已经包含它），只在 `sessionRows` 里读。页数（`event_count`）不另写记录类型：
+核心从这一行累加单书页数。页数口径分两种：
+
+- 漫画（Image / Archive）：`event_count` = **本次新推进的页数**，不是 `pagesRead`。
+  `pagesRead` 是「这次翻了多少页」，重读会重复计入（实测 194 页的卷求和 284）；
+  按最远进度算，`SUM(event_count)` 才等于读到的最远页码（≤ 总页数），与 Kavita 的百分比一致。
+  所以漫画还要补 `page = endPage` / `total_pages = 卷级总页数`。
+- epub / PDF：`pagesRead` 是唯一页数来源，`event_count` 照旧；页坐标仍为 0。
 
 全量重拉：日桶 / 时段桶 / 总量行按「前缀 + 覆盖到最后观测桶的时间窗」替换；单书行按「上次 ∪ 本次
 身份」精确替换，顺带清掉身份漂移（单卷 ↔ 多卷、系列重建）遗留的孤儿行。
@@ -160,6 +167,17 @@ local function volumeCount(volumes, series_id)
     return count
 end
 
+--- 漫画章行：页数贡献要按身份排完序才能算（见 fromHistory 里「漫画最远进度」一段）。
+---@class KavitaComicSlice
+---@field identity string 卷身份（单卷 = seriesId，多卷 = seriesId:chapterId）
+---@field day number 该活动行归属的本地零点（推进的页数记进这一天）
+---@field epoch number|nil 会话行 start_time（也是排序键）
+---@field order number 回包顺序，仅用于同一时刻的稳定排序
+---@field duration number 秒；`> 0` 才发行
+---@field page number 原始 endPage（会话行的进度坐标）
+---@field end_page number 钳到总页数后的结束页（算推进页数用）
+---@field total_pages number 卷级总页数
+
 ---@class KavitaStatsContext
 ---@field source_id string 本源 id（写进每行）
 ---@field fetched_at number|nil 拉取时刻（缺省 now）；写进行 / 桶的 last_time
@@ -184,6 +202,7 @@ function Stats.fromHistory(entries, ctx)
     local hour_durations = {} ---@type table<number, number> 整点 → 秒（账户时段桶）
     local last_day = 0 ---@type number 本次回包里最晚的观测日（零点）
     local last_hour = 0 ---@type number 本次回包里最晚的观测整点
+    local comic_slices = {} ---@type KavitaComicSlice[] 漫画章行，算完进度贡献再落行
     local identities, known, warned_series = {}, {}, {}
 
     --- 记下本次出现的身份。零时长条目也记：它上次可能有行，靠 replace.books 清掉。
@@ -241,9 +260,11 @@ function Stats.fromHistory(entries, ctx)
                         end
                     end
                     noteIdentity(identity)
-                    if contributes and identity then
+                    if identity then
                         local duration = tonumber(chapter.durationSeconds) or 0
-                        if duration > 0 then
+                        -- 章活动行自己的起始时刻（时段桶 / 会话行 / 漫画排序共用）；拿不到就退回条目起始时刻。
+                        local chapter_epoch = utcEpoch(chapter.startTimeUtc) or anchor
+                        if contributes and duration > 0 then
                             local days = book_days[identity]
                             if not days then
                                 days = {}
@@ -253,29 +274,71 @@ function Stats.fromHistory(entries, ctx)
                             book_totals[identity] = (book_totals[identity] or 0) + duration
                             day_durations[day] = (day_durations[day] or 0) + duration
                             -- 时段桶：按活动行自己的起始小时；拿不到就退回条目起始时刻。
-                            local chapter_epoch = utcEpoch(chapter.startTimeUtc) or anchor
                             if chapter_epoch then
                                 local bucket = hourBucket(day, chapter_epoch)
                                 hour_durations[bucket] = (hour_durations[bucket] or 0) + duration
                                 if bucket > last_hour then last_hour = bucket end
+                            end
+                        end
+                        if comic then
+                            -- 漫画的页数不能边遍历边累加：`pagesRead` 是「这次翻了多少页」，重读会重复计入。
+                            -- 先收集，按身份（卷）× 起始时刻排序后再算「本次新推进的页数」。
+                            local total_pages = math.max(0, tonumber(chapter.totalPages) or 0)
+                            local page = math.max(0, tonumber(chapter.endPage) or 0)
+                            comic_slices[#comic_slices + 1] = {
+                                identity = identity,
+                                day = day,
+                                epoch = chapter_epoch,
+                                order = #comic_slices + 1,
+                                duration = duration,
+                                page = page,
+                                -- 只有拿到总页数才钳：缺总页数时别凭空假设一个上界。
+                                end_page = total_pages > 0 and math.min(page, total_pages) or page,
+                                total_pages = total_pages,
+                            }
+                        elseif contributes then
+                            if duration > 0 and chapter_epoch then
                                 -- 阅读会话行：详情「阅读记录」按真实起止时间列出这一段。
                                 local session = statsRow(source_id, identity, SESSION_RECORD,
                                     chapter_epoch, duration, fetched_at)
                                 session.event_count = math.max(0, tonumber(chapter.pagesRead) or 0)
-                                if comic then
-                                    -- page = endPage（读到哪一页，核心 reading_stats.page 的语义）；
-                                    -- total_pages 取**章（卷）级**的 totalPages，多卷系列汇总处取 MAX。
-                                    -- pagesRead = 0 是合法值（打开没翻页），不是缺数据，照落不误。
-                                    session.page = math.max(0, tonumber(chapter.endPage) or 0)
-                                    session.total_pages = math.max(0, tonumber(chapter.totalPages) or 0)
-                                end
                                 rows[#rows + 1] = session
                             end
+                            day_pages[day] = (day_pages[day] or 0) + (tonumber(chapter.pagesRead) or 0)
                         end
-                        day_pages[day] = (day_pages[day] or 0) + (tonumber(chapter.pagesRead) or 0)
                     end
                 end
             end
+        end
+    end
+
+    -- 漫画：按身份（卷）分别按起始时刻升序走一遍，只留「比此前更远」的页数 —— 这样重读不再重复计入，
+    -- 跳读也只按推进到哪算，`SUM(event_count)` = 读到的最远页码（天然 ≤ 总页数），与 Kavita 百分比一致。
+    -- 回包可能是新→旧（服务端按时间倒序），所以必须排序，不能依赖遍历顺序。
+    table.sort(comic_slices, function(a, b)
+        if a.identity ~= b.identity then return a.identity < b.identity end
+        local ae, be = a.epoch or 0, b.epoch or 0
+        if ae ~= be then return ae < be end
+        return a.order < b.order
+    end)
+    local reached = {} ---@type table<string, number> 身份（卷）→ 此前到达的最远页码
+    for _idx, slice in ipairs(comic_slices) do
+        local previous = reached[slice.identity] or 0
+        local advance = slice.end_page - previous
+        if advance < 0 then advance = 0 end
+        if slice.end_page > previous then reached[slice.identity] = slice.end_page end
+        -- 零时长章行不发行（会话行说的是「这一段读了多久」），但推进照样算进当天页数：
+        -- 否则这次跳读会从当天页数里消失，而后续会话又因 reached 更高而少算。
+        day_pages[slice.day] = (day_pages[slice.day] or 0) + advance
+        if slice.duration > 0 and slice.epoch then
+            local session = statsRow(source_id, slice.identity, SESSION_RECORD,
+                slice.epoch, slice.duration, fetched_at)
+            session.event_count = advance
+            -- page = endPage（读到哪一页，核心 reading_stats.page 的语义）；total_pages 取卷级，
+            -- 多卷系列汇总处取 MAX。pagesRead = 0 是合法值（打开没翻页），不是缺数据。
+            session.page = slice.page
+            session.total_pages = slice.total_pages
+            rows[#rows + 1] = session
         end
     end
 
