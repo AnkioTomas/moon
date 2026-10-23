@@ -61,6 +61,33 @@ local function rewriteStyleLinks(html)
     return out, count
 end
 
+-- KOReader 默认样式让每个 h1 另起一页；原书把「第/一/章」拆成连续三个 h1 竖排成一页，
+-- 不放开就会分成三页。
+-- 章首页用 body.bgimg-1 铺满页的背景图（样式表里 cover），crengine 会把它拉伸到整个文档高度；
+-- 改成只包住标题的一页高容器（vh = 视口高度），背景图随之只铺这一页。
+local TITLE_CSS = "<style>h1 + h1, .moon-title h1 { page-break-before: avoid; }"
+    .. " body.bgimg-1 { background-image: none; }"
+    .. " .moon-title { background-image: url(images/bq.jpg); background-size: cover;"
+    .. " background-position: center bottom; height: 90vh; padding-top: 30vh;"
+    .. " page-break-before: always; page-break-after: always; }</style>"
+
+--- body.bgimg-1 的章：丢掉开头垫底的透明出血图，把紧跟着的连续 h1 包进整页容器。
+---@param html string
+---@return string
+local function wrapTitlePage(html)
+    local head, rest = html:match('^(.-<body class="bgimg%-1">%s*)(.*)$')
+    if not head then return html end
+    rest = rest:gsub('^<p class="bleed%-pic">.-</p>%s*', "", 1)
+    local pos = 1
+    while true do
+        local _s, e = rest:find("^<h1[^>]*>.-</h1>%s*", pos)
+        if not e then break end
+        pos = e + 1
+    end
+    if pos == 1 then return head .. rest end
+    return head .. '<div class="moon-title">' .. rest:sub(1, pos - 1) .. "</div>" .. rest:sub(pos)
+end
+
 --- 样式表每本书只拉一次；拉不到就保留原 link，下一章再试。
 ---@param work_dir string
 ---@param html string
@@ -68,6 +95,7 @@ end
 ---@param cb fun(html: string)
 ---@return { cancel: fun() }|nil
 local function localizeStyleAsync(work_dir, html, fetch_style, cb)
+    html = wrapTitlePage(html):gsub("</head>", function() return TITLE_CSS .. "</head>" end, 1)
     local rewritten, count = rewriteStyleLinks(html)
     if count == 0 then
         cb(html)
@@ -81,7 +109,7 @@ local function localizeStyleAsync(work_dir, html, fetch_style, cb)
         return nil
     end
     return fetch_style(function(css)
-        if css and writeFile(path, css) then
+        if css and writeFile(path, (css:gsub("%.%./Images/", "images/"))) then
             cb(rewritten)
         else
             cb(html)

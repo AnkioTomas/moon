@@ -71,6 +71,8 @@ function Mapper.book(row)
     end
     local finished = userFinished(book)
     local cover = type(book.cover) == "string" and book.cover ~= "" and book.cover or nil
+    -- 搜索 / 榜单给的是 s_ 缩略图（70x100），同路径 t7_ 是 285x406
+    cover = cover and cover:gsub("/s_([^/]+)$", "/t7_%1")
     local out = {
         source_id = SOURCE_ID, stable_id = id,
         title = book.title or book.bookName or book.name,

@@ -18,6 +18,7 @@ local Package = require("source.wechat.package")
 local Request = require("http.request")
 local Assets = require("source.wechat.assets")
 local Text = require("utils.text")
+local Paths = require("utils.paths")
 local _ = require("gettext")
 
 local Chapter = {}
@@ -149,11 +150,21 @@ end
 --- 都失败回 nil，由调用方保留原 link。
 ---@param bookId string
 ---@param uid string
+---@param work_dir string 整书公共图（样式表里 ../Images/ 引用的背景等）落到它的 images/
 ---@param done fun(css: string|nil)
 ---@return { cancel: fun() }|nil
-local function fetchStyleAsync(bookId, uid, done)
+local function fetchStyleAsync(bookId, uid, work_dir, done)
     local web
+    Paths.ensureDir(work_dir .. "/images")
     local app = downloadPackageAsync(bookId, "0", function(files)
+        for name, data in pairs(files) do
+            local base = name:match("^Images/([^/]+)$")
+            if base then
+                local f = assert(io.open(work_dir .. "/images/" .. base, "wb"))
+                f:write(data)
+                f:close()
+            end
+        end
         return files["Styles/stylesheets.css"]
     end, function(css, err)
         if css then
@@ -362,7 +373,7 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
             return
         end
         asset_job = Assets.localizeAsync(bookId, chapter, html, reader_url, function(done)
-            return fetchStyleAsync(bookId, chapter.uid, done)
+            return fetchStyleAsync(bookId, chapter.uid, Paths.bookWorkDir(bookId, "wechat"), done)
         end, function(localized)
             if cancelled then return end
             cb({ title = title, document = linkFootnotes(localizeAnchors(localized)) })

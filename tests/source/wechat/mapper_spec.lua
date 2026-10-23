@@ -15,6 +15,11 @@ package.preload["source.contract"] = nil
 local Mapper = require("source.wechat.mapper")
 
 do
+    local _b, cover = Mapper.book({ bookId = "wx-2", cover = "https://cdn.weread.qq.com/weread/cover/80/y_1/s_y_1.jpg" })
+    Assert.eq(cover, "https://cdn.weread.qq.com/weread/cover/80/y_1/t7_y_1.jpg")
+end
+
+do
     local b, cover = Mapper.book({
         bookId = "wx-1",
         bookName = "三体",

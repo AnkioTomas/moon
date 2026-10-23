@@ -122,6 +122,11 @@ do
     local head = '<?xml version="1.0"?><html><head><title></title>'
     local link = '<link href="../Styles/stylesheets.css" rel="stylesheet" type="text/css" />'
     local abs = '<link href="https://cdn/x.css" rel="stylesheet" />'
+    local fix = "<style>h1 + h1, .moon-title h1 { page-break-before: avoid; }"
+        .. " body.bgimg-1 { background-image: none; }"
+        .. " .moon-title { background-image: url(images/bq.jpg); background-size: cover;"
+        .. " background-position: center bottom; height: 90vh; padding-top: 30vh;"
+        .. " page-break-before: always; page-break-after: always; }</style>"
     local body = '</head><body><p class="content">正文<img class="qqreader-footnote" alt="注文" '
         .. 'src="../Images/note.png" /></p></body></html>'
     local sample = head .. link .. abs .. body
@@ -152,7 +157,7 @@ do
     local f = assert(io.open(work_dir .. "/" .. icon, "rb"))
     Assert.eq(f:read(4), "\137PNG")
     f:close()
-    Assert.eq(out, head .. '<link href="stylesheets.css" rel="stylesheet" type="text/css" />' .. abs
+    Assert.eq(out, head .. '<link href="stylesheets.css" rel="stylesheet" type="text/css" />' .. abs .. fix
         .. body:gsub("%.%./Images/note%.png", icon))
     f = assert(io.open(work_dir .. "/stylesheets.css", "rb"))
     Assert.eq(f:read("*a"), ".content{text-indent:2em}")
@@ -160,4 +165,26 @@ do
 
     Assert.eq(run(fetchStyle("不该再拉")), out, "已缓存直接改链接")
     Assert.eq(fetches, 2)
+end
+
+-- 章首页：body.bgimg-1 的开头出血图丢掉，连续 h1 包进整页容器；样式表里 ../Images/ 改指工作目录 images/
+do
+    local Paths = require("utils.paths")
+    local work_dir = Paths.bookWorkDir("book-4", "wechat")
+    Paths.ensureDir(work_dir)
+    os.remove(work_dir .. "/stylesheets.css")
+    local src = '<html><head><link href="../Styles/stylesheets.css" rel="stylesheet" /></head>'
+        .. '<body class="bgimg-1">\n<p class="bleed-pic"><img src="a.png" /></p>\n'
+        .. '<h1 class="firstTitle">第</h1>\n<h1 class="firstTitle">一</h1>\n<p class="content">正文</p></body></html>'
+    local out
+    Assets.localizeAsync("book-4", { uid = "u4" }, src, nil, function(done)
+        done("a{background:url(../Images/bq.jpg)}")
+        return { cancel = function() end }
+    end, function(html) out = html end)
+    Assert.is_true(out:find('<body class="bgimg-1">\n<div class="moon-title"><h1 class="firstTitle">第</h1>\n'
+        .. '<h1 class="firstTitle">一</h1>\n</div><p class="content">正文</p>', 1, true) ~= nil, out)
+    Assert.is_nil(out:find("bleed-pic", 1, true))
+    local f = assert(io.open(work_dir .. "/stylesheets.css", "rb"))
+    Assert.eq(f:read("*a"), "a{background:url(images/bq.jpg)}")
+    f:close()
 end
