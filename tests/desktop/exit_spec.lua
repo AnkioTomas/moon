@@ -103,7 +103,7 @@ local function fileManager()
 end
 
 local function newDesktop(plugin)
-    local d = setmetatable({ key_events = {}, plugin = plugin }, { __index = Desktop })
+    local d = setmetatable({ key_events = {}, plugin = plugin, source = { id = "local" } }, { __index = Desktop })
     d:init()
     plugin.desktop = d
     UIManager:show(d)
@@ -214,4 +214,22 @@ do
     late:show()
     ExitWindows.exiting = false
     Assert.eq(depth(), 0, "Modal shown after Exit must not stay on the stack")
+end
+
+-- 4) 销毁后重开：页签与书架浏览位置还原，换源不还原
+do
+    reset()
+    local plugin = {}
+    local d = newDesktop(plugin)
+    d.tab = "library"
+    d.library.group, d.library.page, d.library.filter = "books", 3, { search = "x" }
+    d:destroy()
+    local d2 = newDesktop(plugin)
+    Assert.eq(d2.tab, "library")
+    Assert.eq(d2.library.page, 3)
+    Assert.eq(d2.library.filter.search, "x")
+    d2.source = { id = "wechat" }
+    d2:destroy()
+    local d3 = newDesktop(plugin)
+    Assert.eq(d3.tab, "home", "换源不还原")
 end
