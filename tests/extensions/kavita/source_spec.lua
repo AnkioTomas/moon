@@ -495,132 +495,375 @@ Assert.is_true(run("putProgressAsync", volume, { fraction = 0.5, locator = "/bod
 Assert.eq(sent.pageNum, 5)
 toc_fresh, online = true, true
 
--- 注解：没 id 的新建（锚点按本地 epub 段落找，找不到只带 spine），id 原地回填；备注改了才更新。
-local epub = {
-    ["META-INF/container.xml"] = [[<rootfile full-path="content.opf"/>]],
-    ["content.opf"] = [[<manifest><item id="a" href="a.xhtml"/></manifest><spine><itemref idref="a"/></spine>]],
-    ["a.xhtml"] = [[<body><p>春眠不觉晓</p></body>]],
-}
-package.loaded["ffi/archiver"] = { Reader = { new = function()
-    return {
-        open = function(_self, file) return file == WORK .. "/20:2002/2002.epub" end,
-        iterate = function() return function() end end,
-        extractToMemory = function(_self, name) return epub[name] end,
-        close = function() end,
+-- 推送（spec §8）：先按章对账一次，再逐条新建 / 更新；用 do 收住局部变量（Lua 单函数 200 个上限）。
+do
+    -- 注解：推送前先按章对账一次（一批一次 GET），create 必须拿到 id，写失败整批留脏。
+    -- 远端仓库 / 当前用户 / 服务端落库行为全部打桩，断言只看向外的请求与回填。
+    local epub = {
+        ["META-INF/container.xml"] = [[<rootfile full-path="content.opf"/>]],
+        ["content.opf"] = [[<manifest><item id="a" href="a.xhtml"/></manifest><spine><itemref idref="a"/></spine>]],
+        ["a.xhtml"] = [[<body><p>春眠不觉晓</p><p>处处闻啼鸟</p></body>]],
     }
-end } }
-local created, updated = {}, {}
-routes["POST /api/Annotation/create"] = function(opts)
-    created[#created + 1] = JSON.decode(opts.body)
-    return json({ id = 70 + #created })
+    package.loaded["ffi/archiver"] = { Reader = { new = function()
+        return {
+            open = function(_self, file) return file == WORK .. "/20:2002/2002.epub" end,
+            iterate = function() return function() end end,
+            extractToMemory = function(_self, name) return epub[name] end,
+            close = function() end,
+        }
+    end } }
+    -- 坐标守卫 / 远端赢只留日志：收起来断言，不弹窗也不干扰别的断言。
+    local push_warnings = {}
+    do
+        local log = require("utils.log")
+        log.warn = function(...) push_warnings[#push_warnings + 1] = table.concat({ ... }, " ") end
+    end
+    local function warned(text)
+        for _idx, line in ipairs(push_warnings) do
+            if line:find(text, 1, true) then return true end
+        end
+        return false
+    end
+
+    -- 远端注解仓库：GET all 读它，create / update 往里写；属主固定成当前用户。
+    local USER, next_id = 5, 101
+    local remote, created, updated = {}, {}, {}
+    local fail_list, fail_create, fail_update, blank_create, drop_create, create_fail_at
+    routes["GET /api/Users/me"] = json({ id = USER })
+    routes["GET /api/Annotation/all"] = function(opts)
+        if fail_list then return { code = 500, body = "" } end
+        local chapter = tonumber(query(opts, "chapterId")) or 0
+        local out = {}
+        for _idx, item in ipairs(remote[chapter] or {}) do out[#out + 1] = item end
+        return json(out)
+    end
+    --- 服务端落库：create 分配 id；update 只覆盖可写四字段（坐标改不了，与 Kavita 一致）。
+    local function persist(body, is_update)
+        local chapter = tonumber(body.chapterId) or 0
+        remote[chapter] = remote[chapter] or {}
+        local item
+        if is_update then
+            for _idx, row in ipairs(remote[chapter]) do
+                if tonumber(row.id) == tonumber(body.id) then item = row end
+            end
+        else
+            body.id, next_id = next_id, next_id + 1
+            body.ownerUserId = USER
+            item = body
+            remote[chapter][#remote[chapter] + 1] = item
+        end
+        if item then
+            item.comment, item.commentHtml = body.comment, body.commentHtml
+            item.selectedSlotIndex, item.containsSpoiler = body.selectedSlotIndex, body.containsSpoiler
+        end
+        return item
+    end
+    routes["POST /api/Annotation/create"] = function(opts)
+        local body = JSON.decode(opts.body)
+        created[#created + 1] = body
+        if fail_create or (create_fail_at and #created >= create_fail_at) then return { code = 500, body = "" } end
+        local item
+        if not drop_create then item = persist(body, false) end
+        -- blank_create：反代吞掉 DTO（2xx 空体），但服务端确实建成了。
+        if blank_create or not item then return { code = 200, body = "" } end
+        return json({ id = item.id })
+    end
+    routes["POST /api/Annotation/update"] = function(opts)
+        local body = JSON.decode(opts.body)
+        updated[#updated + 1] = body
+        if fail_update then return { code = 500, body = "" } end
+        persist(body, true)
+        return json({ id = body.id })
+    end
+    --- 每个场景从干净状态开始：远端仓库、写请求计数、故障开关。
+    local function resetPush()
+        remote, next_id, created, updated = {}, 101, {}, {}
+        fail_list, fail_create, fail_update = false, false, false
+        blank_create, drop_create, create_fail_at = false, false, nil
+        push_warnings = {}
+    end
+
+    -- 非 epub：零请求，pushed=0（核心据此不谎报「同步过」）。
+    resetPush()
+    local calls_before = #calls
+    local ok_epub, _err_epub, data_epub = run("pushNotesAsync", pdf,
+        { { drawer = "lighten", text = "图", pos0 = "x" } })
+    Assert.is_true(ok_epub)
+    Assert.eq(data_epub.pushed, 0)
+    Assert.eq(#calls, calls_before, "非 epub 一个请求都不发")
+
+    -- 对账 GET 失败：宁可这轮不推，也不盲建重复；一个写请求都不发。
+    resetPush()
+    fail_list = true
+    local ok_net, err_net = run("pushNotesAsync", volume,
+        { { drawer = "lighten", text = "春眠\n不觉晓", note = "好诗", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" } })
+    Assert.is_nil(ok_net)
+    Assert.matches(err_net, "500")
+    Assert.len(created, 0)
+    Assert.len(updated, 0)
+
+    -- 新建：请求体按 §5.1 的 Web 兼容形态；成功判据是 DTO 里有 id，id 原地回填给核心落库。
+    resetPush()
+    local anns = {
+        { drawer = "lighten", text = "春眠\n不觉晓", note = "好诗", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" },
+        { drawer = "underscore", text = "处处闻啼鸟", pos0 = "/body/DocFragment[1]/body/p[2]/text().0" },
+    }
+    local ok_new, err_new, data_new = run("pushNotesAsync", volume, anns)
+    Assert.is_true(ok_new)
+    Assert.is_nil(err_new)
+    Assert.eq(data_new.pushed, 2)
+    Assert.eq(data_new.adopted, 0)
+    Assert.len(created, 2)
+    Assert.len(updated, 0)
+    Assert.eq(created[1].xPath, "//body/p[1]")
+    Assert.eq(created[1].endingXPath, "//body/p[1]")
+    Assert.eq(created[1].pageNumber, 0)
+    Assert.eq(created[1].selectedText, "春眠\n不觉晓")
+    Assert.eq(created[1].highlightCount, 6, "按 UTF-16 码元计")
+    Assert.eq(created[1].chapterId, 2002)
+    Assert.eq(created[1].volumeId, 201)
+    Assert.eq(created[1].libraryId, 2)
+    Assert.eq(created[1].seriesId, 20)
+    Assert.eq(JSON.decode(created[1].comment).ops[1].insert, "好诗\n", "备注写 Quill Delta，网页端才打得开")
+    Assert.eq(created[1].commentHtml, "<p>好诗</p>")
+    Assert.eq(created[2].comment, "{}", "空备注写空 Delta（网页端 JSON.parse 不崩）")
+    Assert.eq(created[2].commentHtml, "")
+    Assert.eq(anns[1].kavita_id, 101)
+    Assert.eq(anns[1].kavita_note, "好诗")
+    Assert.eq(anns[1].kavita_xpath, "//body/p[1]", "远端坐标回填给诊断与坐标守卫")
+    Assert.eq(anns[2].kavita_id, 102)
+    Assert.eq(anns[2].kavita_note, "", "空备注的基线是空串，不是 nil（否则每轮都判改过）")
+
+    -- 再推一轮：没有改动 → 零请求，pushed=0。
+    created, updated = {}, {}
+    local ok_same, _err_same, data_same = run("pushNotesAsync", volume, anns)
+    Assert.is_true(ok_same)
+    Assert.eq(data_same.pushed, 0)
+    Assert.len(created, 0, "推过的不重建")
+    Assert.len(updated, 0)
+
+    -- 改备注且远端没变 → 一次 update（整条替换）；未改动的槽位 / 剧透回传远端原值。
+    anns[1].kavita_slot, anns[1].kavita_spoiler = 3, true
+    anns[1].note = "改了"
+    local ok_up, _err_up, data_up = run("pushNotesAsync", volume, anns)
+    Assert.is_true(ok_up)
+    Assert.eq(data_up.pushed, 1)
+    Assert.eq(data_up.adopted, 1)
+    Assert.eq(data_up.conflicts, 0)
+    Assert.len(updated, 1)
+    Assert.eq(updated[1].id, 101)
+    Assert.eq(updated[1].xPath, "//body/p[1]", "update 也带坐标（服务端忽略，形状要对）")
+    Assert.eq(JSON.decode(updated[1].comment).ops[1].insert, "改了\n")
+    Assert.eq(updated[1].selectedSlotIndex, 3, "颜色不回传就会被服务端清成默认")
+    Assert.eq(updated[1].containsSpoiler, true)
+    Assert.eq(anns[1].kavita_note, "改了")
+
+    -- 坐标守卫：现算锚点与远端记录不一致 → 跳过 update 并留日志（服务端改不了坐标，硬发会写到旧位置）。
+    anns[1].note = "坐标漂了"
+    anns[1].kavita_xpath = "//body/p[9]"
+    local ok_guard, _err_guard, data_guard = run("pushNotesAsync", volume, anns)
+    Assert.is_true(ok_guard)
+    Assert.eq(data_guard.pushed, 0)
+    Assert.len(updated, 1, "坐标不一致不 update")
+    Assert.is_true(warned("drifted"), "跳过的原因要能在日志里定位")
+    Assert.eq(anns[1].kavita_note, "改了", "没写成功，基线不能动")
+    anns[1].kavita_xpath = nil
+
+    -- 双方都改过：远端赢，零写请求；本地文本存 kavita_local_note 备查，基线不动（等下轮 pull 采纳远端）。
+    anns[1].note, anns[1].kavita_note = "设备改的", "上次同步"
+    remote[2002][1].comment, remote[2002][1].commentHtml = nil, "<p>网页改的</p>"
+    local ok_lose, _err_lose, data_lose = run("pushNotesAsync", volume, anns)
+    Assert.is_true(ok_lose)
+    Assert.eq(data_lose.pushed, 0)
+    Assert.eq(data_lose.conflicts, 1)
+    Assert.len(updated, 1)
+    Assert.eq(anns[1].kavita_local_note, "设备改的")
+    Assert.eq(anns[1].kavita_note, "上次同步")
+    Assert.is_true(warned("remote"), "远端赢要留日志")
+
+    -- 对账列表按 ownerUserId 收窄：账号开了「查看他人注解」后混进来的条目不能被认领 / 改写。
+    resetPush()
+    remote[2002] = { { id = 5, ownerUserId = 99, chapterId = 2002, xPath = "//body/p[1]", endingXPath = "//body/p[1]",
+        selectedText = "春眠\n不觉晓", commentHtml = "<p>别人</p>" } }
+    local mine = { drawer = "lighten", text = "春眠\n不觉晓", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
+    Assert.is_true(run("pushNotesAsync", volume, { mine }))
+    Assert.eq(mine.kavita_id, 101, "别人的同键注解不认领")
+    Assert.len(created, 1)
+
+    -- 首次认领：本地没 id、远端同键已有 → 采纳（同键多条取 id 最小），不新建。
+    resetPush()
+    remote[2002] = {
+        { id = 43, ownerUserId = USER, chapterId = 2002, xPath = "//body/p[1]", endingXPath = "//body/p[1]",
+            selectedText = "春眠\n不觉晓", commentHtml = "<p>重复</p>" },
+        { id = 37, ownerUserId = USER, chapterId = 2002, xPath = "//body/p[1]", endingXPath = "//body/p[1]",
+            selectedText = "春眠 不觉晓", commentHtml = "<p>网页写的</p>" },
+    }
+    local claimed = { drawer = "lighten", text = "春眠\n不觉晓", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
+    local ok_claim, _err_claim, data_claim = run("pushNotesAsync", volume, { claimed })
+    Assert.is_true(ok_claim)
+    Assert.eq(claimed.kavita_id, 37, "同键多条取 id 最小")
+    Assert.is_nil(claimed.kavita_note, "远端备注不当基线：本地 note 还是空的，等 pull 采纳")
+    Assert.eq(data_claim.pushed, 0)
+    Assert.eq(data_claim.adopted, 0)
+    Assert.len(created, 0)
+    Assert.len(updated, 0, "首次认领不覆盖远端非空备注")
+
+    -- 认领过的那条再推（本地 note 仍空、pull 还没跑）→ 零写请求。
+    -- 基线若被写成远端文本，这里就会被判成「用户清空了备注」，一次 update 抹掉网页作者的内容。
+    local ok_again, _err_again, data_again = run("pushNotesAsync", volume, { claimed })
+    Assert.is_true(ok_again)
+    Assert.eq(data_again.pushed, 0)
+    Assert.len(updated, 0, "认领后不能反手把远端的备注覆盖成空")
+
+    -- 认领后、pull 之前用户补了备注 → 这是真实编辑，直接 update（没有基线不等于冲突）。
+    local later = { drawer = "lighten", text = "春眠\n不觉晓", note = "补的备注", kavita_id = 37,
+        pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
+    Assert.is_true(run("pushNotesAsync", volume, { later }))
+    Assert.eq(updated[#updated].id, 37)
+    Assert.eq(JSON.decode(updated[#updated].comment).ops[1].insert, "补的备注\n")
+    Assert.eq(later.kavita_note, "补的备注")
+
+    -- 首次认领时本地备注非空且不同 → 认到 id 后 update 那一条（设备侧确实改了备注）。
+    local named = { drawer = "lighten", text = "春眠\n不觉晓", note = "我的备注",
+        pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
+    Assert.is_true(run("pushNotesAsync", volume, { named }))
+    Assert.eq(named.kavita_id, 37)
+    Assert.eq(updated[#updated].id, 37, "首次认领不新建")
+    Assert.eq(JSON.decode(updated[#updated].comment).ops[1].insert, "我的备注\n")
+    Assert.eq(named.kavita_note, "我的备注")
+
+    -- 有 id、远端已无该 id（网页端删了）→ 不重建、不复活（交给 pull 的 dropped 通道）。
+    local ghost = { drawer = "lighten", text = "春眠\n不觉晓", note = "改过", kavita_id = 99, kavita_note = "旧",
+        pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
+    local writes_before = #created + #updated
+    Assert.is_true(run("pushNotesAsync", volume, { ghost }))
+    Assert.eq(#created + #updated, writes_before, "远端删了不重建")
+    Assert.eq(ghost.kavita_id, 99)
+    Assert.is_nil(ghost.kavita_local_note)
+
+    -- 本批墓碑的 id 先剔出对账列表：删了又原地划一条同键的，不能认领到「即将删除」的那条。
+    remote[2002] = { { id = 37, ownerUserId = USER, chapterId = 2002, xPath = "//body/p[1]", endingXPath = "//body/p[1]",
+        selectedText = "春眠\n不觉晓", commentHtml = "<p>旧</p>" } }
+    local tomb = { kavita_id = 37, kavita_deleted = true }
+    local redo = { drawer = "lighten", text = "春眠\n不觉晓", note = "新的", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
+    Assert.is_true(run("pushNotesAsync", volume, { tomb, redo }))
+    Assert.is_true(redo.kavita_id ~= 37, "墓碑那条不在认领范围内")
+    Assert.eq(redo.kavita_id, 101, "同键的划线重建一条")
+
+    -- create 回空体（反代吞了 DTO）：按 key 回查一次，命中才回填；仍是 200 不算成功。
+    resetPush()
+    blank_create = true
+    local lone = { drawer = "lighten", text = "春眠\n不觉晓", note = "n", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
+    local ok_blank, _err_blank, data_blank = run("pushNotesAsync", volume, { lone })
+    Assert.is_true(ok_blank)
+    Assert.eq(lone.kavita_id, 101, "回查按 key 命中，回填 id")
+    Assert.eq(data_blank.pushed, 1)
+
+    -- 回查也找不到（服务端真没落库）→ 该条失败、整批 cb(nil) 留脏，绝不当成功。
+    resetPush()
+    drop_create = true
+    local dropped_ann = { drawer = "lighten", text = "春眠\n不觉晓", note = "n",
+        pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
+    local ok_drop, err_drop = run("pushNotesAsync", volume, { dropped_ann })
+    Assert.is_nil(ok_drop)
+    Assert.not_nil(err_drop)
+    Assert.is_nil(dropped_ann.kavita_id)
+
+    -- 全有或全无：一条写失败 → 整批 cb(nil)；已建成的条目下轮由对账认领，不会重复。
+    resetPush()
+    local first = { drawer = "lighten", text = "春眠\n不觉晓", note = "a", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
+    local second = { drawer = "lighten", text = "处处闻啼鸟", note = "b", pos0 = "/body/DocFragment[1]/body/p[2]/text().0" }
+    create_fail_at = 2
+    local ok_fail, err_fail = run("pushNotesAsync", volume, { first, second })
+    Assert.is_nil(ok_fail)
+    Assert.matches(err_fail, "500")
+    Assert.eq(first.kavita_id, 101)
+    Assert.is_nil(second.kavita_id)
+    first.kavita_id = nil -- cb(nil) 后核心不落库，这条 id 就丢了
+    create_fail_at = nil
+    created, updated = {}, {}
+    Assert.is_true(run("pushNotesAsync", volume, { first, second }))
+    Assert.eq(first.kavita_id, 101, "上轮已建成的条目由对账按 key 认领")
+    Assert.len(created, 1, "只补建真正缺的那条")
+    Assert.eq(second.kavita_id, 102)
+
+    -- 锚点失败（找不回段落）：不带空 xPath 发出去（会跟别的空锚点挤成同键），整批不发送、留脏重试。
+    resetPush()
+    local good = { drawer = "lighten", text = "春眠\n不觉晓", note = "a", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
+    local lost = { drawer = "lighten", text = "𠀀找不到", pos0 = "/body/DocFragment[3]/body/p/text().0" }
+    local ok_lost, err_lost = run("pushNotesAsync", volume, { good, lost })
+    Assert.is_nil(ok_lost)
+    Assert.not_nil(err_lost)
+    Assert.len(created, 0, "锚点不齐就一个都不发")
+    Assert.len(updated, 0)
+
+    -- 书签（没有 drawer）不推，也不算失败。
+    resetPush()
+    local ok_mark, _err_mark, data_mark = run("pushNotesAsync", volume,
+        { { text = "书签", pos0 = "/body/DocFragment[1]/body/p" } })
+    Assert.is_true(ok_mark)
+    Assert.eq(data_mark.pushed, 0)
+    Assert.len(created, 0)
+
+    -- 快照：清洗保留 Kavita 全字段（白名单漏一个就静默消失），保存时按 pos0 从上一版接过 id。
+    local clean = source:cleanAnnotations({
+        { datetime = "d", page = 1, drawer = "lighten", text = "x", pos0 = "p", kavita_id = 71, kavita_note = "n", junk = 1,
+            kavita_comment = "{}", kavita_comment_html = "", kavita_slot = 0, kavita_spoiler = false,
+            kavita_modified = "m", kavita_xpath = "//body/p[1]", kavita_ending_xpath = "//body/p[1]",
+            kavita_unlocated = true, kavita_local_note = "被远端覆盖的旧文本" },
+        { text = "没有时间的丢掉" },
+    }, 10)
+    Assert.len(clean, 1)
+    Assert.eq(clean[1].kavita_id, 71)
+    Assert.eq(clean[1].kavita_note, "n")
+    Assert.eq(clean[1].kavita_comment, "{}")
+    Assert.eq(clean[1].kavita_comment_html, "")
+    Assert.eq(clean[1].kavita_slot, 0)
+    Assert.eq(clean[1].kavita_spoiler, false)
+    Assert.eq(clean[1].kavita_modified, "m")
+    Assert.eq(clean[1].kavita_xpath, "//body/p[1]")
+    Assert.eq(clean[1].kavita_ending_xpath, "//body/p[1]")
+    Assert.is_true(clean[1].kavita_unlocated)
+    Assert.eq(clean[1].kavita_local_note, "被远端覆盖的旧文本")
+    Assert.eq(clean[1].total_pages, 10)
+    Assert.is_nil(clean[1].junk, "白名单外的字段仍丢弃")
+
+    -- 无 page 的两类条目必须放行：未定位（只有 xPath）、墓碑（只有 kavita_deleted）。
+    -- 靠「构造期用 xPath / 墓碑标记当占位」过 Normalize.clean，清洗后把占位清空。
+    local unlocated = source:cleanAnnotations({
+        { datetime = "d", text = "云端条", note = "", kavita_id = 72, kavita_xpath = "//body/p[9]" },
+        { datetime = "d", kavita_id = 73, kavita_deleted = true },
+        { datetime = "d", text = "没有任何坐标" },
+    }, 10)
+    Assert.len(unlocated, 2, "无时间 / 无坐标的条目仍然丢掉")
+    Assert.eq(unlocated[1].kavita_id, 72)
+    Assert.eq(unlocated[1].kavita_xpath, "//body/p[9]", "未定位条目保留全部 kavita_* 字段")
+    Assert.is_nil(unlocated[1].page, "占位只在构造期用，清洗后清空")
+    Assert.eq(unlocated[1].total_pages, 10)
+    Assert.eq(unlocated[2].kavita_id, 73)
+    Assert.is_true(unlocated[2].kavita_deleted)
+    Assert.is_nil(unlocated[2].page)
+
+    -- 保存时：pos0 对得上的接过 id；没有 pos0 的未定位条目原样搬进新快照，
+    -- 否则一次普通保存就把「数据在、画不出」的云端条目洗掉。
+    local previous = {
+        { pos0 = "p", kavita_id = 71, kavita_note = "n" },
+        { pos0 = "gone", kavita_id = 9 },
+        { datetime = "d", text = "云端条", kavita_id = 72, kavita_note = "", kavita_xpath = "//body/p[9]" },
+    }
+    local current = source:prepareLocalAnnotations(previous,
+        { { pos0 = "p", note = "新" }, { pos0 = "q" } })
+    Assert.eq(current[1].kavita_id, 71)
+    Assert.eq(current[1].kavita_note, "n", "备注差异留给推送时比对")
+    Assert.is_nil(current[2].kavita_id)
+    Assert.eq(#current, 3, "未定位条目搬进新快照")
+    Assert.eq(current[3].kavita_id, 72)
+    Assert.eq(current[3].kavita_xpath, "//body/p[9]")
+    Assert.is_nil(current[3].pos0)
+    local deduped = source:prepareLocalAnnotations(previous,
+        { { pos0 = "p", note = "新" }, { kavita_id = 72, text = "已经在快照里" } })
+    Assert.eq(#deduped, 2, "快照里已有的 id 不重复搬")
 end
-routes["POST /api/Annotation/update"] = function(opts)
-    updated[#updated + 1] = JSON.decode(opts.body)
-    return json({})
-end
-local anns = {
-    { drawer = "lighten", text = "春眠\n不觉晓", note = "好诗", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" },
-    { drawer = "underscore", text = "𠀀找不到", pos0 = "/body/DocFragment[3]/body/p/text().0" },
-    { text = "书签", pos0 = "/body/DocFragment[1]/body/p" },
-}
-Assert.is_true(run("pushNotesAsync", volume, anns))
-Assert.len(created, 2, "书签不推")
-Assert.eq(created[1].xPath, "//body/p[1]")
-Assert.eq(created[1].endingXPath, "//body/p[1]")
-Assert.eq(created[1].pageNumber, 0)
-Assert.eq(created[1].comment, "好诗")
-Assert.eq(created[1].selectedText, "春眠\n不觉晓")
-Assert.eq(created[1].highlightCount, 6, "按 UTF-16 码元计")
-Assert.eq(created[1].chapterId, 2002)
-Assert.eq(created[1].volumeId, 201)
-Assert.eq(created[1].libraryId, 2)
-Assert.eq(created[1].seriesId, 20)
-Assert.eq(created[2].xPath, "")
-Assert.eq(created[2].pageNumber, 2, "找不到段落只带 spine")
-Assert.eq(created[2].highlightCount, 5, "扩展区汉字占两个码元")
-Assert.eq(anns[1].kavita_id, 71)
-Assert.eq(anns[2].kavita_id, 72)
-created = {}
-Assert.is_true(run("pushNotesAsync", volume, anns))
-Assert.len(created, 0, "推过的不重建")
-Assert.len(updated, 0)
-anns[1].note = "改了"
-Assert.is_true(run("pushNotesAsync", volume, anns))
-Assert.eq(updated[1].id, 71)
-Assert.eq(updated[1].comment, "改了")
-Assert.eq(anns[1].kavita_note, "改了")
-
--- 全部失败才报错（核心留脏重试）；有一条成功就要回填落库，免得重试时重复建。
-routes["POST /api/Annotation/create"] = { code = 500, body = "" }
-anns[3].drawer = "lighten"
-local okn, nerr = run("pushNotesAsync", volume, anns)
-Assert.is_nil(okn)
-Assert.matches(nerr, "500")
-anns[1].note = "再改"
-Assert.is_true(run("pushNotesAsync", volume, anns))
-Assert.is_nil(anns[3].kavita_id)
-
--- 非 epub 不推。
-Assert.is_true(run("pushNotesAsync", pdf, { { drawer = "lighten", text = "图", pos0 = "x" } }))
-
--- 快照：清洗保留 Kavita 全字段（白名单漏一个就静默消失），保存时按 pos0 从上一版接过 id。
-local clean = source:cleanAnnotations({
-    { datetime = "d", page = 1, drawer = "lighten", text = "x", pos0 = "p", kavita_id = 71, kavita_note = "n", junk = 1,
-        kavita_comment = "{}", kavita_comment_html = "", kavita_slot = 0, kavita_spoiler = false,
-        kavita_modified = "m", kavita_xpath = "//body/p[1]", kavita_ending_xpath = "//body/p[1]",
-        kavita_unlocated = true, kavita_local_note = "被远端覆盖的旧文本" },
-    { text = "没有时间的丢掉" },
-}, 10)
-Assert.len(clean, 1)
-Assert.eq(clean[1].kavita_id, 71)
-Assert.eq(clean[1].kavita_note, "n")
-Assert.eq(clean[1].kavita_comment, "{}")
-Assert.eq(clean[1].kavita_comment_html, "")
-Assert.eq(clean[1].kavita_slot, 0)
-Assert.eq(clean[1].kavita_spoiler, false)
-Assert.eq(clean[1].kavita_modified, "m")
-Assert.eq(clean[1].kavita_xpath, "//body/p[1]")
-Assert.eq(clean[1].kavita_ending_xpath, "//body/p[1]")
-Assert.is_true(clean[1].kavita_unlocated)
-Assert.eq(clean[1].kavita_local_note, "被远端覆盖的旧文本")
-Assert.eq(clean[1].total_pages, 10)
-Assert.is_nil(clean[1].junk, "白名单外的字段仍丢弃")
-
--- 无 page 的两类条目必须放行：未定位（只有 xPath）、墓碑（只有 kavita_deleted）。
--- 靠「构造期用 xPath / 墓碑标记当占位」过 Normalize.clean，清洗后把占位清空。
-local unlocated = source:cleanAnnotations({
-    { datetime = "d", text = "云端条", note = "", kavita_id = 72, kavita_xpath = "//body/p[9]" },
-    { datetime = "d", kavita_id = 73, kavita_deleted = true },
-    { datetime = "d", text = "没有任何坐标" },
-}, 10)
-Assert.len(unlocated, 2, "无时间 / 无坐标的条目仍然丢掉")
-Assert.eq(unlocated[1].kavita_id, 72)
-Assert.eq(unlocated[1].kavita_xpath, "//body/p[9]", "未定位条目保留全部 kavita_* 字段")
-Assert.is_nil(unlocated[1].page, "占位只在构造期用，清洗后清空")
-Assert.eq(unlocated[1].total_pages, 10)
-Assert.eq(unlocated[2].kavita_id, 73)
-Assert.is_true(unlocated[2].kavita_deleted)
-Assert.is_nil(unlocated[2].page)
-
--- 保存时：pos0 对得上的接过 id；没有 pos0 的未定位条目原样搬进新快照，
--- 否则一次普通保存就把「数据在、画不出」的云端条目洗掉。
-local previous = {
-    { pos0 = "p", kavita_id = 71, kavita_note = "n" },
-    { pos0 = "gone", kavita_id = 9 },
-    { datetime = "d", text = "云端条", kavita_id = 72, kavita_note = "", kavita_xpath = "//body/p[9]" },
-}
-local current = source:prepareLocalAnnotations(previous,
-    { { pos0 = "p", note = "新" }, { pos0 = "q" } })
-Assert.eq(current[1].kavita_id, 71)
-Assert.eq(current[1].kavita_note, "n", "备注差异留给推送时比对")
-Assert.is_nil(current[2].kavita_id)
-Assert.eq(#current, 3, "未定位条目搬进新快照")
-Assert.eq(current[3].kavita_id, 72)
-Assert.eq(current[3].kavita_xpath, "//body/p[9]")
-Assert.is_nil(current[3].pos0)
-local deduped = source:prepareLocalAnnotations(previous,
-    { { pos0 = "p", note = "新" }, { kavita_id = 72, text = "已经在快照里" } })
-Assert.eq(#deduped, 2, "快照里已有的 id 不重复搬")
 
 -- 拉取：开书时把云端 epub 注解落库（入库不定位）。每章一次 GET，按 ownerUserId 收窄；
 -- authoritative 恒 false（远端为空不代表本地该清空），失败就 cb(nil, err)，快照不动。

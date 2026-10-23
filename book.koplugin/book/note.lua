@@ -87,18 +87,59 @@ local function saveRemoteBuckets(source, stable_id, annotations, authoritative, 
     if done then done(ok) end
 end
 
+--- 用上传时那一版带来的远端 id 覆盖 live 快照里的同一条（按 pos0，退到 (text, chapter_idx)）。
+--- 只搬 kavita_id / kavita_note：live 里的备注文本是用户刚改的，绝不能被上传时那份盖回去。
+---@param live_items table[] 当前库里的条目（原地改写）
+---@param pushed_items table[] 上传时那一版（源已回填 id）
+---@return integer patched 真正盖上的条数
+local function mergeBackfill(live_items, pushed_items)
+    local by_pos, by_text = {}, {}
+    for _idx, item in ipairs(pushed_items) do
+        if item.kavita_id then
+            if item.pos0 then by_pos[item.pos0] = item end
+            local text_key = tostring(item.text or "") .. "\31" .. tostring(item.chapter_idx or 0)
+            by_text[text_key] = item
+        end
+    end
+    local patched = 0
+    for _idx, item in ipairs(live_items) do
+        local source_item = (item.pos0 and by_pos[item.pos0])
+            or by_text[tostring(item.text or "") .. "\31" .. tostring(item.chapter_idx or 0)]
+        if source_item and tostring(item.kavita_id) ~= tostring(source_item.kavita_id) then
+            item.kavita_id, item.kavita_note = source_item.kavita_id, source_item.kavita_note
+            patched = patched + 1
+        end
+    end
+    return patched
+end
+
 --- 上传成功后落定这一版快照：写回源侧回填过 id 的 payload 并标记已同步。
 ---
 --- 读-比对-写在同一个同步调用中，保持原子性。
---- 上传期间用户又划了线（updated_at 变了）时整条跳过——既不覆盖新内容，也不清脏
---- 标记，下轮同步重新上传。
+--- 上传期间用户又划了线（updated_at 变了）时不清脏标记，但把这轮回填的远端 id 并进 live payload：
+--- 整份丢弃会让下轮重新认领（甚至重复建），而覆盖回去会把新划的线抹掉。
 ---@param row table notes 表行（含 source_id/stable_id/chapter_idx/updated_at）
 ---@param payload string|nil 源侧回填过远端 id 的快照
 ---@return boolean ok
 ---@return boolean|nil stale 上传期间本地又改过
 local function confirm(row, payload)
     local live = NoteDB.get(row.source_id, row.stable_id, row.chapter_idx)
-    if not live or live.updated_at ~= row.updated_at then
+    if not live then
+        return false, true
+    end
+    if live.updated_at ~= row.updated_at then
+        if payload ~= nil then
+            local live_items, authoritative = Normalize.decode(live.payload)
+            local pushed_items = Normalize.decode(payload)
+            if live_items and pushed_items and mergeBackfill(live_items, pushed_items) > 0 then
+                local ok_encode, merged = pcall(JSON.encode, Normalize.pack(live_items, authoritative))
+                -- 合并失败也不阻塞：id 丢了由下轮对账按内容键认领，脏标记反正还留着。
+                if not ok_encode
+                    or not NoteDB.updatePayload(row.source_id, row.stable_id, row.chapter_idx, merged) then
+                    logger.warn("book.note backfill merge failed", row.stable_id)
+                end
+            end
+        end
         return false, true
     end
     local ok = NoteDB.markSynced(row.source_id, row.stable_id, row.chapter_idx, row.updated_at, payload)
@@ -216,7 +257,7 @@ local function runSyncAsync(source, opts, cb)
                 finish(nil, "invalid local notes")
                 return
             end
-            current_job = source:pushNotesAsync(identity, annotations, function(value, err)
+            current_job = source:pushNotesAsync(identity, annotations, function(value, err, data)
                 current_job = nil
                 if cancelled then return end
                 if not value then
@@ -250,7 +291,11 @@ local function runSyncAsync(source, opts, cb)
                     finish(nil, "notes confirm failed")
                     return
                 end
-                result.pushed = result.pushed + 1
+                -- 源如实回报这轮推了几条（对账后无可推是 0）；老源没有 data，按「推了一条」记。
+                result.pushed = result.pushed + (type(data) == "table" and tonumber(data.pushed) or 1)
+                if type(data) == "table" and tonumber(data.conflicts) then
+                    result.conflicts = result.conflicts + tonumber(data.conflicts)
+                end
                 pullRemote()
             end)
             return
