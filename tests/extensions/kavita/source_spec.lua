@@ -930,6 +930,7 @@ do
     -- 快照：清洗保留 Kavita 全字段（白名单漏一个就静默消失），保存时按 pos0 从上一版接过 id。
     local clean = source:cleanAnnotations({
         { datetime = "d", page = 1, drawer = "lighten", text = "x", pos0 = "p", kavita_id = 71, kavita_note = "n", junk = 1,
+            pageNumber = 3,
             kavita_comment = "{}", kavita_comment_html = "", kavita_slot = 0, kavita_spoiler = false,
             kavita_modified = "m", kavita_xpath = "//body/p[1]", kavita_ending_xpath = "//body/p[1]",
             kavita_unlocated = true, kavita_local_note = "被远端覆盖的旧文本" },
@@ -937,6 +938,7 @@ do
     }, 10)
     Assert.len(clean, 1)
     Assert.eq(clean[1].kavita_id, 71)
+    Assert.eq(clean[1].pageNumber, 3, "pageNumber 不是 kavita_ 前缀，但也必须过白名单（定位提示）")
     Assert.eq(clean[1].kavita_note, "n")
     Assert.eq(clean[1].kavita_comment, "{}")
     Assert.eq(clean[1].kavita_comment_html, "")
@@ -1081,7 +1083,7 @@ local remote_anns = {
         selectedSlotIndex = 2, containsSpoiler = true,
         createdUtc = os.date("!%Y-%m-%dT%H:%M:%S", 1790000000) .. ".789",
         lastModifiedUtc = "2026-10-04T05:06:07.890",
-        pageNumber = 1,
+        pageNumber = 17,
     },
     {   -- 别人的注解：账号开了「查看他人注解」时接口会混进来，拉取必须按 owner 过滤。
         id = 502, ownerUserId = 9, chapterId = 2002,
@@ -1125,6 +1127,8 @@ Assert.eq(web.kavita_spoiler, true)
 Assert.eq(web.kavita_modified, "2026-10-04T05:06:07.890")
 Assert.eq(web.kavita_xpath, "//body/p[1]")
 Assert.eq(web.kavita_ending_xpath, "//body/p[1]")
+-- spine 提示必须落库：开书定位只按 pageNumber（+1）挑 DocFragment，丢了它多 spine epub 全定位失败。
+Assert.eq(web.pageNumber, 17, "DTO pageNumber 原样进 payload（0-based spine 提示）")
 Assert.is_nil(web.pos0, "pull 不写坐标")
 Assert.is_nil(web.pos1)
 Assert.is_nil(web.page, "page 是定位阶段产物")
@@ -1135,6 +1139,7 @@ local bare = pulled[2]
 Assert.eq(bare.note, "")
 Assert.eq(bare.kavita_note, "", "空备注两边都空，推送侧才判等")
 Assert.eq(bare.color, "yellow", "槽位越界回落 yellow")
+Assert.eq(bare.pageNumber, 0, "DTO 缺 pageNumber 回落 0（只会试前两个 DocFragment）")
 
 -- createdUtc 解析不出（Kavita 的 0001 占位）就用当前时间，仍然要落库。
 routes["GET /api/Annotation/all"] = json({ {
@@ -2073,6 +2078,10 @@ do
             "另一个 DocFragment 的正文。",
             "滑窗命中的句子。",
         },
+        -- 多 spine 书（本票的真实形态）：第 5 个片段里这句只在 pageNumber = 4 的提示下才找得到。
+        { "第三个片段的噪音。" },
+        { "第四个片段的噪音。" },
+        { "第五个片段里才有的一句。", "第五个片段的第二段。" },
     }, book_path)
 
     local anns = {
@@ -2159,6 +2168,36 @@ do
     Assert.eq(localized[9].pos0, "/body/DocFragment[1]/body/p[5]/text()[1].0", "NBSP 与普通空格差异靠去空白重试")
     Assert.eq(localized[9].pos1, "/body/DocFragment[1]/body/p[5]/text()[1].6")
     Assert.is_nil(localized[9].kavita_unlocated)
+
+    -- 本票的链路回归（pull → cleanAnnotations → localize）：三国演义这种多 spine epub 的注解在
+    -- pageNumber 17/23/24（0-based），没有这个提示就只试 DocFragment[1]/[2]，
+    -- 第 3 个片段之后全部 text-not-found → kavita_unlocated，一条都不画。
+    routes["GET /api/Annotation/all"] = json({ {
+        id = 701, ownerUserId = 5, chapterId = 2002,
+        xPath = "//body/p[1]", endingXPath = "//body/p[1]",
+        selectedText = "第五个片段里才有的一句",
+        comment = "", commentHtml = "", commentPlainText = "",
+        selectedSlotIndex = 0, createdUtc = "2026-10-03T05:00:00",
+        pageNumber = 4,
+    } })
+    local chain_pulled = run("pullNotesAsync", volume)
+    Assert.eq(chain_pulled[1].pageNumber, 4, "pull 保留 DTO 的 spine 提示")
+    local chain_clean = source:cleanAnnotations(chain_pulled, 0)
+    Assert.eq(chain_clean[1].pageNumber, 4, "cleanAnnotations 不能把提示洗掉")
+    local chain_located = source:localizeAnnotations(document, chain_clean, book_path, nil)
+    Assert.eq(chain_located[1].pos0, "/body/DocFragment[5]/body/p[1]/text()[1].0",
+        "pageNumber = 4 → 先试 DocFragment[5] 命中")
+    Assert.eq(chain_located[1].pos1, "/body/DocFragment[5]/body/p[1]/text()[1].11")
+    Assert.is_nil(chain_located[1].kavita_unlocated)
+
+    -- 回归锁：同一份条目抹掉 pageNumber → 只试前两个片段 → 定位失败（真实 bug 的形态）。
+    local no_hint = {}
+    for key, value in pairs(chain_clean[1]) do no_hint[key] = value end
+    no_hint.pageNumber = nil
+    local orphan = source:localizeAnnotations(document, { no_hint }, book_path, nil)
+    Assert.is_true(orphan[1].kavita_unlocated, "没有 spine 提示时第 3 个片段之后的文本定位不到")
+    Assert.is_nil(orphan[1].pos0)
+    Assert.is_nil(orphan[1].page)
 
     -- 无文档 / html_path 缺失 / 文件不存在 / 文档不是这本书 → nil（core 据此放弃应用，不覆盖 doc_settings）。
     Assert.is_nil(source:localizeAnnotations(nil, anns, book_path, current))
