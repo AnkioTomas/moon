@@ -391,3 +391,41 @@ do
     Assert.eq(Stats.ianaTimezone(nil), "UTC")
     Assert.eq(#warnings, before + 3, "每次回退都记一条日志")
 end
+
+do
+    -- 阅读会话行：每个「会话 × 章」切片的真实起始时刻 / 时长 / 页数，供详情「阅读记录」列出时段。
+    -- 它只进列表，不参与日 / 时段 / 总量汇总。
+    local day = dayTs(2026, 10, 10)
+    local result = Stats.fromHistory({
+        { seriesId = 66, startTimeUtc = "2026-10-10T09:00:00.0000000", chapters = {
+            { chapterId = 1, durationSeconds = 600, pagesRead = 12,
+              startTimeUtc = "2026-10-10T09:00:00.0000000" },
+            { chapterId = 2, durationSeconds = 300, pagesRead = 3,
+              startTimeUtc = "2026-10-10T09:20:00.0000000" },
+        } },
+    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [66] = 1 } })
+
+    local first = find(result.rows, "cloud_session", "66", hourTs(2026, 10, 10, 17))
+    Assert.not_nil(first, "会话行按章切片的本地起始时刻落行")
+    Assert.eq(first.duration, 600)
+    Assert.eq(first.event_count, 12, "页数记在 event_count")
+    Assert.eq(first.last_time, 2000, "会话行 last_time = 拉取时刻")
+    local second = find(result.rows, "cloud_session", "66", hourTs(2026, 10, 10, 17) + 20 * 60)
+    Assert.not_nil(second)
+    Assert.eq(second.duration, 300)
+    Assert.eq(second.event_count, 3)
+
+    -- 会话行不影响任何汇总桶：日桶 / 总量仍是 900，且不会多出 hour 之外的重复
+    Assert.eq(find(result.rows, "day", "__kv:day:" .. day, day).duration, 900)
+    Assert.eq(find(result.rows, "total", "__kv:total", 0).duration, 900)
+    Assert.eq(find(result.rows, "book_day", "66", day).duration, 900)
+
+    -- 零时长会话不落会话行
+    local zero = Stats.fromHistory({
+        { seriesId = 66, startTimeUtc = "2026-10-10T10:00:00.0000000", chapters = {
+            { chapterId = 1, durationSeconds = 0, pagesRead = 0,
+              startTimeUtc = "2026-10-10T10:00:00.0000000" },
+        } },
+    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [66] = 1 } })
+    Assert.is_nil(find(zero.rows, "cloud_session", "66"), "打开没读的会话不落行")
+end

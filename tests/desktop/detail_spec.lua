@@ -46,11 +46,15 @@ package.preload["book.store"] = function()
         end,
     }
 end
-local stats = { summary = nil, daily = {} }
+local stats = { summary = nil, daily = {}, sessions = {} }
+local stats_ids
 package.preload["book.stats_db"] = function()
     return {
         summaryByBook = function() return stats.summary end,
+        summaryByBooks = function(_, ids) stats_ids = ids; return stats.summary end,
         dailyByBook = function() return stats.daily end,
+        dailyByBooks = function() return stats.daily end,
+        sessionsByBook = function() return stats.sessions end,
     }
 end
 local followed = {}
@@ -493,6 +497,39 @@ for _, text in ipairs(rec_texts) do
     Assert.is_true(text ~= "15s", "只列最近 14 天：" .. text)
 end
 page:close()
+
+-- 只有云端时长（交给 kamare 读的漫画 / 其它设备读的书）：pages=0 也显示指标带和阅读会话。
+local cloud_at = os.time{ year = os.date("*t").year, month = os.date("*t").month, day = os.date("*t").day,
+    hour = 17, min = 54 }
+stats.summary = { pages = 0, total_seconds = 897, last_read = cloud_at, first_read = cloud_at }
+stats.daily, stats.sessions = {}, { { start_time = cloud_at, duration = 897 } }
+resolved = { id = "wechat" }
+Detail.open(desktop, "library", { source_id = "wechat", stable_id = "c1", title = "云端漫画" })
+page = desktop.detail
+texts = Kit.texts(page)
+Assert.contains(texts, "累计时长", "有云端时长就不再显示「暂无阅读记录」")
+Assert.contains(texts, "897s")
+Assert.contains(texts, "—", "云端没有页坐标时已读页数留空")
+local cloud_strip = Kit.taps(page)[1]
+cloud_strip:onTapThemeArea(cloud_strip)
+local cloud_rec = Kit.texts(Themed.last("sheet").items[1].widget(400))
+Assert.contains(cloud_rec, "最近阅读", "阅读会话单独成一节")
+Assert.contains(cloud_rec, os.date("%m-%d %H:%M", cloud_at) .. "–" .. os.date("%H:%M", cloud_at + 897))
+Assert.contains(cloud_rec, "897s")
+page:close()
+
+-- 多卷书：属主源给出卷身份时，详情页按这些身份合并统计（容器自己没有行）。
+resolved = {
+    id = "kavita",
+    statsIdentities = function() return { "s1:v1", "s1:v2" } end,
+}
+stats.summary = { pages = 3, total_seconds = 60, last_read = cloud_at, first_read = cloud_at }
+stats.daily, stats.sessions, stats_ids = {}, {}, nil
+Detail.open(desktop, "library", { source_id = "kavita", stable_id = "s1", title = "合集" })
+Assert.eq(table.concat(stats_ids or {}, ","), "s1:v1,s1:v2")
+desktop.detail:close()
+resolved = local_src
+stats.summary, stats.daily, stats.sessions = nil, {}, {}
 
 -- 预计剩余按进度比例外推；日均按最近记录跨的日历天数摊（没读的日子也算）。
 local noon = os.time{ year = os.date("*t").year, month = os.date("*t").month, day = os.date("*t").day, hour = 12 }

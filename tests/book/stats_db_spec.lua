@@ -210,7 +210,10 @@ do
                         return nil
                     end
                     if sql:find("MAX(CASE WHEN record_type='page_rollup'", 1, true) then
-                        return { 3660, 0, 3, 2000 }, { "s", "f", "c", "m" }
+                        return { 2000 }, { "m" }
+                    end
+                    if sql:find("SUM(CASE WHEN sync_status=0", 1, true) then
+                        return { 3660, 0, 3, 20 }, { "s", "f", "c", "t" }
                     end
                     return nil
                 end,
@@ -294,7 +297,11 @@ do
     Assert.is_true(first_q.sql:find("MIN(start_time)", 1, true) ~= nil)
     Assert.eq(first_q.args[1], "local")
     Assert.eq(first_q.args[2], "/books/a.epub")
-    local sb_q = calls[#calls - 1]
+    local last_read_q = calls[#calls - 1]
+    Assert.is_true(last_read_q.sql:find("MAX(CASE WHEN record_type='page_rollup'", 1, true) ~= nil)
+    Assert.eq(last_read_q.args[1], "local")
+    Assert.eq(last_read_q.args[2], "/books/a.epub")
+    local sb_q = calls[#calls - 2]
     Assert.is_true(sb_q.sql:find("AND stable_id=?", 1, true) ~= nil)
     Assert.eq(sb_q.args[1], 0, "无云端快照时快照时间按 0 绑定")
     Assert.eq(sb_q.args[2], "local")

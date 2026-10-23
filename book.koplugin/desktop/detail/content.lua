@@ -272,18 +272,22 @@ function Detail:buildHead(w, owner, primary)
 end
 
 --- 指标带：四格「数值 / 说明」，竖线分隔，点按看阅读记录；无本机记录时单行占位。
+--- 有云端时长但没有本机逐页记录的书（例如交给 kamare 打开阅读的漫画）也算有记录，
+--- 不能因为 pages=0 就退化成「暂无阅读记录」。
 ---@param w number 物理像素
 ---@return table
 function Detail:buildStats(w)
     local t = self.theme
     local st = self._stats
-    if not st or st.pages <= 0 then
+    local seconds = st and (tonumber(st.total_seconds) or 0) or 0
+    local pages = st and (tonumber(st.pages) or 0) or 0
+    if not st or (seconds <= 0 and pages <= 0) then
         return Text.line("body", _("暂无阅读记录"), { width = w, color = t.color.muted })
     end
     local _remaining, finish = self:forecast()
     local items = {
-        { Catalog.formatDuration(st.total_seconds), _("累计时长") },
-        { tostring(st.pages), _("已读页数") },
+        { Catalog.formatDuration(seconds), _("累计时长") },
+        { pages > 0 and tostring(pages) or "—", _("已读页数") },
         { shortDate(st.last_read), _("上次阅读") },
         finish and { shortDate(finish), _("预计读完") } or { shortDate(st.first_read), _("开始日期") },
     }
@@ -332,11 +336,12 @@ function Detail:buildRecords(w)
     local st = self._stats
     local gap = Theme.px(t.space.sm)
     local remaining, finish = self:forecast()
+    local pages = tonumber(st.pages) or 0
     local kids = VerticalGroup:new{
         align = "left",
         kpiRow(w, gap, {
             { Catalog.formatDuration(st.total_seconds), _("累计时长") },
-            { tostring(st.pages), _("已读页数") },
+            { pages > 0 and tostring(pages) or "—", _("已读页数") },
             { date(st.last_read, "%Y-%m-%d"), _("上次阅读") },
         }),
         VerticalSpan:new{ width = gap },
@@ -346,6 +351,33 @@ function Detail:buildRecords(w)
             { date(finish, "%Y-%m-%d"), _("预计读完") },
         }),
     }
+    -- 阅读会话：云端拉回来的真实时段（本机交给 kamare 读的漫画、其它设备读的书都在这里）。
+    local sessions = self._sessions or {}
+    if #sessions > 0 then
+        kids[#kids + 1] = VerticalSpan:new{ width = gap * 2 }
+        kids[#kids + 1] = Text.line("caption", _("最近阅读"), { color = t.color.muted })
+        local label_w, dur_w = Theme.px(120), Theme.px(72)
+        for i = 1, math.min(#sessions, 8) do
+            local s = sessions[i]
+            local start = tonumber(s.start_time) or 0
+            local text = start > 0
+                and T("%1–%2", os.date("%m-%d %H:%M", start), os.date("%H:%M", start + (tonumber(s.duration) or 0)))
+                or "—"
+            local row_h = Theme.px(20)
+            kids[#kids + 1] = HorizontalGroup:new{
+                align = "center",
+                LeftContainer:new{
+                    dimen = Geom:new{ w = label_w, h = row_h },
+                    Text.line("caption", text, { color = t.color.muted }),
+                },
+                HorizontalSpan:new{ width = gap },
+                LeftContainer:new{
+                    dimen = Geom:new{ w = dur_w, h = row_h },
+                    Text.line("caption", Catalog.formatDuration(s.duration or 0)),
+                },
+            }
+        end
+    end
     local daily = self._daily or {}
     if #daily == 0 then return kids end
     kids[#kids + 1] = VerticalSpan:new{ width = gap * 2 }

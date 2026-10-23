@@ -372,6 +372,14 @@ Assert.eq(remembered["20:2002"].series, "合集")
 Assert.eq(remembered["20:2002"].authors, "丙", "卷行继承容器作者，最近阅读里不再是未知作者")
 Assert.is_nil(remembered["20:2002"].deleted, "卷行不上书架")
 
+-- 多卷 series 的阅读统计都记在卷行上：容器详情用 statsIdentities 把各卷并进来。
+local ids = source:statsIdentities({ source_id = "ext.kavita", stable_id = "20" })
+Assert.eq(table.concat(ids or {}, ","), "20:2001,20:2002")
+Assert.is_nil(source:statsIdentities({ source_id = "ext.kavita", stable_id = "20:2002" }),
+    "卷行只看自己")
+Assert.is_nil(source:statsIdentities({ source_id = "ext.kavita", stable_id = "10" }),
+    "单卷 series 直接记在 series 行")
+
 -- 容器行的作者是 fetchToc 在这次开书里才写回的，identity.book 是开书那一刻的旧快照：
 -- 选卷要用重读后的容器行，否则新 series 第一次打开写下的卷行又是「未知作者」。
 books["21"] = { stable_id = "21", title = "合集21", authors = "丁" }
@@ -636,6 +644,21 @@ stream_ok = true
 Assert.eq(run("openBookAsync", { source_id = "ext.kavita", stable_id = "60:6000" }, nil), cpath,
     "下载过的直接开，不再走 kamare")
 Assert.len(viewers, 2)
+
+-- 漫画 cbz 用内置阅读器时进度同样上报：页级 0-based，读完发 pages（Kavita 据此标已读）。
+sent = nil
+local cbz = { source_id = "ext.kavita", stable_id = "60:6000" }
+Assert.is_true(run("putProgressAsync", cbz, { fraction = 0.1, page = 4, total_pages = 30 }))
+Assert.eq(sent.pageNum, 3, "cbz 页码 1-based → Kavita 0-based")
+Assert.eq(sent.chapterId, 6000)
+Assert.eq(sent.volumeId, 600)
+Assert.eq(sent.libraryId, 3)
+Assert.eq(sent.seriesId, 60)
+Assert.is_nil(sent.bookScrollId, "非 epub 不带锚点")
+run("putProgressAsync", cbz, { fraction = 1, page = 30, total_pages = 30 })
+Assert.eq(sent.pageNum, 30, "读完发 pages")
+run("putProgressAsync", cbz, { fraction = 0, page = 1, total_pages = 30 })
+Assert.eq(sent.pageNum, 0, "第一页是 0（Kavita 页号 0-based）")
 os.remove(require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua")
 
 -- 服务端已读回填：网页端 / 别的设备读过的 epub 也要进「最近阅读」并可能标已读。
