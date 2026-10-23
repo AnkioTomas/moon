@@ -7,8 +7,8 @@ sync_status=0 表示待上传，1 表示已与远端同步，2 表示从 KOReade
 身份即 BookIdentity(source_id + stable_id)，天然按源隔离。
 
 record_type：page / page_rollup 为本地采集；day / hour / total 为账户合成桶；book_total / book_day 为云端单书
-（stable_id 为真实书 id）；cloud_session 为云端单条阅读会话（给「阅读记录」列表；页数（pagesRead）参与
-单书 / 按天页数汇总，时长不参与）；book 为旧版周排行，已不再写入。
+（stable_id 为真实书 id）；cloud_session 为云端单条阅读会话（给「阅读记录」列表；event_count 参与
+单书 / 按天页数汇总 —— 漫画是本次新推进的页数，其他格式是 pagesRead；时长不参与）；book 为旧版周排行，已不再写入。
 
 不变量：
   - 身份唯一索引必须含 record_type（v1 漏了会让压缩撞删 page）。
@@ -277,8 +277,8 @@ function StatsDB.add(row, status)
     end
     local event_count
     if row.record_type == SESSION_RECORD then
-        -- 云端会话的 event_count 就是 pagesRead，**0 是合法值**（打开没翻页的会话）。
-        -- 夹到 1 会让「已读页数 = 各会话 pagesRead 之和」每天凭空多一页。
+        -- 云端会话的 event_count 是源算好的页数（漫画 = 本次新推进的页数，其他格式 = pagesRead），
+        -- **0 是合法值**（打开没翻页 / 重读同一段）。夹到 1 会让每天的页数凭空多一页。
         event_count = math.max(0, tonumber(row.event_count) or 0)
     else
         -- 本地逐页 / 压缩行缺字段时按一页算，沿用旧口径。
@@ -508,7 +508,8 @@ function StatsDB.summaryByBook(source_id, stable_id)
         source_id,
         stable_id
     )
-    -- 页数不能只看本地：漫画的页数在云端会话上（cloud_session.event_count = pagesRead）。
+    -- 页数不能只看本地：漫画的页数在云端会话上（cloud_session.event_count = 本次新推进页数，
+    -- 源侧已按「最远读到第几页」折算，重读不重复计）。
     -- 但本地页行上报成功后已经包含在当天那条会话里，直接相加会双计 —— 所以只对
     -- 「当天真有云端会话」的本地页做去重（covered），其余本地页照常计入。
     -- 这条覆盖判定不能省成「有会话就整本去重」：其他来源（微信 / moon / WebDAV）只回逐页行、
