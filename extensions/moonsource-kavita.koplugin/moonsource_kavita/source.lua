@@ -30,6 +30,7 @@ local Annotation = require("moonsource_kavita.annotation")
 local Position = require("moonsource_kavita.position")
 local Stats = require("moonsource_kavita.stats")
 local SourceBase = require("source.base")
+local Normalize = require("book.note.normalize")
 local logger = require("utils.log")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -1239,13 +1240,32 @@ function Source:cleanAnnotations(items, total_pages)
     return out
 end
 
+--- 删除墓碑（spec §9.1）：只留远端 id 与基线备注，等推送成功出列。
+--- 没有 pos / page，`cleanAnnotations` 用 kavita_deleted 当占位放行，阅读器不画它。
+---@param old table 上一版快照里那条
+---@return table
+local function tombstone(old)
+    return {
+        datetime = old.datetime or os.date("%Y-%m-%d %H:%M:%S"),
+        chapter_idx = old.chapter_idx,
+        kavita_id = old.kavita_id,
+        kavita_note = old.kavita_note,
+        kavita_deleted = true,
+    }
+end
+
 --- 阅读器里的注解不带 Kavita id：按 pos0 从上一版快照接过来，免得每次保存都重建远端注解。
 --- 另外把 `previous` 里「有 id 但没有 pos0」的条目（未定位 / 墓碑）原样搬进新 payload：
 --- 它们不在阅读器快照里，不搬的话一次普通保存就把「数据在、画不出」的云端条目洗掉。
+---
+--- 本次被删条目（spec §9.1，仅 `index_modified < 0` 时有值）按 pos0 找回上一版那条：
+--- 没坐标 / 找不到 → 只漏删不误删；没有 id → 本来就没推到远端；其余追加墓碑。
 ---@param previous table[]
 ---@param current table[]
+---@param deleted table|nil KOReader 事件里的被删条目
 ---@return table[]
-function Source:prepareLocalAnnotations(previous, current)
+function Source:prepareLocalAnnotations(previous, current, deleted)
+    current = type(current) == "table" and current or {}
     local by_pos, present = {}, {}
     for _idx, old in ipairs(previous) do
         if type(old) == "table" and old.kavita_id and old.pos0 then by_pos[old.pos0] = old end
@@ -1258,13 +1278,72 @@ function Source:prepareLocalAnnotations(previous, current)
         end
     end
     for _idx, old in ipairs(previous) do
-        if type(old) == "table" and old.kavita_id and not old.pos0
-            and not present[tostring(old.kavita_id)] then
+        local id = type(old) == "table" and old.kavita_id and tostring(old.kavita_id) or nil
+        if id and not old.pos0 and not present[id] then
             current[#current + 1] = old
+            present[id] = true
+        end
+    end
+    if type(deleted) == "table" then
+        local old = deleted.pos0 and by_pos[deleted.pos0] or nil
+        if not old then
+            -- pos0 对不上（换过文件版本）或事件里没坐标：记一条，下一次开书远端那条会回来。
+            logger.warn("kavita annotation deleted without anchor; skip tombstone", tostring(deleted.text))
+        elseif not old.kavita_id then
+            logger.dbg("kavita annotation deleted before push; no tombstone", tostring(deleted.text))
+        elseif not present[tostring(old.kavita_id)] then
+            current[#current + 1] = tombstone(old)
             present[tostring(old.kavita_id)] = true
         end
     end
     return current
+end
+
+--- 远端删除回流（spec §9.2）：`seen` 按 pull 回来的**全量** id 建（含未定位），
+--- 输出只画可渲染的远端条目；本地条目带 `kavita_id` 而远端集合里没有 → 丢弃并计入 `dropped`。
+--- 未定位条目仍占 id，所以它对应的本地副本不会被当成远端已删；纯本地划线（无 id）原样保留。
+--- `authoritative` 恒 false（spec §7），这里不改变语义，保留参数只为统一签名。
+---@param remote table[]
+---@param current table[]
+---@param paging boolean|nil
+---@param _authoritative boolean|nil
+---@return table[] merged
+---@return integer dropped
+function Source:mergeAnnotations(remote, current, paging, _authoritative)
+    local merged, seen_id, shown_id, seen_pos = {}, {}, {}, {}
+    for _idx, item in ipairs(type(remote) == "table" and remote or {}) do
+        if type(item) == "table" then
+            local id = tonumber(item.kavita_id)
+            if id then seen_id[id] = true end
+            if Normalize.renderable(item, paging) then
+                merged[#merged + 1] = item
+                if id then shown_id[id] = true end
+                if type(item.pos0) == "string" then
+                    seen_pos[item.pos0 .. "\31" .. tostring(item.pos1)] = true
+                end
+            end
+        end
+    end
+    local dropped = 0
+    for _idx, item in ipairs(type(current) == "table" and current or {}) do
+        if type(item) == "table" then
+            local id = tonumber(item.kavita_id)
+            if id and not seen_id[id] then
+                dropped = dropped + 1
+                logger.warn("kavita annotation deleted remotely; drop local", id)
+            else
+                -- 远端已定位的那条会带着复用来的旧 pos0：同 id / 同坐标只画远端那份。
+                -- id 在远端全量里但没画出来（未定位）→ 本地这份必须保留，否则书里就少一条。
+                local pos_key = type(item.pos0) == "string"
+                    and (item.pos0 .. "\31" .. tostring(item.pos1)) or nil
+                local duplicate = (id and shown_id[id]) or (item.drawer and pos_key and seen_pos[pos_key])
+                if not duplicate and Normalize.renderable(item, paging) then
+                    merged[#merged + 1] = item
+                end
+            end
+        end
+    end
+    return merged, dropped
 end
 
 -- ---------------------------------------------------------------------------
@@ -1885,17 +1964,17 @@ end
 --- 幂等的真相源是「每次推送前按章拉一遍远端注解」，payload 里的 kavita_id 只是快路径：
 --- 上传期间用户又划线（stale）、workdir 清空、pos0 漂移都靠下一轮对账自愈，不需要本地映射文件。
 --- 全有或全无：任一写请求失败就整批报错留脏（已建成的条目下轮按内容键认领，不会重复建）。
---- 删除不在这里做（见票 17）：本批墓碑只用来把待删的 id 从对账列表里剔掉。
+--- 先写后删（spec §9.4）：墓碑的 id 先从对账列表里剔掉（防同键认领），全部写成功后再一次 bulk-delete。
 ---@param identity BookIdentity
 ---@param annotations table[]
----@param cb fun(ok: boolean|nil, err: string|nil, data: { pushed: integer, adopted: integer, conflicts: integer }|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, data: { pushed: integer, adopted: integer, conflicts: integer, deleted: integer }|nil)
 ---@return { cancel: fun() }
 function Source:pushNotesAsync(identity, annotations, cb)
     local job, cancelled = nil, false
     job = self:entry(identity, function(entry, err)
         if cancelled then return end
         if not entry then return cb(nil, err) end
-        if entry.format ~= "epub" then return cb(true, nil, { pushed = 0 }) end
+        if entry.format ~= "epub" then return cb(true, nil, { pushed = 0, deleted = 0 }) end
         local path = downloaded(self.id, identity.stable_id)
 
         -- 墓碑（kavita_deleted + id）不推、也不许被认领：删了又原地划一条同键的，
@@ -1909,9 +1988,13 @@ function Source:pushNotesAsync(identity, annotations, cb)
                 pending[#pending + 1] = ann
             end
         end
-        if #pending == 0 then
+        -- 墓碑单独一批也要能推（删除不需要 create/update）；两样都没有才算零请求。
+        local delete_ids = {}
+        for id in pairs(tombstoned) do delete_ids[#delete_ids + 1] = id end
+        table.sort(delete_ids)
+        if #pending == 0 and #delete_ids == 0 then
             -- 无可推：与「真推成功」区分开，核心才不会把 changed 谎报给首页。
-            return cb(true, nil, { pushed = 0, adopted = 0, conflicts = 0 })
+            return cb(true, nil, { pushed = 0, adopted = 0, conflicts = 0, deleted = 0 })
         end
 
         -- 锚点先全部算好：有一条找不回段落就整批不发（空 xPath 会让一批失败项在远端挤成同键）。
@@ -1954,6 +2037,61 @@ function Source:pushNotesAsync(identity, annotations, cb)
 
                 local pushed, adopted, conflicts, index = 0, 0, 0, 0
                 local nextOne
+
+                --- 把本批墓碑从 payload 数组里摘掉：核心随后按这个数组回写快照，出列才算数。
+                local function dropTombstones()
+                    for i = #annotations, 1, -1 do
+                        local ann = annotations[i]
+                        local id = ann.kavita_deleted and tonumber(ann.kavita_id)
+                        if id and tombstoned[id] then table.remove(annotations, i) end
+                    end
+                end
+
+                --- 先写后删：全部 create / update 成功才发一次 bulk-delete（body = 裸 id 数组）。
+                --- 200 ⇒ 墓碑出列；400 ⇒ 重拉一次该章确认真实状态后收尾（不无限重试）；
+                --- 其余失败 ⇒ 整批 cb(nil)，快照留脏、墓碑保留，下轮重试。
+                local function finish()
+                    if #delete_ids == 0 then
+                        return cb(true, nil, { pushed = pushed, adopted = adopted,
+                            conflicts = conflicts, deleted = 0 })
+                    end
+                    job = self.client:json("POST", "/api/Annotation/bulk-delete", nil, delete_ids,
+                        function(_data, derr, code)
+                            if cancelled then return end
+                            if code and code >= 200 and code < 300 then
+                                dropTombstones()
+                                return cb(true, nil, { pushed = pushed, adopted = adopted,
+                                    conflicts = conflicts, deleted = #delete_ids })
+                            end
+                            -- 400 是「id 不存在 / 不是你的 / 服务端拒绝」的同一分支：删除本身幂等，
+                            -- 重拉一次按真实列表收尾，绝不循环重试。
+                            if code ~= 400 then
+                                return cb(nil, derr or _("Kavita 注解删除失败"))
+                            end
+                            job = Annotation.listByChapter(self.client, entry.chapterId, owner_id,
+                                function(fresh, ferr)
+                                    if cancelled then return end
+                                    if not fresh then
+                                        return cb(nil, ferr or _("Kavita 注解删除后复核失败"))
+                                    end
+                                    local alive = {}
+                                    for _idx, item in ipairs(fresh) do
+                                        alive[tonumber(item.id)] = true
+                                    end
+                                    local gone = 0
+                                    for _idx, id in ipairs(delete_ids) do
+                                        if alive[id] then
+                                            logger.warn("kavita annotation delete rejected; drop tombstone", id)
+                                        else
+                                            gone = gone + 1
+                                        end
+                                    end
+                                    dropTombstones()
+                                    cb(true, nil, { pushed = pushed, adopted = adopted,
+                                        conflicts = conflicts, deleted = gone })
+                                end)
+                        end)
+                end
 
                 --- 发一次 create / update；成功回填，失败整批收摊。
                 ---@param ann table
@@ -2016,7 +2154,7 @@ function Source:pushNotesAsync(identity, annotations, cb)
                         index = index + 1
                         local plan = plans[index]
                         if not plan then
-                            return cb(true, nil, { pushed = pushed, adopted = adopted, conflicts = conflicts })
+                            return finish()
                         end
                         local ann, anchor = plan.ann, plan.anchor
                         local note = ann.note or ""
