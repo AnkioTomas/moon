@@ -145,6 +145,23 @@ function Session.chapterPages(snapshot)
     return Toc.chapterPages(snapshot or Session._snapshot)
 end
 
+--- 全书页码（按章打开时用目录字数估算；估不出则退回文档页码）。顶栏 / 侧栏 / 锁屏共用。
+---@param snapshot ReaderSessionSnapshot|nil 缺省当前会话
+---@return integer page
+---@return integer total
+function Session.bookPages(snapshot)
+    snapshot = snapshot or Session._snapshot
+    if not snapshot then return 0, 0 end
+    local page = tonumber(snapshot.page) or 0
+    local total = tonumber(snapshot.total_pages) or 0
+    if snapshot.identity and snapshot.identity.chapter_idx ~= nil then
+        local p, t = require("reader.session.pages").estimate(
+            Toc.list(snapshot), snapshot.identity.chapter_idx, page, total)
+        if p then return p, t end
+    end
+    return page, total
+end
+
 --- 全书剩余阅读时间估算（秒）；数据不足或已读完返回 nil。
 ---@return number|nil
 function Session.remainingSeconds()

@@ -50,7 +50,23 @@ package.preload["features.bars.layout"] = function()
 end
 local session_current = nil
 package.preload["reader.session"] = function()
-    return { current = function() return session_current end }
+    return {
+        current = function() return session_current end,
+        toc = function() return session_current and session_current._toc end,
+        chapterPages = function(cur)
+            cur = cur or session_current
+            if not cur then return nil end
+            return cur.page, cur.total_pages
+        end,
+        bookPages = function(cur)
+            cur = cur or session_current
+            if not cur then return 0, 0 end
+            return cur.page or 0, cur.total_pages or 0
+        end,
+        chapterTitle = function() return session_current and session_current._chapter end,
+        chapterIndex = function() return session_current and session_current.identity and session_current.identity.chapter_idx end,
+        remainingSeconds = function() return nil end,
+    }
 end
 local Bars = require("features.bars")
 local UIManager = require("ui/uimanager")
@@ -64,16 +80,6 @@ Assert.is_true(Bars.timeText(0):match("^%d%d:%d%d$") ~= nil)
 Assert.is_true(Bars.timeText():match("^%d%d:%d%d$") ~= nil)
 
 -- remainingText：不足一分钟为空；分钟 / 小时 + 分钟
--- 按章打开：用目录字数估全书页码；缺字数沿用文档页码。
-do
-    local toc = { { words = 1000 }, { words = 2000 }, { words = 1000 } }
-    local p, t = Bars.estimatePages(toc, 2, 3, 10)
-    Assert.eq(p, 8)
-    Assert.eq(t, 20)
-    Assert.is_nil((Bars.estimatePages({ { words = 1000 }, {} }, 1, 1, 5)))
-    Assert.is_nil((Bars.estimatePages(toc, 2, 0, 10)))
-    Assert.is_nil((Bars.estimatePages(nil, 1, 1, 5)))
-end
 Assert.eq(Bars.remainingText(nil), "")
 Assert.eq(Bars.remainingText(59), "")
 Assert.eq(Bars.remainingText(60), "约 1 分钟")

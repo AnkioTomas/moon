@@ -304,6 +304,34 @@ local function write(path, payload, cb, opts)
         end }
 end
 
+--- 章节 HTML / 纯文本大致字数（去标签后的 UTF-8 字符数），给全书页码估算用。
+---@param payload ChapterContentPayload|string|nil
+---@return integer
+local function payloadWords(payload)
+    local html
+    if type(payload) == "string" then
+        html = payload
+    elseif type(payload) == "table" then
+        if payload.file then return 0 end -- 漫画等二进制不算字
+        html = payload.document or payload.html or payload.text or ""
+    else
+        return 0
+    end
+    local plain = require("utils.text").stripHtml(html)
+    if plain == "" then return 0 end
+    -- 按 UTF-8 字符计：汉字一字符，ASCII 一字符；不追求语言学精度。
+    local n, i = 0, 1
+    while i <= #plain do
+        local c = plain:byte(i)
+        if c < 128 then i = i + 1
+        elseif c < 224 then i = i + 2
+        elseif c < 240 then i = i + 3
+        else i = i + 4 end
+        n = n + 1
+    end
+    return n
+end
+
 --- 确保第 idx 章正文已在本地：已就绪则直接用，否则拉正文并落盘。
 ---@param identity BookIdentity
 ---@param toc BookChapter[] 完整目录
@@ -314,13 +342,35 @@ end
 local function ensure(identity, toc, idx, ops, cb)
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
     if chapterReady(path) then
+        -- 已缓存但目录还没字数：补一次，估页码越读越准。
+        local item = toc[idx]
+        if item and not (tonumber(item.words) and tonumber(item.words) > 0) then
+            local f = io.open(path, "rb")
+            if f then
+                local html = f:read("*a"); f:close()
+                local words = payloadWords(html)
+                if words > 0 then
+                    require("source.toc").setWords(identity.source_id, identity.stable_id, idx, words)
+                    item.words = words
+                end
+            end
+        end
         cb(path)
         return
     end
     local item = assert(toc[idx], "invalid chapter toc")
     return ops.fetchContent(identity, item, function(payload, err)
         if not payload then cb(nil, err or _("章节下载失败")); return end
-        write(path, payload, cb, { book_title = ops.book_title })
+        write(path, payload, function(ok_path, write_err)
+            if ok_path then
+                local words = payloadWords(payload)
+                if words > 0 then
+                    require("source.toc").setWords(identity.source_id, identity.stable_id, idx, words)
+                    item.words = words
+                end
+            end
+            cb(ok_path, write_err)
+        end, { book_title = ops.book_title })
     end)
 end
 
