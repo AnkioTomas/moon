@@ -1070,6 +1070,57 @@ do
     Assert.eq(kept_dropped, 0, "离线没有 id 集合时不判删除")
 end
 
+-- 远端同键重复（历史推送窗口的产物：真书 7460:11285 的 id 37 / 43 同 xPath 同文本，
+-- spec §6「同键多条取 id 最小」/ §13.1 B）：只画 id 最小那条，其余不渲染、也不当远端已删。
+do
+    local XPATH = "//body/DocFragment[24]/body/div[3]/p[2]"
+    local function remoteAnn(id, over)
+        local item = {
+            datetime = "d", page = "/body/p[24].0", pos0 = "/body/p[24].0", pos1 = "/body/p[24].5",
+            drawer = "lighten", text = "既替余以蕙纕兮", kavita_id = id,
+            kavita_xpath = XPATH, kavita_ending_xpath = XPATH,
+        }
+        for key, value in pairs(over or {}) do item[key] = value end
+        return item
+    end
+    local a37, a43 = remoteAnn(37), remoteAnn(43)
+
+    local one, one_dropped, one_deduped = source:mergeAnnotations({ a37, a43 }, {}, nil, false)
+    Assert.eq(#one, 1, "同键两条只画一条")
+    Assert.eq(one[1].kavita_id, 37, "同键取 id 最小")
+    Assert.eq(one_dropped, 0, "去重不是远端删除")
+    Assert.eq(one_deduped, 1, "被抑制的远端条数走第三返回值")
+
+    local reversed, r_dropped, r_deduped = source:mergeAnnotations({ a43, a37 }, {}, nil, false)
+    Assert.eq(#reversed, 1)
+    Assert.eq(reversed[1].kavita_id, 37, "倒序输入仍取 id 最小")
+    Assert.eq(r_dropped, 0)
+    Assert.eq(r_deduped, 1)
+
+    -- 不同键的两条都保留（去重键不能退化成「一章一条」）。
+    local other = remoteAnn(44, {
+        kavita_xpath = "//body/DocFragment[24]/body/div[3]/p[3]",
+        kavita_ending_xpath = "//body/DocFragment[24]/body/div[3]/p[3]",
+        text = "另一段划线",
+    })
+    local both, both_dropped, both_deduped = source:mergeAnnotations({ a37, other }, {}, nil, false)
+    Assert.eq(#both, 2)
+    Assert.eq(both_dropped, 0)
+    Assert.eq(both_deduped, 0)
+
+    -- 旧 doc_settings 里还留着一条带 43 的本地副本：远端 43 被抑制（id 仍在全量集合里），
+    -- 本地那份不能再画一遍，也不能算 dropped —— 否则合法去重会被条数保护当成远端删除。
+    local local43 = {
+        datetime = "d", page = "/body/old.0", pos0 = "/body/old.0", pos1 = "/body/old.5",
+        drawer = "lighten", text = "既替余以蕙纕兮", kavita_id = 43,
+    }
+    local single, s_dropped, s_deduped = source:mergeAnnotations({ a37, a43 }, { local43 }, nil, false)
+    Assert.eq(#single, 1, "本地 43 不重复渲染")
+    Assert.eq(single[1].kavita_id, 37, "画的是 id 最小那条")
+    Assert.eq(s_dropped, 0, "远端 43 只是被抑制，不算远端已删")
+    Assert.eq(s_deduped, 1)
+end
+
 -- 拉取：开书时把云端 epub 注解落库（入库不定位）。每章一次 GET，按 ownerUserId 收窄；
 -- authoritative 恒 false（远端为空不代表本地该清空），失败就 cb(nil, err)，快照不动。
 local ann_calls = {}
@@ -1136,10 +1187,18 @@ Assert.is_nil(web.pageno)
 Assert.is_nil(web.chapter_idx, "整本桶")
 
 local bare = pulled[2]
-Assert.eq(bare.note, "")
-Assert.eq(bare.kavita_note, "", "空备注两边都空，推送侧才判等")
+-- KOReader 的 getBookmarkType 用 `if bookmark.note then return "note"`：Lua 里 "" 为真，
+-- 默认 bookmarks_items_text_type = "note" 就会把空备注写成「高亮与笔记」列表里的空行。
+Assert.is_nil(bare.note, "空备注落 nil（不是空串），否则被当成 note 类型渲染空行")
+Assert.is_nil(bare.kavita_note, "基线与 note 同源：空备注也是 nil（sameNote(nil, \"\") 仍判等）")
 Assert.eq(bare.color, "yellow", "槽位越界回落 yellow")
 Assert.eq(bare.pageNumber, 0, "DTO 缺 pageNumber 回落 0（只会试前两个 DocFragment）")
+
+-- 清洗（保存快照前的白名单）不能把空备注的 nil 变回空串。
+local cleaned_bare = source:cleanAnnotations(pulled, 10)
+Assert.is_nil(cleaned_bare[2].note, "cleanAnnotations 后仍为 nil")
+Assert.is_nil(cleaned_bare[2].kavita_note)
+Assert.eq(cleaned_bare[1].note, "记一笔", "非空备注不受影响")
 
 -- createdUtc 解析不出（Kavita 的 0001 占位）就用当前时间，仍然要落库。
 routes["GET /api/Annotation/all"] = json({ {

@@ -1304,6 +1304,8 @@ end
 
 --- 远端删除回流（spec §9.2）：`seen` 按 pull 回来的**全量** id 建（含未定位），
 --- 输出只画可渲染的远端条目；本地条目带 `kavita_id` 而远端集合里没有 → 丢弃并计入 `dropped`。
+--- 远端同键多条（历史推送窗口的产物，spec §6 / §13.1 B「同键取 id 最小」）只画 id 最小那条，
+--- 其余被抑制、计入 `deduped`；被抑制的 id 仍留在 `seen_id`（远端没删它，本地副本不算 dropped）。
 --- 未定位条目仍占 id，所以它对应的本地副本不会被当成远端已删；纯本地划线（无 id）原样保留。
 --- `authoritative` 恒 false（spec §7），这里不改变语义，保留参数只为统一签名。
 ---@param remote table[]
@@ -1311,19 +1313,51 @@ end
 ---@param paging boolean|nil
 ---@param _authoritative boolean|nil
 ---@return table[] merged
----@return integer dropped
+---@return integer dropped 远端已删（本地有 id 但远端全量里没有）
+---@return integer deduped 远端同键被抑制（不画）的条数
 function Source:mergeAnnotations(remote, current, paging, _authoritative)
-    local merged, seen_id, shown_id, seen_pos = {}, {}, {}, {}
-    for _idx, item in ipairs(type(remote) == "table" and remote or {}) do
+    local merged, seen_id, shown_id, seen_pos, suppressed, suppressed_id = {}, {}, {}, {}, {}, {}
+    local list = type(remote) == "table" and remote or {}
+
+    -- 第一遍：建远端全量 id 集合（含之后要被抑制的），并按键挑出每条键要画的那条。
+    -- 键与推送侧认领同一条（Annotation.key 两套字段名都认）；同键取 id 最小，没有 id 的排最后。
+    local winner = {}
+    for idx, item in ipairs(list) do
         if type(item) == "table" then
             local id = tonumber(item.kavita_id)
             if id then seen_id[id] = true end
             if Normalize.renderable(item, paging) then
-                merged[#merged + 1] = item
-                if id then shown_id[id] = true end
-                if type(item.pos0) == "string" then
-                    seen_pos[item.pos0 .. Annotation.KEY_SEP .. tostring(item.pos1)] = true
+                local key = Annotation.key(item)
+                local best = winner[key]
+                if best == nil then
+                    winner[key] = idx
+                else
+                    local best_id = tonumber(list[best].kavita_id) or math.huge
+                    if (id or math.huge) < best_id then
+                        suppressed[best] = true
+                        winner[key] = idx
+                    else
+                        suppressed[idx] = true
+                    end
                 end
+            end
+        end
+    end
+    local deduped = 0
+    for idx in pairs(suppressed) do
+        deduped = deduped + 1
+        local id = tonumber(list[idx].kavita_id)
+        if id then suppressed_id[id] = true end
+    end
+
+    -- 第二遍：按原顺序输出保留下来的远端条目（顺序影响绘制顺序，不因去重打乱）。
+    for idx, item in ipairs(list) do
+        if type(item) == "table" and not suppressed[idx] and Normalize.renderable(item, paging) then
+            local id = tonumber(item.kavita_id)
+            merged[#merged + 1] = item
+            if id then shown_id[id] = true end
+            if type(item.pos0) == "string" then
+                seen_pos[item.pos0 .. Annotation.KEY_SEP .. tostring(item.pos1)] = true
             end
         end
     end
@@ -1337,16 +1371,19 @@ function Source:mergeAnnotations(remote, current, paging, _authoritative)
             else
                 -- 远端已定位的那条会带着复用来的旧 pos0：同 id / 同坐标只画远端那份。
                 -- id 在远端全量里但没画出来（未定位）→ 本地这份必须保留，否则书里就少一条。
+                -- 例外：id 在远端被同键抑制 → 远端画的是同键里 id 最小的那条，本地这份不能再画一遍。
                 local pos_key = type(item.pos0) == "string"
                     and (item.pos0 .. Annotation.KEY_SEP .. tostring(item.pos1)) or nil
-                local duplicate = (id and shown_id[id]) or (item.drawer and pos_key and seen_pos[pos_key])
+                local duplicate = (id and shown_id[id])
+                    or (id and suppressed_id[id])
+                    or (item.drawer and pos_key and seen_pos[pos_key])
                 if not duplicate and Normalize.renderable(item, paging) then
                     merged[#merged + 1] = item
                 end
             end
         end
     end
-    return merged, dropped
+    return merged, dropped, deduped
 end
 
 -- ---------------------------------------------------------------------------
@@ -1889,7 +1926,11 @@ local function annotationPayload(dto)
     local drawer
     if not blank then drawer = "lighten" end
     -- note 与 kavita_note 必须来自同一次读回：两侧一旦有差异，推送侧每轮都会判「备注改过」。
+    -- 空备注落 nil，不落 ""：KOReader 的 getBookmarkType 把 "" 当真值（`if bookmark.note then
+    -- return "note"`），默认 bookmarks_items_text_type = "note" 会把这条渲染成空行。
+    -- 本地高亮本来就是 nil；sameNote(nil, "") 仍判等，推送侧不会误判「改过」。
     local note = Annotation.noteText(dto.comment, dto.commentHtml, dto.commentPlainText)
+    if note == "" then note = nil end
     -- createdUtc 是真正的 UTC；解析不出（如 0001 占位）回退当前时间，只影响显示 / 排序。
     local created = utcTime(dto.createdUtc)
     return {

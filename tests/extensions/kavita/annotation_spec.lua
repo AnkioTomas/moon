@@ -133,6 +133,24 @@ Assert.eq(
     Annotation.key({ chapterId = 7, xPath = "//body/p[1]", endingXPath = "//body/p[2]", text = "选中  文本" }),
     keyOf({})
 )
+-- payload 形状（pull 落库后 / 阅读器快照里的条目）没有 DTO 字段名：xPath / endingXPath / selectedText
+-- 的回退是 kavita_xpath / kavita_ending_xpath / text。源侧「远端同键去重」直接拿它当键。
+Assert.eq(
+    Annotation.key({ chapterId = 7, kavita_xpath = "//body/p[1]", kavita_ending_xpath = "//body/p[2]",
+        text = "选中  文本" }),
+    keyOf({}),
+    "payload 字段与 DTO 字段算出同一个键"
+)
+Assert.eq(
+    Annotation.key({ kavita_xpath = "//body/p[1]", kavita_ending_xpath = "//body/p[2]", text = "选中 文本" }),
+    Annotation.key({ xPath = "//body/p[1]", endingXPath = "//body/p[2]", selectedText = "选中 文本" })
+)
+Assert.eq(
+    Annotation.key({ chapterId = 7, xPath = "//body/p[1]", kavita_xpath = "//body/p[9]", endingXPath = "//body/p[2]",
+        text = "选中 文本" }),
+    keyOf({}),
+    "DTO 字段优先，回退只在缺失时生效"
+)
 
 -- 对账命中：同键多条取 id 最小；无命中 nil。
 local remote = {
