@@ -19,6 +19,11 @@ local M = {}
 -- 超过此大小的书（几十 MB 插图合集）按「重」处理：默认不用内嵌字体和样式。
 M.BIG_BOOK_BYTES = 20 * 1024 * 1024
 
+-- 不在 configurable 里、由 KOReader 的样式微调模块直接存进 sidecar 的排版键（行距 / 段距等微调与自定义 CSS 在这里）。
+local DOC_KEYS = {
+    "style_tweaks", "style_tweaks_enabled", "book_style_tweak", "book_style_tweak_enabled",
+}
+
 --- native_font.lua 为渲染字体选项塞进 configurable 的临时键，不属于排版偏好。
 local SKIP_COPT_KEY = "book_font_face"
 
@@ -82,11 +87,16 @@ function M.capture(ui)
     if not idMatchesFace(font_id, font_face) then
         font_id = nil
     end
+    local doc_keys = {}
+    for _idx, key in ipairs(DOC_KEYS) do
+        doc_keys[key] = doc and doc:readSetting(key)
+    end
     return {
         font_id = font_id,
         font_name = font_id and doc:readSetting("book_reader_font_name") or nil,
         font_face = font_face,
         copt = copt,
+        doc = doc_keys,
     }
 end
 
@@ -175,6 +185,17 @@ end
 function M.write(doc_settings, prefs)
     for key, value in pairs(prefs.copt or {}) do
         doc_settings:saveSetting("copt_" .. key, copyValue(value))
+    end
+    -- 旧版本存的偏好没有 doc 字段：不动这章自己的微调。有 doc 时缺席即「全书没设」，要清掉。
+    if prefs.doc then
+        for _idx, key in ipairs(DOC_KEYS) do
+            local value = prefs.doc[key]
+            if value == nil then
+                doc_settings:delSetting(key)
+            else
+                doc_settings:saveSetting(key, copyValue(value))
+            end
+        end
     end
     local font_id = type(prefs.font_id) == "string" and prefs.font_id or ""
     local face = (font_id ~= "" and Fonts.faceForId(font_id)) or prefs.font_face
