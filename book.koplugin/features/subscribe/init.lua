@@ -49,7 +49,7 @@ Subscribe.STALE = 3600
 
 --- 网页里的私有 / 本机地址（含 .local、IPv4 私网与链路本地、IPv6 本机 / ULA / 链路本地、纯数字主机）。
 --- 远程管理网页发起的抓取（试拉 / 添加 / 导入 / 批量）一律拒绝，免得局域网里的页面借设备探内网。
---- 只看字面量，域名解析到内网（DNS rebinding）拦不住；设备上自己添加的订阅不受限（可订阅局域网 RSSHub）。
+--- 字面量之外，opts.public 路径还会对解析后的 IP 再查一次（防 DNS rebinding）；设备上自己添加的订阅不受限。
 ---@param url string
 ---@return boolean
 function Subscribe.privateHost(url)
@@ -76,6 +76,33 @@ function Subscribe.privateHost(url)
     return false
 end
 
+--- 解析主机名后的 IP 是否落在私网；解析失败不当私网（交给后续请求报错）。
+---@param url string
+---@return boolean
+local function resolvePrivate(url)
+    local host = tostring(url or ""):match("^%a[%w+.-]*://([^/?#]*)")
+    if not host then return true end
+    host = host:gsub("^.*@", ""):lower()
+    if host:sub(1, 1) == "[" then
+        host = host:match("^%[(.-)%]") or host
+    else
+        host = host:gsub(":%d*$", "")
+    end
+    if host == "" then return true end
+    -- 已是 IP 字面量：privateHost 已经查过
+    if host:match("^[%d.]+$") or host:find(":", 1, true) then return false end
+    local ok, list = pcall(function() return require("socket").dns.getaddrinfo(host) end)
+    if not ok or type(list) ~= "table" then return false end
+    for _i, info in ipairs(list) do
+        local addr = info and info.addr
+        if addr and addr ~= "" then
+            local wrapped = addr:find(":", 1, true) and ("http://[" .. addr .. "]/") or ("http://" .. addr .. "/")
+            if Subscribe.privateHost(wrapped) then return true end
+        end
+    end
+    return false
+end
+
 local ACCEPT = "application/rss+xml,application/atom+xml,application/xml,text/html,*/*"
 
 --- 流式 GET：边收边数，超过 MAX_PAGE 立刻断开（不先整页下完再判断）。
@@ -89,7 +116,7 @@ local function get(url, cb, opts)
     -- 当成完整地址解析失败；GitHub release 的 latest 下载、各类镜像都是相对跳转。
     opts = opts or {}
     local hops = opts.hops or 0
-    if opts.public and Subscribe.privateHost(url) then
+    if opts.public and (Subscribe.privateHost(url) or resolvePrivate(url)) then
         cb(nil, _("不允许访问局域网或本机地址"))
         return nil
     end
@@ -158,21 +185,41 @@ local function imageDownloader(referer)
         local job = { cancelled = false }
         local function fetch(target, hops)
             if not lan and Subscribe.privateHost(target) then return cb(nil) end
-            job.inner = require("http.request").request({
-                url = target, method = "GET",
+            local Request = require("http.request")
+            local chunks, size, too_big, code, headers = {}, 0, false, nil, nil
+            local function abort()
+                too_big, chunks = true, {}
+                if job.inner and job.inner.cancel then job.inner:cancel() end
+            end
+            job.inner = Request.stream({
+                url = target,
                 headers = { ["Accept"] = "image/*", ["Referer"] = referer },
                 timeout = require("http.timeout").net(3),
-            }, function(res)
-                if job.cancelled then return end
-                local code = res and res.code
-                if code and code >= 300 and code < 400 then
-                    local loc = require("http.request").header(res, "Location")
-                    if not loc or loc == "" or hops >= 5 then return cb(nil) end
-                    return fetch(Text.absoluteUrl(target, Text.trim(loc)), hops + 1)
-                end
-                local body = code == 200 and res.body
-                cb(body and body ~= "" and #body <= MAX_IMAGE and body or nil)
-            end)
+            }, {
+                on_headers = function(status, hdrs)
+                    code, headers = tonumber(status), hdrs
+                    if code and code >= 300 and code < 400 then return end
+                    local len = tonumber((Request.header({ headers = hdrs }, "Content-Length")))
+                    if len and len > MAX_IMAGE then abort() end
+                end,
+                on_data = function(chunk)
+                    if too_big or (code and code >= 300 and code < 400) then return end
+                    size = size + #chunk
+                    if size > MAX_IMAGE then return abort() end
+                    chunks[#chunks + 1] = chunk
+                end,
+                on_done = function(err)
+                    if job.cancelled then return end
+                    if code and code >= 300 and code < 400 then
+                        local loc = Request.header({ headers = headers }, "Location")
+                        if not loc or loc == "" or hops >= 5 then return cb(nil) end
+                        return fetch(Text.absoluteUrl(target, Text.trim(loc)), hops + 1)
+                    end
+                    if too_big or err or code ~= 200 then return cb(nil) end
+                    local body = table.concat(chunks)
+                    cb(body ~= "" and body or nil)
+                end,
+            })
         end
         fetch(url, 0)
         -- assets 以 handle.cancel() 调用（不带 self），闭包写法两种调法都行。

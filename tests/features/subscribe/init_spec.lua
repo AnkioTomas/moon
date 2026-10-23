@@ -333,16 +333,25 @@ do
     Req.stream, package.loaded["source.assets"] = real_stream, real_assets
 end
 
--- 图片下载：公网文章的图片不许经跳转落到内网；局域网文章（自建 RSSHub）不限。
+-- 图片下载：公网文章的图片不许经跳转落到内网；局域网文章（自建 RSSHub）不限。流式边收下边限大小。
 do
     local asked, answers = {}, {}
     local Req = package.loaded["http.request"]
-    local real_request, real_assets = Req.request, package.loaded["source.assets"]
-    Req.request = function(opts, cb)
+    local real_stream, real_assets = Req.stream, package.loaded["source.assets"]
+    Req.stream = function(opts, h)
         asked[#asked + 1] = opts.url
+        local job = { stopped = false }
+        function job:cancel() self.stopped = true end
         local to = redirects[opts.url]
-        if to then cb({ code = 302, headers = { Location = to } }) else cb({ code = 200, body = "IMG" }) end
-        return { cancel = function() end }
+        if to then
+            h.on_headers(302, { Location = to })
+            h.on_done(nil)
+            return job
+        end
+        h.on_headers(200, {})
+        h.on_data("IMG")
+        h.on_done(nil)
+        return job
     end
     local downloader
     package.loaded["source.assets"] = { localizeAsync = function(_html, _dir, dl, cb) downloader = dl; cb("") return {} end }
@@ -357,7 +366,6 @@ do
     download("https://a.com/p", "https://cdn.test/a.png")
     Assert.eq(#asked, 1)
     Assert.eq(answers[1], false)
-    -- assets 以 handle.cancel() 调用（不带 self），不能崩
     local handle = downloader("https://cdn.test/z.png", function() end)
     handle.cancel()
     handle:cancel()
@@ -372,5 +380,30 @@ do
     Assert.eq(asked[2], "http://192.168.1.2/x.png")
     Assert.eq(answers[1], "IMG")
     redirects["https://cdn.test/a.png"] = nil
-    Req.request, package.loaded["source.assets"] = real_request, real_assets
+    Req.stream, package.loaded["source.assets"] = real_stream, real_assets
+end
+
+-- opts.public：域名解析到私网 IP 也拦（DNS rebinding）。
+do
+    package.preload["socket"] = function()
+        return { dns = { getaddrinfo = function(host)
+            if host == "evil.example" then return { { addr = "127.0.0.1" } } end
+            if host == "ok.example" then return { { addr = "8.8.8.8" } } end
+            return nil
+        end } }
+    end
+    package.loaded["socket"] = nil
+    package.loaded["features.subscribe"] = nil
+    local S = require("features.subscribe")
+    local body, err
+    S.fetchText("https://evil.example/x", function(b, e) body, err = b, e end, true)
+    Assert.is_nil(body)
+    Assert.eq(err, "不允许访问局域网或本机地址")
+    web["https://ok.example/x"] = "ok"
+    S.fetchText("https://ok.example/x", function(b, e) body, err = b, e end, true)
+    Assert.eq(body, "ok")
+    package.loaded["socket"] = nil
+    package.preload["socket"] = nil
+    package.loaded["features.subscribe"] = nil
+    Subscribe = require("features.subscribe")
 end
