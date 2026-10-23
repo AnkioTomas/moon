@@ -29,7 +29,6 @@ local Client = require("moonsource_kavita.client")
 local Annotation = require("moonsource_kavita.annotation")
 local Position = require("moonsource_kavita.position")
 local Stats = require("moonsource_kavita.stats")
-local Annotation = require("moonsource_kavita.annotation")
 local SourceBase = require("source.base")
 local logger = require("utils.log")
 local _ = require("gettext")
@@ -1443,13 +1442,15 @@ function Source:pushNotesAsync(identity, annotations, cb)
                     end
                 end
 
-                --- 认领远端那条：回填 id / 坐标 / 基线，后续 update 才有原值可回传。
+                --- 认领远端那条：回填 id / 坐标 / 原值，后续 update 才有原值可回传。
+                --- **不碰 kavita_note 基线**：本地备注还是空的（远端文本要等 pull 才进 note），
+                --- 这时候把远端备注记成基线，下一轮就会把「本地空」判成用户清空 → update 掉网页作者的内容。
+                --- 基线只在真的写成功、或本地文本已经与远端相同时才补。
                 ---@param ann table 本地条目（原地改写）
                 ---@param hit table 远端 DTO
                 local function adopt(ann, hit)
                     ann.kavita_id = tonumber(hit.id)
                     ann.kavita_xpath, ann.kavita_ending_xpath = hit.xPath, hit.endingXPath
-                    ann.kavita_note = Annotation.noteText(hit.comment, hit.commentHtml, hit.commentPlainText)
                     ann.kavita_comment, ann.kavita_comment_html = hit.comment, hit.commentHtml
                     ann.kavita_slot, ann.kavita_spoiler = hit.selectedSlotIndex, hit.containsSpoiler
                 end
@@ -1503,6 +1504,7 @@ function Source:pushNotesAsync(identity, annotations, cb)
                             })
                             if not hit then return cb(nil, aerr or _("Kavita 未确认注解已创建")) end
                             adopt(ann, hit)
+                            ann.kavita_note = note
                             pushed = pushed + 1
                             nextOne()
                         end)
@@ -1535,11 +1537,19 @@ function Source:pushNotesAsync(identity, annotations, cb)
                                     logger.warn("kavita annotation anchor drifted; skip update", id,
                                         ann.kavita_xpath, anchor.xPath)
                                 else
-                                    local base = ann.kavita_note or ""
+                                    local base = ann.kavita_note
                                     local remote_note = Annotation.noteText(current.comment, current.commentHtml,
                                         current.commentPlainText)
+                                    if base == nil then
+                                        -- 没有基线（刚认领 / 老 payload）：本地有备注就是真实编辑，整条替换；
+                                        -- 空则什么都不写，等 pull 把远端文本连同基线一起采纳。
+                                        if Annotation.sameNote(note, remote_note) then
+                                            if not Annotation.sameNote(note, "") then ann.kavita_note = note end
+                                        elseif not Annotation.sameNote(note, "") then
+                                            return send(ann, anchor, "update", current)
+                                        end
                                     -- 没改备注就不写：远端怎么变都交给 pull 采纳。
-                                    if not Annotation.sameNote(note, base) then
+                                    elseif not Annotation.sameNote(note, base) then
                                         if Annotation.sameNote(remote_note, base) then
                                             return send(ann, anchor, "update", current)
                                         elseif Annotation.sameNote(remote_note, note) then
@@ -1566,8 +1576,13 @@ function Source:pushNotesAsync(identity, annotations, cb)
                             local remote_note = Annotation.noteText(hit.comment, hit.commentHtml,
                                 hit.commentPlainText)
                             -- 首次认领：本地空 / 与远端相同 → 只采纳 id，不覆盖网页作者的备注。
-                            if not (Annotation.sameNote(note, "") or Annotation.sameNote(note, remote_note)) then
-                                return send(ann, anchor, "update", hit)
+                            -- 基线只在本地确实有这段文本时才补，否则下一轮会把「本地空」当成用户清空。
+                            if not Annotation.sameNote(note, "") then
+                                if Annotation.sameNote(note, remote_note) then
+                                    ann.kavita_note = note
+                                else
+                                    return send(ann, anchor, "update", hit)
+                                end
                             end
                         end
                     end

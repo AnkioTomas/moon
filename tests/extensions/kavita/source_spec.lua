@@ -702,11 +702,26 @@ do
     local ok_claim, _err_claim, data_claim = run("pushNotesAsync", volume, { claimed })
     Assert.is_true(ok_claim)
     Assert.eq(claimed.kavita_id, 37, "同键多条取 id 最小")
-    Assert.eq(claimed.kavita_note, "网页写的", "采纳时把远端备注记为基线")
+    Assert.is_nil(claimed.kavita_note, "远端备注不当基线：本地 note 还是空的，等 pull 采纳")
     Assert.eq(data_claim.pushed, 0)
     Assert.eq(data_claim.adopted, 0)
     Assert.len(created, 0)
     Assert.len(updated, 0, "首次认领不覆盖远端非空备注")
+
+    -- 认领过的那条再推（本地 note 仍空、pull 还没跑）→ 零写请求。
+    -- 基线若被写成远端文本，这里就会被判成「用户清空了备注」，一次 update 抹掉网页作者的内容。
+    local ok_again, _err_again, data_again = run("pushNotesAsync", volume, { claimed })
+    Assert.is_true(ok_again)
+    Assert.eq(data_again.pushed, 0)
+    Assert.len(updated, 0, "认领后不能反手把远端的备注覆盖成空")
+
+    -- 认领后、pull 之前用户补了备注 → 这是真实编辑，直接 update（没有基线不等于冲突）。
+    local later = { drawer = "lighten", text = "春眠\n不觉晓", note = "补的备注", kavita_id = 37,
+        pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
+    Assert.is_true(run("pushNotesAsync", volume, { later }))
+    Assert.eq(updated[#updated].id, 37)
+    Assert.eq(JSON.decode(updated[#updated].comment).ops[1].insert, "补的备注\n")
+    Assert.eq(later.kavita_note, "补的备注")
 
     -- 首次认领时本地备注非空且不同 → 认到 id 后 update 那一条（设备侧确实改了备注）。
     local named = { drawer = "lighten", text = "春眠\n不觉晓", note = "我的备注",
