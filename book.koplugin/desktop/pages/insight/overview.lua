@@ -170,7 +170,7 @@ local function buildCalendar(desktop, state, width, extra)
         local cell = calCell(t, size, cd, seconds > 0, out, key == selected, function()
             state.selected = key
             if out then state.ym = string.format("%04d-%02d", cy, cm) end
-            desktop.insight:goTo("day")
+            desktop.insight:switchPage("day")
             desktop:updateView()
         end)
         table.insert(row, CenterContainer:new{
