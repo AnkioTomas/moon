@@ -22,7 +22,8 @@ Kavita 阅读统计纯核心：reading-history 条目 + 身份 / 时区上下文
 
 阅读会话行（`cloud_session`）：每个「会话 × 章」切片的起始时刻与时长单独落一行，
 供书详情 / 统计页的「阅读记录」列出真的读了几点几分；时长不计入日 / 时段 / 总量行
-（那些桶已经包含它），只在 `sessionRows` 里读。
+（那些桶已经包含它），只在 `sessionRows` 里读。页数（`event_count` = pagesRead）不另写记录类型：
+核心从这一行累加单书页数，所以漫画另外补 `page = endPage` / `total_pages = 卷级总页数`。
 
 全量重拉：日桶 / 时段桶 / 总量行按「前缀 + 覆盖到最后观测桶的时间窗」替换；单书行按「上次 ∪ 本次
 身份」精确替换，顺带清掉身份漂移（单卷 ↔ 多卷、系列重建）遗留的孤儿行。
@@ -78,7 +79,8 @@ function Stats.ianaTimezone(posix)
     return "UTC"
 end
 
---- 合成 reading_stats 行；云端没有页坐标，page / total_pages 恒为 0。
+--- 合成 reading_stats 行；云端默认没有页坐标，page / total_pages 恒为 0。
+--- 漫画（Image / Archive）的会话行由调用方在拿到 endPage / totalPages 后补上。
 ---@param source_id string
 ---@param stable_id string
 ---@param record_type string
@@ -216,6 +218,12 @@ function Stats.fromHistory(entries, ctx)
             else
                 if day > last_day then last_day = day end
                 local chapters = type(entry.chapters) == "table" and entry.chapters or {}
+                -- 漫画才有真实页坐标：Kavita 的 seriesFormat 0 = Image、1 = Archive 是图片页；
+                -- epub（3）的 chapter.pages 是 spine / 阅读单元（6 万字的书 32 个），PDF（4）同理，
+                -- 都不是渲染页，填进 page / total_pages 会让详情页的「读了多少页」变成假的。
+                -- seriesFormat 在条目顶层，不在 chapter 上（实测响应见 history-7453-all.json）。
+                local fmt = tonumber(entry.seriesFormat)
+                local comic = fmt == 0 or fmt == 1
                 local entry_duration = 0
                 for _ci, chapter in ipairs(chapters) do
                     entry_duration = entry_duration + (tonumber(chapter.durationSeconds) or 0)
@@ -254,6 +262,13 @@ function Stats.fromHistory(entries, ctx)
                                 local session = statsRow(source_id, identity, SESSION_RECORD,
                                     chapter_epoch, duration, fetched_at)
                                 session.event_count = math.max(0, tonumber(chapter.pagesRead) or 0)
+                                if comic then
+                                    -- page = endPage（读到哪一页，核心 reading_stats.page 的语义）；
+                                    -- total_pages 取**章（卷）级**的 totalPages，多卷系列汇总处取 MAX。
+                                    -- pagesRead = 0 是合法值（打开没翻页），不是缺数据，照落不误。
+                                    session.page = math.max(0, tonumber(chapter.endPage) or 0)
+                                    session.total_pages = math.max(0, tonumber(chapter.totalPages) or 0)
+                                end
                                 rows[#rows + 1] = session
                             end
                         end

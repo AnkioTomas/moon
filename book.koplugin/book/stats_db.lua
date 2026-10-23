@@ -7,8 +7,8 @@ sync_status=0 表示待上传，1 表示已与远端同步，2 表示从 KOReade
 身份即 BookIdentity(source_id + stable_id)，天然按源隔离。
 
 record_type：page / page_rollup 为本地采集；day / hour / total 为账户合成桶；book_total / book_day 为云端单书
-（stable_id 为真实书 id）；cloud_session 为云端单条阅读会话（只给「阅读记录」列表，不参与时长汇总）；
-book 为旧版周排行，已不再写入。
+（stable_id 为真实书 id）；cloud_session 为云端单条阅读会话（给「阅读记录」列表；页数（pagesRead）参与
+单书 / 按天页数汇总，时长不参与）；book 为旧版周排行，已不再写入。
 
 不变量：
   - 身份唯一索引必须含 record_type（v1 漏了会让压缩撞删 page）。
@@ -171,6 +171,10 @@ end
 --- at=0（旧版拉取未记时间）只认未上传，宁可少算也不双计。两个 ? 都绑 at。
 local FRESH_LOCAL = "(sync_status=0 OR (?>0 AND start_time>=?))"
 
+--- 同一条规则，但引用 `WITH f(at) AS (SELECT ?)` 里的列：一条语句里要用好几次时，
+--- 不必重复绑 ?（多绑一次就多一个容易错位的参数）。
+local FRESH_LOCAL_AT = "(sync_status=0 OR (f.at>0 AND start_time>=f.at))"
+
 --- 按天合并云端日桶与本地页记录：有云端日桶的日期 = 云端 + 拉取后本地新读的。
 --- 源配置 merge_local_stats 打开时每天取它与本地当天合计中较大的：补上云端没记到的离线阅读。
 --- 云端只有日合计、没有逐条记录，分不出哪段已上报，较大值是不双计的近似；extra 是比云端优先多出的秒数。
@@ -271,6 +275,15 @@ function StatsDB.add(row, status)
     if not start_time or not duration or duration <= 0 then
         return false
     end
+    local event_count
+    if row.record_type == SESSION_RECORD then
+        -- 云端会话的 event_count 就是 pagesRead，**0 是合法值**（打开没翻页的会话）。
+        -- 夹到 1 会让「已读页数 = 各会话 pagesRead 之和」每天凭空多一页。
+        event_count = math.max(0, tonumber(row.event_count) or 0)
+    else
+        -- 本地逐页 / 压缩行缺字段时按一页算，沿用旧口径。
+        event_count = math.max(1, tonumber(row.event_count) or 1)
+    end
     return DB.exec(
         [[INSERT INTO reading_stats (
             source_id, stable_id, record_type, page, start_time, duration, total_pages,
@@ -288,7 +301,7 @@ function StatsDB.add(row, status)
         tonumber(row.chapter_idx),
         tonumber(row.chapter_fraction),
         status or StatsDB.PENDING,
-        math.max(1, tonumber(row.event_count) or 1),
+        event_count,
         tonumber(row.last_time) or 0
     ) ~= nil
 end
@@ -484,6 +497,7 @@ end
 --- 汇总单本书阅读统计：总时长/已读页数/上次阅读时间（详情页用）。
 --- 有云端单书快照（book_total）时，总时长 = 快照 + 快照后读的 + 仍未上传的本地时长；
 --- 快照前已上传的本地时长已含在快照里，不能再加。没有快照时就是本地累计。
+--- 页数 = 云端会话的 event_count + 未被会话覆盖的本地页（见下方注释）。
 ---@param source_id string
 ---@param stable_id string
 ---@return { total_seconds: number, local_seconds: number, total_pages: number, pages: number, last_read: number, first_read: number }
@@ -494,14 +508,35 @@ function StatsDB.summaryByBook(source_id, stable_id)
         source_id,
         stable_id
     )
+    -- 页数不能只看本地：漫画的页数在云端会话上（cloud_session.event_count = pagesRead）。
+    -- 但本地页行上报成功后已经包含在当天那条会话里，直接相加会双计 —— 所以只对
+    -- 「当天真有云端会话」的本地页做去重（covered），其余本地页照常计入。
+    -- 这条覆盖判定不能省成「有会话就整本去重」：其他来源（微信 / moon / WebDAV）只回逐页行、
+    -- 根本没有会话行，一刀切套 FRESH_LOCAL 会让它们已同步的历史页数凭空归零。
     local local_seconds, fresh_seconds, pages, total_pages = DB.rowexec(
-        [[SELECT COALESCE(SUM(duration),0),
-                 COALESCE(SUM(CASE WHEN sync_status=0 OR start_time>=? THEN duration ELSE 0 END),0),
-                 COALESCE(SUM(event_count),0),
+        [[WITH f(at) AS (SELECT ?),
+                 covered(day) AS (
+                   SELECT DISTINCT date(start_time,'unixepoch','localtime')
+                   FROM reading_stats
+                   WHERE source_id=? AND stable_id=? AND record_type='cloud_session')
+          SELECT COALESCE(SUM(CASE WHEN record_type IN ('page','page_rollup')
+                                   THEN duration ELSE 0 END),0),
+                 COALESCE(SUM(CASE WHEN record_type IN ('page','page_rollup')
+                                    AND ]] .. FRESH_LOCAL_AT .. [[
+                                   THEN duration ELSE 0 END),0),
+                 COALESCE(SUM(CASE WHEN record_type='cloud_session' THEN event_count
+                                   WHEN record_type IN ('page','page_rollup')
+                                        AND (]] .. FRESH_LOCAL_AT .. [[
+                                             OR date(start_time,'unixepoch','localtime')
+                                                NOT IN (SELECT day FROM covered))
+                                   THEN event_count ELSE 0 END),0),
                  COALESCE(MAX(total_pages),0)
-          FROM reading_stats WHERE source_id=? AND stable_id=?
-            AND record_type IN ('page','page_rollup');]],
+          FROM reading_stats, f
+          WHERE source_id=? AND stable_id=?
+            AND record_type IN ('page','page_rollup','cloud_session');]],
         tonumber(fetched_at) or 0,
+        source_id,
+        stable_id,
         source_id,
         stable_id
     )
@@ -630,6 +665,8 @@ end
 --- 按（书，天）合并云端 book_day 与本地逐页记录，产出 CTE
 --- ``bd(source_id, stable_id, day, seconds, pages, max_page, max_total_pages)``：
 --- 某书某天有云端值 = 云端 + 这本书拉取后本地新读 / 未上传的；否则只有本地。
+--- 页数两侧合并：云端会话（cloud_session.event_count）按天计入，只叠 fresh 的本地页 ——
+--- 本地页上报后已含在当天的会话里。那天没有会话时本地页照旧全量计入（其他来源没有会话行）。
 ---@param source_id string|string[]
 ---@param filter string 追加到 WHERE 的片段，列名用 ``r.`` 前缀；作用于云端与本地两侧
 ---@param filter_args any[]
@@ -638,7 +675,7 @@ end
 local function bookDays(source_id, filter, filter_args)
     local src, src_args = DB.sourceClause("r.source_id", source_id)
     local args = {}
-    for _idx, list in ipairs({ src_args, filter_args, src_args, src_args, filter_args }) do
+    for _idx, list in ipairs({ src_args, filter_args, src_args, src_args, filter_args, src_args, filter_args }) do
         for _idx, v in ipairs(list) do args[#args + 1] = v end
     end
     return [[WITH cloud AS (
@@ -654,22 +691,36 @@ local function bookDays(source_id, filter, filter_args)
           SELECT r.source_id, r.stable_id, date(r.start_time,'unixepoch','localtime') AS day,
                  SUM(r.duration) AS seconds,
                  SUM(CASE WHEN r.sync_status=0 OR r.start_time>=f.at THEN r.duration ELSE 0 END) AS fresh,
-                 SUM(r.event_count) AS pages, MAX(r.page) AS max_page,
+                 SUM(r.event_count) AS pages,
+                 SUM(CASE WHEN r.sync_status=0 OR r.start_time>=f.at THEN r.event_count ELSE 0 END)
+                   AS fresh_pages,
+                 MAX(r.page) AS max_page,
                  MAX(r.total_pages) AS max_total_pages
           FROM reading_stats r LEFT JOIN fetched f
             ON f.source_id=r.source_id AND f.stable_id=r.stable_id
           WHERE ]] .. src .. [[ AND r.record_type IN ('page','page_rollup')]] .. filter .. [[
           GROUP BY 1, 2, 3),
+        cloud_pages AS (
+          SELECT r.source_id, r.stable_id, date(r.start_time,'unixepoch','localtime') AS day,
+                 SUM(r.event_count) AS pages
+          FROM reading_stats r
+          WHERE ]] .. src .. [[ AND r.record_type='cloud_session']] .. filter .. [[
+          GROUP BY 1, 2, 3),
         bd AS (
           SELECT l.source_id, l.stable_id, l.day,
                  CASE WHEN c.seconds IS NULL THEN l.seconds ELSE c.seconds + l.fresh END AS seconds,
-                 l.pages, l.max_page, l.max_total_pages
+                 CASE WHEN cp.pages IS NULL THEN l.pages ELSE l.fresh_pages + cp.pages END AS pages,
+                 l.max_page, l.max_total_pages
           FROM loc l LEFT JOIN cloud c
             ON c.source_id=l.source_id AND c.stable_id=l.stable_id AND c.day=l.day
+            LEFT JOIN cloud_pages cp
+            ON cp.source_id=l.source_id AND cp.stable_id=l.stable_id AND cp.day=l.day
           UNION ALL
-          SELECT c.source_id, c.stable_id, c.day, c.seconds, 0, 0, 0
+          SELECT c.source_id, c.stable_id, c.day, c.seconds, COALESCE(cp.pages,0), 0, 0
           FROM cloud c LEFT JOIN loc l
             ON l.source_id=c.source_id AND l.stable_id=c.stable_id AND l.day=c.day
+            LEFT JOIN cloud_pages cp
+            ON cp.source_id=c.source_id AND cp.stable_id=c.stable_id AND cp.day=c.day
           WHERE l.day IS NULL)
         ]], args
 end
@@ -834,7 +885,7 @@ end
 ---@param end_ts number
 ---@return { total_seconds: number, book_count: number, pages: number }
 function StatsDB.periodSummary(source_id, start_ts, end_ts)
-    -- 书数按（书，天）合并口径（含其他设备读过的书），页数只有本地记录；
+    -- 书数按（书，天）合并口径（含其他设备读过的书），页数按同一口径（云端会话 + 未被会话覆盖的本地页）；
     -- 总时长按天走账户日桶合并口径，与洞察日历保持一致。
     local cte, args = bookDays(source_id, " AND r.start_time>=? AND r.start_time<?",
         { tonumber(start_ts) or 0, tonumber(end_ts) or 0 })
