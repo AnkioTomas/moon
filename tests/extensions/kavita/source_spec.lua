@@ -667,7 +667,7 @@ do
     local ok_up, _err_up, data_up = run("pushNotesAsync", volume, anns)
     Assert.is_true(ok_up)
     Assert.eq(data_up.pushed, 1)
-    Assert.eq(data_up.adopted, 1)
+    Assert.eq(data_up.adopted, 0, "update 是写入，只算 pushed；adopted 只数「认到 id 但没写」")
     Assert.eq(data_up.conflicts, 0)
     Assert.len(updated, 1)
     Assert.eq(updated[1].id, 101)
@@ -723,7 +723,7 @@ do
     Assert.eq(claimed.kavita_id, 37, "同键多条取 id 最小")
     Assert.is_nil(claimed.kavita_note, "远端备注不当基线：本地 note 还是空的，等 pull 采纳")
     Assert.eq(data_claim.pushed, 0)
-    Assert.eq(data_claim.adopted, 0)
+    Assert.eq(data_claim.adopted, 1, "只认领 id、没写远端 → adopted")
     Assert.len(created, 0)
     Assert.len(updated, 0, "首次认领不覆盖远端非空备注")
 
@@ -863,14 +863,23 @@ do
     Assert.eq(data_gone.deleted, 1, "不在列表里 = 已经删掉")
     Assert.len(gone_tomb, 0)
 
-    -- create 回空体（反代吞了 DTO）：按 key 回查一次，命中才回填；仍是 200 不算成功。
+    -- create 回空体（反代吞了 DTO）：§8.3 的补偿只查**同一轮**对账列表（一批一次 GET），
+    -- 那份列表是创建前取的、里面没有刚建的这条 → 无法确认，该条失败留脏，不为它再补发一次 GET。
     resetPush()
     blank_create = true
     local lone = { drawer = "lighten", text = "春眠\n不觉晓", note = "n", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" }
-    local ok_blank, _err_blank, data_blank = run("pushNotesAsync", volume, { lone })
-    Assert.is_true(ok_blank)
-    Assert.eq(lone.kavita_id, 101, "回查按 key 命中，回填 id")
-    Assert.eq(data_blank.pushed, 1)
+    local ok_blank, err_blank = run("pushNotesAsync", volume, { lone })
+    Assert.is_nil(ok_blank, "无 id 的 2xx 不算成功")
+    Assert.not_nil(err_blank)
+    Assert.is_nil(lone.kavita_id, "没确认到 id 就不回填")
+    Assert.eq(list_calls, 1, "一批只对一次账：回空体不再补发 GET")
+    -- 下一轮对账就能看到服务端其实落了那条：按 key 认领，不重复建。
+    blank_create = false
+    created = {}
+    Assert.is_true(run("pushNotesAsync", volume, { lone }))
+    Assert.eq(lone.kavita_id, 101, "下轮对账按 key 认领，回填 id")
+    Assert.len(created, 0, "认到同键就不新建")
+    Assert.len(remote[2002], 1, "远端最终只有一条")
 
     -- 回查也找不到（服务端真没落库）→ 该条失败、整批 cb(nil) 留脏，绝不当成功。
     resetPush()
@@ -1162,6 +1171,32 @@ ann_calls = {}
 local again = run("pullNotesAsync", volume)
 Assert.eq(#ann_calls, 1, "owner 已缓存，不再请求 /Users/me")
 Assert.eq(flatten(again), flatten(pulled), "重复拉取 payload 稳定")
+
+-- 空文本的远端条目画不出来，但它的 id 必须进远端全量集合（spec §7 unlocated / §9.2）：
+-- 丢在 annotationPayload 里，mergeAnnotations 就看不到这个 id，会把本地带该 id 的那条当成
+-- 「远端已删」抹掉（反之远端还在，本地却消失）。
+routes["GET /api/Annotation/all"] = json({ {
+    id = 7, ownerUserId = 5, chapterId = 2002,
+    xPath = "//body/p[7]", endingXPath = "//body/p[7]",
+    selectedText = "   ", comment = "", selectedSlotIndex = 0,
+    createdUtc = "2026-10-03T05:00:00",
+} })
+local blank_pulled = run("pullNotesAsync", volume)
+Assert.eq(#blank_pulled, 1, "有 id 就保留占位（只有没 id 才真丢）")
+Assert.eq(tonumber(blank_pulled[1].kavita_id), 7)
+Assert.is_true(blank_pulled[1].kavita_unlocated, "空文本定位不出来：标记未定位")
+Assert.is_nil(blank_pulled[1].drawer, "未定位占位不画、不进列表")
+local local_seven = { datetime = "d7", page = "/body/p[7].0", pos0 = "/body/p[7].0",
+    pos1 = "/body/p[7].5", drawer = "lighten", text = "本地定位过", kavita_id = 7 }
+local merged_seven, dropped_seven = source:mergeAnnotations(blank_pulled, { local_seven }, nil, false)
+Assert.eq(dropped_seven, 0, "空文本的远端条目仍占 id：本地那条不算远端已删")
+Assert.eq(#merged_seven, 1, "远端不画，本地那份保留")
+Assert.eq(merged_seven[1], local_seven)
+-- 恢复后续用例用的三条 fixture。
+routes["GET /api/Annotation/all"] = function(opts)
+    ann_calls[#ann_calls + 1] = opts
+    return json(remote_anns)
+end
 
 -- 取不到当前用户（/api/Users/me 不可用）→ 不过滤 + 记日志，不能因此不落库。
 routes["GET /api/Users/me"] = { code = 404, body = "" }

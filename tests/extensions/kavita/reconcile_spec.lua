@@ -59,7 +59,7 @@ end
 
 -- 插件模块走 preload：不把插件根塞进 package.path（main.lua 会顶掉月读的 main）。
 local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
-for _idx, name in ipairs({ "client", "position", "source", "stats" }) do
+for _idx, name in ipairs({ "client", "position", "annotation", "source", "stats" }) do
     package.preload["moonsource_kavita." .. name] = function()
         return dofile(PLUGIN .. "/moonsource_kavita/" .. name .. ".lua")
     end
