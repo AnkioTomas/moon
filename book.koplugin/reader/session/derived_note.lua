@@ -315,7 +315,7 @@ function DerivedNote.collect(ui, identity)
         end
         local function finish()
             if changed or #pending > 0 then redraw(ui) end
-            require("reader.session.note").save(ui, identity, function(ok)
+            require("reader.session.note").save(ui, identity, nil, function(ok)
                 -- 逐条收线期间衍生版被重建（重新排版）：手里这份 sidecar 已过时，写回会盖掉新版的。
                 if not ok or lfs.attributes(file, "modification") ~= built then return end
                 settings:saveSetting(LINKED, linked)

@@ -166,7 +166,7 @@ end
 
 package.preload["reader.session.note"] = function()
     return {
-        save = function(ui, identity, cb, changed)
+        save = function(ui, identity, changed, cb)
             calls.notes = calls.notes or {}
             calls.notes[#calls.notes + 1] = { identity, ui, changed }
             if cb then cb(true) end
