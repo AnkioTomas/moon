@@ -116,15 +116,17 @@ end
 --- 幂等键（spec §8.2）：`<chapterId>\31<xPath>\31<endingXPath>\31<selectedText>`。
 --- `comment` 不进键（备注可改，进键会把「改备注」变成「新建」）；`selectedText` 用比较归一，
 --- 否则网页端/设备端的换行差异会让同一条划线认不出来（落库仍存原文）。
----@param ann { chapterId: integer|nil, xPath: string|nil, endingXPath: string|nil, selectedText: string|nil, text: string|nil }
+--- 字段名两套都要认：线上 DTO 用 `xPath` / `endingXPath` / `selectedText`，落库后的 payload
+--- （阅读器快照、远端去重的输入）用 `kavita_xpath` / `kavita_ending_xpath` / `text`。
+---@param ann { chapterId: integer|nil, xPath: string|nil, endingXPath: string|nil, selectedText: string|nil, kavita_xpath: string|nil, kavita_ending_xpath: string|nil, text: string|nil }
 ---@return string
 function Annotation.key(ann)
     local selected = ann.selectedText
     if selected == nil then selected = ann.text end
     return table.concat({
         tostring(ann.chapterId or ""),
-        tostring(ann.xPath or ""),
-        tostring(ann.endingXPath or ""),
+        tostring(ann.xPath or ann.kavita_xpath or ""),
+        tostring(ann.endingXPath or ann.kavita_ending_xpath or ""),
         comparisonText(selected),
     }, Annotation.KEY_SEP)
 end
