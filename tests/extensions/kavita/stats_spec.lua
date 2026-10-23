@@ -429,3 +429,60 @@ do
     }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [66] = 1 } })
     Assert.is_nil(find(zero.rows, "cloud_session", "66"), "打开没读的会话不落行")
 end
+
+do
+    -- 漫画（seriesFormat 0 Image / 1 Archive）的会话行补真实页坐标：page = endPage（读到哪）、
+    -- total_pages = chapter.totalPages（卷级，汇总处继续 MAX）；event_count 仍是 pagesRead。
+    -- pagesRead = 0 是合法值（打开没翻页的会话），不是缺数据。
+    local result = Stats.fromHistory({
+        { seriesId = 70, seriesFormat = 0, startTimeUtc = "2026-10-10T09:00:00.0000000", chapters = {
+            { chapterId = 1, durationSeconds = 300, pagesRead = 12, startPage = 3, endPage = 15,
+              totalPages = 194, startTimeUtc = "2026-10-10T09:00:00.0000000" },
+        } },
+        -- Archive 同样算漫画；同一系列两卷各自的卷级总页数不同，不能被条目级 totalPages 抹平。
+        { seriesId = 71, seriesFormat = 1, startTimeUtc = "2026-10-10T10:00:00.0000000", chapters = {
+            { chapterId = 2, durationSeconds = 60, pagesRead = 0, startPage = 1, endPage = 1,
+              totalPages = 40, startTimeUtc = "2026-10-10T10:00:00.0000000" },
+            { chapterId = 3, durationSeconds = 90, pagesRead = 7, startPage = 20, endPage = 30,
+              totalPages = 52, startTimeUtc = "2026-10-10T10:30:00.0000000" },
+        } },
+        -- epub 的 Chapter.Pages 是 spine 数、与渲染页无关：页坐标保持 0，不因带 endPage 就填。
+        { seriesId = 72, seriesFormat = 3, startTimeUtc = "2026-10-10T11:00:00.0000000", chapters = {
+            { chapterId = 4, durationSeconds = 600, pagesRead = 7, startPage = 15, endPage = 15,
+              totalPages = 22, startTimeUtc = "2026-10-10T11:00:00.0000000" },
+        } },
+    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [70] = 1, [71] = 1, [72] = 1 } })
+
+    local image = find(result.rows, "cloud_session", "70", hourTs(2026, 10, 10, 17))
+    Assert.not_nil(image, "Image 漫画的会话行")
+    Assert.eq(image.page, 15, "page = chapter.endPage")
+    Assert.eq(image.total_pages, 194, "total_pages = chapter.totalPages")
+    Assert.eq(image.event_count, 12, "event_count 仍是 pagesRead")
+
+    local archive_zero = find(result.rows, "cloud_session", "71", hourTs(2026, 10, 10, 18))
+    Assert.not_nil(archive_zero, "Archive 漫画的会话行")
+    Assert.eq(archive_zero.page, 1, "page = endPage（未翻页也合法）")
+    Assert.eq(archive_zero.total_pages, 40, "卷级总页数")
+    Assert.eq(archive_zero.event_count, 0, "pagesRead = 0 不被当缺数据")
+    local archive_more = find(result.rows, "cloud_session", "71", hourTs(2026, 10, 10, 18) + 30 * 60)
+    Assert.not_nil(archive_more, "同一条目里的第二卷")
+    Assert.eq(archive_more.page, 30)
+    Assert.eq(archive_more.total_pages, 52, "逐章取自己的卷级总页数")
+    Assert.eq(archive_more.event_count, 7)
+
+    local epub = find(result.rows, "cloud_session", "72", hourTs(2026, 10, 10, 19))
+    Assert.not_nil(epub, "epub 的会话行照旧落")
+    Assert.eq(epub.page, 0, "epub 不填 page")
+    Assert.eq(epub.total_pages, 0, "epub 不填 total_pages")
+    Assert.eq(epub.event_count, 7)
+
+    -- 页坐标只加在会话行上：日 / 单书桶维持「云端快照没有页坐标」的语义（汇总另算）。
+    local day = dayTs(2026, 10, 10)
+    for _idx, row in ipairs(result.rows) do
+        if row.record_type ~= "cloud_session" then
+            Assert.eq(row.page, 0, row.record_type .. " 行 page 仍为 0")
+            Assert.eq(row.total_pages, 0, row.record_type .. " 行 total_pages 仍为 0")
+        end
+    end
+    Assert.eq(find(result.rows, "book_day", "70", day).duration, 300)
+end

@@ -212,7 +212,9 @@ do
                     if sql:find("MAX(CASE WHEN record_type='page_rollup'", 1, true) then
                         return { 2000 }, { "m" }
                     end
-                    if sql:find("SUM(CASE WHEN sync_status=0", 1, true) then
+                    -- summaryByBook 的页数查询（18 号票起走 WITH f(at) + covered 的形态）：
+                    -- 本地累计 / fresh / 页数 / 总页数 四列。
+                    if sql:find("FROM reading_stats, f", 1, true) then
                         return { 3660, 0, 3, 20 }, { "s", "f", "c", "t" }
                     end
                     return nil

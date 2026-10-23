@@ -3,7 +3,8 @@ book.stats_db：云端阅读会话（cloud_session）的列表 / 去重 / 替换
 真实 sqlite 执行。
 
 规则：
-  - cloud_session 只服务详情「阅读记录」与统计页会话列表，不参与任何时长汇总；
+  - cloud_session 的时长只服务详情「阅读记录」与统计页会话列表，不参与任何时长汇总；
+    页数（event_count = pagesRead）参与单书 / 按天页数聚合（18 号票）；
   - 本机同一天已有逐页记录时，不再列云端会话（同一次阅读不重复列）；
   - 云端单书行按 replace.books 整本替换（含 cloud_session），旧会话不会残留。
 
@@ -87,9 +88,10 @@ Assert.eq(b_sessions[1].duration, 600)
 Assert.eq(b_sessions[1].pages, 12)
 
 -- 只有云端时长的书：pages=0 但时长 / 上次阅读都要有值（详情页不再显示「暂无阅读记录」）。
+-- 页数改由云端会话的 event_count 供给（18 号票）：B 那条会话读了 12 页。
 local summary = StatsDB.summaryByBook(SRC, "B")
 Assert.eq(summary.total_seconds, 600, "累计快照算总时长")
-Assert.eq(summary.pages, 0, "云端没有页坐标")
+Assert.eq(summary.pages, 12, "云端会话的 pagesRead 进已读页数")
 Assert.eq(summary.last_read, AT + 3600, "上次阅读取云端会话时刻")
 Assert.eq(summary.first_read, AT + 3600)
 
@@ -104,7 +106,8 @@ for _idx, item in ipairs({ { "S3:v1", 100 }, { "S3:v2", 50 } }) do
 end
 local books = StatsDB.summaryByBooks(SRC, { "S3:v1", "S3:v2" })
 Assert.eq(books.total_seconds, 150)
-Assert.eq(books.pages, 0, "云端会话的页数不进「已读页数」")
+Assert.eq(books.pages, 5 + 2, "各卷云端会话的 pagesRead 相加")
+Assert.eq(books.total_pages, 0, "多卷容器总页数沿用逐卷相加（会话没填 total_pages）")
 Assert.eq(books.last_read, AT + 3600)
 local days = StatsDB.dailyByBooks(SRC, { "S3:v1", "S3:v2" }, 30)
 Assert.eq(#days, 1, "同一天各卷相加")
