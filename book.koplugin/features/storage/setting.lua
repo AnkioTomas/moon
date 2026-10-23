@@ -140,7 +140,7 @@ local function sections(desktop)
     local Usage = require("features.storage.usage")
     measure(desktop)
     local cached = desktop.storage_usage
-    local disk = require("util").diskUsage(require("datastorage"):getDataDir())
+    local disk = require("features.storage").disk() or {}
     local device = {}
     if disk.total and disk.total > 0 then
         device[1] = barRow(disk)
