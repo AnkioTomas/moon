@@ -336,6 +336,24 @@ function Chapter.gotoChapter(session, idx, opts)
     return true
 end
 
+--- 重新下载当前章：删掉这一章的缓存文件，按同一章号重新打开，其它章不动。
+--- 断网时不删（删了就读不了），正在切章 / 取章时忽略。
+---@param session ReaderSessionSnapshot|nil
+---@return boolean started
+function Chapter.reloadChapter(session)
+    local chapter = session and session.chapter
+    local idx = session and session.identity.chapter_idx
+    if not chapter or not idx or chapter.request or chapter.target or chapter.switching then return false end
+    if not require("ui/network/manager"):isConnected() then
+        require("ui.themes.widgets.toast"):new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
+        return false
+    end
+    local identity = session.identity
+    os.remove(require("utils.paths").chapterPath(identity.stable_id, idx, identity.source_id))
+    requestChapter(chapter, idx, {})
+    return true
+end
+
 ---@param session ReaderSessionSnapshot|nil
 ---@param delta integer
 ---@return boolean

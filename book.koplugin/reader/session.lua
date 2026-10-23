@@ -391,4 +391,10 @@ function Session.gotoChapter(idx, opts)
     return ChapterMode.gotoChapter(Session._snapshot, idx, opts)
 end
 
+--- 重新下载当前章（只清本章缓存）；只有连续章节会话可用。
+---@return boolean started
+function Session.reloadChapter()
+    return ChapterMode.reloadChapter(Session._snapshot)
+end
+
 return Session
