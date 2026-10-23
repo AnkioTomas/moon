@@ -1202,7 +1202,11 @@ end
 
 --- 快照里要原样带住的 Kavita 私有字段（spec §3.1）。`Normalize.clean` 是白名单，
 --- 漏一个 = 该字段静默消失（比如 `kavita_comment` 丢了，下次 update 会把网页富文本清空）。
+--- `pageNumber` 不是 `kavita_` 前缀，但同样是 Kavita 私有字段：它是开书定位时的 spine 提示
+--- （`locateAnnotation` 读 `annotation.pageNumber`），丢了这个字段的多 spine epub 只能试第 1/2 个
+--- DocFragment，第 3 个之后全部定位失败。update 时服务端忽略它，推送仍用现算的 `anchor.pageNumber`。
 local KAVITA_FIELDS = {
+    "pageNumber",
     "kavita_id", "kavita_note", "kavita_comment", "kavita_comment_html",
     "kavita_slot", "kavita_spoiler", "kavita_modified",
     "kavita_xpath", "kavita_ending_xpath",
@@ -1870,6 +1874,8 @@ end
 
 --- Kavita AnnotationDto → notes payload 条目（spec §3.1 / §3.2）。
 --- 只落数据，不算坐标：`page` / `pos0` / `pos1` 是开书时 localizeAnnotations 的产物（05 §3）。
+--- `pageNumber` 只落成本地定位提示（0-based spine）：`locateAnnotation` 用它挑 DocFragment，
+--- update 时 Kavita 服务端忽略这个字段，推送坐标仍用现算的 `anchor.pageNumber`。
 ---@param dto table
 ---@return table|nil
 local function annotationPayload(dto)
@@ -1892,6 +1898,7 @@ local function annotationPayload(dto)
         color = slotColor(dto.selectedSlotIndex),
         text = text,
         note = note,
+        pageNumber = tonumber(dto.pageNumber) or 0,
         kavita_id = dto.id,
         kavita_note = note,
         kavita_comment = dto.comment,
@@ -1926,6 +1933,8 @@ end
 
 --- 开书时全量拉取云端 epub 注解（spec §3.4）：只落数据、不定位，坐标留给开书时的文档。
 --- 每章一次 `GET /api/Annotation/all`（单文件 epub 即一本书一个 chapter），与推送各发一次、不做缓存。
+--- `pageNumber` 是 localizeAnnotations 的 spine 提示，不是坐标：update 时服务端忽略它，
+--- 推送仍用现算的 `anchor.pageNumber`（spec §8.4）。
 --- `authoritative` 恒 false：远端为空不代表本地该清空，删除语义不归这里。
 --- 失败回 `cb(nil, err)`，notes 表快照原样（离线开书只记日志）。
 ---@param identity BookIdentity
