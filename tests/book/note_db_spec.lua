@@ -106,5 +106,18 @@ Assert.eq(sqls[1].args[1], -2)
 Assert.eq(sqls[1].args[4], 1)
 Assert.matches(sqls[2].sql, "^DELETE FROM notes .-chapter_idx>0")
 Assert.matches(sqls[3].sql, "chapter_idx=%-chapter_idx .-chapter_idx<0")
+-- updatePayload：stale 回填只写 payload —— 脏标记与修订号都不能动，否则吃掉上传期间的新内容。
+calls = {}
+Assert.is_true(NoteDB.updatePayload("moon", "book'1", 3, "[snapshot]"))
+q = calls[#calls]
+Assert.matches(q.sql, "^UPDATE notes SET payload=%?")
+Assert.is_false(q.sql:find("sync_status", 1, true) ~= nil, "不碰脏标记")
+Assert.is_false(q.sql:find("updated_at", 1, true) ~= nil, "不碰修订号")
+Assert.eq(q.args[1], "[snapshot]")
+Assert.eq(q.args[2], "moon")
+Assert.eq(q.args[3], "book'1")
+Assert.eq(q.args[4], 3)
+Assert.eq(q.argc, 4)
+Assert.is_false(q.sql:find("book'1", 1, true) ~= nil, "身份参数化")
 Base.close()
 clearMods()

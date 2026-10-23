@@ -87,8 +87,9 @@ end
 --- 保存当前文档的完整注解快照。写入完成前不发网络请求。
 ---@param ui table
 ---@param identity BookIdentity 当前 ReaderSession 身份
+---@param changed table|nil KOReader 的 AnnotationsModified 描述（可选，恒为倒数第二个参数）
 ---@param done fun(ok: boolean, updated_at: number|nil)|nil
-function SessionNote.save(ui, identity, done)
+function SessionNote.save(ui, identity, changed, done)
     if not ui or not ui.doc_settings then
         if done then done(false) end
         return
@@ -119,10 +120,15 @@ function SessionNote.save(ui, identity, done)
     local current = NoteDB.get(source_id, stable_id, chapter_idx)
     local source = identity.source
     local clean = Note.clean(source, items, total_pages)
+    -- 删除判据：KOReader 唯一的删除通道把被删条目放在 items[1]、index_modified 取负。
+    -- 不能只看 nb_highlights_added < 0：划线转笔记、只删备注时它也是负的，但条目还在。
+    local deleted
+    local modified = type(changed) == "table" and tonumber(changed.index_modified)
+    if modified and modified < 0 then deleted = changed[1] end
     if current then
         local previous = Normalize.decode(current.payload)
         if previous and source and type(source.prepareLocalAnnotations) == "function" then
-            source:prepareLocalAnnotations(previous, clean)
+            source:prepareLocalAnnotations(previous, clean, deleted)
         end
     end
     local ok, payload = pcall(require("json").encode, clean)
@@ -160,9 +166,12 @@ local function applySnapshot(ui, identity)
     if not annotations then
         return 0
     end
-    -- 注解形态跟文档走：ReaderUI 只会挂 rolling 或 paging 其中之一
+    -- 注解形态跟文档走：ReaderUI 只会挂 rolling 或 paging 其中之一。
+    -- dropped = 源主动判定为「远端已删」的条数；deduped = 远端同键重复被抑制（不画）的条数。
+    -- 两者都是「合并后条数变少」的正当原因（老源不返回第二 / 第三值 ⇒ nil）。
+    local dropped, deduped
     if source and type(source.mergeAnnotations) == "function" then
-        annotations = source:mergeAnnotations(
+        annotations, dropped, deduped = source:mergeAnnotations(
             annotations, current, ui.paging ~= nil, authoritative
         )
     else
@@ -171,9 +180,11 @@ local function applySnapshot(ui, identity)
     -- 合并结果条数少于阅读器现有条数，说明本地有条目被判成不可渲染而被丢弃。
     -- 这里是整体覆盖 doc_settings，写下去就是永久删除用户划线：宁可这次不显示
     -- 云端划线，也不能删本地的。（分页文档的 page 是数字，曾经被误判过一次。）
-    if #annotations < #current and not authoritative then
+    -- dropped / deduped 是源给出的明确解释，要算回来，否则合法删除永远被这道保险挡住：
+    -- 第一次修正远端重复时 doc_settings 旧有 5 条、合并后 4 条 + deduped 1，不算下来就永远修不掉。
+    if #annotations + (dropped or 0) + (deduped or 0) < #current and not authoritative then
         logger.warn("book.note apply skip: merge would drop local annotations",
-            identity.stable_id, #current, #annotations)
+            identity.stable_id, #current, #annotations, dropped or 0, deduped or 0)
         return 0
     end
     if #annotations == 0 and #current == 0 then
@@ -253,7 +264,7 @@ function SessionNote.pull(ui, identity)
     local existing = NoteDB.get(identity.source_id, identity.stable_id, identity.chapter_idx)
     local current = ui.doc_settings:readSetting("annotations") or {}
     if existing or #current > 0 then
-        SessionNote.save(ui, identity, function(saved)
+        SessionNote.save(ui, identity, nil, function(saved)
             if saved then syncAndApply() end
         end)
     else

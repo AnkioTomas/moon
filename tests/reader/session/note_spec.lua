@@ -75,7 +75,7 @@ meta:close()
 derived_file = dir .. "/book.epub"
 ui.document.file = derived_file
 local saved
-SessionNote.save(ui, identity, function(ok) saved = ok end)
+SessionNote.save(ui, identity, nil, function(ok) saved = ok end)
 Assert.is_true(saved)
 Assert.len(writes, 1, "衍生版不写库")
 os.remove(dir .. "/meta.json")

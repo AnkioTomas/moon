@@ -429,3 +429,233 @@ do
     }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [66] = 1 } })
     Assert.is_nil(find(zero.rows, "cloud_session", "66"), "打开没读的会话不落行")
 end
+
+do
+    -- 漫画（seriesFormat 0 Image / 1 Archive）的会话行补真实页坐标：page = endPage（读到哪）、
+    -- total_pages = chapter.totalPages（卷级，汇总处继续 MAX）；event_count 是**本次新推进的页数**
+    -- （不是 pagesRead —— 重读会重复计入，见下方进度用例）。pagesRead = 0 是合法值，不是缺数据。
+    local result = Stats.fromHistory({
+        { seriesId = 70, seriesFormat = 0, startTimeUtc = "2026-10-10T09:00:00.0000000", chapters = {
+            { chapterId = 1, durationSeconds = 300, pagesRead = 12, startPage = 3, endPage = 15,
+              totalPages = 194, startTimeUtc = "2026-10-10T09:00:00.0000000" },
+        } },
+        -- Archive 同样算漫画；同一系列两卷各自的卷级总页数不同，不能被条目级 totalPages 抹平。
+        { seriesId = 71, seriesFormat = 1, startTimeUtc = "2026-10-10T10:00:00.0000000", chapters = {
+            { chapterId = 2, durationSeconds = 60, pagesRead = 0, startPage = 1, endPage = 1,
+              totalPages = 40, startTimeUtc = "2026-10-10T10:00:00.0000000" },
+            { chapterId = 3, durationSeconds = 90, pagesRead = 7, startPage = 20, endPage = 30,
+              totalPages = 52, startTimeUtc = "2026-10-10T10:30:00.0000000" },
+        } },
+        -- epub 的 Chapter.Pages 是 spine 数、与渲染页无关：页坐标保持 0，不因带 endPage 就填。
+        { seriesId = 72, seriesFormat = 3, startTimeUtc = "2026-10-10T11:00:00.0000000", chapters = {
+            { chapterId = 4, durationSeconds = 600, pagesRead = 7, startPage = 15, endPage = 15,
+              totalPages = 22, startTimeUtc = "2026-10-10T11:00:00.0000000" },
+        } },
+    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [70] = 1, [71] = 1, [72] = 1 } })
+
+    local image = find(result.rows, "cloud_session", "70", hourTs(2026, 10, 10, 17))
+    Assert.not_nil(image, "Image 漫画的会话行")
+    Assert.eq(image.page, 15, "page = chapter.endPage")
+    Assert.eq(image.total_pages, 194, "total_pages = chapter.totalPages")
+    Assert.eq(image.event_count, 15, "event_count = 本次新推进的页数（0 → 15）")
+
+    local archive_zero = find(result.rows, "cloud_session", "71", hourTs(2026, 10, 10, 18))
+    Assert.not_nil(archive_zero, "Archive 漫画的会话行")
+    Assert.eq(archive_zero.page, 1, "page = endPage（未翻页也合法）")
+    Assert.eq(archive_zero.total_pages, 40, "卷级总页数")
+    Assert.eq(archive_zero.event_count, 1, "推进到第 1 页即 1 页，与 pagesRead = 0 无关")
+    local archive_more = find(result.rows, "cloud_session", "71", hourTs(2026, 10, 10, 18) + 30 * 60)
+    Assert.not_nil(archive_more, "同一条目里的第二卷")
+    Assert.eq(archive_more.page, 30)
+    Assert.eq(archive_more.total_pages, 52, "逐章取自己的卷级总页数")
+    Assert.eq(archive_more.event_count, 29, "1 → 30 只推进 29 页（不是 pagesRead 7）")
+
+    local epub = find(result.rows, "cloud_session", "72", hourTs(2026, 10, 10, 19))
+    Assert.not_nil(epub, "epub 的会话行照旧落")
+    Assert.eq(epub.page, 0, "epub 不填 page")
+    Assert.eq(epub.total_pages, 0, "epub 不填 total_pages")
+    Assert.eq(epub.event_count, 7, "epub 仍用 pagesRead")
+
+    -- 页坐标只加在会话行上：日 / 单书桶维持「云端快照没有页坐标」的语义（汇总另算）。
+    local day = dayTs(2026, 10, 10)
+    for _idx, row in ipairs(result.rows) do
+        if row.record_type ~= "cloud_session" then
+            Assert.eq(row.page, 0, row.record_type .. " 行 page 仍为 0")
+            Assert.eq(row.total_pages, 0, row.record_type .. " 行 total_pages 仍为 0")
+        end
+    end
+    -- 当天页数 = 15（70）+ 1（71 卷 2）+ 29（71 卷 3）+ 7（epub 仍是 pagesRead）
+    Assert.eq(find(result.rows, "day", "__kv:day:" .. day, day).event_count, 52)
+    Assert.eq(find(result.rows, "book_day", "70", day).duration, 300)
+end
+
+do
+    -- 漫画的已读页数按「最远进度」算，不按页次累加：pagesRead 是「这次翻了多少页」，
+    -- 重读会重复计入（实测 194 页的卷 6 条会话 pagesRead 合计 284，已读页数超过了总页数）。
+    -- 样本：大剑 Vol.10，总 194 页；依次读到 3 → 91 → 42（重读）→ 94 → 126 → 194。
+    local sessions = {
+        { end_page = 3,   pages_read = 3 },
+        { end_page = 91,  pages_read = 87 },
+        { end_page = 42,  pages_read = 42 },
+        { end_page = 94,  pages_read = 48 },
+        { end_page = 126, pages_read = 34 },
+        { end_page = 194, pages_read = 70 },
+    }
+    local expected = { 3, 88, 0, 3, 32, 68 } -- 每次都只是「比此前更远」的那一段；合计 194
+
+    local function history()
+        local entries = {}
+        for i, s in ipairs(sessions) do
+            -- UTC 01..06 点 → 本地（CST-8）09..14 点，同一本地的天。
+            local utc = string.format("2026-10-10T%02d:00:00", i)
+            entries[#entries + 1] = { seriesId = 100, seriesFormat = 0, startTimeUtc = utc, chapters = {
+                { chapterId = 1, durationSeconds = 60, pagesRead = s.pages_read, startPage = 0,
+                  endPage = s.end_page, totalPages = 194, startTimeUtc = utc } } }
+        end
+        return entries
+    end
+
+    local day = dayTs(2026, 10, 10)
+    local function check(entries, label)
+        local result = Stats.fromHistory(entries,
+            { source_id = "ext.kavita", fetched_at = 2000, volumes = { [100] = 1 } })
+        local sum = 0
+        local session_rows = 0
+        for _idx, row in ipairs(result.rows) do
+            if row.record_type == "cloud_session" and row.stable_id == "100" then
+                session_rows = session_rows + 1
+            end
+        end
+        Assert.eq(session_rows, #sessions, label .. "：每条有时长的会话各落一行，不多不少")
+        for i, want in ipairs(expected) do
+            local row = find(result.rows, "cloud_session", "100", hourTs(2026, 10, 10, 8 + i))
+            Assert.not_nil(row, label .. "：第 " .. i .. " 条会话行")
+            Assert.eq(row.event_count, want, label .. "：第 " .. i .. " 条只算新推进的页数")
+            -- 重读（第 3 条 endPage 42 < 已到达 91）页数为 0，但 page 仍如实记 42。
+            Assert.eq(row.page, sessions[i].end_page, label .. "：第 " .. i .. " 条 page 仍记 endPage")
+            Assert.eq(row.total_pages, 194, label .. "：第 " .. i .. " 条卷级总页数")
+            sum = sum + row.event_count
+        end
+        Assert.eq(sum, 194, label .. "：合计 = 读到的最远页码 = 总页数")
+        Assert.eq(find(result.rows, "day", "__kv:day:" .. day, day).event_count, 194,
+            label .. "：当天页数也是进度而不是页次")
+    end
+
+    check(history(), "正序")
+    -- 回包可能是新→旧：按章起始时刻排序，结果不受遍历顺序影响。
+    local reversed = {}
+    local forward = history()
+    for i = #forward, 1, -1 do reversed[#reversed + 1] = forward[i] end
+    check(reversed, "倒序")
+end
+
+do
+    -- durationSeconds = 0 的跳页（只有 pagesRead / endPage、没有阅读时间）不发行 —— 会话行说的是
+    -- 「读了多久」；但它要参与进度序列与当天页数，否则这段跳读会从当天页面消失、
+    -- 而后续会话又因为 reached 更高而少算，合计就对不上读到的最远页码。
+    local d = dayTs(2026, 10, 11)
+    local result = Stats.fromHistory({
+        { seriesId = 101, seriesFormat = 0, startTimeUtc = "2026-10-11T02:00:00", chapters = {
+            { chapterId = 1, durationSeconds = 0, pagesRead = 20, startPage = 5, endPage = 60,
+              totalPages = 100, startTimeUtc = "2026-10-11T02:00:00" } } },
+        { seriesId = 101, seriesFormat = 0, startTimeUtc = "2026-10-11T03:00:00", chapters = {
+            { chapterId = 1, durationSeconds = 120, pagesRead = 5, startPage = 60, endPage = 70,
+              totalPages = 100, startTimeUtc = "2026-10-11T03:00:00" } } },
+    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [101] = 1 } })
+
+    Assert.is_nil(find(result.rows, "cloud_session", "101", hourTs(2026, 10, 11, 10)),
+        "零时长章行不发行会话行")
+    local read = find(result.rows, "cloud_session", "101", hourTs(2026, 10, 11, 11))
+    Assert.not_nil(read)
+    Assert.eq(read.event_count, 10, "跳读已把进度推到 60，本次只推进 10 页")
+    Assert.eq(read.page, 70)
+    Assert.eq(find(result.rows, "day", "__kv:day:" .. d, d).event_count, 70,
+        "当天页数 = 最远页码（含零时长跳读推进的 60）")
+
+    -- 登记身份用于清孤儿行：零时长条目照旧算见过（它上次可能留下过行）。
+    Assert.contains(result.identities, "101")
+end
+
+do
+    -- endPage 超过总页数（不同版本页数不一致）时钳到总页数：已读页数不可能超过总页数。
+    local d = dayTs(2026, 10, 12)
+    local result = Stats.fromHistory({
+        { seriesId = 102, seriesFormat = 1, startTimeUtc = "2026-10-12T02:00:00", chapters = {
+            { chapterId = 1, durationSeconds = 60, pagesRead = 40, startPage = 0, endPage = 250,
+              totalPages = 194, startTimeUtc = "2026-10-12T02:00:00" } } },
+    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [102] = 1 } })
+    local row = find(result.rows, "cloud_session", "102", hourTs(2026, 10, 12, 10))
+    Assert.not_nil(row)
+    Assert.eq(row.event_count, 194, "推进钳到总页数")
+    Assert.eq(row.total_pages, 194)
+    Assert.eq(find(result.rows, "day", "__kv:day:" .. d, d).event_count, 194, "当天页数也被钳")
+
+    -- 拿不到总页数（totalPages = 0 / 缺字段）时不假设上界：按 endPage 原样算。
+    local unknown = Stats.fromHistory({
+        { seriesId = 103, seriesFormat = 0, startTimeUtc = "2026-10-12T05:00:00", chapters = {
+            { chapterId = 1, durationSeconds = 60, pagesRead = 9, endPage = 77,
+              startTimeUtc = "2026-10-12T05:00:00" } } },
+    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [103] = 1 } })
+    local no_total = find(unknown.rows, "cloud_session", "103", hourTs(2026, 10, 12, 13))
+    Assert.not_nil(no_total)
+    Assert.eq(no_total.event_count, 77, "缺总页数就照 endPage 算")
+    Assert.eq(no_total.total_pages, 0)
+end
+
+do
+    -- 多卷：每卷（stable_id = seriesId:chapterId）各自从 0 起算进度，互不影响；
+    -- 合计 = 各卷进度之和（≤ 各卷总页数之和）。
+    local d = dayTs(2026, 10, 13)
+    local result = Stats.fromHistory({
+        { seriesId = 80, seriesFormat = 0, startTimeUtc = "2026-10-13T02:00:00", chapters = {
+            { chapterId = 1, durationSeconds = 60, pagesRead = 10, endPage = 10, totalPages = 40,
+              startTimeUtc = "2026-10-13T02:00:00" } } },
+        { seriesId = 80, seriesFormat = 0, startTimeUtc = "2026-10-13T03:00:00", chapters = {
+            { chapterId = 1, durationSeconds = 60, pagesRead = 20, endPage = 30, totalPages = 40,
+              startTimeUtc = "2026-10-13T03:00:00" } } },
+        { seriesId = 80, seriesFormat = 0, startTimeUtc = "2026-10-13T04:00:00", chapters = {
+            { chapterId = 2, durationSeconds = 60, pagesRead = 5, endPage = 5, totalPages = 60,
+              startTimeUtc = "2026-10-13T04:00:00" } } },
+        { seriesId = 80, seriesFormat = 0, startTimeUtc = "2026-10-13T05:00:00", chapters = {
+            { chapterId = 2, durationSeconds = 60, pagesRead = 45, endPage = 50, totalPages = 60,
+              startTimeUtc = "2026-10-13T05:00:00" } } },
+    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [80] = 2 } })
+
+    Assert.eq(find(result.rows, "cloud_session", "80:1", hourTs(2026, 10, 13, 10)).event_count, 10)
+    Assert.eq(find(result.rows, "cloud_session", "80:1", hourTs(2026, 10, 13, 11)).event_count, 20)
+    Assert.eq(find(result.rows, "cloud_session", "80:2", hourTs(2026, 10, 13, 12)).event_count, 5)
+    Assert.eq(find(result.rows, "cloud_session", "80:2", hourTs(2026, 10, 13, 13)).event_count, 45)
+    Assert.eq(find(result.rows, "day", "__kv:day:" .. d, d).event_count, 80, "10 + 20 + 5 + 45")
+    Assert.eq(find(result.rows, "cloud_session", "80:1", hourTs(2026, 10, 13, 10)).total_pages, 40)
+    Assert.eq(find(result.rows, "cloud_session", "80:2", hourTs(2026, 10, 13, 13)).total_pages, 60)
+end
+
+do
+    -- epub / PDF 不受进度口径影响：pagesRead 照旧累加（重读同一页也算，这是「翻页数」语义），
+    -- 页坐标仍为 0。
+    local d = dayTs(2026, 10, 14)
+    local result = Stats.fromHistory({
+        { seriesId = 202, seriesFormat = 3, startTimeUtc = "2026-10-14T02:00:00", chapters = {
+            { chapterId = 1, durationSeconds = 60, pagesRead = 7, startPage = 15, endPage = 15,
+              totalPages = 22, startTimeUtc = "2026-10-14T02:00:00" } } },
+        { seriesId = 202, seriesFormat = 3, startTimeUtc = "2026-10-14T03:00:00", chapters = {
+            { chapterId = 1, durationSeconds = 60, pagesRead = 7, startPage = 15, endPage = 15,
+              totalPages = 22, startTimeUtc = "2026-10-14T03:00:00" } } },
+        -- PDF（4）同样不是渲染页，口径与 epub 一致。
+        { seriesId = 203, seriesFormat = 4, startTimeUtc = "2026-10-14T04:00:00", chapters = {
+            { chapterId = 1, durationSeconds = 60, pagesRead = 4, endPage = 99,
+              totalPages = 120, startTimeUtc = "2026-10-14T04:00:00" } } },
+    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [202] = 1, [203] = 1 } })
+
+    local first = find(result.rows, "cloud_session", "202", hourTs(2026, 10, 14, 10))
+    local again = find(result.rows, "cloud_session", "202", hourTs(2026, 10, 14, 11))
+    Assert.eq(first.event_count, 7, "epub 仍是 pagesRead")
+    Assert.eq(again.event_count, 7, "epub 重读不折成 0（不是进度口径）")
+    Assert.eq(first.page, 0)
+    Assert.eq(first.total_pages, 0)
+    local pdf = find(result.rows, "cloud_session", "203", hourTs(2026, 10, 14, 12))
+    Assert.eq(pdf.event_count, 4, "PDF 仍是 pagesRead")
+    Assert.eq(pdf.page, 0)
+    Assert.eq(pdf.total_pages, 0)
+    Assert.eq(find(result.rows, "day", "__kv:day:" .. d, d).event_count, 18, "7 + 7 + 4")
+end

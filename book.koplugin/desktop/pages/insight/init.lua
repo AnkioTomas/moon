@@ -114,7 +114,7 @@ local PAGE_MODULES = {
 
 --- 跳到指定页面（日历点日期回今日页）；该页被隐藏就留在原地。
 ---@param id string 页面 id，见 layout.lua
-function Insight:goto(id)
+function Insight:goTo(id)
     for i, page in ipairs(Layout.pages()) do
         if page.id == id then
             self.ui_page = i
