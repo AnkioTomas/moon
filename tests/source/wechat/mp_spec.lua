@@ -9,6 +9,11 @@ local pages, urls = {}, {}
 local localized = {}
 local renewals = 0
 package.loaded["source.wechat.auth"] = {
+    sessionHeaders = function(extra)
+        local h = { Cookie = "wr_vid=1; wr_skey=2" }
+        if extra then for k, v in pairs(extra) do h[k] = v end end
+        return h
+    end,
     webPostAsync = function(url, _body, _opts, cb)
         renewals = renewals + 1
         Assert.matches(url, "/web/login/renewal")
@@ -21,6 +26,47 @@ package.loaded["source.wechat.auth"] = {
         return { cancel = function() end }
     end,
 }
+-- 正文改走 Request.stream：按 reviewId 吐 pages，超大页边吐边让调用方断开。
+local stream_override = nil
+package.loaded["http.request"] = {
+    stream = function(opts, h)
+        if stream_override then return stream_override(opts, h) end
+        local job = { stopped = false }
+        function job:cancel() self.stopped = true end
+        urls[#urls + 1] = opts.url
+        local key = opts.url:match("reviewId=(.*)$") or "list"
+        local body = pages[key]
+        if body == nil then
+            h.on_headers(404, {})
+            h.on_done("HTTP 404")
+            return job
+        end
+        h.on_headers(200, {})
+        local CHUNK = 256 * 1024
+        for i = 1, #body, CHUNK do
+            if job.stopped then break end
+            h.on_data(body:sub(i, i + CHUNK - 1))
+        end
+        h.on_done(job.stopped and "cancelled" or nil)
+        return job
+    end,
+    header = function(res, name)
+        local headers = res and res.headers
+        if not headers then return nil end
+        if type(headers.get) == "function" then return headers:get(name, true) end
+        local lower = name:lower()
+        for k, v in pairs(headers) do
+            if type(k) == "string" and k:lower() == lower then return v end
+        end
+    end,
+}
+package.loaded["http.timeout"] = { net = function() return 1 end }
+package.loaded["http.request.header"] = { forRequest = function(e) return e or {} end, merge = function(a, b)
+    local o = {}
+    for k, v in pairs(b or {}) do o[k] = v end
+    for k, v in pairs(a or {}) do o[k] = v end
+    return o
+end }
 package.loaded["source.wechat.assets"] = {
     localizeArticleAsync = function(dir, html, cb)
         localized[#localized + 1] = dir
@@ -163,12 +209,15 @@ Assert.eq(got, nil)
 -- 「验证」反爬页：重拉，最多 VERIFY_TRIES 次；一直是验证页给专门的提示。
 local verify_page = "<html><head><title>验证</title></head><body>x</body></html>"
 local seq = { verify_page, html }
-local real = package.loaded["source.wechat.auth"].webGetAsync
 local calls = 0
-package.loaded["source.wechat.auth"].webGetAsync = function(_url, _o, cb2)
+stream_override = function(_opts, h)
     calls = calls + 1
-    cb2(seq[calls] or verify_page)
-    return { cancel = function() end }
+    local body = seq[calls] or verify_page
+    local job = { cancel = function() end }
+    h.on_headers(200, {})
+    h.on_data(body)
+    h.on_done(nil)
+    return job
 end
 local delays = {}
 Mp.later = function(sec, fn) delays[#delays + 1] = sec; fn() end
@@ -178,7 +227,7 @@ Assert.eq(calls, 2); Assert.matches(got, "正文"); Assert.eq(delays[1], 2, "退
 calls, seq = 0, {}
 Mp.fetchContentAsync("v", nil, function(p, e) got, err = p, e end)
 Assert.eq(calls, Mp.VERIFY_TRIES); Assert.eq(got, nil); Assert.matches(err, "验证")
-package.loaded["source.wechat.auth"].webGetAsync = real
+stream_override = nil
 
 -- 回 -2041：续期拿到 ticket / wrpa 头后带头重试；之后的请求直接带头。
 do

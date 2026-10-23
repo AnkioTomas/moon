@@ -166,24 +166,47 @@ local MAX_ARTICLE_IMAGE = 2 * 1024 * 1024
 ---@param cb fun(data: string|nil)
 ---@return table|nil
 local function downloadArticleImageAsync(url, cb)
-    return require("http.request").request({
+    local Request = require("http.request")
+    local chunks, size, too_big, code = {}, 0, false, nil
+    local function abort()
+        too_big, chunks = true, {}
+    end
+    local job
+    job = Request.stream({
         url = url,
-        method = "GET",
         headers = {
             ["Accept"] = "image/jpeg,image/png,image/gif,image/*;q=0.8",
             ["Referer"] = "https://mp.weixin.qq.com/",
         },
         timeout = require("http.timeout").net(3),
         allow_redirects = true,
-    }, function(res, err)
-        local body = res and res.code == 200 and res.body
-        if not body or body == "" or #body > MAX_ARTICLE_IMAGE then
-            logger.dbg("wechat mp image skipped", url, err or (res and res.code), body and #body)
-            cb(nil)
-            return
-        end
-        cb(body)
-    end)
+    }, {
+        on_headers = function(status, headers)
+            code = tonumber(status)
+            local len = tonumber((Request.header({ headers = headers }, "Content-Length")))
+            if len and len > MAX_ARTICLE_IMAGE then abort(); if job and job.cancel then job:cancel() end end
+        end,
+        on_data = function(chunk)
+            if too_big then return end
+            size = size + #chunk
+            if size > MAX_ARTICLE_IMAGE then
+                abort()
+                if job and job.cancel then job:cancel() end
+                return
+            end
+            chunks[#chunks + 1] = chunk
+        end,
+        on_done = function(err)
+            if too_big or not code or code ~= 200 then
+                logger.dbg("wechat mp image skipped", url, err or code, size)
+                cb(nil)
+                return
+            end
+            local body = table.concat(chunks)
+            cb(body ~= "" and body or nil)
+        end,
+    })
+    return job
 end
 
 --- 公众号文章正文里的远程图逐张落到 images_dir（打开该篇时才下），改写成相对路径。

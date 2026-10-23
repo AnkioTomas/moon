@@ -324,6 +324,65 @@ function Mp.later(sec, fn)
     require("ui/uimanager"):scheduleIn(sec, fn)
 end
 
+--- 流式拉公众号文章页：边收边数，超过 MAX_HTML 立刻断开（不先整页下完再判断）。
+---@param url string
+---@param cb fun(raw: string|nil, err: any)
+---@return { cancel: fun() }
+local function mpStreamGet(url, cb)
+    local Auth = require("source.wechat.auth")
+    local cancelled, inner, renewed = false, nil, false
+    local function go()
+        local headers = Auth.sessionHeaders({
+            ["Accept"] = "text/html,application/xhtml+xml,*/*",
+            ["Referer"] = WEB .. "/",
+        })
+        for k, v in pairs(mp_headers) do headers[k] = v end
+        local chunks, size, too_big = {}, 0, false
+        local function abort()
+            too_big, chunks = true, {}
+            if inner and inner.cancel then inner:cancel() end
+        end
+        inner = Request.stream({
+            url = url,
+            headers = headers,
+            timeout = require("http.timeout").net(3),
+        }, {
+            on_headers = function(code, hdrs)
+                local len = tonumber((Request.header({ headers = hdrs }, "Content-Length")))
+                if len and len > MAX_HTML and tonumber(code) and tonumber(code) < 300 then abort() end
+            end,
+            on_data = function(chunk)
+                if too_big then return end
+                size = size + #chunk
+                if size > MAX_HTML then return abort() end
+                chunks[#chunks + 1] = chunk
+            end,
+            on_done = function(err)
+                if cancelled then return end
+                if too_big then return cb(nil, _("文章太大，无法显示")) end
+                if err then return cb(nil, err) end
+                local raw = table.concat(chunks)
+                chunks = nil
+                -- -2041：续期一次再重试（与 mpGetAsync 对齐）
+                if not renewed and raw:find("2041", 1, true) then
+                    local ok, data = pcall(require("utils.json").decode, raw)
+                    if ok and type(data) == "table" and tonumber(data.errcode or data.errCode) == -2041 then
+                        renewed = true
+                        inner = Mp.renewAsync(function() if not cancelled then go() end end)
+                        return
+                    end
+                end
+                cb(raw)
+            end,
+        })
+    end
+    go()
+    return { cancel = function()
+        cancelled = true
+        if inner and inner.cancel then inner:cancel() end
+    end }
+end
+
 --- 一篇文章的正文片段：拉文章页、抽正文；images_dir 非 nil 时图片落地（不带会话 Cookie）。
 ---@param review_id string
 ---@param images_dir string|nil
@@ -334,28 +393,19 @@ function Mp.fetchContentAsync(review_id, images_dir, cb)
     local fetch
     fetch = function()
         tries = tries + 1
-        job = mpGetAsync(WEB .. "/web/mp/content?reviewId=" .. Text.urlEncode(tostring(review_id or "")), {
-            accept = "text/html,application/xhtml+xml,*/*",
-            no_expire = true, -- 公众号接口被风控回失效 errcode 时不判整个微信读书登录失效
-            headers = { ["Referer"] = WEB .. "/" },
-            timeout = require("http.timeout").net(3),
-        }, function(raw, err)
+        job = mpStreamGet(WEB .. "/web/mp/content?reviewId=" .. Text.urlEncode(tostring(review_id or "")),
+            function(raw, err)
             if cancelled then return end
             if not raw then
                 cb(nil, err or _("正文获取失败"))
                 return
             end
-            if #raw > MAX_HTML then
-                cb(nil, _("文章太大，无法显示"))
-                return
-            end
             local body = Mp.extractBody(raw)
-            -- 短时间连着拉文章页（如自动离线下载正在跑）会返回「验证」反爬页：退避几秒再拉，最多 VERIFY_TRIES 次。
+            -- 短时间连着拉文章页会返回「验证」反爬页：退避几秒再拉，最多 VERIFY_TRIES 次。
             local verify = not body and raw:find("<title>%s*验证%s*</title>") ~= nil
             raw = nil
             if verify and tries < Mp.VERIFY_TRIES then
                 local function retry() Mp.later(2 * tries, function() if not cancelled then fetch() end end) end
-                -- 第一次被拦先续期拿 ticket / wrpa，再退避重拉
                 if tries == 1 then
                     job = Mp.renewAsync(retry)
                 else
