@@ -1962,4 +1962,5 @@ Current version: ",
     ["各页显示的数据"] = "Data shown per page",
     ["无法控制系统蓝牙"] = "Cannot control system Bluetooth",
     ["蓝牙状态没有变化"] = "Bluetooth state did not change",
+    ["筛选分组"] = "Filter by group",
 }
