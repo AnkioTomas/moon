@@ -314,8 +314,13 @@ function Client.contentAsync(_novel_id, chapter_id, cb)
                 if cancelled then return end
                 if res.text then cb(res.text); return end
                 if res.kind == "verify" then
-                    cb(nil, Client.cookie() and _("长佩要求人机验证，请先在浏览器打开 gongzicp.com 阅读一章完成验证")
-                        or _("长佩需要登录后阅读，请先在设置里登录长佩账号"))
+                    if not Client.cookie() then
+                        cb(nil, _("长佩需要登录后阅读，请先在设置里登录长佩账号"))
+                        return
+                    end
+                    -- 登录态已不被服务端信任：标记失效，用户在浏览器过验证后可重新授权
+                    cb(nil, require("source.auth").expire("changpei",
+                        _("长佩要求人机验证，请先在浏览器打开 gongzicp.com 阅读一章完成验证，再重新授权")))
                     return
                 end
                 cb(nil, res.err or _("长佩章节内容为空"), res.kind)
