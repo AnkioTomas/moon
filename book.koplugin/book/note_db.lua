@@ -247,6 +247,21 @@ function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at, payloa
     ) ~= nil
 end
 
+--- 上传期间本地又改过时，把回填的远端 id 并进 live 快照：**只写 payload**。
+--- 脏标记与修订号都不动——内容仍是上传期间用户改的那一版，下轮推送继续比对备注；
+--- id 已经有了，下轮就不必再按内容键认领（认领也可能撞上历史重复）。
+---@param source_id string
+---@param stable_id string
+---@param chapter_idx integer|nil nil 或 0 表示整本书那一份快照
+---@param payload string 已并好回填字段的快照
+---@return boolean false 表示参数非法或 SQL 失败
+function NoteDB.updatePayload(source_id, stable_id, chapter_idx, payload)
+    return DB.exec(
+        [[UPDATE notes SET payload=? WHERE source_id=? AND stable_id=? AND chapter_idx=?;]],
+        payload, source_id, stable_id, tonumber(chapter_idx) or 0
+    ) ~= nil
+end
+
 --- 是否有待上传快照：只查存在性，不把整份 payload 读进内存（本地源笔记永远是待上传）。
 ---@param source_id string
 ---@return boolean

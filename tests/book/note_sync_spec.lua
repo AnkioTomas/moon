@@ -70,6 +70,12 @@ package.preload["book.note_db"] = function()
             end
             return true
         end,
+        -- 与真身同语义：只写 payload，sync_status / updated_at 不动
+        updatePayload = function(source_id, stable_id, chapter_idx, payload)
+            local row = rows[source_id .. ":" .. stable_id .. ":" .. (chapter_idx or 0)]
+            if row then row.payload = payload end
+            return true
+        end,
     }
 end
 package.preload["source.registry"] = function()
@@ -469,6 +475,78 @@ do
     }, function() end)
     Stubs.flush()
     Assert.eq(#callbacks, 3, "第三轮仍在飞，第四轮必须排队")
+end
+
+-- 上传期间又改了笔记（stale）：回填的 kavita_id 并进 live 快照，脏标记与修订号都不动。
+-- 之前整份丢弃，下一轮推送只好重新按键认领（甚至重复建）。
+do
+    local JSON = require("json")
+    local racing_backfill = { id = "backfill" }
+    local uploaded = JSON.encode({
+        {
+            datetime = "2026-10-01", page = "/body/p[1].0", pos0 = "/body/p[1].0", pos1 = "/body/p[1].5",
+            text = "高亮", kavita_id = nil,
+        },
+    })
+    local newer = JSON.encode({
+        {
+            datetime = "2026-10-01", page = "/body/p[1].0", pos0 = "/body/p[1].0", pos1 = "/body/p[1].5",
+            text = "高亮",
+        },
+        { datetime = "2026-10-01", page = "/body/p[2].0", pos0 = "/body/p[2].0", pos1 = "/body/p[2].4", text = "新划的" },
+    })
+    local key = "backfill:book5.epub:0"
+    rows[key] = {
+        source_id = "backfill", stable_id = "book5.epub", chapter_idx = 0,
+        payload = uploaded, updated_at = 10, sync_status = 0,
+    }
+    -- 真实源会把 kavita_* 透传进快照；这里明确这条路（核心不自己补字段）。
+    racing_backfill.cleanAnnotations = function(_, items) return items end
+    racing_backfill.pushNotesAsync = function(_, _identity, annotations, cb)
+        annotations[1].kavita_id = 77
+        annotations[1].kavita_note = "高亮"
+        -- 回包还没到，用户又划了一条：payload 与修订号都变了
+        rows[key].payload = newer
+        rows[key].updated_at = 11
+        cb(true, nil, { pushed = 1 })
+    end
+    racing_backfill.pullNotesAsync = function(_, _identity, cb) cb({}) end
+
+    local result
+    Note.syncAsync(racing_backfill, { identity = {
+        source_id = "backfill", stable_id = "book5.epub", source = racing_backfill,
+    }, dirty_only = true }, function(value) result = value end)
+    Stubs.flush()
+
+    local snapshot = JSON.decode(rows[key].payload)
+    Assert.eq(#snapshot, 2, "上传期间新划的线不能被覆盖")
+    Assert.eq(snapshot[1].kavita_id, 77, "回填的 id 并进 live 快照")
+    Assert.eq(snapshot[1].kavita_note, "高亮")
+    Assert.is_nil(snapshot[2].kavita_id, "没推的那条不编 id")
+    Assert.eq(rows[key].updated_at, 11, "修订号不能被回退")
+    Assert.eq(rows[key].sync_status, 0, "仍是脏行，下轮再推")
+    Assert.eq(result.pushed, 1)
+end
+
+-- pushed 如实计数：源说「这轮没什么可推」时核心不能 +1，否则首页会白刷一次。
+do
+    local JSON = require("json")
+    local quiet = { id = "quiet" }
+    local key = "quiet:book6.epub:0"
+    rows[key] = {
+        source_id = "quiet", stable_id = "book6.epub", chapter_idx = 0,
+        payload = JSON.encode({ { datetime = "2026-10-02", page = "/body/p[1].0" } }),
+        updated_at = 500, sync_status = 0,
+    }
+    quiet.pushNotesAsync = function(_, _identity, _annotations, cb) cb(true, nil, { pushed = 0 }) end
+    quiet.pullNotesAsync = function(_, _identity, cb) cb({}) end
+    local result
+    Note.syncAsync(quiet, { identity = {
+        source_id = "quiet", stable_id = "book6.epub", source = quiet,
+    }, dirty_only = true }, function(value) result = value end)
+    Stubs.flush()
+    Assert.eq(result.pushed, 0, "源如实回 0 就按 0 记")
+    Assert.eq(rows[key].sync_status, 1, "对账完的快照仍要清脏，否则每轮重推")
 end
 
 _G.G_reader_settings = previous_settings
