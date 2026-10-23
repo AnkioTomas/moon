@@ -1217,7 +1217,6 @@ local KAVITA_FIELDS = {
 ---@param total_pages integer|nil
 ---@return table[]
 function Source:cleanAnnotations(items, total_pages)
-    local Normalize = require("book.note.normalize")
     local out = {}
     for _idx, item in ipairs(items) do
         if type(item) == "table" then
@@ -1319,7 +1318,7 @@ function Source:mergeAnnotations(remote, current, paging, _authoritative)
                 merged[#merged + 1] = item
                 if id then shown_id[id] = true end
                 if type(item.pos0) == "string" then
-                    seen_pos[item.pos0 .. "\31" .. tostring(item.pos1)] = true
+                    seen_pos[item.pos0 .. Annotation.KEY_SEP .. tostring(item.pos1)] = true
                 end
             end
         end
@@ -1335,7 +1334,7 @@ function Source:mergeAnnotations(remote, current, paging, _authoritative)
                 -- 远端已定位的那条会带着复用来的旧 pos0：同 id / 同坐标只画远端那份。
                 -- id 在远端全量里但没画出来（未定位）→ 本地这份必须保留，否则书里就少一条。
                 local pos_key = type(item.pos0) == "string"
-                    and (item.pos0 .. "\31" .. tostring(item.pos1)) or nil
+                    and (item.pos0 .. Annotation.KEY_SEP .. tostring(item.pos1)) or nil
                 local duplicate = (id and shown_id[id]) or (item.drawer and pos_key and seen_pos[pos_key])
                 if not duplicate and Normalize.renderable(item, paging) then
                     merged[#merged + 1] = item
@@ -1522,6 +1521,9 @@ end
 
 --- 在元素文本里找 selectedText：先精确找，失败再去空白找（CSS 空白折叠差异）。
 --- 同段重复文本取第一处（真实样本 0/29 歧义），由回读校验兜住错位。
+---@param document table
+---@param element string
+---@param selected string
 ---@return string|nil level "exact"|"wsnorm"|nil
 ---@return { k: integer, text: string }[] nodes
 ---@return string concat
@@ -1548,6 +1550,9 @@ end
 
 --- 起始元素里的最长可命中前缀。跨段选区的头半截在起点段落里可能不是完整 selectedText，
 --- 所以从全长往短里试；同一前缀出现多次时优先取「贴元素末尾」的那次（选区的头必然贴段尾）。
+---@param document table
+---@param element string
+---@param selected string
 ---@return string|nil concat
 ---@return table|nil nodes
 ---@return integer|nil start_byte
@@ -1577,6 +1582,9 @@ local function locatePrefix(document, element, selected)
 end
 
 --- 终点元素里的最长可命中后缀。同理，优先取「从元素开头起」的那次（选区尾必然贴段首）。
+---@param document table
+---@param element string
+---@param selected string
 ---@return string|nil concat
 ---@return table|nil nodes
 ---@return integer|nil start_byte
@@ -1634,6 +1642,9 @@ end
 
 --- 同片段同级回扫：Kavita 的 `p[k]` 与 crengine 的元素数可能不同（HTML 自动闭合、
 --- 表格 foster parenting），下标失配时在同一父节点下扫同名兄弟，以文本为准找回。
+---@param document table
+---@param element string
+---@param selected string
 ---@return string|nil element
 ---@return table|nil nodes
 ---@return integer|nil start_byte
@@ -1669,6 +1680,10 @@ local function verifySelection(document, pos0, pos1, selected)
 end
 
 --- 跨段：起点取最长可命中前缀、终点取最长可命中后缀，再各自映射回文本节点。
+---@param document table
+---@param head_element string
+---@param tail_element string
+---@param selected string
 ---@return { pos0: string, pos1: string }|nil
 local function locateCross(document, head_element, tail_element, selected)
     local _head_concat, head_nodes, head_start, head_end = locatePrefix(document, head_element, selected)
@@ -1858,17 +1873,22 @@ end
 ---@param dto table
 ---@return table|nil
 local function annotationPayload(dto)
-    local text = dto.selectedText
-    -- 没有选中文本的不是划线（Kavita create 也要求非空），落库也画不出来。
-    if type(text) ~= "string" or require("utils.text").trim(text) == "" then return nil end
+    -- 没有 id 才真的对不上任何本地条目（update / delete 的唯一依据），直接丢。
     if dto.id == nil or dto.id == "" then return nil end
+    local text = dto.selectedText
+    -- 没有选中文本的条目（Kavita 自己也不许这么建）画不出来，但**保留成未定位占位**：
+    -- 它的 id 必须进远端全量集合，否则 mergeAnnotations 会把本地带该 id 的那条当成「远端已删」抹掉。
+    local blank = type(text) ~= "string" or require("utils.text").trim(text) == ""
+    if blank then text = "" end
+    local drawer
+    if not blank then drawer = "lighten" end
     -- note 与 kavita_note 必须来自同一次读回：两侧一旦有差异，推送侧每轮都会判「备注改过」。
     local note = Annotation.noteText(dto.comment, dto.commentHtml, dto.commentPlainText)
     -- createdUtc 是真正的 UTC；解析不出（如 0001 占位）回退当前时间，只影响显示 / 排序。
     local created = utcTime(dto.createdUtc)
     return {
         datetime = os.date("%Y-%m-%d %H:%M:%S", created or os.time()),
-        drawer = "lighten",
+        drawer = drawer,
         color = slotColor(dto.selectedSlotIndex),
         text = text,
         note = note,
@@ -1881,6 +1901,7 @@ local function annotationPayload(dto)
         kavita_modified = dto.lastModifiedUtc,
         kavita_xpath = dto.xPath,
         kavita_ending_xpath = dto.endingXPath,
+        kavita_unlocated = blank or nil,
     }
 end
 
@@ -2036,7 +2057,7 @@ function Source:pushNotesAsync(identity, annotations, cb)
                 end
 
                 local pushed, adopted, conflicts, index = 0, 0, 0, 0
-                local nextOne
+                local step
 
                 --- 把本批墓碑从 payload 数组里摘掉：核心随后按这个数组回写快照，出列才算数。
                 local function dropTombstones()
@@ -2050,7 +2071,7 @@ function Source:pushNotesAsync(identity, annotations, cb)
                 --- 先写后删：全部 create / update 成功才发一次 bulk-delete（body = 裸 id 数组）。
                 --- 200 ⇒ 墓碑出列；400 ⇒ 重拉一次该章确认真实状态后收尾（不无限重试）；
                 --- 其余失败 ⇒ 整批 cb(nil)，快照留脏、墓碑保留，下轮重试。
-                local function finish()
+                local function finishBatch()
                     if #delete_ids == 0 then
                         return cb(true, nil, { pushed = pushed, adopted = adopted,
                             conflicts = conflicts, deleted = 0 })
@@ -2126,35 +2147,33 @@ function Source:pushNotesAsync(identity, annotations, cb)
                             ann.kavita_xpath, ann.kavita_ending_xpath = anchor.xPath, anchor.endingXPath
                             ann.kavita_note = note
                             pushed = pushed + 1
-                            if kind == "update" then adopted = adopted + 1 end
-                            return nextOne()
+                            return step()
                         end
                         if not data then return cb(nil, perr) end
-                        -- create 回了空体（反代吞掉 DTO）：按同一套键回查一次，命中才认成功。
-                        job = Annotation.listByChapter(self.client, entry.chapterId, owner_id, function(again, aerr)
-                            if cancelled then return end
-                            local hit = again and Annotation.match(again, {
-                                chapterId = entry.chapterId, xPath = anchor.xPath,
-                                endingXPath = anchor.endingXPath, selectedText = ann.text,
-                            })
-                            if not hit then return cb(nil, aerr or _("Kavita 未确认注解已创建")) end
-                            adopt(ann, hit)
-                            ann.kavita_note = note
-                            pushed = pushed + 1
-                            nextOne()
-                        end)
+                        -- create 回了空体（反代吞掉 DTO）：只查**同一轮**对账列表（§8.3，一批一次 GET），
+                        -- 命中才认成功；仍是 200 不算成功。本轮列表是创建前取的，通常查不到 → 留脏，
+                        -- 下轮对账按 key 认领这条已建成的，不会重复建。
+                        local hit = Annotation.match(remote, {
+                            chapterId = entry.chapterId, xPath = anchor.xPath,
+                            endingXPath = anchor.endingXPath, selectedText = ann.text,
+                        })
+                        if not hit then return cb(nil, _("Kavita 未确认注解已创建")) end
+                        adopt(ann, hit)
+                        ann.kavita_note = note
+                        pushed = pushed + 1
+                        step()
                     end)
                 end
 
                 --- 逐条判定：有 id 走冲突表与坐标守卫，无 id 先按键认领，认不到才新建。
                 --- 跳过是纯本地判断，用循环推进，避免连续跳过时递归堆栈。
-                local function step()
+                step = function()
                     while true do
                         if cancelled then return end
                         index = index + 1
                         local plan = plans[index]
                         if not plan then
-                            return finish()
+                            return finishBatch()
                         end
                         local ann, anchor = plan.ann, plan.anchor
                         local note = ann.note or ""
@@ -2219,10 +2238,11 @@ function Source:pushNotesAsync(identity, annotations, cb)
                                     return send(ann, anchor, "update", hit)
                                 end
                             end
+                            -- 只认领 id、没写远端：算 adopted（写了的只算 pushed）。
+                            adopted = adopted + 1
                         end
                     end
                 end
-                nextOne = step
                 step()
             end)
         end)
