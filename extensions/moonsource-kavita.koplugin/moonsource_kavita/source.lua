@@ -1267,6 +1267,503 @@ function Source:prepareLocalAnnotations(previous, current)
     return current
 end
 
+-- ---------------------------------------------------------------------------
+-- 开书定位：云端注解（元素级 xPath + selectedText）→ crengine xpointer（spec §4）
+--
+-- Kavita 只给元素路径，没有偏移；文档接口又没有「节点+偏移 → xpointer」。
+-- 所以反过来让 crengine 当文本真值来源：逐个 text()[k] 取节点文本，在元素拼接文本里
+-- 找 selectedText，再把字节区间映射回 (k, codepoint offset)。合成后必须回读校验，
+-- 绝不把没验过的坐标写进 doc_settings（错位的划线比不画更糟）。
+-- ---------------------------------------------------------------------------
+
+--- crengine 的 `.N` 单位是 codepoint（lChar32），不是 UTF-8 字节；
+--- LuaJIT 没有 utf8 库，只能数前导字节。
+---@param s string
+---@return integer
+local function codepointLength(s)
+    local count, i, len = 0, 1, #s
+    while i <= len do
+        local byte = s:byte(i)
+        if byte < 0x80 or byte >= 0xC0 then count = count + 1 end
+        i = i + 1
+    end
+    return count
+end
+
+---@param s string
+---@param i integer
+---@return integer
+local function charStep(s, i)
+    local byte = s:byte(i)
+    if byte < 0x80 then return 1 end
+    if byte < 0xE0 then return 2 end
+    if byte < 0xF0 then return 3 end
+    return 4
+end
+
+--- 前 count 个 codepoint 占用的字节数（1-based 最后字节位置，count=0 时为 0）。
+---@param s string
+---@param count integer
+---@return integer
+local function bytePosOfCodepoint(s, count)
+    local seen, i = 0, 1
+    while seen < count and i <= #s do
+        i = i + charStep(s, i)
+        seen = seen + 1
+    end
+    return i - 1
+end
+
+--- 按 codepoint 取子串（1-based，含首含尾）。
+---@param s string
+---@param from integer
+---@param to integer
+---@return string
+local function codepointSub(s, from, to)
+    local byte_start = bytePosOfCodepoint(s, from - 1) + 1
+    local byte_end = bytePosOfCodepoint(s, to)
+    return s:sub(byte_start, byte_end)
+end
+
+--- 空白判定：ASCII 折叠 + NBSP + 全角空格。crengine 的 CSS 空白处理会动这三类，
+--- 真实样本跨段回读只差空白，所以去空白重试必须把它们都算进去。
+---@param s string
+---@param i integer
+---@return integer 该字符占用的字节数；0 = 不是空白
+local function whitespaceAt(s, i)
+    local byte = s:byte(i)
+    if byte == 0x20 or byte == 0x09 or byte == 0x0A or byte == 0x0D then return 1 end
+    if byte == 0xC2 and s:byte(i + 1) == 0xA0 then return 2 end
+    if byte == 0xE3 and s:byte(i + 1) == 0x80 and s:byte(i + 2) == 0x80 then return 3 end
+    return 0
+end
+
+--- 去空白并保留「过滤后字节 → 原字节」映射，命中后能把偏移回算到原文本。
+---@param s string
+---@return string, table<integer, integer>
+local function stripWhitespace(s)
+    local out, map = {}, {}
+    local i, len = 1, #s
+    while i <= len do
+        local width = whitespaceAt(s, i)
+        if width > 0 then
+            i = i + width
+        else
+            out[#out + 1] = s:sub(i, i)
+            map[#out] = i
+            i = i + 1
+        end
+    end
+    return table.concat(out), map
+end
+
+--- 最后一个非空白字符的字节位置（跨段「贴元素末尾」判定用；全空白回 0）。
+---@param s string
+---@return integer
+local function trimEndByte(s)
+    local i, last = 1, 0
+    while i <= #s do
+        local width = whitespaceAt(s, i)
+        if width == 0 then
+            i = i + charStep(s, i)
+            last = i - 1
+        else
+            i = i + width
+        end
+    end
+    return last
+end
+
+--- 第一个非空白字符的字节位置（跨段「贴元素开头」判定用）。
+---@param s string
+---@return integer
+local function trimStartByte(s)
+    local i = 1
+    while i <= #s do
+        local width = whitespaceAt(s, i)
+        if width == 0 then break end
+        i = i + width
+    end
+    return i
+end
+
+---@param document table
+---@param xp string
+---@return string|nil
+local function nodeText(document, xp)
+    local ok, text = pcall(document.getTextFromXPointer, document, xp)
+    if ok and type(text) == "string" then return text end
+    return nil
+end
+
+--- 逐 text()[k] 取节点文本：crengine 的 `text()` 不带下标在多节点时会失败，
+--- 所以合成路径一律写到 `[k]`；空节点跳过（否则字节区间会映射到零长度节点上）。
+---@param document table
+---@param element string
+---@return { k: integer, text: string }[]
+local function textNodes(document, element)
+    local nodes = {}
+    for k = 1, 128 do
+        local text = nodeText(document, element .. "/text()[" .. k .. "]")
+        if not text then break end
+        if text ~= "" then nodes[#nodes + 1] = { k = k, text = text } end
+    end
+    return nodes
+end
+
+---@param nodes { k: integer, text: string }[]
+---@return string
+local function concatNodes(nodes)
+    local parts = {}
+    for _idx, node in ipairs(nodes) do parts[#parts + 1] = node.text end
+    return table.concat(parts)
+end
+
+--- 拼接文本里的字节区间 → (text()[k], codepoint offset)。
+---@param nodes { k: integer, text: string }[]
+---@param start_byte integer 1-based，区间首字节
+---@param end_byte integer 1-based，区间尾字节
+---@return integer|nil, integer|nil, integer|nil, integer|nil
+local function mapRange(nodes, start_byte, end_byte)
+    local acc, k0, off0, k1, off1 = 0, nil, nil, nil, nil
+    for _idx, node in ipairs(nodes) do
+        local seg_start, seg_end = acc + 1, acc + #node.text
+        if not k0 and start_byte >= seg_start and start_byte <= seg_end then
+            k0 = node.k
+            off0 = codepointLength(node.text:sub(1, start_byte - seg_start))
+        end
+        if end_byte >= seg_start and end_byte <= seg_end then
+            k1 = node.k
+            off1 = codepointLength(node.text:sub(1, end_byte - seg_start + 1))
+        end
+        acc = seg_end
+    end
+    return k0, off0, k1, off1
+end
+
+--- 在元素文本里找 selectedText：先精确找，失败再去空白找（CSS 空白折叠差异）。
+--- 同段重复文本取第一处（真实样本 0/29 歧义），由回读校验兜住错位。
+---@return string|nil level "exact"|"wsnorm"|nil
+---@return { k: integer, text: string }[] nodes
+---@return string concat
+---@return integer|nil start_byte
+---@return integer|nil end_byte
+local function locateInElement(document, element, selected)
+    local nodes = textNodes(document, element)
+    if #nodes == 0 then
+        return nil, nodes, "", nil, nil
+    end
+    local concat = concatNodes(nodes)
+    local start_byte = concat:find(selected, 1, true)
+    if start_byte then
+        return "exact", nodes, concat, start_byte, start_byte + #selected - 1
+    end
+    local flat, map = stripWhitespace(concat)
+    local wanted = stripWhitespace(selected)
+    local flat_start = wanted ~= "" and flat:find(wanted, 1, true) or nil
+    if flat_start then
+        return "wsnorm", nodes, concat, map[flat_start], map[flat_start + #wanted - 1]
+    end
+    return nil, nodes, concat, nil, nil
+end
+
+--- 起始元素里的最长可命中前缀。跨段选区的头半截在起点段落里可能不是完整 selectedText，
+--- 所以从全长往短里试；同一前缀出现多次时优先取「贴元素末尾」的那次（选区的头必然贴段尾）。
+---@return string|nil concat
+---@return table|nil nodes
+---@return integer|nil start_byte
+---@return integer|nil end_byte
+local function locatePrefix(document, element, selected)
+    local nodes = textNodes(document, element)
+    if #nodes == 0 then return nil end
+    local concat = concatNodes(nodes)
+    local total = codepointLength(selected)
+    local element_end = trimEndByte(concat)
+    for take = total, 1, -1 do
+        local prefix = codepointSub(selected, 1, take)
+        local first = concat:find(prefix, 1, true)
+        if first then
+            local chosen = first
+            local pos = 1
+            while true do
+                local hit = concat:find(prefix, pos, true)
+                if not hit then break end
+                if hit + #prefix - 1 == element_end then chosen = hit end
+                pos = hit + 1
+            end
+            return concat, nodes, chosen, chosen + #prefix - 1
+        end
+    end
+    return nil
+end
+
+--- 终点元素里的最长可命中后缀。同理，优先取「从元素开头起」的那次（选区尾必然贴段首）。
+---@return string|nil concat
+---@return table|nil nodes
+---@return integer|nil start_byte
+---@return integer|nil end_byte
+local function locateTail(document, element, selected)
+    local nodes = textNodes(document, element)
+    if #nodes == 0 then return nil end
+    local concat = concatNodes(nodes)
+    local total = codepointLength(selected)
+    local element_start = trimStartByte(concat)
+    for take = total, 1, -1 do
+        local suffix = codepointSub(selected, total - take + 1, total)
+        local first = concat:find(suffix, 1, true)
+        if first then
+            local chosen = first
+            local pos = 1
+            while true do
+                local hit = concat:find(suffix, pos, true)
+                if not hit then break end
+                if hit == element_start then chosen = hit end
+                pos = hit + 1
+            end
+            return concat, nodes, chosen, chosen + #suffix - 1
+        end
+    end
+    return nil
+end
+
+--- Kavita `//body/p[9]` → `/body/DocFragment[N]/body/p[9]`；N = spine + 1。
+--- 只削一个 `/` 补前缀，不自己归一 `[1]` 下标（那是 DOM version 的事）。
+---@param xpath string|nil
+---@param fragment integer
+---@return string|nil
+local function fragmentBase(xpath, fragment)
+    if type(xpath) ~= "string" or xpath == "" then return nil end
+    local path = xpath
+    if path:sub(1, 2) == "//" then
+        path = path:sub(2)
+    elseif path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+    -- Kavita 不会给 DocFragment；真给了就原样用（跨 spine 的 endingXPath 也不至重复加前缀）。
+    if path:sub(1, 17) == "/body/DocFragment" then return path end
+    if path:sub(1, 5) ~= "/body" then return nil end
+    return "/body/DocFragment[" .. fragment .. "]" .. path
+end
+
+---@param document table
+---@param xp string
+---@return boolean
+local function inDocument(document, xp)
+    local ok, present = pcall(document.isXPointerInDocument, document, xp)
+    return ok and present == true
+end
+
+--- 同片段同级回扫：Kavita 的 `p[k]` 与 crengine 的元素数可能不同（HTML 自动闭合、
+--- 表格 foster parenting），下标失配时在同一父节点下扫同名兄弟，以文本为准找回。
+---@return string|nil element
+---@return table|nil nodes
+---@return integer|nil start_byte
+---@return integer|nil end_byte
+local function scanSiblings(document, element, selected)
+    local tag = element:match("([^/%[]+)%[%d+%]$")
+    local parent = element:match("^(.*)/[^/]+$")
+    if not tag or not parent then return nil end
+    for index = 1, 400 do
+        local candidate = parent .. "/" .. tag .. "[" .. index .. "]"
+        if not nodeText(document, candidate) then break end
+        local level, nodes, _concat, start_byte, end_byte = locateInElement(document, candidate, selected)
+        if level then
+            return candidate, nodes, start_byte, end_byte
+        end
+    end
+    return nil
+end
+
+--- 合成坐标的唯一成功判据：两端都在文档里，且回读文本与 selectedText 相等（允许空白差异）。
+--- 只信 isXPointerInDocument 不够——路径能解析不代表画出来的就是这段文字。
+---@return boolean, string|nil reason
+local function verifySelection(document, pos0, pos1, selected)
+    if not inDocument(document, pos0) then return false, "pos0-missing" end
+    if not inDocument(document, pos1) then return false, "pos1-missing" end
+    if type(document.getTextFromXPointers) ~= "function" then return true end
+    local ok, got = pcall(document.getTextFromXPointers, document, pos0, pos1)
+    if not ok then return true end -- 老文档 / 桩没实现：不要因校验器缺失把能画的全判失败
+    if type(got) ~= "string" then return true end
+    if got == selected then return true end
+    if stripWhitespace(got) == stripWhitespace(selected) then return true end
+    return false, "text-mismatch"
+end
+
+--- 跨段：起点取最长可命中前缀、终点取最长可命中后缀，再各自映射回文本节点。
+---@return { pos0: string, pos1: string }|nil
+local function locateCross(document, head_element, tail_element, selected)
+    local _head_concat, head_nodes, head_start, head_end = locatePrefix(document, head_element, selected)
+    if not head_nodes then return nil end
+    local _tail_concat, tail_nodes, tail_start, tail_end = locateTail(document, tail_element, selected)
+    if not tail_nodes then return nil end
+    local k0, off0 = mapRange(head_nodes, head_start, head_end)
+    local _tail_k, _tail_off, k1, off1 = mapRange(tail_nodes, tail_start, tail_end)
+    if not k0 or not k1 then return nil end
+    return {
+        pos0 = head_element .. "/text()[" .. k0 .. "]." .. off0,
+        pos1 = tail_element .. "/text()[" .. k1 .. "]." .. off1,
+    }
+end
+
+--- 在指定 DocFragment 上尝试一条注解（不含滑窗）。
+---@return { pos0: string, pos1: string }|nil, string|nil reason
+local function attemptLocalize(document, annotation, fragment)
+    local selected = annotation.text
+    if type(selected) ~= "string" or selected == "" then return nil, "no-text" end
+    local base = fragmentBase(annotation.kavita_xpath, fragment)
+    if not base then return nil, "bad-xpath" end
+    local ending = annotation.kavita_ending_xpath
+    local cross = type(ending) == "string" and ending ~= "" and ending ~= annotation.kavita_xpath
+    if cross then
+        local tail_base = fragmentBase(ending, fragment)
+        if tail_base then
+            local located = locateCross(document, base, tail_base, selected)
+            if located and verifySelection(document, located.pos0, located.pos1, selected) then
+                return located
+            end
+        end
+        -- endingXPath 不可用或起点其实含全文：退回单元素匹配，仍以回读为准。
+    end
+
+    local used, nodes, start_byte, end_byte
+    local level, found_nodes, _concat, found_start, found_end = locateInElement(document, base, selected)
+    if level then
+        used, nodes, start_byte, end_byte = base, found_nodes, found_start, found_end
+    else
+        local candidate, sibling_nodes, sibling_start, sibling_end = scanSiblings(document, base, selected)
+        if candidate then
+            used, nodes, start_byte, end_byte = candidate, sibling_nodes, sibling_start, sibling_end
+        end
+    end
+    if not used then return nil, "text-not-found" end
+    local k0, off0, k1, off1 = mapRange(nodes, start_byte, end_byte)
+    if not k0 or not k1 then return nil, "range-map" end
+    local pos0 = used .. "/text()[" .. k0 .. "]." .. off0
+    local pos1 = used .. "/text()[" .. k1 .. "]." .. off1
+    local ok, reason = verifySelection(document, pos0, pos1, selected)
+    if not ok then return nil, reason end
+    return { pos0 = pos0, pos1 = pos1 }
+end
+
+--- pageNumber 只当提示（Kavita 旧推送窗口会差一位，实测 6/29），
+--- 依次试 spine / spine+1 / spine−1，每跳都要求文本命中且回读通过。
+---@return { pos0: string, pos1: string }|nil, string|nil reason
+local function locateAnnotation(document, annotation)
+    local hint = math.floor(tonumber(annotation.pageNumber) or 0)
+    local fragment = hint + 1
+    local last_reason
+    for _idx, delta in ipairs({ 0, 1, -1 }) do
+        local candidate = fragment + delta
+        if candidate >= 1 then
+            local located, reason = attemptLocalize(document, annotation, candidate)
+            if located then return located end
+            last_reason = reason or last_reason
+        end
+    end
+    return nil, last_reason or "text-not-found"
+end
+
+---@param document table
+---@param xp string
+---@return string
+local function normalizedXP(document, xp)
+    if type(document.getNormalizedXPointer) ~= "function" then return xp end
+    local ok, normalized = pcall(document.getNormalizedXPointer, document, xp)
+    if ok and type(normalized) == "string" and normalized ~= "" then return normalized end
+    return xp
+end
+
+---@param document table
+---@param xp string
+---@return integer|nil
+local function pageOf(document, xp)
+    if type(document.getPageFromXPointer) ~= "function" then return nil end
+    local ok, page = pcall(document.getPageFromXPointer, document, xp)
+    if ok and tonumber(page) then return tonumber(page) end
+    return nil
+end
+
+--- 把云端注解定位到当前打开的文档；返回**全量**（含未定位）。
+---
+--- 返回 nil 表示「本次不应用」：无文档 / html_path 缺失或文件不在 / 文档不是这本书。
+--- core 的 applySnapshot 见到 nil 会直接放弃，绝不覆盖 doc_settings —— 这条比多画几条更重要。
+--- 未定位条目只打 `kavita_unlocated`、不写占位坐标，merge 才不会把它误判成「远端已删」。
+---
+--- 复用放在最前：同一 `kavita_id` 已有 pos0/pos1 且仍通过 isXPointerInDocument 的，
+--- 直接用旧坐标，避免每次开书重算（也避免文本微调后坐标抖动）。
+---
+---@param document table|nil     已打开的 crengine 文档
+---@param annotations table[]    pull 落的原始条目
+---@param html_path string|nil   已落盘的 epub 路径（只查存在性，绝不读 ZIP 字节）
+---@param current table[]|nil    阅读器当前注解
+---@return table[]|nil
+function Source:localizeAnnotations(document, annotations, html_path, current)
+    if type(document) ~= "table"
+        or type(document.getTextFromXPointer) ~= "function"
+        or type(document.isXPointerInDocument) ~= "function" then
+        return nil
+    end
+    if type(html_path) ~= "string" or html_path == "" then return nil end
+    -- html_path 就是 core 传进来的 ui.document.file；两者不一致说明这次快照不是这本书的
+    -- （派生笔记 / 切书竞态），宁可不动，也不要把这本书的坐标写到另一本书的 doc_settings。
+    if type(document.file) == "string" and document.file ~= "" and document.file ~= html_path then
+        return nil
+    end
+    if require("libs/libkoreader-lfs").attributes(html_path, "mode") ~= "file" then return nil end
+    if type(annotations) ~= "table" then return {} end
+
+    local reusable = {}
+    for _idx, item in ipairs(type(current) == "table" and current or {}) do
+        if type(item) == "table" and item.kavita_id and type(item.pos0) == "string"
+            and type(item.pos1) == "string" and inDocument(document, item.pos0)
+            and inDocument(document, item.pos1) then
+            local key = tostring(item.kavita_id)
+            reusable[key] = reusable[key] or item
+        end
+    end
+
+    local out, unlocated, last_reason = {}, 0, nil
+    for _idx, item in ipairs(annotations) do
+        local ann = item
+        if type(item) == "table" then
+            -- 浅拷贝：定位只补坐标，pull 落的字段（备注 / 颜色 / 时间）原样带住。
+            ann = {}
+            for key, value in pairs(item) do ann[key] = value end
+            local saved = item.kavita_id and reusable[tostring(item.kavita_id)] or nil
+            if saved then
+                ann.pos0, ann.pos1 = saved.pos0, saved.pos1
+                ann.page = saved.page or saved.pos0
+                ann.pageno = saved.pageno or pageOf(document, saved.pos0)
+                ann.kavita_unlocated = nil
+            else
+                local located, reason = locateAnnotation(document, ann)
+                if located then
+                    local pos0 = normalizedXP(document, located.pos0)
+                    local pos1 = normalizedXP(document, located.pos1)
+                    ann.pos0, ann.pos1 = pos0, pos1
+                    -- page 填 pos0 字符串（照抄本地真实条目）：数字会被 normalize 当成分页文档。
+                    ann.page = pos0
+                    ann.pageno = pageOf(document, pos0)
+                    ann.kavita_unlocated = nil
+                else
+                    ann.pos0, ann.pos1, ann.page, ann.pageno = nil, nil, nil, nil
+                    ann.kavita_unlocated = true
+                    unlocated = unlocated + 1
+                    last_reason = reason or last_reason
+                end
+            end
+        end
+        out[#out + 1] = ann
+    end
+
+    -- 失败只记一条汇总，别让一本定位不了的书刷满日志。
+    if unlocated > 0 then
+        logger.warn("kavita annotation localize failed", html_path,
+            unlocated .. "/" .. #annotations, last_reason or "text-not-found")
+    end
+    return out
+end
+
 --- 颜色槽位 → KOReader 颜色名（01 §Answer）：Kavita 只存用户调色板的槽位序号，
 --- api key 客户端读不到 palette，按索引约定映射；越界 / 未知回落 yellow（0）。颜色不参与同一性。
 local SLOT_COLORS = { [0] = "yellow", [1] = "green", [2] = "blue", [3] = "orange", [4] = "purple" }
