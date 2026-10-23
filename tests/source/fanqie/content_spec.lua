@@ -38,3 +38,13 @@ Assert.eq(ids[2].title, "第2章")
 -- 回包缺 data：空目录
 Assert.len(Content.normalize_chapters({ code = 0 }), 0)
 Assert.len(Content.normalize_chapters(nil), 0)
+
+-- normalize 保留上游字数字段（有则估全书页码）
+do
+    local rows = Content.normalize_chapters({ data = { chapterList = {
+        { itemId = "1", title = "A", wordCount = 1200 },
+        { itemId = "2", title = "B", word_count = 800 },
+    } } })
+    Assert.eq(tonumber(rows[1].wordCount), 1200)
+    Assert.eq(tonumber(rows[2].word_count), 800)
+end

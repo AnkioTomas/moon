@@ -231,7 +231,11 @@ function Source:loadTocAsync(identity, cb)
         local rows = Content.readable_chapters(Content.normalize_chapters(wire))
         local toc = {}
         for _idx, row in ipairs(rows) do
-            toc[#toc + 1] = { idx = #toc + 1, uid = tostring(row.itemId), title = row.title }
+            local w = tonumber(row.wordCount or row.word_count or row.words or row.chapterWordCount)
+            toc[#toc + 1] = {
+                idx = #toc + 1, uid = tostring(row.itemId), title = row.title,
+                words = w and w > 0 and w or nil,
+            }
         end
         if #toc == 0 then
             cb(nil, _("番茄目录为空"))

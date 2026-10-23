@@ -120,6 +120,25 @@ function Toc.put(source_id, stable_id, list)
     return true
 end
 
+--- 补一章字数（缓存正文后回填）；变了才落库。番茄等目录不带字数时靠这个估全书页码。
+---@param source_id string
+---@param stable_id string
+---@param idx integer
+---@param words integer
+function Toc.setWords(source_id, stable_id, idx, words)
+    words = tonumber(words)
+    idx = tonumber(idx)
+    if not words or words <= 0 or not idx then return end
+    -- 目录还没落库 / books_db 桩缺 getToc 时不硬崩，只跳过回填。
+    local ok, list = pcall(Toc.read, source_id, stable_id, true)
+    if not ok or type(list) ~= "table" then return end
+    local chapter = list[idx]
+    if chapter and tonumber(chapter.words) ~= words then
+        chapter.words = words
+        pcall(Toc.put, source_id, stable_id, list)
+    end
+end
+
 --- 记下一章 VIP 的购买状态（目录里显示「已购 / 未购」）；变了才落库。
 ---@param source_id string
 ---@param stable_id string

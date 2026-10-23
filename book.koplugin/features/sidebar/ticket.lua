@@ -41,6 +41,7 @@ function Ticket.new(snapshot, on_ready)
     local book = require("features.sidebar.info").book(snapshot)
     local self = setmetatable({ path = Paths.screensaverDir() .. "/ticket.png", ready = false }, Ticket)
     local _w, sh = Layout.portraitSize()
+    local book_page, book_total = Session.bookPages(snapshot)
     self.blocks = Receipt.blocks(Layout.panel{
         position = "center-center",
         wide = true,
@@ -51,8 +52,8 @@ function Ticket.new(snapshot, on_ready)
         title = book.title,
         authors = book.authors,
         percent = snapshot.percent,
-        page = snapshot.page,
-        total_pages = snapshot.total_pages,
+        page = book_page,
+        total_pages = book_total,
         chapter_idx = Session.chapterIndex(snapshot),
         chapter_title = Session.chapterTitle(snapshot),
     })
