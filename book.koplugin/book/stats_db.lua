@@ -709,16 +709,13 @@ function StatsDB.summaryByBooks(source_id, stable_ids)
     }
     for _idx, stable_id in ipairs(stable_ids) do
         local one = StatsDB.summaryByBook(source_id, stable_id)
-        if one then
-            out.total_seconds = out.total_seconds + (tonumber(one.total_seconds) or 0)
-            out.local_seconds = out.local_seconds + (tonumber(one.local_seconds) or 0)
-            out.total_pages = out.total_pages + (tonumber(one.total_pages) or 0)
-            out.pages = out.pages + (tonumber(one.pages) or 0)
-            out.last_read = math.max(out.last_read, tonumber(one.last_read) or 0)
-            local first = tonumber(one.first_read) or 0
-            if first > 0 then
-                out.first_read = out.first_read == 0 and first or math.min(out.first_read, first)
-            end
+        out.total_seconds = out.total_seconds + one.total_seconds
+        out.local_seconds = out.local_seconds + one.local_seconds
+        out.total_pages = out.total_pages + one.total_pages
+        out.pages = out.pages + one.pages
+        out.last_read = math.max(out.last_read, one.last_read)
+        if one.first_read > 0 then
+            out.first_read = out.first_read == 0 and one.first_read or math.min(out.first_read, one.first_read)
         end
     end
     return out
