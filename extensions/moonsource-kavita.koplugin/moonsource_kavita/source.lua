@@ -26,6 +26,7 @@ pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「
 --]]
 
 local Client = require("moonsource_kavita.client")
+local Annotation = require("moonsource_kavita.annotation")
 local Position = require("moonsource_kavita.position")
 local Stats = require("moonsource_kavita.stats")
 local SourceBase = require("source.base")
@@ -50,6 +51,7 @@ local STATS_STATE_FILE = "/moonsource_kavita_stats.lua"
 ---@class KavitaSource : SourceBase
 ---@field client KavitaClient
 ---@field _heartbeat KavitaHeartbeat|nil 阅读期进度心跳；无则未在跑
+---@field _user_id integer|false|nil 当前用户 id（false = 取不到，不再重试）
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -1241,62 +1243,226 @@ local function utf16Length(s)
     return n
 end
 
---- 划线推到 Kavita：没 id 的新建、备注改过的更新，id 原地回填由核心落库。
---- Kavita 只认 epub 注解；删除不同步（远端删除接口未确认，宁可多留不误删）。
---- 有一条成功就算成功（回填的 id 要落库，否则重试会重复建），失败的那几条没 id，下次笔记变动再推；
---- 全部失败才报错，脏标记留着重试。
+--- 当前 Kavita 用户 id（`/api/Users/me`）：账号开了「查看他人注解」后对账列表会混入别人的条目，
+--- 认领 / 改写别人的条目会整批 400。取不到（老实例没这个接口）就不做属主过滤——
+--- 宁可多认几条，也不能让整个同步停摆。结果缓存在实例上：一次会话里当前用户不会变。
+---@param source KavitaSource
+---@param cb fun(user_id: integer|nil)
+---@return HttpJob|{ cancel: fun() }|nil
+local function withCurrentUserId(source, cb)
+    if source._user_id ~= nil then
+        -- 缓存命中也要下一帧回调：源契约要求 cancel 句柄先于回调成立。
+        return SourceBase.defer(cb, source._user_id or nil)
+    end
+    return source.client:json("GET", "/api/Users/me", nil, nil, function(data)
+        -- 失败也记下来（false）：每轮推送都先打一次 404 只会拖慢同步。
+        source._user_id = data and tonumber(data.id) or false
+        cb(source._user_id or nil)
+    end)
+end
+
+--- 这一条要不要推：没 id 的本地新划线，或备注与上次同步的基线不同。
+--- 书签（没有 drawer）与墓碑不走这里。
+---@param ann table
+---@return boolean
+local function needsPush(ann)
+    if not (ann.drawer and type(ann.pos0) == "string" and type(ann.text) == "string") then return false end
+    if not ann.kavita_id then return true end
+    return not Annotation.sameNote(ann.note, ann.kavita_note)
+end
+
+--- 划线推到 Kavita：先按章对账一次，再逐条新建 / 更新，远端 id 原地回填给核心落库。
+---
+--- 幂等的真相源是「每次推送前按章拉一遍远端注解」，payload 里的 kavita_id 只是快路径：
+--- 上传期间用户又划线（stale）、workdir 清空、pos0 漂移都靠下一轮对账自愈，不需要本地映射文件。
+--- 全有或全无：任一写请求失败就整批报错留脏（已建成的条目下轮按内容键认领，不会重复建）。
+--- 删除不在这里做（见票 17）：本批墓碑只用来把待删的 id 从对账列表里剔掉。
 ---@param identity BookIdentity
 ---@param annotations table[]
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, data: { pushed: integer, adopted: integer, conflicts: integer }|nil)
 ---@return { cancel: fun() }
 function Source:pushNotesAsync(identity, annotations, cb)
     local job, cancelled = nil, false
     job = self:entry(identity, function(entry, err)
         if cancelled then return end
         if not entry then return cb(nil, err) end
-        if entry.format ~= "epub" then return cb(true) end
+        if entry.format ~= "epub" then return cb(true, nil, { pushed = 0 }) end
         local path = downloaded(self.id, identity.stable_id)
-        local pending = {}
+
+        -- 墓碑（kavita_deleted + id）不推、也不许被认领：删了又原地划一条同键的，
+        -- 认领会把它挂到马上要删的那条上。
+        local tombstoned, pending = {}, {}
         for _idx, ann in ipairs(annotations) do
-            if ann.drawer and type(ann.pos0) == "string" and type(ann.text) == "string"
-                and (not ann.kavita_id or (ann.kavita_note or "") ~= (ann.note or "")) then
+            local dead_id = ann.kavita_deleted and tonumber(ann.kavita_id)
+            if dead_id then
+                tombstoned[dead_id] = true
+            elseif needsPush(ann) then
                 pending[#pending + 1] = ann
             end
         end
-        local index, pushed, failed = 0, 0, nil
-        local function nextOne()
-            index = index + 1
-            local ann = pending[index]
-            if not ann then
-                if pushed == 0 and failed then return cb(nil, failed) end
-                return cb(true)
-            end
-            local anchor = Position.anchor(ann.text, ann.pos0, path) or {}
-            local body = {
-                id = ann.kavita_id,
-                chapterId = entry.chapterId, volumeId = entry.volumeId,
-                libraryId = entry.libraryId, seriesId = entry.seriesId,
-                ownerUserId = 0,
-                xPath = anchor.xPath or "", endingXPath = anchor.endingXPath or "",
-                selectedText = ann.text, comment = ann.note or "", commentHtml = "",
-                selectedSlotIndex = 0, containsSpoiler = false,
-                pageNumber = anchor.pageNumber or Position.spine(ann.pos0) or 0,
-                highlightCount = utf16Length(ann.text),
-            }
-            local api = ann.kavita_id and "/api/Annotation/update" or "/api/Annotation/create"
-            job = self.client:json("POST", api, nil, body, function(data, perr)
-                if cancelled then return end
-                if data then
-                    ann.kavita_id = ann.kavita_id or data.id
-                    ann.kavita_note = ann.note or ""
-                    pushed = pushed + 1
-                else
-                    failed = failed or perr
-                end
-                nextOne()
-            end)
+        if #pending == 0 then
+            -- 无可推：与「真推成功」区分开，核心才不会把 changed 谎报给首页。
+            return cb(true, nil, { pushed = 0, adopted = 0, conflicts = 0 })
         end
-        nextOne()
+
+        -- 锚点先全部算好：有一条找不回段落就整批不发（空 xPath 会让一批失败项在远端挤成同键）。
+        local plans = {}
+        for _idx, ann in ipairs(pending) do
+            local anchor = Position.anchor(ann.text, ann.pos0, path)
+            if not anchor or not anchor.xPath or anchor.xPath == "" then
+                return cb(nil, T(_("划线无法定位，本轮暂不推送：%1"), ann.text))
+            end
+            plans[#plans + 1] = { ann = ann, anchor = anchor }
+        end
+
+        job = withCurrentUserId(self, function(owner_id)
+            if cancelled then return end
+            -- 一批只对一次账：GET 失败宁可不推，也不盲建重复。
+            job = Annotation.listByChapter(self.client, entry.chapterId, owner_id, function(list, lerr)
+                if cancelled then return end
+                if not list then return cb(nil, lerr) end
+                local remote, by_id = {}, {}
+                for _idx, item in ipairs(list) do
+                    local id = tonumber(item.id)
+                    if id and not tombstoned[id] then
+                        remote[#remote + 1] = item
+                        by_id[id] = item
+                    end
+                end
+
+                --- 认领远端那条：回填 id / 坐标 / 基线，后续 update 才有原值可回传。
+                ---@param ann table 本地条目（原地改写）
+                ---@param hit table 远端 DTO
+                local function adopt(ann, hit)
+                    ann.kavita_id = tonumber(hit.id)
+                    ann.kavita_xpath, ann.kavita_ending_xpath = hit.xPath, hit.endingXPath
+                    ann.kavita_note = Annotation.noteText(hit.comment, hit.commentHtml, hit.commentPlainText)
+                    ann.kavita_comment, ann.kavita_comment_html = hit.comment, hit.commentHtml
+                    ann.kavita_slot, ann.kavita_spoiler = hit.selectedSlotIndex, hit.containsSpoiler
+                end
+
+                local pushed, adopted, conflicts, index = 0, 0, 0, 0
+                local nextOne
+
+                --- 发一次 create / update；成功回填，失败整批收摊。
+                ---@param ann table
+                ---@param anchor table Position.anchor 的结果
+                ---@param kind string "create" | "update"
+                ---@param target table|nil update 的远端 DTO
+                local function send(ann, anchor, kind, target)
+                    local note = ann.note or ""
+                    local wire = Annotation.toRemote(note)
+                    local body = {
+                        id = kind == "update" and tonumber(target.id) or nil,
+                        chapterId = entry.chapterId, volumeId = entry.volumeId,
+                        libraryId = entry.libraryId, seriesId = entry.seriesId,
+                        ownerUserId = 0,
+                        xPath = anchor.xPath, endingXPath = anchor.endingXPath,
+                        selectedText = ann.text,
+                        pageNumber = anchor.pageNumber or Position.spine(ann.pos0) or 0,
+                        highlightCount = utf16Length(ann.text),
+                        comment = wire.comment, commentHtml = wire.commentHtml,
+                        -- 未改动的两个可写字段回传远端原值，否则一次 update 就把颜色 / 剧透清成默认。
+                        selectedSlotIndex = tonumber(ann.kavita_slot) or 0,
+                        containsSpoiler = ann.kavita_spoiler == true,
+                    }
+                    local api = kind == "create" and "/api/Annotation/create" or "/api/Annotation/update"
+                    job = self.client:json("POST", api, nil, body, function(data, perr)
+                        if cancelled then return end
+                        local new_id = data and tonumber(data.id)
+                        -- update 本来就带着 id：2xx 就认，回查也只可能命中同一条，不会重复建。
+                        if not new_id and kind == "update" then new_id = tonumber(target.id) end
+                        if new_id then
+                            ann.kavita_id = new_id
+                            ann.kavita_xpath, ann.kavita_ending_xpath = anchor.xPath, anchor.endingXPath
+                            ann.kavita_note = note
+                            pushed = pushed + 1
+                            if kind == "update" then adopted = adopted + 1 end
+                            return nextOne()
+                        end
+                        if not data then return cb(nil, perr) end
+                        -- create 回了空体（反代吞掉 DTO）：按同一套键回查一次，命中才认成功。
+                        job = Annotation.listByChapter(self.client, entry.chapterId, owner_id, function(again, aerr)
+                            if cancelled then return end
+                            local hit = again and Annotation.match(again, {
+                                chapterId = entry.chapterId, xPath = anchor.xPath,
+                                endingXPath = anchor.endingXPath, selectedText = ann.text,
+                            })
+                            if not hit then return cb(nil, aerr or _("Kavita 未确认注解已创建")) end
+                            adopt(ann, hit)
+                            pushed = pushed + 1
+                            nextOne()
+                        end)
+                    end)
+                end
+
+                --- 逐条判定：有 id 走冲突表与坐标守卫，无 id 先按键认领，认不到才新建。
+                --- 跳过是纯本地判断，用循环推进，避免连续跳过时递归堆栈。
+                local function step()
+                    while true do
+                        if cancelled then return end
+                        index = index + 1
+                        local plan = plans[index]
+                        if not plan then
+                            return cb(true, nil, { pushed = pushed, adopted = adopted, conflicts = conflicts })
+                        end
+                        local ann, anchor = plan.ann, plan.anchor
+                        local note = ann.note or ""
+                        local id = tonumber(ann.kavita_id)
+                        local current = id and by_id[id]
+                        if id then
+                            -- 有 id 但远端没了 = 网页端删了：不重建、不复活（拉取侧按 dropped 出列）。
+                            if current then
+                                -- 坐标守卫：update 改不了坐标，锚点漂了硬发会把备注写到旧位置。
+                                local drifted = (ann.kavita_xpath and ann.kavita_xpath ~= ""
+                                        and ann.kavita_xpath ~= anchor.xPath)
+                                    or (ann.kavita_ending_xpath and ann.kavita_ending_xpath ~= ""
+                                        and ann.kavita_ending_xpath ~= anchor.endingXPath)
+                                if drifted then
+                                    logger.warn("kavita annotation anchor drifted; skip update", id,
+                                        ann.kavita_xpath, anchor.xPath)
+                                else
+                                    local base = ann.kavita_note or ""
+                                    local remote_note = Annotation.noteText(current.comment, current.commentHtml,
+                                        current.commentPlainText)
+                                    -- 没改备注就不写：远端怎么变都交给 pull 采纳。
+                                    if not Annotation.sameNote(note, base) then
+                                        if Annotation.sameNote(remote_note, base) then
+                                            return send(ann, anchor, "update", current)
+                                        elseif Annotation.sameNote(remote_note, note) then
+                                            -- 两边改成了同一段：只补基线，不再白写一次。
+                                            ann.kavita_note = note
+                                        else
+                                            -- 远端赢：本地改动留在 kavita_local_note 备查，下轮 pull 采纳远端文本。
+                                            ann.kavita_local_note = note
+                                            conflicts = conflicts + 1
+                                            logger.warn("kavita annotation overridden by remote", id)
+                                        end
+                                    end
+                                end
+                            end
+                        else
+                            local hit = Annotation.match(remote, {
+                                chapterId = entry.chapterId, xPath = anchor.xPath,
+                                endingXPath = anchor.endingXPath, selectedText = ann.text,
+                            })
+                            if not hit then
+                                return send(ann, anchor, "create")
+                            end
+                            adopt(ann, hit)
+                            local remote_note = Annotation.noteText(hit.comment, hit.commentHtml,
+                                hit.commentPlainText)
+                            -- 首次认领：本地空 / 与远端相同 → 只采纳 id，不覆盖网页作者的备注。
+                            if not (Annotation.sameNote(note, "") or Annotation.sameNote(note, remote_note)) then
+                                return send(ann, anchor, "update", hit)
+                            end
+                        end
+                    end
+                end
+                nextOne = step
+                step()
+            end)
+        end)
     end)
     return { cancel = function()
         cancelled = true
