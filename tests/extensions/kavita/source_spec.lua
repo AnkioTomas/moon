@@ -1737,4 +1737,207 @@ do
     Assert.eq(state:readSetting("volumes")["8661"], 1, "判定结果从空表重建后写回")
 end
 
+-- 定位：pull 只落数据，开书时按 DocumentFragment 滑窗把 cloud 划线变成 crengine xpointer。
+-- 假文档只实现定位用到的四个接口，语义按真机：`text()[k]` 逐个枚举、偏移按 codepoint 计。
+do
+    local function cp_len(s)
+        local n = 0
+        for ch in s:gmatch("[%z\1-\127\194-\244][\128-\191]*") do n = n + 1 end
+        return n
+    end
+
+    local function cp_sub(s, from, to)
+        local function byte_pos(count)
+            local seen, i = 0, 1
+            while seen < count and i <= #s do
+                local b = s:byte(i)
+                i = i + (b < 0x80 and 1 or b < 0xE0 and 2 or b < 0xF0 and 3 or 4)
+                seen = seen + 1
+            end
+            return i - 1
+        end
+        return s:sub(byte_pos(from - 1) + 1, byte_pos(to))
+    end
+
+    ---@param fragments table[] 每项是一页（DocFragment）的段落列表；段落是字符串或文本节点数组。
+    ---@param file string|nil
+    local function fakeDocument(fragments, file)
+        local elements, nodes, pages = {}, {}, {}
+        local order, fragment_text, node_offset = {}, {}, {}
+        for f, paragraphs in ipairs(fragments) do
+            local prefix = "/body/DocFragment[" .. f .. "]/body"
+            order[f] = order[f] or {}
+            for p, item in ipairs(paragraphs) do
+                local elem = prefix .. "/p[" .. p .. "]"
+                local texts = type(item) == "table" and item or { item }
+                elements[elem] = table.concat(texts)
+                for k, text in ipairs(texts) do
+                    local path = elem .. "/text()[" .. k .. "]"
+                    nodes[path] = text
+                    order[f][#order[f] + 1] = path
+                end
+                pages[elem] = f * 10
+            end
+        end
+        for f, paths in pairs(order) do
+            local acc, offsets, parts = 0, {}, {}
+            for _idx, path in ipairs(paths) do
+                offsets[path] = acc
+                acc = acc + cp_len(nodes[path])
+                parts[#parts + 1] = nodes[path]
+            end
+            fragment_text[f] = table.concat(parts)
+            node_offset[f] = offsets
+        end
+
+        local document = { file = file }
+        function document:getTextFromXPointer(xp)
+            local path = xp:gsub("%.%d+$", "")
+            return nodes[path] or elements[path]
+        end
+        function document:isXPointerInDocument(xp)
+            local path, off = xp:match("^(.*)%.(%d+)$")
+            path = path or xp
+            local text = nodes[path]
+            if text then
+                return off == nil or tonumber(off) <= cp_len(text)
+            end
+            return off == nil and elements[path] ~= nil
+        end
+        function document:getNormalizedXPointer(xp)
+            return self:isXPointerInDocument(xp) and xp or false
+        end
+        -- 真机语义：pos1 是「选区后第一个字符」的偏移（不含），跨文本节点时按片段拼接。
+        function document:getTextFromXPointers(pos0, pos1)
+            local path0, off0 = pos0:match("^(.*)%.(%d+)$")
+            local path1, off1 = pos1:match("^(.*)%.(%d+)$")
+            if not path0 or not path1 then return nil end
+            local f = tonumber(path0:match("DocFragment%[(%d+)%]"))
+            if not f or not node_offset[f] or not node_offset[f][path0] or not node_offset[f][path1] then
+                return nil
+            end
+            return cp_sub(fragment_text[f], node_offset[f][path0] + tonumber(off0) + 1,
+                node_offset[f][path1] + tonumber(off1))
+        end
+        function document:getPageFromXPointer(xp)
+            local elem = xp:match("^(.*)/text%(%)%[%d+%]%.%d+$")
+            return pages[elem] or pages[xp] or 1
+        end
+        return document
+    end
+
+    os.execute("mkdir -p '" .. WORK .. "'")
+    local book_path = WORK .. "/15-localize.epub"
+    local fh = assert(io.open(book_path, "wb"))
+    fh:write("PK\3\4epub")
+    fh:close()
+
+    local document = fakeDocument({
+        {
+            "春眠不觉晓，处处闻啼鸟。",
+            "夜来风雨声，花落知多少。",
+            { "春眠", "不觉晓" },
+            { "第一段。", "第二段在同一 p 里。" },
+            "去空白\194\160重试",
+        },
+        {
+            "另一个 DocFragment 的正文。",
+            "滑窗命中的句子。",
+        },
+    }, book_path)
+
+    local anns = {
+        {   -- 普通命中：段内偏移按 codepoint 算，page 与 reader 一致填 pos0 字符串。
+            kavita_id = 601, datetime = "2026-10-01 00:00:00", text = "处处闻啼鸟", note = "好诗",
+            kavita_note = "好诗", kavita_xpath = "//body/p[1]", kavita_ending_xpath = "//body/p[1]",
+            pageNumber = 0,
+        },
+        {   -- 多文本节点：Kavita 的 text() 下标只当提示，按 crengine 的节点枚举重新映射。
+            kavita_id = 602, text = "不觉晓", kavita_xpath = "//body/p[3]",
+            kavita_ending_xpath = "//body/p[3]", pageNumber = 0,
+        },
+        {   -- pageNumber 差一位（旧推送窗口）：spine 提示失败，靠 +1 滑窗命中。
+            kavita_id = 603, text = "滑窗命中的句子", kavita_xpath = "//body/p[2]",
+            kavita_ending_xpath = "//body/p[2]", pageNumber = 0,
+        },
+        {   -- 跨段：起点取贴段尾的最长前缀，终点取贴段首的最长后缀。
+            kavita_id = 604, text = "啼鸟。夜来", kavita_xpath = "//body/p[1]",
+            kavita_ending_xpath = "//body/p[2]", pageNumber = 0,
+        },
+        {   -- 元素下标失配（Kavita 的 p 数与 crengine 不同）：同片段同级回扫。
+            kavita_id = 605, text = "第二段在同一 p 里。", kavita_xpath = "//body/p[9]",
+            kavita_ending_xpath = "//body/p[9]", pageNumber = 0,
+        },
+        {   -- 单条失败不能拖累同书其它条：标 unlocated，不写占位坐标。
+            kavita_id = 606, text = "这句话不在书里", kavita_xpath = "//body/p[2]",
+            kavita_ending_xpath = "//body/p[2]", pageNumber = 0,
+        },
+        {   -- 同一 kavita_id 已有通过校验的坐标：直接复用，避免每次开书重算。
+            kavita_id = 607, text = "这句也找不到", kavita_xpath = "//body/p[1]",
+            kavita_ending_xpath = "//body/p[1]", pageNumber = 0,
+        },
+        {   -- 旧坐标已失效（偏移越界）：不复用，重算失败照常标 unlocated。
+            kavita_id = 608, text = "哪里都没有", kavita_xpath = "//body/p[1]",
+            kavita_ending_xpath = "//body/p[1]", pageNumber = 0,
+        },
+        {   -- 空白折叠差异（crengine 保留 NBSP，Kavita 存普通空格）：去空白重试后回算偏移。
+            kavita_id = 609, text = "去空白 重试", kavita_xpath = "//body/p[5]",
+            kavita_ending_xpath = "//body/p[5]", pageNumber = 0,
+        },
+    }
+    local current = {
+        { kavita_id = 607, pos0 = "/body/DocFragment[1]/body/p[1]/text()[1].0",
+            pos1 = "/body/DocFragment[1]/body/p[1]/text()[1].2", page = "旧", pageno = 9 },
+        { kavita_id = 608, pos0 = "/body/DocFragment[1]/body/p[1]/text()[1].999",
+            pos1 = "/body/DocFragment[1]/body/p[1]/text()[1].1000", page = "越界" },
+    }
+
+    local localized = source:localizeAnnotations(document, anns, book_path, current)
+    Assert.len(localized, #anns, "返回全量：定位失败的也在列表里")
+    Assert.eq(localized[1].kavita_id, 601)
+    Assert.eq(localized[1].pos0, "/body/DocFragment[1]/body/p[1]/text()[1].6")
+    Assert.eq(localized[1].pos1, "/body/DocFragment[1]/body/p[1]/text()[1].11")
+    Assert.eq(localized[1].page, localized[1].pos0, "page 填 pos0 字符串，不能填数字")
+    Assert.eq(localized[1].pageno, 10)
+    Assert.eq(localized[1].note, "好诗", "定位只补坐标，不动 pull 落的字段")
+    Assert.eq(localized[1].kavita_note, "好诗")
+    Assert.is_nil(localized[1].kavita_unlocated)
+
+    Assert.eq(localized[2].pos0, "/body/DocFragment[1]/body/p[3]/text()[2].0",
+        "span 内文本按 crengine 的 text()[k] 重新编号")
+    Assert.eq(localized[2].pos1, "/body/DocFragment[1]/body/p[3]/text()[2].3")
+
+    Assert.eq(localized[3].pos0, "/body/DocFragment[2]/body/p[2]/text()[1].0", "pageNumber 只当提示，+1 滑窗命中")
+    Assert.eq(localized[3].pageno, 20)
+
+    Assert.eq(localized[4].pos0, "/body/DocFragment[1]/body/p[1]/text()[1].9", "跨段起点贴段尾")
+    Assert.eq(localized[4].pos1, "/body/DocFragment[1]/body/p[2]/text()[1].2", "跨段终点贴段首")
+
+    Assert.eq(localized[5].pos0, "/body/DocFragment[1]/body/p[4]/text()[2].0", "p[9] 不存在时回扫同级")
+
+    Assert.is_true(localized[6].kavita_unlocated, "文本匹配不到就标未定位")
+    Assert.is_nil(localized[6].pos0, "未定位不写占位坐标")
+    Assert.is_nil(localized[6].pos1)
+    Assert.is_nil(localized[6].page)
+
+    Assert.eq(localized[7].pos0, "/body/DocFragment[1]/body/p[1]/text()[1].0", "复用 current 的有效坐标")
+    Assert.eq(localized[7].pos1, "/body/DocFragment[1]/body/p[1]/text()[1].2")
+    Assert.is_nil(localized[7].kavita_unlocated)
+
+    Assert.is_true(localized[8].kavita_unlocated, "旧坐标越界不能复用")
+    Assert.is_nil(localized[8].pos0)
+
+    Assert.eq(localized[9].pos0, "/body/DocFragment[1]/body/p[5]/text()[1].0", "NBSP 与普通空格差异靠去空白重试")
+    Assert.eq(localized[9].pos1, "/body/DocFragment[1]/body/p[5]/text()[1].6")
+    Assert.is_nil(localized[9].kavita_unlocated)
+
+    -- 无文档 / html_path 缺失 / 文件不存在 / 文档不是这本书 → nil（core 据此放弃应用，不覆盖 doc_settings）。
+    Assert.is_nil(source:localizeAnnotations(nil, anns, book_path, current))
+    Assert.is_nil(source:localizeAnnotations(document, anns, nil, current))
+    Assert.is_nil(source:localizeAnnotations(document, anns, "", current))
+    Assert.is_nil(source:localizeAnnotations(document, anns, WORK .. "/missing.epub", current))
+    local other = fakeDocument({ { "别的书" } }, WORK .. "/other.epub")
+    Assert.is_nil(source:localizeAnnotations(other, anns, book_path, current), "document.file 与 html_path 不一致")
+end
+
 os.execute("rm -rf '" .. WORK .. "'")
