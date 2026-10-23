@@ -140,3 +140,31 @@ do
     Assert.eq(books[1].title, "甲")
     Assert.eq(books[1].authors, "乙")
 end
+
+-- 段评：统计只留有评论的真实段（-2 是章末总评），评论页的游标是累计偏移。
+do
+    package.loaded["source.jjwxc.reviews"] = nil
+    local Reviews = require("source.jjwxc.reviews")
+    local hot = Reviews.hotspots({
+        { paragraph_id = "-2", comment_total = "130" },
+        { paragraph_id = "3", comment_total = "7" },
+        { paragraph_id = "1", comment_total = "24148" },
+        { paragraph_id = "2", comment_total = "0" },
+    })
+    Assert.len(hot, 2)
+    Assert.eq(hot[1].range, "1")
+    Assert.eq(hot[2].range, "3")
+    Assert.eq(hot[2].total, 7)
+
+    local page = Reviews.page({ commentTotal = "45", commentList = {
+        { commentId = "9", commentAuthor = "甲", commentBody = "好&amp;看<br/>真的", agreenum = "6", comment_date_time = "1792324141" },
+    } }, 20)
+    Assert.eq(page.total, 45)
+    Assert.eq(page.max_idx, 21)
+    Assert.is_true(page.more)
+    Assert.eq(page.items[1].content, "好&看\n真的")
+    Assert.eq(page.items[1].likes, 6)
+    Assert.eq(page.items[1].time, 1792324141)
+    Assert.is_false(Reviews.page({ commentTotal = "1", commentList = { { commentId = "1" } } }, 0).more)
+    Assert.is_nil((Reviews.page({}, 0)))
+end

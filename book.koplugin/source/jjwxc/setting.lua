@@ -134,8 +134,9 @@ local function showLogin()
     }:show()
 end
 
+---@param plugin table|nil
 ---@return table[]
-function Setting.rows()
+function Setting.rows(plugin)
     local Row = require("ui.themes.widgets.row")
     local rows = {
         function(iw)
@@ -146,6 +147,20 @@ function Setting.rows()
                 callback = function() showLogin() end })
         end,
     }
+    -- 段评接口匿名可读，不用登录
+    rows[#rows + 1] = function(iw)
+        local settings = require("utils.settings")
+        local on = settings.getSource(SOURCE_ID).show_paragraph_reviews == true
+        return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = "forum",
+            title = _("显示段评"), subtitle = _("阅读时给有他人段评的段落末尾画线，点按查看；需联网"),
+            status = on and _("开") or _("关"), status_on = on,
+            callback = function()
+                local cfg = settings.getSource(SOURCE_ID)
+                cfg.show_paragraph_reviews = not on
+                settings.saveSource(SOURCE_ID, cfg)
+                if plugin and plugin.desktop then plugin.desktop:updateView() end
+            end })
+    end
     if not loggedIn() then return rows end
     rows[#rows + 1] = function(iw)
         return Row.widget({ width = iw, chevron = false, kind = "action", icon = "logout", title = _("退出登录"),

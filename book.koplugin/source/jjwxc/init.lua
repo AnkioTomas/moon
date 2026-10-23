@@ -3,6 +3,7 @@
 
 书的元数据 / 目录 / 免费章正文走匿名 App 接口，VIP 章与个人收藏走手机网页 Cookie（client.lua）。
 登录是浏览器登录态的 Cookie（setting.lua）；登录后收藏双向同步（source.shelf）：拉取、本地删除上行。
+段评走网页版匿名接口（reviews.lua），设置里开关。
 最近阅读页能读到章，但没有确认能写回的接口，进度不接，避免只拉不推。笔记和统计没有接口。
 
 @module koplugin.book.source.jjwxc
@@ -11,6 +12,7 @@
 local Browse = require("source.browse")
 local Client = require("source.jjwxc.client")
 local Mapper = require("source.jjwxc.mapper")
+local ReviewCache = require("book.review_cache")
 local Shelf = require("source.shelf")
 local SourceBase = require("source.base")
 local Toc = require("source.toc")
@@ -263,6 +265,69 @@ function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
     local Chapter = require("source.chapter")
     return Chapter.cacheAllAsync(self, identity, Chapter.vipFetcher(self, Client.contentAsync, false), on_progress, cb,
         FETCH_INTERVAL, range)
+end
+
+--- 阅读页是否显示他人段评（设置页开关，默认关）。
+---@return boolean
+function Source:paragraphReviewsEnabled()
+    return require("utils.settings").getSource(self.id).show_paragraph_reviews == true
+end
+
+--- 章节序号 → 晋江章号，目录来自缓存或在线拉取；start 返回要取消的任务。
+---@param self JjwxcSource
+---@param identity BookIdentity
+---@param cb fun(value: any, err: string|nil)
+---@param start fun(chapter_id: string, finish: function): { cancel: fun() }|nil
+---@return { cancel: fun() }
+local function withChapterId(self, identity, cb, start)
+    local cancelled, job = false, nil
+    job = self:loadTocAsync(identity, function(toc, err)
+        if cancelled then return end
+        local chapter = toc and toc[tonumber(identity.chapter_idx)]
+        if not chapter then
+            cb(nil, err or _("缺少晋江章节位置"))
+            return
+        end
+        job = start(chapter.uid, cb)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
+end
+
+--- 本章有评论的段落（未定位）。
+---@param identity BookIdentity
+---@param cb fun(hotspots: JjwxcReviewHotspot[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:paragraphHotspotsAsync(identity, cb)
+    return ReviewCache.hotspotsAsync(identity, function(done)
+        return withChapterId(self, identity, done, function(uid, finish)
+            return require("source.jjwxc.reviews").hotspotsAsync(identity.stable_id, uid, finish)
+        end)
+    end, cb)
+end
+
+--- 段落按段末文字定位到章节 HTML（子进程里跑，不碰实例状态）。
+---@param hotspots JjwxcReviewHotspot[]
+---@param html string
+---@return table[]
+function Source:locateHotspots(hotspots, html)
+    return require("source.jjwxc.reviews").locate(hotspots, html)
+end
+
+--- 某段的一页评论；range 是段落序号，max_idx 是翻页偏移（首页 0）。
+---@param identity BookIdentity
+---@param range string
+---@param max_idx integer
+---@param cb fun(page: WechatReviewPage|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:paragraphReviewPageAsync(identity, range, max_idx, cb)
+    return ReviewCache.pageAsync(identity, range, max_idx, function(done)
+        return withChapterId(self, identity, done, function(uid, finish)
+            return require("source.jjwxc.reviews").pageAsync(identity.stable_id, uid, tonumber(range), max_idx, finish)
+        end)
+    end, cb)
 end
 
 return Jjwxc
