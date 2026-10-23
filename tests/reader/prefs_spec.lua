@@ -163,6 +163,7 @@ local ui = {
         data = {},
         saveSetting = function(self, key, value) self.data[key] = value end,
         readSetting = function(self, key) return self.data[key] end,
+        delSetting = function(self, key) self.data[key] = nil end,
         flush = function() end,
     },
     typeset = {
@@ -179,6 +180,8 @@ ui.font.onSetLineSpace = function() end
 local identity = { source_id = "moon", stable_id = "book-1", chapter_idx = 1 }
 
 ui.doc_settings.data.book_reader_font_id = "demo.ttf"
+ui.doc_settings.data.style_tweaks = { lines_line_height_large = 1 }
+ui.doc_settings.data.book_style_tweak = "p { line-height: 2; }"
 Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
 Assert.is_true(type(saved_payload) == "string" and #saved_payload > 0)
 
@@ -200,8 +203,17 @@ Assert.eq(loaded.copt.font_base_weight, 0.5)
 Assert.is_nil(loaded.copt.book_font_face)
 
 -- inject 把整套 copt 写进新章 sidecar，由原生 ReadSettings 加载
-local fresh = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
+local fresh = {
+    data = { style_tweaks_enabled = false },
+    saveSetting = ui.doc_settings.saveSetting,
+    readSetting = ui.doc_settings.readSetting,
+    delSetting = ui.doc_settings.delSetting,
+}
 Assert.is_true(ReaderPrefs.inject(fresh, { file = "/chapter.html", setFontFace = function() end }))
+-- 样式微调（行距 / 段距）与自定义 CSS 跟着全书走；全书没设的键要清掉这章自己的旧值
+Assert.eq(fresh.data.style_tweaks.lines_line_height_large, 1)
+Assert.eq(fresh.data.book_style_tweak, "p { line-height: 2; }")
+Assert.is_nil(fresh.data.style_tweaks_enabled)
 Assert.eq(fresh.data.copt_font_base_weight, 0.5)
 Assert.eq(fresh.data.copt_h_page_margins[1], 40)
 Assert.eq(fresh.data.font_face, "Demo Face")
@@ -272,7 +284,7 @@ Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
 loaded = ReaderPrefs.load(identity)
 Assert.is_nil(loaded.font_id)
 Assert.eq(loaded.font_face, "Native Face")
-local reopened = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
+local reopened = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting, delSetting = ui.doc_settings.delSetting }
 Assert.is_true(ReaderPrefs.inject(reopened, { file = "/chapter.html", setFontFace = function() end }))
 Assert.eq(reopened.data.font_face, "Native Face")
 Assert.eq(reopened.data.book_reader_font_id, "")
