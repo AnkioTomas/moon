@@ -28,6 +28,7 @@ pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「
 local Client = require("moonsource_kavita.client")
 local Position = require("moonsource_kavita.position")
 local Stats = require("moonsource_kavita.stats")
+local Annotation = require("moonsource_kavita.annotation")
 local SourceBase = require("source.base")
 local logger = require("utils.log")
 local _ = require("gettext")
@@ -50,6 +51,7 @@ local STATS_STATE_FILE = "/moonsource_kavita_stats.lua"
 ---@class KavitaSource : SourceBase
 ---@field client KavitaClient
 ---@field _heartbeat KavitaHeartbeat|nil 阅读期进度心跳；无则未在跑
+---@field _owner_id integer|nil 当前 Kavita 用户 id（`/api/Users/me`）；nil = 没取过 / 取不到
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -1197,7 +1199,19 @@ function Source:putProgressAsync(identity, pos, cb)
     end }
 end
 
---- 注解快照保留 Kavita 注解 id 与已推送的备注：核心按 pos0 之外的字段一律丢弃。
+--- 快照里要原样带住的 Kavita 私有字段（spec §3.1）。`Normalize.clean` 是白名单，
+--- 漏一个 = 该字段静默消失（比如 `kavita_comment` 丢了，下次 update 会把网页富文本清空）。
+local KAVITA_FIELDS = {
+    "kavita_id", "kavita_note", "kavita_comment", "kavita_comment_html",
+    "kavita_slot", "kavita_spoiler", "kavita_modified",
+    "kavita_xpath", "kavita_ending_xpath",
+    "kavita_unlocated", "kavita_deleted", "kavita_local_note",
+}
+
+--- 注解快照保留 Kavita 全字段：核心只认识 KOReader 字段，源私有字段必须自己补回。
+--- 无 page 的有两类条目要放行：未定位（只有 `kavita_xpath`）与墓碑（只有 `kavita_deleted`），
+--- 它们过不了 `Normalize.clean` 的「datetime + page」要求。构造期拿源坐标 / 墓碑标记当占位，
+--- 清洗后再把 page 清空（同微信源的 placeholder 写法），否则一次普通保存就把它们洗掉。
 ---@param items table[]
 ---@param total_pages integer|nil
 ---@return table[]
@@ -1205,31 +1219,149 @@ function Source:cleanAnnotations(items, total_pages)
     local Normalize = require("book.note.normalize")
     local out = {}
     for _idx, item in ipairs(items) do
-        local clean = Normalize.clean({ item }, total_pages)[1]
-        if clean then
-            clean.kavita_id, clean.kavita_note = item.kavita_id, item.kavita_note
-            out[#out + 1] = clean
+        if type(item) == "table" then
+            local placeholder = not item.page and not item.pageref
+                and (item.kavita_xpath or item.kavita_deleted or item.kavita_id)
+            local source = item
+            if placeholder then
+                source = {}
+                for key, value in pairs(item) do source[key] = value end
+                source.page = placeholder
+            end
+            local clean = Normalize.clean({ source }, total_pages)[1]
+            if clean then
+                if placeholder then clean.page = nil end
+                for _i, field in ipairs(KAVITA_FIELDS) do clean[field] = item[field] end
+                out[#out + 1] = clean
+            end
         end
     end
     return out
 end
 
 --- 阅读器里的注解不带 Kavita id：按 pos0 从上一版快照接过来，免得每次保存都重建远端注解。
+--- 另外把 `previous` 里「有 id 但没有 pos0」的条目（未定位 / 墓碑）原样搬进新 payload：
+--- 它们不在阅读器快照里，不搬的话一次普通保存就把「数据在、画不出」的云端条目洗掉。
 ---@param previous table[]
 ---@param current table[]
 ---@return table[]
 function Source:prepareLocalAnnotations(previous, current)
-    local by_pos = {}
+    local by_pos, present = {}, {}
     for _idx, old in ipairs(previous) do
-        if old.kavita_id and old.pos0 then by_pos[old.pos0] = old end
+        if type(old) == "table" and old.kavita_id and old.pos0 then by_pos[old.pos0] = old end
     end
     for _idx, item in ipairs(current) do
+        if item.kavita_id then present[tostring(item.kavita_id)] = true end
         local old = item.pos0 and by_pos[item.pos0]
         if old and not item.kavita_id then
             item.kavita_id, item.kavita_note = old.kavita_id, old.kavita_note
         end
     end
+    for _idx, old in ipairs(previous) do
+        if type(old) == "table" and old.kavita_id and not old.pos0
+            and not present[tostring(old.kavita_id)] then
+            current[#current + 1] = old
+            present[tostring(old.kavita_id)] = true
+        end
+    end
     return current
+end
+
+--- 颜色槽位 → KOReader 颜色名（01 §Answer）：Kavita 只存用户调色板的槽位序号，
+--- api key 客户端读不到 palette，按索引约定映射；越界 / 未知回落 yellow（0）。颜色不参与同一性。
+local SLOT_COLORS = { [0] = "yellow", [1] = "green", [2] = "blue", [3] = "orange", [4] = "purple" }
+
+---@param slot any
+---@return string
+local function slotColor(slot)
+    return SLOT_COLORS[tonumber(slot) or 0] or "yellow"
+end
+
+--- Kavita AnnotationDto → notes payload 条目（spec §3.1 / §3.2）。
+--- 只落数据，不算坐标：`page` / `pos0` / `pos1` 是开书时 localizeAnnotations 的产物（05 §3）。
+---@param dto table
+---@return table|nil
+local function annotationPayload(dto)
+    local text = dto.selectedText
+    -- 没有选中文本的不是划线（Kavita create 也要求非空），落库也画不出来。
+    if type(text) ~= "string" or require("utils.text").trim(text) == "" then return nil end
+    if dto.id == nil or dto.id == "" then return nil end
+    -- note 与 kavita_note 必须来自同一次读回：两侧一旦有差异，推送侧每轮都会判「备注改过」。
+    local note = Annotation.noteText(dto.comment, dto.commentHtml, dto.commentPlainText)
+    -- createdUtc 是真正的 UTC；解析不出（如 0001 占位）回退当前时间，只影响显示 / 排序。
+    local created = utcTime(dto.createdUtc)
+    return {
+        datetime = os.date("%Y-%m-%d %H:%M:%S", created or os.time()),
+        drawer = "lighten",
+        color = slotColor(dto.selectedSlotIndex),
+        text = text,
+        note = note,
+        kavita_id = dto.id,
+        kavita_note = note,
+        kavita_comment = dto.comment,
+        kavita_comment_html = dto.commentHtml,
+        kavita_slot = dto.selectedSlotIndex,
+        kavita_spoiler = dto.containsSpoiler,
+        kavita_modified = dto.lastModifiedUtc,
+        kavita_xpath = dto.xPath,
+        kavita_ending_xpath = dto.endingXPath,
+    }
+end
+
+--- 当前用户 id：注解列表在账号开了「查看他人注解」时会混入别人的条目，
+--- 拉取必须按 `ownerUserId` 收窄，否则本地落一堆别人的划线、推送删改还会整批 400。
+--- 取不到（老版本 / 无权限）就降级为不过滤并记日志：多看到自己的不会丢数据，漏过滤别人的才会误删。
+---@param source KavitaSource
+---@param cb fun(owner_id: integer|nil)
+---@return HttpJob
+local function ownerIdAsync(source, cb)
+    if source._owner_id ~= nil then return SourceBase.defer(cb, source._owner_id) end
+    return source.client:json("GET", "/api/Users/me", nil, nil, function(data, err)
+        local id = type(data) == "table" and tonumber(data.id) or nil
+        if not id then
+            logger.warn("kavita annotation owner unknown; pull without owner filter", err)
+            return cb(nil)
+        end
+        source._owner_id = id
+        cb(id)
+    end)
+end
+
+--- 开书时全量拉取云端 epub 注解（spec §3.4）：只落数据、不定位，坐标留给开书时的文档。
+--- 每章一次 `GET /api/Annotation/all`（单文件 epub 即一本书一个 chapter），与推送各发一次、不做缓存。
+--- `authoritative` 恒 false：远端为空不代表本地该清空，删除语义不归这里。
+--- 失败回 `cb(nil, err)`，notes 表快照原样（离线开书只记日志）。
+---@param identity BookIdentity
+---@param cb fun(annotations: table[]|nil, err: string|nil, meta: {authoritative: boolean}|nil)
+---@return { cancel: fun() }
+function Source:pullNotesAsync(identity, cb)
+    local job, cancelled = nil, false
+    local function finish(annotations, err, meta)
+        if not cancelled then cb(annotations, err, meta) end
+    end
+    job = self:entry(identity, function(entry, err)
+        if cancelled then return end
+        if not entry then return finish(nil, err) end
+        -- 非 epub 没有 Kavita 注解（与推送侧短路一致）：零请求。
+        if entry.format ~= "epub" then return finish({}, nil, { authoritative = false }) end
+        job = ownerIdAsync(self, function(owner_id)
+            if cancelled then return end
+            job = Annotation.listByChapter(self.client, entry.chapterId, owner_id, function(list, lerr)
+                if cancelled then return end
+                if not list then return finish(nil, lerr) end
+                local annotations = {}
+                for _idx, dto in ipairs(list) do
+                    local annotation = annotationPayload(dto)
+                    if annotation then annotations[#annotations + 1] = annotation end
+                end
+                finish(annotations, nil, { authoritative = false })
+            end)
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        job:cancel()
+    end }
 end
 
 --- Kavita 的 highlightCount 按 UTF-16 码元计。
