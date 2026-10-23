@@ -19,6 +19,7 @@ local Request = require("http.request")
 local Assets = require("source.wechat.assets")
 local Text = require("utils.text")
 local Paths = require("utils.paths")
+local Toc = require("source.wechat.toc")
 local _ = require("gettext")
 
 local Chapter = {}
@@ -302,6 +303,18 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
         end }
 end
 
+--- 把脚注 aside 块放到 body 末尾（空块原样返回）。
+---@param html string
+---@param block string
+---@return string
+local function appendBlock(html, block)
+    if block == "" then return html end
+    block = block .. "\n"
+    local last = html:match(".*()</body>")
+    if not last then return html .. block end
+    return html:sub(1, last - 1) .. block .. html:sub(last)
+end
+
 --- 原书脚注是 ``<img class="qqreader-footnote" alt="注文">``，注文只在 alt 里，点了没东西可弹。
 --- 图标原样包进 noteref 链接，注文放进 body 末尾的 footnote aside，交给 KOReader 脚注弹窗。
 --- 不加 ``<p>``、不动正文文字：段落序号与字偏移不变，划线 range 照旧对得上。
@@ -328,23 +341,117 @@ local function linkFootnotes(html)
         -- alt 已是属性转义过的文本，直接当元素内容合法。
         asides[i] = string.format('<aside id="wr-fn%d" epub:type="footnote">%s</aside>', i, alt)
     end
-    local block = table.concat(asides, "\n") .. "\n"
-    local last = html:match(".*()</body>")
-    if not last then return html .. block end
-    return html:sub(1, last - 1) .. block .. html:sub(last)
+    return appendBlock(html, table.concat(asides, "\n"))
 end
 
---- 原书脚注链接带原文件名（``part0012.html#note_1``），章节落盘后文件名变了，KOReader 报「无效或外部链接」。
---- 锚点就在本章文档里的，改写成纯 ``#锚点``；锚点不在本章的（跨章）保持原样。
+--- 原书链接带原文件名（``part0012.html#note_1``、``../Text/zhushi.xhtml#zhu116``），章节落盘后文件名变了，
+--- KOReader 报「无效或外部链接」。锚点就在本章文档里的，改写成纯 ``#锚点``；跨章的留给 linkCrossNotes。
 ---@param html string
 ---@return string
 local function localizeAnchors(html)
-    return (html:gsub('href="([^"#:]+)#([^"]+)"', function(file, frag)
+    return (html:gsub('href="([^"#:]+)#([^"]+)"', function(_file, frag)
         if html:find('id="' .. frag .. '"', 1, true) or html:find('name="' .. frag .. '"', 1, true) then
             return 'href="#' .. frag .. '"'
         end
         return nil
     end))
+end
+
+--- 注释章里「锚点 id → 注文」：``<p class="noteContent"><a id="zhu116">[116]</a>注文</p>``。
+--- 注文保留原样转义（不解实体），直接当元素内容合法。
+---@param html string
+---@return table<string, string>
+local function noteTexts(html)
+    local map = {}
+    for para in html:gmatch("<p[%s>].-</p>") do
+        local id = para:match('<a[^>]-id="([^"]+)"')
+        local text = id and Text.trim((para:gsub("<[^>]+>", ""):gsub("^%s*%[%d+%]", "")))
+        if text and text ~= "" then map[id] = text end
+    end
+    return map
+end
+
+Chapter._noteTexts = noteTexts
+
+--- 注释章按目录标题认：标题带「注」（注释 / 注解 / 脚注 / 尾注）。
+---@param bookId string
+---@return string[] uids
+local function noteChapterUids(bookId)
+    local uids = {}
+    for _idx, ch in ipairs(Toc.read("wechat", bookId) or {}) do
+        if tostring(ch.title or ""):find("注", 1, true) then uids[#uids + 1] = ch.uid end
+    end
+    return uids
+end
+
+local note_files = {}
+
+--- 跨章链接（本章里找不到锚点）的目标文件 → 在注释章里取注文，做成脚注弹窗；取不到的去掉链接壳只留文字。
+--- 每个目标文件在内存里只取一次（书内常驻，注释章通常很小）。
+---@param bookId string
+---@param html string
+---@param cb fun(html: string)
+---@return { cancel: fun() }
+local function linkCrossNotes(bookId, html, cb)
+    local pending, order = {}, {}
+    for file in html:gmatch('<a%s[^>]-href="([^"#:]+)#[^"]+"') do
+        local base = Text.basename(file)
+        if not pending[base] then
+            pending[base] = true
+            order[#order + 1] = base
+        end
+    end
+    local cancelled, job = false, nil
+    local uids = noteChapterUids(bookId)
+    local function finish()
+        local notes = {}
+        html = html:gsub('<a(%s[^>]-)href="([^"#:]+)#([^"]+)"([^>]*)>(.-)</a>', function(pre, file, frag, post, inner)
+            local text = (note_files[bookId .. "\0" .. Text.basename(file)] or {})[frag]
+            if not text then return inner end
+            notes[#notes + 1] = text
+            return string.format('<a%shref="#wr-nt%d" epub:type="noteref"%s>%s</a>', pre, #notes, post, inner)
+        end)
+        local asides = {}
+        for i, text in ipairs(notes) do
+            asides[i] = string.format('<aside id="wr-nt%d" epub:type="footnote">%s</aside>', i, text)
+        end
+        cb(appendBlock(html, table.concat(asides, "\n")))
+    end
+    local function nextFile(i)
+        if cancelled then return end
+        local base = order[i]
+        if not base then return finish() end
+        local key = bookId .. "\0" .. base
+        if note_files[key] or #uids == 0 then
+            note_files[key] = note_files[key] or {}
+            return nextFile(i + 1)
+        end
+        local function try(n)
+            if n > #uids then
+                note_files[key] = {}
+                return nextFile(i + 1)
+            end
+            job = downloadPackageAsync(bookId, uids[n], function(files)
+                for name, body in pairs(files) do
+                    if Text.basename(name) == base then return body end
+                end
+                return nil, "no " .. base
+            end, function(body)
+                if cancelled then return end
+                if body then
+                    note_files[key] = noteTexts(body)
+                    return nextFile(i + 1)
+                end
+                try(n + 1)
+            end)
+        end
+        try(1)
+    end
+    nextFile(1)
+    return { cancel = function()
+            cancelled = true
+            if job then job:cancel() end
+        end }
 end
 
 --- 章节载荷：EPUB 是服务端 XHTML 原文（只把图片 / 样式表引用换成本地文件、脚注接上弹窗），TXT 是段落化正文。
@@ -358,7 +465,7 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
         return { cancel = function() end }
     end
     local title = chapter.title or string.format(_("第 %d 章"), tonumber(chapter.idx) or 0)
-    local cancelled, asset_job = false, nil
+    local cancelled, asset_job, note_job = false, nil, nil
     local reader_url = Protocol.readerUrl(bookId, chapter.uid)
     local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter, function(html, err, _source, format)
         if cancelled then return end
@@ -376,13 +483,16 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
             return fetchStyleAsync(bookId, chapter.uid, Paths.bookWorkDir(bookId, "wechat"), done)
         end, function(localized)
             if cancelled then return end
-            cb({ title = title, document = linkFootnotes(localizeAnchors(localized)) })
+            note_job = linkCrossNotes(bookId, linkFootnotes(localizeAnchors(localized)), function(document)
+                cb({ title = title, document = document })
+            end)
         end)
     end)
     return { cancel = function()
             cancelled = true
             fetch_job:cancel()
             if asset_job then asset_job:cancel() end
+            if note_job then note_job:cancel() end
         end }
 end
 

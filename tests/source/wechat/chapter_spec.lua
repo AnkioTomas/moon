@@ -156,15 +156,24 @@ do
 end
 
 do
-    -- 脚注链接带原文件名：锚点在本章里就改成 #锚点，不在的（跨章）原样保留
+    -- 脚注链接带原文件名：锚点在本章里就改成 #锚点，不在的（跨章）只留文字
     local saved = FULL
-    FULL = FULL:gsub("</body></html>\n<%?xml", '<p><a href="part0012.html#note_1">[1]</a><a href="part0013.html#other">[2]</a></p>'
+    FULL = FULL:gsub("</body></html>\n<%?xml", '<p><a href="part0012.html#note_1">[1]</a><a href="../Text/zhushi.xhtml#zhu116">[2]</a></p>'
         .. '<p id="note_1">注文</p></body></html>\n<?xml', 1)
     local payload
     Chapter.fetchContentAsync("book", { uid = "chapter", title = "第一章" }, function(p) payload = p end)
     FULL = saved
     Assert.is_true(payload.document:find('<a href="#note_1">[1]</a>', 1, true) ~= nil)
-    Assert.is_true(payload.document:find('href="part0013.html#other"', 1, true) ~= nil)
+    Assert.is_nil(payload.document:find("zhushi", 1, true))
+    Assert.is_true(payload.document:find("[2]", 1, true) ~= nil)
+end
+
+do
+    -- 注释章：锚点 id → 注文（去掉 [n] 序号与标签，保留实体转义）
+    local notes = Chapter._noteTexts('<p class="noteContent"><a href="../Text/chapter32.xhtml#zw116" id="zhu116">[116]</a>当时多用沙子&amp;吸干墨迹。</p>'
+        .. '<p>无锚点</p><p class="noteContent"><a id="zhu117">[117]</a></p>')
+    Assert.eq(notes.zhu116, "当时多用沙子&amp;吸干墨迹。")
+    Assert.is_nil(notes.zhu117)
 end
 
 do
