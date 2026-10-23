@@ -143,15 +143,26 @@ function Detail:refresh()
     UIManager:setDirty(self, "ui")
 end
 
---- 读本机阅读统计（汇总 + 最近 N 天）。书城预览书未读过，无本机数据可查，直接跳过。
+--- 读本机阅读统计（汇总 + 最近 N 天 + 云端会话）。书城预览书未读过，无本机数据可查，直接跳过。
+--- 多卷书（如 Kavita 多卷 series）的统计记在卷行上：由属主源给出要合并的身份，
+--- 容器详情页把这些卷的时长 / 页数 / 会话并成一本展示。
 function Detail:loadStats()
     local book = self.book
     if self.origin == "store" then
         return
     end
     local StatsDB = require("book.stats_db")
-    self._stats = StatsDB.summaryByBook(book.source_id, book.stable_id)
-    self._daily = StatsDB.dailyByBook(book.source_id, book.stable_id, 30)
+    local ids = { book.stable_id }
+    local owner = require("desktop.detail.common").bookOwnerSource(book, self.source)
+    if owner and type(owner.statsIdentities) == "function" then
+        local ok, more = pcall(owner.statsIdentities, owner, book)
+        if ok and type(more) == "table" and #more > 0 then
+            ids = more
+        end
+    end
+    self._stats = StatsDB.summaryByBooks(book.source_id, ids)
+    self._daily = StatsDB.dailyByBooks(book.source_id, ids, 30)
+    self._sessions = StatsDB.sessionsByBook(book.source_id, ids, 10)
 end
 
 --- 刮削/编辑结束后重读 books 行并重画：元数据与封面都只在重建时取，

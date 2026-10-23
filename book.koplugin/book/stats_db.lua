@@ -7,7 +7,8 @@ sync_status=0 表示待上传，1 表示已与远端同步，2 表示从 KOReade
 身份即 BookIdentity(source_id + stable_id)，天然按源隔离。
 
 record_type：page / page_rollup 为本地采集；day / hour / total 为账户合成桶；book_total / book_day 为云端单书
-（stable_id 为真实书 id）；book 为旧版周排行，已不再写入。
+（stable_id 为真实书 id）；cloud_session 为云端单条阅读会话（只给「阅读记录」列表，不参与时长汇总）；
+book 为旧版周排行，已不再写入。
 
 不变量：
   - 身份唯一索引必须含 record_type（v1 漏了会让压缩撞删 page）。
@@ -34,6 +35,8 @@ local StatsDB = {
 local DAY_RECORD = "day"
 local HOUR_RECORD = "hour"
 local ROLLUP_RECORD = "page_rollup"
+--- 云端单条阅读会话：详情 / 统计页「阅读记录」列出真实起止时段用。
+local SESSION_RECORD = "cloud_session"
 local LOCAL_RECORDS = { page = true, [ROLLUP_RECORD] = true }
 
 DB.schema("reading_stats", function()
@@ -410,7 +413,7 @@ function StatsDB.replaceSynced(source_id, replace, rows)
         for _idx, stable_id in ipairs(replace and replace.books or {}) do
             if not DB.exec(
                 [[DELETE FROM reading_stats WHERE source_id=? AND stable_id=?
-                    AND record_type IN ('book_day','book_total');]],
+                    AND record_type IN ('book_day','book_total','cloud_session');]],
                 source_id, stable_id
             ) then
                 return nil
@@ -491,16 +494,24 @@ function StatsDB.summaryByBook(source_id, stable_id)
         source_id,
         stable_id
     )
-    local local_seconds, fresh_seconds, pages, last_read, total_pages = DB.rowexec(
+    local local_seconds, fresh_seconds, pages, total_pages = DB.rowexec(
         [[SELECT COALESCE(SUM(duration),0),
                  COALESCE(SUM(CASE WHEN sync_status=0 OR start_time>=? THEN duration ELSE 0 END),0),
                  COALESCE(SUM(event_count),0),
-                 COALESCE(MAX(CASE WHEN record_type='page_rollup'
-                    THEN last_time ELSE start_time END),0),
                  COALESCE(MAX(total_pages),0)
           FROM reading_stats WHERE source_id=? AND stable_id=?
             AND record_type IN ('page','page_rollup');]],
         tonumber(fetched_at) or 0,
+        source_id,
+        stable_id
+    )
+    -- 上次阅读时间：本机逐页 + 云端单书日 / 会话都算。只有云端时长的书（例如交给 kamare
+    -- 打开、Moon 自己没记逐页记录）不能因为 pages=0 就显示成 1970 / 暂无阅读记录。
+    local last_read = DB.rowexec(
+        [[SELECT COALESCE(MAX(CASE WHEN record_type='page_rollup'
+                    THEN last_time ELSE start_time END),0)
+          FROM reading_stats WHERE source_id=? AND stable_id=?
+            AND record_type IN ('page','page_rollup','book_day','cloud_session');]],
         source_id,
         stable_id
     )
@@ -510,7 +521,7 @@ function StatsDB.summaryByBook(source_id, stable_id)
     end
     local first_read = DB.rowexec(
         [[SELECT COALESCE(MIN(start_time),0) FROM reading_stats WHERE source_id=? AND stable_id=?
-            AND record_type IN ('page','page_rollup','book_day');]],
+            AND record_type IN ('page','page_rollup','book_day','cloud_session');]],
         source_id,
         stable_id
     )
@@ -686,6 +697,106 @@ function StatsDB.dailyByBook(source_id, stable_id, limit)
     return rows
 end
 
+--- 多卷书：把各卷身份的统计合成一本（系列容器详情页用）。
+--- 各身份的行互不重叠（多卷系列的进度 / 统计都记在卷行上），直接相加不会重复。
+---@param source_id string
+---@param stable_ids string|string[]
+---@return { total_seconds: number, local_seconds: number, total_pages: number, pages: number, last_read: number, first_read: number }
+function StatsDB.summaryByBooks(source_id, stable_ids)
+    if type(stable_ids) ~= "table" then return StatsDB.summaryByBook(source_id, stable_ids) end
+    local out = {
+        total_seconds = 0, local_seconds = 0, total_pages = 0, pages = 0, last_read = 0, first_read = 0,
+    }
+    for _idx, stable_id in ipairs(stable_ids) do
+        local one = StatsDB.summaryByBook(source_id, stable_id)
+        if one then
+            out.total_seconds = out.total_seconds + (tonumber(one.total_seconds) or 0)
+            out.local_seconds = out.local_seconds + (tonumber(one.local_seconds) or 0)
+            out.total_pages = out.total_pages + (tonumber(one.total_pages) or 0)
+            out.pages = out.pages + (tonumber(one.pages) or 0)
+            out.last_read = math.max(out.last_read, tonumber(one.last_read) or 0)
+            local first = tonumber(one.first_read) or 0
+            if first > 0 then
+                out.first_read = out.first_read == 0 and first or math.min(out.first_read, first)
+            end
+        end
+    end
+    return out
+end
+
+--- 多卷书按天聚合（各卷同一天相加）；参数与 dailyByBook 同。
+---@param source_id string
+---@param stable_ids string|string[]
+---@param limit number|nil
+---@return table[] rows { ymd, seconds, pages }（日期倒序）
+function StatsDB.dailyByBooks(source_id, stable_ids, limit)
+    if type(stable_ids) ~= "table" then return StatsDB.dailyByBook(source_id, stable_ids, limit) end
+    if #stable_ids == 0 then return {} end
+    local marks, filter_args = {}, {}
+    for _idx, stable_id in ipairs(stable_ids) do
+        marks[#marks + 1] = "?"
+        filter_args[#filter_args + 1] = stable_id
+    end
+    local cte, args = bookDays(source_id,
+        " AND r.stable_id IN (" .. table.concat(marks, ",") .. ")", filter_args)
+    args[#args + 1] = math.max(1, tonumber(limit) or 5)
+    local result, nrows = DB.query(
+        cte .. [[SELECT day, COALESCE(SUM(seconds),0), COALESCE(SUM(pages),0)
+          FROM bd GROUP BY day ORDER BY day DESC LIMIT ?;]],
+        unpack(args)
+    )
+    local rows = {}
+    for i = 1, nrows do
+        rows[#rows + 1] = {
+            ymd = result[1][i],
+            seconds = tonumber(result[2][i]) or 0,
+            pages = tonumber(result[3][i]) or 0,
+        }
+    end
+    return rows
+end
+
+--- 单本书 / 多卷书的阅读会话（云端会话行）：详情页「阅读记录」列真实起止时段。
+--- 本机有逐页记录的天不列云端会话，避免同一次阅读在列表里出现两遍。
+---@param source_id string
+---@param stable_ids string|string[]
+---@param limit number|nil 最多返回条数，默认 10
+---@return table[] rows { start_time: number, duration: number, pages: number, stable_id: string }（开始时间倒序）
+function StatsDB.sessionsByBook(source_id, stable_ids, limit)
+    local ids = type(stable_ids) == "table" and stable_ids or { stable_ids }
+    if #ids == 0 then return {} end
+    local marks, args = {}, { source_id }
+    for _idx, stable_id in ipairs(ids) do
+        marks[#marks + 1] = "?"
+        args[#args + 1] = stable_id
+    end
+    args[#args + 1] = math.max(1, tonumber(limit) or 10)
+    local result, nrows = DB.query(
+        [[SELECT r.stable_id, r.start_time, r.duration, r.event_count
+          FROM reading_stats r
+          WHERE r.source_id=? AND r.stable_id IN (]] .. table.concat(marks, ",") .. [[)
+            AND r.record_type='cloud_session'
+            AND NOT EXISTS (
+              SELECT 1 FROM reading_stats l
+               WHERE l.source_id=r.source_id AND l.stable_id=r.stable_id
+                 AND l.record_type IN ('page','page_rollup')
+                 AND date(l.start_time,'unixepoch','localtime')
+                     = date(r.start_time,'unixepoch','localtime'))
+          ORDER BY r.start_time DESC LIMIT ?;]],
+        unpack(args)
+    )
+    local rows = {}
+    for i = 1, nrows do
+        rows[#rows + 1] = {
+            stable_id = result[1][i],
+            start_time = tonumber(result[2][i]) or 0,
+            duration = tonumber(result[3][i]) or 0,
+            pages = tonumber(result[4][i]) or 0,
+        }
+    end
+    return rows
+end
+
 --- 按天聚合某源阅读统计（本地洞察日历、首页热力图用）。
 ---@param source_id string|string[]
 ---@param start_ts number|nil 与 end_ts 同给时只聚合 [start_ts, end_ts)，走 (source_id, start_time) 索引
@@ -787,12 +898,21 @@ end
 ---@param from_ts number 起（含）
 ---@return table[] rows { source_id, stable_id, start_time, duration, pages }
 function StatsDB.sessionRows(source_id, from_ts)
-    local src, args = DB.sourceClause("source_id", source_id)
+    local src, args = DB.sourceClause("r.source_id", source_id)
     args[#args + 1] = tonumber(from_ts) or 0
     local result, nrows = DB.query(
-        [[SELECT source_id, stable_id, start_time, duration, event_count FROM reading_stats
-          WHERE ]] .. src .. [[ AND record_type IN ('page','page_rollup') AND start_time>=?
-          ORDER BY start_time, id;]],
+        [[SELECT r.source_id, r.stable_id, r.start_time, r.duration, r.event_count
+          FROM reading_stats r
+          WHERE ]] .. src .. [[ AND r.start_time>=?
+            AND (r.record_type IN ('page','page_rollup')
+              -- 云端会话只补本机没有逐页记录的书 / 天，别和本机会话重复列一次。
+              OR (r.record_type='cloud_session' AND NOT EXISTS (
+                    SELECT 1 FROM reading_stats l
+                     WHERE l.source_id=r.source_id AND l.stable_id=r.stable_id
+                       AND l.record_type IN ('page','page_rollup')
+                       AND date(l.start_time,'unixepoch','localtime')
+                           = date(r.start_time,'unixepoch','localtime'))))
+          ORDER BY r.start_time, r.id;]],
         unpack(args)
     )
     local rows = {}
