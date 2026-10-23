@@ -104,6 +104,7 @@ local open_files = {
     ["/b2.epub"] = { source_id = "unlocated", stable_id = "book2.epub" },
     ["/b3.epub"] = { source_id = "authoritative", stable_id = "book.epub", chapter_idx = 2 },
     ["/b4.epub"] = { source_id = "dropped", stable_id = "book8.epub" },
+    ["/b6.epub"] = { source_id = "dedupe", stable_id = "book9.epub" },
 }
 package.preload["book.store"] = function()
     return { identityFor = function(file) return open_files[file] end }
@@ -660,6 +661,57 @@ do
         source_id = "dropped", stable_id = "book8.epub", source = legacy,
     }), 0)
     Assert.eq(#current_annotations, 1, "没有 dropped 第二返回值时仍按条数保护跳过")
+end
+
+-- 远端同键去重穿过条数保护：第一次修正时 doc_settings 里旧有 5 条（37 / 43 都在），
+-- 合并后只剩 4 条 + 1 条被抑制（deduped）。守卫必须把 deduped 算回来，否则重复条目永远修不掉；
+-- 没有 dropped / deduped 解释的「少一条」仍按误删拦住。
+do
+    local JSON = require("json")
+    local function ann(page)
+        return { datetime = "2026-10-05", page = page, pos0 = page, pos1 = page .. ".5",
+            drawer = "lighten", text = "线" }
+    end
+    local five = { ann("/body/p[1]"), ann("/body/p[2]"), ann("/body/p[3]"), ann("/body/p[4]"), ann("/body/p[5]") }
+    rows["dedupe:book9.epub:0"] = {
+        source_id = "dedupe", stable_id = "book9.epub", chapter_idx = 0,
+        payload = JSON.encode(five), updated_at = 9, sync_status = 1,
+    }
+    local current_annotations = five
+    local ui9 = {
+        document = { file = "/b6.epub", getPageCount = function() return 10 end },
+        doc_settings = {
+            flush = function() end,
+            readSetting = function(_, name)
+                if name == "annotations" then return current_annotations end
+            end,
+            saveSetting = function(_, name, value)
+                if name == "annotations" then current_annotations = value end
+            end,
+        },
+    }
+    local deduping = {
+        id = "dedupe",
+        mergeAnnotations = function(_, _remote, _current, _paging, _authoritative)
+            return { five[1], five[2], five[3], five[4] }, 0, 1
+        end,
+    }
+    Assert.eq(SessionNote.applyLocal(ui9, {
+        source_id = "dedupe", stable_id = "book9.epub", source = deduping,
+    }), 4, "deduped 计入守卫：4 merged + 1 deduped vs 5 current → 放行")
+    Assert.eq(#current_annotations, 4)
+
+    current_annotations = five
+    local losing = {
+        id = "dedupe",
+        mergeAnnotations = function(_, _remote, _current, _paging, _authoritative)
+            return { five[1], five[2], five[3], five[4] }
+        end,
+    }
+    Assert.eq(SessionNote.applyLocal(ui9, {
+        source_id = "dedupe", stable_id = "book9.epub", source = losing,
+    }), 0, "没解释的丢条仍被拦住")
+    Assert.eq(#current_annotations, 5, "旧快照原样保留")
 end
 
 -- 删除事件判据（spec §9.1）：index_modified < 0 取 changed[1] 作被删条目传给源；

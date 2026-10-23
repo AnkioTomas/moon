@@ -166,11 +166,12 @@ local function applySnapshot(ui, identity)
     if not annotations then
         return 0
     end
-    -- 注解形态跟文档走：ReaderUI 只会挂 rolling 或 paging 其中之一
-    -- dropped = 源主动判定为「远端已删」的条数，用于给下面的条数保护放行（老源无第二值 ⇒ nil）。
-    local dropped
+    -- 注解形态跟文档走：ReaderUI 只会挂 rolling 或 paging 其中之一。
+    -- dropped = 源主动判定为「远端已删」的条数；deduped = 远端同键重复被抑制（不画）的条数。
+    -- 两者都是「合并后条数变少」的正当原因（老源不返回第二 / 第三值 ⇒ nil）。
+    local dropped, deduped
     if source and type(source.mergeAnnotations) == "function" then
-        annotations, dropped = source:mergeAnnotations(
+        annotations, dropped, deduped = source:mergeAnnotations(
             annotations, current, ui.paging ~= nil, authoritative
         )
     else
@@ -179,10 +180,11 @@ local function applySnapshot(ui, identity)
     -- 合并结果条数少于阅读器现有条数，说明本地有条目被判成不可渲染而被丢弃。
     -- 这里是整体覆盖 doc_settings，写下去就是永久删除用户划线：宁可这次不显示
     -- 云端划线，也不能删本地的。（分页文档的 page 是数字，曾经被误判过一次。）
-    -- dropped 是源对「远端已删」的明确判定，要算回来，否则合法删除永远被这道保险挡住。
-    if #annotations + (dropped or 0) < #current and not authoritative then
+    -- dropped / deduped 是源给出的明确解释，要算回来，否则合法删除永远被这道保险挡住：
+    -- 第一次修正远端重复时 doc_settings 旧有 5 条、合并后 4 条 + deduped 1，不算下来就永远修不掉。
+    if #annotations + (dropped or 0) + (deduped or 0) < #current and not authoritative then
         logger.warn("book.note apply skip: merge would drop local annotations",
-            identity.stable_id, #current, #annotations, dropped or 0)
+            identity.stable_id, #current, #annotations, dropped or 0, deduped or 0)
         return 0
     end
     if #annotations == 0 and #current == 0 then
