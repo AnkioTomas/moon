@@ -40,7 +40,7 @@ end
 
 ---@return boolean
 function Source:configured()
-    return Client.cookie() ~= nil
+    return Client.cookie() ~= nil or Client.token() ~= nil
 end
 
 --- 收藏页的书名是截断的：本地没有完整元数据（封面是标志）的书逐本补拉详情，拉不到就退回页面上的书名。
@@ -81,7 +81,10 @@ local Remote = {}
 
 function Remote:shelfSyncAsync(cb)
     local cancelled, job, fill = false, nil, nil
-    job = Client.favAsync(Client.cookie(), function(rows, err)
+    local cookie = Client.cookie()
+    local fetch = cookie and function(done) return Client.favAsync(cookie, done) end
+        or function(done) return Client.tokenFavAsync(Client.token(), done) end
+    job = fetch(function(rows, err)
         if cancelled then return end
         if not rows then cb(nil, err); return end
         fill = fillDetails(rows, cb)
@@ -99,6 +102,9 @@ function Remote:addToShelfAsync(_stable_id, cb)
 end
 
 function Remote:removeFromShelfAsync(stable_id, cb)
+    if not Client.cookie() then
+        return SourceBase.defer(cb, nil, _("账号密码登录暂不支持取消收藏，请用浏览器登录"))
+    end
     return Client.favRemoveAsync(stable_id, cb)
 end
 

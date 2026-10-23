@@ -39,18 +39,24 @@ function Client.cookie()
     return type(cookie) == "string" and cookie ~= "" and cookie or nil
 end
 
+---@return string|nil
+function Client.token()
+    local token = require("utils.settings").getSource(SOURCE_ID).token
+    return type(token) == "string" and token ~= "" and token or nil
+end
+
 ---@param path string
 ---@param params table<string, any>
 ---@param cb fun(wire: table|nil, err: string|nil)
----@return HttpJob
 ---@param ratio number|nil 超时倍率，缺省 0.5
-local function appGet(path, params, cb, ratio)
+---@return HttpJob
+local function appGet(path, params, cb, ratio, headers)
     local query = {}
     for key, value in pairs(params) do query[#query + 1] = key .. "=" .. tostring(value) end
     table.sort(query)
     return Request.get(APP .. path .. "?" .. table.concat(query, "&"), {
         accept = "application/json",
-        headers = APP_HEADERS,
+        headers = headers or APP_HEADERS,
         timeout = require("http.timeout").net(ratio or 0.5),
     }, function(raw, err)
         if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
@@ -58,6 +64,108 @@ local function appGet(path, params, cb, ratio)
         if not ok or type(wire) ~= "table" then cb(nil, _("响应无效")); return end
         cb(wire)
     end)
+end
+
+-- 登录接口的版本号与 App 内置的 DES 密钥（密钥写在 App 里，不是用户机密）。
+local LOGIN_VERSION = 402
+local DES_KEY, DES_IV = "KW8Dvm2N", "1ae2c94b"
+local ACCOUNT_HEADERS = {
+    ["User-Agent"] = "Mobile",
+    ["Accept-Encoding"] = "identity",
+    ["Referer"] = "http://android.jjwxc.net?v=" .. LOGIN_VERSION,
+}
+-- 要求设备验证（手机 / 邮箱验证码）的 code。
+local DEVICE_VERIFY_CODE = 221003
+
+---@param value any
+---@return string|nil
+local function nonEmpty(value)
+    return type(value) == "string" and value ~= "" and value or nil
+end
+
+---@param n integer
+---@param alphabet string
+---@return string
+local function randomString(n, alphabet)
+    local out = {}
+    for i = 1, n do
+        local k = math.random(#alphabet)
+        out[i] = alphabet:sub(k, k)
+    end
+    return table.concat(out)
+end
+
+--- 账号密码登录，拿 App token。
+--- 回调 (token) / (nil, err) / (nil, message, "verify")：后者表示要先做设备验证再带 checktype + code 重试。
+---@param account string
+---@param password string
+---@param verify { checktype: "phone"|"email", code: string }|nil
+---@param cb fun(token: string|nil, err: string|nil, kind: "verify"|nil)
+---@return HttpJob
+function Client.loginAsync(account, password, verify, cb)
+    local Des = require("source.jjwxc.des")
+    local identifiers = randomString(20, "0123456789") .. ":" .. randomString(16, "0123456789abcdef") .. "d4:"
+    local params = {
+        loginName = Text.urlEncode(account),
+        encode = 1,
+        loginPassword = Text.urlEncode(Des.encryptBase64(password, DES_KEY, DES_IV)),
+        sign = Text.urlEncode(Des.encryptBase64(os.time() * 1000 .. "_" .. identifiers .. "_", DES_KEY, DES_IV)),
+        identifiers = Text.urlEncode(identifiers),
+        autologin = 1,
+        versionCode = LOGIN_VERSION,
+    }
+    if verify then
+        params.checktype = verify.checktype
+        params.checkdevicecode = Text.urlEncode(verify.code)
+    end
+    return appGet("/login", params, function(wire, err)
+        if not wire then cb(nil, err); return end
+        if type(wire.token) == "string" and wire.token ~= "" then cb(wire.token); return end
+        if tonumber(wire.code) == DEVICE_VERIFY_CODE and not verify then
+            cb(nil, nonEmpty(wire.message) or _("晋江要求设备验证"), "verify")
+            return
+        end
+        cb(nil, nonEmpty(wire.message) or _("晋江登录失败"))
+    end, 1, ACCOUNT_HEADERS)
+end
+
+--- 让晋江给账号绑定的手机 / 邮箱发设备验证码。
+---@param account string
+---@param checktype "phone"|"email"
+---@param cb fun(message: string|nil, err: string|nil)
+---@return HttpJob
+function Client.sendCodeAsync(account, checktype, cb)
+    local headers = { ["User-Agent"] = "Mobile", ["Accept-Encoding"] = "identity" }
+    return Request.post("https://app.jjwxc.org/appDevicesecurityAndroid/getDeviceSecurityCode",
+        Text.formEncode({ versionCode = 401, username = account, checktype = checktype }), {
+        accept = "application/json",
+        headers = headers,
+        content_type = "application/x-www-form-urlencoded",
+        timeout = require("http.timeout").net(1),
+    }, function(raw, err)
+        if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
+        local ok, wire = pcall(JSON.decode, raw)
+        if not ok or type(wire) ~= "table" then cb(nil, _("响应无效")); return end
+        -- 发送成功时提示语在 data.message；失败（如 2021 缺少前置步骤、1004）只有顶层 message
+        local sent = type(wire.data) == "table" and wire.data.message
+        if type(sent) == "string" and sent ~= "" and tonumber(wire.code) ~= 1004 then cb(sent); return end
+        cb(nil, nonEmpty(wire.message) or _("晋江没有确认验证码已发送"))
+    end)
+end
+
+--- 带 token 的书架（App 增量收藏接口）。
+---@param token string
+---@param cb fun(rows: table[]|nil, err: string|nil)
+---@return HttpJob
+function Client.tokenFavAsync(token, cb)
+    return appGet("/incrementFavorite", { versionCode = 185, token = Text.urlEncode(token), backupTime = 1041350400, order = 1 },
+        function(wire, err)
+            if not wire then cb(nil, err); return end
+            local list = wire.addData
+            if type(list) ~= "table" then cb(nil, wire.message or _("晋江书架无法解析")); return end
+            require("source.auth").ok(SOURCE_ID)
+            cb(Mapper.tokenFavRows(list))
+        end, 1, ACCOUNT_HEADERS)
 end
 
 --- 带登录态取网页，回调 UTF-8 的 HTML。302 到登录页 = Cookie 失效。
@@ -154,6 +262,49 @@ function Client.chaptersAsync(novel_id, cb)
     return appGet("/chapterList", { novelId = novel_id, more = 0, whole = 1 }, cb)
 end
 
+--- 带 token 取章节正文：已购 VIP 章的 content 是 DES/Base64 密文，解密放子进程。
+---@param novel_id string
+---@param chapter_id string
+---@param token string
+---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil)
+---@return { cancel: fun() }
+local function tokenContentAsync(novel_id, chapter_id, token, cb)
+    local cancelled, job = false, nil
+    job = appGet("/chapterContent", {
+        novelId = novel_id, chapterId = chapter_id, versionCode = 381, token = Text.urlEncode(token),
+    }, function(wire, err)
+        if cancelled then return end
+        if not wire then cb(nil, err); return end
+        local data = type(wire.data) == "table" and wire.data.content ~= nil and wire.data or wire
+        if type(data.content) ~= "string" or data.content == "" then
+            local unpaid = tonumber(wire.code) == VIP_CODE
+            cb(nil, wire.message or _("晋江章节内容为空"), unpaid and "unpaid" or nil)
+            return
+        end
+        job = Job.run(function()
+            local content = data.content
+            if data.encryptType == "jj" then
+                content = require("source.jjwxc.des").decryptBase64(content, DES_KEY, DES_IV)
+            end
+            return { text = content }
+        end, {
+            name = "jjwxc_token_content",
+            kind = "light",
+            timeout = 60,
+            on_done = function(res)
+                if cancelled then return end
+                if res.text then cb(res.text) else cb(nil, _("晋江已购章节解密失败")) end
+            end,
+            on_failed = function(e) if not cancelled then cb(nil, tostring(e)) end end,
+            on_cancelled = function() end,
+        })
+    end, 1, ACCOUNT_HEADERS)
+    return { cancel = function()
+        cancelled = true
+        job:cancel()
+    end }
+end
+
 --- 一章正文（纯文本，段落以换行分隔）。App 接口只给免费章；VIP 章在已登录时改走网页（已购才有正文）。
 ---@param novel_id string
 ---@param chapter_id string
@@ -167,9 +318,13 @@ function Client.contentAsync(novel_id, chapter_id, cb)
             cb(wire.content)
             return
         end
-        local cookie = Client.cookie()
-        if not (wire and tonumber(wire.code) == VIP_CODE and cookie) then
+        local cookie, token = Client.cookie(), Client.token()
+        if not (wire and tonumber(wire.code) == VIP_CODE and (cookie or token)) then
             cb(nil, err or (wire and wire.message) or _("晋江章节内容为空"))
+            return
+        end
+        if not cookie then
+            job = tokenContentAsync(novel_id, chapter_id, token, cb)
             return
         end
         job = webGet("/vip/" .. novel_id .. "/" .. chapter_id, cookie, function(html, web_err, kind)

@@ -168,3 +168,19 @@ do
     Assert.is_false(Reviews.page({ commentTotal = "1", commentList = { { commentId = "1" } } }, 0).more)
     Assert.is_nil((Reviews.page({}, 0)))
 end
+
+-- App 登录用的 DES-CBC：向量来自 openssl（des-cbc，key KW8Dvm2N，iv 1ae2c94b）。
+do
+    local Des = require("source.jjwxc.des")
+    local cipher = Des.encrypt("hello-世界 password 123", "KW8Dvm2N", "1ae2c94b")
+    local hex = cipher:gsub(".", function(c) return string.format("%02x", c:byte()) end)
+    Assert.eq(hex, "6c85a3005530ad3b2e41bb2f25eb77bb5fc29c01b2df52790e15fb89ec87c576")
+    Assert.eq(Des.decrypt(cipher, "KW8Dvm2N", "1ae2c94b"), "hello-世界 password 123")
+    Assert.is_nil(Des.decrypt(cipher:sub(1, 15), "KW8Dvm2N", "1ae2c94b"))
+    Assert.is_nil(Des.decrypt(cipher, "WRONGKEY", "1ae2c94b"))
+
+    local rows = Mapper.tokenFavRows({ { novelId = 7, novelName = "甲", authorName = "乙" }, { novelname = "无号" } })
+    Assert.len(rows, 1)
+    Assert.eq(rows[1].id, "7")
+    Assert.eq(rows[1].author, "乙")
+end

@@ -93,6 +93,24 @@ function Mapper.favRows(html)
     return rows
 end
 
+--- App 书架 addData → 与网页收藏同形的 {id,title,author}；没有书号的丢弃。
+---@param list table[]
+---@return table[]
+function Mapper.tokenFavRows(list)
+    local rows = {}
+    for _idx, item in ipairs(list) do
+        local id = item.novelId or item.novelid
+        if id then
+            rows[#rows + 1] = {
+                id = tostring(id),
+                title = item.novelName or item.novelname,
+                author = item.authorName or item.authorname,
+            }
+        end
+    end
+    return rows
+end
+
 --- 收藏行 → Book。本地已有同一本（local_book）沿用其完整元数据，没有就用刚拉到的详情，都没有才退回页面上截断的书名。
 ---@param rows table[] { id, title, author, info?: table, local_book?: Book }
 ---@return Book[]

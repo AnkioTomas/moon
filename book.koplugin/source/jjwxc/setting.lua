@@ -1,9 +1,10 @@
 --[[--
 晋江源设置：登录。
 
-晋江手机网页的登录要过数美验证，墨水屏上做不了；登录态就是网页 Cookie，两种进法：
-远程管理里的「浏览器登录」（浏览器扩展交 Cookie），或在电脑浏览器登录后把 Cookie 请求头粘贴进来。
-两条路都先拉一次收藏页校验，通过才保存。
+晋江手机网页的登录要过数美验证，墨水屏上做不了；登录态有两套：
+1. 网页 Cookie：远程管理里的「浏览器登录」（浏览器扩展交 Cookie），或在电脑浏览器登录后把 Cookie 请求头粘贴进来，
+   先拉一次收藏页校验，通过才保存。能同步收藏、取消收藏、读已购 VIP 章。
+2. App token：设备上直接输账号密码（新设备要手机 / 邮箱验证码），只存 token 不存密码。能同步书架、读已购 VIP 章。
 
 @module koplugin.book.source.jjwxc.setting
 --]]
@@ -16,7 +17,8 @@ local Setting = {}
 
 ---@return boolean
 local function loggedIn()
-    return require("source.jjwxc.client").cookie() ~= nil
+    local Client = require("source.jjwxc.client")
+    return Client.cookie() ~= nil or Client.token() ~= nil
 end
 
 ---@return string, boolean
@@ -118,7 +120,7 @@ Setting.browser = {
     end,
 }
 
-local function showLogin()
+local function showCookieLogin()
     require("ui.themes.widgets.input"):new{
         title = _("晋江登录 Cookie"),
         fields = { { text = "", hint = _("在电脑浏览器登录晋江手机版后粘贴 Cookie") } },
@@ -144,7 +146,7 @@ function Setting.rows(plugin)
             return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "account_circle",
                 title = _("晋江账号"), status = status, status_on = status_on,
                 subtitle = not status_on and _("也可在「远程管理」里用浏览器授权登录") or nil,
-                callback = function() showLogin() end })
+                callback = showAccountLogin })
         end,
     }
     -- 段评接口匿名可读，不用登录
@@ -159,6 +161,7 @@ function Setting.rows(plugin)
                 cfg.show_paragraph_reviews = not on
                 settings.saveSource(SOURCE_ID, cfg)
                 if plugin and plugin.desktop then plugin.desktop:updateView() end
+                        cfg.token = nil
             end })
     end
     if not loggedIn() then return rows end
@@ -169,6 +172,98 @@ function Setting.rows(plugin)
                     text = _("确定退出晋江账号？"),
                     ok_text = _("退出登录"),
                     ok_callback = function()
+---@param token string
+local function saveToken(token)
+    local settings = require("utils.settings")
+    local cfg = settings.getSource(SOURCE_ID)
+    cfg.token = token
+    settings.saveSource(SOURCE_ID, cfg)
+    require("source.auth").ok(SOURCE_ID)
+    require("source.registry").reload()
+end
+
+local showLogin
+
+--- 设备验证：选手机或邮箱收验证码，填了再登录一次。
+---@param account string
+---@param password string
+---@param message string
+local function showVerify(account, password, message)
+    local Toast = require("ui.themes.widgets.toast")
+    local Client = require("source.jjwxc.client")
+    local checktype = "phone"
+    local function send(kind)
+        checktype = kind
+        require("ui/network/manager"):runWhenOnline(function()
+            Client.sendCodeAsync(account, kind, function(msg, err)
+                Toast:new{ text = msg or err, timeout = 3 }:show()
+            end)
+        end)
+    end
+    require("ui.themes.widgets.input"):new{
+        title = _("晋江设备验证"),
+        fields = { { label = message, text = "", hint = _("验证码"), input_type = "number" } },
+        ok_text = _("验证并登录"),
+        actions = {
+            { text = _("发到手机"), callback = function() send("phone") end },
+            { text = _("发到邮箱"), callback = function() send("email") end },
+        },
+        callback = function(code)
+            code = (code or ""):gsub("%s", "")
+            if code == "" then
+                Toast:new{ text = _("请先填写验证码"), timeout = 3 }:show()
+                return
+            end
+            showLogin(account, password, { checktype = checktype, code = code })
+        end,
+    }:show()
+end
+
+--- 账号密码登录；verify 非空表示带设备验证码重试。
+---@param account string
+---@param password string
+---@param verify { checktype: string, code: string }|nil
+function showLogin(account, password, verify)
+    local Toast = require("ui.themes.widgets.toast")
+    require("ui/network/manager"):runWhenOnline(function()
+        local waiting = require("ui.themes.widgets.progress_dialog"):new{
+            title = _("晋江账号"), text = _("正在登录…"), dismissable = false,
+        }
+        waiting:show()
+        require("source.jjwxc.client").loginAsync(account, password, verify, function(token, err, kind)
+            waiting:close()
+            if token then
+                saveToken(token)
+                Toast:new{ text = _("登录成功"), timeout = 2 }:show()
+            elseif kind == "verify" then
+                showVerify(account, password, err)
+            else
+                Toast:new{ text = err, timeout = 3 }:show()
+            end
+        end)
+    end)
+end
+
+local function showAccountLogin()
+    require("ui.themes.widgets.input"):new{
+        title = _("晋江账号登录"),
+        fields = {
+            { label = _("账号"), text = "", hint = _("笔名 / 邮箱 / 手机号") },
+            { label = _("密码"), text = "", text_type = "password" },
+        },
+        ok_text = _("登录"),
+        actions = { { text = _("用 Cookie 登录"), callback = showCookieLogin } },
+        callback = function(account, password)
+            account = (account or ""):gsub("^%s+", ""):gsub("%s+$", "")
+            if account == "" or (password or "") == "" then
+                require("ui.themes.widgets.toast"):new{ text = _("账号或密码不能为空"), timeout = 3 }:show()
+                return
+            end
+            showLogin(account, password)
+        end,
+    }:show()
+end
+
                         local settings = require("utils.settings")
                         local cfg = settings.getSource(SOURCE_ID)
                         cfg.cookie = nil
@@ -183,6 +278,6 @@ function Setting.rows(plugin)
 end
 
 --- 登录失效提示的「重新登录」直达入口（desktop.sync.promptLogin）。
-Setting.login = showLogin
+Setting.login = showAccountLogin
 
 return Setting
