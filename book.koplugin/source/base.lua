@@ -128,8 +128,8 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 ---@field syncProgressAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛进度
 ---@field syncNotesAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛笔记
 ---@field cleanAnnotations fun(self: BookSource, items: table[], total_pages: integer|nil): table[]|nil 清洗并透传源私有注解字段
----@field prepareLocalAnnotations fun(self: BookSource, previous: table[], current: table[]): table[]|nil 根据源协议生成更新/删除状态
----@field mergeAnnotations fun(self: BookSource, remote: table[], current: table[], paging: boolean|nil, authoritative: boolean): table[]|nil 按源身份语义合并注解
+---@field prepareLocalAnnotations fun(self: BookSource, previous: table[], current: table[], deleted?: table): table[]|nil 根据源协议生成更新/删除状态（deleted 为本次被删条目）
+---@field mergeAnnotations fun(self: BookSource, remote: table[], current: table[], paging: boolean|nil, authoritative: boolean): table[]|nil, integer|nil, integer|nil 按源身份语义合并注解（第二值 dropped = 远端已删条数；第三值 deduped = 远端同键重复被抑制的条数，都可为 nil）
 ---@field syncStatsAsync fun(self: BookSource, opts: { dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛统计
 ---@field deleteBookAsync fun(self: BookSource, identity: BookIdentity, cb: fun(ok: boolean, err: string|nil)): table|nil 本地优先删除（清缓存 + 墓碑），远端真删归 syncBooksAsync
 ---@field searchAsync fun(self: BookSource, keyword: string, cb: fun(res: { data: Book[] }|nil, err: string|nil)): table|nil 书城搜索（可选；有这个方法就是可搜索源，书城页按此列出）

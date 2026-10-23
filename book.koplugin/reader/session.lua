@@ -264,7 +264,7 @@ local function syncReading(plugin)
             progress_saved = ok
             pushProgress()
         end)
-        require("reader.session.note").save(plugin.ui, identity, function(ok)
+        require("reader.session.note").save(plugin.ui, identity, nil, function(ok)
             if ok and source.syncNotesAsync then
                 -- 关书只推脏注解；完整 pull 留给下次 ReaderReady，避免未收敛远端盖本地。
                 source:syncNotesAsync({
@@ -339,11 +339,11 @@ end
 
 --- 注解变化：落盘后已在线才 dirty push；离线留脏给源 onNetworkConnected，不弹联网提示。
 ---@param plugin table Book 插件实例
----@param _items table KOReader 变更描述；完整数据从 annotation.annotations 读取
-function Session.onAnnotationsModified(plugin, _items)
+---@param items table|nil KOReader 变更描述；完整数据从 annotation.annotations 读取，删除判据在 index_modified
+function Session.onAnnotationsModified(plugin, items)
     if not Session._snapshot then return end
     local identity = Session._snapshot.identity
-    require("reader.session.note").save(plugin.ui, identity, function(ok)
+    require("reader.session.note").save(plugin.ui, identity, items, function(ok)
         if not ok then return end
         local source = identity and identity.source
         if not source or not source.syncNotesAsync then return end

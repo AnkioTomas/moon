@@ -26,9 +26,11 @@ pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「
 --]]
 
 local Client = require("moonsource_kavita.client")
+local Annotation = require("moonsource_kavita.annotation")
 local Position = require("moonsource_kavita.position")
 local Stats = require("moonsource_kavita.stats")
 local SourceBase = require("source.base")
+local Normalize = require("book.note.normalize")
 local logger = require("utils.log")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -50,6 +52,7 @@ local STATS_STATE_FILE = "/moonsource_kavita_stats.lua"
 ---@class KavitaSource : SourceBase
 ---@field client KavitaClient
 ---@field _heartbeat KavitaHeartbeat|nil 阅读期进度心跳；无则未在跑
+---@field _owner_id integer|nil 当前 Kavita 用户 id（`/api/Users/me`）；nil = 没取过 / 取不到
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -1197,39 +1200,815 @@ function Source:putProgressAsync(identity, pos, cb)
     end }
 end
 
---- 注解快照保留 Kavita 注解 id 与已推送的备注：核心按 pos0 之外的字段一律丢弃。
+--- 快照里要原样带住的 Kavita 私有字段（spec §3.1）。`Normalize.clean` 是白名单，
+--- 漏一个 = 该字段静默消失（比如 `kavita_comment` 丢了，下次 update 会把网页富文本清空）。
+--- `pageNumber` 不是 `kavita_` 前缀，但同样是 Kavita 私有字段：它是开书定位时的 spine 提示
+--- （`locateAnnotation` 读 `annotation.pageNumber`），丢了这个字段的多 spine epub 只能试第 1/2 个
+--- DocFragment，第 3 个之后全部定位失败。update 时服务端忽略它，推送仍用现算的 `anchor.pageNumber`。
+local KAVITA_FIELDS = {
+    "pageNumber",
+    "kavita_id", "kavita_note", "kavita_comment", "kavita_comment_html",
+    "kavita_slot", "kavita_spoiler", "kavita_modified",
+    "kavita_xpath", "kavita_ending_xpath",
+    "kavita_unlocated", "kavita_deleted", "kavita_local_note",
+}
+
+--- 注解快照保留 Kavita 全字段：核心只认识 KOReader 字段，源私有字段必须自己补回。
+--- 无 page 的有两类条目要放行：未定位（只有 `kavita_xpath`）与墓碑（只有 `kavita_deleted`），
+--- 它们过不了 `Normalize.clean` 的「datetime + page」要求。构造期拿源坐标 / 墓碑标记当占位，
+--- 清洗后再把 page 清空（同微信源的 placeholder 写法），否则一次普通保存就把它们洗掉。
 ---@param items table[]
 ---@param total_pages integer|nil
 ---@return table[]
 function Source:cleanAnnotations(items, total_pages)
-    local Normalize = require("book.note.normalize")
     local out = {}
     for _idx, item in ipairs(items) do
-        local clean = Normalize.clean({ item }, total_pages)[1]
-        if clean then
-            clean.kavita_id, clean.kavita_note = item.kavita_id, item.kavita_note
-            out[#out + 1] = clean
+        if type(item) == "table" then
+            local placeholder = not item.page and not item.pageref
+                and (item.kavita_xpath or item.kavita_deleted or item.kavita_id)
+            local source = item
+            if placeholder then
+                source = {}
+                for key, value in pairs(item) do source[key] = value end
+                source.page = placeholder
+            end
+            local clean = Normalize.clean({ source }, total_pages)[1]
+            if clean then
+                if placeholder then clean.page = nil end
+                for _i, field in ipairs(KAVITA_FIELDS) do clean[field] = item[field] end
+                out[#out + 1] = clean
+            end
         end
     end
     return out
 end
 
+--- 删除墓碑（spec §9.1）：只留远端 id 与基线备注，等推送成功出列。
+--- 没有 pos / page，`cleanAnnotations` 用 kavita_deleted 当占位放行，阅读器不画它。
+---@param old table 上一版快照里那条
+---@return table
+local function tombstone(old)
+    return {
+        datetime = old.datetime or os.date("%Y-%m-%d %H:%M:%S"),
+        chapter_idx = old.chapter_idx,
+        kavita_id = old.kavita_id,
+        kavita_note = old.kavita_note,
+        kavita_deleted = true,
+    }
+end
+
 --- 阅读器里的注解不带 Kavita id：按 pos0 从上一版快照接过来，免得每次保存都重建远端注解。
+--- 另外把 `previous` 里「有 id 但没有 pos0」的条目（未定位 / 墓碑）原样搬进新 payload：
+--- 它们不在阅读器快照里，不搬的话一次普通保存就把「数据在、画不出」的云端条目洗掉。
+---
+--- 本次被删条目（spec §9.1，仅 `index_modified < 0` 时有值）按 pos0 找回上一版那条：
+--- 没坐标 / 找不到 → 只漏删不误删；没有 id → 本来就没推到远端；其余追加墓碑。
 ---@param previous table[]
 ---@param current table[]
+---@param deleted table|nil KOReader 事件里的被删条目
 ---@return table[]
-function Source:prepareLocalAnnotations(previous, current)
-    local by_pos = {}
+function Source:prepareLocalAnnotations(previous, current, deleted)
+    current = type(current) == "table" and current or {}
+    local by_pos, present = {}, {}
     for _idx, old in ipairs(previous) do
-        if old.kavita_id and old.pos0 then by_pos[old.pos0] = old end
+        if type(old) == "table" and old.kavita_id and old.pos0 then by_pos[old.pos0] = old end
     end
     for _idx, item in ipairs(current) do
+        if item.kavita_id then present[tostring(item.kavita_id)] = true end
         local old = item.pos0 and by_pos[item.pos0]
         if old and not item.kavita_id then
             item.kavita_id, item.kavita_note = old.kavita_id, old.kavita_note
         end
     end
+    for _idx, old in ipairs(previous) do
+        local id = type(old) == "table" and old.kavita_id and tostring(old.kavita_id) or nil
+        if id and not old.pos0 and not present[id] then
+            current[#current + 1] = old
+            present[id] = true
+        end
+    end
+    if type(deleted) == "table" then
+        local old = deleted.pos0 and by_pos[deleted.pos0] or nil
+        if not old then
+            -- pos0 对不上（换过文件版本）或事件里没坐标：记一条，下一次开书远端那条会回来。
+            logger.warn("kavita annotation deleted without anchor; skip tombstone", tostring(deleted.text))
+        elseif not old.kavita_id then
+            logger.dbg("kavita annotation deleted before push; no tombstone", tostring(deleted.text))
+        elseif not present[tostring(old.kavita_id)] then
+            current[#current + 1] = tombstone(old)
+            present[tostring(old.kavita_id)] = true
+        end
+    end
     return current
+end
+
+--- 远端删除回流（spec §9.2）：`seen` 按 pull 回来的**全量** id 建（含未定位），
+--- 输出只画可渲染的远端条目；本地条目带 `kavita_id` 而远端集合里没有 → 丢弃并计入 `dropped`。
+--- 远端同键多条（历史推送窗口的产物，spec §6 / §13.1 B「同键取 id 最小」）只画 id 最小那条，
+--- 其余被抑制、计入 `deduped`；被抑制的 id 仍留在 `seen_id`（远端没删它，本地副本不算 dropped）。
+--- 未定位条目仍占 id，所以它对应的本地副本不会被当成远端已删；纯本地划线（无 id）原样保留。
+--- `authoritative` 恒 false（spec §7），这里不改变语义，保留参数只为统一签名。
+---@param remote table[]
+---@param current table[]
+---@param paging boolean|nil
+---@param _authoritative boolean|nil
+---@return table[] merged
+---@return integer dropped 远端已删（本地有 id 但远端全量里没有）
+---@return integer deduped 远端同键被抑制（不画）的条数
+function Source:mergeAnnotations(remote, current, paging, _authoritative)
+    local merged, seen_id, shown_id, seen_pos, suppressed, suppressed_id = {}, {}, {}, {}, {}, {}
+    local list = type(remote) == "table" and remote or {}
+
+    -- 第一遍：建远端全量 id 集合（含之后要被抑制的），并按键挑出每条键要画的那条。
+    -- 键与推送侧认领同一条（Annotation.key 两套字段名都认）；同键取 id 最小，没有 id 的排最后。
+    local winner = {}
+    for idx, item in ipairs(list) do
+        if type(item) == "table" then
+            local id = tonumber(item.kavita_id)
+            if id then seen_id[id] = true end
+            if Normalize.renderable(item, paging) then
+                local key = Annotation.key(item)
+                local best = winner[key]
+                if best == nil then
+                    winner[key] = idx
+                else
+                    local best_id = tonumber(list[best].kavita_id) or math.huge
+                    if (id or math.huge) < best_id then
+                        suppressed[best] = true
+                        winner[key] = idx
+                    else
+                        suppressed[idx] = true
+                    end
+                end
+            end
+        end
+    end
+    local deduped = 0
+    for idx in pairs(suppressed) do
+        deduped = deduped + 1
+        local id = tonumber(list[idx].kavita_id)
+        if id then suppressed_id[id] = true end
+    end
+
+    -- 第二遍：按原顺序输出保留下来的远端条目（顺序影响绘制顺序，不因去重打乱）。
+    for idx, item in ipairs(list) do
+        if type(item) == "table" and not suppressed[idx] and Normalize.renderable(item, paging) then
+            local id = tonumber(item.kavita_id)
+            merged[#merged + 1] = item
+            if id then shown_id[id] = true end
+            if type(item.pos0) == "string" then
+                seen_pos[item.pos0 .. Annotation.KEY_SEP .. tostring(item.pos1)] = true
+            end
+        end
+    end
+    local dropped = 0
+    for _idx, item in ipairs(type(current) == "table" and current or {}) do
+        if type(item) == "table" then
+            local id = tonumber(item.kavita_id)
+            if id and not seen_id[id] then
+                dropped = dropped + 1
+                logger.warn("kavita annotation deleted remotely; drop local", id)
+            else
+                -- 远端已定位的那条会带着复用来的旧 pos0：同 id / 同坐标只画远端那份。
+                -- id 在远端全量里但没画出来（未定位）→ 本地这份必须保留，否则书里就少一条。
+                -- 例外：id 在远端被同键抑制 → 远端画的是同键里 id 最小的那条，本地这份不能再画一遍。
+                local pos_key = type(item.pos0) == "string"
+                    and (item.pos0 .. Annotation.KEY_SEP .. tostring(item.pos1)) or nil
+                local duplicate = (id and shown_id[id])
+                    or (id and suppressed_id[id])
+                    or (item.drawer and pos_key and seen_pos[pos_key])
+                if not duplicate and Normalize.renderable(item, paging) then
+                    merged[#merged + 1] = item
+                end
+            end
+        end
+    end
+    return merged, dropped, deduped
+end
+
+-- ---------------------------------------------------------------------------
+-- 开书定位：云端注解（元素级 xPath + selectedText）→ crengine xpointer（spec §4）
+--
+-- Kavita 只给元素路径，没有偏移；文档接口又没有「节点+偏移 → xpointer」。
+-- 所以反过来让 crengine 当文本真值来源：逐个 text()[k] 取节点文本，在元素拼接文本里
+-- 找 selectedText，再把字节区间映射回 (k, codepoint offset)。合成后必须回读校验，
+-- 绝不把没验过的坐标写进 doc_settings（错位的划线比不画更糟）。
+-- ---------------------------------------------------------------------------
+
+--- crengine 的 `.N` 单位是 codepoint（lChar32），不是 UTF-8 字节；
+--- LuaJIT 没有 utf8 库，只能数前导字节。
+---@param s string
+---@return integer
+local function codepointLength(s)
+    local count, i, len = 0, 1, #s
+    while i <= len do
+        local byte = s:byte(i)
+        if byte < 0x80 or byte >= 0xC0 then count = count + 1 end
+        i = i + 1
+    end
+    return count
+end
+
+---@param s string
+---@param i integer
+---@return integer
+local function charStep(s, i)
+    local byte = s:byte(i)
+    if byte < 0x80 then return 1 end
+    if byte < 0xE0 then return 2 end
+    if byte < 0xF0 then return 3 end
+    return 4
+end
+
+--- 前 count 个 codepoint 占用的字节数（1-based 最后字节位置，count=0 时为 0）。
+---@param s string
+---@param count integer
+---@return integer
+local function bytePosOfCodepoint(s, count)
+    local seen, i = 0, 1
+    while seen < count and i <= #s do
+        i = i + charStep(s, i)
+        seen = seen + 1
+    end
+    return i - 1
+end
+
+--- 按 codepoint 取子串（1-based，含首含尾）。
+---@param s string
+---@param from integer
+---@param to integer
+---@return string
+local function codepointSub(s, from, to)
+    local byte_start = bytePosOfCodepoint(s, from - 1) + 1
+    local byte_end = bytePosOfCodepoint(s, to)
+    return s:sub(byte_start, byte_end)
+end
+
+--- 空白判定：ASCII 折叠 + NBSP + 全角空格。crengine 的 CSS 空白处理会动这三类，
+--- 真实样本跨段回读只差空白，所以去空白重试必须把它们都算进去。
+---@param s string
+---@param i integer
+---@return integer 该字符占用的字节数；0 = 不是空白
+local function whitespaceAt(s, i)
+    local byte = s:byte(i)
+    if byte == 0x20 or byte == 0x09 or byte == 0x0A or byte == 0x0D then return 1 end
+    if byte == 0xC2 and s:byte(i + 1) == 0xA0 then return 2 end
+    if byte == 0xE3 and s:byte(i + 1) == 0x80 and s:byte(i + 2) == 0x80 then return 3 end
+    return 0
+end
+
+--- 去空白并保留「过滤后字节 → 原字节」映射，命中后能把偏移回算到原文本。
+---@param s string
+---@return string, table<integer, integer>
+local function stripWhitespace(s)
+    local out, map = {}, {}
+    local i, len = 1, #s
+    while i <= len do
+        local width = whitespaceAt(s, i)
+        if width > 0 then
+            i = i + width
+        else
+            out[#out + 1] = s:sub(i, i)
+            map[#out] = i
+            i = i + 1
+        end
+    end
+    return table.concat(out), map
+end
+
+--- 最后一个非空白字符的字节位置（跨段「贴元素末尾」判定用；全空白回 0）。
+---@param s string
+---@return integer
+local function trimEndByte(s)
+    local i, last = 1, 0
+    while i <= #s do
+        local width = whitespaceAt(s, i)
+        if width == 0 then
+            i = i + charStep(s, i)
+            last = i - 1
+        else
+            i = i + width
+        end
+    end
+    return last
+end
+
+--- 第一个非空白字符的字节位置（跨段「贴元素开头」判定用）。
+---@param s string
+---@return integer
+local function trimStartByte(s)
+    local i = 1
+    while i <= #s do
+        local width = whitespaceAt(s, i)
+        if width == 0 then break end
+        i = i + width
+    end
+    return i
+end
+
+---@param document table
+---@param xp string
+---@return string|nil
+local function nodeText(document, xp)
+    local ok, text = pcall(document.getTextFromXPointer, document, xp)
+    if ok and type(text) == "string" then return text end
+    return nil
+end
+
+--- 逐 text()[k] 取节点文本：crengine 的 `text()` 不带下标在多节点时会失败，
+--- 所以合成路径一律写到 `[k]`；空节点跳过（否则字节区间会映射到零长度节点上）。
+---@param document table
+---@param element string
+---@return { k: integer, text: string }[]
+local function textNodes(document, element)
+    local nodes = {}
+    for k = 1, 128 do
+        local text = nodeText(document, element .. "/text()[" .. k .. "]")
+        if not text then break end
+        if text ~= "" then nodes[#nodes + 1] = { k = k, text = text } end
+    end
+    return nodes
+end
+
+---@param nodes { k: integer, text: string }[]
+---@return string
+local function concatNodes(nodes)
+    local parts = {}
+    for _idx, node in ipairs(nodes) do parts[#parts + 1] = node.text end
+    return table.concat(parts)
+end
+
+--- 拼接文本里的字节区间 → (text()[k], codepoint offset)。
+---@param nodes { k: integer, text: string }[]
+---@param start_byte integer 1-based，区间首字节
+---@param end_byte integer 1-based，区间尾字节
+---@return integer|nil, integer|nil, integer|nil, integer|nil
+local function mapRange(nodes, start_byte, end_byte)
+    local acc, k0, off0, k1, off1 = 0, nil, nil, nil, nil
+    for _idx, node in ipairs(nodes) do
+        local seg_start, seg_end = acc + 1, acc + #node.text
+        if not k0 and start_byte >= seg_start and start_byte <= seg_end then
+            k0 = node.k
+            off0 = codepointLength(node.text:sub(1, start_byte - seg_start))
+        end
+        if end_byte >= seg_start and end_byte <= seg_end then
+            k1 = node.k
+            off1 = codepointLength(node.text:sub(1, end_byte - seg_start + 1))
+        end
+        acc = seg_end
+    end
+    return k0, off0, k1, off1
+end
+
+--- 在元素文本里找 selectedText：先精确找，失败再去空白找（CSS 空白折叠差异）。
+--- 同段重复文本取第一处（真实样本 0/29 歧义），由回读校验兜住错位。
+---@param document table
+---@param element string
+---@param selected string
+---@return string|nil level "exact"|"wsnorm"|nil
+---@return { k: integer, text: string }[] nodes
+---@return string concat
+---@return integer|nil start_byte
+---@return integer|nil end_byte
+local function locateInElement(document, element, selected)
+    local nodes = textNodes(document, element)
+    if #nodes == 0 then
+        return nil, nodes, "", nil, nil
+    end
+    local concat = concatNodes(nodes)
+    local start_byte = concat:find(selected, 1, true)
+    if start_byte then
+        return "exact", nodes, concat, start_byte, start_byte + #selected - 1
+    end
+    local flat, map = stripWhitespace(concat)
+    local wanted = stripWhitespace(selected)
+    local flat_start = wanted ~= "" and flat:find(wanted, 1, true) or nil
+    if flat_start then
+        return "wsnorm", nodes, concat, map[flat_start], map[flat_start + #wanted - 1]
+    end
+    return nil, nodes, concat, nil, nil
+end
+
+--- 起始元素里的最长可命中前缀。跨段选区的头半截在起点段落里可能不是完整 selectedText，
+--- 所以从全长往短里试；同一前缀出现多次时优先取「贴元素末尾」的那次（选区的头必然贴段尾）。
+---@param document table
+---@param element string
+---@param selected string
+---@return string|nil concat
+---@return table|nil nodes
+---@return integer|nil start_byte
+---@return integer|nil end_byte
+local function locatePrefix(document, element, selected)
+    local nodes = textNodes(document, element)
+    if #nodes == 0 then return nil end
+    local concat = concatNodes(nodes)
+    local total = codepointLength(selected)
+    local element_end = trimEndByte(concat)
+    for take = total, 1, -1 do
+        local prefix = codepointSub(selected, 1, take)
+        local first = concat:find(prefix, 1, true)
+        if first then
+            local chosen = first
+            local pos = 1
+            while true do
+                local hit = concat:find(prefix, pos, true)
+                if not hit then break end
+                if hit + #prefix - 1 == element_end then chosen = hit end
+                pos = hit + 1
+            end
+            return concat, nodes, chosen, chosen + #prefix - 1
+        end
+    end
+    return nil
+end
+
+--- 终点元素里的最长可命中后缀。同理，优先取「从元素开头起」的那次（选区尾必然贴段首）。
+---@param document table
+---@param element string
+---@param selected string
+---@return string|nil concat
+---@return table|nil nodes
+---@return integer|nil start_byte
+---@return integer|nil end_byte
+local function locateTail(document, element, selected)
+    local nodes = textNodes(document, element)
+    if #nodes == 0 then return nil end
+    local concat = concatNodes(nodes)
+    local total = codepointLength(selected)
+    local element_start = trimStartByte(concat)
+    for take = total, 1, -1 do
+        local suffix = codepointSub(selected, total - take + 1, total)
+        local first = concat:find(suffix, 1, true)
+        if first then
+            local chosen = first
+            local pos = 1
+            while true do
+                local hit = concat:find(suffix, pos, true)
+                if not hit then break end
+                if hit == element_start then chosen = hit end
+                pos = hit + 1
+            end
+            return concat, nodes, chosen, chosen + #suffix - 1
+        end
+    end
+    return nil
+end
+
+--- Kavita `//body/p[9]` → `/body/DocFragment[N]/body/p[9]`；N = spine + 1。
+--- 只削一个 `/` 补前缀，不自己归一 `[1]` 下标（那是 DOM version 的事）。
+---@param xpath string|nil
+---@param fragment integer
+---@return string|nil
+local function fragmentBase(xpath, fragment)
+    if type(xpath) ~= "string" or xpath == "" then return nil end
+    local path = xpath
+    if path:sub(1, 2) == "//" then
+        path = path:sub(2)
+    elseif path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+    -- Kavita 不会给 DocFragment；真给了就原样用（跨 spine 的 endingXPath 也不至重复加前缀）。
+    if path:sub(1, 17) == "/body/DocFragment" then return path end
+    if path:sub(1, 5) ~= "/body" then return nil end
+    return "/body/DocFragment[" .. fragment .. "]" .. path
+end
+
+---@param document table
+---@param xp string
+---@return boolean
+local function inDocument(document, xp)
+    local ok, present = pcall(document.isXPointerInDocument, document, xp)
+    return ok and present == true
+end
+
+--- 同片段同级回扫：Kavita 的 `p[k]` 与 crengine 的元素数可能不同（HTML 自动闭合、
+--- 表格 foster parenting），下标失配时在同一父节点下扫同名兄弟，以文本为准找回。
+---@param document table
+---@param element string
+---@param selected string
+---@return string|nil element
+---@return table|nil nodes
+---@return integer|nil start_byte
+---@return integer|nil end_byte
+local function scanSiblings(document, element, selected)
+    local tag = element:match("([^/%[]+)%[%d+%]$")
+    local parent = element:match("^(.*)/[^/]+$")
+    if not tag or not parent then return nil end
+    for index = 1, 400 do
+        local candidate = parent .. "/" .. tag .. "[" .. index .. "]"
+        if not nodeText(document, candidate) then break end
+        local level, nodes, _concat, start_byte, end_byte = locateInElement(document, candidate, selected)
+        if level then
+            return candidate, nodes, start_byte, end_byte
+        end
+    end
+    return nil
+end
+
+--- 合成坐标的唯一成功判据：两端都在文档里，且回读文本与 selectedText 相等（允许空白差异）。
+--- 只信 isXPointerInDocument 不够——路径能解析不代表画出来的就是这段文字。
+---@return boolean, string|nil reason
+local function verifySelection(document, pos0, pos1, selected)
+    if not inDocument(document, pos0) then return false, "pos0-missing" end
+    if not inDocument(document, pos1) then return false, "pos1-missing" end
+    if type(document.getTextFromXPointers) ~= "function" then return true end
+    local ok, got = pcall(document.getTextFromXPointers, document, pos0, pos1)
+    if not ok then return true end -- 老文档 / 桩没实现：不要因校验器缺失把能画的全判失败
+    if type(got) ~= "string" then return true end
+    if got == selected then return true end
+    if stripWhitespace(got) == stripWhitespace(selected) then return true end
+    return false, "text-mismatch"
+end
+
+--- 跨段：起点取最长可命中前缀、终点取最长可命中后缀，再各自映射回文本节点。
+---@param document table
+---@param head_element string
+---@param tail_element string
+---@param selected string
+---@return { pos0: string, pos1: string }|nil
+local function locateCross(document, head_element, tail_element, selected)
+    local _head_concat, head_nodes, head_start, head_end = locatePrefix(document, head_element, selected)
+    if not head_nodes then return nil end
+    local _tail_concat, tail_nodes, tail_start, tail_end = locateTail(document, tail_element, selected)
+    if not tail_nodes then return nil end
+    local k0, off0 = mapRange(head_nodes, head_start, head_end)
+    local _tail_k, _tail_off, k1, off1 = mapRange(tail_nodes, tail_start, tail_end)
+    if not k0 or not k1 then return nil end
+    return {
+        pos0 = head_element .. "/text()[" .. k0 .. "]." .. off0,
+        pos1 = tail_element .. "/text()[" .. k1 .. "]." .. off1,
+    }
+end
+
+--- 在指定 DocFragment 上尝试一条注解（不含滑窗）。
+---@return { pos0: string, pos1: string }|nil, string|nil reason
+local function attemptLocalize(document, annotation, fragment)
+    local selected = annotation.text
+    if type(selected) ~= "string" or selected == "" then return nil, "no-text" end
+    local base = fragmentBase(annotation.kavita_xpath, fragment)
+    if not base then return nil, "bad-xpath" end
+    local ending = annotation.kavita_ending_xpath
+    local cross = type(ending) == "string" and ending ~= "" and ending ~= annotation.kavita_xpath
+    if cross then
+        local tail_base = fragmentBase(ending, fragment)
+        if tail_base then
+            local located = locateCross(document, base, tail_base, selected)
+            if located and verifySelection(document, located.pos0, located.pos1, selected) then
+                return located
+            end
+        end
+        -- endingXPath 不可用或起点其实含全文：退回单元素匹配，仍以回读为准。
+    end
+
+    local used, nodes, start_byte, end_byte
+    local level, found_nodes, _concat, found_start, found_end = locateInElement(document, base, selected)
+    if level then
+        used, nodes, start_byte, end_byte = base, found_nodes, found_start, found_end
+    else
+        local candidate, sibling_nodes, sibling_start, sibling_end = scanSiblings(document, base, selected)
+        if candidate then
+            used, nodes, start_byte, end_byte = candidate, sibling_nodes, sibling_start, sibling_end
+        end
+    end
+    if not used then return nil, "text-not-found" end
+    local k0, off0, k1, off1 = mapRange(nodes, start_byte, end_byte)
+    if not k0 or not k1 then return nil, "range-map" end
+    local pos0 = used .. "/text()[" .. k0 .. "]." .. off0
+    local pos1 = used .. "/text()[" .. k1 .. "]." .. off1
+    local ok, reason = verifySelection(document, pos0, pos1, selected)
+    if not ok then return nil, reason end
+    return { pos0 = pos0, pos1 = pos1 }
+end
+
+--- pageNumber 只当提示（Kavita 旧推送窗口会差一位，实测 6/29），
+--- 依次试 spine / spine+1 / spine−1，每跳都要求文本命中且回读通过。
+---@return { pos0: string, pos1: string }|nil, string|nil reason
+local function locateAnnotation(document, annotation)
+    local hint = math.floor(tonumber(annotation.pageNumber) or 0)
+    local fragment = hint + 1
+    local last_reason
+    for _idx, delta in ipairs({ 0, 1, -1 }) do
+        local candidate = fragment + delta
+        if candidate >= 1 then
+            local located, reason = attemptLocalize(document, annotation, candidate)
+            if located then return located end
+            last_reason = reason or last_reason
+        end
+    end
+    return nil, last_reason or "text-not-found"
+end
+
+---@param document table
+---@param xp string
+---@return string
+local function normalizedXP(document, xp)
+    if type(document.getNormalizedXPointer) ~= "function" then return xp end
+    local ok, normalized = pcall(document.getNormalizedXPointer, document, xp)
+    if ok and type(normalized) == "string" and normalized ~= "" then return normalized end
+    return xp
+end
+
+---@param document table
+---@param xp string
+---@return integer|nil
+local function pageOf(document, xp)
+    if type(document.getPageFromXPointer) ~= "function" then return nil end
+    local ok, page = pcall(document.getPageFromXPointer, document, xp)
+    if ok and tonumber(page) then return tonumber(page) end
+    return nil
+end
+
+--- 把云端注解定位到当前打开的文档；返回**全量**（含未定位）。
+---
+--- 返回 nil 表示「本次不应用」：无文档 / html_path 缺失或文件不在 / 文档不是这本书。
+--- core 的 applySnapshot 见到 nil 会直接放弃，绝不覆盖 doc_settings —— 这条比多画几条更重要。
+--- 未定位条目只打 `kavita_unlocated`、不写占位坐标，merge 才不会把它误判成「远端已删」。
+---
+--- 复用放在最前：同一 `kavita_id` 已有 pos0/pos1 且仍通过 isXPointerInDocument 的，
+--- 直接用旧坐标，避免每次开书重算（也避免文本微调后坐标抖动）。
+---
+---@param document table|nil     已打开的 crengine 文档
+---@param annotations table[]    pull 落的原始条目
+---@param html_path string|nil   已落盘的 epub 路径（只查存在性，绝不读 ZIP 字节）
+---@param current table[]|nil    阅读器当前注解
+---@return table[]|nil
+function Source:localizeAnnotations(document, annotations, html_path, current)
+    if type(document) ~= "table"
+        or type(document.getTextFromXPointer) ~= "function"
+        or type(document.isXPointerInDocument) ~= "function" then
+        return nil
+    end
+    if type(html_path) ~= "string" or html_path == "" then return nil end
+    -- html_path 就是 core 传进来的 ui.document.file；两者不一致说明这次快照不是这本书的
+    -- （派生笔记 / 切书竞态），宁可不动，也不要把这本书的坐标写到另一本书的 doc_settings。
+    if type(document.file) == "string" and document.file ~= "" and document.file ~= html_path then
+        return nil
+    end
+    if require("libs/libkoreader-lfs").attributes(html_path, "mode") ~= "file" then return nil end
+    if type(annotations) ~= "table" then return {} end
+
+    local reusable = {}
+    for _idx, item in ipairs(type(current) == "table" and current or {}) do
+        if type(item) == "table" and item.kavita_id and type(item.pos0) == "string"
+            and type(item.pos1) == "string" and inDocument(document, item.pos0)
+            and inDocument(document, item.pos1) then
+            local key = tostring(item.kavita_id)
+            reusable[key] = reusable[key] or item
+        end
+    end
+
+    local out, unlocated, last_reason = {}, 0, nil
+    for _idx, item in ipairs(annotations) do
+        local ann = item
+        if type(item) == "table" then
+            -- 浅拷贝：定位只补坐标，pull 落的字段（备注 / 颜色 / 时间）原样带住。
+            ann = {}
+            for key, value in pairs(item) do ann[key] = value end
+            local saved = item.kavita_id and reusable[tostring(item.kavita_id)] or nil
+            if saved then
+                ann.pos0, ann.pos1 = saved.pos0, saved.pos1
+                ann.page = saved.page or saved.pos0
+                ann.pageno = saved.pageno or pageOf(document, saved.pos0)
+                ann.kavita_unlocated = nil
+            else
+                local located, reason = locateAnnotation(document, ann)
+                if located then
+                    local pos0 = normalizedXP(document, located.pos0)
+                    local pos1 = normalizedXP(document, located.pos1)
+                    ann.pos0, ann.pos1 = pos0, pos1
+                    -- page 填 pos0 字符串（照抄本地真实条目）：数字会被 normalize 当成分页文档。
+                    ann.page = pos0
+                    ann.pageno = pageOf(document, pos0)
+                    ann.kavita_unlocated = nil
+                else
+                    ann.pos0, ann.pos1, ann.page, ann.pageno = nil, nil, nil, nil
+                    ann.kavita_unlocated = true
+                    unlocated = unlocated + 1
+                    last_reason = reason or last_reason
+                end
+            end
+        end
+        out[#out + 1] = ann
+    end
+
+    -- 失败只记一条汇总，别让一本定位不了的书刷满日志。
+    if unlocated > 0 then
+        logger.warn("kavita annotation localize failed", html_path,
+            unlocated .. "/" .. #annotations, last_reason or "text-not-found")
+    end
+    return out
+end
+
+--- 颜色槽位 → KOReader 颜色名（01 §Answer）：Kavita 只存用户调色板的槽位序号，
+--- api key 客户端读不到 palette，按索引约定映射；越界 / 未知回落 yellow（0）。颜色不参与同一性。
+local SLOT_COLORS = { [0] = "yellow", [1] = "green", [2] = "blue", [3] = "orange", [4] = "purple" }
+
+---@param slot any
+---@return string
+local function slotColor(slot)
+    return SLOT_COLORS[tonumber(slot) or 0] or "yellow"
+end
+
+--- Kavita AnnotationDto → notes payload 条目（spec §3.1 / §3.2）。
+--- 只落数据，不算坐标：`page` / `pos0` / `pos1` 是开书时 localizeAnnotations 的产物（05 §3）。
+--- `pageNumber` 只落成本地定位提示（0-based spine）：`locateAnnotation` 用它挑 DocFragment，
+--- update 时 Kavita 服务端忽略这个字段，推送坐标仍用现算的 `anchor.pageNumber`。
+---@param dto table
+---@return table|nil
+local function annotationPayload(dto)
+    -- 没有 id 才真的对不上任何本地条目（update / delete 的唯一依据），直接丢。
+    if dto.id == nil or dto.id == "" then return nil end
+    local text = dto.selectedText
+    -- 没有选中文本的条目（Kavita 自己也不许这么建）画不出来，但**保留成未定位占位**：
+    -- 它的 id 必须进远端全量集合，否则 mergeAnnotations 会把本地带该 id 的那条当成「远端已删」抹掉。
+    local blank = type(text) ~= "string" or require("utils.text").trim(text) == ""
+    if blank then text = "" end
+    local drawer
+    if not blank then drawer = "lighten" end
+    -- note 与 kavita_note 必须来自同一次读回：两侧一旦有差异，推送侧每轮都会判「备注改过」。
+    -- 空备注落 nil，不落 ""：KOReader 的 getBookmarkType 把 "" 当真值（`if bookmark.note then
+    -- return "note"`），默认 bookmarks_items_text_type = "note" 会把这条渲染成空行。
+    -- 本地高亮本来就是 nil；sameNote(nil, "") 仍判等，推送侧不会误判「改过」。
+    local note = Annotation.noteText(dto.comment, dto.commentHtml, dto.commentPlainText)
+    if note == "" then note = nil end
+    -- createdUtc 是真正的 UTC；解析不出（如 0001 占位）回退当前时间，只影响显示 / 排序。
+    local created = utcTime(dto.createdUtc)
+    return {
+        datetime = os.date("%Y-%m-%d %H:%M:%S", created or os.time()),
+        drawer = drawer,
+        color = slotColor(dto.selectedSlotIndex),
+        text = text,
+        note = note,
+        pageNumber = tonumber(dto.pageNumber) or 0,
+        kavita_id = dto.id,
+        kavita_note = note,
+        kavita_comment = dto.comment,
+        kavita_comment_html = dto.commentHtml,
+        kavita_slot = dto.selectedSlotIndex,
+        kavita_spoiler = dto.containsSpoiler,
+        kavita_modified = dto.lastModifiedUtc,
+        kavita_xpath = dto.xPath,
+        kavita_ending_xpath = dto.endingXPath,
+        kavita_unlocated = blank or nil,
+    }
+end
+
+--- 当前用户 id：注解列表在账号开了「查看他人注解」时会混入别人的条目，
+--- 拉取必须按 `ownerUserId` 收窄，否则本地落一堆别人的划线、推送删改还会整批 400。
+--- 取不到（老版本 / 无权限）就降级为不过滤并记日志：多看到自己的不会丢数据，漏过滤别人的才会误删。
+---@param source KavitaSource
+---@param cb fun(owner_id: integer|nil)
+---@return HttpJob
+local function ownerIdAsync(source, cb)
+    if source._owner_id ~= nil then return SourceBase.defer(cb, source._owner_id) end
+    return source.client:json("GET", "/api/Users/me", nil, nil, function(data, err)
+        local id = type(data) == "table" and tonumber(data.id) or nil
+        if not id then
+            logger.warn("kavita annotation owner unknown; pull without owner filter", err)
+            return cb(nil)
+        end
+        source._owner_id = id
+        cb(id)
+    end)
+end
+
+--- 开书时全量拉取云端 epub 注解（spec §3.4）：只落数据、不定位，坐标留给开书时的文档。
+--- 每章一次 `GET /api/Annotation/all`（单文件 epub 即一本书一个 chapter），与推送各发一次、不做缓存。
+--- `pageNumber` 是 localizeAnnotations 的 spine 提示，不是坐标：update 时服务端忽略它，
+--- 推送仍用现算的 `anchor.pageNumber`（spec §8.4）。
+--- `authoritative` 恒 false：远端为空不代表本地该清空，删除语义不归这里。
+--- 失败回 `cb(nil, err)`，notes 表快照原样（离线开书只记日志）。
+---@param identity BookIdentity
+---@param cb fun(annotations: table[]|nil, err: string|nil, meta: {authoritative: boolean}|nil)
+---@return { cancel: fun() }
+function Source:pullNotesAsync(identity, cb)
+    local job, cancelled = nil, false
+    local function finish(annotations, err, meta)
+        if not cancelled then cb(annotations, err, meta) end
+    end
+    job = self:entry(identity, function(entry, err)
+        if cancelled then return end
+        if not entry then return finish(nil, err) end
+        -- 非 epub 没有 Kavita 注解（与推送侧短路一致）：零请求。
+        if entry.format ~= "epub" then return finish({}, nil, { authoritative = false }) end
+        job = ownerIdAsync(self, function(owner_id)
+            if cancelled then return end
+            job = Annotation.listByChapter(self.client, entry.chapterId, owner_id, function(list, lerr)
+                if cancelled then return end
+                if not list then return finish(nil, lerr) end
+                local annotations = {}
+                for _idx, dto in ipairs(list) do
+                    local annotation = annotationPayload(dto)
+                    if annotation then annotations[#annotations + 1] = annotation end
+                end
+                finish(annotations, nil, { authoritative = false })
+            end)
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        job:cancel()
+    end }
 end
 
 --- Kavita 的 highlightCount 按 UTF-16 码元计。
@@ -1241,62 +2020,282 @@ local function utf16Length(s)
     return n
 end
 
---- 划线推到 Kavita：没 id 的新建、备注改过的更新，id 原地回填由核心落库。
---- Kavita 只认 epub 注解；删除不同步（远端删除接口未确认，宁可多留不误删）。
---- 有一条成功就算成功（回填的 id 要落库，否则重试会重复建），失败的那几条没 id，下次笔记变动再推；
---- 全部失败才报错，脏标记留着重试。
+--- 这一条要不要推：没 id 的本地新划线，或备注与上次同步的基线不同。
+--- 书签（没有 drawer）与墓碑不走这里。
+---@param ann table
+---@return boolean
+local function needsPush(ann)
+    if not (ann.drawer and type(ann.pos0) == "string" and type(ann.text) == "string") then return false end
+    if not ann.kavita_id then return true end
+    return not Annotation.sameNote(ann.note, ann.kavita_note)
+end
+
+--- 划线推到 Kavita：先按章对账一次，再逐条新建 / 更新，远端 id 原地回填给核心落库。
+---
+--- 幂等的真相源是「每次推送前按章拉一遍远端注解」，payload 里的 kavita_id 只是快路径：
+--- 上传期间用户又划线（stale）、workdir 清空、pos0 漂移都靠下一轮对账自愈，不需要本地映射文件。
+--- 全有或全无：任一写请求失败就整批报错留脏（已建成的条目下轮按内容键认领，不会重复建）。
+--- 先写后删（spec §9.4）：墓碑的 id 先从对账列表里剔掉（防同键认领），全部写成功后再一次 bulk-delete。
 ---@param identity BookIdentity
 ---@param annotations table[]
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, data: { pushed: integer, adopted: integer, conflicts: integer, deleted: integer }|nil)
 ---@return { cancel: fun() }
 function Source:pushNotesAsync(identity, annotations, cb)
     local job, cancelled = nil, false
     job = self:entry(identity, function(entry, err)
         if cancelled then return end
         if not entry then return cb(nil, err) end
-        if entry.format ~= "epub" then return cb(true) end
+        if entry.format ~= "epub" then return cb(true, nil, { pushed = 0, deleted = 0 }) end
         local path = downloaded(self.id, identity.stable_id)
-        local pending = {}
+
+        -- 墓碑（kavita_deleted + id）不推、也不许被认领：删了又原地划一条同键的，
+        -- 认领会把它挂到马上要删的那条上。
+        local tombstoned, pending = {}, {}
         for _idx, ann in ipairs(annotations) do
-            if ann.drawer and type(ann.pos0) == "string" and type(ann.text) == "string"
-                and (not ann.kavita_id or (ann.kavita_note or "") ~= (ann.note or "")) then
+            local dead_id = ann.kavita_deleted and tonumber(ann.kavita_id)
+            if dead_id then
+                tombstoned[dead_id] = true
+            elseif needsPush(ann) then
                 pending[#pending + 1] = ann
             end
         end
-        local index, pushed, failed = 0, 0, nil
-        local function nextOne()
-            index = index + 1
-            local ann = pending[index]
-            if not ann then
-                if pushed == 0 and failed then return cb(nil, failed) end
-                return cb(true)
-            end
-            local anchor = Position.anchor(ann.text, ann.pos0, path) or {}
-            local body = {
-                id = ann.kavita_id,
-                chapterId = entry.chapterId, volumeId = entry.volumeId,
-                libraryId = entry.libraryId, seriesId = entry.seriesId,
-                ownerUserId = 0,
-                xPath = anchor.xPath or "", endingXPath = anchor.endingXPath or "",
-                selectedText = ann.text, comment = ann.note or "", commentHtml = "",
-                selectedSlotIndex = 0, containsSpoiler = false,
-                pageNumber = anchor.pageNumber or Position.spine(ann.pos0) or 0,
-                highlightCount = utf16Length(ann.text),
-            }
-            local api = ann.kavita_id and "/api/Annotation/update" or "/api/Annotation/create"
-            job = self.client:json("POST", api, nil, body, function(data, perr)
-                if cancelled then return end
-                if data then
-                    ann.kavita_id = ann.kavita_id or data.id
-                    ann.kavita_note = ann.note or ""
-                    pushed = pushed + 1
-                else
-                    failed = failed or perr
-                end
-                nextOne()
-            end)
+        -- 墓碑单独一批也要能推（删除不需要 create/update）；两样都没有才算零请求。
+        local delete_ids = {}
+        for id in pairs(tombstoned) do delete_ids[#delete_ids + 1] = id end
+        table.sort(delete_ids)
+        if #pending == 0 and #delete_ids == 0 then
+            -- 无可推：与「真推成功」区分开，核心才不会把 changed 谎报给首页。
+            return cb(true, nil, { pushed = 0, adopted = 0, conflicts = 0, deleted = 0 })
         end
-        nextOne()
+
+        -- 锚点先全部算好：有一条找不回段落就整批不发（空 xPath 会让一批失败项在远端挤成同键）。
+        local plans = {}
+        for _idx, ann in ipairs(pending) do
+            local anchor = Position.anchor(ann.text, ann.pos0, path)
+            if not anchor or not anchor.xPath or anchor.xPath == "" then
+                return cb(nil, T(_("划线无法定位，本轮暂不推送：%1"), ann.text))
+            end
+            plans[#plans + 1] = { ann = ann, anchor = anchor }
+        end
+
+        job = ownerIdAsync(self, function(owner_id)
+            if cancelled then return end
+            -- 一批只对一次账：GET 失败宁可不推，也不盲建重复。
+            job = Annotation.listByChapter(self.client, entry.chapterId, owner_id, function(list, lerr)
+                if cancelled then return end
+                if not list then return cb(nil, lerr) end
+                local remote, by_id = {}, {}
+                for _idx, item in ipairs(list) do
+                    local id = tonumber(item.id)
+                    if id and not tombstoned[id] then
+                        remote[#remote + 1] = item
+                        by_id[id] = item
+                    end
+                end
+
+                --- 认领远端那条：回填 id / 坐标 / 原值，后续 update 才有原值可回传。
+                --- **不碰 kavita_note 基线**：本地备注还是空的（远端文本要等 pull 才进 note），
+                --- 这时候把远端备注记成基线，下一轮就会把「本地空」判成用户清空 → update 掉网页作者的内容。
+                --- 基线只在真的写成功、或本地文本已经与远端相同时才补。
+                ---@param ann table 本地条目（原地改写）
+                ---@param hit table 远端 DTO
+                local function adopt(ann, hit)
+                    ann.kavita_id = tonumber(hit.id)
+                    ann.kavita_xpath, ann.kavita_ending_xpath = hit.xPath, hit.endingXPath
+                    ann.kavita_comment, ann.kavita_comment_html = hit.comment, hit.commentHtml
+                    ann.kavita_slot, ann.kavita_spoiler = hit.selectedSlotIndex, hit.containsSpoiler
+                end
+
+                local pushed, adopted, conflicts, index = 0, 0, 0, 0
+                local step
+
+                --- 把本批墓碑从 payload 数组里摘掉：核心随后按这个数组回写快照，出列才算数。
+                local function dropTombstones()
+                    for i = #annotations, 1, -1 do
+                        local ann = annotations[i]
+                        local id = ann.kavita_deleted and tonumber(ann.kavita_id)
+                        if id and tombstoned[id] then table.remove(annotations, i) end
+                    end
+                end
+
+                --- 先写后删：全部 create / update 成功才发一次 bulk-delete（body = 裸 id 数组）。
+                --- 200 ⇒ 墓碑出列；400 ⇒ 重拉一次该章确认真实状态后收尾（不无限重试）；
+                --- 其余失败 ⇒ 整批 cb(nil)，快照留脏、墓碑保留，下轮重试。
+                local function finishBatch()
+                    if #delete_ids == 0 then
+                        return cb(true, nil, { pushed = pushed, adopted = adopted,
+                            conflicts = conflicts, deleted = 0 })
+                    end
+                    job = self.client:json("POST", "/api/Annotation/bulk-delete", nil, delete_ids,
+                        function(_data, derr, code)
+                            if cancelled then return end
+                            if code and code >= 200 and code < 300 then
+                                dropTombstones()
+                                return cb(true, nil, { pushed = pushed, adopted = adopted,
+                                    conflicts = conflicts, deleted = #delete_ids })
+                            end
+                            -- 400 是「id 不存在 / 不是你的 / 服务端拒绝」的同一分支：删除本身幂等，
+                            -- 重拉一次按真实列表收尾，绝不循环重试。
+                            if code ~= 400 then
+                                return cb(nil, derr or _("Kavita 注解删除失败"))
+                            end
+                            job = Annotation.listByChapter(self.client, entry.chapterId, owner_id,
+                                function(fresh, ferr)
+                                    if cancelled then return end
+                                    if not fresh then
+                                        return cb(nil, ferr or _("Kavita 注解删除后复核失败"))
+                                    end
+                                    local alive = {}
+                                    for _idx, item in ipairs(fresh) do
+                                        alive[tonumber(item.id)] = true
+                                    end
+                                    local gone = 0
+                                    for _idx, id in ipairs(delete_ids) do
+                                        if alive[id] then
+                                            logger.warn("kavita annotation delete rejected; drop tombstone", id)
+                                        else
+                                            gone = gone + 1
+                                        end
+                                    end
+                                    dropTombstones()
+                                    cb(true, nil, { pushed = pushed, adopted = adopted,
+                                        conflicts = conflicts, deleted = gone })
+                                end)
+                        end)
+                end
+
+                --- 发一次 create / update；成功回填，失败整批收摊。
+                ---@param ann table
+                ---@param anchor table Position.anchor 的结果
+                ---@param kind string "create" | "update"
+                ---@param target table|nil update 的远端 DTO
+                local function send(ann, anchor, kind, target)
+                    local note = ann.note or ""
+                    local wire = Annotation.toRemote(note)
+                    local body = {
+                        id = kind == "update" and tonumber(target.id) or nil,
+                        chapterId = entry.chapterId, volumeId = entry.volumeId,
+                        libraryId = entry.libraryId, seriesId = entry.seriesId,
+                        ownerUserId = 0,
+                        xPath = anchor.xPath, endingXPath = anchor.endingXPath,
+                        selectedText = ann.text,
+                        pageNumber = anchor.pageNumber or Position.spine(ann.pos0) or 0,
+                        highlightCount = utf16Length(ann.text),
+                        comment = wire.comment, commentHtml = wire.commentHtml,
+                        -- 未改动的两个可写字段回传远端原值，否则一次 update 就把颜色 / 剧透清成默认。
+                        selectedSlotIndex = tonumber(ann.kavita_slot) or 0,
+                        containsSpoiler = ann.kavita_spoiler == true,
+                    }
+                    local api = kind == "create" and "/api/Annotation/create" or "/api/Annotation/update"
+                    job = self.client:json("POST", api, nil, body, function(data, perr)
+                        if cancelled then return end
+                        local new_id = data and tonumber(data.id)
+                        -- update 本来就带着 id：2xx 就认，回查也只可能命中同一条，不会重复建。
+                        if not new_id and kind == "update" then new_id = tonumber(target.id) end
+                        if new_id then
+                            ann.kavita_id = new_id
+                            ann.kavita_xpath, ann.kavita_ending_xpath = anchor.xPath, anchor.endingXPath
+                            ann.kavita_note = note
+                            pushed = pushed + 1
+                            return step()
+                        end
+                        if not data then return cb(nil, perr) end
+                        -- create 回了空体（反代吞掉 DTO）：只查**同一轮**对账列表（§8.3，一批一次 GET），
+                        -- 命中才认成功；仍是 200 不算成功。本轮列表是创建前取的，通常查不到 → 留脏，
+                        -- 下轮对账按 key 认领这条已建成的，不会重复建。
+                        local hit = Annotation.match(remote, {
+                            chapterId = entry.chapterId, xPath = anchor.xPath,
+                            endingXPath = anchor.endingXPath, selectedText = ann.text,
+                        })
+                        if not hit then return cb(nil, _("Kavita 未确认注解已创建")) end
+                        adopt(ann, hit)
+                        ann.kavita_note = note
+                        pushed = pushed + 1
+                        step()
+                    end)
+                end
+
+                --- 逐条判定：有 id 走冲突表与坐标守卫，无 id 先按键认领，认不到才新建。
+                --- 跳过是纯本地判断，用循环推进，避免连续跳过时递归堆栈。
+                step = function()
+                    while true do
+                        if cancelled then return end
+                        index = index + 1
+                        local plan = plans[index]
+                        if not plan then
+                            return finishBatch()
+                        end
+                        local ann, anchor = plan.ann, plan.anchor
+                        local note = ann.note or ""
+                        local id = tonumber(ann.kavita_id)
+                        local current = id and by_id[id]
+                        if id then
+                            -- 有 id 但远端没了 = 网页端删了：不重建、不复活（拉取侧按 dropped 出列）。
+                            if current then
+                                -- 坐标守卫：update 改不了坐标，锚点漂了硬发会把备注写到旧位置。
+                                local drifted = (ann.kavita_xpath and ann.kavita_xpath ~= ""
+                                        and ann.kavita_xpath ~= anchor.xPath)
+                                    or (ann.kavita_ending_xpath and ann.kavita_ending_xpath ~= ""
+                                        and ann.kavita_ending_xpath ~= anchor.endingXPath)
+                                if drifted then
+                                    logger.warn("kavita annotation anchor drifted; skip update", id,
+                                        ann.kavita_xpath, anchor.xPath)
+                                else
+                                    local base = ann.kavita_note
+                                    local remote_note = Annotation.noteText(current.comment, current.commentHtml,
+                                        current.commentPlainText)
+                                    if base == nil then
+                                        -- 没有基线（刚认领 / 老 payload）：本地有备注就是真实编辑，整条替换；
+                                        -- 空则什么都不写，等 pull 把远端文本连同基线一起采纳。
+                                        if Annotation.sameNote(note, remote_note) then
+                                            if not Annotation.sameNote(note, "") then ann.kavita_note = note end
+                                        elseif not Annotation.sameNote(note, "") then
+                                            return send(ann, anchor, "update", current)
+                                        end
+                                    -- 没改备注就不写：远端怎么变都交给 pull 采纳。
+                                    elseif not Annotation.sameNote(note, base) then
+                                        if Annotation.sameNote(remote_note, base) then
+                                            return send(ann, anchor, "update", current)
+                                        elseif Annotation.sameNote(remote_note, note) then
+                                            -- 两边改成了同一段：只补基线，不再白写一次。
+                                            ann.kavita_note = note
+                                        else
+                                            -- 远端赢：本地改动留在 kavita_local_note 备查，下轮 pull 采纳远端文本。
+                                            ann.kavita_local_note = note
+                                            conflicts = conflicts + 1
+                                            logger.warn("kavita annotation overridden by remote", id)
+                                        end
+                                    end
+                                end
+                            end
+                        else
+                            local hit = Annotation.match(remote, {
+                                chapterId = entry.chapterId, xPath = anchor.xPath,
+                                endingXPath = anchor.endingXPath, selectedText = ann.text,
+                            })
+                            if not hit then
+                                return send(ann, anchor, "create")
+                            end
+                            adopt(ann, hit)
+                            local remote_note = Annotation.noteText(hit.comment, hit.commentHtml,
+                                hit.commentPlainText)
+                            -- 首次认领：本地空 / 与远端相同 → 只采纳 id，不覆盖网页作者的备注。
+                            -- 基线只在本地确实有这段文本时才补，否则下一轮会把「本地空」当成用户清空。
+                            if not Annotation.sameNote(note, "") then
+                                if Annotation.sameNote(note, remote_note) then
+                                    ann.kavita_note = note
+                                else
+                                    return send(ann, anchor, "update", hit)
+                                end
+                            end
+                            -- 只认领 id、没写远端：算 adopted（写了的只算 pushed）。
+                            adopted = adopted + 1
+                        end
+                    end
+                end
+                step()
+            end)
+        end)
     end)
     return { cancel = function()
         cancelled = true
