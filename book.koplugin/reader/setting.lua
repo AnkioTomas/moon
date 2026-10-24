@@ -7,6 +7,7 @@
 return {
     defaults = {
         auto_mark_read_at_99 = false,
+        chapter_switch_notice = true,
         selection_handles_enabled = true,
         -- 划词菜单的显示顺序；关闭状态仍由 reader_popup_buttons 单独保存。
         reader_popup_button_order = {

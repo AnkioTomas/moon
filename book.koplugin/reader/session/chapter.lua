@@ -34,6 +34,7 @@ end
 
 local function showTransitionNotice()
     closeTransitionNotice()
+    if require("utils.settings").get("reader").chapter_switch_notice == false then return end
     transition_notice = require("ui.themes.widgets.toast"):new{
         text = _("正在切换章节，请稍候…"),
     }
