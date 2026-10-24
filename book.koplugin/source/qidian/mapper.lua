@@ -178,11 +178,26 @@ function Mapper.locked(info)
     return type(info) == "table" and tonumber(info.vipStatus) == 1 and tonumber(info.isBuy) ~= 1
 end
 
---- 已购 VIP 的正文是密文（cES / fEnS 非 0，官方前端 JS 解密 + 字体映射），Lua 端解不了，不能当正文。
+--- 已购 VIP 的正文是 Fock 密文（官方前端 fEnS=1）。
+---@param info table|nil
+---@return boolean
+function Mapper.fockEncrypted(info)
+    return type(info) == "table" and (tonumber(info.fEnS) or 0) ~= 0
+end
+
+--- 已购 VIP 的正文还套了一层字体映射（官方前端 cES=2）。
+--- TTF 画回真字，`<y class="sy-1">` 还要按 CSS 镜像；正文尾部另有一份诱饵副本。
+---@param info table|nil
+---@return boolean
+function Mapper.fontProtected(info)
+    return type(info) == "table" and tonumber(info.cES) == 2
+end
+
+--- 需要本地处理的 VIP 正文：Fock 和/或字体层。
 ---@param info table|nil
 ---@return boolean
 function Mapper.encrypted(info)
-    return type(info) == "table" and ((tonumber(info.cES) or 0) ~= 0 or (tonumber(info.fEnS) or 0) ~= 0)
+    return Mapper.fockEncrypted(info) or Mapper.fontProtected(info)
 end
 
 --- 章节 HTML → 纯文本。起点用 <p> 分段，且不保证闭合。

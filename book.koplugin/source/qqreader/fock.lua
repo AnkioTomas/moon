@@ -12,6 +12,7 @@ QQ阅读已购 VIP 章节正文解密（Fock）。
 --]]--
 
 local ffi = require("ffi")
+local FontRestore = require("source.font_restore")
 local Job = require("workers.job")
 local Text = require("utils.text")
 
@@ -120,56 +121,14 @@ function Fock.decrypt(content, chapter_id, keypool, version, fuid)
     return ffi.string(mem + result[2], result[3])
 end
 
-local function writeTemp(bytes)
-    local path = os.tmpname()
-    local file = assert(io.open(path, "wb"))
-    file:write(bytes)
-    file:close()
-    return path
-end
-
-local function randomFontBytes(font)
-    local parts = {}
-    for idx, byte in ipairs(font and font.data or {}) do parts[idx] = string.char(byte) end
-    return table.concat(parts)
-end
-
-local RARE_LIMIT, FIXED_LIMIT = 6763, 3755
-
---- 乱序码位 / 互换字形 → 真字（字体是随章下发的，写临时文件给 FreeType 读）。
----@return table rare_map
----@return table han_map
-local function recognize(random_font, fixed_font, rare, han)
-    local rare_path, fixed_path = writeTemp(randomFontBytes(random_font)), writeTemp(fixed_font)
-    local ref = require("fontlist").fontdir .. "/noto/NotoSansCJKsc-Regular.otf"
-    local ref_file = assert(io.open(ref, "rb"))
-    local ref_size = ref_file:seek("end")
-    ref_file:close()
-    -- 签名由参考字体和算法参数决定：算法改了升 v 号，参考字体换了（大小变）自动重算
-    local cache = require("utils.paths").cacheDir() .. "/qqreader_glyph_v1_" .. ref_size .. ".bin"
-    local ok, maps = pcall(require("source.qqreader.glyph").recognize, ref, cache, {
-        { font_path = rare_path, codes = rare, limit = RARE_LIMIT },
-        { font_path = fixed_path, codes = han, limit = FIXED_LIMIT },
-    })
-    os.remove(rare_path)
-    os.remove(fixed_path)
-    if not ok then error(maps, 0) end
-    return maps[1], maps[2]
-end
-
---- 解出的 HTML 段落还原成纯文本：把乱序码位 / 互换字形按下发字体认回真字。潇湘同一套字体反盗版，共用这里。
+--- 解出的 HTML 段落还原成纯文本：把乱序码位 / 互换字形按下发字体认回真字。
+--- 起点、潇湘同一套字体反盗版，共用 `source.font_restore`。
 ---@param plain string Fock 解出的正文
 ---@param font table fontResponse（css、randomFont）
 ---@param fixed_font string|nil fontResponse.fixedFontTtf 下载下来的字节；没有字体加密的章为 nil，不还原字形
 ---@return string
 function Fock.restore(plain, font, fixed_font)
-    local Scramble = require("source.qqreader.scramble")
-    local paragraphs = Scramble.paragraphs(plain, font.css or "")
-    if #paragraphs == 0 then return plain end
-    local rare, han = Scramble.codes(paragraphs)
-    local rare_map, han_map = {}, {}
-    if fixed_font and #rare + #han > 0 then rare_map, han_map = recognize(font.randomFont, fixed_font, rare, han) end
-    return Scramble.text(paragraphs, rare_map, han_map)
+    return FontRestore.restore(plain, font, fixed_font)
 end
 
 --- 在子进程里解密并还原乱序，回调拿正文纯文本或错误。

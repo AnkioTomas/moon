@@ -13,10 +13,23 @@ ctors + main，再 `fock_i(uid)` → `fock_a(keypool, version)` → `fock_u(cont
 --]]--
 
 local ffi = require("ffi")
+local FontRestore = require("source.font_restore")
 local Job = require("workers.job")
+local JSON = require("json")
 local Text = require("utils.text")
 
 local Fock = {}
+
+-- 起点 font 层的字形与参考 Noto 偶有 0.65~0.75 的形近字（如 䵻→对），比 QQ阅读放宽一点。
+local FONT_THRESHOLD = 0.65
+
+---@param info table chapterInfo
+---@return table
+local function fontData(info)
+    local ok, random = pcall(JSON.decode, tostring(info.randomFont or "{}"))
+    if not ok or type(random) ~= "table" then random = { data = {} } end
+    return { css = info.css or "", randomFont = random }
+end
 
 local MEM_SIZE = 16 * 1024 * 1024
 local HOST = {
@@ -135,6 +148,52 @@ function Fock.decryptAsync(content, chapter_id, keypool, version, uid, cb)
         name = "qidian_fock",
         kind = "light",
         timeout = 60,
+        on_done = function(res) cb(res.text, res.err) end,
+        on_failed = function(err) cb(nil, tostring(err)) end,
+        on_cancelled = function() end,
+    })
+end
+
+--- 在子进程里解密并还原 cES=2 的字体层；回调拿纯文本或错误。
+--- 起点会在正文尾部追加一份同长度的诱饵副本，restore 的 dedupe 会丢掉它。
+---@param info table chapterInfo
+---@param fixed_font string fixedFontTtf 下载下来的字节
+---@return BookJob
+function Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, uid, cb)
+    return Job.run(function()
+        jit.off()
+        local plain, err = Fock.decrypt(info.content, chapter_id, keypool, version, uid)
+        jit.on()
+        if not plain then return { err = "decrypt: " .. tostring(err) } end
+        local ok, text = pcall(FontRestore.restore, plain, fontData(info), fixed_font,
+            { dedupe = true, confusions = true, threshold = FONT_THRESHOLD })
+        if not ok then return { err = "font: " .. tostring(text) } end
+        return { text = text }
+    end, {
+        name = "qidian_fock",
+        kind = "light",
+        timeout = 600,
+        on_done = function(res) cb(res.text, res.err) end,
+        on_failed = function(err) cb(nil, tostring(err)) end,
+        on_cancelled = function() end,
+    })
+end
+
+--- 只有字体层（fEnS=0）时直接还原明文 HTML。
+---@param html string Fock 明文或页面正文 HTML
+---@param info table chapterInfo
+---@param fixed_font string
+---@return BookJob
+function Fock.restoreAsync(html, info, fixed_font, cb)
+    return Job.run(function()
+        local ok, text = pcall(FontRestore.restore, html, fontData(info), fixed_font,
+            { dedupe = true, confusions = true, threshold = FONT_THRESHOLD })
+        if not ok then return { err = "font: " .. tostring(text) } end
+        return { text = text }
+    end, {
+        name = "qidian_font",
+        kind = "light",
+        timeout = 600,
         on_done = function(res) cb(res.text, res.err) end,
         on_failed = function(err) cb(nil, tostring(err)) end,
         on_cancelled = function() end,
