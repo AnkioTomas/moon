@@ -12,6 +12,11 @@ package.preload["features.xray.ui"] = function()
     return { refresh = function(ui) refreshed = ui end }
 end
 
+local session_current
+package.preload["reader.session"] = function()
+    return { current = function() return session_current end }
+end
+
 local Xray = require("features.xray")
 
 Xray.onCreate()
@@ -25,3 +30,12 @@ Assert.is_nil(refreshed)
 local reader = { ui = { document = {} } }
 Assert.is_true(refresh(reader))
 Assert.eq(refreshed, reader.ui)
+
+session_current = { identity = { source_id = "subscribe", ephemeral = true } }
+Assert.is_false(Xray.available(), "订阅文章不支持 X-Ray")
+refreshed = nil
+Assert.is_false(refresh(reader))
+Assert.is_nil(refreshed)
+
+session_current = { identity = { source_id = "wechat" } }
+Assert.is_true(Xray.available())
