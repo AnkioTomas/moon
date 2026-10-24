@@ -218,8 +218,8 @@ require("features").registerConventions()
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 38)
-Assert.eq(table.concat(section_titles, ","), "书库,订阅,外观,桌面,阅读,系统,安全,维护")
+Assert.len(built_rows, 39)
+Assert.eq(table.concat(section_titles, ","), "搜索,书库,订阅,外观,桌面,阅读,系统,安全,维护")
 -- 订阅的开关直接放在根页「订阅」组，不另开子页。
 local sub_rows = {}
 for _, row in ipairs(built_rows) do

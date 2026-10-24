@@ -222,6 +222,26 @@ local function navRow(desktop, entry)
     end
 end
 
+--- 根页顶部的搜索行：首次点开才建索引（要把所有页面的行建一遍），缓存在本次 groups 上，根页重建即失效。
+---@param self BookSettings
+---@param groups table[] Tree.build 的结果
+---@return fun(iw: number): table
+local function searchRow(self, groups)
+    return function(iw)
+        return Row.widget({
+            width = iw,
+            icon = "search",
+            title = _("搜索设置"),
+            subtitle = _("按名称或说明查找设置项"),
+            callback = function()
+                local Search = require("desktop.pages.setting.search")
+                groups.search_hits = groups.search_hits or Search.build(groups)
+                Search.prompt(self.desktop, groups.search_hits)
+            end,
+        })
+    end
+end
+
 --- 构建设置根页：核心条目 + 扫描到的 feature 条目按层级合并；按内容区尺寸现建，翻页经桌面 updateView 重建。
 ---@return table
 function Settings:updateView()
@@ -246,7 +266,7 @@ function Settings:updateView()
         table.insert(roots, at, { id = g.id, title = g.title, after = g.after })
     end
     local groups = Tree.build(roots, entries)
-    local sections = {}
+    local sections = {{ title = _("搜索"), rows = { searchRow(self, groups) } }}
     for _idx, group in ipairs(groups) do
         local rows = {}
         for _i, entry in ipairs(group.entries) do rows[#rows + 1] = entry.row or navRow(desktop, entry) end
