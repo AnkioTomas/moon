@@ -91,6 +91,32 @@ do
     Assert.eq(again, 1)
 end
 
+-- 远端书架自带进度：读完必标已读，99% 看设置
+do
+    local marked = {}
+    package.preload["book.books_db"] = function()
+        return {
+            reconcile = function() return true, 0 end,
+            markReadAutomatically = function(_source_id, stable_id) marked[#marked + 1] = stable_id; return true end,
+        }
+    end
+    local reader_conf = { auto_mark_read_at_99 = false }
+    package.loaded["utils.settings"] = { get = function() return reader_conf end }
+    package.loaded["book.books_db"] = nil
+    package.loaded["source.shelf"] = nil
+    local S = require("source.shelf")
+    local books = {
+        { stable_id = "done", percent = 100 }, { stable_id = "near", percent = 99 },
+        { stable_id = "mid", percent = 50 }, { stable_id = "none" },
+    }
+    Assert.not_nil(S.reconcile("x", books))
+    Assert.eq(table.concat(marked, ","), "done")
+    marked, reader_conf.auto_mark_read_at_99 = {}, true
+    S.reconcile("x", books)
+    Assert.eq(table.concat(marked, ","), "done,near")
+    package.loaded["utils.settings"] = nil
+    package.loaded["source.shelf"] = nil
+end
 package.preload["book.books_db"] = nil
 package.loaded["book.books_db"] = nil
 package.loaded["source.shelf"] = nil
