@@ -685,22 +685,27 @@ end
 ---@return { cancel: fun() }
 function Catalog.readingInsightAsync(source_id, cb)
     return deferScoped(source_id, cb, function(scope)
-        local StatsDB = require("book.stats_db")
-        cb({
-            data = Catalog.toInsight(
-                scope,
-                StatsDB.summaryBySource(scope),
-                StatsDB.dailyBySource(scope),
-                StatsDB.dailyBooksBySource(scope),
-                StatsDB.hourlyBySource(scope),
-                {
-                    session_rows = StatsDB.sessionRows(scope, os.time() - 400 * 86400),
-                    finished = StatsDB.progressBooks(scope, true),
-                    reading = StatsDB.progressBooks(scope, false, 5),
-                }
-            ),
-        })
+        cb({ data = Catalog.readingInsight(scope) })
     end)
+end
+
+--- 同步读本地洞察（桌面统计页与锁屏统计背景共用）。
+---@param scope string|string[] Catalog.libraryScope 的结果
+---@return StatsInsight
+function Catalog.readingInsight(scope)
+    local StatsDB = require("book.stats_db")
+    return Catalog.toInsight(
+        scope,
+        StatsDB.summaryBySource(scope),
+        StatsDB.dailyBySource(scope),
+        StatsDB.dailyBooksBySource(scope),
+        StatsDB.hourlyBySource(scope),
+        {
+            session_rows = StatsDB.sessionRows(scope, os.time() - 400 * 86400),
+            finished = StatsDB.progressBooks(scope, true),
+            reading = StatsDB.progressBooks(scope, false, 5),
+        }
+    )
 end
 
 return Catalog

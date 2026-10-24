@@ -237,6 +237,12 @@ function M.setPosterStyle(style)
     if require("features.lockscreen.poster").validStyle(style) then save("lock_screen_poster_style", style) end
 end
 
+--- 设置统计页面背景的页面；非法值忽略。
+---@param page string
+function M.setInsightPage(page)
+    if require("features.lockscreen.insight").validPage(page) then save("lock_screen_insight_page", page) end
+end
+
 --- 设置文字海报版式。
 ---@param style string
 function M.setTypoStyle(style)

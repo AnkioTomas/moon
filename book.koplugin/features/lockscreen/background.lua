@@ -141,10 +141,16 @@ local BACKGROUNDS = {
         blocks = function(rect) return require("features.lockscreen.poster").blocks(rect) end,
         cache_key = function() return require("features.lockscreen.poster").cache_key() end,
     },
+    insight = {
+        id = "insight",
+        label = _("统计页面"),
+        blocks = function(rect) return require("features.lockscreen.insight").blocks(rect) end,
+        cache_key = function() return require("features.lockscreen.insight").cache_key() end,
+    },
     none = { id = "none", label = _("无") },
 }
 
-local BACKGROUND_IDS = { "custom", "bing", "myrl", "paper", "danxiangli", "cover", "folder", "poster", "typo", "none" }
+local BACKGROUND_IDS = { "custom", "bing", "myrl", "paper", "danxiangli", "cover", "folder", "poster", "typo", "insight", "none" }
 
 --- 判断背景设置值是否合法。
 ---@param mode string|nil
