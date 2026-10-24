@@ -24,76 +24,82 @@ end
 function Setting.entries(desktop)
     return {
         {
-            parent = "lookup",
-            order = 50,
-            sections = function()
-                local MoonSettings = require("utils.settings")
-                local current = MoonSettings.get("features.dictionary")
-                local enabled = current.dictionary_enabled
-                local rows = {
-                    function(iw)
-                        return require("ui.themes.widgets.row").widget({
-                            width = iw,
-                            chevron = false,
-                            kind = "toggle",
-                            icon = "book",
-                            title = _("月读词典"),
-                            status = enabled and _("开") or _("关"),
-                            status_on = enabled,
-                            callback = function()
-                                current.dictionary_enabled = not enabled
-                                MoonSettings.save("features.dictionary", current)
-                                desktop:updateView()
-                            end,
-                        })
-                    end,
-                }
-                if enabled then
-                    rows[#rows + 1] = function(iw)
-                        local on = current.dictionary_load_all
-                        return require("ui.themes.widgets.row").widget({
-                            width = iw,
-                            chevron = false,
-                            kind = "toggle",
-                            icon = "book",
-                            title = _("加载所有词典"),
-                            subtitle = _("无论是否启用、有无结果，都列在查词菜单里供切换"),
-                            status = on and _("开") or _("关"),
-                            status_on = on,
-                            callback = function()
-                                current.dictionary_load_all = not on
-                                MoonSettings.save("features.dictionary", current)
-                                desktop:updateView()
-                            end,
-                        })
+            group = "reader",
+            order = 16,
+            icon = "menu_book",
+            title = _("词典"),
+            subtitle = _("月读词典与词典管理"),
+            page = {
+                title = _("词典"),
+                sections = function()
+                    local MoonSettings = require("utils.settings")
+                    local current = MoonSettings.get("features.dictionary")
+                    local enabled = current.dictionary_enabled
+                    local rows = {
+                        function(iw)
+                            return require("ui.themes.widgets.row").widget({
+                                width = iw,
+                                chevron = false,
+                                kind = "toggle",
+                                icon = "book",
+                                title = _("月读词典"),
+                                status = enabled and _("开") or _("关"),
+                                status_on = enabled,
+                                callback = function()
+                                    current.dictionary_enabled = not enabled
+                                    MoonSettings.save("features.dictionary", current)
+                                    desktop:updateView()
+                                end,
+                            })
+                        end,
+                    }
+                    if enabled then
+                        rows[#rows + 1] = function(iw)
+                            local on = current.dictionary_load_all
+                            return require("ui.themes.widgets.row").widget({
+                                width = iw,
+                                chevron = false,
+                                kind = "toggle",
+                                icon = "book",
+                                title = _("加载所有词典"),
+                                subtitle = _("无论是否启用、有无结果，都列在查词菜单里供切换"),
+                                status = on and _("开") or _("关"),
+                                status_on = on,
+                                callback = function()
+                                    current.dictionary_load_all = not on
+                                    MoonSettings.save("features.dictionary", current)
+                                    desktop:updateView()
+                                end,
+                            })
+                        end
+                        rows[#rows + 1] = function(iw)
+                            return require("ui.themes.widgets.row").widget({
+                                width = iw,
+                                chevron = true,
+                                kind = "nav",
+                                icon = "cloud_download",
+                                title = _("下载词典"),
+                                callback = function()
+                                    require("features.dictionary.ui").download(hostUi())
+                                end,
+                            })
+                        end
+                        rows[#rows + 1] = function(iw)
+                            return require("ui.themes.widgets.row").widget({
+                                width = iw,
+                                chevron = true,
+                                kind = "nav",
+                                icon = "settings",
+                                title = _("管理词典"),
+                                callback = function()
+                                    require("features.dictionary.ui").manage(hostUi())
+                                end,
+                            })
+                        end
                     end
-                    rows[#rows + 1] = function(iw)
-                        return require("ui.themes.widgets.row").widget({
-                            width = iw,
-                            chevron = true,
-                            kind = "nav",
-                            icon = "cloud_download",
-                            title = _("下载词典"),
-                            callback = function()
-                                require("features.dictionary.ui").download(hostUi())
-                            end,
-                        })
-                    end
-                    rows[#rows + 1] = function(iw)
-                        return require("ui.themes.widgets.row").widget({
-                            width = iw,
-                            chevron = true,
-                            kind = "nav",
-                            icon = "settings",
-                            title = _("管理词典"),
-                            callback = function()
-                                require("features.dictionary.ui").manage(hostUi())
-                            end,
-                        })
-                    end
-                end
-                return { { title = _("词典"), rows = rows } }
-            end,
+                    return { { title = _("词典"), rows = rows } }
+                end,
+            },
         },
     }
 end

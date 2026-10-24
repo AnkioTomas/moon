@@ -218,7 +218,7 @@ require("features").registerConventions()
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 39)
+Assert.len(built_rows, 47)
 Assert.eq(table.concat(section_titles, ","), "搜索,书库,订阅,外观,桌面,阅读,系统,安全,维护")
 -- 订阅的开关直接放在根页「订阅」组，不另开子页。
 local sub_rows = {}
@@ -238,6 +238,14 @@ local expected = {
     { title = "桌面快捷面板", id = "feature:panel:desktop" },
     { title = "底栏拓展", id = "feature:extensions:main" },
     { title = "阅读行为", id = "reader_behavior" },
+    { title = "翻页动画", id = "feature:animation:1" },
+    { title = "阅读侧栏", id = "feature:sidebar:1" },
+    { title = "X-Ray", id = "feature:xray:1" },
+    { title = "翻译", id = "feature:translate:1" },
+    { title = "段评", id = "feature:reviews:1" },
+    { title = "词典", id = "feature:dictionary:1" },
+    { title = "百科", id = "feature:baike:1" },
+    { title = "文字识别（OCR）", id = "feature:ocr:1" },
     { title = "阅读页顶栏", id = "feature:bars:top" },
     { title = "阅读页底栏", id = "feature:bars:bottom" },
     { title = "阅读快捷面板", id = "feature:panel:reader" },
@@ -284,8 +292,8 @@ local function sectionTitles(page)
     for _, section in ipairs(page.sections()) do titles[#titles + 1] = section.title end
     return table.concat(titles, ",")
 end
-Assert.eq(sectionTitles(behavior), "行为,翻页动画,阅读侧栏")
-Assert.eq(sectionTitles(pages.lookup), "选区,翻译,双语对照,X-Ray,段评,词典,文字识别（OCR）,百科")
+Assert.eq(sectionTitles(behavior), "行为")
+Assert.eq(sectionTitles(pages.lookup), "选区")
 Assert.eq(sectionTitles(pages.popup_menu), "按钮")
 Assert.eq(sectionTitles(pages.display), "屏幕,夜间与亮度")
 

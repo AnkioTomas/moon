@@ -166,12 +166,12 @@ local function coreEntries(desktop)
         },
         {
             group = "reader", order = 10, id = "reader_behavior", icon = "touch_app", title = _("阅读行为"),
-            subtitle = _("脚注、翻页动画、侧栏"),
+            subtitle = _("脚注与阅读行为"),
             page = { title = _("阅读行为"), sections = function() return ReaderSettings:sections(desktop) end },
         },
         {
             group = "reader", order = 50, id = "lookup", icon = "format_ink_highlighter", title = _("查词"),
-            subtitle = _("翻译、X-Ray、词典、百科"),
+            subtitle = _("选区与划词"),
             page = { title = _("查词") },
         },
         { parent = "lookup", order = 10, sections = function() return ReaderSettings:lookupSections(desktop) end },

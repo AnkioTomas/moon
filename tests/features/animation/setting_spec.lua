@@ -48,10 +48,10 @@ local Setting = require("features.animation.setting")
 local entries = Setting.entries(desktop)
 Assert.len(entries, 1)
 local entry = entries[1]
-Assert.eq(entry.parent, "reader_behavior")
+Assert.eq(entry.group, "reader")
 
 -- 关闭时只有开关一行。
-local rows = entry.sections()[1].rows
+local rows = entry.page.sections()[1].rows
 Assert.len(rows, 1)
 local toggle = rows[1](600)
 Assert.eq(toggle.kind, "toggle")
@@ -73,7 +73,7 @@ Assert.eq(updates, 1)
 Assert.eq(restarts, 1)
 
 -- 开启后多一行风格，显示当前风格名；选中后刷新设置页。
-rows = entry.sections()[1].rows
+rows = entry.page.sections()[1].rows
 Assert.is_true(rows[1](600).status_on)
 Assert.len(rows, 2)
 local style_row = rows[2](600)
@@ -83,6 +83,6 @@ style_row.callback()
 on_change()
 Assert.eq(updates, 2)
 style = { text = "方框", value = "box" }
-Assert.eq(entry.sections()[1].rows[2](600).status, "方框")
+Assert.eq(entry.page.sections()[1].rows[2](600).status, "方框")
 
 return true
