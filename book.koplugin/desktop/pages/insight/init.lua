@@ -103,7 +103,8 @@ function Insight:openBookDetail(hint)
     require("desktop.detail").open(desktop, "library", book)
 end
 
-local PAGE_MODULES = {
+--- 页面 id → 模块；锁屏统计背景按同一张表构建整页。
+Insight.PAGE_MODULES = {
     day = "desktop.pages.insight.day",
     month = "desktop.pages.insight.overview",
     year = "desktop.pages.insight.year",
@@ -146,7 +147,7 @@ function Insight:build()
     local body
     if usable then
         if spec.id == "day" and state.selected ~= os.date("%Y-%m-%d") then title = _("当日") end
-        body = require(PAGE_MODULES[spec.id]):build({
+        body = require(Insight.PAGE_MODULES[spec.id]):build({
             desktop = desktop, state = state, width = content_w, height = inner_h,
             open_book = function(book) self:openBookDetail(book) end,
         })
@@ -182,6 +183,34 @@ function Insight:build()
     }
 end
 
+--- 洞察原始数据 → 页面状态：默认选中今天（没有就选最近一天）。
+---@param raw StatsInsight
+---@return table
+function Insight.stateOf(raw)
+    local per_day = raw.calendar.days or {}
+    local days = {}
+    for day in pairs(per_day) do days[#days + 1] = day end
+    table.sort(days)
+    local today = os.date("%Y-%m-%d")
+    ---@cast today string
+    local selected = per_day[today] and today or (days[#days] or "")
+    local ym_now = os.date("%Y-%m")
+    ---@cast ym_now string
+    local ym = raw.calendar.initial_ym or ym_now
+    local yy, mm = selected:match("^(%d%d%d%d)%-(%d%d)")
+    if yy and mm then ym = yy .. "-" .. mm end
+    return {
+        has_data = raw.has_data,
+        total = raw.total,
+        calendar = raw.calendar,
+        ym = ym,
+        selected = selected,
+        sessions = raw.sessions,
+        finished = raw.finished,
+        reading = raw.reading,
+    }
+end
+
 --- 经当前源读本地洞察（SourceBase → catalog → DB）；UI 不碰网络。
 function Insight:fetch()
     if self.fetch_cancel then return end
@@ -213,30 +242,7 @@ function Insight:fetch()
             finish({ has_data = false, error = err or _("加载失败") })
             return
         end
-        local raw = res.data
-        ---@cast raw StatsInsight
-        local per_day = raw.calendar.days or {}
-        local days = {}
-        for day in pairs(per_day) do days[#days + 1] = day end
-        table.sort(days)
-        local today = os.date("%Y-%m-%d")
-        ---@cast today string
-        local selected = per_day[today] and today or (days[#days] or "")
-        local ym_now = os.date("%Y-%m")
-        ---@cast ym_now string
-        local ym = raw.calendar.initial_ym or ym_now
-        local yy, mm = selected:match("^(%d%d%d%d)%-(%d%d)")
-        if yy and mm then ym = yy .. "-" .. mm end
-        finish({
-            has_data = raw.has_data,
-            total = raw.total,
-            calendar = raw.calendar,
-            ym = ym,
-            selected = selected,
-            sessions = raw.sessions,
-            finished = raw.finished,
-            reading = raw.reading,
-        })
+        finish(Insight.stateOf(res.data))
     end)
     -- 源可能同步回调：已结束的句柄不能留下挡住下次读取。
     if running then self.fetch_cancel = job end

@@ -213,6 +213,13 @@ function Lockscreen:rows(desktop)
             icon = "view_module", title = _("海报风格"), status = Poster.styleLabel(style),
             items = Poster.styleOptions(), current = style, apply = Settings.setPosterStyle,
         })
+    elseif background == "insight" then
+        local Insight = require("features.lockscreen.insight")
+        local page = Insight.page()
+        rows[#rows + 1] = choiceRow(desktop, {
+            icon = "bar_chart", title = _("统计页面"), status = Insight.pageLabel(page),
+            items = Insight.pageOptions(), current = page, apply = Settings.setInsightPage,
+        })
     elseif background == "typo" then
         local Typo = require("features.lockscreen.typo")
         local style = Typo.style()

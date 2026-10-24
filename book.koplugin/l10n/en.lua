@@ -359,6 +359,7 @@ return {
     ["完成"] = "Done",
     ["宽屏"] = "Wide",
     ["密码"] = "Password",
+    ["每天随机"] = "Random daily",
     ["海报墙"] = "Poster wall",
     ["海报风格"] = "Poster style",
     ["单向历"] = "One-Way Calendar",
