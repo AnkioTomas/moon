@@ -242,7 +242,10 @@ function M:createWidget()
     local ctx, opts = self.ctx, self.opts
     local w = opts.width
     local h = opts.height
+    local previous_key = self.shelf_key
     local recent, reading, err = self:shelf()
+    -- 书架顺序变了（读了别的书）焦点回到最近读的那本，否则堆叠停在旧位置
+    if self.shelf_key ~= previous_key then self.focus = 1 end
     local books = {}
     if recent and M.showFirst() then books[1] = recent end
     if #books == 0 and #reading == 0 then return M.libraryPrompt(ctx, w, h, err) end
