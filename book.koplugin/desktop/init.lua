@@ -209,7 +209,9 @@ end
 ---@param self BookDesktop
 ---@return table
 local function tabbar(self)
+    local backdrop = Ext.last("desktop.backdrop")
     local bar = Tabbar.widget{
+        plain = backdrop and backdrop.plain_tabbar(self.tab),
         width = self.dimen.w,
         tabs = self._tabs,
         active = self.tab,
@@ -227,7 +229,6 @@ local function tabbar(self)
         end,
     }
     bar.overlap_offset = { 0, self.dimen.h - Tabbar.height() }
-    local backdrop = Ext.last("desktop.backdrop")
     if backdrop then backdrop.tabbar(bar, self.tab) end
     return bar
 end

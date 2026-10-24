@@ -11,6 +11,8 @@
   Tabbar.widget({ width = w, tabs = { { id = "home", text = "首页", icon = "home" } },
       active = "home", on_tab = function(id) … end })
 
+opts.plain：简洁样式（壁纸透底时用）：选中格不填色，图标文字都用主文字色，只靠字号和指示条区分选中。
+
 未选中格：页面底色 + faint 文字；点当前格不回调，但照样吞掉点按（不漏给下层手势）。
 on_tab(id, rect) 的 rect 是被点格子的屏幕矩形，可作弹层锚点。
 
@@ -23,6 +25,7 @@ local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local LineWidget = require("ui/widget/linewidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
+local VerticalSpan = require("ui/widget/verticalspan")
 local Icon = require("ui.themes.widgets.icon")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
@@ -46,11 +49,12 @@ function Tabbar.widget(opts)
     local cell_h = (opts.height or Tabbar.height()) - rule
     local cell_w = math.floor(opts.width / #opts.tabs)
     local sel = t.selected
-    local mark = Theme.px(sel.mark)
+    local plain = opts.plain
+    local mark = Theme.px(plain and math.max(sel.mark, 2) or sel.mark)
     local row = HorizontalGroup:new{ align = "top" }
     for _idx, tab in ipairs(opts.tabs) do
         local active = tab.id == opts.active
-        local ink = active and sel.ink or t.color.faint
+        local ink = plain and t.color.ink or (active and sel.ink or t.color.faint)
         local label = Icon.label{
             name = tab.icon,
             text = tab.text,
@@ -66,20 +70,21 @@ function Tabbar.widget(opts)
             align = "center",
             Box:new{
                 -- 选中格多带一个 border 键：壁纸只摘「只有 bg」的页底色，选中底色不能被摘掉。
-                style = active and { bg = sel.bg, border = 0 } or { bg = t.color.page },
+                style = (active and not plain) and { bg = sel.bg, border = 0 } or { bg = t.color.page },
                 width = cell_w,
                 height = cell_h - mark,
                 label,
             },
         }
         if mark > 0 then
-            cell[#cell + 1] = CenterContainer:new{
+            -- 没选中的格留空隙而不是画页面色线：壁纸透底时页面色线会成为一道白条。
+            cell[#cell + 1] = active and CenterContainer:new{
                 dimen = Geom:new{ w = cell_w, h = mark },
                 LineWidget:new{
-                    background = Blitbuffer.Color8(active and sel.ink or t.color.page),
+                    background = Blitbuffer.Color8(plain and t.color.ink or sel.ink),
                     dimen = Geom:new{ w = math.floor(cell_w / 3), h = mark },
                 },
-            }
+            } or VerticalSpan:new{ width = mark }
         end
         local tap
         tap = Tap.wrap(cell, opts.on_tab and function()
