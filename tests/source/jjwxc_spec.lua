@@ -171,7 +171,7 @@ end
 
 -- App 登录用的 DES-CBC：向量来自 openssl（des-cbc，key KW8Dvm2N，iv 1ae2c94b）。
 do
-    local Des = require("source.jjwxc.des")
+    local Des = require("crypto.des")
     local cipher = Des.encrypt("hello-世界 password 123", "KW8Dvm2N", "1ae2c94b")
     local hex = cipher:gsub(".", function(c) return string.format("%02x", c:byte()) end)
     Assert.eq(hex, "6c85a3005530ad3b2e41bb2f25eb77bb5fc29c01b2df52790e15fb89ec87c576")

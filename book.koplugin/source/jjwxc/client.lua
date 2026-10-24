@@ -103,7 +103,7 @@ end
 ---@param cb fun(token: string|nil, err: string|nil, kind: "verify"|nil)
 ---@return HttpJob
 function Client.loginAsync(account, password, verify, cb)
-    local Des = require("source.jjwxc.des")
+    local Des = require("crypto.des")
     local identifiers = randomString(20, "0123456789") .. ":" .. randomString(16, "0123456789abcdef") .. "d4:"
     local params = {
         loginName = Text.urlEncode(account),
@@ -284,7 +284,7 @@ local function tokenContentAsync(novel_id, chapter_id, token, cb)
         job = Job.run(function()
             local content = data.content
             if data.encryptType == "jj" then
-                content = require("source.jjwxc.des").decryptBase64(content, DES_KEY, DES_IV)
+                content = require("crypto.des").decryptBase64(content, DES_KEY, DES_IV)
             end
             return { text = content }
         end, {

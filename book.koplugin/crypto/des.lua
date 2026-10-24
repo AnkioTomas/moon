@@ -1,10 +1,10 @@
 --[[--
 DES-CBC / PKCS7 / Base64（纯 Lua，不依赖原生库）。
 
-晋江 App 接口的登录密码、签名与已购章节正文都用它加解密（密钥写死在 App 里）。
+DES 已不安全，只为兼容旧协议（如晋江 App 的登录密码、签名与已购章节正文，密钥写死在 App 里）。
 数据量小（密码十几字节、一章几 KB），位数组实现够用；解密大章请放子进程。
 
-@module koplugin.book.source.jjwxc.des
+@module koplugin.book.crypto.des
 --]]
 
 local bit = require("bit")
