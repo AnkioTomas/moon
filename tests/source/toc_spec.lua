@@ -53,6 +53,8 @@ do -- stale：过了 TTL 仍能取到（订阅章号基线），普通读取仍�
     now = now + Toc.TTL + 1
     Assert.is_nil(Toc.read("subscribe", "9"))
     Assert.eq(Toc.read("subscribe", "9", true)[1].uid, "g1")
+    Assert.is_nil(Toc.uid("subscribe", "9", 1))
+    Assert.eq(Toc.uid("subscribe", "9", 1, true), "g1")
     now = now - Toc.TTL - 1
 end
 
