@@ -20,6 +20,7 @@ local Box = require("ui.themes.widgets.box")
 ---@class BookHomeBuildOpts
 ---@field wrap fun(widget: table, meta: table): table|nil
 ---@field body_height number|nil
+---@field focus string|nil 优先落在含该组件的那一页（浏览 / 编辑态分页不同，切换时保持所见页）
 
 local Layout = {}
 
@@ -158,6 +159,11 @@ function Layout.build(ctx, components, page, opts)
         end
     end
     local pages = #display
+    for i, ranges in ipairs(display) do
+        for _idx, raw in ipairs(ranges) do
+            if raw.id == opts.focus then page = i end
+        end
+    end
     page = math.max(1, math.min(pages, page))
     local ranges = display[page]
 

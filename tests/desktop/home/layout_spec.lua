@@ -129,6 +129,14 @@ _, _, pages = Layout.build({ width = 320, height = 140 }, components, 1, {
 })
 Assert.eq(pages, 2)
 
+-- 浏览态第 3 页（stats 之后拆出的 recent_list）切到编辑态时，focus 按组件定位到钉页 2，而不是页码 3 → 越界。
+page = select(2, Layout.build({ width = 320, height = 140 }, components, 1, {
+    body_height = 140, wrap = function(widget) return widget end, focus = "recent_list",
+}))
+Assert.eq(page, 2)
+page = select(2, Layout.build({ width = 320, height = 140 }, components, 1, { body_height = 140, focus = "recent_list" }))
+Assert.eq(page, 3)
+
 -- 正文内框：四周 space.md，组件间 space.sm。
 local inner_w, inner_h, inner_gap = Layout.metrics(320, 140)
 Assert.eq(inner_w, 296)
