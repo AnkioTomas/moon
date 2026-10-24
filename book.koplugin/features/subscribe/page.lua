@@ -249,6 +249,33 @@ function Page:showAdd()
 end
 
 --- 一个源的管理菜单。
+--- 全部未读文章正文进后台缓存任务（kind = cache），离线时有网才能下，直接提示。
+function Page:cacheUnread(feed)
+    local Toast = require("ui.themes.widgets.toast")
+    if feed.unread == 0 then return Toast:new{ text = _("没有未读文章"), timeout = 3 }:show() end
+    if not require("ui/network/manager"):isConnected() then
+        return Toast:new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
+    end
+    require("workers.ui.task_dialog").start{
+        key = "cache\0subscribe\0" .. feed.id,
+        kind = "cache",
+        title = feed.title,
+        restartable = true,
+        run = function(report, done)
+            return Subscribe.cacheUnread(feed, report, function(cached, total, failed, err)
+                done({ ok = failed == 0, cached = cached, total = total, err = err })
+            end)
+        end,
+        on_done = function(result)
+            Toast:new{
+                text = result.ok and T(_("已缓存 %1 篇未读文章"), result.cached)
+                    or T(_("缓存完成 %1/%2 篇，其余失败：%3"), result.cached, result.total, tostring(result.err)),
+                timeout = 3,
+            }:show()
+        end,
+    }
+end
+
 function Page:showManage(feed)
     local Input = require("ui.themes.widgets.input")
     local function edit(title, key)
@@ -260,6 +287,7 @@ function Page:showManage(feed)
     end
     require("ui.themes.widgets.sheet"):new{ title = feed.title, items = {
         { text = _("刷新"), callback = function() self:refresh({ feed }, false, true) end },
+        { text = _("缓存全部未读"), callback = function() self:cacheUnread(feed) end },
         { text = _("全部标为已读"), callback = function()
             SubDB.markRead(feed.id)
             self:redraw()

@@ -44,6 +44,12 @@ function T.article(title, html, images, byline)
         html = html:gsub("<figure[^>]*>%s*<img%s[^>]*>%s*(.-)</figure>", "%1"):gsub("<img%s[^>]*>", "")
     end
     html = html:gsub("<(/?)section([%s>])", "<%1div%2"):gsub("<(/?)[hH]1([%s>])", "<%1h2%2")
+    -- 二、三级标题编号：目录页的章内小节靠这个 id 跳转（T.headings 读回）
+    local n = 0
+    html = html:gsub("<[hH]([23])([^>]*)>", function(level, attrs)
+        n = n + 1
+        return "<h" .. level .. attrs:gsub('%sid%s*=%s*"[^"]*"', "") .. ' id="mh' .. n .. '">'
+    end)
     -- 空段落与连续换行
     html = html:gsub("<p[^>]*>%s*</p>", ""):gsub("<p[^>]*>%s*<br%s*/?>%s*</p>", ""):gsub("(<br%s*/?>%s*)+(<br%s*/?>)", "%2")
     -- 只有一张图的段落 → 图块
@@ -53,6 +59,18 @@ function T.article(title, html, images, byline)
         head = head .. '<p class="byline">' .. Text.xmlEscape(byline) .. "</p>"
     end
     return head .. Text.trim(html)
+end
+
+--- 读回 T.article 编了号的标题，做目录的章内小节：h1 / h2（正文 h1 已降成 h2）为第 2 级，h3 为第 3 级。
+---@param html string
+---@return BookChapterAnchor[]
+function T.headings(html)
+    local out = {}
+    for level, id, inner in html:gmatch('<h([23])[^>]-id="(mh%d+)"[^>]*>(.-)</h%1>') do
+        local title = Text.stripHtml(inner):gsub("%s+", " ")
+        if title ~= "" then out[#out + 1] = { title = title, depth = tonumber(level), id = id } end
+    end
+    return out
 end
 
 --- 整篇文档（交 source.chapter 原样落盘）：<title> 是书名（订阅名），供阅读器认书。

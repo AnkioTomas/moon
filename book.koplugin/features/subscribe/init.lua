@@ -519,6 +519,36 @@ function Subscribe.content(feed, item, cb)
     end)
 end
 
+--- 把一个源的全部未读文章正文依次缓存到本地（已缓存的跳过），一篇失败不阻断后面。
+---@param feed table
+---@param report fun(text: string|nil, done: integer, total: integer)
+---@param cb fun(cached: integer, total: integer, failed: integer, err: any)
+---@return { cancel: fun() }
+function Subscribe.cacheUnread(feed, report, cb)
+    local items = SubDB.items(feed.id, 1, -1, false)
+    local total, pos, failed, last_err = #items, 0, 0, nil
+    local cancelled, active = false, nil
+    local step
+    step = function()
+        if cancelled then return end
+        pos = pos + 1
+        local item = items[pos]
+        if not item then return cb(total - failed, total, failed, last_err) end
+        report(item.title, pos - 1, total)
+        active = Subscribe.content(feed, item, function(html, err)
+            active = nil
+            if cancelled then return end
+            if not html then failed, last_err = failed + 1, err or last_err end
+            require("ui/uimanager"):nextTick(step)
+        end)
+    end
+    require("ui/uimanager"):nextTick(step)
+    return { cancel = function()
+        cancelled = true
+        if type(active) == "table" and active.cancel then active.cancel() end
+    end }
+end
+
 -- 扩展点登记（features 加载器 require 本模块时执行一次；见 utils/extension.lua）。
 local Ext = require("utils.extension")
 local function enabled() return require("utils.settings").get("features.subscribe").enabled and true or false end
