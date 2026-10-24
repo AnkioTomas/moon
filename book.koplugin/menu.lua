@@ -74,6 +74,7 @@ local function seedStartWithOnInstall()
     require("utils.log").info("book seed start_with on install")
     Menu.setOpenOnStart(true)
     Settings.get("desktop").start_with_seeded = true
+    Settings.get("desktop").docs_prompt_pending = true
     Settings.save("desktop")
 end
 
