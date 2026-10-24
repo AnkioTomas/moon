@@ -313,7 +313,10 @@ function Client.contentAsync(book_id, chapter_id, cb)
             cb(nil, _("QQ阅读章节解密失败")); return
         end
         current = Request.get(font.fixedFontTtf, { timeout = require("http.timeout").net(1) }, function(ttf, ferr)
-            if not ttf then cb(nil, ferr and tostring(ferr) or _("请求失败")); return end
+            if not ttf or #ttf < 4 then
+                logger.warn("qqreader font download failed:", ferr, ttf and #ttf)
+                cb(nil, _("QQ阅读章节解密失败")); return
+            end
             run(ttf)
         end)
     end

@@ -12,7 +12,7 @@ QQ阅读已购 VIP 章节正文解密（Fock）。
 --]]--
 
 local ffi = require("ffi")
-local FontRestore = require("source.font_restore")
+local FontRestore = require("source.yuewen_fonts")
 local Job = require("workers.job")
 local Text = require("utils.text")
 
@@ -122,7 +122,7 @@ function Fock.decrypt(content, chapter_id, keypool, version, fuid)
 end
 
 --- 解出的 HTML 段落还原成纯文本：把乱序码位 / 互换字形按下发字体认回真字。
---- 起点、潇湘同一套字体反盗版，共用 `source.font_restore`。
+--- 起点、潇湘同一套字体反盗版，共用 `source.yuewen_fonts`。
 ---@param plain string Fock 解出的正文
 ---@param font table fontResponse（css、randomFont）
 ---@param fixed_font string|nil fontResponse.fixedFontTtf 下载下来的字节；没有字体加密的章为 nil，不还原字形
@@ -148,7 +148,7 @@ function Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, fuid,
     end, {
         name = "qqreader_fock",
         kind = "light",
-        timeout = 120,
+        timeout = 600,
         on_done = function(res) cb(res.text, res.err) end,
         on_failed = function(err) cb(nil, tostring(err)) end,
         on_cancelled = function() end,

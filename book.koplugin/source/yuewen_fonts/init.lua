@@ -1,13 +1,13 @@
 --[[--
-阅文系 VIP 章节的乱序字体还原（QQ阅读 / 起点 / 潇湘共用）。
+阅文系 VIP 章节的乱序字体还原（QQ阅读 / 起点共用）。
 
 Fock 解出的 HTML 里，常用字码位被换成别的字，靠随章下发的 fixedFont 画回真字；
 扩展 A 区的生僻码位再靠 randomFont + CSS 排序/伪元素还原。这里把
-`source.qqreader.glyph` 的字形识别和 `source.qqreader.scramble` 的 HTML 解析拼起来。
+`source.yuewen_fonts.glyph` 的字形识别和 `source.yuewen_fonts.scramble` 的 HTML 解析拼起来。
 
 字体是随章下发的，写临时文件给 FreeType 读；参考字签名会落盘缓存。
 
-@module source.font_restore
+@module source.yuewen_fonts
 --]]--
 
 local FontRestore = {}
@@ -39,6 +39,9 @@ end
 local function recognize(random_font, fixed_font, rare, han, opts)
     local rare_bytes = randomFontBytes(random_font)
     local paths, labels, tasks = {}, {}, {}
+    local function cleanup()
+        for _idx, path in ipairs(paths) do os.remove(path) end
+    end
     if #rare > 0 and #rare_bytes > 0 then
         paths[#paths + 1] = writeTemp(rare_bytes)
         labels[#labels + 1] = "rare"
@@ -46,7 +49,7 @@ local function recognize(random_font, fixed_font, rare, han, opts)
             font_path = paths[#paths], codes = rare, limit = RARE_LIMIT, threshold = opts and opts.threshold,
         }
     end
-    if #han > 0 and #fixed_font > 0 then
+    if #han > 0 and fixed_font and #fixed_font > 0 then
         paths[#paths + 1] = writeTemp(fixed_font)
         labels[#labels + 1] = "han"
         tasks[#tasks + 1] = {
@@ -56,26 +59,25 @@ local function recognize(random_font, fixed_font, rare, han, opts)
     if #tasks == 0 then return {}, {} end
 
     local ref = require("fontlist").fontdir .. "/noto/NotoSansCJKsc-Regular.otf"
-    local ref_file = assert(io.open(ref, "rb"))
+    local ref_file, ref_err = io.open(ref, "rb")
+    if not ref_file then cleanup(); error(ref_err, 0) end
     local ref_size = ref_file:seek("end")
     ref_file:close()
     -- 签名只取决于参考字体和算法参数；参考字体换了（大小变）自动重算。
-    -- 优先复用 QQ阅读缓存；也兼容 font.2 已经建好的 glyph_v1_ 文件，避免重新渲染 6763 个参考字。
+    -- 兼容旧版缓存名（qqreader_glyph_v1_ / glyph_v1_），避免重新渲染 6763 个参考字。
     local cache_dir = require("utils.paths").cacheDir()
-    local cache = cache_dir .. "/qqreader_glyph_v1_" .. ref_size .. ".bin"
-    local f = io.open(cache, "rb")
-    if f then
-        f:close()
-    else
-        local alt = cache_dir .. "/glyph_v1_" .. ref_size .. ".bin"
-        local fa = io.open(alt, "rb")
-        if fa then
-            fa:close()
-            cache = alt
+    local cache = cache_dir .. "/yuewen_glyph_v1_" .. ref_size .. ".bin"
+    for _idx, legacy in ipairs({ "yuewen_glyph_v1_", "qqreader_glyph_v1_", "glyph_v1_" }) do
+        local path = cache_dir .. "/" .. legacy .. ref_size .. ".bin"
+        local f = io.open(path, "rb")
+        if f then
+            f:close()
+            cache = path
+            break
         end
     end
-    local ok, maps = pcall(require("source.qqreader.glyph").recognize, ref, cache, tasks)
-    for _idx, path in ipairs(paths) do os.remove(path) end
+    local ok, maps = pcall(require("source.yuewen_fonts.glyph").recognize, ref, cache, tasks)
+    cleanup()
     if not ok then error(maps, 0) end
     local rare_map, han_map = {}, {}
     for idx, label in ipairs(labels) do
@@ -90,17 +92,32 @@ local function utf8len(text)
     return n
 end
 
+local DECOY_SIMILARITY = 0.8
+
+local function chars(text)
+    local list = {}
+    for ch in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do list[#list + 1] = ch end
+    return list
+end
+
 --- 起点 cES=2 的正文会把同一章再追加一份改了几个字的诱饵副本。
---- 两半段落字数一一对应时，丢掉后一半。只在调用方明确要求时启用。
+--- 前后两半段落字数一一对应、且逐字位置上 ≥80% 相同才丢后一半，避免把真实的对称段落误删。
 ---@param paragraphs string[]
 ---@return string[]
 local function dropDecoyHalf(paragraphs)
     local n = #paragraphs
-    if not n or n < 4 or n % 2 ~= 0 then return paragraphs end
+    if n < 4 or n % 2 ~= 0 then return paragraphs end
     local half = n / 2
+    local same, total = 0, 0
     for i = 1, half do
-        if utf8len(paragraphs[i]) ~= utf8len(paragraphs[i + half]) then return paragraphs end
+        local a, b = chars(paragraphs[i]), chars(paragraphs[i + half])
+        if #a ~= #b then return paragraphs end
+        for k = 1, #a do
+            if a[k] == b[k] then same = same + 1 end
+        end
+        total = total + #a
     end
+    if total == 0 or same / total < DECOY_SIMILARITY then return paragraphs end
     for i = n, half + 1, -1 do paragraphs[i] = nil end
     return paragraphs
 end
@@ -115,13 +132,13 @@ local fixConfusions
 ---@return string
 function FontRestore.restore(plain, font, fixed_font, opts)
     opts = opts or {}
-    local Scramble = require("source.qqreader.scramble")
+    local Scramble = require("source.yuewen_fonts.scramble")
     local paragraphs = Scramble.paragraphs(plain, font.css or "")
     if #paragraphs == 0 then return plain end
     if opts.dedupe then paragraphs = dropDecoyHalf(paragraphs) end
     local rare, han = Scramble.codes(paragraphs)
     local rare_map, han_map = {}, {}
-    if fixed_font and #rare + #han > 0 then
+    if #rare + #han > 0 then
         rare_map, han_map = recognize(font.randomFont, fixed_font, rare, han, opts)
     end
     local text = Scramble.text(paragraphs, rare_map, han_map)
@@ -139,13 +156,16 @@ local YU_PREFIX = {
     ["敢"] = true, ["勇"] = true, ["难"] = true, ["易"] = true, ["在"] = true,
     ["位"] = true, ["鉴"] = true,
 }
-local YU_KEEP_NEXT = { ["部"] = true, ["活"] = true, ["事"] = true, ["劲"] = true }
+local YU_KEEP_NEXT = {
+    ["部"] = true, ["活"] = true, ["事"] = true, ["劲"] = true, ["什"] = true, ["嘛"] = true, ["啥"] = true,
+    ["吗"] = true, ["吧"] = true, ["净"] = true, ["脆"] = true, ["燥"] = true, ["旱"] = true, ["扰"] = true,
+    ["预"] = true, ["练"] = true, ["掉"] = true, ["架"] = true, ["涸"] = true,
+}
 local ZE_PREFIX = { ["职"] = true, ["担"] = true, ["负"] = true, ["责"] = true, ["贵"] = true }
--- 少数整词在 fixedFont 里稳定认错，按第三方校对结果直接修。
+-- 少数整词在 fixedFont 里稳定认错（“泮”几乎只出现在“泮池”，不会误伤正文）。
 local TEXT_FIXES = {
     ["同泮"] = "同伴",
     ["泮随"] = "伴随",
-    ["惜仙帝"] = "借仙帝",
     ["聚干"] = "聚于",
 }
 

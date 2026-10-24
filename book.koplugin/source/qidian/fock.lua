@@ -13,7 +13,7 @@ ctors + main，再 `fock_i(uid)` → `fock_a(keypool, version)` → `fock_u(cont
 --]]--
 
 local ffi = require("ffi")
-local FontRestore = require("source.font_restore")
+local FontRestore = require("source.yuewen_fonts")
 local Job = require("workers.job")
 local JSON = require("json")
 local Text = require("utils.text")

@@ -6,10 +6,10 @@ QQ阅读正文乱序还原：Fock 解出的是带反爬样式的 HTML，真正�
 - `<y class="sy-0">` 是 `font-size:0` 的占位，丢弃；`sy-1` 只是镜像显示，文字照留；
 - 其余码位落在 CJK 扩展 A 的字，是 randomFont 画出来的真字，由 `glyph.lua` 认出，这里只负责替换。
 
-@module source.qqreader.scramble
+@module source.yuewen_fonts.scramble
 --]]--
 
-local Glyph = require("source.qqreader.glyph")
+local Glyph = require("source.yuewen_fonts.glyph")
 
 local Scramble = {}
 

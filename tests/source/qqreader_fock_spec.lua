@@ -8,7 +8,7 @@ QQ阅读已购 VIP 章节解密（Fock 转译版）与乱序还原离线用例�
 local Assert = require("support.assert")
 local Sample = require("support.qqreader_fock_sample")
 local Fock = require("source.qqreader.fock")
-local Scramble = require("source.qqreader.scramble")
+local Scramble = require("source.yuewen_fonts.scramble")
 
 local plain, err = Fock.decrypt(Sample.content, Sample.chapter_id, Sample.keypool, Sample.version, Sample.fuid)
 Assert.is_nil(err)

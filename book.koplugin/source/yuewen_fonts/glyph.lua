@@ -8,7 +8,7 @@ QQ阅读乱序字体还原：把章节字体里的字形认回真字。
 标点（，。“” 等）不在 GB2312 汉字里，且外框归一后形状几乎一样，只能靠外框在字面里的位置认：
 网页字体与参考字体是同一套 Noto 字形，同一个标点的外框位置几乎重合。
 
-@module source.qqreader.glyph
+@module source.yuewen_fonts.glyph
 --]]--
 
 local ffi = require("ffi")
@@ -17,7 +17,7 @@ local Glyph = {}
 
 local CHAR = "[%z\1-\127\194-\244][\128-\191]*"
 
-local CANDIDATES = require("source.qqreader.glyph_chars")
+local CANDIDATES = require("source.yuewen_fonts.glyph_chars")
 local PX = 56
 local FINE, COARSE = 16, 8
 local SHORTLIST = 12
@@ -90,7 +90,8 @@ local function dot(a, a_off, b, b_off, len)
     return s
 end
 
-local PUNCTUATION = "，。、；：？！“”‘’（）《》…「」『』【】"
+-- “一”只有一横，归一化后是均匀块、签名无效，和标点一样靠外框位置认。
+local PUNCTUATION = "一，。、；：？！“”‘’（）《》…「」『』【】"
 local PUNCT_TOLERANCE = 0.035
 
 --- 字形外框占字面（PX）的比例 { 左, 下, 右, 上 }；渲染不出来返回 nil。
@@ -160,7 +161,7 @@ local function reference(ref_path, cache_path)
             ffi.copy(sigs + (k - 1) * STRIDE + FINE * FINE, coarse, COARSE * COARSE)
         end
     end
-    local tmp = cache_path .. ".tmp"
+    local tmp = cache_path .. "." .. os.time() .. math.random(1e6) .. ".tmp"
     local out = io.open(tmp, "wb")
     if out then
         out:write(ffi.string(sigs, size))
@@ -209,12 +210,15 @@ function Glyph.recognize(ref_path, cache_path, tasks)
             local keep = dot(sigs, base + FINE * FINE, sigs, base + FINE * FINE, COARSE * COARSE) > 0
             if keep then cands[#cands + 1] = k end
         end
-        local out = {}
+        local out, claims = {}, {}
         for _i, cp in ipairs(task.codes) do
-            local gf0 = gsize:hasGlyph(cp) and signature(gsize, cp, FINE)
+            local has = gsize:hasGlyph(cp)
+            local gf0 = has and signature(gsize, cp, FINE)
             local gc0 = gf0 and signature(gsize, cp, COARSE)
             local best_char, best_score = nil, -1
-            local punct = gf0 and matchPunctuation(puncts, extent(gsize, cp))
+            local scored = {}
+            local box = has and extent(gsize, cp)
+            local punct = box and matchPunctuation(puncts, box)
             if punct then best_char, best_score = punct, 1 end
             for mirror = 0, (gf0 and not punct) and 1 or -1 do
                 -- 原朝向已经认得很准就不必再试镜像
@@ -233,10 +237,34 @@ function Glyph.recognize(ref_path, cache_path, tasks)
                 end
                 for _j, entry in ipairs(top) do
                     local s = dot(gf, 0, sigs, (entry[2] - 1) * STRIDE, FINE * FINE) / (SCALE * SCALE)
-                    if s > best_score then best_score, best_char = s, chars[entry[2]] end
+                    local ch = chars[entry[2]]
+                    if s > (scored[ch] or -1) then scored[ch] = s end
+                    if s > best_score then best_score, best_char = s, ch end
                 end
             end
-            if gf0 then out[cp] = best_score >= threshold and best_char or false end
+            if punct then
+                out[cp] = punct
+            elseif has and gf0 then
+                out[cp] = false
+                for ch, score in pairs(scored) do
+                    if score >= threshold then claims[#claims + 1] = { score, cp, ch } end
+                end
+            end
+        end
+        -- 一种字体里每个真字只画一次：按得分从高到低认领，形近字（于/干）不会被同时认成一个
+        table.sort(claims, function(a, b)
+            if a[1] ~= b[1] then return a[1] > b[1] end
+            return a[2] < b[2]
+        end)
+        local taken = {}
+        for _cp, ch in pairs(out) do
+            if ch then taken[ch] = true end
+        end
+        for _i, claim in ipairs(claims) do
+            if not out[claim[2]] and not taken[claim[3]] then
+                out[claim[2]] = claim[3]
+                taken[claim[3]] = true
+            end
         end
         maps[t_idx] = out
     end
