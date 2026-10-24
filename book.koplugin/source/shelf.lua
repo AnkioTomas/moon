@@ -34,6 +34,15 @@ function Shelf.reconcile(source_id, books, force, inserted_at_from_row)
         inserted_at_from_row = inserted_at_from_row,
     })
     if not ok then return nil, "failed to reconcile books" end
+    -- 远端书架快照自带的进度（percent 0..100）：读完必标已读，读到 99% 看设置，与本机阅读会话同一规则。
+    local BookDB = require("book.books_db")
+    for _idx, book in ipairs(books) do
+        local percent = tonumber(book.percent) or 0
+        if percent >= 100
+            or percent >= 99 and require("utils.settings").get("reader").auto_mark_read_at_99 == true then
+            BookDB.markReadAutomatically(source_id, book.stable_id)
+        end
+    end
     return { pulled = #books, pushed = 0, hidden = hidden, conflicts = 0, skipped = false }
 end
 
