@@ -258,12 +258,17 @@ function Lookup:step(delta)
     if self.active == "dict" and self:isWord() then
         local cur = self:currentDict()
         for idx, d in ipairs(self.dicts) do
-            local nxt = d == cur and self.dicts[idx + delta]
-            if nxt then
-                self.dict_name = nxt.name
-                self.body_page = delta > 0 and 1 or math.huge
-                self:refreshView()
-                return true
+            if d == cur then
+                -- 翻页键跳过没结果的词典。
+                local j = idx + delta
+                while self.dicts[j] and self.dicts[j].empty do j = j + delta end
+                local nxt = self.dicts[j]
+                if nxt then
+                    self.dict_name = nxt.name
+                    self.body_page = delta > 0 and 1 or math.huge
+                    self:refreshView()
+                end
+                break
             end
         end
     end
@@ -483,6 +488,13 @@ function Lookup:init()
     self.ges_events.Swipe = { GestureRange:new{ ges = "swipe", range = self.dimen } }
     local last_dict = require("utils.settings").get("features.rare").rare_lookup_dict
     self.dict_name = self.dict_name or last_dict
+    -- 记住的词典这次没查到时，改显示第一本有结果的（不改记忆）。
+    local remembered = self:currentDict()
+    if remembered and remembered.empty then
+        for _idx, d in ipairs(self.dicts) do
+            if not d.empty then self.dict_name = d.name; break end
+        end
+    end
     self.active = self:initialSource(self.source)
     self:rebuild()
 end
