@@ -25,6 +25,13 @@ return {
     active = function()
         return NetworkMgr:isWifiOn()
     end,
+    --- 已连接时显示当前网络名。
+    ---@return string|nil
+    label = function()
+        if not NetworkMgr:isWifiOn() then return nil end
+        local nw = NetworkMgr:getCurrentNetwork()
+        return nw and nw.ssid
+    end,
     --- 长按：Android 打开系统 Wi-Fi 设置，其余设备走 KOReader 原生长按路径，开着也弹网络列表。
     hold = function()
         if Device:isAndroid() then

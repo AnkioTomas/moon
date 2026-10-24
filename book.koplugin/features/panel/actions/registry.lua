@@ -49,6 +49,7 @@ local loaded = false
 ---@field refresh_delay number|nil
 ---@field available nil|fun(ctx: BookQuickPanelContext|nil): boolean|nil
 ---@field active nil|fun(ctx: BookQuickPanelContext|nil): boolean|nil
+---@field label nil|fun(ctx: BookQuickPanelContext|nil): string|nil 面板按钮上的动态名字（如当前连接的 Wi-Fi / 蓝牙设备）；返回 nil 用 title，设置页始终用 title
 ---@field run nil|fun(ctx: BookQuickPanelContext)
 ---@field hold nil|fun(ctx: BookQuickPanelContext) 长按：打开该动作的详情 / 设置，总是先关面板
 
@@ -113,6 +114,7 @@ local function externalActions()
                 action.hold = Features.wrap(label, raw.hold)
                 action.available = Features.wrap(label, raw.available)
                 action.active = Features.wrap(label, raw.active)
+                action.label = Features.wrap(label, raw.label)
                 out[#out + 1] = action
             end
         end

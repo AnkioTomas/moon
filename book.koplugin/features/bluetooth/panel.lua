@@ -30,6 +30,14 @@ function Panel.actions()
                 local st = require("features.bluetooth").current()
                 return st ~= nil and st.state == "on"
             end,
+            ---@return string|nil
+            label = function()
+                local st = require("features.bluetooth").current()
+                local conns = st and st.state == "on" and st.connections or {}
+                if #conns == 0 then return nil end
+                if #conns > 1 then return require("ffi/util").template(_("%1 台设备"), #conns) end
+                return conns[1].name
+            end,
             run = function()
                 require("features.bluetooth.devices").toggle()
             end,
