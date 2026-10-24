@@ -61,7 +61,10 @@ end
 
 package.preload["reader.prefs"] = function() return { BIG_BOOK_BYTES = 20 * 1024 * 1024 } end
 local sidecar = false
-package.preload["docsettings"] = function() return { hasSidecarFile = function() return sidecar end } end
+package.loaded["docsettings"] = {
+    hasSidecarFile = function() return sidecar end,
+    open = function() return { readSetting = function() end } end,
+}
 
 local Open = require("desktop.open")
 local book = {
@@ -197,29 +200,26 @@ do
     lfs.attributes = real_attributes
 end
 
--- 上次读的是排版版（衍生版）：源返回原书路径，改回上次的版本并重新登记。
+-- 原书 sidecar 记着上次读的衍生版：源返回原书路径，改开那个版本；文件没了就照开原书。
 do
     local dir = os.tmpname()
     os.remove(dir)
     os.execute("mkdir -p " .. dir)
     local origin, derived = dir .. "/a.epub", dir .. "/reflow.epub"
     io.open(derived, "w"):close()
-    package.loaded["reader.session.derived_note"] = { originOf = function(file) return file == derived and origin or nil end }
-    package.loaded["book.books_db"] = { get = function() return { path = derived } end }
+    local last = derived
+    package.loaded["reader.session.derived_note"] = { last = function() return last end }
     ReaderUI.instance = nil
     Open.book({ desktop = {} }, book)
     open_callbacks[#open_callbacks](origin)
     Stubs.flush()
     Assert.eq(shown[#shown], derived)
-    Assert.eq(touched, derived)
 
-    -- 上次的文件不是这本书的衍生版：照源返回的路径开。
-    package.loaded["book.books_db"] = { get = function() return { path = "/else/b.epub" } end }
+    last = nil
     Open.book({ desktop = {} }, book)
     open_callbacks[#open_callbacks](origin)
     Stubs.flush()
     Assert.eq(shown[#shown], origin)
-    package.loaded["book.books_db"] = nil
     package.loaded["reader.session.derived_note"] = nil
     os.execute("rm -rf " .. dir)
 end

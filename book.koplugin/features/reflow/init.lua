@@ -10,8 +10,8 @@
 取字、识别、打包串成一个后台任务，不再预览目录确认。
 章节：原文档自带目录（`ui.toc`）的标题整行命中即切章，没有目录或标题对不上的再按常见章节写法识别。
 
-身份：排版版是同一本书的另一个文件。切换前 `Store.touch` 把 books.path 指过去，开书时按路径解析回
-同一身份，进度、统计都记在这本书上。排版版结构和原书不同，xpointer 不通用，切换时按全书比例落位；
+身份：排版版是同一本书的另一个文件，books.path 不动。开书时按 meta.json 解析回同一身份，
+进度、统计都记在这本书上；上次读的版本记在原书 sidecar（`DerivedNote.remember`），桌面开书时恢复。排版版结构和原书不同，xpointer 不通用，切换时按全书比例落位；
 划线留在排版版自己的 sidecar，和原书之间按文字互相定位（见 reader/session/derived_note）。
 章节源（`type == "chapter"`）的书不做：章节文件各自独立，没有整本可排。
 
@@ -217,11 +217,8 @@ local function switchTo(ui, identity, target, fraction)
         settings:saveSetting("last_page", math.max(1, math.floor(fraction * pages + 0.5)))
     end
     settings:flush()
-    local ok, err = require("book.store").touch(target, identity)
-    if not ok then
-        Toast:new{ text = err }:show()
-        return
-    end
+    local origin = DerivedNote.originOf(ui.document.file) or ui.document.file
+    DerivedNote.remember(ui, origin, target ~= origin and target or nil)
     ui:switchDocument(target)
 end
 

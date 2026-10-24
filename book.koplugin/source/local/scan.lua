@@ -85,7 +85,7 @@ local function upToDate(files, known, rows, flat, kept)
     for _idx, f in ipairs(files) do
         local row = known[f.path]
         if not row or f.changed or row.md5 ~= f.md5 or row.deleted ~= 0 or row.sync_status ~= 1
-            or row.path ~= f.path and require("reader.session.derived_note").originOf(row.path or "") ~= f.path
+            or row.path ~= f.path
             -- 打开「按文件夹分类」后分类 / 系列与目录不一致：要整轮写库
             or not flat and ((row.category or "") ~= (f.category or "") or (row.series or "") ~= (f.series or "")) then
             return false

@@ -330,4 +330,29 @@ function DerivedNote.collect(ui, identity)
     end
 end
 
+local LAST_KEY = "book_last_derived"
+
+--- 记下原书上次读的是哪个衍生版（nil = 原书本身），存在原书 sidecar，books.path 不动。
+--- 原书正开着时写进它在内存里的 doc_settings，关文档时随之落盘，否则会被覆盖。
+---@param ui table ReaderUI
+---@param origin string
+---@param file string|nil
+function DerivedNote.remember(ui, origin, file)
+    if ui.document and ui.document.file == origin then
+        ui.doc_settings:saveSetting(LAST_KEY, file)
+        return
+    end
+    local settings = require("docsettings"):open(origin)
+    settings:saveSetting(LAST_KEY, file)
+    settings:flush()
+end
+
+--- 原书上次读的衍生版路径；没有或文件已不在返回 nil。
+---@param origin string
+---@return string|nil
+function DerivedNote.last(origin)
+    local file = require("docsettings"):open(origin):readSetting(LAST_KEY)
+    if file and require("libs/libkoreader-lfs").attributes(file, "mode") == "file" then return file end
+end
+
 return DerivedNote
