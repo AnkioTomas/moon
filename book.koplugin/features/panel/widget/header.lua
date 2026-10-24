@@ -1,115 +1,101 @@
---[[-- 阅读页快捷面板书籍信息头。
+--[[-- 阅读页快捷面板书籍信息头：左边封面，右边书名、作者、章节、进度，最右退出。
 @module koplugin.book.features.panel.widget.header
 --]]
 
 require("l10n").apply()
 
-local Blitbuffer = require("ffi/blitbuffer")
-local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
-local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
-local Icon = require("ui.themes.widgets.icon")
-local Box = require("ui.themes.widgets.box")
+local VerticalSpan = require("ui/widget/verticalspan")
+local lfs = require("libs/libkoreader-lfs")
+local Button = require("ui.themes.widgets.button")
+local Image = require("ui.themes.widgets.image")
+local Progress = require("ui.themes.widgets.progress")
 local Text = require("ui.themes.widgets.text")
 local Theme = require("ui.themes")
+local Paths = require("utils.paths")
 local Session = require("reader.session")
 local _ = require("gettext")
 
---- 阅读页快捷面板头部：标题、副标题和退出阅读按钮。
+local COVER_W, COVER_H = 66, 92
+
+--- 阅读页快捷面板头部：封面、书籍信息、阅读进度和退出阅读按钮。
 ---@class BookQuickPanelHeader : WidgetContainer
 ---@field width number 头部宽度，单位像素
----@field height number 头部高度，单位像素
 ---@field on_exit fun()|nil 点击退出阅读
 
 local Header = InputContainer:extend{
     name = "book_quick_panel_header",
 }
 
---- 从当前阅读会话提取书名和章节/作者副标题。
----@return string, string|nil
-local function bookTexts()
+--- 当前会话的书名、作者、章节行、进度行与百分比；章节行没有目录时为空串。
+---@return table
+local function bookInfo()
     local current = Session.current()
     local identity = current and current.identity
-    local toc = Session.toc()
-    local title = (identity and identity.book and identity.book.title) or _("阅读")
-    local subtitle = ""
-    local idx = Session.chapterIndex()
+    local book = identity and identity.book or {}
+    local chapter = ""
+    local idx, toc = Session.chapterIndex(), Session.toc()
     if idx and toc then
-        subtitle = Session.chapterTitle() or string.format(_("第 %d/%d 章"), idx, #toc)
-    elseif identity and identity.book and identity.book.authors then
-        subtitle = identity.book.authors
+        chapter = Session.chapterTitle() or string.format(_("第 %d/%d 章"), idx, #toc)
     end
-    return title, subtitle
+    local page, total = Session.bookPages()
+    local percent = current and current.percent or 0
+    local progress = string.format("%d%%", math.floor(percent + 0.5))
+    if total > 0 then
+        progress = string.format(_("第 %d/%d 页"), page, total) .. " · " .. progress
+    end
+    return {
+        title = book.title or _("阅读"),
+        authors = book.authors or "",
+        chapter = chapter,
+        progress = progress,
+        percent = percent,
+        cover = identity and Paths.coverPath(identity.stable_id, identity.source_id),
+    }
 end
 
---- 构建标题文本和退出按钮布局。
+--- 构建封面、信息列与退出按钮。
 ---@param self BookQuickPanelHeader 当前视图或布局实例
 function Header:init()
-    local title, subtitle = bookTexts()
+    local info = bookInfo()
     local t = Theme.current()
-    local exit_w = Theme.px(t.control.height)
-    local gap = Theme.px(t.space.sm)
-    local text_w = self.width - exit_w - gap
-    local title_w = Text.line("title", title, { width = text_w })
-    local info_group = VerticalGroup:new{
+    local gap = Theme.px(t.space.md)
+    local cover_w, cover_h = Theme.px(COVER_W), Theme.px(COVER_H)
+    local exit = Button:new{
+        icon = "logout", text = _("退出"), callback = self.on_exit,
+    }
+    local text_w = self.width - cover_w - exit:getSize().w - gap * 2
+    local cover_src = info.cover and lfs.attributes(info.cover, "mode") == "file" and info.cover or nil
+
+    local column = VerticalGroup:new{
         align = "left",
-        title_w,
+        Text.line("title", info.title, { width = text_w }),
     }
-    if subtitle ~= "" then
-        info_group[#info_group + 1] = Text.line("caption", subtitle, {
-            width = text_w, color = t.color.muted,
-        })
+    for _idx, line in ipairs({ info.authors, info.chapter }) do
+        if line ~= "" then
+            column[#column + 1] = Text.line("caption", line, { width = text_w, color = t.color.muted })
+        end
     end
-    -- range 必须复用 dimen 同一 Geom，布局时 x/y 才会回填，否则叉号命中区永远落在 (0,0)。
-    local exit_dimen = Geom:new{ w = exit_w, h = self.height }
-    local exit_btn = InputContainer:new{
-        dimen = exit_dimen,
-        ges_events = {
-            Tap = { GestureRange:new{ ges = "tap", range = exit_dimen } },
-        },
-    }
-    --- 点击退出按钮时关闭阅读会话。
-    ---@return boolean
-    function exit_btn:onTap()
-        if self.on_exit then self.on_exit() end
-        return true
-    end
-    exit_btn.on_exit = self.on_exit
-    local v = t.button.normal
-    exit_btn[1] = CenterContainer:new{
-        dimen = Geom:new{ w = exit_w, h = self.height },
-        Box:new{
-            style = {
-                bg = v.bg,
-                border = v.border_color and t.control.border or 0,
-                border_color = v.border_color or 0,
-                radius = 999,
-                shadow = 0,
-                shadow_color = 0,
-            },
-            width = exit_w,
-            height = Theme.px(t.control.height),
-            Icon.widget{
-                name = "close",
-                size = t.control.icon,
-                color = Blitbuffer.Color8(v.ink),
-            },
-        },
-    }
-    self.dimen = Geom:new{ w = self.width, h = self.height }
+    column[#column + 1] = VerticalSpan:new{ width = Theme.px(t.space.xs) }
+    column[#column + 1] = Text.line("caption", info.progress, { width = text_w })
+    column[#column + 1] = VerticalSpan:new{ width = Theme.px(t.space.xs) }
+    column[#column + 1] = Progress:new{ width = text_w, percent = info.percent }
+
+    local height = math.max(cover_h, column:getSize().h)
+    self.height = height
+    self.dimen = Geom:new{ w = self.width, h = height }
     self[1] = HorizontalGroup:new{
         align = "center",
-        LeftContainer:new{
-            dimen = Geom:new{ w = text_w, h = self.height },
-            info_group,
-        },
+        Image.widget{ width = cover_w, height = cover_h, src = cover_src, fallback = info.title },
         HorizontalSpan:new{ width = gap },
-        exit_btn,
+        LeftContainer:new{ dimen = Geom:new{ w = text_w, h = height }, column },
+        HorizontalSpan:new{ width = gap },
+        exit,
     }
 end
 

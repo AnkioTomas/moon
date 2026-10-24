@@ -152,7 +152,6 @@ local function buildPanel(menu, W)
         local ui = tab._book_ui
         body_opts.header = W.Header:new{
             width = content_w,
-            height = W.Theme.px(52),
             on_exit = function()
                 Menu.close(menu)
                 ReaderExit.closeToDesktop(ui)
