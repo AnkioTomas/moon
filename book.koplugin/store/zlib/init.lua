@@ -88,6 +88,8 @@ local BROWSE_ORDERS = { { "popular", _("热门") }, { "date", _("最新") } }
 local BROWSE_LANGUAGES = {
     { "-", _("全部") }, { "chinese", _("中文") }, { "english", _("英语") }, { "japanese", _("日语") }, { "korean", _("韩语") },
     { "french", _("法语") }, { "german", _("德语") }, { "russian", _("俄语") }, { "spanish", _("西班牙语") },
+    { "italian", _("意大利语") }, { "portuguese", _("葡萄牙语") }, { "arabic", _("阿拉伯语") }, { "turkish", _("土耳其语") },
+    { "polish", _("波兰语") }, { "dutch", _("荷兰语") }, { "vietnamese", _("越南语") }, { "ukrainian", _("乌克兰语") },
 }
 local BROWSE_FORMATS = {
     { "-", _("全部") }, { "epub", "EPUB" }, { "mobi", "MOBI" }, { "azw3", "AZW3" }, { "pdf", "PDF" }, { "txt", "TXT" },
