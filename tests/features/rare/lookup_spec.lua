@@ -151,6 +151,15 @@ Assert.is_nil(panel.pager)
 Assert.is_true(panel:onSwipe(nil, { direction = "north" }))
 panel:onSwipe(nil, { direction = "west" })
 Assert.eq(panel.active, "dict")
+-- 翻页键：单页词典翻到头 / 尾自动换词典，上一本落在末页，首尾不循环
+Assert.is_true(panel:onReadPrevResult())
+Assert.eq(panel.dict_name, "现代汉语")
+panel:onReadPrevResult()
+Assert.eq(panel.dict_name, "现代汉语")
+panel:onReadNextResult()
+Assert.eq(panel.dict_name, "古汉语")
+panel:onReadNextResult()
+Assert.eq(panel.dict_name, "古汉语")
 -- 布局：没有卡头行的 Tab 正文紧贴顶部内边距；Tab 栏在边框之内
 local function inner_group() return panel[1][1][2][1] end
 panel:select("baike")

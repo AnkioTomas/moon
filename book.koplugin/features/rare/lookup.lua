@@ -246,6 +246,33 @@ function Lookup:turn(delta)
     self:refreshView()
 end
 
+--- 翻页键 / 音量键：翻正文页；词典 Tab 翻到头 / 尾自动换到下一 / 上一本词典（上一本落在末页）。
+---@param delta integer 1 下一页，-1 上一页
+---@return boolean
+function Lookup:step(delta)
+    local page = (self.body_page or 1) + delta
+    if page >= 1 and page <= (self.body_pages or 1) then
+        self:turn(delta)
+        return true
+    end
+    if self.active == "dict" and self:isWord() then
+        local cur = self:currentDict()
+        for idx, d in ipairs(self.dicts) do
+            local nxt = d == cur and self.dicts[idx + delta]
+            if nxt then
+                self.dict_name = nxt.name
+                self.body_page = delta > 0 and 1 or math.huge
+                self:refreshView()
+                return true
+            end
+        end
+    end
+    return true
+end
+
+function Lookup:onReadNextResult() return self:step(1) end
+function Lookup:onReadPrevResult() return self:step(-1) end
+
 --- 当前词典 Tab 显示的词典。
 ---@return { name: string, text: string }|nil
 function Lookup:currentDict()
@@ -449,6 +476,10 @@ function Lookup:init()
     self.content_w = Modal.dialogWidth() - self.frame * 2
     -- 正文区固定高度：左右切卡时卡片不跳动。
     self.body_h = math.floor(Screen:getHeight() * (self.full_page and 0.45 or 0.3))
+    if Device:hasKeys() then
+        self.key_events.ReadPrevResult = { { Device.input.group.PgBack } }
+        self.key_events.ReadNextResult = { { Device.input.group.PgFwd } }
+    end
     self.ges_events.Swipe = { GestureRange:new{ ges = "swipe", range = self.dimen } }
     local last_dict = require("utils.settings").get("features.rare").rare_lookup_dict
     self.dict_name = self.dict_name or last_dict
