@@ -207,6 +207,8 @@ Text2Epub.build = original_build
 
 -- 读原书、已有排版版：面板给出「打开排版版 / 重新排版」，打开时按比例落位、搬排版
 local origin_ui = reader(txt, "rolling")
+local remembered = {}
+origin_ui.doc_settings = { saveSetting = function(_, key, value) remembered[key] = value end }
 Assert.is_false(Reflow.active(origin_ui))
 sidecars[dir .. "/book.epub"] = { last_xpointer = "/body/old", doc_pages = 200 }
 Reflow.show(origin_ui)
@@ -220,8 +222,8 @@ Assert.eq(target.last_percent, 0.4)
 Assert.eq(target.last_page, 80)
 Assert.is_true(target.flushed)
 Assert.eq(prefs_written.copt.font_size, 22)
-Assert.eq(touched.path, dir .. "/book.epub")
-Assert.eq(touched.identity, identity)
+Assert.eq(remembered.book_last_derived, dir .. "/book.epub", "上次读的版本记在原书 sidecar")
+Assert.is_nil(touched, "books.path 不动")
 Assert.eq(switched, dir .. "/book.epub")
 
 -- 两边都是 CREngine：记下当前页开头文字，目标打开后按文字落位（搜不到保留比例落点）
@@ -235,6 +237,7 @@ do
     local epub = assert(io.open(dir .. "/book.epub", "wb"))
     epub:write("epub")
     epub:close()
+    ui.doc_settings = { saveSetting = function() end }
     Reflow.show(ui)
     Assert.eq(Themed.last("sheet").items[1].text, "打开排版版")
     Themed.last("sheet").items[1].callback()

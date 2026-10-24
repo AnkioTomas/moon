@@ -12,6 +12,7 @@ local Assert = require("support.assert")
 
 -- stub db / paths / ffi 最小集（数据驱动：各用例块自行填表）
 local moon_paths = {} -- path → true（.moon 内）
+package.loaded["reader.session.derived_note"] = { originOf = function() end }
 package.preload["utils.paths"] = function()
     return {
         isMoonPath = function(path)
@@ -390,19 +391,18 @@ do
     touch_calls = {}
 end
 
--- ── ensureIdentity：local 书 books.path 指着衍生版 → 直接开原书不覆盖，桌面下次仍开衍生版 ──
+-- ── ensureIdentity：衍生版文件 → 按 meta 解析回原书身份，不改 books.path ──
 do
     package.loaded["reader.session.derived_note"] = {
-        originOf = function(file) return file == "/w/reflow/book.epub" and "/lib/derived.epub" or nil end,
+        originOf = function(file) return file == "/w/reflow/book.epub" and "/lib/a.epub" or nil end,
     }
-    book_rows_by_id["local\0/lib/derived.epub"] = {
-        source_id = "local", stable_id = "/lib/derived.epub", path = "/w/reflow/book.epub",
-    }
-    local id = Store.ensureIdentity("/lib/derived.epub")
-    Assert.eq(id.source_id, "local")
+    book_rows_by_path["/lib/a.epub"] = { source_id = "moon", stable_id = "s2", title = "整本书" }
+    local id = Store.ensureIdentity("/w/reflow/book.epub")
+    Assert.eq(id.source_id, "moon")
+    Assert.eq(id.stable_id, "s2")
     Assert.eq(#touch_calls, 0)
-    package.loaded["reader.session.derived_note"] = nil
-    book_rows_by_id["local\0/lib/derived.epub"] = nil
+    package.loaded["reader.session.derived_note"] = { originOf = function() end }
+    book_rows_by_path["/lib/a.epub"] = nil
 end
 
 -- ── ensureIdentity：文件打不开 → partialMD5 返回 nil，md5=nil 仍登记 ────

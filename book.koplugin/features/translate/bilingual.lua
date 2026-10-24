@@ -9,11 +9,10 @@
 格式：EPUB 逐个改写 XHTML，样式与图片原样保留；其余 CREngine 格式导出 DOM，
 按根元素写成 .fb2 / .html（TXT 的 DOM 就是 FB2），图片不保留。
 
-身份：双语版是同一本书的另一个文件。切换前 `Store.touch` 把 books.path 指过去，
-开书时按路径解析回同一身份，进度、笔记、统计都记在这本书上。译文只追加在原段落内部，
-原文 xpointer 两版通用，切换时写进目标 sidecar 的 last_xpointer，停在同一段。
-books.path 即用户最后选的版本：复用 books.path 的源从桌面重开仍是双语版，本地书总开原书；
-双语版在缓存目录里，清缓存会连它一起删掉并撤 path，下次开书由源重新登记原书。
+身份：双语版是同一本书的另一个文件，books.path 不动（整本书）。开书时按 meta.json 解析回原书身份，
+进度、笔记、统计都记在这本书上；上次读的版本记在原书 sidecar（`DerivedNote.remember`），桌面开书时恢复。
+译文只追加在原段落内部，原文 xpointer 两版通用，切换时写进目标 sidecar 的 last_xpointer，停在同一段。
+章节源仍用 `Store.touch` 登记章节文件。
 
 章节源（`type == "chapter"`）的书按章翻译，见 features.translate.chapter；这里只出面板。
 
@@ -347,10 +346,15 @@ local function switchTo(ui, identity, target, xpointer, touch_opts)
     settings:saveSetting("last_xpointer", xpointer)
     settings:saveSetting("cre_dom_version", ui.doc_settings:readSetting("cre_dom_version"))
     settings:flush()
-    local ok, err = require("book.store").touch(target, identity, touch_opts)
-    if not ok then
-        Toast:new{ text = err }:show()
-        return
+    if touch_opts then
+        local ok, err = require("book.store").touch(target, identity, touch_opts)
+        if not ok then
+            Toast:new{ text = err }:show()
+            return
+        end
+    else
+        local origin = DerivedNote.originOf(ui.document.file) or ui.document.file
+        DerivedNote.remember(ui, origin, target ~= origin and target or nil)
     end
     ui:switchDocument(target)
 end

@@ -288,7 +288,11 @@ function Store.identityFor(path)
             book = book,
         }
     end
-    return nil
+    -- 衍生版（排版 / 双语）不登记路径，身份跟原书走
+    local origin = require("reader.session.derived_note").originOf(path)
+    local id = origin and Store.identityFor(origin)
+    if id then id.derived = true end
+    return id
 end
 
 --- 打开时确保身份：能解析则把 books.path 指向这次打开的文件；
@@ -305,7 +309,7 @@ function Store.ensureIdentity(path)
         id.source = registry.resolve(id.source_id)
         id.ephemeral = id.source and id.source.ephemeral or false
         -- 路径已在库里；章节文件可能绕过桌面（KOReader 历史）打开，books.path 跟到这一章
-        if not BookDB.touchPath(id.source_id, id.stable_id, path) then
+        if not id.derived and not BookDB.touchPath(id.source_id, id.stable_id, path) then
             logger.warn("book identity touch failed", id.source_id, id.stable_id, path)
         end
         return id
@@ -324,17 +328,10 @@ function Store.ensureIdentity(path)
         inserted_at = os.time(),
         path = path,
     }
-    local known = BookDB.get("local", path)
-    if not known then
+    if not BookDB.get("local", path) then
         if not BookDB.upsert(row) then
             logger.warn("book identity register failed", path)
         end
-    end
-    -- 从 KOReader 文件列表 / 历史直接开原书时，books.path 若指着它的衍生版（排版 / 双语）就保留，
-    -- 否则下次从桌面开书记不住用户上次读的版本。
-    local kept = known and known.path
-    if kept and require("reader.session.derived_note").originOf(kept) == path then
-        return { source_id = "local", stable_id = path, chapter_idx = nil, book = known, source = registry.resolve("local") }
     end
     if not BookDB.touchPath("local", path, path) then
         logger.warn("book identity touch failed", "local", path, path)
