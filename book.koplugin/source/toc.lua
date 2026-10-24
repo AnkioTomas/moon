@@ -169,9 +169,10 @@ end
 ---@param source_id string
 ---@param stable_id string
 ---@param idx integer|nil
+---@param stale boolean|nil 为真时过期目录也认（uid 不随时间变，补报离线数据用）
 ---@return string|nil
-function Toc.uid(source_id, stable_id, idx)
-    local hit = entry(source_id, stable_id)
+function Toc.uid(source_id, stable_id, idx, stale)
+    local hit = entry(source_id, stable_id, stale)
     local chapter = hit and hit.list[tonumber(idx)]
     return chapter and chapter.uid
 end
@@ -180,9 +181,10 @@ end
 ---@param source_id string
 ---@param stable_id string
 ---@param idx number|nil
+---@param stale boolean|nil 同 Toc.uid
 ---@return integer|nil
-function Toc.sourceIndex(source_id, stable_id, idx)
-    local hit = entry(source_id, stable_id)
+function Toc.sourceIndex(source_id, stable_id, idx, stale)
+    local hit = entry(source_id, stable_id, stale)
     return hit and hit.source_idx_by_idx[tonumber(idx)]
 end
 

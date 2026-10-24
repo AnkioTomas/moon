@@ -586,7 +586,7 @@ function Source:pushStatsAsync(rows, cb)
             end
             local last = book.rows[#book.rows]
             local chapter_idx = last.chapter_idx
-            local uid = chapter_idx and Toc.uid("wechat", book.id, chapter_idx)
+            local uid = chapter_idx and Toc.uid("wechat", book.id, chapter_idx, true)
             if not uid then
                 logger.warn("wechat stats skipped without toc", book.id)
                 confirm(book)
@@ -601,7 +601,7 @@ function Source:pushStatsAsync(rows, cb)
                 guest_token = token,
                 book_id = book.id,
                 chapter_uid = tonumber(uid) or 0,
-                chapter_idx = Toc.sourceIndex("wechat", book.id, chapter_idx) or chapter_idx,
+                chapter_idx = Toc.sourceIndex("wechat", book.id, chapter_idx, true) or chapter_idx,
                 chapter_offset = math.floor(fraction * 10000),
                 chapter_progress = math.floor(fraction * 100),
                 hours = App.hours(book.rows, App.timeZone()),
