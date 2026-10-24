@@ -168,11 +168,13 @@ local function reference(ref_path, cache_path)
         os.rename(tmp, cache_path)
         -- 同目录里别的版本 / 别的参考字体留下的旧缓存不会再被读到，顺手清掉
         local dir, name = cache_path:match("^(.*)/([^/]+)$")
-        local prefix = name:match("^(qqreader_glyph_)")
-        local lfs = require("libs/libkoreader-lfs")
-        for entry in lfs.dir(dir) do
-            if entry ~= name and entry:sub(1, #prefix) == prefix and entry:match("%.bin$") then
-                os.remove(dir .. "/" .. entry)
+        local prefix = name and (name:match("^(.-_glyph_)") or name:match("^(glyph_)"))
+        if prefix then
+            local lfs = require("libs/libkoreader-lfs")
+            for entry in lfs.dir(dir) do
+                if entry ~= name and entry:sub(1, #prefix) == prefix and entry:match("%.bin$") then
+                    os.remove(dir .. "/" .. entry)
+                end
             end
         end
     end
@@ -185,6 +187,7 @@ end
 ---@field font_path string
 ---@field codes integer[]
 ---@field limit integer
+---@field threshold number|nil 认字阈值，缺省 0.75；起点有些字形更接近，传 0.65
 
 --- 把各字体里指定码位的字形认成真字。
 ---@param ref_path string 参考字体（Noto Sans CJK SC）
@@ -198,6 +201,7 @@ function Glyph.recognize(ref_path, cache_path, tasks)
 
     local maps = {}
     for t_idx, task in ipairs(tasks) do
+        local threshold = task.threshold or THRESHOLD
         local gsize = FT.newFaceSize(task.font_path, PX)
         local cands = {}
         for k = 1, math.min(task.limit, #chars) do
@@ -232,7 +236,7 @@ function Glyph.recognize(ref_path, cache_path, tasks)
                     if s > best_score then best_score, best_char = s, chars[entry[2]] end
                 end
             end
-            if gf0 then out[cp] = best_score >= THRESHOLD and best_char or false end
+            if gf0 then out[cp] = best_score >= threshold and best_char or false end
         end
         maps[t_idx] = out
     end

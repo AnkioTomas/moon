@@ -24,6 +24,26 @@ local Qidian = {}
 -- 章节页不小，预取与整本缓存逐章间隔请求。
 local FETCH_INTERVAL = 1
 
+-- 旧版只做 Fock，不认 cES=2 的字体层，缓存下来的是错字 HTML。
+-- 每个书的工作目录一次性清掉旧章节缓存，避免升级后仍打开旧文件。
+local function migrateFontCache(stable_id)
+    local Paths = require("utils.paths")
+    local lfs = require("libs/libkoreader-lfs")
+    local dir = Paths.bookWorkDir(stable_id, "qidian")
+    if lfs.attributes(dir, "mode") ~= "directory" then return end
+    local marker = dir .. "/.qidian-font-v1"
+    local f = io.open(marker, "rb")
+    if f then f:close(); return end
+    for entry in lfs.dir(dir) do
+        if entry:match("%.html$") then os.remove(dir .. "/" .. entry) end
+    end
+    local out = io.open(marker, "wb")
+    if out then
+        out:write("1")
+        out:close()
+    end
+end
+
 ---@return BookSourceMeta
 function Qidian.meta()
     return { id = "qidian", name = _("起点中文网"), type = "chapter" }
@@ -283,6 +303,7 @@ function Source:loadTocAsync(identity, cb)
 end
 
 function Source:openBookAsync(identity, opts, cb)
+    migrateFontCache(identity.stable_id)
     local Chapter = require("source.chapter")
     local open = opts and opts.chapter_idx and Chapter.openAsync or Chapter.openWithUi
     return open(self, identity, identity.book, opts, {
@@ -292,6 +313,7 @@ function Source:openBookAsync(identity, opts, cb)
 end
 
 function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
+    migrateFontCache(identity.stable_id)
     local Chapter = require("source.chapter")
     return Chapter.prefetchAsync(identity, identity.book, toc, from_idx, count, {
         fetchContent = Chapter.vipFetcher(self, Client.contentAsync, false),
@@ -300,6 +322,7 @@ function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
 end
 
 function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
+    migrateFontCache(identity.stable_id)
     local Chapter = require("source.chapter")
     return Chapter.cacheAllAsync(self, identity, Chapter.vipFetcher(self, Client.contentAsync, false), on_progress, cb,
         FETCH_INTERVAL, range)

@@ -371,12 +371,30 @@ end
 ---@param chapter_id string
 ---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil) kind = "unpaid"：这章没买
 ---@return HttpJob
+local function looksLikeFont(bytes)
+    if type(bytes) ~= "string" or #bytes < 4 then return false end
+    local head = bytes:sub(1, 4)
+    return head == "\0\1\0\0" or head == "OTTO" or head == "true" or head == "ttcf" or head == "wOFF"
+end
+
 function Client.contentAsync(book_id, chapter_id, cb)
-    local decrypting
-    local function finish(content)
+    local decrypting, font_job
+    local function finish_html(content)
         local text = Mapper.chapterText(content)
         if not text then cb(nil, _("起点章节内容为空")); return end
         cb(text)
+    end
+    local function finish_text(text)
+        if type(text) ~= "string" or Text.trim(text) == "" then cb(nil, _("起点章节内容为空")); return end
+        cb(text)
+    end
+    local function decrypt_done(text, derr)
+        decrypting = nil
+        if not text then
+            logger.warn("qidian fock decrypt failed:", derr)
+            cb(nil, _("起点 VIP 章节解密失败") .. (derr and ("：" .. tostring(derr)) or "")); return
+        end
+        finish_text(text)
     end
     local fetch = webGet("/chapter/" .. book_id .. "/" .. chapter_id .. "/", Client.cookie(), function(html, err)
         if not html then cb(nil, err); return end
@@ -384,28 +402,75 @@ function Client.contentAsync(book_id, chapter_id, cb)
         if type(info) ~= "table" then cb(nil, _("起点章节内容为空")); return end
         if Mapper.locked(info) then cb(nil, _("起点 VIP 章节未购买"), "unpaid"); return end
         local content = info.content
-        if not Mapper.encrypted(info) then finish(content); return end
-        local cookie = Client.cookie()
-        local uid = cookie and cookie:match("ywguid=(%d+)")
-        -- fkp 是 base64 的 `window.onkeyfocus("<密钥池>", <版本>)`，只取参数，不执行
-        local keypool, version = Text.base64Decode(tostring(info.fkp or ""))
-            :match('onkeyfocus%("([^"]+)",%s*(%d+)%)')
-        if not (uid and keypool and version and type(content) == "string") then
-            logger.warn("qidian decrypt inputs missing: uid", uid ~= nil, "keypool", keypool ~= nil, "version", version ~= nil,
-                "content", type(content))
-            cb(nil, _("起点 VIP 章节解密失败：缺少登录信息，请重新登录起点")); return
+        local ces = tonumber(info.cES) or 0
+        if ces ~= 0 and ces ~= 2 then
+            logger.warn("qidian unknown cES:", ces)
+            cb(nil, _("起点 VIP 章节加密方式不受支持")); return
         end
-        decrypting = Fock.decryptAsync(content, chapter_id, keypool, version, uid, function(plain, derr)
-            decrypting = nil
-            if not plain then
-                logger.warn("qidian fock decrypt failed:", derr)
-                cb(nil, _("起点 VIP 章节解密失败")); return
+        local fock = Mapper.fockEncrypted(info)
+        local font_protected = Mapper.fontProtected(info)
+        if not fock and not font_protected then finish_html(content); return end
+
+        local keypool, version, uid
+        if fock then
+            local cookie = Client.cookie()
+            uid = cookie and cookie:match("ywguid=(%d+)")
+            -- fkp 是 base64 的 `window.onkeyfocus("<密钥池>", <版本>)`，只取参数，不执行
+            keypool, version = Text.base64Decode(tostring(info.fkp or ""))
+                :match('onkeyfocus%("([^"]+)",%s*(%d+)%)')
+            if not (uid and keypool and version and type(content) == "string") then
+                logger.warn("qidian decrypt inputs missing: uid", uid ~= nil, "keypool", keypool ~= nil,
+                    "version", version ~= nil, "content", type(content))
+                cb(nil, _("起点 VIP 章节解密失败：缺少登录信息，请重新登录起点")); return
             end
-            finish(plain)
+        end
+
+        local function run(fixed_font)
+            if font_protected then
+                if fock then
+                    decrypting = Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, uid, decrypt_done)
+                else
+                    decrypting = Fock.restoreAsync(content, info, fixed_font, decrypt_done)
+                end
+            else
+                decrypting = Fock.decryptAsync(content, chapter_id, keypool, version, uid, function(plain, derr)
+                    decrypting = nil
+                    if not plain then
+                        logger.warn("qidian fock decrypt failed:", derr)
+                        cb(nil, _("起点 VIP 章节解密失败") .. (derr and ("：" .. tostring(derr)) or "")); return
+                    end
+                    finish_html(plain)
+                end)
+            end
+        end
+
+        if not font_protected then run(nil); return end
+
+        local url = info.fixedFontTtf
+        if type(url) ~= "string" or url == "" or type(info.randomFont) ~= "string" or type(info.css) ~= "string" then
+            logger.warn("qidian font inputs missing: fixedFontTtf", type(url), "randomFont", type(info.randomFont),
+                "css", type(info.css))
+            cb(nil, _("起点 VIP 章节字体解密失败：缺少字体信息")); return
+        end
+        font_job = Request.get(url, {
+            headers = { ["User-Agent"] = UA, ["Referer"] = "https://m.qidian.com/" },
+            timeout = require("http.timeout").net(3),
+        }, function(ttf, ferr, res)
+            font_job = nil
+            if not ttf or #ttf == 0 then
+                logger.warn("qidian font download failed:", ferr, "code", res and res.code, "len", ttf and #ttf)
+                cb(nil, _("起点 VIP 章节字体下载失败")); return
+            end
+            if not looksLikeFont(ttf) then
+                logger.warn("qidian font download invalid:", #ttf, tostring(ttf:sub(1, 16)), "code", res and res.code)
+                cb(nil, _("起点 VIP 章节字体下载失败")); return
+            end
+            run(ttf)
         end)
     end)
     return { cancel = function()
         fetch.cancel()
+        if font_job then font_job:cancel() end
         if decrypting then decrypting:cancel() end
     end }
 end
