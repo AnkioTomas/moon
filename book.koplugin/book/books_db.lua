@@ -3,7 +3,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 
 列职责：
   身份：source_id + stable_id（PK）、md5、path、inserted_at（0=仅身份行）
-  成员：deleted（0=在架有效，1=软删/非成员）；sync_status（0 待上传，1 已同步）
+  成员：deleted（0=在架有效，1=软删/非成员）；sync_status（0 待上传，1 已同步，2 只留本地：不上传云书架，远端对账不下架）
   展示：title/authors/category/series/intro/cover
   扩展元数据：meta（JSON 对象，见 BookMeta；入库前由 normalizeMeta 规范成可直接展示的值）
   本地-only：reader_prefs、toc、toc_fetched_at、read_state、hidden（软删除：书留库不显示，远端同步不碰）
@@ -63,7 +63,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 ---@field downloaded boolean|nil 展示用已下载标记（查询时按 downloadedClause 算出，非 books 列）
 ---@field download string|nil OPDS 等书城条目的下载地址，不入库
 ---@field deleted integer|nil 0=在架有效，1=软删/非成员
----@field sync_status integer|nil 0=待上传，1=已同步
+---@field sync_status integer|nil 0=待上传，1=已同步，2=只留本地
 ---@field cover string|nil 封面 URL
 ---@field cover_url string|nil 封面 URL（部分源别名）
 ---@field cover_headers table|nil 封面请求头
@@ -781,6 +781,15 @@ end
 function BookDB.markSynced(source_id, stable_id)
     return DB.exec([[UPDATE books SET sync_status=1
         WHERE source_id=? AND stable_id=?;]], source_id, stable_id) ~= nil
+end
+
+--- 本地加架的书不上传云书架：脱离待上传，又不算已同步（对账时不会被当成远端成员下架）。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function BookDB.markLocalOnly(source_id, stable_id)
+    return DB.exec([[UPDATE books SET sync_status=2
+        WHERE source_id=? AND stable_id=? AND sync_status=0;]], source_id, stable_id) ~= nil
 end
 
 --- 批量清脏（单事务）。

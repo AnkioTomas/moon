@@ -88,9 +88,24 @@ function Setting.rows(plugin)
                 require("source.registry").reload()
             end })
     end
+    --- 关闭后本地加入书架的书不上传到各源的云书架，只同步进度、笔记和统计。
+    local function pushShelfRow(iw)
+        local Settings = require("utils.settings")
+        local conf = Settings.get("source")
+        local on = conf.push_local_shelf
+        return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = "cloud_upload",
+            title = _("上传本地加入书架的书"),
+            subtitle = _("关闭后只同步进度、笔记和统计，不把本地加架的书推到云书架"),
+            status = on and _("开") or _("关"), status_on = on,
+            callback = function()
+                conf.push_local_shelf = not on
+                Settings.save("source", conf)
+            end })
+    end
     return {
         localPathRow,
         folderCategoryRow,
+        pushShelfRow,
         row("webdav_url", _("WebDAV 地址"), false, "dns"),
         row("webdav_username", _("WebDAV 用户名"), false, "person"),
         row("webdav_password", _("WebDAV 密码"), true, "key"),
