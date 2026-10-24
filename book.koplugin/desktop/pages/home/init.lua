@@ -38,6 +38,7 @@ local _ = require("gettext")
 ---@field visible table<string, boolean>
 ---@field editing boolean
 ---@field active boolean 首页 Tab 处于前台
+---@field focus string|nil 下次组装时优先显示含该组件的页，用完即清
 local Home = {}
 Home.__index = Home
 
@@ -324,7 +325,9 @@ local function assemble(self)
     body, self.page, self.pages, self.visible = Layout.build(ctx, self.components, self.page, {
         body_height = body_h,
         wrap = wrap,
+        focus = self.focus,
     })
+    self.focus = nil
     local holder = InputContainer:new{
         dimen = Geom:new{ w = w, h = h },
         Box:new{
@@ -369,9 +372,18 @@ function Home:turn(delta)
     redraw(self)
 end
 
+--- 当前页第一个组件：浏览态会把超高的钉页拆成多页，页码和编辑态不一致，切换时按它定位。
+---@param self BookHome
+local function firstVisible(self)
+    for _idx, place in ipairs(Components.widgets()) do
+        if self.visible[place.id] then return place.id end
+    end
+end
+
 function Home:enterEdit()
     if self.editing then return end
     self.editing = true
+    self.focus = firstVisible(self)
     redraw(self)
     -- 组件上叠网点遮罩，局刷会留残影。
     local desktop = self.desktop
@@ -384,6 +396,7 @@ end
 function Home:exitEdit()
     if not self.editing then return end
     self.editing = false
+    self.focus = firstVisible(self)
     redraw(self)
 end
 
