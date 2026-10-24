@@ -183,7 +183,7 @@ local PERIODS = { { "day", _("日榜") }, { "week", _("周榜") }, { "month", _(
 local AUDIENCES = { { "all", _("全部") }, { "male", _("男频") }, { "female", _("女频") } }
 
 --- 书城浏览：节点 `周期:受众`（缺省 day:all，每页 20 部）或 `theme:<题材>`（按人气）。
---- 三行 chip：周期、受众、题材；选题材后周期 / 受众行不高亮，点回去就是榜单。
+--- 书城 chip 最多两行：第一行周期，第二行受众 + 题材（放不下的折进「更多」）；选题材后周期 / 受众不高亮，点回去就是榜单。
 ---@param opts { node?: string, limit?: integer }
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -192,11 +192,11 @@ function Source:browseAsync(opts, cb)
     local theme = node:match("^theme:(.+)$")
     local period, audience = node:match("^(%a+):(%a+)$")
     if theme then period, audience = "day", "all" end
-    local periods, audiences, themes = {}, {}, {}
+    local periods, filters = {}, {}
     for _idx, row in ipairs(PERIODS) do periods[#periods + 1] = { id = row[1] .. ":" .. audience, title = row[2] } end
-    for _idx, row in ipairs(AUDIENCES) do audiences[#audiences + 1] = { id = period .. ":" .. row[1], title = row[2] } end
-    for _idx, row in ipairs(THEMES) do themes[#themes + 1] = { id = "theme:" .. row[1], title = row[2] } end
-    local groups = { Browse.group(periods, node), Browse.group(audiences, node), Browse.group(themes, node) }
+    for _idx, row in ipairs(AUDIENCES) do filters[#filters + 1] = { id = period .. ":" .. row[1], title = row[2] } end
+    for _idx, row in ipairs(THEMES) do filters[#filters + 1] = { id = "theme:" .. row[1], title = row[2] } end
+    local groups = { Browse.group(periods, node), Browse.group(filters, node) }
     return Browse.pages(function(page, done)
         local function finish(wire, err)
             if not wire then
