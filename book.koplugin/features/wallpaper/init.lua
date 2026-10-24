@@ -128,7 +128,7 @@ function M.bars()
     return { top = c.wallpaper_topbar ~= false, bottom = c.wallpaper_tabbar ~= false }
 end
 
---- 底栏简洁样式：壁纸透出底栏时，选中格不填深色块，图标文字跟正文同色。
+--- 底栏文字不变灰：壁纸透出底栏时，未选中格的图标文字跟正文同色。
 ---@return boolean
 function M.plainTabbar()
     return conf().wallpaper_tabbar_plain == true
