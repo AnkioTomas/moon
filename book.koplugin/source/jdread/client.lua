@@ -46,6 +46,13 @@ function Client:new(o)
     return setmetatable(o, self)
 end
 
+--- 签名用的 uuid：没登录也要能逛榜单，缺省用设备派生值（登录时存的也是它）。
+---@return string
+function Client:signUuid()
+    if type(self.uuid) == "string" and self.uuid ~= "" then return self.uuid end
+    return "h5" .. require("ffi/sha2").md5(require("utils.device_id").ensure())
+end
+
 ---@return boolean
 function Client:configured()
     return type(self.cookie) == "string" and self.cookie ~= ""
@@ -68,7 +75,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:apiGetAsync(path, extra, cb)
-    local query = Text.formEncode(Protocol.signedParams(path, self.uuid, extra))
+    local query = Text.formEncode(Protocol.signedParams(path, self:signUuid(), extra))
     return Request.get(API .. path .. "?" .. query, {
         headers = self:headers(API .. "/"),
     }, function(raw, err)
@@ -81,7 +88,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:apiPostAsync(path, body, cb)
-    local query = Text.formEncode(Protocol.signedParams(path, self.uuid))
+    local query = Text.formEncode(Protocol.signedParams(path, self:signUuid()))
     return Request.post(API .. path .. "?" .. query, JSON.encode(body), {
         headers = self:headers(API .. "/reader/"),
         content_type = "application/json",
@@ -277,7 +284,7 @@ end
 function Client:downloadChapterAsync(book_id, query, cb)
     local path = "/jdread/api/download/chapter/" .. tostring(book_id)
     local tm = Protocol.evenTime()
-    local signed = Protocol.signedParams(path, self.uuid, nil, tm)
+    local signed = Protocol.signedParams(path, self:signUuid(), nil, tm)
     local params = {
         enc = 1,
         app = "jdread-m",
