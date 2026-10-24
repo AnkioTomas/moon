@@ -12,7 +12,8 @@ local Setting = {}
 -- book_xray_mark_style：dashed 虚线 / solid 实线。
 Setting.defaults = {
     book_xray_enabled = true,
-    book_xray_show_marks = true,
+    book_xray_show_marks = false,
+    book_xray_auto = false,
     book_xray_quality = "standard",
     book_xray_mark_style = "dashed",
 }
@@ -68,12 +69,28 @@ function Setting.entries(desktop)
                                 return Row.widget({
                                     width = iw, chevron = false,
                                     kind = "toggle", icon = "format_underlined", title = _("X-Ray 实体画线"),
+                                    subtitle = _("默认关闭；也可在阅读快捷面板里随时开关，点标记查看详情"),
                                     status = (on and marks_on) and _("开") or _("关"),
                                     status_on = on and marks_on,
                                     callback = function()
                                         if not on then return end
                                         xray.book_xray_show_marks = not marks_on
                                         refreshMarks()
+                                        save()
+                                    end,
+                                })
+                            end,
+                            function(iw)
+                                local auto = xray.book_xray_auto
+                                return Row.widget({
+                                    width = iw, chevron = false,
+                                    kind = "toggle", icon = "auto_mode", title = _("X-Ray 自动识别"),
+                                    subtitle = _("翻到新章自动识别本章人物，读过大半再带上下一章；有网才跑，会消耗 AI 额度"),
+                                    status = (on and auto) and _("开") or _("关"),
+                                    status_on = on and auto,
+                                    callback = function()
+                                        if not on then return end
+                                        xray.book_xray_auto = not auto
                                         save()
                                     end,
                                 })

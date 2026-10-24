@@ -30,6 +30,7 @@ Ext.POINTS = {
     ["highlight.relabel"] = "划词菜单按钮改名 fn(key) -> string|nil（按钮行为已由提供者接管时给新名字）",
     ["highlight.fill_selection"] = "单一提供者：划词无文字时补选区 fn(menu) -> bool",
     ["reader.ready"] = "阅读页就绪 fn(plugin)",
+    ["reader.page_updated"] = "翻页后 fn(plugin)（阅读器侧，会话快照已刷新；每次翻页都调，回调要自己节流）",
     ["reader.doc_settings"] = "开书前改文档设置 fn(doc_settings, document)",
     ["reader.preferences"] = "开书后套用偏好 fn(ui)",
     ["web.routes"] = "远程管理接口 { name, handle(method, action, params, cb(status, table)), download?(action) -> { ctype, filename, body }|nil, dir?: string, assets?: string[], page?: { href, title, title_long?, desc?, icon, tile? }, l10n?: string }（/api/<name>/<action>；assets 为 dir 下开放的静态文件；page 进顶栏与首页；l10n 为网页文案模块前缀）",

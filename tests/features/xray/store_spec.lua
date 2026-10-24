@@ -59,3 +59,25 @@ merged = Store.mergeEntities({
 Assert.eq(#merged, 2)
 Assert.eq(merged[2].kind, "location")
 Assert.eq(merged[2].name, "Paris")
+
+-- 别名撞到另一个人的别名：不合并成一个人，别名也只归先到的那个。
+merged = Store.mergeEntities({
+    { kind = "character", name = "王大", aliases = { "老王" }, description = "兄" },
+}, {
+    { kind = "character", name = "王二", aliases = { "老王" }, description = "弟" },
+})
+Assert.eq(#merged, 2)
+Assert.eq(#merged[2].aliases, 0, "")
+Assert.eq(merged[1].aliases[1], "老王")
+
+-- 新描述明显更短：保留旧描述；够长才覆盖。
+merged = Store.mergeEntities({
+    { kind = "character", name = "Mina", aliases = {}, description = "a brave young woman of Whitby" },
+}, {
+    { kind = "character", name = "Mina", aliases = {}, description = "brave" },
+})
+Assert.eq(merged[1].description, "a brave young woman of Whitby")
+merged = Store.mergeEntities(merged, {
+    { kind = "character", name = "Mina", aliases = {}, description = "a brave young woman of Whitby, wife of Jonathan" },
+})
+Assert.eq(merged[1].description, "a brave young woman of Whitby, wife of Jonathan")

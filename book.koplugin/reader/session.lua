@@ -316,6 +316,7 @@ function Session.onPageUpdate(plugin, page)
     Snapshot.refresh(session, page)
     updateReadState(session)
     require("reader.session.stats").onPage(session)
+    require("utils.extension").emit("reader.page_updated", plugin)
     local source = session.identity.source
     if source then
         source:onEvent("page_changed", {

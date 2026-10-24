@@ -114,7 +114,7 @@ package.preload["features.animation"] = function()
     return { isEnabled = function() return false end }
 end
 package.preload["features.xray.marks"] = function()
-    return { install = function() end }
+    return { install = function() end, enabled = function() return false end }
 end
 -- 段评关联动作只对有微信读书的本地书可用，本 spec 只看核心动作
 package.preload["features.reviews.link"] = function()
@@ -157,7 +157,7 @@ local PanelReader = require("features.panel.reader")
 local actions = PanelReader.actions(ui)
 local action_ids = {}
 for _, a in ipairs(actions) do action_ids[#action_ids + 1] = a.id end
-Assert.eq(table.concat(action_ids, ","), "toc,highlights,rare_ruby,xray,xray_refresh")
+Assert.eq(table.concat(action_ids, ","), "toc,highlights,rare_ruby,xray,xray_marks,xray_refresh")
 Assert.eq(actions[1].icon, "menu_book")
 
 Assert.is_false(PanelReader.executeAction("missing", ui))

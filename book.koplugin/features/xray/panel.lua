@@ -1,5 +1,5 @@
 --[[--
-X-Ray 的阅读快捷面板开关：打开 X-Ray、刷新 X-Ray。
+X-Ray 的阅读快捷面板开关：打开 X-Ray、页内标记开关、刷新 X-Ray。
 
 id 保持 `xray` / `xray_refresh`：已保存的 quick_panel_reader_actions 与默认列表都按它启用和排序。
 
@@ -28,6 +28,22 @@ function Panel.actions()
             ---@param ctx BookQuickPanelContext
             run = function(ctx)
                 require("features.xray.ui").openMain(ctx.ui)
+            end,
+        },
+        {
+            id = "xray_marks",
+            title = _("X-Ray 标记"),
+            icon = "format_underlined",
+            scope = "reader",
+            available = enabled,
+            keep_open = true,
+            active = function()
+                return require("features.xray.marks").enabled()
+            end,
+            ---@param ctx BookQuickPanelContext
+            run = function(ctx)
+                local Marks = require("features.xray.marks")
+                Marks.setEnabled(not Marks.enabled(), ctx.ui)
             end,
         },
         {

@@ -20,7 +20,6 @@ local _ = require("gettext")
 local Fetch = {}
 
 local MIN_GROUND_LEN = 2
-local INTRO_LIMIT = 1500
 local LOOKUP_PRIOR_LIMIT = 2000
 --- 一次产出人物、地点、术语三段 JSON，推理模型的思考还要占额度，8K 实测会被截断。
 local BULK_MAX_TOKENS = 16000
@@ -28,8 +27,8 @@ local BULK_MAX_TOKENS = 16000
 local PROFILES = {
     save = { recap = 0, prior = false, caps = { 10, 5, 5 }, max_tokens = 10000,
         rule = "description 不超过 40 字，aliases 最多 2 个；只输出本页新出现或有重要新信息的实体。" },
-    standard = { recap = 5, prior = true, caps = { 15, 10, 10 }, max_tokens = BULK_MAX_TOKENS },
-    high = { recap = 10, prior = true, caps = { 25, 15, 15 }, max_tokens = BULK_MAX_TOKENS,
+    standard = { recap = 5, prior = true, caps = { 25, 15, 15 }, max_tokens = BULK_MAX_TOKENS },
+    high = { recap = 10, prior = true, caps = { 40, 25, 25 }, max_tokens = BULK_MAX_TOKENS,
         rule = "description 写详实（80 到 150 字）：身份、与其他人物的关系、关键经历；有别名或译名变体务必收全。" },
 }
 
@@ -162,11 +161,28 @@ local function fetchResult(entities)
     return result
 end
 
+--- 合并并落库；用户删过的实体（名字或别名在墓碑里）不再加回，手动补全（manual）除外并清掉墓碑。
 ---@param identity BookIdentity
 ---@param incoming table[]
-local function mergeAndSave(identity, incoming)
-    local merged = Store.mergeEntities(XrayDB.list(identity.source_id, identity.stable_id), incoming)
-    assert(XrayDB.replace(identity.source_id, identity.stable_id, merged), "failed to save xray entities")
+---@param manual boolean|nil
+local function mergeAndSave(identity, incoming, manual)
+    local source_id, stable_id = identity.source_id, identity.stable_id
+    if manual then
+        for _idx, row in ipairs(incoming) do XrayDB.restore(source_id, stable_id, row.kind, row.name) end
+    else
+        local removed = XrayDB.removedSet(source_id, stable_id)
+        local kept = {}
+        for _idx, row in ipairs(incoming) do
+            local dropped = removed[row.kind .. "\0" .. Text.trim(row.name):lower()]
+            for _alias_idx, alias in ipairs(row.aliases) do
+                dropped = dropped or removed[row.kind .. "\0" .. Text.trim(alias):lower()]
+            end
+            if not dropped then kept[#kept + 1] = row end
+        end
+        incoming = kept
+    end
+    local merged = Store.mergeEntities(XrayDB.list(source_id, stable_id), incoming)
+    assert(XrayDB.replace(source_id, stable_id, merged), "failed to save xray entities")
     return merged
 end
 
@@ -222,57 +238,17 @@ local function fromContext(ui, identity, existing, cb)
     end)
 end
 
---- 首次初始化：凭书籍基本信息走模型通用知识，不做 grounding；
---- 模型不认识这本书或没给出实体时回落到章节增量。
+--- 按当前位置增量更新 X-Ray：本页 + 本章前文，结果须在正文里 grounding。
 ---@param ui table
 ---@param identity BookIdentity
 ---@param cb fun(result: table|nil, err: any)
 ---@return table|nil
-local function fromKnowledge(ui, identity, cb)
-    local title, author = bookMeta(identity)
-    if title == "" then
-        return fromContext(ui, identity, {}, cb)
-    end
-    local intro = Text.truncateUtf8(Text.trim((identity.book or {}).intro), INTRO_LIMIT)
-    local messages = {
-        { role = "system", content = Prompts.system },
-        { role = "user", content = Prompts.knowledge(title, author, intro) },
-    }
-    return AI.jsonExtract(messages, { localize = true, max_tokens = BULK_MAX_TOKENS, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
-        if not decoded then cb(nil, err); return end
-        local incoming = decoded.known ~= false and cleanPayload(decoded) or {}
-        if #incoming == 0 then
-            fromContext(ui, identity, {}, cb)
-            return
-        end
-        persist(identity, incoming, cb)
-    end)
-end
-
---- 综合拉取 X-Ray：库里没有实体时凭通用知识初始化，之后按章节上下文增量更新；
---- 已有数据且非 force 时直接回缓存。
----@param ui table
----@param identity BookIdentity
----@param opts { force?: boolean }|nil
----@param cb fun(result: table|nil, err: any)
----@return table|nil
-function Fetch.comprehensive(ui, identity, opts, cb)
-    opts = opts or {}
+function Fetch.comprehensive(ui, identity, cb)
     if not AI.isConfigured() then
         cb(nil, _("AI 未配置"))
         return nil
     end
-    local existing = XrayDB.list(identity.source_id, identity.stable_id)
-    if #existing == 0 then
-        return fromKnowledge(ui, identity, cb)
-    end
-    if not opts.force then
-        local result = fetchResult(existing)
-        result.cached = true
-        cb(result)
-        return nil
-    end
-    return fromContext(ui, identity, existing, cb)
+    return fromContext(ui, identity, XrayDB.list(identity.source_id, identity.stable_id), cb)
 end
 
 --- 把正文切成不超过 size 字节的段：优先在后半段的换行处断开，否则退到 UTF-8 字符边界。
@@ -300,6 +276,46 @@ function Fetch.chunks(text, size)
         pos = stop + 1
     end
     return out
+end
+
+--- 按章识别：整章正文切段逐段请求 AI，每段结果当场合并落库；结果须在本章正文里 grounding。
+---@param identity BookIdentity
+---@param text string 本章正文
+---@param cb fun(result: table|nil, err: any)
+---@return table 带 cancel 的句柄
+function Fetch.chapter(identity, text, cb)
+    local chunks = Fetch.chunks(text, SCAN_CHUNK)
+    local title, author = bookMeta(identity)
+    local source_id, stable_id = identity.source_id, identity.stable_id
+    local index, request, cancelled = 1, nil, false
+    local function step()
+        if cancelled then return end
+        if index > #chunks then
+            cb(fetchResult(XrayDB.list(source_id, stable_id)))
+            return
+        end
+        local chunk = chunks[index]
+        local existing = filterGrounded(XrayDB.list(source_id, stable_id), chunk)
+        local messages = {
+            { role = "system", content = Prompts.system },
+            { role = "user", content = Prompts.comprehensive(
+                title, author, progressPercent(), chunk, "", Store.promptSnapshot(existing),
+                storySoFar(identity), profile()) },
+        }
+        request = AI.jsonExtract(messages, { localize = true, max_tokens = profile().max_tokens, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
+            if cancelled then return end
+            if not decoded then cb(nil, err); return end
+            local ok, save_err = pcall(mergeAndSave, identity, filterGrounded(cleanPayload(decoded), chunk))
+            if not ok then cb(nil, save_err); return end
+            index = index + 1
+            step()
+        end)
+    end
+    step()
+    return { cancel = function()
+        cancelled = true
+        if request then request.cancel() end
+    end }
 end
 
 --- 全书正文的指纹：同一本书的同一版正文分段结果不变，续扫游标才对得上。
@@ -438,7 +454,7 @@ function Fetch.lookupWord(ui, identity, word, cb)
             cb(nil, "name not found in text")
             return
         end
-        local ok, save_err = pcall(mergeAndSave, identity, { row })
+        local ok, save_err = pcall(mergeAndSave, identity, { row }, true)
         if ok then cb(row) else cb(nil, save_err) end
     end)
 end

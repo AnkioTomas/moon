@@ -54,3 +54,16 @@ Assert.eq(call.args[7], "brave")
 fail_commit = true
 Assert.is_false(XrayDB.replace("moon", "b1", {}))
 Assert.eq(calls[#calls].sql, "ROLLBACK;")
+
+-- 删除：实体与墓碑在同一事务里写入，名字和别名都留墓碑
+fail_commit = false
+calls = {}
+Assert.is_true(XrayDB.remove("moon", "b1", { kind = "character", name = " Mina ", aliases = { "Harker" } }))
+Assert.eq(calls[1].sql, "BEGIN IMMEDIATE;")
+Assert.matches(calls[2].sql, "DELETE FROM xray_entities")
+local tombs = {}
+for _idx, c in ipairs(calls) do
+    if c.sql:find("xray_removed", 1, true) and c.sql:find("INSERT", 1, true) then tombs[#tombs + 1] = c.args[4] end
+end
+Assert.eq(table.concat(tombs, ","), "mina,harker")
+Assert.eq(calls[#calls].sql, "COMMIT;")

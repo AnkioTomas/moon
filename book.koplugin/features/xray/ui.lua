@@ -60,15 +60,42 @@ local function entityLines(entity)
     return lines
 end
 
---- 展示已收录实体详情。
+--- 生成完成后重载当前分栏的前向声明（定义在下面）。
+local refreshMainTab
+
+--- 删除实体：名字与别名进墓碑，之后的识别不再加回；手动查词可重新收录。
+---@param entity table
+local function removeEntity(entity)
+    local identity = currentIdentity()
+    if not identity then return end
+    if not XrayDB.remove(identity.source_id, identity.stable_id, entity) then
+        info(_("删除失败"))
+        return
+    end
+    require("features.xray.marks").invalidate()
+    refreshMainTab(main_holder)
+    info(T(_("已删除：%1"), entity.name))
+end
+
+--- 展示已收录实体详情（底栏带「删除」）。
 ---@param entity table
 function UI.showEntity(entity)
     local text = table.concat(entityLines(entity), "\n")
-    TextViewer:new{
+    local viewer
+    viewer = TextViewer:new{
         title = entity.name,
         text = text ~= "" and text or _("（无内容）"),
         fullscreen = false,
-    }:show()
+        buttons = { { text = _("删除"), callback = function()
+            viewer:close()
+            require("ui.themes.widgets.confirm"):new{
+                text = T(_("删除「%1」？之后识别不会再把它加回来。"), entity.name),
+                ok_text = _("删除"),
+                ok_callback = function() removeEntity(entity) end,
+            }:show()
+        end } },
+    }
+    viewer:show()
 end
 
 --- 未配置 AI 或没联网时提示并拦下操作；离线立即失败，不等联网回调。
@@ -113,7 +140,7 @@ end
 
 --- 生成完成后重载当前分栏，停在原页。
 ---@param holder table|nil
-local function refreshMainTab(holder)
+function refreshMainTab(holder)
     if not holder or not holder.menu then
         return
     end
@@ -179,7 +206,7 @@ function UI.refresh(ui, identity)
         restartable = true,
         run = function(report, done)
             report(_("正在重新生成 X-Ray…"))
-            return require("features.xray.fetch").comprehensive(ui, identity, { force = true }, function(result, err)
+            return require("features.xray.fetch").comprehensive(ui, identity, function(result, err)
                 done({ ok = result ~= nil, data = result, err = err })
             end)
         end,
@@ -232,6 +259,108 @@ function UI.scanBook(ui, identity)
     }:show()
 end
 
+--- 本章（可选含下一章）里还没识别过的章：{ idx, text }。没有目录的书只有「整本」一份，章号记 0。
+---@param ui table ReaderUI
+---@param identity BookIdentity
+---@param with_next boolean
+---@param force boolean|nil 已识别过的也重做
+---@return { idx: integer, text: string }[]
+local function chapterJobs(ui, identity, with_next, force)
+    local Session = require("reader.session")
+    local snapshot = Session.current()
+    local idx = Session.chapterIndex()
+    local jobs = {}
+    for offset = 0, with_next and 1 or 0 do
+        local chapter = idx and idx + offset or (offset == 0 and 0 or nil)
+        if chapter and (force or not XrayDB.chapterDone(identity.source_id, identity.stable_id, chapter)) then
+            local text = require("reader.context").chapterText(ui, snapshot and snapshot.page or 0, offset)
+            if text then jobs[#jobs + 1] = { idx = chapter, text = text } end
+        end
+    end
+    return jobs
+end
+
+--- 逐章识别的任务（ai 类，可重跑：做完的章记在 xray_chapter，重跑跳过）。
+---@param identity BookIdentity
+---@param jobs { idx: integer, text: string }[]
+---@param on_done fun(result: table)
+---@return table
+local function chapterTask(identity, jobs, on_done)
+    local finished = {}
+    return {
+        key = taskKey(identity),
+        kind = "ai",
+        title = bookTitle(identity),
+        restartable = true,
+        retryable = function() return true end,
+        run = function(report, done)
+            local position, handle = 0, nil
+            local function nextJob()
+                position = position + 1
+                while jobs[position] and finished[jobs[position].idx] do position = position + 1 end
+                local job = jobs[position]
+                if not job then done({ ok = true }); return end
+                report(_("正在识别章节人物"), position - 1, #jobs)
+                handle = require("features.xray.fetch").chapter(identity, job.text, function(result, err)
+                    if not result then done({ ok = false, err = err }); return end
+                    XrayDB.markChapter(identity.source_id, identity.stable_id, job.idx)
+                    finished[job.idx] = true
+                    require("features.xray.marks").invalidate()
+                    refreshMainTab(main_holder)
+                    nextJob()
+                end)
+            end
+            nextJob()
+            return { cancel = function() if handle then handle.cancel() end end }
+        end,
+        on_done = on_done,
+    }
+end
+
+--- 识别本章（前台任务：进度窗，可转后台）。
+---@param ui table ReaderUI
+---@param identity BookIdentity|nil
+function UI.chapter(ui, identity)
+    identity = identity or currentIdentity()
+    if not ui or not identity then
+        info(_("当前书籍没有可用身份"))
+        return
+    end
+    local key = taskKey(identity)
+    if followRunning(key) or not ensureReady() then return end
+    local jobs = chapterJobs(ui, identity, false, true)
+    if #jobs == 0 then
+        info(_("取不到本章正文"))
+        return
+    end
+    require("workers.ui.task_dialog").start(chapterTask(identity, jobs, function(result)
+        if result.ok then
+            info(_("本章 X-Ray 已更新"))
+        else
+            info(T(_("X-Ray 失败：%1"), tostring(result.err or _("未知错误")):match("[^\n]*")))
+        end
+    end))
+end
+
+--- 自动预取本章（with_next 时连下一章）的人物（翻页时由 init 的挂点调用）：静默入后台队列，不弹窗不提示。
+--- 没网、没配 AI、同本书已有任务时返回 false（调用方下次翻页再试）；没有要做的章也算处理完，返回 true。
+---@param ui table ReaderUI
+---@param with_next boolean
+---@return boolean
+function UI.prefetch(ui, with_next)
+    local identity = currentIdentity()
+    if not identity then return true end
+    if not require("ai").isConfigured() or not require("ui/network/manager"):isConnected()
+        or require("workers.tasks").get(taskKey(identity)) then
+        return false
+    end
+    local jobs = chapterJobs(ui, identity, with_next)
+    if #jobs > 0 then
+        require("workers.tasks").enqueue(chapterTask(identity, jobs, function() end))
+    end
+    return true
+end
+
 --- 打开 X-Ray 主菜单（底部分栏，左上角重新生成）。
 ---@param ui table|nil
 ---@param initial_tab string|nil
@@ -251,6 +380,7 @@ function UI.openMain(ui, initial_tab)
         left_icon = "sync",
         left_callback = function()
             require("ui.themes.widgets.sheet"):new{ title = _("X-Ray"), items = {
+                { text = _("识别本章人物"), callback = function() UI.chapter(ui, identity) end },
                 { text = _("按当前位置更新"), callback = function() UI.refresh(ui, identity) end },
                 { text = _("分析全书（含剧透）"), callback = function() UI.scanBook(ui, identity) end },
             } }:show()
