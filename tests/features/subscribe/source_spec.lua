@@ -25,6 +25,7 @@ package.loaded["book.note_db"] = { remapChapters = function(_s, id, map) remaps[
 local root = require("support.config").dir() .. "/subscribe_source_spec"
 package.loaded["utils.paths"] = { bookWorkDir = function(id, src) return root .. "/" .. src .. "/" .. id end }
 package.loaded["features.subscribe"] = {
+    dir = function(id) return root .. "/subscribe/" .. id end,
     content = function(feed, item, cb)
         Assert.eq(feed.id, 3)
         cb("<h1>" .. item.title .. "</h1><p>正文</p>")
@@ -158,5 +159,22 @@ do
     Assert.eq(slurp("3.html"), "d", "d：2 → 3")
     Assert.is_nil(slurp(".mv-7.html"), "残留临时名清掉")
     Assert.is_nil(slurp(".mv-2.html"))
+    os.execute("rm -rf '" .. root .. "'")
+end
+
+-- 已缓存文章的二、三级标题成章内小节（目录没变也更新目录缓存）；没缓存的没有小节
+do
+    os.execute("mkdir -p '" .. dir .. "/articles'")
+    local f = assert(io.open(dir .. "/articles/" .. require("ffi/sha2").md5("f") .. ".html", "wb"))
+    f:write('<h1>六</h1><h2 id="mh1">一节</h2><h3 id="mh2">小节</h3>')
+    f:close()
+    local list
+    src:loadTocAsync(identity, function(t) list = t end)
+    Stubs.flush()
+    Assert.eq(#list[1].anchors, 2)
+    Assert.eq(list[1].anchors[2].depth, 3)
+    Assert.eq(list[1].anchors[2].id, "mh2")
+    Assert.is_nil(list[2].anchors)
+    Assert.eq(#tocs["3"][1].anchors, 2, "目录缓存跟着更新")
     os.execute("rm -rf '" .. root .. "'")
 end

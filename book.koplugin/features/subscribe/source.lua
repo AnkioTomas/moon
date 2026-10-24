@@ -111,6 +111,19 @@ local function isOpen(identity)
     return cur ~= nil and cur.source_id == M.ID and tostring(cur.stable_id) == tostring(identity.stable_id)
 end
 
+--- 已缓存文章里的二、三级标题（章内小节）；没缓存 / 旧缓存没有编号的文章没有小节。
+---@param feed_id integer
+---@param guid string
+---@return BookChapterAnchor[]|nil
+local function anchorsOf(feed_id, guid)
+    local f = io.open(require("features.subscribe").dir(feed_id) .. "/articles/" .. require("ffi/sha2").md5(guid) .. ".html", "rb")
+    if not f then return nil end
+    local html = f:read("*a")
+    f:close()
+    local anchors = require("features.subscribe.typography").headings(html)
+    return #anchors > 0 and anchors or nil
+end
+
 --- 目录同步。阅读中（这本书正开着）目录变了不重排章号：沿用旧目录，等下次打开（force）再挪，
 --- 免得正在看的章节文件、边车被改名、上一章 / 下一章错位。
 ---@param identity BookIdentity
@@ -118,10 +131,12 @@ end
 ---@param force boolean|nil 打开书时为真：无论是否开着都同步
 function Source:loadTocAsync(identity, cb, force)
     local Toc = require("source.toc")
-    local items = SubDB.items(tonumber(identity.stable_id), 1, -1)
+    local feed_id = tonumber(identity.stable_id)
+    local items = SubDB.items(feed_id, 1, -1)
     local toc = {}
     for i, item in ipairs(items) do
-        toc[i] = { idx = i, uid = item.guid, title = item.title ~= "" and item.title or _("无标题"), link = item.link }
+        toc[i] = { idx = i, uid = item.guid, title = item.title ~= "" and item.title or _("无标题"), link = item.link,
+            anchors = anchorsOf(feed_id, item.guid) }
     end
     -- 旧目录是章节文件 / 注解现行章号的基线，过了 TTL 也得用：丢了基线就不挪，章号错位后划线串到别的文章上。
     local old = Toc.read(M.ID, identity.stable_id, true)
@@ -135,6 +150,14 @@ function Source:loadTocAsync(identity, cb, force)
     if not same then
         if old then remapChapters(identity, old, toc) end
         if #toc > 0 then Toc.put(M.ID, identity.stable_id, toc) end
+    elseif #toc > 0 then
+        -- 目录没变，但文章缓存后多了小节：只更新目录缓存，不用挪章号。
+        for i = 1, #toc do
+            if #(old[i].anchors or {}) ~= #(toc[i].anchors or {}) then
+                Toc.put(M.ID, identity.stable_id, toc)
+                break
+            end
+        end
     end
     if #toc == 0 then return SourceBase.defer(cb, nil, _("订阅里还没有文章")) end
     return SourceBase.defer(cb, toc)
@@ -154,6 +177,16 @@ local function fetchContent(identity, chapter, cb)
     return Subscribe.content(feed, { guid = chapter.uid, title = chapter.title, link = chapter.link or "" },
         function(html, err)
             if not html then return cb(nil, err) end
+            -- 这篇刚缓存：小节写进目录缓存与调用方手里的目录项，打开目录马上就有。
+            local anchors = require("features.subscribe.typography").headings(html)
+            local toc = require("source.toc").read(M.ID, identity.stable_id, true)
+            local entry = toc and toc[chapter.idx]
+            local changed = entry and entry.uid == chapter.uid and #(entry.anchors or {}) ~= #anchors
+            chapter.anchors = #anchors > 0 and anchors or nil
+            if changed then
+                entry.anchors = chapter.anchors
+                require("source.toc").put(M.ID, identity.stable_id, toc)
+            end
             cb({ document = require("features.subscribe.typography").document(feed.title, html) })
         end)
 end

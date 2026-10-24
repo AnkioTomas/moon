@@ -2021,4 +2021,8 @@ Current version: ",
     ["按名称或说明查找设置项"] = "Find settings by name or description",
     ["没有匹配的设置"] = "No matching settings",
     ["设置名称或说明"] = "Setting name or description",
+    ["缓存全部未读"] = "Cache all unread",
+    ["没有未读文章"] = "No unread articles",
+    ["已缓存 %1 篇未读文章"] = "Cached %1 unread articles",
+    ["缓存完成 %1/%2 篇，其余失败：%3"] = "Cached %1/%2, the rest failed: %3",
 }

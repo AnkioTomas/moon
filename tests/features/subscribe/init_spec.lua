@@ -217,7 +217,7 @@ Subscribe.content(rss_feed, { guid = "g2", title = "二", link = "https://gone/"
 Assert.matches(g2, "短摘要二")
 Assert.is_nil(g2:find("<section", 1, true), "section 换成 div，CRE 不在标题后分页")
 Assert.matches(g2, "</div>")
-Assert.matches(g2, "<h2>小标题</h2>", "正文 h1 降级，CRE 不在它前面分页")
+Assert.matches(g2, "<h2 id=\"mh1\">小标题</h2>", "正文 h1 降级，CRE 不在它前面分页")
 -- 摘要够长但以省略号结尾 = 被截断：仍抓原文；够长且没截断才直接用；抓到的比摘要还短就用摘要。
 do
     local long = string.rep("这是一段很长的摘要。", 80)
@@ -406,4 +406,20 @@ do
     package.preload["socket"] = nil
     package.loaded["features.subscribe"] = nil
     Subscribe = require("features.subscribe")
+end
+
+-- 缓存全部未读：只取未读条目，逐篇缓存，失败的计数但不阻断后面
+do
+    local db = package.loaded["features.subscribe.db"]
+    db.items = function(_id, _page, _size, read)
+        Assert.eq(read, false, "只要未读")
+        return { { guid = "u1", title = "一", link = "https://gone/" }, { guid = "u2", title = "二", link = "https://gone/" } }
+    end
+    local progress, result = {}, nil
+    Subscribe.cacheUnread(rss_feed, function(text, n, total) progress[#progress + 1] = n .. "/" .. total end,
+        function(cached, total, failed) result = { cached, total, failed } end)
+    require("support.stubs").flush()
+    Assert.eq(table.concat(progress, ","), "0/2,1/2")
+    Assert.eq(result[2], 2)
+    Assert.eq(result[1] + result[3], 2)
 end
