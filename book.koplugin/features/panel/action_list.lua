@@ -109,7 +109,7 @@ local function create(scope, settings_key, order_fn)
                 local active = Registry.active(action, ctx)
                 result[#result + 1] = {
                     id = id,
-                    title = action.title,
+                    title = action.label and action.label(ctx) or action.title,
                     icon = active and action.active_icon or action.icon,
                     active = active,
                     hold = action.hold ~= nil,

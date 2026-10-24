@@ -2043,4 +2043,5 @@ Current version: ",
     ["X-Ray 自动识别"] = "X-Ray auto recognition",
     ["翻到新章自动识别本章人物，读过大半再带上下一章；有网才跑，会消耗 AI 额度"] = "Recognizes a chapter's characters when you enter it, and the next chapter once you are well into it; needs a network and uses AI quota",
     ["默认关闭；也可在阅读快捷面板里随时开关，点标记查看详情"] = "Off by default; also toggleable from the reader quick panel. Tap a mark for details",
+    ["%1 台设备"] = "%1 devices",
 }
