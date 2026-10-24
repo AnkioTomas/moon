@@ -31,6 +31,7 @@ local BADGE_SIZE = { bare = 44, circle = 52 }
 ---@field icon string
 ---@field active boolean|nil
 ---@field on_action fun(id: string)
+---@field on_hold fun(id: string)|nil 有长按动作的按钮才接 hold
 
 local ActionButton = InputContainer:extend{}
 
@@ -112,6 +113,9 @@ function ActionButton:init()
     self.ges_events = {
         Tap = { GestureRange:new{ ges = "tap", range = self.dimen } },
     }
+    if self.on_hold then
+        self.ges_events.Hold = { GestureRange:new{ ges = "hold", range = self.dimen } }
+    end
     local active = self.active == true
     local t = Theme.current()
     local v = active and t.button.primary or t.button.normal
@@ -128,6 +132,14 @@ end
 ---@return boolean
 function ActionButton:onTap()
     self.on_action(self.id)
+    return true
+end
+
+--- 处理按钮长按。
+---@param self BookQuickPanelActionButton
+---@return boolean
+function ActionButton:onHold()
+    self.on_hold(self.id)
     return true
 end
 

@@ -60,3 +60,13 @@ end, "boom")
 Assert.is_false(Registry.available(nil))
 Assert.is_false(Registry.active({ id = "plain" }))
 Assert.is_true(Registry.active({ id = "on", active = function() return true end }))
+
+-- 长按：总是先关面板再跑 hold；没有 hold 的动作什么都不做。
+o = opts()
+local held
+Registry.executeHold({ id = "wifi", hold = function(ctx) held = ctx end }, { ui = "u" }, o)
+Assert.eq(o.closed, 1)
+Assert.eq(held.ui, "u")
+o = opts()
+Registry.executeHold({ id = "rotate", event = "IterateRotation" }, {}, o)
+Assert.eq(o.closed, 0)

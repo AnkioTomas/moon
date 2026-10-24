@@ -489,6 +489,7 @@ return {
     ["想法上传失败"] = "Failed to upload note",
     ["想法上传成功但缺少 reviewId"] = "Note upload succeeded without a reviewId",
     ["截屏"] = "Screenshot",
+    ["3 秒后截屏"] = "3 seconds until screenshot",
     ["打开 GitHub"] = "Open GitHub",
     ["书友交流群"] = "Reader Group",
     ["Bug 反馈群"] = "Bug Report Group",

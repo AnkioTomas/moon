@@ -122,6 +122,13 @@ local function buildPanel(menu, W)
                 W.Desktop.executeAction(id, callbacks)
             end
         end,
+        on_hold = function(id)
+            if mode == "reader" then
+                W.ReaderPanel.holdAction(id, tab._book_ui, callbacks)
+            else
+                W.Desktop.holdAction(id, callbacks)
+            end
+        end,
         on_exit_edit = function()
             tab._book_panel_editing = false
             Menu.refresh(menu)

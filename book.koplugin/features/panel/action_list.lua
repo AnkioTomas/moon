@@ -12,6 +12,7 @@ local Registry = require("features.panel.actions.registry")
 ---@field swap fun(a: string, b: string)
 ---@field actions fun(ctx: BookQuickPanelContext): BookQuickPanelMenuItem[]
 ---@field execute fun(id: string, ctx: BookQuickPanelContext, opts: BookQuickPanelExecuteOpts|nil): boolean
+---@field hold fun(id: string, ctx: BookQuickPanelContext, opts: BookQuickPanelExecuteOpts|nil): boolean
 ---@field options fun(): BookQuickPanelOption[]
 
 --- 设置页没有 ReaderUI：可用性一律按 ctx.ui = nil 判断。
@@ -111,6 +112,7 @@ local function create(scope, settings_key, order_fn)
                     title = action.title,
                     icon = active and action.active_icon or action.icon,
                     active = active,
+                    hold = action.hold ~= nil,
                 }
             end
         end
@@ -127,6 +129,18 @@ local function create(scope, settings_key, order_fn)
         if not Registry.available(action, ctx) then return false end
         ---@cast action BookQuickPanelAction
         Registry.execute(action, ctx, opts)
+        return true
+    end
+
+    --- 长按动作；未注册、不可用或没有 hold 返回 false。
+    ---@param id string
+    ---@param ctx BookQuickPanelContext
+    ---@param opts BookQuickPanelExecuteOpts|nil
+    ---@return boolean
+    local function hold(id, ctx, opts)
+        local action = Registry.get(id)
+        if not Registry.available(action, ctx) or not action.hold then return false end
+        Registry.executeHold(action, ctx, opts)
         return true
     end
 
@@ -161,6 +175,7 @@ local function create(scope, settings_key, order_fn)
         swap = swap,
         actions = actions,
         execute = execute,
+        hold = hold,
         options = options,
     }
 end

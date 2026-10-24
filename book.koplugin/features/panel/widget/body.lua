@@ -44,6 +44,7 @@ end
 ---@field header table|nil 可选头部（阅读面板书名行）
 ---@field editing boolean|nil 为真时进入现场编辑叠层
 ---@field on_action fun(id: string)|nil 非编辑态点击动作
+---@field on_hold fun(id: string)|nil 非编辑态长按动作，只给声明了 hold 的动作
 ---@field on_level fun(kind: string, fraction: number): boolean|nil 滑杆回调
 ---@field on_exit_edit fun()|nil 「完成」退出编辑
 ---@field on_move fun(id: string, other_id: string)|nil 与可见的前 / 后邻居互换
@@ -111,6 +112,7 @@ function Body:updateView()
             icon = action.icon,
             active = action.active,
             on_action = self.on_action,
+            on_hold = action.hold and self.on_hold or nil,
         }
         if editing then
             button = Edit.wrap(button, {

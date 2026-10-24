@@ -33,6 +33,9 @@ function Panel.actions()
             run = function()
                 require("features.bluetooth.devices").toggle()
             end,
+            hold = function()
+                require("features.bluetooth.devices").show()
+            end,
         },
         {
             id = "bluetooth_devices",

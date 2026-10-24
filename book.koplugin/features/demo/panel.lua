@@ -18,6 +18,8 @@ quick_panel_reader_actions 的 id 保持用户原来的启用和排序；不在�
 - 可选：`available(ctx)` 是否显示。设置页调用时 `ctx.ui` 为 nil，要能勾选就返回 true；
   `active(ctx)` 是否高亮；`active_icon` 高亮时的图标；`keep_open` 点完不关面板（随后刷新）；
   `refresh_delay` keep_open 时延迟几秒再刷新（状态要等设备回填，如 Wi-Fi）
+- 可选 `hold(ctx)`：长按，用来打开该开关的详情 / 设置页（如 Wi-Fi 网络列表）；总是先关面板，
+  没有 `hold` 的按钮不接长按手势
 - `ctx.ui`：阅读面板是当前 ReaderUI，桌面面板为 nil
 - available / active / run 抛错不吞：会冒到面板入口的 guard 弹错误页
 
