@@ -20,6 +20,8 @@ Setting.defaults = {
     -- 顶栏 / 底栏要不要跟着透出壁纸；关的那条补回页面底色。
     wallpaper_topbar = true,
     wallpaper_tabbar = true,
+    -- 底栏透出壁纸时：选中格不填深色块、图标文字跟正文同色。默认关（保持原来的强调样式）。
+    wallpaper_tabbar_plain = false,
     wallpaper_contain = false,
     -- 默认淡一点：选了图铺满各界面时不至于盖住内容。
     wallpaper_opacity = 30,

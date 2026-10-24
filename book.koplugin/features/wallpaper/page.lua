@@ -261,6 +261,12 @@ function Page.sections(desktop)
         icon = "space_bar", title = _("底栏显示壁纸"), subtitle = _("关上底栏用页面底色"),
         on = bars.bottom, apply = function(on) Core.setBar("bottom", on) end,
     })
+    if bars.bottom then
+        rows[#rows + 1] = toggleRow(desktop, {
+            icon = "space_bar", title = _("底栏简洁样式"), subtitle = _("选中格不填色，图标文字与正文同色"),
+            on = Core.plainTabbar(), apply = function(on) Core.setPlainTabbar(on) end,
+        })
+    end
 
     local scope_rows = {}
     for _idx, scope in ipairs(SCOPES) do

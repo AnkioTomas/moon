@@ -128,6 +128,18 @@ function M.bars()
     return { top = c.wallpaper_topbar ~= false, bottom = c.wallpaper_tabbar ~= false }
 end
 
+--- 底栏简洁样式：壁纸透出底栏时，选中格不填深色块，图标文字跟正文同色。
+---@return boolean
+function M.plainTabbar()
+    return conf().wallpaper_tabbar_plain == true
+end
+
+---@param on boolean
+function M.setPlainTabbar(on)
+    conf().wallpaper_tabbar_plain = on == true
+    save()
+end
+
 ---@param which string top / bottom
 ---@param on boolean
 function M.setBar(which, on)
@@ -420,6 +432,7 @@ local Ext = require("utils.extension")
 Ext.add("desktop.backdrop", {
     content = function(widget, tab) M.hollow(widget, tab) end,
     tabbar = function(bar, tab) M.hollowBars(bar, tab, M.bars().bottom) end,
+    plain_tabbar = function(tab) return M.plainTabbar() and M.bars().bottom and M.enabled(tab) end,
     wrap = function(w, h, child, tab) return M.wrap(tab, w, h, child) end,
 })
 
