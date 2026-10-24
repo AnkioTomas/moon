@@ -101,8 +101,7 @@ function Shelf.pushDeletes(source_id, remove_one, report, cb)
     end }
 end
 
---- 本地新加架（脏行）上行。remote_ids 里已有的直接标已同步，不再发请求；
---- 设置关了「上传本地书架」时，其余一律标只留本地，不发请求。
+--- 本地新加架（脏行）上行。remote_ids 里已有的直接标已同步，不再发请求。
 ---@param source_id string
 ---@param remote table 书架远端（见模块头注释）
 ---@param remote_ids table<string, boolean>
@@ -118,10 +117,6 @@ local function pushAdded(source_id, remote, remote_ids, report, cb)
         else
             missing[#missing + 1] = stable_id
         end
-    end
-    if not require("utils.settings").get("source").push_local_shelf then
-        for _idx, stable_id in ipairs(missing) do BookDB.markLocalOnly(source_id, stable_id) end
-        return SourceBase.defer(cb, 0)
     end
     return pushEach(missing, function(stable_id, done)
         return remote:addToShelfAsync(stable_id, function(wire, err)

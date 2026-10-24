@@ -1459,6 +1459,32 @@ do
     books = {}
 end
 
+-- 设置关了「上传本地书到 WebDAV」：本地书照常入库可读，但不交出后台上传、远端没有文件。
+do
+    local Settings = require("utils.settings")
+    local L = require("support.config").dir() .. "/webdav-scenario-no-upload"
+    Paths.ensureDir(L)
+    local f = assert(io.open(L .. "/不传.epub", "wb"))
+    f:write("n")
+    f:close()
+    local cfg = Settings.getSource("local")
+    cfg.webdav_upload_local = false
+    Settings.saveSource("local", cfg)
+    local dav = fakeDav()
+    putSync(dav, { { filename = "已有.epub", bookName = "已有" } })
+    local c = deviceClient(dav, "A", L)
+    local start
+    c:scanWebdavAsync(function() end, { on_background = function(fn) start = fn end })
+    Stubs.flush()
+    Assert.is_nil(start, "关了不交出后台上传")
+    Assert.is_nil(dav.files[ROOT .. "/不传.epub"], "不上传")
+    Assert.not_nil(books[L .. "/不传.epub"], "本地照常入库")
+    cfg.webdav_upload_local = nil
+    Settings.saveSource("local", cfg)
+    os.remove(L .. "/不传.epub")
+    books = {}
+end
+
 -- 场景 2：手动编辑 / 刮削。先写本地库（立即生效），再经 book_meta_changed 立即上行书目与封面；
 -- 离线没推成保留脏行，联网推脏补上；另一台设备日常同步拿到新元数据。
 do

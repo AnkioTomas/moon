@@ -466,6 +466,11 @@ local function adoptLocal(item, stable_id)
     return BookDB.adoptStableId(SOURCE_ID, item.path, stable_id, item.path)
 end
 
+--- 设置「上传本地书到 WebDAV」（默认开）；关了本地书不上传，也不会被当成待上传。
+local function uploadEnabled()
+    return require("utils.settings").getSource(SOURCE_ID).webdav_upload_local ~= false
+end
+
 --- 同步步骤：合并本地书库目录。远端已有的收编身份；远端没有的先在本地入库（按绝对路径登记，用户立刻能读），
 --- 并标记 run.upload_pending，整轮同步结束后由后台上传（见 backgroundUpload），传成功再并成 WebDAV 书。
 --- 入库是纯本地操作：远端书目读不出 / 远端为空被跳过时照常做，只是不收编、不上传（远端信息不可信）。
@@ -494,7 +499,7 @@ local function indexLocal(self, run, done)
         elseif not row and not local_rows[paths[i]] then
             pending[#pending + 1] = item
         end
-        if trusted and not remote[rel] and not (row and row.deleted == 1 and row.sync_status == 0)
+        if trusted and uploadEnabled() and not remote[rel] and not (row and row.deleted == 1 and row.sync_status == 0)
             and os.time() - (self.upload_failed[rel] or 0) > UPLOAD_COOLDOWN then
             run.upload_pending = true
         end
@@ -516,7 +521,7 @@ local function indexLocal(self, run, done)
     end)
 end
 
---- 后台上传步骤：本地书库里远端没有的书上传到同一相对路径；成功后绝对路径身份并成 WebDAV 身份，进书目。
+--- 后台上传步骤（设置关了则跳过）：本地书库里远端没有的书上传到同一相对路径；成功后绝对路径身份并成 WebDAV 身份，进书目。
 --- 书在入库（indexLocal）时已可阅读，这里只负责上云，不阻塞用户。
 --- 刷新时「远端已有」以列出的远端文件为准（书目有条目、文件却丢了也补传）；日常同步不列目录，以书目为准。
 --- 用户在 KOReader 删过、删除还没推上去的（脏墓碑）不传。
@@ -526,7 +531,7 @@ end
 ---@param run WebdavRun
 ---@param done fun(err: string|nil)
 local function uploadLocal(self, run, done)
-    if run.meta_failed or (run.reconcile_skipped and not run.remote) then return done() end
+    if run.meta_failed or (run.reconcile_skipped and not run.remote) or not uploadEnabled() then return done() end
     local remote = run.remote or run.entries
     local BookDB = require("book.books_db")
     local rels = {}

@@ -29,7 +29,6 @@ end
 package.preload["utils.settings"] = function()
     return {
         getSource = function() return {} end,
-        get = function() return { push_local_shelf = true } end,
     }
 end
 
