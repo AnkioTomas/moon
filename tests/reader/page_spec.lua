@@ -162,7 +162,21 @@ Assert.eq(actions[1].icon, "menu_book")
 
 Assert.is_false(PanelReader.executeAction("missing", ui))
 
+local margin = { name = "t_page_margin", hide_on_apply = true }
+local other = { name = "font_size", hide_on_apply = true }
+package.preload["ui/data/creoptions"] = function() return { { options = { margin, other } } } end
 Reader.onCreate(plugin)
+Assert.is_nil(margin.hide_on_apply, "边距调整不收起面板、不弹信息框")
+Assert.is_true(other.hide_on_apply)
+moon_settings.margin_popup = true
+native_ui = nil
+ui._book_reader_attached = nil
+Reader.onCreate(plugin)
+Assert.is_true(margin.hide_on_apply, "开关打开时恢复原生信息框")
+moon_settings.margin_popup = nil
+ui._book_reader_attached = nil
+Reader.onCreate(plugin)
+Assert.is_nil(margin.hide_on_apply)
 Assert.eq(native_ui, ui)
 Assert.not_nil(registered_modules.book_bars)
 Assert.not_nil(registered_modules.book_page_marks)
