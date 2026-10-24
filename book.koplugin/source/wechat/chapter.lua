@@ -303,13 +303,15 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
         end }
 end
 
---- 把脚注 aside 块放到 body 末尾（空块原样返回）。
+--- 把脚注 aside 块放到 body 末尾（空块原样返回），外包一层分割线 + 小号灰字。
+--- 样式放外层 div 而不是 aside：脚注弹窗取的是 aside 自己的 HTML，样式写在 aside 上会连弹窗一起变小变灰。
 ---@param html string
 ---@param block string
 ---@return string
 local function appendBlock(html, block)
     if block == "" then return html end
-    block = block .. "\n"
+    block = '<div style="margin-top:2em;padding-top:0.5em;border-top:1px solid #888;font-size:0.8em;color:#555">\n'
+        .. block .. "\n</div>\n"
     local last = html:match(".*()</body>")
     if not last then return html .. block end
     return html:sub(1, last - 1) .. block .. html:sub(last)
@@ -339,7 +341,7 @@ local function linkFootnotes(html)
     local asides = {}
     for i, alt in ipairs(notes) do
         -- alt 已是属性转义过的文本，直接当元素内容合法。
-        asides[i] = string.format('<aside id="wr-fn%d" epub:type="footnote">%s</aside>', i, alt)
+        asides[i] = string.format('<aside id="wr-fn%d">[%d] %s <a href="#wr-fnref%d">↩</a></aside>', i, i, alt, i)
     end
     return appendBlock(html, table.concat(asides, "\n"))
 end
@@ -386,6 +388,35 @@ end
 
 local note_files = {}
 
+--- 注释章注文落盘在书工作目录：重启后不必再下一次加密包（下载 + 逐字节解密很慢）。只存取到的，没取到的不落盘。
+---@param bookId string
+---@return string
+local function notesPath(bookId)
+    return Paths.bookWorkDir(bookId, "wechat") .. "/notes.json"
+end
+
+---@param bookId string
+---@return table<string, table<string, string>>
+local function loadNotes(bookId)
+    local f = io.open(notesPath(bookId), "rb")
+    if not f then return {} end
+    local data = f:read("*a")
+    f:close()
+    local ok, map = pcall(JSON.decode, data)
+    return ok and type(map) == "table" and map or {}
+end
+
+---@param bookId string
+---@param base string
+---@param map table<string, string>
+local function saveNotes(bookId, base, map)
+    local all = loadNotes(bookId)
+    all[base] = map
+    local f = assert(io.open(notesPath(bookId), "wb"))
+    f:write(JSON.encode(all))
+    f:close()
+end
+
 --- 跨章链接（本章里找不到锚点）的目标文件 → 在注释章里取注文，做成脚注弹窗；取不到的去掉链接壳只留文字。
 --- 每个目标文件在内存里只取一次（书内常驻，注释章通常很小）。
 ---@param bookId string
@@ -408,12 +439,12 @@ local function linkCrossNotes(bookId, html, cb)
         html = html:gsub('<a(%s[^>]-)href="([^"#:]+)#([^"]+)"([^>]*)>(.-)</a>', function(pre, file, frag, post, inner)
             local text = (note_files[bookId .. "\0" .. Text.basename(file)] or {})[frag]
             if not text then return inner end
-            notes[#notes + 1] = text
-            return string.format('<a%shref="#wr-nt%d" epub:type="noteref"%s>%s</a>', pre, #notes, post, inner)
+            notes[#notes + 1] = { text = text, label = Text.trim((inner:gsub("<[^>]+>", ""))) }
+            return string.format('<a%sid="wr-ntref%d" href="#wr-nt%d" epub:type="noteref"%s>%s</a>', pre, #notes, #notes, post, inner)
         end)
         local asides = {}
-        for i, text in ipairs(notes) do
-            asides[i] = string.format('<aside id="wr-nt%d" epub:type="footnote">%s</aside>', i, text)
+        for i, note in ipairs(notes) do
+            asides[i] = string.format('<aside id="wr-nt%d">%s %s <a href="#wr-ntref%d">↩</a></aside>', i, note.label, note.text, i)
         end
         cb(appendBlock(html, table.concat(asides, "\n")))
     end
@@ -422,6 +453,7 @@ local function linkCrossNotes(bookId, html, cb)
         local base = order[i]
         if not base then return finish() end
         local key = bookId .. "\0" .. base
+        note_files[key] = note_files[key] or loadNotes(bookId)[base]
         if note_files[key] or #uids == 0 then
             note_files[key] = note_files[key] or {}
             return nextFile(i + 1)
@@ -440,6 +472,7 @@ local function linkCrossNotes(bookId, html, cb)
                 if cancelled then return end
                 if body then
                     note_files[key] = noteTexts(body)
+                    saveNotes(bookId, base, note_files[key])
                     return nextFile(i + 1)
                 end
                 try(n + 1)
