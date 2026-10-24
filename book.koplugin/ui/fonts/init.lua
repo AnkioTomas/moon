@@ -39,6 +39,7 @@ local UI_FACES = {
 }
 
 local _defaults = nil
+local _bold_patched = false
 local _registered_fonts = {}
 
 --- 微信读书字体在 .moon/fonts 下的落盘路径（sfnt）。
@@ -284,6 +285,14 @@ function Fonts.applyCurrent()
         _defaults = {}
         for _idx, key in ipairs(UI_FACES) do
             _defaults[key] = Font.fontmap[key]
+        end
+    end
+    -- 界面字体加粗：TextWidget / TextBoxWidget 创建时都经 getAdjustedFace 决定是否加粗，在这里统一打开。
+    if not _bold_patched then
+        _bold_patched = true
+        local adjusted = Font.getAdjustedFace
+        Font.getAdjustedFace = function(self, face, bold)
+            return adjusted(self, face, bold or MoonSettings.get("ui").font_bold or nil)
         end
     end
     local id = Fonts.currentId()

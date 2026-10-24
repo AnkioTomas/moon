@@ -158,6 +158,20 @@ function Display:appearanceRows(ctx)
             })
         end,
         function(iw)
+            local conf = MoonSettings.get("ui")
+            return Row.widget({
+                width = iw,
+                icon = "format_bold", title = _("字体加粗"),
+                subtitle = _("界面文字加粗，觉得字偏灰时打开，不影响书籍正文"),
+                toggle = conf.font_bold,
+                callback = function()
+                    conf.font_bold = not conf.font_bold
+                    MoonSettings.save("ui", conf)
+                    desktop:updateView()
+                end,
+            })
+        end,
+        function(iw)
             return Row.widget({
                 width = iw,
                 kind = "nav", icon = "format_size", title = _("界面缩放"),

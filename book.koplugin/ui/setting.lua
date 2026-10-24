@@ -9,6 +9,7 @@ return {
         ui_scale = 130,
         ui_font = "",
         ui_font_name = "",
+        font_bold = false,
         grid_max_cols = 4,
         mesh_mask = true,
         swipe_dismiss = "down",
