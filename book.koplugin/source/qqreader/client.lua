@@ -22,6 +22,9 @@ local _ = require("gettext")
 
 local Client = {}
 
+-- 匿名榜单 / 搜索页走 http 缓存：切榜单、回书城不再每次联网。
+local LIST_TTL = 5 * 60
+
 local SOURCE_ID = "qqreader"
 local WEB = "https://book.qq.com"
 local API = WEB .. "/api"
@@ -233,6 +236,7 @@ function Client.listAsync(path, cb)
     return Request.get(WEB .. path, {
         headers = headers(nil),
         timeout = require("http.timeout").net(1),
+        cache_ttl = LIST_TTL,
     }, function(raw, err)
         if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
         cb(Mapper.searchHtml(raw))

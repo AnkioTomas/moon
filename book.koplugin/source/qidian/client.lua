@@ -27,6 +27,8 @@ local WEB = "https://m.qidian.com"
 local UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) "
     .. "Version/16.0 Mobile/15E148 Safari/604.1"
 local PAGE_SIZE = 20
+-- 匿名榜单 / 搜索页走 http 缓存：切榜单、回书城不再每次联网。
+local LIST_TTL = 5 * 60
 local MAX_PAGES = 50
 
 ---@return string|nil
@@ -85,10 +87,11 @@ end
 ---@param cookie string|nil
 ---@param cb fun(html: string|nil, err: string|nil)
 ---@return HttpJob
-local function webGet(path, cookie, cb)
+local function webGet(path, cookie, cb, cache_ttl)
     return Request.get(WEB .. path, {
         headers = headers(cookie),
         timeout = require("http.timeout").net(1),
+        cache_ttl = cache_ttl,
     }, function(raw, err, res)
         if not raw then
             local code = res and tonumber(res.code)
@@ -323,7 +326,7 @@ function Client.searchAsync(keyword, cb)
         local data = Mapper.pageData(html)
         if not data then cb(nil, _("起点书籍信息为空")); return end
         cb(data)
-    end)
+    end, LIST_TTL)
 end
 
 --- 榜单页（手机网页 SSR，一页 20 本）。path 如 /rank/yuepiao/catid21/。
@@ -336,7 +339,7 @@ function Client.rankAsync(path, cb)
         local data = Mapper.pageData(html)
         if not data or type(data.records) ~= "table" then cb(nil, _("起点榜单为空")); return end
         cb(data)
-    end)
+    end, LIST_TTL)
 end
 
 ---@param book_id string

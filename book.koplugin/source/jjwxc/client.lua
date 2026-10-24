@@ -50,7 +50,7 @@ end
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@param ratio number|nil 超时倍率，缺省 0.5
 ---@return HttpJob
-local function appGet(path, params, cb, ratio, headers)
+local function appGet(path, params, cb, ratio, headers, cache_ttl)
     local query = {}
     for key, value in pairs(params) do query[#query + 1] = key .. "=" .. tostring(value) end
     table.sort(query)
@@ -58,6 +58,7 @@ local function appGet(path, params, cb, ratio, headers)
         accept = "application/json",
         headers = headers or APP_HEADERS,
         timeout = require("http.timeout").net(ratio or 0.5),
+        cache_ttl = cache_ttl,
     }, function(raw, err)
         if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
         local ok, wire = pcall(JSON.decode, raw)
@@ -241,7 +242,7 @@ end
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return HttpJob
 function Client.searchAsync(keyword, cb)
-    return appGet("/search", { keyword = Text.urlEncode(keyword), type = 1, page = 1, versionCode = 206 }, cb, 1)
+    return appGet("/search", { keyword = Text.urlEncode(keyword), type = 1, page = 1, versionCode = 206 }, cb, 1, nil, 5 * 60)
 end
 
 ---@param novel_id string
