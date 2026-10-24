@@ -10,6 +10,8 @@
   - 繁体词组：词库里的多字词组（多音字定音用，如 银行 háng）经 OpenCC STPhrases / STCharacters
     （简 → 繁，一对多取首选）转成繁体，和原词组不同且词库里没有时追加，读音与 rank 照抄。
 
+  - 表外冷僻字：pinyin-data 有读音、词库里没有的 BMP 汉字（叕 龘 沝 秏…），rank 9000（最生僻档）。
+
 已在词库里的键一律不动（脚本可重复运行，结果不变）。只用 Python 标准库；数据版本固定在下方常量。
 输出：覆盖 lexicon.tsv.part.001 并重写 manifest.json（entries / sha256 / size / built_at）。
 
@@ -34,6 +36,7 @@ FILES = {
 }
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "rare", "zh-pinyin")
 PART = "lexicon.tsv.part.001"
+OUT_OF_TABLE_RANK = 9000
 NAME = "#name=汉字拼音（通用规范汉字表，含繁体）"
 LICENSE = ("#license=MIT (mozillazg/pinyin-data, phrase-pinyin-data); 字序: 通用规范汉字表 "
            "(ben-hua/general_standard_chinese, Apache-2.0); 繁简对照: OpenCC (Apache-2.0)")
@@ -93,6 +96,11 @@ def build(lines, ts, st_chars, st_phrases, pinyin):
             continue
         ann = pinyin.get(trad) or known[0][0]
         added.append((trad, ann, min(r for _a, r in known)))
+    # 字表外的冷僻字（叕 龘 沝…）：pinyin-data 有读音的 BMP 汉字一律补上，rank 9000
+    seen = set(entries) | {k for k, _a, _r in added}
+    for ch, ann in sorted(pinyin.items()):
+        if 0x3400 <= ord(ch) <= 0x9FFF and ch not in seen:
+            added.append((ch, ann, OUT_OF_TABLE_RANK))
     have = set(entries) | {k for k, _a, _r in added}
     for key in order:
         # 已含繁体字（只在繁→简表里、不是简体字）的词组是上次追加的，跳过，保证重复运行结果不变

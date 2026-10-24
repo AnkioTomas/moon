@@ -1,14 +1,14 @@
 {
   "tag": "main",
-  "built_at": "2026-10-16 21:59:26",
-  "entries": 17342,
-  "raw_sha256": "8cd3d0f107af6d2d787022186d5dd835b917698f2eb242b93cfc316cb7b16f4f",
-  "raw_size": 312229,
+  "built_at": "2026-10-24 11:53:56",
+  "entries": 33197,
+  "raw_sha256": "338815fc49c212876f2a1b7b3837631d2d3a7997e672bf2a4e1dda6f407033e8",
+  "raw_size": 535099,
   "parts": [
     {
       "file": "lexicon.tsv.part.001",
-      "size": 312229,
-      "sha256": "8cd3d0f107af6d2d787022186d5dd835b917698f2eb242b93cfc316cb7b16f4f"
+      "size": 535099,
+      "sha256": "338815fc49c212876f2a1b7b3837631d2d3a7997e672bf2a4e1dda6f407033e8"
     }
   ]
 }
