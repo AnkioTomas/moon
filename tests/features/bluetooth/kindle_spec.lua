@@ -22,9 +22,12 @@ package.preload["liblipclua"] = function()
                 get_int_property = function() return btfd.state end,
                 set_string_property = function(_self, _svc, prop, value)
                     btfd.sets[#btfd.sets + 1] = prop .. "=" .. value
-                    if prop == "BTenable" then btfd.state = value == "1:2" and 1 or 0 end
+                    if prop == "BTenable" and value:sub(1, 1) == "1" then btfd.state = 1 end
                 end,
-                set_int_property = function(_self, _svc, prop, value) btfd.sets[#btfd.sets + 1] = prop .. "=" .. value end,
+                set_int_property = function(_self, _svc, prop, value)
+                    btfd.sets[#btfd.sets + 1] = prop .. "=" .. value
+                    if prop == "BTflightMode" and value == 1 then btfd.state = 0 end
+                end,
                 close = function() end,
             }
         end,
@@ -63,14 +66,14 @@ do
     Assert.eq(select(2, Bluetooth.topbar()), "bluetooth_connected")
 end
 
--- 开关：写 BTenable，状态翻转后回调成功；已经是目标状态不写。
+-- 开关：关写 BTflightMode=1（BTenable 0:x 在 ACE 栈上关不掉），开写 BTenable 1:2；状态翻转后回调成功；已经是目标状态不写。
 do
     btfd.sets = {}
     local ok
     Bluetooth.setEnabled(false, function(done) ok = done end)
     Stubs.flush()
     Assert.is_true(ok)
-    Assert.eq(btfd.sets[1], "BTenable=0:2")
+    Assert.eq(btfd.sets[1], "BTflightMode=1")
     Assert.eq(Bluetooth.current().state, "stopped")
     Assert.eq(#Bluetooth.current().devices, 0, "关闭后不列设备")
 
@@ -79,7 +82,8 @@ do
     Assert.len(btfd.sets, 0)
     Bluetooth.setEnabled(true, function(done) ok = done end)
     Stubs.flush()
-    Assert.eq(btfd.sets[1], "BTenable=1:2")
+    Assert.eq(btfd.sets[1], "BTflightMode=0")
+    Assert.eq(btfd.sets[2], "BTenable=1:2")
 end
 
 -- 断开：写 Disconnect，连接表还在时超时失败不挂起。
