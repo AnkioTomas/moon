@@ -113,13 +113,11 @@ function Catalog.enabled(id)
     return MoonSettings.get("features.rare").rare_lexicons[id] == true
 end
 
---- 下载 / 更新，装好后自动启用。
+--- 下载规格：装好后自动启用。
 ---@param id string
----@param cb fun(ok: boolean, err: any)
----@param on_progress function|nil
-function Catalog.download(id, cb, on_progress)
-    Paths.ensureDir(Catalog.dir())
-    require("features.ime.download").install({
+---@return BookDictSpec
+function Catalog.spec(id)
+    return {
         name = "rare." .. id,
         base_path = BASE_ROOT .. "/" .. id,
         dest = Catalog.path(id),
@@ -131,7 +129,16 @@ function Catalog.download(id, cb, on_progress)
             MoonSettings.save("features.rare", s)
             loaded[id] = nil
         end,
-    }, cb, on_progress)
+    }
+end
+
+--- 下载 / 更新，装好后自动启用。
+---@param id string
+---@param cb fun(ok: boolean, err: any)
+---@param on_progress function|nil
+function Catalog.download(id, cb, on_progress)
+    Paths.ensureDir(Catalog.dir())
+    require("features.ime.download").install(Catalog.spec(id), cb, on_progress)
 end
 
 --- 删掉词库文件与记录。

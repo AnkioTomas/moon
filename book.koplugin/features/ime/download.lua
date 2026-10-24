@@ -216,6 +216,42 @@ end
 ---@field tmp string|nil 续传目录，缺省 dest .. ".dl"
 ---@field on_installed fun(manifest: table) 落位成功后记版本、重置缓存
 
+--- 拉并校验远端 manifest。成功 cb(manifest, 总字节)，失败 cb(nil, nil, err)。
+---@param spec BookDictSpec
+---@param cb fun(manifest: table|nil, total: number|nil, err: any)
+local function fetchManifest(spec, cb)
+    Mirror.get(spec.base_path .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
+        if err then
+            cb(nil, nil, err)
+            return
+        end
+        local ok, manifest = pcall(JSON.decode, body)
+        if not ok then
+            cb(nil, nil, "bad manifest")
+            return
+        end
+        local valid, manifest_err, total = validateManifest(manifest)
+        if not valid then
+            cb(nil, nil, manifest_err)
+            return
+        end
+        cb(manifest, total)
+    end)
+end
+
+--- 远端 manifest 的版本和已装的不一样（只查版本，不下载分片）。cb(true|false)，查询失败 cb(nil, err)。
+---@param spec BookDictSpec
+---@param cb fun(outdated: boolean|nil, err: any)
+function M.outdated(spec, cb)
+    fetchManifest(spec, function(manifest, _total, err)
+        if err then
+            cb(nil, err)
+            return
+        end
+        cb(spec.installed ~= manifest.built_at)
+    end)
+end
+
 --- 按 manifest 下载有更新的分片并落位。重复请求通过 cb 返回失败，不并发写同一目标。
 ---@param spec BookDictSpec
 ---@param cb fun(ok: boolean, err: any)|nil
@@ -250,19 +286,9 @@ function M.install(spec, cb, on_progress)
     end
 
     report("manifest")
-    Mirror.get(spec.base_path .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
+    fetchManifest(spec, function(manifest, total, err)
         if err then
             done(false, err)
-            return
-        end
-        local ok, manifest = pcall(JSON.decode, body)
-        if not ok then
-            done(false, "bad manifest")
-            return
-        end
-        local valid, manifest_err, total = validateManifest(manifest)
-        if not valid then
-            done(false, manifest_err)
             return
         end
         local attr = lfs.attributes(dest)
@@ -282,12 +308,11 @@ function M.install(spec, cb, on_progress)
     end)
 end
 
---- 输入法词库：按方法 id 拼出 spec 交给 install。
+--- 输入法词库的下载规格。
 ---@param method "pinyin"|"wubi"|"cangjie"|"zhuyin"
----@param cb fun(ok: boolean, err: any)|nil
----@param on_progress function|nil
-function M.ensure(method, cb, on_progress)
-    M.install({
+---@return BookDictSpec
+function M.imeSpec(method)
+    return {
         name = "ime." .. method,
         base_path = BASE_ROOT .. (method == "pinyin" and "/pinyin" or "/ime/" .. method),
         dest = Paths.imeDictPath(method),
@@ -300,7 +325,15 @@ function M.ensure(method, cb, on_progress)
             MoonSettings.save("features.ime", c)
             logger.info("book ime dict installed:", method, manifest.tag, manifest.entries)
         end,
-    }, cb, on_progress)
+    }
+end
+
+--- 输入法词库：按方法 id 拼出 spec 交给 install。
+---@param method "pinyin"|"wubi"|"cangjie"|"zhuyin"
+---@param cb fun(ok: boolean, err: any)|nil
+---@param on_progress function|nil
+function M.ensure(method, cb, on_progress)
+    M.install(M.imeSpec(method), cb, on_progress)
 end
 
 -- 前向声明的实现。

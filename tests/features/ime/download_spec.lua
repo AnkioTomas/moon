@@ -302,6 +302,17 @@ local ok_run, err_run = pcall(function()
     wubi_file:close()
     Assert.eq(fake_settings.ime_dict_built_at.wubi, manifest.built_at)
     os.remove(wubi_dest)
+
+    -- 只查版本不下分片：已装版本和远端一致 → false，不同 → true。
+    downloads = {}
+    local same, differ
+    Download.outdated({ base_path = "assets/pinyin", installed = manifest.built_at }, function(v) same = v end)
+    Stubs.flush()
+    Download.outdated({ base_path = "assets/pinyin", installed = "old" }, function(v) differ = v end)
+    Stubs.flush()
+    Assert.is_false(same)
+    Assert.is_true(differ)
+    Assert.eq(#downloads, 0)
 end)
 
 cleanup()

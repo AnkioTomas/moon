@@ -434,6 +434,7 @@ end
 require("utils.extension").add("desktop.activated", function(desk)
     local root = desk.plugin and desk.plugin.path
     if root then Update.autoCheck(root) end
+    require("features.update.resources").autoCheck()
 end)
 
 return Update

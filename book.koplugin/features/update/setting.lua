@@ -11,6 +11,7 @@ local Setting = {}
 Setting.defaults = {
     auto_update_check = false,
     update_last_checked_at = 0,
+    resource_last_checked_at = 0,
 }
 
 ---@param desktop BookDesktop
@@ -28,7 +29,7 @@ function Setting.entries(desktop)
                 return require("ui.themes.widgets.row").widget({
                     width = iw, chevron = false,
                     kind = "toggle", icon = "update", title = _("自动检查更新"),
-                    subtitle = _("每天最多检查一次，只提示不自动安装"),
+                    subtitle = _("每天最多检查一次，只提示不自动安装；含注音、输入法词库"),
                     status = enabled and _("开") or _("关"), status_on = enabled,
                     callback = function()
                         settings.auto_update_check = not enabled
