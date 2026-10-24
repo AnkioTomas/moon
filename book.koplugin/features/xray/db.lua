@@ -8,6 +8,7 @@ xray_scan 每本书至多一行：digest 是全书正文的指纹（字节数:�
 --]]
 
 local DB = require("utils.db")
+local Text = require("utils.text")
 
 local XrayDB = {}
 
@@ -32,6 +33,26 @@ CREATE TABLE IF NOT EXISTS xray_scan (
   source_id TEXT NOT NULL, stable_id TEXT NOT NULL,
   digest TEXT NOT NULL, done INTEGER NOT NULL, total INTEGER NOT NULL,
   PRIMARY KEY (source_id, stable_id)
+);
+]]) ~= nil
+end)
+
+-- 用户删掉的实体（名字与别名，小写去空白）：之后的 AI 识别不再把它们加回来。
+DB.schema("xray_removed", function()
+    return DB.exec([[
+CREATE TABLE IF NOT EXISTS xray_removed (
+  source_id TEXT NOT NULL, stable_id TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL,
+  PRIMARY KEY (source_id, stable_id, kind, name)
+);
+]]) ~= nil
+end)
+
+-- 已按章识别过的目录章序号，自动预取据此不重复花 token。
+DB.schema("xray_chapter", function()
+    return DB.exec([[
+CREATE TABLE IF NOT EXISTS xray_chapter (
+  source_id TEXT NOT NULL, stable_id TEXT NOT NULL, chapter_idx INTEGER NOT NULL,
+  PRIMARY KEY (source_id, stable_id, chapter_idx)
 );
 ]]) ~= nil
 end)
@@ -139,6 +160,76 @@ function XrayDB.list(source_id, stable_id, kind)
         }
     end
     return out
+end
+
+---@param name string
+---@return string
+local function tombName(name)
+    return Text.trim(name):lower()
+end
+
+--- 删除实体并把它的名字与别名记入墓碑。
+---@param source_id string
+---@param stable_id string
+---@param entity table { kind, name, aliases }
+---@return boolean
+function XrayDB.remove(source_id, stable_id, entity)
+    return DB.transaction(function()
+        if not DB.exec("DELETE FROM xray_entities WHERE source_id=? AND stable_id=? AND kind=? AND name=?;",
+                source_id, stable_id, entity.kind, entity.name) then
+            return false
+        end
+        local names = { entity.name }
+        for _idx, alias in ipairs(entity.aliases or {}) do names[#names + 1] = alias end
+        for _idx, name in ipairs(names) do
+            if not DB.exec("INSERT OR IGNORE INTO xray_removed (source_id, stable_id, kind, name) VALUES (?,?,?,?);",
+                    source_id, stable_id, entity.kind, tombName(name)) then
+                return false
+            end
+        end
+        return true
+    end) == true
+end
+
+--- 墓碑集合：键为 kind\0小写名。
+---@param source_id string
+---@param stable_id string
+---@return table<string, true>
+function XrayDB.removedSet(source_id, stable_id)
+    local result, nrows = DB.query(
+        "SELECT kind, name FROM xray_removed WHERE source_id=? AND stable_id=?;", source_id, stable_id)
+    local out = {}
+    for i = 1, nrows do out[result[1][i] .. "\0" .. result[2][i]] = true end
+    return out
+end
+
+--- 用户手动要回某个名字：清掉它的墓碑。
+---@param source_id string
+---@param stable_id string
+---@param kind string
+---@param name string
+---@return boolean
+function XrayDB.restore(source_id, stable_id, kind, name)
+    return DB.exec("DELETE FROM xray_removed WHERE source_id=? AND stable_id=? AND kind=? AND name=?;",
+        source_id, stable_id, kind, tombName(name)) ~= nil
+end
+
+---@param source_id string
+---@param stable_id string
+---@param chapter_idx integer
+---@return boolean
+function XrayDB.chapterDone(source_id, stable_id, chapter_idx)
+    return DB.rowexec("SELECT 1 FROM xray_chapter WHERE source_id=? AND stable_id=? AND chapter_idx=?;",
+        source_id, stable_id, chapter_idx) ~= nil
+end
+
+---@param source_id string
+---@param stable_id string
+---@param chapter_idx integer
+---@return boolean
+function XrayDB.markChapter(source_id, stable_id, chapter_idx)
+    return DB.exec("INSERT OR IGNORE INTO xray_chapter (source_id, stable_id, chapter_idx) VALUES (?,?,?);",
+        source_id, stable_id, chapter_idx) ~= nil
 end
 
 --- 原子替换一本书的全部 X-Ray 实体。

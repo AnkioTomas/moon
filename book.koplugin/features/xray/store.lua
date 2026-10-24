@@ -31,6 +31,7 @@ end
 function Store.mergeEntities(existing, incoming)
     local by_key = {}
     local alias_to_key = {}
+    local name_to_key = {}
     local order = {}
 
     --- 登记一个实体：占住去重键、记下出现顺序，并把名字与全部别名指向它。
@@ -40,9 +41,12 @@ function Store.mergeEntities(existing, incoming)
         by_key[key] = entity
         order[#order + 1] = key
         alias_to_key[entityKey(entity.kind, entity.name)] = key
+        name_to_key[entityKey(entity.kind, entity.name)] = key
         for index, alias in ipairs(entity.aliases) do
             local n = normName(alias)
-            if n ~= "" then alias_to_key[entityKey(entity.kind, n)] = key end
+            if n ~= "" and not alias_to_key[entityKey(entity.kind, n)] then
+                alias_to_key[entityKey(entity.kind, n)] = key
+            end
         end
     end
 
@@ -61,30 +65,31 @@ function Store.mergeEntities(existing, incoming)
                     aliases[#aliases + 1] = alias
                 end
             end
+            -- 名字撞到已有名字 / 别名才合并；只有别名撞到别人的主名时才吸收（别名对别名不算，常见称呼会误并两个人）。
             local hit = alias_to_key[entityKey(kind, name)]
             if not hit then
                 for index, alias in ipairs(aliases) do
-                    hit = alias_to_key[entityKey(kind, alias)]
-                    if hit then break end
+                    local candidate = name_to_key[entityKey(kind, alias)]
+                    if candidate then hit = candidate; break end
                 end
             end
             if hit then
                 local cur = by_key[hit]
                 local seen = {}
                 for index, alias in ipairs(cur.aliases) do seen[normName(alias)] = true end
-                if normName(name) ~= normName(cur.name) and not seen[normName(name)] then
-                    cur.aliases[#cur.aliases + 1] = name
-                    seen[normName(name)] = true
+                --- 别名属于别的实体时不给当前实体，避免一个称呼同时指向两个人。
+                local function addAlias(alias)
+                    local owner = alias_to_key[entityKey(kind, alias)]
+                    if seen[normName(alias)] or (owner and owner ~= hit) then return end
+                    cur.aliases[#cur.aliases + 1] = alias
+                    seen[normName(alias)] = true
                 end
-                for index, alias in ipairs(aliases) do
-                    if not seen[normName(alias)] then
-                        cur.aliases[#cur.aliases + 1] = alias
-                        seen[normName(alias)] = true
-                    end
-                end
+                if normName(name) ~= normName(cur.name) then addAlias(name) end
+                for index, alias in ipairs(aliases) do addAlias(alias) end
                 for index, field in ipairs(detail_fields) do
                     local value = Text.trim(item[field])
-                    if value ~= "" then
+                    -- 新描述明显更短多半是模型偷懒，保留旧的，不丢已有信息。
+                    if value ~= "" and not (field == "description" and #value * 2 < #(cur.description or "")) then
                         cur[field] = value
                     end
                 end
@@ -93,10 +98,14 @@ function Store.mergeEntities(existing, incoming)
                     alias_to_key[entityKey(cur.kind, alias)] = hit
                 end
             else
+                local own = {}
+                for index, alias in ipairs(aliases) do
+                    if not alias_to_key[entityKey(kind, alias)] then own[#own + 1] = alias end
+                end
                 remember({
                     kind = kind,
                     name = name,
-                    aliases = aliases,
+                    aliases = own,
                     role = Text.trim(item.role),
                     description = Text.trim(item.description),
                     gender = Text.trim(item.gender),

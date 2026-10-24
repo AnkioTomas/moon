@@ -64,8 +64,8 @@ local looked_up
 local scan_progress
 package.preload["features.xray.fetch"] = function()
     return {
-        comprehensive = function(ui, current, opts, cb)
-            captured = { ui = ui, identity = current, opts = opts, cb = cb }
+        comprehensive = function(ui, current, cb)
+            captured = { ui = ui, identity = current, cb = cb }
             return { cancel = function() captured.cancelled = true end }
         end,
         scanProgress = function() return scan_progress end,
@@ -114,7 +114,6 @@ Assert.is_true(started.restartable)
 local done_result
 local handle = started.run(function() end, function(r) done_result = r end)
 Assert.eq(captured.ui, ui)
-Assert.is_true(captured.opts.force)
 handle.cancel()
 Assert.is_true(captured.cancelled)
 captured.cb({ characters = { 1 }, locations = {}, terms = {} })
@@ -179,5 +178,15 @@ running_task, confirm = { key = "xray\0moon\0book-1" }, nil
 require("features.xray.ui").scanBook(ui, identity)
 Assert.eq(followed, running_task)
 Assert.is_nil(confirm)
+
+-- 自动预取：没网 / 没配 AI / 已有任务都不入队，返回 false 让下次翻页再试
+running_task = nil
+connected = false
+Assert.is_false(require("features.xray.ui").prefetch(ui, false))
+connected, configured = true, false
+Assert.is_false(require("features.xray.ui").prefetch(ui, false))
+configured, running_task = true, { key = "x" }
+Assert.is_false(require("features.xray.ui").prefetch(ui, false))
+running_task = nil
 
 return true

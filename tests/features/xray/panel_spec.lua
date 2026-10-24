@@ -20,8 +20,9 @@ package.preload["features.xray.ui"] = function()
 end
 
 local actions = require("features.xray.panel").actions()
-Assert.len(actions, 2)
-local xray, refresh = actions[1], actions[2]
+Assert.len(actions, 3)
+local xray, refresh = actions[1], actions[3]
+Assert.eq(actions[2].id, "xray_marks")
 Assert.eq(xray.id, "xray")
 Assert.eq(xray.scope, "reader")
 Assert.eq(refresh.id, "xray_refresh")

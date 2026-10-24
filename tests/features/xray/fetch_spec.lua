@@ -26,6 +26,10 @@ package.preload["features.xray.db"] = function()
             end
             return out
         end,
+        removedSet = function() return {} end,
+        restore = function() end,
+        chapterDone = function() return false end,
+        markChapter = function() end,
         replace = function(source_id, stable_id, entities)
             entity_rows = {}
             for index, entity in ipairs(entities) do
@@ -94,41 +98,26 @@ local identity = {
 local function run(rows, queued, ident, force)
     entity_rows, replies, prompts = rows, queued, {}
     local result, failure
-    Fetch.comprehensive({}, ident or identity, { force = force ~= false }, function(value, err)
+    Fetch.comprehensive({}, ident or identity, function(value, err)
         result, failure = value, err
     end)
     return result, failure
 end
 
--- 初始化：库空时凭通用知识生成，不要求名字出现在正文
-local result, failure = run({}, { full_reply })
-Assert.is_nil(failure)
-Assert.len(prompts, 1)
-Assert.matches(prompts[1], "凭你对这本书的已有知识")
-Assert.matches(prompts[1], "A vampire novel%.")
-Assert.eq(prompts[1]:find("阅读进度", 1, true), nil)
-Assert.eq(#result.characters, 2)
-Assert.eq(#result.locations, 1)
-Assert.eq(#result.terms, 1)
-Assert.len(entity_rows, 4)
-
--- 模型不认识这本书：回落到章节上下文，并做 grounding
-result, failure = run({}, {
-    { known = false },
-    { characters = { { name = "Mina", aliases = {} }, { name = "Imaginary", aliases = {} } },
+-- 初始化：库空时也只按当前位置的正文识别，并做 grounding（不凭知识库编造）
+local result, failure = run({}, {
+    { characters = { { name = "Mina", aliases = { "Mina Harker" } }, { name = "Imaginary", aliases = {} } },
       locations = {}, terms = {} },
 })
 Assert.is_nil(failure)
-Assert.len(prompts, 2)
-Assert.matches(prompts[2], "CURRENT PAGE")
+Assert.len(prompts, 1)
+Assert.matches(prompts[1], "CURRENT PAGE")
+Assert.is_nil(prompts[1]:find("已有知识", 1, true))
 Assert.eq(#result.characters, 1)
 Assert.eq(result.characters[1].name, "Mina")
 
 -- 模型漏掉 aliases：不能抛错
-result, failure = run({}, {
-    { known = false },
-    { characters = { { name = "Mina" } }, locations = {}, terms = {} },
-})
+result, failure = run({}, { { characters = { { name = "Mina" } }, locations = {}, terms = {} } })
 Assert.is_nil(failure)
 Assert.eq(result.characters[1].name, "Mina")
 
@@ -178,14 +167,6 @@ replies = { { is_valid = true, type = "character", item = { name = "Mina", alias
 Fetch.lookupWord({}, identity, "Mina", function() end)
 Assert.matches(prompts[1], "伯爵来到了惠特比。$")
 chapter_idx, recap = nil, nil
-
--- 已有数据且非 force：直接回缓存，不请求 AI
-result, failure = run({
-    { kind = "character", name = "Old", aliases = {}, role = "", description = "", updated_at = 1 },
-}, {}, nil, false)
-Assert.is_nil(failure)
-Assert.len(prompts, 0)
-Assert.is_true(result.cached)
 
 -- 划词：只取小段前文
 entity_rows, prompts, prior_limits = {}, {}, {}
@@ -294,10 +275,10 @@ Assert.matches(prompts[1], "人物不超过 10，地点不超过 5，专有名�
 Assert.is_nil(prompts[1]:find("prior", 1, true), "节约档不带本页之前的正文")
 Assert.matches(prompts[1], "description 不超过 40 字")
 runQuality("standard")
-Assert.matches(prompts[1], "人物不超过 15，地点不超过 10，专有名词不超过 10")
+Assert.matches(prompts[1], "人物不超过 25，地点不超过 15，专有名词不超过 15")
 Assert.eq(recap_asked.chapters, 5)
 runQuality("high")
-Assert.matches(prompts[1], "人物不超过 25，地点不超过 15，专有名词不超过 15")
+Assert.matches(prompts[1], "人物不超过 40，地点不超过 25，专有名词不超过 25")
 Assert.eq(recap_asked.chapters, 10)
 Assert.matches(prompts[1], "description 写详实")
 chapter_idx, recap = nil, nil

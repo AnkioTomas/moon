@@ -13,6 +13,7 @@ local Context = {}
 local PRIOR_TEXT_LIMIT = 24000
 local VISIBLE_TEXT_LIMIT = 12000
 local PARAGRAPH_LIMIT = 4000
+local CHAPTER_TEXT_LIMIT = 64000
 
 local SENTENCE_STOPS = { "。", "！", "？", "!", "?", ".", "\n" }
 local SENTENCE_CLOSERS = { "”", "」", "』", "）", "\"", "'", ")" }
@@ -167,6 +168,32 @@ function Context.pagesText(ui, start_page, end_page, head, tail)
     local out = table.concat(first, "\n\n")
     if #last == 0 then return out end
     return out .. (lo <= hi and "\n……\n" or "\n\n") .. table.concat(last, "\n\n")
+end
+
+--- 整章正文：offset 0 = 当前页所在章，1 = 下一章（含读者没读到的部分，只给按章识别用）。
+--- 没有目录时只有 offset 0 且取整份文档；没有下一章、取不到字时 nil。超长章保留开头 CHAPTER_TEXT_LIMIT 字节。
+---@param ui table
+---@param page integer
+---@param offset 0|1
+---@return string|nil
+function Context.chapterText(ui, page, offset)
+    local document = ui.document
+    local count = document:getPageCount()
+    local toc = ui.toc
+    local start, stop = 1, count
+    if toc and toc.toc and #toc.toc > 0 then
+        start = chapterStart(ui, page)
+        if offset == 1 then start = toc:getNextChapter(start) end
+        if not start then return nil end
+        stop = toc:getNextChapter(start) or count
+    elseif offset ~= 0 then
+        return nil
+    end
+    -- CRE 取到区间末页起点，固定版式逐页取字要把末页算进去。
+    local last = (stop == count and not ui.rolling) and count + 1 or stop
+    local text = Context.pagesText(ui, start, last, 24000, 12000)
+    if text == "" then return nil end
+    return Text.truncateUtf8(text, CHAPTER_TEXT_LIMIT)
 end
 
 --- 本章开头到当前页之前的正文（不含当前页），超过 limit 字节保留末尾。
