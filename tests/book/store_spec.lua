@@ -390,6 +390,21 @@ do
     touch_calls = {}
 end
 
+-- ── ensureIdentity：local 书 books.path 指着衍生版 → 直接开原书不覆盖，桌面下次仍开衍生版 ──
+do
+    package.loaded["reader.session.derived_note"] = {
+        originOf = function(file) return file == "/w/reflow/book.epub" and "/lib/derived.epub" or nil end,
+    }
+    book_rows_by_id["local\0/lib/derived.epub"] = {
+        source_id = "local", stable_id = "/lib/derived.epub", path = "/w/reflow/book.epub",
+    }
+    local id = Store.ensureIdentity("/lib/derived.epub")
+    Assert.eq(id.source_id, "local")
+    Assert.eq(#touch_calls, 0)
+    package.loaded["reader.session.derived_note"] = nil
+    book_rows_by_id["local\0/lib/derived.epub"] = nil
+end
+
 -- ── ensureIdentity：文件打不开 → partialMD5 返回 nil，md5=nil 仍登记 ────
 do
     local id = Store.ensureIdentity("/lib/broken.epub")
