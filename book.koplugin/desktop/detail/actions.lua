@@ -175,6 +175,10 @@ function Detail:installStoreBook()
         return
     end
     local local_src = require("source.registry").resolve("local")
+    if local_src and not local_src:configured() then
+        require("source.local.setting").open(function() self:installStoreBook() end)
+        return
+    end
     if not local_src or type(local_src.importBookAsync) ~= "function" then
         Toast:new{ text = _("当前数据源不支持导入书籍") }:show()
         return
