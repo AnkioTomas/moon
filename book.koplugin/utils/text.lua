@@ -264,6 +264,16 @@ function Text.urlEncode(value)
     end))
 end
 
+--- 只转义 URL 里不合法的字节（非 ASCII、空格、控制字符），已有的 %XX 与分隔符原样保留。
+--- 正文里的图片地址常带未编码的中文文件名，HTTP 客户端会拒绝。
+---@param url string
+---@return string
+function Text.escapeUrl(url)
+    return (url:gsub("[^\33-\126]", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end))
+end
+
 --- 相对引用按 base 解析为绝对 URL（RFC 3986：//、/、?、#、相对路径及 ./ ../）。
 ---@param base string|nil 当前文档 URL
 ---@param ref string|nil
