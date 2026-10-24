@@ -625,7 +625,18 @@ Assert.is_true(detail_cancelled)
 package.preload["ui/network/manager"] = function()
     return { runWhenOnline = function(_, cb) cb() end, isConnected = function() return true end }
 end
-resolved = { id = "local", importBookAsync = function() end }
+-- 本地书库目录未配置：直接弹目录选择，选定后接着下载，不先提示没设置。
+local picked
+package.loaded["source.local.setting"] = { open = function(on_saved) picked = on_saved end }
+resolved = { id = "local", configured = function() return false end, importBookAsync = function() end }
+Detail.open(desktop, "store", { source_id = "zlib", stable_id = "1:abc", title = "书城书", filesize = 100 })
+desktop.detail:installStoreBook()
+Assert.eq(installs, 0)
+Assert.eq(type(picked), "function")
+desktop.detail:close()
+package.loaded["source.local.setting"] = nil
+
+resolved = { id = "local", configured = function() return true end, importBookAsync = function() end }
 Detail.open(desktop, "store", { source_id = "zlib", stable_id = "1:abc", title = "书城书", filesize = 100 })
 page = desktop.detail
 desktop.events = {}

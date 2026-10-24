@@ -142,7 +142,8 @@ function Setting.subdirs(path)
 end
 
 --- 目录选择列表：逐层浏览（原地换项），首行「使用此目录」确认当前目录。
-function Setting.open()
+---@param on_saved fun()|nil 保存目录后回调（书城下载前引导配置用）
+function Setting.open(on_saved)
     local lfs = require("libs/libkoreader-lfs")
     local List = require("ui.themes.widgets.list")
     local MoonSettings = require("utils.settings")
@@ -183,6 +184,7 @@ function Setting.open()
             MoonSettings.saveSource(SOURCE_ID, cfg)
             require("ui.themes.widgets.toast"):new{ text = _("已保存"), timeout = 2 }:show()
             require("source.registry").reload()
+            if type(on_saved) == "function" then on_saved() end
         end
         -- Kindle 的 documents 先劝一句：列表不关，「重新选择」接着挑子目录
         local warn = Setting.isKindleDocuments(path)
