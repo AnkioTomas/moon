@@ -32,20 +32,22 @@ package.preload["version"] = function()
 end
 
 local KOVersion = require("ko_version")
+local Container = { extend = function(_, fields) return fields end }
 
-Assert.is_true(KOVersion.check(), "v2026.07 归一 202607000000 必须通过")
-Assert.is_nil(calls.dialog)
+Assert.is_true(KOVersion.supported(), "v2026.07 归一 202607000000 必须通过")
 
 version_current = 202607010000
-short_version = "2026.07.1"
-Assert.is_true(KOVersion.check(), "point release 也必须通过")
+Assert.is_true(KOVersion.supported(), "point release 也必须通过")
 
 version_current = 202606000000
 short_version = "2026.06"
-Assert.is_true(not KOVersion.check(), "更旧月发必须拒绝")
+Assert.is_true(not KOVersion.supported(), "更旧月发必须拒绝")
+local stub = KOVersion.stub(Container)
+stub.init()
 Assert.eq(calls.dialog.text, "月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：2026.06")
+calls.dialog = nil
+stub.init()
+Assert.is_nil(calls.dialog, "同一进程只弹一次")
 
 version_current = nil
-short_version = "unknown"
-Assert.is_true(not KOVersion.check(), "无 git-rev 必须拒绝")
-Assert.eq(calls.dialog.text, "月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：unknown")
+Assert.is_true(not KOVersion.supported(), "无 git-rev 必须拒绝")
