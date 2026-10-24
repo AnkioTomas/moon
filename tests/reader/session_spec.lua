@@ -559,13 +559,12 @@ do
 
     -- 翻页：更新快照 + 刷新 + 分发 page_changed
     local UIManager = require("ui/uimanager")
-    local old_dirty, dirtied = UIManager.setDirty, nil
-    plugin.ui.dialog = {}
-    UIManager.setDirty = function(_self, widget) dirtied = widget end
+    local old_dirty, dirtied = UIManager.setDirty, false
+    UIManager.setDirty = function() dirtied = true end
     Session.onPageUpdate(plugin, 6)
     UIManager.setDirty = old_dirty
     Assert.eq(Session.current().page, 6)
-    Assert.is_true(dirtied == plugin.ui.dialog, "翻页刷新阅读窗口")
+    Assert.is_true(not dirtied, "翻页不额外刷新：ReaderView 自己会重画，栏绘制时现取快照")
     local ev = emitted[#emitted]
     Assert.eq(ev.ev, "page_changed")
     Assert.eq(ev.payload.identity.stable_id, "b1")

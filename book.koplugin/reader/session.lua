@@ -304,7 +304,7 @@ function Session.onCloseDocument(plugin)
     Session._snapshot = nil
 end
 
---- PageUpdate（分页视图）：结清上一页统计、刷新快照和阅读 UI，并通知属主源。
+--- PageUpdate（分页视图）：结清上一页统计、刷新快照，并通知属主源。重画归 ReaderView，这里不再 setDirty（会多一次整屏刷新）。
 ---@param plugin table Book 插件实例
 ---@param page number|nil
 function Session.onPageUpdate(plugin, page)
@@ -316,7 +316,6 @@ function Session.onPageUpdate(plugin, page)
     Snapshot.refresh(session, page)
     updateReadState(session)
     require("reader.session.stats").onPage(session)
-    require("ui/uimanager"):setDirty(plugin.ui.dialog, "ui")
     local source = session.identity.source
     if source then
         source:onEvent("page_changed", {
