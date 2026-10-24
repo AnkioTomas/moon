@@ -26,6 +26,9 @@ local search_wire = { code = 0, data = { ret_data = {
       thumb_url = "https://p6-tt.bytecdn.cn/novel-pic/abc~tplv-shrink:640:0.image" },
     { title = "没有书号" },
 } } }
+package.preload["utils.settings"] = function()
+    return { get = function() return { push_local_shelf = true } end }
+end
 package.preload["source.fanqie.settings"] = function()
     return {
         new = function()

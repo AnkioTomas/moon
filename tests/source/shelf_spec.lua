@@ -91,6 +91,37 @@ do
     Assert.eq(again, 1)
 end
 
+-- 关了「上传本地书架」：待上传的书标只留本地，不发 addToShelf
+do
+    local local_only = {}
+    package.preload["book.books_db"] = function()
+        return {
+            pendingShelfAddIds = function() return { "a", "b" } end,
+            markSynced = function() error("不该标已同步") end,
+            markLocalOnly = function(_source_id, stable_id) local_only[#local_only + 1] = stable_id end,
+            pendingDeleteIds = function() return {} end,
+        }
+    end
+    package.preload["utils.settings"] = function()
+        return { get = function() return { push_local_shelf = false } end }
+    end
+    package.loaded["book.books_db"] = nil
+    package.loaded["utils.settings"] = nil
+    package.loaded["source.shelf"] = nil
+    local S = require("source.shelf")
+    local pushed
+    S.syncAsync("x", {
+        shelfSyncAsync = function(_, cb) cb({}) end,
+        removeFromShelfAsync = function() error("不该删") end,
+        addToShelfAsync = function() error("不该上传") end,
+    }, function() return {} end, { dirty_only = true }, function(r) pushed = r.pushed end)
+    Stubs.flush()
+    Assert.eq(pushed, 0)
+    Assert.eq(table.concat(local_only, ","), "a,b")
+end
+
+package.preload["utils.settings"] = nil
+package.loaded["utils.settings"] = nil
 package.preload["book.books_db"] = nil
 package.loaded["book.books_db"] = nil
 package.loaded["source.shelf"] = nil

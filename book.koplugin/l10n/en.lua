@@ -2008,4 +2008,6 @@ Current version: ",
     ["词库已更新"] = "Lexicons updated",
     ["词库有更新"] = "Lexicon updates available",
     ["输入法词库：%1"] = "IME lexicon: %1",
+    ["上传本地加入书架的书"] = "Upload locally added books",
+    ["关闭后只同步进度、笔记和统计，不把本地加架的书推到云书架"] = "When off, only progress, notes and stats sync; locally added books are not pushed to the cloud shelf",
 }
