@@ -22,12 +22,16 @@ local function allowInitModules(root)
 end
 local ROOT = debug.getinfo(1, "S").source:match("^@(.*)/")
 allowInitModules(ROOT)
-require("utils.modules").install(ROOT)
+local INDEX = require("utils.modules").install(ROOT)
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 -- 版本门禁必须在其它业务模块加载之前：旧版 KOReader 缺 ffi/posix 等，顶层 require 就会抛错。
 local KoVersion = require("ko_version")
 if not KoVersion.supported() then return KoVersion.stub(WidgetContainer) end
+-- 缺文件时业务模块 require 会一路抛错，先拦住并提示重装。
+local InstallCheck = require("install_check")
+local MISSING = InstallCheck.check(ROOT, INDEX)
+if MISSING then return InstallCheck.stub(WidgetContainer, MISSING) end
 local logger = require("utils.log")
 -- 启动横幅只是诊断信息，失败不能拖垮插件加载。
 local boot_ok, boot_err = pcall(logger.boot)
