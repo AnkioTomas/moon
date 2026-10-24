@@ -348,7 +348,10 @@ Assert.eq(table.concat(feature_hooks, ","),
 version_current = 202606000000
 local attach_count = calls.attach
 package.loaded["ko_version"] = nil
-setmetatable({ path = "book.koplugin", ui = { menu = menu } }, Main):init()
+package.loaded["main"] = nil
+local Old = require("main")
+Assert.is_nil(Old.addToMainMenu, "不支持的 KOReader 版本拿到的是占位插件，业务模块一个都不加载")
+setmetatable({ path = "book.koplugin", ui = { menu = menu } }, Old):init()
 Assert.eq(calls.attach, attach_count, "不支持的 KOReader 版本不得进入插件")
 Assert.eq(calls.version_dialog.text, "月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：2026.06")
 
