@@ -10,6 +10,7 @@ stable_id 是 cc.db 的 p_uuid；已转换的书用它的缓存 EPUB 作文件�
 
 local SourceBase = require("source.base")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Kindle = {}
 
@@ -153,28 +154,94 @@ function Source:coverRequest(identity)
     return nil, _("无封面")
 end
 
---- 开书：按 uuid 查原文件交给 kindle.koplugin（KFX 首次要转换，可能几分钟），拿到真实路径再走我们的阅读器。
+--- kindle.koplugin 里这本书的目录项和缓存管理器；接口不全（版本不同）返回 nil，退回它自己的同步转换。
+---@param row table
+---@return table|nil book, table|nil cache_manager
+local function convertible(row)
+    local helper = Kindle.helper()
+    local library, cm = helper.virtual_library, helper.cache_manager
+    if type(library) ~= "table" or type(library.getBook) ~= "function"
+        or type(cm) ~= "table" or type(cm.isFresh) ~= "function" or type(cm.ensureCachedEpub) ~= "function" then
+        return nil
+    end
+    local book = library:getBook("cc:" .. row.uuid) or library:getBook(row.location)
+    if book and not cm:isFresh(book) then return book, cm end
+    return nil
+end
+
+--- 开书：按 uuid 查原文件交给 kindle.koplugin，拿到真实路径再走我们的阅读器。
+--- KFX 首次要转换（kindle-helper 要几分钟）：放进 fork 子进程当后台任务，UI 不卡、可取消、可转后台；
+--- 转换完时用户还在等才继续开，转了后台只提示。
 function Source:openBookAsync(identity, _opts, cb)
     local rows, err = Kindle.query("p_uuid = ?", identity.stable_id)
     local row = rows and rows[1]
     if not row then return SourceBase.defer(cb, nil, err or _("Kindle 书库里找不到这本书")) end
     local helper = Kindle.helper()
     if not helper then return SourceBase.defer(cb, nil, _("需要先安装并启用 kindle.koplugin")) end
-    if row.kfx and not cachedEpub(row.uuid, row.location) then
-        require("ui.themes.widgets.toast"):new{ text = _("首次打开需要转换，可能要几分钟，请耐心等待") }:show()
-    end
     local cancelled = false
-    require("ui/uimanager"):nextTick(function()
-        if cancelled then return end
-        local ok, path, prep_err = pcall(helper.prepareKnownKindlePath, helper, row.location)
-        if cancelled then return end
-        if not ok or type(path) ~= "string" or path == "" then
-            return cb(nil, ok and prep_err or _("无法打开书籍"))
+    local handle = { cancel = function() cancelled = true end }
+    local function open()
+        require("ui/uimanager"):nextTick(function()
+            if cancelled then return end
+            local ok, path, prep_err = pcall(helper.prepareKnownKindlePath, helper, row.location)
+            if cancelled then return end
+            if not ok or type(path) ~= "string" or path == "" then
+                return cb(nil, ok and prep_err or _("无法打开书籍"))
+            end
+            local touched, store_err = require("book.store").touch(path, identity)
+            cb(touched and path or nil, store_err)
+        end)
+    end
+
+    local book, cm
+    if row.kfx then book, cm = convertible(row) end
+    if not book then
+        if row.kfx then
+            require("ui.themes.widgets.toast"):new{ text = _("首次打开需要转换，可能要几分钟，请耐心等待") }:show()
         end
-        local touched, store_err = require("book.store").touch(path, identity)
-        cb(touched and path or nil, store_err)
-    end)
-    return { cancel = function() cancelled = true end }
+        open()
+        return handle
+    end
+
+    local Tasks = require("workers.tasks")
+    local foreground = true
+    local task, reason = Tasks.enqueue{
+        key = "kindle\0convert\0" .. row.uuid,
+        kind = "cache",
+        title = row.title,
+        cancellable = true,
+        run = function(report, done)
+            report(_("首次打开需要转换，可能要几分钟"))
+            return require("workers.job").run(function()
+                local path, convert_err = cm:ensureCachedEpub(book)
+                return { ok = path ~= nil, err = convert_err }
+            end, {
+                name = "kindle.convert",
+                kind = "medium",
+                on_done = done,
+                on_failed = function(job_err) done({ ok = false, err = tostring(job_err) }) end,
+            })
+        end,
+        on_done = function(result)
+            if cancelled then return end
+            if foreground then
+                if result.ok then open() else cb(nil, result.err or _("无法打开书籍")) end
+            elseif result.ok then
+                require("ui.themes.widgets.toast"):new{ text = T(_("「%1」已转换完成，可以打开了"), row.title) }:show()
+            else
+                require("ui.themes.widgets.toast"):new{ text = T(_("「%1」转换失败"), row.title) }:show()
+            end
+        end,
+    }
+    if not task then
+        return SourceBase.defer(cb, nil, reason == "running" and _("这本书正在转换，请稍后再试") or _("任务队列已满"))
+    end
+    require("workers.ui.task_dialog").follow(task, function() foreground = false end)
+    handle.cancel = function()
+        cancelled = true
+        task.cancel()
+    end
+    return handle
 end
 
 return Kindle
