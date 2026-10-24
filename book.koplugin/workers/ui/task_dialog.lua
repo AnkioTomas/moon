@@ -116,7 +116,8 @@ end
 --- 前台跟随一个任务：进度弹窗随队列刷新，任务结束（完成 / 取消）自动关窗。
 --- 「后台运行」只关窗；转后台后进入等网络时提示一次；任务被同 key 新任务替换时也算结束、自动关窗。
 ---@param task BookTask Tasks.enqueue 返回的任务
-function TaskDialog.follow(task)
+---@param on_background fun()|nil 用户点「后台运行」时回调
+function TaskDialog.follow(task, on_background)
     if task.done then return end
     local label = TaskDialog.label(task.kind)
     local name = task.title or label
@@ -125,9 +126,10 @@ function TaskDialog.follow(task)
     local dialog = ProgressDialog:new{
         title = heading(task),
         on_background = function()
+            if on_background then on_background() end
             Toast:new{ text = _("已转到后台，可在顶栏查看进度"), timeout = 2 }:show()
         end,
-        on_cancel = task.restartable and function() task.cancel() end or nil,
+        on_cancel = (task.restartable or task.cancellable) and function() task.cancel() end or nil,
         close_callback = function() open = false end,
     }
     local function refresh()

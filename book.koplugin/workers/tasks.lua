@@ -48,6 +48,7 @@ local Tasks = {}
 ---@field kind BookTaskKind
 ---@field title string|nil
 ---@field restartable boolean|nil
+---@field cancellable boolean|nil 非 restartable 的任务也给进度窗取消键
 ---@field run fun(report: fun(text: string|nil, count: integer|nil, total: integer|nil), done: fun(result: table)): table|nil
 ---@field retryable (fun(result: table): boolean)|nil
 ---@field on_done fun(result: table)|nil

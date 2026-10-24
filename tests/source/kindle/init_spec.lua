@@ -135,5 +135,31 @@ source:openBookAsync({ source_id = "kindle", stable_id = "u2" }, nil, function(p
 Assert.is_nil(path)
 Assert.not_nil(err)
 
+-- 后台转换：接口齐全时 KFX 走任务，转换完用户还在等才开书
+local enqueued, followed
+package.loaded["workers.tasks"] = { enqueue = function(spec) enqueued = spec; return { cancel = function() end } end }
+package.loaded["workers.ui.task_dialog"] = { follow = function(_task, on_bg) followed = on_bg end }
+ofe.virtual_library = { getBook = function(_self, id) return { id = id } end }
+ofe.cache_manager.isFresh = function() return false end
+ofe.cache_manager.ensureCachedEpub = function() return epub end
+ofe.prepareKnownKindlePath = function() return epub end
+path, err, touched = nil, nil, nil
+source:openBookAsync({ source_id = "kindle", stable_id = "u1" }, nil, function(p, e) path, err = p, e end)
+Assert.eq(enqueued.kind, "cache")
+Assert.is_nil(path) -- 转换没完不开
+enqueued.on_done({ ok = true })
+Assert.eq(path, epub)
+-- 转了后台：不开，只提示
+path = nil
+source:openBookAsync({ source_id = "kindle", stable_id = "u1" }, nil, function(p) path = p end)
+followed()
+enqueued.on_done({ ok = true })
+Assert.is_nil(path)
+-- 转换失败：报给调用方
+source:openBookAsync({ source_id = "kindle", stable_id = "u1" }, nil, function(p, e) path, err = p, e end)
+enqueued.on_done({ ok = false, err = "坏书" })
+Assert.eq(err, "坏书")
+package.loaded["workers.tasks"], package.loaded["workers.ui.task_dialog"] = nil, nil
+
 package.loaded["lua/open_file_ext"] = nil
 for _idx, p in ipairs({ cc_path, kfx, azw3, epub, thumb, placeholder }) do os.remove(p) end
