@@ -11,7 +11,7 @@
   Tabbar.widget({ width = w, tabs = { { id = "home", text = "首页", icon = "home" } },
       active = "home", on_tab = function(id) … end })
 
-opts.plain：简洁样式（壁纸透底时用）：选中格不填色，图标文字都用主文字色，只靠字号和指示条区分选中。
+opts.plain：壁纸透底时用，未选中格的图标文字用主文字色而不是 faint（选中格不变）。
 
 未选中格：页面底色 + faint 文字；点当前格不回调，但照样吞掉点按（不漏给下层手势）。
 on_tab(id, rect) 的 rect 是被点格子的屏幕矩形，可作弹层锚点。
@@ -50,11 +50,11 @@ function Tabbar.widget(opts)
     local cell_w = math.floor(opts.width / #opts.tabs)
     local sel = t.selected
     local plain = opts.plain
-    local mark = Theme.px(plain and math.max(sel.mark, 2) or sel.mark)
+    local mark = Theme.px(sel.mark)
     local row = HorizontalGroup:new{ align = "top" }
     for _idx, tab in ipairs(opts.tabs) do
         local active = tab.id == opts.active
-        local ink = plain and t.color.ink or (active and sel.ink or t.color.faint)
+        local ink = active and sel.ink or (plain and t.color.ink or t.color.faint)
         local label = Icon.label{
             name = tab.icon,
             text = tab.text,
@@ -70,7 +70,7 @@ function Tabbar.widget(opts)
             align = "center",
             Box:new{
                 -- 选中格多带一个 border 键：壁纸只摘「只有 bg」的页底色，选中底色不能被摘掉。
-                style = (active and not plain) and { bg = sel.bg, border = 0 } or { bg = t.color.page },
+                style = active and { bg = sel.bg, border = 0 } or { bg = t.color.page },
                 width = cell_w,
                 height = cell_h - mark,
                 label,
@@ -81,7 +81,7 @@ function Tabbar.widget(opts)
             cell[#cell + 1] = active and CenterContainer:new{
                 dimen = Geom:new{ w = cell_w, h = mark },
                 LineWidget:new{
-                    background = Blitbuffer.Color8(plain and t.color.ink or sel.ink),
+                    background = Blitbuffer.Color8(sel.ink),
                     dimen = Geom:new{ w = math.floor(cell_w / 3), h = mark },
                 },
             } or VerticalSpan:new{ width = mark }

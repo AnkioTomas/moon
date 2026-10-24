@@ -18,7 +18,7 @@ local Ext = {}
 --- 已声明的挂点：名字 → 说明。新增挂点 = 在这里加一行，并在下层取用处写清形状。
 Ext.POINTS = {
     ["desktop.tabs"] = "底栏页签 { id, text, icon, after?, enabled():bool, create?(opts):page, tap?(desktop, rect, cell_id?), cells?(room):{id,text,icon}[]|nil（按屏宽剩余空格数换成多个格子，nil = 仍是一格） }",
-    ["desktop.backdrop"] = "单一提供者：桌面背景 { content(page, tab), tabbar(bar, tab), plain_tabbar(tab) -> boolean（底栏用简洁样式）, wrap(w, h, child, tab) -> widget }（tab 为当前页签 id；透底 / 垫在三层之下）",
+    ["desktop.backdrop"] = "单一提供者：桌面背景 { content(page, tab), tabbar(bar, tab), plain_tabbar(tab) -> boolean（底栏未选中格文字不变灰）, wrap(w, h, child, tab) -> widget }（tab 为当前页签 id；透底 / 垫在三层之下）",
     ["modal.backdrop"] = "单一提供者：主题弹窗在遮罩之下先画背景 fn(modal, bb, x, y)",
     ["desktop.activated"] = "桌面回到前台 fn(desktop)",
     ["desktop.opened"] = "桌面打开并显示后 fn(desktop)",

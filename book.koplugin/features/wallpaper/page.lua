@@ -263,7 +263,7 @@ function Page.sections(desktop)
     })
     if bars.bottom then
         rows[#rows + 1] = toggleRow(desktop, {
-            icon = "space_bar", title = _("底栏简洁样式"), subtitle = _("选中格不填色，图标文字与正文同色"),
+            icon = "space_bar", title = _("底栏文字不变灰"), subtitle = _("未选中的图标文字与正文同色"),
             on = Core.plainTabbar(), apply = function(on) Core.setPlainTabbar(on) end,
         })
     end
