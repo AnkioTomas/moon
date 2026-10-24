@@ -175,7 +175,7 @@ function ReaderSettings:sections(desktop)
     return { { title = _("行为"), rows = rows } }
 end
 
---- 划词页「选区」分节；翻译、X-Ray、词典、百科由各自 feature 追加到同一页。
+--- 查词页「选区」分节。
 ---@param desktop table
 ---@return BookQuickPanelSettingSection[]
 function ReaderSettings:lookupSections(desktop)

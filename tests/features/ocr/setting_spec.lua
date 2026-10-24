@@ -24,9 +24,9 @@ end
 
 local updates = 0
 local entry = require("features.ocr.setting").entries({ updateView = function() updates = updates + 1 end })[1]
-Assert.eq(entry.parent, "lookup")
-Assert.is_true(entry.order > 50, "排在词典（50）之后")
-local section = entry.sections()[1]
+Assert.eq(entry.group, "reader")
+Assert.eq(entry.order, 18)
+local section = entry.page.sections()[1]
 Assert.eq(section.title, "文字识别（OCR）")
 -- 第一行：KOReader「Forced OCR」开关，读写同一设置并刷新页面。
 Assert.eq(section.rows[1](600).title, "强制文字识别")
@@ -34,7 +34,7 @@ Assert.is_false(section.rows[1](600).status_on)
 section.rows[1](600).callback()
 Assert.is_true(forced)
 Assert.eq(updates, 1)
-Assert.is_true(entry.sections()[1].rows[1](600).status_on)
+Assert.is_true(entry.page.sections()[1].rows[1](600).status_on)
 Assert.eq(section.rows[2](600).title, "下载识别语言")
 Assert.eq(section.rows[2](600).subtitle, "仅对扫描版 PDF / DjVu 生效，长按文字即可识别")
 Assert.eq(section.rows[3](600).status, "未安装")
@@ -42,6 +42,6 @@ section.rows[2](600).callback()
 section.rows[3](600).callback()
 Assert.eq(table.concat(calls, ","), "download,manage")
 installed = { "chi_sim", "eng" }
-Assert.eq(entry.sections()[1].rows[3](600).status, "2")
+Assert.eq(entry.page.sections()[1].rows[3](600).status, "2")
 
 return true

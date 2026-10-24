@@ -22,35 +22,41 @@ Setting.defaults = {
 function Setting.entries(desktop)
     return {
         {
-            parent = "lookup",
-            order = 45,
-            sections = function()
-                local MoonSettings = require("utils.settings")
-                local Row = require("ui.themes.widgets.row")
-                local reviews = MoonSettings.get("features.reviews")
-                local solid = reviews.book_reviews_mark_style == "solid"
-                return {
-                    {
-                        title = _("段评"),
-                        rows = {
-                            function(iw)
-                                return Row.widget({
-                                    width = iw, chevron = true,
-                                    kind = "nav", icon = "border_style", title = _("段评下划线样式"),
-                                    status = solid and _("实线") or _("虚线"),
-                                    callback = function()
-                                        reviews.book_reviews_mark_style = solid and "dashed" or "solid"
-                                        MoonSettings.save("features.reviews", reviews)
-                                        local ui = require("apps/reader/readerui").instance
-                                        if ui and ui.dialog then require("ui/uimanager"):setDirty(ui.dialog, "ui") end
-                                        desktop:updateView()
-                                    end,
-                                })
-                            end,
+            group = "reader",
+            order = 15,
+            icon = "rate_review",
+            title = _("段评"),
+            subtitle = _("他人段评的页内标记"),
+            page = {
+                title = _("段评"),
+                sections = function()
+                    local MoonSettings = require("utils.settings")
+                    local Row = require("ui.themes.widgets.row")
+                    local reviews = MoonSettings.get("features.reviews")
+                    local solid = reviews.book_reviews_mark_style == "solid"
+                    return {
+                        {
+                            title = _("段评"),
+                            rows = {
+                                function(iw)
+                                    return Row.widget({
+                                        width = iw, chevron = true,
+                                        kind = "nav", icon = "border_style", title = _("段评下划线样式"),
+                                        status = solid and _("实线") or _("虚线"),
+                                        callback = function()
+                                            reviews.book_reviews_mark_style = solid and "dashed" or "solid"
+                                            MoonSettings.save("features.reviews", reviews)
+                                            local ui = require("apps/reader/readerui").instance
+                                            if ui and ui.dialog then require("ui/uimanager"):setDirty(ui.dialog, "ui") end
+                                            desktop:updateView()
+                                        end,
+                                    })
+                                end,
+                            },
                         },
-                    },
-                }
-            end,
+                    }
+                end,
+            },
         },
     }
 end
