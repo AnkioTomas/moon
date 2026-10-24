@@ -7,10 +7,13 @@
 @module koplugin.book.source.assets
 --]]
 
+require("l10n").apply()
+
 local md5 = require("ffi/sha2").md5
 local Image = require("utils.image")
 local Paths = require("utils.paths")
 local Text = require("utils.text")
+local _ = require("gettext")
 
 local Assets = {}
 
@@ -90,6 +93,20 @@ function Assets.rewriteImageSources(xhtml, src_map)
     end))
 end
 
+--- 阅读器解不了的图（AVIF 等）：整个 img 换成指向原图的一行说明，不让它留成空白或破图。
+---@param xhtml string
+---@param formats table<string, string> 清洗后的 src → 格式名
+---@return string
+local function replaceUnsupported(xhtml, formats)
+    return (xhtml:gsub("<img%s+[^>]*>", function(tag)
+        local _quote, src = tag:match("src=(['\"])(.-)%1")
+        local url = src and src:gsub("&amp;", "&")
+        local format = url and formats[url]
+        if not format then return tag end
+        return '<a href="' .. Text.xmlEscape(url) .. '">' .. Text.xmlEscape(string.format(_("[图片：不支持 %s 格式，点此看原图]"), format)) .. "</a>"
+    end))
+end
+
 --- 下载正文里的远程 img，写入 images_dir，改写成相对路径。
 ---@param html string
 ---@param images_dir string
@@ -113,7 +130,7 @@ function Assets.localizeAsync(html, images_dir, download, cb)
 
     Paths.ensureDir(images_dir)
 
-    local url_hrefs, index = {}, 1
+    local url_hrefs, unsupported, index = {}, {}, 1
     local cancelled, active_job = false, nil
     local function nextUrl()
         if cancelled then return end
@@ -121,15 +138,17 @@ function Assets.localizeAsync(html, images_dir, download, cb)
         index = index + 1
         local mine = index
         if not url then
-            cb(Assets.rewriteImageSources(html, url_hrefs))
+            cb(replaceUnsupported(Assets.rewriteImageSources(html, url_hrefs), unsupported))
             return
         end
-        local handle = download(url, function(raw)
+        local handle = download(Text.escapeUrl(url), function(raw)
             if cancelled then return end
             if raw then
                 local href = Assets.materializeImage(images_dir, raw)
                 if href then
                     url_hrefs[url] = href
+                else
+                    unsupported[url] = Image.unsupported(raw)
                 end
             end
             nextUrl()

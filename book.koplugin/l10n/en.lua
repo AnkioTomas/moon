@@ -2027,4 +2027,5 @@ Current version: ",
     ["没有未读文章"] = "No unread articles",
     ["已缓存 %1 篇未读文章"] = "Cached %1 unread articles",
     ["缓存完成 %1/%2 篇，其余失败：%3"] = "Cached %1/%2, the rest failed: %3",
+    ["[图片：不支持 %s 格式，点此看原图]"] = "[Image: %s format not supported, tap for original]",
 }

@@ -66,6 +66,17 @@ function Image.ext(data)
     return ext, MIME[ext]
 end
 
+--- 阅读器解不了的图片格式（ISO BMFF 容器：AVIF / HEIC）。返回格式名，其它返回 nil。
+---@param data string|nil
+---@return string|nil
+function Image.unsupported(data)
+    if type(data) ~= "string" or #data < 12 or data:sub(5, 8) ~= "ftyp" then return nil end
+    local brand = data:sub(9, 12)
+    if brand == "avif" or brand == "avis" then return "AVIF" end
+    if brand == "heic" or brand == "heix" or brand == "mif1" or brand == "msf1" then return "HEIC" end
+    return nil
+end
+
 --- 打开文件读头；是图返回后缀。
 ---@param path string|nil
 ---@return string|nil ext

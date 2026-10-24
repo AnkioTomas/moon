@@ -120,3 +120,25 @@ do -- 首图同步失败立刻拉下一张时，cancel 取消的是正在下载�
     Assert.eq(#cancelled, 1)
     Assert.eq(cancelled[1], 2)
 end
+
+do
+    local avif = "\0\0\0\32ftypavif\0\0\0\0avifmif1miaf"
+    local out
+    Assets.localizeAsync('<p><img src="' .. remote .. '" alt="x"/></p>', images_dir, function(_url, cb)
+        cb(avif)
+        return { cancel = function() end }
+    end, function(html) out = html end)
+    Assert.is_nil(out:find("<img", 1, true))
+    Assert.is_true(out:find('href="' .. remote .. '"', 1, true) ~= nil)
+    Assert.matches(out, "AVIF")
+end
+
+do
+    local asked
+    Assets.localizeAsync('<img src="https://cdn.example.com/图 1.png?a=%E4&b=1"/>', images_dir, function(url, cb)
+        asked = url
+        cb(png)
+        return { cancel = function() end }
+    end, function() end)
+    Assert.eq(asked, "https://cdn.example.com/%E5%9B%BE%201.png?a=%E4&b=1")
+end
