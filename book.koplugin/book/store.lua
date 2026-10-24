@@ -324,10 +324,17 @@ function Store.ensureIdentity(path)
         inserted_at = os.time(),
         path = path,
     }
-    if not BookDB.get("local", path) then
+    local known = BookDB.get("local", path)
+    if not known then
         if not BookDB.upsert(row) then
             logger.warn("book identity register failed", path)
         end
+    end
+    -- 从 KOReader 文件列表 / 历史直接开原书时，books.path 若指着它的衍生版（排版 / 双语）就保留，
+    -- 否则下次从桌面开书记不住用户上次读的版本。
+    local kept = known and known.path
+    if kept and require("reader.session.derived_note").originOf(kept) == path then
+        return { source_id = "local", stable_id = path, chapter_idx = nil, book = known, source = registry.resolve("local") }
     end
     if not BookDB.touchPath("local", path, path) then
         logger.warn("book identity touch failed", "local", path, path)
