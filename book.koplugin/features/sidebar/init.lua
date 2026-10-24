@@ -60,7 +60,7 @@ local Sidebar = Modal:extend{}
 --- 按条件出现的页：字体页要文档能换字体，X-Ray 页要功能开着。
 local AVAILABLE = {
     font = function(ui) return require("ui.fonts.reader").supports(ui) end,
-    xray = function() return MoonSettings.get("features.xray").book_xray_enabled end,
+    xray = function() return require("features.xray").available() end,
     stats = function() return require("features.sidebar.stats").available() end,
 }
 

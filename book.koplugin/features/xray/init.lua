@@ -19,10 +19,18 @@ function Xray.onCreate()
     })
 end
 
+--- X-Ray 开着且当前不是订阅文章（ephemeral 源不是书，没有可累积的人物 / 地点）。
+---@return boolean
+function Xray.available()
+    if not require("utils.settings").get("features.xray").book_xray_enabled then return false end
+    local current = require("reader.session").current()
+    return not (current and current.identity.ephemeral)
+end
+
 Xray.events = {
     ---@param plugin BookPlugin
     BookXrayRefresh = function(plugin)
-        if not plugin.ui.document then return false end
+        if not plugin.ui.document or not Xray.available() then return false end
         require("features.xray.ui").refresh(plugin.ui)
         return true
     end,

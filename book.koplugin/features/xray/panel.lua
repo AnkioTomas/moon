@@ -12,10 +12,8 @@ local _ = require("gettext")
 
 local Panel = {}
 
---- X-Ray 开着才可用。
----@return boolean
 local function enabled()
-    return require("utils.settings").get("features.xray").book_xray_enabled
+    return require("features.xray").available()
 end
 
 ---@return BookQuickPanelAction[]
