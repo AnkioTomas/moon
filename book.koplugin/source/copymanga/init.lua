@@ -161,26 +161,55 @@ end
 local PERIODS = { { "day", _("日榜") }, { "week", _("周榜") }, { "month", _("月榜") }, { "total", _("总榜") } }
 local AUDIENCES = { { "all", _("全部") }, { "male", _("男频") }, { "female", _("女频") } }
 
---- 书城浏览：榜单周期 × 受众两行 chip，节点是「周期:受众」，缺省日榜全部。每页 20 部。
+-- 官网「查看全部分類」的题材（接口 filter/comic/tags 只回前 20 个，其余题材同样可查）；漫展场次标签不收。
+local THEMES = {
+    { "aiqing", "愛情" }, { "huanlexiang", "歡樂向" }, { "maoxian", "冒險" }, { "qihuan", "奇幻" },
+    { "baihe", "百合" }, { "xiaoyuan", "校园" }, { "kehuan", "科幻" }, { "dongfang", "東方" },
+    { "danmei", "耽美" }, { "gedou", "格鬥" }, { "teenslove", "TL" }, { "shenghuo", "生活" },
+    { "qingxiaoshuo", "轻小说" }, { "xuanyi", "悬疑" }, { "mengxi", "萌系" }, { "shengui", "神鬼" },
+    { "zhichang", "职场" }, { "zhiyu", "治愈" }, { "jiecao", "节操" }, { "sige", "四格" },
+    { "gaoxiao", "搞笑" }, { "changtiao", "長條" }, { "jingji", "竞技" }, { "mohuan", "魔幻" },
+    { "jianniang", "舰娘" }, { "weiniang", "伪娘" }, { "rexue", "热血" }, { "jingsong", "惊悚" },
+    { "meishi", "美食" }, { "xingzhuanhuan", "性转换" }, { "lizhi", "励志" }, { "hougong", "後宮" },
+    { "yinyuewudao", "音乐舞蹈" }, { "zhentan", "侦探" }, { "COLOR", "彩色" }, { "aa", "AA" },
+    { "yishijie", "异世界" }, { "lishi", "历史" }, { "chuanyue", "穿越" }, { "jizhan", "机战" },
+    { "zhanzheng", "战争" }, { "dushi", "都市" }, { "chongsheng", "重生" }, { "kongbu", "恐怖" },
+    { "shengcun", "生存" }, { "wuxia", "武侠" }, { "zhaixi", "宅系" }, { "zhuansheng", "转生" },
+    { "fate", "FATE" }, { "Uncensored", "無修正" }, { "xianxia", "仙侠" }, { "loveLive", "LoveLive" },
+    { "zazhifuzengxiezhenji", "雜誌附贈寫真集" }, { "qita", "其他" },
+}
+
+local PERIODS = { { "day", _("日榜") }, { "week", _("周榜") }, { "month", _("月榜") }, { "total", _("总榜") } }
+local AUDIENCES = { { "all", _("全部") }, { "male", _("男频") }, { "female", _("女频") } }
+
+--- 书城浏览：节点 `周期:受众`（缺省 day:all，每页 20 部）或 `theme:<题材>`（按人气）。
+--- 三行 chip：周期、受众、题材；选题材后周期 / 受众行不高亮，点回去就是榜单。
 ---@param opts { node?: string, limit?: integer }
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:browseAsync(opts, cb)
-    local period, audience = (opts.node or "day:all"):match("^(%a+):(%a+)$")
-    local periods, audiences = {}, {}
+    local node = opts.node or "day:all"
+    local theme = node:match("^theme:(.+)$")
+    local period, audience = node:match("^(%a+):(%a+)$")
+    if theme then period, audience = "day", "all" end
+    local periods, audiences, themes = {}, {}, {}
     for _idx, row in ipairs(PERIODS) do periods[#periods + 1] = { id = row[1] .. ":" .. audience, title = row[2] } end
     for _idx, row in ipairs(AUDIENCES) do audiences[#audiences + 1] = { id = period .. ":" .. row[1], title = row[2] } end
-    local node = period .. ":" .. audience
-    local groups = { Browse.group(periods, node), Browse.group(audiences, node) }
+    for _idx, row in ipairs(THEMES) do themes[#themes + 1] = { id = "theme:" .. row[1], title = row[2] } end
+    local groups = { Browse.group(periods, node), Browse.group(audiences, node), Browse.group(themes, node) }
     return Browse.pages(function(page, done)
-        return self._client:rankAsync(period, audience ~= "all" and audience or nil, (page - 1) * 20,
-            function(wire, err)
-                if not wire then
-                    done(nil, err)
-                    return
-                end
-                done(Mapper.search(wire))
-            end)
+        local function finish(wire, err)
+            if not wire then
+                done(nil, err)
+                return
+            end
+            done(Mapper.search(wire))
+        end
+        local offset = (page - 1) * 20
+        if theme then
+            return self._client:themeAsync(theme, offset, finish)
+        end
+        return self._client:rankAsync(period, audience ~= "all" and audience or nil, offset, finish)
     end, opts.limit or 60, groups, cb)
 end
 

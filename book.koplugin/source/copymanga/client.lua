@@ -186,6 +186,16 @@ function Client:rankAsync(date_type, audience, offset, cb)
     return self:_getJson(path, cb)
 end
 
+--- 分类列表一页（20 部），按人气。
+---@param theme string
+---@param offset integer
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:themeAsync(theme, offset, cb)
+    return self:_getJson("/api/v3/comics?limit=20&free_type=1&ordering=-popular&offset=" .. offset
+        .. "&theme=" .. Text.urlEncode(theme), cb)
+end
+
 --- 云端浏览记录（需登录）。browse 为 null 表示从未读过。
 ---@param stable_id string
 ---@param cb fun(wire: table|nil, err: string|nil)
