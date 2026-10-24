@@ -123,7 +123,10 @@ function Row.widget(opts)
             dimen = Geom:new{ w = opts.width, h = divider },
         }
     end
-    return Tap.wrap(group, enabled and opts.callback or nil)
+    local widget = Tap.wrap(group, enabled and opts.callback or nil)
+    -- 设置搜索靠这两个字段取行文字，不必解析控件树。
+    widget.row_title, widget.row_subtitle = opts.title, opts.subtitle
+    return widget
 end
 
 return Row

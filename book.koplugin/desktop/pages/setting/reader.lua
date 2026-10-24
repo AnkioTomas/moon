@@ -164,6 +164,10 @@ function ReaderSettings:sections(desktop)
     rows[#rows + 1] = toggleRow(desktop, "reader", reader, "auto_mark_read_at_99", auto_mark_read, {
         icon = "done_all", title = _("读到 99% 自动标记已读"),
     })
+    rows[#rows + 1] = toggleRow(desktop, "reader", reader, "chapter_switch_notice", reader.chapter_switch_notice ~= false, {
+        icon = "article", title = _("显示换章提示"),
+        subtitle = _("章节类书源切换章节时提示"),
+    })
     return { { title = _("行为"), rows = rows } }
 end
 
