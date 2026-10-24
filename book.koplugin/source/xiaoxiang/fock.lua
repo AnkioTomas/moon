@@ -134,11 +134,11 @@ function Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, uid, 
         jit.on()
         if not plain then return { err = err } end
         local font = type(info.fontResponse) == "table" and info.fontResponse or {}
-        return { text = require("source.qqreader.fock").restore(plain, font, fixed_font) }
+        return { text = require("source.yuewen_fonts").restore(plain, font, fixed_font) }
     end, {
         name = "xiaoxiang_fock",
         kind = "light",
-        timeout = 120,
+        timeout = 600,
         on_done = function(res) cb(res.text, res.err) end,
         on_failed = function(err) cb(nil, tostring(err)) end,
         on_cancelled = function() end,
