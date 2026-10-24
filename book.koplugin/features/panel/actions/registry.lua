@@ -13,6 +13,7 @@ require("l10n").apply()
 ---@field available fun(action: BookQuickPanelAction|nil, ctx: BookQuickPanelContext|nil): boolean
 ---@field active fun(action: BookQuickPanelAction, ctx: BookQuickPanelContext|nil): boolean
 ---@field execute fun(action: BookQuickPanelAction, ctx: BookQuickPanelContext, opts: BookQuickPanelExecuteOpts|nil)
+---@field executeHold fun(action: BookQuickPanelAction, ctx: BookQuickPanelContext, opts: BookQuickPanelExecuteOpts|nil)
 
 local Registry = {}
 
@@ -49,6 +50,7 @@ local loaded = false
 ---@field available nil|fun(ctx: BookQuickPanelContext|nil): boolean|nil
 ---@field active nil|fun(ctx: BookQuickPanelContext|nil): boolean|nil
 ---@field run nil|fun(ctx: BookQuickPanelContext)
+---@field hold nil|fun(ctx: BookQuickPanelContext) 长按：打开该动作的详情 / 设置，总是先关面板
 
 local SCOPES = { desktop = true, reader = true }
 
@@ -108,6 +110,7 @@ local function externalActions()
                 for key, value in pairs(raw) do action[key] = value end
                 action.id = id
                 action.run = Features.wrap(label, raw.run)
+                action.hold = Features.wrap(label, raw.hold)
                 action.available = Features.wrap(label, raw.available)
                 action.active = Features.wrap(label, raw.active)
                 out[#out + 1] = action
@@ -221,6 +224,16 @@ function Registry.execute(action, ctx, opts)
     else
         UIManager:nextTick(opts.refresh)
     end
+end
+
+--- 长按：详情页要盖在桌面上，面板先关；没有 hold 的动作不处理。
+---@param action BookQuickPanelAction
+---@param ctx BookQuickPanelContext
+---@param opts BookQuickPanelExecuteOpts|nil
+function Registry.executeHold(action, ctx, opts)
+    if not action.hold then return end
+    if opts and opts.close then opts.close() end
+    require("ui.guard").call("quick action hold " .. tostring(action.id), action.hold, ctx)
 end
 
 ---@type BookQuickPanelRegistry

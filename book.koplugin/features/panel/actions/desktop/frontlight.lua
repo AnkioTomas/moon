@@ -17,4 +17,9 @@ return {
     available = function()
         return Device:hasFrontlight()
     end,
+    --- 长按：KOReader 原生前光对话框（亮度、色温微调）。
+    hold = function()
+        local Event = require("ui/event")
+        require("ui/uimanager"):broadcastEvent(Event:new("ShowFlDialog"))
+    end,
 }

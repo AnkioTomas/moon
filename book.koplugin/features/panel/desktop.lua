@@ -25,6 +25,7 @@ local MoonSettings = require("utils.settings")
 ---@field sliders fun(): BookQuickPanelSlider[]
 ---@field menuActions fun(): BookQuickPanelMenuItem[]
 ---@field executeAction fun(id: string, opts: BookQuickPanelExecuteOpts|nil): boolean
+---@field holdAction fun(id: string, opts: BookQuickPanelExecuteOpts|nil): boolean
 ---@field setLevel fun(kind: "brightness"|"warmth", fraction: number): boolean
 
 local Panel = {}
@@ -47,6 +48,7 @@ local list = ActionList.create("desktop", "quick_panel_actions", Registry.deskto
 ---@field title string
 ---@field icon string
 ---@field active boolean
+---@field hold boolean 动作声明了长按
 
 --- 快捷面板灯光滑杆数据。
 ---@class BookQuickPanelSlider
@@ -119,6 +121,14 @@ end
 ---@return boolean
 function Panel.executeAction(id, opts)
     return list.execute(id, {}, opts)
+end
+
+--- 长按桌面动作；没有 hold 返回 false。
+---@param id string
+---@param opts BookQuickPanelExecuteOpts|nil
+---@return boolean
+function Panel.holdAction(id, opts)
+    return list.hold(id, {}, opts)
 end
 
 --- 设置亮度或暖色，并在设备不支持时返回 false。

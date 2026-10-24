@@ -25,4 +25,12 @@ return {
     active = function()
         return NetworkMgr:isWifiOn()
     end,
+    --- 长按：Android 打开系统 Wi-Fi 设置，其余设备走 KOReader 原生长按路径，开着也弹网络列表。
+    hold = function()
+        if Device:isAndroid() then
+            NetworkMgr:openSettings()
+        else
+            NetworkMgr:toggleWifiOn(nil, true, true)
+        end
+    end,
 }

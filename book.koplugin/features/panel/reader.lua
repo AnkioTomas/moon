@@ -17,6 +17,7 @@ local Registry = require("features.panel.actions.registry")
 ---@field swap fun(a: string, b: string)
 ---@field actions fun(ui: table|nil): BookQuickPanelMenuItem[]
 ---@field executeAction fun(id: string, ui: table|nil, opts: BookQuickPanelExecuteOpts|nil): boolean
+---@field holdAction fun(id: string, ui: table|nil, opts: BookQuickPanelExecuteOpts|nil): boolean
 
 local ReaderPanel = {}
 
@@ -47,6 +48,15 @@ end
 ---@return boolean
 function ReaderPanel.executeAction(id, ui, opts)
     return list.execute(id, { ui = ui }, opts)
+end
+
+--- 长按阅读页动作；没有 hold 返回 false。
+---@param id string
+---@param ui table|nil
+---@param opts BookQuickPanelExecuteOpts|nil
+---@return boolean
+function ReaderPanel.holdAction(id, ui, opts)
+    return list.hold(id, { ui = ui }, opts)
 end
 
 ---@type BookQuickPanelReader
