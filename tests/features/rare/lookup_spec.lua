@@ -112,6 +112,16 @@ do
     Assert.is_true(all[2].empty, "无结果的也留一项")
     dict_settings.dictionary_load_all = false
     Assert.len(Lookup.queryDicts(ui, "彘"), 1, "关闭时只查已启用的")
+    -- 记住的词典这次没结果：默认显示第一本有结果的，且不改记忆
+    local remembered = settings.rare_lookup_dict
+    settings.rare_lookup_dict = "甲"
+    dict_settings.dictionary_load_all = true
+    local p2 = Lookup.open{ ui = ui, text = "彘" }
+    Assert.eq(p2:currentDict().name, "乙")
+    Assert.eq(settings.rare_lookup_dict, "甲")
+    p2:close()
+    settings.rare_lookup_dict = remembered
+    dict_settings.dictionary_load_all = false
     os.execute("rm -rf " .. dir)
 end
 
