@@ -661,16 +661,17 @@ loadConfig().then(function (config) {
             backBtn.disabled = hist.length === 0;
             parentBtn.disabled = !parentPath;
             renderBreadcrumb();
+            // 快捷入口会嵌套（书籍根目录 ⊃ 锁屏壁纸 ⊃ …），只高亮包含当前目录的最深一个
             var locations = el('quick').getElementsByTagName('button');
+            var best = -1, bestLen = -1;
             for (var i = 0; i < locations.length; i++) {
                 var root = locations[i].getAttribute('data-path');
-                if (locations[i].getAttribute('data-kind') !== 'file') {
-                    locations[i].className = cur === root || (root !== '/' && cur.indexOf(root + '/') === 0) ? 'active' : '';
-                } else {
-                    locations[i].className = '';
-                }
-                if (locations[i].className === 'active') locations[i].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                var inside = locations[i].getAttribute('data-kind') !== 'file' &&
+                    (cur === root || (root !== '/' && cur.indexOf(root + '/') === 0));
+                if (inside && root.length > bestLen) { best = i; bestLen = root.length; }
             }
+            for (var j = 0; j < locations.length; j++) locations[j].className = j === best ? 'active' : '';
+            if (best >= 0) locations[best].scrollIntoView({ block: 'nearest', inline: 'nearest' });
             render();
         }).catch(function (err) {
             if (my !== seq) return;
