@@ -16,6 +16,7 @@
 --]]
 
 local lfs = require("libs/libkoreader-lfs")
+local logger = require("utils.log")
 
 local MTK_MODELS = { Kobo_condor = true, Kobo_monza = true, Kobo_spaBW = true, Kobo_spaColour = true }
 local DEST = "com.kobo.mtk.bluedroid"
@@ -42,6 +43,7 @@ local function run(cmd, seconds)
     if not handle then return "" end
     local out = handle:read("*a")
     handle:close()
+    logger.info("bluetooth kobo:", cmd, "->", (out:gsub("%s+$", ""):sub(1, 300)))
     return out
 end
 
@@ -136,6 +138,7 @@ local function attachInput()
                 pcall(Device.input.close, Device.input, path)
                 Device.input:open(path)
                 opened[path] = ino
+                logger.info("bluetooth kobo: 打开输入设备", path)
             end
         end
     end
@@ -264,7 +267,9 @@ function Kobo.bond(address)
             "string:org.bluez.Device1", "string:Trusted", "variant:boolean:true")
         return ok
     end
-    local paired = run("bluetoothctl pair " .. address, 20):find("Pairing successful", 1, true) ~= nil
+    local out = run("bluetoothctl pair " .. address, 20)
+    -- 已配对的设备再 pair 会报 AlreadyExists，状态已满足，不算失败。
+    local paired = out:find("Pairing successful", 1, true) ~= nil or out:find("AlreadyExists", 1, true) ~= nil
     run("bluetoothctl trust " .. address, 5)
     return paired
 end

@@ -84,7 +84,7 @@ function Sync.wrap(raw)
         local waiting = true
         UIManager:scheduleIn(0.3, function()
             if not waiting then return end
-            if not raw.bond(dev.address) then return cb(false, _("无法控制系统蓝牙")) end
+            local bonded = raw.bond(dev.address)
             waitFor(function(s)
                 for _idx, paired in ipairs(s.devices) do
                     if paired.address == dev.address then return true end
@@ -93,7 +93,8 @@ function Sync.wrap(raw)
             end, WAIT_SECONDS * 2, function(done)
                 if not waiting then return end
                 if done then raw.connect(dev.address) end
-                cb(done, not done and _("配对超时") or nil)
+                if done then return cb(true) end
+                cb(false, bonded and _("配对超时") or _("无法控制系统蓝牙"))
             end)
         end)
         return { cancel = function() waiting = false end }
