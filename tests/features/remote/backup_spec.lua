@@ -194,5 +194,27 @@ Assert.eq(_limit, Backup.MAX_BYTES)
 Assert.eq(resp.first.code, 200)
 Assert.eq(resp.second.code, 400, "校验失败映射 400")
 
+-- ── 清除配置 ───────────────────────────────────────────
+fresh()
+write(root .. "/book.sqlite3", "DB")
+write(root .. "/settings/a.lua", "A")
+write(root .. "/settings/sub/b.lua", "B")
+write(base .. "/crash.log", "CRASH")
+Assert.is_true(Backup.clearConfig(lfs, root .. "/settings", { base .. "/crash.log", base .. "/crash.log.old" }))
+Assert.is_nil(lfs.attributes(root .. "/settings"), "settings 整棵删掉")
+Assert.is_nil(read(base .. "/crash.log"))
+Assert.eq(read(root .. "/book.sqlite3"), "DB", "书库不动")
+
+local reset_resp
+server.handlers.reset_config = function(cb) cb(true) end
+server._json = function(_self, _conn, code, body) reset_resp = code .. body end
+Backup.reset(server, {}, "POST")
+Assert.eq(reset_resp, '200{"ok":true}')
+server.handlers.reset_config = function(cb) cb(false, "boom") end
+Backup.reset(server, {}, "POST")
+Assert.eq(failed, 500)
+Backup.reset(server, {}, "GET")
+Assert.eq(failed, 405)
+
 sh("rm -rf '" .. base .. "'")
 Stubs.flush()

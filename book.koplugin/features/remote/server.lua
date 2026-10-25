@@ -69,6 +69,7 @@ local STATUS = {
 ---@field get_status fun(): table 首页设备状态快照
 ---@field install_update fun(temp: string, cb: fun(ok: boolean, err: string|nil)) 安装上传的月读插件包（临时文件所有权移交）
 ---@field backup_zip fun(cb: fun(output: string|nil, err: any))|nil 打包 .moon（不含日志与缓存）
+---@field reset_config fun(cb: fun(ok: boolean, err: string|nil))|nil 清除全部配置与 crash.log，成功后设备提示并重启
 ---@field restore_backup fun(temp: string, cb: fun(ok: boolean, err: string|nil))|nil 用上传的备份包替换 .moon，成功后设备提示并重启
 
 --- 一切非 2xx 响应都是 JSON {"error": msg}：页面能把真实原因显示出来，
@@ -103,6 +104,7 @@ Server._routeStatus = Status.route
 Server._routeSettings = SettingsRoute.settings
 Server._routeUpdate = UpdateRoute.route
 Server._routeBackup = BackupRoute.route
+Server._routeReset = BackupRoute.reset
 Server._routeExt = ExtRoute.route
 
 --- idle_timeout：连续这么多秒没有任何在途连接就调一次 on_idle（nil = 不检测）。
@@ -600,6 +602,8 @@ function Server:_route(conn, head)
         return self:_routeUpdate(conn, method, headers)
     elseif path == "/api/backup" then
         return self:_routeBackup(conn, method, headers)
+    elseif path == "/api/reset" then
+        return self:_routeReset(conn, method)
     end
     local ext_name, ext_action = path:match("^/api/([%w_]+)/([%w_]+)$")
     local ext = ext_name and ExtRoute.find(ext_name)

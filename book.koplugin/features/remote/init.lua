@@ -1308,6 +1308,24 @@ local function restoreBackup(temp, cb)
     end)
 end
 
+--- 清除全部配置（.moon/settings 与 crash.log）：与恢复备份同一收尾——重载配置、提示、重启。
+---@param cb fun(ok: boolean, err: string|nil)
+local function resetConfig(cb)
+    local crash = require("datastorage"):getFullDataDir() .. "/crash.log"
+    runFilesystem("remote-reset", function()
+        return require("features.remote.backup").clearConfig(
+            require("libs/libkoreader-lfs"), require("utils.paths").settingsDir(), { crash, crash .. ".old" })
+    end, function(done, err)
+        if not done then return cb(false, err) end
+        require("utils.settings").reload()
+        cb(true)
+        require("ui.themes.widgets.toast"):new{
+            text = _("配置已通过远程管理清除，正在重启 KOReader…"),
+        }:show()
+        require("ui/uimanager"):scheduleIn(1, require("features.update").restart)
+    end)
+end
+
 -- ── 启停 ─────────────────────────────────────────────
 
 --- Kindle 防火墙打孔（照 httpinspector 语义：start 打、stop 堵）。
@@ -1430,6 +1448,7 @@ function Remote.start()
             install_update = installUpdate,
             backup_zip = backupZip,
             restore_backup = restoreBackup,
+            reset_config = resetConfig,
         },
     }
     local started, serr = server:start()
