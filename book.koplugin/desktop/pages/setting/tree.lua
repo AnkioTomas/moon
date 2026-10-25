@@ -20,6 +20,7 @@
 ---@field title string
 ---@field preview (fun(width: number): table)|nil
 ---@field sections (fun(): table[])|nil 页面自带分节；全靠第三层追加时可省略
+---@field refresh_seconds number|nil 页面在最上层时定时重算（实时状态页）
 
 ---@class BookSettingEntry
 ---@field order number 同层排序
@@ -179,6 +180,7 @@ function Tree.build(groups, entries)
             title = page.title,
             preview = page.preview,
             right_icon = page.right_icon,
+            refresh_seconds = page.refresh_seconds,
             right_callback = page.right_callback,
             sections = function()
                 local out = {}
