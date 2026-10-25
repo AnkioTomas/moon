@@ -1,10 +1,12 @@
 --[[--
 晋江源设置：登录。
 
-晋江手机网页的登录要过数美验证，墨水屏上做不了；登录态有两套：
+晋江手机网页的登录要过数美验证，墨水屏上做不了；登录协议有两套（protocols/web.lua、protocols/app.lua），只用其中一个：
 1. 网页 Cookie：远程管理里的「浏览器登录」（浏览器扩展交 Cookie），或在电脑浏览器登录后把 Cookie 请求头粘贴进来，
    先拉一次收藏页校验，通过才保存。能同步收藏、取消收藏、读已购 VIP 章。
-2. App token：设备上直接输账号密码（新设备要手机 / 邮箱验证码），只存 token 不存密码。能同步书架、读已购 VIP 章。
+2. App 账号：设备上直接输账号密码（新设备要手机 / 邮箱验证码），保存账号密码与 token，token 失效自动重登。
+   能同步书架、读已购 VIP 章。
+登录成功即切到该协议；两套都登录过时可在设置里改用哪一个。
 
 @module koplugin.book.source.jjwxc.setting
 --]]
@@ -17,8 +19,7 @@ local Setting = {}
 
 ---@return boolean
 local function loggedIn()
-    local Client = require("source.jjwxc.client")
-    return Client.cookie() ~= nil or Client.token() ~= nil
+    return require("source.jjwxc.protocols").current() ~= nil
 end
 
 ---@return string, boolean
@@ -78,11 +79,12 @@ end
 ---@param cb fun(ok: boolean, err: string|nil)
 local function saveCookie(cookie, cb)
     if cookie == "" then return cb(false, _("没有读到 Cookie")) end
-    require("source.jjwxc.client").favAsync(cookie, function(rows, err)
+    require("source.jjwxc.protocols.web").favAsync(cookie, function(rows, err)
         if not rows then return cb(false, err or _("登录失败")) end
         local settings = require("utils.settings")
         local cfg = settings.getSource(SOURCE_ID)
         cfg.cookie = cookie
+        cfg.protocol = "web"
         settings.saveSource(SOURCE_ID, cfg)
         require("source.auth").ok(SOURCE_ID)
         require("source.registry").reload()
@@ -153,6 +155,27 @@ function Setting.rows(plugin)
     }
     rows[#rows + 1] = require("source.review_setting").row(SOURCE_ID, plugin)
     if not loggedIn() then return rows end
+    local Protocols = require("source.jjwxc.protocols")
+    rows[#rows + 1] = function(iw)
+        local current = Protocols.current()
+        return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "swap_horiz", title = _("登录协议"),
+            status = current.label(), status_on = true,
+            callback = function()
+                local items = {}
+                for _idx, protocol in ipairs(Protocols.list) do
+                    items[#items + 1] = {
+                        text = protocol.label() .. (protocol.available() and "" or _("（未登录）")),
+                        variant = protocol == current and "primary" or "normal",
+                        enabled = protocol.available(),
+                        callback = function()
+                            Protocols.select(protocol.id)
+                            require("source.registry").reload()
+                        end,
+                    }
+                end
+                require("ui.themes.widgets.sheet"):new{ title = _("登录协议"), items = items }:show()
+            end })
+    end
     rows[#rows + 1] = function(iw)
         return Row.widget({ width = iw, chevron = false, kind = "action", icon = "logout", title = _("退出登录"),
             callback = function()
@@ -162,8 +185,7 @@ function Setting.rows(plugin)
                     ok_callback = function()
                         local settings = require("utils.settings")
                         local cfg = settings.getSource(SOURCE_ID)
-                        cfg.cookie = nil
-                        cfg.token = nil
+                        cfg.cookie, cfg.token, cfg.account, cfg.password, cfg.protocol = nil, nil, nil, nil, nil
                         settings.saveSource(SOURCE_ID, cfg)
                         require("ui.themes.widgets.toast"):new{ text = _("已退出登录"), timeout = 2 }:show()
                         require("source.registry").reload()
@@ -174,12 +196,12 @@ function Setting.rows(plugin)
     return rows
 end
 
+---@param account string
+---@param password string
 ---@param token string
-local function saveToken(token)
-    local settings = require("utils.settings")
-    local cfg = settings.getSource(SOURCE_ID)
-    cfg.token = token
-    settings.saveSource(SOURCE_ID, cfg)
+local function saveToken(account, password, token)
+    require("source.jjwxc.protocols.app").save(account, password, token)
+    require("source.jjwxc.protocols").select("app")
     require("source.auth").ok(SOURCE_ID)
     require("source.registry").reload()
 end
@@ -192,12 +214,12 @@ local showLogin
 ---@param message string
 local function showVerify(account, password, message)
     local Toast = require("ui.themes.widgets.toast")
-    local Client = require("source.jjwxc.client")
+    local Token = require("source.jjwxc.protocols.app")
     local checktype = "phone"
     local function send(kind)
         checktype = kind
         require("ui/network/manager"):runWhenOnline(function()
-            Client.sendCodeAsync(account, kind, function(msg, err)
+            Token.sendCodeAsync(account, kind, function(msg, err)
                 Toast:new{ text = msg or err, timeout = 3 }:show()
             end)
         end)
@@ -232,10 +254,10 @@ function showLogin(account, password, verify)
             title = _("晋江账号"), text = _("正在登录…"), dismissable = false,
         }
         waiting:show()
-        require("source.jjwxc.client").loginAsync(account, password, verify, function(token, err, kind)
+        require("source.jjwxc.protocols.app").loginAsync(account, password, verify, function(token, err, kind)
             waiting:close()
             if token then
-                saveToken(token)
+                saveToken(account, password, token)
                 Toast:new{ text = _("登录成功"), timeout = 2 }:show()
             elseif kind == "verify" then
                 showVerify(account, password, err)

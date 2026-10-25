@@ -12,10 +12,12 @@
 local Browse = require("source.browse")
 local Client = require("source.jjwxc.client")
 local Mapper = require("source.jjwxc.mapper")
+local Protocols = require("source.jjwxc.protocols")
 local ReviewCache = require("book.review_cache")
 local Shelf = require("source.shelf")
 local SourceBase = require("source.base")
 local Toc = require("source.toc")
+local Web = require("source.jjwxc.protocols.web")
 local _ = require("gettext")
 
 local Jjwxc = {}
@@ -40,7 +42,7 @@ end
 
 ---@return boolean
 function Source:configured()
-    return Client.cookie() ~= nil or Client.token() ~= nil
+    return Protocols.current() ~= nil
 end
 
 --- 收藏页的书名是截断的：本地没有完整元数据（封面是标志）的书逐本补拉详情，拉不到就退回页面上的书名。
@@ -81,10 +83,7 @@ local Remote = {}
 
 function Remote:shelfSyncAsync(cb)
     local cancelled, job, fill = false, nil, nil
-    local cookie = Client.cookie()
-    local fetch = cookie and function(done) return Client.favAsync(cookie, done) end
-        or function(done) return Client.tokenFavAsync(Client.token(), done) end
-    job = fetch(function(rows, err)
+    job = Protocols.current().shelfAsync(function(rows, err)
         if cancelled then return end
         if not rows then cb(nil, err); return end
         fill = fillDetails(rows, cb)
@@ -102,10 +101,10 @@ function Remote:addToShelfAsync(_stable_id, cb)
 end
 
 function Remote:removeFromShelfAsync(stable_id, cb)
-    if not Client.cookie() then
-        return SourceBase.defer(cb, nil, _("账号密码登录暂不支持取消收藏，请用浏览器登录"))
+    if Protocols.current() ~= Web then
+        return SourceBase.defer(cb, nil, _("App 协议暂不支持取消收藏，请在设置里改用网页协议"))
     end
-    return Client.favRemoveAsync(stable_id, cb)
+    return Web.favRemoveAsync(stable_id, cb)
 end
 
 --- 未登录时书库就是唯一真相：标删后直接撕墓碑；登录后走基类三段式，由书架同步推删。
@@ -175,7 +174,7 @@ local RANKS = {
 ---@return { cancel: fun() }
 function Source:browseAsync(opts, cb)
     local rank, idx = (opts.node or RANKS[1][1] .. ":1"):match("^(%d+):(%d+)$")
-    return Client.rankAsync(rank, function(sections, err)
+    return Web.rankAsync(rank, function(sections, err)
         if not sections then
             cb(nil, err)
             return
@@ -200,7 +199,7 @@ end
 ---@param identity BookIdentity
 ---@param toc BookChapter[]
 local function probePaid(self, identity, toc)
-    if not Client.cookie() or self.probing then return end
+    if Protocols.current() ~= Web or self.probing then return end
     local todo = {}
     for _idx, chapter in ipairs(toc) do
         if chapter.vip and chapter.paid == nil then todo[#todo + 1] = chapter end
@@ -216,7 +215,7 @@ local function probePaid(self, identity, toc)
             if changed then Toc.put(self.id, identity.stable_id, toc) end
             return
         end
-        Client.paidAsync(identity.stable_id, chapter.uid, function(paid)
+        Web.paidAsync(identity.stable_id, chapter.uid, function(paid)
             if paid == nil then
                 pos = #todo
             else

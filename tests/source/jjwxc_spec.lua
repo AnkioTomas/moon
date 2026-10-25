@@ -7,8 +7,9 @@
 
 local Assert = require("support.assert")
 
+local source_cfg = {}
 package.preload["utils.settings"] = function()
-    return { getSource = function() return {} end }
+    return { getSource = function() return source_cfg end, saveSource = function() end }
 end
 package.loaded["source.jjwxc.mapper"] = nil
 package.loaded["source.jjwxc.setting"] = nil
@@ -183,4 +184,41 @@ do
     Assert.len(rows, 1)
     Assert.eq(rows[1].id, "7")
     Assert.eq(rows[1].author, "乙")
+end
+
+do
+    local Des = require("crypto.des")
+    local Md5, Hex = require("crypto.md5"), require("crypto.hex")
+    package.loaded["source.jjwxc.protocols.app"] = nil
+    local Client = require("source.jjwxc.protocols.app")
+    local keystring = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    local plain = '{"content":"正文","code":"1004"}'
+    -- accesskey 字节和 = 97+98+99 = 294，末字符 c(99) 为奇：盐在尾；偏移 294%62=46，长度 floor(294/65)=4
+    local salt, part = "0123456789ab", keystring:sub(47, 50)
+    local cipher = Hex.to_hex(Des.encrypt(plain, Md5.hex(part .. salt):sub(1, 8), Md5.hex(salt):sub(1, 8)))
+    Assert.eq(Client.decryptBody(cipher .. salt, "abc", keystring), plain)
+    -- 末字符为偶：盐在头
+    local even_sum = 97 + 98 + 100
+    local start2, count2 = even_sum % #keystring, math.floor(even_sum / 65)
+    local part2 = keystring:sub(start2 + 1, start2 + count2)
+    local cipher2 = Hex.to_hex(Des.encrypt(plain, Md5.hex(part2 .. salt):sub(1, 8), Md5.hex(salt):sub(1, 8)))
+    Assert.eq(Client.decryptBody(salt .. cipher2, "abd", keystring), plain)
+end
+
+do
+    local Settings = require("utils.settings")
+    local Protocols = require("source.jjwxc.protocols")
+    local cfg = Settings.getSource("jjwxc")
+    cfg.cookie, cfg.token, cfg.protocol = nil, nil, nil
+    Assert.is_nil(Protocols.current())
+    cfg.token = "t"
+    Assert.eq(Protocols.current().id, "app")
+    cfg.cookie = "c=1"
+    Assert.eq(Protocols.current().id, "web")
+    Protocols.select("app")
+    Assert.eq(Protocols.current().id, "app")
+    cfg.protocol = "web"
+    cfg.cookie = nil
+    Assert.eq(Protocols.current().id, "app")
+    cfg.token, cfg.protocol = nil, nil
 end
