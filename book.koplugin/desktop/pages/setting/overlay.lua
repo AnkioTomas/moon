@@ -33,6 +33,7 @@ local TitleBar = require("ui.themes.widgets.titlebar")
 ---@field preview (fun(width: number): table)|nil
 ---@field sections fun(): BookThemeSection[]
 ---@field on_close (fun())|nil
+---@field refresh_seconds number|nil 页面在最上层时每隔这么久重算一次（运行状态这类实时页）
 ---@field right_icon string|nil 标题栏右上角图标
 ---@field right_callback (fun())|nil
 
@@ -114,6 +115,24 @@ end
 function Overlay:init()
     Modal.init(self)
     self:rebuild()
+    if self.spec.refresh_seconds then self:startRefresh(self.spec.refresh_seconds) end
+end
+
+-- 第一次 2 秒后就刷：CPU 占用要两次采样才有数。被二级页面盖住时不画。
+function Overlay:startRefresh(seconds)
+    self._refresh = require("ui.guard").wrap("settings refresh", function()
+        if self.refresh_stopped then return end
+        local stack = UIManager._window_stack
+        if stack[#stack].widget == self then self:updateView() end
+        UIManager:scheduleIn(seconds, self._refresh)
+    end)
+    UIManager:scheduleIn(2, self._refresh)
+end
+
+function Overlay:onCloseWidget()
+    self.refresh_stopped = true
+    if self._refresh then UIManager:unschedule(self._refresh) end
+    Modal.onCloseWidget(self)
 end
 
 function Overlay:rebuild()
