@@ -397,6 +397,44 @@ function Subscribe.probe(kind, url, filter, cb, public, seen)
     end)
 end
 
+local swept = {}
+
+--- 清缓存：条目已被淘汰（条数 / 180 天）的文章缓存删掉，没有任何缓存文章再引用的图片删掉。收藏的条目不会被淘汰，缓存跟着留。
+--- 淘汰发生时扫；另外每个订阅每次启动扫一次，收拾老版本留下的孤儿文件。
+---@param feed_id integer
+function Subscribe.sweep(feed_id)
+    local lfs = require("libs/libkoreader-lfs")
+    local dir = Subscribe.dir(feed_id)
+    local articles = dir .. "/articles"
+    if lfs.attributes(articles, "mode") ~= "directory" then return end
+    local md5 = require("ffi/sha2").md5
+    local keep = {}
+    for guid in pairs(SubDB.guids(feed_id)) do keep[md5(guid)] = true end
+    local used = {}
+    for name in lfs.dir(articles) do
+        local id = name:match("^(%x+)%.html$")
+        if id and not keep[id] then
+            os.remove(articles .. "/" .. name)
+        elseif id then
+            local f = io.open(articles .. "/" .. name, "rb")
+            if f then
+                for img in f:read("*a"):gmatch('src="images/([^"]+)"') do used[img] = true end
+                f:close()
+            end
+        end
+    end
+    local images = dir .. "/images"
+    if lfs.attributes(images, "mode") ~= "directory" then return end
+    for name in lfs.dir(images) do
+        local path = images .. "/" .. name
+        -- 刚下好、正文还没落盘的图（文章下载进行中）不动。
+        if not used[name] and lfs.attributes(path, "mode") == "file"
+            and os.time() - lfs.attributes(path, "modification") > 3600 then
+            os.remove(path)
+        end
+    end
+end
+
 --- 刷新一个源；more 为真时拉更早的一页（只有公众号有）。
 ---@param feed table SubDB 行
 ---@param more boolean|nil
@@ -411,7 +449,11 @@ function Subscribe.refresh(feed, more, cb)
             SubDB.update(feed.id, { error = tostring(err or "") })
             return cb(nil, err)
         end
-        local added = SubDB.merge(feed.id, items)
+        local added, removed = SubDB.merge(feed.id, items)
+        if removed > 0 or not swept[feed.id] then
+            swept[feed.id] = true
+            Subscribe.sweep(feed.id)
+        end
         -- 刷新第一页不能把已经翻到更早的游标拉回来。
         local keep = more and (next_cursor or 0) or math.max(feed.cursor or 0, next_cursor or 0)
         SubDB.update(feed.id, { cursor = keep, updated_at = os.time(), error = "" })
