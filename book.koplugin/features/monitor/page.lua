@@ -65,6 +65,15 @@ local function pluginModules()
     return out
 end
 
+---@param title string
+---@param status string
+---@return fun(iw: number): table
+local function infoRow(title, status)
+    return function(iw)
+        return Row.widget({ width = iw, chevron = false, title = title, status = status })
+    end
+end
+
 --- 点一下才分析：要整堆遍历，几百毫秒；结果缓存到下次再点。
 ---@param desktop BookDesktop
 ---@return BookThemeSection
@@ -105,15 +114,6 @@ function Page.toggleSort(desktop)
     local s = state(desktop)
     s.sort = s.sort == "mem" and "cpu" or "mem"
     if desktop.settings_overlay then desktop.settings_overlay:updateView() end
-end
-
----@param title string
----@param status string
----@return fun(iw: number): table
-local function infoRow(title, status)
-    return function(iw)
-        return Row.widget({ width = iw, chevron = false, title = title, status = status })
-    end
 end
 
 --- KOReader 自带的「设备状态警报 → 高内存用量」（ReaderDeviceStatus，注册为 ui.devicestatus）。
