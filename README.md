@@ -50,7 +50,7 @@
 | 元数据刮削与封面缓存 | X-Ray、统一查词窗口（词典 / 翻译 / AI / 百科）、整书双语对照、段评、生僻字注音 | 进度冲突处理与离线补推 | 局域网文件、输入、配置与更新管理 |
 | Z-Library 与 OPDS 书城、订阅（RSS / 网页 / 公众号） | 重新排版（另存，原书不动）、AZW3 | 热力图、阅读时段、读完预测、年度记录 | 快捷面板与 14 种翻页动画 |
 | 后台任务列表、单书缓存清理 | 按章书的全书笔记列表、章节缓存范围 | 导入 KOReader 自带统计 | 自动夜间、自动亮度、时区与 NTP 校时 |
-| 游戏：小黑屋、阿页的阁楼、游戏合集（可选插件） | | | |
+| 游戏：小黑屋、阿页的阁楼、游戏合集（可选插件） | 蓝牙翻页器与想法选择器（可选插件 pageturner） | | |
 
 ## 目录
 
@@ -240,6 +240,7 @@ AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址�
   - **Kobo 系统蓝牙**：i.MX6 机型走 hciattach / bluetoothctl，需已装 [bluetooth.koplugin](https://github.com/onatbas/bluetooth.koplugin) 自带的 uhid.ko；MTK 机型走系统 D-Bus；连上后自动接入输入设备。
   - **Android**：蓝牙在系统里，KOReader 没有接口，请在系统设置里连接。
   - 系统蓝牙后端尚未在真机充分验证，遇到问题请反馈。
+  - **翻页器：** 蓝牙只管连上，把翻页器接成翻页键、录手势、用它选想法，由独立插件[翻页器 pageturner](https://github.com/AnkioTomas/ko-pageturner)负责（可选，见[翻页器（可选）](#翻页器可选)）。
 - **网络超时：** 「网络」页可设普通请求的默认超时（默认 30 秒，5～300 秒），下载等请求按倍率放大；AI 请求单独用「AI 接口」页的「AI 请求超时」（默认 120 秒，10～600 秒）。
 - **HTTP 代理：** 与 KOReader 原生「HTTP 代理」是同一份设置，月读的网络请求也会走代理；只支持 `http://` 代理，HTTPS 请求经隧道转发，保存前会经代理实测一次。
 - **在线更新：** 检查 GitHub Release，直连与公益镜像竞速下载，只信任 GitHub 给出的 SHA-256；自动检查每天最多一次，只提示不自动安装。词典、词库、OCR 等资源下载也会在多个镜像间自动切换，优先用上次成功的源。
@@ -406,6 +407,15 @@ Release 里另有两个独立插件包，需要同时安装月读才能使用：
 | `moonsource-bookorbit.koplugin-<版本>.zip` | BookOrbit 服务器 |
 
 解压后把 `moonsource-xxx.koplugin/` 目录和 `book.koplugin/` 一样放进 `plugins/`，重启 KOReader 后在月读的数据源里选择。
+
+### 翻页器（可选）
+
+[翻页器 pageturner](https://github.com/AnkioTomas/ko-pageturner)（`pageturner.koplugin`）是月读的联动插件，从它的 [Release](https://github.com/AnkioTomas/ko-pageturner/releases) 下载，把解压出的 `pageturner.koplugin/` 放进 `plugins/`，重启 KOReader。没装月读也能单独用，装了会联动：
+
+- **蓝牙联动：** 月读里开蓝牙就自动接管翻页器并连上，翻页器重连后自动重新接管，连着时不息屏；没装月读时每 10 秒轮询一次。
+- **设置页：** 月读 **设置 → 阅读 → 翻页器** 里录「下一个 / 上一个 / 确认」手势（单击、连按 2~3 下、长按）。
+- **想法选择器：** 用翻页器选中并打开当前页的想法，段评来自月读，没装月读时只有自己带笔记的划线可选。
+- **设备：** Kindle 配合 kindle-hid-passthrough 或 Kindle 原生蓝牙；Kobo 路径尚未在真机验证。Android 和桌面版不适用。
 
 ### 游戏（可选）
 
