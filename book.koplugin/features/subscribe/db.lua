@@ -314,12 +314,6 @@ function SubDB.setStarred(feed_id, guid, starred)
     DB.exec("UPDATE sub_items SET starred=? WHERE feed_id=? AND guid=?;", starred and 1 or 0, feed_id, guid)
 end
 
---- 全部未读数（跨源）。
----@return integer
-function SubDB.unreadTotal()
-    return tonumber(DB.rowexec("SELECT COUNT(*) FROM sub_items WHERE read=0;")) or 0
-end
-
 --- 条目自带正文（RSS content / description）。
 ---@return string|nil
 function SubDB.summary(feed_id, guid)
