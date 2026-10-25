@@ -692,5 +692,93 @@
             .then(function () { el('pl-ok').disabled = el('pl-cancel').disabled = false; return load(); });
     };
 
+    // ── 在线订阅源 ──
+    var ctFeeds = [], ctPicked = {}, ctLoaded = false;
+    function ctMatch(f) {
+        var q = el('ct-q').value.trim().toLowerCase();
+        return !q || f.title.toLowerCase().indexOf(q) >= 0 || f.url.toLowerCase().indexOf(q) >= 0;
+    }
+    function ctVisible() {
+        return ctFeeds.filter(function (f) { return !f.subscribed && ctMatch(f); });
+    }
+    function ctRender() {
+        var ul = el('ct-list');
+        ul.textContent = '';
+        ctFeeds.forEach(function (f, i) {
+            if (!ctMatch(f)) return;
+            var li = mk('li', f.subscribed ? 'done' : null);
+            var lb = mk('label');
+            var cb = mk('input');
+            cb.type = 'checkbox';
+            cb.checked = !!ctPicked[i];
+            cb.disabled = f.subscribed;
+            cb.onchange = function () { if (cb.checked) ctPicked[i] = true; else delete ctPicked[i]; ctCount(); };
+            lb.appendChild(cb);
+            var tx = mk('span');
+            tx.setAttribute('translate', 'no');
+            tx.appendChild(mk('strong', null, f.title));
+            tx.appendChild(mk('small', null, f.url));
+            lb.appendChild(tx);
+            if (f.subscribed) lb.appendChild(mk('em', null, t('已订阅')));
+            li.appendChild(lb);
+            ul.appendChild(li);
+        });
+        if (!ul.children.length) ul.appendChild(mk('li', 'empty', t('没有可订阅的条目')));
+        ctCount();
+    }
+    function ctCount() {
+        var n = Object.keys(ctPicked).length;
+        el('ct-count').textContent = t('共 %1 个，已选 %2 个', ctFeeds.length, n);
+        el('ct-ok').disabled = !n;
+    }
+    function ctOpenSource(id) {
+        ctFeeds = []; ctPicked = {};
+        el('ct-list').textContent = '';
+        el('ct-list').appendChild(mk('li', 'empty', t('正在加载…')));
+        el('ct-ok').disabled = true;
+        post('catalog', { id: id }).then(function (r) {
+            ctFeeds = r.feeds;
+            el('ct-group').value = el('ct-group').value || '';
+            ctRender();
+        }).catch(function (e) {
+            el('ct-list').textContent = '';
+            el('ct-list').appendChild(mk('li', 'empty', t('加载失败：%1', errText(e))));
+        });
+    }
+    el('catalog-open').onclick = function () {
+        el('catalog').hidden = false;
+        if (ctLoaded) return;
+        get('catalog').then(function (r) {
+            var sel = el('ct-source'), box = null, last = null;
+            r.sources.forEach(function (s) {
+                if (s.group !== last) { box = mk('optgroup'); box.label = t(s.group); sel.appendChild(box); last = s.group; }
+                var o = mk('option', null, t(s.name));
+                o.value = s.id;
+                box.appendChild(o);
+            });
+            ctLoaded = true;
+            ctOpenSource(sel.value);
+        }).catch(fail);
+    };
+    el('ct-close').onclick = function () { el('catalog').hidden = true; };
+    el('ct-source').onchange = function () { ctOpenSource(this.value); };
+    el('ct-q').oninput = ctRender;
+    el('ct-all').onchange = function () {
+        var on = this.checked;
+        ctVisible().forEach(function (f) {
+            var i = ctFeeds.indexOf(f);
+            if (on) ctPicked[i] = true; else delete ctPicked[i];
+        });
+        ctRender();
+    };
+    el('ct-ok').onclick = function () {
+        var feeds = Object.keys(ctPicked).map(function (i) { return ctFeeds[i]; });
+        el('ct-ok').disabled = true;
+        post('pick', { feeds: feeds, group: el('ct-group').value.trim() }).then(function (r) {
+            toast(t('已订阅 %1 个，跳过 %2 个。', r.added, r.skipped));
+            return load().then(function () { return ctOpenSource(el('ct-source').value); });
+        }).catch(function (e) { fail(e); el('ct-ok').disabled = false; });
+    };
+
     load();
 })();

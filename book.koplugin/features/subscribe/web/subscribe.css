@@ -185,3 +185,17 @@
     .sub-page .sub-bulk-help { padding: 10px 12px }
     .sub-page #bk-text { padding: 12px }
 }
+
+/* 在线订阅源 */
+.sub-catalog-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--row-rule) }
+.sub-catalog-bar .ct-all { display: flex; align-items: center; gap: 6px; font-size: 13px }
+.sub-catalog-bar #ct-group { width: 200px }
+.sub-ct-list { flex: 1; margin: 0; padding: 0; overflow: auto; list-style: none }
+.sub-ct-list li { border-bottom: 1px solid var(--row-rule) }
+.sub-ct-list li.empty { padding: 32px 16px; color: var(--dim); text-align: center }
+.sub-ct-list label { display: flex; align-items: center; gap: 12px; padding: 10px 16px; cursor: pointer }
+.sub-ct-list label > span { display: flex; flex-direction: column; min-width: 0; flex: 1 }
+.sub-ct-list strong, .sub-ct-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.sub-ct-list small { color: var(--dim) }
+.sub-ct-list li.done { opacity: .5 }
+.sub-ct-list em { color: var(--dim); font-size: 12px; font-style: normal }
