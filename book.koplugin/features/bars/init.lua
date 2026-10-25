@@ -412,6 +412,7 @@ local function liveContext()
         return nil
     end
     local book = cur.identity.book
+    local toc = Session.toc()
     local chapter_page, chapter_pages = Session.chapterPages(cur)
     local page, total_pages = Session.bookPages(cur)
     return {
