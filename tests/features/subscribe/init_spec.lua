@@ -424,6 +424,23 @@ do
     Assert.eq(asked[2], "http://192.168.1.2/x.png")
     Assert.eq(answers[1], "IMG")
     redirects["https://cdn.test/a.png"] = nil
+
+    -- 地址是 .jpg 但服务器按协商给了 AVIF：公网图转 JPEG（不看后缀），局域网原样交回。
+    local avif = "\0\0\0\28ftypavif"
+    Req.stream = function(opts, h)
+        asked[#asked + 1] = opts.url
+        h.on_headers(200, {})
+        h.on_data(opts.url:find("wsrv.nl", 1, true) and "JPEG" or avif)
+        h.on_done(nil)
+        return { cancel = function() end }
+    end
+    download("https://a.com/p", "https://cdn.test/n.jpg")
+    Assert.eq(#asked, 2)
+    Assert.matches(asked[2], "^https://wsrv%.nl/%?output=jpg.*url=https%%3A%%2F%%2Fcdn%.test%%2Fn%.jpg")
+    Assert.eq(answers[1], "JPEG")
+    download("http://192.168.1.5/p", "https://cdn.test/n.jpg")
+    Assert.eq(#asked, 1)
+    Assert.eq(answers[1], avif)
     Req.stream, package.loaded["source.assets"] = real_stream, real_assets
 end
 

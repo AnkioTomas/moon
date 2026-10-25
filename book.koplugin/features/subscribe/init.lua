@@ -15,6 +15,7 @@ local Parse = require("features.subscribe.parse")
 local SubDB = require("features.subscribe.db")
 local Paths = require("utils.paths")
 local Text = require("utils.text")
+local Image = require("utils.image")
 local logger = require("utils.log")
 local _ = require("gettext")
 
@@ -182,7 +183,7 @@ local function imageDownloader(referer)
     local lan = Subscribe.privateHost(referer)
     return function(url, cb)
         local job = { cancelled = false }
-        local function fetch(target, hops)
+        local function fetch(target, hops, converted)
             if not lan and Subscribe.privateHost(target) then return cb(nil) end
             local Request = require("http.request")
             local chunks, code, headers = {}, nil, nil
@@ -203,20 +204,19 @@ local function imageDownloader(referer)
                     if code and code >= 300 and code < 400 then
                         local loc = Request.header({ headers = headers }, "Location")
                         if not loc or loc == "" or hops >= 5 then return cb(nil) end
-                        return fetch(Text.absoluteUrl(target, Text.trim(loc)), hops + 1)
+                        return fetch(Text.absoluteUrl(target, Text.trim(loc)), hops + 1, converted)
                     end
                     if err or code ~= 200 then return cb(nil) end
                     local body = table.concat(chunks)
+                    -- KOReader 解不了 AVIF / HEIC（不论地址后缀，CDN 常按 Accept 协商）：公网图交给 wsrv.nl 转成 JPEG。
+                    if not lan and not converted and Image.unsupported(body) then
+                        return fetch("https://wsrv.nl/?output=jpg&w=1200&q=80&url=" .. Text.urlEncode(url), 0, true)
+                    end
                     cb(body ~= "" and body or nil)
                 end,
             })
         end
-        -- KOReader 解不了 AVIF：公网图交给 wsrv.nl 转成 JPEG（图片地址本来就是公开的）。
-        local first = url
-        if not lan and url:lower():match("^https?://[^?#]+%.avif$") and not Subscribe.privateHost(url) then
-            first = "https://wsrv.nl/?output=jpg&w=1200&q=80&url=" .. Text.urlEncode(url)
-        end
-        fetch(first, 0)
+        fetch(url, 0)
         -- assets 以 handle.cancel() 调用（不带 self），闭包写法两种调法都行。
         job.cancel = function()
             job.cancelled = true
