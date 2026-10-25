@@ -77,7 +77,7 @@ function renderForms(list, external) {
                 saveGroup(group, payload).then(function () {
                     setState(state, '已保存', 'ok');
                     return el('rsbtn').onclick = function () {
-    var state = el('rsstate');
+    var state = el('rstate');
     if (!window.confirm(t('清除全部配置和崩溃日志后将重启 KOReader，无法恢复，继续吗？'))) return;
     el('rsbtn').disabled = true;
     setState(state, '清除中…', '');
@@ -117,7 +117,7 @@ function loadSettings() {
 }
 
 el('rsbtn').onclick = function () {
-    var state = el('rsstate');
+    var state = el('rstate');
     if (!window.confirm(t('清除全部配置和崩溃日志后将重启 KOReader，无法恢复，继续吗？'))) return;
     el('rsbtn').disabled = true;
     setState(state, '清除中…', '');
