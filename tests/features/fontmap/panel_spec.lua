@@ -2,6 +2,8 @@
 local Assert = require("support.assert")
 local requested
 local supported = true
+local settings = { enabled = true }
+package.loaded["utils.settings"] = { get = function() return settings end }
 local state = { start = function(_self, value) requested = value end }
 package.loaded["features.fontmap"] = {
     supported = function() return supported end,
@@ -24,3 +26,6 @@ supported = true
 requested = nil
 action.run({ ui = {} })
 Assert.is_nil(requested, "不支持的文档不创建状态、不启动扫描")
+settings.enabled = false
+Assert.is_false(action.available({ ui = nil }), "关闭后不提供快捷动作")
+Assert.is_false(action.available({ ui = ui }))

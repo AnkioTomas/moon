@@ -11,7 +11,8 @@ function Panel.actions()
         id = "fontmap", title = _("书内字体映射"), icon = "font_download", scope = "reader",
         available = function(ctx)
             local FontMap = require("features.fontmap")
-            return FontMap.supported() and (not ctx or not ctx.ui or FontMap.available(ctx.ui))
+            return require("utils.settings").get("features.fontmap").enabled and FontMap.supported()
+                and (not ctx or not ctx.ui or FontMap.available(ctx.ui))
         end,
         run = function(ctx)
             local FontMap = require("features.fontmap")

@@ -4,6 +4,7 @@ local Assert = require("support.assert")
 local Themed = require("support.theme_stubs")
 Themed.install()
 local mappings = {}
+local settings = { mappings = mappings }
 ---@type { pending?: { on_done: fun(names: string[]), on_failed: fun(err: string) } }
 local callbacks = {}
 ---@type FontPickerOpts|nil
@@ -14,7 +15,7 @@ local identities, face_calls, jobs = {}, 0, 0
 package.loaded["book.store"] = { identityFor = function(path) return identities[path] end }
 package.loaded["version"] = { getNormalizedCurrentVersion = function() return version end }
 package.loaded["utils.settings"] = {
-    get = function() return { mappings = mappings } end,
+    get = function() return settings end,
     save = function() saved = saved + 1 end,
 }
 package.loaded["utils.log"] = { warn = function() warnings = warnings + 1 end }
@@ -67,6 +68,14 @@ local function ui(styles)
     return reader
 end
 
+local off = ui(1)
+FontMap.onCreate({ ui = off, path = "" })
+FontMap.onReaderReady({ ui = off, path = "" })
+Assert.is_nil(off._book_fontmap, "未开启时不装 hook")
+Assert.eq(jobs, 0, "未开启时不扫描")
+Assert.eq(face_calls, 0, "未开启时不解析映射字体")
+Assert.is_false(FontMap.available(off))
+settings.enabled = true
 local reader = ui(1)
 local original = reader.document.setStyleSheet
 local plugin = { ui = reader, path = "" }
@@ -213,3 +222,18 @@ Assert.eq(face_calls, calls_before + 1, "同一目标只解析一次")
 dedup.document:setStyleSheet("book.css", "")
 Assert.eq(face_calls, calls_before + 1, "重排不重复准备字体")
 FontMap.onExit({ ui = dedup, path = "" })
+
+local switching = ui(1)
+FontMap.onCreate({ ui = switching, path = "" })
+FontMap.onReaderReady({ ui = switching, path = "" })
+switching._book_fontmap:pick("Absent")
+settings.enabled = false
+made = #Themed.made
+callbacks.pending.on_done({ "Absent" })
+Assert.eq(#Themed.made, made, "关闭后扫描的迟到结果不弹窗")
+callbacks.pending.on_failed("late error")
+Assert.eq(#Themed.made, made, "关闭后失败回调不弹错误")
+local before_pick_saved = saved
+picker.on_select({ id = "Kai", name = "Kai", kind = "system" }, "Kai", "Kai")
+Assert.eq(saved, before_pick_saved, "关闭后字体选择的迟到结果不再保存/重载")
+FontMap.onExit({ ui = switching, path = "" })
