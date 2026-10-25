@@ -294,6 +294,7 @@ end
 --- JSON 或图过期才入队。未过期是空操作。url 变了（换地点）才取消在跑的同名任务。
 function Online:ensure()
     if self:fresh() and self:imageReady() then return end
+    if self._retry_at and os.time() < self._retry_at then return end
     local Tasks = require("workers.tasks")
     local key = "online\0" .. self.name
     local url = self:url()
@@ -311,6 +312,16 @@ function Online:ensure()
         restartable = true,
         _online_url = url,
         retryable = function(result) return not result.ok end,
+        -- 任务（含退避重试）最终失败后冷却，避免桌面每次激活都重新入队、反复占连接超时。
+        on_done = function(result)
+            if result.ok then
+                self._fail_count = 0
+                self._retry_at = nil
+                return
+            end
+            self._fail_count = (self._fail_count or 0) + 1
+            self._retry_at = os.time() + math.min(120 * 2 ^ (self._fail_count - 1), 1800)
+        end,
         run = function(report, done)
             report(title)
             if not require("ui/network/manager"):isConnected() then
