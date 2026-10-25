@@ -466,6 +466,8 @@ local function paint(self, bb, x, y)
                 icons = icons,
             }
         )
+        -- ReaderView 先画书签折角再画扩展层；额外顶栏高度会盖住折角，需恢复到最上层。
+        if ui.view.dogear_visible then ui.view.dogear:paintTo(bb, x, y) end
     end
 
     local rect = bottom and bottomRect(ui, x, y)

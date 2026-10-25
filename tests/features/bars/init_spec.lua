@@ -309,6 +309,29 @@ do
     Assert.eq(painted[1].x, 12, "顶栏水平留白")
     Assert.eq(painted[2].x, 12, "底栏与顶栏同一水平留白，不叠加 footer 边距")
     Assert.eq(painted[2].w, 600 - 24)
+    local dogears = {}
+    ui_top.view.dogear = {
+        paintTo = function(_self, _bb, x, y)
+            dogears[#dogears + 1] = { x = x, y = y, painted = #painted }
+        end,
+    }
+    local bb = { paintRect = function() end }
+    ui_top.view.dogear_visible = true
+    painted = {}
+    Bars:paintTo(bb, 5, 7)
+    Assert.len(dogears, 1)
+    Assert.eq(dogears[1].painted, 1, "顶栏内容绘制完成后恢复原生书签折角")
+    Assert.eq(dogears[1].x, 5)
+    Assert.eq(dogears[1].y, 7)
+    ui_top.view.dogear_visible = false
+    Bars:paintTo(bb, 0, 0)
+    Assert.len(dogears, 1, "取消书签后不重画折角")
+    ui_top.view.dogear_visible = true
+    replace.top = false
+    Bars:paintTo(bb, 0, 0)
+    Assert.len(dogears, 1, "未替代顶栏时保留原生绘制，不重复画折角")
+    replace.top = true
+    ui_top.view.dogear_visible = false
     package.loaded["features.bars.items"] = nil
     package.loaded["ui/font"] = nil
 end
