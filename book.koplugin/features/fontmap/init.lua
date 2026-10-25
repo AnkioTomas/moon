@@ -48,7 +48,8 @@ end
 ---@param ui table|nil
 ---@return boolean
 function FontMap.available(ui)
-    if not FontMap.supported() or not ui or not ui.rolling or type(ui.document.setStyleSheet) ~= "function"
+    if not require("utils.settings").get("features.fontmap").enabled
+        or not FontMap.supported() or not ui or not ui.rolling or type(ui.document.setStyleSheet) ~= "function"
         or type(ui.document.getEmbeddedFontList) ~= "function" then return false end
     local ext = ui.document.file:lower():match("%.([%w]+)$")
     if ext ~= "epub" and ext ~= "html" and ext ~= "htm" and ext ~= "xhtml" and ext ~= "fb2" and ext ~= "zip" then
@@ -104,7 +105,8 @@ end
 
 ---@return boolean
 function FontMap:stylesEnabled()
-    return self.ui.document.configurable.embedded_css ~= 0
+    return require("utils.settings").get("features.fontmap").enabled
+        and self.ui.document.configurable.embedded_css ~= 0
 end
 
 --- 仅应用当前书用到的映射；不存在的目标字体重新列为缺失，不拖累其它书。
@@ -150,7 +152,7 @@ function FontMap:pick(name)
         title = T(_("映射字体：%1"), name),
         current_id = function() return mappings[name] and mappings[name].id or "" end,
         on_select = function(_item, id, label)
-            if self.closed then return end
+            if self.closed or not self:stylesEnabled() then return end
             local face, err = require("ui.fonts").faceForId(id)
             if not face then
                 require("ui.themes.widgets.toast"):new{ text = err }:show()
@@ -215,7 +217,8 @@ end
 
 ---@param requested boolean 从快捷面板主动打开时展示全部字体，否则只提示缺失字体。
 function FontMap:start(requested)
-    if not FontMap.supported() or self.closed then return end
+    if not require("utils.settings").get("features.fontmap").enabled
+        or not FontMap.supported() or self.closed then return end
     if not self:stylesEnabled() then
         if requested then require("ui.themes.widgets.toast"):new{ text = _("请先开启本书的内嵌样式") }:show() end
         return
@@ -241,7 +244,7 @@ function FontMap:start(requested)
         end),
         on_failed = function(err)
             self.job = nil
-            if self.closed then return end
+            if self.closed or not self:stylesEnabled() then return end
             require("utils.log").warn("fontmap scan failed", path, err)
             require("ui.themes.widgets.toast"):new{ text = T(_("检测书内字体失败：%1"), err) }:show()
         end,
