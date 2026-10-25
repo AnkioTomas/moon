@@ -111,7 +111,7 @@ function Paper.view(page, w, h)
         return padded(line)
     end
 
-    -- 顶栏：范围下拉 ........ 添加 刷新 缓存 管理
+    -- 顶栏：范围下拉 ........ 添加 刷新 全部已读 缓存 管理
     local pick
     pick = Button:new{ text = page:scopeLabel(), icon = "arrow_drop_down", trailing = true, size = "small",
         callback = function() page:pickScope(pick.dimen) end }
@@ -119,6 +119,7 @@ function Paper.view(page, w, h)
     local tools = HorizontalGroup:new{ align = "center",
         tool("add", function() page:showAdd() end),
         tool("refresh", function() page:refresh(page:scopeFeeds(), false, true) end),
+        tool("done_all", function() page:markAllRead() end),
         tool("download", function() page:cacheUnread() end),
         tool("delete", function() page:showManage() end) }
     local head = VerticalGroup:new{ align = "left", VerticalSpan:new{ width = sm }, ends(pick, tools),

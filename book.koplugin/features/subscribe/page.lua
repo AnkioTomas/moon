@@ -301,6 +301,23 @@ function Page:scopeFeeds()
     return out
 end
 
+--- 当前范围（来源 / 分组）的全部文章标已读，确认后执行。
+function Page:markAllRead()
+    local Toast = require("ui.themes.widgets.toast")
+    local feeds = self:scopeFeeds()
+    local unread = 0
+    for _idx, feed in ipairs(feeds) do unread = unread + feed.unread end
+    if unread == 0 then return Toast:new{ text = _("没有未读文章"), timeout = 3 }:show() end
+    require("ui.themes.widgets.confirm"):new{
+        text = T(_("将「%1」的 %2 篇未读文章全部标为已读？"), self:scopeLabel(), unread),
+        ok_text = _("全部已读"),
+        ok_callback = function()
+            for _idx, feed in ipairs(feeds) do SubDB.markRead(feed.id) end
+            self:redraw()
+        end,
+    }:show()
+end
+
 --- 当前范围的全部未读文章正文进后台缓存任务（kind = cache）；离线时有网才能下，直接提示。
 function Page:cacheUnread()
     local Toast = require("ui.themes.widgets.toast")
