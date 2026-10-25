@@ -189,3 +189,37 @@ Assert.is_false((Passcode.verify("000000")))
 os.remove(path)
 Assert.is_true(Passcode.verify("000000"))
 Assert.is_false(Passcode.hasPin())
+
+-- 手势与 PIN 互斥：同一份凭证，后设置的覆盖先设置的；旧数据没有 mode 即 pin。
+Passcode.setPin("1234")
+Assert.eq(Passcode.mode(), "pin")
+Passcode.setPin("1596", "pattern")
+Assert.eq(Passcode.mode(), "pattern")
+Assert.is_false((Passcode.verify("1234")), "旧 PIN 不再有效")
+Assert.is_true((Passcode.verify("1596")))
+Passcode.setPin("1234")
+Assert.eq(Passcode.mode(), "pin")
+Assert.is_true((Passcode.verify("1234")))
+Passcode.setPin("1596", "pattern")
+Passcode.clear()
+Assert.eq(Passcode.mode(), "pin", "关闭后回到缺省方式")
+
+-- 手势锁复用启动 / 唤醒与 afterUnlock，输入界面按 mode 选择。
+package.loaded["features.passcode.pattern"] = package.loaded["features.passcode.pad"]
+Passcode.setPin("1596", "pattern")
+package.loaded["features.passcode"] = nil
+Passcode = require("features.passcode")
+Passcode.onCreate()
+Stubs.flush()
+local pattern = pads[#pads]
+Assert.eq(pattern.title, "绘制手势解锁")
+Assert.is_false(pattern.dismissable)
+Assert.is_true(isLocked())
+Passcode.onResume()
+Assert.eq(pattern.cleared, 1)
+Assert.eq(pattern.on_submit("1236"), "密码错误")
+Assert.is_true(isLocked())
+Assert.eq(pattern.on_submit("1596"), true)
+Assert.is_false(isLocked())
+pattern.close()
+Passcode.clear()

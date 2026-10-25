@@ -1,9 +1,10 @@
 --[[--
-锁屏密码：冷启动和每次唤醒时盖一层整屏数字键盘，输对 PIN 才放行。
+锁屏密码：冷启动和每次唤醒时盖一层整屏数字键盘或手势点阵，验证后才放行。
 
 只是隐私遮挡，不是加密：USB / SSH 仍能直接读书和配置。忘记密码时删掉 settings/passcode.lua 及其 .old 即解除
 （LuaSettings 落盘时会把旧文件留成 .old，主文件不在时会读它）。
 有没有锁只看有没有 PIN（settings 里的 hash），没有单独的开关。
+手势密码与 PIN 互斥、共用一份凭证：手势是点序号串（"1596"），`mode = "pattern"` 区分解锁界面。
 PIN 只存 sha256(salt .. pin)，只为不落明文：位数太少，拿到文件就能穷举。
 连续输错 MAX_FAILS 次后每错一次冷却 COOLDOWN 秒，次数与截止时间落盘，重启不清零。
 
@@ -34,7 +35,7 @@ local Passcode = {}
 
 -- locked：还没输对 PIN；pad：屏上的解锁键盘。两者不总同步：键盘被 Modal 异常关掉时仍算锁着。
 local locked = false
----@type BookPasscodePad|nil
+---@type BookPasscodePad|BookPasscodePattern|nil
 local pad
 local booted = false
 ---@type table<string, fun()>
@@ -52,10 +53,18 @@ function Passcode.hasPin()
     return MoonSettings.get(OWNER).hash ~= nil
 end
 
---- 设新 PIN，清掉失败记录。
----@param pin string
-function Passcode.setPin(pin)
+--- 当前锁的方式：pattern 手势（点序号串）/ pin 数字。只有一份凭证，两者互斥；旧数据没有 mode 即 pin。
+---@return "pin"|"pattern"
+function Passcode.mode()
+    return MoonSettings.get(OWNER).mode == "pattern" and "pattern" or "pin"
+end
+
+--- 设新密码（覆盖旧的，方式随之切换），清掉失败记录。
+---@param pin string PIN 或手势点序号串
+---@param mode "pin"|"pattern"|nil 缺省 pin
+function Passcode.setPin(pin, mode)
     local conf = MoonSettings.get(OWNER)
+    conf.mode = mode == "pattern" and "pattern" or nil
     conf.salt = sha2.md5(os.time() .. os.clock() .. math.random()) --[[@as string]]
     conf.hash = digest(conf.salt, pin)
     conf.fails, conf.locked_until = nil, nil
@@ -65,7 +74,7 @@ end
 --- 去掉 PIN，即关闭锁屏密码。落盘可能刚把带 hash 的旧文件转成 .old，一并删掉，免得主文件丢失时锁又回来。
 function Passcode.clear()
     local conf = MoonSettings.get(OWNER)
-    conf.salt, conf.hash, conf.fails, conf.locked_until = nil, nil, nil, nil
+    conf.salt, conf.hash, conf.mode, conf.fails, conf.locked_until = nil, nil, nil, nil, nil
     MoonSettings.save(OWNER)
     os.remove(Paths.sectionPath("passcode") .. ".old")
 end
@@ -119,16 +128,20 @@ end
 
 local function showPad()
     if pad then return end
-    pad = require("features.passcode.pad"):new{
-        title = _("输入密码解锁"),
+    local pattern = Passcode.mode() == "pattern"
+    pad = require(pattern and "features.passcode.pattern" or "features.passcode.pad"):new{
+        title = pattern and _("绘制手势解锁") or _("输入密码解锁"),
         dismissable = false,
         header = true,
         forgot = Passcode.tooManyFails,
         on_forgot = function()
             require("ui.themes.widgets.confirm"):new{
                 title = _("忘记了设备密码？"),
-                text = T(_("不需要输入密码：用 USB 连接电脑，删除 %1 和 %1.old，然后在密码页输入 000000 即可解锁并关闭密码。"),
-                    Paths.sectionPath("passcode")),
+                text = pattern
+                    and T(_("不需要手势：用 USB 连接电脑，删除 %1 和 %1.old，然后重启 KOReader 即可关闭手势密码。"),
+                        Paths.sectionPath("passcode"))
+                    or T(_("不需要输入密码：用 USB 连接电脑，删除 %1 和 %1.old，然后在密码页输入 000000 即可解锁并关闭密码。"),
+                        Paths.sectionPath("passcode")),
                 ok_text = _("知道了"),
             }:show()
         end,
@@ -156,7 +169,7 @@ function Passcode.onCreate()
     require("ui/uimanager"):nextTick(Guard.wrap("passcode showPad", showPad))
 end
 
---- 已有键盘就只清掉休眠前没输完的位数。
+--- 已有键盘就只清掉休眠前没输完的输入。
 function Passcode.onResume()
     if not Passcode.hasPin() then return end
     locked = true

@@ -1,5 +1,5 @@
 --[[--
-锁屏密码配置（settings/passcode.lua：salt / hash / fails / locked_until，全部无默认值）与设置入口。
+锁屏密码配置（settings/passcode.lua：salt / hash / mode / fails / locked_until，全部无默认值）与设置入口。
 
 @module koplugin.book.features.passcode.setting
 --]]
@@ -21,7 +21,7 @@ function Setting.entries(desktop)
             order = 20,
             icon = "lock",
             title = _("锁屏密码"),
-            subtitle = _("开机和唤醒时需要输入数字密码"),
+            subtitle = _("开机和唤醒时需要输入数字密码或绘制手势"),
             status = on and _("开") or _("关"),
             status_on = on,
             page = {
