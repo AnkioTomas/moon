@@ -105,7 +105,7 @@ package.preload["ffi/util"] = function()
             local function dump(v, depth)
                 depth = depth or 0
                 local t = type(v)
-                if t == "number" then return tostring(v) end
+                if t == "number" or t == "boolean" then return tostring(v) end
                 if t == "string" then return string.format("%q", v) end
                 if t ~= "table" then return "nil" end
                 if seen[v] then return "nil" end
@@ -182,6 +182,11 @@ local identity = { source_id = "moon", stable_id = "book-1", chapter_idx = 1 }
 ui.doc_settings.data.book_reader_font_id = "demo.ttf"
 ui.doc_settings.data.style_tweaks = { lines_line_height_large = 1 }
 ui.doc_settings.data.book_style_tweak = "p { line-height: 2; }"
+ui.doc_settings.data.inverse_reading_order = true
+ui.doc_settings.data.highlight_color = "red"
+ui.doc_settings.data.text_lang = "zh-Hans"
+ui.doc_settings.data.preferred_dictionaries = { ["a"] = "b" }
+ui.doc_settings.data.wikipedia_language = "zh"
 Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
 Assert.is_true(type(saved_payload) == "string" and #saved_payload > 0)
 
@@ -213,6 +218,11 @@ Assert.is_true(ReaderPrefs.inject(fresh, { file = "/chapter.html", setFontFace =
 -- 样式微调（行距 / 段距）与自定义 CSS 跟着全书走；全书没设的键要清掉这章自己的旧值
 Assert.eq(fresh.data.style_tweaks.lines_line_height_large, 1)
 Assert.eq(fresh.data.book_style_tweak, "p { line-height: 2; }")
+Assert.is_true(fresh.data.inverse_reading_order, "反转翻页跟着全书走，换章不回落全局默认")
+Assert.eq(fresh.data.highlight_color, "red")
+Assert.eq(fresh.data.text_lang, "zh-Hans")
+Assert.eq(fresh.data.preferred_dictionaries.a, "b")
+Assert.eq(fresh.data.wikipedia_language, "zh")
 Assert.is_nil(fresh.data.style_tweaks_enabled)
 Assert.eq(fresh.data.copt_font_base_weight, 0.5)
 Assert.eq(fresh.data.copt_h_page_margins[1], 40)
