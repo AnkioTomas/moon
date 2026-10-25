@@ -6,7 +6,8 @@
   GET  text                     纯文本批量编辑的当前文本
   GET  opml                     导出 OPML（Remote.download，路由层直接回附件）
   POST article {id, guid}       文章正文（离线缓存优先，会抓取并写缓存，所以走 POST），外链资源去掉，图片只留 https / data:image
-  POST add / preview（OPML 地址回 {opml=true,count}）/ update / remove / refresh / move / reorder / group / import / read / batch
+  POST add / preview（OPML 地址回 {opml=true,count}）/ update / remove / refresh / move / reorder / group / import / catalog（在线订阅源清单）/ pick（订阅勾选项）/ read / batch
+  GET  catalog                  在线订阅源目录（catalog.lua，POST catalog 按 id 取清单）
 
 GET 只读；有副作用（抓取、写库、写缓存）的一律 POST。网页发起的抓取只许公网地址（Subscribe.privateHost）。
 
@@ -478,6 +479,50 @@ function POST.import(b, cb)
         if not body then return cb(502, { error = tostring(err or _("下载失败")) }) end
         run(body)
     end, true)
+end
+
+--- 在线订阅源：GET catalog 列出目录；POST catalog 取某个源的订阅清单（带「已订阅」标记）。
+--- 只认目录里的 id，地址由设备端决定。
+function GET.catalog(_q, cb)
+    local out = {}
+    for _idx, src in ipairs(require("features.subscribe.catalog").sources) do
+        out[#out + 1] = { id = src.id, group = src.group, name = src.name }
+    end
+    cb(200, { sources = out })
+end
+
+function POST.catalog(b, cb)
+    local src = require("features.subscribe.catalog").find(tostring(b.id))
+    if not src then return cb(404, { error = _("订阅源不存在") }) end
+    S().fetchText(src.url, function(body, err)
+        if not body then return cb(502, { error = tostring(err or _("下载失败")) }) end
+        local have = {}
+        for _idx, f in ipairs(SubDB.feeds()) do have[f.url] = true end
+        local feeds = {}
+        for _idx, f in ipairs(Remote.parseOpml(body)) do
+            feeds[#feeds + 1] = { title = f.title, url = f.url, subscribed = have[f.url] == true }
+        end
+        if #feeds == 0 then return cb(422, { error = _("这个订阅源里没有找到订阅") }) end
+        cb(200, { name = src.name, feeds = feeds })
+    end, true)
+end
+
+--- 订阅在线源里勾选的条目：feeds = [{ url, title }]，统一放进 group（可空）。已订阅的算 skipped。
+function POST.pick(b, cb)
+    local group = Text.trim(b.group or "")
+    local list = {}
+    for _idx, f in ipairs(type(b.feeds) == "table" and b.feeds or {}) do
+        local url = Text.trim(tostring(f.url or ""))
+        if url:match("^https?://") then
+            local title = Text.trim(tostring(f.title or ""))
+            list[#list + 1] = { kind = "rss", url = url, title = title ~= "" and title or url, grp = group }
+        end
+    end
+    if #list == 0 then return cb(400, { error = _("没有选中订阅") }) end
+    local added, skipped = SubDB.addMany(list)
+    addGroups({ group })
+    save()
+    cb(200, { added = added, skipped = skipped })
 end
 
 --- 标已读：给 guid 标单篇，不给标整个订阅。

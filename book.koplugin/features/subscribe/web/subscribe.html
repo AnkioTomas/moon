@@ -29,6 +29,7 @@
 <button type="button" id="add" class="file-action primary">添加订阅</button>
 <button type="button" id="refresh-all" class="file-action">全部刷新</button>
 <button type="button" id="bulk-open" class="file-action">文本编辑</button>
+<button type="button" id="catalog-open" class="file-action">在线订阅源</button>
 <button type="button" id="import" class="file-action">导入 OPML</button>
 <a id="export" class="file-action" href="/api/subscribe/opml" download>导出 OPML</a>
 <input type="file" id="import-file" accept=".opml,.xml,text/xml,text/x-opml" hidden>
@@ -125,6 +126,23 @@
 </header>
 <p class="sub-bulk-help">每行一个订阅：只写网址即可，标题和类型会自动识别；也可以写「标题 | 网址」或「网址 | 分组」。用「# 分组名」开始一个分组。删掉一行就是取消订阅；公众号行只能移组、排序或删除。</p>
 <textarea id="bk-text" spellcheck="false" wrap="off" aria-label="订阅文本" translate="no"></textarea>
+</div>
+
+<div id="catalog" class="fullscreen sub-catalog" role="dialog" aria-modal="true" aria-labelledby="ct-title" hidden>
+<header class="ed-header">
+<button type="button" id="ct-close" class="icon-btn" aria-label="关闭">✕</button>
+<h2 id="ct-title" class="ed-title">在线订阅源</h2>
+<select id="ct-source" aria-label="订阅源合集"></select>
+<button type="button" id="ct-ok" class="primary" disabled>订阅所选</button>
+</header>
+<p class="sub-bulk-help">社区维护的订阅源合集（定期清理失效源），选一个合集，勾选想订阅的条目。数据来自 GitHub 上的 xiangyugongzuoliu/awesome-rss-feeds-list 与 plenaryapp/awesome-rss-feeds。</p>
+<div class="sub-catalog-bar">
+<label class="sub-search"><span class="visually-hidden">筛选</span><input id="ct-q" type="search" placeholder="筛选名称或地址" autocomplete="off"></label>
+<label class="ct-all"><input type="checkbox" id="ct-all">全选当前</label>
+<input id="ct-group" type="text" list="group-names" placeholder="放入分组（可留空）" aria-label="分组">
+<span id="ct-count" class="ed-msg"></span>
+</div>
+<ul id="ct-list" class="sub-ct-list"></ul>
 </div>
 
 <div id="plan" class="overlay up-overlay" hidden>

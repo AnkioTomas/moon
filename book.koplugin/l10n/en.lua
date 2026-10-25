@@ -2104,4 +2104,7 @@ Current version: ",
     ["选一张图片"] = "Pick an image",
     ["选文件夹（随机换图）"] = "Pick a folder (random image)",
     ["每次启动 / 唤醒随机换一张"] = "Changes randomly on each launch / wake",
+    ["订阅源不存在"] = "Source not found",
+    ["这个订阅源里没有找到订阅"] = "No feeds found in this source",
+    ["没有选中订阅"] = "No feeds selected",
 }

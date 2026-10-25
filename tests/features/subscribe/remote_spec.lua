@@ -280,6 +280,31 @@ do
     Assert.eq(table.concat(store.groups, ","), "乙组")
 end
 
+-- 在线订阅源：只认目录 id；清单带已订阅标记；勾选的条目入库进分组。
+do
+    local S = package.loaded["features.subscribe"]
+    local Catalog = require("features.subscribe.catalog")
+    local _c, list = call("GET", "catalog", {})
+    Assert.eq(#list.sources, #Catalog.sources)
+    Assert.eq(call("POST", "catalog", { id = "nope" }), 404)
+    local src = Catalog.sources[1]
+    local fetched
+    S.fetchText = function(url, cb) fetched = url; cb('<outline xmlUrl="https://cat.test/a" text="A"/><outline xmlUrl="https://cat.test/b" text="B"/>') end
+    local code, r = call("POST", "catalog", { id = src.id })
+    Assert.eq(code, 200)
+    Assert.eq(fetched, src.url)
+    Assert.eq(#r.feeds, 2)
+    Assert.eq(call("POST", "pick", { feeds = {} }), 400)
+    local pc, pr = call("POST", "pick", { group = "在线", feeds = { { url = "https://cat.test/a", title = "A" }, { url = "javascript:x" } } })
+    Assert.eq(pc, 200)
+    Assert.eq(pr.added, 1)
+    local _c2, r2 = call("POST", "catalog", { id = src.id })
+    Assert.is_true(r2.feeds[1].subscribed)
+    Assert.is_true(not r2.feeds[2].subscribed)
+    S.fetchText = function(_url, cb) cb(nil, "HTTP 500") end
+    Assert.eq(call("POST", "catalog", { id = src.id }), 502)
+end
+
 -- 网页发起的抓取拒绝局域网 / 本机地址（preview / add / import / batch）。
 do
     Assert.eq(call("POST", "preview", { kind = "rss", url = "http://192.168.1.5/feed" }), 400)
