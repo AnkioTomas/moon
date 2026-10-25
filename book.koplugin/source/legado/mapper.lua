@@ -11,21 +11,21 @@ local Mapper = {}
 local SOURCE_ID = "legado"
 
 --- 封面走阅读服务器的 /cover 代理（原地址常要 Referer / 本地路径）。
----@param base string
+---@param coverUrl fun(path: string): string
 ---@param row table
 ---@return string|nil
-local function cover(base, row)
+local function cover(coverUrl, row)
     local path = row.customCoverUrl
     if type(path) ~= "string" or path == "" then path = row.coverUrl end
     if type(path) ~= "string" or path == "" then return nil end
-    return base .. "/cover?path=" .. Text.urlEncode(path)
+    return coverUrl(path)
 end
 
 --- 书架行 → Book[]。bookUrl 是书在阅读 App 里的唯一键。
----@param base string 服务器地址
+---@param coverUrl fun(path: string): string 封面代理地址构造（Client.coverUrl）
 ---@param rows table[]
 ---@return Book[]
-function Mapper.shelfList(base, rows)
+function Mapper.shelfList(coverUrl, rows)
     local out = {}
     for _idx, row in ipairs(rows) do
         if type(row.bookUrl) == "string" and row.bookUrl ~= "" then
@@ -36,7 +36,7 @@ function Mapper.shelfList(base, rows)
                 authors = row.author,
                 category = row.kind,
                 intro = row.intro and Text.stripHtml(row.intro),
-                cover = cover(base, row),
+                cover = cover(coverUrl, row),
             }
         end
     end
@@ -54,13 +54,14 @@ function Mapper.readPos(row)
         offset = tonumber(row.durChapterPos) or 0 }
 end
 
---- 目录：按服务端顺序，idx 连续，uid 是 0 基章节序号。
+--- 目录：按服务端顺序，idx 连续，uid 是 0 基章节序号；origin 是书源（轻阅读取正文要用，随目录落盘）。
 ---@param rows table[]
+---@param origin string|nil
 ---@return BookChapter[]
-function Mapper.toc(rows)
+function Mapper.toc(rows, origin)
     local toc = {}
     for i, row in ipairs(rows) do
-        toc[i] = { idx = i, uid = tostring(tonumber(row.index) or (i - 1)), title = row.title }
+        toc[i] = { idx = i, uid = tostring(tonumber(row.index) or (i - 1)), title = row.title, origin = origin }
     end
     return toc
 end
@@ -69,14 +70,15 @@ end
 --- 懒加载占位用的 data:image/svg+xml 没有内容，直接丢掉；src 尾部 Legado 的 ``,{请求头 JSON}`` 剥掉。
 ---@param title string
 ---@param text string
+---@param imageUrl fun(src: string): string 相对图片地址补全（Client.imageUrl）
 ---@return string
-function Mapper.chapterHtml(title, text)
+function Mapper.chapterHtml(title, text, imageUrl)
     local imgs = {}
     text = text:gsub("<img%s[^>]*>", function(tag)
         local src = tag:match('src%s*=%s*"([^"]*)"') or tag:match("src%s*=%s*'([^']*)'")
         src = src and src:gsub(",%s*{.*$", "")
         if not src or src == "" or src:find("^data:image/svg") then return "" end
-        imgs[#imgs + 1] = '<img src="' .. Text.xmlEscape(Text.xmlDecode(src)) .. '"/>'
+        imgs[#imgs + 1] = '<img src="' .. Text.xmlEscape(imageUrl(Text.xmlDecode(src))) .. '"/>'
         return "\1" .. #imgs .. "\1"
     end)
     return (Text.chapterHtml(title, text):gsub("\1(%d+)\1", function(n) return imgs[tonumber(n)] end))
