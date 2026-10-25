@@ -14,7 +14,7 @@
   [<]              第 1 / 20 页             [>]
 
 左上角下拉选范围（全部 / 分组 / 单个源）；右上角依次是添加、刷新当前范围、缓存当前范围未读、订阅源管理。
-点条目打开文章，长按收藏 / 取消收藏；已读条目标题淡灰、没有圆点。
+点条目打开文章，点右侧星标收藏 / 取消收藏；已读条目标题淡灰、没有圆点。
 
 @module koplugin.book.features.subscribe.paper
 --]]
@@ -25,6 +25,7 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local CenterContainer = require("ui/widget/container/centercontainer")
 local LineWidget = require("ui/widget/linewidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -50,15 +51,13 @@ local Paper = {}
 
 ---@param widget table
 ---@param on_tap fun()
----@param on_hold fun()|nil
 ---@return table
-local function area(widget, on_tap, on_hold)
+local function area(widget, on_tap)
     local size = widget:getSize()
     local box = InputContainer:new{ dimen = Geom:new{ x = 0, y = 0, w = size.w, h = size.h }, widget }
     local function range(ges) return GestureRange:new{ ges = ges, range = function() return box.dimen end } end
-    box.ges_events = { TapPaper = { range("tap") }, HoldPaper = on_hold and { range("hold") } or nil }
+    box.ges_events = { TapPaper = { range("tap") } }
     function box:onTapPaper() on_tap() return true end
-    function box:onHoldPaper() on_hold() return true end
     return box
 end
 
@@ -149,7 +148,8 @@ function Paper.view(page, w, h)
 
     -- 文章行：固定高度（标题两行 + 来源行），分页数才稳定。
     local bullet_w = Text.line("title", "★"):getSize().w
-    local text_w = iw - bullet_w - sm
+    local star_w = Theme.px(56)
+    local text_w = iw - bullet_w - sm - star_w
     local title_h = Text.box("body", "国\n国", text_w, { max_lines = 2, bold = true }):getSize().h
     local meta_h = Text.line("caption", "国", {}):getSize().h
     local row_h = title_h + meta_h + sm * 2 + Theme.px(t.space.xs)
@@ -172,18 +172,22 @@ function Paper.view(page, w, h)
         local mark_widget = Text.line("title", mark ~= "" and mark or " ")
         local content = HorizontalGroup:new{ align = "top",
             mark_widget, HorizontalSpan:new{ width = bullet_w - mark_widget:getSize().w + sm }, body }
-        local cell = VerticalGroup:new{ align = "left", VerticalSpan:new{ width = sm }, content,
-            VerticalSpan:new{ width = math.max(0, row_h - sm - content:getSize().h - 1) }, rule(iw, 1, t.color.faint) }
-        list[#list + 1] = padded(area(cell, function()
-            page:openItem(item)
-        end, function()
+        local function toggleStar()
             SubDB.setStarred(item.feed_id, item.guid, not item.starred)
             require("ui.themes.widgets.toast"):new{ text = item.starred and _("已取消收藏") or _("已收藏"), timeout = 2 }:show()
             page:redraw()
-        end))
+        end
+        local body_h = row_h - 1
+        local cell = VerticalGroup:new{ align = "left", VerticalSpan:new{ width = sm }, content,
+            VerticalSpan:new{ width = math.max(0, body_h - sm - content:getSize().h) } }
+        local star = CenterContainer:new{ dimen = Geom:new{ w = star_w, h = body_h },
+            Button:new{ icon = "star", variant = item.starred and "primary" or "ghost", size = "small", callback = toggleStar } }
+        list[#list + 1] = padded(VerticalGroup:new{ align = "left",
+            HorizontalGroup:new{ area(cell, function() page:openItem(item) end), star },
+            rule(iw, 1, t.color.faint) })
     end
     if #items == 0 then
-        local empty = status or (q ~= "" and _("没有匹配的文章") or (mode.id == "star" and _("还没有收藏，长按文章可收藏")
+        local empty = status or (q ~= "" and _("没有匹配的文章") or (mode.id == "star" and _("还没有收藏，点文章右侧的星标可收藏")
             or mode.id == "unread" and _("没有未读文章") or _("暂无文章")))
         list[1] = padded(VerticalGroup:new{ VerticalSpan:new{ width = pad },
             Text.box("body", empty, iw, { color = faint }) })
