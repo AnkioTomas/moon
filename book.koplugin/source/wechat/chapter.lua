@@ -324,6 +324,9 @@ end
 ---@param html string
 ---@return string
 local FOOTNOTE_STYLE = "height:0.8em;width:auto;vertical-align:super;border:0"
+local function iconSized(tag)
+    return (tag:gsub('%sstyle="[^"]*"', ""):gsub("%s*/?>$", ' style="' .. FOOTNOTE_STYLE .. '" />'))
+end
 local function linkFootnotes(html)
     if not html:find("qqreader-footnote", 1, true) then return html end
     local notes = {}
@@ -331,7 +334,7 @@ local function linkFootnotes(html)
         local class = tag:match('class="([^"]*)"') or ""
         local alt = tag:match('alt="([^"]*)"') or ""
         if not class:find("qqreader-footnote", 1, true) then return nil end
-        tag = tag:gsub('%sstyle="[^"]*"', ""):gsub("%s*/?>$", ' style="' .. FOOTNOTE_STYLE .. '" />')
+        tag = iconSized(tag)
         if alt == "" then return tag end
         notes[#notes + 1] = alt
         local n = #notes
@@ -438,6 +441,7 @@ local function linkCrossNotes(bookId, html, cb)
         local notes = {}
         html = html:gsub('<a(%s[^>]-)href="([^"#:]+)#([^"]+)"([^>]*)>(.-)</a>', function(pre, file, frag, post, inner)
             local text = (note_files[bookId .. "\0" .. Text.basename(file)] or {})[frag]
+            inner = inner:gsub("<img%s[^>]*>", iconSized)
             if not text then return inner end
             notes[#notes + 1] = { text = text, label = Text.trim((inner:gsub("<[^>]+>", ""))) }
             return string.format('<a%sid="wr-ntref%d" href="#wr-nt%d" epub:type="noteref"%s>%s</a>', pre, #notes, #notes, post, inner)

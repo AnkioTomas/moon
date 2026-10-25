@@ -169,6 +169,16 @@ do
 end
 
 do
+    -- 跨章注释链接里的图标：找不到注文也要限制尺寸，否则样式表缺规则时显示成大方块
+    local saved = FULL
+    FULL = FULL:gsub("</body></html>\n<%?xml", '<p>总之<a href="../Text/zhushi.xhtml#zhu9"><img class="x" src="n.png"/></a></p></body></html>\n<?xml', 1)
+    local payload
+    Chapter.fetchContentAsync("book", { uid = "chapter", title = "第一章" }, function(p) payload = p end)
+    FULL = saved
+    Assert.is_true(payload.document:find('<img class="x" src="n.png" style="height:0.8em', 1, true) ~= nil)
+end
+
+do
     -- 注释章：锚点 id → 注文（去掉 [n] 序号与标签，保留实体转义）
     local notes = Chapter._noteTexts('<p class="noteContent"><a href="../Text/chapter32.xhtml#zw116" id="zhu116">[116]</a>当时多用沙子&amp;吸干墨迹。</p>'
         .. '<p>无锚点</p><p class="noteContent"><a id="zhu117">[117]</a></p>')
