@@ -5,8 +5,7 @@ local rows, next_id = {}, 1
 local function find(id) for _, r in ipairs(rows) do if r.id == id then return r end end end
 local read_calls = {}
 package.loaded["features.subscribe.db"] = {
-    KEEP = 300,
-    HARD_KEEP = 600,
+    KEEP = 600,
     addMany = function(list)
         local added = 0
         for _, f in ipairs(list) do if package.loaded["features.subscribe.db"].add(f) then added = added + 1 end end

@@ -73,26 +73,20 @@ for _idx, item in ipairs(read_items) do by_guid[item.guid] = item end
 Assert.eq(by_guid.r1.read_at, 1234)
 Assert.eq(by_guid.r2.read_at, 0)
 
--- 上限：超出 KEEP 的最旧已读条目被删，未读不删。
+-- 条数上限：超出 KEEP 的最旧条目被删（已读未读都算），新增计数不受淘汰影响。
 SubDB.KEEP = 3
-SubDB.markRead(mp, "a")
-SubDB.merge(mp, { { guid = "d", title = "最新", time = 400 } })
+Assert.eq(SubDB.merge(mp, { { guid = "d", title = "最新", time = 400 } }), 1)
 local _list, n = SubDB.items(mp, 1, 20)
-Assert.eq(n, 3, "最旧的已读条目被淘汰")
-SubDB.merge(mp, { { guid = "e", title = "更新", time = 500 } })
-_list, n = SubDB.items(mp, 1, 20)
-Assert.eq(n, 4, "未读的不淘汰")
-
--- 硬上限：只刷不读的源超出 HARD_KEEP 连未读一起删（最旧的先走）；新增计数不受淘汰影响。
-SubDB.HARD_KEEP = 5
+Assert.eq(n, 3, "超出上限淘汰最旧的")
+Assert.eq(_list[3].guid, "c", "删的是最旧的 a")
 Assert.eq(SubDB.merge(mp, { { guid = "f", title = "六", time = 600 }, { guid = "g", title = "七", time = 700 } }), 2,
     "淘汰不影响新增计数")
 _list, n = SubDB.items(mp, 1, 20)
-Assert.eq(n, 5, "超出硬上限连未读一起删")
-Assert.eq(_list[5].guid, "b", "删的是最旧的")
+Assert.eq(n, 3)
+Assert.eq(_list[3].guid, "d")
 Assert.eq(SubDB.merge(mp, { { guid = "g", title = "七改", time = 700 } }), 0, "已有条目不算新增")
 Assert.eq(SubDB.items(mp, 1, 1)[1].title, "七改")
-SubDB.KEEP, SubDB.HARD_KEEP = 300, 600
+SubDB.KEEP = 600
 
 -- 按 id 直查；不存在 / nil 回 nil。
 Assert.eq(SubDB.feed(mp).url, "MP_WXS_1")

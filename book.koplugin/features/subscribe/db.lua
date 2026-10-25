@@ -10,10 +10,8 @@ local DB = require("utils.db")
 
 local SubDB = {}
 
---- 每个源最多留这么多条；超出的先删最旧的已读条目。
-SubDB.KEEP = 300
---- 未读也算上的硬上限：只刷不读的源超出后最旧的连未读一起删（防止无限增长）。
-SubDB.HARD_KEEP = 600
+--- 每个源最多留这么多条（已读未读都算），超出的删最旧的，收藏除外。
+SubDB.KEEP = 600
 --- 文章超过这么久（秒，180 天）自动淘汰；收藏的不动。没有发布时间（time=0）的只受条数上限管。
 SubDB.MAX_AGE = 180 * 86400
 
@@ -200,7 +198,7 @@ function SubDB.remove(id)
 end
 
 --- 写入条目：已有的（同 guid，或同标题 + 时间）只更新标题，保留已读。seq 递增：同一时间（网页链接无时间）的新条目排在旧的前面、彼此保持页面顺序。
---- 超出 KEEP 删最旧的已读条目，再超出 HARD_KEEP 连未读一起删，超过 MAX_AGE 的也删（收藏一律保留）。
+--- 超出 KEEP 条删最旧的，超过 MAX_AGE 的也删（收藏一律保留）。
 --- 返回真正新增的条数、淘汰的条数。
 ---@param feed_id integer
 ---@param items table[]
@@ -219,14 +217,13 @@ function SubDB.merge(feed_id, items)
                 DB.exec("UPDATE OR IGNORE sub_items SET title=? WHERE feed_id=? AND guid=?;", item.title or "", feed_id, item.guid)
             end
         end
-        local trim = [[DELETE FROM sub_items WHERE feed_id=? %s AND guid IN (
+        local trim = [[DELETE FROM sub_items WHERE feed_id=? AND starred=0 AND guid IN (
   SELECT guid FROM sub_items WHERE feed_id=? ORDER BY time DESC, seq DESC LIMIT -1 OFFSET ?);]]
         local function drop(sql, ...)
             DB.exec(sql, ...)
             removed = removed + (tonumber(DB.rowexec("SELECT changes();")) or 0)
         end
-        drop(trim:format("AND read=1 AND starred=0"), feed_id, feed_id, SubDB.KEEP)
-        drop(trim:format("AND starred=0"), feed_id, feed_id, SubDB.HARD_KEEP)
+        drop(trim, feed_id, feed_id, SubDB.KEEP)
         drop("DELETE FROM sub_items WHERE feed_id=? AND starred=0 AND time > 0 AND time < ?;", feed_id, os.time() - SubDB.MAX_AGE)
         return true
     end)
