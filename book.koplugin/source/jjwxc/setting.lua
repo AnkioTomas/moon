@@ -120,6 +120,8 @@ Setting.browser = {
     end,
 }
 
+local showAccountLogin
+
 local function showCookieLogin()
     require("ui.themes.widgets.input"):new{
         title = _("晋江登录 Cookie"),
@@ -244,7 +246,7 @@ function showLogin(account, password, verify)
     end)
 end
 
-local function showAccountLogin()
+function showAccountLogin()
     require("ui.themes.widgets.input"):new{
         title = _("晋江账号登录"),
         fields = {
