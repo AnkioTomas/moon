@@ -16,10 +16,6 @@ local _ = require("gettext")
 local Mp = {}
 
 local WEB = "https://weread.qq.com"
---- 文章页超过这么大不解析：页面自带几 MB 脚本（实测 2–4 MB），再大多半是异常页面，别撑爆内存。
-local MAX_HTML = 8 * 1024 * 1024
---- 每篇最多落地的图片数；多出的直接去掉，免得一篇文章下几十 MB。
-local MAX_IMAGES = 30
 --- 公众号 CDN 的宽度档位（URL 末段），640 够墨水屏看清，原图（0）动辄几 MB。
 local IMAGE_WIDTH = "640"
 --- 公众号接口回 -2041 时的提示（订阅刷新据此弹窗，网页端作为源的错误显示）。
@@ -105,17 +101,15 @@ end
 ---@param html string
 ---@return string
 local function rewriteImages(html)
-    local count = 0
     return (html:gsub("<img%s[^>]*>", function(tag)
         local _q, src = tag:match('data%-src=(["\'])(.-)%1')
         if not src then _q, src = tag:match('%ssrc=(["\'])(.-)%1') end
-        if not src or src == "" or count >= MAX_IMAGES then return "" end
+        if not src or src == "" then return "" end
         -- QQ 表情是透明占位图 + CSS 雪碧背景，下载下来只是空白：去掉，留 alt（如「[微笑]」）
         if src:find("pic_blank.gif", 1, true) then
             local _qa, alt = tag:match('%salt=(["\'])(.-)%1')
             return alt or ""
         end
-        count = count + 1
         src = src:gsub("&amp;", "&")
         if src:find("mmbiz.qpic.cn", 1, true) then
             src = src:gsub("/0([%?#])", "/" .. IMAGE_WIDTH .. "%1"):gsub("/0$", "/" .. IMAGE_WIDTH)
@@ -324,7 +318,7 @@ function Mp.later(sec, fn)
     require("ui/uimanager"):scheduleIn(sec, fn)
 end
 
---- 流式拉公众号文章页：边收边数，超过 MAX_HTML 立刻断开（不先整页下完再判断）。
+--- 流式拉公众号文章页。
 ---@param url string
 ---@param cb fun(raw: string|nil, err: any)
 ---@return { cancel: fun() }
@@ -337,29 +331,15 @@ local function mpStreamGet(url, cb)
             ["Referer"] = WEB .. "/",
         })
         for k, v in pairs(mp_headers) do headers[k] = v end
-        local chunks, size, too_big = {}, 0, false
-        local function abort()
-            too_big, chunks = true, {}
-            if inner and inner.cancel then inner:cancel() end
-        end
+        local chunks = {}
         inner = Request.stream({
             url = url,
             headers = headers,
             timeout = require("http.timeout").net(3),
         }, {
-            on_headers = function(code, hdrs)
-                local len = tonumber((Request.header({ headers = hdrs }, "Content-Length")))
-                if len and len > MAX_HTML and tonumber(code) and tonumber(code) < 300 then abort() end
-            end,
-            on_data = function(chunk)
-                if too_big then return end
-                size = size + #chunk
-                if size > MAX_HTML then return abort() end
-                chunks[#chunks + 1] = chunk
-            end,
+            on_data = function(chunk) chunks[#chunks + 1] = chunk end,
             on_done = function(err)
                 if cancelled then return end
-                if too_big then return cb(nil, _("文章太大，无法显示")) end
                 if err then return cb(nil, err) end
                 local raw = table.concat(chunks)
                 chunks = nil

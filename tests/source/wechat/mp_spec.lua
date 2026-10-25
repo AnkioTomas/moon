@@ -37,11 +37,11 @@ package.loaded["http.request"] = {
         local key = opts.url:match("reviewId=(.*)$") or "list"
         local body = pages[key]
         if body == nil then
-            h.on_headers(404, {})
+            if h.on_headers then h.on_headers(404, {}) end
             h.on_done("HTTP 404")
             return job
         end
-        h.on_headers(200, {})
+        if h.on_headers then h.on_headers(200, {}) end
         local CHUNK = 256 * 1024
         for i = 1, #body, CHUNK do
             if job.stopped then break end
@@ -152,7 +152,7 @@ Assert.not_nil(body:find('<img src="https://mmbiz.qpic.cn/mmbiz_jpg/abc/640?wx_f
 Assert.eq(Mp.extractBody("<html>没有正文</html>"), nil)
 local many = '<div id="js_content">' .. string.rep('<img data-src="https://x/a.png">', 40) .. "</div><script>"
 local _n, imgs = Mp.extractBody(many):gsub("<img", "")
-Assert.eq(imgs, 30, "每篇图片封顶")
+Assert.eq(imgs, 40, "图片不设上限")
 
 -- 实测页面形状（脱敏）：class 在 id 前、属性跨行、正文前有几百 KB 脚本；正文后的 JS 里另有一份 content_noencode。
 local real = "<!DOCTYPE html>\n<html class=\"\n\">\n<head><script>" .. string.rep("var a=1;", 20000) .. "</script></head><body>\n"
@@ -199,10 +199,9 @@ Assert.matches(got, "正文")
 Assert.eq(localized[1], "/tmp/x/images")
 Mp.fetchContentAsync("r1", nil, function(h) got = h end)
 Assert.len(localized, 1, "不给目录不下图")
-pages["big"] = string.rep("x", 8 * 1024 * 1024 + 1)
+pages["big"] = html .. string.rep("x", 9 * 1024 * 1024)
 Mp.fetchContentAsync("big", nil, function(p, e) got, err = p, e end)
-Assert.eq(got, nil)
-Assert.not_nil(err, "超大页面不解析")
+Assert.matches(got, "正文", "页面大小不设上限")
 Mp.fetchContentAsync("none", nil, function(p, e) got, err = p, e end)
 Assert.eq(got, nil)
 
@@ -214,7 +213,7 @@ stream_override = function(_opts, h)
     calls = calls + 1
     local body = seq[calls] or verify_page
     local job = { cancel = function() end }
-    h.on_headers(200, {})
+    if h.on_headers then h.on_headers(200, {}) end
     h.on_data(body)
     h.on_done(nil)
     return job
