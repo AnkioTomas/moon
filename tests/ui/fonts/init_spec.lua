@@ -29,6 +29,13 @@ local engine_faces = { "System Demo" }
 local registered = {}
 local register_calls = 0
 local woff_calls = {}
+local repair_calls = {}
+package.preload["ui.fonts.sfnt"] = function()
+    return { ensureSpace = function(path)
+        repair_calls[#repair_calls + 1] = path
+        error("font repair must not run on UI thread")
+    end }
+end
 
 package.preload["ui.fonts.woff"] = function()
     return { toSfnt = function(src, dest)
@@ -109,7 +116,8 @@ package.preload["document/credocument"] = function()
             return {
                 registerFont = function(path)
                     register_calls = register_calls + 1
-                    if engine_registered[path] then
+                    if engine_registered[path] or path:match("aik")
+                        or path:match("unfixable") then
                         error("cannot register font <" .. path .. ">")
                     end
                     registered[path] = true
@@ -184,6 +192,18 @@ Assert.eq(Fonts.faceForId("sys.ttf"), "System Demo")
 local broken_face, broken_err = Fonts.faceForId("broken.ttf")
 Assert.is_nil(broken_face)
 Assert.eq(broken_err, "应用字体失败")
+Assert.len(repair_calls, 0, "不修改用户/系统字库")
+files["/tmp/fonts/aik.ttf"] = true
+fontinfo["/tmp/fonts/aik.ttf"] = { { name = "AI Kai" } }
+local aik, aik_err = Fonts.faceForId("aik")
+Assert.is_nil(aik)
+Assert.eq(aik_err, "应用字体失败")
+Assert.len(repair_calls, 0, "加载/开书只注册，不在 UI 线程同步修复")
+files["/tmp/fonts/unfixable.ttf"] = true
+fontinfo["/tmp/fonts/unfixable.ttf"] = { { name = "Unfixable" } }
+local unavailable, unavailable_err = Fonts.faceForId("unfixable")
+Assert.is_nil(unavailable)
+Assert.eq(unavailable_err, "应用字体失败", "不是缺空格的字体仍然报错")
 -- 含空格/中文的文件名按原样匹配，不能被 sanitize 成下划线
 Assert.eq(Fonts.faceForId("霞鹜 文楷.ttf"), "LXGW WenKai")
 Assert.is_true(FontReader.apply(ui, "霞鹜 文楷.ttf", "霞鹜文楷"))
