@@ -97,7 +97,7 @@ function Day:build(ctx)
     local function runsBlock()
         if #runs == 0 then return nil end
         local col = VerticalGroup:new{ align = "left" }
-        for i = 1, math.min(#runs, 3) do
+        for i = math.max(1, #runs - 2), #runs do
             local s = runs[i]
             col[#col + 1] = Parts.pair(
                 T(_("%1–%2 %3"), os.date("%H:%M", s.start), os.date("%H:%M", s.finish), titles[s.stable_id] or ""),
