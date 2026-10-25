@@ -133,7 +133,9 @@ end
 ---@param opts table
 ---@return string|nil
 ---@return number|nil
-local function existingLocalPath(identity, opts)
+local function existingLocalPath(identity, opts, ops)
+    -- 章节文件只是按章号渲染的缓存（正文另有缓存）：章号会随目录变，源声明 volatile 就每次重渲，不信旧文件。
+    if ops.volatile then return nil end
     local idx = tonumber(opts.chapter_idx)
     if idx then
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
@@ -341,7 +343,7 @@ end
 ---@return { cancel: fun() }|nil
 local function ensure(identity, toc, idx, ops, cb)
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-    if chapterReady(path) then
+    if not ops.volatile and chapterReady(path) then
         -- 已缓存但目录还没字数：补一次，估页码越读越准。
         local item = toc[idx]
         if item and not (tonumber(item.words) and tonumber(item.words) > 0) then
@@ -477,7 +479,7 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
     local cancelled = false
     local job, dialog
 
-    local local_path, local_idx = existingLocalPath(identity, opts)
+    local local_path, local_idx = existingLocalPath(identity, opts, ops)
     if local_path then
         local_path = variant(identity, local_idx, local_path)
         local touched, touch_err = require("book.store").touch(local_path, identity, {
@@ -625,7 +627,7 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
             return
         end
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-        if chapterReady(path) then
+        if not ops.volatile and chapterReady(path) then
             cached_count = cached_count + 1
             report()
             require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter prefetch", nextIndex))

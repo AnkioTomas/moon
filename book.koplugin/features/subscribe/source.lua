@@ -242,6 +242,7 @@ end
 local OPS = {
     loadToc = function(ref, done) return Source.loadTocAsync(nil, ref, done) end,
     fetchContent = fetchContent,
+    volatile = true,
 }
 
 --- 阅读器「重新下载本章」：章节文件之外，文章缓存也要作废，否则重下的还是旧正文。
@@ -258,7 +259,8 @@ end
 function Source:openBookAsync(identity, opts, cb)
     -- 本地快开不读目录：先按订阅库同步一次（同步完成，回调延后），顺序变了章节文件与划线先挪到新章号，
     -- 否则会按旧章号打开错位的文章。
-    Source.loadTocAsync(self, identity, function() end, true)
+    -- 阅读中切章不能再挪章号：调用方手里的章号是现行目录的，挪了就会开成别的文章（含「重新下载本章」）。
+    Source.loadTocAsync(self, identity, function() end, not isOpen(identity))
     return require("source.chapter").openWithUi(self, identity, identity.book, opts or {}, OPS, cb)
 end
 
