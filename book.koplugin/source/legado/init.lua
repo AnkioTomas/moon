@@ -1,7 +1,7 @@
 --[[--
 阅读（Legado / 开源阅读）数据源。
 
-直连阅读 App 的 Web 服务（局域网地址，setting.lua 配置）。书架只拉不加（书在阅读 App 里添加），
+直连阅读 App 的 Web 服务，或 reader3 服务器版（地址可带 /reader3 前缀，再配账号密码，setting.lua 配置）。书架只拉不加（书在阅读 App 里添加），
 目录 / 正文按章落盘走公共 source/chapter；进度只到章，开书从书架行的 durChapterIndex 拉，
 关书经 /saveBookProgress 上报。笔记和统计没有接口。
 
@@ -74,7 +74,7 @@ end
 
 function Source:syncBooksAsync(opts, cb)
     if not self:configured() then return SourceBase.skipped(cb, "legado not configured") end
-    return Shelf.syncAsync(self.id, Remote, function(rows) return Mapper.shelfList(Client.base(), rows) end, opts, cb)
+    return Shelf.syncAsync(self.id, Remote, function(rows) return Mapper.shelfList(Client.coverUrl, rows) end, opts, cb)
 end
 
 function Source:syncNotesAsync(_opts, cb)
@@ -144,20 +144,33 @@ function Source:getDetailAsync(identity, cb)
     return SourceBase.defer(cb, identity.book or require("book.books_db").get(self.id, identity.stable_id))
 end
 
+--- 取目录并落盘。轻阅读按书源取，先从书架行查 origin；其余后端不需要，直接拉。
 function Source:loadTocAsync(identity, cb)
     local cached = Toc.read(self.id, identity.stable_id)
     if cached and #cached > 0 then
         return SourceBase.defer(cb, cached)
     end
     local cancelled, job = false, nil
-    job = Client.chaptersAsync(identity.stable_id, function(rows, err)
-        if cancelled then return end
-        if not rows then cb(nil, err); return end
-        local toc = Mapper.toc(rows)
-        if #toc == 0 then cb(nil, _("阅读目录为空")); return end
-        if not Toc.put(self.id, identity.stable_id, toc) then cb(nil, _("章节目录保存失败")); return end
-        cb(toc)
-    end)
+    local function fetch(origin)
+        job = Client.chaptersAsync(identity.stable_id, origin, function(rows, err)
+            if cancelled then return end
+            if not rows then cb(nil, err); return end
+            local toc = Mapper.toc(rows, origin)
+            if #toc == 0 then cb(nil, _("阅读目录为空")); return end
+            if not Toc.put(self.id, identity.stable_id, toc) then cb(nil, _("章节目录保存失败")); return end
+            cb(toc)
+        end)
+    end
+    if Client.mode() ~= "qread" then
+        fetch(nil)
+    else
+        job = Client.shelfAsync(function(rows, err)
+            if cancelled then return end
+            local row = rows and findRow(rows, identity.stable_id)
+            if not row then cb(nil, err or _("这本书不在阅读书架上")); return end
+            fetch(row.origin)
+        end)
+    end
     return { cancel = function()
         cancelled = true
         job.cancel()
@@ -167,9 +180,9 @@ end
 ---@return ChapterFetchContent
 local function contentFetcher()
     return function(identity, chapter, done)
-        return Client.contentAsync(identity.stable_id, tonumber(chapter.uid), function(text, err)
+        return Client.contentAsync(identity.stable_id, tonumber(chapter.uid), chapter.origin, function(text, err)
             if not text then done(nil, err); return end
-            local html = Mapper.chapterHtml(chapter.title, text)
+            local html = Mapper.chapterHtml(chapter.title, text, Client.imageUrl)
             -- 只有 <h1> 没有段落 = 服务器给的是空白正文，不能当成功落盘缓存。
             if not html:find("<p", 1, true) then done(nil, _("阅读章节内容为空")); return end
             done({ title = chapter.title, html = html })
