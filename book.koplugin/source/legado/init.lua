@@ -19,7 +19,7 @@ local Legado = {}
 
 ---@return BookSourceMeta
 function Legado.meta()
-    return { id = "legado", name = _("开源阅读"), type = "chapter" }
+    return require("source.meta").get("legado")
 end
 
 ---@class LegadoSource : SourceBase

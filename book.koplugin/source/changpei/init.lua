@@ -23,7 +23,7 @@ local FETCH_INTERVAL = 1
 
 ---@return BookSourceMeta
 function Changpei.meta()
-    return { id = "changpei", name = _("长佩文学"), type = "chapter" }
+    return require("source.meta").get("changpei")
 end
 
 ---@class ChangpeiSource : SourceBase

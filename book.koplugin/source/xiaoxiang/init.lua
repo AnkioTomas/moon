@@ -23,7 +23,7 @@ local FETCH_INTERVAL = 1
 
 ---@return BookSourceMeta
 function Xiaoxiang.meta()
-    return { id = "xiaoxiang", name = _("潇湘书院"), type = "chapter" }
+    return require("source.meta").get("xiaoxiang")
 end
 
 ---@class XiaoxiangSource : SourceBase

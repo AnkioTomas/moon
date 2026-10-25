@@ -25,7 +25,7 @@ local FETCH_INTERVAL = 1
 
 ---@return BookSourceMeta
 function QQReader.meta()
-    return { id = "qqreader", name = _("QQ阅读"), type = "chapter" }
+    return require("source.meta").get("qqreader")
 end
 
 ---@class QQReaderSource : SourceBase

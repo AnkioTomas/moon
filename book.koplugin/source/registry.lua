@@ -211,7 +211,7 @@ end
 function Registry.meta(id)
     if hidden[id] then return hidden[id]().meta() end
     sourceIds()
-    return known[id] and sourceModule(id).meta() or nil
+    return known[id] and (require("source.meta").get(id) or sourceModule(id).meta()) or nil
 end
 
 --- 列出数据源元信息。
