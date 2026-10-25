@@ -23,7 +23,7 @@ local Subscribe = {}
 --- 网页 / 订阅源超过这么大不解析：Readability 要建整棵树，3MB 页面去掉脚本后树也就几 MB，再大不碰。
 local MAX_PAGE = 3 * 1024 * 1024
 --- 单张图片上限。
-local MAX_IMAGE = 2 * 1024 * 1024
+local MAX_IMAGE = 8 * 1024 * 1024
 --- RSS 自带正文去掉标签后超过这么多字节才当全文（约 500 个汉字）；否则当摘要、去抓原文。
 local FULL_TEXT = 1500
 --- 摘要结尾带这些就是被截断的（省略号 / 阅读全文 / WordPress 的 "appeared first on"），不管多长都去抓原文。
