@@ -73,3 +73,12 @@ end
 -- 没有 /proc（非 Linux）
 files = {}
 Assert.is_nil(Procs.new(fs()):sample())
+
+-- 本进程内存构成
+files = { ["/proc/self/status"] = "VmRSS:\t  104876 kB\nRssAnon:\t   79524 kB\nRssFile:\t   25352 kB\n" }
+local own = Procs.new(fs()):own()
+Assert.eq(own.rss, 104876)
+Assert.eq(own.anon, 79524)
+Assert.eq(own.file, 25352)
+files = {}
+Assert.is_nil(Procs.new(fs()):own())

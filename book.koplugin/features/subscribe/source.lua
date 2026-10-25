@@ -1,10 +1,13 @@
 --[[--
-订阅在阅读器里的书源：一个订阅是一本按章书（stable_id = 订阅 id），一篇文章是一章，
+订阅在阅读器里的书源：一个阅读范围是一本按章书（订阅页当前的筛选条件：源 / 分组 / 未读·全部·收藏 / 搜索词，
+见 SubDB.scope；单个源 + 全部 + 无搜索词的 stable_id 仍是订阅 id），一篇文章是一章，
 走 source.chapter 的落盘 / 快开与月读阅读会话（顶栏、侧栏目录、面板、字体排版），上一章 / 下一章就是相邻文章。
 
 不进源清单（main 用 Registry.registerHidden 登记），书库、书架同步、选择器都看不到。
 ephemeral：没有云端，阅读会话不存进度、不记统计（reader.session 入口按此跳过）；打开哪篇由订阅页指定章号。
-目录 = 订阅页同序（新到旧），章号随刷新错位：目录变了按 guid 把章节文件、边车与注解挪到新章号（见 remapChapters）。
+目录 = 该范围在订阅页里的文章流（新到旧），章号随刷新 / 已读错位：目录变了按 uid 把章节文件、边车与注解挪到新章号（见 remapChapters）；
+带注解的文章即使退出了范围（读过的不再算未读）也留在目录里，划线不丢。
+uid：单源书是 guid，其余范围是「订阅 id:guid」。
 
 @module koplugin.book.features.subscribe.source
 --]]
@@ -32,21 +35,84 @@ function M.new()
     return setmetatable({ id = meta.id, name = meta.name, type = meta.type }, Source)
 end
 
---- 订阅页打开文章用的书：书名是订阅名。
----@param feed table
+--- 订阅页打开文章用的书：id 见 SubDB.scope，书名是范围名。
+---@param id string
+---@param title string
 ---@return Book
-function M.book(feed)
-    return { source_id = M.ID, stable_id = tostring(feed.id), title = feed.title }
+function M.book(id, title)
+    return { source_id = M.ID, stable_id = id, title = title }
 end
 
 function Source:configured()
     return true
 end
 
+--- 已缓存文章里的二、三级标题（章内小节）；没缓存 / 旧缓存没有编号的文章没有小节。
+---@param feed_id integer
+---@param guid string
+---@return BookChapterAnchor[]|nil
+local function anchorsOf(feed_id, guid)
+    local f = io.open(require("features.subscribe").dir(feed_id) .. "/articles/" .. require("ffi/sha2").md5(guid) .. ".html", "rb")
+    if not f then return nil end
+    local html = f:read("*a")
+    f:close()
+    local anchors = require("features.subscribe.typography").headings(html)
+    return #anchors > 0 and anchors or nil
+end
+
+--- 章节 uid 拆成（订阅 id, guid）。
 ---@param identity BookIdentity
----@return table|nil
-local function feedOf(identity)
-    return SubDB.feed(tonumber(identity.stable_id))
+---@param uid string
+---@return integer|nil feed_id
+---@return string|nil guid
+local function splitUid(identity, uid)
+    if tostring(identity.stable_id):match("^%d+$") then return tonumber(identity.stable_id), uid end
+    local feed_id, guid = uid:match("^(%d+):(.*)$")
+    return tonumber(feed_id), guid
+end
+
+--- 这本书的目录：范围内的文章流；带注解的旧章（范围外了）按时间并回去。
+---@param identity BookIdentity
+---@return BookChapter[]
+function M.toc(identity)
+    local sid = tostring(identity.stable_id)
+    local spec = SubDB.scopeOf(sid)
+    if not spec then return {} end
+    local single = sid:match("^%d+$")
+    local list = SubDB.stream(spec, 1, -1)
+    local have = {}
+    for _idx, item in ipairs(list) do have[item.feed_id .. ":" .. item.guid] = true end
+    local old = not single and require("source.toc").read(M.ID, sid, true)
+    if old then
+        local added
+        for _idx, note in ipairs(require("book.note_db").all(M.ID, sid)) do
+            local chapter = old[note.chapter_idx]
+            if chapter then
+                local feed_id, guid = splitUid(identity, chapter.uid)
+                local item = feed_id and not have[feed_id .. ":" .. guid] and SubDB.item(feed_id, guid)
+                if item then
+                    have[feed_id .. ":" .. guid] = true
+                    list[#list + 1] = item
+                    added = true
+                end
+            end
+        end
+        if added then
+            local pos = {}
+            for i, item in ipairs(list) do pos[item] = i end
+            table.sort(list, function(a, b)
+                if a.time ~= b.time then return a.time > b.time end
+                return pos[a] < pos[b]
+            end)
+        end
+    end
+    local toc = {}
+    for i, item in ipairs(list) do
+        toc[i] = { idx = i, uid = single and item.guid or (item.feed_id .. ":" .. item.guid),
+            title = item.title ~= "" and item.title or _("无标题"), link = item.link,
+            anchors = anchorsOf(item.feed_id, item.guid) }
+    end
+    return toc
 end
 
 --- 目录变了（刷新新增 / 淘汰旧条目）：按 guid 把旧章号挪到新章号，划线跟着文章走。
@@ -111,19 +177,6 @@ local function isOpen(identity)
     return cur ~= nil and cur.source_id == M.ID and tostring(cur.stable_id) == tostring(identity.stable_id)
 end
 
---- 已缓存文章里的二、三级标题（章内小节）；没缓存 / 旧缓存没有编号的文章没有小节。
----@param feed_id integer
----@param guid string
----@return BookChapterAnchor[]|nil
-local function anchorsOf(feed_id, guid)
-    local f = io.open(require("features.subscribe").dir(feed_id) .. "/articles/" .. require("ffi/sha2").md5(guid) .. ".html", "rb")
-    if not f then return nil end
-    local html = f:read("*a")
-    f:close()
-    local anchors = require("features.subscribe.typography").headings(html)
-    return #anchors > 0 and anchors or nil
-end
-
 --- 目录同步。阅读中（这本书正开着）目录变了不重排章号：沿用旧目录，等下次打开（force）再挪，
 --- 免得正在看的章节文件、边车被改名、上一章 / 下一章错位。
 ---@param identity BookIdentity
@@ -131,13 +184,7 @@ end
 ---@param force boolean|nil 打开书时为真：无论是否开着都同步
 function Source:loadTocAsync(identity, cb, force)
     local Toc = require("source.toc")
-    local feed_id = tonumber(identity.stable_id)
-    local items = SubDB.items(feed_id, 1, -1)
-    local toc = {}
-    for i, item in ipairs(items) do
-        toc[i] = { idx = i, uid = item.guid, title = item.title ~= "" and item.title or _("无标题"), link = item.link,
-            anchors = anchorsOf(feed_id, item.guid) }
-    end
+    local toc = M.toc(identity)
     -- 旧目录是章节文件 / 注解现行章号的基线，过了 TTL 也得用：丢了基线就不挪，章号错位后划线串到别的文章上。
     local old = Toc.read(M.ID, identity.stable_id, true)
     local same = old and #old == #toc
@@ -171,10 +218,11 @@ end
 ---@param chapter BookChapter
 ---@param cb fun(payload: ChapterContentPayload|nil, err: any)
 local function fetchContent(identity, chapter, cb)
-    local feed = feedOf(identity)
+    local feed_id, guid = splitUid(identity, chapter.uid)
+    local feed = feed_id and SubDB.feed(feed_id)
     if not feed then return SourceBase.defer(cb, nil, _("订阅已删除")) end
     local Subscribe = require("features.subscribe")
-    return Subscribe.content(feed, { guid = chapter.uid, title = chapter.title, link = chapter.link or "" },
+    return Subscribe.content(feed, { guid = guid, title = chapter.title, link = chapter.link or "" },
         function(html, err)
             if not html then return cb(nil, err) end
             -- 这篇刚缓存：小节写进目录缓存与调用方手里的目录项，打开目录马上就有。
@@ -216,7 +264,9 @@ function Source:onEvent(event, payload)
     local identity = payload and payload.identity
     local idx = identity and tonumber(identity.chapter_idx)
     local item = idx and (require("source.toc").read(M.ID, identity.stable_id, true) or {})[idx]
-    if item then SubDB.markRead(tonumber(identity.stable_id), item.uid, os.time()) end
+    if not item then return end
+    local feed_id, guid = splitUid(identity, item.uid)
+    if feed_id then SubDB.markRead(feed_id, guid, os.time()) end
 end
 
 return M

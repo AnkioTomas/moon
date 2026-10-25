@@ -1,65 +1,47 @@
 --[[--
-桌面「订阅」页：订阅列表（按分组）→ 点开一个源看条目（新到旧，每页最多 20）→ 点条目打开文章。
+桌面「订阅」页：跨订阅源的文章流（纸质风格，paper.lua），点条目打开文章。
 
   +-----------------------------------------------+
-  | [⟳]            订阅                     [⇅][+] |   ⟳ 刷新全部，⇅ 排序（分组 / 最近阅读 / 未读最多 / 最近更新 / 名称），+ 添加（RSS / 网站 / 公众号 / 推荐）
-  | 科技                                          |
-  | [rss] 少数派                         12  >    |   右侧是未读数
-  | 未分组                                        |
-  | [mp]  某公众号                        3  >    |
-  +-----------------------------------------------+
-  | [<]          少数派             [≡][⋯]   |   ≡ 筛选（全部 → 仅未读 → 仅已读），⋯ 刷新 / 全部已读 / 重命名 / 修改分组 / 取消订阅
-  | ● 标题一                                      |
-  |   2026-10-16 12:00                            |
-  | [加载更早的文章]                              |   公众号翻到最后一页时
-  | [<]              1 / 3                   [>]  |
+  | [全部 ⌄]                      [+] [⟳] [↓] [🗑] |   左：范围选择（全部 / 分组 / 单个源，书城同款下拉）；
+  | 未读文章                                  940 |   右：添加、刷新、缓存未读、订阅源管理
+  | 分组 │ 未读 全部 收藏 │ 搜索                   |
+  | • 标题                                        |
+  |   来源 · 分组 · 日期                          |
+  | [<]              第 1 / 20 页             [>] |
   +-----------------------------------------------+
 
-点开一个超过一小时没刷的源时只把它交给后台刷新任务（features.subscribe.refresh，插队首）；激活页签不扫全部，
-刷新全部只走标题栏 ⟳；
+范围（源 / 分组）+ 未读·全部·收藏 + 搜索词就是文章流的筛选条件，也是阅读器目录的范围（features.subscribe.source）。
 刷新不归页面所有，切走页签、看书时照跑，页面只订阅进度来更新副标题、刷完重画。
 
 @module koplugin.book.features.subscribe.page
 --]]
 
 local UIManager = require("ui/uimanager")
-local VerticalGroup = require("ui/widget/verticalgroup")
-local VerticalSpan = require("ui/widget/verticalspan")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local Subscribe = require("features.subscribe")
 local SubDB = require("features.subscribe.db")
 local Refresh = require("features.subscribe.refresh")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
-local Pager = require("ui.themes.widgets.pager")
-local Row = require("ui.themes.widgets.row")
-local Sections = require("ui.themes.widgets.sections")
-local TitleBar = require("ui.themes.widgets.titlebar")
+local Button = require("ui.themes.widgets.button")
 local T = require("ffi/util").template
 local _ = require("gettext")
-
-local PAGE_MAX = 20
---- 订阅列表排序：group = 按分组（组内手动顺序），其余是不分组的平铺，按 key 降序（name 升序）。
-local ORDERS = {
-    { id = "group", label = function() return _("按分组") end },
-    { id = "recent", label = function() return _("最近阅读") end, key = "read_at" },
-    { id = "unread", label = function() return _("未读最多") end, key = "unread" },
-    { id = "updated", label = function() return _("最近更新") end, key = "updated_at" },
-    { id = "name", label = function() return _("名称") end },
-}
 
 ---@class BookSubscribePage
 ---@field desktop BookDesktop
 ---@field name string
----@field feed_id integer|nil 正在看的源；nil = 订阅列表
 ---@field page integer
 ---@field busy string|nil 正在做的事（标题栏副标题）
 ---@field job table|nil
 local Page = {}
 
---- 条目筛选（本次运行内记住，所有源共用）：nil = 全部，false = 仅未读，true = 仅已读；标题栏图标依次切换。
-Page.read_filter = nil
---- 订阅列表分组筛选（本次运行内记住）：nil = 全部，"" = 未分组，其它 = 组名。
+--- 筛选条件（本次运行内记住）：范围 = 单个源 feed_filter 或分组 group_filter（nil 全部，"" 未分组），页签 unread / all / star，搜索词。
+Page.feed_filter = nil
 Page.group_filter = nil
+Page.stream_mode = "unread"
+Page.stream_q = ""
+
 Page.__index = Page
 
 function Page:new(opts)
@@ -106,7 +88,7 @@ end
 function Page:activate() end
 
 function Page:onEvent(event, payload)
-    if event ~= "swipe" or not self.feed_id then return end
+    if event ~= "swipe" then return end
     if payload.direction == "west" then
         self:gotoPage(self.page + 1)
     elseif payload.direction == "east" then
@@ -118,17 +100,6 @@ function Page:gotoPage(page)
     if page < 1 or page > (self.pages or 1) then return end
     self.page = page
     self:redraw()
-end
-
----@param feed_id integer|nil
-function Page:openFeed(feed_id)
-    self.feed_id, self.page = feed_id, 1
-    self:redraw()
-    -- 只刷这一个源（过期才刷）；刷新全部只走订阅列表标题栏。
-    local feed = feed_id and SubDB.feed(feed_id)
-    if feed and os.time() - (feed.updated_at or 0) > Subscribe.STALE then
-        UIManager:nextTick(function() self:refresh({ feed }) end)
-    end
 end
 
 --- 添加：先试拉一次拿标题，再入库并刷新。
@@ -248,21 +219,103 @@ function Page:showAdd()
     } }:show()
 end
 
---- 一个源的管理菜单。
---- 全部未读文章正文进后台缓存任务（kind = cache），离线时有网才能下，直接提示。
-function Page:cacheUnread(feed)
+
+--- 当前筛选条件（SubDB.stream / SubDB.scope 的参数）。
+---@return table
+function Page:spec()
+    local feed = Page.feed_filter
+    return { feed = feed, grp = not feed and Page.group_filter or nil, mode = Page.stream_mode, q = Page.stream_q }
+end
+
+--- 范围名：全部 / 分组名 / 源名。
+---@return string
+function Page:scopeLabel()
+    local feed = Page.feed_filter and SubDB.feed(Page.feed_filter)
+    if feed then return feed.title end
+    local grp = Page.group_filter
+    if grp == nil then return _("全部") end
+    return grp == "" and _("未分组") or grp
+end
+
+--- 改筛选条件并回到第一页重画。
+---@param fields table feed_filter / group_filter / stream_mode / stream_q；false 表示清掉（nil 在 pairs 里留不住）
+function Page:filter(fields)
+    for key, value in pairs(fields) do
+        if value == false then value = nil end
+        Page[key] = value
+    end
+    self.page = 1
+    self:redraw()
+end
+
+--- 范围下拉（同书城来源下拉）：全部 / 各分组 / 各订阅源。
+---@param anchor table 按钮矩形
+function Page:pickScope(anchor)
+    local feeds = SubDB.feeds()
+    local items = {}
+    local function add(text, icon, checked, fields, unread)
+        items[#items + 1] = { text = text, icon = icon, checked = checked, mandatory = unread and unread > 0 and tostring(unread) or nil,
+            callback = function() self:filter(fields) end }
+    end
+    local none = Page.feed_filter == nil and Page.group_filter == nil
+    add(_("全部"), "select_all", none, { feed_filter = false, group_filter = false }, SubDB.unreadTotal())
+    local seen, names, ungrouped = {}, {}, false
+    for _idx, feed in ipairs(feeds) do
+        local g = feed.grp or ""
+        if g == "" then ungrouped = true
+        elseif not seen[g] then seen[g] = true; names[#names + 1] = g end
+    end
+    table.sort(names)
+    for _idx, g in ipairs(names) do
+        local unread = 0
+        for _i, feed in ipairs(feeds) do
+            if feed.grp == g then unread = unread + feed.unread end
+        end
+        add(g, "folder", Page.feed_filter == nil and Page.group_filter == g, { feed_filter = false, group_filter = g }, unread)
+    end
+    if ungrouped and #names > 0 then
+        add(_("未分组"), "folder_off", Page.feed_filter == nil and Page.group_filter == "", { feed_filter = false, group_filter = "" })
+    end
+    for _idx, feed in ipairs(feeds) do
+        local provider = Subscribe.providers[feed.kind]
+        add(feed.title, provider and provider.icon or "rss_feed", Page.feed_filter == feed.id,
+            { feed_filter = feed.id, group_filter = false }, feed.unread)
+    end
+    require("ui.themes.widgets.list"):new{
+        centered = true, anchor = anchor, inner_width = Theme.px(260), items = items,
+    }:show()
+end
+
+--- 当前范围内的订阅源（刷新用）。
+---@return table[]
+function Page:scopeFeeds()
+    local out = {}
+    for _idx, feed in ipairs(SubDB.feeds()) do
+        if Page.feed_filter and feed.id == Page.feed_filter
+            or not Page.feed_filter and (Page.group_filter == nil or (feed.grp or "") == Page.group_filter) then
+            out[#out + 1] = feed
+        end
+    end
+    return out
+end
+
+--- 当前范围的全部未读文章正文进后台缓存任务（kind = cache）；离线时有网才能下，直接提示。
+function Page:cacheUnread()
     local Toast = require("ui.themes.widgets.toast")
-    if feed.unread == 0 then return Toast:new{ text = _("没有未读文章"), timeout = 3 }:show() end
+    local spec = self:spec()
+    spec.mode = "unread"
+    local items = SubDB.stream(spec, 1, -1)
+    if #items == 0 then return Toast:new{ text = _("没有未读文章"), timeout = 3 }:show() end
     if not require("ui/network/manager"):isConnected() then
         return Toast:new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
     end
     require("workers.ui.task_dialog").start{
-        key = "cache\0subscribe\0" .. feed.id,
+        key = "cache\0subscribe\0" .. SubDB.scope(spec),
         kind = "cache",
-        title = feed.title,
+        title = self:scopeLabel(),
         restartable = true,
         run = function(report, done)
-            return Subscribe.cacheUnread(feed, report, function(cached, total, failed, err)
+            return Subscribe.cacheUnread(items, report, function(cached, total, failed, err)
                 done({ ok = failed == 0, cached = cached, total = total, err = err })
             end)
         end,
@@ -276,263 +329,92 @@ function Page:cacheUnread(feed)
     }
 end
 
-function Page:showManage(feed)
+--- 编辑一个源：重命名 / 修改分组。
+---@param feed table
+---@param after fun() 改完回调
+function Page:editFeed(feed, after)
     local Input = require("ui.themes.widgets.input")
     local function edit(title, key)
         Input:new{ title = title, fields = { { text = feed[key] } }, callback = function(value)
             if key == "title" and (not value or value:match("^%s*$")) then return end
             SubDB.update(feed.id, { [key] = value or "" })
             self:redraw()
+            after()
         end }:show()
     end
     require("ui.themes.widgets.sheet"):new{ title = feed.title, items = {
-        { text = _("刷新"), callback = function() self:refresh({ feed }, false, true) end },
-        { text = _("缓存全部未读"), callback = function() self:cacheUnread(feed) end },
-        { text = _("全部标为已读"), callback = function()
-            SubDB.markRead(feed.id)
-            self:redraw()
-        end },
-        { separator = true },
         { text = _("重命名"), callback = function() edit(_("重命名"), "title") end },
         { text = _("修改分组"), callback = function() edit(_("修改分组"), "grp") end },
-        { text = _("取消订阅"), callback = function()
-            require("ui.themes.widgets.confirm"):new{
-                text = T(_("取消订阅「%1」？已缓存的文章一并删除。"), feed.title),
-                ok_text = _("取消订阅"),
-                ok_callback = function()
-                    Subscribe.remove(feed)
-                    self:openFeed(nil)
-                end,
-            }:show()
-        end },
     } }:show()
 end
 
---- 打开文章：订阅按一本按章书交给月读阅读（features.subscribe.source），章号 = 文章在目录（同本页顺序）里的位置。
-function Page:openItem(feed, item)
-    local idx
-    for i, row in ipairs(SubDB.items(feed.id, 1, -1)) do
-        if row.guid == item.guid then idx = i break end
-    end
-    if not idx then return end
-    require("desktop.open").book(self.desktop.plugin, require("features.subscribe.source").book(feed), nil,
-        { chapter_idx = idx })
-end
-
---- 订阅列表分节：分组 → 源。
-function Page:feedSections()
-    local sections, by = {}, {}
-    local feeds = SubDB.feeds()
-    local gf = Page.group_filter
-    if gf ~= nil then
-        local filtered = {}
-        for _i, feed in ipairs(feeds) do
-            if (feed.grp or "") == gf then filtered[#filtered + 1] = feed end
+--- 订阅源管理：每行右侧是编辑、删除（取消订阅）。
+function Page:showManage()
+    local list
+    local function items()
+        local out = {}
+        for _idx, feed in ipairs(SubDB.feeds()) do
+            local provider = Subscribe.providers[feed.kind]
+            out[#out + 1] = {
+                text = feed.title, icon = provider and provider.icon or "rss_feed", keep_open = true,
+                widget = function()
+                    return HorizontalGroup:new{ align = "center",
+                        Button:new{ icon = "edit", variant = "ghost", size = "small", callback = function()
+                            self:editFeed(feed, function() list:setItems(items()) end)
+                        end },
+                        HorizontalSpan:new{ width = Theme.px(Theme.current().space.xs) },
+                        Button:new{ icon = "delete", variant = "ghost", size = "small", callback = function()
+                            require("ui.themes.widgets.confirm"):new{
+                                text = T(_("取消订阅「%1」？已缓存的文章一并删除。"), feed.title),
+                                ok_text = _("取消订阅"),
+                                ok_callback = function()
+                                    Subscribe.remove(feed)
+                                    if Page.feed_filter == feed.id then Page.feed_filter = nil end
+                                    list:setItems(items())
+                                    self:redraw()
+                                end,
+                            }:show()
+                        end } }
+                end,
+            }
         end
-        feeds = filtered
+        if #out == 0 then out[1] = { text = _("还没有订阅"), enabled = false } end
+        return out
     end
-    local function row(feed)
-        local provider = Subscribe.providers[feed.kind]
-        return function(iw)
-            return Row.widget({
-                width = iw, icon = provider and provider.icon, title = feed.title,
-                subtitle = provider and provider.label,
-                status = feed.unread > 0 and tostring(feed.unread) or nil, status_on = feed.unread > 0,
-                callback = function() self:openFeed(feed.id) end,
-            })
+    list = require("ui.themes.widgets.list"):new{ title = _("订阅源管理"), items = items() }
+    list:show()
+end
+
+--- 打开文章：阅读器的书是当前筛选范围（目录 = 此刻的文章流），章号 = 文章在目录里的位置。
+---@param item table SubDB.stream 的一行
+function Page:openItem(item)
+    local Source = require("features.subscribe.source")
+    local id = SubDB.scope(self:spec())
+    local uid = id:match("^%d+$") and item.guid or (item.feed_id .. ":" .. item.guid)
+    for _idx, chapter in ipairs(Source.toc({ stable_id = id })) do
+        if chapter.uid == uid then
+            return require("desktop.open").book(self.desktop.plugin, Source.book(id, self:bookTitle()), nil,
+                { chapter_idx = chapter.idx })
         end
     end
-    local total, order = #feeds, self:order()
-    if order.id ~= "group" then
-        if order.key then
-            table.sort(feeds, function(a, b)
-                if a[order.key] ~= b[order.key] then return a[order.key] > b[order.key] end
-                return a.title < b.title
-            end)
-        else
-            table.sort(feeds, function(a, b) return a.title < b.title end)
-        end
-        local rows = {}
-        for i, feed in ipairs(feeds) do rows[i] = row(feed) end
-        sections[1] = { title = order.label(), rows = rows }
-        feeds = {}
-    end
-    for _idx, feed in ipairs(feeds) do
-        local key = feed.grp ~= "" and feed.grp or _("未分组")
-        if not by[key] then
-            by[key] = { title = key, rows = {} }
-            sections[#sections + 1] = by[key]
-        end
-        table.insert(by[key].rows, row(feed))
-    end
-    if total == 0 then
-        sections[1] = { title = _("订阅"), rows = { function(iw)
-            return Row.widget({ width = iw, icon = "add", title = _("还没有订阅"),
-                subtitle = _("点右上角添加 RSS、网站或公众号"), callback = function() self:showAdd() end })
-        end } }
-    end
-    return sections
 end
 
---- 当前排序方式（设置里没存或存了已不认识的 id 时按分组）。
----@return table
-function Page:order()
-    local id = Subscribe.settings().order
-    for _idx, order in ipairs(ORDERS) do
-        if order.id == id then return order end
-    end
-    return ORDERS[1]
-end
-
---- 分组筛选菜单：全部 / 未分组 / 各分组。
-function Page:showGroupFilter()
-    local current, items = Page.group_filter, {}
-    local function add(key, label)
-        items[#items + 1] = {
-            text = label, variant = current == key and "primary" or nil,
-            callback = function()
-                Page.group_filter, self.page = key, 1
-                self:redraw()
-            end,
-        }
-    end
-    add(nil, _("全部"))
-    add("", _("未分组"))
-    local seen, names = { [""] = true }, {}
-    for _i, feed in ipairs(SubDB.feeds()) do
-        local g = feed.grp or ""
-        if g ~= "" and not seen[g] then seen[g] = true; names[#names + 1] = g end
-    end
-    table.sort(names)
-    for _i, g in ipairs(names) do add(g, g) end
-    require("ui.themes.widgets.sheet"):new{ title = _("筛选分组"), items = items }:show()
-end
-
-function Page:showOrder()
-    local current, items = self:order(), {}
-    items[#items + 1] = {
-        text = _("筛选分组"),
-        callback = function() self:showGroupFilter() end,
-    }
-    for _idx, order in ipairs(ORDERS) do
-        items[#items + 1] = {
-            text = order.label(), variant = order == current and "primary" or nil,
-            callback = function()
-                Subscribe.settings().order, self.page = order.id, 1
-                require("utils.settings").save("features.subscribe")
-                self:redraw()
-            end,
-        }
-    end
-    require("ui.themes.widgets.sheet"):new{ title = _("排序"), items = items }:show()
-end
-
----@param w integer
----@param h integer
----@return table
-function Page:feedsView(w, h)
-    local subtitle = self:status()
-    if not subtitle and Page.group_filter ~= nil then
-        subtitle = Page.group_filter == "" and _("未分组") or Page.group_filter
-    end
-    local bar = TitleBar.widget({
-        width = w, title = _("订阅"), subtitle = subtitle,
-        left_icon = "refresh", left_callback = function() self:refresh(SubDB.feeds(), false, true) end,
-        extra_icon = "sort", extra_callback = function() self:showOrder() end,
-        right_icon = "add", right_callback = function() self:showAdd() end,
-    })
-    local body_h = h - bar:getSize().h
-    local body, page = Sections.widget({
-        width = w, height = body_h, page = self.page, sections = self:feedSections(),
-        on_page = function(p) self.page = p; self:redraw() end,
-    })
-    self.page = page
-    return VerticalGroup:new{ align = "left", bar, body }
-end
-
---- 发布时间，读过的再带上读的时间。
----@param item table
----@return string|nil
-local function itemSubtitle(item)
-    local text = item.time > 0 and os.date("%Y-%m-%d %H:%M", item.time) or nil
-    if item.read_at > 0 then
-        local read = T(_("读于 %1"), os.date("%m-%d %H:%M", item.read_at))
-        text = text and (text .. " · " .. read) or read
-    end
-    return text
-end
-
----@param feed table
----@param w integer
----@param h integer
----@return table
-function Page:itemsView(feed, w, h)
-    local t = Theme.current()
-    local subtitle = self:status() or (feed.unread > 0 and T(_("%1 篇未读"), feed.unread) or nil)
-    if Page.read_filter ~= nil and not self:status() then
-        local label = Page.read_filter and _("仅已读") or _("仅未读")
-        subtitle = subtitle and (subtitle .. " · " .. label) or label
-    end
-    local bar = TitleBar.widget({
-        width = w, title = feed.title,
-        subtitle = subtitle,
-        left_icon = "arrow_back", left_callback = function() self:openFeed(nil) end,
-        extra_icon = "filter_list", extra_callback = function()
-            if Page.read_filter == nil then Page.read_filter = false
-            elseif Page.read_filter == false then Page.read_filter = true
-            else Page.read_filter = nil end
-            self.page = 1
-            self:redraw()
-        end,
-        right_icon = "more_horiz", right_callback = function() self:showManage(feed) end,
-    })
-    local pager_h = Theme.px(t.control.height)
-    local avail = h - bar:getSize().h - pager_h
-    local probe = Row.widget({ width = w, title = "M", subtitle = "M" })
-    local row_h = probe:getSize().h
-    probe:free()
-    -- 公众号还有更早的文章时留一行给「加载更早的文章」。
-    local more = (feed.cursor or 0) > 0
-    local size = math.max(1, math.min(PAGE_MAX, math.floor(avail / row_h) - (more and 1 or 0)))
-    local read = Page.read_filter
-    local _first, total = SubDB.items(feed.id, 1, 0, read)
-    self.pages = math.max(1, math.ceil(total / size))
-    self.page = math.max(1, math.min(self.page, self.pages))
-    local items = SubDB.items(feed.id, self.page, size, read)
-    local list = VerticalGroup:new{ align = "left" }
-    for _idx, item in ipairs(items) do
-        list[#list + 1] = Row.widget({
-            width = w, title = (item.read and "" or "● ") .. item.title,
-            subtitle = itemSubtitle(item),
-            selected = false,
-            callback = function() self:openItem(feed, item) end,
-        })
-    end
-    if more and self.page == self.pages then
-        list[#list + 1] = Row.widget({ width = w, icon = "refresh", title = _("加载更早的文章"),
-            callback = function() self:refresh({ feed }, true) end })
-    end
-    if #items == 0 then
-        list[1] = Row.widget({ width = w, title = self:status() or _("暂无文章"), enabled = false })
-    end
-    local group = VerticalGroup:new{ align = "left", bar, list,
-        VerticalSpan:new{ width = math.max(0, avail - list:getSize().h) } }
-    group[#group + 1] = Pager.widget({
-        width = w, page = self.page, pages = self.pages,
-        on_prev = function() self:gotoPage(self.page - 1) end,
-        on_next = function() self:gotoPage(self.page + 1) end,
-    })
-    return group
+--- 阅读器里的书名：范围名，带上非默认的页签与搜索词。
+---@return string
+function Page:bookTitle()
+    local title = self:scopeLabel()
+    if Page.stream_mode == "unread" then title = title .. " · " .. _("未读")
+    elseif Page.stream_mode == "star" then title = title .. " · " .. _("收藏") end
+    if Page.stream_q ~= "" then title = title .. " · " .. Page.stream_q end
+    return title
 end
 
 ---@return table
 function Page:updateView()
     local desktop = self.desktop
     local w, h = desktop.dimen.w, desktop:contentHeight()
-    local feed = self.feed_id and SubDB.feed(self.feed_id)
-    if not feed then self.feed_id = nil end
-    local view = feed and self:itemsView(feed, w, h) or self:feedsView(w, h)
-    return Box:new{ style = { bg = Theme.current().color.page }, width = w, height = h, view }
+    return Box:new{ style = { bg = Theme.current().color.page }, width = w, height = h,
+        require("features.subscribe.paper").view(self, w, h) }
 end
 
 return Page
