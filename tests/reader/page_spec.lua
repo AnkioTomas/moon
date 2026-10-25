@@ -157,7 +157,7 @@ local PanelReader = require("features.panel.reader")
 local actions = PanelReader.actions(ui)
 local action_ids = {}
 for _, a in ipairs(actions) do action_ids[#action_ids + 1] = a.id end
-Assert.eq(table.concat(action_ids, ","), "toc,highlights,rare_ruby,xray,xray_marks,xray_refresh")
+Assert.eq(table.concat(action_ids, ","), "toc,highlights,bookmark,rare_ruby,xray,xray_marks,xray_refresh")
 Assert.eq(actions[1].icon, "menu_book")
 
 Assert.is_false(PanelReader.executeAction("missing", ui))
@@ -187,4 +187,3 @@ Assert.is_nil(ui._zones, "不应注册覆盖原生菜单的触摸区")
 native_ui = nil
 Reader.onCreate(plugin)
 Assert.is_nil(native_ui, "同一 ReaderUI 不应重复安装")
-
