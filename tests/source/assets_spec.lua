@@ -82,17 +82,6 @@ do
     Assert.eq(html_out, sample)
 end
 
--- 超出大小上限：不留远程破图，换成指向原图的说明。
-do
-    local html_out
-    Assets.localizeAsync('<img src="' .. remote .. '"/>', images_dir, function(_url, cb)
-        cb(nil, "too_big")
-        return { cancel = function() end }
-    end, function(html) html_out = html end)
-    Assert.matches(html_out, "^<a href=")
-    Assert.is_nil(html_out:find("<img", 1, true))
-end
-
 -- 写盘失败：不返回 href、不留目标文件，下次同图仍会重写而不是复用半截文件。
 do
     local md5 = require("ffi/sha2").md5

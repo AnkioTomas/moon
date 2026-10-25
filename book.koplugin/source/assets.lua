@@ -95,7 +95,7 @@ end
 
 --- 阅读器解不了的图（AVIF 等）：整个 img 换成指向原图的一行说明，不让它留成空白或破图。
 ---@param xhtml string
----@param formats table<string, string> 清洗后的 src → 说明文字
+---@param formats table<string, string> 清洗后的 src → 格式名
 ---@return string
 local function replaceUnsupported(xhtml, formats)
     return (xhtml:gsub("<img%s+[^>]*>", function(tag)
@@ -103,14 +103,14 @@ local function replaceUnsupported(xhtml, formats)
         local url = src and src:gsub("&amp;", "&")
         local format = url and formats[url]
         if not format then return tag end
-        return '<a href="' .. Text.xmlEscape(url) .. '">' .. Text.xmlEscape(format) .. "</a>"
+        return '<a href="' .. Text.xmlEscape(url) .. '">' .. Text.xmlEscape(string.format(_("[图片：不支持 %s 格式，点此看原图]"), format)) .. "</a>"
     end))
 end
 
 --- 下载正文里的远程 img，写入 images_dir，改写成相对路径。
 ---@param html string
 ---@param images_dir string
----@param download fun(url: string, cb: fun(data: string|nil, err: any)): { cancel: fun() }|nil  err == "too_big" 表示超出大小上限
+---@param download fun(url: string, cb: fun(data: string|nil, err: any)): { cancel: fun() }|nil
 ---@param cb fun(html: string)
 ---@return { cancel: fun() }
 function Assets.localizeAsync(html, images_dir, download, cb)
@@ -141,17 +141,15 @@ function Assets.localizeAsync(html, images_dir, download, cb)
             cb(replaceUnsupported(Assets.rewriteImageSources(html, url_hrefs), unsupported))
             return
         end
-        local handle = download(Text.escapeUrl(url), function(raw, err)
+        local handle = download(Text.escapeUrl(url), function(raw)
             if cancelled then return end
             if raw then
                 local href = Assets.materializeImage(images_dir, raw)
                 if href then
                     url_hrefs[url] = href
                 else
-                    unsupported[url] = string.format(_("[图片：不支持 %s 格式，点此看原图]"), Image.unsupported(raw))
+                    unsupported[url] = Image.unsupported(raw)
                 end
-            elseif err == "too_big" then
-                unsupported[url] = _("[图片过大，点此看原图]")
             end
             nextUrl()
         end)
