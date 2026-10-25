@@ -258,7 +258,9 @@ function Page:pickScope(anchor)
             callback = function() self:filter(fields) end }
     end
     local none = Page.feed_filter == nil and Page.group_filter == nil
-    add(_("全部"), "select_all", none, { feed_filter = false, group_filter = false }, SubDB.unreadTotal())
+    local all_unread = 0
+    for _idx, feed in ipairs(feeds) do all_unread = all_unread + feed.unread end
+    add(_("全部"), "select_all", none, { feed_filter = false, group_filter = false }, all_unread)
     local seen, names, ungrouped = {}, {}, false
     for _idx, feed in ipairs(feeds) do
         local g = feed.grp or ""
