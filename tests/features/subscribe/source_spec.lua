@@ -43,7 +43,7 @@ package.loaded["features.subscribe"] = {
     articlePath = function(id, guid) return root .. "/subscribe/" .. id .. "/" .. guid .. ".html" end,
     content = function(feed, item, cb)
         Assert.is_true(feed.id == 3 or feed.id == 4)
-        cb("<h1>" .. item.title .. "</h1><p>正文</p>")
+        cb("<h1>" .. item.title .. "</h1><p>正文</p><img src=\"images/a.jpg\"/>")
     end,
 }
 local snap -- 阅读器当前会话（nil = 没开书）
@@ -209,6 +209,7 @@ do
     src:openBookAsync({ source_id = "subscribe", stable_id = "sabc", book = book }, {}, function() end)
     ops.fetchContent(ident, { idx = 2, uid = "4:b:x", title = "乙", link = "" }, function(p) payload = p end)
     Assert.matches(payload.document, "乙")
+    Assert.matches(payload.document, 'src="%.%./4/images/a%.jpg"', "范围书的图指回订阅目录")
     src:onEvent("chapter_changed", { identity = { stable_id = "sabc", chapter_idx = 2 } })
     Assert.eq(read[#read], "4:b:x")
 
