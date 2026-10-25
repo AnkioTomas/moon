@@ -13,8 +13,8 @@ Bond、Connect、Disconnect(str,w 地址) / ListPaired、ListConnected、ListDis
 --]]
 
 local SERVICE = "com.lab126.btfd"
-local ADDRESS_KEYS = { "address", "bdaddr", "bdAddr", "mac", "deviceAddress", "addr", "id" }
-local NAME_KEYS = { "name", "deviceName", "friendlyName", "displayName" }
+local ADDRESS_KEYS = { "bd_address", "address", "bdaddr", "bdAddr", "mac", "deviceAddress", "addr", "id" }
+local NAME_KEYS = { "bd_name", "name", "deviceName", "friendlyName", "displayName" }
 
 local Native = {}
 
