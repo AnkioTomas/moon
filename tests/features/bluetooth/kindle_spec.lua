@@ -51,8 +51,8 @@ end
 -- lfs 里没有守护进程二进制：走原生后端。
 local Bluetooth = require("features.bluetooth")
 
-btfd.hashes.ListPaired = { { address = "aa-bb-cc-dd-ee-ff", name = "Kindle Click" }, { junk = "x" } }
-btfd.hashes.ListConnected = { { bdaddr = "AA:BB:CC:DD:EE:FF" } }
+btfd.hashes.ListPaired = { { bd_address = "D7:10:18:3C:9A:F1", bd_name = "Kindle Click" }, { bd_address = "AA:BB:CC:DD:EE:FF" }, { junk = "x" } }
+btfd.hashes.ListConnected = { { bd_address = "AA:BB:CC:DD:EE:FF" } }
 
 -- 状态：BTstate 非 0 为 on；哈希行地址归一成大写冒号，没有地址的行丢弃。
 do
@@ -60,8 +60,9 @@ do
     local got
     Bluetooth.refresh(function(st) got = st end)
     Assert.eq(got.state, "on")
-    Assert.len(got.devices, 1)
-    Assert.eq(got.devices[1].address, "AA:BB:CC:DD:EE:FF")
+    Assert.len(got.devices, 2)
+    Assert.eq(got.devices[1].address, "D7:10:18:3C:9A:F1")
+    Assert.eq(got.devices[1].name, "Kindle Click")
     Assert.is_true(Bluetooth.isConnected(got, "aa:bb:cc:dd:ee:ff"))
     Assert.eq(select(2, Bluetooth.topbar()), "bluetooth_connected")
 end
@@ -109,7 +110,7 @@ end
 -- 扫描：触发 triggerBTscan，结束时给出发现的设备；取消后不再回调。
 do
     btfd.sets = {}
-    btfd.hashes.ListDiscovered = { { address = "11:22:33:44:55:66", name = "BLE-M3" } }
+    btfd.hashes.ListDiscovered = { { bd_address = "11:22:33:44:55:66", bd_name = "BLE-M3" } }
     local done
     Bluetooth.scan(function() end, function(devices) done = devices end)
     Stubs.flush()
