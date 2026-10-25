@@ -524,6 +524,13 @@ function Subscribe.remove(feed)
     require("book.books_db").remove("subscribe", tostring(feed.id))
 end
 
+---@param feed_id integer|string
+---@param guid string
+---@return string
+function Subscribe.articlePath(feed_id, guid)
+    return Subscribe.dir(feed_id) .. "/articles/" .. require("ffi/sha2").md5(guid) .. ".html"
+end
+
 --- 文章正文片段（含标题 h1），按 guid 缓存：目录变动作废章节文件后重开不必重下。
 ---@param feed table
 ---@param item { guid: string, title: string|nil, link: string|nil }
@@ -531,7 +538,7 @@ end
 ---@return table|nil job
 function Subscribe.content(feed, item, cb)
     local dir = Subscribe.dir(feed.id)
-    local path = dir .. "/articles/" .. require("ffi/sha2").md5(item.guid) .. ".html"
+    local path = Subscribe.articlePath(feed.id, item.guid)
     local images_dir = Subscribe.settings().images ~= false and dir .. "/images" or nil
     local cached
     local f = io.open(path, "rb")
