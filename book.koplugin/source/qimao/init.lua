@@ -24,7 +24,7 @@ local FETCH_INTERVAL = 1
 
 ---@return BookSourceMeta
 function Qimao.meta()
-    return require("source.meta").get("qimao")
+    return { id = "qimao", name = _("七猫小说"), type = "chapter" }
 end
 
 ---@class QimaoSource : SourceBase

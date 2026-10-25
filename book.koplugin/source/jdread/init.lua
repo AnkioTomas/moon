@@ -25,7 +25,7 @@ local Jdread = {}
 
 ---@return BookSourceMeta
 function Jdread.meta()
-    return require("source.meta").get("jdread")
+    return { id = "jdread", name = _("京东读书"), type = "chapter" }
 end
 
 ---@class JdreadSource : SourceBase

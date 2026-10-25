@@ -32,7 +32,7 @@ local WeChat = {}
 --- 返回微信读书源元信息。
 ---@return BookSourceMeta
 function WeChat.meta()
-    return require("source.meta").get("wechat")
+    return { id = "wechat", name = _("微信读书"), type = "chapter" }
 end
 
 ---@class WechatSource : SourceBase

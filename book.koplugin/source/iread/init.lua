@@ -20,7 +20,7 @@ local IRead = {}
 
 ---@return BookSourceMeta
 function IRead.meta()
-    return require("source.meta").get("iread")
+    return { id = "iread", name = _("iRead"), type = "chapter" }
 end
 
 ---@class IReadSource : SourceBase

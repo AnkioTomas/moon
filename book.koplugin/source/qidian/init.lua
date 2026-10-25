@@ -46,7 +46,7 @@ end
 
 ---@return BookSourceMeta
 function Qidian.meta()
-    return require("source.meta").get("qidian")
+    return { id = "qidian", name = _("起点中文网"), type = "chapter" }
 end
 
 ---@class QidianSource : SourceBase

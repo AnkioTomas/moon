@@ -15,7 +15,7 @@ local Local = {}
 --- 返回本地源元信息。
 ---@return BookSourceMeta
 function Local.meta()
-    return require("source.meta").get("local")
+    return { id = "local", name = _("本地书籍"), type = "book" }
 end
 
 ---@class LocalSource : SourceBase
