@@ -292,7 +292,7 @@ function POST.article(q, cb)
     local feed = feedOr404(q.id, cb)
     if not feed then return end
     local item
-    for _idx, it in ipairs((SubDB.items(feed.id, 1, SubDB.HARD_KEEP))) do
+    for _idx, it in ipairs((SubDB.items(feed.id, 1, SubDB.KEEP))) do
         if it.guid == q.guid then item = it; break end
     end
     if not item then return cb(404, { error = _("文章不存在") }) end
