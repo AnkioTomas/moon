@@ -7,7 +7,11 @@ local Assert = require("support.assert")
 local built_rows = {}
 local opened
 
-package.preload["gettext"] = function() return function(text) return text end end
+package.preload["gettext"] = function()
+    return setmetatable({ current_lang = "C", translation = {} }, {
+        __call = function(_self, text) return text end,
+    })
+end
 package.preload["ffi/util"] = function()
     return {
         template = function(text, value)
@@ -218,7 +222,13 @@ require("features").registerConventions()
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 48)
+Assert.len(built_rows, 49)
+local fontmap_row
+for _idx, row in ipairs(built_rows) do
+    if row.title == "书内字体映射" then fontmap_row = row end
+end
+Assert.eq(fontmap_row.kind, "toggle")
+Assert.eq(fontmap_row.status_on, false)
 Assert.eq(table.concat(section_titles, ","), "搜索,书库,订阅,外观,桌面,阅读,系统,安全,维护")
 -- 订阅的开关直接放在根页「订阅」组，不另开子页。
 local sub_rows = {}
@@ -302,7 +312,7 @@ local maintenance = {}
 for _, row in ipairs(built_rows) do
     if row.kind == "action" or row.kind == "toggle" or row.toggle ~= nil then maintenance[#maintenance + 1] = row.title end
 end
-Assert.eq(table.concat(maintenance, ","), "启用订阅,下载文章图片,清除当前源统计,导入 KOReader 统计,自动检查更新,检查更新,调试日志,关于,关闭桌面")
+Assert.eq(table.concat(maintenance, ","), "启用订阅,下载文章图片,书内字体映射,清除当前源统计,导入 KOReader 统计,自动检查更新,检查更新,调试日志,关于,关闭桌面")
 
 _G.G_reader_settings = previous_settings
 
