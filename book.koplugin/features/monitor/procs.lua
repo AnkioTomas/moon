@@ -134,6 +134,17 @@ function Procs:sample()
     return { mem_total = mem_total, mem_avail = mem_avail, cpu = cpu, procs = procs }
 end
 
+--- 本进程内存构成（/proc/self/status，KB）：rss 总量、anon 私有内存（堆）、file 文件映射（字体、动态库，可回收）。
+---@return { rss: integer, anon: integer, file: integer }|nil
+function Procs:own()
+    local text = self.fs.read("/proc/self/status")
+    if not text then return nil end
+    local function kb(key) return tonumber(text:match(key .. ":%s*(%d+)")) end
+    local rss = kb("VmRSS")
+    if not rss then return nil end
+    return { rss = rss, anon = kb("RssAnon") or 0, file = kb("RssFile") or 0 }
+end
+
 --- 从高到低排序（就地）：mem 按常驻内存，cpu 按 CPU 占用（nil 排最后），同值按内存再按 pid。
 ---@param procs { pid: integer, rss: integer, cpu: number|nil }[]
 ---@param by "mem"|"cpu"

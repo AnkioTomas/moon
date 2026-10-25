@@ -54,6 +54,45 @@ local function percent(value)
     return value and string.format("%.1f%%", value) or "—"
 end
 
+--- 月读顶层模块名（目录名与去掉 .lua 的文件名），用来区分 KOReader 自己的模块。
+---@return table<string, true>
+local function pluginModules()
+    local root = debug.getinfo(1, "S").source:match("^@(.*)/features/monitor/page%.lua$")
+    local out = {}
+    for name in require("libs/libkoreader-lfs").dir(root) do
+        out[name:gsub("%.lua$", "")] = true
+    end
+    return out
+end
+
+--- 点一下才分析：要整堆遍历，几百毫秒；结果缓存到下次再点。
+---@param desktop BookDesktop
+---@return BookThemeSection
+local function luaSection(desktop)
+    local s = desktop.monitor
+    local rows = {
+        function(iw)
+            return Row.widget({
+                width = iw, kind = "nav", title = _("分析 Lua 模块占用"),
+                subtitle = _("按模块估算 Lua 堆，要几百毫秒；数字是量级参考"),
+                status = s.lua_at and os.date("%H:%M", s.lua_at) or "",
+                callback = function()
+                    s.lua = require("features.monitor.luamem").scan(pluginModules())
+                    s.lua_at = os.time()
+                    desktop.settings_overlay:updateView()
+                end,
+            })
+        end,
+    }
+    for i, r in ipairs(s.lua or {}) do
+        if i <= TOP or r.rest then
+            local name = r.rest and _("未归属（全局表、协程栈等）") or (r.mine and _("月读：") or "") .. r.name
+            rows[#rows + 1] = infoRow(name, size(r.kb))
+        end
+    end
+    return { title = _("Lua 堆占用（估算）"), rows = rows }
+end
+
 ---@param desktop BookDesktop
 ---@return table
 local function state(desktop)
@@ -123,7 +162,7 @@ local function alertSection(desktop)
     return {
         title = _("KOReader 内存警报"),
         rows = {
-            toggleRow(_("高内存用量警报"), _("KOReader 自身内存超过阈值时提醒"), "device_status_memory_alarm", true, function()
+            toggleRow(_("高内存用量警报"), _("KOReader 总占用（RSS，含字体等文件映射）超过阈值时提醒"), "device_status_memory_alarm", true, function()
                 if settings:isTrue("device_status_memory_alarm") then
                     ds:startMemoryChecker(true)
                 else
@@ -184,6 +223,21 @@ function Page.sections(desktop)
             },
         },
     }
+    local own = s.procs:own()
+    if own then
+        local lua_kb = math.floor(collectgarbage("count"))
+        sections[#sections + 1] = {
+            title = _("KOReader 内存构成"),
+            rows = {
+                infoRow(_("总占用 (RSS)"), size(own.rss)),
+                infoRow(_("私有内存"), size(own.anon)),
+                infoRow(_("　其中 Lua 堆"), size(lua_kb)),
+                infoRow(_("　其中 非 Lua（排版、缓存等）"), size(math.max(0, own.anon - lua_kb))),
+                infoRow(_("文件映射（字体、库）"), size(own.file)),
+            },
+        }
+    end
+    sections[#sections + 1] = luaSection(desktop)
     sections[#sections + 1] = alertSection(desktop)
     sections[#sections + 1] = {
         title = s.sort == "cpu" and _("进程（按 CPU 从高到低）") or _("进程（按内存从高到低）"),

@@ -4,14 +4,24 @@ local Assert = require("support.assert")
 local Stubs = require("support.stubs")
 Stubs.install()
 
-local items, read = {}, {}
+local items, read, scopes, extra = {}, {}, {}, {}
 package.loaded["features.subscribe.db"] = {
-    items = function(_id, page, size)
+    scopeOf = function(id)
+        if id:match("^%d+$") then return { feed = tonumber(id), mode = "all", q = "" } end
+        return scopes[id]
+    end,
+    stream = function(spec, page, size)
         Assert.eq(page, 1)
         Assert.eq(size, -1, "目录取全部条目")
-        return items
+        local out = {}
+        for i, item in ipairs(items) do
+            out[i] = { feed_id = item.feed_id or spec.feed or 3, guid = item.guid, title = item.title, link = item.link,
+                time = item.time or 0 }
+        end
+        return out
     end,
-    feed = function(id) return id == 3 and { id = 3, kind = "rss", title = "源<名" } or nil end,
+    item = function(feed_id, guid) return extra[feed_id .. ":" .. guid] end,
+    feed = function(id) return (id == 3 or id == 4) and { id = id, kind = "rss", title = "源<名" } or nil end,
     markRead = function(id, guid) read[#read + 1] = id .. ":" .. guid end,
 }
 local tocs, dropped = {}, {}
@@ -21,13 +31,17 @@ package.loaded["source.toc"] = {
 }
 package.loaded["book.chapters_db"] = { deleteUnder = function(dir) dropped[#dropped + 1] = dir end }
 local remaps = {}
-package.loaded["book.note_db"] = { remapChapters = function(_s, id, map) remaps[#remaps + 1] = { id, map } end }
+local noted = {}
+package.loaded["book.note_db"] = {
+    remapChapters = function(_s, id, map) remaps[#remaps + 1] = { id, map } end,
+    all = function() return noted end,
+}
 local root = require("support.config").dir() .. "/subscribe_source_spec"
 package.loaded["utils.paths"] = { bookWorkDir = function(id, src) return root .. "/" .. src .. "/" .. id end }
 package.loaded["features.subscribe"] = {
     dir = function(id) return root .. "/subscribe/" .. id end,
     content = function(feed, item, cb)
-        Assert.eq(feed.id, 3)
+        Assert.is_true(feed.id == 3 or feed.id == 4)
         cb("<h1>" .. item.title .. "</h1><p>正文</p>")
     end,
 }
@@ -40,7 +54,7 @@ Assert.eq(M.meta().type, "chapter")
 local src = M.new()
 Assert.is_true(src.ephemeral, "不记进度 / 统计")
 Assert.is_nil(src.getProgressAsync, "没有云端进度")
-local book = M.book({ id = 3, title = "源" })
+local book = M.book("3", "源")
 Assert.eq(book.source_id, "subscribe")
 Assert.eq(book.stable_id, "3")
 
@@ -177,4 +191,33 @@ do
     Assert.is_nil(list[2].anchors)
     Assert.eq(#tocs["3"][1].anchors, 2, "目录缓存跟着更新")
     os.execute("rm -rf '" .. root .. "'")
+end
+
+
+-- 筛选范围的书（stable_id 非订阅 id）：uid = 订阅 id:guid，跨源；正文、已读都按 uid 拆回 (源, guid)。
+do
+    scopes.sabc = { mode = "unread", q = "" }
+    items = { { feed_id = 3, guid = "a", title = "甲", time = 30 }, { feed_id = 4, guid = "b:x", title = "乙", time = 20 } }
+    local ident = { source_id = "subscribe", stable_id = "sabc" }
+    local t = M.toc(ident)
+    Assert.eq(t[1].uid, "3:a")
+    Assert.eq(t[2].uid, "4:b:x", "guid 里带冒号照样拆得回")
+    local payload
+    local ops = nil
+    package.loaded["source.chapter"] = { openWithUi = function(_s, _i, _b, _o, o) ops = o end }
+    src:openBookAsync({ source_id = "subscribe", stable_id = "sabc", book = book }, {}, function() end)
+    ops.fetchContent(ident, { idx = 2, uid = "4:b:x", title = "乙", link = "" }, function(p) payload = p end)
+    Assert.matches(payload.document, "乙")
+    src:onEvent("chapter_changed", { identity = { stable_id = "sabc", chapter_idx = 2 } })
+    Assert.eq(read[#read], "4:b:x")
+
+    -- 带注解的旧章退出了范围（读过了）：留在目录里并按时间归位，划线不丢。
+    tocs.sabc = { { idx = 1, uid = "3:a" }, { idx = 2, uid = "3:gone" } }
+    noted = { { chapter_idx = 2 } }
+    extra["3:gone"] = { feed_id = 3, guid = "gone", title = "读过", link = "", time = 25 }
+    t = M.toc(ident)
+    Assert.eq(#t, 3)
+    Assert.eq(t[2].uid, "3:gone", "按时间插回 a 与 b 之间")
+    Assert.eq(t[3].idx, 3)
+    noted = {}
 end

@@ -175,3 +175,47 @@ do
     local _l, all = SubDB.items(f, 1, 20)
     Assert.eq(all, 3)
 end
+
+-- 跨源文章流：新到旧混排；未读 / 收藏 / 分组 / 标题搜索，分页总数按筛后算。
+do
+    local a = SubDB.add({ kind = "rss", url = "https://s.com/a", title = "SA", grp = "G1" })
+    local b = SubDB.add({ kind = "rss", url = "https://s.com/b", title = "SB" })
+    SubDB.merge(a, { { guid = "x", title = "Hello%", time = 9001 }, { guid = "y", title = "y", time = 9003 } })
+    SubDB.merge(b, { { guid = "z", title = "z", time = 9002 } })
+    SubDB.markRead(a, "y")
+    local list, total = SubDB.stream({ mode = "all" }, 1, 3)
+    Assert.eq(list[1].guid, "y")
+    Assert.eq(list[2].feed_title, "SB")
+    Assert.eq(list[3].grp, "G1")
+    Assert.eq(select(2, SubDB.stream({}, 1, 0)) < total, true, "缺省只要未读")
+    local grouped, count = SubDB.stream({ mode = "all", grp = "G1" }, 1, 20)
+    Assert.eq(count, 2)
+    Assert.eq(select(2, SubDB.stream({ mode = "all", grp = "" }, 1, 20)) >= 1, true, "未分组")
+    Assert.eq(select(2, SubDB.stream({ mode = "all", q = "hello%" }, 1, 20)), 1, "搜索不分大小写，% 不是通配符")
+    Assert.eq(select(2, SubDB.stream({ mode = "star" }, 1, 20)), 0)
+    SubDB.setStarred(a, "x", true)
+    local starred = SubDB.stream({ mode = "star" }, 1, 20)
+    Assert.eq(#starred, 1)
+    Assert.eq(starred[1].starred, true)
+    -- 单个源、取全部（size = -1）、按 id 取一条
+    local only, n = SubDB.stream({ mode = "all", feed = b, grp = "G1" }, 1, -1)
+    Assert.eq(n, 1, "指定源时不看分组")
+    Assert.eq(only[1].guid, "z")
+    Assert.eq(only[1].link, "")
+    Assert.eq(SubDB.item(a, "x").feed_title, "SA")
+    Assert.is_nil(SubDB.item(a, "none"))
+
+    -- 阅读范围：单源 + 全部 + 无搜索词沿用订阅 id，其余登记成 s<md5>，能还原
+    Assert.eq(SubDB.scope({ feed = a, mode = "all", q = "" }), tostring(a))
+    Assert.eq(SubDB.scopeOf(tostring(a)).feed, a)
+    local id = SubDB.scope({ grp = "G1", mode = "unread", q = "he" })
+    Assert.matches(id, "^s%x+$")
+    Assert.eq(SubDB.scope({ grp = "G1", mode = "unread", q = "he" }), id, "同条件同 id")
+    Assert.is_true(SubDB.scope({ grp = "", mode = "unread", q = "he" }) ~= id, "未分组与 G1 不同")
+    local spec = SubDB.scopeOf(id)
+    Assert.eq(spec.grp, "G1")
+    Assert.eq(spec.mode, "unread")
+    Assert.eq(spec.q, "he")
+    Assert.is_nil(spec.feed)
+    Assert.is_nil(SubDB.scopeOf("s0000"))
+end

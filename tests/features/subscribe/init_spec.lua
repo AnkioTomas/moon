@@ -408,15 +408,14 @@ do
     Subscribe = require("features.subscribe")
 end
 
--- 缓存全部未读：只取未读条目，逐篇缓存，失败的计数但不阻断后面
+-- 缓存一批文章（可跨源）：逐篇缓存，失败的计数但不阻断后面
 do
     local db = package.loaded["features.subscribe.db"]
-    db.items = function(_id, _page, _size, read)
-        Assert.eq(read, false, "只要未读")
-        return { { guid = "u1", title = "一", link = "https://gone/" }, { guid = "u2", title = "二", link = "https://gone/" } }
-    end
+    db.feed = function() return rss_feed end
+    local articles = { { feed_id = 1, guid = "u1", title = "一", link = "https://gone/" },
+        { feed_id = 1, guid = "u2", title = "二", link = "https://gone/" } }
     local progress, result = {}, nil
-    Subscribe.cacheUnread(rss_feed, function(text, n, total) progress[#progress + 1] = n .. "/" .. total end,
+    Subscribe.cacheUnread(articles, function(text, n, total) progress[#progress + 1] = n .. "/" .. total end,
         function(cached, total, failed) result = { cached, total, failed } end)
     require("support.stubs").flush()
     Assert.eq(table.concat(progress, ","), "0/2,1/2")

@@ -48,6 +48,15 @@ DB.schema("sub_read_at", function()
     return true
 end)
 
+--- 收藏：条目 starred=1，不被条数上限淘汰。老库补列。
+DB.schema("sub_starred", function()
+    local columns, nrows = DB.query("PRAGMA table_info(sub_items);")
+    for i = 1, columns and nrows or 0 do
+        if columns[2][i] == "starred" then return true end
+    end
+    return DB.exec("ALTER TABLE sub_items ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;") ~= nil
+end)
+
 --- 公众号游标曾按篇数累加，服务端 offset 实际以推送组为单位（且旧的 maxIdx 被无视，翻页一直拿到第一页）。
 --- 加列只是一次性标记：加成功的这一次把旧游标清掉，下次刷新首页从组数重新起算。
 DB.schema("sub_mp_cursor_groups", function()
@@ -57,6 +66,15 @@ DB.schema("sub_mp_cursor_groups", function()
     end
     return DB.exec("ALTER TABLE sub_feeds ADD COLUMN cursor_groups INTEGER NOT NULL DEFAULT 1;")
         and DB.exec("UPDATE sub_feeds SET cursor = NULL WHERE kind = 'mp';") ~= nil
+end)
+
+--- 阅读范围（见 SubDB.scope）。
+DB.schema("sub_scopes", function()
+    return DB.exec([[
+CREATE TABLE IF NOT EXISTS sub_scopes (
+  id TEXT PRIMARY KEY, feed INTEGER, grp TEXT, mode TEXT NOT NULL, q TEXT NOT NULL
+);
+]]) ~= nil
 end)
 
 --- 同一篇换了 guid 也只留一条：公众号同一篇文章在不同请求下回两种 reviewId（短 id / WR1A… 长 id），
@@ -199,8 +217,8 @@ function SubDB.merge(feed_id, items)
         end
         local trim = [[DELETE FROM sub_items WHERE feed_id=? %s AND guid IN (
   SELECT guid FROM sub_items WHERE feed_id=? ORDER BY time DESC, seq DESC LIMIT -1 OFFSET ?);]]
-        DB.exec(trim:format("AND read=1"), feed_id, feed_id, SubDB.KEEP)
-        DB.exec(trim:format(""), feed_id, feed_id, SubDB.HARD_KEEP)
+        DB.exec(trim:format("AND read=1 AND starred=0"), feed_id, feed_id, SubDB.KEEP)
+        DB.exec(trim:format("AND starred=0"), feed_id, feed_id, SubDB.HARD_KEEP)
         return true
     end)
     return added
@@ -222,6 +240,84 @@ function SubDB.items(feed_id, page, size, read)
         item.time, item.read, item.read_at = tonumber(item.time) or 0, tonumber(item.read) == 1, tonumber(item.read_at) or 0
     end
     return out, total
+end
+
+--- 跨订阅源的文章流（新到旧），每条带所属源的标题 / 分组。
+---@param opts table mode = "unread"（缺省）/ "all" / "star"；feed = 订阅源 id（给了则不看 grp）；grp = 分组（nil 全部，"" 未分组）；q = 标题关键词（不分大小写子串，不当通配符）
+---@param page integer 从 1 起
+---@param size integer 给 -1 取全部
+---@return table[] items
+---@return integer total
+function SubDB.stream(opts, page, size)
+    local mode, q, feed = opts.mode or "unread", opts.q or "", opts.feed
+    local grp = not feed and opts.grp or nil
+    local from = [[ FROM sub_items i JOIN sub_feeds f ON f.id = i.feed_id
+ WHERE (? <> 'unread' OR i.read = 0) AND (? <> 'star' OR i.starred = 1)
+ AND (? IS NULL OR f.id = ?) AND (? IS NULL OR f.grp = ?) AND (? = '' OR instr(lower(i.title), lower(?)) > 0)]]
+    local total = tonumber(DB.rowexec("SELECT COUNT(*)" .. from .. ";", mode, mode, feed, feed, grp, grp, q, q)) or 0
+    local result, n = DB.query("SELECT i.feed_id, i.guid, i.title, i.time, i.read, i.starred, f.title, f.grp, i.link" .. from
+        .. " ORDER BY i.time DESC, i.seq DESC LIMIT ? OFFSET ?;", mode, mode, feed, feed, grp, grp, q, q, size, (page - 1) * size)
+    local out = rows(result, n or 0, { "feed_id", "guid", "title", "time", "read", "starred", "feed_title", "grp", "link" })
+    for _idx, item in ipairs(out) do
+        item.feed_id, item.time = tonumber(item.feed_id), tonumber(item.time) or 0
+        item.read, item.starred = tonumber(item.read) == 1, tonumber(item.starred) == 1
+    end
+    return out, total
+end
+
+--- 一条文章（带所属源的标题 / 分组），没有返回 nil。
+---@param feed_id integer
+---@param guid string
+---@return table|nil
+function SubDB.item(feed_id, guid)
+    local result, n = DB.query([[SELECT i.feed_id, i.guid, i.title, i.time, i.read, i.starred, f.title, f.grp, i.link
+ FROM sub_items i JOIN sub_feeds f ON f.id = i.feed_id WHERE i.feed_id=? AND i.guid=?;]], feed_id, guid)
+    local out = rows(result, n or 0, { "feed_id", "guid", "title", "time", "read", "starred", "feed_title", "grp", "link" })
+    local item = out[1]
+    if item then
+        item.feed_id, item.time = tonumber(item.feed_id), tonumber(item.time) or 0
+        item.read, item.starred = tonumber(item.read) == 1, tonumber(item.starred) == 1
+    end
+    return item
+end
+
+--- 阅读范围（订阅页当前的筛选条件）登记成一本书：id 是阅读器里的 stable_id，目录 = 该范围的文章流。
+--- 单个源 + 全部 + 无搜索词就是老的「一个订阅一本书」，id 仍是订阅 id（旧注解、章节缓存不丢）；
+--- 其余范围 id = "s" + 条件的 md5，条件存 sub_scopes 以便从 id 还原。
+---@param spec table { feed, grp, mode, q }
+---@return string id
+function SubDB.scope(spec)
+    local mode, q = spec.mode or "unread", spec.q or ""
+    if spec.feed and mode == "all" and q == "" then return tostring(spec.feed) end
+    local key = table.concat({ spec.feed or "", spec.feed and "" or (spec.grp or "\0"), mode, q }, "\1")
+    local id = "s" .. require("ffi/sha2").md5(key)
+    DB.exec("INSERT OR IGNORE INTO sub_scopes (id, feed, grp, mode, q) VALUES (?, ?, ?, ?, ?);",
+        id, spec.feed, not spec.feed and spec.grp or nil, mode, q)
+    return id
+end
+
+--- 范围 id 还原成筛选条件（SubDB.stream 的 opts）；认不得的 id（库被清过）返回 nil。
+---@param id string
+---@return table|nil
+function SubDB.scopeOf(id)
+    if id:match("^%d+$") then return { feed = tonumber(id), mode = "all", q = "" } end
+    local result, n = DB.query("SELECT feed, grp, mode, q FROM sub_scopes WHERE id=?;", id)
+    if not n or n < 1 then return nil end
+    return { feed = tonumber(result[1][1]), grp = result[2][1], mode = result[3][1], q = result[4][1] }
+end
+
+--- 收藏 / 取消收藏。
+---@param feed_id integer
+---@param guid string
+---@param starred boolean
+function SubDB.setStarred(feed_id, guid, starred)
+    DB.exec("UPDATE sub_items SET starred=? WHERE feed_id=? AND guid=?;", starred and 1 or 0, feed_id, guid)
+end
+
+--- 全部未读数（跨源）。
+---@return integer
+function SubDB.unreadTotal()
+    return tonumber(DB.rowexec("SELECT COUNT(*) FROM sub_items WHERE read=0;")) or 0
 end
 
 --- 条目自带正文（RSS content / description）。
