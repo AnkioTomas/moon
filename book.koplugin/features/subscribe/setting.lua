@@ -11,6 +11,8 @@ local Setting = {}
 
 -- images：打开文章时把图片下到本地（关掉省流量、省空间）。
 Setting.defaults = { enabled = false, images = true }
+-- filter：订阅页的筛选条件 { feed, grp, mode, q }。
+Setting.keys = { "filter" }
 
 --- 开关当前值：未设置时取默认。
 ---@param settings table

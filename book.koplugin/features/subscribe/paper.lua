@@ -164,7 +164,7 @@ function Paper.view(page, w, h)
         local meta = { item.feed_title }
         if item.grp ~= "" then meta[#meta + 1] = item.grp end
         if item.time > 0 then meta[#meta + 1] = os.date("%m-%d", item.time) end
-        local mark = item.starred and "★" or (item.read and "" or "•")
+        local mark = item.read and "" or "•"
         local body = VerticalGroup:new{ align = "left",
             Text.box("body", item.title, text_w, { max_lines = 2, bold = not item.read, color = item.read and faint or ink }),
             VerticalSpan:new{ width = Theme.px(t.space.xs) },
@@ -180,8 +180,9 @@ function Paper.view(page, w, h)
         local body_h = row_h - 1
         local cell = VerticalGroup:new{ align = "left", VerticalSpan:new{ width = sm }, content,
             VerticalSpan:new{ width = math.max(0, body_h - sm - content:getSize().h) } }
-        local star = CenterContainer:new{ dimen = Geom:new{ w = star_w, h = body_h },
-            Button:new{ icon = "star", variant = item.starred and "primary" or "ghost", size = "small", callback = toggleStar } }
+        -- 图标字体只有描边星；已收藏用实心 ★ 字符，大小对齐图标
+        local star_glyph = item.starred and Text.line("title", "★", { color = ink }) or ico("star", faint)
+        local star = area(CenterContainer:new{ dimen = Geom:new{ w = star_w, h = body_h }, star_glyph }, toggleStar)
         list[#list + 1] = padded(VerticalGroup:new{ align = "left",
             HorizontalGroup:new{ area(cell, function() page:openItem(item) end), star },
             rule(iw, 1, t.color.faint) })
