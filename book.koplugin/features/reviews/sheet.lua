@@ -116,7 +116,7 @@ function Sheet:gap()
     return Theme.px(t.space.md) * 2 + Theme.px(t.row.divider)
 end
 
---- 第 i 条段评的卡片：头像图标 + 作者（粗）+ 右侧「点赞图标 赞数 日期」+ 正文；正文过长截到一页内。
+--- 第 i 条段评的卡片；正文过长截到一页内，点按卡片分页查看完整正文。
 ---@param i integer
 ---@return table
 function Sheet:card(i)
@@ -149,7 +149,8 @@ function Sheet:card(i)
     local pics_h = pics and pics:getSize().h + space or 0
     local content = Text.box("body", item.content, w)
     local room = self.body_h - head:getSize().h - space - pics_h
-    if content:getSize().h > room then
+    local truncated = content:getSize().h > room
+    if truncated then
         local lines = math.max(1, math.floor(room / content:getLineHeight()))
         content:free()
         content = Text.box("body", item.content, w, { max_lines = lines })
@@ -159,7 +160,12 @@ function Sheet:card(i)
         card[#card + 1] = VerticalSpan:new{ width = space }
         card[#card + 1] = pics
     end
-    self.cards[i] = card
+    self.cards[i] = require("ui.themes.widgets.tap").wrap(card, truncated and function()
+        require("ui.themes.widgets.text_viewer"):new{
+            title = _("段评") .. " · " .. item.author,
+            text = item.content,
+        }:show()
+    end or nil)
     return self.cards[i]
 end
 
