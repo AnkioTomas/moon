@@ -15,7 +15,10 @@ package.loaded["utils.settings"] = {
 }
 
 package.loaded["device"] = { screen = { getWidth = function() return 100 end, getHeight = function() return 100 end } }
-package.loaded["utils.image"] = { ok = function() return true end }
+package.loaded["utils.image"] = {
+    ok = function() return true end,
+    suffix = function(name) return name:match("%.png$") end,
+}
 package.loaded["utils.paths"] = { screensaverDir = function() return "/nonexistent" end }
 
 local Ext = require("utils.extension")
@@ -102,4 +105,25 @@ do
     Assert.eq(Wallpaper.opacity("home"), 60)
     Wallpaper.setOverride("library", "opacity", nil)
     Assert.eq(Wallpaper.opacity("library"), 60)
+end
+
+-- 文件夹壁纸（全局与单个界面都可以是文件夹）：同一轮固定，唤醒后换一张
+do
+    local dir = os.tmpname()
+    os.remove(dir)
+    os.execute("mkdir -p " .. dir)
+    for _idx, name in ipairs({ "a.png", "b.png", "c.txt" }) do io.open(dir .. "/" .. name, "w"):close() end
+    Wallpaper.setImage(dir)
+    local first = Wallpaper.path()
+    Assert.is_true(first == dir .. "/a.png" or first == dir .. "/b.png")
+    Assert.eq(Wallpaper.path(), first, "同一轮固定")
+    Wallpaper.onResume()
+    Assert.is_true(Wallpaper.path() ~= first, "唤醒后换另一张")
+    Wallpaper.setImage("/tmp/g.png")
+    Wallpaper.setOverride("library", "image", dir)
+    local own = Wallpaper.path("library")
+    Assert.is_true(own == dir .. "/a.png" or own == dir .. "/b.png")
+    Assert.eq(Wallpaper.path("home"), "/tmp/g.png", "其它界面仍用全局图")
+    Wallpaper.setOverride("library", "image", nil)
+    os.execute("rm -rf " .. dir)
 end

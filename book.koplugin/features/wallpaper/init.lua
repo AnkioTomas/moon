@@ -49,7 +49,37 @@ end
 
 -- ── 全局：图 / 铺法 / 透明度 ──────────────
 
---- 全局壁纸图；没选过且旧版图源是「自定义」时用 .moon/screensaver/wallpaper.png。
+local picks = {} -- 文件夹 → { picked = 本轮抽中的图, previous = 上一轮的图（重抽时避开） }
+
+--- 文件夹壁纸：从里面随机抽一张，每次启动 / 唤醒换一张（同一轮固定，不然每次重绘都变）。
+---@param dir string
+---@return string|nil
+local function folderPick(dir)
+    local state = picks[dir] or {}
+    picks[dir] = state
+    if state.picked and Image.ok(state.picked) then return state.picked end
+    local files = {}
+    for name in lfs.dir(dir) do
+        local path = dir .. "/" .. name
+        if Image.suffix(name) and Image.ok(path) then files[#files + 1] = path end
+    end
+    if #files == 0 then return nil end
+    table.sort(files)
+    math.randomseed(os.time())
+    state.picked = files[math.random(#files)]
+    if #files > 1 and state.picked == state.previous then state.picked = files[state.picked == files[1] and 2 or 1] end
+    return state.picked
+end
+
+--- 配置里的图可以是文件，也可以是文件夹（从中随机抽）。
+---@param candidate string
+---@return string|nil
+local function resolve(candidate)
+    if lfs.attributes(candidate, "mode") == "directory" then return folderPick(candidate) end
+    return candidate
+end
+
+--- 全局壁纸（文件或文件夹）；没选过且旧版图源是「自定义」时用 .moon/screensaver/wallpaper.png。
 ---@return string|nil
 function M.image()
     local c = conf()
@@ -57,7 +87,13 @@ function M.image()
     if c.wallpaper_source == "custom" then return Paths.screensaverDir() .. "/wallpaper.png" end
 end
 
----@param path string
+--- 唤醒时每个文件夹重抽一张（没配文件夹就什么都不做）。
+function M.onResume()
+    for _dir, state in pairs(picks) do state.previous, state.picked = state.picked, nil end
+    if next(picks) then M.invalidate() end
+end
+
+---@param path string 图片文件或文件夹
 function M.setImage(path)
     conf().wallpaper_custom_image = path
     save()
@@ -207,7 +243,8 @@ function M.path(scope)
     if resolved[id] == nil then
         local path
         for _idx, candidate in ipairs({ scope and M.override(scope, "image") or false, M.image() or false }) do
-            if candidate and Image.ok(candidate) then path = candidate break end
+            local file = candidate and resolve(candidate)
+            if file and Image.ok(file) then path = file break end
         end
         resolved[id] = path or false
     end
