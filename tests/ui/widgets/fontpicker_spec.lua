@@ -12,6 +12,7 @@ local getface_n = 0
 local image_n = 0
 local last_image
 local selected
+local prepare_callback, prepare_cancelled
 
 package.preload["ui/font"] = function()
     return {
@@ -45,6 +46,7 @@ package.preload["ui.fonts"] = function()
     return {
         currentId = function() return "Font25.ttf" end,
         set = function(id) selected = id end,
+        downloadedPath = function(id) return id:match("^wr") and "/fonts/" .. id .. ".ttf" end,
     }
 end
 package.preload["ui.fonts.catalog"] = function()
@@ -77,6 +79,10 @@ package.preload["ui.fonts.catalog"] = function()
         listAsync = function(cb)
             cb(items)
             return { cancel = function() end }
+        end,
+        ensureInstalledAsync = function(_item, _progress, cb)
+            prepare_callback = cb
+            return { cancel = function() prepare_cancelled = true end }
         end,
     }
 end
@@ -130,5 +136,29 @@ Kit.taps(list)[1]:onTapThemeArea()
 Assert.eq(Kit.closed[#Kit.closed], list, "选中即关列表")
 Assert.is_true(selected ~= nil and selected:match("^Font%d+%.ttf$") ~= nil, "写入选中字体")
 Assert.eq(Kit.shown[#Kit.shown].text, "已选择：" .. selected:gsub("%.ttf$", ""))
+
+-- 已下载在线字体选「使用」也先异步准备，不联网、不提前写设置。
+selected = nil
+FontPicker.open{ title = "字体" }
+list = Kit.shown[#Kit.shown]
+list:switchTab("weread")
+list.on_select(list.items[1].value)
+local sheet = Kit.shown[#Kit.shown]
+Assert.eq(sheet.items[1].text, "使用")
+sheet.items[1].callback()
+local preparing = Kit.shown[#Kit.shown]
+Assert.eq(preparing.title, "正在准备字体 Weread1")
+Assert.is_nil(selected)
+prepare_callback(true)
+Assert.eq(selected, "wr1")
+Assert.is_nil(prepare_cancelled, "正常完成关进度窗不取消任务")
+
+selected = nil
+sheet.items[1].callback()
+preparing = Kit.shown[#Kit.shown]
+preparing:close()
+Assert.is_true(prepare_cancelled, "关闭进度窗取消准备任务")
+prepare_callback(true)
+Assert.is_nil(selected, "关闭后迟到的完成回调不能应用字体")
 
 return true

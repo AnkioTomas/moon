@@ -101,9 +101,11 @@ local function downloadAndSave(opts, item)
     local done = false
     -- 收起弹窗即取消下载；下载结束后关窗不算取消。
     local dialog = ProgressDialog:new{
-        title = T(_("正在下载字体 %1"), name),
+        title = T(Fonts.downloadedPath(id) and _("正在准备字体 %1") or _("正在下载字体 %1"), name),
         close_callback = function()
-            if not done and install_job then install_job.cancel() end
+            if done then return end
+            done = true
+            if install_job then install_job.cancel() end
         end,
     }
     dialog:show()
@@ -131,7 +133,7 @@ local function askUseOrDelete(opts, item, current_id)
     require("ui.themes.widgets.sheet"):new{
         title = name,
         items = {
-            { text = _("使用"), callback = function() saveSelection(opts, item.id, name, item) end },
+            { text = _("使用"), callback = function() downloadAndSave(opts, item) end },
             { text = _("删除字体"), callback = function()
                 require("ui.themes.widgets.confirm"):new{
                     text = T(_("删除已下载的字体 %1？需要时可重新下载。"), name),

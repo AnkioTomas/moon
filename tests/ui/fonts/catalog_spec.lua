@@ -159,5 +159,131 @@ do
     os.execute("rm -rf '" .. dir .. "'")
 end
 
+-- 已下载字体必须先在 fork Job 中准备，主线程和取消后的回调都不能修复/保存。
+do
+    local Fonts = require("ui.fonts")
+    local dir = Config.dir() .. "/font_prepare_spec"
+    os.execute("mkdir -p '" .. dir .. "'")
+    local function write(path, data)
+        local f = assert(io.open(path, "wb"))
+        assert(f:write(data))
+        f:close()
+    end
+    Fonts.wereadPath = function(id) return dir .. "/" .. id .. ".ttf" end
+    Fonts.isFile = function(path)
+        local f = io.open(path, "rb")
+        if not f then return false end
+        f:close()
+        return true
+    end
+    Fonts.downloadedPath = function(id)
+        local path = Fonts.wereadPath(id)
+        if Fonts.isFile(path) then return path end
+        path = path:gsub("%.ttf$", ".woff")
+        return Fonts.isFile(path) and path or nil
+    end
+    local jobs, in_worker, repairs, repair_error = {}, false, {}, nil
+    require("workers.job").run = function(worker, opts)
+        local job = { worker = worker, opts = opts }
+        function job:cancel() self.cancelled = true end
+        jobs[#jobs + 1] = job
+        return job
+    end
+    local function run(job)
+        in_worker = true
+        local err = job.worker()
+        in_worker = false
+        job.opts.on_done(err)
+    end
+    require("ui.fonts.sfnt").ensureSpace = function(path)
+        Assert.is_true(in_worker, "字体修复只在 Job 内运行")
+        repairs[#repairs + 1] = path
+        if repair_error then return nil, repair_error end
+        return true
+    end
+    package.loaded["ui.fonts.woff"] = { toSfnt = function(_src, dest)
+        Assert.is_true(in_worker, "旧 WOFF 转换也不在 UI 线程")
+        write(dest, "test-sfnt")
+        return true
+    end }
+    local called, result, failure = 0
+    local function callback(ok, err)
+        called, result, failure = called + 1, ok, err
+    end
+    write(Fonts.wereadPath("aik"), "test-sfnt")
+    local handle = Catalog.ensureInstalledAsync({ kind = "weread", id = "aik" }, nil, callback)
+    Assert.eq(called, 0, "返回前不回调成功")
+    Assert.len(repairs, 0, "返回前不读写字体")
+    Assert.eq(jobs[1].opts.name, "font.prepare")
+    Assert.eq(jobs[1].opts.kind, "medium")
+    run(jobs[1])
+    Assert.is_true(result)
+    Assert.eq(called, 1)
+    Assert.eq(repairs[1], Fonts.wereadPath("aik"))
+
+    handle = Catalog.ensureInstalledAsync({ kind = "weread", id = "aik" }, nil, callback)
+    handle.cancel()
+    Assert.is_true(jobs[2].cancelled)
+    jobs[2].opts.on_done(nil)
+    Assert.eq(called, 1, "取消后迟到的结果不能继续应用字体")
+
+    repair_error = "disk full"
+    Catalog.ensureInstalledAsync({ kind = "weread", id = "aik" }, nil, callback)
+    run(jobs[3])
+    Assert.is_nil(result)
+    Assert.eq(failure, "应用字体失败")
+    Assert.is_true(Fonts.isFile(Fonts.wereadPath("aik")), "修复失败不删除已有字体")
+    repair_error = nil
+
+    Catalog.ensureInstalledAsync({ kind = "weread", id = "aik" }, nil, callback)
+    jobs[4].opts.on_failed("worker failed")
+    Assert.is_nil(result)
+    Assert.eq(failure, "应用字体失败", "子进程失败不能报成功")
+
+    write(dir .. "/legacy.woff", "test-woff")
+    Catalog.ensureInstalledAsync({ kind = "weread", id = "legacy" }, nil, callback)
+    Assert.is_false(Fonts.isFile(Fonts.wereadPath("legacy")))
+    run(jobs[5])
+    Assert.is_true(result)
+    Assert.eq(repairs[#repairs], Fonts.wereadPath("legacy"))
+    Assert.is_false(Fonts.isFile(dir .. "/legacy.woff"))
+
+    -- 新下载在原解包 Job 内修复，不再启动第二个 Job。
+    package.loaded["ffi/archiver"].Reader = { new = function()
+        return {
+            open = function() return true end,
+            iterate = function()
+                local first = true
+                return function()
+                    if first then first = false; return { path = "font.woff", mode = "file", size = 9 } end
+                end
+            end,
+            extractToPath = function(_self, _path, dest) write(dest, "test-woff") end,
+            close = function() end,
+        }
+    end }
+    require("http.request").download = function(_opts, dest, cb)
+        write(dest, "PK\3\4")
+        cb(true)
+        return { cancel = function() end }
+    end
+    Catalog.ensureInstalledAsync({ kind = "weread", id = "new", url = "https://x/new.zip" }, nil, callback)
+    Assert.eq(jobs[6].opts.name, "font.extract")
+    run(jobs[6])
+    Assert.is_true(result)
+    Assert.eq(repairs[#repairs], Fonts.wereadPath("new"))
+    Assert.len(jobs, 6)
+
+    repair_error = "repair failed"
+    Catalog.ensureInstalledAsync({ kind = "weread", id = "bad", url = "https://x/bad.zip" }, nil, callback)
+    run(jobs[7])
+    Assert.is_nil(result)
+    Assert.eq(failure, "字体解压失败")
+    Assert.is_false(Fonts.isFile(Fonts.wereadPath("bad")), "新安装失败不能留下伪装成功的字体")
+    for _, id in ipairs({ "aik", "legacy", "new" }) do os.remove(Fonts.wereadPath(id)) end
+    os.remove(dir .. "/bad.ttf.space.part")
+    os.execute("rmdir '" .. dir .. "'")
+end
+
 GetText.current_lang = saved_lang
 return true

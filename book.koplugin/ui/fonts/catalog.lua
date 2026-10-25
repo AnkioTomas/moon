@@ -17,6 +17,7 @@ local Paths = require("utils.paths")
 local Job = require("workers.job")
 local Text = require("utils.text")
 local Fonts = require("ui.fonts")
+local Sfnt = require("ui.fonts.sfnt")
 local _ = require("gettext")
 
 local Catalog = {}
@@ -207,6 +208,11 @@ local function extractInstalledFont(zip_path, dest)
             -- 新下载转换失败不能把原 WOFF 改名成 .ttf 冒充已安装：FreeType 读不出，且之后永远判为已下载。
             local ok, convert_err = require("ui.fonts.woff").toSfnt(woff, dest)
             if not ok then err = "woff convert failed: " .. tostring(convert_err) end
+            if not err then
+                local _changed, repair_err = Sfnt.ensureSpace(dest)
+                err = repair_err
+                if err then os.remove(dest) end
+            end
         end
         os.remove(woff)
     end
@@ -214,7 +220,7 @@ local function extractInstalledFont(zip_path, dest)
     return err
 end
 
---- 确保字体可用：微信读书字体未下载时下载 zip 并在子进程解压；其余直接回调成功。
+--- 确保字体可用：新下载在解包子进程里修复，已有下载在独立子进程里迁移/修复。
 --- 下载前先删掉残留 zip，避免续用上次中断的半截包。
 ---@param item MoonFontItem
 ---@param on_progress fun(bytes: number)|nil 下载字节进度
@@ -222,7 +228,7 @@ end
 ---@return { cancel: fun() }
 function Catalog.ensureInstalledAsync(item, on_progress, cb)
     local noop = { cancel = function() end }
-    if item.kind ~= "weread" or Fonts.downloadedPath(item.id) then
+    if item.kind ~= "weread" then
         cb(true)
         return noop
     end
@@ -230,6 +236,32 @@ function Catalog.ensureInstalledAsync(item, on_progress, cb)
     if not dest then
         cb(nil, _("无效字体项"))
         return noop
+    end
+    local installed = Fonts.downloadedPath(item.id)
+    if installed then
+        local cancelled = false
+        local function done(err)
+            if cancelled then return end
+            if err then
+                logger.warn("book.font prepare failed", item.id, err)
+                cb(nil, _("应用字体失败"))
+            else
+                cb(true)
+            end
+        end
+        local job = Job.run(function()
+            if installed ~= dest then
+                local ok, err = require("ui.fonts.woff").toSfnt(installed, dest)
+                if not ok then return err end
+                os.remove(installed)
+            end
+            local _changed, err = Sfnt.ensureSpace(dest)
+            return err
+        end, { name = "font.prepare", kind = "medium", on_done = done, on_failed = done })
+        return { cancel = function()
+            cancelled = true
+            job:cancel()
+        end }
     end
     Paths.ensureFonts()
     local zip_path = dest:gsub("%.ttf$", ".zip")
@@ -242,7 +274,7 @@ function Catalog.ensureInstalledAsync(item, on_progress, cb)
             if not ok then return cb(nil, err) end
             local function done(extract_err)
                 if cancelled then return end
-                if not Fonts.isFile(dest) then
+                if extract_err or not Fonts.isFile(dest) then
                     logger.warn("book.font extract failed", item.id, extract_err)
                     return cb(nil, _("字体解压失败"))
                 end
