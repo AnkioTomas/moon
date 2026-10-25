@@ -22,6 +22,10 @@ M.BIG_BOOK_BYTES = 20 * 1024 * 1024
 -- 不在 configurable 里、由 KOReader 的样式微调模块直接存进 sidecar 的排版键（行距 / 段距等微调与自定义 CSS 在这里）。
 local DOC_KEYS = {
     "style_tweaks", "style_tweaks_enabled", "book_style_tweak", "book_style_tweak_enabled",
+    "inverse_reading_order", "invert_ui_layout",
+    "highlight_drawer", "highlight_color",
+    "text_lang", "hyphenation", "floating_punctuation", "font_family_fonts", "css",
+    "preferred_dictionaries", "disabled_dicts", "wikipedia_language", "toc_ticks_ignored_levels",
 }
 
 --- native_font.lua 为渲染字体选项塞进 configurable 的临时键，不属于排版偏好。
