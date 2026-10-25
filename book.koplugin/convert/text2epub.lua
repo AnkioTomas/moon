@@ -468,7 +468,7 @@ function Text2Epub.parse(text, opts, progress)
     }
 end
 
---- 读取 UTF-8 文本文件；空文件或非 UTF-8 视为失败。
+--- 读取文本文件并转成 UTF-8：非 UTF-8 的按 BOM 声明（UTF-16）或 GBK / GB18030 转码；空文件或转不出文字视为失败。
 ---@param source string
 ---@return string|nil text, string|nil err
 function Text2Epub.read(source)
@@ -481,10 +481,15 @@ function Text2Epub.read(source)
     if type(text) ~= "string" or trim(text) == "" then
         return nil, _("无文本内容")
     end
-    if not Text.isValidUtf8(text) then
-        return nil, _("仅支持 UTF-8 编码的文本")
+    if Text.isValidUtf8(text) then
+        return text
     end
-    return text
+    local Charset = require("utils.charset")
+    local converted = Charset.toUtf8(text, not Charset.detect(text) and "charset=gb18030" or nil)
+    if not (converted and Text.isValidUtf8(converted) and trim(converted) ~= "") then
+        return nil, _("无法识别文本编码")
+    end
+    return converted
 end
 
 --- 子进程里跑 worker(report)：整本书在 UI 线程上要跑几十秒。report(text, done, total) 按整数百分比节流
