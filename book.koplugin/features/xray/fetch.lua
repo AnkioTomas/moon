@@ -35,8 +35,9 @@ local PROFILES = {
 local function profile()
     return PROFILES[require("utils.settings").get("features.xray").book_xray_quality] or PROFILES.standard
 end
---- 全书分析每段正文的字节上限。
-local SCAN_CHUNK = 32000
+--- 本章 / 全书分析每段正文的字节上限（约 4000 汉字）。请求是非流式的，输出量随段长增长：
+--- 原先 32000 字节一段，一次要产出几十个实体，推理模型常在整包超时内写不完，表现为「本章 / 本书超时」。
+local SCAN_CHUNK = 12000
 
 local payload_sections = {
     { kind = "character", key = "characters" },
@@ -251,7 +252,26 @@ function Fetch.comprehensive(ui, identity, cb)
     return fromContext(ui, identity, XrayDB.list(identity.source_id, identity.stable_id), cb)
 end
 
---- 把正文切成不超过 size 字节的段：优先在后半段的换行处断开，否则退到 UTF-8 字符边界。
+local SENTENCE_ENDS = { "。", "！", "？", "…", ". ", "! ", "? " }
+
+--- window 里最后一个句末标点之后的字节位置；没有返回 nil。
+---@param window string
+---@return integer|nil
+local function lastSentenceEnd(window)
+    local best
+    for _idx, mark in ipairs(SENTENCE_ENDS) do
+        local from = 1
+        while true do
+            local at = window:find(mark, from, true)
+            if not at then break end
+            best = math.max(best or 0, at + #mark - 1)
+            from = at + 1
+        end
+    end
+    return best
+end
+
+--- 把正文切成不超过 size 字节的段：优先在后半段的换行处断开，其次句末标点，最后退到 UTF-8 字符边界。
 ---@param text string
 ---@param size integer
 ---@return string[]
@@ -260,9 +280,13 @@ function Fetch.chunks(text, size)
     while pos <= len do
         local stop = math.min(pos + size - 1, len)
         if stop < len then
-            local cut = text:sub(pos, stop):match("^.*()\n")
+            local window = text:sub(pos, stop)
+            local cut = window:match("^.*()\n")
+            local sentence = lastSentenceEnd(window)
             if cut and cut > size / 2 then
                 stop = pos + cut - 1
+            elseif sentence and sentence > size / 2 then
+                stop = pos + sentence - 1
             else
                 local byte = text:byte(stop + 1)
                 while stop > pos and byte >= 0x80 and byte < 0xC0 do

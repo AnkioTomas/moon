@@ -199,14 +199,18 @@ Assert.eq(parts[3], "cc")
 parts = Fetch.chunks("一二三四", 7)
 Assert.eq(parts[1], "一二")
 Assert.eq(parts[2], "三四")
+parts = Fetch.chunks("一二三。四五六七八九", 12)
+Assert.eq(parts[1], "一二三。", "无换行的长段落在句末断开，不切断词")
+Assert.eq(parts[2], "四五六七")
+Assert.eq(parts[3], "八九")
 Assert.len(Fetch.chunks("", 8), 0)
 Assert.len(Fetch.chunks("  \n  ", 8), 0)
 
 -- 全书分析：逐段请求、每段落库；只带本段提到的已收录实体；失败后重跑从断点续
 local invalidated = 0
 package.loaded["features.xray.marks"] = { invalidate = function() invalidated = invalidated + 1 end }
-local chunk_a = string.rep("x", 20000) .. " Mina at Whitby"
-local chunk_b = string.rep("y", 20000) .. " Lucy met Mina"
+local chunk_a = string.rep("x", 10000) .. " Mina at Whitby"
+local chunk_b = string.rep("y", 10000) .. " Lucy met Mina"
 entity_rows, prompts = {
     { kind = "character", name = "Old", aliases = {}, role = "", description = "老管家", updated_at = 1 },
 }, {}
