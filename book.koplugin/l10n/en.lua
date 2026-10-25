@@ -1,4 +1,5 @@
 return {
+    ["书签"] = "Bookmark",
     ["书内字体映射"] = "Book font mapping",
     ["映射字体：%1"] = "Map font: %1",
     ["本机已有"] = "Available locally",
