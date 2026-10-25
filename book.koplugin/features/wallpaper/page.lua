@@ -134,29 +134,31 @@ local function layoutLabel(contain)
     return contain and _("整图") or _("铺满")
 end
 
---- 图片行：没选过 / 选了文件名；点开选图。
+--- 图片行：没选过 / 选了文件名；点开选一张图或一个文件夹（文件夹里随机换图）。
 ---@param desktop table
 ---@param opts { title: string, path: string|nil, empty: string, apply: fun(path: string), clear: (fun())|nil }
 ---@return fun(iw: number): table
 local function imageRow(desktop, opts)
-    local function pick()
-        choosePath(desktop, opts.path or require("apps/filemanager/filemanagerutil").getHomeFolder(), true, opts.apply)
-    end
+    local is_dir = opts.path and lfs.attributes(opts.path, "mode") == "directory"
+    local items = {
+        { text = _("选一张图片"), value = "file" },
+        { text = _("选文件夹（随机换图）"), value = "folder" },
+    }
+    if opts.clear then items[#items + 1] = { text = _("跟随全局"), value = "clear" } end
     return navRow{
-        icon = "image", title = opts.title,
+        icon = is_dir and "folder" or "image", title = opts.title,
         status = opts.path and opts.path:match("[^/]*$") or opts.empty,
-        subtitle = opts.path,
+        subtitle = opts.path and is_dir and opts.path .. "\n" .. _("每次启动 / 唤醒随机换一张") or opts.path,
         callback = function()
-            if not (opts.path and opts.clear) then return pick() end
             List:new{
-                title = opts.title, centered = true,
-                items = { { text = _("换一张图"), value = "pick" }, { text = _("跟随全局"), value = "clear" } },
+                title = opts.title, centered = true, items = items,
                 on_select = function(action)
-                    if action == "pick" then
-                        pick()
-                    elseif action == "clear" then
+                    local start = opts.path or require("apps/filemanager/filemanagerutil").getHomeFolder()
+                    if action == "clear" then
                         opts.clear()
                         repaint(desktop)
+                    elseif action then
+                        choosePath(desktop, start, action == "file", opts.apply)
                     end
                 end,
             }:show()
