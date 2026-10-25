@@ -103,6 +103,7 @@ Features.list = {
     "nightmode",
     "panel",
     "azw3",
+    "fontmap",
     "bars",
     "sidebar",
     "xray",

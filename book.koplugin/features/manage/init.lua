@@ -32,6 +32,7 @@ Manage.ITEMS = {
     { id = "cookie", label = _("Cookie 存储"), subtitle = _("接收浏览器扩展同步的 Cookie") },
     { id = "dictionary", label = _("词典"), subtitle = _("多词典查词") },
     { id = "extensions", label = _("拓展页签"), subtitle = _("桌面底栏的其它插件入口") },
+    { id = "fontmap", label = _("书内字体映射"), subtitle = _("将书中指定的字体替换为本机字体") },
     { id = "ime", label = _("中文输入法"), subtitle = _("拼音、五笔、仓颉、注音") },
     { id = "lockscreen", label = _("锁屏显示"), subtitle = _("组合壁纸与锁屏主体") },
     { id = "nightmode", label = _("自动夜间与亮度"), subtitle = _("按时间或天气调整") },
