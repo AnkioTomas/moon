@@ -75,6 +75,12 @@ local ACCOUNT_HEADERS = {
     ["Accept-Encoding"] = "identity",
     ["Referer"] = "http://android.jjwxc.net?v=" .. LOGIN_VERSION,
 }
+-- 带 token 取正文必须带 App 的 UA，UA 是 "Mobile" 时服务端回 2016「浏览器标识异常」。
+local TOKEN_CONTENT_HEADERS = {
+    ["User-Agent"] = "JINJIANG-Android/381",
+    ["Referer"] = "http://android.jjwxc.net?v=381",
+    ["Accept-Encoding"] = "identity",
+}
 -- 要求设备验证（手机 / 邮箱验证码）的 code。
 local DEVICE_VERIFY_CODE = 221003
 
@@ -299,7 +305,7 @@ local function tokenContentAsync(novel_id, chapter_id, token, cb)
             on_failed = function(e) if not cancelled then cb(nil, tostring(e)) end end,
             on_cancelled = function() end,
         })
-    end, 1, ACCOUNT_HEADERS)
+    end, 1, TOKEN_CONTENT_HEADERS)
     return { cancel = function()
         cancelled = true
         job:cancel()
