@@ -2103,4 +2103,6 @@ Current version: ",
     ["月读："] = "Moon: ",
     ["未归属（全局表、协程栈等）"] = "Unattributed (globals, coroutine stacks, etc.)",
     ["私有内存"] = "Private memory",
+    ["正在退出 KOReader…"] = "Exiting KOReader…",
+    ["正在重启 KOReader…"] = "Restarting KOReader…",
 }

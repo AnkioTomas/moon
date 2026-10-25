@@ -14,13 +14,15 @@ package.preload["device"] = function()
     }
 end
 
-local events, suspended, reboots, ticks = {}, 0, 0, {}
+local events, suspended, reboots, ticks, toasts = {}, 0, 0, {}, {}
 package.preload["ui/uimanager"] = function()
     return {
         broadcastEvent = function(_self, ev) events[#events + 1] = ev.name end,
         suspend = function() suspended = suspended + 1 end,
         askForReboot = function() reboots = reboots + 1 end,
         nextTick = function(_self, fn) ticks[#ticks + 1] = fn end,
+        show = function(_self, w) toasts[#toasts + 1] = w end,
+        forceRePaint = function() end,
     }
 end
 package.preload["ui/event"] = function()
@@ -30,6 +32,10 @@ end
 local shown
 package.preload["ui.themes.widgets.sheet"] = function()
     return { new = function(_self, spec) return { show = function() shown = spec end } end }
+end
+
+package.preload["ui.themes.widgets.toast"] = function()
+    return { new = function(_self, spec) return spec end }
 end
 
 local fm = { instance = nil }
@@ -88,9 +94,14 @@ local desk_closed = 0
 fm.instance = { book = { desktop = { onClose = function() desk_closed = desk_closed + 1 end } } }
 item("退出 KOReader").callback()
 Assert.eq(desk_closed, 1, "桌面留在栈上时 Exit 退不出 KOReader")
+Assert.eq(toasts[1].text, "正在退出 KOReader…", "先给反馈")
+Assert.eq(#events, 0, "事件等提示画出来后再发")
+ticks[#ticks]()
 Assert.eq(events[1], "Exit")
 
 item("重启 KOReader").callback()
+Assert.eq(toasts[2].text, "正在重启 KOReader…")
+ticks[#ticks]()
 Assert.eq(events[2], "Restart")
 item("休眠").callback()
 Assert.eq(suspended, 1)
