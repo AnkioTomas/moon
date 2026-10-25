@@ -351,6 +351,8 @@ function Chapter.reloadChapter(session)
     end
     local identity = session.identity
     os.remove(require("utils.paths").chapterPath(identity.stable_id, idx, identity.source_id))
+    local entry = chapter.toc and chapter.toc[idx]
+    if entry and identity.source.dropChapterCache then identity.source:dropChapterCache(identity, entry) end
     requestChapter(chapter, idx, {})
     return true
 end

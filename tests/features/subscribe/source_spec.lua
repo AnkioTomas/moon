@@ -40,6 +40,7 @@ local root = require("support.config").dir() .. "/subscribe_source_spec"
 package.loaded["utils.paths"] = { bookWorkDir = function(id, src) return root .. "/" .. src .. "/" .. id end }
 package.loaded["features.subscribe"] = {
     dir = function(id) return root .. "/subscribe/" .. id end,
+    articlePath = function(id, guid) return root .. "/subscribe/" .. id .. "/" .. guid .. ".html" end,
     content = function(feed, item, cb)
         Assert.is_true(feed.id == 3 or feed.id == 4)
         cb("<h1>" .. item.title .. "</h1><p>正文</p>")
@@ -220,4 +221,14 @@ do
     Assert.eq(t[2].uid, "3:gone", "按时间插回 a 与 b 之间")
     Assert.eq(t[3].idx, 3)
     noted = {}
+end
+
+-- 重新下载本章：文章缓存一并作废
+do
+    local dir = root .. "/subscribe/3"
+    os.execute("mkdir -p " .. dir)
+    local path = dir .. "/zz.html"
+    io.open(path, "w"):close()
+    src:dropChapterCache({ stable_id = "3", source_id = "subscribe" }, { uid = "zz" })
+    Assert.is_nil(io.open(path, "r"), "文章缓存已删")
 end

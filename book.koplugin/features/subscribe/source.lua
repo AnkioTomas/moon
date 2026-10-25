@@ -244,6 +244,14 @@ local OPS = {
     fetchContent = fetchContent,
 }
 
+--- 阅读器「重新下载本章」：章节文件之外，文章缓存也要作废，否则重下的还是旧正文。
+---@param identity BookIdentity
+---@param chapter BookChapter
+function Source:dropChapterCache(identity, chapter)
+    local feed_id, guid = splitUid(identity, chapter.uid)
+    if feed_id and guid then os.remove(require("features.subscribe").articlePath(feed_id, guid)) end
+end
+
 ---@param identity BookIdentity
 ---@param opts table|nil { chapter_idx }
 ---@param cb fun(path: string|nil, err: string|nil)
