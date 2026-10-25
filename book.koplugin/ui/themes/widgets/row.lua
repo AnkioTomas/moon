@@ -74,8 +74,13 @@ function Row.widget(opts)
     local image_w = opts.image and Theme.px(opts.image_w or opts.image_h or t.control.icon)
     local chev_w = chevron and icon_sz or 0
     local status_widget = type(opts.status) == "table" and opts.status or nil
-    local status_w = status_widget and status_widget:getSize().w
-        or opts.status and math.floor(inner * 0.4) or 0
+    local status_w = status_widget and status_widget:getSize().w or 0
+    if not status_widget and opts.status then
+        -- 默认占 40%；文字更长时按实际宽度撑开（最多 65%），不再被截断。
+        local probe = Text.line("body", opts.status)
+        status_w = math.min(math.max(probe:getSize().w, math.floor(inner * 0.4)), math.floor(inner * 0.65))
+        probe:free()
+    end
     local text_w = math.max(1, inner - icon_w - (image_w and image_w + gap or 0) - status_w - chev_w)
 
     local content = HorizontalGroup:new{ align = "center" }
