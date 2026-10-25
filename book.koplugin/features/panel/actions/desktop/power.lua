@@ -37,19 +37,30 @@ local function exitMoon(ctx)
     end)
 end
 
+--- 退出 / 重启要几秒才有动静，先上一个不可关的提示并立即重绘，再广播事件。
+---@param text string
+---@param event string
+local function leave(text, event)
+    local UIManager = require("ui/uimanager")
+    UIManager:show(require("ui.themes.widgets.toast"):new{ text = text, dismissable = false })
+    UIManager:nextTick(function()
+        UIManager:forceRePaint()
+        UIManager:broadcastEvent(require("ui/event"):new(event))
+    end)
+end
+
 local function show(ctx)
     local UIManager = require("ui/uimanager")
-    local Event = require("ui/event")
     local items = {
         { text = _("退出月读"), callback = function() exitMoon(ctx) end },
         { text = _("退出 KOReader"), callback = function()
             closeDesktop()
-            UIManager:broadcastEvent(Event:new("Exit"))
+            leave(_("正在退出 KOReader…"), "Exit")
         end },
     }
     if Device:canRestart() then
         items[#items + 1] = { text = _("重启 KOReader"), callback = function()
-            UIManager:broadcastEvent(Event:new("Restart"))
+            leave(_("正在重启 KOReader…"), "Restart")
         end }
     end
     if Device:canSuspend() then
