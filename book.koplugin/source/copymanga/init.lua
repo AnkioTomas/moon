@@ -21,7 +21,7 @@ local Copymanga = {}
 
 ---@return BookSourceMeta
 function Copymanga.meta()
-    return require("source.meta").get("copymanga")
+    return { id = "copymanga", name = _("拷贝漫画"), type = "chapter" }
 end
 
 ---@class CopymangaSource : SourceBase
