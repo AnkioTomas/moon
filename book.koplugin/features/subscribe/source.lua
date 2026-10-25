@@ -235,6 +235,11 @@ local function fetchContent(identity, chapter, cb)
                 entry.anchors = chapter.anchors
                 require("source.toc").put(M.ID, identity.stable_id, toc)
             end
+            -- 范围书（未读 / 收藏等）的章节文件不在订阅目录里，相对路径 images/ 要指回订阅目录。
+            if identity.stable_id ~= tostring(feed_id) then
+                local dir = Subscribe.dir(feed_id):match("[^/]+$")
+                html = html:gsub('(<img[^>]-src=")images/', "%1../" .. dir .. "/images/")
+            end
             cb({ document = require("features.subscribe.typography").document(feed.title, html) })
         end)
 end
