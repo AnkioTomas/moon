@@ -36,16 +36,32 @@ local _ = require("gettext")
 ---@field job table|nil
 local Page = {}
 
---- 筛选条件（本次运行内记住）：范围 = 单个源 feed_filter 或分组 group_filter（nil 全部，"" 未分组），页签 unread / all / star，搜索词。
+--- 筛选条件（落盘 features.subscribe 的 filter，重启后保留）：范围 = 单个源 feed_filter 或分组 group_filter（nil 全部，"" 未分组），页签 unread / all / star，搜索词。
 Page.feed_filter = nil
 Page.group_filter = nil
 Page.stream_mode = "unread"
 Page.stream_q = ""
 
+--- 从设置恢复筛选；记着的订阅源已被删就回到全部。
+local function restore()
+    local saved = require("utils.settings").get("features.subscribe").filter
+    if not saved then return end
+    Page.group_filter, Page.stream_mode, Page.stream_q = saved.grp, saved.mode or "unread", saved.q or ""
+    Page.feed_filter = saved.feed and SubDB.feed(saved.feed) and saved.feed or nil
+end
+
+local function persist()
+    local MoonSettings = require("utils.settings")
+    MoonSettings.get("features.subscribe").filter = {
+        feed = Page.feed_filter, grp = Page.group_filter, mode = Page.stream_mode, q = Page.stream_q }
+    MoonSettings.save("features.subscribe")
+end
+
 Page.__index = Page
 
 function Page:new(opts)
     opts.page = 1
+    restore()
     local page = setmetatable(opts, self)
     -- 只订一份：页面重建时先退掉旧的监听。
     if Page._unwatch then Page._unwatch() end
@@ -244,6 +260,7 @@ function Page:filter(fields)
         if value == false then value = nil end
         Page[key] = value
     end
+    persist()
     self.page = 1
     self:redraw()
 end
@@ -388,7 +405,7 @@ function Page:showManage()
                                 ok_text = _("取消订阅"),
                                 ok_callback = function()
                                     Subscribe.remove(feed)
-                                    if Page.feed_filter == feed.id then Page.feed_filter = nil end
+                                    if Page.feed_filter == feed.id then self:filter({ feed_filter = false }) end
                                     list:setItems(items())
                                     self:redraw()
                                 end,
