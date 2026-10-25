@@ -146,7 +146,7 @@ return {
     ["京东读书错误 "] = "JD Read error ",
     ["亮度"] = "Brightness",
     ["人物"] = "Characters",
-    ["仅支持 UTF-8 编码的文本"] = "Only UTF-8 text is supported",
+    ["无法识别文本编码"] = "Unrecognized text encoding",
     ["今日"] = "Today",
     ["今日摘要"] = "Today's summary",
     ["今日阅读"] = "Reading today",
