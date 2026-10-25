@@ -211,7 +211,12 @@ local function imageDownloader(referer)
                 end,
             })
         end
-        fetch(url, 0)
+        -- KOReader 解不了 AVIF：公网图交给 wsrv.nl 转成 JPEG（图片地址本来就是公开的）。
+        local first = url
+        if not lan and url:lower():match("^https?://[^?#]+%.avif$") and not Subscribe.privateHost(url) then
+            first = "https://wsrv.nl/?output=jpg&w=1200&q=80&url=" .. Text.urlEncode(url)
+        end
+        fetch(first, 0)
         -- assets 以 handle.cancel() 调用（不带 self），闭包写法两种调法都行。
         job.cancel = function()
             job.cancelled = true
