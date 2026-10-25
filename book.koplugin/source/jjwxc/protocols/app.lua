@@ -55,6 +55,14 @@ end
 ---@return boolean
 function Token.available() return Token.get() ~= nil end
 
+--- 段评接口（Pc/comment）的登录态：VIP 章节要求，App 协议把 token 放查询参数（放请求头 / Cookie 都被拒）。
+---@return string query
+---@return table headers
+function Token.commentAuth()
+    local token = Token.get()
+    return token and "&token=" .. Text.urlEncode(token) or "", {}
+end
+
 --- 登录成功后保存，重登与书架都靠它。
 ---@param account string
 ---@param password string

@@ -40,6 +40,11 @@ end
 ---@return boolean
 function Web.available() return Web.cookie() ~= nil end
 
+--- 段评接口（Pc/comment）的登录态：VIP 章节要求，网页协议走 Cookie。
+---@return string query
+---@return table headers
+function Web.commentAuth() return "", { Cookie = Web.cookie() } end
+
 --- 带登录态取网页，回调 UTF-8 的 HTML。302 到登录页 = Cookie 失效。
 ---@param path string
 ---@param cookie string|nil

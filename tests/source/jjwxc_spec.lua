@@ -222,3 +222,21 @@ do
     Assert.eq(Protocols.current().id, "app")
     cfg.token, cfg.protocol = nil, nil
 end
+
+-- 段评接口：VIP 章节要登录态，web 带 Cookie、app 带 token 查询参数，都没有就匿名。
+do
+    local Settings = require("utils.settings")
+    local Protocols = require("source.jjwxc.protocols")
+    local cfg = Settings.getSource("jjwxc")
+    cfg.cookie, cfg.token, cfg.protocol = nil, nil, nil
+    Assert.eq(select(1, Protocols.list[1].commentAuth()), "")
+    Assert.is_nil(select(2, Protocols.list[1].commentAuth()).Cookie)
+    cfg.cookie, cfg.token = "c=1", "t k"
+    local query, headers = Protocols.list[1].commentAuth()
+    Assert.eq(query, "")
+    Assert.eq(headers.Cookie, "c=1")
+    query, headers = Protocols.list[2].commentAuth()
+    Assert.eq(query, "&token=t%20k")
+    Assert.is_nil(headers.Cookie)
+    cfg.cookie, cfg.token = nil, nil
+end

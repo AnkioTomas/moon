@@ -1,7 +1,7 @@
 --[[--
 晋江段评：本章各段评论数、某段的评论页、把段落定位到章节 HTML。
 
-走晋江网页版的段评接口（www.jjwxc.net/app.jjwxc/Pc/comment/…），匿名可读，不用登录态：
+走晋江网页版的段评接口（www.jjwxc.net/app.jjwxc/Pc/comment/…），免费章节匿名可读，VIP 章节要登录态（当前协议的 commentAuth：web 带 Cookie，app 带 token 查询参数）：
 - getNovelParagraphCommentNum：本章每段的评论数；paragraph_id 是「第几个非空段」（从 1 数），-2 是章末总评。
 - getCommentList：某段的评论，offset / limit 翻页，新的在前。
 章节 HTML 的段落就是非空行逐个包成 <p>（Text.textToBody），所以第 n 个 <p> 就是 paragraph_id = n。
@@ -34,9 +34,15 @@ local PAGE_SIZE = 20
 ---@return HttpJob
 local function get(name, query, novel_id, chapter_id, cb)
     local referer = "https://www.jjwxc.net/onebook.php?novelid=" .. novel_id .. "&chapterid=" .. chapter_id
-    return Request.get(BASE .. name .. "?versionCode=" .. VERSION .. query, {
+    local headers = { ["User-Agent"] = "Mozilla/5.0", Referer = referer, versionCode = VERSION }
+    -- 免费章节匿名可读，VIP 章节要登录态；没有任何登录态就匿名发。
+    local protocol = require("source.jjwxc.protocols").current()
+    local auth_query, auth_headers = "", {}
+    if protocol then auth_query, auth_headers = protocol.commentAuth() end
+    for key, value in pairs(auth_headers) do headers[key] = value end
+    return Request.get(BASE .. name .. "?versionCode=" .. VERSION .. query .. auth_query, {
         accept = "application/json",
-        headers = { ["User-Agent"] = "Mozilla/5.0", Referer = referer, versionCode = VERSION },
+        headers = headers,
         timeout = require("http.timeout").net(0.5),
     }, function(raw, err)
         if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
