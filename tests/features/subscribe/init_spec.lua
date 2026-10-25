@@ -45,10 +45,11 @@ package.loaded["workers.job"] = { run = function(worker, opts) opts.on_done(work
 package.loaded["http.timeout"] = { net = function() return 1 end }
 local merged, updates, summaries = {}, {}, {}
 package.loaded["features.subscribe.db"] = {
-    merge = function(id, items) merged[id] = items; return #items end,
+    merge = function(id, items) merged[id] = items; return #items, 0 end,
     feed = function() return nil end,
     update = function(id, fields) updates[id] = fields end,
     summary = function(_id, guid) return summaries[guid] end,
+    guids = function() return { alive = true } end,
 }
 local mp_calls = {}
 package.loaded["source.wechat.mp"] = {
@@ -261,6 +262,28 @@ do
     Subscribe.content(rss_feed, { guid = "g6", title = "六", link = "https://a.com/1" }, function(h) g6 = h end)
     Assert.matches(g6, "big.gif", "重做失败用旧缓存")
     settings.images, Subscribe.providers.rss.content = saved_images, saved_content
+
+    -- 清缓存：条目没了的文章缓存删掉；图片只留还被现存文章引用的（刚下好的不动）。
+    local md5 = require("ffi/sha2").md5
+    local lfs = require("libs/libkoreader-lfs")
+    local function put(rel, body)
+        local fh = io.open(Subscribe.dir(7) .. "/" .. rel, "wb")
+        fh:write(body)
+        fh:close()
+    end
+    os.execute("mkdir -p '" .. Subscribe.dir(7) .. "/images'")
+    put("articles/" .. md5("alive") .. ".html", '<img src="images/keep.jpg">')
+    put("articles/" .. md5("gone") .. ".html", '<img src="images/orphan.jpg">')
+    put("images/keep.jpg", "k")
+    put("images/orphan.jpg", "o")
+    put("images/fresh.jpg", "f")
+    os.execute("touch -t 202001010000 '" .. Subscribe.dir(7) .. "/images/keep.jpg' '" .. Subscribe.dir(7) .. "/images/orphan.jpg'")
+    Subscribe.sweep(7)
+    Assert.is_true(lfs.attributes(Subscribe.dir(7) .. "/articles/" .. md5("alive") .. ".html", "mode") == "file")
+    Assert.is_nil(lfs.attributes(Subscribe.dir(7) .. "/articles/" .. md5("gone") .. ".html", "mode"))
+    Assert.is_true(lfs.attributes(Subscribe.dir(7) .. "/images/keep.jpg", "mode") == "file")
+    Assert.is_nil(lfs.attributes(Subscribe.dir(7) .. "/images/orphan.jpg", "mode"))
+    Assert.is_true(lfs.attributes(Subscribe.dir(7) .. "/images/fresh.jpg", "mode") == "file")
 end
 os.execute("rm -rf '" .. dir .. "'")
 

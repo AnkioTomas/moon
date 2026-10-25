@@ -14,6 +14,8 @@ local SubDB = {}
 SubDB.KEEP = 300
 --- 未读也算上的硬上限：只刷不读的源超出后最旧的连未读一起删（防止无限增长）。
 SubDB.HARD_KEEP = 600
+--- 文章超过这么久（秒，180 天）自动淘汰；收藏的不动。没有发布时间（time=0）的只受条数上限管。
+SubDB.MAX_AGE = 180 * 86400
 
 DB.schema("sub_feeds", function()
     return DB.exec([[
@@ -198,13 +200,15 @@ function SubDB.remove(id)
 end
 
 --- 写入条目：已有的（同 guid，或同标题 + 时间）只更新标题，保留已读。seq 递增：同一时间（网页链接无时间）的新条目排在旧的前面、彼此保持页面顺序。
---- 超出 KEEP 删最旧的已读条目，再超出 HARD_KEEP 连未读一起删。返回真正新增的条数。
+--- 超出 KEEP 删最旧的已读条目，再超出 HARD_KEEP 连未读一起删，超过 MAX_AGE 的也删（收藏一律保留）。
+--- 返回真正新增的条数、淘汰的条数。
 ---@param feed_id integer
 ---@param items table[]
----@return integer
+---@return integer added
+---@return integer removed
 function SubDB.merge(feed_id, items)
     local base = tonumber(DB.rowexec("SELECT COALESCE(MAX(seq), 0) FROM sub_items WHERE feed_id=?;", feed_id)) or 0
-    local added = 0
+    local added, removed = 0, 0
     DB.transaction(function()
         for i, item in ipairs(items) do
             DB.exec([[INSERT OR IGNORE INTO sub_items (feed_id, guid, title, link, time, seq, summary) VALUES (?,?,?,?,?,?,?);]],
@@ -217,11 +221,26 @@ function SubDB.merge(feed_id, items)
         end
         local trim = [[DELETE FROM sub_items WHERE feed_id=? %s AND guid IN (
   SELECT guid FROM sub_items WHERE feed_id=? ORDER BY time DESC, seq DESC LIMIT -1 OFFSET ?);]]
-        DB.exec(trim:format("AND read=1 AND starred=0"), feed_id, feed_id, SubDB.KEEP)
-        DB.exec(trim:format("AND starred=0"), feed_id, feed_id, SubDB.HARD_KEEP)
+        local function drop(sql, ...)
+            DB.exec(sql, ...)
+            removed = removed + (tonumber(DB.rowexec("SELECT changes();")) or 0)
+        end
+        drop(trim:format("AND read=1 AND starred=0"), feed_id, feed_id, SubDB.KEEP)
+        drop(trim:format("AND starred=0"), feed_id, feed_id, SubDB.HARD_KEEP)
+        drop("DELETE FROM sub_items WHERE feed_id=? AND starred=0 AND time > 0 AND time < ?;", feed_id, os.time() - SubDB.MAX_AGE)
         return true
     end)
-    return added
+    return added, removed
+end
+
+--- 一个源现存条目的 guid 集合。
+---@param feed_id integer
+---@return table<string, true>
+function SubDB.guids(feed_id)
+    local result, n = DB.query("SELECT guid FROM sub_items WHERE feed_id=?;", feed_id)
+    local set = {}
+    for i = 1, n or 0 do set[result[1][i]] = true end
+    return set
 end
 
 --- 一页条目，新到旧。

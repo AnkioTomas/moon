@@ -17,6 +17,10 @@ local Base = require("utils.db")
 local SubDB = require("features.subscribe.db")
 Assert.not_nil(Base.open())
 
+-- 下面用的是演示用的小时间戳，别被 180 天淘汰；淘汰单独在末尾测。
+local MAX_AGE = SubDB.MAX_AGE
+SubDB.MAX_AGE = math.huge
+
 local id = SubDB.add({ kind = "rss", url = "https://a.com/feed", title = "A", grp = "科技" })
 Assert.not_nil(id)
 Assert.eq(SubDB.add({ kind = "rss", url = "https://a.com/feed", title = "A2" }), nil, "同地址不重复订阅")
@@ -218,4 +222,20 @@ do
     Assert.eq(spec.q, "he")
     Assert.is_nil(spec.feed)
     Assert.is_nil(SubDB.scopeOf("s0000"))
+end
+
+-- 超过 180 天的自动淘汰，收藏的与没有发布时间的保留；返回淘汰条数。
+do
+    local f = SubDB.add({ kind = "rss", url = "https://age.com/feed", title = "age" })
+    local now = os.time()
+    SubDB.MAX_AGE = math.huge
+    SubDB.merge(f, { { guid = "old", title = "旧", time = now - MAX_AGE - 100 }, { guid = "oldstar", title = "旧藏", time = now - MAX_AGE - 200 },
+        { guid = "new", title = "新", time = now - 100 }, { guid = "notime", title = "无时间" } })
+    SubDB.setStarred(f, "oldstar", true)
+    SubDB.MAX_AGE = MAX_AGE
+    local _added, removed = SubDB.merge(f, { { guid = "new2", title = "新二", time = now } })
+    Assert.eq(removed, 1)
+    local left = SubDB.guids(f)
+    Assert.is_nil(left.old)
+    Assert.is_true(left.oldstar and left.new and left.notime and left.new2)
 end
