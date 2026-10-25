@@ -240,6 +240,26 @@ do
     local g5
     Subscribe.content(rss_feed, { guid = "g5", title = "五", link = "https://a.com/1" }, function(h) g5 = h end)
     Assert.matches(g5, "这是一段很长的摘要", "抓到的比摘要还短，用摘要")
+
+    -- 缓存里还有没落地的远程图：联网时重做；重做失败仍用旧缓存。
+    local settings = Subscribe.settings()
+    local saved_images, saved_content = settings.images, Subscribe.providers.rss.content
+    settings.images = true
+    local path = Subscribe.dir(7) .. "/articles/" .. require("ffi/sha2").md5("g6") .. ".html"
+    local f = io.open(path, "wb")
+    f:write('<p><img src="https://a.com/big.gif"></p>')
+    f:close()
+    Subscribe.providers.rss.content = function(_feed, _item, _dir, cb) cb("<p>新</p>") end
+    local g6
+    Subscribe.content(rss_feed, { guid = "g6", title = "六", link = "https://a.com/1" }, function(h) g6 = h end)
+    Assert.matches(g6, "新", "残缺缓存重做")
+    f = io.open(path, "wb")
+    f:write('<p><img src="https://a.com/big.gif"></p>')
+    f:close()
+    Subscribe.providers.rss.content = function(_feed, _item, _dir, cb) cb(nil, "断网") end
+    Subscribe.content(rss_feed, { guid = "g6", title = "六", link = "https://a.com/1" }, function(h) g6 = h end)
+    Assert.matches(g6, "big.gif", "重做失败用旧缓存")
+    settings.images, Subscribe.providers.rss.content = saved_images, saved_content
 end
 os.execute("rm -rf '" .. dir .. "'")
 
