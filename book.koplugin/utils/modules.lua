@@ -18,7 +18,8 @@ local Modules = {}
 
 local installed = {}
 
---- 递归登记 dir 下的 .lua：`a/b.lua` → "a/b"，`a/init.lua` → "a"；同名时 `a.lua` 优先于 `a/init.lua`，与 `?.lua;?/init.lua` 的顺序一致。
+--- 递归登记 dir 下的 .lua：`a/b.lua` → "a/b"，`a/init.lua` → "a"；同名时 `a/init.lua` 优先于 `a.lua`：
+--- 仓库里不会同时存在两者，同时出现只能是覆盖解压留下的旧版 `a.lua`（模块后来改成了目录），让它赢就会加载旧代码。
 ---@param dir string 绝对路径
 ---@param prefix string 模块名前缀（含结尾斜杠，根目录为 ""）
 ---@param index table<string, string>
@@ -31,9 +32,11 @@ local function scan(dir, prefix, index)
             scan(path, prefix .. name .. "/", index)
         elseif name == "init.lua" and prefix ~= "" then
             local key = prefix:sub(1, -2)
-            index[key] = index[key] or path
+            index[key] = path
         elseif name:sub(-4) == ".lua" then
-            index[prefix .. name:sub(1, -5)] = path
+            local key = prefix .. name:sub(1, -5)
+            local known = index[key]
+            if not (known and known:sub(-9) == "/init.lua") then index[key] = path end
         end
     end
 end
