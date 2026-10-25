@@ -76,7 +76,20 @@ function renderForms(list, external) {
                 setState(state, '保存中…', '');
                 saveGroup(group, payload).then(function () {
                     setState(state, '已保存', 'ok');
-                    return loadSettings();
+                    return el('rsbtn').onclick = function () {
+    var state = el('rsstate');
+    if (!window.confirm(t('清除全部配置和崩溃日志后将重启 KOReader，无法恢复，继续吗？'))) return;
+    el('rsbtn').disabled = true;
+    setState(state, '清除中…', '');
+    jfetch('/api/reset', { method: 'POST' }).then(function () {
+        setState(state, '已清除 ✓ KOReader 正在重启，稍后可重新连接。', 'ok');
+    }).catch(function (err) {
+        setState(state, t('清除失败：%1', err.message || String(err)), 'err');
+        el('rsbtn').disabled = false;
+    });
+};
+
+loadSettings();
                 }).catch(function (err) {
                     setState(state, String(err), 'err');
                 });
@@ -102,5 +115,18 @@ function loadSettings() {
         setState(el('loadstate'), String(err), 'err');
     });
 }
+
+el('rsbtn').onclick = function () {
+    var state = el('rsstate');
+    if (!window.confirm(t('清除全部配置和崩溃日志后将重启 KOReader，无法恢复，继续吗？'))) return;
+    el('rsbtn').disabled = true;
+    setState(state, '清除中…', '');
+    jfetch('/api/reset', { method: 'POST' }).then(function () {
+        setState(state, '已清除 ✓ KOReader 正在重启，稍后可重新连接。', 'ok');
+    }).catch(function (err) {
+        setState(state, t('清除失败：%1', err.message || String(err)), 'err');
+        el('rsbtn').disabled = false;
+    });
+};
 
 loadSettings();

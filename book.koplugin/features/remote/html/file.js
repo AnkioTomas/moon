@@ -5,6 +5,7 @@
 loadConfig().then(function (config) {
     var STORE = 'moon-fm-';
     var TEXT_EXT = /\.(txt|md|markdown|lua|json|js|css|html?|xml|csv|tsv|log|ini|conf|cfg|ya?ml|toml|sh|py|srt|ass|ssa|vtt|opf|ncx|svg|properties|tex|rst|c|h|cpp|java|go|rs|ts|sql|gitignore|env)$/i;
+    var THUMB_MAX = 8 * 1024 * 1024;
     var IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp)$/i;
     var VIDEO_EXT = /\.(mp4|m4v|webm)$/i;
     var AUDIO_EXT = /\.(mp3|m4a|ogg|wav|flac)$/i;
@@ -48,7 +49,8 @@ loadConfig().then(function (config) {
         folderSort: getPref('folder-sort', {}),
         showSystemHidden: getPref('show-system-hidden', false),
         showManualHidden: getPref('show-manual-hidden', false),
-        hidden: getPref('hidden', [])
+        hidden: getPref('hidden', []),
+        grid: getPref('grid', false)
     };
 
     function setBusy(on) {
@@ -393,6 +395,19 @@ loadConfig().then(function (config) {
         openMenu(r.right, r.bottom + 4, items, true);
     }
     el('hiddenbtn').onclick = function (e) { e.stopPropagation(); anchorMenu(this, hiddenMenuItems()); };
+    function applyView() {
+        el('listwrap').classList.toggle('grid', prefs.grid);
+        el('viewbtn').setAttribute('aria-pressed', String(prefs.grid));
+        el('viewbtn').title = prefs.grid ? '切换到列表视图' : '切换到预览视图';
+    }
+    function toggleView() {
+        prefs.grid = !prefs.grid;
+        setPref('grid', prefs.grid);
+        applyView();
+        render();
+    }
+    el('viewbtn').onclick = function (e) { e.stopPropagation(); toggleView(); };
+    applyView();
     el('sortbtn').onclick = function (e) { e.stopPropagation(); openSort(); };
     el('more').onclick = function (e) {
         e.stopPropagation();
@@ -404,6 +419,7 @@ loadConfig().then(function (config) {
             ['复制路径', function () { copyText(cur).then(function () { toast('已复制路径 ' + cur); }); }],
             null,
             ['刷新', function () { load(cur, true); }],
+            [prefs.grid ? '列表视图' : '预览视图', toggleView],
             ['排序方式', openSort],
             ['隐藏文件…', function () { setTimeout(function () { anchorMenu(el('more'), hiddenMenuItems()); }, 0); }]
         ];
@@ -576,6 +592,15 @@ loadConfig().then(function (config) {
             ib.setAttribute('aria-label', '选择 ' + e.name);
             ib.setAttribute('aria-pressed', 'false');
             ib.onclick = function (ev) { ev.stopPropagation(); toggle(i, ev.shiftKey); };
+            // 预览视图：图片直接显示缩略（懒加载，过大的原图不拉）
+            if (prefs.grid && !e.dir && IMAGE_EXT.test(e.name) && (e.size || 0) <= THUMB_MAX) {
+                var th = node('img', 'thumb');
+                th.loading = 'lazy';
+                th.alt = '';
+                th.src = '/download?path=' + encodeURIComponent(full) + '&inline=1';
+                th.onerror = function () { th.remove(); };
+                sel.appendChild(th);
+            }
             sel.appendChild(ib);
             tr.appendChild(sel);
 

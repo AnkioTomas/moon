@@ -108,6 +108,17 @@ local function rmtree(lfs, path)
     end
 end
 
+--- 清除全部配置：删 settings 目录整棵树与给定文件（crash.log 等），书库、字体、词库不动。
+---@param lfs table
+---@param settings_dir string
+---@param files string[]
+---@return boolean ok
+function Backup.clearConfig(lfs, settings_dir, files)
+    rmtree(lfs, settings_dir)
+    for _idx, path in ipairs(files) do os.remove(path) end
+    return true
+end
+
 --- 条目路径必须是相对、不含 .. 的 / 分隔路径。
 ---@param path any
 ---@return boolean
@@ -231,6 +242,21 @@ function Backup.route(self, conn, method, headers)
             end
             reply(self.jsonResp(200, '{"ok":true}'))
         end)
+    end)
+end
+
+--- 路由：POST /api/reset 清除全部配置与 crash.log，设备提示后重启（由 handlers.reset_config 负责）。
+---@param conn table
+---@param method string
+function Backup.reset(self, conn, method)
+    if method ~= "POST" then
+        return self:_fail(conn, 405, "Method Not Allowed")
+    end
+    self.handlers.reset_config(function(ok, err)
+        if not ok then
+            return self:_fail(conn, 500, err)
+        end
+        return self:_json(conn, 200, '{"ok":true}')
     end)
 end
 
