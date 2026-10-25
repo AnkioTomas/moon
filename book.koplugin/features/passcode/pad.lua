@@ -172,6 +172,7 @@ function Pad:dots()
 end
 
 --- 左上角：圆形设备头像 + 设备名称。
+---@param self BookPasscodePad|BookPasscodePattern
 ---@return table
 function Pad:headerWidget()
     local t = self.theme
@@ -193,6 +194,7 @@ function Pad:headerWidget()
 end
 
 --- 底部：连续输错后的「忘记了设备密码？」。
+---@param self BookPasscodePad|BookPasscodePattern
 ---@return table
 function Pad:forgotWidget()
     local t = self.theme
