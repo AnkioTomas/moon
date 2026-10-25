@@ -539,7 +539,7 @@ function Subscribe.content(feed, item, cb)
         cached = f:read("*a")
         f:close()
         -- 有图没落地（当时下载失败）的缓存不算数：联网时重做一次，重做失败仍用旧缓存。
-        local incomplete = images_dir and cached:find('<img[^>]-src="https?://')
+        local incomplete = images_dir and (cached:find('<img[^>]-src="https?://') or cached:find("AVIF", 1, true))
         if not incomplete or not require("ui/network/manager"):isConnected() then return cb(cached) end
     end
     Paths.ensureDir(dir .. "/articles")

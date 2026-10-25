@@ -84,6 +84,8 @@ function Assets.rewriteImageSources(xhtml, src_map)
         tag = tag:gsub("src=(['\"])(.-)%1", function(quote)
             return "src=" .. quote .. href .. quote
         end, 1)
+        -- srcset 仍指向远程原图，CREngine 可能优先取它而不显示本地图。
+        tag = tag:gsub("%s+srcset=(['\"]).-%1", ""):gsub("%s+sizes=(['\"]).-%1", "")
         if tag:find("href=", 1, true) then
             tag = tag:gsub("href=(['\"])(.-)%1", function(quote)
                 return "href=" .. quote .. href .. quote
