@@ -23,7 +23,6 @@ local Subscribe = {}
 --- 网页 / 订阅源超过这么大不解析：Readability 要建整棵树，3MB 页面去掉脚本后树也就几 MB，再大不碰。
 local MAX_PAGE = 3 * 1024 * 1024
 --- 单张图片上限。
-local MAX_IMAGE = 8 * 1024 * 1024
 --- RSS 自带正文去掉标签后超过这么多字节才当全文（约 500 个汉字）；否则当摘要、去抓原文。
 local FULL_TEXT = 1500
 --- 摘要结尾带这些就是被截断的（省略号 / 阅读全文 / WordPress 的 "appeared first on"），不管多长都去抓原文。
@@ -186,11 +185,7 @@ local function imageDownloader(referer)
         local function fetch(target, hops)
             if not lan and Subscribe.privateHost(target) then return cb(nil) end
             local Request = require("http.request")
-            local chunks, size, too_big, code, headers = {}, 0, false, nil, nil
-            local function abort()
-                too_big, chunks = true, {}
-                if job.inner and job.inner.cancel then job.inner:cancel() end
-            end
+            local chunks, code, headers = {}, nil, nil
             job.inner = Request.stream({
                 url = target,
                 headers = { ["Accept"] = "image/*", ["Referer"] = referer },
@@ -198,14 +193,9 @@ local function imageDownloader(referer)
             }, {
                 on_headers = function(status, hdrs)
                     code, headers = tonumber(status), hdrs
-                    if code and code >= 300 and code < 400 then return end
-                    local len = tonumber((Request.header({ headers = hdrs }, "Content-Length")))
-                    if len and len > MAX_IMAGE then abort() end
                 end,
                 on_data = function(chunk)
-                    if too_big or (code and code >= 300 and code < 400) then return end
-                    size = size + #chunk
-                    if size > MAX_IMAGE then return abort() end
+                    if code and code >= 300 and code < 400 then return end
                     chunks[#chunks + 1] = chunk
                 end,
                 on_done = function(err)
@@ -215,7 +205,7 @@ local function imageDownloader(referer)
                         if not loc or loc == "" or hops >= 5 then return cb(nil) end
                         return fetch(Text.absoluteUrl(target, Text.trim(loc)), hops + 1)
                     end
-                    if too_big or err or code ~= 200 then return cb(nil) end
+                    if err or code ~= 200 then return cb(nil) end
                     local body = table.concat(chunks)
                     cb(body ~= "" and body or nil)
                 end,
@@ -495,16 +485,19 @@ end
 function Subscribe.content(feed, item, cb)
     local dir = Subscribe.dir(feed.id)
     local path = dir .. "/articles/" .. require("ffi/sha2").md5(item.guid) .. ".html"
+    local images_dir = Subscribe.settings().images ~= false and dir .. "/images" or nil
+    local cached
     local f = io.open(path, "rb")
     if f then
-        local html = f:read("*a")
+        cached = f:read("*a")
         f:close()
-        return cb(html)
+        -- 有图没落地（当时下载失败）的缓存不算数：联网时重做一次，重做失败仍用旧缓存。
+        local incomplete = images_dir and cached:find('<img[^>]-src="https?://')
+        if not incomplete or not require("ui/network/manager"):isConnected() then return cb(cached) end
     end
     Paths.ensureDir(dir .. "/articles")
-    local images_dir = Subscribe.settings().images ~= false and dir .. "/images" or nil
     return Subscribe.providers[feed.kind].content(feed, item, images_dir, function(html, err, meta)
-        if not html then return cb(nil, err) end
+        if not html then return cb(cached, not cached and err or nil) end
         html = require("features.subscribe.typography").article(item.title or "", html, images_dir ~= nil,
             meta and meta.byline)
         -- 先写临时文件再改名：写到一半断电 / 被杀不会留下半截缓存（下次直接当正文用）。
