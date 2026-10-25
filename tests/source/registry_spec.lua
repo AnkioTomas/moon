@@ -245,12 +245,14 @@ do
     Assert.eq(common.active_source, "moon")
 end
 
--- 源模块加载失败是代码缺陷：直接抛出，不从列表里悄悄藏掉。
+-- 列源只读元信息，不加载源模块；源模块加载失败是代码缺陷，建实例时直接抛出。
 do
     package.loaded["source.jdread"] = nil
     package.preload["source.jdread"] = function() error("boom") end
-    Assert.errors(function() Registry.meta("jdread") end)
-    Assert.errors(function() Registry.list() end)
+    Assert.eq(Registry.meta("jdread").id, "jdread")
+    Assert.is_true(#Registry.list() > 0)
+    Assert.is_nil(package.loaded["source.jdread"])
+    Assert.errors(function() Registry.create("jdread") end)
     package.preload["source.jdread"] = nil
     package.loaded["source.jdread"] = nil
 end

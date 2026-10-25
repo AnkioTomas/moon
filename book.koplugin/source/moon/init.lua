@@ -100,11 +100,7 @@ end
 --- 返回 Moon 源元信息。
 ---@return BookSourceMeta
 function Moon.meta()
-    return {
-        id = "moon",
-        name = _("月读服务"),
-        type = "book",
-    }
+    return require("source.meta").get("moon")
 end
 
 ---@class MoonSource : SourceBase
