@@ -146,9 +146,9 @@ local function sourceIds()
             -- 第三方代码不归月读管：坏一个只记日志跳过，不能拖垮内置源和整个桌面。
             local ok, id, desc, is_source, widgets = pcall(readDescriptor, path)
             if not ok then
-                logger.err("book.source external rejected", path, id)
+                logger.error("book.source external rejected", path, id)
             elseif seen[id] then
-                logger.err("book.source external duplicate id", path, id)
+                logger.error("book.source external duplicate id", path, id)
             else
                 seen[id] = true
                 exts[#exts + 1] = { id = id, desc = desc, source = is_source, home_widgets = widgets,
@@ -288,7 +288,7 @@ function Registry.create(id)
     -- 第三方源的 new() 抛错不能拖垮书库 / 桌面：记日志，按源不可用处理。
     local ok, source, err = pcall(mod.new)
     if not ok then
-        logger.err("book.source external new failed", id, source)
+        logger.error("book.source external new failed", id, source)
         return nil, T(_("数据源初始化失败: %1"), id)
     end
     return source, err

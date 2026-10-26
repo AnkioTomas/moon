@@ -60,7 +60,7 @@ local function guard(class, plugin_id)
     G.new = function(_self, opts)
         local ok, inst = pcall(class.new, G, opts)
         if ok and type(inst) == "table" then return setmetatable(inst, G) end
-        logger.err("desktop.home external new failed", plugin_id, class.id, inst)
+        logger.error("desktop.home external new failed", plugin_id, class.id, inst)
         return Base.new(G, opts)
     end
     for _idx, name in ipairs(GUARDED) do
@@ -69,7 +69,7 @@ local function guard(class, plugin_id)
             G[name] = function(self, ...)
                 local ok, a, b = pcall(fn, self, ...)
                 if ok then return a, b end
-                logger.err("desktop.home external component error", plugin_id, class.id, name, a)
+                logger.error("desktop.home external component error", plugin_id, class.id, name, a)
                 local fallback = FALLBACK[name]
                 if fallback then return fallback(self, ...) end
             end
@@ -137,7 +137,7 @@ function M.list()
                 components[#components + 1] = component
                 by_id[component.id] = component
             else
-                logger.err("desktop.home external component rejected", ext.id,
+                logger.error("desktop.home external component rejected", ext.id,
                     type(item) == "table" and item.id, why)
             end
         end

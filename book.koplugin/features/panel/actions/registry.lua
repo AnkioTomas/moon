@@ -94,7 +94,7 @@ local function externalActions()
     for _idx, ext in ipairs(items) do
         local actions = Features.try(ext.id .. " panel", ext.mod.actions)
         if type(actions) ~= "table" or actions.id or actions.scope then
-            logger.err("feature external panel rejected: actions must return a list", ext.id)
+            logger.error("feature external panel rejected: actions must return a list", ext.id)
             actions = {}
         end
         for _i, raw in ipairs(actions) do
@@ -104,7 +104,7 @@ local function externalActions()
                 or not (raw.title and raw.icon) and "action needs title and icon"
                 or not (raw.run or raw.event) and "action needs run or event"
             if why then
-                logger.err("feature external panel rejected", ext.id, why)
+                logger.error("feature external panel rejected", ext.id, why)
             else
                 local label = "quick action " .. id
                 local action = {}
