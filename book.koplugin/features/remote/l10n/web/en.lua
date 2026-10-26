@@ -170,6 +170,7 @@ return {
     ["显示系统隐藏"] = "Show system hidden",
     ["暂无可显示的属性：%1"] = "No properties to show: %1",
     ["更多添加方式"] = "More ways to add",
+    ["更多页面"] = "More pages",
     ["更新"] = "Update",
     ["替换"] = "Replace",
     ["替换为"] = "Replace with",
