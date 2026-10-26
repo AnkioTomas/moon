@@ -165,4 +165,4 @@
 | #22 DNS | subscribe 失败负缓存 10s |
 | #9–#12 | mirror save 记 warn；Wake.boot 记 warn；Toc.setWords 去吞错；fock 坏 JSON 抛错 |
 
-未做：书架 reconcile 批量（#20）、筛选 6 路 GROUP BY lazy、段评去重。真机 Kindle 计时仍待确认。
+第二批已做：reconcile 只软删缺席行（#20）、filtersAsync 去掉分类/系列/作者三条 GROUP BY、起点/晋江 `with_chapter_uid` 去重。真机 Kindle 计时仍待确认。

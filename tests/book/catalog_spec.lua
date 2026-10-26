@@ -132,19 +132,16 @@ do -- listLibraryAsync 读假库
     Assert.eq(FakeBooks.list_opts.chapter_sources[1], "wechat")
 end
 
-do -- filtersAsync
-    FakeBooks.category_counts = { { category = "科幻", count = 2 } }
-    FakeBooks.series_counts = { { series = "三体", count = 2 } }
-    FakeBooks.authors_counts = { { authors = "刘慈欣", count = 3 } }
+do -- filtersAsync：只拉状态菜单用的计数，分类/系列/作者走 groupCountsAsync
     FakeBooks.read_counts = { { status = "read", count = 1 } }
     local got
     Catalog.filtersAsync("local", function(res)
         got = res
     end)
     Stubs.flush()
-    Assert.eq(got.data.category_counts[1].count, 2)
-    Assert.eq(got.data.series_counts[1].series, "三体")
-    Assert.eq(got.data.author_counts[1].authors, "刘慈欣")
+    Assert.is_nil(got.data.category_counts)
+    Assert.is_nil(got.data.series_counts)
+    Assert.is_nil(got.data.author_counts)
     Assert.eq(got.data.read_counts[1].status, "read")
     Assert.eq(got.data.downloaded_count, 3)
     Assert.eq(got.data.hidden_count, 2)

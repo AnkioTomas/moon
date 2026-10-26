@@ -406,7 +406,7 @@ do
     clearMods()
 end
 
--- ── reconcile：先软删已同步在架行，再逐条 upsertRemote(deleted=0) ──
+-- ── reconcile：只软删快照缺席的在架行，再逐条 upsertRemote(deleted=0) ──
 do
     local connection, calls = makeConn({
         resultset = function(sql)
@@ -427,8 +427,12 @@ do
     local insert_calls = {}
     for _, call in ipairs(calls) do
         if call.sql:find("UPDATE books SET deleted=1", 1, true)
-            and call.sql:find("deleted=0 AND sync_status=1", 1, true) then
+            and call.sql:find("stable_id IN (", 1, true) then
             deactivate = deactivate + 1
+            Assert.eq(call.args[1], "moon")
+            Assert.eq(call.args[2], "gone.epub")
+            Assert.eq(call.args[3], "old.epub")
+            Assert.is_true(call.sql:find("a.epub", 1, true) == nil, "仍在架的不标删")
         end
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1

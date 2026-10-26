@@ -633,7 +633,8 @@ function Catalog.groupCountsAsync(source_id, column, cb)
     end)
 end
 
---- 分类 / 系列 /（混合时）数据源筛选项。
+--- 状态筛选下拉用的计数（阅读状态 / 已下载 / 隐藏 / 混合时各源）。
+--- 分类 / 系列 / 作者分组走 groupCountsAsync，打开状态菜单时不要拖三条全库 GROUP BY。
 ---@param source_id string
 ---@param cb fun(data: BookFiltersResult|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -641,9 +642,6 @@ function Catalog.filtersAsync(source_id, cb)
     return deferScoped(source_id, cb, function(scope)
         local BookDB = require("book.books_db")
         local data = {
-            category_counts = BookDB.countsBy("category", scope),
-            series_counts = BookDB.countsBy("series", scope),
-            author_counts = BookDB.countsBy("authors", scope),
             read_counts = BookDB.readStatusCountsBySource(scope),
             downloaded_count = BookDB.downloadedCountBySource(scope, chapterSources()),
             hidden_count = BookDB.hiddenCountBySource(scope),
