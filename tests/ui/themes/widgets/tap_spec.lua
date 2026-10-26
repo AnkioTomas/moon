@@ -21,4 +21,18 @@ Assert.is_true(outer:onTapThemeArea(outer, {}))
 Assert.is_true(inner:onTapThemeArea(inner, {}))
 Assert.eq(table.concat(hits, ","), "outer,inner")
 
+-- 长按：只认自己发出的 HoldThemeArea，与点按互不干扰。
+local holds = {}
+local held = Tap.wrap(
+    { getSize = function() return { w = 10, h = 10 } end },
+    function() hits[#hits + 1] = "tap" end,
+    function() holds[#holds + 1] = "hold" end)
+Assert.eq(held.ges_events.HoldThemeArea.args, held)
+Assert.is_true(held:onHoldThemeArea(held, {}))
+Assert.is_nil(held:onHoldThemeArea(outer, {}))
+Assert.eq(table.concat(holds, ","), "hold")
+Assert.eq(table.concat(hits, ","), "outer,inner")
+
+Assert.eq(Tap.wrap({ getSize = function() return { w = 1, h = 1 } end }, nil, nil).getSize().w, 1)
+
 return true

@@ -16,6 +16,7 @@
       enabled = true,      -- false 时置灰、不响应
       divider = true,
       callback = fn,
+      hold_callback = fn,  -- 可选长按；与 callback 互不影响
   })
 
 @module koplugin.book.ui.themes.widgets.row
@@ -134,7 +135,9 @@ function Row.widget(opts)
             dimen = Geom:new{ w = opts.width, h = divider },
         }
     end
-    local widget = Tap.wrap(group, enabled and opts.callback or nil)
+    local widget = Tap.wrap(group,
+        enabled and opts.callback or nil,
+        enabled and opts.hold_callback or nil)
     -- 设置搜索靠这两个字段取行文字，不必解析控件树。
     widget.row_title, widget.row_subtitle = opts.title, opts.subtitle
     return widget

@@ -379,6 +379,24 @@ Update.manualCheck("/plugins/book.koplugin")
 Assert.eq(shown[#shown].text, "检查更新失败：正在检查或安装更新，请稍候")
 pending_check(update_release)
 
+-- 普通检查已是最新：只 toast，不弹安装。
+shown, closed = {}, {}
+Update.manualCheck("/plugins/book.koplugin")
+Assert.eq(shown[1].title, "检查更新")
+check_cb(release("v1.2.3"))
+Assert.eq(shown[#shown].text, "已是最新版本（1.2.3）")
+Assert.is_nil(shown[2] and shown[2].buttons)
+
+-- 长按强制更新：已是最新也弹安装确认，文案标明强制重装。
+shown, closed = {}, {}
+Update.manualCheck("/plugins/book.koplugin", true)
+Assert.eq(shown[1].title, "强制更新")
+check_cb(release("v1.2.3"))
+local force_prompt = shown[2]
+Assert.eq(force_prompt.title, "强制更新")
+Assert.matches(force_prompt.text, "强制重装月读 1%.2%.3")
+Assert.eq(force_prompt.buttons[2].text, "下载并安装")
+
 -- 自动检查：没连网不发请求；连上后照常查。
 local settings = require("utils.settings").get("features.update")
 settings.auto_update_check, settings.update_last_checked_at = true, 0
