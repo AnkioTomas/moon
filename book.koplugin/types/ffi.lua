@@ -3,6 +3,19 @@
 
 ---@meta
 
+---@class BlitColor : ffi.cdata*
+local BlitColor = {}
+---@return integer
+function BlitColor:getR() end
+---@return integer
+function BlitColor:getG() end
+---@return integer
+function BlitColor:getB() end
+
+---@class BlitBufferModule
+---@field Color8 fun(value: number): BlitColor
+---@field ColorRGB32 fun(r: number, g: number, b: number, a: number): BlitColor
+
 --- ffi/blitbuffer.lua
 ---@class BlitBuffer : ffi.cdata*
 ---@field data ffi.cdata*

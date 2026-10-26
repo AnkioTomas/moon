@@ -113,9 +113,11 @@ Remote.port = function() return 9528 end
 Remote.autostartOn = function() return false end
 Remote.idleStopOn = function() return true end
 Remote.deleteAfterShareOn = function() return false end
-local page = require("features.remote.setting").entries({
+local desktop = {
     updateView = function() redraws = redraws + 1 end,
-})[1].page
+}
+---@cast desktop BookDesktop
+local page = require("features.remote.setting").entries(desktop)[1].page
 local service_row = page.sections()[1].rows[1]
 connected = false
 service_row(600).callback()

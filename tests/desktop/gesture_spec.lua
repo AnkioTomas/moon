@@ -110,7 +110,9 @@ Assert.eq(base_calls, 7)
 
 -- 用户已配置的左右滑动先于桌面内置翻页；其它方向和空配置不被新逻辑抢走。
 local swipes = 0
-desktop.library = { onEvent = function() swipes = swipes + 1 end }
+local library = { onEvent = function() swipes = swipes + 1 end }
+---@cast library BookLibrary
+desktop.library = library
 desktop.tab = "library"
 fm.gestures = { gestures = {} }
 fm._ordered_touch_zones = { zone("multiswipe", true) }
