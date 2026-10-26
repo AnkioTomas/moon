@@ -17,6 +17,17 @@ local Event = require("ui/event")
 local Geom = require("ui/geometry")
 local time = require("ui/time")
 
+-- 模拟器上 LuaSocket×macOS Network 框架在并发 getaddrinfo 时会 SIGSEGV。
+-- 验证会话默认断网：挡住启动时的书架同步 / NTP，避免驱动还没轮询就崩。
+-- 需要联网测试时：MOON_EMU_ONLINE=1 ./run.sh
+if os.getenv("MOON_EMU_ONLINE") ~= "1" then
+    local ok_nm, NM = pcall(require, "ui/network/manager")
+    if ok_nm and NM then
+        NM.isConnected = function() return false end
+        if NM.isOnline then NM.isOnline = function() return false end end
+    end
+end
+
 local CMD, OUT, SHOTS = "/tmp/ko_cmd.lua", "/tmp/ko_out.txt", "/tmp/moon-shots"
 
 _G.D = {}
@@ -59,24 +70,35 @@ function D.top()
 end
 
 local function poll()
-    local f = io.open(CMD, "r")
-    if f then
-        local src = f:read("*a")
-        f:close()
-        os.remove(CMD)
-        local fn, err = loadstring(src, "ko_cmd")
-        local ok, res
-        if fn then
-            ok, res = xpcall(fn, debug.traceback)
-        else
-            ok, res = false, err
+    local ok_poll, err_poll = pcall(function()
+        local beat = io.open("/tmp/ko_emu_beat.txt", "w")
+        if beat then beat:write(tostring(os.time())); beat:close() end
+        local f = io.open(CMD, "r")
+        if f then
+            local src = f:read("*a")
+            f:close()
+            os.remove(CMD)
+            local fn, err = loadstring(src, "ko_cmd")
+            local ok, res
+            if fn then
+                ok, res = xpcall(fn, debug.traceback)
+            else
+                ok, res = false, err
+            end
+            local o = io.open(OUT, "w")
+            o:write((ok and "OK\n" or "ERR\n") .. tostring(res))
+            o:close()
         end
-        local o = io.open(OUT, "w")
-        o:write((ok and "OK\n" or "ERR\n") .. tostring(res))
-        o:close()
+    end)
+    if not ok_poll then
+        local e = io.open("/tmp/ko_emu_err.txt", "a")
+        if e then e:write(tostring(err_poll) .. "\n"); e:close() end
     end
     UIManager:scheduleIn(0.3, poll)
 end
 
 os.execute("mkdir -p " .. SHOTS)
-UIManager:scheduleIn(1, poll)
+-- 补丁加载时 UIManager 任务队列可能还没转起来：先 nextTick 再进入轮询。
+UIManager:nextTick(function()
+    UIManager:scheduleIn(0.5, poll)
+end)

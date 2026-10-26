@@ -325,11 +325,13 @@ local function surface(w, h, bpp, scope)
         if not bb then return end
         if cache.bb and cache.bb.free then cache.bb:free() end
         cache.key, cache.bb = key, bb
-        UIManager:setDirty("all", "ui")
+        -- 只脏顶层窗口：全屏 setDirty("all") 在墨水屏上比局刷贵。
+        local stack = UIManager._window_stack
+        local top = stack and stack[#stack]
+        UIManager:setDirty(top and top.widget or "all", "ui")
     end))
     return nil
 end
-
 --- 把壁纸铺进目标画布。没开、没图、解图失败都不画，返回 false 让调用方保留底色。
 ---@param bb BlitBuffer
 ---@param x number

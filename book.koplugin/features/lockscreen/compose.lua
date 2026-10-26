@@ -132,29 +132,31 @@ local function buildBlocks(component, position, wide)
 end
 
 --- 背景就绪后合成。
---- 返回值是可取消任务；本地背景在本次调用中同步完成，返回 nil。
+--- 建块与写 PNG 一律下一拍再跑：本地背景 ensure 是同步回调，若当场 write 会卡死
+--- 电源键 / 桌面激活 / 设置预览所在的主循环（低端 Kindle 上数秒）。
 ---@param plan table
 ---@param cb fun(ok: boolean, err: any, transparent: boolean|nil)
 ---@return table|nil
 function M.build(plan, cb)
-    local cancelled, done = false, false
+    local cancelled = false
     local asset_job
+    local UIManager = require("ui/uimanager")
     asset_job = Background.ensure(plan.asset, function(path, err)
         if cancelled then return end
-        done = true
         if err then return cb(false, err) end
-        -- 建块与写盘同步完成，中途不会被取消；块里的 widget 由 Render.write 释放。
-        local sw, sh = Layout.portraitSize()
-        local backdrop = plan.asset.blocks and plan.asset.blocks({ x = 0, y = 0, w = sw, h = sh, pad = 0 })
-        local blocks = buildBlocks(plan.component, plan.position, plan.wide)
-        local ok, render_err, transparent = require("features.lockscreen.render").write(COMPOSE_PATH,
-            { path = path, contain = plan.asset.contain, blocks = backdrop }, blocks)
-        if not ok and path and tostring(render_err):find("cannot decode background", 1, true) then
-            Background.invalidate(plan.asset)
-        end
-        cb(ok, render_err, transparent)
+        UIManager:nextTick(function()
+            if cancelled then return end
+            local sw, sh = Layout.portraitSize()
+            local backdrop = plan.asset.blocks and plan.asset.blocks({ x = 0, y = 0, w = sw, h = sh, pad = 0 })
+            local blocks = buildBlocks(plan.component, plan.position, plan.wide)
+            local ok, render_err, transparent = require("features.lockscreen.render").write(COMPOSE_PATH,
+                { path = path, contain = plan.asset.contain, blocks = backdrop }, blocks)
+            if not ok and path and tostring(render_err):find("cannot decode background", 1, true) then
+                Background.invalidate(plan.asset)
+            end
+            cb(ok, render_err, transparent)
+        end)
     end)
-    if done then return nil end
     return { cancel = function()
         cancelled = true
         if asset_job then asset_job:cancel() end

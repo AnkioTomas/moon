@@ -64,7 +64,7 @@ local function read(key)
     DB.exec([[DELETE FROM http WHERE key=?;]], key)
 end
 
---- 写缓存。缓存是尽力而为：编码或落库失败只记日志，不影响已成功的请求。
+--- 写缓存。编码在当前拍；落库/淘汰挪到下一拍，别堵在 HTTP 回调热路径上（封面一屏十几次）。
 ---@param key string
 ---@param ttl number 存活秒数
 local function write(key, value, ttl)
@@ -73,21 +73,24 @@ local function write(key, value, ttl)
         logger.warn("book.http.cache encode failed", key)
         return
     end
-    local now = os.time()
-    DB.exec([[DELETE FROM http WHERE expires <= ?;]], now)
-    local stored, err = DB.exec(
-        [[INSERT INTO http (key, value, expires) VALUES (?,?,?)
-          ON CONFLICT(key) DO UPDATE SET value=excluded.value, expires=excluded.expires;]],
-        key, encoded, now + ttl)
-    if not stored then
-        logger.warn("book.http cache set failed", key, err)
-        return
-    end
-    local n = tonumber(DB.rowexec([[SELECT COUNT(*) FROM http;]])) or 0
-    if n > Cache.MAX_ROWS then
-        DB.exec([[DELETE FROM http WHERE key IN (
-            SELECT key FROM http ORDER BY expires ASC LIMIT ?);]], n - Cache.MAX_ROWS)
-    end
+    local expires = os.time() + ttl
+    UIManager:nextTick(function()
+        local now = os.time()
+        DB.exec([[DELETE FROM http WHERE expires <= ?;]], now)
+        local stored, err = DB.exec(
+            [[INSERT INTO http (key, value, expires) VALUES (?,?,?)
+              ON CONFLICT(key) DO UPDATE SET value=excluded.value, expires=excluded.expires;]],
+            key, encoded, expires)
+        if not stored then
+            logger.warn("book.http cache set failed", key, err)
+            return
+        end
+        local n = tonumber(DB.rowexec([[SELECT COUNT(*) FROM http;]])) or 0
+        if n > Cache.MAX_ROWS then
+            DB.exec([[DELETE FROM http WHERE key IN (
+                SELECT key FROM http ORDER BY expires ASC LIMIT ?);]], n - Cache.MAX_ROWS)
+        end
+    end)
 end
 
 --- 先读缓存，未命中再 load；load 回调 value 非 nil 且无 err 才写入。
