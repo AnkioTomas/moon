@@ -8,7 +8,8 @@ require("support.theme_stubs").install()
 local connected, fetches = true, 0
 package.loaded["ui/network/manager"] = { isConnected = function() return connected end }
 package.loaded["http.request"] = { stream = function() error("离线打开不得发 HTTP 请求") end }
-package.loaded["utils.settings"] = { get = function() return { images = true } end }
+local settings = { images = true }
+package.loaded["utils.settings"] = { get = function() return settings end, save = function() end }
 package.loaded["reader.session"] = { current = function() return nil end }
 package.loaded["book.progress_db"] = { get = function() return nil end }
 package.loaded["book.note_db"] = { all = function() return {} end }
@@ -91,6 +92,33 @@ Assert.eq(fetches, 1, "未缓存离线立即失败，不调用 provider")
 local again = open(1)
 Assert.eq(again.path, origin, "离线重开同样可用")
 Assert.eq(fetches, 1)
+
+-- 正文没变的重建不能刷新原章时间戳，否则已生成的双语章会被误判过期。
+local ChapterBi = require("features.translate.chapter")
+require("source.chapter").variant = ChapterBi.resolve
+ChapterBi.set(identity, { engine = "edge", lang = "zh" })
+local bi = ChapterBi.pathFor(origin, ChapterBi.get(identity))
+local translated = assert(io.open(bi, "wb"))
+assert(translated:write(html .. "<!-- translated -->"))
+translated:close()
+local lfs = require("libs/libkoreader-lfs")
+assert(lfs.touch(origin, 1000, 1000))
+assert(lfs.touch(bi, 2000, 2000))
+local bilingual = open(1)
+Assert.eq(bilingual.path, bi, "重开未变化的文章继续用双语版")
+Assert.eq(lfs.attributes(origin, "modification"), 1000, "不因重建改变原章时间戳")
+Assert.eq(fetches, 1, "复用双语不发请求")
+
+-- 真正更新正文仍要使旧双语章失效。
+local article = assert(io.open(Subscribe.articlePath(feed.id, items[1].guid), "wb"))
+assert(article:write("<h1>已缓存</h1><p>更新后的正文</p>"))
+article:close()
+local updated = open(1)
+Assert.eq(updated.path, origin, "正文变了不能继续用旧译文")
+Assert.is_nil(ChapterBi.resolve(identity, 1, origin))
+local changed = assert(io.open(origin, "rb"))
+Assert.matches(changed:read("*a"), "更新后的正文")
+changed:close()
 
 -- 换筛选范围后，仍能从所属订阅的文章缓存重建章节。
 identity.stable_id = "subscribe-offline-scope-spec"
