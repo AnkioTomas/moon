@@ -7,7 +7,8 @@ XPointer 之间的文本，末页跳到页首后按屏幕范围取，取完放�
 文档对象只在主进程里，取字只能在 UI 线程上做：按时长分批，批间让出给输入。结果交给 text2epub
 做章节识别与物理行合并；转换有损，不保留图片、脚注和原样式。
 
-页文本边取边写入临时文件，只保留上一页做边界行去重，避免 pages[] + concat 双份峰值内存。
+页文本边取边写入临时文件，只保留上一页做边界行去重；成功时把文件路径交给调用方，
+**绝不**再 read("*a") 整本回主进程——Kindle 上文档已占一大块，再叠一份全文再 fork 必 OOM。
 
 @module koplugin.book.features.reflow.extract
 --]]
@@ -32,15 +33,16 @@ local function later(fn)
     UIManager:scheduleIn(YIELD_S, require("ui.guard").wrap("reflow extract", fn))
 end
 
---- 相对上一页去重边界行，写入文件；返回新的上一页正文（供下次比较）。
+--- 相对上一页去重边界行，写入文件；返回新的上一页正文（供下次比较）与是否写入了非空白。
 ---@param file file*
 ---@param previous string
 ---@param raw string
 ---@return string previous
+---@return boolean wrote
 local function appendPage(file, previous, raw)
     local page = Text.normalizeNewlines(raw):gsub("^\n+", ""):gsub("\n+$", "")
     if page == "" then
-        return previous
+        return previous, false
     end
     if previous ~= "" then
         local last_line = previous:match("^.*\n([^\n]+)$") or previous:match("^[^\n]+$")
@@ -53,13 +55,13 @@ local function appendPage(file, previous, raw)
         end
     end
     if page == "" then
-        return previous
+        return previous, false
     end
     if previous ~= "" then
         file:write("\n")
     end
     file:write(page)
-    return page
+    return page, page:find("%S") ~= nil
 end
 
 --- 流式文档第 page 页：非末页取相邻两页 xpointer 之间，末页只能跳过去按屏幕范围取。
@@ -101,9 +103,10 @@ local function pagingPage(document, page)
     return table.concat(lines, "\n")
 end
 
---- 取出 ui 当前文档的全部文字；可取消，取消后 cb 不再触发。
+--- 取出 ui 当前文档的全部文字到临时文件；成功 cb(path)，失败 cb(nil, err)。
+--- 成功时文件归调用方（用完自己删）；取消 / 失败由这里删掉。可取消，取消后 cb 不再触发。
 ---@param ui table ReaderUI
----@param cb fun(text: string|nil, err: any)
+---@param cb fun(path: string|nil, err: any)
 ---@param on_progress fun(text: string, done: integer, total: integer) 每批结束报一次已取页数
 ---@return { cancel: fun() }
 function Extract.run(ui, cb, on_progress)
@@ -121,6 +124,7 @@ function Extract.run(ui, cb, on_progress)
         return { cancel = function() end }
     end
     local previous = ""
+    local had_text = false
     local closed = false
 
     local function discardTmp()
@@ -131,16 +135,24 @@ function Extract.run(ui, cb, on_progress)
         os.remove(tmp)
     end
 
-    ---@param text string|nil
     ---@param err any
-    local function finish(text, err)
+    local function fail(err)
         discardTmp()
         if ui.document == document and restore_xp then
             -- 放不回原位置只是阅读位置偏了；抛出去 cb 就不来了，调用方的进度窗会一直挡着阅读页。
             local ok, restore_err = pcall(document.gotoXPointer, document, restore_xp)
             if not ok then require("logger").warn("reflow extract: restore position failed", restore_err) end
         end
-        cb(text, err)
+        cb(nil, err)
+    end
+
+    ---@param path string
+    local function succeed(path)
+        if ui.document == document and restore_xp then
+            local ok, restore_err = pcall(document.gotoXPointer, document, restore_xp)
+            if not ok then require("logger").warn("reflow extract: restore position failed", restore_err) end
+        end
+        cb(path)
     end
     -- 进度条按整数百分比走：每批都报会让墨水屏 10 次/秒刷新。
     local reported = -1
@@ -154,15 +166,17 @@ function Extract.run(ui, cb, on_progress)
             discardTmp()
             return
         end
-        if ui.document ~= document then return finish(nil, _("文档已关闭")) end
+        if ui.document ~= document then return fail(_("文档已关闭")) end
         local started = Perf.now()
         while page <= count do
             -- 坏页上 CREngine / MuPDF 会抛错：整次提取作废并告诉用户，不带着半本书继续。
             local ok, chunk = pcall(readPage, document, page, count)
             if not ok or type(chunk) ~= "string" then
-                return finish(nil, _("无法提取文字") .. ": " .. tostring(chunk))
+                return fail(_("无法提取文字") .. ": " .. tostring(chunk))
             end
-            previous = appendPage(file, previous, chunk)
+            local wrote
+            previous, wrote = appendPage(file, previous, chunk)
+            if wrote then had_text = true end
             page = page + 1
             if page <= count and Perf.now() - started >= BATCH_MS then
                 local percent = math.floor((page - 1) * 100 / count)
@@ -170,6 +184,8 @@ function Extract.run(ui, cb, on_progress)
                     reported = percent
                     on_progress(_("正在提取文字"), page - 1, count)
                 end
+                -- 词框 / 页字符串这批用完就催一下 GC，别拖到整本取完才收。
+                collectgarbage("step", 400)
                 return later(function() step(page) end)
             end
         end
@@ -177,22 +193,11 @@ function Extract.run(ui, cb, on_progress)
             closed = true
             file:close()
         end
-        local reader = io.open(tmp, "rb")
-        local text = reader and reader:read("*a") or ""
-        if reader then reader:close() end
-        os.remove(tmp)
-        if not text:find("%S") then
-            if ui.document == document and restore_xp then
-                local ok, restore_err = pcall(document.gotoXPointer, document, restore_xp)
-                if not ok then require("logger").warn("reflow extract: restore position failed", restore_err) end
-            end
-            return cb(nil, _("文档没有可提取的文字"))
+        if not had_text then
+            os.remove(tmp)
+            return fail(_("文档没有可提取的文字"))
         end
-        if ui.document == document and restore_xp then
-            local ok, restore_err = pcall(document.gotoXPointer, document, restore_xp)
-            if not ok then require("logger").warn("reflow extract: restore position failed", restore_err) end
-        end
-        cb(text)
+        succeed(tmp)
     end
 
     later(function() step(1) end)

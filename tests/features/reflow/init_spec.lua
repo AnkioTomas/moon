@@ -16,11 +16,16 @@ package.preload["reader.session"] = function()
     return { current = function() return session end }
 end
 local extracted_ui
+local extract_tmp
 package.preload["features.reflow.extract"] = function()
     return {
         run = function(ui, cb)
             extracted_ui = ui
-            cb("第一章 开始\n正文\n第二章 继续\n更多")
+            extract_tmp = os.tmpname() .. ".txt"
+            local f = assert(io.open(extract_tmp, "wb"))
+            f:write("第一章 开始\n正文\n第二章 继续\n更多")
+            f:close()
+            cb(extract_tmp)
             return { cancel = function() end }
         end,
     }
@@ -164,11 +169,13 @@ local meta = require("support.json_stub").decode(assert(io.open(dir .. "/meta.js
 Assert.eq(meta.origin, txt)
 Assert.eq(meta.file, dir .. "/book.epub")
 
--- 其它格式：先从打开的文档逐页取字，再交给转换
+-- 其它格式：先从打开的文档逐页取字落盘，再交给转换（主进程不持有全文）
 local pdf_ui = reader("/books/a.pdf", "pdf")
 Reflow.runAsync(pdf_ui, identity, function(p, e) path, err = p, e end, function() end)
 Assert.eq(extracted_ui, pdf_ui)
-Assert.eq(built.text, "第一章 开始\n正文\n第二章 继续\n更多")
+Assert.is_nil(built.text, "全文不进主进程")
+Assert.eq(built.text_file, extract_tmp)
+Assert.is_nil(io.open(extract_tmp), "转换结束后删临时文件")
 Reflow.runAsync(reader(txt, "rolling"), identity, function(p, e) path, err = p, e end, function() end)
 
 -- 生成失败：回调错误，meta 不变
@@ -193,15 +200,20 @@ Assert.is_true(build_cancelled)
 Assert.is_nil(io.open(dir .. "/book.epub.part"))
 Assert.eq(assert(io.open(dir .. "/book.epub", "rb")):read("*a"), "epub", "旧排版版不受影响")
 Assert.is_nil(path)
--- 取字中取消：不再进入转换
+-- 取字中取消：不再进入转换；晚到的路径回调只删临时文件
 local extract_cb
 package.loaded["features.reflow.extract"] = { run = function(ui, cb) extract_cb = cb return { cancel = function() end } end }
 built = nil
 Text2Epub.build = function(opts, cb) built = opts return { cancel = function() end } end
 handle = Reflow.runAsync(reader("/books/a.epub", "rolling"), identity, function(p, e) path, err = p, e end, function() end)
 handle.cancel()
-extract_cb("全文")
+local late = os.tmpname() .. ".txt"
+local late_file = assert(io.open(late, "wb"))
+late_file:write("全文")
+late_file:close()
+extract_cb(late)
 Assert.is_nil(built, "取消后不再打包")
+Assert.is_nil(io.open(late), "取消后丢掉晚到的提取文件")
 package.loaded["features.reflow.extract"] = nil
 Text2Epub.build = original_build
 

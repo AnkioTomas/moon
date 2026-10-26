@@ -6,8 +6,9 @@
   local Text2Epub = require("convert.text2epub")
   local job = Text2Epub.build({
       dest = "/path/book.epub",
-      source = "/path/book.txt", -- 没给 text 时读这个文件；也用于推断书名 / 作者
-      text = nil, -- 可省略，已有全文（如从文档提取）时直接给
+      source = "/path/book.txt", -- 没给 text / text_file 时读这个；也用于推断书名 / 作者
+      text = nil, -- 可省略；已有全文时直接给（主进程慎用，占内存）
+      text_file = nil, -- 可省略；提取落盘的临时 txt，子进程读完即删（reflow 走这条）
       title = "书名", -- 可省略
       author = "作者", -- 可省略
   }, function(ok, err) end)
@@ -349,6 +350,8 @@ function Text2Epub.parse(text, opts, progress)
     for line in (text .. "\n"):gmatch("(.-)\n") do
         lines[#lines + 1] = line
     end
+    -- 行表已立，整串可以放掉；后面只用 lines。
+    text = nil
     collectInlineToc(lines, known)
 
     local title = trim(opts.title)
@@ -440,6 +443,10 @@ function Text2Epub.parse(text, opts, progress)
         end
     end
 
+    -- content / lines 已拆进 sections，先断引用再切 HTML，压峰值。
+    content = nil
+    lines = nil
+
     sections = dropTocEchoes(sections)
     if #sections == 0 then
         startSection(title)
@@ -451,6 +458,7 @@ function Text2Epub.parse(text, opts, progress)
     local max_part_chars = opts.max_part_chars or DEFAULT_PART_CHARS
     for index, section in ipairs(sections) do
         local parts = chapterParts(section.title, section.lines, max_part_chars, opts.reflow == true)
+        section.lines = nil
         for part_index, html in ipairs(parts) do
             chapters[#chapters + 1] = {
                 title = section.title,
@@ -520,19 +528,22 @@ local function runJob(name, worker, cb, on_progress)
     return { cancel = function() job:cancel() end }
 end
 
---- opts.text 是全文；没给就读 opts.source。
+--- opts.text 优先；否则 opts.text_file（提取临时文件）；再否则读 opts.source。
 ---@param opts table
 ---@return string|nil text, string|nil err
 local function load(opts)
     if opts.text then return opts.text end
+    if opts.text_file then return Text2Epub.read(opts.text_file) end
     return Text2Epub.read(opts.source)
 end
 
 --- 异步构建 EPUB，读文件、解析、打包都在子进程里。
---- opts.text 是全文；没给就读 opts.source（`Text2Epub.read`）。opts.source 也用于从文件名推断书名 / 作者。
+--- opts.text 是全文；opts.text_file 是提取落盘的临时文件；都没给就读 opts.source。
+--- opts.source 也用于从文件名推断书名 / 作者（与 text_file 可同时存在）。
 ---@param opts {
 ---   dest: string,
 ---   text: string|nil,
+---   text_file: string|nil,
 ---   source: string|nil,
 ---   title: string|nil,
 ---   author: string|nil,
@@ -548,8 +559,11 @@ end
 function Text2Epub.build(opts, cb, on_progress)
     return runJob("epub.text", function(report)
         local text, err = load(opts)
+        -- 子进程里断掉 opts 上的全文引用，parse 拆行后即可回收整串。
+        opts.text = nil
         if not text then return { err = err } end
         local book = Text2Epub.parse(text, opts, function(done, total) report(_("正在识别章节"), done, total) end)
+        text = nil
         local ok, write_err = Html2Epub.write({
             dest = opts.dest,
             title = book.title,

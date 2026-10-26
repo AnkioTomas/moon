@@ -21,11 +21,24 @@ local Extract = require("features.reflow.extract")
 
 local function ignore() end
 
+--- 读出提取结果文件内容（成功时 cb 给的是路径，不再是全文）。
+---@param path string|nil
+---@return string|nil
+local function readResult(path)
+    if not path then return nil end
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    local text = f:read("*a")
+    f:close()
+    os.remove(path)
+    return text
+end
+
 local function run(ui)
     local result, reason
-    local handle = Extract.run(ui, function(text, err) result, reason = text, err end, ignore)
+    local handle = Extract.run(ui, function(path, err) result, reason = path, err end, ignore)
     Stubs.flush()
-    return result, reason, handle
+    return readResult(result), reason, handle
 end
 
 local function rollingUi(count, pages)
@@ -119,7 +132,7 @@ do
     -- 页快：一批取完整本
     local ui = rollingUi(3, { "一", "二", "三" })
     local text, err
-    Extract.run(ui, function(t, e) text, err = t, e end, ignore)
+    Extract.run(ui, function(path, e) text, err = readResult(path), e end, ignore)
     tick()
     Assert.eq(text, "一\n二\n三")
     Assert.is_nil(err)
