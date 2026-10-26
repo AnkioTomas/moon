@@ -149,7 +149,7 @@ function Tree.build(groups, entries)
     end
     for i, raw in ipairs(entries) do
         local why = add(copy(raw), i)
-        if why then logger.err("feature external setting rejected", raw.owner, why) end
+        if why then logger.error("feature external setting rejected", raw.owner, why) end
     end
 
     local function sort(list)
@@ -162,7 +162,7 @@ function Tree.build(groups, entries)
         if not pages[parent] then
             for i = #list, 1, -1 do
                 if list[i].external then
-                    logger.err("feature external setting rejected", list[i].owner, "unknown parent " .. parent)
+                    logger.error("feature external setting rejected", list[i].owner, "unknown parent " .. parent)
                     table.remove(list, i)
                 end
             end
