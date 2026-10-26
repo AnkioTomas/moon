@@ -549,6 +549,9 @@ function Subscribe.content(feed, item, cb)
         local incomplete = images_dir and (cached:find('<img[^>]-src="https?://') or cached:find("AVIF", 1, true))
         if not incomplete or not require("ui/network/manager"):isConnected() then return cb(cached) end
     end
+    if not require("ui/network/manager"):isConnected() then
+        return cb(nil, _("网络不可用，请先连接 Wi-Fi"))
+    end
     Paths.ensureDir(dir .. "/articles")
     return Subscribe.providers[feed.kind].content(feed, item, images_dir, function(html, err, meta)
         if not html then return cb(cached, not cached and err or nil) end

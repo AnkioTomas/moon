@@ -266,7 +266,12 @@ function Source:openBookAsync(identity, opts, cb)
     -- 否则会按旧章号打开错位的文章。
     -- 阅读中切章不能再挪章号：调用方手里的章号是现行目录的，挪了就会开成别的文章（含「重新下载本章」）。
     Source.loadTocAsync(self, identity, function() end, not isOpen(identity))
-    return require("source.chapter").openWithUi(self, identity, identity.book, opts or {}, OPS, cb)
+    local Chapter = require("source.chapter")
+    -- 订阅正文另存 articles/：离线也能重建 volatile 章节，不走通用入口的联网门槛。
+    if not require("ui/network/manager"):isConnected() then
+        return Chapter.openAsync(self, identity, identity.book, opts or {}, OPS, cb)
+    end
+    return Chapter.openWithUi(self, identity, identity.book, opts or {}, OPS, cb)
 end
 
 function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
