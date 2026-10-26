@@ -101,8 +101,9 @@ function Hero.widget(plugin, source, book, opts)
     local gap_desc = Theme.px(3)
     local gap_foot = show_progress and Theme.px(t.space.xs) or 0
 
+    -- 英雄卡自己没有表面底色，多行文字必须透明，否则 Text.box 默认拿页面白铺满矩形。
     local title_w = (opts.title_lines or 1) > 1
-        and Text.box("title", title, info_w, { max_lines = opts.title_lines })
+        and Text.box("title", title, info_w, { max_lines = opts.title_lines, transparent = true })
         or Text.line("title", title, { width = info_w })
     local author_w = Text.line("caption", author ~= "" and author or _("未知作者"), {
         width = info_w, color = t.color.muted,
@@ -131,6 +132,7 @@ function Hero.widget(plugin, source, book, opts)
             height = mid_budget - gap_desc,
             color = t.color.muted,
             ellipsis = true,
+            transparent = true,
         }))
         head_h = head_h + mid_budget
     end
