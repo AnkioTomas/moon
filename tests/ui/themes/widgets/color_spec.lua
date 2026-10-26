@@ -5,6 +5,9 @@ local Kit = require("support.widget_stubs")
 Kit.install("paper")
 Kit.color_enabled = true
 Kit.display.theme_color = 0x7038A0
+-- 存量主题色经 Theme.vivid 补饱和后才是实际强调色。
+local accent = require("ui.themes").current().color.accent
+Assert.eq(accent, require("ui.themes").vivid(0x7038A0))
 
 local TextWidget = require("ui/widget/textwidget")
 local gray, rgb = 0, 0
@@ -17,11 +20,11 @@ local bb = {
     colorblitFrom = function() gray = gray + 1 end,
     colorblitFromRGB32 = function(_self, _source, _x, _y, _ox, _oy, _w, _h, color)
         rgb = rgb + 1
-        Assert.eq(color, Kit.display.theme_color)
+        Assert.eq(color, accent)
     end,
 }
 local Text = require("ui.themes.widgets.text")
-local title = Text.line("title", "窗口标题", { color = Kit.display.theme_color })
+local title = Text.line("title", "窗口标题", { color = accent })
 title:paintTo(bb, 0, 0)
 Assert.eq(rgb, 1, "显式强调色走 RGB 字形着色")
 local icon = require("ui.themes.widgets.icon").widget{ name = "home", size = 24, box = false }
@@ -42,12 +45,12 @@ book_title:paintTo({
     colorblitFromRGB32 = function(_self, _source, _x, _y, _ox, _oy, _w, _h, color) foreground = color end,
 }, 0, 0)
 Assert.eq(background, 255, "彩色多行标题保留原底色")
-Assert.eq(foreground, Kit.display.theme_color, "多行书名按蒙版绘制强调色，不受 xtext 开关影响")
+Assert.eq(foreground, accent, "多行书名按蒙版绘制强调色，不受 xtext 开关影响")
 Assert.eq(TextWidget.paintTo, getmetatable(title).paintTo, "原生 TextWidget 不被全局修改")
 
 local Chart = require("ui.widgets.chart")
 local chart = Chart.bars{ width = 200, height = 100, values = { 20, 0 } }
-Assert.len(Kit.find(chart, function(w) return w.style and w.style.bg == Kit.display.theme_color end), 1)
+Assert.len(Kit.find(chart, function(w) return w.style and w.style.bg == accent end), 1)
 
 local canvas = Kit.canvas()
 local painted = {}
@@ -57,4 +60,4 @@ require("ui.widgets.heatmap"):new{
     width = 20, cols = { { { level = 0 }, { level = 4 }, false } },
 }:paintTo(canvas, 0, 0)
 Assert.eq(painted[1], 0xEE)
-Assert.eq(painted[2], Kit.display.theme_color, "最深热力格使用主题色")
+Assert.eq(painted[2], accent, "最深热力格使用主题色")

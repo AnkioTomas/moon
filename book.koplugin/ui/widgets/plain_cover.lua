@@ -24,6 +24,7 @@ local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local TextWidget = require("ui/widget/textwidget")
 local Widget = require("ui/widget/widget")
+local Theme = require("ui.themes")
 local util = require("util")
 
 local PALETTE = {
@@ -78,6 +79,12 @@ function PlainCover:init()
     self.margin = math.max(2, math.floor(w * 0.06 + 0.5))
     self.line = math.max(1, math.floor(w / 120 + 0.5))
     local rgb = PALETTE[colorIndex(self.title)]
+    -- 彩屏上这块纯色底同样会被冲淡，开彩色时补饱和；灰度屏保持原色板。
+    local Screen = Device.screen
+    if Screen.isColorEnabled and Screen:isColorEnabled() then
+        local packed = Theme.vivid(rgb[1] * 0x10000 + rgb[2] * 0x100 + rgb[3])
+        rgb = { math.floor(packed / 0x10000), math.floor(packed / 0x100) % 0x100, packed % 0x100 }
+    end
     self.bg = Blitbuffer.ColorRGB32(rgb[1], rgb[2], rgb[3], 0xFF)
 
     local inner_w = w - self.margin * 2

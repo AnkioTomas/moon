@@ -9,7 +9,8 @@
 三套主题的键集合完全一致（tests/ui/themes 校验），组件只读键、不判断主题 id。
 当前主题读 ui.ui_theme，未设或写错回落 paper。
 彩色渲染开启时，导航、图标、标题、书名和统计共用 ui.theme_color；正文保持黑白。
-彩色令牌按主题缓存，不改原始灰度令牌。
+彩色令牌按主题缓存，不改原始灰度令牌。彩屏（Kindle Color / Kaleido）会把颜色
+冲淡，accent 在收口处经 Theme.vivid 补饱和后再派生，存量配置不迁移。
 
 ui/themes 自成一体：除 KOReader 自带模块与 utils.settings / l10n 外不依赖插件其他 UI 组件。
 缩放沿用设置 ui.ui_scale（百分比，100–180，缺省 130），与旧桌面同一个键。
@@ -70,12 +71,28 @@ function Theme.set(id)
     return id
 end
 
+--- 补饱和：绕三通道均值拉开色差。彩色墨水屏的滤光层会把 RGB 往灰里冲，
+--- 存量主题色和拿 accent 往灰里掺的派生色都靠它补回来；灰度与等通道色原样返回。
+---@param value number 0xRRGGBB 或灰度
+---@return number
+function Theme.vivid(value)
+    if value <= 0xFF then return value end
+    local r = math.floor(value / 0x10000)
+    local g = math.floor(value / 0x100) % 0x100
+    local b = value % 0x100
+    local mean = (r + g + b) / 3
+    local function boost(channel)
+        return math.max(0, math.min(0xFF, math.floor(mean + (channel - mean) * 1.7 + 0.5)))
+    end
+    return boost(r) * 0x10000 + boost(g) * 0x100 + boost(b)
+end
+
 --- 当前主题令牌表。
 ---@return table
 function Theme.current()
     local base = Theme.get(Theme.id())
     if not (Screen.isColorEnabled and Screen:isColorEnabled()) then return base end
-    local accent = MoonSettings.get("ui").theme_color or 0x0756AD
+    local accent = Theme.vivid(MoonSettings.get("ui").theme_color or 0x0756AD)
     if not colored[base.id] or colored[base.id].accent ~= accent then
         local t = {}
         for key, value in pairs(base) do t[key] = value end
@@ -118,9 +135,10 @@ function Theme.mix(from, to, fraction)
     local function channel(value, divisor)
         return value <= 0xFF and value or math.floor(value / divisor) % 0x100
     end
-    return mix(channel(from, 0x10000), channel(to, 0x10000)) * 0x10000
+    -- 掺灰本身就掉饱和，彩色结果补回来，否则热力图低档在彩屏上与灰阶无异。
+    return Theme.vivid(mix(channel(from, 0x10000), channel(to, 0x10000)) * 0x10000
         + mix(channel(from, 0x100), channel(to, 0x100)) * 0x100
-        + mix(channel(from, 1), channel(to, 1))
+        + mix(channel(from, 1), channel(to, 1)))
 end
 
 --- 灰度 / RGB 令牌转绘图颜色；灰度主题保留原来的 Color8 路径。

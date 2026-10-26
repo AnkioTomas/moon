@@ -209,13 +209,13 @@ local calendar = Overview:build{ desktop = desktop, state = calendar_state, widt
 local function dateColor(text)
     return Kit.find(calendar, function(w) return w.text == text and w.fgcolor ~= nil end)[1].fgcolor
 end
-Assert.eq(dateColor("11"), Kit.display.theme_color, "有阅读记录的日期使用主题色")
-Assert.eq(dateColor("25"), Kit.display.theme_color, "选中日期使用主题色")
+Assert.eq(dateColor("11"), require("ui.themes").current().color.accent, "有阅读记录的日期使用主题色")
+Assert.eq(dateColor("25"), require("ui.themes").current().color.accent, "选中日期使用主题色")
 Assert.eq(dateColor("27"), require("ui.themes").current().color.faint, "相邻月份仍灰显")
 Assert.eq(dateColor("10"), 0, "无阅读记录的普通日期保留黑色")
-Assert.eq(dateColor("2026年10月"), Kit.display.theme_color, "月份标题使用主题色")
+Assert.eq(dateColor("2026年10月"), require("ui.themes").current().color.accent, "月份标题使用主题色")
 local outline = Kit.find(calendar, function(w) return w.style and w.style.border == 2 end)[1]
-Assert.eq(outline.style.border_color, Kit.display.theme_color, "选中日描边使用主题色")
+Assert.eq(outline.style.border_color, require("ui.themes").current().color.accent, "选中日描边使用主题色")
 local canvas = Kit.canvas()
 outline:paintTo(canvas, 0, 0)
 Assert.is_true(canvas.ops[1].rgb, "日历描边实际走 RGB 绘制")
