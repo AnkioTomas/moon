@@ -131,7 +131,7 @@ local function extTab(id)
     end
 end
 
---- 按开关生成 Desktop 底栏 Tab（书城：有可搜索来源才出现）。统计页始终在。
+--- 按开关生成 Desktop 底栏 Tab（书城：有可搜索来源才出现）。
 ---@return table
 local function desktopTabs()
     local tabs = {
@@ -141,7 +141,9 @@ local function desktopTabs()
     if #StorePage.providers() > 0 then
         tabs[#tabs + 1] = { id = "store", text = _("书城"), icon = "storefront" }
     end
-    tabs[#tabs + 1] = { id = "insight", text = _("统计"), icon = "bar_chart" }
+    if MoonSettings.get("desktop").insight_enabled ~= false then
+        tabs[#tabs + 1] = { id = "insight", text = _("统计"), icon = "bar_chart" }
+    end
     -- 扩展页签：插在 after 指定的格子后（同一 after 按登记顺序），没写 after 就排在「设置」前。
     -- 页签可带 cells(room)：按屏宽剩余的空格数换成多个格子（替换自己那一格），没有就是它自己。
     local exts = extTabs()

@@ -3,6 +3,7 @@
 --]]
 
 local Row = require("ui.themes.widgets.row")
+local Settings = require("utils.settings")
 local _ = require("gettext")
 
 ---@class BookSettingsInsight
@@ -74,6 +75,22 @@ function InsightSettings:sections(desktop)
         end
     end
     return {
+        { title = _("统计页"), rows = {
+            function(iw)
+                local conf = Settings.get("desktop")
+                local enabled = conf.insight_enabled ~= false
+                return Row.widget({
+                    width = iw, icon = "bar_chart", title = _("显示统计页"),
+                    subtitle = _("在底栏显示统计入口，不影响阅读统计"),
+                    toggle = enabled,
+                    callback = function()
+                        conf.insight_enabled = not enabled
+                        Settings.save("desktop")
+                        desktop:updateView()
+                    end,
+                })
+            end,
+        } },
         { title = _("显示的页面"), rows = { pickRow(desktop, _("统计页面"), page_items) } },
         { title = _("各页显示的数据"), rows = card_rows },
     }
