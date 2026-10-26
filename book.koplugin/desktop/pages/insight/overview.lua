@@ -84,16 +84,16 @@ local function calCell(t, size, day_num, has_read, out_month, selected, on_tap)
     local kids = VerticalGroup:new{
         align = "center",
         Text.line(has_read and "body" or "caption", tostring(day_num), {
-            color = out_month and t.color.faint or ((has_read or selected) and t.color.accent or t.color.ink),
+            color = out_month and t.color.faint or ((has_read or selected) and t.color.headings or t.color.ink),
             bold = has_read,
         }),
     }
     if has_read and not out_month then
         local dot = Theme.px(t.space.xs)
         kids[#kids + 1] = VerticalSpan:new{ width = Theme.px(2) }
-        kids[#kids + 1] = Box:new{ style = { bg = t.color.accent }, width = dot, height = dot, keep_bg = true }
+        kids[#kids + 1] = Box:new{ style = { bg = t.color.stat }, width = dot, height = dot, keep_bg = true }
     end
-    local style = selected and { border = 2, border_color = t.color.accent, radius = t.control.radius } or {}
+    local style = selected and { border = 2, border_color = t.color.navigation, radius = t.control.radius } or {}
     return Tap.wrap(Box:new{ style = style, width = size, height = size, kids }, on_tap)
 end
 
@@ -225,7 +225,7 @@ function Overview:build(ctx)
             if not chart then return nil end
             return VerticalGroup:new{
                 align = "left",
-                Parts.caption(_("本月阅读时段"), width, t.color.accent > 0xFF and t.color.accent or t.color.muted),
+                Parts.caption(_("本月阅读时段"), width, t.color.accent > 0xFF and t.color.headings or t.color.muted),
                 VerticalSpan:new{ width = xs },
                 chart,
             }

@@ -29,6 +29,6 @@ return {
         -- 随机一本的范围：new = 只抽没开始读的，reading = 再包含阅读中的。
         random_scope = "new",
     },
-    -- ui_theme 为 nil = 默认主题，见 ui.themes。
-    keys = { "ui_theme" },
+    -- ui_theme 为 nil = 默认主题，见 ui.themes；theme_preset 为 nil = 用旧 theme_color 单色。
+    keys = { "ui_theme", "theme_preset" },
 }

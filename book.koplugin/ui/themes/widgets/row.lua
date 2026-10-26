@@ -90,7 +90,7 @@ function Row.widget(opts)
         content[#content + 1] = LeftContainer:new{
             dimen = Geom:new{ w = icon_w, h = h },
             Icon.widget{ name = opts.icon, size = t.control.icon,
-                color = Theme.color(enabled and not sel and t.color.accent or ink) },
+                color = Theme.color(enabled and not sel and t.color.icons or ink) },
         }
     end
     if opts.image then
@@ -112,7 +112,7 @@ function Row.widget(opts)
             dimen = Geom:new{ w = status_w, h = h },
             status_widget or Text.line("body", opts.status, {
                 width = status_w,
-                color = opts.status_on and (enabled and not sel and t.color.accent or ink) or muted,
+                color = opts.status_on and (enabled and not sel and t.color.headings or ink) or muted,
             }),
         }
     end

@@ -8,9 +8,10 @@
 
 三套主题的键集合完全一致（tests/ui/themes 校验），组件只读键、不判断主题 id。
 当前主题读 ui.ui_theme，未设或写错回落 paper。
-彩色渲染开启时，导航、图标、标题、书名和统计共用 ui.theme_color；正文保持黑白。
+彩色渲染开启时，导航、图标、标题、书名和统计共用一个主题色（色板见
+ui/themes/palettes.lua）；正文保持黑白。没选过色板时用旧 theme_color。
 彩色令牌按主题缓存，不改原始灰度令牌。彩屏（Kindle Color / Kaleido）会把颜色
-冲淡，accent 在收口处经 Theme.vivid 补饱和后再派生，存量配置不迁移。
+冲淡，主题色在收口处经 Theme.vivid 补饱和后再派生，存量配置不迁移。
 
 ui/themes 自成一体：除 KOReader 自带模块与 utils.settings / l10n 外不依赖插件其他 UI 组件。
 缩放沿用设置 ui.ui_scale（百分比，100–180，缺省 130），与旧桌面同一个键。
@@ -87,21 +88,40 @@ function Theme.vivid(value)
     return boost(r) * 0x10000 + boost(g) * 0x100 + boost(b)
 end
 
---- 当前主题令牌表。
+--- 主按钮底色上的文字色：按相对亮度选黑或白（移植自 mooncolor 的 foreground）。
+---@param rgb number 0xRRGGBB
+---@return number 灰度 0x00 或 0xFF
+local function onColor(rgb)
+    local function lin(n)
+        n = n / 255
+        return n <= 0.04045 and n / 12.92 or ((n + 0.055) / 1.055) ^ 2.4
+    end
+    local lum = 0.2126 * lin(math.floor(rgb / 0x10000))
+        + 0.7152 * lin(math.floor(rgb / 0x100) % 0x100) + 0.0722 * lin(rgb % 0x100)
+    return (lum + 0.05) / 0.05 >= 1.05 / (lum + 0.05) and 0x00 or 0xFF
+end
+
+--- 当前主题令牌表。彩色时全场共用一个主题色（色板见 ui/themes/palettes.lua）：
+--- icons / headings / navigation / stat 是 accent 的别名令牌，消费者按语义取用，
+--- 值恒等于 accent——分角色着色实测看不出区别，不值一套管线，别再拆。
 ---@return table
 function Theme.current()
     local base = Theme.get(Theme.id())
     if not (Screen.isColorEnabled and Screen:isColorEnabled()) then return base end
-    local accent = Theme.vivid(MoonSettings.get("ui").theme_color or 0x0756AD)
-    if not colored[base.id] or colored[base.id].accent ~= accent then
+    local conf = MoonSettings.get("ui")
+    local signature = tostring(conf.theme_preset) .. ":" .. tostring(conf.theme_color)
+    if not colored[base.id] or colored[base.id].signature ~= signature then
+        local accent = Theme.vivid(require("ui.themes.palettes").color(conf.theme_preset, conf.theme_color))
         local t = {}
         for key, value in pairs(base) do t[key] = value end
         t.color = {}
         for key, value in pairs(base.color) do t.color[key] = value end
         t.color.accent = accent
+        t.color.icons, t.color.headings, t.color.navigation, t.color.stat =
+            accent, accent, accent, accent
         t.button = {
             normal = { bg = base.button.normal.bg, ink = accent, border_color = accent },
-            primary = { bg = accent, ink = 0xFF, border_color = accent },
+            primary = { bg = accent, ink = onColor(accent), border_color = accent },
             ghost = { ink = accent },
         }
         t.selected = {
@@ -117,7 +137,7 @@ function Theme.current()
         t.progress = {}
         for key, value in pairs(base.progress) do t.progress[key] = value end
         t.progress.fill, t.progress.border_color = accent, accent
-        colored[base.id] = { accent = accent, tokens = t }
+        colored[base.id] = { signature = signature, tokens = t }
     end
     return colored[base.id].tokens
 end

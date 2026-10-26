@@ -11,6 +11,10 @@ return {
         page = 0xFF,     -- 页面与面板底
         ink = 0x00,      -- 主文字、图标
         accent = 0x00,
+        icons = 0x00,
+        headings = 0x00,
+        navigation = 0x00,
+        stat = 0x00,
         muted = 0x44,    -- 次要文字
         faint = 0x88,    -- 未选中标签、提示
         disabled = 0xAA, -- 不可用

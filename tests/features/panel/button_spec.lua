@@ -62,7 +62,7 @@ package.preload["ui.themes"] = function()
                 },
                 card = { radius = 0, shadow = 3, shadow_color = 0 },
                 control = { border = 2, radius = 2, icon = 22 },
-                color = { ink = 0, accent = 0, disabled = 170 },
+                color = { ink = 0, accent = 0, icons = 0, disabled = 170 },
                 space = { xs = 4, sm = 8 },
                 font = { caption = 11 },
             }

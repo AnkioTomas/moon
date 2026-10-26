@@ -85,7 +85,7 @@ function Text.line(role, text, opts)
         face = opts.face or Text.face(role),
         bold = bold(opts, role),
         max_width = opts.width,
-        fgcolor = Theme.color(opts.color or (BOLD[role] and theme.color.accent or theme.color.ink)),
+        fgcolor = Theme.color(opts.color or (BOLD[role] and theme.color.headings or theme.color.ink)),
     })
 end
 
@@ -100,7 +100,7 @@ end
 function Text.box(role, text, width, opts)
     opts = opts or {}
     local theme = Theme.current()
-    local ink = Theme.color(opts.color or (BOLD[role] and theme.color.accent or theme.color.ink))
+    local ink = Theme.color(opts.color or (BOLD[role] and theme.color.headings or theme.color.ink))
     local bg = Theme.color(opts.bg or theme.color.page)
     local mask = opts.transparent or not Blitbuffer.isColor8(ink)
     local function build(height)
