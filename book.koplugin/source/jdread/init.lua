@@ -87,6 +87,9 @@ local RANK_PAGE = 20
 ---@return { cancel: fun() }
 function Source:browseAsync(opts, cb)
     local handle = {}
+    function handle.cancel()
+        if handle.inner then handle.inner.cancel() end
+    end
     local function show(menu)
         local tid, kid, period, cat = (opts.node or ""):match("^(%d+):(%d+):(%a+):(%d*)$")
         local function pick(rows, key, want)
@@ -150,9 +153,6 @@ function Source:browseAsync(opts, cb)
             show(self._rank_menu)
         end)
     end)
-    function handle.cancel()
-        if handle.inner then handle.inner.cancel() end
-    end
     return handle
 end
 
