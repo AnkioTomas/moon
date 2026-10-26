@@ -1,10 +1,26 @@
---[[-- 桌面设置项。
+--[[-- 桌面设置项（启动与按键、分页与弹窗）。
 @module koplugin.book.desktop.pages.setting.desktop
 --]]
 
+local List = require("ui.themes.widgets.list")
 local Row = require("ui.themes.widgets.row")
 local Settings = require("utils.settings")
 local _ = require("gettext")
+
+local SWIPE_DISMISS_PRESETS = {
+    { value = "down", text = _("下滑") },
+    { value = "up", text = _("上滑") },
+    { value = "off", text = _("关闭") },
+}
+
+---@param mode string|nil
+---@return string
+local function swipeDismissLabel(mode)
+    for _idx, item in ipairs(SWIPE_DISMISS_PRESETS) do
+        if item.value == mode then return item.text end
+    end
+    return SWIPE_DISMISS_PRESETS[1].text
+end
 
 ---@class BookSettingsDesktop
 local DesktopSettings = {}
@@ -99,6 +115,27 @@ function DesktopSettings:inputRows(desktop)
                 end,
             })
         end
+    end
+    rows[#rows + 1] = function(iw)
+        local conf = Settings.get("ui")
+        return Row.widget({
+            width = iw,
+            kind = "nav", icon = "swipe", title = _("弹窗关闭手势"),
+            subtitle = _("上滑或下滑关闭弹出的面板和菜单"),
+            status = swipeDismissLabel(conf.swipe_dismiss), status_on = true,
+            callback = function()
+                List:new{
+                    title = _("弹窗关闭手势"),
+                    items = SWIPE_DISMISS_PRESETS,
+                    current = conf.swipe_dismiss,
+                    centered = true,
+                    on_select = function(value)
+                        conf.swipe_dismiss = value
+                        Settings.save("ui", conf)
+                    end,
+                }:show()
+            end,
+        })
     end
     return rows
 end
