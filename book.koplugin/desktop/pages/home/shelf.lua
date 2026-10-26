@@ -55,6 +55,18 @@ function M.cols()
     return math.max(MIN_COLS, math.min(MAX_COLS, n))
 end
 
+--- 封面下是否显示书名；独立开关，不跟图书馆的 library_title。
+---@return boolean
+function M.showTitle()
+    return home().home_shelf_show_title ~= false
+end
+
+--- 封面下是否显示作者；独立开关，不跟图书馆的 library_author。
+---@return boolean
+function M.showAuthor()
+    return home().home_shelf_show_author == true
+end
+
 --- 编辑态设置：单行 / 多行（2–4 行或自动），每行本数。
 ---@param desktop BookDesktop
 function M:showSettings(desktop)
@@ -71,6 +83,14 @@ function M:showSettings(desktop)
         title = M.label, centered = true,
         items = {
             opt(1, _("一行")), opt(2, _("两行")), opt(3, _("三行")), opt(4, _("四行")), opt(0, _("自动")),
+            { text = _("显示标题"), checked = M.showTitle(), callback = function()
+                save("home_shelf_show_title", not M.showTitle())
+                desktop:onEvent("home_refresh")
+            end },
+            { text = _("显示作者"), checked = M.showAuthor(), callback = function()
+                save("home_shelf_show_author", not M.showAuthor())
+                desktop:onEvent("home_refresh")
+            end },
             { text = T(_("每行 %1 本"), M.cols()), chevron = true, callback = function()
                 require("ui.themes.widgets.spin"):new{
                     title = _("每行数量"),
@@ -91,7 +111,7 @@ end
 local function metrics(width)
     local cols = M.cols()
     local lib = CoverCell.libraryConf()
-    local extra = Book.captionExtra(true, lib.author, lib.kobo)
+    local extra = Book.captionExtra(M.showTitle(), M.showAuthor(), lib.kobo)
     local max_h = CoverCell.gridCoverMaxH()
     local slot_w, cw, ch, _cols, gap, row_gap, cell_h = CoverCell.denseCoverMetrics(math.max(1, width), 0, {
         title_extra = extra, max_h = max_h, min_cols = cols, max_cols = cols,
@@ -155,7 +175,7 @@ function M:createWidget()
                 local book = books[(r - 1) * cols + c]
                 if not book then break end
                 if c > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
-                row[#row + 1] = (CoverCell.build(ctx, book, slot_w, cw, ch, on_open, true, true, lib.author, lib))
+                row[#row + 1] = (CoverCell.build(ctx, book, slot_w, cw, ch, on_open, true, M.showTitle(), M.showAuthor(), lib))
             end
             body[#body + 1] = row
         end

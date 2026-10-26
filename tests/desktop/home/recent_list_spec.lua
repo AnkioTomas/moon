@@ -13,20 +13,23 @@ local Widget = require("ui/widget/widget")
 Kit.sections.home = {}
 local covers, opened = {}, {}
 package.preload["ui.widgets.book"] = function()
-    return { captionExtra = function(show_title) return show_title ~= false and 26 or 0 end }
+    return { captionExtra = function(show_title, show_author)
+        return (show_title ~= false and 26 or 0) + (show_author and 14 or 0)
+    end }
 end
 package.preload["ui.widgets.cover"] = function()
     return {
         gridCoverMaxH = function() return 200 end,
         stretchW = function(_, cw) return cw end,
-        libraryConf = function() return { kobo = false } end,
+        -- 图书馆开了作者也不该影响最近阅读列表，桩里故意给 true 验证解耦。
+        libraryConf = function() return { kobo = false, author = true } end,
         denseCoverMetrics = function(_, _, opts)
             return 100, 100, 150, opts.min_cols, 8, 10, 150 + opts.title_extra
         end,
         opener = function(owner) return function(book) opened[#opened + 1] = { owner = owner, book = book } end end,
-        build = function(_, book, slot_w, cw, ch, on_open, show_status, show_title)
-            local cell = Widget:new{ dimen = { w = slot_w, h = ch + (show_title and 26 or 0) } }
-            covers[#covers + 1] = { book = book, w = cw, h = ch, cell = cell, more = show_status, on_open = on_open }
+        build = function(_, book, slot_w, cw, ch, on_open, show_status, show_title, show_author)
+            local cell = Widget:new{ dimen = { w = slot_w, h = ch + (show_title and 26 or 0) + (show_author and 14 or 0) } }
+            covers[#covers + 1] = { book = book, w = cw, h = ch, cell = cell, more = show_status, author = show_author, on_open = on_open }
             function cell:onHomePause() self.paused = true end
             return cell
         end,
@@ -48,6 +51,11 @@ Assert.is_true(List.showTitle())
 List.saveShowTitle(false)
 Assert.is_false(List.showTitle())
 List.saveShowTitle(true)
+Assert.is_false(List.showAuthor(), "作者缺省关，不跟图书馆设置")
+List.saveShowAuthor(true)
+Assert.is_true(List.showAuthor())
+List.saveShowAuthor(false)
+Assert.is_false(List.showAuthor())
 List.saveCols(2)
 Assert.eq(List.cols(), 3)
 List.saveCols(9)
@@ -65,6 +73,9 @@ Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + 176)
 List.saveShowTitle(false)
 Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + 150)
 List.saveShowTitle(true)
+List.saveShowAuthor(true)
+Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + 190, "显示作者多一行高度")
+List.saveShowAuthor(false)
 for i = 1, 5 do shelf[i] = { title = "book" .. i } end
 Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + PAGER + 176, "一行四列五本两页：留分页条")
 List.saveRows(2)
@@ -82,6 +93,7 @@ do -- 一页装下：五本、不画分页条；开书状态挂在组件实例�
     Assert.is_false(list.paged)
     Assert.len(covers, 5)
     Assert.eq(covers[1].w, 100)
+    Assert.is_false(covers[1].author, "图书馆开作者时最近阅读仍按自己开关（缺省关）")
     Assert.is_true(covers[1].more)
     Assert.eq(Kit.texts(slot)[1], "最近阅读 · 5")
     covers[1].on_open(shelf[1])
@@ -141,7 +153,7 @@ do -- 空书架：居中提示，不画网格
     shelf = saved
 end
 
-do -- 设置 Sheet：行数按钮行、列数 Spin、标题开关，改完通知首页刷新
+do -- 设置 Sheet：行数按钮行、列数 Spin、标题 / 作者开关，改完通知首页刷新
     List.saveRows(2)
     List.saveCols(4)
     List:showSettings(desktop)
@@ -151,6 +163,7 @@ do -- 设置 Sheet：行数按钮行、列数 Spin、标题开关，改完通知
     Assert.eq(sheet.items[1].buttons[2].text, "✓ 两行")
     Assert.eq(sheet.items[2].text, "每行 4 本")
     Assert.eq(sheet.items[3].text, "✓ 显示标题")
+    Assert.eq(sheet.items[4].text, "显示作者")
     sheet.items[1].buttons[2].callback()
     Assert.len(events, 0, "选中当前值不刷新")
     sheet.items[1].buttons[1].callback()
@@ -158,6 +171,8 @@ do -- 设置 Sheet：行数按钮行、列数 Spin、标题开关，改完通知
     Assert.eq(events[1], "home_refresh")
     sheet.items[3].callback()
     Assert.is_false(List.showTitle())
+    sheet.items[4].callback()
+    Assert.is_true(List.showAuthor())
     sheet.items[2].callback()
     local spin = Themed.last("spin")
     Assert.eq(spin.title, "每行数量")
@@ -166,12 +181,13 @@ do -- 设置 Sheet：行数按钮行、列数 Spin、标题开关，改完通知
     Assert.eq(spin.fields[1].max, 8)
     spin.callback(5)
     Assert.eq(List.cols(), 5)
-    Assert.len(events, 3)
-    List.saveShowTitle(true)
-    Assert.eq(sheet.items[4].text, "显示第一本", "缺省不显示第一本")
-    sheet.items[4].callback()
-    Assert.is_true(List.showFirst())
     Assert.len(events, 4)
+    List.saveShowTitle(true)
+    List.saveShowAuthor(false)
+    Assert.eq(sheet.items[5].text, "显示第一本", "缺省不显示第一本")
+    sheet.items[5].callback()
+    Assert.is_true(List.showFirst())
+    Assert.len(events, 5)
     List.saveShowFirst(false)
 end
 

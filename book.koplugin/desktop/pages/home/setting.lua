@@ -11,6 +11,7 @@ return {
         home_recent_list_rows = 2,
         home_recent_list_cols = 4,
         home_recent_list_show_title = true,
+        home_recent_list_show_author = false,
         -- 第一本 = 最近读的那本；列表默认留给「当前阅读」大卡片，堆叠卡片默认放中间。
         home_recent_list_show_first = false,
         home_recent_cards_show_first = true,
@@ -22,6 +23,8 @@ return {
         -- 书架：行数 1–4，0 = 自动按分配高度；每行 3–8 本。
         home_shelf_rows = 1,
         home_shelf_cols = 4,
+        home_shelf_show_title = true,
+        home_shelf_show_author = false,
     },
     -- home_widgets 为 nil = 用默认布局，见 registry.lua。
     keys = { "home_widgets" },

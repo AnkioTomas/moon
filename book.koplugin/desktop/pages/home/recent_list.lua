@@ -81,6 +81,20 @@ function M.saveShowTitle(on)
     MoonSettings.save("desktop.pages.home", home)
 end
 
+--- 读取封面下是否显示作者；独立开关，不跟图书馆的 library_author。
+---@return boolean
+function M.showAuthor()
+    return MoonSettings.get("desktop.pages.home").home_recent_list_show_author == true
+end
+
+--- 规范化并保存封面下是否显示作者。
+---@param on boolean|nil
+function M.saveShowAuthor(on)
+    local home = MoonSettings.get("desktop.pages.home")
+    home.home_recent_list_show_author = on == true
+    MoonSettings.save("desktop.pages.home", home)
+end
+
 --- 是否把第一本（最近读的那本）也排进列表；缺省不排，留给「当前阅读」大卡片。
 ---@return boolean
 function M.showFirst()
@@ -140,6 +154,10 @@ function M:showSettings(desktop)
                 M.saveShowTitle(not M.showTitle())
                 refresh()
             end },
+            { text = M.showAuthor() and _("✓ 显示作者") or _("显示作者"), callback = function()
+                M.saveShowAuthor(not M.showAuthor())
+                refresh()
+            end },
             { text = M.showFirst() and _("✓ 显示第一本") or _("显示第一本"), callback = function()
                 M.saveShowFirst(not M.showFirst())
                 refresh()
@@ -163,7 +181,7 @@ end
 local function gridMetrics(width, area_h)
     local cols = M.cols()
     local lib = CoverCell.libraryConf()
-    local extra = Book.captionExtra(M.showTitle(), lib.author, lib.kobo)
+    local extra = Book.captionExtra(M.showTitle(), M.showAuthor(), lib.kobo)
     -- 单行时宽度决定封面尺寸；用剩余高度压缩会留下无意义的横向空隙。
     -- 多行才需要受区域高度约束，避免整组网格溢出。
     local max_h = M.rows() == 1 and math.huge or CoverCell.gridCoverMaxH(area_h)
@@ -266,7 +284,7 @@ local function buildGrid(ctx, books, width, grid_h, page, on_open)
         if col > 0 then
             table.insert(row, HorizontalSpan:new{ width = gap })
         end
-        table.insert(row, (CoverCell.build(ctx, books[i], slot_w, cw, ch, on_open, true, M.showTitle(), lib.author, lib)))
+        table.insert(row, (CoverCell.build(ctx, books[i], slot_w, cw, ch, on_open, true, M.showTitle(), M.showAuthor(), lib)))
         col = col + 1
         if col == cols then flushRow() end
     end

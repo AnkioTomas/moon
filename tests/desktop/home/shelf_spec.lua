@@ -12,20 +12,27 @@ local Container = require("ui/widget/container/widgetcontainer")
 local Geom = require("ui/geometry")
 
 local built = 0
+local captions = {}
 package.preload["ui.widgets.cover"] = function()
     return {
         gridCoverMaxH = function() return 90 end,
         stretchW = function(_, cw) return cw end,
-        libraryConf = function() return { kobo = false } end,
+        -- 图书馆开了作者也不该影响书架组件，桩里故意给 true 验证解耦。
+        libraryConf = function() return { kobo = false, author = true, title = false } end,
         denseCoverMetrics = function() return 100, 60, 90, 4, 10, 10, 110 end,
         opener = function(_, _, open) return function(book) open(nil, book) end end,
-        build = function(_, book, w, _, _, on_open)
+        build = function(_, book, w, _, _, on_open, _show_status, show_title, show_author)
             built = built + 1
+            captions[#captions + 1] = { title = show_title, author = show_author }
             local cell = Container:new{ dimen = Geom:new{ w = w, h = 110 } }
             cell.book, cell.on_open = book, on_open
             return cell, 110
         end,
     }
+end
+local list_opts
+package.preload["ui.themes.widgets.list"] = function()
+    return { new = function(_self, opts) list_opts = opts return { show = function() end } end }
 end
 package.preload["ui.widgets.book"] = function() return { captionExtra = function() return 20 end } end
 local asked, total = nil, 9
@@ -60,6 +67,27 @@ local slot = Shelf:new():build(ctx, { width = 600, height = 400 })
 Assert.eq(asked.limit, 4)
 Assert.eq(asked.sort, "title")
 Assert.eq(built, 4)
+Assert.is_true(captions[1].title, "书名缺省显示，不跟图书馆 library_title")
+Assert.is_false(captions[1].author, "作者缺省关，不跟图书馆 library_author")
+
+-- 书名 / 作者独立开关：改完只影响书架组件自身。
+home.home_shelf_show_title, home.home_shelf_show_author = false, true
+captions = {}
+Shelf:new():build(ctx, { width = 600, height = 400 })
+Assert.is_false(captions[1].title)
+Assert.is_true(captions[1].author)
+local shelf_events = {}
+Shelf:showSettings({ onEvent = function(_, e) shelf_events[#shelf_events + 1] = e end })
+Assert.eq(list_opts.items[6].text, "显示标题")
+Assert.is_false(list_opts.items[6].checked)
+Assert.eq(list_opts.items[7].text, "显示作者")
+Assert.is_true(list_opts.items[7].checked)
+list_opts.items[6].callback()
+Assert.is_true(Shelf.showTitle())
+Assert.eq(shelf_events[1], "home_refresh")
+list_opts.items[7].callback()
+Assert.is_false(Shelf.showAuthor())
+home.home_shelf_show_title, home.home_shelf_show_author = true, false
 
 -- 两行：高度多一行；分配高度只够一行时也只取一行。
 home.home_shelf_rows = 2
