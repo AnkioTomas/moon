@@ -25,19 +25,26 @@ local ACTION = {
     ---@param _ctx BookQuickPanelContext|nil
     run = function(_ctx)
         local Remote = require("features.remote")
-        local UIManager = require("ui/uimanager")
         local T = require("ffi/util").template
         if Remote.isRunning() then
             Remote.stop()
             require("ui.themes.widgets.toast"):new{ text = _("远程管理已关闭"), timeout = 2 }:show()
             return
         end
-        local ok, err = Remote.start()
-        if not ok then
-            require("ui.themes.widgets.toast"):new{ text = T(_("启动失败：%1"), tostring(err)), timeout = 3 }:show()
-            return
+        local function start()
+            local ok, err = Remote.start()
+            if not ok then
+                require("ui.themes.widgets.toast"):new{ text = T(_("启动失败：%1"), tostring(err)), timeout = 3 }:show()
+                return
+            end
+            require("ui.themes.widgets.toast"):new{ text = T(_("服务已启动：%1"), Remote.status()), timeout = 4 }:show()
         end
-        require("ui.themes.widgets.toast"):new{ text = T(_("服务已启动：%1"), Remote.status()), timeout = 4 }:show()
+        local NetworkMgr = require("ui/network/manager")
+        if NetworkMgr:isConnected() then
+            start()
+        else
+            NetworkMgr:toggleWifiOn(start, nil, true)
+        end
     end,
 }
 

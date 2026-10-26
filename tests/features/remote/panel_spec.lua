@@ -17,6 +17,20 @@ end
 local running = false
 local started, stopped = 0, 0
 local start_err = nil
+local connected = true
+local wifi_starts = 0
+local wifi_callback
+package.preload["ui/network/manager"] = function()
+    return {
+        isConnected = function() return connected end,
+        toggleWifiOn = function(_self, cb, long_press, interactive)
+            Assert.is_nil(long_press)
+            Assert.is_true(interactive)
+            wifi_starts = wifi_starts + 1
+            wifi_callback = cb
+        end,
+    }
+end
 package.preload["features.remote"] = function()
     return {
         isRunning = function() return running end,
@@ -70,3 +84,52 @@ start_err = "port in use"
 Action.run({})
 Assert.is_false(Action.active())
 Assert.eq(shown[3], "启动失败：port in use")
+Assert.eq(wifi_starts, 0, "局域网已连时不重开 Wi-Fi、不检测外网")
+
+-- 离线：先开 Wi-Fi，连接回调之前不能声称服务已启动。
+start_err = nil
+connected = false
+Action.run({})
+Assert.eq(wifi_starts, 1)
+Assert.eq(started, 1)
+Assert.is_false(Action.active())
+Assert.len(shown, 3, "未连上或取消选网时不弹成功")
+connected = true
+wifi_callback()
+Assert.eq(started, 2)
+Assert.is_true(Action.active())
+Assert.eq(shown[4], "服务已启动：http://192.168.1.2:9528")
+
+-- 关闭服务不顺带关闭或重开 Wi-Fi。
+Action.run({})
+Assert.eq(stopped, 2)
+Assert.eq(wifi_starts, 1)
+
+-- 设置页采用相同的主动联网行为，而不是受全局联网策略控制。
+local redraws = 0
+package.loaded["ui.themes.widgets.row"] = { widget = function(opts) return opts end }
+local Remote = require("features.remote")
+Remote.port = function() return 9528 end
+Remote.autostartOn = function() return false end
+Remote.idleStopOn = function() return true end
+Remote.deleteAfterShareOn = function() return false end
+local page = require("features.remote.setting").entries({
+    updateView = function() redraws = redraws + 1 end,
+})[1].page
+local service_row = page.sections()[1].rows[1]
+connected = false
+service_row(600).callback()
+Assert.eq(wifi_starts, 2)
+Assert.is_false(running)
+Assert.eq(started, 2)
+connected = true
+wifi_callback()
+Assert.is_true(running)
+Assert.eq(started, 3)
+Assert.eq(redraws, 2)
+service_row(600).callback()
+Assert.is_false(running)
+Assert.eq(wifi_starts, 2)
+service_row(600).callback()
+Assert.is_true(running, "设置页已联网直接启动")
+Assert.eq(wifi_starts, 2)
