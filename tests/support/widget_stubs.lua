@@ -10,7 +10,7 @@ ui/themes 组件测试用的最小 KOReader 控件桩。
   - UIManager：记录 show / close / setDirty（含 region）/ scheduleIn / unschedule；close 触发 onCloseWidget；nextTick 同步执行
   - 设置：拥有者 ui 即 Kit.display，其余按文件名（拥有者路径末段）读 Kit.sections[name]（spec 自己塞），save 回写
   - 事件：ui/event 给 { handler, args }，控件 handleEvent 先逐子件下发再问自身 handler（同 KOReader）
-  - 画布：Kit.canvas() 记录 paintRoundedRect / paintBorder 调用，setPixel 计数
+  - 画布：Kit.canvas() 记录 paintRoundedRect / paintBorder / colorblitFrom(RGB32) 调用，setPixel 计数
   - 字体：ui/font 的 getFace 返回 { name, size }，主题图标 / 遮罩走真实实现
 
   local Kit = require("support.widget_stubs")
@@ -269,8 +269,13 @@ function Kit.canvas()
         paintBorderRGB32 = function(_, x, y, w, h, bw, c, r)
             ops[#ops + 1] = { op = "border", x = x, y = y, w = w, h = h, bw = bw, c = c, r = r, rgb = true }
         end,
+        getWidth = function() return Kit.SCREEN_W end,
+        getHeight = function() return Kit.SCREEN_H end,
         colorblitFrom = function(_, _source, x, y, _ox, _oy, w, h)
             ops[#ops + 1] = { op = "colorblit", x = x, y = y, w = w, h = h }
+        end,
+        colorblitFromRGB32 = function(_, _source, x, y, _ox, _oy, w, h)
+            ops[#ops + 1] = { op = "colorblitRGB", x = x, y = y, w = w, h = h }
         end,
         lightenRect = function(_, x, y, w, h)
             ops[#ops + 1] = { op = "lighten", x = x, y = y, w = w, h = h }
