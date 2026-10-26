@@ -18,7 +18,7 @@
     invert_in_night = false,  -- 单色字形图随夜间模式反色；默认保持原色
     fallback = widget,        -- 下载中/失败/无图时居中显示的控件（本地文件解码前留白）；省略则空白占位
     on_ready = function(path) end,  -- 可选：下载并替换完成后
-    stretch = true,           -- 拉伸铺满目标框（不保比例）；缺省按比例缩进
+    stretch = true,           -- 按比例缩进目标框（scale_factor=0）；缺省拉满框（不保比例）
   }
 
 UI 图标请用 ui.themes.widgets.icon（Material Icons 字体），不要走本组件。
@@ -304,7 +304,7 @@ end
 ---@param on_ready fun(path: string|nil)|nil
 ---@param fallback_src string|nil 远程下载失败时使用的本地图片
 ---@param invert_in_night boolean|nil 夜间模式下是否随屏幕反色
----@param stretch boolean|nil 拉伸铺满目标框（不保比例），缺省按比例缩进
+---@param stretch boolean|nil 按比例缩进目标框；缺省拉满框（不保比例）
 ---@return table
 local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, invert_in_night, stretch)
     -- 本地文件解码前留白：冷启动整屏封面排队解码，先画占位再换图会像整架重新加载。
@@ -414,18 +414,25 @@ local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, i
     end
 
     --- 解这一张。getSize 会触发 ImageWidget:_render。
-    --- 大图位图归本模块缓存，ImageWidget 不得 free。
+    --- 拉满框的大图位图归本模块缓存，ImageWidget 不得 free；保比例时不走该缓存
+    --- （缓存是按目标框拉满解的，比例已破坏）。
     ---@param path string 图片或书籍的本地文件路径
     function box:_applyFile(path)
         local widget
         local ok, err = pcall(function()
             local w, h = self._inner_w, self._inner_h
-            local image = self._big and bitmap(path, w, h)
-                or replaced[path] and assert(require("ui/renderimage"):renderImageFile(path, false, w, h))
+            -- _stretch：按比例缩进（ImageWidget scale_factor=0）。位图缓存 / 替换路径的
+            -- renderImageFile(w,h) 会拉满框，保比例时必须绕开，交给 ImageWidget 自己缩。
+            local image
+            if not self._stretch then
+                image = self._big and bitmap(path, w, h)
+                    or replaced[path] and assert(require("ui/renderimage"):renderImageFile(path, false, w, h))
+            end
+            local cached = image ~= nil and self._big
             widget = ImageWidget:new{
                 file = not image and path or nil,
                 image = image or nil,
-                image_disposable = not self._big,
+                image_disposable = not cached,
                 width = self._inner_w,
                 height = self._inner_h,
                 alpha = self._alpha and true or false,
