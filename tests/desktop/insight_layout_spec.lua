@@ -57,4 +57,30 @@ Assert.is_false(Layout.togglePage("day"))
 Assert.eq(#Layout.pages(), 1)
 cfg.hidden_pages = {}
 
+-- 统计页总开关只控制桌面入口，不改各页和卡片的显隐配置。
+Kit.sections.desktop = {}
+package.preload["ui.themes.widgets.row"] = function()
+    return { widget = function(opts) return opts end }
+end
+package.loaded["ui.themes.widgets.row"] = nil
+local InsightSettings = require("desktop.pages.setting.insight")
+local updates = 0
+local desktop = { updateView = function() updates = updates + 1 end }
+local hidden_pages, hidden_cards = cfg.hidden_pages, cfg.hidden_cards
+local function toggleRow()
+    return InsightSettings:sections(desktop)[1].rows[1](600)
+end
+Assert.is_true(toggleRow().toggle, "旧配置默认显示统计入口")
+local saved = Kit.saved or 0
+toggleRow().callback()
+Assert.eq(Kit.sections.desktop.insight_enabled, false)
+Assert.is_false(toggleRow().toggle)
+Assert.eq(Kit.saved, saved + 1, "开关持久化")
+Assert.eq(updates, 1, "切换后立即刷新桌面")
+toggleRow().callback()
+Assert.is_true(toggleRow().toggle)
+Assert.eq(updates, 2)
+Assert.eq(cfg.hidden_pages, hidden_pages)
+Assert.eq(cfg.hidden_cards, hidden_cards)
+
 return true

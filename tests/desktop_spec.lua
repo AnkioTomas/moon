@@ -196,6 +196,26 @@ do -- 拓展格：开关打开才出现；点它在格子上弹层，不切页
     drain()
 end
 
+do -- 统计入口可隐藏；当前统计页回首页，扩展仍可用，重新开启恢复入口。
+    desk:switchTab("insight")
+    Kit.sections.desktop.insight_enabled = false
+    Kit.sections.extensions.enabled = true
+    desk:updateView()
+    Assert.eq(ids(), "home,library,extensions,settings")
+    Assert.eq(desk.tab, "home")
+    Assert.eq(desk.layers[1].page, "home")
+    desk:switchTab("insight")
+    Assert.eq(desk.tab, "home", "隐藏后不能通过切页重新显示")
+    Kit.sections.desktop.insight_enabled = true
+    Kit.sections.extensions.enabled = nil
+    desk:updateView()
+    Assert.eq(ids(), "home,library,insight,settings")
+    desk:switchTab("insight")
+    Assert.eq(desk.layers[1].page, "insight")
+    desk:switchTab("home")
+    drain()
+end
+
 do -- 订阅格：总开关打开才出现在图书馆旁；关掉时在订阅页会退回首页
     package.loaded["features.subscribe.page"] = page("subscribe")
     Kit.sections.subscribe.enabled = true
