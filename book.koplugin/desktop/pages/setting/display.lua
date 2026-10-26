@@ -1,4 +1,4 @@
---[[-- 外观（风格 / 字体 / 缩放 / 遮罩）与屏幕（刷新 / 彩屏）设置项。
+--[[-- 外观（风格 / 字体 / 缩放 / 遮罩 / 彩色）与屏幕刷新设置项。
 @module koplugin.book.desktop.pages.setting.display
 --]]
 
@@ -102,7 +102,7 @@ local function colorRow(desktop)
             or G_reader_settings:isTrue("color_rendering")
         return Row.widget({
             width = iw,
-            icon = "palette", title = _("彩色屏幕支持"),
+            icon = "palette", title = _("彩色显示"),
             subtitle = _("在彩屏上启用彩色渲染"),
             toggle = color_on,
             callback = function()
@@ -124,7 +124,7 @@ end
 function Display:appearanceRows(ctx)
     local desktop = ctx.desktop
     local font_name, scale = ctx.font_name, ctx.scale
-    return {
+    local rows = {
         function(iw)
             local id = Theme.id()
             return Row.widget({
@@ -247,7 +247,11 @@ function Display:appearanceRows(ctx)
                 end,
             })
         end,
-        function(iw)
+    }
+    local color = colorRow(desktop)
+    if color then rows[#rows + 1] = color end
+    if Device.screen.isColorEnabled and Device.screen:isColorEnabled() then
+        rows[#rows + 1] = function(iw)
             local conf = MoonSettings.get("ui")
             local value = conf.theme_color or COLOR_PRESETS[1].value
             local label = string.format("#%06X", value)
@@ -271,11 +275,12 @@ function Display:appearanceRows(ctx)
                     }:show()
                 end,
             })
-        end,
-    }
+        end
+    end
+    return rows
 end
 
---- 墨水屏刷新与彩屏条件行；夜间与亮度在 nightmode feature。
+--- 墨水屏刷新条件行；夜间与亮度在 nightmode feature。
 ---@param ctx table
 ---@return table
 function Display:screenRows(ctx)
@@ -283,8 +288,6 @@ function Display:screenRows(ctx)
     local desktop = ctx.desktop
     local refresh = refreshRow(desktop)
     if refresh then rows[#rows + 1] = refresh end
-    local color = colorRow(desktop)
-    if color then rows[#rows + 1] = color end
     return rows
 end
 
