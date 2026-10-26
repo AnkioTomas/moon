@@ -33,6 +33,14 @@ function BlitBuffer:paintRoundedRect(x, y, w, h, color, radius) end
 
 ---@param x number
 ---@param y number
+---@param w number
+---@param h number
+---@param color any
+---@param radius number|nil
+function BlitBuffer:paintRoundedRectRGB32(x, y, w, h, color, radius) end
+
+---@param x number
+---@param y number
 ---@param radius number
 ---@param color any
 ---@param setter any|nil
@@ -102,6 +110,16 @@ function BlitBuffer:writePNG(path, color) end
 ---@param anti_alias boolean|nil 圆角抗锯齿（只在 C 实现、Color8 下生效）
 function BlitBuffer:paintBorder(x, y, w, h, border, color, radius, anti_alias) end
 
+---@param x number
+---@param y number
+---@param w number
+---@param h number
+---@param border number
+---@param color any
+---@param radius number|nil
+---@param anti_alias boolean|nil
+function BlitBuffer:paintBorderRGB32(x, y, w, h, border, color, radius, anti_alias) end
+
 ---@param src BlitBuffer
 ---@param dest_x number
 ---@param dest_y number
@@ -111,6 +129,16 @@ function BlitBuffer:paintBorder(x, y, w, h, border, color, radius, anti_alias) e
 ---@param h number
 ---@param color any
 function BlitBuffer:colorblitFrom(src, dest_x, dest_y, offs_x, offs_y, w, h, color) end
+
+---@param src BlitBuffer
+---@param dest_x number
+---@param dest_y number
+---@param offs_x number
+---@param offs_y number
+---@param w number
+---@param h number
+---@param color any
+function BlitBuffer:colorblitFromRGB32(src, dest_x, dest_y, offs_x, offs_y, w, h, color) end
 
 --- ffi.new("moon_z_stream")，番茄正文 inflate。
 ---@class MoonZStream

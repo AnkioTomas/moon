@@ -10,6 +10,8 @@ return {
         ui_font = "",
         ui_font_name = "",
         font_bold = false,
+        tabbar_labels = true,
+        theme_color = 0x0756AD,
         grid_max_cols = 4,
         mesh_mask = true,
         swipe_dismiss = "down",

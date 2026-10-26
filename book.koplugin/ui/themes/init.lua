@@ -2,12 +2,14 @@
 界面主题：纸本 paper / 高对比 bold / 柔和 soft 三套令牌，组件在 ui/themes/widgets。
 
 令牌是纯数据，不依赖 KOReader：
-  颜色  8 位灰度（0x00 黑 … 0xFF 白），组件里经 Blitbuffer.Color8 变成颜色
+  颜色  8 位灰度（0x00 黑 … 0xFF 白）或 0xRRGGBB，组件经 Theme.color 变成颜色
   尺寸  逻辑像素，组件里经 Theme.px（DPI × ui_scale）
   字号  逻辑字号，组件里经 Theme.face（Font:getFace 自带 DPI，这里只乘 ui_scale）
 
 三套主题的键集合完全一致（tests/ui/themes 校验），组件只读键、不判断主题 id。
 当前主题读 ui.ui_theme，未设或写错回落 paper。
+彩色渲染开启时，导航、图标、标题、书名和统计共用 ui.theme_color；正文保持黑白。
+彩色令牌按主题缓存，不改原始灰度令牌。
 
 ui/themes 自成一体：除 KOReader 自带模块与 utils.settings / l10n 外不依赖插件其他 UI 组件。
 缩放沿用设置 ui.ui_scale（百分比，100–180，缺省 130），与旧桌面同一个键。
@@ -24,6 +26,7 @@ progress_dialog 点按不关窗，转后台只是关窗；后台任务的前台�
 --]]
 
 local Device = require("device")
+local Blitbuffer = require("ffi/blitbuffer")
 local Font = require("ui/font")
 local MoonSettings = require("utils.settings")
 local Screen = Device.screen
@@ -37,6 +40,7 @@ Theme.ids = { "paper", "bold", "soft" }
 local DEFAULT = "paper"
 Theme.SCALE_MIN, Theme.SCALE_MAX, Theme.SCALE_STEP = 100, 180, 10
 local known = {}
+local colored = {}
 for _idx, id in ipairs(Theme.ids) do known[id] = true end
 
 --- 取指定主题的令牌表。
@@ -68,7 +72,62 @@ end
 --- 当前主题令牌表。
 ---@return table
 function Theme.current()
-    return Theme.get(Theme.id())
+    local base = Theme.get(Theme.id())
+    if not (Screen.isColorEnabled and Screen:isColorEnabled()) then return base end
+    local accent = MoonSettings.get("ui").theme_color or 0x0756AD
+    if not colored[base.id] or colored[base.id].accent ~= accent then
+        local t = {}
+        for key, value in pairs(base) do t[key] = value end
+        t.color = {}
+        for key, value in pairs(base.color) do t.color[key] = value end
+        t.color.accent = accent
+        t.button = {
+            normal = { bg = base.button.normal.bg, ink = accent, border_color = accent },
+            primary = { bg = accent, ink = 0xFF, border_color = accent },
+            ghost = { ink = accent },
+        }
+        t.selected = {
+            bg = base.selected.bg == base.color.ink and accent or base.selected.bg,
+            ink = base.selected.ink == base.color.ink and accent or base.selected.ink,
+            mark = base.selected.mark,
+        }
+        for _idx, name in ipairs({ "card", "raised", "dialog" }) do
+            t[name] = {}
+            for key, value in pairs(base[name]) do t[name][key] = value end
+            t[name].border_color = accent
+        end
+        t.progress = {}
+        for key, value in pairs(base.progress) do t.progress[key] = value end
+        t.progress.fill, t.progress.border_color = accent, accent
+        colored[base.id] = { accent = accent, tokens = t }
+    end
+    return colored[base.id].tokens
+end
+
+--- 颜色之间插值；不能直接对打包后的 RGB 整数做算术。
+---@param from number
+---@param to number
+---@param fraction number
+---@return number
+function Theme.mix(from, to, fraction)
+    if fraction == 0 then return from end
+    if fraction == 1 then return to end
+    local function mix(a, b) return math.floor(a + (b - a) * fraction + 0.5) end
+    if from <= 0xFF and to <= 0xFF then return mix(from, to) end
+    local function channel(value, divisor)
+        return value <= 0xFF and value or math.floor(value / divisor) % 0x100
+    end
+    return mix(channel(from, 0x10000), channel(to, 0x10000)) * 0x10000
+        + mix(channel(from, 0x100), channel(to, 0x100)) * 0x100
+        + mix(channel(from, 1), channel(to, 1))
+end
+
+--- 灰度 / RGB 令牌转绘图颜色；灰度主题保留原来的 Color8 路径。
+---@param value number
+---@return ffi.cdata*
+function Theme.color(value)
+    if value <= 0xFF then return Blitbuffer.Color8(value) end
+    return Blitbuffer.ColorRGB32(math.floor(value / 0x10000), math.floor(value / 0x100) % 0x100, value % 0x100, 0xFF)
 end
 
 --- 当前 UI 缩放百分比（夹到 100–180）。

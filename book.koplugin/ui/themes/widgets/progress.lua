@@ -9,7 +9,6 @@
 @module koplugin.book.ui.themes.widgets.progress
 --]]
 
-local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
 local Widget = require("ui/widget/widget")
 local Theme = require("ui.themes")
@@ -50,14 +49,16 @@ function Progress:paintTo(bb, x, y)
     local w, h = self.dimen.w, self.dimen.h
     local r = math.min(Theme.px(s.radius), math.floor(h / 2))
     local border = Theme.px(s.border)
-    bb:paintRoundedRect(x, y, w, h, Blitbuffer.Color8(s.track), r)
+    bb:paintRoundedRect(x, y, w, h, Theme.color(s.track), r)
     local fill_w = math.floor((w - border * 2) * self.percent / 100 + 0.5)
     if fill_w > 0 then
-        bb:paintRoundedRect(x + border, y + border, fill_w, h - border * 2,
-            Blitbuffer.Color8(s.fill), math.max(0, r - border))
+        local paint = s.fill > 0xFF and bb.paintRoundedRectRGB32 or bb.paintRoundedRect
+        paint(bb, x + border, y + border, fill_w, h - border * 2,
+            Theme.color(s.fill), math.max(0, r - border))
     end
     if border > 0 then
-        bb:paintBorder(x, y, w, h, border, Blitbuffer.Color8(s.border_color), r,
+        local paint = s.border_color > 0xFF and bb.paintBorderRGB32 or bb.paintBorder
+        paint(bb, x, y, w, h, border, Theme.color(s.border_color), r,
             G_reader_settings:nilOrTrue("anti_alias_ui"))
     end
 end

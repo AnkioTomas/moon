@@ -7,7 +7,6 @@
 @module koplugin.book.features.panel.widget.button
 --]]
 
-local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
@@ -67,7 +66,7 @@ local function block(self, t, v)
             text = self.title,
             direction = "column",
             size = t.control.icon,
-            color = Blitbuffer.Color8(v.ink),
+            color = Theme.color(v.ink),
             font_size = t.font.caption,
             max_width = math.max(Theme.px(36), self.width - Theme.px(t.space.sm)),
             gap = Theme.px(2),
@@ -97,7 +96,7 @@ local function badge(self, t, v, active, shape)
                 Icon.widget{
                     name = self.icon,
                     size = t.control.icon,
-                    color = Blitbuffer.Color8(filled and v.ink or t.color.ink),
+                    color = Theme.color(filled and v.ink or t.color.accent),
                 },
             },
             VerticalSpan:new{ width = Theme.px(t.space.xs) },

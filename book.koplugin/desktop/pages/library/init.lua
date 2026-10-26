@@ -498,11 +498,11 @@ local function tabStrip(w, tabs, active, on_tab)
         strip[#strip + 1] = Tap.wrap(VerticalGroup:new{
             CenterContainer:new{
                 dimen = Geom:new{ w = tab_w, h = text_h },
-                Text.line("body", g.text, { bold = on, color = on and t.color.ink or t.color.muted }),
+                Text.line("body", g.text, { bold = on, color = on and t.color.accent or t.color.muted }),
             },
-            on and LineWidget:new{
-                background = Blitbuffer.Color8(t.color.ink),
-                dimen = Geom:new{ w = tab_w, h = line },
+            on and Box:new{
+                style = { bg = t.color.accent },
+                width = tab_w, height = line, keep_bg = true,
             } or VerticalSpan:new{ width = line },
         }, function() on_tab(g.id) end)
     end
@@ -777,7 +777,8 @@ function Library:buildPage(ctx)
         local name = self.filter[g.key] or g.empty
         left = function(avail)
             local room = avail - back:getSize().w - Theme.px(t.space.sm)
-            return { back, Text.line("body", name, { bold = true, width = math.max(Theme.px(t.space.md), room) }) }
+            return { back, Text.line("body", name, { bold = true, color = t.color.accent,
+                width = math.max(Theme.px(t.space.md), room) }) }
         end
     elseif g.id == "folder" then
         local root = localRoot()
@@ -793,7 +794,8 @@ function Library:buildPage(ctx)
             local name = dir:match("([^/]+)$") or dir
             left = function(avail)
                 local room = avail - back:getSize().w - Theme.px(t.space.sm)
-                return { back, Text.line("body", name, { bold = true, width = math.max(Theme.px(t.space.md), room) }) }
+                return { back, Text.line("body", name, { bold = true, color = t.color.accent,
+                    width = math.max(Theme.px(t.space.md), room) }) }
             end
         else
             left = { Text.line("caption", T(_("%1 项"), self.total), muted) }

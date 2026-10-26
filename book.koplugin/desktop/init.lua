@@ -185,6 +185,7 @@ end
 local function shellKey()
     return table.concat({
         Screen:getWidth(), Screen:getHeight(), tostring(MoonSettings.get("ui").ui_theme), Theme.scale(),
+        Theme.current().color.accent,
     }, ":")
 end
 
@@ -211,6 +212,7 @@ end
 local function tabbar(self)
     local backdrop = Ext.last("desktop.backdrop")
     local bar = Tabbar.widget{
+        show_labels = MoonSettings.get("ui").tabbar_labels,
         plain = backdrop and backdrop.plain_tabbar(self.tab),
         width = self.dimen.w,
         tabs = self._tabs,

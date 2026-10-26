@@ -52,6 +52,7 @@ local shape = "bare"
 package.preload["ui.themes"] = function()
     return {
         px = function(n) return n end,
+        color = function(n) return n end,
         current = function()
             return {
                 tile = { shape = shape },
@@ -61,7 +62,7 @@ package.preload["ui.themes"] = function()
                 },
                 card = { radius = 0, shadow = 3, shadow_color = 0 },
                 control = { border = 2, radius = 2, icon = 22 },
-                color = { ink = 0, disabled = 170 },
+                color = { ink = 0, accent = 0, disabled = 170 },
                 space = { xs = 4, sm = 8 },
                 font = { caption = 11 },
             }

@@ -287,5 +287,12 @@ do -- Pause：全部拆掉；之后心跳 / 事件不换顶栏
     Assert.is_false(bar.active, "暂停中改设置不重挂")
 end
 
+Kit.color_enabled = true
+local metric = TopBar.metric("80%", "battery_5_bar")
+Assert.eq(Kit.find(metric, function(w) return w.text == "battery_5_bar" end)[1].fgcolor,
+    Theme.current().color.accent)
+Assert.eq(Kit.find(metric, function(w) return w.text == "80%" end)[1].fgcolor, 0,
+    "顶栏只强调图标，读数保持黑色")
+
 _G.G_reader_settings = previous_settings
 return true

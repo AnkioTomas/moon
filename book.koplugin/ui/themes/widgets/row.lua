@@ -59,6 +59,7 @@ function Row.widget(opts)
     local t = Theme.current()
     local enabled = opts.enabled ~= false
     local sel = opts.selected == true
+    if not enabled and t.color.accent > 0xFF then sel = false end
     local ink = not enabled and t.color.disabled or (sel and t.selected.ink or t.color.ink)
     -- 反色选中行上 muted 灰看不清，副文字跟主文字同色。
     local muted = not enabled and t.color.disabled or (sel and t.selected.ink or t.color.muted)
@@ -87,7 +88,8 @@ function Row.widget(opts)
     if opts.icon then
         content[#content + 1] = LeftContainer:new{
             dimen = Geom:new{ w = icon_w, h = h },
-            Icon.widget{ name = opts.icon, size = t.control.icon, color = Blitbuffer.Color8(ink) },
+            Icon.widget{ name = opts.icon, size = t.control.icon,
+                color = Theme.color(enabled and not sel and t.color.accent or ink) },
         }
     end
     if opts.image then
@@ -107,7 +109,10 @@ function Row.widget(opts)
     if opts.status then
         content[#content + 1] = RightContainer:new{
             dimen = Geom:new{ w = status_w, h = h },
-            status_widget or Text.line("body", opts.status, { width = status_w, color = opts.status_on and ink or muted }),
+            status_widget or Text.line("body", opts.status, {
+                width = status_w,
+                color = opts.status_on and (enabled and not sel and t.color.accent or ink) or muted,
+            }),
         }
     end
     if chevron then
@@ -119,7 +124,8 @@ function Row.widget(opts)
 
     local group = VerticalGroup:new{
         align = "left",
-        Box:new{ style = { bg = sel and t.selected.bg or nil }, width = opts.width, height = h, content },
+        Box:new{ style = { bg = sel and t.selected.bg or nil }, keep_bg = sel,
+            width = opts.width, height = h, content },
     }
     local divider = Theme.px(t.row.divider)
     if opts.divider ~= false and divider > 0 then

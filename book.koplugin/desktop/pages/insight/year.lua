@@ -72,7 +72,9 @@ function Year:build(ctx)
     )
     --- 小标题 + 内容。
     local function titled(title, body)
-        return VerticalGroup:new{ align = "left", Parts.caption(title, width), VerticalSpan:new{ width = xs }, body }
+        return VerticalGroup:new{ align = "left",
+            Parts.caption(title, width, t.color.accent > 0xFF and t.color.accent or t.color.muted),
+            VerticalSpan:new{ width = xs }, body }
     end
     return Layout.stack("year", {
         { id = "kpi", build = function()
@@ -90,7 +92,8 @@ function Year:build(ctx)
                 Heatmap:new{ cols = Calc.heatmap(state.calendar.days, os.time()).cols, width = width })
         end },
         { id = "wall", hi = math.huge, build = function(extra)
-            local title = Parts.caption(T(_("%1年读完的书"), year), width)
+            local title = Parts.caption(T(_("%1年读完的书"), year), width,
+                t.color.accent > 0xFF and t.color.accent or t.color.muted)
             local wall = coverWall(desktop, done, width, extra, ctx.open_book)
             return wall and VerticalGroup:new{ align = "left", title, VerticalSpan:new{ width = xs }, wall }
         end },

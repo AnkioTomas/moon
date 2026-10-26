@@ -95,7 +95,7 @@ package.preload["ui.themes"] = function()
         face = function(name, size) return { name = name, size = size } end,
         current = function()
             return {
-                color = { ink = 1, page = 0, muted = 2, faint = 3 },
+                color = { ink = 1, page = 0, muted = 2, faint = 3, accent = 0x7038A0 },
                 image = {},
                 raised = {},
                 space = { xs = 4, sm = 8 },
@@ -112,6 +112,7 @@ package.preload["ui.themes.widgets.text"] = function()
             return {
                 text = text,
                 max_width = opts and opts.width,
+                color = opts and opts.color,
                 getSize = function() return { w = 10, h = 10 } end,
                 paintTo = function() end,
                 free = function() end,
@@ -328,8 +329,10 @@ local named = Book.widget(nil, nil, { title = "书", authors = "甲" }, 80, 120,
 local unknown = Book.widget(nil, nil, { title = "书" }, 80, 120, { show_author = true, show_title = false })
 Assert.eq(#plain, 3)
 Assert.eq(plain[3][1].text, "书")
+Assert.eq(plain[3][1].color, 0x7038A0, "小字号封面书名也使用主题色")
 Assert.eq(#named, 5)
 Assert.eq(named[5][1].text, "甲")
+Assert.eq(named[5][1].color, 2, "作者仍是次要文字色")
 Assert.eq(#unknown, 3)
 Assert.eq(unknown[3][1].text, "未知作者")
 

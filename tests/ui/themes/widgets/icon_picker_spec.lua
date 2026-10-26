@@ -53,7 +53,7 @@ local marks = Kit.find(picker, function(w) return w.dimen and w.dimen.w == 33 an
 Assert.len(marks, 42)
 local inked = 0
 for _idx, m in ipairs(marks) do
-    if m.background == 0x00 then inked = inked + 1 end
+    if m.style.bg == 0x00 then inked = inked + 1 end
 end
 Assert.eq(inked, 1)
 
@@ -117,5 +117,15 @@ Assert.is_false(picker:onSwipeIconPicker(nil, { direction = "north" }))
 picker:goPage(999)
 Assert.eq(picker.page, picker:pages())
 Assert.is_true(#Kit.taps(picker) >= 1)
+
+Kit.color_enabled = true
+picker = IconPicker:new{ current = "home" }
+local cell = picker:cellWidget("home")
+local mark = Kit.find(cell, function(w) return w.style and w.box_w == 33 and w.box_h == 2 end)[1]
+Assert.eq(mark.style.bg, require("ui.themes").current().color.accent,
+    "选中指示条位于白底上，不能误用反白文字色")
+local canvas = Kit.canvas()
+mark:paintTo(canvas, 0, 0)
+Assert.is_true(canvas.ops[1].rgb)
 
 return true

@@ -114,7 +114,9 @@ function M:createWidget()
     end
     self.weeks, self.key, self.day = weeks, keyOf(levels, total), os.date("%Y-%m-%d") --[[@as string]]
 
-    local track, ink = t.progress.track, t.color.ink
+    local track, ink = t.progress.track, t.progress.fill
+    local shades = {}
+    for level = 0, 4 do shades[level] = Theme.mix(track, ink, level / 4) end
     local grid = HorizontalGroup:new{ align = "top" }
     for wi, column in ipairs(levels) do
         if wi > 1 then grid[#grid + 1] = HorizontalSpan:new{ width = gap } end
@@ -122,7 +124,7 @@ function M:createWidget()
         for d = 1, 7 do
             if d > 1 then col[#col + 1] = VerticalSpan:new{ width = gap } end
             local level = column[d]
-            local bg = level and math.floor(track + (ink - track) * level / 4 + 0.5) or nil
+            local bg = level and shades[level] or nil
             col[#col + 1] = Box:new{ style = { bg = bg }, width = cell, height = cell, keep_bg = true }
         end
         grid[#grid + 1] = col

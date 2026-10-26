@@ -19,18 +19,17 @@
 @module koplugin.book.features.subscribe.paper
 --]]
 
-local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local LineWidget = require("ui/widget/linewidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local SubDB = require("features.subscribe.db")
 local Theme = require("ui.themes")
+local Box = require("ui.themes.widgets.box")
 local Icon = require("ui.themes.widgets.icon")
 local Button = require("ui.themes.widgets.button")
 local Pager = require("ui.themes.widgets.pager")
@@ -66,8 +65,8 @@ end
 ---@param ink number|nil
 ---@return table
 local function rule(width, thick, ink)
-    return LineWidget:new{
-        dimen = Geom:new{ w = width, h = thick }, background = Blitbuffer.Color8(ink or Theme.current().color.ink),
+    return Box:new{
+        width = width, height = thick, style = { bg = ink or Theme.current().color.ink }, keep_bg = true,
     }
 end
 
@@ -100,7 +99,7 @@ function Paper.view(page, w, h)
     local big = Theme.face("cfont", math.floor(t.font.hero * 0.7))
 
     local function ico(name, color)
-        return Icon.widget{ name = name, size = t.control.icon, color = Blitbuffer.Color8(color or ink) }
+        return Icon.widget{ name = name, size = t.control.icon, color = Theme.color(color or ink) }
     end
     local function padded(widget) return HorizontalGroup:new{ HorizontalSpan:new{ width = pad }, widget } end
     --- 左右两端对齐的一行。
@@ -134,15 +133,15 @@ function Paper.view(page, w, h)
     local tabs = HorizontalGroup:new{ align = "top" }
     for _idx, m in ipairs(MODES) do
         local active = m.id == mode.id
-        local label = Text.line("body", m.label(), { bold = active, color = active and ink or faint })
+        local label = Text.line("body", m.label(), { bold = active, color = active and t.color.accent or faint })
         local cell = VerticalGroup:new{ align = "center", label, VerticalSpan:new{ width = sm },
-            rule(label:getSize().w, active and math.max(2, Theme.px(2)) or 0) }
+            rule(label:getSize().w, active and math.max(2, Theme.px(2)) or 0, t.color.accent) }
         tabs[#tabs + 1] = area(HorizontalGroup:new{ cell, HorizontalSpan:new{ width = pad } }, function()
             page:filter({ stream_mode = m.id })
         end)
     end
-    local search = area(HorizontalGroup:new{ align = "center", ico("search", q ~= "" and ink or faint),
-        HorizontalSpan:new{ width = sm }, Text.line("body", _("搜索"), { color = q ~= "" and ink or faint }) },
+    local search = area(HorizontalGroup:new{ align = "center", ico("search", q ~= "" and t.color.accent or faint),
+        HorizontalSpan:new{ width = sm }, Text.line("body", _("搜索"), { color = q ~= "" and t.color.accent or faint }) },
         function() Paper.search(page) end)
     local filter = VerticalGroup:new{ align = "left", ends(tabs, search), padded(rule(iw, 1, t.color.faint)) }
 
@@ -166,7 +165,8 @@ function Paper.view(page, w, h)
         if item.time > 0 then meta[#meta + 1] = os.date("%m-%d", item.time) end
         local mark = item.read and "" or "•"
         local body = VerticalGroup:new{ align = "left",
-            Text.box("body", item.title, text_w, { max_lines = 2, bold = not item.read, color = item.read and faint or ink }),
+            Text.box("body", item.title, text_w, { max_lines = 2, bold = not item.read,
+                color = item.read and faint or t.color.accent }),
             VerticalSpan:new{ width = Theme.px(t.space.xs) },
             Text.line("caption", table.concat(meta, " · "), { width = text_w, color = faint }) }
         local mark_widget = Text.line("title", mark ~= "" and mark or " ")
@@ -181,7 +181,7 @@ function Paper.view(page, w, h)
         local cell = VerticalGroup:new{ align = "left", VerticalSpan:new{ width = sm }, content,
             VerticalSpan:new{ width = math.max(0, body_h - sm - content:getSize().h) } }
         -- 图标字体只有描边星；已收藏用实心 ★ 字符，大小对齐图标
-        local star_glyph = item.starred and Text.line("title", "★", { color = ink }) or ico("star", faint)
+        local star_glyph = item.starred and Text.line("title", "★", { color = t.color.accent }) or ico("star", faint)
         local star = area(CenterContainer:new{ dimen = Geom:new{ w = star_w, h = body_h }, star_glyph }, toggleStar)
         list[#list + 1] = padded(VerticalGroup:new{ align = "left",
             HorizontalGroup:new{ area(cell, function() page:openItem(item) end), star },

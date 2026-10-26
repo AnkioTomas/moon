@@ -7,6 +7,17 @@ ui.themes：三套令牌键集合与取值类型一致、灰度合法；当前�
 local Assert = require("support.assert")
 
 local display = {}
+local color_enabled = false
+local rgb_channels = {}
+package.preload["ffi/blitbuffer"] = function()
+    return {
+        Color8 = function(value) return value end,
+        ColorRGB32 = function(r, g, b)
+            rgb_channels = { r, g, b }
+            return rgb_channels
+        end,
+    }
+end
 package.preload["utils.settings"] = function()
     return {
         get = function(section) assert(section == "ui"); return display end,
@@ -14,7 +25,10 @@ package.preload["utils.settings"] = function()
     }
 end
 package.preload["device"] = function()
-    return { screen = { scaleBySize = function(_, n) return n * 2 end } }
+    return { screen = {
+        scaleBySize = function(_, n) return n * 2 end,
+        isColorEnabled = function() return color_enabled end,
+    } }
 end
 package.preload["ui/font"] = function()
     return { getFace = function(_, name, size) return { name = name, size = size } end }
@@ -97,5 +111,45 @@ Assert.matches(Theme.root(), "/book%.koplugin/$")
 Assert.eq(Theme.setScale(125), 130, "按 10 取整")
 Assert.eq(display.ui_scale, 130)
 Assert.eq(Theme.setScale(50), 100)
+
+-- 彩色模式只替换交互强调色，关闭后恢复原始令牌；不污染共享灰度主题。
+color_enabled = true
+for _idx, id in ipairs(Theme.ids) do
+    Theme.set(id)
+    local t, base_tokens = Theme.current(), Theme.get(id)
+    Assert.is_true(t.button.primary.bg > 255)
+    Assert.eq(t.selected.bg, base_tokens.selected.bg == 0 and t.color.accent or base_tokens.selected.bg,
+        "选中底色保留各主题差异，仅实心黑底换为强调色")
+    Assert.eq(t.selected.ink, base_tokens.selected.ink == 0 and t.color.accent or base_tokens.selected.ink)
+    Assert.is_true(t.progress.fill > 255)
+    Assert.eq(t.color.ink, base_tokens.color.ink, "正文保持黑色")
+    Assert.eq(t.raised.bg, base_tokens.raised.bg, "通用凸起表面不染色，避免污染封面容器")
+    Assert.eq(t.button.normal.bg, base_tokens.button.normal.bg, "选择器及普通按钮保留原灰度底色")
+    Assert.eq(t.control, base_tokens.control, "几何不变")
+    Assert.eq(Theme.current(), t, "彩色令牌复用，不逐帧分配")
+    Assert.eq(base_tokens.button.primary.bg, 0)
+    color_enabled = false
+    Assert.eq(Theme.current(), base_tokens)
+    color_enabled = true
+end
+Theme.color(0x245B78)
+Assert.eq(rgb_channels[1], 0x24)
+Assert.eq(rgb_channels[2], 0x5B)
+Assert.eq(rgb_channels[3], 0x78)
+Assert.eq(Theme.color(0x88), 0x88)
+Assert.eq(Theme.mix(0xFF, 0, 0.5), 0x80)
+Assert.eq(Theme.mix(0xFF, 0x0756AD, 1), 0x0756AD)
+display.theme_color = 0x7038A0
+local purple = Theme.current()
+Assert.eq(purple.color.accent, display.theme_color)
+Assert.eq(purple.progress.fill, display.theme_color, "统计只能使用同一主题色")
+Assert.eq(purple.selected.ink, display.theme_color)
+Assert.eq(purple.button.primary.bg, display.theme_color)
+Assert.eq(purple.button.ghost.ink, display.theme_color)
+display.theme_color = 0x00734F
+Assert.eq(Theme.current().color.accent, display.theme_color, "改色后缓存失效")
+Assert.eq(purple.color.accent, 0x7038A0, "旧控件持有的令牌不原地修改")
+color_enabled = false
+Assert.eq(Theme.current(), Theme.get(Theme.id()), "关彩色后不受主题色影响")
 
 return true

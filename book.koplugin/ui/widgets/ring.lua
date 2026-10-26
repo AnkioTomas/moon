@@ -34,6 +34,10 @@ local function clamp01(v)
     return v < 0 and 0 or (v > 1 and 1 or v)
 end
 
+local function channel(track, ink, on, coverage)
+    return math.floor(255 * (1 - coverage) + (track * (1 - on) + ink * on) * coverage + 0.5)
+end
+
 --- 画一圈：逐像素算覆盖率做灰阶抗锯齿（径向内外缘 + 弧段两端），底色按白处理。
 ---@param bb BlitBuffer
 ---@param cx number
@@ -44,6 +48,14 @@ end
 ---@param ink number 填充灰度
 ---@param track number 轨道灰度
 local function paintRing(bb, cx, cy, radius, th, fraction, ink, track)
+    local rgb = ink > 0xFF
+    local ink_color = rgb and Theme.color(ink)
+    local track_color = rgb and Theme.color(track)
+    local ir, ig, ib, tr, tg, tb
+    if rgb then
+        ir, ig, ib = ink_color:getR(), ink_color:getG(), ink_color:getB()
+        tr, tg, tb = track_color:getR(), track_color:getG(), track_color:getB()
+    end
     local ro, ri = radius + th / 2, radius - th / 2
     local end_a = 2 * math.pi * math.min(1, math.max(0, fraction))
     local full = fraction >= 1
@@ -63,9 +75,16 @@ local function paintRing(bb, cx, cy, radius, th, fraction, ink, track)
                     if a < 0 then a = a + 2 * math.pi end
                     local on = full and 1
                         or clamp01(0.5 + (end_a - a) * d) * clamp01(0.5 + a * d)
-                    local v = track * (1 - on) + ink * on
-                    v = 255 * (1 - cov) + v * cov
-                    bb:setPixel(cx + math.floor(dx), cy + math.floor(py), Blitbuffer.Color8(math.floor(v + 0.5)))
+                    local color
+                    if rgb then
+                        color = Blitbuffer.ColorRGB32(channel(tr, ir, on, cov),
+                            channel(tg, ig, on, cov), channel(tb, ib, on, cov), 0xFF)
+                    else
+                        local v = track * (1 - on) + ink * on
+                        v = 255 * (1 - cov) + v * cov
+                        color = Blitbuffer.Color8(math.floor(v + 0.5))
+                    end
+                    bb:setPixel(cx + math.floor(dx), cy + math.floor(py), color)
                 end
             end
         end
@@ -80,7 +99,7 @@ function Ring:paintTo(bb, x, y)
     local t = Theme.current()
     local th = self.thickness or math.max(3, math.floor(self.size / (#self.rings * 2 + 8)))
     local gap = math.max(3, math.floor(th / 2))
-    local ink, track = t.color.ink, t.progress.track
+    local ink, track = t.progress.fill, t.progress.track
     local c = math.floor(self.size / 2)
     local radius = c - math.ceil(th / 2)
     for _idx, ring in ipairs(self.rings) do

@@ -9,11 +9,16 @@ package.preload["ffi/blitbuffer"] = function()
 end
 package.preload["ui.themes"] = function()
     return {
+        current = function() return { color = { accent = 0 } } end,
+        color = function(value) return value end,
         px = function(n) return n * 2 end,
         fontSize = function(n) return n * 3 end,
         face = function(name, size) return { face = name, size = size } end,
         root = function() return "/plugin/" end,
     }
+end
+package.preload["ui.themes.widgets.text"] = function()
+    return { tint = function(widget) return widget end }
 end
 package.preload["ui/geometry"] = function()
     return { new = function(_, opts) return opts end }
@@ -61,4 +66,7 @@ Assert.eq(FontList.fontlist[1], "/plugin/ui/themes/widgets/icon/MaterialSymbolsO
 local label = Icon.label{ name = "wifi", text = "Wi-Fi", size = 12, color = 7 }
 Assert.eq(label[1][1].fgcolor, 7)
 Assert.eq(label[3].fgcolor, 7)
+local metric = Icon.label{ name = "wifi", text = "Wi-Fi", size = 12, color = 7, text_color = 0 }
+Assert.eq(metric[1][1].fgcolor, 7)
+Assert.eq(metric[3].fgcolor, 0, "指标读数与图标可分色")
 return true

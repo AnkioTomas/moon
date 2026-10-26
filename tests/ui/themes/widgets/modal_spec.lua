@@ -283,6 +283,26 @@ paint(qr)
 qr:onTapModal(nil, Kit.tap(1, 1))
 Assert.eq(Kit.closed[#Kit.closed], qr)
 
+-- 彩色不能抹平 Sheet 的主题风格：直角 / 圆角、粗边 / 细边、阴影与按钮底色各走原令牌。
+Kit.color_enabled = true
+local Theme = require("ui.themes")
+for _idx, id in ipairs(Theme.ids) do
+    Kit.use(id)
+    local base = Theme.get(id)
+    local sheet = Sheet:new{ title = "菜单", items = { { text = "操作" } } }
+    for _field_idx, field in ipairs({ "bg", "border", "radius", "shadow", "shadow_color" }) do
+        Assert.eq(sheet[1].style[field], base.dialog[field], id .. " Sheet " .. field)
+    end
+    local action = Kit.buttons(sheet)[1]
+    Assert.eq(action[1].style.bg, base.button.normal.bg)
+    Assert.eq(action[1].style.radius, base.control.radius)
+    Assert.eq(action[1].style.border, base.control.border)
+    Assert.eq(Kit.find(sheet, function(w) return w.text == "菜单" and w.fgcolor ~= nil end)[1].fgcolor,
+        Theme.current().color.accent)
+end
+Kit.color_enabled = false
+Kit.use("paper")
+
 -- guard 隔离（错误页本身见 tests/ui/guard_spec.lua）：换记录桩后重载 Modal。
 do
     local reported = {}

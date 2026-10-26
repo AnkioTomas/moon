@@ -133,7 +133,7 @@ function Day:build(ctx)
             local meta_w = math.max(1, width - cover_w - md)
             local meta = VerticalGroup:new{
                 align = "left",
-                Text.line("body", book.title or book.stable_id or "?", { width = meta_w }),
+                Text.line("body", book.title or book.stable_id or "?", { width = meta_w, color = t.color.accent }),
                 VerticalSpan:new{ width = xs },
                 Text.line("caption", author_text, { width = meta_w, color = t.color.muted }),
                 VerticalSpan:new{ width = sm },

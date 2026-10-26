@@ -9,7 +9,7 @@
 
   Icon.widget{ name = "home", size = 24, color = c }
   Icon.label{ name = "home", text = "首页", direction = "row"|"column",
-              size = 24, color = c, face = "cfont", font_size = 14, gap = px, max_width = px,
+              size = 24, color = c, text_color = c, face = "cfont", font_size = 14, gap = px, max_width = px,
               trailing = bool }  -- trailing：图标在文案后（下拉箭头）
 
 name 写 Material Icons 原名：字体用 OpenType rlig 把 ASCII 合成字形，所以强制 use_xtext。
@@ -19,7 +19,6 @@ size 是逻辑字号，经 Theme.fontSize（Font:getFace 自带 DPI）；占位�
 @module koplugin.book.ui.themes.widgets.icon
 --]]
 
-local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Font = require("ui/font")
 local FontList = require("fontlist")
@@ -30,6 +29,7 @@ local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Theme = require("ui.themes")
+local Text = require("ui.themes.widgets.text")
 
 ---@class BookThemeIcon
 local Icon = {}
@@ -67,12 +67,12 @@ end
 function Icon.widget(opts)
     opts = opts or {}
     if type(opts.name) ~= "string" or opts.name == "" then return nil end
-    local glyph = TextWidget:new{
+    local glyph = Text.tint(TextWidget:new{
         text = opts.name,
         face = Icon.face(Theme.fontSize(opts.size)),
-        fgcolor = opts.color or Blitbuffer.COLOR_BLACK,
+        fgcolor = opts.color or Theme.color(Theme.current().color.accent),
         use_xtext = true,
-    }
+    })
     if opts.box == false then return glyph end
     local box = Theme.px(opts.size)
     return CenterContainer:new{
@@ -84,16 +84,16 @@ end
 ---@param opts table 见模块头
 ---@return table 横排 / 竖排组
 function Icon.label(opts)
-    local color = opts.color or Blitbuffer.COLOR_BLACK
+    local color = opts.color or Theme.color(Theme.current().color.accent)
     local column = opts.direction == "column"
     local group = (column and VerticalGroup or HorizontalGroup):new{ align = "center" }
     local icon = Icon.widget{ name = opts.name, size = opts.size, color = color }
-    local text = TextWidget:new{
+    local text = Text.tint(TextWidget:new{
         text = opts.text,
         face = Theme.face(opts.face or "xx_smallinfofont", opts.font_size or 12),
-        fgcolor = color,
+        fgcolor = opts.text_color or color,
         max_width = opts.max_width,
-    }
+    })
     group[1] = opts.trailing and text or icon
     group[2] = (column and VerticalSpan or HorizontalSpan):new{ width = opts.gap or Theme.px(4) }
     group[3] = opts.trailing and icon or text

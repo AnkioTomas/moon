@@ -235,8 +235,14 @@ function Kit.canvas()
         paintRoundedRect = function(_, x, y, w, h, c, r)
             ops[#ops + 1] = { op = "rect", x = x, y = y, w = w, h = h, c = c, r = r }
         end,
+        paintRoundedRectRGB32 = function(_, x, y, w, h, c, r)
+            ops[#ops + 1] = { op = "rect", x = x, y = y, w = w, h = h, c = c, r = r, rgb = true }
+        end,
         paintBorder = function(_, x, y, w, h, bw, c, r)
             ops[#ops + 1] = { op = "border", x = x, y = y, w = w, h = h, bw = bw, c = c, r = r }
+        end,
+        paintBorderRGB32 = function(_, x, y, w, h, bw, c, r)
+            ops[#ops + 1] = { op = "border", x = x, y = y, w = w, h = h, bw = bw, c = c, r = r, rgb = true }
         end,
         colorblitFrom = function(_, _source, x, y, _ox, _oy, w, h)
             ops[#ops + 1] = { op = "colorblit", x = x, y = y, w = w, h = h }
@@ -260,9 +266,15 @@ function Kit.install(theme)
     -- 主题边框和 FrameContainer 一样读 KOReader 的「界面抗锯齿」；离线没有这个全局时按默认开。
     _G.G_reader_settings = _G.G_reader_settings or { nilOrTrue = function() return true end }
     Kit.shown, Kit.closed, Kit.dirty, Kit.scheduled, Kit.unscheduled = {}, {}, {}, {}, {}
+    Kit.color_enabled = false
     Kit.sections = {}
     local modules = {
-        ["ffi/blitbuffer"] = { Color8 = function(v) return v end, COLOR_BLACK = 0, COLOR_WHITE = 255 },
+        ["ffi/blitbuffer"] = {
+            Color8 = function(v) return v end,
+            isColor8 = function(v) return type(v) == "number" and v <= 0xFF end,
+            ColorRGB32 = function(r, g, b) return r * 0x10000 + g * 0x100 + b end,
+            COLOR_BLACK = 0, COLOR_WHITE = 255,
+        },
         ["ffi/util"] = {
             template = function(s, ...)
                 local args = { ... }
@@ -278,6 +290,7 @@ function Kit.install(theme)
                 getHeight = function() return Kit.SCREEN_H end,
                 scaleBySize = function(_, n) return n end,
                 scaleByDPI = function(_, n) return n end,
+                isColorEnabled = function() return Kit.color_enabled == true end,
             },
             hasKeys = function() return false end,
             input = { group = { Back = "Back" } },

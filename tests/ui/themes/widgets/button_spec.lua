@@ -79,6 +79,75 @@ cells[2]:onTapThemeArea()
 Assert.eq(picked, "shelf")
 Assert.eq(bar:getSize().h, 56)
 
+bar = Tabbar.widget({ width = 200, tabs = tabs, active = "home", show_labels = false,
+    on_tab = function(id) picked = id end })
+Assert.len(Kit.find(bar, function(w) return w.text == "首页" or w.text == "书架" end), 0)
+Assert.len(Kit.find(bar, function(w) return w.text == "home" or w.text == "book" end), 2)
+Assert.eq(bar:getSize().h, 56, "隐藏名称不改变触摸区高度")
+picked = nil
+Kit.taps(bar)[2]:onTapThemeArea()
+Assert.eq(picked, "shelf", "纯图标模式仍能切换")
+
+Kit.color_enabled = true
+bar = Tabbar.widget({ width = 200, tabs = tabs, active = "home" })
+local accent = require("ui.themes").current().color.accent
+Assert.is_true(accent > 255)
+Assert.eq(Kit.find(bar, function(w) return w.style and w.style.border == 0 and w.width == 100 end)[1].style.bg,
+    255, "纸本风格保留白底与指示条，不强制实心色块")
+Assert.eq(Kit.find(bar, function(w) return w.text == "home" end)[1].fgcolor, accent)
+Assert.eq(Kit.find(bar, function(w) return w.text == "book" end)[1].fgcolor, 0x88,
+    "未选中导航退回中性色，与当前页区分")
+local icon_bar = Tabbar.widget{ width = 200, tabs = tabs, active = "shelf", show_labels = false }
+Assert.eq(Kit.find(icon_bar, function(w) return w.text == "home" end)[1].fgcolor, 0x88)
+Assert.eq(Kit.find(icon_bar, function(w) return w.text == "book" end)[1].fgcolor, accent)
+bar = Tabbar.widget({ width = 200, tabs = tabs, active = "home", plain = true })
+Assert.eq(Kit.find(bar, function(w) return w.text == "book" end)[1].fgcolor, 0, "壁纸透底时保留黑色未选中图标")
+pager = Pager.widget({ width = 300, page = 1, pages = 2, dots = true })
+dots = Kit.find(pager, function(w) return w.style ~= nil and w.box_w == 8 end)
+Assert.eq(dots[1].style.bg, accent, "分页当前点跟随主题色")
+Assert.eq(dots[2].style.bg, 0xAA)
+local disabled_primary = Button:new{ text = "不可用", variant = "primary", enabled = false }
+Assert.eq(disabled_primary[1].style.bg, 255, "禁用按钮不能保留强强调色底")
+Assert.eq(disabled_primary[1][1].fgcolor, 0xAA)
+local colored_row = Row.widget{ width = 300, icon = "wifi", title = "连接", toggle = true }
+Assert.eq(Kit.find(colored_row, function(w) return w.text == "wifi" end)[1].fgcolor, accent)
+Assert.eq(Kit.find(colored_row, function(w) return w.text == "开" end)[1].fgcolor, accent)
+colored_row = Row.widget{ width = 300, icon = "wifi", title = "连接", toggle = true, selected = true }
+Assert.eq(Kit.find(colored_row, function(w) return w.text == "wifi" end)[1].fgcolor, accent)
+Assert.eq(Kit.find(colored_row, function(w) return w.text == "开" end)[1].fgcolor, accent)
+colored_row = Row.widget{ width = 300, icon = "wifi", title = "连接", toggle = true, enabled = false, selected = true }
+Assert.eq(Kit.find(colored_row, function(w) return w.text == "wifi" end)[1].fgcolor, 0xAA)
+Assert.eq(Kit.find(colored_row, function(w) return w.text == "开" end)[1].fgcolor, 0xAA)
+Assert.is_nil(Kit.find(colored_row, function(w) return w.style ~= nil end)[1].style.bg,
+    "禁用行不能被选中标记染色")
+local colored_button = Button:new{ text = "彩色", variant = "primary" }
+Assert.is_true(colored_button[1].style.bg > 255)
+local selector = Button:new{ text = "拷贝漫画", icon = "arrow_drop_down", trailing = true, size = "small" }
+Assert.eq(selector[1].style.bg, require("ui.themes").get("paper").button.normal.bg,
+    "下拉选择器保留原灰度背景")
+Assert.eq(Kit.find(selector, function(w) return w.text == "拷贝漫画" and w.fgcolor ~= nil end)[1].fgcolor, accent)
+Assert.eq(Kit.find(selector, function(w) return w.text == "arrow_drop_down" end)[1].fgcolor, accent)
+local canvas = Kit.canvas()
+colored_button:paintTo(canvas, 0, 0)
+Assert.eq(canvas.ops[1].c, colored_button[1].style.bg)
+Assert.is_true(canvas.ops[1].rgb, "彩色表面必须走 RGB 原语，否则颜色会被转灰")
+local progress = require("ui.themes.widgets.progress"):new{ width = 100, percent = 50 }
+canvas = Kit.canvas()
+progress:paintTo(canvas, 0, 0)
+Assert.eq(canvas.ops[2].c, require("ui.themes").current().progress.fill)
+Assert.is_true(canvas.ops[2].rgb)
+for _idx, id in ipairs({ "bold", "soft" }) do
+    Kit.use(id)
+    local base = require("ui.themes").get(id)
+    bar = Tabbar.widget({ width = 200, tabs = tabs, active = "home" })
+    local selected = Kit.find(bar, function(w) return w.style and w.style.border == 0 and w.width == 100 end)[1]
+    Assert.eq(selected.style.bg, id == "bold" and accent or base.selected.bg,
+        "底栏保留主题各自的选中风格")
+    Assert.eq(Kit.find(bar, function(w) return w.text == "home" end)[1].fgcolor,
+        id == "bold" and 255 or accent)
+end
+Kit.color_enabled = false
+
 -- bold：选中格整块反色、无指示条。
 Kit.use("bold")
 bar = Tabbar.widget({ width = 200, tabs = tabs, active = "home", on_tab = function() end })

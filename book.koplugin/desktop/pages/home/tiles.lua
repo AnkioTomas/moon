@@ -85,7 +85,7 @@ local function dots(data)
     local row = HorizontalGroup:new{ align = "center" }
     for i, bar in ipairs(data.bars) do
         if i > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
-        local bg = bar.seconds > 0 and t.color.ink or t.progress.track
+        local bg = bar.seconds > 0 and t.progress.fill or t.progress.track
         row[#row + 1] = Box:new{ style = { bg = bg, radius = 999 }, width = d, height = d }
     end
     return row
@@ -103,8 +103,8 @@ local function bars(data)
     for i, bar in ipairs(data.bars) do
         if i > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
         local bh = bar.seconds > 0 and math.max(Theme.px(2), math.floor(h * bar.seconds / peak)) or Theme.px(1)
-        local bg = bar.seconds > 0 and t.color.ink or t.progress.track
-        row[#row + 1] = Box:new{ style = { bg = bg }, width = bw, height = bh }
+        local bg = bar.seconds > 0 and t.progress.fill or t.progress.track
+        row[#row + 1] = Box:new{ style = { bg = bg }, width = bw, height = bh, keep_bg = true }
     end
     return row
 end

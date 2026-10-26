@@ -165,7 +165,8 @@ function M:createWidget()
             Text.line("caption", _("没有书籍"), { color = t.color.muted }),
         }
     end
-    local more = Tap.wrap(Text.line("caption", _("更多 ›"), { color = t.color.muted }), function()
+    local accent = t.color.accent > 0xFF and t.color.accent or t.color.muted
+    local more = Tap.wrap(Text.line("caption", _("更多 ›"), { color = accent }), function()
         local desktop = ctx.desktop
         if not desktop then return end
         desktop.library:reset()
@@ -177,7 +178,7 @@ function M:createWidget()
     local label = LeftContainer:new{
         dimen = Geom:new{ w = label_w, h = more_size.h },
         Text.line("caption", (count or 0) > 0 and T(_("书架 · %1"), count) or _("书架"),
-            { width = label_w, color = t.color.muted, bold = true }),
+            { width = label_w, color = accent, bold = true }),
     }
     return VerticalGroup:new{
         align = "left",
