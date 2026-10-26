@@ -179,7 +179,9 @@ end
 local function paintText(bb, block, w)
     local x = block.x or math.floor(w * 0.08)
     local width = block.width or (w - x * 2)
-    local color = blockColor(block, Blitbuffer.COLOR_BLACK, block.bold and block.color == nil)
+    -- Color* cdata 带 __eq，写 `color == nil` 会进 metamethod 对 nil 调 getColorRGB32 炸掉
+    -- （票根粗体 + MUTED 色就是这条路径）。用 not 判缺省即可。
+    local color = blockColor(block, Blitbuffer.COLOR_BLACK, block.bold and not block.color)
     local mask_text = block.box == false or not Blitbuffer.isColor8(color)
     local widget = TextBoxWidget:new{
         text = tostring(block.text or ""),
