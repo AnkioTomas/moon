@@ -18,6 +18,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
     图书馆「最近添加」只能按 id 排。
   - 本地删除 = deleted=1 + sync_status=0（墓碑），推云端成功后 remove 撕墓碑（连同依附表）；本地上架推 addToShelf 后 markSynced。
   - 远端 upsert 遇本地脏行（sync_status=0）不盖 title/authors/category/series/intro 与 deleted。
+  - 远端展示字段的 nil / 空字符串表示缺资料，不清空已有值；主动清空走 upsertLocal。
   - meta 只经 setMeta 写（三种 upsert 写完顺带调），按键合并、从不清键：
     普通同步与详情只补缺的键；强制刷新（reconcile force）与本地写入（扫盘 / 刮削）覆盖传入的键。
     rating 是 { score, by } 整体，分数和来源不会拆开合并。
@@ -290,15 +291,15 @@ function BookDB.upsertRemote(row, overwrite, dated)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             md5=COALESCE(excluded.md5, books.md5),
             title=CASE WHEN books.sync_status=0
-                THEN books.title ELSE COALESCE(excluded.title, books.title) END,
+                THEN books.title ELSE COALESCE(NULLIF(excluded.title, ''), books.title) END,
             authors=CASE WHEN books.sync_status=0
-                THEN books.authors ELSE COALESCE(excluded.authors, books.authors) END,
+                THEN books.authors ELSE COALESCE(NULLIF(excluded.authors, ''), books.authors) END,
             category=CASE WHEN books.sync_status=0
-                THEN books.category ELSE COALESCE(excluded.category, books.category) END,
+                THEN books.category ELSE COALESCE(NULLIF(excluded.category, ''), books.category) END,
             series=CASE WHEN books.sync_status=0
-                THEN books.series ELSE COALESCE(excluded.series, books.series) END,
+                THEN books.series ELSE COALESCE(NULLIF(excluded.series, ''), books.series) END,
             intro=CASE WHEN books.sync_status=0
-                THEN books.intro ELSE COALESCE(excluded.intro, books.intro) END,
+                THEN books.intro ELSE COALESCE(NULLIF(excluded.intro, ''), books.intro) END,
             cover=COALESCE(NULLIF(excluded.cover, ''), books.cover),
             path=COALESCE(excluded.path, books.path),
             read_at=MAX(books.read_at, excluded.read_at),

@@ -716,6 +716,33 @@ net_online = true
 Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
 desktop.detail:close()
 Assert.is_true(owner_cancelled, "关窗取消在飞请求")
+do
+    local before = asked
+    db_row = { title = "K", authors = "库内作者", intro = "库内简介", meta = { detail_at = 100 } }
+    Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K", authors = "", intro = "" })
+    Assert.eq(asked, before)
+    Assert.eq(desktop.detail.book.authors, "库内作者", "旧列表空值不能遮住已补齐的本地资料")
+    Assert.eq(desktop.detail.book.intro, "库内简介")
+    desktop.detail:close()
+
+    db_row = { title = "K", authors = "", intro = "", meta = {} }
+    Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+    Assert.eq(asked, before + 1)
+    owner_cb({})
+    Assert.is_nil(db_row.meta.detail_at, "只回读本地空行不能记成详情补齐")
+    desktop.detail:close()
+    Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+    Assert.eq(asked, before + 2, "仍缺资料，下次打开必须允许重试")
+    desktop.detail:close()
+
+    db_row = { title = "K", authors = "", intro = "简介", meta = { detail_at = 100 } }
+    Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+    Assert.eq(asked, before + 3, "旧的 detail_at 不能阻止缺作者的书补详情")
+    owner_cb(nil, "network failed")
+    Assert.eq(db_row.intro, "简介", "补拉失败保留已有资料")
+    Assert.eq(db_row.meta.detail_at, 100)
+    desktop.detail:close()
+end
 db_row = nil
 
 -- 桌面已关：关详情不再碰桌面。

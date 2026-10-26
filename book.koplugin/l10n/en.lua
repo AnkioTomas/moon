@@ -161,6 +161,7 @@ return {
     ["启动与按键"] = "Startup & keys",
     ["书籍来源"] = "Book sources",
     ["书籍详情为空"] = "Empty book details",
+    ["书籍信息保存失败"] = "Failed to save book information",
     ["二"] = "Tu",
     ["二维码已失效，请重新登录"] = "QR code expired, sign in again",
     ["云端"] = "Cloud",
