@@ -851,7 +851,7 @@ end
 --- 阅读页是否显示他人段评（设置页开关，默认关）。
 ---@return boolean
 function Source:paragraphReviewsEnabled()
-    return require("utils.settings").getSource(self.id).show_paragraph_reviews == true
+    return require("source.review_setting").enabled(self.id)
 end
 
 --- 按书名搜索微信读书书目（关联本地书看段评用）。

@@ -12,6 +12,15 @@ local ensure_mode = "async"
 local render_calls
 local render_background
 local accent = 0
+local ticks = {}
+package.preload["ui/uimanager"] = function()
+    return {
+        nextTick = function(_, fn) ticks[#ticks + 1] = fn end,
+    }
+end
+local function flush()
+    while #ticks > 0 do table.remove(ticks, 1)() end
+end
 package.preload["ui.themes"] = function()
     return { current = function() return { color = { accent = accent } } end }
 end
@@ -110,9 +119,10 @@ local function reset()
     ensure_mode = "async"
     render_calls = 0
     render_background = nil
+    ticks = {}
 end
 
--- 异步背景：返回可取消任务，背景到了才渲染，只回调一次。
+-- 异步背景：返回可取消任务，背景到了下一拍才渲染，只回调一次。
 reset()
 local results = {}
 local job = Compose.build(plan(), function(ok, err)
@@ -121,6 +131,8 @@ end)
 Assert.not_nil(job)
 Assert.eq(render_calls, 0)
 asset_cb("/tmp/background.png")
+Assert.eq(render_calls, 0, "写盘在 nextTick")
+flush()
 Assert.eq(render_calls, 1)
 Assert.eq(#results, 1)
 Assert.is_true(results[1].ok)
@@ -128,12 +140,14 @@ Assert.eq(render_background.path, "/tmp/background.png")
 Assert.is_nil(render_background.contain)
 Assert.is_nil(render_background.blocks)
 
--- 同步背景：当场合成，没有任务可取消。
+-- 本地背景 ensure 同步回调：仍返回可取消句柄，合成在下一拍。
 reset()
 ensure_mode = "success"
 local sync_result
 job = Compose.build(plan(), function(ok) sync_result = ok end)
-Assert.is_nil(job)
+Assert.not_nil(job)
+Assert.eq(render_calls, 0)
+flush()
 Assert.eq(render_calls, 1)
 Assert.is_true(sync_result)
 
@@ -144,6 +158,7 @@ job = Compose.build(plan(), function(ok) cancelled_result = ok end)
 assert(job).cancel()
 Assert.is_true(asset_cancelled)
 asset_cb("/tmp/background.png")
+flush()
 Assert.eq(render_calls, 0)
 Assert.is_nil(cancelled_result)
 
@@ -159,6 +174,7 @@ job = Compose.build(plan({
     end,
 }), function() end)
 asset_cb(nil)
+flush()
 Assert.eq(render_calls, 1)
 Assert.eq(backdrop_rect.w, 480)
 Assert.eq(backdrop_rect.h, 800)
@@ -173,7 +189,6 @@ local failed, failure
 job = Compose.build(plan(), function(ok, err)
     failed, failure = ok, err
 end)
-Assert.is_nil(job)
 Assert.is_false(failed)
 Assert.eq(failure, "asset failed")
 Assert.eq(render_calls, 0)

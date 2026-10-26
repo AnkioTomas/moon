@@ -134,7 +134,10 @@ local function hookDesktopActivated()
     if activated_hooked then return end
     activated_hooked = true
     require("utils.extension").add("desktop.activated", function(_desktop)
-        require("ui.guard").call("lockscreen.activated", refreshIfStale, "desktop_activated")
+        -- 下一拍再刷：激活路径上同步合成会卡住顶栏 / 首页组件入场。
+        require("ui/uimanager"):nextTick(function()
+            require("ui.guard").call("lockscreen.activated", refreshIfStale, "desktop_activated")
+        end)
     end)
 end
 

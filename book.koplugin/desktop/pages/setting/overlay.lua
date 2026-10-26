@@ -118,7 +118,8 @@ function Overlay:init()
     if self.spec.refresh_seconds then self:startRefresh(self.spec.refresh_seconds) end
 end
 
--- 第一次 2 秒后就刷：CPU 占用要两次采样才有数。被二级页面盖住时不画。
+-- 按页面声明的间隔刷；被二级页面盖住时不画。
+-- 监控页自己要两次采样才有 CPU 差值，间隔已是 10s，不要再硬编码 2s 把墨水屏刷稀碎。
 function Overlay:startRefresh(seconds)
     self._refresh = require("ui.guard").wrap("settings refresh", function()
         if self.refresh_stopped then return end
@@ -126,7 +127,7 @@ function Overlay:startRefresh(seconds)
         if stack[#stack].widget == self then self:updateView() end
         UIManager:scheduleIn(seconds, self._refresh)
     end)
-    UIManager:scheduleIn(2, self._refresh)
+    UIManager:scheduleIn(seconds, self._refresh)
 end
 
 function Overlay:onCloseWidget()
