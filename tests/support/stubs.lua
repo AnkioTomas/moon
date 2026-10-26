@@ -545,6 +545,9 @@ function Stubs.install()
         installFfiUtil()
         installLuaSettings()
         installLeafStubs()
+        installIfMissing("version", function()
+            return { getShortVersion = function() return "test" end }
+        end)
     end
     installUIManager()
     installIfMissing("pluginshare", function() return {} end)

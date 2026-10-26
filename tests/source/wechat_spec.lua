@@ -795,6 +795,7 @@ end
 
 -- pushNotesAsync：划线与想法两段队列必须串起来
 do
+    chapter_fetches = 0
     local NOTE_REF = {
         source_id = "wechat",
         stable_id = "bpush",
