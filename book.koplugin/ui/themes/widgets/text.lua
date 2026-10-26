@@ -20,16 +20,39 @@ local BOLD = { title = true, hero = true }
 ---@class BookThemeText
 local Text = {}
 
+--- 代理画布：colorblitFrom 强制走 RGB32，其余名字透传给真画布。
+---
 --- 原生单行文字只用灰度 colorblitFrom；仅本控件改走 RGB，不修改全局画布或原生控件。
+--- 但插件会覆写 TextWidget:paintTo 并直接对收到的 bb 调别的 BlitBuffer 方法
+--- （如 appearance 会调 colorblitFromRGB32），代理缺方法就会在绘制时抛错，
+--- 被 guard 捕获后整屏文字一个字都画不出来。透传按名字缓存闭包，逐字绘制不重复分配。
+---@param bb table
+---@return table
+local function tinted_canvas(bb)
+    local forwarded = {}
+    return setmetatable({
+        getWidth = function() return bb:getWidth() end,
+        colorblitFrom = function(_, ...) return bb:colorblitFromRGB32(...) end,
+    }, {
+        __index = function(_, key)
+            local method = forwarded[key]
+            if method == nil then
+                local value = bb[key]
+                if type(value) ~= "function" then return value end
+                method = function(_, ...) return value(bb, ...) end
+                forwarded[key] = method
+            end
+            return method
+        end,
+    })
+end
+
 ---@param widget table
 ---@return table
 function Text.tint(widget)
     if not Blitbuffer.isColor8(widget.fgcolor) then
         function widget:paintTo(bb, x, y)
-            TextWidget.paintTo(self, {
-                getWidth = function() return bb:getWidth() end,
-                colorblitFrom = function(_canvas, ...) return bb:colorblitFromRGB32(...) end,
-            }, x, y)
+            TextWidget.paintTo(self, tinted_canvas(bb), x, y)
         end
     end
     return widget
