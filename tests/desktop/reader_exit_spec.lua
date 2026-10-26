@@ -14,15 +14,6 @@ package.preload["ui/uimanager"] = function()
         nextTick = function(_, callback) next_tick = callback end,
     }
 end
-package.preload["features.panel.native_settings"] = function() return { inject = function() end } end
-package.preload["features.panel.desktop"] = function() return { menuActions = function() return {} end } end
-package.preload["features.panel.reader"] = function() return { actions = function() return {} end } end
-package.preload["ui/widget/touchmenu"] = function()
-    return { updateItems = function() end, switchMenuTab = function() end }
-end
-package.preload["apps/filemanager/filemanagermenu"] = function()
-    return { setUpdateItemTable = function() end }
-end
 
 local drawer_on = true
 local opened_desktop = 0
@@ -32,12 +23,6 @@ package.preload["desktop"] = function()
         ensureFileManager = function() return { book = {} } end,
     }
 end
-package.preload["apps/filemanager/filemanager"] = function()
-    return {
-        instance = { book = {} },
-    }
-end
-package.preload["apps/reader/readerui"] = function() return { instance = nil } end
 package.preload["utils.settings"] = function()
     return { get = function() return { drawer_opens_desktop = drawer_on } end }
 end
@@ -45,42 +30,55 @@ package.preload["menu"] = function()
     return { openOnStart = function() return true end }
 end
 
-local previous_settings = _G.G_reader_settings
-_G.G_reader_settings = {
-    readSetting = function() end,
-    saveSetting = function() end,
-}
-
-local original_filemanager_callback = function() return "native" end
-local ReaderMenu = {}
-function ReaderMenu:getDefaultMenuButtons()
+-- ReaderMenu 桩按正式版 v2026.07 的形状：按钮在 init 里内联固化，没有 getDefaultMenuButtons；
+-- setUpdateItemTable 末尾 MenuSorter 把按钮摘进 tab_item_table 后将 menu_items.filemanager 置 nil。
+-- fresh_buttons 模拟 nightly：重建先把按钮回填进 menu_items（换新表），其余相同。
+local native_calls = 0
+local function nativeButton()
     return {
-        filemanager = {
-            icon = "appbar.filebrowser",
-            remember = false,
-            callback = original_filemanager_callback,
-        },
+        icon = "appbar.filebrowser",
+        remember = false,
+        callback = function()
+            native_calls = native_calls + 1
+            return "native"
+        end,
     }
 end
-function ReaderMenu:setUpdateItemTable() end
-function ReaderMenu:onTapCloseMenu() self.closed = true end
+local ReaderMenu = {}
+ReaderMenu.__index = ReaderMenu
+local function newReaderMenu(ui)
+    local self = setmetatable({}, ReaderMenu)
+    self.ui = ui
+    self.menu_items = { filemanager = nativeButton() }
+    return self
+end
+function ReaderMenu:setUpdateItemTable()
+    if self.fresh_buttons then self.menu_items.filemanager = nativeButton() end
+    local fm = self.menu_items.filemanager
+    fm.id = "filemanager"
+    self.tab_item_table = { fm }
+    self.menu_items.filemanager = nil
+end
+function ReaderMenu:onTapCloseMenu() self.closed = (self.closed or 0) + 1 end
 package.preload["apps/reader/modules/readermenu"] = function() return ReaderMenu end
 
-require("desktop.reader_exit").install()
+local function drawerTab(menu) return menu.tab_item_table[1] end
 
+-- 实例在 install 前就已建好（正式版按钮此时已固化），接管仍必须生效。
 local reader_closed = 0
-local menu = setmetatable({
-    ui = { onClose = function() reader_closed = reader_closed + 1 end },
-}, { __index = ReaderMenu })
-local buttons = menu:getDefaultMenuButtons()
-Assert.not_nil(buttons.filemanager)
-Assert.is_true(type(buttons.filemanager.callback) == "function")
--- 阅读模式下 filebrowser 回调必须被替换为返回 Book 桌面，而不是原生回调。
-Assert.is_false(buttons.filemanager.callback == original_filemanager_callback)
-Assert.is_false(buttons.filemanager.remember)
+local menu = newReaderMenu({ onClose = function() reader_closed = reader_closed + 1 end })
+local native_tab = menu.menu_items.filemanager
+require("desktop.reader_exit").install()
+menu:setUpdateItemTable()
+Assert.is_nil(menu.menu_items.filemanager)
+local tab = drawerTab(menu)
+Assert.is_true(tab == native_tab)
+Assert.is_true(tab._book_drawer_patched)
+Assert.is_false(tab.remember)
 
-buttons.filemanager.callback()
-Assert.is_true(menu.closed)
+tab.callback()
+Assert.eq(menu.closed, 1)
+Assert.eq(native_calls, 0, "开关开时不得走原生文件浏览器")
 Assert.eq(reader_closed, 0, "菜单关闭后不得在点击调用栈里同步关闭文档")
 Assert.eq(opened_desktop, 0)
 Assert.not_nil(next_tick)
@@ -88,9 +86,27 @@ next_tick()
 Assert.eq(reader_closed, 1)
 Assert.eq(opened_desktop, 1)
 
--- 开关关：走原生文件浏览器，不回桌面。
-drawer_on = false
-Assert.eq(menu:getDefaultMenuButtons().filemanager.callback(), "native")
-Assert.eq(opened_desktop, 1)
+-- 正式版形状下重复重建菜单：正式版不会重建已固化的 Tab，这里只断言同一张 Tab 不叠包。
+tab.callback()
+Assert.eq(menu.closed, 2)
+next_tick()
+Assert.eq(reader_closed, 2)
+Assert.eq(opened_desktop, 2)
 
-_G.G_reader_settings = previous_settings
+-- nightly 形状：每次重建换新 Tab 表，新表同样被接管且只包一层。
+local nightly_closed = 0
+local nightly = newReaderMenu({ onClose = function() nightly_closed = nightly_closed + 1 end })
+nightly.fresh_buttons = true
+nightly:setUpdateItemTable()
+nightly:setUpdateItemTable()
+drawerTab(nightly).callback()
+Assert.eq(native_calls, 0)
+next_tick()
+Assert.eq(nightly_closed, 1)
+Assert.eq(opened_desktop, 3)
+
+-- 开关关：走原生文件浏览器，不回桌面（只测正式版形状）。
+drawer_on = false
+tab.callback()
+Assert.eq(native_calls, 1)
+Assert.eq(opened_desktop, 3)

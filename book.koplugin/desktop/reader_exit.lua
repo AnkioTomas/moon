@@ -1,8 +1,11 @@
 --[[--
 阅读页退出回月读桌面：关书后回桌面而不是 KOReader 原生文件管理器，并接管阅读菜单顶栏的文件浏览器图标。
 
-接管在类级别装一次（main init 调 `install`），要早于任何 ReaderMenu 实例：ReaderMenu 在 init 里就调
-`getDefaultMenuButtons` 固化按钮，晚装会让第一次阅读的图标仍走原生文件管理器。
+接管挂在 `ReaderMenu:setUpdateItemTable`（各版本都有）：原函数跑完后，从重建好的
+`tab_item_table` 里找 filemanager Tab 换回调。不要 patch `getDefaultMenuButtons`：它只有 nightly 有，
+正式版 v2026.07 的按钮是 init 里内联写死的，patch 一个没人调用的方法等于没接管
+（看书点抽屉先回原生文件管理器、在那边再点一次才回月读，就是这么来的）；也不要在原函数跑完后
+找 `menu_items.filemanager`，它已被 MenuSorter 从 menu_items 里摘走置 nil。
 
 @module koplugin.book.desktop.reader_exit
 --]]
@@ -55,22 +58,30 @@ function ReaderExit.drawerOpensDesktop()
     return require("menu").openOnStart() and require("utils.settings").get("desktop").drawer_opens_desktop == true
 end
 
---- 一次性 patch ReaderMenu 的文件浏览器按钮。
+--- 一次性 patch ReaderMenu：每次重建菜单表后替换文件浏览器 Tab 的回调。
+--- nightly 每次重建都换一张新 Tab 表（靠每次重打），正式版沿用同一张（靠 Tab 上的标记防叠包）。
 function ReaderExit.install()
     local ReaderMenu = require("apps/reader/modules/readermenu")
     if ReaderMenu._book_drawer_patched then return end
     ReaderMenu._book_drawer_patched = true
-    local original = ReaderMenu.getDefaultMenuButtons
-    ReaderMenu.getDefaultMenuButtons = function(self)
-        local buttons = original(self)
-        local fm = buttons.filemanager
-        local native = fm.callback
-        fm.callback = function()
+    local original = ReaderMenu.setUpdateItemTable
+    ReaderMenu.setUpdateItemTable = function(self, ...)
+        original(self, ...)
+        local tab
+        for _idx, item in ipairs(self.tab_item_table or {}) do
+            if item.id == "filemanager" then
+                tab = item
+                break
+            end
+        end
+        if not tab or tab._book_drawer_patched then return end
+        tab._book_drawer_patched = true
+        local native = tab.callback
+        tab.callback = function()
             if not ReaderExit.drawerOpensDesktop() then return native() end
             self:onTapCloseMenu()
             ReaderExit.closeToDesktop(self.ui)
         end
-        return buttons
     end
 end
 
