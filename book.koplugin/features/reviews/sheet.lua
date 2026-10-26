@@ -43,7 +43,7 @@ local QUOTE_LINES = 6
 local MAX_THUMBS = 3
 local IMAGE_HEADERS = { Referer = "https://fanqienovel.com/" }
 
---- 全屏查看段评配图；点任意处或返回键退出。
+--- 全屏查看段评配图；按比例缩进屏幕（不拉变形），点任意处或返回键退出。
 ---@param url string
 local function showImage(url)
     local viewer = Modal:new{ covers_fullscreen = true, close_on_tap = true }
@@ -52,6 +52,7 @@ local function showImage(url)
         headers = IMAGE_HEADERS,
         width = viewer.dimen.w,
         height = viewer.dimen.h,
+        stretch = true,
     }
     viewer.close_callback = function() image[1]:cancel() end
     viewer:setPanel(Box:new{

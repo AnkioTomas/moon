@@ -54,5 +54,6 @@ local viewer = Kit.shown[#Kit.shown]
 Assert.is_true(viewer.close_on_tap, "全屏图可点按关闭")
 local displayed_image = Kit.find(viewer, function(widget) return widget.src == image_url end)[1]
 Assert.is_true(displayed_image ~= nil, "预览使用点击的图片地址")
+Assert.is_true(displayed_image.image_opts.stretch, "全屏预览按比例缩进，不拉满变形")
 viewer.close_callback()
 Assert.is_true(displayed_image.cancelled, "关闭预览取消图片下载")

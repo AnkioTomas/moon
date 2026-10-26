@@ -11,7 +11,7 @@
       src = "https://…" | "/abs/path.png" | "logo.png"（插件相对）,
       fallback = "书名",     -- 未就绪 / 失败时的文案；也可直接给控件
       style = theme.card,    -- 可选：换一种表面，缺省 theme.image
-      -- 其余原样交给内核：headers / alpha / on_ready / fallback_src / invert_in_night
+      -- 其余原样交给内核：headers / alpha / on_ready / fallback_src / invert_in_night / stretch
   })
   img[1]:cancel()            -- 只取消这一张的下载
 
@@ -60,6 +60,7 @@ function ThemeImage.widget(opts)
             fallback_src = opts.fallback_src,
             invert_in_night = opts.invert_in_night,
             on_ready = opts.on_ready,
+            stretch = opts.stretch,
         },
     }
 end

@@ -496,6 +496,19 @@ local none = Image.widget{ width = 40, height = 60, fallback = fb_none }
 Assert.eq(none[1][1], fb_none, "没有来源直接显示兜底控件")
 none:free()
 
+-- 保比例（stretch）：大图不得按目标框拉满解码，交给 ImageWidget scale_factor=0。
+do
+    local before = #renders
+    local fit = Image.widget{ src = image_path, width = big(), height = 200, stretch = true }
+    Stubs.flush()
+    Assert.len(renders, before, "保比例大图不走 renderImageFile(w,h)")
+    local iw = image_widgets[#image_widgets]
+    Assert.eq(iw.file, image_path)
+    Assert.eq(iw.scale_factor, 0, "按比例缩进")
+    Assert.is_nil(iw.image)
+    fit:free()
+end
+
 os.remove(image_path)
 os.remove(cached_file)
 package.loaded["ui/renderimage"] = nil
