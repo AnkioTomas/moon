@@ -343,7 +343,9 @@ function Items.paint(bb, x, y, w, h, layout, ctx, opts)
         if meta then
             local entry = {
                 id = slot.id,
-                align = slot.align == "right" and "right" or "left",
+                align = slot.align == "center" and "center"
+                    or slot.align == "right" and "right"
+                    or "left",
                 kind = meta.kind,
                 text = Items.text(slot.id, ctx, opts.icons),
                 flex = meta.flex == true,
@@ -420,6 +422,26 @@ function Items.paint(bb, x, y, w, h, layout, ctx, opts)
             right = right - entry.w
             paintEntry(entry, right)
             right = right - gap
+        end
+    end
+    -- 居中：同侧多项按布局顺序成组，相对整栏绝对居中（与左右重叠是用户自己的布局选择）。
+    local center_w, center_n = 0, 0
+    for i = 1, #prepared do
+        local entry = prepared[i]
+        if entry.align == "center" then
+            center_w = center_w + entry.w
+            center_n = center_n + 1
+        end
+    end
+    if center_n > 0 then
+        center_w = center_w + (center_n - 1) * gap
+        local cx = x + math.floor((w - center_w) / 2)
+        for i = 1, #prepared do
+            local entry = prepared[i]
+            if entry.align == "center" then
+                paintEntry(entry, cx)
+                cx = cx + entry.w + gap
+            end
         end
     end
 

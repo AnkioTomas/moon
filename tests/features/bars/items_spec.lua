@@ -76,6 +76,25 @@ do
     Assert.eq(painted[3].text, "wifi_off")
     Assert.eq(painted[3].x, 300 - #"wifi_off" * 5, "只有图标的条目贴右边")
     Assert.len(painted, 3)
+
+    -- 居中：相对整栏绝对居中；多项按布局顺序成组
+    painted = {}
+    Items.paint(bb, 0, 0, 300, 20,
+        { { id = "clock", align = "center" } },
+        { clock = "12:34" },
+        { face = { orig_size = 14 }, gap = 4 })
+    Assert.eq(painted[1].text, "12:34")
+    Assert.eq(painted[1].x, math.floor((300 - #"12:34" * 5) / 2), "单条居中")
+
+    painted = {}
+    Items.paint(bb, 0, 0, 300, 20,
+        { { id = "clock", align = "center" }, { id = "percent", align = "center" } },
+        { clock = "12:34", percent = 42 },
+        { face = { orig_size = 14 }, gap = 4 })
+    local group_w = #"12:34" * 5 + 4 + #"42%" * 5
+    Assert.eq(painted[1].x, math.floor((300 - group_w) / 2), "居中组起点")
+    Assert.eq(painted[2].x, painted[1].x + #"12:34" * 5 + 4)
+
     TextWidget.paintTo = orig_paint
     package.loaded["ui.themes.widgets.icon"] = nil
 end
