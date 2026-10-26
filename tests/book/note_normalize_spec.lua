@@ -104,6 +104,33 @@ do
     Assert.eq(cleaned[1].total_pages, 100)
 end
 
+-- ── clean：空串 note/drawer → nil（月读源 PHP 缺省 ""；Lua 空串为真会把高亮判成笔记）──
+do
+    local cleaned = Normalize.clean({
+        {
+            datetime = "d1", page = "/body/a", drawer = "lighten",
+            note = "", text = "纯高亮",
+            pos0 = "/body/a.0", pos1 = "/body/a.1",
+        },
+        {
+            datetime = "d2", page = "/body/b", drawer = "",
+            note = "有备注", text = "",
+        },
+        {
+            datetime = "d3", page = "/body/c", drawer = "lighten",
+            note = "真笔记", text = "带备注的划线",
+            pos0 = "/body/c.0", pos1 = "/body/c.1",
+        },
+    })
+    Assert.len(cleaned, 3)
+    Assert.is_nil(cleaned[1].note, "空备注必须变成 nil，否则 KOReader 判成笔记")
+    Assert.eq(cleaned[1].drawer, "lighten")
+    Assert.is_nil(cleaned[2].drawer, "空 drawer 必须变成 nil，否则书签被当成划线")
+    Assert.eq(cleaned[2].note, "有备注")
+    Assert.eq(cleaned[3].note, "真笔记")
+    Assert.eq(cleaned[3].drawer, "lighten")
+end
+
 -- ── payload：权威快照带外层元数据；非权威为裸数组 ──
 do
     local items = { { page = "/body/a" } }

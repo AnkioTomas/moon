@@ -17,11 +17,11 @@ local Highlights = {}
 local Normalize = require("book.note.normalize")
 local NoteDB = require("book.note_db")
 
---- 有 drawer（划线）且文本非空才算高亮。
+--- 有非空 drawer（划线）且文本非空才算高亮；空串 drawer 是 SQL 缺省，不是划线。
 ---@param item any
 ---@return boolean
 local function isHighlight(item)
-    return type(item) == "table" and item.drawer ~= nil
+    return type(item) == "table" and type(item.drawer) == "string" and item.drawer ~= ""
         and type(item.text) == "string" and item.text ~= ""
 end
 

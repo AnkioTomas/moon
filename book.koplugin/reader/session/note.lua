@@ -157,6 +157,8 @@ local function applySnapshot(ui, identity)
     if not annotations then
         return 0
     end
+    -- 库里可能已有 PHP/JSON 写进来的 note="" / drawer=""；先洗成 nil，否则高亮会被当成笔记。
+    annotations = Note.clean(source, annotations)
     local current = ui.doc_settings:readSetting("annotations") or {}
     if source and type(source.localizeAnnotations) == "function" then
         annotations = source:localizeAnnotations(
