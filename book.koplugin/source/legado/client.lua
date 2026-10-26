@@ -137,6 +137,7 @@ local function authed(go, cb)
     local user, password = credentials()
     if not user then return go(nil, cb) end
     local key = Client.base() .. "\0" .. user .. "\0" .. password
+    ---@type boolean, CancelHandle|nil
     local cancelled, job = false, nil
     local function run(retry)
         local function call(token)

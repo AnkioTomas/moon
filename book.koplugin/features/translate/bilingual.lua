@@ -225,6 +225,7 @@ local function batches(texts, size, chars)
 end
 
 ---@class BilingualInput
+---@field chapter boolean|nil 章节翻译输入
 ---@field kind "epub"|"dom"
 ---@field origin string 原书路径
 ---@field source string|nil dom：导出的 DOM 文件

@@ -23,7 +23,9 @@ package.preload["features.ocr.ui"] = function()
 end
 
 local updates = 0
-local entry = require("features.ocr.setting").entries({ updateView = function() updates = updates + 1 end })[1]
+local desktop = { updateView = function() updates = updates + 1 end }
+---@cast desktop BookDesktop
+local entry = require("features.ocr.setting").entries(desktop)[1]
 Assert.eq(entry.group, "reader")
 Assert.eq(entry.order, 18)
 local section = entry.page.sections()[1]

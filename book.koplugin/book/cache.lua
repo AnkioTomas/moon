@@ -25,7 +25,7 @@ local BUDGET = 32
 ---@param root string
 ---@param visit fun(path: string, attr: table): boolean|nil, string|nil
 ---@param done fun(ok: boolean, err: string|nil)
----@param protected fun(path: string, attr: table): boolean|nil
+---@param protected (fun(path: string, attr: table): boolean|nil)|nil
 ---@return { cancel: fun() }
 local function walkAsync(root, visit, done, protected)
     local cancelled = false

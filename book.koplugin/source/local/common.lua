@@ -185,7 +185,7 @@ end
 --- 逐项串行异步遍历：step(item, next, index) 处理完一项调 next()，全部处理完调 done()。
 ---@param list any[]
 ---@param step fun(item: any, next: fun(), index: integer)
----@param done fun()
+---@param done fun(err: any)
 local function eachAsync(list, step, done)
     local index = 0
     local function next_item()
@@ -231,8 +231,6 @@ local function moveBookArtifacts(old_path, new_path)
 end
 
 --- 从已打开的文档提取封面并落盘为 PNG；封面缓存独立于 books 元数据缓存。
----@param doc table
----@param path string 封面缓存键（stable_id）
 --- 用户在 KOReader 里给书设过自定义封面（sidecar 里的 cover.*）时优先用它，和文件管理器显示的一致。
 ---@param doc table
 ---@param path string 封面缓存键（stable_id，本地书即文件路径）

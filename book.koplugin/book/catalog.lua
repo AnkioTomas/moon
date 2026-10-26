@@ -18,6 +18,7 @@ reading_stats 提供统计。
 --- 图书馆 / 书城列表查询参数。
 --- 未使用的筛选项传 nil 或空串；源不支持的项可忽略。
 ---@class BookListOpts
+---@field root string|nil 本地目录查询根
 ---@field page number|nil 页码，从 1 起
 ---@field page_size number|nil 每页条数（须与网格容量一致）
 ---@field search string|nil 关键词搜索
@@ -512,7 +513,7 @@ end
 --- 本地书库的文件夹视图一页：先列 dir 下的子文件夹（按名称），再列直接放在 dir 里的书。
 --- 子文件夹以 { is_folder = true, title, dir, cover } 条目返回，cover 取目录里的 cover.jpg / cover.png。
 ---@param source_id string
----@param opts { dir: string, page: number|nil, page_size: number|nil, sort: string|nil }
+---@param opts { dir: string, root?: string, page: number|nil, page_size: number|nil, sort: string|nil }
 ---@param cb fun(data: BookListResult|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Catalog.folderPageAsync(source_id, opts, cb)

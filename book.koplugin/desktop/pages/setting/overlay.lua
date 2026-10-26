@@ -28,7 +28,7 @@ local Text = require("ui.themes.widgets.text")
 local TitleBar = require("ui.themes.widgets.titlebar")
 
 ---@class BookSettingsOverlaySpec
----@field id string
+---@field id string|nil
 ---@field title string
 ---@field preview (fun(width: number): table)|nil
 ---@field sections fun(): BookThemeSection[]

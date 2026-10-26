@@ -30,14 +30,14 @@ end
 
 local pipe = assert(io.popen(string.format(
     "find %s/book.koplugin/features/remote -not -path '*/l10n/*' \\( -name '*.html' -o -name '*.js' -o -name '*.lua' \\)", root)))
-local src = {}
+local chunks = {}
 for path in pipe:lines() do
     local fh = assert(io.open(path, "rb"))
-    src[#src + 1] = fh:read("*a")
+    chunks[#chunks + 1] = fh:read("*a")
     fh:close()
 end
 pipe:close()
-src = table.concat(src, "\n")
+local src = table.concat(chunks, "\n")
 local stale = {}
 for k in pairs(en) do
     if not k:find("%%%d") and not k:find("\n") and not src:find((k:gsub("…$", "")), 1, true) then

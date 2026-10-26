@@ -34,7 +34,7 @@ end
 
 -- ephemeral 源（订阅）不开计时。
 do
-    Tracker.start({ identity = { source_id = "subscribe", stable_id = "1", ephemeral = true }, page = 1 })
+    Tracker.start({ ui = {}, identity = { source_id = "subscribe", stable_id = "1", ephemeral = true }, page = 1 })
     Assert.is_nil(Tracker.session)
 end
 

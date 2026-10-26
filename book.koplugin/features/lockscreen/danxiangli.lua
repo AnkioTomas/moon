@@ -233,7 +233,7 @@ end
 function M.blocks(rect)
     local w = math.max(1, tonumber(rect.w) or 1)
     local h = math.max(1, tonumber(rect.h) or 1)
-    local c = M.day(os.date("*t"))
+    local c = M.day(os.date("*t") --[[@as osdate]])
     local face, measure, synthetic = Typo.metrics()
     local ops = M.plan(c, M.pickQuote(c), w, h, measure)
     T.release()
@@ -246,7 +246,7 @@ end
 --- 一天一页；农历到货后键变，组合图重画。
 ---@return string
 function M.cache_key()
-    local date = os.date("*t")
+    local date = os.date("*t") --[[@as osdate]]
     local lunar = M.lunarLines(M.daily(date))
     return os.date("%Y-%m-%d") .. (lunar and ("|" .. lunar.date) or "")
 end

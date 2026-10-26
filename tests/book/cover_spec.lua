@@ -75,7 +75,7 @@ package.loaded["ffi/mupdf"] = { scaleBlitBuffer = function(_bb, w, h) scaled_to 
 freed = 0
 Cover.save(doc({ getWidth = function() return 1600 end, getHeight = function() return 2400 end,
     writePNG = function() error("原图不该落盘") end, free = function() freed = freed + 1 end }), target)
-Assert.eq(X)
+Assert.eq(scaled_to, "400x600")
 Assert.eq(read(target), "png")
 Assert.eq(freed, 2, "原图与缩图都释放")
 os.remove(target)

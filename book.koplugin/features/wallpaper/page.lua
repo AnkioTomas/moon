@@ -153,7 +153,7 @@ local function imageRow(desktop, opts)
             List:new{
                 title = opts.title, centered = true, items = items,
                 on_select = function(action)
-                    local start = opts.path or require("apps/filemanager/filemanagerutil").getHomeFolder()
+                    local start = opts.path or require("apps/filemanager/filemanagerutil").getHomeFolder() --[[@as string]]
                     if action == "clear" then
                         opts.clear()
                         repaint(desktop)

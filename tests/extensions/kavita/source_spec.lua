@@ -1711,9 +1711,10 @@ do
     local before = #calls
     local pulled = run("pullStatsAsync")
     local day = os.time({ year = 2026, month = 10, day = 10, hour = 0 })
-    local function findBook(rows, record_type, stable_id)
+    local function findBook(rows, record_type, stable_id, start_time)
         for _idx, row in ipairs(rows) do
-            if row.record_type == record_type and row.stable_id == stable_id then return row end
+            if row.record_type == record_type and row.stable_id == stable_id
+                and (not start_time or row.start_time == start_time) then return row end
         end
     end
     Assert.eq(findBook(pulled.rows, "book_day", "8661", day).duration, 600, "1 章 = 单卷，读在 series 行")

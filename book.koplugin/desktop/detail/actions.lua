@@ -22,7 +22,7 @@ local function cacheKey(book)
 end
 
 --- 章节缓存结果提示：成功 / 部分完成 / 失败。
----@param result { ok: boolean, cached: integer, total: integer, failed: integer, err: string|nil, failed_idx: integer[]|nil }
+---@param result { ok: boolean, cached: integer, total: integer, failed: integer, err: string|nil, failed_idx: integer[]|nil, reviews?: { ok: boolean, done: integer, err?: string } }
 local function notifyCached(result)
     local text
     if result.ok then

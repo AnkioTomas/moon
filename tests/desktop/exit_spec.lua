@@ -228,7 +228,9 @@ do
     Assert.eq(d2.tab, "library")
     Assert.eq(d2.library.page, 3)
     Assert.eq(d2.library.filter.search, "x")
-    d2.source = { id = "wechat" }
+    local source = { id = "wechat" }
+    ---@cast source BookSource
+    d2.source = source
     d2:destroy()
     local d3 = newDesktop(plugin)
     Assert.eq(d3.tab, "home", "换源不还原")

@@ -75,7 +75,7 @@ end
 ---@param known table<string, Book>
 ---@param rows table<string, Book> 本源全部行
 ---@param flat boolean|nil 关闭「按文件夹分类」：分类 / 系列不由目录派生，不参与比较
----@return boolean
+---@return boolean ok, string|nil err
 local function upToDate(files, known, rows, flat, kept)
     local shelved = 0
     for _id, row in pairs(rows) do
@@ -158,7 +158,7 @@ end
 ---@param known table<string, Book>
 ---@param full_snapshot boolean|nil
 ---@param kept Book[]|nil 读不了的子目录下原有的在架行：不在快照里也照留
----@return boolean
+---@return boolean ok, string|nil err
 local function commitFiles(files, known, full_snapshot, kept)
     local BookDB = require("book.books_db")
     for _idx, f in ipairs(files) do
