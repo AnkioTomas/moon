@@ -166,6 +166,7 @@ local margin = { name = "t_page_margin", hide_on_apply = true }
 local other = { name = "font_size", hide_on_apply = true }
 package.preload["ui/data/creoptions"] = function() return { { options = { margin, other } } } end
 Reader.onCreate(plugin)
+Assert.is_true(ui._book_back_attached, "阅读页安装原始返回按键入口")
 Assert.is_nil(margin.hide_on_apply, "边距调整不收起面板、不弹信息框")
 Assert.is_true(other.hide_on_apply)
 moon_settings.margin_popup = true
