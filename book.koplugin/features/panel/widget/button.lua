@@ -96,7 +96,7 @@ local function badge(self, t, v, active, shape)
                 Icon.widget{
                     name = self.icon,
                     size = t.control.icon,
-                    color = Theme.color(filled and v.ink or t.color.accent),
+                    color = Theme.color(filled and v.ink or t.color.icons),
                 },
             },
             VerticalSpan:new{ width = Theme.px(t.space.xs) },

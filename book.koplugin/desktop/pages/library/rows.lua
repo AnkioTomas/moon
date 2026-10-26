@@ -84,7 +84,7 @@ function Rows.book(ctx, book, w, h, on_open, on_detail)
     local more = Book.tappable(more_w, inner_h, function() on_detail(book) end)
     more[1] = CenterContainer:new{
         dimen = Geom:new{ w = more_w, h = inner_h },
-        Icon.widget{ name = "more_vert", size = t.control.icon, color = Theme.color(t.color.accent) },
+        Icon.widget{ name = "more_vert", size = t.control.icon, color = Theme.color(t.color.icons) },
     }
     local side = HorizontalGroup:new{ align = "center" }
     if book.downloaded then
@@ -101,7 +101,7 @@ function Rows.book(ctx, book, w, h, on_open, on_detail)
     local mid_w = math.max(1, w - pad * 2 - cw - gap * 2 - side_w)
     local meta = VerticalGroup:new{
         align = "left",
-        Text.line("body", Book.title(book), { width = mid_w, bold = true, color = t.color.accent }),
+        Text.line("body", Book.title(book), { width = mid_w, bold = true, color = t.color.headings }),
     }
     local author = Book.author(book)
     meta[2] = Text.line("caption", author ~= "" and author or _("未知作者"), { width = mid_w, color = t.color.muted })

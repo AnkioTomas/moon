@@ -95,7 +95,7 @@ package.preload["ui.themes"] = function()
         face = function(name, size) return { name = name, size = size } end,
         current = function()
             return {
-                color = { ink = 1, page = 0, muted = 2, faint = 3, accent = 0x7038A0 },
+                color = { ink = 1, page = 0, muted = 2, faint = 3, accent = 0x7038A0, headings = 0x7038A0 },
                 image = {},
                 raised = {},
                 space = { xs = 4, sm = 8 },

@@ -190,7 +190,7 @@ end
 local function shellKey()
     return table.concat({
         Screen:getWidth(), Screen:getHeight(), tostring(MoonSettings.get("ui").ui_theme), Theme.scale(),
-        Theme.current().color.accent,
+        tostring(MoonSettings.get("ui").theme_preset), MoonSettings.get("ui").theme_color,
     }, ":")
 end
 

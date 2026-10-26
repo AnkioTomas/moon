@@ -167,6 +167,19 @@ do -- 外壳签名（主题）变了：整壳重建，全刷
     desk:updateView()
 end
 
+do -- 换色板（主色相同也不能只看 accent）：整壳重建，顶栏不残留上一套色板
+    Kit.color_enabled = true
+    Kit.display.theme_preset = "ocean"
+    desk:updateView()
+    local top = desk.layers[2].top
+    Kit.display.theme_preset = "aurora"
+    desk:updateView()
+    Assert.is_true(desk.layers[2].top > top, "换色板连顶栏一起重建")
+    Kit.display.theme_preset = nil
+    Kit.color_enabled = false
+    desk:updateView()
+end
+
 do -- 当前 Tab 被关掉（书城开关）：回退首页
     Kit.sections.store.zlib_enabled = true
     desk:switchTab("store")

@@ -23,13 +23,11 @@ local STYLE_NAMES = {
     bold = _("高对比"),
     soft = _("柔和"),
 }
-local COLOR_PRESETS = {
-    { value = 0x0756AD, text = _("蓝色") },
-    { value = 0x00734F, text = _("绿色") },
-    { value = 0x7038A0, text = _("紫色") },
-    { value = 0xB32635, text = _("红色") },
-    { value = 0xAD4C00, text = _("橙色") },
-}
+local Palettes = require("ui.themes.palettes")
+local COLOR_PRESETS = {}
+for _idx, palette in ipairs(Palettes.list) do
+    COLOR_PRESETS[#COLOR_PRESETS + 1] = { value = palette.id, text = _(palette.name) }
+end
 local REFRESH_PRESETS = {
     { value = 0, text = _("从不") },
     { value = 1, text = _("每页") },
@@ -218,22 +216,24 @@ function Display:appearanceRows(ctx)
     if Device.screen.isColorEnabled and Device.screen:isColorEnabled() then
         rows[#rows + 1] = function(iw)
             local conf = MoonSettings.get("ui")
-            local value = conf.theme_color or COLOR_PRESETS[1].value
-            local label = string.format("#%06X", value)
-            for _idx, preset in ipairs(COLOR_PRESETS) do
-                if preset.value == value then label = preset.text break end
-            end
+            local palette = Palettes.find(conf.theme_preset)
+            -- 没选过色板时仍在用旧单色：状态显示色值，选过后显示色板名。
+            local label = palette and _(palette.name)
+                or string.format("#%06X", conf.theme_color or 0x0756AD)
             return Row.widget({
                 width = iw,
                 kind = "nav", icon = "palette", title = _("主题色"),
-                subtitle = _("彩色模式下统一用于图标、按钮和统计"),
+                subtitle = _("彩色模式下按钮、图标、标题、导航、进度与统计的配色"),
                 status = label, status_on = true,
                 callback = function()
                     List:new{
                         title = _("主题色"), items = COLOR_PRESETS,
-                        current = value, centered = true,
-                        on_select = function(color)
-                            conf.theme_color = color
+                        current = conf.theme_preset, centered = true,
+                        on_select = function(id)
+                            local picked = Palettes.find(id)
+                            conf.theme_preset = id
+                            -- 同步旧单色键：降级旧版本时仍是接近的强调色。
+                            if picked then conf.theme_color = picked.rgb end
                             MoonSettings.save("ui", conf)
                             desktop:updateView()
                         end,

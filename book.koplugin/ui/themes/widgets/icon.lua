@@ -70,7 +70,7 @@ function Icon.widget(opts)
     local glyph = Text.tint(TextWidget:new{
         text = opts.name,
         face = Icon.face(Theme.fontSize(opts.size)),
-        fgcolor = opts.color or Theme.color(Theme.current().color.accent),
+        fgcolor = opts.color or Theme.color(Theme.current().color.icons),
         use_xtext = true,
     })
     if opts.box == false then return glyph end
@@ -84,7 +84,7 @@ end
 ---@param opts table 见模块头
 ---@return table 横排 / 竖排组
 function Icon.label(opts)
-    local color = opts.color or Theme.color(Theme.current().color.accent)
+    local color = opts.color or Theme.color(Theme.current().color.icons)
     local column = opts.direction == "column"
     local group = (column and VerticalGroup or HorizontalGroup):new{ align = "center" }
     local icon = Icon.widget{ name = opts.name, size = opts.size, color = color }

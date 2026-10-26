@@ -88,7 +88,7 @@ local function dots(t, page, pages)
     for i = 1, pages do
         if i > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
         row[#row + 1] = Box:new{
-            style = { bg = i == page and t.color.accent or t.color.disabled, radius = t.control.radius },
+            style = { bg = i == page and t.color.navigation or t.color.disabled, radius = t.control.radius },
             width = size,
             height = size,
         }
@@ -104,7 +104,7 @@ function Pager.widget(opts)
     local mid_w = math.max(1, opts.width - h * 2)
     local center = opts.center or opts.dots and dots(t, opts.page, opts.pages)
         or Text.line("body", opts.title or T(_("%1 / %2"), opts.page, opts.pages),
-            { width = mid_w, color = opts.title and t.color.accent or t.color.ink })
+            { width = mid_w, color = opts.title and t.color.headings or t.color.ink })
     local input = PagerInput:new{ opts = opts }
     local cycle = opts.on_page and opts.cycle ~= false and Settings.get("ui").pager_cycle and opts.pages > 1
     input[1] = HorizontalGroup:new{

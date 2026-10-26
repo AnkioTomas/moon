@@ -114,7 +114,7 @@ function M:createWidget()
     end
     self.weeks, self.key, self.day = weeks, keyOf(levels, total), os.date("%Y-%m-%d") --[[@as string]]
 
-    local track, ink = t.progress.track, t.progress.fill
+    local track, ink = t.progress.track, t.color.stat
     local shades = {}
     for level = 0, 4 do shades[level] = Theme.mix(track, ink, level / 4) end
     local grid = HorizontalGroup:new{ align = "top" }
