@@ -39,6 +39,7 @@ function Assets.materializeImage(images_dir, data)
     if not ext then
         return nil
     end
+    if ext == ".svg" then data = require("utils.svg").normalize(data) end
     Paths.ensureDir(images_dir)
     local name = md5(data) .. ext
     local path = images_dir .. "/" .. name
