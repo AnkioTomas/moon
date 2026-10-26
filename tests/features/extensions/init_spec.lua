@@ -214,3 +214,42 @@ do -- 点固定格：叶子直接执行；有子菜单弹层；入口没了退�
     Extensions.run(plugin, "gone:x", rect)
     Assert.eq(#Themed.all("list"), before + 2)
 end
+
+do -- 动态回调入口：收集时不执行工厂，弹层与固定格点击时才取当前回调。
+    modules[#modules + 1] = { name = "dynamic", path = "/plugins/dynamic.koplugin" }
+    local resolved, clicked = 0, 0
+    plugin.ui.dynamic = inst({
+        dynamic = {
+            text = "Dynamic",
+            callback_func = function()
+                resolved = resolved + 1
+                return function(menu)
+                    clicked = clicked + 1
+                    menu:closeMenu()
+                end
+            end,
+        },
+    })
+    local found
+    for _idx, entry in ipairs(Extensions.entries(plugin)) do
+        if entry.id == "dynamic:dynamic" then found = entry end
+    end
+    Assert.not_nil(found, "callback_func 与 callback 一样是有效入口")
+    Assert.eq(resolved, 0, "收集入口不能提前解析动态回调")
+    Extensions.show(plugin, rect)
+    local list = Themed.last("list")
+    local row
+    for _idx, item in ipairs(list.items) do
+        if item.text == "Dynamic" then row = item end
+    end
+    Assert.not_nil(row)
+    Assert.is_true(row.enabled)
+    Assert.eq(resolved, 0)
+    row.callback()
+    Assert.eq(resolved, 1)
+    Assert.eq(clicked, 1)
+    Assert.is_true(list.closed)
+    Extensions.run(plugin, "dynamic:dynamic", rect)
+    Assert.eq(resolved, 2)
+    Assert.eq(clicked, 2)
+end
