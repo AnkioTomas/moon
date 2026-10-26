@@ -325,11 +325,17 @@ ui.config = { options = { prefix = "copt" } }
 ui.document.configurable.book_font_face = "tmp"
 ui.font.font_face = "Demo Face"
 ui.doc_settings.data.book_reader_font_id = "demo.ttf"
+-- 高亮刚在菜单里改完还没 SaveSettings：sidecar 是旧的 red，活状态才是当前格式。
+ui.view = { highlight = { saved_drawer = "underscore", saved_color = "green" } }
 -- 另一本已有快照的书，saveDefaults 必须一起覆盖。
 other_payload = "{font_face=\"Old Face\",copt={font_size=10}}"
 Assert.is_true(ReaderPrefs.saveDefaults(ui))
 Assert.eq(global_data.cre_font, "Demo Face")
 Assert.eq(global_data.book_reader_default_font_id, "demo.ttf")
+-- 高亮格式必须落 KOReader 全局键（drawer 键名不同），新书靠 onReadSettings 回退读到；
+-- 且取活状态而非 sidecar 旧值。章节书快照里也带活状态。
+Assert.eq(global_data.highlight_drawing_style, "underscore")
+Assert.eq(global_data.highlight_color, "green")
 Assert.is_nil(global_data.copt_book_font_face)
 for key, value in pairs(ui.document.configurable) do
     local vt = type(value)
@@ -339,6 +345,8 @@ Assert.eq(flushed, 1)
 local synced = require("json").decode(other_payload)
 Assert.eq(synced.font_face, "Demo Face")
 Assert.eq(synced.copt.font_size, ui.document.configurable.font_size)
+Assert.eq(synced.doc.highlight_drawer, "underscore")
+Assert.eq(synced.doc.highlight_color, "green")
 -- 新书 sidecar 没有字体 id 时，按默认插件字体注册。
 resolved_font_ids = {}
 ReaderPrefs.inject({ data = {}, readSetting = function() end, saveSetting = function() end }, { file = "/x.epub", setFontFace = function() end })
@@ -414,6 +422,9 @@ Assert.is_true(ReaderPrefs.inject(next_chapter, { file = "/chapter2.html", setFo
 Assert.eq(next_chapter.data.copt_font_size, 28)
 Assert.eq(next_chapter.data.copt_h_page_margins[1], 15)
 Assert.eq(next_chapter.data.font_face, "Demo Face")
+-- 本章的高亮格式（活状态 underscore/green，非 sidecar 旧值）也跟着到下一章
+Assert.eq(next_chapter.data.highlight_drawer, "underscore")
+Assert.eq(next_chapter.data.highlight_color, "green")
 
 -- 2) 章节书「保存为默认」→ 下一章吃到刚存的默认（replaceAll 已写本书快照）
 ui.document.configurable.font_size = 31
