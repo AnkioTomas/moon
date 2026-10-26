@@ -26,8 +26,12 @@ local FONT_THRESHOLD = 0.65
 ---@param info table chapterInfo
 ---@return table
 local function fontData(info)
-    local ok, random = pcall(JSON.decode, tostring(info.randomFont or "{}"))
-    if not ok or type(random) ~= "table" then random = { data = {} } end
+    local raw = info.randomFont
+    assert(type(raw) == "string" and raw ~= "", "qidian randomFont missing")
+    local ok, random = pcall(JSON.decode, raw)
+    if not ok or type(random) ~= "table" then
+        error("qidian randomFont decode failed: " .. tostring(random))
+    end
     return { css = info.css or "", randomFont = random }
 end
 

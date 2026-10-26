@@ -135,7 +135,10 @@ function Toc.setWords(source_id, stable_id, idx, words)
     local chapter = list[idx]
     if chapter and tonumber(chapter.words) ~= words then
         chapter.words = words
-        pcall(Toc.put, source_id, stable_id, list)
+        local put_ok, put_ret = pcall(Toc.put, source_id, stable_id, list)
+        if not put_ok or put_ret == false then
+            require("logger").warn("book.toc setWords put failed", source_id, stable_id, idx, put_ret)
+        end
     end
 end
 

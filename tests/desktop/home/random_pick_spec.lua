@@ -1,5 +1,6 @@
 --[[--
-desktop.pages.home.random.randomBook：先抽没读过的，再抽读到一半的，已读完的不抽；只取一行；库里不止一本时避开上一次。
+desktop.pages.home.random.randomBook：先抽没读过的，再抽读到一半的，已读完的不抽；
+RANDOM() 一次最多两行（避开上一次）；库里不止一本时避开上一次。
 
 @module tests.desktop.home.random_pick_spec
 --]]
@@ -25,14 +26,15 @@ local calls = {}
 Catalog.listBooks = function(scope, opts)
     calls[#calls + 1] = opts
     Assert.eq(scope, "local")
-    Assert.eq(opts.limit, 1, "只取一行")
+    Assert.is_true(opts.random == true, "走 RANDOM()，不 COUNT+OFFSET")
+    Assert.eq(opts.limit, 2, "一次最多两行以便避开上一次")
     local hit = {}
     for _idx, b in ipairs(books) do
         local ok = b.read_state ~= 1 and (opts.read_status ~= "new" or not b.started)
         if ok then hit[#hit + 1] = b end
     end
-    local row = hit[(opts.offset or 0) + 1]
-    return { row }, #hit
+    -- 稳定顺序：b 先于 c，模拟「抽到 b 时用第二本避开」
+    return { hit[1], hit[2] }, #hit
 end
 
 for _i = 1, 20 do

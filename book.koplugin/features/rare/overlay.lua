@@ -343,16 +343,27 @@ function Overlay:refresh(key)
         return
     end
     local settings = require("utils.settings").get("features.rare")
-    local lexicons = require("features.rare.catalog").active()
-    if #lexicons == 0 then
+    -- 先看有没有启用词库文件；完整 parse 放到 fork 后的子进程，别堵翻页这一帧。
+    local Catalog = require("features.rare.catalog")
+    local lfs = require("libs/libkoreader-lfs")
+    local has_lex = false
+    for id, on in pairs(settings.rare_lexicons or {}) do
+        if on and lfs.attributes(Catalog.path(id), "mode") then
+            has_lex = true
+            break
+        end
+    end
+    if not has_lex then
         self.key = key
         return
     end
     local level = settings.rare_level
-    -- 生字本读库：只能在主进程取，子进程拿结果副本。
+    -- 生字本读库：只能在主进程取（子进程禁碰 sqlite），结果经闭包进子进程。
     local force = settings.rare_vocab and require("features.rare.vocab").set() or nil
     local started_at = Perf.now()
     local job = require("workers.job").run(function()
+        local lexicons = require("features.rare.catalog").active()
+        if #lexicons == 0 then return {} end
         return scanHits(self, lexicons, level, force)
     end, {
         name = "features.rare.scan",
@@ -384,10 +395,17 @@ function Overlay:marks()
     return {}
 end
 
+-- paint 热路径：revision 变了才重读开关，别每帧撞 settings。
+local enabled_rev, enabled_on = -1, false
+
 --- PageMarks 绘制钩子（外层已经 Guard.paint）。视口变了只排队，本帧不画旧注音。
 ---@param bb any Blitbuffer
 function Overlay:paint(bb)
-    if not require("utils.settings").get("features.rare").rare_enabled then return end
+    if enabled_rev ~= revision then
+        enabled_rev = revision
+        enabled_on = require("utils.settings").get("features.rare").rare_enabled == true
+    end
+    if not enabled_on then return end
     local key = PageMarks.viewKey(self.ui, revision)
     if not key then return end
     if key ~= self.key then

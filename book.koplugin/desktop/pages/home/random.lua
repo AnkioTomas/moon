@@ -43,16 +43,12 @@ function M.randomBook(source_id, exclude)
     local scope = Catalog.libraryScope(source_id)
     if not (type(scope) == "string" and scope ~= "" or type(scope) == "table" and #scope > 0) then return nil end
     for _idx, status in ipairs(M.statuses()) do
-        local opts = { read_status = status, limit = 1 }
-        local rows, count = Catalog.listBooks(scope, opts)
-        if count > 0 then
-            opts.offset = math.random(count) - 1
-            rows = Catalog.listBooks(scope, opts)
-            if rows[1] and rows[1].stable_id == exclude and count > 1 then
-                opts.offset = (opts.offset + 1) % count
-                rows = Catalog.listBooks(scope, opts)
-            end
-            return Catalog.toList(rows, 1, type(scope) == "string" and scope or nil).data[1]
+        -- 一次 RANDOM() 抽两本：避开刚抽过的，不必先 COUNT 再 OFFSET。
+        local rows = Catalog.listBooks(scope, { read_status = status, random = true, limit = 2 })
+        if rows[1] then
+            local pick = rows[1]
+            if pick.stable_id == exclude and rows[2] then pick = rows[2] end
+            return Catalog.toList({ pick }, 1, type(scope) == "string" and scope or nil).data[1]
         end
     end
 end
