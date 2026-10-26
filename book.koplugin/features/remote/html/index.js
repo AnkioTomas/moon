@@ -8,10 +8,11 @@ function refreshStatus() {
             ? '不可用'
             : fmt(status.storage_available);
         var reading = el('status-reading');
-        reading.textContent = status.reading ? (status.book || '正在阅读') : '未在阅读';
+        reading.setAttribute('translate', 'no');
+        reading.textContent = status.reading ? (status.book || t('正在阅读')) : t('未在阅读');
         reading.title = reading.textContent;
     }).catch(function () {
-        el('status-reading').textContent = '状态不可用';
+        el('status-reading').textContent = t('状态不可用');
     });
 }
 

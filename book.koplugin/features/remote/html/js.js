@@ -25,16 +25,15 @@ var I18N = (function () {
     function fill(s, args) {
         return s.replace(/%(\d)/g, function (m, n) { var v = args[n - 1]; return v == null ? m : v; });
     }
-    // 整句查表；失败再套模板（捕获段递归翻译，如「主题：浅色」）
-    function tr(s, depth) {
+    // 只翻译模板本身，捕获段可能是用户文件名或路径，必须原样保留。
+    function tr(s) {
         if (!s) return s;
         if (Object.prototype.hasOwnProperty.call(dict, s)) return dict[s];
-        if ((depth || 0) > 2) return s;
         for (var i = 0; i < tpls.length; i++) {
             var m = tpls[i].re.exec(s);
             if (!m) continue;
             var args = [];
-            tpls[i].order.forEach(function (n, j) { args[n - 1] = tr(m[j + 1], (depth || 0) + 1); });
+            tpls[i].order.forEach(function (n, j) { args[n - 1] = m[j + 1]; });
             return fill(tpls[i].out, args);
         }
         return s;
@@ -50,6 +49,8 @@ var I18N = (function () {
     function skip(e) { return !e || (e.closest && e.closest('[translate="no"]')); }
     function trText(node) {
         if (skip(node.parentNode)) return;
+        var tag = node.parentNode.tagName;
+        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA') return;
         var v = node.nodeValue;
         if (!v || !/[\u3000-\u9fff\uff00-\uffef]/.test(v)) return;
         var m = /^(\s*)([\s\S]*?)(\s*)$/.exec(v);
@@ -59,7 +60,7 @@ var I18N = (function () {
     function trEl(e) {
         if (e.nodeType !== 1 || skip(e)) return;
         var key = e.getAttribute('data-i18n');
-        if (key) e.textContent = t(key);
+        if (key && e.textContent !== t(key)) e.textContent = t(key);
         ATTRS.forEach(function (a) {
             var v = e.getAttribute(a);
             if (v && /[\u3000-\u9fff\uff00-\uffef]/.test(v)) {
@@ -70,15 +71,12 @@ var I18N = (function () {
     }
     function walk(root) {
         if (root.nodeType === 3) return trText(root);
-        if (root.nodeType !== 1 || root.tagName === 'SCRIPT' || root.tagName === 'STYLE' || root.tagName === 'TEXTAREA') return;
+        if (root.nodeType !== 1 || root.tagName === 'SCRIPT' || root.tagName === 'STYLE') return;
         trEl(root);
         var w = document.createTreeWalker(root, 5, null);
         var n;
         while ((n = w.nextNode())) {
-            if (n.nodeType === 3) {
-                var p = n.parentNode && n.parentNode.tagName;
-                if (p !== 'SCRIPT' && p !== 'STYLE' && p !== 'TEXTAREA') trText(n);
-            } else trEl(n);
+            if (n.nodeType === 3) trText(n); else trEl(n);
         }
     }
     function start() {
@@ -129,11 +127,11 @@ function setState(node, text, kind) {
 }
 function jfetch(u, opt) {
     return fetch(u, opt).then(function (r) {
-        return r.text().then(function (t) {
+        return r.text().then(function (text) {
             var d;
-            try { d = JSON.parse(t); } catch (e) { throw 'HTTP ' + r.status; }
+            try { d = JSON.parse(text); } catch (e) { throw 'HTTP ' + r.status; }
             if (!r.ok) {
-                var err = new Error((d && d.error) || ('HTTP ' + r.status));
+                var err = new Error(t((d && d.error) || ('HTTP ' + r.status)));
                 err.status = r.status;
                 throw err;
             }
@@ -269,9 +267,9 @@ function dialog(o) {
         var t = document.documentElement.getAttribute('data-theme');
         return t === 'light' || t === 'dark' ? t : 'auto';
     }
-    function show(t) {
-        btn.title = '主题：' + label[t];
-        btn.setAttribute('aria-label', '切换主题（当前：' + label[t] + '）');
+    function show(theme) {
+        btn.title = t('主题：%1', t(label[theme]));
+        btn.setAttribute('aria-label', t('切换主题（当前：%1）', t(label[theme])));
     }
     show(current());
     btn.onclick = function () {

@@ -174,16 +174,16 @@ loadConfig().then(function (config) {
         bar.innerHTML = '';
         tabs.forEach(function (path, i) {
             var t = node('div', 'tab-item' + (i === activeTab ? ' active' : ''));
+            t.setAttribute('translate', 'no');
             t.setAttribute('role', 'tab');
             t.setAttribute('aria-selected', i === activeTab ? 'true' : 'false');
             t.title = path;
-            var tl = node('span', 'tab-label', path === '/' ? '根目录' : baseName(path));
-            if (path !== '/') tl.setAttribute('translate', 'no');
+            var tl = node('span', 'tab-label', path === '/' ? I18N.t('根目录') : baseName(path));
             t.appendChild(tl);
             if (tabs.length > 1) {
                 var x = node('button', 'tab-close', '×');
                 x.type = 'button';
-                x.setAttribute('aria-label', '关闭标签');
+                x.setAttribute('aria-label', I18N.t('关闭标签'));
                 x.onclick = function (e) { e.stopPropagation(); closeTabs([i]); };
                 t.appendChild(x);
             }
@@ -239,10 +239,11 @@ loadConfig().then(function (config) {
     function renderBreadcrumb() {
         var box = el('path');
         box.innerHTML = '';
+        box.setAttribute('translate', 'no');
         box.title = cur;
         var parts = cur.split('/').filter(Boolean);
         var acc = '';
-        var root = node('button', 'crumb', '根目录');
+        var root = node('button', 'crumb', t('根目录'));
         root.type = 'button';
         root.onclick = function (e) { e.stopPropagation(); load('/'); };
         box.appendChild(root);
@@ -251,7 +252,6 @@ loadConfig().then(function (config) {
             box.appendChild(node('span', 'crumb-sep', '/'));
             var target = acc;
             var c = node('button', 'crumb', p);
-            c.setAttribute('translate', 'no');
             c.type = 'button';
             c.onclick = function (e) { e.stopPropagation(); load(target); };
             box.appendChild(c);
@@ -269,7 +269,7 @@ loadConfig().then(function (config) {
         var more = node('button', 'crumb crumb-more', '…');
         more.type = 'button';
         more.title = cur;
-        more.setAttribute('aria-label', '显示完整路径');
+        more.setAttribute('aria-label', t('显示完整路径'));
         more.onclick = function (e) { e.stopPropagation(); editPath(); };
         box.insertBefore(more, box.firstChild);
         // kids: [根目录, sep, a, sep, b, ...]；保留最后一个层级及其前一个分隔符
@@ -427,7 +427,7 @@ loadConfig().then(function (config) {
         if (window.matchMedia('(max-width: 720px)').matches && config.shortcuts.length) {
             items.push(null);
             config.shortcuts.forEach(function (sc) {
-                items.push([(sc.kind === 'file' ? '下载 ' : '前往 ') + sc.label, function () {
+                items.push([t(sc.kind === 'file' ? '下载 %1' : '前往 %1', t(sc.label)), function () {
                     if (sc.kind === 'file') downloadShortcut(sc); else load(sc.path);
                 }]);
             });
@@ -878,11 +878,11 @@ loadConfig().then(function (config) {
             body.innerHTML = '';
             var types = { directory: '文件夹', file: '文件', link: '链接' };
             var rows = [
-                ['名称', s.name],
-                ['位置', dirName(s.path)],
-                ['类型', (types[s.type] || s.type) + (s.type === 'file' && ext(s.name) ? '（' + ext(s.name).toUpperCase() + '）' : '')]
+                ['名称', s.name, true],
+                ['位置', dirName(s.path), true],
+                ['类型', t(types[s.type] || s.type) + (s.type === 'file' && ext(s.name) ? '（' + ext(s.name).toUpperCase() + '）' : '')]
             ];
-            if (s.target) rows.push(['链接目标', s.target]);
+            if (s.target) rows.push(['链接目标', s.target, true]);
             if (s.size != null) rows.push(['逻辑大小', fmt(s.size) + '（' + s.size + ' 字节）']);
             if (s.blocks != null) rows.push(['实际大小', fmt(s.blocks * 512)]);
             if (s.type === 'directory') {
@@ -897,7 +897,9 @@ loadConfig().then(function (config) {
             if (s.protected) rows.push(['保护', '重要路径，不可删除或移动']);
             rows.forEach(function (r) {
                 body.appendChild(node('dt', null, r[0]));
-                body.appendChild(node('dd', null, r[1]));
+                var value = node('dd', null, r[1]);
+                if (r[2]) value.setAttribute('translate', 'no');
+                body.appendChild(value);
             });
         }).catch(function (err) {
             body.innerHTML = '';
@@ -1046,7 +1048,8 @@ loadConfig().then(function (config) {
     config.shortcuts.forEach(function (s) {
         var b = document.createElement('button');
         b.type = 'button';
-        b.textContent = s.label;
+        b.setAttribute('translate', 'no');
+        b.textContent = t(s.label);
         b.setAttribute('data-path', s.path);
         b.setAttribute('data-kind', s.kind || 'directory');
         b.title = s.path;
@@ -1409,7 +1412,7 @@ loadConfig().then(function (config) {
                 }
                 var msg = 'HTTP ' + xhr.status;
                 try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
-                var err = new Error(msg);
+                var err = new Error(t(msg));
                 err.status = xhr.status;
                 reject(err);
             };

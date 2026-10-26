@@ -20,7 +20,7 @@ function install(file) {
         var msg = err.message || String(err);
         if (err.status === 400) msg = '这不是月读插件安装包';
         else if (err.status === 409) msg = '设备正在安装其它更新，请稍后再试';
-        setState(state, '安装失败: ' + msg, 'err');
+        setState(state, t('安装失败: %1', t(msg)), 'err');
         busy = false;
         pick.disabled = false;
     });
