@@ -171,7 +171,7 @@ end
 
 --- 开书：按 uuid 查原文件交给 kindle.koplugin，拿到真实路径再走我们的阅读器。
 --- KFX 首次要转换（kindle-helper 要几分钟）：放进 fork 子进程当后台任务，UI 不卡、可取消、可转后台；
---- 转换完时用户还在等才继续开，转了后台只提示。
+--- 转换完时用户还在等才继续开，转了后台只提示。相对可用内存偏大的 KFX 先确认再入队，避免默默 OOM。
 function Source:openBookAsync(identity, _opts, cb)
     local rows, err = Kindle.query("p_uuid = ?", identity.stable_id)
     local row = rows and rows[1]
@@ -203,44 +203,67 @@ function Source:openBookAsync(identity, _opts, cb)
         return handle
     end
 
-    local Tasks = require("workers.tasks")
-    local foreground = true
-    local task, reason = Tasks.enqueue{
-        key = "kindle\0convert\0" .. row.uuid,
-        kind = "cache",
-        title = row.title,
-        cancellable = true,
-        run = function(report, done)
-            report(_("首次打开需要转换，可能要几分钟"))
-            return require("workers.job").run(function()
-                local path, convert_err = cm:ensureCachedEpub(book)
-                return { ok = path ~= nil, err = convert_err }
-            end, {
-                name = "kindle.convert",
-                kind = "medium",
-                on_done = done,
-                on_failed = function(job_err) done({ ok = false, err = tostring(job_err) }) end,
-            })
-        end,
-        on_done = function(result)
-            if cancelled then return end
-            if foreground then
-                if result.ok then open() else cb(nil, result.err or _("无法打开书籍")) end
-            elseif result.ok then
-                require("ui.themes.widgets.toast"):new{ text = T(_("「%1」已转换完成，可以打开了"), row.title) }:show()
-            else
-                require("ui.themes.widgets.toast"):new{ text = T(_("「%1」转换失败"), row.title) }:show()
-            end
-        end,
-    }
-    if not task then
-        return SourceBase.defer(cb, nil, reason == "running" and _("这本书正在转换，请稍后再试") or _("任务队列已满"))
+    local function enqueueConvert()
+        if cancelled then return end
+        local Tasks = require("workers.tasks")
+        local foreground = true
+        local task, reason = Tasks.enqueue{
+            key = "kindle\0convert\0" .. row.uuid,
+            kind = "cache",
+            title = row.title,
+            cancellable = true,
+            run = function(report, done)
+                report(_("首次打开需要转换，可能要几分钟"))
+                return require("workers.job").run(function()
+                    local path, convert_err = cm:ensureCachedEpub(book)
+                    return { ok = path ~= nil, err = convert_err }
+                end, {
+                    name = "kindle.convert",
+                    kind = "medium",
+                    on_done = done,
+                    on_failed = function(job_err) done({ ok = false, err = tostring(job_err) }) end,
+                })
+            end,
+            on_done = function(result)
+                if cancelled then return end
+                if foreground then
+                    if result.ok then open() else cb(nil, result.err or _("无法打开书籍")) end
+                elseif result.ok then
+                    require("ui.themes.widgets.toast"):new{ text = T(_("「%1」已转换完成，可以打开了"), row.title) }:show()
+                else
+                    require("ui.themes.widgets.toast"):new{ text = T(_("「%1」转换失败"), row.title) }:show()
+                end
+            end,
+        }
+        if not task then
+            return cb(nil, reason == "running" and _("这本书正在转换，请稍后再试") or _("任务队列已满"))
+        end
+        require("workers.ui.task_dialog").follow(task, function() foreground = false end)
+        handle.cancel = function()
+            cancelled = true
+            task.cancel()
+        end
     end
-    require("workers.ui.task_dialog").follow(task, function() foreground = false end)
-    handle.cancel = function()
-        cancelled = true
-        task.cancel()
+
+    local size = attr(row.location, "size") or 0
+    local Mem = require("utils.mem")
+    if Mem.isHeavy(size) then
+        local file_mb = Mem.mb(size) or 1
+        local free_mb = Mem.mb(Mem.availableBytes())
+        local text = free_mb
+            and T(_("这本书文件很大（约 %1 MB；当前可用内存约 %2 MB）。首次打开需要由 kindle.koplugin 转换成 EPUB，转换过程内存占用很高，在 Kindle 上可能卡死或被系统强制结束，并可能耗时很久。\n\n仍要转换并打开吗？"), file_mb, free_mb)
+            or T(_("这本书文件很大（约 %1 MB）。首次打开需要由 kindle.koplugin 转换成 EPUB，转换过程内存占用很高，在 Kindle 上可能卡死或被系统强制结束，并可能耗时很久。\n\n仍要转换并打开吗？"), file_mb)
+        require("ui.themes.widgets.confirm"):new{
+            text = text,
+            ok_text = _("仍然转换"),
+            cancel_text = _("取消"),
+            ok_callback = enqueueConvert,
+            cancel_callback = function() cb(nil, nil, { cancelled = true }) end,
+        }:show()
+        return handle
     end
+
+    enqueueConvert()
     return handle
 end
 

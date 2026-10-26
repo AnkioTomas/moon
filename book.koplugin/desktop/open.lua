@@ -11,7 +11,9 @@ local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
 local Perf = require("utils.perf")
 local Store = require("book.store")
+local Mem = require("utils.mem")
 local _ = require("gettext")
+local T = require("ffi/util").template
 local Toast = require("ui.themes.widgets.toast")
 
 local Open = {
@@ -40,13 +42,13 @@ local function cancelPending()
     if job and job.cancel then job:cancel() end
 end
 
---- 超大 EPUB 且从没开过（没有 sidecar）：首次排版最容易把设备内存吃光。
+--- 相对当前可用内存偏大、且从没开过（没有 sidecar）：首次打开最容易把设备内存吃光。
 ---@param path string
----@return boolean
+---@return boolean, number size
 local function isHeavyFirstOpen(path)
-    if not path:lower():match("%.epub$") then return false end
     local size = require("libs/libkoreader-lfs").attributes(path, "size") or 0
-    return size >= require("reader.prefs").BIG_BOOK_BYTES and not require("docsettings"):hasSidecarFile(path)
+    if require("docsettings"):hasSidecarFile(path) then return false, size end
+    return Mem.isHeavy(size), size
 end
 
 --- 下一拍打开阅读器；用户已切到其他文档时丢弃本次交接。
@@ -76,9 +78,15 @@ local function showReader(plugin, path, generation, done)
                 end))
             end)
         end
-        if isHeavyFirstOpen(path) then
+        local heavy, size = isHeavyFirstOpen(path)
+        if heavy then
+            local file_mb = Mem.mb(size) or 1
+            local free_mb = Mem.mb(Mem.availableBytes())
+            local text = free_mb
+                and T(_("这本书文件很大（约 %1 MB；当前可用内存约 %2 MB），首次打开时可能占满内存，导致卡死甚至被系统强制结束。这通常是 KOReader 处理超大文件的限制，不是月读的问题。对 EPUB 已默认关闭内嵌字体与内嵌样式以减轻负担；若仍卡死，建议先拆分书籍或压缩其中的图片。\n\n仍要打开吗？"), file_mb, free_mb)
+                or T(_("这本书文件很大（约 %1 MB），首次打开时可能占满内存，导致卡死甚至被系统强制结束。这通常是 KOReader 处理超大文件的限制，不是月读的问题。对 EPUB 已默认关闭内嵌字体与内嵌样式以减轻负担；若仍卡死，建议先拆分书籍或压缩其中的图片。\n\n仍要打开吗？"), file_mb)
             require("ui.themes.widgets.confirm"):new{
-                text = _("这本书文件很大（超过 20 MB），首次打开时 KOReader 的排版引擎可能占满内存，导致卡死甚至被系统强制结束。这不是月读的问题，而是 KOReader 排版引擎处理超大文件的限制。已默认关闭内嵌字体与内嵌样式以减轻负担；若仍卡死，建议先拆分书籍或压缩其中的图片。\n\n仍要打开吗？"),
+                text = text,
                 ok_text = _("仍然打开"),
                 cancel_text = _("取消"),
                 ok_callback = open,
@@ -142,6 +150,10 @@ function Open.book(plugin, book, on_done, opts)
         logger.dbg("book.perf open.source", Perf.elapsedMs(started_at), "ms", book.source_id, path ~= nil)
         if meta and meta.handled then
             done(true)
+            return
+        end
+        if meta and meta.cancelled then
+            done(false)
             return
         end
         if not path then

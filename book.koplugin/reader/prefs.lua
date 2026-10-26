@@ -18,7 +18,8 @@ local logger = require("utils.log")
 
 local M = {}
 
--- 超过此大小的书（几十 MB 插图合集）按「重」处理：默认不用内嵌字体和样式。
+-- 超过此大小的书按「重」处理：默认不用内嵌字体和样式（固定阈值，不跟瞬时可用内存晃）。
+-- 开书确认阈值见 utils.mem.warnThresholdBytes（随可用内存在 8–40MB 间伸缩）。
 M.BIG_BOOK_BYTES = 20 * 1024 * 1024
 
 -- 不在 configurable 里、由 KOReader 的样式微调模块直接存进 sidecar 的排版键（行距 / 段距等微调与自定义 CSS 在这里）。

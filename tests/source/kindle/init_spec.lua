@@ -159,6 +159,41 @@ Assert.is_nil(path)
 source:openBookAsync({ source_id = "kindle", stable_id = "u1" }, nil, function(p, e) path, err = p, e end)
 enqueued.on_done({ ok = false, err = "坏书" })
 Assert.eq(err, "坏书")
+
+-- 超大 KFX 待转换：先确认（点明 kindle.koplugin），确认后才入队；取消带 cancelled。
+do
+    local confirms = {}
+    package.loaded["ui.themes.widgets.confirm"] = {
+        new = function(_self, opts)
+            return { show = function() confirms[#confirms + 1] = opts end }
+        end,
+    }
+    local lfs = require("libs/libkoreader-lfs")
+    local real_attributes = lfs.attributes
+    lfs.attributes = function(path, what)
+        if path == kfx and what == "size" then return 40 * 1024 * 1024 end
+        return real_attributes(path, what)
+    end
+    enqueued = nil
+    source:openBookAsync({ source_id = "kindle", stable_id = "u1" }, nil, function(p, e) path, err = p, e end)
+    Assert.is_nil(enqueued)
+    Assert.eq(#confirms, 1)
+    Assert.matches(confirms[1].text, "kindle.koplugin")
+    Assert.matches(confirms[1].text, "约 40 MB")
+    confirms[1].ok_callback()
+    Assert.eq(enqueued.kind, "cache")
+
+    local meta
+    enqueued = nil
+    source:openBookAsync({ source_id = "kindle", stable_id = "u1" }, nil, function(p, e, m)
+        path, err, meta = p, e, m
+    end)
+    confirms[#confirms].cancel_callback()
+    Assert.is_nil(enqueued)
+    Assert.is_nil(path)
+    Assert.eq(meta.cancelled, true)
+    lfs.attributes = real_attributes
+end
 package.loaded["workers.tasks"], package.loaded["workers.ui.task_dialog"] = nil, nil
 
 package.loaded["lua/open_file_ext"] = nil
