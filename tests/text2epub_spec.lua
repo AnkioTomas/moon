@@ -308,6 +308,18 @@ do
         function(o, e) ok, err = o, e end)
     Assert.is_true(ok)
 
+    -- text_file：提取落盘的临时文件，优先于 source
+    local extracted = os.tmpname()
+    local ef = assert(io.open(extracted, "wb"))
+    ef:write("第一章\n正文行")
+    ef:close()
+    ok, err = nil, nil
+    Text2Epub.build({ dest = "/tmp/out.epub", source = "/missing.txt", text_file = extracted, title = "书" },
+        function(o, e) ok, err = o, e end)
+    Assert.is_true(ok)
+    Assert.eq(written.chapters[1].title, "第一章")
+    os.remove(extracted)
+
     -- 读失败、写失败都回调错误
     Text2Epub.build({ dest = "/tmp/out.epub", source = path }, function(o, e) ok, err = o, e end)
     Assert.is_nil(ok)

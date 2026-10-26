@@ -128,28 +128,43 @@ function Reflow.runAsync(ui, identity, cb, on_progress)
         cb(dest)
     end
 
-    ---@param text string|nil nil 时子进程读原文件
-    local function build(text)
-        if cancelled then return end
+    ---@param text_file string|nil 提取出的临时 txt；nil 时子进程读原文件（TXT）
+    local function build(text_file)
+        if cancelled then
+            if text_file then os.remove(text_file) end
+            return
+        end
         Paths.ensureBookWork(identity.stable_id, identity.source_id)
         local ok, err = Paths.ensureDir(dir)
-        if not ok then return cb(nil, err) end
-        opts.text = text
-        current = Text2Epub.build(opts, finish, on_progress)
+        if not ok then
+            if text_file then os.remove(text_file) end
+            return cb(nil, err)
+        end
+        -- 全文只落盘，不进主进程字符串；子进程自己读。source 仍是原书路径（推断书名）。
+        opts.text = nil
+        opts.text_file = text_file
+        current = Text2Epub.build(opts, function(ok_build, build_err)
+            if text_file then os.remove(text_file) end
+            finish(ok_build, build_err)
+        end, on_progress)
     end
 
     if origin:lower():match("%.txt$") then
         build(nil)
     else
-        current = require("features.reflow.extract").run(ui, function(text, err)
-            if not text then return cb(nil, err) end
-            build(text)
+        current = require("features.reflow.extract").run(ui, function(text_file, err)
+            if not text_file then return cb(nil, err) end
+            build(text_file)
         end, on_progress)
     end
     return { cancel = function()
         cancelled = true
-        current.cancel()
+        if current then current.cancel() end
         os.remove(dest .. ".part")
+        if opts.text_file then
+            os.remove(opts.text_file)
+            opts.text_file = nil
+        end
     end }
 end
 
