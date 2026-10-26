@@ -7,9 +7,10 @@ reader.prefs 离线用例：捕获、落库与应用。
 
 local Assert = require("support.assert")
 
--- 全局设置桩：saveDefaults 写这里，inject 从这里读默认插件字体。
+-- 全局设置桩：saveDefaults 写这里，inject / fromDefaults 从这里读。
 local global_data, flushed = {}, 0
 _G.G_reader_settings = {
+    data = global_data,
     readSetting = function(_self, key) return global_data[key] end,
     has = function(_self, key) return global_data[key] ~= nil end,
     saveSetting = function(_self, key, value) global_data[key] = value end,
@@ -18,12 +19,17 @@ _G.G_reader_settings = {
 }
 
 local saved_payload
+local other_payload
 local fail_write
+local fail_replace
 local warnings = {}
 local resolved_font_ids = {}
 package.preload["book.books_db"] = function()
     return {
         getReaderPrefs = function(source_id, stable_id)
+            if source_id == "fanqie" and stable_id == "other" then
+                return other_payload
+            end
             Assert.eq(source_id, "moon")
             Assert.eq(stable_id, "book-1")
             return saved_payload
@@ -33,6 +39,12 @@ package.preload["book.books_db"] = function()
             Assert.eq(stable_id, "book-1")
             if fail_write then return false end
             saved_payload = payload
+            return true
+        end,
+        replaceAllReaderPrefs = function(payload)
+            if fail_replace then return false end
+            saved_payload = payload
+            if other_payload ~= nil then other_payload = payload end
             return true
         end,
     }
@@ -52,6 +64,9 @@ package.preload["book.store"] = function()
         identityFor = function(path)
             if path == "/chapter.html" then
                 return { source_id = "moon", stable_id = "book-1", chapter_idx = 1 }
+            end
+            if path == "/chapter2.html" then
+                return { source_id = "moon", stable_id = "book-1", chapter_idx = 2 }
             end
             return { source_id = "moon", stable_id = "book-1" }
         end,
@@ -310,6 +325,8 @@ ui.config = { options = { prefix = "copt" } }
 ui.document.configurable.book_font_face = "tmp"
 ui.font.font_face = "Demo Face"
 ui.doc_settings.data.book_reader_font_id = "demo.ttf"
+-- 另一本已有快照的书，saveDefaults 必须一起覆盖。
+other_payload = "{font_face=\"Old Face\",copt={font_size=10}}"
 Assert.is_true(ReaderPrefs.saveDefaults(ui))
 Assert.eq(global_data.cre_font, "Demo Face")
 Assert.eq(global_data.book_reader_default_font_id, "demo.ttf")
@@ -319,10 +336,121 @@ for key, value in pairs(ui.document.configurable) do
     if key ~= "book_font_face" and (vt == "number" or vt == "string") then Assert.eq(global_data["copt_" .. key], value) end
 end
 Assert.eq(flushed, 1)
+local synced = require("json").decode(other_payload)
+Assert.eq(synced.font_face, "Demo Face")
+Assert.eq(synced.copt.font_size, ui.document.configurable.font_size)
 -- 新书 sidecar 没有字体 id 时，按默认插件字体注册。
 resolved_font_ids = {}
 ReaderPrefs.inject({ data = {}, readSetting = function() end, saveSetting = function() end }, { file = "/x.epub", setFontFace = function() end })
 Assert.eq(resolved_font_ids[1], "demo.ttf")
 Assert.is_false(ReaderPrefs.saveDefaults({ document = {} }))
+
+-- 章节书无 per-book 快照时，从全局默认注入（盖住旧章 sidecar）。
+saved_payload = nil
+for k in pairs(global_data) do global_data[k] = nil end
+global_data.copt_font_size = 33
+global_data.copt_line_spacing = 120
+global_data.cre_font = "Demo Face"
+global_data.book_reader_default_font_id = "demo.ttf"
+local from_global = {
+    data = { copt_font_size = 11 },
+    saveSetting = ui.doc_settings.saveSetting,
+    readSetting = ui.doc_settings.readSetting,
+    delSetting = ui.doc_settings.delSetting,
+}
+Assert.is_true(ReaderPrefs.inject(from_global, { file = "/chapter.html", setFontFace = function() end }))
+Assert.eq(from_global.data.copt_font_size, 33)
+Assert.eq(from_global.data.copt_line_spacing, 120)
+Assert.eq(from_global.data.font_face, "Demo Face")
+
+-- 有 per-book 快照时仍优先该书（换章不回落全局）。
+saved_payload = require("json").encode({
+    font_face = "Book Face",
+    copt = { font_size = 18 },
+})
+global_data.copt_font_size = 99
+local prefer_book = {
+    data = {},
+    saveSetting = ui.doc_settings.saveSetting,
+    readSetting = ui.doc_settings.readSetting,
+    delSetting = ui.doc_settings.delSetting,
+}
+Assert.is_true(ReaderPrefs.inject(prefer_book, { file = "/chapter.html", setFontFace = function() end }))
+Assert.eq(prefer_book.data.copt_font_size, 18)
+Assert.eq(prefer_book.data.font_face, "Book Face")
+
+-- replaceAll 失败只打日志，saveDefaults 仍算成功（全局已落盘）。
+fail_replace = true
+warnings = {}
+ui.document.configurable.font_size = 25
+Assert.is_true(ReaderPrefs.saveDefaults(ui))
+Assert.eq(global_data.copt_font_size, 25)
+Assert.eq(#warnings, 1)
+Assert.matches(warnings[1][1], "replaceAll failed")
+fail_replace = false
+fail_write = false
+
+local function emptySidecar()
+    return {
+        data = {},
+        saveSetting = ui.doc_settings.saveSetting,
+        readSetting = ui.doc_settings.readSetting,
+        delSetting = ui.doc_settings.delSetting,
+    }
+end
+
+-- ========== 产品场景补全 ==========
+
+-- 1) 本章改配置（不点「保存为默认」）→ 下一章跟随
+--    模拟：改 configurable → captureAndSave（关章）→ inject 另一章文件
+saved_payload = nil
+ui.document.configurable.font_size = 28
+ui.document.configurable.h_page_margins = { 15, 15 }
+ui.font.font_face = "Demo Face"
+ui.doc_settings.data.book_reader_font_id = "demo.ttf"
+Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
+local next_chapter = emptySidecar()
+Assert.is_true(ReaderPrefs.inject(next_chapter, { file = "/chapter2.html", setFontFace = function() end }))
+Assert.eq(next_chapter.data.copt_font_size, 28)
+Assert.eq(next_chapter.data.copt_h_page_margins[1], 15)
+Assert.eq(next_chapter.data.font_face, "Demo Face")
+
+-- 2) 章节书「保存为默认」→ 下一章吃到刚存的默认（replaceAll 已写本书快照）
+ui.document.configurable.font_size = 31
+ui.document.configurable.line_spacing = 140
+other_payload = "{font_face=\"X\",copt={font_size=1}}"
+Assert.is_true(ReaderPrefs.saveDefaults(ui))
+local after_default = emptySidecar()
+Assert.is_true(ReaderPrefs.inject(after_default, { file = "/chapter2.html", setFontFace = function() end }))
+Assert.eq(after_default.data.copt_font_size, 31)
+Assert.eq(after_default.data.copt_line_spacing, 140)
+Assert.eq(require("json").decode(other_payload).copt.font_size, 31)
+
+-- 3a) 文件书：inject 不灌 reader_prefs；老 sidecar 原样保留（不被全书快照盖掉）
+saved_payload = require("json").encode({ font_face = "Should Not Apply", copt = { font_size = 77 } })
+local old_file_book = {
+    data = { copt_font_size = 12, font_face = "Old Sidecar" },
+    saveSetting = ui.doc_settings.saveSetting,
+    readSetting = ui.doc_settings.readSetting,
+    delSetting = ui.doc_settings.delSetting,
+}
+Assert.is_false(ReaderPrefs.inject(old_file_book, { file = "/x.epub", setFontFace = function() end }))
+Assert.eq(old_file_book.data.copt_font_size, 12)
+Assert.eq(old_file_book.data.font_face, "Old Sidecar")
+
+-- 3b) 文件书新书路径：saveDefaults 后全局有 copt_*（供 KOReader loadDefaults）；
+--     整本 inject 仍 false，不写跨文件 prefs（新文件书靠 G_reader_settings，不靠 inject）
+for k in pairs(global_data) do global_data[k] = nil end
+ui.document.configurable.font_size = 36
+ui.document.configurable.t_page_margin = 20
+Assert.is_true(ReaderPrefs.saveDefaults(ui))
+Assert.eq(global_data.copt_font_size, 36)
+Assert.eq(global_data.copt_t_page_margin, 20)
+Assert.eq(global_data.cre_font, "Demo Face")
+local new_file_book = emptySidecar()
+Assert.is_false(ReaderPrefs.inject(new_file_book, { file = "/brand-new.epub", setFontFace = function() end }))
+Assert.is_nil(new_file_book.data.copt_font_size)
+-- 仅可能写入大书防护的 embedded 默认
+Assert.eq(new_file_book.data.copt_embedded_fonts, 0)
 
 return true

@@ -1074,4 +1074,14 @@ function BookDB.setReaderPrefs(source_id, stable_id, payload)
     ) ~= nil
 end
 
+--- 「保存为默认」时把已有全书快照统一成当前排版；不新建行。
+---@param payload string
+---@return boolean
+function BookDB.replaceAllReaderPrefs(payload)
+    return DB.exec(
+        [[UPDATE books SET reader_prefs=? WHERE reader_prefs IS NOT NULL;]],
+        payload
+    ) ~= nil
+end
+
 return BookDB

@@ -1,4 +1,4 @@
---[[-- 保存为默认配置快捷动作：当前排版与字体成为新开书的默认值。
+--[[-- 保存为默认配置快捷动作：当前排版与字体成为全局默认（所有书下次打开生效）。
 @module koplugin.book.features.panel.actions.reader.save_default
 --]]
 
@@ -20,7 +20,7 @@ return {
     run = function(ctx)
         local ui = ctx.ui
         require("ui.themes.widgets.confirm"):new{
-            text = _("将当前排版和字体保存为新书的默认配置？"),
+            text = _("将当前排版和字体保存为所有书的默认配置？下次打开时生效（含章节源）。"),
             ok_text = _("保存"),
             ok_callback = function()
                 local ok = require("reader.prefs").saveDefaults(ui)
