@@ -53,7 +53,7 @@ function Trends:build(ctx)
             VerticalSpan:new{ width = xs },
         }
         if not trend.enough then
-            col[#col + 1] = Text.box("body", _("阅读不满四个月，攒够数据再来看趋势"), width, { color = t.color.muted })
+            col[#col + 1] = Text.box("body", _("阅读不满四个月，攒够数据再来看趋势"), width, { color = t.color.muted, transparent = true })
             return col
         end
         local w3, w4 = math.floor(width * 0.34), math.floor(width * 0.2)

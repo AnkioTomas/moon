@@ -165,7 +165,7 @@ function Paper.view(page, w, h)
         if item.time > 0 then meta[#meta + 1] = os.date("%m-%d", item.time) end
         local mark = item.read and "" or "•"
         local body = VerticalGroup:new{ align = "left",
-            Text.box("body", item.title, text_w, { max_lines = 2, bold = not item.read,
+            Text.box("body", item.title, text_w, { max_lines = 2, bold = not item.read, transparent = true,
                 color = item.read and faint or t.color.accent }),
             VerticalSpan:new{ width = Theme.px(t.space.xs) },
             Text.line("caption", table.concat(meta, " · "), { width = text_w, color = faint }) }
@@ -191,7 +191,7 @@ function Paper.view(page, w, h)
         local empty = status or (q ~= "" and _("没有匹配的文章") or (mode.id == "star" and _("还没有收藏，点文章右侧的星标可收藏")
             or mode.id == "unread" and _("没有未读文章") or _("暂无文章")))
         list[1] = padded(VerticalGroup:new{ VerticalSpan:new{ width = pad },
-            Text.box("body", empty, iw, { color = faint }) })
+            Text.box("body", empty, iw, { color = faint, transparent = true }) })
     end
 
     local group_all = VerticalGroup:new{ align = "left", head, title, filter, list,
