@@ -12,6 +12,7 @@ package.preload["json"] = function()
 end
 package.preload["device"] = function()
     return {
+        model = "KindlePaperWhite5",
         screen = {
             getWidth = function() return 480 end,
             getHeight = function() return 800 end,
@@ -39,7 +40,7 @@ package.preload["http.request"] = function()
             return { cancel = function() end }
         end,
         download = function(opts, dest, cb)
-            requests[#requests + 1] = { kind = "download", url = opts.url, dest = dest }
+            requests[#requests + 1] = { kind = "download", url = opts.url, dest = dest, opts = opts }
             local file = io.open(dest, "wb")
             if file then
                 file:write(PNG)
@@ -93,6 +94,11 @@ Assert.eq(requests[1].url, "https://api.ankio.net/weather?city=")
 Assert.eq(requests[2].url, "https://api.ankio.net/hitokoto")
 Assert.eq(requests[3].url, "https://api.ankio.net/myrl?type=json")
 Assert.eq(requests[4].url, "https://api.ankio.net/bing?type=json")
+local expected_ua = "Mozilla/5.0 (" .. require("ffi").os .. "; KindlePaperWhite5) Moon/"
+    .. require("bookversion") .. " KOReader/" .. require("version"):getShortVersion()
+for _idx, request in ipairs(requests) do
+    Assert.eq(request.opts.headers["User-Agent"], expected_ua)
+end
 
 requests[1].cb('{"current_condition":[{"temp_C":"1","weatherCode":"113","weatherDesc":[{"value":"Sunny"}]}]}')
 requests[2].cb('{"hitokoto":"月"}')
@@ -107,6 +113,8 @@ Assert.eq(requests[5].kind, "download")
 Assert.is_true(tostring(requests[5].url):find("myrl", 1, true) ~= nil)
 Assert.eq(requests[6].kind, "download")
 Assert.eq(requests[6].url, "https://www.bing.com/th?id=OHR.x.jpg")
+Assert.eq(requests[5].opts.headers["User-Agent"], expected_ua)
+Assert.eq(requests[6].opts.headers["User-Agent"], expected_ua)
 
 requests = {}
 ensureAll()
