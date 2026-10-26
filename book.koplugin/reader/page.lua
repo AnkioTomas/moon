@@ -16,7 +16,7 @@ local Reader = {}
 --- 开关关闭（默认）时去掉它，面板留着，改动直接重排渲染，不弹提示。
 local function applyMarginPopup()
     local popup = require("utils.settings").get("reader").margin_popup == true
-    for _idx, tab in ipairs(require("ui/data/creoptions")) do
+    for _idx, tab in ipairs(require("ui/data/creoptions") --[[@as { options: table[] }[] ]]) do
         for _idx2, option in ipairs(tab.options) do
             if option.name and option.name:find("page_margin", 1, true) then
                 option.hide_on_apply = popup or nil

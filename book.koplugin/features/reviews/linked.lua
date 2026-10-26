@@ -39,8 +39,8 @@ local AHEAD = 2
 
 ---@class ReviewLink
 ---@field book_id string 微信读书 bookId
----@field title string
----@field author string
+---@field title string|nil
+---@field author string|nil
 
 --- 一条段评热点：identity 是该句所属的微信章身份（点按开段评用）。
 ---@class ReviewEntry

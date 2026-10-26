@@ -83,14 +83,14 @@ local function pushEach(ids, push_one, label, report, cb)
 end
 
 --- 本地已标删的书：逐本 remove_one 推远端，成功则撕墓碑。
+---@type table<string, boolean> 源 id → 正在推删（启动 pushDirty 与书架同步并发时同一本只推一次）
+local deleting = {}
+
 ---@param source_id string
 ---@param remove_one fun(stable_id: string, done: fun(ok: any)): { cancel: fun() }|nil 远端删一本
 ---@param report ShelfReport
 ---@param cb fun(pushed: integer)
 ---@return { cancel: fun() }
----@type table<string, boolean> 源 id → 正在推删（启动 pushDirty 与书架同步并发时同一本只推一次）
-local deleting = {}
-
 function Shelf.pushDeletes(source_id, remove_one, report, cb)
     local BookDB = require("book.books_db")
     -- 已有一轮在推：本轮跳过。没推完的墓碑是脏行，reconcile 不会把它复活。

@@ -235,6 +235,7 @@ local function searchRow(self, groups)
             subtitle = _("按名称或说明查找设置项"),
             callback = function()
                 local Search = require("desktop.pages.setting.search")
+                ---@cast groups table[]|{ search_hits?: table }
                 groups.search_hits = groups.search_hits or Search.build(groups)
                 Search.prompt(self.desktop, groups.search_hits)
             end,

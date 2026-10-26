@@ -34,7 +34,7 @@ end
 --- 备份文件名 moon-backup-YYYYMMDD-HHMM.zip
 ---@return string
 function Backup.fileName()
-    return os.date("moon-backup-%Y%m%d-%H%M.zip")
+    return os.date("moon-backup-%Y%m%d-%H%M.zip") --[[@as string]]
 end
 
 ---@param lfs table
@@ -157,7 +157,8 @@ end
 ---@param root string
 ---@param Reader table ffi/archiver 的 Reader 类
 ---@param lfs table
----@return string[]|nil restored 被替换的顶层条目名, string|nil err
+---@return string[]|nil restored 被替换的顶层条目名
+---@return string|nil err
 function Backup.restore(archive, root, Reader, lfs)
     local staging = root .. "/" .. Backup.STAGING
     rmtree(lfs, staging)

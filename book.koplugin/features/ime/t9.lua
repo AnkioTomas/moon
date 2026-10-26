@@ -30,7 +30,8 @@ function T9.mapKey(key)
 end
 
 ---@param syllables string[]
----@return table sig  数字串 → 完整音节表；prefix 数字串 → 半截音节（含完整音节本身）
+---@return table sig 数字串 → 完整音节表
+---@return table prefix 数字串 → 半截音节（含完整音节本身）
 local function indexSyllables(syllables)
     local full, partial = {}, {}
     for _idx, syl in ipairs(syllables) do

@@ -19,9 +19,10 @@ local MOBI_EXT = { mobi = true, prc = true, azw = true }
 ---@param doc table
 ---@return table|nil bb
 function Cover.mobiFallback(doc)
-    local file = type(doc) == "table" and doc.file
+    local file = (type(doc) == "table" and doc.file) --[[@as string|nil]]
     local ext = type(file) == "string" and file:match("%.([^.]+)$")
     if not ext or not MOBI_EXT[ext:lower()] then return nil end
+    ---@cast file string
     local data = require("utils.mobi").cover(file)
     if not data then return nil end
     local ok, bb = pcall(function() return require("ui/renderimage"):renderImageData(data, #data) end)

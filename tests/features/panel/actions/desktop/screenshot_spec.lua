@@ -6,6 +6,7 @@ package.preload["gettext"] = function()
     return function(value) return value end
 end
 
+---@type integer, integer, integer, { delay: number, fn: function }|nil
 local repainted, waited, sent, scheduled = 0, 0, 0, nil
 package.preload["ui/uimanager"] = function()
     return {

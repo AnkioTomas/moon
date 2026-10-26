@@ -33,6 +33,8 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 
 --- 路径解析出的阅读身份（Store.identityFor / ensureIdentity 返回值）。
 ---@class BookIdentity
+---@field derived boolean|nil 派生文档沿用原书身份
+---@field prefetch boolean|nil 后台预取请求
 ---@field source_id string 源标识（moon / wechat / jdread / local 等）
 ---@field stable_id string 源内稳定身份
 ---@field chapter_idx number|nil 章节文件时为章号；整本书为 nil
@@ -45,6 +47,9 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 
 --- 对应表 books：身份列 + 展示元数据 + 软删成员 + sync_status。
 ---@class Book
+---@field is_folder boolean|nil 文件夹视图中的目录条目
+---@field dir string|nil 文件夹条目的完整路径
+---@field read_at number|nil 最近阅读时间
 ---@field source_id string 源标识；与 stable_id 共同组成 PRIMARY KEY
 ---@field stable_id string 源内稳定身份；本地源即文件绝对路径
 ---@field md5 string|nil 内容 partialMD5；本地源用它识别文件改名/移动

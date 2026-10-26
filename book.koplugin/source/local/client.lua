@@ -25,6 +25,8 @@ local rootPath, localRoot = Common.rootPath, Common.localRoot
 local remoteRelativePath, coverPath = Common.remoteRelativePath, Common.coverPath
 
 ---@class LocalClient
+---@field upload_failed table<string, number> 上传失败的冷却时间
+---@field _uploading boolean|nil 是否正在上传
 ---@field cfg table
 ---@field dav WebdavClient
 ---@field _crashed table<string, boolean>|nil

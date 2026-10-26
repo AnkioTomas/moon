@@ -204,6 +204,7 @@ do
     Assert.eq(t[1].uid, "3:a")
     Assert.eq(t[2].uid, "4:b:x", "guid 里带冒号照样拆得回")
     local payload
+    ---@type { fetchContent: function }|nil
     local ops = nil
     package.loaded["source.chapter"] = { openWithUi = function(_s, _i, _b, _o, o) ops = o end }
     src:openBookAsync({ source_id = "subscribe", stable_id = "sabc", book = book }, {}, function() end)
@@ -230,6 +231,6 @@ do
     os.execute("mkdir -p " .. dir)
     local path = dir .. "/zz.html"
     io.open(path, "w"):close()
-    src:dropChapterCache({ stable_id = "3", source_id = "subscribe" }, { uid = "zz" })
+    src:dropChapterCache({ stable_id = "3", source_id = "subscribe" }, { uid = "zz", idx = 1, title = "" })
     Assert.is_nil(io.open(path, "r"), "文章缓存已删")
 end

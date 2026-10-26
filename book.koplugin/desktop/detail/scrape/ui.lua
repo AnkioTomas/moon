@@ -83,7 +83,7 @@ local function clip(s, max)
     for p in s:gmatch("()[%z\1-\127\194-\244][\128-\191]*") do
         n = n + 1
         if n > max then return s:sub(1, p - 1) .. "…" end
-        pos = p
+        pos = p --[[@as integer]]
     end
     return s
 end

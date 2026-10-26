@@ -76,7 +76,7 @@ local function lastChar(unit) local c = M.chars(unit); return c[#c] end
 --- 本行若以开头括号收尾，就把它推到下一行。行首空格丢掉。
 ---@param text string
 ---@param max number 每行容量（与 measure 同单位）
----@param measure fun(unit: string): number|nil 缺省按字符数
+---@param measure (fun(unit: string): number)|nil 缺省按字符数
 ---@param keep string|nil 不拆开的关键词
 ---@return string[]
 function M.breakLines(text, max, measure, keep)

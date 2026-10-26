@@ -826,6 +826,7 @@ function Library:buildPage(ctx)
         end
         body = buildGrid(ctx, books, m, on_tap, true, lib)
     end
+    ---@type function|table
     local right = function(compact) return self:bookTools(compact) end
     if g.id == "folder" then
         right = {

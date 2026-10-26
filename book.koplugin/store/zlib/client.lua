@@ -251,11 +251,6 @@ end
 
 --- 带镜像故障转移与 30x 手动跟随的 JSON 请求。
 --- 成功 cb(data)；最终失败 cb(nil, err)。
----@param method string
----@param path string eAPI 路径（以 / 开头）
----@param opts table session、form、cache_ttl、timeout
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }
 --- 竞速有镜像胜出（说明网络通）时，把同场失败的镜像落盘拉黑；胜出的镜像移出黑名单。
 ---@param lanes table[]
 function Client:_blacklistFailed(lanes)
@@ -276,6 +271,11 @@ function Client:_blacklistFailed(lanes)
     require("utils.settings").saveSource("zlib", self.cfg)
 end
 
+---@param method string
+---@param path string eAPI 路径（以 / 开头）
+---@param opts table session、form、cache_ttl、timeout
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
 function Client:_jsonAsync(method, path, opts, cb)
     local race = not opts.serial and not pinned_base -- 只在还没选定镜像时竞速，之后固定用胜出的那个
     local bases = baseCandidates(self.cfg, race and RACE_WIDTH or SERIAL_ATTEMPTS)

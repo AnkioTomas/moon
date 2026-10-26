@@ -32,7 +32,7 @@ function Wake.boot()
     end
     f = io.open(path, "w")
     if f then
-        f:write(os.date("%Y-%m-%d %H:%M:%S"))
+        f:write(os.date("%Y-%m-%d %H:%M:%S") --[[@as string]])
         f:close()
     end
     Log.flushSync()

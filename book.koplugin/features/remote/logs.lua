@@ -241,7 +241,7 @@ end
 ---@param t number|nil
 ---@return string
 function M.fileName(t)
-    return os.date("moon-logs-%Y%m%d-%H%M.zip", t or os.time())
+    return os.date("moon-logs-%Y%m%d-%H%M.zip", t or os.time()) --[[@as string]]
 end
 
 return M

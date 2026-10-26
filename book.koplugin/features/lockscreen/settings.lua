@@ -48,6 +48,7 @@ local KEYS = { "screensaver_type", "screensaver_document_cover", "screensaver_sh
 --- 已记的键不动：接管期间的中间值不是用户的选择；旧版快照缺的新键在首次写入前补记。
 local function snapshot()
     local saved = G_reader_settings:readSetting(PREVIOUS_KEY) or {}
+    ---@cast saved table
     local changed = false
     for _idx, key in ipairs(KEYS) do
         if saved[key] == nil then
@@ -92,6 +93,7 @@ function M.applyCover(path, transparent)
         G_reader_settings:saveSetting("screensaver_stretch_images", false)
     else
         local saved = G_reader_settings:readSetting(PREVIOUS_KEY)
+        ---@cast saved table
         restore(saved, "screensaver_img_background")
         restore(saved, "screensaver_stretch_images")
     end

@@ -49,11 +49,18 @@ local CACHE_MAX = 50
 local ai_cache, ai_cache_n = {}, 0
 
 ---@class BookLookupPanel : BookThemeModal
+---@field translator table|nil 翻译器替身或原生翻译器
+---@field source string|nil 初始来源
+---@field source_lang string|nil 源语言
+---@field target_lang string|nil 目标语言
+---@field from_highlight boolean|nil 是否由划词打开
+---@field full_page boolean|nil 是否使用较高正文区域
+---@field note_index integer|nil 要编辑的笔记序号
 ---@field ui table|nil ReaderUI
 ---@field text string 查的词 / 选中文字
 ---@field reading string|nil 读音
----@field context { sentence: string, paragraph: string }|nil
----@field dicts { name: string, text: string, html: string|nil, css: string|nil, dir: string|nil }[]
+---@field context { text?: string, sentence: string, paragraph: string }|nil
+---@field dicts { name: string, text: string, html: string|nil, css: string|nil, dir: string|nil, empty?: boolean }[]
 ---@field active string 当前来源 id：dict:<名> / translate / ai
 ---@field content table<string, string> 各来源已就绪的正文
 ---@field status table<string, string> 各来源未就绪时的状态
@@ -279,7 +286,7 @@ function Lookup:onReadNextResult() return self:step(1) end
 function Lookup:onReadPrevResult() return self:step(-1) end
 
 --- 当前词典 Tab 显示的词典。
----@return { name: string, text: string }|nil
+---@return { name: string, text: string, html?: string, css?: string, dir?: string, empty?: boolean }|nil
 function Lookup:currentDict()
     for _idx, d in ipairs(self.dicts) do
         if d.name == self.dict_name then return d end
@@ -348,8 +355,8 @@ end
 
 function Lookup:requestTranslate()
     local translator = self.translator or require("ui/translator")
-    self.source_lang = self.source_lang or translator:getSourceLanguage()
-    self.target_lang = self.target_lang or translator:getTargetLanguage()
+    self.source_lang = self.source_lang or translator:getSourceLanguage() --[[@as string|nil]]
+    self.target_lang = self.target_lang or translator:getTargetLanguage() --[[@as string|nil]]
     if self.jobs.translate then self.jobs.translate.cancel() end
     self.content.translate, self.status.translate = nil, _("正在翻译…")
     self.jobs.translate = require("features.translate.edge").translateAsync(self.text, self.target_lang, self.source_lang,
@@ -399,6 +406,7 @@ function Lookup:requestAi(chain)
     end
     local Explain = require("features.ai.explain")
     local selection = self.context or { text = self.text, sentence = self.text, paragraph = "" }
+    ---@cast selection { text: string, sentence: string, paragraph: string }
     selection.text = self.text
     self.ai_messages = chain or Explain.messages(self.ui, selection)
     self.content.ai, self.status.ai = nil, _("AI 解释中…")

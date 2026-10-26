@@ -36,6 +36,7 @@ local Client = require("store.zlib.client")
 local client = Client.new({ base_url = "https://a.example" })
 
 -- 并发：5 个同时发出，第 3 个先答成功，其余被取消，只回调一次
+---@type integer, table|nil
 local calls, data = 0, nil
 client:_jsonAsync("GET", "/eapi/x", {}, function(d) calls = calls + 1; data = d end)
 Assert.eq(#pending, 5)

@@ -41,6 +41,9 @@ local MoonSettings = require("utils.settings")
 local Screen = Device.screen
 
 ---@class BookThemeModal : InputContainer
+---@field closed boolean|nil 窗口已关闭
+---@field title string|nil 窗口标题
+---@field updateView fun(self: BookThemeModal)|nil 子类重建入口
 ---@field dismissable boolean 点面板外 / 返回键是否关闭
 ---@field close_on_tap boolean 面板内外任意点按都直接关窗（提示、二维码这类无交互面板）；dismissable=false 时不生效
 ---@field swipe_dismiss string|nil 面板内外下滑直接关窗（走 dismiss 语义）："down"（下滑）/"up"（上滑）/"off"（关闭）；
@@ -72,9 +75,9 @@ function Modal.dialogWidth()
 end
 
 --- 下滑关闭是否生效：实例显式设过 swipe_dismiss 时优先，否则跟随全局开关 ui.swipe_dismiss。
+local SWIPE_DISMISS_DIRECTIONS = { down = "south", up = "north" }
 ---@param self BookThemeModal
 ---@return string|nil "south"/"north"（对应手势方向），nil 表示不生效
-local SWIPE_DISMISS_DIRECTIONS = { down = "south", up = "north" }
 local function swipeDismissDirection(self)
     local mode = self.swipe_dismiss
     if mode == nil then

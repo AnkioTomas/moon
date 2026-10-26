@@ -166,7 +166,7 @@ local ann_ink
 function Overlay.annInk()
     if not ann_ink then
         local ok, at, ab = pcall(function()
-            local ann = require("ffi/freetype").newFaceSize(facePath(), 100)
+            local ann = require("ffi/freetype").newFaceSize(facePath(), 100) --[[@as FreeTypeSize]]
             local t, b = ink(ann, ANN_CODES)
             ann:done()
             return t, b

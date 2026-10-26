@@ -49,6 +49,8 @@ local Box = require("ui.themes.widgets.box")
 local Tabbar = require("ui.themes.widgets.tabbar")
 
 ---@class BookDesktop : InputContainer
+---@field _room number 底栏剩余格数
+---@field monitor table|nil 内存监控页缓存
 ---@field closed boolean|nil destroy 置 true；桌面外持有旧引用的回调据此判断是否已关
 ---@field active boolean 前台可刷屏
 ---@field plugin BookPlugin|nil
@@ -64,7 +66,7 @@ local Tabbar = require("ui.themes.widgets.tabbar")
 ---@field layers table|nil 三层 OverlapGroup
 ---@field detail BookDetailPage|nil
 ---@field settings_overlay BookSettingsOverlay|nil
----@field storage_usage { at: integer, list: table[], total: number }|nil 存储空间页的统计缓存（features/storage）
+---@field storage_usage BookStorageUsage|nil 存储空间页的统计缓存（features/storage）
 ---@field storage_job { cancel: fun() }|nil
 ---@field _tabs table[]
 ---@field _shell string|nil 外壳签名：屏幕尺寸 / 主题 / 缩放
@@ -131,7 +133,7 @@ local function extTab(id)
 end
 
 --- 按开关生成 Desktop 底栏 Tab（书城：有可搜索来源才出现）。统计页始终在。
----@return table
+---@return table tabs, number room
 local function desktopTabs()
     local tabs = {
         { id = "home", text = _("首页"), icon = "home" },

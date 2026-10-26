@@ -151,7 +151,7 @@ do
         return { cancel = function() end }
     end
     local ok, e
-    Catalog.ensureInstalledAsync({ kind = "weread", id = "f1", url = "https://x/f1.zip" }, nil,
+    Catalog.ensureInstalledAsync({ name = "f1", kind = "weread", id = "f1", url = "https://x/f1.zip" }, nil,
         function(r, er) ok, e = r, er end)
     Assert.is_nil(ok)
     Assert.eq(e, "字体解压失败")
@@ -206,12 +206,12 @@ do
         write(dest, "test-sfnt")
         return true
     end }
-    local called, result, failure = 0
+    local called, result, failure = 0, nil, nil
     local function callback(ok, err)
         called, result, failure = called + 1, ok, err
     end
     write(Fonts.wereadPath("aik"), "test-sfnt")
-    local handle = Catalog.ensureInstalledAsync({ kind = "weread", id = "aik" }, nil, callback)
+    local handle = Catalog.ensureInstalledAsync({ name = "aik", kind = "weread", id = "aik" }, nil, callback)
     Assert.eq(called, 0, "返回前不回调成功")
     Assert.len(repairs, 0, "返回前不读写字体")
     Assert.eq(jobs[1].opts.name, "font.prepare")
@@ -221,27 +221,27 @@ do
     Assert.eq(called, 1)
     Assert.eq(repairs[1], Fonts.wereadPath("aik"))
 
-    handle = Catalog.ensureInstalledAsync({ kind = "weread", id = "aik" }, nil, callback)
+    handle = Catalog.ensureInstalledAsync({ name = "aik", kind = "weread", id = "aik" }, nil, callback)
     handle.cancel()
     Assert.is_true(jobs[2].cancelled)
     jobs[2].opts.on_done(nil)
     Assert.eq(called, 1, "取消后迟到的结果不能继续应用字体")
 
     repair_error = "disk full"
-    Catalog.ensureInstalledAsync({ kind = "weread", id = "aik" }, nil, callback)
+    Catalog.ensureInstalledAsync({ name = "aik", kind = "weread", id = "aik" }, nil, callback)
     run(jobs[3])
     Assert.is_nil(result)
     Assert.eq(failure, "应用字体失败")
     Assert.is_true(Fonts.isFile(Fonts.wereadPath("aik")), "修复失败不删除已有字体")
     repair_error = nil
 
-    Catalog.ensureInstalledAsync({ kind = "weread", id = "aik" }, nil, callback)
+    Catalog.ensureInstalledAsync({ name = "aik", kind = "weread", id = "aik" }, nil, callback)
     jobs[4].opts.on_failed("worker failed")
     Assert.is_nil(result)
     Assert.eq(failure, "应用字体失败", "子进程失败不能报成功")
 
     write(dir .. "/legacy.woff", "test-woff")
-    Catalog.ensureInstalledAsync({ kind = "weread", id = "legacy" }, nil, callback)
+    Catalog.ensureInstalledAsync({ name = "legacy", kind = "weread", id = "legacy" }, nil, callback)
     Assert.is_false(Fonts.isFile(Fonts.wereadPath("legacy")))
     run(jobs[5])
     Assert.is_true(result)
@@ -267,7 +267,7 @@ do
         cb(true)
         return { cancel = function() end }
     end
-    Catalog.ensureInstalledAsync({ kind = "weread", id = "new", url = "https://x/new.zip" }, nil, callback)
+    Catalog.ensureInstalledAsync({ name = "new", kind = "weread", id = "new", url = "https://x/new.zip" }, nil, callback)
     Assert.eq(jobs[6].opts.name, "font.extract")
     run(jobs[6])
     Assert.is_true(result)
@@ -275,7 +275,7 @@ do
     Assert.len(jobs, 6)
 
     repair_error = "repair failed"
-    Catalog.ensureInstalledAsync({ kind = "weread", id = "bad", url = "https://x/bad.zip" }, nil, callback)
+    Catalog.ensureInstalledAsync({ name = "bad", kind = "weread", id = "bad", url = "https://x/bad.zip" }, nil, callback)
     run(jobs[7])
     Assert.is_nil(result)
     Assert.eq(failure, "字体解压失败")

@@ -814,6 +814,7 @@ end
 function StatsDB.sessionsByBook(source_id, stable_ids, limit)
     local ids = type(stable_ids) == "table" and stable_ids or { stable_ids }
     if #ids == 0 then return {} end
+    ---@type string[], any[]
     local marks, args = {}, { source_id }
     for _idx, stable_id in ipairs(ids) do
         marks[#marks + 1] = "?"

@@ -15,6 +15,8 @@ manifest 也走镜像链。
 local Request = require("http.request")
 local logger = require("utils.log")
 
+---@class MirrorDownloadOpts : HttpRequestOpts
+---@field check (fun(dest: string): boolean, string|nil)|nil 下载后的校验
 local Mirror = {}
 
 --- 仓库文件模板，{path} 为仓库内路径（如 assets/dict/manifest.json）。
@@ -233,7 +235,7 @@ end
 
 --- 下载仓库文件到 dest，失败（含 check 不过）换源重下；内容校验由调用方负责。
 ---@param path string
----@param opts HttpRequest 不含 url；可带 check(dest): boolean,err
+---@param opts MirrorDownloadOpts 不含 url；可校验下载文件
 ---@param dest string
 ---@param cb fun(ok: boolean, err: any)
 ---@return table handle
