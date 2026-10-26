@@ -284,6 +284,29 @@ local ok_run, err_run = pcall(function()
     Assert.eq(text_log.blit.color, 3)
     Assert.is_true(text_log.freed)
 
+    -- 票根粗体 + MUTED（真实 Color* 带 __eq）：写 `color == nil` 会进 metamethod 对 nil
+    -- 调 getColorRGB32，炸在 blitbuffer.lua:601。显式颜色必须用 not block.color 判缺省。
+    reset()
+    text_log = {}
+    local muted = setmetatable({ tag = "muted" }, {
+        __eq = function(_, other)
+            if other == nil then error("attempt to index a nil value") end
+            return false
+        end,
+    })
+    local BB = package.loaded["ffi/blitbuffer"]
+    local old_is_color8 = BB.isColor8
+    BB.isColor8 = function(c)
+        if rawequal(c, muted) then return true end
+        return old_is_color8(c)
+    end
+    ok, err = Render.write("/tmp/compose.png", nil, {
+        { text = "MOON READING", bold = true, box = false, color = muted },
+    })
+    BB.isColor8 = old_is_color8
+    Assert.is_true(ok, tostring(err))
+    Assert.eq(text_log.blit.color, muted, "粗体有显式色时不得改走主题 accent")
+
     -- 带框文字保持原样：白框 + 原色直接绘制。
     text_log = {}
     ok = Render.write("/tmp/compose.png", nil, { { text = "字", x = 5, y = 7, width = 40, color = 3 } })
