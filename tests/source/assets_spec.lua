@@ -14,6 +14,18 @@ local png = "\137PNG\r\n\026\n" .. string.rep("x", 32)
 local remote = "https://img30.360buyimg.com/ebookadmin/jfs/x.jpg"
 local images_dir = Config.dir() .. "/.moon/cache/jdread/book/assets-spec/images"
 
+do -- 新 SVG 先展开变量，再按处理后内容寻址；不改变普通 PNG。
+    local md5 = require("ffi/sha2").md5
+    local svg = '<svg class="viz"><style>.viz { --bg: white; } .bg { fill: var(--bg); }</style><rect class="bg"/></svg>'
+    local normalized = require("utils.svg").normalize(svg)
+    local href = Assets.materializeImage(images_dir, svg)
+    Assert.eq(href, "images/" .. md5(normalized) .. ".svg")
+    local file = assert(io.open(images_dir .. "/" .. md5(normalized) .. ".svg", "rb"))
+    Assert.eq(file:read("*a"), normalized)
+    file:close()
+    Assert.eq(Assets.materializeImage(images_dir, svg), href)
+end
+
 do
     local html = '<img src="foo.jpg"/><img src="https://cdn/x.png?w=1"/>'
     local out = Assets.rewriteImageSources(html, {
