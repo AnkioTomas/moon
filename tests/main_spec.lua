@@ -95,8 +95,12 @@ stub("desktop", {
 calls.auto_open = {}
 stub("utils.paths", { ensureLayout = function() end })
 local dispatcher_actions = {}
+local dispatcher_specs = {}
 stub("dispatcher", {
-    registerAction = function(_, id) dispatcher_actions[#dispatcher_actions + 1] = id end,
+    registerAction = function(_, id, spec)
+        dispatcher_actions[#dispatcher_actions + 1] = id
+        dispatcher_specs[id] = spec
+    end,
 })
 stub("ui.fonts", { onCreate = function() calls.attach = (calls.attach or 0) + 1 end })
 stub("ui.themes.widgets.icon", { ensure = function() end })
@@ -200,7 +204,12 @@ start_item.sub_item_table[1].callback()
 Assert.eq(start_item.text_func(), "Start with: 月读", "选中月读后标题不为 nil")
 Assert.eq(table.concat(source_hooks, ","), "pushDirty:moon", "启动有网就推遗留脏行")
 Assert.eq(calls.attach, 1)
-Assert.eq(table.concat(dispatcher_actions, ","), "book_open_shelf", "feature 的手势由各自 onCreate 登记")
+Assert.eq(table.concat(dispatcher_actions, ","), "book_open_shelf,book_window_prev,book_window_next,book_window_close",
+    "核心只登记桌面与窗口导航动作，feature 的手势仍由各自登记")
+Assert.eq(dispatcher_specs.book_window_prev.event, "BookWindowPage")
+Assert.eq(dispatcher_specs.book_window_prev.arg, -1)
+Assert.eq(dispatcher_specs.book_window_next.arg, 1)
+Assert.eq(dispatcher_specs.book_window_close.event, "BookWindowClose")
 Assert.is_nil(calls.boot, "init 不直接挂功能，全部进 features")
 Assert.eq(feature_loads, 1, "加载器在 main 顶层调一次")
 Assert.eq(table.concat(feature_hooks, ","), "onCreate:book.koplugin")

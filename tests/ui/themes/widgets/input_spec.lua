@@ -112,4 +112,69 @@ row[2]:onTapThemeButton()
 Assert.eq(probed, "Tokyo")
 Assert.eq(#Kit.closed, closed, "action 不关窗")
 
+-- 键盘是独立顶层窗口，未接住的点按仍交给所属输入弹窗，不交给被覆盖的其它弹窗。
+local UIManager = require("ui/uimanager")
+local Event = require("ui/event")
+local WindowInput = require("ui.input")
+local searched
+dialog = Input:new{
+    title = "搜索",
+    fields = { { text = "书名" } },
+    callback = function(text) searched = text end,
+}
+dialog:show()
+dialog:paintTo(Kit.canvas(), 0, 0)
+local input = dialog.inputs[1]
+local keyboard = { inputbox = input }
+input.keyboard = keyboard
+UIManager:show(keyboard)
+Assert.is_true(WindowInput.isTop(dialog))
+local other = Input:new{ fields = { { text = "其它" } } }
+Assert.is_false(WindowInput.isTop(other), "只放行键盘所属弹窗")
+local overlay = {}
+UIManager:show(overlay)
+Assert.is_false(WindowInput.isTop(dialog), "其它窗口盖住键盘时仍隔离输入")
+UIManager:close(overlay)
+local confirm = Kit.buttons(dialog)[2]
+local tap = Kit.tap(confirm.dimen.x + 1, confirm.dimen.y + 1)
+tap.ges = "tap"
+Assert.is_true(dialog:handleEvent(Event:new("Gesture", tap)))
+Assert.eq(searched, "书名", "键盘显示时一次点按即可提交搜索")
+Assert.eq(Kit.closed[#Kit.closed], dialog)
+UIManager:close(keyboard)
+
+local function tapAt(x, y)
+    local ges = Kit.tap(x, y)
+    ges.ges = "tap"
+    return Event:new("Gesture", ges)
+end
+
+cancelled, probed = false, nil
+dialog = Input:new{
+    fields = { { text = "当前文本" } },
+    actions = { { text = "测试", callback = function(text) probed = text end } },
+    cancel_callback = function() cancelled = true end,
+}
+dialog:show()
+dialog:onShow()
+dialog:paintTo(Kit.canvas(), 0, 0)
+input = dialog.inputs[1]
+keyboard = { inputbox = input }
+input.keyboard = keyboard
+UIManager:show(keyboard)
+row = Kit.buttons(dialog)
+Assert.is_true(dialog:handleEvent(tapAt(row[2].dimen.x + 1, row[2].dimen.y + 1)))
+Assert.eq(probed, "当前文本", "键盘显示时附加操作也能响应")
+Assert.is_false(cancelled)
+Assert.is_true(dialog:handleEvent(tapAt(1, 790)))
+Assert.is_false(input.kb, "点面板外先收键盘，不误关输入弹窗")
+Assert.is_false(cancelled)
+UIManager:close(keyboard)
+input:onShowKeyboard()
+UIManager:show(keyboard)
+Assert.is_true(dialog:handleEvent(tapAt(row[1].dimen.x + 1, row[1].dimen.y + 1)))
+Assert.is_true(cancelled, "键盘显示时取消按钮能响应")
+Assert.is_false(input.kb)
+UIManager:close(keyboard)
+
 return true

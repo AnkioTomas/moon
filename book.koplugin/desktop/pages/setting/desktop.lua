@@ -75,6 +75,34 @@ function DesktopSettings:rows(desktop, open_on)
     return rows
 end
 
+---@param desktop table
+---@return table
+function DesktopSettings:inputRows(desktop)
+    local rows = {}
+    for _idx, spec in ipairs({
+        { key = "pager_keys", title = _("分页按键"), subtitle = _("使用物理按键或蓝牙翻页键翻动当前窗口") },
+        { key = "pager_swipe", title = _("滑动分页"), subtitle = _("左右滑动翻页，桌面优先执行自定义手势") },
+        { key = "pager_cycle", title = _("循环分页"), subtitle = _("首页与末页相连；未加载完整的列表不循环"), default = false },
+        { key = "modal_keys", title = _("返回键关闭弹窗"), subtitle = _("使用物理或蓝牙返回键关闭最上层弹窗") },
+    }) do
+        rows[#rows + 1] = function(iw)
+            local conf = Settings.get("ui")
+            local enabled = conf[spec.key]
+            if enabled == nil then enabled = spec.default ~= false end
+            return Row.widget({
+                width = iw, icon = "touch_app", title = spec.title, subtitle = spec.subtitle,
+                toggle = enabled,
+                callback = function()
+                    conf[spec.key] = not enabled
+                    Settings.save("ui", conf)
+                    desktop:updateView()
+                end,
+            })
+        end
+    end
+    return rows
+end
+
 --- 照抄 DeviceListener:onSwapPageTurnButtons() 的全局分支：先撤销单侧反转，再整体翻转。
 ---@param device table
 ---@param gs table G_reader_settings

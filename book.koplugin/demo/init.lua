@@ -192,11 +192,9 @@ local function rows(page, t, width)
                 callback = function() say("row") end }),
         },
         Pager.widget({ width = width, page = page.at, pages = 12,
-            on_prev = function() page.at = page.at - 1; page:refresh() end,
-            on_next = function() page.at = page.at + 1; page:refresh() end }),
+            keys = false, on_page = function(target) page.at = target; page:refresh() end }),
         Pager.widget({ width = width, page = page.dot, pages = 4, dots = true,
-            on_prev = function() page.dot = page.dot - 1; page:refresh() end,
-            on_next = function() page.dot = page.dot + 1; page:refresh() end }),
+            keys = false, on_page = function(target) page.dot = target; page:refresh() end }),
         Tabbar.widget({
             width = width,
             active = page.tab,

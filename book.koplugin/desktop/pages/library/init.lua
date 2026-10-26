@@ -37,6 +37,7 @@ local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
 local Input = require("ui.themes.widgets.input")
 local Pager = require("ui.themes.widgets.pager")
+local WindowInput = require("ui.input")
 local Tap = require("ui.themes.widgets.tap")
 local Text = require("ui.themes.widgets.text")
 local MoonSettings = require("utils.settings")
@@ -674,8 +675,8 @@ function Library:build(ctx, state, opts)
     return frame(w, h, head, body, m.grid_h, {
         page = opts.page or 1,
         pages = opts.pages or 1,
-        on_prev = opts.on_prev,
-        on_next = opts.on_next,
+        keys = false,
+        on_page = opts.on_page,
     })
 end
 
@@ -737,8 +738,8 @@ function Library:buildPage(ctx)
     local pager = {
         page = self:currentPage(),
         pages = self:pages(),
-        on_prev = function() self:gotoPage(self:currentPage() - 1) end,
-        on_next = function() self:gotoPage(self:currentPage() + 1) end,
+        keys = false,
+        on_page = function(page) self:gotoPage(page) end,
     }
 
     if self:inGroupList() then
@@ -981,7 +982,7 @@ end
 --- 跳转到指定页并重建；分组列表本地翻页，不发请求。
 ---@param page number 当前页码，从 1 开始
 function Library:gotoPage(page)
-    page = math.max(1, math.min(self:pages(), page))
+    page = WindowInput.page(page, self:pages())
     if self:inGroupList() then
         if page == self.group_page then return end
         self.group_page = page

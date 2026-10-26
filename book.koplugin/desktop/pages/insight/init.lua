@@ -23,6 +23,7 @@ local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Layout = require("desktop.pages.insight.layout")
 local Pager = require("ui.themes.widgets.pager")
+local Input = require("ui.input")
 local Text = require("ui.themes.widgets.text")
 local Toast = require("ui.themes.widgets.toast")
 local UIManager = require("ui/uimanager")
@@ -79,7 +80,7 @@ end
 --- 底部翻页条翻页（按钮、左右滑、物理翻页键共用）；到头不动不重绘。
 ---@param dir integer 1 下一页，-1 上一页
 function Insight:turn(dir)
-    local page = math.max(1, math.min((self.ui_page or 1) + dir, self.ui_pages or 1))
+    local page = Input.page((self.ui_page or 1) + dir, self.ui_pages or 1)
     if page == self.ui_page then return end
     self.ui_page = page
     self.desktop:updateView()
@@ -176,8 +177,8 @@ function Insight:build()
                 page = page,
                 pages = pages,
                 title = title,
-                on_prev = function() self:turn(-1) end,
-                on_next = function() self:turn(1) end,
+                keys = false,
+                on_page = function(target) self:turn(target - page) end,
             }),
         },
     }

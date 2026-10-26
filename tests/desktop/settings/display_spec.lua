@@ -132,3 +132,5 @@ Assert.eq(#Display:screenRows{ desktop = {} }, 0, "无墨水屏/彩屏时不展�
 Assert.len(Display:appearanceRows(ctx), 7, "不支持彩色时不展示彩色开关和主题色")
 require("device").screen.isColorEnabled = nil
 Assert.len(Display:appearanceRows(ctx), 7, "缺少彩色查询接口不会报错")
+
+Assert.is_nil(Display.inputRows, "分页与弹窗不属于外观设置")

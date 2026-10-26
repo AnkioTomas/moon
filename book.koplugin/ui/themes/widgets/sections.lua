@@ -81,7 +81,7 @@ local function pack(blocks, avail)
     return pages
 end
 
----@param opts { width: number, height: number, sections: BookThemeSection[], page: integer|nil, on_page: fun(page: integer) }
+---@param opts { width: number, height: number, sections: BookThemeSection[], page: integer|nil, on_page: fun(page: integer), range?: table, keys?: boolean }
 ---@return table widget
 ---@return integer page 夹进 [1, pages] 后的页码
 ---@return integer pages
@@ -108,8 +108,9 @@ function Sections.widget(opts)
     if #pages > 1 then
         group[#group + 1] = Pager.widget({
             width = w, page = page, pages = #pages,
-            on_prev = function() opts.on_page(page - 1) end,
-            on_next = function() opts.on_page(page + 1) end,
+            range = opts.range,
+            keys = opts.keys,
+            on_page = opts.on_page,
         })
     end
     return Box:new{ style = { bg = t.color.page }, width = w, height = h, group }, page, #pages

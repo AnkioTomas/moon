@@ -28,6 +28,7 @@ local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
 local Pager = require("ui.themes.widgets.pager")
+local Input = require("ui.input")
 local _ = require("gettext")
 
 ---@class BookHome
@@ -345,8 +346,8 @@ local function assemble(self)
                     pages = self.pages,
                     dots = true,
                     center = self.editing and editActions(self, body_h, w) or nil,
-                    on_prev = function() self:turn(-1) end,
-                    on_next = function() self:turn(1) end,
+                    keys = false,
+                    on_page = function(page) self:turn(page - self.page) end,
                 }),
             },
         },
@@ -366,7 +367,7 @@ end
 --- 把首页页码限制在有效范围内，页码变化时重建。
 ---@param delta number 相对于当前位置的偏移量
 function Home:turn(delta)
-    local next_page = math.max(1, math.min(self.pages, self.page + delta))
+    local next_page = Input.page(self.page + delta, self.pages)
     if next_page == self.page then return end
     self.page = next_page
     redraw(self)

@@ -24,7 +24,8 @@ for _, name in ipairs({
 }) do
     package.preload[name] = emptyModule
 end
-package.preload["ui/uimanager"] = emptyModule
+local UIManager = { _window_stack = {}, isSubwidgetShown = function() return false end }
+package.preload["ui/uimanager"] = function() return UIManager end
 package.preload["device"] = function() return { screen = {} } end
 package.preload["gettext"] = function()
     return function(text) return text end
@@ -67,6 +68,7 @@ local fm = {
     },
 }
 local desktop = setmetatable({ plugin = { ui = fm } }, { __index = Desktop })
+UIManager._window_stack = { { widget = desktop } }
 local function gesture() return { handler = "onGesture", args = { { ges = "tap" } } } end
 
 -- 月读控件消费了（如左下角的「首页」Tab）：文件管理器手势不得覆盖。
@@ -100,9 +102,25 @@ hits = {}
 Assert.eq(desktop:handleEvent({ handler = "onResume", args = {} }), false)
 fm.gestures = nil
 Assert.eq(desktop:handleEvent(gesture()), false)
-Assert.eq(setmetatable({}, { __index = Desktop }):handleEvent(gesture()), false)
+local other = setmetatable({}, { __index = Desktop })
+UIManager._window_stack = { { widget = other } }
+Assert.eq(other:handleEvent(gesture()), false)
 Assert.eq(#hits, 0)
 Assert.eq(base_calls, 7)
+
+-- 用户已配置的左右滑动先于桌面内置翻页；其它方向和空配置不被新逻辑抢走。
+local swipes = 0
+desktop.library = { onEvent = function() swipes = swipes + 1 end }
+desktop.tab = "library"
+fm.gestures = { gestures = {} }
+fm._ordered_touch_zones = { zone("multiswipe", true) }
+Assert.is_true(desktop:onSwipe(nil, { direction = "west" }))
+Assert.eq(swipes, 0, "自定义手势命中就不再翻页")
+fm._ordered_touch_zones = {}
+require("utils.settings").get = function() return {} end
+require("ui/bidi").flipDirectionIfMirroredUILayout = function(d) return d end
+Assert.is_true(desktop:onSwipe(nil, { direction = "west" }))
+Assert.eq(swipes, 1)
 
 -- 已销毁但还在窗口栈上（Exit 广播只 destroy）：不处理、不抛错，放行给下层。
 local closed = setmetatable({ closed = true, plugin = { ui = fm } }, { __index = Desktop })

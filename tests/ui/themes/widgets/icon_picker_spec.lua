@@ -107,13 +107,19 @@ Assert.contains(picker.names, "menu_book")
 
 -- 左右滑翻页，夹在范围内；上下滑不处理。
 picker = IconPicker:new{}
+picker:show()
+local function swipe(direction)
+    local ges = Kit.tap(1, 1)
+    ges.ges, ges.direction = "swipe", direction
+    return picker:handleEvent(require("ui/event"):new("Gesture", ges))
+end
 Assert.eq(picker.page, 1)
-Assert.is_true(picker:onSwipeIconPicker(nil, { direction = "west" }))
+Assert.is_true(swipe("west"))
 Assert.eq(picker.page, 2)
-picker:onSwipeIconPicker(nil, { direction = "east" })
-picker:onSwipeIconPicker(nil, { direction = "east" })
+swipe("east")
+swipe("east")
 Assert.eq(picker.page, 1)
-Assert.is_false(picker:onSwipeIconPicker(nil, { direction = "north" }))
+Assert.is_true(swipe("north"), "未处理的方向不穿透弹窗")
 picker:goPage(999)
 Assert.eq(picker.page, picker:pages())
 Assert.is_true(#Kit.taps(picker) >= 1)

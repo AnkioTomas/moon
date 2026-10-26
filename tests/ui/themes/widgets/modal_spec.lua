@@ -104,10 +104,10 @@ log = {}
 confirm = Confirm:new{ text = "x", swipe_dismiss = "down", cancel_callback = function() log[#log + 1] = "cancel" end }
 paint(confirm)
 closed = #Kit.closed
-Assert.is_true(confirm:onSwipeModal(nil, { direction = "east" }), "非下滑方向只吞事件")
+Assert.is_false(confirm:onSwipeModal(nil, { direction = "east" }), "非下滑方向留给分页处理")
 Assert.eq(#Kit.closed, closed)
 Assert.len(log, 0)
-Assert.is_true(confirm:onSwipeModal(nil, { direction = "north" }), "swipe_dismiss=down 时上滑不关")
+Assert.is_false(confirm:onSwipeModal(nil, { direction = "north" }), "swipe_dismiss=down 时上滑不关")
 Assert.eq(#Kit.closed, closed)
 Assert.len(log, 0)
 Assert.is_true(confirm:onSwipeModal(nil, { direction = "south" }))
@@ -125,7 +125,7 @@ log = {}
 local up_swipe = Confirm:new{ text = "x", swipe_dismiss = "up",
     cancel_callback = function() log[#log + 1] = "cancel" end }
 closed = #Kit.closed
-Assert.is_true(up_swipe:onSwipeModal(nil, { direction = "south" }), "swipe_dismiss=up 时下滑不关")
+Assert.is_false(up_swipe:onSwipeModal(nil, { direction = "south" }), "swipe_dismiss=up 时下滑不关")
 Assert.eq(#Kit.closed, closed)
 Assert.len(log, 0)
 Assert.is_true(up_swipe:onSwipeModal(nil, { direction = "north" }))

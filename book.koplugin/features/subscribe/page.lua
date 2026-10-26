@@ -25,6 +25,7 @@ local Refresh = require("features.subscribe.refresh")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
+local Input = require("ui.input")
 local T = require("ffi/util").template
 local _ = require("gettext")
 
@@ -113,7 +114,8 @@ function Page:onEvent(event, payload)
 end
 
 function Page:gotoPage(page)
-    if page < 1 or page > (self.pages or 1) then return end
+    page = Input.page(page, self.pages or 1)
+    if page == self.page then return end
     self.page = page
     self:redraw()
 end

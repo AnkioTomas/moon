@@ -118,6 +118,7 @@ local function buildCalendar(desktop, state, width, extra)
 
     local t = Theme.current()
     local nav = Pager.widget({
+        keys = false,
         width = width,
         title = ymLabel(ym),
         on_prev = function()

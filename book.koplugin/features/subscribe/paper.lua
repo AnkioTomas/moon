@@ -198,8 +198,8 @@ function Paper.view(page, w, h)
         VerticalSpan:new{ width = math.max(0, avail - list:getSize().h) } }
     group_all[#group_all + 1] = Pager.widget({
         width = w, page = page.page, pages = page.pages, title = T(_("第 %1 / %2 页"), page.page, page.pages),
-        on_prev = function() page:gotoPage(page.page - 1) end,
-        on_next = function() page:gotoPage(page.page + 1) end,
+        keys = false,
+        on_page = function(target) page:gotoPage(target) end,
     })
     return group_all
 end

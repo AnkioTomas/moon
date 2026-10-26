@@ -114,10 +114,16 @@ local first = Kit.texts(paged)
 Assert.eq(first[2], "缓存：书p1")
 Assert.contains(first, "1 / " .. math.ceil(22 / per))
 local height = paged[1]:getSize().h
-Assert.is_true(paged:onSwipeTasks(nil, { direction = "west" }))
+paged:show()
+local function swipe(direction)
+    local ges = Kit.tap(1, 1)
+    ges.ges, ges.direction = "swipe", direction
+    return paged:handleEvent(require("ui/event"):new("Gesture", ges))
+end
+Assert.is_true(swipe("west"))
 Assert.eq(paged.page, 2)
 Assert.eq(Kit.texts(paged)[2], "缓存：书p" .. (per + 1))
-Assert.is_false(paged:onSwipeTasks(nil, { direction = "north" }))
+Assert.is_true(swipe("north"), "未处理的方向不穿透弹窗")
 paged:goPage(99)
 local pages = math.ceil(22 / per)
 Assert.eq(paged.page, pages, "越界夹到末页")

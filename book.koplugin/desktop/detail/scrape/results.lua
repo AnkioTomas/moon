@@ -206,8 +206,8 @@ function Results:updateView()
                 width = w,
                 page = page,
                 pages = pages,
-                on_prev = function() turn(page - 1) end,
-                on_next = function() turn(page + 1) end,
+                range = self.dimen,
+                on_page = turn,
             }),
         },
     })

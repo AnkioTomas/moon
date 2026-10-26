@@ -168,6 +168,7 @@ function Overlay:rebuild()
         height = h - head_h,
         sections = self.spec.sections(),
         page = self.page,
+        range = self.dimen,
         on_page = function(p) self.page = p; self:updateView() end,
     })
     page[#page + 1] = body

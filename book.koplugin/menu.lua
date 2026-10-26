@@ -92,6 +92,16 @@ function Menu.onCreate(plugin)
         general = true,
         filemanager = true,
     })
+    for _idx, action in ipairs({
+        { id = "book_window_prev", title = _("月读：当前窗口上一页"), event = "BookWindowPage", arg = -1 },
+        { id = "book_window_next", title = _("月读：当前窗口下一页"), event = "BookWindowPage", arg = 1 },
+        { id = "book_window_close", title = _("月读：关闭当前弹窗"), event = "BookWindowClose" },
+    }) do
+        require("dispatcher"):registerAction(action.id, {
+            category = "none", event = action.event, arg = action.arg, title = action.title,
+            general = true,
+        })
+    end
     seedStartWithOnInstall()
 end
 

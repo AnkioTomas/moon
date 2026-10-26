@@ -22,7 +22,6 @@ require("l10n").apply()
 
 local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
-local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local LineWidget = require("ui/widget/linewidget")
@@ -69,7 +68,6 @@ function Sheet:init()
     self.inner_w = self.dimen.w - self.pad * 2
     self.body_h = self.dimen.h - TitleBar.height() - Theme.px(t.control.height) - self.pad * 2
     self.items, self.cards, self.page, self.max_idx, self.more = {}, {}, 1, 0, true
-    self.ges_events.SwipeSheet = { GestureRange:new{ ges = "swipe", range = self.dimen } }
     self.close_callback = function()
         if self.job then self.job.cancel() end
         self.job = nil
@@ -255,9 +253,10 @@ function Sheet:rebuild()
                 width = w,
                 page = self.page,
                 pages = pages + (self.more and self.loaded and 1 or 0),
+                cycle = not self.more,
                 title = string.format("%d / %d%s", self.page, pages, self.more and "+" or ""),
-                on_prev = function() self:turn(-1) end,
-                on_next = function() self:turn(1) end,
+                range = self.dimen,
+                on_page = function(page) self:turn(page - self.page) end,
             }),
         },
     })
@@ -308,21 +307,6 @@ function Sheet:turn(dir)
     self.page = target
     if self.page == #self.pages then self:load() end
     self:refresh()
-end
-
----@param _arg any
----@param ges table
----@return boolean
-function Sheet:onSwipeSheet(_arg, ges)
-    local dir = require("ui/bidi").flipDirectionIfMirroredUILayout(ges.direction)
-    if dir == "west" then
-        self:turn(1)
-    elseif dir == "east" then
-        self:turn(-1)
-    else
-        return false
-    end
-    return true
 end
 
 --- 打开某句的段评；在线取最新，离线且没缓存由源立即回错。
