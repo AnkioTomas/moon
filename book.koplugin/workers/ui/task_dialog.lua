@@ -28,9 +28,7 @@
 
 require("l10n").apply()
 
-local BD = require("ui/bidi")
 local Geom = require("ui/geometry")
-local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local LeftContainer = require("ui/widget/container/leftcontainer")
@@ -225,7 +223,6 @@ function TaskDialog:init()
     local chrome = Theme.px(t.control.height) + Theme.px(t.space.lg) * 4 + Theme.px(t.font.title * 2)
     self.per_page = math.max(1, math.floor((self.dimen.h - chrome) / pitch))
     self.pitch = pitch
-    self.ges_events.SwipeTasks = { GestureRange:new{ ges = "swipe", range = self.dimen } }
     self:rebuild()
     self.watch = Tasks.watch(function() self:refresh() end)
 end
@@ -257,8 +254,8 @@ function TaskDialog:rebuild()
             width = self.inner,
             page = self.page,
             pages = pages,
-            on_prev = function() self:goPage(self.page - 1) end,
-            on_next = function() self:goPage(self.page + 1) end,
+            range = self.dimen,
+            on_page = function(page) self:goPage(page) end,
         })
     end
     self:setDialog{ title = _("后台任务"), body = body }
@@ -283,21 +280,6 @@ end
 function TaskDialog:goPage(page)
     self.page = page
     self:refresh("ui")
-end
-
----@param _arg any
----@param ges table
----@return boolean
-function TaskDialog:onSwipeTasks(_arg, ges)
-    local dir = BD.flipDirectionIfMirroredUILayout(ges.direction)
-    if dir == "west" then
-        self:goPage(self.page + 1)
-    elseif dir == "east" then
-        self:goPage(self.page - 1)
-    else
-        return false
-    end
-    return true
 end
 
 ---@param task { key: string, title: string|nil }

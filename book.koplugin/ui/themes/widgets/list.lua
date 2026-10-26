@@ -34,8 +34,6 @@ items：{ text, value, icon, mandatory（右侧状态字）, widget（右侧控�
 @module koplugin.book.ui.themes.widgets.list
 --]]
 
-local BD = require("ui/bidi")
-local GestureRange = require("ui/gesturerange")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -98,7 +96,6 @@ function List:init()
     end
     self.per_page = math.max(1, math.floor((room - chrome) / self.pitch))
     self.page = self:checkedPage()
-    self.ges_events.SwipeList = { GestureRange:new{ ges = "swipe", range = self.dimen } }
     self:rebuild()
 end
 
@@ -106,21 +103,6 @@ end
 ---@return number 物理像素
 function List:innerWidth()
     return math.min(self.inner_width or math.huge, Modal.innerWidth(self))
-end
-
----@param _arg any
----@param ges table
----@return boolean
-function List:onSwipeList(_arg, ges)
-    local dir = BD.flipDirectionIfMirroredUILayout(ges.direction)
-    if dir == "west" then
-        self:goPage(self.page + 1)
-    elseif dir == "east" then
-        self:goPage(self.page - 1)
-    else
-        return false
-    end
-    return true
 end
 
 --- 重画：嵌在别的窗口里时刷所在窗口。
@@ -209,8 +191,8 @@ function List:rebuild()
         width = self.row_w,
         page = self.page,
         pages = pages,
-        on_prev = function() self:goPage(self.page - 1) end,
-        on_next = function() self:goPage(self.page + 1) end,
+        range = self.dimen,
+        on_page = function(page) self:goPage(page) end,
     })
     if self.centered then
         local body = VerticalGroup:new{ align = "left", rows }

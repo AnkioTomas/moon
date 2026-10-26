@@ -13,6 +13,7 @@ local Row = require("ui.themes.widgets.row")
 local Fonts = require("ui.fonts")
 local SourceRegistry = require("source.registry")
 local Overlay = require("desktop.pages.setting.overlay")
+local Input = require("ui.input")
 local _ = require("gettext")
 
 local Tree = require("desktop.pages.setting.tree")
@@ -61,9 +62,12 @@ end
 
 --- 换源后关掉叠层，避免停在过期的来源页。
 ---@param event string 父组件转发的事件名称或事件对象
-function Settings:onEvent(event)
+function Settings:onEvent(event, payload)
     if event == "source_changed" then
         self:reset()
+    elseif event == "swipe" and (payload.direction == "west" or payload.direction == "east") then
+        self.page = Input.page(self.page + (payload.direction == "west" and 1 or -1), self.pages or 1)
+        self.desktop:updateView()
     end
 end
 
@@ -138,7 +142,10 @@ local function coreEntries(desktop)
             page = {
                 title = _("启动与按键"),
                 sections = function()
-                    return {{ title = _("启动与按键"), rows = DesktopSettings:rows(desktop, require("menu").openOnStart()) }}
+                    return {
+                        { title = _("启动与按键"), rows = DesktopSettings:rows(desktop, require("menu").openOnStart()) },
+                        { title = _("分页与弹窗"), rows = DesktopSettings:inputRows(desktop) },
+                    }
                 end,
             },
         },
@@ -273,10 +280,11 @@ function Settings:updateView()
         sections[#sections + 1] = { title = group.title, rows = rows }
     end
     local body
-    body, self.page = Sections.widget({
+    body, self.page, self.pages = Sections.widget({
         width = desktop.dimen.w,
         height = desktop:contentHeight(),
         page = self.page,
+        keys = false,
         on_page = function(page) self.page = page; desktop:updateView() end,
         sections = sections,
     })

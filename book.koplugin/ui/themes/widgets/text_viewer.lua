@@ -28,6 +28,7 @@ local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Modal = require("ui.themes.widgets.modal")
 local Pager = require("ui.themes.widgets.pager")
+local Input = require("ui.input")
 local Text = require("ui.themes.widgets.text")
 local TitleBar = require("ui.themes.widgets.titlebar")
 
@@ -104,8 +105,8 @@ function TextViewer:rebuild()
             width = w,
             page = self.page,
             pages = self.pages,
-            on_prev = function() self:turn(-1) end,
-            on_next = function() self:turn(1) end,
+            range = self.dimen,
+            on_page = function(page) self:turn(page - self.page) end,
         })
     end
     if self.buttons and #self.buttons > 0 then
@@ -124,8 +125,18 @@ end
 --- 前后翻一页；TextBoxWidget 自己按可见行数滚动。
 ---@param dir integer 1 或 -1
 function TextViewer:turn(dir)
-    if dir > 0 then self.body:scrollDown() else self.body:scrollUp() end
-    self.page = math.max(1, math.min(self.pages, self.page + dir))
+    local page = Input.page(self.page + dir, self.pages)
+    if page == self.page then return end
+    if page == 1 then
+        self.body:scrollToTop()
+    elseif page == self.pages then
+        self.body:scrollToBottom()
+    elseif page > self.page then
+        self.body:scrollDown()
+    else
+        self.body:scrollUp()
+    end
+    self.page = page
     self:rebuild()
     UIManager:setDirty(self, "ui")
 end

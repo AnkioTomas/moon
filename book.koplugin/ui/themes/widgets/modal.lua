@@ -27,6 +27,7 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local Input = require("ui.input")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -91,9 +92,7 @@ function Modal:init()
     if self.mask then
         self._mask = Mask:new{ dimen = self.dimen }
     end
-    if Device:hasKeys() then
-        self.key_events.Close = { { Device.input.group.Back } }
-    end
+    self.key_events.ModalBack = { { Device.input.group.Back } }
     self.ges_events.TapModal = {
         GestureRange:new{ ges = "tap", range = self.dimen },
     }
@@ -203,11 +202,41 @@ end
 ---@param event table|string KOReader 事件
 ---@return boolean|nil
 function Modal:handleEvent(event)
+    local handler = type(event) == "table" and event.handler
+    local input = handler == "onGesture" or handler == "onKeyPress" or handler == "onKeyRepeat"
+        or handler == "onBookWindowPage" or handler == "onBookWindowClose"
+    if input and not Input.isTop(self) then return false end
     local ok, handled = Guard.call("modal " .. tostring(event.handler or event), function()
         return true, InputContainer.handleEvent(self, event)
     end)
     if not ok then return true end
-    return handled
+    -- 只拦截导航输入；截图、多指手势及其它用户快捷键仍走 KOReader 原有分发。
+    local navigation = handler == "onBookWindowPage" or handler == "onBookWindowClose"
+    if handler == "onGesture" then
+        navigation = event.args[1].ges == "swipe"
+    elseif handler == "onKeyPress" or handler == "onKeyRepeat" then
+        local key = event.args[1]
+        navigation = key:match({ Device.input.group.Back })
+            or key:match({ { "RPgFwd", "LPgFwd", "RPgBack", "LPgBack" } })
+    end
+    return handled or navigation and not self.show_parent or nil
+end
+
+function Modal:onModalBack()
+    if self.show_parent then return false end
+    if MoonSettings.get("ui").modal_keys ~= false then self:onClose() end
+    return true
+end
+
+function Modal:onKeyRepeat(key)
+    if key:match({ Device.input.group.Back }) then return true end
+    return InputContainer.onKeyRepeat(self, key)
+end
+
+function Modal:onBookWindowClose()
+    if self.show_parent or not Input.isTop(self) then return false end
+    self:onClose()
+    return true
 end
 
 --- 网点遮罩叠在旧像素上，局刷会留残影：带遮罩（且设置开着网点）弹出时全刷。
@@ -272,10 +301,11 @@ end
 ---@param ges table
 ---@return boolean
 function Modal:onSwipeModal(_arg, ges)
+    if self.show_parent then return false end
     if self.dismissable and ges.direction == self._swipe_direction then
         self:dismiss()
     end
-    return true
+    return ges.direction == self._swipe_direction
 end
 
 ---@return boolean

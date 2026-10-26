@@ -22,10 +22,8 @@
 
 require("l10n").apply()
 
-local BD = require("ui/bidi")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
-local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -75,7 +73,6 @@ function IconPicker:init()
     self.query = ""
     self.names = NAMES
     self.page = self:currentPage()
-    self.ges_events.SwipeIconPicker = { GestureRange:new{ ges = "swipe", range = self.dimen } }
     self:rebuild()
 end
 
@@ -197,8 +194,8 @@ function IconPicker:rebuild()
         width = w,
         page = self.page,
         pages = pages,
-        on_prev = function() self:goPage(self.page - 1) end,
-        on_next = function() self:goPage(self.page + 1) end,
+        range = self.dimen,
+        on_page = function(page) self:goPage(page) end,
     })
     local used = bar:getSize().h + grid:getSize().h + (pager and pager:getSize().h or 0)
     local page = VerticalGroup:new{
@@ -216,21 +213,6 @@ function IconPicker:goPage(page)
     self.page = math.max(1, math.min(self:pages(), page))
     self:rebuild()
     UIManager:setDirty(self.show_parent or self, "ui")
-end
-
----@param _arg any
----@param ges table
----@return boolean
-function IconPicker:onSwipeIconPicker(_arg, ges)
-    local dir = BD.flipDirectionIfMirroredUILayout(ges.direction)
-    if dir == "west" then
-        self:goPage(self.page + 1)
-    elseif dir == "east" then
-        self:goPage(self.page - 1)
-    else
-        return false
-    end
-    return true
 end
 
 return IconPicker

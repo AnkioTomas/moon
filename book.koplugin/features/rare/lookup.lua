@@ -32,10 +32,10 @@ local Modal = require("ui.themes.widgets.modal")
 local Icon = require("ui.themes.widgets.icon")
 local Html = require("ui.themes.widgets.html")
 local Pager = require("ui.themes.widgets.pager")
+local Input = require("ui.input")
 local Tabbar = require("ui.themes.widgets.tabbar")
 local Text = require("ui.themes.widgets.text")
 local TitleBar = require("ui.themes.widgets.titlebar")
-local GestureRange = require("ui/gesturerange")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -227,21 +227,11 @@ function Lookup:isWord()
     return #self.text <= DICT_MAX and not self.text:find("\n")
 end
 
---- 滑动翻正文页；全部吞掉，不漏到阅读页翻页。
----@param _arg any
----@param ges table
----@return boolean
-function Lookup:onSwipe(_arg, ges)
-    local d = ges.direction
-    if d == "north" or d == "west" then self:turn(1) elseif d == "south" or d == "east" then self:turn(-1) end
-    return true
-end
-
 --- 正文翻页。
 ---@param delta integer
 function Lookup:turn(delta)
-    local page = (self.body_page or 1) + delta
-    if page < 1 or page > (self.body_pages or 1) then return end
+    local page = Input.page((self.body_page or 1) + delta, self.body_pages or 1)
+    if page == self.body_page then return end
     self.body_page = page
     self:refreshView()
 end
@@ -267,16 +257,27 @@ function Lookup:step(delta)
                     self.dict_name = nxt.name
                     self.body_page = delta > 0 and 1 or math.huge
                     self:refreshView()
+                    return true
                 end
                 break
             end
         end
     end
+    self:turn(delta)
     return true
 end
 
-function Lookup:onReadNextResult() return self:step(1) end
-function Lookup:onReadPrevResult() return self:step(-1) end
+function Lookup:onReadNextResult()
+    if require("utils.settings").get("ui").pager_keys ~= false then self:step(1) end
+    return true
+end
+
+function Lookup:onReadPrevResult()
+    if require("utils.settings").get("ui").pager_keys ~= false then self:step(-1) end
+    return true
+end
+
+Lookup.onBookWindowPage = Lookup.step
 
 --- 当前词典 Tab 显示的词典。
 ---@return { name: string, text: string }|nil
@@ -481,11 +482,8 @@ function Lookup:init()
     self.content_w = Modal.dialogWidth() - self.frame * 2
     -- 正文区固定高度：左右切卡时卡片不跳动。
     self.body_h = math.floor(Screen:getHeight() * (self.full_page and 0.45 or 0.3))
-    if Device:hasKeys() then
-        self.key_events.ReadPrevResult = { { Device.input.group.PgBack } }
-        self.key_events.ReadNextResult = { { Device.input.group.PgFwd } }
-    end
-    self.ges_events.Swipe = { GestureRange:new{ ges = "swipe", range = self.dimen } }
+    self.key_events.ReadPrevResult = { { { "RPgBack", "LPgBack" } } }
+    self.key_events.ReadNextResult = { { { "RPgFwd", "LPgFwd" } } }
     local last_dict = require("utils.settings").get("features.rare").rare_lookup_dict
     self.dict_name = self.dict_name or last_dict
     -- 记住的词典这次没查到时，改显示第一本有结果的（不改记忆）。
@@ -621,7 +619,7 @@ function Lookup:rebuild()
     if self.body_pages > 1 then
         group[#group + 1] = VerticalSpan:new{ width = gap }
         self.pager = Pager.widget({ width = inner, page = self.body_page, pages = self.body_pages,
-            on_prev = function() self:turn(-1) end, on_next = function() self:turn(1) end })
+            keys = false, range = self.dimen, on_page = function(page) self:turn(page - self.body_page) end })
         group[#group + 1] = self.pager
         used = used + gap + self.pager:getSize().h
     else

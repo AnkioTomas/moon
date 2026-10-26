@@ -90,6 +90,29 @@ function InputContainer._prep(o)
     o.ges_events = o.ges_events or {}
 end
 
+function InputContainer:onKeyPress(key)
+    for name, seq in pairs(self.key_events) do
+        for _idx, keys in ipairs(seq) do
+            if key:match(keys) then
+                return self:handleEvent(require("ui/event"):new(seq.event or name, seq.args, key))
+            end
+        end
+    end
+end
+
+InputContainer.onKeyRepeat = InputContainer.onKeyPress
+
+function InputContainer:onGesture(ges)
+    for name, seq in pairs(self.ges_events) do
+        for _idx, range in ipairs(seq) do
+            local bounds = type(range.range) == "function" and range.range() or range.range
+            if range.ges == ges.ges and ges.pos:intersectWith(bounds) then
+                if self:handleEvent(require("ui/event"):new(seq.event or name, seq.args, ges)) then return true end
+            end
+        end
+    end
+end
+
 --- 固定尺寸容器：子件按 kind 在框内对齐。
 local function aligned(kind)
     return Container:extend{
@@ -164,6 +187,8 @@ local TextBoxWidget = Widget:extend{
     end,
     scrollDown = function(self) self.scrolled = (self.scrolled or 0) + 1 end,
     scrollUp = function(self) self.scrolled = (self.scrolled or 0) - 1 end,
+    scrollToTop = function(self) self.scrolled = 0 end,
+    scrollToBottom = function(self) self.scrolled = math.ceil(self:getAllLineCount() / self:getVisLineCount()) - 1 end,
     free = function() end,
     dimen = geom{ w = 0, h = 0 },
     _bb = { getHeight = function() return 20 end },
@@ -261,6 +286,7 @@ end
 --- 安装全部桩并清空记录。
 ---@param theme string|nil 主题 id，缺省 paper
 function Kit.install(theme)
+    package.loaded["ui.input"] = nil
     -- ui_scale = 100 且 scaleBySize 恒等：逻辑像素 = 物理像素，断言可以直接写令牌值。
     Kit.display = { ui_theme = theme or "paper", ui_scale = 100, mesh_mask = true, swipe_dismiss = "down", library_tabs = { "books", "author", "series", "category", "folder" } }
     -- 主题边框和 FrameContainer 一样读 KOReader 的「界面抗锯齿」；离线没有这个全局时按默认开。
@@ -293,16 +319,38 @@ function Kit.install(theme)
                 isColorEnabled = function() return Kit.color_enabled == true end,
             },
             hasKeys = function() return false end,
+            hasFewKeys = function() return false end,
             input = { group = { Back = "Back" } },
         },
         ["ui/geometry"] = { new = function(_, o) return geom(o) end },
         ["ui/bidi"] = { flipDirectionIfMirroredUILayout = function(d) return d end },
         ["ui/gesturerange"] = { new = function(_, o) return o end },
         ["ui/uimanager"] = {
-            show = function(_, w) Kit.shown[#Kit.shown + 1] = w end,
-            close = function(_, w)
+            _window_stack = {},
+            show = function(self, w)
+                Kit.shown[#Kit.shown + 1] = w
+                self._window_stack[#self._window_stack + 1] = { widget = w }
+            end,
+            close = function(self, w)
                 Kit.closed[#Kit.closed + 1] = w
                 if w.onCloseWidget then w:onCloseWidget() end
+                for i = #self._window_stack, 1, -1 do
+                    if self._window_stack[i].widget == w then table.remove(self._window_stack, i) end
+                end
+            end,
+            isSubwidgetShown = function(self, widget)
+                local function contains(root)
+                    if root == widget then return true end
+                    for _idx, child in ipairs(root) do
+                        if contains(child) then return true end
+                    end
+                    return false
+                end
+                for i = #self._window_stack, 1, -1 do
+                    local root = self._window_stack[i].widget
+                    if contains(root) then return true, 1, root end
+                end
+                return false
             end,
             setDirty = function(_, w, mode, region)
                 Kit.dirty[#Kit.dirty + 1] = { widget = w, mode = mode, region = region }

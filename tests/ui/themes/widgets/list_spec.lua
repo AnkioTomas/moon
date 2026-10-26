@@ -138,11 +138,17 @@ Assert.is_nil(plain[20].checked)
 
 -- 左右滑翻页；上下滑不处理。
 list = List:new{ items = items(30) }
-Assert.is_true(list:onSwipeList(nil, { direction = "west" }))
+list:show()
+local function swipe(direction)
+    local ges = Kit.tap(1, 1)
+    ges.ges, ges.direction = "swipe", direction
+    return list:handleEvent(require("ui/event"):new("Gesture", ges))
+end
+Assert.is_true(swipe("west"))
 Assert.eq(list.page, 2)
-list:onSwipeList(nil, { direction = "east" })
+swipe("east")
 Assert.eq(list.page, 1)
-Assert.is_false(list:onSwipeList(nil, { direction = "north" }))
+Assert.is_true(swipe("north"), "未处理的方向不穿透弹窗")
 
 -- 分栏：底栏占位，每页少一行；切栏换成 on_tab 返回的项并翻到其 checked 项；左上按钮进标题栏。
 local left_n = 0

@@ -7,13 +7,15 @@ package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
 local book_settings = { drawer_opens_desktop = true }
+local ui_settings = {}
+local saved_owner
 local has_keys = false
 package.preload["device"] = function() return { hasKeys = function() return has_keys end } end
 local open_on_start
 package.preload["utils.settings"] = function()
     return {
-        get = function() return book_settings end,
-        save = function() end,
+        get = function(owner) return owner == "ui" and ui_settings or book_settings end,
+        save = function(owner) saved_owner = owner end,
     }
 end
 package.preload["menu"] = function()
@@ -58,5 +60,16 @@ Assert.eq(inv.title, "反转翻页键")
 Assert.is_true(inv.toggle)
 _G.G_reader_settings = saved_g
 
+local inputs = Settings:inputRows(desktop)
+Assert.len(inputs, 4)
+for i, key in ipairs({ "pager_keys", "pager_swipe", "pager_cycle", "modal_keys" }) do
+    local row = inputs[i](600)
+    Assert.eq(row.toggle, key ~= "pager_cycle", "默认不开循环，保留原始边界行为")
+    row.callback()
+    Assert.eq(saved_owner, "ui", "只移动入口，不迁移已有配置")
+    Assert.eq(ui_settings[key], key == "pager_cycle")
+    inputs[i](600).callback()
+    Assert.eq(ui_settings[key], key ~= "pager_cycle", "开关可独立恢复")
+end
 
 return true

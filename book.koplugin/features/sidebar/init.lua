@@ -366,6 +366,8 @@ function Sidebar:onSwipeSidebar(_arg, ges)
         self:goTab(self.tab + 1)
     elseif ges.direction == "east" then
         self:goTab(self.tab - 1)
+    else
+        return false
     end
     return true
 end

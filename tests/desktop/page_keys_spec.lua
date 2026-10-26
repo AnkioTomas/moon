@@ -20,8 +20,13 @@ package.preload["ui/geometry"] = ctorModule
 package.preload["desktop.gesture"] = function() return { range = function() return {} end } end
 package.preload["gettext"] = function() return function(text) return text end end
 local desktop_settings = {}
+local ui_settings = {}
 package.preload["utils.settings"] = function()
-    return { get = function(name) assert(name == "desktop"); return desktop_settings end }
+    return { get = function(name)
+        if name == "ui" then return ui_settings end
+        assert(name == "desktop")
+        return desktop_settings
+    end }
 end
 local keys, few = true, false
 package.preload["device"] = function()
@@ -58,9 +63,9 @@ Assert.eq(d.key_events.DesktopPagePrev.args, -1)
 few = true
 Assert.eq(table.concat(make().key_events.DesktopPageNext[1][1], ","), "RPgFwd,LPgFwd")
 
--- 纯触屏：不注册。
+-- 纯触屏也登记标准键：外接蓝牙不一定会改变 hasKeys。
 keys = false
-Assert.is_nil(make().key_events.DesktopPageNext)
+Assert.eq(table.concat(make().key_events.DesktopPageNext[1][1], ","), "RPgFwd,LPgFwd")
 
 -- 按键转成当前页签的左右滑，并吃掉按键。
 local got = {}
@@ -84,5 +89,17 @@ Assert.len(got, 0)
 desktop_settings.page_keys = true
 Assert.is_true(d:onDesktopTurn(1))
 Assert.len(got, 1)
+ui_settings.pager_keys = false
+Assert.is_false(d:onDesktopTurn(1))
+Assert.len(got, 1)
+Assert.is_true(d:onBookWindowPage(1), "显式映射动作不受原始按键开关影响")
+Assert.len(got, 2)
+Assert.is_true(d:onBookWindowClose(), "桌面不响应关闭弹窗动作")
+local UIManager = require("ui/uimanager")
+UIManager._window_stack = { { widget = d } }
+InputContainer.handleEvent = function() return false end
+Assert.is_true(d:handleEvent({ handler = "onKeyPress", args = {
+    { match = function() return true end },
+} }), "关闭翻页功能也不把标准翻页键漏给下层")
 
 return true

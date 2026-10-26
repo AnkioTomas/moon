@@ -22,6 +22,7 @@ local Library = require("desktop.pages.library")
 local BookStore = require("book.store")
 local MoonSettings = require("utils.settings")
 local UIManager = require("ui/uimanager")
+local Input = require("ui.input")
 local _ = require("gettext")
 
 ---@class BookStorePage
@@ -268,7 +269,7 @@ end
 --- 跳转到指定页并重建。
 ---@param page number
 function Store:gotoPage(page)
-    page = math.max(1, math.min(self:pages(), page))
+    page = Input.page(page, self:pages())
     if page == self.page and self.state then
         return
     end
@@ -360,12 +361,7 @@ function Store:updateView()
         page = self.page,
         pages = self:pages(),
         total = self.total,
-        on_prev = function()
-            self:gotoPage(self.page - 1)
-        end,
-        on_next = function()
-            self:gotoPage(self.page + 1)
-        end,
+        on_page = function(page) self:gotoPage(page) end,
     })
 end
 

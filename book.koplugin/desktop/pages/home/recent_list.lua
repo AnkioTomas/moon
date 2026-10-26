@@ -316,8 +316,8 @@ function M:createWidget()
             width = w,
             page = page,
             pages = pages,
-            on_prev = function() self.page = page - 1; self:refresh() end,
-            on_next = function() self.page = page + 1; self:refresh() end,
+            keys = false,
+            on_page = function(target) self.page = target; self:refresh() end,
         })
     end
     return col

@@ -12,7 +12,7 @@ local dict_settings = { dictionary_load_all = false }
 Kit.sections.dictionary = dict_settings
 require("utils.settings").save = function() end
 require("device").hasClipboard = function() return true end
-require("device").input = { setClipboardText = function() end }
+require("device").input.setClipboardText = function() end
 local lex = { entries = { ["彘"] = { "zhì", 7000 } } }
 package.preload["features.rare.catalog"] = function() return { active = function() return { lex } end } end
 local translate_cb, translate_cancelled
@@ -158,8 +158,13 @@ Assert.eq(panel.text_box.text, "大猪")
 Assert.eq(settings.rare_lookup_dict, "古汉语")
 -- 短正文一页：无翻页条，滑动吞掉不切 Tab
 Assert.is_nil(panel.pager)
-Assert.is_true(panel:onSwipe(nil, { direction = "north" }))
-panel:onSwipe(nil, { direction = "west" })
+local function swipe(direction)
+    local ges = Kit.tap(1, 1)
+    ges.ges, ges.direction = "swipe", direction
+    return panel:handleEvent(require("ui/event"):new("Gesture", ges))
+end
+Assert.is_true(swipe("north"))
+swipe("west")
 Assert.eq(panel.active, "dict")
 -- 翻页键：单页词典翻到头 / 尾自动换词典，上一本落在末页，首尾不循环
 Assert.is_true(panel:onReadPrevResult())
@@ -222,7 +227,7 @@ Assert.is_true(panel.pager ~= nil, "有翻页条")
 Assert.eq(panel.text_box.height % panel.text_box:getLineHeight(), 0, "无半行")
 Assert.eq(panel[1]:getSize().h, h_before, "分页不改总高")
 local pages = panel.body_pages
-panel:onSwipe(nil, { direction = "north" })
+swipe("west")
 Assert.eq(panel.body_page, 2)
 Assert.eq(panel.text_box.scrolled, 1)
 ai_cb(string.rep("长", 4000))

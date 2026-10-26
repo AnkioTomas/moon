@@ -29,6 +29,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local Gesture = require("desktop.gesture")
 local Sync = require("desktop.sync")
 local Guard = require("ui.guard")
+local Input = require("ui.input")
 local MoonSettings = require("utils.settings")
 local Ext = require("utils.extension")
 local OverlapGroup = require("ui/widget/overlapgroup")
@@ -301,14 +302,12 @@ function Desktop:init()
     -- 物理翻页键（Kindle / Kobo 侧键，安卓开启音量键翻页后也映射到这里）翻当前页签。
     -- 反转翻页键、横屏键位旋转由 KOReader 设备层处理，这里收到的已是最终方向。
     -- 方向键只给键多的设备，和 ReaderPaging 一致，少键设备不占用。
-    if Device:hasKeys() then
-        local fwd, back = { "RPgFwd", "LPgFwd" }, { "RPgBack", "LPgBack" }
-        if not Device:hasFewKeys() then
-            fwd[#fwd + 1], back[#back + 1] = "Right", "Left"
-        end
-        self.key_events.DesktopPageNext = { { fwd }, event = "DesktopTurn", args = 1 }
-        self.key_events.DesktopPagePrev = { { back }, event = "DesktopTurn", args = -1 }
+    local fwd, back = { "RPgFwd", "LPgFwd" }, { "RPgBack", "LPgBack" }
+    if Device:hasKeys() and not Device:hasFewKeys() then
+        fwd[#fwd + 1], back[#back + 1] = "Right", "Left"
     end
+    self.key_events.DesktopPageNext = { { fwd }, event = "DesktopTurn", args = 1 }
+    self.key_events.DesktopPagePrev = { { back }, event = "DesktopTurn", args = -1 }
     self:build()
 end
 
@@ -387,6 +386,10 @@ end
 ---@return boolean|nil
 local function route(desktop, event)
     local handled = InputContainer.handleEvent(desktop, event)
+    if not handled and (event.handler == "onKeyPress" or event.handler == "onKeyRepeat")
+        and event.args[1]:match({ { "RPgFwd", "LPgFwd", "RPgBack", "LPgBack" } }) then
+        return true
+    end
     if handled or event.handler ~= "onGesture" then return handled end
     return Gesture.fm(desktop, event.args[1])
 end
@@ -414,6 +417,11 @@ Desktop.onScreenResize = Desktop.onSetRotationMode
 ---@return boolean|nil
 function Desktop:handleEvent(event)
     if self.closed then return end
+    local handler = type(event) == "table" and event.handler
+    if (handler == "onGesture" or handler == "onKeyPress" or handler == "onKeyRepeat"
+        or handler == "onBookWindowPage" or handler == "onBookWindowClose") and not Input.isTop(self) then
+        return false
+    end
     return Guard.call("desktop " .. tostring(event.handler or event), route, self, event)
 end
 
@@ -468,6 +476,8 @@ end
 ---@param ges_ev table|nil KOReader 手势数据，含方向和位置
 ---@return boolean
 function Desktop:onSwipe(_arg, ges_ev)
+    if Gesture.fm(self, ges_ev) then return true end
+    if MoonSettings.get("ui").pager_swipe == false then return false end
     notify(self:page(self.tab), "onEvent", "swipe", {
         direction = BD.flipDirectionIfMirroredUILayout(ges_ev.direction),
     })
@@ -476,12 +486,22 @@ end
 
 --- 物理翻页键：按「下一页 / 上一页」语义转成当前页签的左右滑（不做 RTL 翻转，按键不是物理方向）。
 --- 吃掉按键，不漏给下层文件管理器翻文件列表。弹窗在栈顶时按键到不了这里。
---- 「桌面物理翻页键」关闭时不处理、返回 false，按键照旧交给下层；按键时读设置，切换立即生效。
+--- 关闭时不翻页；入口仍吞掉标准翻页键，避免底下文件管理器被翻动。开关即时生效。
 ---@param dir integer 1 下一页，-1 上一页
 ---@return boolean
 function Desktop:onDesktopTurn(dir)
     if MoonSettings.get("desktop").page_keys == false then return false end
+    if MoonSettings.get("ui").pager_keys == false then return false end
+    return self:onBookWindowPage(dir)
+end
+
+function Desktop:onBookWindowPage(dir)
     notify(self:page(self.tab), "onEvent", "swipe", { direction = dir > 0 and "west" or "east" })
+    return true
+end
+
+-- 桌面不是弹窗；映射关闭不能穿透为关书、退出文件管理器。
+function Desktop:onBookWindowClose()
     return true
 end
 
