@@ -296,11 +296,11 @@ function Mapper.chapters(data, bookId)
             local anchors = {}
             for _idx, anchor in ipairs(ch.anchors or {}) do
                 local anchor_title = tostring(anchor.title or "")
-                if anchor_title ~= "" then
-                    anchors[#anchors + 1] = {
-                        title = anchor_title,
-                        depth = math.max(1, math.floor(tonumber(anchor.level) or (depth + 1))),
-                    }
+                local anchor_depth = math.max(1, math.floor(tonumber(anchor.level) or (depth + 1)))
+                -- 微信给每章挂一个同名同层的自锚点（就是章首），不是章内小节；
+                -- 收下会让阅读目录一章出两行同名节点，只留真小节。
+                if anchor_title ~= "" and not (anchor_title == title and anchor_depth <= depth) then
+                    anchors[#anchors + 1] = { title = anchor_title, depth = anchor_depth }
                 end
             end
             local source_idx = ch.chapterIdx or ch.idx

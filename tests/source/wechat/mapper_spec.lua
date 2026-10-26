@@ -129,12 +129,31 @@ do
     Assert.eq(chapters[1].depth, 1)
     Assert.eq(chapters[1].anchors[1].title, "第一章")
     Assert.eq(chapters[1].anchors[1].depth, 2)
-    Assert.eq(chapters[1].toc_version, 4)
+    Assert.eq(chapters[1].toc_version, 5)
     Assert.not_nil(chapters[1].words, "带字数：关联书按篇幅对齐")
     Assert.eq(chapters[2].title, "二", "出版书（epub）章名原样")
     Assert.eq(chapters[2].depth, 2)
 end
 
+
+do
+    -- 微信给每章挂的同名同层自锚点（就是章首）不是章内小节，丢掉；同名更深与异名小节保留。
+    local chapters = Mapper.chapters({
+        data = {
+            {
+                bookId = "1",
+                updated = {
+                    { chapterIdx = 1, chapterUid = "u1", title = "龙卷风", wordCount = 10, level = 2,
+                        anchors = { { title = "龙卷风", level = 2 } } },
+                    { chapterIdx = 2, chapterUid = "u2", title = "序", wordCount = 10, level = 1,
+                        anchors = { { title = "序", level = 2 }, { title = "小节", level = 2 } } },
+                },
+            },
+        },
+    }, "1")
+    Assert.is_nil(chapters[1].anchors, "同名同层自锚点丢弃，目录不再一章两行")
+    Assert.eq(#chapters[2].anchors, 2, "同名更深与异名小节保留")
+end
 do
     -- 网文（book.format=txt，chapterInfos 实测字段）：按 chapterIdx 补「第 N 章」，已带序号的不重复补，空章名只留序号。
     local chapters = Mapper.chapters({
@@ -360,7 +379,7 @@ do
     Assert.eq(chapters[1].depth, 1)
     Assert.eq(chapters[1].anchors[1].title, "第一章")
     Assert.eq(chapters[1].anchors[1].depth, 2)
-    Assert.eq(chapters[1].toc_version, 4)
+    Assert.eq(chapters[1].toc_version, 5)
     Assert.not_nil(chapters[1].words, "带字数：关联书按篇幅对齐")
     Assert.eq(chapters[2].title, "二", "出版书（epub）章名原样")
     Assert.eq(chapters[2].depth, 2)
