@@ -362,15 +362,20 @@ local function startInstall(release, plugin_root)
     end)
 end
 
-local function promptInstall(release, plugin_root)
-    if Update._offered_version == release.version then return end
+---@param release table
+---@param plugin_root string
+---@param force boolean|nil 为真时即便已是最新也允许重装，并跳过「同版本已提示过」记忆
+local function promptInstall(release, plugin_root, force)
+    if not force and Update._offered_version == release.version then return end
     Update._offered_version = release.version
-    local header = T(_("发现月读 %1（当前 %2）。下载并完整替换插件目录？"),
-        release.version, require("bookversion"))
+    local current = require("bookversion")
+    local header = force and not release.available
+        and T(_("强制重装月读 %1（当前已是此版本）。下载并完整替换插件目录？"), release.version)
+        or T(_("发现月读 %1（当前 %2）。下载并完整替换插件目录？"), release.version, current)
     local text = release.notes and (header .. "\n\n" .. release.notes) or header
     local dialog
     dialog = require("ui.themes.widgets.text_viewer"):new{
-        title = _("更新日志"),
+        title = force and not release.available and _("强制更新") or _("更新日志"),
         text = text,
         buttons = {
             { text = _("稍后"), callback = function() dialog:close() end },
@@ -387,12 +392,14 @@ local function promptInstall(release, plugin_root)
     dialog:show()
 end
 
---- 用户主动检查；始终显示结果。
+--- 用户主动检查；始终显示结果。长按设置行时 force=true：不管有没有新版本都提示安装最新包。
 ---@param plugin_root string
-function Update.manualCheck(plugin_root)
+---@param force boolean|nil
+function Update.manualCheck(plugin_root, force)
     local Toast = require("ui.themes.widgets.toast")
     local loading = require("ui.themes.widgets.progress_dialog"):new{
-        title = _("检查更新"), text = _("正在检查月读更新…"), dismissable = false,
+        title = force and _("强制更新") or _("检查更新"),
+        text = _("正在检查月读更新…"), dismissable = false,
     }
     loading:show()
     Update.check(function(release, err)
@@ -403,9 +410,9 @@ function Update.manualCheck(plugin_root)
                 timeout = 4,
             }:show()
         elseif release then
-            if release.available then
+            if force or release.available then
                 Update._offered_version = nil
-                promptInstall(release, plugin_root)
+                promptInstall(release, plugin_root, force)
             else
                 Toast:new{
                     text = T(_("已是最新版本（%1）"), require("bookversion")),

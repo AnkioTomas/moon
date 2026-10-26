@@ -43,12 +43,17 @@ function Setting.entries(desktop)
             group = "maintenance",
             order = 60,
             row = function(iw)
+                local root = desktop.plugin.path
                 return require("ui.themes.widgets.row").widget({
                     width = iw, chevron = false,
                     kind = "action", icon = "system_update", title = _("检查更新"),
+                    subtitle = _("长按强制重装最新包"),
                     status = require("bookversion"), status_on = true,
                     callback = function()
-                        require("features.update").manualCheck(desktop.plugin.path)
+                        require("features.update").manualCheck(root)
+                    end,
+                    hold_callback = function()
+                        require("features.update").manualCheck(root, true)
                     end,
                 })
             end,
