@@ -11,7 +11,7 @@ package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(s) return s end end
 
 local DESKTOP = {
-    "night", "wifi", "rotate", "refresh", "screenshot", "frontlight", "suspend", "power",
+    "night", "wifi", "tasks", "rotate", "refresh", "screenshot", "frontlight", "suspend", "power",
 }
 local READER = {
     "toc", "font", "highlights", "bookmark", "bookorbit", "push_progress", "pull_progress", "reload_chapter", "save_default",
