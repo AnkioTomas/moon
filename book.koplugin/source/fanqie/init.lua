@@ -78,8 +78,9 @@ local function errMsg(err)
     return tostring(err or _("番茄请求失败"))
 end
 
+--- 进了平台自定义分组的书，分类用分组名（和微信/起点同一口径）；没进组不写分类。
 local function shelfBook(row)
-    return {
+    local book = {
         source_id = "fanqie",
         stable_id = tostring(row.book_id),
         title = row.book_name,
@@ -87,6 +88,10 @@ local function shelfBook(row)
         intro = require("utils.text").stripHtml(row.abstract),
         cover = row.thumb_url,
     }
+    if type(row._group_name) == "string" and row._group_name ~= "" then
+        book.category = row._group_name
+    end
+    return book
 end
 
 ---@param wire table fetchShelfDetailAsync 的回包

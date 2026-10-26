@@ -321,10 +321,16 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
         local book_shelf_info = shelf_info.data.book_shelf_info
             or shelf_info.data.bookShelfInfo
             or shelf_info.data
-        local shelf_book_ids = {}
+        -- 自定义分组：bookId→分组名（和微信/起点同一口径；无 group_name 的书不算分组）。
+        local shelf_book_ids, group_by_id = {}, {}
         for _idx, item in ipairs(type(book_shelf_info) == "table" and book_shelf_info or {}) do
             if item.book_id then
-                shelf_book_ids[#shelf_book_ids + 1] = tostring(item.book_id)
+                local book_id = tostring(item.book_id)
+                shelf_book_ids[#shelf_book_ids + 1] = book_id
+                local name = item.group_name
+                if type(name) == "string" and name ~= "" then
+                    group_by_id[book_id] = group_by_id[book_id] or name
+                end
             end
         end
         if #shelf_book_ids == 0 then
@@ -348,6 +354,7 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
             for _idx, book_id in ipairs(shelf_book_ids) do
                 local row = by_id[book_id]
                 if row then
+                    row._group_name = group_by_id[book_id]
                     detail_list[#detail_list + 1] = row
                 end
             end

@@ -1,5 +1,6 @@
 --[[--
-番茄书架详情：网页端查无此书的用书号占位保留；详情请求本身失败则整次失败（保留本地书架）；并发有上限。
+番茄书架详情：网页端查无此书的用书号占位保留；详情请求本身失败则整次失败（保留本地书架）；
+并发有上限；book_shelf_info 上的 group_name 挂到详情行。
 
 @module tests.source.fanqie.client_spec
 --]]
@@ -13,6 +14,8 @@ package.preload["json"] = function()
 end
 
 local SHELF_IDS = { "1", "2", "3" }
+-- book_id → group_name；空表 = 书架项不带分组字段（和没建文件夹的账号一致）。
+local SHELF_GROUPS = {}
 local fail_ids = {}
 local gone_ids = {}
 local requests = 0
@@ -30,7 +33,11 @@ package.preload["http.request"] = function()
             if opts.url:find("/bookshelf/info/", 1, true) then
                 local list = {}
                 for _idx, id in ipairs(SHELF_IDS) do
-                    list[#list + 1] = '{"book_id":"' .. id .. '"}'
+                    local item = '{"book_id":"' .. id .. '"'
+                    if SHELF_GROUPS[id] then
+                        item = item .. ',"group_id":"7","group_name":"' .. SHELF_GROUPS[id] .. '"'
+                    end
+                    list[#list + 1] = item .. "}"
                 end
                 cb({ code = 200, body = '{"code":0,"data":{"book_shelf_info":[' .. table.concat(list, ",") .. ']}}' })
                 return { cancel = function() end }
@@ -139,6 +146,19 @@ Assert.eq(peak, 4)
 Assert.is_nil(err)
 Assert.len(data.data.detail_list, 10)
 Assert.eq(data.data.detail_list[10].book_id, "110")
+
+do -- 书架分组：book_shelf_info 上的 group_name 挂到详情行（没进组的不写）
+    SHELF_IDS = { "1", "2", "3" }
+    SHELF_GROUPS = { ["1"] = "追更", ["3"] = "追更" }
+    gone_ids = {}
+    client:fetchShelfDetailAsync(true, function(d, e) data, err = d, e end)
+    drain()
+    Assert.is_nil(err)
+    Assert.eq(data.data.detail_list[1]._group_name, "追更")
+    Assert.is_nil(data.data.detail_list[2]._group_name, "没进组不算分组")
+    Assert.eq(data.data.detail_list[3]._group_name, "追更")
+    SHELF_GROUPS = {}
+end
 
 do
     client:fetchBookDetailAsync("1", function(d, e) data, err = d, e end)

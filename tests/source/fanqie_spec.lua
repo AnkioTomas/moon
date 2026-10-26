@@ -63,6 +63,14 @@ package.preload["source.fanqie.client"] = function()
                                         author_name = "作者",
                                         thumb_url = "https://p6-novel.byteimg.com/novel-pic/x~tplv-shrink:320:0.image",
                                         abstract = "简介",
+                                        _group_name = "追更",
+                                    },
+                                    {
+                                        book_id = "9876543210987654321",
+                                        book_name = "未分组书",
+                                        author_name = "作者乙",
+                                        thumb_url = "https://p6-novel.byteimg.com/novel-pic/y~tplv-shrink:320:0.image",
+                                        abstract = "简介乙",
                                     },
                                 },
                             },
@@ -208,11 +216,14 @@ src:syncBooksAsync({}, function(r, e)
     count = r.pulled
 end)
 drain()
-Assert.eq(count, 1)
+Assert.eq(count, 2)
 Assert.eq(stored[1].stable_id, "1234567890123456789")
 Assert.eq(stored[1].authors, "作者")
 Assert.eq(stored[1].title, "测试")
+Assert.eq(stored[1].category, "追更", "进组书分类用分组名")
 Assert.matches(stored[1].cover, "p6%-novel%.byteimg%.com")
+Assert.eq(stored[2].stable_id, "9876543210987654321")
+Assert.is_nil(stored[2].category, "没进组不写分类")
 
 local ref = { source_id = "fanqie", stable_id = "1234567890123456789" }
 src:openBookAsync(ref, { chapter_idx = 1 }, function(path)
@@ -220,7 +231,7 @@ src:openBookAsync(ref, { chapter_idx = 1 }, function(path)
     count = count + 1
 end)
 drain()
-Assert.eq(count, 2)
+Assert.eq(count, 3)
 
 local cancelled = src:syncBooksAsync({}, function()
     error("cancelled callback delivered")
@@ -231,7 +242,7 @@ drain()
 src:prefetchChaptersAsync(ref, {}, 1, 3, function()
     count = count + 1
 end)
-Assert.eq(count, 3)
+Assert.eq(count, 4)
 
 -- 整本下载：走公共 cacheAllAsync，正文用番茄接口，间隔与预取一致（风控）
 do
