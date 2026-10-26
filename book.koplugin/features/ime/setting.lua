@@ -20,7 +20,7 @@ local function hintRow(width, text)
     local Theme = require("ui.themes")
     local t = Theme.current()
     local box_w = math.max(1, width - Theme.px(t.space.xs))
-    local box = Text.box("caption", text, box_w, { color = t.color.muted })
+    local box = Text.box("caption", text, box_w, { color = t.color.muted, transparent = true })
     local box_h = box:getSize().h
     return LeftContainer:new{
         dimen = Geom:new{ w = width, h = box_h },

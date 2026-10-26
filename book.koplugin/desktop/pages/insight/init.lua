@@ -154,7 +154,7 @@ function Insight:build()
         })
     else
         body = Text.box("body", state.error or _("暂无阅读统计。上报后再查看。"), content_w,
-            { align = "center", color = t.color.muted })
+            { align = "center", color = t.color.muted, transparent = true })
     end
     return Box:new{
         style = { bg = t.color.page },

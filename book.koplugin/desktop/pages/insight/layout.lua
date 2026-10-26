@@ -153,7 +153,7 @@ function Layout.stack(page_id, blocks, width, avail_h)
     end
     if #items == 0 then
         return Text.box("body", _("这一页的内容都已隐藏，可在设置里重新打开"), width,
-            { align = "center", color = t.color.muted })
+            { align = "center", color = t.color.muted, transparent = true })
     end
     total = total + gap * (#items - 1)
     local left = avail_h - total

@@ -35,7 +35,7 @@ function Ranks:build(ctx)
         os.time{ year = year + 1, month = 1, day = 1, hour = 0 }
     )
     if #done == 0 then
-        return Text.box("body", _("今年还没有读完的书"), width, { align = "center", color = t.color.muted })
+        return Text.box("body", _("今年还没有读完的书"), width, { align = "center", color = t.color.muted, transparent = true })
     end
     local value_w = Theme.px(110)
     local row_h = Parts.pair("0", "0", width, value_w):getSize().h
