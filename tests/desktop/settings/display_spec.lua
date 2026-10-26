@@ -27,6 +27,8 @@ package.preload["ui/widget/infomessage"] = function() return { new = function(_,
 package.preload["ui/event"] = function() return { new = function(_, name) return { name = name } end } end
 
 local eink, color_screen, frontlight = true, true, true
+local color_enabled = false
+local canvas_color, color_events = nil, 0
 package.preload["device"] = function()
     return {
         hasEinkScreen = function() return eink end,
@@ -35,7 +37,7 @@ package.preload["device"] = function()
         isKobo = function() return false end,
         screen = {
             isColorScreen = function() return color_screen end,
-            isColorEnabled = function() return false end,
+            isColorEnabled = function() return color_enabled end,
         },
     }
 end
@@ -43,7 +45,10 @@ package.preload["ui/uimanager"] = function()
     return {
         getRefreshRate = function() return 6, 6 end,
         setRefreshRate = function() end,
-        broadcastEvent = function() end,
+        broadcastEvent = function(_, event)
+            Assert.eq(event.name, "ColorRenderingUpdate")
+            color_events = color_events + 1
+        end,
         show = function() end,
         askForRestart = function() end,
     }
@@ -53,14 +58,21 @@ package.preload["utils.settings"] = function()
     return { get = function() return settings end, save = function() saved = saved + 1 end }
 end
 _G.G_reader_settings = {
-    isTrue = function() return false end,
-    saveSetting = function() end,
+    isTrue = function() return color_enabled end,
+    saveSetting = function(_, key, value)
+        Assert.eq(key, "color_rendering")
+        color_enabled = value
+    end,
 }
+package.preload["document/canvascontext"] = function()
+    return { setColorRenderingEnabled = function(_, value) canvas_color = value end }
+end
 
 package.loaded["desktop.pages.setting.display"] = nil
 local Display = require("desktop.pages.setting.display")
 local redraws = 0
-local rows = Display:appearanceRows{ desktop = { updateView = function() redraws = redraws + 1 end }, font_name = "Noto", scale = 120 }
+local ctx = { desktop = { updateView = function() redraws = redraws + 1 end }, font_name = "Noto", scale = 120 }
+local rows = Display:appearanceRows(ctx)
 local screen = Display:screenRows{ desktop = {} }
 Assert.eq(rows[1](600).title, "界面风格")
 Assert.eq(rows[1](600).status, "纸本")
@@ -81,22 +93,42 @@ Assert.eq(saved, 1)
 Assert.eq(redraws, 1)
 rows[7](600).callback()
 Assert.is_true(settings.tabbar_labels)
-Assert.eq(rows[8](600).title, "主题色")
-Assert.eq(rows[8](600).status, "蓝色")
+Assert.eq(rows[8](600).title, "彩色显示")
+Assert.is_false(rows[8](600).toggle)
+Assert.is_nil(rows[9], "彩色关闭时隐藏主题色")
 rows[8](600).callback()
+Assert.is_true(canvas_color)
+Assert.eq(color_events, 1)
+rows = Display:appearanceRows(ctx)
+Assert.len(rows, 9)
+Assert.eq(rows[9](600).title, "主题色")
+Assert.eq(rows[9](600).status, "蓝色")
+rows[9](600).callback()
 local picker = Themed.last("list")
 Assert.eq(picker.current, 0x0756AD)
 Themed.choose(picker, 3)
 Assert.eq(settings.theme_color, 0x7038A0)
-Assert.eq(rows[8](600).status, "紫色")
-Assert.eq(redraws, 3, "切换颜色立即重建界面")
+Assert.eq(rows[9](600).status, "紫色")
+Assert.eq(redraws, 4, "开彩色和切换颜色立即重建界面")
 Assert.eq(screen[1](600).title, "屏幕刷新")
 Assert.eq(screen[1](600).status, "每 6 页")
-Assert.eq(screen[2](600).title, "彩色屏幕支持")
-Assert.is_false(screen[2](600).toggle)
+Assert.len(screen, 1, "彩色开关不再放在屏幕分节")
+rows[8](600).callback()
+Assert.is_false(canvas_color)
+Assert.eq(color_events, 2)
+rows = Display:appearanceRows(ctx)
+Assert.len(rows, 8, "关彩色后主题色消失")
+Assert.eq(settings.theme_color, 0x7038A0, "隐藏主题色不清除已有选择")
+rows[8](600).callback()
+rows = Display:appearanceRows(ctx)
+Assert.eq(rows[9](600).status, "紫色", "重新开启沿用已选主题色")
+rows[8](600).callback()
 
 eink, color_screen, frontlight = false, false, false
 package.loaded["device"] = nil
 package.loaded["desktop.pages.setting.display"] = nil
 Display = require("desktop.pages.setting.display")
 Assert.eq(#Display:screenRows{ desktop = {} }, 0, "无墨水屏/彩屏时不展示刷新与彩色项")
+Assert.len(Display:appearanceRows(ctx), 7, "不支持彩色时不展示彩色开关和主题色")
+require("device").screen.isColorEnabled = nil
+Assert.len(Display:appearanceRows(ctx), 7, "缺少彩色查询接口不会报错")
