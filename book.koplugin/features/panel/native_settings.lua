@@ -22,7 +22,7 @@ local function refreshReader(ui)
     require("features.lockscreen").refresh(nil, nil, "reader_settings")
 end
 
---- 保存当前文档配置为默认并刷新。
+--- 保存当前文档配置为默认并刷新（同步章节书 reader_prefs）。
 ---@param ui table|nil
 ---@param menu table|nil
 local function saveDefault(ui, menu)
@@ -30,8 +30,11 @@ local function saveDefault(ui, menu)
     if ui and ui.menu and ui.menu.saveDocumentSettingsAsDefault then
         ui.menu:saveDocumentSettingsAsDefault()
     end
+    -- 原生路径只写 G_reader_settings；再走 prefs.saveDefaults 覆盖已有全书快照。
+    local ok = ui and require("reader.prefs").saveDefaults(ui)
     require("ui.themes.widgets.toast"):new{
-        text = _("默认配置已保存"), timeout = 2,
+        text = (ok or not ui) and _("默认配置已保存") or _("当前文档不支持保存默认配置"),
+        timeout = 2,
     }:show()
     refreshReader(ui)
 end

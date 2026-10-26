@@ -2,6 +2,8 @@
 全书阅读排版偏好：字体 + CRE 边距/字号，按 source_id + stable_id 存 books.reader_prefs。
 
 连续章节每章是独立物理文件；本模块在关书/休眠/切章前捕获当前排版，开章时按书身份写回 sidecar。
+「保存为默认」写 G_reader_settings，并同步覆盖所有已有 reader_prefs；无 per-book 快照的章节书
+开书时从全局默认注入，避免旧章 sidecar 挡住默认。
 
 @module koplugin.book.reader.prefs
 --]]
@@ -111,6 +113,43 @@ function M.load(identity)
     return decode(BookDB.getReaderPrefs(identity.source_id, identity.stable_id))
 end
 
+--- 从 G_reader_settings 组装与 capture 同形的 prefs（章节书无 per-book 快照时用）。
+---@return table|nil
+function M.fromDefaults()
+    if not G_reader_settings or type(G_reader_settings.data) ~= "table" then
+        return nil
+    end
+    local copt = {}
+    local has_copt = false
+    for key, value in pairs(G_reader_settings.data) do
+        local name = type(key) == "string" and key:match("^copt_(.+)$")
+        if name and name ~= SKIP_COPT_KEY then
+            local value_type = type(value)
+            if value_type == "number" or value_type == "string" or value_type == "table" then
+                copt[name] = copyValue(value)
+                has_copt = true
+            end
+        end
+    end
+    local font_face = G_reader_settings:readSetting("cre_font")
+    local font_id = G_reader_settings:readSetting("book_reader_default_font_id")
+    if type(font_id) ~= "string" or font_id == "" then
+        font_id = nil
+    end
+    if not idMatchesFace(font_id, font_face) then
+        font_id = nil
+    end
+    if not has_copt and type(font_face) ~= "string" and not font_id then
+        return nil
+    end
+    return {
+        font_id = font_id,
+        font_name = font_id,
+        font_face = font_face,
+        copt = copt,
+    }
+end
+
 ---@param ui table
 ---@param identity BookIdentity|nil 缺省按当前文档路径解析
 ---@return boolean 是否成功写入数据库
@@ -175,7 +214,7 @@ function M.inject(doc_settings, document)
     if not (identity and identity.chapter_idx) then
         return false
     end
-    local prefs = M.load(identity)
+    local prefs = M.load(identity) or M.fromDefaults()
     if not prefs then
         return false
     end
@@ -210,8 +249,9 @@ function M.write(doc_settings, prefs)
     end
 end
 
---- 当前排版存为新书默认：同 KOReader ConfigDialog「设为默认」，逐项写 G_reader_settings 的
+--- 当前排版存为全局默认：同 KOReader ConfigDialog「设为默认」，逐项写 G_reader_settings 的
 --- `<prefix>_<name>`（CRE 为 copt，PDF/DjVu 为 kopt）；字体同 ReaderFont 写 cre_font。
+--- 同时覆盖所有已有 books.reader_prefs，让章节源下次打开也吃到这套。
 ---@param ui table ReaderUI
 ---@return boolean
 function M.saveDefaults(ui)
@@ -237,6 +277,11 @@ function M.saveDefaults(ui)
         end
     end
     G_reader_settings:flush()
+    if prefs then
+        if not BookDB.replaceAllReaderPrefs(JSON.encode(prefs)) then
+            logger.warn("book.reader_prefs replaceAll failed")
+        end
+    end
     return true
 end
 
