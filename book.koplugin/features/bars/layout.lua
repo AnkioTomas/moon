@@ -67,7 +67,17 @@ local function allowedIds(which)
     return allowed
 end
 
---- 清洗用户布局：已知 id、不重复、align 只有 left/right。
+--- align 只认 left / center / right，其它一律当 left。
+---@param align any
+---@return string
+local function normalizeAlign(align)
+    if align == "center" or align == "right" then
+        return align
+    end
+    return "left"
+end
+
+--- 清洗用户布局：已知 id、不重复、align 只有 left/center/right。
 ---@param which string
 ---@return table
 local function sanitize(which, raw)
@@ -80,8 +90,7 @@ local function sanitize(which, raw)
         local item = raw[i]
         local id = type(item) == "table" and item.id or nil
         if id and allowed[id] and not seen[id] then
-            local align = item.align == "right" and "right" or "left"
-            out[#out + 1] = { id = id, align = align }
+            out[#out + 1] = { id = id, align = normalizeAlign(item.align) }
             seen[id] = true
         end
     end
@@ -288,12 +297,12 @@ function Layout.move(which, id, delta)
     Layout.set(which, layout)
 end
 
---- 改左右对齐。
+--- 改对齐：left / center / right。
 ---@param which string
 ---@param id string
 ---@param align string
 function Layout.setAlign(which, id, align)
-    if align ~= "left" and align ~= "right" then
+    if align ~= "left" and align ~= "center" and align ~= "right" then
         return
     end
     local layout = copyLayout(Layout.get(which))

@@ -65,6 +65,10 @@ Assert.eq(align, "right")
 
 Layout.setAlign("top", "percent", "left")
 Assert.eq(select(2, Layout.slot("top", "percent")), "left")
+Layout.setAlign("top", "percent", "center")
+Assert.eq(select(2, Layout.slot("top", "percent")), "center")
+Layout.setAlign("top", "percent", "up")
+Assert.eq(select(2, Layout.slot("top", "percent")), "center", "非法 align 不改")
 
 Layout.move("top", "percent", -1)
 Assert.eq(Layout.get("top")[2].id, "percent")
@@ -90,6 +94,12 @@ local cleaned = Layout.get("top")
 Assert.eq(#cleaned, 1)
 Assert.eq(cleaned[1].id, "chapter")
 Assert.eq(cleaned[1].align, "left")
+
+store.book_reader_top_bar_layout = {
+    { id = "chapter", align = "center" },
+    { id = "clock", align = "right" },
+}
+Assert.eq(Layout.get("top")[1].align, "center", "清洗保留 center")
 
 store.book_reader_top_bar_layout = {}
 local fallback = Layout.get("top")

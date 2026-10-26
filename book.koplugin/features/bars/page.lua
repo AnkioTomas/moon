@@ -69,7 +69,9 @@ local function itemRow(desktop, item, which)
     return function(iw)
         local index, align = Layout.slot(which, item.id)
         local enabled = index ~= nil
-        local side = align == "right" and _("右") or _("左")
+        local side = align == "center" and _("中")
+            or align == "right" and _("右")
+            or _("左")
         return Row.widget({
     width = iw,
     chevron = true,
@@ -97,6 +99,10 @@ local function itemRow(desktop, item, which)
                     actions[#actions + 1] = {
                         text = _("靠左"), enabled = align ~= "left",
                         callback = apply(function() Layout.setAlign(which, item.id, "left") end),
+                    }
+                    actions[#actions + 1] = {
+                        text = _("居中"), enabled = align ~= "center",
+                        callback = apply(function() Layout.setAlign(which, item.id, "center") end),
                     }
                     actions[#actions + 1] = {
                         text = _("靠右"), enabled = align ~= "right",

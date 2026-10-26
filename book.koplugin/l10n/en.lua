@@ -421,6 +421,7 @@ return {
     ["卡片底色不透明度（%）"] = "Card background opacity (%)",
     ["示例书名"] = "Sample title",
     ["示例开关"] = "Sample toggle",
+    ["中"] = "Center",
     ["左"] = "Left",
     ["左上"] = "Top left",
     ["左下"] = "Bottom left",
