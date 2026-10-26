@@ -68,6 +68,9 @@ package.loaded["utils.settings"] = { get = function() return sub_settings end, s
 package.loaded["features.subscribe"] = nil
 local Subscribe = require("features.subscribe")
 
+-- 自动刷新周期与图书馆后台同步一致（5 分钟）。
+Assert.eq(Subscribe.STALE, 5 * 60)
+
 local rss = '<rss><channel><title>源</title><item><title>一</title><link>https://a.com/1</link></item></channel></rss>'
 web["https://a.com/feed"] = rss
 web["https://a.com/"] = '<html><head><link rel="alternate" type="application/rss+xml" href="/feed"></head></html>'

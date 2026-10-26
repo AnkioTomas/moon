@@ -136,4 +136,29 @@ do
     Assert.is_false(Refresh.running())
     Refresh.CONCURRENCY = 1
 end
+-- 自动刷新（quiet）失败不弹 toast；非 quiet 的后台刷新失败照常弹。
+do
+    -- 上面取消用例把 enqueue 桩换成了 finish 不记 result 的版本，这里换回记 result 的。
+    package.loaded["workers.tasks"].enqueue = function(spec)
+        enqueued[#enqueued + 1] = spec
+        spec.state = "running"
+        spec.handle = spec.run(function() end,
+            function(result) spec.state, spec.done, spec.result = "finished", true, result end)
+        return spec
+    end
+    Refresh._reset(); calls, pending = {}, {}
+    _G.__toast = nil
+    Refresh.start({ { id = 41, title = "Q" } }, { quiet = true })
+    pending[#pending](nil, "HTTP 500"); Stubs.flush()
+    local spec = enqueued[#enqueued]
+    spec.on_done(spec.result)
+    Assert.is_nil(_G.__toast, "自动刷新失败不弹 toast")
+    Refresh._reset()
+    Refresh.start({ { id = 42, title = "M" } })
+    pending[#pending](nil, "HTTP 500"); Stubs.flush()
+    spec = enqueued[#enqueued]
+    spec.on_done(spec.result)
+    Assert.matches(_G.__toast, "M: HTTP 500", "手动后台刷新失败弹 toast")
+    _G.__toast = nil
+end
 unwatch()

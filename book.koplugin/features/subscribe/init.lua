@@ -44,8 +44,9 @@ local function isFullText(summary)
     return true
 end
 
---- 打开订阅页时，超过这么久没刷新的源自动刷新（秒）。
-Subscribe.STALE = 3600
+--- 打开订阅页时，超过这么久没刷新的源自动刷新（秒）。与图书馆后台同步同周期
+--- （desktop/sync.lua 的 BACKGROUND_SYNC_INTERVAL），进程内节流，手动刷新不受限。
+Subscribe.STALE = 5 * 60
 
 --- 网页里的私有 / 本机地址（含 .local、IPv4 私网与链路本地、IPv6 本机 / ULA / 链路本地、纯数字主机）。
 --- 远程管理网页发起的抓取（试拉 / 添加 / 导入 / 批量）一律拒绝，免得局域网里的页面借设备探内网。

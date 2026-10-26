@@ -102,8 +102,23 @@ function Page:status()
     return self.busy or Refresh.status()
 end
 
---- 激活页签不自动刷新（不扫全部过期源）。
-function Page:activate() end
+---@type integer|nil 上次自动刷新的时间（进程内节流，与图书馆后台同步一致）
+local auto_at
+
+--- 切到订阅页 / 桌面回前台：超过 Subscribe.STALE 没刷过的源静默后台刷；
+--- 离线不刷（也不占节流，下次激活再试），手动刷新不受节流限制。
+function Page:activate()
+    local now = os.time()
+    if auto_at and now - auto_at < Subscribe.STALE then return end
+    if not require("ui/network/manager"):isConnected() then return end
+    local stale = {}
+    for _idx, feed in ipairs(SubDB.feeds()) do
+        if now - (feed.updated_at or 0) >= Subscribe.STALE then stale[#stale + 1] = feed end
+    end
+    if #stale == 0 then return end
+    auto_at = now
+    Refresh.start(stale, { quiet = true })
+end
 
 function Page:onEvent(event, payload)
     if event ~= "swipe" then return end

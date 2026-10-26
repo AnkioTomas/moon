@@ -4,7 +4,7 @@
 全进程只有一个刷新任务（固定 key）：在跑或排队时再要刷新的源并进去（同一个源不重复），不另起并发；
 单个源（点某个源刷新 / 网页端单源刷新）插到队首，下一个就刷它，不用等前面整轮刷完。
 最多 CONCURRENCY 个源并发拉条目列表（只拉列表，不下载正文），内存里只有待刷新的行。手动刷新 follow 时弹前台进度窗（可转后台），
-自动刷新（打开某个过期的源时只刷它）静默入队、在任务列表里看进度。每个源刷完、整轮结束都通知 watch 的监听者（订阅页重画）。
+自动刷新（打开订阅页时刷全部过期源，quiet）静默入队、失败不弹 toast、在任务列表里看进度。每个源刷完、整轮结束都通知 watch 的监听者（订阅页重画）。
 队列满时退回直接跑。
 
   Refresh.start(feeds, { more = false, follow = true, on_feed = function(feed, added, err) end })
@@ -180,7 +180,7 @@ end
 
 --- 刷新一组源（后台任务）。已有刷新在跑 / 排队时并进去，返回 false。
 ---@param feeds table[] SubDB 行
----@param opts { more?: boolean, follow?: boolean, on_feed?: fun(feed: table, added: integer|nil, err: any) }|nil
+---@param opts { more?: boolean, follow?: boolean, quiet?: boolean, on_feed?: fun(feed: table, added: integer|nil, err: any) }|nil quiet = 自动刷新：失败不弹 toast
 ---@return boolean started 是否新起了一轮
 function Refresh.start(feeds, opts)
     opts = opts or {}
@@ -198,7 +198,7 @@ function Refresh.start(feeds, opts)
     local task = Tasks.enqueue{
         key = Refresh.KEY, kind = "sync", title = _("订阅"), run = run,
         on_done = function(result)
-            if not opts.follow and result and not result.ok and result.err then
+            if not opts.follow and not opts.quiet and result and not result.ok and result.err then
                 require("ui.themes.widgets.toast"):new{ text = tostring(result.err), timeout = 3 }:show()
             end
         end,
