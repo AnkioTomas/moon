@@ -43,6 +43,26 @@ local QUOTE_LINES = 6
 local MAX_THUMBS = 3
 local IMAGE_HEADERS = { Referer = "https://fanqienovel.com/" }
 
+--- 全屏查看段评配图；点任意处或返回键退出。
+---@param url string
+local function showImage(url)
+    local viewer = Modal:new{ covers_fullscreen = true, close_on_tap = true }
+    local image = Image.widget{
+        src = url,
+        headers = IMAGE_HEADERS,
+        width = viewer.dimen.w,
+        height = viewer.dimen.h,
+    }
+    viewer.close_callback = function() image[1]:cancel() end
+    viewer:setPanel(Box:new{
+        style = { bg = viewer.theme.color.page },
+        width = viewer.dimen.w,
+        height = viewer.dimen.h,
+        image,
+    })
+    viewer:show()
+end
+
 ---@class ReviewSheet : BookThemeModal
 ---@field identity BookIdentity
 ---@field spot { range: string, text: string, total: integer }
@@ -178,7 +198,10 @@ function Sheet:thumbs(images)
     local row = HorizontalGroup:new{ align = "center" }
     for n = 1, math.min(#images, MAX_THUMBS) do
         if n > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
-        row[#row + 1] = Image.widget{ src = images[n].url, headers = IMAGE_HEADERS, width = size, height = size }
+        local image = images[n]
+        row[#row + 1] = require("ui.themes.widgets.tap").wrap(
+            Image.widget{ src = image.url, headers = IMAGE_HEADERS, width = size, height = size },
+            function() showImage(image.url) end)
     end
     if #images > MAX_THUMBS then
         row[#row + 1] = HorizontalSpan:new{ width = gap }
