@@ -78,19 +78,23 @@ local function errMsg(err)
     return tostring(err or _("番茄请求失败"))
 end
 
+local function shelfBook(row)
+    return {
+        source_id = "fanqie",
+        stable_id = tostring(row.book_id),
+        title = row.book_name,
+        authors = row.author_name,
+        intro = require("utils.text").stripHtml(row.abstract),
+        cover = row.thumb_url,
+    }
+end
+
 ---@param wire table fetchShelfDetailAsync 的回包
 ---@return Book[]
 local function shelfBooks(wire)
     local books = {}
     for _idx, row in ipairs(wire.data.detail_list) do
-        books[#books + 1] = {
-            source_id = "fanqie",
-            stable_id = tostring(row.book_id),
-            title = row.book_name,
-            authors = row.author_name,
-            intro = require("utils.text").stripHtml(row.abstract),
-            cover = row.thumb_url,
-        }
+        books[#books + 1] = shelfBook(row)
     end
     return books
 end
@@ -211,7 +215,21 @@ function Source:browseAsync(opts, cb)
 end
 
 function Source:getDetailAsync(identity, cb)
-    return Base.defer(cb, identity.book or require("book.books_db").get(self.id, identity.stable_id))
+    local h = handle()
+    h.job = self.client:fetchBookDetailAsync(identity.stable_id, function(row, err)
+        if h.cancelled then return end
+        if not row then cb(nil, errMsg(err)); return end
+        local BookDB = require("book.books_db")
+        local book = shelfBook(row)
+        local existing = BookDB.get(self.id, identity.stable_id)
+        if existing then book.deleted = existing.deleted end
+        if not BookDB.upsertRemote(book) then
+            cb(nil, _("书籍信息保存失败"))
+            return
+        end
+        cb(BookDB.get(self.id, identity.stable_id))
+    end)
+    return h
 end
 
 function Source:loadTocAsync(identity, cb)

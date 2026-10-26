@@ -51,7 +51,10 @@ package.preload["http.request"] = function()
                 elseif gone_ids[id] then
                     cb({ code = 200, body = '{"code":-1,"message":"book not found"}' })
                 else
-                    cb({ code = 200, body = '{"code":0,"data":{"bookName":"书' .. id .. '","thumbUri":"x"}}' })
+                    local metadata = id == "1"
+                        and ',"author":"年轻熊","abstract":"真正的书籍简介","description":"作者签名"'
+                        or ',"author":"","authorName":"兼容作者","abstract":"另一份简介","description":"仍是作者签名"'
+                    cb({ code = 200, body = '{"code":0,"data":{"bookName":"书' .. id .. '","thumbUri":"x"' .. metadata .. '}}' })
                 end
             end
             return { cancel = function() end }
@@ -94,6 +97,10 @@ Assert.is_nil(err)
 Assert.len(data.data.detail_list, 3)
 Assert.eq(data.data.detail_list[1].book_name, "书1")
 Assert.eq(data.data.detail_list[2].book_id, "2")
+Assert.eq(data.data.detail_list[1].author_name, "年轻熊", "第三方版权书只返回 author")
+Assert.eq(data.data.detail_list[1].abstract, "真正的书籍简介", "description 是作者签名，不能当书简介")
+Assert.eq(data.data.detail_list[2].author_name, "兼容作者")
+Assert.eq(data.data.detail_list[2].abstract, "另一份简介")
 Assert.eq(data.data.detail_list[3].book_name, "架上3", "网页查无此书时用书架 multidetail 取书名")
 
 -- 结果进缓存：再拉直接命中，不再发请求。
@@ -132,6 +139,26 @@ Assert.eq(peak, 4)
 Assert.is_nil(err)
 Assert.len(data.data.detail_list, 10)
 Assert.eq(data.data.detail_list[10].book_id, "110")
+
+do
+    client:fetchBookDetailAsync("1", function(d, e) data, err = d, e end)
+    drain()
+    Assert.is_nil(err)
+    Assert.eq(data.author_name, "年轻熊")
+    Assert.eq(data.abstract, "真正的书籍简介")
+    fail_ids["1"] = true
+    client:fetchBookDetailAsync("1", function(d, e) data, err = d, e end)
+    drain()
+    Assert.is_nil(data)
+    Assert.eq(err, "timeout")
+    fail_ids["1"] = nil
+    gone_ids["1"] = true
+    client:fetchBookDetailAsync("1", function(d, e) data, err = d, e end)
+    drain()
+    Assert.is_nil(data)
+    Assert.matches(err, "book not found")
+    gone_ids["1"] = nil
+end
 
 do -- Set-Cookie 值没变不落盘；变了才 flush 一次
     local set_cookie = "ttwid=a; Path=/"

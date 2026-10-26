@@ -21,6 +21,8 @@ package.loaded["source.base"] = nil
 local progress_wire = { data = {} }
 local put_args, put_wire = nil, { code = 0 }
 local shelf_actions, pending_adds = {}, {}
+local detail_error
+local detail_writable = true
 local search_wire = { code = 0, data = { ret_data = {
     { book_id = "111", title = "搜到的书", author = "某人", abstract = "简介", category = "玄幻",
       thumb_url = "https://p6-tt.bytecdn.cn/novel-pic/abc~tplv-shrink:640:0.image" },
@@ -39,6 +41,17 @@ package.preload["source.fanqie.client"] = function()
     return {
         new = function()
             return {
+                fetchBookDetailAsync = function(_self, book_id, cb)
+                    require("ui/uimanager"):nextTick(function()
+                        if detail_error then cb(nil, detail_error); return end
+                        cb({
+                            book_id = book_id, book_name = "详情书名",
+                            author_name = "详情作者", abstract = "<p>详情简介</p>",
+                            thumb_url = "https://p6-novel.byteimg.com/novel-pic/x~tplv-shrink:320:0.image",
+                        })
+                    end)
+                    return { cancel = function() end }
+                end,
                 fetchShelfDetailAsync = function(_, _force, cb)
                     require("ui/uimanager"):nextTick(function()
                         cb({
@@ -125,6 +138,11 @@ package.preload["book.books_db"] = function()
         pendingDeleteIds = function() return {} end,
         pendingShelfAddIds = function() return pending_adds end,
         markSynced = function() return true end,
+        upsertRemote = function(book)
+            if not detail_writable then return false end
+            stored = { book }
+            return true
+        end,
         get = function(_source_id, stable_id)
             return stored and stored[1] and stored[1].stable_id == stable_id and stored[1] or nil
         end,
@@ -340,4 +358,38 @@ do
     drain()
     Assert.is_nil(ok)
     Assert.eq(err, "番茄进度上传失败")
+end
+
+do
+    local detail, err
+    stored[1].deleted = 1
+    src:getDetailAsync({ source_id = src.id, stable_id = ref.stable_id, book = { intro = "" } },
+        function(book, reason) detail, err = book, reason end)
+    Assert.is_nil(detail, "详情不能同步返回旧的本地行")
+    drain()
+    Assert.is_nil(err)
+    Assert.eq(detail.authors, "详情作者")
+    Assert.eq(detail.intro, "详情简介")
+    Assert.eq(detail.deleted, 1, "补详情不能复活墓碑")
+
+    detail_error = "network failed"
+    src:getDetailAsync(ref, function(book, reason) detail, err = book, reason end)
+    drain()
+    Assert.is_nil(detail)
+    Assert.eq(err, "network failed")
+    Assert.eq(stored[1].intro, "详情简介")
+    detail_error = nil
+
+    detail_writable = false
+    src:getDetailAsync(ref, function(book, reason) detail, err = book, reason end)
+    drain()
+    Assert.is_nil(detail)
+    Assert.eq(err, "书籍信息保存失败")
+    detail_writable = true
+
+    local previous = stored[1]
+    local job = src:getDetailAsync(ref, function() error("cancelled detail callback delivered") end)
+    job:cancel()
+    drain()
+    Assert.eq(stored[1], previous, "关闭详情后到达的回包不能写库")
 end

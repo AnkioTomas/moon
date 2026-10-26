@@ -111,7 +111,10 @@ function Detail:mergeStored()
     if storeBackend(book) or not (book.source_id and book.stable_id) then return nil end
     local BookDB = require("book.books_db")
     local row = BookDB.get(book.source_id, book.stable_id)
-    if row then book.meta = row.meta end
+    if row then
+        book.meta = row.meta
+        book.authors, book.intro = row.authors or book.authors, row.intro or book.intro
+    end
     return row
 end
 
@@ -120,18 +123,31 @@ end
 ---@param row Book|nil mergeStored 读到的 books 行
 function Detail:fetchMissingDetail(row)
     if not row then return end
-    if row.intro and row.meta and row.meta.detail_at then return end
+    if row.intro and row.intro ~= "" and row.authors and row.authors ~= ""
+        and row.meta and row.meta.detail_at then return end
     local BookDB = require("book.books_db")
     local book = self.book
     local owner = require("desktop.detail.common").bookOwnerSource(book, self.source)
     if not (owner and owner.getDetailAsync and require("ui/network/manager"):isConnected()) then return end
     local identity = { source_id = book.source_id, stable_id = book.stable_id, source = owner, book = row }
-    self._detail_job = owner:getDetailAsync(identity, function(detail)
+    self._detail_job = owner:getDetailAsync(identity, function(detail, err)
         self._detail_job = nil
-        if self.closed or not detail then return end
-        BookDB.setMeta({ source_id = book.source_id, stable_id = book.stable_id, meta = { detail_at = os.time() } }, true)
+        if self.closed then return end
+        if not detail then
+            if err then require("utils.log").warn("book detail fetch failed", book.source_id, book.stable_id, err) end
+            return
+        end
         local fresh = BookDB.get(book.source_id, book.stable_id)
         if not fresh then return end
+        if fresh.intro and fresh.intro ~= "" and fresh.authors and fresh.authors ~= "" then
+            local at = os.time()
+            if BookDB.setMeta({ source_id = book.source_id, stable_id = book.stable_id, meta = { detail_at = at } }, true) then
+                fresh.meta = fresh.meta or {}
+                fresh.meta.detail_at = at
+            else
+                require("utils.log").warn("book detail timestamp save failed", book.source_id, book.stable_id)
+            end
+        end
         book.intro, book.authors, book.meta = fresh.intro or book.intro, fresh.authors or book.authors, fresh.meta
         self:refresh()
     end)

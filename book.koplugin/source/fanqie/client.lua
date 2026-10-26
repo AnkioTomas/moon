@@ -19,6 +19,7 @@ Client.__index = Client
 ---@field fetchReadProgressAsync fun(self: FanqieClient, cb: function): CancelHandle|nil
 ---@field updateReadProgressAsync fun(self: FanqieClient, book_id: string, item_id: string, index: number, progress: number, cb: function): CancelHandle|nil
 ---@field fetchChapterDirectoryAsync fun(self: FanqieClient, book_id: string, cb: function): CancelHandle|nil
+---@field fetchBookDetailAsync fun(self: FanqieClient, book_id: string, cb: function): CancelHandle
 ---@field fetchShelfDetailAsync fun(self: FanqieClient, force_refresh: boolean|nil, cb: function): CancelHandle|nil
 ---@field searchAsync fun(self: FanqieClient, keyword: string, cb: function): { cancel: fun() }
 ---@field shelfActionAsync fun(self: FanqieClient, action: "add"|"delete", book_id: string, cb: function): { cancel: fun() }
@@ -247,6 +248,34 @@ function Client:fetchChapterDirectoryAsync(book_id, cb)
     end)
 end
 
+local function bookDetail(book_id, data)
+    local author = data.author
+    if not author or author == "" then author = data.authorName end
+    return {
+        book_id = book_id,
+        book_name = data.bookName,
+        author_name = author or "",
+        abstract = data.abstract or "",
+        thumb_url = FanQie.mobileCover(data.thumbUri),
+    }
+end
+
+---@param book_id string
+---@param cb fun(detail: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:fetchBookDetailAsync(book_id, cb)
+    return jsonAsync(self, "GET", FanQie.book_info_url(book_id), nil, nil, function(info, err)
+        if not info then cb(nil, err); return end
+        if (info.code ~= nil and tonumber(info.code) ~= 0)
+            or type(info.data) ~= "table" or not info.data.bookName or info.data.bookName == ""
+        then
+            cb(nil, businessError(info, "番茄书籍详情请求失败"))
+            return
+        end
+        cb(bookDetail(book_id, info.data))
+    end)
+end
+
 ---@param force_refresh boolean|nil
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -363,14 +392,7 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
             if not info then
                 failed = failed or info_err or "番茄书籍详情请求失败"
             elseif type(info.data) == "table" and (info.code == nil or tonumber(info.code) == 0) then
-                local d = info.data
-                by_id[book_id] = {
-                    book_id = book_id,
-                    book_name = d.bookName,
-                    author_name = d.authorName or "",
-                    abstract = d.description or "",
-                    thumb_url = FanQie.mobileCover(d.thumbUri),
-                }
+                by_id[book_id] = bookDetail(book_id, info.data)
             else
                 logger.warn("fanqie book info", book_id, businessError(info, "invalid"))
                 fallbackDetail(book_id)
