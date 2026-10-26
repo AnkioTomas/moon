@@ -48,7 +48,7 @@ local function collect(name, inst, out)
     inst:addToMainMenu(items)
     for key, item in pairs(items) do
         local text = item.text or (item.text_func and item.text_func())
-        if text and (item.callback or item.sub_item_table or item.sub_item_table_func) then
+        if text and (item.callback or item.callback_func or item.sub_item_table or item.sub_item_table_func) then
             out[#out + 1] = { id = name .. ":" .. key, text = text, builtin = BUILTIN[name] == true, item = item }
         end
     end
