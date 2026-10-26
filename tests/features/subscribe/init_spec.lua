@@ -483,3 +483,101 @@ do
     Assert.eq(result[2], 2)
     Assert.eq(result[1] + result[3], 2)
 end
+
+-- 批量缓存限并发；请求完成后补位，取消时中止所有在飞请求。
+do
+    local original_content = Subscribe.content
+    local db = package.loaded["features.subscribe.db"]
+    local original_feed = db.feed
+    local pending, peak, in_flight, mp_peak, active_mp = {}, 0, 0, 0, 0
+    db.feed = function(id)
+        if id == 2 then return { id = id, kind = "mp" } end
+        return rss_feed
+    end
+    Subscribe.content = function(feed, item, done)
+        local request = { done = done, cancelled = false }
+        in_flight = in_flight + 1
+        peak = math.max(peak, in_flight)
+        if feed.kind == "mp" then
+            active_mp = active_mp + 1
+            mp_peak = math.max(mp_peak, active_mp)
+        end
+        pending[item.guid] = request
+        return { cancel = function()
+            if not request.cancelled then
+                request.cancelled = true
+                in_flight = in_flight - 1
+                if feed.kind == "mp" then active_mp = active_mp - 1 end
+            end
+        end }
+    end
+    local articles = {}
+    for i = 1, 5 do articles[i] = { feed_id = 1, guid = "parallel-" .. i, title = tostring(i) } end
+    local result, finished = nil, 0
+    Subscribe.cacheUnread(articles, function() end, function(cached, total, failed)
+        result = { cached, total, failed }
+        finished = finished + 1
+    end)
+    require("support.stubs").flush()
+    Assert.eq(peak, 3)
+    Assert.eq(in_flight, 3)
+    local function complete(guid, html, err)
+        local request = pending[guid]
+        request.done(html, err)
+        in_flight = in_flight - 1
+        if guid:find("wechat-", 1, true) then active_mp = active_mp - 1 end
+    end
+    complete("parallel-2", "body")
+    require("support.stubs").flush()
+    Assert.eq(in_flight, 3)
+    complete("parallel-1", "body")
+    complete("parallel-3", nil, "failed")
+    require("support.stubs").flush()
+    complete("parallel-4", "body")
+    complete("parallel-5", "body")
+    require("support.stubs").flush()
+    Assert.eq(finished, 1)
+    Assert.eq(result[1], 4)
+    Assert.eq(result[2], 5)
+    Assert.eq(result[3], 1)
+
+    pending, peak, in_flight, mp_peak, active_mp = {}, 0, 0, 0, 0
+    local mp_articles = {}
+    for i = 1, 4 do mp_articles[i] = { feed_id = 2, guid = "wechat-" .. i, title = tostring(i) } end
+    local mp_result
+    Subscribe.cacheUnread(mp_articles, function() end, function(cached, total)
+        mp_result = { cached, total }
+    end)
+    require("support.stubs").flush()
+    Assert.eq(active_mp, 1)
+    Assert.eq(mp_peak, 1)
+    complete("wechat-1", "body")
+    require("support.stubs").flush()
+    Assert.eq(active_mp, 1)
+    complete("wechat-2", "body")
+    require("support.stubs").flush()
+    complete("wechat-3", "body")
+    require("support.stubs").flush()
+    complete("wechat-4", "body")
+    require("support.stubs").flush()
+    Assert.eq(mp_result[1], 4)
+    Assert.eq(mp_result[2], 4)
+
+    pending, in_flight = {}, 0
+    local cancel_calls, cancel_done = 0, false
+    Subscribe.content = function(_feed, item, done)
+        pending[item.guid] = { done = done }
+        in_flight = in_flight + 1
+        return { cancel = function()
+            cancel_calls = cancel_calls + 1
+            in_flight = in_flight - 1
+        end }
+    end
+    local batch = Subscribe.cacheUnread(articles, function() end, function() cancel_done = true end)
+    require("support.stubs").flush()
+    batch.cancel()
+    Assert.eq(cancel_calls, 3)
+    Assert.is_false(cancel_done)
+    Subscribe.content = original_content
+    db.feed = original_feed
+end

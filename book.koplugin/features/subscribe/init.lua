@@ -566,34 +566,67 @@ function Subscribe.content(feed, item, cb)
     end)
 end
 
---- 把一批文章（SubDB.stream 的行，可跨源）正文依次缓存到本地（已缓存的跳过），一篇失败不阻断后面。
+--- 把一批文章（SubDB.stream 的行，可跨源）缓存到本地；非公众号最多并发 3 篇，公众号串行以降低限流风险。
 ---@param items table[]
 ---@param report fun(text: string|nil, done: integer, total: integer)
 ---@param cb fun(cached: integer, total: integer, failed: integer, err: any)
 ---@return { cancel: fun() }
 function Subscribe.cacheUnread(items, report, cb)
+    local concurrency = 3
     local feeds = {}
-    local total, pos, failed, last_err = #items, 0, 0, nil
-    local cancelled, active = false, nil
-    local step
-    step = function()
-        if cancelled then return end
-        pos = pos + 1
-        local item = items[pos]
-        if not item then return cb(total - failed, total, failed, last_err) end
-        report(item.title, pos - 1, total)
-        feeds[item.feed_id] = feeds[item.feed_id] or SubDB.feed(item.feed_id)
-        active = Subscribe.content(feeds[item.feed_id], item, function(html, err)
-            active = nil
+    local total, started, completed, failed, last_err = #items, 0, 0, 0, nil
+    local queue = {}
+    for i = 1, total do queue[i] = i end
+    local cancelled, finished, running, active_mp, active = false, false, 0, false, {}
+    local pump
+    local function launch(index)
+        local item = items[index]
+        local feed = feeds[item.feed_id]
+        local is_mp = feed.kind == "mp"
+        local operation = {}
+        active[index] = operation
+        running, started = running + 1, started + 1
+        if is_mp then active_mp = true end
+        report(item.title, started - 1, total)
+        local job = Subscribe.content(feed, item, function(html, err)
+            if active[index] ~= operation then return end
+            active[index] = nil
+            running = running - 1
+            if is_mp then active_mp = false end
             if cancelled then return end
             if not html then failed, last_err = failed + 1, err or last_err end
-            require("ui/uimanager"):nextTick(step)
+            completed = completed + 1
+            require("ui/uimanager"):nextTick(pump)
         end)
+        if active[index] == operation then operation.job = job end
     end
-    require("ui/uimanager"):nextTick(step)
+    pump = function()
+        if cancelled or finished then return end
+        while running < concurrency do
+            local selected
+            for i, index in ipairs(queue) do
+                local item = items[index]
+                feeds[item.feed_id] = feeds[item.feed_id] or SubDB.feed(item.feed_id)
+                if feeds[item.feed_id].kind ~= "mp" or not active_mp then
+                    selected = table.remove(queue, i)
+                    break
+                end
+            end
+            if not selected then break end
+            launch(selected)
+        end
+        if completed == total then
+            finished = true
+            cb(total - failed, total, failed, last_err)
+        end
+    end
+    require("ui/uimanager"):nextTick(pump)
     return { cancel = function()
         cancelled = true
-        if type(active) == "table" and active.cancel then active.cancel() end
+        for _index, operation in pairs(active) do
+            local job = operation.job
+            if type(job) == "table" and job.cancel then job.cancel() end
+        end
     end }
 end
 
