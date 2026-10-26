@@ -15,8 +15,20 @@ local QR = require("ui.themes.widgets.qr")
 local _ = require("gettext")
 
 local DOCS_URL = "https://moon.ankio.net"
+local GROUP_URL = "https://qm.qq.com/q/yLPC4fxb1K"
 
 local Welcome = {}
+
+--- 能直接开链接就开；墨水屏等开不了的设备出二维码，扫码打开同一地址。
+---@param url string
+---@param title string 二维码弹窗标题
+local function open(url, title)
+    if Device:canOpenLink() then
+        Device:openLink(url)
+    else
+        QR:new{ title = title, text = url, caption = url }:show()
+    end
+end
 
 function Welcome.promptDocs()
     local desktop = Settings.get("desktop")
@@ -28,13 +40,9 @@ function Welcome.promptDocs()
         text = _("要看看使用文档吗？\n之后也可以在「设置 → 维护 → 关于」里找到项目主页。"),
         ok_text = _("查看文档"),
         cancel_text = _("以后再说"),
-        ok_callback = function()
-            if Device:canOpenLink() then
-                Device:openLink(DOCS_URL)
-            else
-                QR:new{ title = _("使用文档"), text = DOCS_URL, caption = DOCS_URL }:show()
-            end
-        end,
+        extra_text = _("加入交流群"),
+        ok_callback = function() open(DOCS_URL, _("使用文档")) end,
+        extra_callback = function() open(GROUP_URL, _("加入交流群")) end,
     }:show()
 end
 

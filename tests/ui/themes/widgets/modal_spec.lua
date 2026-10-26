@@ -72,6 +72,22 @@ Assert.eq(log[2], "ok:1")
 confirm:onCloseWidget()
 Assert.len(log, 2)
 
+-- extra_text：在取消与确定之间多一个中性按钮，同样先关窗再回调。
+local extra_log = {}
+local extra_confirm = Confirm:new{
+    text = "x", extra_text = "中间",
+    extra_callback = function() extra_log[#extra_log + 1] = "extra:" .. #Kit.closed end,
+}
+paint(extra_confirm)
+local extra_buttons = Kit.buttons(extra_confirm)
+Assert.len(extra_buttons, 3)
+Assert.eq(extra_buttons[1].text, "取消")
+Assert.eq(extra_buttons[2].text, "中间")
+Assert.eq(extra_buttons[3].text, "确定")
+extra_buttons[2]:onTapThemeButton()
+Assert.eq(extra_log[1], "extra:" .. #Kit.closed)
+Assert.eq(Kit.closed[#Kit.closed], extra_confirm)
+
 -- 点面板外 = 取消；返回键同理。
 Kit.install("paper")
 Confirm = require("ui.themes.widgets.confirm")
