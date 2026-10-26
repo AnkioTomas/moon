@@ -106,6 +106,7 @@ local ok, err = pcall(function()
     -- Frame delay (ms) and frame budget per orientation; fewer, faster
     -- frames in landscape feel better.
     local DELAY_MS = { landscape = 10, portrait = 20 }
+    local SPEED_FACTORS = { slow = 2, normal = 1, fast = 0.5 }
     local STEPS = { landscape = 6, portrait = 8 }
 
     ---------------------------------------------------------------
@@ -529,6 +530,8 @@ local ok, err = pcall(function()
         if delay_ms == nil or delay_ms < 0 then
             delay_ms = DELAY_MS[orientation]
         end
+        local speed = SPEED_FACTORS[G_reader_settings:readSetting("swipe_animation_speed")]
+        if speed then delay_ms = DELAY_MS[orientation] * speed end
         local usleep = ffi.C.usleep
         local steps = STEPS[orientation]
         local anim_refresh_mode = G_reader_settings:readSetting("swipe_animation_refresh_mode") or "ui"

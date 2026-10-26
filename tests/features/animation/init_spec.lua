@@ -111,6 +111,32 @@ popup_opts = Themed.last("list")
 popup_opts.on_select("wipe")
 Assert.eq(store.swipe_animation_style, "wipe", "无回调也能落设置")
 
+-- 三档速度独立持久化；未设置或非法值显示标准，不改旧版延迟配置。
+Assert.eq(PageTurnAnimation.currentSpeed().value, "normal")
+store.swipe_animation_speed = "unknown"
+Assert.eq(PageTurnAnimation.currentSpeed().value, "normal")
+store.swipe_animation_delay_ms = 37
+store.swipe_animation_speed = nil
+local speed_changes = 0
+PageTurnAnimation.pickSpeed(function() speed_changes = speed_changes + 1 end)
+popup_opts = Themed.last("list")
+Assert.eq(popup_opts.current, "normal")
+local speed_names = {}
+for _, item in ipairs(popup_opts.items) do speed_names[#speed_names + 1] = item.text end
+Assert.eq(table.concat(speed_names, ","), "慢,标准,快")
+popup_opts.on_select("normal")
+Assert.eq(store.swipe_animation_speed, "normal", "显式选择标准可覆盖旧延迟")
+Assert.eq(speed_changes, 1)
+popup_opts.on_select("normal")
+Assert.eq(speed_changes, 1, "重复选择不刷新")
+popup_opts.on_select("slow")
+Assert.eq(PageTurnAnimation.currentSpeed().text, "慢")
+Assert.eq(speed_changes, 2)
+PageTurnAnimation.pickSpeed()
+Themed.last("list").on_select("fast")
+Assert.eq(PageTurnAnimation.currentSpeed().text, "快")
+Assert.eq(store.swipe_animation_delay_ms, 37, "保留旧设置")
+
 -- 启动自检：已安装但运行时补丁内容变了（插件升级）时重新分发并提示重启；没变则静默。
 local shown = {}
 local Manager = require("patch.manager")

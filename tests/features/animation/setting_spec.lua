@@ -1,5 +1,5 @@
 --[[--
-翻页动画设置：追加到「阅读行为」页，开关装/卸补丁，开启时多一行风格。
+翻页动画设置：开关装/卸补丁，开启时显示风格与速度。
 
 @module tests.features.animation.setting_spec
 --]]
@@ -28,6 +28,7 @@ end
 
 local enabled, set_result, restarts, on_change = false, { ok = true }, 0, nil
 local style = { text = "擦除", value = "wipe" }
+local speed = { text = "标准", value = "normal" }
 package.preload["features.animation"] = function()
     return {
         isEnabled = function() return enabled end,
@@ -38,6 +39,8 @@ package.preload["features.animation"] = function()
         promptRestart = function() restarts = restarts + 1 end,
         currentStyle = function() return style end,
         pickStyle = function(cb) on_change = cb end,
+        currentSpeed = function() return speed end,
+        pickSpeed = function(cb) on_change = cb end,
     }
 end
 
@@ -72,17 +75,26 @@ Assert.is_true(enabled)
 Assert.eq(updates, 1)
 Assert.eq(restarts, 1)
 
--- 开启后多一行风格，显示当前风格名；选中后刷新设置页。
+-- 开启后显示速度与风格；修改后刷新设置页，不提示重启。
 rows = entry.page.sections()[1].rows
 Assert.is_true(rows[1](600).status_on)
-Assert.len(rows, 2)
-local style_row = rows[2](600)
+Assert.len(rows, 3)
+local speed_row = rows[2](600)
+Assert.eq(speed_row.title, "翻页动画速度")
+Assert.eq(speed_row.status, "标准")
+speed_row.callback()
+on_change()
+Assert.eq(updates, 2)
+speed = { text = "慢", value = "slow" }
+Assert.eq(entry.page.sections()[1].rows[2](600).status, "慢")
+Assert.eq(restarts, 1, "调整速度无需重启")
+local style_row = rows[3](600)
 Assert.eq(style_row.title, "翻页动画风格")
 Assert.eq(style_row.status, "擦除")
 style_row.callback()
 on_change()
-Assert.eq(updates, 2)
+Assert.eq(updates, 3)
 style = { text = "方框", value = "box" }
-Assert.eq(entry.page.sections()[1].rows[2](600).status, "方框")
+Assert.eq(entry.page.sections()[1].rows[3](600).status, "方框")
 
 return true
