@@ -23,6 +23,9 @@ package.preload["device"] = function()
         },
     }
 end
+package.preload["ui.themes"] = function()
+    return { current = function() return { color = { accent = 0 } } end }
+end
 
 local PNG8 = "\137PNG\r\n\26\n" .. string.rep("\0", 24)
 local last_download = {}

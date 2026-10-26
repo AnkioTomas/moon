@@ -48,6 +48,7 @@ function Chart.appendBars(blocks, opts)
                 kind = "vbar", x = bar_x, y = y + height - filled,
                 width = bar_w, height = filled, value = 1, radius = bar_radius,
                 color = strong and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_9,
+                accent = strong,
             }
             if opts.value_label then
                 blocks[#blocks + 1] = {
@@ -62,6 +63,7 @@ function Chart.appendBars(blocks, opts)
             width = math.floor(slot_w), size = 11, align = "center", box = false,
             bold = opts.highlight_last and i == n or nil,
             color = opts.highlight_last and i == n and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_4,
+            accent = opts.highlight_last and i == n,
         }
     end
     return blocks

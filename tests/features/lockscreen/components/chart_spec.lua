@@ -30,7 +30,10 @@ Chart.appendBars(bars, {
 })
 local vbar_n, label_n, rule_n = 0, 0, 0
 for _idx, b in ipairs(bars) do
-    if b.kind == "vbar" then vbar_n = vbar_n + 1 end
+    if b.kind == "vbar" then
+        vbar_n = vbar_n + 1
+        Assert.is_true(b.accent)
+    end
     if b.kind == "rule" then rule_n = rule_n + 1 end
     if b.text then label_n = label_n + 1 end
 end

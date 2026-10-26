@@ -71,6 +71,8 @@ function M.dayKey(plan)
         plan.position,
         plan.wide and "wide" or "narrow",
         plan.source_path or "",
+        "accent-v1",
+        tostring(require("ui.themes").current().color.accent),
     }
     if asset.cache_key then
         parts[#parts + 1] = asset.cache_key()

@@ -2,7 +2,7 @@
 锁屏主体公共辅助：日期桶、章节文案、时长、空态。
 
 封面和进度条用本文件的块，不引用桌面组件。
-色值用 COLOR_GRAY_*，DSL 块不依赖 Device。
+色值用 COLOR_GRAY_*，强调图形标 accent；DSL 块不依赖 Device。
 
 @module koplugin.book.features.lockscreen.components.util
 --]]
@@ -275,7 +275,7 @@ function U.progressBlocks(x, y, width, percent)
     local fill = math.floor(width * pct / 100)
     if fill > 0 then
         blocks[#blocks + 1] = {
-            kind = "rule", x = x, y = y, width = fill, height = h, color = Blitbuffer.COLOR_BLACK,
+            kind = "rule", x = x, y = y, width = fill, height = h, color = Blitbuffer.COLOR_BLACK, accent = true,
         }
     end
     return blocks, h

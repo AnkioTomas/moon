@@ -12,8 +12,22 @@ local ImageWidget = require("ui/widget/imagewidget")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local Paths = require("utils.paths")
 local Layout = require("features.lockscreen.layout")
+local Screen = require("device").screen
 
 local M = {}
+
+-- 显式灰度文字、背景和装饰不染色；强调块与未指定颜色的粗体标题共用主题色。
+---@param block table
+---@param fallback ffi.cdata*
+---@param title boolean|nil
+---@return ffi.cdata*
+local function blockColor(block, fallback, title)
+    if (block.accent or title) and Screen.isColorEnabled and Screen:isColorEnabled() then
+        local Theme = require("ui.themes")
+        return Theme.color(Theme.current().color.accent)
+    end
+    return block.color or fallback
+end
 
 --- 将 widget 绘制到画布；越过任一画布边缘时裁剪，避免 blit 越界。借用 widget，不释放。
 ---@param bb BlitBuffer 用于绘制的 Blitbuffer 画布
@@ -72,13 +86,13 @@ local function writePNG(path, width, height, paint, transparent)
     local tmp = path .. ".part"
     -- 画的是文件不是屏幕：ImageWidget 等在夜间模式会预先反色去抵消整屏反色，
     -- 离屏写 PNG 时照做就存成底片。绘制期间关掉 night_mode，结束（含出错）恢复。
-    local Screen = require("device").screen
     local night = Screen.night_mode
     Screen.night_mode = false
     local ok, err = xpcall(function()
         -- 灰度屏用 BB8：整屏画布 RGB32 要 8 MiB，灰度 PNG 也小得多。透明背景只有 RGB32 带 alpha。
         bb = Blitbuffer.new(width, height,
-            (transparent or Screen:isColorEnabled()) and Blitbuffer.TYPE_BBRGB32 or Blitbuffer.TYPE_BB8)
+            (transparent or (Screen.isColorEnabled and Screen:isColorEnabled()))
+                and Blitbuffer.TYPE_BBRGB32 or Blitbuffer.TYPE_BB8)
         ---@diagnostic disable-next-line: cast-type-mismatch
         ---@cast bb BlitBuffer
         if not transparent then bb:fill(Blitbuffer.COLOR_WHITE) end
@@ -165,14 +179,15 @@ end
 local function paintText(bb, block, w)
     local x = block.x or math.floor(w * 0.08)
     local width = block.width or (w - x * 2)
-    local color = block.color or Blitbuffer.COLOR_BLACK
+    local color = blockColor(block, Blitbuffer.COLOR_BLACK, block.bold and block.color == nil)
+    local mask_text = block.box == false or not Blitbuffer.isColor8(color)
     local widget = TextBoxWidget:new{
         text = tostring(block.text or ""),
         face = Font:getFace(block.face or "cfont", block.size or 24),
         width = width,
         alignment = block.align or "left",
-        -- 无框文字取黑字作覆盖度蒙版，着色交给 colorblitFrom
-        fgcolor = block.box == false and Blitbuffer.COLOR_BLACK or color,
+        fgcolor = mask_text and Blitbuffer.COLOR_WHITE or color,
+        bgcolor = mask_text and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
         bold = block.bold == true,
     }
     local size = widget:getSize()
@@ -180,12 +195,14 @@ local function paintText(bb, block, w)
     if block.box ~= false then
         local pad = block.padding or 10
         bb:paintRect(x - pad, y - pad, width + pad * 2, size.h + pad * 2, Blitbuffer.COLOR_WHITE)
-        widget:paintTo(bb, x, y)
-    else
-        -- TextBoxWidget:paintTo 会连白底整块贴上；反相后按字形覆盖度混合，背景才透得出来。
+    end
+    if mask_text then
+        -- 白字黑底作覆盖度蒙版，背景透出，RGB 字形也不会被原生绘制转灰。
         local mask = widget._bb
-        mask:invertRect(0, 0, mask:getWidth(), mask:getHeight())
-        bb:colorblitFrom(mask, x, y, 0, 0, mask:getWidth(), mask:getHeight(), color)
+        local paint = Blitbuffer.isColor8(color) and bb.colorblitFrom or bb.colorblitFromRGB32
+        paint(bb, mask, x, y, 0, 0, mask:getWidth(), mask:getHeight(), color)
+    else
+        widget:paintTo(bb, x, y)
     end
     widget:free()
 end
@@ -200,9 +217,11 @@ end
 local function paintRect(bb, x, y, width, height, color, radius)
     radius = math.max(0, math.floor(tonumber(radius) or 0))
     if radius > 0 then
-        bb:paintRoundedRect(x, y, width, height, color, radius)
+        local paint = Blitbuffer.isColor8(color) and bb.paintRoundedRect or bb.paintRoundedRectRGB32
+        paint(bb, x, y, width, height, color, radius)
     else
-        bb:paintRect(x, y, width, height, color)
+        local paint = Blitbuffer.isColor8(color) and bb.paintRect or bb.paintRectRGB32
+        paint(bb, x, y, width, height, color)
     end
 end
 
@@ -246,8 +265,8 @@ local function paintShape(bb, block, w, h, background)
     local width = block.width or (w - x * 2)
     if block.kind == "rule" then
         -- DESIGN：分割线 #55，默认 1px，不抢内容
-        bb:paintRect(x, y, width, block.height or 1,
-            block.color or Blitbuffer.COLOR_GRAY_5)
+        paintRect(bb, x, y, width, block.height or 1,
+            blockColor(block, Blitbuffer.COLOR_GRAY_5))
     elseif block.kind == "panel" then
         -- DESIGN：浅卡可带 8px 圆角 + 2px 轻阴影（#DD）
         local height = block.height or 1
@@ -257,7 +276,7 @@ local function paintShape(bb, block, w, h, background)
             lightenRounded(bb, x, y, width, height, radius, block.lighten)
             return
         end
-        local color = block.color or Blitbuffer.COLOR_WHITE
+        local color = blockColor(block, Blitbuffer.COLOR_WHITE)
         if block.shadow then
             local s = type(block.shadow) == "number" and block.shadow or 2
             paintRect(bb, x + s, y + s, width, height, Blitbuffer.COLOR_GRAY_D, radius)
@@ -274,7 +293,7 @@ local function paintShape(bb, block, w, h, background)
         local filled = math.floor(height * math.max(0, math.min(1, block.value or 0)))
         if filled > 0 then
             paintRect(bb, x, y + height - filled, width, filled,
-                block.color or Blitbuffer.COLOR_BLACK, radius)
+                blockColor(block, Blitbuffer.COLOR_BLACK), radius)
         end
     elseif block.kind == "cutout_circle" then
         if not background then error("cutout_circle requires background snapshot") end
