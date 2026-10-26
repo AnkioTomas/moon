@@ -602,7 +602,8 @@ do
 
     local src = Jdread.new()
     local res
-    src:browseAsync({}, function(r) res = r end)
+    local handle = src:browseAsync({}, function(r) res = r end)
+    Assert.eq(type(handle.cancel), "function")
     Assert.eq(calls[1], "1,week,,1,20")
     Assert.len(res.data, 1)
     Assert.len(res.groups, 4)
@@ -617,6 +618,19 @@ do
     src:browseAsync({ node = "2:13:week:10944" }, function(r) res = r end)
     Assert.len(res.groups, 3)
     Assert.eq(res.groups[3].chips[2].title, "玄幻频道")
+    Assert.eq(types_calls, 1)
+
+    -- 缓存菜单后再次切榜单：返回的句柄仍能取消当前在途请求。
+    local cancelled = 0
+    fake_client.rankAsync = function()
+        return { cancel = function() cancelled = cancelled + 1 end }
+    end
+    for _, node in ipairs({ "1:1:all:10846", "2:13:week:10944" }) do
+        handle = src:browseAsync({ node = node }, function() error("请求尚未完成") end)
+        Assert.eq(type(handle.cancel), "function")
+        handle:cancel()
+    end
+    Assert.eq(cancelled, 2)
     Assert.eq(types_calls, 1)
 end
 
