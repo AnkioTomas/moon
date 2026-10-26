@@ -239,9 +239,18 @@ local function write(path, payload, cb, opts)
         cb(nil, _("章节内容为空"))
         return
     end
+    if type(payload) == "table" and payload.temporary then html = TEMP_MARK .. html end
+    -- 动态目录每次重建章节；内容不变就保留原文件，免得双语章被时间戳误判过期。
+    if opts and opts.volatile then
+        local previous = io.open(path, "rb")
+        if previous then
+            local same = previous:read("*a") == html
+            previous:close()
+            if same then cb(path); return end
+        end
+    end
     local dir_ok, dir_err = Paths.ensureDir(path:match("(.+)/[^/]+$"))
     if not dir_ok then cb(nil, dir_err); return end
-    if type(payload) == "table" and payload.temporary then html = TEMP_MARK .. html end
     local tmp = path .. ".part"
     os.remove(tmp)
     local f, err = io.open(tmp, "wb")
@@ -374,7 +383,7 @@ local function ensure(identity, toc, idx, ops, cb)
                 end
             end
             cb(ok_path, write_err)
-        end, { book_title = ops.book_title })
+        end, { book_title = ops.book_title, volatile = ops.volatile })
     end)
 end
 
