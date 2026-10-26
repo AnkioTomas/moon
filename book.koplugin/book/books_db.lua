@@ -365,7 +365,33 @@ function BookDB.upsertLocal(row)
     ) ~= nil and BookDB.setMeta(row, true)
 end
 
---- 远端书架快照入库：先把当前在架标软删，再 upsert 远端成员。
+--- 把一批 stable_id 标软删（已同步在架行）；每批最多 400 个绑定参数。
+---@param source_id string
+---@param ids string[]
+---@param clear_path boolean|nil
+---@return boolean
+local function softDeleteIds(source_id, ids, clear_path)
+    if #ids == 0 then return true end
+    local prefix = clear_path
+        and "UPDATE books SET deleted=1, path=NULL WHERE source_id=? AND deleted=0 AND sync_status=1 AND stable_id IN ("
+        or "UPDATE books SET deleted=1 WHERE source_id=? AND deleted=0 AND sync_status=1 AND stable_id IN ("
+    local BATCH = 400
+    for start = 1, #ids, BATCH do
+        local stop = math.min(start + BATCH - 1, #ids)
+        local marks, args = {}, { source_id }
+        for i = start, stop do
+            marks[#marks + 1] = "?"
+            args[#args + 1] = ids[i]
+        end
+        if not DB.exec(prefix .. table.concat(marks, ",") .. ");", unpack(args)) then
+            return false
+        end
+    end
+    return true
+end
+
+--- 远端书架快照入库：只软删快照里缺席的在架行，再 upsert 远端成员。
+--- 以前是「全表 deleted=1 再逐本救回」：千本书架每次同步多写一遍；现在只碰缺席的。
 ---@param source_id string
 ---@param books table[]
 ---@param opts { clear_missing_paths: boolean|nil, force: boolean|nil, allow_empty: boolean|nil, inserted_at_from_row: boolean|nil }|nil
@@ -385,24 +411,27 @@ function BookDB.reconcile(source_id, books, opts)
         for _idx, book in ipairs(books) do
             if book.stable_id ~= nil then incoming[tostring(book.stable_id)] = true end
         end
-        local count = 0
+        local missing = {}
         for _idx, stable_id in ipairs(BookDB.libraryStableIdsBySource(source_id)) do
-            if not incoming[stable_id] then count = count + 1 end
+            if not incoming[stable_id] then missing[#missing + 1] = stable_id end
         end
-        local deactivate = opts.clear_missing_paths
-            and [[UPDATE books SET deleted=1, path=NULL
-                WHERE source_id=? AND deleted=0 AND sync_status=1;]]
-            or [[UPDATE books SET deleted=1
-                WHERE source_id=? AND deleted=0 AND sync_status=1;]]
-        if not DB.exec(deactivate, source_id) then return nil end
+        if #books == 0 then
+            -- 空快照 + allow_empty：整源已同步在架行全部下架。
+            local deactivate = opts.clear_missing_paths
+                and [[UPDATE books SET deleted=1, path=NULL
+                    WHERE source_id=? AND deleted=0 AND sync_status=1;]]
+                or [[UPDATE books SET deleted=1
+                    WHERE source_id=? AND deleted=0 AND sync_status=1;]]
+            if not DB.exec(deactivate, source_id) then return nil end
+        elseif not softDeleteIds(source_id, missing, opts.clear_missing_paths) then
+            return nil
+        end
         for _idx, row in ipairs(books) do
-            local copy = {}
-            for k, v in pairs(row) do copy[k] = v end
-            copy.source_id = source_id
-            copy.deleted = 0
-            if not BookDB.upsertRemote(copy, opts.force, opts.inserted_at_from_row) then return nil end
+            row.source_id = source_id
+            row.deleted = 0
+            if not BookDB.upsertRemote(row, opts.force, opts.inserted_at_from_row) then return nil end
         end
-        return count
+        return #missing
     end)
     if hidden then return true, hidden end
     return false
