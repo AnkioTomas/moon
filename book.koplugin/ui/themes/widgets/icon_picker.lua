@@ -23,12 +23,10 @@
 require("l10n").apply()
 
 local BD = require("ui/bidi")
-local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
-local LineWidget = require("ui/widget/linewidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -133,11 +131,11 @@ function IconPicker:cellWidget(name)
     local sel = t.selected
     local active = name == self.current
     local mark = Theme.px(sel.mark)
-    local ink = Blitbuffer.Color8(active and sel.ink or t.color.ink)
+    local ink = Theme.color(active and sel.ink or t.color.accent)
     local cell = VerticalGroup:new{
         align = "center",
         Box:new{
-            style = { bg = active and sel.bg or nil },
+            style = { bg = active and sel.bg or nil }, keep_bg = active,
             width = self.cell_w,
             height = self.cell - mark,
             Icon.label{
@@ -155,9 +153,9 @@ function IconPicker:cellWidget(name)
     if mark > 0 then
         cell[#cell + 1] = CenterContainer:new{
             dimen = Geom:new{ w = self.cell_w, h = mark },
-            LineWidget:new{
-                background = Blitbuffer.Color8(active and sel.ink or t.color.page),
-                dimen = Geom:new{ w = math.floor(self.cell_w / 3), h = mark },
+            Box:new{
+                style = { bg = active and t.color.accent or t.color.page },
+                width = math.floor(self.cell_w / 3), height = mark, keep_bg = true,
             },
         }
     end

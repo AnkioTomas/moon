@@ -22,6 +22,13 @@ local STYLE_NAMES = {
     bold = _("高对比"),
     soft = _("柔和"),
 }
+local COLOR_PRESETS = {
+    { value = 0x0756AD, text = _("蓝色") },
+    { value = 0x00734F, text = _("绿色") },
+    { value = 0x7038A0, text = _("紫色") },
+    { value = 0xB32635, text = _("红色") },
+    { value = 0xAD4C00, text = _("橙色") },
+}
 local REFRESH_PRESETS = {
     { value = 0, text = _("从不") },
     { value = 1, text = _("每页") },
@@ -221,6 +228,45 @@ function Display:appearanceRows(ctx)
                         on_select = function(value)
                             conf.swipe_dismiss = value
                             MoonSettings.save("ui", conf)
+                        end,
+                    }:show()
+                end,
+            })
+        end,
+        function(iw)
+            local conf = MoonSettings.get("ui")
+            return Row.widget({
+                width = iw,
+                icon = "label", title = _("底部导航名称"),
+                subtitle = _("关闭后仅显示图标"),
+                toggle = conf.tabbar_labels ~= false,
+                callback = function()
+                    conf.tabbar_labels = not (conf.tabbar_labels ~= false)
+                    MoonSettings.save("ui", conf)
+                    desktop:updateView()
+                end,
+            })
+        end,
+        function(iw)
+            local conf = MoonSettings.get("ui")
+            local value = conf.theme_color or COLOR_PRESETS[1].value
+            local label = string.format("#%06X", value)
+            for _idx, preset in ipairs(COLOR_PRESETS) do
+                if preset.value == value then label = preset.text break end
+            end
+            return Row.widget({
+                width = iw,
+                kind = "nav", icon = "palette", title = _("主题色"),
+                subtitle = _("彩色模式下统一用于图标、按钮和统计"),
+                status = label, status_on = true,
+                callback = function()
+                    List:new{
+                        title = _("主题色"), items = COLOR_PRESETS,
+                        current = value, centered = true,
+                        on_select = function(color)
+                            conf.theme_color = color
+                            MoonSettings.save("ui", conf)
+                            desktop:updateView()
                         end,
                     }:show()
                 end,

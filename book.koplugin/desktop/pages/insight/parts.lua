@@ -46,9 +46,10 @@ end
 
 ---@param text string
 ---@param width number
+---@param color number|nil
 ---@return table
-function Parts.caption(text, width)
-    return Text.line("caption", text, { width = width, color = Theme.current().color.muted })
+function Parts.caption(text, width, color)
+    return Text.line("caption", text, { width = width, color = color or Theme.current().color.muted })
 end
 
 --- 左名右值一行；右列定宽、左列占剩余。

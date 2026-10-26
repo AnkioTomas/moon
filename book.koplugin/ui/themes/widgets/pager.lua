@@ -28,7 +28,7 @@ local T = require("ffi/util").template
 ---@class BookThemePager
 local Pager = {}
 
---- 页码圆点：当前页 ink，其余 disabled；形状跟 control.radius（直角主题是方点）。
+--- 页码圆点：当前页强调色，其余 disabled；形状跟 control.radius（直角主题是方点）。
 ---@param t table 主题令牌
 ---@param page integer
 ---@param pages integer
@@ -39,7 +39,7 @@ local function dots(t, page, pages)
     for i = 1, pages do
         if i > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
         row[#row + 1] = Box:new{
-            style = { bg = i == page and t.color.ink or t.color.disabled, radius = t.control.radius },
+            style = { bg = i == page and t.color.accent or t.color.disabled, radius = t.control.radius },
             width = size,
             height = size,
         }
@@ -54,7 +54,8 @@ function Pager.widget(opts)
     local h = Theme.px(t.control.height)
     local mid_w = math.max(1, opts.width - h * 2)
     local center = opts.center or opts.dots and dots(t, opts.page, opts.pages)
-        or Text.line("body", opts.title or T(_("%1 / %2"), opts.page, opts.pages), { width = mid_w })
+        or Text.line("body", opts.title or T(_("%1 / %2"), opts.page, opts.pages),
+            { width = mid_w, color = opts.title and t.color.accent or t.color.ink })
     return HorizontalGroup:new{
         align = "center",
         Button:new{ icon = "chevron_left", variant = "ghost", width = h, height = h,

@@ -12,6 +12,7 @@
       active = "home", on_tab = function(id) … end })
 
 opts.plain：壁纸透底时用，未选中格的图标文字用主文字色而不是 faint（选中格不变）。
+opts.show_labels：false 时只显示图标；高度与触摸区不变。
 
 未选中格：页面底色 + faint 文字；点当前格不回调，但照样吞掉点按（不漏给下层手势）。
 on_tab(id, rect) 的 rect 是被点格子的屏幕矩形，可作弹层锚点。
@@ -51,16 +52,21 @@ function Tabbar.widget(opts)
     local sel = t.selected
     local plain = opts.plain
     local mark = Theme.px(sel.mark)
+    local inactive_ink = plain and t.color.ink or t.color.faint
     local row = HorizontalGroup:new{ align = "top" }
     for _idx, tab in ipairs(opts.tabs) do
         local active = tab.id == opts.active
-        local ink = active and sel.ink or (plain and t.color.ink or t.color.faint)
-        local label = Icon.label{
+        local ink = active and sel.ink or inactive_ink
+        local label = opts.show_labels == false and Icon.widget{
+            name = tab.icon,
+            size = t.control.icon,
+            color = Theme.color(ink),
+        } or Icon.label{
             name = tab.icon,
             text = tab.text,
             direction = "column",
             size = t.control.icon,
-            color = Blitbuffer.Color8(ink),
+            color = Theme.color(ink),
             face = active and "cfont" or "xx_smallinfofont",
             font_size = t.font.caption + (active and 2 or 0),
             max_width = cell_w,
@@ -80,9 +86,9 @@ function Tabbar.widget(opts)
             -- 没选中的格留空隙而不是画页面色线：壁纸透底时页面色线会成为一道白条。
             cell[#cell + 1] = active and CenterContainer:new{
                 dimen = Geom:new{ w = cell_w, h = mark },
-                LineWidget:new{
-                    background = Blitbuffer.Color8(sel.ink),
-                    dimen = Geom:new{ w = math.floor(cell_w / 3), h = mark },
+                Box:new{
+                    style = { bg = t.progress.fill },
+                    width = math.floor(cell_w / 3), height = mark, keep_bg = true,
                 },
             } or VerticalSpan:new{ width = mark }
         end

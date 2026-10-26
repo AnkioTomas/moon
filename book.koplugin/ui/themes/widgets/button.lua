@@ -15,7 +15,6 @@ enabled=false 时文字与边框改 disabled 色，点按被吞掉不回调。
 @module koplugin.book.ui.themes.widgets.button
 --]]
 
-local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
@@ -59,7 +58,7 @@ function Button:content(t, ink, max_w)
             name = self.icon,
             text = self.text,
             size = icon_size,
-            color = Blitbuffer.Color8(ink),
+            color = Theme.color(ink),
             face = small and "xx_smallinfofont" or "cfont",
             font_size = small and t.font.caption or t.font.body,
             gap = Theme.px(t.space.xs),
@@ -68,7 +67,7 @@ function Button:content(t, ink, max_w)
         }
     end
     if self.icon then
-        return Icon.widget{ name = self.icon, size = icon_size, color = Blitbuffer.Color8(ink) }
+        return Icon.widget{ name = self.icon, size = icon_size, color = Theme.color(ink) }
     end
     return Text.line(small and "caption" or "body", self.text, { width = max_w, color = ink })
 end
@@ -89,9 +88,11 @@ function Button:init()
     local pad = Theme.px(self.size == "small" and t.space.sm or t.space.md)
     local content = self:content(t, ink, self.width and math.max(1, self.width - pad * 2))
     local border_color = v.border_color and (self.enabled and v.border_color or t.color.disabled)
+    local bg = v.bg
+    if not self.enabled and t.color.accent > 0xFF then bg = bg and t.color.page end
     self[1] = Box:new{
         style = {
-            bg = v.bg,
+            bg = bg,
             border = border_color and t.control.border or 0,
             border_color = border_color,
             radius = t.control.radius,

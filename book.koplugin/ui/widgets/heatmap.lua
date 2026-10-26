@@ -8,9 +8,9 @@
 @module koplugin.book.ui.widgets.heatmap
 --]]
 
-local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
 local Widget = require("ui/widget/widget")
+local Theme = require("ui.themes")
 
 ---@class BookHeatmap : Widget
 ---@field cols table[] cols[c][r] = { level } | false
@@ -43,12 +43,20 @@ end
 ---@param y number
 function Heatmap:paintTo(bb, x, y)
     self.dimen.x, self.dimen.y = x, y
+    local fill = Theme.current().progress.fill
+    local shades = SHADES
+    if fill > 0xFF then
+        shades = {}
+        for level = 0, 4 do shades[level + 1] = Theme.mix(SHADES[1], fill, level / 4) end
+    end
     for c, col in ipairs(self.cols) do
         for r, cell in ipairs(col) do
             if cell then
-                bb:paintRect(
+                local value = shades[cell.level + 1]
+                local paint = value > 0xFF and bb.paintRectRGB32 or bb.paintRect
+                paint(bb,
                     x + (c - 1) * (self.cell + GAP), y + (r - 1) * (self.cell + GAP),
-                    self.cell, self.cell, Blitbuffer.Color8(SHADES[cell.level + 1])
+                    self.cell, self.cell, Theme.color(value)
                 )
             end
         end

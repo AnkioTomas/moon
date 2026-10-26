@@ -19,7 +19,6 @@
 @module koplugin.book.desktop.topbar
 --]]
 
-local Blitbuffer = require("ffi/blitbuffer")
 local DataStorage = require("datastorage")
 local Device = require("device")
 local Geom = require("ui/geometry")
@@ -277,9 +276,10 @@ end
 ---@return table
 function TopBar.metric(text, icon, max_width)
     local t = Theme.current()
-    local ink = Blitbuffer.Color8(t.color.ink)
+    local ink = Theme.color(t.color.accent)
     if icon and text then
         return Icon.label{ name = icon, text = text, size = ICON_SIZE, color = ink,
+            text_color = Theme.color(t.color.ink),
             font_size = t.font.caption, gap = Theme.px(t.space.xs), max_width = max_width }
     end
     if icon then return Icon.widget{ name = icon, size = ICON_SIZE, color = ink } end

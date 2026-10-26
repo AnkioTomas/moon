@@ -1,10 +1,10 @@
 --[[--
-主题文字：按字号角色（caption / body / title / hero）取字面与字号，颜色取灰度令牌。
+主题文字：按字号角色（caption / body / title / hero）取字面与字号。
 
   Text.line("title", "书名", { width = w })          -- 单行，超宽截断
   Text.box("body", long_text, w, { align = "center" })  -- 多行自动换行
 
-opts.color 是灰度令牌（缺省 color.ink）；title / hero 默认加粗，opts.bold 可覆盖。
+opts.color 是颜色令牌；title / hero 默认强调色并加粗，opts.bold 可覆盖。
 
 @module koplugin.book.ui.themes.widgets.text
 --]]
@@ -19,6 +19,21 @@ local BOLD = { title = true, hero = true }
 
 ---@class BookThemeText
 local Text = {}
+
+--- 原生单行文字只用灰度 colorblitFrom；仅本控件改走 RGB，不修改全局画布或原生控件。
+---@param widget table
+---@return table
+function Text.tint(widget)
+    if not Blitbuffer.isColor8(widget.fgcolor) then
+        function widget:paintTo(bb, x, y)
+            TextWidget.paintTo(self, {
+                getWidth = function() return bb:getWidth() end,
+                colorblitFrom = function(_canvas, ...) return bb:colorblitFromRGB32(...) end,
+            }, x, y)
+        end
+    end
+    return widget
+end
 
 ---@param role string caption/body/title/hero
 ---@return table face
@@ -42,13 +57,13 @@ end
 function Text.line(role, text, opts)
     opts = opts or {}
     local theme = Theme.current()
-    return TextWidget:new{
+    return Text.tint(TextWidget:new{
         text = text,
         face = opts.face or Text.face(role),
         bold = bold(opts, role),
         max_width = opts.width,
-        fgcolor = Blitbuffer.Color8(opts.color or theme.color.ink),
-    }
+        fgcolor = Theme.color(opts.color or (BOLD[role] and theme.color.accent or theme.color.ink)),
+    })
 end
 
 --- 多行文字；给 height 时超出部分可经 TextBoxWidget:scrollDown 翻页。
@@ -62,7 +77,9 @@ end
 function Text.box(role, text, width, opts)
     opts = opts or {}
     local theme = Theme.current()
-    local ink = Blitbuffer.Color8(opts.color or theme.color.ink)
+    local ink = Theme.color(opts.color or (BOLD[role] and theme.color.accent or theme.color.ink))
+    local bg = Theme.color(opts.bg or theme.color.page)
+    local mask = opts.transparent or not Blitbuffer.isColor8(ink)
     local function build(height)
         local box = TextBoxWidget:new{
             text = text,
@@ -73,14 +90,19 @@ function Text.box(role, text, width, opts)
             height_adjust = height ~= nil,
             alignment = opts.align or "left",
             height_overflow_show_ellipsis = (opts.ellipsis or opts.max_lines) and true or nil,
-            -- 透明：白字黑底渲染成覆盖率蒙版，绘制时按它给目标画布上墨色，不铺底色。
-            fgcolor = opts.transparent and Blitbuffer.COLOR_WHITE or ink,
-            bgcolor = opts.transparent and Blitbuffer.COLOR_BLACK or Blitbuffer.Color8(opts.bg or theme.color.page),
+            -- 彩色字也用蒙版，避免原生非 xtext 渲染路径把字形转灰。
+            fgcolor = mask and Blitbuffer.COLOR_WHITE or ink,
+            bgcolor = mask and Blitbuffer.COLOR_BLACK or bg,
         }
-        if opts.transparent then
+        if mask then
             function box:paintTo(bb, x, y)
                 self.dimen.x, self.dimen.y = x, y
-                bb:colorblitFrom(self._bb, x, y, 0, 0, self.width, self._bb:getHeight(), ink)
+                if not opts.transparent then
+                    local paint = Blitbuffer.isColor8(bg) and bb.paintRect or bb.paintRectRGB32
+                    paint(bb, x, y, self.width, self._bb:getHeight(), bg)
+                end
+                local paint = Blitbuffer.isColor8(ink) and bb.colorblitFrom or bb.colorblitFromRGB32
+                paint(bb, self._bb, x, y, 0, 0, self.width, self._bb:getHeight(), ink)
             end
         end
         return box

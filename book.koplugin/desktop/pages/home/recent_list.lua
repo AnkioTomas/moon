@@ -306,7 +306,8 @@ function M:createWidget()
     local label = #books > 0 and T(_("最近阅读 · %1"), #books) or _("最近阅读")
     local col = VerticalGroup:new{
         align = "left",
-        Text.line("caption", label, { width = w, color = t.color.muted, bold = true }),
+        Text.line("caption", label, { width = w,
+            color = t.color.accent > 0xFF and t.color.accent or t.color.muted, bold = true }),
         VerticalSpan:new{ width = Theme.px(t.space.xs) },
         content,
     }

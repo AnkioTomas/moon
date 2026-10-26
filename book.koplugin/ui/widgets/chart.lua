@@ -7,6 +7,7 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local Text = require("ui.themes.widgets.text")
 local Theme = require("ui.themes")
+local Box = require("ui.themes.widgets.box")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -107,7 +108,6 @@ function Chart.bars(opts)
     local Geom = require("ui/geometry")
     local HorizontalGroup = require("ui/widget/horizontalgroup")
     local HorizontalSpan = require("ui/widget/horizontalspan")
-    local LineWidget = require("ui/widget/linewidget")
     local VerticalGroup = require("ui/widget/verticalgroup")
     local VerticalSpan = require("ui/widget/verticalspan")
     local BottomContainer = require("ui/widget/container/bottomcontainer")
@@ -137,9 +137,9 @@ function Chart.bars(opts)
         local current_h = peak > 0 and seconds > 0
             and math.max(Theme.px(2), math.floor(bar_h * seconds / peak + 0.5))
             or math.max(1, Theme.px(t.row.divider))
-        local bar = LineWidget:new{
-            background = Blitbuffer.Color8(seconds > 0 and t.color.ink or t.progress.track),
-            dimen = Geom:new{ w = col_w, h = current_h },
+        local bar = Box:new{
+            style = { bg = seconds > 0 and t.progress.fill or t.progress.track }, keep_bg = true,
+            width = col_w, height = current_h,
         }
         local slot = BottomContainer:new{ dimen = Geom:new{ w = col_w, h = bar_h }, bar }
         if label_h > 0 then

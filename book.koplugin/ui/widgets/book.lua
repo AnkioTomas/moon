@@ -675,7 +675,7 @@ function Book.widget(plugin, source, book, cw, ch, opts)
         kids[#kids + 1] = VerticalSpan:new{ width = opts.status_row and 0 or gap }
         kids[#kids + 1] = CenterContainer:new{
             dimen = Geom:new{ w = slot_w, h = Book.captionExtra(true, false) - gap },
-            Text.line("caption", Book.title(book), { width = slot_w }),
+            Text.line("caption", Book.title(book), { width = slot_w, color = t.color.accent }),
         }
     end
     if show_author then

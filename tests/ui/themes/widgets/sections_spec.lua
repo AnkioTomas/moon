@@ -64,3 +64,7 @@ texts = Kit.texts(second)
 Assert.eq(texts[1], "B")
 Assert.contains(texts, "B3")
 Assert.contains(texts, "2 / 2")
+Kit.color_enabled = true
+local colored = Sections.widget({ width = 600, height = 800, sections = sections, on_page = error })
+Assert.eq(Kit.find(colored, function(w) return w.text == "A" end)[1].fgcolor,
+    require("ui.themes").current().color.accent, "分组标题不因 caption 字号漏掉着色")

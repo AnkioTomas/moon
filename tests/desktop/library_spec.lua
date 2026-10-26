@@ -182,6 +182,22 @@ for _idx, label in ipairs({ "书籍", "作者", "系列", "分类", "7 本书", 
 end
 Assert.eq(type(more_option), "function")
 
+Kit.color_enabled = true
+local colored_page = library:buildPage(ctx)
+local accent = require("ui.themes").current().color.accent
+Assert.eq(Kit.find(colored_page, function(w) return w.text == "书籍" end)[1].fgcolor, accent)
+Assert.eq(Kit.find(colored_page, function(w) return w.text == "作者" end)[1].fgcolor,
+    require("ui.themes").current().color.muted)
+local underline = Kit.find(colored_page, function(w)
+    return w.style and w.style.bg == accent and w.box_h == 2 and w.box_w == 150
+end)[1]
+Assert.is_true(underline ~= nil, "选中页签下划线与标题同色")
+Assert.is_true(underline.keep_bg, "选中条是内容，壁纸不能挖掉")
+local color_canvas = Kit.canvas()
+underline:paintTo(color_canvas, 0, 0)
+Assert.is_true(color_canvas.ops[1].rgb, "页签下划线实际保留 RGB")
+Kit.color_enabled = false
+
 -- 网格：右下角「更多」进详情，点卡片开书；开书期间封面盖「正在打开」条。
 more_option()
 Assert.eq(opened_origin, "library")

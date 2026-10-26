@@ -10,6 +10,7 @@ return {
     color = {
         page = 0xFF,
         ink = 0x00,
+        accent = 0x00,
         muted = 0x22,
         faint = 0x44,
         disabled = 0x99,

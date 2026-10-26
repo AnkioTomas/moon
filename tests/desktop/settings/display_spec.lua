@@ -10,7 +10,8 @@ package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
 package.preload["ui.widgets.fontpicker"] = function() return { open = function() end } end
-require("support.theme_stubs").install()
+local Themed = require("support.theme_stubs")
+Themed.install()
 package.preload["ui.themes"] = function()
     return {
         id = function() return "paper" end,
@@ -47,8 +48,9 @@ package.preload["ui/uimanager"] = function()
         askForRestart = function() end,
     }
 end
+local settings, saved = { mesh_mask = true, swipe_dismiss = "off" }, 0
 package.preload["utils.settings"] = function()
-    return { get = function() return { mesh_mask = true, swipe_dismiss = "off" } end, save = function() end }
+    return { get = function() return settings end, save = function() saved = saved + 1 end }
 end
 _G.G_reader_settings = {
     isTrue = function() return false end,
@@ -57,7 +59,8 @@ _G.G_reader_settings = {
 
 package.loaded["desktop.pages.setting.display"] = nil
 local Display = require("desktop.pages.setting.display")
-local rows = Display:appearanceRows{ desktop = {}, font_name = "Noto", scale = 120 }
+local redraws = 0
+local rows = Display:appearanceRows{ desktop = { updateView = function() redraws = redraws + 1 end }, font_name = "Noto", scale = 120 }
 local screen = Display:screenRows{ desktop = {} }
 Assert.eq(rows[1](600).title, "界面风格")
 Assert.eq(rows[1](600).status, "纸本")
@@ -68,7 +71,25 @@ Assert.eq(rows[5](600).title, "背景遮罩")
 Assert.is_true(rows[5](600).toggle)
 Assert.eq(rows[6](600).title, "弹窗关闭手势")
 Assert.eq(rows[6](600).status, "关闭")
-Assert.len(rows, 6, "夜间与亮度不在外观分节")
+Assert.len(rows, 8, "夜间与亮度不在外观分节")
+Assert.eq(rows[7](600).title, "底部导航名称")
+Assert.is_true(rows[7](600).toggle, "旧配置默认显示名称")
+rows[7](600).callback()
+Assert.is_false(settings.tabbar_labels)
+Assert.is_false(rows[7](600).toggle)
+Assert.eq(saved, 1)
+Assert.eq(redraws, 1)
+rows[7](600).callback()
+Assert.is_true(settings.tabbar_labels)
+Assert.eq(rows[8](600).title, "主题色")
+Assert.eq(rows[8](600).status, "蓝色")
+rows[8](600).callback()
+local picker = Themed.last("list")
+Assert.eq(picker.current, 0x0756AD)
+Themed.choose(picker, 3)
+Assert.eq(settings.theme_color, 0x7038A0)
+Assert.eq(rows[8](600).status, "紫色")
+Assert.eq(redraws, 3, "切换颜色立即重建界面")
 Assert.eq(screen[1](600).title, "屏幕刷新")
 Assert.eq(screen[1](600).status, "每 6 页")
 Assert.eq(screen[2](600).title, "彩色屏幕支持")

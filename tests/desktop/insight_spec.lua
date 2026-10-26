@@ -194,4 +194,35 @@ Assert.is_false(has(desktop.view, "本地书"), "关掉当日书单")
 Assert.is_true(has(desktop.view, "页数 7 / 45") or has(desktop.view, "今日"), "其余仍显示")
 Kit.sections.insight.hidden_pages, Kit.sections.insight.hidden_cards = {}, {}
 
+-- 月历只强调本月有阅读的日子及选中日，相邻月份仍灰显。
+Kit.color_enabled = true
+Kit.display.theme_color = 0x7038A0
+local Overview = require("desktop.pages.insight.overview")
+local calendar_state = {
+    ym = "2026-10", selected = "2026-10-25", finished = {},
+    calendar = { days = {
+        ["2026-10-11"] = { duration_seconds = 600 },
+        ["2026-09-27"] = { duration_seconds = 600 },
+    } },
+}
+local calendar = Overview:build{ desktop = desktop, state = calendar_state, width = 600, height = 700 }
+local function dateColor(text)
+    return Kit.find(calendar, function(w) return w.text == text and w.fgcolor ~= nil end)[1].fgcolor
+end
+Assert.eq(dateColor("11"), Kit.display.theme_color, "有阅读记录的日期使用主题色")
+Assert.eq(dateColor("25"), Kit.display.theme_color, "选中日期使用主题色")
+Assert.eq(dateColor("27"), require("ui.themes").current().color.faint, "相邻月份仍灰显")
+Assert.eq(dateColor("10"), 0, "无阅读记录的普通日期保留黑色")
+Assert.eq(dateColor("2026年10月"), Kit.display.theme_color, "月份标题使用主题色")
+local outline = Kit.find(calendar, function(w) return w.style and w.style.border == 2 end)[1]
+Assert.eq(outline.style.border_color, Kit.display.theme_color, "选中日描边使用主题色")
+local canvas = Kit.canvas()
+outline:paintTo(canvas, 0, 0)
+Assert.is_true(canvas.ops[1].rgb, "日历描边实际走 RGB 绘制")
+Kit.color_enabled = false
+calendar = Overview:build{ desktop = desktop, state = calendar_state, width = 600, height = 700 }
+Assert.eq(dateColor("11"), 0, "黑白模式保留原日期颜色")
+outline = Kit.find(calendar, function(w) return w.style and w.style.border == 2 end)[1]
+Assert.eq(outline.style.border_color, 0)
+
 return true

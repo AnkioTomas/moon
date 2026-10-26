@@ -47,7 +47,9 @@ function Ranks:build(ctx)
         return { id = id, hi = row_h * 4, build = function(extra)
             local rows = list(TOP + math.floor(extra / row_h))
             if #rows == 0 then return nil end
-            local col = VerticalGroup:new{ align = "left", Parts.caption(title, width), VerticalSpan:new{ width = xs } }
+            local col = VerticalGroup:new{ align = "left",
+                Parts.caption(title, width, t.color.accent > 0xFF and t.color.accent or t.color.muted),
+                VerticalSpan:new{ width = xs } }
             for i, row in ipairs(rows) do
                 local line = Parts.pair(T(_("%1. %2"), i, row.name), row.value, width, value_w)
                 col[#col + 1] = row.tap and Tap.wrap(line, row.tap) or line

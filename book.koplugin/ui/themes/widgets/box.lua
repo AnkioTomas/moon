@@ -16,7 +16,6 @@ style 取 card / raised / dialog 这类表面令牌（bg/border/border_color/rad
 @module koplugin.book.ui.themes.widgets.box
 --]]
 
-local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local Theme = require("ui.themes")
@@ -99,7 +98,7 @@ function Box:paintTo(bb, x, y)
     -- paintBorder 不夹半径，这里统一夹到短边一半，radius=999 即胶囊。
     local r = math.min(Theme.px(s.radius or 0), math.floor(math.min(w, h) / 2))
     if self.shadow > 0 then
-        bb:paintRoundedRect(x + self.shadow, y + self.shadow, w, h, Blitbuffer.Color8(s.shadow_color), r)
+        bb:paintRoundedRect(x + self.shadow, y + self.shadow, w, h, Theme.color(s.shadow_color), r)
     end
     if s.bg and self.bg_alpha and self.bg_alpha < 100 then
         -- 白底按比例向白提亮即「白色 + 透明度」；圆角外的像素还原。
@@ -107,13 +106,15 @@ function Box:paintTo(bb, x, y)
         bb:lightenRect(x, y, w, h, self.bg_alpha / 100)
         for _idx, pixel in ipairs(corners or {}) do bb:setPixel(pixel[1], pixel[2], pixel[3]) end
     elseif s.bg then
-        bb:paintRoundedRect(x, y, w, h, Blitbuffer.Color8(s.bg), r)
+        local paint = s.bg > 0xFF and bb.paintRoundedRectRGB32 or bb.paintRoundedRect
+        paint(bb, x, y, w, h, Theme.color(s.bg), r)
     end
     local border = Theme.px(s.border or 0)
     if border > 0 then
         -- 只有边框收 anti_alias（paintRoundedRect 不收）：和 FrameContainer 一样靠它盖住底色的锯齿，
         -- 也和它一样听 KOReader「界面抗锯齿」设置。
-        bb:paintBorder(x, y, w, h, border, Blitbuffer.Color8(s.border_color), r,
+        local paint = s.border_color > 0xFF and bb.paintBorderRGB32 or bb.paintBorder
+        paint(bb, x, y, w, h, border, Theme.color(s.border_color), r,
             G_reader_settings:nilOrTrue("anti_alias_ui"))
     end
     local child = self[1]

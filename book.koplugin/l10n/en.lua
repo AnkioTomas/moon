@@ -1,4 +1,13 @@
 return {
+    ["主题色"] = "Accent color",
+    ["彩色模式下统一用于图标、按钮和统计"] = "Use one color for icons, buttons and statistics in color mode",
+    ["蓝色"] = "Blue",
+    ["绿色"] = "Green",
+    ["紫色"] = "Purple",
+    ["红色"] = "Red",
+    ["橙色"] = "Orange",
+    ["底部导航名称"] = "Navigation labels",
+    ["关闭后仅显示图标"] = "Show icons only when disabled",
     ["书签"] = "Bookmark",
     ["书内字体映射"] = "Book font mapping",
     ["映射字体：%1"] = "Map font: %1",

@@ -127,3 +127,36 @@ do
     Wallpaper.setOverride("library", "image", nil)
     os.execute("rm -rf " .. dir)
 end
+
+-- 真实组件的指示条和统计柱不是页面背景，透底后仍须绘制。
+do
+    local Kit = require("support.widget_stubs")
+    Kit.install("paper")
+    local Theme = require("ui.themes")
+    local Box = require("ui.themes.widgets.box")
+    local Tabbar = require("ui.themes.widgets.tabbar")
+    local Chart = require("ui.widgets.chart")
+    conf.wallpaper_custom_image, conf.wallpaper_enabled, conf.wallpaper_desktop = "/tmp/g.png", true, true
+    Wallpaper.invalidate()
+    for _idx, color_enabled in ipairs({ false, true }) do
+        Kit.color_enabled = color_enabled
+        local fill = Theme.current().progress.fill
+        local page = Box:new{
+            style = { bg = Theme.current().color.page }, width = 300, height = 200,
+            Tabbar.widget{
+                width = 300, active = "home",
+                tabs = { { id = "home", text = "首页", icon = "home" }, { id = "library", text = "书架", icon = "book" } },
+            },
+            Chart.bars{ width = 300, height = 80, values = { 30, 60 } },
+        }
+        local content = Kit.find(page, function(widget)
+            return widget.box_w ~= nil and widget.style.bg == fill and widget.keep_bg
+        end)
+        Assert.len(content, 3, "一个选中指示条、两个统计柱")
+        Assert.is_true(Wallpaper.hollow(page, "desktop"))
+        Assert.is_nil(page.style.bg, "页面底色仍正常透底")
+        for _content_idx, widget in ipairs(content) do
+            Assert.eq(widget.style.bg, fill, "透底不能抹掉内容色条")
+        end
+    end
+end
