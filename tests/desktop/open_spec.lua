@@ -59,7 +59,26 @@ package.preload["apps/reader/readerui"] = function()
     return ReaderUI
 end
 
-package.preload["reader.prefs"] = function() return { BIG_BOOK_BYTES = 20 * 1024 * 1024 } end
+local mem_free = 80 * 1024 * 1024 -- 阈值 = clamp(free/4)=20MB
+package.preload["utils.mem"] = function()
+    local MB = 1024 * 1024
+    return {
+        availableBytes = function() return mem_free end,
+        warnThresholdBytes = function()
+            if not mem_free then return 20 * MB end
+            local q = math.floor(mem_free / 4)
+            return math.max(8 * MB, math.min(40 * MB, q))
+        end,
+        isHeavy = function(size)
+            local thr = (not mem_free) and (20 * MB) or math.max(8 * MB, math.min(40 * MB, math.floor(mem_free / 4)))
+            return (size or 0) >= thr
+        end,
+        mb = function(bytes)
+            if not bytes then return nil end
+            return math.max(1, math.floor(bytes / MB + 0.5))
+        end,
+    }
+end
 local sidecar = false
 package.loaded["docsettings"] = {
     hasSidecarFile = function() return sidecar end,
@@ -160,12 +179,16 @@ Assert.len(shown, shown_before)
 Assert.len(Themed.all("toast"), toasts)
 Assert.is_true(handled_plugin.desktop ~= nil)
 
--- 超大 EPUB 首次打开（没有 sidecar）：先弹确认，说明是 KOReader 排版引擎的限制；确认后才交给 Reader。
+-- 相对可用内存偏大且首次打开（没有 sidecar）：先弹确认；不限 EPUB。确认后才交给 Reader。
 do
     local lfs = require("libs/libkoreader-lfs")
     local real_attributes = lfs.attributes
     lfs.attributes = function(path, what)
-        if path == "/library/huge.epub" and what == "size" then return 40 * 1024 * 1024 end
+        if (path == "/library/huge.epub" or path == "/library/huge.pdf" or path == "/library/mid.epub")
+            and what == "size" then
+            if path == "/library/mid.epub" then return 12 * 1024 * 1024 end
+            return 40 * 1024 * 1024
+        end
         return real_attributes(path, what)
     end
     ReaderUI.instance = nil
@@ -177,7 +200,8 @@ do
     Assert.len(shown, before)
     local confirm = Themed.last("confirm")
     Assert.matches(confirm.text, "不是月读的问题")
-    Assert.matches(confirm.text, "KOReader 排版引擎")
+    Assert.matches(confirm.text, "约 40 MB")
+    Assert.matches(confirm.text, "可用内存约 80 MB")
     confirm.cancel_callback()
     Assert.is_false(done_ok)
     Assert.len(shown, before)
@@ -189,6 +213,27 @@ do
     Assert.is_true(done_ok)
     Assert.eq(shown[#shown], "/library/huge.epub")
 
+    -- PDF 同样提示
+    local confirms_before = #Themed.all("confirm")
+    done_ok = nil
+    Open.book({ desktop = {} }, book, function(ok) done_ok = ok end)
+    open_callbacks[#open_callbacks]("/library/huge.pdf")
+    Stubs.flush()
+    Assert.len(Themed.all("confirm"), confirms_before + 1)
+    Assert.matches(Themed.last("confirm").text, "约 40 MB")
+    Themed.last("confirm").cancel_callback()
+    Assert.is_false(done_ok)
+
+    -- 可用内存充裕时，中等文件不提示（free=200MB → 阈值 40MB，12MB 过）
+    mem_free = 200 * 1024 * 1024
+    local mid_confirms = #Themed.all("confirm")
+    Open.book({ desktop = {} }, book)
+    open_callbacks[#open_callbacks]("/library/mid.epub")
+    Stubs.flush()
+    Assert.len(Themed.all("confirm"), mid_confirms)
+    Assert.eq(shown[#shown], "/library/mid.epub")
+    mem_free = 80 * 1024 * 1024
+
     -- 开过的书（有 sidecar）不再提示
     sidecar = true
     local confirms = #Themed.all("confirm")
@@ -198,6 +243,17 @@ do
     Assert.len(Themed.all("confirm"), confirms)
     Assert.eq(shown[#shown], "/library/huge.epub")
     lfs.attributes = real_attributes
+end
+
+-- 源侧用户取消（如超大 KFX 放弃转换）：不算打开失败，不弹「无法打开」。
+do
+    local toasts = #Themed.all("toast")
+    done_ok = nil
+    Open.book({ desktop = {} }, book, function(ok) done_ok = ok end)
+    open_callbacks[#open_callbacks](nil, nil, { cancelled = true })
+    Stubs.flush()
+    Assert.is_false(done_ok)
+    Assert.len(Themed.all("toast"), toasts)
 end
 
 -- 原书 sidecar 记着上次读的衍生版：源返回原书路径，改开那个版本；文件没了就照开原书。
