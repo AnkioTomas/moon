@@ -1,6 +1,7 @@
 --[[-- 反转翻页键：与 KOReader 共用 input_invert_page_turn_keys 与 Device:invertButtons*()。 --]]
 local Assert = require("support.assert")
 package.preload["ui.themes.widgets.row"] = function() return {} end
+package.preload["ui.themes.widgets.list"] = function() return {} end
 package.preload["utils.settings"] = function() return {} end
 package.preload["gettext"] = function() return function(t) return t end end
 package.loaded["desktop.pages.setting.desktop"] = nil

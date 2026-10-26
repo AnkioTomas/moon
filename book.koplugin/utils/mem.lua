@@ -20,8 +20,9 @@ local CEIL = 40 * MB
 function Mem.availableBytes()
     local ok, util = pcall(require, "util")
     if ok and type(util) == "table" and type(util.calcFreeMem) == "function" then
+        -- util 本身就读 /proc，它给不出数就别再读一遍，否则测试替身说「读不到」时会被真实内存顶掉。
         local free = util.calcFreeMem()
-        if type(free) == "number" and free > 0 then return free end
+        return type(free) == "number" and free > 0 and free or nil
     end
     local f = io.open("/proc/meminfo", "r")
     if not f then return nil end
