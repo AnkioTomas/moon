@@ -32,6 +32,7 @@ function Reader.onCreate(plugin)
     if not ui or ui._book_reader_attached then return end
     ui._book_reader_attached = true
     applyMarginPopup()
+    require("desktop.reader_exit").attach(ui)
 
     -- 面板、顶底栏和侧栏要在首绘之前装上。
     require("utils.extension").emit("reader.ready", plugin)

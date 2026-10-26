@@ -172,6 +172,10 @@ function ReaderSettings:sections(desktop)
         icon = "crop", title = _("边距调整弹出提示"),
         subtitle = _("关闭时直接重排，面板不收起；下次打开书生效"),
     })
+    rows[#rows + 1] = toggleRow(desktop, "reader", reader, "back_to_desktop", reader.back_to_desktop == true, {
+        icon = "arrow_back", title = _("返回键回月读"),
+        subtitle = _("阅读时按返回键关书回月读，不改变返回手势"),
+    })
     return { { title = _("行为"), rows = rows } }
 end
 

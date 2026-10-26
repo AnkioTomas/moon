@@ -12,6 +12,27 @@ local Perf = require("utils.perf")
 
 local ReaderExit = {}
 
+--- 只接原始返回按键；子模块先处理选区等状态，Back 动作与自定义手势仍走原生路径。
+---@param ui table ReaderUI
+function ReaderExit.attach(ui)
+    if ui._book_back_attached then return end
+    ui._book_back_attached = true
+    for _idx, handler in ipairs({ "onKeyPress", "onKeyRepeat" }) do
+        local original = ui[handler]
+        ui[handler] = function(self, key)
+            if require("utils.settings").get("reader").back_to_desktop == true
+                and key:match({ require("device").input.group.Back }) then
+                if not require("ui.input").isTop(self.dialog or self) then return false end
+                if not self.link:isPageLinkSelected() then
+                    if handler == "onKeyPress" then ReaderExit.closeToDesktop(self) end
+                    return true
+                end
+            end
+            return original(self, key)
+        end
+    end
+end
+
 --- 下一 tick 关闭文档并回到月读桌面（点击调用栈里不能同步关文档）。
 ---@param ui table|nil ReaderUI
 function ReaderExit.closeToDesktop(ui)
