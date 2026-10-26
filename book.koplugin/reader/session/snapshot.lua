@@ -5,6 +5,7 @@
 --]]
 
 ---@class ReaderSessionSnapshot
+---@field read_marks table<string, boolean>|nil 已尝试的阅读状态写入
 ---@field ui table 当前 ReaderUI
 ---@field identity BookIdentity 当前物理文档身份
 ---@field page integer|nil 当前文档页码

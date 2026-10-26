@@ -264,6 +264,7 @@ end
 ---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil)
 ---@return { cancel: fun() }
 function Token.contentAsync(novel_id, chapter_id, cb)
+    ---@type boolean, CancelHandle|nil
     local cancelled, job = false, nil
     local function fetch(token, retry)
         job = get("/chapterContent", {

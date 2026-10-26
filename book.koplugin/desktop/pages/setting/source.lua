@@ -242,7 +242,7 @@ function Source:configSections(ctx)
 end
 
 --- 右上角多选窗口：启用哪些书源。
----@param desktop table
+---@type fun(desktop: table)
 Source.pickEnabled = pickEnabledSources
 
 return Source

@@ -821,7 +821,7 @@ end
 --- 且该章正文已落盘（缺 HTML 时无法定位划线区间）。无可推送内容直接回调成功。
 ---@param identity BookIdentity
 ---@param annotations table[] KOReader 注解数组，就地改写
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, meta: table|nil)
 ---@return { cancel: fun() }|nil
 function Source:pushNotesAsync(identity, annotations, cb)
     if not self:configured() then

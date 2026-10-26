@@ -342,7 +342,7 @@ function Eink.completeQrLoginAsync(info, cb)
 end
 
 --- 在飞续期的等待者；并发请求共享同一次 /login。
----@type fun(ok: boolean, err: string|nil)[]|nil
+---@type (fun(ok: boolean, err: string|nil, rejected: boolean|nil))[]|nil
 local mint_waiters
 
 --- 是否有续期在飞（调用方据此排队而不是另起 / 走冷却）。

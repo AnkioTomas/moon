@@ -11,6 +11,11 @@ require("l10n").apply()
 
 local _ = require("gettext")
 
+---@class BookStorageUsage
+---@field cats table<string, number>
+---@field books table<string, table<string, number>>
+---@field total number
+---@field at integer|nil 主进程的缓存时间
 local Usage = {}
 
 --- 展示顺序之外的元信息；`clearable` = 属于 .moon/cache，可经「清理缓存」安全重建。
@@ -49,7 +54,7 @@ end
 
 --- 统计（子进程里遍历，不占主线程）。
 --- cb 收 `{ cats = { [类别] = 字节 }, books = { [源] = { [slug] = 字节 } }, total }`；失败时记日志并回调 nil。
----@param cb fun(result: nil|{ cats: table<string, number>, books: table<string, table<string, number>>, total: number })
+---@param cb fun(result: BookStorageUsage|nil)
 ---@return { cancel: fun() }
 function Usage.measureAsync(cb)
     local root = require("utils.paths").root()

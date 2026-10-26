@@ -18,7 +18,7 @@ Assert.matches(plain, "光王街")
 -- 子进程任务：worker 结果经 on_done 交回
 local Job = require("workers.job")
 local real_run = Job.run
-Job.run = function(worker, opts) opts.on_done(worker()); return {} end
+Job.run = function(worker, opts) opts.on_done(worker(function() end)); return {} end
 local async_text
 Fock.decryptAsync(Sample.content, Sample.chapter_id, Sample.keypool, Sample.version, Sample.uid,
     function(text) async_text = text end)

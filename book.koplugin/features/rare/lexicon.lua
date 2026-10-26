@@ -23,6 +23,7 @@ Lexicon.LEVELS = { rarest = 1, rare = 2, all = 3 }
 local DEFAULT_LEVELS = { zh = { 6500, 3500, 0 }, en = { 20000, 8000, 3000 } }
 
 ---@class RareLexicon
+---@field count integer 有效词条数量
 ---@field meta table<string, string>
 ---@field lang string
 ---@field levels number[]

@@ -102,6 +102,9 @@ end
 --- 某个界面的覆盖值（图 / 铺法 / 透明度），nil = 跟随全局。
 ---@param scope string
 ---@param field "image"|"contain"|"opacity"
+---@overload fun(scope: string, field: "image"): string|nil
+---@overload fun(scope: string, field: "contain"): boolean|nil
+---@overload fun(scope: string, field: "opacity"): integer|nil
 ---@return string|boolean|integer|nil
 function M.override(scope, field)
     return conf()["wallpaper_" .. field .. "_" .. scope]
@@ -223,6 +226,7 @@ end
 -- ── 解析与缓存 ──────────────────────────
 
 local revision = 0
+---@type { revision: number, [string]: string|false }
 local resolved = { revision = -1 }
 local cache = { key = nil, bb = nil }
 
@@ -248,7 +252,7 @@ function M.path(scope)
         end
         resolved[id] = path or false
     end
-    return resolved[id] or nil
+    return (resolved[id] or nil) --[[@as string|nil]]
 end
 
 --- 按目标尺寸取铺好的位图；解图失败返回 nil（表层保留底色）。
@@ -283,7 +287,7 @@ local function surface(w, h, bpp, scope)
             alpha = true,
         }
         bb = Blitbuffer.new(w, h, bpp or ((Screen.isColorEnabled and Screen:isColorEnabled())
-            and Blitbuffer.TYPE_BBRGB32 or Blitbuffer.TYPE_BB8))
+            and Blitbuffer.TYPE_BBRGB32 or Blitbuffer.TYPE_BB8)) --[[@as BlitBuffer]]
         bb:fill(Blitbuffer.COLOR_WHITE)
         image:paintTo(bb, 0, 0)
         image:free()

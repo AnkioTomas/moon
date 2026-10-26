@@ -19,10 +19,11 @@ end
 
 do
     local calls, out = {}, nil
-    Browse.pages(fetcher({ { "a", "b" }, { "c", "d" }, { "e" } }, calls), 3, { "g" }, function(res) out = res end)
+    local group = { chips = { { id = "g", title = "组" } }, active = "g" }
+    Browse.pages(fetcher({ { "a", "b" }, { "c", "d" }, { "e" } }, calls), 3, { group }, function(res) out = res end)
     Assert.len(out.data, 4)
     Assert.len(calls, 2)
-    Assert.eq(out.groups[1], "g")
+    Assert.eq(out.groups[1], group)
 end
 
 do

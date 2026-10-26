@@ -170,7 +170,7 @@ function QRLogin:_poll(gen, token, started)
             local cookie = self.jar.PHPSESSID and cookieHeader(self.jar)
             -- login_res(2).web_data(4).token(1)：网页端后续请求靠它认人；refresh_token(2) 在 token 失效时换新的
             local login = type(fields[2]) == "string" and QRLogin.fields(fields[2]) or {}
-            local web = type(login[4]) == "string" and QRLogin.fields(login[4]) or {}
+            local web = type(login[4]) == "string" and QRLogin.fields(login[4] --[[@as string]]) or {}
             require("utils.log").info("changpei qr approved", "login_status", login[1], "token", web[1] and #web[1] or 0,
                 "refresh", type(web[2]) == "string" and #web[2] or 0)
             if cookie and type(web[1]) == "string" and web[1] ~= "" then

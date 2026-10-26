@@ -95,6 +95,7 @@ function IME.onCreate()
     end
     -- 布局列表可能被 KOReader 设置重置，开关仍开着却没有 zh_CN 可切
     local layouts = G_reader_settings:readSetting("keyboard_layouts", {})
+    ---@cast layouts string[]
     local has_zh = false
     for _idx, layout in ipairs(layouts) do
         has_zh = has_zh or layout == "zh_CN"

@@ -97,6 +97,7 @@ local running_task
 package.preload["workers.tasks"] = function()
     return { get = function() return running_task end }
 end
+---@type BookTask|nil, BookTask|nil
 local started, followed
 package.preload["workers.ui.task_dialog"] = function()
     return {
@@ -157,6 +158,7 @@ started = nil
 require("features.xray.ui").scanBook(ui, identity)
 Assert.is_nil(started, "确认前不入队")
 confirm.ok_callback()
+---@cast started +BookTask
 Assert.eq(started.kind, "ai")
 Assert.eq(started.key, "xray\0moon\0book-1")
 Assert.is_true(started.restartable)

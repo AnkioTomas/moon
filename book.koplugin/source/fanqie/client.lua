@@ -15,6 +15,7 @@ local Client = {}
 Client.__index = Client
 
 ---@class FanqieClient
+---@field rankAsync fun(self: FanqieClient, path: string, cb: function): CancelHandle|nil
 ---@field settings FanqieSettings
 ---@field fetchReadProgressAsync fun(self: FanqieClient, cb: function): CancelHandle|nil
 ---@field updateReadProgressAsync fun(self: FanqieClient, book_id: string, item_id: string, index: number, progress: number, cb: function): CancelHandle|nil

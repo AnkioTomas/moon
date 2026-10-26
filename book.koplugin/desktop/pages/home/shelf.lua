@@ -119,7 +119,7 @@ end
 --- 按图书馆当前排序取前 n 本在架书。
 ---@param ctx table
 ---@param n integer
----@return Book[]
+---@return Book[] books, integer|nil count
 function M.books(ctx, n)
     local Catalog = require("book.catalog")
     local source = ctx.source or (ctx.desktop and ctx.desktop.source)

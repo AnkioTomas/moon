@@ -4,7 +4,9 @@
 ---@meta
 
 --- ffi/blitbuffer.lua
----@class BlitBuffer
+---@class BlitBuffer : ffi.cdata*
+---@field data ffi.cdata*
+---@field stride integer
 local BlitBuffer = {}
 
 ---@param x number
@@ -81,6 +83,11 @@ function BlitBuffer:setPixel(x, y, color) end
 
 ---@param x number
 ---@param y number
+---@param color any
+function BlitBuffer:setPixelClamped(x, y, color) end
+
+---@param x number
+---@param y number
 ---@return any
 function BlitBuffer:getPixel(x, y) end
 
@@ -141,7 +148,7 @@ function BlitBuffer:colorblitFrom(src, dest_x, dest_y, offs_x, offs_y, w, h, col
 function BlitBuffer:colorblitFromRGB32(src, dest_x, dest_y, offs_x, offs_y, w, h, color) end
 
 --- ffi.new("moon_z_stream")，番茄正文 inflate。
----@class MoonZStream
+---@class MoonZStream : ffi.cdata*
 ---@field next_in ffi.cdata*
 ---@field avail_in integer
 ---@field next_out ffi.cdata*
@@ -195,3 +202,16 @@ function ArchiverWriter:new(o) end
 function ArchiverWriter:open(path, format) end
 
 function ArchiverWriter:close() end
+
+--- ffi/freetype.lua 的 FT_Size 元表。
+---@class FreeTypeSize : ffi.cdata*
+local FreeTypeSize = {}
+---@param codepoint integer
+---@return boolean
+function FreeTypeSize:hasGlyph(codepoint) end
+function FreeTypeSize:done() end
+
+--- KOReader 在 ffi/loadlib.lua 扩充的 LuaJIT FFI 字段。
+---@class ffilib
+---@field loadlib (fun(name: string): any)|nil
+---@field log (fun(...: any))|nil

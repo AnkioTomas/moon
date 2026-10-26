@@ -147,7 +147,7 @@ end
 --- 自动续期；冷却内不再打 /login，直接让调用方用现有令牌重试一次。
 --- 单飞由 Eink.refreshAsync 负责：续期在飞时后来的请求排进同一次 /login 等结果，不能拿旧令牌立刻重试
 --- （否则旧令牌必然再回失效 errcode，被当成「续期救不回来」而误判登录失效），所以在飞时不看冷却。
----@param cb fun(ok: boolean, err: string|nil)
+---@param cb fun(ok: boolean, err: string|nil, rejected: boolean|nil)
 local function renewAsync(cb)
     if Eink.refreshing() then
         Eink.refreshAsync(cb)

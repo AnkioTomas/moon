@@ -21,6 +21,8 @@ local Reviews = {}
 
 --- 未定位的热点。
 ---@class WechatReviewHotspot
+---@field chapter_idx integer|nil 归属章序号
+---@field badge string|nil 标记文案
 ---@field range string wire range，翻页时原样带回
 ---@field text string 原句
 ---@field total integer 段评总数

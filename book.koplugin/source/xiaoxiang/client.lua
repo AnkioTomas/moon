@@ -119,6 +119,7 @@ end
 ---@return { cancel: fun() }
 local function authed(path, query, body, cb)
     local cookie = Client.cookie()
+    ---@type boolean, CancelHandle|nil
     local cancelled, job = false, nil
     local Auth = require("source.auth")
     job = Client.userAsync(cookie or "", function(info, err)
@@ -140,6 +141,7 @@ end
 ---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client.shelfAsync(cb)
+    ---@type table[], boolean, CancelHandle|nil
     local rows, cancelled, job = {}, false, nil
     local function more(page)
         job = authed("/bookshelf/pc/page", "pageIndex=" .. page .. "&pageSize=20", nil, function(wire, err)
@@ -221,6 +223,7 @@ end
 ---@param cb fun(value: any, err: string|nil, kind: string|nil)
 ---@return { cancel: fun() }
 local function parsed(url, name, parse, cb)
+    ---@type boolean, CancelHandle|nil
     local cancelled, job = false, nil
     job = page(url, function(html, err)
         if cancelled then return end
@@ -298,7 +301,7 @@ function Client.contentAsync(book_id, chapter_id, cb)
             local text, kind, chapter = Mapper.content(wire)
             if text then cb(text); return end
             if kind == "encrypted" then decrypt(chapter); return end
-            cb(nil, (not kind) and _("潇湘章节内容为空") or nil, kind)
+            cb(nil, (not kind) and _("潇湘章节内容为空") or nil, kind --[[@as "unpaid"|nil]])
         end)
     return { cancel = function() if current then current:cancel() end end }
 end

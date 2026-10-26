@@ -21,7 +21,7 @@ function Preview.footerSettings()
     local ui = require("apps/reader/readerui").instance
     local footer = ui and ui.document and ui.view and ui.view.footer
     if footer and footer.settings then return footer.settings, footer end
-    return G_reader_settings and G_reader_settings:readSetting("footer") or nil, nil
+    return (G_reader_settings and G_reader_settings:readSetting("footer") or nil) --[[@as table|nil]], nil
 end
 
 --- 预览用字面：与阅读页同字体、同字号（设置页预览条是全宽，按真实字号画才有参考价值）。

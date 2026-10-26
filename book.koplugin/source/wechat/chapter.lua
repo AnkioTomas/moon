@@ -204,9 +204,9 @@ local function fetchWebHtmlAsync(bookId, chapter, cb)
         if not cancelled then cb(nil, err) end
     end
     --- 取一个正文分片（st=0）；已取消则丢弃回包。
+    local seq = 0
     ---@param endpoint string 正文接口路径
     ---@param done fun(raw: string|nil, err: any) 原始 JSON 串
-    local seq = 0
     local function shard(endpoint, done)
         seq = seq + 1
         local mine = seq
@@ -321,12 +321,12 @@ end
 --- 图标原样包进 noteref 链接，注文放进 body 末尾的 footnote aside，交给 KOReader 脚注弹窗。
 --- 不加 ``<p>``、不动正文文字：段落序号与字偏移不变，划线 range 照旧对得上。
 --- 图标尺寸写成行内 style：整书样式表拉取失败 / 缺规则时 CRE 会按 PNG 原始像素×DPI 画成两行高的大方块。
----@param html string
----@return string
 local FOOTNOTE_STYLE = "height:0.8em;width:auto;vertical-align:super;border:0"
 local function iconSized(tag)
     return (tag:gsub('%sstyle="[^"]*"', ""):gsub("%s*/?>$", ' style="' .. FOOTNOTE_STYLE .. '" />'))
 end
+---@param html string
+---@return string
 local function linkFootnotes(html)
     if not html:find("qqreader-footnote", 1, true) then return html end
     local notes = {}

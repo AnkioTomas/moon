@@ -370,16 +370,18 @@ function Client.catalogAsync(book_id, cb)
 end
 
 --- 一章正文。未购买的 VIP（vipStatus=1 且 isBuy 不是 1）只有预览，不当正文。
----@param book_id string
----@param chapter_id string
----@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil) kind = "unpaid"：这章没买
----@return HttpJob
+---@param bytes string|nil
+---@return boolean
 local function looksLikeFont(bytes)
     if type(bytes) ~= "string" or #bytes < 4 then return false end
     local head = bytes:sub(1, 4)
     return head == "\0\1\0\0" or head == "OTTO" or head == "true" or head == "ttcf" or head == "wOFF"
 end
 
+---@param book_id string
+---@param chapter_id string
+---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil) kind = "unpaid"：这章没买
+---@return HttpJob
 function Client.contentAsync(book_id, chapter_id, cb)
     local decrypting, font_job
     local function finish_html(content)

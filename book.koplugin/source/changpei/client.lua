@@ -99,11 +99,10 @@ function Client.renewAsync(cb)
 end
 
 --- cookie 显式传入：登录入口要先校验再保存，校验用的新 Cookie 失效不能污染已保存的登录态。
----@param path string
----@param query string
 ---@param cookie string|nil
 ---@param cb fun(wire: table|nil, err: string|nil)
----@return HttpJob
+---@param retry boolean|nil
+---@return fun(raw: string|nil, err: any)
 local function reply(cookie, cb, retry)
     return function(raw, err)
         if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
@@ -180,8 +179,9 @@ local function post(path, params, body, cb, renewed)
     end
     job = get("/system/init", "", nil, function(init, err)
         if cancelled then return end
-        local timestamp = init and type(init.data) == "table" and init.data.timestamp
+        local timestamp = (init and type(init.data) == "table" and init.data.timestamp) --[[@as string|number|nil]]
         if not timestamp then cb(nil, err or _("响应无效")); return end
+        ---@cast timestamp string|number
         timestamp = tostring(timestamp)
         local head = headers(cookie)
         head["Timestamp"] = timestamp

@@ -229,6 +229,7 @@ do
     Assert.eq(started.kind, "convert")
     Assert.eq(started.title, "书（双语）")
     Assert.is_true(started.restartable, "可取消、休眠断网后续跑")
+    ---@type string[], table|nil
     local reports, result = {}, nil
     local h = started.run(function(text) reports[#reports + 1] = text end, function(r) result = r end)
     Assert.eq(reports[1], "正在分析全书段落")

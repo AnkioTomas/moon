@@ -559,7 +559,16 @@ do
     local bb = setmetatable({}, { __index = function() return function() end end })
     kb:paintTo(bb, 0, 0)
     Assert.eq(kb:getFocusItem(), kb.layout[1][1])
+    -- FocusManager 通过 UIManager 分发合成手势；此用例没有真实窗口栈，记录叶子事件。
+    local UIManager = require("ui/uimanager")
+    local sendEvent, sent = UIManager.sendEvent, nil
+    UIManager.sendEvent = function(_manager, event) sent = event end
     Assert.is_true(kb:onPress())
+    UIManager.sendEvent = sendEvent
+    Assert.eq(sent.handler, "onGesture")
+    Assert.eq(sent.args[1].ges, "tap")
+    Assert.eq(sent.args[1].pos.x, kb.layout[1][1].dimen.x + kb.layout[1][1].dimen.w / 2)
+    Assert.eq(sent.args[1].pos.y, kb.layout[1][1].dimen.y + kb.layout[1][1].dimen.h / 2)
 end
 
 -- ── 清理 ─────────────────────────────────────────────

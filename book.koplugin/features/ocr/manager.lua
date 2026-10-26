@@ -281,7 +281,7 @@ end
 --- 默认识别语言：KOReader 的 kopt 默认值（「设为默认」同一键），新开的扫描书用它。
 ---@return string|nil
 function Manager.defaultLanguage()
-    return G_reader_settings and G_reader_settings:readSetting("kopt_doc_language") or nil
+    return (G_reader_settings and G_reader_settings:readSetting("kopt_doc_language") or nil) --[[@as string|nil]]
 end
 
 ---@param code string
@@ -315,7 +315,10 @@ function Manager.koptReader()
     local ReaderUI = package.loaded["apps/reader/readerui"]
     local ui = type(ReaderUI) == "table" and ReaderUI.instance
     local doc = ui and ui.document
-    if doc and doc.configurable and doc.koptinterface then return ui end
+    if doc and doc.configurable and doc.koptinterface then
+        ---@cast ui table
+        return ui
+    end
 end
 
 --- 当前书的识别语言。

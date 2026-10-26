@@ -24,7 +24,7 @@ local Guard = require("ui.guard")
 ---@class PageMarkLayer
 ---@field marks fun(self: PageMarkLayer): PageMark[]
 ---@field paint fun(self: PageMarkLayer, bb: any)|nil 可选：自绘内容（如注音），不占位
----@field tap fun(self: PageMarkLayer, pos: table): boolean|nil 可选：自绘内容的点按，所有标记都没命中后才问；命中返回 true
+---@field tap (fun(self: PageMarkLayer, pos: table): boolean|nil)|nil 可选：自绘内容的点按，所有标记都没命中后才问；命中返回 true
 
 ---@class PageMarks
 ---@field ui table ReaderUI

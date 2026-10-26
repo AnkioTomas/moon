@@ -217,7 +217,7 @@ end
 ---@field on_installed fun(manifest: table) 落位成功后记版本、重置缓存
 
 --- 拉并校验远端 manifest。成功 cb(manifest, 总字节)，失败 cb(nil, nil, err)。
----@param spec BookDictSpec
+---@param spec { base_path: string }
 ---@param cb fun(manifest: table|nil, total: number|nil, err: any)
 local function fetchManifest(spec, cb)
     Mirror.get(spec.base_path .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
@@ -240,7 +240,7 @@ local function fetchManifest(spec, cb)
 end
 
 --- 远端 manifest 的版本和已装的不一样（只查版本，不下载分片）。cb(true|false)，查询失败 cb(nil, err)。
----@param spec BookDictSpec
+---@param spec { base_path: string, installed?: string }
 ---@param cb fun(outdated: boolean|nil, err: any)
 function M.outdated(spec, cb)
     fetchManifest(spec, function(manifest, _total, err)

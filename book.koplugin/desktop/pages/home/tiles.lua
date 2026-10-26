@@ -56,7 +56,7 @@ local function collect(source)
     local week = Calc.weekCompare(days, now)
     local fc = Calc.forecast(days, {}, finished, now)
     return {
-        streak = Calc.streak(days, os.date("%Y-%m-%d", now)),
+        streak = Calc.streak(days, os.date("%Y-%m-%d", now) --[[@as string]]),
         bars = week.bars,
         week_seconds = week.seconds,
         challenge = Calc.challenge(days, now, goals.month_goal_hours * 3600),

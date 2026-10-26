@@ -53,7 +53,7 @@ end
 ---@return integer
 local function inflateTo(data, offset, comp_len, out)
     local ffi, z = require("ffi"), libz()
-    local strm = ffi.new("moon_z_stream")
+    local strm = ffi.new("moon_z_stream") --[[@as MoonZStream]]
     local zs = ffi.cast("void *", strm)
     assert(z.inflateInit2_(zs, 15, "1.2.11", ffi.sizeof(strm)) == 0, "inflateInit failed")
     local buf = ffi.new("unsigned char[?]", CHUNK)

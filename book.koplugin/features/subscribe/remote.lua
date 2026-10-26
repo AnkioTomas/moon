@@ -564,7 +564,7 @@ end
 
 --- 解析文本：返回订阅行（按出现顺序）与无效行。
 ---@param text string
----@return { url: string, title: string|nil, group: string, line: integer }[] rows
+---@return { url: string, title: string|nil, group: string, line: integer, id?: integer }[] rows
 ---@return { line: integer, text: string }[] invalid
 function Remote.parseText(text)
     local rows, invalid, group = {}, {}, ""

@@ -115,6 +115,7 @@ end
 
 --- WebDAV 同步的一轮状态；各步骤只读写这张表，run.active 是当前在飞的可取消句柄。
 ---@class WebdavRun
+---@field upload_pending boolean|nil 是否还有待上传的本地书
 ---@field files string[] 本轮书架成员（相对路径）：books.sync 条目 + 未推的本地新增；刷新时再并入扫描结果
 ---@field entries table<string, table> books.sync 条目，按 filename
 ---@field remote table<string, boolean>|nil 刷新时列出的远端书文件；日常同步不列目录，为 nil

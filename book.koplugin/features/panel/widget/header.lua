@@ -25,6 +25,7 @@ local COVER_W, COVER_H = 66, 92
 
 --- 阅读页快捷面板头部：封面、书籍信息、阅读进度和退出阅读按钮。
 ---@class BookQuickPanelHeader : WidgetContainer
+---@field height number 头部高度，单位像素
 ---@field width number 头部宽度，单位像素
 ---@field on_exit fun()|nil 点击退出阅读
 
