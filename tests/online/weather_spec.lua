@@ -5,6 +5,8 @@ online.weather：空 city= 走 IP；图标走 assets CDN；日预报收进 days�
 
 local Assert = require("support.assert")
 
+package.preload["device"] = function() return { model = "KindlePaperWhite5" } end
+
 package.preload["json"] = function()
     return { decode = require("support.json_stub").decode }
 end

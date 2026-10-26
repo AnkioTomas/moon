@@ -5,6 +5,8 @@ online.bing：JSON + 图都落 cache/online；无缓存时图走 302。
 
 local Assert = require("support.assert")
 
+package.preload["device"] = function() return { model = "KindlePaperWhite5" } end
+
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(s) return s end end
 package.preload["json"] = function()

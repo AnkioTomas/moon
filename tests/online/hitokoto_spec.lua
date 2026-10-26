@@ -5,6 +5,8 @@ online.hitokoto：成功写 cache/online；失败读文件。
 
 local Assert = require("support.assert")
 
+package.preload["device"] = function() return { model = "KindlePaperWhite5" } end
+
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(s) return s end end
 package.preload["json"] = function()

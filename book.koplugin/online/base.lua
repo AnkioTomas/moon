@@ -34,6 +34,18 @@ Online.__index = Online
 Online.host = "https://api.ankio.net"
 Online.timeout_ratio = 2 / 3 -- × 「网络超时」，缺省 20 秒
 
+---@return table<string, string>
+local function requestHeaders()
+    local model = require("device").model or "Unknown"
+    -- 设备型号放 UA 注释内，不能让括号、反斜杠或控制字符破坏头部。
+    model = model:gsub("[%c()\\]", " ")
+    return {
+        ["User-Agent"] = string.format("Mozilla/5.0 (%s; %s) Moon/%s KOReader/%s",
+            require("ffi").os, model, require("bookversion"),
+            require("version"):getShortVersion()),
+    }
+end
+
 --- 距本地今日结束的秒数。日更用这个。
 ---@return number
 function Online.untilMidnight()
@@ -183,6 +195,7 @@ local function downloadImage(self, cb)
     return Request.download({
         url = url,
         method = "GET",
+        headers = requestHeaders(),
         allow_redirects = true,
         timeout = require("http.timeout").net(2),
     }, path, function(ok)
@@ -239,6 +252,7 @@ function Online:fetch(args, cb)
     local url = self:url()
     self.city = saved
     return Request.get(url, {
+        headers = requestHeaders(),
         timeout = require("http.timeout").net(self.timeout_ratio),
         allow_redirects = true,
         cache_ttl = 0,

@@ -6,6 +6,13 @@ online.base：HTTP 不走 cache；过期才入队；解析失败读 load。
 
 local Assert = require("support.assert")
 
+local device = { model = "KindlePaperWhite5" }
+package.preload["device"] = function() return device end
+package.preload["bookversion"] = function() return "1.2.3" end
+package.preload["version"] = function()
+    return { getShortVersion = function() return "2026.07" end }
+end
+
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(s) return s end end
 package.preload["json"] = function()
@@ -85,9 +92,24 @@ do -- HTTP 不走 cache；成功走 store
     Child:fetch(nil, function(data) got = data end)
     Assert.eq(requests[1].url, "https://api.ankio.net/x?q=a")
     Assert.eq(requests[1].opts.cache_ttl, 0)
+    Assert.eq(requests[1].opts.headers["User-Agent"],
+        "Mozilla/5.0 (" .. require("ffi").os .. "; KindlePaperWhite5) Moon/1.2.3 KOReader/2026.07")
     requests[1].cb('{"ok":"net"}')
     Assert.eq(got.ok, "net")
     Assert.eq(stored.ok, "net")
+end
+
+do -- 设备名称不能注入头部或截断 UA 注释；未知型号仍可请求
+    device.model = "Reader (test)\\\r\nInjected: value"
+    Child:fetch({ ttl = 0 }, function() end)
+    local ua = requests[#requests].opts.headers["User-Agent"]
+    Assert.is_nil(ua:find("[%c\\]"))
+    Assert.matches(ua, "^Mozilla/5%.0 %([^()]*%) Moon/1%.2%.3 KOReader/2026%.07$")
+    Assert.not_nil(ua:find("Injected: value", 1, true))
+    device.model = nil
+    Child:fetch({ ttl = 0 }, function() end)
+    Assert.not_nil(requests[#requests].opts.headers["User-Agent"]:find("; Unknown)", 1, true))
+    device.model = "KindlePaperWhite5"
 end
 
 do -- args.ttl 覆盖；解析失败且缓存过期则空
