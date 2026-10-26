@@ -6,8 +6,9 @@ kind = "hot"（key 为空串，payload 是热点数组）或 "page"（key = rang
 不缓存图片。有内容的行存 TTL（180 天）；空结果（多半是网络抖动 / 接口偶发）只存 EMPTY_TTL 就重来。
 过期行读到时当没有，下次写入覆盖。
 
-预缓存（identity.prefetch）的评论页只存前 PREFETCH_ITEMS 条并标 partial：离线直接用，联网读到就当没有、重拉完整页。
-`through`（内部）是读写收口：命中直接回（不看网络；离线时热点只留首页已缓存的句子），没命中且未联网立即失败，联网才请求并落库。
+预缓存（identity.prefetch）的评论页只存前 PREFETCH_ITEMS 条并标 partial。
+`through`（内部）是读写收口：在线阅读总取最新并更新缓存；离线与预缓存续跑才读缓存。
+离线时热点只留首页已缓存且有评论的句子，没命中且未联网立即失败。
 依附书身份：改名 / 撕墓碑由 books_db 经 IDENTITY_MODULES 调 moveIdentity / removeIdentity。
 
 @module koplugin.book.book.review_cache
@@ -18,6 +19,9 @@ local JSON = require("json")
 local _ = require("gettext")
 
 local ReviewCache = {}
+
+---@class ReviewCacheIdentity: BookIdentity
+---@field prefetch boolean|nil 预缓存请求，允许复用已有缓存并裁剪评论页
 
 local TTL = 180 * 24 * 3600
 local EMPTY_TTL = 300
@@ -43,7 +47,7 @@ function ReviewCache.removeIdentity(source_id, stable_id)
     return DB.removeIdentity("review_cache", source_id, stable_id)
 end
 
----@param identity BookIdentity
+---@param identity ReviewCacheIdentity
 ---@param kind "hot"|"page"
 ---@param key string
 ---@return table|nil
@@ -56,7 +60,7 @@ local function read(identity, kind, key)
     return JSON.decode(payload)
 end
 
----@param identity BookIdentity
+---@param identity ReviewCacheIdentity
 ---@param kind "hot"|"page"
 ---@param key string
 ---@param value table
@@ -84,14 +88,14 @@ local function pageKey(range, max_idx)
 end
 
 --- 本章热点缓存（未过期才有）。
----@param identity BookIdentity
+---@param identity ReviewCacheIdentity
 ---@return table[]|nil
 function ReviewCache.hotspots(identity)
     return read(identity, "hot", "")
 end
 
 --- 某句某页的评论缓存（未过期才有）。
----@param identity BookIdentity
+---@param identity ReviewCacheIdentity
 ---@param range string
 ---@param max_idx integer
 ---@return table|nil
@@ -99,8 +103,8 @@ function ReviewCache.page(identity, range, max_idx)
     return read(identity, "page", pageKey(range, max_idx))
 end
 
---- 读写收口：命中直接回；没命中且未联网立即失败；联网请求，成功落库。
----@param identity BookIdentity
+--- 在线阅读取最新；离线 / 预缓存命中直接回；请求成功才覆盖缓存，失败不回退成旧结果。
+---@param identity ReviewCacheIdentity
 ---@param kind "hot"|"page"
 ---@param key string
 ---@param fetch fun(cb: fun(value: table|nil, err: string|nil)): { cancel: fun() }|nil
@@ -112,9 +116,8 @@ local function through(identity, kind, key, fetch, cb)
         cancelled = true
         if job then job.cancel() end
     end }
-    local hit = read(identity, kind, key)
     local connected = require("ui/network/manager"):isConnected()
-    if hit and hit.partial and connected then hit = nil end
+    local hit = (not connected or identity.prefetch) and read(identity, kind, key) or nil
     local online = hit ~= nil or connected
     if not online then
         require("ui/uimanager"):nextTick(function()
@@ -143,7 +146,8 @@ function ReviewCache.hotspotsAsync(identity, fetch, cb)
         if list and not require("ui/network/manager"):isConnected() then
             local kept = {}
             for _idx, spot in ipairs(list) do
-                if ReviewCache.page(identity, spot.range, 0) then kept[#kept + 1] = spot end
+                local page = ReviewCache.page(identity, spot.range, 0)
+                if page and #page.items > 0 then kept[#kept + 1] = spot end
             end
             list = kept
         end
@@ -153,7 +157,19 @@ end
 
 --- 评论页：缓存或请求。
 function ReviewCache.pageAsync(identity, range, max_idx, fetch, cb)
-    return through(identity, "page", pageKey(range, max_idx), fetch, cb)
+    return through(identity, "page", pageKey(range, max_idx), fetch, function(page, err)
+        if page and max_idx == 0 and page.total == 0 then
+            local hotspots = ReviewCache.hotspots(identity)
+            if hotspots then
+                local kept = {}
+                for _idx, spot in ipairs(hotspots) do
+                    if spot.range ~= range then kept[#kept + 1] = spot end
+                end
+                if #kept < #hotspots then write(identity, "hot", "", kept) end
+            end
+        end
+        cb(page, err)
+    end)
 end
 
 return ReviewCache

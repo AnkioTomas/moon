@@ -268,7 +268,7 @@ function Sheet:refresh()
     UIManager:setDirty(self, "ui")
 end
 
---- 拉下一批并追加；命中本地缓存不联网，没命中又没网时源会立即回错，不留悬挂状态。
+--- 拉下一批并追加；在线取最新、离线读缓存，没缓存又没网时源立即回错。
 function Sheet:load()
     if self.job or not self.more then return end
     local Toast = require("ui.themes.widgets.toast")
@@ -282,6 +282,7 @@ function Sheet:load()
             if not self.loaded then self:close() end
             return
         end
+        if not self.loaded then self.spot.total = page.total end
         for _idx, item in ipairs(page.items) do self.items[#self.items + 1] = item end
         self.loaded, self.total, self.max_idx = true, page.total, page.max_idx
         self.more = page.more and #page.items > 0
@@ -324,7 +325,7 @@ function Sheet:onSwipeSheet(_arg, ges)
     return true
 end
 
---- 打开某句的段评；首页走本地缓存，没缓存且未联网由源立即回错。
+--- 打开某句的段评；在线取最新，离线且没缓存由源立即回错。
 ---@param identity BookIdentity 章会话身份（属主源提供 paragraphReviewPageAsync）
 ---@param spot { range: string, text: string, total: integer }
 function Sheet.open(identity, spot)

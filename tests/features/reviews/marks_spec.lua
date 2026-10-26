@@ -128,6 +128,12 @@ marks.current[1].tap()
 Assert.eq(opened.spot.range, "1-5")
 Assert.eq(opened.identity, identity)
 
+-- 段评首页确认总数为零后，关窗重绘立即去掉本次会话里的旧标记。
+opened.spot.total = 0
+Assert.len(marks:marks(), 0)
+marks.render_key = nil
+Assert.len(marks:marks(), 0, "视口变化不能让空标记复活")
+
 -- 换章：清掉旧标记、取消在飞请求。
 identity = { source_id = "wechat", stable_id = "b1", chapter_idx = 4, source = source }
 session = { identity = identity }
