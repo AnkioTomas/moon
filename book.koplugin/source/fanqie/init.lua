@@ -20,7 +20,7 @@ local T = require("ffi/util").template
 
 local M = {}
 
----@class FanqieSource : BookSource
+---@class FanqieSource : SourceBase
 ---@field settings FanqieSettings
 ---@field client FanqieClient
 
@@ -124,6 +124,7 @@ end
 ---@param opts { force?: boolean, dirty_only?: boolean, on_progress?: fun(text: string|nil, done: integer|nil, total: integer|nil) }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return CancelHandle|nil
+---@param self FanqieSource
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
     if not self:configured() then

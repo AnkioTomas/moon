@@ -34,14 +34,14 @@ end
 
 --- 算高亮条目的去重键：有 id 就用 id，否则用文本+章节+页码+起止位置拼串。
 --- 拼串用 \0 分隔，避免字段内容里的分隔符造成误撞。
----@param item table 注解条目（会话 annotation 或 notes 表反序列化结果）
----@return string
 --- 分页文档的 pos 是表，tostring 只得到地址，内容相同的两条去不了重。
 local function posKey(p)
     if type(p) == "table" then return tostring(p.page) .. "," .. tostring(p.x) .. "," .. tostring(p.y) end
     return tostring(p or "")
 end
 
+---@param item table 注解条目（会话 annotation 或 notes 表反序列化结果）
+---@return string
 local function highlightKey(item)
     local id = item.id or item.annotation_id
     if id ~= nil then return "id:" .. tostring(id) end

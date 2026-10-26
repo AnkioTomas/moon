@@ -12,6 +12,7 @@ local NotesPush = require("source.wechat.notes_push")
 --- 只记调用、按表回包的假客户端（回包走 nextTick，模拟真异步）。
 local function fakeClient(replies)
     local calls = {}
+    ---@type { calls: string[], [string]: any }
     local client = { calls = calls }
     local function method(name)
         return function(_self, ...)

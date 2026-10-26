@@ -19,7 +19,7 @@ local logger = require("utils.log")
 local RETRY = 60
 
 --- 提供段评的源（WechatSource 实现）。
----@class ParagraphReviewSource
+---@class ParagraphReviewSource : BookSource
 ---@field id string
 ---@field configured fun(self: ParagraphReviewSource): boolean
 ---@field paragraphReviewsEnabled fun(self: ParagraphReviewSource): boolean
@@ -37,6 +37,7 @@ local RETRY = 60
 ---@field place fun(data: any): ReviewPlacement[]
 
 ---@class ReviewMarks: PageMarkLayer
+---@field borrowed_idents table<string, BookIdentity>|nil 借用热点对应的书籍身份
 ---@field ui table ReaderUI
 ---@field key string|nil 当前目标键
 ---@field data any fetch 的结果；nil = 尚未取到

@@ -63,7 +63,7 @@ local shown
 package.preload["features.rare.lookup"] = function()
     return { open = function(opts) shown = opts end }
 end
-ReaderDictionary.onLookupWord = function() return "native lookup" end
+ReaderDictionary.onLookupWord = function(...) return "native lookup" end
 
 package.loaded["features.dictionary"] = nil
 local DictInit = require("features.dictionary")

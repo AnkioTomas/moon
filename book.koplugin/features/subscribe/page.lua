@@ -29,6 +29,7 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 
 ---@class BookSubscribePage
+---@field pages integer|nil 总页数
 ---@field desktop BookDesktop
 ---@field name string
 ---@field page integer

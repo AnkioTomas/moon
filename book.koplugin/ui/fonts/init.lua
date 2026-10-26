@@ -203,8 +203,7 @@ local function resolvePath(id)
 end
 
 --- 字体 id → 字体文件路径（登记进 FontList）；不读字体信息，自绘只要文件时用这个。
----@param id string
----@return string|nil path, string|nil err
+---@type fun(id: string): string|nil, string|nil
 Fonts.pathForId = resolvePath
 
 --- 字体 id → CRE 字体名与字体文件路径；不触发 CRE 注册，用于偏好比较和保存。

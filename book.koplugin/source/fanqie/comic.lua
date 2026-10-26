@@ -74,7 +74,7 @@ function Comic.materializeAsync(urls, key, archive_path, cb)
             local path = string.format("%s/%04d%s", dir, current, ext)
             local file, err = io.open(path, "wb")
             if not file then cb(nil, err); return end
-            file:write(data)
+            file:write(data --[[@as string]])
             file:close()
             paths[current] = path
             current = current + 1

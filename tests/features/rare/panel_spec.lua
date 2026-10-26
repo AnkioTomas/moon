@@ -14,7 +14,7 @@ Assert.eq(action.id, "rare_ruby")
 Assert.eq(action.scope, "reader")
 Assert.is_false(action.active())
 
-action.run()
+action.run({})
 local menu = lists[1]
 Assert.len(menu.items, 4)
 Assert.is_false(menu.items[1].checked)

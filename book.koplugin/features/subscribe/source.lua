@@ -72,7 +72,7 @@ local function splitUid(identity, uid)
 end
 
 --- 这本书的目录：范围内的文章流；带注解的旧章（范围外了）按时间并回去。
----@param identity BookIdentity
+---@param identity { stable_id: string }
 ---@return BookChapter[]
 function M.toc(identity)
     local sid = tostring(identity.stable_id)
@@ -277,6 +277,7 @@ end
 function Source:onEvent(event, payload)
     if event ~= "chapter_changed" then return end
     local identity = payload and payload.identity
+    ---@cast identity BookIdentity|nil
     local idx = identity and tonumber(identity.chapter_idx)
     local item = idx and (require("source.toc").read(M.ID, identity.stable_id, true) or {})[idx]
     if not item then return end

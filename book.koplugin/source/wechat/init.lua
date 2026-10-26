@@ -462,7 +462,7 @@ end
 --- 上报阅读进度：需要 chapter_uid，优先复用 pos.extra 缓存的坐标，否则回查目录解析。
 ---@param identity BookIdentity
 ---@param pos ProgressPosition|nil 缺省视为空位置
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, meta: table|nil)
 ---@return { cancel: fun() }
 function Source:putProgressAsync(identity, pos, cb)
     pos = pos or {}
@@ -828,7 +828,7 @@ end
 --- 且该章正文已落盘（缺 HTML 时无法定位划线区间）。无可推送内容直接回调成功。
 ---@param identity BookIdentity
 ---@param annotations table[] KOReader 注解数组，就地改写
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, meta: table|nil)
 ---@return { cancel: fun() }|nil
 function Source:pushNotesAsync(identity, annotations, cb)
     if not self:configured() then

@@ -78,7 +78,7 @@ end
 --- 本机时区，形如 ``+08:00``。
 ---@return string
 function App.timeZone()
-    local z = os.date("%z")
+    local z = os.date("%z") --[[@as string]]
     return z:sub(1, 3) .. ":" .. z:sub(4, 5)
 end
 

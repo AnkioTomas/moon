@@ -48,7 +48,7 @@ end
 ---@return string|nil err
 function Inflate.raw(data)
     local z = lib()
-    local strm = ffi.new("moon_z_stream")
+    local strm = ffi.new("moon_z_stream") --[[@as MoonZStream]]
     local zs = ffi.cast("void *", strm)
     if z.inflateInit2_(zs, -15, "1.2.11", ffi.sizeof(strm)) ~= 0 then
         return nil, "inflateInit failed"

@@ -93,8 +93,10 @@ Assert.eq(built[1], ctx)
 Assert.eq(built[2], 100)
 Assert.eq(built[3], 50)
 Assert.eq(h:heightRange(ctx, { height = 300 }).height, 40)
-h:showSettings("desk")
-Assert.eq(settings_opened[1], "desk")
+local desktop = {}
+---@cast desktop BookDesktop
+h:showSettings(desktop)
+Assert.eq(settings_opened[1], desktop)
 Assert.eq(settings_opened[2], "ext.greeting.hello")
 hello.build = function() error("hello boom") end
 Assert.eq(type(h:createWidget()), "table", "build 抛错不崩首页")

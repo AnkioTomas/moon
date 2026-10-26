@@ -489,7 +489,7 @@ end
 --- 算绘制指令。q = {text, title, author, keyword?}；measure(text, px, bold) 返回像素宽。
 ---@param style string
 ---@param q table
----@return table[] ops（ops.w / ops.h 为画布尺寸，绘制时裁剪出血）
+---@return table[]|{ w: number, h: number } ops 画布尺寸与绘制指令
 function M.plan(style, q, w, h, measure)
     local body = T.strip(q.text)
     local kw = q.keyword or T.keyword(q.text)
@@ -741,7 +741,7 @@ local function paintGrain(bb, op, ox, oy, f, synthetic, cw, ch)
     local bold = op.bold and synthetic
     local tw = math.ceil(RenderText:sizeUtf8Text(0, 100000, f, op.s, true, bold).x) + 4
     local th = math.ceil(op.size * 1.25)
-    local tmp = Blitbuffer.new(tw, th, Blitbuffer.TYPE_BB8)
+    local tmp = Blitbuffer.new(tw, th, Blitbuffer.TYPE_BB8) --[[@as BlitBuffer]]
     tmp:fill(Blitbuffer.COLOR_WHITE)
     RenderText:renderUtf8Text(tmp, 0, fmt(op.size * 0.88), f, op.s, true, bold, Blitbuffer.COLOR_BLACK)
     local p = ffi.cast("uint8_t*", tmp.data)

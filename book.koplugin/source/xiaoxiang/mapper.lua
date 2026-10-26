@@ -88,7 +88,8 @@ end
 --- 正文段落以 \r\n 分隔、每段前有全角缩进。
 ---@param wire table
 ---@return string|nil text
----@return "unpaid"|nil kind
+---@return "unpaid"|"encrypted"|nil kind
+---@return table|nil encrypted
 function Mapper.content(wire)
     local chapters = type(wire.data) == "table" and wire.data.chapterContents
     local chapter = chapters and chapters[1]

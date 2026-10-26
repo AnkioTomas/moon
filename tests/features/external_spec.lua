@@ -111,10 +111,13 @@ end
 do
     local list = Features.list
     Features.list = {}
-    Features.emit("onCreate", "p0")
+    local p0, p1 = {}, {}
+    ---@cast p0 BookPlugin
+    ---@cast p1 BookPlugin
+    Features.emit("onCreate", p0)
     Assert.eq(calls.hook, nil)
-    Features.emit("onReaderReady", "p1")
-    Assert.eq(calls.hook, "p1")
+    Features.emit("onReaderReady", p1)
+    Assert.eq(calls.hook, p1)
     Features.list = list
 end
 

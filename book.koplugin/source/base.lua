@@ -96,6 +96,7 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 
 --- 按章正文载荷：Source 只交内容，宿主写 HTML。
 ---@class ChapterContentPayload
+---@field temporary boolean|nil 临时提示正文，不作为章节缓存
 ---@field title string|nil 章节标题
 ---@field book_title string|nil 书名（写入 HTML <title>，供阅读器/第三方插件认书）
 ---@field html string|nil HTML/XHTML 正文片段（优先）
@@ -115,6 +116,8 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 --- 书架：远端快照 reconcile + 本地独有成员经 addToShelf 上行（wechat/jdread）；
 --- 删除经 deleteBookAsync。local 扫盘；moon 无 add API（list/delete）。
 ---@class BookSource
+---@field probing boolean|nil 正在探测协议
+---@field dropChapterCache fun(self: BookSource, identity: BookIdentity, chapter: BookChapter)|nil
 ---@field id SourceId|nil 源标识
 ---@field name string|nil 展示名
 ---@field type BookSourceType 阅读形态
@@ -136,16 +139,16 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 ---@field browseAsync fun(self: BookSource, opts: { node?: string, limit?: integer }, cb: fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)): table|nil 书城浏览（可选；无搜索词时书城页按 groups 画 chip 行、按 data 画书。node 是 chip 的 id，缺省由源选默认；源每次返回完整 groups 并标出 active，书城页不认识榜单 / 分类）
 ---@field getDetailAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: Book|nil, err: string|nil)): table|nil 书籍详情
 ---@field openBookAsync fun(self: BookSource, identity: BookIdentity, opts: table|nil, cb: fun(path: string|nil, err: string|nil, meta: { handled?: boolean }|nil)): table|nil 根据书籍身份解析、落盘并登记物理文档；按章源通过 opts.chapter_idx 指定章节；取消后不回调；源已自行展示（如在线漫画查看器）时回调 `nil, nil, { handled = true }`，桌面不开阅读器也不提示
----@field loadTocAsync fun(self: BookSource, identity: BookIdentity, cb: fun(toc: BookChapter[]|nil, err: string|nil)): table|nil 拉取并持久化章节目录
+---@field loadTocAsync fun(self: BookSource, identity: BookIdentity, cb: fun(toc: BookChapter[]|nil, err: string|nil), force?: boolean): table|nil 拉取并持久化章节目录
 ---@field prefetchChaptersAsync fun(self: BookSource, identity: BookIdentity, toc: BookChapter[], from_idx: integer, count: integer, cb: fun(cached: integer, total: integer, failed: integer, err: any)|nil): table|nil 阅读期预取后续章节
 ---@field getProgressAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: ProgressPosition|nil, err: string|nil, meta: table|nil)): table|nil 拉取远端进度；meta.empty 表示远端无记录
----@field putProgressAsync fun(self: BookSource, identity: BookIdentity, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 推送进度
+---@field putProgressAsync fun(self: BookSource, identity: BookIdentity, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil, meta: table|nil)): table|nil 推送进度
 ---@field coverRequest fun(self: BookSource, identity: BookIdentity): (BookCoverRequest|nil, string|nil) 封面请求描述（纯构造，无 IO）
 ---@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil Z-Library 导入目标（local 移入）
 ---@field pushStatsAsync fun(self: BookSource, rows: BookStatsRow[], cb: fun(data: BookStatsPushResult|nil, err: string|nil)): table|nil 上报领域统计记录；协议细节由源处理
 ---@field pullStatsAsync fun(self: BookSource, cb: fun(result: BookStatsRow[]|BookStatsPullResult|nil, err: string|nil)): table|nil 拉取领域统计记录（可选 replace 覆盖策略）
 ---@field statsIdentities fun(self: BookSource, identity: BookIdentity): string[]|nil 详情页阅读统计要并入的书身份（如多卷书把卷行并进 series 行）；缺省只看书自己
----@field pushNotesAsync fun(self: BookSource, identity: BookIdentity, annotations: table[], cb: fun(data: table|nil, err: string|nil)): table|nil 上传划线/书签
+---@field pushNotesAsync fun(self: BookSource, identity: BookIdentity, annotations: table[], cb: fun(data: table|nil, err: string|nil, meta: table|nil)): table|nil 上传划线/书签
 ---@field pullNotesAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: table[]|nil, err: string|nil, meta: table|nil)): table|nil 拉取划线/书签
 ---@field localizeAnnotations fun(self: BookSource, document: table|nil, annotations: table[], html_path: string|nil, current: table[]|nil): table[]|nil 按章 HTML 把远端划线定位到本地 xpointer
 ---@field cacheAllChaptersAsync fun(self: BookSource, identity: BookIdentity, on_progress: function|nil, cb: function, range: ChapterCacheRange|nil): table|nil 章节模式缓存：range 缺省全本，否则从当前阅读章起一段
@@ -306,21 +309,21 @@ end
 function SourceBase:onEvent(_event, _payload) end
 
 --- 默认书架同步：无远端书架。远端源覆盖，local 覆盖为扫盘。
----@param _opts { force?: boolean }|nil
+---@param _opts { force?: boolean, dirty_only?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }
 function SourceBase:syncBooksAsync(_opts, cb)
     return SourceBase.skipped(cb, "unsupported")
 end
 
----@param opts { identity?: BookIdentity }|nil
+---@param opts { identity?: BookIdentity, dirty_only?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return table
 function SourceBase:syncProgressAsync(opts, cb)
     return require("book.progress").syncAsync(self, opts, cb)
 end
 
----@param opts { identity?: BookIdentity }|nil
+---@param opts { identity?: BookIdentity, dirty_only?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return table
 function SourceBase:syncNotesAsync(opts, cb)

@@ -17,6 +17,10 @@
 
 --- online / article 源目录中的一章。
 ---@class BookChapter
+---@field chapterId integer|string|nil Kavita 的章节身份
+---@field origin string|nil 源端正文地址
+---@field link string|nil 订阅文章地址
+---@field updated integer|nil 起点章节更新时间（Unix 秒）
 ---@field idx integer 连续章序号（1-based）
 ---@field depth integer|nil 展示层级（1-based）
 ---@field anchors BookChapterAnchor[]|nil 章内目录节点
@@ -562,6 +566,7 @@ end
 ---@param ops {
 ---   fetchContent: ChapterFetchContent,
 ---   progress: fun(done: integer, total: integer)|nil,
+---   volatile: boolean|nil,
 ---   interval_seconds: number|nil,
 ---   persist_book: boolean|nil,
 --- }
@@ -737,7 +742,7 @@ end
 --- 带 VIP 章的源取正文：成功记「已购」；open（用户点开的章）遇到没买的 VIP 章不报错，
 --- 记「未购」并给一页临时提示文档（不当缓存，买了再开会重新拉）。预取 / 整本缓存传 open = false，照常失败。
 ---@param source BookSource
----@param content_async fun(book_id: string, chapter_id: string, cb: fun(text: string|nil, err: string|nil, kind: "unpaid"|nil)): table
+---@param content_async fun(book_id: string, chapter_id: string, cb: fun(text: string|nil, err: string|nil, kind: "unpaid"|nil)): table|nil
 ---@param open boolean
 ---@return ChapterFetchContent
 function Chapter.vipFetcher(source, content_async, open)

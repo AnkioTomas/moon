@@ -18,7 +18,7 @@ local BASE_ROOT = "assets/rare"
 local Catalog = {}
 
 --- 内置可下载词库。
----@return { id: string, label: string, lang: string }[]
+---@return { id: string, label: string, lang: string, custom?: boolean }[]
 function Catalog.remote()
     return {
         { id = "zh-pinyin", label = _("汉字拼音"), lang = "zh" },
@@ -44,7 +44,7 @@ function Catalog.installed(id)
 end
 
 --- 内置清单 + 目录里用户自放的词库。
----@return { id: string, label: string, lang: string|nil }[]
+---@return { id: string, label: string, lang: string|nil, custom?: boolean }[]
 function Catalog.list()
     local out, seen = {}, {}
     for _idx, item in ipairs(Catalog.remote()) do

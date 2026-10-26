@@ -91,7 +91,7 @@ end
 
 --- 估算各模块占用。
 ---@param plugin table<string, true> 月读顶层模块名集合（目录名与文件名去掉 .lua）
----@return { name: string, kb: integer, mine: boolean }[] rows 从大到小；末尾含「未归属」
+---@return { name: string, kb: integer, mine: boolean, rest?: boolean }[] rows 从大到小；末尾含「未归属」
 function LuaMem.scan(plugin)
     collectgarbage()
     collectgarbage()

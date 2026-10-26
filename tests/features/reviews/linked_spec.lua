@@ -390,7 +390,7 @@ do
     local at, title = Linked.anchorOf({ { idx = 1, words = 100, title = "一" }, { idx = 2, words = 300, title = "二" } }, 2)
     Assert.eq(at, 0.625)
     Assert.eq(title, "二")
-    Assert.eq(Linked.anchorOf({ { idx = 1 }, { idx = 2 }, { idx = 3 }, { idx = 4 } }, 2), 0.375)
+    Assert.eq(Linked.anchorOf({ { idx = 1, title = "" }, { idx = 2, title = "" }, { idx = 3, title = "" }, { idx = 4, title = "" } }, 2), 0.375)
     Assert.eq(Linked.anchorOf({}, 2), 0)
 end
 

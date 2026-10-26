@@ -203,7 +203,7 @@ function Glyph.recognize(ref_path, cache_path, tasks)
     local maps = {}
     for t_idx, task in ipairs(tasks) do
         local threshold = task.threshold or THRESHOLD
-        local gsize = FT.newFaceSize(task.font_path, PX)
+        local gsize = FT.newFaceSize(task.font_path, PX) --[[@as FreeTypeSize]]
         local cands = {}
         for k = 1, math.min(task.limit, #chars) do
             local base = (k - 1) * STRIDE

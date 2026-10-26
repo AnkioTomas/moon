@@ -102,7 +102,7 @@ local function images(content)
     return out
 end
 
----@param item table commentapi 评论条目
+---@param entry table commentapi 评论条目
 ---@return WechatReview
 local function item(entry)
     local c = type(entry.comment) == "table" and entry.comment or entry

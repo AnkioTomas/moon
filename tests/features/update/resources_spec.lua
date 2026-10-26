@@ -15,11 +15,15 @@ package.preload["utils.settings"] = function() return {} end
 
 local Resources = require("features.update.resources")
 
+local function dictSpec(version)
+    return { name = "test", base_path = "assets/test", dest = "unused",
+        installed = version, on_installed = function() end }
+end
 local got
 Resources.findStale({
-    { label = "a", spec = { installed = "old" } },
-    { label = "b", spec = { installed = "new" } },
-    { label = "c", spec = { installed = "older" } },
+    { label = "a", spec = dictSpec("old") },
+    { label = "b", spec = dictSpec("new") },
+    { label = "c", spec = dictSpec("older") },
 }, function(stale) got = stale end)
 Assert.len(got, 2)
 Assert.eq(got[1].label, "a")

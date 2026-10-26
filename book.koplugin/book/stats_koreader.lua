@@ -43,7 +43,8 @@ local function libraryIndex()
         if md5 and by_md5[md5] == nil and unhashed then
             local partialMD5 = require("util").partialMD5
             for _idx, book in ipairs(unhashed) do
-                local digest = partialMD5(book.path) ---@type string|nil
+                local digest = partialMD5(book.path)
+                ---@cast digest string|nil
                 if digest then addUnique(by_md5, digest, book) end
             end
             unhashed = nil

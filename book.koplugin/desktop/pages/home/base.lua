@@ -17,6 +17,7 @@ local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 
 ---@class BookHomeComponent
+---@field showSettings fun(self: BookHomeComponent, desktop: BookDesktop)|nil
 ---@field id string 首页组件注册标识
 ---@field label string 设置页显示的组件名称
 ---@field icon string 设置页使用的图标名称

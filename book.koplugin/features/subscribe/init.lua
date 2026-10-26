@@ -108,7 +108,7 @@ local ACCEPT = "application/rss+xml,application/atom+xml,application/xml,text/ht
 --- 流式 GET：边收边数，超过 MAX_PAGE 立刻断开（不先整页下完再判断）。
 --- opts.public：只许公网地址（每一跳都查）。
 ---@param url string
----@param cb fun(body: string|nil, err: any)
+---@param cb fun(body: string|nil, err: any, kind: "image"|nil)
 ---@param opts { public: boolean|nil, hops: integer|nil }|nil
 ---@return table|nil
 local function get(url, cb, opts)
@@ -502,7 +502,7 @@ end
 
 --- 订阅源的工作目录：订阅在阅读器里是一本按章书（features.subscribe.source，书 id 为订阅 id），
 --- 章节 HTML、正文片段（articles/）和图片（images/）都在这本书的目录下。
----@param feed_id integer
+---@param feed_id integer|string
 ---@return string
 function Subscribe.dir(feed_id)
     return Paths.bookWorkDir(tostring(feed_id), "subscribe")

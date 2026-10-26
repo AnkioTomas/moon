@@ -65,14 +65,18 @@ Assert.is_nil(make().key_events.DesktopPageNext)
 -- 按键转成当前页签的左右滑，并吃掉按键。
 local got = {}
 d.tab = "library"
-d.library = { onEvent = function(_, event, payload) got[#got + 1] = event .. ":" .. payload.direction end }
+local library = { onEvent = function(_, event, payload) got[#got + 1] = event .. ":" .. payload.direction end }
+---@cast library BookLibrary
+d.library = library
 Assert.is_true(d:onDesktopTurn(1))
 Assert.is_true(d:onDesktopTurn(-1))
 Assert.eq(table.concat(got, ","), "swipe:west,swipe:east")
 
 -- 当前页签不处理事件也照样吃掉，不漏给文件管理器。
 d.tab = "settings"
-d.settings = {}
+local settings = {}
+---@cast settings BookSettings
+d.settings = settings
 Assert.is_true(d:onDesktopTurn(1))
 
 -- 「桌面物理翻页键」关闭：不处理、返回 false，按键交给下层；再打开立即恢复，无需重启。

@@ -337,7 +337,7 @@ function M.paintBlock(bb, block, w, h, background)
 end
 
 --- 解码后的背景是否带透明像素：只有 RGB32 有 alpha，遇到第一个非不透明像素即停。
----@param source BlitBuffer
+---@param source any 解码器返回的位图或不支持的图像对象
 ---@return boolean
 function M.hasAlpha(source)
     if not source.getType or source:getType() ~= Blitbuffer.TYPE_BBRGB32 then return false end
@@ -403,7 +403,7 @@ function M.write(path, background, blocks, fill)
     local background_copy, alpha_bg, source
     local bg_path = background and background.path
     if bg_path then
-        source = require("ui/renderimage"):renderImageFile(bg_path, false)
+        source = require("ui/renderimage"):renderImageFile(bg_path, false) --[[@as BlitBuffer]]
     end
     local transparent = source ~= nil and M.hasAlpha(source)
     local ok, err = writePNG(path, w, h, function(bb)
