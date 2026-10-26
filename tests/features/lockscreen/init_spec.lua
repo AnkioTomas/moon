@@ -324,25 +324,28 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(refreshed)
     Assert.is_true(render_writes > 0)
 
-    -- KOReader 先 Screensaver:setup 再发 Suspend：钩子必须在原生 setup 读设置前把图生成好，
-    -- 否则锁屏永远显示上一轮的内容；内容没变时命中缓存不重画；关机 / 重启画面不生成。
+    -- 电源键路径绝不同步合成：有图就接管路径；内容变了也不在 setup 里重画（留给 desktop.activated）。
+    -- 关机 / 重启画面不碰锁屏图。
     render_writes = 0
     current_cover = cover_a
     LockScreen.onCreate()
     LockScreen.onCreate()
     Stubs.flush()
-    Assert.eq(render_writes, 0, "本地背景：启动 / 开书不预合成，留给休眠钩子")
+    Assert.eq(render_writes, 0, "本地背景：启动不预合成")
     current_cover = cover_a
     Screensaver:setup()
     Assert.len(setup_seen, 1, "钩子只装一次")
-    Assert.eq(setup_seen[1].writes, 1, "原生 setup 之前已经重画")
-    Assert.eq(saved.screensaver_document_cover, compose_path)
+    Assert.eq(setup_seen[1].writes, 0, "原生 setup 之前不得同步重画")
+    Assert.eq(saved.screensaver_document_cover, compose_path, "有旧图就接管路径")
     Screensaver:setup()
-    Assert.eq(setup_seen[2].writes, 1, "内容没变：缓存命中，不重画")
+    Assert.eq(setup_seen[2].writes, 0, "内容没变：仍不重画")
     current_cover = cover_b
+    Screensaver:setup()
+    Assert.eq(setup_seen[3].writes, 0, "封面变了也不在电源键路径重画")
+    Assert.eq(saved.screensaver_document_cover, compose_path, "过期图仍顶上，避免锁屏空白")
     Screensaver:setup("poweroff")
-    Assert.eq(setup_seen[3].event, "poweroff")
-    Assert.eq(setup_seen[3].writes, 1, "关机画面不生成锁屏图")
+    Assert.eq(setup_seen[4].event, "poweroff")
+    Assert.eq(setup_seen[4].writes, 0, "关机画面不生成锁屏图")
 
     -- 在飞生成期间改配置：旧任务作废，新请求必须重开，不能被 already_running 吞掉。
     local Background = require("features.lockscreen.background")

@@ -229,10 +229,13 @@ local revision = 0
 ---@type { revision: number, [string]: string|false }
 local resolved = { revision = -1 }
 local cache = { key = nil, bb = nil }
+-- paintTo 只 blit 已就绪缓存；整屏 decode 放下一拍，避免弹窗首帧卡死 Kindle。
+local pending = {}
 
 --- 丢掉已解析的路径与位图；改了任何设置之后调用。
 function M.invalidate()
     revision = revision + 1
+    pending = {}
     if cache.bb and cache.bb.free then cache.bb:free() end
     cache.key, cache.bb = nil, nil
 end
@@ -255,20 +258,15 @@ function M.path(scope)
     return (resolved[id] or nil) --[[@as string|nil]]
 end
 
---- 按目标尺寸取铺好的位图；解图失败返回 nil（表层保留底色）。
---- bpp 用目标画布的类型：C 版 addblitFrom 两张图类型不同会直接退出进程。
+--- 同步解一张铺好的位图；失败返回 nil。只给异步队列和阅读页预热用，禁止进 paintTo。
+---@param path string
 ---@param w number
 ---@param h number
----@param bpp integer|nil 缺省按屏幕是否彩色选 BB8 / RGB32
----@param scope string 界面（专用图按它取）
+---@param bpp integer|nil
+---@param contain boolean
+---@param opacity number
 ---@return table|nil
-local function surface(w, h, bpp, scope)
-    local path = M.path(scope)
-    if not path then return nil end
-    local contain = M.contain(scope)
-    local opacity = M.opacity(scope)
-    local key = table.concat({ path, w, h, contain and "contain" or "cover", bpp or "auto", opacity }, "|")
-    if cache.key == key then return cache.bb end
+local function decodeSurface(path, w, h, bpp, contain, opacity)
     ---@type BlitBuffer|nil
     local bb
     local ok, err = pcall(function()
@@ -298,9 +296,38 @@ local function surface(w, h, bpp, scope)
         logger.warn("book wallpaper decode failed", path, err)
         return nil
     end
-    if cache.bb and cache.bb.free then cache.bb:free() end
-    cache.key, cache.bb = key, bb
     return bb
+end
+
+--- 按目标尺寸取已就绪的位图；miss 时排队下一拍解码并返回 nil（本帧保留底色）。
+--- bpp 用目标画布的类型：C 版 addblitFrom 两张图类型不同会直接退出进程。
+---@param w number
+---@param h number
+---@param bpp integer|nil 缺省按屏幕是否彩色选 BB8 / RGB32
+---@param scope string 界面（专用图按它取）
+---@return table|nil
+local function surface(w, h, bpp, scope)
+    local path = M.path(scope)
+    if not path then return nil end
+    local contain = M.contain(scope)
+    local opacity = M.opacity(scope)
+    local key = table.concat({ path, w, h, contain and "contain" or "cover", bpp or "auto", opacity }, "|")
+    if cache.key == key then return cache.bb end
+    if pending[key] then return nil end
+    pending[key] = true
+    local queued_rev = revision
+    local UIManager = require("ui/uimanager")
+    UIManager:nextTick(require("ui.guard").wrap("wallpaper.decode", function()
+        pending[key] = nil
+        if queued_rev ~= revision then return end
+        if cache.key == key then return end
+        local bb = decodeSurface(path, w, h, bpp, contain, opacity)
+        if not bb then return end
+        if cache.bb and cache.bb.free then cache.bb:free() end
+        cache.key, cache.bb = key, bb
+        UIManager:setDirty("all", "ui")
+    end))
+    return nil
 end
 
 --- 把壁纸铺进目标画布。没开、没图、解图失败都不画，返回 false 让调用方保留底色。
@@ -448,24 +475,37 @@ end
 
 local reader_key
 
---- 阅读页壁纸：把整屏位图写成 PNG 交给 crengine 平铺（尺寸正好等于屏幕，一张铺满）。
+--- 阅读页壁纸：首帧后再解码写 PNG，交给 crengine 平铺（不挡开书）。
 --- 同一张图 / 尺寸 / 铺法 / 透明度本进程只写一次。
 ---@param plugin BookPlugin
 function M.onReaderReady(plugin)
-    local document = plugin.ui.document
+    local ui = plugin.ui
+    local document = ui.document
     if not (document and document.setBackgroundImage and M.enabled("reader")) then return end
     local w, h = Screen:getWidth(), Screen:getHeight()
     local path = M.path("reader")
-    local img = path and surface(w, h, nil, "reader")
-    if not img then return end
+    if not path then return end
+    local contain, opacity = M.contain("reader"), M.opacity("reader")
+    local key = table.concat({ path, w, h, contain and "contain" or "cover", opacity }, "|")
     Paths.ensureCacheRoot()
     local file = Paths.cacheDir() .. "/wallpaper_reader.png"
-    local key = table.concat({ path, w, h, M.contain("reader") and "contain" or "cover", M.opacity("reader") }, "|")
-    if reader_key ~= key or not lfs.attributes(file, "mode") then
+    if reader_key == key and lfs.attributes(file, "mode") then
+        document:setBackgroundImage(file)
+        return
+    end
+    local queued_rev = revision
+    require("ui/uimanager"):nextTick(require("ui.guard").wrap("wallpaper.reader", function()
+        if queued_rev ~= revision then return end
+        if ui.document ~= document then return end
+        local img = decodeSurface(path, w, h, nil, contain, opacity)
+        if not img then return end
+        if cache.bb and cache.bb.free and cache.key ~= key then cache.bb:free() end
+        cache.key, cache.bb = key, img
         img:writePNG(file)
         reader_key = key
-    end
-    document:setBackgroundImage(file)
+        document:setBackgroundImage(file)
+        require("ui/uimanager"):setDirty(ui.dialog, "partial")
+    end))
 end
 
 local Ext = require("utils.extension")

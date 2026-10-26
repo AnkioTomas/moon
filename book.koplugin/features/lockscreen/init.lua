@@ -1,12 +1,14 @@
 --[[--
 锁屏组合图生命周期：生成、接管和宿主事件。
 
-KOReader 先 Screensaver:setup/show 再广播 Suspend，所以锁屏图在 setup 读设置之前生成；
-内容没变时缓存命中零开销，变了就当场重画，锁屏显示的永远是此刻的状态。
+KOReader 先 Screensaver:setup/show 再广播 Suspend。电源键路径上绝不同步解码/写 PNG：
+缓存命中或已有旧 compose.png 只接管路径；重建留给桌面回到前台 / 设置变更 / 联网后的异步刷新。
+低端 Kindle 上同步整屏合成会卡死数秒。
 
 @module koplugin.book.features.lockscreen
 --]]
 
+local lfs = require("libs/libkoreader-lfs")
 local Compose = require("features.lockscreen.compose")
 local Settings = require("features.lockscreen.settings")
 local MoonSettings = require("utils.settings")
@@ -16,7 +18,7 @@ local logger = require("utils.log")
 local M = {}
 local job
 local job_revision
-
+local activated_hooked
 --- 生成并接管锁屏图；非强制刷新不打断配置仍有效的在飞生成，缓存命中直接复用。
 --- 在飞任务的配置已过期时它的结果注定被丢弃，必须让位给新请求，否则无人重跑。
 ---@param cb fun(ok: boolean, err: any)|nil
@@ -84,8 +86,29 @@ function M.running()
     return job ~= nil
 end
 
---- 锁屏前同步刷新：Screensaver:setup 读 screensaver_document_cover 之前图必须已经就位。
---- 带 event 的调用是关机 / 重启画面，不是锁屏。在线资源未就绪时异步生成，本次沿用旧图。
+--- 休眠前只接管路径，绝不 Compose.build。命中缓存用新键；miss 时有旧图就顶上（过期也行）。
+local function prepareSuspend()
+    if not Settings.isCompose() then
+        logger.dbg("book.lockscreen suspend skipped", "mode_disabled")
+        return
+    end
+    local plan = Compose.plan()
+    local transparent = MoonSettings.get("features.lockscreen").lock_screen_transparent
+    if Compose.cacheValid(plan) then
+        Settings.applyCover(plan.output_path, transparent)
+        logger.dbg("book.lockscreen suspend", "cache_hit", plan.output_path)
+        return
+    end
+    if (lfs.attributes(plan.output_path, "size") or 0) > 0 then
+        Settings.applyCover(plan.output_path, transparent)
+        logger.dbg("book.lockscreen suspend", "stale_cover", plan.output_path)
+        return
+    end
+    logger.dbg("book.lockscreen suspend", "no_cover")
+end
+
+--- Screensaver:setup 读 screensaver_document_cover 之前只做路径接管。
+--- 带 event 的调用是关机 / 重启画面，不是锁屏。
 local function hookScreensaver()
     local Screensaver = require("ui/screensaver")
     if Screensaver._book_lockscreen_hooked then return end
@@ -93,17 +116,33 @@ local function hookScreensaver()
     local native_setup = Screensaver.setup
     Screensaver.setup = function(self, event, ...)
         if event == nil then
-            require("ui.guard").call("lockscreen.suspend", M.refresh, nil, false, "suspend")
+            require("ui.guard").call("lockscreen.suspend", prepareSuspend)
         end
         return native_setup(self, event, ...)
     end
 end
 
---- 插件启动：缓存失效时先撤下旧图（别让上次的配置冒充）。
---- 背景在本地时休眠钩子会当场同步合成，这里不预生成：开书时在主线程合成整屏图只会卡，
---- 而且当前书 / 轮换类主体的键到休眠时早变了。只有在线背景没就绪才下一帧发起（等下载）。
+--- 缓存失效时异步重建（桌面回到前台 / 启动 / 联网）。不进电源键路径。
+local function refreshIfStale(reason)
+    if not Settings.isCompose() then return end
+    local plan = Compose.plan()
+    if Compose.cacheValid(plan) then return end
+    M.refresh(nil, false, reason)
+end
+
+local function hookDesktopActivated()
+    if activated_hooked then return end
+    activated_hooked = true
+    require("utils.extension").add("desktop.activated", function(_desktop)
+        require("ui.guard").call("lockscreen.activated", refreshIfStale, "desktop_activated")
+    end)
+end
+
+--- 插件启动：缓存失效时先撤下旧图；在线背景未就绪才下一帧下载合成。
+--- 本地背景的重建留给 desktop.activated（用户回到桌面时），不进电源键、也不在开书路径卡主线程。
 function M.onCreate()
     hookScreensaver()
+    hookDesktopActivated()
     Settings.migrate()
     if not Settings.isCompose() then
         logger.dbg("book.lockscreen onCreate skipped", "mode_disabled")

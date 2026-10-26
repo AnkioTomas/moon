@@ -7,6 +7,8 @@ XPointer 之间的文本，末页跳到页首后按屏幕范围取，取完放�
 文档对象只在主进程里，取字只能在 UI 线程上做：按时长分批，批间让出给输入。结果交给 text2epub
 做章节识别与物理行合并；转换有损，不保留图片、脚注和原样式。
 
+页文本边取边写入临时文件，只保留上一页做边界行去重，避免 pages[] + concat 双份峰值内存。
+
 @module koplugin.book.features.reflow.extract
 --]]
 
@@ -15,6 +17,7 @@ require("l10n").apply()
 local UIManager = require("ui/uimanager")
 local Perf = require("utils.perf")
 local Text = require("utils.text")
+local Paths = require("utils.paths")
 local _ = require("gettext")
 
 local Extract = {}
@@ -29,16 +32,17 @@ local function later(fn)
     UIManager:scheduleIn(YIELD_S, require("ui.guard").wrap("reflow extract", fn))
 end
 
---- 只消除相邻渲染页完全相同的边界行。
----@param pages string[]
+--- 相对上一页去重边界行，写入文件；返回新的上一页正文（供下次比较）。
+---@param file file*
+---@param previous string
 ---@param raw string
-local function appendPage(pages, raw)
+---@return string previous
+local function appendPage(file, previous, raw)
     local page = Text.normalizeNewlines(raw):gsub("^\n+", ""):gsub("\n+$", "")
     if page == "" then
-        return
+        return previous
     end
-    local previous = pages[#pages]
-    if previous then
+    if previous ~= "" then
         local last_line = previous:match("^.*\n([^\n]+)$") or previous:match("^[^\n]+$")
         local first_line, rest = page:match("^([^\n]+)\n(.*)$")
         if not first_line then
@@ -48,9 +52,14 @@ local function appendPage(pages, raw)
             page = rest
         end
     end
-    if page ~= "" then
-        pages[#pages + 1] = page
+    if page == "" then
+        return previous
     end
+    if previous ~= "" then
+        file:write("\n")
+    end
+    file:write(page)
+    return page
 end
 
 --- 流式文档第 page 页：非末页取相邻两页 xpointer 之间，末页只能跳过去按屏幕范围取。
@@ -103,12 +112,29 @@ function Extract.run(ui, cb, on_progress)
     local count = document:getPageCount()
     -- 末页 gotoPage 会挪走阅读位置，收尾时放回。
     local restore_xp = rolling and document:getXPointer() or nil
-    local pages = {}
     local cancelled = false
+    Paths.ensureCacheRoot()
+    local tmp = Paths.cacheDir() .. "/reflow_extract_" .. tostring(os.time()) .. ".txt"
+    local file, open_err = io.open(tmp, "wb")
+    if not file then
+        cb(nil, open_err or _("无法创建临时文件"))
+        return { cancel = function() end }
+    end
+    local previous = ""
+    local closed = false
+
+    local function discardTmp()
+        if not closed then
+            closed = true
+            file:close()
+        end
+        os.remove(tmp)
+    end
 
     ---@param text string|nil
     ---@param err any
     local function finish(text, err)
+        discardTmp()
         if ui.document == document and restore_xp then
             -- 放不回原位置只是阅读位置偏了；抛出去 cb 就不来了，调用方的进度窗会一直挡着阅读页。
             local ok, restore_err = pcall(document.gotoXPointer, document, restore_xp)
@@ -124,7 +150,10 @@ function Extract.run(ui, cb, on_progress)
     --- 从第 page 页取到用完一批的时长，没取完排下一批。
     ---@param page integer
     local function step(page)
-        if cancelled then return end
+        if cancelled then
+            discardTmp()
+            return
+        end
         if ui.document ~= document then return finish(nil, _("文档已关闭")) end
         local started = Perf.now()
         while page <= count do
@@ -133,7 +162,7 @@ function Extract.run(ui, cb, on_progress)
             if not ok or type(chunk) ~= "string" then
                 return finish(nil, _("无法提取文字") .. ": " .. tostring(chunk))
             end
-            appendPage(pages, chunk)
+            previous = appendPage(file, previous, chunk)
             page = page + 1
             if page <= count and Perf.now() - started >= BATCH_MS then
                 local percent = math.floor((page - 1) * 100 / count)
@@ -144,15 +173,32 @@ function Extract.run(ui, cb, on_progress)
                 return later(function() step(page) end)
             end
         end
-        local text = table.concat(pages, "\n")
-        if not text:find("%S") then
-            return finish(nil, _("文档没有可提取的文字"))
+        if not closed then
+            closed = true
+            file:close()
         end
-        finish(text)
+        local reader = io.open(tmp, "rb")
+        local text = reader and reader:read("*a") or ""
+        if reader then reader:close() end
+        os.remove(tmp)
+        if not text:find("%S") then
+            if ui.document == document and restore_xp then
+                local ok, restore_err = pcall(document.gotoXPointer, document, restore_xp)
+                if not ok then require("logger").warn("reflow extract: restore position failed", restore_err) end
+            end
+            return cb(nil, _("文档没有可提取的文字"))
+        end
+        if ui.document == document and restore_xp then
+            local ok, restore_err = pcall(document.gotoXPointer, document, restore_xp)
+            if not ok then require("logger").warn("reflow extract: restore position failed", restore_err) end
+        end
+        cb(text)
     end
 
     later(function() step(1) end)
-    return { cancel = function() cancelled = true end }
+    return { cancel = function()
+        cancelled = true
+    end }
 end
 
 return Extract

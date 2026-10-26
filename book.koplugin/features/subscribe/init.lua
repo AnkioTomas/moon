@@ -91,8 +91,15 @@ local function resolvePrivate(url)
     if host == "" then return true end
     -- 已是 IP 字面量：privateHost 已经查过
     if host:match("^[%d.]+$") or host:find(":", 1, true) then return false end
+    -- 失败负缓存：弱网下每次 getaddrinfo 堵到超时，一串订阅探测会卡死 UI。
+    Subscribe._dns_fail = Subscribe._dns_fail or {}
+    local now = os.time()
+    if (Subscribe._dns_fail[host] or 0) > now then return false end
     local ok, list = pcall(function() return require("socket").dns.getaddrinfo(host) end)
-    if not ok or type(list) ~= "table" then return false end
+    if not ok or type(list) ~= "table" then
+        Subscribe._dns_fail[host] = now + 10
+        return false
+    end
     for _i, info in ipairs(list) do
         local addr = info and info.addr
         if addr and addr ~= "" then

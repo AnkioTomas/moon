@@ -70,10 +70,15 @@ Mirror.DEAD_TTL = 7 * 24 * 3600
 --- 模板 → 最近失败时间（只在内存，重启即清）。
 local failed = {}
 
----@return table http 配置；设置模块不可用（测试桩）时给空表
+---@return table http 配置；离线测试桩缺 settings 分区时给空表
 local function conf()
     local ok, cfg = pcall(function() return require("utils.settings").get("http") end)
     return ok and type(cfg) == "table" and cfg or {}
+end
+
+local function saveHttp()
+    local ok, err = pcall(function() require("utils.settings").save("http") end)
+    if not ok then logger.warn("book.http mirror save failed", err) end
 end
 
 --- 源（模板或加速前缀）是否在落盘黑名单里。
@@ -95,7 +100,7 @@ function Mirror.markDead(keys)
     end
     for _idx, key in ipairs(keys) do dead[key] = now end
     cfg.mirror_dead = dead
-    pcall(function() require("utils.settings").save("http") end)
+    saveHttp()
 end
 
 --- 按优先级排好的模板列表：上次成功 → 其余默认；冷却中的源垫底。
@@ -149,7 +154,7 @@ local function markOk(template)
     local cfg = conf()
     if cfg.mirror_last ~= template then
         cfg.mirror_last = template
-        pcall(function() require("utils.settings").save("http") end)
+        saveHttp()
     end
 end
 

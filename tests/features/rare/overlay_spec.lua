@@ -8,7 +8,14 @@ package.preload["utils.settings"] = function()
 end
 local lex
 package.preload["features.rare.catalog"] = function()
-    return { active = function() return { lex } end }
+    return {
+        active = function() return { lex } end,
+        -- 翻页前只查文件是否在；桩给个假路径，配合下面的 lfs stub。
+        path = function(id) return id == "t" and "/tmp/rare-overlay-stub.tsv" or nil end,
+    }
+end
+package.preload["libs/libkoreader-lfs"] = function()
+    return { attributes = function(path) return path == "/tmp/rare-overlay-stub.tsv" and "file" or nil end }
 end
 local screen_text = "普通文字龘"
 package.preload["reader.context"] = function()

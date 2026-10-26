@@ -16,6 +16,8 @@ local _ = require("gettext")
 local M = {}
 
 local DEFAULT_PAGE = "random"
+-- 同一 cache_key 下合成可能重入（设置页预览 / 异步刷新）；整套 readingInsight 很贵，复用一次。
+local state_cache = { key = nil, state = nil }
 
 --- 统计页目录（含被用户隐藏的页）。
 ---@return InsightPageSpec[]
@@ -88,7 +90,12 @@ function M.blocks(rect)
     local pad = Theme.px(t.space.md)
     local width = w - pad * 2
 
-    local state = Insight.stateOf(require("book.catalog").readingInsight(Library.activeSourceId()))
+    local key = M.cache_key()
+    local state = state_cache.key == key and state_cache.state or nil
+    if not state then
+        state = Insight.stateOf(require("book.catalog").readingInsight(Library.activeSourceId()))
+        state_cache.key, state_cache.state = key, state
+    end
     if not state.has_data then
         return {{
             text = _("暂无阅读统计"), x = math.floor(w * 0.1), y = math.floor(h * 0.47),

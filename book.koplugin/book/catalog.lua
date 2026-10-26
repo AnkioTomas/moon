@@ -391,6 +391,48 @@ function Catalog.listBooks(source_id, opts)
     -- 一律 LEFT JOIN：「最近阅读」按 max(本机进度时间, 云端最近阅读时间 b.read_at) 倒序，
     -- 都没有的书排在后面按加入时间倒序。首页「最近阅读 / 当前阅读」走 ProgressDB.recent，仍只列有进度的书。
     local join = " LEFT JOIN pending_progress p ON p.source_id=b.source_id AND p.stable_id=b.stable_id"
+    local limit = tonumber(opts.limit) or 0
+    local offset = tonumber(opts.offset) or 0
+    -- random：跳过 COUNT，一条 ORDER BY RANDOM()；首页抽书专用，勿给分页列表。
+    if opts.random then
+        local sel_args = {}
+        local downloaded = BookDB.downloadedClause(opts.chapter_sources or {}, sel_args)
+        local sel = [[SELECT b.source_id, b.stable_id, b.title, b.authors,
+                            COALESCE(p.fraction * 100, 0),
+                            b.category, b.series, b.intro, b.cover, b.inserted_at,
+                            b.read_state, b.path, ]] .. downloaded .. [[
+                       FROM books b]] .. join .. [[
+                       WHERE ]] .. where .. " ORDER BY RANDOM()"
+        for _idx, v in ipairs(args) do sel_args[#sel_args + 1] = v end
+        if limit > 0 then
+            sel = sel .. " LIMIT ?"
+            sel_args[#sel_args + 1] = limit
+        end
+        local result, nrows = DB.query(sel .. ";", unpack(sel_args))
+        if not result then
+            return {}, 0, "query failed"
+        end
+        local rows = {}
+        for i = 1, nrows do
+            rows[i] = {
+                source_id = result[1][i],
+                stable_id = result[2][i],
+                title = result[3][i],
+                authors = result[4][i],
+                percent = tonumber(result[5][i]) or 0,
+                category = result[6][i],
+                series = result[7][i],
+                intro = result[8][i],
+                cover = result[9][i],
+                inserted_at = tonumber(result[10][i]) or 0,
+                read_state = tonumber(result[11][i]) or 0,
+                path = result[12][i],
+                downloaded = tonumber(result[13][i]) == 1,
+                deleted = 0,
+            }
+        end
+        return rows, #rows
+    end
     local count_raw = DB.rowexec("SELECT COUNT(*) FROM books b" .. join .. " WHERE " .. where .. ";", unpack(args))
     if count_raw == nil then
         return {}, 0, "query failed"
@@ -399,8 +441,6 @@ function Catalog.listBooks(source_id, opts)
     if total == 0 then
         return {}, 0
     end
-    local limit = tonumber(opts.limit) or 0
-    local offset = tonumber(opts.offset) or 0
     local sort_sql = {
         title = "COALESCE(b.title, '') COLLATE NOCASE %s, b.stable_id ASC",
         author = "COALESCE(b.authors, '') COLLATE NOCASE %s, COALESCE(b.title, '') COLLATE NOCASE %s, b.stable_id ASC",
