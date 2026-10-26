@@ -47,6 +47,8 @@ package.preload["source.wechat.auth"] = function()
             posted.body = ok and decoded or nil
             if url:find("/review/add", 1, true) then
                 cb('{"reviewId":"rv-1"}')
+            elseif url:find("/web/book/read", 1, true) then
+                cb(posted.web_read_reply or '{"succ":1}')
             else
                 cb('{"succ":1}')
             end
@@ -275,24 +277,32 @@ do
 end
 
 do
-    -- 进度走 App /book/read：签名体带全书进度，没有 succ=1 的回包不算成功。
+    -- 进度走真实网页会话；原文偏移不换算成百分比，也不附带阅读时长。
     package.preload["source.wechat.eink"] = nil
     local Eink = require("source.wechat.eink")
     Eink.credentials = function() return { vid = "1", device_id = "d" } end
     Eink.installId = function() return "i" end
     Eink.setGuestToken = function() end
+    require("source.wechat.context").clear()
+    web_replies["/web/reader/"] = '{"psvts":"ps","pclts":"pc"}'
     posted = {}
     local ok, err
-    client:putProgressAsync("99", { progress = 50, chapter_uid = 8, chapter_idx = 3, chapter_offset = 4000 },
+    client:putProgressAsync("99", {
+        progress = 50, chapter_uid = 8, chapter_idx = 3, chapter_offset = 24000, chapter_fraction = 0.35,
+    },
         function(data, e) ok, err = data, e end)
-    Assert.eq(posted.eink.path, "/book/read")
-    Assert.eq(posted.eink.body.currentProgress, 50)
-    Assert.eq(posted.eink.body.chapterUid, 8)
-    Assert.eq(posted.eink.body.chapterOffset, 4000)
-    Assert.not_nil(posted.eink.body.signature)
+    Assert.eq(posted.url, "https://weread.qq.com/web/book/read")
+    Assert.eq(posted.body.pr, 50)
+    Assert.eq(posted.body.c, require("source.wechat.protocol").encode(8))
+    Assert.eq(posted.body.co, 24000)
+    Assert.eq(posted.body.ps, "ps")
+    Assert.eq(posted.body.pc, "pc")
+    Assert.is_nil(posted.body.rt)
+    Assert.is_nil(posted.body.hours)
+    Assert.not_nil(posted.body.s)
     Assert.not_nil(ok)
 
-    posted.read_reply = {}
+    posted.web_read_reply = "{}"
     ok, err = nil, nil
     client:putProgressAsync("99", { progress = 50, chapter_uid = 8 }, function(data, e) ok, err = data, e end)
     Assert.is_nil(ok)

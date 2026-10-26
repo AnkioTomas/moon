@@ -369,18 +369,10 @@ function Source:getProgressAsync(identity, cb)
                 cb(nil, nil, { empty = true })
                 return
             end
-            -- 服务端 read_progress 是整数（万分比）：我们推的 0..1 小数被截断成 0/1，
-            -- 回读永远是 0，当章首会每次开书都采纳云端、跳回章首。≤1 视为没有章内位置，留 nil。
-            local within = tonumber(row.read_progress)
-            if within and within > 1 then
-                within = math.min(1, within / 10000)
-            else
-                within = nil
-            end
+            -- 官方网页只写章节：read_progress 为 0 或章节 order，并不是章内万分比。
             cb({
                 chapter_idx = idx,
-                chapter_fraction = within,
-                fraction = (idx - 1 + (within or 0)) / #toc,
+                fraction = (idx - 1) / #toc,
                 extra = { chapter_uid = tostring(row.item_id), chapter_idx = idx },
             })
         end)
@@ -404,7 +396,7 @@ function Source:putProgressAsync(identity, pos, cb)
         end
         h.job = self.client:updateReadProgressAsync(
             identity.stable_id, chapter.uid, idx - 1,
-            math.max(0, math.min(1, tonumber(pos.chapter_fraction) or 0)),
+            0,
             function(wire, reason)
                 if h.cancelled then return end
                 if not wire or tonumber(wire.code or 0) ~= 0 then

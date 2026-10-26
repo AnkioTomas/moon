@@ -130,7 +130,7 @@ do
     -- 交给宿主：EPUB 是整份 document，只改资源引用；TXT 仍是 html 片段走外壳。
     local payload
     styles = {}
-    Chapter.fetchContentAsync("book", { uid = "chapter", title = "第一章" }, function(p) payload = p end)
+    Chapter.fetchContentAsync("book", { idx = 1, uid = "chapter", title = "第一章" }, function(p) payload = p end)
     -- e_0/e_1/e_3 正文 st=0，最后 e_2 拉整书样式表 st=1。
     Assert.eq(table.concat({ tostring(styles[1]), tostring(styles[2]), tostring(styles[3]), tostring(styles[4]) }, ","),
         "false,false,false,true")
@@ -146,7 +146,7 @@ do
     Assert.is_true(payload.document:find('height:0.8em', 1, true) ~= nil)
 
     txt = true
-    Chapter.fetchContentAsync("book", { uid = "c2", title = "第2章 想<整>我" }, function(p) payload = p end)
+    Chapter.fetchContentAsync("book", { idx = 2, uid = "c2", title = "第2章 想<整>我" }, function(p) payload = p end)
     txt = false
     Assert.is_nil(payload.document)
     -- TXT 正文不带章名：章首补 h1（转义），EPUB 原文自带标题不补。
@@ -161,7 +161,7 @@ do
     FULL = FULL:gsub("</body></html>\n<%?xml", '<p><a href="part0012.html#note_1">[1]</a><a href="../Text/zhushi.xhtml#zhu116">[2]</a></p>'
         .. '<p id="note_1">注文</p></body></html>\n<?xml', 1)
     local payload
-    Chapter.fetchContentAsync("book", { uid = "chapter", title = "第一章" }, function(p) payload = p end)
+    Chapter.fetchContentAsync("book", { idx = 1, uid = "chapter", title = "第一章" }, function(p) payload = p end)
     FULL = saved
     Assert.is_true(payload.document:find('<a href="#note_1">[1]</a>', 1, true) ~= nil)
     Assert.is_nil(payload.document:find("zhushi", 1, true))
@@ -173,7 +173,7 @@ do
     local saved = FULL
     FULL = FULL:gsub("</body></html>\n<%?xml", '<p>总之<a href="../Text/zhushi.xhtml#zhu9"><img class="x" src="n.png"/></a></p></body></html>\n<?xml', 1)
     local payload
-    Chapter.fetchContentAsync("book", { uid = "chapter", title = "第一章" }, function(p) payload = p end)
+    Chapter.fetchContentAsync("book", { idx = 1, uid = "chapter", title = "第一章" }, function(p) payload = p end)
     FULL = saved
     Assert.is_true(payload.document:find('<img class="x" src="n.png" style="height:0.8em', 1, true) ~= nil)
 end
@@ -190,7 +190,7 @@ do
     -- 无权阅读的付费章：EPUB 通道回纯文本试读片段，必须报错，不能当正文落盘。
     trial = true
     local payload, err = "untouched", nil
-    Chapter.fetchContentAsync("book", { uid = "paid", title = "第二章" }, function(p, e) payload, err = p, e end)
+    Chapter.fetchContentAsync("book", { idx = 2, uid = "paid", title = "第二章" }, function(p, e) payload, err = p, e end)
     trial = false
     Assert.is_nil(payload)
     Assert.matches(err, "试读")
@@ -200,7 +200,7 @@ do
     -- 服务端给 XHTML 带 UTF-8 BOM：是正文，不能当试读片段拒掉。
     bom = true
     local payload, err = nil, nil
-    Chapter.fetchContentAsync("book", { uid = "bom", title = "第一章" }, function(p, e) payload, err = p, e end)
+    Chapter.fetchContentAsync("book", { idx = 1, uid = "bom", title = "第一章" }, function(p, e) payload, err = p, e end)
     bom = false
     Assert.is_nil(err)
     Assert.is_true(payload ~= nil)

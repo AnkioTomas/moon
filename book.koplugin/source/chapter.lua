@@ -221,6 +221,8 @@ local function render(payload, opts)
         .. "</style></head><body>" .. content .. "</body></html>"
 end
 
+Chapter.render = render
+
 --- 把章节正文落盘，先写 .part 再 rename，避免读到半截文件。
 ---@param path string 目标章节文件路径
 ---@param payload ChapterContentPayload|string|nil 源交来的正文

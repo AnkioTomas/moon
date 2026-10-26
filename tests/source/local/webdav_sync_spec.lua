@@ -570,6 +570,116 @@ do
     dav.getAsync = get
 end
 
+-- 精确进度跨设备保留正文坐标与未舍入比例；其它客户端改写 .po 后不能复用旧坐标。
+do
+    local dav = fakeDav()
+    local a, b = client(dav), client(dav)
+    local id = "webdav://分类/precise.epub"
+    local remote = ROOT .. "/.Moon+/Cache/precise.epub.po"
+    local sent = {
+        updated_at = 1700000200, chapter_idx = 4, fraction = 0.456789321,
+        locator = "/body/DocFragment[4]/body/p[15]/text().12", page = 123, total_pages = 270,
+    }
+    local ok, err, pos
+    a:putProgressAsync(id, sent, function(v, e) ok, err = v, e end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.eq(dav.files[remote].data, "1700000200000*4@0#0:45.7%")
+    b:getProgressAsync(id, function(v, e) pos, err = v, e end)
+    Stubs.flush()
+    Assert.is_nil(err)
+    Assert.eq(pos.locator, sent.locator)
+    Assert.eq(pos.page, 123)
+    Assert.eq(pos.fraction, sent.fraction)
+
+    putSync(dav, { { filename = "分类/precise.epub" } })
+    Assert.is_true(scan(b))
+    Assert.eq(progress[id].locator, sent.locator, "整库同步不能只解析粗粒度 .po")
+    Assert.eq(progress[id].fraction, sent.fraction)
+    books, progress = {}, {}
+
+    b:getProgressAsync("webdav://其它分类/precise.epub", function(v) pos = v end)
+    Stubs.flush()
+    Assert.is_nil(pos.locator, "同名不同路径不能串用正文坐标")
+    Assert.eq(pos.fraction, 0.457)
+
+    dav:put(remote, "1700000300000*5@0#0:62.1%")
+    b:getProgressAsync(id, function(v) pos = v end)
+    Stubs.flush()
+    Assert.is_nil(pos.locator)
+    Assert.eq(pos.fraction, 0.621)
+    Assert.eq(pos.chapter_idx, 5)
+
+    dav:put(remote .. ".json", "{broken")
+    b:getProgressAsync(id, function(v, e) pos, err = v, e end)
+    Stubs.flush()
+    Assert.is_nil(pos)
+    Assert.eq(err, "进度文件损坏")
+
+    local get = dav.getAsync
+    function dav:getAsync(path, dest, opts, cb)
+        if path == remote .. ".json" then cb(nil, "metadata unavailable"); return end
+        return get(self, path, dest, opts, cb)
+    end
+    b:getProgressAsync(id, function(v, e) pos, err = v, e end)
+    Stubs.flush()
+    Assert.is_nil(pos)
+    Assert.eq(err, "metadata unavailable", "精确坐标下载失败不能伪装成功")
+    dav.getAsync = get
+
+    local put = dav.putFileAsync
+    function dav:putFileAsync(path, local_path, cb)
+        if path == remote .. ".json" then cb(nil, "metadata upload failed"); return end
+        return put(self, path, local_path, cb)
+    end
+    a:putProgressAsync(id, sent, function(v, e) ok, err = v, e end)
+    Stubs.flush()
+    Assert.is_nil(ok)
+    Assert.eq(err, "metadata upload failed", "精确坐标失败必须保留本地脏行")
+    Assert.eq(dav.files[remote].data, "1700000300000*5@0#0:62.1%", "坐标未写好不能发布新 .po")
+    dav.putFileAsync = put
+
+    local pending, cancelled, called
+    function dav:getAsync(path, dest, opts, cb)
+        if path ~= remote .. ".json" then return get(self, path, dest, opts, cb) end
+        pending = cb
+        return { cancel = function() cancelled = true end }
+    end
+    local handle = b:getProgressAsync(id, function() called = true end)
+    Stubs.flush()
+    handle:cancel()
+    Assert.is_true(cancelled)
+    pending(nil, "cancelled")
+    Assert.is_nil(called)
+    dav.getAsync = get
+
+    cancelled, called = nil, nil
+    function dav:getAsync(path, dest, opts, cb)
+        if path ~= remote then return get(self, path, dest, opts, cb) end
+        pending = cb
+        return { cancel = function() cancelled = true end }
+    end
+    handle = b:getProgressAsync(id, function() called = true end)
+    handle:cancel()
+    Assert.is_true(cancelled, "首次异步请求也必须持有取消句柄")
+    pending(nil, "cancelled")
+    Assert.is_nil(called)
+    dav.getAsync = get
+
+    cancelled, called = nil, nil
+    function dav:putFileAsync(path, local_path, cb)
+        if path ~= remote then return put(self, path, local_path, cb) end
+        pending = cb
+        return { cancel = function() cancelled = true end }
+    end
+    handle = a:putProgressAsync(id, sent, function() called = true end)
+    Stubs.flush()
+    handle:cancel()
+    Assert.is_true(cancelled, "发布阶段取消必须取消当前请求，而不是已完成的目录请求")
+    pending(true)
+    Assert.is_nil(called)
+end
+
 -- 封面：远端有、本地缺 → 下载；刷新时本地有、远端缺 → 上传；两边都有不重复传。
 do
     local dav = fakeDav()
@@ -829,6 +939,7 @@ do
     local dav = fakeDav()
     dav:put(ROOT .. "/分类/gone.epub", "x")
     dav:put(ROOT .. "/.Moon+/Cache/gone.epub.po", "1*0:1%")
+    dav:put(ROOT .. "/.Moon+/Cache/gone.epub.po.json", "{}")
     putSync(dav, { { filename = "分类/gone.epub" }, { filename = "ghost.epub" }, { filename = "keep.epub" } })
     for _, id in ipairs({ "webdav://分类/gone.epub", "webdav://ghost.epub" }) do
         books[id] = { stable_id = id, deleted = 1, sync_status = 0 }
@@ -838,6 +949,7 @@ do
     Assert.is_true(run(c, { dirty_only = true }))
     Assert.is_nil(dav.files[ROOT .. "/分类/gone.epub"])
     Assert.is_nil(dav.files[ROOT .. "/.Moon+/Cache/gone.epub.po"])
+    Assert.is_nil(dav.files[ROOT .. "/.Moon+/Cache/gone.epub.po.json"])
     Assert.eq(dav:count("DELETE " .. ROOT .. "/.Moon+/Cover/gone.epub_2.png"), 1)
     Assert.eq(dav:count("DELETE " .. ROOT .. "/.Moon+/Notes/gone.epub.json"), 1)
     Assert.is_nil(remoteEntries(dav)["分类/gone.epub"])

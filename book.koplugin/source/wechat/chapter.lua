@@ -504,13 +504,15 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
     local title = chapter.title or string.format(_("第 %d 章"), tonumber(chapter.idx) or 0)
     local cancelled, asset_job, note_job = false, nil, nil
     local reader_url = Protocol.readerUrl(bookId, chapter.uid)
-    local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter, function(html, err, _source, format)
+    local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter, function(html, err, source, format)
         if cancelled then return end
         if not html then
             logger.warn("weread chapter fetch", bookId, chapter.idx, err)
             cb(nil, err)
             return
         end
+        local cached, cache_err = require("source.wechat.progress").remember(bookId, chapter, source, format)
+        if not cached then cb(nil, cache_err); return end
         if format == "txt" then
             -- TXT 正文不含章名（EPUB 原文自带标题），补一个，翻到新章才看得到章名。
             cb({ title = title, html = "<h1>" .. Text.xmlEscape(title) .. "</h1>" .. html })

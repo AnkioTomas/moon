@@ -318,7 +318,7 @@ local function applyChosenPos(ui, id, pos, pct, show_msg)
             within = withinFromFraction(pct, count, target_idx) or 0
         end
         if target_idx ~= id.chapter_idx then
-            if not require("reader.session").gotoChapter(target_idx, { within = within }) then
+            if not require("reader.session").gotoChapter(target_idx, { within = within, xpointer = pos.locator }) then
                 require("ui.themes.widgets.toast"):new{
                     text = T(_("跳转到 %1 失败"), conflictLabel(pos, id)),
                     timeout = 3,
@@ -449,6 +449,12 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
         if local_idx then
             if local_idx ~= remote_idx then
                 return true
+            end
+            local doc = snapshot.ui.document
+            if here and remote_pos.locator and tonumber(id.chapter_idx) == local_idx
+                and doc.isXPointerInDocument and doc.getPageFromXPointer
+                and doc:isXPointerInDocument(here) and doc:isXPointerInDocument(remote_pos.locator) then
+                return doc:getPageFromXPointer(here) ~= doc:getPageFromXPointer(remote_pos.locator)
             end
             -- 云端只记到章（京东 / 拷贝漫画等不回章内位置）：同章即一致，以本地章内位置为准。
             -- 拿全书比例反推只会落在章首，每次开书都假冲突。

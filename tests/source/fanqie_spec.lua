@@ -281,7 +281,7 @@ end
 -- 封面走基类：查书库 cover（同步书架时写入的手机 CDN 地址）
 Assert.matches(src:coverRequest(ref).url, "p6%-novel%.byteimg%.com")
 
--- 进度拉取：云端 item_id → 章节序号；read_progress 是万分比；全书比例按目录换算
+-- 官方网页进度只有章节；read_progress 不是章内比例。
 toc = {
     { idx = 1, uid = "a" }, { idx = 2, uid = "b" }, { idx = 3, uid = "c" }, { idx = 4, uid = "d" },
 }
@@ -295,8 +295,8 @@ do
     drain()
     Assert.is_nil(err)
     Assert.eq(pos.chapter_idx, 3)
-    Assert.eq(pos.chapter_fraction, 0.5)
-    Assert.eq(pos.fraction, 0.625)
+    Assert.is_nil(pos.chapter_fraction, "不能把章节 order 当成万分比")
+    Assert.eq(pos.fraction, 0.5)
     Assert.eq(pos.extra.chapter_uid, "c")
 
     -- 章节不在目录 / 云端没这本书：空进度，不是错误
@@ -314,7 +314,7 @@ do
     Assert.is_true(meta.empty)
 end
 
--- 进度上传：章节序号 → uid + 0 起 index，章内比例夹到 [0, 1]
+-- 进度上传：章节序号 → uid + 0 起 index，不伪造网页不支持的章内位置。
 do
     local ok, err
     src:putProgressAsync(ref, { chapter_idx = 2, chapter_fraction = 1.5 }, function(r, e) ok, err = r, e end)
@@ -324,7 +324,7 @@ do
     Assert.eq(put_args.book_id, ref.stable_id)
     Assert.eq(put_args.item_id, "b")
     Assert.eq(put_args.index, 1)
-    Assert.eq(put_args.progress, 1)
+    Assert.eq(put_args.progress, 0)
 
     -- 没有章节位置：不发请求，直接报错
     put_args = nil

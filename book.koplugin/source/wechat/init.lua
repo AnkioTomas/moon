@@ -1,9 +1,9 @@
 --[[--
 微信读书数据源门面（仅异步网络）
 
-两套会话别混：eink.lua 扫码拿 accessToken / refreshToken（设置页走这条），auth.lua 网页 cookie（正文、笔记、部分统计）。
-开章发「进入阅读」须早于时长上报；开书拉进度期间先挂起，免得抢在冲突选择前写云端位置。
-时长走 30 秒心跳（开章 / 翻页 / 唤醒起，关书 / 休眠停），离线跳拍不补报。划线经 notes.lua / annotations.lua 与网页 range 互定位。
+eink.lua 管扫码会话与 App 接口，auth.lua 管网页会话。
+进度按章节原文字符坐标同步；时长从本地统计补报，并保留最新云端位置。
+划线经 notes.lua / annotations.lua 与网页 range 互定位。
 
 @module koplugin.book.source.wechat
 --]]
@@ -84,28 +84,11 @@ function Source:configured()
     return Auth.hasSession()
 end
 
---- 章节开读即发「进入阅读」（putProgressAsync 就是 enter 上报）。
----@param self WechatSource
----@param payload { identity: BookIdentity, position: ProgressPosition|nil }
-local function enterReading(self, payload)
-    if not self:configured() then return end
-    self:putProgressAsync(payload.identity, payload.position, function(ok, err)
-        if not ok then logger.warn("wechat enter reading failed", err) end
-    end)
-end
-
---- 开读章节时进入阅读会话；其余事件交给基类。阅读时长不实时报：本地采集的统计行经 pushStatsAsync 按 App 协议上报，开章（上一章已落库）、关书、唤醒、联网时推。
+--- 开章只补报已落库的时长；进度由阅读会话在解决冲突后推送，不能在拉取前抢写。
 ---@param event string
 ---@param payload table|nil
 function Source:onEvent(event, payload)
     if event == "chapter_changed" then
-        -- enter 会写云端位置：开书拉进度期间先挂起，抢在拉取前落地会吞掉进度冲突。
-        local pull = self._progress_pull
-        if pull and pull.stable_id == payload.identity.stable_id then
-            pull.enter = payload
-        else
-            enterReading(self, payload)
-        end
         -- 上一章的时长这时已落库：有网就顺手补报（Stats.push 自带在飞去重，没网留作脏行）。
         if self:configured() and require("ui/network/manager"):isConnected() then
             require("book.stats").push(self)
@@ -392,23 +375,8 @@ end
 ---@param cb fun(pos: ProgressPosition|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:getProgressAsync(identity, cb)
-    local pull = { stable_id = identity.stable_id }
-    self._progress_pull = pull
-    --- 结束挂起：回调完成与取消都走这里，挂起的进入阅读只发一次。
-    local function release()
-        if self._progress_pull == pull then self._progress_pull = nil end
-        local enter = pull.enter
-        pull.enter = nil
-        if enter then enterReading(self, enter) end
-    end
-    local reply = cb
-    cb = function(pos, err)
-        if self._progress_pull == pull then self._progress_pull = nil end
-        reply(pos, err)
-        release()
-    end
     local cancelled = false
-    local first, second
+    local first, second, position_job
     first = self._client:getProgressAsync(identity.stable_id, function(wire, err)
         if cancelled then return end
         if not wire then
@@ -416,19 +384,35 @@ function Source:getProgressAsync(identity, cb)
             return
         end
         local pos, chapter_uid = Mapper.progress(wire)
-        -- 云端只给了章节位置时，按目录长度折算成全书 fraction。
-        local function finish()
+        local function reply()
             if pos.chapter_idx and (pos.fraction == nil or pos.fraction == 0) then
                 pos.fraction = Toc.wholeFraction(
                     identity.source_id, identity.stable_id, pos.chapter_idx, pos.chapter_fraction
                 ) or pos.fraction
             end
+            cb(pos)
+        end
+        local function finish()
             -- 章节坐标随进度一起存本地：目录缓存过期后 push 可直接复用，免一轮请求。
             -- 必须带上 chapter_idx，否则读者翻章后会拿旧 uid 把进度报到错误章节。
             if chapter_uid and pos.chapter_idx then
-                pos.extra = { chapter_uid = chapter_uid, chapter_idx = pos.chapter_idx }
+                pos.extra.chapter_uid, pos.extra.chapter_idx = chapter_uid, pos.chapter_idx
             end
-            cb(pos)
+            if not chapter_uid or not pos.chapter_idx or pos.extra.chapter_offset == nil then
+                reply()
+                return
+            end
+            local entry = (Toc.read(identity.source_id, identity.stable_id) or {})[pos.chapter_idx]
+            local chapter = { idx = pos.chapter_idx, uid = tostring(chapter_uid),
+                title = entry and entry.title or pos.chapter_title or "" }
+            local Position = require("source.wechat.progress")
+            position_job = Position.loadAsync(identity, chapter, function(source, format)
+                if cancelled then return end
+                if not source then cb(nil, format); return end
+                local ok, map_err = Position.localize(identity, chapter, pos, source, format)
+                if not ok then cb(nil, map_err); return end
+                reply()
+            end)
         end
         -- wire 的 chapterIdx 是云端索引空间，本地目录过滤掉了 wordCount=0 与「封面」，
         -- 两边序号并不相等（差几章就跳到错误的章节）。只要有 uid 就一律回查目录换算成
@@ -454,26 +438,22 @@ function Source:getProgressAsync(identity, cb)
             cancelled = true
             if first then first.cancel() end
             if second then second.cancel() end
-            -- 拉取作废不等于不读了：挂起的进入阅读照发，否则云端位置停在旧章。
-            release()
+            if position_job and position_job.cancel then position_job:cancel() end
         end }
 end
 
 --- 上报阅读进度：需要 chapter_uid，优先复用 pos.extra 缓存的坐标，否则回查目录解析。
 ---@param identity BookIdentity
 ---@param pos ProgressPosition|nil 缺省视为空位置
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, meta?: { permanent?: boolean })
 ---@return { cancel: fun() }
 function Source:putProgressAsync(identity, pos, cb)
     pos = pos or {}
     local frac = Progress.clampFraction(pos.fraction)
     local progress = math.max(0, math.min(100, math.floor(frac * 100 + 0.5)))
     local chapter_idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx) or 0
-    local chapter_frac = pos.chapter_fraction
-    local offset = chapter_frac and math.floor(Progress.clampFraction(chapter_frac) * 10000) or 0
-    local summary = pos.chapter_title or ""
     local cancelled = false
-    local resolve_job, push_job
+    local resolve_job, push_job, position_job
     -- 只有 extra 记录的章与本次上报的章一致时才复用 uid，避免翻章后报错位置。
     local extra = pos.extra
     local chapter_uid = extra and tonumber(extra.chapter_idx) == chapter_idx
@@ -482,19 +462,28 @@ function Source:putProgressAsync(identity, pos, cb)
     local function startPush(uid)
         local source_idx = Toc.sourceIndex(identity.source_id, identity.stable_id, chapter_idx)
             or chapter_idx
-        push_job = self._client:putProgressAsync(identity.stable_id, {
-            progress = progress,
-            chapter_uid = uid,
-            chapter_idx = source_idx,
-            chapter_offset = offset,
-            summary = summary,
-        }, function(wire, push_err)
+        local function send(offset, summary, fraction)
+            push_job = self._client:putProgressAsync(identity.stable_id, {
+                progress = progress, chapter_uid = uid, chapter_idx = source_idx,
+                chapter_offset = offset, chapter_fraction = fraction, summary = summary,
+                book_version = extra and extra.book_version,
+            }, function(wire, push_err)
+                if cancelled then return end
+                cb(wire and true or nil, push_err)
+            end)
+        end
+        if not pos.locator and pos.chapter_fraction == 0 then
+            send(0, "", 0)
+            return
+        end
+        local chapter = { idx = chapter_idx, uid = tostring(uid), title = pos.chapter_title or "" }
+        local Position = require("source.wechat.progress")
+        position_job = Position.loadAsync(identity, chapter, function(source, format)
             if cancelled then return end
-            if wire then
-                cb(true)
-            else
-                cb(nil, push_err)
-            end
+            if not source then cb(nil, format); return end
+            local offset, summary, fraction, map_err = Position.encode(identity, chapter, pos, source, format)
+            if not offset then cb(nil, map_err); return end
+            send(offset, summary, fraction)
         end)
     end
     local missing = _("缺少章节信息")
@@ -515,7 +504,8 @@ function Source:putProgressAsync(identity, pos, cb)
                     cb(nil, missing, { permanent = true })
                     return
                 end
-                chapter_idx, offset, progress = last, 10000, 100
+                chapter_idx, progress = last, 100
+                pos = { fraction = 1, chapter_fraction = 1 }
                 startPush(uid)
             end)
         end
@@ -533,12 +523,13 @@ function Source:putProgressAsync(identity, pos, cb)
             cancelled = true
             if resolve_job and resolve_job.cancel then resolve_job.cancel() end
             if push_job and push_job.cancel then push_job.cancel() end
+            if position_job and position_job.cancel then position_job:cancel() end
         end }
 end
 
 --- 按 App 协议（``/book/read``）上报本地阅读时长，一本书一个请求，时长按小时分桶，
 --- 离线攒下的时段联网后照原时间补报。成功的书确认其全部行，失败就停，其余行留给下一轮。
---- 书目录没缓存（定位不到章节）的行无法上报，直接确认丢弃，免得卡住队首。
+--- 统计行不含正文坐标，必须保留最新云端位置，不能用采样时的页比例伪造 chapterOffset。
 ---@param rows table[]|nil
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
@@ -584,37 +575,39 @@ function Source:pushStatsAsync(rows, cb)
                 finish()
                 return
             end
-            local last = book.rows[#book.rows]
-            local chapter_idx = last.chapter_idx
-            local uid = chapter_idx and Toc.uid("wechat", book.id, chapter_idx, true)
-            if not uid then
-                logger.warn("wechat stats skipped without toc", book.id)
-                confirm(book)
-                nextBook()
-                return
-            end
-            local fraction = Progress.clampFraction(last.chapter_fraction)
-            local body = App.readBody({
-                vid = creds.vid,
-                device_id = creds.device_id,
-                install_id = Eink.installId(),
-                guest_token = token,
-                book_id = book.id,
-                chapter_uid = tonumber(uid) or 0,
-                chapter_idx = Toc.sourceIndex("wechat", book.id, chapter_idx, true) or chapter_idx,
-                chapter_offset = math.floor(fraction * 10000),
-                chapter_progress = math.floor(fraction * 100),
-                hours = App.hours(book.rows, App.timeZone()),
-            })
-            job = self._client:reportAppReadAsync(body, function(data, err)
+            job = self._client:getProgressAsync(book.id, function(wire, progress_err)
                 if cancelled then return end
-                if not data then
-                    logger.warn("wechat app report failed", book.id, err)
-                    finish(err)
+                if not wire then finish(progress_err); return end
+                local node = wire.book or wire
+                if not tonumber(node.chapterUid) or node.chapterOffset == nil then
+                    finish(_("缺少章节信息"))
                     return
                 end
-                confirm(book)
-                nextBook()
+                local body = App.readBody({
+                    vid = creds.vid,
+                    device_id = creds.device_id,
+                    install_id = Eink.installId(),
+                    guest_token = token,
+                    book_id = book.id,
+                    chapter_uid = tonumber(node.chapterUid),
+                    chapter_idx = node.chapterIdx,
+                    chapter_offset = node.chapterOffset,
+                    chapter_progress = node.chapterProgress or 0,
+                    current_progress = node.progress,
+                    summary = node.summary or "",
+                    book_version = node.bookVersion or 0,
+                    hours = App.hours(book.rows, App.timeZone()),
+                })
+                job = self._client:reportAppReadAsync(body, function(data, err)
+                    if cancelled then return end
+                    if not data then
+                        logger.warn("wechat app report failed", book.id, err)
+                        finish(err)
+                        return
+                    end
+                    confirm(book)
+                    nextBook()
+                end)
             end)
         end
         nextBook()

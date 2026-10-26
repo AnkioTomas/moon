@@ -20,7 +20,7 @@ end
 -- 可控假 client：每个用例按需覆写方法
 local fake_client = {}
 local chapter_open = {}
-local chapter_range_html
+local chapter_range_html = "<html><body><p>" .. string.rep("正文", 8000) .. "</p></body></html>"
 local chapter_fetches = 0
 local progress_ui = { shown = 0, closed = 0, progress = {} }
 local remembered_stats_books = {}
@@ -291,6 +291,10 @@ do
     local posted = {}
     local fail_book
     fake_client.guestTokenAsync = function(_, cb) cb("tok") end
+    fake_client.getProgressAsync = function(_, _book_id, cb)
+        cb({ book = { chapterUid = 12, chapterIdx = 9, chapterOffset = 23456,
+            progress = 77, summary = "云端最新位置" } })
+    end
     fake_client.reportAppReadAsync = function(_, body, cb)
         posted[#posted + 1] = body
         if body.bookId == fail_book then cb(nil, "boom") else cb({ succ = 1 }) end
@@ -303,12 +307,14 @@ do
     local data, err
     src:pushStatsAsync(rows, function(value, e) data, err = value, e end)
     Assert.is_nil(err)
-    Assert.len(posted, 1, "目录没缓存的书不发请求")
+    Assert.len(posted, 2, "时长上报不依赖本地目录缓存")
     local body = posted[1]
     Assert.eq(body.bookId, "bp")
-    Assert.eq(body.chapterUid, 0, "非数字 uid 退成 0")
-    Assert.eq(body.chapterIdx, 5, "取最后一行的章节，带微信原始序号")
-    Assert.eq(body.chapterOffset, 2500)
+    Assert.eq(body.chapterUid, 12)
+    Assert.eq(body.chapterIdx, 9, "保留云端最新章节，不用旧统计行的位置")
+    Assert.eq(body.chapterOffset, 23456, "原文偏移可超过 10000")
+    Assert.eq(body.currentProgress, 77)
+    Assert.eq(body.summary, "云端最新位置")
     Assert.eq(body.deviceId, "dev1")
     Assert.eq(body.installId, "inst1")
     Assert.eq(body.readingTime, 30)
@@ -323,11 +329,11 @@ do
     Assert.is_nil(data)
     Assert.eq(err, "boom", "一本都没成功就报错，行留作脏行")
 
-    fake_client.guestTokenAsync, fake_client.reportAppReadAsync = nil, nil
+    fake_client.guestTokenAsync, fake_client.reportAppReadAsync, fake_client.getProgressAsync = nil, nil, nil
     Eink.credentials, Eink.installId = real_creds, real_install
 end
 
--- 章节开读立即 enter（写云端位置）。
+-- 开章与拉取结束都不抢写云端进度，必须等阅读会话解决冲突。
 do
     local src = WeChat.new()
     require("source.wechat.context").clear()
@@ -347,8 +353,7 @@ do
         position = { fraction = 0.1, chapter_idx = 1, chapter_fraction = 0.2 },
     })
     require("support.stubs").flush()
-    Assert.len(entered, 1, "开读章节立即进入阅读")
-    Assert.eq(entered[1].chapter_uid, "u1")
+    Assert.len(entered, 0, "开读章节不能在冲突决议前覆盖云端")
     Assert.len(stats_pushes, 1, "开章时顺手补报上一章已落库的时长")
 
     -- 开书拉云端进度期间挂起 enter，拉取回调之后再发，避免 enter 写的位置吞掉进度冲突。
@@ -367,7 +372,7 @@ do
     pull_cb(nil, "offline")
     require("support.stubs").flush()
     Assert.eq(pulled, "offline")
-    Assert.len(entered, 1, "拉取返回后补发 enter")
+    Assert.len(entered, 0, "拉取失败也不能抢写")
 
     -- 取消拉取（关书 / 换书）不能吞掉挂起的 enter；回调后再取消也不重复发。
     entered = {}
@@ -377,14 +382,14 @@ do
     Assert.len(entered, 0)
     job.cancel()
     require("support.stubs").flush()
-    Assert.len(entered, 1, "取消拉取时补发挂起的 enter")
+    Assert.len(entered, 0, "取消不上传位置")
     job.cancel()
     pull_cb(nil, "late")
     require("support.stubs").flush()
-    Assert.len(entered, 1, "取消后迟到的回包不再触发 enter")
+    Assert.len(entered, 0, "取消后迟到的回包不上传")
     src:onEvent("chapter_changed", { identity = identity, position = { chapter_idx = 1 } })
     require("support.stubs").flush()
-    Assert.len(entered, 2, "取消后章节切换直接 enter，不再挂起")
+    Assert.len(entered, 0, "之后切章仍不抢写")
     fake_client.putProgressAsync = nil
     fake_client.getProgressAsync = nil
 end
@@ -491,13 +496,16 @@ do
     local src = WeChat.new()
 
     local function put(pos)
+        if pos and not pos.locator and pos.extra and pos.extra.chapter_idx == 0 then
+            pos.chapter_fraction = 0
+        end
         local ok, err
         src:putProgressAsync(REF, pos, function(v, e) ok, err = v, e end)
         return ok, err
     end
 
     -- 源私有的 chapter_uid 走 extra；REF 无 chapter_idx，归一后为 0
-    local UID = { chapter_uid = 42, chapter_idx = 0 }
+    local UID = { chapter_uid = 42, chapter_idx = 0, chapter_offset = 12345 }
     Assert.is_true(put({ fraction = 0, extra = UID }))
     Assert.eq(captured.progress, 0)
     Assert.is_true(put({ fraction = 1, extra = UID }))
@@ -523,7 +531,7 @@ do
     require("support.stubs").flush()
     Assert.is_true(done)
     Assert.eq(captured.chapter_uid, "42")
-    Assert.eq(captured.chapter_offset, 10000)
+    Assert.eq(captured.chapter_offset, 16015, "章末取真实原文坐标，不是固定 10000")
     Assert.eq(captured.progress, 100)
     require("source.toc").clear()
     -- stable_id 透传
@@ -538,11 +546,12 @@ do
     Assert.eq(captured.chapter_uid, 42)
     Assert.is_true(put({
         fraction = 0.5, chapter_idx = 3, chapter_fraction = 0.25, chapter_title = "序章",
-        extra = { chapter_uid = 42, chapter_idx = 3 },
+        locator = "/html/body/p/text().12345",
+        extra = { chapter_uid = 42, chapter_idx = 3, chapter_offset = 1 },
     }))
     Assert.eq(captured.chapter_idx, 7, "上传必须使用微信原始 chapterIdx")
-    Assert.eq(captured.chapter_offset, 2500)
-    Assert.eq(captured.summary, "序章")
+    Assert.eq(captured.chapter_offset, 12360, "必须按 XPointer 计算，不能复用旧 extra 偏移")
+    Assert.eq(captured.summary, string.rep("文正", 15), "摘要必须是当前位置正文，不是章名")
     -- extra 记的是别的章：不复用旧 uid，回落到目录解析（此处目录拉取失败 → 不上传）
     Assert.is_nil(put({ fraction = 0.5, chapter_idx = 7, extra = { chapter_uid = 42, chapter_idx = 3 } }))
     -- 目标章不在目录里：不能回退成当前打开章的 uid，否则进度报到错误章节
@@ -568,7 +577,7 @@ do
     local src = WeChat.new()
     local ok, err
     src:putProgressAsync(REF, {
-        fraction = 0.5, extra = { chapter_uid = 42, chapter_idx = 0 },
+        fraction = 0.5, chapter_fraction = 0, extra = { chapter_uid = 42, chapter_idx = 0 },
     }, function(v, e) ok, err = v, e end)
     Assert.is_nil(ok)
     Assert.eq(err, "写入失败")
@@ -613,7 +622,8 @@ do
     pos = get()
     Assert.eq(pos.fraction, 0.77)
     Assert.eq(pos.chapter_idx, 7)
-    Assert.is_true(math.abs((pos.chapter_fraction or 0) - 0.5) < 0.001)
+    Assert.eq(pos.extra.chapter_offset, 5000)
+    Assert.eq(pos.locator, "/html/body/p/text().4985")
 
     -- 自带 chapter_idx 时直接回调，不再拉目录
     wire = { percent = 10, chapterIdx = 7, chapterUid = "99" }

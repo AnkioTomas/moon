@@ -410,9 +410,8 @@ function Mapper.progress(data)
     if node == root and type(root.book) == "table" then node = root.book end
     local finished = userFinished(node) or userFinished(root)
     local chapter_idx = tonumber(node.chapter_idx or node.chapterIdx)
-    -- chapterOffset 是 0..10000 的整数，按量级猜单位会把 1 当成章末。
     local offset = tonumber(node.chapterOffset)
-    local chapter_fraction = tonumber(node.chapter_fraction) or (offset and offset / 10000)
+    local chapter_fraction = tonumber(node.chapter_fraction)
     if chapter_fraction then chapter_fraction = Progress.clampFraction(chapter_fraction) end
     local percent = tonumber(node.percent or node.progress or node.progressPercent or node.readingProgress)
     local fraction = 0
@@ -425,6 +424,7 @@ function Mapper.progress(data)
         chapter_idx = chapter_idx,
         chapter_fraction = chapter_fraction,
         locator = node.locator,
+        extra = { chapter_offset = offset, summary = node.summary, book_version = node.bookVersion },
     }, chapter_uid
 end
 

@@ -137,7 +137,7 @@ end
 ---@field book_id string
 ---@field chapter_uid integer
 ---@field chapter_idx integer
----@field chapter_offset integer 章内偏移（0..10000）
+---@field chapter_offset integer 章节原文字符偏移（EPUB 包含 HTML 标签）
 ---@field chapter_progress integer 章内百分比 0..100
 ---@field hours WechatAppHour[]
 ---@field current_progress integer|nil 全书进度百分比 0..100（上报进度时带上）

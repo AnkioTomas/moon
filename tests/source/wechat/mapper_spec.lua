@@ -183,14 +183,17 @@ do
     })
     Assert.eq(uid, "u7")
     Assert.eq(pos.fraction, 0.77)
-    Assert.is_true(math.abs(pos.chapter_fraction - 0.5) < 0.001)
+    Assert.is_nil(pos.chapter_fraction, "原文偏移不是章内万分比")
+    Assert.eq(pos.extra.chapter_offset, 5000)
 end
 
 do
     local pos = Mapper.progress({ book = { chapterUid = "u7", progress = 1, chapterOffset = 1 } })
-    Assert.eq(pos.chapter_fraction, 0.0001)
+    Assert.is_nil(pos.chapter_fraction)
+    Assert.eq(pos.extra.chapter_offset, 1)
     pos = Mapper.progress({ book = { chapterUid = "u7", progress = 1, chapterOffset = 0 } })
-    Assert.eq(pos.chapter_fraction, 0)
+    Assert.is_nil(pos.chapter_fraction)
+    Assert.eq(pos.extra.chapter_offset, 0)
     pos = Mapper.progress({ book = { chapterUid = "u7", progress = 1 } })
     Assert.is_nil(pos.chapter_fraction)
 end
@@ -411,14 +414,17 @@ do
     })
     Assert.eq(uid, "u7")
     Assert.eq(pos.fraction, 0.77)
-    Assert.is_true(math.abs(pos.chapter_fraction - 0.5) < 0.001)
+    Assert.is_nil(pos.chapter_fraction)
+    Assert.eq(pos.extra.chapter_offset, 5000)
 end
 
 do
     local pos = Mapper.progress({ book = { chapterUid = "u7", progress = 1, chapterOffset = 1 } })
-    Assert.eq(pos.chapter_fraction, 0.0001)
+    Assert.is_nil(pos.chapter_fraction)
+    Assert.eq(pos.extra.chapter_offset, 1)
     pos = Mapper.progress({ book = { chapterUid = "u7", progress = 1, chapterOffset = 0 } })
-    Assert.eq(pos.chapter_fraction, 0)
+    Assert.is_nil(pos.chapter_fraction)
+    Assert.eq(pos.extra.chapter_offset, 0)
     pos = Mapper.progress({ book = { chapterUid = "u7", progress = 1 } })
     Assert.is_nil(pos.chapter_fraction)
 end

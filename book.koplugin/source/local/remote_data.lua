@@ -2,6 +2,8 @@
 本地源：WebDAV 下 .Moon+/ 的进度、统计、笔记文件读写。
 非 webdav:// 身份（纯本地书）没有远端，推送直接成功、拉取为空。
 函数首参即 LocalClient，由 source.local.client 装配为方法。
+兼容 Moon+ 的 .po 不变；.po.json 保存精确坐标，仅在相对路径及 .po 原文一致时采用，
+其它客户端改写 .po 后自动退回其百分比，不能拿旧 XPointer 覆盖新进度。
 
 @module koplugin.book.source.local.remote_data
 --]]
@@ -27,13 +29,33 @@ local RemoteData = {}
 function RemoteData.getProgressAsync(self, stable_id, cb)
     local rel = remoteRelativePath(stable_id)
     if not rel then return defer(cb, nil, nil, { empty = true }) end
-    return fetchText(self, progressRemotePath(self, rel), self:webdavCacheRoot() .. "/.progress.get",
+    local cancelled, active = false, nil
+    local remote = progressRemotePath(self, rel)
+    local first = fetchText(self, remote, self:webdavCacheRoot() .. "/.progress.get",
         function(raw, err, missing)
+            if cancelled then return end
             if missing then return cb(nil, nil, { empty = true }) end
             if not raw then return cb(nil, err) end
             local pos = decodeProgress(raw)
-            if pos then cb(pos) else cb(nil, _("进度为空")) end
+            if not pos then return cb(nil, _("进度为空")) end
+            active = fetchText(self, remote .. ".json", self:webdavCacheRoot() .. "/.position.get",
+                function(metadata, meta_err, absent)
+                    if cancelled then return end
+                    if absent then return cb(pos) end
+                    if not metadata then return cb(nil, meta_err) end
+                    local ok, data = pcall(require("json").decode, metadata)
+                    if not ok or type(data) ~= "table" or type(data.position) ~= "table"
+                        or type(data.position.fraction) ~= "number" then
+                        return cb(nil, _("进度文件损坏"))
+                    end
+                    cb(data.file == rel and data.marker == raw and data.position or pos)
+                end)
         end)
+    active = active or first
+    return { cancel = function()
+        cancelled = true
+        if active and active.cancel then active:cancel() end
+    end }
 end
 
 --- 推送单本进度（关书 / 网络恢复时由 book.progress 推脏行）。非 webdav:// 身份没有远端，直接成功。
@@ -45,8 +67,24 @@ end
 function RemoteData.putProgressAsync(self, stable_id, pos, cb)
     local rel = remoteRelativePath(stable_id)
     if not rel then return defer(cb, true) end
-    return putText(self, progressRemotePath(self, rel), self:webdavCacheRoot() .. "/.progress.upload",
-        encodeProgress(pos), cb)
+    local cancelled, active = false, nil
+    local remote, raw = progressRemotePath(self, rel), encodeProgress(pos)
+    if pos.locator or pos.page then
+        -- .po 是发布标记，精确坐标先到位；任一步失败都不能确认本地脏行。
+        local first = putText(self, remote .. ".json", self:webdavCacheRoot() .. "/.position.upload",
+            require("json").encode({ file = rel, marker = raw, position = pos }), function(ok, err)
+                if cancelled then return end
+                if not ok then return cb(nil, err) end
+                active = putText(self, remote, self:webdavCacheRoot() .. "/.progress.upload", raw, cb)
+            end)
+        active = active or first
+    else
+        active = putText(self, remote, self:webdavCacheRoot() .. "/.progress.upload", raw, cb)
+    end
+    return { cancel = function()
+        cancelled = true
+        if active and active.cancel then active:cancel() end
+    end }
 end
 
 --- 与本地 compactSynced 同一口径：超过 30 天的逐页行按小时汇总。

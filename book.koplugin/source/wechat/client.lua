@@ -1,8 +1,8 @@
 --[[--
 微信读书协议客户端：只返回 wire，不做领域转换（仅异步）。
 
-书架、进度、章节、想法、划线与统计都走 Eink ``i.weread.qq.com``（App 协议）；
-网页接口只留给没有 App 对应的书城榜单 / 分类、搜索与公众号。
+书架、章节、想法、划线与统计走 Eink ``i.weread.qq.com``（App 协议）。
+进度写入走网页阅读接口：App 时长上报即使成功，也不保证更新阅读位置。
 
 @module koplugin.book.source.wechat.client
 --]]
@@ -161,53 +161,48 @@ end
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
 function Client:getProgressAsync(bookId, cb)
-    return Eink.callAsync("GET", "/book/getProgress", { query = { bookId = bookId } }, cb)
+    return Eink.callAsync("GET", "/book/getProgress", {
+        query = { bookId = bookId, t = os.time() * 1000 + math.random(0, 999) },
+    }, cb)
 end
 
---- 上报阅读进度：App ``/book/read``，不带时长桶（时长由统计同步补报）。
+--- 上报阅读进度：网页阅读会话的位置 payload，不附加或伪造阅读时长。
 ---@param bookId string
----@param opts { progress: number, chapter_uid: string|number, chapter_idx?: number, chapter_offset?: number, summary?: string, book_version?: integer }
+---@param opts { progress: number, chapter_uid: string|number, chapter_idx?: number, chapter_offset?: number, chapter_fraction?: number, summary?: string, book_version?: integer }
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }
 function Client:putProgressAsync(bookId, opts, cb)
-    local creds = Eink.credentials()
-    if not creds then
+    if not Eink.credentials() then
         require("ui/uimanager"):nextTick(function() cb(nil, _("请先扫码登录微信读书墨水屏")) end)
         return { cancel = function() end }
     end
     local cancelled, job = false, nil
-    job = self:guestTokenAsync(function(token, err)
+    local session_job = require("source.wechat.context").sessionAsync(self, bookId, false, function(session, err)
         if cancelled then return end
-        if not token then
+        if not session then
             cb(nil, err)
             return
         end
-        local offset = opts.chapter_offset or 0
-        local body = require("source.wechat.app").readBody({
-            vid = creds.vid,
-            device_id = creds.device_id,
-            install_id = Eink.installId(),
-            guest_token = token,
+        local body = Protocol.makeEnterReadPayload({
             book_id = bookId,
-            chapter_uid = tonumber(opts.chapter_uid) or 0,
+            chapter_uid = opts.chapter_uid,
             chapter_idx = opts.chapter_idx or 0,
-            chapter_offset = offset,
-            chapter_progress = math.floor(offset / 100),
-            current_progress = opts.progress,
+            chapter_offset = opts.chapter_offset or 0,
+            progress = opts.progress,
             summary = opts.summary,
-            book_version = opts.book_version,
-            hours = {},
+            psvts = session.psvts,
+            pclts = session.pclts,
         })
-        job = self:reportAppReadAsync(body, function(data, push_err)
+        job = postWebAsync("/web/book/read", body, Protocol.readerUrl(bookId, opts.chapter_uid), function(data, push_err)
             if cancelled then return end
-            if data then
-                cb({ ok = true })
-            else
-                logger.warn("weread putProgress", push_err)
-                cb(nil, push_err)
+            if not data then return cb(nil, push_err) end
+            if not (data.succ == true or tonumber(data.succ) == 1 or data.synckey ~= nil) then
+                return cb(nil, _("上报响应异常"))
             end
+            cb({ ok = true })
         end)
     end)
+    job = job or session_job
     return { cancel = function()
             cancelled = true
             if job then job.cancel() end
