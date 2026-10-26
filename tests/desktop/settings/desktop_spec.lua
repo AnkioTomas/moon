@@ -6,6 +6,9 @@ package.preload["gettext"] = function() return function(text) return text end en
 package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
+package.preload["ui.themes.widgets.list"] = function()
+    return { new = function(_, opts) return setmetatable(opts, { __index = { show = function() end } }) end }
+end
 local book_settings = { drawer_opens_desktop = true }
 local ui_settings = {}
 local saved_owner
@@ -61,7 +64,7 @@ Assert.is_true(inv.toggle)
 _G.G_reader_settings = saved_g
 
 local inputs = Settings:inputRows(desktop)
-Assert.len(inputs, 4)
+Assert.len(inputs, 5)
 for i, key in ipairs({ "pager_keys", "pager_swipe", "pager_cycle", "modal_keys" }) do
     local row = inputs[i](600)
     Assert.eq(row.toggle, key ~= "pager_cycle", "默认不开循环，保留原始边界行为")
@@ -71,5 +74,10 @@ for i, key in ipairs({ "pager_keys", "pager_swipe", "pager_cycle", "modal_keys" 
     inputs[i](600).callback()
     Assert.eq(ui_settings[key], key ~= "pager_cycle", "开关可独立恢复")
 end
+local swipe = inputs[5](600)
+Assert.eq(swipe.title, "弹窗关闭手势")
+Assert.eq(swipe.status, "下滑", "缺省跟 ui.swipe_dismiss=down")
+ui_settings.swipe_dismiss = "off"
+Assert.eq(inputs[5](600).status, "关闭")
 
 return true
