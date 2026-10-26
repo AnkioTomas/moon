@@ -428,7 +428,7 @@ local function putText(self, remote, temp, data, cb)
     temp = uniqueTemp(temp)
     if not writeFile(temp, data) then return defer(cb, nil, _("无法写入临时文件")) end
     local cancelled, active = false, nil
-    active = self.dav:ensurePathAsync(remote:match("(.+)/[^/]+$"), function(ok_dir, dir_err)
+    local directory_job = self.dav:ensurePathAsync(remote:match("(.+)/[^/]+$"), function(ok_dir, dir_err)
         if cancelled then return end
         if not ok_dir then os.remove(temp); return cb(nil, dir_err) end
         active = self.dav:putFileAsync(remote, temp, function(ok, err)
@@ -436,6 +436,7 @@ local function putText(self, remote, temp, data, cb)
             if not cancelled then cb(ok, err) end
         end)
     end)
+    active = active or directory_job
     return { cancel = function()
         cancelled = true
         if active and active.cancel then active:cancel() end

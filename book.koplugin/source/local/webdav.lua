@@ -18,7 +18,7 @@ local defer, isBookFile, localRoot, ensureParent = Common.defer, Common.isBookFi
 local fetchText, putText = Common.fetchText, Common.putText
 local remoteStableId, remoteRelativePath = Common.remoteStableId, Common.remoteRelativePath
 local sidecarKey, stem, readFile, writeFile, field = Common.sidecarKey, Common.stem, Common.readFile, Common.writeFile, Common.field
-local decodeProgress, eachAsync, coverPath = Common.decodeProgress, Common.eachAsync, Common.coverPath
+local eachAsync, coverPath = Common.eachAsync, Common.coverPath
 local safeRel = Common.safeRel
 local parseBookProps, scanFiles = Common.parseBookProps, Common.scanFiles
 local moonPath, coverRemotePath = Common.moonPath, Common.coverRemotePath
@@ -330,13 +330,13 @@ local function pullProgress(self, run, done)
         end
         eachAsync(pending, function(item, next_item, i)
             run.report(T(_("正在下载进度 %1"), item.rel), i, #pending)
-            run.active = fetchText(self, progressRemotePath(self, item.rel), self:webdavCacheRoot() .. "/.progress",
-                function(raw)
+            run.active = self:getProgressAsync(remoteStableId(item.rel), function(pos, err)
                 if run.cancelled then return end
-                local pos = decodeProgress(raw)
                 if pos then
                     pos.updated_at = item.mtime
                     ProgressDB.upsertRemote(SOURCE_ID, remoteStableId(item.rel), pos)
+                elseif err then
+                    require("utils.log").warn("book webdav progress failed", item.rel, err)
                 end
                 next_item()
             end)
@@ -703,7 +703,8 @@ local function deleteRemoteBook(self, rel, cb)
     active = self.dav:deleteAsync(self:webdavPath() .. "/" .. rel, function(ok, err, code)
         if cancelled then return end
         if not ok and code ~= 404 then return cb(false, err) end
-        local sidecars = { coverRemotePath(self, rel), progressRemotePath(self, rel), notesRemotePath(self, rel) }
+        local sidecars = { coverRemotePath(self, rel), progressRemotePath(self, rel),
+            progressRemotePath(self, rel) .. ".json", notesRemotePath(self, rel) }
         eachAsync(sidecars, function(path, next_item)
             active = self.dav:deleteAsync(path, function()
                 if not cancelled then next_item() end

@@ -536,4 +536,53 @@ function Annotations.toWireRange(wire, local_flow, needle, pos0, pos1)
     return string.format("%d-%d", wire.starts[wire_head], wire.ends[wire_tail])
 end
 
+--- 远端原文偏移 → 本地正文坐标；正文改写后按相同出现次数的上下文对齐。
+---@param wire WechatWireMapping
+---@param local_flow WechatRuneFlow
+---@param offset integer
+---@return string|nil locator
+---@return number|nil fraction 正文字符比例，不是排版页比例
+function Annotations.fromWireOffset(wire, local_flow, offset)
+    if wire.count == 0 then return nil end
+    local head = wire.count
+    for i = 1, wire.count do
+        if wire.ends[i] > offset then head = i; break end
+    end
+    if wire.text == local_flow.text then
+        return xpointerAt(local_flow, head), (head - 1) / wire.count
+    end
+    local needle = table.concat(wire.runes, "", head, math.min(head + 29, wire.count))
+    local wire_heads, local_heads = matchingHeads(wire, needle), matchingHeads(local_flow, needle)
+    if #wire_heads == #local_heads then
+        for ordinal, wire_head in ipairs(wire_heads) do
+            if wire_head == head then
+                return xpointerAt(local_flow, local_heads[ordinal]), (head - 1) / wire.count
+            end
+        end
+    end
+    return nil
+end
+
+--- 本地正文坐标 → 远端原文偏移及正文摘要。
+---@param wire WechatWireMapping
+---@param local_flow WechatRuneFlow
+---@param locator string
+---@return integer|nil offset
+---@return string|nil summary
+---@return number|nil fraction
+---@return string|nil err
+function Annotations.toWirePosition(wire, local_flow, locator)
+    local head = headAtXPointer(local_flow, locator)
+    if not head then return nil, nil, nil, "reading position not found in chapter" end
+    local summary = table.concat(local_flow.runes, "", head, math.min(head + 29, local_flow.count))
+    local range, err = Annotations.toWireRange(wire, local_flow, summary, locator)
+    if not range then return nil, nil, nil, err end
+    local offset = tonumber(range:match("^(%d+)"))
+    local wire_head = 1
+    for i = 1, wire.count do
+        if wire.starts[i] == offset then wire_head = i; break end
+    end
+    return offset, summary, (wire_head - 1) / wire.count
+end
+
 return Annotations

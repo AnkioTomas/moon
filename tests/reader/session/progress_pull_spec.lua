@@ -15,6 +15,7 @@ local adopted = {}
 local pulled = 0
 local pending_row
 local live_xpointer -- 测试桩会话的 rolling.xpointer（页级源无进度行时的本地位置）
+local precise_document
 local goto_calls = {}
 local current_identity = {
     source_id = "wechat",
@@ -53,7 +54,7 @@ package.preload["reader.session"] = function()
         current = function()
             return {
                 identity = current_identity,
-                ui = { document = { getPageCount = function() return 10 end }, handleEvent = function() end,
+                ui = { document = precise_document or { getPageCount = function() return 10 end }, handleEvent = function() end,
                     rolling = live_xpointer and { xpointer = live_xpointer } },
                 chapter = { toc = { {}, {}, {}, {}, {} } },
                 doc_fraction = 0,
@@ -209,6 +210,49 @@ Stubs.flush()
 Assert.eq(synced[1], "b1")
 Assert.is_true(synced.dirty_only, "脏本地只需上传")
 Assert.eq(#remote_upserted, 0, "不能用远端覆盖脏本地")
+
+-- 精确正文坐标按实际目标页比较：长章中 <1% 也可能差好几页。
+do
+    local remote
+    precise_document = {
+        getPageCount = function() return 1000 end,
+        isXPointerInDocument = function() return true end,
+        getPageFromXPointer = function(_, xp) return tonumber(xp:match("(%d+)$")) end,
+    }
+    source.getProgressAsync = function(_, _id, cb)
+        cb(remote)
+        return { cancel = function() end }
+    end
+    Progress.clearConflicts()
+    shown, remote_upserted = {}, {}
+    pending_row = {
+        fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.5,
+        locator = "page500", sync_status = 0,
+    }
+    remote = { fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.505, locator = "page505" }
+    Progress.pull(snapshot())
+    Stubs.flush()
+    Assert.len(shown, 1, "正文定位相差五页不能被 1% 容差吞掉")
+    Assert.not_nil(shown[1].ok_callback)
+
+    Progress.clearConflicts()
+    shown, remote_upserted = {}, {}
+    pending_row.sync_status = 1
+    remote = { fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.8, locator = "same500" }
+    Progress.pull(snapshot())
+    Stubs.flush()
+    Assert.len(shown, 0, "字号或 HTML 改写造成比例不同，同页不能假冲突")
+    Assert.len(remote_upserted, 1)
+
+    Progress.clearConflicts()
+    shown, goto_calls = {}, {}
+    remote = { fraction = 0.6, chapter_idx = 4, locator = "/html/body/p/text().123" }
+    Progress.pull(snapshot())
+    Stubs.flush()
+    Assert.eq(goto_calls[1].idx, 4)
+    Assert.eq(goto_calls[1].opts.xpointer, remote.locator, "跨章必须把精确正文坐标带到新文档")
+    precise_document = nil
+end
 
 -- 阅读器尚在章首但 pending 已与云端一致 → 不弹假冲突
 Progress.clearConflicts()
