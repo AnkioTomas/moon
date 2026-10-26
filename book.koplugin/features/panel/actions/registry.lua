@@ -20,7 +20,7 @@ local Registry = {}
 -- 内置动作只放 KOReader 原生能力与核心阅读会话（actions/<scope>/<id>.lua）。
 -- 属于某个 feature 的开关一律写在 features/<name>/panel.lua，扫描后追加到对应 scope 末尾（按目录名）。
 local DESKTOP_ORDER = {
-    "night", "wifi", "rotate", "refresh", "screenshot", "frontlight", "suspend", "power",
+    "night", "wifi", "tasks", "rotate", "refresh", "screenshot", "frontlight", "suspend", "power",
 }
 local READER_ORDER = {
     "toc", "font", "highlights", "bookmark", "bookorbit", "push_progress", "pull_progress", "reload_chapter", "save_default",

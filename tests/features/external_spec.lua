@@ -9,7 +9,7 @@ local Assert = require("support.assert")
 
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(s) return s end end
-for _idx, id in ipairs({ "night", "wifi", "rotate", "refresh", "screenshot", "frontlight", "suspend", "power" }) do
+for _idx, id in ipairs({ "night", "wifi", "tasks", "rotate", "refresh", "screenshot", "frontlight", "suspend", "power" }) do
     package.preload["features.panel.actions.desktop." .. id] = function()
         return { id = id, title = id, icon = "x", scope = "desktop" }
     end
