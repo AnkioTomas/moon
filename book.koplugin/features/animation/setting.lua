@@ -1,5 +1,5 @@
 --[[--
-翻页动画设置：往桌面「阅读行为」页追加「翻页动画」分节（开关装/卸补丁、风格）。
+翻页动画设置：开关装/卸补丁，选择风格与速度。
 
 @module koplugin.book.features.animation.setting
 --]]
@@ -17,7 +17,7 @@ function Setting.entries(desktop)
             order = 11,
             icon = "animation",
             title = _("翻页动画"),
-            subtitle = _("开关与动画风格"),
+            subtitle = _("开关、动画风格与速度"),
             page = {
                 title = _("翻页动画"),
                 sections = function()
@@ -51,6 +51,19 @@ function Setting.entries(desktop)
                         end,
                     }
                     if enabled then
+                        rows[#rows + 1] = function(iw)
+                            return Row.widget({
+                                width = iw,
+                                chevron = true,
+                                kind = "nav",
+                                icon = "animation",
+                                title = _("翻页动画速度"),
+                                status = Animation.currentSpeed().text,
+                                callback = function()
+                                    Animation.pickSpeed(function() desktop:updateView() end)
+                                end,
+                            })
+                        end
                         rows[#rows + 1] = function(iw)
                             return Row.widget({
                                 width = iw,

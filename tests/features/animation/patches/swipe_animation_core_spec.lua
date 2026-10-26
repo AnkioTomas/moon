@@ -50,11 +50,10 @@ local BB = {
 }
 package.loaded["ffi/blitbuffer"] = BB
 
--- KOReader 里 usleep 由 ffi/posix_h 声明；同进程其他 spec 可能已声明过，重复 cdef 会报错。
-local ffi = require("ffi")
-if not pcall(function() return ffi.C.usleep end) then
-    ffi.cdef("int usleep(unsigned int);")
-end
+local sleeps = {}
+package.loaded["ffi"] = { C = {
+    usleep = function(usec) sleeps[#sleeps + 1] = usec end,
+} }
 
 dofile(Config.root() .. "/book.koplugin/features/animation/patches/2-swipe-animation-core.lua")
 local SwipeAnimation = _G.SwipeAnimation
@@ -221,11 +220,11 @@ Assert.len(S.wipe(W, H, 200, 16, true), 67)
 ---@param style string|nil
 ---@param stack table[]|nil 本轮 KOReader 排队的刷新，缺省只有一条 partial
 ---@param no_snapshot boolean|nil 模拟 beforePaint 没拍到旧页
-local function run(style, stack, no_snapshot)
+local function run(style, stack, no_snapshot, w, h)
     store.swipe_animation_style = style
     store.swipe_animation_delay_ms = 0
-    Screen.bb = newBB(W, H)
-    Screen.saved_bb = not no_snapshot and newBB(W, H) or nil
+    Screen.bb = newBB(w or W, h or H)
+    Screen.saved_bb = not no_snapshot and newBB(w or W, h or H) or nil
     Screen.swipe_forward = true
     Screen.refreshes = {}
     local ui = { _refresh_stack = stack or { { mode = "partial" } } }
@@ -292,5 +291,33 @@ for _, style in ipairs({ "nope", "cover", "center" }) do
     Assert.eq(refreshes[1].x + refreshes[1].w, W)
 end
 Assert.len((run(nil)), STEPS)
+
+-- 速度每次翻页读取；只调整帧间隔，不改变帧数和刷新几何。横屏保持原来的半间隔。
+for _, screen in ipairs({ { W, H, 8, 20 }, { H, W, 6, 10 } }) do
+    for _, preset in ipairs({ { "slow", 2 }, { "normal", 1 }, { "fast", 0.5 } }) do
+        store.swipe_animation_speed = preset[1]
+        sleeps = {}
+        refreshes = run("wipe", nil, nil, screen[1], screen[2])
+        Assert.len(refreshes, screen[3])
+        Assert.len(sleeps, screen[3] - 1)
+        for _, delay in ipairs(sleeps) do
+            Assert.eq(delay, screen[4] * preset[2] * 1000)
+        end
+    end
+end
+
+-- 未选速度时继续尊重旧版延迟；显式 0 不等待。
+store.swipe_animation_speed = nil
+sleeps = {}
+run("wipe")
+Assert.len(sleeps, 0)
+store.swipe_animation_delay_ms_vertical = 37
+sleeps = {}
+run("wipe")
+Assert.eq(sleeps[1], 37000)
+store.swipe_animation_speed = "unknown"
+sleeps = {}
+run("wipe")
+Assert.eq(sleeps[1], 37000, "非法速度不破坏旧延迟")
 
 return true

@@ -24,6 +24,13 @@ PageTurnAnimation.ENABLED_KEY = "moon_page_turn_animation"
 --- 动画风格设置键；运行时补丁每次翻页读取，切换无需重启。
 PageTurnAnimation.STYLE_KEY = "swipe_animation_style"
 
+PageTurnAnimation.SPEED_KEY = "swipe_animation_speed"
+PageTurnAnimation.SPEEDS = {
+    { text = _("慢"), value = "slow" },
+    { text = _("标准"), value = "normal" },
+    { text = _("快"), value = "fast" },
+}
+
 --- 可选风格；value 必须与 2-swipe-animation-core.lua 的 SwipeAnimation.STYLES 键一致。
 PageTurnAnimation.STYLES = {
     { text = _("擦除"), value = "wipe" },
@@ -62,6 +69,28 @@ function PageTurnAnimation.pickStyle(on_change)
         on_select = function(value)
             if not value or value == current then return end
             G_reader_settings:saveSetting(PageTurnAnimation.STYLE_KEY, value)
+            if on_change then on_change() end
+        end,
+    }:show()
+end
+
+---@return { text: string, value: string }
+function PageTurnAnimation.currentSpeed()
+    local value = G_reader_settings:readSetting(PageTurnAnimation.SPEED_KEY)
+    for _idx, item in ipairs(PageTurnAnimation.SPEEDS) do
+        if item.value == value then return item end
+    end
+    return PageTurnAnimation.SPEEDS[2]
+end
+
+---@param on_change fun()|nil
+function PageTurnAnimation.pickSpeed(on_change)
+    require("ui.themes.widgets.list"):new{
+        title = _("翻页动画速度"), items = PageTurnAnimation.SPEEDS,
+        current = PageTurnAnimation.currentSpeed().value, centered = true,
+        on_select = function(value)
+            if not value or value == G_reader_settings:readSetting(PageTurnAnimation.SPEED_KEY) then return end
+            G_reader_settings:saveSetting(PageTurnAnimation.SPEED_KEY, value)
             if on_change then on_change() end
         end,
     }:show()
