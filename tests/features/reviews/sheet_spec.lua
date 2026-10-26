@@ -35,6 +35,26 @@ Assert.eq(pages[1][2], 0)
 Assert.eq(pages[2][1], 1)
 Assert.eq(pages[2][2], 2)
 
+do
+    local callback
+    local spot = { range = "old", text = "原句", total = 5 }
+    local fake = setmetatable({
+        identity = { source = { paragraphReviewPageAsync = function(_self, _identity, _range, _max_idx, cb)
+            callback = cb
+            return { cancel = function() end }
+        end } },
+        spot = spot, more = true, max_idx = 0, items = {}, page = 1,
+        paginate = function(self) self.pages = { { 1, #self.items } } end,
+        refresh = function() end,
+    }, { __index = Sheet })
+    fake:load()
+    Assert.eq(spot.total, 5, "请求回来前不修改标记")
+    callback({ items = {}, total = 0, max_idx = 0, more = false })
+    Assert.eq(spot.total, 0, "首页明确归零同步更新页内标记")
+    Assert.is_true(fake.loaded)
+    Assert.is_false(fake.more)
+end
+
 -- 放得下照常同页。
 pages = paginate(20, { 30, 30 })
 Assert.len(pages, 1)

@@ -36,13 +36,16 @@ local RETRY = 60
 ---@field fetch fun(cb: fun(data: any, err: string|nil)): { cancel: fun() }
 ---@field place fun(data: any): ReviewPlacement[]
 
+---@class ReviewPageMark: PageMark
+---@field spot WechatReviewHotspot
+
 ---@class ReviewMarks: PageMarkLayer
 ---@field ui table ReaderUI
 ---@field key string|nil 当前目标键
 ---@field data any fetch 的结果；nil = 尚未取到
 ---@field retry_at integer|nil 拉取失败后的重试时刻（秒）
 ---@field job { cancel: fun() }|nil
----@field current PageMark[] 当前屏上标记（另带 spot）
+---@field current ReviewPageMark[] 当前屏上标记（另带 spot）
 ---@field render_key string|nil
 ---@field spans integer[][]|nil 章会话 data[i] 的 { 起页, 止页 }
 ---@field spans_hash integer|nil spans 对应的排版指纹
@@ -267,7 +270,14 @@ end
 function ReviewMarks:marks()
     self:updateView()
     local solid = require("utils.settings").get("features.reviews").book_reviews_mark_style == "solid"
-    for _idx, mark in ipairs(self.current) do mark.solid = solid end
+    for i = #self.current, 1, -1 do
+        local mark = self.current[i]
+        if mark.spot.total == 0 then
+            table.remove(self.current, i)
+        else
+            mark.solid = solid
+        end
+    end
     return self.current
 end
 

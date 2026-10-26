@@ -1,5 +1,5 @@
 --[[--
-book.review_cache：命中不看网络、未命中且未联网立即失败、联网请求后落库、空结果短 TTL、过期重拉；
+book.review_cache：在线取最新、离线读缓存、未命中且未联网立即失败、空结果移除热点、过期重拉；
 book.review_prefetch：章数 / 句数 / 页数上限、命中跳过、失败即停。
 
 @module tests.book.review_cache_spec
@@ -22,7 +22,13 @@ package.preload["utils.db"] = function()
         schema = function() end,
         moveIdentity = function() return true end,
         removeIdentity = function() return true end,
-        exec = function(_sql, source_id, stable_id, idx, kind, key, payload, expire)
+        exec = function(sql, source_id, stable_id, idx, kind, key, payload, expire)
+            if sql:find("DELETE", 1, true) then
+                for row_key, row in pairs(rows) do
+                    if row[2] <= source_id then rows[row_key] = nil end
+                end
+                return true
+            end
             rows[rowKey(source_id, stable_id, idx, kind, key)] = { payload, expire }
             return true
         end,
@@ -95,6 +101,66 @@ do
     os.time = function() return real() + 181 * 24 * 3600 end
     Assert.is_nil(ReviewCache.hotspots(ident))
     os.time = real
+end
+
+do
+    -- 在线忽略已有热点 / 评论页缓存，成功覆盖；失败不能伪装成旧数据或空结果。
+    connected = true
+    local ci = { source_id = "wechat", stable_id = "fresh", chapter_idx = 23 }
+    ReviewCache.hotspotsAsync(ci, fetcher({ { range = "old", total = 5 } }).fetch, function() end)
+    local hot = fetcher({ { range = "new", total = 2 } })
+    local got, got_err
+    ReviewCache.hotspotsAsync(ci, hot.fetch, function(v) got = v end)
+    Assert.eq(hot.calls, 1)
+    Assert.eq(got[1].range, "new")
+    Assert.eq(ReviewCache.hotspots(ci)[1].range, "new")
+
+    local first = fetcher({ items = { { id = "old" } }, total = 1, max_idx = 1, more = false })
+    ReviewCache.pageAsync(ci, "new", 0, first.fetch, function() end)
+    local fresh = fetcher({ items = { { id = "new" } }, total = 1, max_idx = 1, more = false })
+    ReviewCache.pageAsync(ci, "new", 0, fresh.fetch, function(v) got = v end)
+    Assert.eq(fresh.calls, 1)
+    Assert.eq(got.items[1].id, "new")
+
+    local failed = fetcher(nil, "timeout")
+    ReviewCache.pageAsync(ci, "new", 0, failed.fetch, function(v, e) got, got_err = v, e end)
+    Assert.is_nil(got)
+    Assert.eq(got_err, "timeout")
+    Assert.eq(ReviewCache.page(ci, "new", 0).items[1].id, "new", "失败不破坏离线缓存")
+    ReviewCache.hotspotsAsync(ci, failed.fetch, function(v, e) got, got_err = v, e end)
+    Assert.is_nil(got)
+    Assert.eq(got_err, "timeout")
+    Assert.eq(ReviewCache.hotspots(ci)[1].range, "new")
+
+    connected = false
+    ReviewCache.pageAsync(ci, "new", 0, fresh.fetch, function(v) got = v end)
+    Stubs.flush()
+    Assert.eq(fresh.calls, 1)
+    Assert.eq(got.items[1].id, "new", "离线仍可读最新落库内容")
+end
+
+do
+    connected = true
+    local ci = { source_id = "wechat", stable_id = "empty-hotspot", chapter_idx = 23 }
+    local hot = { { range = "gone", total = 3 }, { range = "keep", total = 2 } }
+    ReviewCache.hotspotsAsync(ci, fetcher(hot).fetch, function() end)
+    local empty = fetcher({ items = {}, total = 0, max_idx = 0, more = false })
+    ReviewCache.pageAsync(ci, "gone", 30, empty.fetch, function() end)
+    Assert.len(ReviewCache.hotspots(ci), 2, "后续页为空不删除热点")
+    ReviewCache.pageAsync(ci, "gone", 0, empty.fetch, function() end)
+    Assert.len(ReviewCache.hotspots(ci), 1, "首页总数为零移除旧热点")
+    Assert.eq(ReviewCache.hotspots(ci)[1].range, "keep")
+
+    -- 兼容已有的空首页缓存：离线不画点开后没有内容的标记。
+    ReviewCache.hotspotsAsync(ci, fetcher(hot).fetch, function() end)
+    ReviewCache.pageAsync(ci, "keep", 0,
+        fetcher({ items = { { id = "kept" } }, total = 2, max_idx = 1 }).fetch, function() end)
+    connected = false
+    local got
+    ReviewCache.hotspotsAsync(ci, fetcher(nil, "offline").fetch, function(v) got = v end)
+    Stubs.flush()
+    Assert.len(got, 1)
+    Assert.eq(got[1].range, "keep")
 end
 
 do
