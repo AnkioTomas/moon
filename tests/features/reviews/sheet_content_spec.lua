@@ -40,3 +40,19 @@ Assert.eq(fake.page, 2, "全文翻页不前进到另一人的段评")
 viewer:close()
 Assert.eq(fake.page, 2)
 Assert.is_nil(fake:card(2).onTapThemeArea, "短评论不增加无用点击区")
+
+local image_url = "https://example.test/review.jpg"
+local image_card = setmetatable({
+    theme = theme, inner_w = 500, body_h = 200, cards = {},
+    items = { { author = "Reviewer", content = "Short review", likes = 1, time = 1,
+        images = { { url = image_url } } } },
+}, { __index = Sheet }):card(1)
+local image_tap = Kit.taps(image_card)[1]
+Assert.is_true(image_tap ~= nil, "配图有独立点击入口")
+image_tap:onTapThemeArea()
+local viewer = Kit.shown[#Kit.shown]
+Assert.is_true(viewer.close_on_tap, "全屏图可点按关闭")
+local displayed_image = Kit.find(viewer, function(widget) return widget.src == image_url end)[1]
+Assert.is_true(displayed_image ~= nil, "预览使用点击的图片地址")
+viewer.close_callback()
+Assert.is_true(displayed_image.cancelled, "关闭预览取消图片下载")
