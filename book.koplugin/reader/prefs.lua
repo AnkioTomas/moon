@@ -98,6 +98,17 @@ function M.capture(ui)
     for _idx, key in ipairs(DOC_KEYS) do
         doc_keys[key] = doc and doc:readSetting(key)
     end
+    -- 高亮样式的活状态在 view.highlight，sidecar 是上次 SaveSettings 的旧值；
+    -- 刚在菜单里改完就捕获（保存为默认 / 关书）读 sidecar 会拿到旧格式。
+    local highlight = ui.view and ui.view.highlight
+    if type(highlight) == "table" then
+        if type(highlight.saved_drawer) == "string" and highlight.saved_drawer ~= "" then
+            doc_keys.highlight_drawer = highlight.saved_drawer
+        end
+        if type(highlight.saved_color) == "string" and highlight.saved_color ~= "" then
+            doc_keys.highlight_color = highlight.saved_color
+        end
+    end
     return {
         font_id = font_id,
         font_name = font_id and doc:readSetting("book_reader_font_name") or nil,
@@ -275,6 +286,17 @@ function M.saveDefaults(ui)
             G_reader_settings:saveSetting("book_reader_default_font_id", prefs.font_id)
         else
             G_reader_settings:delSetting("book_reader_default_font_id")
+        end
+    end
+    -- 高亮不在 configurable 里，不会跟着 copt_* 进全局默认；且全局键名与 sidecar 不同
+    -- （drawer 是 highlight_drawing_style，见 ReaderHighlight:onReadSettings 的回退读取）。
+    -- 不写这两个，新书只能吃 KOReader 默认划线，与字体/间距的表现不一致。
+    if prefs and prefs.doc then
+        if type(prefs.doc.highlight_drawer) == "string" and prefs.doc.highlight_drawer ~= "" then
+            G_reader_settings:saveSetting("highlight_drawing_style", prefs.doc.highlight_drawer)
+        end
+        if type(prefs.doc.highlight_color) == "string" and prefs.doc.highlight_color ~= "" then
+            G_reader_settings:saveSetting("highlight_color", prefs.doc.highlight_color)
         end
     end
     G_reader_settings:flush()
