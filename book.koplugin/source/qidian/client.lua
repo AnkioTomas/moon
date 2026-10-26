@@ -168,6 +168,9 @@ function Client.shelfAsync(cookie, cb)
     end
     local cancelled, job = false, nil
     local books, seen, groups = {}, {}, nil
+    -- 自定义分组：id→名、bookId→分组名（一本书进多个组取第一个，和微信读书同一口径）。
+    -- 默认分组（-100）不算分组，没进自定义组的书在 Mapper 里保留题材分类。
+    local group_names, group_by_id = {}, {}
     local fetchPage
     local function addRows(list)
         for _idx, row in ipairs(type(list) == "table" and list or {}) do
@@ -178,9 +181,21 @@ function Client.shelfAsync(cookie, cb)
             end
         end
     end
+    local function noteGroup(gid, list)
+        local name = group_names[gid]
+        if not name then return end
+        for _idx, row in ipairs(type(list) == "table" and list or {}) do
+            local id = row.bid and tostring(row.bid)
+            if id then group_by_id[id] = group_by_id[id] or name end
+        end
+    end
     local function finish(err)
         if cancelled then return end
-        if err then cb(nil, err) else cb(books) end
+        if err then cb(nil, err); return end
+        for _idx, row in ipairs(books) do
+            row._group_name = group_by_id[tostring(row.bid)]
+        end
+        cb(books)
     end
     local function nextGroup()
         local gid = groups and table.remove(groups, 1)
@@ -202,9 +217,12 @@ function Client.shelfAsync(cookie, cb)
                     local id = tonumber(group.groupId)
                     if id and id ~= -100 and tonumber(group.bookCount) ~= 0 then
                         groups[#groups + 1] = id
+                        local name = type(group.groupName) == "string" and group.groupName or ""
+                        if name ~= "" then group_names[id] = name end
                     end
                 end
             end
+            noteGroup(gid, data.list)
             local info = type(data.page) == "table" and data.page or {}
             local list = type(data.list) == "table" and data.list or {}
             if info.isLast == 1 or info.isLast == true or #list < PAGE_SIZE then
