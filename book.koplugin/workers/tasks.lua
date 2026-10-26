@@ -84,19 +84,22 @@ local change_scheduled = false
 --- 休眠中：restartable 任务不启动。
 local suspended = false
 
---- 是否由我们按下了自动休眠的暂停（与 keepalive 等插件共用 PluginShare，只撤自己按下的）。
+--- 上次写入的 pause_auto_suspend 目标（cache 忙 或 其它插件的 keepalive，如翻页器不息屏）。
 local holding_awake = false
 
 --- 缓存任务在跑 / 排队 / 退避时不让 KOReader 自动休眠；waiting（等网络 / 唤醒）不算，否则永远睡不下去。
+-- keepalive（翻页器 / KeepAlive 插件）为真时也要撑着，不能在 cache 结束时把别人的不息屏清掉。
 local function syncAwake()
     local busy = false
     for _idx, task in ipairs(list) do
         if task.kind == "cache" and task.state ~= "waiting" then busy = true break end
     end
-    if busy == holding_awake then return end
-    holding_awake = busy
-    logger.info("book tasks pause_auto_suspend", busy)
-    require("pluginshare").pause_auto_suspend = busy
+    local share = require("pluginshare")
+    local want = busy or share.keepalive == true
+    if want == holding_awake then return end
+    holding_awake = want
+    logger.info("book tasks pause_auto_suspend", want, "cache", busy, "keepalive", share.keepalive == true)
+    share.pause_auto_suspend = want
 end
 
 --- 通知观察者；订阅者只是 UI，绝不拥有或取消任务。

@@ -88,6 +88,21 @@ do
     Assert.is_false(share.pause_auto_suspend, "非缓存任务不拦休眠")
     dl.runs[#dl.runs].done({ ok = true })
     settle()
+
+    -- 翻页器 / KeepAlive 的 keepalive 为真时，cache 结束不能把不息屏清掉
+    share.keepalive = true
+    local held = Tasks.enqueue(spec("awake-keep", "cache", { restartable = true }))
+    settle()
+    Assert.is_true(share.pause_auto_suspend)
+    held.runs[#held.runs].done({ ok = true })
+    settle()
+    Assert.is_true(share.pause_auto_suspend, "keepalive 仍撑着")
+    share.keepalive = false
+    local release = Tasks.enqueue(spec("awake-release", "cache", { restartable = true }))
+    settle()
+    release.runs[#release.runs].done({ ok = true })
+    settle()
+    Assert.is_false(share.pause_auto_suspend, "keepalive 关了才放行")
 end
 
 -- 同类并行；异类等执行权；队首是异类时后面的同类不插队。
