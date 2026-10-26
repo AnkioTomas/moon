@@ -284,11 +284,12 @@ local ok_run, err_run = pcall(function()
     Assert.eq(text_log.blit.color, 3)
     Assert.is_true(text_log.freed)
 
-    -- 票根粗体 + MUTED（真实 Color* 带 __eq）：写 `color == nil` 会进 metamethod 对 nil
-    -- 调 getColorRGB32，炸在 blitbuffer.lua:601。显式颜色必须用 not block.color 判缺省。
+    -- Color* 带 __eq：`color == nil` 会进 metamethod 对 nil 调 getColorRGB32，炸在
+    -- blitbuffer.lua:601。票根「粗体+MUTED」、统计柱末项标签「粗体+COLOR_BLACK」都踩；
+    -- 公共 paintText 必须用 not block.color 判缺省，不能只修某一个主体。
     reset()
     text_log = {}
-    local muted = setmetatable({ tag = "muted" }, {
+    local toxic = setmetatable({ tag = "toxic" }, {
         __eq = function(_, other)
             if other == nil then error("attempt to index a nil value") end
             return false
@@ -297,15 +298,32 @@ local ok_run, err_run = pcall(function()
     local BB = package.loaded["ffi/blitbuffer"]
     local old_is_color8 = BB.isColor8
     BB.isColor8 = function(c)
-        if rawequal(c, muted) then return true end
+        if rawequal(c, toxic) then return true end
         return old_is_color8(c)
     end
     ok, err = Render.write("/tmp/compose.png", nil, {
-        { text = "MOON READING", bold = true, box = false, color = muted },
+        { text = "MOON READING", bold = true, box = false, color = toxic },
     })
-    BB.isColor8 = old_is_color8
     Assert.is_true(ok, tostring(err))
-    Assert.eq(text_log.blit.color, muted, "粗体有显式色时不得改走主题 accent")
+    Assert.eq(text_log.blit.color, toxic, "票根粗体有显式色时不得改走主题 accent")
+    -- 统计柱 Chart.appendBars highlight_last 末项：粗体 + 显式色 + accent，同一条判空路径。
+    for _idx, enabled in ipairs({ true, false }) do
+        color_screen = enabled
+        reset()
+        text_log = {}
+        BB.isColor8 = function(c)
+            if rawequal(c, toxic) then return true end
+            return old_is_color8(c)
+        end
+        ok, err = Render.write("/tmp/compose.png", nil, {
+            { text = "今", bold = true, box = false, color = toxic, accent = true },
+        })
+        Assert.is_true(ok, tostring(err))
+        Assert.eq(text_log.blit.color, enabled and accent or toxic,
+            enabled and "彩屏：accent 覆盖显式色" or "灰度屏：保留显式色")
+    end
+    color_screen = true
+    BB.isColor8 = old_is_color8
 
     -- 带框文字保持原样：白框 + 原色直接绘制。
     text_log = {}
