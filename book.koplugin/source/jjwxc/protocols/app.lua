@@ -259,6 +259,8 @@ end
 
 --- 带 token 取章节正文：已购 VIP 章的响应整包加密、content 又是 DES/Base64 密文，解密放子进程。
 --- token 无效（1004）重登一次再取；没买（1025）直接回 unpaid。
+--- CDN 偶发给出「头体自洽但整包 DES 解不开」的坏包（模拟器并行压测约千分之一到百分之二），
+--- 失败落成「响应无效」/「已购章节解密失败」且不落盘，看起来像隔一章才能看：整次请求重试一次。
 ---@param novel_id string
 ---@param chapter_id string
 ---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil)
@@ -266,28 +268,38 @@ end
 function Token.contentAsync(novel_id, chapter_id, cb)
     ---@type boolean, CancelHandle|nil
     local cancelled, job = false, nil
-    local function fetch(token, retry)
+    local function fetch(token, retry_login, retry_decrypt)
         job = get("/chapterContent", {
             novelId = novel_id, chapterId = chapter_id, versionCode = 381, token = Text.urlEncode(token),
         }, CONTENT_HEADERS, function(wire, err)
             if cancelled then return end
-            if not wire then cb(nil, err); return end
+            if not wire then
+                if retry_decrypt and err == _("响应无效") then
+                    require("utils.log").warn("jjwxc chapterContent body decrypt retry", novel_id, chapter_id)
+                    fetch(token, retry_login, false)
+                    return
+                end
+                cb(nil, err)
+                return
+            end
             local data = type(wire.data) == "table" and wire.data.content ~= nil and wire.data or wire
             local code = tonumber(wire.code)
             if code == LOGIN_CODE or code == UNPAID_CODE or type(data.content) ~= "string" or data.content == "" then
-                if code == LOGIN_CODE and retry then
+                if code == LOGIN_CODE and retry_login then
                     relogin(function(fresh, rerr)
                         if cancelled then return end
-                        if fresh then fetch(fresh, false) else cb(nil, rerr) end
+                        if fresh then fetch(fresh, false, retry_decrypt) else cb(nil, rerr) end
                     end)
                     return
                 end
                 cb(nil, wire.message or _("晋江章节内容为空"), code == UNPAID_CODE and "unpaid" or nil)
                 return
             end
+            local encrypt_type = data.encryptType
+            local content_len = #data.content
             job = Job.run(function()
                 local content = data.content
-                if data.encryptType == "jj" then
+                if encrypt_type == "jj" then
                     content = require("crypto.des").decryptBase64(content, DES_KEY, DES_IV)
                 end
                 return { text = content }
@@ -297,17 +309,24 @@ function Token.contentAsync(novel_id, chapter_id, cb)
                 timeout = 60,
                 on_done = function(res)
                     if cancelled then return end
-                    if res.text then cb(res.text) else cb(nil, _("晋江已购章节解密失败")) end
+                    if res.text then cb(res.text); return end
+                    require("utils.log").warn("jjwxc content DES failed", novel_id, chapter_id,
+                        "encryptType", tostring(encrypt_type), "content_len", content_len)
+                    if retry_decrypt then
+                        fetch(token, false, false)
+                        return
+                    end
+                    cb(nil, _("晋江已购章节解密失败"))
                 end,
                 on_failed = function(e) if not cancelled then cb(nil, tostring(e)) end end,
                 on_cancelled = function() end,
             })
         end)
     end
-    fetch(Token.get(), true)
+    fetch(Token.get(), true, true)
     return { cancel = function()
         cancelled = true
-        job:cancel()
+        if job then job:cancel() end
     end }
 end
 
