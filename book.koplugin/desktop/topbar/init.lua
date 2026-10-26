@@ -135,7 +135,9 @@ local ITEMS = {
         interval = 600,
         read = function()
             -- 旧版 KOReader 的 df 只返回 total, free，没有第三个 available
-            local _total, free, avail = ffiUtil.df(DataStorage:getDataDir())
+            local total, free, avail = ffiUtil.df(DataStorage:getDataDir())
+            if not total then return nil end
+            ---@cast free number
             avail = avail or free
             if avail == nil then return nil end
             return util.getFriendlySize(avail), "hard_drive"

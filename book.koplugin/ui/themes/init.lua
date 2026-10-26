@@ -26,6 +26,7 @@ progress_dialog 点按不关窗，转后台只是关窗；后台任务的前台�
 --]]
 
 local Device = require("device")
+---@type BlitBufferModule
 local Blitbuffer = require("ffi/blitbuffer")
 local Font = require("ui/font")
 local MoonSettings = require("utils.settings")
@@ -124,7 +125,7 @@ end
 
 --- 灰度 / RGB 令牌转绘图颜色；灰度主题保留原来的 Color8 路径。
 ---@param value number
----@return ffi.cdata*
+---@return BlitColor
 function Theme.color(value)
     if value <= 0xFF then return Blitbuffer.Color8(value) end
     return Blitbuffer.ColorRGB32(math.floor(value / 0x10000), math.floor(value / 0x100) % 0x100, value % 0x100, 0xFF)

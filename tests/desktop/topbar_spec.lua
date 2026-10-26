@@ -122,6 +122,17 @@ do -- 全部打开：左时钟 / 源，右内存 / 后台任务 / 存储 / Wi‑
     Assert.eq(texts(), "1:23 PM|source|书库|memory|0.3 GB|download|空闲|hard_drive|10.0 GB|wifi_off|brightness_6|37%|battery_android_full|100%")
 end
 
+do -- df 失败时第二个返回值是错误文本，不能拿它格式化容量。
+    local util = require("ffi/util")
+    local df = util.df
+    local storage = TopBar.find("storage")
+    util.df = function() return nil, "statvfs failed" end
+    Assert.is_nil(storage.read())
+    util.df = function() return 10000000000, 2000000000 end
+    Assert.eq(storage.read(), "2.0 GB", "兼容只有 total/free 的旧版 KOReader")
+    util.df = df
+end
+
 do -- 点按：源名换源；其余位置开快捷面板（整条是外层点击区）
     local taps = Kit.taps(desktop.root)
     Assert.len(taps, 3, "外层整条 + 源名 + 后台任务")
