@@ -11,6 +11,10 @@ local asset_cancelled
 local ensure_mode = "async"
 local render_calls
 local render_background
+local accent = 0
+package.preload["ui.themes"] = function()
+    return { current = function() return { color = { accent = accent } } end }
+end
 
 package.preload["utils.paths"] = function()
     return {
@@ -41,6 +45,7 @@ package.preload["features.lockscreen.background"] = function()
             }
         end,
         invalidate = function() end,
+        dayKey = function() return "2026-10-26" end,
     }
 end
 
@@ -72,6 +77,7 @@ package.loaded["features.lockscreen.compose"] = nil
 local Compose = require("features.lockscreen.compose")
 
 local component = {
+    id = "current",
     layout = "quote",
     blocks = function(position)
         return { { text = position } }
@@ -86,6 +92,17 @@ local function plan(asset)
         wide = true,
     }
 end
+
+-- 模式 / 主题色切换必须使已有 PNG 失效；灰度时改预设色不改变有效强调色。
+local key_plan = plan()
+local gray_key = Compose.dayKey(key_plan)
+accent = 0x0756AD
+local blue_key = Compose.dayKey(key_plan)
+Assert.is_true(gray_key ~= blue_key)
+accent = 0x7038A0
+Assert.is_true(Compose.dayKey(key_plan) ~= blue_key)
+accent = 0
+Assert.eq(Compose.dayKey(key_plan), gray_key)
 
 local function reset()
     asset_cb = nil

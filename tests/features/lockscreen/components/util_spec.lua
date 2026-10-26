@@ -47,6 +47,8 @@ local bar, bar_h = U.progressBlocks(0, 0, 200, 25)
 Assert.eq(bar_h, 6)
 Assert.eq(bar[1].color, U.TRACK)
 Assert.eq(bar[2].width, 50)
+Assert.is_true(bar[2].accent, "进度填充是强调内容，轨道仍灰度")
+Assert.is_nil(bar[1].accent)
 
 -- 书卡文字头：按实测行高逐行下移，不写死偏移；长书名压成单行；空作者跳过。
 -- 替身：每字宽 = 字号，行高 = 字号 × 1.5，超宽就折行（高度翻倍）。

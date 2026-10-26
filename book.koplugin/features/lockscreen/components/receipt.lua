@@ -157,7 +157,7 @@ function M.blocks(rect, book)
         {
             kind = "panel", x = x, y = y + math.floor(height * 0.535),
             width = math.floor(width * percent / 100), height = 7,
-            radius = 0, color = Blitbuffer.COLOR_BLACK,
+            radius = 0, color = Blitbuffer.COLOR_BLACK, accent = true,
         },
         {
             text = page_line, x = x, y = y + math.floor(height * 0.56),

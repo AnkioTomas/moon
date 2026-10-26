@@ -22,18 +22,31 @@ local rounded_paints = 0
 local lightens = {}
 local text_log
 local paint_order
+local shape_log
+local accent = 0x0756AD
 
 local function buffer()
     return {
         fill = function() end,
-        paintRect = function() end,
-        paintRoundedRect = function() rounded_paints = rounded_paints + 1 end,
+        paintRect = function(_self, _x, _y, _w, _h, color) shape_log = { color = color, rgb = false } end,
+        paintRectRGB32 = function(_self, _x, _y, _w, _h, color) shape_log = { color = color, rgb = true } end,
+        paintRoundedRect = function(_self, _x, _y, _w, _h, color)
+            rounded_paints = rounded_paints + 1
+            shape_log = { color = color, rgb = false }
+        end,
+        paintRoundedRectRGB32 = function(_self, _x, _y, _w, _h, color)
+            rounded_paints = rounded_paints + 1
+            shape_log = { color = color, rgb = true }
+        end,
         lightenRect = function(_, x, y, w, h, by)
             lightens[#lightens + 1] = { x = x, y = y, w = w, h = h, by = by }
         end,
         blitFrom = function() cutout_blits = cutout_blits + 1 end,
         colorblitFrom = function(_, _, x, y, _, _, _, _, color)
-            text_log.blit = { x = x, y = y, color = color }
+            text_log.blit = { x = x, y = y, color = color, rgb = false }
+        end,
+        colorblitFromRGB32 = function(_self, _source, x, y, _ox, _oy, _w, _h, color)
+            text_log.blit = { x = x, y = y, color = color, rgb = true }
         end,
         copy = function()
             if paint_order then paint_order[#paint_order + 1] = "snapshot" end
@@ -57,6 +70,7 @@ package.preload["ffi/blitbuffer"] = function()
         COLOR_BLACK = 1,
         COLOR_GRAY_5 = 5,
         COLOR_GRAY_D = 13,
+        isColor8 = function(color) return color <= 255 end,
         new = function(_, _, buffer_type)
             buffer_types[#buffer_types + 1] = buffer_type
             return buffer()
@@ -66,6 +80,12 @@ end
 
 local color_screen = true
 package.loaded["device"] = { screen = { night_mode = false, isColorEnabled = function() return color_screen end } }
+package.preload["ui.themes"] = function()
+    return {
+        current = function() return { color = { accent = accent } } end,
+        color = function(value) return value end,
+    }
+end
 package.preload["ui/font"] = function()
     return { getFace = function() return {} end }
 end
@@ -91,6 +111,7 @@ end
 package.preload["ui/widget/textboxwidget"] = function()
     return { new = function(_, opts)
         text_log.fgcolor = opts.fgcolor
+        text_log.bgcolor = opts.bgcolor
         return {
             _bb = {
                 getWidth = function() return opts.width end,
@@ -183,6 +204,17 @@ local ok_run, err_run = pcall(function()
     Assert.eq(buffer_types[1], 1, "灰度屏用 BB8 画布")
     color_screen = true
 
+    -- 旧屏幕接口没有彩色能力查询时，仍按灰度合成而不是调用 nil。
+    local screen = package.loaded["device"].screen
+    local is_color_enabled = screen.isColorEnabled
+    screen.isColorEnabled = nil
+    reset()
+    text_log = {}
+    Assert.is_true((Render.write("/tmp/compose.png", nil, { { text = "标题", bold = true, box = false } })))
+    Assert.eq(buffer_types[1], 1)
+    Assert.is_false(text_log.blit.rgb)
+    screen.isColorEnabled = is_color_enabled
+
     -- 票根缺口必须逐行恢复原背景，并释放背景快照。
     reset()
     ok, err = Render.write("/tmp/compose.png", nil, {
@@ -235,7 +267,7 @@ local ok_run, err_run = pcall(function()
     end
     Assert.eq(decodes, 1, "logo 只解码一次")
 
-    -- 无框文字不得整块贴 TextBoxWidget 白底：黑字蒙版反相后按块颜色 colorblit。
+    -- 无框文字不得整块贴 TextBoxWidget 白底：白字黑底蒙版按块颜色 colorblit。
     reset()
     text_log = {}
     ok, err = Render.write("/tmp/compose.png", nil, {
@@ -243,8 +275,9 @@ local ok_run, err_run = pcall(function()
     })
     Assert.is_true(ok, tostring(err))
     Assert.is_nil(err)
-    Assert.eq(text_log.fgcolor, 1, "蒙版必须用黑字渲染")
-    Assert.is_true(text_log.inverted)
+    Assert.eq(text_log.fgcolor, 0, "蒙版必须用白字渲染")
+    Assert.eq(text_log.bgcolor, 1)
+    Assert.is_nil(text_log.inverted, "不依赖画布反色")
     Assert.is_nil(text_log.opaque)
     Assert.eq(text_log.blit.x, 5)
     Assert.eq(text_log.blit.y, 7)
@@ -258,6 +291,44 @@ local ok_run, err_run = pcall(function()
     Assert.eq(text_log.fgcolor, 3)
     Assert.is_true(text_log.opaque)
     Assert.is_nil(text_log.blit)
+
+    -- 五种主题色：标题、进度与统计柱实际使用 RGB；正文、装饰线与卡片底不跟着染色。
+    for _idx, theme_color in ipairs({ 0x0756AD, 0x00734F, 0x7038A0, 0xB32635, 0xAD4C00 }) do
+        accent = theme_color
+        for _mode_idx, enabled in ipairs({ true, false }) do
+            color_screen = enabled
+            text_log = {}
+            Assert.is_true((Render.write("/tmp/compose.png", nil, { { text = "书名", bold = true, box = false } })))
+            Assert.eq(text_log.blit.color, enabled and accent or 1)
+            Assert.eq(text_log.blit.rgb, enabled)
+            text_log = {}
+            Assert.is_true((Render.write("/tmp/compose.png", nil, { { text = "书名", bold = true } })))
+            if enabled then
+                Assert.eq(text_log.blit.color, accent, "带白底标题也必须按蒙版保留 RGB")
+            else
+                Assert.is_true(text_log.opaque)
+            end
+            for _kind_idx, kind in ipairs({ "rule", "vbar", "panel" }) do
+                Render.paintBlock(buffer(), {
+                    kind = kind, x = 0, y = 0, width = 40, height = 6,
+                    value = 1, radius = kind == "vbar" and 2 or 0, color = 1, accent = true,
+                }, 100, 200)
+                Assert.eq(shape_log.color, enabled and accent or 1)
+                Assert.eq(shape_log.rgb, enabled)
+            end
+        end
+        color_screen = true
+        text_log = {}
+        Render.paintBlock(buffer(), { text = "正文", box = false }, 100, 200)
+        Assert.eq(text_log.blit.color, 1)
+        text_log = {}
+        Render.paintBlock(buffer(), { text = "说明", bold = true, color = 3, box = false }, 100, 200)
+        Assert.eq(text_log.blit.color, 3, "显式灰度说明不染色")
+        Render.paintBlock(buffer(), { kind = "rule" }, 100, 200)
+        Assert.eq(shape_log.color, 5)
+        Render.paintBlock(buffer(), { kind = "panel" }, 100, 200)
+        Assert.eq(shape_log.color, 0)
+    end
 
     -- 半透明卡只混合不填充：不画阴影和实心圆角，行覆盖恰好是整个矩形、圆角行收窄。
     reset()
@@ -313,7 +384,6 @@ local ok_run, err_run = pcall(function()
     Assert.eq(warnings, 0)
 
     -- 离屏绘制期间关掉 night_mode（否则 ImageWidget 预先反色，存成底片），写完和出错都恢复。
-    local screen = package.loaded["device"].screen
     local during
     local probe = {
         getSize = function() return { w = 10, h = 10 } end,

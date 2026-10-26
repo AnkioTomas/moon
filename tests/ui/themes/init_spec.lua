@@ -151,5 +151,8 @@ Assert.eq(Theme.current().color.accent, display.theme_color, "改色后缓存失
 Assert.eq(purple.color.accent, 0x7038A0, "旧控件持有的令牌不原地修改")
 color_enabled = false
 Assert.eq(Theme.current(), Theme.get(Theme.id()), "关彩色后不受主题色影响")
+local screen = require("device").screen
+screen.isColorEnabled = nil
+Assert.eq(Theme.current(), Theme.get(Theme.id()), "旧屏幕没有彩色查询接口时保持灰度")
 
 return true
