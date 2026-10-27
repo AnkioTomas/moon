@@ -356,6 +356,8 @@ downloadParts = function(spec, manifest, idx, done, report, done_bytes, total)
     Mirror.download(spec.base_path .. "/" .. part.file, {
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
+        -- 15MB 一片，断在中途整片重下太亏：保留 .part，换源/重试都带 Range 续传。
+        resume = true,
         on_progress = total > 0 and function(written)
             report("part", done_bytes + written, total, idx, #parts)
         end or nil,

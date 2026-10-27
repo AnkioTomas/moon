@@ -263,6 +263,126 @@ do
     Assert.is_nil(io.open(dest .. ".part", "rb"))
 end
 
+-- ── resume 续传 ─────────────────────────────────────────
+local function writeFile(path, data)
+    local f = assert(io.open(path, "wb"))
+    f:write(data)
+    f:close()
+end
+local function readFile(path)
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    local data = f:read("*a")
+    f:close()
+    return data
+end
+
+-- 已有 .part 时带 Range 发请求，206 追加，进度含已下基数。
+do
+    local original_stream = Request.stream
+    local dest = Config.dir() .. "/.moon/test_download_resume.bin"
+    writeFile(dest .. ".part", "pay")
+    os.remove(dest)
+    local seen_headers, progress = nil, {}
+    Request.stream = function(opts, h)
+        seen_headers = opts.headers
+        h.on_headers(206, { ["Content-Length"] = "4", ["Content-Range"] = "bytes 3-6/7" })
+        h.on_data("load")
+        h.on_done()
+        return { cancel = function() end }
+    end
+    local ok_d, err_d
+    Request.download({
+        url = "https://example.test/file",
+        resume = true,
+        on_progress = function(n) progress[#progress + 1] = n end,
+    }, dest, function(ok, err) ok_d, err_d = ok, err end)
+    Request.stream = original_stream
+
+    Assert.eq(seen_headers.Range, "bytes=3-")
+    Assert.is_true(ok_d)
+    Assert.is_nil(err_d)
+    Assert.eq(readFile(dest), "payload")
+    Assert.eq(progress[#progress], 7)
+    Assert.is_nil(io.open(dest .. ".part", "rb"))
+    os.remove(dest)
+end
+
+-- 服务器不认 Range 回 200：截断重下，不能把旧半截拼在前面。
+do
+    local original_stream = Request.stream
+    local dest = Config.dir() .. "/.moon/test_download_resume200.bin"
+    writeFile(dest .. ".part", "pay")
+    os.remove(dest)
+    Request.stream = function(_, h)
+        h.on_headers(200, { ["Content-Length"] = "7" })
+        h.on_data("payload")
+        h.on_done()
+        return { cancel = function() end }
+    end
+    local ok_d
+    Request.download({ url = "https://example.test/file", resume = true }, dest, function(ok) ok_d = ok end)
+    Request.stream = original_stream
+
+    Assert.is_true(ok_d)
+    Assert.eq(readFile(dest), "payload")
+    os.remove(dest)
+end
+
+-- 续传中途失败：.part 保留已下字节，下次接着下；不带 resume 仍按旧行为删。
+do
+    local original_stream = Request.stream
+    local dest = Config.dir() .. "/.moon/test_download_resume_fail.bin"
+    writeFile(dest .. ".part", "pay")
+    os.remove(dest)
+    Request.stream = function(_, h)
+        h.on_headers(206, { ["Content-Length"] = "4", ["Content-Range"] = "bytes 3-6/7" })
+        h.on_data("lo")
+        h.on_done("boom")
+        return { cancel = function() end }
+    end
+    local ok_d, err_d
+    Request.download({ url = "https://example.test/file", resume = true }, dest, function(ok, err) ok_d, err_d = ok, err end)
+    Assert.is_false(ok_d)
+    Assert.eq(err_d, "boom")
+    Assert.eq(readFile(dest .. ".part"), "paylo")
+    Assert.is_nil(io.open(dest, "rb"))
+
+    -- 同一路径不带 resume 再失败：.part 必须删掉（旧契约）。
+    Request.stream = function(_, h)
+        h.on_headers(200, { ["Content-Length"] = "7" })
+        h.on_data("pa")
+        h.on_done("boom")
+        return { cancel = function() end }
+    end
+    Request.download({ url = "https://example.test/file" }, dest, function(ok, err) ok_d, err_d = ok, err end)
+    Request.stream = original_stream
+    Assert.is_false(ok_d)
+    Assert.is_nil(io.open(dest .. ".part", "rb"))
+end
+
+-- 206 的起始偏移与本地对不上：报错且不碰 .part（追加必坏文件）。
+do
+    local original_stream = Request.stream
+    local dest = Config.dir() .. "/.moon/test_download_resume_mismatch.bin"
+    writeFile(dest .. ".part", "pay")
+    os.remove(dest)
+    Request.stream = function(_, h)
+        h.on_headers(206, { ["Content-Length"] = "2", ["Content-Range"] = "bytes 5-6/7" })
+        h.on_data("ad")
+        h.on_done()
+        return { cancel = function() end }
+    end
+    local ok_d, err_d
+    Request.download({ url = "https://example.test/file", resume = true }, dest, function(ok, err) ok_d, err_d = ok, err end)
+    Request.stream = original_stream
+
+    Assert.is_false(ok_d)
+    Assert.matches(err_d, "range mismatch")
+    Assert.eq(readFile(dest .. ".part"), "pay")
+    os.remove(dest .. ".part")
+end
+
 -- ── SNI 补丁：turbo 握手前对域名补 SNI（无 SNI 时 Cloudflare 类主机直接挂起到超时）──
 do
     local UIManager = require("ui/uimanager")

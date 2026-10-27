@@ -30,6 +30,7 @@ Cache.fetch(key, ttl, load, cb) 缓存解码结果，别手写「读缓存 → �
 ---@field content_type string|nil POST body 的 Content-Type
 ---@field on_progress fun(bytes: number, total: number|nil)|nil 仅 download；total 取自 Content-Length
 ---@field max_bytes number|nil 仅 download；超限失败
+---@field resume boolean|nil 仅 download：失败保留 .part，下次带 Range 续传；服务器回 200 时自动重下
 ---@field cache_ttl number|nil 仅 GET；>0 时走 http.cache，秒（按 auth_username 隔离）
 
 --- request / stream / download：一张表，必须带 url。
@@ -235,7 +236,9 @@ end
 
 --- 非阻塞下载：写入 dest.part，成功后原子改名为 dest。
 --- 取消时 stream 必回 on_done("cancelled")，关文件 / 删 .part 都在那里收口。
----@param opts HttpRequest 可带 on_progress / max_bytes
+--- opts.resume：失败保留 .part，下次带 Range 从已有字节续传；服务器不支持 Range
+--- 回 200 时在拿到响应头后截断重下，调用方无感。
+---@param opts HttpRequest 可带 on_progress / max_bytes / resume
 ---@param dest string
 ---@param cb fun(ok: boolean, err: any, res: table|nil)
 ---@return HttpJob
@@ -257,10 +260,29 @@ function Request.download(opts, dest, cb)
         cb(ok, err, res)
     end
 
-    local file, open_err = io.open(tmp, "wb")
-    if not file then
-        return Fetch.fail("http download", done, false, open_err)
+    -- 续传起点只能在发请求前定：已有 .part 多大就从哪续；能不能续要等响应头（206/200）才知道。
+    local resume_from = 0
+    if opts.resume then
+        local probe = io.open(tmp, "rb")
+        if probe then
+            resume_from = probe:seek("end") or 0
+            probe:close()
+        end
     end
+    local req_opts = opts
+    if resume_from > 0 then
+        local copied = {}
+        for key, value in pairs(opts) do copied[key] = value end
+        local headers = {}
+        for key, value in pairs(opts.headers or {}) do headers[key] = value end
+        headers.Range = "bytes=" .. resume_from .. "-"
+        copied.headers = headers
+        req_opts = copied
+        logger.dbg("book.http download resume", target, resume_from)
+    end
+
+    -- 文件推迟到响应头再开：206 追加、其余截断，打开模式由服务器是否认 Range 决定。
+    local file
 
     --- 已注定失败（超限/写盘错）就立刻断流，不再白拉剩余 body；on_done 仍会收口。
     ---@param reason string
@@ -269,17 +291,40 @@ function Request.download(opts, dest, cb)
         if stream_job then stream_job:cancel() end
     end
 
-    stream_job = Request.stream(opts, {
+    stream_job = Request.stream(req_opts, {
         on_headers = function(code, headers)
             response.code = code
             response.headers = headers
-            total = tonumber((Request.header({ headers = headers }, "Content-Length")))
+            local header_view = { headers = headers }
+            local length = tonumber((Request.header(header_view, "Content-Length")))
+            local append = false
+            if resume_from > 0 and tonumber(code) == 206 then
+                local range = Request.header(header_view, "Content-Range")
+                local start = range and tonumber(range:match("^bytes%s+(%d+)%-"))
+                if start and start ~= resume_from then
+                    -- 服务器给的偏移跟本地对不上，追加必坏文件；留 .part 换下一次尝试。
+                    abort("download range mismatch: " .. start .. "/" .. resume_from)
+                    return
+                end
+                append = true
+                written = resume_from
+                total = (range and tonumber(range:match("/(%d+)%s*$")))
+                    or (length and resume_from + length or nil)
+            else
+                total = length
+            end
+            local open_err
+            file, open_err = io.open(tmp, append and "ab" or "wb")
+            if not file then
+                abort(open_err)
+                return
+            end
             if max_bytes and total and total > max_bytes then
                 abort("download too large")
             end
         end,
         on_data = function(chunk)
-            if write_err or not Request.ok(response.code) then return end
+            if write_err or not file or not Request.ok(response.code) then return end
             if max_bytes and written + #chunk > max_bytes then
                 abort("download too large")
                 return
@@ -293,7 +338,8 @@ function Request.download(opts, dest, cb)
             if opts.on_progress then opts.on_progress(written, total) end
         end,
         on_done = function(err)
-            local closed, close_err = file:close()
+            local closed, close_err
+            if file then closed, close_err = file:close() end
             err = write_err or err or (not closed and close_err) or nil
             -- 连接中途断开时 turbo 未必报错：按 Content-Length 校验，半截包不落位（压缩传输时长度不可比）。
             if not err and total and written < total and not Request.header(response, "Content-Encoding") then
@@ -302,7 +348,7 @@ function Request.download(opts, dest, cb)
             local moved, rename_err
             if not err then moved, rename_err = os.rename(tmp, dest) end
             if not moved then
-                os.remove(tmp)
+                if not opts.resume then os.remove(tmp) end
                 return done(false, err or rename_err, response)
             end
             done(true, nil, response)
