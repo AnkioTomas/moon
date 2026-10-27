@@ -296,6 +296,13 @@ image = select(1, Book.cover(nil, nil, {
 }, 80, 120, {}))
 Assert.eq(coverImage(image).src, "https://remote/book-3.jpg")
 
+-- 封面一律拉满框（不保比例）：2:3 常态框与拉宽后的宽框都不传 stretch
+-- （Image 的 stretch=true 是按比例缩进，传了反而在宽框里留白边）。
+for _, dims in ipairs({ { 80, 120 }, { 120, 120 }, { 90, 120 } }) do
+    local filled = select(1, Book.cover(nil, nil, { title = "拉满" }, dims[1], dims[2], {}))
+    Assert.is_nil(coverImage(filled).stretch, dims[1] .. "x" .. dims[2])
+end
+
 local with_more = select(1, Book.cover(nil, nil, {}, 80, 120, { more = true }))
 Assert.eq(with_more.dimen.w, 80)
 Assert.eq(with_more.dimen.h, 120)
