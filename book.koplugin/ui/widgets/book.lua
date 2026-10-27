@@ -505,14 +505,14 @@ function Book.cover(plugin, source, book, cw, ch, opts)
     local cover_w = math.max(Theme.px(16), cw - cover_pad * 2)
     local cover_h = math.max(Theme.px(24), ch - cover_pad * 2)
     local on_ready = opts.on_ready
+    -- 封面不保比例、一律拉满框：格子拉宽后图跟着铺满，不留白边。
+    -- 注意 Image 的 stretch=true 是按比例缩进（scale_factor=0），这里故意不传。
     local image = Image.widget{
         src = req and req.url or nil,
         headers = req and req.headers or nil,
         width = cover_w,
         height = cover_h,
         alpha = false,
-        -- 封面框比 2:3 宽（格子留给封面拉宽）时拉伸铺满，免得框里留白边。
-        stretch = cover_w * 3 > cover_h * 2 + 2,
         style = {},
         fallback = PlainCover:new{
             title = title,
