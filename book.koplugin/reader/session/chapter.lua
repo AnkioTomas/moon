@@ -9,7 +9,8 @@ local _ = require("gettext")
 
 ---@class ReaderChapterSession
 ---@field identity BookIdentity|nil 书籍身份与属主源
----@field toc BookChapter[] 从 books.toc 恢复的目录快照
+---@field toc BookChapter[] 从 books.toc 恢复的目录快照（可为过期基线，新鲜度看 toc_stale）
+---@field toc_stale boolean|nil toc 已过 TTL：先当基线用，afterBootstrap 试刷新，失败不丢
 ---@field request { cancel: fun() }|nil 在途章节打开任务
 ---@field target { path: string, within: number|nil, direction: "prev"|"next"|nil, xpointer: string|nil }|nil 已下载、等待 ReaderReady 的目标
 ---@field toc_job { cancel: fun() }|nil 目录恢复任务
@@ -180,9 +181,15 @@ function Chapter.onReaderReady(plugin, session)
         chapter.identity = identity
     else
         Chapter.clearActiveChapter(nil)
+        -- 过期目录也先装上当基线：离线时它是唯一真相（目录展示、章末切章都靠它），
+        -- 是否新鲜只决定 afterBootstrap 要不要试刷新，不能决定会话有没有目录。
+        local SourceToc = require("source.toc")
+        local toc = SourceToc.read(identity.source_id, identity.stable_id, true)
         chapter = {
             identity = identity,
-            toc = require("source.toc").read(identity.source_id, identity.stable_id),
+            toc = toc,
+            toc_stale = toc ~= nil
+                and SourceToc.read(identity.source_id, identity.stable_id) == nil,
             switching = false,
         }
         chapter_session = chapter
@@ -220,7 +227,8 @@ function Chapter.afterBootstrap(plugin, session)
     })
     local identity = chapter.identity
     if not identity then return end
-    local toc_current = type(source.isTocCurrent) ~= "function" or source:isTocCurrent(chapter.toc)
+    local toc_current = (type(source.isTocCurrent) ~= "function" or source:isTocCurrent(chapter.toc))
+        and not chapter.toc_stale
     if toc_current and type(chapter.toc) == "table" and #chapter.toc > 0 then
         schedulePrefetch(chapter)
         return
@@ -229,11 +237,14 @@ function Chapter.afterBootstrap(plugin, session)
     if type(load_toc) ~= "function" then return end
     chapter.toc_job = load_toc(source, identity, function(toc)
         chapter.toc_job = nil
-        if chapter_session ~= chapter or session.chapter ~= chapter
-            or type(toc) ~= "table" or #toc == 0 then
+        if chapter_session ~= chapter or session.chapter ~= chapter then return end
+        if type(toc) ~= "table" or #toc == 0 then
+            -- 刷新失败（离线）：基线目录照常预取，切章/展示不受影响。
+            schedulePrefetch(chapter)
             return
         end
         chapter.toc = toc
+        chapter.toc_stale = false
         Snapshot.refresh(session)
         require("ui/uimanager"):setDirty(plugin.ui.dialog, "ui")
         schedulePrefetch(chapter)
