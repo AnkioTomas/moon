@@ -152,6 +152,7 @@ package.loaded["book.books_db"] = nil
 package.loaded["book.store"] = nil
 local ReaderPrefs = require("reader.prefs")
 
+local save_settings_events = 0
 local ui = {
     font = {
         font_face = "Demo Face",
@@ -185,7 +186,17 @@ local ui = {
         onSetPageHorizMargins = function() end,
         onSetPageTopAndBottomMargin = function() end,
     },
-    handleEvent = function() end,
+    -- 模拟原生模块：SaveSettings 才把活状态写入 sidecar（与 CloseDocument 时序一致）。
+    handleEvent = function(self, ev)
+        if ev.name ~= "SaveSettings" then return end
+        save_settings_events = save_settings_events + 1
+        local live = self._live_doc
+        if type(live) == "table" then
+            for key, value in pairs(live) do
+                self.doc_settings:saveSetting(key, value)
+            end
+        end
+    end,
     dialog = {},
 }
 
@@ -243,6 +254,59 @@ Assert.eq(fresh.data.copt_font_base_weight, 0.5)
 Assert.eq(fresh.data.copt_h_page_margins[1], 40)
 Assert.eq(fresh.data.font_face, "Demo Face")
 Assert.eq(fresh.data.book_reader_font_id, "demo.ttf")
+
+-- CloseDocument 早于 FlushSettings：sidecar 仍是旧值，活状态只在模块内存里。
+-- capture 必须先广播 SaveSettings，把 DOC_KEYS（反转翻页、样式微调、语种…）刷进 sidecar 再采。
+ui.doc_settings.data.inverse_reading_order = false
+ui.doc_settings.data.style_tweaks = nil
+ui.doc_settings.data.text_lang = "en"
+ui._live_doc = {
+    inverse_reading_order = true,
+    invert_ui_layout = true,
+    style_tweaks = { lines_line_height_large = 2 },
+    text_lang = "zh-Hans",
+    hyphenation = false,
+    floating_punctuation = 1,
+    css = "./data/epub.css",
+}
+save_settings_events = 0
+Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
+Assert.is_true(save_settings_events >= 1, "capture 先广播 SaveSettings")
+local live = ReaderPrefs.load(identity)
+Assert.is_true(live.doc.inverse_reading_order, "SaveSettings 后 sidecar 已是活状态")
+Assert.is_true(live.doc.invert_ui_layout)
+Assert.eq(live.doc.style_tweaks.lines_line_height_large, 2)
+Assert.eq(live.doc.text_lang, "zh-Hans")
+Assert.is_false(live.doc.hyphenation)
+Assert.eq(live.doc.floating_punctuation, 1)
+Assert.eq(live.doc.css, "./data/epub.css")
+local next_chapter = {
+    data = {},
+    saveSetting = ui.doc_settings.saveSetting,
+    readSetting = ui.doc_settings.readSetting,
+    delSetting = ui.doc_settings.delSetting,
+}
+Assert.is_true(ReaderPrefs.inject(next_chapter, { file = "/chapter2.html", setFontFace = function() end }))
+Assert.is_true(next_chapter.data.inverse_reading_order)
+Assert.is_true(next_chapter.data.invert_ui_layout)
+Assert.eq(next_chapter.data.style_tweaks.lines_line_height_large, 2)
+Assert.eq(next_chapter.data.text_lang, "zh-Hans")
+ui._live_doc = nil
+
+-- SaveSettings 没挂上时，view 兜底仍能采到反转翻页。
+local bare = {
+    font = ui.font,
+    document = ui.document,
+    doc_settings = {
+        data = { inverse_reading_order = false },
+        saveSetting = ui.doc_settings.saveSetting,
+        readSetting = ui.doc_settings.readSetting,
+        delSetting = ui.doc_settings.delSetting,
+    },
+    view = { inverse_reading_order = true, invert_ui_layout = true },
+}
+Assert.is_true(ReaderPrefs.captureAndSave(bare, identity))
+Assert.is_true(ReaderPrefs.load(identity).doc.inverse_reading_order, "无 handleEvent 时跟 view")
 
 -- 整本书的单一 sidecar 就是偏好真相，不读写跨文件偏好。
 local whole_book = { source_id = "moon", stable_id = "book-1" }
