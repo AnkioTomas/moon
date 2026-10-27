@@ -32,6 +32,9 @@ stub("utils.wake", {
     GRACE = 0, boot = function() end, suspend = function() end, resume = function() end, exit = function() end,
     timed = function(_label, fn, ...) return fn(...) end,
 })
+stub("utils.rotation", {
+    remember = function() end, apply = function() end, injectDocSettings = function() end,
+})
 stub("ui/widget/infomessage", {
     new = function(_, fields) calls.version_dialog = fields return fields end,
 })
