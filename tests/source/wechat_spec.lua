@@ -38,9 +38,17 @@ end)
 local toc_payload = {}
 stub("book.books_db", function()
     return {
-        reconcile = function() return true, 0 end,
+        reconcile = function(_, books) remembered_stats_books.last_snapshot = books; return true, 0 end,
         stableIdsBySource = function() return {} end,
         get = function() return existing_book end,
+        getMany = function(_, ids)
+            local out = {}
+            for _idx, id in ipairs(ids) do
+                local row = (remembered_stats_books.local_rows or {})[id]
+                if row then out[id] = row end
+            end
+            return out
+        end,
         getToc = function(_, stable_id) return toc_payload[stable_id] end,
         setToc = function(_, stable_id, payload)
             toc_payload[stable_id] = payload
@@ -1213,6 +1221,90 @@ do
     toc_payload["bcancel"] = nil
     fake_client.bookmarkListAsync = nil
     fake_client.myReviewsAsync = nil
+end
+
+-- 增量拉书架：有游标时只拉 id 增量，变更补详情、其余用本地行拼快照，不走全量
+do
+    remembered_stats_books.local_library = { "a", "b", "gone" }
+    remembered_stats_books.pending_adds = {}
+    remembered_stats_books.local_rows = {
+        a = { source_id = "wechat", stable_id = "a", title = "甲", deleted = 0 },
+        b = { source_id = "wechat", stable_id = "b", title = "乙旧", category = "我的分组", deleted = 0 },
+        gone = { source_id = "wechat", stable_id = "gone", title = "删", deleted = 0 },
+    }
+    local ids_req, books_req, full_called = nil, nil, false
+    fake_client.shelfSyncIdsAsync = function(_, synckey, count, cb)
+        ids_req = { synckey = synckey, count = count }
+        cb({ synckey = 101, bookCount = 3, removed = { "gone" },
+            bookIds = { { bookId = "b", type = 0 }, { bookId = "c", type = 0 } },
+            archive = {}, albumRemoved = {}, removedArchive = {} })
+        return { cancel = function() end }
+    end
+    fake_client.shelfSyncBooksAsync = function(_, ids, cb)
+        books_req = ids
+        cb({ books = { { bookId = "b", title = "乙新", category = "玄幻" }, { bookId = "c", title = "丙" } },
+            bookProgress = { { bookId = "c", progress = 50 } }, albums = {}, emptyInfoIds = {} })
+        return { cancel = function() end }
+    end
+    fake_client.shelfSyncAsync = function(_, cb)
+        full_called = true
+        cb({ books = {} })
+        return { cancel = function() end }
+    end
+    local src = WeChat.new()
+    src.cfg.wr_vid = "v1"
+    src.cfg.shelf_cursor = { vid = "v1", synckey = 100 }
+    local result
+    src:syncBooksAsync(nil, function(r) result = r end)
+    require("support.stubs").flush()
+    Assert.not_nil(result)
+    Assert.is_false(full_called, "增量对得齐时不走全量")
+    Assert.eq(ids_req.synckey, 100)
+    Assert.eq(ids_req.count, 3)
+    Assert.len(books_req, 2)
+    local snap = {}
+    for _idx, b in ipairs(remembered_stats_books.last_snapshot) do snap[b.stable_id] = b end
+    Assert.eq(snap.a.title, "甲")
+    Assert.eq(snap.b.title, "乙新")
+    Assert.eq(snap.b.category, "我的分组", "分组无变更时保留本地分组名")
+    Assert.is_nil(snap.gone, "removed 的书不进快照")
+    Assert.not_nil(snap.c, "新增的书经 syncbook 补进快照")
+    Assert.eq(src.cfg.shelf_cursor.synckey, 101, "reconcile 成功后推进游标")
+    fake_client.shelfSyncIdsAsync, fake_client.shelfSyncBooksAsync = nil, nil
+    remembered_stats_books.local_library, remembered_stats_books.local_rows = nil, nil
+    remembered_stats_books.last_snapshot = nil
+end
+
+-- 增量对不齐（数量对不上）回退全量，全量成功后游标取全量回包的 synckey
+do
+    remembered_stats_books.local_library = { "a" }
+    remembered_stats_books.pending_adds = {}
+    remembered_stats_books.local_rows = {
+        a = { source_id = "wechat", stable_id = "a", title = "甲", deleted = 0 },
+    }
+    local full_called = false
+    fake_client.shelfSyncIdsAsync = function(_, _synckey, _count, cb)
+        cb({ synckey = 102, bookCount = 99, removed = {}, bookIds = {},
+            archive = {}, albumRemoved = {}, removedArchive = {} })
+        return { cancel = function() end }
+    end
+    fake_client.shelfSyncAsync = function(_, cb)
+        full_called = true
+        cb({ synckey = 555, books = { { bookId = "a", title = "甲" } } })
+        return { cancel = function() end }
+    end
+    local src = WeChat.new()
+    src.cfg.wr_vid = "v1"
+    src.cfg.shelf_cursor = { vid = "v1", synckey = 100 }
+    local result
+    src:syncBooksAsync(nil, function(r) result = r end)
+    require("support.stubs").flush()
+    Assert.not_nil(result)
+    Assert.is_true(full_called, "数量对不齐应回退全量")
+    Assert.eq(src.cfg.shelf_cursor.synckey, 555)
+    fake_client.shelfSyncIdsAsync = nil
+    remembered_stats_books.local_library, remembered_stats_books.local_rows = nil, nil
+    remembered_stats_books.last_snapshot = nil
 end
 
 -- 还原打桩，避免影响本文件之后的其它用例

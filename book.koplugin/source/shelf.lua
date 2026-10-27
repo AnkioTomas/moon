@@ -141,6 +141,9 @@ local function pushAdded(source_id, remote, remote_ids, report, cb)
     end, _("正在同步加入书架的书"), report, cb)
 end
 
+-- 自己编排同步的源（如微信增量拉取）复用同一份加架上行，不另写一份。
+Shelf.pushAdded = pushAdded
+
 --- 书架同步。dirty_only：只推本地删/加，不拉书架、不对账；
 --- 全量：先推删 → 拉远端 → 推本地新加 →（有推送则再拉）→ reconcile。
 ---@param source_id string

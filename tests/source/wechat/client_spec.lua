@@ -61,7 +61,7 @@ package.preload["source.wechat.eink"] = function()
         callAsync = function(method, path, opts, cb)
             posted.eink = { method = method, path = path, query = opts.query, body = opts.body }
             if path == "/shelf/sync" then
-                cb({ books = {}, archive = {} })
+                cb(posted.shelf_reply or { books = {}, archive = {} })
             elseif path == "/book/getProgress" then
                 cb({ bookId = "42", book = { chapterUid = 1, progress = 10 } })
             elseif path == "/book/underlines" then
@@ -165,6 +165,19 @@ do
     Assert.eq(req.method .. req.path, "GET/shelf/sync")
     Assert.eq(req.query.album, 1)
     Assert.not_nil(wire)
+
+    -- 增量索引：带游标与本地计数，只要 id 不要元数据
+    req = call(client.shelfSyncIdsAsync, client, 100, 18, function(d) wire = d end)
+    Assert.eq(req.method .. req.path, "GET/shelf/sync")
+    Assert.eq(req.query.synckey, 100)
+    Assert.eq(req.query.onlyBookid, 1)
+    Assert.eq(req.query.localBookCount, 18)
+
+    -- 变更补详情：POST /shelf/syncbook 带 bookIds
+    req = call(client.shelfSyncBooksAsync, client, { "b1", "b2" }, function() end)
+    Assert.eq(req.method .. req.path, "POST/shelf/syncbook")
+    Assert.eq(req.body.bookIds[1], "b1")
+    Assert.eq(req.body.bookIds[2], "b2")
 
     req = call(client.getProgressAsync, client, "42", function(d) wire = d end)
     Assert.eq(req.path, "/book/getProgress")
@@ -307,4 +320,20 @@ do
     client:putProgressAsync("99", { progress = 50, chapter_uid = 8 }, function(data, e) ok, err = data, e end)
     Assert.is_nil(ok)
     Assert.not_nil(err)
+end
+
+-- 书架完整性：实收去重数少于回包 bookCount 就是拉不全，整次失败，不能把残缺快照交给 reconcile
+do
+    local data, err
+    posted = { shelf_reply = { bookCount = 3, books = { { bookId = "1" }, { bookId = "2" } }, archive = {} } }
+    client:shelfSyncAsync(function(d, e) data, err = d, e end)
+    Assert.is_nil(data)
+    Assert.matches(err, "拉取不完整")
+
+    posted = { shelf_reply = { bookCount = 2, books = { { bookId = "1" }, { bookId = "2" } },
+        recentBooks = { { bookId = "2" } }, archive = {} } }
+    client:shelfSyncAsync(function(d, e) data, err = d, e end)
+    Assert.is_nil(err)
+    Assert.not_nil(data)
+    posted = {}
 end

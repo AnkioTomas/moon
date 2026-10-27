@@ -180,7 +180,26 @@ end
 --- 本进程是否已清过旧版同步进书库的公众号行（Mp.dropLegacyBooks）。
 local legacy_mp_dropped = false
 
----@param opts { dirty_only?: boolean, force?: boolean }|nil
+--- 书架增量游标（跟账号走：vid 对不上直接作废，换账号 / 重登自动回全量）。
+---@param self WechatSource
+---@return number|nil
+local function shelfCursor(self)
+    local saved = self.cfg.shelf_cursor
+    if type(saved) == "table" and tostring(saved.vid) == tostring(self.cfg.wr_vid) then
+        return tonumber(saved.synckey)
+    end
+    return nil
+end
+
+---@param self WechatSource
+---@param synckey number|nil
+local function saveShelfCursor(self, synckey)
+    if not synckey then return end
+    self.cfg.shelf_cursor = { vid = self.cfg.wr_vid, synckey = synckey }
+    Eink.save({ shelf_cursor = self.cfg.shelf_cursor })
+end
+
+---@param opts { dirty_only?: boolean, force?: boolean, on_progress?: fun(text: string, done: integer|nil, total: integer|nil) }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return table
 function Source:syncBooksAsync(opts, cb)
@@ -188,9 +207,157 @@ function Source:syncBooksAsync(opts, cb)
         legacy_mp_dropped = true
         require("source.wechat.mp").dropLegacyBooks(require("book.books_db"))
     end
-    return Shelf.syncAsync(self.id, self._client, function(wire)
-        return Mapper.shelfList(wire, function(id, url) rememberCover(self, id, url) end).data
-    end, opts, cb)
+    opts = opts or {}
+    local report = opts.on_progress or function(...) end
+
+    -- 全量路（首次 / 强制 / dirty_only / 增量对不齐回退）：行为与原来一致，顺带存下游标。
+    local function fullPull()
+        local synckey
+        return Shelf.syncAsync(self.id, self._client, function(wire)
+            synckey = tonumber(wire.synckey) or synckey
+            return Mapper.shelfList(wire, function(id, url) rememberCover(self, id, url) end).data
+        end, opts, function(result, err)
+            if result then saveShelfCursor(self, synckey) end
+            cb(result, err)
+        end)
+    end
+
+    if opts.dirty_only or opts.force then return fullPull() end
+    local cursor = shelfCursor(self)
+    if not cursor then return fullPull() end
+
+    -- 增量路：推删 → 拉 id 增量 → 变更补详情、其余用本地行拼完整快照 → 加架上行 → reconcile。
+    -- 快照语义不变，reconcile 照旧是权威；任何一步对不齐就回退全量（慢一次，不出错）。
+    local BookDB = require("book.books_db")
+    local cancelled, job, delete_job, push_job = false, nil, nil, nil
+    local handle = { cancel = function()
+        cancelled = true
+        for _idx, j in ipairs({ job, delete_job, push_job }) do
+            if j and j.cancel then j.cancel() end
+        end
+    end }
+
+    local function removeOne(stable_id, done)
+        return self._client:removeFromShelfAsync(stable_id, function(wire, err)
+            if not wire then logger.warn("wechat shelf delete push failed", stable_id, err) end
+            done(wire)
+        end)
+    end
+
+    delete_job = Shelf.pushDeletes(self.id, removeOne, report, function(deleted_n)
+        if cancelled then return end
+        -- 本地已同步在架 id（待加架的脏行是本地独有的，不进远端计数对账）
+        local local_set = {}
+        for _idx, id in ipairs(BookDB.libraryStableIdsBySource(self.id)) do local_set[id] = true end
+        for _idx, id in ipairs(BookDB.pendingShelfAddIds(self.id)) do local_set[id] = nil end
+        local local_count = 0
+        for _id in pairs(local_set) do local_count = local_count + 1 end
+
+        report(_("正在拉取书架…"))
+        job = self._client:shelfSyncIdsAsync(cursor, local_count, function(wire, err)
+            if cancelled then return end
+            if not wire then job = fullPull(); return end
+            -- 分组 / 专辑增量的形状没有抓包样本，不猜：任一非空就回退全量。
+            if #(wire.archive or {}) > 0 or #(wire.removedArchive or {}) > 0
+                or #(wire.albumRemoved or {}) > 0 then
+                job = fullPull()
+                return
+            end
+            local removed = {}
+            for _idx, item in ipairs(type(wire.removed) == "table" and wire.removed or {}) do
+                local id = type(item) == "table" and (item.bookId or item.id) or item
+                if id ~= nil then removed[tostring(id)] = true end
+            end
+            local changed_ids, changed_set = {}, {}
+            for _idx, item in ipairs(type(wire.bookIds) == "table" and wire.bookIds or {}) do
+                local id = type(item) == "table" and (item.bookId or item.id) or item
+                local typ = type(item) == "table" and item.type or nil
+                if id == nil or (typ ~= nil and tonumber(typ) ~= 0) then
+                    job = fullPull()
+                    return
+                end
+                id = tostring(id)
+                if id:sub(1, 7) ~= "MP_WXS_" and not changed_set[id] then
+                    changed_set[id] = true
+                    changed_ids[#changed_ids + 1] = id
+                end
+            end
+            -- 最终集合与服务端总数对账：对不齐（本地被外力改过、口径差）一律回退全量。
+            local final_set, final_count = {}, 0
+            for id in pairs(local_set) do
+                if not removed[id] then final_set[id] = true end
+            end
+            for id in pairs(changed_set) do final_set[id] = true end
+            for _id in pairs(final_set) do final_count = final_count + 1 end
+            local expected = tonumber(wire.bookCount) or tonumber(wire.pureBookCount)
+            if expected and final_count ~= expected then
+                job = fullPull()
+                return
+            end
+
+            --- 本地行拼快照（删掉 removed、变更用新行）→ 加架上行 → reconcile，成功才推进游标。
+            ---@param changed table<string, Book>
+            local function reconcileIncremental(changed)
+                local all_ids = BookDB.libraryStableIdsBySource(self.id)
+                local locals = BookDB.getMany(self.id, all_ids)
+                local snapshot = {}
+                for _idx, id in ipairs(all_ids) do
+                    if not removed[id] then
+                        snapshot[#snapshot + 1] = changed[id] or locals[id]
+                    end
+                end
+                for id, book in pairs(changed) do
+                    if not locals[id] then snapshot[#snapshot + 1] = book end
+                end
+                push_job = Shelf.pushAdded(self.id, self._client, final_set, report, function(pushed)
+                    if cancelled then return end
+                    local result, rerr = Shelf.reconcile(self.id, snapshot, opts.force)
+                    if result then
+                        result.pushed = deleted_n + pushed
+                        saveShelfCursor(self, tonumber(wire.synckey))
+                    end
+                    cb(result, rerr)
+                end)
+            end
+
+            if #changed_ids == 0 then
+                reconcileIncremental({})
+                return
+            end
+            job = self._client:shelfSyncBooksAsync(changed_ids, function(detail, derr)
+                if cancelled then return end
+                if not detail or #(detail.emptyInfoIds or {}) > 0 then
+                    job = fullPull()
+                    return
+                end
+                local prog = Mapper.progressByBookId(detail)
+                local changed = {}
+                for _idx, row in ipairs(detail.books or {}) do
+                    local b, cover = Mapper.book(row)
+                    if b then
+                        Mapper.applyProgress(b, prog[b.stable_id])
+                        if cover then rememberCover(self, b.stable_id, cover) end
+                        changed[b.stable_id] = b
+                    end
+                end
+                for _idx, album in ipairs(detail.albums or {}) do
+                    local b, cover = Mapper.albumBook(album)
+                    if b then
+                        if cover then rememberCover(self, b.stable_id, cover) end
+                        changed[b.stable_id] = b
+                    end
+                end
+                -- 分组已确认无变更：分组名优先用本地旧行，别被服务端题材分类覆盖掉。
+                local locals = BookDB.getMany(self.id, changed_ids)
+                for id, b in pairs(changed) do
+                    local old = locals[id]
+                    if old and old.category and old.category ~= "" then b.category = old.category end
+                end
+                reconcileIncremental(changed)
+            end)
+        end)
+    end)
+    return handle
 end
 
 --- 拉取书籍详情并缓存封面 URL；映射不出书籍时按「详情为空」失败。
