@@ -29,7 +29,6 @@ local UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/6
 local PAGE_SIZE = 20
 -- 匿名榜单 / 搜索页走 http 缓存：切榜单、回书城不再每次联网。
 local LIST_TTL = 5 * 60
-local MAX_PAGES = 50
 
 ---@return string|nil
 function Client.cookie()
@@ -204,7 +203,6 @@ function Client.shelfAsync(cookie, cb)
     end
     fetchPage = function(gid, page)
         if cancelled then return end
-        if page > MAX_PAGES then nextGroup(); return end
         job = apiGet("/webcommon/bookshelf/mlist", {
             gid = gid, sort = 0, pageNum = page, pageSize = PAGE_SIZE, sortChange = 0,
         }, cookie, function(data, err)

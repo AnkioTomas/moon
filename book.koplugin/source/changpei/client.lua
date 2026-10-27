@@ -20,7 +20,6 @@ local Client = {}
 
 local SOURCE_ID = "changpei"
 local LOGIN_REQUIRED = 9996
-local MAX_SHELF_PAGES = 50
 
 local API = "https://www.gongzicp.com/webapi"
 -- 匿名榜单 / 搜索页走 http 缓存：切榜单、回书城不再每次联网。
@@ -242,7 +241,7 @@ function Client.shelfAsync(cb)
                 for _idx, row in ipairs(list) do
                     if row.type == "novel" then rows[#rows + 1] = row end
                 end
-                if #list == 0 or n >= MAX_SHELF_PAGES then cb(rows) else page(n + 1) end
+                if #list == 0 then cb(rows) else page(n + 1) end
             end)
     end
     page(1)

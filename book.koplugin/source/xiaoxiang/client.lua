@@ -49,7 +49,6 @@ end
 
 local SOURCE_ID = "xiaoxiang"
 local API = "https://www.xxsypro.com/api"
-local MAX_SHELF_PAGES = 50
 
 --- 请求头里的 Cookie：没有 csrfToken 就补一个，网页端要求 Cookie 与 `_csrfToken` 同值。
 ---@param cookie string|nil
@@ -151,7 +150,7 @@ function Client.shelfAsync(cb)
             for _idx, row in ipairs(data.data or {}) do
                 if tonumber(row.restype) == 1 and tonumber(row.groupId) == -100 then rows[#rows + 1] = row end
             end
-            if page < (tonumber(data.pageCount) or 0) and page < MAX_SHELF_PAGES then
+            if page < (tonumber(data.pageCount) or 0) then
                 more(page + 1)
                 return
             end

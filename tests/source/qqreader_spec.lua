@@ -130,6 +130,20 @@ do
     Assert.matches(requests[2].url, "pageNo=2")
 end
 
+-- 分页没有页数上限：超过 50 页照样翻到底
+do
+    requests, replies = {}, {}
+    for i = 1, 60 do
+        replies[#replies + 1] = { body = ('{"code":0,"data":{"topBookList":[],"bookList":[{"bid":%d,"title":"书"}],"hasNext":%s}}')
+            :format(i, i < 60 and "true" or "false") }
+    end
+    local rows, err
+    Client.shelfAsync(cfg.cookie, function(v, e) rows, err = v, e end)
+    Assert.is_nil(err)
+    Assert.len(rows, 60)
+    Assert.len(requests, 60)
+end
+
 -- 已保存的 Cookie 收到 -4 才标失效。校验新 Cookie 不污染旧登录态。
 do
     expired = nil

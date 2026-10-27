@@ -407,3 +407,69 @@ do
     Assert.eq(res.groups[2].active, "1:3")
     package.preload["http.request"] = nil
 end
+
+-- 长佩：分页没有页数上限，超过 50 页照样翻到空页
+do
+    local pages = {}
+    package.loaded["http.request"] = nil
+    package.preload["http.request"] = function()
+        return {
+            get = function(url, _opts, cb)
+                if url:find("system/init", 1, true) then
+                    cb('{"code":200,"data":{"timestamp":1792556196}}')
+                else
+                    local n = tonumber(url:match("page=(%d+)"))
+                    pages[#pages + 1] = n
+                    cb(n > 60 and '{"code":200,"data":{"list":[]}}'
+                        or ('{"code":200,"data":{"list":[{"type":"novel","id":%d}]}}'):format(n))
+                end
+                return {}
+            end,
+            post = function(_url, _body, _opts, cb) cb('{"code":200,"data":[]}') return {} end,
+        }
+    end
+    package.loaded["source.changpei.client"] = nil
+    local Deep = require("source.changpei.client")
+    local rows, err
+    Deep.shelfAsync(function(r, e) rows, err = r, e end)
+    Assert.is_nil(err)
+    Assert.len(rows, 60)
+    Assert.len(pages, 61)
+    package.preload["http.request"] = nil
+end
+
+-- 潇湘：分页没有页数上限，pageCount 多少就翻多少页
+do
+    local pages = 0
+    package.loaded["http.request"] = nil
+    package.preload["http.request"] = function()
+        return {
+            get = function(url, _opts, cb)
+                if url:find("/bookshelf/pc/page", 1, true) then
+                    pages = pages + 1
+                    cb('{"code":0,"data":{"pageCount":60,"data":[{"restype":1,"groupId":-100,"bookid":"1","title":"甲"}]}}')
+                else
+                    cb('{"code":0,"data":{"isLogin":1}}')
+                end
+                return {}
+            end,
+            post = function(_url, _body, _opts, cb) cb('{"code":0,"data":{"isLogin":1}}') return {} end,
+        }
+    end
+    local Settings = require("utils.settings")
+    local cfg = Settings.getSource("xiaoxiang")
+    cfg.cookie = "csrfToken=C1; ywKey=K"
+    Settings.saveSource("xiaoxiang", cfg)
+    package.loaded["source.xiaoxiang.client"] = nil
+    local Deep = require("source.xiaoxiang.client")
+    require("source.auth").reset()
+    local rows, err
+    Deep.shelfAsync(function(r, e) rows, err = r, e end)
+    Assert.is_nil(err)
+    Assert.len(rows, 60)
+    Assert.eq(pages, 60)
+    cfg.cookie = nil
+    Settings.saveSource("xiaoxiang", cfg)
+    package.loaded["source.xiaoxiang.client"] = nil
+    package.preload["http.request"] = nil
+end

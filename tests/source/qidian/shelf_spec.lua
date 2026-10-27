@@ -66,3 +66,25 @@ do -- 移出分组：本地旧行分类是旧分组名，书架行题材要把�
     Assert.eq(books[1].category, "历史", "移出分组落回题材")
     Assert.eq(books[2].category, "在读", "进了组用分组名覆盖本地旧分类")
 end
+
+do -- 分页没有页数上限：超过 50 页照样翻到末页
+    local n = 0
+    local list = {}
+    for i = 1, 20 do list[#list + 1] = ('{"bid":%d,"bName":"书","cateName":"玄幻"}'):format(i) end
+    package.loaded["http.request"] = nil
+    package.preload["http.request"] = function()
+        return { get = function(_url, _opts, cb)
+            n = n + 1
+            cb('{"code":0,"data":{"count":9999,"page":{"isLast":' .. (n > 60 and "1" or "0")
+                .. '},"groups":[],"list":[' .. table.concat(list, ",") .. "]}}")
+            return { cancel = function() end }
+        end }
+    end
+    package.loaded["source.qidian.client"] = nil
+    local Deep = require("source.qidian.client")
+    local rows, err
+    Deep.shelfAsync("_csrfToken=tok", function(r, e) rows, err = r, e end)
+    Assert.is_nil(err)
+    Assert.len(rows, 20)
+    Assert.eq(n, 61)
+end

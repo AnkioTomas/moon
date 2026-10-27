@@ -31,7 +31,6 @@ local API = WEB .. "/api"
 local UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
     .. "Chrome/120.0.0.0 Safari/537.36"
 local PAGE_SIZE = 100
-local MAX_PAGES = 50
 local AUTH_FAIL = -4
 
 ---@return string|nil
@@ -165,7 +164,6 @@ function Client.shelfAsync(cookie, cb)
     end
     local function page(n)
         if cancelled then return end
-        if n > MAX_PAGES then cb(books); return end
         job = call("GET", "/bookshelf/query", { pageNo = n, pageSize = PAGE_SIZE }, nil, cookie, function(wire, err)
             if cancelled then return end
             if not wire then cb(nil, err); return end
