@@ -1,6 +1,6 @@
 --[[--
-Kavita 卷列表：真实 list 的行尾控件命中（04 A9）、状态字优先级、缓存整部、删除保护、
-暂停 / 恢复与进度框收尾。
+Kavita 卷列表：真实 list 的行尾控件命中（04 A9）、状态字优先级、批量预设
+（整部 / 从当前进度 / 后 N 卷）、删除保护、暂停 / 恢复与进度框收尾。
 
 真实 list 与 Kit 一起用：A9 的「点图标不关窗」只能靠真行 / 真按钮的事件顺序证明。
 Themed 只负责记录弹窗参数；装完把它的 list 桩摘掉，require 真组件。
@@ -136,10 +136,11 @@ local function textContains(haystack, needle, msg)
 end
 
 --- 打开卷列表；返回 list、选中回调的接收表。
+---@param volumes table[]|nil 缺省用共享的 toc（全读退化等用例换一份目录）
 ---@return table, table
-local function open()
+local function open(volumes)
     local picked = {}
-    local list = assert(VolumeList.pick(series, toc, function(value) picked.value = value end))
+    local list = assert(VolumeList.pick(series, volumes or toc, function(value) picked.value = value end))
     list:show()
     list:paintTo(Kit.canvas(), 0, 0)
     return list, picked
@@ -170,6 +171,53 @@ local function tap(list, widget)
     local ges = Kit.tap(size.x + math.floor(size.w / 2), size.y + math.floor(size.h / 2))
     ges.ges = "tap"
     list:handleEvent(require("ui/event"):new("Gesture", ges))
+end
+
+--- 这个窗口被 UIManager 关过吗（真实组件不写 `.closed`，只能看桩的关闭记录）。
+---@param widget table
+---@return boolean
+local function wasClosed(widget)
+    for _idx, w in ipairs(Kit.closed) do
+        if w == widget then return true end
+    end
+    return false
+end
+
+--- 标题栏左钮 → 二级菜单；返回菜单控件（真实 list，与卷列表分开的窗口）。
+---@param list table
+---@return table
+local function openMenu(list)
+    local before = #Kit.shown
+    list.left_callback()
+    Assert.is_true(#Kit.shown > before, "左钮弹二级菜单")
+    local menu = Kit.shown[#Kit.shown]
+    Assert.is_true(menu ~= list, "菜单不是卷列表本身")
+    menu:paintTo(Kit.canvas(), 0, 0)
+    return menu
+end
+
+--- 菜单第 index 项；越界即断言失败。
+---@param menu table
+---@param index integer
+local function chooseMenu(menu, index)
+    local rows = Kit.taps(menu)
+    Assert.is_true(#rows >= index, "菜单有第 " .. index .. " 项")
+    tap(menu, rows[index])
+end
+
+--- 标题栏左钮 → 「缓存整部」（菜单第一项）。
+---@param list table
+local function batchAll(list)
+    chooseMenu(openMenu(list), 1)
+end
+
+--- 入队对象的章 id，逗号拼接：断言「选了哪几卷」。
+---@param entries table[]|nil
+---@return string
+local function idsText(entries)
+    local out = {}
+    for _idx, entry in ipairs(entries or {}) do out[#out + 1] = entry.chapterId end
+    return table.concat(out, ",")
 end
 
 -- A9：点行尾按钮被按钮吃掉，不关窗、不选中，只弹该卷的确认框。
@@ -220,7 +268,9 @@ textContains(text, "在读 · 已缓存")
 textContains(text, "已缓存")
 Assert.eq(#tails(list), 3)
 
--- 标题栏左钮＝缓存整部：只选未缓存（跳过已缓存 / 排队中），先 estimate 再确认。
+-- 标题栏左钮＝批量预设菜单（04 A9 的 C 变体）：整部 / 从当前进度 / 后 N 卷。
+-- 菜单是独立的 list 窗口，点菜单行不会被当成选卷；「缓存整部」仍然只选未缓存
+-- （跳过已缓存 / 排队中），先 estimate 再确认。
 reset()
 st.statuses["601"] = { state = "complete", bytes = 1 }
 st.queue = { state = "downloading", entries = { [603] = { chapterId = 603, state = "downloading",
@@ -230,7 +280,16 @@ list, picked = open()
 local title = Kit.buttons(list)[1]
 Assert.eq(title.icon, "download", "标题栏左钮是下载图标")
 Assert.is_true(title.dimen.y < Kit.taps(list)[1].dimen.y, "左钮在标题栏里，不是行尾")
-list.left_callback()
+local menu = openMenu(list)
+local menu_items = {}
+for _idx, item in ipairs(menu.items) do menu_items[#menu_items + 1] = item.text end
+Assert.eq(menu.title, "批量缓存", "菜单标题")
+Assert.eq(table.concat(menu_items, "|"), "缓存整部|从当前进度开始|后 N 卷…", "菜单三项与顺序")
+Assert.is_nil(picked.value, "开菜单不选卷")
+chooseMenu(menu, 1)
+Assert.is_true(wasClosed(menu), "选完关菜单")
+Assert.is_false(wasClosed(list), "点菜单不关卷列表")
+Assert.is_nil(picked.value, "点菜单行不选卷")
 Assert.len(calls.estimate, 1, "先估算")
 Assert.eq(calls.estimate[1].chapterId, 602, "只估算未缓存的第 2 卷")
 confirm = Themed.last("confirm")
@@ -252,6 +311,109 @@ Assert.not_nil(progress.on_cancel)
 Assert.not_nil(progress.on_background, "后台运行")
 Assert.is_true(#calls.retry == 0, "没有失败项就不调 queue_retry")
 
+-- 预设「从当前进度开始」：起点 = 第一个未读完的卷（toc 的 pagesRead），终点最后一卷；
+-- 已缓存 / 已排队照旧跳过，也不逐卷调 resume_page。
+local preset_toc = {
+    entry(701, "第 1 卷", 100, 100),
+    entry(702, "第 2 卷", 100, 40),
+    entry(703, "第 3 卷", 100, 0),
+    entry(704, "第 4 卷", 100, 0),
+}
+reset()
+st.statuses["703"] = { state = "complete", bytes = 1 }
+st.queue = { state = "downloading", entries = { [704] = { chapterId = 704, state = "downloading",
+    bytes_done = 10, bytes_total = 100 } }, bytes_done = 10, bytes_total = 100 }
+list = open(preset_toc)
+local probes = calls.resume_page
+menu = openMenu(list)
+chooseMenu(menu, 2)
+Assert.eq(idsText(calls.estimate), "702", "从第 2 卷（在读）到末卷：跳过已读完 / 已缓存 / 已排队")
+Assert.eq(calls.resume_page, probes, "预设不逐卷调 resume_page")
+confirm = Themed.last("confirm")
+Assert.eq(confirm.title, "缓存这一卷")
+textContains(confirm.text, "第 2 卷")
+confirm.ok_callback()
+Assert.eq(idsText(calls.enqueue[1]), "702", "只入队选中的未缓存卷")
+Assert.eq(#calls.retry, 0)
+
+-- 全部都读完：起点退化到第 1 卷，即整部（仍跳过已缓存）。
+local all_read = {
+    entry(711, "第 1 卷", 100, 100),
+    entry(712, "第 2 卷", 100, 100),
+    entry(713, "第 3 卷", 100, 100),
+}
+reset()
+st.statuses["711"] = { state = "complete", bytes = 1 }
+local read_list = open(all_read)
+local read_menu = openMenu(read_list)
+chooseMenu(read_menu, 2)
+Assert.eq(idsText(calls.estimate), "712,713", "全部已读时退化为整部，只跳过已缓存")
+
+-- 预设也没有对象：与「缓存整部」同一条 toast，不弹框。
+reset()
+for _idx, item_entry in ipairs(preset_toc) do
+    st.statuses[tostring(item_entry.chapterId)] = { state = "complete", bytes = 1 }
+end
+list = open(preset_toc)
+local no_object_confirms = #Themed.all("confirm")
+menu = openMenu(list)
+chooseMenu(menu, 2)
+Assert.is_nil(calls.estimate, "没有对象不估算")
+textContains(Themed.last("toast").text, "全部已缓存")
+Assert.eq(#Themed.all("confirm"), no_object_confirms, "空选择不弹框")
+
+-- 预设「后 N 卷…」：主题输入框取正整数；0 / 非数字不动作；N 超过剩余卷数时截断。
+reset()
+list = open(preset_toc)
+menu = openMenu(list)
+chooseMenu(menu, 3)
+local input = Themed.last("input")
+Assert.not_nil(input, "后 N 卷走主题输入框")
+Assert.eq(input.title, "后 N 卷")
+Assert.eq(input.fields[1].label, "卷数")
+Assert.is_nil(calls.estimate, "输入前不估算")
+input.callback("0")
+Assert.is_nil(calls.estimate, "0 不动作")
+input.callback("abc")
+Assert.is_nil(calls.estimate, "非数字不动作")
+input.callback("1")
+Assert.eq(idsText(calls.estimate), "702", "N=1 从进度起点取一卷")
+confirm = Themed.last("confirm")
+Assert.eq(confirm.title, "缓存这一卷")
+st.estimate = { chapters = 3, bytes = 10 * 1024 * 1024, available = 1000 * 1024 * 1024, ok = true }
+input.callback("9")
+Assert.eq(idsText(calls.estimate), "702,703,704", "N 超过剩余卷数时截断到末卷")
+confirm = Themed.last("confirm")
+Assert.eq(confirm.title, "缓存 3 卷")
+confirm.ok_callback()
+Assert.eq(idsText(calls.enqueue[1]), "702,703,704", "三个入口共用同一确认与入队")
+textContains(Themed.last("progress_dialog").text, "1/3 卷", "三个入口共用同一进度框")
+Assert.eq(#calls.retry, 0)
+
+-- 「后 N 卷」同样跳过已缓存 / 已排队，不重复入队。
+reset()
+st.queue = { state = "downloading", entries = { [703] = { chapterId = 703, state = "downloading",
+    bytes_done = 10, bytes_total = 100 } }, bytes_done = 10, bytes_total = 100 }
+list = open(preset_toc)
+menu = openMenu(list)
+chooseMenu(menu, 3)
+Themed.last("input").callback("9")
+Assert.eq(idsText(calls.estimate), "702,704", "已排队的卷不再入队")
+
+-- 「后 N 卷」没有对象：同一条 toast。
+reset()
+for _idx, item_entry in ipairs(preset_toc) do
+    st.statuses[tostring(item_entry.chapterId)] = { state = "complete", bytes = 1 }
+end
+list = open(preset_toc)
+local empty_confirms = #Themed.all("confirm")
+menu = openMenu(list)
+chooseMenu(menu, 3)
+Themed.last("input").callback("2")
+Assert.is_nil(calls.estimate, "没有对象不估算")
+textContains(Themed.last("toast").text, "全部已缓存")
+Assert.eq(#Themed.all("confirm"), empty_confirms, "空选择不弹框")
+
 -- 全部已缓存：不估算，直接 toast。
 reset()
 for _idx, item_entry in ipairs(toc) do
@@ -259,7 +421,7 @@ for _idx, item_entry in ipairs(toc) do
 end
 list = open()
 local confirms = #Themed.all("confirm")
-list.left_callback()
+batchAll(list)
 Assert.is_nil(calls.estimate, "没有对象不估算")
 textContains(Themed.last("toast").text, "全部已缓存")
 Assert.eq(#Themed.all("confirm"), confirms, "全部已缓存不弹框")
@@ -268,7 +430,7 @@ Assert.eq(#Themed.all("confirm"), confirms, "全部已缓存不弹框")
 reset()
 st.estimate = { chapters = 0, bytes = 0, available = 1, ok = false, reason = "nothing_to_do" }
 list = open()
-list.left_callback()
+batchAll(list)
 textContains(Themed.last("toast").text, "全部已缓存或正在下载")
 Assert.eq(#Themed.all("confirm"), confirms, "没事可做只 toast")
 
@@ -276,7 +438,7 @@ Assert.eq(#Themed.all("confirm"), confirms, "没事可做只 toast")
 reset()
 st.estimate = { chapters = 3, bytes = 849 * 1024 * 1024, available = 480 * 1024 * 1024, ok = false, reason = "space" }
 list = open()
-list.left_callback()
+batchAll(list)
 confirm = Themed.last("confirm")
 Assert.not_nil(confirm)
 textContains(confirm.text, "空间不足：需要 849.0 MB，可用 480.0 MB")
@@ -289,7 +451,7 @@ textContains(Themed.last("toast").text, "空间不足")
 reset()
 st.estimate = { chapters = 3, bytes = 1, available = 400 * 1024 * 1024, ok = false, reason = "low_water" }
 list = open()
-list.left_callback()
+batchAll(list)
 confirm = Themed.last("confirm")
 textContains(confirm.text, "可用空间不足（剩余 400.0 MB）")
 Assert.eq(confirm.ok_text, "去清理空间")
@@ -299,7 +461,7 @@ reset()
 st.queue = { state = "paused", pause_reason = "user", entries = {}, bytes_done = 0, bytes_total = 0 }
 st.estimate = { chapters = 3, bytes = 10 * 1024 * 1024, available = 2000 * 1024 * 1024, ok = true }
 list = open()
-list.left_callback()
+batchAll(list)
 textContains(Themed.last("confirm").text, "当前下载已暂停，开始缓存会恢复整个队列")
 
 -- 批量里含失败项：入队未缓存的，再逐条重试失败的，进度框算上两项。
@@ -310,7 +472,7 @@ st.queue = { state = "idle", entries = {
     [602] = { chapterId = 602, state = "failed", bytes_done = 0, bytes_total = 100, last_error = "http 403" },
 }, bytes_done = 0, bytes_total = 0 }
 list = open()
-list.left_callback()
+batchAll(list)
 confirm = Themed.last("confirm")
 textContains(confirm.text, "另有 1 卷失败将重试")
 confirm.ok_callback()
@@ -327,7 +489,7 @@ st.queue = { state = "idle", entries = {
     [602] = { chapterId = 602, state = "failed", last_error = "socket closed" },
 }, bytes_done = 0, bytes_total = 0 }
 list = open()
-list.left_callback()
+batchAll(list)
 Assert.is_nil(calls.estimate, "没有要下载的就不估算")
 confirm = Themed.last("confirm")
 Assert.eq(confirm.title, "重试缓存")
@@ -463,7 +625,7 @@ local function batchProgress()
     st.statuses["601"] = { state = "complete", bytes = 1 }
     st.estimate = { chapters = 2, bytes = 10 * 1024 * 1024, available = 1000 * 1024 * 1024, ok = true }
     list = open()
-    list.left_callback()
+    batchAll(list)
     Themed.last("confirm").ok_callback()
     return Themed.last("progress_dialog")
 end
@@ -641,7 +803,7 @@ st.probe = { ok = true, state = "enhanced", capabilities = {
 st.statuses["601"] = { state = "complete", bytes = 1 }
 st.estimate = { chapters = 2, bytes = 1, available = 1000, ok = true }
 list = open()
-list.left_callback()
+batchAll(list)
 Themed.last("confirm").ok_callback()
 progress_dialog = Themed.last("progress_dialog")
 Assert.is_nil(progress_dialog.on_cancel, "没有暂停钮")
@@ -657,7 +819,7 @@ st.estimate = { chapters = 2, bytes = 10 * 1024 * 1024, available = 1000 * 1024 
 local scheduled_before = #Kit.scheduled
 local toasts_before = #Themed.all("toast")
 list = open()
-list.left_callback()
+batchAll(list)
 Themed.last("confirm").ok_callback()
 progress_dialog = Themed.last("progress_dialog")
 Assert.not_nil(progress_dialog, "缺 queue 也确认已入队")

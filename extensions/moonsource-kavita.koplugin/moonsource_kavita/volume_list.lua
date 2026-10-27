@@ -1,12 +1,14 @@
 --[[--
 Kavita 卷列表：选卷阅读 + 缓存管理（04 A1–A9 / 07 A1–A7）。
 
-一行 = 一卷；点行阅读，行尾「状态字 + 一个图标钮」管该卷的缓存，标题栏左钮批量缓存整部。
+一行 = 一卷；点行阅读，行尾「状态字 + 一个图标钮」管该卷的缓存，标题栏左钮开批量预设菜单
+（整部 / 从当前进度 / 后 N 卷）。
 状态全部在打开 / 每秒轮询时现算：`Cache.status` 是内存索引，`queue_state` 按服务器过滤，
 本地已读 / 在读取 toc 的 pagesRead（不按卷调 resume_page，只给有本地进度的行补「待同步」）。
 
 不改 `ui/themes/widgets/list` 与 `row`：行尾控件塞 `item.widget`，靠 KOReader 的
-「先子件后自身」事件顺序吃掉点按（04 A9）。若该假设不成立，退回 C 变体（二级菜单）。
+「先子件后自身」事件顺序吃掉点按（04 A9）。批量预设复用主题 `list` 当二级菜单
+（04 A9 的 C 变体，ticket 16），不新增控件。
 
 @module moonsource_kavita.volume_list
 --]]
@@ -340,6 +342,28 @@ local function batchTargets(ctx, toc)
         end
     end
     return enqueue, retry
+end
+
+--- 批量预设的起点：第一个未读完的卷；全部都读完就退化为整部（ticket 16）。
+---@param toc table[]
+---@return integer
+local function resumeIndex(toc)
+    for idx, entry in ipairs(toc) do
+        if readState(entry) ~= "read" then return idx end
+    end
+    return 1
+end
+
+--- 从 first 起取 count 卷（缺省到末卷）；越界截断。
+---@param toc table[]
+---@param first integer
+---@param count integer|nil
+---@return table[]
+local function volumeRange(toc, first, count)
+    local out = {}
+    local last = count and math.min(#toc, first + count - 1) or #toc
+    for idx = first, last do out[#out + 1] = toc[idx] end
+    return out
 end
 
 --- 批量确认框正文：卷数 / 卷名 / 峰值 / 可用 / 完成后剩余（04 A4 + 07 A6）。
@@ -743,9 +767,10 @@ function VolumeList.pick(series, toc, cb, opts)
         refresh()
     end
 
-    --- 标题栏左钮「缓存整部」：没有对象就只 toast。
-    local function startBatch()
-        local to_enqueue, to_retry = batchTargets(ctx, toc)
+    --- 批量入口：三种范围共用 estimate 确认、进度框与失败重试；没有对象只 toast。
+    ---@param entries table[]
+    local function runBatch(entries)
+        local to_enqueue, to_retry = batchTargets(ctx, entries)
         if #to_enqueue == 0 and #to_retry == 0 then
             toast(_("全部已缓存"))
             return
@@ -757,6 +782,42 @@ function VolumeList.pick(series, toc, cb, opts)
         confirmEnqueue(to_enqueue, to_retry)
     end
 
+    --- 「后 N 卷」：正整数才动作；0 / 非数字不动作，越界由 volumeRange 截断。
+    local function promptNext()
+        local Input = require("ui.themes.widgets.input")
+        Input:new{
+            title = _("后 N 卷"),
+            fields = { { label = _("卷数"), input_type = "number" } },
+            callback = function(text)
+                local count = math.floor(tonumber(text) or 0)
+                if count <= 0 then return end
+                runBatch(volumeRange(toc, resumeIndex(toc), count))
+            end,
+        }:show()
+    end
+
+    --- 标题栏左钮：批量缓存预设菜单（04 A9 的 C 变体，复用主题 list 当二级菜单）。
+    local function openBatchMenu()
+        local Menu = require("ui.themes.widgets.list")
+        Menu:new{
+            title = _("批量缓存"),
+            items = {
+                { text = _("缓存整部"), value = "all" },
+                { text = _("从当前进度开始"), value = "progress" },
+                { text = _("后 N 卷…"), value = "next" },
+            },
+            on_select = function(value)
+                if value == "all" then
+                    runBatch(toc)
+                elseif value == "progress" then
+                    runBatch(volumeRange(toc, resumeIndex(toc), nil))
+                else
+                    promptNext()
+                end
+            end,
+        }:show()
+    end
+
     local can_batch = ctx.show_cache
         and (has(ctx.capabilities, "enqueue") or has(ctx.capabilities, "queue_control"))
 
@@ -764,7 +825,7 @@ function VolumeList.pick(series, toc, cb, opts)
         title = series.title or _("选择卷"),
         items = items(),
         left_icon = can_batch and "download" or nil,
-        left_callback = can_batch and startBatch or nil,
+        left_callback = can_batch and openBatchMenu or nil,
         on_select = function(entry)
             chosen = true
             cb(entry)
