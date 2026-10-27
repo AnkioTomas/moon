@@ -183,11 +183,13 @@ function Bars.applyPreferences(ui)
 end
 
 --- 顶栏 overlay 是否应绘制（系统 Alt Status Bar 开）。
+--- crengine 在滚动模式同样按屏留页眉高度并画原生页眉，两种模式都接管绘制；
+--- KOReader 自己把滚动模式的 current_header_height 记 0 只是它内部约定，不影响这里。
 --- 关书时 closeDocument 先清 document，ReaderUI 还在，这段时间不画。
 ---@param ui table ReaderUI
 ---@return boolean
 function Bars.topVisible(ui)
-    if not ui.document or not ui.rolling or ui.view.view_mode ~= "page" then
+    if not ui.document or not ui.rolling then
         return false
     end
     return ui.document:getHeaderHeight() > 0
