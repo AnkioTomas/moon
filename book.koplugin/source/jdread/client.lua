@@ -23,6 +23,24 @@ local SHELF_BATCH = 18
 -- download/chapter 对未购买且非试读章节返回 {"result_code":101,"message":"can not download"}。
 local DOWNLOAD_DENIED = 101
 
+--- 京东会话失效文案：网页 Cookie 无续期，只能引导重新扫码。
+local function authExpired()
+    return require("source.auth").expire("jdread", _("京东读书登录已失效，请重新扫码登录"))
+end
+
+--- 响应 message 是否表示未登录 / 会话失效。
+--- 中文「登录」与英文错误码（实测书架同步会回 NOT.LOGIN）都算。
+---@param message any
+---@return boolean
+local function isLoginFailure(message)
+    local msg = tostring(message or "")
+    if msg == "" then return false end
+    if msg:find("登录", 1, true) then return true end
+    local upper = msg:upper()
+    return upper:find("NOT.LOGIN", 1, true) ~= nil
+        or upper:find("NOT_LOGIN", 1, true) ~= nil
+end
+
 ---@param raw string|nil
 ---@return table|nil, string|nil
 local function decodeApi(raw, err)
@@ -30,9 +48,8 @@ local function decodeApi(raw, err)
     local ok, wire = pcall(JSON.decode, raw)
     if not ok or type(wire) ~= "table" then return nil, _("京东读书响应无效") end
     if tonumber(wire.result_code) ~= 0 then
-        -- 网页 Cookie 没有续期接口：提示含「登录」即视为会话失效，由上层引导重新扫码。
-        if tostring(wire.message or ""):find("登录", 1, true) then
-            return nil, require("source.auth").expire("jdread", wire.message)
+        if isLoginFailure(wire.message) then
+            return nil, authExpired()
         end
         return nil, wire.message or (_("京东读书错误 ") .. tostring(wire.result_code))
     end
@@ -297,7 +314,11 @@ function Client:downloadChapterAsync(book_id, query, cb)
     }, function(raw, err)
         if not raw then cb(nil, err); return end
         local wire, decode_err, code = Protocol.decodeDownload(raw, tm)
-        if code == DOWNLOAD_DENIED then decode_err = _("京东读书网页协议读不到本章，请在京东读书 App 内阅读") end
+        if code == DOWNLOAD_DENIED then
+            decode_err = _("京东读书网页协议读不到本章，请在京东读书 App 内阅读")
+        elseif isLoginFailure(decode_err) then
+            decode_err = authExpired()
+        end
         cb(wire, decode_err)
     end)
 end

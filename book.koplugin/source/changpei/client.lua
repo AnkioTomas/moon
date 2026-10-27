@@ -111,6 +111,8 @@ local function reply(cookie, cb, retry)
                 -- 只有 PHPSESSID 的 Cookie 登录是服务端会话，闲置（休眠）一阵就丢，没有续期凭据
                 if not (cookie:match("moon_refresh=") or cookie:match("ukey=")) then
                     msg = _("长佩登录已失效。网页 Cookie 登录无法自动续期，请改用扫码登录")
+                else
+                    msg = _("长佩登录已失效，请重新登录")
                 end
                 if retry then
                     -- token 过期：用 refresh_token 换新的再重发一次；换不到才算登录失效

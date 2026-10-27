@@ -56,7 +56,7 @@ local function decodeAccount(raw, err, token_checked)
         local title = errors.title or _("请求失败")
         if token_checked == Client.token()
             and (AUTH_CODES[tostring(errors.code)] or tostring(title):find("登录", 1, true)) then
-            return nil, require("source.auth").expire(SOURCE_ID, title)
+            return nil, require("source.auth").expire(SOURCE_ID, _("七猫登录已失效，请重新登录"))
         end
         return nil, title
     end

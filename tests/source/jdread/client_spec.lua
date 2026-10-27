@@ -211,3 +211,39 @@ do
     Assert.eq(body[1].ebook_id, 30451107)
     Assert.eq(body[1].list[1].data_type, 0)
 end
+
+-- NOT.LOGIN：英文错误码也要标登录失效，不能把服务端原串弹给用户。
+do
+    local expired = {}
+    package.preload["source.auth"] = function()
+        return {
+            expire = function(id, msg) expired[#expired + 1] = { id = id, msg = msg }; return msg end,
+            ok = function() end,
+        }
+    end
+    local bodies = { '{"result_code":1,"message":"NOT.LOGIN"}' }
+    package.loaded["http.request"] = {
+        get = function(_url, _opts, cb)
+            cb(bodies[1])
+            return { cancel = function() end }
+        end,
+        post = function(_url, _body, _opts, cb)
+            cb(bodies[1])
+            return { cancel = function() end }
+        end,
+    }
+    package.loaded["source.auth"] = nil
+    package.loaded["source.jdread.client"] = nil
+    local AuthClient = require("source.jdread.client")
+    local c = AuthClient:new{ cookie = "thor=stale", uuid = "h5-test" }
+    local got_err
+    c:apiGetAsync("/jdread/api/bookshelf/sort", nil, function(_wire, err) got_err = err end)
+    Assert.eq(expired[1].id, "jdread")
+    Assert.eq(got_err, "京东读书登录已失效，请重新扫码登录")
+    Assert.eq(got_err, expired[1].msg)
+    -- 中文「登录」同样走失效路径，文案仍用统一中文，不附原文
+    bodies[1] = '{"result_code":1,"message":"请重新登录"}'
+    c:apiGetAsync("/jdread/api/bookshelf/sort", nil, function(_wire, err) got_err = err end)
+    Assert.eq(got_err, "京东读书登录已失效，请重新扫码登录")
+    Assert.len(expired, 2)
+end

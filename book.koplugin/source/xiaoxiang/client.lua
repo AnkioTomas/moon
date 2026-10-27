@@ -120,7 +120,7 @@ local function authed(path, query, body, cb)
     job = Client.userAsync(cookie or "", function(info, err)
         if cancelled then return end
         if not info then
-            cb(nil, cookie and Auth.expire(SOURCE_ID, err or _("潇湘登录已失效")) or _("未登录潇湘"))
+            cb(nil, cookie and Auth.expire(SOURCE_ID, _("潇湘登录已失效，请重新登录")) or _("未登录潇湘"))
             return
         end
         Auth.ok(SOURCE_ID)

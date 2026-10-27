@@ -10,6 +10,7 @@ local JSON = require("json")
 local Request = require("http.request")
 local Text = require("utils.text")
 local logger = require("utils.log")
+local _ = require("gettext")
 
 local Client = {}
 Client.__index = Client
@@ -112,7 +113,13 @@ local function isAuthError(code, body, res)
     local err_code = data.errCode or data.errcode or data.code
     if AUTH_ERROR_CODES[tonumber(err_code)] then return true end
     local msg = tostring(data.errMsg or data.errmsg or data.message or data.msg or "")
-    return msg:find("登录", 1, true) ~= nil
+    if msg:find("登录", 1, true) then return true end
+    -- 英文错误码（与京东同类）：LOGIN / NOT.LOGIN / unauthorized
+    local upper = msg:upper()
+    return upper:find("NOT.LOGIN", 1, true) ~= nil
+        or upper:find("NOT_LOGIN", 1, true) ~= nil
+        or upper:find("UNAUTHORIZED", 1, true) ~= nil
+        or (upper:find("LOGIN", 1, true) ~= nil and upper:find("FAIL", 1, true) ~= nil)
 end
 
 ---@param method string
@@ -191,8 +198,9 @@ local function jsonAsync(self, method, url, extra_headers, body, cb)
         -- 番茄扫码登录的 Cookie 没有续期接口：会话失效直接标记，由上层引导重新扫码。
         local Auth = require("source.auth")
         if isAuthError(code, res.body, res) then
-            local msg = httpError(method, url, code, res.body, res)
-            cb(nil, Auth.expire("fanqie", msg))
+            -- 技术细节只打日志；弹窗给人看的中文由 Auth → Sync.promptLogin。
+            logger.warn("fanqie auth expired", httpError(method, url, code, res.body, res))
+            cb(nil, Auth.expire("fanqie", _("番茄小说登录已失效，请重新扫码登录")))
             return
         end
         if not Request.ok(code) then

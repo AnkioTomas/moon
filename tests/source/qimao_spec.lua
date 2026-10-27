@@ -79,15 +79,15 @@ do
     Assert.is_true(not select(2, Mapper.classify(wire)))
 end
 
--- 登录态被拒：标失效并把服务端文案交给调用方。
+-- 登录态被拒：标失效；弹窗用人话，不原样塞服务端 title。
 do
     requests, expired = {}, nil
     replies = { '{"errors":{"code":"40001002","title":"请先登录"}}' }
     local wire, err
     Client.shelfPushAsync({ { book_id = "1" } }, function(v, e) wire, err = v, e end)
     Assert.is_nil(wire)
-    Assert.eq(err, "请先登录")
-    Assert.eq(expired, "请先登录")
+    Assert.eq(err, "七猫登录已失效，请重新登录")
+    Assert.eq(expired, "七猫登录已失效，请重新登录")
 end
 
 -- 没 token 不发请求。

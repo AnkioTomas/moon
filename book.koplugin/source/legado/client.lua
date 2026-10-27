@@ -130,6 +130,7 @@ local function login(user, password, key, cb)
 end
 
 --- 配了账号密码时先登录、请求带 accessToken；服务端回 NEED_LOGIN（令牌过期）就重新登录再试一次。
+--- 重登仍失败 / 仍 NEED_LOGIN → Auth.expire，引导用户检查账号密码。
 ---@param go fun(token: string|nil, done: fun(data: any|nil, err: string|nil)): { cancel: fun() }
 ---@param cb fun(data: any|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -137,6 +138,7 @@ local function authed(go, cb)
     local user, password = credentials()
     if not user then return go(nil, cb) end
     local key = Client.base() .. "\0" .. user .. "\0" .. password
+    local expired_msg = _("阅读服务器登录已失效，请检查账号密码")
     ---@type boolean, CancelHandle|nil
     local cancelled, job = false, nil
     local function run(retry)
@@ -148,6 +150,9 @@ local function authed(go, cb)
                     run(false)
                     return
                 end
+                if err and err:find("NEED_LOGIN", 1, true) then
+                    err = require("source.auth").expire(SOURCE_ID, expired_msg)
+                end
                 cb(data, err)
             end)
         end
@@ -156,7 +161,15 @@ local function authed(go, cb)
         else
             job = login(user, password, key, function(token, err)
                 if cancelled then return end
-                if not token then cb(nil, err); return end
+                if not token then
+                    -- 令牌过期后的重登失败：明确通知；首次配置错误登录仍原样返回。
+                    if not retry then
+                        err = require("source.auth").expire(SOURCE_ID, expired_msg)
+                    end
+                    cb(nil, err)
+                    return
+                end
+                require("source.auth").ok(SOURCE_ID)
                 call(token)
             end)
         end

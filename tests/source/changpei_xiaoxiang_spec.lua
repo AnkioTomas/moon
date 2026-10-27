@@ -367,7 +367,7 @@ do
     local failed
     Client.historyAsync(function(w, err) failed = { w, err } end)
     Assert.is_nil(failed[1])
-    Assert.eq(failed[2], "请先登录")
+    Assert.eq(failed[2], "长佩登录已失效，请重新登录")
     Assert.is_true(Auth.expired("changpei"))
 
     settings.saveSource("changpei", { cookie = "PHPSESSID=a; _c_n_=dev; moon_token=OLD" })
