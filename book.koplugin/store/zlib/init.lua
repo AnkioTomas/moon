@@ -13,7 +13,10 @@ local Text = require("utils.text")
 local logger = require("utils.log")
 local _ = require("gettext")
 
-local Zlib = {}
+local Zlib = {
+    -- 书城页经 StoreCache.browse 读穿时用；与 books.source_id / Mapper 一致。
+    id = "zlib",
+}
 
 -- 文件名单段上限 255 字节，留出扩展名、下载的 .part 与导入重名的 " (n)"。
 local MAX_STEM_BYTES = 200

@@ -111,3 +111,22 @@ StoreCache.browse(source, {}, function(r) res = r end)
 Assert.eq(calls.browse, 2)
 Assert.len(res.data, 1)
 Assert.eq(res.data[1].stable_id, "b2")
+
+-- 书城后端（如 store.zlib）不是 BookSource，但同样走 browse；必须有 id，否则拼缓存键会炸。
+do
+    local backend_calls = 0
+    local backend = {
+        id = "zlib",
+        browseAsync = function(_, _opts, cb)
+            backend_calls = backend_calls + 1
+            cb({ data = { { source_id = "zlib", stable_id = "z1", title = "Z" } } })
+            return { cancel = function() end }
+        end,
+    }
+    local got
+    StoreCache.browse(backend, {}, function(r) got = r end)
+    Assert.eq(backend_calls, 1)
+    Assert.eq(got.data[1].stable_id, "z1")
+    StoreCache.browse(backend, {}, function(r) got = r end)
+    Assert.eq(backend_calls, 1, "zlib 浏览命中不调源")
+end
