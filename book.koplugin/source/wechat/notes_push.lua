@@ -11,7 +11,7 @@ local logger = require("utils.log")
 local Notes = require("source.wechat.notes")
 local Annotations = require("book.annotations")
 local Toc = require("source.wechat.toc")
-local WChapter = require("source.wechat.chapter")
+local Position = require("source.wechat.progress")
 local Context = require("source.wechat.context")
 local Mapper = require("source.wechat.mapper")
 local _ = require("gettext")
@@ -209,14 +209,19 @@ function Push:locate()
         self:finish(nil, _("缺少章节信息"))
         return
     end
-    self.job = WChapter.fetchHtmlAsync(self.book_id, chapter, function(_html, err, range_source, format)
+    -- range 原文用开书下载时记住的那份（Position 缓存）：每条划线都重拉整章包
+    -- 既慢，重拉到的还可能与本地在读章节不是同一通道 / 版本，可见文本相同、
+    -- 校验照样通过，但标签长度不同会让 range 整体漂移（手机端错位）。
+    local fired = false
+    local job = Position.loadAsync(self.identity, chapter, function(range_source, format_or_err)
+        fired = true
         self.job = nil
         if self.cancelled then return end
         if not range_source then
-            self:finish(nil, err or _("无法获取章节坐标"))
+            self:finish(nil, format_or_err or _("无法获取章节坐标"))
             return
         end
-        local wire = Annotations.rangeMapping(range_source, format)
+        local wire = Annotations.rangeMapping(range_source, format_or_err)
         local flow = Annotations.flow(self.local_html)
         -- 定位不了的条目只跳过它自己：失败不落库，整章中止会让同一条每轮都卡住其余划线。
         for _idx, item in ipairs(range_items) do
@@ -243,6 +248,8 @@ function Push:locate()
         end)
         self:withBookVersion(candidates)
     end)
+    -- 缓存命中时回调已同步跑完并可能发出了下一个请求，不能用旧句柄覆盖它。
+    if not fired then self.job = job end
 end
 
 --- addBookmark 必须带书籍版本号；进程内没有就拉一次详情。

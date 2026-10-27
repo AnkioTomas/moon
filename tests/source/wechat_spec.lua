@@ -825,6 +825,8 @@ do
     local Paths = require("utils.paths")
     local chapter_path = Paths.chapterPath("bpush", 2, "wechat")
     assert(Paths.ensureDir(Paths.bookWorkDir("bpush", "wechat")))
+    -- 沙箱跨运行保留：清掉上次留下的 range 原文缓存，首个定位必走一次拉取并回填缓存
+    os.remove(Paths.bookWorkDir("bpush", "wechat") .. "/2.position.json")
     local chapter_file = assert(io.open(chapter_path, "wb"))
     chapter_file:write("<html><body><h1>微信书</h1><p>旧划线</p><p>新划线</p>"
         .. "<p>补偿划线</p><p>部分一</p><p>部分二</p></body></html>")
@@ -1034,7 +1036,8 @@ do
     ok, err = push({ recovered })
     Assert.is_true(ok, tostring(err))
     Assert.eq(recovered.wr_bookmark_id, "bm-postflight")
-    Assert.eq(chapter_fetches, 3)
+    -- 后续定位全部命中首轮回填的 range 原文缓存，不再重拉整章
+    Assert.eq(chapter_fetches, 1)
 
     -- 批次后半超时：下轮 preflight 必须认回前半成功项，只补传失败项。
     fail_text = "部分一"

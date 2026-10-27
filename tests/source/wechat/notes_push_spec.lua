@@ -112,6 +112,49 @@ do -- 想法列表预检失败只跳过想法对账，不阻断划线：已有 r
     Assert.is_nil(item.wr_bookmark_id)
 end
 
+do -- 新划线定位：range 原文走 Position 缓存（开书记住的那份），同步命中不重拉整章
+    local Toc = require("source.wechat.toc")
+    local Position = require("source.wechat.progress")
+    local old_read, old_load = Toc.read, Position.loadAsync
+    Toc.read = function() return { { uid = "c1" } } end
+    local load_calls = 0
+    Position.loadAsync = function(_identity, _chapter, cb)
+        load_calls = load_calls + 1
+        -- 缓存命中：同步回调、返回 nil（与 Position.loadAsync 真实行为一致）
+        cb('<html><head><title>tttttttttt</title></head><body><p>hello world</p></body></html>', "html")
+        return nil
+    end
+    local submitted = false
+    local item = {
+        drawer = "lighten", text = "hello",
+        pos0 = "/html/body/p/text().0", pos1 = "/html/body/p/text().5",
+    }
+    local client = fakeClient({
+        bookmarkListAsync = function()
+            if not submitted then return { updated = {} } end
+            return { updated = { {
+                chapterUid = "c1", range = item.wr_range, bookmarkId = "bm-new",
+                markText = "hello", type = 1,
+            } } }
+        end,
+        myReviewsAsync = { reviews = {} },
+        addBookmarkAsync = function() submitted = true; return { bookmarkId = "bm-new" } end,
+        bookInfoAsync = { book = { version = 7 } },
+    })
+    local ok, err
+    NotesPush.run(client, identity, "c1",
+        "<html><body><p>hello world</p></body></html>", { item },
+        function(o, e) ok, err = o, e end)
+    Stubs.flush()
+    Toc.read, Position.loadAsync = old_read, old_load
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(load_calls, 1)
+    -- 53 = wire 原文里 <p> 之前的全部 rune（head/title 计入），与本地壳无关
+    Assert.eq(item.wr_range, "53-58")
+    Assert.eq(item.wr_bookmark_id, "bm-new")
+end
+
 do -- 想法清单拿不到：新想法不推（认不回上轮已成功的会重复），报失败留脏；划线与已有想法照常
     local client = fakeClient({ bookmarkListAsync = { updated = {} }, myReviewsAsync = false })
     local item = { drawer = "lighten", text = "t", note = "想法", wr_review_only = true, wr_range = "1-2" }
