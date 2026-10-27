@@ -244,6 +244,85 @@ local function confirmDelete(entry, model, done)
     }:show()
 end
 
+--- 卷名清单：≤3 卷列全名，多了只写第一卷 + 总数。
+---@param entries table[]
+---@return string
+local function namesText(entries)
+    if #entries <= 3 then
+        local names = {}
+        for _idx, entry in ipairs(entries) do names[#names + 1] = entry.title end
+        return table.concat(names, "、")
+    end
+    return T(_("%1 等 %2 卷"), entries[1].title, #entries)
+end
+
+--- 「缓存整部」的对象：未缓存未排队的入队；队列里失败的走 queue_retry
+--- （07 A4；enqueue 对仍在队里的失败项只会回 already_queued）。
+---@param ctx table
+---@param toc table[]
+---@return table[] enqueue, table[] retry
+local function batchTargets(ctx, toc)
+    local enqueue, retry = {}, {}
+    for _idx, entry in ipairs(toc) do
+        local cid = tostring(entry.chapterId)
+        local status = ctx.statuses[cid]
+        local cached = type(status) == "table" and (status.state == "complete" or status.state == "stale")
+        local queued = ctx.entries[cid]
+        if not cached then
+            if queued then
+                if queued.state == "failed" then retry[#retry + 1] = entry end
+            else
+                enqueue[#enqueue + 1] = entry
+            end
+        end
+    end
+    return enqueue, retry
+end
+
+--- 批量确认框正文：卷数 / 卷名 / 峰值 / 可用 / 完成后剩余（04 A4 + 07 A6）。
+---@param entries table[] 要入队的卷
+---@param estimate table Cache.estimate 结果
+---@param retry_count integer
+---@param paused boolean
+---@return string
+local function enqueueText(entries, estimate, retry_count, paused)
+    local lines = { T(_("将缓存：%1"), namesText(entries)) }
+    lines[#lines + 1] = T(_("预计占用 %1（峰值）"), Cache.sizeText(estimate.bytes))
+    lines[#lines + 1] = T(_("设备可用 %1"), Cache.sizeText(estimate.available))
+    local left = (tonumber(estimate.available) or 0) - (tonumber(estimate.bytes) or 0)
+    lines[#lines + 1] = T(_("完成后剩余 %1"), Cache.sizeText(math.max(0, left)))
+    if retry_count > 0 then lines[#lines + 1] = T(_("另有 %1 卷失败将重试"), retry_count) end
+    -- 07 A5：enqueue 会隐式恢复整条队列，先讲清楚。
+    if paused then lines[#lines + 1] = _("当前下载已暂停，开始缓存会恢复整个队列") end
+    return table.concat(lines, "\n")
+end
+
+--- 重试确认框正文：逐条 lastError 用 07 A7 的表映射，不显示原始堆栈。
+---@param entries table[]
+---@param ctx table
+---@return string
+local function retryText(entries, ctx)
+    local lines = { T(_("将重试：%1"), namesText(entries)) }
+    for _idx, entry in ipairs(entries) do
+        local queued = ctx.entries[tostring(entry.chapterId)]
+        local reason = Cache.failureText(type(queued) == "table" and queued.last_error or nil)
+        if reason then lines[#lines + 1] = T(_("%1：%2"), entry.title, reason) end
+    end
+    return table.concat(lines, "\n")
+end
+
+--- 空间不足：就地换成清理提示，主按钮只 toast（07 A6）。
+---@param message string
+local function confirmSpace(message)
+    local Confirm = require("ui.themes.widgets.confirm")
+    Confirm:new{
+        title = _("空间不足"),
+        text = message .. "\n" .. _("清理后再下载"),
+        ok_text = _("去清理空间"),
+        ok_callback = function() toast(message) end,
+    }:show()
+end
+
 --- 打开卷列表。返回 list 控件（测试与「部分失败」后重画都要用）。
 ---@param series Book
 ---@param toc table[]
@@ -255,10 +334,13 @@ function VolumeList.pick(series, toc, cb, opts)
     local ctx = scan(toc)
     local chosen = false
     local list
+    local dialog
+    -- 行、重画与确认框互相引用（重画要重建行，行要弹确认框），先声明再赋值。
+    local item, items, refresh, confirmRetry, confirmEnqueue, resumeQueue
 
     ---@param entry table
     ---@return table
-    local function item(entry)
+    item = function(entry)
         if not ctx.show_cache then
             -- unknown_server / 缺 status：回到旧行为，只显示阅读状态（含旧的「已下载」）。
             local mandatory = opts.fallback and opts.fallback(entry) or nil
@@ -266,9 +348,15 @@ function VolumeList.pick(series, toc, cb, opts)
         end
         local model = rowState(ctx, entry)
         local actions = {}
-        actions.delete = function()
-            confirmDelete(entry, model, function() end)
+        actions.download = function() confirmEnqueue({ entry }, {}) end
+        actions.delete = function() confirmDelete(entry, model, refresh) end
+        actions.refresh = function() confirmRetry({ entry }) end
+        actions.pause = function()
+            local ok, code, message = Cache.queuePause()
+            if not ok then toast(Cache.message(code, message)) end
+            refresh()
         end
+        actions.play_arrow = function() resumeQueue() end
         return {
             text = entry.title,
             value = entry,
@@ -277,15 +365,142 @@ function VolumeList.pick(series, toc, cb, opts)
     end
 
     ---@return table[]
-    local function items()
+    items = function()
         local out = {}
         for _idx, entry in ipairs(toc) do out[#out + 1] = item(entry) end
         return out
     end
 
+    --- 重画：状态全在 kamare 的内存索引里，重扫一遍即可（列表停在原页）。
+    refresh = function()
+        ctx = scan(toc)
+        if list and not list.closed then list:setItems(items()) end
+    end
+
+    ---@param entries table[]
+    ---@return boolean
+    local function enqueue(entries)
+        local ok, code, message, detail = Cache.enqueue(entries)
+        if ok then return true end
+        toast(Cache.message(code, message, detail))
+        return false
+    end
+
+    ---@param entries table[]
+    ---@return boolean
+    local function retry(entries)
+        local ids = {}
+        for _idx, entry in ipairs(entries) do ids[#ids + 1] = entry.chapterId end
+        local ok, code, message = Cache.queueRetry(ids)
+        if ok then return true end
+        toast(Cache.message(code, message))
+        return false
+    end
+
+    --- 进度框：1 秒轮询与三种收尾见 reap()。
+    ---@param total integer 本批次的卷数（入队 + 重试）
+    local function startProgress(total)
+        local ProgressDialog = require("ui.themes.widgets.progress_dialog")
+        dialog = ProgressDialog:new{
+            title = _("正在缓存"),
+            text = T(_("正在缓存 %1/%2 卷"), 1, total),
+            cancel_text = _("暂停"),
+            on_cancel = function()
+                local ok, code, message = Cache.queuePause()
+                if not ok then toast(Cache.message(code, message)) end
+                dialog = nil
+                refresh()
+            end,
+            on_background = function() dialog = nil end,
+        }
+        dialog:show()
+        refresh()
+    end
+
+    ---@param entries table[]
+    confirmRetry = function(entries)
+        local Confirm = require("ui.themes.widgets.confirm")
+        Confirm:new{
+            title = _("重试缓存"),
+            text = retryText(entries, ctx),
+            ok_text = _("重试"),
+            ok_callback = function()
+                if retry(entries) then startProgress(#entries) end
+            end,
+        }:show()
+    end
+
+    --- 先 estimate 再画 04 A4 的确认框；空间不足就地换文案（07 A6）。
+    ---@param to_enqueue table[]
+    ---@param to_retry table[]
+    confirmEnqueue = function(to_enqueue, to_retry)
+        local estimate, code, message = Cache.estimate(to_enqueue)
+        if type(estimate) ~= "table" then
+            toast(Cache.message(code, message))
+            return
+        end
+        local reason = Cache.estimateMessage(estimate)
+        if reason then
+            if estimate.reason == "nothing_to_do" then toast(reason) else confirmSpace(reason) end
+            return
+        end
+        local count = tonumber(estimate.chapters) or #to_enqueue
+        local total = count + #to_retry
+        local Confirm = require("ui.themes.widgets.confirm")
+        Confirm:new{
+            title = total == 1 and _("缓存这一卷") or T(_("缓存 %1 卷"), total),
+            text = enqueueText(to_enqueue, estimate, #to_retry, ctx.paused),
+            ok_text = _("开始缓存"),
+            ok_callback = function()
+                if not enqueue(to_enqueue) then return end
+                if #to_retry > 0 then retry(to_retry) end
+                startProgress(total)
+            end,
+        }:show()
+    end
+
+    --- 恢复队列：低水位不给继续，连续失败先逐条重试失败项（07 A5）。
+    resumeQueue = function()
+        local reason = type(ctx.queue) == "table" and ctx.queue.pause_reason or nil
+        if reason == "low_space" then
+            toast(_("空间不足，已暂停。清理后再下载"))
+            return
+        end
+        if reason == "network" then
+            local failed = {}
+            for _idx, entry in ipairs(toc) do
+                local queued = ctx.entries[tostring(entry.chapterId)]
+                if type(queued) == "table" and queued.state == "failed" then failed[#failed + 1] = entry end
+            end
+            if #failed > 0 then retry(failed) end
+        end
+        local ok, code, message = Cache.queueResume()
+        if not ok then toast(Cache.message(code, message)) end
+        refresh()
+    end
+
+    --- 标题栏左钮「缓存整部」：没有对象就只 toast。
+    local function batch()
+        local to_enqueue, to_retry = batchTargets(ctx, toc)
+        if #to_enqueue == 0 and #to_retry == 0 then
+            toast(_("全部已缓存"))
+            return
+        end
+        if #to_enqueue == 0 then
+            confirmRetry(to_retry)
+            return
+        end
+        confirmEnqueue(to_enqueue, to_retry)
+    end
+
+    local can_batch = ctx.show_cache
+        and (has(ctx.capabilities, "enqueue") or has(ctx.capabilities, "queue_control"))
+
     list = require("ui.themes.widgets.list"):new{
         title = series.title or _("选择卷"),
         items = items(),
+        left_icon = can_batch and "download" or nil,
+        left_callback = can_batch and batch or nil,
         on_select = function(entry)
             chosen = true
             cb(entry)

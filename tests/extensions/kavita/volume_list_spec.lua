@@ -133,10 +133,13 @@ end
 ---@param list table
 ---@return table[]
 local function tails(list)
+    local first = Kit.taps(list)[1]
+    local top = first and first.dimen.y or 0
     local out = {}
     for _idx, button in ipairs(Kit.buttons(list)) do
-        if button.icon == "download" or button.icon == "delete" or button.icon == "refresh"
-            or button.icon == "pause" or button.icon == "play_arrow" then
+        if button.dimen.y >= top
+            and (button.icon == "download" or button.icon == "delete" or button.icon == "refresh"
+                or button.icon == "pause" or button.icon == "play_arrow") then
             out[#out + 1] = button
         end
     end
@@ -199,5 +202,122 @@ textContains(text, "已读 · 已缓存")
 textContains(text, "在读 · 已缓存")
 textContains(text, "已缓存")
 Assert.eq(#tails(list), 3)
+
+-- 标题栏左钮＝缓存整部：只选未缓存（跳过已缓存 / 排队中），先 estimate 再确认。
+reset()
+st.statuses["601"] = { state = "complete", bytes = 1 }
+st.queue = { state = "downloading", entries = { [603] = { chapterId = 603, state = "downloading",
+    bytes_done = 50, bytes_total = 100 } }, bytes_done = 50, bytes_total = 100 }
+st.estimate = { chapters = 1, bytes = 120 * 1024 * 1024, available = 2000 * 1024 * 1024, ok = true }
+list, picked = open()
+local title = Kit.buttons(list)[1]
+Assert.eq(title.icon, "download", "标题栏左钮是下载图标")
+Assert.is_true(title.dimen.y < Kit.taps(list)[1].dimen.y, "左钮在标题栏里，不是行尾")
+list.left_callback()
+Assert.len(calls.estimate, 1, "先估算")
+Assert.eq(calls.estimate[1].chapterId, 602, "只估算未缓存的第 2 卷")
+confirm = Themed.last("confirm")
+Assert.not_nil(confirm, "估算通过后弹确认框")
+Assert.eq(confirm.title, "缓存这一卷")
+textContains(confirm.text, "第 2 卷")
+textContains(confirm.text, "预计占用 120.0 MB（峰值）")
+textContains(confirm.text, "设备可用 2000.0 MB")
+textContains(confirm.text, "完成后剩余 1880.0 MB")
+Assert.eq(confirm.ok_text, "开始缓存")
+confirm.ok_callback()
+Assert.len(calls.enqueue, 1)
+Assert.eq(calls.enqueue[1][1].chapterId, 602)
+local progress = Themed.last("progress_dialog")
+Assert.not_nil(progress, "入队后开进度框")
+Assert.eq(progress.title, "正在缓存")
+Assert.eq(progress.cancel_text, "暂停", "按钮是暂停，不是取消")
+Assert.not_nil(progress.on_cancel)
+Assert.not_nil(progress.on_background, "后台运行")
+Assert.is_true(#calls.retry == 0, "没有失败项就不调 queue_retry")
+
+-- 全部已缓存：不估算，直接 toast。
+reset()
+for _idx, item_entry in ipairs(toc) do
+    st.statuses[tostring(item_entry.chapterId)] = { state = "complete", bytes = 1 }
+end
+list = open()
+local confirms = #Themed.all("confirm")
+list.left_callback()
+Assert.is_nil(calls.estimate, "没有对象不估算")
+textContains(Themed.last("toast").text, "全部已缓存")
+Assert.eq(#Themed.all("confirm"), confirms, "全部已缓存不弹框")
+
+-- estimate 说没事可做：toast，不弹框。
+reset()
+st.estimate = { chapters = 0, bytes = 0, available = 1, ok = false, reason = "nothing_to_do" }
+list = open()
+list.left_callback()
+textContains(Themed.last("toast").text, "全部已缓存或正在下载")
+Assert.eq(#Themed.all("confirm"), confirms, "没事可做只 toast")
+
+-- 空间不足：确认框就地换成「空间不足」，主按钮只 toast，不入队。
+reset()
+st.estimate = { chapters = 3, bytes = 849 * 1024 * 1024, available = 480 * 1024 * 1024, ok = false, reason = "space" }
+list = open()
+list.left_callback()
+confirm = Themed.last("confirm")
+Assert.not_nil(confirm)
+textContains(confirm.text, "空间不足：需要 849.0 MB，可用 480.0 MB")
+Assert.eq(confirm.ok_text, "去清理空间")
+confirm.ok_callback()
+Assert.len(calls.enqueue, 0, "空间不足不入队")
+textContains(Themed.last("toast").text, "空间不足")
+
+-- 低水位：同样不给「开始缓存」。
+reset()
+st.estimate = { chapters = 3, bytes = 1, available = 400 * 1024 * 1024, ok = false, reason = "low_water" }
+list = open()
+list.left_callback()
+confirm = Themed.last("confirm")
+textContains(confirm.text, "可用空间不足（剩余 400.0 MB）")
+Assert.eq(confirm.ok_text, "去清理空间")
+
+-- 队列已暂停：确认框要说清「开始缓存会恢复整个队列」（07 A5）。
+reset()
+st.queue = { state = "paused", pause_reason = "user", entries = {}, bytes_done = 0, bytes_total = 0 }
+st.estimate = { chapters = 3, bytes = 10 * 1024 * 1024, available = 2000 * 1024 * 1024, ok = true }
+list = open()
+list.left_callback()
+textContains(Themed.last("confirm").text, "当前下载已暂停，开始缓存会恢复整个队列")
+
+-- 批量里含失败项：入队未缓存的，再逐条重试失败的，进度框算上两项。
+reset()
+st.statuses["601"] = { state = "complete", bytes = 1 }
+st.estimate = { chapters = 1, bytes = 10 * 1024 * 1024, available = 2000 * 1024 * 1024, ok = true }
+st.queue = { state = "idle", entries = {
+    [602] = { chapterId = 602, state = "failed", bytes_done = 0, bytes_total = 100, last_error = "http 403" },
+}, bytes_done = 0, bytes_total = 0 }
+list = open()
+list.left_callback()
+confirm = Themed.last("confirm")
+textContains(confirm.text, "另有 1 卷失败将重试")
+confirm.ok_callback()
+Assert.eq(calls.enqueue[1][1].chapterId, 603)
+Assert.eq(calls.retry[1][1], 602)
+progress = Themed.last("progress_dialog")
+textContains(progress.text, "1/2 卷", "进度框按「入队 + 重试」算总数")
+
+-- 只有失败项：直接给「重试缓存」，文案用 lastError 映射后的说法。
+reset()
+st.statuses["603"] = { state = "complete", bytes = 1 }
+st.queue = { state = "idle", entries = {
+    [601] = { chapterId = 601, state = "failed", last_error = "http 403" },
+    [602] = { chapterId = 602, state = "failed", last_error = "socket closed" },
+}, bytes_done = 0, bytes_total = 0 }
+list = open()
+list.left_callback()
+Assert.is_nil(calls.estimate, "没有要下载的就不估算")
+confirm = Themed.last("confirm")
+Assert.eq(confirm.title, "重试缓存")
+textContains(confirm.text, "服务器拒绝下载（403），检查 API Key / 权限")
+textContains(confirm.text, "网络中断或服务器不可达")
+confirm.ok_callback()
+Assert.eq(table.concat(calls.retry[1], ","), "601,602")
+Assert.len(calls.enqueue, 0, "没有未缓存的项就不入队")
 
 return true
