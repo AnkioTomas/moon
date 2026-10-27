@@ -425,7 +425,8 @@ local function dimensions(client, chapter_id)
     return dims
 end
 
---- 官方 / 旧版 kamare 的查看器通道：行为与 02 A4 之前完全一致，12 号票再整体删除。
+--- 官方 / 旧版 kamare 的查看器通道：02 A4 要求官方版（无 kamarecache）与增强版缺 `open` 时
+--- 仍保住今天的在线看图，所以这条通道留在适配层；source.lua 里那份重复实现已删（12 号票）。
 ---@param opts table
 ---@return table|nil viewer, string|nil code, string|nil message
 local function legacyOpen(opts)

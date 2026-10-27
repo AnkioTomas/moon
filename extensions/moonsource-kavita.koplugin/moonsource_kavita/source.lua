@@ -20,7 +20,8 @@ pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「
 统计：纯本地确认推送（Kavita 自己按会话记录），另全量拉取服务端阅读历史 → 按「身份 × 日」的行
 与替换指令写成本地统计快照；身份判定（单卷 / 多卷）与上次身份、卷名记在扩展状态文件里。
 划线：epub 的划线按段落文本在本地 epub 里找锚点，新建 / 改备注推到 Kavita，注解 id 存在笔记快照里。
-漫画：装了 kamare 插件且在线时交它在线看（开书回调 handled），否则下载 cbz 用内置阅读器。
+漫画：缓存判定 / 起始页 / 离线全归 kamare cache（03 A1），moon 只按返回码路由；
+缓存不可用或失败时回退旧 cbz，再不行才下载 cbz 用内置阅读器。
 
 @module moonsource_kavita.source
 --]]
@@ -371,8 +372,12 @@ local function backfillRead(source_id, series_list)
                 -- 对齐计入 changed：同步只会报「变了」的域，首页 / 图书馆据此重画。
                 changed = changed + syncVolumeMeta(
                     require("book.books_db").get(source_id, stable_id), stable_id, progressed)
-                -- 真实进度在卷行上；容器行的 series 级占位是多余的（旧版回填过就清掉）。
-                if here and ProgressDB.dropRemote(source_id, stable_id) then
+                -- 真实位置在卷行上；容器行保留一条服务端 series 级聚合（updated_at=0 不进最近阅读，
+                -- 但书架 / 详情百分比有量级）。不再 drop：离线读、回连、再离线看到的是同一个量级。
+                if ProgressDB.upsertRemote(source_id, stable_id, {
+                    fraction = math.min(1, read / pages),
+                    updated_at = 0,
+                }) then
                     changed = changed + 1
                 end
             elseif (comic and not (here and here.page == read)) or (not comic and here == nil) then
@@ -975,57 +980,117 @@ function Source:fetchVolume(ref, entry, cb)
     end }
 end
 
---- 打开一卷：漫画（cbz / 图片目录）在线且装了 kamare 就从 Kavita 记录的页交它在线看，
---- 回调 handled；kamare 打不开时 cbz 退回下载，图片目录报错。其余格式下载。
---- 关查看器时把页码记成远端版本地进度（kamare 已推给 Kavita），书架看得到进度。
+--- 漫画查看器的提示通道：on_next 找不到下一卷时没有 cb 可回，只能自己弹。
+---@param text string
+local function toast(text)
+    require("ui.themes.widgets.toast"):new{ text = text, timeout = 3 }:show()
+end
+
+--- 打开一卷：漫画（cbz / 图片目录）的缓存判定、起始页、离线全归 kamare cache（03 A1/A2/A9），
+--- moon 只按返回码路由；其它格式仍然下载后用内置阅读器。
+--- 关查看器写卷行真实位置 + 容器聚合（06 A1/A2）；章末续读按回调 id 回目录（03 A7）。
 ---@param ref BookIdentity 承载这一卷的书库行
 ---@param entry table
----@param toc table[] 同 series 的卷，章末续读按 chapterId 找下一卷
+---@param toc table[]|nil 同 series 的卷，章末续读按 chapterId 找下一卷
 ---@param title string
 ---@param cb fun(path: string|nil, err: string|nil, meta: { handled: boolean }|nil)
 ---@return { cancel: fun() }
 function Source:openEntry(ref, entry, toc, title, cb)
-    local cached = MAGIC[entry.format] and validFile(
-        T("%1/%2.%3", require("utils.paths").bookWorkDir(ref.stable_id, self.id), entry.chapterId, entry.format),
-        entry.format)
-    if (entry.format ~= "cbz" and entry.format ~= "image") or cached or not online() or not Cache.available("open") then
+    if (entry.format ~= "cbz" and entry.format ~= "image") or not Cache.available("open") then
         return self:fetchVolume(ref, entry, cb)
     end
-    local job, cancelled = nil, false
-    local function show(item, start_page)
-        local viewer, code, message = Cache.open({
-            base_url = self.client.base_url, api_key = self.client.api_key,
-            entry = item, title = title, start_page = start_page,
-            on_close = function(page, total)
-                total = tonumber(total) or item.pages
-                page = tonumber(page) or 1
-                if total > 0 then
-                    require("book.progress_db").upsertRemote(self.id, ref.stable_id, {
-                        fraction = math.min(1, page / total), page = page, total_pages = total,
-                        updated_at = os.time(),
-                    })
-                end
-            end,
+
+    local series_id = splitId(ref.stable_id)
+    --- 卷身份：真实位置记在 seriesId:chapterId 上，容器行只做聚合（06 A1）。
+    ---@param item table
+    ---@return string
+    local function volumeId(item)
+        return series_id .. ":" .. tostring(item.chapterId or item.uid)
+    end
+
+    --- 聚合 = (其它已读完卷数 + 本卷 fraction) / toc 卷数；目录缺失退本卷 fraction。
+    ---@param item table
+    ---@param fraction number
+    ---@return number
+    local function aggregate(item, fraction)
+        if type(toc) ~= "table" or #toc == 0 then return fraction end
+        local ProgressDB = require("book.progress_db")
+        local finished = 0
+        for _idx, other in ipairs(toc) do
+            if tostring(other.chapterId or other.uid) ~= tostring(item.chapterId or item.uid) then
+                local row = ProgressDB.get(self.id, volumeId(other))
+                if row and (tonumber(row.fraction) or 0) >= 1 then finished = finished + 1 end
+            end
+        end
+        return math.min(1, (finished + fraction) / #toc)
+    end
+
+    --- 卷行缺书时用目录卷名 + 容器元数据补一条（06 A2）：ProgressDB.recent 的 EXISTS books
+    --- 会过滤掉没有书行的卷，最近阅读里就看不到它。
+    ---@param item table
+    local function rememberVolume(item)
+        local BookDB = require("book.books_db")
+        local stable_id = volumeId(item)
+        if BookDB.get(self.id, stable_id) then return end
+        local container = BookDB.get(self.id, series_id) or ref.book or { stable_id = series_id }
+        require("book.store").rememberMany({ volumeRow(container, stable_id, item.title) })
+    end
+
+    --- kamare 回调的是物理页 / 物理总数：卷行存真实位置，容器行只存聚合 fraction 且不进最近阅读。
+    ---@param item table
+    ---@param page any
+    ---@param total any
+    local function closeProgress(item, page, total)
+        total = tonumber(total) or tonumber(item.pages) or 0
+        page = tonumber(page) or 1
+        if total <= 0 then return end
+        local fraction = math.min(1, page / total)
+        local ProgressDB = require("book.progress_db")
+        ProgressDB.upsertRemote(self.id, volumeId(item), {
+            fraction = fraction,
+            page = page,
+            total_pages = total,
+            updated_at = os.time(),
+        })
+        rememberVolume(item)
+        ProgressDB.upsertRemote(self.id, series_id, {
+            fraction = aggregate(item, fraction),
+            updated_at = 0,
+        })
+    end
+
+    ---@param item table
+    ---@return table|nil viewer, string|nil code, string|nil message
+    local function show(item)
+        return Cache.open({
+            base_url = self.client.base_url,
+            api_key = self.client.api_key,
+            entry = item,
+            title = title,
+            on_close = function(page, total) closeProgress(item, page, total) end,
             on_next = function(next_id)
-                for _idx, next_entry in ipairs(toc) do
-                    if tostring(next_entry.chapterId) == tostring(next_id) then return show(next_entry, 1) end
-                end
+                local next_entry = findEntry(toc or {}, tostring(next_id))
+                if not next_entry then return toast(_("下一卷不在目录里")) end
+                show(next_entry)
             end,
         })
-        return viewer, Cache.message(code, message)
     end
-    job = self.client:json("GET", "/api/Reader/get-progress", { chapterId = entry.chapterId }, nil, function(remote)
-        if cancelled then return end
-        local read = remote and tonumber(remote.pageNum) or 0
-        local viewer, err = show(entry, math.max(1, math.min(read + 1, entry.pages)))
-        if viewer then return cb(nil, nil, { handled = true }) end
-        if entry.format ~= "cbz" then return cb(nil, err) end
-        job = self:fetchVolume(ref, entry, cb)
-    end)
-    return { cancel = function()
-        cancelled = true
-        job:cancel()
-    end }
+
+    local viewer, code, message = show(entry)
+    if viewer then return cb(nil, nil, { handled = true }) end
+    if code == "offline_not_cached" then
+        -- A5/A6：kamare 缓存 > 旧 cbz > 下载。旧 cbz 命中时离线照开，静默保留不删。
+        local old = entry.format == "cbz" and downloaded(self.id, ref.stable_id)
+        if old then return SourceBase.defer(cb, old) end
+        return cb(nil, Cache.message(code, message))
+    end
+    if code == "viewer_running" or code == "no_pages" or code == "settings_write_failed" then
+        -- 查看器已在运行绝不回退下载（旧的 bug）；页面为空 / 配置写失败也不该重下。
+        return cb(nil, Cache.message(code, message))
+    end
+    -- 其它失败：cbz 交给 fetchVolume 兜底（本地已有文件时只登记，不重新下载）；image 下载不了。
+    if entry.format == "cbz" then return self:fetchVolume(ref, entry, cb) end
+    return cb(nil, Cache.message(code, message))
 end
 
 --- 旧「已下载」标记：kamare 不可用时卷列表右侧仍要显示本地 cbz / epub。
@@ -1057,17 +1122,24 @@ local function pickVolume(series, toc, cb)
     }):show()
 end
 
---- 打开：已下载的直接开（不联网）；单卷 series 下到 series 行，多卷选卷后下到卷行。
+--- 打开：非漫画的已下载文件直接开（不联网）；漫画按 kamare 缓存 > 旧 cbz > 下载的顺序（03 A5）。
+--- `downloaded()` 的早返回不能压过 kamare 缓存，否则有旧 cbz 的卷永远走不进离线缓存。
 function Source:openBookAsync(identity, _opts, cb)
-    local path = downloaded(self.id, identity.stable_id)
-    if path then return SourceBase.defer(cb, path) end
     local job, cancelled = nil, false
     local function finish(file, err, meta)
         if not cancelled then cb(file, err, meta) end
     end
     local series_id, chapter_id = splitId(identity.stable_id)
+    local local_path = downloaded(self.id, identity.stable_id)
+    local local_format = local_path and local_path:match("%.(%w+)$")
+    -- EPUB / PDF：本地文件优先，否则下载后原生阅读；漫画要先进 kamare 判缓存（A5）。
+    if local_path and local_format ~= "cbz" then return SourceBase.defer(cb, local_path) end
     job = self:toc(series_id, function(toc, err)
-        if not toc then return finish(nil, err) end
+        if not toc then
+            -- 目录拿不到但盘上有旧 cbz：本地文件仍可开，离线老用户不被缓存目录卡住。
+            if local_path then return finish(local_path) end
+            return finish(nil, err)
+        end
         if chapter_id or #toc == 1 then
             local entry = findEntry(toc, chapter_id)
             if not entry then return finish(nil, _("这一卷已不在 Kavita 上")) end
