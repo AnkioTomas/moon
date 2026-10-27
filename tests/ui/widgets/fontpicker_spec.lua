@@ -161,4 +161,9 @@ Assert.is_true(prepare_cancelled, "关闭进度窗取消准备任务")
 prepare_callback(true)
 Assert.is_nil(selected, "关闭后迟到的完成回调不能应用字体")
 
+FontPicker.open{ title = "西文字体", initial_tab = "system", current_id = function() return "" end }
+Assert.eq(Kit.shown[#Kit.shown].tabs.active, "system", "首次选西文字体直接打开系统字库")
+FontPicker.open{ initial_tab = "system", current_id = function() return "Font25.ttf" end }
+Assert.eq(Kit.shown[#Kit.shown].tabs.active, "local", "已选字体仍优先定位到所在分栏")
+
 return true

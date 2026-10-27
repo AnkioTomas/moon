@@ -53,6 +53,9 @@ local PANEL_RATIO = 0.85
 ---@field panel_w integer
 ---@field ticket BookSidebarTicket|nil 首次进入票根页时生成，关侧栏取消
 ---@field font_job table|nil 字体列表拉取中（{ cancel }），关侧栏取消
+---@field font_items table[]|nil 两类字体共用的字体目录
+---@field font_kind string 当前选择中文 chinese 或西文 western
+---@field mixed_fonts boolean 开启时显示中西文字体切换
 ---@field closed boolean|nil 已关闭：迟到的异步回调不再重画
 --- 用 Modal 的整屏遮罩，面板贴左缘盖住左侧部分（见 render 末尾）。
 local Sidebar = Modal:extend{}
@@ -157,6 +160,8 @@ function Sidebar:init()
     end
     self.tab = 1
     self.menus = {}
+    self.font_kind = "chinese"
+    self.mixed_fonts = MoonSettings.get("reader").mixed_fonts == true
     self.native_closes = {}
     self.ges_events.SwipeSidebar = { GestureRange:new{ ges = "swipe", range = self.dimen } }
     self:render()
@@ -191,23 +196,24 @@ function Sidebar:adopt(id, menu)
     self.menus[id] = menu or false
 end
 
---- 字体页：选择器自己的入口会先弹加载提示，借不到列表；这里自己拉列表，拉到后借
---- FontPicker.show 的列表并刷新本页。选中字体即应用到当前文档（选中后关侧栏）。
+--- 字体页：共用一次目录加载，按中文 / 西文借用各自的字体选择器。
 ---@param width integer
 ---@param height integer
 ---@return table|nil
 function Sidebar:fontMenu(width, height)
+    if self.menus.font == nil and self.font_items then
+        local opts = self.font_kind == "western"
+            and require("ui.fonts.reader").westernPickerOpts(self.ui)
+            or require("features.panel.actions.reader.font").pickerOpts(self.ui)
+        self:adopt("font", borrowMenu(function()
+            require("ui.widgets.fontpicker").show(opts, self.font_items)
+        end, width, height))
+    end
     if self.menus.font == nil and not self.font_job then
         local job = require("ui.fonts.catalog").listAsync(function(items)
             self.font_job = nil
-            if items then
-                local opts = require("features.panel.actions.reader.font").pickerOpts(self.ui)
-                self:adopt("font", borrowMenu(function()
-                    require("ui.widgets.fontpicker").show(opts, items)
-                end, width, height))
-            else
-                self.menus.font = false
-            end
+            self.font_items = items
+            if not items then self.menus.font = false end
             -- 可能同步回调（缓存命中），推迟到下一 tick 再重画
             UIManager:nextTick(require("ui.guard").wrap("sidebar font", function()
                 if self.closed or self.tabs[self.tab] ~= "font" then return end
@@ -215,7 +221,7 @@ function Sidebar:fontMenu(width, height)
                 UIManager:setDirty(self, "ui")
             end))
         end)
-        if self.menus.font == nil then self.font_job = job end
+        if not self.font_items and self.menus.font == nil then self.font_job = job end
     end
     return self.menus.font or nil
 end
@@ -287,24 +293,46 @@ function Sidebar:render()
         }
     else
         local menu, status
+        local menu_h = body_h
         if id == "font" then
-            menu = self:fontMenu(self.panel_w, body_h)
+            if self.mixed_fonts then menu_h = body_h - Tabbar.height() end
+            menu = self:fontMenu(self.panel_w, menu_h)
             status = self.font_job and _("正在加载字体列表…") or _("字体列表加载失败")
         else
             menu = self:menuFor(id, self.panel_w, body_h)
         end
         body = OverlapGroup:new{
-            dimen = Geom:new{ w = self.panel_w, h = body_h },
+            dimen = Geom:new{ w = self.panel_w, h = menu_h },
             menu or Box:new{
                 style = surface,
                 width = self.panel_w,
-                height = body_h,
+                height = menu_h,
                 status and Text.line("body", status, {
                     width = self.panel_w - Theme.px(t.space.lg) * 2,
                     color = t.color.muted,
                 }) or nil,
             },
         }
+        if id == "font" and self.mixed_fonts then
+            body = VerticalGroup:new{
+                align = "left",
+                Tabbar.widget({
+                    width = self.panel_w,
+                    active = self.font_kind,
+                    tabs = {
+                        { id = "chinese", text = _("中文字体"), icon = "text_fields" },
+                        { id = "western", text = _("西文字体"), icon = "font_download" },
+                    },
+                    on_tab = function(kind)
+                        self.font_kind = kind
+                        self.menus.font = nil
+                        self:render()
+                        UIManager:setDirty(self, "ui")
+                    end,
+                }),
+                body,
+            }
+        end
     end
     local panel = VerticalGroup:new{
         align = "left",

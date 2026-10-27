@@ -11,7 +11,7 @@ local _ = require("gettext")
 ---@return FontPickerOpts
 local function pickerOpts(ui)
     return {
-        title = _("阅读字体"),
+        title = require("utils.settings").get("reader").mixed_fonts and _("中文字体") or _("阅读字体"),
         current_id = function()
             return FontReader.currentId(ui)
         end,
@@ -59,6 +59,16 @@ return {
             }:show()
             return
         end
-        FontPicker.open(pickerOpts(ui))
+        if not require("utils.settings").get("reader").mixed_fonts then
+            FontPicker.open(pickerOpts(ui))
+            return
+        end
+        require("ui.themes.widgets.sheet"):new{
+            title = _("阅读字体"),
+            items = {
+                { text = _("中文字体"), callback = function() FontPicker.open(pickerOpts(ui)) end },
+                { text = _("西文字体"), callback = function() FontPicker.open(FontReader.westernPickerOpts(ui)) end },
+            },
+        }:show()
     end,
 }

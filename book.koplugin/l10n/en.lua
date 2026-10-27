@@ -1,4 +1,9 @@
 return {
+    ["中西文字体分开"] = "Separate Chinese and Western fonts",
+    ["西文默认 Bookerly，可在阅读字体中更换"] = "Western text defaults to Bookerly; change it in Reading font",
+    ["中文字体"] = "Chinese font",
+    ["西文字体"] = "Western font",
+    ["请选择不含中文字形的字体，以保留所选中文字体"] = "Choose a font without Chinese glyphs to preserve your selected Chinese font",
     ["分页与弹窗"] = "Paging and dialogs",
     ["分页按键"] = "Page-turn keys",
     ["使用物理按键或蓝牙翻页键翻动当前窗口"] = "Use physical or Bluetooth page keys in the current window",
