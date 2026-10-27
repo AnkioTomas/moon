@@ -29,6 +29,7 @@ local Client = require("moonsource_kavita.client")
 local Annotation = require("moonsource_kavita.annotation")
 local Position = require("moonsource_kavita.position")
 local Stats = require("moonsource_kavita.stats")
+local Cache = require("moonsource_kavita.cache")
 local SourceBase = require("source.base")
 local Normalize = require("book.note.normalize")
 local logger = require("utils.log")
@@ -983,16 +984,15 @@ end
 ---@param cb fun(path: string|nil, err: string|nil, meta: { handled: boolean }|nil)
 ---@return { cancel: fun() }
 function Source:openEntry(ref, entry, toc, title, cb)
-    local Kamare = require("moonsource_kavita.kamare")
     local cached = MAGIC[entry.format] and validFile(
         T("%1/%2.%3", require("utils.paths").bookWorkDir(ref.stable_id, self.id), entry.chapterId, entry.format),
         entry.format)
-    if (entry.format ~= "cbz" and entry.format ~= "image") or cached or not online() or not Kamare.available() then
+    if (entry.format ~= "cbz" and entry.format ~= "image") or cached or not online() or not Cache.available("open") then
         return self:fetchVolume(ref, entry, cb)
     end
     local job, cancelled = nil, false
     local function show(item, start_page)
-        return Kamare.open({
+        local viewer, code, message = Cache.open({
             base_url = self.client.base_url, api_key = self.client.api_key,
             entry = item, title = title, start_page = start_page,
             on_close = function(page, total)
@@ -1011,6 +1011,7 @@ function Source:openEntry(ref, entry, toc, title, cb)
                 end
             end,
         })
+        return viewer, Cache.message(code, message)
     end
     job = self.client:json("GET", "/api/Reader/get-progress", { chapterId = entry.chapterId }, nil, function(remote)
         if cancelled then return end
