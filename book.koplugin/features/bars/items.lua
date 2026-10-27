@@ -392,6 +392,18 @@ function Items.paint(bb, x, y, w, h, layout, ctx, opts)
         end
     end
 
+    --- 条目实际内容宽；flex 条目槽宽大于内容时，右对齐 / 居中要画的偏移靠它。
+    local function contentWidth(entry)
+        local w = 0
+        if entry.icon then
+            w = w + entry.icon:getSize().w + (entry.text ~= "" and icon_gap or 0)
+        end
+        if entry.widget then
+            w = w + entry.widget:getSize().w
+        end
+        return w
+    end
+
     --- 在 px 处画一个条目：进度条临时建（自绘无资源，不用释放）；图标在前，文字随后。
     local function paintEntry(entry, px)
         if entry.kind == "bar" then
@@ -399,6 +411,11 @@ function Items.paint(bb, x, y, w, h, layout, ctx, opts)
             local bar = Progress:new{ width = entry.w, height = bar_h, percent = clampPercent(ctx.percent) }
             bar:paintTo(bb, px, y + math.floor((h - bar_h) / 2))
             return
+        end
+        if entry.align == "center" then
+            px = px + math.max(0, math.floor((entry.w - contentWidth(entry)) / 2))
+        elseif entry.align == "right" then
+            px = px + math.max(0, entry.w - contentWidth(entry))
         end
         if entry.icon then
             paintCentered(entry.icon, bb, px, y, h)

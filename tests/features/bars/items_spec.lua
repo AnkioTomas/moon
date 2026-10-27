@@ -95,6 +95,28 @@ do
     Assert.eq(painted[1].x, math.floor((300 - group_w) / 2), "居中组起点")
     Assert.eq(painted[2].x, painted[1].x + #"12:34" * 5 + 4)
 
+    -- flex 组件居中：槽宽是弹性分配的整片剩余宽度，必须居中槽内的内容而不是贴槽左缘
+    painted = {}
+    Items.paint(bb, 0, 0, 300, 20,
+        { { id = "chapter_page", align = "left" }, { id = "title", align = "center" }, { id = "percent", align = "right" } },
+        ctx,
+        { face = { orig_size = 14 }, gap = 4 })
+    local title_w = #"示例书名" * 5
+    for _i, p in ipairs(painted) do
+        if p.text == "示例书名" then
+            Assert.eq(p.x, math.floor((300 - title_w) / 2), "flex 书名居中")
+        end
+    end
+
+    -- flex 组件靠右：内容右缘贴栏右缘
+    painted = {}
+    Items.paint(bb, 0, 0, 300, 20,
+        { { id = "title", align = "right" } },
+        ctx,
+        { face = { orig_size = 14 }, gap = 4 })
+    Assert.eq(painted[1].text, "示例书名")
+    Assert.eq(painted[1].x, 300 - title_w, "flex 书名靠右")
+
     TextWidget.paintTo = orig_paint
     package.loaded["ui.themes.widgets.icon"] = nil
 end
