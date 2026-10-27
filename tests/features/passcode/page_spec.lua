@@ -7,6 +7,7 @@ local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
 Kit.sections.passcode = {}
+Kit.sections.lockscreen = { lock_screen = "ko" }
 require("support.theme_stubs").install()
 package.loaded["ui.themes.widgets.row"] = { widget = function(spec) return spec end }
 
