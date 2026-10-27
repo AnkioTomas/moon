@@ -11,6 +11,7 @@ local Request = require("http.request")
 local Text = require("utils.text")
 local logger = require("utils.log")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Client = {}
 Client.__index = Client
@@ -68,11 +69,11 @@ end
 ---@return table|nil, string|nil
 local function decodeJson(text)
     if type(text) ~= "string" or text == "" then
-        return nil, "empty json"
+        return nil, _("响应为空")
     end
     local ok, data = pcall(JSON.decode, text)
     if not ok or type(data) ~= "table" then
-        return nil, "invalid json"
+        return nil, _("响应无效")
     end
     return data
 end
@@ -151,6 +152,22 @@ local function httpError(method, url, code, body, res)
     return table.concat(parts, ", ")
 end
 
+--- 给用户看的 HTTP 错误：诊断串（httpError）只进日志，这里只留服务端
+--- msg，没有就只报状态码，免得整条 URL 被 toast 出来。
+---@param code number|nil
+---@param body string|nil
+---@return string
+local function userHttpError(code, body)
+    local data = decodeJson(body)
+    if type(data) == "table" then
+        local err_message = data.errMsg or data.errmsg or data.message or data.msg
+        if err_message ~= nil and tostring(err_message) ~= "" then
+            return tostring(err_message):gsub("[%c]+", " "):sub(1, 200)
+        end
+    end
+    return T(_("请求失败 (HTTP %1)"), tostring(code))
+end
+
 ---@param self FanqieClient
 ---@return table
 local function sessionHeaders(self, extra)
@@ -204,7 +221,8 @@ local function jsonAsync(self, method, url, extra_headers, body, cb)
             return
         end
         if not Request.ok(code) then
-            cb(nil, httpError(method, url, code, res.body, res))
+            logger.warn("fanqie http error", httpError(method, url, code, res.body, res))
+            cb(nil, userHttpError(code, res.body))
             return
         end
         Auth.ok("fanqie")
@@ -446,7 +464,8 @@ function Client:searchAsync(keyword, cb)
             return
         end
         if not Request.ok(tonumber(res.code)) then
-            cb(nil, httpError("GET", FanQie.searchUrl(keyword), tonumber(res.code), res.body, res))
+            logger.warn("fanqie http error", httpError("GET", FanQie.searchUrl(keyword), tonumber(res.code), res.body, res))
+            cb(nil, userHttpError(tonumber(res.code), res.body))
             return
         end
         local data, derr = decodeJson(res.body)
@@ -476,7 +495,8 @@ function Client:rankAsync(path, cb)
         if err or not res then
             cb(nil, err and tostring(err))
         elseif not Request.ok(tonumber(res.code)) then
-            cb(nil, httpError("GET", url, tonumber(res.code), res.body, res))
+            logger.warn("fanqie http error", httpError("GET", url, tonumber(res.code), res.body, res))
+            cb(nil, userHttpError(tonumber(res.code), res.body))
         else
             cb(res.body)
         end

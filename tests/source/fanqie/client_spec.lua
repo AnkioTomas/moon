@@ -211,13 +211,13 @@ do -- Set-Cookie 值没变不落盘；变了才 flush 一次
 end
 
 do -- 搜索免登录（不带 Cookie、App UA）；书架加 / 删走网页接口并校验业务码
-    local seen, reply
+    local seen, reply, reply_code
     package.loaded["http.request"] = {
         header = function() return nil end,
         ok = function(code) return code >= 200 and code < 300 end,
         request = function(opts, cb)
             seen = opts
-            cb({ code = 200, body = reply })
+            cb({ code = reply_code or 200, body = reply })
             return { cancel = function() end }
         end,
     }
@@ -249,6 +249,22 @@ do -- 搜索免登录（不带 Cookie、App UA）；书架加 / 删走网页接�
     c:shelfActionAsync("delete", "42", function(r, err) d, e = r, err end)
     Assert.is_nil(d)
     Assert.matches(e, "code=101108")
+
+    -- HTTP 错误给用户只留短句：诊断串（URL/状态码拼接）只进日志；
+    -- 非 JSON 回包（风控 HTML 页）同样只报「响应无效」。
+    reply_code = 500
+    reply = "<html><title>blocked</title></html>"
+    c:searchAsync("x", function(r, err) d, e = r, err end)
+    Assert.is_nil(d)
+    Assert.eq(e, "请求失败 (HTTP 500)")
+    reply = '{"code":500,"message":"服务繁忙"}'
+    c:searchAsync("x", function(r, err) d, e = r, err end)
+    Assert.eq(e, "服务繁忙")
+    reply_code = 200
+    reply = "<html>not json</html>"
+    c:searchAsync("x", function(r, err) d, e = r, err end)
+    Assert.is_nil(d)
+    Assert.eq(e, "响应无效")
     package.loaded["http.request"] = nil
     package.loaded["source.fanqie.client"] = nil
 end

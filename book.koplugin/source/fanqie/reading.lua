@@ -21,11 +21,11 @@ local TIMEOUT_RATIO = 2 / 3 -- × 「网络超时」，缺省 20 秒
 ---@return table|nil, string|nil
 local function decodeJson(text)
     if type(text) ~= "string" or text == "" then
-        return nil, "empty body"
+        return nil, "空响应"
     end
     local ok, data = pcall(JSON.decode, text)
     if not ok or type(data) ~= "table" then
-        return nil, "invalid json"
+        return nil, "响应无效"
     end
     return data
 end
