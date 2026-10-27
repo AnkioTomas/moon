@@ -15,7 +15,7 @@ package.preload["ffi/util"] = function()
 end
 
 local running = false
-local started, stopped = 0, 0
+local started, stopped, access_shown = 0, 0, 0
 local start_err = nil
 local connected = true
 local wifi_starts = 0
@@ -47,6 +47,10 @@ package.preload["features.remote"] = function()
         status = function()
             return running and "http://192.168.1.2:9528" or "未运行"
         end,
+        showAccess = function()
+            access_shown = access_shown + 1
+            return true
+        end,
     }
 end
 
@@ -66,24 +70,25 @@ Assert.eq(Action.title, "远程管理")
 Assert.eq(Action.scope, "desktop")
 Assert.is_true(Action.keep_open)
 
--- 未运行：启动并显示地址。
+-- 未运行：启动并弹二维码（含底部明文 URL），不再只闪一句 toast。
 Assert.is_false(Action.active())
 Action.run({})
 Assert.eq(started, 1)
 Assert.is_true(Action.active())
-Assert.eq(shown[1], "服务已启动：http://192.168.1.2:9528")
+Assert.eq(access_shown, 1)
+Assert.len(shown, 0)
 
 -- 运行中：关闭。
 Action.run({})
 Assert.eq(stopped, 1)
 Assert.is_false(Action.active())
-Assert.eq(shown[2], "远程管理已关闭")
+Assert.eq(shown[1], "远程管理已关闭")
 
 -- 启动失败：透出失败原因，不改变运行态。
 start_err = "port in use"
 Action.run({})
 Assert.is_false(Action.active())
-Assert.eq(shown[3], "启动失败：port in use")
+Assert.eq(shown[2], "启动失败：port in use")
 Assert.eq(wifi_starts, 0, "局域网已连时不重开 Wi-Fi、不检测外网")
 
 -- 离线：先开 Wi-Fi，连接回调之前不能声称服务已启动。
@@ -93,12 +98,13 @@ Action.run({})
 Assert.eq(wifi_starts, 1)
 Assert.eq(started, 1)
 Assert.is_false(Action.active())
-Assert.len(shown, 3, "未连上或取消选网时不弹成功")
+Assert.len(shown, 2, "未连上或取消选网时不弹成功")
+Assert.eq(access_shown, 1, "未连上或取消选网时不弹二维码")
 connected = true
 wifi_callback()
 Assert.eq(started, 2)
 Assert.is_true(Action.active())
-Assert.eq(shown[4], "服务已启动：http://192.168.1.2:9528")
+Assert.eq(access_shown, 2)
 
 -- 关闭服务不顺带关闭或重开 Wi-Fi。
 Action.run({})
@@ -128,10 +134,12 @@ connected = true
 wifi_callback()
 Assert.is_true(running)
 Assert.eq(started, 3)
+Assert.eq(access_shown, 3, "设置页启动成功同样弹二维码")
 Assert.eq(redraws, 2)
 service_row(600).callback()
 Assert.is_false(running)
 Assert.eq(wifi_starts, 2)
 service_row(600).callback()
 Assert.is_true(running, "设置页已联网直接启动")
+Assert.eq(access_shown, 4)
 Assert.eq(wifi_starts, 2)

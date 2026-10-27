@@ -1579,13 +1579,37 @@ function Remote.shareUrl(path)
     return string.format("http://%s:%d/download?path=%s", ip, Remote.port(), Text.urlEncode(real))
 end
 
+--- 浏览器访问地址；拿不到局域网 IP 时没有可扫、可输的地址。
+---@return string|nil
+local function accessUrl()
+    local ip = localIP()
+    if not ip then return nil end
+    return string.format("http://%s:%d/", ip, Remote.port())
+end
+
 --- 运行状态文案：运行中给可访问地址（IP 尽力而为），否则「未运行」。
 ---@return string status, boolean running
 function Remote.status()
     if not Remote.isRunning() then
         return _("未运行"), false
     end
-    return string.format("http://%s:%d/", localIP() or _("本机IP"), Remote.port()), true
+    return accessUrl() or string.format("http://%s:%d/", _("本机IP"), Remote.port()), true
+end
+
+--- 打开远程管理时弹访问二维码：内容就是地址，底部（caption）再明文写一遍，
+--- 扫不了码时照着输。拿不到局域网 IP 就不弹扫了也打不开的码，退回文字提示。
+--- 只供用户主动打开时调用（面板 / 设置页启动成功后）；自启、唤醒续跑不弹窗。
+---@return boolean 是否弹出了二维码
+function Remote.showAccess()
+    local url = accessUrl()
+    if not url then
+        require("ui.themes.widgets.toast"):new{
+            text = require("ffi/util").template(_("服务已启动：%1"), Remote.status()), timeout = 4,
+        }:show()
+        return false
+    end
+    require("ui.themes.widgets.qr"):new{ title = _("远程管理"), text = url, caption = url }:show()
+    return true
 end
 
 return Remote

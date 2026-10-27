@@ -36,6 +36,10 @@ package.preload["ffi/util"] = function()
         basename = function(path)
             return path:match("([^/]+)$") or path
         end,
+        template = function(str, ...)
+            local args = { ... }
+            return (str:gsub("%%1", tostring(args[1])))
+        end,
     }
 end
 local function attributes(path, key)
@@ -358,5 +362,50 @@ Assert.is_true(server_opts.handlers.set_input("x"))
 Assert.eq(typed[1], "x")
 UI._window_stack[1] = nil
 Assert.is_false(server_opts.handlers.get_input().active)
+
+-- 打开远程管理弹的二维码：内容是访问地址，底部 caption 再明文写一遍同一地址。
+local fake_ip = "192.168.1.2"
+package.preload["socket"] = function()
+    return {
+        udp = function()
+            return {
+                setpeername = function() return true end,
+                getsockname = function() return fake_ip end,
+                close = function() end,
+            }
+        end,
+    }
+end
+local qr_opts, toast_opts
+package.preload["ui.themes.widgets.qr"] = function()
+    return {
+        new = function(_, opts)
+            qr_opts = opts
+            opts.show = function() end
+            return opts
+        end,
+    }
+end
+package.preload["ui.themes.widgets.toast"] = function()
+    return {
+        new = function(_, opts)
+            toast_opts = opts
+            opts.show = function() end
+            return opts
+        end,
+    }
+end
+Assert.is_true(Remote.showAccess())
+Assert.eq(qr_opts.title, "远程管理")
+Assert.eq(qr_opts.text, "http://192.168.1.2:9528/")
+Assert.eq(qr_opts.caption, qr_opts.text, "二维码底部必须明文显示 URL")
+Assert.eq(Remote.status(), qr_opts.text)
+
+-- 拿不到局域网 IP：不弹扫了也打不开的码，退回文字提示。
+fake_ip = nil
+qr_opts = nil
+Assert.is_false(Remote.showAccess())
+Assert.is_nil(qr_opts)
+Assert.eq(toast_opts.text, "服务已启动：http://本机IP:9528/")
 
 return true

@@ -37,7 +37,7 @@ local ACTION = {
                 require("ui.themes.widgets.toast"):new{ text = T(_("启动失败：%1"), tostring(err)), timeout = 3 }:show()
                 return
             end
-            require("ui.themes.widgets.toast"):new{ text = T(_("服务已启动：%1"), Remote.status()), timeout = 4 }:show()
+            Remote.showAccess()
         end
         local NetworkMgr = require("ui/network/manager")
         if NetworkMgr:isConnected() then
