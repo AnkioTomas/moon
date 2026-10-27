@@ -216,9 +216,9 @@ function Modal:handleEvent(event)
     -- 只拦截导航输入；截图、多指手势及其它用户快捷键仍走 KOReader 原有分发。
     local navigation = handler == "onBookWindowPage" or handler == "onBookWindowClose"
     if handler == "onGesture" then
-        -- 对角滑动是 KOReader 的截图手势（下层 Screenshoter 接），不能算导航吞掉。
+        -- 斜向滑动是 KOReader 的截图手势（下层 Screenshoter 接）；方向是 northeast 等，不是字面 "diagonal"。
         local ev = event.args[1]
-        navigation = ev.ges == "swipe" and ev.direction ~= "diagonal"
+        navigation = ev.ges == "swipe" and not Input.isDiagonalSwipe(ev.direction)
     elseif handler == "onKeyPress" or handler == "onKeyRepeat" then
         local key = event.args[1]
         navigation = key:match({ Device.input.group.Back })

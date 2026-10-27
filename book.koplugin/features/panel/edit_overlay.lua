@@ -45,17 +45,20 @@ local _ = require("gettext")
 local Edit = {}
 
 --- 在命中范围内吞掉点按 / 长按 / 滑动 / 拖动，不让底层动作收到。
---- 对角滑动例外：那是 KOReader 的截图手势，要放行给下层。
+--- 斜向滑动例外：那是 KOReader 的截图手势（direction=northeast 等），要放行给下层。
 ---@param host table
 ---@param prefix string
 local function swallowEvents(host, prefix)
+    local Input = require("ui.input")
     host.ges_events = {}
     for _i, ges in ipairs({ "Tap", "Hold", "Swipe", "Pan" }) do
         host.ges_events[prefix .. ges] = {
             GestureRange:new{ ges = ges:lower(), range = function() return host.dimen end },
         }
         if ges == "Swipe" then
-            host["on" .. prefix .. ges] = function(_self, _arg, ev) return not ev or ev.direction ~= "diagonal" end
+            host["on" .. prefix .. ges] = function(_self, _arg, ev)
+                return not ev or not Input.isDiagonalSwipe(ev.direction)
+            end
         else
             host["on" .. prefix .. ges] = function() return true end
         end

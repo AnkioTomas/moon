@@ -35,10 +35,10 @@ Assert.eq(moves[1].id, "night")
 Assert.eq(moves[1].delta, -1)
 Assert.eq(moves[2].delta, 1)
 
--- 编辑遮罩吞普通滑动，但对角滑动（KOReader 截图手势）放行。
+-- 编辑遮罩吞普通滑动，但斜向滑动（KOReader 截图手势，direction=northeast 等）放行。
 local shield = overlay[2]
 Assert.is_true(shield:onPanelEditShieldSwipe(nil, { direction = "west" }))
-Assert.is_false(shield:onPanelEditShieldSwipe(nil, { direction = "diagonal" }))
+Assert.is_false(shield:onPanelEditShieldSwipe(nil, { direction = "northeast" }))
 
 -- 仅一项时不可停用、不可移动：按钮灰显，点按不回调
 local lone_called = false
