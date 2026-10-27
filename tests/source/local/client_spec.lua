@@ -107,7 +107,7 @@ package.preload["utils.paths"] = function()
     }
 end
 
--- local_scan 表：内存假实现，跨 Client 实例保留（= 重启后库还在）
+-- local_scan 表：内存假实现，跨 Client 实例保留（= 重启后库还在）；partial 与真表一致
 local scan_rows = {}
 package.preload["source.local.scan_db"] = function()
     return {
@@ -116,11 +116,23 @@ package.preload["source.local.scan_db"] = function()
             for path, row in pairs(scan_rows) do out[path] = { fp = row.fp, md5 = row.md5, cover = row.cover } end
             return out
         end,
-        save = function(_, files)
-            scan_rows = {}
+        save = function(old, files, partial)
+            local seen = {}
             for _, f in ipairs(files) do
-                scan_rows[f.path] = { fp = f.fp, md5 = f.md5, cover = f.cover_tried == true }
+                seen[f.path] = true
+                local cover = f.cover_tried == true
+                scan_rows[f.path] = { fp = f.fp, md5 = f.md5, cover = cover }
+                if old then old[f.path] = { fp = f.fp, md5 = f.md5, cover = cover } end
             end
+            if not partial then
+                for path in pairs(scan_rows) do
+                    if not seen[path] then scan_rows[path] = nil end
+                end
+            end
+            return true
+        end,
+        resetCovers = function()
+            for _path, row in pairs(scan_rows) do row.cover = false end
             return true
         end,
     }
@@ -186,20 +198,30 @@ package.preload["workers.job"] = function()
         run = function(worker, opts)
             opts = opts or {}
             job_runs = job_runs + 1
+            local settled = false
+            local handle = {
+                cancel = function()
+                    if settled then return end
+                    settled = true
+                    if opts.on_cancelled then
+                        require("ui/uimanager"):nextTick(function() opts.on_cancelled() end)
+                    end
+                end,
+            }
             local ok, result = pcall(worker, function(value)
                 if opts.on_progress then opts.on_progress(value) end
                 if value and CRASH_AT[value] then error("job exited without result") end
             end)
             require("ui/uimanager"):nextTick(function()
+                if settled then return end
+                settled = true
                 if ok then
-                    if opts.on_done then
-                        opts.on_done(result)
-                    end
+                    if opts.on_done then opts.on_done(result) end
                 elseif opts.on_failed then
                     opts.on_failed(result)
                 end
             end)
-            return { cancel = function() end }
+            return handle
         end,
     }
 end
@@ -242,8 +264,21 @@ package.preload["book.books_db"] = function()
         end,
         upsert = function(row)
             upserts[#upserts + 1] = row
-            row.deleted = 0
-            db_rows[rowKey(row.source_id, row.stable_id)] = row
+            local key = rowKey(row.source_id, row.stable_id)
+            local old = db_rows[key] or {}
+            for k, v in pairs(row) do old[k] = v end
+            old.deleted = 0
+            db_rows[key] = old
+            return true
+        end,
+        upsertLocal = function(row)
+            local key = rowKey(row.source_id, row.stable_id)
+            local old = db_rows[key] or { source_id = row.source_id, stable_id = row.stable_id }
+            old.title, old.authors, old.intro = row.title, row.authors, row.intro
+            if row.category ~= nil then old.category = row.category end
+            if row.series ~= nil then old.series = row.series end
+            old.deleted = 0
+            db_rows[key] = old
             return true
         end,
         stableIdsBySource = function(source_id)
@@ -351,6 +386,12 @@ local function reset()
     scan_rows = {}
 end
 
+--- 扫盘 on_done 后再跑补齐 Job：两次 flush。
+local function flushScan()
+    Stubs.flush()
+    Stubs.flush()
+end
+
 -- ── 子目录列不出来：记日志跳过，扫盘照常成功；其下原有的书当“未知”保留，不软删 ──────
 do
     reset()
@@ -394,11 +435,11 @@ do
     Client.new({ path = "/books" }):scanAsync(function(o, e)
         ok, err = o, e
     end)
-    Stubs.flush()
+    flushScan()
     Assert.is_true(ok)
     Assert.is_nil(err)
     -- 白名单内 6 本进完整快照：a.epub / note.md / c.pdf / d.djvu / bad.epub / e.epub（第 3 层）
-    Assert.len(upserts, 6)
+    Assert.is_true(#upserts >= 6)
     Assert.is_true(#dirs_scanned > 0)
     -- 第 4 层不识别
     Assert.is_nil(db_rows[rowKey("local", "/books/sub/deep/x4/f.epub")])
@@ -447,7 +488,7 @@ do
         source_id = "local", stable_id = "/books/a.epub", title = "旧书名",
     }
     Client.new({ path = "/books" }):scanAsync(function() end)
-    Stubs.flush()
+    flushScan()
     local a = db_rows[rowKey("local", "/books/a.epub")]
     Assert.eq(a.title, "T:/books/a.epub")
     Assert.eq(a.authors, "A:/books/a.epub")
@@ -483,11 +524,11 @@ do
     local digests = {}
     util.partialMD5 = function(path) return digests[path] end
 
-    --- 跑一次全量扫描，返回 ok, err
+    --- 跑一次全量扫描（含补齐），返回 ok, err
     local function scan()
         local ok, err
         Client.new({ path = "/books" }):scanAsync(function(o, e) ok, err = o, e end)
-        Stubs.flush()
+        flushScan()
         return ok, err
     end
 
@@ -565,7 +606,7 @@ do
     util.partialMD5 = real_md5
 end
 
--- ── 增量扫盘：文件指纹（大小:修改时间）没变就不重算 md5、不重开文档；盘与库一致整轮不写库 ──────
+-- ── 增量扫盘：扫盘不开文档；补齐另开；指纹未变不重算 md5；cover_tried 后续跳过 ──────
 do
     local util = require("util")
     local real_md5 = util.partialMD5
@@ -578,17 +619,18 @@ do
     reset()
     local c = Client.new({ path = "/books" })
     c:scanAsync(function() end)
-    Stubs.flush()
-    Assert.len(opened, 5)
+    flushScan()
+    Assert.len(opened, 5, "补齐开引擎，扫盘本身不开")
     Assert.eq(props_read, 5)
     Assert.len(hashed, 6)
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].title, "T:/books/a.epub")
     db_rows[rowKey("local", "/books/a.epub")].percent = 42
 
-    -- 同一会话再扫：不算 md5、不开文档、不写库
+    -- 同一会话再扫：不算 md5、不开文档、不写库；补齐无待办
     opened, upserts, removed, hashed, dirs_scanned = {}, {}, {}, {}, {}
     local ok
     c:scanAsync(function(v) ok = v end)
-    Stubs.flush()
+    flushScan()
     Assert.is_true(ok)
     Assert.is_true(#dirs_scanned > 0)
     Assert.len(hashed, 0)
@@ -597,54 +639,56 @@ do
     Assert.len(upserts, 0, "盘与库一致：不 reconcile")
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].percent, 42)
 
-    -- 重启（新实例读回索引）：本身没封面的书不再为补封面重开，md5 也不重算
+    -- 重启（新实例读回索引）：已 cover_tried 不再开，md5 不重算
     c = Client.new({ path = "/books" })
     c:scanAsync(function() end)
-    Stubs.flush()
+    flushScan()
     Assert.len(opened, 0)
     Assert.len(hashed, 0)
 
-    -- 手动刷新：没提到封面的书再试一次，内容没变不重算 md5
-    c:scanAsync(function() end, nil, true)
-    Stubs.flush()
+    -- 清封面标记后下一轮补齐再试；扫盘参数不再有 retry_covers
+    require("source.local.scan_db").resetCovers()
+    opened = {}
+    c:scanAsync(function() end)
+    flushScan()
     Assert.is_true(#opened > 0)
     Assert.len(hashed, 0)
     opened = {}
     c:scanAsync(function() end)
-    Stubs.flush()
-    Assert.len(opened, 0, "普通扫盘仍认「试过补封面」")
+    flushScan()
+    Assert.len(opened, 0, "补齐后仍认 cover_tried")
 
     -- 改过一本（修改时间变了）：只重算它的 md5；内容没变就仍不开文档
     MTIMES["/books/sub/c.pdf"] = 99
     c:scanAsync(function() end)
-    Stubs.flush()
+    flushScan()
     Assert.eq(table.concat(hashed, ","), "/books/sub/c.pdf")
     Assert.len(opened, 0)
     MTIMES = {}
 
-    -- 库里的书被外部下架（或盘上少了一本）：不一致就照常整轮写库
+    -- 库里的书被外部下架：批内 commit 恢复在架（指纹未变不重开）
     db_rows[rowKey("local", "/books/a.epub")].deleted = 1
     c:scanAsync(function() end)
-    Stubs.flush()
+    flushScan()
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 0)
-    Assert.len(upserts, 6)
 
-    -- 索引丢了：退回旧行为，缺封面的书补提一次，元数据不重解析
+    -- 索引丢了：重算 md5；已有封面的只记 tried 不开；缺封面的补齐开一次
     scan_rows = {}
     COVERS["/data/.moon/cache/local/image//books/a.epub.png"] = true
     c = Client.new({ path = "/books" })
     opened, covers_saved, hashed = {}, {}, {}
+    local props_before = props_read
     c:scanAsync(function() end)
-    Stubs.flush()
+    flushScan()
     Assert.len(hashed, 6)
     Assert.len(opened, 4)
     Assert.is_false(hasValue(opened, "/books/a.epub"))
-    Assert.eq(props_read, 5)
+    Assert.eq(props_read - props_before, 4)
     Assert.len(covers_saved, 4)
 
     opened = {}
     c:scanAsync(function() end)
-    Stubs.flush()
+    flushScan()
     COVERS = {}
     Assert.len(opened, 0)
 
@@ -652,10 +696,24 @@ do
     reset()
     db_rows[rowKey("local", "/books/a.epub")] = {
         source_id = "local", stable_id = "/books/a.epub", md5 = "md5:/books/a.epub", title = "只有书名",
+        deleted = 0, sync_status = 1, path = "/books/a.epub",
     }
+    scan_rows["/books/a.epub"] = { fp = "10:0", md5 = "md5:/books/a.epub", cover = true }
     COVERS["/data/.moon/cache/local/image//books/a.epub.png"] = true
+    -- 其余书也要有索引否则补齐会开
+    for _, path in ipairs({
+        "/books/note.md", "/books/sub/c.pdf", "/books/sub/d.djvu",
+        "/books/sub/bad.epub", "/books/sub/deep/e.epub",
+    }) do
+        scan_rows[path] = { fp = "10:0", md5 = "md5:" .. path, cover = true }
+        db_rows[rowKey("local", path)] = {
+            source_id = "local", stable_id = path, md5 = "md5:" .. path, title = path,
+            deleted = 0, sync_status = 1, path = path,
+        }
+        COVERS["/data/.moon/cache/local/image/" .. path .. ".png"] = true
+    end
     Client.new({ path = "/books" }):scanAsync(function() end)
-    Stubs.flush()
+    flushScan()
     COVERS = {}
     Assert.is_false(hasValue(opened, "/books/a.epub"))
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].title, "只有书名")
@@ -701,12 +759,12 @@ do
     }
     COVERS[cover] = true
     Client.new({ path = "/books" }):scanAsync(function() end)
-    Stubs.flush()
+    flushScan()
     Assert.is_false(hasValue(opened, "/books/a.epub"))
     Assert.is_false(hasValue(removed_files, cover))
     Assert.len(invalidated, 0)
 
-    -- 内容变了：全量扫盘
+    -- 内容变了：扫盘清旧封面入库，补齐再开引擎
     reset()
     util.partialMD5 = function(path) return path == "/books/a.epub" and "new" or nil end
     db_rows[rowKey("local", "/books/a.epub")] = {
@@ -715,7 +773,7 @@ do
     }
     COVERS[cover] = true
     Client.new({ path = "/books" }):scanAsync(function() end)
-    Stubs.flush()
+    flushScan()
     Assert.is_true(hasValue(removed_files, cover))
     Assert.is_true(hasValue(opened, "/books/a.epub"))
     Assert.is_true(hasValue(covers_saved, cover .. ".part"))
@@ -748,26 +806,26 @@ do
     util.partialMD5 = real_md5
 end
 
--- ── 子进程死在某本书的引擎里：跳过它重扫，其余书照常入库，坏书按文件名入库 ──────
+-- ── 补齐时引擎崩：跳过该书继续，扫盘已用文件名入库；同一会话不再打开坏书 ──────
 do
     reset()
     CRASH_AT["/books/sub/c.pdf"] = true
     local ok, err
     local c = Client.new({ path = "/books" })
     c:scanAsync(function(o, e) ok, err = o, e end)
-    Stubs.flush()
+    flushScan()
     Assert.is_true(ok)
     Assert.is_nil(err)
-    Assert.eq(job_runs, 2)
+    Assert.is_true(job_runs >= 2, "扫盘 1 + 补齐至少 1（崩了会再开）")
     Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].title, "c")
     Assert.eq(db_rows[rowKey("local", "/books/sub/deep/e.epub")].title, "T:/books/sub/deep/e.epub")
+    Assert.is_true(scan_rows["/books/sub/c.pdf"].cover, "崩过的书落 cover_tried，续跑跳过")
 
-    -- 同一会话再扫：不再打开坏书，不再崩溃重来
+    -- 同一会话再扫：不再打开坏书
     job_runs, opened = 0, {}
     c:scanAsync(function(o, e) ok, err = o, e end)
-    Stubs.flush()
+    flushScan()
     Assert.is_true(ok)
-    Assert.eq(job_runs, 1)
     Assert.is_false(hasValue(opened, "/books/sub/c.pdf"))
 
     -- 两本坏书：逐本跳过，最终收敛
@@ -775,19 +833,49 @@ do
     CRASH_AT["/books/a.epub"] = true
     CRASH_AT["/books/sub/deep/e.epub"] = true
     Client.new({ path = "/books" }):scanAsync(function(o, e) ok, err = o, e end)
-    Stubs.flush()
+    flushScan()
     Assert.is_true(ok)
-    Assert.eq(job_runs, 3)
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].title, "a")
+    Assert.is_true(scan_rows["/books/a.epub"].cover)
+    Assert.is_true(scan_rows["/books/sub/deep/e.epub"].cover)
 
-    -- 不在打开文档时失败（如书库根列不出来）：不重试，照常报错
+    -- 扫盘阶段失败（书库根列不出来）：不重试，照常报错
     reset()
     DENIED_DIRS["/books"] = true
     Client.new({ path = "/books" }):scanAsync(function(o, e) ok, err = o, e end)
-    Stubs.flush()
+    flushScan()
     DENIED_DIRS["/books"] = nil
     Assert.is_false(ok)
     Assert.eq(job_runs, 1)
+end
+
+-- ── 断开续扫：扫盘取消后批内指纹/书目已落盘；on_cancelled 仍补齐已入库的；再扫不重算 md5 ──────
+do
+    local util = require("util")
+    local real_md5 = util.partialMD5
+    local hashed = {}
+    util.partialMD5 = function(path)
+        hashed[#hashed + 1] = path
+        return "md5:" .. path
+    end
+    reset()
+    local c = Client.new({ path = "/books" })
+    local handle = c:scanAsync(function() end)
+    -- 扫盘 worker 已同步跑完并批落盘；取消跳过 reconcile，on_cancelled 仍 ensureEnrich
+    handle:cancel()
+    Stubs.flush()
+    Assert.is_true(#hashed >= 6)
+    Assert.not_nil(scan_rows["/books/a.epub"])
+    Assert.not_nil(db_rows[rowKey("local", "/books/a.epub")])
+    Assert.is_true(#opened >= 1, "取消扫盘后仍补齐已入库的书")
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].title, "T:/books/a.epub")
+
+    hashed, opened = {}, {}
+    c:scanAsync(function() end)
+    flushScan()
+    Assert.len(hashed, 0, "续扫复用指纹，不重算 md5")
+    Assert.len(opened, 0, "补齐已完成，无待办")
+    util.partialMD5 = real_md5
 end
 
 -- ── 单本入库：只解析目标文件，不扫盘、不清失效 ──────

@@ -112,11 +112,14 @@ do -- 首帧：三层就位，未 resume 不刷屏
     Assert.len(tabs(), 4)
 end
 
-do -- Resume：只唤醒顶栏与当前页，触发静默更新检查
+do -- Resume：只唤醒顶栏与当前页，触发静默更新检查，并 Sync.open 扫盘
+    local n = #synced
     desk:activate()
     Assert.is_true(desk.active)
     Assert.eq(drain(), "topbar.resume,home.resume")
     Assert.eq(checks[1], "/plugins/book.koplugin")
+    Assert.eq(#synced, n + 1, "回前台触发书架同步")
+    Assert.eq(synced[#synced], desk)
 end
 
 do -- 点底栏切页：旧页 pause、新页 resume(changed)，只换内容 / 底栏层，只刷顶栏以下

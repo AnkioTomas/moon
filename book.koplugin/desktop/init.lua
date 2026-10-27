@@ -324,6 +324,8 @@ function Desktop:activate()
     -- 扩展的前台维护（更新检查、校时等）走桌面 Resume，不在插件 init / 网络回调里抢跑。
     Ext.emit("desktop.activated", self)
     require("desktop.welcome").promptDocs()
+    -- 回前台再扫一次（本地 60s / 混合模式 5min 节流）：USB 拷书后唤醒能发现新书。
+    Sync.open(self)
 end
 
 Desktop.onResume = Desktop.activate
@@ -653,8 +655,7 @@ function Desktop.open(plugin)
     plugin.desktop = desk
     UIManager:show(desk)
     UIManager:setDirty(desk, "ui")
-    desk:activate()
-    Sync.open(desk)
+    desk:activate() -- 内含 Sync.open（回前台扫盘，与 Resume 同一条路）
     -- 扩展的打开后任务（open 前已关书，阅读中不会触发）。
     Ext.emit("desktop.opened", desk)
 end

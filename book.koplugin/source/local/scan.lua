@@ -1,7 +1,11 @@
 --[[--
 本地源：本地书库目录扫盘、导入、移动、排版替换、单本索引。
-遍历与解析在子进程（workers.job），落库在主进程；子进程不碰 sqlite。
-函数首参即 LocalClient，由 source.local.client 装配为方法。
+扫盘与补齐拆开：
+  扫盘子进程只列目录 / 算指纹与 md5 / 新书用文件名入库，**不开文档**；
+  批内落 local_scan + books，中断后续扫接着指纹走（续扫）；
+  扫完（或库已最新）另开补齐子进程：缺封面且未试过的书开引擎提封面并补元数据，
+  cover_tried 逐本落盘，取消 / 崩溃后续跑只啃剩下的。
+落库在主进程；子进程不碰 sqlite。函数首参即 LocalClient，由 source.local.client 装配为方法。
 
 @module koplugin.book.source.local.scan
 --]]
@@ -17,8 +21,9 @@ local Common = require("source.local.common")
 
 local SOURCE_ID = Common.SOURCE_ID
 local defer, isBookFile, rootPath, coverPath = Common.defer, Common.isBookFile, Common.rootPath, Common.coverPath
-local moveBookArtifacts, ensureCover = Common.moveBookArtifacts, Common.ensureCover
+local moveBookArtifacts = Common.moveBookArtifacts
 local parseBookProps, scanFiles = Common.parseBookProps, Common.scanFiles
+local remoteRelativePath = Common.remoteRelativePath
 local ScanDB = require("source.local.scan_db")
 
 local Scan = {}
@@ -46,10 +51,8 @@ local function parseFilename(filename)
 end
 
 --- 扫盘的进程边界：
----   子进程只做文件系统 / 渲染引擎重活（遍历、md5、解析元数据、落封面），**不碰 sqlite**——
----   utils.db 禁止子进程访问库（fork 会继承父进程的连接句柄）。
----   主进程在 fork 前查好「已入库且标题非空」的行交给子进程判断是否要解析，
----   子进程返回扫描产物列表，主进程收齐后落库。
+---   子进程只做文件系统轻活（遍历、md5），**不碰 sqlite、不开文档**。
+---   主进程在 fork 前查好已入库行；批内落索引与书库；扫完再开补齐子进程提封面。
 
 --- 主进程：扫盘解析过的行（有 md5 且有书名），按 stable_id（即路径）索引；
 --- 另附全部行（含残缺行与墓碑）的内容 md5，供子进程识别同路径换了文件；以及全部行本身。
@@ -60,8 +63,8 @@ local function knownBooks()
     local known, digests = {}, {}
     for stable_id, row in pairs(rows) do
         digests[stable_id] = row.md5
-        -- md5 只由扫盘/入库写入，有它就说明按当前内容解析过；作者/简介缺失多半是书本身没有，
-        -- 按缺字段判定会让每次扫盘重开几乎所有书。无 md5 的身份行（开书时登记）照常解析补齐。
+        -- md5 只由扫盘/入库写入，有它就说明按当前内容对过账；作者/简介缺失多半是书本身没有。
+        -- 无 md5 的身份行（开书时登记）下一轮扫盘当新书用文件名补齐，封面留给补齐进程。
         if row.md5 and type(row.title) == "string" and row.title ~= "" then
             known[stable_id] = row
         end
@@ -94,47 +97,26 @@ local function upToDate(files, known, rows, flat, kept)
     return true
 end
 
---- 子进程：算 md5；已入库且内容没变的书只补缺失封面，否则解析元数据（引擎失败回退文件名）。
---- 同路径内容变了（删书后拷入同名新书 / 覆盖上传）标 changed 并删掉旧封面，按新书重新提取。
---- 引擎段错误 pcall 接不住，子进程直接死：打开文档前后各报一次 progress（path / false），
---- 父进程据此认出致死的书，下一轮放进 skip 只按文件名入库。
----@param f table 扫描产物 { name, path, category, series }
+--- 子进程轻解析：只算 md5；已入库且内容没变直接返回；新书 / 换内容用文件名标题，不开文档。
+--- 同路径内容变了（删书后拷入同名新书 / 覆盖上传）标 changed 并删掉旧封面，cover_tried 清掉留给补齐。
+---@param f table 扫描产物 { name, path, category, series, fp }
 ---@param known table<string, Book>
 ---@param digests table<string, string> 库内各路径的内容 md5
----@param skip table<string, boolean> 曾让子进程崩溃的书，不再打开
----@param index LocalScanIndex 上轮扫盘索引（local_scan 表）：指纹没变就沿用 md5，内容没变就沿用「试过补封面」
----@param progress fun(value: string|false)
----@param retry_covers boolean|nil 手动刷新：不认「试过补封面」，缺封面的书再提一次
----@return table f 原表，补上 md5/changed/cover_tried，需解析时再补 title/authors/intro
-local function parseFile(f, known, digests, skip, index, progress, retry_covers)
-    local open = not skip[f.path]
+---@param index LocalScanIndex 上轮扫盘索引（local_scan 表）
+---@return table f
+local function parseFile(f, known, digests, index)
     local seen = index[f.path]
     f.md5 = seen and f.fp and seen.fp == f.fp and seen.md5 or util.partialMD5(f.path)
-    f.cover_tried = not retry_covers and seen and f.md5 and seen.md5 == f.md5 and seen.cover or nil
+    f.cover_tried = seen and f.md5 and seen.md5 == f.md5 and seen.cover or nil
     local old = digests[f.path]
     f.changed = f.md5 ~= nil and old ~= nil and old ~= f.md5
     if f.changed then
         os.remove(coverPath(f.path))
+        f.cover_tried = nil
     elseif known[f.path] then
-        if open and not f.cover_tried and lfs.attributes(coverPath(f.path), "mode") ~= "file" then
-            f.cover_tried = true
-            progress(f.path)
-            ensureCover(f.path)
-            progress(false)
-        end
         return f
     end
-    local props = {}
-    if open then
-        f.cover_tried = true
-        progress(f.path)
-        props = parseBookProps(f.path) or {}
-        progress(false)
-    end
-    f.title, f.authors, f.intro, f.language = props.title, props.authors, props.intro, props.language
-    if not f.title or f.title == "" then
-        f.title, f.authors = parseFilename(f.name)
-    end
+    f.title, f.authors = parseFilename(f.name)
     return f
 end
 
@@ -194,6 +176,10 @@ local function commitFiles(files, known, full_snapshot, kept)
         if f.changed then
             require("ui.themes.widgets.image").invalidate(coverPath(f.path))
         end
+        -- 批内续扫：后续 movedFrom / 去重认得出本轮刚写入的行
+        if not cached or f.changed then
+            known[f.path] = BookDB.get(SOURCE_ID, f.path) or known[f.path]
+        end
     end
     if not full_snapshot then return true end
     -- 盘上就是真相：扫盘成功时空目录也要下架；读不了的子目录下原有的书由 kept 保留。
@@ -212,16 +198,159 @@ local function commitFiles(files, known, full_snapshot, kept)
     return true
 end
 
---- 扫盘写库（不查询），供 syncBooksAsync 使用。遍历与解析在子进程，落库在主进程，cancel 杀子进程。
---- 子进程死在某本书的引擎里时跳过它重扫（每轮至少多跳一本，必然收敛），本会话内不再打开它；
---- 其余失败照常回调，库里是旧数据，照查，不让 UI 空转。
---- 子进程 progress 两种帧：`{ i, n, name }` 是逐本计数；路径 / false 是开文档前后的崩溃探针。
+--- 把一条 cover_tried 写进 local_scan（补齐逐本落盘，中断后续跑）。
+---@param index LocalScanIndex
+---@param path string
+---@param fp string|nil
+---@param md5 string|nil
+local function markCoverTried(index, path, fp, md5)
+    local was = index[path]
+    ScanDB.save(index, {
+        { path = path, fp = fp or (was and was.fp) or "", md5 = md5 or (was and was.md5), cover_tried = true },
+    }, true)
+end
+
+--- 补齐：缺封面且未试过的在架本地书，子进程开引擎提封面并升级元数据；已有封面只记 tried。
+--- 可取消；崩溃记 skip 并落 tried，避免每轮同书再崩；没做完的下次 ensureEnrich 接着啃。
+---@param self LocalClient
+---@param cb fun()|nil
+---@param report fun(text: string, done: integer|nil, total: integer|nil)|nil
+---@return { cancel: fun() }
+function Scan.enrichAsync(self, cb, report)
+    report = report or function() end
+    cb = cb or function() end
+    local index = ScanDB.all()
+    local BookDB = require("book.books_db")
+    local rows = BookDB.getMany(SOURCE_ID, BookDB.stableIdsBySource(SOURCE_ID))
+    local pending = {}
+    for path, row in pairs(rows) do
+        if row.deleted == 0 and type(row.path) == "string" and remoteRelativePath(path) == nil then
+            local seen = index[path]
+            if not (seen and seen.cover) then
+                pending[#pending + 1] = {
+                    path = path,
+                    fp = seen and seen.fp,
+                    md5 = row.md5 or (seen and seen.md5),
+                    has_cover = lfs.attributes(coverPath(path), "mode") == "file",
+                }
+            end
+        end
+    end
+    table.sort(pending, function(a, b) return a.path < b.path end)
+    if #pending == 0 then
+        return defer(cb)
+    end
+
+    self._crashed = self._crashed or {}
+    local skip = self._crashed
+    local job
+    local function start()
+        local opening
+        local todo = {}
+        for _idx, item in ipairs(pending) do
+            if item.has_cover then
+                markCoverTried(index, item.path, item.fp, item.md5)
+            elseif not skip[item.path] then
+                todo[#todo + 1] = item
+            else
+                markCoverTried(index, item.path, item.fp, item.md5)
+            end
+        end
+        if #todo == 0 then return cb() end
+        report(_("正在补齐封面…"), 0, #todo)
+        job = Job.run(function(progress)
+            local out = {}
+            for i, item in ipairs(todo) do
+                progress({ i, #todo, item.path:match("([^/]+)$") or item.path })
+                progress(item.path)
+                local props = parseBookProps(item.path) or {}
+                progress(false)
+                out[#out + 1] = {
+                    path = item.path, fp = item.fp, md5 = item.md5,
+                    title = props.title, authors = props.authors,
+                    intro = props.intro, language = props.language,
+                }
+            end
+            return { books = out }
+        end, {
+            name = "local.enrich",
+            kind = "medium",
+            on_progress = function(value)
+                if type(value) == "table" then
+                    report(T(_("正在补齐 %1"), value[3]), value[1], value[2])
+                    return
+                end
+                opening = value or nil
+            end,
+            on_done = function(result)
+                for _idx, f in ipairs(result.books or {}) do
+                    markCoverTried(index, f.path, f.fp, f.md5)
+                    local row = f.title and f.title ~= "" and BookDB.get(SOURCE_ID, f.path)
+                    local name = f.path:match("([^/]+)$") or f.path
+                    -- 只升级仍是文件名兜底的行，用户改过的书名 / 已有元数据不覆盖
+                    local fallback = parseFilename(name)
+                    if row and (not row.title or row.title == "" or row.title == fallback) then
+                        BookDB.upsertLocal({
+                            source_id = SOURCE_ID, stable_id = f.path,
+                            title = f.title, authors = f.authors, intro = f.intro,
+                            category = row.category, series = row.series,
+                            meta = { language = f.language },
+                        })
+                    end
+                end
+                cb()
+            end,
+            on_failed = function(err)
+                if opening and not skip[opening] then
+                    require("utils.log").warn("book local enrich crashed; skip", opening, err)
+                    skip[opening] = true
+                    markCoverTried(index, opening)
+                    -- 已完成的书不在 pending 里重做：只留下 opening 之后的
+                    local rest = {}
+                    local seen_crash = false
+                    for _idx, item in ipairs(todo) do
+                        if item.path == opening then
+                            seen_crash = true
+                        elseif seen_crash then
+                            rest[#rest + 1] = item
+                        end
+                    end
+                    pending = rest
+                    return start()
+                end
+                require("utils.log").warn("book local enrich failed", err)
+                cb()
+            end,
+        })
+    end
+    start()
+    return { cancel = function()
+            if job then job:cancel() end
+        end }
+end
+
+--- 补齐未在跑才开一轮；句柄挂 client，取消扫盘时一并杀掉。
+---@param self LocalClient
+---@param report fun(text: string, done: integer|nil, total: integer|nil)|nil
+---@return { cancel: fun() }|nil
+function Scan.ensureEnrich(self, report)
+    if self._enrich_job then return self._enrich_job end
+    local handle
+    handle = Scan.enrichAsync(self, function()
+        if self._enrich_job == handle then self._enrich_job = nil end
+    end, report)
+    self._enrich_job = handle
+    return handle
+end
+
+--- 扫盘写库（不查询），供 syncBooksAsync 使用。遍历与 md5 在子进程，落库在主进程，cancel 杀子进程与补齐。
+--- 批内落索引 + upsert：取消 / 崩溃不丢已扫进度；整轮成功后再 reconcile，并 ensureEnrich 补封面。
+--- 子进程 progress：`{ i, n, name }` 逐本计数；`{ files = batch }` 批结果。
 ---@param self LocalClient
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@param report fun(text: string, done: integer|nil, total: integer|nil)|nil 真实步骤上报
----@param retry_covers boolean|nil 手动刷新时为 true：之前没提到封面的书再试一次
 ---@return { cancel: fun() }
-function Scan.scanAsync(self, cb, report, retry_covers)
+function Scan.scanAsync(self, cb, report)
     local valid, path_err = self:validatePath()
     if not valid then return defer(cb, false, path_err) end
     report = report or function() end
@@ -230,20 +359,17 @@ function Scan.scanAsync(self, cb, report, retry_covers)
     local index = ScanDB.all()
     local job
     local started_at = Perf.now()
-    -- 崩溃记录跨轮保留：入库后缺封面还会被补提，不记住的话每轮扫盘都要再崩一次、整轮重来
-    self._crashed = self._crashed or {}
-    local skip = self._crashed
+    local cancelled = false
     local function start()
-        local opening, count
         local parsed = {}
         report(_("正在扫描书库…"))
         job = Job.run(function(progress)
             local files, skipped = scanFiles(root, self.cfg.folder_category == false)
-            -- 结果帧有 4MB 上限，几千本一次回传必超：解析产物分批经 progress 送回，结果只带 skipped。
+            -- 结果帧有 4MB 上限，几千本一次回传必超：产物分批经 progress 送回，结果只带 skipped。
             local batch = {}
             for i = 1, #files do
                 progress({ i, #files, files[i].name })
-                batch[#batch + 1] = parseFile(files[i], known, digests, skip, index, progress, retry_covers)
+                batch[#batch + 1] = parseFile(files[i], known, digests, index)
                 if #batch >= SCAN_BATCH or i == #files then
                     progress({ files = batch })
                     batch = {}
@@ -256,26 +382,25 @@ function Scan.scanAsync(self, cb, report, retry_covers)
             on_progress = function(value)
                 if type(value) == "table" and value.files then
                     for _idx, f in ipairs(value.files) do parsed[#parsed + 1] = f end
-                    -- 指纹 / md5 逐批落盘：几千本整轮要几十分钟，取消或子进程崩溃不能让已算的 md5 白费
+                    -- 指纹 / md5 / 书目逐批落盘：取消后续扫不重算已完成的
                     ScanDB.save(index, value.files, true)
+                    local ok, step = commitFiles(value.files, known, false)
+                    if not ok then
+                        require("utils.log").warn("book local scan batch commit failed at", step)
+                    end
                     return
                 end
                 if type(value) == "table" then
-                    count = value
                     report(T(_("正在检查 %1"), value[3]), value[1], value[2])
-                    return
-                end
-                opening = value or nil
-                if opening and count then
-                    report(T(_("正在解析 %1"), count[3]), count[1], count[2])
                 end
             end,
             on_done = function(result)
+                if cancelled then return end
                 local files = parsed
                 -- 读不了的子目录是“未知”不是“没有”：其下原有的在架行原样保留
                 local kept = {}
                 for _id, row in pairs(rows) do
-                    for _idx, dir in ipairs(result.skipped) do
+                    for _idx, dir in ipairs(result.skipped or {}) do
                         if row.deleted == 0 and type(row.path) == "string" and row.path:sub(1, #dir + 1) == dir .. "/" then
                             kept[#kept + 1] = row
                             break
@@ -292,26 +417,33 @@ function Scan.scanAsync(self, cb, report, retry_covers)
                     require("utils.log").dbg("book.perf local.scan", Perf.elapsedMs(started_at), "ms",
                         "files", #files, unchanged and "unchanged" or "committed")
                     cb(true)
+                    Scan.ensureEnrich(self, report)
                 else
-                    -- 进度满格后才失败的就是这里：写库哪一步失败要写清楚，便于对日志
                     require("utils.log").warn("book local scan commit failed at", step, "files", #files)
                     cb(false, "failed to commit local scan: " .. tostring(step))
                 end
             end,
             on_failed = function(err)
-                if opening and not skip[opening] then
-                    require("utils.log").warn("book local scan crashed; skip", opening, err)
-                    skip[opening] = true
-                    return start()
-                end
+                if cancelled then return end
+                -- 轻扫不再开文档，子进程崩多半是列目录 / md5；整轮失败，已批落盘的索引与书目保留续扫
                 require("utils.log").warn("book local scan failed", err)
                 cb(false, err or "local scan failed")
+                Scan.ensureEnrich(self, report)
+            end,
+            on_cancelled = function()
+                -- 已批入库的留下；补齐接着啃已在架缺封面的
+                Scan.ensureEnrich(self)
             end,
         })
     end
     start()
     return { cancel = function()
-            job:cancel()
+            cancelled = true
+            if job then job:cancel() end
+            if self._enrich_job then
+                self._enrich_job:cancel()
+                self._enrich_job = nil
+            end
         end }
 end
 
@@ -450,7 +582,7 @@ function Scan.moveBook(self, stable_id, category, series)
     return new_path
 end
 
---- 单文件入库（不扫盘、不清失效）。同步解析在子进程跑。
+--- 单文件入库（不扫盘、不清失效）。同步解析在子进程跑——单本导入用户在等，开一次引擎拿元数据+封面。
 --- 导入落根目录，category/series 恒为 nil（与扫盘根层语义一致）。
 ---@param path string 绝对路径（即 stable_id）
 ---@param cb fun(ok: boolean|nil, err: any)
@@ -462,13 +594,27 @@ function Scan.indexOneAsync(self, path, cb)
         return defer(cb, nil, _("不支持的文件格式"))
     end
     local known, digests = knownBooks()
+    local index = ScanDB.all()
+    local attr = lfs.attributes(path)
+    local fp = attr and (attr.size .. ":" .. attr.modification) or nil
     local job = Job.run(function(progress)
-        return parseFile({ name = name, path = path }, known, digests, {}, {}, progress)
+        local f = parseFile({ name = name, path = path, fp = fp }, known, digests, index)
+        progress(path)
+        local props = parseBookProps(path) or {}
+        progress(false)
+        f.cover_tried = true
+        if props.title and props.title ~= "" then
+            f.title, f.authors, f.intro, f.language = props.title, props.authors, props.intro, props.language
+        elseif not f.title or f.title == "" then
+            f.title, f.authors = parseFilename(name)
+        end
+        return f
     end, {
         name = "local.index",
         kind = "light",
         on_done = function(f)
             if commitFiles({ f }, known) then
+                ScanDB.save(index, { f }, true)
                 cb(true)
             else
                 cb(nil, "failed to commit local book")
