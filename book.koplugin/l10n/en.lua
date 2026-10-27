@@ -385,7 +385,7 @@ return {
     ["启用"] = "Enable",
     ["启用源"] = "Enabled sources",
     ["周连续"] = "Weekly streak",
-    ["响应不是 JSON (HTTP %1) %2"] = "Response is not JSON (HTTP %1) %2",
+    ["响应不是 JSON (HTTP %1)"] = "Response is not JSON (HTTP %1)",
     ["响应为空"] = "Response is empty",
     ["响应无效"] = "Invalid response",
     ["四"] = "Th",

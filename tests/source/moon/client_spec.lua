@@ -92,6 +92,13 @@ response = { res = { code = 200, body = "{}" } }
 client:_jsonAsync("POST", "/x", nil, function() end)
 Assert.is_false(require("source.auth").expired("moon"))
 
+-- 非 JSON 回包（服务端重定向到登录页时返回整页 HTML）：错误只给短句，
+-- HTML 原文不得进 err——同步层会把它直接 toast 出来；细节只进日志。
+local d6, err6 = post({ code = 200, body = "<!DOCTYPE html><html><title>login</title></html>" })
+Assert.is_nil(d6)
+Assert.eq(err6, "响应不是 JSON (HTTP 200)")
+Assert.is_nil(err6:find("<"), "err 不能夹带回包原文")
+
 -- 传输失败
 local d5, err5 = post(nil, "timeout")
 Assert.is_nil(d5)
