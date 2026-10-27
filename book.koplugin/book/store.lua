@@ -317,30 +317,29 @@ function Store.ensureIdentity(path)
     if Paths.isMoonPath(path) then
         return nil -- .moon 内未知文件必须从月读桌面打开
     end
-    -- 未入库 → 当本地书登记（标题取文件名；md5 供扫盘改名识别）。
-    -- 已有行（如扫盘已解析元数据、仅 path 被清掉）只补 path，不覆盖元数据。
-    -- 入库失败仍返回身份，阅读继续；书架可能暂时没有这本书。
-    local row = {
-        source_id = "local",
-        stable_id = path,
-        md5 = require("util").partialMD5(path),
-        title = require("utils.text").basename(path):gsub("%.[^%.]+$", ""),
-        inserted_at = os.time(),
-        path = path,
-    }
-    if not BookDB.get("local", path) then
-        if not BookDB.upsert(row) then
-            logger.warn("book identity register failed", path)
-        end
-    end
+    -- 未入库 → 只 touch 身份行（deleted=1，不上架），挂进度/统计用。
+    -- 禁止 upsert 上架：否则库外打开的文件会被当成书架成员，EndOfBook 误接管。
     if not BookDB.touchPath("local", path, path) then
         logger.warn("book identity touch failed", "local", path, path)
+    end
+    local book = BookDB.get("local", path) or {
+        source_id = "local",
+        stable_id = path,
+        title = require("utils.text").basename(path):gsub("%.[^%.]+$", ""),
+        deleted = 1,
+        path = path,
+    }
+    if book.title == nil or book.title == "" then
+        book.title = require("utils.text").basename(path):gsub("%.[^%.]+$", "")
+    end
+    if book.md5 == nil then
+        book.md5 = require("util").partialMD5(path)
     end
     return {
         source_id = "local",
         stable_id = path,
         chapter_idx = nil,
-        book = row,
+        book = book,
         source = registry.resolve("local"),
     }
 end
