@@ -88,8 +88,9 @@ end
 
 --- 打开 / 轮询时的一份只读快照。
 ---@param toc table[]
+---@param memo table|nil 上一次的 resume_page 结果：轮询复用，别每秒为整列扫 journal
 ---@return table
-local function scan(toc)
+local function scan(toc, memo)
     local probe = Cache.probe()
     local capabilities = probe.ok and (probe.capabilities or {}) or {}
     local queue, queue_code = Cache.queueState()
@@ -97,9 +98,20 @@ local function scan(toc)
     -- unknown_server：缓存状态整块不显示，只剩阅读状态（02 A9）。
     local show_cache = probe.ok and has(capabilities, "status") and queue_code ~= "unknown_server"
     local statuses = {}
+    local resumes = memo or {}
     if show_cache then
         for _idx, entry in ipairs(toc) do
-            statuses[tostring(entry.chapterId)] = Cache.status(entry.chapterId)
+            local cid = tostring(entry.chapterId)
+            local status = Cache.status(entry.chapterId)
+            statuses[cid] = status
+            -- 06 A4：只有读过 / 已缓存的行才可能有「待同步」；结果按章记忆，
+            -- 每秒轮询不再重复读 journal（false = 查过没有）。
+            if resumes[cid] == nil then
+                local cached = type(status) == "table" and (status.state == "complete" or status.state == "stale")
+                if cached or readState(entry) ~= nil then
+                    resumes[cid] = Cache.resumePage(entry.chapterId) or false
+                end
+            end
         end
     end
     return {
@@ -109,6 +121,7 @@ local function scan(toc)
         entries = queueEntries(queue),
         paused = queuePaused(queue),
         statuses = statuses,
+        resumes = resumes,
         offline = not online(),
     }
 end
@@ -149,14 +162,11 @@ local function rowState(ctx, entry)
         text = ctx.offline and T(_("%1 · 离线"), base) or base
         icon = "download"
     end
-    -- 06 A4：kamare 还有位置没推上去。只有本地读过（或有缓存）的行才可能有，
-    -- 因此只为这些行取一次 resume_page，不给整列付 N 次调用。
-    if ctx.show_cache and (read ~= nil or cached) then
-        local resume = Cache.resumePage(entry.chapterId)
-        local status_code = type(resume) == "table" and resume.status or nil
-        if status_code == "pending" or status_code == "failed" then
-            text = T(_("%1 · 待同步"), text)
-        end
+    -- 06 A4：kamare 还有位置没推上去（结果由 scan 按章记忆，轮询不重复取）。
+    local resume = ctx.resumes[cid]
+    local status_code = type(resume) == "table" and resume.status or nil
+    if status_code == "pending" or status_code == "failed" then
+        text = T(_("%1 · 待同步"), text)
     end
     return { text = text, icon = icon, queued = queued, status = status, read = read, cached = cached }
 end
@@ -400,8 +410,9 @@ function VolumeList.pick(series, toc, cb, opts)
     end
 
     --- 重画：状态全在 kamare 的内存索引里，重扫一遍即可（列表停在原页）。
-    refresh = function()
-        ctx = scan(toc)
+    ---@param reuse_resume boolean|nil 轮询用：复用 resume_page 的记忆
+    refresh = function(reuse_resume)
+        ctx = scan(toc, reuse_resume and ctx.resumes or nil)
         if list and not list.closed then list:setItems(items()) end
     end
 
@@ -557,7 +568,7 @@ function VolumeList.pick(series, toc, cb, opts)
     --- 每一拍：重画行，有进度框就更新 / 收尾；队列停住或暂停就不再排下一拍。
     local function tick()
         timer = nil
-        refresh()
+        refresh(true)
         if dialog then
             if ctx.paused then
                 finishPaused()
@@ -599,7 +610,7 @@ function VolumeList.pick(series, toc, cb, opts)
             on_background = function() dialog = nil end,
         }
         dialog:show()
-        refresh()
+        refresh(true)
         if not timer then
             timer = function()
                 timer = nil

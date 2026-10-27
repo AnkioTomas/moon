@@ -32,7 +32,7 @@ local RealCache = dofile(PLUGIN .. "/moonsource_kavita/cache.lua")
 
 local st, calls = {}, {}
 local function reset(overrides)
-    calls = { enqueue = {}, delete = {}, retry = {}, pause = 0, resume = 0 }
+    calls = { enqueue = {}, delete = {}, retry = {}, pause = 0, resume = 0, resume_page = 0 }
     st.probe = { ok = true, state = "enhanced", capabilities = {
         status = true, queue = true, queue_control = true,
         enqueue = true, delete = true, estimate = true,
@@ -57,7 +57,10 @@ local Cache = setmetatable({}, { __index = RealCache })
 function Cache.probe() return st.probe end
 function Cache.queueState() return st.queue, st.queue_code end
 function Cache.status(chapter_id) return st.statuses[tostring(chapter_id)] end
-function Cache.resumePage(chapter_id) return st.resumes[tostring(chapter_id)] end
+function Cache.resumePage(chapter_id)
+    calls.resume_page = calls.resume_page + 1
+    return st.resumes[tostring(chapter_id)]
+end
 function Cache.isChapterOpen(chapter_id)
     return st.open_chapter ~= nil and tostring(st.open_chapter) == tostring(chapter_id)
 end
@@ -479,8 +482,10 @@ Assert.eq(progress_dialog.sets and #progress_dialog.sets or 0, 0, "刚开还没�
 st.queue = { state = "downloading", percent = 0.5, entries = {
     [602] = { chapterId = 602, state = "downloading", bytes_done = 50, bytes_total = 100 },
 }, bytes_done = 50, bytes_total = 100, current_chapter_id = 602 }
+local resume_page_calls = calls.resume_page
 tick()
 Assert.is_true(#progress_dialog.sets > 0, "轮询后更新说明行")
+Assert.eq(calls.resume_page, resume_page_calls, "轮询不重复读 journal 的 resume_page")
 local last_set = progress_dialog.sets[#progress_dialog.sets]
 textContains(last_set[1], "第 2 卷")
 Assert.eq(last_set[2], 50, "进度条用本服务器的聚合 percentage")
