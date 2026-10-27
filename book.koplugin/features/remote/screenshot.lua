@@ -33,7 +33,7 @@ function M.share(path, on_url)
             return
         end
         if on_url then on_url() end
-        require("ui.themes.widgets.qr"):new{ title = _("通过远程管理分享"), text = url }:show()
+        require("ui.themes.widgets.qr"):new{ title = _("通过远程管理分享"), text = url, caption = url }:show()
     end)
 end
 

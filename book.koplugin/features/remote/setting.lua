@@ -29,7 +29,7 @@ local function rows(desktop)
         local function connected()
             local ok, err = Remote.start()
             if ok then
-                Toast:new{ text = T(_("服务已启动：%1"), Remote.status()), timeout = 4 }:show()
+                Remote.showAccess()
             else
                 Toast:new{ text = T(_("启动失败：%1"), tostring(err)), timeout = 3 }:show()
             end

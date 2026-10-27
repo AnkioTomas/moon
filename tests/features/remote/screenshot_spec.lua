@@ -71,6 +71,7 @@ Assert.eq(closed[1], saved, "二维码打开前必须关闭截图确认框")
 local qr = Themed.last("qr")
 Assert.eq(qr.title, "通过远程管理分享")
 Assert.eq(qr.text, "http://192.0.2.1:8080/download?path=x")
+Assert.eq(qr.caption, "http://192.0.2.1:8080/download?path=x", "二维码底部要明文显示 URL，扫不了时可手输")
 Assert.eq(shown[1], qr)
 
 return true
