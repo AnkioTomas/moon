@@ -29,6 +29,7 @@ local engine_faces = { "System Demo" }
 local registered = {}
 local register_calls = 0
 local woff_calls = {}
+local directory_scans = 0
 local repair_calls = {}
 package.preload["ui.fonts.sfnt"] = function()
     return { ensureSpace = function(path)
@@ -61,7 +62,10 @@ package.preload["logger"] = function() return { info = function() end, warn = fu
 package.preload["util"] = function()
     return {
         findFiles = function(_dir, fn)
-            fn("/tmp/reader-font.ttf", "reader-font.ttf", { mode = "file" })
+            directory_scans = directory_scans + 1
+            if files["/tmp/reader-font.ttf"] then
+                fn("/tmp/reader-font.ttf", "reader-font.ttf", { mode = "file" })
+            end
         end,
         arrayContains = function(t, v)
             for i, x in ipairs(t) do if x == v then return i end end
@@ -95,7 +99,7 @@ package.preload["libs/libkoreader-lfs"] = function()
             if files[path] and (not key or key == "mode") then
                 return "file"
             end
-            if path == "/tmp/fonts" and (not key or key == "mode") then
+            if (path == "/tmp/fonts" or path == "/tmp/ko/fonts") and (not key or key == "mode") then
                 return "directory"
             end
         end,
@@ -176,6 +180,8 @@ local face_name, face_name_err = Fonts.faceNameForId("reader-font.ttf")
 Assert.eq(face_name, "Reader Demo")
 Assert.is_nil(face_name_err)
 Assert.eq(register_calls, 0, "偏好比较不应注册 CRE 字体")
+local initial_scans = directory_scans
+Assert.eq(initial_scans, 1)
 
 local face, err = Fonts.faceForId("reader-font.ttf")
 Assert.is_nil(err)
@@ -184,6 +190,7 @@ Assert.is_true(registered["/tmp/reader-font.ttf"])
 Assert.eq(register_calls, 1)
 Assert.eq(Fonts.faceForId("reader-font.ttf"), "Reader Demo")
 Assert.eq(register_calls, 1, "同一路径只注册一次")
+Assert.eq(directory_scans, initial_scans, "同一字体后续解析复用路径，不重新扫描目录")
 Assert.is_nil(Fonts.downloadedPath("wr"), "未下载的微信读书字体")
 
 -- engineInit 已注册的系统字体：重复注册被拒不算失败
@@ -249,10 +256,12 @@ Assert.is_true(Fonts.removeDownloaded("wr"))
 Assert.is_nil(Fonts.downloadedPath("wr"))
 Assert.is_nil(files["/tmp/fonts/wr.ttf"])
 Assert.is_nil(files["/tmp/fonts/wr.woff"])
+Assert.is_nil(Fonts.pathForId("wr"), "删除字体后路径缓存失效")
 Assert.eq(Fonts.removeDownloaded("wr"), false, "没有文件可删")
 os.remove = real_remove
 files["/tmp/fonts/wr.woff"] = true
 files["/tmp/fonts/wr.ttf"] = true
+Assert.eq(Fonts.pathForId("wr"), "/tmp/fonts/wr.ttf", "重新下载后可再次解析字体")
 
 -- 转换失败且改名也失败：退回原 WOFF，字体仍可用
 files["/tmp/fonts/bad.woff"] = true
@@ -318,3 +327,45 @@ files["/tmp/fonts/solo.ttf"] = true
 Assert.eq(Fonts.faceNameForId("solo"), "Solo Demo")
 Assert.eq(table.concat(collected, ","), "/tmp/fonts/solo.ttf", "只读这一个文件的字体信息")
 Assert.is_false(walked, "不走整目录 _readList")
+
+-- 已缓存的本地文件被删除时，不得重新命中 FontList 中残留的旧路径。
+files["/tmp/reader-font.ttf"] = nil
+Assert.is_nil(Fonts.pathForId("reader-font.ttf"))
+files["/tmp/reader-font.ttf"] = true
+Assert.eq(Fonts.pathForId("reader-font.ttf"), "/tmp/reader-font.ttf")
+
+-- 西文选择重载当前书，保留中文字体；选择失败不重载。
+local western_reloads, western_error = 0
+moon_settings.western_font_id = ""
+package.preload["ui.fonts.mixed"] = function() return { setWestern = function(id, name)
+    if id == moon_settings.western_font_id then return true, nil, false end
+    if id == "bad.ttf" then return nil, "不支持的西文字体" end
+    moon_settings.western_font_id, moon_settings.western_font_name = id, name
+    return true, nil, true
+end } end
+package.preload["ui.themes.widgets.toast"] = function() return { new = function(_, opts)
+    return { show = function() western_error = opts.text end }
+end } end
+ui.reloadDocument = function(_, callback, seamless)
+    Assert.is_nil(callback)
+    Assert.is_true(seamless)
+    western_reloads = western_reloads + 1
+end
+local chinese_face = ui.font.font_face
+local western = FontReader.westernPickerOpts(ui)
+Assert.eq(western.title, "西文字体")
+Assert.eq(western.current_id(), "")
+western.on_select(nil, "west.ttf", "自选西文")
+Assert.eq(western.current_id(), "west.ttf")
+Assert.eq(western_reloads, 1)
+western.on_select(nil, "west.ttf", "自选西文")
+Assert.eq(western_reloads, 1, "重复选择当前西文字体不重载当前书籍")
+Assert.eq(ui.font.font_face, chinese_face, "西文选择不覆盖中文字体状态")
+western.on_select(nil, "bad.ttf", "无效字体")
+Assert.eq(western_reloads, 1)
+Assert.eq(western_error, "不支持的西文字体")
+western.on_select(nil, "", "")
+Assert.eq(moon_settings.western_font_id, "", "空选择恢复默认西文字体")
+Assert.eq(western_reloads, 2)
+western.on_select(nil, "", "")
+Assert.eq(western_reloads, 2, "重复使用自动选择不重载")

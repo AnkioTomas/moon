@@ -10,6 +10,7 @@ local Assert = require("support.assert")
 
 local state = {
     sidebar = { sidebar_gesture = "edge", sidebar_hidden_tabs = {}, sidebar_tab_order = {} },
+    reader = { mixed_fonts = true },
     xray = { book_xray_enabled = true },
     snapshot = nil,
     shown = {},
@@ -137,7 +138,12 @@ package.preload["features.sidebar.info"] = function()
 end
 --- 字体：listAsync 的回调由测试手动触发，模拟子进程扫盘 / 网络异步返回。
 package.preload["ui.fonts.reader"] = function()
-    return { supports = function(ui) return ui.font ~= nil end }
+    return {
+        supports = function(ui) return ui.font ~= nil end,
+        westernPickerOpts = function(ui)
+            return { ui = ui, title = "西文字体", on_select = function() state.font_selected = "western" end }
+        end,
+    }
 end
 package.preload["ui.fonts.catalog"] = function()
     return {
@@ -150,14 +156,17 @@ package.preload["ui.fonts.catalog"] = function()
     }
 end
 package.preload["features.panel.actions.reader.font"] = function()
-    return { pickerOpts = function(ui) return { ui = ui } end }
+    return { pickerOpts = function(ui)
+        return { ui = ui, title = state.reader.mixed_fonts and "中文字体" or "阅读字体",
+            on_select = function() state.font_selected = "chinese" end }
+    end }
 end
 --- 主题 List：只模拟缺省宽高（borrowMenu 临时改写）与 show。
 local ThemeList = {}
 package.preload["ui.themes.widgets.list"] = function() return ThemeList end
 package.preload["ui.widgets.fontpicker"] = function()
     return { show = function(opts, items)
-        local list = { title = "阅读字体", items = items, w = ThemeList.width, h = ThemeList.height, picker_opts = opts }
+        local list = { title = opts.title, items = items, w = ThemeList.width, h = ThemeList.height, picker_opts = opts }
         list.close_callback = function() state.native_closed[#state.native_closed + 1] = "font" end
         UIManager:show(list)
     end }
@@ -373,19 +382,41 @@ Assert.eq(table.concat(fonted.tabs, ","), "info,toc,font,notes,xray,ticket")
 Assert.len(state.font_jobs, 0, "没进字体页不拉列表")
 fonted:goTab(3)
 Assert.len(state.font_jobs, 1)
-local loading = fonted[1][1][1][1]
+local font_body = fonted[1][1][1]
+Assert.eq(font_body[1].strip.active, "chinese")
+Assert.eq(font_body[1].strip.tabs[1].text, "中文字体")
+Assert.eq(font_body[1].strip.tabs[2].text, "西文字体")
+local loading = font_body[2][1]
 Assert.eq(loading[1].muted, "正在加载字体列表…")
 -- 列表回来：借选择器菜单进侧栏，推迟一 tick 重画；选择器参数来自阅读字体快捷动作。
 local shown_before = #state.shown
 state.font_jobs[1].cb({ { id = "a" } })
 Assert.len(state.shown, shown_before, "选择器菜单被截下，不上屏")
 flush()
-local font_menu = fonted[1][1][1][1]
-Assert.eq(font_menu.title, "阅读字体")
+font_body = fonted[1][1][1]
+local font_menu = font_body[2][1]
+Assert.eq(font_menu.title, "中文字体")
 Assert.eq(font_menu.w, 510)
+Assert.eq(font_menu.h, 800 - 41 * 2, "扣除字体类型切换栏和侧栏底栏，不挤出屏幕")
 Assert.eq(font_menu.picker_opts.ui, font_ui)
 Assert.eq(font_menu.show_parent, fonted)
 Assert.is_nil(ThemeList.width, "List 缺省宽高已还原")
+-- 中文 / 西文都走对应选择回调；切换复用已拉取的目录，不再扫盘或联网。
+font_menu.picker_opts.on_select()
+Assert.eq(state.font_selected, "chinese")
+font_body[1].strip.on_tab("western")
+font_body = fonted[1][1][1]
+font_menu = font_body[2][1]
+Assert.eq(font_body[1].strip.active, "western")
+Assert.eq(font_menu.title, "西文字体")
+Assert.eq(font_menu.picker_opts.ui, font_ui)
+font_menu.picker_opts.on_select()
+Assert.eq(state.font_selected, "western")
+Assert.len(state.font_jobs, 1)
+font_body[1].strip.on_tab("chinese")
+font_menu = fonted[1][1][1][2][1]
+Assert.eq(font_menu.title, "中文字体")
+Assert.len(state.font_jobs, 1)
 -- 选中字体后 List 自关：关侧栏，补跑选择器原 close_callback。
 font_menu:close()
 Assert.eq(state.closed[#state.closed], fonted)
@@ -396,12 +427,35 @@ local failing = Sidebar:new{ ui = font_ui, snapshot = state.snapshot }
 failing:goTab(3)
 state.font_jobs[2].cb(nil)
 flush()
-Assert.eq(failing[1][1][1][1][1].muted, "字体列表加载失败")
+Assert.eq(failing[1][1][1][2][1][1].muted, "字体列表加载失败")
 local pending = Sidebar:new{ ui = font_ui, snapshot = state.snapshot }
 pending:goTab(3)
+pending[1][1][1][1].strip.on_tab("western")
+Assert.len(state.font_jobs, 3, "加载中切换类型不启动重复任务")
+state.font_jobs[3].cb({ { id = "a" } })
+flush()
+Assert.eq(pending[1][1][1][2][1].title, "西文字体", "异步返回后显示最后选择的类型")
 pending:onClose()
-Assert.is_true(state.font_jobs[3].cancelled)
 Assert.is_nil(pending.font_job)
+local cancelled = Sidebar:new{ ui = font_ui, snapshot = state.snapshot }
+cancelled:goTab(3)
+cancelled:onClose()
+Assert.is_true(state.font_jobs[4].cancelled)
+
+-- 关闭分开时，字体页直接显示普通列表，不占用中西文切换栏的高度。
+state.reader.mixed_fonts = false
+local unified = Sidebar:new{ ui = font_ui, snapshot = state.snapshot }
+unified:goTab(3)
+state.font_jobs[5].cb({ { id = "a" } })
+flush()
+local unified_menu = unified[1][1][1][1]
+Assert.eq(unified_menu.title, "阅读字体")
+Assert.eq(unified_menu.h, 800 - 41, "关闭分开时列表使用完整侧栏内容高度")
+Assert.eq(unified_menu, unified.menus.font, "没有中西文切换栏，直接嵌入列表")
+unified_menu.picker_opts.on_select()
+Assert.eq(state.font_selected, "chinese", "普通字体选择仍可用")
+unified:onClose()
+state.reader.mixed_fonts = true
 
 -- 书籍页左滑切页；遮罩上滑动直接关闭。
 local other = Sidebar:new{ ui = ui, snapshot = state.snapshot }

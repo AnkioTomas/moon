@@ -36,6 +36,7 @@ local TABS = {
 
 ---@class FontPickerOpts
 ---@field title string|nil
+---@field initial_tab string|nil 无当前选中项时默认打开的分栏
 ---@field on_done fun(id: string, name: string)|nil
 ---@field current_id? fun(): string|nil
 ---@field on_select fun(item: MoonFontItem|table, id: string, name: string)|nil
@@ -159,7 +160,7 @@ function FontPicker.show(opts, items)
     local cur = (opts.current_id and opts.current_id()) or Fonts.currentId()
     local groups = {}
     for _idx, tab in ipairs(TABS) do groups[tab[1]] = {} end
-    local active = "weread"
+    local active = opts.initial_tab or "weread"
     for _idx, it in ipairs(items or {}) do
         local group = groups[it.kind] or groups.weread
         group[#group + 1] = it

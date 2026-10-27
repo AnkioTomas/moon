@@ -11,7 +11,7 @@ package.preload["ffi/util"] = function()
         end,
     }
 end
-local reader_section = { reader_popup_seen = {} }
+local reader_section = { reader_popup_seen = {}, western_font_id = "", western_font_name = "" }
 local saved_section
 package.preload["utils.settings"] = function()
     return {
@@ -41,7 +41,7 @@ Assert.eq(#sections, 1)
 Assert.eq(sections[1].title, "行为")
 Assert.eq(sections[1].rows[1](600).title, "脚注弹窗")
 Assert.is_false(sections[1].rows[1](600).toggle)
-Assert.len(sections[1].rows, 5, "翻页动画在 animation feature 的设置页")
+Assert.len(sections[1].rows, 6, "阅读行为不再提供独立西文字体入口")
 local auto_mark = sections[1].rows[2](600)
 Assert.eq(auto_mark.title, "读到 99% 自动标记已读")
 Assert.is_false(auto_mark.toggle)
@@ -62,6 +62,18 @@ back.callback()
 Assert.is_true(reader_section.back_to_desktop)
 Assert.eq(saved_section.name, "reader")
 Assert.is_true(Settings:sections(desktop)[1].rows[5](600).toggle)
+local mixed = Settings:sections(desktop)[1].rows[6](600)
+Assert.eq(mixed.title, "中西文字体分开")
+Assert.is_false(require("reader.setting").defaults.mixed_fonts, "中西文字体分开默认关闭")
+Assert.is_false(mixed.toggle)
+mixed.callback()
+Assert.is_true(reader_section.mixed_fonts)
+Assert.eq(saved_section.name, "reader")
+local enabled = Settings:sections(desktop)[1].rows
+Assert.len(enabled, 6, "开启后阅读行为页仍没有西文字体入口")
+Assert.is_true(enabled[6](600).toggle)
+enabled[6](600).callback()
+Assert.is_false(reader_section.mixed_fonts)
 reader_section = { reader_popup_seen = {} }
 
 local lookup = Settings:lookupSections(desktop)
