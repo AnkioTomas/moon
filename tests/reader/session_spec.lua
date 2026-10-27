@@ -15,6 +15,7 @@ local defer_tracker_stop = false
 local tracker_stop_done
 local resolved_source
 local stored_toc = {}
+local stale_toc = {}
 local toc_reads = 0
 local book_fraction = 0.25
 local auto_mark_read = false
@@ -109,8 +110,9 @@ package.preload["book.store"] = function()
 end
 package.preload["source.toc"] = function()
     return {
-        read = function(_source_id, stable_id)
+        read = function(_source_id, stable_id, stale)
             toc_reads = toc_reads + 1
+            if stale then return stored_toc[stable_id] or stale_toc[stable_id] end
             return stored_toc[stable_id]
         end,
     }
@@ -704,6 +706,50 @@ do
     Assert.eq(Session.toc()[1].title, "新")
     Session.onCloseDocument(plugin)
     resolved_source = nil
+end
+
+-- 目录已过 TTL（只剩 stale 基线）且刷新失败（离线）：会话保留旧目录，
+-- 章末切下一章而不是弹「本书已读完」，目录列表也是全本而不是当前单章。
+do
+    stored_toc.chapters = nil
+    stale_toc.chapters = { { idx = 1, title = "一" }, { idx = 2, title = "二" }, { idx = 3, title = "三" } }
+    local opened_idx
+    local source = {
+        type = "chapter",
+        isTocCurrent = function() return true end,
+        loadTocAsync = function(_, _, cb)
+            cb(nil, "网络不可用")
+            return { cancel = function() end }
+        end,
+        refreshTocAsync = function(_, _, cb)
+            cb(nil, "网络不可用")
+            return { cancel = function() end }
+        end,
+        openBookAsync = function(_, _, opts, cb)
+            opened_idx = opts.chapter_idx
+            return asyncChapter("/cache/2.html", cb)
+        end,
+        prefetchChaptersAsync = function()
+            return { cancel = function() end }
+        end,
+        putProgressAsync = default_source.putProgressAsync,
+        syncProgressAsync = default_source.syncProgressAsync,
+        syncNotesAsync = default_source.syncNotesAsync,
+        syncStatsAsync = default_source.syncStatsAsync,
+    }
+    resolved_source = source
+    end_dialog_identity = nil
+    local plugin = mkPlugin("/cache/1.html")
+    plugin.ui.status = { onEndOfBook = function() end }
+    Session.onReaderReady(plugin)
+    Assert.len(Session.toc(), 3, "过期目录离线时仍是会话目录")
+    Assert.eq(Session.chapterTitle(), "一")
+    plugin.ui.status.onEndOfBook(plugin.ui.status)
+    Assert.eq(opened_idx, 2, "章末应切下一章")
+    Assert.is_nil(end_dialog_identity, "未读完不弹本书已读完")
+    Session.onCloseDocument(plugin)
+    resolved_source = nil
+    stale_toc.chapters = nil
 end
 
 -- 属主源已不在（第三方源插件被卸载）：已落盘的章节照常打开，不给源发事件、不崩。
