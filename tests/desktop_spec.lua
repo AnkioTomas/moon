@@ -407,6 +407,7 @@ do -- 开机自动开桌面：按启动项、进程内只开一次；Reader 实�
     _G.G_reader_settings = {
         readSetting = function(_s, k) return saved[k] end,
         saveSetting = function(_s, k, v) saved[k] = v end,
+        isTrue = function() return false end,
     }
     local FM = { showFiles = function(self, path) self.instance = { listed = path } end }
     package.loaded["apps/filemanager/filemanager"] = FM
