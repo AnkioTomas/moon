@@ -129,7 +129,7 @@ Assert.is_false(Bars.topVisible(ui_top))
 
 ui_top.document.getHeaderHeight = function() return 28 end
 ui_top.view.view_mode = "scroll"
-Assert.is_false(Bars.topVisible(ui_top))
+Assert.is_true(Bars.topVisible(ui_top), "滚动模式同样留页眉高度，顶栏须绘制")
 
 -- 渲染不可见不等于配置关闭：滚动模式下仍须写入 status_line。
 ui_top.document.configurable.status_line = 0
