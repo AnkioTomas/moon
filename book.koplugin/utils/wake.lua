@@ -3,7 +3,9 @@
 
 - 每个节点同步写 book.log，卡死后长按重启也留得下。
 - 上次没正常退出（崩溃 / 卡死 / 强制重启）时，下次启动记一条 WARN。
-- 唤醒后挂看门狗：主循环被阻塞、该自动消失的锁屏还挂在屏幕上，都记 WARN，后者强制关掉。
+- 唤醒后挂看门狗：主循环被阻塞、该自动消失的锁屏还挂在屏幕上，都只记 WARN。
+  看门狗不许关屏：它分不清「卡住的旧锁屏」和「用户刚上的新锁屏」，真卡住按电源键能救，
+  它误关一次就是用户刚锁的屏没了。只留日志给人事后定位，关屏权归 KOReader 和用户。
 
 @module koplugin.book.utils.wake
 --]]
@@ -17,6 +19,7 @@ local Wake = {
 }
 
 local watchdog
+local suspend_count = 0
 
 local function marker()
     return Paths.root() .. "/.running"
@@ -44,6 +47,7 @@ function Wake.exit()
 end
 
 function Wake.suspend()
+    suspend_count = suspend_count + 1
     Log.info("wake: suspend")
     Log.flushSync()
 end
@@ -54,20 +58,7 @@ local function shouldAutoClose()
     return tonumber(delay) ~= nil or delay == "disable"
 end
 
-local function forceCloseScreensaver()
-    local UIManager = require("ui/uimanager")
-    local Screensaver = require("ui/screensaver")
-    pcall(function()
-        Screensaver:close_widget()
-        if Screensaver.screensaver_lock_widget then
-            UIManager:close(Screensaver.screensaver_lock_widget)
-        end
-        Screensaver:cleanup()
-        UIManager:setDirty("all", "full")
-    end)
-end
-
---- 每次唤醒调；wait 到点时检查主循环是否被阻塞、锁屏是否卡住。
+--- 每次唤醒调；wait 到点时检查主循环是否被阻塞、锁屏是否还挂着（只记日志，不关）。
 function Wake.resume()
     local UIManager = require("ui/uimanager")
     local time = require("ui/time")
@@ -76,16 +67,18 @@ function Wake.resume()
     if watchdog then UIManager:unschedule(watchdog) end
     local wait = (tonumber(G_reader_settings:readSetting("screensaver_delay")) or 0) + Wake.GRACE
     local armed_at = time.now()
+    local cycle = suspend_count
     watchdog = function()
         watchdog = nil
+        -- 唤醒后又睡下去了：屏幕上是新一轮的锁屏，还挂着是正常的，连日志都别记。
+        if cycle ~= suspend_count then return end
         local late = time.to_s(time.now() - armed_at) - wait
         if late > Wake.STALL then
             Log.warn(string.format("wake: UI loop blocked ~%.1fs after resume", late))
         end
         local Device = require("device")
         if Device.screen_saver_mode and shouldAutoClose() then
-            Log.warn("wake: screensaver still shown after resume, forcing close")
-            forceCloseScreensaver()
+            Log.warn("wake: screensaver still shown after resume")
         end
         Log.flushSync()
     end
