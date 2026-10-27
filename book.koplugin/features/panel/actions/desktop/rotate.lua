@@ -1,4 +1,4 @@
---[[-- 旋转屏幕快捷动作。
+--[[-- 旋转屏幕快捷动作。转完由 BookPlugin:onSetRotationMode 记进全局方向。
 @module koplugin.book.features.panel.actions.desktop.rotate
 --]]
 

@@ -401,6 +401,7 @@ local function route(desktop, event)
 end
 
 --- 旋转屏幕：FileManager 在同一次广播里转屏，桌面等下一 tick 屏幕尺寸稳定后整壳重建。
+--- 全局方向由 BookPlugin:onSetRotationMode 记；这里只负责重排。
 --- 返回 false 让广播继续送给下层 FileManager。
 ---@return boolean
 function Desktop:onSetRotationMode()
@@ -640,6 +641,8 @@ function Desktop.open(plugin)
     end
     require("utils.paths").ensureLayout(source.id)
     logger.info("book openDesktop", source.id)
+    -- 开桌面前扳到全局上次旋转（冷启动 FM 已读 fm 键；关书回来若屏幕被别处改过则这里对齐）。
+    require("utils.rotation").apply()
     local old = plugin.desktop
     if old then
         old:destroy()
