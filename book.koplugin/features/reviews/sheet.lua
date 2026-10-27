@@ -114,7 +114,7 @@ function Sheet:quote()
     local gap = Theme.px(t.space.sm)
     local mark = Icon.widget{ name = "format_quote", size = t.control.icon, color = Blitbuffer.Color8(t.color.faint) }
     local text = Text.box("body", self.spot.text, self.inner_w - mark:getSize().w - gap,
-        { color = t.color.muted, max_lines = QUOTE_LINES })
+        { color = t.color.muted, max_lines = QUOTE_LINES, transparent = true })
     self.quote_widget = VerticalGroup:new{
         align = "left",
         HorizontalGroup:new{
@@ -135,10 +135,12 @@ function Sheet:gap()
     return Theme.px(t.space.md) * 2 + Theme.px(t.row.divider)
 end
 
---- 第 i 条段评的卡片；正文过长截到一页内，点按卡片分页查看完整正文。
+--- 第 i 条段评的卡片；正文过长截到可用高度内，点按卡片分页查看完整正文。
 ---@param i integer
+---@param avail number|nil 卡片所在页的可用高度（第一页要先扣掉引用）；缺省按整页算。
+--- 只由 paginate 在分页时首建卡片，缓存后不要再换 avail 调用。
 ---@return table
-function Sheet:card(i)
+function Sheet:card(i, avail)
     if self.cards[i] then return self.cards[i] end
     local t, w = self.theme, self.inner_w
     local item = self.items[i]
@@ -166,13 +168,13 @@ function Sheet:card(i)
     local space = Theme.px(t.space.xs)
     local pics = self:thumbs(item.images or {})
     local pics_h = pics and pics:getSize().h + space or 0
-    local content = Text.box("body", item.content, w)
-    local room = self.body_h - head:getSize().h - space - pics_h
+    local content = Text.box("body", item.content, w, { transparent = true })
+    local room = (avail or self.body_h) - head:getSize().h - space - pics_h
     local truncated = content:getSize().h > room
     if truncated then
         local lines = math.max(1, math.floor(room / content:getLineHeight()))
         content:free()
-        content = Text.box("body", item.content, w, { max_lines = lines })
+        content = Text.box("body", item.content, w, { max_lines = lines, transparent = true })
     end
     local card = VerticalGroup:new{ align = "left", head, VerticalSpan:new{ width = space }, content }
     if pics then
@@ -211,11 +213,12 @@ function Sheet:thumbs(images)
     return row
 end
 
---- 按卡片高度贪心分页；首页先放原句。没有段评时也保留一页。
+--- 按卡片高度贪心分页；首页先放原句，首条按扣掉引用后的剩余高度截断，
+--- 避免长段评整条被挤到第二页、第一页只剩引用。
 function Sheet:paginate()
     local pages, first, used = {}, 1, self:quote():getSize().h
     for i = 1, #self.items do
-        local h = self:card(i):getSize().h
+        local h = self:card(i, i == 1 and self.body_h - used or nil):getSize().h
         if i > first then h = h + self:gap() end
         if used > 0 and used + h > self.body_h then
             pages[#pages + 1] = { first, i - 1 }

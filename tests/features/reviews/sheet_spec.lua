@@ -16,23 +16,23 @@ local Sheet = require("features.reviews.sheet")
 
 local function widget(h) return { getSize = function() return { w = 10, h = h } end } end
 
---- 引用高 quote_h，卡片高依次为 heights，卡片间隔 10，正文区高 100。
+--- 引用高 quote_h，卡片自然高依次为 heights（按所在页可用高度截断），卡片间隔 10，正文区高 100。
 local function paginate(quote_h, heights)
     local fake = { items = {}, body_h = 100 }
     for i = 1, #heights do fake.items[i] = {} end
     function fake.quote() return widget(quote_h) end
-    function fake.card(_self, i) return widget(heights[i]) end
+    function fake.card(_self, i, avail) return widget(math.min(heights[i], avail or 100)) end
     function fake.gap() return 10 end
     Sheet.paginate(fake)
     return fake.pages
 end
 
--- 引用 + 首条放不下：首条挪到第二页，第一页只剩引用。
+-- 引用 + 首条自然高放不下：首条按首页剩余高度（100-60）截断留在第一页，第二条去第二页。
 local pages = paginate(60, { 80, 10 })
 Assert.len(pages, 2)
 Assert.eq(pages[1][1], 1)
-Assert.eq(pages[1][2], 0)
-Assert.eq(pages[2][1], 1)
+Assert.eq(pages[1][2], 1)
+Assert.eq(pages[2][1], 2)
 Assert.eq(pages[2][2], 2)
 
 do
