@@ -20,6 +20,7 @@
   dialog:set("已格式化的文案", 40)          -- 文案原样显示；percent 省略时进度条不动
 
   ProgressDialog:new{ title = "…", on_background = fn, on_cancel = fn }   -- 可转后台 / 可取消
+  ProgressDialog:new{ title = "正在缓存", on_cancel = fn, cancel_text = "暂停" }  -- 按钮换文案
   ProgressDialog:new{ title = "…", text = "正在测试…", dismissable = false }  -- 不可取消的前台等待
   local handle = dialog:showWhile(startAsync, …)  -- 弹窗并同步发起；发起时抛错先关窗再抛
 
@@ -45,17 +46,19 @@ local T = require("ffi/util").template
 ---@field text string|nil 初始说明行，缺省「正在准备…」
 ---@field on_background fun()|nil 给了就出「后台运行」按钮；返回键同此
 ---@field on_cancel fun()|nil 给了就出「取消」按钮
+---@field cancel_text string|nil 取消按钮的文案（缺省「取消」；缓存队列用「暂停」）
 local ProgressDialog = Modal:extend{
     title = nil,
     text = nil,
     on_background = nil,
     on_cancel = nil,
+    cancel_text = nil,
 }
 
 function ProgressDialog:init()
     local buttons = {}
     if self.on_cancel then
-        buttons[#buttons + 1] = { text = _("取消"), callback = function()
+        buttons[#buttons + 1] = { text = self.cancel_text or _("取消"), callback = function()
             self:close()
             self.on_cancel()
         end }

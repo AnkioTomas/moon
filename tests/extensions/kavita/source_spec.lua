@@ -26,7 +26,7 @@ package.loaded["json"] = JSON
 Themed.install()
 local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
 -- 走 preload 不改 package.path：runner 只还原 preload/loaded，插件根上的 main.lua 会顶掉月读的 main。
-for _idx, name in ipairs({ "client", "position", "annotation", "source", "setting", "cache", "stats" }) do
+for _idx, name in ipairs({ "client", "position", "annotation", "source", "setting", "cache", "volume_list", "stats" }) do
     package.preload["moonsource_kavita." .. name] = function()
         return dofile(PLUGIN .. "/moonsource_kavita/" .. name .. ".lua")
     end

@@ -31,6 +31,7 @@ local Annotation = require("moonsource_kavita.annotation")
 local Position = require("moonsource_kavita.position")
 local Stats = require("moonsource_kavita.stats")
 local Cache = require("moonsource_kavita.cache")
+local VolumeList = require("moonsource_kavita.volume_list")
 local SourceBase = require("source.base")
 local Normalize = require("book.note.normalize")
 local logger = require("utils.log")
@@ -1106,41 +1107,33 @@ function Source:openEntry(ref, entry, toc, title, cb)
     return cb(nil, Cache.message(code, message))
 end
 
---- 多卷选卷：标注已下载 / 在读 / 已读；关窗没选算取消。
+--- 旧「已下载」标记：kamare 不可用时卷列表右侧仍要显示本地 cbz / epub。
+---@param series Book
+---@param entry table
+---@return string|nil
+local function legacyVolumeState(series, entry)
+    local Paths = require("utils.paths")
+    local vid = series.stable_id .. ":" .. entry.chapterId
+    local state
+    if entry.pages > 0 and entry.pagesRead >= entry.pages then
+        state = _("已读")
+    elseif entry.pagesRead > 0 then
+        state = _("在读")
+    end
+    if entry.format and validFile(T("%1/%2.%3", Paths.bookWorkDir(vid, ID), entry.chapterId, entry.format), entry.format) then
+        state = state and T(_("%1 · 已下载"), state) or _("已下载")
+    end
+    return state
+end
+
+--- 多卷选卷：状态字 + 行尾缓存动作，标题栏「缓存整部」（04 / 07）；关窗没选算取消。
 ---@param series Book
 ---@param toc table[]
 ---@param cb fun(entry: table|nil)
 local function pickVolume(series, toc, cb)
-    local Paths = require("utils.paths")
-    local items = {}
-    for _idx, entry in ipairs(toc) do
-        local vid = series.stable_id .. ":" .. entry.chapterId
-        local state
-        if entry.pages > 0 and entry.pagesRead >= entry.pages then
-            state = _("已读")
-        elseif entry.pagesRead > 0 then
-            state = _("在读")
-        end
-        if entry.format and validFile(T("%1/%2.%3", Paths.bookWorkDir(vid, ID), entry.chapterId, entry.format), entry.format) then
-            state = state and T(_("%1 · 已下载"), state) or _("已下载")
-        end
-        items[#items + 1] = { text = entry.title, value = entry, mandatory = state }
-    end
-    local chosen = false
-    require("ui.themes.widgets.list"):new{
-        title = series.title or _("选择卷"),
-        items = items,
-        on_select = function(entry)
-            chosen = true
-            cb(entry)
-        end,
-        -- 单选点按时先关窗、同一拍再 on_select：下一拍还没选中就是用户关掉了列表。
-        close_callback = function()
-            require("ui/uimanager"):nextTick(function()
-                if not chosen then cb(nil) end
-            end)
-        end,
-    }:show()
+    return VolumeList.pick(series, toc, cb, {
+        fallback = function(entry) return legacyVolumeState(series, entry) end,
+    }):show()
 end
 
 --- 打开：非漫画的已下载文件直接开（不联网）；漫画按 kamare 缓存 > 旧 cbz > 下载的顺序（03 A5）。
