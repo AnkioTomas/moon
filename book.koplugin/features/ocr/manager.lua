@@ -58,7 +58,9 @@ function Manager.catalog(cb)
     return Mirror.get(Manager.BASE_PATH .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
         if not body then cb(nil, err); return end
         local ok, manifest = pcall(JSON.decode, body)
-        if not ok then cb(nil, manifest); return end
+        -- 解析器报错是内部细节（清单被 CDN 换成 HTML 页时就会触发），
+        -- 给用户只留与 validateManifest 同一口径的短失败。
+        if not ok or type(manifest) ~= "table" then cb(nil, "bad manifest"); return end
         cb(Manager.validateManifest(manifest))
     end)
 end

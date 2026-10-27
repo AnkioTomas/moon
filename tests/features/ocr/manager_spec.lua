@@ -29,6 +29,17 @@ package.preload["json"] = function()
         encode = function(t) local key = "json#" .. tostring(t); store[key] = t; return key end,
     }
 end
+local mirror_body
+package.preload["http.mirror"] = function()
+    return {
+        get = function(_path, _opts, cb) cb(mirror_body); return {} end,
+        url = function(path) return "mirror:///" .. path end,
+        download = function(path, opts, dest, cb)
+            opts.url = "mirror:///" .. path
+            return require("http.request").download(opts, dest, cb)
+        end,
+    }
+end
 local downloads = {}
 package.preload["http.request"] = function()
     return { download = function(opts, dest, cb)
@@ -163,6 +174,19 @@ saved.kopt_forced_ocr = 1
 Assert.is_true(Manager.forcedOcr(), "没开书读全局默认")
 package.loaded["apps/reader/readerui"] = nil
 _G.G_reader_settings = old_g
+
+-- 清单拉取：回包不是 JSON（CDN 回 HTML 页）时只报短失败，
+-- 解析器报错原文不得传给 UI。
+mirror_body = "<html>cdn error page</html>"
+local cat_items, cat_err
+Manager.catalog(function(items, err) cat_items, cat_err = items, err end)
+Assert.is_nil(cat_items)
+Assert.eq(cat_err, "bad manifest")
+store["manifest-body"] = { models = { good } }
+mirror_body = "manifest-body"
+Manager.catalog(function(items, err) cat_items, cat_err = items, err end)
+Assert.len(cat_items, 1)
+Assert.is_nil(cat_err)
 
 os.execute("rm -rf '" .. dir .. "'")
 return true
