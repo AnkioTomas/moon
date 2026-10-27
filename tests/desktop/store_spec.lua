@@ -93,8 +93,8 @@ end
 -- 数据获取层缓存用透传假实现顶掉：本文件只验书城页的调用与状态，缓存本体在 store_cache_spec 覆盖。
 package.preload["source.store_cache"] = function()
     return {
-        browse = function(source, opts, cb) return source:browseAsync(opts, cb) end,
-        search = function(source, keyword, cb) return source:searchAsync(keyword, cb) end,
+        browse = function(_source_id, browser, opts, cb) return browser:browseAsync(opts, cb) end,
+        search = function(_source_id, searcher, keyword, cb) return searcher:searchAsync(keyword, cb) end,
     }
 end
 

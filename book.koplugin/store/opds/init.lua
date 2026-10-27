@@ -12,7 +12,10 @@ local Text = require("utils.text")
 local logger = require("utils.log")
 local _ = require("gettext")
 
-local Opds = {}
+local Opds = {
+    -- 与 books.source_id / Mapper 一致；以后若加 browseAsync 走 StoreCache，身份仍从 provider.id 传入。
+    id = "opds",
+}
 
 -- 顺着 rel="next" 最多拉这么多页凑满一屏结果，防止服务端 next 链成环或过长。
 local MAX_PAGES = 10

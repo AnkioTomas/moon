@@ -83,7 +83,7 @@ function Store:provider()
     return list[1]
 end
 
---- 当前来源能浏览（带 browseAsync 的书源）：没搜索词时展示它的 chip 分组 + 书列表。
+--- 当前来源能浏览（带 browseAsync：书源或 Z 站等书城后端）：没搜索词时展示 chip 分组 + 书列表。
 ---@return StoreProvider|nil
 function Store:browsable()
     local provider = self:provider()
@@ -331,7 +331,10 @@ function Store:fetch()
         self.desktop:updateView()
     end
     if browsing then
-        self.fetch_cancel = StoreCache.browse(provider.backend, { node = self.node, limit = BROWSE_RESULTS }, onResult)
+        -- 缓存键用 provider.id，不碰 backend.id（书城后端不是 BookSource）。
+        self.fetch_cancel = StoreCache.browse(provider.id, provider.backend, {
+            node = self.node, limit = BROWSE_RESULTS,
+        }, onResult)
     elseif provider.store then
         self.fetch_cancel = require("store." .. provider.id):listStoreAsync({
             page = 1,
@@ -340,7 +343,7 @@ function Store:fetch()
             feed = top and top.feed,
         }, onResult)
     else
-        self.fetch_cancel = StoreCache.search(provider.source, search, onResult)
+        self.fetch_cancel = StoreCache.search(provider.id, provider.source, search, onResult)
     end
 end
 
