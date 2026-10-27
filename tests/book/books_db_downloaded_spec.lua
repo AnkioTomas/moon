@@ -24,6 +24,14 @@ package.preload["utils.paths"] = function()
 end
 for _idx, name in ipairs({ "utils.db", "utils.event", "book.books_db", "book.chapters_db", "book.progress_db", "book.catalog" }) do package.loaded[name] = nil end
 
+-- 已同步的进度行会把位置编码进 synced 列（sync_status=1）；本 spec 只关心进度列，
+-- 给 json 一个最小实现，解码仍用 support 里的最小解析器。
+package.loaded["json"] = nil
+package.preload["json"] = function()
+    local stub = require("support.json_stub")
+    return { decode = stub.decode, encode = function() return "{}" end }
+end
+
 local Base = require("utils.db")
 local BookDB = require("book.books_db")
 local ChapterDB = require("book.chapters_db")

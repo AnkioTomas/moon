@@ -328,6 +328,25 @@ local function scopedIds(scope, filter)
     return {}
 end
 
+--- 源实例解析失败（配置缺字段、测试桩、禁用中的源）不能把整条书库查询带下水：
+--- 这类源按「没声明 shelf_cache」处理，只记一次警告，书库照常出列。
+---@type table<string, boolean>
+local resolve_warned = {}
+---@param id string
+---@return BookSource|nil
+local function resolveSource(id)
+    local ok, source = pcall(function() return require("source.registry").resolve(id) end)
+    if ok and source then return source end
+    if not resolve_warned[id] then
+        resolve_warned[id] = true
+        local logged, logger = pcall(require, "utils.log")
+        if logged and logger then
+            logger.warn("catalog shelf cache: source " .. tostring(id) .. " unavailable")
+        end
+    end
+    return nil
+end
+
 --- 声明了 shelf_cache 且实现了 shelfCache 的源 id（只看能力，不构建投影）。
 --- 「源声明了能力」与「实现了方法」两个条件都要满足；未声明 / 未实现的源直接跳过。
 --- 投影要拉缓存索引，hasShelfCache 这种每次查询都跑的判断不能为它全量构建（05 A4 / 10）。
@@ -335,10 +354,9 @@ end
 ---@return table<string, boolean>
 function Catalog.shelfCacheSources(ids)
     local out = {}
-    local Registry = require("source.registry")
     for _idx, id in ipairs(ids or {}) do
         if type(id) == "string" and id ~= "" and out[id] == nil then
-            local source = Registry.resolve(id)
+            local source = resolveSource(id)
             local caps = source and type(source.capabilities) == "function" and source:capabilities()
             if caps and caps.shelf_cache == true and type(source.shelfCache) == "function" then
                 out[id] = true
@@ -355,11 +373,10 @@ end
 ---@return table<string, ShelfCacheProjection> source_id → 投影
 function Catalog.shelfCaches(ids)
     local out = {}
-    local Registry = require("source.registry")
     for id in pairs(Catalog.shelfCacheSources(ids)) do
-        local source = Registry.resolve(id)
-        local projection = source and source:shelfCache()
-        if type(projection) == "table" then out[id] = projection end
+        local source = resolveSource(id)
+        local ok, projection = pcall(function() return source and source:shelfCache() end)
+        if ok and type(projection) == "table" then out[id] = projection end
     end
     return out
 end
