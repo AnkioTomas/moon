@@ -27,6 +27,20 @@ local Session = {
     _snapshot = nil,
 }
 
+--- 月读是否认这份文档：Store.identityFor 能解析，且是章节文件或书架成员。
+--- ensureIdentity 给库外文件补的 deleted=1 登记不算——那只是挂进度/统计。
+---@param snapshot ReaderSessionSnapshot|nil
+---@return boolean
+local function moonRecognizes(snapshot)
+    if not snapshot or not snapshot.identity then return false end
+    local file = snapshot.ui and snapshot.ui.document and snapshot.ui.document.file
+    if not Store.identityFor(file) then return false end
+    local id = snapshot.identity
+    if id.chapter_idx ~= nil then return true end
+    -- deleted=1 是 touch 非成员；缺省 / 0 = 书架上的书
+    return id.book ~= nil and tonumber(id.book.deleted) ~= 1
+end
+
 --- 按全书进度收敛已读状态：100% 是事实，99% 仅是用户可选便利规则。
 ---@param session ReaderSessionSnapshot|nil
 ---@param complete boolean|nil EndOfBook 的完成兜底
@@ -52,7 +66,8 @@ local function updateReadState(session, complete)
     if ok and book then book.read_state = 1 end
 end
 
---- 安装本插件的书籍结束处理，屏蔽 KOReader 默认的结束菜单。
+--- 安装本插件的书籍结束处理。
+--- 只接管 Store.identityFor 认得出的书（章节文件 / 书架成员）；库外顺手登记的不算，交回原生。
 ---@param plugin table
 ---@param ui table
 local function installEndOfBookHandler(plugin, ui)
@@ -62,13 +77,19 @@ local function installEndOfBookHandler(plugin, ui)
         return
     end
     ui._book_end_of_book_handler = true
-    status.onEndOfBook = Guard.wrap("onEndOfBook", function()
-        if ChapterMode.onChapterBoundary(Session._snapshot, 1) then
+    local original = status.onEndOfBook
+    status.onEndOfBook = Guard.wrap("onEndOfBook", function(self, ...)
+        local snapshot = Session._snapshot
+        if ChapterMode.onChapterBoundary(snapshot, 1) then
             return true
         end
-        updateReadState(Session._snapshot, true)
-        require("reader.end_dialog").show(plugin, Session._snapshot and Session._snapshot.identity)
-        return true
+        if moonRecognizes(snapshot) then
+            updateReadState(snapshot, true)
+            require("reader.end_dialog").show(plugin, snapshot.identity)
+            return true
+        end
+        if snapshot then updateReadState(snapshot, true) end
+        return original(self, ...)
     end)
 end
 

@@ -2,7 +2,7 @@
 book.store 路径精确查库身份解析离线用例
 
 唯一规则：章节文件查 chapters 表 → 整本书查 books.path；
-未中时 .moon 内拒开、.moon 外登记 local 书。
+未中时 .moon 内拒开、.moon 外 touch 身份行（deleted=1，不上架）。
 
 @module tests.book.store_spec
 --]]
@@ -345,7 +345,7 @@ do
     moon_paths["/data/.moon/cache/moon/book/noid/2.html"] = nil
 end
 
--- ── ensureIdentity：.moon 外未入库 → 当 local 源书登记 ────
+-- ── ensureIdentity：.moon 外未入库 → touch 身份行（deleted=1 不上架），不 upsert ──
 do
     md5_by_path["/lib/new.book.epub"] = "digest-new"
     local id = Store.ensureIdentity("/lib/new.book.epub")
@@ -354,22 +354,15 @@ do
     Assert.is_nil(id.chapter_idx)
     Assert.eq(id.book.title, "new.book")
     Assert.eq(id.book.path, "/lib/new.book.epub")
-    Assert.eq(#book_upserts, 1)
-    Assert.eq(book_upserts[1].source_id, "local")
-    Assert.eq(book_upserts[1].stable_id, "/lib/new.book.epub")
-    Assert.eq(book_upserts[1].md5, "digest-new")
-    Assert.eq(book_upserts[1].title, "new.book") -- 文件名只去末尾扩展名
-    Assert.eq(book_upserts[1].path, "/lib/new.book.epub")
-    Assert.is_true(type(book_upserts[1].inserted_at) == "number")
+    Assert.eq(tonumber(id.book.deleted), 1, "库外顺手登记不上架")
+    Assert.eq(#book_upserts, 0, "禁止 upsert 上架")
     Assert.eq(#touch_calls, 1)
     Assert.eq(touch_calls[1].source_id, "local")
     Assert.eq(touch_calls[1].stable_id, "/lib/new.book.epub")
     Assert.eq(touch_calls[1].path, "/lib/new.book.epub")
-    Assert.is_nil(touch_calls[1].chapter_idx)
     Assert.eq(registry_created[#registry_created], "local")
     Assert.eq(id.source.id, "local")
     md5_by_path["/lib/new.book.epub"] = nil
-    book_upserts = {}
     touch_calls = {}
     registry_created = {}
 end
@@ -380,12 +373,14 @@ do
         source_id = "local",
         stable_id = "/lib/scanned.epub",
         title = "扫盘解析的标题",
+        deleted = 0,
     }
     local id = Store.ensureIdentity("/lib/scanned.epub")
     Assert.eq(id.source_id, "local")
     Assert.eq(id.stable_id, "/lib/scanned.epub")
-    Assert.eq(#book_upserts, 0) -- 已有行不 upsert，元数据不被覆盖
-    Assert.eq(#touch_calls, 1) -- 但仍无条件补 path
+    Assert.eq(id.book.title, "扫盘解析的标题")
+    Assert.eq(#book_upserts, 0)
+    Assert.eq(#touch_calls, 1)
     Assert.eq(touch_calls[1].path, "/lib/scanned.epub")
     book_rows_by_id["local\0/lib/scanned.epub"] = nil
     touch_calls = {}
@@ -405,31 +400,25 @@ do
     book_rows_by_path["/lib/a.epub"] = nil
 end
 
--- ── ensureIdentity：文件打不开 → partialMD5 返回 nil，md5=nil 仍登记 ────
+-- ── ensureIdentity：文件打不开 → partialMD5 返回 nil，仍 touch 身份 ────
 do
     local id = Store.ensureIdentity("/lib/broken.epub")
     Assert.eq(id.source_id, "local")
-    Assert.eq(#book_upserts, 1)
-    Assert.is_nil(book_upserts[1].md5)
-    Assert.eq(book_upserts[1].title, "broken")
+    Assert.eq(id.book.title, "broken")
+    Assert.eq(#book_upserts, 0)
     Assert.eq(#touch_calls, 1)
-    book_upserts = {}
     touch_calls = {}
 end
 
--- ── ensureIdentity：入库失败仍返回身份，并记 warn ──
+-- ── ensureIdentity：touch 失败仍返回身份，并记 warn ──
 do
     warnings = {}
-    book_upsert_ok = false
     touch_ok = false
     local id = Store.ensureIdentity("/lib/fail-register.epub")
     Assert.eq(id.source_id, "local")
     Assert.eq(id.stable_id, "/lib/fail-register.epub")
-    Assert.eq(warnings[1][1], "book identity register failed")
-    Assert.eq(warnings[2][1], "book identity touch failed")
-    book_upsert_ok = true
+    Assert.eq(warnings[1][1], "book identity touch failed")
     touch_ok = true
-    book_upserts = {}
     touch_calls = {}
     warnings = {}
 end

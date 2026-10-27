@@ -726,15 +726,46 @@ do
     Store.ensureIdentity = original
 end
 
--- 真正 EndOfBook 是 100% 完成兜底，即使快照比例不足且用户手动标过未读。
+-- 库外顺手登记的幽灵书（deleted=1）：只记完成，交回原生，不吞事件。
 do
+    local original_calls = 0
     local plugin = mkPlugin("/x/book.epub")
-    plugin.ui.status = { onEndOfBook = function() end }
+    plugin.ui.status = {
+        onEndOfBook = function()
+            original_calls = original_calls + 1
+        end,
+    }
     book_fraction = 0.95
+    end_dialog_identity = nil
     Session.onReaderReady(plugin)
     Session.current().identity.book.read_state = 2
+    Session.current().identity.book.deleted = 1
+    plugin.ui.status.onEndOfBook(plugin.ui.status)
+    Assert.eq(calls.book[#calls.book][1], "complete")
+    Assert.eq(original_calls, 1, "deleted=1 应交回原生")
+    Assert.is_nil(end_dialog_identity, "幽灵书不弹月读结束页")
+    book_fraction = 0.25
+    Session.onCloseDocument(plugin)
+end
+
+-- 书架上的整书（identityFor 认得出且 deleted≠1）：完成兜底 + 月读结束页。
+do
+    local original_calls = 0
+    local plugin = mkPlugin("/x/book.epub")
+    plugin.ui.status = {
+        onEndOfBook = function()
+            original_calls = original_calls + 1
+        end,
+    }
+    plugin.ui._book_end_of_book_handler = nil
+    book_fraction = 0.95
+    end_dialog_identity = nil
+    Session.onReaderReady(plugin)
+    Session.current().identity.book.read_state = 2
+    Session.current().identity.book.deleted = 0
     Assert.is_true(plugin.ui.status.onEndOfBook(plugin.ui.status))
     Assert.eq(calls.book[#calls.book][1], "complete")
+    Assert.eq(original_calls, 0, "书架整书不走原生结束框")
     Assert.eq(end_dialog_identity.stable_id, "b1")
     book_fraction = 0.25
     Session.onCloseDocument(plugin)
@@ -779,6 +810,70 @@ do
     Assert.eq(end_dialog, 0, "切章成功时不弹原生结束对话框")
     Assert.eq(calls.switched_path, "/cache/2.html")
     Session.onCloseDocument(plugin)
+    resolved_source = nil
+end
+
+-- 月读按章最后一章：无下一章时弹月读结束页，仍吞原生框。
+do
+    stored_toc.chapters = { { idx = 1 }, { idx = 2 } }
+    local source = {
+        type = "chapter",
+        openBookAsync = function() return { cancel = function() end } end,
+        prefetchChaptersAsync = function() return { cancel = function() end } end,
+    }
+    resolved_source = source
+    end_dialog_identity = nil
+    local plugin = mkPlugin("/cache/2.html")
+    plugin.ui.name = "ReaderUI"
+    plugin.ui.status = { onEndOfBook = function() end }
+    plugin.ui._book_end_of_book_handler = nil
+    Session.onReaderReady(plugin)
+    Assert.is_true(plugin.ui.status.onEndOfBook(plugin.ui.status))
+    Assert.eq(end_dialog_identity.stable_id, "chapters")
+    Session.onCloseDocument(plugin)
+    resolved_source = nil
+end
+
+-- 章首边界：有按章会话才切章；会话清掉后即便 wrap 还在也不抢。
+do
+    local opened = 0
+    stored_toc.chapters = { { idx = 1 }, { idx = 2 } }
+    local source = {
+        type = "chapter",
+        openBookAsync = function(_, _, opts, cb)
+            opened = opened + 1
+            cb("/cache/" .. opts.chapter_idx .. ".html")
+            return { cancel = function() end }
+        end,
+        prefetchChaptersAsync = function() return { cancel = function() end } end,
+    }
+    resolved_source = source
+    package.preload["apps/reader/readerui"] = function()
+        return { instance = { switchDocument = function() end } }
+    end
+    package.loaded["apps/reader/readerui"] = nil
+    local plugin = mkPlugin("/cache/2.html")
+    plugin.ui.name = "ReaderUI"
+    plugin.ui.rolling = {
+        ui = plugin.ui,
+        current_page = 1,
+        onGotoViewRel = function(self, diff)
+            self.current_page = math.max(1, self.current_page + diff)
+            return true
+        end,
+    }
+    Session.onReaderReady(plugin)
+    Assert.is_true(type(plugin.ui.rolling.onGotoViewRel) == "function")
+    plugin.ui.rolling.current_page = 1
+    plugin.ui.rolling:onGotoViewRel(-1)
+    Stubs.flush()
+    Assert.eq(opened, 1, "按章会话章首应切上一章")
+    opened = 0
+    Session.onCloseDocument(plugin)
+    plugin.ui.rolling.current_page = 1
+    plugin.ui.rolling:onGotoViewRel(-1)
+    Stubs.flush()
+    Assert.eq(opened, 0, "会话结束后章首不抢切章")
     resolved_source = nil
 end
 
