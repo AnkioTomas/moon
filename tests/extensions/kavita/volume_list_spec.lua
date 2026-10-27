@@ -284,7 +284,7 @@ local menu = openMenu(list)
 local menu_items = {}
 for _idx, item in ipairs(menu.items) do menu_items[#menu_items + 1] = item.text end
 Assert.eq(menu.title, "批量缓存", "菜单标题")
-Assert.eq(table.concat(menu_items, "|"), "缓存整部|从当前进度开始|后 N 卷…", "菜单三项与顺序")
+Assert.eq(table.concat(menu_items, "|"), "缓存整部|只缓存未读|从当前进度开始|后 N 卷…", "菜单四项与顺序")
 Assert.is_nil(picked.value, "开菜单不选卷")
 chooseMenu(menu, 1)
 Assert.is_true(wasClosed(menu), "选完关菜单")
@@ -326,7 +326,7 @@ st.queue = { state = "downloading", entries = { [704] = { chapterId = 704, state
 list = open(preset_toc)
 local probes = calls.resume_page
 menu = openMenu(list)
-chooseMenu(menu, 2)
+chooseMenu(menu, 3)
 Assert.eq(idsText(calls.estimate), "702", "从第 2 卷（在读）到末卷：跳过已读完 / 已缓存 / 已排队")
 Assert.eq(calls.resume_page, probes, "预设不逐卷调 resume_page")
 confirm = Themed.last("confirm")
@@ -346,7 +346,7 @@ reset()
 st.statuses["711"] = { state = "complete", bytes = 1 }
 local read_list = open(all_read)
 local read_menu = openMenu(read_list)
-chooseMenu(read_menu, 2)
+chooseMenu(read_menu, 3)
 Assert.eq(idsText(calls.estimate), "712,713", "全部已读时退化为整部，只跳过已缓存")
 
 -- 预设也没有对象：与「缓存整部」同一条 toast，不弹框。
@@ -357,7 +357,7 @@ end
 list = open(preset_toc)
 local no_object_confirms = #Themed.all("confirm")
 menu = openMenu(list)
-chooseMenu(menu, 2)
+chooseMenu(menu, 3)
 Assert.is_nil(calls.estimate, "没有对象不估算")
 textContains(Themed.last("toast").text, "全部已缓存")
 Assert.eq(#Themed.all("confirm"), no_object_confirms, "空选择不弹框")
@@ -366,22 +366,21 @@ Assert.eq(#Themed.all("confirm"), no_object_confirms, "空选择不弹框")
 reset()
 list = open(preset_toc)
 menu = openMenu(list)
-chooseMenu(menu, 3)
-local input = Themed.last("input")
-Assert.not_nil(input, "后 N 卷走主题输入框")
+chooseMenu(menu, 4)
+local input = Themed.last("spin")
+Assert.not_nil(input, "后 N 卷走主题加减控件，不是文本输入")
 Assert.eq(input.title, "后 N 卷")
 Assert.eq(input.fields[1].label, "卷数")
-Assert.is_nil(calls.estimate, "输入前不估算")
-input.callback("0")
-Assert.is_nil(calls.estimate, "0 不动作")
-input.callback("abc")
-Assert.is_nil(calls.estimate, "非数字不动作")
-input.callback("1")
+Assert.eq(input.fields[1].min, 1, "最少 1 卷")
+Assert.eq(input.fields[1].max, 3, "最多到末卷（进度起点之后还有 3 卷）")
+Assert.eq(input.fields[1].value, 1, "初值 1")
+Assert.is_nil(calls.estimate, "选之前不估算")
+input.callback(1)
 Assert.eq(idsText(calls.estimate), "702", "N=1 从进度起点取一卷")
 confirm = Themed.last("confirm")
 Assert.eq(confirm.title, "缓存这一卷")
 st.estimate = { chapters = 3, bytes = 10 * 1024 * 1024, available = 1000 * 1024 * 1024, ok = true }
-input.callback("9")
+input.callback(9)
 Assert.eq(idsText(calls.estimate), "702,703,704", "N 超过剩余卷数时截断到末卷")
 confirm = Themed.last("confirm")
 Assert.eq(confirm.title, "缓存 3 卷")
@@ -396,9 +395,46 @@ st.queue = { state = "downloading", entries = { [703] = { chapterId = 703, state
     bytes_done = 10, bytes_total = 100 } }, bytes_done = 10, bytes_total = 100 }
 list = open(preset_toc)
 menu = openMenu(list)
-chooseMenu(menu, 3)
-Themed.last("input").callback("9")
+chooseMenu(menu, 4)
+Themed.last("spin").callback(9)
 Assert.eq(idsText(calls.estimate), "702,704", "已排队的卷不再入队")
+
+-- 预设「只缓存未读」：完全没有进度的卷（pagesRead == 0）；已读 / 在读都不算未读，
+-- 已缓存 / 已排队照旧跳过。与「从当前进度」不同：它不是一个连续后缀。
+local unread_toc = {
+    entry(721, "第 1 卷", 100, 100),
+    entry(722, "第 2 卷", 100, 30),
+    entry(723, "第 3 卷", 100, 0),
+    entry(724, "第 4 卷", 100, 0),
+    entry(725, "第 5 卷", 100, 0),
+}
+reset()
+st.statuses["724"] = { state = "complete", bytes = 1 }
+st.estimate = { chapters = 2, bytes = 20 * 1024 * 1024, available = 1000 * 1024 * 1024, ok = true }
+list = open(unread_toc)
+menu = openMenu(list)
+chooseMenu(menu, 2)
+Assert.eq(idsText(calls.estimate), "723,725", "只选完全没有进度的卷，跳过已读 / 在读 / 已缓存")
+confirm = Themed.last("confirm")
+Assert.eq(confirm.title, "缓存 2 卷")
+Assert.eq(confirm.ok_text, "开始缓存")
+confirm.ok_callback()
+Assert.eq(idsText(calls.enqueue[1]), "723,725", "入队集合与估算一致")
+Assert.eq(#calls.retry, 0)
+
+-- 「只缓存未读」没有对象：全都读过时给准确的文案，不说「全部已缓存」。
+reset()
+local all_read_unread = {
+    entry(731, "第 1 卷", 100, 100),
+    entry(732, "第 2 卷", 100, 100),
+}
+list = open(all_read_unread)
+local unread_confirms = #Themed.all("confirm")
+menu = openMenu(list)
+chooseMenu(menu, 2)
+Assert.is_nil(calls.estimate, "没有未读卷不估算")
+textContains(Themed.last("toast").text, "没有未读的卷")
+Assert.eq(#Themed.all("confirm"), unread_confirms, "空选择不弹框")
 
 -- 「后 N 卷」没有对象：同一条 toast。
 reset()
@@ -408,8 +444,8 @@ end
 list = open(preset_toc)
 local empty_confirms = #Themed.all("confirm")
 menu = openMenu(list)
-chooseMenu(menu, 3)
-Themed.last("input").callback("2")
+chooseMenu(menu, 4)
+Themed.last("spin").callback(2)
 Assert.is_nil(calls.estimate, "没有对象不估算")
 textContains(Themed.last("toast").text, "全部已缓存")
 Assert.eq(#Themed.all("confirm"), empty_confirms, "空选择不弹框")

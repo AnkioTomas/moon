@@ -354,6 +354,18 @@ local function resumeIndex(toc)
     return 1
 end
 
+--- 未读的卷：完全没有阅读进度（pagesRead == 0）。读了一半的卷算「在读」，
+--- 跟在读/当前进度那条路走，不混进「未读」。
+---@param toc table[]
+---@return table[]
+local function unreadVolumes(toc)
+    local out = {}
+    for _idx, entry in ipairs(toc) do
+        if (tonumber(entry.pagesRead) or 0) <= 0 then out[#out + 1] = entry end
+    end
+    return out
+end
+
 --- 从 first 起取 count 卷（缺省到末卷）；越界截断。
 ---@param toc table[]
 ---@param first integer
@@ -782,16 +794,20 @@ function VolumeList.pick(series, toc, cb, opts)
         confirmEnqueue(to_enqueue, to_retry)
     end
 
-    --- 「后 N 卷」：正整数才动作；0 / 非数字不动作，越界由 volumeRange 截断。
+    --- 「后 N 卷」：数值加减控件（[+]/[-]），范围 1..剩余卷数；越界由 volumeRange 截断兜底。
     local function promptNext()
-        local Input = require("ui.themes.widgets.input")
-        Input:new{
+        local Spin = require("ui.themes.widgets.spin")
+        local first = resumeIndex(toc)
+        local max = math.max(1, #toc - first + 1)
+        Spin:new{
             title = _("后 N 卷"),
-            fields = { { label = _("卷数"), input_type = "number" } },
-            callback = function(text)
-                local count = math.floor(tonumber(text) or 0)
-                if count <= 0 then return end
-                runBatch(volumeRange(toc, resumeIndex(toc), count))
+            fields = {
+                { value = 1, min = 1, max = max, label = _("卷数") },
+            },
+            callback = function(count)
+                local n = math.floor(tonumber(count) or 0)
+                if n <= 0 then return end
+                runBatch(volumeRange(toc, first, n))
             end,
         }:show()
     end
@@ -803,12 +819,17 @@ function VolumeList.pick(series, toc, cb, opts)
             title = _("批量缓存"),
             items = {
                 { text = _("缓存整部"), value = "all" },
+                { text = _("只缓存未读"), value = "unread" },
                 { text = _("从当前进度开始"), value = "progress" },
                 { text = _("后 N 卷…"), value = "next" },
             },
             on_select = function(value)
                 if value == "all" then
                     runBatch(toc)
+                elseif value == "unread" then
+                    local unread = unreadVolumes(toc)
+                    -- 全都读过不是「全部已缓存」：文案要说得准确。
+                    if #unread == 0 then toast(_("没有未读的卷")) else runBatch(unread) end
                 elseif value == "progress" then
                     runBatch(volumeRange(toc, resumeIndex(toc), nil))
                 else
