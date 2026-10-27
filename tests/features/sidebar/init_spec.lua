@@ -210,10 +210,16 @@ local Sidebar = require("features.sidebar")
 local ui = {}
 function ui:registerTouchZones(zones) self.zones = zones end
 ui.bookmark = {
-    onShowBookmark = function()
-        state.opened[#state.opened + 1] = "notes"
-        local menu = Menu:new{ title = "书签" }
-        menu.close_callback = function() state.native_closed[#state.native_closed + 1] = "notes" end
+    onShowBookmark = function(self)
+        local id = "bookmarks"
+        if self.match_table and (self.match_table.highlight or self.match_table.note)
+            and not self.match_table.bookmark then
+            id = "notes"
+        end
+        state.opened[#state.opened + 1] = id
+        state.match_table = self.match_table
+        local menu = Menu:new{ title = id == "notes" and "书摘" or "书签" }
+        menu.close_callback = function() state.native_closed[#state.native_closed + 1] = id end
         UIManager:show(menu)
     end,
 }
@@ -255,11 +261,11 @@ Assert.len(state.shown, 2)
 
 -- X-Ray 关闭时少一页；票根永远在最后。
 state.xray = { book_xray_enabled = false }
-Assert.eq(table.concat(Sidebar:new{ ui = ui, snapshot = state.snapshot }.tabs, ","), "info,toc,notes,ticket")
+Assert.eq(table.concat(Sidebar:new{ ui = ui, snapshot = state.snapshot }.tabs, ","), "info,toc,bookmarks,notes,ticket")
 state.xray = { book_xray_enabled = true }
 
 local bar = state.shown[1]
-Assert.eq(table.concat(bar.tabs, ","), "info,toc,notes,xray,ticket")
+Assert.eq(table.concat(bar.tabs, ","), "info,toc,bookmarks,notes,xray,ticket")
 Assert.eq(bar.panel_w, 510)
 Assert.is_true(bar.mask ~= false, "用 Modal 的整屏遮罩")
 Assert.eq(bar.panel_x, 0, "面板贴左缘")
@@ -313,21 +319,32 @@ bar:goTab(2)
 Assert.len(state.opened, 1)
 Assert.eq(bar[1][1][1][1], toc_menu)
 
--- 书摘：原生书签列表直接 show 的 Menu 同样被借入。
+-- 书签：只过滤页书签；原生书签列表直接 show 的 Menu 同样被借入。
 bar:goTab(3)
+local bookmarks_menu = bar[1][1][1][1]
+Assert.eq(bookmarks_menu.title, "书签")
+Assert.eq(bookmarks_menu.w, 510)
+Assert.eq(state.match_table.bookmark, true)
+Assert.is_nil(state.match_table.highlight)
+
+-- 书摘：只过滤划线 / 笔记。
+bar:goTab(4)
 local notes_menu = bar[1][1][1][1]
-Assert.eq(notes_menu.title, "书签")
+Assert.eq(notes_menu.title, "书摘")
 Assert.eq(notes_menu.w, 510)
+Assert.eq(state.match_table.highlight, true)
+Assert.eq(state.match_table.note, true)
+Assert.is_nil(state.match_table.bookmark)
 
 -- X-Ray 入口只弹了提示（非 Menu）：照常显示，页内给白底占位。
-bar:goTab(4)
+bar:goTab(5)
 Assert.is_true(state.shown[#state.shown].info_message)
 Assert.eq(bar[1][1][1][1].height, 800 - 40 - 1)
-bar:goTab(4)
+bar:goTab(5)
 
 -- 票根：首次进入才生成；未出图先显示占位，出图回调推迟一 tick 再刷新本页。
 Assert.len(state.tickets, 0, "没进票根页不生成")
-bar:goTab(5)
+bar:goTab(6)
 Assert.len(state.tickets, 1)
 local ticket = state.tickets[1]
 Assert.eq(ticket.snapshot, state.snapshot)
@@ -343,8 +360,8 @@ flush()
 Assert.is_true(bar[1][1][1][1][1].ready)
 Assert.eq(state.dirty, dirty + 1)
 -- 切走再回来复用同一张；切走后才出图的回调不重绘别的页。
-bar:goTab(4)
 bar:goTab(5)
+bar:goTab(6)
 Assert.len(state.tickets, 1)
 bar:goTab(1)
 dirty = state.dirty
@@ -353,14 +370,17 @@ flush()
 Assert.eq(state.dirty, dirty)
 
 -- 菜单内选中条目会调 close_callback：关侧栏，并补跑所有借来菜单的原生清理（各一次）。
+Assert.not_nil(ui.bookmark.match_table, "侧栏打开期间保留类型过滤")
 toc_menu.close_callback()
 Assert.eq(state.closed[#state.closed], bar)
-Assert.len(state.native_closed, 2)
+Assert.len(state.native_closed, 3)
+Assert.contains(state.native_closed, "bookmarks")
 Assert.contains(state.native_closed, "notes")
 Assert.is_true(ticket.cancelled, "关侧栏取消票根任务")
 Assert.is_nil(bar.ticket)
+Assert.is_nil(ui.bookmark.match_table, "关侧栏清掉类型过滤")
 bar:onClose()
-Assert.len(state.native_closed, 2, "重复关闭不重复清理")
+Assert.len(state.native_closed, 3, "重复关闭不重复清理")
 
 -- 书籍页右上角关闭：先关侧栏，再关书回桌面。
 local exiting = Sidebar:new{ ui = ui, snapshot = state.snapshot }
@@ -378,7 +398,7 @@ Assert.eq(UIManager.show, original_show)
 -- 阅读字体：文档支持换字体才有这一页，排在目录后。
 local font_ui = { font = {}, bookmark = ui.bookmark }
 local fonted = Sidebar:new{ ui = font_ui, snapshot = state.snapshot }
-Assert.eq(table.concat(fonted.tabs, ","), "info,toc,font,notes,xray,ticket")
+Assert.eq(table.concat(fonted.tabs, ","), "info,toc,font,bookmarks,notes,xray,ticket")
 Assert.len(state.font_jobs, 0, "没进字体页不拉列表")
 fonted:goTab(3)
 Assert.len(state.font_jobs, 1)
@@ -469,13 +489,13 @@ do
     local strip = jump[1][1][2][1].strip
     Assert.eq(strip.width, 510)
     Assert.eq(strip.active, "info")
-    Assert.len(strip.tabs, 5)
-    Assert.eq(strip.tabs[5].id, "ticket")
-    Assert.eq(strip.tabs[5].icon, "confirmation_number")
+    Assert.len(strip.tabs, 6)
+    Assert.eq(strip.tabs[6].id, "ticket")
+    Assert.eq(strip.tabs[6].icon, "confirmation_number")
     local opened, tickets = #state.opened, #state.tickets
     strip.on_tab("ticket")
-    Assert.eq(jump.tab, 5)
-    Assert.len(state.opened, opened, "跳过目录 / 书摘，不借它们的菜单")
+    Assert.eq(jump.tab, 6)
+    Assert.len(state.opened, opened, "跳过目录 / 书签 / 书摘，不借它们的菜单")
     Assert.len(state.tickets, tickets + 1)
     Assert.eq(jump[1][1][2][1].strip.active, "ticket")
     jump:onClose()
@@ -485,17 +505,17 @@ end
 do
     state.sidebar.sidebar_hidden_tabs = { "toc", "ticket" }
     local trimmed = Sidebar:new{ ui = ui, snapshot = state.snapshot }
-    Assert.eq(table.concat(trimmed.tabs, ","), "info,notes,xray")
+    Assert.eq(table.concat(trimmed.tabs, ","), "info,bookmarks,notes,xray")
     local strip = trimmed[1][1][2][1].strip
-    Assert.len(strip.tabs, 3)
-    Assert.eq(strip.tabs[3].id, "xray")
+    Assert.len(strip.tabs, 4)
+    Assert.eq(strip.tabs[4].id, "xray")
 
     state.sidebar.sidebar_tab_order = { "xray", "notes" }
     local reordered = Sidebar:new{ ui = ui, snapshot = state.snapshot }
-    Assert.eq(table.concat(reordered.tabs, ","), "xray,notes,info")
+    Assert.eq(table.concat(reordered.tabs, ","), "xray,notes,info,bookmarks")
     state.sidebar.sidebar_tab_order = {}
 
-    state.sidebar.sidebar_hidden_tabs = { "info", "toc", "font", "notes", "ticket" }
+    state.sidebar.sidebar_hidden_tabs = { "info", "toc", "font", "bookmarks", "notes", "ticket" }
     state.xray = { book_xray_enabled = false }
     local fallback = Sidebar:new{ ui = ui, snapshot = state.snapshot }
     Assert.eq(table.concat(fallback.tabs, ","), "info", "只剩不可用的 X-Ray：退回书籍页")

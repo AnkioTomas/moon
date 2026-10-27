@@ -18,9 +18,10 @@ return {
         if not ui then return true end
         return ui.bookmark and ui.bookmark.onShowBookmark ~= nil
     end,
-    --- 打开高亮、书签和笔记列表。
+    --- 打开高亮、书签和笔记列表（清掉侧栏可能留下的类型过滤）。
     ---@param ctx BookQuickPanelContext
     run = function(ctx)
+        ctx.ui.bookmark.match_table = nil
         ctx.ui.bookmark:onShowBookmark()
     end,
 }
