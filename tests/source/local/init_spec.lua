@@ -211,4 +211,25 @@ do
     os.time = real_time
 end
 
+-- 手动 force 只跳过节流，不把 retry_covers 传给扫盘（封面另开补齐进程）
+do
+    webdav = false
+    local Client = require("source.local.client")
+    local seen
+    local scan = Client.scanAsync
+    Client.scanAsync = function(_, cb, report, retry_covers)
+        seen = { report = report, retry_covers = retry_covers }
+        cb(true)
+        return { cancel = function() end }
+    end
+    local s = Local.new()
+    s._auto_sync_at = nil
+    s:syncBooksAsync({ force = true }, function() end)
+    Stubs.flush()
+    Assert.not_nil(seen)
+    Assert.is_nil(seen.retry_covers, "force 不得再触发重提全部封面")
+    Client.scanAsync = scan
+    webdav = true
+end
+
 os.remove(dir)

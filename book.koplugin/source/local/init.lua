@@ -138,8 +138,8 @@ local skipped = SourceBase.skipped
 local AUTO_SYNC_INTERVAL = 60
 
 --- 书架同步。WebDAV：force=刷新（另列远端目录）、dirty_only=只推本地删除与书目改动、否则日常同步；
---- 有本地改动没推上去时整轮仍算成功，原因放在 push_error。纯本地目录：扫盘，dirty_only 无事可做。
---- 不带 force / dirty_only 的自动同步按 AUTO_SYNC_INTERVAL 节流；失败不占节流窗口，下次打开桌面就重试。
+--- 有本地改动没推上去时整轮仍算成功，原因放在 push_error。纯本地目录：轻扫盘（不开文档）+ 后台补齐封面。
+--- force 只跳过 AUTO_SYNC_INTERVAL，不重提封面；失败不占节流窗口，下次打开桌面就重试。
 ---@param opts { force?: boolean, dirty_only?: boolean, on_progress?: fun(text: string|nil, done: integer|nil, total: integer|nil), on_background?: fun(start: function) }|nil on_background=后台上传交给调用方排队、展示进度
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }|nil
@@ -168,7 +168,8 @@ function Source:syncBooksAsync(opts, cb)
             { refresh = opts.force, dirty_only = opts.dirty_only, on_progress = opts.on_progress,
                 on_background = opts.on_background })
     end
-    return self._client:scanAsync(done, opts.on_progress, opts.force)
+    -- force 只跳过自动同步节流；封面补齐另开进程，不认「手动刷新 = 重提全部封面」。
+    return self._client:scanAsync(done, opts.on_progress)
 end
 
 --- 纯本地目录没有远端：进度域直接 skipped；WebDAV 走通用 book.progress（开书拉取 + 冲突弹窗，关书推脏）。

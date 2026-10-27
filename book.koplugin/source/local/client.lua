@@ -1,9 +1,9 @@
 --[[--
 本地书库客户端（仅异步）：配置、路径与方法装配。
 
-数据流：扫描器只负责把目录状态写进 books 表（增/改/删 + 封面 PNG），
+数据流：扫盘只把目录状态写进 books（增/改/删，文件名入库）；封面与引擎元数据另开补齐进程。
 书库/筛选/搜索/最近阅读/统计一律直查数据库，不做内存缓存。
-实现按职责拆在同目录：scan（本地目录扫盘 / 导入 / 移动 / 替换）、
+实现按职责拆在同目录：scan（本地目录扫盘 / 补齐 / 导入 / 移动 / 替换）、
 webdav（WebDAV 书目同步与远端书操作）、remote_data（.Moon+ 进度 / 统计 / 笔记）、
 common（共享原语）。子模块函数首参即 self，在这里装配为方法。
 
@@ -29,8 +29,8 @@ local remoteRelativePath, coverPath = Common.remoteRelativePath, Common.coverPat
 ---@field _uploading boolean|nil 是否正在上传
 ---@field cfg table
 ---@field dav WebdavClient
----@field _crashed table<string, boolean>|nil
----@field _enriched table<string, boolean>|nil
+---@field _crashed table<string, boolean>|nil 补齐时引擎崩过的路径（本进程）
+---@field _enrich_job { cancel: fun() }|nil 在飞的封面/元数据补齐
 ---@field _stats_seen table<string, string>|nil 统计按书已入库版本（stats_index.json 的内存副本）
 local Client = {}
 
