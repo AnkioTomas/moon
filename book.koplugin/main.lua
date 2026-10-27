@@ -43,6 +43,8 @@ require("l10n")
 
 -- feature 加载器：各 feature 在自己的 init 里往 utils.extension 的通用挂点登记；这里不点名任何 feature。
 require("features").load()
+-- 全局旋转记忆：登记 reader.doc_settings（模块只加载一次，勿放进 init —— FM/Reader 各建实例会重复挂）。
+require("utils.rotation")
 
 local SourceRegistry = require("source.registry")
 local Desktop = require("desktop")
@@ -130,8 +132,13 @@ function BookPlugin:onNetworkConnected()
     Features.emit("onNetworkConnected", self)
 end
 
---- 转屏：KOReader 的 IterateRotation 等动作只把 SetRotationMode / SetDimensions 送给 FileManager 或
---- ReaderUI（含本插件），桌面和弹窗是独立窗口收不到，这里转给窗口栈上要重排的窗口。
+--- 转屏：记下全局方向（桌面 / 阅读共用），下次进桌面或开书接着用。
+function BookPlugin:onSetRotationMode(mode)
+    require("utils.rotation").remember(mode)
+end
+
+--- 转屏后尺寸变化：KOReader 的 IterateRotation 等只把 SetDimensions 送给 FileManager / ReaderUI，
+--- 桌面和弹窗是独立窗口收不到，这里转给窗口栈上要重排的窗口。
 function BookPlugin:onSetDimensions()
     for _idx, win in ipairs(require("ui/uimanager")._window_stack) do
         local widget = win.widget
