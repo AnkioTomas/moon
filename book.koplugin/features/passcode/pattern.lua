@@ -1,23 +1,22 @@
 --[[--
-手势密码：整屏面板，3×3 点阵，手指依次划过的点序号（1～9）拼成字符串，如 "1596"。
+手势密码：锁屏图铺底 + 半透明卡片内 3×3 点阵，手指依次划过的点序号（1～9）拼成字符串，如 "1596"。
 
 接口与数字键盘 `pad.lua` 一致：on_submit(seq) 返回 true 关窗；返回字符串则清空、显示该提示。
 手指抬起时提交；少于 MIN_LEN 个点直接提示。点序号串当 PIN 用，存储与校验沿用 `Passcode.verify`。
+外壳（背景 / 卡片 / 头像 / 忘记密码）复用 `Pad.setUnlockPanel`。
 
 @module koplugin.book.features.passcode.pattern
 --]]
 
-local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
-local OverlapGroup = require("ui/widget/overlapgroup")
+local LeftContainer = require("ui/widget/container/leftcontainer")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Widget = require("ui/widget/widget")
 local Blitbuffer = require("ffi/blitbuffer")
-local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
 local Modal = require("ui.themes.widgets.modal")
 local Pad = require("features.passcode.pad")
@@ -140,7 +139,8 @@ function Pattern:init()
     Modal.init(self)
     local t = self.theme
     local w, h = Screen:getWidth(), Screen:getHeight()
-    self.grid = Grid:new{ side = math.floor(math.min(w, h) * 0.7), ink = t.color.ink, page = t.color.page }
+    -- 卡片比原先整屏点阵略窄，点阵跟着缩。
+    self.grid = Grid:new{ side = math.floor(math.min(w, h) * 0.58), ink = t.color.ink, page = t.color.page }
     local full = Geom:new{ x = 0, y = 0, w = w, h = h }
     self.ges_events.TapModal, self.ges_events.SwipeModal = nil, nil
     self.ges_events.PatternTouch = { GestureRange:new{ ges = "touch", range = full } }
@@ -198,17 +198,33 @@ function Pattern:close()
     UIManager:nextTick(function() UIManager:setDirty("all", "full") end)
 end
 
+function Pattern:onCloseWidget()
+    if self._backdrop and self._backdrop.free then self._backdrop:free() end
+    self._backdrop = nil
+    Modal.onCloseWidget(self)
+end
+
 function Pattern:updateView()
     local t = self.theme
     local w, h = Screen:getWidth(), Screen:getHeight()
+    local margin = Theme.px(t.space.lg) * 2
+    local card_w = math.min(w - margin * 2, math.floor(math.min(w, h) * 0.88))
+    local inner_w = card_w - Theme.px(t.space.lg) * 2
     local col = VerticalGroup:new{
         align = "center",
-        Text.line("title", self.title),
+        LeftContainer:new{
+            dimen = Geom:new{ w = inner_w, h = Theme.px(t.control.height) },
+            Text.line("title", self.title),
+        },
         VerticalSpan:new{ width = Theme.px(t.space.sm) },
-        Text.line("caption", self.message or " ", { color = t.color.muted }),
-        VerticalSpan:new{ width = Theme.px(t.space.lg) },
-        self.grid,
+        Text.line("caption", self.message or " ", { color = t.color.muted, width = inner_w }),
+        VerticalSpan:new{ width = Theme.px(t.space.md) },
     }
+    if self.on_forgot and self.forgot and self.forgot() then
+        col[#col + 1] = Pad.forgotRow(self, inner_w)
+        col[#col + 1] = VerticalSpan:new{ width = Theme.px(t.space.sm) }
+    end
+    col[#col + 1] = self.grid
     if self.dismissable then
         col[#col + 1] = VerticalSpan:new{ width = Theme.px(t.space.lg) }
         col[#col + 1] = Button:new{
@@ -216,13 +232,7 @@ function Pattern:updateView()
             callback = function() self:close() end,
         }
     end
-    local screen = OverlapGroup:new{
-        dimen = Geom:new{ w = w, h = h },
-        CenterContainer:new{ dimen = Geom:new{ w = w, h = h }, col },
-    }
-    if self.header then screen[#screen + 1] = Pad.headerWidget(self) end
-    if self.on_forgot and self.forgot and self.forgot() then screen[#screen + 1] = Pad.forgotWidget(self) end
-    self:setPanel(Box:new{ style = { bg = t.color.page }, width = w, height = h, screen })
+    Pad.setUnlockPanel(self, col)
 end
 
 return Pattern
