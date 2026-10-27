@@ -183,6 +183,21 @@ do
     package.loaded["source.registry"] = nil
 end
 
+-- 容器行时间戳：旧版本写过的 series 时间戳必须能被漫画容器写清零（06 A1 / US 24），
+-- 普通进度写入仍然只进不退（markSynced 的乐观锁依赖修订号单调）。
+do
+    Assert.is_true(BookDB.upsertRemote({ source_id = "ext.kavita", stable_id = "800", title = "容器" }))
+    Assert.is_true(ProgressDB.upsertRemote("ext.kavita", "800", { fraction = 0.2, updated_at = 1000 }))
+    Assert.eq(ProgressDB.get("ext.kavita", "800").updated_at, 1000)
+    Assert.is_true(ProgressDB.upsertRemote("ext.kavita", "800", { fraction = 0.3, updated_at = 500 }))
+    Assert.eq(ProgressDB.get("ext.kavita", "800").updated_at, 1000, "普通写入不能把时间往回拨")
+    Assert.is_true(ProgressDB.upsertRemote("ext.kavita", "800", { fraction = 0.4, updated_at = 0 },
+        { reset_updated_at = true }))
+    local series = ProgressDB.get("ext.kavita", "800")
+    Assert.eq(series.updated_at, 0, "容器行归零，最近阅读不再出现重复的 series 行")
+    Assert.eq(series.fraction, 0.4)
+end
+
 Base.close()
 for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end
 
