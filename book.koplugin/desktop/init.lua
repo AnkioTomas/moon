@@ -445,6 +445,7 @@ end
 ---@param ges_ev table|nil KOReader 手势数据，含方向和位置
 ---@return boolean
 function Desktop:onSwipeTopBar(_arg, ges_ev)
+    if ges_ev.direction == "diagonal" then return false end
     if ges_ev.direction == "south" then
         Ext.call("quickpanel.show", "desktop")
     end
@@ -481,6 +482,7 @@ end
 ---@return boolean
 function Desktop:onSwipe(_arg, ges_ev)
     if Gesture.fm(self, ges_ev) then return true end
+    if ges_ev.direction == "diagonal" then return false end
     if MoonSettings.get("ui").pager_swipe == false then return false end
     notify(self:page(self.tab), "onEvent", "swipe", {
         direction = BD.flipDirectionIfMirroredUILayout(ges_ev.direction),

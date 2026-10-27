@@ -289,6 +289,9 @@ do -- 手势：内容区左右滑只给当前页；顶栏下滑开快捷面板�
     desk:onSwipeTopBar(nil, { direction = "south" })
     Assert.eq(panels[1], "desktop")
     Assert.is_true(desk:onTapBar())
+    -- 对角滑动是 KOReader 截图手势：内容区与顶栏都不吞，放行给下层。
+    Assert.is_false(desk:onSwipe(nil, { direction = "diagonal" }))
+    Assert.is_false(desk:onSwipeTopBar(nil, { direction = "diagonal" }))
 end
 
 do -- 系统 Suspend 广播直达桌面 → Pause，之后不刷屏

@@ -156,6 +156,22 @@ confirm = Confirm:new{ text = "x", swipe_dismiss = "up" }
 Assert.is_true(confirm.ges_events.SwipeModal ~= nil, "实例显式开启优先于全局开关")
 Kit.display.swipe_dismiss = "down"
 
+-- 对角滑动是 KOReader 的截图手势（下层 Screenshoter 接）：弹窗不能报已处理，
+-- 普通横滑仍是导航输入、照吞不漏给下层。
+do
+    local dialog = Confirm:new{ text = "x" }
+    dialog:show()
+    paint(dialog)
+    local Event = require("ui/event")
+    local function swipe(direction)
+        local ges = Kit.tap(1, 1)
+        ges.ges, ges.direction = "swipe", direction
+        return dialog:handleEvent(Event:new("Gesture", ges))
+    end
+    Assert.is_nil(swipe("diagonal"), "对角滑动放行给下层截图")
+    Assert.is_true(swipe("west"), "普通横滑仍被弹窗拦截")
+end
+
 -- 提示：onShow 按 timeout 定时；到点关窗，关窗时撤销定时。
 local toast = Toast:new{ text = "已保存", timeout = 2 }
 toast:onShow()

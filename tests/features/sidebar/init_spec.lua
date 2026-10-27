@@ -263,6 +263,11 @@ Assert.len(state.opened, 0, "列表页没打开前不借菜单")
 Assert.is_true(bar:onTapModal(nil, { pos = { x = 100, y = 10 } }))
 Assert.len(state.closed, 0)
 
+-- 对角滑动是截图手势：面板内不切页签、遮罩区也不关侧栏，直接放行。
+Assert.is_false(bar:onSwipeSidebar(nil, { direction = "diagonal", pos = { x = 580, y = 10 } }))
+Assert.eq(bar.tab, 1)
+Assert.len(state.closed, 0)
+
 -- 左滑到目录：借原生目录 Menu，尺寸 = 面板宽 × (屏高 - 底栏 - 分隔线)，不弹全屏容器。
 local dirty = state.dirty
 bar:onSwipeSidebar(nil, { direction = "west", pos = { x = 100, y = 10 } })
