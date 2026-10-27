@@ -647,4 +647,42 @@ progress_dialog = Themed.last("progress_dialog")
 Assert.is_nil(progress_dialog.on_cancel, "没有暂停钮")
 Assert.not_nil(progress_dialog.on_background, "仍可后台运行")
 
+-- 缺 queue：没有进度可轮询，行显示「已排队」且不能凭缺席的队列宣布完成（02 A4）。
+reset()
+st.probe = { ok = true, state = "enhanced", capabilities = {
+    status = true, enqueue = true, delete = true, estimate = true,
+} }
+st.statuses["601"] = { state = "complete", bytes = 1 }
+st.estimate = { chapters = 2, bytes = 10 * 1024 * 1024, available = 1000 * 1024 * 1024, ok = true }
+local scheduled_before = #Kit.scheduled
+local toasts_before = #Themed.all("toast")
+list = open()
+list.left_callback()
+Themed.last("confirm").ok_callback()
+progress_dialog = Themed.last("progress_dialog")
+Assert.not_nil(progress_dialog, "缺 queue 也确认已入队")
+Assert.eq(progress_dialog.text, "已排队", "没有百分比可写")
+Assert.eq(#Kit.scheduled, scheduled_before, "没有 queue 可轮询：不排下一拍")
+Assert.eq(#Themed.all("toast"), toasts_before, "不凭缺席的队列宣布完成")
+local no_queue_text = table.concat(Kit.texts(list), "\n")
+textContains(no_queue_text, "已排队", "行内显示排队")
+Assert.is_nil(no_queue_text:find("已缓存 2 卷", 1, true), "不能谎报已缓存")
+
+-- 行内暂停是全局动作：文案要说清暂停的是整个队列（04 A3）。
+reset()
+st.statuses["601"] = { state = "complete", bytes = 1 }
+st.queue = { state = "downloading", entries = { [602] = { chapterId = 602, state = "downloading",
+    bytes_done = 30, bytes_total = 100 } }, bytes_done = 30, bytes_total = 100 }
+list = open()
+local pause_button
+for _idx, button in ipairs(tails(list)) do
+    if button.icon == "pause" then pause_button = button end
+end
+Assert.not_nil(pause_button)
+local toasts_used = #Themed.all("toast")
+pause_button:onTapThemeButton()
+Assert.eq(calls.pause, 1, "点暂停即 queue_pause")
+Assert.eq(#Themed.all("toast"), toasts_used + 1, "暂停后提示")
+textContains(Themed.last("toast").text, "整个下载队列", "说明作用于全局队列")
+
 return true

@@ -42,7 +42,7 @@ local logged = {}
 local active
 
 --- 书架投影记忆，按服务器分开；只由成功写操作 / 手动刷新 / Registry.reload 失效。
----@type table<string, table>
+---@type table<string, ShelfCacheProjection>
 local shelves = {}
 
 --- 上次记录过的暂停原因（按服务器），轮询时只在变化时写日志。
@@ -58,22 +58,33 @@ local function logOnce(key, text)
     logger.info(text)
 end
 
---- 能力名清单（排序后逗号分隔），探测日志用。
+--- 记一行警告；同一 key 在本进程内只记一次（真实故障不能静默，也不能刷屏）。
+---@param key string
+---@param text string
+local function warnOnce(key, text)
+    if logged[key] then return end
+    logged[key] = true
+    logger.warn(text)
+end
+
+--- 能力名清单（排序后按分隔符拼接），日志与设置页共用一份口径。
 ---@param capabilities table|nil
+---@param separator string|nil 缺省逗号（日志）；设置页传「、」
 ---@return string
-local function capabilityNames(capabilities)
+function Cache.capabilityNames(capabilities, separator)
     local names = {}
     for name, on in pairs(type(capabilities) == "table" and capabilities or {}) do
         if on == true then names[#names + 1] = tostring(name) end
     end
     table.sort(names)
-    return #names > 0 and table.concat(names, ",") or "none"
+    if #names == 0 then return "none" end
+    return table.concat(names, separator or ",")
 end
 
 --- 探测结果每进程（每种结果）一行：四态 + 版本 + 能力；不记 API Key。
 ---@param probe KamareProbe
 local function logProbe(probe)
-    local capabilities = capabilityNames(probe.capabilities)
+    local capabilities = Cache.capabilityNames(probe.capabilities)
     local signature = string.format("probe|%s|%s|%s", probe.state, tostring(probe.version), capabilities)
     logOnce(signature, string.format("kamare probe ok=%s state=%s version=%s caps=%s",
         tostring(probe.ok), probe.state, tostring(probe.version), capabilities))
@@ -245,10 +256,12 @@ function Cache.available(cap)
 end
 
 --- 源配置：只读 base_url / api_key，其它键与缓存无关。
+--- settings 模块加载失败是真故障（打包 / 安装坏了）：照旧降级成「未配置」，但要留一行日志。
 ---@return table
 local function config()
     local ok, settings = pcall(require, "utils.settings")
     if not ok or type(settings) ~= "table" or type(settings.getSource) ~= "function" then
+        warnOnce("config", "kavita cache settings unavailable")
         return {}
     end
     local value = settings.getSource("ext.kavita")
@@ -514,8 +527,19 @@ function Cache.resetShelf()
     shelves = {}
 end
 
+--- 「已缓存」的唯一口径：complete 或 stale（stale 与 complete 等价，03 A3）。
+--- 同时接受两种形状：Cache.status 的章状态（state）与书架 index 的系列摘要（complete/stale）。
+---@param status table|nil
+---@return boolean
+function Cache.isCached(status)
+    if type(status) ~= "table" then return false end
+    if status.state == "complete" or status.state == "stale" then return true end
+    if status.state ~= nil then return false end
+    return status.complete == true or status.stale == true
+end
+
 --- 只读：书架投影（series_ids / mark / cover），按服务器记忆；无 TTL。
----@return { series_ids: table, mark: table, cover: table }|nil
+---@return ShelfCacheProjection|nil
 function Cache.shelf()
     local base_url = targetBase()
     if not base_url then return nil end
@@ -527,9 +551,8 @@ function Cache.shelf()
     for key, info in pairs(series) do
         if type(info) == "table" then
             local stable_id = tostring(info.seriesId or key)
-            local chapters = tonumber(info.chapters) or 0
             -- 只有 complete / stale 算「已缓存」；queued / downloading 只有 .part，离线打不开。
-            if chapters > 0 and (info.complete == true or info.stale == true) then
+            if (tonumber(info.chapters) or 0) > 0 and Cache.isCached(info) then
                 projection.series_ids[stable_id] = true
                 projection.mark[stable_id] = true
             end

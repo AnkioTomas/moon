@@ -75,6 +75,27 @@ local function entryPercent(entry)
     return math.floor(done / total * 100)
 end
 
+--- 目录条目 → 章 id 列表（批量动作的统一取数）。
+---@param entries table[]
+---@return any[]
+local function chapterIds(entries)
+    local ids = {}
+    for _idx, entry in ipairs(entries or {}) do ids[#ids + 1] = entry.chapterId end
+    return ids
+end
+
+--- 队列里这一章的条目；缺 queue 能力时用本地入队记忆顶着（只表示「已排队」，没有百分比）。
+---@param ctx table
+---@param chapter_id any
+---@return table|nil
+local function queuedEntry(ctx, chapter_id)
+    local key = tostring(chapter_id)
+    local queued = ctx.entries[key]
+    if queued then return queued end
+    if not ctx.queue_capable and ctx.pending[key] then return { state = "queued" } end
+    return nil
+end
+
 --- 本地阅读状态：已读 / 在读 / nil（与书架百分比同源，不额外调 resume_page）。
 ---@param entry table
 ---@return "read"|"reading"|nil
@@ -89,12 +110,19 @@ end
 --- 打开 / 轮询时的一份只读快照。
 ---@param toc table[]
 ---@param memo table|nil 上一次的 resume_page 结果：轮询复用，别每秒为整列扫 journal
+---@param pending table<string, boolean>|nil 本地入队记忆：缺 queue 能力时没有别的「排队」来源
 ---@return table
-local function scan(toc, memo)
+local function scan(toc, memo, pending)
     local probe = Cache.probe()
     local capabilities = probe.ok and (probe.capabilities or {}) or {}
+    local queue_capable = has(capabilities, "queue")
     local queue, queue_code = Cache.queueState()
-    if type(queue) ~= "table" then queue = nil end
+    -- 能力缺失或这一次读不到队列状态，都只能算「没有可用的队列」：
+    -- 不能拿空结果当「都下完了」（02 A4）。
+    if not queue_capable or type(queue) ~= "table" then
+        queue_capable = false
+        queue = nil
+    end
     -- unknown_server：缓存状态整块不显示，只剩阅读状态（02 A9）。
     local show_cache = probe.ok and has(capabilities, "status") and queue_code ~= "unknown_server"
     local statuses = {}
@@ -107,18 +135,28 @@ local function scan(toc, memo)
             -- 06 A4：只有读过 / 已缓存的行才可能有「待同步」；结果按章记忆，
             -- 每秒轮询不再重复读 journal（false = 查过没有）。
             if resumes[cid] == nil then
-                local cached = type(status) == "table" and (status.state == "complete" or status.state == "stale")
+                local cached = Cache.isCached(status)
                 if cached or readState(entry) ~= nil then
                     resumes[cid] = Cache.resumePage(entry.chapterId) or false
                 end
             end
         end
     end
+    pending = pending or {}
+    -- 缺 queue 时 kamare 的索引已报 complete 才把本地排队记忆撤掉；
+    -- 仍排队的继续显示「已排队」，不能假装已经缓存。
+    if not queue_capable then
+        for cid in pairs(pending) do
+            if Cache.isCached(statuses[cid]) then pending[cid] = nil end
+        end
+    end
     return {
         capabilities = capabilities,
         show_cache = show_cache,
+        queue_capable = queue_capable,
         queue = queue,
         entries = queueEntries(queue),
+        pending = pending,
         paused = queuePaused(queue),
         statuses = statuses,
         resumes = resumes,
@@ -132,9 +170,9 @@ end
 ---@return table
 local function rowState(ctx, entry)
     local cid = tostring(entry.chapterId)
-    local queued = ctx.entries[cid]
+    local queued = queuedEntry(ctx, entry.chapterId)
     local status = ctx.statuses[cid]
-    local cached = status ~= nil and (status.state == "complete" or status.state == "stale")
+    local cached = Cache.isCached(status)
     local read = readState(entry)
     local text, icon
     if queued then
@@ -248,7 +286,8 @@ end
 ---@param entry table
 ---@param model table
 ---@param done fun()
-local function confirmDelete(entry, model, done)
+---@param pending table<string, boolean>|nil 本地入队记忆：删成功后这一卷不再是「已排队」
+local function confirmDelete(entry, model, done, pending)
     local Confirm = require("ui.themes.widgets.confirm")
     local bytes = type(model.status) == "table" and tonumber(model.status.bytes)
         or type(model.queued) == "table" and tonumber(model.queued.bytes_done) or 0
@@ -258,7 +297,11 @@ local function confirmDelete(entry, model, done)
         ok_text = _("删除"),
         ok_callback = function()
             local ok, code, message = Cache.delete({ entry.chapterId })
-            if not ok then toast(Cache.message(code, message)) end
+            if ok then
+                if pending then pending[tostring(entry.chapterId)] = nil end
+            else
+                toast(Cache.message(code, message))
+            end
             done()
         end,
     }:show()
@@ -286,8 +329,8 @@ local function batchTargets(ctx, toc)
     for _idx, entry in ipairs(toc) do
         local cid = tostring(entry.chapterId)
         local status = ctx.statuses[cid]
-        local cached = type(status) == "table" and (status.state == "complete" or status.state == "stale")
-        local queued = ctx.entries[cid]
+        local cached = Cache.isCached(status)
+        local queued = queuedEntry(ctx, entry.chapterId)
         if not cached then
             if queued then
                 if queued.state == "failed" then retry[#retry + 1] = entry end
@@ -361,7 +404,9 @@ local PAUSE_REASONS = {
 ---@return table
 function VolumeList.pick(series, toc, cb, opts)
     opts = type(opts) == "table" and opts or {}
-    local ctx = scan(toc)
+    -- 缺 queue 能力时没有队列状态可读，只能在本地记「这一卷已经入队」（02 A4）。
+    local pending = {}
+    local ctx = scan(toc, nil, pending)
     local chosen = false
     local list
     local dialog
@@ -379,11 +424,12 @@ function VolumeList.pick(series, toc, cb, opts)
         local model = rowState(ctx, entry)
         local actions = {}
         actions.download = function() confirmEnqueue({ entry }, {}) end
-        actions.delete = function() confirmDelete(entry, model, refresh) end
+        actions.delete = function() confirmDelete(entry, model, refresh, pending) end
         actions.refresh = function() confirmRetry({ entry }) end
         actions.pause = function()
             local ok, code, message = Cache.queuePause()
-            if not ok then toast(Cache.message(code, message)) end
+            -- 队列是全局的：行里的暂停作用于所有服务器的所有下载，明确告诉用户（04 A3）。
+            if not ok then toast(Cache.message(code, message)) else toast(_("已暂停整个下载队列")) end
             refresh()
         end
         actions.play_arrow = function() resumeQueue() end
@@ -412,7 +458,7 @@ function VolumeList.pick(series, toc, cb, opts)
     --- 重画：状态全在 kamare 的内存索引里，重扫一遍即可（列表停在原页）。
     ---@param reuse_resume boolean|nil 轮询用：复用 resume_page 的记忆
     refresh = function(reuse_resume)
-        ctx = scan(toc, reuse_resume and ctx.resumes or nil)
+        ctx = scan(toc, reuse_resume and ctx.resumes or nil, pending)
         if list and not list.closed then list:setItems(items()) end
     end
 
@@ -420,7 +466,11 @@ function VolumeList.pick(series, toc, cb, opts)
     ---@return boolean
     local function enqueue(entries)
         local ok, code, message, detail = Cache.enqueue(entries)
-        if ok then return true end
+        if ok then
+            -- 缺 queue 能力时靠这份记忆把行显示成「已排队」（02 A4）。
+            for _idx, entry in ipairs(entries) do pending[tostring(entry.chapterId)] = true end
+            return true
+        end
         toast(Cache.message(code, message, detail))
         return false
     end
@@ -428,10 +478,12 @@ function VolumeList.pick(series, toc, cb, opts)
     ---@param entries table[]
     ---@return boolean
     local function retry(entries)
-        local ids = {}
-        for _idx, entry in ipairs(entries) do ids[#ids + 1] = entry.chapterId end
+        local ids = chapterIds(entries)
         local ok, code, message = Cache.queueRetry(ids)
-        if ok then return true end
+        if ok then
+            for _idx, entry in ipairs(entries) do pending[tostring(entry.chapterId)] = true end
+            return true
+        end
         toast(Cache.message(code, message))
         return false
     end
@@ -568,6 +620,8 @@ function VolumeList.pick(series, toc, cb, opts)
     --- 每一拍：重画行，有进度框就更新 / 收尾；队列停住或暂停就不再排下一拍。
     local function tick()
         timer = nil
+        -- 没有 queue 能力就没有进度可轮询，也绝不能凭「没有条目」宣布全部完成（02 A4）。
+        if not ctx.queue_capable then return end
         refresh(true)
         if dialog then
             if ctx.paused then
@@ -599,7 +653,8 @@ function VolumeList.pick(series, toc, cb, opts)
         local control = has(ctx.capabilities, "queue_control")
         dialog = ProgressDialog:new{
             title = _("正在缓存"),
-            text = T(_("正在缓存 %1/%2 卷"), 1, batch.total),
+            -- 缺 queue：没有百分比，只报「已排队」（02 A4）。
+            text = ctx.queue_capable and T(_("正在缓存 %1/%2 卷"), 1, batch.total) or _("已排队"),
             cancel_text = control and _("暂停") or nil,
             on_cancel = control and function()
                 local ok, code, message = Cache.queuePause()
@@ -611,6 +666,8 @@ function VolumeList.pick(series, toc, cb, opts)
         }
         dialog:show()
         refresh(true)
+        -- 没有 queue 就没有可轮询的进度；不排拍，也就不会从缺席的队列宣布完成。
+        if not ctx.queue_capable then return end
         if not timer then
             timer = function()
                 timer = nil
@@ -629,9 +686,7 @@ function VolumeList.pick(series, toc, cb, opts)
             ok_text = _("重试"),
             ok_callback = function()
                 if retry(entries) then
-                    local ids = {}
-                    for _idx, entry in ipairs(entries) do ids[#ids + 1] = entry.chapterId end
-                    startProgress(ids, #entries)
+                    startProgress(chapterIds(entries), #entries)
                 end
             end,
         }:show()
@@ -661,9 +716,8 @@ function VolumeList.pick(series, toc, cb, opts)
             ok_callback = function()
                 if not enqueue(to_enqueue) then return end
                 if #to_retry > 0 then retry(to_retry) end
-                local ids = {}
-                for _idx, entry in ipairs(to_enqueue) do ids[#ids + 1] = entry.chapterId end
-                for _idx, entry in ipairs(to_retry) do ids[#ids + 1] = entry.chapterId end
+                local ids = chapterIds(to_enqueue)
+                for _idx, id in ipairs(chapterIds(to_retry)) do ids[#ids + 1] = id end
                 startProgress(ids, total)
             end,
         }:show()
@@ -690,7 +744,7 @@ function VolumeList.pick(series, toc, cb, opts)
     end
 
     --- 标题栏左钮「缓存整部」：没有对象就只 toast。
-    local function batch()
+    local function startBatch()
         local to_enqueue, to_retry = batchTargets(ctx, toc)
         if #to_enqueue == 0 and #to_retry == 0 then
             toast(_("全部已缓存"))
@@ -710,7 +764,7 @@ function VolumeList.pick(series, toc, cb, opts)
         title = series.title or _("选择卷"),
         items = items(),
         left_icon = can_batch and "download" or nil,
-        left_callback = can_batch and batch or nil,
+        left_callback = can_batch and startBatch or nil,
         on_select = function(entry)
             chosen = true
             cb(entry)

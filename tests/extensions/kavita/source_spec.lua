@@ -103,7 +103,7 @@ local dropped = {}
 -- 脏行（sync_status=0）：漫画走 kamare 时只写 upsertRemote，任何 upsert 都是回归。
 local dirty = {}
 local toc_fresh = true
-local shelf_ids, written = {}, {}
+local shelf_ids, written, written_opts = {}, {}, {}
 package.loaded["book.books_db"] = {
     get = function(_sid, id) return books[id] end,
     getToc = function(_sid, id) return stale[id] end,
@@ -111,8 +111,9 @@ package.loaded["book.books_db"] = {
 }
 package.loaded["book.progress_db"] = {
     get = function(_sid, id) return progress[id] end,
-    upsertRemote = function(_sid, id, pos)
+    upsertRemote = function(_sid, id, pos, opts)
         written[id] = pos
+        written_opts[id] = opts
         return true
     end,
     upsert = function(_sid, id, pos)
@@ -1404,6 +1405,9 @@ do
     local container = written["60"]
     Assert.eq(container.fraction, 0.25, "聚合 = (0 个读完卷 + 本卷 0.5) / 2 卷")
     Assert.eq(container.updated_at, 0, "容器行不进最近阅读")
+    Assert.eq(written_opts["60"] and written_opts["60"].reset_updated_at, true,
+        "容器行显式允许归零：旧版本的 series 时间戳要能被清掉")
+    Assert.is_nil(written_opts["60:6001"], "卷行不归零，继续进最近阅读")
     Assert.is_nil(container.page, "容器行只写聚合 fraction")
     Assert.is_nil(container.total_pages)
     Assert.eq(remembered["60:6001"].title, "漫画 · 第2话", "卷行缺书时用目录卷名补元数据")
@@ -1451,6 +1455,30 @@ do
     Assert.len(opened, 2, "目录里没有的 id 不另开查看器")
     Assert.eq(#Themed.all("toast"), toasts + 1)
     Assert.eq(Themed.last("toast").text, "下一卷不在目录里")
+
+    -- 单卷漫画：从书架行（stable_id = seriesId）打开，卷身份仍是 seriesId:chapterId。
+    -- 关查看器写「卷行真实位置 + 无时间戳容器行」，卷行元数据补齐，最近阅读看得到（US 22 / 06 A2）。
+    local single_toc, single_two = { toc[1] }, tocs["60"]
+    tocs["60"] = single_toc
+    books["60:6000"] = nil
+    written, remembered, opened = {}, {}, {}
+    reply = function() return { kind = "viewer" } end
+    local single_path, single_err, single_meta
+    source:openBookAsync({ source_id = "ext.kavita", stable_id = "60", book = books["60"] }, nil,
+        function(p, e, m) single_path, single_err, single_meta = p, e, m end)
+    Stubs.flush()
+    Assert.is_nil(single_path)
+    Assert.is_nil(single_err)
+    Assert.is_true(single_meta and single_meta.handled, "单卷直接进查看器，不弹选卷")
+    Assert.eq(opened[1].entry.chapterId, 6000)
+    opened[1].on_close(5, 30)
+    Assert.eq(written["60:6000"].page, 5, "单卷也把真实位置写进卷行")
+    Assert.is_true((written["60:6000"].updated_at or 0) > 0, "卷行带时间戳，最近阅读能看到")
+    Assert.eq(written["60"].updated_at, 0, "容器行不带时间戳，不与卷行重复")
+    Assert.eq(written["60"].fraction, 5 / 30, "容器行聚合百分比，书架有量级")
+    Assert.not_nil(remembered["60:6000"], "卷行元数据补齐：ProgressDB.recent 的 EXISTS books 过得去")
+    Assert.eq(remembered["60:6000"].title, "漫画 · 第1话")
+    tocs["60"] = single_two
 
     -- offline_not_cached + 无旧 cbz：提示，不落到下载。
     books["60:6001"] = nil
@@ -1597,6 +1625,8 @@ Assert.eq(written["700"].updated_at, 1770062706, "latestReadDate 按服务器时
 Assert.eq(written["701"].fraction, 1, "读完的写满比例，进步进「已读」")
 Assert.eq(written["710"].fraction, 0.3, "容器行改写服务端 series 级 pagesRead/pages")
 Assert.eq(written["710"].updated_at, 0, "容器行不进最近阅读")
+Assert.eq(written_opts["710"] and written_opts["710"].reset_updated_at, true,
+    "回填聚合也要能清掉旧版本留下的 series 时间戳")
 Assert.is_nil(written["710"].page, "容器行只写聚合 fraction")
 Assert.eq(#dropped, 0, "不再删容器行")
 Assert.eq(remembered["710:7101"].authors, "甲", "读过的卷行继承容器作者，不再显示未知作者")

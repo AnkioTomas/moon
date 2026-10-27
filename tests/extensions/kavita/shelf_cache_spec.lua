@@ -13,6 +13,21 @@ local Config = require("support.config")
 local Stubs = require("support.stubs")
 Stubs.install()
 
+-- 日志：pcall 的失败必须被检查并记录，不能静默吞掉（项目审计口径）。
+local warns = {}
+package.loaded["utils.log"] = {
+    dbg = function() end,
+    info = function() end,
+    error = function() end,
+    warn = function(...)
+        local parts = {}
+        for index = 1, select("#", ...) do
+            parts[#parts + 1] = tostring(select(index, ...))
+        end
+        warns[#warns + 1] = table.concat(parts, " ")
+    end,
+}
+
 local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
 -- 走 preload 不改 package.path：插件根上的 main.lua 会顶掉月读的 main。
 for _idx, name in ipairs({ "client", "position", "annotation", "source", "cache", "volume_list", "stats" }) do
@@ -153,8 +168,38 @@ Assert.is_nil(synced.err)
 Assert.eq(synced.result.pulled, 1, "对账结果照旧回调")
 Assert.eq(table.concat(sequence, ","), "reconcile,shelf,cb", "预热排在回调之前")
 
+-- 手动刷新 / 书库重扫（force）必须让投影失效并重建；后台同步沿用记忆（05 A1）。
+-- 拉回的新缓存状态看不见 = 用户点了刷新但书架标记不更新。
+sequence, requested = {}, {}
+local resets = 0
+local real_reset = Cache.resetShelf
+Cache.resetShelf = function()
+    resets = resets + 1
+    sequence[#sequence + 1] = "reset"
+end
+Cache.shelf = function()
+    sequence[#sequence + 1] = "shelf"
+    return projection
+end
+local background
+source:syncBooksAsync(nil, function(result, err) background = { result = result, err = err } end)
+Stubs.flush()
+Assert.not_nil(background and background.result)
+Assert.eq(resets, 0, "后台同步不丢投影")
+Assert.eq(table.concat(sequence, ","), "reconcile,shelf", "后台同步只预热现有记忆")
+sequence = {}
+local forced
+source:syncBooksAsync({ force = true }, function(result, err) forced = { result = result, err = err } end)
+Stubs.flush()
+Assert.not_nil(forced and forced.result)
+Assert.eq(resets, 1, "手动刷新让投影失效")
+Assert.eq(table.concat(sequence, ","), "reset,reconcile,shelf", "重扫先失效再重建，回调前投影已就绪")
+sequence = {}
+Cache.resetShelf = real_reset
+
 -- 预热失败不拖垮同步：投影只是书架标记，缓存模块异常照样要回调对账结果。
 sequence, requested = {}, {}
+warns = {}
 local broken_sequence = sequence
 Cache.shelf = function()
     broken_sequence[#broken_sequence + 1] = "shelf"
@@ -165,6 +210,11 @@ source:syncBooksAsync(nil, function(result, err) second = { result = result, err
 Stubs.flush()
 Assert.not_nil(second and second.result, "预热异常不影响同步结果")
 Assert.eq(table.concat(sequence, ","), "reconcile,shelf")
+-- 第二次仍失败：不能每次同步都刷一行日志（一次性），但也不能静默。
+source:syncBooksAsync(nil, function(result, err) second = { result = result, err = err } end)
+Stubs.flush()
+Assert.eq(#warns, 1, "投影预热失败检查并只记一次")
+Assert.matches(warns[1] or "", "shelf")
 Cache.shelf = real_shelf
 
 -- Registry.reload() 会重建源实例：新实例顺手丢掉旧服务器的投影（05 A1 的第三类失效点）。

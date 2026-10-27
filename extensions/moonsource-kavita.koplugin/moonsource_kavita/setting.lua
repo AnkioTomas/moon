@@ -291,29 +291,13 @@ local function pluginsDir(plugin)
     return module_dir or "plugins"
 end
 
---- 目录可写才把主路径当真；不可写时在说明里补 $DATA/plugins/（写一个探针文件最可靠）。
----@param dir string
----@return boolean
-local function writable(dir)
-    local probe = dir .. "/.moon-cache-write-check"
-    local file = io.open(probe, "w")
-    if not file then return false end
-    file:close()
-    os.remove(probe)
-    return true
-end
-
---- 能力清单文案（按名字排序，便于和日志对照）。
+--- 能力清单文案（按名字排序，便于和日志对照）；排序与拼接口径复用适配层，避免两处漂移。
 ---@param probe table
 ---@return string
 local function capabilityText(probe)
     if probe.state ~= "enhanced" then return _("无") end
-    local names = {}
-    for name, on in pairs(probe.capabilities or {}) do
-        if on == true then names[#names + 1] = tostring(name) end
-    end
-    table.sort(names)
-    return #names > 0 and table.concat(names, "、") or _("无")
+    local names = Cache.capabilityNames(probe.capabilities, "、")
+    return names == "none" and _("无") or names
 end
 
 --- 缓存占用：未配置服务器 / 缺 summary 能力时整行不显示（02 A8）。
@@ -355,10 +339,9 @@ function showCacheDetail(plugin)
     lines[#lines + 1] = _("        没有就是官方版，缓存功能不会出现。")
     lines[#lines + 1] = _("  注意：增强版与官方版目录同名，不能共存；替换前先删掉旧的 kamare.koplugin/。")
     lines[#lines + 1] = _("        服务器配置、阅读进度与缓存都在数据目录，替换插件目录不会删它们。")
-    if not writable(dir) then
-        lines[#lines + 1] = T(_("  目录不可写，可改用：%1"),
-            require("datastorage"):getDataDir() .. "/plugins")
-    end
+    -- 只读详情不写任何探针文件（02 A8 / 09 A3）：可写性交给用户按目录自行判断。
+    lines[#lines + 1] = T(_("  如该目录不可写，可改用：%1"),
+        require("datastorage"):getDataDir() .. "/plugins")
 
     require("ui.themes.widgets.confirm"):new{
         title = _("漫画缓存"),

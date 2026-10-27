@@ -51,6 +51,8 @@ local STATS_PAGE_SIZE = 200
 local STATS_MAX_PAGES = 50
 -- 统计状态文件（与书架指纹 / 回填 done 同机制）：上次身份 + 每系列章数判定 + 卷名。
 local STATS_STATE_FILE = "/moonsource_kavita_stats.lua"
+-- 投影预热失败只记一行：同一进程反复同步不该刷屏（项目审计口径：不静默 pcall）。
+local shelf_prewarm_failed = false
 
 ---@class KavitaSource : SourceBase
 ---@field client KavitaClient
@@ -89,7 +91,7 @@ end
 
 --- 书架缓存投影：同步交回适配层记忆的三张表（series_ids / mark / cover）。
 --- 未配置或 kamare 没给 index 时返回 nil；不触网，翻页复用同一份记忆（05 A1/A2）。
----@return { series_ids: table, mark: table, cover: table }|nil
+---@return ShelfCacheProjection|nil
 function Source:shelfCache()
     if not self:configured() then return nil end
     return Cache.shelf()
@@ -386,10 +388,11 @@ local function backfillRead(source_id, series_list)
                     require("book.books_db").get(source_id, stable_id), stable_id, progressed)
                 -- 真实位置在卷行上；容器行保留一条服务端 series 级聚合（updated_at=0 不进最近阅读，
                 -- 但书架 / 详情百分比有量级）。不再 drop：离线读、回连、再离线看到的是同一个量级。
+                -- 归零必须显式允许：旧版本存过非零时间，MAX 会把它留住（US 24）。
                 if ProgressDB.upsertRemote(source_id, stable_id, {
                     fraction = math.min(1, read / pages),
                     updated_at = 0,
-                }) then
+                }, { reset_updated_at = true }) then
                     changed = changed + 1
                 end
             elseif (comic and not (here and here.page == read)) or (not comic and here == nil) then
@@ -612,6 +615,9 @@ end
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
     if opts.dirty_only then return SourceBase.skipped(cb, "no remote delete") end
+    -- 手动刷新 / 书库重扫 = 05 A1 的第二类失效：投影必须重建，
+    -- 否则用户点了刷新、缓存状态变了，书架标记还是旧的。后台同步复用记忆（无 TTL、不重拉）。
+    if opts.force then Cache.resetShelf() end
     local libraries = {}
     for id in pairs(require("utils.settings").getSource(ID).libraries or {}) do
         libraries[#libraries + 1] = id
@@ -650,8 +656,13 @@ function Source:syncBooksAsync(opts, cb)
         self:backfillMeta(ids)
         -- 服务端已读进度同理：网页端 / 别的设备读过，书架也得进「最近阅读」与「已读」。
         result.pulled = result.pulled + backfillRead(self.id, reads)
-        -- 书架投影预热：开桌面必跑本方法，进书架时命中记忆（05 A1）。失败不影响同步结果。
-        pcall(Cache.shelf)
+        -- 书架投影预热：开桌面必跑本方法，进书架时命中记忆（05 A1）。失败不影响同步结果，
+        -- 但不能静默：同一故障本进程只记一行（缓存模块异常通常意味着 kamare 侧坏了）。
+        local ok, shelf_err = pcall(Cache.shelf)
+        if not ok and not shelf_prewarm_failed then
+            shelf_prewarm_failed = true
+            logger.warn("kavita shelf cache prewarm failed", shelf_err)
+        end
         cb(result)
     end
 
@@ -1067,10 +1078,12 @@ function Source:openEntry(ref, entry, toc, title, cb)
             updated_at = os.time(),
         })
         rememberVolume(item)
+        -- 容器行只做聚合；显式归零时间戳：旧版本写过的非零时间要能被清掉，
+        -- 否则 series 会和卷行一起留在「最近阅读」（06 A1 / US 24）。
         ProgressDB.upsertRemote(self.id, series_id, {
             fraction = aggregate(item, fraction),
             updated_at = 0,
-        })
+        }, { reset_updated_at = true })
     end
 
     ---@param item table

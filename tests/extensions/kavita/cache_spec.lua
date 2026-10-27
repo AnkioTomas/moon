@@ -665,6 +665,19 @@ Assert.eq(callCount("index"), 8, "无缓存不写空投影")
 installCache({ api_version = 1, capabilities = { status = true } })
 Assert.is_nil(Cache.shelf(), "缺 index 无书架标记")
 
+-- 「已缓存」口径只在一处：章状态与 index 摘要两种形状都认（03 A3）。
+Assert.is_true(Cache.isCached({ state = "complete" }))
+Assert.is_true(Cache.isCached({ state = "stale" }))
+Assert.is_false(Cache.isCached({ state = "partial" }))
+Assert.is_false(Cache.isCached(nil))
+Assert.is_true(Cache.isCached({ chapters = 1, complete = true }))
+Assert.is_false(Cache.isCached({ chapters = 1 }))
+
+-- 能力名单排序与拼接：设置页与日志共用同一份（08）。
+Assert.eq(Cache.capabilityNames({ open = true, index = true }), "index,open")
+Assert.eq(Cache.capabilityNames({ open = true, index = true }, "、"), "index、open")
+Assert.eq(Cache.capabilityNames(nil), "none")
+
 ----------------------------------------------------------------------
 -- 日志：探测每进程一次、写操作一行、open 失败去重、暂停原因只在变化时记。
 ----------------------------------------------------------------------
@@ -734,6 +747,19 @@ resetLogs()
 Cache.status(6001)
 Cache.index()
 Assert.len(logs, 0, "读路径零日志")
+
+-- settings 模块加载失败是真故障：降级成未配置，但不能静默。
+local settings_preload = package.preload["utils.settings"]
+package.loaded["utils.settings"] = nil
+package.preload["utils.settings"] = function() error("settings module broken") end
+resetLogs()
+Cache.reset()
+Assert.is_nil(Cache.shelf())
+Assert.is_nil(Cache.shelf())
+Assert.eq(countLines("kavita cache settings unavailable"), 1, "配置模块故障只记一次")
+Assert.eq(logs[1] and logs[1].level, "warn", "真实故障记警告")
+package.preload["utils.settings"] = settings_preload
+Cache.reset()
 
 -- open 失败同一原因只记一次。
 log_mod.open = function() return nil, "viewer_running" end

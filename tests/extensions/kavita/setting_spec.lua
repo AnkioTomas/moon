@@ -58,6 +58,14 @@ package.preload["moonsource_kavita.cache"] = function()
         end,
         available = function(cap) return available[cap] == true end,
         summary = function() return summary_result end,
+        capabilityNames = function(caps, separator)
+            local names = {}
+            for name, on in pairs(caps or {}) do
+                if on == true then names[#names + 1] = tostring(name) end
+            end
+            table.sort(names)
+            return #names > 0 and table.concat(names, separator or ",") or "none"
+        end,
         sizeText = function(bytes)
             local value = tonumber(bytes)
             if not value then return "未知" end
@@ -221,6 +229,25 @@ rowAt("漫画缓存").callback()
 local missing_detail = Themed.last("confirm")
 Assert.matches(missing_detail.text, Config.root() .. "/extensions", "实际插件目录")
 Assert.is_nil(missing_detail.text:find("缓存占用", 1, true), "未配置服务器不显示占用")
+
+-- 只读详情（02 A8 / 09 A3）：不能为了判断可写性往插件目录写探针文件；
+-- 备选目录说明无条件给出，用户自己判断。
+local temp_plugin = Config.dir() .. "/setting_plugins/kamare.koplugin"
+os.execute("mkdir -p '" .. temp_plugin .. "'")
+local temp_row
+for _idx, make in ipairs(Setting.rows({ path = temp_plugin })) do
+    local row = make(600)
+    if row.title == "漫画缓存" then temp_row = row end
+end
+temp_row.callback()
+local readonly_detail = Themed.last("confirm")
+Assert.is_true(readonly_detail.text:find(Config.dir() .. "/setting_plugins", 1, true) ~= nil,
+    "用传入插件目录的父目录")
+Assert.is_true(readonly_detail.text:find("如该目录不可写，可改用", 1, true) ~= nil)
+Assert.is_true(readonly_detail.text:find(require("datastorage"):getDataDir() .. "/plugins", 1, true) ~= nil,
+    "备选目录")
+Assert.is_nil(io.open(Config.dir() .. "/setting_plugins/.moon-cache-write-check", "rb"),
+    "详情不写探针文件：只读、无副作用")
 
 -- 保存后镜像：先落 moon 自己的配置，再 register_server；失败 toast 但不阻断。
 cfg.base_url, cfg.api_key = "http://kav", "k"
