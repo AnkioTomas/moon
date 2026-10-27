@@ -1,36 +1,42 @@
 --[[--
-密码数字键盘：整屏面板，圆点显示已输位数，下面是 3×4 键盘。
+密码数字键盘：锁屏图（或壁纸）铺底，中间半透明卡片放圆点与 3×4 键盘。
 
-  +----------------------+
-  |     输入密码解锁     |
-  |     ● ● ○ ○ ○ ○      |
-  |     密码错误         |
-  |   [1]  [2]  [3]      |
-  |   [4]  [5]  [6]      |
-  |   [7]  [8]  [9]      |
-  |   [⌫]  [0]  [✓]      |
-  |      [ 取消 ]        |   仅 dismissable
-  +----------------------+
+  +----------------------------------+
+  |  (背景：compose / screensaver)   |
+  |   +--------------------------+   |
+  |   |     输入密码解锁         |   |
+  |   |     ● ● ○ ○ ○ ○          |   |
+  |   |     密码错误             |   |
+  |   |            忘记密码      |   |
+  |   |   [1]  [2]  [3]          |   |
+  |   |   [4]  [5]  [6]          |   |
+  |   |   [7]  [8]  [9]          |   |
+  |   |   [⌫]  [0]  [✓]          |   |
+  |   |      [ 取消 ]            |   |  仅 dismissable
+  |   +--------------------------+   |
+  +----------------------------------+
 
 on_submit(pin) 返回 true 关窗；返回字符串则清空输入、显示该提示。
 dismissable=false（解锁）时返回键、点空白都被吞掉；true（设置页）时多一个取消按钮，返回键也能取消。
-header=true（解锁）时左上角画设备头像 + 设备名称；on_forgot 给了、且 forgot() 为真时底部出现「忘记了设备密码？」。
+header=true（解锁）时左上角画设备头像 + 设备名称；on_forgot 给了、且 forgot() 为真时卡片内出现「忘记密码」。
 刚按下的那一位明文显示 REVEAL 秒再变回圆点；每位占固定宽度的格子，换字符时整行不抖。
 
 @module koplugin.book.features.passcode.pad
 --]]
 
-local BottomContainer = require("ui/widget/container/bottomcontainer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local LeftContainer = require("ui/widget/container/leftcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
+local RightContainer = require("ui/widget/container/rightcontainer")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local Backdrop = require("features.passcode.backdrop")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
 local Image = require("ui.themes.widgets.image")
@@ -83,6 +89,8 @@ end
 
 function Pad:onCloseWidget()
     UIManager:unschedule(self.mask)
+    if self._backdrop and self._backdrop.free then self._backdrop:free() end
+    self._backdrop = nil
     Modal.onCloseWidget(self)
 end
 
@@ -171,6 +179,15 @@ function Pad:dots()
     return row
 end
 
+--- 头像条占高（头像 + 上下 padding），算卡片区域用，避免先建再丢。
+---@param self BookPasscodePad|BookPasscodePattern
+---@return number
+function Pad:headerHeight()
+    if not self.header then return 0 end
+    local t = self.theme
+    return Theme.px(t.control.height) + Theme.px(t.space.lg) * 2
+end
+
 --- 左上角：圆形设备头像 + 设备名称。
 ---@param self BookPasscodePad|BookPasscodePattern
 ---@return table
@@ -193,36 +210,112 @@ function Pad:headerWidget()
     }
 end
 
---- 底部：连续输错后的「忘记了设备密码？」。
+--- 卡片内右对齐的「忘记密码」。
 ---@param self BookPasscodePad|BookPasscodePattern
+---@param width number 卡片内容宽
 ---@return table
-function Pad:forgotWidget()
-    local t = self.theme
-    return BottomContainer:new{
-        dimen = Geom:new{ w = Screen:getWidth(), h = Screen:getHeight() },
-        VerticalGroup:new{
-            Button:new{ text = _("忘记了设备密码？"), variant = "ghost", callback = self.on_forgot },
-            VerticalSpan:new{ width = Theme.px(t.space.lg) * 2 },
-        },
+function Pad:forgotRow(width)
+    return RightContainer:new{
+        dimen = Geom:new{ w = width, h = Theme.px(self.theme.control.height) },
+        Button:new{ text = _("忘记密码"), variant = "ghost", callback = self.on_forgot },
     }
+end
+
+--- 锁屏纯图壁纸铺底 + 半透明卡片；头像条独占顶部，卡片在其下居中，互不重叠。
+--- 无图时外层纯色底保证不露书页；keep_bg 禁止弹窗壁纸 hollow 摘底。
+---@param self BookPasscodePad|BookPasscodePattern
+---@param body table 卡片内主内容（VerticalGroup）
+function Pad:setUnlockPanel(body)
+    local t = self.theme
+    local w, h = Screen:getWidth(), Screen:getHeight()
+    local margin = Theme.px(t.space.lg) * 2
+    local pad = Theme.px(t.space.lg)
+    local header = self.header and Pad.headerWidget(self) or nil
+    -- 必须量真实占位：估算偏矮时卡片会顶进 logo。
+    local header_h = header and header:getSize().h or 0
+    local area_h = math.max(1, h - header_h)
+    local card_w = math.min(w - margin * 2, math.floor(math.min(w, area_h) * 0.88))
+
+    local card = Box:new{
+        style = {
+            bg = t.color.page,
+            border = 1,
+            border_color = t.color.ink,
+            radius = 0,
+        },
+        -- 有背景图时半透明；纯色底上也无害（lighten 白底仍是白）。
+        bg_alpha = 78,
+        padding = pad,
+        width = card_w,
+        body,
+    }
+
+    local screen = OverlapGroup:new{ dimen = Geom:new{ w = w, h = h } }
+    local bg = self._backdrop
+    if not bg or bg.width ~= w or bg.height ~= h then
+        if bg and bg.free then bg:free() end
+        bg = Backdrop.widget(w, h)
+        self._backdrop = bg
+    end
+    if bg and not bg:surface() then
+        bg:free()
+        bg, self._backdrop = nil, nil
+    end
+    if bg then screen[#screen + 1] = bg end
+    -- 头像单独叠在左上角（不要进 align=center 的 VerticalGroup，否则被居中）。
+    if header then screen[#screen + 1] = header end
+    -- 卡片水平居中：VerticalGroup 自身宽度只有卡片宽时，OverlapGroup 默认左对齐会整组贴左。
+    -- 用整屏宽的 CenterContainer 包住卡片；上下垫高撑满，避免外层 Box 再垂直居中挪位。
+    local card_h = card:getSize().h
+    local top_gap = math.max(Theme.px(t.space.md), math.floor((area_h - card_h) / 2))
+    local bottom_gap = math.max(0, h - header_h - top_gap - card_h)
+    screen[#screen + 1] = VerticalGroup:new{
+        HorizontalSpan:new{ width = w },
+        VerticalSpan:new{ width = header_h + top_gap },
+        CenterContainer:new{
+            dimen = Geom:new{ w = w, h = card_h },
+            card,
+        },
+        VerticalSpan:new{ width = bottom_gap },
+    }
+
+    self:setPanel(Box:new{
+        style = { bg = t.color.page },
+        keep_bg = true,
+        width = w,
+        height = h,
+        screen,
+    })
 end
 
 function Pad:updateView()
     local t = self.theme
     local w, h = Screen:getWidth(), Screen:getHeight()
     local gap = Theme.px(t.space.md)
-    local key_w = math.floor((math.min(w, h) * 0.7 - gap * 2) / 3)
+    local key_w = math.floor((math.min(w, h) * 0.62 - gap * 2) / 3)
     local key_h = math.floor(Theme.px(t.control.height) * 1.5)
+    local margin = Theme.px(t.space.lg) * 2
+    -- 与 setUnlockPanel 同一口径：有头像条时按剩余高度算卡片宽。
+    local area_h = math.max(1, h - self:headerHeight())
+    local card_w = math.min(w - margin * 2, math.floor(math.min(w, area_h) * 0.88))
+    local inner_w = card_w - Theme.px(t.space.lg) * 2
 
     local col = VerticalGroup:new{
         align = "center",
-        Text.line("title", self.title),
+        LeftContainer:new{
+            dimen = Geom:new{ w = inner_w, h = Theme.px(t.control.height) },
+            Text.line("title", self.title),
+        },
         VerticalSpan:new{ width = Theme.px(t.space.lg) },
         self:dots(),
         VerticalSpan:new{ width = Theme.px(t.space.sm) },
-        Text.line("caption", self.message or " ", { color = t.color.muted }),
-        VerticalSpan:new{ width = Theme.px(t.space.lg) },
+        Text.line("caption", self.message or " ", { color = t.color.muted, width = inner_w }),
+        VerticalSpan:new{ width = Theme.px(t.space.md) },
     }
+    if self.on_forgot and self.forgot and self.forgot() then
+        col[#col + 1] = self:forgotRow(inner_w)
+        col[#col + 1] = VerticalSpan:new{ width = Theme.px(t.space.sm) }
+    end
     for _idx, keys in ipairs(KEYS) do
         local row = HorizontalGroup:new{}
         for i, key in ipairs(keys) do
@@ -238,13 +331,7 @@ function Pad:updateView()
             callback = function() self:close() end,
         }
     end
-    local screen = OverlapGroup:new{
-        dimen = Geom:new{ w = w, h = h },
-        CenterContainer:new{ dimen = Geom:new{ w = w, h = h }, col },
-    }
-    if self.header then screen[#screen + 1] = self:headerWidget() end
-    if self.on_forgot and self.forgot and self.forgot() then screen[#screen + 1] = self:forgotWidget() end
-    self:setPanel(Box:new{ style = { bg = t.color.page }, width = w, height = h, screen })
+    self:setUnlockPanel(col)
 end
 
 return Pad
