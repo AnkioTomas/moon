@@ -152,7 +152,10 @@ function Client:_jsonAsync(method, path, opts, cb)
             local raw = Text.stripBom(response.body or "")
             local ok, data = pcall(JSON.decode, raw)
             if not ok or type(data) ~= "table" then
-                done(nil, T(_("响应不是 JSON (HTTP %1) %2"), tostring(code), (raw:gsub("%s+", " ")):sub(1, 120)))
+                -- 登录页 / 拦截页等 HTML 原文只进日志：err 会被同步层
+                -- 直接 toast 出来，给用户看整页源码没有意义。
+                logger.warn("moon non-JSON response", method, path, code, (raw:gsub("%s+", " ")):sub(1, 120))
+                done(nil, T(_("响应不是 JSON (HTTP %1)"), tostring(code)))
                 return
             end
             -- 长期令牌没有续期接口：401 直接标记失效，由上层引导重新填写令牌。
