@@ -241,4 +241,58 @@ do
     Assert.is_nil(done)
 end
 
+-- 睡眠恢复：睡前开着且连着设备，唤醒后蓝牙停了 → 重新打开（/start）并连回睡前设备（/connect）。
+do
+    reset()
+    routes["/status"] = ON_ONE
+    Bluetooth.refresh()
+    Stubs.flush()
+    Bluetooth.onSuspend()
+    Stubs.flush()
+    reset()
+    routes["/status"] = { STOPPED, ON_EMPTY, ON_EMPTY, ON_EMPTY, ON_ONE }
+    routes["/start"] = '{"ok":true}'
+    routes["/connect"] = '{"ok":true}'
+    Bluetooth.onResume()
+    Stubs.flush()
+    Assert.contains(calls, "/start")
+    Assert.contains(calls, "/connect?addr=aa%3Abb&protocol=ble")
+    Assert.is_true(Bluetooth.isConnected(Bluetooth.current(), "AA:BB"))
+end
+
+-- 睡眠恢复：唤醒后蓝牙还开着且设备还在 → 不发开关 / 连接命令；重复唤醒是空操作。
+do
+    reset()
+    routes["/status"] = ON_ONE
+    Bluetooth.refresh()
+    Stubs.flush()
+    Bluetooth.onSuspend()
+    Stubs.flush()
+    reset()
+    routes["/status"] = ON_ONE
+    Bluetooth.onResume()
+    Bluetooth.onResume()
+    Stubs.flush()
+    Assert.is_true(#calls > 0, "唤醒应先读一次状态")
+    for _idx, call in ipairs(calls) do
+        Assert.is_nil(call:find("/start", 1, true), "不应重新打开蓝牙")
+        Assert.is_nil(call:find("/connect", 1, true), "不应重连已连上的设备")
+    end
+end
+
+-- 睡眠恢复：睡前关着 → 唤醒什么都不做。
+do
+    reset()
+    routes["/status"] = STOPPED
+    Bluetooth.refresh()
+    Stubs.flush()
+    Bluetooth.onSuspend()
+    Stubs.flush()
+    reset()
+    routes["/status"] = STOPPED
+    Bluetooth.onResume()
+    Stubs.flush()
+    Assert.len(calls, 0, "睡前关着，唤醒不发任何请求")
+end
+
 os.execute = real_execute

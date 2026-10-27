@@ -107,6 +107,23 @@ do
     Assert.eq(btfd.sets[2], "Connect=AA:BB:CC:DD:EE:FF")
 end
 
+-- 睡眠恢复：睡前开着且连着设备，睡眠中系统把蓝牙关了（BTstate=0、连接清空），
+-- 唤醒后重新打开并连回睡前设备（桩里连接表不会自己回来，连回超时只记日志不断言结果）。
+do
+    btfd.state = 1
+    btfd.hashes.ListConnected = { { bd_address = "AA:BB:CC:DD:EE:FF" } }
+    Bluetooth.refresh()
+    Bluetooth.onSuspend()
+    btfd.state = 0
+    btfd.hashes.ListConnected = {}
+    btfd.sets = {}
+    Bluetooth.onResume()
+    Stubs.flush()
+    Assert.eq(btfd.sets[1], "BTflightMode=0")
+    Assert.eq(btfd.sets[2], "BTenable=1:2")
+    Assert.contains(btfd.sets, "Connect=AA:BB:CC:DD:EE:FF")
+end
+
 -- 扫描：触发 triggerBTscan，结束时给出发现的设备；取消后不再回调。
 do
     btfd.sets = {}
