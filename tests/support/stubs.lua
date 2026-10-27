@@ -324,8 +324,15 @@ local function installLeafStubs()
     installIfMissing("ui/widget/widget", function()
         local Widget = {}
         Widget.__index = Widget
+        function Widget:extend(subclass)
+            subclass = subclass or {}
+            subclass.__index = subclass
+            return setmetatable(subclass, { __index = self })
+        end
         function Widget:new(options)
-            return setmetatable(options or {}, self)
+            local o = setmetatable(options or {}, self)
+            if o.init then o:init() end
+            return o
         end
         function Widget:getSize()
             return self.dimen

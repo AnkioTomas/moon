@@ -6,6 +6,7 @@ features.passcode.pattern：划过的点序号成串、点不重复、不足 4 �
 local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
+Kit.sections.lockscreen = { lock_screen = "ko" }
 
 local Pattern = require("features.passcode.pattern")
 local Modal = require("ui.themes.widgets.modal")

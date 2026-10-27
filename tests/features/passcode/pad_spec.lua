@@ -6,6 +6,8 @@ features.passcode.pad：接真 Modal 的整屏键盘；输入上限、确定键�
 local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
+-- 解锁页会读锁屏壁纸设置；默认非组合锁屏 → 不铺背景。
+Kit.sections.lockscreen = { lock_screen = "ko" }
 
 local UIManager = require("ui/uimanager")
 local Modal = require("ui.themes.widgets.modal")
