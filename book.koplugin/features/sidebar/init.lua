@@ -360,6 +360,7 @@ end
 
 --- 列表页的左右滑已被列表收走（翻页），到这里的是书籍页、遮罩或列表没消费的滑动。
 function Sidebar:onSwipeSidebar(_arg, ges)
+    if ges.direction == "diagonal" then return false end
     if ges.pos.x >= self.panel_w then
         self:onClose()
     elseif ges.direction == "west" then
