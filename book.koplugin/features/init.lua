@@ -118,6 +118,7 @@ Features.list = {
     "baike",
     "lockscreen",
     "wallpaper",
+    "bluetooth", -- 无 onCreate，进 list 只为收 onSuspend / onResume 做唤醒恢复蓝牙
     "passcode", -- 必须在 remote 之前：remote 的 onCreate / onResume 要看到已锁
     "ime",
     "remote",

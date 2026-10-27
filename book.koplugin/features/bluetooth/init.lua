@@ -7,6 +7,9 @@
 
 守护进程会接管蓝牙芯片，所以排第一。kindle / kobo 是同步原语，经 sync.lua 适配成与 khp 相同的异步接口：
 available()、status(cb)、setEnabled(on, cb)、setConnected(dev, connect, cb)、scan(on_update, on_done)、pair(dev, cb)。
+
+Kindle 睡眠会把蓝牙关掉且唤醒后不自动恢复：onSuspend 记下睡前状态（进程内即可，睡眠不重启进程），
+onResume 时睡前开着就重新打开，并把睡前连着的设备逐个连回。
 Android 的蓝牙在系统里，KOReader 没有接口；都没有时顶栏项与快捷开关都不出现。
 
 @module koplugin.book.features.bluetooth
@@ -15,6 +18,7 @@ Android 的蓝牙在系统里，KOReader 没有接口；都没有时顶栏项与
 require("l10n").apply()
 
 local UIManager = require("ui/uimanager")
+local logger = require("utils.log")
 
 local POLL_SECONDS = 30
 
@@ -158,6 +162,51 @@ end
 ---@return CancelHandle
 function Bluetooth.pair(dev, cb)
     return backend().pair(dev, refreshed(cb))
+end
+
+--- 睡前快照（蓝牙关着为 nil）；睡眠前的刷新是异步的，回来晚了不能写进快照。
+---@type { connections: BookBluetoothDevice[] }|nil
+local pre_sleep
+local sleeping = false
+
+---@param st BookBluetoothStatus|nil
+local function snapshot(st)
+    if not st then return end
+    pre_sleep = st.state == "on" and { connections = { unpack(st.connections or {}) } } or nil
+end
+
+--- 睡眠前（Features 钩子，FM / Reader 两个实例都会调）：先记缓存再刷新一次修正，
+--- Kindle 睡眠关掉的蓝牙靠唤醒时按这份快照恢复，这里不要动蓝牙本身。
+function Bluetooth.onSuspend()
+    if not Bluetooth.installed() then return end
+    sleeping = true
+    snapshot(status)
+    Bluetooth.refresh(function(st) if sleeping then snapshot(st) end end)
+end
+
+--- 唤醒（Features 钩子）：睡前开着才恢复——重新打开，连回睡前连着的设备。
+--- 快照取走即清，第二个插件实例的重复唤醒是空操作。
+function Bluetooth.onResume()
+    sleeping = false
+    local want = pre_sleep
+    pre_sleep = nil
+    if not want or not Bluetooth.installed() then return end
+    Bluetooth.setEnabled(true, function(ok, err)
+        if not ok then
+            logger.warn("book.bluetooth resume restore failed:", err)
+            return
+        end
+        if #want.connections == 0 then return end
+        Bluetooth.refresh(function(st)
+            for _idx, dev in ipairs(want.connections) do
+                if not Bluetooth.isConnected(st, dev.address) then
+                    Bluetooth.setConnected(dev, true, function(done, conn_err)
+                        if not done then logger.warn("book.bluetooth resume reconnect failed:", dev.address, conn_err) end
+                    end)
+                end
+            end
+        end)
+    end)
 end
 
 --- 顶栏读数：还没读过（没装就不会读）不显示；连上一台显示名字（没名字只显示图标），多台显示台数。
