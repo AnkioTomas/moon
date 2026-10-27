@@ -185,6 +185,7 @@ function Manager.install(item, dir, cb, on_progress)
     return Mirror.download(Manager.BASE_PATH .. "/" .. item.file, {
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
+        resume = true,
         on_progress = function(bytes) report("download", bytes, item.size) end,
     }, part, function(ok, err)
         if not ok then

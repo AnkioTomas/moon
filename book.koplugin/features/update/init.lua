@@ -218,6 +218,7 @@ local function installFrom(url, release, plugin_root, done, on_progress, on_inst
         url = url,
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
+        resume = true,
         max_bytes = MAX_ARCHIVE_BYTES,
         on_progress = on_progress,
     }, archive, function(ok, err)

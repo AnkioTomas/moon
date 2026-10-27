@@ -252,6 +252,7 @@ local function downloadParts(item, dir, idx, completed, done, report)
     Mirror.download(BASE_PATH .. "/" .. part.file, {
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
+        resume = true,
         on_progress = function(bytes)
             report("part", completed + bytes, item.size, idx, #item.parts)
         end,
