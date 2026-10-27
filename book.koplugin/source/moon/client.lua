@@ -157,7 +157,8 @@ function Client:_jsonAsync(method, path, opts, cb)
             end
             -- 长期令牌没有续期接口：401 直接标记失效，由上层引导重新填写令牌。
             if code == 401 or data.code == 401 then
-                done(nil, Auth.expire("moon", data.msg or _("令牌无效或未登录")))
+                if data.msg then logger.warn("moon auth expired", data.msg) end
+                done(nil, Auth.expire("moon", _("月读令牌无效或已失效，请重新填写")))
                 return
             end
             -- 非 2xx 一律失败。服务端 5xx/4xx 的错误页有时也是 JSON 且不带业务

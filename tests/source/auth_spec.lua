@@ -42,4 +42,19 @@ do
     Auth.reset()
 end
 
+do
+    -- 接口原文不能进弹窗；中文说明可以
+    Assert.is_true(Auth.isTechnical("NOT.LOGIN"))
+    Assert.is_true(Auth.isTechnical("NOT_LOGIN"))
+    Assert.is_true(Auth.isTechnical("HTTP 401"))
+    Assert.is_true(Auth.isTechnical("code=-2012"))
+    Assert.is_true(Auth.isTechnical("login failed"))
+    Assert.is_true(Auth.isTechnical(""))
+    Assert.is_true(Auth.isTechnical(nil))
+    Assert.is_nil(Auth.userDetail("NOT.LOGIN"))
+    Assert.eq(Auth.userDetail("京东读书登录已失效，请重新扫码登录"),
+        "京东读书登录已失效，请重新扫码登录")
+    Assert.is_false(Auth.isTechnical("长佩登录已失效。网页 Cookie 登录无法自动续期，请改用扫码登录"))
+end
+
 print("auth_spec ok")

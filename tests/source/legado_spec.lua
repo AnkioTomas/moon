@@ -174,6 +174,20 @@ do
     Assert.eq(requests[1].method, "POST")
     Assert.matches(requests[1].url, "/reader3/getChapterList%?accessToken=T2$")
     Assert.matches(requests[1].body, '"url":"bu"')
+
+    -- 重登仍失败：标记登录失效，给人看的中文说明（放在复用 T2 的用例之后）。
+    local Auth = require("source.auth")
+    Auth.reset()
+    requests, replies = {}, {
+        '{"isSuccess":false,"errorMsg":"NEED_LOGIN","data":"NEED_LOGIN"}',
+        '{"isSuccess":false,"errorMsg":"bad password"}',
+    }
+    local err
+    Client.shelfAsync(function(_v, e) err = e end)
+    Assert.eq(err, "阅读服务器登录已失效，请检查账号密码")
+    Assert.is_true(Auth.expired("legado"))
+    Auth.reset()
+
     cfg.username, cfg.password = nil, nil
 end
 

@@ -345,6 +345,35 @@ do
     MoonSettings.get("source").library_mixed = was_mixed
 end
 
+-- 登录失效弹窗：永远中文模板；接口原文（NOT.LOGIN）不进正文；中文说明才附上。
+do
+    local Stubs = require("support.stubs")
+    local Registry = require("source.registry")
+    local saved_meta = Registry.meta
+    Registry.meta = function(id)
+        return { name = id == "jdread" and "京东读书" or id }
+    end
+    settings.jdread = { login = function() end }
+
+    Themed.made = {}
+    Sync.promptLogin({ desktop = desktop }, "jdread", "NOT.LOGIN")
+    Stubs.flush()
+    local box = Themed.last("confirm")
+    Assert.not_nil(box)
+    Assert.matches(box.text, "京东读书%s+登录已失效")
+    Assert.is_true(not tostring(box.text):find("NOT.LOGIN", 1, true))
+    Assert.eq(box.ok_text, "重新登录")
+
+    Themed.made = {}
+    Sync.promptLogin({ desktop = desktop }, "jdread",
+        "京东读书登录已失效，请重新扫码登录")
+    Stubs.flush()
+    box = Themed.last("confirm")
+    Assert.matches(box.text, "请重新扫码登录")
+
+    Registry.meta = saved_meta
+end
+
 -- 本地文件变了（远程上传）：只重扫本地书籍源，别的源不动
 do
     local scanned = {}

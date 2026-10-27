@@ -283,6 +283,7 @@ end
 
 --- 源登录失效（静默续期失败）时引导重新登录。由 main 经 ``source.auth`` 注入；
 --- 每个源每次运行最多弹一次（见 source.auth）；源设置有 login / open 就给直达按钮。
+--- 正文永远是中文模板；接口原文（NOT.LOGIN 等）不进弹窗，额外中文说明才附在后面。
 ---@param plugin table
 ---@param id string
 ---@param msg string|nil
@@ -291,7 +292,11 @@ function Sync.promptLogin(plugin, id, msg)
         local meta = Registry.meta(id)
         local name = meta and meta.name or id
         local text = T(_("%1 登录已失效，请重新登录。后台同步会暂停该数据源，直到重新登录。"), name)
-        if msg and msg ~= "" then text = text .. "\n\n" .. msg end
+        -- 只附中文说明（扫码提示等）；NOT.LOGIN / HTTP 401 一类接口原文丢掉。
+        local detail = Auth.userDetail(msg)
+        if detail and detail ~= "" then
+            text = text .. "\n\n" .. detail
+        end
         local setting = require("desktop.pages.setting.source").loadSetting(id)
         local login = setting and (setting.login or setting.open)
         if type(login) == "function" then
