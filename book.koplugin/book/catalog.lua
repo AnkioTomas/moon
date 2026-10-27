@@ -32,6 +32,7 @@ reading_stats 提供统计。
 ---@field read_status "read"|"unread"|nil 按独立阅读状态筛选
 ---@field hidden boolean|nil 只查软删除的书；缺省只查未软删除的
 ---@field downloaded boolean|nil 只查询已下载到本地的书（口径同 BookDB.isDownloaded）
+---@field offline_only boolean|nil 离线书架：只列能离线读的行（源书架缓存 ∪ 已下载 ∪ 卷行），只作用于声明 shelf_cache 的源（05 A4）
 ---@field source_id string|nil 混合模式下按书行所属源筛选
 ---@field force boolean|nil 强制重扫、忽略扫描缓存（本地源手动刷新）
 ---@field sort "title"|"author"|"recent_read"|"recent_added"|nil 排序字段
@@ -160,6 +161,8 @@ local function toBook(row, source_id)
         path = row.path,
         inserted_at = row.inserted_at,
         downloaded = row.downloaded,
+        -- 书架缓存标记由源的书架投影给出（查询期算出的展示字段，不是 books 列）。
+        cache_mark = row.cache_mark == true,
         chapter_idx = row.chapter_idx,
         chapter_title = row.chapter_title,
         page = row.page,
@@ -314,6 +317,107 @@ local function chapterSources()
     return ids
 end
 
+--- 本次查询真正覆盖的源 id：source_id 筛选再收窄一层（混合模式时 scope 是多源列表）。
+---@param scope string|string[]
+---@param filter string|nil opts.source_id
+---@return string[]
+local function scopedIds(scope, filter)
+    if type(filter) == "string" and filter ~= "" then return { filter } end
+    if type(scope) == "table" then return scope end
+    if type(scope) == "string" and scope ~= "" then return { scope } end
+    return {}
+end
+
+--- 声明了 shelf_cache 的源的书架投影（同步、只读本地记忆，缺省不触网）。
+--- 「源声明了能力」与「实现了方法」两个条件都要满足；未声明 / 未实现的源直接跳过。
+---@param ids string[]
+---@return table<string, { series_ids: table, mark: table, cover: table }> source_id → 投影
+function Catalog.shelfCaches(ids)
+    local out = {}
+    local Registry = require("source.registry")
+    for _idx, id in ipairs(ids or {}) do
+        if type(id) == "string" and id ~= "" and out[id] == nil then
+            local source = Registry.resolve(id)
+            local caps = source and type(source.capabilities) == "function" and source:capabilities()
+            if caps and caps.shelf_cache == true and type(source.shelfCache) == "function" then
+                local projection = source:shelfCache()
+                if type(projection) == "table" then out[id] = projection end
+            end
+        end
+    end
+    return out
+end
+
+--- 范围内是否有源声明了书架缓存（离线书架的触发条件之一，见 desktop.pages.library）。
+---@param scope string|string[]
+---@return boolean
+function Catalog.hasShelfCache(scope)
+    return next(Catalog.shelfCaches(scopedIds(scope, nil))) ~= nil
+end
+
+--- 行是否在源的书架投影里；值是查询期算出的展示字段，不是 books 列。
+---@param shelves table<string, { mark: table }>
+---@param source_id string|nil
+---@param stable_id string|nil
+---@return boolean|nil
+local function cachedMark(shelves, source_id, stable_id)
+    local projection = source_id and shelves[source_id]
+    if not projection or type(stable_id) ~= "string" then return nil end
+    return (projection.mark or {})[stable_id] == true or nil
+end
+
+--- 单条 IN 的参数个数：SQLite 默认上限 999 个绑定参数，别的筛选与下载子句也要占位。
+local CACHE_IN_CHUNK = 500
+
+--- 离线可见集 where 片段：已缓存 series ∪ 已下载 ∪ 卷行（stable_id 含 ':'）。
+--- 只约束声明了 shelf_cache 的源；同范围里其它源的行原样放行（05 A4）。
+---@param BookDB table book.books_db
+---@param ids string[] 本次查询覆盖的源
+---@param shelves table<string, table> 源 id → 投影
+---@param chapter_sources string[]|nil
+---@param args table where 绑定参数（追加）
+---@return string|nil 没有声明 shelf_cache 的源时返回 nil（一行不改）
+local function offlineClause(BookDB, ids, shelves, chapter_sources, args)
+    chapter_sources = chapter_sources or {}
+    local declaring, series, all = {}, {}, true
+    for _idx, id in ipairs(ids) do
+        local projection = shelves[id]
+        if projection then
+            declaring[#declaring + 1] = id
+            for stable_id in pairs(projection.series_ids or {}) do series[#series + 1] = tostring(stable_id) end
+        else
+            all = false
+        end
+    end
+    if #declaring == 0 then return nil end
+    table.sort(series)
+    local head = ""
+    if not all then
+        table.sort(declaring)
+        local marks = {}
+        for _idx, id in ipairs(declaring) do
+            marks[#marks + 1] = "?"
+            args[#args + 1] = id
+        end
+        head = "b.source_id NOT IN (" .. table.concat(marks, ",") .. ") OR "
+    end
+    -- series 可能上千条：按块拆成多个 OR 组，绑定参数总数就不会撞上 SQLite 的上限。
+    local chunks = {}
+    for start = 1, #series, CACHE_IN_CHUNK do
+        local marks = {}
+        for i = start, math.min(start + CACHE_IN_CHUNK - 1, #series) do
+            marks[#marks + 1] = "?"
+            args[#args + 1] = series[i]
+        end
+        chunks[#chunks + 1] = "b.stable_id IN (" .. table.concat(marks, ",") .. ")"
+    end
+    if #chunks == 0 then chunks[1] = "0" end
+    local downloaded = BookDB.downloadedClause(chapter_sources, args)
+    return "(" .. head .. "(" .. table.concat(chunks, " OR ") .. ")"
+        .. " OR " .. downloaded
+        .. " OR instr(b.stable_id, ':') > 0)"
+end
+
 --- 书库分页查询：books 筛选 + LEFT JOIN pending_progress 取进度与最近阅读排序；每行带 downloaded。
 ---@param source_id string|string[]
 ---@param opts table|nil limit/offset/sort/sort_desc/chapter_sources 及 BookListOpts 的筛选项
@@ -324,6 +428,9 @@ function Catalog.listBooks(source_id, opts)
     local BookDB = require("book.books_db")
     require("book.progress_db")
     local where, args = DB.sourceClause("b.source_id", source_id)
+    -- 书架缓存投影：在线用来标「已缓存」，离线用来收窄可见集；两者都只问声明了 shelf_cache 的源。
+    local ids = scopedIds(source_id, opts.source_id)
+    local shelves = Catalog.shelfCaches(ids)
     -- 「最近阅读」列整个书架：在架书全列；Kavita 卷行这种「非书架成员但仍是有效身份」的
     -- 只在有进度时进来（进度记在卷行上）。其它排序 / 筛选只列在架书。
     where = where .. (opts.sort == "recent_read"
@@ -388,6 +495,11 @@ function Catalog.listBooks(source_id, opts)
     if opts.downloaded then
         where = where .. " AND " .. BookDB.downloadedClause(opts.chapter_sources, args)
     end
+    if opts.offline_only then
+        -- 放在 where 里（不是 SELECT）：count 与 select 共用，分页与总数自动一致。
+        local clause = offlineClause(BookDB, ids, shelves, opts.chapter_sources, args)
+        if clause then where = where .. " AND " .. clause end
+    end
     -- 一律 LEFT JOIN：「最近阅读」按 max(本机进度时间, 云端最近阅读时间 b.read_at) 倒序，
     -- 都没有的书排在后面按加入时间倒序。首页「最近阅读 / 当前阅读」走 ProgressDB.recent，仍只列有进度的书。
     local join = " LEFT JOIN pending_progress p ON p.source_id=b.source_id AND p.stable_id=b.stable_id"
@@ -428,6 +540,7 @@ function Catalog.listBooks(source_id, opts)
                 read_state = tonumber(result[11][i]) or 0,
                 path = result[12][i],
                 downloaded = tonumber(result[13][i]) == 1,
+                cache_mark = cachedMark(shelves, result[1][i], result[2][i]),
                 deleted = 0,
             }
         end
@@ -484,6 +597,7 @@ function Catalog.listBooks(source_id, opts)
             read_state = tonumber(result[11][i]) or 0,
             path = result[12][i],
             downloaded = tonumber(result[13][i]) == 1,
+            cache_mark = cachedMark(shelves, result[1][i], result[2][i]),
             deleted = 0,
         }
     end
@@ -510,6 +624,7 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             search = opts.search,
             read_status = opts.read_status,
             downloaded = opts.downloaded,
+            offline_only = opts.offline_only,
             hidden = opts.hidden,
             chapter_sources = chapterSources(),
             source_id = opts.source_id,

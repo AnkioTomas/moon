@@ -67,6 +67,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 ---@field inserted_at integer|nil 本行首次写入时间；0 表示仅身份行；内存展示行可能没有
 ---@field path string|nil 本地文件路径；身份解析唯一入口
 ---@field downloaded boolean|nil 展示用已下载标记（查询时按 downloadedClause 算出，非 books 列）
+---@field cache_mark boolean|nil 展示用「已缓存」标记（查询时按属主源的 shelfCache 投影算出，非 books 列）
 ---@field download string|nil OPDS 等书城条目的下载地址，不入库
 ---@field deleted integer|nil 0=在架有效，1=软删/非成员
 ---@field sync_status integer|nil 0=待上传，1=已同步

@@ -104,6 +104,17 @@ do -- count 参数：显式传入优先，否则取 books 数量；rows 为 nil 
     Assert.eq(#empty.data, 0)
 end
 
+do -- 书架缓存标记：行上的 cache_mark 原样透传成布尔（05 A2）
+    local list = list({
+        { stable_id = "700", cache_mark = true },
+        { stable_id = "701", cache_mark = nil },
+        { stable_id = "702", cache_mark = false },
+    })
+    Assert.is_true(list.data[1].cache_mark, "源书架投影命中：已缓存")
+    Assert.is_false(list.data[2].cache_mark, "缺字段按未缓存")
+    Assert.is_false(list.data[3].cache_mark)
+end
+
 do -- recent 与 list 同构（无显式 count）
     local r = list({
         { stable_id = "x", title = "最近读" },
