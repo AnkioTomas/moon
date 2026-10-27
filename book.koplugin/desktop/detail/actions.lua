@@ -84,7 +84,8 @@ function Detail:chooseCacheRange(with_reviews)
         })
         if with_reviews then
             table.insert(items, 2, { widget = function(width)
-                return require("ui.themes.widgets.text").box("body", _("段评请求频繁，可能导致账号被风控封号，请谨慎使用。"), width)
+                return require("ui.themes.widgets.text").box("body", _("段评请求频繁，可能导致账号被风控封号，请谨慎使用。"), width,
+                    { bg = require("ui.themes").current().dialog.bg })
             end })
         end
     end

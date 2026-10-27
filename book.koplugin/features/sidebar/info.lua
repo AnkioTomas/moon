@@ -120,7 +120,7 @@ function Info.build(snapshot, width, height, show_parent, on_exit)
         col[#col + 1] = Text.line("body", _("暂无简介"), { width = width, color = t.color.muted })
     elseif desc_h > Theme.px(20) then
         col[#col + 1] = Text.box("body", desc, width, {
-            height = desc_h, color = t.color.muted, ellipsis = true,
+            height = desc_h, color = t.color.muted, ellipsis = true, transparent = true,
         })
     end
     return col

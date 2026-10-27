@@ -229,7 +229,7 @@ function Detail:buildHead(w, owner, primary)
     local author = Book.author(book)
     local top = VerticalGroup:new{
         align = "left",
-        Text.box("title", Book.title(book), sw, { max_lines = 3 }),
+        Text.box("title", Book.title(book), sw, { max_lines = 3, transparent = true }),
         VerticalSpan:new{ width = small },
         Text.line("body", author ~= "" and author or _("未知作者"), { width = sw }),
     }
@@ -419,7 +419,7 @@ function Detail:buildIntro(w, max_h)
     local title = Common.sectionTitle(_("简介"), w)
     local gap = Theme.px(t.space.xs)
     local box_h = max_h - title:getSize().h - gap
-    local box = Text.box("body", desc, w, { color = t.color.muted })
+    local box = Text.box("body", desc, w, { color = t.color.muted, transparent = true })
     if box:getSize().h <= box_h then
         return VerticalGroup:new{ align = "left", title, VerticalSpan:new{ width = gap }, box }
     end
@@ -432,7 +432,7 @@ function Detail:buildIntro(w, max_h)
         align = "left",
         title,
         VerticalSpan:new{ width = gap },
-        Text.box("body", desc, w, { color = t.color.muted, height = box_h - more_h, ellipsis = true }),
+        Text.box("body", desc, w, { color = t.color.muted, height = box_h - more_h, ellipsis = true, transparent = true }),
         RightContainer:new{ dimen = Geom:new{ w = w, h = more_h }, more },
     }, function()
         TextViewer:new{ title = Book.title(self.book), text = desc }:show()

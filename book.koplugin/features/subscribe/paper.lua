@@ -149,7 +149,7 @@ function Paper.view(page, w, h)
     local bullet_w = Text.line("title", "★"):getSize().w
     local star_w = Theme.px(56)
     local text_w = iw - bullet_w - sm - star_w
-    local title_h = Text.box("body", "国\n国", text_w, { max_lines = 2, bold = true }):getSize().h
+    local title_h = Text.box("body", "国\n国", text_w, { max_lines = 2, bold = true, transparent = true }):getSize().h
     local meta_h = Text.line("caption", "国", {}):getSize().h
     local row_h = title_h + meta_h + sm * 2 + Theme.px(t.space.xs)
     local avail = h - head:getSize().h - title:getSize().h - filter:getSize().h - Theme.px(t.control.height)
