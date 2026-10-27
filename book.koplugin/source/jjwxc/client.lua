@@ -49,7 +49,7 @@ end
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return HttpJob
 function Client.searchAsync(keyword, cb)
-    return appGet("/search", { keyword = Text.urlEncode(keyword), type = 1, page = 1, versionCode = 206 }, cb, 1, 5 * 60)
+    return appGet("/search", { keyword = Text.urlEncode(keyword), type = 1, page = 1, versionCode = 206 }, cb, 1)
 end
 
 ---@param novel_id string

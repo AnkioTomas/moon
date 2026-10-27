@@ -165,14 +165,17 @@ function Source:searchAsync(keyword, cb)
 end
 
 --- 书城浏览：排序 / 频道 / 分类 / 子分类四行 chip（选项来自书库筛选接口），节点是「频道:分类:子分类:排序」，
---- 缺省男生原创按点击量；选项树缓存在实例上。
+--- 缺省男生原创按点击量；选项每次都调 client，新鲜度由数据获取层缓存（source.store_cache）管。
 ---@param opts { node?: string, limit?: integer }
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:browseAsync(opts, cb)
     local handle = {}
+    -- 回调同步完成时 load 已换上在途句柄，外层赋值不能再覆盖（同 jdread 的 mine 记法）。
+    local step = 0
     local function load(options)
-        local channel, cat1, cat2, order = (opts.node or "0:a:a:click"):match("^(%w+):(%w+):(%w+):(%w+)$")
+        step = step + 1
+        local channel, cat1, cat2, order = (opts.node or "0:a:a:click"):match("^(%w+):(%w+):(%w+)$")
         local function chips(rows, id_of)
             local out = {}
             for _idx, row in ipairs(rows) do
@@ -210,18 +213,14 @@ function Source:browseAsync(opts, cb)
                 end)
         end, opts.limit or 60, groups, cb)
     end
-    if self._classify then
-        load(self._classify)
-    else
-        handle.inner = Client.classifyOptionsAsync(function(wire, err)
-            if not wire then
-                cb(nil, err)
-                return
-            end
-            self._classify = wire.data
-            load(self._classify)
-        end)
-    end
+    local first = Client.classifyOptionsAsync(function(wire, err)
+        if not wire then
+            cb(nil, err)
+            return
+        end
+        load(wire.data)
+    end)
+    if step == 0 then handle.inner = first end
     function handle.cancel()
         if handle.inner then handle.inner.cancel() end
     end

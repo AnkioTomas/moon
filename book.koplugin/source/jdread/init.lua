@@ -30,7 +30,6 @@ end
 
 ---@class JdreadSource : SourceBase
 ---@field _client JdreadClient
----@field _rank_menu { types: table[], categories: table<string, table[]> }|nil
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -81,7 +80,7 @@ end
 local RANK_PAGE = 20
 
 --- 书城浏览：榜单类别（出版 / 男生 / 女生）、榜单、周期、分类四行 chip，节点是「类别:榜单:周期:分类」，
---- 缺省出版首个榜单的周榜。菜单与分类树取一次缓存在实例上；分类 id 只认对应类别根下一级。
+--- 缺省出版首个榜单的周榜。菜单与分类树每次现取，新鲜度由数据获取层缓存（source.store_cache）管；分类 id 只认对应类别根下一级。
 ---@param opts { node?: string, limit?: integer }
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -90,7 +89,10 @@ function Source:browseAsync(opts, cb)
     function handle.cancel()
         if handle.inner then handle.inner.cancel() end
     end
+    -- 回调同步完成时已在 show 里换上在途句柄，外层赋值不能再覆盖（同 client 书架分批的 mine 记法）。
+    local step = 0
     local function show(menu)
+        step = step + 1
         local tid, kid, period, cat = (opts.node or ""):match("^(%d+):(%d+):(%a+):(%d*)$")
         local function pick(rows, key, want)
             for _idx, row in ipairs(rows) do
@@ -137,22 +139,20 @@ function Source:browseAsync(opts, cb)
             end)
         end, opts.limit or 40, groups, cb)
     end
-    if self._rank_menu then
-        show(self._rank_menu)
-        return handle
-    end
-    handle.inner = self._client:rankTypesAsync(function(types, err)
+    local first = self._client:rankTypesAsync(function(types, err)
         if not types then cb(nil, err); return end
-        handle.inner = self._client:categoriesAsync(function(tree, err2)
+        local mine = step
+        local second = self._client:categoriesAsync(function(tree, err2)
             if not tree then cb(nil, err2); return end
             local categories = {}
             for _idx, root in ipairs(tree.data.category_list) do
                 categories[root.show_name] = root.sub_category
             end
-            self._rank_menu = { types = types.data, categories = categories }
-            show(self._rank_menu)
+            show({ types = types.data, categories = categories })
         end)
+        if step == mine then handle.inner = second end
     end)
+    if step == 0 then handle.inner = first end
     return handle
 end
 

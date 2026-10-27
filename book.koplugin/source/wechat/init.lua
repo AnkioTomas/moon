@@ -1050,13 +1050,16 @@ function Source:searchAsync(keyword, cb)
 end
 
 --- 书城浏览：三行 chip（榜单 / 分类 / 所选分类的子分类）+ 所选节点的书，节点是榜单或分类 id，缺省是第一个榜单。
---- 目录树只在实例上缓存精简版；榜单页每次现拉。
+--- 目录树与榜单书每次都调 client，新鲜度由数据获取层缓存（source.store_cache）管，源不留实例缓存。
 ---@param opts { node?: string, limit?: integer }
 ---@param cb fun(res: { data: Book[], groups: table[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:browseAsync(opts, cb)
     local handle = {}
+    -- 回调同步完成时 load 已换上在途句柄，外层赋值不能再覆盖（同 jdread 的 mine 记法）。
+    local step = 0
     local function load(tree)
+        step = step + 1
         local node = opts.node or (tree.rankings[1] and tree.rankings[1].id)
         if not node then
             cb(nil, _("没有可浏览的榜单"))
@@ -1091,18 +1094,14 @@ function Source:browseAsync(opts, cb)
             end)
         end, opts.limit or 60, groups, cb)
     end
-    if self._store_tree then
-        load(self._store_tree)
-    else
-        handle.inner = self._client:storeCategoriesAsync(function(wire, err)
-            if not wire then
-                cb(nil, err)
-                return
-            end
-            self._store_tree = Mapper.storeTree(wire)
-            load(self._store_tree)
-        end)
-    end
+    local first = self._client:storeCategoriesAsync(function(wire, err)
+        if not wire then
+            cb(nil, err)
+            return
+        end
+        load(Mapper.storeTree(wire))
+    end)
+    if step == 0 then handle.inner = first end
     function handle.cancel()
         if handle.inner then handle.inner:cancel() end
     end

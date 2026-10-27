@@ -27,8 +27,6 @@ local WEB = "https://m.qidian.com"
 local UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) "
     .. "Version/16.0 Mobile/15E148 Safari/604.1"
 local PAGE_SIZE = 20
--- 匿名榜单 / 搜索页走 http 缓存：切榜单、回书城不再每次联网。
-local LIST_TTL = 5 * 60
 
 ---@return string|nil
 function Client.cookie()
@@ -342,7 +340,7 @@ function Client.searchAsync(keyword, cb)
         local data = Mapper.pageData(html)
         if not data then cb(nil, _("起点书籍信息为空")); return end
         cb(data)
-    end, LIST_TTL)
+    end)
 end
 
 --- 榜单页（手机网页 SSR，一页 20 本）。path 如 /rank/yuepiao/catid21/。
@@ -355,7 +353,7 @@ function Client.rankAsync(path, cb)
         local data = Mapper.pageData(html)
         if not data or type(data.records) ~= "table" then cb(nil, _("起点榜单为空")); return end
         cb(data)
-    end, LIST_TTL)
+    end)
 end
 
 ---@param book_id string

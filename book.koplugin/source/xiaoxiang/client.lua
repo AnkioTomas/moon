@@ -20,9 +20,6 @@ local _ = require("gettext")
 
 local Client = {}
 
--- 匿名榜单 / 搜索页走 http 缓存：切榜单、回书城不再每次联网。
-local LIST_TTL = 5 * 60
-
 --- 已保存的登录 Cookie。
 ---@return string|nil
 function Client.cookie()
@@ -36,11 +33,10 @@ local UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/6
 ---@param url string
 ---@param cb fun(html: string|nil, err: string|nil)
 ---@return HttpJob
-local function page(url, cb, cache_ttl)
+local function page(url, cb)
     return Request.get(url, {
         headers = { ["User-Agent"] = UA },
         timeout = require("http.timeout").net(1),
-        cache_ttl = cache_ttl,
     }, function(raw, err)
         if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
         cb(raw)
@@ -201,7 +197,7 @@ function Client.searchAsync(keyword, cb)
     return page("https://www.xxsy.net/search?sort=0&s_wd=" .. Text.urlEncode(keyword), function(html, err)
         if not html then cb(nil, err); return end
         cb(Mapper.search(html))
-    end, LIST_TTL)
+    end)
 end
 
 --- 榜单页（一页 20 本）；name 是手机站 /rank/<name>。
@@ -212,7 +208,7 @@ function Client.rankAsync(name, cb)
     return page("https://m.xxsy.net/rank/" .. name, function(html, err)
         if not html then cb(nil, err); return end
         cb(Mapper.rank(html))
-    end, LIST_TTL)
+    end)
 end
 
 --- 取页面并在子进程里按 parse 解析；parse 返回 nil 以外的值都算成功。

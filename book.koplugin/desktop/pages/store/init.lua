@@ -20,6 +20,7 @@ OPDS 导航项带 feed，点开压入 trail 下钻，「上级」出栈。
 
 local Library = require("desktop.pages.library")
 local BookStore = require("book.store")
+local StoreCache = require("source.store_cache")
 local MoonSettings = require("utils.settings")
 local UIManager = require("ui/uimanager")
 local Input = require("ui.input")
@@ -122,6 +123,13 @@ function Store:reset()
     self.trail = {}
     self.page = 1
     self.total = 0
+end
+
+--- 切回书城 / 桌面唤醒：丢弃已加载结果重问数据层；新鲜度由 source.store_cache 的 TTL 管，命中直接回。
+---@param _changed boolean|nil 桌面切页签时是否为换页；本页不分这两种情况
+function Store:activate(_changed)
+    self.state = nil
+    self.books = nil
 end
 
 Store.onCancel = Store.cancel
@@ -323,7 +331,7 @@ function Store:fetch()
         self.desktop:updateView()
     end
     if browsing then
-        self.fetch_cancel = provider.backend:browseAsync({ node = self.node, limit = BROWSE_RESULTS }, onResult)
+        self.fetch_cancel = StoreCache.browse(provider.backend, { node = self.node, limit = BROWSE_RESULTS }, onResult)
     elseif provider.store then
         self.fetch_cancel = require("store." .. provider.id):listStoreAsync({
             page = 1,
@@ -332,7 +340,7 @@ function Store:fetch()
             feed = top and top.feed,
         }, onResult)
     else
-        self.fetch_cancel = provider.source:searchAsync(search, onResult)
+        self.fetch_cancel = StoreCache.search(provider.source, search, onResult)
     end
 end
 

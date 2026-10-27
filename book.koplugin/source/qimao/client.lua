@@ -15,9 +15,6 @@ local _ = require("gettext")
 
 local Client = {}
 
--- 匿名榜单 / 搜索页走 http 缓存：切榜单、回书城不再每次联网。
-local LIST_TTL = 5 * 60
-
 --- 解回包：data 在才算成功；errors.title 是服务端给的人话。
 ---@param raw string|nil
 ---@param err any
@@ -151,7 +148,7 @@ function Client.searchAsync(keyword, page, cb)
     return get(Protocol.BC, "/search/v1/words", {
         extend = "", tab = "0", gender = "0", refresh_state = "8",
         page = page, wd = keyword, is_short_story_user = "0",
-    }, nil, cb, LIST_TTL)
+    }, nil, cb)
 end
 
 local WWW = "https://www.qimao.com"
@@ -166,7 +163,6 @@ local function wwwGet(path, params, cb)
     return Request.get(url, {
         accept = "application/json",
         headers = { Referer = WWW .. "/shuku/a-a-a-a-a-a-a-click-1/" },
-        cache_ttl = LIST_TTL,
         timeout = require("http.timeout").net(0.5),
     }, function(raw, err) cb(Client.decode(raw, err)) end)
 end

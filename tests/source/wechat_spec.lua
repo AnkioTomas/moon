@@ -1307,6 +1307,41 @@ do
     remembered_stats_books.last_snapshot = nil
 end
 
+-- 书城浏览：目录树与榜单书每次都调 client，源不留实例缓存（新鲜度归 client 的 http 缓存）
+do
+    local cat_calls, book_calls = 0, 0
+    fake_client.storeCategoriesAsync = function(_, cb)
+        cat_calls = cat_calls + 1
+        cb({ data = { { categories = {
+            { CategoryId = "rising", title = "飙升榜", ranklist = 1, sublist = {} },
+        } } } })
+        return { cancel = function() end }
+    end
+    fake_client.storeBooksAsync = function(_, _node, _offset, _is_rank, cb)
+        book_calls = book_calls + 1
+        cb({ books = {}, hasMore = 0 })
+        return { cancel = function() end }
+    end
+    local src = WeChat.new()
+    local res
+    src:browseAsync({}, function(r) res = r end)
+    Assert.eq(cat_calls, 1)
+    Assert.eq(res.groups[1].chips[1].id, "rising")
+    src:browseAsync({}, function(r) res = r end)
+    Assert.eq(cat_calls, 2, "源不缓存目录树，每次浏览都调 client")
+    Assert.eq(book_calls, 2, "榜单书每次调 client")
+
+    -- 目录同步回完、榜单请求在途：取消必须打到在途请求，外层赋值不能覆盖它。
+    local cancelled = 0
+    fake_client.storeBooksAsync = function()
+        return { cancel = function() cancelled = cancelled + 1 end }
+    end
+    local browse_handle = src:browseAsync({}, function() error("请求尚未完成") end)
+    browse_handle.cancel()
+    Assert.eq(cancelled, 1)
+    fake_client.storeCategoriesAsync, fake_client.storeBooksAsync = nil, nil
+end
+
 -- 还原打桩，避免影响本文件之后的其它用例
 for name, factory in pairs(saved_preload) do
     package.preload[name] = factory

@@ -22,8 +22,6 @@ local SOURCE_ID = "changpei"
 local LOGIN_REQUIRED = 9996
 
 local API = "https://www.gongzicp.com/webapi"
--- 匿名榜单 / 搜索页走 http 缓存：切榜单、回书城不再每次联网。
-local LIST_TTL = 5 * 60
 Client.USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
     .. "Chrome/126.0.0.0 Safari/537.36"
 local HEADERS = {
@@ -202,7 +200,7 @@ end
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return HttpJob
 function Client.searchAsync(keyword, cb)
-    return get("/search/novels", "page=1&k=" .. Text.urlEncode(keyword), nil, cb, true, LIST_TTL)
+    return get("/search/novels", "page=1&k=" .. Text.urlEncode(keyword), nil, cb, true)
 end
 
 ---@param novel_id string
@@ -215,7 +213,7 @@ end
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return HttpJob
 function Client.rankNavAsync(cb)
-    return get("/novel/rankingNav", "", nil, cb, true, LIST_TTL)
+    return get("/novel/rankingNav", "", nil, cb, true)
 end
 
 ---@param rid integer
@@ -224,7 +222,7 @@ end
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return HttpJob
 function Client.rankAsync(rid, tid, page, cb)
-    return get("/novel/rankingGetList", ("tid=0&rid=%d&date=%d&page=%d"):format(rid, tid, page), nil, cb, true, LIST_TTL)
+    return get("/novel/rankingGetList", ("tid=0&rid=%d&date=%d&page=%d"):format(rid, tid, page), nil, cb, true)
 end
 
 --- 网页书架（根目录，不含分组里的书），逐页取到空页为止。

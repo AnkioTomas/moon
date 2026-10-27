@@ -573,7 +573,7 @@ do
     Toc.read, Toc.put, Chapter.openWithUi = orig_read, orig_put, orig_open
 end
 
--- 书城浏览：榜单类别 / 榜单 / 周期 / 分类四行 chip，选项树只取一次
+-- 书城浏览：榜单类别 / 榜单 / 周期 / 分类四行 chip，菜单每次现取（缓存归数据获取层）
 do
     local calls, types_calls = {}, 0
     fake_client.rankTypesAsync = function(_, cb)
@@ -618,9 +618,9 @@ do
     src:browseAsync({ node = "2:13:week:10944" }, function(r) res = r end)
     Assert.len(res.groups, 3)
     Assert.eq(res.groups[3].chips[2].title, "玄幻频道")
-    Assert.eq(types_calls, 1)
+    Assert.eq(types_calls, 3, "源不留菜单缓存，每次浏览都现取")
 
-    -- 缓存菜单后再次切榜单：返回的句柄仍能取消当前在途请求。
+    -- 再次切榜单：返回的句柄仍能取消当前在途请求（菜单两个请求先行、同步回完才发榜单请求）。
     local cancelled = 0
     fake_client.rankAsync = function()
         return { cancel = function() cancelled = cancelled + 1 end }
@@ -631,7 +631,7 @@ do
         handle:cancel()
     end
     Assert.eq(cancelled, 2)
-    Assert.eq(types_calls, 1)
+    Assert.eq(types_calls, 5)
 end
 
 -- 书城搜索：product_search_infos 映射成 Book，源因此出现在书城来源下拉里
