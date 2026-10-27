@@ -81,17 +81,20 @@ function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_t
         badge = true,
         ribbon = status,
         download = status,
+        cached = status,
         -- 图书馆右下角「更多」进详情（角标自带点击区，先于整卡收到点按）；书城整卡即详情，不画「更多」。
         more = status and function() ctx.on_detail(book) end,
         show_parent = ctx.desktop,
     }
     if lib and lib.kobo then
-        -- Kobo：封面上不留东西，下载状态 / 进度 / 更多都收到封面下一行。
-        opts.badge, opts.ribbon, opts.download, opts.more = false, false, false, false
+        -- Kobo：封面上不留东西，下载 / 缓存状态、进度、更多都收到封面下一行。
+        opts.badge, opts.ribbon, opts.download, opts.cached, opts.more = false, false, false, false, false
         opts.status_row = status
         if status then
-            -- 未下载优先，已下载显示阅读进度条。
-            if book.downloaded == false then
+            -- 缓存优先（同槽位），其次未下载，已下载显示阅读进度条。
+            if book.cache_mark then
+                opts.status_icon = "cached"
+            elseif book.downloaded == false then
                 opts.status_icon = "cloud_download"
             else
                 opts.status_pct = Book.isRead(book) and 100 or Book.pct(book)

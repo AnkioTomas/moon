@@ -46,8 +46,9 @@ package.preload["ui.widgets.plain_cover"] = function()
 end
 package.preload["ui.themes.widgets.icon"] = function()
     return {
-        widget = function()
+        widget = function(opts)
             return {
+                name = opts and opts.name,
                 getSize = function() return { w = 10, h = 10 } end,
                 paintTo = function() end,
                 free = function() end,
@@ -211,14 +212,43 @@ Assert.eq(ribbon.overlap_offset[2], 0)
 local marks = {}
 local mark = Book.downloadMark(120)
 mark:paintTo({
-    paintCircle = function(_, cx, cy, r)
-        marks[#marks + 1] = { cx = cx, cy = cy, r = r }
+    paintCircle = function(_, cx, cy, r, color)
+        marks[#marks + 1] = { cx = cx, cy = cy, r = r, color = color }
     end,
 }, 0, 0)
 Assert.len(marks, 1)
 Assert.eq(marks[1].r, 9)
 Assert.eq(mark.overlap_offset[1], 4)
 Assert.eq(mark.overlap_offset[2], 120 - 18 - 4)
+Assert.eq(mark.icon.name, "check", "已下载：勾")
+
+-- 已缓存：同一个左下角槽位画 cached，圆底用 muted 色（05 A5）。
+local cached_marks = {}
+local cached_mark = Book.cachedMark(120)
+cached_mark:paintTo({
+    paintCircle = function(_, cx, cy, r, color)
+        cached_marks[#cached_marks + 1] = { cx = cx, cy = cy, r = r, color = color }
+    end,
+}, 0, 0)
+Assert.len(cached_marks, 1)
+Assert.eq(cached_mark.icon.name, "cached")
+Assert.eq(cached_mark.overlap_offset[1], mark.overlap_offset[1], "与下载角标同槽")
+Assert.eq(cached_mark.overlap_offset[2], mark.overlap_offset[2])
+Assert.eq(cached_marks[1].color, require("ui.themes").current().color.muted, "缓存角标 muted 色")
+
+-- 封面叠层：缓存与下载互斥，缓存优先（同时成立只画缓存）。
+local cached_cover = select(1, Book.cover(nil, nil, { read_state = 0, percent = 0, cache_mark = true }, 80, 120,
+    { badge = true, ribbon = true, download = true, cached = true }))
+Assert.len(cached_cover, 2, "无进度未下载：只有封面 + 缓存角标")
+Assert.eq(cached_cover[2].icon.name, "cached")
+local both_marks = select(1, Book.cover(nil, nil,
+    { read_state = 0, percent = 0, downloaded = true, cache_mark = true }, 80, 120,
+    { badge = true, ribbon = true, download = true, cached = true }))
+Assert.len(both_marks, 2, "缓存与下载互斥：左下角只画一个")
+Assert.eq(both_marks[2].icon.name, "cached")
+local not_cached = select(1, Book.cover(nil, nil, { read_state = 0, percent = 0, downloaded = true }, 80, 120,
+    { download = true, cached = true }))
+Assert.eq(not_cached[2].icon.name, "check", "没缓存仍然画下载勾")
 
 local more = Book.moreMark(80, 120)
 Assert.eq(more.overlap_offset[1], 80 - 18 - 4)

@@ -65,6 +65,8 @@ end
 
 ---@return KavitaSource
 local function new()
+    -- 换源 / 改配置经 Registry.reload() 重建实例：顺手丢掉旧服务器的书架投影（05 A1）。
+    Cache.resetShelf()
     local self = setmetatable(meta(), Source) --[[@as KavitaSource]]
     self.client = Client.new(require("utils.settings").getSource(ID))
     return self
@@ -75,11 +77,21 @@ function Source:configured()
 end
 
 --- 能力：书架 + 统计拉取（推送是纯本地确认，见 pushStatsAsync），其余走基类默认（全 false）。
+--- shelf_cache：断网时书架按适配层的缓存投影收窄可见集（05 A2）。
 ---@return SourceCapabilities
 function Source:capabilities()
     local caps = SourceBase.capabilities(self)
     caps.stats_pull = true
+    caps.shelf_cache = true
     return caps
+end
+
+--- 书架缓存投影：同步交回适配层记忆的三张表（series_ids / mark / cover）。
+--- 未配置或 kamare 没给 index 时返回 nil；不触网，翻页复用同一份记忆（05 A1/A2）。
+---@return { series_ids: table, mark: table, cover: table }|nil
+function Source:shelfCache()
+    if not self:configured() then return nil end
+    return Cache.shelf()
 end
 
 ---@return boolean
@@ -637,6 +649,8 @@ function Source:syncBooksAsync(opts, cb)
         self:backfillMeta(ids)
         -- 服务端已读进度同理：网页端 / 别的设备读过，书架也得进「最近阅读」与「已读」。
         result.pulled = result.pulled + backfillRead(self.id, reads)
+        -- 书架投影预热：开桌面必跑本方法，进书架时命中记忆（05 A1）。失败不影响同步结果。
+        pcall(Cache.shelf)
         cb(result)
     end
 
@@ -1179,6 +1193,14 @@ end
 function Source:coverRequest(identity)
     if not self:configured() then return nil, _("未配置") end
     local series_id, chapter_id = splitId(identity.stable_id)
+    -- 已缓存系列 kamare 落了本地封面：离线也能画，且不再走鉴权 URL（05 A8）。
+    -- 只在文件真的存在时用：index 里记的路径可能已被用户清掉。
+    local shelf = Cache.shelf()
+    local local_cover = shelf and shelf.cover and shelf.cover[series_id]
+    if type(local_cover) == "string" and local_cover ~= ""
+        and require("libs/libkoreader-lfs").attributes(local_cover, "mode") == "file" then
+        return { url = local_cover }
+    end
     local url = chapter_id and self.client:url("/api/Image/chapter-cover", { chapterId = chapter_id })
         or self.client:url("/api/Image/series-cover", { seriesId = series_id })
     return { url = url, headers = self.client:headers() }
