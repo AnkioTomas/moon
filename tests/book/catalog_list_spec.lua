@@ -22,6 +22,7 @@ end
 
 -- 书架缓存钩子：只有声明 shelf_cache 的源才有投影；别的源（如 wechat）解析不出声明。
 local shelf_caps, shelf_projection = false, nil
+local shelf_calls = 0
 local registry = {
     list = function() return {} end,
     listEnabled = function() return {} end,
@@ -30,7 +31,10 @@ local registry = {
         return {
             id = "ext.kavita",
             capabilities = function() return { shelf_cache = shelf_caps } end,
-            shelfCache = function() return shelf_projection end,
+            shelfCache = function()
+                shelf_calls = shelf_calls + 1
+                return shelf_projection
+            end,
         }
     end,
 }
@@ -363,6 +367,25 @@ do
     Assert.is_true(calls[1].sql:find("instr(b.stable_id, ':') > 0", 1, true) ~= nil, "离线子句到达查询")
     Assert.eq(calls[2].args[#calls[2].args - 1], 24)
     Assert.eq(calls[2].args[#calls[2].args], 24, "第 2 页偏移")
+
+    -- 投影不可用（Kavita 未配置 / kamare 缺失 / index 取不到）不等于「源没声明能力」：
+    -- 离线书架仍要收窄到已下载 ∪ 卷行，否则会列出点开即死路的行（05 A4 / US 11）。
+    shelf_caps, shelf_projection = true, nil
+    shelf_calls = 0
+    Assert.is_true(Catalog.hasShelfCache("ext.kavita"), "声明了 shelf_cache 就算数，投影为 nil 也算")
+    Assert.eq(shelf_calls, 0, "hasShelfCache 只查能力，不为一次判断构建整份投影")
+    calls = {}
+    Catalog.listBooks("ext.kavita", { offline_only = true, limit = 10, chapter_sources = {} })
+    Assert.is_nil(calls[1].sql:find("b.stable_id IN (?)", 1, true), "没有缓存 series：不加 IN 参数")
+    Assert.is_true(calls[1].sql:find("COALESCE(b.path, '')<>''", 1, true) ~= nil, "已下载仍可离线")
+    Assert.is_true(calls[1].sql:find("instr(b.stable_id, ':') > 0", 1, true) ~= nil, "卷行仍放行")
+
+    -- 空投影同理：不能因为集合为空就关掉离线过滤。
+    shelf_caps, shelf_projection = true, { series_ids = {}, mark = {}, cover = {} }
+    calls = {}
+    Catalog.listBooks("ext.kavita", { offline_only = true, limit = 10, chapter_sources = {} })
+    Assert.is_true(calls[1].sql:find("COALESCE(b.path, '')<>''", 1, true) ~= nil, "空投影仍限制到已下载")
+    Assert.is_true(calls[1].sql:find("instr(b.stable_id, ':') > 0", 1, true) ~= nil, "空投影仍放行卷行")
 
     DbBase.close()
     clearMods()

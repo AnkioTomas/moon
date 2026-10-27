@@ -328,11 +328,12 @@ local function scopedIds(scope, filter)
     return {}
 end
 
---- 声明了 shelf_cache 的源的书架投影（同步、只读本地记忆，缺省不触网）。
+--- 声明了 shelf_cache 且实现了 shelfCache 的源 id（只看能力，不构建投影）。
 --- 「源声明了能力」与「实现了方法」两个条件都要满足；未声明 / 未实现的源直接跳过。
+--- 投影要拉缓存索引，hasShelfCache 这种每次查询都跑的判断不能为它全量构建（05 A4 / 10）。
 ---@param ids string[]
----@return table<string, { series_ids: table, mark: table, cover: table }> source_id → 投影
-function Catalog.shelfCaches(ids)
+---@return table<string, boolean>
+function Catalog.shelfCacheSources(ids)
     local out = {}
     local Registry = require("source.registry")
     for _idx, id in ipairs(ids or {}) do
@@ -340,23 +341,39 @@ function Catalog.shelfCaches(ids)
             local source = Registry.resolve(id)
             local caps = source and type(source.capabilities) == "function" and source:capabilities()
             if caps and caps.shelf_cache == true and type(source.shelfCache) == "function" then
-                local projection = source:shelfCache()
-                if type(projection) == "table" then out[id] = projection end
+                out[id] = true
             end
         end
     end
     return out
 end
 
+--- 声明了 shelf_cache 的源的书架投影（同步、只读本地记忆，缺省不触网）。
+--- 投影不可用（未配置 / 缓存插件缺失 / 索引取不到）时该源不出现在结果里；
+--- 调用方要用声明集合（shelfCacheSources）区分「没声明」与「声明了但这次没投影」。
+---@param ids string[]
+---@return table<string, ShelfCacheProjection> source_id → 投影
+function Catalog.shelfCaches(ids)
+    local out = {}
+    local Registry = require("source.registry")
+    for id in pairs(Catalog.shelfCacheSources(ids)) do
+        local source = Registry.resolve(id)
+        local projection = source and source:shelfCache()
+        if type(projection) == "table" then out[id] = projection end
+    end
+    return out
+end
+
 --- 范围内是否有源声明了书架缓存（离线书架的触发条件之一，见 desktop.pages.library）。
+--- 只看能力声明，不看这一次有没有投影：投影为 nil 时离线过滤仍要生效（05 A4）。
 ---@param scope string|string[]
 ---@return boolean
 function Catalog.hasShelfCache(scope)
-    return next(Catalog.shelfCaches(scopedIds(scope, nil))) ~= nil
+    return next(Catalog.shelfCacheSources(scopedIds(scope, nil))) ~= nil
 end
 
 --- 行是否在源的书架投影里；值是查询期算出的展示字段，不是 books 列。
----@param shelves table<string, { mark: table }>
+---@param shelves table<string, ShelfCacheProjection>
 ---@param source_id string|nil
 ---@param stable_id string|nil
 ---@return boolean|nil
@@ -371,31 +388,36 @@ local CACHE_IN_CHUNK = 500
 
 --- 离线可见集 where 片段：已缓存 series ∪ 已下载 ∪ 卷行（stable_id 含 ':'）。
 --- 只约束声明了 shelf_cache 的源；同范围里其它源的行原样放行（05 A4）。
+--- 投影为 nil / 空集合时只去掉 IN 部分，已下载与卷行仍然放行：不能因为这次没拿到
+--- 缓存索引就把整架书都列出来（点开即死路）或不加过滤。
 ---@param BookDB table book.books_db
 ---@param ids string[] 本次查询覆盖的源
----@param shelves table<string, table> 源 id → 投影
+---@param shelves table<string, ShelfCacheProjection> 源 id → 投影（可能缺）
+---@param declaring table<string, boolean> 声明了 shelf_cache 的源（决定收不收窄）
 ---@param chapter_sources string[]|nil
 ---@param args table where 绑定参数（追加）
 ---@return string|nil 没有声明 shelf_cache 的源时返回 nil（一行不改）
-local function offlineClause(BookDB, ids, shelves, chapter_sources, args)
+local function offlineClause(BookDB, ids, shelves, declaring, chapter_sources, args)
     chapter_sources = chapter_sources or {}
-    local declaring, series, all = {}, {}, true
+    local declaring_ids, series, all = {}, {}, true
     for _idx, id in ipairs(ids) do
-        local projection = shelves[id]
-        if projection then
-            declaring[#declaring + 1] = id
-            for stable_id in pairs(projection.series_ids or {}) do series[#series + 1] = tostring(stable_id) end
+        if declaring[id] then
+            declaring_ids[#declaring_ids + 1] = id
+            local projection = shelves[id]
+            for stable_id in pairs(projection and projection.series_ids or {}) do
+                series[#series + 1] = tostring(stable_id)
+            end
         else
             all = false
         end
     end
-    if #declaring == 0 then return nil end
+    if #declaring_ids == 0 then return nil end
     table.sort(series)
     local head = ""
     if not all then
-        table.sort(declaring)
+        table.sort(declaring_ids)
         local marks = {}
-        for _idx, id in ipairs(declaring) do
+        for _idx, id in ipairs(declaring_ids) do
             marks[#marks + 1] = "?"
             args[#args + 1] = id
         end
@@ -418,6 +440,31 @@ local function offlineClause(BookDB, ids, shelves, chapter_sources, args)
         .. " OR instr(b.stable_id, ':') > 0)"
 end
 
+--- 一条查询结果 → 书架行（random 与分页共用同一字段映射，避免两处漂移）。
+---@param result table DB.query 的结果集
+---@param index integer 行号
+---@param shelves table<string, ShelfCacheProjection>
+---@return Book
+local function listRow(result, index, shelves)
+    return {
+        source_id = result[1][index],
+        stable_id = result[2][index],
+        title = result[3][index],
+        authors = result[4][index],
+        percent = tonumber(result[5][index]) or 0,
+        category = result[6][index],
+        series = result[7][index],
+        intro = result[8][index],
+        cover = result[9][index],
+        inserted_at = tonumber(result[10][index]) or 0,
+        read_state = tonumber(result[11][index]) or 0,
+        path = result[12][index],
+        downloaded = tonumber(result[13][index]) == 1,
+        cache_mark = cachedMark(shelves, result[1][index], result[2][index]),
+        deleted = 0,
+    }
+end
+
 --- 书库分页查询：books 筛选 + LEFT JOIN pending_progress 取进度与最近阅读排序；每行带 downloaded。
 ---@param source_id string|string[]
 ---@param opts table|nil limit/offset/sort/sort_desc/chapter_sources 及 BookListOpts 的筛选项
@@ -430,6 +477,7 @@ function Catalog.listBooks(source_id, opts)
     local where, args = DB.sourceClause("b.source_id", source_id)
     -- 书架缓存投影：在线用来标「已缓存」，离线用来收窄可见集；两者都只问声明了 shelf_cache 的源。
     local ids = scopedIds(source_id, opts.source_id)
+    local declaring = Catalog.shelfCacheSources(ids)
     local shelves = Catalog.shelfCaches(ids)
     -- 「最近阅读」列整个书架：在架书全列；Kavita 卷行这种「非书架成员但仍是有效身份」的
     -- 只在有进度时进来（进度记在卷行上）。其它排序 / 筛选只列在架书。
@@ -497,7 +545,7 @@ function Catalog.listBooks(source_id, opts)
     end
     if opts.offline_only then
         -- 放在 where 里（不是 SELECT）：count 与 select 共用，分页与总数自动一致。
-        local clause = offlineClause(BookDB, ids, shelves, opts.chapter_sources, args)
+        local clause = offlineClause(BookDB, ids, shelves, declaring, opts.chapter_sources, args)
         if clause then where = where .. " AND " .. clause end
     end
     -- 一律 LEFT JOIN：「最近阅读」按 max(本机进度时间, 云端最近阅读时间 b.read_at) 倒序，
@@ -526,23 +574,7 @@ function Catalog.listBooks(source_id, opts)
         end
         local rows = {}
         for i = 1, nrows do
-            rows[i] = {
-                source_id = result[1][i],
-                stable_id = result[2][i],
-                title = result[3][i],
-                authors = result[4][i],
-                percent = tonumber(result[5][i]) or 0,
-                category = result[6][i],
-                series = result[7][i],
-                intro = result[8][i],
-                cover = result[9][i],
-                inserted_at = tonumber(result[10][i]) or 0,
-                read_state = tonumber(result[11][i]) or 0,
-                path = result[12][i],
-                downloaded = tonumber(result[13][i]) == 1,
-                cache_mark = cachedMark(shelves, result[1][i], result[2][i]),
-                deleted = 0,
-            }
+            rows[i] = listRow(result, i, shelves)
         end
         return rows, #rows
     end
@@ -583,23 +615,7 @@ function Catalog.listBooks(source_id, opts)
     end
     local rows = {}
     for i = 1, nrows do
-        rows[i] = {
-            source_id = result[1][i],
-            stable_id = result[2][i],
-            title = result[3][i],
-            authors = result[4][i],
-            percent = tonumber(result[5][i]) or 0,
-            category = result[6][i],
-            series = result[7][i],
-            intro = result[8][i],
-            cover = result[9][i],
-            inserted_at = tonumber(result[10][i]) or 0,
-            read_state = tonumber(result[11][i]) or 0,
-            path = result[12][i],
-            downloaded = tonumber(result[13][i]) == 1,
-            cache_mark = cachedMark(shelves, result[1][i], result[2][i]),
-            deleted = 0,
-        }
+        rows[i] = listRow(result, i, shelves)
     end
     return rows, total
 end

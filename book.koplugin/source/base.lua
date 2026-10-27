@@ -43,6 +43,12 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field stats_pull boolean 是否从远端拉取阅读统计并写入本地 reading_stats（各源自决映射与替换策略）
 ---@field shelf_cache boolean 是否提供书架缓存投影（声明 true 且实现 shelfCache 才进离线书架，见 05 A2）
 
+--- 书架缓存投影：源从自己的缓存索引投影出的三张表，同步、只读本地记忆（05 A2）。
+---@class ShelfCacheProjection
+---@field series_ids table<string, boolean> 至少一章可离线读的系列
+---@field mark table<string, boolean> 「已缓存」标记（当前语义同 series_ids，留给 UI 命名）
+---@field cover table<string, string> seriesId → 本地封面绝对路径
+
 ---@class SyncResult
 ---@field pulled integer
 ---@field pushed integer
@@ -146,7 +152,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field getProgressAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: ProgressPosition|nil, err: string|nil, meta: table|nil)): table|nil 拉取远端进度；meta.empty 表示远端无记录
 ---@field putProgressAsync fun(self: BookSource, identity: BookIdentity, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil, meta: table|nil)): table|nil 推送进度
 ---@field coverRequest fun(self: BookSource, identity: BookIdentity): (BookCoverRequest|nil, string|nil) 封面请求描述（纯构造，无 IO）
----@field shelfCache fun(self: BookSource): { series_ids: table, mark: table, cover: table }|nil 书架缓存投影（可选、同步、只读本地记忆）。仅 capabilities().shelf_cache 为 true 的源实现；series_ids/mark 是 [stable_id]=true，cover 是 [stable_id]=本地封面绝对路径。不支持的源不实现（nil）
+---@field shelfCache fun(self: BookSource): ShelfCacheProjection|nil 书架缓存投影（可选、同步、只读本地记忆）。仅 capabilities().shelf_cache 为 true 的源实现；series_ids/mark 是 [stable_id]=true，cover 是 [stable_id]=本地封面绝对路径。不支持的源不实现（nil）
 ---@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil Z-Library 导入目标（local 移入）
 ---@field pushStatsAsync fun(self: BookSource, rows: BookStatsRow[], cb: fun(data: BookStatsPushResult|nil, err: string|nil)): table|nil 上报领域统计记录；协议细节由源处理
 ---@field pullStatsAsync fun(self: BookSource, cb: fun(result: BookStatsRow[]|BookStatsPullResult|nil, err: string|nil)): table|nil 拉取领域统计记录（可选 replace 覆盖策略）
