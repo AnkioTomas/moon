@@ -76,7 +76,7 @@ function TextViewer:init()
     end
     self.pager_h = Theme.px(t.control.height)
     self.body_h = math.max(1, h - self.bar:getSize().h - self.pager_h - pad * 2 - button_h)
-    self.body = Text.box("body", self.text, w - pad * 2, { height = self.body_h })
+    self.body = Text.box("body", self.text, w - pad * 2, { height = self.body_h, transparent = true })
     self.pages = math.max(1, math.ceil(self.body:getAllLineCount() / self.body:getVisLineCount()))
     self.page = 1
     -- 不足一页时 TextBoxWidget 把高度压到实际行数，单页也不显示翻页条：空出的高度

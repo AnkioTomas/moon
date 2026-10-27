@@ -98,8 +98,8 @@ function Stats.build(width)
             align = "center",
             Icon.widget{ name = ICONS[i] or "info", size = icon_size, color = Blitbuffer.Color8(t.color.muted) },
             HorizontalSpan:new{ width = gap },
-            Text.box("body", row[1], label_w, { color = t.color.muted }),
-            Text.box("body", row[2], value_w, { align = "right" }),
+            Text.box("body", row[1], label_w, { color = t.color.muted, transparent = true }),
+            Text.box("body", row[2], value_w, { align = "right", transparent = true }),
         }
         col[#col + 1] = VerticalSpan:new{ width = gap }
     end
