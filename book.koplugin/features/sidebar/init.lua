@@ -1,11 +1,12 @@
 --[[--
-阅读页左侧栏：书籍 / 目录 / 阅读字体 / 书摘 / X-Ray / 阅读票根 / 统计，右侧网状遮罩压暗正文。
+阅读页左侧栏：书籍 / 目录 / 阅读字体 / 书签 / 书摘 / X-Ray / 阅读票根 / 统计，右侧网状遮罩压暗正文。
 阅读字体仅在文档支持换字体时出现，复用字体选择器菜单。
 页面清单在 setting.lua 的 TABS，用户顺序 sidebar_tab_order（Setting.orderedTabs）；用户隐藏的页记在 sidebar_hidden_tabs。
 书籍页右上角关闭按钮退出本书；票根页复用锁屏票根并可分享。
 
-目录、书摘、X-Ray、字体不自己画：借用各自原有入口弹出的全屏列表（KOReader 原生目录的折叠/搜索、
-原生书签列表、连续章节全书笔记用 Menu；X-Ray 分栏、字体选择器用主题 List），把尺寸压进侧栏、改挂到侧栏窗口上。
+目录、书签、书摘、X-Ray、字体不自己画：借用各自原有入口弹出的全屏列表（KOReader 原生目录的折叠/搜索、
+原生书签列表按类型过滤——书签页只看页书签、书摘页只看划线/笔记；X-Ray 分栏、字体选择器用主题 List），
+把尺寸压进侧栏、改挂到侧栏窗口上。
 
 入口：
   - 阅读页右滑，范围由设置 sidebar_gesture（settings/sidebar.lua）决定：
@@ -67,10 +68,19 @@ local AVAILABLE = {
     stats = function() return require("features.sidebar.stats").available() end,
 }
 
+--- 打开原生书签列表并套上类型过滤。match_table 留到关侧栏再清，删改条目后重绘仍按该过滤。
+---@param ui table
+---@param filter table
+local function openBookmarks(ui, filter)
+    ui.bookmark.match_table = filter
+    ui.bookmark:onShowBookmark()
+end
+
 --- 各列表页的原有入口（与快捷面板同一条路径，整书 / 连续章节的分流都在入口内部）。
 local OPENERS = {
     toc = function(ui) require("features.panel.actions.reader.toc").run({ ui = ui }) end,
-    notes = function(ui) ui.bookmark:onShowBookmark() end,
+    bookmarks = function(ui) openBookmarks(ui, { bookmark = true }) end,
+    notes = function(ui) openBookmarks(ui, { highlight = true, note = true }) end,
     xray = function(ui) require("features.xray.ui").openMain(ui) end,
 }
 
@@ -407,6 +417,8 @@ function Sidebar:onCloseWidget()
     self.native_closes = {}
     for _idx, close in ipairs(closes) do close() end
     self.closed = true
+    -- 书签 / 书摘页写入的类型过滤只属于侧栏；清掉免得快捷面板「高亮与笔记」被卡住。
+    if self.ui.bookmark then self.ui.bookmark.match_table = nil end
     if self.font_job then
         self.font_job.cancel()
         self.font_job = nil

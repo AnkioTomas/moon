@@ -29,6 +29,7 @@ Setting.TABS = {
     { id = "info", text = _("书籍"), icon = "info" },
     { id = "toc", text = _("目录"), icon = "menu_book" },
     { id = "font", text = _("阅读字体"), icon = "text_fields", note = _("文档支持时显示") },
+    { id = "bookmarks", text = _("书签"), icon = "bookmark" },
     { id = "notes", text = _("书摘"), icon = "format_ink_highlighter" },
     { id = "xray", text = _("X-Ray"), icon = "person_search", note = _("开启 X-Ray 后显示") },
     { id = "ticket", text = _("阅读票根"), icon = "confirmation_number" },
