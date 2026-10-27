@@ -90,6 +90,14 @@ package.preload["store.zlib"] = function()
     }
 end
 
+-- 数据获取层缓存用透传假实现顶掉：本文件只验书城页的调用与状态，缓存本体在 store_cache_spec 覆盖。
+package.preload["source.store_cache"] = function()
+    return {
+        browse = function(source, opts, cb) return source:browseAsync(opts, cb) end,
+        search = function(source, keyword, cb) return source:searchAsync(keyword, cb) end,
+    }
+end
+
 local Store = require("desktop.pages.store")
 local view_updates = 0
 local desktop = {
@@ -258,3 +266,10 @@ Assert.len(opds.trail, 0)
 opds.trail = { { title = "x", feed = "http://nas/x" } }
 opds:onEvent("source_changed")
 Assert.len(opds.trail, 0)
+
+-- 回到书城：activate 一律丢弃已加载结果重问数据层（新鲜度归 source.store_cache，本页不计时）。
+store:fetch()
+Assert.not_nil(store.state)
+store:activate(true)
+Assert.is_nil(store.state)
+Assert.is_nil(store.books)
