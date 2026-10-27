@@ -23,6 +23,25 @@ function FontReader.currentId(ui)
     return ui.doc_settings:readSetting("book_reader_font_id") or ""
 end
 
+--- 阅读菜单与侧栏共用的西文字体选择；全局保存，重开当前文档应用新组合。
+---@param ui table ReaderUI
+---@return table
+function FontReader.westernPickerOpts(ui)
+    return {
+        title = _("西文字体"),
+        initial_tab = "system",
+        current_id = function() return require("utils.settings").get("reader").western_font_id end,
+        on_select = function(_item, id, name)
+            local ok, err, changed = require("ui.fonts.mixed").setWestern(id, name)
+            if not ok then
+                require("ui.themes.widgets.toast"):new{ text = err }:show()
+                return
+            end
+            if changed then ui:reloadDocument(nil, true) end
+        end,
+    }
+end
+
 --- 把字体应用到当前文档并写入 sidecar；全书排版偏好由调用方落库（ui 层不反向依赖 reader）。
 ---@param ui table|nil
 ---@param id string

@@ -41,6 +41,8 @@ local UI_FACES = {
 local _defaults = nil
 local _bold_patched = false
 local _registered_fonts = {}
+-- 只缓存已解析的字体路径；命中后检查目标文件，避免每次开书遍历整个字库。
+local _resolved_paths = {}
 
 --- 微信读书字体在 .moon/fonts 下的落盘路径（sfnt）。
 --- id 去空白后非 [%w._-] 一律换成下划线，才能安全拼进文件名。
@@ -73,6 +75,7 @@ end
 ---@param id string
 ---@return boolean removed 至少删掉一个文件
 function Fonts.removeDownloaded(id)
+    _resolved_paths[id] = nil
     local path = Fonts.wereadPath(id)
     if not path then return false end
     local removed = false
@@ -151,7 +154,7 @@ local function findInstalledFont(id)
     if path then return path end
     FontList:getFontList()
     for _idx, p in ipairs(FontList.fontlist or {}) do
-        if Text.basename(p) == id then return p end
+        if Text.basename(p) == id and Fonts.isFile(p) then return p end
     end
     return nil
 end
@@ -196,9 +199,13 @@ end
 ---@param id string
 ---@return string|nil path, string|nil err
 local function resolvePath(id)
-    local path = installedWereadPath(id) or findInstalledFont(id)
+    local path = _resolved_paths[id]
+    if path and Fonts.isFile(path) then return path end
+    _resolved_paths[id] = nil
+    path = installedWereadPath(id) or findInstalledFont(id)
     if not path then return nil, _("字体文件不存在") end
     registerFontPath(path)
+    _resolved_paths[id] = path
     return path
 end
 
@@ -309,9 +316,10 @@ function Fonts.applyCurrent()
     end
 end
 
---- 插件 init：fontmap 是进程级全局表，FM / Reader 各实例共享，只在首个实例应用一次。
-function Fonts.onCreate()
+--- 插件 init：UI fontmap 每进程应用一次，阅读字体组合按文档安装。
+function Fonts.onCreate(ui)
     if not _defaults then Fonts.applyCurrent() end
+    if ui and ui.document then require("ui.fonts.mixed").install(ui.document) end
 end
 
 return Fonts

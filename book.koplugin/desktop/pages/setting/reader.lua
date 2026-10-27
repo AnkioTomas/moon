@@ -176,6 +176,10 @@ function ReaderSettings:sections(desktop)
         icon = "arrow_back", title = _("返回键回月读"),
         subtitle = _("阅读时按返回键关书回月读，不改变返回手势"),
     })
+    rows[#rows + 1] = toggleRow(desktop, "reader", reader, "mixed_fonts", reader.mixed_fonts == true, {
+        icon = "text_fields", title = _("中西文字体分开"),
+        subtitle = _("西文默认 Bookerly，可在阅读字体中更换"),
+    })
     return { { title = _("行为"), rows = rows } }
 end
 
