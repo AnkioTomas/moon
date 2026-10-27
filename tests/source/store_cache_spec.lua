@@ -75,7 +75,7 @@ local source = {
 
 -- 未命中：调源，结果按源顺序回（经书库解析，形状一致）。
 local res
-local handle = StoreCache.browse(source, {}, function(r) res = r end)
+local handle = StoreCache.browse("fake", source, {}, function(r) res = r end)
 Assert.eq(type(handle.cancel), "function")
 Assert.eq(calls.browse, 1)
 Assert.len(res.data, 2)
@@ -84,49 +84,54 @@ Assert.eq(res.groups[1].active, "n1")
 
 -- 改书库里的书名后命中：不再调源，且回的是书库最新元数据（缓存只存 id）。
 db_rows.b2 = { source_id = "fake", stable_id = "b2", title = "乙·改" }
-StoreCache.browse(source, {}, function(r) res = r end)
+StoreCache.browse("fake", source, {}, function(r) res = r end)
 Assert.eq(calls.browse, 1, "TTL 内命中不调源")
 Assert.eq(res.data[1].title, "乙·改")
 Assert.eq(res.groups[1].active, "n1")
 
 -- 换节点是另一键：重新调源。
-StoreCache.browse(source, { node = "n2" }, function(r) res = r end)
+StoreCache.browse("fake", source, { node = "n2" }, function(r) res = r end)
 Assert.eq(calls.browse, 2)
 Assert.eq(res.groups[1].active, "n2")
 
 -- 搜索：命中不调源；失败不写缓存，重试仍调源。
-StoreCache.search(source, "甲", function(r) res = r end)
+StoreCache.search("fake", source, "甲", function(r) res = r end)
 Assert.eq(calls.search, 1)
 Assert.eq(res.data[1].stable_id, "b1")
-StoreCache.search(source, "甲", function(r) res = r end)
+StoreCache.search("fake", source, "甲", function(r) res = r end)
 Assert.eq(calls.search, 1, "搜索命中不调源")
-StoreCache.search(source, "bad", function(_r, err) res = err end)
+StoreCache.search("fake", source, "bad", function(_r, err) res = err end)
 Assert.eq(res, "网络断开")
-StoreCache.search(source, "bad", function(_r, err) res = err end)
+StoreCache.search("fake", source, "bad", function(_r, err) res = err end)
 Assert.eq(calls.search, 3, "失败结果不缓存")
 
 -- 书被删后命中：拼不回的直接跳过，不报错。
 db_rows.b1 = nil
-StoreCache.browse(source, {}, function(r) res = r end)
+StoreCache.browse("fake", source, {}, function(r) res = r end)
 Assert.eq(calls.browse, 2)
 Assert.len(res.data, 1)
 Assert.eq(res.data[1].stable_id, "b2")
 
--- 书城后端（如 store.zlib）不是 BookSource，但同样走 browse；必须有 id，否则拼缓存键会炸。
+-- 书城后端可以没有 .id：身份由调用方显式传入（对应桌面 provider.id）。
 do
     local backend_calls = 0
     local backend = {
-        id = "zlib",
         browseAsync = function(_, _opts, cb)
             backend_calls = backend_calls + 1
             cb({ data = { { source_id = "zlib", stable_id = "z1", title = "Z" } } })
             return { cancel = function() end }
         end,
     }
+    Assert.is_nil(backend.id)
     local got
-    StoreCache.browse(backend, {}, function(r) got = r end)
+    StoreCache.browse("zlib", backend, {}, function(r) got = r end)
     Assert.eq(backend_calls, 1)
     Assert.eq(got.data[1].stable_id, "z1")
-    StoreCache.browse(backend, {}, function(r) got = r end)
-    Assert.eq(backend_calls, 1, "zlib 浏览命中不调源")
+    StoreCache.browse("zlib", backend, {}, function(r) got = r end)
+    Assert.eq(backend_calls, 1, "显式 source_id 命中不调源")
 end
+
+-- 漏传 source_id 必须立刻报错，不能拼出 nil 键再炸。
+Assert.errors(function()
+    StoreCache.browse(nil, source, {}, function() end)
+end, "source_id required")

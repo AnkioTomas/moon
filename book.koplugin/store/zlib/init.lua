@@ -14,7 +14,7 @@ local logger = require("utils.log")
 local _ = require("gettext")
 
 local Zlib = {
-    -- 书城页经 StoreCache.browse 读穿时用；与 books.source_id / Mapper 一致。
+    -- 与 books.source_id / Mapper 一致；StoreCache 的键由书城页传 provider.id，不依赖这里。
     id = "zlib",
 }
 

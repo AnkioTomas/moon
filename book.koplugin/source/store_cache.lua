@@ -21,10 +21,13 @@ local StoreCache = {}
 local TTL = 10 * 60
 
 ---@param kind string browse / search
----@param source_id string
+---@param source_id string 书源 id 或书城后端 id（zlib / opds）；禁止从实现对象上猜
 ---@param arg string 节点 id 或搜索关键词
 ---@return string
 local function key(kind, source_id, arg)
+    if type(source_id) ~= "string" or source_id == "" then
+        error("store_cache: source_id required", 2)
+    end
     return "store\0" .. kind .. "\0" .. source_id .. "\0" .. arg
 end
 
@@ -84,25 +87,28 @@ local function through(cache_key, source_id, load, cb)
     end)
 end
 
---- 书城浏览读穿：opts 同源 browseAsync。
----@param source BookSource 带 browseAsync 的源
+--- 书城浏览读穿：opts 同源 / 书城后端 browseAsync。
+--- source_id 由调用方显式传入（provider.id），不要用 browser.id——书城后端不是 BookSource。
+---@param source_id string
+---@param browser table 带 browseAsync 的实现（书源或 store.zlib 等）
 ---@param opts { node?: string, limit?: integer }
 ---@param cb fun(res: { data: Book[], groups: table[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
-function StoreCache.browse(source, opts, cb)
-    return through(key("browse", source.id, opts.node or ""), source.id, function(done)
-        return source:browseAsync(opts, done)
+function StoreCache.browse(source_id, browser, opts, cb)
+    return through(key("browse", source_id, opts.node or ""), source_id, function(done)
+        return browser:browseAsync(opts, done)
     end, cb)
 end
 
---- 书城搜索读穿。
----@param source BookSource 带 searchAsync 的源
+--- 书城搜索读穿。source_id 同上，显式传入。
+---@param source_id string
+---@param searcher table 带 searchAsync 的实现
 ---@param keyword string
 ---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
-function StoreCache.search(source, keyword, cb)
-    return through(key("search", source.id, keyword), source.id, function(done)
-        return source:searchAsync(keyword, done)
+function StoreCache.search(source_id, searcher, keyword, cb)
+    return through(key("search", source_id, keyword), source_id, function(done)
+        return searcher:searchAsync(keyword, done)
     end, cb)
 end
 
