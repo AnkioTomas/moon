@@ -282,6 +282,11 @@ bg = ProgressDialog:new{
 }
 buttons = Kit.buttons(bg)
 Assert.len(buttons, 2)
+-- cancel_text：缓存队列的「暂停」不是取消语义，但复用同一个按钮槽。
+local pausable = ProgressDialog:new{
+    title = "正在缓存", on_cancel = function() end, cancel_text = "暂停",
+}
+Assert.eq(Kit.buttons(pausable)[1].text, "暂停")
 Assert.eq(buttons[1].text, "取消")
 Assert.eq(buttons[2].text, "后台运行")
 Assert.eq(buttons[2].variant, "primary")

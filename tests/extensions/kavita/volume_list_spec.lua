@@ -45,6 +45,7 @@ local function reset(overrides)
     st.enqueue_ok, st.enqueue_code, st.enqueue_message, st.enqueue_detail = true, nil, nil, nil
     st.delete_ok, st.delete_code, st.delete_message = true, nil, nil
     st.pause_ok, st.resume_ok, st.retry_ok = true, true, true
+    st.pause_reason = "user"
     st.retry_code = nil
     st.pause_code = nil
     st.resume_code = nil
@@ -71,15 +72,27 @@ function Cache.enqueue(entries)
 end
 function Cache.delete(ids)
     calls.delete[#calls.delete + 1] = ids
-    if st.delete_ok then return true end
+    if st.delete_ok then
+        -- 真 kamare 删完 index 里就没有这一章了：刷新后行要变回「未缓存 / 已读」。
+        for _idx, id in ipairs(ids) do st.statuses[tostring(id)] = nil end
+        return true
+    end
     return nil, st.delete_code, st.delete_message
 end
 function Cache.queuePause()
     calls.pause = calls.pause + 1
+    if st.pause_ok then
+        st.queue.state = "paused"
+        st.queue.pause_reason = st.pause_reason or "user"
+    end
     return st.pause_ok, st.pause_code
 end
 function Cache.queueResume()
     calls.resume = calls.resume + 1
+    if st.resume_ok then
+        st.queue.pause_reason = nil
+        st.queue.state = "idle"
+    end
     return st.resume_ok, st.resume_code
 end
 function Cache.queueRetry(ids)
@@ -178,6 +191,7 @@ confirm.ok_callback()
 Assert.eq(calls.delete[1][1], 601, "只删这一卷")
 
 -- 行状态字：已读 · 已缓存 / 在读 / 未缓存；图标各归各位。
+st.statuses["601"] = { state = "complete", bytes = 80 * 1024 * 1024 }
 st.resumes["602"] = { page = 41, status = "pending" }
 list, picked = open()
 local text = table.concat(Kit.texts(list), "\n")
@@ -319,5 +333,313 @@ textContains(confirm.text, "网络中断或服务器不可达")
 confirm.ok_callback()
 Assert.eq(table.concat(calls.retry[1], ","), "601,602")
 Assert.len(calls.enqueue, 0, "没有未缓存的项就不入队")
+
+-- 删除下载中的卷：确认文案多一句「会取消这一卷的下载」（07 A4）。行尾只有一个动作槽，
+-- 下载中显示暂停；确认文案本身是可复用的纯函数，供将来二级菜单 / 系列清理复用。
+reset()
+st.statuses["601"] = { state = "complete", bytes = 1 }
+st.queue = { state = "downloading", entries = { [602] = { chapterId = 602, state = "downloading",
+    bytes_done = 30, bytes_total = 100 } }, bytes_done = 30, bytes_total = 100 }
+list = open()
+text = table.concat(Kit.texts(list), "\n")
+textContains(text, "下载中 30%")
+local row_buttons = tails(list)
+Assert.eq(row_buttons[1].icon, "delete")
+Assert.eq(row_buttons[2].icon, "pause")
+textContains(VolumeList.deleteText(toc[2], 30 * 1024 * 1024, true), "删除会取消这一卷的下载。")
+
+-- 删除后重画：这一卷回到「在读」（缓存动作变回 download）。
+row_buttons[1]:onTapThemeButton()
+Themed.last("confirm").ok_callback()
+row_buttons = tails(list)
+Assert.eq(row_buttons[1].icon, "download", "删完变回下载")
+textContains(table.concat(Kit.texts(list), "\n"), "已读", "删缓存不动阅读进度")
+
+-- 正在读的卷：删除钮置灰，点按只 toast，不弹确认框、不选中（07 A1）。
+reset()
+st.statuses["602"] = { state = "complete", bytes = 1 }
+st.open_chapter = 602
+list, picked = open()
+local disabled
+for _idx, button in ipairs(tails(list)) do
+    if button.icon == "delete" then disabled = button end
+end
+Assert.is_false(disabled.enabled, "删除钮置灰")
+confirms = #Themed.all("confirm")
+tap(list, disabled)
+Assert.eq(#Themed.all("confirm"), confirms, "置灰的删除钮不弹确认框")
+textContains(Themed.last("toast").text, "正在阅读这一卷，关闭后可以删除")
+Assert.is_nil(picked.value, "点置灰按钮不选中")
+
+-- 离线 + 未缓存：行仍可点，但只提示，不关窗也不选中（04 A7）。
+reset()
+offline = true
+list, picked = open()
+textContains(table.concat(Kit.texts(list), "\n"), "未缓存 · 离线")
+tap(list, Kit.taps(list)[3])
+Assert.is_nil(picked.value, "离线未缓存行不选中")
+textContains(Themed.last("toast").text, "这一卷还没缓存，联网后可下载")
+
+-- unknown_server：缓存状态整块不显示，只剩阅读状态，缓存动作全部隐藏（02 A9）。
+reset()
+st.queue_code = "unknown_server"
+st.queue = nil
+list = open()
+Assert.len(tails(list), 0, "没有行尾动作")
+Assert.is_nil(list.left_icon, "没有缓存整部")
+Assert.is_true(table.concat(Kit.texts(list), "\n"):find("缓存", 1, true) == nil, "不出现缓存状态字")
+
+-- 缺 queue_control：下载中只显示百分比，不出暂停 / 重试（02 A4）。
+reset()
+st.probe = { ok = true, state = "enhanced", capabilities = {
+    status = true, queue = true, enqueue = true, delete = true, estimate = true,
+} }
+st.statuses["601"] = { state = "complete", bytes = 1 }
+st.queue = { state = "downloading", entries = { [602] = { chapterId = 602, state = "downloading",
+    bytes_done = 62, bytes_total = 100 } }, bytes_done = 62, bytes_total = 100 }
+list = open()
+textContains(table.concat(Kit.texts(list), "\n"), "下载中 62%")
+Assert.len(tails(list), 2, "只剩已缓存的删除钮与未缓存的下载钮")
+
+-- 暂停原因：行显示「已暂停 + 百分比 + play」，动作按 07 A5 分派。
+reset()
+st.statuses["601"] = { state = "complete", bytes = 1 }
+local function pausedQueue(reason, extra)
+    local entries = extra or {}
+    return { state = "paused", pause_reason = reason, entries = entries,
+        bytes_done = 0, bytes_total = 0 }
+end
+-- user / restored / offline / wifi：直接 resume。
+for _idx, reason in ipairs({ "user", "restored", "offline", "wifi" }) do
+    reset()
+    st.statuses["601"] = { state = "complete", bytes = 1 }
+    st.queue = pausedQueue(reason, { [602] = { chapterId = 602, state = "queued",
+        bytes_done = 62, bytes_total = 100 } })
+    list = open()
+    textContains(table.concat(Kit.texts(list), "\n"), "已暂停 62%")
+    local play
+    for _i, button in ipairs(tails(list)) do
+        if button.icon == "play_arrow" then play = button end
+    end
+    Assert.not_nil(play, reason .. " 有继续钮")
+    play:onTapThemeButton()
+    Assert.eq(calls.resume, 1, reason .. " 直接继续")
+    Assert.len(calls.retry, 0, reason .. " 不重试")
+end
+
+-- network：先重试本服务器的失败项，再继续。
+reset()
+st.statuses["601"] = { state = "complete", bytes = 1 }
+st.queue = pausedQueue("network", {
+    [602] = { chapterId = 602, state = "failed", last_error = "socket closed" },
+    [603] = { chapterId = 603, state = "queued" },
+})
+list = open()
+for _idx, button in ipairs(tails(list)) do
+    if button.icon == "play_arrow" then button:onTapThemeButton() end
+end
+Assert.eq(table.concat(calls.retry[1], ","), "602")
+Assert.eq(calls.resume, 1)
+
+-- low_space：不给继续，只 toast 清理提示。
+reset()
+st.statuses["601"] = { state = "complete", bytes = 1 }
+st.queue = pausedQueue("low_space", { [602] = { chapterId = 602, state = "queued" } })
+list = open()
+for _idx, button in ipairs(tails(list)) do
+    if button.icon == "play_arrow" then button:onTapThemeButton() end
+end
+Assert.eq(calls.resume, 0, "空间不足不恢复")
+textContains(Themed.last("toast").text, "空间不足，已暂停")
+
+-- 进度框：入队后 1 秒轮询，暂停 → 已暂停收尾；继续 → 再开进度框。
+--- 走一遍「缓存整部」到出进度框；返回进度框与已排的 tick 数。
+---@return table
+local function batchProgress()
+    reset()
+    st.statuses["601"] = { state = "complete", bytes = 1 }
+    st.estimate = { chapters = 2, bytes = 10 * 1024 * 1024, available = 1000 * 1024 * 1024, ok = true }
+    list = open()
+    list.left_callback()
+    Themed.last("confirm").ok_callback()
+    return Themed.last("progress_dialog")
+end
+
+--- 跑下一拍（1 秒）。
+local function tick()
+    local scheduled = Kit.scheduled[#Kit.scheduled]
+    Assert.not_nil(scheduled, "有下一拍")
+    Assert.eq(scheduled.delay, 1, "每秒轮询")
+    scheduled.fn()
+end
+
+local progress_dialog = batchProgress()
+Assert.eq(progress_dialog.sets and #progress_dialog.sets or 0, 0, "刚开还没走过一拍")
+-- 下载中：聚合百分比 + 当前卷。
+st.queue = { state = "downloading", percent = 0.5, entries = {
+    [602] = { chapterId = 602, state = "downloading", bytes_done = 50, bytes_total = 100 },
+}, bytes_done = 50, bytes_total = 100, current_chapter_id = 602 }
+tick()
+Assert.is_true(#progress_dialog.sets > 0, "轮询后更新说明行")
+local last_set = progress_dialog.sets[#progress_dialog.sets]
+textContains(last_set[1], "第 2 卷")
+Assert.eq(last_set[2], 50, "进度条用本服务器的聚合 percentage")
+
+-- 暂停：进度框按钮走 queue_pause；下一拍收尾成「已暂停」，按钮是继续 / 关闭。
+progress_dialog.on_cancel()
+Assert.eq(calls.pause, 1)
+tick()
+confirm = Themed.last("confirm")
+Assert.eq(confirm.title, "已暂停")
+textContains(confirm.text, "已暂停")
+Assert.eq(confirm.ok_text, "继续")
+Assert.eq(confirm.cancel_text, "关闭")
+-- 继续：先 resume，再开回进度框。
+local dialogs = #Themed.all("progress_dialog")
+confirm.ok_callback()
+Assert.eq(calls.resume, 1)
+Assert.eq(#Themed.all("progress_dialog"), dialogs + 1, "继续后重开进度框")
+
+-- 全部完成：自动关窗 + toast「已缓存 N 卷」，不再排下一拍。
+progress_dialog = Themed.last("progress_dialog")
+st.queue = { state = "idle", entries = {}, bytes_done = 0, bytes_total = 0 }
+local before = #Kit.scheduled
+tick()
+Assert.is_true(progress_dialog.closed, "全成关窗")
+textContains(Themed.last("toast").text, "已缓存 2 卷")
+Assert.eq(#Kit.scheduled, before, "收尾后不再轮询")
+
+-- 部分失败：说明行写成功 / 失败数并列出失败原因，按钮「查看失败原因」。
+progress_dialog = batchProgress()
+st.queue = { state = "idle", entries = {
+    [602] = { chapterId = 602, state = "failed", last_error = "not an archive: html" },
+}, bytes_done = 0, bytes_total = 0 }
+tick()
+confirm = Themed.last("confirm")
+Assert.eq(confirm.title, "部分失败")
+textContains(confirm.text, "1 卷成功，1 卷失败")
+textContains(confirm.text, "下载内容不完整或不是有效压缩包")
+Assert.eq(confirm.ok_text, "查看失败原因")
+confirm.ok_callback()
+Assert.is_true(progress_dialog.closed)
+
+-- 断网暂停：文案带原因，按钮继续。
+progress_dialog = batchProgress()
+st.queue = { state = "paused", pause_reason = "offline", entries = {
+    [602] = { chapterId = 602, state = "queued" },
+}, bytes_done = 0, bytes_total = 0 }
+tick()
+confirm = Themed.last("confirm")
+Assert.eq(confirm.title, "已暂停")
+textContains(confirm.text, "已暂停（断网）")
+Assert.eq(confirm.ok_text, "继续")
+Assert.eq(confirm.cancel_text, "关闭")
+
+-- 其余暂停原因：文案与主按钮都来自 07 A5 的表。
+for reason, expected in pairs({
+    user = "已暂停",
+    restored = "已暂停（启动恢复）",
+    wifi = "已暂停（仅 Wi-Fi 下载）",
+}) do
+    progress_dialog = batchProgress()
+    st.queue = { state = "paused", pause_reason = reason, entries = {
+        [602] = { chapterId = 602, state = "queued" },
+    }, bytes_done = 0, bytes_total = 0 }
+    tick()
+    confirm = Themed.last("confirm")
+    Assert.eq(confirm.title, "已暂停", reason)
+    textContains(confirm.text, expected, reason)
+    Assert.eq(confirm.ok_text, "继续", reason)
+    Assert.eq(confirm.cancel_text, "关闭", reason)
+end
+
+-- 空间不足暂停：没有继续，只有清理提示。
+progress_dialog = batchProgress()
+st.queue = { state = "paused", pause_reason = "low_space", entries = {
+    [602] = { chapterId = 602, state = "queued" },
+}, bytes_done = 0, bytes_total = 0 }
+tick()
+confirm = Themed.last("confirm")
+textContains(confirm.text, "空间不足，已暂停")
+Assert.eq(confirm.ok_text, "去清理空间")
+confirm.ok_callback()
+textContains(Themed.last("toast").text, "空间不足")
+Assert.eq(calls.resume, 0, "低水位不给继续")
+
+-- 连续失败暂停：主按钮「重试失败项并继续」，点了先逐条重试再恢复。
+progress_dialog = batchProgress()
+st.queue = { state = "paused", pause_reason = "network", entries = {
+    [602] = { chapterId = 602, state = "failed", last_error = "http 403" },
+}, bytes_done = 0, bytes_total = 0 }
+tick()
+confirm = Themed.last("confirm")
+textContains(confirm.text, "已暂停（连续下载失败）")
+Assert.eq(confirm.ok_text, "重试失败项并继续")
+confirm.ok_callback()
+Assert.eq(table.concat(calls.retry[1], ","), "602")
+Assert.eq(calls.resume, 1)
+Assert.not_nil(Themed.last("progress_dialog"))
+
+-- 后台运行：关窗不影响队列，列表继续轮询；后台期间不再弹收尾框。
+progress_dialog = batchProgress()
+progress_dialog.on_background()
+st.queue = { state = "downloading", percent = 0.9, entries = {
+    [602] = { chapterId = 602, state = "downloading", bytes_done = 90, bytes_total = 100 },
+}, bytes_done = 90, bytes_total = 100, current_chapter_id = 602 }
+local confirms_before = #Themed.all("confirm")
+tick()
+Assert.eq(#Themed.all("confirm"), confirms_before, "后台不弹窗")
+st.queue = { state = "idle", entries = {}, bytes_done = 0, bytes_total = 0 }
+tick()
+Assert.eq(#Themed.all("confirm"), confirms_before, "后台收尾也不弹窗")
+
+-- 失败行：refresh 走单卷确认，文案是 lastError 映射后的说法（07 A7），没有 moon 侧重试。
+reset()
+st.statuses["601"] = { state = "complete", bytes = 1 }
+st.queue = { state = "idle", entries = {
+    [602] = { chapterId = 602, state = "failed", last_error = "http 403" },
+}, bytes_done = 0, bytes_total = 0 }
+list = open()
+local refresh_button
+for _idx, button in ipairs(tails(list)) do
+    if button.icon == "refresh" then refresh_button = button end
+end
+Assert.not_nil(refresh_button)
+tap(list, refresh_button)
+confirm = Themed.last("confirm")
+Assert.eq(confirm.title, "重试缓存")
+textContains(confirm.text, "服务器拒绝下载（403），检查 API Key / 权限")
+confirm.ok_callback()
+Assert.eq(table.concat(calls.retry[1], ","), "602")
+Assert.eq(calls.resume, 0, "queue_retry 由 kamare 自己恢复，moon 不再补 resume")
+
+-- 删除失败：kamare 的 code / message 原样提示。
+reset()
+st.statuses["601"] = { state = "complete", bytes = 1 }
+st.delete_ok, st.delete_code, st.delete_message = false, "write_failed", "删除失败：磁盘错误"
+list = open()
+tap(list, tails(list)[1])
+Themed.last("confirm").ok_callback()
+textContains(Themed.last("toast").text, "删除失败：磁盘错误")
+
+-- 关列表即停轮询（04 A8）。
+batchProgress()
+Assert.is_true(#Kit.scheduled > 0)
+list:close()
+Assert.is_true(#Kit.unscheduled > 0, "关窗时撤掉定时器")
+
+-- 缺 queue_control：进度框只留后台运行。
+reset()
+st.probe = { ok = true, state = "enhanced", capabilities = {
+    status = true, queue = true, enqueue = true, delete = true, estimate = true,
+} }
+st.statuses["601"] = { state = "complete", bytes = 1 }
+st.estimate = { chapters = 2, bytes = 1, available = 1000, ok = true }
+list = open()
+list.left_callback()
+Themed.last("confirm").ok_callback()
+progress_dialog = Themed.last("progress_dialog")
+Assert.is_nil(progress_dialog.on_cancel, "没有暂停钮")
+Assert.not_nil(progress_dialog.on_background, "仍可后台运行")
 
 return true

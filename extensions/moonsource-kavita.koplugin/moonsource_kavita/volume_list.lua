@@ -126,12 +126,16 @@ local function rowState(ctx, entry)
     local text, icon
     if queued then
         local percent = entryPercent(queued)
-        if ctx.paused then
-            text = percent and T(_("已暂停 %1%"), percent) or _("已暂停")
+        if ctx.paused and percent then
+            text = T(_("已暂停 %1%"), percent)
             icon = "play_arrow"
         elseif queued.state == "failed" then
             text = _("缓存失败")
             icon = "refresh"
+        elseif ctx.paused then
+            -- 排队还没开始下载就暂停：没有百分比可写。
+            text = _("已暂停")
+            icon = "play_arrow"
         else
             text = percent and T(_("下载中 %1%"), percent) or _("已排队")
             icon = "pause"
@@ -197,9 +201,6 @@ local function tailWidget(ctx, entry, model, actions)
     local disabled_tap
     if icon == "download" then
         enabled = has(ctx.capabilities, "enqueue")
-        if enabled then
-            icon = "download"
-        end
     elseif icon == "delete" then
         enabled = has(ctx.capabilities, "delete")
         if enabled and Cache.isChapterOpen(entry.chapterId) then
@@ -219,6 +220,20 @@ local function tailWidget(ctx, entry, model, actions)
     return group
 end
 
+--- 删除确认正文（07 A1 / A4 / A6）：释放体积、离线不可读、下载中会取消。
+---@param entry table
+---@param bytes number|nil
+---@param downloading boolean|nil
+---@return string
+function VolumeList.deleteText(entry, bytes, downloading)
+    local text = T(_("删除「%1」的缓存？将释放 %2。"), entry.title, Cache.sizeText(bytes or 0))
+    text = text .. "\n" .. _("删除后离线不可读。")
+    if downloading then
+        text = text .. "\n" .. _("删除会取消这一卷的下载。")
+    end
+    return text
+end
+
 --- 单卷删除确认（04 A6 / 07 A1、A4）。
 ---@param entry table
 ---@param model table
@@ -227,14 +242,9 @@ local function confirmDelete(entry, model, done)
     local Confirm = require("ui.themes.widgets.confirm")
     local bytes = type(model.status) == "table" and tonumber(model.status.bytes)
         or type(model.queued) == "table" and tonumber(model.queued.bytes_done) or 0
-    local text = T(_("删除「%1」的缓存？将释放 %2。"), entry.title, Cache.sizeText(bytes))
-    text = text .. "\n" .. _("删除后离线不可读。")
-    if model.queued then
-        text = text .. "\n" .. _("删除会取消这一卷的下载。")
-    end
     Confirm:new{
         title = _("删除缓存"),
-        text = text,
+        text = VolumeList.deleteText(entry, bytes, model.queued ~= nil),
         ok_text = _("删除"),
         ok_callback = function()
             local ok, code, message = Cache.delete({ entry.chapterId })
@@ -323,6 +333,16 @@ local function confirmSpace(message)
     }:show()
 end
 
+--- 暂停原因 → 文案与主按钮（07 A5）。low_space 不给继续。
+local PAUSE_REASONS = {
+    user = { text = _("已暂停"), resume = true },
+    restored = { text = _("已暂停（启动恢复）"), resume = true },
+    offline = { text = _("已暂停（断网）"), resume = true },
+    wifi = { text = _("已暂停（仅 Wi-Fi 下载）"), resume = true },
+    network = { text = _("已暂停（连续下载失败）"), resume = true, retry = true },
+    low_space = { text = _("空间不足，已暂停"), resume = false },
+}
+
 --- 打开卷列表。返回 list 控件（测试与「部分失败」后重画都要用）。
 ---@param series Book
 ---@param toc table[]
@@ -336,7 +356,7 @@ function VolumeList.pick(series, toc, cb, opts)
     local list
     local dialog
     -- 行、重画与确认框互相引用（重画要重建行，行要弹确认框），先声明再赋值。
-    local item, items, refresh, confirmRetry, confirmEnqueue, resumeQueue
+    local item, items, refresh, confirmRetry, confirmEnqueue, resumeQueue, startProgress, stopPolling
 
     ---@param entry table
     ---@return table
@@ -357,11 +377,19 @@ function VolumeList.pick(series, toc, cb, opts)
             refresh()
         end
         actions.play_arrow = function() resumeQueue() end
-        return {
+        local offline_uncached = ctx.offline and model.icon == "download"
+            and not model.queued and not model.cached
+        local row = {
             text = entry.title,
             value = entry,
             widget = tailWidget(ctx, entry, model, actions),
         }
+        -- 04 A7：离线未缓存的行仍可点，但只提示；不关窗，用户还能挑别的卷。
+        if offline_uncached then
+            row.keep_open = true
+            row.callback = function() toast(Cache.message("offline_not_cached")) end
+        end
+        return row
     end
 
     ---@return table[]
@@ -397,24 +425,188 @@ function VolumeList.pick(series, toc, cb, opts)
         return false
     end
 
-    --- 进度框：1 秒轮询与三种收尾见 reap()。
-    ---@param total integer 本批次的卷数（入队 + 重试）
-    local function startProgress(total)
+    local timer
+    local batch
+
+    --- 本批次的条目（按 chapterId 回到 toc）。
+    ---@param ids integer[]
+    ---@return table[]
+    local function batchEntries(ids)
+        local out = {}
+        for _idx, id in ipairs(ids) do
+            for _i, entry in ipairs(toc) do
+                if tostring(entry.chapterId) == tostring(id) then out[#out + 1] = entry break end
+            end
+        end
+        return out
+    end
+
+    --- 本批次里已经失败的卷（kamare 把失败项留在 entries 里）。
+    ---@return table[]
+    local function failedEntries()
+        local out = {}
+        for _idx, entry in ipairs(batch and batchEntries(batch.ids) or {}) do
+            local queued = ctx.entries[tostring(entry.chapterId)]
+            if type(queued) == "table" and queued.state == "failed" then out[#out + 1] = entry end
+        end
+        return out
+    end
+
+    stopPolling = function()
+        if timer then
+            require("ui/uimanager"):unschedule(timer)
+            timer = nil
+        end
+    end
+
+    local function closeProgress()
+        if dialog and not dialog.closed then dialog:close() end
+        dialog = nil
+    end
+
+    --- 本服务器范围内的聚合百分比；kamare 的 percent 是 0..1。
+    ---@return number
+    local function aggregatePercent()
+        local percent = tonumber(ctx.queue and ctx.queue.percent)
+        if percent then return math.max(0, math.min(100, percent <= 1 and percent * 100 or percent)) end
+        local total = tonumber(ctx.queue and ctx.queue.bytes_total) or 0
+        local done = tonumber(ctx.queue and ctx.queue.bytes_done) or 0
+        if total <= 0 then return 0 end
+        return math.max(0, math.min(100, done / total * 100))
+    end
+
+    --- 进度框说明行：第几卷 / 共几卷 · 当前卷名。
+    ---@return string
+    local function progressLine()
+        local total = batch and batch.total or 1
+        local remaining = 0
+        for _idx, id in ipairs(batch and batch.ids or {}) do
+            local queued = ctx.entries[tostring(id)]
+            if type(queued) == "table" and queued.state ~= "failed" then remaining = remaining + 1 end
+        end
+        local index = math.max(1, math.min(total, batch and batch.total - remaining + 1 or 1))
+        local title
+        local current = ctx.queue and ctx.queue.current_chapter_id
+        if current ~= nil then
+            for _idx, entry in ipairs(toc) do
+                if tostring(entry.chapterId) == tostring(current) then title = entry.title break end
+            end
+        end
+        local line = T(_("正在缓存 %1/%2 卷"), index, total)
+        return title and T(_("%1 · %2"), line, title) or line
+    end
+
+    --- 全部完成 / 只剩失败项：全成 toast，有失败给「部分失败」（04 A5）。
+    local function finishDone()
+        local failed = failedEntries()
+        local total = batch and batch.total or 0
+        closeProgress()
+        if #failed > 0 then
+            local lines = { T(_("%1 卷成功，%2 卷失败"), math.max(0, total - #failed), #failed) }
+            for _idx, entry in ipairs(failed) do
+                local queued = ctx.entries[tostring(entry.chapterId)]
+                local reason = Cache.failureText(type(queued) == "table" and queued.last_error or nil)
+                lines[#lines + 1] = T(_("%1：%2"), entry.title, reason or _("缓存失败"))
+            end
+            local Confirm = require("ui.themes.widgets.confirm")
+            Confirm:new{
+                title = _("部分失败"),
+                text = table.concat(lines, "\n"),
+                ok_text = _("查看失败原因"),
+                cancel_text = _("关闭"),
+                ok_callback = refresh,
+            }:show()
+        else
+            toast(T(_("已缓存 %1 卷"), total))
+        end
+        batch = nil
+    end
+
+    --- 队列暂停：按 pause_reason 给文案与主按钮；low_space 不给继续（07 A5）。
+    local function finishPaused()
+        local reason = ctx.queue and ctx.queue.pause_reason
+        local info = PAUSE_REASONS[reason] or { text = _("已暂停"), resume = true }
+        local failed = failedEntries()
+        closeProgress()
+        local Confirm = require("ui.themes.widgets.confirm")
+        Confirm:new{
+            title = _("已暂停"),
+            text = info.text,
+            ok_text = info.resume and (info.retry and _("重试失败项并继续") or _("继续")) or _("去清理空间"),
+            cancel_text = _("关闭"),
+            ok_callback = function()
+                if not info.resume then
+                    toast(_("空间不足，已暂停。清理后再下载"))
+                    batch = nil
+                    return
+                end
+                if info.retry and #failed > 0 then retry(failed) end
+                local ok, code, message = Cache.queueResume()
+                if not ok then
+                    toast(Cache.message(code, message))
+                    return
+                end
+                local resumed = batch
+                batch = nil
+                if resumed then startProgress(resumed.ids, resumed.total) end
+            end,
+            cancel_callback = function() batch = nil end,
+        }:show()
+    end
+
+    --- 每一拍：重画行，有进度框就更新 / 收尾；队列停住或暂停就不再排下一拍。
+    local function tick()
+        timer = nil
+        refresh()
+        if dialog then
+            if ctx.paused then
+                finishPaused()
+            elseif not queueRunning(ctx.queue) then
+                finishDone()
+            else
+                dialog:set(progressLine(), aggregatePercent())
+            end
+        end
+        if queueRunning(ctx.queue) and not ctx.paused then
+            timer = function()
+                timer = nil
+                tick()
+            end
+            require("ui/uimanager"):scheduleIn(1, timer)
+        else
+            stopPolling()
+        end
+    end
+
+    --- 进度框：1 秒轮询 queue_state（只看本服务器），后台运行不停队列。
+    ---@param ids integer[] 本批次的章 id（入队 + 重试）
+    ---@param total integer 本批次的卷数
+    startProgress = function(ids, total)
+        batch = { ids = ids or {}, total = total or #(ids or {}) }
         local ProgressDialog = require("ui.themes.widgets.progress_dialog")
+        -- 缺 queue_control 时只留「后台运行」（02 A4）。
+        local control = has(ctx.capabilities, "queue_control")
         dialog = ProgressDialog:new{
             title = _("正在缓存"),
-            text = T(_("正在缓存 %1/%2 卷"), 1, total),
-            cancel_text = _("暂停"),
-            on_cancel = function()
+            text = T(_("正在缓存 %1/%2 卷"), 1, batch.total),
+            cancel_text = control and _("暂停") or nil,
+            on_cancel = control and function()
                 local ok, code, message = Cache.queuePause()
                 if not ok then toast(Cache.message(code, message)) end
-                dialog = nil
                 refresh()
-            end,
+            end or nil,
+            -- 关弹窗 ≠ 取消：队列继续跑，列表行继续按拍刷新（04 A5）。
             on_background = function() dialog = nil end,
         }
         dialog:show()
         refresh()
+        if not timer then
+            timer = function()
+                timer = nil
+                tick()
+            end
+            require("ui/uimanager"):scheduleIn(1, timer)
+        end
     end
 
     ---@param entries table[]
@@ -425,7 +617,11 @@ function VolumeList.pick(series, toc, cb, opts)
             text = retryText(entries, ctx),
             ok_text = _("重试"),
             ok_callback = function()
-                if retry(entries) then startProgress(#entries) end
+                if retry(entries) then
+                    local ids = {}
+                    for _idx, entry in ipairs(entries) do ids[#ids + 1] = entry.chapterId end
+                    startProgress(ids, #entries)
+                end
             end,
         }:show()
     end
@@ -454,7 +650,10 @@ function VolumeList.pick(series, toc, cb, opts)
             ok_callback = function()
                 if not enqueue(to_enqueue) then return end
                 if #to_retry > 0 then retry(to_retry) end
-                startProgress(total)
+                local ids = {}
+                for _idx, entry in ipairs(to_enqueue) do ids[#ids + 1] = entry.chapterId end
+                for _idx, entry in ipairs(to_retry) do ids[#ids + 1] = entry.chapterId end
+                startProgress(ids, total)
             end,
         }:show()
     end
@@ -507,6 +706,8 @@ function VolumeList.pick(series, toc, cb, opts)
         end,
         -- 单选点按时先关窗、同一拍再 on_select：下一拍还没选中就是用户关掉了列表。
         close_callback = function()
+            -- 04 A8：关列表即停，不设常驻轮询。
+            stopPolling()
             require("ui/uimanager"):nextTick(function()
                 if not chosen then cb(nil) end
             end)
