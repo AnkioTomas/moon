@@ -156,8 +156,8 @@ confirm = Confirm:new{ text = "x", swipe_dismiss = "up" }
 Assert.is_true(confirm.ges_events.SwipeModal ~= nil, "实例显式开启优先于全局开关")
 Kit.display.swipe_dismiss = "down"
 
--- 对角滑动是 KOReader 的截图手势（下层 Screenshoter 接）：弹窗不能报已处理，
--- 普通横滑仍是导航输入、照吞不漏给下层。
+-- 斜向滑动是 KOReader 的截图手势（下层 Screenshoter 接）：方向字段是 northeast 等，
+-- 不是字面 "diagonal"；弹窗不能报已处理。普通横滑仍是导航输入、照吞不漏给下层。
 do
     local dialog = Confirm:new{ text = "x" }
     dialog:show()
@@ -168,7 +168,8 @@ do
         ges.ges, ges.direction = "swipe", direction
         return dialog:handleEvent(Event:new("Gesture", ges))
     end
-    Assert.is_nil(swipe("diagonal"), "对角滑动放行给下层截图")
+    Assert.is_nil(swipe("northeast"), "斜向滑动放行给下层截图")
+    Assert.is_nil(swipe("southwest"), "斜向滑动放行给下层截图")
     Assert.is_true(swipe("west"), "普通横滑仍被弹窗拦截")
 end
 

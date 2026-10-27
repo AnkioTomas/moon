@@ -6,6 +6,17 @@ local UIManager = require("ui/uimanager")
 local Settings = require("utils.settings")
 local Input = {}
 
+--- 单指斜向滑动（GestureDetector:getPath 给出 northeast 等四向斜线）。
+--- KOReader Screenshoter 靠「接近屏对角线长度」的 swipe 截图，方向字段是斜向名，不是字面 "diagonal"；
+--- "diagonal" 只出现在双指手势映射里，一并认。
+---@param direction string|nil
+---@return boolean
+function Input.isDiagonalSwipe(direction)
+    return direction == "northeast" or direction == "northwest"
+        or direction == "southeast" or direction == "southwest"
+        or direction == "diagonal"
+end
+
 --- 只有越过边界才循环；页数尚不完整时 cycle=false，保留向前加载语义。
 ---@param page integer
 ---@param pages integer

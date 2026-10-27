@@ -273,7 +273,7 @@ Assert.is_true(bar:onTapModal(nil, { pos = { x = 100, y = 10 } }))
 Assert.len(state.closed, 0)
 
 -- 对角滑动是截图手势：面板内不切页签、遮罩区也不关侧栏，直接放行。
-Assert.is_false(bar:onSwipeSidebar(nil, { direction = "diagonal", pos = { x = 580, y = 10 } }))
+Assert.is_false(bar:onSwipeSidebar(nil, { direction = "northeast", pos = { x = 580, y = 10 } }))
 Assert.eq(bar.tab, 1)
 Assert.len(state.closed, 0)
 
