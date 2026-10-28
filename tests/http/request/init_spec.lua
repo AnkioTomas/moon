@@ -516,9 +516,10 @@ do
     Assert.eq(handshake_calls, 4)
 
     -- LuaSocket 点号调用必须把流对象补回去，否则离线开书会炸 iostream.lua:476
+    -- （IP 字面量不走异步 DNS，connect 同步到达桩；主机名解析见 tests/http/turbo/init_spec.lua）
     local iostream = require("turbo.iostream")
     local fail_stream = {}
-    iostream.IOStream.connect(fail_stream, "example.com", 443)
+    iostream.IOStream.connect(fail_stream, "203.0.113.5", 443)
     Assert.eq(fail_stream.fail_err, "Network is unreachable")
     Assert.eq(fail_stream.fail_self, fail_stream)
     fail_stream.fail_err = nil
@@ -648,5 +649,4 @@ do
     Assert.matches(select(2, Fetch.begin({ url = "http://127.0.0.1:8321/status" }, "spec")), "pump stub")
     Assert.matches(select(2, Fetch.begin({ url = "http://127.0.0.10/x" }, "spec")), "网络不可用")
     Turbo.acquire = acquire
-    network_connected = true
 end

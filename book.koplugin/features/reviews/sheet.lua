@@ -290,7 +290,10 @@ function Sheet:rebuild()
 end
 
 function Sheet:refresh()
+    local Perf = require("utils.perf")
+    local started_at = Perf.now()
     self:rebuild()
+    Perf.slow("reviews.sheet page " .. self.page, started_at)
     UIManager:setDirty(self, "ui")
 end
 

@@ -19,6 +19,8 @@ local _ = require("gettext")
 local Chapter = {}
 
 local PREFETCH_AHEAD = 3
+--- 切章（取章 + switchDocument）超过这么久按 warn 落盘。
+Chapter.SLOW_SWITCH_MS = 3000
 
 ---@type ReaderChapterSession|nil
 local chapter_session
@@ -280,10 +282,14 @@ local function requestChapter(chapter, idx, opts)
     if not identity then return end
     local source = identity.source
     if not source then return end
+    -- 切章 = 取章（网络 / 缓存）+ switchDocument（同步阻塞）；之后 ReaderReady 自己有 reader.ready 一段。
+    local span = require("utils.perf").begin("chapter.switch")
     chapter.request = source:openBookAsync(identity, { chapter_idx = idx }, function(path, err)
         chapter.request = nil
+        span:lap("fetch")
         if chapter_session ~= chapter then return end
         if not path then
+            span:finish(Chapter.SLOW_SWITCH_MS, idx, "failed")
             failRequest(chapter, err or _("章节打开失败"))
             return
         end
@@ -316,6 +322,7 @@ local function requestChapter(chapter, idx, opts)
                     ReaderUI:showReader(path, nil, true)
                 end
             end)
+            span:lap("switch"):finish(Chapter.SLOW_SWITCH_MS, idx)
             if not ok and chapter_session == chapter then
                 chapter.switching = false
                 chapter.target = nil

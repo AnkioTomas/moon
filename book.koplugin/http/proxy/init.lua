@@ -7,7 +7,7 @@ https 目标先 CONNECT 建隧道再握手（TLS 仍端到端到目标站）。
 @module koplugin.book.http.proxy
 --]]
 
-local Patch = require("http.turbo.patch")
+local Dns = require("http.dns")
 local logger = require("utils.log")
 local Text = require("utils.text")
 local _ = require("gettext")
@@ -148,7 +148,7 @@ local function useProxy(client, proxy)
     end
     -- 连不上代理时丢它的 DNS 缓存（类补丁只丢目标主机的）。
     client._handle_connect_fail = function(self, ...)
-        Patch.forget(proxy.host)
+        Dns.forget(proxy.host)
         return fail(self, ...)
     end
 end

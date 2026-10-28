@@ -25,6 +25,8 @@ local _ = require("gettext")
 local Session = {
     ---@type ReaderSessionSnapshot|nil
     _snapshot = nil,
+    --- ReaderReady 超过这个毫秒数按 WARN 记分段耗时
+    SLOW_READY_MS = 3000,
 }
 
 --- 月读是否认这份文档：Store.identityFor 能解析，且是章节文件或书架成员。
@@ -222,8 +224,8 @@ end
 --- ReaderReady：按物理路径重建阅读快照并启动统计、进度和阅读 UI。
 ---@param plugin table Book 插件实例
 function Session.onReaderReady(plugin)
-    local Perf = require("utils.perf")
-    local started_at = Perf.now()
+    -- ReaderReady 期间 KOReader 屏蔽全部输入，这里慢几十秒用户就是「点什么都没反应」：分段计时，超阈值 warn。
+    local span = require("utils.perf").begin("reader.ready")
     Session._snapshot = nil
     local ui = plugin.ui
     local identity = Store.ensureIdentity(ui.document.file)
@@ -237,7 +239,7 @@ function Session.onReaderReady(plugin)
         }:show()
         return
     end
-
+    span:lap("identity")
     Session._snapshot = Snapshot.new(ui, identity)
     installEndOfBookHandler(plugin, ui)
     local chapter_mode = identity.chapter_idx ~= nil
@@ -253,13 +255,15 @@ function Session.onReaderReady(plugin)
         require("reader.session.auto_toc").start(Session._snapshot)
         ensureCover(ui, identity)
     end
+    span:lap("snapshot")
     updateReadState(Session._snapshot)
     bootstrapReading(plugin, Session._snapshot, skip_pull)
+    span:lap("bootstrap")
     if chapter_mode then
         ChapterMode.afterBootstrap(plugin, Session._snapshot)
+        span:lap("after")
     end
-    require("utils.log").dbg("book.perf reader.ready", Perf.elapsedMs(started_at), "ms",
-        identity.source_id, chapter_mode and "chapter" or "book")
+    span:finish(Session.SLOW_READY_MS, identity.source_id, chapter_mode and "chapter" or "book")
 end
 
 --- 推送当前进度和注解。
@@ -334,6 +338,9 @@ function Session.onPageUpdate(plugin, page)
         require("reader.session.stats").onPage(nil)
         return
     end
+    -- 每翻一页都走这里，这里慢就是「翻不动」：超 100ms 记下来。
+    local Perf = require("utils.perf")
+    local started_at = Perf.now()
     Snapshot.refresh(session, page)
     updateReadState(session)
     require("reader.session.stats").onPage(session)
@@ -348,6 +355,7 @@ function Session.onPageUpdate(plugin, page)
             position = session.position,
         })
     end
+    Perf.slow("page.update", started_at)
 end
 
 --- PosUpdate（滚动视图）：同 PageUpdate。

@@ -1,5 +1,5 @@
 --[[--
-turbo 类补丁 + 主机名 DNS 缓存（会话内只打一次，由 http.turbo 建 loop 时调用）。
+turbo 类补丁（会话内只打一次，由 http.turbo 建 loop 时调用）。主机名解析交给 http.dns（非阻塞 UDP）。
 
 补丁：SNI、CA、connect_fail、int64，以及 HTTPParser.get 的 strncasecmp 回退
 （turbo 靠 io.popen("uname") 选平台绑定，Android 上 popen 失败留 nil，一读响应头就崩）。
@@ -11,41 +11,7 @@ local Patch = {}
 
 local patched = false
 
--- LuaSocket connect 按主机名在 UI 线程同步 getaddrinfo，SSL 握手前还会再 connect 一次。
--- 设备上没有系统 DNS 缓存，10 路封面下载就是 20 次阻塞解析；这里按主机名缓存结果。
-local DNS_TTL = 10 * 60
-local dns = {}
--- 解析失败也记 10 秒：Wi-Fi 连着但上不了网时每次 getaddrinfo 都要阻塞到超时，一屏封面就是十几次。
--- 只挡同一批请求，不能长：刚联网的重试不该吃到联网前的失败。
--- 单独一张表：连接失败会清 dns[host]，不能顺手把失败记录也清了。
-local DNS_FAIL_TTL = 10
-local dns_fail = {}
-
---- 主机名换成缓存地址；IP 字面量原样返回，解析失败（含 10 秒内失败过）返回 nil。
----@param host string
----@return string|nil
-local function resolve(host)
-    if host:match("^[%d%.]+$") or host:find(":", 1, true) then
-        return host
-    end
-    local now = os.time()
-    local hit = dns[host]
-    if hit and hit.expires > now then
-        return hit.addr
-    end
-    if (dns_fail[host] or 0) > now then
-        return nil
-    end
-    local list = require("socket").dns.getaddrinfo(host)
-    local addr = list and list[1] and list[1].addr
-    if not addr then
-        dns_fail[host] = now + DNS_FAIL_TTL
-        return nil
-    end
-    dns_fail[host] = nil
-    dns[host] = { addr = addr, expires = now + DNS_TTL }
-    return addr
-end
+local Dns = require("http.dns")
 
 --- 包一层 target[name]。turbo 随 KOReader 版本变，方法不存在就跳过；
 --- 类上记标记，插件重载（本模块重新加载、turbo 类还在）不会包两层。
@@ -115,7 +81,9 @@ function Patch.apply()
         end
     end)
 
-    -- `self._handle_connect_fail(err)` 点号调用会把 self 变成错误字符串；主机名解析收口到 resolve。
+    -- `self._handle_connect_fail(err)` 点号调用会把 self 变成错误字符串；主机名解析收口到 Dns.resolve（不阻塞）。
+    -- HTTPClient 不看 connect 的返回值，只等 _handle_connect / _handle_connect_fail（外加自己的 connect 超时），
+    -- 所以解析可以异步：先登记失败回调，地址到了再真正 connect。
     wrap(IOStream, "connect", function(orig)
         local orig_fail = IOStream._handle_connect_fail
         return function(self, address, port, family, callback, fail_callback, arg)
@@ -125,13 +93,19 @@ function Patch.apply()
                 end
                 return orig_fail(first, second)
             end
-            local addr = resolve(address)
-            if not addr then
-                -- 与 turbo 自己解析失败同一条路：登记失败回调后立即失败，不让 LuaSocket 再阻塞解析一次。
-                self._connect_fail_callback, self._connect_callback_arg = fail_callback, arg
-                return self._handle_connect_fail("DNS resolv error: " .. address)
-            end
-            return orig(self, addr, port, family, callback, fail_callback, arg)
+            self._connect_fail_callback, self._connect_callback_arg = fail_callback, arg
+            self._connecting = true
+            Dns.resolve(address, function(addr, err)
+                -- 等解析期间请求已取消 / 超时关流（close 只清 socket，不碰 _connecting）或已经失败过：什么都别做。
+                if (self.closed and self:closed()) or self._connect_fail_callback ~= fail_callback then return end
+                if not addr then
+                    -- 与 turbo 自己解析失败同一条路：立即失败，不让 LuaSocket 再阻塞解析一次。
+                    self._handle_connect_fail("DNS resolv error: " .. address .. " (" .. tostring(err) .. ")")
+                    return
+                end
+                orig(self, addr, port, family, callback, fail_callback, arg)
+            end)
+            return 0
         end
     end)
 
@@ -176,20 +150,13 @@ function Patch.apply()
     -- LuaSocket 异步失败回调是 (client, -1, err)，官方只取第二参，提示成「Could not connect: -1」。
     wrap(HTTPClient, "_handle_connect_fail", function(orig)
         return function(self, rc, err)
-            dns[self.hostname] = nil
+            Dns.drop(self.hostname)
             if rc == -1 and err ~= nil then
                 rc = err
             end
             return orig(self, rc)
         end
     end)
-end
-
---- 丢弃主机的 DNS 缓存，下次连接重新解析。
----@param host string
-function Patch.forget(host)
-    dns[host] = nil
-    dns_fail[host] = nil
 end
 
 return Patch

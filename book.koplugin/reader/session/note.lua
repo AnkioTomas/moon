@@ -225,12 +225,17 @@ function SessionNote.applyLocal(ui, identity)
         logger.dbg("book.note apply skip: document changed")
         return 0
     end
+    local Perf = require("utils.perf")
+    local started_at = Perf.now()
+    local applied
     if DerivedNote.originOf(ui.document.file) then
         DerivedNote.project(ui, identity)
-        return #(ui.doc_settings:readSetting("annotations") or {})
+        applied = #(ui.doc_settings:readSetting("annotations") or {})
+    else
+        applied = applySnapshot(ui, identity)
+        DerivedNote.collect(ui, identity)
     end
-    local applied = applySnapshot(ui, identity)
-    DerivedNote.collect(ui, identity)
+    Perf.slow("note.applyLocal", started_at)
     return applied
 end
 
