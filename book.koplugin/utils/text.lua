@@ -183,6 +183,18 @@ local function utf8char(cp)
 end
 Text.utf8char = utf8char
 
+--- 匹配一个 UTF-8 字符的 Lua pattern（`gmatch` 逐字、`"^" .. UTF8_CHAR` 取首字、`:rep(n)` 取前 n 字）。
+Text.UTF8_CHAR = "[%z\1-\127\194-\244][\128-\191]*"
+
+--- 按 UTF-8 字符切成数组。
+---@param s string
+---@return string[]
+function Text.chars(s)
+    local out = {}
+    for ch in s:gmatch(Text.UTF8_CHAR) do out[#out + 1] = ch end
+    return out
+end
+
 --- 去掉 KOReader 字体画不出的 emoji（只会成空白方块）：U+1F000–1FFFF 图形（含肤色、区旗字母）、
 --- 标签字符 U+E0020–E007F、变体选择符 FE0E/FE0F、零宽连接 200D、键帽 20E3。
 --- ★ ✓ ♥ 这类 U+2000–2BFF 符号字体里有，保留。不改空白，HTML 片段也能直接用；别用于按原文匹配的字符串。

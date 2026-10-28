@@ -221,7 +221,7 @@ function Bluetooth.topbar()
     -- 顶栏只留前 4 个字（按 UTF-8 字符数）
     local name = conns[1].name
     if not name then return nil, "bluetooth_connected" end
-    return name:match("^" .. ("[%z\1-\127\194-\244][\128-\191]*"):rep(4)) or name, "bluetooth_connected"
+    return name:match("^" .. require("utils.text").UTF8_CHAR:rep(4)) or name, "bluetooth_connected"
 end
 
 return Bluetooth

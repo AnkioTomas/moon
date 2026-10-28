@@ -125,8 +125,7 @@ function Lexicon.match(lex, text, threshold, limit)
         end
         return out
     end
-    local chars = {}
-    for c in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do chars[#chars + 1] = c end
+    local chars = require("utils.text").chars(text)
     local i = 1
     while i <= #chars and #out < limit do
         local step = 1

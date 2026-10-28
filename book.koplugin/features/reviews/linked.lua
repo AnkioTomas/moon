@@ -125,7 +125,7 @@ for _idx, p in ipairs(CJK_PUNCT) do PUNCT[p] = true end
 ---@return table<integer, integer> to 去后串字符末字节 → 原文终点
 local function squash(raw)
     local parts, from, to, n = {}, {}, {}, 0
-    for s, ch, e in raw:gmatch("()([%z\1-\127\194-\244][\128-\191]*)()") do
+    for s, ch, e in raw:gmatch("()(" .. require("utils.text").UTF8_CHAR .. ")()") do
         if not (PUNCT[ch] or ch:match("^[%s%p]$")) then
             parts[#parts + 1] = ch
             from[n + 1] = s

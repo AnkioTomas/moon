@@ -58,14 +58,14 @@ do -- 没有日报 / 不是今天的日报：不画农历，不报错
     Assert.is_nil(Dxl.day({ year = 2026, month = 10, day = 16 }).lunar) -- 昨天的缓存不用
     Assert.is_true(ensured >= 3)
     local ops = Dxl.plan(Dxl.day(OCT15, false), { text = "没有农历也要排得下。", title = "", author = "" }, 600, 800,
-        function(text, px) return #T.chars(text) * px end)
+        function(text, px) return #require("utils.text").chars(text) * px end)
     for _k, op in ipairs(ops) do Assert.is_true(op.s ~= "九月初六") end
     Myrl.current, Myrl.ensure = saved_current, saved_ensure
 end
 
 local function measure(text, px)
     local w = 0
-    for _idx, ch in ipairs(T.chars(text)) do w = w + (#ch == 1 and px * 0.55 or px) end
+    for _idx, ch in ipairs(require("utils.text").chars(text)) do w = w + (#ch == 1 and px * 0.55 or px) end
     return w
 end
 

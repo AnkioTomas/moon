@@ -219,7 +219,7 @@ function Overlay.walk(document, pos0, pos1)
         text = text:gsub("%s+", "")
         if text ~= "" then
             -- 偶有一次取到多个字（节点边界）：只取第一个字，位置仍按这一格。
-            units[#units + 1] = { text = text:match("^[%z\1-\127\194-\244][\128-\191]*"), xp = xp, stop = stop }
+            units[#units + 1] = { text = text:match("^" .. require("utils.text").UTF8_CHAR), xp = xp, stop = stop }
         end
         if not nx or nx == xp then break end
         xp = nx

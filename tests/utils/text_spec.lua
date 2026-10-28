@@ -227,3 +227,14 @@ Assert.eq(Text.stripEmoji("\240\159\135\168\240\159\135\179中1\239\184\143\226\
 Assert.eq(Text.stripEmoji("\226\152\133\226\157\164\239\184\143"), "\226\152\133\226\157\164")
 Assert.eq(Text.stripEmoji(""), "")
 Assert.is_nil(Text.stripEmoji(nil))
+
+-- ── UTF8_CHAR / chars ─────────────────────────────
+do
+    Assert.eq(table.concat(Text.chars("a中\240\159\152\128b"), "|"), "a|中|\240\159\152\128|b")
+    Assert.len(Text.chars(""), 0)
+    Assert.eq(("月读 moon"):match("^" .. Text.UTF8_CHAR), "月")
+    Assert.eq(("月读 moon"):match("^" .. Text.UTF8_CHAR:rep(2)), "月读")
+    local n = 0
+    for _ch in ("abc中文"):gmatch(Text.UTF8_CHAR) do n = n + 1 end
+    Assert.eq(n, 5)
+end

@@ -9,7 +9,7 @@ local Typo = require("features.lockscreen.typo")
 
 local function measure(text, px)
     local w = 0
-    for _idx, ch in ipairs(T.chars(text)) do w = w + (#ch == 1 and px * 0.55 or px) end
+    for _idx, ch in ipairs(require("utils.text").chars(text)) do w = w + (#ch == 1 and px * 0.55 or px) end
     return w
 end
 

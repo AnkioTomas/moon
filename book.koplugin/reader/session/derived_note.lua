@@ -35,7 +35,6 @@ local ORPHANS = "book_note_orphans"
 --- 搜索串取划线首尾各这么多个字：太短重复多，太长容易跨过排版版合并掉的断行。
 local EDGE_CHARS = 16
 local MAX_HITS = 200
-local UTF8_CHAR = "[%z\1-\127\194-\244][\128-\191]*"
 
 --- 衍生版目录的 meta.json；没有或解不出来返回 nil。
 ---@param dir string
@@ -82,8 +81,7 @@ end
 ---@return string
 local function edge(text, tail)
     local line = tail and text:match("([^\n]*)$") or text:match("^([^\n]*)")
-    local chars = {}
-    for char in line:gmatch(UTF8_CHAR) do chars[#chars + 1] = char end
+    local chars = require("utils.text").chars(line)
     if tail then
         return table.concat(chars, "", math.max(1, #chars - EDGE_CHARS + 1))
     end

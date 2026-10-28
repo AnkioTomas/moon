@@ -80,7 +80,7 @@ local FIELDS = {
 local function clip(s, max)
     s = s:gsub("%s+", " ")
     local n, pos = 0, 1
-    for p in s:gmatch("()[%z\1-\127\194-\244][\128-\191]*") do
+    for p in s:gmatch("()" .. Text.UTF8_CHAR) do
         n = n + 1
         if n > max then return s:sub(1, p - 1) .. "…" end
         pos = p --[[@as integer]]
