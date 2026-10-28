@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""五笔、仓颉、注音词库 → 月读 IME SQLite 分片。
+"""五笔、仓颉（速成共用）、注音词库 → 月读 IME SQLite 分片。
 
 仅依赖 Python 标准库。词库来源与许可证见 book.koplugin/ime/THIRD_PARTY.md。
 """
@@ -28,10 +28,13 @@ SOURCES = {
             "wubi86_jidian_extra.dict.yaml",
         ],
     },
+    # 码表本身没有词频（按码排序）；速成按首尾码聚合几十个字，必须按字频排，
+    # 权重取 rime-essay 八股文的单字频次（繁体为主，与 Cangjie5_TC 一致）。
     "cangjie": {
         "repo": "Jackchows/Cangjie5",
         "ref": "master",
         "files": ["Cangjie5_TC.txt"],
+        "extra": ["https://raw.githubusercontent.com/rime/rime-essay/master/essay.txt"],
     },
     "zhuyin": {
         "repo": "openvanilla/McBopomofo",
@@ -92,21 +95,23 @@ def yaml_entries(path):
             yield fields[0], fields[1], weight
 
 
-def cangjie_entries(path):
+def cangjie_entries(path, occurrence_path):
+    weights = occurrence_weights(occurrence_path)
     with open(path, encoding="utf-8") as source:
         for line in source:
             fields = line.split()
             if len(fields) >= 2 and re.fullmatch(r"[a-z]+", fields[1]):
-                yield fields[0], fields[1], 0
+                yield fields[0], fields[1], weights.get(fields[0], 0)
 
 
 def occurrence_weights(path):
+    """``词 频次`` / ``词\\t频次`` 每行一条（McBopomofo phrase.occ、rime-essay essay.txt）。"""
     weights = {}
     with open(path, encoding="utf-8") as source:
         for line in source:
-            word, separator, count = line.rstrip().rpartition(" ")
-            if separator and count.isdigit():
-                weights[word] = int(count)
+            fields = line.rstrip().rsplit(None, 1)
+            if len(fields) == 2 and fields[1].isdigit():
+                weights[fields[0]] = int(fields[1])
     return weights
 
 
@@ -140,7 +145,7 @@ def read_entries(method, paths):
         for path in paths:
             yield from yaml_entries(path)
     elif method == "cangjie":
-        yield from cangjie_entries(paths[0])
+        yield from cangjie_entries(paths[0], paths[1])
     else:
         yield from zhuyin_entries(paths[0], paths[1], paths[2])
 
@@ -198,11 +203,12 @@ def build(args):
             os.remove(os.path.join(out_dir, name))
 
     with tempfile.TemporaryDirectory(prefix=f"moon-{args.method}-") as temp:
+        urls = [source_url(source, name, ref) for name in source["files"]] + source.get("extra", [])
         paths = []
-        for index, name in enumerate(source["files"]):
+        for index, url in enumerate(urls):
             path = os.path.join(temp, str(index))
-            print(f"fetch {name}")
-            fetch(source_url(source, name, ref), path)
+            print(f"fetch {url}")
+            fetch(url, path)
             paths.append(path)
 
         rows = {}

@@ -14,13 +14,14 @@ end
 
 local Registry = require("features.ime.registry")
 local methods = Registry.list()
-Assert.len(methods, 6)
+Assert.len(methods, 7)
 Assert.eq(methods[1].id, "pinyin")
 Assert.eq(methods[2].id, "t9")
 Assert.eq(methods[3].id, "xiaohe")
 Assert.eq(methods[4].id, "wubi")
 Assert.eq(methods[5].id, "cangjie")
-Assert.eq(methods[6].id, "zhuyin")
+Assert.eq(methods[6].id, "quick")
+Assert.eq(methods[7].id, "zhuyin")
 for _, method in ipairs(methods) do
     Assert.is_true(type(method.dictionary) == "string")
 end
@@ -62,6 +63,26 @@ Assert.eq(cangjie.labels.a, "日")
 Assert.is_nil(cangjie.labels.z)
 Assert.is_true(cangjie.show_codes)
 Assert.eq(cangjie.mapKey("A"), "a")
+
+-- 速成共用仓颉词库与键帽：单键同仓颉查法，两键按首尾码 GLOB，三键以上没有码。
+local quick = Registry.get("quick")
+Assert.eq(quick.dictionary, "cangjie")
+Assert.eq(quick.labels.a, "日")
+Assert.eq(quick.mapKey("A"), "a")
+local globbed, exact = {}, {}
+package.loaded["features.ime.cangjie.dictionary"] = nil
+package.preload["features.ime.cangjie.dictionary"] = function()
+    return {
+        lookup = function(_, code) exact[#exact + 1] = code; return { "日" } end,
+        glob = function(_, pattern) globbed[#globbed + 1] = pattern; return { "明" } end,
+    }
+end
+Assert.eq(Registry.lookup(quick, "a")[1], "日")
+Assert.eq(exact[1], "a")
+Assert.eq(Registry.lookup(quick, "ab")[1], "明")
+Assert.eq(globbed[1], "a*b")
+Assert.len(Registry.lookup(quick, "abc"), 0)
+Assert.len(globbed, 1)
 
 local zhuyin = Registry.get("zhuyin")
 Assert.eq(zhuyin.labels.q, "ㄆ")

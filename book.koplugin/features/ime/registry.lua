@@ -53,6 +53,13 @@ local function mappedKey(map, key)
     return map[#key == 1 and key:lower() or key]
 end
 
+-- 速成 = 仓颉首尾码：两键查仓颉码 GLOB `首*尾`（含恰好两码的字）；单键同仓颉；没有三键以上的码。
+local function quickLookup(dictionary, code)
+    if #code == 1 then return dictionary:lookup(code) end
+    if #code > 2 then return {} end
+    return dictionary:glob(code:sub(1, 1) .. "*" .. code:sub(2, 2))
+end
+
 local METHODS = {
     pinyin = {
         id = "pinyin",
@@ -96,6 +103,16 @@ local METHODS = {
         optional_labels = true,
         mapKey = letterKey,
     },
+    quick = {
+        id = "quick",
+        dictionary = "cangjie",
+        label = _("速成"),
+        labels = CANGJIE,
+        show_codes = true,
+        optional_labels = true,
+        mapKey = letterKey,
+        query = quickLookup,
+    },
     zhuyin = {
         id = "zhuyin",
         dictionary = "zhuyin",
@@ -105,7 +122,7 @@ local METHODS = {
     },
 }
 
-local ORDER = { "pinyin", "t9", "xiaohe", "wubi", "cangjie", "zhuyin" }
+local ORDER = { "pinyin", "t9", "xiaohe", "wubi", "cangjie", "quick", "zhuyin" }
 
 local M = {}
 
@@ -129,7 +146,7 @@ end
 
 -- M.isAvailable/fileExists/lookup/entries/builtAt/reset(method, ...)：method 为 profile 或 id，
 -- 转发到该方法所用词库（profile.dictionary）的 table_dictionary 实例。
--- 声明了 toCode 的方法（双拼）查词前先把键码翻译成词库码；声明了 query 的（九宫格）自己展开多个词库码。
+-- 声明了 toCode 的方法（双拼）查词前先把键码翻译成词库码；声明了 query 的（九宫格、速成）自己决定怎么查。
 for _idx, name in ipairs({ "isAvailable", "fileExists", "lookup", "entries", "builtAt", "reset" }) do
     M[name] = function(method, ...)
         local profile = M.get(type(method) == "table" and method.id or method)

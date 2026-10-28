@@ -127,6 +127,23 @@ function Dictionary:lookup(code)
     return words
 end
 
+--- 按 GLOB 模式查码（速成：仓颉首尾码 `a*b`）。同一字多码命中只出一次。
+---@param pattern string
+---@return string[]
+function Dictionary:glob(pattern)
+    if not self:open() then return {} end
+    local ok, words = pcall(self.fetch, self, "glob",
+        "SELECT DISTINCT text FROM entries WHERE code GLOB ?"
+            .. " ORDER BY weight DESC, source_order LIMIT " .. MAX_CANDIDATES,
+        pattern)
+    if not ok then
+        logger.warn("book ime dict glob failed", self.id, words)
+        pcall(function() self.statements.glob:clearbind():reset() end)
+        return {}
+    end
+    return words
+end
+
 ---@param key string
 ---@return string|nil
 function Dictionary:metaValue(key)
