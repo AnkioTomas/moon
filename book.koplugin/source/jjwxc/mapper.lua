@@ -153,6 +153,78 @@ function Mapper.toc(wire)
     return toc
 end
 
+--- 取一条 CSS 规则里的 content 字符串（解 \' \" \\ 与 \XXXXXX 十六进制转义）；没有返回 nil。
+---@param rule string
+---@return string|nil
+local function cssContent(rule)
+    local _from, stop = rule:find("content%s*:%s*")
+    if not stop then return nil end
+    local quote = rule:sub(stop + 1, stop + 1)
+    if quote ~= "'" and quote ~= '"' then return nil end
+    local out, i = {}, stop + 2
+    while i <= #rule do
+        local c = rule:sub(i, i)
+        if c == quote then return table.concat(out) end
+        if c == "\\" then
+            local hex, next_i = rule:match("^\\(%x%x?%x?%x?%x?%x?)%s?()", i)
+            if hex then
+                out[#out + 1] = Text.utf8char(tonumber(hex, 16) or 0)
+                i = next_i
+            else
+                out[#out + 1] = rule:sub(i + 1, i + 1)
+                i = i + 2
+            end
+        else
+            out[#out + 1] = c
+            i = i + 1
+        end
+    end
+    return nil
+end
+
+--- VIP 页正文被切成 <span class="c_xxx">，段缝里的字不在解密片段里，挂在同页 <style> 的
+--- .c_xxx:before/:after content 上，浏览器靠 CSS 拼出全文（issue #67）。收成 { 类名 -> { before, after } }。
+---@param html string
+---@return table
+local function seamTexts(html)
+    local seams = {}
+    for style in html:gmatch("<style[^>]*>(.-)</style>") do
+        for selectors, rule in style:gmatch("([^{}]+)%{([^{}]*)}") do
+            local text = cssContent(rule)
+            if text then
+                for cls, kind in selectors:gmatch("%.(c_%w+)%s*::?%s*(%a+)") do
+                    if kind == "before" or kind == "after" then
+                        local seam = seams[cls] or {}
+                        seam[kind] = text
+                        seams[cls] = seam
+                    end
+                end
+            end
+        end
+    end
+    return seams
+end
+
+--- 把段缝拼回片段：span 开标签换成该类的 before、配对的 </span> 换成 after，之后再走原有剥标签。
+--- 片段里 span 不嵌套，按出现顺序配对。
+---@param body string
+---@param seams table
+---@return string
+local function spliceSeams(body, seams)
+    local opens, closed = {}, 0
+    body = body:gsub("<[Ss][Pp][Aa][Nn][^>]*>", function(tag)
+        local cls = tag:match("class%s*=%s*['\"](c_%w+)['\"]")
+        opens[#opens + 1] = cls
+        local seam = cls and seams[cls]
+        return seam and seam.before or ""
+    end)
+    return (body:gsub("</[Ss][Pp][Aa][Nn]%s*>", function()
+        closed = closed + 1
+        local seam = opens[closed] and seams[opens[closed]]
+        return seam and seam.after or ""
+    end))
+end
+
 --- 章节网页 HTML → 正文纯文本；不是正文页（未购买的提示页等）返回 nil。
 ---@param html string
 ---@return string|nil
@@ -165,6 +237,8 @@ function Mapper.webContent(html)
         body = html:match('<ul class="content_ul">%s*<li[^>]*>(.-)</li>')
     end
     if not body then return nil, why end
+    local seams = seamTexts(html)
+    if next(seams) then body = spliceSeams(body, seams) end
     body = body:gsub("<script.-</script>", ""):gsub("&zwnj;", ""):gsub("&#([xX]%x+);?", "&#%1;")
     local text = Text.xmlDecode((body:gsub("<[Bb][Rr]%s*/?>", "\n"):gsub("<[^>]*>", "")))
     return Text.trim(text) ~= "" and text or nil

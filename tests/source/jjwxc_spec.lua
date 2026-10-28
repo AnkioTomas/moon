@@ -94,6 +94,11 @@ do
         .. '<input name="cryptInfo" value="' .. enc(meta, "9942287.23.85927522.AcsRWK", 27, 11) .. '">'
         .. '<input name="content" value="' .. enc(body, "HqgOwYk179254410485927522", 12, 28) .. '"></div>'
     Assert.eq(require("source.jjwxc.vip").content(page), body)
+    -- 段缝：正文切成 c_ span，缝里的字挂在同页 <style> 的 :before/:after content 上（issue #67）。
+    -- .c_zz 是同规则的配对类名（不在正文里），不得重复拼；\7f1d 是 CSS 十六进制转义。
+    Assert.eq(Mapper.webContent([[<style>.c_aa:before, .c_zz:after{content:'缝1';} .c_bb:after{content:'\7f1d 2';}</style>]]
+        .. [[<ul class="content_ul"><li>甲<span class='c_aa'>乙</span><span class="c_bb">丙</span>丁</li></ul>]]),
+        "甲缝1乙丙缝2丁")
 end
 
 do
