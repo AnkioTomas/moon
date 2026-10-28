@@ -489,25 +489,36 @@ function Book.cover(plugin, source, book, cw, ch, opts)
             cached_cover = cached
         end
     end
-    -- 显式 src（刮削候选）> 本地封面 > 远程链接：本地已落盘就不再为同一本书走网络。
-    if type(opts.src) == "string" and opts.src ~= "" then
-        req = { url = opts.src, headers = opts.headers }
-    elseif cached_cover then
-        req = { url = cached_cover }
-    elseif type(book) == "table" and type(book.cover_url) == "string" and book.cover_url ~= "" then
-        req = { url = book.cover_url, headers = book.cover_headers }
-    elseif type(book) == "table" and type(book.cover) == "string" and book.cover ~= "" then
-        req = { url = book.cover, headers = book.cover_headers }
-    end
-    if not req and type(book) == "table" and type(book.stable_id) == "string" then
+    -- 属主源封面（纯构造，无 IO）。源声明 authoritative 时要压过本地缓存：同身份缓存可能
+    -- 本来就是坏图（Kavita 卷行抽页 = 扫描版第一页）或书库早就换掉的旧封面。
+    local source_req
+    if type(book) == "table" and type(book.stable_id) == "string" then
         local sid = book.source_id
         local owner = source
         if type(sid) == "string" and sid ~= "" and (not source or source.id ~= sid) then
             owner = require("source.registry").resolve(sid)
         end
         if owner and type(owner.coverRequest) == "function" then
-            req = select(1, owner:coverRequest(book))
+            local ok, got = pcall(owner.coverRequest, owner, book)
+            if ok and type(got) == "table" and type(got.url) == "string" and got.url ~= "" then
+                source_req = got
+            end
         end
+    end
+    -- 显式 src（刮削候选）> 权威源封面 > 本地封面 > 远程链接 > 源封面。
+    -- 本地已落盘就不再为同一本书走网络；权威源封面例外（本地只作加载失败兜底）。
+    if type(opts.src) == "string" and opts.src ~= "" then
+        req = { url = opts.src, headers = opts.headers }
+    elseif source_req and source_req.authoritative then
+        req = source_req
+    elseif cached_cover then
+        req = { url = cached_cover }
+    elseif type(book) == "table" and type(book.cover_url) == "string" and book.cover_url ~= "" then
+        req = { url = book.cover_url, headers = book.cover_headers }
+    elseif type(book) == "table" and type(book.cover) == "string" and book.cover ~= "" then
+        req = { url = book.cover, headers = book.cover_headers }
+    else
+        req = source_req
     end
     local t = Theme.current()
     local style = opts.shadow == false and t.image or t.raised

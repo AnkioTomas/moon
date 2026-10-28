@@ -1053,4 +1053,22 @@ Assert.eq(menu.items[5].mandatory, "无")
 Assert.is_true(menu.items[4].enabled, "还有未读的缓存：整系列清理仍可点")
 Assert.eq(menu.items[4].mandatory, "1 卷")
 
+-- 点开系列时后台刷新目录：服务器最新的 pagesRead 原地反映到行里（不用关掉重开）。
+reset()
+local fresh_toc = { entry(631, "第 1 卷", 100, 0), entry(632, "第 2 卷", 100, 0) }
+local live = open(fresh_toc)
+Assert.not_nil(live.refreshToc, "列表暴露刷新入口")
+live.refreshToc({ entry(631, "第 1 卷", 100, 100), entry(632, "第 2 卷", 100, 40) })
+live:paintTo(Kit.canvas(), 0, 0)
+local live_text = table.concat(Kit.texts(live), "\n")
+Assert.is_true(live_text:find("已读", 1, true) ~= nil, "服务器说读完的卷立刻变已读")
+Assert.is_true(live_text:find("在读", 1, true) ~= nil, "服务器说读到一半的卷立刻变在读")
+-- 空目录 / 已关的列表直接丢弃回包，不把列表清空。
+live.refreshToc({})
+live:paintTo(Kit.canvas(), 0, 0)
+textContains(table.concat(Kit.texts(live), "\n"), "第 1 卷", "空回包不清空列表")
+live.closed = true
+live.refreshToc({ entry(631, "第 1 卷", 100, 0) })
+Assert.eq(#live.items, 2, "关掉的列表不再吃回包")
+
 return true

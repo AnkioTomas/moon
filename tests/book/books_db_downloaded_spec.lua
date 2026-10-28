@@ -139,7 +139,7 @@ do
     Assert.is_true(BookDB.upsert({ source_id = "ext.kavita", stable_id = "701", title = "没缓存没下载", deleted = 0 }))
     Assert.is_true(BookDB.upsert({ source_id = "ext.kavita", stable_id = "702", title = "历史 cbz",
         path = "/cache/702.cbz", deleted = 0 }))
-    -- 卷行：非书架成员身份行（deleted=1 + sync_status=1），只有进度时才出现在最近阅读。
+    -- 卷行：非书架成员身份行（deleted=1 + sync_status=1），最近阅读列它的系列行，不列卷行本身。
     Assert.is_true(BookDB.upsertRemote({ source_id = "ext.kavita", stable_id = "700:7001", title = "第七百卷" }))
     Assert.is_true(ProgressDB.upsert("ext.kavita", "700:7001", { fraction = 0.5, updated_at = os.time() }))
     Assert.is_true(BookDB.upsert({ source_id = "local", stable_id = "/lib/x.epub", title = "本地书",
@@ -154,10 +154,10 @@ do
     Assert.is_true(got_offline["700"].cache_mark, "离线行也带 cache_mark")
     Assert.is_nil(got_offline["701"], "没缓存没下载：离线隐藏")
     Assert.is_true(got_offline["702"] ~= nil, "已下载的历史 cbz 仍可离线读")
-    Assert.is_true(got_offline["700:7001"] ~= nil, "卷行放行（不误杀上次读到一半的书）")
-    Assert.eq(offline_count, 3, "count 与 where 一致")
+    Assert.is_nil(got_offline["700:7001"], "卷行不是书架成员：离线列表也只列系列行")
+    Assert.eq(offline_count, 2, "count 与 where 一致")
 
-    -- 分页与总数：翻页只改取出范围，不改 count。
+    -- 分页与总数：翻页只改取出范围，不改 count；翻过最后一页是空页，不是「加载失败」。
     local page1, count1 = Catalog.listBooks("ext.kavita", {
         sort = "recent_read", offline_only = true, chapter_sources = {}, limit = 2, offset = 0,
     })
@@ -165,8 +165,8 @@ do
         sort = "recent_read", offline_only = true, chapter_sources = {}, limit = 2, offset = 2,
     })
     Assert.len(page1, 2)
-    Assert.len(page2, 1)
-    Assert.eq(count1, 3)
+    Assert.len(page2, 0)
+    Assert.eq(count1, 2)
     Assert.eq(count2, count1, "分页总数不受页码影响")
 
     -- 在线（不传 offline_only）：没缓存的照旧列出，只是没有标记。
@@ -186,7 +186,7 @@ do
     for _idx, row in ipairs(mixed_rows) do got_mixed[row.source_id .. "/" .. row.stable_id] = true end
     Assert.is_true(got_mixed["local//lib/x.epub"], "别的源不受离线过滤")
     Assert.is_nil(got_mixed["ext.kavita/701"])
-    Assert.eq(mixed_count, 4, "本地的行加上可离线的 Kavita 行")
+    Assert.eq(mixed_count, 3, "本地的行加上可离线的 Kavita 系列行（卷行不列）")
 
     package.loaded["source.registry"] = nil
 end
@@ -202,7 +202,7 @@ do
     Assert.is_true(ProgressDB.upsertRemote("ext.kavita", "800", { fraction = 0.4, updated_at = 0 },
         { reset_updated_at = true }))
     local series = ProgressDB.get("ext.kavita", "800")
-    Assert.eq(series.updated_at, 0, "容器行归零，最近阅读不再出现重复的 series 行")
+    Assert.eq(series.updated_at, 0, "reset_updated_at 能把旧时间戳归零（纠正用）")
     Assert.eq(series.fraction, 0.4)
 end
 

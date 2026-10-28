@@ -243,14 +243,12 @@ do
     Assert.eq(err_count, 0)
     Assert.not_nil(err, "库查询出错要带错误，图书馆页据此显示「加载失败」")
 
-    -- 「最近阅读」列整个书架：LEFT JOIN，在架书全列，卷行这种非成员只在有进度时进来。
+    -- 「最近阅读」只是排序：LEFT JOIN，只列在架书；卷行是进度身份、不是书架成员。
     calls = {}
     Catalog.listBooks("local", { sort = "recent_read", limit = 24 })
     Assert.is_true(calls[1].sql:find("LEFT JOIN pending_progress p", 1, true) ~= nil, "没进度的书也要计数")
-    Assert.is_true(calls[1].sql:find("(b.deleted=0 OR ((b.deleted=0 OR (b.sync_status=1 AND NOT (b.source_id='local' AND b.path IS NULL))) AND p.stable_id IS NOT NULL"
-            .. " AND NOT EXISTS (SELECT 1 FROM books s WHERE s.source_id=b.source_id"
-            .. " AND s.deleted=0 AND s.title=b.title)))", 1, true) ~= nil,
-        "卷行有进度才列进最近阅读")
+    Assert.is_true(calls[1].sql:find("AND b.deleted=0", 1, true) ~= nil, "最近阅读只列在架书")
+    Assert.is_nil(calls[1].sql:find("p.stable_id IS NOT NULL", 1, true), "卷行不靠「有进度」挤进列表")
     Assert.is_true(calls[2].sql:find("ORDER BY MAX(COALESCE(p.updated_at, 0), b.read_at) DESC, b.inserted_at DESC", 1, true) ~= nil,
         "按本机 / 云端最近阅读时间排，没读过的按加入时间")
     -- 其它排序仍 LEFT JOIN + 只在架：按书名 / 加入时间排要列出全库。

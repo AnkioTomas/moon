@@ -147,7 +147,8 @@ package.loaded["book.store"] = {
     end,
 }
 package.loaded["source.toc"] = {
-    read = function(_sid, id) return toc_fresh and tocs[id] or nil end,
+    -- allow_stale：过期目录也认（身份判定用；卷数 / 卷身份不随时间变）。
+    read = function(_sid, id, allow_stale) return (allow_stale or toc_fresh) and tocs[id] or nil end,
     put = function(_sid, id, list)
         tocs[id] = list
         return true
@@ -238,7 +239,8 @@ routes["GET /api/Series/volumes"] = function(opts)
     if sid == "20" then
         return json({
             { id = 200, name = "1", chapters = { { id = 2001, titleName = "第一卷", format = 3, pages = 8, pagesRead = 8 } } },
-            { id = 201, name = "2", chapters = { { id = 2002, titleName = "第二卷", format = 3, pages = 10, pagesRead = 0 } } },
+            { id = 201, name = "2", chapters = { { id = 2002, titleName = "第二卷", format = 3, pages = 10, pagesRead = 0,
+                summary = "第二卷简介" } } },
         })
     end
     if sid == "30" then
@@ -427,11 +429,53 @@ list:close()
 Stubs.flush()
 Assert.matches(oerr, "已取消")
 
--- 封面：series 与卷各走各的接口，带鉴权头。
+-- 点开系列 = 立即拉一次最新进度：目录缓存 6 小时内不更新，选卷列表要显示服务器上的已读状态。
+do
+    tocs["8701"] = {
+        { chapterId = 87010, title = "第1卷", pages = 100, pagesRead = 0, format = 1 },
+        { chapterId = 87011, title = "第2卷", pages = 100, pagesRead = 0, format = 1 },
+    }
+    books["8701"] = { stable_id = "8701", title = "系列87", authors = "作者" }
+    routes["GET /api/Series/8701"] = json({ id = 8701, name = "系列87", libraryId = 2, format = 1 })
+    local base_volumes = routes["GET /api/Series/volumes"]
+    routes["GET /api/Series/volumes"] = function(opts)
+        if query(opts, "seriesId") ~= "8701" then return base_volumes(opts) end
+        return json({
+            { id = 870, chapters = { { id = 87010, titleName = "第1卷", format = 1, pages = 100, pagesRead = 100 } } },
+            { id = 871, chapters = { { id = 87011, titleName = "第2卷", format = 1, pages = 100, pagesRead = 30 } } },
+        })
+    end
+    source:openBookAsync({ source_id = "ext.kavita", stable_id = "8701", book = books["8701"] }, nil,
+        function() end)
+    Stubs.flush()
+    Assert.eq(tocs["8701"][1].pagesRead, 100, "打开系列就拉到最新进度")
+    Assert.eq(tocs["8701"][2].pagesRead, 30)
+    local live = Themed.last("list")
+    Assert.eq(live.items[1].mandatory, "已读", "选卷列表按服务器最新进度显示已读")
+    Assert.eq(live.items[2].mandatory, "在读")
+    live:close()
+    Stubs.flush()
+    routes["GET /api/Series/volumes"] = base_volumes
+    books["8701"] = nil
+end
+
+-- 封面：系列行取系列封面，卷行取这一卷自己的封面；chapter-cover 是扫描版第一页，不用。
 local cover = source:coverRequest({ stable_id = "10" })
 Assert.eq(cover.url, "http://kav/api/Image/series-cover?seriesId=10")
 Assert.eq(cover.headers["x-api-key"], "k")
-Assert.eq(source:coverRequest({ stable_id = "20:2002" }).url, "http://kav/api/Image/chapter-cover?chapterId=2002")
+Assert.eq(cover.authoritative, true, "源封面压过本地抽页 / 旧封面缓存")
+-- 目录里能查到这一卷 → volume-cover（「当前阅读」要显示正在读的那一卷）。
+tocs["70"] = { { chapterId = 7001, volumeId = 701, title = "第一卷", pages = 10 } }
+local volume_cover = source:coverRequest({ stable_id = "70:7001" })
+Assert.eq(volume_cover.url, "http://kav/api/Image/volume-cover?volumeId=701", "卷行用卷封面")
+Assert.eq(volume_cover.authoritative, true)
+-- 目录里查不到这一卷（没拉过目录）→ 退回系列封面。
+Assert.eq(source:coverRequest({ stable_id = "71:7101" }).url,
+    "http://kav/api/Image/series-cover?seriesId=71", "查不到卷退回系列封面")
+tocs["70"] = nil
+-- 卷身份折叠：图书馆最近阅读按系列归并，点开再选卷。
+Assert.eq(source:volumeParent("20:2002"), "20")
+Assert.is_nil(source:volumeParent("20"))
 
 -- 拉进度：远端 spine + 锚点 → xpointer；没读过算空。
 local volume = { source_id = "ext.kavita", stable_id = "20:2002" }
@@ -1314,8 +1358,24 @@ routes["GET /api/Series/metadata"] = function(opts)
     return json({ summary = "卷简介", writers = { { name = "丁" } } })
 end
 local detail = run("getDetailAsync", { source_id = "ext.kavita", stable_id = "20:2002" })
-Assert.eq(detail.intro, "卷简介")
+Assert.eq(detail.intro, "第二卷简介", "详情补简介不能把卷摘要盖成整部简介")
 Assert.eq(remembered["20:2002"].authors, "丁")
+-- 目录里没有这一卷 / 这一卷没有摘要：保留行里已有的简介，最后才退回系列简介。
+tocs["20"][2].summary = nil
+books["20:2002"] = { intro = "已有卷简介" }
+Assert.eq(run("getDetailAsync", { source_id = "ext.kavita", stable_id = "20:2002" }).intro, "已有卷简介",
+    "没有卷摘要时不清空已有简介")
+books["20:2002"] = nil
+Assert.eq(run("getDetailAsync", { source_id = "ext.kavita", stable_id = "20:2002" }).intro, "卷简介",
+    "确认没有卷摘要才退回系列简介")
+-- 旧目录缓存不认识卷摘要（升级前拉的目录）：问一次单章接口，几 KB。
+routes["GET /api/Series/chapter"] = function(opts)
+    Assert.eq(query(opts, "chapterId"), "2002")
+    return json({ id = 2002, summary = "单章摘要" })
+end
+Assert.eq(run("getDetailAsync", { source_id = "ext.kavita", stable_id = "20:2002" }).intro, "单章摘要",
+    "目录没带卷摘要时用单章接口补")
+routes["GET /api/Series/chapter"] = nil
 
 -- 漫画打开路径：判定 / 起始页 / 离线全归 kamare cache（03 A1/A2/A6），moon 只做路由与兜底。
 -- 关查看器写卷行 + 容器聚合（06 A1/A2），章末续读按回调 id 回目录（03 A7）。
@@ -1393,7 +1453,7 @@ do
     Assert.eq(opened[1].api_key, "k", "Key 去空白")
     Assert.is_nil(opened[1].start_page, "起始页全归 Cache.open，moon 不传")
 
-    -- on_close：卷行写物理页 / 物理总数 / 现在；容器行只写聚合 fraction + updated_at=0。
+    -- on_close：卷行写物理页 / 物理总数 / 现在；容器行写聚合 fraction + 最近阅读时间。
     written, remembered = {}, {}
     progress["60:6000"] = nil
     opened[1].on_close(10, 20)
@@ -1404,10 +1464,10 @@ do
     Assert.is_true((volume.updated_at or 0) > 0, "卷行用当前时间，进最近阅读")
     local container = written["60"]
     Assert.eq(container.fraction, 0.25, "聚合 = (0 个读完卷 + 本卷 0.5) / 2 卷")
-    Assert.eq(container.updated_at, 0, "容器行不进最近阅读")
+    Assert.is_true((container.updated_at or 0) > 0, "容器行带最近阅读时间：读完一卷系列行立刻浮上来")
     Assert.eq(written_opts["60"] and written_opts["60"].reset_updated_at, true,
-        "容器行显式允许归零：旧版本的 series 时间戳要能被清掉")
-    Assert.is_nil(written_opts["60:6001"], "卷行不归零，继续进最近阅读")
+        "容器行允许回落时间戳：旧版本存的未来时间要能被纠正")
+    Assert.is_nil(written_opts["60:6001"], "卷行走 MAX，修订号单调")
     Assert.is_nil(container.page, "容器行只写聚合 fraction")
     Assert.is_nil(container.total_pages)
     Assert.eq(remembered["60:6001"].title, "漫画 · 第2话", "卷行缺书时用目录卷名补元数据")
@@ -1457,7 +1517,7 @@ do
     Assert.eq(Themed.last("toast").text, "下一卷不在目录里")
 
     -- 单卷漫画：从书架行（stable_id = seriesId）打开，卷身份仍是 seriesId:chapterId。
-    -- 关查看器写「卷行真实位置 + 无时间戳容器行」，卷行元数据补齐，最近阅读看得到（US 22 / 06 A2）。
+    -- 关查看器写「卷行真实位置 + 带时间的容器行」，卷行元数据补齐（US 22 / 06 A2）。
     local single_toc, single_two = { toc[1] }, tocs["60"]
     tocs["60"] = single_toc
     books["60:6000"] = nil
@@ -1474,7 +1534,7 @@ do
     opened[1].on_close(5, 30)
     Assert.eq(written["60:6000"].page, 5, "单卷也把真实位置写进卷行")
     Assert.is_true((written["60:6000"].updated_at or 0) > 0, "卷行带时间戳，最近阅读能看到")
-    Assert.eq(written["60"].updated_at, 0, "容器行不带时间戳，不与卷行重复")
+    Assert.is_true((written["60"].updated_at or 0) > 0, "容器行带最近阅读时间")
     Assert.eq(written["60"].fraction, 5 / 30, "容器行聚合百分比，书架有量级")
     Assert.not_nil(remembered["60:6000"], "卷行元数据补齐：ProgressDB.recent 的 EXISTS books 过得去")
     Assert.eq(remembered["60:6000"].title, "漫画 · 第1话")
@@ -1509,7 +1569,11 @@ do
     Assert.is_nil(cerr)
     Assert.is_true(cmeta and cmeta.handled, "kamare 缓存优先于旧 cbz")
     Assert.eq(opened[1].entry.chapterId, 6001)
-    Assert.eq(#calls, before_book, "目录命中缓存 + kamare 打开：开书全程零 HTTP")
+    -- 目录命中缓存也照样拉一次「最新进度」（点开系列 = 想看服务器上的已读状态）：
+    -- 只问 series（libraryId）+ volumes（各卷 pagesRead），不重拉 metadata。
+    Assert.eq(#calls, before_book + 2, "开书只额外问一次最新进度")
+    Assert.matches(calls[before_book + 1].url, "^http://kav/api/Series/60$")
+    Assert.matches(calls[before_book + 2].url, "^http://kav/api/Series/volumes%?seriesId=60")
     Assert.not_nil(io.open(old_cbz), "旧 cbz 静默保留，不删用户数据")
 
     reply = function() return nil, "offline_not_cached", "这一卷还没缓存，联网后可下载" end
@@ -1690,8 +1754,8 @@ local read_route = json({
       lastChapterAdded = "2026-02-03T11:05:06.1", lastChapterAddedUtc = "2026-02-03T03:05:06.1",
       latestReadDate = "2026-02-03T04:05:06.123" },
 })
--- 多卷 series：卷行上已经有进度 → 容器行改写服务端 series 级 fraction（updated_at=0，
--- 只做书架 / 详情聚合），不 drop（06 A1）。容器行不进最近阅读，重复条目由 updated_at 门槛解决。
+-- 多卷 series：卷行上已经有进度 → 容器行改写服务端 series 级 fraction + 最近阅读时间，
+-- 不 drop（06 A1）。图书馆「最近阅读」列系列行（点开再选卷），首页「当前阅读」取卷行。
 tocs["710"] = { { chapterId = 7101, title = "上" }, { chapterId = 7102, title = "下" } }
 progress["710:7101"] = { fraction = 0.3, updated_at = os.time() - 3600 }
 progress["710"] = { fraction = 0.5, updated_at = os.time() - 3600 }
@@ -1706,9 +1770,9 @@ Assert.is_nil(written["700"].page, "epub 不写页码：Kavita 的页是 spine")
 Assert.eq(written["700"].updated_at, 1770062706, "latestReadDate 按服务器时区换成真 epoch")
 Assert.eq(written["701"].fraction, 1, "读完的写满比例，进步进「已读」")
 Assert.eq(written["710"].fraction, 0.3, "容器行改写服务端 series 级 pagesRead/pages")
-Assert.eq(written["710"].updated_at, 0, "容器行不进最近阅读")
+Assert.eq(written["710"].updated_at, 1770062706, "容器行带最近阅读时间，图书馆按系列行排序")
 Assert.eq(written_opts["710"] and written_opts["710"].reset_updated_at, true,
-    "回填聚合也要能清掉旧版本留下的 series 时间戳")
+    "回填聚合要能回落时间戳（旧版本存过未来时间 / 0）")
 Assert.is_nil(written["710"].page, "容器行只写聚合 fraction")
 Assert.eq(#dropped, 0, "不再删容器行")
 Assert.eq(remembered["710:7101"].authors, "甲", "读过的卷行继承容器作者，不再显示未知作者")
@@ -1724,6 +1788,14 @@ Assert.eq(vol_result.pulled - vol_again.pulled, 1, "已对齐的卷行不再重�
 dropped = {}
 run("syncBooksAsync", { force = true })
 Assert.eq(#dropped, 0, "容器行保留（离线读过的量级回连后不被抹回未读）")
+-- 目录缓存过期不能让身份翻回容器行：过期目录照样算数，否则容器行会重新拿到
+-- 单书位置（整部书当成一卷）而不是聚合。
+toc_fresh, written = false, {}
+run("syncBooksAsync", { force = true })
+Assert.eq(written["710"].updated_at, 1770062706, "过期目录也认卷身份：容器行仍写系列级时间")
+Assert.eq(written["710"].fraction, 0.3, "容器行仍写服务端聚合")
+Assert.is_nil(written["710"].page, "容器行只写聚合 fraction")
+toc_fresh = true
 written = {}
 progress["700"] = { fraction = 0.4 }
 run("syncBooksAsync", { force = true })
@@ -1736,6 +1808,64 @@ run("syncBooksAsync", { force = true })
 Assert.eq(fixed["700"], 1770062706, "库里的未来时间被拉回 Kavita 的真实阅读时间")
 progress["700"] = nil
 routes["POST /api/Series/all-v2"] = shelf_route
+
+-- 另一台设备读的新卷：series 级只有聚合（pagesRead），本机没有那一卷的卷行，
+-- 首页「当前阅读」会停在旧卷。continue-point 才知道「当前读的是哪一章 / 哪一卷」。
+do
+    routes["POST /api/Series/all-v2"] = json({
+        { id = 8901, name = "系列甲", libraryName = "漫画", format = 1, pages = 400, pagesRead = 207,
+          lastChapterAdded = "2026-02-03T11:05:06.1", lastChapterAddedUtc = "2026-02-03T03:05:06.1",
+          latestReadDate = "2026-02-03T04:05:06.123" },
+        { id = 8902, name = "系列乙", libraryName = "漫画", format = 1, pages = 200, pagesRead = 200,
+          lastChapterAdded = "2026-02-03T11:05:06.1", lastChapterAddedUtc = "2026-02-03T03:05:06.1",
+          latestReadDate = "2026-02-03T04:05:06.123" },
+        { id = 8903, name = "系列丙", libraryName = "漫画", format = 1, pages = 200, pagesRead = 0,
+          lastChapterAdded = "2026-02-03T11:05:06.1", lastChapterAddedUtc = "2026-02-03T03:05:06.1" },
+    })
+    local asked = {}
+    routes["GET /api/Reader/continue-point"] = function(opts)
+        local sid = query(opts, "seriesId")
+        asked[#asked + 1] = sid
+        if sid == "8901" then
+            -- 第 2 卷读到第 7 页：这就是「正在读」的那一卷。
+            return json({ id = 89010, volumeId = 9901, title = "-100000", titleName = "第2卷",
+                pages = 200, pagesRead = 7, summary = "第2卷摘要",
+                lastReadingProgressUtc = "2026-02-02T20:05:06.1" })
+        end
+        -- 读完一卷后给的是「下一章」，pagesRead = 0：那不是正在读。
+        return json({ id = 89020, volumeId = 9902, titleName = "第1卷", pages = 200, pagesRead = 0 })
+    end
+    books["8901"] = { title = "系列甲", authors = "甲", category = "漫画" }
+    books["8902"] = { title = "系列乙", authors = "乙", category = "漫画" }
+    books["8903"] = { title = "系列丙", authors = "丙", category = "漫画" }
+    written, remembered = {}, {}
+    run("syncBooksAsync", { force = true })
+    -- 只问「读过、还没读完」的漫画：读完的（8902）和没读过的（8903）都不需要当前卷。
+    Assert.eq(table.concat(asked, ","), "8901")
+    local row = written["8901:89010"]
+    Assert.not_nil(row, "服务器说在读的那一卷补成本地卷行")
+    Assert.eq(row.fraction, 7 / 200)
+    Assert.eq(row.page, 7, "漫画写物理页")
+    Assert.eq(row.total_pages, 200)
+    Assert.eq(row.updated_at, 1770062706, "用章节的 UTC 阅读时间（换算成本地 epoch）")
+    Assert.eq(remembered["8901:89010"].title, "系列甲 · 第2卷", "卷行继承容器元数据，标题带卷名")
+    Assert.eq(remembered["8901:89010"].intro, "第2卷摘要", "卷简介用这一卷的摘要，不用整部简介")
+    Assert.is_nil(written["8902:89020"], "读完的卷不补：continue-point 给的是下一章")
+    -- 同一份服务端进度不重复写：每 5 分钟重写同一行会白刷首页。
+    progress["8901:89010"] = { fraction = 7 / 200, updated_at = 1770062706 }
+    written = {}
+    run("syncBooksAsync", { force = true })
+    Assert.is_nil(written["8901:89010"], "服务端没更新就不重写")
+    -- 另一台设备接着读了：服务器时间更新 → 采纳服务器的位置（服务器优先）。
+    routes["GET /api/Reader/continue-point"] = json({ id = 89010, volumeId = 9901,
+        titleName = "第2卷", pages = 200, pagesRead = 120,
+        lastReadingProgressUtc = "2026-02-03T01:05:06.1" })
+    written = {}
+    run("syncBooksAsync", { force = true })
+    Assert.eq(written["8901:89010"].fraction, 0.6, "服务器进度更新时覆盖本机卷行")
+    progress["8901:89010"] = nil
+    routes["POST /api/Series/all-v2"] = shelf_route
+end
 
 -- 阅读期进度心跳：Kavita 的阅读会话时长按相邻两次进度写入的间隔算，只在关书推一次，
 -- Kavita 那边就是一个 StartTime == EndTime 的 0 秒会话。翻页 / 切章 / 唤醒起心跳：位置一变

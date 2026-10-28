@@ -77,6 +77,7 @@ package.preload["libs/libkoreader-lfs"] = function()
     }
 end
 local resolved = {}
+local authoritative = {}
 package.preload["source.registry"] = function()
     return {
         resolve = function(id)
@@ -84,7 +85,11 @@ package.preload["source.registry"] = function()
             return {
                 id = id,
                 coverRequest = function(_, book)
-                    return { url = "https://" .. id .. "/" .. book.stable_id, headers = { X = id } }
+                    return {
+                        url = "https://" .. id .. "/" .. book.stable_id,
+                        headers = { X = id },
+                        authoritative = authoritative[id] or nil,
+                    }
                 end,
             }
         end,
@@ -295,7 +300,7 @@ image = select(1, Book.cover(nil, same, {
 Assert.len(resolved, 0)
 Assert.eq(coverImage(image).src, "https://same/book-2")
 
--- 本地封面已落盘：优先本地，不再走远程链接 / 源 coverRequest。
+-- 本地封面已落盘：优先本地，不再走远程链接。源仍问一次（只有它知道封面是否权威），但不用它的图。
 local local_cover = "/covers/wechat/book-3"
 existing_files[local_cover] = true
 resolved = {}
@@ -307,7 +312,20 @@ image = select(1, Book.cover(nil, active, {
 Assert.eq(coverImage(image).src, local_cover, "本地封面优先于远程链接")
 Assert.is_nil(coverImage(image).headers)
 Assert.is_nil(coverImage(image).fallback_src)
-Assert.len(resolved, 0)
+Assert.len(resolved, 1)
+
+-- 源声明封面权威（Kavita：本地抽页就是扫描页）：本地缓存只作加载失败兜底。
+authoritative.wechat = true
+resolved = {}
+image = select(1, Book.cover(nil, active, {
+    source_id = "wechat",
+    stable_id = "book-3",
+    cover_url = "https://remote/book-3.jpg",
+}, 80, 120, {}))
+Assert.eq(resolved[1], "wechat")
+Assert.eq(coverImage(image).src, "https://wechat/book-3", "权威源封面压过本地缓存与远程链接")
+Assert.eq(coverImage(image).fallback_src, local_cover, "本地缓存留作失败兜底")
+authoritative.wechat = nil
 
 -- 显式 src（刮削候选）仍压过本地封面，本地只做失败兜底。
 image = select(1, Book.cover(nil, nil, {

@@ -101,6 +101,8 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@class BookCoverRequest
 ---@field url string 封面 URL 或本地 file:// 路径
 ---@field headers table 附加请求头（可空表）
+---@field authoritative boolean|nil 源封面是权威的：优先于同身份的本地抽页 / 旧缓存，本地只作加载失败兜底。
+---        给「本地缓存可能本来就是坏图」的源用（如 Kavita：卷行抽页 = 扫描版第一页）
 
 --- 按章正文载荷：Source 只交内容，宿主写 HTML。
 ---@class ChapterContentPayload
@@ -152,6 +154,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field getProgressAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: ProgressPosition|nil, err: string|nil, meta: table|nil)): table|nil 拉取远端进度；meta.empty 表示远端无记录
 ---@field putProgressAsync fun(self: BookSource, identity: BookIdentity, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil, meta: table|nil)): table|nil 推送进度
 ---@field coverRequest fun(self: BookSource, identity: BookIdentity): (BookCoverRequest|nil, string|nil) 封面请求描述（纯构造，无 IO）
+---@field volumeParent fun(self: BookSource, stable_id: string): string|nil 卷身份所属系列 id（可选、同步、纯构造）。声明后「最近阅读」把卷行归并成系列行（一部漫画一条，点开再选卷），首页「当前阅读」仍取卷行；返回 nil 表示不是卷身份
 ---@field shelfCache fun(self: BookSource): ShelfCacheProjection|nil 书架缓存投影（可选、同步、只读本地记忆）。仅 capabilities().shelf_cache 为 true 的源实现；series_ids/mark 是 [stable_id]=true，cover 是 [stable_id]=本地封面绝对路径。不支持的源不实现（nil）
 ---@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil Z-Library 导入目标（local 移入）
 ---@field pushStatsAsync fun(self: BookSource, rows: BookStatsRow[], cb: fun(data: BookStatsPushResult|nil, err: string|nil)): table|nil 上报领域统计记录；协议细节由源处理

@@ -496,14 +496,10 @@ function Catalog.listBooks(source_id, opts)
     local ids = scopedIds(source_id, opts.source_id)
     local declaring = Catalog.shelfCacheSources(ids)
     local shelves = Catalog.shelfCaches(ids)
-    -- 「最近阅读」列整个书架：在架书全列；Kavita 卷行这种「非书架成员但仍是有效身份」的
-    -- 只在有进度时进来（进度记在卷行上）。其它排序 / 筛选只列在架书。
-    where = where .. (opts.sort == "recent_read"
-        and " AND (b.deleted=0 OR (" .. BookDB.readableClause("b") .. " AND p.stable_id IS NOT NULL"
-            -- 下架后换了身份重新上架的书（同源同名的在架行）只列在架那本，旧行不再像重复条目
-            .. " AND NOT EXISTS (SELECT 1 FROM books s WHERE s.source_id=b.source_id"
-            .. " AND s.deleted=0 AND s.title=b.title)))"
-        or " AND b.deleted=0")
+    -- 所有排序都只列在架书。「最近阅读」只是排序，不是「有进度的都算」：
+    -- 卷行（Kavita seriesId:chapterId）是进度身份、不是书架成员，它的最近阅读时间由
+    -- 源写在容器行上（Kavita 系列行），列表里出现的是系列（点开再选卷）。
+    where = where .. " AND b.deleted=0"
     where = where .. (opts.hidden and " AND b.hidden=1" or " AND b.hidden=0")
     if type(opts.source_id) == "string" and opts.source_id ~= "" then
         where = where .. " AND b.source_id=?"
@@ -829,16 +825,90 @@ function Catalog.recentShelf(source_id, limit)
     if not validScope(Catalog.libraryScope(source_id)) then
         return nil, {}, _("当前数据源不可用")
     end
-    -- pending_progress 主键是 (source_id, stable_id)，行不重复，第一本之后即其余在读
-    local rows = Catalog.recentBooks(source_id, limit or 24)
-    return rows[1], { unpack(rows, 2) }, nil
+    local rows = Catalog.recentRows(source_id, limit or 24)
+    if #rows == 0 then return nil, {}, nil end
+    -- 「当前阅读」= 最近读的那一卷（分卷封面）：最近一条本身就是卷就用它；
+    -- 最近一条是系列行（服务端只给系列级聚合）时，退到该系列最新的一卷，
+    -- 但只认还没读完的卷：读完的卷不能冒充「正在读」（另一台设备读到新卷时尤其明显）。
+    local first = rows[1]
+    local first_parent = Catalog.volumeParent(first.source_id, first.stable_id)
+    local first_key = first_parent or first.stable_id
+    local hero = first
+    if not first_parent then
+        for _idx, book in ipairs(rows) do
+            if Catalog.volumeParent(book.source_id, book.stable_id) == first_key
+                and (tonumber(book.percent) or 0) < 100 then
+                hero = book
+                break
+            end
+        end
+    end
+    -- 「最近阅读」= 系列行（系列封面），点开再由源给出选卷；当前阅读的那一部不重复列。
+    local cards = {}
+    for _idx, book in ipairs(Catalog.collapseVolumes(rows)) do
+        local key = Catalog.volumeParent(book.source_id, book.stable_id) or book.stable_id
+        if key ~= first_key then cards[#cards + 1] = book end
+    end
+    return hero, cards, nil
 end
 
---- 最近阅读同步快照：进度决定准入、顺序和阅读位置，books 只补书库元数据。
+--- 卷身份 → 所属系列 id；源用可选方法 `volumeParent` 声明（Kavita：seriesId:chapterId）。
+---@param source_id string|nil
+---@param stable_id string|nil
+---@return string|nil
+function Catalog.volumeParent(source_id, stable_id)
+    if type(source_id) ~= "string" or source_id == "" or type(stable_id) ~= "string" then
+        return nil
+    end
+    local ok, source = pcall(function()
+        return require("source.registry").resolve(source_id)
+    end)
+    if not ok or type(source) ~= "table" or type(source.volumeParent) ~= "function" then
+        return nil
+    end
+    local called, parent = pcall(source.volumeParent, source, stable_id)
+    if called and type(parent) == "string" and parent ~= "" and parent ~= stable_id then
+        return parent
+    end
+    return nil
+end
+
+--- 卷行归并成它的系列行：同一系列只留最近一条；系列行缺进度时沿用卷行的百分比。
+---@param books Book[]
+---@return Book[]
+function Catalog.collapseVolumes(books)
+    local BookDB = require("book.books_db")
+    local ProgressDB = require("book.progress_db")
+    local out, seen = {}, {}
+    for _idx, book in ipairs(books) do
+        local parent = Catalog.volumeParent(book.source_id, book.stable_id)
+        local key = book.source_id .. "\31" .. (parent or book.stable_id)
+        if not seen[key] then
+            seen[key] = true
+            local series = parent and toBook(BookDB.get(book.source_id, parent), book.source_id)
+            if series then
+                -- 系列行有聚合进度就用它；没有（还没同步过）才沿用卷行的百分比。
+                local progress = ProgressDB.get(book.source_id, parent)
+                local fraction = progress and tonumber(progress.fraction)
+                if fraction == nil then fraction = (tonumber(book.percent) or 0) / 100 end
+                series.percent = math.floor(fraction * 100 + 0.5)
+                series.chapter_idx = progress and progress.chapter_idx
+                series.chapter_title = progress and progress.chapter_title
+                series.downloaded = book.downloaded
+                out[#out + 1] = series
+            else
+                out[#out + 1] = book
+            end
+        end
+    end
+    return out
+end
+
+--- 最近阅读的原始行（可能同时含卷行与系列行，顺序 = 最近的阅读事件）。
 ---@param source_id string|string[]|nil
 ---@param limit number|nil
 ---@return Book[]
-function Catalog.recentBooks(source_id, limit)
+function Catalog.recentRows(source_id, limit)
     local scope = Catalog.libraryScope(source_id)
     if not validScope(scope) then
         return {}
@@ -864,6 +934,15 @@ function Catalog.recentBooks(source_id, limit)
         end
     end
     return books
+end
+
+--- 最近阅读同步快照：进度决定准入、顺序和阅读位置，books 只补书库元数据。
+--- 卷行按系列归并（封面 / 标题用系列行），列表里一部漫画只有一条。
+---@param source_id string|string[]|nil
+---@param limit number|nil
+---@return Book[]
+function Catalog.recentBooks(source_id, limit)
+    return Catalog.collapseVolumes(Catalog.recentRows(source_id, limit))
 end
 
 --- 阅读洞察（reading_stats 聚合）。

@@ -1045,6 +1045,17 @@ function VolumeList.pick(series, toc, cb, opts)
     -- 打开列表时队列已经在跑（例如从书架 / 后台任务回来，不是本页发起的批次）：
     -- 不排拍的话行会永远停在打开那一瞬的「下载中 32%」。
     if queueRunning(ctx.queue) and not ctx.paused then startPolling() end
+
+    --- 打开后刷新目录（点开系列时后台拉服务器最新进度）：原地替换条目并重扫状态，
+    --- 列表停在原页；列表已关 / 回包为空则丢弃。
+    ---@param fresh table[] 新目录（chapterId 与卷号顺序不变）
+    list.refreshToc = function(fresh)
+        if type(fresh) ~= "table" or fresh[1] == nil or list.closed then return end
+        for i = #toc, 1, -1 do toc[i] = nil end
+        for i, entry in ipairs(fresh) do toc[i] = entry end
+        ctx.local_reads = localReadStates(series, toc)
+        refresh(true)
+    end
     return list
 end
 
