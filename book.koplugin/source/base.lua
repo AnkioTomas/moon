@@ -249,24 +249,38 @@ function SourceBase:deleteBookAsync(identity, cb)
     return SourceBase.defer(cb, true)
 end
 
---- 本源各域的脏行，按推送顺序：书架、笔记、统计，进度最后（微信时长上报会写云端位置，
---- 最后落地的必须是精确进度）。只列有脏行的域：书架没脏行就不调用，免得走成全量 pull。
----@param id SourceId
+--- 推送顺序：书架、笔记、统计，进度最后（微信时长上报会写云端位置，最后落地的必须是精确进度）。
+--- 域能不能推看源有没有对应的上行方法（书架人人都有）；阅读会话对每个源都写脏行，
+--- 没远端的域（jjwxc / kindle 的进度、大多数源的笔记统计）不算脏，否则每次唤醒都入队一条空任务。
+local DOMAINS = {
+    { method = "syncBooksAsync", dirty = function(id) return #require("book.books_db").unsynced(id) > 0 end },
+    { method = "syncNotesAsync", push = "pushNotesAsync", dirty = function(id) return require("book.note_db").hasUnsynced(id) end },
+    { method = "syncStatsAsync", push = "pushStatsAsync", dirty = function(id) return #require("book.stats_db").unsyncedBySource(id, 1) > 0 end },
+    { method = "syncProgressAsync", push = "putProgressAsync", dirty = function(id) return #require("book.progress_db").unsynced(id) > 0 end },
+}
+
+--- 本源能推且有脏行的域。只列有脏行的：书架没脏行就不调用，免得走成全量 pull。
+---@param source BookSource
 ---@return string[] 同步方法名
-local function dirtyDomains(id)
+local function dirtyDomains(source)
     local out = {}
-    if #require("book.books_db").unsynced(id) > 0 then out[#out + 1] = "syncBooksAsync" end
-    if require("book.note_db").hasUnsynced(id) then out[#out + 1] = "syncNotesAsync" end
-    if #require("book.stats_db").unsyncedBySource(id, 1) > 0 then out[#out + 1] = "syncStatsAsync" end
-    if #require("book.progress_db").unsynced(id) > 0 then out[#out + 1] = "syncProgressAsync" end
+    for _idx, domain in ipairs(DOMAINS) do
+        if (not domain.push or type(source[domain.push]) == "function") and domain.dirty(source.id) then
+            out[#out + 1] = domain.method
+        end
+    end
     return out
 end
 
---- 本源有没有待推的脏行；只查库，不需要源实例。
+--- 本源有没有待推的脏行；只查库，不需要源实例，所以不看源能不能推（宁可多建一个实例，
+--- 由 pushDirty 再按能力过滤）。
 ---@param id SourceId
 ---@return boolean
 function SourceBase.hasDirty(id)
-    return #dirtyDomains(id) > 0
+    for _idx, domain in ipairs(DOMAINS) do
+        if domain.dirty(id) then return true end
+    end
+    return false
 end
 
 --- 推本源脏行，作为 sync 类后台任务入队（key 按源唯一，同源只留一条）。
@@ -274,13 +288,14 @@ end
 --- main 在启动、唤醒、联网时对有脏行的启用源调用：Wi-Fi 常开时 KOReader 不再发 NetworkConnected，
 --- 只靠联网事件，失败重试和上次遗留的脏行会一直等着。
 function SourceBase:pushDirty()
+    if #dirtyDomains(self) == 0 then return end
     require("workers.tasks").enqueue{
         key = "dirty\0" .. self.id,
         kind = "sync",
         title = self.name,
         restartable = true,
         run = function(report, done)
-            local domains, index, failed, job = dirtyDomains(self.id), 0, nil, nil
+            local domains, index, failed, job = dirtyDomains(self), 0, nil, nil
             local cancelled = false
             local function nextDomain()
                 if cancelled then return end

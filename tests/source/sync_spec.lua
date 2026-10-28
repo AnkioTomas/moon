@@ -45,6 +45,10 @@ local function sourceOf(id)
     source.syncNotesAsync = record("notes")
     source.syncStatsAsync = record("stats")
     source.syncProgressAsync = record("progress")
+    -- 能推的域看上行方法在不在
+    source.pushNotesAsync = function() end
+    source.pushStatsAsync = function() end
+    source.putProgressAsync = function() end
     return source
 end
 
@@ -165,4 +169,24 @@ do
     books, notes, stats_rows, progress = {}, { { stable_id = "n1" } }, {}, {}
     Assert.is_true(SourceBase.hasDirty("moon"))
     notes = {}
+end
+
+-- 源没有某域的上行方法（jjwxc 没有远端进度）：该域的脏行不算，不入队、不调 sync；
+-- 书架人人能推。
+do
+    books, notes, stats_rows = {}, {}, {}
+    progress = { { stable_id = "b1" } }
+    local source = sourceOf("jjwxc")
+    source.putProgressAsync, source.pushNotesAsync, source.pushStatsAsync = nil, nil, nil
+    enqueued = {}
+    source:pushDirty()
+    Assert.len(enqueued, 0, "没有能推的域就不入队")
+    Assert.is_true(SourceBase.hasDirty("jjwxc"), "hasDirty 只查库，不看能力")
+
+    notes = { { stable_id = "n1" } }
+    books = { { stable_id = "b1" } }
+    runPush(source)
+    Assert.eq(#source.calls, 1)
+    Assert.eq(source.calls[1][1], "books")
+    books, notes, progress = {}, {}, {}
 end

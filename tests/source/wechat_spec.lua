@@ -64,6 +64,10 @@ stub("book.books_db", function()
         pendingShelfAddIds = function()
             return remembered_stats_books.pending_adds or {}
         end,
+        unsynced = function()
+            local m = remembered_stats_books.marked_deleted
+            return m and not remembered_stats_books.removed and { m } or {}
+        end,
         markSynced = function() return true end,
         setRead = function(source_id, stable_id, is_read)
             remembered_stats_books.set_read = {
@@ -82,6 +86,7 @@ stub("book.progress_db", function()
     return {
         get = function() return existing_progress end,
         upsertRemote = function() return true end,
+        unsynced = function() return {} end,
     }
 end)
 stub("book.chapters_db", function()

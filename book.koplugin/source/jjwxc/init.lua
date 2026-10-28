@@ -128,27 +128,8 @@ function Source:syncBooksAsync(opts, cb)
     return Shelf.syncAsync(self.id, Remote, Mapper.shelfList, opts, cb)
 end
 
-function Source:syncProgressAsync(_opts, cb)
-    return SourceBase.skipped(cb, "jjwxc has no remote")
-end
+--- 进度 / 笔记 / 统计没有远端接口：不定义 put/push 方法，基类按能力回 skipped，脏行不入推送队列。
 
-function Source:syncNotesAsync(_opts, cb)
-    return SourceBase.skipped(cb, "jjwxc has no remote")
-end
-
-function Source:syncStatsAsync(_opts, cb)
-    return SourceBase.skipped(cb, "jjwxc has no remote")
-end
-
-function Source:getProgressAsync(_identity, cb)
-    return SourceBase.defer(cb, nil, nil, { empty = true })
-end
-
-function Source:putProgressAsync(_identity, _pos, cb)
-    return SourceBase.defer(cb, true)
-end
-
---- 书库里已有的元数据（收藏同步时已补全）。
 --- 书城搜索：匿名 App 接口，只取第一页。
 ---@param keyword string
 ---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
