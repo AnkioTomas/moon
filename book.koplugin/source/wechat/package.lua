@@ -12,6 +12,7 @@ local bit = require("bit")
 local JSON = require("json")
 local Aes = require("crypto.aes")
 local Inflate = require("utils.inflate")
+local Text = require("utils.text")
 
 local Package = {}
 
@@ -25,25 +26,6 @@ local REMAP = Aes.from_hex(
     .. "ab847a80e778c7e5eb73836bfc38467d4765b352633a05d1efa3a6de9e3c02ae"
     .. "b27ba0f6f32ac0ac86035a540bf582d47ee3dfb0d8dd21e87c88a2795870b715")
 
-local function b64decode(s)
-    local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    local val = {}
-    for i = 1, #alphabet do val[alphabet:byte(i)] = i - 1 end
-    local out, acc, bits = {}, 0, 0
-    for i = 1, #s do
-        local v = val[s:byte(i)]
-        if v then
-            acc, bits = acc * 64 + v, bits + 6
-            if bits >= 8 then
-                bits = bits - 8
-                out[#out + 1] = string.char(math.floor(acc / 2 ^ bits) % 256)
-                acc = acc % 2 ^ bits
-            end
-        end
-    end
-    return table.concat(out)
-end
-
 --- 由 vid 与响应头 encryptKey 算出 zip 口令。
 ---@param vid string
 ---@param encrypt_key string base64
@@ -53,7 +35,7 @@ function Package.password(vid, encrypt_key)
     if not vid:match("^%d+$") then return nil, "bad vid" end
     local raw = vid:rep(math.ceil(32 / #vid)):sub(1, 32)
     local kiv = raw:gsub(".", function(c) return string.char(REMAP:byte(c:byte() + 1)) end)
-    local ok, plain = pcall(Aes.cbc_decrypt, b64decode(encrypt_key), kiv:sub(1, 16), kiv:sub(17, 32))
+    local ok, plain = pcall(Aes.cbc_decrypt, Text.base64Decode(encrypt_key), kiv:sub(1, 16), kiv:sub(17, 32))
     if not ok then return nil, "encryptKey decrypt failed" end
     return plain
 end
