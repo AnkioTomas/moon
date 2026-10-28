@@ -1,9 +1,9 @@
 --[[--
-http.webdav 离线用例：join 拼接 / listAsync（驱动 local parseList）/ statusErr 文案
+source.local.dav 离线用例：join 拼接 / listAsync（驱动 local parseList）/ statusErr 文案
 
 parseList 是 local，经 package.preload 打桩 http.request 喂罐头 207 XML 驱动。
 
-@module tests.http.webdav_spec
+@module tests.source.local.dav_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
@@ -52,9 +52,9 @@ package.preload["http.request"] = function()
     }
 end
 package.loaded["http.request"] = nil
-package.loaded["http.webdav"] = nil
+package.loaded["source.local.dav"] = nil
 
-local Webdav = require("http.webdav")
+local Webdav = require("source.local.dav")
 
 -- ── 构造：URL 去尾斜杠、user 回退 ─────────────────────────
 do
@@ -333,6 +333,6 @@ end
 -- ── 还原现场（不影响后续 spec 文件）────────────────────────
 package.preload["http.request"] = nil
 package.loaded["http.request"] = nil
-package.loaded["http.webdav"] = nil
+package.loaded["source.local.dav"] = nil
 package.loaded["util"] = saved_util
 table.pack = saved_pack

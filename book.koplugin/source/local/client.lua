@@ -4,8 +4,9 @@
 数据流：扫盘只把目录状态写进 books（增/改/删，文件名入库）；封面与引擎元数据另开补齐进程。
 书库/筛选/搜索/最近阅读/统计一律直查数据库，不做内存缓存。
 实现按职责拆在同目录：scan（本地目录扫盘 / 补齐 / 导入 / 移动 / 替换）、
-webdav（WebDAV 书目同步与远端书操作）、remote_data（.Moon+ 进度 / 统计 / 笔记）、
-common（共享原语）。子模块函数首参即 self，在这里装配为方法。
+webdav（网盘书目同步与远端书操作，传输在 dav / gdrive）、
+remote_data（.Moon+ 进度 / 统计 / 笔记）、common（共享原语）。
+子模块函数首参即 self，在这里装配为方法。
 
 @module koplugin.book.source.local.client
 --]]
@@ -13,7 +14,8 @@ common（共享原语）。子模块函数首参即 self，在这里装配为方
 local lfs = require("libs/libkoreader-lfs")
 local Text = require("utils.text")
 local _ = require("gettext")
-local Webdav = require("http.webdav")
+local Webdav = require("source.local.dav")
+local GDrive = require("source.local.gdrive")
 local Paths = require("utils.paths")
 local Common = require("source.local.common")
 local Scan = require("source.local.scan")
@@ -34,17 +36,45 @@ local remoteRelativePath, coverPath = Common.remoteRelativePath, Common.coverPat
 ---@field _stats_seen table<string, string>|nil 统计按书已入库版本（stats_index.json 的内存副本）
 local Client = {}
 
---- cfg 是 utils.settings 的共享表，设置页和远程配置会原地改它；dav 每次按 cfg 现造，不存快照。
+--- 凭据变了就换一个传输客户端。访问令牌和 Drive 文件 id 缓存在客户端上，不能每次现造。
+---@param cfg table
+---@return string
+local function davStamp(cfg)
+    return table.concat({
+        cfg.cloud or "",
+        cfg.webdav_url or "",
+        cfg.webdav_username or "",
+        cfg.webdav_password or "",
+        cfg.gdrive_token or "",
+        cfg.gdrive_client or "",
+    }, "\0")
+end
+
+--- cfg 是 utils.settings 的共享表，设置页和远程配置会原地改它。
 Client.__index = function(self, key)
     if key == "dav" then
         local cfg = rawget(self, "cfg")
-        return Webdav.new{
-            url = cfg.webdav_url,
-            username = cfg.webdav_username,
-            password = cfg.webdav_password,
-        }
+        local stamp = davStamp(cfg)
+        local cached = rawget(self, "_dav")
+        if cached and rawget(self, "_dav_stamp") == stamp then return cached end
+        local built = self:_buildDav()
+        rawset(self, "_dav", built)
+        rawset(self, "_dav_stamp", stamp)
+        return built
     end
     return Client[key]
+end
+
+--- 按 cloud 选传输。没写 cloud 但填了 WebDAV 地址的旧配置仍走 WebDAV。
+---@return table
+function Client:_buildDav()
+    local kind = self:cloudKind()
+    if kind == "gdrive" then return GDrive.new(self.cfg) end
+    return Webdav.new{
+        url = self.cfg.webdav_url,
+        username = self.cfg.webdav_username,
+        password = self.cfg.webdav_password,
+    }
 end
 
 --- 从配置构造本地客户端。
@@ -54,9 +84,26 @@ function Client.new(cfg)
     return setmetatable({ cfg = cfg or {}, upload_failed = {} }, Client)
 end
 
+--- 当前网盘。`off` 显式关闭；空值且填了 WebDAV 地址时按 WebDAV（旧配置）。
+--- 写了认不出的值（含已下线的 dropbox）也关闭，不改走 WebDAV。
+---@return "webdav"|"gdrive"|nil
+function Client:cloudKind()
+    local kind = Text.trim(self.cfg.cloud or ""):lower()
+    if kind == "off" then return nil end
+    if kind == "webdav" or kind == "gdrive" then return kind end
+    if kind ~= "" then return nil end
+    if Text.trim(self.cfg.webdav_url or "") ~= "" then return "webdav" end
+    return nil
+end
+
+---@return boolean
+function Client:hasCloud()
+    return self:cloudKind() ~= nil
+end
+
 ---@return boolean
 function Client:isWebdav()
-    return Text.trim(self.cfg.webdav_url or "") ~= ""
+    return self:cloudKind() == "webdav"
 end
 
 ---@return string
@@ -86,15 +133,26 @@ end
 --- 是否已配置本地路径。
 ---@return boolean
 function Client:configured()
-    return self:isWebdav() or Text.stripWhitespace(self.cfg.path) ~= ""
+    return self:hasCloud() or Text.stripWhitespace(self.cfg.path) ~= ""
 end
 
---- 本地路径是否有效（存在、是目录、且不在插件数据目录内）。
+--- 本地路径是否有效（存在、是目录、且不在插件数据目录内）。网盘只校验自己的凭据。
 ---@return boolean, string|nil
 function Client:validatePath()
-    if self:isWebdav() then
-        if not self.cfg.webdav_url:match("^https?://") then
+    local kind = self:cloudKind()
+    if kind == "webdav" then
+        if not tostring(self.cfg.webdav_url or ""):match("^https?://") then
             return false, _("WebDAV 地址必须以 http:// 或 https:// 开头")
+        end
+        return true
+    end
+    if kind == "gdrive" then
+        if Text.trim(self.cfg.gdrive_token or "") == "" then
+            return false, _("未配置 Google Drive 刷新令牌")
+        end
+        local client_id, secret = Text.trim(self.cfg.gdrive_client or ""):match("^([^:]+):(.+)$")
+        if not client_id or client_id == "" or not secret or secret == "" then
+            return false, _("Google 客户端格式应为 ID:密钥")
         end
         return true
     end

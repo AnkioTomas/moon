@@ -141,7 +141,7 @@ function Config.installUtilStub()
                 fh:close()
                 return true
             end,
-            -- 与 koreader/frontend/util.lua 同实现（http/webdav.lua 需要）
+            -- 与 koreader/frontend/util.lua 同实现（source/local/dav.lua 需要）
             urlEncode = function(url, preserve_chars)
                 local char_to_hex = function(c)
                     return string.format("%%%02X", string.byte(c))

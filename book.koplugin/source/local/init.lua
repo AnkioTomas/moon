@@ -1,7 +1,7 @@
 --[[--
 本地数据源门面：扫盘同步写库 + 查询走 book.catalog（本地唯一读入口）。
 
-syncBooksAsync = 扫盘或 WebDAV 同步（force 强制 / 否则节流自动同步）。查询继承 SourceBase。
+syncBooksAsync = 扫盘或网盘同步（force 强制 / 否则节流自动同步）。查询继承 SourceBase。
 
 @module koplugin.book.source.local
 --]]
@@ -46,7 +46,7 @@ function Source:capabilities()
     return {
         scrape = true,
         edit = true,
-        stats_pull = self._client:isWebdav(),
+        stats_pull = self._client:hasCloud(),
     }
 end
 
@@ -60,7 +60,7 @@ end
 ---@param event string
 ---@param payload table|nil
 function Source:onEvent(event, payload)
-    if event ~= "book_meta_changed" or not self._client:isWebdav() then return end
+    if event ~= "book_meta_changed" or not self._client:hasCloud() then return end
     local stable_id = payload.identity.stable_id
     self._client:pushBookAsync(stable_id, payload.cover == true, function(ok, err)
         if not ok then require("utils.log").warn("book webdav meta push failed", stable_id, err) end
@@ -69,7 +69,7 @@ end
 
 --- 纯本地目录没有远端：书库外开过的书、进度、统计会一直是脏行，入队只会每次唤醒空跑一轮。
 function Source:pushDirty()
-    if self._client:isWebdav() then SourceBase.pushDirty(self) end
+    if self._client:hasCloud() then SourceBase.pushDirty(self) end
 end
 
 --- 删除。WebDAV 书：删本地镜像后走基类本地优先删除，远端文件与书目条目由下一轮同步的 pushDeletes 推删。
@@ -145,8 +145,8 @@ local AUTO_SYNC_INTERVAL = 60
 ---@return { cancel: fun() }|nil
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
-    local webdav = self._client:isWebdav()
-    if opts.dirty_only and not webdav then return skipped(cb, "local dirty_only") end
+    local cloud = self._client:hasCloud()
+    if opts.dirty_only and not cloud then return skipped(cb, "local dirty_only") end
     local auto = not opts.force and not opts.dirty_only
     if auto then
         if self._auto_sync_at and os.time() - self._auto_sync_at < AUTO_SYNC_INTERVAL then
@@ -163,7 +163,7 @@ function Source:syncBooksAsync(opts, cb)
         cb({ pulled = opts.dirty_only and 0 or 1, pushed = 0, hidden = 0, conflicts = 0,
             skipped = false, push_error = push_error })
     end
-    if webdav then
+    if cloud then
         return self._client:scanWebdavAsync(done,
             { refresh = opts.force, dirty_only = opts.dirty_only, on_progress = opts.on_progress,
                 on_background = opts.on_background })
@@ -174,7 +174,7 @@ end
 
 --- 纯本地目录没有远端：进度域直接 skipped；WebDAV 走通用 book.progress（开书拉取 + 冲突弹窗，关书推脏）。
 function Source:syncProgressAsync(opts, cb)
-    if not self._client:isWebdav() then return skipped(cb, "local source") end
+    if not self._client:hasCloud() then return skipped(cb, "local source") end
     return SourceBase.syncProgressAsync(self, opts, cb)
 end
 
@@ -182,7 +182,7 @@ end
 ---@param identity BookIdentity
 ---@param cb fun(pos: ProgressPosition|nil, err: string|nil, meta: table|nil)
 function Source:getProgressAsync(identity, cb)
-    if not self._client:isWebdav() then return SourceBase.defer(cb, nil, nil, { empty = true }) end
+    if not self._client:hasCloud() then return SourceBase.defer(cb, nil, nil, { empty = true }) end
     return self._client:getProgressAsync(identity.stable_id, cb)
 end
 
@@ -195,7 +195,7 @@ end
 
 --- 纯本地目录没有远端：统计域直接 skipped；WebDAV 走通用 book.stats。
 function Source:syncStatsAsync(opts, cb)
-    if not self._client:isWebdav() then return skipped(cb, "local source") end
+    if not self._client:hasCloud() then return skipped(cb, "local source") end
     return SourceBase.syncStatsAsync(self, opts, cb)
 end
 
@@ -208,7 +208,7 @@ end
 
 --- 纯本地目录没有远端：笔记域直接 skipped；WebDAV 走通用 book.note（每设备每书一份快照，拉取取并集）。
 function Source:syncNotesAsync(opts, cb)
-    if not self._client:isWebdav() then return skipped(cb, "local source") end
+    if not self._client:hasCloud() then return skipped(cb, "local source") end
     return SourceBase.syncNotesAsync(self, opts, cb)
 end
 
@@ -237,7 +237,7 @@ end
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return table|nil
 function Source:importBookAsync(temp_path, filename, cb)
-    if self._client:isWebdav() then
+    if self._client:hasCloud() then
         return self._client:importWebdavAsync(temp_path, filename, cb)
     end
     return self._client:importAsync(temp_path, filename, cb)
@@ -249,7 +249,7 @@ end
 ---@param series string|nil
 ---@return string|nil new_stable_id, string|nil err
 function Source:moveBook(stable_id, category, series)
-    if self._client:isWebdav() then
+    if self._client:hasCloud() then
         -- WebDAV 下分类/系列只是 books.sync 元数据，不移动文件。编辑框随后 upsertLocal 写字段；
         -- 这里先标脏，否则下一轮同步会用远端书目把这次编辑覆盖回去。
         require("book.books_db").setLibraryMembership(self.id, stable_id, true)

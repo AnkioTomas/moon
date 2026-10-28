@@ -15,9 +15,11 @@ local Setting = {}
 ---@return string status, boolean status_on
 function Setting.rowStatus()
     local cfg = require("utils.settings").getSource(SOURCE_ID)
-    if type(cfg.webdav_url) == "string" and cfg.webdav_url ~= "" then
+    local kind = require("source.local.client").new(cfg):cloudKind()
+    if kind == "webdav" then
         return "WebDAV · " .. cfg.webdav_url, true
     end
+    if kind == "gdrive" then return "Google Drive", true end
     local path = cfg.path or ""
     if path ~= "" then
         return path, true
@@ -49,25 +51,96 @@ function Setting.rows(plugin)
             end,
         }:show()
     end
-    local function row(key, title, password, icon)
+    local function row(key, title, password, icon, subtitle)
         return function(iw)
             local value = require("utils.settings").getSource(SOURCE_ID)[key] or ""
             return Row.widget({ width = iw, chevron = true, kind = "nav", icon = icon, title = title,
+                subtitle = subtitle,
                 status = value ~= "" and (password and "******" or value) or _("未设置"),
                 status_on = value ~= "", callback = function() edit(key, title, password) end })
         end
     end
+    local function cloudRow(iw)
+        local cfg = require("utils.settings").getSource(SOURCE_ID)
+        local kind = require("source.local.client").new(cfg):cloudKind()
+        local labels = { webdav = "WebDAV", gdrive = "Google Drive" }
+        local icons = { webdav = "dns", gdrive = "add_to_drive" }
+        return Row.widget({ width = iw, chevron = true, kind = "nav", icon = icons[kind] or "cloud_off",
+            title = _("网盘"),
+            status = labels[kind] or _("不使用"), status_on = kind ~= nil,
+            callback = function()
+                local function pick(id)
+                    cfg.cloud = id
+                    require("utils.settings").saveSource(SOURCE_ID, cfg)
+                    require("source.registry").invalidate()
+                    if plugin and plugin.desktop then plugin.desktop:updateView() end
+                end
+                require("ui.themes.widgets.list"):new{ title = _("网盘"), items = {
+                    { text = _("不使用"), icon = "cloud_off", callback = function() pick("off") end },
+                    { text = "WebDAV", icon = "dns", callback = function() pick("webdav") end },
+                    { text = "Google Drive", icon = "add_to_drive", callback = function() pick("gdrive") end },
+                } }:show()
+            end })
+    end
+    --- 打开月读的授权页。Google 同意后浏览器停在打不开的本机地址，用户把地址栏贴回来。
+    local function authorizeGoogle()
+        local Drive = require("source.local.gdrive")
+        local url = Drive.authorizeUrl()
+        local function askCode()
+            require("ui.themes.widgets.input"):new{
+                title = _("授权 Google Drive"),
+                fields = { { label = _("授权码"), hint = _("地址栏里的整段地址，或其中的授权码") } },
+                ok_text = _("确定"),
+                callback = function(code)
+                    local waiting = require("ui.themes.widgets.progress_dialog"):new{
+                        title = _("授权 Google Drive"), text = _("正在换取 Google Drive 令牌…"), dismissable = false,
+                    }
+                    waiting:show()
+                    Drive.exchangeCode(code, function(refresh, err)
+                        waiting:close()
+                        if not refresh then
+                            require("ui.themes.widgets.toast"):new{ text = err }:show()
+                            return
+                        end
+                        local cfg = require("utils.settings").getSource(SOURCE_ID)
+                        cfg.cloud = "gdrive"
+                        cfg.gdrive_token = refresh
+                        cfg.gdrive_client = Drive.clientApp()
+                        require("utils.settings").saveSource(SOURCE_ID, cfg)
+                        require("source.registry").invalidate()
+                        if plugin and plugin.desktop then plugin.desktop:updateView() end
+                        require("ui.themes.widgets.toast"):new{ text = _("已授权，可以访问你的 Google Drive"), timeout = 2 }:show()
+                    end)
+                end,
+            }:show()
+        end
+        local Device = require("device")
+        if Device:canOpenLink() then
+            Device:openLink(url)
+            askCode()
+        else
+            require("ui.themes.widgets.qr"):new{
+                title = _("授权 Google Drive"), text = url, caption = url, close_callback = askCode,
+            }:show()
+        end
+    end
+    local function authorizeGoogleRow(iw)
+        return Row.widget({ width = iw, chevron = false, kind = "action", icon = "add_to_drive",
+            title = _("授权 Google Drive"),
+            subtitle = _("同意后地址栏会停在打不开的页面，把整段地址贴回来"),
+            callback = authorizeGoogle })
+    end
     local function testRow(iw)
-        return Row.widget({ width = iw, chevron = false, kind = "action", icon = "network_check", title = _("测试 WebDAV 连接"),
+        return Row.widget({ width = iw, chevron = false, kind = "action", icon = "network_check", title = _("测试网盘连接"),
             subtitle = _("写入、读回并删除一个测试文件"), callback = function()
                 local waiting = require("ui.themes.widgets.progress_dialog"):new{
-                    title = _("测试 WebDAV 连接"), text = _("正在测试 WebDAV 连接…"), dismissable = false,
+                    title = _("测试网盘连接"), text = _("正在测试网盘连接…"), dismissable = false,
                 }
                 waiting:show()
                 local client = require("source.local.client").new(require("utils.settings").getSource(SOURCE_ID))
                 client:testWebdavAsync(function(ok, err)
                     waiting:close()
-                    require("ui.themes.widgets.toast"):new{ text = ok and _("WebDAV 连接正常，可读写") or err, timeout = ok and 2 or nil }:show()
+                    require("ui.themes.widgets.toast"):new{ text = ok and _("网盘连接正常，可读写") or err, timeout = ok and 2 or nil }:show()
                 end)
             end })
     end
@@ -94,7 +167,7 @@ function Setting.rows(plugin)
         local cfg = Settings.getSource(SOURCE_ID)
         local on = cfg.webdav_upload_local ~= false
         return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = "cloud_upload",
-            title = _("上传本地书到 WebDAV"),
+            title = _("上传本地书到网盘"),
             subtitle = _("关闭后只同步进度、笔记和统计，不上传本地书籍文件"),
             status = on and _("开") or _("关"), status_on = on,
             callback = function()
@@ -106,10 +179,14 @@ function Setting.rows(plugin)
         localPathRow,
         folderCategoryRow,
         uploadRow,
+        cloudRow,
+        authorizeGoogleRow,
         row("webdav_url", _("WebDAV 地址"), false, "dns"),
         row("webdav_username", _("WebDAV 用户名"), false, "person"),
         row("webdav_password", _("WebDAV 密码"), true, "key"),
-        row("webdav_path", _("WebDAV 目录"), false, "folder"),
+        row("gdrive_token", _("Google Drive 刷新令牌"), true, "add_to_drive", _("OAuth 刷新令牌，范围要包含 drive")),
+        row("gdrive_client", _("Google 客户端"), true, "key", _("客户端 ID:密钥")),
+        row("webdav_path", _("网盘目录"), false, "folder"),
         testRow,
     }
 end

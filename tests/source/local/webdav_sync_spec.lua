@@ -464,7 +464,7 @@ do
     c:openWebdavAsync("webdav://无.epub", function(p, e) path, err = p, e end)
     Stubs.flush()
     Assert.is_nil(path)
-    Assert.eq(err, "未配置 WebDAV，无法下载云端书籍")
+    Assert.eq(err, "未配置网盘，无法下载云端书籍")
     Assert.len(dav.calls, 0)
     os.remove(L .. "/有.epub")
 end

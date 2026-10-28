@@ -949,7 +949,7 @@ function Webdav.openWebdavAsync(self, stable_id, cb)
     if not rel then return defer(cb, nil, _("无效的 WebDAV 书籍路径")) end
     local target = self:webdavBookRoot() .. "/" .. rel
     if lfs.attributes(target, "mode") == "file" then return defer(cb, target) end
-    if not self:isWebdav() then return defer(cb, nil, _("未配置 WebDAV，无法下载云端书籍")) end
+    if not self:hasCloud() then return defer(cb, nil, _("未配置网盘，无法下载云端书籍")) end
     ensureParent(target)
     local part = target .. ".part"
     local cancelled = false
@@ -1080,7 +1080,7 @@ end
 ---@return { cancel: fun() }|nil
 ---@param self LocalClient
 function Webdav.testWebdavAsync(self, cb)
-    if not self:isWebdav() then return defer(cb, false, _("未配置 WebDAV 地址")) end
+    if not self:hasCloud() then return defer(cb, false, _("未配置网盘")) end
     local valid, valid_err = self:validatePath()
     if not valid then return defer(cb, false, valid_err) end
     local remote = self:webdavPath() .. "/.moon-webdav-test"
