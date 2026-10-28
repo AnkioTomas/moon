@@ -75,7 +75,7 @@ local function rawReplaceBeforeCursor(inputbox, count, chars)
     if start_pos < 1 then
         return false
     end
-    for _ = 1, count do
+    for _n = 1, count do
         table.remove(inputbox.charlist, start_pos)
     end
     local added = util.splitToChars(chars)

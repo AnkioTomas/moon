@@ -43,7 +43,7 @@ end
 local CRC = {}
 for i = 0, 255 do
     local c = i
-    for _ = 1, 8 do
+    for _bit = 1, 8 do
         c = bit.band(c, 1) == 1 and bit.bxor(0xEDB88320, bit.rshift(c, 1)) or bit.rshift(c, 1)
     end
     CRC[i] = c
@@ -100,7 +100,7 @@ function Package.unzip(data, password)
     end
     if not eocd then return nil, "zip: no end record" end
     local files, p = {}, u32(data, eocd + 16) + 1
-    for _ = 1, u16(data, eocd + 10) do
+    for _entry = 1, u16(data, eocd + 10) do
         if u32(data, p) ~= 0x02014b50 then return nil, "zip: bad central directory" end
         local flags, method, csize = u16(data, p + 8), u16(data, p + 10), u32(data, p + 20)
         local nlen, elen, clen, lho = u16(data, p + 28), u16(data, p + 30), u16(data, p + 32), u32(data, p + 42) + 1

@@ -215,7 +215,7 @@ local function normalizePaint(css)
         pos = last + 1
     end
     local out, changed = {}, false
-    for _, declaration in ipairs(declarations) do
+    for _idx, declaration in ipairs(declarations) do
         local key, value = declaration.key, declaration.value
         local raw = declaration.raw
         if key == "fill" or key == "stroke" then
@@ -240,7 +240,7 @@ local function normalizePaint(css)
         end
         if not (key == "fill-opacity" or key == "stroke-opacity") then out[#out + 1] = raw end
     end
-    for _, key in ipairs({ "fill-opacity", "stroke-opacity" }) do
+    for _idx, key in ipairs({ "fill-opacity", "stroke-opacity" }) do
         if opacity[key] then out[#out + 1] = key .. ": " .. opacity[key] end
     end
     return changed and table.concat(out, ";") or css

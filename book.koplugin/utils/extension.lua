@@ -6,7 +6,7 @@
 完整清单与各项形状见下方 `POINTS`；登记未声明的挂点直接报错，防止拼错名静默失效。
 
     Ext.add("desktop.activated", function(desktop) ... end)   -- 追加一项
-    for _, fn in ipairs(Ext.list("desktop.activated")) do ... end
+    for _idx, fn in ipairs(Ext.list("desktop.activated")) do ... end
     Ext.call("quickpanel.show", "desktop")                     -- 单一提供者：取最后登记的那项调用
     Ext.emit("reader.ready", plugin)                           -- 逐项调用（经 ui.guard 隔离）
 

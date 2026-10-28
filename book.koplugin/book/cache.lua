@@ -42,7 +42,7 @@ local function walkAsync(root, visit, done, protected)
 
     local function step()
         if cancelled then return end
-        for _ = 1, BUDGET do
+        for _step = 1, BUDGET do
             local top = stack[#stack]
             if not top then break end
             local name = top.iter(top.state)

@@ -183,7 +183,7 @@ function M.dumpTable(data, roots)
             elseif type(v) == "table" then
                 -- 空表也留一行，方便看「有这个键」
                 local empty = true
-                for _ in pairs(v) do empty = false break end
+                for _key in pairs(v) do empty = false break end
                 if empty then
                     lines[#lines + 1] = path .. " = {}"
                 else
