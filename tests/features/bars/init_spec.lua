@@ -231,6 +231,22 @@ post_ready[1]()
 Log.info = orig_info
 Assert.eq(diag_args[1], "bars top diag")
 
+-- 强制重写页眉高度：配置已是开但高度为 0（被别的插件压掉）时，偏好应用须绕过
+-- setSystemTop 的早退、重发状态栏事件逼引擎重排；高度正常时不发任何事件。
+ui_top.document.configurable.status_line = 0
+ui_top.document.getHeaderHeight = function() return 0 end
+events = {}
+Bars.applyPreferences(ui_top)
+local forced = 0
+for _idx, e in ipairs(events) do
+    if e.name == "SetStatusLine" and e.args[1] == 0 then forced = forced + 1 end
+end
+Assert.eq(forced, 1)
+ui_top.document.getHeaderHeight = function() return 28 end
+events = {}
+Bars.applyPreferences(ui_top)
+Assert.len(events, 0)
+
 -- 强制重画：月读画底栏时改走整页重画，不让原生底栏盖上来
 footer:onUpdateFooter(true)
 Assert.is_true(update_args[2])

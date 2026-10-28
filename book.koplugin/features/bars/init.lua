@@ -175,11 +175,29 @@ function Bars.injectStatusLine(doc_settings, document)
     doc_settings:saveSetting("copt_status_line", Bars.topBarPreference() and 0 or 1)
 end
 
+--- 顶栏开了却没有页眉高度：多半被别的插件压掉，或开关没真正落到引擎。
+--- setSystemTop 在「配置已是开」时早退，救不了这种状态；这里绕过早退重发一遍
+--- 状态栏事件，逼 ReaderRolling 重新应用属性并重排。高度正常的书不会走到这里。
+---@param ui table ReaderUI
+local function forceTopHeader(ui)
+    if not Bars.topBarPreference() or not Layout.replace("top") then
+        return
+    end
+    local doc = ui.document
+    if not ui.rolling or not doc or not doc.getHeaderHeight or doc:getHeaderHeight() > 0 then
+        return
+    end
+    local Event = require("ui/event")
+    ui:handleEvent(Event:new("ConfigChange", "status_line", 0))
+    ui:handleEvent(Event:new("SetStatusLine", 0))
+end
+
 --- 按 Book 设置同步系统顶底栏。
 ---@param ui table ReaderUI
 function Bars.applyPreferences(ui)
     Bars.setSystemTop(ui, Bars.topBarPreference())
     Bars.setSystemBottom(ui, Bars.bottomBarPreference())
+    forceTopHeader(ui)
 end
 
 --- 顶栏 overlay 是否应绘制（系统 Alt Status Bar 开）。
@@ -397,6 +415,14 @@ function Bars.install(ui)
     ui:registerPostReaderReadyCallback(Guard.wrap("bars preferences", function()
         Bars.applyPreferences(ui)
         logTopDiag(ui)
+        -- 别的插件可能在更晚的 ready 回调里又把页眉压掉；隔一拍只复查一次，不无限对打。
+        require("ui/uimanager"):scheduleIn(2, Guard.wrap("bars header recheck", function()
+            if require("apps/reader/readerui").instance ~= ui then
+                return
+            end
+            forceTopHeader(ui)
+            logTopDiag(ui)
+        end))
     end))
 end
 
