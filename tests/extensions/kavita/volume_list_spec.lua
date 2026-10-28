@@ -978,9 +978,15 @@ Assert.not_nil(cleanup_confirm, "清理前确认")
 textContains(cleanup_confirm.text, "将删除本系列 1 卷已读完的缓存")
 textContains(cleanup_confirm.text, "阅读进度与 kamare journal 保留")
 cleanup_confirm.ok_callback()
+local busy = Themed.last("progress_dialog")
+Assert.not_nil(busy, "同步删除先弹忙碌窗")
+Assert.eq(busy.title, "清理本系列已读")
+Assert.eq(busy.text, "正在清理…")
+Assert.is_true(busy.shown and busy.closed, "先显示、删完关闭")
 Assert.eq(#calls.delete, 1, "清理本系列已读只调一次 delete")
 Assert.eq(#calls.delete[1], 1, "只删已读完的那一卷")
 Assert.eq(calls.delete[1][1], 601, "删的是已读卷")
+Assert.eq(calls.chapters, 2, "删后重取一次 chapters 比对残留")
 textContains(Themed.last("toast").text, "已清理 1 卷")
 
 -- 0 个对象：菜单项置灰，点了也不会弹确认。
@@ -993,51 +999,7 @@ list = open()
 menu = openMenu(list)
 Assert.is_false(menu.items[6].enabled, "没有已读完的卷时置灰")
 Assert.eq(menu.items[6].mandatory, "无")
-
--- 系列清理：一次 chapters(series_id)、菜单计数、确认后批量删、就地刷新。
-reset()
-st.probe = { ok = true, state = "enhanced", capabilities = {
-    status = true, queue = true, queue_control = true, enqueue = true,
-    delete = true, estimate = true, chapters = true,
-} }
-st.plan = {
-    { chapterId = 601, pages = 100, read = true, bytes = 1024, stale = false, queued = false },
-    { chapterId = 602, pages = 100, read = false, bytes = 2048, stale = false, queued = false },
-}
-list = open()
-Assert.eq(calls.chapters, 1, "一次 chapters(series_id) 取代逐章 status")
-Assert.eq(calls.chapters_series, "900", "按当前 seriesId 取计划")
-textContains(table.concat(Kit.texts(list), "\n"), "已读 · 已缓存", "kamare 的已读进入行状态")
-
-menu = openMenu(list)
-local cleanup_labels = {}
-for _idx, item in ipairs(menu.items) do cleanup_labels[#cleanup_labels + 1] = item.text end
-Assert.eq(table.concat(cleanup_labels, "|"),
-    "缓存整部|只缓存未读|从当前进度开始|后 N 卷…|清理本系列|清理本系列已读",
-    "清理项在批量菜单底部")
-Assert.eq(menu.items[5].mandatory, "2 卷", "本系列缓存计数")
-Assert.eq(menu.items[6].mandatory, "1 卷", "本系列已读计数")
-
-chooseMenu(menu, 6)
-local cleanup_confirm = Themed.last("confirm")
-Assert.not_nil(cleanup_confirm, "清理前确认")
-textContains(cleanup_confirm.text, "将删除本系列 1 卷已读完的缓存")
-textContains(cleanup_confirm.text, "阅读进度与 kamare journal 保留")
-cleanup_confirm.ok_callback()
-Assert.eq(#calls.delete, 1, "清理本系列已读只调一次 delete")
-Assert.eq(#calls.delete[1], 1, "只删已读完的那一卷")
-Assert.eq(calls.delete[1][1], 601, "删的是已读卷")
-textContains(Themed.last("toast").text, "已清理 1 卷")
-
--- 0 个对象：菜单项置灰，点了也不会弹确认。
-reset()
-st.probe = { ok = true, state = "enhanced", capabilities = {
-    status = true, enqueue = true, delete = true, estimate = true, chapters = true,
-} }
-st.plan = { { chapterId = 602, pages = 100, read = false, bytes = 2048 } }
-list = open()
-menu = openMenu(list)
-Assert.is_false(menu.items[6].enabled, "没有已读完的卷时置灰")
-Assert.eq(menu.items[6].mandatory, "无")
+Assert.is_true(menu.items[5].enabled, "还有未读的缓存：整系列清理仍可点")
+Assert.eq(menu.items[5].mandatory, "1 卷")
 
 return true

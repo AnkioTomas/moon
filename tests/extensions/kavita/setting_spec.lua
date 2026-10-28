@@ -44,6 +44,11 @@ end
 package.preload["ui/network/manager"] = function()
     return { isConnected = function() return true end }
 end
+-- 同步删除的忙碌窗会先强制重绘再动手；这里只数次数。
+local repaints = 0
+package.preload["ui/uimanager"] = function()
+    return { forceRePaint = function() repaints = repaints + 1 end }
+end
 package.preload["moonsource_kavita.source"] = function()
     return { DEFAULT_HEARTBEAT_INTERVAL = 30 }
 end
@@ -88,6 +93,8 @@ local chapters_result = {}
 local delete_calls, delete_all_calls = {}, 0
 local delete_ok, delete_code = true, nil
 local delete_all_ok, delete_all_code, delete_all_detail = true, nil, nil
+-- 占用 / 计划只在详情页各取一次（06 B 的「占用只算一次」）。
+local summary_calls, summary_all_calls, chapters_calls = 0, 0, 0
 package.preload["moonsource_kavita.cache"] = function()
     return {
         probe = function() return probe_result end,
@@ -103,9 +110,18 @@ package.preload["moonsource_kavita.cache"] = function()
             return nil, "settings_write_failed"
         end,
         available = function(cap) return available[cap] == true end,
-        summary = function() return summary_result end,
-        summaryAll = function() return summary_all_result end,
-        chapters = function() return chapters_result end,
+        summary = function()
+            summary_calls = summary_calls + 1
+            return summary_result
+        end,
+        summaryAll = function()
+            summary_all_calls = summary_all_calls + 1
+            return summary_all_result
+        end,
+        chapters = function()
+            chapters_calls = chapters_calls + 1
+            return chapters_result
+        end,
         plan = function(entries, filter, toc_read)
             local out = { chapters = 0, bytes = 0, ids = {}, queued = 0, open = false }
             for __, entry in ipairs(entries or {}) do
@@ -246,7 +262,7 @@ Assert.eq(saved, 4)
 Assert.eq(reloaded, 4, "每次保存都重建源实例，新配置立即生效")
 
 ----------------------------------------------------------------------
--- 漫画缓存：五态 + 只读详情 + 09 手动安装说明。
+-- 漫画缓存：七态（含旧接口/镜像失败）+ 只读详情 + 09 手动安装说明。
 ----------------------------------------------------------------------
 local function checkStatus(probe, expected, on, mirror)
     probe_result = probe
@@ -260,8 +276,14 @@ end
 checkStatus({ ok = false, state = "missing" }, "未安装 / 未启用", false)
 checkStatus({ ok = false, state = "official" }, "官方版（无缓存接口）", false)
 checkStatus({ ok = false, state = "incompatible", api_version = 2 }, "版本不兼容", false)
-checkStatus({ ok = true, state = "enhanced", api_version = 1, version = "0.10.0-dev" },
+checkStatus({ ok = true, state = "enhanced", api_version = 1, version = "0.10.0-dev",
+    capabilities = { chapters = true, delete = true, delete_all = true } },
     "增强版 v0.10.0-dev", true)
+-- 旧接口：有 kamarecache 但没有 chapters / delete，清理不可用，不高亮。
+checkStatus({ ok = true, state = "enhanced", api_version = 1, version = "0.9.22",
+    capabilities = { status = true, summary = true } },
+    "增强版 v0.9.22（旧接口）", false)
+checkStatus({ ok = true, state = "enhanced", api_version = 1 }, "增强版（旧接口）", false)
 checkStatus({ ok = true, state = "enhanced", api_version = 1, version = "0.10.0-dev" },
     "配置同步失败", false, true)
 
@@ -307,7 +329,11 @@ rowAt("漫画缓存").callback()
 local page = overlays[#overlays]
 Assert.not_nil(page, "详情走叠层，不再用 ConfirmBox")
 Assert.eq(page.title, "漫画缓存")
+summary_calls, summary_all_calls, chapters_calls = 0, 0, 0
 local sections = page.sections()
+Assert.eq(summary_calls, 1, "占用只在详情页算一次")
+Assert.eq(summary_all_calls, 0, "配了服务器用 summary，不取合计")
+Assert.eq(chapters_calls, 1, "清理计划一次 chapters() 取全")
 local status_rows = sectionRows(sections, "状态")
 Assert.eq(statusOf(status_rows, "版本").status, "0.10.0-dev")
 Assert.eq(statusOf(status_rows, "增强版功能").subtitle,
@@ -329,17 +355,65 @@ Assert.is_nil(findSection(sections, "获取增强版"), "增强态不显示安�
 sectionRows(sections, "维护")[1].callback()
 Assert.eq(reprobed, 1, "重新检测")
 
--- 清理已读：确认 → 删除 → 复查 → 刷新。
+-- 清理已读：确认 → 忙碌窗 → 删除 → 复查 → 刷新。
 delete_calls = {}
 cleanup_rows[1].callback()
 local read_confirm = Themed.last("confirm")
 Assert.not_nil(read_confirm)
 Assert.matches(read_confirm.text, "将删除 1 章")
+local repaints_before = repaints
 read_confirm.ok_callback()
+local busy = Themed.last("progress_dialog")
+Assert.not_nil(busy, "同步删除先弹忙碌窗")
+Assert.eq(busy.title, "清理已读")
+Assert.eq(busy.text, "正在清理…")
+Assert.is_true(busy.dismissable == false, "忙碌窗不可关")
+Assert.is_true(busy.shown, "先显示再删除")
+Assert.is_true(busy.closed, "删完关闭")
+Assert.eq(repaints, repaints_before + 1, "删除前强制重绘一次")
 Assert.eq(#delete_calls, 1, "清理已读调用一次批量删除")
 Assert.eq(#delete_calls[1], 1, "只删已读完的那一章")
 Assert.matches(Themed.last("toast").text, "已清理 1 章")
 Assert.eq(shelf_events[#shelf_events], "shelf_changed", "删除后刷新书架")
+
+-- 空缓存：三项都置灰（03 待确认 3），清理全部不再可点。
+cfg.base_url, cfg.api_key = "http://kav", "k"
+probe_result = {
+    ok = true, state = "enhanced", api_version = 1, version = "0.10.0-dev",
+    capabilities = { summary = true, chapters = true, delete = true, delete_all = true },
+    path = cache_path,
+}
+available = { summary = true }
+local saved_chapters = chapters_result
+chapters_result = {}
+summary_result = { used = 0, available = 9 * MB, chapters = 0 }
+rowAt("漫画缓存").callback()
+local empty_rows = sectionRows(overlays[#overlays].sections(), "清理")
+for idx = 1, 3 do
+    Assert.is_false(empty_rows[idx].enabled, "空缓存置灰：" .. empty_rows[idx].title)
+    Assert.is_false(empty_rows[idx].chevron, "空缓存不显示箭头：" .. empty_rows[idx].title)
+end
+Assert.eq(empty_rows[1].subtitle, "没有可清理的缓存")
+Assert.eq(empty_rows[2].subtitle, "没有可清理的缓存")
+chapters_result = saved_chapters
+summary_result = { used = 3 * MB, available = 9 * MB, chapters = 12 }
+
+-- 旧接口：不出清理项，只写升级说明。
+probe_result = {
+    ok = true, state = "enhanced", api_version = 1, version = "0.9.22",
+    capabilities = { status = true, summary = true }, path = cache_path,
+}
+rowAt("漫画缓存").callback()
+local old_rows = sectionRows(overlays[#overlays].sections(), "清理")
+Assert.eq(#old_rows, 1, "旧接口只有一段说明")
+Assert.eq(old_rows[1].title, "当前 kamare 没有清理接口")
+Assert.matches(old_rows[1].subtitle, "chapters / delete_all", "说明要升级到什么")
+probe_result = {
+    ok = true, state = "enhanced", api_version = 1, version = "0.10.0-dev",
+    capabilities = { open = true, index = true, status = true, summary = true,
+        chapters = true, delete = true, delete_all = true },
+    path = cache_path,
+}
 
 -- 清理全部：没有服务器也能用，确认文案含未关联。
 cfg.base_url, cfg.api_key = "", ""
@@ -350,12 +424,17 @@ probe_result = {
 }
 available = { summary = true }
 rowAt("漫画缓存").callback()
+summary_all_calls, summary_calls = 0, 0
 local unconfigured = overlays[#overlays].sections()
 Assert.eq(sectionRows(unconfigured, "清理")[1].title, "未配置服务器")
+Assert.eq(summary_all_calls, 1, "没有服务器时占用取合计")
+Assert.eq(summary_calls, 0, "没有服务器时不查单服务器")
+Assert.matches(statusOf(sectionRows(unconfigured, "状态"), "缓存占用").subtitle, "含未关联服务器")
 sectionRows(unconfigured, "清理")[2].callback()
 local all_confirm = Themed.last("confirm")
 Assert.matches(all_confirm.text, "含未关联服务器")
 all_confirm.ok_callback()
+Assert.eq(Themed.last("progress_dialog").title, "清理全部缓存", "全部清理同样有忙碌窗")
 Assert.eq(delete_all_calls, 1, "清理全部走 deleteAll")
 
 -- 未安装：安装说明；路径归一；不显示占用。
@@ -372,6 +451,14 @@ Assert.matches(install_text, "kamarecache.lua")
 Assert.matches(install_text, "增强版提供：缓存")
 Assert.matches(install_text, Config.root() .. "/extensions", "moon 自己的插件目录")
 Assert.is_nil(findSection(missing, "清理"), "未安装不显示清理")
+
+-- 版本不兼容：安装说明前先讲清 API 不兼容（03 原型）。
+probe_result = { ok = false, state = "incompatible", api_version = 2 }
+rowAt("漫画缓存").callback()
+local incompatible = sectionRows(overlays[#overlays].sections(), "获取增强版")
+Assert.eq(incompatible[1].title, "版本不兼容")
+Assert.matches(incompatible[1].subtitle, "API v2")
+Assert.not_nil(incompatible[2].text, "后面仍是安装说明")
 
 -- 镜像失败：状态区给出警告 + 重试同步。
 probe_result = {
@@ -436,9 +523,13 @@ local function connectToast(probe, mirror, version, err)
     return Themed.last("toast").text
 end
 
-local enhanced = { ok = true, state = "enhanced", api_version = 1, version = "0.10.0-dev" }
+local enhanced = { ok = true, state = "enhanced", api_version = 1, version = "0.10.0-dev",
+    capabilities = { chapters = true, delete = true, delete_all = true } }
 Assert.eq(connectToast(enhanced, false, "0.9.0"),
     "连接正常\nKavita 0.9.0\nkamare 增强版 v0.10.0-dev")
+Assert.eq(connectToast({ ok = true, state = "enhanced", api_version = 1, version = "0.9.22" },
+        false, "0.9.0"),
+    "连接正常\nKavita 0.9.0\nkamare 增强版 v0.9.22（旧接口）")
 Assert.eq(connectToast(enhanced, true, "0.9.0"),
     "连接正常\nKavita 0.9.0\nkamare 配置同步失败")
 Assert.eq(connectToast({ ok = false, state = "missing" }, false, "0.9.0"),

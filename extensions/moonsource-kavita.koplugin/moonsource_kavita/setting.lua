@@ -194,15 +194,29 @@ local function heartbeatRow()
     end
 end
 
+--- 增强版是否带清理接口（03 A）：只有 chapters + delete 才能按章删除。
+--- 缺任一项就是「旧接口」，设置行与详情页都据此降级。
+---@param probe table
+---@return boolean
+local function cleanupReady(probe)
+    local caps = probe.capabilities or {}
+    return caps.chapters == true and caps.delete == true
+end
+
 --- 五态文案（02 A8）：镜像失败优先于「增强版」，其余按探测态。
+--- 增强版再分「能力齐 / 旧接口」两态（03 A 七态矩阵）；旧接口不高亮。
 --- 行副标题只留结论，API 版本 / 能力清单不再展示（用户不需要，也会误导）。
 ---@param probe table
 ---@return string, boolean
 local function cacheStatus(probe)
     if probe.state == "enhanced" then
         if Cache.mirrorFailed() then return _("配置同步失败"), false end
-        if probe.version then return T(_("增强版 v%1"), probe.version), true end
-        return _("增强版"), true
+        local ready = cleanupReady(probe)
+        if probe.version then
+            return ready and T(_("增强版 v%1"), probe.version)
+                or T(_("增强版 v%1（旧接口）"), probe.version), ready
+        end
+        return ready and _("增强版") or _("增强版（旧接口）"), ready
     elseif probe.state == "incompatible" then
         return _("版本不兼容"), false
     elseif probe.state == "official" then
@@ -363,6 +377,26 @@ local function leftoverCount(entries, ids)
     return left
 end
 
+--- 同步删除期间的忙碌窗（05 A）：kamare 直接写盘，主线程会停住；
+--- 先画出来再动手，否则用户看不到任何反馈（与维护页导入统计同一套做法）。
+---@param title string
+---@param fn fun(): boolean|nil, string|nil, string|nil, any
+---@return boolean|nil, string|nil, string|nil, any
+local function runBusy(title, fn)
+    local UIManager = require("ui/uimanager")
+    local busy = require("ui.themes.widgets.progress_dialog"):new{
+        title = title,
+        text = _("正在清理…"),
+        dismissable = false,
+    }
+    local result, code, message, detail = busy:showWhile(function()
+        if UIManager.forceRePaint then UIManager:forceRePaint() end
+        return fn()
+    end)
+    busy:close()
+    return result, code, message, detail
+end
+
 local function runCleanup(plugin, filter, title)
     local entries, code = Cache.chapters()
     if not entries then
@@ -389,7 +423,7 @@ local function runCleanup(plugin, filter, title)
         ok_text = _("清理"),
         cancel_text = _("取消"),
         ok_callback = function()
-            local ok, err, message = Cache.delete(plan.ids)
+            local ok, err, message = runBusy(title, function() return Cache.delete(plan.ids) end)
             if not ok then
                 toast(Cache.message(err, message))
                 return
@@ -421,7 +455,8 @@ local function runCleanupAll(plugin)
         ok_text = _("清理"),
         cancel_text = _("取消"),
         ok_callback = function()
-            local ok, err, message, detail = Cache.deleteAll()
+            local ok, err, message, detail = runBusy(_("清理全部缓存"),
+                function() return Cache.deleteAll() end)
             if not ok then
                 toast(Cache.message(err, message))
                 return
@@ -441,7 +476,7 @@ local function cacheSections(plugin)
     local probe = Cache.probe()
     local caps = probe.capabilities or {}
     local configured = (config().base_url or "") ~= ""
-    local can_plan = probe.ok and caps.chapters == true and caps.delete == true
+    local can_plan = probe.ok and cleanupReady(probe)
     local can_all = probe.ok and caps.delete_all == true
     local usage = usageFor(configured)
     local out = {}
@@ -481,6 +516,23 @@ local function cacheSections(plugin)
     end
     out[#out + 1] = { title = _("状态"), rows = status }
 
+    --- 「清理全部」一行：跨服务器（含未关联）。统计得到 0 章时置灰（03 待确认 3）；
+    --- 拿不到 summary 时不猜，保持可点（删除时以 kamare 的事实为准）。
+    local function cleanupAllRow()
+        local count = usage and tonumber(usage.chapters) or nil
+        local empty = count ~= nil and count <= 0
+        return mk({
+            icon = "delete", title = _("清理全部"),
+            subtitle = usage
+                and T(_("含未关联服务器 · %1 章 · 约 %2"), tostring(usage.chapters or 0),
+                    Cache.sizeText(usage.used))
+                or _("含未关联服务器"),
+            enabled = not empty,
+            chevron = not empty,
+            callback = function() runCleanupAll(plugin) end,
+        })
+    end
+
     if can_plan and configured then
         local entries = Cache.chapters() or {}
         local read_plan = Cache.plan(entries, "read")
@@ -506,15 +558,7 @@ local function cacheSections(plugin)
             }),
         }
         if can_all then
-            cleanup[#cleanup + 1] = mk({
-                icon = "delete", title = _("清理全部"),
-                subtitle = usage
-                    and T(_("含未关联服务器 · %1 章 · 约 %2"), tostring(usage.chapters or 0),
-                        Cache.sizeText(usage.used))
-                    or _("含未关联服务器"),
-                chevron = true,
-                callback = function() runCleanupAll(plugin) end,
-            })
+            cleanup[#cleanup + 1] = cleanupAllRow()
         end
         out[#out + 1] = { title = _("清理"), rows = cleanup }
     elseif can_all and not configured then
@@ -522,15 +566,7 @@ local function cacheSections(plugin)
             mk({ icon = "info", title = _("未配置服务器"),
                 subtitle = _("填写服务器地址与 API Key 后，可按服务器清理已读或全部缓存"),
                 chevron = false }),
-            mk({
-                icon = "delete", title = _("清理全部"),
-                subtitle = usage
-                    and T(_("含未关联服务器 · %1 章 · 约 %2"), tostring(usage.chapters or 0),
-                        Cache.sizeText(usage.used))
-                    or _("含未关联服务器"),
-                chevron = true,
-                callback = function() runCleanupAll(plugin) end,
-            }),
+            cleanupAllRow(),
         } }
     elseif probe.ok and not can_plan then
         out[#out + 1] = { title = _("清理"), rows = {
@@ -553,7 +589,16 @@ local function cacheSections(plugin)
     } }
 
     if not probe.ok then
-        out[#out + 1] = { title = _("获取增强版"), rows = { textRow(installText(plugin)) } }
+        local rows = {}
+        if probe.state == "incompatible" and probe.api_version then
+            rows[#rows + 1] = mk({
+                icon = "warning", title = _("版本不兼容"),
+                subtitle = T(_("kamare API v%1 与当前支持的 v1 不兼容"), tostring(probe.api_version)),
+                chevron = false,
+            })
+        end
+        rows[#rows + 1] = textRow(installText(plugin))
+        out[#out + 1] = { title = _("获取增强版"), rows = rows }
     end
     return out
 end

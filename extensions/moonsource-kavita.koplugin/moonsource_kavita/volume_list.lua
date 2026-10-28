@@ -36,6 +36,26 @@ local function toast(text)
     require("ui.themes.widgets.toast"):new{ text = text, timeout = 2 }:show()
 end
 
+--- 同步批量删除期间的忙碌窗（05 A）：kamare 直接写盘，主线程会停住；
+--- 先画出来再动手（与设置页、维护页导入统计同一套做法）。
+---@param title string
+---@param ids any[]
+---@return boolean|nil, string|nil, string|nil
+local function deleteBusy(title, ids)
+    local UIManager = require("ui/uimanager")
+    local busy = require("ui.themes.widgets.progress_dialog"):new{
+        title = title,
+        text = _("正在清理…"),
+        dismissable = false,
+    }
+    local ok, code, message = busy:showWhile(function()
+        if UIManager.forceRePaint then UIManager:forceRePaint() end
+        return Cache.delete(ids)
+    end)
+    busy:close()
+    return ok, code, message
+end
+
 --- 后台任务登记模块：旧包 / 安装不完整缺这个文件时退回页内进度框，不拖垮整个卷列表。
 ---@return table|nil
 local function cacheTask()
@@ -902,7 +922,7 @@ function VolumeList.pick(series, toc, cb, opts)
             ok_text = _("清理"),
             cancel_text = _("取消"),
             ok_callback = function()
-                local ok, code, message = Cache.delete(plan.ids)
+                local ok, code, message = deleteBusy(title, plan.ids)
                 if not ok then
                     toast(Cache.message(code, message))
                     return
