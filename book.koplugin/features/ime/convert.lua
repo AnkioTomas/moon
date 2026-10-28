@@ -93,14 +93,9 @@ end
 ---@field dir string
 ---@field target "simplified"|"traditional"
 
---- 子进程：EPUB 逐项复制，标记文件转字形；mimetype 必须是第一项且不压缩。
+--- EPUB 逐项复制，标记文件转字形；mimetype 必须是第一项且不压缩。
 ---@param input HanziInput
----@return boolean
-local function build(input)
-    if input.kind == "dom" then
-        writeFile(input.dest, Convert.markup(assert(readFile(input.source)), input.target))
-        return true
-    end
+local function buildEpub(input)
     local tmp = input.dest .. ".part"
     local Archiver = require("ffi/archiver")
     local reader = Archiver.Reader:new()
@@ -123,6 +118,18 @@ local function build(input)
     writer:close()
     os.remove(input.dest)
     assert(os.rename(tmp, input.dest))
+end
+
+--- 子进程：产出转换版；衍生版约定的 meta.json 也在这里写：写盘失败就是任务失败（on_failed），不留给主进程回调。
+---@param input HanziInput
+---@return boolean
+local function build(input)
+    if input.kind == "dom" then
+        writeFile(input.dest, Convert.markup(assert(readFile(input.source)), input.target))
+    else
+        buildEpub(input)
+    end
+    writeFile(input.dir .. "/meta.json", JSON.encode({ origin = input.origin, file = input.dest }))
     return true
 end
 
@@ -166,11 +173,8 @@ local function task(input)
             name = "hanzi.build",
             kind = "heavy",
             on_done = function()
-                -- job 回调里抛错会被吞掉、done 不来：写盘失败按任务失败结束。
-                local ok, err = pcall(writeFile, input.dir .. "/meta.json",
-                    JSON.encode({ origin = input.origin, file = input.dest }))
-                if ok and input.source then os.remove(input.source) end
-                done(ok and { ok = true, file = input.dest } or { ok = false, err = err })
+                if input.source then os.remove(input.source) end
+                done({ ok = true, file = input.dest })
             end,
             on_failed = function(err) done({ ok = false, err = err }) end,
         })
