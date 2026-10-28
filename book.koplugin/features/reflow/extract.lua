@@ -27,6 +27,8 @@ local Extract = {}
 local BATCH_MS = 100
 --- 批间延迟（秒），必须为正：UIManager:handleInput 会把 nextTick 链一口气跑完、中间不轮询输入。
 local YIELD_S = 0.01
+--- 临时文件序号：同一秒内两次提取（前一次取消后立刻重来）不能撞名
+local seq = 0
 
 ---@param fn fun()
 local function later(fn)
@@ -39,6 +41,7 @@ end
 ---@param raw string
 ---@return string previous
 ---@return boolean wrote
+---@return string|nil err 写盘失败原因
 local function appendPage(file, previous, raw)
     local page = Text.normalizeNewlines(raw):gsub("^\n+", ""):gsub("\n+$", "")
     if page == "" then
@@ -57,10 +60,11 @@ local function appendPage(file, previous, raw)
     if page == "" then
         return previous, false
     end
-    if previous ~= "" then
-        file:write("\n")
+    -- 磁盘满 / 卡被拔时 write 返回 nil, err；不查就是交出半本书
+    local ok, err = file:write(previous ~= "" and "\n" or "", page)
+    if not ok then
+        return previous, false, err
     end
-    file:write(page)
     return page, page:find("%S") ~= nil
 end
 
@@ -117,7 +121,8 @@ function Extract.run(ui, cb, on_progress)
     local restore_xp = rolling and document:getXPointer() or nil
     local cancelled = false
     Paths.ensureCacheRoot()
-    local tmp = Paths.cacheDir() .. "/reflow_extract_" .. tostring(os.time()) .. ".txt"
+    seq = seq + 1
+    local tmp = Paths.cacheDir() .. "/reflow_extract_" .. os.time() .. "_" .. seq .. ".txt"
     local file, open_err = io.open(tmp, "wb")
     if not file then
         cb(nil, open_err or _("无法创建临时文件"))
@@ -174,8 +179,11 @@ function Extract.run(ui, cb, on_progress)
             if not ok or type(chunk) ~= "string" then
                 return fail(_("无法提取文字") .. ": " .. tostring(chunk))
             end
-            local wrote
-            previous, wrote = appendPage(file, previous, chunk)
+            local wrote, write_err
+            previous, wrote, write_err = appendPage(file, previous, chunk)
+            if write_err then
+                return fail(_("写入临时文件失败") .. ": " .. tostring(write_err))
+            end
             if wrote then had_text = true end
             page = page + 1
             if page <= count and Perf.now() - started >= BATCH_MS then
@@ -189,9 +197,11 @@ function Extract.run(ui, cb, on_progress)
                 return later(function() step(page) end)
             end
         end
-        if not closed then
-            closed = true
-            file:close()
+        closed = true
+        local close_ok, close_err = file:close()
+        if not close_ok then
+            os.remove(tmp)
+            return fail(_("写入临时文件失败") .. ": " .. tostring(close_err))
         end
         if not had_text then
             os.remove(tmp)
