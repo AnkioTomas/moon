@@ -39,6 +39,30 @@ function DictInit.isEnabled()
     return MoonSettings.get("features.dictionary").dictionary_enabled
 end
 
+--- 原生查词弹窗的按钮里，月读面板已复刻的（生词本手动添加）。
+local INTEGRATED_DICT_BUTTONS = { vocabulary = true }
+
+--- 有没有别的插件往原生查词弹窗（DictQuickLookup）注册了、且月读面板没有的按钮。
+--- 有就别接管这次查词：硬开月读面板等于把人家的按钮挡死，回退原生弹窗。
+--- show_func 拿一个只有 word / ui 的替身试探：判不准（抛错）按会显示处理，宁可回退也不能挡。
+---@param dict table ReaderDictionary 实例
+---@param word string
+---@return boolean
+function DictInit.hasUnintegratedButtons(dict, word)
+    if type(dict._dict_buttons) ~= "table" then return false end
+    for id, spec in pairs(dict._dict_buttons) do
+        if not INTEGRATED_DICT_BUTTONS[id] and type(spec) == "table" then
+            local show = true
+            if type(spec.show_func) == "function" then
+                local ok, result = pcall(spec.show_func, { word = word, lookupword = word, ui = dict.ui })
+                show = not ok or (result and true or false)
+            end
+            if show then return true end
+        end
+    end
+    return false
+end
+
 --- 安装一次；只修改入口方法，不触碰 KOReader 源码。
 function DictInit.onCreate()
     local ReaderDictionary = require("apps/reader/modules/readerdictionary")
@@ -78,7 +102,8 @@ function DictInit.onCreate()
     -- 查词（划词「查词」、长按单词）改开多来源查词面板；维基百科（ReaderWikipedia 继承本类）不接管。
     local native_lookup = ReaderDictionary.onLookupWord
     ReaderDictionary.onLookupWord = function(self, word, is_sane, boxes, highlight, link, dict_close_callback)
-        if not (DictInit.isEnabled() and self.ui and self.ui.dictionary == self) then
+        if not (DictInit.isEnabled() and self.ui and self.ui.dictionary == self)
+            or DictInit.hasUnintegratedButtons(self, word) then
             return native_lookup(self, word, is_sane, boxes, highlight, link, dict_close_callback)
         end
         require("ui.guard").call("dictionary lookup", function()

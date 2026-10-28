@@ -44,7 +44,7 @@ end
 
 --- 第三方扩展声明的某类 feature 挂点，按插件加载顺序：{ id = 扩展 id, mod = 解析后的表 }。
 --- 模块名在这里 require，失败记日志跳过。不缓存；第二返回值为假表示插件还没加载完，调用方别缓存结果。
----@param kind "setting"|"panel"|"topbar"|"events"|"hooks"
+---@param kind "setting"|"panel"|"topbar"|"events"|"hooks"|"lookup"
 ---@return { id: string, mod: table }[] items, boolean ready
 function External.collect(kind)
     local out = {}
