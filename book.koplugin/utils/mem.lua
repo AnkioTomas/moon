@@ -15,31 +15,11 @@ local FALLBACK = 20 * MB
 local FLOOR = 8 * MB
 local CEIL = 40 * MB
 
---- 当前大致可用字节（KOReader util.calcFreeMem，已含余量）；读不到为 nil。
+--- 当前大致可用字节（KOReader util.calcFreeMem，已留 85% 余量）；非 Linux（读不到 /proc/meminfo）为 nil。
 ---@return number|nil
 function Mem.availableBytes()
-    local ok, util = pcall(require, "util")
-    if ok and type(util) == "table" and type(util.calcFreeMem) == "function" then
-        -- util 本身就读 /proc，它给不出数就别再读一遍，否则测试替身说「读不到」时会被真实内存顶掉。
-        local free = util.calcFreeMem()
-        return type(free) == "number" and free > 0 and free or nil
-    end
-    local f = io.open("/proc/meminfo", "r")
-    if not f then return nil end
-    local avail, free_kb
-    for line in f:lines() do
-        local key, kb = line:match("^(%w+):%s*(%d+)")
-        if key == "MemAvailable" then
-            avail = tonumber(kb)
-        elseif key == "MemFree" then
-            free_kb = tonumber(kb)
-        end
-        if avail then break end
-    end
-    f:close()
-    local kb = avail or free_kb
-    -- 与 util.calcFreeMem 一样留余量，避免「刚够」仍 OOM。
-    return kb and math.floor(kb * 0.85) * 1024 or nil
+    local free = require("util").calcFreeMem()
+    return type(free) == "number" and free > 0 and free or nil
 end
 
 --- 首次打开 / KFX 转换前的确认阈值（字节）。

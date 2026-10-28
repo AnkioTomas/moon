@@ -54,23 +54,20 @@ function Dns.provider(id)
     return Dns.provider(Dns.DEFAULT)
 end
 
---- 当前设置选中的备选 DNS。设置模块拿不到（精简测试桩）按缺省。
+--- 当前设置选中的备选 DNS。
 ---@return DnsProvider
 function Dns.current()
-    local ok, cfg = pcall(function() return require("utils.settings").get("http") end)
-    return Dns.provider(ok and type(cfg) == "table" and cfg.dns or nil)
+    return Dns.provider(require("utils.settings").get("http").dns)
 end
 
----@type table|false|nil ffi 模块；false = 不可用
+---@type table|nil 声明过原型的 ffi 模块
 local ffi_mod
 
 --- 声明只做一次；同名原型 KOReader 别处可能已声明，重复声明会报错，逐条 pcall。
----@return table|false
+---@return table
 local function ffiModule()
-    if ffi_mod ~= nil then return ffi_mod end
-    local ok, ffi = pcall(require, "ffi")
-    ffi_mod = ok and ffi or false
-    if not ffi_mod then return false end
+    if ffi_mod then return ffi_mod end
+    local ffi = require("ffi")
     for _idx, decl in ipairs({
         "typedef struct { uint16_t family; uint16_t port; uint8_t addr[4]; uint8_t zero[8]; } book_dns_sockaddr_in;",
         "typedef struct { int retrans; int retry; unsigned long options; int nscount; book_dns_sockaddr_in ns[3]; } book_dns_res_prefix;",
@@ -83,7 +80,8 @@ local function ffiModule()
     }) do
         pcall(ffi.cdef, decl)
     end
-    return ffi_mod
+    ffi_mod = ffi
+    return ffi
 end
 
 ---@param b table|ffi.cdata* 4 字节，网络序
@@ -100,7 +98,6 @@ end
 ---@return string[]
 function Dns.libcServers()
     local ffi = ffiModule()
-    if not ffi then return {} end
     local out = {}
     if ffi.os == "OSX" then
         pcall(function()

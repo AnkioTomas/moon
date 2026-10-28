@@ -78,9 +78,7 @@ function M.capture(ui)
     -- FlushSettings/SaveSettings。切章捕获若直接读 sidecar，DOC_KEYS（反转翻页、样式微调、
     -- 语种/断字、词典偏好、高亮样式…）全是菜单改完尚未落盘的旧值。先广播一次 SaveSettings，
     -- 让各模块把活状态写进内存里的 doc_settings，再采（真正 flush 仍由原生关书路径做）。
-    if type(ui.handleEvent) == "function" then
-        ui:handleEvent(require("ui/event"):new("SaveSettings"))
-    end
+    ui:handleEvent(require("ui/event"):new("SaveSettings"))
     -- configurable 就是整套 copt_ 排版状态；逐键白名单会丢字重、字间距等设置。
     local copt = {}
     for key, value in pairs(config) do
@@ -104,25 +102,6 @@ function M.capture(ui)
     local doc_keys = {}
     for _idx, key in ipairs(DOC_KEYS) do
         doc_keys[key] = doc and doc:readSetting(key)
-    end
-    -- 兜底：SaveSettings 没挂上（离线桩）时，view 上的活状态仍要采到。
-    local view = ui.view
-    if type(view) == "table" then
-        if view.inverse_reading_order ~= nil then
-            doc_keys.inverse_reading_order = view.inverse_reading_order
-        end
-        if view.invert_ui_layout ~= nil then
-            doc_keys.invert_ui_layout = view.invert_ui_layout
-        end
-        local highlight = view.highlight
-        if type(highlight) == "table" then
-            if type(highlight.saved_drawer) == "string" and highlight.saved_drawer ~= "" then
-                doc_keys.highlight_drawer = highlight.saved_drawer
-            end
-            if type(highlight.saved_color) == "string" and highlight.saved_color ~= "" then
-                doc_keys.highlight_color = highlight.saved_color
-            end
-        end
     end
     return {
         font_id = font_id,

@@ -187,6 +187,7 @@ local ui = {
         onSetPageTopAndBottomMargin = function() end,
     },
     -- 模拟原生模块：SaveSettings 才把活状态写入 sidecar（与 CloseDocument 时序一致）。
+    -- ReaderView:onSaveSettings 写反转翻页 / 布局镜像，ReaderHighlight:onSaveSettings 写高亮样式。
     handleEvent = function(self, ev)
         if ev.name ~= "SaveSettings" then return end
         save_settings_events = save_settings_events + 1
@@ -194,6 +195,17 @@ local ui = {
         if type(live) == "table" then
             for key, value in pairs(live) do
                 self.doc_settings:saveSetting(key, value)
+            end
+        end
+        local view = self.view
+        if type(view) == "table" then
+            if view.inverse_reading_order ~= nil then
+                self.doc_settings:saveSetting("inverse_reading_order", view.inverse_reading_order)
+                self.doc_settings:saveSetting("invert_ui_layout", view.invert_ui_layout)
+            end
+            if type(view.highlight) == "table" then
+                self.doc_settings:saveSetting("highlight_drawer", view.highlight.saved_drawer)
+                self.doc_settings:saveSetting("highlight_color", view.highlight.saved_color)
             end
         end
     end,
@@ -293,7 +305,7 @@ Assert.eq(next_chapter.data.style_tweaks.lines_line_height_large, 2)
 Assert.eq(next_chapter.data.text_lang, "zh-Hans")
 ui._live_doc = nil
 
--- SaveSettings 没挂上时，view 兜底仍能采到反转翻页。
+-- 反转翻页只在 view 上改过还没落 sidecar：采集靠 SaveSettings 让 ReaderView 写进来，不自己读 view。
 local bare = {
     font = ui.font,
     document = ui.document,
@@ -304,9 +316,10 @@ local bare = {
         delSetting = ui.doc_settings.delSetting,
     },
     view = { inverse_reading_order = true, invert_ui_layout = true },
+    handleEvent = ui.handleEvent,
 }
 Assert.is_true(ReaderPrefs.captureAndSave(bare, identity))
-Assert.is_true(ReaderPrefs.load(identity).doc.inverse_reading_order, "无 handleEvent 时跟 view")
+Assert.is_true(ReaderPrefs.load(identity).doc.inverse_reading_order, "SaveSettings 后采到 view 的活状态")
 
 -- 整本书的单一 sidecar 就是偏好真相，不读写跨文件偏好。
 local whole_book = { source_id = "moon", stable_id = "book-1" }
