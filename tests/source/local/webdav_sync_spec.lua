@@ -796,6 +796,112 @@ do
     books = {}
 end
 
+-- books.sync 带版本号：每次写回所有条目 syncVersion = max(远端, 本地记录) + 1、syncDevice = 本机，本地记下最后见到 / 写出的
+-- 版本与写入者。拉到的书目「比记录新」或「同版本同写入者」才认「别的设备删了」而删本地文件；版本更低（旧书目覆盖）
+-- 或同版本不同写入者（两台设备从同一版本各写一份，后写的那份没看到先写的改动）：照常按书目下架（可恢复），
+-- 但不删文件、不立墓碑——下一次刷新本地文件还在就补回书目。没有版本号的书目（静读天下 / 旧版插件）按今天的行为处理。
+do
+    local L = require("support.config").dir() .. "/webdav-version"
+    local function put(rel, data)
+        Paths.ensureDir(L)
+        local f = assert(io.open(L .. "/" .. rel, "wb"))
+        f:write(data)
+        f:close()
+    end
+    local function exists(rel) return readFile(L .. "/" .. rel) ~= nil end
+    local function versions(dav)
+        local out = {}
+        for rel, e in pairs(remoteEntries(dav)) do out[rel] = e.syncVersion end
+        return out
+    end
+    local function recorded(c) return readFile(c:webdavCacheRoot() .. "/books_sync_version") end
+    --- 别的写入者写出的书目：保留 except 以外的条目并盖上给定版本 / 写入者（nil = 原样保留字段）
+    local function rewrite(dav, except, version, device)
+        local list = {}
+        for rel, e in pairs(remoteEntries(dav)) do
+            if rel ~= except then
+                if version then e.syncVersion, e.syncDevice = version, device end
+                list[#list + 1] = e
+            end
+        end
+        putSync(dav, list)
+    end
+    books = {}
+    for _, rel in ipairs({ "甲.epub", "乙.epub", "丙.epub", "丁.epub" }) do put(rel, rel) end
+    local dav = fakeDav()
+    dav:put(ROOT .. "/甲.epub", "甲.epub")
+    putSync(dav, { { filename = "甲.epub", bookName = "甲" } })
+    local c = Client.new({ webdav_url = "https://dav.example", path = L })
+    c.dav = dav
+    function c:webdavCacheRoot() return L .. "/.cache" end -- 版本记录独立于其它用例
+    Paths.ensureDir(L .. "/.cache")
+    os.remove(L .. "/.cache/books_sync_version")
+
+    -- 1) 刷新写书目（版本 1）、后台上传完新书再写一次（版本 2）：写入者本机
+    Assert.is_true(refresh(c))
+    Assert.eq(versions(dav)["甲.epub"], 2)
+    Assert.eq(versions(dav)["丁.epub"], 2)
+    Assert.eq(remoteEntries(dav)["乙.epub"].syncDevice, "dev-A")
+    Assert.eq(recorded(c), "2\ndev-A")
+
+    -- 2) 别的设备删了丁并写出版本 3：比记录新 → 下架 + 删本地文件 + 墓碑
+    rewrite(dav, "丁.epub", 3, "dev-B")
+    dav.files[ROOT .. "/丁.epub"] = nil
+    Assert.is_true(scan(c))
+    Assert.eq(books["webdav://丁.epub"].deleted, 1)
+    Assert.is_false(exists("丁.epub"))
+    Assert.is_nil(books["webdav://丁.epub"].path, "墓碑")
+    Assert.eq(recorded(c), "3\ndev-B")
+
+    -- 3) 静读天下式重写：字段原样保留（同版本同写入者）、删了丙 → 同一谱系，照删文件
+    rewrite(dav, "丙.epub")
+    Assert.is_true(scan(c))
+    Assert.is_false(exists("丙.epub"))
+    Assert.is_nil(books["webdav://丙.epub"].path)
+
+    -- 4) 撞车：另一台设备也从版本 2 写出版本 3，书目里没有乙 → 不认：乙的文件、path 保留，不立墓碑；
+    --    本地文件还在就当新书走后台上传，同一轮补回书目（版本 4）
+    warns = {}
+    rewrite(dav, "乙.epub", 3, "dev-C")
+    Assert.is_true(scan(c))
+    Assert.is_true(exists("乙.epub"), "同版本不同写入者：不删文件")
+    Assert.eq(books["webdav://乙.epub"].path, L .. "/乙.epub")
+    Assert.eq(books["webdav://乙.epub"].deleted, 0, "补回书目")
+    local warned = false
+    for _, w in ipairs(warns) do if w:find("stale", 1, true) then warned = true end end
+    Assert.is_true(warned)
+    Assert.eq(versions(dav)["乙.epub"], 4)
+    Assert.eq(versions(dav)["甲.epub"], 4)
+    Assert.eq(recorded(c), "4\ndev-A")
+
+    -- 5) 旧书目覆盖（版本 1，没有甲，乙的条目也被改）：同样不删文件、补回；记录不回退，
+    --    新版本 = max(远端 1, 记录 4) + 1 = 5 写乙的条目，后台上传补回甲再写一次 = 6
+    putSync(dav, { { filename = "乙.epub", bookName = "乙", syncVersion = 1, syncDevice = "dev-B" } })
+    Assert.is_true(scan(c))
+    Assert.is_true(exists("甲.epub"))
+    Assert.eq(books["webdav://甲.epub"].deleted, 0)
+    Assert.eq(versions(dav)["甲.epub"], 6)
+    Assert.eq(recorded(c), "6\ndev-A")
+
+    -- 6) 没有版本号的书目（静读天下丢了字段 / 旧版插件写的）：按今天的行为，缺的书连文件一起删
+    putSync(dav, { { filename = "甲.epub", bookName = "甲" } })
+    Assert.is_true(scan(c))
+    Assert.is_false(exists("乙.epub"))
+    Assert.is_nil(books["webdav://乙.epub"].path)
+    Assert.eq(versions(dav)["甲.epub"], 7, "重写时重新盖版本：max(远端 0, 记录 6) + 1")
+    Assert.eq(recorded(c), "7\ndev-A")
+
+    -- 7) 单本上行（编辑后 pushBookAsync）也是一次写回：版本 +1
+    books["webdav://甲.epub"].title, books["webdav://甲.epub"].sync_status = "甲（改）", 0
+    local ok
+    c:pushBookAsync("webdav://甲.epub", true, function(x) ok = x end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.eq(versions(dav)["甲.epub"], 8)
+    Assert.eq(recorded(c), "8\ndev-A")
+    books = {}
+end
+
 -- 远端空（无 books.sync）而本地书架已有云端身份的书：状态不明，不下架；日常同步不上传、不写书目，刷新才传上去。
 do
     local L = require("support.config").dir() .. "/webdav-first"
