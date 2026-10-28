@@ -91,8 +91,24 @@ local function savePreference(key, on)
     MoonSettings.save("features.bars", settings)
 end
 
+--- Alt Status Bar 开着但页眉子项全关时，cre 的 getPageHeaderHeight 仍为 0
+--- （setStatusMode → setPageHeaderInfo(0)，见 lvdocview.cpp）。重发 status_line 救不了。
+--- 打开一项无害子项（时钟）占位；月读替代绘制会盖住原生内容，只借它的高度。
+---@param ui table ReaderUI
+---@param doc table
+local function ensureCreHeaderSlot(ui, doc)
+    local cre = doc._document
+    if cre and type(cre.setIntProperty) == "function" then
+        cre:setIntProperty("window.status.clock", 1)
+    end
+    G_reader_settings:saveSetting("cre_header_clock", 1)
+    if ui.coptlistener then
+        ui.coptlistener.clock = 1
+    end
+end
+
 --- 设置系统顶栏开/关（同步 configurable + crengine，与 Aa 菜单一致）。
---- 开着时还要看页眉高度：配置已是开但高度为 0（别的插件压掉 / 引擎没真正落），照样重发事件逼重排。
+--- 开着时还要看页眉高度：配置已是开但高度为 0，照样重发事件；仍为 0 则补一个页眉子项占位。
 ---@param ui table ReaderUI
 ---@param enabled boolean
 function Bars.setSystemTop(ui, enabled)
@@ -110,6 +126,10 @@ function Bars.setSystemTop(ui, enabled)
     local Event = require("ui/event")
     ui:handleEvent(Event:new("ConfigChange", "status_line", next_val))
     ui:handleEvent(Event:new("SetStatusLine", next_val))
+    if enabled and type(doc.getHeaderHeight) == "function" and doc:getHeaderHeight() <= 0 then
+        ensureCreHeaderSlot(ui, doc)
+        ui:handleEvent(Event:new("SetStatusLine", 0))
+    end
     config:saveSettings(ui.doc_settings, "copt_")
     ui.doc_settings:flush()
 end

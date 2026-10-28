@@ -10,8 +10,14 @@ local Stubs = require("support.stubs")
 Stubs.install()
 Stubs.reset()
 
-G_reader_settings = G_reader_settings or {}
-G_reader_settings.saveSetting = function() end
+local reader_settings = {}
+G_reader_settings = {
+    saveSetting = function(_, k, v) reader_settings[k] = v end,
+    readSetting = function(_, k, default)
+        if reader_settings[k] ~= nil then return reader_settings[k] end
+        return default
+    end,
+}
 
 package.preload["device"] = function()
     return {
@@ -223,16 +229,30 @@ Assert.is_false(registered_touch_zone)
 Assert.len(post_ready, 1, "偏好等 ReaderReady 收尾后再应用")
 post_ready[1]()
 
--- 配置已是开但高度为 0：setSystemTop 不得早退，须重发事件逼引擎重排；高度正常时零事件。
+-- 配置已是开但高度为 0（页眉子项全关）：不得早退；补开 cre 时钟占位后再发 SetStatusLine。
+-- 高度正常时零事件。
+local header_h = 0
+local cre_props = {}
 ui_top.document.configurable.status_line = 0
-ui_top.document.getHeaderHeight = function() return 0 end
+ui_top.document.getHeaderHeight = function() return header_h end
+ui_top.document._document = {
+    setIntProperty = function(_, k, v)
+        cre_props[k] = v
+        if k == "window.status.clock" and v == 1 then header_h = 28 end
+    end,
+}
+ui_top.coptlistener = { clock = 0 }
 events = {}
 Bars.setSystemTop(ui_top, true)
-Assert.eq(events[1].name, "ConfigChange")
-Assert.eq(events[1].args[2], 0)
-Assert.eq(events[2].name, "SetStatusLine")
-Assert.eq(events[2].args[1], 0)
-ui_top.document.getHeaderHeight = function() return 28 end
+Assert.eq(cre_props["window.status.clock"], 1)
+Assert.eq(ui_top.coptlistener.clock, 1)
+Assert.eq(G_reader_settings:readSetting("cre_header_clock"), 1)
+local set_status = 0
+for _idx, e in ipairs(events) do
+    if e.name == "SetStatusLine" and e.args[1] == 0 then set_status = set_status + 1 end
+end
+Assert.is_true(set_status >= 2, "先开 status_line，补子项后再发一次")
+Assert.eq(header_h, 28)
 events = {}
 Bars.setSystemTop(ui_top, true)
 Assert.len(events, 0)
