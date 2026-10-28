@@ -158,8 +158,6 @@ function Source:searchAsync(keyword, cb)
     end)
 end
 
-local PERIODS = { { "day", _("日榜") }, { "week", _("周榜") }, { "month", _("月榜") }, { "total", _("总榜") } }
-local AUDIENCES = { { "all", _("全部") }, { "male", _("男频") }, { "female", _("女频") } }
 
 -- 官网「查看全部分類」的题材（接口 filter/comic/tags 只回前 20 个，其余题材同样可查）；漫展场次标签不收。
 local THEMES = {
