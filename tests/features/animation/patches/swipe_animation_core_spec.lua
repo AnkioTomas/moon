@@ -43,7 +43,16 @@ Screen.refreshFast = recorder("fast")
 Screen.refreshFull = recorder("full")
 Screen.refreshPartial = recorder("partial")
 
-package.loaded["device"] = { screen = Screen, isKobo = function() return false end }
+local Device = {
+    screen = Screen,
+    _kobo = false,
+    _color = false,
+    _mtk = false,
+    isKobo = function(self) return self._kobo end,
+    hasColorScreen = function(self) return self._color end,
+    isMTK = function(self) return self._mtk end,
+}
+package.loaded["device"] = Device
 package.loaded["logger"] = { dbg = function() end, warn = function(...) error(table.concat({ ... }, " ")) end }
 local BB = {
     COLOR_LIGHT_GRAY = "gray_c", COLOR_GRAY_9 = "gray_9", COLOR_GRAY_7 = "gray_7", COLOR_GRAY_4 = "gray_4",
@@ -118,7 +127,8 @@ end
 local SCREENS = {
     { 1072, 1448, 8, 16 },   -- Kobo MTK 竖屏
     { 1448, 1072, 6, 16 },   -- 横屏
-    { 1264, 1680, 8, 16 },
+    { 1264, 1680, 8, 16 },   -- Libra Colour 分辨率，灰度路径仍对齐
+    { 1264, 1680, 8, nil },  -- 同分辨率不对齐（Kobo 彩屏 strip_align=nil）
     { 758, 1024, 8, nil },   -- 无对齐约束
 }
 for _, sc in ipairs(SCREENS) do
@@ -247,6 +257,20 @@ for i, r in ipairs(refreshes) do
     Assert.eq(b.dx, r.x) Assert.eq(b.dy, r.y) Assert.eq(b.w, r.w) Assert.eq(b.h, r.h)
     Assert.eq(b.sx, b.dx) Assert.eq(b.sy, b.dy)
 end
+
+-- Kobo 彩屏：即使驱动 alignment_constraint=16，动画层也必须走不对齐切点
+-- （1264/8 → 158，不是 160），让 getBoundedRect 扩边后条带边缘重叠盖住 CFA 缝。
+-- 灰度 Kobo 仍按 16 对齐。不打开 isMTK，避免首条 strip 前的 fence 刷新干扰几何断言。
+Screen.alignment_constraint = 16
+Device._kobo, Device._color = true, true
+refreshes = run("wipe", nil, nil, 1264, 1680)
+Assert.eq(refreshes[1].w, 158, "Kobo 彩屏 wipe 首条不对齐")
+Assert.eq(refreshes[1].x + refreshes[1].w, 1264)
+Device._color = false
+refreshes = run("wipe", nil, nil, 1264, 1680)
+Assert.eq(refreshes[1].w, 160, "Kobo 灰度 wipe 仍按 16 对齐")
+Device._kobo, Device._color = false, false
+Screen.alignment_constraint = nil
 
 -- 播放阴影：阴影块涂 4 级灰阶等宽竖带、不从新页取图，但同样刷新。
 refreshes = run("shadow")
