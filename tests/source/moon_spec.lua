@@ -49,6 +49,9 @@ package.preload["book.books_db"] = function()
         pendingDeleteIds = function()
             return rec.marked_deleted and not rec.removed and { rec.marked_deleted.stable_id } or {}
         end,
+        unsynced = function()
+            return rec.marked_deleted and not rec.removed and { rec.marked_deleted } or {}
+        end,
         markSynced = function() return true end,
         get = function() return rec.stored_book end,
         setRead = function(source_id, stable_id, is_read)
@@ -84,7 +87,15 @@ package.preload["book.progress_db"] = function()
             }
             return true
         end,
+        unsynced = function() return {} end,
     }
+end
+-- 推脏只查脏行存在性：笔记 / 统计这两张表这里没有脏行
+package.preload["book.note_db"] = function()
+    return { hasUnsynced = function() return false end }
+end
+package.preload["book.stats_db"] = function()
+    return { unsyncedBySource = function() return {} end }
 end
 
 package.preload["book.catalog"] = function()
@@ -580,6 +591,8 @@ for _, name in ipairs({
     "book.books_db",
     "book.chapters_db",
     "book.progress_db",
+    "book.note_db",
+    "book.stats_db",
     "ffi/util",
     "source.moon.client",
     "ui/network/manager",

@@ -38,10 +38,14 @@ package.preload["book.sidecar"] = function()
     return { remove = function(path) rec.sidecar = path end }
 end
 package.preload["book.books_db"] = function()
-    return { remove = function(source_id, stable_id)
-        rec.removed = { source_id, stable_id }
-        return true
-    end }
+    return {
+        remove = function(source_id, stable_id)
+            rec.removed = { source_id, stable_id }
+            return true
+        end,
+        -- 标删后书架有脏行（pushDirty 只在有能推的脏行时入队）
+        unsynced = function() return rec.marked and { rec.marked } or {} end,
+    }
 end
 package.preload["source.local.client"] = function()
     local Client = {}
