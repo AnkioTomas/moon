@@ -181,6 +181,7 @@ local function utf8char(cp)
     end
     return ""
 end
+Text.utf8char = utf8char
 
 --- 去掉 KOReader 字体画不出的 emoji（只会成空白方块）：U+1F000–1FFFF 图形（含肤色、区旗字母）、
 --- 标签字符 U+E0020–E007F、变体选择符 FE0E/FE0F、零宽连接 200D、键帽 20E3。
