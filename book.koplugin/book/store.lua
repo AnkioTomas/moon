@@ -345,7 +345,7 @@ function Store.ensureIdentity(path)
         book.title = require("utils.text").basename(path):gsub("%.[^%.]+$", "")
     end
     if book.md5 == nil then
-        book.md5 = require("util").partialMD5(path)
+        book.md5 = require("util").partialMD5(path) --[[@as string|nil]]
     end
     return {
         source_id = "local",

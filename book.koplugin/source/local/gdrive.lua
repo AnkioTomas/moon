@@ -18,6 +18,12 @@ local util = require("util")
 local _ = require("gettext")
 local T = ffiUtil.template
 
+---@class GDriveClient
+---@field kind "gdrive"
+---@field cfg table
+---@field ids table<string, string> 相对路径 → 文件 id 缓存
+---@field access string|nil 访问令牌
+---@field access_until number 令牌过期时刻
 local Drive = {}
 Drive.__index = Drive
 
@@ -34,7 +40,7 @@ local REDIRECT = "http://127.0.0.1"
 
 --- 构造客户端。cfg 是设置表，调用时现读。
 ---@param cfg table
----@return table
+---@return GDriveClient
 function Drive.new(cfg)
     return setmetatable({
         kind = "gdrive",
@@ -170,8 +176,8 @@ local function partsOf(path)
 end
 
 --- 拿到访问令牌再发请求。401 时刷新重试一次。
----@param build fun(token: string, done: fun(res: table|nil, err: string|nil, code: number|nil)): table|nil
----@param cb fun(res: table|nil, err: string|nil, code: number|nil)
+---@param build fun(token: string, done: fun(res: any, err: string|nil, code: number|nil)): table|nil res 由 build 自定（HTTP 响应 / 文件 id / true）
+---@param cb fun(res: any, err: string|nil, code: number|nil)
 ---@return table
 function Drive:call(build, cb)
     local state = { cancelled = false }

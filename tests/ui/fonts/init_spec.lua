@@ -335,7 +335,7 @@ files["/tmp/reader-font.ttf"] = true
 Assert.eq(Fonts.pathForId("reader-font.ttf"), "/tmp/reader-font.ttf")
 
 -- 西文选择重载当前书，保留中文字体；选择失败不重载。
-local western_reloads, western_error = 0
+local western_reloads, western_error = 0, nil
 moon_settings.western_font_id = ""
 package.preload["ui.fonts.mixed"] = function() return { setWestern = function(id, name)
     if id == moon_settings.western_font_id then return true, nil, false end

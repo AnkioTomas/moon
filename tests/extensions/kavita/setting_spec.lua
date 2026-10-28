@@ -82,8 +82,8 @@ package.loaded["ui/widget/container/centercontainer"] = nil
 package.preload["ui/widget/container/centercontainer"] = function()
     return { new = function(_, opts) return opts end }
 end
-package.loaded["ui/themes/widgets/text"] = nil
-package.preload["ui/themes/widgets/text"] = function()
+package.loaded["ui.themes.widgets.text"] = nil
+package.preload["ui.themes.widgets.text"] = function()
     return {
         box = function(_, text, _width, _opts)
             return { text = text, getSize = function() return { h = 10 } end }

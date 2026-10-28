@@ -198,7 +198,7 @@ local footer = {
     mode = 1,
     mode_list = { off = 0, page_progress = 1 },
     TapFooter = function() return "original tap" end,
-    onHoldFooter = function() return "original hold" end,
+    onHoldFooter = function(_self, _ges) return "original hold" end,
     onUpdateFooter = function(_, force_repaint, full_repaint)
         update_args = { force_repaint, full_repaint }
     end,

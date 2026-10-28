@@ -182,7 +182,7 @@ for _idx, name in ipairs({
     "onAnnotationsModified",
     "onCloseDocument",
 }) do
-    BookPlugin[name] = Guard.wrap(name, Session[name])
+    BookPlugin[name] = Guard.wrap(name, Session[name] --[[@as function]])
 end
 
 return BookPlugin

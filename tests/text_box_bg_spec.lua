@@ -46,7 +46,7 @@ local function withOptsTable(src, pos, call)
     local at
     for start in src:sub(1, pos):gmatch("()" .. var .. "%s*=%s*{") do at = start end
     if not at then return call end
-    local brace = src:find("{", at, true)
+    local brace = src:find("{", at --[[@as integer]], true)
     local depth, i, n = 0, brace, #src
     while i <= n do
         local c = src:sub(i, i)
