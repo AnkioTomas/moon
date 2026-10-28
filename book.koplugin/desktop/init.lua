@@ -400,11 +400,12 @@ local function route(desktop, event)
     return Gesture.fm(desktop, event.args[1])
 end
 
---- 旋转屏幕：FileManager 在同一次广播里转屏，桌面等下一 tick 屏幕尺寸稳定后整壳重建。
---- 全局方向由 BookPlugin:onSetRotationMode 记；这里只负责重排。
---- 返回 false 让广播继续送给下层 FileManager。
+--- 陀螺仪只把 SetRotationMode 送给栈顶。桌面盖住文件管理器时由这里把 mode 交回去转屏，
+--- 再等下一 tick 尺寸稳定后整壳重建。返回 false，菜单那条广播仍继续往下送。
+---@param mode number|nil
 ---@return boolean
-function Desktop:onSetRotationMode()
+function Desktop:onSetRotationMode(mode)
+    require("utils.rotation").follow(mode)
     UIManager:nextTick(function()
         if self.closed or shellKey() == self._shell then return end
         Guard.call("desktop rotate", function()

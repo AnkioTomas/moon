@@ -260,7 +260,7 @@ end
 
 --- 旋转屏幕后按新屏幕重排。dimen 与遮罩、点按区共用同一张表，原地改尺寸即可；
 --- 有 updateView 的整屏页（设置叠层、详情）重建内容，其余弹窗保持面板、重新居中。
---- 旋转由 FileManager 在同一次广播里完成，所以等下一 tick 屏幕尺寸才是新的。
+--- 转屏在宿主里完成，这里等下一 tick，屏幕尺寸才是新的。
 function Modal:relayout()
     if self.closed then return end
     local screen = Screen:getSize()
@@ -275,13 +275,17 @@ function Modal:relayout()
     UIManager:setDirty(self, "full")
 end
 
-local function scheduleRelayout(self)
+--- 弹窗在栈顶时同样收得到陀螺仪。先把 mode 交给宿主转屏，再按新尺寸重排。
+---@param mode number|nil
+---@return boolean
+local function onRotate(self, mode)
+    require("utils.rotation").follow(mode)
     UIManager:nextTick(function() Guard.call("modal relayout", self.relayout, self) end)
     return false
 end
 
-Modal.onSetRotationMode = scheduleRelayout
-Modal.onScreenResize = scheduleRelayout
+Modal.onSetRotationMode = onRotate
+Modal.onScreenResize = onRotate
 
 --- 用户放弃（点面板外 / 返回键）；子类覆盖为取消语义。
 function Modal:dismiss()
