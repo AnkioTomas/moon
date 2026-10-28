@@ -1,11 +1,13 @@
 --[[--
 远程管理「下载日志」：把插件日志（$DATA/.moon/book.log 及轮转件）与 KOReader crash.log
-（含 crash.log.old 等轮转件）打成一个 zip，附 info.txt（插件/KOReader 版本、设备、语言、时间）。
+（含 crash.log.old 等轮转件）打成一个 zip，附 info.txt（插件/KOReader 版本、设备、语言、时间）
+与诊断快照（启用插件、脱敏后的全局/月读设置、源登录态、书库规模、各源采样 sdr）。
 
-只收日志文件本身，不碰 settings / cookie 等凭证；日志内容逐行脱敏（token、密钥、
-口令、Cookie、Authorization、sk- 密钥）。单文件只取末尾 PER_FILE 字节，总量封顶 TOTAL。
+日志与设置值逐项脱敏（token、密钥、口令、Cookie、Authorization、sk- 密钥、路径托名）。
+单文件只取末尾 PER_FILE 字节，总量封顶 TOTAL。源凭证文件只记「已配置/未配置」，不进包。
 
-纯函数为主（redact / collect / build 依赖注入），便于离线测试。
+纯函数为主（redact / collect / build / dump 依赖注入），便于离线测试；
+现场采集走 gatherExtras（全部 pcall，失败只记 notes）。
 
 @module koplugin.book.features.remote.logs
 --]]
@@ -14,6 +16,10 @@ local M = {}
 
 M.PER_FILE = 4 * 1024 * 1024
 M.TOTAL = 16 * 1024 * 1024
+M.SAMPLE_PER_SOURCE = 3
+M.CHAPTERS_PER_BOOK = 2
+M.RECENT_HISTORY = 5
+M.SDR_MAX = 64 * 1024
 
 --- 大小写无关的 Lua 模式片段："token" → "[Tt][Oo][Kk][Ee][Nn]"
 ---@param word string
@@ -25,9 +31,72 @@ end
 local SECRET_KEYS = {
     "access_token", "refresh_token", "token", "api_key", "apikey", "api-key", "secret",
     "password", "passwd", "cookie", "session", "access_key", "authorization",
+    "pin", "salt", "credential", "openid", "userid", "user_id", "vid",
+    "username", "nickname", "email", "phone", "mobile", "display_name", "avatar",
 }
 local VALUE = "[^%s&\"',;}]+"
 local MASK = "***"
+
+--- 键名是否像凭证 / 账号标识（值一律 ***，不进包）。
+--- 只认整词或 `_` 分段（weread_token 命中 token；provider 不命中 vid）。
+---@param key any
+---@return boolean
+function M.isSecretKey(key)
+    local lk = tostring(key):lower():gsub("%-", "_")
+    for _idx, s in ipairs(SECRET_KEYS) do
+        local needle = s:gsub("%-", "_")
+        local i = 1
+        while true do
+            local a, b = lk:find(needle, i, true)
+            if not a then break end
+            local before_ok = a == 1 or lk:sub(a - 1, a - 1) == "_"
+            local after_ok = b == #lk or lk:sub(b + 1, b + 1) == "_"
+            if before_ok and after_ok then return true end
+            i = a + 1
+        end
+    end
+    return false
+end
+
+--- 把绝对路径换成 $MOON / $DATA / $HOME（最长前缀优先）。roots 已按长度降序。
+---@param s string
+---@param roots { root: string, token: string }[]|nil
+---@return string
+function M.scrubPaths(s, roots)
+    if type(s) ~= "string" or s == "" or not roots then return s end
+    for _idx, r in ipairs(roots) do
+        if r.root and r.root ~= "" and r.token then
+            local plain = r.root:gsub("(%W)", "%%%1")
+            s = s:gsub(plain, r.token)
+        end
+    end
+    return s
+end
+
+--- 收集常见根路径，按长度降序，供 scrubPaths 使用。
+---@return { root: string, token: string }[]
+function M.pathRoots()
+    local roots = {}
+    pcall(function()
+        local DataStorage = require("datastorage")
+        local Paths = require("utils.paths")
+        local data = DataStorage:getFullDataDir()
+        roots[#roots + 1] = { root = Paths.root(), token = "$MOON" }
+        roots[#roots + 1] = { root = data, token = "$DATA" }
+        if DataStorage.getDataDir then
+            local d = DataStorage:getDataDir()
+            if d and d ~= "" and d ~= data then
+                roots[#roots + 1] = { root = d, token = "$DATADIR" }
+            end
+        end
+        local home = os.getenv("HOME")
+        if home and home ~= "" then
+            roots[#roots + 1] = { root = home, token = "$HOME" }
+        end
+    end)
+    table.sort(roots, function(a, b) return #a.root > #b.root end)
+    return roots
+end
 
 --- 日志脱敏：key=value / "key": "value" / ?key= / Bearer xxx / sk-xxx 统一替换为 ***
 ---@param s string
@@ -98,6 +167,609 @@ function M.settingsKeys(data)
     return "settings.reader.lua keys (values omitted):\n" .. table.concat(keys, "\n") .. "\n"
 end
 
+--- 递归导出表为 dotted key = value；密钥键值变 ***，字符串路径托名。
+---@param data table|nil
+---@param roots { root: string, token: string }[]|nil
+---@return string
+function M.dumpTable(data, roots)
+    local lines = {}
+    local function walk(t, prefix)
+        local keys = {}
+        for k in pairs(t) do keys[#keys + 1] = k end
+        table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+        for _idx, k in ipairs(keys) do
+            local path = prefix == "" and tostring(k) or (prefix .. "." .. tostring(k))
+            local v = t[k]
+            if M.isSecretKey(k) then
+                lines[#lines + 1] = path .. " = " .. MASK
+            elseif type(v) == "table" then
+                -- 空表也留一行，方便看「有这个键」
+                local empty = true
+                for _ in pairs(v) do empty = false break end
+                if empty then
+                    lines[#lines + 1] = path .. " = {}"
+                else
+                    walk(v, path)
+                end
+            elseif type(v) == "string" then
+                lines[#lines + 1] = path .. " = " .. string.format("%q", M.scrubPaths(v, roots))
+            elseif type(v) == "boolean" or type(v) == "number" then
+                lines[#lines + 1] = path .. " = " .. tostring(v)
+            else
+                lines[#lines + 1] = path .. " = <" .. type(v) .. ">"
+            end
+        end
+    end
+    if type(data) ~= "table" then
+        return "(empty)\n"
+    end
+    walk(data, "")
+    if #lines == 0 then return "(empty)\n" end
+    return table.concat(lines, "\n") .. "\n"
+end
+
+--- 启用 / 禁用插件名单。
+---@param enabled { name: string }[]|string[]|nil
+---@param disabled { name: string }[]|string[]|nil
+---@return string
+function M.pluginsText(enabled, disabled)
+    local function names(list)
+        local out = {}
+        for _idx, p in ipairs(list or {}) do
+            out[#out + 1] = type(p) == "table" and tostring(p.name or p.path or "?") or tostring(p)
+        end
+        table.sort(out)
+        return out
+    end
+    local lines = { "enabled plugins:" }
+    local en = names(enabled)
+    if #en == 0 then lines[#lines + 1] = "  (none)" else
+        for _idx, n in ipairs(en) do lines[#lines + 1] = "  " .. n end
+    end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "disabled plugins:"
+    local dis = names(disabled)
+    if #dis == 0 then lines[#lines + 1] = "  (none)" else
+        for _idx, n in ipairs(dis) do lines[#lines + 1] = "  " .. n end
+    end
+    return table.concat(lines, "\n") .. "\n"
+end
+
+--- 源登录态：只写 id / enabled / configured，不要账号名与凭证。
+---@param rows { id: string, enabled: boolean, configured: boolean, name: string|nil }[]|nil
+---@return string
+function M.accountsText(rows)
+    local lines = {
+        "source accounts (login status only; no credentials / display names):",
+        "",
+    }
+    if not rows or #rows == 0 then
+        lines[#lines + 1] = "(none)"
+        return table.concat(lines, "\n") .. "\n"
+    end
+    table.sort(rows, function(a, b) return tostring(a.id) < tostring(b.id) end)
+    for _idx, r in ipairs(rows) do
+        lines[#lines + 1] = string.format(
+            "%s  enabled=%s  configured=%s",
+            tostring(r.id),
+            r.enabled and "yes" or "no",
+            r.configured and "yes" or "no"
+        )
+    end
+    return table.concat(lines, "\n") .. "\n"
+end
+
+--- 月读书源设置摘要（active / mixed / enabled 集合）。
+---@param source table|nil MoonSettings.get("source")
+---@return string
+function M.moonSourceText(source)
+    source = type(source) == "table" and source or {}
+    local lines = {
+        "active_source: " .. tostring(source.active_source or "?"),
+        "library_mixed: " .. tostring(source.library_mixed == true),
+        "enabled_sources:",
+    }
+    local enabled = source.enabled_sources
+    if type(enabled) ~= "table" then
+        lines[#lines + 1] = "  (nil = all enabled by default)"
+    else
+        local ids = {}
+        for id, on in pairs(enabled) do
+            ids[#ids + 1] = { id = tostring(id), on = on ~= false }
+        end
+        table.sort(ids, function(a, b) return a.id < b.id end)
+        if #ids == 0 then
+            lines[#lines + 1] = "  (empty table)"
+        else
+            for _idx, row in ipairs(ids) do
+                lines[#lines + 1] = string.format("  %s = %s", row.id, row.on and "true" or "false")
+            end
+        end
+    end
+    return table.concat(lines, "\n") .. "\n"
+end
+
+--- 书库规模：总数 + 按源 + 已读/未读。
+---@param info { total: integer|nil, by_source: { source_id: string, count: integer }[]|nil, read: integer|nil, unread: integer|nil, hidden: integer|nil, deleted: integer|nil }
+---@return string
+function M.libraryText(info)
+    info = info or {}
+    local lines = {
+        "library scale (deleted=0 hidden=0 unless noted):",
+        "total: " .. tostring(info.total or 0),
+        "read: " .. tostring(info.read or 0),
+        "unread: " .. tostring(info.unread or 0),
+        "hidden: " .. tostring(info.hidden or 0),
+        "tombstone_deleted: " .. tostring(info.deleted or 0),
+        "",
+        "by source:",
+    }
+    local rows = info.by_source or {}
+    if #rows == 0 then
+        lines[#lines + 1] = "  (none)"
+    else
+        for _idx, r in ipairs(rows) do
+            lines[#lines + 1] = string.format("  %s: %d", tostring(r.source_id), tonumber(r.count) or 0)
+        end
+    end
+    return table.concat(lines, "\n") .. "\n"
+end
+
+--- 设备事实（型号 / 平台 / 屏幕 / 存储 / 联网）。
+---@param info table|nil
+---@return string
+function M.deviceText(info)
+    info = info or {}
+    local lines = {
+        "device:",
+        "model: " .. tostring(info.model or "?"),
+        "platform: " .. tostring(info.platform or "?"),
+        "screen: " .. tostring(info.screen_w or "?") .. "x" .. tostring(info.screen_h or "?"),
+        "dpi: " .. tostring(info.dpi or "?"),
+        "storage_total_bytes: " .. tostring(info.storage_total or "?"),
+        "storage_free_bytes: " .. tostring(info.storage_free or "?"),
+        "storage_avail_bytes: " .. tostring(info.storage_avail or "?"),
+        "network_connected: " .. tostring(info.connected),
+        "has_battery: " .. tostring(info.has_battery),
+        "battery: " .. tostring(info.battery or "n/a"),
+    }
+    return table.concat(lines, "\n") .. "\n"
+end
+
+--- 当前阅读会话摘要（无书名凭证；路径已托名）。
+---@param info table|nil open=false 表示桌面侧
+---@param roots { root: string, token: string }[]|nil
+---@return string
+function M.sessionText(info, roots)
+    if not info or not info.open then
+        return "current reading session: (none — desktop / file manager)\n"
+    end
+    local lines = {
+        "current reading session:",
+        "source_id: " .. tostring(info.source_id or "?"),
+        "stable_id: " .. M.scrubPaths(tostring(info.stable_id or "?"), roots),
+        "chapter_idx: " .. tostring(info.chapter_idx),
+        "file: " .. M.scrubPaths(tostring(info.file or "?"), roots),
+        "view_mode: " .. tostring(info.view_mode or "?"),
+        "page: " .. tostring(info.page or "?") .. " / " .. tostring(info.total_pages or "?"),
+        "percent: " .. tostring(info.percent or "?"),
+        "copt_status_line: " .. tostring(info.copt_status_line),
+        "header_height: " .. tostring(info.header_height),
+    }
+    return table.concat(lines, "\n") .. "\n"
+end
+
+--- 各源脏行计数（只记条数，不落内容）。
+---@param rows { id: string, books: integer, notes: integer, progress: integer, stats: integer }[]|nil
+---@return string
+function M.dirtyText(rows)
+    local lines = {
+        "dirty rows (sync_status=0 counts only; no payloads):",
+        "",
+    }
+    if not rows or #rows == 0 then
+        lines[#lines + 1] = "(none)"
+        return table.concat(lines, "\n") .. "\n"
+    end
+    table.sort(rows, function(a, b) return tostring(a.id) < tostring(b.id) end)
+    local any = false
+    for _idx, r in ipairs(rows) do
+        local sum = (r.books or 0) + (r.notes or 0) + (r.progress or 0) + (r.stats or 0)
+        if sum > 0 then any = true end
+        lines[#lines + 1] = string.format(
+            "%s  books=%d  notes=%d  progress=%d  stats=%d",
+            tostring(r.id), r.books or 0, r.notes or 0, r.progress or 0, r.stats or 0
+        )
+    end
+    if not any then
+        lines[#lines + 1] = ""
+        lines[#lines + 1] = "(all clean)"
+    end
+    return table.concat(lines, "\n") .. "\n"
+end
+
+--- 各源采样的书 / 章 sdr 正文（路径已托名、内容已脱敏）。
+---@param samples { source_id: string, stable_id: string, kind: string, path: string, sdr_path: string|nil, text: string|nil, note: string|nil }[]|nil
+---@param heading string|nil
+---@return string
+function M.sdrSamplesText(samples, heading)
+    local lines = {
+        heading or "sidecar (.sdr) samples:",
+        "paths scrubbed; secrets redacted; credentials never included.",
+        "",
+    }
+    if not samples or #samples == 0 then
+        lines[#lines + 1] = "(no samples)"
+        return table.concat(lines, "\n") .. "\n"
+    end
+    for _idx, s in ipairs(samples) do
+        lines[#lines + 1] = string.format(
+            "==== %s  %s  stable_id=%s ====",
+            tostring(s.source_id), tostring(s.kind), tostring(s.stable_id)
+        )
+        lines[#lines + 1] = "doc: " .. tostring(s.path)
+        lines[#lines + 1] = "sdr: " .. tostring(s.sdr_path or "(missing)")
+        if s.note then lines[#lines + 1] = "note: " .. s.note end
+        if s.text and s.text ~= "" then
+            lines[#lines + 1] = "-- begin --"
+            lines[#lines + 1] = s.text
+            if s.text:sub(-1) ~= "\n" then lines[#lines + 1] = "" end
+            lines[#lines + 1] = "-- end --"
+        end
+        lines[#lines + 1] = ""
+    end
+    return table.concat(lines, "\n")
+end
+
+--- 读文件（可选上限）；超限截尾。
+---@param path string
+---@param limit number|nil
+---@return string|nil
+---@return string|nil note
+local function readCapped(path, limit)
+    local f = io.open(path, "rb")
+    if not f then return nil, "unreadable" end
+    local size = f:seek("end") or 0
+    limit = limit or M.SDR_MAX
+    local truncated = size > limit
+    f:seek("set", truncated and (size - limit) or 0)
+    local text = f:read("*a") or ""
+    f:close()
+    if truncated then
+        text = text:gsub("^[^\n]*\n", "", 1)
+        return text, "truncated to last " .. tostring(limit) .. " bytes"
+    end
+    return text, nil
+end
+
+--- 读某文档的 sidecar，返回已托名/脱敏的采样行。
+---@param roots { root: string, token: string }[]
+---@param source_id string
+---@param stable_id string
+---@param kind string
+---@param doc_path string
+---@param DocSettings table
+---@return table
+local function sdrSample(roots, source_id, stable_id, kind, doc_path, DocSettings)
+    local scrubbed_doc = M.scrubPaths(doc_path, roots)
+    local scrubbed_sid = M.scrubPaths(tostring(stable_id), roots)
+    local sdr = DocSettings:findSidecarFile(doc_path)
+    if not sdr then
+        return {
+            source_id = source_id, stable_id = scrubbed_sid, kind = kind,
+            path = scrubbed_doc, sdr_path = nil, note = "no sidecar",
+        }
+    end
+    local text, note = readCapped(sdr, M.SDR_MAX)
+    return {
+        source_id = source_id, stable_id = scrubbed_sid, kind = kind,
+        path = scrubbed_doc,
+        sdr_path = M.scrubPaths(sdr, roots),
+        text = text and M.redact(M.scrubPaths(text, roots)) or nil,
+        note = note or (text and nil or "unreadable"),
+    }
+end
+
+--- 现场采集诊断 extras（失败只记 notes，不抛）。
+---@return { name: string, text: string }[]
+---@return string[]
+function M.gatherExtras()
+    local extras, notes = {}, {}
+    local roots = M.pathRoots()
+
+    local function add(name, text)
+        extras[#extras + 1] = { name = name, text = text or "" }
+    end
+    local function try(label, fn)
+        local ok, a, b = pcall(fn)
+        if not ok then
+            notes[#notes + 1] = "diag failed (" .. label .. "): " .. tostring(a)
+            return nil
+        end
+        return a, b
+    end
+
+    -- 0) 设备事实
+    try("device", function()
+        local Device = require("device")
+        local DataStorage = require("datastorage")
+        local platforms = {}
+        for _idx, name in ipairs({
+            "isKindle", "isKobo", "isAndroid", "isPocketBook", "isCervantes",
+            "isRemarkable", "isSonyPRSTUX", "isSDL",
+        }) do
+            local fn = Device[name]
+            local ok, v = pcall(function() return fn and fn(Device) end)
+            if ok and v then
+                platforms[#platforms + 1] = name:match("^is(.+)$"):lower()
+            end
+        end
+        local total, free, avail = require("ffi/util").df(DataStorage:getDataDir())
+        local connected
+        do
+            local ok_n, v = pcall(function() return require("ui/network/manager"):isConnected() end)
+            connected = ok_n and v == true
+        end
+        local battery
+        if Device:hasBattery() and Device.powerd then
+            battery = Device.powerd:getCapacity()
+        end
+        add("diag/device.txt", M.deviceText({
+            model = Device.model,
+            platform = #platforms > 0 and table.concat(platforms, ",") or "unknown",
+            screen_w = Device.screen and Device.screen:getWidth(),
+            screen_h = Device.screen and Device.screen:getHeight(),
+            dpi = Device.screen and Device.screen:getDPI(),
+            storage_total = total,
+            storage_free = free,
+            storage_avail = avail or free,
+            connected = connected,
+            has_battery = Device:hasBattery() and true or false,
+            battery = battery,
+        }))
+    end)
+
+    -- 1) 启用插件
+    try("plugins", function()
+        local PluginLoader = require("pluginloader")
+        local enabled, disabled = PluginLoader.enabled_plugins, PluginLoader.disabled_plugins
+        if (not enabled or not disabled) and PluginLoader.loadPlugins then
+            enabled, disabled = PluginLoader:loadPlugins()
+        end
+        add("diag/plugins.txt", M.pluginsText(enabled, disabled))
+    end)
+
+    -- 2) KOReader 全局设置（值脱敏 + 路径托名）
+    try("koreader-settings", function()
+        local data = G_reader_settings and G_reader_settings.data
+        add("diag/koreader-settings.txt", M.dumpTable(data, roots))
+    end)
+
+    -- 3) 源登录态（只写 configured）
+    local credential_ids = { zlib = true, opds = true }
+    try("accounts", function()
+        local Registry = require("source.registry")
+        local rows = {}
+        for _idx, meta in ipairs(Registry.list()) do
+            credential_ids[meta.id] = true
+            local configured = false
+            local source = select(1, Registry.create(meta.id))
+            if source then
+                local ok_c, conf = pcall(function() return source:configured() end)
+                configured = ok_c and conf == true
+                pcall(function() source:close() end)
+            end
+            rows[#rows + 1] = {
+                id = meta.id,
+                enabled = Registry.isEnabled(meta.id),
+                configured = configured,
+            }
+        end
+        add("diag/accounts.txt", M.accountsText(rows))
+    end)
+
+    -- 4) 月读设置：书源摘要 + settings 目录（源凭证文件只列名）
+    try("moon-source", function()
+        local MoonSettings = require("utils.settings")
+        add("diag/moon-source.txt", M.moonSourceText(MoonSettings.get("source")))
+    end)
+    try("moon-settings", function()
+        local Paths = require("utils.paths")
+        local lfs = require("libs/libkoreader-lfs")
+        local dir = Paths.settingsDir()
+        local lines = {
+            "moon settings directory: " .. M.scrubPaths(dir, roots),
+            "source/store credential files listed as present only (content omitted).",
+            "",
+        }
+        local names = {}
+        local ok_d, iter, state = pcall(lfs.dir, dir)
+        if ok_d and iter then
+            for name in iter, state do
+                if name:match("%.lua$") then names[#names + 1] = name end
+            end
+        else
+            lines[#lines + 1] = "(settings dir missing)"
+            add("diag/moon-settings.txt", table.concat(lines, "\n") .. "\n")
+            return
+        end
+        table.sort(names)
+        for _idx, name in ipairs(names) do
+            local id = name:match("^(.*)%.lua$")
+            local path = dir .. "/" .. name
+            if credential_ids[id] then
+                lines[#lines + 1] = "==== " .. name .. " (credential file, content omitted) ===="
+                lines[#lines + 1] = "present: yes"
+                lines[#lines + 1] = ""
+            else
+                local text, note = readCapped(path, M.SDR_MAX)
+                lines[#lines + 1] = "==== " .. name .. " ===="
+                if note then lines[#lines + 1] = "note: " .. note end
+                if text then
+                    lines[#lines + 1] = M.redact(M.scrubPaths(text, roots))
+                    if text:sub(-1) ~= "\n" then lines[#lines + 1] = "" end
+                else
+                    lines[#lines + 1] = "(unreadable)"
+                    lines[#lines + 1] = ""
+                end
+            end
+        end
+        add("diag/moon-settings.txt", table.concat(lines, "\n"))
+    end)
+
+    -- 5) 书库规模
+    try("library", function()
+        local BookDB = require("book.books_db")
+        local Registry = require("source.registry")
+        local ids = {}
+        for _idx, meta in ipairs(Registry.list()) do ids[#ids + 1] = meta.id end
+        if #ids == 0 then ids = { "local" } end
+        local by_source = BookDB.sourceCountsBySource(ids)
+        local total = 0
+        for _idx, r in ipairs(by_source) do total = total + (tonumber(r.count) or 0) end
+        local status = BookDB.readStatusCountsBySource(ids)
+        local read, unread = 0, 0
+        for _idx, r in ipairs(status) do
+            if r.status == "read" then read = r.count end
+            if r.status == "unread" then unread = r.count end
+        end
+        local hidden = BookDB.hiddenCountBySource(ids)
+        local deleted = tonumber(require("utils.db").rowexec(
+            "SELECT COUNT(*) FROM books WHERE deleted=1;"
+        )) or 0
+        add("diag/library.txt", M.libraryText({
+            total = total, by_source = by_source, read = read, unread = unread,
+            hidden = hidden, deleted = deleted,
+        }))
+    end)
+
+    -- 5b) 脏行计数
+    try("dirty", function()
+        local Registry = require("source.registry")
+        local DB = require("utils.db")
+        local function count(sql, id)
+            return tonumber(DB.rowexec(sql, id)) or 0
+        end
+        local rows = {}
+        for _idx, meta in ipairs(Registry.list()) do
+            rows[#rows + 1] = {
+                id = meta.id,
+                books = count("SELECT COUNT(*) FROM books WHERE source_id=? AND sync_status=0;", meta.id),
+                notes = count("SELECT COUNT(*) FROM notes WHERE source_id=? AND sync_status=0;", meta.id),
+                progress = count("SELECT COUNT(*) FROM pending_progress WHERE source_id=? AND sync_status=0;", meta.id),
+                stats = count("SELECT COUNT(*) FROM reading_stats WHERE source_id=? AND sync_status=0;", meta.id),
+            }
+        end
+        add("diag/dirty.txt", M.dirtyText(rows))
+    end)
+
+    -- 6) 当前阅读会话 + 其 sdr
+    try("session", function()
+        local session = require("reader.session").current()
+        if not session or not session.identity then
+            add("diag/session.txt", M.sessionText({ open = false }, roots))
+            return
+        end
+        local id = session.identity
+        local ui = session.ui
+        local doc = ui and ui.document
+        local file = doc and doc.file
+        local view_mode = ui and ui.view and ui.view.view_mode
+        local copt = ui and ui.doc_settings and ui.doc_settings:readSetting("copt_status_line")
+        local header
+        if doc and doc.getHeaderHeight then
+            local ok_h, h = pcall(function() return doc:getHeaderHeight() end)
+            if ok_h then header = h end
+        end
+        add("diag/session.txt", M.sessionText({
+            open = true,
+            source_id = id.source_id,
+            stable_id = id.stable_id,
+            chapter_idx = id.chapter_idx,
+            file = file,
+            view_mode = view_mode,
+            page = session.page,
+            total_pages = session.total_pages,
+            percent = session.percent,
+            copt_status_line = copt,
+            header_height = header,
+        }, roots))
+        if file then
+            local DocSettings = require("docsettings")
+            local DB = require("utils.db")
+            local samples = {
+                sdrSample(roots, id.source_id, id.stable_id, "current", file, DocSettings),
+            }
+            -- 章会话：当前文件就是章；再抽同书另一章作对照。整书：抽登记过的章 sdr。
+            local ch, cn = DB.query(
+                [[SELECT path FROM chapters WHERE source_id=? AND stable_id=? AND path!=? ORDER BY chapter_idx ASC LIMIT ?;]],
+                id.source_id, id.stable_id, file, M.CHAPTERS_PER_BOOK
+            )
+            for j = 1, cn do
+                samples[#samples + 1] = sdrSample(
+                    roots, id.source_id, id.stable_id, "chapter", ch[1][j], DocSettings)
+            end
+            add("diag/sdr-current.txt", M.sdrSamplesText(samples, "current session sidecar (.sdr):"))
+        end
+    end)
+
+    -- 7) 最近打开（KOReader history）
+    try("sdr-recent", function()
+        local ReadHistory = require("readhistory")
+        pcall(function() ReadHistory:_read() end)
+        local DocSettings = require("docsettings")
+        local Store = require("book.store")
+        local samples, seen = {}, {}
+        local hist = ReadHistory.hist or {}
+        local n = 0
+        for _idx, item in ipairs(hist) do
+            if n >= M.RECENT_HISTORY then break end
+            local file = item.file
+            if file and file ~= "" and not seen[file] then
+                seen[file] = true
+                n = n + 1
+                local identity = Store.identityFor(file)
+                local source_id = identity and identity.source_id or "?"
+                local stable_id = identity and identity.stable_id or file
+                samples[#samples + 1] = sdrSample(
+                    roots, source_id, stable_id, "recent-" .. tostring(n), file, DocSettings)
+            end
+        end
+        add("diag/sdr-recent.txt", M.sdrSamplesText(samples, "recently opened sidecar (.sdr):"))
+    end)
+
+    -- 8) 各源采样书 / 章 sdr（补漏：history 没覆盖到的源）
+    try("sdr-samples", function()
+        local DB = require("utils.db")
+        local DocSettings = require("docsettings")
+        local result, nrows = DB.query([[
+SELECT source_id, stable_id, path FROM books
+ WHERE deleted=0 AND path IS NOT NULL AND path != ''
+ ORDER BY source_id ASC, inserted_at DESC;
+]])
+        local per, samples = {}, {}
+        for i = 1, nrows do
+            local source_id, stable_id, path = result[1][i], result[2][i], result[3][i]
+            local n = per[source_id] or 0
+            if n < M.SAMPLE_PER_SOURCE then
+                per[source_id] = n + 1
+                samples[#samples + 1] = sdrSample(roots, source_id, stable_id, "book", path, DocSettings)
+                local ch, cn = DB.query(
+                    [[SELECT path FROM chapters WHERE source_id=? AND stable_id=? ORDER BY chapter_idx ASC LIMIT ?;]],
+                    source_id, stable_id, M.CHAPTERS_PER_BOOK
+                )
+                for j = 1, cn do
+                    samples[#samples + 1] = sdrSample(
+                        roots, source_id, stable_id, "chapter", ch[1][j], DocSettings)
+                end
+            end
+        end
+        add("diag/sdr-samples.txt", M.sdrSamplesText(samples, "per-source sidecar (.sdr) samples:"))
+    end)
+
+    return extras, notes
+end
+
 --- info.txt 文本
 ---@param info table<string, any>
 ---@param files table[]
@@ -121,7 +793,8 @@ function M.infoText(info, files, notes)
     if #files == 0 then lines[#lines + 1] = "  (none)" end
     for _idx, n in ipairs(notes or {}) do lines[#lines + 1] = n end
     lines[#lines + 1] = ""
-    lines[#lines + 1] = "Secrets (tokens, keys, passwords, cookies) are redacted as ***; settings files are not included."
+    lines[#lines + 1] = "Secrets (tokens, keys, passwords, cookies, account ids) are redacted as ***;"
+    lines[#lines + 1] = "absolute paths scrubbed to $MOON/$DATA/$HOME; source credential files omitted."
     return table.concat(lines, "\n") .. "\n"
 end
 

@@ -795,7 +795,7 @@ function Server.errorResp(code, msg)
     return Server.jsonResp(code, JSON.encode({ error = tostring(msg) }))
 end
 
---- GET /api/logs.zip：一键打包日志（插件日志 + KOReader crash.log + info.txt，已脱敏）。
+--- GET /api/logs.zip：一键打包日志（插件日志 + crash.log + info.txt + diag/*，已脱敏）。
 ---@param conn table
 ---@param method string
 function Server:_routeLogs(conn, method)
