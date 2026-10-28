@@ -825,7 +825,7 @@ local queues = {}
 ---@param start fun(release: fun()): table|nil 返回可取消句柄
 ---@return { cancel: fun() }
 local function serial(self, start)
-    local key = self.cfg.webdav_url .. "\0" .. moonPath(self, "books.sync")
+    local key = self:cloudStamp() .. "\0" .. moonPath(self, "books.sync")
     local queue = queues[key] or {}
     queues[key] = queue
     local handle, released, begin = nil, false, nil

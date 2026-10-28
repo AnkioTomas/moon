@@ -37,10 +37,11 @@ local remoteRelativePath, coverPath = Common.remoteRelativePath, Common.coverPat
 ---@field _stats_seen table<string, string>|nil 统计按书已入库版本（stats_index.json 的内存副本）
 local Client = {}
 
---- 凭据变了就换一个传输客户端。访问令牌和 Drive 文件 id 缓存在客户端上，不能每次现造。
----@param cfg table
+--- 网盘凭据指纹：变了就换一个传输客户端（访问令牌和 Drive 文件 id 缓存在客户端上，不能每次现造），
+--- 也是 webdav.lua 里 books.sync 读改写锁的键（WebDAV 看地址，Drive 看令牌，不能只看 webdav_url）。
 ---@return string
-local function davStamp(cfg)
+function Client:cloudStamp()
+    local cfg = self.cfg
     return table.concat({
         cfg.cloud or "",
         cfg.webdav_url or "",
@@ -54,8 +55,7 @@ end
 --- cfg 是 utils.settings 的共享表，设置页和远程配置会原地改它。
 Client.__index = function(self, key)
     if key == "dav" then
-        local cfg = rawget(self, "cfg")
-        local stamp = davStamp(cfg)
+        local stamp = Client.cloudStamp(self)
         local cached = rawget(self, "_dav")
         if cached and rawget(self, "_dav_stamp") == stamp then return cached end
         local built = self:_buildDav()
