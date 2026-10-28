@@ -32,6 +32,13 @@ package.preload["json"] = function()
     return { decode = stub.decode, encode = function() return "{}" end }
 end
 
+-- 列表会解析各源实例查书架缓存能力；这里的源都不声明，解析为 nil 即可。
+package.loaded["source.registry"] = {
+    list = function() return {} end,
+    listEnabled = function() return {} end,
+    resolve = function() return nil end,
+}
+
 local Base = require("utils.db")
 local BookDB = require("book.books_db")
 local ChapterDB = require("book.chapters_db")

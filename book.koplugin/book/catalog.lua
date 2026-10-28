@@ -328,21 +328,18 @@ local function scopedIds(scope, filter)
     return {}
 end
 
---- 源实例解析失败（配置缺字段、测试桩、禁用中的源）不能把整条书库查询带下水：
---- 这类源按「没声明 shelf_cache」处理，只记一次警告，书库照常出列。
+--- 解析不出实例的源（未知 id、禁用中、第三方初始化失败）按「没声明 shelf_cache」处理，
+--- 只记一次警告，书库照常出列；源实现抛错则一路冒到入口。
 ---@type table<string, boolean>
 local resolve_warned = {}
 ---@param id string
 ---@return BookSource|nil
 local function resolveSource(id)
-    local ok, source = pcall(function() return require("source.registry").resolve(id) end)
-    if ok and source then return source end
+    local source = require("source.registry").resolve(id)
+    if source then return source end
     if not resolve_warned[id] then
         resolve_warned[id] = true
-        local logged, logger = pcall(require, "utils.log")
-        if logged and logger then
-            logger.warn("catalog shelf cache: source " .. tostring(id) .. " unavailable")
-        end
+        require("utils.log").warn("catalog shelf cache: source " .. tostring(id) .. " unavailable")
     end
     return nil
 end
@@ -375,8 +372,8 @@ function Catalog.shelfCaches(ids)
     local out = {}
     for id in pairs(Catalog.shelfCacheSources(ids)) do
         local source = resolveSource(id)
-        local ok, projection = pcall(function() return source and source:shelfCache() end)
-        if ok and type(projection) == "table" then out[id] = projection end
+        local projection = source and source:shelfCache()
+        if type(projection) == "table" then out[id] = projection end
     end
     return out
 end
@@ -860,16 +857,10 @@ function Catalog.volumeParent(source_id, stable_id)
     if type(source_id) ~= "string" or source_id == "" or type(stable_id) ~= "string" then
         return nil
     end
-    local ok, source = pcall(function()
-        return require("source.registry").resolve(source_id)
-    end)
-    if not ok or type(source) ~= "table" or type(source.volumeParent) ~= "function" then
-        return nil
-    end
-    local called, parent = pcall(source.volumeParent, source, stable_id)
-    if called and type(parent) == "string" and parent ~= "" and parent ~= stable_id then
-        return parent
-    end
+    local source = require("source.registry").resolve(source_id)
+    if not source or type(source.volumeParent) ~= "function" then return nil end
+    local parent = source:volumeParent(stable_id)
+    if type(parent) == "string" and parent ~= "" and parent ~= stable_id then return parent end
     return nil
 end
 

@@ -171,10 +171,8 @@ function Detail:loadStats()
     local ids = { book.stable_id }
     local owner = require("desktop.detail.common").bookOwnerSource(book, self.source)
     if owner and type(owner.statsIdentities) == "function" then
-        local ok, more = pcall(owner.statsIdentities, owner, book)
-        if ok and type(more) == "table" and #more > 0 then
-            ids = more
-        end
+        local more = owner:statsIdentities(book)
+        if type(more) == "table" and #more > 0 then ids = more end
     end
     self._stats = StatsDB.summaryByBooks(book.source_id, ids)
     self._daily = StatsDB.dailyByBooks(book.source_id, ids, 30)

@@ -24,6 +24,15 @@ package.preload["utils.paths"] = function()
         sanitizeSourceId = function(id) return id end,
     }
 end
+-- 书架缓存能力查询会解析源实例；这里的源都不声明 shelf_cache。
+package.loaded["source.registry"] = nil
+package.preload["source.registry"] = function()
+    return {
+        list = function() return { { id = "wechat", name = "微信读书", type = "chapter" } } end,
+        listEnabled = function() return { { id = "wechat", name = "微信读书" } } end,
+        resolve = function() return nil end,
+    }
+end
 local mods = { "utils.db", "utils.event", "book.books_db", "book.chapters_db", "book.progress_db", "book.catalog" }
 for _idx, name in ipairs(mods) do package.loaded[name] = nil end
 
@@ -88,5 +97,5 @@ Assert.eq(all, 6, "其它排序只列在架书")
 
 Base.close()
 for _idx, name in ipairs(mods) do package.loaded[name] = nil end
-package.preload["utils.paths"] = nil
-package.loaded["utils.paths"] = nil
+package.preload["utils.paths"], package.preload["source.registry"] = nil, nil
+package.loaded["utils.paths"], package.loaded["source.registry"] = nil, nil

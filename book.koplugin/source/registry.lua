@@ -285,12 +285,9 @@ function Registry.create(id)
     end
     local mod = sourceModule(id)
     if not external[id] then return mod.new() end
-    -- 第三方源的 new() 抛错不能拖垮书库 / 桌面：记日志，按源不可用处理。
-    local ok, source, err = pcall(mod.new)
-    if not ok then
-        logger.error("book.source external new failed", id, source)
-        return nil, T(_("数据源初始化失败: %1"), id)
-    end
+    -- 第三方源的 new() 是插件边界：抛错弹错误页让用户看到原因，源按不可用处理，不拖垮书库 / 桌面。
+    local source, err = require("ui.guard").call("source " .. id .. ".new", mod.new)
+    if not source and not err then return nil, T(_("数据源初始化失败: %1"), id) end
     return source, err
 end
 
