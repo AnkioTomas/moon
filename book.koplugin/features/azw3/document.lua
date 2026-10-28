@@ -93,7 +93,7 @@ function Azw3Document:init()
     CreDocument.init(self)
 end
 
---- 重建失败（DRM / HUFF / 结构损坏）返回 false，与 CREngine 加载失败同一语义，由 ReaderUI 提示并关闭。
+--- 重建失败（DRM / 结构损坏 / 解压失败）返回 false，与 CREngine 加载失败同一语义，由 ReaderUI 提示并关闭。
 function Azw3Document:loadDocument(full_document)
     if not self.azw.dir then
         if full_document == false and self.azw.metadata then return true end

@@ -2,11 +2,11 @@
 KF8（AZW3）→ 单文件 HTML + 资源，交给 CREngine 渲染。
 
 移植自 azwreader-koreader 的 kf8extractor（按 Calibre mobi8 reader 核对过偏移）：
-PalmDB 分节 → 文本记录解压（无压缩 / PalmDOC）→ FDST 切流 → SKEL/DIV 索引重建 XHTML
+PalmDB 分节 → 文本记录解压（无压缩 / PalmDOC / HUFF·CDIC）→ FDST 切流 → SKEL/DIV 索引重建 XHTML
 → 改写 kindle:embed / kindle:flow / kindle:pos 引用。
 
 只处理独立 KF8（MOBI 版本 8）。MOBI6 与 MOBI6+KF8 合并文件返回 nil：CREngine 能直接按 MOBI 读。
-DRM、HUFF/CDIC 压缩、结构损坏直接 error。
+DRM、结构损坏直接 error。HUFF/CDIC 见 `features.azw3.huff`。
 
   local info = Kf8.extract(path, dir)
   -- info = { html = "book.html", cover = "res0003.jpg"|nil, metadata = {...}, toc = { { title, depth, anchor } } }
@@ -166,8 +166,19 @@ end
 ---@return ffi.cdata* buf, number n 字节数
 local function readText(section, header)
     local compression = u16(header, 0)
-    if compression == 0x4448 then error("HUFF/CDIC-compressed KF8 is not supported") end
-    if compression ~= 1 and compression ~= 2 then error("unknown MOBI compression " .. compression) end
+    if compression ~= 1 and compression ~= 2 and compression ~= 0x4448 then
+        error("unknown MOBI compression " .. compression)
+    end
+    local unpack_huff
+    if compression == 0x4448 then
+        local huff0, huff_n = u32(header, 0x70), u32(header, 0x74)
+        if huff0 == NULL_INDEX or huff_n == 0 then error("missing HUFF/CDIC records") end
+        local huffs = {}
+        for i = 0, huff_n - 1 do
+            huffs[#huffs + 1] = section(huff0 + i) or error("missing HUFF/CDIC record " .. (huff0 + i))
+        end
+        unpack_huff = require("features.azw3.huff").reader(huffs)
+    end
     local extra_flags = #header >= 0xF4 and u16(header, 0xF2) or 0
     local records = u16(header, 8)
     -- 头里的文本长度通常正好够；按记录数封顶，防坏头一次申请巨块内存
@@ -185,6 +196,9 @@ local function readText(section, header)
                 scratch = ffi.new("uint8_t[?]", scratch_cap)
             end
             src, len = scratch, palmdoc(data, size, scratch)
+        elseif compression == 0x4448 then
+            local plain = unpack_huff(data:sub(1, size))
+            src, len = plain, #plain
         end
         if n + len > cap then
             cap = math.max(n + len, math.floor(cap * 1.5))
@@ -440,7 +454,7 @@ local function probeFile(f)
 end
 
 --- 只读 PalmDB 分节表、MOBI 头（EXTH）与封面记录，不解压正文：书名/作者/简介/封面够用。
---- DRM / HUFF 等只影响正文，这里不拦，留给 extract。
+--- DRM / 正文解压失败只影响 extract，这里不拦。
 ---@param path string
 ---@return { metadata: table, cover_data: string|nil }|nil 非独立 KF8 时为 nil
 function Kf8.probe(path)
