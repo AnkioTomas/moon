@@ -20,6 +20,36 @@ local function stubDbDeps()
     end
 end
 
+-- 书架缓存钩子：只有声明 shelf_cache 的源才有投影；别的源（如 wechat）解析不出声明。
+local shelf_caps, shelf_projection = false, nil
+local shelf_calls = 0
+local registry = {
+    list = function() return {} end,
+    listEnabled = function() return {} end,
+    resolve = function(id)
+        if id ~= "ext.kavita" then return nil end
+        return {
+            id = "ext.kavita",
+            capabilities = function() return { shelf_cache = shelf_caps } end,
+            shelfCache = function()
+                shelf_calls = shelf_calls + 1
+                return shelf_projection
+            end,
+        }
+    end,
+}
+package.preload["source.registry"] = function() return registry end
+-- listLibraryAsync 的推迟回调与混合作用域解析。
+package.preload["ui/uimanager"] = function()
+    return { nextTick = function(_, fn) fn() end }
+end
+package.preload["ui/guard"] = function()
+    return { wrap = function(_, fn) return fn end }
+end
+package.preload["utils.settings"] = function()
+    return { get = function() return {} end }
+end
+
 local function clearMods()
     for _, name in ipairs({
         "utils.paths",
@@ -34,6 +64,7 @@ local function clearMods()
         "book.progress_db",
         "book.stats_db",
         "features.xray.db", "book.catalog",
+        "source.registry", "ui/uimanager", "ui/guard", "utils.settings",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -43,6 +74,8 @@ end
 do
     local calls = {}
     local fail_count = false
+    -- 假结果集的行身份：书架缓存用例要拿 ext.kavita 的行来对投影。
+    local row_source, row_stable = "local", "/books/a.epub"
     local connection = {
         exec = function() end,
         close = function() end,
@@ -82,8 +115,8 @@ do
                         return { { "sub", "" }, { 3, 2 } }, 2
                     end
                     return {
-                        { "local" },
-                        { "/books/a.epub" },
+                        { row_source },
+                        { row_stable },
                         { "书名" },
                         { "作者" },
                         { 42 },
@@ -210,14 +243,12 @@ do
     Assert.eq(err_count, 0)
     Assert.not_nil(err, "库查询出错要带错误，图书馆页据此显示「加载失败」")
 
-    -- 「最近阅读」列整个书架：LEFT JOIN，在架书全列，卷行这种非成员只在有进度时进来。
+    -- 「最近阅读」只是排序：LEFT JOIN，只列在架书；卷行是进度身份、不是书架成员。
     calls = {}
     Catalog.listBooks("local", { sort = "recent_read", limit = 24 })
     Assert.is_true(calls[1].sql:find("LEFT JOIN pending_progress p", 1, true) ~= nil, "没进度的书也要计数")
-    Assert.is_true(calls[1].sql:find("(b.deleted=0 OR ((b.deleted=0 OR (b.sync_status=1 AND NOT (b.source_id='local' AND b.path IS NULL))) AND p.stable_id IS NOT NULL"
-            .. " AND NOT EXISTS (SELECT 1 FROM books s WHERE s.source_id=b.source_id"
-            .. " AND s.deleted=0 AND s.title=b.title)))", 1, true) ~= nil,
-        "卷行有进度才列进最近阅读")
+    Assert.is_true(calls[1].sql:find("AND b.deleted=0", 1, true) ~= nil, "最近阅读只列在架书")
+    Assert.is_nil(calls[1].sql:find("p.stable_id IS NOT NULL", 1, true), "卷行不靠「有进度」挤进列表")
     Assert.is_true(calls[2].sql:find("ORDER BY MAX(COALESCE(p.updated_at, 0), b.read_at) DESC, b.inserted_at DESC", 1, true) ~= nil,
         "按本机 / 云端最近阅读时间排，没读过的按加入时间")
     -- 其它排序仍 LEFT JOIN + 只在架：按书名 / 加入时间排要列出全库。
@@ -237,6 +268,122 @@ do
     calls = {}
     Catalog.listBooks("local", { hidden = true })
     Assert.is_true(calls[1].sql:find("b.hidden=1", 1, true) ~= nil)
+
+    -- 书架缓存标记：只认声明 shelf_cache 的源给出的 mark，按行身份透传成 cache_mark。
+    shelf_caps, shelf_projection = true, {
+        series_ids = { ["700"] = true },
+        mark = { ["700"] = true },
+        cover = { ["700"] = "/cache/700.jpg" },
+    }
+    row_source, row_stable = "ext.kavita", "700"
+    calls = {}
+    rows = Catalog.listBooks("ext.kavita", { limit = 24 })
+    Assert.is_true(rows[1].cache_mark, "投影 mark 命中：已缓存")
+    row_stable = "701"
+    calls = {}
+    rows = Catalog.listBooks("ext.kavita", { limit = 24 })
+    Assert.is_nil(rows[1].cache_mark, "不在投影里：未缓存")
+    -- 没有声明能力的源不看投影，也不多出 SQL。
+    shelf_caps = false
+    calls = {}
+    rows = Catalog.listBooks("local", { limit = 24 })
+    Assert.is_nil(rows[1].cache_mark)
+    Assert.is_nil(calls[1].sql:find("b.stable_id IN (", 1, true), "未声明 shelf_cache：不进离线子句")
+
+    --- 取外层 where 片段（count 与 select 必须共用同一份；子查询里也有 WHERE，靠 join 位置定位）。
+    local function whereOf(sql)
+        local join = sql:find(" LEFT JOIN pending_progress p ON ", 1, true)
+        if not join then return nil end
+        local from = sql:find(" WHERE ", join, true)
+        if not from then return nil end
+        local tail = sql:sub(from + 7)
+        return tail:match("^(.-)%s*ORDER BY") or tail:match("^(.-);")
+    end
+
+    -- 离线可见集：已缓存 series ∪ 已下载 ∪ 卷行；单源全是缓存源时不加 source_id 限制。
+    shelf_caps, shelf_projection = true, {
+        series_ids = { ["700"] = true },
+        mark = { ["700"] = true },
+        cover = {},
+    }
+    row_source, row_stable = "ext.kavita", "700"
+    calls = {}
+    rows, count = Catalog.listBooks("ext.kavita", {
+        offline_only = true, limit = 10, offset = 0, chapter_sources = { "wechat" },
+    })
+    local count_offline, list_offline = calls[1], calls[2]
+    for _idx, q in ipairs({ count_offline, list_offline }) do
+        Assert.is_true(q.sql:find("b.stable_id IN (?)", 1, true) ~= nil, "已缓存 series")
+        Assert.is_true(q.sql:find("FROM chapters c", 1, true) ~= nil, "已下载也算可离线读")
+        Assert.is_true(q.sql:find("instr(b.stable_id, ':') > 0", 1, true) ~= nil, "卷行放行")
+        Assert.is_nil(q.sql:find("b.source_id NOT IN", 1, true), "单源全是缓存源：不加源限制")
+    end
+    Assert.eq(whereOf(count_offline.sql), whereOf(list_offline.sql), "count 与 select 共用同一 where")
+    Assert.eq(count_offline.args[1], "ext.kavita")
+    Assert.eq(count_offline.args[2], "700", "series 参数在源参数之后")
+    Assert.eq(count_offline.args[3], "wechat", "下载子句参数排在最后")
+    Assert.eq(list_offline.args[#list_offline.args - 1], 10)
+    Assert.eq(list_offline.args[#list_offline.args], 0)
+    Assert.is_true(rows[1].cache_mark, "离线行也带缓存标记")
+
+    -- 混合源：只约束声明了 shelf_cache 的源，其它源的行原样放行（05 A4）。
+    calls = {}
+    Catalog.listBooks({ "ext.kavita", "wechat" }, {
+        offline_only = true, limit = 24, chapter_sources = { "wechat" },
+    })
+    local mixed_count = calls[1]
+    Assert.is_true(mixed_count.sql:find("b.source_id NOT IN (?)", 1, true) ~= nil,
+        "同范围里别的源不受离线过滤")
+    Assert.eq(mixed_count.args[1], "ext.kavita")
+    Assert.eq(mixed_count.args[2], "wechat")
+    Assert.eq(mixed_count.args[3], "ext.kavita", "缓存源列表")
+    Assert.eq(mixed_count.args[4], "700")
+
+    -- 参数上限：series 多到超过单条 IN 的分块大小就拆成多个 OR 组（SQLite 默认 999 个绑定参数）。
+    local many = { series_ids = {}, mark = {}, cover = {} }
+    for i = 1, 600 do many.series_ids["s" .. i] = true end
+    shelf_caps, shelf_projection = true, many
+    calls = {}
+    Catalog.listBooks("ext.kavita", { offline_only = true, limit = 24 })
+    local groups = 0
+    for _idx in calls[1].sql:gmatch("b%.stable_id IN %(") do groups = groups + 1 end
+    Assert.eq(groups, 2, "600 个 series 拆成两块")
+    local marks = 0
+    for _idx in calls[1].sql:gmatch("%?") do marks = marks + 1 end
+    Assert.eq(marks, 601, "一块最多 500 个参数 args=" .. #calls[1].args)
+    Assert.eq(#calls[1].args, 601)
+
+    -- 页面只置离线标志：listLibraryAsync 原样透传给 listBooks。
+    shelf_caps, shelf_projection = true, {
+        series_ids = { ["700"] = true }, mark = { ["700"] = true }, cover = {},
+    }
+    calls = {}
+    local listed
+    Catalog.listLibraryAsync("ext.kavita", { offline_only = true, page = 2, page_size = 24 },
+        function(res) listed = res and res.count end)
+    Assert.eq(listed, 7)
+    Assert.is_true(calls[1].sql:find("instr(b.stable_id, ':') > 0", 1, true) ~= nil, "离线子句到达查询")
+    Assert.eq(calls[2].args[#calls[2].args - 1], 24)
+    Assert.eq(calls[2].args[#calls[2].args], 24, "第 2 页偏移")
+
+    -- 投影不可用（Kavita 未配置 / kamare 缺失 / index 取不到）不等于「源没声明能力」：
+    -- 离线书架仍要收窄到已下载 ∪ 卷行，否则会列出点开即死路的行（05 A4 / US 11）。
+    shelf_caps, shelf_projection = true, nil
+    shelf_calls = 0
+    Assert.is_true(Catalog.hasShelfCache("ext.kavita"), "声明了 shelf_cache 就算数，投影为 nil 也算")
+    Assert.eq(shelf_calls, 0, "hasShelfCache 只查能力，不为一次判断构建整份投影")
+    calls = {}
+    Catalog.listBooks("ext.kavita", { offline_only = true, limit = 10, chapter_sources = {} })
+    Assert.is_nil(calls[1].sql:find("b.stable_id IN (?)", 1, true), "没有缓存 series：不加 IN 参数")
+    Assert.is_true(calls[1].sql:find("COALESCE(b.path, '')<>''", 1, true) ~= nil, "已下载仍可离线")
+    Assert.is_true(calls[1].sql:find("instr(b.stable_id, ':') > 0", 1, true) ~= nil, "卷行仍放行")
+
+    -- 空投影同理：不能因为集合为空就关掉离线过滤。
+    shelf_caps, shelf_projection = true, { series_ids = {}, mark = {}, cover = {} }
+    calls = {}
+    Catalog.listBooks("ext.kavita", { offline_only = true, limit = 10, chapter_sources = {} })
+    Assert.is_true(calls[1].sql:find("COALESCE(b.path, '')<>''", 1, true) ~= nil, "空投影仍限制到已下载")
+    Assert.is_true(calls[1].sql:find("instr(b.stable_id, ':') > 0", 1, true) ~= nil, "空投影仍放行卷行")
 
     DbBase.close()
     clearMods()

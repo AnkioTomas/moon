@@ -20,7 +20,8 @@ pageNum / bookScrollId 真的变了才建会话、续会话，所以心跳是「
 统计：纯本地确认推送（Kavita 自己按会话记录），另全量拉取服务端阅读历史 → 按「身份 × 日」的行
 与替换指令写成本地统计快照；身份判定（单卷 / 多卷）与上次身份、卷名记在扩展状态文件里。
 划线：epub 的划线按段落文本在本地 epub 里找锚点，新建 / 改备注推到 Kavita，注解 id 存在笔记快照里。
-漫画：装了 kamare 插件且在线时交它在线看（开书回调 handled），否则下载 cbz 用内置阅读器。
+漫画：缓存判定 / 起始页 / 离线全归 kamare cache（03 A1），moon 只按返回码路由；
+缓存不可用或失败时回退旧 cbz，再不行才下载 cbz 用内置阅读器。
 
 @module moonsource_kavita.source
 --]]
@@ -29,6 +30,8 @@ local Client = require("moonsource_kavita.client")
 local Annotation = require("moonsource_kavita.annotation")
 local Position = require("moonsource_kavita.position")
 local Stats = require("moonsource_kavita.stats")
+local Cache = require("moonsource_kavita.cache")
+local VolumeList = require("moonsource_kavita.volume_list")
 local SourceBase = require("source.base")
 local Normalize = require("book.note.normalize")
 local logger = require("utils.log")
@@ -48,6 +51,8 @@ local STATS_PAGE_SIZE = 200
 local STATS_MAX_PAGES = 50
 -- 统计状态文件（与书架指纹 / 回填 done 同机制）：上次身份 + 每系列章数判定 + 卷名。
 local STATS_STATE_FILE = "/moonsource_kavita_stats.lua"
+-- 投影预热失败只记一行：同一进程反复同步不该刷屏（项目审计口径：不静默 pcall）。
+local shelf_prewarm_failed = false
 
 ---@class KavitaSource : SourceBase
 ---@field client KavitaClient
@@ -63,8 +68,18 @@ end
 
 ---@return KavitaSource
 local function new()
+    -- 换源 / 改配置经 Registry.reload() 重建实例：顺手丢掉旧服务器的书架投影（05 A1）。
+    Cache.resetShelf()
+    local settings = require("utils.settings")
+    local cfg = settings.getSource(ID)
+    -- 「多设备统计合并」开关已删除：Kavita 的统计以云端 reading-history 为准，本机离线差额不再补。
+    -- 旧版本可能已把键落盘成 true（核心只认 == true），这里清掉，避免删了开关反而锁死在开启。
+    if cfg.merge_local_stats ~= nil then
+        cfg.merge_local_stats = nil
+        settings.saveSource(ID)
+    end
     local self = setmetatable(meta(), Source) --[[@as KavitaSource]]
-    self.client = Client.new(require("utils.settings").getSource(ID))
+    self.client = Client.new(cfg)
     return self
 end
 
@@ -73,11 +88,21 @@ function Source:configured()
 end
 
 --- 能力：书架 + 统计拉取（推送是纯本地确认，见 pushStatsAsync），其余走基类默认（全 false）。
+--- shelf_cache：断网时书架按适配层的缓存投影收窄可见集（05 A2）。
 ---@return SourceCapabilities
 function Source:capabilities()
     local caps = SourceBase.capabilities(self)
     caps.stats_pull = true
+    caps.shelf_cache = true
     return caps
+end
+
+--- 书架缓存投影：同步交回适配层记忆的三张表（series_ids / mark / cover）。
+--- 未配置或 kamare 没给 index 时返回 nil；不触网，翻页复用同一份记忆（05 A1/A2）。
+---@return ShelfCacheProjection|nil
+function Source:shelfCache()
+    if not self:configured() then return nil end
+    return Cache.shelf()
 end
 
 ---@return boolean
@@ -93,6 +118,16 @@ local function title(value)
     value = require("utils.text").trim(value)
     if value == "" or value:match("^%-?%d+$") then return nil end
     return value
+end
+
+--- 卷摘要：Kavita 把它挂在章节上（`chapter.summary`），VolumeDto 没有 summary 字段。
+--- 空串 / 纯空白当作没有，好让调用方退回容器简介。
+---@param value any
+---@return string|nil
+local function summary(value)
+    if type(value) ~= "string" then return nil end
+    value = require("utils.text").trim(value)
+    return value ~= "" and value or nil
 end
 
 --- 文件头对得上格式才算下载完整（非 2xx 的错误页、截断的文件都过不了）。
@@ -211,14 +246,18 @@ end
 --- series 的目录缓存（打开过才有）+ 其中已经在本地读过（有进度）的卷。
 --- 多卷 series 的进度分别记在各卷行上（stable_id = seriesId:chapterId）：
 --- 回填要跳过容器行，而读过的卷行要继承容器元数据。
+--- 目录过期也照用：卷的身份与数量不随时间变，而「只看新鲜目录」会让容器行在目录
+--- 过期后重新拿到真实时间戳、以系列封面挤进最近阅读，和卷行（扫描版封面）来回换。
 ---@param source_id string
 ---@param series_id string
 ---@param ProgressDB table
 ---@return table[]|nil toc
 ---@return table[] progressed 读过的卷表项
 local function progressedVolumes(source_id, series_id, ProgressDB)
-    local toc = require("source.toc").read(source_id, series_id)
-    if type(toc) ~= "table" or #toc < 2 then return nil, {} end
+    local toc = require("source.toc").read(source_id, series_id, true)
+    -- 单卷也要看：漫画单卷同样读在卷行上（openEntry 一律用 seriesId:chapterId），
+    -- 回到容器行会让同一本书在最近阅读里出现两条。
+    if type(toc) ~= "table" or #toc == 0 then return nil, {} end
     local out = {}
     for _idx, entry in ipairs(toc) do
         local chapter_id = entry.chapterId or entry.uid
@@ -246,20 +285,31 @@ local function untouched(cur, row)
     return true
 end
 
+--- 卷行简介：这一卷的摘要（Kavita 的章节 summary）优先；没有就保留行里已有的简介
+--- （旧版目录缓存还没带上卷摘要，别把已经正确的卷简介改回整部简介），最后才退回容器简介。
+---@param volume_summary string|nil
+---@param cur Book|nil 库里已有的卷行
+---@param series Book|table 容器书行
+---@return string|nil
+local function volumeIntro(volume_summary, cur, series)
+    return summary(volume_summary) or (cur and cur.intro) or series.intro
+end
+
 --- 卷行的元数据形状（先例 syncVolumeMeta / openBookAsync）：标题「系列 · 卷名」，其余继承容器。
---- Kavita 只在 series 级给作者 / 简介 / 分类，而展示列的是卷行：卷行空着就是「未知作者」。
---- 封面不继承：卷封面走源自己的 chapter-cover 接口。
+--- 简介用调用方解析好的 `volumeIntro`（卷摘要 > 已有简介 > 整部简介）。
+--- 封面不写进行：卷行也由 coverRequest 取**这一卷的封面**（chapter-cover 是扫描页，不能当封面）。
 ---@param series Book|table 容器书行
 ---@param stable_id string "seriesId:chapterId"
 ---@param volume_title string|nil 卷名；拿不到时退容器名，宁可重复也不留裸 ID
+---@param volume_intro string|nil 卷简介（见 volumeIntro）
 ---@return table
-local function volumeRow(series, stable_id, volume_title)
+local function volumeRow(series, stable_id, volume_title, volume_intro)
     return {
         source_id = ID,
         stable_id = stable_id,
         title = T("%1 · %2", series.title or "", volume_title or series.title or ""),
         authors = series.authors,
-        intro = series.intro,
+        intro = summary(volume_intro) or series.intro,
         category = series.category,
         series = series.title,
     }
@@ -297,8 +347,9 @@ local function syncVolumeMeta(series, series_id, entries)
     local rows = {}
     for _idx, entry in ipairs(entries) do
         local stable_id = series_id .. ":" .. tostring(entry.chapterId or entry.uid)
-        local row = volumeRow(series, stable_id, entry.title)
-        if not untouched(BookDB.get(ID, stable_id), row) then
+        local cur = BookDB.get(ID, stable_id)
+        local row = volumeRow(series, stable_id, entry.title, volumeIntro(entry.summary, cur, series))
+        if not untouched(cur, row) then
             rows[#rows + 1] = row
         end
     end
@@ -327,8 +378,8 @@ local function materializeVolumes(identities, titles)
         if series then
             local named = titles[series_id]
             local volume_title = named and chapter_id and named[chapter_id]
-            local row = volumeRow(series, identity, volume_title)
             local cur = BookDB.get(ID, identity)
+            local row = volumeRow(series, identity, volume_title, volumeIntro(nil, cur, series))
             if volume_title or not (cur and cur.title and cur.title ~= row.title) then
                 if not untouched(cur, row) then rows[#rows + 1] = row end
             end
@@ -369,8 +420,14 @@ local function backfillRead(source_id, series_list)
                 -- 对齐计入 changed：同步只会报「变了」的域，首页 / 图书馆据此重画。
                 changed = changed + syncVolumeMeta(
                     require("book.books_db").get(source_id, stable_id), stable_id, progressed)
-                -- 真实进度在卷行上；容器行的 series 级占位是多余的（旧版回填过就清掉）。
-                if here and ProgressDB.dropRemote(source_id, stable_id) then
+                -- 真实位置在卷行上；容器行保留服务端 series 级聚合，并带上最近阅读时间：
+                -- 图书馆「最近阅读」按系列行排（点开再选卷），首页「当前阅读」仍取卷行。
+                -- 不写 page：整部书的聚合进度不是「读到第几页」。
+                -- 显式允许回落：旧版本存过非零 / 未来时间，MAX 会把它留住（US 24）。
+                if ProgressDB.upsertRemote(source_id, stable_id, {
+                    fraction = math.min(1, read / pages),
+                    updated_at = at or 0,
+                }, { reset_updated_at = true }) then
                     changed = changed + 1
                 end
             elseif (comic and not (here and here.page == read)) or (not comic and here == nil) then
@@ -386,6 +443,91 @@ local function backfillRead(source_id, series_list)
         end
     end
     return changed
+end
+
+--- 同步时最多问几部「当前读到哪一卷」：首页「当前阅读」只取最近一部，留几部余量。
+local CURRENT_VOLUME_LIMIT = 3
+
+--- 服务端「当前读到哪一卷」：all-v2 只有 series 级聚合（pagesRead / latestReadDate），
+--- 另一台设备读的卷在本机没有任何卷行，首页「当前阅读」只能退到系列行或本机残留的旧卷。
+--- Kavita 的 continue-point 一次给一章（volumeId / pagesRead / 最后阅读时间），响应只有几 KB，
+--- 所以只问最近在读的几部漫画，不为整架书发请求。
+---@param source BookSource 源实例（要 client / id）
+---@param series_list table[] Kavita SeriesDto（本次同步里 pagesRead > 0 的那些）
+---@param cb fun(changed: integer) 候选跑完（可能 0 个）后回调
+---@return { cancel: fun() }
+local function backfillCurrentVolume(source, series_list, cb)
+    local targets = {}
+    for _idx, series in ipairs(series_list) do
+        local pages, read = tonumber(series.pages) or 0, tonumber(series.pagesRead) or 0
+        -- 只处理漫画：epub 的进度本来就记在系列行上；读完 / 没读过的不需要「当前卷」。
+        if tonumber(series.format) == 1 and pages > 0 and read > 0 and read < pages then
+            targets[#targets + 1] = { id = tostring(series.id), at = readTime(series) or 0 }
+        end
+    end
+    table.sort(targets, function(a, b)
+        if a.at ~= b.at then return a.at > b.at end
+        return a.id < b.id
+    end)
+    local limit = math.min(#targets, CURRENT_VOLUME_LIMIT)
+    local index, changed, cancelled, job = 0, 0, false, nil
+
+    --- 服务端说在读的这一章 → 本地卷行。没有卷行就补一条；本机已有且服务器没更新的不重写
+    --- （每次同步重写同一行会白白触发首页重画），但卷摘要 / 卷名这类元数据仍会对齐
+    --- （旧版本写下的卷行带着整部简介，靠这一步纠正成这一卷的摘要）。
+    ---@param target table 候选（id / at）
+    ---@param chapter table Kavita ChapterDto
+    ---@return integer 变更数
+    local function write(target, chapter)
+        local pages = tonumber(chapter.pages) or 0
+        local read = tonumber(chapter.pagesRead) or 0
+        local chapter_id = chapter.id or chapter.chapterId
+        -- 读完一卷后 continue-point 给的是「下一章」（pagesRead = 0）：那不是正在读。
+        if not chapter_id or pages <= 0 or read <= 0 or read >= pages then return 0 end
+        local stable_id = target.id .. ":" .. tostring(chapter_id)
+        local BookDB = require("book.books_db")
+        local container = BookDB.get(source.id, target.id)
+        if not container then return 0 end
+        local ProgressDB = require("book.progress_db")
+        local at = utcTime(chapter.lastReadingProgressUtc) or target.at or 0
+        local changed = 0
+        local cur = BookDB.get(source.id, stable_id)
+        local row = volumeRow(container, stable_id,
+            title(chapter.titleName) or title(chapter.title) or title(chapter.volumeTitle),
+            volumeIntro(chapter.summary, cur, container))
+        if not untouched(cur, row) then
+            require("book.store").rememberMany({ row })
+            changed = changed + 1
+        end
+        local here = ProgressDB.get(source.id, stable_id)
+        -- 本机已有这一卷的进度：只有服务器明显更新（另一台设备接着读了）才采纳。
+        if here and at <= (tonumber(here.updated_at) or 0) + 60 then return changed end
+        if not ProgressDB.upsertRemote(source.id, stable_id, {
+            fraction = read / pages,
+            page = read,
+            total_pages = pages,
+            updated_at = at,
+        }) then return changed end
+        return changed + 1
+    end
+
+    local function step()
+        if cancelled then return end
+        index = index + 1
+        if index > limit then return cb(changed) end
+        local target = targets[index]
+        job = source.client:json("GET", "/api/Reader/continue-point", { seriesId = target.id }, nil,
+            function(chapter)
+                if cancelled then return end
+                if chapter then changed = changed + write(target, chapter) end
+                step()
+            end)
+    end
+    if online() then step() else cb(0) end
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job:cancel() end
+    end }
 end
 
 --- 后台逐本补简介 / 作者（all-v2 不带，metadata 一本一请求）。已有简介的跳过；
@@ -444,13 +586,50 @@ end
 ---@param cb fun(book: Book|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:getDetailAsync(identity, cb)
-    return self.client:json("GET", "/api/Series/metadata", { seriesId = splitId(identity.stable_id) }, nil,
-        function(metadata, err)
-            if not metadata then return cb(nil, err) end
-            local book = withMetadata({ source_id = self.id, stable_id = identity.stable_id }, metadata)
+    local series_id, chapter_id = splitId(identity.stable_id)
+    local job, cancelled = nil, false
+    local function finish(book, err)
+        if cancelled then return end
+        cb(book, err)
+    end
+
+    --- 卷简介：目录里的章节摘要 > 行里已有的卷简介 > 单章接口 > 整部简介。
+    --- 行里的简介如果与整部简介相同，说明是旧版本回退写下的，不算「已有卷摘要」。
+    local function detail(metadata)
+        local book = withMetadata({ source_id = self.id, stable_id = identity.stable_id }, metadata)
+        if not chapter_id then
             require("book.store").rememberMany({ book })
-            cb(book)
+            return finish(book)
+        end
+        local series_intro = summary(metadata.summary)
+        local here = require("book.books_db").get(self.id, identity.stable_id)
+        local here_intro = here and summary(here.intro)
+        local toc = require("source.toc").read(self.id, series_id, true)
+        local entry = toc and findEntry(toc, chapter_id)
+        local known = summary(entry and entry.summary)
+            or (here_intro and here_intro ~= series_intro and here_intro)
+        local function store(intro)
+            book.intro = intro
+            require("book.store").rememberMany({ book })
+            finish(book)
+        end
+        if known then return store(known) end
+        -- 旧目录缓存没带卷摘要（升级前拉的目录）：单章接口只有几 KB，补一次。
+        job = self.client:json("GET", "/api/Series/chapter", { chapterId = chapter_id }, nil,
+            function(chapter)
+                store(summary(chapter and chapter.summary) or here_intro or book.intro)
+            end)
+    end
+
+    job = self.client:json("GET", "/api/Series/metadata", { seriesId = series_id }, nil,
+        function(metadata, err)
+            if not metadata then return finish(nil, err) end
+            detail(metadata)
         end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job:cancel() end
+    end }
 end
 
 --- Kavita 的阅读会话时长 = 相邻两次进度写入的时间跨度（10 分钟无写入即封会话）。
@@ -593,6 +772,9 @@ end
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
     if opts.dirty_only then return SourceBase.skipped(cb, "no remote delete") end
+    -- 手动刷新 / 书库重扫 = 05 A1 的第二类失效：投影必须重建，
+    -- 否则用户点了刷新、缓存状态变了，书架标记还是旧的。后台同步复用记忆（无 TTL、不重拉）。
+    if opts.force then Cache.resetShelf() end
     local libraries = {}
     for id in pairs(require("utils.settings").getSource(ID).libraries or {}) do
         libraries[#libraries + 1] = id
@@ -631,7 +813,21 @@ function Source:syncBooksAsync(opts, cb)
         self:backfillMeta(ids)
         -- 服务端已读进度同理：网页端 / 别的设备读过，书架也得进「最近阅读」与「已读」。
         result.pulled = result.pulled + backfillRead(self.id, reads)
-        cb(result)
+        -- 书架投影预热：开桌面必跑本方法，进书架时命中记忆（05 A1）。失败不影响同步结果，
+        -- 但不能静默：同一故障本进程只记一行（缓存模块异常通常意味着 kamare 侧坏了）。
+        local function settle(changed)
+            if cancelled then return end
+            result.pulled = result.pulled + changed
+            local ok, shelf_err = pcall(Cache.shelf)
+            if not ok and not shelf_prewarm_failed then
+                shelf_prewarm_failed = true
+                logger.warn("kavita shelf cache prewarm failed", shelf_err)
+            end
+            cb(result)
+        end
+        -- 系列级聚合不知道「当前读到哪一卷」：另一台设备读的新卷本机没有卷行，首页「当前阅读」
+        -- 会停在旧卷。按服务器给的 continue-point 补上（离线直接跳过）。
+        job = backfillCurrentVolume(self, reads, settle)
     end
 
     local function fetch()
@@ -825,6 +1021,73 @@ function Source:pullStatsAsync(cb)
 end
 
 --- series 的卷目录：series（取 libraryId）→ volumes → metadata（作者 / 简介写回书库，失败不影响目录）。
+--- Kavita 的卷列表 → 目录条目。fetchToc 与「点开系列时立即刷新进度」共用同一份映射：
+--- 标题退让顺序、卷摘要（挂在章上）、页数 / 已读页数必须两处一致，否则选卷列表会跳变。
+---@param series table Kavita SeriesDto（要 id / name / libraryId / format）
+---@param volumes table[] Kavita VolumeDto[]
+---@return BookChapter[]|nil
+local function tocFromVolumes(series, volumes)
+    local toc = {}
+    for _vidx, volume in ipairs(volumes) do
+        -- 卷摘要挂在章上（VolumeDto 没有 summary）：一章为空时用同卷第一个有摘要的。
+        local volume_summary
+        for _cidx, chapter in ipairs(volume.chapters or {}) do
+            volume_summary = volume_summary or summary(chapter.summary)
+        end
+        for _cidx, chapter in ipairs(volume.chapters or {}) do
+            local file = chapter.files and chapter.files[1] and chapter.files[1].filePath
+            toc[#toc + 1] = {
+                idx = #toc + 1,
+                uid = tostring(chapter.id),
+                title = title(chapter.titleName) or title(chapter.title) or title(volume.name)
+                    or (file and file:match("([^/\\]+)%.[^.]+$")) or series.name,
+                -- 卷简介：优先本章摘要，退回同卷其它章的摘要（都没有就不写，展示时回退系列简介）。
+                summary = summary(chapter.summary) or volume_summary,
+                chapterId = chapter.id,
+                volumeId = volume.id,
+                libraryId = series.libraryId,
+                seriesId = series.id,
+                format = FORMATS[tonumber(chapter.format) or tonumber(series.format)],
+                pages = tonumber(chapter.pages) or 0,
+                pagesRead = tonumber(chapter.pagesRead) or 0,
+            }
+        end
+    end
+    return #toc > 0 and toc or nil
+end
+
+--- 按需刷新目录：点开系列时立刻问一次服务器（各卷 pagesRead / 卷名 / 卷摘要），
+--- 绕过 6 小时目录缓存，但不拉 series metadata（那是开书补资料的事）。
+--- 失败不打扰用户：调用方继续用缓存。
+---@param series_id string
+---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:refreshToc(series_id, cb)
+    local cancelled = false
+    ---@type HttpJob
+    local job
+    local function done(toc, err)
+        if not cancelled then cb(toc, err) end
+    end
+    job = self.client:json("GET", "/api/Series/" .. series_id, nil, nil, function(series, err)
+        if not series then return done(nil, err) end
+        job = self.client:json("GET", "/api/Series/volumes", { seriesId = series_id }, nil,
+            function(volumes, verr)
+                if not volumes then return done(nil, verr) end
+                local toc = tocFromVolumes(series, volumes)
+                if not toc then return done(nil, _("这本书在 Kavita 上没有可读的卷")) end
+                if not require("source.toc").put(self.id, series_id, toc) then
+                    return done(nil, _("章节目录保存失败"))
+                end
+                done(toc)
+            end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job:cancel() end
+    end }
+end
+
 ---@param series_id string
 ---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -841,26 +1104,8 @@ function Source:fetchToc(series_id, cb)
         if not series then return cb(nil, err) end
         step("GET", "/api/Series/volumes", { seriesId = series_id }, function(volumes, verr)
             if not volumes then return cb(nil, verr) end
-            local toc = {}
-            for _vidx, volume in ipairs(volumes) do
-                for _cidx, chapter in ipairs(volume.chapters or {}) do
-                    local file = chapter.files and chapter.files[1] and chapter.files[1].filePath
-                    toc[#toc + 1] = {
-                        idx = #toc + 1,
-                        uid = tostring(chapter.id),
-                        title = title(chapter.titleName) or title(chapter.title) or title(volume.name)
-                            or (file and file:match("([^/\\]+)%.[^.]+$")) or series.name,
-                        chapterId = chapter.id,
-                        volumeId = volume.id,
-                        libraryId = series.libraryId,
-                        seriesId = series.id,
-                        format = FORMATS[tonumber(chapter.format) or tonumber(series.format)],
-                        pages = tonumber(chapter.pages) or 0,
-                        pagesRead = tonumber(chapter.pagesRead) or 0,
-                    }
-                end
-            end
-            if #toc == 0 then return cb(nil, _("这本书在 Kavita 上没有可读的卷")) end
+            local toc = tocFromVolumes(series, volumes)
+            if not toc then return cb(nil, _("这本书在 Kavita 上没有可读的卷")) end
             if not require("source.toc").put(self.id, series_id, toc) then
                 return cb(nil, _("章节目录保存失败"))
             end
@@ -973,107 +1218,222 @@ function Source:fetchVolume(ref, entry, cb)
     end }
 end
 
---- 打开一卷：漫画（cbz / 图片目录）在线且装了 kamare 就从 Kavita 记录的页交它在线看，
---- 回调 handled；kamare 打不开时 cbz 退回下载，图片目录报错。其余格式下载。
---- 关查看器时把页码记成远端版本地进度（kamare 已推给 Kavita），书架看得到进度。
+--- 漫画查看器的提示通道：on_next 找不到下一卷时没有 cb 可回，只能自己弹。
+---@param text string
+local function toast(text)
+    require("ui.themes.widgets.toast"):new{ text = text, timeout = 3 }:show()
+end
+
+--- 打开一卷：漫画（cbz / 图片目录）的缓存判定、起始页、离线全归 kamare cache（03 A1/A2/A9），
+--- moon 只按返回码路由；其它格式仍然下载后用内置阅读器。
+--- 关查看器写卷行真实位置 + 容器聚合（06 A1/A2）；章末续读按回调 id 回目录（03 A7）。
 ---@param ref BookIdentity 承载这一卷的书库行
 ---@param entry table
----@param toc table[] 同 series 的卷，章末续读按 chapterId 找下一卷
+---@param toc table[]|nil 同 series 的卷，章末续读按 chapterId 找下一卷
 ---@param title string
 ---@param cb fun(path: string|nil, err: string|nil, meta: { handled: boolean }|nil)
 ---@return { cancel: fun() }
 function Source:openEntry(ref, entry, toc, title, cb)
-    local Kamare = require("moonsource_kavita.kamare")
-    local cached = MAGIC[entry.format] and validFile(
-        T("%1/%2.%3", require("utils.paths").bookWorkDir(ref.stable_id, self.id), entry.chapterId, entry.format),
-        entry.format)
-    if (entry.format ~= "cbz" and entry.format ~= "image") or cached or not online() or not Kamare.available() then
+    if (entry.format ~= "cbz" and entry.format ~= "image") or not Cache.available("open") then
         return self:fetchVolume(ref, entry, cb)
     end
-    local job, cancelled = nil, false
+
+    local series_id = splitId(ref.stable_id)
+    --- 卷身份：真实位置记在 seriesId:chapterId 上，容器行只做聚合（06 A1）。
+    ---@param item table
+    ---@return string
+    local function volumeId(item)
+        return series_id .. ":" .. tostring(item.chapterId or item.uid)
+    end
+
+    --- 聚合 = (其它已读完卷数 + 本卷 fraction) / toc 卷数；目录缺失退本卷 fraction。
+    ---@param item table
+    ---@param fraction number
+    ---@return number
+    local function aggregate(item, fraction)
+        if type(toc) ~= "table" or #toc == 0 then return fraction end
+        local ProgressDB = require("book.progress_db")
+        local finished = 0
+        for _idx, other in ipairs(toc) do
+            if tostring(other.chapterId or other.uid) ~= tostring(item.chapterId or item.uid) then
+                local row = ProgressDB.get(self.id, volumeId(other))
+                if row and (tonumber(row.fraction) or 0) >= 1 then finished = finished + 1 end
+            end
+        end
+        return math.min(1, (finished + fraction) / #toc)
+    end
+
+    --- 卷行缺书时用目录卷名 + 容器元数据补一条（06 A2）：ProgressDB.recent 的 EXISTS books
+    --- 会过滤掉没有书行的卷，最近阅读里就看不到它。
+    ---@param item table
+    local function rememberVolume(item)
+        local BookDB = require("book.books_db")
+        local stable_id = volumeId(item)
+        if BookDB.get(self.id, stable_id) then return end
+        local container = BookDB.get(self.id, series_id) or ref.book or { stable_id = series_id }
+        require("book.store").rememberMany({ volumeRow(container, stable_id, item.title,
+            volumeIntro(item.summary, nil, container)) })
+    end
+
+    --- kamare 回调的是物理页 / 物理总数：卷行存真实位置，容器行只存聚合 fraction 且不进最近阅读。
+    ---@param item table
+    ---@param page any
+    ---@param total any
+    local function closeProgress(item, page, total)
+        total = tonumber(total) or tonumber(item.pages) or 0
+        page = tonumber(page) or 1
+        if total <= 0 then return end
+        local fraction = math.min(1, page / total)
+        local ProgressDB = require("book.progress_db")
+        ProgressDB.upsertRemote(self.id, volumeId(item), {
+            fraction = fraction,
+            page = page,
+            total_pages = total,
+            updated_at = os.time(),
+        })
+        rememberVolume(item)
+        -- 容器行做聚合，并带上「刚读过」的时间戳：图书馆「最近阅读」按系列行排，
+        -- 读完一卷立刻就能浮上去，不必等下一次同步。位置仍只在卷行上。
+        ProgressDB.upsertRemote(self.id, series_id, {
+            fraction = aggregate(item, fraction),
+            updated_at = os.time(),
+        }, { reset_updated_at = true })
+    end
+
+    ---@param item table
+    ---@param start_page integer|nil 官方 / 旧版通道的起始页；增强版由 kamare 的 journal 决定
+    ---@return table|nil viewer, string|nil code, string|nil message
     local function show(item, start_page)
-        return Kamare.open({
-            base_url = self.client.base_url, api_key = self.client.api_key,
-            entry = item, title = title, start_page = start_page,
-            on_close = function(page, total)
-                total = tonumber(total) or item.pages
-                page = tonumber(page) or 1
-                if total > 0 then
-                    require("book.progress_db").upsertRemote(self.id, ref.stable_id, {
-                        fraction = math.min(1, page / total), page = page, total_pages = total,
-                        updated_at = os.time(),
-                    })
-                end
-            end,
+        return Cache.open({
+            base_url = self.client.base_url,
+            api_key = self.client.api_key,
+            entry = item,
+            title = title,
+            start_page = start_page,
+            on_close = function(page, total) closeProgress(item, page, total) end,
             on_next = function(next_id)
-                for _idx, next_entry in ipairs(toc) do
-                    if tostring(next_entry.chapterId) == tostring(next_id) then return show(next_entry, 1) end
-                end
+                local next_entry = findEntry(toc or {}, tostring(next_id))
+                if not next_entry then return toast(_("下一卷不在目录里")) end
+                show(next_entry)
             end,
         })
     end
-    job = self.client:json("GET", "/api/Reader/get-progress", { chapterId = entry.chapterId }, nil, function(remote)
+
+    local cancelled, job = false, nil
+
+    --- 官方 / 旧版 kamare 没有 journal / resume 接口：起始页得 moon 自己给（03 A2 降级通道）。
+    --- 优先问 Kavita（跨设备读到哪就从哪续）；云端没记录 / 请求失败时用本地卷行
+    --- （关查看器时写的真实页），离线直接用本地。增强版由 kamare 的 journal 决定，不看这里。
+    ---@param item table
+    ---@param done fun(page: integer|nil)
+    ---@return table|nil job
+    local function withStartPage(item, done)
+        local pages = math.max(1, tonumber(item.pages) or 1)
+        local function localPage()
+            local row = require("book.progress_db").get(self.id, volumeId(item))
+            local page = row and tonumber(row.page)
+            if page and page > 0 then return math.min(page, pages) end
+        end
+        if not online() then
+            done(localPage())
+            return nil
+        end
+        return self.client:json("GET", "/api/Reader/get-progress", { chapterId = item.chapterId }, nil,
+            function(remote)
+                if cancelled then return end
+                local read = tonumber(remote and remote.pageNum) or 0
+                if read > 0 then return done(math.min(read + 1, pages)) end
+                -- 云端没记录 / 请求失败：本地关书写过页就别退回第 1 页。
+                done(localPage())
+            end)
+    end
+
+    ---@param viewer table|nil
+    ---@param code string|nil
+    ---@param message string|nil
+    local function afterOpen(viewer, code, message)
         if cancelled then return end
-        local read = remote and tonumber(remote.pageNum) or 0
-        local viewer, err = show(entry, math.max(1, math.min(read + 1, entry.pages)))
         if viewer then return cb(nil, nil, { handled = true }) end
-        if entry.format ~= "cbz" then return cb(nil, err) end
-        job = self:fetchVolume(ref, entry, cb)
-    end)
+        if code == "offline_not_cached" then
+            -- A5/A6：kamare 缓存 > 旧 cbz > 下载。旧 cbz 命中时离线照开，静默保留不删。
+            local old = entry.format == "cbz" and downloaded(self.id, ref.stable_id)
+            if old then return SourceBase.defer(cb, old) end
+            return cb(nil, Cache.message(code, message))
+        end
+        if code == "viewer_running" or code == "no_pages" or code == "settings_write_failed" then
+            -- 查看器已在运行绝不回退下载（旧的 bug）；页面为空 / 配置写失败也不该重下。
+            return cb(nil, Cache.message(code, message))
+        end
+        -- 其它失败：cbz 交给 fetchVolume 兜底（本地已有文件时只登记，不重新下载）；image 下载不了。
+        if entry.format == "cbz" then return self:fetchVolume(ref, entry, cb) end
+        return cb(nil, Cache.message(code, message))
+    end
+
+    if Cache.enhancedOpen() then
+        afterOpen(show(entry))
+    else
+        job = withStartPage(entry, function(start_page)
+            if cancelled then return end
+            afterOpen(show(entry, start_page))
+        end)
+    end
     return { cancel = function()
         cancelled = true
-        job:cancel()
+        if job and job.cancel then job:cancel() end
     end }
 end
 
---- 多卷选卷：标注已下载 / 在读 / 已读；关窗没选算取消。
+--- 旧「已下载」标记：kamare 不可用时卷列表右侧仍要显示本地 cbz / epub。
+---@param series Book
+---@param entry table
+---@return string|nil
+local function legacyVolumeState(series, entry)
+    local Paths = require("utils.paths")
+    local vid = series.stable_id .. ":" .. entry.chapterId
+    local state
+    if entry.pages > 0 and entry.pagesRead >= entry.pages then
+        state = _("已读")
+    elseif entry.pagesRead > 0 then
+        state = _("在读")
+    end
+    if entry.format and validFile(T("%1/%2.%3", Paths.bookWorkDir(vid, ID), entry.chapterId, entry.format), entry.format) then
+        state = state and T(_("%1 · 已下载"), state) or _("已下载")
+    end
+    return state
+end
+
+--- 多卷选卷：状态字 + 行尾缓存动作，标题栏「缓存整部」（04 / 07）；关窗没选算取消。
 ---@param series Book
 ---@param toc table[]
 ---@param cb fun(entry: table|nil)
 local function pickVolume(series, toc, cb)
-    local Paths = require("utils.paths")
-    local items = {}
-    for _idx, entry in ipairs(toc) do
-        local vid = series.stable_id .. ":" .. entry.chapterId
-        local state
-        if entry.pages > 0 and entry.pagesRead >= entry.pages then
-            state = _("已读")
-        elseif entry.pagesRead > 0 then
-            state = _("在读")
-        end
-        if entry.format and validFile(T("%1/%2.%3", Paths.bookWorkDir(vid, ID), entry.chapterId, entry.format), entry.format) then
-            state = state and T(_("%1 · 已下载"), state) or _("已下载")
-        end
-        items[#items + 1] = { text = entry.title, value = entry, mandatory = state }
-    end
-    local chosen = false
-    require("ui.themes.widgets.list"):new{
-        title = series.title or _("选择卷"),
-        items = items,
-        on_select = function(entry)
-            chosen = true
-            cb(entry)
-        end,
-        -- 单选点按时先关窗、同一拍再 on_select：下一拍还没选中就是用户关掉了列表。
-        close_callback = function()
-            require("ui/uimanager"):nextTick(function()
-                if not chosen then cb(nil) end
-            end)
-        end,
-    }:show()
+    local list = VolumeList.pick(series, toc, cb, {
+        fallback = function(entry) return legacyVolumeState(series, entry) end,
+    })
+    list:show()
+    return list
 end
 
---- 打开：已下载的直接开（不联网）；单卷 series 下到 series 行，多卷选卷后下到卷行。
+--- 打开：非漫画的已下载文件直接开（不联网）；漫画按 kamare 缓存 > 旧 cbz > 下载的顺序（03 A5）。
+--- `downloaded()` 的早返回不能压过 kamare 缓存，否则有旧 cbz 的卷永远走不进离线缓存。
 function Source:openBookAsync(identity, _opts, cb)
-    local path = downloaded(self.id, identity.stable_id)
-    if path then return SourceBase.defer(cb, path) end
     local job, cancelled = nil, false
     local function finish(file, err, meta)
         if not cancelled then cb(file, err, meta) end
     end
     local series_id, chapter_id = splitId(identity.stable_id)
+    local local_path = downloaded(self.id, identity.stable_id)
+    local local_format = local_path and local_path:match("%.(%w+)$")
+    -- EPUB / PDF：本地文件优先，否则下载后原生阅读；漫画要先进 kamare 判缓存（A5）。
+    if local_path and local_format ~= "cbz" then return SourceBase.defer(cb, local_path) end
+    -- 目录命中缓存才需要额外拉一次进度：本来就要 fetchToc 的话，那一次已经是最新。
+    local cached_toc = require("source.toc").read(self.id, series_id)
     job = self:toc(series_id, function(toc, err)
-        if not toc then return finish(nil, err) end
+        if not toc then
+            -- 目录拿不到但盘上有旧 cbz：本地文件仍可开，离线老用户不被缓存目录卡住。
+            if local_path then return finish(local_path) end
+            return finish(nil, err)
+        end
         if chapter_id or #toc == 1 then
             local entry = findEntry(toc, chapter_id)
             if not entry then return finish(nil, _("这一卷已不在 Kavita 上")) end
@@ -1085,15 +1445,25 @@ function Source:openBookAsync(identity, _opts, cb)
         -- 这里重读一次容器行，免得新 series 第一次打开时卷行被写成「未知作者」。
         local series = require("book.books_db").get(self.id, series_id)
             or identity.book or { stable_id = series_id }
-        pickVolume(series, toc, function(entry)
+        local picker = pickVolume(series, toc, function(entry)
             if cancelled then return end
             if not entry then return finish(nil, _("已取消")) end
             local ref = { source_id = self.id, stable_id = series_id .. ":" .. entry.chapterId }
             -- 卷行继承容器（series 级）元数据：Kavita 只在 series 级给作者 / 简介 / 分类，
             -- 卷行自己空着，最近阅读里就是「未知作者」。每次开书对齐一次，容器补全后立刻生效。
-            require("book.store").rememberMany({ volumeRow(series, ref.stable_id, entry.title) })
+            local cur = require("book.books_db").get(self.id, ref.stable_id)
+            require("book.store").rememberMany({ volumeRow(series, ref.stable_id, entry.title,
+                volumeIntro(entry.summary, cur, series)) })
             job = self:openEntry(ref, entry, toc, series.title or entry.title, finish)
         end)
+        -- 点开系列 = 想看最新进度：目录缓存 6 小时内不会自己更新，这里立刻问一次服务器
+        -- （各卷 pagesRead），拿到后原地刷新选卷列表；离线 / 失败继续用缓存，不打断选择。
+        if cached_toc and picker and type(picker.refreshToc) == "function" and online() then
+            job = self:refreshToc(series_id, function(fresh)
+                if cancelled or not fresh then return end
+                picker.refreshToc(fresh)
+            end)
+        end
     end)
     return { cancel = function()
         cancelled = true
@@ -1101,14 +1471,58 @@ function Source:openBookAsync(identity, _opts, cb)
     end }
 end
 
+--- 卷身份 → Kavita volumeId（按 chapterId 从目录缓存反查）。目录还没拉过就没有。
+---@param series_id string
+---@param chapter_id string
+---@return integer|nil
+function Source:volumeId(series_id, chapter_id)
+    local toc = require("source.toc").read(self.id, series_id, true)
+    local entry = toc and findEntry(toc, chapter_id)
+    return entry and entry.volumeId or nil
+end
+
+--- 卷身份（seriesId:chapterId）折叠回系列 id；不是卷身份返回 nil。
+--- 图书馆「最近阅读」按它把卷行归并成系列行（点开再选卷），首页「当前阅读」仍按卷展示。
+---@param stable_id string
+---@return string|nil
+function Source:volumeParent(stable_id)
+    if type(stable_id) ~= "string" then return nil end
+    return stable_id:match("^(%d+):%d+$")
+end
+
+--- 封面：系列行取系列封面，卷行取**这一卷自己的封面**（`volume-cover`）。
+--- `chapter-cover` 是从该卷文件第一页取的图，扫描版常是跨页 / 版权页 / 白页，缩到卡片上就是坏图，不用。
+--- 离线或目录里查不到这一卷时退回 kamare 缓存的系列封面（本地文件，不需要鉴权）。
+--- `authoritative`：源封面压过同身份的本地抽页 / 旧封面缓存。
 ---@param identity BookIdentity
 ---@return BookCoverRequest|nil, string|nil
 function Source:coverRequest(identity)
     if not self:configured() then return nil, _("未配置") end
     local series_id, chapter_id = splitId(identity.stable_id)
-    local url = chapter_id and self.client:url("/api/Image/chapter-cover", { chapterId = chapter_id })
-        or self.client:url("/api/Image/series-cover", { seriesId = series_id })
-    return { url = url, headers = self.client:headers() }
+    -- 已缓存系列 kamare 落了本地封面：离线也能画，且不再走鉴权 URL（05 A8）。
+    -- 只在文件真的存在时用：index 里记的路径可能已被用户清掉。
+    local shelf = Cache.shelf()
+    local local_cover = shelf and shelf.cover and shelf.cover[series_id]
+    if not (type(local_cover) == "string" and local_cover ~= ""
+        and require("libs/libkoreader-lfs").attributes(local_cover, "mode") == "file") then
+        local_cover = nil
+    end
+    if chapter_id and online() then
+        local volume_id = self:volumeId(series_id, chapter_id)
+        if volume_id then
+            return {
+                url = self.client:url("/api/Image/volume-cover", { volumeId = volume_id }),
+                headers = self.client:headers(),
+                authoritative = true,
+            }
+        end
+    end
+    if local_cover then return { url = local_cover, authoritative = true } end
+    return {
+        url = self.client:url("/api/Image/series-cover", { seriesId = series_id }),
+        headers = self.client:headers(),
+        authoritative = true,
+    }
 end
 
 --- Kavita 进度 → 月读位置；与本地同一 spine / 页时交回本地行。

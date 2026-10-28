@@ -10,7 +10,8 @@
 
 IO 一律 XxxAsync(..., cb) 返回 { cancel }，取消后不回调；当场能回的结果也用 SourceBase.defer(cb, ...) 下一帧回调，
 不支持的域用 SourceBase.skipped(cb, reason)。无 IO 的 capabilities / configured / coverRequest 保持同步。
-capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 SourceCapabilities.supports* 判断），
+capabilities() 是 UI 开关（scrape / edit / stats_pull / shelf_cache，默认 false，用 SourceCapabilities.supports* 判断；
+shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明，核心按 caps.shelf_cache == true 就地判），
 不是「有没有这个函数」；全本缓存看有没有 cacheAllChaptersAsync，进度双向看 get/putProgressAsync 是否都在。
 源外代码只碰 source.<id>（经 registry）和 source.<id>.setting；require("source.<id>")，禁止写 .init。
 新增内置源：source/<id>/init.lua（meta + new）、可选 setting.lua、registry 的 BUILTIN 加一项，测试放 tests/source/<id>/。
@@ -40,6 +41,13 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 ---@field scrape boolean 支持把外部元数据写入本地书籍记录（仅 local 为 true）
 ---@field edit boolean 支持编辑展示元信息（仅 local 为 true）
 ---@field stats_pull boolean 是否从远端拉取阅读统计并写入本地 reading_stats（各源自决映射与替换策略）
+---@field shelf_cache boolean 是否提供书架缓存投影（声明 true 且实现 shelfCache 才进离线书架，见 05 A2）
+
+--- 书架缓存投影：源从自己的缓存索引投影出的三张表，同步、只读本地记忆（05 A2）。
+---@class ShelfCacheProjection
+---@field series_ids table<string, boolean> 至少一章可离线读的系列
+---@field mark table<string, boolean> 「已缓存」标记（当前语义同 series_ids，留给 UI 命名）
+---@field cover table<string, string> seriesId → 本地封面绝对路径
 
 ---@class SyncResult
 ---@field pulled integer
@@ -93,6 +101,8 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 ---@class BookCoverRequest
 ---@field url string 封面 URL 或本地 file:// 路径
 ---@field headers table 附加请求头（可空表）
+---@field authoritative boolean|nil 源封面是权威的：优先于同身份的本地抽页 / 旧缓存，本地只作加载失败兜底。
+---        给「本地缓存可能本来就是坏图」的源用（如 Kavita：卷行抽页 = 扫描版第一页）
 
 --- 按章正文载荷：Source 只交内容，宿主写 HTML。
 ---@class ChapterContentPayload
@@ -144,6 +154,8 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull，默认 false，用 S
 ---@field getProgressAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: ProgressPosition|nil, err: string|nil, meta: table|nil)): table|nil 拉取远端进度；meta.empty 表示远端无记录
 ---@field putProgressAsync fun(self: BookSource, identity: BookIdentity, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil, meta: table|nil)): table|nil 推送进度
 ---@field coverRequest fun(self: BookSource, identity: BookIdentity): (BookCoverRequest|nil, string|nil) 封面请求描述（纯构造，无 IO）
+---@field volumeParent fun(self: BookSource, stable_id: string): string|nil 卷身份所属系列 id（可选、同步、纯构造）。声明后「最近阅读」把卷行归并成系列行（一部漫画一条，点开再选卷），首页「当前阅读」仍取卷行；返回 nil 表示不是卷身份
+---@field shelfCache fun(self: BookSource): ShelfCacheProjection|nil 书架缓存投影（可选、同步、只读本地记忆）。仅 capabilities().shelf_cache 为 true 的源实现；series_ids/mark 是 [stable_id]=true，cover 是 [stable_id]=本地封面绝对路径。不支持的源不实现（nil）
 ---@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil Z-Library 导入目标（local 移入）
 ---@field pushStatsAsync fun(self: BookSource, rows: BookStatsRow[], cb: fun(data: BookStatsPushResult|nil, err: string|nil)): table|nil 上报领域统计记录；协议细节由源处理
 ---@field pullStatsAsync fun(self: BookSource, cb: fun(result: BookStatsRow[]|BookStatsPullResult|nil, err: string|nil)): table|nil 拉取领域统计记录（可选 replace 覆盖策略）
@@ -205,10 +217,10 @@ function SourceBase.skipped(cb, reason)
     return SourceBase.defer(cb, { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = true, reason = reason })
 end
 
---- 返回默认全 false 能力集。
+--- 返回默认全 false 能力集。书架缓存是可选项：默认 false，源自己置 true 并实现 shelfCache。
 ---@return SourceCapabilities
 function SourceBase:capabilities()
-    return { scrape = false, edit = false, stats_pull = false }
+    return { scrape = false, edit = false, stats_pull = false, shelf_cache = false }
 end
 
 --- 是否已配置。

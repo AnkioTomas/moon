@@ -387,6 +387,45 @@ do
     sync.runs[1].done({ ok = true })
 end
 
+-- passive：只展示、不占执行权（漫画缓存由 kamare 自己跑）；hold() 为假时不再压自动休眠。
+do
+    local function drain()
+        local fns = scheduled
+        scheduled = {}
+        for _idx, item in ipairs(fns) do item.fn() end
+    end
+    local share = require("pluginshare")
+    local holds = true
+    local passive = Tasks.enqueue(spec("pas-cache", "cache", {
+        passive = true,
+        hold = function() return holds end,
+    }))
+    Assert.eq(#passive.runs, 1, "passive 直接启动，不排队")
+
+    local dl = Tasks.enqueue(spec("pas-dl", "download"))
+    Assert.eq(#dl.runs, 1, "passive 不占执行权，异类照常开跑")
+    local p2 = Tasks.enqueue(spec("pas-cache-2", "cache", { passive = true }))
+    Assert.eq(#p2.runs, 1, "passive 不被异类挡住")
+    p2.runs[1].done({ ok = true })
+
+    drain()
+    Assert.is_true(share.pause_auto_suspend, "passive cache 同样撑住不休眠")
+    holds = false
+    passive.runs[1].report(nil, 1, 3)
+    drain()
+    Assert.is_false(share.pause_auto_suspend, "hold() 说放行就放行")
+    holds = true
+    passive.runs[1].report(nil, 2, 3)
+    drain()
+    Assert.is_true(share.pause_auto_suspend, "恢复后继续撑住")
+
+    passive.runs[1].done({ ok = true })
+    dl.runs[1].done({ ok = true })
+    drain()
+    Assert.is_false(share.pause_auto_suspend)
+    Assert.len(Tasks.tasks(), 0, "passive 结束也离开未结束列表")
+end
+
 -- 未结束任务满 64 个后拒绝入队，带 queue_full（同类并行时在跑的也算）。
 do
     local accepted, reason = 0, nil

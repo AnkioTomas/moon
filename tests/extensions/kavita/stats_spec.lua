@@ -550,8 +550,9 @@ do
 end
 
 do
-    -- durationSeconds = 0 的跳页（只有 pagesRead / endPage、没有阅读时间）不发行 —— 会话行说的是
-    -- 「读了多久」；但它要参与进度序列与当天页数，否则这段跳读会从当天页面消失、
+    -- durationSeconds = 0 但有推进的章行照样发行：Kavita 的会话是「两次进度写入之间」，
+    -- 只写一次就是 0 秒，可推进的页数是真的（详情页「已读页数 / 上次阅读」靠它）。
+    -- 它同时要参与进度序列与当天页数，否则这段跳读会从当天页面消失、
     -- 而后续会话又因为 reached 更高而少算，合计就对不上读到的最远页码。
     local d = dayTs(2026, 10, 11)
     local result = Stats.fromHistory({
@@ -563,8 +564,10 @@ do
               totalPages = 100, startTimeUtc = "2026-10-11T03:00:00" } } },
     }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [101] = 1 } })
 
-    Assert.is_nil(find(result.rows, "cloud_session", "101", hourTs(2026, 10, 11, 10)),
-        "零时长章行不发行会话行")
+    local jump = find(result.rows, "cloud_session", "101", hourTs(2026, 10, 11, 10))
+    Assert.not_nil(jump, "零时长但有推进的章行也发行（页数是真推进）")
+    Assert.eq(jump.duration, 0)
+    Assert.eq(jump.event_count, 60)
     local read = find(result.rows, "cloud_session", "101", hourTs(2026, 10, 11, 11))
     Assert.not_nil(read)
     Assert.eq(read.event_count, 10, "跳读已把进度推到 60，本次只推进 10 页")
