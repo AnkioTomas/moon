@@ -24,7 +24,11 @@ end
 package.preload["reader.session"] = function()
     return { current = function() return { identity = { source_id = "local", stable_id = "x", chapter_idx = 1 } } end }
 end
-package.preload["ui/font"] = function() return { getFace = function(_self, name, size) return { size = size } end } end
+-- 注音字体按像素直接开 FreeType 面（NotoSans 是 KOReader 自带字体，必在）。
+package.preload["fontlist"] = function() return { fontdir = "/fonts" } end
+package.preload["ffi/freetype"] = function()
+    return { newFaceSize = function(_path, px) return { px = px, done = function() end } end }
+end
 local rendered = {}
 package.preload["ui/rendertext"] = function()
     return {

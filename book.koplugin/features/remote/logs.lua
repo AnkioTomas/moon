@@ -76,24 +76,22 @@ end
 --- 收集常见根路径，按长度降序，供 scrubPaths 使用。
 ---@return { root: string, token: string }[]
 function M.pathRoots()
-    local roots = {}
-    pcall(function()
-        local DataStorage = require("datastorage")
-        local Paths = require("utils.paths")
-        local data = DataStorage:getFullDataDir()
-        roots[#roots + 1] = { root = Paths.root(), token = "$MOON" }
-        roots[#roots + 1] = { root = data, token = "$DATA" }
-        if DataStorage.getDataDir then
-            local d = DataStorage:getDataDir()
-            if d and d ~= "" and d ~= data then
-                roots[#roots + 1] = { root = d, token = "$DATADIR" }
-            end
+    local DataStorage = require("datastorage")
+    local data = DataStorage:getFullDataDir()
+    local roots = {
+        { root = require("utils.paths").root(), token = "$MOON" },
+        { root = data, token = "$DATA" },
+    }
+    if DataStorage.getDataDir then
+        local d = DataStorage:getDataDir()
+        if d and d ~= "" and d ~= data then
+            roots[#roots + 1] = { root = d, token = "$DATADIR" }
         end
-        local home = os.getenv("HOME")
-        if home and home ~= "" then
-            roots[#roots + 1] = { root = home, token = "$HOME" }
-        end
-    end)
+    end
+    local home = os.getenv("HOME")
+    if home and home ~= "" then
+        roots[#roots + 1] = { root = home, token = "$HOME" }
+    end
     table.sort(roots, function(a, b) return #a.root > #b.root end)
     return roots
 end
