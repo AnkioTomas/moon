@@ -86,43 +86,6 @@ function Crypto.decrypt_content(encrypted_content_b64, v1_key_hex)
     return Aes.cbc_decrypt(raw:sub(17), key, raw:sub(1, 16), true)
 end
 
-local libz_cache
-
---- libz 句柄；加载失败返回 false。
----@return table|false
-local function loadLibz()
-    if libz_cache ~= nil then return libz_cache end
-    local ffi = require("ffi")
-    -- 逐条 cdef：同名函数可能已被其他模块声明，重复声明报错不能连带丢掉其余声明。
-    -- 参数用 void * 才能兼容他人以 z_stream * 声明的同名函数。
-    for _idx, decl in ipairs({
-        [[typedef struct {
-            const unsigned char *next_in;
-            unsigned int avail_in;
-            unsigned long total_in;
-            unsigned char *next_out;
-            unsigned int avail_out;
-            unsigned long total_out;
-            const char *msg;
-            void *state;
-            void *(*zalloc)(void *, unsigned int, unsigned int);
-            void (*zfree)(void *, void *);
-            void *opaque;
-            int data_type;
-            unsigned long adler;
-            unsigned long reserved;
-        } moon_z_stream;]],
-        "int inflateInit2_(void *, int, const char *, int);",
-        "int inflate(void *, int);",
-        "int inflateEnd(void *);",
-    }) do
-        pcall(ffi.cdef, decl)
-    end
-    local ok, lib = pcall(ffi.load, "z")
-    libz_cache = ok and lib or false
-    return libz_cache
-end
-
 --- 尽量解压 gzip/zlib；失败则原样返回。
 ---@param data string
 ---@param compress_status number|nil
@@ -134,60 +97,9 @@ function Crypto.maybe_decompress(data, compress_status)
     local need = (tonumber(compress_status) or 0) > 0 or is_gzip or is_zlib
     if not need then return data end
 
-    local ffi = require("ffi")
-    local libz = loadLibz()
-    if not libz then
-        local ok2, zlib = pcall(require, "ffi/zlib")
-        if ok2 and zlib and is_zlib then
-            local buflen = math.max(#data * 8, 64)
-            for _attempt = 1, 6 do
-                local ok3, out = pcall(zlib.zlib_uncompress, data, buflen)
-                if ok3 and out then return out end
-                buflen = buflen * 2
-            end
-        end
-        return data
-    end
-
+    --- 截断的载荷也要尽量给出前面解出的部分。
     local function inflate(blob, window_bits)
-        local strm = ffi.new("moon_z_stream")
-        local zs = ffi.cast("void *", strm)
-        local rc = libz.inflateInit2_(zs, window_bits, "1.2.11", ffi.sizeof(strm))
-        if rc ~= 0 then
-            return nil
-        end
-        local out_cap = math.max(#blob * 8, 4096)
-        local chunks = {}
-        local input = ffi.new("unsigned char[?]", #blob)
-        ffi.copy(input, blob, #blob)
-        ---@diagnostic disable-next-line: inject-field
-        strm.next_in = input
-        ---@diagnostic disable-next-line: inject-field
-        strm.avail_in = #blob
-        while true do
-            local buf = ffi.new("unsigned char[?]", out_cap)
-            ---@diagnostic disable-next-line: inject-field
-            strm.next_out = buf
-            ---@diagnostic disable-next-line: inject-field
-            strm.avail_out = out_cap
-            local ret = libz.inflate(zs, 0)
-            local produced = out_cap - strm.avail_out
-            if produced > 0 then
-                chunks[#chunks + 1] = ffi.string(buf, produced)
-            end
-            if ret == 1 then
-                libz.inflateEnd(zs)
-                return table.concat(chunks)
-            end
-            if ret ~= 0 then
-                libz.inflateEnd(zs)
-                return nil
-            end
-            if strm.avail_in == 0 and strm.avail_out ~= 0 then
-                libz.inflateEnd(zs)
-                return table.concat(chunks)
-            end
-        end
+        return require("utils.inflate").all(blob, window_bits, true)
     end
 
     if is_gzip then
