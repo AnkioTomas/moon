@@ -272,7 +272,11 @@ function StatsDB.add(row, status)
     local source_id = row.source_id
     local start_time = tonumber(row.start_time)
     local duration = tonumber(row.duration)
-    if not start_time or not duration or duration <= 0 then
+    -- 云端会话的 0 秒是合法值：Kavita 的会话是「两次进度写入之间」，只写一次（开书 / 关书各一次）
+    -- 就是 0 秒，但推进的页数是真的。拒掉它，详情页「已读页数 / 上次阅读」会整段消失。
+    -- 其它记录类型（本地逐页 / 日桶 / 总量）没有时长就没有意义，照旧拒收。
+    local zero_ok = row.record_type == SESSION_RECORD and (tonumber(row.event_count) or 0) > 0
+    if not start_time or not duration or (duration <= 0 and not zero_ok) then
         return false
     end
     local event_count
@@ -722,7 +726,15 @@ local function bookDays(source_id, filter, filter_args)
             ON l.source_id=c.source_id AND l.stable_id=c.stable_id AND l.day=c.day
             LEFT JOIN cloud_pages cp
             ON cp.source_id=c.source_id AND cp.stable_id=c.stable_id AND cp.day=c.day
-          WHERE l.day IS NULL)
+          WHERE l.day IS NULL
+          UNION ALL
+          -- 只有 0 秒会话（Kavita 单次进度写入）的（书，天）：时长 0，页数照算，
+          -- 否则「统计」的当日书单 / 详情「最近几天」会整段看不到这本书。
+          SELECT cp.source_id, cp.stable_id, cp.day, 0, cp.pages, 0, 0
+          FROM cloud_pages cp
+          LEFT JOIN loc l ON l.source_id=cp.source_id AND l.stable_id=cp.stable_id AND l.day=cp.day
+          LEFT JOIN cloud c ON c.source_id=cp.source_id AND c.stable_id=cp.stable_id AND c.day=cp.day
+          WHERE l.day IS NULL AND c.day IS NULL)
         ]], args
 end
 

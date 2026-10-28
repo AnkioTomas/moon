@@ -330,7 +330,10 @@ function Stats.fromHistory(entries, ctx)
         -- 零时长章行不发行（会话行说的是「这一段读了多久」），但推进照样算进当天页数：
         -- 否则这次跳读会从当天页数里消失，而后续会话又因 reached 更高而少算。
         day_pages[slice.day] = (day_pages[slice.day] or 0) + advance
-        if slice.duration > 0 and slice.epoch then
+        -- 零时长章行也要发行：Kavita 的会话是「两次进度写入之间」，只写一次（开书 / 关书各一次）
+        -- 就是 0 秒，但推进的页数是真的。丢掉它，详情页「已读页数 / 上次阅读」会整段消失
+        -- （另一台设备刚读的那一卷尤其明显）。既没时长又没推进的（打开没翻）才跳过。
+        if slice.epoch and (slice.duration > 0 or advance > 0) then
             local session = statsRow(source_id, slice.identity, SESSION_RECORD,
                 slice.epoch, slice.duration, fetched_at)
             session.event_count = advance
