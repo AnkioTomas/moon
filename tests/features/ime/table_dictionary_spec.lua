@@ -38,6 +38,17 @@ local cangjie = Dictionary:new("cangjie")
 Assert.is_true(cangjie:isAvailable())
 Assert.contains(cangjie:lookup("a"), "日")
 Assert.is_true(tonumber(cangjie:entries()) > 130000)
+-- 速成首尾码：按字频排，常用字在前、多码同字只出一次
+local quick = cangjie:glob("a*b")
+Assert.eq(quick[1], "明")
+Assert.contains(quick, "晴")
+local seen = {}
+for _idx, word in ipairs(cangjie:glob("o*o")) do
+    Assert.is_nil(seen[word], "重复候选: " .. word)
+    seen[word] = true
+end
+Assert.eq(cangjie:glob("o*o")[1], "像")
+Assert.is_nil(seen["人"], "单码字「人」(o) 不是两键速成码 oo 的候选")
 cangjie:reset()
 
 selected = "zhuyin"

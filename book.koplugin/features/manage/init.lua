@@ -33,7 +33,7 @@ Manage.ITEMS = {
     { id = "dictionary", label = _("词典"), subtitle = _("多词典查词") },
     { id = "extensions", label = _("拓展页签"), subtitle = _("桌面底栏的其它插件入口") },
     { id = "fontmap", label = _("书内字体映射"), subtitle = _("将书中指定的字体替换为本机字体") },
-    { id = "ime", label = _("中文输入法"), subtitle = _("拼音、五笔、仓颉、注音") },
+    { id = "ime", label = _("中文输入法"), subtitle = _("拼音、五笔、仓颉、速成、注音") },
     { id = "lockscreen", label = _("锁屏显示"), subtitle = _("组合壁纸与锁屏主体") },
     { id = "nightmode", label = _("自动夜间与亮度"), subtitle = _("按时间或天气调整") },
     { id = "ocr", label = _("OCR 识字"), subtitle = _("图片文字识别") },
