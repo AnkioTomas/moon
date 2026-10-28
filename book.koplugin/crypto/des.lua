@@ -121,7 +121,7 @@ local function schedule(key)
     for i = 1, 28 do c[i], d[i] = kp[i], kp[i + 28] end
     local keys = {}
     for round = 1, 16 do
-        for _ = 1, SHIFTS[round] do
+        for _shift = 1, SHIFTS[round] do
             table.insert(c, table.remove(c, 1))
             table.insert(d, table.remove(d, 1))
         end

@@ -144,7 +144,7 @@ end
 ---@param device table
 ---@param gs table G_reader_settings
 function DesktopSettings.swapPageKeys(device, gs)
-    for _, side in ipairs({ "Left", "Right" }) do
+    for _idx, side in ipairs({ "Left", "Right" }) do
         local key = "input_invert_" .. side:lower() .. "_page_turn_keys"
         if gs:isTrue(key) then
             gs:makeFalse(key)

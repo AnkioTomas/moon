@@ -41,7 +41,7 @@ function Mixed.install(document)
 
     local cre = document:engineInit()
     local installed = {}
-    for _, face in ipairs(cre.getFontFaces()) do installed[face] = true end
+    for _idx, face in ipairs(cre.getFontFaces()) do installed[face] = true end
     local western = settings.western_font_id ~= "" and require("ui.fonts").faceForId(settings.western_font_id)
         or installed.Bookerly and "Bookerly" or installed["Noto Serif"] and "Noto Serif"
     if not western then return end
@@ -67,7 +67,7 @@ function Mixed.install(document)
         end
         local additional = not G_reader_settings:isFalse("additional_fallback_fonts")
         if additional or not user_fallback then
-            for _, face in pairs(doc.fallback_fonts) do
+            for _key, face in pairs(doc.fallback_fonts) do
                 if not seen[face] then
                     faces[#faces + 1] = face
                     seen[face] = true

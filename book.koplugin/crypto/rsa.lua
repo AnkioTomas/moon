@@ -348,11 +348,11 @@ local function modinv(a, m)
     local g, x = egcd(a, m)
     if #g ~= 1 or g[1] ~= 1 then return nil end
     if x.neg then
-        local _, rem = divmod(x.v, m)
+        local _quot, rem = divmod(x.v, m)
         if is_zero(rem) then return zzero() end
         return zsub(m, rem)
     end
-    local _, rem = divmod(x.v, m)
+    local _quot, rem = divmod(x.v, m)
     return rem
 end
 

@@ -32,14 +32,14 @@ local function tinted_canvas(bb)
     local forwarded = {}
     return setmetatable({
         getWidth = function() return bb:getWidth() end,
-        colorblitFrom = function(_, ...) return bb:colorblitFromRGB32(...) end,
+        colorblitFrom = function(_self, ...) return bb:colorblitFromRGB32(...) end,
     }, {
-        __index = function(_, key)
+        __index = function(_proxy, key)
             local method = forwarded[key]
             if method == nil then
                 local value = bb[key]
                 if type(value) ~= "function" then return value end
-                method = function(_, ...) return value(bb, ...) end
+                method = function(_self, ...) return value(bb, ...) end
                 forwarded[key] = method
             end
             return method

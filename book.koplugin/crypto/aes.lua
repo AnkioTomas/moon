@@ -58,7 +58,7 @@ end
 local function mul(a, b)
     local r = 0
     a, b = band(a, 0xff), band(b, 0xff)
-    for _ = 1, 8 do
+    for _bit = 1, 8 do
         if band(b, 1) ~= 0 then r = bxor(r, a) end
         a = xtime(a)
         b = rshift(b, 1)
