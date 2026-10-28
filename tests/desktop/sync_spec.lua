@@ -397,4 +397,34 @@ do
     Assert.eq(#scanned, 0)
 end
 
+-- 后台上传：同 key 已在上传时第二轮不得并发再起一份，提示「正在执行」。
+do
+    for i = #rejected, 1, -1 do rejected[i] = nil end
+    local starts, bg = 0, nil
+    local up = setmetatable({
+        id = "up", name = "Up", configured = function() return true end,
+        syncBooksAsync = function(_, opts, cb)
+            bg = opts.on_background
+            cb({ pulled = 0 })
+            return { cancel = function() end }
+        end,
+    }, { __index = SourceBase })
+    local desk = { source = up, _books_sync = {}, _stats_sync = {}, tab = "home",
+        updateView = function() end, onEvent = function() end }
+    local function start(_report, _done) starts = starts + 1; return { cancel = function() end } end
+    Sync.open(desk)
+    bg(start)
+    local task = Tasks.get("books-upload\0up")
+    Assert.not_nil(task, "上传经任务队列")
+    Assert.eq(starts, 1)
+    Assert.eq(task.state, "running")
+    Sync.open(desk)
+    bg(start)
+    Assert.eq(starts, 1, "上传还在执行：不并发第二份")
+    Assert.len(rejected, 1)
+    Assert.eq(rejected[1].reason, "running")
+    Assert.eq(rejected[1].task.key, "books-upload\0up")
+    task.cancel()
+end
+
 return true

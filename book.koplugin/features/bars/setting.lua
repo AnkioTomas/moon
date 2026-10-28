@@ -30,7 +30,8 @@ Setting.defaults = {
 }
 
 --- 无默认值的持久键：顶栏高度（读取时由 features.bars.layout 夹到合法范围）。
-Setting.keys = { "book_reader_top_bar_height" }
+-- cre_header_clock_prev：开顶栏时为占位改 KOReader 全局 cre_header_clock 前的原值（false = 原本没设），关顶栏时还原。
+Setting.keys = { "book_reader_top_bar_height", "cre_header_clock_prev" }
 
 ---@param desktop BookDesktop
 ---@return BookSettingEntry[]

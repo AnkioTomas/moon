@@ -75,6 +75,7 @@ package.preload["reader.session"] = function()
     }
 end
 local Bars = require("features.bars")
+require("utils.settings").get("features.bars").cre_header_clock_prev = nil -- 沙箱可能留着上次的快照
 local UIManager = require("ui/uimanager")
 local dirty = {}
 UIManager.setDirty = function(_, widget, mode, rect)
@@ -251,6 +252,24 @@ Assert.len(events, 2)
 events = {}
 Bars.setSystemTop(ui_top, true)
 Assert.len(events, 0)
+
+-- 关顶栏：改过的 KOReader 全局 cre_header_clock 还原成原值（原本没设就删掉），不留下莫名打开的页眉时钟
+Bars.setSystemTop(ui_top, false)
+Assert.is_nil(reader_settings.cre_header_clock, "原本没设：还原为未设")
+Assert.eq(cre_props["window.status.clock"], 0)
+Assert.is_nil(require("utils.settings").get("features.bars").cre_header_clock_prev)
+-- 原本用户自己开着 → 关 bars 后仍开着
+reader_settings.cre_header_clock = 1
+header_h = 0
+ui_top.document.configurable.status_line = 1
+Bars.setSystemTop(ui_top, true)
+ui_top.document.configurable.status_line = 0 -- 真实 ConfigChange 会写回 configurable，桩不会
+Bars.setSystemTop(ui_top, false)
+Assert.eq(reader_settings.cre_header_clock, 1)
+Assert.eq(cre_props["window.status.clock"], 1)
+Assert.is_nil(require("utils.settings").get("features.bars").cre_header_clock_prev, "还原后不留快照")
+-- 回到顶栏开着的状态供后续用例
+ui_top.document.configurable.status_line = 0
 
 -- 强制重画：月读画底栏时改走整页重画，不让原生底栏盖上来
 footer:onUpdateFooter(true)

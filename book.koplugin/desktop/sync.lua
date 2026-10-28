@@ -149,7 +149,7 @@ local function syncBooks(desktop, source, force, follow)
             end,
             on_background = function(start)
                 -- 本地新书已入库可读；上传进任务队列，顶栏可见进度，传完刷新书架（身份并成云端书）。
-                local upload = Tasks.enqueue{
+                local spec = {
                     key = "books-upload\0" .. tostring(source.id), kind = "sync",
                     title = source.name .. " · " .. _("上传"),
                     run = function(report, finish)
@@ -161,7 +161,13 @@ local function syncBooks(desktop, source, force, follow)
                         end)
                     end,
                 }
-                if not upload then start(function() end, function() end) end
+                local upload, reason = Tasks.enqueue(spec)
+                -- 同 key 已在上传：不再并发第二份，剩下的脏书由那一轮或下一轮同步带走；队列满才退回直跑。
+                if not upload and reason == "queue_full" then
+                    start(function() end, function() end)
+                elseif not upload then
+                    require("workers.ui.task_dialog").rejected(reason, spec)
+                end
             end,
         }, function(result, err)
             finish({ ok = result ~= nil, err = err })

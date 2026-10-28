@@ -99,9 +99,16 @@ local added, skipped = SubDB.addMany({ { kind = "rss", url = "https://m1", title
 Assert.eq(added, 2)
 Assert.eq(skipped, 1)
 
-SubDB.remove(id)
+-- 删源：条目与它名下的阅读范围一并删，返回范围 id 给调用方清隐藏书；别的源 / 分组的范围不动
+local mine = SubDB.scope({ feed = id, mode = "unread", q = "" })
+local other_scope = SubDB.scope({ grp = "G", mode = "unread", q = "" })
+local removed = SubDB.remove(id)
 Assert.eq(SubDB.feed(id), nil)
 Assert.eq(select(2, SubDB.items(id, 1, 20)), 0, "条目一并删")
+Assert.len(removed, 1)
+Assert.eq(removed[1], mine)
+Assert.is_nil(SubDB.scopeOf(mine))
+Assert.not_nil(SubDB.scopeOf(other_scope))
 Base.close()
 for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end
 
