@@ -112,7 +112,7 @@ do
     Assert.errors(function() Kf8.extract(book, root) end)
 end
 
--- probe：只读头部与封面记录；正文不支持（HUFF / DRM）也能取元数据，MOBI6 返回 nil，坏文件报错
+-- probe：只读头部与封面记录；正文解压失败（缺 HUFF 表 / DRM）也能取元数据，MOBI6 返回 nil，坏文件报错
 do
     local book = root .. "/probe.azw3"
     Fixture.write(book, { compression = 2 })
@@ -122,9 +122,10 @@ do
     Assert.is_nil(info.metadata.cover_offset, "内部字段不外泄")
     Assert.eq(info.cover_data, "\255\216\255\224fake-jpeg")
 
+    -- 夹具标了 HUFF 压缩但没有 HUFF/CDIC 记录：probe 仍可读头，extract 报缺表
     Fixture.write(book, { compression = 0x4448 })
     Assert.eq(Kf8.probe(book).metadata.title, Fixture.TITLE)
-    Assert.errors(function() Kf8.extract(book, root) end, "HUFF")
+    Assert.errors(function() Kf8.extract(book, root) end, "HUFF/CDIC")
     Fixture.write(book, { encryption = 2 })
     Assert.eq(Kf8.probe(book).metadata.title, Fixture.TITLE)
 
