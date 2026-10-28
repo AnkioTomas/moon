@@ -370,6 +370,22 @@ local function hijackFooter(ui)
     footer._book_bars_hijacked = true
 end
 
+--- 顶栏各道门的状态，开书落一行（issue #67：个别设备顶栏不显示，正常路径原本无日志可查）。
+---@param ui table ReaderUI
+local function logTopDiag(ui)
+    local ids = {}
+    for _idx, slot in ipairs(Layout.get("top")) do ids[#ids + 1] = slot.id .. "@" .. slot.align end
+    require("utils.log").info("bars top diag",
+        "mode", ui.view and ui.view.view_mode,
+        "header_h", ui.document and ui.document.getHeaderHeight and ui.document:getHeaderHeight(),
+        "copt", ui.doc_settings and ui.doc_settings:readSetting("copt_status_line"),
+        "pref", Bars.topBarPreference(),
+        "replace", Layout.replace("top"),
+        "layout", table.concat(ids, ","),
+        "session", require("reader.session").current() ~= nil,
+        "visible", Bars.topVisible(ui))
+end
+
 --- 安装底栏模式保护；偏好等 ReaderReady 收尾后再应用，此时 ReaderRolling 才会响应重排。
 ---@param ui table
 function Bars.install(ui)
@@ -380,6 +396,7 @@ function Bars.install(ui)
     hijackFooter(ui)
     ui:registerPostReaderReadyCallback(Guard.wrap("bars preferences", function()
         Bars.applyPreferences(ui)
+        logTopDiag(ui)
     end))
 end
 

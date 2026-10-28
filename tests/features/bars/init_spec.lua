@@ -93,7 +93,7 @@ local ui_top = {
         getHeaderHeight = function() return 28 end,
         configurable = { status_line = 0, h_page_margins = { 10, 10 }, saveSettings = function() end },
     },
-    doc_settings = { flush = function() end },
+    doc_settings = { flush = function() end, readSetting = function() return 0 end },
     dialog = "reader-dialog",
     view = {
         view_mode = "page",
@@ -221,6 +221,15 @@ Assert.is_true(footer:onHoldFooter({ pos = { x = 100, y = 780 } }))
 Assert.eq(footer:onHoldFooter(), "original hold")
 Assert.is_false(registered_touch_zone)
 Assert.len(post_ready, 1, "偏好等 ReaderReady 收尾后再应用")
+
+-- 开书诊断（issue #67）：偏好应用后落一行顶栏各门状态。
+local Log = require("utils.log")
+local diag_args
+local orig_info = Log.info
+Log.info = function(...) diag_args = { ... } end
+post_ready[1]()
+Log.info = orig_info
+Assert.eq(diag_args[1], "bars top diag")
 
 -- 强制重画：月读画底栏时改走整页重画，不让原生底栏盖上来
 footer:onUpdateFooter(true)
