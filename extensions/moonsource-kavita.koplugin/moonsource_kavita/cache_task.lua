@@ -137,6 +137,9 @@ local function newState(opts)
         if self.settled then return { ok = false } end
         self.settled = true
         stopTimer(self)
+        -- 最后一卷落地的那一拍直接 settle，不会走到 poll 末尾的 emit：补报一次最终计数，
+        -- 否则任务卡片停在上一拍的「已完成 2/3」。
+        self:emit(nil)
         local failed_count = 0
         for key in pairs(self.failed) do
             if self.seen[key] then failed_count = failed_count + 1 end

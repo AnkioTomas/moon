@@ -152,6 +152,8 @@ do
     local finished = Tasks.finished()[1]
     Assert.is_true(finished.ok, "全成算成功")
     Assert.eq(finished.total, 3)
+    Assert.eq(finished.count, 3, "收尾补报最终计数（不是上一拍的 2/3）")
+    Assert.is_nil(finished.text, "收尾后不再挂着上一卷的名字")
     Assert.eq(#Themed.all("toast"), toasts + 1, "只 toast 一次")
     Assert.eq(Themed.last("toast").text, "已缓存 3 卷")
     Assert.is_false(runTimer(function(delay) return delay >= 1 end), "收尾后不再轮询")
@@ -170,6 +172,7 @@ do
     local finished = Tasks.finished()[1]
     Assert.is_false(finished.ok)
     Assert.eq(finished.total, 3)
+    Assert.eq(finished.count, 2, "失败的那卷不算成功")
     Assert.eq(Themed.last("toast").text, "2 卷成功，1 卷失败")
 end
 
