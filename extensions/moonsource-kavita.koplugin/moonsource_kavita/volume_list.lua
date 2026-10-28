@@ -441,17 +441,15 @@ local function resumeIndex(ctx, toc)
     return 1
 end
 
---- 未读的卷：完全没有阅读进度（toc 的 pagesRead、本地卷进度都没有）。读了一半的卷算「在读」，
---- 跟在读/当前进度那条路走，不混进「未读」。
+--- 未读的卷：没读完的都算（包括正在读的那一卷）；已读的跳过。
+--- 与「缓存后 N 卷」不同：这里不是连续后缀，中间已读的卷不会被打包进来。
 ---@param ctx table
 ---@param toc table[]
 ---@return table[]
 local function unreadVolumes(ctx, toc)
     local out = {}
     for _idx, entry in ipairs(toc) do
-        if readOf(ctx, entry) == nil then
-            out[#out + 1] = entry
-        end
+        if readOf(ctx, entry) ~= "read" then out[#out + 1] = entry end
     end
     return out
 end
@@ -902,15 +900,16 @@ function VolumeList.pick(series, toc, cb, opts)
         confirmEnqueue(to_enqueue, to_retry)
     end
 
-    --- 「后 N 卷」：数值加减控件（[+]/[-]），范围 1..剩余卷数；越界由 volumeRange 截断兜底。
+    --- 「缓存后 N 卷」：数值加减控件（[+]/[-]），范围 1..剩余卷数，默认 3（不足 3 取剩余）；
+    --- 越界由 volumeRange 截断兜底。
     local function promptNext()
         local Spin = require("ui.themes.widgets.spin")
         local first = resumeIndex(ctx, toc)
         local max = math.max(1, #toc - first + 1)
         Spin:new{
-            title = _("后 N 卷"),
+            title = _("缓存后 N 卷"),
             fields = {
-                { value = 1, min = 1, max = max, label = _("卷数") },
+                { value = math.min(3, max), min = 1, max = max, label = _("卷数") },
             },
             callback = function(count)
                 local n = math.floor(tonumber(count) or 0)
@@ -975,9 +974,8 @@ function VolumeList.pick(series, toc, cb, opts)
         local Menu = require("ui.themes.widgets.list")
         local items = {
             { text = _("缓存整部"), value = "all" },
-            { text = _("只缓存未读"), value = "unread" },
-            { text = _("从当前进度开始"), value = "progress" },
-            { text = _("后 N 卷…"), value = "next" },
+            { text = _("缓存未读"), value = "unread" },
+            { text = _("缓存后 N 卷…"), value = "next" },
         }
         if can_clean then
             local read_plan = Cache.plan(ctx.plan or {}, "read")
@@ -1001,10 +999,8 @@ function VolumeList.pick(series, toc, cb, opts)
                     runBatch(toc)
                 elseif value == "unread" then
                     local unread = unreadVolumes(ctx, toc)
-                    -- 全都读过不是「全部已缓存」：文案要说得准确。
+                    -- 全部读完不是「全部已缓存」：文案要说得准确。
                     if #unread == 0 then toast(_("没有未读的卷")) else runBatch(unread) end
-                elseif value == "progress" then
-                    runBatch(volumeRange(toc, resumeIndex(ctx, toc), nil))
                 elseif value == "next" then
                     promptNext()
                 elseif value == "clean_all" then
