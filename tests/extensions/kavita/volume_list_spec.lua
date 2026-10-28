@@ -25,7 +25,12 @@ package.loaded["utils.log"] = {
     info = function() end, warn = function() end, err = function() end, dbg = function() end,
 }
 local offline = false
+local local_progress = {}
 package.loaded["ui/network/manager"] = { isConnected = function() return not offline end }
+-- 本地卷进度（ProgressDB）：卷行在阅读器关闭时写回，比 toc 快照新。
+package.loaded["book.progress_db"] = {
+    get = function(_source_id, stable_id) return local_progress[stable_id] end,
+}
 
 local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
 local RealCache = dofile(PLUGIN .. "/moonsource_kavita/cache.lua")
@@ -35,6 +40,7 @@ local st, calls = {}, {}
 local tracked = {}
 local function reset(overrides)
     calls = { enqueue = {}, delete = {}, retry = {}, pause = 0, resume = 0, resume_page = 0, chapters = 0 }
+    local_progress = {}
     tracked = {}
     st.probe = { ok = true, state = "enhanced", capabilities = {
         status = true, queue = true, queue_control = true,
@@ -160,7 +166,7 @@ local toc = {
     entry(602, "第 2 卷", 100, 40),
     entry(603, "第 3 卷", 100, 0),
 }
-local series = { stable_id = "900", title = "测试系列" }
+local series = { source_id = "ext.kavita", stable_id = "900", title = "测试系列" }
 
 --- 子串断言：Assert.contains 只认数组，文案用这个。
 ---@param haystack string
@@ -397,6 +403,33 @@ chooseMenu(menu, 3)
 Assert.is_nil(calls.estimate, "没有对象不估算")
 textContains(Themed.last("toast").text, "全部已缓存")
 Assert.eq(#Themed.all("confirm"), no_object_confirms, "空选择不弹框")
+
+-- toc 是带 TTL 的快照：刚读完 / 刚开读的卷在服务端可能还是旧进度（大剑 Vol.17 的现场：
+-- toc 仍是 117/196，本地已经 196/196）。本地卷进度（ProgressDB）比快照新，必须一起算，
+-- 否则「后 N 卷」会从已经读完的卷重新缓存。
+local stale_toc = {
+    entry(801, "第 1 卷", 196, 196),
+    entry(802, "第 2 卷", 196, 117), -- toc 还是 60%，本地已读完
+    entry(803, "第 3 卷", 196, 0),   -- toc 没有进度，本地刚开读
+    entry(804, "第 4 卷", 196, 0),
+}
+reset()
+local_progress["900:802"] = { fraction = 1.0, page = 196, total_pages = 196 }
+local_progress["900:803"] = { fraction = 0.015, page = 3, total_pages = 196 }
+list = open(stale_toc)
+local rows_text = table.concat(Kit.texts(list), "\n")
+textContains(rows_text, "第 2 卷", "行还在")
+Assert.is_true(rows_text:find("已读", 1, true) ~= nil, "本地读完的卷显示已读")
+local stale_menu = openMenu(list)
+chooseMenu(stale_menu, 3)
+Assert.eq(idsText(calls.estimate), "803,804", "已读完的卷不再被当成进度起点")
+reset()
+local_progress["900:802"] = { fraction = 1.0, page = 196, total_pages = 196 }
+local_progress["900:803"] = { fraction = 0.015, page = 3, total_pages = 196 }
+list = open(stale_toc)
+menu = openMenu(list)
+chooseMenu(menu, 2)
+Assert.eq(idsText(calls.estimate), "804", "本地开读的卷也不再算「未读」")
 
 -- 预设「后 N 卷…」：主题输入框取正整数；0 / 非数字不动作；N 超过剩余卷数时截断。
 reset()

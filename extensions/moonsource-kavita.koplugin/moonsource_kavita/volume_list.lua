@@ -127,13 +127,42 @@ local function readState(entry)
     return nil
 end
 
---- 显示用阅读状态：kamare 的三源判定优先（离线读完也算已读），再退回 toc 的 pagesRead。
+--- 本地卷进度：ProgressDB 的卷行由阅读器关闭时写回，比 toc 快照（Kavita pagesRead，TTL 6 小时）新。
+--- 读完一卷马上回列表时，服务端 / toc 里可能还是「读到 117/196」，不能因此把已读完的卷当成在读，
+--- 否则「后 N 卷」会从这卷重新缓存。只认卷行（seriesId:chapterId），容器聚合行不参与。
+---@param series Book|nil
+---@param toc table[]
+---@return table<string, "read"|"reading">
+local function localReadStates(series, toc)
+    local out = {}
+    if type(series) ~= "table" or series.source_id == nil or series.stable_id == nil then return out end
+    local series_id = tostring(series.stable_id)
+    if series_id:find(":", 1, true) then return out end
+    local ok, ProgressDB = pcall(require, "book.progress_db")
+    if not ok or type(ProgressDB) ~= "table" or type(ProgressDB.get) ~= "function" then return out end
+    for _idx, entry in ipairs(toc) do
+        local row = ProgressDB.get(series.source_id, series_id .. ":" .. tostring(entry.chapterId))
+        local fraction = row and tonumber(row.fraction) or 0
+        if fraction >= 1 then
+            out[tostring(entry.chapterId)] = "read"
+        elseif fraction > 0 then
+            out[tostring(entry.chapterId)] = "reading"
+        end
+    end
+    return out
+end
+
+--- 显示用阅读状态：kamare 的三源判定优先（离线读完也算已读），再退回 toc 的 pagesRead，
+--- 最后用本地卷进度补上 toc 快照之后才读完 / 刚开读的卷。
 ---@param ctx table
 ---@param entry table
 ---@return "read"|"reading"|nil
 local function readOf(ctx, entry)
-    if ctx.reads and ctx.reads[tostring(entry.chapterId)] then return "read" end
-    return readState(entry)
+    local cid = tostring(entry.chapterId)
+    if ctx.reads and ctx.reads[cid] then return "read" end
+    local local_state = ctx.local_reads and ctx.local_reads[cid]
+    if local_state == "read" then return "read" end
+    return readState(entry) or local_state
 end
 
 --- 打开 / 轮询时的一份只读快照。
@@ -141,8 +170,9 @@ end
 ---@param series_id any Kavita seriesId：一次 chapters(series_id) 取整列的缓存事实
 ---@param memo table|nil 上一次的 resume_page 结果：轮询复用，别每秒为整列扫 journal
 ---@param pending table<string, boolean>|nil 本地入队记忆：缺 queue 能力时没有别的「排队」来源
+---@param local_reads table<string, "read"|"reading">|nil 本地卷进度（ProgressDB），见 localReadStates
 ---@return table
-local function scan(toc, series_id, memo, pending)
+local function scan(toc, series_id, memo, pending, local_reads)
     local probe = Cache.probe()
     local capabilities = probe.ok and (probe.capabilities or {}) or {}
     local queue_capable = has(capabilities, "queue")
@@ -217,6 +247,7 @@ local function scan(toc, series_id, memo, pending)
         plan = plan,
         plan_by_id = plan_by_id,
         resumes = resumes,
+        local_reads = local_reads,
         offline = not online(),
     }
 end
@@ -410,7 +441,7 @@ local function resumeIndex(ctx, toc)
     return 1
 end
 
---- 未读的卷：完全没有阅读进度（pagesRead == 0）。读了一半的卷算「在读」，
+--- 未读的卷：完全没有阅读进度（toc 的 pagesRead、本地卷进度都没有）。读了一半的卷算「在读」，
 --- 跟在读/当前进度那条路走，不混进「未读」。
 ---@param ctx table
 ---@param toc table[]
@@ -418,7 +449,7 @@ end
 local function unreadVolumes(ctx, toc)
     local out = {}
     for _idx, entry in ipairs(toc) do
-        if (tonumber(entry.pagesRead) or 0) <= 0 and readOf(ctx, entry) == nil then
+        if readOf(ctx, entry) == nil then
             out[#out + 1] = entry
         end
     end
@@ -501,7 +532,9 @@ function VolumeList.pick(series, toc, cb, opts)
     opts = type(opts) == "table" and opts or {}
     -- 缺 queue 能力时没有队列状态可读，只能在本地记「这一卷已经入队」（02 A4）。
     local pending = {}
-    local ctx = scan(toc, series and series.stable_id, nil, pending)
+    -- 本地卷进度只取一次：列表开着的时候不会在后台读书，轮询没必要每秒重扫 ProgressDB。
+    local local_reads = localReadStates(series, toc)
+    local ctx = scan(toc, series and series.stable_id, nil, pending, local_reads)
     local chosen = false
     local list
     local dialog
@@ -553,7 +586,8 @@ function VolumeList.pick(series, toc, cb, opts)
     --- 重画：状态全在 kamare 的内存索引里，重扫一遍即可（列表停在原页）。
     ---@param reuse_resume boolean|nil 轮询用：复用 resume_page 的记忆
     refresh = function(reuse_resume)
-        ctx = scan(toc, series and series.stable_id, reuse_resume and ctx.resumes or nil, pending)
+        ctx = scan(toc, series and series.stable_id, reuse_resume and ctx.resumes or nil, pending,
+            ctx.local_reads)
         if list and not list.closed then list:setItems(items()) end
     end
 
