@@ -347,7 +347,7 @@ AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址�
 - 长佩书架不同步分组里的书。长佩和潇湘不登录也能读免费章。
 - iRead 从月读加架要先搜到这本书。
 - QQ阅读的书不在书架上时不推进度，也不会为了推进度把书加回去。
-- Kavita 没有删书接口。时长靠阅读期进度心跳记在服务端（默认 30 秒，可关），月读只拉统计。划线双向：本地新建和改备注会推上去，远端的改动与删除也会拉回本地。装了 kamare 且在线时，漫画交它看；增强版还能在「设置 → 数据源 → Kavita → 漫画缓存」里清理已读、按系列清理和全部清理（含未关联服务器的缓存）。
+- Kavita 没有删书接口。时长靠阅读期进度心跳记在服务端（默认 30 秒，可关），月读只拉统计。划线双向：本地新建和改备注会推上去，远端的改动与删除也会拉回本地。装了 [kamare](https://github.com/backtracker/kamare.koplugin) 且在线时，漫画交它看；增强版还能在「设置 → 数据源 → Kavita → 漫画缓存」里清理已读、按系列清理和全部清理（含未关联服务器的缓存）。
 - BookOrbit 没有删书接口。划线只上传，网页上的改动和删除不会回到本地。
 
 订阅不是书源，不进选择器，也不记进度和统计。Z-Library 与 OPDS 是书城，下载后进本地书籍，见[书城](#书城)。
@@ -403,7 +403,7 @@ Release 里另有两个独立插件包，需要同时安装月读才能使用：
 
 | 插件包 | 书源 |
 |---|---|
-| `moonsource-kavita.koplugin-<版本>.zip` | [Kavita](https://www.kavitareader.com/) 服务器 |
+| `moonsource-kavita.koplugin-<版本>.zip` | [Kavita](https://www.kavitareader.com/) 服务器（漫画阅读与缓存由 [kamare](https://github.com/backtracker/kamare.koplugin) 提供，需增强版才有缓存接口） |
 | `moonsource-bookorbit.koplugin-<版本>.zip` | BookOrbit 服务器 |
 
 解压后把 `moonsource-xxx.koplugin/` 目录和 `book.koplugin/` 一样放进 `plugins/`，重启 KOReader 后在月读的数据源里选择。
