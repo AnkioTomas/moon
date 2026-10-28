@@ -563,38 +563,17 @@ function Catalog.listBooks(source_id, opts)
     local join = " LEFT JOIN pending_progress p ON p.source_id=b.source_id AND p.stable_id=b.stable_id"
     local limit = tonumber(opts.limit) or 0
     local offset = tonumber(opts.offset) or 0
-    -- random：跳过 COUNT，一条 ORDER BY RANDOM()；首页抽书专用，勿给分页列表。
-    if opts.random then
-        local sel_args = {}
-        local downloaded = BookDB.downloadedClause(opts.chapter_sources or {}, sel_args)
-        local sel = [[SELECT b.source_id, b.stable_id, b.title, b.authors,
-                            COALESCE(p.fraction * 100, 0),
-                            b.category, b.series, b.intro, b.cover, b.inserted_at,
-                            b.read_state, b.path, ]] .. downloaded .. [[
-                       FROM books b]] .. join .. [[
-                       WHERE ]] .. where .. " ORDER BY RANDOM()"
-        for _idx, v in ipairs(args) do sel_args[#sel_args + 1] = v end
-        if limit > 0 then
-            sel = sel .. " LIMIT ?"
-            sel_args[#sel_args + 1] = limit
-        end
-        local result, nrows = DB.query(sel .. ";", unpack(sel_args))
-        if not result then
+    -- random：跳过 COUNT（total 回 0）、ORDER BY RANDOM()；首页抽书专用，勿给分页列表。
+    local total = 0
+    if not opts.random then
+        local count_raw = DB.rowexec("SELECT COUNT(*) FROM books b" .. join .. " WHERE " .. where .. ";", unpack(args))
+        if count_raw == nil then
             return {}, 0, "query failed"
         end
-        local rows = {}
-        for i = 1, nrows do
-            rows[i] = listRow(result, i, shelves)
+        total = tonumber(count_raw) or 0
+        if total == 0 then
+            return {}, 0
         end
-        return rows, #rows
-    end
-    local count_raw = DB.rowexec("SELECT COUNT(*) FROM books b" .. join .. " WHERE " .. where .. ";", unpack(args))
-    if count_raw == nil then
-        return {}, 0, "query failed"
-    end
-    local total = tonumber(count_raw) or 0
-    if total == 0 then
-        return {}, 0
     end
     local sort_sql = {
         title = "COALESCE(b.title, '') COLLATE NOCASE %s, b.stable_id ASC",
@@ -602,7 +581,7 @@ function Catalog.listBooks(source_id, opts)
         recent_read = "MAX(COALESCE(p.updated_at, 0), b.read_at) DESC, b.inserted_at DESC, b.stable_id ASC",
         recent_added = "b.inserted_at DESC, b.stable_id ASC",
     }
-    local order = (sort_sql[opts.sort] or sort_sql.recent_added)
+    local order = opts.random and "RANDOM()" or (sort_sql[opts.sort] or sort_sql.recent_added)
         :gsub("%%s", opts.sort_desc and "DESC" or "ASC")
     -- SELECT 里的占位符排在 WHERE 之前，绑定参数也要按这个顺序拼。
     local sel_args = {}
@@ -951,10 +930,11 @@ end
 ---@return StatsInsight
 function Catalog.readingInsight(scope)
     local StatsDB = require("book.stats_db")
+    local daily = StatsDB.dailyBySource(scope)
     return Catalog.toInsight(
         scope,
-        StatsDB.summaryBySource(scope),
-        StatsDB.dailyBySource(scope),
+        StatsDB.summaryBySource(scope, daily),
+        daily,
         StatsDB.dailyBooksBySource(scope),
         StatsDB.hourlyBySource(scope),
         {

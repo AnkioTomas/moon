@@ -465,9 +465,10 @@ end
 --- 汇总某源阅读统计：总时长/页数、近 7 天时长、最长单日。
 --- source_id 可为单源字符串，或已启用源 id 列表（混合模式）。
 ---@param source_id string|string[]
+---@param daily table[]|nil 已取好的 dailyBySource(source_id) 结果（洞察页两者一起要，省一次整表扫描）
 ---@return { total_seconds: number, total_pages: number, last7_seconds: number, longest_day_seconds: number }
-function StatsDB.summaryBySource(source_id)
-    local daily = mergedDailyRows(source_id)
+function StatsDB.summaryBySource(source_id, daily)
+    daily = daily or mergedDailyRows(source_id)
     local total_seconds, total_pages, last7_seconds, longest_day_seconds, extra = 0, 0, 0, 0, 0
     local cutoff = os.date("%Y-%m-%d", os.time() - 6 * 86400)
     for _idx, row in ipairs(daily) do
