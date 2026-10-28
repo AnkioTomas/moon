@@ -45,7 +45,7 @@ local server = {
     jsonResp = function(code, body) return { code = code, body = body } end,
     _queueResponse = function(_self, _conn, resp) queued[#queued + 1] = resp end,
     _fail = function(_self, _conn, code) failed[#failed + 1] = code end,
-    _acceptText = function(self, conn, _headers, _limit, finish) accepted = true; return finish(self, conn, '{"id":7}') end,
+    _acceptJson = function(self, conn, _headers, _limit, finish) accepted = true; return finish(self, conn, { id = 7 }) end,
 }
 local item = ExtRoute.find("demo")
 

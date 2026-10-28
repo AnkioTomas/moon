@@ -9,17 +9,12 @@ local SettingsApi = require("features.remote.settings")
 
 local Route = {}
 
---- /api/settings body 收尾：解析 JSON 后做部分更新，回写实际生效的字段。
---- 空 body 等价于提交 {}；JSON 非法或 apply 拒绝都回 400（带原因）。
+--- /api/settings body 收尾：做部分更新，回写实际生效的字段。
+--- 空 body 等价于提交 {}（_acceptJson 处理）；apply 拒绝回 400（带原因）。
 ---@param conn table
----@param text string 收齐的请求体 JSON 文本
-function Route.finishSettings(self, conn, text)
-    local payload, err = require("utils.json").decode(text ~= "" and text or "{}")
-    if not payload then
-        return self:_fail(conn, 400, err or "invalid json")
-    end
-    local applied
-    applied, err = SettingsApi.apply(payload)
+---@param payload table 已解析的请求体
+function Route.finishSettings(self, conn, payload)
+    local applied, err = SettingsApi.apply(payload)
     if not applied then
         return self:_fail(conn, 400, err)
     end
@@ -37,7 +32,7 @@ function Route.settings(self, conn, method, headers, _query)
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    return self:_acceptText(conn, headers, SettingsApi.BODY_LIMIT, Route.finishSettings)
+    return self:_acceptJson(conn, headers, SettingsApi.BODY_LIMIT, Route.finishSettings)
 end
 
 return Route

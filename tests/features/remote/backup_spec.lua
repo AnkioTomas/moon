@@ -166,6 +166,48 @@ rejected({ { path = Backup.MARKER }, { path = "a/../../b", text = "x" } }, "unsa
 rejected({ { path = Backup.MARKER }, { path = "link", mode = "link" } }, "unsupported archive entry")
 rejected({ { path = Backup.MARKER }, { path = "cache/only.txt", text = "x" } }, "backup is empty")
 
+-- 落位阶段失败（主进程在中间重建了 settings/，rename 报 ENOTEMPTY）：旧数据挪回来，不留 .old
+do
+    seed()
+    local real_rename = os.rename
+    local tripped = false
+    os.rename = function(from, to)
+        if not tripped and to == root .. "/settings" and from:find(Backup.STAGING, 1, true) then
+            tripped = true
+            sh("mkdir -p '" .. root .. "/settings' && echo relived > '" .. root .. "/settings/x.lua'")
+        end
+        return real_rename(from, to)
+    end
+    local ok, e = Backup.restore("ignored.zip", root, reader({
+        { path = Backup.MARKER, text = "moon-backup 1" },
+        { path = "book.sqlite3", text = "NEW" },
+        { path = "settings", mode = "directory" },
+        { path = "settings/wechat.lua", text = "return {cookie='x'}" },
+    }), lfs)
+    os.rename = real_rename
+    Assert.is_nil(ok)
+    Assert.is_true(tripped)
+    Assert.is_true(e ~= nil)
+    Assert.eq(read(root .. "/settings/old.lua"), "return {}", "落位失败旧 settings 挪回来")
+    Assert.is_nil(read(root .. "/settings/wechat.lua"))
+    Assert.is_nil(lfs.attributes(root .. "/settings.old"), "不留 .old")
+    Assert.is_nil(lfs.attributes(root .. "/" .. Backup.STAGING))
+end
+
+-- 库换新：旧库连 WAL / SHM 一起换掉，成功后不留 .old
+do
+    seed()
+    local ok = Backup.restore("ignored.zip", root, reader({
+        { path = Backup.MARKER, text = "moon-backup 1" },
+        { path = "book.sqlite3", text = "NEW" },
+    }), lfs)
+    Assert.is_true(ok ~= nil)
+    Assert.eq(read(root .. "/book.sqlite3"), "NEW")
+    Assert.is_nil(lfs.attributes(root .. "/book.sqlite3.old"))
+    Assert.is_nil(lfs.attributes(root .. "/book.sqlite3-wal.old"))
+    Assert.is_nil(lfs.attributes(root .. "/book.sqlite3-wal"))
+end
+
 -- ── 路由 ───────────────────────────────────────────────
 local sent, failed
 local server = {

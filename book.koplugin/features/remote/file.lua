@@ -355,10 +355,9 @@ File.MAX_ZIP_ITEMS = 1000
 
 --- 打包请求体收尾：{"paths":[...],"name":"x.zip"} → 后台建 zip，回 {"id":...}，再由 GET 取走。
 ---@param conn table
----@param text string
-local function finishZip(self, conn, text)
-    local payload = require("utils.json").decode(text ~= "" and text or "{}")
-    local list = type(payload) == "table" and payload.paths
+---@param payload table
+local function finishZip(self, conn, payload)
+    local list = payload.paths
     if type(list) ~= "table" or #list == 0 or #list > File.MAX_ZIP_ITEMS then
         return self:_fail(conn, 400, "Bad paths")
     end
@@ -406,7 +405,7 @@ end
 ---@param query table
 function File.zip(self, conn, method, headers, query)
     if method == "POST" then
-        return self:_acceptText(conn, headers, File.ZIP_BODY_LIMIT, finishZip)
+        return self:_acceptJson(conn, headers, File.ZIP_BODY_LIMIT, finishZip)
     end
     if method ~= "GET" then
         return self:_fail(conn, 405, "Method Not Allowed")
@@ -417,10 +416,12 @@ function File.zip(self, conn, method, headers, query)
     end
     self._zip = nil
     local file = io.open(pending.path, "rb")
-    os.remove(pending.path)
     if not file then
+        os.remove(pending.path)
         return self:_fail(conn, 404, "Archive gone")
     end
+    -- 发完（或断开）由 _kill 删：Kindle 的 /mnt/us 是 FUSE，打开后立即 unlink 再读会读到 0 字节
+    conn.temp = pending.path
     local size = file:seek("end") or 0
     file:seek("set", 0)
     return self:_queueResponse(conn, {
