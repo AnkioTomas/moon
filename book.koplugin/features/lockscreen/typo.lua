@@ -818,7 +818,9 @@ function M.blocks(rect)
     return {{ kind = "widget", widget = widget, x = 0, y = 0, width = w, height = h }}
 end
 
---- 每次锁屏换一句：键每秒都变。
-M.cache_key = os.time
+--- 每次锁屏换一句：键随锁屏次数变，锁过一次才重合成一次（每秒变的键会让每次回桌面都整屏重画）。
+function M.cache_key()
+    return require("features.lockscreen.compose").lock_cycles
+end
 
 return M

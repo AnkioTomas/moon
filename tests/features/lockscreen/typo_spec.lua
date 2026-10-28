@@ -171,4 +171,14 @@ do -- 用户选的字体只解析文件路径，不读整目录字体信息（�
     package.loaded["ui.fonts"], Typo.fontId, Typo.boldSibling = loaded, id_fn, sib_fn
 end
 
+-- 缓存键随锁屏次数变（compose.lock_cycles，唤醒时 +1）：没锁过屏回桌面不重合成，不再每秒变
+do
+    package.loaded["features.lockscreen.compose"] = { lock_cycles = 7 }
+    Assert.eq(Typo.cache_key(), 7)
+    Assert.eq(Typo.cache_key(), 7, "同一次锁屏周期内键稳定")
+    package.loaded["features.lockscreen.compose"].lock_cycles = 8
+    Assert.eq(Typo.cache_key(), 8)
+    package.loaded["features.lockscreen.compose"] = nil
+end
+
 return true

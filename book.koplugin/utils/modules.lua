@@ -52,9 +52,15 @@ function Modules.install(root)
     index.main = nil
     index._meta = nil
     installed[root] = index
+    -- 只服务本插件目录内发起的 require：别的 koplugin 撞名的 utils/、ui/ 不能被劫持到这里的代码。
+    -- 栈：1 本加载器，2 require（C），3 发起 require 的 chunk。`return require(x)` 是尾调用，发起方帧被抹掉，
+    -- 这时看到的是再上一层；认不出来只是退回标准搜索（慢），不会装错模块。
+    local mine = "@" .. root .. "/"
     table.insert(package.loaders, 2, function(name)
         local path = index[name:gsub("%.", "/")]
         if not path then return nil end
+        local caller = debug.getinfo(3, "S")
+        if not (caller and caller.source:sub(1, #mine) == mine) then return nil end
         return assert(loadfile(path))
     end)
     return index

@@ -56,6 +56,26 @@ Assert.eq(queries[3].tbl, "t2s")
 Assert.eq(table.concat(Script.convertWords({ "乾", "干", "幹", "後" }, "simplified"), ","), "干,后",
     "转换后重复只留第一个，保序")
 
+-- fork 子进程里不复用主进程的句柄：自己再开一份（只读）。
+do
+    local opens = 0
+    local sqlite = package.loaded["lua-ljsqlite3/init"]
+    local open = sqlite.open
+    sqlite.open = function(...) opens = opens + 1 return open(...) end
+    local Job = require("workers.job")
+    local inSubProcess = Job.inSubProcess
+    Script.convertWords({ "发" }, "traditional")
+    Assert.eq(opens, 0, "主进程复用已开的句柄")
+    Job.inSubProcess = function() return true end
+    Script.convertWords({ "发" }, "traditional")
+    Script.convertWords({ "头" }, "traditional")
+    Assert.eq(opens, 1, "子进程开一次自己的，之后复用")
+    Job.inSubProcess = inSubProcess
+    Script.convertWords({ "发" }, "traditional")
+    Assert.eq(opens, 2, "回到主进程视角（测试里同进程模拟）再开一份，不拿子进程的")
+    sqlite.open = open
+end
+
 local many = {}
 for i = 1, 600 do many[i] = string.format("w%03d", i) end
 local before = #queries

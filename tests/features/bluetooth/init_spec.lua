@@ -47,8 +47,17 @@ os.execute = function(cmd)
     return real_execute(cmd)
 end
 
-require("features.bluetooth.khp").available = function() return true end
+local khp_present = false
+require("features.bluetooth.khp").available = function() return khp_present end
 local Bluetooth = require("features.bluetooth")
+
+-- 启动时守护进程还没起来：不把「没有后端」记死，装好 / 起来后同一进程就能看到蓝牙入口。
+Assert.is_false(Bluetooth.installed())
+khp_present = true
+Assert.is_true(Bluetooth.installed())
+khp_present = false
+Assert.is_true(Bluetooth.installed(), "选中的后端记住，不反复探测")
+khp_present = true
 
 local STOPPED = '{"ok":true,"daemon_running":false,"devices":[],"connections":[]}'
 local ON_EMPTY = '{"ok":true,"daemon_running":true,'

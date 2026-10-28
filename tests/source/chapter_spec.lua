@@ -36,7 +36,8 @@ package.preload["book.progress_db"] = function()
     return { get = function() return pending end }
 end
 package.preload["book.books_db"] = function()
-    return { get = function() return book_row end }
+    -- 目录没落库：字数回填查不到目录即跳过，不是 ensure 的事。
+    return { get = function() return book_row end, getToc = function() return nil end }
 end
 local touches = {}
 local touch_error

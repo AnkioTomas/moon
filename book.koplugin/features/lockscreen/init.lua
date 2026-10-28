@@ -158,6 +158,11 @@ function M.onCreate()
     require("ui/uimanager"):nextTick(function() require("ui.guard").call("lockscreen.create", M.refresh, nil, false, "onCreate") end)
 end
 
+--- 唤醒 = 刚锁过一次屏：按锁屏次数失效的背景（海报字）下次回桌面重合成一次。
+function M.onResume()
+    Compose.lock_cycles = Compose.lock_cycles + 1
+end
+
 --- 网络恢复：必应 / 摸鱼日报 / 一言可能刚就绪；内容没变就是缓存命中。
 function M.onNetworkConnected()
     M.refresh(nil, false, "network_connected")
