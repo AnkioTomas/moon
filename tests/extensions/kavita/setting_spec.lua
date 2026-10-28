@@ -406,6 +406,20 @@ Assert.eq(#delete_calls[1], 1, "只删已读完的那一章")
 Assert.matches(Themed.last("toast").text, "已清理 1 章")
 Assert.eq(shelf_events[#shelf_events], "shelf_changed", "删除后刷新书架")
 
+-- 删除后占用必须重算（03 E）：只 updateView 会留下删前的数字。
+summary_result = { used = 2 * MB, available = 9 * MB, chapters = 11 }
+summary_all_result = { used = 3 * MB, available = 9 * MB, chapters = 14 }
+local usage_calls_before = summary_calls + summary_all_calls
+local after_cleanup = page.sections()
+Assert.eq(statusOf(sectionRows(after_cleanup, "状态"), "缓存占用").subtitle,
+    "正在统计…", "删除后先画「正在统计…」")
+flush()
+Assert.eq(summary_calls + summary_all_calls, usage_calls_before + 2, "删除后重算本服务器与合计")
+Assert.eq(statusOf(sectionRows(page.sections(), "状态"), "缓存占用").status,
+    "11 章", "占用数字跟着删除刷新")
+Assert.matches(sectionRows(page.sections(), "清理")[3].subtitle,
+    "含未关联服务器 · 14 章", "清理全部的数字也刷新")
+
 -- 空缓存：三项都置灰（03 待确认 3），清理全部不再可点。
 cfg.base_url, cfg.api_key = "http://kav", "k"
 probe_result = {

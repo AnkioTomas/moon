@@ -384,7 +384,14 @@ local function installText(plugin)
     }, "\n")
 end
 
-local function refreshOverlay(plugin)
+--- 叠层的占用是打开时算的一份；清理之后只 updateView 会留着删前的数字，
+--- 所以写入路径显式标记「占用过期」，下次重建先回「正在统计…」再走盘。
+local usage_stale = false
+
+---@param plugin table|nil
+---@param reload_usage boolean|nil 写入路径传 true（删除后占用要重算）
+local function refreshOverlay(plugin, reload_usage)
+    if reload_usage then usage_stale = true end
     local desktop = plugin and plugin.desktop
     if desktop and desktop.settings_overlay then desktop.settings_overlay:updateView() end
 end
@@ -444,7 +451,7 @@ local function runCleanup(plugin, filter, title)
             else
                 toast(T(_("已清理 %1 章，释放约 %2"), plan.chapters, Cache.sizeText(plan.bytes)), 3)
             end
-            refreshOverlay(plugin)
+            refreshOverlay(plugin, true)
             if plugin and plugin.desktop then plugin.desktop:onEvent("shelf_changed") end
         end,
     }:show()
@@ -473,7 +480,7 @@ local function runCleanupAll(plugin)
             end
             local freed = detail and tonumber(detail.bytes) or bytes
             toast(T(_("已清理全部缓存，释放约 %1"), Cache.sizeText(freed)), 3)
-            refreshOverlay(plugin)
+            refreshOverlay(plugin, true)
             if plugin and plugin.desktop then plugin.desktop:onEvent("shelf_changed") end
         end,
     }:show()
@@ -651,9 +658,16 @@ local function showCachePage(plugin)
         title = _("漫画缓存"),
         sections = function()
             -- 占用走盘：先让叠层用「正在统计…」画出来，下一拍算完再刷新（03 E）。
+            -- 删除后 refreshOverlay(…, true) 把占用标脏，这里重新走一遍同一条路径。
+            if usage_stale then
+                usage_stale = false
+                state.pending = true
+                state.usage, state.all = nil, nil
+            end
             if state.pending and not scheduled then
                 scheduled = true
                 require("ui/uimanager"):nextTick(function()
+                    scheduled = false
                     local probe = Cache.probe()
                     local need_all = probe.ok and (probe.capabilities or {}).delete_all == true
                     state.usage, state.all = loadUsage(need_all)
