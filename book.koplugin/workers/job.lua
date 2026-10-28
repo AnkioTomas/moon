@@ -56,12 +56,14 @@ local KINDS = {
     heavy = 5,
 }
 
----@param callback function|nil
-local function notify(callback, ...)
+--- 回调是插件自己的调度入口（nextTick / scheduleIn 里跑，KOReader 不保护）：
+--- 抛错经 guard 弹错误页，且不能打断调度器的槽位释放。
+---@param self table
+---@param hook "on_done"|"on_failed"|"on_cancelled"|"on_progress"
+local function notify(self, hook, ...)
+    local callback = self[hook]
     if not callback then return end
-    -- 回调异常不能打断调度器的槽位释放，但必须留下栈，不能静默吞掉。
-    local ok, err = xpcall(callback, debug.traceback, ...)
-    if not ok then logger.warn("workers.job callback failed", err) end
+    require("ui.guard").call("job " .. self.name .. " " .. hook, callback, ...)
 end
 
 ---@param fd number
@@ -109,11 +111,11 @@ function Job:_finish(state, result, err)
     end
     logger.dbg("book.worker", self.name, self.kind, state, err or "")
     if state == "done" then
-        notify(self.on_done, result)
+        notify(self, "on_done", result)
     elseif state == "failed" then
-        notify(self.on_failed, err)
+        notify(self, "on_failed", err)
     else
-        notify(self.on_cancelled, self)
+        notify(self, "on_cancelled", self)
     end
     self:_release()
     if self._slotted then
@@ -128,7 +130,7 @@ end
 
 function Job:_dispatch(message)
     if message.type == "progress" then
-        notify(self.on_progress, message.value)
+        notify(self, "on_progress", message.value)
     elseif message.type == "done" then
         self:_finish("done", message.result)
     elseif message.type == "failed" then
@@ -179,7 +181,7 @@ local function runInstant(self, worker)
         if self.settled then return end
         self.state = "running"
         local ok, result = xpcall(worker, debug.traceback, function(value)
-            notify(self.on_progress, value)
+            notify(self, "on_progress", value)
         end)
         if self.settled then return end
         if ok then

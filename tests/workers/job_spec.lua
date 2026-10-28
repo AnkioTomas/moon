@@ -188,6 +188,15 @@ function UIManager:insertZMQ(...)
     return insertZMQ(self, ...)
 end
 
+-- 回调是插件自己的调度入口：抛错经 ui/guard 报告（弹错误页），不是只记一行日志。
+local guarded = {}
+package.loaded["ui.guard"] = {
+    call = function(label, fn, ...)
+        local ok, err = pcall(fn, ...)
+        if not ok then guarded[#guarded + 1] = label .. ": " .. tostring(err) end
+    end,
+}
+package.loaded["workers.job"] = nil
 local Job = require("workers.job")
 local Protocol = require("workers.protocol")
 Assert.is_false(Job.inSubProcess())
@@ -304,6 +313,18 @@ local instant_failed = Job.run(function() error("boom") end, {
 Stubs.flush()
 Assert.eq(instant_failed.state, "failed")
 Assert.matches(instant_failed.error, "boom")
+
+-- on_done 抛错：任务仍结算为 done（槽位释放），错误经 guard 报告而非吞掉。
+guarded = {}
+local bad_done = Job.run(function() return 1 end, {
+    name = "test.instant.baddone",
+    kind = "instant",
+    on_done = function() error("done handler boom", 0) end,
+})
+Stubs.flush()
+Assert.eq(bad_done.state, "done")
+Assert.len(guarded, 1)
+Assert.eq(guarded[1], "job test.instant.baddone on_done: done handler boom")
 
 local System = require("workers.system")
 local slots = System:concurrency()
