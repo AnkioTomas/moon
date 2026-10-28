@@ -131,12 +131,8 @@ local faces = {}
 ---@return table face
 local function annFace(px)
     if not faces[px] then
-        local Font = require("ui/font")
-        local ok, ftsize = pcall(function()
-            return require("ffi/freetype").newFaceSize(facePath(), px)
-        end)
-        faces[px] = ok and { ftsize = ftsize, hash = FACE .. "@px" .. px, orig_font = FACE, realname = FACE, size = px, orig_size = px }
-            or Font:getFace(FACE, px)
+        local ftsize = require("ffi/freetype").newFaceSize(facePath(), px)
+        faces[px] = { ftsize = ftsize, hash = FACE .. "@px" .. px, orig_font = FACE, realname = FACE, size = px, orig_size = px }
     end
     return faces[px]
 end
@@ -165,13 +161,10 @@ local ann_ink
 ---@return { em: number, bottom_em: number }
 function Overlay.annInk()
     if not ann_ink then
-        local ok, at, ab = pcall(function()
-            local ann = require("ffi/freetype").newFaceSize(facePath(), 100) --[[@as FreeTypeSize]]
-            local t, b = ink(ann, ANN_CODES)
-            ann:done()
-            return t, b
-        end)
-        ann_ink = ok and { em = (at + ab) / 100, bottom_em = ab / 100 } or { em = 1.3, bottom_em = 0.3 }
+        local ann = require("ffi/freetype").newFaceSize(facePath(), 100) --[[@as FreeTypeSize]]
+        local at, ab = ink(ann, ANN_CODES)
+        ann:done()
+        ann_ink = { em = (at + ab) / 100, bottom_em = ab / 100 }
     end
     return ann_ink
 end
@@ -267,8 +260,8 @@ local function scanHits(self, lexicons, level, force)
     local document = self.ui.document
     local started_at = Perf.now()
     local width, height = PageMarks.screenSize(self.ui)
-    local ok, range = pcall(document.getTextFromPositions, document, { x = 0, y = 0 }, { x = width, y = height }, true)
-    if not (ok and range and range.pos0 and range.pos1) then return {} end
+    local range = document:getTextFromPositions({ x = 0, y = 0 }, { x = width, y = height }, true)
+    if not (range and range.pos0 and range.pos1) then return {} end
     local units = Overlay.walk(document, range.pos0, range.pos1)
     if #units == 0 then return {} end
     local texts = {}
