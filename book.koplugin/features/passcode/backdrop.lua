@@ -57,6 +57,10 @@ end
 
 --- 铺满裁切 / 海报墙自绘的位图层；同模式+尺寸复用，避免按键刷新反复解码。
 ---@class BookPasscodeBackdrop : Widget
+---@field mode string 背景模式（IMAGE_MODES / BLOCK_MODES 之一）
+---@field path string|nil 图片路径（图模式）
+---@field width integer 物理像素
+---@field height integer 物理像素
 local Cover = Widget:extend{
     mode = nil,
     path = nil,

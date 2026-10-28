@@ -38,7 +38,7 @@ local VALUE = "[^%s&\"',;}]+"
 local MASK = "***"
 
 --- 键名是否像凭证 / 账号标识（值一律 ***，不进包）。
---- 只认整词或 `_` 分段（weread_token 命中 token；provider 不命中 vid）。
+--- 只认整词或 `_` 分段（access_token 命中 token；provider 不命中 vid）。
 ---@param key any
 ---@return boolean
 function M.isSecretKey(key)

@@ -452,7 +452,7 @@ local CURRENT_VOLUME_LIMIT = 3
 --- 另一台设备读的卷在本机没有任何卷行，首页「当前阅读」只能退到系列行或本机残留的旧卷。
 --- Kavita 的 continue-point 一次给一章（volumeId / pagesRead / 最后阅读时间），响应只有几 KB，
 --- 所以只问最近在读的几部漫画，不为整架书发请求。
----@param source BookSource 源实例（要 client / id）
+---@param source KavitaSource 源实例（要 client / id）
 ---@param series_list table[] Kavita SeriesDto（本次同步里 pagesRead > 0 的那些）
 ---@param cb fun(changed: integer) 候选跑完（可能 0 个）后回调
 ---@return { cancel: fun() }

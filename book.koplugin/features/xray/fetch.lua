@@ -433,7 +433,7 @@ function Fetch.scanBook(identity, path)
             return { cancel = function() end }
         end
     end
-    local digest = scanDigest(len_or_err, #bounds)
+    local digest = scanDigest(len_or_err --[[@as integer]], #bounds)
     local title, author = bookMeta(identity)
     local cursor = XrayDB.scanCursor(identity.source_id, identity.stable_id)
     local index = cursor and cursor.digest == digest and cursor.done + 1 or 1

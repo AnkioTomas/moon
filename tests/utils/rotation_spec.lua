@@ -139,7 +139,8 @@ end
 do
     screen_mode = 0
     Rotation.follow(nil)
-    Rotation.follow("1")
+    local bad_mode = "1" ---@type any
+    Rotation.follow(bad_mode)
     Assert.eq(screen_mode, 0)
 end
 

@@ -31,9 +31,10 @@ local function online()
 end
 
 ---@param text string|nil
-local function toast(text)
+---@param timeout number|nil 秒，缺省 2
+local function toast(text, timeout)
     if not text then return end
-    require("ui.themes.widgets.toast"):new{ text = text, timeout = 2 }:show()
+    require("ui.themes.widgets.toast"):new{ text = text, timeout = timeout or 2 }:show()
 end
 
 --- 同步批量删除期间的忙碌窗（05 A）：与设置页共用同一套实现。

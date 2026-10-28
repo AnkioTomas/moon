@@ -22,7 +22,7 @@ function Mixed.setWestern(id, name)
         if not face then return nil, err end
         local cre = require("document/credocument"):engineInit()
         local path, index = cre.getFontFaceFilenameAndFaceIndex(face)
-        local font = require("ffi/freetype").newFaceSize(path, 20, index)
+        local font = require("ffi/freetype").newFaceSize(path, 20, index) --[[@as FreeTypeSize]]
         local has_chinese = font:hasGlyph(0x4E2D)
         font:done()
         if has_chinese then return nil, _("请选择不含中文字形的字体，以保留所选中文字体") end
@@ -100,7 +100,7 @@ function Mixed.install(document)
             local path, index = cre.getFontFaceFilenameAndFaceIndex(face)
             cjk_faces[face] = false
             if path then
-                local font = require("ffi/freetype").newFaceSize(path, 20, index)
+                local font = require("ffi/freetype").newFaceSize(path, 20, index) --[[@as FreeTypeSize]]
                 cjk_faces[face] = font:hasGlyph(0x4E2D)
                 font:done()
             end

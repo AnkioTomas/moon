@@ -301,7 +301,6 @@ return {
     ["加入书库"] = "Add to library",
     ["书籍信息"] = "Book info",
     ["大小"] = "Size",
-    ["文件"] = "File",
     ["路径"] = "Path",
     ["来源"] = "Source",
     ["格式"] = "Format",

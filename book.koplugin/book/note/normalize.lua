@@ -6,9 +6,6 @@
 
 local Normalize = {}
 
----@param items table[]|nil
----@param total_pages integer|nil
----@return table[]
 --- KOReader 用「字段缺席 / nil」表示无备注、无划线样式；SQL / JSON 常把缺省写成 ""。
 --- Lua 里空串为真，ReaderBookmark.getBookmarkType 会把高亮判成笔记、把书签判成划线。
 ---@param value any
@@ -18,6 +15,9 @@ local function blankToNil(value)
     return value
 end
 
+---@param items table[]|nil
+---@param total_pages integer|nil
+---@return table[]
 function Normalize.clean(items, total_pages)
     local result = {}
     for _idx, item in ipairs(items or {}) do

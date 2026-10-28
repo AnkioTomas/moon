@@ -30,9 +30,10 @@ local remoteRelativePath, coverPath = Common.remoteRelativePath, Common.coverPat
 ---@field upload_failed table<string, number> 上传失败的冷却时间
 ---@field _uploading boolean|nil 是否正在上传
 ---@field cfg table
----@field dav WebdavClient
+---@field dav WebdavClient|GDriveClient
 ---@field _crashed table<string, boolean>|nil 补齐时引擎崩过的路径（本进程）
 ---@field _enrich_job { cancel: fun() }|nil 在飞的封面/元数据补齐
+---@field _enriched table<string, boolean>|nil 本进程已补齐过的远端书（按 stable_id）
 ---@field _stats_seen table<string, string>|nil 统计按书已入库版本（stats_index.json 的内存副本）
 local Client = {}
 

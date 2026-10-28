@@ -20,8 +20,9 @@ local function config()
 end
 
 ---@param text string
-local function toast(text)
-    require("ui.themes.widgets.toast"):new{ text = text, timeout = 3 }:show()
+---@param timeout number|nil 秒，缺省 3
+local function toast(text, timeout)
+    require("ui.themes.widgets.toast"):new{ text = text, timeout = timeout or 3 }:show()
 end
 
 --- 落盘并重建源实例，让新地址 / Key / 书库立即生效，设置页随之刷新。
@@ -348,7 +349,7 @@ local function textRow(text)
         local Theme = require("ui.themes")
         local Geom = require("ui/geometry")
         local CenterContainer = require("ui/widget/container/centercontainer")
-        local TextBlock = require("ui/themes/widgets/text")
+        local TextBlock = require("ui.themes.widgets.text")
         local t = Theme.current()
         local pad = Theme.px(t.space.md)
         local box = TextBlock.box("caption", text, iw - pad * 2,

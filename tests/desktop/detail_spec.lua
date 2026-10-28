@@ -574,7 +574,7 @@ end
 Assert.eq(cover_args.source.id, "wechat")
 desktop.detail:close()
 
--- 整本书文件：格式、大小、加入日期、文件名；短简介整段直出，不给「更多」。
+-- 整本书文件：格式、大小、加入日期、完整路径；短简介整段直出，不给「更多」。
 resolved = local_src
 local added = os.time({ year = 2026, month = 9, day = 1, hour = 12 })
 Detail.open(desktop, "library", {
@@ -586,7 +586,7 @@ Assert.contains(texts_w, "local")
 Assert.contains(texts_w, "EPUB")
 Assert.contains(texts_w, require("util").getFriendlySize(2048))
 Assert.contains(texts_w, "2026-09-01")
-Assert.contains(texts_w, "长书.epub")
+Assert.contains(texts_w, "/books/长书.epub")
 Assert.contains(texts_w, "暂无阅读记录")
 Assert.contains(texts_w, "简介")
 Assert.len(Kit.find(desktop.detail, function(w) return w.text == "全文简介" end), 1)

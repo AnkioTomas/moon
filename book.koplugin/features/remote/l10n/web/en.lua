@@ -302,7 +302,6 @@ return {
     ["插件日志"] = "Plugin log",
     ["插件日志尚未生成。"] = "The plugin log has not been created yet.",
     ["月读数据目录"] = "Moon data folder",
-    ["本地书库 WebDAV"] = "Local library WebDAV",
     ["用户名"] = "Username",
     ["留空自动选择"] = "Empty for automatic",
     ["目录地址"] = "Catalog URL",

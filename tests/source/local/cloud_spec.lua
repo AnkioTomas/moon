@@ -27,12 +27,12 @@ do
     local cfg = { cloud = "gdrive", gdrive_token = "refresh", gdrive_client = "id:secret" }
     local client = Client.new(cfg)
     Assert.eq(client:cloudKind(), "gdrive")
-    Assert.eq(client.dav.kind, "gdrive")
+    Assert.eq((client.dav --[[@as GDriveClient]]).kind, "gdrive")
     local first = client.dav
     Assert.eq(client.dav, first)
     cfg.gdrive_token = "other"
     Assert.is_true(client.dav ~= first)
-    Assert.eq(client.dav.kind, "gdrive")
+    Assert.eq((client.dav --[[@as GDriveClient]]).kind, "gdrive")
 
     local drive = Client.new({ cloud = "GDrive", gdrive_token = "r", gdrive_client = "id:secret" })
     Assert.eq(drive:cloudKind(), "gdrive")

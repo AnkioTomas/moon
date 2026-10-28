@@ -170,6 +170,7 @@ Assert.eq(started.key, "xray\0moon\0book-1")
 Assert.is_true(started.restartable)
 Assert.is_true(started.retryable({ ok = false }))
 Assert.is_nil(extract_cb, "入队前不取字")
+---@type { ok: boolean, err?: string }|nil
 local scan_done
 started.run(function() end, function(r) scan_done = r end)
 extract_cb(nil, "文档没有可提取的文字")
@@ -178,6 +179,7 @@ Assert.is_false(scan_done.ok)
 scan_done = nil
 started.run(function() end, function(r) scan_done = r end)
 extract_cb("/tmp/reflow_extract_xray.txt")
+---@cast scan_done -nil
 Assert.is_true(scan_done.ok, "extract 交出路径后应进入 scanBook")
 
 -- 上次没分析完：确认框报断点
