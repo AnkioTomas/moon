@@ -107,14 +107,11 @@ local BUILTIN = {
         end,
     },
     {
-        id = "local", name = "本地书库网盘", invalidate = true,
+        id = "local", name = "本地书库 WebDAV", invalidate = true,
         fields = {
-            { key = "cloud", label = "网盘", placeholder = "webdav / gdrive / off" },
             { key = "webdav_url", label = "WebDAV 地址", type = "url", placeholder = "https://dav.example.com/dav" },
             { key = "webdav_username", label = "用户名" },
             { key = "webdav_password", label = "密码", secret = true },
-            { key = "gdrive_token", label = "Google Drive 刷新令牌", secret = true },
-            { key = "gdrive_client", label = "Google 客户端 ID:密钥", secret = true },
             { key = "webdav_path", label = "目录" },
         },
     },
