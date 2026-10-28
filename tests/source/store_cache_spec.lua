@@ -112,6 +112,20 @@ Assert.eq(calls.browse, 2)
 Assert.len(res.data, 1)
 Assert.eq(res.data[1].stable_id, "b2")
 
+-- 缓存值解不开：当未命中现拉，返回的句柄要能取消这次现拉。
+do
+    local cancelled = false
+    local slow = {
+        browseAsync = function(_, _opts, _cb)
+            return { cancel = function() cancelled = true end }
+        end,
+    }
+    entries["store\0browse\0fake\0n3"] = "not json {"
+    local h = StoreCache.browse("fake", slow, { node = "n3" }, function() end)
+    h.cancel()
+    Assert.is_true(cancelled, "坏缓存回落的现拉必须可取消")
+end
+
 -- 书城后端可以没有 .id：身份由调用方显式传入（对应桌面 provider.id）。
 do
     local backend_calls = 0
