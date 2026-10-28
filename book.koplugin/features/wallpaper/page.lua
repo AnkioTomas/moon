@@ -49,24 +49,19 @@ local function navRow(opts)
     end
 end
 
---- 单选行：点开列表，选中新值写配置并重画。apply 返回 false 表示还没定，不重画。
+--- 单选行：选中新值写配置并重画。apply 返回 false 表示还没定，不重画。
 ---@param desktop table
----@param opts { icon: string, title: string, status: string, items: table[], current: string, apply: fun(value: string): boolean|nil }
+---@param opts table Row.choice 参数（width / on_select 由本函数补上）外加 apply: fun(value: string): boolean|nil
 ---@return fun(iw: number): table
 local function choiceRow(desktop, opts)
-    return navRow{
-        icon = opts.icon, title = opts.title, status = opts.status,
-        callback = function()
-            List:new{
-                title = opts.title, items = opts.items, current = opts.current, centered = true,
-                on_select = function(value)
-                    if not value or value == opts.current then return end
-                    if opts.apply(value) == false then return end
-                    repaint(desktop)
-                end,
-            }:show()
-        end,
-    }
+    return function(iw)
+        opts.width = iw
+        opts.on_select = function(value)
+            if opts.apply(value) == false then return end
+            repaint(desktop)
+        end
+        return Row.choice(opts)
+    end
 end
 
 --- 弹路径选择器选图片（is_file）或文件夹。

@@ -42,16 +42,6 @@ local function sizes()
     }
 end
 
----@param items table[]
----@param value any
----@return string
-local function label(items, value)
-    for _idx, item in ipairs(items) do
-        if item.value == value then return item.text end
-    end
-    return tostring(value)
-end
-
 ---@param key string
 ---@param value any
 local function save(desktop, key, value)
@@ -63,16 +53,17 @@ local function save(desktop, key, value)
     desktop:updateView()
 end
 
+--- 单选行：选中写配置；注音范围选「全部」时提醒性能。
 ---@param desktop BookDesktop
+---@param iw number
+---@param icon string
 ---@param title string
 ---@param items table[]
 ---@param key string
-local function pick(desktop, title, items, key)
-    require("ui.themes.widgets.list"):new{
-        title = title,
-        items = items,
-        current = require("utils.settings").get("features.rare")[key],
-        centered = true,
+local function pickRow(desktop, iw, icon, title, items, key)
+    return require("ui.themes.widgets.row").choice({
+        width = iw, icon = icon, title = title,
+        items = items, current = require("utils.settings").get("features.rare")[key],
         on_select = function(value)
             save(desktop, key, value)
             if key == "rare_level" and value == "all" then
@@ -82,7 +73,7 @@ local function pick(desktop, title, items, key)
                 }:show()
             end
         end,
-    }:show()
+    })
 end
 
 ---@param desktop BookDesktop
@@ -191,13 +182,7 @@ local function sections(desktop)
                         end,
                     })
                 end,
-                function(iw)
-                    return Row.widget({
-                        width = iw, chevron = true, kind = "nav", icon = "tune",
-                        title = _("注音范围"), status = label(levels(), s.rare_level), status_on = true,
-                        callback = function() pick(desktop, _("注音范围"), levels(), "rare_level") end,
-                    })
-                end,
+                function(iw) return pickRow(desktop, iw, "tune", _("注音范围"), levels(), "rare_level") end,
                 function(iw)
                     return Row.widget({
                         width = iw, chevron = false, kind = "toggle", icon = "bookmark",
@@ -206,13 +191,7 @@ local function sections(desktop)
                         callback = function() save(desktop, "rare_vocab", not s.rare_vocab) end,
                     })
                 end,
-                function(iw)
-                    return Row.widget({
-                        width = iw, chevron = true, kind = "nav", icon = "format_size",
-                        title = _("注音字号"), status = label(sizes(), s.rare_size), status_on = true,
-                        callback = function() pick(desktop, _("注音字号"), sizes(), "rare_size") end,
-                    })
-                end,
+                function(iw) return pickRow(desktop, iw, "format_size", _("注音字号"), sizes(), "rare_size") end,
             },
         },
         { title = _("注音词库"), rows = lexicon_rows },
