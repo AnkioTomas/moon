@@ -1438,7 +1438,7 @@ function Remote.start()
             end,
             logs_zip = function(cb)
                 -- 先把缓冲里的插件日志刷盘，打包才完整
-                pcall(require("utils.log").flush)
+                require("utils.log").flush()
                 -- 诊断快照要查 sqlite、建源实例：子进程禁止碰库，主进程先算
                 local diag, diag_notes = require("features.remote.logs").gatherExtras()
                 runFilesystem("remote-logs", function() return buildLogsZip(diag, diag_notes) end, cb)
