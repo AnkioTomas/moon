@@ -43,7 +43,6 @@ function M.units(text, keep)
     local function piece(s)
         for _idx, w in ipairs(M.segment(s)) do push(w) end
     end
-    text = tostring(text or "")
     local pos = 1
     if keep and keep ~= "" then
         while true do
@@ -103,7 +102,7 @@ end
 ---@return string[]
 function M.clauses(text)
     local out, cur = {}, {}
-    local chars = Text.chars((tostring(text or ""):gsub("[\r\n\t]", " ")))
+    local chars = Text.chars((text:gsub("[\r\n\t]", " ")))
     local function flush()
         local s = table.concat(cur):gsub("^%s+", ""):gsub("%s+$", "")
         if s ~= "" then out[#out + 1] = s end
@@ -235,7 +234,7 @@ function M.rankWords(text)
     local list = {}
     for w, s in pairs(best) do list[#list + 1] = { w, s, at[w] } end
     if #list == 0 then
-        for w in tostring(text):gmatch("%a+") do
+        for w in text:gmatch("%a+") do
             if #w >= 4 and not EN_STOP[w:lower()] and not best[w] then
                 best[w] = M.MIN_SCORE + #w * 0.2
                 list[#list + 1] = { w, best[w], #list }
@@ -260,7 +259,6 @@ end
 ---@param text string
 ---@return string|nil
 function M.keyword(text)
-    text = tostring(text or "")
     local marked = text:match("【(.-)】")
     if marked and marked ~= "" then return marked end
     local kw, score = M.scoreKeyword(text)
@@ -272,7 +270,7 @@ end
 ---@param text string
 ---@return string
 function M.strip(text)
-    return (tostring(text or ""):gsub("【", ""):gsub("】", ""))
+    return (text:gsub("【", ""):gsub("】", ""))
 end
 
 --- 按分数从高到低的候选词，用于散落背景字。

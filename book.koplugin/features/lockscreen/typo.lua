@@ -802,8 +802,8 @@ end
 ---@param rect table
 ---@return table[]
 function M.blocks(rect)
-    local w = math.max(1, tonumber(rect.w) or 1)
-    local h = math.max(1, tonumber(rect.h) or 1)
+    local w = math.max(1, rect.w)
+    local h = math.max(1, rect.h)
     local style = M.style()
     if style == "random" then style = STYLE_IDS[math.random(#STYLE_IDS)] end
     local face, measure, synthetic = M.metrics()

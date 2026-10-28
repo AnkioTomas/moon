@@ -95,7 +95,6 @@ function Position.localize(identity, chapter, pos, source, format)
     local locator, fraction = Annotations.fromWireOffset(wire, flow, pos.extra.chapter_offset)
     if not locator then return nil, _("无法定位阅读进度") end
     pos.locator = locator
-    pos.extra = pos.extra or {}
     pos.extra.chapter_char_fraction = fraction
     -- 有精确定位就不填页比例字段；打开文档后由 Toc.chapterFraction 重算。
     pos.chapter_fraction = nil
