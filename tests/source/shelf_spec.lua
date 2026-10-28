@@ -117,6 +117,25 @@ do
     package.loaded["utils.settings"] = nil
     package.loaded["source.shelf"] = nil
 end
+
+-- 远端源的强制刷新只是 meta 覆盖，不等于「认空书架」：登录态半失效时接口常回空壳成功，
+-- 空快照下架整架只允许本地 / kindle 扫盘（它们直接调 BookDB.reconcile 给 allow_empty）。
+do
+    local seen
+    package.preload["book.books_db"] = function()
+        return {
+            reconcile = function(_source_id, _books, opts) seen = opts; return true, 0 end,
+            markReadAutomatically = function() return true end,
+        }
+    end
+    package.loaded["book.books_db"] = nil
+    package.loaded["source.shelf"] = nil
+    local S = require("source.shelf")
+    Assert.not_nil(S.reconcile("x", {}, true))
+    Assert.is_true(seen.force)
+    Assert.is_nil(seen.allow_empty, "远端源强制刷新不得把空快照当下架依据")
+    package.loaded["source.shelf"] = nil
+end
 package.preload["book.books_db"] = nil
 package.loaded["book.books_db"] = nil
 package.loaded["source.shelf"] = nil
