@@ -32,28 +32,11 @@ function Setting.parseToken(input)
     return (require("utils.text").trim(input):gsub("^[Bb]earer%s+", ""))
 end
 
----@param name any
----@param value any
----@return boolean
-local function validPair(name, value)
-    return type(name) == "string" and name:match("^[%w_%-%.]+$") ~= nil
-        and type(value) == "string" and value ~= "" and not value:find("[;\r\n]")
-end
-
---- 浏览器扩展交来的 payload.cookies → Cookie 请求头；只收发往 iread.ankio.net 的 Cookie（本站与 ankio.net 父域）。
+--- 浏览器扩展交来的 payload.cookies → Cookie 请求头；只收发往 ankio.net 及其子域的 Cookie。
 ---@param payload table
 ---@return string
 function Setting.fromPayload(payload)
-    local pairs_list = {}
-    for _idx, cookie in ipairs(type(payload.cookies) == "table" and payload.cookies or {}) do
-        local domain = type(cookie) == "table" and type(cookie.domain) == "string"
-            and cookie.domain:gsub("^%.", ""):lower()
-        if (domain == "iread.ankio.net" or domain == "ankio.net") and validPair(cookie.name, cookie.value) then
-            pairs_list[#pairs_list + 1] = cookie.name .. "=" .. cookie.value
-        end
-    end
-    table.sort(pairs_list)
-    return table.concat(pairs_list, "; ")
+    return require("source.cookie_login").fromPayload(payload, "ankio.net")
 end
 
 --- 校验凭据，通过才保存（Token 与 Cookie 互斥）并重载源。
