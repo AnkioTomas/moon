@@ -46,17 +46,17 @@ local chosen
 --- 当前后端；没有为 nil。
 ---@return table|nil
 local function backend()
-    if chosen == nil then
-        chosen = false
-        for _idx, name in ipairs({ "khp", "kindle", "kobo" }) do
-            local mod = require("features.bluetooth." .. name)
-            if mod.available() then
-                chosen = name == "khp" and mod or require("features.bluetooth.sync").wrap(mod)
-                break
-            end
+    -- 只记住选中的；「都没有」不记：khp 守护进程可能在 KOReader 之后才起来，记死就得重启才见蓝牙入口。
+    -- 重探很便宜：khp 是一次 stat，kindle / kobo 各自缓存探测结果。
+    if chosen then return chosen end
+    for _idx, name in ipairs({ "khp", "kindle", "kobo" }) do
+        local mod = require("features.bluetooth." .. name)
+        if mod.available() then
+            chosen = name == "khp" and mod or require("features.bluetooth.sync").wrap(mod)
+            return chosen
         end
     end
-    return chosen or nil
+    return nil
 end
 
 --- 有可用的蓝牙后端。

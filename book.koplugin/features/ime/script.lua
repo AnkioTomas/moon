@@ -19,13 +19,17 @@ local CHUNK = 500
 local TABLES = { traditional = "s2t", simplified = "t2s" }
 
 local conn
+--- conn 是在 fork 子进程里开的吗。整书转换（convert）在子进程跑，不能复用从主进程继承来的句柄。
+local conn_in_child
 ---@type table<string, integer>
 local max_len = {}
 
 ---@return table
 local function open()
-    if conn then return conn end
+    local in_child = require("workers.job").inSubProcess()
+    if conn and conn_in_child == in_child then return conn end
     conn = require("lua-ljsqlite3/init").open(PATH, "ro")
+    conn_in_child = in_child
     local stmt = conn:prepare("SELECT k, v FROM meta WHERE k IN ('s2t_max', 't2s_max')")
     for row in stmt:rows() do max_len[row[1]:sub(1, 3)] = tonumber(row[2]) end
     stmt:close()

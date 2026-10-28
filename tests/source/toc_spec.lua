@@ -95,6 +95,55 @@ do
     end
 end
 
+do
+    -- 回填字数：内存立即可见，落库合并成一次延迟写（千章全本缓存不再序列化目录一千遍）。
+    local Stubs = require("support.stubs")
+    Stubs.reset()
+    local saved = 0
+    local setToc = package.loaded["book.books_db"].setToc
+    package.loaded["book.books_db"].setToc = function(...)
+        saved = saved + 1
+        return setToc(...)
+    end
+    Assert.is_true(Toc.put("fanqie", "words", { { idx = 1, uid = "w1" }, { idx = 2, uid = "w2" } }))
+    saved = 0
+    Toc.setWords("fanqie", "words", 1, 1200)
+    Toc.setWords("fanqie", "words", 2, 800)
+    Toc.setWords("fanqie", "words", 2, 800)
+    Assert.eq(Toc.read("fanqie", "words")[1].words, 1200, "内存目录立即带字数")
+    Assert.eq(Toc.read("fanqie", "words")[2].words, 800)
+    Assert.eq(saved, 0, "setWords 不同步写库")
+    Stubs.flush()
+    Assert.eq(saved, 1, "多次回填合并成一次写")
+    local stored = require("json").decode(rows["fanqie:words"].payload)
+    Assert.eq(stored[1].words, 1200)
+    Assert.eq(stored[2].words, 800)
+
+    -- 字数没变不排写；非法参数不碰库。
+    Toc.setWords("fanqie", "words", 1, 1200)
+    Toc.setWords("fanqie", "words", 1, 0)
+    Toc.setWords("fanqie", "words", nil, 5)
+    Toc.setWords("fanqie", "nope", 1, 5)
+    Stubs.flush()
+    Assert.eq(saved, 1)
+
+    -- 等待落库期间目录被重新 put：新目录为准，过期的字数写不再覆盖它。
+    Toc.setWords("fanqie", "words", 1, 1300)
+    Assert.is_true(Toc.put("fanqie", "words", { { idx = 1, uid = "w1-new" } }))
+    saved = 0
+    Stubs.flush()
+    Assert.eq(saved, 0)
+    Assert.eq(Toc.uid("fanqie", "words", 1), "w1-new")
+
+    -- 落库失败只告警，不抛。
+    Toc.setWords("fanqie", "words", 1, 50)
+    writes = false
+    Stubs.flush()
+    writes = true
+    Assert.eq(Toc.read("fanqie", "words")[1].words, 50)
+    package.loaded["book.books_db"].setToc = setToc
+end
+
 now = now + 6 * 60 * 60
 Assert.is_nil(Toc.read("jdread", "book-1"))
 Assert.is_true(reads > before)

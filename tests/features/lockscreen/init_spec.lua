@@ -374,6 +374,11 @@ local ok_run, err_run = pcall(function()
     Assert.eq(saved.screensaver_type, "cover", "接管前的锁屏方式必须还原")
     Assert.eq(saved.screensaver_document_cover, "/old/cover.png")
     Assert.is_true(saved.screensaver_show_message)
+
+    -- 唤醒 = 锁过一次屏：锁屏次数 +1，按它失效的背景（海报字）下次回桌面才重合成
+    local cycles = Compose.lock_cycles
+    LockScreen.onResume()
+    Assert.eq(Compose.lock_cycles, cycles + 1)
 end)
 
 cleanup()

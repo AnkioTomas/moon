@@ -24,6 +24,13 @@ local cache = {}
 local count = 0
 local CACHE_LIMIT = 32
 
+--- 字数回填后等多久把目录写回库（秒）。字数是派生缓存，丢了下次打开该章再算；
+--- 千章全本缓存按这个节奏合并写，而不是每章序列化一遍整份目录。
+Toc.WORDS_FLUSH_DELAY = 30
+--- 字数改了、还没写回库的目录：key → list。Toc.put 换新目录时作废。
+---@type table<string, BookChapter[]>
+local pending_words = {}
+
 --- 写入缓存；满了先整表清空再放新条目（活跃的只有在读的几本，清掉的下次查库重建）。
 ---@param key string
 ---@param entry SourceTocEntry
@@ -116,11 +123,13 @@ function Toc.put(source_id, stable_id, list)
     local ok, payload = pcall(require("json").encode, list)
     if not ok or type(payload) ~= "string" then return false end
     if not require("book.books_db").setToc(source_id, stable_id, payload) then return false end
-    putCache(keyOf(source_id, stable_id), build(list, os.time()))
+    local key = keyOf(source_id, stable_id)
+    pending_words[key] = nil
+    putCache(key, build(list, os.time()))
     return true
 end
 
---- 补一章字数（缓存正文后回填）；变了才落库。番茄等目录不带字数时靠这个估全书页码。
+--- 补一章字数（缓存正文后回填）：内存目录立即生效，落库延迟合并。番茄等目录不带字数时靠这个估全书页码。
 ---@param source_id string
 ---@param stable_id string
 ---@param idx integer
@@ -129,17 +138,24 @@ function Toc.setWords(source_id, stable_id, idx, words)
     words = tonumber(words)
     idx = tonumber(idx)
     if not words or words <= 0 or not idx then return end
-    -- 目录还没落库 / books_db 桩缺 getToc 时不硬崩，只跳过回填。
-    local ok, list = pcall(Toc.read, source_id, stable_id, true)
-    if not ok or type(list) ~= "table" then return end
-    local chapter = list[idx]
-    if chapter and tonumber(chapter.words) ~= words then
-        chapter.words = words
-        local put_ok, put_ret = pcall(Toc.put, source_id, stable_id, list)
-        if not put_ok or put_ret == false then
-            require("logger").warn("book.toc setWords put failed", source_id, stable_id, idx, put_ret)
+    local list = Toc.read(source_id, stable_id, true)
+    local chapter = list and list[idx]
+    if not chapter or tonumber(chapter.words) == words then return end
+    chapter.words = words
+    local key = keyOf(source_id, stable_id)
+    local scheduled = pending_words[key] ~= nil
+    pending_words[key] = list
+    if scheduled then return end
+    require("ui/uimanager"):scheduleIn(Toc.WORDS_FLUSH_DELAY, function()
+        local dirty = pending_words[key]
+        pending_words[key] = nil
+        if not dirty then return end
+        local ok, payload = pcall(require("json").encode, dirty)
+        if not ok or type(payload) ~= "string"
+            or not require("book.books_db").setToc(source_id, stable_id, payload) then
+            require("logger").warn("book.toc setWords flush failed", source_id, stable_id, payload)
         end
-    end
+    end)
 end
 
 --- 记下一章 VIP 的购买状态（目录里显示「已购 / 未购」）；变了才落库。
