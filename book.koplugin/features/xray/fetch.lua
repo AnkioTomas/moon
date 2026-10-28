@@ -271,6 +271,30 @@ local function lastSentenceEnd(window)
     return best
 end
 
+--- 候选窗口（最多 size 字节）的断开长度；未到全文末尾时优先换行、其次句末，最后不切断 UTF-8 字符。
+---@param window string
+---@param size integer
+---@param at_end boolean
+---@param next_byte integer|nil 窗口后第一个字节
+---@return integer
+local function cutLength(window, size, at_end, next_byte)
+    local stop = #window
+    if at_end or stop == 0 then return stop end
+    local cut = window:match("^.*()\n")
+    local sentence = lastSentenceEnd(window)
+    if cut and cut > size / 2 then
+        return cut
+    elseif sentence and sentence > size / 2 then
+        return sentence
+    end
+    local byte = next_byte
+    while stop > 1 and byte and byte >= 0x80 and byte < 0xC0 do
+        stop = stop - 1
+        byte = window:byte(stop + 1)
+    end
+    return stop
+end
+
 --- 把正文切成不超过 size 字节的段：优先在后半段的换行处断开，其次句末标点，最后退到 UTF-8 字符边界。
 ---@param text string
 ---@param size integer
@@ -278,28 +302,63 @@ end
 function Fetch.chunks(text, size)
     local out, pos, len = {}, 1, #text
     while pos <= len do
-        local stop = math.min(pos + size - 1, len)
-        if stop < len then
-            local window = text:sub(pos, stop)
-            local cut = window:match("^.*()\n")
-            local sentence = lastSentenceEnd(window)
-            if cut and cut > size / 2 then
-                stop = pos + cut - 1
-            elseif sentence and sentence > size / 2 then
-                stop = pos + sentence - 1
-            else
-                local byte = text:byte(stop + 1)
-                while stop > pos and byte >= 0x80 and byte < 0xC0 do
-                    stop = stop - 1
-                    byte = text:byte(stop + 1)
-                end
-            end
-        end
-        local chunk = Text.trim(text:sub(pos, stop))
+        local want = math.min(size, len - pos + 1)
+        local window = text:sub(pos, pos + want - 1)
+        local at_end = pos + want - 1 >= len
+        local take = cutLength(window, size, at_end, not at_end and text:byte(pos + want) or nil)
+        if take < 1 then take = want end
+        local chunk = Text.trim(text:sub(pos, pos + take - 1))
         if chunk ~= "" then out[#out + 1] = chunk end
-        pos = stop + 1
+        pos = pos + take
     end
     return out
+end
+
+--- 与 chunks 同一套断开规则，但只记文件字节区间，不把全书读进内存。
+---@param path string
+---@param size integer
+---@return { from: integer, to: integer }[]|nil, integer|string 成功为 (bounds, 文件字节数)，失败为 (nil, err)
+function Fetch.chunkBounds(path, size)
+    local file, open_err = io.open(path, "rb")
+    if not file then return nil, open_err or "open failed" end
+    local len = file:seek("end") or 0
+    local out, pos = {}, 1
+    while pos <= len do
+        local want = math.min(size, len - pos + 1)
+        file:seek("set", pos - 1)
+        local window = file:read(want) or ""
+        if #window == 0 then
+            file:close()
+            return nil, "short read"
+        end
+        local at_end = pos + #window - 1 >= len
+        local next_byte
+        if not at_end then
+            local next_char = file:read(1)
+            next_byte = next_char and next_char:byte(1) or nil
+        end
+        local take = cutLength(window, size, at_end, next_byte)
+        if take < 1 then take = #window end
+        if Text.trim(window:sub(1, take)) ~= "" then
+            out[#out + 1] = { from = pos, to = pos + take - 1 }
+        end
+        pos = pos + take
+    end
+    file:close()
+    return out, len
+end
+
+--- 按 chunkBounds 的区间读一段并 trim；读失败返回 nil。
+---@param path string
+---@param bound { from: integer, to: integer }
+---@return string|nil
+local function readBound(path, bound)
+    local file = io.open(path, "rb")
+    if not file then return nil end
+    file:seek("set", bound.from - 1)
+    local raw = file:read(bound.to - bound.from + 1)
+    file:close()
+    return raw and Text.trim(raw) or nil
 end
 
 --- 按章识别：整章正文切段逐段请求 AI，每段结果当场合并落库；结果须在本章正文里 grounding。
@@ -343,11 +402,11 @@ function Fetch.chapter(identity, text, cb)
 end
 
 --- 全书正文的指纹：同一本书的同一版正文分段结果不变，续扫游标才对得上。
----@param text string
----@param chunks string[]
+---@param byte_len integer
+---@param chunk_count integer
 ---@return string
-local function scanDigest(text, chunks)
-    return #text .. ":" .. #chunks
+local function scanDigest(byte_len, chunk_count)
+    return byte_len .. ":" .. chunk_count
 end
 
 --- 上次没分析完、这次可以接着来的段数；没有或正文变了时 nil。
@@ -361,12 +420,20 @@ end
 --- 全书分析的任务体（`workers.tasks` 的 run）：逐段请求 AI，每段结果当场合并落库并推进游标（xray_scan）。
 --- 退避重试、休眠 / 断网后重跑、下次重新点「分析全书」都从没做完的那段接着来；全部完成删游标。
 --- 提示词只带本段提到的已收录实体，否则实体越积越多会撑爆上下文。
+--- path 是 extract 写出的临时正文文件：只按段 seek 读取，禁止再把全书读进主进程。
 ---@param identity BookIdentity
----@param text string 全书正文
+---@param path string 全书正文临时文件
 ---@return fun(report: fun(text: string|nil, count: integer|nil, total: integer|nil), done: fun(result: table)): table
-function Fetch.scanBook(identity, text)
-    local chunks = Fetch.chunks(text, SCAN_CHUNK)
-    local digest = scanDigest(text, chunks)
+function Fetch.scanBook(identity, path)
+    local bounds, len_or_err = Fetch.chunkBounds(path, SCAN_CHUNK)
+    if not bounds then
+        local err = len_or_err
+        return function(_report, done)
+            done({ ok = false, err = err })
+            return { cancel = function() end }
+        end
+    end
+    local digest = scanDigest(len_or_err, #bounds)
     local title, author = bookMeta(identity)
     local cursor = XrayDB.scanCursor(identity.source_id, identity.stable_id)
     local index = cursor and cursor.digest == digest and cursor.done + 1 or 1
@@ -381,24 +448,28 @@ function Fetch.scanBook(identity, text)
             done(result)
         end
         local function step()
-            report(_("正在分析全书"), index - 1, #chunks)
-            if index > #chunks then
+            report(_("正在分析全书"), index - 1, #bounds)
+            if index > #bounds then
                 finish({ ok = true })
                 return
             end
-            local chunk = chunks[index]
+            local chunk = readBound(path, bounds[index])
+            if not chunk or chunk == "" then
+                finish({ ok = false, err = _("无法读取全书正文") })
+                return
+            end
             local existing = filterGrounded(XrayDB.list(identity.source_id, identity.stable_id), chunk)
             local messages = {
                 { role = "system", content = Prompts.system },
                 { role = "user", content = Prompts.comprehensive(
-                    title, author, math.floor(index * 100 / #chunks), chunk, "", Store.promptSnapshot(existing),
+                    title, author, math.floor(index * 100 / #bounds), chunk, "", Store.promptSnapshot(existing),
                     nil, profile()) },
             }
             request = AI.jsonExtract(messages, { localize = true, max_tokens = profile().max_tokens, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
                 if not decoded then finish({ ok = false, err = err }); return end
                 local ok, save_err = pcall(mergeAndSave, identity, filterGrounded(cleanPayload(decoded), chunk))
                 if not ok then finish({ ok = false, err = save_err }); return end
-                XrayDB.saveScanCursor(identity.source_id, identity.stable_id, digest, index, #chunks)
+                XrayDB.saveScanCursor(identity.source_id, identity.stable_id, digest, index, #bounds)
                 index = index + 1
                 step()
             end)

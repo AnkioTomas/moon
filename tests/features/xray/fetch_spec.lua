@@ -196,28 +196,54 @@ local parts = Fetch.chunks("aaaa\nbbbb\ncc", 6)
 Assert.eq(parts[1], "aaaa")
 Assert.eq(parts[2], "bbbb")
 Assert.eq(parts[3], "cc")
-parts = Fetch.chunks("一二三四", 7)
-Assert.eq(parts[1], "一二")
-Assert.eq(parts[2], "三四")
-parts = Fetch.chunks("一二三。四五六七八九", 12)
-Assert.eq(parts[1], "一二三。", "无换行的长段落在句末断开，不切断词")
-Assert.eq(parts[2], "四五六七")
-Assert.eq(parts[3], "八九")
+local utf_parts = Fetch.chunks("一二三四", 7)
+Assert.eq(utf_parts[1], "一二")
+Assert.eq(utf_parts[2], "三四")
+local sentence_parts = Fetch.chunks("一二三。四五六七八九", 12)
+Assert.eq(sentence_parts[1], "一二三。", "无换行的长段落在句末断开，不切断词")
+Assert.eq(sentence_parts[2], "四五六七")
+Assert.eq(sentence_parts[3], "八九")
 Assert.len(Fetch.chunks("", 8), 0)
 Assert.len(Fetch.chunks("  \n  ", 8), 0)
+
+-- 文件分段与内存分段结果一致（只记区间，不把全书拼进字符串）
+local function writeTemp(body)
+    local path = os.tmpname()
+    local f = assert(io.open(path, "wb"))
+    f:write(body)
+    f:close()
+    return path
+end
+local sample = "aaaa\nbbbb\ncc"
+local sample_path = writeTemp(sample)
+local bounds, byte_len = Fetch.chunkBounds(sample_path, 6)
+Assert.eq(byte_len, #sample)
+Assert.len(bounds, 3)
+local from_file = {}
+for _idx, bound in ipairs(bounds) do
+    local f = assert(io.open(sample_path, "rb"))
+    f:seek("set", bound.from - 1)
+    from_file[#from_file + 1] = (f:read(bound.to - bound.from + 1) or ""):match("^%s*(.-)%s*$")
+    f:close()
+end
+Assert.eq(from_file[1], parts[1])
+Assert.eq(from_file[2], parts[2])
+Assert.eq(from_file[3], parts[3])
+os.remove(sample_path)
 
 -- 全书分析：逐段请求、每段落库；只带本段提到的已收录实体；失败后重跑从断点续
 local invalidated = 0
 package.loaded["features.xray.marks"] = { invalidate = function() invalidated = invalidated + 1 end }
 local chunk_a = string.rep("x", 10000) .. " Mina at Whitby"
 local chunk_b = string.rep("y", 10000) .. " Lucy met Mina"
+local book_path = writeTemp(chunk_a .. "\n" .. chunk_b)
 entity_rows, prompts = {
     { kind = "character", name = "Old", aliases = {}, role = "", description = "老管家", updated_at = 1 },
 }, {}
 replies = {
     { characters = { { name = "Mina", aliases = {} }, { name = "Ghost", aliases = {} } }, locations = {}, terms = {} },
 }
-local scan = Fetch.scanBook(identity, chunk_a .. "\n" .. chunk_b)
+local scan = Fetch.scanBook(identity, book_path)
 local reports = {}
 ---@type { ok: boolean, err: any, progressed: boolean|nil }
 local outcome
@@ -252,7 +278,7 @@ Assert.is_true(not outcome.progressed)
 
 -- 下次重新点「分析全书」：新建的任务体按游标从第二段开始
 prompts = {}
-scan = Fetch.scanBook(identity, chunk_a .. "\n" .. chunk_b)
+scan = Fetch.scanBook(identity, book_path)
 -- 输出被截断时后面的段缺失（nil），只处理有的部分
 replies = { { characters = { { name = "Lucy", aliases = {} } } } }
 attempt()
@@ -265,6 +291,7 @@ Assert.eq(reports[#reports][2], 2)
 names_after = {}
 for _idx, row in ipairs(entity_rows) do names_after[row.name] = true end
 Assert.is_true(names_after.Lucy)
+os.remove(book_path)
 
 -- 识别档位：节约不带摘要与前文、上限收紧；高质量放宽
 local xray_conf = require("utils.settings").get("features.xray")

@@ -163,20 +163,32 @@ local function followRunning(key)
     return running ~= nil
 end
 
---- 任务体包一层取字：在任务里取出全书正文（可取消），再交给 make(text) 生成的任务体。
+--- 任务体包一层取字：在任务里把全书正文落到临时文件（可取消），再交给 make(path) 生成的任务体。
+--- extract 成功后文件归这里：分析结束或取消时删掉；禁止再 read("*a") 整本回主进程。
 ---@param ui table ReaderUI
----@param make fun(text: string): fun(report: function, done: function): table|nil
+---@param make fun(path: string): fun(report: function, done: function): table|nil
 ---@return fun(report: function, done: function): table
 local function withText(ui, make)
     return function(report, done)
-        local inner
-        local outer = require("features.reflow.extract").run(ui, function(text, err)
-            if not text then done({ ok = false, err = err }); return end
-            inner = make(text)(report, done)
+        local inner, path_held
+        local function drop()
+            if path_held then
+                os.remove(path_held)
+                path_held = nil
+            end
+        end
+        local outer = require("features.reflow.extract").run(ui, function(path, err)
+            if not path then done({ ok = false, err = err }); return end
+            path_held = path
+            inner = make(path)(report, function(result)
+                drop()
+                done(result)
+            end)
         end, report)
         return { cancel = function()
             outer.cancel()
             if inner then inner.cancel() end
+            drop()
         end }
     end
 end
@@ -237,7 +249,7 @@ function UI.scanBook(ui, identity)
             kind = "ai",
             title = bookTitle(identity),
             restartable = true,
-            run = withText(ui, function(text) return require("features.xray.fetch").scanBook(identity, text) end),
+            run = withText(ui, function(path) return require("features.xray.fetch").scanBook(identity, path) end),
             retryable = function() return true end,
             on_done = function(result)
                 if not result.ok then
