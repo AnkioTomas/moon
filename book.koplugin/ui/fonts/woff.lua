@@ -9,41 +9,6 @@ FreeType 打开 WOFF 时会把整份字体解压到堆上，而 crengine 每个�
 
 local Woff = {}
 
-local CHUNK = 65536
-local libz_cache
-
---- 逐条 cdef：同名声明可能已被别的模块（番茄 crypto）定义，重复声明报错不能连带丢掉其余声明。
----@return table
-local function libz()
-    if libz_cache then return libz_cache end
-    local ffi = require("ffi")
-    for _idx, decl in ipairs({
-        [[typedef struct {
-            const unsigned char *next_in;
-            unsigned int avail_in;
-            unsigned long total_in;
-            unsigned char *next_out;
-            unsigned int avail_out;
-            unsigned long total_out;
-            const char *msg;
-            void *state;
-            void *(*zalloc)(void *, unsigned int, unsigned int);
-            void (*zfree)(void *, void *);
-            void *opaque;
-            int data_type;
-            unsigned long adler;
-            unsigned long reserved;
-        } moon_z_stream;]],
-        "int inflateInit2_(void *, int, const char *, int);",
-        "int inflate(void *, int);",
-        "int inflateEnd(void *);",
-    }) do
-        pcall(ffi.cdef, decl)
-    end
-    libz_cache = ffi.load("z")
-    return libz_cache
-end
-
 --- 把 data 里 [offset, offset+comp_len) 的 zlib 流分块解压写进 out，返回解出的字节数。
 --- 不整表分配缓冲区：大 CJK 字体的 glyf 表有几十 MB，一次性解压会在小内存设备上 OOM。
 ---@param data string
@@ -52,26 +17,10 @@ end
 ---@param out file*
 ---@return integer
 local function inflateTo(data, offset, comp_len, out)
-    local ffi, z = require("ffi"), libz()
-    local strm = ffi.new("moon_z_stream") --[[@as MoonZStream]]
-    local zs = ffi.cast("void *", strm)
-    assert(z.inflateInit2_(zs, 15, "1.2.11", ffi.sizeof(strm)) == 0, "inflateInit failed")
-    local buf = ffi.new("unsigned char[?]", CHUNK)
-    strm.next_in = ffi.cast("const unsigned char *", data) + offset
-    strm.avail_in = comp_len
-    local total, ret = 0, 0
-    while ret == 0 do
-        strm.next_out = buf
-        strm.avail_out = CHUNK
-        ret = z.inflate(zs, 0)
-        if ret ~= 0 and ret ~= 1 then break end
-        local n = CHUNK - strm.avail_out
-        total = total + n
-        assert(out:write(ffi.string(buf, n)))
-    end
-    z.inflateEnd(zs)
-    assert(ret == 1, "inflate failed: " .. ret)
-    return total
+    local total, err = require("utils.inflate").stream(data, offset, comp_len, 15, function(chunk)
+        assert(out:write(chunk))
+    end)
+    return assert(total, err)
 end
 
 ---@param s string
