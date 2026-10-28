@@ -617,6 +617,7 @@ function VolumeList.pick(series, toc, cb, opts)
 
     local timer
     local batch
+    local startPolling
     --- 这一批对应的后台任务句柄（登记不上 / 旧核没有 workers.tasks 时为 nil）。
     local cache_task
 
@@ -762,14 +763,21 @@ function VolumeList.pick(series, toc, cb, opts)
             end
         end
         if queueRunning(ctx.queue) and not ctx.paused then
-            timer = function()
-                timer = nil
-                tick()
-            end
-            require("ui/uimanager"):scheduleIn(1, timer)
+            startPolling()
         else
             stopPolling()
         end
+    end
+
+    --- 起 1 秒轮询（已排过就不重复排）。列表自己发起的批次、打开列表时已有队列在跑、
+    --- 从行尾恢复暂停的队列，都要靠它把「下载中 32%」刷成最终状态。
+    startPolling = function()
+        if timer or not ctx.queue_capable then return end
+        timer = function()
+            timer = nil
+            tick()
+        end
+        require("ui/uimanager"):scheduleIn(1, timer)
     end
 
     --- 进度框：1 秒轮询 queue_state（只看本服务器），后台运行不停队列。
@@ -810,13 +818,7 @@ function VolumeList.pick(series, toc, cb, opts)
         refresh(true)
         -- 没有 queue 就没有可轮询的进度；不排拍，也就不会从缺席的队列宣布完成。
         if not ctx.queue_capable then return end
-        if not timer then
-            timer = function()
-                timer = nil
-                tick()
-            end
-            require("ui/uimanager"):scheduleIn(1, timer)
-        end
+        startPolling()
     end
 
     ---@param entries table[]
@@ -881,7 +883,12 @@ function VolumeList.pick(series, toc, cb, opts)
             if #failed > 0 then retry(failed) end
         end
         local ok, code, message = Cache.queueResume()
-        if not ok then toast(Cache.message(code, message)) end
+        if not ok then
+            toast(Cache.message(code, message))
+        else
+            -- 只恢复队列不会自己排拍：行尾点的继续也要开始刷新。
+            startPolling()
+        end
         refresh()
     end
 
@@ -1035,6 +1042,9 @@ function VolumeList.pick(series, toc, cb, opts)
             end)
         end,
     }
+    -- 打开列表时队列已经在跑（例如从书架 / 后台任务回来，不是本页发起的批次）：
+    -- 不排拍的话行会永远停在打开那一瞬的「下载中 32%」。
+    if queueRunning(ctx.queue) and not ctx.paused then startPolling() end
     return list
 end
 

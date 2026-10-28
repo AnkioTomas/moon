@@ -310,6 +310,27 @@ textContains(text, "在读 · 已缓存")
 textContains(text, "已缓存")
 Assert.eq(#tails(list), 3)
 
+-- 打开列表时队列已经在跑（不是本页发起的批次）：也要排拍刷新，
+-- 不能停在打开那一瞬的「下载中 32%」。
+reset()
+Kit.scheduled = {}
+st.queue = { state = "downloading", entries = { [602] = { chapterId = 602, state = "downloading",
+    bytes_done = 32, bytes_total = 100 } }, bytes_done = 32, bytes_total = 100 }
+list = open()
+textContains(table.concat(Kit.texts(list), "\n"), "下载中 32%", "打开时看到的是队列快照")
+local poll
+for index, item in ipairs(Kit.scheduled) do
+    if item.delay == 1 then poll = item; table.remove(Kit.scheduled, index); break end
+end
+Assert.not_nil(poll, "队列在跑时打开列表也要排 1 秒轮询")
+st.queue = { state = "idle", entries = {} }
+st.statuses["602"] = { state = "complete", bytes = 1 }
+poll.fn()
+textContains(table.concat(Kit.texts(list), "\n"), "在读 · 已缓存", "收尾后行就地刷新")
+local repoll = false
+for _idx, item in ipairs(Kit.scheduled) do if item.delay == 1 then repoll = true end end
+Assert.is_false(repoll, "队列停了就不再多排拍")
+
 -- 标题栏左钮＝批量预设菜单（04 A9 的 C 变体）：整部 / 未读 / 后 N 卷。
 -- 菜单是独立的 list 窗口，点菜单行不会被当成选卷；「缓存整部」仍然只选未缓存
 -- （跳过已缓存 / 排队中），先 estimate 再确认。
