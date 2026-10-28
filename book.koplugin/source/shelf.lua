@@ -21,6 +21,8 @@ local Shelf = {}
 ---@alias ShelfReport fun(text: string, done: integer|nil, total: integer|nil)
 
 --- 用远端书架快照对账 books 表；pushed 由源在 add/delete 上行后自行累加。
+--- 空快照一律不下架（含强制刷新）：登录态半失效时接口常回空壳成功，整架标删代价太大；
+--- 「空即下架」只有本地 / kindle 扫盘成立，它们直接调 BookDB.reconcile 给 allow_empty。
 ---@param source_id string
 ---@param books Book[]
 ---@param force boolean|nil 用户强制刷新：快照里的 meta 覆盖本地已有键
@@ -30,7 +32,6 @@ local Shelf = {}
 function Shelf.reconcile(source_id, books, force, inserted_at_from_row)
     local ok, hidden = require("book.books_db").reconcile(source_id, books, {
         force = force,
-        allow_empty = force,
         inserted_at_from_row = inserted_at_from_row,
     })
     if not ok then return nil, "failed to reconcile books" end

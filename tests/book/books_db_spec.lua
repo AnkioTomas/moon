@@ -456,7 +456,7 @@ do
     clearMods()
 end
 
--- ── reconcile 空快照：自动同步不下架；allow_empty（手动刷新 / 本地扫盘）照常下架 ──
+-- ── reconcile 空快照：远端源不下架；allow_empty（本地 / kindle 扫盘）照常下架 ──
 do
     local connection, calls = makeConn({ resultset = function() return { {} }, 0 end })
     local DbBase, BookDB = loadBook(connection)
@@ -471,7 +471,7 @@ do
     Assert.eq(hidden, 0)
     Assert.is_false(deactivated(), "自动同步拿到空书架不下架")
     Assert.is_true(BookDB.reconcile("moon", {}, { allow_empty = true }))
-    Assert.is_true(deactivated(), "手动刷新认空快照")
+    Assert.is_true(deactivated(), "本机扫盘认空快照")
     DbBase.close()
     clearMods()
 end

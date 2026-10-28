@@ -397,13 +397,13 @@ end
 ---@param books table[]
 ---@param opts { clear_missing_paths: boolean|nil, force: boolean|nil, allow_empty: boolean|nil, inserted_at_from_row: boolean|nil }|nil
 ---   force：用户强制刷新，快照里的 meta 覆盖已有键；
----   allow_empty：空快照也照常下架（手动刷新 / 本地扫盘）；
+---   allow_empty：空快照也照常下架（仅本地 / kindle 扫盘：快照来自本机文件系统，空就是真空）；
 ---   inserted_at_from_row：行自带权威加入时间（源提供），覆盖本地占位值
 ---@return boolean ok
 ---@return integer|nil hidden 原本在架、本次快照里缺席的行数
 function BookDB.reconcile(source_id, books, opts)
     opts = opts or {}
-    -- 自动同步拿到空书架多半是接口抖动 / 会话失效：不下架，免得书架整个变空；用户手动刷新才认空快照。
+    -- 远端拿到空书架多半是接口抖动 / 会话失效：不下架，免得书架整个变空；只有本机扫盘认空快照。
     if #books == 0 and not opts.allow_empty then
         return true, 0
     end
