@@ -11,6 +11,15 @@ Stubs.install()
 Stubs.reset()
 
 local calls = { tracker = {}, progress = {}, chapter = {}, reader = {}, book = {} }
+-- KOReader 全局设置桩：repairMetadataArc 读写
+local ko_settings, ko_deleted = {}, {}
+_G.G_reader_settings = {
+    isTrue = function(_, key) return ko_settings[key] == true end,
+    hasNot = function(_, key) return ko_settings[key] == nil end,
+    delSetting = function(_, key) ko_settings[key] = nil; ko_deleted[#ko_deleted + 1] = key end,
+    nilOrTrue = function() return true end,
+    readSetting = function(_, key) return ko_settings[key] end,
+}
 local defer_tracker_stop = false
 local tracker_stop_done
 local resolved_source
@@ -335,7 +344,15 @@ do
     local toc = { { idx = 1 }, { idx = 2 } }
     stored_toc.chapters = toc
     local plugin = mkPlugin("/cache/1.html")
+    -- KOReader 归档坏状态（开关开、目录没了）在开书时修掉；目录在就不碰
+    ko_settings.document_metadata_arc_on_closing = true
     Session.onReaderReady(plugin)
+    Assert.eq(table.concat(ko_deleted, ","), "document_metadata_arc_on_closing")
+    Assert.is_nil(ko_settings.document_metadata_arc_on_closing)
+    ko_settings.document_metadata_arc_on_closing, ko_settings.document_metadata_arc_folder = true, "/mnt/us/arc"
+    Session.repairMetadataArc()
+    Assert.eq(#ko_deleted, 1)
+    Assert.is_true(ko_settings.document_metadata_arc_on_closing)
 
     Assert.eq(calls.prefetch.from_idx, 1)
     Assert.eq(calls.prefetch.count, 3)

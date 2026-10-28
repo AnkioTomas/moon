@@ -221,11 +221,24 @@ function Session.onDocSettingsLoad(_plugin, doc_settings, document)
     applyChapterBookTitle(doc_settings, document)
 end
 
+--- KOReader 2026.07 书籍元数据归档的坏状态：选归档目录的回调 path 为 nil 时 saveSetting 把
+--- document_metadata_arc_folder 删了，「关书时归档」开关却还开着；此后每次关书 saveSettingsArcFile
+--- 对 nil 路径 LuaSettings:open 必炸，sidecar 落不了盘；菜单里那个开关又因没目录而灰掉，用户无法自救。
+--- 没有目录的开关毫无意义，直接关掉。每次开书都查，状态在会话中重新出现也能在下一次关书前修好。
+function Session.repairMetadataArc()
+    if G_reader_settings:isTrue("document_metadata_arc_on_closing")
+        and G_reader_settings:hasNot("document_metadata_arc_folder") then
+        require("utils.log").warn("book metadata archive enabled without folder; disabling to keep book closing alive")
+        G_reader_settings:delSetting("document_metadata_arc_on_closing")
+    end
+end
+
 --- ReaderReady：按物理路径重建阅读快照并启动统计、进度和阅读 UI。
 ---@param plugin table Book 插件实例
 function Session.onReaderReady(plugin)
     -- ReaderReady 期间 KOReader 屏蔽全部输入，这里慢几十秒用户就是「点什么都没反应」：分段计时，超阈值 warn。
     local span = require("utils.perf").begin("reader.ready")
+    Session.repairMetadataArc()
     Session._snapshot = nil
     local ui = plugin.ui
     local identity = Store.ensureIdentity(ui.document.file)
