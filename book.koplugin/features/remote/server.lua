@@ -345,8 +345,22 @@ function Server:_readHeaders(conn)
     end
     local head = conn.buf:sub(1, split - 1)
     conn.buf = conn.buf:sub(split + 4) -- 残留字节属于 body
-    self:_route(conn, head)
+    self:_guarded(conn, self._route, self, conn, head)
     return true
+end
+
+--- 跑路由 / body 收尾：抛错只算这一条请求失败（500），不能往上冒——
+--- waitEvent 外面的 Guard 出错即停服，否则一条畸形请求就把远程管理整个关掉。
+--- 已经排了响应（或连接已死）就不再改写。
+---@param conn table
+---@param fn function
+function Server:_guarded(conn, fn, ...)
+    local ok, err = xpcall(fn, debug.traceback, ...)
+    if ok then return end
+    logger.warn("book remote request failed", err)
+    if not conn.dead and conn.state ~= "respond" then
+        self:_fail(conn, 500, "Internal error")
+    end
 end
 
 -- ── 页面与静态资源 ─────────────────────────────────────
@@ -642,6 +656,22 @@ function Server:_acceptText(conn, headers, limit, finish)
     conn.state = "body"
 end
 
+--- JSON body 入口：_acceptText 收齐后解析，空 body 当 {}；不是合法 JSON 对象回 400，
+--- finish(server, conn, payload) 只见到 table。
+---@param conn table
+---@param headers table 已小写化的请求头
+---@param limit number body 上限（字节）
+---@param finish fun(self: table, conn: table, payload: table)
+function Server:_acceptJson(conn, headers, limit, finish)
+    return self:_acceptText(conn, headers, limit, function(server, c, text)
+        local ok, payload = pcall(require("utils.json").decode, text ~= "" and text or "{}")
+        if not ok or type(payload) ~= "table" then
+            return server:_fail(c, 400, "Bad JSON")
+        end
+        return finish(server, c, payload)
+    end)
+end
+
 --- 文件 body 入口（上传、更新包共用）：校验长度后开临时文件，切 body 状态流式落盘；
 --- 收齐后临时文件所有权移交 commit，commit 落位完调 reply(resp) 排响应。
 --- 带 Expect: 100-continue 先回 interim。chunked 501，缺长度 411，非法 400，超 limit 413，开文件失败 500。
@@ -743,7 +773,7 @@ function Server:_readBody(conn)
         conn.finish = nil
         local text = table.concat(conn.text_buf)
         conn.text_buf = nil
-        finish(self, conn, text)
+        self:_guarded(conn, finish, self, conn, text)
         return true
     end
     -- 缓冲写的磁盘满错误常在 close 刷盘时才报出来，不判就会把截断文件当成功。

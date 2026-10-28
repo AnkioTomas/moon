@@ -113,9 +113,13 @@ end
 ---@param settings_dir string
 ---@param files string[]
 ---@return boolean ok
+---@return string|nil err
 function Backup.clearConfig(lfs, settings_dir, files)
     rmtree(lfs, settings_dir)
     for _idx, path in ipairs(files) do os.remove(path) end
+    if lfs.attributes(settings_dir, "mode") then
+        return false, "settings not fully removed"
+    end
     return true
 end
 
@@ -141,15 +145,35 @@ local function mergeFonts(lfs, from, to)
     end
 end
 
---- 整体替换一个顶层条目。
+--- 整体替换一个顶层条目：现有的先挪到 .old，新件落位后才删；落位失败挪回来。
+--- 恢复跑在子进程、主进程还活着：先删后放的话主进程一次 Settings.save 就能在中间重建
+--- settings/，rename 报 ENOTEMPTY 时旧设置已经没了。库的 WAL / SHM 跟库一起挪（套不到新库上）。
 ---@return boolean|nil moved, string|nil err
 local function replace(lfs, from, dest, name)
-    rmtree(lfs, dest)
-    if name:match("%.sqlite3$") then -- 旧库的 WAL 套不到新库上
-        os.remove(dest .. "-wal")
-        os.remove(dest .. "-shm")
+    local aside = {}
+    local function putBack()
+        for _idx, pair in ipairs(aside) do os.rename(pair[2], pair[1]) end
     end
-    return os.rename(from, dest)
+    local suffixes = name:match("%.sqlite3$") and { "", "-wal", "-shm" } or { "" }
+    for _idx, suffix in ipairs(suffixes) do
+        local cur, old = dest .. suffix, dest .. suffix .. ".old"
+        rmtree(lfs, old)
+        if lfs.attributes(cur, "mode") then
+            if not os.rename(cur, old) then
+                putBack()
+                return nil, "cannot move aside " .. name .. suffix
+            end
+            aside[#aside + 1] = { cur, old }
+        end
+    end
+    local moved, err = os.rename(from, dest)
+    if not moved then
+        rmtree(lfs, dest)
+        putBack()
+        return nil, err
+    end
+    for _idx, pair in ipairs(aside) do rmtree(lfs, pair[2]) end
+    return true
 end
 
 --- 解包并替换 .moon 对应条目。

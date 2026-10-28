@@ -1139,6 +1139,30 @@ do
     drain(serve(c3))
     Assert.eq((parseResponse(c3:output())), 400)
 
+    -- 路由抛错只算这条请求 500，服务继续接下一条（之前会冒到 waitEvent 外的 Guard 把服务停掉）
+    local c_boom = newClient({ "GET /api/stat?path=/x HTTP/1.1\r\n\r\n" })
+    local srv_boom = serve(c_boom)
+    srv_boom._routeStat = function() error("boom") end
+    drain(srv_boom)
+    Assert.eq((parseResponse(c_boom:output())), 500)
+    local c_next = newClient({ "GET /nope HTTP/1.1\r\n\r\n" })
+    bind_queue[#bind_queue + 1] = c_next
+    drain(srv_boom)
+    Assert.eq((parseResponse(c_next:output())), 404, "抛错后服务还活着")
+
+    -- body 收尾抛错同样 500；JSON 体不合法是 400，不是抛错
+    local junk = "{not json"
+    local c_json = newClient({ "POST /api/zip HTTP/1.1\r\nContent-Length: " .. #junk .. "\r\n\r\n" .. junk })
+    drain(serve(c_json))
+    Assert.eq((parseResponse(c_json:output())), 400)
+    local c_fin = newClient({ "POST /api/settings HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}" })
+    local srv_fin = serve(c_fin)
+    srv_fin._acceptJson = function(self, conn, headers, limit)
+        return self:_acceptText(conn, headers, limit, function() error("finish boom") end)
+    end
+    drain(srv_fin)
+    Assert.eq((parseResponse(c_fin:output())), 500)
+
     -- bind 失败
     bind_opts = { err = "address in use" }
     local s = Server.new({ port = 1, root = "/", token = TOKEN, handlers = {} })

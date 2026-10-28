@@ -105,9 +105,7 @@ function ExtRoute.route(self, conn, method, headers, query, item, action)
         return dispatch(self, conn, item, "GET", action, query or {})
     end
     if method ~= "POST" then return self:_fail(conn, 405, "Method Not Allowed") end
-    return self:_acceptText(conn, headers, ExtRoute.TEXT_LIMIT, function(server, c, text)
-        local ok, body = pcall(require("utils.json").decode, text ~= "" and text or "{}")
-        if not ok or type(body) ~= "table" then return server:_fail(c, 400, "Bad JSON") end
+    return self:_acceptJson(conn, headers, ExtRoute.TEXT_LIMIT, function(server, c, body)
         return dispatch(server, c, item, "POST", action, body)
     end)
 end
