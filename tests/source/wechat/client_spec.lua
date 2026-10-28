@@ -322,18 +322,13 @@ do
     Assert.not_nil(err)
 end
 
--- 书架完整性：实收去重数少于回包 bookCount 就是拉不全，整次失败，不能把残缺快照交给 reconcile
+-- bookCount 大于 books 条数也原样交回（专辑、公众号不在这三份列表里）
 do
     local data, err
     posted = { shelf_reply = { bookCount = 3, books = { { bookId = "1" }, { bookId = "2" } }, archive = {} } }
     client:shelfSyncAsync(function(d, e) data, err = d, e end)
-    Assert.is_nil(data)
-    Assert.matches(err, "拉取不完整")
-
-    posted = { shelf_reply = { bookCount = 2, books = { { bookId = "1" }, { bookId = "2" } },
-        recentBooks = { { bookId = "2" } }, archive = {} } }
-    client:shelfSyncAsync(function(d, e) data, err = d, e end)
     Assert.is_nil(err)
-    Assert.not_nil(data)
+    Assert.eq(data.bookCount, 3)
+    Assert.eq(#data.books, 2)
     posted = {}
 end

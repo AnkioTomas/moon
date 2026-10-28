@@ -96,37 +96,14 @@ function Client:storeBooksAsync(category_id, offset, ranking, cb)
     return getWebAsync("/web/bookListInCategory/" .. Text.urlEncode(category_id), query, cb)
 end
 
---- 全量拉取书架（synckey=0 表示不做增量）。/shelf/sync 无分页参数、服务端一发全量，
---- 完整性靠回包 bookCount 对账：实收（books/recentBooks/finishReadBooks 合并去重）少于
---- bookCount 就是拉不全，整次失败——残缺快照进 reconcile 会把缺的书当远端已删下架。
+--- 全量拉取书架（synckey=0 表示不做增量）。/shelf/sync 无分页参数、服务端一发全量。
+--- bookCount 含专辑、公众号等不在 books 里的条目，不能拿它卡这次同步。
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
 function Client:shelfSyncAsync(cb)
     return Eink.callAsync("GET", "/shelf/sync", {
         query = { synckey = 0, teenmode = 0, album = 1, onlyBookid = 0, localBookCount = 0 },
-    }, function(data, err)
-        local total = data and tonumber(data.bookCount)
-        if not total or total <= 0 then
-            cb(data, err)
-            return
-        end
-        local seen, count = {}, 0
-        for _idx, rows in ipairs({ data.books, data.recentBooks, data.finishReadBooks }) do
-            for _i, row in ipairs(type(rows) == "table" and rows or {}) do
-                local book = type(row) == "table" and (row.book or row.bookInfo or row) or nil
-                local id = type(book) == "table" and (book.bookId or book.id) or nil
-                if id ~= nil and not seen[tostring(id)] then
-                    seen[tostring(id)] = true
-                    count = count + 1
-                end
-            end
-        end
-        if count < total then
-            cb(nil, _("书架拉取不完整，已保留本地书架"))
-            return
-        end
-        cb(data, err)
-    end)
+    }, cb)
 end
 
 --- 增量拉书架索引：自 synckey 以来删了哪些（removed）、变了哪些（bookIds，只要 id）、
