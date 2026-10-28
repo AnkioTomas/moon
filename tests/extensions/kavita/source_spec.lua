@@ -1577,6 +1577,88 @@ do
     package.loaded["book.stats_db"] = nil
 end
 
+-- 官方 / 旧版 kamare（无 kamarecache）：没有 journal，起始页由 moon 补：
+-- 本地卷行（关查看器时写的真实页）优先，本机没读过才问 Kavita（03 A2 降级通道）。
+do
+    local Cache = require("moonsource_kavita.cache")
+    local legacy_shown = {}
+    package.loaded["kamarecache"] = nil
+    package.loaded["kamareimageviewer"] = { new = function(_self, spec) return spec end }
+    package.loaded["kavitaclient"] = { streamChapter = function() return { { pageNumber = 1 } } end }
+    local UIManager = require("ui/uimanager")
+    local real_show = UIManager.show
+    UIManager.show = function(_, widget) legacy_shown[#legacy_shown + 1] = widget end
+    Cache.reset()
+
+    local entry = { chapterId = 6001, volumeId = 601, libraryId = 3, seriesId = 60,
+        format = "cbz", pages = 20, title = "第2话" }
+    local legacy_ref = { source_id = "ext.kavita", stable_id = "60:6001" }
+
+    ---@return table got, table|nil job, table|nil viewer
+    local function openLegacy()
+        local got
+        local job = source:openEntry(legacy_ref, entry, { entry }, "漫画", function(path, err, meta)
+            got = { path = path, err = err, meta = meta }
+        end)
+        Stubs.flush()
+        return got or {}, job, legacy_shown[#legacy_shown]
+    end
+
+    -- 云端有进度：跟云端（跨设备读到哪就从哪续）。
+    progress["60:6001"] = { page = 7, total_pages = 20 }
+    routes["GET /api/Reader/get-progress"] = json({ pageNum = 9 })
+    local before = #calls
+    local got, _, viewer = openLegacy()
+    Assert.is_true(got.meta and got.meta.handled)
+    Assert.eq(#calls, before + 1, "官方通道开书先问一次云端进度")
+    Assert.eq(viewer.metadata.startPage, 10, "云端 pageNum 0-based → 第 10 页（比本地新就跟云端）")
+
+    -- 本机没读过（换设备 / 重装）：同样用云端 pageNum + 1。
+    progress["60:6001"] = nil
+    routes["GET /api/Reader/get-progress"] = json({ pageNum = 3 })
+    viewer = select(3, openLegacy())
+    Assert.eq(viewer.metadata.startPage, 4, "没有本地进度：云端 pageNum + 1")
+
+    -- 云端也没读过：不给起始页，查看器从第 1 页开始。
+    routes["GET /api/Reader/get-progress"] = json({ pageNum = 0 })
+    viewer = select(3, openLegacy())
+    Assert.is_nil(viewer.metadata.startPage, "云端无进度：不硬塞页码")
+
+    -- 云端请求失败：本机关书写的卷行兜底，不把人丢回第 1 页。
+    progress["60:6001"] = { page = 7, total_pages = 20 }
+    routes["GET /api/Reader/get-progress"] = { code = 500, body = "" }
+    viewer = select(3, openLegacy())
+    Assert.eq(viewer.metadata.startPage, 7, "云端失败：用本地卷行续读")
+
+    -- 云端页码超过当前总页数（服务器重排过）：夹到总页数。
+    routes["GET /api/Reader/get-progress"] = json({ pageNum = 30 })
+    viewer = select(3, openLegacy())
+    Assert.eq(viewer.metadata.startPage, 20, "页码夹到总页数")
+
+    -- 离线：不问网络，直接用本地卷行；没有就第 1 页。
+    online = false
+    before = #calls
+    viewer = select(3, openLegacy())
+    Assert.eq(#calls, before, "离线不请求")
+    Assert.eq(viewer.metadata.startPage, 7, "离线用本地卷行续读")
+    progress["60:6001"] = nil
+    viewer = select(3, openLegacy())
+    Assert.is_nil(viewer.metadata.startPage, "离线且本机没读过：第 1 页")
+    online = true
+
+    -- 恢复增强版桩，别把状态留给后面的用例。
+    progress["60:6001"] = nil
+    package.loaded["kamareimageviewer"] = nil
+    UIManager.show = real_show
+    package.loaded["kamarecache"] = {
+        api_version = 1,
+        capabilities = { open = true, server = true },
+        register_server = function() return "kav", nil end,
+        open = function() return {} end,
+    }
+    Cache.reset()
+end
+
 -- 漫画 cbz 用内置阅读器时进度同样上报：页级 0-based，读完发 pages（Kavita 据此标已读）。
 sent = nil
 local cbz = { source_id = "ext.kavita", stable_id = "60:6000" }
@@ -2490,5 +2572,12 @@ do
     local other = fakeDocument({ { "别的书" } }, WORK .. "/other.epub")
     Assert.is_nil(source:localizeAnnotations(other, anns, book_path, current), "document.file 与 html_path 不一致")
 end
+
+----------------------------------------------------------------------
+-- 已删除的「多设备统计合并」开关：旧配置残留的键在源实例化时清掉。
+----------------------------------------------------------------------
+cfg.merge_local_stats = true
+require("moonsource_kavita.source").new()
+Assert.is_nil(cfg.merge_local_stats, "旧开关残留键不能让核心继续按开启合并")
 
 os.execute("rm -rf '" .. WORK .. "'")

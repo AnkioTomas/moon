@@ -151,7 +151,7 @@ do
         end
     end
     -- 拿一条只存在于扩展源码里的键钉住「扩展也是目录键的合法来源」。
-    Assert.is_true(source_literals["多设备统计合并"] == true,
+    Assert.is_true(source_literals["获取增强版"] == true,
         "扩展源码没进残留键判定：extensions/ 下的文案会被误报为残留键")
 
     local stale = {}

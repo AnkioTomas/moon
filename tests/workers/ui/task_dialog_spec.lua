@@ -250,4 +250,28 @@ runs.q.done({ ok = true })
 flush()
 Assert.eq(#Tasks.tasks(), 0)
 
+-- passive 任务（漫画缓存，执行者是 kamare）：列表里照常显示进度，但没有取消手势。
+local passive = {
+    key = "kavita-cache\0900", kind = "cache", title = "测试系列", passive = true,
+    run = function(report, done)
+        runs.passive = { report = report, done = done }
+        return { cancel = function() runs.passive.cancelled = true end }
+    end,
+}
+Tasks.enqueue(passive)
+flush()
+local passive_dialog = TaskDialog:new{}
+passive_dialog:show()
+runs.passive.report("第 2 卷", 1, 3)
+flush()
+local passive_text = texts(passive_dialog)
+Assert.is_true(passive_text:find("后台任务|缓存：测试系列|第 2 卷 1/3|进行中", 1, true) ~= nil,
+    "passive 任务照常显示进度：" .. passive_text)
+Assert.len(Kit.taps(passive_dialog), 0, "passive 任务不走取消（队列归 kamare）")
+runs.passive.done({ ok = true })
+flush()
+Assert.is_true(texts(passive_dialog):find("缓存：测试系列|第 2 卷 1/3|已完成", 1, true) ~= nil, "结束后标已完成")
+passive_dialog:onCloseWidget()
+Themed.made = {}
+
 return true

@@ -136,6 +136,16 @@ Assert.eq(probe.state, "enhanced")
 Assert.eq(probe.api_version, 1)
 Assert.eq(probe.version, "0.10.0-dev", "kamareversion 返回字符串")
 Assert.eq(probe.path, fake_path, "加载路径取自 debug.getinfo(module.status)")
+
+-- data 目录里的插件路径是 `plugins//x.koplugin`（KOReader 的 extra_plugin_paths 带尾斜杠）：
+-- 展示前归一，否则用户会以为路径坏了。
+installCache({
+    api_version = 1,
+    capabilities = { status = true, open = true },
+    version = "0.10.0-dev",
+    path = "/fake/plugins//kamare.koplugin/kamarecache.lua",
+})
+Assert.eq(Cache.probe().path, "/fake/plugins/kamare.koplugin/kamarecache.lua", "重复斜杠归一")
 Assert.eq(probe.capabilities.status, true)
 Assert.eq(Cache.available("status"), true)
 Assert.eq(Cache.available("index"), false, "能力逐项判断")
@@ -459,6 +469,7 @@ local closed = {}
 local nexts = {}
 local fake_viewer = { kind = "viewer" }
 opened.open = record("open", function() return fake_viewer end)
+Assert.is_true(Cache.enhancedOpen(), "增强版有 open：由 kamare 决定起始页 / 离线")
 local open_result, open_code = Cache.open({
     base_url = "http://kav/", api_key = "k",
     entry = { chapterId = 6001, pages = 20 }, title = "漫画",
@@ -522,6 +533,7 @@ local shown = {}
 package.loaded["ui/uimanager"] = { show = function(_, widget) shown[#shown + 1] = widget end }
 Cache.reset()
 Assert.is_true(Cache.available("open"), "官方版仍能在线看图")
+Assert.is_false(Cache.enhancedOpen(), "官方版不接管 open：起始页由 moon 补")
 local legacy_viewer, legacy_code = Cache.open({
     base_url = "http://kav/", api_key = "k", entry = { chapterId = 6001, pages = 20 }, title = "漫画",
     start_page = 3, on_close = function() end, on_next = function() end,
@@ -539,6 +551,7 @@ Assert.is_true(Cache.isChapterOpen(6001), "legacy 也记当前章")
 
 -- enhanced 但缺 open 能力：同样退回 legacy。
 installCache({ api_version = 1, capabilities = { status = true } })
+Assert.is_false(Cache.enhancedOpen(), "增强版缺 open：退回 legacy，由 moon 给起始页")
 package.loaded["kamareimageviewer"] = { new = function(_self, spec) return spec end }
 package.loaded["kavitaclient"] = { streamChapter = function() return { { pageNumber = 1 } } end }
 Cache.reset()
@@ -759,6 +772,7 @@ Assert.is_nil(Cache.shelf())
 Assert.eq(countLines("kavita cache settings unavailable"), 1, "配置模块故障只记一次")
 Assert.eq(logs[1] and logs[1].level, "warn", "真实故障记警告")
 package.preload["utils.settings"] = settings_preload
+package.loaded["utils.settings"] = nil
 Cache.reset()
 
 -- open 失败同一原因只记一次。
@@ -767,5 +781,56 @@ resetLogs()
 Cache.open({ base_url = "http://kav/", api_key = "k", entry = { chapterId = 6001, pages = 4 } })
 Cache.open({ base_url = "http://kav/", api_key = "k", entry = { chapterId = 6001, pages = 4 } })
 Assert.eq(countLines("cache open cid=6001 code=viewer_running"), 1, "open 失败去重")
+
+-- chapters / delete_all / plan / summaryAll：清理门面
+cfg.base_url, cfg.api_key = "http://kav", "k"
+local cleanup_calls = {}
+local cleanup_mod = installCache({
+    api_version = 1,
+    capabilities = { status = true, summary = true, chapters = true, delete = true,
+        delete_all = true, server = true },
+    version = "0.10.0",
+})
+function cleanup_mod.chapters(base_url, series_id)
+    cleanup_calls.chapters = { base_url, series_id }
+    return { { chapterId = 1, pages = 10, bytes = 100, read = true } }
+end
+function cleanup_mod.delete_all()
+    cleanup_calls.delete_all = (cleanup_calls.delete_all or 0) + 1
+    return true, nil, { chapters = 3, bytes = 300 }
+end
+function cleanup_mod.summary(base_url)
+    cleanup_calls.summary = (cleanup_calls.summary or 0) + 1
+    cleanup_calls.summary_base = base_url
+    return { used = 300, available = 1000, chapters = 3 }
+end
+function cleanup_mod.register_server() return "srv" end
+Cache.reset()
+
+local plan_rows = Cache.chapters(42)
+Assert.eq(cleanup_calls.chapters[1], "http://kav", "chapters 用当前服务器")
+Assert.eq(cleanup_calls.chapters[2], 42, "chapters 透传 series_id")
+Assert.len(plan_rows, 1, "chapters 返回数组")
+
+local ok, _code, _message, detail = Cache.deleteAll()
+Assert.is_true(ok, "deleteAll 成功")
+Assert.eq(detail and detail.chapters, 3, "deleteAll 透传估算")
+Assert.eq(cleanup_calls.delete_all, 1, "deleteAll 调 kamare 一次")
+
+Assert.eq(Cache.summaryAll().chapters, 3, "summaryAll 返回合计")
+Assert.eq(cleanup_calls.summary_base, nil, "summaryAll 不传 base_url")
+
+local plan = Cache.plan(plan_rows, "read", nil)
+Assert.eq(plan.chapters, 1, "read 过滤保留已读")
+Assert.eq(plan.bytes, 100, "字节合计")
+Assert.eq(plan.ids[1], 1, "ids 供批量删除")
+local not_read = Cache.plan({ { chapterId = 2, pages = 10, bytes = 50, read = false } }, "read", nil)
+Assert.eq(not_read.chapters, 0, "未读不入选")
+local via_toc = Cache.plan({ { chapterId = 3, pages = 10, bytes = 50, read = false } }, "read",
+    { ["3"] = 10 })
+Assert.eq(via_toc.chapters, 1, "toc 的 pagesRead 补第三源")
+local queued = Cache.plan({ { chapterId = 4, pages = 10, bytes = 1, read = true, queued = true } }, "all", nil)
+Assert.eq(queued.queued, 1, "排队数进计划")
+
 
 return true

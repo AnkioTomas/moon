@@ -31,8 +31,11 @@ local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
 local RealCache = dofile(PLUGIN .. "/moonsource_kavita/cache.lua")
 
 local st, calls = {}, {}
+--- 后台任务句柄的记录（stub 与 reset 共用同一个 upvalue）。
+local tracked = {}
 local function reset(overrides)
-    calls = { enqueue = {}, delete = {}, retry = {}, pause = 0, resume = 0, resume_page = 0 }
+    calls = { enqueue = {}, delete = {}, retry = {}, pause = 0, resume = 0, resume_page = 0, chapters = 0 }
+    tracked = {}
     st.probe = { ok = true, state = "enhanced", capabilities = {
         status = true, queue = true, queue_control = true,
         enqueue = true, delete = true, estimate = true,
@@ -40,6 +43,7 @@ local function reset(overrides)
     st.queue = { state = "idle", entries = {}, percent = 0, bytes_done = 0, bytes_total = 0 }
     st.queue_code = nil
     st.statuses, st.resumes = {}, {}
+    st.plan = nil
     st.open_chapter = nil
     st.estimate = { chapters = 1, bytes = 100 * 1024 * 1024, available = 2000 * 1024 * 1024, ok = true }
     st.enqueue_ok, st.enqueue_code, st.enqueue_message, st.enqueue_detail = true, nil, nil, nil
@@ -77,10 +81,27 @@ function Cache.delete(ids)
     calls.delete[#calls.delete + 1] = ids
     if st.delete_ok then
         -- 真 kamare 删完 index 里就没有这一章了：刷新后行要变回「未缓存 / 已读」。
-        for _idx, id in ipairs(ids) do st.statuses[tostring(id)] = nil end
+        local wanted = {}
+        for _idx, id in ipairs(ids) do
+            wanted[tostring(id)] = true
+            st.statuses[tostring(id)] = nil
+        end
+        if st.plan then
+            local kept = {}
+            for _idx, item in ipairs(st.plan) do
+                if not wanted[tostring(item.chapterId)] then kept[#kept + 1] = item end
+            end
+            st.plan = kept
+        end
+        
         return true
     end
     return nil, st.delete_code, st.delete_message
+end
+function Cache.chapters(series_id)
+    calls.chapters = calls.chapters + 1
+    calls.chapters_series = series_id
+    return st.plan
 end
 function Cache.queuePause()
     calls.pause = calls.pause + 1
@@ -103,6 +124,18 @@ function Cache.queueRetry(ids)
     return st.retry_ok, st.retry_code
 end
 package.preload["moonsource_kavita.cache"] = function() return Cache end
+-- 后台任务登记：这里只记调用与静音状态；真实轮询见 cache_task_spec 与 tasks_e2e_spec。
+package.preload["moonsource_kavita.cache_task"] = function()
+    return {
+        track = function(opts)
+            local handle = { opts = opts, adds = {} }
+            handle.mute = function(value) handle.muted = value ~= false end
+            handle.add = function(entries) handle.adds[#handle.adds + 1] = entries end
+            tracked[#tracked + 1] = handle
+            return handle
+        end,
+    }
+end
 package.preload["moonsource_kavita.volume_list"] = function()
     return dofile(PLUGIN .. "/moonsource_kavita/volume_list.lua")
 end
@@ -283,7 +316,7 @@ Assert.is_true(title.dimen.y < Kit.taps(list)[1].dimen.y, "左钮在标题栏里
 local menu = openMenu(list)
 local menu_items = {}
 for _idx, item in ipairs(menu.items) do menu_items[#menu_items + 1] = item.text end
-Assert.eq(menu.title, "批量缓存", "菜单标题")
+Assert.eq(menu.title, "批量操作", "菜单标题")
 Assert.eq(table.concat(menu_items, "|"), "缓存整部|只缓存未读|从当前进度开始|后 N 卷…", "菜单四项与顺序")
 Assert.is_nil(picked.value, "开菜单不选卷")
 chooseMenu(menu, 1)
@@ -831,6 +864,37 @@ Assert.is_true(#Kit.scheduled > 0)
 list:close()
 Assert.is_true(#Kit.unscheduled > 0, "关窗时撤掉定时器")
 
+-- 后台任务：入队就登记一条 passive 任务，页面自己的进度框在时静音（收尾只提示一次）。
+reset()
+progress_dialog = batchProgress()
+local handle = tracked[1]
+Assert.not_nil(handle, "入队后登记后台任务")
+Assert.eq(handle.opts.series, series, "任务按这一部书")
+Assert.eq(#handle.opts.entries, 2, "任务只数本批的卷")
+Assert.eq(handle.opts.entries[1].chapterId, 602)
+Assert.is_true(handle.muted, "进度框开着时任务静音")
+progress_dialog.on_background()
+Assert.is_false(handle.muted, "转后台后由任务收尾提示")
+
+-- 关列表同样取消静音：页面不再轮询，完成提示归任务。
+reset()
+progress_dialog = batchProgress()
+handle = tracked[1]
+Assert.is_true(handle.muted)
+list:close()
+Assert.is_false(handle.muted, "关列表后由任务收尾提示")
+
+-- 缺 queue：没有可轮询的队列，不登记任务（不能让后台任务永远挂着）。
+reset()
+st.probe = { ok = true, state = "enhanced", capabilities = {
+    status = true, enqueue = true, delete = true, estimate = true,
+} }
+st.estimate = { chapters = 2, bytes = 1, available = 1000, ok = true }
+list = open()
+batchAll(list)
+Themed.last("confirm").ok_callback()
+Assert.len(tracked, 0, "缺 queue 不登记任务")
+
 -- 缺 queue_control：进度框只留后台运行。
 reset()
 st.probe = { ok = true, state = "enhanced", capabilities = {
@@ -882,5 +946,98 @@ pause_button:onTapThemeButton()
 Assert.eq(calls.pause, 1, "点暂停即 queue_pause")
 Assert.eq(#Themed.all("toast"), toasts_used + 1, "暂停后提示")
 textContains(Themed.last("toast").text, "整个下载队列", "说明作用于全局队列")
+
+
+-- 系列清理：一次 chapters(series_id)、菜单计数、确认后批量删、就地刷新。
+reset()
+st.probe = { ok = true, state = "enhanced", capabilities = {
+    status = true, queue = true, queue_control = true, enqueue = true,
+    delete = true, estimate = true, chapters = true,
+} }
+st.plan = {
+    { chapterId = 601, pages = 100, read = true, bytes = 1024, stale = false, queued = false },
+    { chapterId = 602, pages = 100, read = false, bytes = 2048, stale = false, queued = false },
+}
+list = open()
+Assert.eq(calls.chapters, 1, "一次 chapters(series_id) 取代逐章 status")
+Assert.eq(calls.chapters_series, "900", "按当前 seriesId 取计划")
+textContains(table.concat(Kit.texts(list), "\n"), "已读 · 已缓存", "kamare 的已读进入行状态")
+
+menu = openMenu(list)
+local cleanup_labels = {}
+for _idx, item in ipairs(menu.items) do cleanup_labels[#cleanup_labels + 1] = item.text end
+Assert.eq(table.concat(cleanup_labels, "|"),
+    "缓存整部|只缓存未读|从当前进度开始|后 N 卷…|清理本系列|清理本系列已读",
+    "清理项在批量菜单底部")
+Assert.eq(menu.items[5].mandatory, "2 卷", "本系列缓存计数")
+Assert.eq(menu.items[6].mandatory, "1 卷", "本系列已读计数")
+
+chooseMenu(menu, 6)
+local cleanup_confirm = Themed.last("confirm")
+Assert.not_nil(cleanup_confirm, "清理前确认")
+textContains(cleanup_confirm.text, "将删除本系列 1 卷已读完的缓存")
+textContains(cleanup_confirm.text, "阅读进度与 kamare journal 保留")
+cleanup_confirm.ok_callback()
+Assert.eq(#calls.delete, 1, "清理本系列已读只调一次 delete")
+Assert.eq(#calls.delete[1], 1, "只删已读完的那一卷")
+Assert.eq(calls.delete[1][1], 601, "删的是已读卷")
+textContains(Themed.last("toast").text, "已清理 1 卷")
+
+-- 0 个对象：菜单项置灰，点了也不会弹确认。
+reset()
+st.probe = { ok = true, state = "enhanced", capabilities = {
+    status = true, enqueue = true, delete = true, estimate = true, chapters = true,
+} }
+st.plan = { { chapterId = 602, pages = 100, read = false, bytes = 2048 } }
+list = open()
+menu = openMenu(list)
+Assert.is_false(menu.items[6].enabled, "没有已读完的卷时置灰")
+Assert.eq(menu.items[6].mandatory, "无")
+
+-- 系列清理：一次 chapters(series_id)、菜单计数、确认后批量删、就地刷新。
+reset()
+st.probe = { ok = true, state = "enhanced", capabilities = {
+    status = true, queue = true, queue_control = true, enqueue = true,
+    delete = true, estimate = true, chapters = true,
+} }
+st.plan = {
+    { chapterId = 601, pages = 100, read = true, bytes = 1024, stale = false, queued = false },
+    { chapterId = 602, pages = 100, read = false, bytes = 2048, stale = false, queued = false },
+}
+list = open()
+Assert.eq(calls.chapters, 1, "一次 chapters(series_id) 取代逐章 status")
+Assert.eq(calls.chapters_series, "900", "按当前 seriesId 取计划")
+textContains(table.concat(Kit.texts(list), "\n"), "已读 · 已缓存", "kamare 的已读进入行状态")
+
+menu = openMenu(list)
+local cleanup_labels = {}
+for _idx, item in ipairs(menu.items) do cleanup_labels[#cleanup_labels + 1] = item.text end
+Assert.eq(table.concat(cleanup_labels, "|"),
+    "缓存整部|只缓存未读|从当前进度开始|后 N 卷…|清理本系列|清理本系列已读",
+    "清理项在批量菜单底部")
+Assert.eq(menu.items[5].mandatory, "2 卷", "本系列缓存计数")
+Assert.eq(menu.items[6].mandatory, "1 卷", "本系列已读计数")
+
+chooseMenu(menu, 6)
+local cleanup_confirm = Themed.last("confirm")
+Assert.not_nil(cleanup_confirm, "清理前确认")
+textContains(cleanup_confirm.text, "将删除本系列 1 卷已读完的缓存")
+textContains(cleanup_confirm.text, "阅读进度与 kamare journal 保留")
+cleanup_confirm.ok_callback()
+Assert.eq(#calls.delete, 1, "清理本系列已读只调一次 delete")
+Assert.eq(#calls.delete[1], 1, "只删已读完的那一卷")
+Assert.eq(calls.delete[1][1], 601, "删的是已读卷")
+textContains(Themed.last("toast").text, "已清理 1 卷")
+
+-- 0 个对象：菜单项置灰，点了也不会弹确认。
+reset()
+st.probe = { ok = true, state = "enhanced", capabilities = {
+    status = true, enqueue = true, delete = true, estimate = true, chapters = true,
+} }
+st.plan = { { chapterId = 602, pages = 100, read = false, bytes = 2048 } }
+list = open()
+menu = openMenu(list)
+Assert.is_false(menu.items[6].enabled, "没有已读完的卷时置灰")
+Assert.eq(menu.items[6].mandatory, "无")
 
 return true
