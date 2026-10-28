@@ -92,15 +92,19 @@ local function savePreference(key, on)
 end
 
 --- 设置系统顶栏开/关（同步 configurable + crengine，与 Aa 菜单一致）。
+--- 开着时还要看页眉高度：配置已是开但高度为 0（别的插件压掉 / 引擎没真正落），照样重发事件逼重排。
 ---@param ui table ReaderUI
 ---@param enabled boolean
 function Bars.setSystemTop(ui, enabled)
     if not ui.rolling or not ui.document then
         return
     end
-    local config = ui.document.configurable
+    local doc = ui.document
+    local config = doc.configurable
     local next_val = enabled and 0 or 1
-    if config.status_line == next_val then
+    local height_ok = not enabled
+        or (type(doc.getHeaderHeight) == "function" and doc:getHeaderHeight() > 0)
+    if config.status_line == next_val and height_ok then
         return
     end
     local Event = require("ui/event")
@@ -175,29 +179,11 @@ function Bars.injectStatusLine(doc_settings, document)
     doc_settings:saveSetting("copt_status_line", Bars.topBarPreference() and 0 or 1)
 end
 
---- 顶栏开了却没有页眉高度：多半被别的插件压掉，或开关没真正落到引擎。
---- setSystemTop 在「配置已是开」时早退，救不了这种状态；这里绕过早退重发一遍
---- 状态栏事件，逼 ReaderRolling 重新应用属性并重排。高度正常的书不会走到这里。
----@param ui table ReaderUI
-local function forceTopHeader(ui)
-    if not Bars.topBarPreference() or not Layout.replace("top") then
-        return
-    end
-    local doc = ui.document
-    if not ui.rolling or not doc or not doc.getHeaderHeight or doc:getHeaderHeight() > 0 then
-        return
-    end
-    local Event = require("ui/event")
-    ui:handleEvent(Event:new("ConfigChange", "status_line", 0))
-    ui:handleEvent(Event:new("SetStatusLine", 0))
-end
-
 --- 按 Book 设置同步系统顶底栏。
 ---@param ui table ReaderUI
 function Bars.applyPreferences(ui)
     Bars.setSystemTop(ui, Bars.topBarPreference())
     Bars.setSystemBottom(ui, Bars.bottomBarPreference())
-    forceTopHeader(ui)
 end
 
 --- 顶栏 overlay 是否应绘制（系统 Alt Status Bar 开）。
@@ -388,22 +374,6 @@ local function hijackFooter(ui)
     footer._book_bars_hijacked = true
 end
 
---- 顶栏各道门的状态，开书落一行（issue #67：个别设备顶栏不显示，正常路径原本无日志可查）。
----@param ui table ReaderUI
-local function logTopDiag(ui)
-    local ids = {}
-    for _idx, slot in ipairs(Layout.get("top")) do ids[#ids + 1] = slot.id .. "@" .. slot.align end
-    require("utils.log").info("bars top diag",
-        "mode", ui.view and ui.view.view_mode,
-        "header_h", ui.document and ui.document.getHeaderHeight and ui.document:getHeaderHeight(),
-        "copt", ui.doc_settings and ui.doc_settings:readSetting("copt_status_line"),
-        "pref", Bars.topBarPreference(),
-        "replace", Layout.replace("top"),
-        "layout", table.concat(ids, ","),
-        "session", require("reader.session").current() ~= nil,
-        "visible", Bars.topVisible(ui))
-end
-
 --- 安装底栏模式保护；偏好等 ReaderReady 收尾后再应用，此时 ReaderRolling 才会响应重排。
 ---@param ui table
 function Bars.install(ui)
@@ -414,14 +384,12 @@ function Bars.install(ui)
     hijackFooter(ui)
     ui:registerPostReaderReadyCallback(Guard.wrap("bars preferences", function()
         Bars.applyPreferences(ui)
-        logTopDiag(ui)
-        -- 别的插件可能在更晚的 ready 回调里又把页眉压掉；隔一拍只复查一次，不无限对打。
-        require("ui/uimanager"):scheduleIn(2, Guard.wrap("bars header recheck", function()
+        -- 别的插件可能在更晚的 ready 回调里又把页眉压掉；隔一拍只再收敛一次，不无限对打。
+        require("ui/uimanager"):scheduleIn(2, Guard.wrap("bars preferences recheck", function()
             if require("apps/reader/readerui").instance ~= ui then
                 return
             end
-            forceTopHeader(ui)
-            logTopDiag(ui)
+            Bars.applyPreferences(ui)
         end))
     end))
 end

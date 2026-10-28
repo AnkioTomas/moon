@@ -221,30 +221,20 @@ Assert.is_true(footer:onHoldFooter({ pos = { x = 100, y = 780 } }))
 Assert.eq(footer:onHoldFooter(), "original hold")
 Assert.is_false(registered_touch_zone)
 Assert.len(post_ready, 1, "偏好等 ReaderReady 收尾后再应用")
-
--- 开书诊断（issue #67）：偏好应用后落一行顶栏各门状态。
-local Log = require("utils.log")
-local diag_args
-local orig_info = Log.info
-Log.info = function(...) diag_args = { ... } end
 post_ready[1]()
-Log.info = orig_info
-Assert.eq(diag_args[1], "bars top diag")
 
--- 强制重写页眉高度：配置已是开但高度为 0（被别的插件压掉）时，偏好应用须绕过
--- setSystemTop 的早退、重发状态栏事件逼引擎重排；高度正常时不发任何事件。
+-- 配置已是开但高度为 0：setSystemTop 不得早退，须重发事件逼引擎重排；高度正常时零事件。
 ui_top.document.configurable.status_line = 0
 ui_top.document.getHeaderHeight = function() return 0 end
 events = {}
-Bars.applyPreferences(ui_top)
-local forced = 0
-for _idx, e in ipairs(events) do
-    if e.name == "SetStatusLine" and e.args[1] == 0 then forced = forced + 1 end
-end
-Assert.eq(forced, 1)
+Bars.setSystemTop(ui_top, true)
+Assert.eq(events[1].name, "ConfigChange")
+Assert.eq(events[1].args[2], 0)
+Assert.eq(events[2].name, "SetStatusLine")
+Assert.eq(events[2].args[1], 0)
 ui_top.document.getHeaderHeight = function() return 28 end
 events = {}
-Bars.applyPreferences(ui_top)
+Bars.setSystemTop(ui_top, true)
 Assert.len(events, 0)
 
 -- 强制重画：月读画底栏时改走整页重画，不让原生底栏盖上来
