@@ -10,7 +10,7 @@ examples/moonsource-demo.koplugin/moon_source.lua），按 PluginLoader.enabled_
   - 没有 provides（旧描述文件）：除非顶层 `source = false`，一律当书源；首页组件取顶层 `home`。
   - 书源要 meta() / new()，id 取 meta().id；非书源不要求 meta/new，id 取描述表的 `id`。id 都必须是 ext.<name>。
   - provides.features：往月读自己的挂点加功能，`{ setting, panel, topbar, events, hooks }`，值是表或延迟 require 的模块名，
-    这里只原样记下（MoonExtension.features），解析、加前缀、校验与隔离都在 features/init.lua（Features.external）。
+    这里只原样记下（MoonExtension.features），解析、加前缀、校验与隔离都在 utils/external.lua（External.collect）。
 Registry.extensions() 按加载顺序列出全部扩展（含非书源），供桌面等上层读取首页组件与 feature；本模块不 require 桌面 / features。
 Registry.extensionsReady() 为假（KOReader 还在加载插件）时上层不要缓存扩展收集结果。
 
