@@ -244,6 +244,12 @@ Assert.eq(detail.meta.isbn, "9787000000000")
 Assert.eq(decode_mode, SIMPLE, "响应按 simple 模式解析（null → nil）")
 routes["GET /koreader/plugin/catalog/books/4"] = json({ id = 4, title = "无日期", publishedYear = 1999, files = {} })
 Assert.eq(run("getDetailAsync", { source_id = "ext.bookorbit", stable_id = "4" }).meta.published, 1999, "没有日期退到年份")
+-- 简介若带 HTML（BookOrbit 常见），入库前剥成纯文本，详情页不再露出 div/p。
+routes["GET /koreader/plugin/catalog/books/5"] = json({
+    id = 5, title = "带标签", description = "<div><p>第一段</p><p>第二段&amp;续</p></div>", files = {},
+})
+Assert.eq(run("getDetailAsync", { source_id = "ext.bookorbit", stable_id = "5" }).intro, "第一段\n第二段&续")
+Assert.eq(remembered["5"].intro, "第一段\n第二段&续")
 
 -- 封面：缩略图接口带鉴权头。
 local cover = source:coverRequest({ stable_id = "1" })

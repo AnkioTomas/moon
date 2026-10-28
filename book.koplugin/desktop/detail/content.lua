@@ -44,7 +44,8 @@ local function scoreLine(m)
     return #parts > 0 and table.concat(parts, " · ") or nil
 end
 
---- 书籍信息表的条目：{ 标签, 值, 独占一行 }。格式、大小、文件名只有整本书文件（或书城条目）才有。
+--- 书籍信息表的条目：{ 标签, 值, 独占一行 [, 点按看全文] }。
+--- 格式、大小、路径只有整本书文件（或书城条目）才有；路径独占一行，过长可点开看全文。
 ---@return table[]
 local function infoItems(book, owner)
     local sid = book.source_id
@@ -63,7 +64,7 @@ local function infoItems(book, owner)
         { _("加入"), added > 0 and os.date("%Y-%m-%d", added) },
         { _("语言"), m.language and ({ zh = _("中文"), en = _("英文"), ja = _("日文") })[m.language] or m.language },
         { "ISBN", m.isbn },
-        { _("文件"), name, true },
+        { _("路径"), path, true, true },
     }) do
         if item[2] and item[2] ~= "" then items[#items + 1] = item end
     end
@@ -71,6 +72,7 @@ local function infoItems(book, owner)
 end
 
 --- 两列「标签 值」表；独占项单独一行。超出 max_h 的行从末尾整行丢弃。
+--- item[4] 为真时点按弹出全文（长路径）。
 ---@param items table[]
 ---@param w number 物理像素
 ---@param max_h number
@@ -88,7 +90,13 @@ local function infoTable(items, w, max_h)
             HorizontalSpan:new{ width = math.max(0, label_w - label:getSize().w) },
             Text.line("body", item[2], { width = math.max(1, cw - label_w) }),
         }
-        return LeftContainer:new{ dimen = Geom:new{ w = cw, h = row:getSize().h }, row }
+        local wrap = LeftContainer:new{ dimen = Geom:new{ w = cw, h = row:getSize().h }, row }
+        if item[4] then
+            return Tap.wrap(wrap, function()
+                TextViewer:new{ title = item[1], text = item[2] }:show()
+            end)
+        end
+        return wrap
     end
     local rows, half = {}, nil
     for _idx, item in ipairs(items) do

@@ -177,6 +177,12 @@ Assert.is_false(Book.isRead({ read_state = 0 }))
 Assert.is_false(Book.isRead({ read_state = 2 }))
 Assert.is_false(Book.isRead(nil))
 
+-- 简介：纯文本原样；残留 HTML（如 BookOrbit 旧数据）展示前剥掉
+Assert.eq(Book.desc({ intro = "纯文本简介" }), "纯文本简介")
+Assert.eq(Book.desc({ intro = "<div><p>段一</p><p>段二</p></div>" }), "段一\n段二")
+Assert.eq(Book.desc({ intro = "" }), "")
+Assert.eq(Book.desc(nil), "")
+
 -- 封面状态叠层：已读与进度互斥，下载独立；下载角标只认查询带出的 book.downloaded。
 local status_opts = { badge = true, ribbon = true, download = true }
 local unread = select(1, Book.cover(nil, nil, { read_state = 0, percent = 12, downloaded = true }, 80, 120, status_opts))
