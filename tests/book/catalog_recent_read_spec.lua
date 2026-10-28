@@ -1,6 +1,6 @@
 --[[--
-图书馆「最近阅读」排序：整个书架都列，按 max(本机进度时间, 云端最近阅读时间) 倒序，
-都没有的排后面按加入时间倒序；卷行只在有进度时进来；云端时间只增不减。真实 sqlite 执行。
+图书馆「最近阅读」排序：只列在架书（卷行是进度身份、不是书架成员，最近阅读时间写在系列行上），
+按 max(进度时间, 云端最近阅读时间) 倒序，都没有的排后面按加入时间倒序；云端时间只增不减。真实 sqlite 执行。
 
 @module tests.book.catalog_recent_read_spec
 --]]
@@ -43,7 +43,7 @@ shelf("both", 300, 1700001000)        -- 本机比云端新
 shelf("never_old", 400, nil)
 shelf("never_new", 500, nil)
 shelf("ms", 50, 1700003000000)        -- 毫秒时间戳折成秒 = 1700003000
--- 卷行（非书架成员、sync_status=1）：有进度才进来
+-- 卷行（非书架成员、sync_status=1）：不是书架成员，最近阅读也不列它
 Assert.is_true(BookDB.upsertRemote({ source_id = "wechat", stable_id = "vol:1", title = "卷" }))
 Assert.is_true(BookDB.upsertRemote({ source_id = "wechat", stable_id = "vol:2", title = "卷2" }))
 for id, at in pairs({ ["local"] = 1700004000, both = 1700006000, ["vol:1"] = 1700002000 }) do
@@ -54,8 +54,8 @@ end
 local rows, count = Catalog.listBooks("wechat", { sort = "recent_read" })
 local ids = {}
 for i, row in ipairs(rows) do ids[i] = row.stable_id end
-Assert.eq(count, 7, "整个书架 + 有进度的卷行，没进度的卷行不进来")
-Assert.eq(table.concat(ids, ","), "both,cloud,local,ms,vol:1,never_new,never_old")
+Assert.eq(count, 6, "只列在架书，卷行不进来")
+Assert.eq(table.concat(ids, ","), "both,cloud,local,ms,never_new,never_old")
 
 -- 分页仍走 LIMIT/OFFSET
 rows = Catalog.listBooks("wechat", { sort = "recent_read", limit = 2, offset = 1 })
@@ -72,7 +72,7 @@ Assert.is_true(BookDB.upsertRemote({ source_id = "wechat", stable_id = "old_id",
 Assert.not_nil(Base.exec([[INSERT INTO pending_progress (source_id, stable_id, fraction, updated_at)
     VALUES ('wechat', 'old_id', 0.3, 1700007000);]]))
 rows, count = Catalog.listBooks("wechat", { sort = "recent_read" })
-Assert.eq(count, 7, "同名在架行存在时旧身份行不再重复出现")
+Assert.eq(count, 6, "下架行不进最近阅读，同名的在架行照常列出")
 for _idx, row in ipairs(rows) do Assert.is_true(row.stable_id ~= "old_id") end
 
 -- 本地书文件没了（下架并清空 path）：有进度也不留在最近阅读里

@@ -83,15 +83,20 @@ function Stats.push(source, done)
 end
 
 --- 判断一条领域统计记录是否具备可持久化的最小字段。
---- page 和 total_pages 可缺省为 0；身份、开始时间和正数时长必须存在。
+--- page 和 total_pages 可缺省为 0；身份和开始时间必须存在。
+--- 云端会话允许 0 秒（Kavita 的会话是「两次进度写入之间」，只写一次就是 0 秒），
+--- 但要求至少推进了一页；其余记录类型仍然要有正数时长。
 ---@param row table|nil
 ---@return boolean
 local function validRecord(row)
-    return type(row) == "table"
-        and type(row.source_id) == "string" and row.source_id ~= ""
-        and type(row.stable_id) == "string" and row.stable_id ~= ""
-        and tonumber(row.start_time) and tonumber(row.duration) and tonumber(row.duration) > 0
-        or false
+    if type(row) ~= "table"
+        or type(row.source_id) ~= "string" or row.source_id == ""
+        or type(row.stable_id) ~= "string" or row.stable_id == ""
+        or not tonumber(row.start_time) or not tonumber(row.duration) then
+        return false
+    end
+    if tonumber(row.duration) > 0 then return true end
+    return row.record_type == "cloud_session" and (tonumber(row.event_count) or 0) > 0
 end
 
 --- 解析 pullStatsAsync 回包：数组=追加去重；``{ rows, replace }``=云端覆盖入库。

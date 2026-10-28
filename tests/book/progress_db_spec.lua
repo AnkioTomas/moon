@@ -250,6 +250,30 @@ do
     clearMods()
 end
 
+-- ── 容器行：允许显式把 updated_at 归零（06 A1 / US 24）──────────────
+-- 普通写入仍用 MAX 保修订号单调；只有漫画容器行需要「从最近阅读里消失」。
+do
+    local connection, calls = makeConn()
+    local DbBase, ProgressDB = loadProgress(connection)
+
+    Assert.is_true(ProgressDB.upsertRemote("ext.kavita", "700", { fraction = 0.5, updated_at = 0 },
+        { reset_updated_at = true }))
+    local q = calls[#calls]
+    Assert.is_true(q.sql:find("updated_at=excluded.updated_at", 1, true) ~= nil,
+        "容器行显式覆盖时间戳，不被旧版本的 MAX 留住")
+    Assert.is_nil(q.sql:find("MAX(excluded.updated_at", 1, true), "这条写入不再走 MAX")
+    Assert.eq(q.args[11], 0, "容器行写 0，不进最近阅读")
+
+    Assert.is_true(ProgressDB.upsertRemote("ext.kavita", "700:7001", { fraction = 0.5, updated_at = 1000 }))
+    q = calls[#calls]
+    Assert.is_true(q.sql:find("updated_at=MAX(excluded.updated_at, pending_progress.updated_at)", 1, true) ~= nil,
+        "普通进度仍只进不退")
+    Assert.eq(q.args[11], 1000, "普通写入照旧带自己的时间")
+
+    DbBase.close()
+    clearMods()
+end
+
 -- ── fixRemoteTime：源换时间口径时显式拉回未来时间 ──────────────
 do
     local connection, calls = makeConn({ step = function() return nil end })

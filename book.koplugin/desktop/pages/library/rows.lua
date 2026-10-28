@@ -87,7 +87,14 @@ function Rows.book(ctx, book, w, h, on_open, on_detail)
         Icon.widget{ name = "more_vert", size = t.control.icon, color = Theme.color(t.color.icons) },
     }
     local side = HorizontalGroup:new{ align = "center" }
-    if book.downloaded then
+    -- 已缓存优先：同时成立时打开实际走本地缓存，标「已下载」会误导（05 A5）。
+    if book.cache_mark then
+        side[1] = Box:new{
+            style = { border = 1, border_color = t.color.ink },
+            padding = Theme.px(t.space.xs),
+            Text.line("caption", _("已缓存")),
+        }
+    elseif book.downloaded then
         side[1] = Box:new{
             style = { border = 1, border_color = t.color.ink },
             padding = Theme.px(t.space.xs),

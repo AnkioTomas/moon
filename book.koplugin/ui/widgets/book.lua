@@ -341,8 +341,9 @@ end
 ---@param name string Material 图标名
 ---@param ox number 叠层横向偏移，单位像素
 ---@param oy number 叠层纵向偏移，单位像素
+---@param ink any|nil 圆底颜色（缺省状态条墨色）
 ---@return table
-local function circleMark(name, ox, oy)
+local function circleMark(name, ox, oy, ink)
     local t = Theme.current()
     local size = Theme.px(18)
     local icon = Icon.widget{
@@ -367,7 +368,7 @@ local function circleMark(name, ox, oy)
     function mark:paintTo(bb, x, y)
         local r = math.floor(size / 2)
         local cx, cy = x + r, y + r
-        bb:paintCircle(cx, cy, r, statusInk())
+        bb:paintCircle(cx, cy, r, ink or statusInk())
         if self.icon then
             local iz = self.icon:getSize()
             self.icon:paintTo(
@@ -393,6 +394,15 @@ end
 function Book.downloadMark(ch)
     local size, inset = Theme.px(18), Theme.px(Theme.current().space.xs)
     return circleMark("check", inset, math.max(0, ch - size - inset))
+end
+
+--- 左下角「已缓存」：与下载勾同槽，圆底用 muted 色（它不是本机文件，只是能离线打开）。
+---@param ch number 封面高度，单位像素
+---@return table
+function Book.cachedMark(ch)
+    local t = Theme.current()
+    local size, inset = Theme.px(18), Theme.px(t.space.xs)
+    return circleMark("cached", inset, math.max(0, ch - size - inset), Blitbuffer.Color8(t.color.muted))
 end
 
 --- 右下角「更多」：实心圆 + more_horiz，贴边留缝。
@@ -453,6 +463,7 @@ end
 --- opts.badge: 未读且有进度时叠右上角百分比
 --- opts.ribbon: 已读时叠右上角「已读」绑带
 --- opts.download: 已本地下载时叠左下角勾（口径见 BookDB.downloadedClause）
+--- opts.cached: 属主源书架缓存命中时叠左下角「已缓存」（与下载同槽，缓存优先）
 --- opts.more: 叠右下角「更多」；true 只画，function 同时可点
 --- opts.show_parent: 窗口级父（Desktop / Detail）
 --- opts.on_ready: 图片就绪回调
@@ -478,25 +489,36 @@ function Book.cover(plugin, source, book, cw, ch, opts)
             cached_cover = cached
         end
     end
-    -- 显式 src（刮削候选）> 本地封面 > 远程链接：本地已落盘就不再为同一本书走网络。
-    if type(opts.src) == "string" and opts.src ~= "" then
-        req = { url = opts.src, headers = opts.headers }
-    elseif cached_cover then
-        req = { url = cached_cover }
-    elseif type(book) == "table" and type(book.cover_url) == "string" and book.cover_url ~= "" then
-        req = { url = book.cover_url, headers = book.cover_headers }
-    elseif type(book) == "table" and type(book.cover) == "string" and book.cover ~= "" then
-        req = { url = book.cover, headers = book.cover_headers }
-    end
-    if not req and type(book) == "table" and type(book.stable_id) == "string" then
+    -- 属主源封面（纯构造，无 IO）。源声明 authoritative 时要压过本地缓存：同身份缓存可能
+    -- 本来就是坏图（Kavita 卷行抽页 = 扫描版第一页）或书库早就换掉的旧封面。
+    local source_req
+    if type(book) == "table" and type(book.stable_id) == "string" then
         local sid = book.source_id
         local owner = source
         if type(sid) == "string" and sid ~= "" and (not source or source.id ~= sid) then
             owner = require("source.registry").resolve(sid)
         end
         if owner and type(owner.coverRequest) == "function" then
-            req = select(1, owner:coverRequest(book))
+            local ok, got = pcall(owner.coverRequest, owner, book)
+            if ok and type(got) == "table" and type(got.url) == "string" and got.url ~= "" then
+                source_req = got
+            end
         end
+    end
+    -- 显式 src（刮削候选）> 权威源封面 > 本地封面 > 远程链接 > 源封面。
+    -- 本地已落盘就不再为同一本书走网络；权威源封面例外（本地只作加载失败兜底）。
+    if type(opts.src) == "string" and opts.src ~= "" then
+        req = { url = opts.src, headers = opts.headers }
+    elseif source_req and source_req.authoritative then
+        req = source_req
+    elseif cached_cover then
+        req = { url = cached_cover }
+    elseif type(book) == "table" and type(book.cover_url) == "string" and book.cover_url ~= "" then
+        req = { url = book.cover_url, headers = book.cover_headers }
+    elseif type(book) == "table" and type(book.cover) == "string" and book.cover ~= "" then
+        req = { url = book.cover, headers = book.cover_headers }
+    else
+        req = source_req
     end
     local t = Theme.current()
     local style = opts.shadow == false and t.image or t.raised
@@ -531,13 +553,14 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         padding = cover_pad,
         image,
     }
-    -- 已读与进度互斥；下载状态由查询时带出（book.downloaded）。
+    -- 已读与进度互斥；下载 / 缓存状态由查询时带出（book.downloaded / book.cache_mark）。
     local read = Book.isRead(book)
     local show_read = opts.ribbon and read
     local show_pct = opts.badge and not read and pct > 0
-    local show_dl = opts.download and book.downloaded
+    local show_cached = opts.cached and book.cache_mark
+    local show_dl = opts.download and book.downloaded and not show_cached
     local show_more = opts.more
-    if show_read or show_pct or show_dl or show_more then
+    if show_read or show_pct or show_dl or show_cached or show_more then
         local overlays = {
             dimen = Geom:new{ w = cw, h = ch },
             show_parent = opts.show_parent,
@@ -548,7 +571,9 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         elseif show_pct then
             overlays[#overlays + 1] = Book.progressBadge(cw, pct)
         end
-        if show_dl then
+        if show_cached then
+            overlays[#overlays + 1] = Book.cachedMark(ch)
+        elseif show_dl then
             overlays[#overlays + 1] = Book.downloadMark(ch)
         end
         if show_more then

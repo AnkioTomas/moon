@@ -13,6 +13,9 @@ do
     Assert.is_false(c.store)
     Assert.is_nil(c.insight)
     Assert.is_false(c.stats_pull)
+    -- 书架缓存是可选能力：默认显式 false，声明 true 才参与离线书架（05 A2）。
+    Assert.eq(c.shelf_cache, false)
+    Assert.is_nil(SourceBase.shelfCache, "不支持的源不实现 shelfCache（不进基类）")
     Assert.is_false(c.scrape)
     Assert.is_false(c.edit)
     Assert.is_nil(c.library)

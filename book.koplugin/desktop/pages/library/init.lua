@@ -408,16 +408,30 @@ local function buildGrid(ctx, books, m, on_open, show_status, lib)
     return grid
 end
 
---- 正文空态：加载中 / 错误 / 空列表。
+--- 正文空态：加载中 / 错误 / 空列表；sub 是离线专用副文案（无按钮，05 A6）。
 ---@param w number
 ---@param h number
 ---@param msg string
+---@param sub string|nil
 ---@return table
-local function emptyBody(w, h, msg)
+local function emptyBody(w, h, msg, sub)
     local t = Theme.current()
+    local width = w - Theme.px(t.space.md) * 2
+    local body = Text.line("body", msg, { color = t.color.muted, width = width })
+    local inner
+    if type(sub) == "string" and sub ~= "" then
+        inner = VerticalGroup:new{
+            align = "center",
+            body,
+            VerticalSpan:new{ width = Theme.px(t.space.xs) },
+            Text.line("caption", sub, { color = t.color.muted, width = width }),
+        }
+    else
+        inner = body
+    end
     return CenterContainer:new{
         dimen = Geom:new{ w = w, h = h },
-        Text.line("body", msg, { color = t.color.muted, width = w - Theme.px(t.space.md) * 2 }),
+        inner,
     }
 end
 
@@ -810,7 +824,12 @@ function Library:buildPage(ctx)
     local on_detail = function(book) require("desktop.detail").open(ctx.desktop, "library", book) end
     local body
     if not books or #books == 0 then
-        body = emptyBody(w, m.grid_h, not books and _("加载中…") or state.err or _("没有书籍"))
+        if books and #books == 0 and self.offline and not state.err and g.id ~= "folder" then
+            body = emptyBody(w, m.grid_h, _("离线：Kavita 里还没有可离线阅读的书"),
+                _("联网后可在漫画详情里下载卷"))
+        else
+            body = emptyBody(w, m.grid_h, not books and _("加载中…") or state.err or _("没有书籍"))
+        end
     elseif self.view == "list" and g.id ~= "folder" then
         body = VerticalGroup:new{ align = "left" }
         for i = 1, math.min(#books, m.rows) do
@@ -866,6 +885,8 @@ function Library:fetch()
     if not source then done({}, _("当前数据源不可用")); return end
     local Catalog = require("book.catalog")
     local request, query = Catalog.listLibraryAsync, self:query()
+    -- 离线空态用它区分「真的没有书」和「断网收窄后没有」（A6）。
+    self.offline = query.offline_only == true
     if self.group == "folder" then
         request = Catalog.folderPageAsync
         query = { dir = self:currentDir(), root = localRoot(), page = self.page, page_size = self.page_size, sort = self.sort }
@@ -896,6 +917,12 @@ end
 ---@return BookListOpts
 function Library:query()
     local f = self.filter
+    local Catalog = require("book.catalog")
+    -- 离线书架只在断网且源声明了书架缓存的源上收窄可见集；其它源一行不改（05 A4）。
+    local offline = false
+    if not require("ui/network/manager"):isConnected() then
+        offline = Catalog.hasShelfCache(Catalog.libraryScope(self.desktop.source and self.desktop.source.id))
+    end
     return {
         page = self.page,
         page_size = self.page_size,
@@ -908,6 +935,7 @@ function Library:query()
         unauthor = not not f.unauthor,
         read_status = f.read_status,
         downloaded = f.downloaded,
+        offline_only = offline or nil,
         hidden = f.hidden,
         source_id = f.source_id or "",
         sort = self.sort,

@@ -10,6 +10,10 @@
 队列不认识业务：进度文案、完成提示、可否重试都由任务自己给；download 类的 count/total 是字节数。
 前台弹窗 / 转后台 / 被拒提示由 `workers/ui/task_dialog`（`start` / `follow`）负责，队列本身零 UI。
 
+`passive` 任务只被展示、不占执行权：执行者是别人（kamare 的漫画缓存队列），队列只按它自己的
+轮询报进度；它随时可以启动、不挡别的类型，也不被别的类型挡住。给了 `hold` 的话，`hold()` 返回假时
+（例如缓存队列因空间不足暂停）不再压自动休眠，免得一停一整夜。
+
 restartable 的任务归队列所有，队列可以随时中断并从头重跑它：
 休眠（`Tasks.onSuspend`）时中断、放回 waiting；断网导致的失败（result.ok 为假且设备未连网）
 也放回 waiting，不算失败、不消耗重试次数；`Tasks.onResume` / `Tasks.onNetworkConnected` 后按原顺序续跑。
@@ -49,6 +53,8 @@ local Tasks = {}
 ---@field title string|nil
 ---@field restartable boolean|nil
 ---@field cancellable boolean|nil 非 restartable 的任务也给进度窗取消键
+---@field passive boolean|nil 只展示、不占执行权（执行者是别的插件）
+---@field hold (fun(): boolean)|nil 返回假时这类任务不再压自动休眠（缺省为压）
 ---@field run fun(report: fun(text: string|nil, count: integer|nil, total: integer|nil), done: fun(result: table)): table|nil
 ---@field retryable (fun(result: table): boolean)|nil
 ---@field on_done fun(result: table)|nil
@@ -88,11 +94,17 @@ local suspended = false
 local holding_awake = false
 
 --- 缓存任务在跑 / 排队 / 退避时不让 KOReader 自动休眠；waiting（等网络 / 唤醒）不算，否则永远睡不下去。
+--- passive 任务自己的 `hold()` 说「先别撑」（例如队列因空间不足暂停）时同样放行。
 -- keepalive（翻页器 / KeepAlive 插件）为真时也要撑着，不能在 cache 结束时把别人的不息屏清掉。
 local function syncAwake()
     local busy = false
     for _idx, task in ipairs(list) do
-        if task.kind == "cache" and task.state ~= "waiting" then busy = true break end
+        if task.kind == "cache" and task.state ~= "waiting" then
+            if not task.hold or task.hold() then
+                busy = true
+                break
+            end
+        end
     end
     local share = require("pluginshare")
     local want = busy or share.keepalive == true
@@ -154,24 +166,25 @@ local function archive(task)
     finished[MAX_FINISHED + 1] = nil
 end
 
---- 占着执行权的类型：有 running / retry_wait 任务时为其类型。
+--- 占着执行权的类型：有 running / retry_wait 任务时为其类型。passive 任务不占执行权。
 ---@return BookTaskKind|nil
 local function activeKind()
     for _idx, task in ipairs(list) do
-        if (task.state == "running" or task.state == "retry_wait") and not SHARED[task.kind] then
+        if (task.state == "running" or task.state == "retry_wait")
+            and not SHARED[task.kind] and not task.passive then
             return task.kind
         end
     end
 end
 
---- 下一个可启动的排队任务；队首可启动的排队任务是异类时后面的同类不插队，只有 SHARED 类照常启动。
+--- 下一个可启动的排队任务；队首可启动的排队任务是异类时后面的同类不插队，只有 SHARED / passive 类照常启动。
 ---@return BookTask|nil
 local function nextQueued()
     local kind = activeKind()
     local blocked = false
     for _idx, task in ipairs(list) do
         if task.state == "queued" and not (suspended and task.restartable) then
-            if SHARED[task.kind] then return task end
+            if task.passive or SHARED[task.kind] then return task end
             if not blocked then
                 if kind == nil or task.kind == kind then return task end
                 blocked = true

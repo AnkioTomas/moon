@@ -17,6 +17,7 @@ local Geom = require("ui/geometry")
 
 -- 网格度量：一列 40 宽、封面 40×60，单元高 86。
 local more_option
+local grid_opts
 local tappables = {}
 package.preload["ui.widgets.book"] = function()
     local function box(w, h) return Container:new{ dimen = Geom:new{ w = w, h = h } } end
@@ -32,7 +33,7 @@ package.preload["ui.widgets.book"] = function()
             return box(w, h)
         end,
         widget = function(_, _, book, cw, ch, opts)
-            more_option = opts.more
+            more_option, grid_opts = opts.more, opts
             local Text = require("ui.themes.widgets.text")
             local VerticalGroup = require("ui/widget/verticalgroup")
             local cover = box(cw, ch)
@@ -55,6 +56,11 @@ package.preload["desktop.open"] = function()
 end
 local requested ---@type table
 local listed_source_id
+-- 断网判定与「源是否声明书架缓存」两个触发条件（05 A4）。
+local network, shelf_cache = { connected = true }, false
+package.preload["ui/network/manager"] = function()
+    return { isConnected = function() return network.connected end }
+end
 local filters_data = {
     read_counts = { { status = "unread", count = 1 } },
     downloaded_count = 0,
@@ -62,6 +68,7 @@ local filters_data = {
 }
 local catalog = {
     libraryScope = function(id) return { id, "extra" } end,
+    hasShelfCache = function() return shelf_cache end,
     filtersAsync = function(_, cb) cb({ data = filters_data }) end,
     groupCountsAsync = function(_, column, cb)
         Assert.eq(column, "authors")
@@ -485,3 +492,59 @@ do -- 页签按设置显示，书籍恒在；取消当前页签后落回书籍
     Assert.eq(library.group, "books")
     display.library_tabs = saved
 end
+
+-- 缓存标记：列表行「已缓存」方框与「已下载」互斥（同时成立只显示已缓存，05 A5）。
+library.view, library.group = "list", "books"
+library.filter = {}
+local cached_page = render({
+    { source_id = "ext.kavita", stable_id = "700", title = "漫画一", downloaded = true, cache_mark = true },
+}, 1)
+local cached_texts = Kit.texts(cached_page)
+Assert.contains(cached_texts, "已缓存")
+for _idx, s in ipairs(cached_texts) do
+    Assert.is_true(s ~= "已下载", "缓存优先：同一行不再写已下载")
+end
+-- 没有缓存的已下载书维持原方框。
+local dl_page = render({ { source_id = "moon", stable_id = "m1", title = "书一", downloaded = true } }, 1)
+Assert.contains(Kit.texts(dl_page), "已下载")
+for _idx, s in ipairs(Kit.texts(dl_page)) do
+    Assert.is_true(s ~= "已缓存", "没缓存不写已缓存")
+end
+
+-- 网格：缓存标记走封面左下角同一槽位；Kobo 风格收进封面下状态行（05 A5）。
+library.view = "grid"
+render({ { source_id = "ext.kavita", stable_id = "700", title = "漫画一", cache_mark = true } }, 1)
+Assert.is_true(grid_opts.cached, "网格格子带缓存标记")
+Assert.is_nil(grid_opts.status_icon)
+display.library_style = "kobo"
+render({ { source_id = "ext.kavita", stable_id = "700", title = "漫画一", cache_mark = true } }, 1)
+Assert.is_false(grid_opts.cached, "Kobo 不在封面上叠图标")
+Assert.eq(grid_opts.status_icon, "cached", "Kobo 状态行槽位画缓存图标")
+display.library_style = "kindle"
+
+-- 离线书架：断网且源声明 shelf_cache 才收窄可见集，并换离线空态（05 A4/A6）。
+library.view, library.group, library.filter = "grid", "books", {}
+library.page = 1
+network.connected, shelf_cache = false, false
+requested = nil
+library:fetch()
+Assert.is_nil(requested.offline_only, "源没声明 shelf_cache：一行不改")
+shelf_cache = true
+requested = nil
+library:fetch()
+Assert.is_true(requested.offline_only, "断网 + 声明 shelf_cache：只列能离线读的")
+Assert.is_true(library.offline)
+local offline_page = library:buildPage(ctx)
+local offline_texts = Kit.texts(offline_page)
+Assert.contains(offline_texts, "离线：Kavita 里还没有可离线阅读的书")
+Assert.contains(offline_texts, "联网后可在漫画详情里下载卷")
+for _idx, b in ipairs(Kit.buttons(offline_page)) do
+    Assert.is_true(b.icon ~= "download", "空态不放下载按钮")
+end
+-- 回连：标志清掉，空态回到普通文案。
+network.connected = true
+requested = nil
+library:fetch()
+Assert.is_nil(requested.offline_only)
+Assert.is_false(library.offline)
+Assert.contains(Kit.texts(render({}, 0)), "没有书籍")

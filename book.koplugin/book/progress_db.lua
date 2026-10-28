@@ -117,8 +117,11 @@ end
 ---@param pos ProgressPosition
 ---@param status integer 落库后的 sync_status
 ---@param keep_dirty boolean|nil 为真时不覆盖 sync_status=0 的本地脏版本
+---@param opts { reset_updated_at?: boolean }|nil reset_updated_at：允许本次写入把 updated_at 显式清零。
+---        只给漫画容器行用：容器行固定 updated_at=0 才不进最近阅读（06 A1）；
+---        但普通写入仍靠 MAX 保修订号单调（markSynced 的乐观锁）。
 ---@return boolean
-local function write(source_id, stable_id, pos, status, keep_dirty)
+local function write(source_id, stable_id, pos, status, keep_dirty, opts)
     local fraction = tonumber(pos.fraction)
     -- keep_dirty：本地脏行整行跳过，避免远端覆盖。
     if keep_dirty and tonumber(DB.rowexec(
@@ -131,6 +134,9 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
     if extra_err then
         return false
     end
+    local updated_at = opts and opts.reset_updated_at
+        and "updated_at=excluded.updated_at"
+        or "updated_at=MAX(excluded.updated_at, pending_progress.updated_at)"
     if not DB.exec(
         [[INSERT INTO pending_progress
             (source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction,
@@ -145,7 +151,7 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
             total_pages=excluded.total_pages,
             locator=excluded.locator,
             extra=excluded.extra,
-            updated_at=MAX(excluded.updated_at, pending_progress.updated_at),
+            ]] .. updated_at .. [[,
             sync_status=excluded.sync_status,
             synced=COALESCE(excluded.synced, pending_progress.synced);]],
         source_id, stable_id, fraction, pos.chapter_idx, pos.chapter_title, pos.chapter_fraction,
@@ -174,9 +180,10 @@ end
 ---@param source_id string
 ---@param stable_id string
 ---@param pos ProgressPosition
+---@param opts { reset_updated_at?: boolean }|nil reset_updated_at：允许显式把时间戳清零（漫画容器行，见 write）
 ---@return boolean
-function ProgressDB.upsertRemote(source_id, stable_id, pos)
-    return write(source_id, stable_id, pos, 1, true)
+function ProgressDB.upsertRemote(source_id, stable_id, pos, opts)
+    return write(source_id, stable_id, pos, 1, true, opts)
 end
 
 --- 用户确认采用远端进度：无条件覆盖本地（含 sync_status=0 的脏版本）。

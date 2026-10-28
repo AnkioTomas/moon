@@ -133,4 +133,18 @@ local account_days = StatsDB.dailyBySource(SRC)
 Assert.eq(#account_days, 1)
 Assert.eq(account_days[1].seconds, 120, "账户当日只有 A 的本机逐页记录")
 
+-- 0 秒会话（Kavita 只写了一次进度）：时长是 0，但推进的页数是真的。
+-- 以前被 StatsDB.add 拒收，详情页「已读页数 / 上次阅读」整段消失（另一台设备刚读的卷）。
+local zero_at = AT + 3 * 3600
+add(cloud_session("Z", zero_at, 0, 7))
+local z = StatsDB.summaryByBook(SRC, "Z")
+Assert.eq(z.pages, 7, "0 秒会话的页数照算")
+Assert.eq(z.last_read, zero_at, "上次阅读取 0 秒会话的时刻")
+Assert.eq(z.total_seconds, 0, "没有时长就没有时长")
+local z_days = StatsDB.dailyByBook(SRC, "Z", 30)
+Assert.eq(#z_days, 1, "只有 0 秒会话的那天也出现在逐日列表")
+Assert.eq(z_days[1].seconds, 0)
+Assert.eq(z_days[1].pages, 7, "当天页数 = 会话推进页数")
+Assert.is_false(StatsDB.add(cloud_session("Z", zero_at + 60, 0, 0)), "既没时长也没页数的空会话仍然拒收")
+
 Base.close()

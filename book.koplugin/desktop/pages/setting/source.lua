@@ -137,7 +137,12 @@ local function entryRow(desktop, plugin, mod, title, icon)
                 if type(mod.rows) ~= "function" then return mod.open(plugin) end
                 require("desktop.pages.setting.overlay").push(desktop, {
                     title = title,
-                    sections = function() return {{ title = title, rows = mod.rows(plugin) }} end,
+                    sections = function()
+                        -- 模块可以自己分组（Kavita：连接 / 缓存与同步 / 诊断）；
+                        -- 没给 sections 的沿用一整块，标题就是源名。
+                        if type(mod.sections) == "function" then return mod.sections(plugin) end
+                        return {{ title = title, rows = mod.rows(plugin) }}
+                    end,
                 })
             end,
         })
