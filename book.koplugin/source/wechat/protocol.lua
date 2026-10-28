@@ -288,7 +288,7 @@ local function utf8Prefix(value, max_chars)
     local text = value or ""
     local pos = 1
     for _i = 1, max_chars do
-        local _start, stop = text:find("^[%z\1-\127\194-\244][\128-\191]*", pos)
+        local _start, stop = text:find("^" .. Text.UTF8_CHAR, pos)
         if not stop then break end
         pos = stop + 1
     end

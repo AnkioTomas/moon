@@ -15,7 +15,7 @@ local ffi = require("ffi")
 
 local Glyph = {}
 
-local CHAR = "[%z\1-\127\194-\244][\128-\191]*"
+local CHAR = require("utils.text").UTF8_CHAR
 
 local CANDIDATES = require("source.yuewen_fonts.glyph_chars")
 local PX = 56

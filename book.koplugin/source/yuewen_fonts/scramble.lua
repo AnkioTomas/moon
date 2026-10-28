@@ -13,7 +13,7 @@ local Glyph = require("source.yuewen_fonts.glyph")
 
 local Scramble = {}
 
-local CHAR = "[%z\1-\127\194-\244][\128-\191]*"
+local CHAR = require("utils.text").UTF8_CHAR
 
 local UNKNOWN = "□"
 local LOW, HIGH = 0x3400, 0x4DBF

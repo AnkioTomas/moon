@@ -4,22 +4,13 @@
 @module koplugin.book.features.lockscreen.typo_text
 --]]
 
-local M = {}
+local Text = require("utils.text")
 
---- UTF-8 切成字符数组。
----@param text string
----@return string[]
-function M.chars(text)
-    local out = {}
-    for ch in tostring(text or ""):gmatch("[%z\1-\127\194-\244][\128-\191]*") do
-        out[#out + 1] = ch
-    end
-    return out
-end
+local M = {}
 
 local function set(list)
     local s = {}
-    for _idx, ch in ipairs(M.chars(list)) do s[ch] = true end
+    for _idx, ch in ipairs(Text.chars(list)) do s[ch] = true end
     return s
 end
 
@@ -69,8 +60,8 @@ function M.units(text, keep)
     return units
 end
 
-local function firstChar(unit) return M.chars(unit)[1] end
-local function lastChar(unit) local c = M.chars(unit); return c[#c] end
+local function firstChar(unit) return Text.chars(unit)[1] end
+local function lastChar(unit) local c = Text.chars(unit); return c[#c] end
 
 --- 贪心断行 + 避头尾：下一单元若以收尾标点开头，就挂到本行末（允许超出，标点悬挂）；
 --- 本行若以开头括号收尾，就把它推到下一行。行首空格丢掉。
@@ -80,7 +71,7 @@ local function lastChar(unit) local c = M.chars(unit); return c[#c] end
 ---@param keep string|nil 不拆开的关键词
 ---@return string[]
 function M.breakLines(text, max, measure, keep)
-    measure = measure or function(unit) return #M.chars(unit) end
+    measure = measure or function(unit) return #Text.chars(unit) end
     local lines, cur, used = {}, {}, 0
     local function flush()
         while cur[#cur] == " " do cur[#cur] = nil end
@@ -112,7 +103,7 @@ end
 ---@return string[]
 function M.clauses(text)
     local out, cur = {}, {}
-    local chars = M.chars((tostring(text or ""):gsub("[\r\n\t]", " ")))
+    local chars = Text.chars((tostring(text or ""):gsub("[\r\n\t]", " ")))
     local function flush()
         local s = table.concat(cur):gsub("^%s+", ""):gsub("%s+$", "")
         if s ~= "" then out[#out + 1] = s end
@@ -198,7 +189,7 @@ function M.segment(text)
         for _idx, w in ipairs(seg) do out[#out + 1] = w end
         run = {}
     end
-    for _idx, ch in ipairs(M.chars(text)) do
+    for _idx, ch in ipairs(Text.chars(text)) do
         if isHan(ch) then run[#run + 1] = ch else flush(); out[#out + 1] = ch end
     end
     flush()

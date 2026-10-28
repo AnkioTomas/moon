@@ -8,10 +8,11 @@
 @module koplugin.book.features.ime.script
 --]]
 
+local Text = require("utils.text")
+
 local Script = {}
 
 local PATH = debug.getinfo(1, "S").source:match("^@(.*)/[^/]+$") .. "/opencc.sqlite3"
-local UTF8_CHAR = "[%z\1-\127\194-\244][\128-\191]*"
 -- 低于老版本 SQLite 的绑定参数上限 999。
 local CHUNK = 500
 
@@ -82,8 +83,7 @@ function Script.convertTexts(texts, target)
     local max = max_len[tbl]
     local split, keys, seen = {}, {}, {}
     for w, text in ipairs(texts) do
-        local chars = {}
-        for ch in text:gmatch(UTF8_CHAR) do chars[#chars + 1] = ch end
+        local chars = Text.chars(text)
         split[w] = chars
         for i = 1, #chars do
             for j = i, math.min(#chars, i + max - 1) do

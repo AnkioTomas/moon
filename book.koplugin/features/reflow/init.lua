@@ -179,10 +179,11 @@ local function anchorText(ui)
     local page = ui.rolling and ui.rolling.current_page
     if not page or page >= document:getPageCount() then return nil end
     local text = document:getTextFromXPointers(document:getPageXPointer(page), document:getPageXPointer(page + 1))
-    local line = require("utils.text").trim(text or ""):match("^[^\n]+")
+    local Text = require("utils.text")
+    local line = Text.trim(text or ""):match("^[^\n]+")
     if not line then return nil end
     local chars = {}
-    for char in line:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+    for char in line:gmatch(Text.UTF8_CHAR) do
         chars[#chars + 1] = char
         if #chars == ANCHOR_CHARS then break end
     end

@@ -10,6 +10,8 @@ Fock 解出的 HTML 里，常用字码位被换成别的字，靠随章下发的
 @module source.yuewen_fonts
 --]]--
 
+local Text = require("utils.text")
+
 local FontRestore = {}
 
 local RARE_LIMIT, FIXED_LIMIT = 6763, 3755
@@ -97,18 +99,12 @@ local function recognize(random_font, fixed_font, rare, han, opts)
 end
 
 local function utf8len(text)
-    local n = 0
-    for _ in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do n = n + 1 end
-    return n
+    return #Text.chars(text)
 end
 
 local DECOY_SIMILARITY = 0.8
 
-local function chars(text)
-    local list = {}
-    for ch in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do list[#list + 1] = ch end
-    return list
-end
+local chars = Text.chars
 
 --- 起点 cES=2 的正文会把同一章再追加一份改了几个字的诱饵副本。
 --- 前后两半段落字数一一对应、且逐字位置上 ≥80% 相同才丢后一半，避免把真实的对称段落误删。
@@ -184,8 +180,7 @@ local TEXT_FIXES = {
 ---@param text string
 ---@return string
 fixConfusions = function(text)
-    local list = {}
-    for ch in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do list[#list + 1] = ch end
+    local list = Text.chars(text)
     for i = 2, #list do
         local ch, prev, nxt = list[i], list[i - 1], list[i + 1]
         if ch == "干" and YU_PREFIX[prev] and not (nxt and YU_KEEP_NEXT[nxt]) then

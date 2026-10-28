@@ -16,6 +16,7 @@ plan() 只算绘制指令（可单测），paint 才碰字体和 BlitBuffer。
 
 local MoonSettings = require("utils.settings")
 local T = require("features.lockscreen.typo_text")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local M = {}
@@ -84,7 +85,7 @@ local function newCtx(measure, kw, kscale)
     end
     --- 行宽，句末悬挂标点不计。
     function c.lineW(line, size, bold)
-        local chars = T.chars(line)
+        local chars = Text.chars(line)
         local hang = chars[#chars]
         local wsum = 0
         for _idx, r in ipairs(runs(line, emph)) do
@@ -143,7 +144,7 @@ end
 
 --- 颗粒巨字：逐字横排（出血允许）。
 local function giantRow(ops, word, x, y, g, gray)
-    for _idx, ch in ipairs(T.chars(word)) do
+    for _idx, ch in ipairs(Text.chars(word)) do
         textOp(ops, ch, x, y, g, gray, true, true)
         x = x + g
     end
@@ -168,7 +169,7 @@ function LAYOUTS.horizontal(q, w, h, measure)
     local tail
     local last = cs[#cs] or body
     local a = kw and body:find(kw, #body - #last + 1, true)
-    if a and a > 1 and #T.chars(body:sub(a)) <= 6 then
+    if a and a > 1 and #Text.chars(body:sub(a)) <= 6 then
         tail = body:sub(a)
     elseif #cs >= 2 then
         tail = last
@@ -180,7 +181,7 @@ function LAYOUTS.horizontal(q, w, h, measure)
     local ts, tlines = 0, {}
     if tail then
         ts, tlines = c.fit(tail, inner, math.min(w * 0.19, c.fill(tail, inner, true)), w * 0.06, h * 0.3, 1.15, true)
-        if #T.chars(tail) > 8 then
+        if #Text.chars(tail) > 8 then
             ts, tlines = c.fit(tail, inner, w * 0.15, w * 0.06, h * 0.3, 1.15, true)
             -- 两行时均分，别让第二行只剩一两个字
             if #tlines == 2 then
@@ -218,7 +219,7 @@ end
 function LAYOUTS.vertical(q, w, h, measure)
     local ops, m = {}, w * 0.1
     local kw = q.keyword
-    local kchars = T.chars(kw or "")
+    local kchars = Text.chars(kw or "")
     local n = #kchars
     local kscale = 1.35
     local col_h = h * 0.68
@@ -234,7 +235,7 @@ function LAYOUTS.vertical(q, w, h, measure)
         side = g * 0.82
     end
     local avail_w = w - m * 2 - side
-    local function count(u) return #T.chars(u) * (u == kw and kscale or 1) end
+    local function count(u) return #Text.chars(u) * (u == kw and kscale or 1) end
     local function colLen(col)
         local n_ = 0
         for _idx, r in ipairs(runs(col, kw)) do n_ = n_ + count(r[1]) end
@@ -269,7 +270,7 @@ function LAYOUTS.vertical(q, w, h, measure)
         local y = top + (i - 1) * stagger
         for _idx, r in ipairs(runs(col, kw)) do
             local s = r[2] and size * kscale or size
-            for _i, ch in ipairs(T.chars(r[1])) do
+            for _i, ch in ipairs(Text.chars(r[1])) do
                 textOp(ops, T.vertical(ch), x - (s - size) / 2, y, s, BLACK, true)
                 y = y + s * 1.04
             end
@@ -282,7 +283,7 @@ end
 function LAYOUTS.backdrop(q, w, h, measure)
     local ops, m = {}, w * 0.1
     local inner = w - m * 2
-    local kchars = T.chars(q.keyword)
+    local kchars = Text.chars(q.keyword)
     local n = #kchars
     local g = math.min(w * 1.04 / n, w * 0.6, h * 0.38)
     giantRow(ops, q.keyword, (w - n * g) / 2, h - g * 0.9, g, PALE)
@@ -344,7 +345,7 @@ function LAYOUTS.scatter(q, w, h, measure)
     local used = {}
     local placed = {}
     for _idx, word in ipairs(q.words) do
-        local n = #T.chars(word)
+        local n = #Text.chars(word)
         local gmax = math.min(w * 0.3, (w - pad * 2) / n)
         local done = false
         local g = gmax
@@ -405,7 +406,7 @@ function LAYOUTS.collage(q, w, h, measure)
     -- 右栏：两条细竖线夹竖排书名，下方小字
     rectOp(ops, rx - inner * 0.025, top, 1, bottom - top, BLACK)
     local title = q.title ~= "" and q.title or "月读"
-    local tchars = T.chars(title)
+    local tchars = Text.chars(title)
     local ts = math.min(w * 0.075, right_w * 0.42, (bottom - top - small * 8) / math.max(1, #tchars))
     local ty = top
     for _idx, ch in ipairs(tchars) do
@@ -437,7 +438,7 @@ function LAYOUTS.collage(q, w, h, measure)
     rectOp(ops, rx - inner * 0.025, mid_top, 1, math.max(y - mid_top, small * 9), BLACK)
     local info = { _("摘自") .. " " .. (q.title ~= "" and "《" .. q.title .. "》" or "—") }
     if q.author ~= "" then info[#info + 1] = q.author end
-    info[#info + 1] = string.format("%d %s", #T.chars(q.body), _("字"))
+    info[#info + 1] = string.format("%d %s", #Text.chars(q.body), _("字"))
     info[#info + 1] = d
     local iy = mid_top
     for _idx, line in ipairs(info) do
@@ -527,7 +528,7 @@ end
 function M.cachedKeyword(text)
     local kw = keywordStore():readSetting(T.strip(text))
     -- 旧版 validKeyword 按字节剥标点，会把「云」这类字削成半个字符并缓存下来，读到就当没有
-    return kw ~= "" and require("utils.text").isValidUtf8(kw) and kw or nil
+    return kw ~= "" and Text.isValidUtf8(kw) and kw or nil
 end
 
 --- AI 回答是否可用：原句里连续出现的 1–6 个字。
@@ -536,11 +537,11 @@ end
 ---@return string|nil
 function M.validKeyword(answer, body)
     local kept = {}
-    for _idx, ch in ipairs(T.chars(answer)) do
+    for _idx, ch in ipairs(Text.chars(answer)) do
         if not (T.isPunct(ch) or ch:match("^%s$")) then kept[#kept + 1] = ch end
     end
     local kw = table.concat(kept)
-    local n = #T.chars(kw)
+    local n = #Text.chars(kw)
     if n >= 1 and n <= 6 and body:find(kw, 1, true) then return kw end
     return nil
 end
@@ -578,7 +579,7 @@ function M.shortQuotes(max, items)
     if hit and hit.stamp == stamp then return hit.list end
     local list = {}
     for _idx, item in ipairs(items or require("book.highlights").collectAll()) do
-        local n = #T.chars(item.text or "")
+        local n = #Text.chars(item.text or "")
         if n >= 6 and n <= max then list[#list + 1] = { text = item.text, title = item.title, author = item.author } end
     end
     if stamp then pools[max] = { stamp = stamp, list = list } end
