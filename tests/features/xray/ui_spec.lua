@@ -77,8 +77,14 @@ package.preload["features.xray.fetch"] = function()
             looked_up = word
             return { cancel = function() looked_up = "cancelled" end }
         end,
-        scanBook = function(current, text)
-            return function() return { cancel = function() end } end
+        scanBook = function(current, path)
+            return function(report, done)
+                -- extract 成功后必须传临时文件路径，不能再把路径字符串当正文。
+                Assert.eq(type(path), "string")
+                Assert.is_true(path:find("%.txt") ~= nil or path:find("/") ~= nil)
+                done({ ok = true })
+                return { cancel = function() end }
+            end
         end,
     }
 end
@@ -168,6 +174,11 @@ local scan_done
 started.run(function() end, function(r) scan_done = r end)
 extract_cb(nil, "文档没有可提取的文字")
 Assert.is_false(scan_done.ok)
+
+scan_done = nil
+started.run(function() end, function(r) scan_done = r end)
+extract_cb("/tmp/reflow_extract_xray.txt")
+Assert.is_true(scan_done.ok, "extract 交出路径后应进入 scanBook")
 
 -- 上次没分析完：确认框报断点
 scan_progress = { done = 3, total = 10 }

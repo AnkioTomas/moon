@@ -1,7 +1,7 @@
 --[[--
 X-Ray 书级实体，以及全书分析的续扫游标。
 
-xray_scan 每本书至多一行：digest 是全书正文的指纹（字节数:段数），done 是已落库的段数；
+xray_scan 每本书至多一行：digest 是全书正文临时文件的指纹（字节数:段数），done 是已落库的段数；
 正文变了（换了排版版、书被更新）指纹对不上就从头分析。全书分析完成即删行。
 
 @module koplugin.book.features.xray.db
