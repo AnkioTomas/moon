@@ -6,6 +6,7 @@ Kavita 源设置：服务器地址、API Key、书库选择、测试连接。
 --]]
 
 local Text = require("utils.text")
+local Cache = require("moonsource_kavita.cache")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -18,16 +19,22 @@ local function config()
     return require("utils.settings").getSource(ID)
 end
 
---- 落盘并重建源实例，让新地址 / Key / 书库立即生效，设置页随之刷新。
----@param cfg table
-local function save(cfg)
-    require("utils.settings").saveSource(ID, cfg)
-    require("source.registry").reload()
-end
-
 ---@param text string
 local function toast(text)
     require("ui.themes.widgets.toast"):new{ text = text, timeout = 3 }:show()
+end
+
+--- 落盘并重建源实例，让新地址 / Key / 书库立即生效，设置页随之刷新。
+--- 保存后把配置镜像给 kamare（02 A5 第二处）；kamare 侧失败只提示，不阻断 moon 自己的保存。
+---@param cfg table
+local function save(cfg)
+    require("utils.settings").saveSource(ID, cfg)
+    local configured = (cfg.base_url or "") ~= "" and (cfg.api_key or "") ~= ""
+    if configured and Cache.probe().ok then
+        local server_key, code = Cache.registerServer(cfg.base_url, cfg.api_key)
+        if not server_key or code then toast(_("无法同步配置到 kamare")) end
+    end
+    require("source.registry").reload()
 end
 
 --- 未配置 / 断网当场提示；否则带忙碌提示调 fn(client, done)，fn 结束时必须调 done()。
@@ -248,18 +255,134 @@ local function testRow()
     end
 end
 
+--- 五态文案（02 A8）：镜像失败优先于「增强版」，其余按探测态。
+---@param probe table
+---@return string, boolean
+local function cacheStatus(probe)
+    if probe.state == "enhanced" then
+        if Cache.mirrorFailed() then return _("配置同步失败"), false end
+        if probe.version then return T(_("增强版 v%1（API 1）"), probe.version), true end
+        return _("增强版（API 1）"), true
+    elseif probe.state == "incompatible" then
+        return T(_("版本不兼容（API %1，需要 1）"), tostring(probe.api_version or "?")), false
+    elseif probe.state == "official" then
+        return _("官方版（无缓存接口）"), false
+    end
+    return _("未安装 / 未启用"), false
+end
+
+--- 插件安装目录（09）：kamare 已装用它当前所在目录（就地替换），否则用 moon 自己的。
+---@param plugin table|nil
+---@return string
+local function pluginsDir(plugin)
+    local path = Cache.probe().path
+    local installed = type(path) == "string" and path:match("^(.*)/[^/]+%.koplugin/")
+    if installed then return installed end
+    local own = plugin and plugin.path
+    if type(own) == "string" and own ~= "" then
+        own = own:gsub("/+$", "")
+        return own:match("^(.*)/[^/]+$") or own
+    end
+    local source = debug.getinfo(1, "S").source
+    if type(source) == "string" and source:sub(1, 1) == "@" then source = source:sub(2) end
+    local module_dir = source:match("^(.*)/[^/]+$")
+    local root = module_dir and module_dir:match("^(.*)/[^/]+$")
+    if root then return root:match("^(.*)/[^/]+$") or root end
+    return module_dir or "plugins"
+end
+
+--- 能力清单文案（按名字排序，便于和日志对照）；排序与拼接口径复用适配层，避免两处漂移。
+---@param probe table
+---@return string
+local function capabilityText(probe)
+    if probe.state ~= "enhanced" then return _("无") end
+    local names = Cache.capabilityNames(probe.capabilities, "、")
+    return names == "none" and _("无") or names
+end
+
+--- 缓存占用：未配置服务器 / 缺 summary 能力时整行不显示（02 A8）。
+---@return string|nil
+local function usageText()
+    if (config().base_url or "") == "" then return nil end
+    if not Cache.available("summary") then return nil end
+    local usage = Cache.summary()
+    if type(usage) ~= "table" then return nil end
+    return T(_("缓存占用：已用 %1，可用 %2，共 %3 章"),
+        Cache.sizeText(usage.used), Cache.sizeText(usage.available), tostring(usage.chapters or 0))
+end
+
+local showCacheDetail
+
+--- 只读详情 + 09 的手动安装说明；唯一动作是「重新检测」。
+---@param plugin table|nil
+function showCacheDetail(plugin)
+    local probe = Cache.probe()
+    local lines = {
+        T(_("加载路径：%1"), probe.path or _("未加载")),
+        T(_("API 版本：%1"), probe.api_version and tostring(probe.api_version) or _("无")),
+        T(_("kamare 版本：%1"), probe.version or _("未知")),
+        T(_("能力：%1"), capabilityText(probe)),
+    }
+    local usage = usageText()
+    if usage then lines[#lines + 1] = usage end
+
+    local dir = pluginsDir(plugin)
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = _("获取增强版")
+    lines[#lines + 1] = _("  仓库：github.com/backtracker/kamare.koplugin")
+    lines[#lines + 1] = _("  发布页：github.com/backtracker/kamare.koplugin/releases/latest")
+    lines[#lines + 1] = _("  1. 在电脑上下载 kamare.koplugin.zip")
+    lines[#lines + 1] = T(_("  2. 解压，把 kamare.koplugin/ 放进：%1"), dir)
+    lines[#lines + 1] = _("  3. 重启 KOReader")
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = _("  要求：压缩包里必须有 kamarecache.lua（有它才是增强版）；")
+    lines[#lines + 1] = _("        没有就是官方版，缓存功能不会出现。")
+    lines[#lines + 1] = _("  注意：增强版与官方版目录同名，不能共存；替换前先删掉旧的 kamare.koplugin/。")
+    lines[#lines + 1] = _("        服务器配置、阅读进度与缓存都在数据目录，替换插件目录不会删它们。")
+    -- 只读详情不写任何探针文件（02 A8 / 09 A3）：可写性交给用户按目录自行判断。
+    lines[#lines + 1] = T(_("  如该目录不可写，可改用：%1"),
+        require("datastorage"):getDataDir() .. "/plugins")
+
+    require("ui.themes.widgets.confirm"):new{
+        title = _("漫画缓存"),
+        text = table.concat(lines, "\n"),
+        ok_text = _("重新检测"),
+        cancel_text = _("关闭"),
+        ok_callback = function()
+            Cache.reprobe()
+            showCacheDetail(plugin)
+        end,
+    }:show()
+end
+
+---@param plugin table|nil
+---@return fun(iw: number): table
+local function cacheRow(plugin)
+    return function(iw)
+        local status, on = cacheStatus(Cache.probe())
+        return require("ui.themes.widgets.row").widget({
+            width = iw, chevron = true,
+            kind = "nav", icon = "download_done", title = _("漫画缓存"),
+            status = status, status_on = on,
+            callback = function() showCacheDetail(plugin) end,
+        })
+    end
+end
+
 ---@param value string|nil
 ---@return string
 local function normalizeUrl(value)
     return Text.rtrimSlashes(Text.stripWhitespace(value))
 end
 
+---@param plugin table|nil 月读插件实例（取 plugin.path 定位实际安装目录）
 ---@return table[]
-function Setting.rows()
+function Setting.rows(plugin)
     return {
         field("base_url", _("服务器地址"), "https://kavita.example.com", false, normalizeUrl, "dns"),
         field("api_key", _("API Key"), _("Kavita 用户设置 → API Key"), true, Text.stripWhitespace, "key"),
         libraryRow(),
+        cacheRow(plugin),
         heartbeatRow(),
         timeoutRow(),
         mergeRow(),

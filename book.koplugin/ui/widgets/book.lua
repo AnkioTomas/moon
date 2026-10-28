@@ -341,8 +341,9 @@ end
 ---@param name string Material 图标名
 ---@param ox number 叠层横向偏移，单位像素
 ---@param oy number 叠层纵向偏移，单位像素
+---@param ink any|nil 圆底颜色（缺省状态条墨色）
 ---@return table
-local function circleMark(name, ox, oy)
+local function circleMark(name, ox, oy, ink)
     local t = Theme.current()
     local size = Theme.px(18)
     local icon = Icon.widget{
@@ -367,7 +368,7 @@ local function circleMark(name, ox, oy)
     function mark:paintTo(bb, x, y)
         local r = math.floor(size / 2)
         local cx, cy = x + r, y + r
-        bb:paintCircle(cx, cy, r, statusInk())
+        bb:paintCircle(cx, cy, r, ink or statusInk())
         if self.icon then
             local iz = self.icon:getSize()
             self.icon:paintTo(
@@ -393,6 +394,15 @@ end
 function Book.downloadMark(ch)
     local size, inset = Theme.px(18), Theme.px(Theme.current().space.xs)
     return circleMark("check", inset, math.max(0, ch - size - inset))
+end
+
+--- 左下角「已缓存」：与下载勾同槽，圆底用 muted 色（它不是本机文件，只是能离线打开）。
+---@param ch number 封面高度，单位像素
+---@return table
+function Book.cachedMark(ch)
+    local t = Theme.current()
+    local size, inset = Theme.px(18), Theme.px(t.space.xs)
+    return circleMark("cached", inset, math.max(0, ch - size - inset), Blitbuffer.Color8(t.color.muted))
 end
 
 --- 右下角「更多」：实心圆 + more_horiz，贴边留缝。
@@ -453,6 +463,7 @@ end
 --- opts.badge: 未读且有进度时叠右上角百分比
 --- opts.ribbon: 已读时叠右上角「已读」绑带
 --- opts.download: 已本地下载时叠左下角勾（口径见 BookDB.downloadedClause）
+--- opts.cached: 属主源书架缓存命中时叠左下角「已缓存」（与下载同槽，缓存优先）
 --- opts.more: 叠右下角「更多」；true 只画，function 同时可点
 --- opts.show_parent: 窗口级父（Desktop / Detail）
 --- opts.on_ready: 图片就绪回调
@@ -531,13 +542,14 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         padding = cover_pad,
         image,
     }
-    -- 已读与进度互斥；下载状态由查询时带出（book.downloaded）。
+    -- 已读与进度互斥；下载 / 缓存状态由查询时带出（book.downloaded / book.cache_mark）。
     local read = Book.isRead(book)
     local show_read = opts.ribbon and read
     local show_pct = opts.badge and not read and pct > 0
-    local show_dl = opts.download and book.downloaded
+    local show_cached = opts.cached and book.cache_mark
+    local show_dl = opts.download and book.downloaded and not show_cached
     local show_more = opts.more
-    if show_read or show_pct or show_dl or show_more then
+    if show_read or show_pct or show_dl or show_cached or show_more then
         local overlays = {
             dimen = Geom:new{ w = cw, h = ch },
             show_parent = opts.show_parent,
@@ -548,7 +560,9 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         elseif show_pct then
             overlays[#overlays + 1] = Book.progressBadge(cw, pct)
         end
-        if show_dl then
+        if show_cached then
+            overlays[#overlays + 1] = Book.cachedMark(ch)
+        elseif show_dl then
             overlays[#overlays + 1] = Book.downloadMark(ch)
         end
         if show_more then

@@ -26,7 +26,7 @@ package.loaded["json"] = JSON
 Themed.install()
 local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
 -- 走 preload 不改 package.path：runner 只还原 preload/loaded，插件根上的 main.lua 会顶掉月读的 main。
-for _idx, name in ipairs({ "client", "position", "annotation", "source", "setting", "kamare", "stats" }) do
+for _idx, name in ipairs({ "client", "position", "annotation", "source", "setting", "cache", "volume_list", "stats" }) do
     package.preload["moonsource_kavita." .. name] = function()
         return dofile(PLUGIN .. "/moonsource_kavita/" .. name .. ".lua")
     end
@@ -100,8 +100,10 @@ local function query(opts, key) return opts.url:match("[?&]" .. key .. "=([^&]*)
 local books, tocs, stale, progress, remembered, touched, reconciled = {}, {}, {}, {}, {}, {}, nil
 local fixed = {}
 local dropped = {}
+-- 脏行（sync_status=0）：漫画走 kamare 时只写 upsertRemote，任何 upsert 都是回归。
+local dirty = {}
 local toc_fresh = true
-local shelf_ids, written = {}, {}
+local shelf_ids, written, written_opts = {}, {}, {}
 package.loaded["book.books_db"] = {
     get = function(_sid, id) return books[id] end,
     getToc = function(_sid, id) return stale[id] end,
@@ -109,9 +111,21 @@ package.loaded["book.books_db"] = {
 }
 package.loaded["book.progress_db"] = {
     get = function(_sid, id) return progress[id] end,
-    upsertRemote = function(_sid, id, pos)
+    upsertRemote = function(_sid, id, pos, opts)
+        written[id] = pos
+        written_opts[id] = opts
+        return true
+    end,
+    upsert = function(_sid, id, pos)
+        dirty[id] = true
         written[id] = pos
         return true
+    end,
+    unsynced = function()
+        local ids = {}
+        for id in pairs(dirty) do ids[#ids + 1] = id end
+        table.sort(ids)
+        return ids
     end,
     fixRemoteTime = function(_sid, id, at)
         fixed[id] = at
@@ -1303,61 +1317,265 @@ local detail = run("getDetailAsync", { source_id = "ext.kavita", stable_id = "20
 Assert.eq(detail.intro, "卷简介")
 Assert.eq(remembered["20:2002"].authors, "丁")
 
--- kamare：漫画在线看（从 Kavita 记录的下一页起），回调 handled 不开阅读器；
--- 关查看器记本地进度；章末续读下一卷；打不开时 cbz 退回下载。
-routes["GET /api/Series/metadata"] = metadata_route
-local viewers, stream_ok = {}, true
-package.loaded["kamareimageviewer"] = { new = function(_self, spec)
-    viewers[#viewers + 1] = spec
-    return spec
-end }
-package.loaded["kavitaclient"] = { streamChapter = function(_self, id) return stream_ok and { id } or nil end }
-routes["GET /api/Series/60"] = json({ id = 60, name = "漫画", libraryId = 3 })
-local volumes_route = routes["GET /api/Series/volumes"]
-routes["GET /api/Series/volumes"] = function(opts)
-    if query(opts, "seriesId") ~= "60" then return volumes_route(opts) end
-    return json({
-        { id = 600, chapters = { { id = 6000, titleName = "第1话", format = 1, pages = 30 } } },
-        { id = 601, chapters = { { id = 6001, titleName = "第2话", format = 1, pages = 20 } } },
-    })
-end
-routes["GET /api/Reader/get-progress"] = function(opts)
-    return json({ pageNum = query(opts, "chapterId") == "6001" and 4 or 0 })
-end
-local comic = { source_id = "ext.kavita", stable_id = "60", book = { stable_id = "60", title = "漫画" } }
-local cpath, cerr, cmeta
-source:openBookAsync(comic, nil, function(p, e, m) cpath, cerr, cmeta = p, e, m end)
-Stubs.flush()
-Themed.choose(Themed.last("list"), 2)
-Stubs.flush()
-Assert.is_nil(cpath)
-Assert.is_nil(cerr)
-Assert.is_true(cmeta.handled)
-Assert.eq(viewers[1].metadata.chapterId, 6001)
-Assert.eq(viewers[1].metadata.startPage, 5)
-Assert.eq(viewers[1].images_list_nb, 20)
-Assert.eq(viewers[1].title, "漫画")
-Assert.eq(require("kavitaclient").api_key, "k")
-viewers[1].on_close_callback(10, 20)
-Assert.eq(written["60:6001"].page, 10)
-Assert.eq(written["60:6001"].fraction, 0.5)
-viewers[1].on_next_chapter_callback(6000)
-Stubs.flush()
-Assert.eq(viewers[2].metadata.chapterId, 6000)
-Assert.eq(viewers[2].metadata.startPage, 1)
+-- 漫画打开路径：判定 / 起始页 / 离线全归 kamare cache（03 A1/A2/A6），moon 只做路由与兜底。
+-- 关查看器写卷行 + 容器聚合（06 A1/A2），章末续读按回调 id 回目录（03 A7）。
+do
+    routes["GET /api/Series/metadata"] = metadata_route
+    routes["GET /api/Series/60"] = json({ id = 60, name = "漫画", libraryId = 3 })
+    local volumes_route = routes["GET /api/Series/volumes"]
+    routes["GET /api/Series/volumes"] = function(opts)
+        if query(opts, "seriesId") ~= "60" then return volumes_route(opts) end
+        return json({
+            { id = 600, chapters = { { id = 6000, titleName = "第1话", format = 1, pages = 30 } } },
+            { id = 601, chapters = { { id = 6001, titleName = "第2话", format = 1, pages = 20 } } },
+        })
+    end
 
-stream_ok, download.body = false, "PK\3\4cbz"
-source:openBookAsync(comic, nil, function(p, e, m) cpath, cerr, cmeta = p, e, m end)
-Stubs.flush()
-Themed.choose(Themed.last("list"), 1)
-Stubs.flush()
-Assert.eq(cpath, WORK .. "/60:6000/6000.cbz", "kamare 打不开，cbz 退回下载")
-Assert.is_nil(cmeta)
-Assert.len(viewers, 2)
-stream_ok = true
-Assert.eq(run("openBookAsync", { source_id = "ext.kavita", stable_id = "60:6000" }, nil), cpath,
-    "下载过的直接开，不再走 kamare")
-Assert.len(viewers, 2)
+    -- 增强版：open 由 spec 控制返回；register_server 只用于镜像，不参与断言。
+    local Cache = require("moonsource_kavita.cache")
+    local opened, reply = {}, nil
+    package.loaded["kamarecache"] = {
+        api_version = 1,
+        capabilities = { open = true, server = true },
+        register_server = function() return "kav", nil end,
+        open = function(opts)
+            opened[#opened + 1] = opts
+            return reply(opts)
+        end,
+    }
+    Cache.reset()
+
+    local toc = {
+        { idx = 6000, uid = 6000, title = "第1话", chapterId = 6000, volumeId = 600, libraryId = 3,
+          seriesId = 60, format = "cbz", pages = 30, pagesRead = 0 },
+        { idx = 6001, uid = 6001, title = "第2话", chapterId = 6001, volumeId = 601, libraryId = 3,
+          seriesId = 60, format = "cbz", pages = 20, pagesRead = 0 },
+    }
+    tocs["60"] = toc
+    books["60"] = { stable_id = "60", title = "漫画", authors = "甲", intro = "简介", category = "漫画" }
+    local ref = { source_id = "ext.kavita", stable_id = "60:6001", book = books["60"] }
+
+    -- 阅读统计只由 core 落库：源这一路碰都不该碰。
+    local stats_read = false
+    package.loaded["book.stats_db"] = setmetatable({}, {
+        __index = function()
+            stats_read = true
+            return function() end
+        end,
+    })
+
+    --- 直接走一卷：同步回调不泵队列；返回实际发出的请求数。
+    ---@return table { path, err, meta, http }
+    local NO_TOC = {}
+    local function open(entry, toc_arg, ref_arg)
+        local got
+        local list = toc_arg == NO_TOC and nil or (toc_arg or toc)
+        local before = #calls
+        source:openEntry(ref_arg or ref, entry, list, "漫画", function(path, err, meta)
+            got = { path = path, err = err, meta = meta }
+        end)
+        got = got or {}
+        got.http = #calls - before
+        return got
+    end
+
+    -- 成功：同步回调 handled；零请求、不预取 get-progress、不传起始页。
+    reply = function() return { kind = "viewer" } end
+    local ok = open(toc[2])
+    Assert.is_nil(ok.path)
+    Assert.is_nil(ok.err)
+    Assert.is_true(ok.meta and ok.meta.handled, "可见查看器：同步回调 handled，没有异步间隙")
+    Assert.eq(ok.http, 0, "交 kamare 打开：moon 侧零请求（不预取 get-progress）")
+    Assert.len(opened, 1)
+    Assert.eq(opened[1].entry, toc[2])
+    Assert.eq(opened[1].title, "漫画")
+    Assert.eq(opened[1].base_url, "http://kav", "地址去尾斜杠")
+    Assert.eq(opened[1].api_key, "k", "Key 去空白")
+    Assert.is_nil(opened[1].start_page, "起始页全归 Cache.open，moon 不传")
+
+    -- on_close：卷行写物理页 / 物理总数 / 现在；容器行只写聚合 fraction + updated_at=0。
+    written, remembered = {}, {}
+    progress["60:6000"] = nil
+    opened[1].on_close(10, 20)
+    local volume = written["60:6001"]
+    Assert.eq(volume.page, 10, "卷行是唯一真实位置：物理页")
+    Assert.eq(volume.total_pages, 20, "物理总数来自 kamare 回调")
+    Assert.eq(volume.fraction, 0.5)
+    Assert.is_true((volume.updated_at or 0) > 0, "卷行用当前时间，进最近阅读")
+    local container = written["60"]
+    Assert.eq(container.fraction, 0.25, "聚合 = (0 个读完卷 + 本卷 0.5) / 2 卷")
+    Assert.eq(container.updated_at, 0, "容器行不进最近阅读")
+    Assert.eq(written_opts["60"] and written_opts["60"].reset_updated_at, true,
+        "容器行显式允许归零：旧版本的 series 时间戳要能被清掉")
+    Assert.is_nil(written_opts["60:6001"], "卷行不归零，继续进最近阅读")
+    Assert.is_nil(container.page, "容器行只写聚合 fraction")
+    Assert.is_nil(container.total_pages)
+    Assert.eq(remembered["60:6001"].title, "漫画 · 第2话", "卷行缺书时用目录卷名补元数据")
+    Assert.eq(remembered["60:6001"].authors, "甲", "卷行继承容器作者")
+    Assert.eq(#dirty, 0, "不产生 dirty 行（sync_status=0 才进推送队列）")
+    Assert.eq(#require("book.progress_db").unsynced("ext.kavita"), 0, "身份不在 unsynced 里")
+    Assert.is_false(stats_read, "不产生 reading_stats 行")
+
+    -- 读完当前卷也只按卷数聚合：全卷读完才 100%。
+    written = {}
+    progress["60:6000"] = { fraction = 1 }
+    opened[1].on_close(20, 20)
+    Assert.eq(written["60"].fraction, 1, "两卷都读完 = 100%")
+    progress["60:6000"] = nil
+
+    -- 目录拿不到：容器退「最靠后卷的 fraction」。
+    written, opened = {}, {}
+    reply = function() return {} end
+    local solo = open(toc[2], NO_TOC)
+    Assert.is_true(solo.meta and solo.meta.handled)
+    opened[1].on_close(10, 20)
+    Assert.eq(written["60"].fraction, 0.5, "toc 缺失时容器退本卷 fraction")
+
+    -- 已有卷行：不重写元数据。
+    books["60:6001"] = { stable_id = "60:6001", title = "已有" }
+    remembered, written = {}, {}
+    reply = function() return {} end
+    open(toc[2])
+    opened[#opened].on_close(10, 20)
+    Assert.is_nil(remembered["60:6001"], "已有卷行不重复补元数据")
+
+    -- on_next：只按回调 id 在 toc 找卷，再走同一条 Cache.open；找不到提示。
+    written, opened = {}, {}
+    reply = function() return {} end
+    open(toc[2])
+    local first = opened[1]
+    first.on_next(6000)
+    Assert.len(opened, 2, "按回调 id 打开下一卷")
+    Assert.eq(opened[2].entry.chapterId, 6000)
+    opened[2].on_close(30, 30)
+    Assert.eq(written["60:6000"].page, 30, "下一卷进度写下一卷行")
+    Assert.is_nil(written["60:6001"], "进度不串到上一卷")
+    local toasts = #Themed.all("toast")
+    first.on_next(9999)
+    Assert.len(opened, 2, "目录里没有的 id 不另开查看器")
+    Assert.eq(#Themed.all("toast"), toasts + 1)
+    Assert.eq(Themed.last("toast").text, "下一卷不在目录里")
+
+    -- 单卷漫画：从书架行（stable_id = seriesId）打开，卷身份仍是 seriesId:chapterId。
+    -- 关查看器写「卷行真实位置 + 无时间戳容器行」，卷行元数据补齐，最近阅读看得到（US 22 / 06 A2）。
+    local single_toc, single_two = { toc[1] }, tocs["60"]
+    tocs["60"] = single_toc
+    books["60:6000"] = nil
+    written, remembered, opened = {}, {}, {}
+    reply = function() return { kind = "viewer" } end
+    local single_path, single_err, single_meta
+    source:openBookAsync({ source_id = "ext.kavita", stable_id = "60", book = books["60"] }, nil,
+        function(p, e, m) single_path, single_err, single_meta = p, e, m end)
+    Stubs.flush()
+    Assert.is_nil(single_path)
+    Assert.is_nil(single_err)
+    Assert.is_true(single_meta and single_meta.handled, "单卷直接进查看器，不弹选卷")
+    Assert.eq(opened[1].entry.chapterId, 6000)
+    opened[1].on_close(5, 30)
+    Assert.eq(written["60:6000"].page, 5, "单卷也把真实位置写进卷行")
+    Assert.is_true((written["60:6000"].updated_at or 0) > 0, "卷行带时间戳，最近阅读能看到")
+    Assert.eq(written["60"].updated_at, 0, "容器行不带时间戳，不与卷行重复")
+    Assert.eq(written["60"].fraction, 5 / 30, "容器行聚合百分比，书架有量级")
+    Assert.not_nil(remembered["60:6000"], "卷行元数据补齐：ProgressDB.recent 的 EXISTS books 过得去")
+    Assert.eq(remembered["60:6000"].title, "漫画 · 第1话")
+    tocs["60"] = single_two
+
+    -- offline_not_cached + 无旧 cbz：提示，不落到下载。
+    books["60:6001"] = nil
+    reply = function() return nil, "offline_not_cached", "这一卷还没缓存，联网后可下载" end
+    local offline = open(toc[2])
+    Assert.is_nil(offline.path)
+    Assert.eq(offline.err, "这一卷还没缓存，联网后可下载")
+    Assert.eq(offline.http, 0, "未缓存离线：零请求")
+
+    -- 旧 cbz：kamare 缓存优先；offline_not_cached 时回退到本地文件。
+    os.execute("mkdir -p '" .. WORK .. "/60:6001'")
+    local old_cbz = WORK .. "/60:6001/6001.cbz"
+    local old_file = assert(io.open(old_cbz, "wb"))
+    old_file:write("PK\3\4cbz")
+    old_file:close()
+    books["60:6001"] = { stable_id = "60:6001", path = old_cbz }
+    local comic = { source_id = "ext.kavita", stable_id = "60", book = books["60"] }
+
+    opened = {}
+    reply = function() return {} end
+    local before_book = #calls
+    local cpath, cerr, cmeta
+    source:openBookAsync(comic, nil, function(p, e, m) cpath, cerr, cmeta = p, e, m end)
+    Stubs.flush()
+    Themed.choose(Themed.last("list"), 2)
+    Stubs.flush()
+    Assert.is_nil(cpath)
+    Assert.is_nil(cerr)
+    Assert.is_true(cmeta and cmeta.handled, "kamare 缓存优先于旧 cbz")
+    Assert.eq(opened[1].entry.chapterId, 6001)
+    Assert.eq(#calls, before_book, "目录命中缓存 + kamare 打开：开书全程零 HTTP")
+    Assert.not_nil(io.open(old_cbz), "旧 cbz 静默保留，不删用户数据")
+
+    reply = function() return nil, "offline_not_cached", "这一卷还没缓存，联网后可下载" end
+    local offline_path, offline_err = run("openBookAsync",
+        { source_id = "ext.kavita", stable_id = "60:6001", book = books["60"] }, nil)
+    Assert.eq(offline_path, old_cbz, "未缓存离线：先用盘上的旧 cbz")
+    Assert.is_nil(offline_err)
+
+    -- viewer_running：绝不回退（旧 cbz 在盘上也不开，不下载）。
+    reply = function() return nil, "viewer_running", "漫画阅读器已在运行" end
+    local running = open(toc[2])
+    Assert.is_nil(running.path)
+    Assert.eq(running.err, "漫画阅读器已在运行")
+    Assert.eq(running.http, 0, "查看器已在运行：不下载、不请求")
+
+    -- 未知失败 / 流式失败：在线 cbz 回退下载；image 报错。
+    os.remove(old_cbz)
+    books["60:6001"] = nil
+    download.body, download.code = "PK\3\4cbz", 200
+    reply = function() return nil, "open_failed", "打开漫画阅读器失败" end
+    local fallback
+    source:openEntry(ref, toc[2], toc, "漫画", function(p, e, m) fallback = { path = p, err = e, meta = m } end)
+    Stubs.flush()
+    Assert.eq(fallback.path, old_cbz, "kamare 失败：cbz 退回下载")
+    Assert.is_nil(fallback.err)
+
+    local image = { chapterId = 6001, volumeId = 601, libraryId = 3, seriesId = 60, format = "image", pages = 20 }
+    local img_before = #calls
+    local img = open(image)
+    Assert.is_nil(img.path)
+    Assert.not_nil(img.err, "image 下载不了：报错")
+    Assert.eq(#calls, img_before, "image 失败不回退下载")
+
+    reply = function() return nil, "no_pages", "这一卷没有可显示的页面" end
+    local empty = open(toc[2])
+    Assert.is_nil(empty.path)
+    Assert.eq(empty.err, "这一卷没有可显示的页面")
+    Assert.eq(empty.http, 0)
+
+    reply = function() return nil, "settings_write_failed", "无法写入 kamare 配置" end
+    local bad_settings = open(toc[2])
+    Assert.is_nil(bad_settings.path)
+    Assert.eq(bad_settings.err, "无法写入 kamare 配置")
+    Assert.eq(bad_settings.http, 0)
+
+    -- 没有增强版（未装 / 官方版）：旧回退照旧，图片目录仍是「需要安装 kamare」。
+    package.loaded["kamarecache"] = nil
+    package.loaded["kamareimageviewer"] = nil
+    Cache.reset()
+    local degraded, degraded_before = nil, #calls
+    source:openEntry(ref, image, toc, "漫画", function(path, err) degraded = { path = path, err = err } end)
+    Stubs.flush()
+    Assert.is_nil(degraded.path)
+    Assert.eq(degraded.err, "图片目录格式需要安装 kamare 插件在线阅读")
+    Assert.eq(#calls, degraded_before, "没有缓存接口时图片目录不下载")
+
+    -- 恢复增强版桩：后续段只用到 HTTP / 进度，不依赖缓存路径，但别把状态留给别的用例。
+    package.loaded["kamarecache"] = {
+        api_version = 1,
+        capabilities = { open = true, server = true },
+        register_server = function() return "kav", nil end,
+        open = function() return {} end,
+    }
+    Cache.reset()
+    package.loaded["book.stats_db"] = nil
+end
 
 -- 漫画 cbz 用内置阅读器时进度同样上报：页级 0-based，读完发 pages（Kavita 据此标已读）。
 sent = nil
@@ -1390,14 +1608,14 @@ local read_route = json({
       lastChapterAdded = "2026-02-03T11:05:06.1", lastChapterAddedUtc = "2026-02-03T03:05:06.1",
       latestReadDate = "2026-02-03T04:05:06.123" },
 })
--- 多卷 series：卷行上已经有进度 → 不再往容器行回填（否则最近阅读会多一条没阅读位置的重复条目），
--- 早先回填过的容器占位行也要清掉。
+-- 多卷 series：卷行上已经有进度 → 容器行改写服务端 series 级 fraction（updated_at=0，
+-- 只做书架 / 详情聚合），不 drop（06 A1）。容器行不进最近阅读，重复条目由 updated_at 门槛解决。
 tocs["710"] = { { chapterId = 7101, title = "上" }, { chapterId = 7102, title = "下" } }
 progress["710:7101"] = { fraction = 0.3, updated_at = os.time() - 3600 }
 progress["710"] = { fraction = 0.5, updated_at = os.time() - 3600 }
 books["710"] = { title = "多卷书", authors = "甲", intro = "简介", category = "书籍" }
 routes["POST /api/Series/all-v2"] = read_route
-written = {}
+written, dropped = {}, {}
 local vol_result = run("syncBooksAsync", { force = true })
 Assert.eq(written["700"].fraction, 0.25)
 Assert.is_nil(written["700"].page, "epub 不写页码：Kavita 的页是 spine")
@@ -1405,12 +1623,17 @@ Assert.is_nil(written["700"].page, "epub 不写页码：Kavita 的页是 spine")
 -- 按 UTC 解析会存成 1770091506（8 小时后的未来），刚读完的书就会被它压在下面。
 Assert.eq(written["700"].updated_at, 1770062706, "latestReadDate 按服务器时区换成真 epoch")
 Assert.eq(written["701"].fraction, 1, "读完的写满比例，进步进「已读」")
-Assert.is_nil(written["710"], "按卷读的书不再往容器行回填，避免重复条目")
+Assert.eq(written["710"].fraction, 0.3, "容器行改写服务端 series 级 pagesRead/pages")
+Assert.eq(written["710"].updated_at, 0, "容器行不进最近阅读")
+Assert.eq(written_opts["710"] and written_opts["710"].reset_updated_at, true,
+    "回填聚合也要能清掉旧版本留下的 series 时间戳")
+Assert.is_nil(written["710"].page, "容器行只写聚合 fraction")
+Assert.eq(#dropped, 0, "不再删容器行")
 Assert.eq(remembered["710:7101"].authors, "甲", "读过的卷行继承容器作者，不再显示未知作者")
 Assert.eq(remembered["710:7101"].title, "多卷书 · 上")
 Assert.eq(remembered["710:7101"].category, "书籍")
 -- 对齐必须算进同步变更：pulled 全 0 时桌面不发 shelf_changed，首页「当前阅读」不重画，
--- 卡片会一直停在未知作者（对账 3 本 + 回填 700/701 各 1 + 卷行对齐 1 + 清容器占位 1）。
+-- 卡片会一直停在未知作者（对账 3 本 + 回填 700/701 各 1 + 卷行对齐 1 + 容器聚合 1）。
 Assert.eq(vol_result.pulled, 7, "卷行元数据对齐算一次变更，首页才会重画")
 -- 卷行按真实书库落库后（rememberMany 会写库），重复同步不再是变更，否则每次同步都白刷首页。
 books["710:7101"] = remembered["710:7101"]
@@ -1418,7 +1641,7 @@ local vol_again = run("syncBooksAsync", { force = true })
 Assert.eq(vol_result.pulled - vol_again.pulled, 1, "已对齐的卷行不再重复计入变更")
 dropped = {}
 run("syncBooksAsync", { force = true })
-Assert.eq(dropped[1], "710", "容器行残留的占位进度被清掉")
+Assert.eq(#dropped, 0, "容器行保留（离线读过的量级回连后不被抹回未读）")
 written = {}
 progress["700"] = { fraction = 0.4 }
 run("syncBooksAsync", { force = true })
