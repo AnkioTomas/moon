@@ -33,6 +33,7 @@ local registry = {
             capabilities = function() return { shelf_cache = shelf_caps } end,
             shelfCache = function()
                 shelf_calls = shelf_calls + 1
+                if shelf_projection == "boom" then error("shelf cache boom") end
                 return shelf_projection
             end,
         }
@@ -384,6 +385,10 @@ do
     Catalog.listBooks("ext.kavita", { offline_only = true, limit = 10, chapter_sources = {} })
     Assert.is_true(calls[1].sql:find("COALESCE(b.path, '')<>''", 1, true) ~= nil, "空投影仍限制到已下载")
     Assert.is_true(calls[1].sql:find("instr(b.stable_id, ':') > 0", 1, true) ~= nil, "空投影仍放行卷行")
+
+    -- 源的 shelfCache 抛错不吞：冒到入口弹错误页，而不是把「出错」当「没缓存」把整个书架限制到已下载。
+    shelf_caps, shelf_projection = true, "boom"
+    Assert.errors(function() Catalog.shelfCaches({ "ext.kavita" }) end, "shelf cache boom")
 
     DbBase.close()
     clearMods()

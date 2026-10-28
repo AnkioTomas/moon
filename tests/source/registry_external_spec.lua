@@ -130,16 +130,28 @@ do
     Assert.is_nil(Registry.external("ext.old"))
 end
 
--- 第三方 new() 抛错：create 返回错误，不向上抛。
+-- 第三方 new() 抛错是插件边界：经 ui/guard 报告（错误页让用户看到原因），create 返回错误，不向上抛。
 do
+    local reported = {}
+    package.loaded["ui.guard"] = {
+        call = function(label, fn, ...)
+            local ok, a, b = pcall(fn, ...)
+            if ok then return a, b end
+            reported[#reported + 1] = label .. ": " .. tostring(a)
+        end,
+    }
     local desc = Registry.external("ext.demo")
     local orig = desc.new
-    desc.new = function() error("boom") end
+    desc.new = function() error("boom", 0) end
     local src, err = Registry.create("ext.demo")
     Assert.is_nil(src)
     Assert.eq(type(err), "string")
+    Assert.len(reported, 1)
+    Assert.eq(reported[1], "source ext.demo.new: boom")
     desc.new = orig
     Assert.is_true(Registry.create("ext.demo").created)
+    Assert.len(reported, 1, "正常构造不报告")
+    package.loaded["ui.guard"] = nil
 end
 
 -- 已勾选过启用源（集合里没有后装的第三方源）：后装的源默认启用，显式 false 才禁用。

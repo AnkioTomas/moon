@@ -45,6 +45,7 @@ package.preload["source.registry"] = function()
                 { id = "wechat", name = "微信读书" },
             }
         end,
+        resolve = function() return nil end,
     }
 end
 package.preload["book.books_db"] = function()

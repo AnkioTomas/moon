@@ -28,7 +28,7 @@ package.preload["utils.settings"] = function()
     return { get = function() return { library_mixed = false } end }
 end
 package.preload["source.registry"] = function()
-    return { list = function() return {} end, listEnabled = function() return {} end }
+    return { list = function() return {} end, listEnabled = function() return {} end, resolve = function() return nil end }
 end
 local mods = { "utils.db", "utils.event", "book.books_db", "book.chapters_db", "book.progress_db", "book.catalog" }
 for _idx, name in ipairs(mods) do package.loaded[name] = nil end
