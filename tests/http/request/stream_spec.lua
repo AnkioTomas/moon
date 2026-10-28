@@ -68,6 +68,7 @@ do
         second = { code = 200, length = "2" },
         empty = { code = 302, length = "0" },
         missing = { code = 404, length = "3" },
+        unsatisfiable = { code = 416, length = "3" },
     }
     local first_hop = "first"
     package.preload["turbo.httputil"] = function()
@@ -192,6 +193,28 @@ do
     Assert.eq(dl_err, "HTTP 404")
     Assert.is_nil(io.open(dest, "rb"), "错误页不落盘")
     Assert.is_nil(io.open(dest .. ".part", "rb"))
+
+    -- 续传撞 416（.part 已不短于远端文件）：这份 .part 续不动，删掉，下一次全量下载成功。
+    first_hop = "unsatisfiable"
+    local resume_dest = require("support.config").dir() .. "/stream-416.bin"
+    os.remove(resume_dest)
+    local stale = assert(io.open(resume_dest .. ".part", "wb"))
+    stale:write("stale-part-bytes")
+    stale:close()
+    local r_ok, r_err
+    Request.download({ url = "https://example.test/big.bin", resume = true }, resume_dest,
+        function(ok, err) r_ok, r_err = ok, err end)
+    Assert.is_false(r_ok)
+    Assert.eq(r_err, "HTTP 416")
+    Assert.is_nil(io.open(resume_dest .. ".part", "rb"), "416 后 .part 必须删掉")
+    first_hop = "second"
+    Request.download({ url = "https://example.test/big.bin", resume = true }, resume_dest,
+        function(ok, err) r_ok, r_err = ok, err end)
+    Assert.is_true(r_ok, r_err)
+    local got = assert(io.open(resume_dest, "rb"))
+    Assert.eq(got:read("*a"), "xx")
+    got:close()
+    os.remove(resume_dest)
 
     -- on_headers 抛错同 on_data：经 guard 报告，丢弃 body，on_done 报错收口（否则跳过 release，泵不拆）。
     local guard = package.loaded["ui.guard"]

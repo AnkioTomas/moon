@@ -297,6 +297,12 @@ function Request.download(opts, dest, cb)
             response.headers = headers
             local header_view = { headers = headers }
             local length = tonumber((Request.header(header_view, "Content-Length")))
+            if resume_from > 0 and tonumber(code) == 416 then
+                -- .part 已不短于远端文件（上次写完没落位 / 远端变短）：这份续不动，删掉下次全量。
+                os.remove(tmp)
+                abort("HTTP 416")
+                return
+            end
             local append = false
             if resume_from > 0 and tonumber(code) == 206 then
                 local range = Request.header(header_view, "Content-Range")
