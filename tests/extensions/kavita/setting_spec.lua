@@ -44,10 +44,20 @@ end
 package.preload["ui/network/manager"] = function()
     return { isConnected = function() return true end }
 end
--- 同步删除的忙碌窗会先强制重绘再动手；这里只数次数。
+-- 同步删除的忙碌窗会先强制重绘再动手；占用统计在下一拍算（03 E），测试里手动 flush。
 local repaints = 0
+local pending_ticks = {}
+local function flush()
+    while #pending_ticks > 0 do
+        local tick = table.remove(pending_ticks, 1)
+        tick()
+    end
+end
 package.preload["ui/uimanager"] = function()
-    return { forceRePaint = function() repaints = repaints + 1 end }
+    return {
+        forceRePaint = function() repaints = repaints + 1 end,
+        nextTick = function(_, fn) pending_ticks[#pending_ticks + 1] = fn end,
+    }
 end
 package.preload["moonsource_kavita.source"] = function()
     return { DEFAULT_HEARTBEAT_INTERVAL = 30 }
@@ -179,8 +189,11 @@ local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
 package.preload["moonsource_kavita.setting"] = function()
     return dofile(PLUGIN .. "/moonsource_kavita/setting.lua")
 end
+package.preload["moonsource_kavita.busy"] = function()
+    return dofile(PLUGIN .. "/moonsource_kavita/busy.lua")
+end
 
-local overlays, shelf_events = {}, {}
+local overlays, shelf_events, overlay_updates = {}, {}, 0
 local fake_desktop = {
     settings_overlay = nil,
     onEvent = function(_, event) shelf_events[#shelf_events + 1] = event end,
@@ -189,7 +202,9 @@ package.preload["desktop.pages.setting.overlay"] = function()
     return {
         push = function(desktop, spec)
             overlays[#overlays + 1] = spec
-            desktop.settings_overlay = { updateView = function() end }
+            desktop.settings_overlay = {
+                updateView = function() overlay_updates = overlay_updates + 1 end,
+            }
         end,
     }
 end
@@ -325,15 +340,30 @@ local function statusOf(rows_list, title)
     end
 end
 
+--- 最近一次详情页的最终 sections：先取一拍（触发占用统计），flush 后再取一次。
+---@return BookThemeSection[]
+local function currentSections()
+    overlays[#overlays].sections()
+    flush()
+    return overlays[#overlays].sections()
+end
+
 rowAt("漫画缓存").callback()
 local page = overlays[#overlays]
 Assert.not_nil(page, "详情走叠层，不再用 ConfirmBox")
 Assert.eq(page.title, "漫画缓存")
 summary_calls, summary_all_calls, chapters_calls = 0, 0, 0
-local sections = page.sections()
-Assert.eq(summary_calls, 1, "占用只在详情页算一次")
-Assert.eq(summary_all_calls, 0, "配了服务器用 summary，不取合计")
+overlay_updates = 0
+local pending_sections = page.sections()
+Assert.eq(summary_calls + summary_all_calls, 0, "先画「正在统计…」，不在这一拍走盘")
+Assert.eq(statusOf(sectionRows(pending_sections, "状态"), "缓存占用").subtitle, "正在统计…")
 Assert.eq(chapters_calls, 1, "清理计划一次 chapters() 取全")
+flush()
+Assert.eq(summary_calls, 1, "下一拍算本服务器占用")
+Assert.eq(summary_all_calls, 1, "「清理全部」的合计也算出来")
+Assert.eq(overlay_updates, 1, "算完刷新叠层")
+local sections = page.sections()
+Assert.eq(chapters_calls, 2, "重画不重算占用，只重取计划")
 local status_rows = sectionRows(sections, "状态")
 Assert.eq(statusOf(status_rows, "版本").status, "0.10.0-dev")
 Assert.eq(statusOf(status_rows, "增强版功能").subtitle,
@@ -348,7 +378,7 @@ Assert.matches(cleanup_rows[1].subtitle, "1 章")
 Assert.eq(cleanup_rows[2].title, "清理本服务器")
 Assert.matches(cleanup_rows[2].subtitle, "2 章")
 Assert.eq(cleanup_rows[3].title, "清理全部")
-Assert.matches(cleanup_rows[3].subtitle, "含未关联服务器")
+Assert.matches(cleanup_rows[3].subtitle, "含未关联服务器 · 15 章", "全部清理用合计，不用本服务器")
 Assert.is_nil(findSection(sections, "获取增强版"), "增强态不显示安装说明")
 
 -- 重新检测：原地重建叠层。
@@ -387,24 +417,27 @@ available = { summary = true }
 local saved_chapters = chapters_result
 chapters_result = {}
 summary_result = { used = 0, available = 9 * MB, chapters = 0 }
+summary_all_result = { used = 0, available = 9 * MB, chapters = 0 }
 rowAt("漫画缓存").callback()
-local empty_rows = sectionRows(overlays[#overlays].sections(), "清理")
+local empty_rows = sectionRows(currentSections(), "清理")
 for idx = 1, 3 do
     Assert.is_false(empty_rows[idx].enabled, "空缓存置灰：" .. empty_rows[idx].title)
     Assert.is_false(empty_rows[idx].chevron, "空缓存不显示箭头：" .. empty_rows[idx].title)
+    Assert.eq(empty_rows[idx].subtitle, "没有可清理的缓存", "空缓存文案：" .. empty_rows[idx].title)
 end
-Assert.eq(empty_rows[1].subtitle, "没有可清理的缓存")
-Assert.eq(empty_rows[2].subtitle, "没有可清理的缓存")
 chapters_result = saved_chapters
 summary_result = { used = 3 * MB, available = 9 * MB, chapters = 12 }
+summary_all_result = { used = 4 * MB, available = 9 * MB, chapters = 15 }
 
--- 旧接口：不出清理项，只写升级说明。
+-- 旧接口：不出清理项，只写升级说明；设置行也不承诺清理。
 probe_result = {
     ok = true, state = "enhanced", api_version = 1, version = "0.9.22",
     capabilities = { status = true, summary = true }, path = cache_path,
 }
+Assert.eq(rowAt("漫画缓存").subtitle, "状态与获取增强版", "旧接口不承诺清理")
+Assert.eq(rowAt("漫画缓存").status, "增强版 v0.9.22（旧接口）")
 rowAt("漫画缓存").callback()
-local old_rows = sectionRows(overlays[#overlays].sections(), "清理")
+local old_rows = sectionRows(currentSections(), "清理")
 Assert.eq(#old_rows, 1, "旧接口只有一段说明")
 Assert.eq(old_rows[1].title, "当前 kamare 没有清理接口")
 Assert.matches(old_rows[1].subtitle, "chapters / delete_all", "说明要升级到什么")
@@ -425,7 +458,7 @@ probe_result = {
 available = { summary = true }
 rowAt("漫画缓存").callback()
 summary_all_calls, summary_calls = 0, 0
-local unconfigured = overlays[#overlays].sections()
+local unconfigured = currentSections()
 Assert.eq(sectionRows(unconfigured, "清理")[1].title, "未配置服务器")
 Assert.eq(summary_all_calls, 1, "没有服务器时占用取合计")
 Assert.eq(summary_calls, 0, "没有服务器时不查单服务器")
@@ -433,6 +466,7 @@ Assert.matches(statusOf(sectionRows(unconfigured, "状态"), "缓存占用").sub
 sectionRows(unconfigured, "清理")[2].callback()
 local all_confirm = Themed.last("confirm")
 Assert.matches(all_confirm.text, "含未关联服务器")
+Assert.matches(all_confirm.text, "共 15 章", "确认框用所有服务器的合计，不用本服务器")
 all_confirm.ok_callback()
 Assert.eq(Themed.last("progress_dialog").title, "清理全部缓存", "全部清理同样有忙碌窗")
 Assert.eq(delete_all_calls, 1, "清理全部走 deleteAll")
@@ -442,7 +476,7 @@ probe_result = { ok = false, state = "missing" }
 available = {}
 cfg.base_url = ""
 rowAt("漫画缓存").callback()
-local missing = overlays[#overlays].sections()
+local missing = currentSections()
 local install = findSection(missing, "获取增强版")
 Assert.not_nil(install, "非增强态显示安装说明")
 local install_text = install.rows[1](600).text or ""
@@ -455,7 +489,7 @@ Assert.is_nil(findSection(missing, "清理"), "未安装不显示清理")
 -- 版本不兼容：安装说明前先讲清 API 不兼容（03 原型）。
 probe_result = { ok = false, state = "incompatible", api_version = 2 }
 rowAt("漫画缓存").callback()
-local incompatible = sectionRows(overlays[#overlays].sections(), "获取增强版")
+local incompatible = sectionRows(currentSections(), "版本与获取")
 Assert.eq(incompatible[1].title, "版本不兼容")
 Assert.matches(incompatible[1].subtitle, "API v2")
 Assert.not_nil(incompatible[2].text, "后面仍是安装说明")
@@ -469,7 +503,7 @@ probe_result = {
 mirror_failed = true
 available = { summary = true }
 rowAt("漫画缓存").callback()
-local mirrored = overlays[#overlays].sections()
+local mirrored = currentSections()
 local mirror_row = statusOf(sectionRows(mirrored, "状态"), "配置同步失败")
 Assert.not_nil(mirror_row, "镜像失败在状态区")
 Assert.eq(mirror_row.status, "重试同步")

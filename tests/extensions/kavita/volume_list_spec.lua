@@ -139,6 +139,9 @@ end
 package.preload["moonsource_kavita.volume_list"] = function()
     return dofile(PLUGIN .. "/moonsource_kavita/volume_list.lua")
 end
+package.preload["moonsource_kavita.busy"] = function()
+    return dofile(PLUGIN .. "/moonsource_kavita/busy.lua")
+end
 
 local VolumeList = require("moonsource_kavita.volume_list")
 

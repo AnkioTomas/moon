@@ -194,11 +194,12 @@ local function heartbeatRow()
     end
 end
 
---- 增强版是否带清理接口（03 A）：只有 chapters + delete 才能按章删除。
+--- 探测结果是否带清理接口（03 A）：只有能用且具备 chapters + delete 才能按章删除。
 --- 缺任一项就是「旧接口」，设置行与详情页都据此降级。
 ---@param probe table
 ---@return boolean
 local function cleanupReady(probe)
+    if not probe.ok then return false end
     local caps = probe.capabilities or {}
     return caps.chapters == true and caps.delete == true
 end
@@ -312,11 +313,33 @@ local function pluginsDir(plugin)
     return module_dir or "plugins"
 end
 
---- 只读占用：summary / summaryAll；能力缺失或读失败返回 nil。
-local function usageFor(configured)
+--- 只读占用：当前服务器。
+---@return table|nil
+local function serverUsage()
     if not Cache.available("summary") then return nil end
-    local usage = configured and Cache.summary() or Cache.summaryAll()
+    local usage = Cache.summary()
     return type(usage) == "table" and usage or nil
+end
+
+--- 只读占用：所有服务器（含未关联）。
+---@return table|nil
+local function allUsage()
+    if not Cache.available("summary") then return nil end
+    local usage = Cache.summaryAll()
+    return type(usage) == "table" and usage or nil
+end
+
+--- 详情页打开时的一次统计（03 E）：配置了服务器时「本服务器」与「合计」各一次；
+--- 没配置时两者都是合计，只走盘一次。`need_all` 由「清理全部」是否出现决定。
+---@param need_all boolean
+---@return table|nil usage, table|nil all_usage
+local function loadUsage(need_all)
+    local configured = (config().base_url or "") ~= ""
+    if not configured then
+        local all = allUsage()
+        return all, all
+    end
+    return serverUsage(), need_all and allUsage() or nil
 end
 
 --- 多行说明段（安装说明）：设置行的 rows 是构建函数，这里返回一个带内边距的文本块。
@@ -377,24 +400,11 @@ local function leftoverCount(entries, ids)
     return left
 end
 
---- 同步删除期间的忙碌窗（05 A）：kamare 直接写盘，主线程会停住；
---- 先画出来再动手，否则用户看不到任何反馈（与维护页导入统计同一套做法）。
 ---@param title string
 ---@param fn fun(): boolean|nil, string|nil, string|nil, any
 ---@return boolean|nil, string|nil, string|nil, any
 local function runBusy(title, fn)
-    local UIManager = require("ui/uimanager")
-    local busy = require("ui.themes.widgets.progress_dialog"):new{
-        title = title,
-        text = _("正在清理…"),
-        dismissable = false,
-    }
-    local result, code, message, detail = busy:showWhile(function()
-        if UIManager.forceRePaint then UIManager:forceRePaint() end
-        return fn()
-    end)
-    busy:close()
-    return result, code, message, detail
+    return require("moonsource_kavita.busy").run(title, fn)
 end
 
 local function runCleanup(plugin, filter, title)
@@ -441,7 +451,7 @@ local function runCleanup(plugin, filter, title)
 end
 
 local function runCleanupAll(plugin)
-    local usage = usageFor((config().base_url or "") ~= "")
+    local usage = allUsage()
     local chapters = usage and tonumber(usage.chapters) or 0
     local bytes = usage and tonumber(usage.used) or 0
     require("ui.themes.widgets.confirm"):new{
@@ -469,16 +479,25 @@ local function runCleanupAll(plugin)
     }:show()
 end
 
+--- 详情页状态：占用走盘，先画「正在统计…」，下一拍算完再整页刷新（03 E）。
+---@class KavitaCachePageState
+---@field pending boolean 占用还在统计
+---@field usage table|nil 当前服务器（未配置时是所有服务器合计）
+---@field all table|nil 所有服务器合计（「清理全部」用；拿不到就是 nil）
+
 --- 详情页：状态 → 清理 → 维护（+ 非增强态的安装说明）。
 ---@param plugin table|nil
+---@param state KavitaCachePageState|nil
 ---@return BookThemeSection[]
-local function cacheSections(plugin)
+local function cacheSections(plugin, state)
+    state = state or { pending = false }
     local probe = Cache.probe()
     local caps = probe.capabilities or {}
     local configured = (config().base_url or "") ~= ""
-    local can_plan = probe.ok and cleanupReady(probe)
+    local can_plan = cleanupReady(probe)
     local can_all = probe.ok and caps.delete_all == true
-    local usage = usageFor(configured)
+    local usage = state.usage
+    local all_usage = state.all
     local out = {}
 
     local status = {
@@ -491,7 +510,12 @@ local function cacheSections(plugin)
     end
     status[#status + 1] = mk({ icon = "info", title = _("加载路径"),
         subtitle = probe.path and tidyPath(probe.path) or _("未加载"), chevron = false })
-    if usage then
+    if state.pending and Cache.available("summary") then
+        status[#status + 1] = mk({
+            icon = "storage", title = _("缓存占用"),
+            subtitle = _("正在统计…"), chevron = false,
+        })
+    elseif usage then
         local scope = configured and "" or _("（含未关联服务器）")
         status[#status + 1] = mk({
             icon = "storage", title = _("缓存占用"),
@@ -516,17 +540,24 @@ local function cacheSections(plugin)
     end
     out[#out + 1] = { title = _("状态"), rows = status }
 
-    --- 「清理全部」一行：跨服务器（含未关联）。统计得到 0 章时置灰（03 待确认 3）；
-    --- 拿不到 summary 时不猜，保持可点（删除时以 kamare 的事实为准）。
+    --- 「清理全部」一行：跨服务器（含未关联），数字来自 summaryAll 而不是本服务器。
+    --- 统计到 0 章时置灰并写「没有可清理的缓存」（03 待确认 3）；还没统计完 /
+    --- 拿不到统计时不猜，保持可点（删除时以 kamare 的事实为准）。
     local function cleanupAllRow()
-        local count = usage and tonumber(usage.chapters) or nil
+        local count = all_usage and tonumber(all_usage.chapters) or nil
         local empty = count ~= nil and count <= 0
+        local subtitle
+        if empty then
+            subtitle = _("没有可清理的缓存")
+        elseif all_usage then
+            subtitle = T(_("含未关联服务器 · %1 章 · 约 %2"), tostring(all_usage.chapters or 0),
+                Cache.sizeText(all_usage.used))
+        else
+            subtitle = _("含未关联服务器")
+        end
         return mk({
             icon = "delete", title = _("清理全部"),
-            subtitle = usage
-                and T(_("含未关联服务器 · %1 章 · 约 %2"), tostring(usage.chapters or 0),
-                    Cache.sizeText(usage.used))
-                or _("含未关联服务器"),
+            subtitle = subtitle,
             enabled = not empty,
             chevron = not empty,
             callback = function() runCleanupAll(plugin) end,
@@ -593,12 +624,16 @@ local function cacheSections(plugin)
         if probe.state == "incompatible" and probe.api_version then
             rows[#rows + 1] = mk({
                 icon = "warning", title = _("版本不兼容"),
-                subtitle = T(_("kamare API v%1 与当前支持的 v1 不兼容"), tostring(probe.api_version)),
+                subtitle = T(_("kamare API v%1 与当前支持的 v1 不兼容；装回支持 v1 的增强版后可管理缓存"),
+                    tostring(probe.api_version)),
                 chevron = false,
             })
         end
         rows[#rows + 1] = textRow(installText(plugin))
-        out[#out + 1] = { title = _("获取增强版"), rows = rows }
+        out[#out + 1] = {
+            title = probe.state == "incompatible" and _("版本与获取") or _("获取增强版"),
+            rows = rows,
+        }
     end
     return out
 end
@@ -610,9 +645,24 @@ local function showCachePage(plugin)
         toast(_("请先打开月读桌面"))
         return
     end
+    local state = { pending = true }
+    local scheduled = false
     require("desktop.pages.setting.overlay").push(desktop, {
         title = _("漫画缓存"),
-        sections = function() return cacheSections(plugin) end,
+        sections = function()
+            -- 占用走盘：先让叠层用「正在统计…」画出来，下一拍算完再刷新（03 E）。
+            if state.pending and not scheduled then
+                scheduled = true
+                require("ui/uimanager"):nextTick(function()
+                    local probe = Cache.probe()
+                    local need_all = probe.ok and (probe.capabilities or {}).delete_all == true
+                    state.usage, state.all = loadUsage(need_all)
+                    state.pending = false
+                    refreshOverlay(plugin)
+                end)
+            end
+            return cacheSections(plugin, state)
+        end,
     })
 end
 
@@ -620,11 +670,13 @@ end
 ---@return fun(iw: number): table
 local function cacheRow(plugin)
     return function(iw)
-        local status, on = cacheStatus(Cache.probe())
+        local probe = Cache.probe()
+        local status, on = cacheStatus(probe)
         return require("ui.themes.widgets.row").widget({
             width = iw, chevron = true,
             kind = "nav", icon = "download_done", title = _("漫画缓存"),
-            subtitle = Cache.probe().ok
+            -- 副标题只承诺真能做到的事：旧接口没有清理入口。
+            subtitle = cleanupReady(probe)
                 and _("清理已读、按系列或全部清理")
                 or _("状态与获取增强版"),
             status = status, status_on = on,
