@@ -6,6 +6,23 @@ http.turbo：acquire/release 管泵；补丁经第一次 acquire 挂上。
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
 
+-- http.dns 桩：补丁只负责「解析完成前不 connect、失败走 turbo 的 DNS 失败路径」，解析器本身在 tests/http/dns_spec.lua。
+-- held 为真时把回调挂起（解析在飞），否则同步回：IP 字面量原样、nx.invalid 失败、其余 10.0.0.N。
+local resolves, held, dropped = {}, false, {}
+package.loaded["http.dns"] = nil
+package.preload["http.dns"] = function()
+    return {
+        resolve = function(host, cb)
+            if host:match("^[%d%.]+$") or host:find(":", 1, true) then return cb(host) end
+            resolves[#resolves + 1] = host
+            local function fire() cb(host ~= "nx.invalid" and ("10.0.0." .. #resolves) or nil) end
+            if held then resolves.fire = fire else fire() end
+        end,
+        drop = function(host) dropped[#dropped + 1] = host end,
+        forget = function() end,
+    }
+end
+
 local UIManager = require("ui/uimanager")
 local Turbo = require("http.turbo")
 local Proxy = require("http.proxy")
@@ -38,14 +55,6 @@ do
                 return true
             end,
         }
-    end
-    local lookups = {}
-    package.preload["socket"] = function()
-        return { dns = { getaddrinfo = function(host)
-            lookups[#lookups + 1] = host
-            if host == "nx.invalid" then return nil, "host not found" end
-            return { { family = "inet", addr = "10.0.0." .. #lookups } }
-        end } }
     end
     package.preload["turbo.iostream"] = function()
         local IOStream = {}
@@ -89,49 +98,49 @@ do
     Assert.eq(fail_stream.fail_err, "Network is unreachable")
     Assert.eq(fail_stream.fail_self, fail_stream)
 
-    -- 同一主机只在 UI 线程解析一次；IP 字面量不解析；连接失败丢缓存重解析。
-    lookups = {}
-    local a, b = {}, {}
+    -- 主机名经 http.dns 解析后才 connect；IP 字面量不解析。
+    local a = {}
     iostream.IOStream.connect(a, "cdn.example.com", 443)
-    iostream.IOStream.connect(b, "cdn.example.com", 443)
-    Assert.eq(#lookups, 1, "同主机第二次连接必须命中缓存")
-    Assert.eq(a.connected_to, "10.0.0.1")
-    Assert.eq(b.connected_to, "10.0.0.1")
-    iostream.IOStream.connect({}, "1.2.3.4", 443)
+    Assert.eq(resolves[#resolves], "cdn.example.com")
+    Assert.eq(a.connected_to, "10.0.0." .. #resolves)
+    local lit, n = {}, #resolves
+    iostream.IOStream.connect(lit, "1.2.3.4", 443)
     iostream.IOStream.connect({}, "2001:db8::1", 443)
-    Assert.eq(#lookups, 1, "IP 字面量不得解析")
-    -- 同步失败：iostream 经 run_callback 调 HTTPClient:_handle_connect_fail(client, err)
+    Assert.eq(#resolves, n, "IP 字面量不得解析")
+    Assert.eq(lit.connected_to, "1.2.3.4")
+    -- 同步失败：iostream 经 run_callback 调 HTTPClient:_handle_connect_fail(client, err) → 丢该主机地址缓存
     HTTPClient._handle_connect_fail({ hostname = "cdn.example.com" }, "Network is unreachable")
     Assert.eq(client_fail_msgs[1], "Could not connect: Network is unreachable")
-    local c = {}
-    iostream.IOStream.connect(c, "cdn.example.com", 443)
-    Assert.eq(#lookups, 2, "连接失败后必须重新解析")
-    Assert.eq(c.connected_to, "10.0.0.2")
+    Assert.eq(dropped[1], "cdn.example.com", "连接失败后必须丢 DNS 缓存")
     -- LuaSocket 异步失败回调 (client, -1, err)：用真实错误，同样丢缓存
     HTTPClient._handle_connect_fail({ hostname = "cdn.example.com" }, -1, "connection refused")
     Assert.eq(client_fail_msgs[2], "Could not connect: connection refused")
-    iostream.IOStream.connect({}, "cdn.example.com", 443)
-    Assert.eq(#lookups, 3, "异步连接失败后也必须重新解析")
+    Assert.eq(#dropped, 2)
     HTTPClient._handle_connect_fail({ hostname = "cdn.example.com" }, -1)
     Assert.eq(client_fail_msgs[3], "Could not connect: -1", "无真实错误时保留原样")
-    -- 解析失败：按 turbo 自己的 DNS 失败路径立即失败，不让 LuaSocket 再阻塞解析一次；10 秒内同主机不再解析。
-    local before = #lookups
+    -- 解析失败：按 turbo 自己的 DNS 失败路径立即失败，不让 LuaSocket 再阻塞解析一次。
     local nx = {}
     iostream.IOStream.connect(nx, "nx.invalid", 443, nil, nil, "fail-cb", "arg")
     Assert.is_nil(nx.connected_to, "解析失败不得交给 connect 再解析")
     Assert.matches(nx.fail_err, "^DNS resolv error")
     Assert.eq(nx._connect_fail_callback, "fail-cb")
     Assert.eq(nx._connect_callback_arg, "arg")
-    local nx2 = {}
-    iostream.IOStream.connect(nx2, "nx.invalid", 443)
-    Assert.eq(#lookups, before + 1, "失败记录挡住同一批请求")
-    Assert.matches(nx2.fail_err, "^DNS resolv error")
-    HTTPClient._handle_connect_fail({ hostname = "nx.invalid" }, "DNS resolv error")
-    iostream.IOStream.connect({}, "nx.invalid", 443)
-    Assert.eq(#lookups, before + 1, "连接失败清正向缓存，不清失败记录")
-    require("http.turbo.patch").forget("nx.invalid")
-    iostream.IOStream.connect({}, "nx.invalid", 443)
-    Assert.eq(#lookups, before + 2, "forget 连失败记录一起清")
+
+    -- 解析在飞：主进程不阻塞，connect 立即返回 0；地址到了再真正 connect。
+    held = true
+    local p = {}
+    Assert.eq(iostream.IOStream.connect(p, "img.example.com", 443, nil, nil, "fail-p", "arg-p"), 0)
+    Assert.is_nil(p.connected_to, "地址没回来前不能 connect")
+    Assert.eq(p._connect_fail_callback, "fail-p", "等解析期间失败回调已登记，HTTPClient 的连接超时能找到人")
+    Assert.is_true(p._connecting, "等解析期间算连接中，HTTPClient 的 connect 超时按常规处理")
+    resolves.fire()
+    Assert.eq(p.connected_to, "10.0.0." .. #resolves)
+    -- 等解析期间请求被取消关流：结果回来什么都不做
+    local gone = { closed = function() return true end }
+    iostream.IOStream.connect(gone, "late.example.com", 443)
+    resolves.fire()
+    Assert.is_nil(gone.connected_to, "已关的流不得再 connect")
+    held = false
     local ffi = require("ffi")
     local sized = {
         _read_buffer_size = ffi.new("int64_t", 16),
@@ -144,7 +153,7 @@ do
     Assert.eq(type(got_bytes), "number")
     Turbo.release()
 
-    for _, name in ipairs({ "turbo", "turbo.crypto", "turbo.iostream", "socket" }) do
+    for _, name in ipairs({ "turbo", "turbo.crypto", "turbo.iostream", "http.dns" }) do
         package.preload[name] = nil
         package.loaded[name] = nil
     end

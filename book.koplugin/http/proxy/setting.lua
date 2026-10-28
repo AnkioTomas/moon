@@ -151,11 +151,45 @@ function Setting.entry(desktop)
             sections = function()
                 return {
                     { title = _("HTTP 代理"), rows = Setting.rows(desktop) },
+                    { title = _("DNS"), rows = { Setting.dnsRow(desktop) } },
                     { title = _("超时"), rows = { Setting.timeoutRow(desktop) } },
                 }
             end,
         },
     }
+end
+
+--- 「备选 DNS」：每次解析同时问系统 DNS 和这家，谁先应答用谁（见 http/dns.lua）；换家清掉已解析缓存。
+---@param desktop BookDesktop
+---@return fun(iw: number): table
+function Setting.dnsRow(desktop)
+    return function(iw)
+        local Dns = require("http.dns")
+        local current = Dns.current()
+        return Row.widget({
+            width = iw, kind = "nav", icon = "dns",
+            title = _("备选 DNS"),
+            subtitle = _("与系统 DNS 同时查询，谁先应答用谁"),
+            status = _(current.name), status_on = true,
+            callback = function()
+                local items = {}
+                for _idx, p in ipairs(Dns.PROVIDERS) do
+                    items[#items + 1] = {
+                        text = _(p.name) .. "  " .. p.servers[1],
+                        variant = p.id == current.id and "primary" or "normal",
+                        callback = function()
+                            local MoonSettings = require("utils.settings")
+                            MoonSettings.get("http").dns = p.id
+                            MoonSettings.save("http")
+                            Dns.clear()
+                            desktop:updateView()
+                        end,
+                    }
+                end
+                require("ui.themes.widgets.sheet"):new{ title = _("备选 DNS"), items = items }:show()
+            end,
+        })
+    end
 end
 
 --- 「网络超时」：普通请求的默认秒数，其余请求按倍率 × 它（见 http/timeout.lua）。

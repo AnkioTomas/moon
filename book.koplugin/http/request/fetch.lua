@@ -62,8 +62,10 @@ end
 ---@return HttpFetchCtx|nil
 ---@return string|nil err
 function Fetch.begin(opts, tag)
-    if not opts.url:find("^http://127%.0%.0%.1[:/]") and not NetworkMgr:isConnected() then
-        return nil, _("网络不可用，请先连接 Wi-Fi")
+    if not opts.url:find("^http://127%.0%.0%.1[:/]") then
+        if not NetworkMgr:isConnected() then
+            return nil, _("网络不可用，请先连接 Wi-Fi")
+        end
     end
     seq = seq + 1
     local ctx = { id = seq, tag = tag, method = opts.method or "GET", url = Fetch.safeUrl(opts.url), started_at = Perf.now() }

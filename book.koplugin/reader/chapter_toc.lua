@@ -19,6 +19,8 @@ local ChapterToc = {}
 ---@param on_select fun(idx: integer, anchor: BookChapterAnchor|nil)
 ---@return table
 function ChapterToc.show(toc, current_idx, on_select)
+    local Perf = require("utils.perf")
+    local started_at = Perf.now()
     local ReaderToc = require("apps/reader/modules/readertoc")
     local nodes, targets, chapter_pages = {}, {}, {}
     for _idx, chapter in ipairs(toc) do
@@ -72,6 +74,7 @@ function ChapterToc.show(toc, current_idx, on_select)
     adapter.getTitle = function() return _("目录") end
     adapter.completeTocWithChapterLengths = function() end
     adapter:onShowToc()
+    Perf.slow("chapter_toc.show " .. #nodes, started_at)
     return adapter
 end
 
