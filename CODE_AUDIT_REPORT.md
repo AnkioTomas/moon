@@ -1,168 +1,179 @@
-# `book.koplugin/` 代码审计报告
+# `book.koplugin/` 代码审计报告（v0.2.0 → HEAD）
 
-审计基线：`52c495ff`（2026-10-26），日期 2026-10-26。范围为 `book.koplugin/`（排除 `types/`、`demo/`）约 **612** 个 Lua 源文件、约 **169805** 行；重点检查了锁屏/壁纸绘制、书库 SQL、Rare/X-Ray/reflow 热路径、HTTP DNS、源段评编排、吞错 `pcall`。以下是有证据的发现，不声称逐行形式化验证。初版仅生成报告。后续已按 P1→P2 落地优化（见文末「已落地修复」）。
-
-**本次重点**：Kindle 低端机（慢 CPU、小内存、慢闪存、墨水屏刷新贵）上的**卡顿 / 数秒冻结 / OOM 风险**；重复实现与吞错按技能顺序附带。
+审计基线：`v0.2.0`（`9bc13a63`，2026-10-14）→ HEAD `0b8cdee2`（2026-10-28）。703 次提交、555 个文件、+105 242 / −7 586 行（去掉 3 份生成的 `fock_wasm.lua` 共 43 671 行后，手写 Lua / Web 约 +60 000 行）。范围为这段区间内 `book.koplugin/` 下 520 个被改动的 Lua 源文件（现有内容约 122 800 行），按五个分区并行审查：新书源、wechat / local / book / desktop / reader、remote / subscribe、UI features、http / utils / ui / workers。每个分区的 P1 与关键 P2 由主审独立复核代码路径。以下是有证据的发现，不声称逐行形式化验证。本次仅生成报告，未修改业务代码。
 
 ## 需求理解
 
-找出会让低端 Kindle 在休眠、开书、翻页、图书馆、锁屏上卡顿或内存爆的主线程重活，以及重复实现、空转发、无效防御里会掩盖故障或拖累排障的项；给出最小、兼容的修正顺序。
+找出 v0.2.0 之后两周内新增与改动代码里的重复实现、单行转发、无效防御和可能破坏现有行为的 bug，并给出最小、兼容的修正顺序。
 
 ## 核心判断
 
-**值得做。** 最严重的真实问题不是「架构不够优雅」，而是：**休眠锁屏与壁纸在主线程同步解码/合成整屏图**，以及 **全书正文一次性 `table.concat` 进内存**——这和 Kindle 的电源键路径、小内存、慢闪存直接冲突。
+**值得做。** 两周 +60k 行手写代码，HEAD 测试红 4 个、LuaLS 48 条警告，同时带进了三类用户当场能踩到的 P1：① 无鉴权的远程管理新增 `/api/backup`（全量凭证导出）与 `/api/reset`（清掉锁屏密码），一个畸形 JSON 还能关停整个服务；② 今天合入的 Google Drive 同步在纯 gdrive 配置下 `serial()` 必 nil 拼接崩溃；③ 整本排版 / X-Ray 的全文抽取不检查写盘结果，磁盘满时用半截正文生成「排版版」并把 `books.path` 切过去。这些不是风格问题。
 
 ## 关键问题
 
-* **数据结构：** 锁屏组合图既是磁盘缓存（`compose.png`）又在 miss 时同步重建；壁纸在 `paintTo` 里按 key 懒解码进进程缓存；书库列表每次查询都先 `COUNT(*)` 再分页。
-* **复杂度：** 最大卡顿来自「绘制/休眠入口上的同步 IO + 图像解码 +（insight 时）多段聚合 SQL」，不是任务队列本身。
-* **最大风险：** 电源键休眠瞬间 UI 冻结数秒；开壁纸弹窗时首帧卡死；X-Ray/重排全书时峰值内存把低内存 Kindle 打进 OOM。
+* **数据结构：** 「源有没有远端进度 / 笔记 / 统计」没有落在任何数据结构里，只靠方法存在与否推断，于是 jjwxc 伪造 `putProgressAsync`、八个源手写 skipped 覆盖、`dirtyDomains` 对 jjwxc / kindle 永远报脏、每次唤醒都入队一条空任务。远程管理假设「局域网 = 可信」，把账号级 / 设备级操作当普通文件操作挂上去。「可停用 feature」与 24 对 feature 间静态 `require`（`rare/lookup.lua` 一个文件吸了 dictionary / ai / translate / baike 四家）互相矛盾。
+* **复杂度：** 不是逻辑，是复制：fock 宿主 ×3、cookie 登录设置页 ×5、`deleteBookAsync` ×7、`mine/step` 回调防御 ×9、skipped 覆盖 ×8、libz inflate ×3、哈希 / HMAC 双栈、分片下载流水线 ×3、UTF-8 切字 pattern ×7（features 内）、设置页选择行 ×4。约 1 500 行可直接删。
+* **最大风险：** 同一个「异步句柄被同步回调覆盖 / 返回值没保存」的坑在 gdrive、legado、fanqie `Cbz.ready`、store_cache、jjwxc probePaid、detail 缓存六处重复出现——取消是空操作，回调在取消后照常落库 / 开文档。
+
+## 验证记录
+
+* `./tests/run.sh`：**498 通过、1 跳过、4 失败**（60 241 断言）。失败：`tests/desktop/detail_spec.lua:589`（`83efbef3` 把详情页文件名改成完整路径没改断言）、`tests/feature_boundary_spec.lua:209`（`5b50b63d` 新增 `features/remote/logs.lua:41` 注释含 `weread`）、`tests/features/remote/l10n_web_spec.lua:48`（残留键「本地书库 WebDAV」）、`tests/l10n_spec.lua:179`（残留键「文件」）。最近两次提交没跑测试就进了 main。
+* LuaLS（绝对路径）：**48 条警告 / 18 文件**（AGENTS 要求 0）。全部是注解与返回形状不符（`gdrive.lua` 的 `done(ok, err, code)` 注解成 `table|nil`、`passcode/backdrop.lua` 对 `BACKGROUNDS` 项取 `mode/path/width/height`、`ui/fonts/mixed.lua` 的 `hasGlyph/done`、`extensions/moonsource-kavita` 多参），未发现其中有运行时错误。
+* 独立复现：`cfg.webdav_url .. "\0"` 在 gdrive 配置下 `attempt to concatenate a nil value`（luajit 直接跑表达式）；`Text.base64Decode` 60 KB 25 ms（M 系列 Mac，Kindle 约 20–50 倍）。
+* 其余标 `代码路径明确` 的均为读源码确认调用链；`待确认边界` 为需要真机 / 抓包 / 子进程行为才能定的。
 
 ## 详细发现
 
 ### 一、重复实现，优先处理
 
-1. **[P2] 起点 / 晋江 `withChapterId` 控制流逐字同构。** [`source/qidian/init.lua`](book.koplugin/source/qidian/init.lua#L343) 与 [`source/jjwxc/init.lua`](book.koplugin/source/jjwxc/init.lua#L287) 都是 `loadTocAsync` → 按下标取章 → `start(uid, cb)` → cancel 链；仅错误文案不同。修一处漏一处会让段评定位行为分叉。
-   最小方案：抽 `source` 下薄函数（传入错误串），两源各一行调用。不要加 Service。
-
-2. **[P2] 四源段评 API 编排模板重复（热点 / 翻页 / 定位）。** [`qidian`](book.koplugin/source/qidian/init.lua#L333)、[`jjwxc`](book.koplugin/source/jjwxc/init.lua#L277)、[`fanqie`](book.koplugin/source/fanqie/init.lua#L433)、[`wechat`](book.koplugin/source/wechat/init.lua#L851) 共用 `ReviewCache` + 章 uid 解析骨架，但 uid 解析语义已分叉（微信 `resolveChapterUidAsync`、番茄目录下标、起点/晋江 `withChapterId`）。
-   最小方案：只抽「ReviewCache + done」薄 helper，保留各源 uid 解析；禁止硬合并成一支。
-
-3. **[P3] 晋江 / 起点 `Reviews.locate` 一行相同。** [`jjwxc/reviews.lua`](book.koplugin/source/jjwxc/reviews.lua#L138) 与 [`qidian/reviews.lua`](book.koplugin/source/qidian/reviews.lua#L103) 都是 `ReviewLocate.locate(paragraphs(html), …)`。
-   最小方案：在 `book/review_locate.lua` 加 `locateFromHtml`，两源一行 re-export。番茄因 `blk/p_idx` 不同不可合并。
-
-4. **[P3] 番茄 JSON decode 局部函数双份。** [`fanqie/client.lua`](book.koplugin/source/fanqie/client.lua#L68) 与 [`fanqie/reading.lua`](book.koplugin/source/fanqie/reading.lua#L22)。
-   最小方案：一个 `decode(text, empty_err)`；或 reading 直接用 client 侧函数。
-
-5. **[P3] 微信 / 京东目录缓存命中的异步调度未走 `SourceBase.defer`。** [`wechat/init.lua`](book.koplugin/source/wechat/init.lua#L262)（`nextTick` + guard）、[`jdread/init.lua`](book.koplugin/source/jdread/init.lua#L229)（裸 `nextTick`）。
-   最小方案：缓存命中统一 `SourceBase.defer`，微信把 guard 包在回调里。
+1. **[P2] fock wasm 宿主三份几乎逐字相同，且已开始分叉。** [`source/qidian/fock.lua`](book.koplugin/source/qidian/fock.lua#L45)、[`source/xiaoxiang/fock.lua`](book.koplugin/source/xiaoxiang/fock.lua#L29)、[`source/qqreader/fock.lua`](book.koplugin/source/qqreader/fock.lua#L30)：`cstr`、数据段装载、`with_stack/put_bytes/put_string`、解密调用序列、`chapterAsync` 的 `Job.run` 壳完全一致，只差导出名、回调编号（22685 / 22353 / 21795）、栈基址、HOST 表。qidian 多了 `decryptAsync/restoreAsync`（L145–159、L191–205），字体兜底只有 qidian 走得通。最小方案：一个 `source/yuewen_fock.lua` 收一张 `{ wasm, exports, callback_id, stack_base, host }` 参数表，三个源各留 10 行。`fock_wasm.lua` 是不同 wasm 构建的生成物，不算重复。
+2. **[P2] 「未登录就撕墓碑」`deleteBookAsync` 七份。** [`qidian/init.lua`](book.koplugin/source/qidian/init.lua#L130)、[`xiaoxiang/init.lua`](book.koplugin/source/xiaoxiang/init.lua#L58)、[`qqreader/init.lua`](book.koplugin/source/qqreader/init.lua#L107)、[`jjwxc/init.lua`](book.koplugin/source/jjwxc/init.lua#L114)、[`changpei/init.lua`](book.koplugin/source/changpei/init.lua#L58)、[`qimao/init.lua`](book.koplugin/source/qimao/init.lua#L64)、`fanqie/init.lua`：同一段 `if not self:configured() then markDeleted + BookDB.remove else SourceBase.deleteBookAsync`。基类 [`source/base.lua`](book.koplugin/source/base.lua#L242) 已知道 `configured()`。最小方案：分支收进 `SourceBase:deleteBookAsync`，七个覆盖全删。
+3. **[P2] 「`mine/step` 同步回调防御」九处手写、语义已不一致。** [`source/assets.lua`](book.koplugin/source/assets.lua#L160)、[`qimao/init.lua`](book.koplugin/source/qimao/init.lua#L227)、[`wechat/init.lua`](book.koplugin/source/wechat/init.lua#L1104)、[`jdread/client.lua`](book.koplugin/source/jdread/client.lua#L147)、[`wechat/chapter.lua`](book.koplugin/source/wechat/chapter.lua#L217)、[`jdread/init.lua`](book.koplugin/source/jdread/init.lua#L153)、[`copymanga/chapter.lua`](book.koplugin/source/copymanga/chapter.lua#L99)。`http/request/*` 的成功 / 缓存命中 / `Fetch.fail` 三条路全经 `nextTick` 异步回调，生产里「回调比 return 先到」不会发生；防的是离线桩，而 [`tests/support/stubs.lua`](tests/support/stubs.lua#L402) 的 `nextTick` 本来就排队。最小方案：九处全删。`待确认边界`：确认没有不经 `nextTick` 直接调 cb 的桩。
+4. **[P2] 阅文系 cookie 登录设置页五份结构雷同、含同名私有函数。** [`qidian/setting.lua`](book.koplugin/source/qidian/setting.lua#L18)、[`qqreader/setting.lua`](book.koplugin/source/qqreader/setting.lua#L18)、[`jjwxc/setting.lua`](book.koplugin/source/jjwxc/setting.lua#L21)（`validPair/cookieHeader/fromPayload` 30 行纯函数三份完全相同），xiaoxiang / changpei 另有 `parseCookie/verify/showLogin` 第 4、5 份。最小方案：`source/cookie_login.lua` 提供 `parse / fromPayload(payload, domain) / rows(spec)`，源只留 id、域名、`loginCheckAsync`。
+5. **[P2] 三处 JSON 请求体解码，两种语义。** [`remote/ext_route.lua`](book.koplugin/features/remote/ext_route.lua#L109) `pcall(decode)` 回 400；[`remote/file.lua`](book.koplugin/features/remote/file.lua#L360) 与 [`remote/settings_route.lua`](book.koplugin/features/remote/settings_route.lua#L17) 裸调 `utils.json.decode`（luajson 抛错，后者 `if not payload then … 400` 是死分支）。后果见四·3。最小方案：`Server:_acceptJson(conn, headers, limit, finish)` = `_acceptText` + 一次 `pcall(decode)` 回 400，三处改用。
+6. **[P2] libz FFI inflate 三份。** [`utils/inflate.lua`](book.koplugin/utils/inflate.lua#L16)（raw）、[`ui/fonts/woff.lua`](book.koplugin/ui/fonts/woff.lua#L17)（zlib，流式）、[`source/fanqie/reading/crypto.lua`](book.koplugin/source/fanqie/reading/crypto.lua#L97)（gzip / zlib）：各自 `pcall(ffi.cdef)` 同一个 `z_stream`、各自分块循环。最小方案：`utils/inflate.lua` 改成 `Inflate.stream(data, offset, len, window_bits, sink)`，另两处删本地副本。
+7. **[P2] 哈希 / HMAC 与 KOReader `ffi/sha2` 双栈。** `crypto/md5.lua`、`sha1.lua`、`sha256.lua`、`hex.lua` 纯 Lua；`ffi/sha2` 已导出 `md5/sha1/sha256/hmac/hex_to_bin/bin_to_hex`。仓库 `require("ffi/sha2")` 20+ 处、`require("crypto.md5"/"sha256")` 7 处，本周期 [`crypto/gcm.lua`](book.koplugin/crypto/gcm.lua#L20) 又手写 HMAC-SHA256。两边 md5 输出格式不同，于是 [`jdread/protocol.lua`](book.koplugin/source/jdread/protocol.lua#L19) 和 [`fanqie/reading/sign.lua`](book.koplugin/source/fanqie/reading/sign.lua#L316) 各写了 `md5bin`，而 [`crypto/hex.lua`](book.koplugin/crypto/hex.lua#L18) `from_hex` 就是这件事。最小方案：crypto 只留 KOReader 没有的（aes / des / sm* / rsa / bn / GHASH），md5 / sha1 / sha256 / hex 换成对 `ffi/sha2` 的转调；gcm 用 `sha2.hmac`。
+8. **[P2] 「manifest → 分片 → sha256 → 拼接」三套流水线。** [`ime/download.lua`](book.koplugin/features/ime/download.lua#L152)、[`dictionary/manager.lua`](book.koplugin/features/dictionary/manager.lua#L139)、[`ocr/manager.lua`](book.koplugin/features/ocr/manager.lua#L178)；`validateManifest / partComplete / downloadParts` 递归结构相同，差异只在收尾（解压 / reset 词库连接）。最小方案：ime 的 `downloadParts + assemble` 最完整，另两处改调它，收尾作回调参数；不要新建 Manager。
+9. **[P2] UTF-8 按字切分 pattern 在 features 内抄了 7 次。** [`lockscreen/typo_text.lua`](book.koplugin/features/lockscreen/typo_text.lua#L14)、[`rare/lexicon.lua`](book.koplugin/features/rare/lexicon.lua#L129)、[`rare/overlay.lua`](book.koplugin/features/rare/overlay.lua#L222)、[`reflow/init.lua`](book.koplugin/features/reflow/init.lua#L185)、[`reviews/linked.lua`](book.koplugin/features/reviews/linked.lua#L128)、[`ime/script.lua`](book.koplugin/features/ime/script.lua#L14)、[`bluetooth/init.lua`](book.koplugin/features/bluetooth/init.lua#L224)（源目录外另 4 处，含 [`yuewen_fonts/init.lua`](book.koplugin/source/yuewen_fonts/init.lua#L91)）。最小方案：`utils/text.lua` 加 `Text.UTF8_CHAR` 常量与 `Text.chars(s)`。
+10. **[P2] 设置页「选择行 / 导航行 / 选路径」四份手抄。** [`wallpaper/page.lua`](book.koplugin/features/wallpaper/page.lua#L45)、[`lockscreen/page.lua`](book.koplugin/features/lockscreen/page.lua#L68)、[`desktop/pages/setting/library.lua`](book.koplugin/desktop/pages/setting/library.lua#L28)、[`rare/setting.lua`](book.koplugin/features/rare/setting.lua#L48)。[`ui/themes/widgets/row.lua`](book.koplugin/ui/themes/widgets/row.lua#L56) 已有 `toggle`，没有「单选 Sheet 行」；全仓 35 处手写 `x and _("开") or _("关")`。最小方案：`choiceRow` 落到 row.lua 旁一处。
+11. **[P2] 关书回桌面两条路径，一同步一异步。** [`desktop/reader_exit.lua`](book.koplugin/desktop/reader_exit.lua#L44) 在 `nextTick` 里 `onClose + ensureFileManager + Desktop.open`，注释明确「点击调用栈里不能同步关文档」；[`desktop/init.lua`](book.koplugin/desktop/init.lua#L632) `Desktop.open` 遇到 `plugin.ui.document` 时同步做同样三步。最小方案：该分支委托 `ReaderExit.closeToDesktop`。`待确认边界`：带文档调 `Desktop.open` 的调用方是否全来自 nextTick。
+12. **[P3] 八个源的 `syncNotesAsync / syncStatsAsync` 空覆盖是多余的。** qidian / xiaoxiang / qqreader / changpei / qimao / legado / iread / jjwxc 全部 `return SourceBase.skipped(cb, ...)`；基类 [`base.lua`](book.koplugin/source/base.lua#L341) 走 `book/note.lua` / `book/stats.lua`，源上没有 `push/pull*Async` 时本来就回 `skipped`。全删。
+13. **[P3] Base64 三条路、其中热路径一条很慢。** [`utils/text.lua`](book.koplugin/utils/text.lua#L462) `Text.base64Decode` 把每个字符展开成 8 位字符串再拼回；[`source/wechat/package.lua`](book.koplugin/source/wechat/package.lua#L28) 本地 `b64decode`（算术版）；[`crypto/des.lua`](book.koplugin/crypto/des.lua#L217) 走 LuaSocket `mime.unb64`。`Text.base64Decode` 正跑在 qidian / xiaoxiang [`fock.lua`](book.koplugin/source/qidian/fock.lua#L131) 与 [`qimao/protocol.lua`](book.koplugin/source/qimao/protocol.lua#L71) 的整章密文上（60 KB 25 ms on M-series，Kindle 秒级）。最小方案：`Text.base64Decode` 内部改调 `mime.unb64`（URL-safe 字符先规范化），package.lua / des.lua 改用 Text。
+14. **[P3] 段评 `locate` 与排序三份。** [`qidian/reviews.lua`](book.koplugin/source/qidian/reviews.lua#L103)、[`jjwxc/reviews.lua`](book.koplugin/source/jjwxc/reviews.lua#L138)、[`fanqie/reviews.lua`](book.koplugin/source/fanqie/reviews.lua#L69)。收进 `book/review_locate.lua`。另 [`fanqie/setting.lua`](book.koplugin/source/fanqie/setting.lua) 的段评开关文案自己再写了一遍，qidian / jjwxc 都走 [`source/review_setting.lua`](book.koplugin/source/review_setting.lua#L1)。
+15. **[P3] 二维码登录 `cookieHeader / takeCookies / toast / show_retry` 三份。** [`changpei/qrlogin.lua`](book.koplugin/source/changpei/qrlogin.lua#L82)、[`qqreader/qrlogin.lua`](book.koplugin/source/qqreader/qrlogin.lua#L77)、[`fanqie/qrlogin.lua`](book.koplugin/source/fanqie/qrlogin.lua#L52)；fanqie 自带 `absolute_url`，[`utils/text.lua`](book.koplugin/utils/text.lua#L282) 已有 `Text.absoluteUrl`。三个 qrlogin 都在源目录顶层 require `UIManager / Confirm / QR / Toast`，违反「源模块顶部禁止 require UI」。
+16. **[P3] XML 转义本地副本 ×3 且 `Text.xmlEscape` 已有。** [`subscribe/remote.lua`](book.koplugin/features/subscribe/remote.lua#L167)、[`subscribe/readability.lua`](book.koplugin/features/subscribe/readability.lua#L354)（L367 第二个变体）；同文件 L114 `trim` 等同 `Text.trim`。HTML 属性解析器在 subscribe 内也有 3 份（`readability.lua#L238 parseAttrs` 最完整）。
+17. **[P3] `ffi/util.df` 三元组 + `available or free` ×3。** [`remote/init.lua`](book.koplugin/features/remote/init.lua#L826)、[`remote/logs.lua`](book.koplugin/features/remote/logs.lua#L507)、[`storage/init.lua`](book.koplugin/features/storage/init.lua#L23)（注释自称「与桌面顶栏同源」）。remote 两处改调 `Storage.disk()`。`/proc/meminfo` 解析两份：[`workers/system.lua`](book.koplugin/workers/system.lua#L50) 与 [`utils/mem.lua`](book.koplugin/utils/mem.lua#L26)。
+18. **[P3] web 端 `errText` ×3 + 内联 ×2。** [`remote/html/file.js`](book.koplugin/features/remote/html/file.js#L84)、[`subscribe/web/subscribe.js`](book.koplugin/features/subscribe/web/subscribe.js#L32)、[`cookie/web/cookie.js`](book.koplugin/features/cookie/web/cookie.js#L70)。`jfetch` 已在 [`remote/html/js.js`](book.koplugin/features/remote/html/js.js#L128) 共享，放一起。`file.js#L97 toast(text){ say(text) }` 是单行转发。
+19. **[P3] 「pcall 读 http 设置」三份。** [`http/dns.lua`](book.koplugin/http/dns.lua#L58)、[`http/timeout.lua`](book.koplugin/http/timeout.lua#L23)、[`http/mirror.lua`](book.koplugin/http/mirror.lua#L75)，注释都是「精简测试桩拿不到设置」。桩掉 `utils.settings`，三处改裸 require。
+20. **[P3] 其它两份（未到三，记录不合并）：** `listBooks` 随机分支整段复制分页 SELECT（[`book/catalog.lua`](book.koplugin/book/catalog.lua#L570) 与 L610，列序靠人肉同步）；scope 合法性 / `toList(scope)` 口径三处（`catalog.lua#L281`、[`home/shelf.lua`](book.koplugin/desktop/pages/home/shelf.lua#L147)、[`home/random.lua`](book.koplugin/desktop/pages/home/random.lua#L44)）；随机抽书两套语义（`home/random.lua` 的 `ORDER BY RANDOM()` vs [`library/init.lua`](book.koplugin/desktop/pages/library/init.lua#L943) 的 COUNT + OFFSET）；`purgeLocal / softDelete / clearCache` 同壳三次（[`detail/actions.lua`](book.koplugin/desktop/detail/actions.lua#L302)）；目录图片扫描 + `fileOk` 绕开 `Image.ok` 三处（[`lockscreen/background.lua`](book.koplugin/features/lockscreen/background.lua#L29)、[`passcode/backdrop.lua`](book.koplugin/features/passcode/backdrop.lua#L32)、[`wallpaper/init.lua`](book.koplugin/features/wallpaper/init.lua#L57)）；失败源 7 天黑名单（`http/mirror.lua#L65` 与 [`store/zlib/client.lua`](book.koplugin/store/zlib/client.lua#L124)）；PKCS7 两份语义不一致（[`crypto/pad.lua`](book.koplugin/crypto/pad.lua#L12) 只看末字节、`crypto/des.lua#L182` 逐字节）；颜色分支派发 `isColor8 and paintRect or paintRectRGB32` 6 次（[`themes/widgets/text.lua`](book.koplugin/ui/themes/widgets/text.lua#L124)、[`lockscreen/render.lua`](book.koplugin/features/lockscreen/render.lua#L204)）；正文清洗白名单 Lua / JS 两份已分叉（`subscribe/remote.lua#L158` vs `subscribe.js#L531`）。
 
 ### 二、单行包装与空层
 
-6. **[P3] 番茄 `Client:officialGetContentAsync` 纯转发。** [`fanqie/client.lua`](book.koplugin/source/fanqie/client.lua#L504) → `reading.fetchAsync`；唯一调用 [`fanqie/init.lua`](book.koplugin/source/fanqie/init.lua#L300)。
-   最小方案：调用处直接 `reading.fetchAsync`，删 client 方法。
-
-7. **[P3] 微信 `paragraphReviewsEnabled` 与 `review_setting.enabled` 重复。** [`wechat/init.lua`](book.koplugin/source/wechat/init.lua#L853) vs [`source/review_setting.lua`](book.koplugin/source/review_setting.lua#L13)。
-   最小方案：微信改为 `return review_setting.enabled(self.id)`。
-
-8. **[说明 · 保留]** `Source:locateHotspots` / `SourceBase:sync*Async` / 微信 `*Annotations` 是源多态或基类默认实现，调用点在 `features/reviews`、`book/note`、`reader/session`；删了会逼下层写源名，违反 feature 边界。
+21. **[P3] 死 Mapper 函数（0 调用点）。** [`qidian/mapper.lua`](book.koplugin/source/qidian/mapper.lua#L18) `coverUrl` / L133 `chapterTime` / L212 `encrypted`；[`qimao/mapper.lua`](book.koplugin/source/qimao/mapper.lua#L133) `detail`；[`qqreader/mapper.lua`](book.koplugin/source/qqreader/mapper.lua#L51) `coverUrl`；[`jjwxc/mapper.lua`](book.koplugin/source/jjwxc/mapper.lua#L26) `book`。删。
+22. **[P3] 生产零调用、只有 spec 在用。** [`rare/lexicon.lua`](book.koplugin/features/rare/lexicon.lua#L84) `Lexicon.words` / L109 `match`（`overlay` 用的是 `scan`）；[`subscribe/refresh.lua`](book.koplugin/features/subscribe/refresh.lua#L73) `Refresh.running`；[`remote/logs.lua`](book.koplugin/features/remote/logs.lua#L161) `settingsKeys`（被 `dumpTable` 取代）；[`manage/init.lua`](book.koplugin/features/manage/init.lua#L79) `Manage.label`；[`ai/client.lua`](book.koplugin/ai/client.lua#L19) `DEFAULT_TIMEOUT`。连同断言一起删。
+23. **[P3] 纯转发。** [`qqreader/fock.lua`](book.koplugin/source/qqreader/fock.lua#L130) `Fock.restore`（唯一调用 L147）；[`jjwxc/protocols/web.lua`](book.koplugin/source/jjwxc/protocols/web.lua#L94) `shelfAsync → favAsync`；`fanqie/fanqie.lua` `bookshelf_multidetail_url()` 返回常量；[`kindle/init.lua`](book.koplugin/source/kindle/init.lua#L36) `Kindle.helper`；[`remote/server.lua`](book.koplugin/features/remote/server.lua#L447) `_safePath` 只剩 `return cleanPath(p)`（file.lua 一半用它一半直接 `cleanPath`）；[`features/init.lua`](book.koplugin/features/init.lua#L137) 四个 `Features.try/wrap/prefix/external = External.*` 别名（调用点全是自己人）；[`desktop/reader_exit.lua`](book.koplugin/desktop/reader_exit.lua#L57) `drawerOpensDesktop`；`desktop/open.lua` `rememberDerived`；[`translate/chapter.lua`](book.koplugin/features/translate/chapter.lua#L48) `pathFor`。
+24. **[P3] jjwxc 进度桩是空层（还是成功谎言，见四·4）。** [`jjwxc/init.lua`](book.koplugin/source/jjwxc/init.lua#L142) `getProgressAsync` / `putProgressAsync`，`book/progress.lua` 永远到不了（L130 已把 `syncProgressAsync` 覆盖成 skipped）。
+25. **[P3] 为不存在的用户空间做的兼容。** [`ui/themes/palettes.lua`](book.koplugin/ui/themes/palettes.lua#L48) 的「legacy `theme_color`」：`theme_color` 在 `c47591ac` 引入、同周期 `58a91dea` 换成色板，没有任何已发布版本写过这个键；[`ui/setting.lua`](book.koplugin/ui/setting.lua#L14) `theme_color + theme_preset` 二键并存。只留 `theme_preset`。同理 [`ui/themes/init.lua`](book.koplugin/ui/themes/init.lua#L125) 五个恒等于 `accent` 的别名令牌（注释自己说「分角色实测看不出区别」）。
+26. **[P3] `subscribe/setting.lua`** [`Setting.on`](book.koplugin/features/subscribe/setting.lua#L21) 是「未设置取默认」的再实现；`utils/settings.get` 已 `fillDefaults`，`== nil` 永假。删。
+27. 核过有存在理由、不算空层：`Session.reloadChapter`、`Desktop:cellCapacity`、`Store.softDelete`、xiaoxiang / changpei / qimao 的 `Remote` 适配表（`Shelf.syncAsync` 契约形状）、`cookie/init.lua` / `subscribe/init.lua` 的延迟加载包装、`ocr/manager.lua` / `dictionary/manager.lua`（有真实状态）。
 
 ### 三、无效防御及吞错
 
-9. **[P2] `http/mirror.lua` 对 settings 的 `pcall` 把失败变成空表，且 `save` 结果丢弃。** [`http/mirror.lua`](book.koplugin/http/mirror.lua#L74)–L98：`conf()` 失败返回 `{}`；`markDead`/`markOk` 的 `pcall(save)` 不看结果。契约：生产路径 `utils.settings` 必须可用。掩盖：镜像黑名单/优选「以为落盘了」实际没落。
-   最小方案：直接 `get`/`save`；失败 `logger.warn`。测试用 stub，不要在 HTTP 层假装没配置。
+28. **[P2] `book/catalog.lua` 用 pcall 包自家模块。** [`resolveSource`](book.koplugin/book/catalog.lua#L338) `pcall(registry.resolve)` + `pcall(require, "utils.log")`；同文件 L377 `shelfCaches`、L859 `volumeParent`（双重 pcall）、[`detail/init.lua`](book.koplugin/desktop/detail/init.lua#L172) `pcall(owner.statsIdentities)`。源实现抛错应冒到 Guard 弹错误页；现在是书单 / 统计静默算错。全部去 pcall。
+29. **[P2] 为测试桩写的生产分支。** [`source/toc.lua`](book.koplugin/source/toc.lua#L128) `setWords` 注释「books_db 桩缺 getToc 时不硬崩」，`Toc.put` 真失败（磁盘满、锁表）章节字数静默丢；[`reader/prefs.lua`](book.koplugin/reader/prefs.lua#L104) 「SaveSettings 没挂上（离线桩）时」再采一遍（生产 `ui.handleEvent` 恒存在）；[`utils/mem.lua`](book.koplugin/utils/mem.lua#L22) `pcall(require, "util")`；[`http/dns.lua`](book.koplugin/http/dns.lua#L69) `pcall(require, "ffi")`（LuaJIT 必有）。给桩补缺口，删生产分支。
+30. **[P2] 同一函数一处 pcall 一处不 pcall。** [`remote/init.lua`](book.koplugin/features/remote/init.lua#L1437) `pcall(require("utils.log").flush)` vs L1281 直接调。删 pcall。
+31. **[P2] `source/registry.lua` 对外部源 `new()` 包 pcall 只打日志。** 第三方 `extensions/*.koplugin` 构造抛错源直接从列表消失，用户看不到原因。属入口，应走 `ui/guard`。
+32. **[P2] `ime/convert.lua`** [`pcall(writeFile)`](book.koplugin/features/ime/convert.lua#L170) 注释写明「job 回调抛错会被吞、done 不来」——根因是 `workers/job.lua` 回调没经 Guard，应修 job 而不是每个调用方 pcall。
+33. **[P3] 业务内部用 Guard 兜底。** [`lockscreen/danxiangli.lua`](book.koplugin/features/lockscreen/danxiangli.lua#L59)、[`lockscreen/components/cover_prefetch.lua`](book.koplugin/features/lockscreen/components/cover_prefetch.lua#L25)（pcall + Guard）。compose 内部，抛错应冒到 `compose.build` 的 nextTick 入口。
+34. **[P3] pcall 后静默回退无日志。** [`rare/overlay.lua`](book.koplugin/features/rare/overlay.lua#L132) `annFace` / L167 `annInk` / L270 `scanHits`（吞掉 CREngine 抛错后把「没命中」当「没生字」）；[`remote/logs.lua`](book.koplugin/features/remote/logs.lua#L80) `pathRoots` 裸 pcall 回空表；[`qidian/fock.lua`](book.koplugin/source/qidian/fock.lua#L31) `fontData` 坏 JSON → nil → 走明文路径出乱码而非报错；[`kindle/init.lua`](book.koplugin/source/kindle/init.lua#L72) `query` 打开 / 查询整段 pcall 回空表，原生库损坏时 `allow_empty = true` 的 reconcile 会把全部 kindle 书下架；[`ui/widgets/book.lua`](book.koplugin/ui/widgets/book.lua#L507) `pcall(owner.coverRequest)`（v0.2.0 前是直接调）。
+35. **[P3] 契约幻觉。** `cb` 判空（`qimao/init.lua`、`changpei/init.lua` 的 `if cb then`，`SourceBase` 接口 cb 必填）；[`legado/init.lua`](book.koplugin/source/legado/init.lua#L93) / [`iread/init.lua`](book.koplugin/source/iread/init.lua#L201) `withRow` 的 `fn(cached) or SourceBase.defer(...)`（fn 契约必返回句柄）；[`source/wechat/progress.lua`](book.koplugin/source/wechat/progress.lua#L98) `pos.extra = pos.extra or {}` 在 L96 已解引用之后；[`lockscreen/typo.lua`](book.koplugin/features/lockscreen/typo.lua#L803) `tonumber(rect.w) or 1`、`typo_text.lua` 全文 `tostring(text or "")`；[`subscribe/remote.lua`](book.koplugin/features/subscribe/remote.lua#L713) `Remote.handle` 整段 pcall → 500（该在 `ext_route.dispatch` 一处做，cookie 没做所以行为分叉）。
+36. **[P3] 裸 `_` 违反仓库规则（新增）。** [`desktop/pages/setting/desktop.lua`](book.koplugin/desktop/pages/setting/desktop.lua#L147)、[`remote/logs.lua`](book.koplugin/features/remote/logs.lua#L188)、[`crypto/des.lua`](book.koplugin/crypto/des.lua#L124)、[`crypto/aes.lua`](book.koplugin/crypto/aes.lua#L61)、[`source/wechat/package.lua`](book.koplugin/source/wechat/package.lua#L64)、[`ui/fonts/mixed.lua`](book.koplugin/ui/fonts/mixed.lua#L44)、[`utils/svg.lua`](book.koplugin/utils/svg.lua#L218)、[`yuewen_fonts/init.lua`](book.koplugin/source/yuewen_fonts/init.lua#L91) 等 14 处。无 `goto`、无 `isOnline`。
+37. **复核为合法的防御（勿删）：** `bc200b1f` 的 `block.bold and not block.color`（Blitbuffer `Color*` 是 ffi cdata，与 nil 比较会炸，有 spec）；`wallpaper/init.lua decodeSurface`（用户图）；`lockscreen/render.lua paintBackground`；`readability.lua#L1405` 的 pcall（任意网页 → 退回 `Parse.article`，注释写清）；`remote/init.lua#L648` 解压路径校验；`subscribe/init.lua#L55` 私网判定 + DNS rebinding 复查；`rare/lookup.lua#L229` pcall 第三方扩展；`dns.lua` 报文校验；`request/init.lua#L298` 206 / Content-Range 核对；`xiaoxiang/client.lua#L64`、`qimao/client.lua#L50`、`iread/client.lua#L73`、`jdread/client.lua isLoginFailure` 对网络响应的解析。
 
-10. **[P2] `main.lua` 吞掉 `Wake.boot` 失败。** [`main.lua`](book.koplugin/main.lua#L40)：`pcall(Wake.boot)` 无检查、无日志（对比上行 `logger.boot` 至少 warn）。掩盖：`.running` 标记失败、异常退出诊断失效。
-    最小方案：与 boot banner 同级记 warn，或去掉 pcall。
+### 四、可能存在的 bug，按影响排序
 
-11. **[P2] `Toc.setWords` 对不抛错的 API 再套 `pcall` 且忽略 `put` 失败。** [`source/toc.lua`](book.koplugin/source/toc.lua#L133)–L138。契约：`Toc.read`/`put` 返回值表达失败，不抛。掩盖：字数回填静默丢，页码估算长期错。
-    最小方案：直接调用；`put` 失败 `logger.warn`。
+#### 安全边界（features/remote）
 
-12. **[P2] 起点 VIP 字体 JSON 坏了仍当成功。** [`source/qidian/fock.lua`](book.koplugin/source/qidian/fock.lua#L29)：decode 失败 → `{ data = {} }`。上游已保证 `randomFont` 是 string。掩盖：乱码章节看起来「解密成功」。
-    最小方案：失败向上报字体解密失败；去掉空表兜底。
+前置：远程管理 HTTP 服务**无鉴权**，只有 Host 字面量 + Origin 同源检查（[`server.lua`](book.koplugin/features/remote/server.lua#L474)）；局域网任何 `curl` 都是合法客户端；`kindleHole` 还会开 iptables。`Remote.start` 把 `waitEvent` 包成 `Guard.call`，抛错即 `Remote.stop()` 并弹错误页（[`init.lua`](book.koplugin/features/remote/init.lua#L1462)）。
 
-13. **[P3] Rare 注音度量失败静默常量。** [`features/rare/overlay.lua`](book.koplugin/features/rare/overlay.lua#L168) 附近：`pcall` 失败硬编码 `{ em = 1.3, bottom_em = 0.3 }` 无日志。掩盖：对齐怪却不知道字体挂了。
-    最小方案：warn + 禁用 overlay 或显式失败。
+1. **[P1，代码路径明确] `GET /api/backup` 无鉴权整包导出全部凭证。** [`backup.lua`](book.koplugin/features/remote/backup.lua#L233) GET 即 `_sendBuiltZip`；文件头自己写明「含登录态、Cookie、令牌、API Key、WebDAV 密码、锁屏密码哈希」。同一服务里 `logs.lua` 花 920 行脱敏、`zipPaths/copyTree` 跳过 `isSecret`，而这一条路由把它们全给出去。最小方案：备份只在设备端导出到文件；或 HTTP 下载前设备弹一次确认 / 一次性口令（`Remote._once` 已有机制，`init.lua#L1553`）。
+2. **[P1，代码路径明确] `POST /api/reset` 无鉴权删掉 `settings/` 整目录 = 远程拆除锁屏密码。** [`backup.lua`](book.koplugin/features/remote/backup.lua#L252) → `init.lua#L1314 resetConfig` → `backup.lua#L116 clearConfig rmtree(settings_dir)`；passcode 的 `hash/salt` 在 `settings/passcode.lua`。`Remote.onResume` 特意等 `afterUnlock` 才起服（L1517），说明意图是密码保护远程管理，但服务一旦在跑，`curl -X POST /api/reset` → 重启 → 无密码。最小方案：`clearConfig` 跳过 `passcode.lua`，或 reset 必须设备端确认。附：`clearConfig` 永远返回 true（`rmtree` 不看 `os.remove` 结果），删除失败用户看到「已清除」。
+3. **[P1，代码路径明确] 一个畸形请求关停整个远程服务（DoS），三条路径。** `GET /api/cookie/login?data=<非 JSON>`：[`cookie/remote.lua`](book.koplugin/features/cookie/remote.lua#L91) `utils.json.decode` 抛（[`utils/json.lua`](book.koplugin/utils/json.lua#L46) 透传 luajson、默认 throw）→ [`ext_route.lua`](book.koplugin/features/remote/ext_route.lua#L80) `dispatch` 对 GET 无 pcall → `Guard.call` 失败 → `Remote.stop()` + 设备弹错误页；`POST /api/zip` 非 JSON（`file.lua#L360`）；`POST /api/settings` 非 JSON（`settings_route.lua#L17`）。离线测试用 [`json_stub.lua`](tests/support/json_stub.lua#L113) 替身测不出。最小方案：一·5 的 `_acceptJson` + `dispatch` 对 `item.handle` 一次 pcall → 500 + 日志。
+4. **[P1，代码路径明确] `Backup.restore` 「失败不动现有数据」的承诺在 replace 阶段不成立。** [`backup.lua`](book.koplugin/features/remote/backup.lua#L146) `replace()` 先 `rmtree(dest)` 再 `os.rename`；rename 失败（L209）只清 staging，dest 已删无回滚。恢复跑在 fork 子进程、主进程还活着（`init.lua#L1296`），主进程任何 `Settings.save` 在 rmtree 与 rename 之间重建 `settings/x.lua` → ENOTEMPTY → 旧设置已删、备份未落地。`book.sqlite3` 同理（主进程任何 DB 调用会重开连接）。最小方案：`dest → dest.old` / `staging → dest` / 成功后删 `.old`，失败挪回。
+5. **[P2，代码路径明确] 日志打包在 fork 子进程里跑 sqlite 与源实例构造。** [`init.lua`](book.koplugin/features/remote/init.lua#L1437) `buildLogsZip` 整个交给 `runFilesystem`（light = fork）→ [`logs.lua`](book.koplugin/features/remote/logs.lua#L621) `BookDB.* / DB.rowexec / DB.query`、L550 `Registry.create`。违反 [`workers/job.lua`](book.koplugin/workers/job.lua#L10) 「子进程禁止碰库」。最小方案：`gatherExtras` 在主进程算完，只把 `extras` 传给子进程。
+6. **[P1，代码路径明确] `GET /api/zip?id=` 在 Kindle 上下到 0 字节。** [`file.lua`](book.koplugin/features/remote/file.lua#L419) `io.open` 后立刻 `os.remove`；[`server.lua`](book.koplugin/features/remote/server.lua#L826) 自己的注释写着「Kindle `/mnt/us` 是 FUSE，打开后立即 unlink 再读会读到 0 字节」，`47a563db` 只修了 logs 路由。响应头 `Content-Length` 是真实大小，body 读不出 → 截断包。最小方案：照 `_sendBuiltZip` 用 `conn.temp` 由 `_kill` 删。
 
-### 四、性能 / 卡顿（Kindle 低端），按影响排序
+#### 数据正确性 / 成功谎言
 
-14. **[P1，代码路径明确] 休眠锁屏 miss 时主线程同步整屏合成。** [`features/lockscreen/init.lua`](book.koplugin/features/lockscreen/init.lua#L87)–L98 在 `Screensaver.setup`（`event == nil`）里同步调 `M.refresh`；本地背景时 [`compose.lua`](book.koplugin/features/lockscreen/compose.lua#L139)–L156 `Background.ensure` 同步回调后立刻 `Render.write`（解码 + 画块 + 写 PNG，见 [`render.lua`](book.koplugin/features/lockscreen/render.lua#L147)）。模块头注释写明「变了就当场重画」。触发：改锁屏设置/主体/背景后按电源键。Kindle：休眠路径上用户已在等，整屏 RGB 画布 + 闪存写盘常见数秒卡死。
-    最小方案：休眠只接受缓存命中；miss 用旧图/纯色先过，合成挪到唤醒后或 `workers.job`（编码可子进程）；不要在 `setup` 同步等在线资源。
+7. **[P1，已复现] 纯 Google Drive 配置下所有云同步必崩。** [`source/local/webdav.lua`](book.koplugin/source/local/webdav.lua#L828) `serial()`：`self.cfg.webdav_url .. "\0" .. ...`。[`setting.lua`](book.koplugin/source/local/setting.lua#L106) `authorizeGoogle` 只写 `cloud/gdrive_token/gdrive_client`，`utils/settings.getSource` 注释明确「无默认值」，`client.lua` 处处 `cfg.webdav_url or ""` 说明 nil 是正常态。`scanWebdavAsync#L902`、`pushBookAsync#L985`、`backgroundUpload#L860` 全经 `serial` → `attempt to concatenate a nil value`。[`cloud_spec.lua`](tests/source/local/cloud_spec.lua) 的 cfg 没有 `webdav_url` 但不走这几条路径，所以绿。今天合入的 `a230db19`。最小方案：key 用 `cloudKind + 对应凭证`；补一条 gdrive `scanWebdavAsync` spec。
+8. **[P1，代码路径明确] 全文抽取不检查写盘，半截正文变「排版版」并污染 X-Ray 游标。** [`reflow/extract.lua`](book.koplugin/features/reflow/extract.lua#L60) `appendPage` 与 L194 对 `file:write/close` 不看返回值；磁盘满 / IO 错时 `run` 照常回调成功，[`reflow/init.lua`](book.koplugin/features/reflow/init.lua#L116) 只检查 meta 写入就把 `books.path` 切过去；X-Ray [`xray/ui.lua`](book.koplugin/features/xray/ui.lua#L171) `withText` 吃同一份文件，段游标按「正文长度 + 段数」校验，截断正文生成错的 digest 永久写进 `xray_scan`。最小方案：`assert(f:write(...))`、`assert(f:close())`（[`ime/convert.lua`](book.koplugin/features/ime/convert.lua#L55) `writeFile` 已是正确写法）。附：临时文件名 `reflow_extract_<os.time()>.txt` 秒级碰撞；AGENTS 写的 `reader/extract.lua` 不存在，xray 实际 require `features.reflow.extract`（跨 feature）。
+9. **[P1，代码路径明确] jjwxc 进度「推送成功」是假的，脏行永不收敛，每次唤醒入队空任务。** [`jjwxc/init.lua`](book.koplugin/source/jjwxc/init.lua#L146) `putProgressAsync` 直接 `defer(cb, true)`，同时 L130 `syncProgressAsync → skipped`。[`reader/session/progress.lua`](book.koplugin/reader/session/progress.lua#L188) 每次翻页写 `sync_status=0`，没人确认；[`base.lua`](book.koplugin/source/base.lua#L257) `dirtyDomains` 只看 `progress_db.unsynced(id)`，永远含 `syncProgressAsync`；[`main.lua`](book.koplugin/main.lua#L75) 每次启动 / 唤醒 / 联网为 jjwxc 入队 `dirty\0jjwxc`，任务 skipped 后报 ok、脏行原样留着。kindle 源同理（无 `putProgressAsync`，`configured()` 在 Kindle 上恒真，`library_mixed` 开启时顶栏 cache 项会闪「执行中」，`待确认边界`）。最小方案：删两个桩；`dirtyDomains` 只统计源真有 `put*Async` 的域，或 `ProgressDB.upsert` 对无远端进度的源直接写 `sync_status=1`。
+10. **[P1，代码路径明确] 续传 416 让 `.part` 永久卡死。** `.part` 已 ≥ 文件长度（上次写完没 rename、服务器文件变短）→ 带 `Range` → 416 → [`stream.lua`](book.koplugin/http/request/stream.lua#L138) 产出 `"HTTP 416"` → [`init.lua`](book.koplugin/http/request/init.lua#L350) `opts.resume` 为真不删 `.part` → 下次仍 416。五个调用方（dictionary / update / ocr / fonts / ime）都会撞上。最小方案：`on_headers` 里 `code == 416` 时 `os.remove(tmp)` 并 abort，下次全量。`待确认边界`：206 不核 ETag / Last-Modified、不发 `If-Range`，镜像链换源续传时两个源版本不同拼出坏文件（字典 / 词库 / 更新包有 sha256 兜底，字体 [`catalog.lua`](book.koplugin/ui/fonts/catalog.lua#L271) 只靠魔数；同文件 L218 注释「删掉残留 zip」实际删的不是 `.part`）。
+11. **[P2，代码路径明确] 上传任务被拒时反而并发跑第二份。** [`desktop/sync.lua`](book.koplugin/desktop/sync.lua#L152) `Tasks.enqueue{ key="books-upload\0id" }` 返回 nil 的常见原因是同 key 已在执行，代码却 `start(noop, noop)` 直接起第二个上传，无进度无回调。最小方案：返回 nil 时按 `task_dialog.rejected` 提示并 return；`queue_full` 才退回。
+12. **[P2，待确认边界] 远端索引里缺的书 → 删本地文件。** [`webdav.lua`](book.koplugin/source/local/webdav.lua#L298) `pullBooksSync` 对 books.sync 里没有的本地同步书删原文件 + 立墓碑。「远端删 → 本地删文件」不可逆，与「本地是唯一真相」相反；任一设备上传残缺 `books.sync` 就连锁删文件。至少只标 `hidden/deleted`，文件留到下轮 reconcile。
+13. **[P2，待确认边界] 「保存为默认」清掉所有书的 per-book 排版。** [`reader/prefs.lua`](book.koplugin/reader/prefs.lua#L281) `saveDefaults` → [`books_db.lua`](book.koplugin/book/books_db.lua#L1081) `replaceAllReaderPrefs` 用当前书整包 prefs（含 `doc` 里 `text_lang/hyphenation/css/preferred_dictionaries`）覆盖 `WHERE reader_prefs IS NOT NULL` 每一行，不可恢复。最小方案：只覆盖 `copt`/字体，或置 NULL 让 `fromDefaults` 注入。
+14. **[P2，待确认边界] 统计拉取全有或全无。** [`stats_db.lua`](book.koplugin/book/stats_db.lua#L271) `add` 对 `duration<=0 且非 cloud_session` 返回 false；L384 `replaceSynced` 任一 add 为 false 则整事务回滚 → 整源统计 pull 永远失败且每轮重试；`synced_books` 模式还先 `DELETE page/page_rollup WHERE sync_status=1`，远端某本书 json 丢了本地已同步记录随之删光。坏记录应跳过而不是回滚整批。统计索引 `Stats/index.json` 读-改-写无 If-Match（[`remote_data.lua`](book.koplugin/source/local/remote_data.lua#L335) 注释自己承认），双设备互相覆盖。
+15. **[P2，代码路径明确] 微信进度拉取「定位失败 = 整条进度丢弃」。** [`wechat/init.lua`](book.koplugin/source/wechat/init.lua#L576) `Position.loadAsync` 或 `localize` 任一失败 → `cb(nil, err)`，远端明明给了 `chapter_idx + chapter_fraction` 可降级到章级。[`wechat/chapter.lua`](book.koplugin/source/wechat/chapter.lua#L514) 正文已取到、划线定位缓存 `remember` 写盘失败却 `cb(nil, cache_err)` 不让读（`待确认边界`）。增量同步 `bookCount` 为 nil 时跳过对账（L291，`待确认边界`）。
+16. **[P2，代码路径明确] `Shelf.reconcile` 的 `allow_empty = force` 把「强制」和「允许空书架下架全部」绑在一起。** [`source/shelf.lua`](book.koplugin/source/shelf.lua)：手动刷新时远端返回空数组（登录态半失效只返回空壳成功）会把本地整架标删。iread [`client.lua`](book.koplugin/source/iread/client.lua#L135) 对空书架额外探 `/user/home`，说明作者知道风险但只有 iread 做了。`待确认边界`。
+17. **[P2，代码路径明确] 订阅「阅读范围」只增不删。** [`subscribe/db.lua`](book.koplugin/features/subscribe/db.lua#L305) `SubDB.scope` 对每个（源 / 分组 / 模式 / **搜索词**）组合 `INSERT OR IGNORE` 一行 `sub_scopes`，随即以 `s<md5>` 登记 toc 缓存、隐藏 books 行、章节文件；全仓没有 `DELETE FROM sub_scopes`，[`Subscribe.remove`](book.koplugin/features/subscribe/init.lua#L521) 只清 `tostring(feed.id)`。每搜一个词再点开一篇 = 永久多一本带章节缓存的隐藏书。
+18. **[P2，代码路径明确] 订阅图片下载无大小上限。** [`subscribe/init.lua`](book.koplugin/features/subscribe/init.lua#L26) 一行孤儿注释「单张图片上限。」后面没有常量；L190 `imageDownloader` `chunks` 无限累积，[`source/assets.lua`](book.koplugin/source/assets.lua#L147) 也不限。RSS 一张 30 MB 原图把 Kindle 拖进 OOM。对照同文件 `get()` 的 `MAX_PAGE` 边收边断。
+19. **[P2，代码路径明确] `utils/db.lua` 空结果集语义按有没有参数分叉。** [`db.lua`](book.koplugin/utils/db.lua#L166) `if argc > 0 and result == nil then result = {} end`——带参零行回 `{}`，不带参仍回 nil；注释说「一律交空表」。改成无条件。
+20. **[P2，代码路径明确] 设置键改名没迁移。** v0.2.0 `features/keyboard/setting.lua` 用 `features.keyboard.enabled`（默认 true）；`52fda8fd` 并入 [`ime/hide_key.lua`](book.koplugin/features/ime/hide_key.lua) 读 `features.ime.hide_key`；[`utils/settings_legacy.lua`](book.koplugin/utils/settings_legacy.lua) 没有 `keyboard` 条目。关过收起键的用户升级后被重新打开。
+21. **[P2，代码路径明确] `bars` 写 KOReader 全局设置不回滚。** [`bars/init.lua`](book.koplugin/features/bars/init.lua) `setSystemTop` 在顶栏高度为 0 时 `G_reader_settings:saveSetting("cre_header_clock", 1)`，关 bars 或卸插件后 CREngine 自带页眉时钟莫名打开。改 doc 级属性或像 `lockscreen/settings.lua` 一样记快照还原。
+22. **[P2，待确认边界] `syncAwake` 把别人置的 `pause_auto_suspend = true` 清成 false。** [`workers/tasks.lua`](book.koplugin/workers/tasks.lua#L109) `want = busy or share.keepalive`，与上次不同就整体写入；KOReader autoturn、reMarkable / Sony 设备层都写 true，只豁免了 `keepalive`。自动翻页开着 → 月读缓存任务结束 → 写回 false → 设备休眠。最小方案：升旗记 `prev`，降旗还原。
+23. **[P2，代码路径明确] `store/zlib/client.lua` 把镜像 Basic 凭据明文写进源码随 Release 分发。** [`client.lua`](book.koplugin/store/zlib/client.lua#L90) `MIRROR_AUTH`。凭据被撤掉时所有用户同时失效；至少挪到 manifest / 远端配置。
 
-15. **[P1，代码路径明确] 壁纸在 `paintTo` 路径上主线程全屏解码。** [`features/wallpaper/init.lua`](book.koplugin/features/wallpaper/init.lua#L265)–L321：`surface` 在 key miss 时 `renderImageFile` + `ImageWidget:paintTo`；`paintTo`/`modal.backdrop` 每帧可走进这条路径直到缓存命中。开书阅读壁纸 [`onReaderReady`](book.koplugin/features/wallpaper/init.lua#L454)–L468 再同步解码并 `writePNG`。Kindle：弹窗首开/换图/分辨率变化时 UI 冻结；与 CREngine 开书叠加更痛。
-    最小方案：对齐 [`ui/themes/widgets/image/core.lua`](book.koplugin/ui/themes/widgets/image/core.lua) 的预算队列；`paintTo` 只 blit 已就绪 bb；预解码用 `nextTick`；阅读壁纸推迟到首帧后。
+#### 异步句柄丢失 / 取消失效（同一个坑六处）
 
-16. **[P1，代码路径明确] 锁屏 insight 主体合成时同步跑完整 `readingInsight`。** [`features/lockscreen/insight.lua`](book.koplugin/features/lockscreen/insight.lua#L91) → [`book/catalog.lua`](book.koplugin/book/catalog.lua#L696)–L709（`summaryBySource` / `daily*` / `hourly*` / `sessionRows(400天)` / `progressBooks`）再 `PAGE_MODULES[id]:build`。与 **#14** 叠在休眠路径上。Kindle：多段聚合 SQL + 半套 Insight 组件树 `getSize`。
-    最小方案：锁屏只用轻量 KPI 快照，或 insight 主体禁止 miss 时同步合成、只复用已生成 `compose.png`。
+24. **[P1，代码路径明确] fanqie 漫画归档已就绪时取消句柄丢失。** `fanqie/init.lua` `fetch` 里 `if Cbz.ready(...) then return Base.defer(cb, { file = archive }) end` 没把句柄写回 `h.job`，外层已把 `h` 返回；用户在这一 tick 内取消后 cb 仍投递，章节文档在取消后被打开。
+25. **[P1，代码路径明确] jjwxc `probePaid` 用过期目录覆盖新目录。** [`jjwxc/init.lua`](book.koplugin/source/jjwxc/init.lua#L201)：`Web.paidAsync` 句柄没记在 `self` 上（只记布尔 `self.probing`），`loadTocAsync#L230` 拉到新目录 `Toc.put` 后，在飞的 `paidAsync` 回调拿旧章节表 `markPaid` 再 `Toc.put`，把新目录写回旧版本；换书 / 退出源也不取消。
+26. **[P2，代码路径明确] gdrive 取消句柄被同步回调覆盖。** [`gdrive.lua`](book.koplugin/source/local/gdrive.lua#L184) `state.job = self:tokenAsync(cb)`；token 已缓存时 `tokenAsync` 同步调 cb（L218 `cb(self.access); return cancelledHandle()`），cb 里刚拿到真正 HTTP 句柄又被哑句柄盖掉 → 此后 `cancel()` 空操作。`listAsync#L386` 在 `self.ids` 命中时同样。[`source/local/common.lua`](book.koplugin/source/local/common.lua#L425) `putText` 的 `active = active or directory_job` 已是正确写法。
+27. **[P2，代码路径明确] legado 进度推送句柄未保存。** [`legado/init.lua`](book.koplugin/source/legado/init.lua#L127) `Client.saveProgressAsync` 返回值没写入返回句柄，`book/progress.lua` 的 `cancel()` 空操作。
+28. **[P2，代码路径明确] `store_cache.through` 回落路径丢句柄。** [`store_cache.lua`](book.koplugin/source/store_cache.lua#L86) 缓存值解不开时 `load(cb)` 返回值丢弃；真正的网络请求不可取消。
+29. **[P2，代码路径明确] jjwxc app 协议书架重试不可取消 + 模块级状态。** [`protocols/app.lua`](book.koplugin/source/jjwxc/protocols/app.lua#L240) `shelfAsync` 只返回第一次请求的 job，`relogin` 后二次请求无句柄；L218 `waiters` 模块级，两个源实例共享。[`changpei/client.lua`](book.koplugin/source/changpei/client.lua#L55) `renewing` 模块级单飞标志，取消的 HTTP 不回调时卡住到重启（`待确认边界`）。[`ime/download.lua`](book.koplugin/features/ime/download.lua#L30) `M._downloading` 同类（`install` 不返回取消句柄）。
+30. **[P2，待确认边界] 详情页缓存任务同样的覆盖模式。** [`detail/actions.lua`](book.koplugin/desktop/detail/actions.lua#L116) `stage = source:cacheAllChaptersAsync(...)`，0 章待缓存时若同步回调，`reviews()` 里设的 `Prefetch.run` 句柄被盖掉。
 
-17. **[P1，代码路径明确] 全书正文一次性进内存。** [`features/reflow/extract.lua`](book.koplugin/features/reflow/extract.lua#L106)–L151：`pages[]` + `table.concat(pages, "\n")`；[`features/xray/ui.lua`](book.koplugin/features/xray/ui.lua#L173) / [`features/reflow/init.lua`](book.koplugin/features/reflow/init.lua#L144) 走同一入口。批间 `later` 只防卡死，不降峰值内存。Kindle：百万字级字符串 + Lua 表易 OOM。
-    最小方案：按页追加临时文件；X-Ray `Fetch.chunks` 读窗口，禁止先 concat 全书再切。
+#### 网络层
 
-18. **[P2，代码路径明确] Rare 翻页：主线程读生字本全表 + 加载词库全文，再进子进程扫。** [`features/rare/overlay.lua`](book.koplugin/features/rare/overlay.lua#L345)–L353 在 `job.run` **之前**调 `catalog.active()` / `vocab.set()`；[`vocab.lua`](book.koplugin/features/rare/vocab.lua#L46) `SELECT word FROM vocabulary` 无 LIMIT；[`catalog.lua`](book.koplugin/features/rare/catalog.lua#L81) `read("*a")` + `Lexicon.parse`（有 mtime 缓存，冷启动/换库仍痛）。`paint` 每帧 [`get("features.rare")`](book.koplugin/features/rare/overlay.lua#L390)。
-    最小方案：把 vocab/catalog 加载挪进子进程或预热；`paint` 缓存 `rare_enabled`。
+31. **[P2，代码路径明确] DNS 对 rcode≠0 的应答立即定局，一个 SERVFAIL / REFUSED 就让备选 DNS 白配。** [`dns.lua`](book.koplugin/http/dns.lua#L264) `rcode 2/5` 当「有效应答」→ L317 第一个到的就 `udp:close(); cb(nil, err)` → 记 10 秒失败。模块头注释的场景「路由器 DNS 挂了不用等它超时」只覆盖**不应答**；dnsmasq 上游断了是秒回 SERVFAIL，运营商 DNS 对境外域名常回 REFUSED。所有网络请求都走这条路。最小方案：rcode≠0 且≠3 返回 `"soft"`，`poll` 记 `last_err` 继续等，deadline 到才 fail。
+32. **[P2，代码路径明确] DNS 彻底绕开 `/etc/hosts`，也不再回退 getaddrinfo。** [`dns.lua`](book.koplugin/http/dns.lua#L340) 只认 IP 字面量，其余一律 UDP；[`turbo/patch.lua`](book.koplugin/http/turbo/patch.lua#L96) 解析失败直接 `_handle_connect_fail`。v0.2.0 的 `socket.dns.getaddrinfo` 读 hosts；越狱 Kindle / Kobo 用户改 hosts 指向镜像 / 屏蔽域名升级后静默失效。最小方案：未命中缓存先查一次 `/etc/hosts`。
+33. **[P2，代码路径明确] `body_file` 打不开时发出带 Content-Length 的空 body，服务器等到超时。** [`fetch.lua`](book.koplugin/http/request/fetch.lua#L172) `io.open` 失败 `file` 为 nil → `pump` 首轮直接 `_headers_written_cb()`，头里 `Content-Length: body_size` 已写出；调用方（`dav.lua#L238`、`gdrive.lua#L501`）拿到「超时」而非「文件不存在」。中途断开 `file` 不关。
+34. **[P2，代码路径明确] xiaoxiang 每章翻页都打一次个人接口；字体下载不校验文件头。** [`xiaoxiang/client.lua`](book.koplugin/source/xiaoxiang/client.lua#L115) `authed` 每次 `call` 前 `userAsync`，`cacheAllAsync` 每章两次请求；L288 下载字节直接落盘交给 `yuewen_fonts.recognize`，HTML 错误页会被当字体写进缓存复用（qidian [`client.lua`](book.koplugin/source/qidian/client.lua#L389) `looksLikeFont` 有校验，该挪到 `yuewen_fonts`）。
+35. **[P2，代码路径明确] `Auth.ok` 策略分叉。** [`jdread/client.lua`](book.koplugin/source/jdread/client.lua) `decodeApi` 在任何成功响应（含匿名搜索 / 榜单）上调 `Auth.ok("jdread")`；qidian / qqreader / iread / qimao 只在凭证等于已保存凭证时调。登录过期弹窗后逛一次书城就把「已提示过期」清掉，下次再弹。
+36. **[P2，代码路径明确] `runWhenOnline` 10 处。** [`ocr/ui.lua`](book.koplugin/features/ocr/ui.lua#L70)、[`lockscreen/page.lua`](book.koplugin/features/lockscreen/page.lua#L61)、[`dictionary/ui.lua`](book.koplugin/features/dictionary/ui.lua#L191)、[`ui/widgets/fontpicker.lua`](book.koplugin/ui/widgets/fontpicker.lua#L205)、[`changpei/setting.lua`](book.koplugin/source/changpei/setting.lua#L56)（两处）、[`xiaoxiang/setting.lua`](book.koplugin/source/xiaoxiang/setting.lua#L55)、[`fanqie/setting.lua`](book.koplugin/source/fanqie/setting.lua#L37)、[`iread/setting.lua`](book.koplugin/source/iread/setting.lua#L95)。用户拒绝开 Wi-Fi 时回调永不来，进度窗 / 状态悬挂，与 AGENTS「离线立即失败并提示」冲突。`isConnected()` 为假直接 Toast。
 
-19. **[P2，代码路径明确] 书库每次 `listBooks` 先全表 `COUNT(*)`。** [`book/catalog.lua`](book.koplugin/book/catalog.lua#L394)–L426；`limit=1` 的随机书同样先 COUNT。图书馆筛选项 [`filters`](book.koplugin/book/catalog.lua#L600) 一次最多 6 路 `GROUP BY`。Kindle：万级书时翻页/筛选顿一下。
-    最小方案：翻页才 COUNT；随机用 `ORDER BY RANDOM() LIMIT 1`（待确认 SQL）；筛选项按当前页签 lazy。
+#### 性能 / 资源（Kindle）
 
-20. **[P2，代码路径明确] 书架 reconcile 大快照时主线程长事务逐本 upsert。** [`book/books_db.lua`](book.koplugin/book/books_db.lua#L377)–L404。Kindle：数千本同步时 UI 与 sqlite 抢锁。
-    最小方案：批量 UPSERT / 单事务 apply diff；重计算放子进程后主进程只写 diff（待确认事件顺序）。
+37. **[P2，代码路径明确] 海报字背景每次回桌面整屏重合成。** [`lockscreen/typo.lua`](book.koplugin/features/lockscreen/typo.lua#L822) `M.cache_key = os.time`；[`compose.lua`](book.koplugin/features/lockscreen/compose.lua#L18) 把 `cache_key()` 拼进 `dayKey`，`cacheValid` 永远不等 → 每次 `desktop.activated` 重跑 `render.lua#L363 hasAlpha` 全像素 Lua 循环与两份 RGB32 整屏拷贝。回桌面卡顿的直接原因。`cache_key` 应返回关键词 + 字体 id + 日期。
+38. **[P2，待确认边界] `Toc.setWords` 在每章首次打开时整本目录重写。** [`source/chapter.lua`](book.koplugin/source/chapter.lua) 新增的 `ensure()` → [`toc.lua`](book.koplugin/source/toc.lua#L128) `Toc.read` 全量 JSON 解析 + `Toc.put` 全量写回。千章网文 `cacheAllAsync` 序列化目录一千遍。字数应落 `chapters` 表该章行。
+39. **[P2，待确认边界] fork 子进程复用主进程 sqlite 句柄。** [`ime/convert.lua`](book.koplugin/features/ime/convert.lua#L165) `kind="heavy"` 跑 `build` → `markup` → [`ime/script.lua`](book.koplugin/features/ime/script.lua#L27) 模块级 `conn`；候选栏在主进程早已用过，fork 时子进程继承已打开的 ljsqlite3 句柄。只读库，风险是读到坏页。
+40. **[P2，代码路径明确] `utils/modules.lua` 的 `package.loaders[2]` 拦截全进程 require。** [`modules.lua`](book.koplugin/utils/modules.lua#L55) 索引键是 `a/b`，任何插件 `require("utils.text")`、`require("ai")`、`require("menu")`、`require("l10n")` 都拿到月读的模块；同机其它 koplugin（`utils/`、`ui/` 极常见）撞名就加载错代码且无报错。最小方案：loader 里 `debug.getinfo(3, "S").source` 以 `"@" .. ROOT` 开头才命中。
+41. **[P3] N+1 与重复计算。** [`catalog.lua`](book.koplugin/book/catalog.lua#L910) `recentRows` 每行 `BookDB.get + isDownloaded`；L961 `readingInsight` 同时调 `summaryBySource` 与 `dailyBySource`，各自跑一遍 `mergedDailyRows` 整表扫描；[`utils/rotation.lua`](book.koplugin/utils/rotation.lua#L75) 一次转屏 `remember` + `G_reader_settings:flush()` 两次；[`ui/themes/init.lua`](book.koplugin/ui/themes/init.lua#L108) `Theme.current()` 彩屏每次调用拼签名；[`wallpaper/init.lua`](book.koplugin/features/wallpaper/init.lua#L483) 模块级 `cache.bb` key 不含 bpp。
 
-21. **[P2，代码路径明确] 桌面每次 `paintTo` 等墨水刷新结束。** [`desktop/init.lua`](book.koplugin/desktop/init.lua#L432)–L440：`Screen:refreshWaitForLast()`。注释说明为防半帧错乱。Kindle：E-Ink 控制器慢时拉长整帧。
-    最小方案：仅全刷前 wait；`ui` 局刷跳过（需真机确认半帧是否再现）。
+#### 架构边界
 
-22. **[P2，代码路径明确] subscribe 公网检查同步 `dns.getaddrinfo`。** [`features/subscribe/init.lua`](book.koplugin/features/subscribe/init.lua#L94)。HTTP 侧已有 [`http/turbo/patch.lua`](book.koplugin/http/turbo/patch.lua#L14)–L47 缓存，但订阅探测仍直打 DNS。弱网/无网时阻塞到超时。
-    最小方案：复用 turbo DNS 缓存，或挪到 `workers.job`；失败短 TTL 记负缓存。
-
-23. **[P2，待确认边界] 设置页 `refresh_seconds` 默认 2s 轮询重建视图。** [`desktop/pages/setting/overlay.lua`](book.koplugin/desktop/pages/setting/overlay.lua#L122)–L129。哪些 spec 开启待确认；开启时墨水屏频繁 `setDirty`。
-    最小方案：数值变才 patch；轮询 ≥5s。
-
-24. **[P3 / 已缓解]** 业务侧未直接调用 `isOnline`（[`http/request/fetch.lua`](book.koplugin/http/request/fetch.lua#L58) 明确禁用）；封面异步队列有 `BUDGET_MS`；Rare/X-Ray 页扫进 `workers.job`；蓝牙 30s、顶栏按分钟——这些方向正确。大量设置页仍用 `NetworkMgr:runWhenOnline`（是否内部同步 DNS：**待确认**，`translate` 注释已警告 `willRerunWhenOnline`）。
-
-### 五、其它正确性（非性能）
-
-25. **[P2，代码路径明确] `reader/session/document_toc.lua` 填充 TOC 的 `pcall` 不读返回值。** 失败被当成「无目录」。最小方案：warn + 明确 fallback。
+42. **[P2，代码路径明确] `rare/lookup.lua` 成了跨 feature 枢纽，与 `manage` 的「停用」矛盾。** 被 `dictionary/init.lua#L111`、`ai/explain.lua#L237`、`translate/init.lua#L43`、`baike/init.lua#L34` require，自己 require `translate.edge`（L500）、`baike.client`（L514）、`ai.explain`（L545）、读 `features.dictionary` 设置（L203），内置页签无条件登记。[`manage/init.lua`](book.koplugin/features/manage/init.lua) 的停用只是从 `Features.list/scan` 摘掉，注释自己承认「文件还在，照常 require」：用户停用 baike / translate 后查词面板照样出页签。features 内跨 feature require 共 24 对（`update→ime/rare`、`remote→update/passcode`、`passcode→lockscreen`、`xray→reflow`、`baike→rare`、`storage→subscribe`、`bars→panel`、`nightmode→panel`、`fontmap` 硬编码 `source_id ~= "subscribe"`）。最小方案：lookup 页签改 `Ext` 挂点；`manage` 的停用名单与「被别人 require 的 feature」互斥。
+43. **[P2，代码路径明确] AGENTS.md 与代码分叉。** 任务 `kind` 实际六类（[`tasks.lua`](book.koplugin/workers/tasks.lua#L78) 加 `convert`）+ `passive/hold/cancellable` 三个新字段（`passive` 全仓无人设置，为外部插件写的扩展点）；文档写五类且「重新排版 / 双语对照不入队」，而 [`bilingual.lua`](book.koplugin/features/translate/bilingual.lua#L438)、[`ime/convert.lua`](book.koplugin/features/ime/convert.lua#L213) 都以 `kind="convert"` 入队；`reader/extract.lua` 不存在。二选一：改 AGENTS，或撤回。
+44. **[P3] 其它。** [`copymanga/init.lua`](book.koplugin/source/copymanga/init.lua#L161) `local PERIODS / AUDIENCES` 声明两次，前一份死代码；[`iread/init.lua`](book.koplugin/source/iread/init.lua#L80) `addToShelfAsync` 调 `removeAsync`（收藏 toggle），离线加架 + 远端已有 → 联网后把书从远端移除；iread stable_id 由书名派生（`待确认边界`）；[`bluetooth/init.lua`](book.koplugin/features/bluetooth/init.lua#L48) `backend()` 把 `chosen=false` 永久记住，启动时守护进程没起来则整个进程蓝牙入口消失；[`lockscreen/typo.lua`](book.koplugin/features/lockscreen/typo.lua#L639) `register` 往 `FontList.fontlist` 头部插路径改 KOReader 全局表；L550 `prefetchKeyword` fire-and-forget `ai.chat` 不存句柄；[`backup.lua`](book.koplugin/features/remote/backup.lua#L256) `reset` 不进 `pending` 状态与其它异步路由分叉；[`subscribe/refresh.lua`](book.koplugin/features/subscribe/refresh.lua#L41) `settle` 清队列不回调 `on_feed`，网页端单源刷新可挂 30 分钟；[`readability.lua`](book.koplugin/features/subscribe/readability.lua#L338) `<head>` 内正文祖先链到不了 `body` 会 index nil 后退化（不崩）；[`turbo/patch.lua`](book.koplugin/http/turbo/patch.lua#L123) 把 `HTTPParser:get` 全局改成大小写不敏感；[`storage/setting.lua`](book.koplugin/features/storage/setting.lua#L46) 直接 require `subscribe.db` 触发建表。
 
 ## Linus 式方案
 
-1. **先砍休眠/绘制路径上的同步重活（#14–#16）**：缓存命中才进 `Screensaver.setup`；壁纸解码出 `paintTo`；insight 锁屏禁止现场重算。这是用户每天按电源键会踩到的。
-2. **再砍峰值内存（#17）**：extract 流式落盘，X-Ray/reflow 读窗口。
-3. **图书馆 / Rare 主线程 IO（#18–#20）**：COUNT 与全表 vocab 移出热路径；reconcile 批量写。
-4. **钉住分叉语义后再去重（#1–#2）**；删确认无调用转发（#6）；吞错先修 mirror/Wake/Toc/fock（#9–#12）。不要为去重发明 Service。
+1. **先修 P1 数据 / 安全正确性，一天内：** `/api/backup`、`/api/reset` 加设备端确认或下线（策略先定）；`_acceptJson` + `dispatch` pcall 止住 DoS；`webdav.lua serial()` 的 key 换 `cloudKind + 凭证`；`reflow/extract.lua` 写盘 `assert`；416 删 `.part`；fanqie `Cbz.ready` / jjwxc `probePaid` 句柄落实例；`/api/zip` 改 `conn.temp`；`Backup.restore` 改 `.old` 三步；jjwxc 删进度桩 + `dirtyDomains` 按能力统计。每条配 spec，先让 HEAD 的 4 个红测试绿回来。
+2. **用测试钉住分叉语义，再消除已确认的逐字重复：** fock 宿主 ×3、`deleteBookAsync` ×7、skipped 覆盖 ×8、`mine/step` ×9、cookie 登录 ×5、inflate ×3、哈希双栈、分片下载 ×3、UTF-8 切字 ×7+4、设置选择行 ×4。保持模块路径与公开签名，不造 Service / Manager。
+3. **删确认无调用方的死转发；无效防御只在契约明确处删：** 二节 21–26 全删；三节 28–32 的 pcall 去掉、给桩补缺口。`theme_color` legacy、五个别名令牌一起删。
+4. **架构债留到下个版本定策略：** feature 间 24 对静态 require 与 `manage` 的停用模型；`sub_scopes` 生命周期；DNS 的 SERVFAIL / hosts；`package.loaders[2]` 作用域；AGENTS 与 tasks 字段对齐。
 
 ## 代码检查
 
-**语法：** ✅ `./tests/run.sh` 全绿。
+**语法：** ⚠️ 离线测试 498 / 4 红（最近两次提交引入）；LuaLS 48 条注解警告（要求 0）。未在真机 / 模拟器跑。
 
-**逻辑：** ⚠️ 休眠锁屏 miss、壁纸 paintTo 解码、全书 concat 三条错误/慢路径未闭环到「不卡 UI」；mirror save 失败路径未暴露。
+**逻辑：** ❌ P1 共 11 条：3 条安全边界（备份导出、远程 reset、畸形 JSON DoS）、1 条恢复无回滚、1 条 FUSE 0 字节、1 条 gdrive nil 拼接（已复现）、1 条抽取写盘不校验、1 条 jjwxc 假成功、1 条 416 死循环、2 条取消句柄丢失导致取消后落库 / 开文档。
 
-**兼容性：** ✅ 本次未改代码。修复时必须保持：Screensaver 封面路径契约、壁纸 scope API、`Catalog.listBooks` 返回 `(rows, total)`、X-Ray `xray_scan` 指纹语义、源 `paragraphReviews*` 多态、HTTP 镜像配置键。
+**兼容性：** ✅ 本次未改代码。修复时必须保持：`SourceBase` 接口与 `Shelf.syncAsync(Remote)` 形状、`books.path` / 墓碑 / `sync_status` 语义、`settings/<name>.lua` 键名（补 `features.keyboard.enabled → features.ime.hide_key` 迁移）、`store.<id>` 模块名、远程管理现有路由路径与 JSON 回包形状、`Tasks.enqueue` 返回值契约、`patch/manager` 的 `definition.name`。
 
-验证记录：`./tests/run.sh` → **479 passed, 1 skipped, 0 failed (70767 assertions)**。真机未跑；P1 为代码路径审计，未在 Kindle 上计时复现。
+验证记录：`./tests/run.sh` 498 passed / 1 skipped / 4 failed / 60 241 assertions；`lua-language-server --check`（绝对路径）48 problems / 18 files；gdrive nil 拼接 luajit 直接复现；`Text.base64Decode` 60 KB 25 ms 基准。其余为代码路径审计。
 
 ## 过度设计
 
-**🟡 可接受**
-
-任务队列、job 边界、`isConnected`、封面预算队列方向正确。局部噪音：锁屏「缓存 + 同步重建」双轨、壁纸解码塞进绘制路径、源侧段评编排复制。不是该推倒重写的程度。
+**🟡 可接受。** 骨架方向正确（`SourceBase` + `Shelf` + `Chapter.vipFetcher`、`http/` 收口成 dns / timeout / mirror / 续传、remote 的 `web.routes` 挂点），没有新增 Service / Manager 转发层；问题是写第 N 份时没 grep——复制粘贴量约 1 500 行，以及 `workers/tasks.lua` 为一个外部调用方加的 `passive/hold/cancellable` 三字段、`crypto/` 与 `ffi/sha2` 的双栈在延长。
 
 ## 冗余
 
-* **无意义函数：** `fanqie.Client:officialGetContentAsync`（#6）
-* **无意义类：** 未发现
-* **无意义抽象：** 未发现新增 Manager/Factory；段评重复是复制而非错误抽象
-* **无意义判空：** 少量（Toc.setWords 对不抛 API 的 pcall）
-* **无意义转换：** `fock.lua` 对已是 string 的 `tostring(info.randomFont)`
-* **无意义异常处理：** mirror/Wake/Toc/fock/rare 度量（#9–#13）
-* **可删除代码：** 微信 `paragraphReviewsEnabled` 体可改为一行 `review_setting`；qidian/jjwxc `withChapterId` 可并一处
+* **无意义函数：** 6 个死 Mapper、`Lexicon.words/match`、`Refresh.running`、`Logs.settingsKeys`、`Manage.label`、`Client.DEFAULT_TIMEOUT`、`Fock.restore`、`shelfAsync→favAsync`、`bookshelf_multidetail_url`、`Kindle.helper`、`_safePath`、四个 `Features.* = External.*` 别名、`drawerOpensDesktop`、`rememberDerived`、`Setting.on`、jjwxc 两个进度桩。
+* **无意义类：** 未发现。
+* **无意义抽象：** 主题五个恒等 `accent` 的别名令牌；`theme_color` legacy 分支；`passive` 字段（全仓无人设置）。
+* **无意义判空：** `cb` 判空（qimao / changpei）、`fn(cached) or defer`（legado / iread）、`pos.extra or {}`（wechat/progress）、`tonumber(rect.w) or 1` / `tostring(text or "")`（typo）、`if not payload then 400`（settings_route 死分支）。
+* **无意义转换：** `Text.base64Decode` 的位串展开（应直接走 `mime.unb64`）；`md5bin` ×2 重做 `Hex.from_hex`。
+* **无意义异常处理：** `pcall(require, "utils.log"/"util"/"ffi")`；`pcall(registry.resolve)`、`pcall(Toc.read/put)`、`pcall(settings.get)` ×3、`pcall(log.flush)`、`pcall(owner.coverRequest)`、`pcall(owner.statsIdentities)`、业务内 `Guard.call` ×2、`Remote.handle` 整段 pcall。
+* **可删除代码：** 上述重复实现约 1 500 行 + `workers` 删掉的 README 已删；`copymanga` 重复声明的 `PERIODS/AUDIENCES`；`reader/prefs.lua` 为桩写的 20 行；`fock_wasm.lua` 不算（生成物）。
 
 ## 致命问题
 
-**按电源键锁屏时，若组合图缓存失效，主线程同步解码背景、跑 insight SQL、画整屏、写 PNG——低端 Kindle 上这就是数秒「假死」。** 壁纸 `paintTo` 首帧解码是第二号杀手。全书 concat 是第三号（内存）。
+远程管理开着时，同一 Wi-Fi 下任何设备一条 `curl http://<kindle>:9528/api/backup` 拿走全部账号 Cookie / 令牌 / WebDAV 密码 / 锁屏密码哈希，再一条 `curl -X POST /api/reset` 让设备重启成无密码状态；或者随便发个 `?data=x` 让服务连同错误页一起倒。这三条都在本周期新增，且设计者在同一服务里为日志脱敏花了 920 行——边界是知道的，只是新增路由没过这道边界。
 
 ## 最终结论
 
-**需要修改**
+**需要修改。**
 
-修正顺序：
-
-1. P1 性能：锁屏休眠路径只走缓存（#14）→ 壁纸解码出绘制路径（#15）→ insight 锁屏轻量化（#16）→ extract 流式（#17）
-2. P2 性能：Rare 主线程预载（#18）、COUNT/筛选（#19）、reconcile（#20）、subscribe DNS（#22）
-3. P2 正确性：mirror save / Wake.boot / Toc.setWords / fock 字体失败（#9–#12）
-4. P2/P3 去重与空转发：withChapterId、段评 helper、officialGetContentAsync（#1–#6）
-
-单行包装只删无调用且非兼容入口的。性能修复以「主线程不做重 IO/解码」为铁律，不要为「更通用」再加一层调度框架。
-
-## 已落地修复（同会话）
-
-| 项 | 改动 |
-|---|---|
-| #14 锁屏休眠 | `prepareSuspend`：只接管路径 / 过期图；重建改 `desktop.activated` |
-| #15 壁纸 | `paintTo` 只 blit 缓存；miss 时 `nextTick` 解码后 `setDirty`；阅读壁纸推迟首帧后 |
-| #16 insight | 同 `cache_key` 复用 `readingInsight` 结果 |
-| #17 extract | 边取边写临时文件，去掉 `pages[]`+concat 双峰 |
-| #18 Rare | 词库 parse 进 fork 子进程；`paint` 缓存开关 |
-| #19 抽书 | `listBooks{random=true}` 走 `ORDER BY RANDOM()`，首页不再 COUNT+OFFSET |
-| #22 DNS | subscribe 失败负缓存 10s |
-| #9–#12 | mirror save 记 warn；Wake.boot 记 warn；Toc.setWords 去吞错；fock 坏 JSON 抛错 |
-
-第二批已做：reconcile 只软删缺席行（#20）、filtersAsync 去掉分类/系列/作者三条 GROUP BY、起点/晋江 `with_chapter_uid` 去重。真机 Kindle 计时仍待确认。
+修正顺序：P1（安全三条 + gdrive nil + 抽取写盘 + 416 + 两条句柄丢失 + 恢复回滚 + FUSE 0 字节 + jjwxc 假成功）→ 让 HEAD 测试与 LuaLS 清零 → 用 spec 钉住 `dirtyDomains` / `allow_empty` / DNS rcode / 续传换源的语义 → 有限去重（一节 1–10 按 Rule of Three 已满足的顺序）。单行包装只删无调用且非兼容入口的；`runWhenOnline` 10 处与 24 对 feature 互引作为单独一轮，先定策略再动代码。
