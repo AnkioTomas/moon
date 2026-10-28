@@ -149,6 +149,18 @@ function Store.clearCache(source_id, stable_id, keep_cover)
     return ok, leftover
 end
 
+--- 软删除：清本地文档（保留封面），书留库里标 hidden，书架默认不显示；
+--- 元数据、进度、标注都在，可在书架筛选「软删除」里恢复。纯本地操作，不碰远端与同步状态。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function Store.softDelete(source_id, stable_id)
+    if not Store.clearCache(source_id, stable_id, true) then
+        return false
+    end
+    return BookDB.setHidden(source_id, stable_id, true)
+end
+
 --- 章节登记事务体：最新元数据、books.path、chapters 任一失败即返回错误。
 ---@param path string
 ---@param source_id string

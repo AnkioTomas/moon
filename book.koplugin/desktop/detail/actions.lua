@@ -341,8 +341,7 @@ function Detail:softDelete()
                 Toast:new{ text = _("本书正在后台缓存，请稍后再试"), timeout = 3 }:show()
                 return
             end
-            local ok = Store.clearCache(book.source_id, book.stable_id, true)
-            if not (ok and require("book.books_db").setHidden(book.source_id, book.stable_id, true)) then
+            if not Store.softDelete(book.source_id, book.stable_id) then
                 Toast:new{ text = _("软删除失败"), timeout = 3 }:show()
                 return
             end
