@@ -70,8 +70,16 @@ end
 local function new()
     -- 换源 / 改配置经 Registry.reload() 重建实例：顺手丢掉旧服务器的书架投影（05 A1）。
     Cache.resetShelf()
+    local settings = require("utils.settings")
+    local cfg = settings.getSource(ID)
+    -- 「多设备统计合并」开关已删除：Kavita 的统计以云端 reading-history 为准，本机离线差额不再补。
+    -- 旧版本可能已把键落盘成 true（核心只认 == true），这里清掉，避免删了开关反而锁死在开启。
+    if cfg.merge_local_stats ~= nil then
+        cfg.merge_local_stats = nil
+        settings.saveSource(ID)
+    end
     local self = setmetatable(meta(), Source) --[[@as KavitaSource]]
-    self.client = Client.new(require("utils.settings").getSource(ID))
+    self.client = Client.new(cfg)
     return self
 end
 
@@ -1087,13 +1095,15 @@ function Source:openEntry(ref, entry, toc, title, cb)
     end
 
     ---@param item table
+    ---@param start_page integer|nil 官方 / 旧版通道的起始页；增强版由 kamare 的 journal 决定
     ---@return table|nil viewer, string|nil code, string|nil message
-    local function show(item)
+    local function show(item, start_page)
         return Cache.open({
             base_url = self.client.base_url,
             api_key = self.client.api_key,
             entry = item,
             title = title,
+            start_page = start_page,
             on_close = function(page, total) closeProgress(item, page, total) end,
             on_next = function(next_id)
                 local next_entry = findEntry(toc or {}, tostring(next_id))
@@ -1103,21 +1113,68 @@ function Source:openEntry(ref, entry, toc, title, cb)
         })
     end
 
-    local viewer, code, message = show(entry)
-    if viewer then return cb(nil, nil, { handled = true }) end
-    if code == "offline_not_cached" then
-        -- A5/A6：kamare 缓存 > 旧 cbz > 下载。旧 cbz 命中时离线照开，静默保留不删。
-        local old = entry.format == "cbz" and downloaded(self.id, ref.stable_id)
-        if old then return SourceBase.defer(cb, old) end
+    local cancelled, job = false, nil
+
+    --- 官方 / 旧版 kamare 没有 journal / resume 接口：起始页得 moon 自己给（03 A2 降级通道）。
+    --- 优先问 Kavita（跨设备读到哪就从哪续）；云端没记录 / 请求失败时用本地卷行
+    --- （关查看器时写的真实页），离线直接用本地。增强版由 kamare 的 journal 决定，不看这里。
+    ---@param item table
+    ---@param done fun(page: integer|nil)
+    ---@return table|nil job
+    local function withStartPage(item, done)
+        local pages = math.max(1, tonumber(item.pages) or 1)
+        local function localPage()
+            local row = require("book.progress_db").get(self.id, volumeId(item))
+            local page = row and tonumber(row.page)
+            if page and page > 0 then return math.min(page, pages) end
+        end
+        if not online() then
+            done(localPage())
+            return nil
+        end
+        return self.client:json("GET", "/api/Reader/get-progress", { chapterId = item.chapterId }, nil,
+            function(remote)
+                if cancelled then return end
+                local read = tonumber(remote and remote.pageNum) or 0
+                if read > 0 then return done(math.min(read + 1, pages)) end
+                -- 云端没记录 / 请求失败：本地关书写过页就别退回第 1 页。
+                done(localPage())
+            end)
+    end
+
+    ---@param viewer table|nil
+    ---@param code string|nil
+    ---@param message string|nil
+    local function afterOpen(viewer, code, message)
+        if cancelled then return end
+        if viewer then return cb(nil, nil, { handled = true }) end
+        if code == "offline_not_cached" then
+            -- A5/A6：kamare 缓存 > 旧 cbz > 下载。旧 cbz 命中时离线照开，静默保留不删。
+            local old = entry.format == "cbz" and downloaded(self.id, ref.stable_id)
+            if old then return SourceBase.defer(cb, old) end
+            return cb(nil, Cache.message(code, message))
+        end
+        if code == "viewer_running" or code == "no_pages" or code == "settings_write_failed" then
+            -- 查看器已在运行绝不回退下载（旧的 bug）；页面为空 / 配置写失败也不该重下。
+            return cb(nil, Cache.message(code, message))
+        end
+        -- 其它失败：cbz 交给 fetchVolume 兜底（本地已有文件时只登记，不重新下载）；image 下载不了。
+        if entry.format == "cbz" then return self:fetchVolume(ref, entry, cb) end
         return cb(nil, Cache.message(code, message))
     end
-    if code == "viewer_running" or code == "no_pages" or code == "settings_write_failed" then
-        -- 查看器已在运行绝不回退下载（旧的 bug）；页面为空 / 配置写失败也不该重下。
-        return cb(nil, Cache.message(code, message))
+
+    if Cache.enhancedOpen() then
+        afterOpen(show(entry))
+    else
+        job = withStartPage(entry, function(start_page)
+            if cancelled then return end
+            afterOpen(show(entry, start_page))
+        end)
     end
-    -- 其它失败：cbz 交给 fetchVolume 兜底（本地已有文件时只登记，不重新下载）；image 下载不了。
-    if entry.format == "cbz" then return self:fetchVolume(ref, entry, cb) end
-    return cb(nil, Cache.message(code, message))
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job:cancel() end
+    end }
 end
 
 --- 旧「已下载」标记：kamare 不可用时卷列表右侧仍要显示本地 cbz / epub。

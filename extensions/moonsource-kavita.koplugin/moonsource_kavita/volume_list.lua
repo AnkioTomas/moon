@@ -5,6 +5,8 @@ Kavita 卷列表：选卷阅读 + 缓存管理（04 A1–A9 / 07 A1–A7）。
 （整部 / 从当前进度 / 后 N 卷）。
 状态全部在打开 / 每秒轮询时现算：`Cache.status` 是内存索引，`queue_state` 按服务器过滤，
 本地已读 / 在读取 toc 的 pagesRead（不按卷调 resume_page，只给有本地进度的行补「待同步」）。
+开缓存后同一批卷登记成一条 passive 后台任务（`cache_task`）：顶栏能看到、缓存期间不自动休眠、
+关掉页面后由它报完成；页面自己的进度框还在时任务静音，收尾只提示一次。
 
 不改 `ui/themes/widgets/list` 与 `row`：行尾控件塞 `item.widget`，靠 KOReader 的
 「先子件后自身」事件顺序吃掉点按（04 A9）。批量预设复用主题 `list` 当二级菜单
@@ -32,6 +34,22 @@ end
 local function toast(text)
     if not text then return end
     require("ui.themes.widgets.toast"):new{ text = text, timeout = 2 }:show()
+end
+
+--- 同步批量删除期间的忙碌窗（05 A）：与设置页共用同一套实现。
+---@param title string
+---@param ids any[]
+---@return boolean|nil, string|nil, string|nil
+local function deleteBusy(title, ids)
+    return require("moonsource_kavita.busy").run(title, function() return Cache.delete(ids) end)
+end
+
+--- 后台任务登记模块：旧包 / 安装不完整缺这个文件时退回页内进度框，不拖垮整个卷列表。
+---@return table|nil
+local function cacheTask()
+    local ok, mod = pcall(require, "moonsource_kavita.cache_task")
+    if ok and type(mod) == "table" and type(mod.track) == "function" then return mod end
+    return nil
 end
 
 ---@param capabilities table|nil
@@ -109,12 +127,52 @@ local function readState(entry)
     return nil
 end
 
+--- 本地卷进度：ProgressDB 的卷行由阅读器关闭时写回，比 toc 快照（Kavita pagesRead，TTL 6 小时）新。
+--- 读完一卷马上回列表时，服务端 / toc 里可能还是「读到 117/196」，不能因此把已读完的卷当成在读，
+--- 否则「后 N 卷」会从这卷重新缓存。只认卷行（seriesId:chapterId），容器聚合行不参与。
+---@param series Book|nil
+---@param toc table[]
+---@return table<string, "read"|"reading">
+local function localReadStates(series, toc)
+    local out = {}
+    if type(series) ~= "table" or series.source_id == nil or series.stable_id == nil then return out end
+    local series_id = tostring(series.stable_id)
+    if series_id:find(":", 1, true) then return out end
+    local ok, ProgressDB = pcall(require, "book.progress_db")
+    if not ok or type(ProgressDB) ~= "table" or type(ProgressDB.get) ~= "function" then return out end
+    for _idx, entry in ipairs(toc) do
+        local row = ProgressDB.get(series.source_id, series_id .. ":" .. tostring(entry.chapterId))
+        local fraction = row and tonumber(row.fraction) or 0
+        if fraction >= 1 then
+            out[tostring(entry.chapterId)] = "read"
+        elseif fraction > 0 then
+            out[tostring(entry.chapterId)] = "reading"
+        end
+    end
+    return out
+end
+
+--- 显示用阅读状态：kamare 的三源判定优先（离线读完也算已读），再退回 toc 的 pagesRead，
+--- 最后用本地卷进度补上 toc 快照之后才读完 / 刚开读的卷。
+---@param ctx table
+---@param entry table
+---@return "read"|"reading"|nil
+local function readOf(ctx, entry)
+    local cid = tostring(entry.chapterId)
+    if ctx.reads and ctx.reads[cid] then return "read" end
+    local local_state = ctx.local_reads and ctx.local_reads[cid]
+    if local_state == "read" then return "read" end
+    return readState(entry) or local_state
+end
+
 --- 打开 / 轮询时的一份只读快照。
 ---@param toc table[]
+---@param series_id any Kavita seriesId：一次 chapters(series_id) 取整列的缓存事实
 ---@param memo table|nil 上一次的 resume_page 结果：轮询复用，别每秒为整列扫 journal
 ---@param pending table<string, boolean>|nil 本地入队记忆：缺 queue 能力时没有别的「排队」来源
+---@param local_reads table<string, "read"|"reading">|nil 本地卷进度（ProgressDB），见 localReadStates
 ---@return table
-local function scan(toc, memo, pending)
+local function scan(toc, series_id, memo, pending, local_reads)
     local probe = Cache.probe()
     local capabilities = probe.ok and (probe.capabilities or {}) or {}
     local queue_capable = has(capabilities, "queue")
@@ -126,18 +184,42 @@ local function scan(toc, memo, pending)
         queue = nil
     end
     -- unknown_server：缓存状态整块不显示，只剩阅读状态（02 A9）。
-    local show_cache = probe.ok and has(capabilities, "status") and queue_code ~= "unknown_server"
-    local statuses = {}
+    local show_cache = probe.ok
+        and (has(capabilities, "status") or has(capabilities, "chapters"))
+        and queue_code ~= "unknown_server"
+    local statuses, reads = {}, {}
     local resumes = memo or {}
+
+    -- 04 A2：一次 chapters(series_id) 取代逐章 status；返回的 read 已经合并了
+    -- journal 与下载快照，toc 的服务端 pagesRead 在这里补上第三源。
+    local plan, plan_by_id
+    if show_cache and has(capabilities, "chapters") and series_id ~= nil then
+        local result = Cache.chapters(series_id)
+        if type(result) == "table" then
+            plan = result
+            plan_by_id = {}
+            for _idx, item in ipairs(plan) do
+                plan_by_id[tostring(item.chapterId)] = item
+            end
+        end
+    end
+
     if show_cache then
         for _idx, entry in ipairs(toc) do
             local cid = tostring(entry.chapterId)
-            local status = Cache.status(entry.chapterId)
-            statuses[cid] = status
+            local item = plan_by_id and plan_by_id[cid]
+            if item then
+                if readState(entry) == "read" then item.read = true end
+                reads[cid] = item.read == true
+                statuses[cid] = { state = item.stale and "stale" or "complete", bytes = item.bytes }
+            elseif not plan_by_id and has(capabilities, "status") then
+                -- 旧增强版没有 chapters：退回逐章 status。
+                statuses[cid] = Cache.status(entry.chapterId)
+            end
             -- 06 A4：只有读过 / 已缓存的行才可能有「待同步」；结果按章记忆，
             -- 每秒轮询不再重复读 journal（false = 查过没有）。
             if resumes[cid] == nil then
-                local cached = Cache.isCached(status)
+                local cached = Cache.isCached(statuses[cid])
                 if cached or readState(entry) ~= nil then
                     resumes[cid] = Cache.resumePage(entry.chapterId) or false
                 end
@@ -161,7 +243,11 @@ local function scan(toc, memo, pending)
         pending = pending,
         paused = queuePaused(queue),
         statuses = statuses,
+        reads = reads,
+        plan = plan,
+        plan_by_id = plan_by_id,
         resumes = resumes,
+        local_reads = local_reads,
         offline = not online(),
     }
 end
@@ -175,7 +261,7 @@ local function rowState(ctx, entry)
     local queued = queuedEntry(ctx, entry.chapterId)
     local status = ctx.statuses[cid]
     local cached = Cache.isCached(status)
-    local read = readState(entry)
+    local read = readOf(ctx, entry)
     local text, icon
     if queued then
         local percent = entryPercent(queued)
@@ -345,23 +431,25 @@ local function batchTargets(ctx, toc)
 end
 
 --- 批量预设的起点：第一个未读完的卷；全部都读完就退化为整部（ticket 16）。
+---@param ctx table
 ---@param toc table[]
 ---@return integer
-local function resumeIndex(toc)
+local function resumeIndex(ctx, toc)
     for idx, entry in ipairs(toc) do
-        if readState(entry) ~= "read" then return idx end
+        if readOf(ctx, entry) ~= "read" then return idx end
     end
     return 1
 end
 
---- 未读的卷：完全没有阅读进度（pagesRead == 0）。读了一半的卷算「在读」，
---- 跟在读/当前进度那条路走，不混进「未读」。
+--- 未读的卷：没读完的都算（包括正在读的那一卷）；已读的跳过。
+--- 与「缓存后 N 卷」不同：这里不是连续后缀，中间已读的卷不会被打包进来。
+---@param ctx table
 ---@param toc table[]
 ---@return table[]
-local function unreadVolumes(toc)
+local function unreadVolumes(ctx, toc)
     local out = {}
     for _idx, entry in ipairs(toc) do
-        if (tonumber(entry.pagesRead) or 0) <= 0 then out[#out + 1] = entry end
+        if readOf(ctx, entry) ~= "read" then out[#out + 1] = entry end
     end
     return out
 end
@@ -442,7 +530,9 @@ function VolumeList.pick(series, toc, cb, opts)
     opts = type(opts) == "table" and opts or {}
     -- 缺 queue 能力时没有队列状态可读，只能在本地记「这一卷已经入队」（02 A4）。
     local pending = {}
-    local ctx = scan(toc, nil, pending)
+    -- 本地卷进度只取一次：列表开着的时候不会在后台读书，轮询没必要每秒重扫 ProgressDB。
+    local local_reads = localReadStates(series, toc)
+    local ctx = scan(toc, series and series.stable_id, nil, pending, local_reads)
     local chosen = false
     local list
     local dialog
@@ -494,7 +584,8 @@ function VolumeList.pick(series, toc, cb, opts)
     --- 重画：状态全在 kamare 的内存索引里，重扫一遍即可（列表停在原页）。
     ---@param reuse_resume boolean|nil 轮询用：复用 resume_page 的记忆
     refresh = function(reuse_resume)
-        ctx = scan(toc, reuse_resume and ctx.resumes or nil, pending)
+        ctx = scan(toc, series and series.stable_id, reuse_resume and ctx.resumes or nil, pending,
+            ctx.local_reads)
         if list and not list.closed then list:setItems(items()) end
     end
 
@@ -526,6 +617,9 @@ function VolumeList.pick(series, toc, cb, opts)
 
     local timer
     local batch
+    local startPolling
+    --- 这一批对应的后台任务句柄（登记不上 / 旧核没有 workers.tasks 时为 nil）。
+    local cache_task
 
     --- 本批次的条目（按 chapterId 回到 toc）。
     ---@param ids integer[]
@@ -669,14 +763,21 @@ function VolumeList.pick(series, toc, cb, opts)
             end
         end
         if queueRunning(ctx.queue) and not ctx.paused then
-            timer = function()
-                timer = nil
-                tick()
-            end
-            require("ui/uimanager"):scheduleIn(1, timer)
+            startPolling()
         else
             stopPolling()
         end
+    end
+
+    --- 起 1 秒轮询（已排过就不重复排）。列表自己发起的批次、打开列表时已有队列在跑、
+    --- 从行尾恢复暂停的队列，都要靠它把「下载中 32%」刷成最终状态。
+    startPolling = function()
+        if timer or not ctx.queue_capable then return end
+        timer = function()
+            timer = nil
+            tick()
+        end
+        require("ui/uimanager"):scheduleIn(1, timer)
     end
 
     --- 进度框：1 秒轮询 queue_state（只看本服务器），后台运行不停队列。
@@ -684,6 +785,15 @@ function VolumeList.pick(series, toc, cb, opts)
     ---@param total integer 本批次的卷数
     startProgress = function(ids, total)
         batch = { ids = ids or {}, total = total or #(ids or {}) }
+        -- 同一部书的这一批进「后台任务」：顶栏能看到、缓存期间不自动休眠、关掉页面后仍有完成提示。
+        -- 页面自己的进度框还在时静音任务，避免收尾时两处同时提示（04 A5）。
+        if ctx.queue_capable then
+            local CacheTask = cacheTask()
+            if CacheTask then
+                cache_task = CacheTask.track{ series = series, entries = batchEntries(batch.ids) }
+                if cache_task then cache_task.mute(true) end
+            end
+        end
         local ProgressDialog = require("ui.themes.widgets.progress_dialog")
         -- 缺 queue_control 时只留「后台运行」（02 A4）。
         local control = has(ctx.capabilities, "queue_control")
@@ -698,19 +808,17 @@ function VolumeList.pick(series, toc, cb, opts)
                 refresh()
             end or nil,
             -- 关弹窗 ≠ 取消：队列继续跑，列表行继续按拍刷新（04 A5）。
-            on_background = function() dialog = nil end,
+            -- 此后由后台任务负责收尾提示，所以取消静音。
+            on_background = function()
+                dialog = nil
+                if cache_task then cache_task.mute(false) end
+            end,
         }
         dialog:show()
         refresh(true)
         -- 没有 queue 就没有可轮询的进度；不排拍，也就不会从缺席的队列宣布完成。
         if not ctx.queue_capable then return end
-        if not timer then
-            timer = function()
-                timer = nil
-                tick()
-            end
-            require("ui/uimanager"):scheduleIn(1, timer)
-        end
+        startPolling()
     end
 
     ---@param entries table[]
@@ -775,7 +883,12 @@ function VolumeList.pick(series, toc, cb, opts)
             if #failed > 0 then retry(failed) end
         end
         local ok, code, message = Cache.queueResume()
-        if not ok then toast(Cache.message(code, message)) end
+        if not ok then
+            toast(Cache.message(code, message))
+        else
+            -- 只恢复队列不会自己排拍：行尾点的继续也要开始刷新。
+            startPolling()
+        end
         refresh()
     end
 
@@ -794,15 +907,16 @@ function VolumeList.pick(series, toc, cb, opts)
         confirmEnqueue(to_enqueue, to_retry)
     end
 
-    --- 「后 N 卷」：数值加减控件（[+]/[-]），范围 1..剩余卷数；越界由 volumeRange 截断兜底。
+    --- 「缓存后 N 卷」：数值加减控件（[+]/[-]），范围 1..剩余卷数，默认 3（不足 3 取剩余）；
+    --- 越界由 volumeRange 截断兜底。
     local function promptNext()
         local Spin = require("ui.themes.widgets.spin")
-        local first = resumeIndex(toc)
+        local first = resumeIndex(ctx, toc)
         local max = math.max(1, #toc - first + 1)
         Spin:new{
-            title = _("后 N 卷"),
+            title = _("缓存后 N 卷"),
             fields = {
-                { value = 1, min = 1, max = max, label = _("卷数") },
+                { value = math.min(3, max), min = 1, max = max, label = _("卷数") },
             },
             callback = function(count)
                 local n = math.floor(tonumber(count) or 0)
@@ -812,35 +926,102 @@ function VolumeList.pick(series, toc, cb, opts)
         }:show()
     end
 
-    --- 标题栏左钮：批量缓存预设菜单（04 A9 的 C 变体，复用主题 list 当二级菜单）。
+    --- 清理本系列 / 本系列已读：同一份 chapters 快照出预览，确认后一次批量删除。
+    ---@param filter "all"|"read"
+    ---@param title string
+    local function runCleanup(filter, title)
+        local plan = Cache.plan(ctx.plan or {}, filter)
+        if plan.chapters == 0 then
+            toast(filter == "read" and _("没有已读完的缓存") or _("没有可清理的缓存"))
+            return
+        end
+        local lines = {
+            filter == "read"
+                and T(_("将删除本系列 %1 卷已读完的缓存（约 %2）。"), plan.chapters, Cache.sizeText(plan.bytes))
+                or T(_("将删除本系列 %1 卷缓存（约 %2）。"), plan.chapters, Cache.sizeText(plan.bytes)),
+        }
+        if plan.queued > 0 then
+            lines[#lines + 1] = T(_("会中止正在下载的 %1 卷，已下载的部分会被删除。"), plan.queued)
+        end
+        lines[#lines + 1] = _("阅读进度与 kamare journal 保留。")
+        require("ui.themes.widgets.confirm"):new{
+            title = title,
+            text = table.concat(lines, "\n"),
+            ok_text = _("清理"),
+            cancel_text = _("取消"),
+            ok_callback = function()
+                local ok, code, message = deleteBusy(title, plan.ids)
+                if not ok then
+                    toast(Cache.message(code, message))
+                    return
+                end
+                refresh()
+                local remaining = {}
+                for _idx, item in ipairs(ctx.plan or {}) do
+                    remaining[tostring(item.chapterId)] = true
+                end
+                local left = 0
+                for _idx, id in ipairs(plan.ids) do
+                    if remaining[tostring(id)] then left = left + 1 end
+                end
+                if left > 0 then
+                    toast(T(_("已清理 %1 卷，%2 卷未能删除"), plan.chapters - left, left), 3)
+                else
+                    toast(T(_("已清理 %1 卷，释放约 %2"), plan.chapters, Cache.sizeText(plan.bytes)), 3)
+                end
+            end,
+        }:show()
+    end
+
+    local can_clean = ctx.show_cache
+        and has(ctx.capabilities, "chapters") and has(ctx.capabilities, "delete")
+
+    --- 标题栏左钮：批量操作菜单（缓存预设 + 系列清理，04 A9 的 C 变体）。
     local function openBatchMenu()
         local Menu = require("ui.themes.widgets.list")
+        local items = {
+            { text = _("缓存整部"), value = "all" },
+            { text = _("缓存未读"), value = "unread" },
+            { text = _("缓存后 N 卷…"), value = "next" },
+        }
+        if can_clean then
+            local read_plan = Cache.plan(ctx.plan or {}, "read")
+            local all_plan = Cache.plan(ctx.plan or {}, "all")
+            items[#items + 1] = {
+                text = _("清理本系列"), value = "clean_all",
+                mandatory = all_plan.chapters > 0 and T(_("%1 卷"), all_plan.chapters) or _("无"),
+                enabled = all_plan.chapters > 0,
+            }
+            items[#items + 1] = {
+                text = _("清理本系列已读"), value = "clean_read",
+                mandatory = read_plan.chapters > 0 and T(_("%1 卷"), read_plan.chapters) or _("无"),
+                enabled = read_plan.chapters > 0,
+            }
+        end
         Menu:new{
-            title = _("批量缓存"),
-            items = {
-                { text = _("缓存整部"), value = "all" },
-                { text = _("只缓存未读"), value = "unread" },
-                { text = _("从当前进度开始"), value = "progress" },
-                { text = _("后 N 卷…"), value = "next" },
-            },
+            title = _("批量操作"),
+            items = items,
             on_select = function(value)
                 if value == "all" then
                     runBatch(toc)
                 elseif value == "unread" then
-                    local unread = unreadVolumes(toc)
-                    -- 全都读过不是「全部已缓存」：文案要说得准确。
+                    local unread = unreadVolumes(ctx, toc)
+                    -- 全部读完不是「全部已缓存」：文案要说得准确。
                     if #unread == 0 then toast(_("没有未读的卷")) else runBatch(unread) end
-                elseif value == "progress" then
-                    runBatch(volumeRange(toc, resumeIndex(toc), nil))
-                else
+                elseif value == "next" then
                     promptNext()
+                elseif value == "clean_all" then
+                    runCleanup("all", _("清理本系列"))
+                elseif value == "clean_read" then
+                    runCleanup("read", _("清理本系列已读"))
                 end
             end,
         }:show()
     end
 
     local can_batch = ctx.show_cache
-        and (has(ctx.capabilities, "enqueue") or has(ctx.capabilities, "queue_control"))
+        and (has(ctx.capabilities, "enqueue") or has(ctx.capabilities, "queue_control")
+            or can_clean)
 
     list = require("ui.themes.widgets.list"):new{
         title = series.title or _("选择卷"),
@@ -853,13 +1034,17 @@ function VolumeList.pick(series, toc, cb, opts)
         end,
         -- 单选点按时先关窗、同一拍再 on_select：下一拍还没选中就是用户关掉了列表。
         close_callback = function()
-            -- 04 A8：关列表即停，不设常驻轮询。
+            -- 04 A8：关列表即停，不设常驻轮询。后台任务继续轮询并在收尾时提示。
             stopPolling()
+            if cache_task then cache_task.mute(false) end
             require("ui/uimanager"):nextTick(function()
                 if not chosen then cb(nil) end
             end)
         end,
     }
+    -- 打开列表时队列已经在跑（例如从书架 / 后台任务回来，不是本页发起的批次）：
+    -- 不排拍的话行会永远停在打开那一瞬的「下载中 32%」。
+    if queueRunning(ctx.queue) and not ctx.paused then startPolling() end
     return list
 end
 

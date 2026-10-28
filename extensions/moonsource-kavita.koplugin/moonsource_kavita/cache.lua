@@ -161,6 +161,8 @@ local function kamareVersion()
 end
 
 --- 模块文件路径：借任一公开函数反查，不扫 package.path。
+--- 归一重复斜杠：KOReader 的 `extra_plugin_paths` 带尾斜杠，data 目录里的插件会被拼成
+--- `plugins//kamare.koplugin`，原样显示会让人以为路径写错了（文件系统本身不介意）。
 ---@param mod table
 ---@return string|nil
 local function modulePath(mod)
@@ -168,7 +170,9 @@ local function modulePath(mod)
         if type(mod[name]) == "function" then
             local ok, info = pcall(debug.getinfo, mod[name], "S")
             local source = ok and info and info.source
-            if type(source) == "string" and source:sub(1, 1) == "@" then return source:sub(2) end
+            if type(source) == "string" and source:sub(1, 1) == "@" then
+                return (source:sub(2):gsub("/+", "/"))
+            end
         end
     end
     return nil
@@ -306,6 +310,8 @@ local KAMARE = {
     estimate = "estimate",
     open = "open",
     server = "register_server",
+    chapters = "chapters",
+    delete_all = "delete_all",
 }
 
 --- 取能力对应的函数：缺能力 / 缺函数一律 unsupported（调用点不各写一套）。
@@ -489,6 +495,16 @@ local function legacyOpen(opts)
     return viewer, code, message
 end
 
+--- 增强版是否接管打开：起始页 / 离线全归 kamare（journal + 缓存）。
+--- 官方版或增强版缺 `open` 时退回 legacy 查看器，起始页要 moon 自己给。
+---@return boolean
+function Cache.enhancedOpen()
+    local probe = Cache.probe()
+    if not probe.ok or (probe.capabilities or {}).open ~= true then return false end
+    local mod = loadModule("kamarecache")
+    return mod ~= nil and type(mod.open) == "function"
+end
+
 --- 打开一卷：enhanced 有 open 交 kamare 判缓存 / 离线 / 起始页；否则退回 legacy 查看器。
 ---@param opts { base_url: string|nil, api_key: string|nil, entry: table, title: string,
 ---              start_page: integer|nil, on_close: function|nil, on_next: function|nil }
@@ -501,8 +517,7 @@ function Cache.open(opts)
     if not base_url then return nil, "unknown_server" end
     local probe = Cache.probe()
     local mod = probe.ok and loadModule("kamarecache") or nil
-    local use_enhanced = probe.ok and (probe.capabilities or {}).open == true
-        and mod and type(mod.open) == "function"
+    local use_enhanced = Cache.enhancedOpen()
     local viewer, code, message
     if use_enhanced then
         ensureMirror(false, base_url, api_key)
@@ -575,6 +590,26 @@ function Cache.summary()
     if not mod then return nil, code end
     ensureMirror(false)
     return fn(base_url)
+end
+
+--- 只读：所有服务器（含未关联）的合计占用；未配置服务器时用它算「清理全部」的预览。
+---@return table|nil, string|nil, string|nil
+function Cache.summaryAll()
+    local mod, code, fn = capability("summary")
+    if not mod then return nil, code end
+    return fn(nil)
+end
+
+--- 只读：当前服务器的清理计划（每章 facts）。series_id 可选。
+---@param series_id any|nil
+---@return table[]|nil, string|nil, string|nil
+function Cache.chapters(series_id)
+    local base_url = targetBase()
+    if not base_url then return nil, "unknown_server" end
+    local mod, code, fn = capability("chapters")
+    if not mod then return nil, code end
+    ensureMirror(false)
+    return fn(base_url, series_id)
 end
 
 --- 只读：已缓存章的状态（complete / stale / partial）。
@@ -712,6 +747,20 @@ function Cache.delete(chapter_ids)
     return ok, err, message, deleted
 end
 
+--- 写：清空所有服务器（含未关联）。成功时第四个返回值是 { chapters, bytes } 估算。
+---@return boolean|nil, string|nil, string|nil, table|nil
+function Cache.deleteAll()
+    local mod, code, fn = capability("delete_all")
+    if not mod then return nil, code end
+    local ok, err, third = fn()
+    logWrite("delete_all", nil, err)
+    if ok then
+        Cache.resetShelf()
+        return true, nil, nil, type(third) == "table" and third or nil
+    end
+    return nil, err, third
+end
+
 --- 只读：下载前估算（数量 / 峰值 / 可用 / 裁决），不写盘、不入队、不建 serverKey。
 ---@param entries table[]
 ---@return table|nil, string|nil, string|nil, table|nil
@@ -741,6 +790,7 @@ local CODE_TEXT = {
     unsupported = _("需要安装带缓存接口的增强版 kamare"),
     base_url_required = _("无法同步配置到 kamare"),
     api_key_required = _("无法同步配置到 kamare"),
+    delete_incomplete = _("部分缓存未能删除（权限或存储错误）"),
 }
 
 local SPACE_CODES = {
@@ -781,6 +831,29 @@ function Cache.message(code, message, detail)
     if code == nil or SILENT[code] then return nil end
     if SPACE_CODES[code] then return spaceText(code, detail) end
     return CODE_TEXT[code] or message or _("缓存操作失败")
+end
+
+--- 清理计划 → 汇总。`filter` 为 "read" 时只算已读；`toc_read` 是可选的服务端进度
+--- （chapterId → pagesRead），用于补上 kamare 离线拿不到的第三源。
+---@param entries table[]|nil
+---@param filter "all"|"read"
+---@param toc_read table<string, number>|nil
+---@return { chapters: integer, bytes: integer, ids: any[], queued: integer, open: boolean }
+function Cache.plan(entries, filter, toc_read)
+    local out = { chapters = 0, bytes = 0, ids = {}, queued = 0, open = false }
+    for _idx, entry in ipairs(type(entries) == "table" and entries or {}) do
+        local pages = tonumber(entry.pages) or 0
+        local server_read = toc_read and (tonumber(toc_read[tostring(entry.chapterId)]) or 0) or 0
+        local read = entry.read == true or (pages > 0 and server_read >= pages)
+        if filter ~= "read" or read then
+            out.chapters = out.chapters + 1
+            out.bytes = out.bytes + (tonumber(entry.bytes) or 0)
+            out.ids[#out.ids + 1] = entry.chapterId
+            if entry.queued then out.queued = out.queued + 1 end
+            if entry.open then out.open = true end
+        end
+    end
+    return out
 end
 
 --- estimate 的裁决 → 确认框 / toast 文案；可下载时 nil。
