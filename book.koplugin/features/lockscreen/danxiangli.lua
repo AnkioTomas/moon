@@ -56,7 +56,7 @@ end
 ---@return table|nil
 function M.daily(date)
     local Myrl = require("online.myrl")
-    require("ui.guard").call("danxiangli myrl ensure", function() Myrl:ensure() end)
+    Myrl:ensure()
     local data = Myrl:current()
     if not data then return nil end
     if data.ymd and data.ymd ~= string.format("%04d-%02d-%02d", date.year, date.month, date.day) then

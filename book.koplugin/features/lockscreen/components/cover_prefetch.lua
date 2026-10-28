@@ -22,11 +22,8 @@ local function request(book)
     if book.cover_url then return { url = book.cover_url } end
     local owner = require("source.registry").resolve(book.source_id)
     if owner and type(owner.coverRequest) == "function" then
-        local ok, req = pcall(owner.coverRequest, owner, book)
-        if not ok then
-            logger.warn("book.lockscreen coverRequest failed", book.source_id, req)
-        elseif type(req) == "table" and type(req.url) == "string"
-            and req.url:match("^https?://") then
+        local req = owner:coverRequest(book)
+        if type(req) == "table" and type(req.url) == "string" and req.url:match("^https?://") then
             return req
         end
     end
@@ -57,7 +54,7 @@ function M.run(shelf)
             local req = request(book)
             if req then
                 pending = pending + 1
-                local started, start_err = pcall(Image.fetchAsync, req.url, req.headers, function(path, err)
+                Image.fetchAsync(req.url, req.headers, function(path, err)
                     if path then
                         Book.persistCover(book, path)
                         if require("features.lockscreen.components.library")
@@ -69,10 +66,6 @@ function M.run(shelf)
                     end
                     finish()
                 end)
-                if not started then
-                    logger.warn("book.lockscreen poster cover fetch failed", book.stable_id, start_err)
-                    finish()
-                end
             end
         end
     end

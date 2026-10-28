@@ -504,8 +504,8 @@ function Book.cover(plugin, source, book, cw, ch, opts)
             owner = require("source.registry").resolve(sid)
         end
         if owner and type(owner.coverRequest) == "function" then
-            local ok, got = pcall(owner.coverRequest, owner, book)
-            if ok and type(got) == "table" and type(got.url) == "string" and got.url ~= "" then
+            local got = owner:coverRequest(book)
+            if type(got) == "table" and type(got.url) == "string" and got.url ~= "" then
                 source_req = got
             end
         end
