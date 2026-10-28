@@ -1753,3 +1753,18 @@ do
     Assert.eq(dav:count("GET " .. ROOT .. "/直接传的.epub"), 0, "正文不下载")
     books = {}
 end
+
+-- Google Drive 配置没有 webdav_url：books.sync 的读改写锁键按凭据指纹算，同步不能炸；
+-- 两个不同账号互不排队，同账号串行。
+do
+    local dav = fakeDav()
+    putSync(dav, { { filename = "云书.epub", bookName = "云书" } })
+    local c = Client.new({ cloud = "gdrive", gdrive_token = "refresh-a", gdrive_client = "id:secret" })
+    c.dav = dav
+    local ok, err = scan(c)
+    Assert.is_true(ok, err)
+    Assert.eq(books["webdav://云书.epub"].deleted, 0)
+    Assert.eq(c:cloudStamp(), Client.new({ cloud = "gdrive", gdrive_token = "refresh-a", gdrive_client = "id:secret" }):cloudStamp())
+    Assert.is_true(c:cloudStamp() ~= Client.new({ cloud = "gdrive", gdrive_token = "refresh-b", gdrive_client = "id:secret" }):cloudStamp())
+    books = {}
+end

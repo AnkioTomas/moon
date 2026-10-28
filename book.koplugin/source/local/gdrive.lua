@@ -187,7 +187,8 @@ function Drive:call(build, cb)
     end
     local function once(refreshed)
         if state.cancelled then return end
-        state.job = self:tokenAsync(function(token, token_err)
+        state.job = nil
+        local token_job = self:tokenAsync(function(token, token_err)
             if state.cancelled then return end
             if not token then finish(nil, token_err); return end
             state.job = build(token, function(res, err, code)
@@ -200,6 +201,8 @@ function Drive:call(build, cb)
                 finish(res, err, code)
             end)
         end)
+        -- 令牌缓存命中时回调同步跑完、state.job 已是请求句柄，不能被令牌句柄盖掉
+        if not state.job then state.job = token_job end
     end
     once(false)
     return { cancel = function()

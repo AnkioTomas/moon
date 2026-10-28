@@ -162,6 +162,21 @@ do
     Assert.eq(captured[3].method, "PUT")
 end
 
+-- 令牌缓存命中时 tokenAsync 同步回调，call 返回的句柄必须指向真正在飞的请求：取消要能停掉它。
+do
+    local cancelled = false
+    local drive = Drive.new(CFG)
+    drive.access = "access"
+    drive.access_until = os.time() + 3600
+    local finished = false
+    local handle = drive:call(function(_token, _done)
+        return { cancel = function() cancelled = true end }
+    end, function() finished = true end)
+    handle:cancel()
+    Assert.is_true(cancelled, "取消没有传到在飞请求")
+    Assert.is_true(not finished)
+end
+
 -- 没有这本书：下载回 404。
 do
     reset({
