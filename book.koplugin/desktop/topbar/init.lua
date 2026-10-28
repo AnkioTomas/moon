@@ -278,7 +278,7 @@ end
 ---@return table
 function TopBar.metric(text, icon, max_width)
     local t = Theme.current()
-    local ink = Theme.color(t.color.icons)
+    local ink = Theme.color(t.color.accent)
     if icon and text then
         return Icon.label{ name = icon, text = text, size = ICON_SIZE, color = ink,
             text_color = Theme.color(t.color.ink),

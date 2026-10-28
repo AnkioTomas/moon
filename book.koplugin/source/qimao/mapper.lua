@@ -128,13 +128,6 @@ function Mapper.classify(wire)
     return out, (tonumber(paging.page) or 0) * (tonumber(paging.page_size) or 0) < (tonumber(paging.count) or 0)
 end
 
----@param wire table|nil
----@return Book|nil
-function Mapper.detail(wire)
-    local row = wire and wire.data and wire.data.book
-    return type(row) == "table" and book(row) or nil
-end
-
 --- 目录：按 chapter_sort 排，idx 连续；章节 id 是 uid。
 ---@param wire table|nil
 ---@return BookChapter[]

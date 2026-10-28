@@ -56,7 +56,7 @@ local function head(t, section, width, first)
         HorizontalGroup:new{
             HorizontalSpan:new{ width = pad },
             Text.line("caption", section.title, { width = width - pad * 2,
-                color = t.color.accent > 0xFF and t.color.headings or t.color.muted }),
+                color = t.color.accent > 0xFF and t.color.accent or t.color.muted }),
         },
     }
     if section.rows[1] then block[#block + 1] = section.rows[1](width) end

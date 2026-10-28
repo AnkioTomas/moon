@@ -138,7 +138,7 @@ function Chart.bars(opts)
             and math.max(Theme.px(2), math.floor(bar_h * seconds / peak + 0.5))
             or math.max(1, Theme.px(t.row.divider))
         local bar = Box:new{
-            style = { bg = seconds > 0 and t.color.stat or t.progress.track }, keep_bg = true,
+            style = { bg = seconds > 0 and t.color.accent or t.progress.track }, keep_bg = true,
             width = col_w, height = current_h,
         }
         local slot = BottomContainer:new{ dimen = Geom:new{ w = col_w, h = bar_h }, bar }

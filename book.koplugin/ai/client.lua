@@ -15,9 +15,6 @@ local _ = require("gettext")
 
 local Client = {}
 
---- 默认请求超时（秒）；推理模型首包可能较慢。
-Client.DEFAULT_TIMEOUT = 120
-
 --- 默认生成 token 上限；调用方未显式传 max_tokens 时用。推理模型的思考也计入，被截断时会放大重试。
 Client.DEFAULT_MAX_TOKENS = 8000
 

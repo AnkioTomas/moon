@@ -3,7 +3,7 @@
 
 函数签名对齐 Server 方法（首参 self=server），由 features.remote.server 装配到
 Server._route* 上；只依赖 server 暴露的 _fail/_queueResponse/jsonResp/errorResp/
-_safePath/_isRoot/cleanPath/handlers，不反向 require server（防循环）。
+_isRoot/cleanPath/handlers，不反向 require server（防循环）。
 
 @module koplugin.book.features.remote.file
 --]]
@@ -62,7 +62,7 @@ end
 ---@param bad string 400 的错误说明
 ---@return string|nil
 local function resolveTarget(self, conn, path, bad)
-    local target = self:_safePath(path)
+    local target = self.cleanPath(path)
     if not target then
         return self:_fail(conn, 400, bad)
     end
@@ -102,7 +102,7 @@ function File.list(self, conn, method, path)
     if path == nil or path == "" then
         dir = self.root
     else
-        dir = self:_safePath(path)
+        dir = self.cleanPath(path)
         if not dir then
             return self:_fail(conn, 400, "Bad path")
         end

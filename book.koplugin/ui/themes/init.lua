@@ -102,8 +102,7 @@ local function onColor(rgb)
 end
 
 --- 当前主题令牌表。彩色时全场共用一个主题色（色板见 ui/themes/palettes.lua）：
---- icons / headings / navigation / stat 是 accent 的别名令牌，消费者按语义取用，
---- 值恒等于 accent——分角色着色实测看不出区别，不值一套管线，别再拆。
+--- 按钮、图标、标题、导航、统计全部取 accent——分角色着色实测看不出区别，不值一套管线，别再拆。
 ---@return table
 function Theme.current()
     local base = Theme.get(Theme.id())
@@ -117,8 +116,6 @@ function Theme.current()
         t.color = {}
         for key, value in pairs(base.color) do t.color[key] = value end
         t.color.accent = accent
-        t.color.icons, t.color.headings, t.color.navigation, t.color.stat =
-            accent, accent, accent, accent
         t.button = {
             normal = { bg = base.button.normal.bg, ink = accent, border_color = accent },
             primary = { bg = accent, ink = onColor(accent), border_color = accent },

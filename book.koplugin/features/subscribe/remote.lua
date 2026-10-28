@@ -59,14 +59,12 @@ end
 --- 列表。
 ---@return table
 function Remote.list()
-    local s = settings()
-    local Setting = require("features.subscribe.setting")
     local rows, feeds = SubDB.feeds(), {}
     for _idx, f in ipairs(rows) do
         feeds[#feeds + 1] = { id = f.id, kind = f.kind, url = f.url, title = f.title, group = f.grp,
             unread = f.unread or 0, updated_at = f.updated_at or 0, sort = f.sort or 0, error = f.error or "" }
     end
-    return { enabled = Setting.on(s, "enabled"), feeds = feeds,
+    return { enabled = settings().enabled, feeds = feeds,
         groups = Remote.groups(rows) }
 end
 

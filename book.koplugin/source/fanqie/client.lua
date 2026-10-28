@@ -402,7 +402,7 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
         -- 网页端 book/info 查无此书时，改用书架 multidetail 取书名封面（只返回在架的书，正好）。
         local function fallbackDetail(book_id)
             local body = JSON.encode({ books = { { book_id = book_id, item_id = "0" } } })
-            detail_jobs[book_id] = jsonAsync(self, "POST", FanQie.bookshelf_multidetail_url(), {
+            detail_jobs[book_id] = jsonAsync(self, "POST", FanQie.BASE_URL .. "/api/bookshelf/multidetail", {
                 ["Content-Type"] = "application/json;charset=UTF-8",
                 ["Origin"] = FanQie.BASE_URL,
             }, body, function(wire)

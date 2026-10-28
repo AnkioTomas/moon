@@ -59,9 +59,8 @@ Assert.eq(sent.opts.headers.Authorization, "Bearer secret")
 Assert.eq(sent.opts.headers["User-Agent"],
     "opencode/1.2.3 ai-sdk/amazon-bedrock/3.0.73 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5")
 Assert.eq(sent.opts.content_type, "application/json")
-Assert.eq(sent.opts.timeout, Client.DEFAULT_TIMEOUT)
-Assert.eq(sent.opts.connect_timeout, Client.DEFAULT_TIMEOUT)
-Assert.eq(Client.DEFAULT_TIMEOUT, 120)
+Assert.eq(sent.opts.timeout, 120, "http.timeout.ai 默认 120s：推理模型首包可能较慢")
+Assert.eq(sent.opts.connect_timeout, 120)
 Assert.eq(content, "ok")
 Assert.is_nil(failure)
 

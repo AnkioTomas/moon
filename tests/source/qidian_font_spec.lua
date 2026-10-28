@@ -13,9 +13,6 @@ Assert.is_true(Mapper.fockEncrypted({ fEnS = "1" }))
 Assert.is_false(Mapper.fockEncrypted({ fEnS = "0", cES = "2" }))
 Assert.is_true(Mapper.fontProtected({ cES = "2" }))
 Assert.is_false(Mapper.fontProtected({ cES = "1" }))
-Assert.is_true(Mapper.encrypted({ fEnS = "0", cES = "2" }))
-Assert.is_true(Mapper.encrypted({ fEnS = "1", cES = "0" }))
-Assert.is_false(Mapper.encrypted({ fEnS = "0", cES = "0" }))
 
 -- 起点把同一章再追加一份同长度的诱饵副本；长度一一对应时丢掉后半。
 local duplicate = { "甲甲乙乙", "乙乙乙乙乙", "甲甲乙乙", "乙乙乙乙丁" }

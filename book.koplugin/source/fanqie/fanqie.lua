@@ -32,11 +32,6 @@ function FanQie.shelfActionUrl(action)
         .. "/v:version?aid=1967&iid=0&version_code=57700&update_version_code=57700"
 end
 
----@return string
-function FanQie.bookshelf_multidetail_url()
-    return FanQie.BASE_URL .. "/api/bookshelf/multidetail"
-end
-
 ---@param book_id string
 ---@return string
 function FanQie.book_info_url(book_id)

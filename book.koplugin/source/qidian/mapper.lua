@@ -206,13 +206,6 @@ function Mapper.fontProtected(info)
     return type(info) == "table" and tonumber(info.cES) == 2
 end
 
---- 需要本地处理的 VIP 正文：Fock 和/或字体层。
----@param info table|nil
----@return boolean
-function Mapper.encrypted(info)
-    return Mapper.fockEncrypted(info) or Mapper.fontProtected(info)
-end
-
 --- 章节 HTML → 纯文本。起点用 <p> 分段，且不保证闭合。
 ---@param html string|nil
 ---@return string|nil

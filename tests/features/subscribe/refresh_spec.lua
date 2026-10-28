@@ -40,7 +40,7 @@ Assert.eq(enqueued[1].kind, "sync")
 Assert.eq(followed, 1)
 Assert.eq(table.concat(calls, ","), "1", "串行：一次只拉一个源")
 Assert.eq(Refresh.status(), "正在刷新 A…")
-Assert.is_true(Refresh.running())
+Assert.not_nil(Refresh.status())
 
 -- 在跑时再要刷新：并进本轮（重复的源不再排），不另起任务
 Assert.is_false(Refresh.start({ { id = 2, title = "B" }, { id = 3, title = "C" } }))
@@ -72,9 +72,9 @@ Assert.eq(got[1], 5)
 -- 任务在排队时被取消（run 没跑）：残留的本轮被清掉，下次能重新起
 package.loaded["workers.tasks"].enqueue = function(spec) spec.state = "queued"; enqueued[#enqueued + 1] = spec; return spec end
 Assert.is_true(Refresh.start({ { id = 4, title = "D" } }))
-Assert.is_true(Refresh.running())
+Assert.not_nil(Refresh.status())
 enqueued[#enqueued].state = "cancelled"
-Assert.is_false(Refresh.running())
+Assert.is_nil(Refresh.status())
 Assert.is_true(Refresh.start({ { id = 4, title = "D" } }))
 
 -- 取消在跑的一轮：剩下的网页回调收到错误
@@ -89,7 +89,7 @@ local errs = {}
 Refresh.start({ { id = 5, title = "E" }, { id = 6, title = "F" } }, { on_feed = function(_f, _a, err) errs[#errs + 1] = err end })
 enqueued[#enqueued].handle.cancel()
 Assert.len(errs, 2)
-Assert.is_false(Refresh.running())
+Assert.is_nil(Refresh.status())
 -- 单个源插队：整轮在刷时点某个源刷新，它排到下一个（队里已有的同一源挪到前面），不用等整轮刷完
 Refresh._reset(); calls, pending = {}, {}
 Refresh.start({ { id = 11, title = "K1" }, { id = 12, title = "K2" }, { id = 13, title = "K3" } })
@@ -101,7 +101,7 @@ pending[2](4); Stubs.flush()
 Assert.eq(one, 4)
 pending[3](0); Stubs.flush()
 Assert.eq(table.concat(calls, ","), "11,13,12", "同一源不再刷第二遍")
-Assert.is_false(Refresh.running())
+Assert.is_nil(Refresh.status())
 -- 公众号授权失效（-2041）：一轮只弹一次窗（不是每个源一次），30 分钟内不再弹
 do
     local shown = {}
@@ -131,9 +131,9 @@ do
     pending[2](1); Stubs.flush()
     Assert.eq(table.concat(calls, ","), "31,32,33", "回来一个补一个")
     pending[1](0); Stubs.flush()
-    Assert.is_true(Refresh.running(), "还有一个在飞")
+    Assert.not_nil(Refresh.status(), "还有一个在飞")
     pending[3](0); Stubs.flush()
-    Assert.is_false(Refresh.running())
+    Assert.is_nil(Refresh.status())
     Refresh.CONCURRENCY = 1
 end
 -- 自动刷新（quiet）失败不弹 toast；非 quiet 的后台刷新失败照常弹。

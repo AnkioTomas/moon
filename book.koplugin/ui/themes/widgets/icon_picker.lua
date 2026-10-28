@@ -128,7 +128,7 @@ function IconPicker:cellWidget(name)
     local sel = t.selected
     local active = name == self.current
     local mark = Theme.px(sel.mark)
-    local ink = Theme.color(active and sel.ink or t.color.icons)
+    local ink = Theme.color(active and sel.ink or t.color.accent)
     local cell = VerticalGroup:new{
         align = "center",
         Box:new{
@@ -151,7 +151,7 @@ function IconPicker:cellWidget(name)
         cell[#cell + 1] = CenterContainer:new{
             dimen = Geom:new{ w = self.cell_w, h = mark },
             Box:new{
-                style = { bg = active and t.color.navigation or t.color.page },
+                style = { bg = active and t.color.accent or t.color.page },
                 width = math.floor(self.cell_w / 3), height = mark, keep_bg = true,
             },
         }

@@ -43,7 +43,7 @@ end
 ---@param y number
 function Heatmap:paintTo(bb, x, y)
     self.dimen.x, self.dimen.y = x, y
-    local fill = Theme.current().color.stat
+    local fill = Theme.current().color.accent
     local shades = SHADES
     if fill > 0xFF then
         shades = {}

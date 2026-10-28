@@ -78,15 +78,6 @@ function Lexicon.stems(word)
     return out
 end
 
---- 英文：按连续字母切词。
----@param text string
----@return string[]
-function Lexicon.words(text)
-    local out = {}
-    for w in text:gmatch("%a+") do out[#out + 1] = w end
-    return out
-end
-
 ---@param lex RareLexicon
 ---@param word string 原文
 ---@return table|nil
@@ -98,52 +89,6 @@ local function lookupWord(lex, word)
         e = lex.entries[stem]
         if e then return e end
     end
-end
-
---- 屏上文字里 rank 超过阈值的词，按出现顺序去重：{ key = 原文, ann = 注音 }。
----@param lex RareLexicon
----@param text string
----@param threshold number
----@param limit integer|nil 最多返回几个
----@return { key: string, ann: string }[]
-function Lexicon.match(lex, text, threshold, limit)
-    local out, seen = {}, {}
-    limit = limit or math.huge
-    local function hit(key, e)
-        if e[2] > threshold and not seen[key] then
-            seen[key] = true
-            out[#out + 1] = { key = key, ann = e[1] }
-        end
-    end
-    if lex.lang == "en" then
-        for _idx, w in ipairs(Lexicon.words(text)) do
-            if #out >= limit then break end
-            if #w >= 3 then
-                local e = lookupWord(lex, w)
-                if e then hit(w, e) end
-            end
-        end
-        return out
-    end
-    local chars = require("utils.text").chars(text)
-    local i = 1
-    while i <= #chars and #out < limit do
-        local step = 1
-        -- 只有非 ASCII 字才查；最长词组优先，词组读音覆盖单字首选读音。
-        if #chars[i] > 1 then
-            for n = math.min(lex.max_len, #chars - i + 1), 1, -1 do
-                local key = table.concat(chars, "", i, i + n - 1)
-                local e = lex.entries[key]
-                if e then
-                    hit(key, e)
-                    step = n
-                    break
-                end
-            end
-        end
-        i = i + step
-    end
-    return out
 end
 
 --- 屏上逐字单元的全部命中（不去重，每处都注音）：{ i, n, key, ann }，i..i+n-1 是命中占的单元。
