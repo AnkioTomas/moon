@@ -69,12 +69,6 @@ function Refresh.status()
     return queue and (status or _("等待刷新订阅…")) or nil
 end
 
----@return boolean
-function Refresh.running()
-    settle()
-    return queue ~= nil
-end
-
 ---@param front boolean|nil 插到队首（单源刷新插队）；队里已有的同一源挪过来
 local function push(feeds, opts, front)
     if front then

@@ -325,7 +325,7 @@ function M:createWidget()
     local col = VerticalGroup:new{
         align = "left",
         Text.line("caption", label, { width = w,
-            color = t.color.accent > 0xFF and t.color.headings or t.color.muted, bold = true }),
+            color = t.color.accent > 0xFF and t.color.accent or t.color.muted, bold = true }),
         VerticalSpan:new{ width = Theme.px(t.space.xs) },
         content,
     }

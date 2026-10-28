@@ -74,15 +74,6 @@ function Manage.isMarked(id)
     return false
 end
 
----@param id string
----@return string
-function Manage.label(id)
-    for _idx, item in ipairs(Manage.ITEMS) do
-        if item.id == id then return item.label end
-    end
-    return id
-end
-
 --- 标记 / 取消标记；返回现在是否已标记。只动 id 自己，不连带别的 feature。
 ---@param id string
 ---@return boolean

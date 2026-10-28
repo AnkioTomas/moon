@@ -84,7 +84,7 @@ function Rows.book(ctx, book, w, h, on_open, on_detail)
     local more = Book.tappable(more_w, inner_h, function() on_detail(book) end)
     more[1] = CenterContainer:new{
         dimen = Geom:new{ w = more_w, h = inner_h },
-        Icon.widget{ name = "more_vert", size = t.control.icon, color = Theme.color(t.color.icons) },
+        Icon.widget{ name = "more_vert", size = t.control.icon, color = Theme.color(t.color.accent) },
     }
     local side = HorizontalGroup:new{ align = "center" }
     -- 已缓存优先：同时成立时打开实际走本地缓存，标「已下载」会误导（05 A5）。
@@ -108,7 +108,7 @@ function Rows.book(ctx, book, w, h, on_open, on_detail)
     local mid_w = math.max(1, w - pad * 2 - cw - gap * 2 - side_w)
     local meta = VerticalGroup:new{
         align = "left",
-        Text.line("body", Book.title(book), { width = mid_w, bold = true, color = t.color.headings }),
+        Text.line("body", Book.title(book), { width = mid_w, bold = true, color = t.color.accent }),
     }
     local author = Book.author(book)
     meta[2] = Text.line("caption", author ~= "" and author or _("未知作者"), { width = mid_w, color = t.color.muted })

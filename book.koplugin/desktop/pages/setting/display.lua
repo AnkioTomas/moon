@@ -230,10 +230,7 @@ function Display:appearanceRows(ctx)
                         title = _("主题色"), items = COLOR_PRESETS,
                         current = conf.theme_preset, centered = true,
                         on_select = function(id)
-                            local picked = Palettes.find(id)
                             conf.theme_preset = id
-                            -- 同步旧单色键：降级旧版本时仍是接近的强调色。
-                            if picked then conf.theme_color = picked.rgb end
                             MoonSettings.save("ui", conf)
                             desktop:updateView()
                         end,

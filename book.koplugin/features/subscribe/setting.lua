@@ -14,15 +14,6 @@ Setting.defaults = { enabled = false, images = true }
 -- filter：订阅页的筛选条件 { feed, grp, mode, q }。
 Setting.keys = { "filter" }
 
---- 开关当前值：未设置时取默认。
----@param settings table
----@param key string
----@return boolean
-function Setting.on(settings, key)
-    if settings[key] == nil then return Setting.defaults[key] == true end
-    return settings[key] == true
-end
-
 ---@param desktop BookDesktop
 ---@return BookSettingEntry[]
 function Setting.entries(desktop)
@@ -35,9 +26,9 @@ function Setting.entries(desktop)
             row = function(iw)
                 return require("ui.themes.widgets.row").widget({
                     width = iw, icon = icon, title = title, subtitle = subtitle,
-                    toggle = Setting.on(settings, key),
+                    toggle = settings[key],
                     callback = function()
-                        settings[key] = not Setting.on(settings, key)
+                        settings[key] = not settings[key]
                         MoonSettings.save("features.subscribe")
                         desktop:updateView()
                     end,

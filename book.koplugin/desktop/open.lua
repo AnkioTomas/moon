@@ -98,13 +98,6 @@ local function showReader(plugin, path, generation, done)
     end))
 end
 
---- 原书上次读的是衍生版（排版 / 双语）且文件还在：改开那个版本。
----@param path string 源返回的路径
----@return string
-local function rememberDerived(path)
-    return require("reader.session.derived_note").last(path) or path
-end
-
 --- 打开书籍：Book 身份决定属主源，源负责返回已登记的物理文档。
 ---@param plugin table
 ---@param book Book
@@ -161,7 +154,8 @@ function Open.book(plugin, book, on_done, opts)
             done(false)
             return
         end
-        showReader(plugin, rememberDerived(path), generation, done)
+        -- 原书上次读的是衍生版（排版 / 双语）且文件还在：改开那个版本。
+        showReader(plugin, require("reader.session.derived_note").last(path) or path, generation, done)
     end)
 end
 

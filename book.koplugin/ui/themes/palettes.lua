@@ -38,8 +38,8 @@ function Palettes.find(id)
     return id and by_id[id] or nil
 end
 
---- 当前生效的主题色：给了色板用色板；没给（存量配置）用旧 theme_color，
---- 老用户升级后画面不变，选过色板才换色。
+--- 当前生效的主题色：给了色板用色板；没给用旧 theme_color（v0.2.46–48 的单色选色器写过这个键，
+--- 之后版本只读不写），老用户升级后画面不变，选过色板才换色。
 ---@param id string|nil
 ---@param legacy number|nil 旧单色主题色 0xRRGGBB
 ---@return number 0xRRGGBB（未补饱和）

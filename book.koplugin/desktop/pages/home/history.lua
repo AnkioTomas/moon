@@ -81,7 +81,7 @@ function M:column(w)
     local col = VerticalGroup:new{
         align = "left",
         Text.line("caption", self.label, { width = w,
-            color = t.color.accent > 0xFF and t.color.headings or t.color.muted, bold = true }),
+            color = t.color.accent > 0xFF and t.color.accent or t.color.muted, bold = true }),
     }
     local marks, items = {}, {}
     for i = 1, self.lines do

@@ -53,7 +53,7 @@ end
 ---@param width number 目标宽度，单位像素
 ---@return table
 function M.sectionTitle(text, width)
-    return Text.line("body", text, { width = width, bold = true, color = Theme.current().color.headings })
+    return Text.line("body", text, { width = width, bold = true, color = Theme.current().color.accent })
 end
 
 --- KPI 卡片：卡片表面，上值下标签。

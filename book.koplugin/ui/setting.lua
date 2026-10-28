@@ -11,7 +11,6 @@ return {
         ui_font_name = "",
         font_bold = false,
         tabbar_labels = true,
-        theme_color = 0x0756AD,
         grid_max_cols = 4,
         mesh_mask = true,
         swipe_dismiss = "down",
@@ -29,6 +28,6 @@ return {
         -- 随机一本的范围：new = 只抽没开始读的，reading = 再包含阅读中的。
         random_scope = "new",
     },
-    -- ui_theme 为 nil = 默认主题，见 ui.themes；theme_preset 为 nil = 用旧 theme_color 单色。
-    keys = { "ui_theme", "theme_preset" },
+    -- ui_theme 为 nil = 默认主题，见 ui.themes；theme_preset 为 nil = 默认色板（v0.2.46–48 写过的 theme_color 单色仍认，见 ui.themes.palettes）。
+    keys = { "ui_theme", "theme_preset", "theme_color" },
 }

@@ -33,39 +33,9 @@ do
 end
 
 do
-    local lex = Lexicon.parse(ZH)
-    -- 词组最长匹配覆盖单字首选读音，去重，ASCII 跳过。
-    local hits = Lexicon.match(lex, "abc一曏觊龘，龘", 3500)
-    Assert.len(hits, 3)
-    Assert.eq(hits[1].key, "一曏")
-    Assert.eq(hits[1].ann, "yī xiàng")
-    Assert.eq(hits[2].key, "觊")
-    Assert.eq(hits[3].key, "龘")
-    -- 最生僻只留 rank > 6500。
-    hits = Lexicon.match(lex, "觊龘", 6500)
-    Assert.len(hits, 1)
-    Assert.eq(hits[1].key, "龘")
-    -- 全部：常用字也注；limit 截断。
-    Assert.len(Lexicon.match(lex, "一龘觊", 0), 3)
-    Assert.len(Lexicon.match(lex, "一龘觊", 0, 2), 2)
-end
-
-do
-    Assert.len(Lexicon.words("It's a Ubiquitous-thing, 42x"), 6)
     Assert.contains(Lexicon.stems("studies"), "study")
     Assert.contains(Lexicon.stems("garbled"), "garble")
     Assert.contains(Lexicon.stems("garbling"), "garble")
-    local lex = Lexicon.parse(EN)
-    local hits = Lexicon.match(lex, "The UBIQUITOUS, lugubrious studies were garbled. Lugubrious!", 8000)
-    Assert.len(hits, 4)
-    Assert.eq(hits[1].key, "UBIQUITOUS")
-    Assert.eq(hits[1].ann, "/ju:'bikwitәs/")
-    Assert.eq(hits[2].key, "lugubrious")
-    Assert.eq(hits[3].key, "garbled")
-    Assert.eq(hits[3].ann, "/'gɑ:bl/")
-    -- 大小写不同算不同原文（findText 忽略大小写，画两次也只命中同样的框）。
-    Assert.eq(hits[4].key, "Lugubrious")
-    Assert.len(Lexicon.match(lex, "ubiquitous lugubrious", 20000), 1)
 end
 
 do

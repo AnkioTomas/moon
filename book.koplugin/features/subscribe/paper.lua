@@ -133,15 +133,15 @@ function Paper.view(page, w, h)
     local tabs = HorizontalGroup:new{ align = "top" }
     for _idx, m in ipairs(MODES) do
         local active = m.id == mode.id
-        local label = Text.line("body", m.label(), { bold = active, color = active and t.color.navigation or faint })
+        local label = Text.line("body", m.label(), { bold = active, color = active and t.color.accent or faint })
         local cell = VerticalGroup:new{ align = "center", label, VerticalSpan:new{ width = sm },
-            rule(label:getSize().w, active and math.max(2, Theme.px(2)) or 0, t.color.navigation) }
+            rule(label:getSize().w, active and math.max(2, Theme.px(2)) or 0, t.color.accent) }
         tabs[#tabs + 1] = area(HorizontalGroup:new{ cell, HorizontalSpan:new{ width = pad } }, function()
             page:filter({ stream_mode = m.id })
         end)
     end
-    local search = area(HorizontalGroup:new{ align = "center", ico("search", q ~= "" and t.color.icons or faint),
-        HorizontalSpan:new{ width = sm }, Text.line("body", _("搜索"), { color = q ~= "" and t.color.icons or faint }) },
+    local search = area(HorizontalGroup:new{ align = "center", ico("search", q ~= "" and t.color.accent or faint),
+        HorizontalSpan:new{ width = sm }, Text.line("body", _("搜索"), { color = q ~= "" and t.color.accent or faint }) },
         function() Paper.search(page) end)
     local filter = VerticalGroup:new{ align = "left", ends(tabs, search), padded(rule(iw, 1, t.color.faint)) }
 
@@ -166,7 +166,7 @@ function Paper.view(page, w, h)
         local mark = item.read and "" or "•"
         local body = VerticalGroup:new{ align = "left",
             Text.box("body", item.title, text_w, { max_lines = 2, bold = not item.read, transparent = true,
-                color = item.read and faint or t.color.headings }),
+                color = item.read and faint or t.color.accent }),
             VerticalSpan:new{ width = Theme.px(t.space.xs) },
             Text.line("caption", table.concat(meta, " · "), { width = text_w, color = faint }) }
         local mark_widget = Text.line("title", mark ~= "" and mark or " ")
@@ -181,7 +181,7 @@ function Paper.view(page, w, h)
         local cell = VerticalGroup:new{ align = "left", VerticalSpan:new{ width = sm }, content,
             VerticalSpan:new{ width = math.max(0, body_h - sm - content:getSize().h) } }
         -- 图标字体只有描边星；已收藏用实心 ★ 字符，大小对齐图标
-        local star_glyph = item.starred and Text.line("title", "★", { color = t.color.stat }) or ico("star", faint)
+        local star_glyph = item.starred and Text.line("title", "★", { color = t.color.accent }) or ico("star", faint)
         local star = area(CenterContainer:new{ dimen = Geom:new{ w = star_w, h = body_h }, star_glyph }, toggleStar)
         list[#list + 1] = padded(VerticalGroup:new{ align = "left",
             HorizontalGroup:new{ area(cell, function() page:openItem(item) end), star },

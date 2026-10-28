@@ -159,10 +159,7 @@ Assert.eq(purple.color.accent, vivid_purple, "旧控件持有的令牌不原地�
 display.theme_preset = "sakura"
 local sakura = Theme.current()
 Assert.eq(sakura.color.accent, Theme.vivid(0xA34454))
-Assert.eq(sakura.color.icons, sakura.color.accent)
-Assert.eq(sakura.color.headings, sakura.color.accent)
-Assert.eq(sakura.color.navigation, sakura.color.accent)
-Assert.eq(sakura.color.stat, sakura.color.accent)
+Assert.is_nil(sakura.color.icons, "别名令牌已删：只有 accent 一色")
 Assert.eq(sakura.progress.fill, sakura.color.accent)
 Assert.eq(sakura.selected.ink, sakura.color.accent)
 Assert.eq(sakura.card.border_color, sakura.color.accent)
@@ -170,9 +167,9 @@ Assert.eq(sakura.button.primary.ink, 0xFF, "深色主按钮用白字")
 display.theme_preset = nil
 display.theme_color = 0xFFCC00
 Assert.eq(Theme.current().button.primary.ink, 0, "亮色主按钮用黑字")
-Assert.eq(Theme.current().color.icons, Theme.vivid(0xFFCC00), "没选色板时回到单色展开")
+Assert.eq(Theme.current().color.accent, Theme.vivid(0xFFCC00), "没选色板时回到单色展开")
 color_enabled = false
-Assert.eq(Theme.current().color.icons, 0, "灰度模式角色色就是墨色")
+Assert.eq(Theme.current().color.accent, 0, "灰度模式强调色就是墨色")
 Assert.eq(Theme.current(), Theme.get(Theme.id()), "关彩色后不受主题色影响")
 local screen = require("device").screen
 screen.isColorEnabled = nil
