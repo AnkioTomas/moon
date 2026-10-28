@@ -19,6 +19,9 @@
       hold_callback = fn,  -- 可选长按；与 callback 互不影响
   })
 
+  Row.choice({ width = w, icon = …, title = …, items = { { value, text } … }, current = v,
+      on_select = fn(value) })   -- 单选行：点开列表；status 缺省取当前项文案
+
 @module koplugin.book.ui.themes.widgets.row
 --]]
 
@@ -141,6 +144,31 @@ function Row.widget(opts)
     -- 设置搜索靠这两个字段取行文字，不必解析控件树。
     widget.row_title, widget.row_subtitle = opts.title, opts.subtitle
     return widget
+end
+
+--- 单选行：导航行，点开单选列表（标题同行标题），选了与 current 不同的值才回调 on_select。
+--- status 缺省取 current 对应项的文案（current 不在列表里则不显示状态）。
+---@param opts table Row.widget 参数外加 items（{ value, text }[]）/ current / on_select(value)
+---@return table
+function Row.choice(opts)
+    local items, current = opts.items, opts.current
+    if opts.status == nil then
+        for _idx, item in ipairs(items) do
+            if item.value == current then opts.status = item.text end
+        end
+        opts.status_on = true
+    end
+    opts.kind = opts.kind or "nav"
+    opts.callback = function()
+        require("ui.themes.widgets.list"):new{
+            title = opts.title, items = items, current = current, centered = true,
+            on_select = function(value)
+                if value == nil or value == current then return end
+                opts.on_select(value)
+            end,
+        }:show()
+    end
+    return Row.widget(opts)
 end
 
 return Row

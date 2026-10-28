@@ -22,16 +22,6 @@ local TAPS = {
     { value = "detail", text = _("进入详情") },
 }
 
----@param items table[]
----@param value string
----@return string
-local function label(items, value)
-    for _idx, item in ipairs(items) do
-        if item.value == value then return item.text end
-    end
-    return items[1].text
-end
-
 ---@param desktop table
 ---@param key string settings/ui.lua 里的键
 ---@param icon string
@@ -63,21 +53,13 @@ end
 local function choiceRow(desktop, key, icon, title, subtitle, items)
     return function(iw)
         local conf = MoonSettings.get("ui")
-        return Row.widget({
-            width = iw, kind = "nav", icon = icon, title = title, subtitle = subtitle,
-            status = label(items, conf[key]), status_on = true,
-            callback = function()
-                require("ui.themes.widgets.list"):new{
-                    title = title,
-                    items = items,
-                    current = conf[key],
-                    centered = true,
-                    on_select = function(value)
-                        conf[key] = value
-                        MoonSettings.save("ui", conf)
-                        desktop:updateView()
-                    end,
-                }:show()
+        return Row.choice({
+            width = iw, icon = icon, title = title, subtitle = subtitle,
+            items = items, current = conf[key],
+            on_select = function(value)
+                conf[key] = value
+                MoonSettings.save("ui", conf)
+                desktop:updateView()
             end,
         })
     end

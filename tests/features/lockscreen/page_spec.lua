@@ -26,7 +26,18 @@ Themed.on_show = function(o)
     if o.kind == "toast" then log[#log + 1] = "show:" .. o.text end
 end
 package.preload["ui.themes.widgets.row"] = function()
-    return { widget = function(opts) return opts end }
+    local Row = { widget = function(opts) return opts end }
+    -- 单选行替身：点按弹主题列表，选了别的值才回调（与 Row.choice 同约定，row_spec 测真实现）
+    function Row.choice(opts)
+        opts.callback = function()
+            require("ui.themes.widgets.list"):new{
+                title = opts.title, items = opts.items, current = opts.current,
+                on_select = function(v) if v ~= nil and v ~= opts.current then opts.on_select(v) end end,
+            }:show()
+        end
+        return opts
+    end
+    return Row
 end
 
 local refresh_cb

@@ -7,7 +7,6 @@ local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
 local Confirm = require("ui.themes.widgets.confirm")
 local Input = require("ui.themes.widgets.input")
-local List = require("ui.themes.widgets.list")
 local Toast = require("ui.themes.widgets.toast")
 local Row = require("ui.themes.widgets.row")
 local LockScreen = require("features.lockscreen")
@@ -72,24 +71,19 @@ local function navRow(opts)
     end
 end
 
---- 单选行：点开列表，选中新值写配置并重出图；apply 返回 false 表示还没定（如另开了选择器），不重出图。
+--- 单选行：选中新值写配置并重出图；apply 返回 false 表示还没定（如另开了选择器），不重出图。
 ---@param desktop table
----@param opts { icon: string, title: string, status: string, items: table[], current: string, apply: fun(value: string): boolean|nil }
+---@param opts table Row.choice 参数（width / on_select 由本函数补上）外加 apply: fun(value: string): boolean|nil
 ---@return fun(iw: number): table
 local function choiceRow(desktop, opts)
-    return navRow{
-        icon = opts.icon, title = opts.title, status = opts.status,
-        callback = function()
-            List:new{
-                title = opts.title, items = opts.items, current = opts.current, centered = true,
-                on_select = function(value)
-                    if not value or value == opts.current then return end
-                    if opts.apply(value) == false then return end
-                    refreshAfterChange(desktop)
-                end,
-            }:show()
-        end,
-    }
+    return function(iw)
+        opts.width = iw
+        opts.on_select = function(value)
+            if opts.apply(value) == false then return end
+            refreshAfterChange(desktop)
+        end
+        return Row.choice(opts)
+    end
 end
 
 --- 用主题路径选择器选图片（is_file）或文件夹。
