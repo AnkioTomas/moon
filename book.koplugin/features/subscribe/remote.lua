@@ -703,7 +703,7 @@ end
 
 function GET.text(_q, cb) cb(200, { text = Remote.serialize() }) end
 
---- 分发；回调只回一次由调用方（remote/ext_route）保证。
+--- 分发；回调只回一次由调用方（remote/ext_route）保证，抛错由 server 按单条请求 500 收口。
 ---@param method "GET"|"POST"
 ---@param action string
 ---@param params table query（GET）或 JSON body（POST）
@@ -711,11 +711,7 @@ function GET.text(_q, cb) cb(200, { text = Remote.serialize() }) end
 function Remote.handle(method, action, params, cb)
     local fn = (method == "GET" and GET or POST)[action]
     if not fn then return cb(404, { error = _("接口不存在") }) end
-    local ok, err = pcall(fn, params or {}, cb)
-    if not ok then
-        require("utils.log").warn("subscribe remote failed", action, err)
-        cb(500, { error = tostring(err) })
-    end
+    fn(params or {}, cb)
 end
 
 --- 附件下载（GET opml）；其余动作返回 nil 交给 handle。
