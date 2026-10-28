@@ -113,11 +113,54 @@ local function decodeBooksSync(raw)
     return nil
 end
 
+--- 书目版本谱系：每次写回把所有条目盖上 syncVersion = max(远端版本, 本地记录) + 1、syncDevice = 本机，
+--- 本地记下最后见到 / 写出的「版本 + 写入者」。拉到的书目比记录新、或同版本同写入者，才认「别的设备删了」
+--- 而删本地文件（见 pullBooksSync）。放在条目上而不是外层：books.sync 对静读天下 / book 服务端仍是条目数组；
+--- 它们重写时字段原样保留就还是同一谱系，丢了就回到无版本号（按今天的行为处理）。
+---@param decoded table[] books.sync 条目
+---@return integer|nil version
+---@return string|nil device
+local function listVersion(decoded)
+    local version, device
+    for _idx, entry in ipairs(decoded) do
+        local v = type(entry) == "table" and tonumber(entry.syncVersion)
+        if v and (not version or v > version) then
+            version, device = v, type(entry.syncDevice) == "string" and entry.syncDevice or nil
+        end
+    end
+    return version, device
+end
+
+---@param self LocalClient
+---@return string
+local function versionPath(self)
+    return self:webdavCacheRoot() .. "/books_sync_version"
+end
+
+--- 本地记录的书目版本与写入者（没记过为 nil）。
+---@param self LocalClient
+---@return integer|nil version
+---@return string|nil device
+local function knownVersion(self)
+    local raw = readFile(versionPath(self)) or ""
+    local version, device = raw:match("^(%d+)\n?(.*)$")
+    return tonumber(version), device ~= "" and device or nil
+end
+
+---@param self LocalClient
+---@param version integer
+---@param device string|nil
+local function rememberVersion(self, version, device)
+    writeFile(versionPath(self), version .. "\n" .. (device or ""))
+end
+
 --- WebDAV 同步的一轮状态；各步骤只读写这张表，run.active 是当前在飞的可取消句柄。
 ---@class WebdavRun
 ---@field upload_pending boolean|nil 是否还有待上传的本地书
 ---@field files string[] 本轮书架成员（相对路径）：books.sync 条目 + 未推的本地新增；刷新时再并入扫描结果
 ---@field entries table<string, table> books.sync 条目，按 filename
+---@field version integer|nil 拉到的书目版本号（条目上没有则 nil）
+---@field version_device string|nil 该版本的写入者
 ---@field remote table<string, boolean>|nil 刷新时列出的远端书文件；日常同步不列目录，为 nil
 ---@field local_files table<string, table>|nil 扫出的本地书库目录文件（相对路径 → scanFiles 条目；推脏不扫，为 nil）
 ---@field meta_failed boolean|nil books.sync 存在但读不出：本轮不能回写，否则会覆盖别的设备的书目
@@ -230,7 +273,10 @@ end
 
 --- 拉 books.sync，按书目 reconcile 书架（云端的书只靠 books.sync 存活）。
 --- 远端元数据覆盖本地已同步行；本地脏行（用户编辑、删除）由 upsertRemote 保留，等 pushBooksSync 推上去。
---- 书目里没了的书（别的设备删了）：本地书库目录里已下载的那份跟着删。
+--- 书目里没了的书（别的设备删了）：本地书库目录里已下载的那份跟着删——但只在书目比本地记录新、
+--- 或同版本同写入者（同一谱系，含静读天下原样保留字段的重写）时。版本更低（旧书目覆盖）或同版本不同写入者
+--- （两台设备从同一版本各写一份）说明这份书目没看到我们最后见过的内容，它缺的书不一定是被删的：
+--- 只下架（可恢复），文件留着，下次刷新本地还有就补回书目。没有版本号的书目照旧删。
 ---@param self LocalClient
 ---@param run WebdavRun
 ---@param done fun(err: string|nil)
@@ -243,6 +289,7 @@ local function pullBooksSync(self, run, done)
         if not raw and not missing then return done(err) end
         local decoded = raw and decodeBooksSync(raw)
         if type(decoded) == "table" then
+            run.version, run.version_device = listVersion(decoded)
             for _idx, entry in ipairs(decoded) do
                 if type(entry) == "table" and type(entry.filename) == "string" then
                     if safeRel(entry.filename) then
@@ -293,11 +340,20 @@ local function pullBooksSync(self, run, done)
         if not BookDB.reconcile(SOURCE_ID, rows) then
             return done("failed to save WebDAV book metadata")
         end
+        local known, known_device = knownVersion(self)
+        local trusted = not run.version or not known or run.version > known
+            or (run.version == known and run.version_device == known_device)
+        if not trusted then
+            require("utils.log").warn("book webdav books.sync stale version; keep local files",
+                run.version, run.version_device, known, known_device)
+        elseif run.version and run.version ~= known then
+            rememberVersion(self, run.version, run.version_device)
+        end
         local root, member = localRoot(self), {}
         for _idx, rel in ipairs(run.files) do member[rel] = true end
         for stable_id, row in pairs(before) do
             local rel = remoteRelativePath(stable_id)
-            if root and rel and not member[rel] and row.sync_status == 1 and row.path == root .. "/" .. rel then
+            if trusted and root and rel and not member[rel] and row.sync_status == 1 and row.path == root .. "/" .. rel then
                 os.remove(row.path)
                 tombstone(stable_id)
             end
@@ -628,17 +684,26 @@ local function uploadCovers(self, run, done)
     end, done)
 end
 
---- 书目整份写回：zlib 压缩 JSON；putText 先建 .Moon+（日常同步不列目录，远端可能还没有它）。
+--- 书目整份写回：所有条目盖上新版本 max(远端, 本地记录) + 1 与本机写入者，zlib 压缩 JSON；写成才记下版本。
+--- putText 先建 .Moon+（日常同步不列目录，远端可能还没有它）。
 ---@param self LocalClient
 ---@param list table[]
+---@param remote_version integer|nil 读到的远端书目版本
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }
-local function writeBooksSync(self, list, cb)
+local function writeBooksSync(self, list, remote_version, cb)
     local JSON = require("json")
+    local version = math.max(remote_version or 0, knownVersion(self) or 0) + 1
+    local device = require("utils.device_id").ensure()
+    for _idx, entry in ipairs(list) do entry.syncVersion, entry.syncDevice = version, device end
     local ok_zlib, Zlib = pcall(require, "ffi/zlib")
     local data = ok_zlib and Zlib.zlib_compress(JSON.encode(#list > 0 and list or JSON.util.InitArray({})))
     if not data then return defer(cb, false, _("无法生成 WebDAV 书目文件")) end
-    return putText(self, moonPath(self, "books.sync"), self:webdavCacheRoot() .. "/.books.sync.upload", data, cb)
+    return putText(self, moonPath(self, "books.sync"), self:webdavCacheRoot() .. "/.books.sync.upload", data,
+        function(ok, err)
+            if ok then rememberVersion(self, version, device) end
+            cb(ok, err)
+        end)
 end
 
 --- 按本轮书架成员重建 books.sync，只在内容有变化时回写。
@@ -681,7 +746,7 @@ local function pushBooksSync(self, run, done)
     end
     if not changed then return confirm() end
     run.report(T(_("正在更新书目（%1 本）"), #list))
-    run.active = writeBooksSync(self, list, function(ok, err)
+    run.active = writeBooksSync(self, list, run.version, function(ok, err)
         if run.cancelled then return end
         if not ok then
             require("utils.log").warn("book webdav books.sync upload failed", err)
@@ -746,7 +811,7 @@ local function editBooksSync(self, rel, edit, cb)
         local entry = edit(old)
         if not old and not entry then return cb(true) end
         if entry then table.insert(list, at or #list + 1, entry) end
-        active = writeBooksSync(self, list, function(written, write_err)
+        active = writeBooksSync(self, list, listVersion(decoded), function(written, write_err)
             if not cancelled then cb(written, write_err) end
         end)
     end)
