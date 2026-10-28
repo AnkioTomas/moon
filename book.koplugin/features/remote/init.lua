@@ -19,6 +19,7 @@ local logger = require("utils.log")
 local Settings = require("utils.settings")
 local Text = require("utils.text")
 local Guard = require("ui.guard")
+local Pair = require("features.remote.pair")
 local _ = require("gettext")
 
 local Remote = {
@@ -1454,6 +1455,10 @@ function Remote.start()
             backup_zip = backupZip,
             restore_backup = restoreBackup,
             reset_config = resetConfig,
+            is_paired = Pair.isPaired,
+            is_shared = function(path) return Remote._shared[path] == true end,
+            pair_request = Pair.request,
+            pair_poll = Pair.poll,
         },
     }
     local started, serr = server:start()
@@ -1488,6 +1493,7 @@ function Remote.stop()
     require("ui/uimanager"):removeZMQ(Remote._server)
     Remote._server:stop()
     Remote._server = nil
+    Pair.cancel()
     stopFilesystemJobs()
     kindleHole(false)
     logger.info("book remote stopped")
@@ -1555,6 +1561,8 @@ end
 
 --- 分享链接下载完整后要删掉的文件（开关「分享后自动删除」开启时登记）。
 Remote._once = {}
+--- 设备主动分享出去的文件：这些 /download 链接不要浏览器配对（扫码的手机没法配对）。
+Remote._shared = {}
 
 --- 启动服务并给受控文件生成局域网下载地址。
 ---@param path string
@@ -1581,6 +1589,7 @@ function Remote.shareUrl(path)
     if Remote.deleteAfterShareOn() then
         Remote._once[real] = true
     end
+    Remote._shared[real] = true
     return string.format("http://%s:%d/download?path=%s", ip, Remote.port(), Text.urlEncode(real))
 end
 

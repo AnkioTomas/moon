@@ -125,8 +125,73 @@ function setState(node, text, kind) {
     node.textContent = text || '';
     node.className = 'state' + (kind ? ' ' + kind : '');
 }
+// ── 浏览器配对：令牌存 localStorage（真相），每次加载镜像进会话 Cookie，
+// <a href>/<img src> 的 /download 请求才带得上。401 → 在 Kindle 上点「允许」→ 存令牌重试。
+var PAIR_KEY = 'moon_token';
+(function () {
+    var tok = null;
+    try { tok = localStorage.getItem(PAIR_KEY); } catch (e) {}
+    if (tok) document.cookie = PAIR_KEY + '=' + tok + '; path=/; SameSite=Lax';
+})();
+function browserName() {
+    var ua = navigator.userAgent || '';
+    var b = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox'
+        : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+    var os = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mac OS/.test(ua) ? 'macOS'
+        : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : '';
+    return os ? b + ' · ' + os : b;
+}
+var _pairing = null;
+function pair() {
+    if (_pairing) return _pairing;
+    var ov = document.createElement('div');
+    ov.className = 'overlay on';
+    var box = document.createElement('div');
+    box.className = 'dialog';
+    var h = document.createElement('h2'); h.textContent = t('等待 Kindle 授权');
+    var p = document.createElement('p'); p.textContent = t('第一次访问需要在 Kindle 上点「允许」。请查看设备屏幕。');
+    var st = document.createElement('p');
+    var btns = document.createElement('div'); btns.className = 'btns';
+    var retry = document.createElement('button'); retry.type = 'button'; retry.className = 'primary'; retry.textContent = t('重试'); retry.hidden = true;
+    btns.appendChild(retry);
+    box.appendChild(h); box.appendChild(p); box.appendChild(st); box.appendChild(btns);
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    _pairing = new Promise(function (res) {
+        function finish(tok) {
+            try { localStorage.setItem(PAIR_KEY, tok); } catch (e) {}
+            document.cookie = PAIR_KEY + '=' + tok + '; path=/; SameSite=Lax';
+            ov.remove();
+            _pairing = null;
+            res();
+        }
+        function fail(msg) {
+            st.textContent = msg;
+            retry.hidden = false;
+        }
+        function poll(id) {
+            fetch('/api/pair?id=' + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (d) {
+                if (d.state === 'approved' && d.token) return finish(d.token);
+                if (d.state === 'pending') return setTimeout(function () { poll(id); }, 1500);
+                fail(t('Kindle 拒绝了这次授权'));
+            }).catch(function () { fail(t('与设备失去联系')); });
+        }
+        function start() {
+            retry.hidden = true;
+            st.textContent = '';
+            fetch('/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: browserName() }) })
+                .then(function (r) { return r.json(); })
+                .then(function (d) { if (d.id) poll(d.id); else fail(t('与设备失去联系')); })
+                .catch(function () { fail(t('与设备失去联系')); });
+        }
+        retry.onclick = start;
+        start();
+    });
+    return _pairing;
+}
 function jfetch(u, opt) {
     return fetch(u, opt).then(function (r) {
+        if (r.status === 401) return pair().then(function () { return jfetch(u, opt); });
         return r.text().then(function (text) {
             var d;
             try { d = JSON.parse(text); } catch (e) { throw 'HTTP ' + r.status; }

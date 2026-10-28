@@ -36,6 +36,7 @@ local STATUS = {
     [200] = "OK",
     [201] = "Created",
     [400] = "Bad Request",
+    [401] = "Unauthorized",
     [403] = "Forbidden",
     [404] = "Not Found",
     [405] = "Method Not Allowed",
@@ -71,6 +72,10 @@ local STATUS = {
 ---@field backup_zip fun(cb: fun(output: string|nil, err: any))|nil 打包 .moon（不含日志与缓存）
 ---@field reset_config fun(cb: fun(ok: boolean, err: string|nil))|nil 清除全部配置与 crash.log，成功后设备提示并重启
 ---@field restore_backup fun(temp: string, cb: fun(ok: boolean, err: string|nil))|nil 用上传的备份包替换 .moon，成功后设备提示并重启
+---@field is_paired fun(token: string): boolean 令牌是否属于已配对浏览器（见 pair.lua）
+---@field is_shared fun(path: string): boolean /download?path= 是否设备主动分享出去的链接（免配对）
+---@field pair_request fun(name: string, ip: string|nil): string 发起配对（设备弹窗），返回请求 id
+---@field pair_poll fun(id: string): string, string|nil 配对状态 pending|approved|denied 与批准后的令牌
 
 --- 一切非 2xx 响应都是 JSON {"error": msg}：页面能把真实原因显示出来，
 --- 而不是 r.json() 解析纯文本炸出 SyntaxError 掩盖问题。
@@ -88,6 +93,7 @@ local SettingsRoute = require("features.remote.settings_route")
 local UpdateRoute = require("features.remote.update")
 local BackupRoute = require("features.remote.backup")
 local ExtRoute = require("features.remote.ext_route")
+local Pair = require("features.remote.pair")
 Server._routeList = File.list
 Server._routeDownload = File.download
 Server._routeUpload = File.upload
@@ -106,6 +112,7 @@ Server._routeUpdate = UpdateRoute.route
 Server._routeBackup = BackupRoute.route
 Server._routeReset = BackupRoute.reset
 Server._routeExt = ExtRoute.route
+Server._routePair = Pair.route
 
 --- idle_timeout：连续这么多秒没有任何在途连接就调一次 on_idle（nil = 不检测）。
 ---@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil, idle_timeout: number|nil, on_idle: fun()|nil }
@@ -255,6 +262,7 @@ function Server:_accept()
         client:settimeout(0)
         self._conns[#self._conns + 1] = {
             sock = client,
+            peer = client:getpeername(),
             state = "headers",
             buf = "",
             out = "",
@@ -514,8 +522,8 @@ end
 
 --- 解析请求行 + headers 并分发路由；失败直接排响应。
 --- 顺序固定：静态资源（仅 GET，否则 405）→
---- Host 字面量校验（403，防 DNS rebinding）→ 非 GET 的同源校验（403）→ API 路由；
---- 全不匹配回 404。
+--- Host 字面量校验（403，防 DNS rebinding）→ 非 GET 的同源校验（403）→
+--- 浏览器配对校验（401，公开路由见 pair.lua）→ API 路由；全不匹配回 404。
 ---@param conn table
 ---@param head string 请求行 + headers 原文（不含结尾空行）
 function Server:_route(conn, head)
@@ -558,6 +566,25 @@ function Server:_route(conn, head)
         return self:_fail(conn, 403, "Cross-origin request rejected")
     end
 
+    -- 页面启动就要的 i18n / 页面列表与配对本身是公开的，其余都要已配对浏览器的令牌
+    if path == "/api/pages" then
+        if method ~= "GET" then
+            return self:_fail(conn, 405, "Method Not Allowed")
+        end
+        return self:_json(conn, 200, JSON.encode(ExtRoute.pages()))
+    elseif path == "/api/i18n" then
+        return self:_routeI18n(conn, method)
+    elseif path == "/api/pair" then
+        return self:_routePair(conn, method, headers, query)
+    end
+    local ext_name, ext_action = path:match("^/api/([%w_]+)/([%w_]+)$")
+    local ext = ext_name and ExtRoute.find(ext_name)
+    local public = (path == "/download" and query.path and self.handlers.is_shared(query.path))
+        or (ext and ext.public and ext.public[ext_action])
+    if not public and not Pair.authorized(self, headers) then
+        return self:_fail(conn, 401, "pair required")
+    end
+
     if path == "/api/config" then
         if method ~= "GET" then
             return self:_fail(conn, 405, "Method Not Allowed")
@@ -567,13 +594,6 @@ function Server:_route(conn, head)
             home = self.home,
             shortcuts = self.shortcuts,
         }))
-    elseif path == "/api/pages" then
-        if method ~= "GET" then
-            return self:_fail(conn, 405, "Method Not Allowed")
-        end
-        return self:_json(conn, 200, JSON.encode(ExtRoute.pages()))
-    elseif path == "/api/i18n" then
-        return self:_routeI18n(conn, method)
     elseif path == "/api/logs.zip" then
         return self:_routeLogs(conn, method)
     elseif path == "/api/list" then
@@ -613,8 +633,6 @@ function Server:_route(conn, head)
     elseif path == "/api/reset" then
         return self:_routeReset(conn, method)
     end
-    local ext_name, ext_action = path:match("^/api/([%w_]+)/([%w_]+)$")
-    local ext = ext_name and ExtRoute.find(ext_name)
     if ext then
         return self:_routeExt(conn, method, headers, query, ext, ext_action)
     end

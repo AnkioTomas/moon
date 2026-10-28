@@ -95,6 +95,42 @@ async function check(lang) {
     await assert.rejects(context.jfetch('/api/input'), err =>
         err.status === 400 && err.message === strings['设备上没有激活的输入框']);
 
+    // 配对：401 → 弹等待框、POST /api/pair → 轮询 pending → approved 存令牌、镜像 Cookie → 原请求重试
+    const stored = {};
+    context.localStorage = { getItem: k => stored[k] ?? null, setItem(k, v) { stored[k] = v; } };
+    const body = element('BODY');
+    body.appendChild = n => { body.children.push(n); n.parentNode = body; };
+    document.body = body;
+    document.createElement = tag => {
+        const n = element(tag.toUpperCase());
+        n.appendChild = c => { n.children.push(c); c.parentNode = n; };
+        n.remove = () => { body.children = body.children.filter(c => c !== n); };
+        return n;
+    };
+    context.setTimeout = fn => { fn(); return 0; };
+    context.navigator = { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) Chrome/120 Safari/537' };
+    const calls = [];
+    let polls = 0;
+    context.fetch = async (u, opt) => {
+        calls.push((opt && opt.method || 'GET') + ' ' + u);
+        if (u === '/api/pair') {
+            assert.equal(JSON.parse(opt.body).name, 'Chrome · macOS');
+            return { ok: true, json: async () => ({ id: 'req-1' }) };
+        }
+        if (u.startsWith('/api/pair?id=req-1')) {
+            polls++;
+            return { ok: true, json: async () => polls < 2 ? { state: 'pending' } : { state: 'approved', token: 'abc123' } };
+        }
+        if (!context.document.cookie.includes('moon_token=abc123')) return { ok: false, status: 401, text: async () => '{"error":"pair required"}' };
+        return { ok: true, status: 200, text: async () => '{"ok":true}' };
+    };
+    context.document.cookie = '';
+    const paired = await context.jfetch('/api/list?path=/');
+    assert.equal(paired.ok, true);
+    assert.equal(stored.moon_token, 'abc123');
+    assert.equal(body.children.length, 0, 'overlay removed after approval');
+    assert.deepEqual(calls, ['GET /api/list?path=/', 'POST /api/pair', 'GET /api/pair?id=req-1', 'GET /api/pair?id=req-1', 'GET /api/list?path=/']);
+
     const nodes = {};
     document.getElementById = id => nodes[id] ||= element('DIV');
     document.getElementById('bkprog').querySelector = () => null;

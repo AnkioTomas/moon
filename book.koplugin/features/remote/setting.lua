@@ -8,7 +8,7 @@ local _ = require("gettext")
 
 local Setting = {}
 
-Setting.defaults = { remote_port = 9528, remote_autostart = false, remote_idle_stop = true, remote_delete_after_share = false }
+Setting.defaults = { remote_port = 9528, remote_autostart = false, remote_idle_stop = true, remote_delete_after_share = false, remote_paired = {} }
 
 ---@param desktop BookDesktop
 ---@return function[]
@@ -113,6 +113,26 @@ local function rows(desktop)
                 callback = function()
                     Remote.setDeleteAfterShare(not on)
                     rebuild()
+                end,
+            })
+        end,
+        function(iw)
+            local Pair = require("features.remote.pair")
+            local n = Pair.count()
+            return Row.widget({
+                width = iw, icon = "devices", title = _("已授权的浏览器"),
+                subtitle = _("第一次访问要在本机点「允许」"),
+                status = n > 0 and T(_("%1 个浏览器"), n) or _("无"),
+                callback = function()
+                    if n == 0 then return end
+                    require("ui.themes.widgets.confirm"):new{
+                        text = T(_("撤销全部 %1 个浏览器的授权？"), n),
+                        ok_text = _("撤销"),
+                        ok_callback = function()
+                            Pair.revokeAll()
+                            rebuild()
+                        end,
+                    }:show()
                 end,
             })
         end,
