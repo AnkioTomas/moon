@@ -41,10 +41,10 @@ package.preload["book.books_db"] = function()
             saved_payload = payload
             return true
         end,
-        replaceAllReaderPrefs = function(payload)
+        mergeReaderPrefs = function(update)
             if fail_replace then return false end
-            saved_payload = payload
-            if other_payload ~= nil then other_payload = payload end
+            if saved_payload ~= nil then saved_payload = update(saved_payload) or saved_payload end
+            if other_payload ~= nil then other_payload = update(other_payload) or other_payload end
             return true
         end,
     }
@@ -404,8 +404,11 @@ ui.font.font_face = "Demo Face"
 ui.doc_settings.data.book_reader_font_id = "demo.ttf"
 -- 高亮刚在菜单里改完还没 SaveSettings：sidecar 是旧的 red，活状态才是当前格式。
 ui.view = { highlight = { saved_drawer = "underscore", saved_color = "green" } }
--- 另一本已有快照的书，saveDefaults 必须一起覆盖。
-other_payload = "{font_face=\"Old Face\",copt={font_size=10}}"
+-- 另一本已有快照的书：排版（copt / 字体）跟着换，但它自己的 doc（右开本、语言、专属 CSS、高亮格式）原样保留。
+other_payload = require("json").encode({
+    font_face = "Old Face", font_id = "old.ttf", copt = { font_size = 10, stale_only_here = 90 },
+    doc = { inverse_reading_order = true, text_lang = "ja", book_style_tweak = "p{color:red}", highlight_drawer = "lighten" },
+})
 Assert.is_true(ReaderPrefs.saveDefaults(ui))
 Assert.eq(global_data.cre_font, "Demo Face")
 Assert.eq(global_data.book_reader_default_font_id, "demo.ttf")
@@ -421,9 +424,20 @@ end
 Assert.eq(flushed, 1)
 local synced = require("json").decode(other_payload)
 Assert.eq(synced.font_face, "Demo Face")
+Assert.eq(synced.font_id, "demo.ttf")
 Assert.eq(synced.copt.font_size, ui.document.configurable.font_size)
-Assert.eq(synced.doc.highlight_drawer, "underscore")
-Assert.eq(synced.doc.highlight_color, "green")
+Assert.is_nil(synced.copt.stale_only_here, "copt 整组替换，旧书多出来的键不残留")
+Assert.is_true(synced.doc.inverse_reading_order, "漫画右开本不能被小说的默认盖掉")
+Assert.eq(synced.doc.text_lang, "ja")
+Assert.eq(synced.doc.book_style_tweak, "p{color:red}")
+Assert.eq(synced.doc.highlight_drawer, "lighten", "那本书自己的高亮格式保留")
+Assert.is_nil(synced.doc.highlight_color)
+-- 旧格式快照（没有 doc 字段）：只换排版，不凭空造 doc（write 时才不会清掉那章自己的微调）
+other_payload = "{\"font_face\":\"Old\",\"copt\":{\"font_size\":9}}"
+Assert.is_true(ReaderPrefs.saveDefaults(ui))
+local legacy = require("json").decode(other_payload)
+Assert.eq(legacy.copt.font_size, ui.document.configurable.font_size)
+Assert.is_nil(legacy.doc)
 -- 新书 sidecar 没有字体 id 时，按默认插件字体注册。
 resolved_font_ids = {}
 ReaderPrefs.inject({ data = {}, readSetting = function() end, saveSetting = function() end }, { file = "/x.epub", setFontFace = function() end })
@@ -464,14 +478,14 @@ Assert.is_true(ReaderPrefs.inject(prefer_book, { file = "/chapter.html", setFont
 Assert.eq(prefer_book.data.copt_font_size, 18)
 Assert.eq(prefer_book.data.font_face, "Book Face")
 
--- replaceAll 失败只打日志，saveDefaults 仍算成功（全局已落盘）。
+-- 快照合并失败只打日志，saveDefaults 仍算成功（全局已落盘）。
 fail_replace = true
 warnings = {}
 ui.document.configurable.font_size = 25
 Assert.is_true(ReaderPrefs.saveDefaults(ui))
 Assert.eq(global_data.copt_font_size, 25)
 Assert.eq(#warnings, 1)
-Assert.matches(warnings[1][1], "replaceAll failed")
+Assert.matches(warnings[1][1], "merge failed")
 fail_replace = false
 fail_write = false
 
@@ -503,10 +517,10 @@ Assert.eq(next_chapter.data.font_face, "Demo Face")
 Assert.eq(next_chapter.data.highlight_drawer, "underscore")
 Assert.eq(next_chapter.data.highlight_color, "green")
 
--- 2) 章节书「保存为默认」→ 下一章吃到刚存的默认（replaceAll 已写本书快照）
+-- 2) 章节书「保存为默认」→ 下一章吃到刚存的默认（本书快照的 copt 已合并）
 ui.document.configurable.font_size = 31
 ui.document.configurable.line_spacing = 140
-other_payload = "{font_face=\"X\",copt={font_size=1}}"
+other_payload = "{\"font_face\":\"X\",\"copt\":{\"font_size\":1}}"
 Assert.is_true(ReaderPrefs.saveDefaults(ui))
 local after_default = emptySidecar()
 Assert.is_true(ReaderPrefs.inject(after_default, { file = "/chapter2.html", setFontFace = function() end }))

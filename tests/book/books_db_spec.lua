@@ -476,6 +476,37 @@ do
     clearMods()
 end
 
+-- ── mergeReaderPrefs：逐行把旧 payload 交给 update，nil 跳过，按身份回写，不新建行 ──
+do
+    local connection, calls = makeConn({
+        exec = function(sql)
+            -- 无参 SELECT 走 conn:exec：列式结果 { source_id[], stable_id[], reader_prefs[] }, nrows
+            if sql:find("SELECT source_id, stable_id, reader_prefs", 1, true) then
+                return { { "moon", "fanqie" }, { "b1", "b2" }, { "{old1}", "{old2}" } }, 2
+            end
+        end,
+    })
+    local DbBase, BookDB = loadBook(connection)
+    local seen = {}
+    Assert.is_true(BookDB.mergeReaderPrefs(function(payload)
+        seen[#seen + 1] = payload
+        if payload == "{old2}" then return nil end
+        return payload .. "+"
+    end))
+    Assert.eq(table.concat(seen, ","), "{old1},{old2}")
+    local updates = {}
+    for _, call in ipairs(calls) do
+        if call.sql:find("UPDATE books SET reader_prefs=?", 1, true) then updates[#updates + 1] = call end
+    end
+    Assert.len(updates, 1, "回 nil 的行不写")
+    Assert.eq(updates[1].args[1], "{old1}+")
+    Assert.eq(updates[1].args[2], "moon")
+    Assert.eq(updates[1].args[3], "b1")
+    Assert.is_true(calls[#calls].sql:find("COMMIT", 1, true) ~= nil)
+    DbBase.close()
+    clearMods()
+end
+
 -- ── markDeleted / pendingDeleteIds：本地软删入脏队列 ──
 do
     local connection, calls = makeConn({

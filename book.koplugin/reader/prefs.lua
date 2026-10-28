@@ -257,7 +257,8 @@ end
 
 --- 当前排版存为全局默认：同 KOReader ConfigDialog「设为默认」，逐项写 G_reader_settings 的
 --- `<prefix>_<name>`（CRE 为 copt，PDF/DjVu 为 kopt）；字体同 ReaderFont 写 cre_font。
---- 同时覆盖所有已有 books.reader_prefs，让章节源下次打开也吃到这套。
+--- 同时把所有已有 books.reader_prefs 的排版（copt / 字体）换成这套，章节书下一章 inject 即生效；
+--- 各书自己的 doc（右开本、语言断词、专属 CSS、词典、高亮格式）是那本书的属性，不是排版风格，保留。
 ---@param ui table ReaderUI
 ---@return boolean
 function M.saveDefaults(ui)
@@ -295,8 +296,14 @@ function M.saveDefaults(ui)
     end
     G_reader_settings:flush()
     if prefs then
-        if not BookDB.replaceAllReaderPrefs(JSON.encode(prefs)) then
-            logger.warn("book.reader_prefs replaceAll failed")
+        local merged = BookDB.mergeReaderPrefs(function(raw)
+            local existing = decode(raw) or {}
+            existing.copt = copyValue(prefs.copt)
+            existing.font_id, existing.font_name, existing.font_face = prefs.font_id, prefs.font_name, prefs.font_face
+            return JSON.encode(existing)
+        end)
+        if not merged then
+            logger.warn("book.reader_prefs merge failed")
         end
     end
     return true
