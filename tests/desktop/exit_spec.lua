@@ -1,6 +1,6 @@
 --[[--
 退出假死回归：桌面 + 文件管理器在窗口栈上，广播 Exit 后栈必须清空（KOReader 普通退出靠空栈收尾）。
-覆盖详情页 / 设置浮层打开、onClose 后再 Exit 不重复关、退出兜底清理残留窗口。
+覆盖详情页 / 设置浮层打开、onClose 后再 Exit 不重复关、退出兜底清理残留窗口；阅读中 Desktop.open 走 reader_exit 异步关书。
 
 @module tests.desktop.exit_spec
 --]]
@@ -234,4 +234,18 @@ do
     d2:destroy()
     local d3 = newDesktop(plugin)
     Assert.eq(d3.tab, "home", "换源不还原")
+end
+
+-- 5) 阅读中调 Desktop.open（主菜单「月读」）：不在当前调用栈里同步关文档，
+--    交给 reader_exit.closeToDesktop 下一 tick 关书再开桌面（与侧栏 / 快捷面板的「回桌面」同一条路）
+do
+    local delegated
+    package.loaded["desktop.reader_exit"] = { closeToDesktop = function(ui) delegated = ui end }
+    local closed = 0
+    local ui = { document = {}, onClose = function() closed = closed + 1 end }
+    local plugin = { ui = ui }
+    ---@cast plugin BookPlugin
+    Desktop.open(plugin)
+    Assert.eq(delegated, ui)
+    Assert.eq(closed, 0, "不得同步 onClose")
 end

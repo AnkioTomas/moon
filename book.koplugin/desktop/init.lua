@@ -629,9 +629,9 @@ end
 --- 已有桌面先销毁再重建。桌面可见后后台同步书架与统计（desktop.sync）。
 ---@param plugin BookPlugin
 function Desktop.open(plugin)
+    -- 阅读中（主菜单「月读」）：调用栈里不能同步关文档，下一 tick 关书 → 重建 FM → 再开桌面。
     if plugin.ui and plugin.ui.document then
-        plugin.ui:onClose()
-        Desktop.open(Desktop.ensureFileManager().book)
+        require("desktop.reader_exit").closeToDesktop(plugin.ui)
         return
     end
 
