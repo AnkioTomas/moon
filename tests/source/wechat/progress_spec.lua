@@ -46,6 +46,8 @@ Assert.eq(fetched, 1)
 local pos = { fraction = 0.5, extra = { chapter_offset = 16 } }
 Assert.is_true(Position.localize(identity, chapter, pos, source, "html"))
 Assert.eq(pos.locator, "/html/body/p/text().1")
+Assert.is_nil(pos.chapter_fraction, "字符比不能进章内页比例字段")
+Assert.not_nil(pos.extra.chapter_char_fraction)
 Assert.eq(Position.encode(identity, chapter, pos, source, "html"), 16)
 
 pos = { fraction = 0.5, extra = { chapter_offset = 1 } }

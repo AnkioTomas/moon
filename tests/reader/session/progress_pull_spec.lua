@@ -254,6 +254,53 @@ do
     precise_document = nil
 end
 
+-- 微信式：远端有 locator、章内比是字符口径（或已清空）；不能拿页比例 1% 假冲突后静默 adopt。
+do
+    precise_document = {
+        getPageCount = function() return 100 end,
+        isXPointerInDocument = function() return false end, -- 比不了页，退回 locator 字符串
+    }
+    local remote
+    source.getProgressAsync = function(_, _id, cb)
+        cb(remote)
+        return { cancel = function() end }
+    end
+    Progress.clearConflicts()
+    shown, goto_calls, remote_upserted, adopted = {}, {}, {}, {}
+    pending_row = {
+        fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.5,
+        locator = "xp-local", sync_status = 1,
+        synced = { fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.5, locator = "xp-local" },
+    }
+    -- 远端字符比 0.2 vs 本地页比 0.5，但同一定位 → 必须视为一致，不能 adopt 跳走
+    remote = { fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.2, locator = "xp-local" }
+    Progress.pull(snapshot())
+    Stubs.flush()
+    Assert.len(shown, 0, "字符比与页比不同不能假冲突")
+    Assert.len(adopted, 0, "已同步同定位不能静默跳走")
+    Assert.len(remote_upserted, 1)
+
+    -- 微信 localize 后 chapter_fraction 为 nil，仍有 locator：应落库，不能当「只记到章」跳过
+    Progress.clearConflicts()
+    shown, remote_upserted, adopted = {}, {}, {}
+    remote = { fraction = 0.4, chapter_idx = 3, locator = "xp-local" }
+    Progress.pull(snapshot())
+    Stubs.flush()
+    Assert.len(shown, 0)
+    Assert.len(adopted, 0)
+    Assert.len(remote_upserted, 1, "有 locator 时 nil 章内比仍落库")
+
+    -- 定位字符串不同且比不了页 → 算冲突（sync 已同步则静默 adopt）
+    Progress.clearConflicts()
+    shown, remote_upserted, adopted = {}, {}, {}
+    remote = { fraction = 0.4, chapter_idx = 3, locator = "xp-cloud" }
+    Progress.pull(snapshot())
+    Stubs.flush()
+    Assert.len(adopted, 1, "定位变了要静默跟云端")
+    Assert.eq(adopted[1].locator, "xp-cloud")
+    precise_document = nil
+end
+
 -- 阅读器尚在章首但 pending 已与云端一致 → 不弹假冲突
 Progress.clearConflicts()
 shown = {}

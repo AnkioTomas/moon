@@ -2,6 +2,10 @@
 微信进度坐标：chapterOffset 是章节原文的字符偏移，EPUB 含 HTML 标签，TXT 按纯文本计。
 原文随章节缓存，离线进度仍只保存本地 XPointer；联网推送时转换，不把页比例当成字符坐标。
 
+localize 得到的字符比例只进 extra.chapter_char_fraction，**不写** ProgressPosition.chapter_fraction：
+后者是阅读器章内页比例（DocumentToc），混进同一字段会让开书比对假冲突、静默跟云端、
+以及 locator 失效时把字符比当成页比例 gotoFraction —— 体感就是进度跳来跳去。
+
 @module koplugin.book.source.wechat.progress
 --]]
 
@@ -90,7 +94,11 @@ function Position.localize(identity, chapter, pos, source, format)
     local flow = Annotations.flow(localHtml(identity, chapter, source, format))
     local locator, fraction = Annotations.fromWireOffset(wire, flow, pos.extra.chapter_offset)
     if not locator then return nil, _("无法定位阅读进度") end
-    pos.locator, pos.chapter_fraction = locator, fraction
+    pos.locator = locator
+    pos.extra = pos.extra or {}
+    pos.extra.chapter_char_fraction = fraction
+    -- 有精确定位就不填页比例字段；打开文档后由 Toc.chapterFraction 重算。
+    pos.chapter_fraction = nil
     return true
 end
 

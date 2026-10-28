@@ -451,10 +451,15 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
                 return true
             end
             local doc = snapshot.ui.document
-            if here and remote_pos.locator and tonumber(id.chapter_idx) == local_idx
-                and doc.isXPointerInDocument and doc.getPageFromXPointer
-                and doc:isXPointerInDocument(here) and doc:isXPointerInDocument(remote_pos.locator) then
-                return doc:getPageFromXPointer(here) ~= doc:getPageFromXPointer(remote_pos.locator)
+            if here and remote_pos.locator then
+                -- 双方都有定位：只比页 / 比字符串。微信等源的远端 chapter_fraction 可能是
+                -- 正文字符比，本地是排版页比，1% 阈值会假冲突 → 静默 adopt → 跳来跳去。
+                if tonumber(id.chapter_idx) == local_idx
+                    and doc.isXPointerInDocument and doc.getPageFromXPointer
+                    and doc:isXPointerInDocument(here) and doc:isXPointerInDocument(remote_pos.locator) then
+                    return doc:getPageFromXPointer(here) ~= doc:getPageFromXPointer(remote_pos.locator)
+                end
+                return here ~= remote_pos.locator
             end
             -- 云端只记到章（京东 / 拷贝漫画等不回章内位置）：同章即一致，以本地章内位置为准。
             -- 拿全书比例反推只会落在章首，每次开书都假冲突。
@@ -629,8 +634,9 @@ function ReaderProgress.pull(snapshot, opts)
             if source.syncProgressAsync then
                 source:syncProgressAsync({ identity = id, dirty_only = true }, function() end)
             end
-        elseif remote_pos.chapter_fraction == nil and chapterToc(snapshot) then
-            -- 云端只记到章：落库会把本地章内位置冲成章首，保留本地。
+        elseif remote_pos.chapter_fraction == nil and not remote_pos.locator and chapterToc(snapshot) then
+            -- 云端只记到章（无定位、无章内比）：落库会把本地章内位置冲成章首，保留本地。
+            -- 有 locator 时仍落库（如微信 localize 后字符比不进 chapter_fraction）。
             logger.dbg("book.progress reader pull done", id.source_id, id.stable_id, "chapter only")
             return
         elseif page_level and locatorElementPath(remote_pos.locator) == nil then
