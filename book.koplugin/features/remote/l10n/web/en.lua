@@ -344,4 +344,8 @@ return {
     ["切换到列表视图"] = "Switch to list view",
     ["列表视图"] = "List view",
     ["预览视图"] = "Preview view",
+    ["等待 Kindle 授权"] = "Waiting for Kindle approval",
+    ["第一次访问需要在 Kindle 上点「允许」。请查看设备屏幕。"] = "On first visit you need to tap \"Allow\" on the Kindle. Check the device screen.",
+    ["Kindle 拒绝了这次授权"] = "The Kindle denied this request",
+    ["与设备失去联系"] = "Lost contact with the device",
 }

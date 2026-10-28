@@ -85,17 +85,16 @@ end
 
 local TOKEN = "0123456789abcdef"
 
---- 除静态资源外所有路由都要 token：给请求行的 URI 补上 t=，
---- 免得每条用例都写一遍。opts.no_token 保留原样（用于认证本身的用例）。
+--- 除公开路由外都要已配对浏览器的令牌（Cookie moon_token）：给请求补上这行头，
+--- 免得每条用例都写一遍。opts.no_token 保留原样（用于配对本身的用例）。
 ---@param chunk string
 ---@return string
 local function withToken(chunk)
-    local method, uri, rest = chunk:match("^(%u+) (%S+) (HTTP/1%.1.*)$")
-    if not method then
+    local line, rest = chunk:match("^(%u+ %S+ HTTP/1%.1)\r\n(.*)$")
+    if not line then
         return chunk
     end
-    local sep = uri:find("?", 1, true) and "&" or "?"
-    return method .. " " .. uri .. sep .. "t=" .. TOKEN .. " " .. rest
+    return line .. "\r\nCookie: a=1; moon_token=" .. TOKEN .. "\r\n" .. rest
 end
 
 --- 新假客户端：chunks 为 receive 逐次吐出的字节片。
@@ -118,6 +117,9 @@ local function newClient(chunks, opts)
         send_limit = opts.send_limit,
     }
     function c:settimeout(_) end
+    function c:getpeername()
+        return "192.168.1.9", 51234
+    end
     function c:receive(n)
         local s = self.chunks[1]
         if not s then
@@ -234,6 +236,21 @@ local function fakeHandlers(dirs)
             end
             os.remove(temp)
             cb(true)
+        end,
+        -- 配对：pair_request 记请求并返回固定 id；pair_poll 按 calls.pair_state 回答
+        is_paired = function(token)
+            return token == TOKEN
+        end,
+        is_shared = function(path)
+            return path == "/dl/shared.bin"
+        end,
+        pair_request = function(name, ip)
+            calls.pair = { name = name, ip = ip }
+            return "req-1"
+        end,
+        pair_poll = function(id)
+            if id ~= "req-1" then return "denied" end
+            return calls.pair_state or "pending", calls.pair_state == "approved" and TOKEN or nil
         end,
     }
     return handlers, calls
@@ -492,26 +509,128 @@ do
     Assert.eq(dynamic.shortcuts[1].path, "/shots")
 end
 
--- ── 来源校验 / DNS rebinding ───────────────────────────
+-- ── 浏览器配对（设备端授权）────────────────────────────
 
 do
-    -- 静态资源免票（都是常量，且页面要先加载才能拿到 token 转发）
+    -- 静态资源免票（页面要先加载才能发起配对）
     local c_asset = newClient({ "GET /style.css HTTP/1.1\r\n\r\n" }, { no_token = true })
     drain(serve(c_asset))
     Assert.eq((parseResponse(c_asset:output())), 200)
 
-    -- 无 token 也可访问，远程管理不再使用令牌
+    -- 没配对的浏览器：API 一律 401，handler 不被调用
     local handlers, calls = fakeHandlers({ ["/"] = {} })
     local c_none = newClient({ "GET /api/list?path=/ HTTP/1.1\r\n\r\n" }, { no_token = true })
     drain(serve(c_none, handlers))
-    Assert.eq((parseResponse(c_none:output())), 200)
-
-    local c_bad = newClient({ "GET /api/list?path=/&t=nope HTTP/1.1\r\n\r\n" }, { no_token = true })
+    local code_none, body_none = parseResponse(c_none:output())
+    Assert.eq(code_none, 401)
+    has(body_none, "pair")
+    local c_bad = newClient({ "GET /api/list?path=/ HTTP/1.1\r\nCookie: moon_token=nope\r\n\r\n" }, { no_token = true })
     drain(serve(c_bad, handlers))
-    Assert.eq((parseResponse(c_bad:output())), 200)
-
+    Assert.eq((parseResponse(c_bad:output())), 401)
     local c_del = newClient(
         { "POST /api/delete?path=/a HTTP/1.1\r\nContent-Length: 0\r\n\r\n" }, { no_token = true })
+    drain(serve(c_del, handlers))
+    Assert.eq((parseResponse(c_del:output())), 401)
+    Assert.is_nil(calls.delete)
+    local c_cfg = newClient({ "GET /api/config HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_cfg, handlers))
+    Assert.eq((parseResponse(c_cfg:output())), 401)
+
+    -- 公开：页面启动就要的 i18n / 页面列表
+    local c_i18n = newClient({ "GET /api/i18n HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_i18n, handlers))
+    Assert.eq((parseResponse(c_i18n:output())), 200)
+    local c_pages = newClient({ "GET /api/pages HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_pages, handlers))
+    Assert.eq((parseResponse(c_pages:output())), 200)
+
+    -- 发起配对：POST /api/pair {name} → { id }；设备端拿到浏览器名与对端 IP
+    local req = '{"name":"Chrome · macOS"}'
+    local c_req = newClient({
+        "POST /api/pair HTTP/1.1\r\nHost: 192.168.1.5:9528\r\nOrigin: http://192.168.1.5:9528\r\n" ..
+        "Content-Length: " .. #req .. "\r\n\r\n" .. req,
+    }, { no_token = true })
+    drain(serve(c_req, handlers))
+    local code_req, body_req = parseResponse(c_req:output())
+    Assert.eq(code_req, 200)
+    has(body_req, '"id":"req-1"')
+    Assert.eq(calls.pair.name, "Chrome · macOS")
+    Assert.eq(calls.pair.ip, "192.168.1.9")
+
+    -- 轮询：pending → approved 带 token；未知 id 是 denied
+    local c_poll = newClient({ "GET /api/pair?id=req-1 HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_poll, handlers))
+    local code_poll, body_poll = parseResponse(c_poll:output())
+    Assert.eq(code_poll, 200)
+    has(body_poll, '"state":"pending"')
+    Assert.is_nil(body_poll:find("token", 1, true))
+    calls.pair_state = "approved"
+    local c_ok = newClient({ "GET /api/pair?id=req-1 HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_ok, handlers))
+    local _, body_ok = parseResponse(c_ok:output())
+    has(body_ok, '"state":"approved"')
+    has(body_ok, '"token":"' .. TOKEN .. '"')
+    local c_unknown = newClient({ "GET /api/pair?id=zzz HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_unknown, handlers))
+    has(select(2, parseResponse(c_unknown:output())), '"state":"denied"')
+    local c_nobody = newClient({ "POST /api/pair HTTP/1.1\r\nContent-Length: 0\r\n\r\n" }, { no_token = true })
+    drain(serve(c_nobody, handlers))
+    Assert.eq((parseResponse(c_nobody:output())), 400)
+
+    -- 配对后的浏览器（Cookie 里带令牌）正常访问
+    local c_paired = newClient({ "GET /api/list?path=/ HTTP/1.1\r\n\r\n" })
+    drain(serve(c_paired, handlers))
+    Assert.eq((parseResponse(c_paired:output())), 200)
+    local c_del2 = newClient({ "POST /api/delete?path=/a HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c_del2, handlers))
+    Assert.eq((parseResponse(c_del2:output())), 200)
+    Assert.eq(calls.delete, "/a")
+
+    -- 分享链接（设备主动生成的 /download）不要配对；没分享过的文件照样 401
+    local shared = os.tmpname()
+    local f = io.open(shared, "wb")
+    f:write("SHARED")
+    f:close()
+    handlers.resolve_download = function(p)
+        return (p == "/dl/shared.bin" or p == "/dl/ok.bin") and shared or nil
+    end
+    local c_share = newClient({ "GET /download?path=/dl/shared.bin HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_share, handlers))
+    local code_share, body_share = parseResponse(c_share:output())
+    Assert.eq(code_share, 200)
+    Assert.eq(body_share, "SHARED")
+    local c_unshared = newClient({ "GET /download?path=/dl/ok.bin HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_unshared, handlers))
+    Assert.eq((parseResponse(c_unshared:output())), 401)
+    os.remove(shared)
+
+    -- 扩展接口：提供者声明 public 的动作免配对（浏览器扩展回调），其余 401
+    local Ext = require("utils.extension")
+    local ext_calls = {}
+    Ext.add("web.routes", {
+        name = "pairdemo",
+        public = { callback = true },
+        handle = function(method, action, _params, cb)
+            ext_calls[#ext_calls + 1] = method .. ":" .. action
+            cb(200, { ok = true })
+        end,
+    })
+    local c_pub = newClient({ "GET /api/pairdemo/callback?x=1 HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_pub, handlers))
+    Assert.eq((parseResponse(c_pub:output())), 200)
+    Assert.eq(ext_calls[1], "GET:callback")
+    local c_priv = newClient({ "GET /api/pairdemo/list HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_priv, handlers))
+    Assert.eq((parseResponse(c_priv:output())), 401)
+    Assert.len(ext_calls, 1)
+    Ext.reset()
+end
+
+-- ── 来源校验 / DNS rebinding ───────────────────────────
+
+do
+    local handlers, calls = fakeHandlers({ ["/"] = {} })
+    local c_del = newClient({ "POST /api/delete?path=/a HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
     drain(serve(c_del, handlers))
     Assert.eq((parseResponse(c_del:output())), 200)
     Assert.eq(calls.delete, "/a")

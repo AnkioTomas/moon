@@ -33,7 +33,7 @@ Ext.POINTS = {
     ["reader.page_updated"] = "翻页后 fn(plugin)（阅读器侧，会话快照已刷新；每次翻页都调，回调要自己节流）",
     ["reader.doc_settings"] = "开书前改文档设置 fn(doc_settings, document)",
     ["reader.preferences"] = "开书后套用偏好 fn(ui)",
-    ["web.routes"] = "远程管理接口 { name, handle(method, action, params, cb(status, table)), download?(action) -> { ctype, filename, body }|nil, dir?: string, assets?: string[], page?: { href, title, title_long?, desc?, icon, tile? }, l10n?: string }（/api/<name>/<action>；assets 为 dir 下开放的静态文件；page 进顶栏与首页；l10n 为网页文案模块前缀）",
+    ["web.routes"] = "远程管理接口 { name, handle(method, action, params, cb(status, table)), download?(action) -> { ctype, filename, body }|nil, dir?: string, assets?: string[], page?: { href, title, title_long?, desc?, icon, tile? }, l10n?: string, public?: { [action] = true } }（/api/<name>/<action>；assets 为 dir 下开放的静态文件；page 进顶栏与首页；l10n 为网页文案模块前缀；public 列出免浏览器配对的动作）",
     ["note.markup_classes"] = "页内插入的译文类元素 class（字符串）；划线端点落在其中时回退到原文",
 }
 

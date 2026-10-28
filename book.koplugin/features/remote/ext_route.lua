@@ -1,9 +1,10 @@
 --[[--
 扩展接口路由：功能模块经 `web.routes` 挂点（见 utils/extension.lua）把自己的网页挂进远程管理，远程管理不认识任何具体功能。
 
-提供者 { name, dir?, assets?, page?, l10n?, handle, download? }：
+提供者 { name, dir?, assets?, page?, l10n?, public?, handle, download? }：
 - /api/<name>/<action>：只读的 GET 带 query；有副作用的一律 POST（JSON body）。download(action) 给出附件时直接回文本下载，
   其余交给 handle(method, action, params, cb(status, table))，连接转 pending 等回调，回调只认第一次。
+- public：{ [action] = true } 免浏览器配对的动作（浏览器扩展回调之类拿不到令牌的调用方），须自带鉴权；其余动作都要配对（见 pair.lua）。
 - assets：dir 目录下随之开放的静态文件名（/<文件名>）。
 - page：{ href, title, title_long?, desc?, icon（svg path）, tile? }，经 /api/pages 补进顶栏与首页。
 - l10n：网页文案模块前缀，按语言 require(l10n .. "." .. lang) 合入 /api/i18n。
