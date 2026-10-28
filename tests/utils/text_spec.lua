@@ -218,6 +218,15 @@ do
     Assert.eq(Text.base64Decode("5L2c6ICF77ya572X6LSv"), "作者：罗贯")
     -- URL-safe 字符与缺失填充
     Assert.eq(Text.base64Decode("YWI"), "ab")
+    Assert.eq(Text.base64Decode("-_8="), "\251\255")
+    -- 换行 / 空白 / 非字母表字符忽略
+    Assert.eq(Text.base64Decode("YW\nJj\r\n"), "abc")
+    Assert.eq(Text.base64Decode(""), "")
+    Assert.eq(Text.base64Decode(nil), "")
+    local bytes = {}
+    for i = 0, 255 do bytes[#bytes + 1] = string.char(i) end
+    local raw = table.concat(bytes)
+    Assert.eq(Text.base64Decode(Text.base64Encode(raw)), raw)
 end
 
 -- stripEmoji：图形 emoji、ZWJ 序列、肤色、VS16、国旗、键帽去掉；★ 与空白、普通文字不动

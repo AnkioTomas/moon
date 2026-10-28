@@ -214,7 +214,7 @@ end
 ---@param iv string
 ---@return string
 function Des.encryptBase64(plain, key, iv)
-    return (require("mime").b64(Des.encrypt(plain, key, iv)))
+    return require("utils.text").base64Encode(Des.encrypt(plain, key, iv))
 end
 
 ---@param text string
@@ -222,8 +222,7 @@ end
 ---@param iv string
 ---@return string|nil
 function Des.decryptBase64(text, key, iv)
-    local raw = require("mime").unb64(text)
-    return raw and Des.decrypt(raw, key, iv)
+    return Des.decrypt(require("utils.text").base64Decode(text), key, iv)
 end
 
 return Des

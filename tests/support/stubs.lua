@@ -508,13 +508,10 @@ local function installSocketutil()
     end
 end
 
---- 裸 LuaJIT 没有 LuaSocket；只补业务直接用到的 gettime / unb64。
+--- 裸 LuaJIT 没有 LuaSocket；只补业务直接用到的 gettime。
 local function installLuaSocket()
     installIfMissing("socket", function()
         return { gettime = os.clock }
-    end)
-    installIfMissing("mime", function()
-        return { unb64 = function(data) return require("utils.text").base64Decode(data) end }
     end)
 end
 

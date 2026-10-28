@@ -468,40 +468,31 @@ function Text.base64Encode(data)
     return table.concat(out)
 end
 
---- Base64 解码（容忍 URL-safe 字符与缺失填充）。
+local B64_VAL = {}
+do
+    local alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    for i = 1, #alpha do B64_VAL[alpha:byte(i)] = i - 1 end
+    B64_VAL[("-"):byte()], B64_VAL[("_"):byte()] = 62, 63
+end
+
+--- Base64 解码（容忍 URL-safe 字符、缺失填充、换行与其它非字母表字符）。
 ---@param data string|nil
 ---@return string
 function Text.base64Decode(data)
     data = tostring(data or "")
-    local alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    data = data:gsub("-", "+"):gsub("_", "/")
-    local pad = #data % 4
-    if pad > 0 then
-        data = data .. string.rep("=", 4 - pad)
-    end
-    data = data:gsub("[^" .. alpha .. "=]", "")
-    return (data:gsub(".", function(char)
-        if char == "=" then
-            return ""
-        end
-        local bits = ""
-        local index = alpha:find(char, 1, true) - 1
-        for b = 6, 1, -1 do
-            bits = bits .. (index % 2 ^ b - index % 2 ^ (b - 1) > 0 and "1" or "0")
-        end
-        return bits
-    end):gsub("%d%d%d?%d?%d?%d?%d?%d?", function(bits)
-        if #bits ~= 8 then
-            return ""
-        end
-        local byte = 0
-        for i = 1, 8 do
-            if bits:sub(i, i) == "1" then
-                byte = byte + 2 ^ (8 - i)
+    local out, acc, bits = {}, 0, 0
+    for i = 1, #data do
+        local v = B64_VAL[data:byte(i)]
+        if v then
+            acc, bits = acc * 64 + v, bits + 6
+            if bits >= 8 then
+                bits = bits - 8
+                out[#out + 1] = string.char(math.floor(acc / 2 ^ bits) % 256)
+                acc = acc % 2 ^ bits
             end
         end
-        return string.char(byte)
-    end))
+    end
+    return table.concat(out)
 end
 
 --- 剥掉每行行首的排版缩进（ASCII 空白、全角空格 U+3000、不换行空格 U+00A0），并规范化换行。
