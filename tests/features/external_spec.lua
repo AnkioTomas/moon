@@ -52,6 +52,7 @@ local exts = {
             book_removed = function(...) calls[#calls + 1] = { ... }; error("sub boom") end,
         },
         hooks = { onReaderReady = function(plugin) calls.hook = plugin; error("hook boom") end },
+        lookup = { tabs = function() return { { id = "demo", text = "演示", fetch = function() end } } end },
     } },
     { id = "ext.broken", features = { panel = "no.such.module", setting = { entries = function() return { order = 1 } end } } },
     { id = "ext.none" },
@@ -86,6 +87,9 @@ do
     local items = Features.external("panel")
     Assert.eq(#items, 1, "坏模块名记日志跳过")
     Assert.eq(items[1].id, "ext.demo")
+    local lookup = Features.external("lookup")
+    Assert.eq(#lookup, 1, "lookup 同走第三方收集")
+    Assert.eq(lookup[1].mod.tabs()[1].id, "demo")
 end
 local desktop = Panel.desktopOrder()
 Assert.eq(desktop[#desktop - 1], "ext.demo.toggle")

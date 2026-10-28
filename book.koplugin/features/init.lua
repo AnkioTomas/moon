@@ -47,11 +47,12 @@ onCreate 每次开书、关书都会再调（FM / Reader 各建实例），monke
 只有写进 list 的才加载。新增 feature：复制 demo/ 为 <name>/ 删掉不用的钩子，加进 list，测试放 tests/features/<name>/；
 demo/ 不登记、打包时剔除。
 
-第三方 feature：KOReader 插件的 moon_source.lua 写 `provides.features = { setting, panel, topbar, events, hooks }`，
+第三方 feature：KOReader 插件的 moon_source.lua 写 `provides.features = { setting, panel, topbar, events, hooks, lookup }`，
 每个值是表，或插件内的模块名（字符串，用到时才 require）；形状与对应约定文件相同：
   setting = { entries = fn(desktop) }、panel = { actions = fn() }、topbar = { items = fn() }、
-  events = { [数据事件名] = fn(...) }、hooks = { onReaderReady = fn(plugin) }。
-`Features.external(kind)` 收集它们，由四个收集点（设置树、快捷面板注册表、桌面顶栏、main 传给 utils.event）追加在内置项之后。
+  events = { [数据事件名] = fn(...) }、hooks = { onReaderReady = fn(plugin) }、
+  lookup = { tabs = fn(), actions = fn() }（查词面板：tabs 底部 Tab，actions 操作行按钮，形状见 features.rare.lookup 的 externalTabs / externalActions；都可选，不写就不追加）。
+`Features.external(kind)` 收集它们，由收集点（设置树、快捷面板注册表、桌面顶栏、main 传给 utils.event、查词面板）追加在内置项之后。
 只开放 onReaderReady：其余生命周期与 KOReader 事件第三方插件自己的实例就能收到，月读不转发；补丁与页内标记不开放。
 规则：
   - 页面 / 开关 / 顶栏项 id 自动加 `<扩展 id>.` 前缀（已带则不重复加），撞名的记日志跳过；

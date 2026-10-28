@@ -1,8 +1,10 @@
 --[[--
 查词面板：所有划词 / 查词入口共用的一个标准居中弹窗（主题 Modal，带遮罩，点遮罩关闭）。
 
-底部四个图标 Tab：词典、翻译、AI、百科，点 Tab 原地切换正文。词典 Tab 卡头可选词典（列出有结果的词典，记住选择）；
-AI、百科首次切到才请求（结果缓存，可取消，AI 可追问）。正文固定高度，超长时上下滑滚动；各 Tab 卡片几何一致，
+底部图标 Tab：词典、翻译、AI、百科，之后是 Moon 扩展登记的 Tab（provides.features.lookup.tabs），点 Tab 原地切换正文。
+操作行：内置「复制 / 存为笔记 / 加入生词本 / 追问」之后可接扩展的 lookup.actions（扩展自己决定加不加，核心与示例默认不加）。
+词典 Tab 卡头可选词典（列出有结果的词典，记住选择）；
+AI、百科、扩展 Tab 首次切到才请求（结果缓存，可取消，AI 可追问）。正文固定高度，超长时上下滑滚动；各 Tab 卡片几何一致，
 切换时重画整个窗口栈，遮罩下不留旧卡残影。记住上次用的 Tab；同一时刻只留一个面板。
 入口：长按查词、划词「查词」「翻译」「AI 解释」。
 
@@ -12,9 +14,9 @@ AI、百科首次切到才请求（结果缓存，可取消，AI 可追问）。
   |-------------------------------|
   | [现代汉语 ▼]                  |   词典 Tab（翻译 Tab 为语言按钮）
   | 正文……（HTML 词典按 HTML 排版）|
-  | [复制] [存为笔记] [追问]      |
+  | [复制] [存为笔记] [追问] …    |   内置 + 扩展 actions
   |-------------------------------|
-  |  词典   翻译    AI    百科    |   图标 Tab
+  |  词典   翻译    AI    百科 …  |   图标 Tab + 扩展 tabs
   +-------------------------------+
 
 @module koplugin.book.features.rare.lookup
@@ -217,15 +219,129 @@ function Lookup.queryDicts(ui, word)
     return out
 end
 
---- 底部 Tab（固定四个）。
+local BUILTIN_TAB_IDS = { dict = true, translate = true, ai = true, baike = true }
+
+--- Moon 扩展登记的查词 Tab：moon_source.lua 写 provides.features.lookup = { tabs = fn() }，
+--- 每项 { id, text, icon?, fetch }，id 由月读补成 <扩展 id>.<id>（已带则不重复加）；
+--- fetch(text, { ui, context, from_highlight }, cb) 异步交回 cb(正文|nil, 错误|nil)，可返回 { cancel = fn }。
+--- 收集 / 回调出错只跳过该项，查词面板本身不能被第三方拖死。
+---@return { id: string, text: string, icon: string, fetch: function }[]
+function Lookup.externalTabs()
+    local External = require("utils.external")
+    local ok, items = pcall(External.collect, "lookup")
+    if not ok or type(items) ~= "table" then return {} end
+    local out, seen = {}, {}
+    for _idx, item in ipairs(items) do
+        local tabs = type(item.mod.tabs) == "function" and External.try(item.id .. " lookup tabs", item.mod.tabs)
+        if type(tabs) == "table" then
+            for _i, tab in ipairs(tabs) do
+                local id = type(tab) == "table" and not BUILTIN_TAB_IDS[tab.id] and External.prefix(item.id, tab.id) or nil
+                if id and not seen[id] and type(tab.text) == "string" and tab.text ~= ""
+                    and type(tab.fetch) == "function" then
+                    seen[id] = true
+                    local fetch = tab.fetch
+                    out[#out + 1] = {
+                        id = id, text = tab.text,
+                        icon = type(tab.icon) == "string" and tab.icon ~= "" and tab.icon or "dictionary",
+                        -- once：扩展先 cb 再抛错时，不能把成功结果盖成失败。
+                        fetch = function(text, ctx, cb)
+                            local done = false
+                            local function once(body, err)
+                                if done then return end
+                                done = true
+                                cb(body, err)
+                            end
+                            local ok, job = pcall(fetch, text, ctx, once)
+                            if not ok then once(nil, tostring(job)) end
+                            return job
+                        end,
+                    }
+                else
+                    require("utils.log").error("lookup external tab rejected", item.id, type(tab) == "table" and tab.id or nil)
+                end
+            end
+        end
+    end
+    return out
+end
+
+--- Moon 扩展登记的查词操作按钮：provides.features.lookup = { actions = fn() }，
+--- 每项 { id, text, run, available? }，id 补成 <扩展 id>.<id>；不写 actions = 不追加按钮。
+--- available(ctx) / run(ctx)：ctx = { text, content, active, ui, from_highlight, close? }（close 只给 run）；
+--- available 缺省恒显示，抛错当不显示；run 抛错只记日志。开窗收集一次，rebuild 时再滤 available。
+---@return { id: string, text: string, run: function, available: function|nil }[]
+function Lookup.externalActions()
+    local External = require("utils.external")
+    local ok, items = pcall(External.collect, "lookup")
+    if not ok or type(items) ~= "table" then return {} end
+    local out, seen = {}, {}
+    for _idx, item in ipairs(items) do
+        local actions = type(item.mod.actions) == "function"
+            and External.try(item.id .. " lookup actions", item.mod.actions)
+        if type(actions) == "table" then
+            for _i, act in ipairs(actions) do
+                local id = type(act) == "table" and External.prefix(item.id, act.id) or nil
+                if id and not seen[id] and type(act.text) == "string" and act.text ~= ""
+                    and type(act.run) == "function" then
+                    seen[id] = true
+                    out[#out + 1] = {
+                        id = id, text = act.text, run = act.run,
+                        available = type(act.available) == "function" and act.available or nil,
+                    }
+                else
+                    require("utils.log").error("lookup external action rejected", item.id,
+                        type(act) == "table" and act.id or nil)
+                end
+            end
+        end
+    end
+    return out
+end
+
+--- 当前 Tab 可复制 / 存笔记的正文（加载中或空为 nil）。
+---@return string|nil
+function Lookup:activeContent()
+    local text = self.content[self.active]
+    if text then return text end
+    if self.active == "dict" and self:currentDict() then return self:body() end
+end
+
+--- 给扩展 available / run 的上下文。
+---@param with_close boolean|nil
+---@return table
+function Lookup:actionCtx(with_close)
+    local ctx = {
+        text = self.text,
+        content = self:activeContent(),
+        active = self.active,
+        ui = self.ui,
+        from_highlight = self.from_highlight,
+    }
+    if with_close then
+        ctx.close = function() self:close() end
+    end
+    return ctx
+end
+
+--- 底部 Tab：内置四个 + 扩展 Tab（开窗时收集一次，挂在实例上）。
 ---@return table[]
 function Lookup:tabs()
-    return {
+    local out = {
         { id = "dict", text = _("词典"), icon = "dictionary" },
         { id = "translate", text = _("翻译"), icon = "translate" },
         { id = "ai", text = _("AI"), icon = "auto_awesome" },
         { id = "baike", text = _("百科"), icon = "travel_explore" },
     }
+    for _idx, tab in ipairs(self.ext_tabs or {}) do out[#out + 1] = tab end
+    return out
+end
+
+---@param id string
+---@return table|nil
+function Lookup:extTab(id)
+    for _idx, tab in ipairs(self.ext_tabs or {}) do
+        if tab.id == id then return tab end
+    end
 end
 
 --- 能否查词典 / 百科（长句、多行不查）。
@@ -299,7 +415,8 @@ end
 ---@param wanted string|nil
 ---@return string
 function Lookup:initialSource(wanted)
-    local ids = { dict = true, translate = true, ai = true, baike = true }
+    local ids = {}
+    for _idx, tab in ipairs(self:tabs()) do ids[tab.id] = true end
     local last = require("utils.settings").get("features.rare").rare_lookup_source
     if wanted and ids[wanted] then return wanted end
     if last and ids[last] then return last end
@@ -320,9 +437,29 @@ function Lookup:select(id)
     if not self.content[id] and not self.jobs[id] then
         if id == "translate" then self:requestTranslate()
         elseif id == "baike" and self:isWord() then self:requestBaike()
-        elseif id == "ai" then self:requestAi() end
+        elseif id == "ai" then self:requestAi()
+        else
+            local tab = self:extTab(id)
+            if tab then self:requestExternal(tab) end
+        end
     end
     self:refreshView()
+end
+
+--- 扩展 Tab：切到才请求，正文 / 错误都写回卡里；fetch 同步交回时 jobs 还没登记，deliver 顺序无碍。
+---@param tab table
+function Lookup:requestExternal(tab)
+    self.content[tab.id], self.status[tab.id] = nil, _("正在查询…")
+    local delivered = false
+    local job = tab.fetch(self.text, { ui = self.ui, context = self.context, from_highlight = self.from_highlight },
+        function(text, err)
+            delivered = true
+            self:deliver(tab.id, text, not text and T(_("查询失败：%1"), tostring(err or _("未知错误"))) or nil)
+        end)
+    if type(job) == "function" then job = { cancel = job } end
+    if not delivered and type(job) == "table" and type(job.cancel) == "function" then
+        self.jobs[tab.id] = job
+    end
 end
 
 --- 词典 Tab 换词典：弹出有结果的词典列表，记住选择。
@@ -446,19 +583,19 @@ function Lookup:refreshView()
     UIManager:setDirty("all", "ui")
 end
 
---- 复制 / 存为笔记（划词进来的才有）。
+--- 复制 / 存为笔记（划词进来的才有）+ 扩展 lookup.actions。
 ---@return table[]
 function Lookup:actions()
     local row = {}
     if Device:hasClipboard() then
         row[#row + 1] = { text = _("复制"), callback = function()
-            local text = self.content[self.active] or (self.active == "dict" and self:currentDict() and self:body())
+            local text = self:activeContent()
             if text then Device.input.setClipboardText(text) end
         end }
     end
     if self.from_highlight then
         row[#row + 1] = { text = _("存为笔记"), callback = function()
-            local text = self.content[self.active] or (self.active == "dict" and self:currentDict() and self:body())
+            local text = self:activeContent()
             local ui = self.ui
             if not (text and ui and ui.highlight) then return end
             self.handed_off = true
@@ -478,11 +615,26 @@ function Lookup:actions()
     if self.active == "ai" and self.content.ai then
         row[#row + 1] = { text = _("追问"), callback = function() self:followUp() end }
     end
+    local External = require("utils.external")
+    for _idx, act in ipairs(self.ext_actions or {}) do
+        local show = true
+        if act.available then
+            show = External.try(act.id .. " available", act.available, self:actionCtx(false)) and true or false
+        end
+        if show then
+            local run = act.run
+            row[#row + 1] = { text = act.text, callback = function()
+                External.try(act.id .. " run", run, self:actionCtx(true))
+            end }
+        end
+    end
     return row
 end
 
 function Lookup:init()
     Modal.init(self)
+    self.ext_tabs = self.ext_tabs or Lookup.externalTabs()
+    self.ext_actions = self.ext_actions or Lookup.externalActions()
     self.dicts = self.dicts or {}
     self.content, self.status, self.jobs = {}, {}, {}
     local t = self.theme

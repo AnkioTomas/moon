@@ -103,6 +103,20 @@ Assert.is_true(shown.from_highlight)
 local wiki = setmetatable({ ui = reader_ui }, { __index = ReaderDictionary })
 Assert.eq(wiki:onLookupWord("moon"), "native lookup")
 
+-- 原生查词弹窗的第三方按钮：月读没集成的不要挡（回退原生），已集成的（生词本）不挡面板
+dict._dict_buttons = { vocabulary = { text = "生词本" } }
+shown = {}
+Assert.is_true(dict:onLookupWord("moon", false, nil, {}))
+Assert.eq(shown.text, "moon!")
+dict._dict_buttons = { anki = { text = "Anki" } }
+Assert.eq(dict:onLookupWord("moon"), "native lookup", "未集成的原生按钮回退原生弹窗")
+Assert.is_true(DictInit.hasUnintegratedButtons(dict, "moon"))
+dict._dict_buttons = { anki = { show_func = function() return false end } }
+Assert.is_false(DictInit.hasUnintegratedButtons(dict, "moon"), "show_func 说不显示就不算挡")
+dict._dict_buttons = { anki = { show_func = function() error("boom") end } }
+Assert.is_true(DictInit.hasUnintegratedButtons(dict, "moon"), "show_func 判不准按会显示处理")
+dict._dict_buttons = nil
+
 settings.dictionary_enabled = false
 Assert.is_false(DictInit.isEnabled())
 local native_menu_items = {}

@@ -47,6 +47,52 @@ package.preload["features.baike.client"] = function()
         return { cancel = function() baike_cancelled = true end }
     end }
 end
+local ext_fetch_cb, ext_seen, ext_cancelled, ext_action_run, ext_action_ctx
+package.preload["utils.external"] = function()
+    return {
+        collect = function(kind)
+            Assert.eq(kind, "lookup")
+            return { { id = "ext.demo", mod = {
+                tabs = function()
+                    return {
+                        { id = "demo", text = "演示", icon = "dictionary", fetch = function(text, ctx, cb)
+                            ext_seen, ext_fetch_cb = text, cb
+                            return { cancel = function() ext_cancelled = true end }
+                        end },
+                        { id = "throw_after", text = "先成后抛", fetch = function(_text, _ctx, cb)
+                            cb("先成功")
+                            error("after cb")
+                        end },
+                        { id = "throw_before", text = "先抛", fetch = function()
+                            error("before cb")
+                        end },
+                        { id = "dict", text = "撞内置", fetch = function() end },
+                        { id = "bad", text = "坏项", fetch = "no" },
+                    }
+                end,
+                actions = function()
+                    return {
+                        { id = "hi", text = "说你好", run = function(ctx)
+                            ext_action_run, ext_action_ctx = true, ctx
+                        end },
+                        { id = "hidden", text = "隐藏", available = function() return false end, run = function() end },
+                        { id = "boom", text = "抛错可用", available = function() error("avail") end, run = function() end },
+                        { id = "norun", text = "无 run" },
+                        { id = "empty", text = "", run = function() end },
+                    }
+                end,
+            } } }, true
+        end,
+        try = function(_label, fn, ...)
+            local ok, a, b, c = pcall(fn, ...)
+            if ok then return a, b, c end
+        end,
+        prefix = function(ext_id, id)
+            if type(id) ~= "string" or id == "" then return nil end
+            return id:sub(1, #ext_id + 1) == ext_id .. "." and id or ext_id .. "." .. id
+        end,
+    }
+end
 package.preload["ui/network/manager"] = function() return { isConnected = function() return connected end } end
 package.preload["http.timeout"] = function() return { ai = function() return 60 end } end
 package.preload["features.ai.explain"] = function()
@@ -137,7 +183,7 @@ Assert.eq(sdcv_word, "彘")
 Assert.eq(panel.reading, "zhì")
 local ids = {}
 for _idx, tab in ipairs(panel:tabs()) do ids[#ids + 1] = tab.id .. ":" .. tab.text .. ":" .. tab.icon end
-Assert.eq(table.concat(ids, ","), "dict:词典:dictionary,translate:翻译:translate,ai:AI:auto_awesome,baike:百科:travel_explore")
+Assert.eq(table.concat(ids, ","), "dict:词典:dictionary,translate:翻译:translate,ai:AI:auto_awesome,baike:百科:travel_explore,ext.demo.demo:演示:dictionary,ext.demo.throw_after:先成后抛:dictionary,ext.demo.throw_before:先抛:dictionary")
 Assert.eq(panel.active, "dict")
 Assert.eq(panel.text_box.text, "猪")
 Assert.eq(settings.rare_lookup_source, "dict", "记住 Tab")
@@ -246,6 +292,68 @@ Assert.eq(again.active, "ai")
 Assert.eq(ai_calls, 1)
 Assert.eq(again.text_box.text, "猪，此处指祭品")
 again:close()
+
+-- Moon 扩展 Tab：开窗不请求，停在该 Tab 才 fetch；结果 / 错误写回卡里，关窗取消在途请求
+local ext_tabs = Lookup.externalTabs()
+Assert.len(ext_tabs, 3, "撞内置 id 与坏项跳过，抛错用例保留")
+Assert.eq(ext_tabs[1].id, "ext.demo.demo")
+local by_id = {}
+for _idx, tab in ipairs(ext_tabs) do by_id[tab.id] = tab end
+-- fetch 先 cb 再抛：只交一次成功，不能被 pcall 失败路径盖掉
+local after_hits = {}
+by_id["ext.demo.throw_after"].fetch("词", {}, function(body, err)
+    after_hits[#after_hits + 1] = { body, err }
+end)
+Assert.len(after_hits, 1, "先成后抛只回调一次")
+Assert.eq(after_hits[1][1], "先成功")
+Assert.is_nil(after_hits[1][2])
+-- fetch 抛在 cb 前：一次失败回调
+local before_hits = {}
+by_id["ext.demo.throw_before"].fetch("词", {}, function(body, err)
+    before_hits[#before_hits + 1] = { body, err }
+end)
+Assert.len(before_hits, 1, "先抛只回调一次")
+Assert.is_nil(before_hits[1][1])
+Assert.matches(before_hits[1][2], "before cb")
+local ext = Lookup.open{ ui = ui, text = "彘", source = "ext.demo.demo" }
+Assert.eq(ext.active, "ext.demo.demo")
+Assert.eq(ext_seen, "彘")
+Assert.eq(ext.text_box.text, "正在查询…")
+ext_fetch_cb("演示结果")
+Assert.eq(ext.text_box.text, "演示结果")
+ext:close()
+ext_cancelled = false
+local ext2 = Lookup.open{ ui = ui, text = "彘", source = "ext.demo.demo" }
+ext2:close()
+Assert.is_true(ext_cancelled, "关窗取消扩展请求")
+local ext3 = Lookup.open{ ui = ui, text = "彘", source = "ext.demo.demo" }
+ext_fetch_cb(nil, "boom")
+Assert.eq(ext3.text_box.text, "查询失败：boom")
+ext3:close()
+settings.rare_lookup_source = ""
+
+-- Moon 扩展操作行：合法项追加在复制后；available=false / 抛错 / 缺 run 跳过
+local ext_acts = Lookup.externalActions()
+Assert.len(ext_acts, 3, "合法三项（含 hidden/boom），缺 run 与空 text 跳过")
+Assert.eq(ext_acts[1].id, "ext.demo.hi")
+local act_panel = Lookup.open{ ui = ui, text = "彘", source = "dict" }
+local act_texts = {}
+for _idx, a in ipairs(act_panel:actions()) do act_texts[#act_texts + 1] = a.text end
+Assert.contains(act_texts, "复制")
+Assert.contains(act_texts, "说你好")
+Assert.is_false((function()
+    for _i, t in ipairs(act_texts) do if t == "隐藏" or t == "抛错可用" then return true end end
+    return false
+end)(), "available 假或抛错不显示")
+ext_action_run = false
+for _idx, a in ipairs(act_panel:actions()) do
+    if a.text == "说你好" then a.callback(); break end
+end
+Assert.is_true(ext_action_run)
+Assert.eq(ext_action_ctx.text, "彘")
+Assert.eq(ext_action_ctx.active, "dict")
+Assert.eq(type(ext_action_ctx.close), "function")
+act_panel:close()
 
 -- 百科未收录 / 断网 / 关窗取消；长句没有百科卡
 local nb = Lookup.open{ ui = {}, text = "龘龘", source = "baike" }

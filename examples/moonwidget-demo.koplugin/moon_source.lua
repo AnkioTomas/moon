@@ -5,7 +5,8 @@
 - home_widgets 用简写表：build(ctx, w, h) 返回占满 w × h 的控件；settings(desktop, id) 让首页编辑态出现设置按钮。
 - 组件设置存进 utils.settings.getSource(<扩展 id>) 那张独立表（settings/<id>.lua），别写月读自己的分区。
 - provides.features 演示往月读自己的挂点加功能（契约见 book.koplugin/features/init.lua 头注释），三处共用一个开关 `bar`：
-  setting（「桌面」分组里一行开关）、panel（桌面快捷面板开关）、topbar（打开时顶栏显示一句短问候）。
+  setting（「桌面」分组里一行开关）、panel（桌面快捷面板开关）、topbar（打开时顶栏显示一句短问候）；
+  lookup.tabs 往查词面板底部加一个「问候」Tab（长按查词时出现）；lookup.actions 可往「复制」那一行追加按钮（本示例不登记，扩展自己决定要不要加）。
   值可以是表，也可以是插件内的模块名（字符串，用到时才 require）；id 由月读补成 ext.greeting.<id>，回调出错只记日志。
 --]]
 
@@ -70,6 +71,20 @@ local features = {
                     keep_open = true,
                     active = barOn,
                     run = function() setBar(not barOn()) end,
+                },
+            }
+        end,
+    },
+    lookup = {
+        tabs = function()
+            return {
+                {
+                    id = "greeting", -- 月读补成 ext.greeting.greeting，上线后别改
+                    text = _("问候"),
+                    icon = "wb_sunny",
+                    fetch = function(text, _ctx, cb)
+                        cb(greeting() .. "\n" .. text)
+                    end,
                 },
             }
         end,
