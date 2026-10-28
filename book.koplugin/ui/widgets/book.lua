@@ -179,12 +179,17 @@ function Book.author(book)
     return book.authors or ""
 end
 
---- 取简介。
+--- 取简介（纯文本）。库里若残留 HTML（旧数据 / 漏剥的源），展示前剥掉。
 ---@param book Book|BookDetail|table|nil 当前操作或展示的书籍数据
 ---@return string
 function Book.desc(book)
     if type(book) ~= "table" then return "" end
-    return tostring(book.intro or "")
+    local intro = book.intro
+    if type(intro) ~= "string" or intro == "" then return "" end
+    if intro:find("<", 1, true) then
+        return require("utils.text").stripHtml(intro)
+    end
+    return intro
 end
 
 --- 取阅读进度百分比（0–100）。

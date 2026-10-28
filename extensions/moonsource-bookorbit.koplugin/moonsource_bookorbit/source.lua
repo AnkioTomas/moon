@@ -202,9 +202,17 @@ end
 ---@param detail table
 ---@return Book
 local function detailRow(id, stable_id, detail)
+    local Text = require("utils.text")
+    local intro = detail.description
+    if type(intro) == "string" and intro ~= "" then
+        intro = Text.stripHtml(intro)
+        if intro == "" then intro = nil end
+    else
+        intro = nil
+    end
     return {
         source_id = id, stable_id = stable_id, title = detail.title,
-        authors = authorsOf(detail.authors), intro = detail.description, series = detail.seriesName,
+        authors = authorsOf(detail.authors), intro = intro, series = detail.seriesName,
         meta = {
             publisher = detail.publisher, published = detail.publishedDate or detail.publishedYear,
             language = detail.language, isbn = detail.isbn13 or detail.isbn10,
