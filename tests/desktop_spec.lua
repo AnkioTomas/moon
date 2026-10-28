@@ -416,4 +416,28 @@ do -- 开机自动开桌面：按启动项、进程内只开一次；Reader 实�
     Assert.eq(saved.lastdir, "/books", "lastdir 不被改")
 end
 
+do -- 陀螺仪只送到栈顶：桌面把方向交给 FileManager，自己仍返回 false
+    local turned
+    package.loaded["apps/reader/readerui"] = nil
+    package.loaded["apps/filemanager/filemanager"] = {
+        instance = { handleEvent = function(_, ev) turned = ev.args[1] end },
+    }
+    local kept = {}
+    _G.G_reader_settings = {
+        isTrue = function() return false end,
+        readSetting = function(_, key) return kept[key] end,
+        saveSetting = function(_, key, value) kept[key] = value end,
+        flush = function() end,
+    }
+    local screen = require("device").screen
+    screen.mode = 0
+    screen.getRotationMode = function() return screen.mode end
+    screen.setRotationMode = function(_, mode) screen.mode = mode end
+    package.loaded["utils.rotation"] = nil
+    Assert.is_false(desk:onSetRotationMode(1))
+    Assert.eq(turned, 1)
+    Assert.eq(kept.fm_rotation_mode, 1)
+    Assert.is_false(desk:onSetRotationMode())
+end
+
 return true

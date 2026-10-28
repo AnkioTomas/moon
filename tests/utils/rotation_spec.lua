@@ -83,6 +83,66 @@ do
     Assert.eq(screen_mode, 1)
 end
 
+-- follow：没有宿主时自己转屏并记下
+do
+    saved, flushed, screen_mode = {}, 0, 0
+    package.loaded["apps/reader/readerui"] = nil
+    package.loaded["apps/filemanager/filemanager"] = nil
+    Rotation.follow(2)
+    Assert.eq(screen_mode, 2)
+    Assert.eq(saved.fm_rotation_mode, 2)
+    Assert.eq(flushed, 1)
+    Rotation.follow(2)
+    Assert.eq(flushed, 1, "方向没变不再记")
+end
+
+-- follow：阅读器优先于文件管理器；方向锁定仍转屏，但不落盘
+do
+    local which
+    screen_mode = 0
+    package.loaded["apps/reader/readerui"] = {
+        instance = {
+            handleEvent = function(_, ev)
+                which = "reader"
+                screen_mode = ev.args[1]
+            end,
+        },
+    }
+    package.loaded["apps/filemanager/filemanager"] = {
+        instance = { handleEvent = function() which = "fm" end },
+    }
+    saved, flushed = {}, 0
+    Rotation.follow(3)
+    Assert.eq(which, "reader")
+    Assert.eq(screen_mode, 3)
+    Assert.eq(saved.fm_rotation_mode, 3)
+
+    which = nil
+    package.loaded["apps/reader/readerui"].instance.tearing_down = true
+    Rotation.follow(1)
+    Assert.eq(which, "fm")
+
+    saved, flushed = { lock_rotation = true }, 0
+    screen_mode = 0
+    package.loaded["apps/reader/readerui"] = nil
+    package.loaded["apps/filemanager/filemanager"] = {
+        instance = { handleEvent = function(_, ev) screen_mode = ev.args[1] end },
+    }
+    Rotation.follow(1)
+    Assert.eq(screen_mode, 1)
+    Assert.is_nil(saved.fm_rotation_mode)
+    package.loaded["apps/reader/readerui"] = nil
+    package.loaded["apps/filemanager/filemanager"] = nil
+end
+
+-- 非数字方向忽略
+do
+    screen_mode = 0
+    Rotation.follow(nil)
+    Rotation.follow("1")
+    Assert.eq(screen_mode, 0)
+end
+
 -- reader.doc_settings 挂点已登记
 do
     local found = false

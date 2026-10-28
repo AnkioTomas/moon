@@ -52,6 +52,29 @@ function Rotation.apply()
     Screen:setRotationMode(mode)
 end
 
+--- 当时在前台的阅读器或文件管理器。陀螺仪不广播，只把 SetRotationMode 送给栈顶窗口。
+---@return table|nil
+local function host()
+    local reader = package.loaded["apps/reader/readerui"]
+    local reading = reader and reader.instance
+    if reading and not reading.tearing_down then return reading end
+    local fm = package.loaded["apps/filemanager/filemanager"]
+    return fm and fm.instance
+end
+
+--- 栈顶窗口（桌面、弹窗）收到陀螺仪方向后交给宿主转屏。方向没变则什么都不做。
+---@param mode number|nil
+function Rotation.follow(mode)
+    if type(mode) ~= "number" or mode == Screen:getRotationMode() then return end
+    local ui = host()
+    if ui then
+        ui:handleEvent(require("ui/event"):new("SetRotationMode", mode))
+    else
+        Screen:setRotationMode(mode)
+    end
+    Rotation.remember(mode)
+end
+
 require("utils.extension").add("reader.doc_settings", Rotation.injectDocSettings)
 
 return Rotation
