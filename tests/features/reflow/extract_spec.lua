@@ -117,6 +117,31 @@ do
     Assert.eq(err, "文档没有可提取的文字")
 end
 
+-- 写盘失败（磁盘满）：整次作废、带原因、临时文件删掉，不交出半本书
+do
+    local real_open = io.open
+    local tmp_path
+    io.open = function(path, mode)
+        local f = real_open(path, mode)
+        if mode == "wb" and f then
+            tmp_path = path
+            return setmetatable({}, { __index = function(_t, k)
+                if k == "write" then return function() return nil, "No space left on device" end end
+                return function(_self, ...) return f[k](f, ...) end
+            end })
+        end
+        return f
+    end
+    local ui = rollingUi(2, { "正文", "结尾" })
+    local text, err = run(ui)
+    io.open = real_open
+    Assert.is_nil(text)
+    Assert.matches(err, "写入临时文件失败")
+    Assert.matches(err, "No space left")
+    Assert.is_nil(real_open(tmp_path, "rb"), "临时文件应已删除")
+    Assert.eq(ui.document.at, "reading")
+end
+
 -- 按时长分批，批间 scheduleIn 正延迟（nextTick 链不让出输入）；取消后排队的批不再提取、也不回调
 do
     local UIManager = require("ui/uimanager")
