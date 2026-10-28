@@ -63,17 +63,19 @@ package.loaded["source.registry"] = {
 }
 
 package.loaded["features"] = nil
+package.loaded["utils.external"] = nil
 local Features = require("features")
+local External = require("utils.external")
 
 -- 前缀
-Assert.eq(Features.prefix("ext.a", "x"), "ext.a.x")
-Assert.eq(Features.prefix("ext.a", "ext.a.x"), "ext.a.x")
-Assert.eq(Features.prefix("ext.a", ""), nil)
-Assert.eq(Features.prefix("ext.a", 3), nil)
+Assert.eq(External.prefix("ext.a", "x"), "ext.a.x")
+Assert.eq(External.prefix("ext.a", "ext.a.x"), "ext.a.x")
+Assert.eq(External.prefix("ext.a", ""), nil)
+Assert.eq(External.prefix("ext.a", 3), nil)
 
 -- 插件没加载完：空且 ready 为假
 do
-    local items, ok = Features.external("panel")
+    local items, ok = External.collect("panel")
     Assert.eq(#items, 0)
     Assert.eq(ok, false)
 end
@@ -84,10 +86,10 @@ local Panel = require("features.panel.actions.registry")
 Assert.eq(Panel.get("ext.demo.toggle"), nil)
 ready = true
 do
-    local items = Features.external("panel")
+    local items = External.collect("panel")
     Assert.eq(#items, 1, "坏模块名记日志跳过")
     Assert.eq(items[1].id, "ext.demo")
-    local lookup = Features.external("lookup")
+    local lookup = External.collect("lookup")
     Assert.eq(#lookup, 1, "lookup 同走第三方收集")
     Assert.eq(lookup[1].mod.tabs()[1].id, "demo")
 end

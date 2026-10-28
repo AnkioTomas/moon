@@ -52,12 +52,12 @@ demo/ 不登记、打包时剔除。
   setting = { entries = fn(desktop) }、panel = { actions = fn() }、topbar = { items = fn() }、
   events = { [数据事件名] = fn(...) }、hooks = { onReaderReady = fn(plugin) }、
   lookup = { tabs = fn(), actions = fn() }（查词面板：tabs 底部 Tab，actions 操作行按钮，形状见 features.rare.lookup 的 externalTabs / externalActions；都可选，不写就不追加）。
-`Features.external(kind)` 收集它们，由收集点（设置树、快捷面板注册表、桌面顶栏、main 传给 utils.event、查词面板）追加在内置项之后。
+`External.collect(kind)` 收集它们，由收集点（设置树、快捷面板注册表、桌面顶栏、main 传给 utils.event、查词面板）追加在内置项之后。
 只开放 onReaderReady：其余生命周期与 KOReader 事件第三方插件自己的实例就能收到，月读不转发；补丁与页内标记不开放。
 规则：
   - 页面 / 开关 / 顶栏项 id 自动加 `<扩展 id>.` 前缀（已带则不重复加），撞名的记日志跳过；
   - 配置存 utils.settings.getSource(<扩展 id>)（settings/ext.<name>.lua，不参与旧分区迁移），别用 get / save；
-  - 每个回调经 Features.try 隔离：出错只记日志（不弹错误页），读数类回调返回 nil，数据事件订阅方出错不中断核心派发；
+  - 每个回调经 External.try 隔离：出错只记日志（不弹错误页），读数类回调返回 nil，数据事件订阅方出错不中断核心派发；
   - 插件卸载后已保存的开关 / 顶栏 id 找不到就静默跳过；插件未加载完（extensionsReady 为假）时收集方不缓存。阅读会话、后台任务、源生命周期这类有返回值或顺序约束的核心编排不走这里，留在 main.lua。
 
 @module koplugin.book.features
@@ -133,12 +133,6 @@ Features.list = {
 local External = require("utils.external")
 local Ext = require("utils.extension")
 
--- 第三方挂点工具在核心 utils.external；这里保留旧名给 features 内部用。
-Features.try = External.try
-Features.wrap = External.wrap
-Features.prefix = External.prefix
-Features.external = External.collect
-
 local loaded = false
 
 --- 加载器：main.lua 顶层调一次（不点名任何 feature）。
@@ -184,8 +178,8 @@ function Features.emit(hook, plugin)
         Perf.slow("feature " .. name .. "." .. hook, started_at)
     end
     if hook ~= "onReaderReady" then return end
-    for _idx, item in ipairs(Features.external("hooks")) do
-        Features.try(item.id .. "." .. hook, item.mod[hook], plugin)
+    for _idx, item in ipairs(External.collect("hooks")) do
+        External.try(item.id .. "." .. hook, item.mod[hook], plugin)
     end
 end
 
@@ -222,14 +216,14 @@ function Features.listeners(file)
     local out = {}
     for _idx, name in ipairs(Features.scan(file)) do out[#out + 1] = require("features." .. name .. "." .. file) end
     if file ~= "events" then return out, true end
-    local items, ready = Features.external("events")
+    local items, ready = External.collect("events")
     for _idx, item in ipairs(items) do
         local map = {}
         for event, fn in pairs(item.mod) do
             if type(event) == "string" and type(fn) == "function" then
                 local label = item.id .. ".events." .. event
                 map[event] = function(...)
-                    Features.try(label, fn, ...)
+                    External.try(label, fn, ...)
                     return true
                 end
             end

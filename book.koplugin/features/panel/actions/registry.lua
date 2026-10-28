@@ -1,6 +1,6 @@
 --[[-- 快捷动作注册表：内置动作加载与调度辅助。
-第三方扩展的开关（Features.external("panel")）追加在内置 feature 之后：id 自动加 `<扩展 id>.` 前缀，
-回调经 Features.wrap 隔离；缺字段、未知 scope、撞名只记日志跳过。插件还没加载完时不缓存，下次重收。
+第三方扩展的开关（utils.external.collect("panel")）追加在内置 feature 之后：id 自动加 `<扩展 id>.` 前缀，
+回调经 External.wrap 隔离；缺字段、未知 scope、撞名只记日志跳过。插件还没加载完时不缓存，下次重收。
 已保存但插件已卸载的 id，get 返回 nil、available 为假，列表静默跳过。
 @module koplugin.book.features.panel.actions.registry
 --]]
@@ -87,18 +87,18 @@ end
 --- 第三方扩展的开关：校验、加前缀、包隔离；不合格记日志跳过。
 ---@return BookQuickPanelAction[] actions, boolean ready
 local function externalActions()
-    local Features = require("features")
+    local External = require("utils.external")
     local logger = require("utils.log")
     local out = {}
-    local items, ready = Features.external("panel")
+    local items, ready = External.collect("panel")
     for _idx, ext in ipairs(items) do
-        local actions = Features.try(ext.id .. " panel", ext.mod.actions)
+        local actions = External.try(ext.id .. " panel", ext.mod.actions)
         if type(actions) ~= "table" or actions.id or actions.scope then
             logger.error("feature external panel rejected: actions must return a list", ext.id)
             actions = {}
         end
         for _i, raw in ipairs(actions) do
-            local id = type(raw) == "table" and Features.prefix(ext.id, raw.id)
+            local id = type(raw) == "table" and External.prefix(ext.id, raw.id)
             local why = not id and "action needs id"
                 or not SCOPES[raw.scope] and "unknown scope " .. tostring(raw.scope)
                 or not (raw.title and raw.icon) and "action needs title and icon"
@@ -110,11 +110,11 @@ local function externalActions()
                 local action = {}
                 for key, value in pairs(raw) do action[key] = value end
                 action.id = id
-                action.run = Features.wrap(label, raw.run)
-                action.hold = Features.wrap(label, raw.hold)
-                action.available = Features.wrap(label, raw.available)
-                action.active = Features.wrap(label, raw.active)
-                action.label = Features.wrap(label, raw.label)
+                action.run = External.wrap(label, raw.run)
+                action.hold = External.wrap(label, raw.hold)
+                action.available = External.wrap(label, raw.available)
+                action.active = External.wrap(label, raw.active)
+                action.label = External.wrap(label, raw.label)
                 out[#out + 1] = action
             end
         end
