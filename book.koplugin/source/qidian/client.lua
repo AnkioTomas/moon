@@ -384,14 +384,6 @@ function Client.catalogAsync(book_id, cb)
 end
 
 --- 一章正文。未购买的 VIP（vipStatus=1 且 isBuy 不是 1）只有预览，不当正文。
----@param bytes string|nil
----@return boolean
-local function looksLikeFont(bytes)
-    if type(bytes) ~= "string" or #bytes < 4 then return false end
-    local head = bytes:sub(1, 4)
-    return head == "\0\1\0\0" or head == "OTTO" or head == "true" or head == "ttcf" or head == "wOFF"
-end
-
 ---@param book_id string
 ---@param chapter_id string
 ---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil) kind = "unpaid"：这章没买
@@ -480,7 +472,7 @@ function Client.contentAsync(book_id, chapter_id, cb)
                 logger.warn("qidian font download failed:", ferr, "code", res and res.code, "len", ttf and #ttf)
                 cb(nil, _("起点 VIP 章节字体下载失败")); return
             end
-            if not looksLikeFont(ttf) then
+            if not require("source.yuewen_fonts").looksLikeFont(ttf) then
                 logger.warn("qidian font download invalid:", #ttf, tostring(ttf:sub(1, 16)), "code", res and res.code)
                 cb(nil, _("起点 VIP 章节字体下载失败")); return
             end

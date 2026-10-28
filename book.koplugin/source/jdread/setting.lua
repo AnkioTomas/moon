@@ -28,7 +28,7 @@ local function showQrLogin()
     local Theme = require("ui.themes")
     local Toast = require("ui.themes.widgets.toast")
 
-    NetworkMgr:runWhenOnline(function()
+    NetworkMgr:runWhenConnected(function()
         local cancelled = false
         local dialog, begin_job, wait_job, complete_job, showFailure
         local qr_size = math.floor(math.min(Screen:getWidth(), Screen:getHeight()) * 0.55)

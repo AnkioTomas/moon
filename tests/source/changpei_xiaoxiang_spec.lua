@@ -185,12 +185,43 @@ do
     Assert.is_true(ok)
     Assert.matches(seen.post_url, "/bookshelf/delete%?_csrfToken=C1")
     Assert.matches(seen.body, '"bookId":"35554414603847007"')
+    Assert.eq(n, 1)
+    -- 同一 Cookie AUTH_TTL 内不再每次先打个人接口（每章翻页报进度不再双倍请求）
+    Client.shelfRemoveAsync("35554414603847007", function(wire) ok = wire ~= nil end)
+    Assert.is_true(ok)
+    Assert.eq(n, 1, "校验结果复用")
+    cfg.cookie = "csrfToken=C2; ywKey=K2"
+    Settings.saveSource("xiaoxiang", cfg)
+    Client.shelfRemoveAsync("35554414603847007", function(wire) ok = wire ~= nil end)
+    Assert.eq(n, 2, "换了 Cookie 重新校验")
+    Client.AUTH_TTL = 0
+    Client.shelfRemoveAsync("35554414603847007", function(wire) ok = wire ~= nil end)
+    Assert.eq(n, 3, "过期重新校验")
+    Client.AUTH_TTL = 600
 
     replies[2] = '{"code":0,"data":{"chapterContents":[{"ccid":35554414603847008,"chapterPrice":"0","auth":true,"chapterContent":"甲"}]}}'
     local text
     Client.contentAsync("35554414603847007", "35554414603847008", function(t) text = t end)
     Assert.eq(text, "甲")
     Assert.matches(seen.body, '"ccids":%["35554414603847008"%]')
+
+    -- 加密章的字体下载回来是 HTML 错误页（CDN 200）：不当字体去解，直接报解密失败
+    local fkp = require("utils.text").base64Encode('window.onkeyfocus("pool", 3)')
+    replies[2] = '{"code":0,"data":{"chapterContents":[{"ccid":35554414603847008,"chapterPrice":"0","auth":true,'
+        .. '"encrypt":true,"font":true,"fkp":"' .. fkp .. '","chapterContent":"xx",'
+        .. '"fontResponse":{"fixedFontTtf":"https://cdn.test/f.ttf"}}]}}'
+    replies[1] = "<html>Not Found</html>"
+    cfg.cookie = "csrfToken=C1; ywKey=K; ywGuid=42"
+    Settings.saveSource("xiaoxiang", cfg)
+    local fock_called = false
+    package.loaded["source.xiaoxiang.fock"] = { chapterAsync = function() fock_called = true; return { cancel = function() end } end }
+    local ferr
+    text = nil
+    Client.contentAsync("35554414603847007", "35554414603847008", function(t, e) text, ferr = t, e end)
+    Assert.is_nil(text)
+    Assert.eq(ferr, "潇湘章节解密失败")
+    Assert.is_false(fock_called, "坏字体不进解密")
+    package.loaded["source.xiaoxiang.fock"] = nil
     cfg.cookie = nil
     Settings.saveSource("xiaoxiang", cfg)
     package.loaded["source.xiaoxiang.client"] = nil

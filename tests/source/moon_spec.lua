@@ -109,7 +109,7 @@ end
 
 package.preload["ui/network/manager"] = function()
     return {
-        runWhenOnline = function(_, fn) fn() end,
+        runWhenConnected = function(_, fn) fn() end,
         isConnected = function() return not rec.offline end,
     }
 end

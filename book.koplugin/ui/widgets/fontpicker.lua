@@ -202,7 +202,7 @@ function FontPicker.show(opts, items)
             elseif Fonts.downloadedPath(item.id) then
                 askUseOrDelete(opts, item, cur)
             else
-                NetworkMgr:runWhenOnline(function() downloadAndSave(opts, item) end)
+                NetworkMgr:runWhenConnected(function() downloadAndSave(opts, item) end)
             end
         end,
     }:show()

@@ -29,7 +29,7 @@ package.preload["ui.themes.widgets.image"] = function()
     }
 end
 package.preload["ui/network/manager"] = function()
-    return { runWhenOnline = function(_, fn) fn() end }
+    return { runWhenConnected = function(_, fn) fn() end }
 end
 package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }

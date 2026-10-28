@@ -14,6 +14,16 @@ local FontRestore = {}
 
 local RARE_LIMIT, FIXED_LIMIT = 6763, 3755
 
+--- 下载回来的字节是不是字体文件（TTF / OTF / TTC / WOFF 魔数）。CDN 的 HTML 错误页也会 200 回来，
+--- 写进缓存会被当字体复用，一章章都解不出来。
+---@param bytes string|nil
+---@return boolean
+function FontRestore.looksLikeFont(bytes)
+    if type(bytes) ~= "string" or #bytes < 4 then return false end
+    local head = bytes:sub(1, 4)
+    return head == "\0\1\0\0" or head == "OTTO" or head == "true" or head == "ttcf" or head == "wOFF"
+end
+
 local function writeTemp(bytes)
     local path = os.tmpname()
     local file = assert(io.open(path, "wb"))

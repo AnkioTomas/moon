@@ -30,7 +30,7 @@ local function showQrLogin()
     local QR = require("ui.themes.widgets.qr")
     local Toast = require("ui.themes.widgets.toast")
 
-    NetworkMgr:runWhenOnline(function()
+    NetworkMgr:runWhenConnected(function()
         local cancelled = false
         local dialog
         local begin_job, wait_job
@@ -158,7 +158,7 @@ function Setting.rows(plugin)
     rows[#rows + 1] = function(iw)
         return Row.widget({ width = iw, chevron = false, kind = "action", icon = "autorenew", title = _("续期会话"),
             callback = function()
-                require("ui/network/manager"):runWhenOnline(function()
+                require("ui/network/manager"):runWhenConnected(function()
                     require("source.wechat.eink").refreshAsync(function(ok, err)
                         Toast:new{ text = ok and _("已续期") or (err or _("续期失败")), timeout = 2 }:show()
                     end)

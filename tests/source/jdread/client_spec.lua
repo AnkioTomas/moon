@@ -214,11 +214,11 @@ end
 
 -- NOT.LOGIN：英文错误码也要标登录失效，不能把服务端原串弹给用户。
 do
-    local expired = {}
+    local expired, oks = {}, 0
     package.preload["source.auth"] = function()
         return {
             expire = function(id, msg) expired[#expired + 1] = { id = id, msg = msg }; return msg end,
-            ok = function() end,
+            ok = function() oks = oks + 1 end,
         }
     end
     local bodies = { '{"result_code":1,"message":"NOT.LOGIN"}' }
@@ -246,4 +246,12 @@ do
     c:apiGetAsync("/jdread/api/bookshelf/sort", nil, function(_wire, err) got_err = err end)
     Assert.eq(got_err, "京东读书登录已失效，请重新扫码登录")
     Assert.len(expired, 2)
+
+    -- 匿名请求（没配 Cookie 逛榜单）成功不算登录态有效，不能把「已提示过期」清掉；带 Cookie 的成功才算
+    bodies[1] = '{"result_code":0,"data":{}}'
+    local anon = AuthClient:new{ uuid = "h5-anon" }
+    anon:apiGetAsync("/jdread/api/rank", nil, function() end)
+    Assert.eq(oks, 0, "匿名成功不 Auth.ok")
+    c:apiGetAsync("/jdread/api/bookshelf/sort", nil, function() end)
+    Assert.eq(oks, 1)
 end

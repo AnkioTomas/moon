@@ -142,6 +142,7 @@ function Request.request(opts, cb)
             return
         end
         state.done = true
+        Fetch.closeBody(state.client)
         state.client = nil
         Fetch.log(ctx, err or (state.cancelled and "cancelled"), "status", res and res.code or "-",
             "bytes", res and type(res.body) == "string" and #res.body or 0)
@@ -163,7 +164,12 @@ function Request.request(opts, cb)
         end
         state.client = client
         if opts.body_file then
-            Fetch.streamBody(client, opts.body_file)
+            local file, open_err = io.open(opts.body_file, "rb")
+            if not file then
+                settle(nil, open_err)
+                return
+            end
+            Fetch.streamBody(client, file)
         end
         local fetched, future = pcall(client.fetch, client, opts.url, Fetch.options(opts, 1))
         if not fetched then

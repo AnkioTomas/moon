@@ -95,7 +95,7 @@ end
 ---@param cookie string
 local function verify(cookie)
     local Toast = require("ui.themes.widgets.toast")
-    require("ui/network/manager"):runWhenOnline(function()
+    require("ui/network/manager"):runWhenConnected(function()
         local waiting = require("ui.themes.widgets.progress_dialog"):new{
             title = _("晋江账号"), text = _("正在校验登录…"), dismissable = false,
         }
@@ -218,7 +218,7 @@ local function showVerify(account, password, message)
     local checktype = "phone"
     local function send(kind)
         checktype = kind
-        require("ui/network/manager"):runWhenOnline(function()
+        require("ui/network/manager"):runWhenConnected(function()
             Token.sendCodeAsync(account, kind, function(msg, err)
                 Toast:new{ text = msg or err, timeout = 3 }:show()
             end)
@@ -249,7 +249,7 @@ end
 ---@param verify { checktype: string, code: string }|nil
 function showLogin(account, password, verify)
     local Toast = require("ui.themes.widgets.toast")
-    require("ui/network/manager"):runWhenOnline(function()
+    require("ui/network/manager"):runWhenConnected(function()
         local waiting = require("ui.themes.widgets.progress_dialog"):new{
             title = _("晋江账号"), text = _("正在登录…"), dismissable = false,
         }

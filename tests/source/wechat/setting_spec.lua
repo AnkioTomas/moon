@@ -26,7 +26,7 @@ end
 local Themed = require("support.theme_stubs")
 Themed.install()
 package.preload["ui/network/manager"] = function()
-    return { runWhenOnline = function(_, fn) fn() end }
+    return { runWhenConnected = function(_, fn) fn() end }
 end
 local begin_cb, wait_cb
 local begin_cancels, wait_cancels = 0, 0

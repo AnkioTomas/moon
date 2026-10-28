@@ -70,7 +70,7 @@ local function edit()
                 require("source.registry").reload()
                 return
             end
-            require("ui/network/manager"):runWhenOnline(function()
+            require("ui/network/manager"):runWhenConnected(function()
                 save(address, Text.stripWhitespace(user), password)
             end)
         end,

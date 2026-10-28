@@ -137,7 +137,7 @@ stub("book.review_cache", function()
     }
 end)
 stub("ui/network/manager", function()
-    return { runWhenOnline = function(_, fn) fn() end, isConnected = function() return true end }
+    return { runWhenConnected = function(_, fn) fn() end, isConnected = function() return true end }
 end)
 stub("ui/widget/progressbardialog", function()
     return {

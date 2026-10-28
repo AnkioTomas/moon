@@ -41,9 +41,13 @@ local function isLoginFailure(message)
         or upper:find("NOT_LOGIN", 1, true) ~= nil
 end
 
+--- 匿名请求（搜索 / 榜单不带 Cookie 也成功）不能算「登录态有效」：登录过期弹窗后逛一次书城就把
+--- 「已提示过期」清掉，下次又弹。只有带着已保存 Cookie 的请求成功才 Auth.ok。
 ---@param raw string|nil
+---@param err any
+---@param authed boolean 请求带了登录态
 ---@return table|nil, string|nil
-local function decodeApi(raw, err)
+local function decodeApi(raw, err, authed)
     if not raw then return nil, err end
     local ok, wire = pcall(JSON.decode, raw)
     if not ok or type(wire) ~= "table" then return nil, _("京东读书响应无效") end
@@ -53,7 +57,7 @@ local function decodeApi(raw, err)
         end
         return nil, wire.message or (_("京东读书错误 ") .. tostring(wire.result_code))
     end
-    require("source.auth").ok("jdread")
+    if authed then require("source.auth").ok("jdread") end
     return wire
 end
 
@@ -96,7 +100,7 @@ function Client:apiGetAsync(path, extra, cb)
     return Request.get(API .. path .. "?" .. query, {
         headers = self:headers(API .. "/"),
     }, function(raw, err)
-        cb(decodeApi(raw, err))
+        cb(decodeApi(raw, err, self:configured()))
     end)
 end
 
@@ -110,7 +114,7 @@ function Client:apiPostAsync(path, body, cb)
         headers = self:headers(API .. "/reader/"),
         content_type = "application/json",
     }, function(raw, err)
-        cb(decodeApi(raw, err))
+        cb(decodeApi(raw, err, self:configured()))
     end)
 end
 

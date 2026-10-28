@@ -39,7 +39,7 @@ package.preload["ui.themes.widgets.image"] = function()
 end
 
 package.preload["ui/network/manager"] = function()
-    return { runWhenOnline = function(_, cb) cb() end }
+    return { runWhenConnected = function(_, cb) cb() end }
 end
 
 package.preload["ui.fonts"] = function()

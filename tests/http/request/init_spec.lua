@@ -629,13 +629,36 @@ do
     local client = { req = "HEAD", _prepare_http_request = function() prepared = prepared + 1 end }
     client.iostream = { write = function(_, data, cb) writes[#writes + 1] = #data; cb() end }
     client._headers_written_cb = function() writes.done = true end
-    Fetch.streamBody(client, path)
+    Fetch.streamBody(client, assert(io.open(path, "rb")))
     client:_send_http_request()
     os.remove(path)
     Assert.eq(prepared, 0, "不重复生成请求头")
     Assert.eq(writes[1], 4, "先发请求头")
     Assert.eq(writes[2] + writes[3], 70 * 1024, "文件分块发完")
     Assert.is_true(writes.done)
+    Assert.is_nil(client._book_body_file, "发完关文件")
+
+    -- 没发完就取消：Fetch.close 关文件，不留句柄
+    local held = assert(io.open(Config.dir() .. "/stream_body2.bin", "wb"))
+    held:write("abc")
+    held:close()
+    local f2 = assert(io.open(Config.dir() .. "/stream_body2.bin", "rb"))
+    local c2 = { iostream = { closed = function() return true end } }
+    Fetch.streamBody(c2, f2)
+    Fetch.close(c2)
+    Assert.is_nil(c2._book_body_file)
+    Assert.eq(io.type(f2), "closed file")
+    os.remove(Config.dir() .. "/stream_body2.bin")
+end
+
+-- body_file 打不开：不发请求（头里已写 Content-Length，空 body 服务器会等到超时），直接回错
+do
+    local Request = require("http.request")
+    local got_err
+    Request.request({ url = "http://127.0.0.1:8088/up", method = "PUT",
+        body_file = Config.dir() .. "/no-such-file.bin", body_size = 3 }, function(_res, err) got_err = err end)
+    Assert.not_nil(got_err)
+    Assert.matches(tostring(got_err), "no%-such%-file")
 end
 
 -- 本机回环不看网卡（蓝牙守护进程接口在 Wi-Fi 关着时也要能连）。

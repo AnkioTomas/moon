@@ -67,7 +67,7 @@ end
 
 --- 拉取模型目录并弹出下载列表。
 function Ui.download()
-    require("ui/network/manager"):runWhenOnline(function()
+    require("ui/network/manager"):runWhenConnected(function()
         local loading = require("ui.themes.widgets.progress_dialog"):new{
             title = _("下载识别语言"), text = _("正在获取识别语言目录…"), dismissable = false,
         }

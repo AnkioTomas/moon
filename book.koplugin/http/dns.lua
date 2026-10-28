@@ -6,7 +6,8 @@ LuaSocket 按主机名 connect 会在 UI 线程同步 getaddrinfo；设备上没
 这里用 ``socket.udp`` 零超时收发，经 UIManager 轮询等应答，主进程不等任何 IO。
 
 每次查询把同一个包同时发给系统 DNS 和设置 ``http.dns`` 选的备选 DNS（阿里 / 腾讯，各两台），
-谁先应答用谁：路由器 DNS 挂了不用等它超时，备选被墙了系统的还在。
+谁先应答用谁：路由器 DNS 挂了不用等它超时，备选被墙了系统的还在。只有地址 / NXDOMAIN 定局，
+SERVFAIL / REFUSED 继续等别的服务器。查询前先看 /etc/hosts（自建服务常靠它指到内网）。
 系统 DNS 问 libc 自己的 resolver 状态（和 getaddrinfo 用的同一份，见 ``Dns.libcServers``），
 Android 经 JNI 问 ConnectivityManager，都拿不到才读 /etc/resolv.conf。解析结果缓存 10 分钟；
 查无此域名 / 没应答只记这一个主机 10 秒。一个包都发不出去（没网 "Network is unreachable"）当场失败，不记、不等。
@@ -35,6 +36,7 @@ Dns.QUERY_TIMEOUT = 3
 Dns.POLL = 0.05
 --- libc 拿不到 nameserver 时的兜底（musl 的 res_init 是空操作）。
 Dns.RESOLV_CONF = "/etc/resolv.conf"
+Dns.HOSTS = "/etc/hosts"
 
 ---@type table<string, { addr: string, expires: integer }>
 local cache = {}
@@ -310,21 +312,26 @@ local function query(host, servers, cb)
         return nil, "sendto " .. tostring(send_err)
     end
     local deadline = socket.gettime() + Dns.QUERY_TIMEOUT
+    -- 有地址 / NXDOMAIN 才定局。SERVFAIL / REFUSED / 没 A 记录只是这一台答不上来（dnsmasq 上游断了是秒回
+    -- SERVFAIL），记下来继续等别的服务器；都答完或到时还没结果才按最后一个错报。
+    local answered, last_err = 0, nil
     local function poll()
         local data = udp:receivefrom()
         while data do
             local addr, err = Dns.decode(data, id)
-            if err ~= "mismatch" then
-                -- 第一个有效应答定结果（含 NXDOMAIN），其余的随 socket 关闭丢掉
+            if addr or err == "nxdomain" then
                 udp:close()
                 cb(addr, err)
                 return
             end
+            if err ~= "mismatch" then
+                answered, last_err = answered + 1, err
+            end
             data = udp:receivefrom()
         end
-        if socket.gettime() >= deadline then
+        if answered >= sent or socket.gettime() >= deadline then
             udp:close()
-            cb(nil, "timeout")
+            cb(nil, last_err or "timeout")
             return
         end
         UIManager:scheduleIn(Dns.POLL, poll)
@@ -333,7 +340,31 @@ local function query(host, servers, cb)
     return true
 end
 
---- 主机名换地址，回调 cb(addr) 或 cb(nil, err)：IP 字面量 / 缓存命中 / 发不出去同步回调；
+--- /etc/hosts 里的静态条目（自建服务常靠它指到内网机器；getaddrinfo 会读，自己发 UDP 就绕开了）。
+--- 只认 IPv4 行；文件不存在 / 没命中回 nil。只在缓存未命中时读一次，不缓存文件内容。
+---@param host string
+---@return string|nil addr
+function Dns.hostsLookup(host)
+    local f = io.open(Dns.HOSTS, "r")
+    if not f then return nil end
+    local want = host:lower()
+    for line in f:lines() do
+        local fields = line:gsub("#.*$", "")
+        local addr, names = fields:match("^%s*(%d+%.%d+%.%d+%.%d+)%s+(.-)%s*$")
+        if addr then
+            for name in names:gmatch("%S+") do
+                if name:lower() == want then
+                    f:close()
+                    return addr
+                end
+            end
+        end
+    end
+    f:close()
+    return nil
+end
+
+--- 主机名换地址，回调 cb(addr) 或 cb(nil, err)：IP 字面量 / /etc/hosts / 缓存命中 / 发不出去同步回调；
 --- 10 秒内失败过的直接回 nil；否则发查询，同主机并发只查一次、一起回。
 ---@param host string
 ---@param cb fun(addr: string|nil, err: string|nil)
@@ -346,6 +377,12 @@ function Dns.resolve(host, cb)
     local hit = cache[host]
     if hit and hit.expires > now then
         cb(hit.addr)
+        return
+    end
+    local static = Dns.hostsLookup(host)
+    if static then
+        cache[host] = { addr = static, expires = now + Dns.TTL }
+        cb(static)
         return
     end
     if (fail[host] or 0) > now then

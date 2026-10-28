@@ -188,7 +188,7 @@ end
 --- 拉取远程目录并按语言分组弹出下载列表。
 ---@param ui table ReaderUI / FileManager
 function Dictionary.download(ui)
-    require("ui/network/manager"):runWhenOnline(function()
+    require("ui/network/manager"):runWhenConnected(function()
         local loading = require("ui.themes.widgets.progress_dialog"):new{
             title = _("下载 StarDict 字典"), text = _("正在获取字典目录…"), dismissable = false,
         }

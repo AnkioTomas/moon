@@ -630,7 +630,7 @@ Assert.is_true(detail_cancelled)
 
 -- 加入书库：进下载任务并前台跟随，下载中重复点被拒绝；进度按字节；完成提示并通知书架已变。
 package.preload["ui/network/manager"] = function()
-    return { runWhenOnline = function(_, cb) cb() end, isConnected = function() return true end }
+    return { runWhenConnected = function(_, cb) cb() end, isConnected = function() return true end }
 end
 -- 本地书库目录未配置：直接弹目录选择，选定后接着下载，不先提示没设置。
 local picked

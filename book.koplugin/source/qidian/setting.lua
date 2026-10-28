@@ -91,7 +91,7 @@ end
 ---@param cookie string
 local function verify(cookie)
     local Toast = require("ui.themes.widgets.toast")
-    require("ui/network/manager"):runWhenOnline(function()
+    require("ui/network/manager"):runWhenConnected(function()
         local waiting = require("ui.themes.widgets.progress_dialog"):new{
             title = _("起点账号"), text = _("正在校验登录…"), dismissable = false,
         }

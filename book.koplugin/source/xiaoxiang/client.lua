@@ -106,7 +106,12 @@ function Client.userAsync(cookie, cb)
     end)
 end
 
---- 带登录态的调用：先确认 isLogin=1，失效就标记登出，免得访客书架被当成真实书架。
+--- 同一 Cookie 校验通过后多久内不再问个人接口：每章翻页都报进度，次次先打一遍个人接口是双倍请求。
+Client.AUTH_TTL = 10 * 60
+---@type { cookie: string|nil, at: integer } 最近一次通过校验的 Cookie 与时刻
+local verified = { cookie = nil, at = 0 }
+
+--- 带登录态的调用：先确认 isLogin=1（AUTH_TTL 内同一 Cookie 只确认一次），失效就标记登出，免得访客书架被当成真实书架。
 ---@param path string
 ---@param query string
 ---@param body string|nil
@@ -114,15 +119,20 @@ end
 ---@return { cancel: fun() }
 local function authed(path, query, body, cb)
     local cookie = Client.cookie()
+    if cookie and cookie == verified.cookie and os.time() - verified.at < Client.AUTH_TTL then
+        return call(path, query, body, cookie, cb)
+    end
     ---@type boolean, CancelHandle|nil
     local cancelled, job = false, nil
     local Auth = require("source.auth")
     job = Client.userAsync(cookie or "", function(info, err)
         if cancelled then return end
         if not info then
+            verified.cookie = nil
             cb(nil, cookie and Auth.expire(SOURCE_ID, _("潇湘登录已失效，请重新登录")) or _("未登录潇湘"))
             return
         end
+        verified.cookie, verified.at = cookie, os.time()
         Auth.ok(SOURCE_ID)
         job = call(path, query, body, cookie, cb)
     end)
@@ -287,6 +297,10 @@ function Client.contentAsync(book_id, chapter_id, cb)
         end
         current = Request.get(font.fixedFontTtf, { timeout = require("http.timeout").net(1) }, function(ttf, ferr)
             if not ttf then cb(nil, ferr and tostring(ferr) or _("请求失败")); return end
+            if not require("source.yuewen_fonts").looksLikeFont(ttf) then
+                logger.warn("xiaoxiang font download invalid:", #ttf, tostring(ttf:sub(1, 16)))
+                cb(nil, _("潇湘章节解密失败")); return
+            end
             run(ttf)
         end)
     end

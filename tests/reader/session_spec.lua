@@ -480,13 +480,13 @@ do
     Session.onCloseDocument(plugin)
 end
 
--- 注解事件离线：只落盘，不 push，也不走 runWhenOnline 弹联网提示。
+-- 注解事件离线：只落盘，不 push，也不走 runWhenConnected 弹联网提示。
 do
     local NetworkMgr = require("ui/network/manager")
-    local old_connected, old_run = NetworkMgr.isConnected, NetworkMgr.runWhenOnline
+    local old_connected, old_run = NetworkMgr.isConnected, NetworkMgr.runWhenConnected
     local prompted = false
     NetworkMgr.isConnected = function() return false end
-    NetworkMgr.runWhenOnline = function() prompted = true end
+    NetworkMgr.runWhenConnected = function() prompted = true end
     local plugin = mkPlugin("/x/book.epub")
     plugin.ui.annotation = { annotations = { { text = "高亮" } } }
     Session.onReaderReady(plugin)
@@ -496,7 +496,7 @@ do
     Assert.eq(calls.notes[notes_before + 1][2], plugin.ui)
     Assert.is_nil(calls.notes[notes_before + 2], "离线不 push")
     Assert.is_false(prompted, "离线不弹联网提示")
-    NetworkMgr.isConnected, NetworkMgr.runWhenOnline = old_connected, old_run
+    NetworkMgr.isConnected, NetworkMgr.runWhenConnected = old_connected, old_run
     Session.onCloseDocument(plugin)
 end
 

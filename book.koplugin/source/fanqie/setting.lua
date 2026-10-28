@@ -34,7 +34,7 @@ function M.open()
     function owner:onLoginSuccess()
         require("source.registry").reload()
     end
-    require("ui/network/manager"):runWhenOnline(function()
+    require("ui/network/manager"):runWhenConnected(function()
         require("source.fanqie.qrlogin"):new(settings, owner):start()
     end)
 end
