@@ -1075,14 +1075,24 @@ function BookDB.setReaderPrefs(source_id, stable_id, payload)
     ) ~= nil
 end
 
---- 「保存为默认」时把已有全书快照统一成当前排版；不新建行。
----@param payload string
+--- 「保存为默认」时逐行改写已有全书快照：update(payload) 回新 payload（nil = 这行不动）；
+--- 一个事务，不新建行。JSON 形状归调用方，这里不认识。
+---@param update fun(payload: string): string|nil
 ---@return boolean
-function BookDB.replaceAllReaderPrefs(payload)
-    return DB.exec(
-        [[UPDATE books SET reader_prefs=? WHERE reader_prefs IS NOT NULL;]],
-        payload
-    ) ~= nil
+function BookDB.mergeReaderPrefs(update)
+    return DB.transaction(function()
+        local rows, nrows = DB.query([[SELECT source_id, stable_id, reader_prefs FROM books WHERE reader_prefs IS NOT NULL;]])
+        if not rows then return nil end
+        for i = 1, nrows do
+            local payload = update(rows[3][i])
+            if payload and not DB.exec(
+                [[UPDATE books SET reader_prefs=? WHERE source_id=? AND stable_id=?;]],
+                payload, rows[1][i], rows[2][i]) then
+                return nil
+            end
+        end
+        return true
+    end) == true
 end
 
 return BookDB
