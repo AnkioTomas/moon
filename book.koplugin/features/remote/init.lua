@@ -1206,8 +1206,9 @@ local function zipPaths(paths)
     return output
 end
 
---- 一键日志包：插件日志（含轮转件）+ KOReader crash.log 等，内容脱敏，附 info.txt。
---- 只按文件名白名单收日志，settings/cookie 等凭证文件不会进包。
+--- 一键日志包：插件日志（含轮转件）+ KOReader crash.log 等，内容脱敏，附 info.txt
+--- 与 diag/* 诊断快照（插件列表、脱敏设置、源登录态、书库规模、采样 sdr）。
+--- 只按文件名白名单收日志；源凭证文件只记登录态，不进包。
 ---@return string|nil output 临时 zip 路径
 ---@return any err
 local function buildLogsZip()
@@ -1248,9 +1249,9 @@ local function buildLogsZip()
     for _idx, dir in ipairs(missing) do notes[#notes + 1] = "skipped (not found): " .. dir end
 
     local extras = {}
-    -- 设置只导出键名，不含值（凭证都在值里）
-    local ok_s, keys = pcall(function() return Logs.settingsKeys(G_reader_settings and G_reader_settings.data) end)
-    extras[#extras + 1] = { name = "koreader-settings-keys.txt", text = ok_s and keys or ("error: " .. tostring(keys)) }
+    local diag, diag_notes = Logs.gatherExtras()
+    for _idx, e in ipairs(diag or {}) do extras[#extras + 1] = e end
+    for _idx, n in ipairs(diag_notes or {}) do notes[#notes + 1] = n end
     if is("isAndroid") then
         -- 应用只能读到自己进程的 logcat；取不到就记 skipped
         local ok_l, text = pcall(function()

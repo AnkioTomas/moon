@@ -174,6 +174,127 @@ do
     os.execute("rm -rf '" .. d .. "'")
 end
 
+-- 诊断快照纯函数：插件名单、设置 dump、登录态、书源、书库、sdr 采样；密钥与路径托名
+do
+    Assert.is_true(Logs.isSecretKey("weread_token"))
+    Assert.is_true(Logs.isSecretKey("api-key"))
+    Assert.is_true(Logs.isSecretKey("password"))
+    Assert.is_false(Logs.isSecretKey("provider")) -- 不能因 vid 误伤
+    Assert.is_false(Logs.isSecretKey("spinner")) -- 不能因 pin 误伤
+    Assert.is_false(Logs.isSecretKey("language"))
+
+    local roots = {
+        { root = "/Users/alice/.config/koreader/.moon", token = "$MOON" },
+        { root = "/Users/alice/.config/koreader", token = "$DATA" },
+        { root = "/Users/alice", token = "$HOME" },
+    }
+    Assert.eq(Logs.scrubPaths("/Users/alice/.config/koreader/.moon/book.log", roots), "$MOON/book.log")
+    Assert.eq(Logs.scrubPaths("/Users/alice/.config/koreader/settings.reader.lua", roots), "$DATA/settings.reader.lua")
+
+    local dump = Logs.dumpTable({
+        language = "zh_CN",
+        home_dir = "/Users/alice/Books",
+        weread_token = "SECRET-TOKEN",
+        nested = { api_key = "sk-leak", theme = "light" },
+        empty = {},
+    }, roots)
+    has(dump, 'language = "zh_CN"')
+    has(dump, 'home_dir = "$HOME/Books"')
+    has(dump, "weread_token = ***")
+    has(dump, "nested.api_key = ***")
+    has(dump, 'nested.theme = "light"')
+    has(dump, "empty = {}")
+    hasnt(dump, "SECRET-TOKEN")
+    hasnt(dump, "sk-leak")
+    hasnt(dump, "/Users/alice")
+
+    local plugins = Logs.pluginsText(
+        { { name = "book" }, { name = "statistics" } },
+        { { name = "coverbrowser" } }
+    )
+    has(plugins, "enabled plugins:")
+    has(plugins, "  book")
+    has(plugins, "  statistics")
+    has(plugins, "disabled plugins:")
+    has(plugins, "  coverbrowser")
+
+    local accounts = Logs.accountsText({
+        { id = "wechat", enabled = true, configured = true },
+        { id = "local", enabled = true, configured = true },
+        { id = "fanqie", enabled = false, configured = false },
+    })
+    has(accounts, "wechat  enabled=yes  configured=yes")
+    has(accounts, "fanqie  enabled=no  configured=no")
+    hasnt(accounts, "张三")
+    hasnt(accounts, "token")
+
+    local src = Logs.moonSourceText({
+        active_source = "wechat",
+        library_mixed = true,
+        enabled_sources = { wechat = true, fanqie = false },
+    })
+    has(src, "active_source: wechat")
+    has(src, "library_mixed: true")
+    has(src, "  fanqie = false")
+    has(src, "  wechat = true")
+
+    local lib = Logs.libraryText({
+        total = 12, read = 3, unread = 9, hidden = 1, deleted = 2,
+        by_source = { { source_id = "local", count = 4 }, { source_id = "wechat", count = 8 } },
+    })
+    has(lib, "total: 12")
+    has(lib, "  wechat: 8")
+
+    local sdr = Logs.sdrSamplesText({
+        {
+            source_id = "local", stable_id = "$DATA/book.epub", kind = "book",
+            path = "$DATA/book.epub", sdr_path = "$DATA/book.epub.sdr/metadata.epub.lua",
+            text = 'return { ["partial_md5_checksum"] = "abc", password = "nope" }\n',
+        },
+        {
+            source_id = "wechat", stable_id = "123", kind = "chapter",
+            path = "$MOON/cache/wechat/book/x/1.html", sdr_path = nil, note = "no sidecar",
+        },
+    }, "per-source sidecar (.sdr) samples:")
+    has(sdr, "==== local  book")
+    has(sdr, "password = \"nope\"") -- 文本层由 redact 再剥；此处只验证拼装
+    has(sdr, "note: no sidecar")
+    has(sdr, "==== wechat  chapter")
+
+    local device = Logs.deviceText({
+        model = "KindlePaperWhite4", platform = "kindle",
+        screen_w = 1072, screen_h = 1448, dpi = 300,
+        storage_total = 1000, storage_free = 400, storage_avail = 350,
+        connected = true, has_battery = true, battery = 88,
+    })
+    has(device, "model: KindlePaperWhite4")
+    has(device, "platform: kindle")
+    has(device, "screen: 1072x1448")
+    has(device, "network_connected: true")
+    has(device, "battery: 88")
+
+    local sess_none = Logs.sessionText({ open = false }, roots)
+    has(sess_none, "(none")
+    local sess = Logs.sessionText({
+        open = true, source_id = "wechat", stable_id = "/Users/alice/book",
+        chapter_idx = 3, file = "/Users/alice/.config/koreader/.moon/cache/x/3.html",
+        view_mode = "page", page = 2, total_pages = 10, percent = 20,
+        copt_status_line = 0, header_height = 28,
+    }, roots)
+    has(sess, "source_id: wechat")
+    has(sess, "stable_id: $HOME/book")
+    has(sess, "view_mode: page")
+    has(sess, "file: $MOON/cache/x/3.html")
+    hasnt(sess, "/Users/alice")
+
+    local dirty = Logs.dirtyText({
+        { id = "local", books = 0, notes = 0, progress = 0, stats = 0 },
+        { id = "wechat", books = 2, notes = 5, progress = 1, stats = 0 },
+    })
+    has(dirty, "wechat  books=2  notes=5  progress=1  stats=0")
+    has(dirty, "local  books=0")
+end
+
 -- fixPerms：KOReader 写成十进制 0644 的外部属性，改回 0100644，别的字节不动
 do
     local function u16(n) return string.char(n % 256, math.floor(n / 256) % 256) end

@@ -289,7 +289,7 @@ return {
     ["页面导航"] = "Page navigation",
     ["预览加载失败"] = "Preview failed to load",
     ["下载日志"] = "Download logs",
-    ["一键打包插件日志与 KOReader 崩溃日志（已脱敏），反馈问题时附上。"] = "Bundle plugin logs and the KOReader crash log (secrets redacted) into one ZIP to attach to bug reports.",
+    ["一键打包插件日志、崩溃日志与诊断快照（设备/插件/设置/登录态/当前书/最近打开/书库/脏行/采样 sdr，已脱敏），反馈问题时附上。"] = "Bundle plugin logs, crash logs, and a diagnostic snapshot (device / plugins / settings / login / current book / recent / library / dirty counts / sample sidecars; secrets redacted) for bug reports.",
     ["AI 服务"] = "AI service",
     ["KOReader 字体"] = "KOReader fonts",
     ["KOReader 崩溃日志"] = "KOReader crash log",
