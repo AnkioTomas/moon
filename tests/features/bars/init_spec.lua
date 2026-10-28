@@ -214,7 +214,11 @@ ui_top.registerTouchZones = function() registered_touch_zone = true end
 ui_top.registerPostReaderReadyCallback = function(_, cb) post_ready[#post_ready + 1] = cb end
 Bars.install(ui_top)
 Assert.is_false(footer:TapFooter())
-Assert.is_true(footer:onHoldFooter())
+-- 长按落在正文区（底栏矩形上方、仍在原生底部 1/13 hold 区）必须透传给选字；
+-- 只有落在底栏矩形内才吞掉阻止切换模式。测试底栏矩形为 y 764..800。
+Assert.eq(footer:onHoldFooter({ pos = { x = 100, y = 700 } }), "original hold")
+Assert.is_true(footer:onHoldFooter({ pos = { x = 100, y = 780 } }))
+Assert.eq(footer:onHoldFooter(), "original hold")
 Assert.is_false(registered_touch_zone)
 Assert.len(post_ready, 1, "偏好等 ReaderReady 收尾后再应用")
 

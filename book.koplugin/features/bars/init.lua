@@ -318,6 +318,8 @@ end
 
 --- 包装 ReaderFooter：
 --- - 底栏由月读画时禁止切换模式；短按继续交给原生翻页区，兼容把蓝牙按钮转换为屏幕点击的翻页器。
+--- - 长按只有落在底栏矩形内才阻止原生切换：footer 的 hold 触摸区是屏幕底部 1/13 且
+---   overrides 选字，矩形上方那截（正文最后一行常在里面）无条件吞掉会让最后一行选不了字。
 --- - 强制重画时原生走 widgetRepaint(footer) 只画底栏、不经 ReaderView，会把原栏盖回月读底栏上；
 ---   改走 full_repaint 分支（整页重画、只刷底栏区域）。
 --- - 用户点底栏 / 手势切模式时回写偏好，否则下次开书又被偏好覆盖回去。不包 applyFooterMode：
@@ -342,8 +344,13 @@ local function hijackFooter(ui)
     end
     local orig_hold = footer.onHoldFooter
     footer.onHoldFooter = function(self, ges)
-        if ours(self) then
-            return true
+        local pos = ges and ges.pos
+        if pos and ours(self) then
+            local rect = bottomRect(self.ui, 0, 0)
+            if rect and pos.x >= rect.x and pos.x < rect.x + rect.w
+                    and pos.y >= rect.y and pos.y < rect.y + rect.h then
+                return true
+            end
         end
         return orig_hold(self, ges)
     end
