@@ -236,6 +236,7 @@ function SourceBase:close() end
 --- （`syncBooksAsync` 推脏行，成功后 `BookDB.remove` 撕墓碑）；已连网就顺手 `pushDirty` 入队，不弹联网。
 --- 走队列而不直接调同步：同源推脏按 key 只留一条，失败退避重试，不和别的推脏并发。
 --- 没有远端删除接口的源（番茄）墓碑一直留着，书在月读里隐藏，reconcile 不会复活它。
+--- 未登录时没有远端可同步，书库就是唯一真相：标删后当场撕墓碑（撕不掉只是库里残留，书已从书架消失，不算失败）。
 ---@param identity BookIdentity
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return { cancel: fun() }
@@ -243,7 +244,11 @@ function SourceBase:deleteBookAsync(identity, cb)
     if not require("book.store").markDeleted(self.id, identity.stable_id) then
         return SourceBase.defer(cb, false, _("删除本书失败"))
     end
-    if self:configured() and require("ui/network/manager"):isConnected() then
+    if not self:configured() then
+        if not require("book.books_db").remove(self.id, identity.stable_id) then
+            require("utils.log").warn("book tombstone remove failed", self.id, identity.stable_id)
+        end
+    elseif require("ui/network/manager"):isConnected() then
         self:pushDirty()
     end
     return SourceBase.defer(cb, true)

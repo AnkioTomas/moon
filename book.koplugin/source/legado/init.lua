@@ -77,14 +77,6 @@ function Source:syncBooksAsync(opts, cb)
     return Shelf.syncAsync(self.id, Remote, function(rows) return Mapper.shelfList(Client.coverUrl, rows) end, opts, cb)
 end
 
-function Source:syncNotesAsync(_opts, cb)
-    return SourceBase.skipped(cb, "legado has no notes")
-end
-
-function Source:syncStatsAsync(_opts, cb)
-    return SourceBase.skipped(cb, "legado has no stats")
-end
-
 --- 取书架行再交给 fn(row, toc, done)；没配置 / 不在书架上 / 目录空都走 cb 报错。
 --- fn 要再发请求就返回它的句柄，取消会传过去；done 是取消后不再投递的 cb。
 ---@param identity BookIdentity

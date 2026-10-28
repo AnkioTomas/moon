@@ -107,14 +107,6 @@ function Source:syncBooksAsync(opts, cb)
     return Shelf.syncAsync(self.id, remote, Mapper.shelfList, opts, cb)
 end
 
-function Source:syncNotesAsync(_opts, cb)
-    return SourceBase.skipped(cb, "iread has no notes")
-end
-
-function Source:syncStatsAsync(_opts, cb)
-    return SourceBase.skipped(cb, "iread has no stats")
-end
-
 --- 书城搜索：回包形状同 listStoreAsync。搜索行同书架行，缓存起来供目录 / 正文接口使用。
 ---@param keyword string
 ---@param cb fun(res: { data: Book[] }|nil, err: string|nil)

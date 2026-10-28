@@ -51,32 +51,9 @@ function Remote:addToShelfAsync(stable_id, cb) return Client.shelfAddAsync(stabl
 
 function Remote:removeFromShelfAsync(stable_id, cb) return Client.shelfRemoveAsync(stable_id, cb) end
 
---- 未登录时书库就是唯一真相：标删后直接撕墓碑；登录后走基类三段式，由书架同步推删。
----@param identity BookIdentity
----@param cb fun(ok: boolean, err: string|nil)
----@return { cancel: fun() }
-function Source:deleteBookAsync(identity, cb)
-    if self:configured() then return SourceBase.deleteBookAsync(self, identity, cb) end
-    if not require("book.store").markDeleted(self.id, identity.stable_id) then
-        return SourceBase.defer(cb, false, _("删除本书失败"))
-    end
-    if not require("book.books_db").remove(self.id, identity.stable_id) then
-        require("utils.log").warn("book changpei tombstone remove failed", identity.stable_id)
-    end
-    return SourceBase.defer(cb, true)
-end
-
 function Source:syncBooksAsync(opts, cb)
     if not self:configured() then return SourceBase.skipped(cb, "changpei not logged in") end
     return Shelf.syncAsync(self.id, Remote, Mapper.shelfList, opts, cb)
-end
-
-function Source:syncNotesAsync(_opts, cb)
-    return SourceBase.skipped(cb, "changpei has no notes")
-end
-
-function Source:syncStatsAsync(_opts, cb)
-    return SourceBase.skipped(cb, "changpei has no stats")
 end
 
 --- 进度只到章：读阅读历史里这本书最近读到的章。
