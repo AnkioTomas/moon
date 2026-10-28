@@ -145,6 +145,9 @@ local ok, err = pcall(function()
     -- Interior cuts snap to `align` (Screen.alignment_constraint, 16 on
     -- Kobo MTK) so getBoundedRect does not expand neighbouring strips
     -- into each other. Last edge stays the real size.
+    -- Kobo colour skips this (align is nil) and keeps pre-4.2 unaligned
+    -- cuts: HWTCON drops 1px from 16-aligned partials, which shows as
+    -- black CFA seams (#25 / moon#74); the old overlap covers that gap.
     ---@param size number 屏幕宽或高（最后一条边界保持真实尺寸）
     ---@param steps number 期望的条带数
     ---@param align number|nil 对齐粒度（Screen.alignment_constraint），小于 2 视为不对齐
@@ -543,7 +546,13 @@ local ok, err = pcall(function()
         end
         local style = SwipeAnimation.STYLES[G_reader_settings:readSetting("swipe_animation_style")]
             or SwipeAnimation.STYLES.wipe
-        local frames = style(screen_w, screen_h, steps, Screen.alignment_constraint, swipe_forward)
+        -- Kobo colour: keep cuts unaligned so framebuffer getBoundedRect
+        -- can overlap neighbouring strips at the edges (see buildStripEdges).
+        local strip_align = Screen.alignment_constraint
+        if Device:isKobo() and Device:hasColorScreen() then
+            strip_align = nil
+        end
+        local frames = style(screen_w, screen_h, steps, strip_align, swipe_forward)
         local refresh_fn = anim_refresh_mode == "fast" and Screen.refreshFast or Screen.refreshUI
 
         -- Draw the previous page as the starting background
