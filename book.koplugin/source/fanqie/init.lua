@@ -294,14 +294,13 @@ end
 
 local function fetch(self, identity, chapter, cb)
     local Content = require("source.fanqie.content")
-    local h = handle()
     Paths.ensureBookWork(identity.stable_id, identity.source_id)
     -- 已打好的漫画章节不再联网（也免去正文接口风控）
     local archive = comicPath(identity, chapter)
     if Cbz.ready(archive) then
-        Base.defer(cb, { file = archive })
-        return h
+        return Base.defer(cb, { file = archive })
     end
+    local h = handle()
     h.job = self.client:officialGetContentAsync(identity.stable_id, chapter.uid, function(result, err)
         if h.cancelled then return end
         if not result then

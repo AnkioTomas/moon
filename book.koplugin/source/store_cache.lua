@@ -63,7 +63,8 @@ end
 ---@param cb fun(res: { data: Book[], groups: table[]|nil }|nil, err: string|nil)
 ---@return { cancel: fun() }
 local function through(cache_key, source_id, load, cb)
-    return Cache.fetch(cache_key, TTL, function(done)
+    local fallback
+    local job = Cache.fetch(cache_key, TTL, function(done)
         return load(function(res, err)
             if not res then
                 done(nil, err)
@@ -83,8 +84,12 @@ local function through(cache_key, source_id, load, cb)
             return
         end
         -- 缓存值解不开（跨版本形状变了）：当未命中现拉一遍，坏行等 TTL 自行过期。
-        load(cb)
+        fallback = load(cb)
     end)
+    return { cancel = function()
+        job.cancel()
+        if fallback then fallback.cancel() end
+    end }
 end
 
 --- 书城浏览读穿：opts 同源 / 书城后端 browseAsync。

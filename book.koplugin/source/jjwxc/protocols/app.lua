@@ -236,14 +236,18 @@ end
 
 --- 带 token 的书架（App 增量收藏接口），token 被拒就重登一次再取。
 ---@param cb fun(rows: table[]|nil, err: string|nil)
----@return HttpJob
+---@return { cancel: fun() }
 function Token.shelfAsync(cb)
+    ---@type boolean, CancelHandle|nil
+    local cancelled, job = false, nil
     local function fetch(token, retry)
-        return get("/incrementFavorite", { versionCode = 185, token = Text.urlEncode(token), backupTime = 1041350400, order = 1 },
+        job = get("/incrementFavorite", { versionCode = 185, token = Text.urlEncode(token), backupTime = 1041350400, order = 1 },
             ACCOUNT_HEADERS, function(wire, err)
+                if cancelled then return end
                 if not wire then cb(nil, err); return end
                 if tonumber(wire.code) == LOGIN_CODE and retry then
                     relogin(function(fresh, rerr)
+                        if cancelled then return end
                         if fresh then fetch(fresh, false) else cb(nil, rerr) end
                     end)
                     return
@@ -254,7 +258,11 @@ function Token.shelfAsync(cb)
                 cb(Mapper.tokenFavRows(list))
             end)
     end
-    return fetch(Token.get(), true)
+    fetch(Token.get(), true)
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
 end
 
 --- 带 token 取章节正文：已购 VIP 章的响应整包加密、content 又是 DES/Base64 密文，解密放子进程。

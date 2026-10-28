@@ -255,6 +255,30 @@ do
     Assert.eq(cached, 1)
 end
 
+-- 漫画章节归档已就绪：不联网直接回文件；返回的句柄取消后回调不再投递（之前句柄丢了，取消是空操作）
+do
+    local Chapter = package.loaded["source.chapter"]
+    local real_cache_all = Chapter.cacheAllAsync
+    local fetchContent
+    Chapter.cacheAllAsync = function(_source, _identity, fetcher) fetchContent = fetcher; return { cancel = function() end } end
+    src:cacheAllChaptersAsync(ref, function() end, function() end)
+    Chapter.cacheAllAsync = real_cache_all
+    local Cbz = package.loaded["source.cbz"]
+    local real_ready = Cbz.ready
+    Cbz.ready = function(path) return path == "work/777.cbz" end
+    local chapter = { idx = 1, uid = "777", title = "漫画一" }
+    local got
+    fetchContent(ref, chapter, function(payload) got = payload end)
+    drain()
+    Assert.eq(got.file, "work/777.cbz")
+    got = nil
+    local handle = fetchContent(ref, chapter, function(payload) got = payload end)
+    handle.cancel()
+    drain()
+    Assert.is_nil(got, "取消后不能再回调")
+    Cbz.ready = real_ready
+end
+
 do
     toc = nil
     toc_writable = false

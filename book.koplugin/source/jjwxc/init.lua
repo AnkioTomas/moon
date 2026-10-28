@@ -31,6 +31,7 @@ function Jjwxc.meta()
 end
 
 ---@class JjwxcSource : SourceBase
+---@field probe { stable_id: string, cancel: fun() }|nil 在飞的 VIP 章购买状态探测
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -195,27 +196,39 @@ function Source:getDetailAsync(identity, cb)
 end
 
 --- 目录里还没问过的 VIP 章逐章问一遍购买状态（只在已登录时），问完落库一次；失败（断网 / Cookie 失效）就停。
----@param self BookSource
+--- 一个源实例同时只有一条探测（`self.probe`）：同一本书在飞就不重开；换书则取消旧的。
+--- 探测拿着自己那份目录表，结束时整表写回，所以目录重拉前必须先取消它，否则旧表把新目录盖回去。
+---@param self JjwxcSource
 ---@param identity BookIdentity
 ---@param toc BookChapter[]
 local function probePaid(self, identity, toc)
-    if Protocols.current() ~= Web or self.probing then return end
+    if Protocols.current() ~= Web then return end
     local todo = {}
     for _idx, chapter in ipairs(toc) do
         if chapter.vip and chapter.paid == nil then todo[#todo + 1] = chapter end
     end
     if #todo == 0 then return end
-    self.probing = true
-    local pos, changed = 0, false
+    if self.probe then
+        if self.probe.stable_id == identity.stable_id then return end
+        self.probe.cancel()
+    end
+    local pos, changed, cancelled, job = 0, false, false, nil
+    local probe = { stable_id = identity.stable_id }
+    probe.cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+        if self.probe == probe then self.probe = nil end
+    end
     local function nextChapter()
         pos = pos + 1
         local chapter = todo[pos]
         if not chapter then
-            self.probing = nil
+            self.probe = nil
             if changed then Toc.put(self.id, identity.stable_id, toc) end
             return
         end
-        Web.paidAsync(identity.stable_id, chapter.uid, function(paid)
+        job = Web.paidAsync(identity.stable_id, chapter.uid, function(paid)
+            if cancelled then return end
             if paid == nil then
                 pos = #todo
             else
@@ -224,7 +237,12 @@ local function probePaid(self, identity, toc)
             nextChapter()
         end)
     end
+    self.probe = probe
     nextChapter()
+end
+
+function Source:close()
+    if self.probe then self.probe.cancel() end
 end
 
 function Source:loadTocAsync(identity, cb)
@@ -239,6 +257,7 @@ function Source:loadTocAsync(identity, cb)
         local toc = wire and Mapper.toc(wire)
         if not toc then cb(nil, err); return end
         if #toc == 0 then cb(nil, _("晋江目录为空")); return end
+        if self.probe and self.probe.stable_id == identity.stable_id then self.probe.cancel() end
         if not Toc.put(self.id, identity.stable_id, toc) then cb(nil, _("章节目录保存失败")); return end
         cb(toc)
         probePaid(self, identity, toc)

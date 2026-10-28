@@ -125,10 +125,10 @@ do
         local f = real_open(path, mode)
         if mode == "wb" and f then
             tmp_path = path
-            return setmetatable({}, { __index = function(_t, k)
-                if k == "write" then return function() return nil, "No space left on device" end end
-                return function(_self, ...) return f[k](f, ...) end
-            end })
+            return {
+                write = function() return nil, "No space left on device" end,
+                close = function() return f:close() end,
+            }
         end
         return f
     end

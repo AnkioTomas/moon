@@ -85,14 +85,18 @@ function Source:syncStatsAsync(_opts, cb)
     return SourceBase.skipped(cb, "legado has no stats")
 end
 
---- 取书架行再交给 fn(row, toc)；没配置 / 不在书架上 / 目录空都走 cb 报错。
+--- 取书架行再交给 fn(row, toc, done)；没配置 / 不在书架上 / 目录空都走 cb 报错。
+--- fn 要再发请求就返回它的句柄，取消会传过去；done 是取消后不再投递的 cb。
 ---@param identity BookIdentity
 ---@param cb function
----@param fn fun(row: table, toc: BookChapter[])
+---@param fn fun(row: table, toc: BookChapter[], done: function): { cancel: fun() }|nil
 ---@return { cancel: fun() }
 function Source:withRow(identity, cb, fn)
     if not self:configured() then return SourceBase.defer(cb, nil, _("未配置阅读服务器地址")) end
     local cancelled, job = false, nil
+    local function done(...)
+        if not cancelled then cb(...) end
+    end
     job = Client.shelfAsync(function(rows, err)
         if cancelled then return end
         if not rows then cb(nil, err); return end
@@ -101,7 +105,7 @@ function Source:withRow(identity, cb, fn)
         job = self:loadTocAsync(identity, function(toc, reason)
             if cancelled then return end
             if not toc then cb(nil, reason); return end
-            fn(row, toc)
+            job = fn(row, toc, done) or job
         end)
     end)
     return { cancel = function()
@@ -125,17 +129,17 @@ function Source:getProgressAsync(identity, cb)
 end
 
 function Source:putProgressAsync(identity, pos, cb)
-    return self:withRow(identity, cb, function(row, toc)
+    return self:withRow(identity, cb, function(row, toc, done)
         local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
         local chapter = idx and toc[idx]
         if not chapter then cb(nil, _("缺少阅读章节位置")); return end
         local read = Mapper.readPos(row)
         local same = read and read.index == idx - 1
-        Client.saveProgressAsync(row, {
+        return Client.saveProgressAsync(row, {
             index = idx - 1,
             title = chapter.title,
             offset = same and read.offset or 0,
-        }, cb)
+        }, done)
     end)
 end
 
