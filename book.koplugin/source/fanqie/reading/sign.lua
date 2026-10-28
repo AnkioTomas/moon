@@ -159,11 +159,7 @@ function Sign.encrypt_ladon(khronos, random4)
     random4 = random4 or urandom(4)
     assert(#random4 == 4)
     local keygen = random4 .. tostring(AID)
-    local md5hex = md5(keygen)
-    if #md5hex ~= 32 or md5hex:find("[^%x]") then
-        md5hex = Aes.to_hex(md5hex)
-    end
-    local table_ = build_ladon_hash_table(md5hex)
+    local table_ = build_ladon_hash_table(md5(keygen))
     local padded = pkcs7_pad(data, 16)
     local enc = {}
     for i = 1, #padded, 16 do
@@ -313,15 +309,8 @@ function Sign.encrypt_argus(query, timestamp, device_id, opts)
     local inner = encrypt_enc_pb(prefix .. enc_pb, #enc_pb + 8)
     local head = string.char(0xa6, 0x6e, 0xad, 0x9f, 0x77, 0x01, 0xd0, 0x0c, 0x18)
     local buf = head .. inner .. "ao"
-    local function md5_bin(s)
-        local h = md5(s)
-        if #h == 32 and not h:find("[^%x]") then
-            return Aes.from_hex(h)
-        end
-        return h
-    end
-    local aes_key = md5_bin(SIGN_KEY:sub(1, 16))
-    local aes_iv = md5_bin(SIGN_KEY:sub(17, 32))
+    local aes_key = Aes.from_hex(md5(SIGN_KEY:sub(1, 16)))
+    local aes_iv = Aes.from_hex(md5(SIGN_KEY:sub(17, 32)))
     local encrypted = Aes.cbc_encrypt(buf, aes_key, aes_iv, true)
     return Text.base64Encode(string.char(0xf2, 0x81) .. encrypted)
 end

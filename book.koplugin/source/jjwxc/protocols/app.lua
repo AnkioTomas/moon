@@ -90,8 +90,8 @@ function Token.decryptBody(body, accesskey, keystring)
     else
         salt, cipher = body:sub(1, 12), body:sub(13)
     end
-    local Md5, Des = require("crypto.md5"), require("crypto.des")
-    local key, iv = Md5.hex(part .. salt):sub(1, 8), Md5.hex(salt):sub(1, 8)
+    local md5, Des = require("ffi/sha2").md5, require("crypto.des")
+    local key, iv = md5(part .. salt):sub(1, 8), md5(salt):sub(1, 8)
     if cipher:find("^%x+$") then
         local raw = require("crypto.hex").from_hex(cipher)
         return raw and Des.decrypt(raw, key, iv)

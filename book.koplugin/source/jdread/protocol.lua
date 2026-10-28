@@ -4,7 +4,8 @@
 @module koplugin.book.source.jdread.protocol
 --]]
 
-local md5 = require("ffi/sha2").md5
+local sha2 = require("ffi/sha2")
+local md5 = sha2.md5
 local JSON = require("json")
 local Aes = require("crypto.aes")
 local Text = require("utils.text")
@@ -14,12 +15,11 @@ local Protocol = {}
 
 local APP = "jdread-m"
 
----@param raw string
+--- AES 密钥 = md5(时间戳 .. APP) 的原始 16 字节
+---@param tm integer
 ---@return string
-local function md5bin(raw)
-    return (md5(raw):gsub("(%x%x)", function(pair)
-        return string.char(tonumber(pair, 16))
-    end))
+local function aesKey(tm)
+    return sha2.hex_to_bin(sha2.md5(tostring(tm) .. APP))
 end
 
 ---@return string
@@ -76,7 +76,7 @@ end
 ---@param tm integer
 ---@return string
 function Protocol.encryptQuery(query, tm)
-    local raw = Aes.ecb_encrypt(query, md5bin(tostring(tm) .. APP))
+    local raw = Aes.ecb_encrypt(query, aesKey(tm))
     return (Text.base64Encode(raw):gsub("%+", "-"):gsub("/", "_"))
 end
 
@@ -104,7 +104,7 @@ function Protocol.decodeDownload(raw, tm)
             return checkDownload(envelope)
         end
     end
-    local ok, text = pcall(Aes.ecb_decrypt, Text.base64Decode(raw), md5bin(tostring(tm) .. APP))
+    local ok, text = pcall(Aes.ecb_decrypt, Text.base64Decode(raw), aesKey(tm))
     if not ok or type(text) ~= "string" or text == "" then
         return nil, _("京东读书响应无效")
     end

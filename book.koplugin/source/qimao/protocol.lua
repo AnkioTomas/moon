@@ -9,8 +9,8 @@
 
 local Aes = require("crypto.aes")
 local Hex = require("crypto.hex")
-local Md5 = require("crypto.md5")
 local Text = require("utils.text")
+local md5 = require("ffi/sha2").md5
 
 local Protocol = {}
 
@@ -29,7 +29,7 @@ function Protocol.sign(params)
     table.sort(keys)
     local parts = {}
     for i, k in ipairs(keys) do parts[i] = k .. "=" .. tostring(params[k]) end
-    return Md5.hex(table.concat(parts) .. SIGN_KEY)
+    return md5(table.concat(parts) .. SIGN_KEY) --[[@as string]]
 end
 
 --- 带签名的请求头。版本号只是风控里的取值，按书号稳定挑一个，同一本书请求头不变。

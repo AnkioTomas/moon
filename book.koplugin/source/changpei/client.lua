@@ -161,7 +161,7 @@ local function sign(params, timestamp)
     local parts = { SIGN_PREFIX }
     for _idx, key in ipairs(keys) do parts[#parts + 1] = "&" .. key .. "=" .. params[key] end
     parts[#parts + 1] = "&" .. timestamp
-    return require("crypto.md5").hex(table.concat(parts))
+    return require("ffi/sha2").md5(table.concat(parts)) --[[@as string]]
 end
 
 --- 带签名的 JSON POST：先取服务器时间（本机时钟不可信）再发。

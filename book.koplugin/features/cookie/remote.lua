@@ -13,7 +13,7 @@ ticket 只在内存里：10 分钟过期；成功后保留回执 2 分钟，重�
 --]]
 
 local Gcm = require("crypto.gcm")
-local Sha256 = require("crypto.sha256")
+local sha2 = require("ffi/sha2")
 local Text = require("utils.text")
 local _ = require("gettext")
 
@@ -150,7 +150,7 @@ function Remote.handle(method, action, params, cb)
         local now = os.time()
         sweep(now)
         local ticket = randomTicket()
-        tickets[b64url(Sha256.hash(ticket))] = { ticket = ticket, source = params.source, expires = now + TICKET_TTL }
+        tickets[b64url(sha2.hex_to_bin(sha2.sha256(ticket)))] = { ticket = ticket, source = params.source, expires = now + TICKET_TTL }
         return cb(200, {
             domain = browser.domain, scope = browser.scope, login = browser.login, check = browser.check, check_json = browser.check_json,
             ticket = ticket, callback = CALLBACK,

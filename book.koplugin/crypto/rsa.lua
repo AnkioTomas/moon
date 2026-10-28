@@ -13,16 +13,19 @@ local bit = require("bit")
 local bor = bit.bor
 
 local Bn = require("crypto.bn")
-local Md5 = require("crypto.md5")
-local Sha1 = require("crypto.sha1")
-local Sha256 = require("crypto.sha256")
+local sha2 = require("ffi/sha2")
 
 local Rsa = {}
 
+-- ffi/sha2 回十六进制，DigestInfo 要原始摘要
+local function raw(hex_digest)
+    return function(msg) return sha2.hex_to_bin(hex_digest(msg)) end
+end
+
 local HASH = {
-    md5 = Md5.hash,
-    sha1 = Sha1.hash,
-    sha256 = Sha256.hash,
+    md5 = raw(sha2.md5),
+    sha1 = raw(sha2.sha1),
+    sha256 = raw(sha2.sha256),
 }
 
 -- DigestInfo 去掉末尾的散列值。

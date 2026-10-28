@@ -8,7 +8,7 @@ HKDF-SHA256 与 AES-GCM 解密（浏览器扩展 moon-cookie-storage 的加密�
 
 local bit = require("bit")
 local Aes = require("crypto.aes")
-local Sha256 = require("crypto.sha256")
+local sha2 = require("ffi/sha2")
 
 local band, bor, bxor, lshift, rshift = bit.band, bit.bor, bit.bxor, bit.lshift, bit.rshift
 
@@ -16,13 +16,9 @@ local Gcm = {}
 
 ---@param key string
 ---@param msg string
----@return string
+---@return string 原始 32 字节
 local function hmac(key, msg)
-    if #key > 64 then key = Sha256.hash(key) end
-    key = key .. string.rep("\0", 64 - #key)
-    local ipad = key:gsub(".", function(c) return string.char(bxor(c:byte(), 0x36)) end)
-    local opad = key:gsub(".", function(c) return string.char(bxor(c:byte(), 0x5c)) end)
-    return Sha256.hash(opad .. Sha256.hash(ipad .. msg))
+    return sha2.hex_to_bin(sha2.hmac(sha2.sha256, key, msg))
 end
 
 --- HKDF-SHA256，最多 32 字节（一个输出块，够 AES-256 密钥）。

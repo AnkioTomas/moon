@@ -15,8 +15,8 @@
 --]]
 
 local Aes = require("crypto.aes")
-local Md5 = require("crypto.md5")
 local Text = require("utils.text")
+local md5 = require("ffi/sha2").md5
 
 local Vip = {}
 
@@ -66,7 +66,7 @@ function Vip.content(html)
 
     --- 在摘要的 32 个偏移里找出让密文解成 `shape` 的 key 和 iv，返回去填充后的明文。
     local function decrypt(data, source, shape)
-        local digest = Md5.hex(source)
+        local digest = md5(source)
         digest = digest .. digest
         local function window(from) return digest:sub(from + 1, from + 16) end
         local probe_len = math.min(#data - 16, 48)
