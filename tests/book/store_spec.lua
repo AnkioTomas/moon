@@ -126,6 +126,8 @@ local book_upsert_ok = true
 local book_batch_calls = 0
 local touch_calls = {} -- { source_id, stable_id, path, chapter_idx }
 local touch_ok = true
+local hidden_sets = {} -- { source_id, stable_id, value }
+local hidden_ok = true
 local mark_deleted_ok = true
 package.preload["book.books_db"] = function()
     return {
@@ -169,6 +171,12 @@ package.preload["book.books_db"] = function()
                 path = path,
             }
             return touch_ok
+        end,
+        setHidden = function(source_id, stable_id, value)
+            hidden_sets[#hidden_sets + 1] = {
+                source_id = source_id, stable_id = stable_id, value = value,
+            }
+            return hidden_ok
         end,
     }
 end
@@ -511,6 +519,30 @@ do
     book_rows_by_id["local\0/lib/x.epub"] = nil
     book_rows_by_id["local\0/cache2/y.epub"] = nil
     touch_calls = {}
+end
+
+-- ── softDelete：清文档保封面 + 标 hidden；清缓存失败就不标，标失败整体算失败 ──
+do
+    book_rows_by_id["local\0dav/a.epub"] = {
+        source_id = "local", stable_id = "dav/a.epub",
+        path = "/cache/local/book/webdav/a.epub", cover = "https://img.test/c.jpg",
+    }
+    hidden_sets = {}
+    Assert.is_true(Store.softDelete("local", "dav/a.epub"))
+    Assert.eq(#hidden_sets, 1)
+    Assert.eq(hidden_sets[1].source_id, "local")
+    Assert.eq(hidden_sets[1].stable_id, "dav/a.epub")
+    Assert.eq(hidden_sets[1].value, true)
+
+    hidden_ok = false
+    Assert.is_false(Store.softDelete("local", "dav/a.epub"))
+    hidden_ok = true
+
+    touch_ok = false
+    local before = #hidden_sets
+    Assert.is_false(Store.softDelete("local", "dav/a.epub"))
+    Assert.eq(#hidden_sets, before)
+    touch_ok = true
 end
 
 -- ── clearCache：把 KOReader 的 .sdr 边车搬回工作目录，正文照删 ──

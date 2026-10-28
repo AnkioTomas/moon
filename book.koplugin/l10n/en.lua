@@ -273,7 +273,6 @@ return {
     ["删除失败：%1"] = "Delete failed: %1",
     ["删除字典"] = "Delete dictionary",
     ["删除字典“%1”？"] = "Delete dictionary “%1”?",
-    ["删除本书"] = "Delete book",
     ["删除本书失败"] = "Failed to delete book",
     ["别名：%1"] = "Aliases: %1",
     ["刮削"] = "Scrape",

@@ -36,6 +36,7 @@ package.preload["book.catalog"] = function()
 end
 local cleared
 local clear_result = { true }
+local soft_deleted
 package.preload["book.store"] = function()
     return {
         rememberMany = function() end,
@@ -43,6 +44,11 @@ package.preload["book.store"] = function()
         clearCache = function(source_id, stable_id, keep_cover)
             cleared = { source_id, stable_id, keep_cover }
             return clear_result[1], clear_result[2]
+        end,
+        softDelete = function(source_id, stable_id)
+            cleared = { source_id, stable_id, true }
+            soft_deleted = { source_id, stable_id }
+            return clear_result[1]
         end,
     }
 end
@@ -279,8 +285,9 @@ Assert.eq(confirm.text, "软删除《书一》？\n本地文档会被清理，�
 confirm.ok_callback()
 Assert.eq(cleared[1], "wechat")
 Assert.is_true(cleared[3])
+Assert.eq(soft_deleted[1], "wechat")
+Assert.eq(soft_deleted[2], "w2")
 Assert.eq(Themed.last("toast").text, "已软删除")
-Assert.eq(hidden_set[3], true)
 Assert.is_true(page.closed)
 
 -- 恢复：软删除的书出现「恢复」，点后取消隐藏

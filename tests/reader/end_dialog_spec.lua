@@ -10,6 +10,8 @@ local Themed = require("support.theme_stubs")
 Themed.install()
 
 local order = {}
+local soft_result = { true }
+local running_task
 local desk = { events = {} }
 function desk:onEvent(name) self.events[#self.events + 1] = name end
 package.preload["desktop"] = function()
@@ -18,7 +20,18 @@ end
 package.preload["apps/filemanager/filemanager"] = function()
     return { instance = { book = { desktop = desk } } }
 end
-for _, name in ipairs({ "desktop", "apps/filemanager/filemanager", "reader.end_dialog" }) do
+package.preload["book.store"] = function()
+    return {
+        softDelete = function(source_id, stable_id)
+            order[#order + 1] = "soft:" .. source_id .. "\0" .. stable_id
+            return soft_result[1]
+        end,
+    }
+end
+package.preload["workers.tasks"] = function()
+    return { get = function(key) if key == "cache\0moon\0a.epub" then return running_task end end }
+end
+for _, name in ipairs({ "desktop", "apps/filemanager/filemanager", "book.store", "workers.tasks", "reader.end_dialog" }) do
     package.loaded[name] = nil
 end
 local EndDialog = require("reader.end_dialog")
@@ -31,11 +44,13 @@ function source:deleteBookAsync(_, cb)
 end
 local identity = { source_id = "moon", stable_id = "a.epub", book = { title = "A" }, source = source }
 
-local function deleteItem()
+local function findItem(text)
     for _, item in ipairs(Themed.last("sheet").items) do
-        if item.text == "删除本书" then return item end
+        if item.text == text then return item end
     end
 end
+local function deleteItem() return findItem("彻底删除（连同书架条目与进度一并移除）") end
+local function softItem() return findItem("软删除（隐藏，数据保留，可恢复）") end
 
 -- 点「删除本书」只弹确认，不删
 do
@@ -61,6 +76,43 @@ do
     Assert.len(desk.events, 0)
 end
 
+-- 软删除：点选只弹确认；确认后先关书再软删，成功刷新书架
+do
+    order, desk.events, soft_result, running_task = {}, {}, { true }, nil
+    EndDialog.show({}, identity)
+    softItem().callback()
+    Assert.len(order, 0)
+    local confirm = Themed.last("confirm")
+    Assert.matches(confirm.text, "软删除《A》")
+    Assert.eq(confirm.ok_text, "软删除")
+    confirm.ok_callback()
+    Assert.eq(order[1], "open_desktop")
+    Assert.eq(order[2], "soft:moon\0a.epub")
+    Assert.eq(Themed.last("toast").text, "已软删除")
+    Assert.eq(desk.events[1], "shelf_changed")
+end
+
+-- 软删除失败：提示，不刷新书架
+do
+    order, desk.events, soft_result = {}, {}, { false }
+    EndDialog.show({}, identity)
+    softItem().callback()
+    Themed.last("confirm").ok_callback()
+    Assert.eq(Themed.last("toast").text, "软删除失败")
+    Assert.len(desk.events, 0)
+end
+
+-- 本书正在后台缓存：确认后中止，不关书不软删
+do
+    order, running_task = {}, { id = "cache" }
+    EndDialog.show({}, identity)
+    softItem().callback()
+    Themed.last("confirm").ok_callback()
+    Assert.eq(Themed.last("toast").text, "本书正在后台缓存，请稍后再试")
+    Assert.len(order, 0)
+    running_task = nil
+end
+
 -- 没有属主源：直接提示，不弹确认
 do
     local made = #Themed.made
@@ -70,7 +122,19 @@ do
     Assert.eq(#Themed.made, made + 2, "只多了 sheet 与 toast")
 end
 
-for _, name in ipairs({ "desktop", "apps/filemanager/filemanager", "reader.end_dialog" }) do
+-- 没有属主源也能软删除：纯本地操作不依赖源
+do
+    order, desk.events, soft_result = {}, {}, { true }
+    EndDialog.show({}, { source_id = "local", stable_id = "y.epub", book = { title = "Y" } })
+    softItem().callback()
+    Themed.last("confirm").ok_callback()
+    Assert.eq(order[1], "open_desktop")
+    Assert.eq(order[2], "soft:local\0y.epub")
+    Assert.eq(Themed.last("toast").text, "已软删除")
+    Assert.eq(desk.events[1], "shelf_changed")
+end
+
+for _, name in ipairs({ "desktop", "apps/filemanager/filemanager", "book.store", "workers.tasks", "reader.end_dialog" }) do
     package.preload[name] = nil
     package.loaded[name] = nil
 end
