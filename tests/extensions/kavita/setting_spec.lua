@@ -220,6 +220,19 @@ Assert.eq(table.concat(titles, "|"),
     "服务器地址|API Key|书库|漫画缓存|进度心跳间隔|请求超时|测试连接",
     "「漫画缓存」紧跟「书库」")
 
+-- 03 原型的三块分组：连接 / 缓存与同步 / 诊断。
+local sections = Setting.sections({ path = PLUGIN, desktop = fake_desktop })
+Assert.eq(#sections, 3, "设置页分三块")
+local grouped = {}
+for _idx, section in ipairs(sections) do
+    local names = {}
+    for _row_idx, make in ipairs(section.rows) do names[#names + 1] = make(600).title end
+    grouped[#grouped + 1] = section.title .. ":" .. table.concat(names, ",")
+end
+Assert.eq(table.concat(grouped, "|"),
+    "连接:服务器地址,API Key,书库|缓存与同步:漫画缓存,进度心跳间隔,请求超时|诊断:测试连接",
+    "分组与原型一致，扁平的 rows 顺序不变")
+
 --- 按标题找行（索引会随增删漂移）。
 ---@param title string
 ---@return table

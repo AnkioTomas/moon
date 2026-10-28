@@ -139,6 +139,23 @@ do
     table.sort(missing)
     Assert.len(missing, 0, "l10n 目录缺少源码里的文案: " .. table.concat(missing, " | "))
 
+    -- Kavita 扩展的文案已全部纳入目录（09 验收补齐）；只按这个扩展查正向覆盖，
+    -- 不要求其它扩展一次翻完，避免把存量文案变成红灯。
+    local kavita_sources = sourceTexts({ root .. "/extensions/moonsource-kavita.koplugin" })
+    local kavita_missing, kavita_seen = {}, {}
+    for _, src in ipairs(kavita_sources) do
+        for literal in src:gmatch('_%(%s*"([^"]*)"') do
+            local msgid = unescape(literal)
+            if msgid ~= "" and not kavita_seen[msgid] then
+                kavita_seen[msgid] = true
+                if en[msgid] == nil then kavita_missing[#kavita_missing + 1] = msgid end
+            end
+        end
+    end
+    table.sort(kavita_missing)
+    Assert.len(kavita_missing, 0,
+        "Kavita 扩展缺少 l10n 文案: " .. table.concat(kavita_missing, " | "))
+
     -- 反向：目录键必须作为完整字符串存在于源码。不能用裸 substring 搜索，
     -- 否则「账号」会被「微信读书账号」冒充使用，注释也会掩盖废弃键。
     local source_literals = {}

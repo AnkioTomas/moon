@@ -705,18 +705,39 @@ local function normalizeUrl(value)
     return Text.rtrimSlashes(Text.stripWhitespace(value))
 end
 
+--- 设置页按 03 原型分三块：连接 / 缓存与同步 / 诊断。
 ---@param plugin table|nil 月读插件实例（取 plugin.path 定位实际安装目录）
+---@return BookThemeSection[]
+function Setting.sections(plugin)
+    return {
+        {
+            title = _("连接"),
+            rows = {
+                field("base_url", _("服务器地址"), "https://kavita.example.com", false, normalizeUrl, "dns"),
+                field("api_key", _("API Key"), _("Kavita 用户设置 → API Key"), true, Text.stripWhitespace, "key"),
+                libraryRow(),
+            },
+        },
+        {
+            title = _("缓存与同步"),
+            rows = { cacheRow(plugin), heartbeatRow(), timeoutRow() },
+        },
+        {
+            title = _("诊断"),
+            rows = { testRow() },
+        },
+    }
+end
+
+--- 扁平行列表（兼容只认 rows 的调用方与测试）；顺序与分组一致。
+---@param plugin table|nil
 ---@return table[]
 function Setting.rows(plugin)
-    return {
-        field("base_url", _("服务器地址"), "https://kavita.example.com", false, normalizeUrl, "dns"),
-        field("api_key", _("API Key"), _("Kavita 用户设置 → API Key"), true, Text.stripWhitespace, "key"),
-        libraryRow(),
-        cacheRow(plugin),
-        heartbeatRow(),
-        timeoutRow(),
-        testRow(),
-    }
+    local rows = {}
+    for _idx, section in ipairs(Setting.sections(plugin)) do
+        for _row_idx, row in ipairs(section.rows) do rows[#rows + 1] = row end
+    end
+    return rows
 end
 
 --- 远程管理「连接配置」网页上的表单；书库要连服务器挑，仍在设备上选。
