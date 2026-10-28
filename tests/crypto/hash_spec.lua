@@ -1,32 +1,34 @@
 --[[--
-MD5 / SHA-1 / SHA-256 / SM3 已知答案。
+SM3 已知答案；hex 互转；HKDF-SHA256（RFC 5869 用例 1，取前 32 字节）。
+
+MD5 / SHA-1 / SHA-256 来自 KOReader `ffi/sha2`，本仓库不再自带实现。
 
 @module tests.crypto.hash_spec
 --]]
 
 local Assert = require("support.assert")
 
-local Md5 = require("crypto.md5")
-local Sha1 = require("crypto.sha1")
-local Sha256 = require("crypto.sha256")
+local Hex = require("crypto.hex")
 local Sm3 = require("crypto.sm3")
-
-Assert.eq(Md5.hex(""), "d41d8cd98f00b204e9800998ecf8427e")
-Assert.eq(Md5.hex("abc"), "900150983cd24fb0d6963f7d28e17f72")
-Assert.eq(Md5.hex(string.rep("a", 100)), "36a92cc94a9e0fa21f625f8bfb007adf")
-Assert.eq(#Md5.hash("abc"), 16)
-
-Assert.eq(Sha1.hex(""), "da39a3ee5e6b4b0d3255bfef95601890afd80709")
-Assert.eq(Sha1.hex("abc"), "a9993e364706816aba3e25717850c26c9cd0d89d")
-Assert.eq(Sha1.hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
-    "84983e441c3bd26ebaae4aa1f95129e5e54670f1")
-
-Assert.eq(Sha256.hex(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
-Assert.eq(Sha256.hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
-Assert.eq(Sha256.hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
-    "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
-Assert.eq(Sha256.hex(string.rep("a", 1000)),
-    "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3")
+local Gcm = require("crypto.gcm")
 
 Assert.eq(Sm3.hex(""), "1ab21d8355cfa17f8e61194831e81a8f22bec8c728fefb747ed035eb5082aa2b")
 Assert.eq(Sm3.hex("abc"), "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0")
+
+Assert.eq(Hex.to_hex("\0\1\254\255"), "0001feff")
+Assert.eq(Hex.from_hex("0001FEff"), "\0\1\254\255")
+Assert.eq(Hex.from_hex("00 01\n fe ff"), "\0\1\254\255", "whitespace is ignored")
+Assert.eq(Hex.from_hex(""), "")
+
+local ikm = string.rep("\11", 22)
+local salt = Hex.from_hex("000102030405060708090a0b0c")
+local info = Hex.from_hex("f0f1f2f3f4f5f6f7f8f9")
+Assert.eq(Hex.to_hex(Gcm.hkdf(ikm, salt, info, 32)),
+    "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf")
+Assert.eq(#Gcm.hkdf(ikm, salt, info, 16), 16)
+Assert.errors(function() Gcm.hkdf(ikm, salt, info, 33) end, "one block only")
+
+-- 旧 crypto.md5 / sha1 / sha256 已删，不得再被 require 到
+for _idx, name in ipairs({ "crypto.md5", "crypto.sha1", "crypto.sha256" }) do
+    Assert.is_nil(package.searchpath(name, package.path), name .. " removed")
+end

@@ -178,6 +178,8 @@ local function installFfiUtil()
 end
 
 local function installSha2()
+    -- 本机有 koreader/ 克隆时 base/ffi/sha2.lua 已在 package.path（纯 Lua，裸 LuaJIT 能跑），用真的
+    if package.searchpath("ffi/sha2", package.path) then return end
     installIfMissing("ffi/sha2", function()
         local sha2 = {}
 
@@ -209,8 +211,30 @@ local function installSha2()
             return hasher("md5sum", value)
         end
 
+        function sha2.sha1(value)
+            return hasher("sha1sum", value)
+        end
+
         function sha2.sha256(value)
             return hasher("sha256sum", value)
+        end
+
+        function sha2.hex_to_bin(hex)
+            return (hex:gsub("%x%x", function(hh) return string.char(tonumber(hh, 16)) end))
+        end
+
+        function sha2.bin_to_hex(bin)
+            return (bin:gsub(".", function(c) return string.format("%02x", c:byte()) end))
+        end
+
+        -- 同 ffi/sha2 签名：hash_func 回十六进制，HMAC 也回十六进制；md5 / sha1 / sha256 块长都是 64
+        function sha2.hmac(hash_func, key, message)
+            local bxor = require("bit").bxor
+            if #key > 64 then key = sha2.hex_to_bin(hash_func(key)) end
+            key = key .. string.rep("\0", 64 - #key)
+            local ipad = key:gsub(".", function(c) return string.char(bxor(c:byte(), 0x36)) end)
+            local opad = key:gsub(".", function(c) return string.char(bxor(c:byte(), 0x5c)) end)
+            return hash_func(opad .. sha2.hex_to_bin(hash_func(ipad .. message)))
         end
 
         return sha2
