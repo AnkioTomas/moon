@@ -119,6 +119,8 @@ function Config.installUtilStub()
             end,
             -- 与 frontend/util.lua 同语义（输入法候选栏拷贝键盘布局用）
             tableDeepCopy = tableDeepCopy,
+            -- 与 frontend/util.lua 同语义：非 Linux 读不到 /proc/meminfo 返回 nil（utils.mem 按读不到处理）
+            calcFreeMem = function() return nil, nil end,
             -- 与 frontend/util.lua 同语义（输入框 charlist 按 UTF-8 字符存储）
             splitToChars = function(text)
                 local chars = {}
