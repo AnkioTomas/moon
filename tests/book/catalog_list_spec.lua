@@ -327,6 +327,16 @@ do
     Assert.eq(list_offline.args[#list_offline.args], 0)
     Assert.is_true(rows[1].cache_mark, "离线行也带缓存标记")
 
+    -- random：同一条分页 SELECT（列序只有一份），只是不 COUNT、ORDER BY RANDOM()。
+    calls = {}
+    rows = Catalog.listBooks("ext.kavita", { random = true, limit = 2, offline_only = true, chapter_sources = { "wechat" } })
+    Assert.len(calls, 1, "random 不先 COUNT")
+    Assert.is_true(calls[1].sql:find("ORDER BY RANDOM()", 1, true) ~= nil)
+    Assert.eq(whereOf(calls[1].sql), whereOf(list_offline.sql), "random 与分页同一 where")
+    Assert.eq(calls[1].args[#calls[1].args - 1], 2)
+    Assert.eq(calls[1].args[#calls[1].args], 0)
+    Assert.is_true(rows[1].cache_mark, "random 行与分页行同一字段映射")
+
     -- 混合源：只约束声明了 shelf_cache 的源，其它源的行原样放行（05 A4）。
     calls = {}
     Catalog.listBooks({ "ext.kavita", "wechat" }, {
