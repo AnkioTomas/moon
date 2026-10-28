@@ -168,22 +168,33 @@ local BODY_CHUNK = 64 * 1024
 
 --- turbo 只收整段字符串 body（拼接 + 写缓冲，峰值约 3 倍文件）。这里让 client 先发 setup 阶段已备好的请求头（self.req，不能再 _prepare 一次：Host/Content-Length 会重复，服务器不回应），
 --- 再 64KB 一块读文件、等上一块刷出再写下一块，内存恒定。Content-Length 由 opts.body_size 经 on_headers 写入。
+--- 文件由调用方先打开（打不开就不该发请求：头里已写 Content-Length，发个空 body 服务器会等到超时），
+--- 挂在 client 上，发完 / 取消 / 失败时经 Fetch.closeBody 关。
 ---@param client table
----@param path string
-function Fetch.streamBody(client, path)
+---@param file file*
+function Fetch.streamBody(client, file)
+    client._book_body_file = file
     client._send_http_request = function(self)
         local head = self.req
-        local file = io.open(path, "rb")
         local function pump()
-            local chunk = file and file:read(BODY_CHUNK)
+            local chunk = self._book_body_file and self._book_body_file:read(BODY_CHUNK)
             if chunk then
                 return self.iostream:write(chunk, pump)
             end
-            if file then file:close() end
+            Fetch.closeBody(self)
             self:_headers_written_cb()
         end
         self.iostream:write(head, pump)
     end
+end
+
+--- 关掉还开着的 body 文件；没有或已关为空操作。
+---@param client table|nil
+function Fetch.closeBody(client)
+    local file = client and client._book_body_file
+    if not file then return end
+    client._book_body_file = nil
+    file:close()
 end
 
 --- 取消时先拆 turbo 的连接/请求超时和已入队回调，再关 iostream。
@@ -194,6 +205,7 @@ function Fetch.close(client)
     if not client then
         return
     end
+    Fetch.closeBody(client)
     local loop = client.io_loop
     if loop and loop.remove_timeout then
         if client.connect_timeout_ref then loop:remove_timeout(client.connect_timeout_ref) end

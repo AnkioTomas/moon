@@ -365,7 +365,7 @@ Assert.eq(bare.title, identity.stable_id)
 bare:dismiss()
 progress_ui.shown = 0
 
--- 未连网：直接失败给出提示，不走 runWhenOnline（用户拒开 Wi-Fi 时它永不回调）。
+-- 未连网：直接失败给出提示，不走 runWhenConnected（用户拒开 Wi-Fi 时它永不回调）。
 network.connected = false
 progress_ui.shown = 0
 os.remove(tmp .. "/2.html")

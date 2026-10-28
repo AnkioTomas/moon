@@ -58,7 +58,7 @@ local function refreshAfterChange(desktop)
     if Compose.plan().offline then
         refresh()
     else
-        NetworkMgr:runWhenOnline(refresh)
+        NetworkMgr:runWhenConnected(refresh)
     end
 end
 

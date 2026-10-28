@@ -32,7 +32,7 @@ local function doLogin(username, password)
     local Auth = require("source.copymanga.auth")
     local NetworkMgr = require("ui/network/manager")
     local Toast = require("ui.themes.widgets.toast")
-    NetworkMgr:runWhenOnline(function()
+    NetworkMgr:runWhenConnected(function()
         local waiting = require("ui.themes.widgets.progress_dialog"):new{
             title = _("拷贝漫画账号"), text = _("正在登录…"), dismissable = false,
         }

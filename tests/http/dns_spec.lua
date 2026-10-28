@@ -229,6 +229,47 @@ answer(sent[1], {}, 3)
 tick()
 Assert.eq(#got, 1); Assert.eq(got[1], false); Assert.eq(errs[1], "nxdomain")
 
+-- SERVFAIL（路由器 dnsmasq 上游断了秒回）不定局：继续等别的服务器，第二台答了地址就用
+sent, got, errs = {}, {}, {}
+Dns.resolve("sf.example.com", function(a, e) got[#got + 1] = a or false; errs[#errs + 1] = e end)
+answer(sent[1], {}, 2)
+tick()
+Assert.eq(#got, 0, "一个 SERVFAIL 不能让备选 DNS 白配")
+answer(sent[2], { { 1, "\9\9\9\9" } })
+tick()
+Assert.eq(got[1], "9.9.9.9")
+-- 全部服务器都答 SERVFAIL / REFUSED：不等到超时，按最后一个错立即回
+sent, got, errs = {}, {}, {}
+Dns.resolve("sf2.example.com", function(a, e) got[#got + 1] = a or false; errs[#errs + 1] = e end)
+answer(sent[1], {}, 2)
+answer(sent[2], {}, 5)
+tick()
+Assert.eq(#got, 1); Assert.eq(got[1], false); Assert.eq(errs[1], "rcode 5")
+-- 一台 SERVFAIL、另一台到超时都没应答：按超时前记下的错回
+sent, got, errs = {}, {}, {}
+Dns.resolve("sf3.example.com", function(a, e) got[#got + 1] = a or false; errs[#errs + 1] = e end)
+answer(sent[1], {}, 2)
+tick()
+Assert.eq(#got, 0)
+clock = clock + Dns.QUERY_TIMEOUT + 0.01
+tick()
+Assert.eq(#got, 1); Assert.eq(errs[1], "rcode 2")
+
+-- /etc/hosts：静态条目优先于 UDP 查询（大小写不敏感、带注释、多名字一行），命中后进缓存
+local hosts = os.tmpname()
+local hf = assert(io.open(hosts, "w"))
+hf:write("# comment\n127.0.0.1 localhost\n192.168.1.20   nas.lan  Books.Home # my nas\n::1 ip6-localhost\n")
+hf:close()
+Dns.HOSTS = hosts
+sent, got = {}, {}
+Dns.resolve("books.home", function(a) got[#got + 1] = a or false end)
+Assert.eq(got[1], "192.168.1.20"); Assert.eq(#sent, 0, "hosts 命中不发包")
+Dns.resolve("ip6-localhost", function(a) got[#got + 1] = a or false end)
+Assert.eq(#sent, 2, "只认 IPv4 行，其余照常查")
+os.remove(hosts)
+Dns.HOSTS = hosts .. ".missing"
+Assert.is_nil(Dns.hostsLookup("nas.lan"), "没有 hosts 文件不崩")
+
 -- 缓存 TTL 到期重查
 now = now + Dns.TTL + 1
 sent = {}

@@ -29,7 +29,7 @@ package.preload["features.dictionary.manager"] = function()
     }
 end
 package.preload["ui/network/manager"] = function()
-    return { runWhenOnline = function(_, cb) cb() end }
+    return { runWhenConnected = function(_, cb) cb() end }
 end
 package.preload["utils.text"] = function()
     return { trim = function(s) return s end }
