@@ -573,11 +573,15 @@ function Source:getProgressAsync(identity, cb)
             local chapter = { idx = pos.chapter_idx, uid = tostring(chapter_uid),
                 title = entry and entry.title or pos.chapter_title or "" }
             local Position = require("source.wechat.progress")
+            -- 精确定位要拿到章节正文（可能要联网）；拿不到或对不上就退回章级位置，
+            -- 远端给的 chapter_idx + chapter_fraction 仍是有效进度，不能整条丢掉。
             position_job = Position.loadAsync(identity, chapter, function(source, format)
                 if cancelled then return end
-                if not source then cb(nil, format); return end
-                local ok, map_err = Position.localize(identity, chapter, pos, source, format)
-                if not ok then cb(nil, map_err); return end
+                local ok, map_err = nil, format
+                if source then ok, map_err = Position.localize(identity, chapter, pos, source, format) end
+                if not ok then
+                    logger.warn("wechat progress position fallback to chapter", identity.stable_id, map_err)
+                end
                 reply()
             end)
         end

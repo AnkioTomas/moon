@@ -511,8 +511,9 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
             cb(nil, err)
             return
         end
+        -- 进度定位缓存写不进去（磁盘满）只影响下次进度换算，正文已到手，照常交出去。
         local cached, cache_err = require("source.wechat.progress").remember(bookId, chapter, source, format)
-        if not cached then cb(nil, cache_err); return end
+        if not cached then logger.warn("wechat chapter position cache failed", bookId, chapter.uid, cache_err) end
         if format == "txt" then
             -- TXT 正文不含章名（EPUB 原文自带标题），补一个，翻到新章才看得到章名。
             cb({ title = title, html = "<h1>" .. Text.xmlEscape(title) .. "</h1>" .. html })

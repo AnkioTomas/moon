@@ -292,12 +292,14 @@ os.execute("rm -rf '" .. dir .. "'")
 
 -- 删订阅：订阅库、缓存、目录、隐藏书行（及依附的章节 / 注解记录）一并清掉。
 local calls = {}
-package.loaded["features.subscribe.db"].remove = function(id) calls[#calls + 1] = "db:" .. id end
+package.loaded["features.subscribe.db"].remove = function(id) calls[#calls + 1] = "db:" .. id; return { "sabc" } end
 package.loaded["book.store"] = { clearCache = function(s, id) calls[#calls + 1] = "cache:" .. s .. ":" .. id end }
 package.loaded["source.toc"] = { drop = function(s, id) calls[#calls + 1] = "toc:" .. s .. ":" .. id end }
 package.loaded["book.books_db"] = { remove = function(s, id) calls[#calls + 1] = "book:" .. s .. ":" .. id end }
 Subscribe.remove({ id = 7 })
-Assert.eq(table.concat(calls, ","), "db:7,cache:subscribe:7,toc:subscribe:7,book:subscribe:7")
+-- 该源名下的阅读范围（未读 / 搜索，id 为 s<md5>）也是隐藏书，同样三步清掉
+Assert.eq(table.concat(calls, ","), "db:7,cache:subscribe:sabc,toc:subscribe:sabc,book:subscribe:sabc,"
+    .. "cache:subscribe:7,toc:subscribe:7,book:subscribe:7")
 
 -- 公众号默认全订：书架上的全加（无分组归「公众号」），取消过的不加回来，手动加回撤销记录。
 Subscribe.remove({ id = 8, kind = "mp", url = "MP_WXS_2" })
@@ -444,6 +446,39 @@ do
     download("http://192.168.1.5/p", "https://cdn.test/n.jpg")
     Assert.eq(#asked, 1)
     Assert.eq(answers[1], avif)
+
+    -- 超过单张上限（5MB）：当没图，不把整张攒进内存。真实流是异步的、收到第 6 MB 就 cancel 断流；
+    -- 这里的桩同步喂完，走 on_done 兜底，两条路都只回调一次 nil。
+    local stream_h
+    Req.stream = function(_opts, h)
+        stream_h = h
+        h.on_headers(200, {})
+        local chunk = string.rep("x", 1024 * 1024)
+        for _i = 1, 8 do h.on_data(chunk) end
+        h.on_done(nil)
+        return { cancel = function() end }
+    end
+    download("https://a.com/p", "https://cdn.test/huge.jpg")
+    Assert.eq(answers[1], false)
+    Assert.len(answers, 1)
+    -- 异步形态：先拿到句柄再喂数据，超限时主动 cancel
+    local stopped = false
+    Req.stream = function(_opts, h)
+        stream_h = h
+        return { cancel = function() stopped = true; h.on_done("cancelled") end }
+    end
+    download("https://a.com/p", "https://cdn.test/huge2.jpg")
+    stream_h.on_headers(200, {})
+    local fed = 0
+    for _i = 1, 8 do
+        if stopped then break end
+        fed = fed + 1
+        stream_h.on_data(string.rep("x", 1024 * 1024))
+    end
+    Assert.is_true(stopped, "超限断流")
+    Assert.eq(fed, 6, "第 6 MB 到就停，不收完 8 MB")
+    Assert.eq(answers[1], false)
+    Assert.len(answers, 1, "断流只回调一次")
     Req.stream, package.loaded["source.assets"] = real_stream, real_assets
 end
 

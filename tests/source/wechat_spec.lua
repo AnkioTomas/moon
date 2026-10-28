@@ -407,6 +407,39 @@ do
     fake_client.getProgressAsync = nil
 end
 
+-- 拉进度：精确定位拿不到正文（离线）或对不上时退回章级位置，不把整条进度丢掉。
+do
+    local src = WeChat.new()
+    local Toc = require("source.wechat.toc")
+    local Position = require("source.wechat.progress")
+    local old_index, old_read, old_load, old_localize = Toc.index, Toc.read, Position.loadAsync, Position.localize
+    Toc.index = function() return 3 end
+    Toc.read = function() return { [3] = { title = "第三章" } } end
+    fake_client.getProgressAsync = function(_, _, cb)
+        cb({ book = { chapterUid = 33, chapterIdx = 9, chapterOffset = 120, progress = 40 } })
+        return { cancel = function() end }
+    end
+    local identity = { source_id = "wechat", stable_id = "bp", chapter_idx = 1 }
+
+    Position.loadAsync = function(_identity, _chapter, cb) cb(nil, "offline") end
+    local pos, err
+    src:getProgressAsync(identity, function(p, e) pos, err = p, e end)
+    Assert.is_nil(err)
+    Assert.eq(pos.chapter_idx, 3, "正文拿不到：退回章级位置")
+    Assert.eq(pos.extra.chapter_uid, 33)
+    Assert.eq(pos.extra.chapter_offset, 120, "原文偏移保留给 push 复用")
+
+    Position.loadAsync = function(_identity, _chapter, cb) cb("<p>x</p>", "html") end
+    Position.localize = function() return nil, "无法定位阅读进度" end
+    pos, err = nil, nil
+    src:getProgressAsync(identity, function(p, e) pos, err = p, e end)
+    Assert.is_nil(err)
+    Assert.eq(pos.chapter_idx, 3, "定位失败：退回章级位置")
+
+    Toc.index, Toc.read, Position.loadAsync, Position.localize = old_index, old_read, old_load, old_localize
+    fake_client.getProgressAsync = nil
+end
+
 -- getDetailAsync：wire 经 mapper 转 Book，并把封面 URL 记进缓存供 coverRequest 用
 do
     local src = WeChat.new()

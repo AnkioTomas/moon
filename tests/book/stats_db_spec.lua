@@ -160,6 +160,24 @@ do
     Assert.eq(deleted, 1)
     Assert.eq(committed, 1)
 
+    -- 云端给了一条 0 秒 / 缺时间的坏记录：只跳过它，同批其它记录照常入库，不整批回滚
+    local bad = { source_id = "moon", stable_id = "b2", record_type = "book_day", page = 0,
+        start_time = 3000, duration = 0 }
+    local fresh = { source_id = "moon", stable_id = "b2", record_type = "book_day", page = 0,
+        start_time = 4000, duration = 30 }
+    local partial_mark = #calls
+    local partial = StatsDB.replaceSynced("moon", {}, { bad, fresh })
+    Assert.not_nil(partial, "坏记录不得让整批失败")
+    Assert.eq(partial.imported, 1)
+    Assert.eq(partial.skipped, 1)
+    local inserted, rolled_back = 0, false
+    for i = partial_mark + 1, #calls do
+        if calls[i].sql:find("INSERT INTO reading_stats", 1, true) then inserted = inserted + 1 end
+        if calls[i].sql:find("ROLLBACK", 1, true) then rolled_back = true end
+    end
+    Assert.eq(inserted, 1, "只写好记录")
+    Assert.is_false(rolled_back)
+
     local full_mark = #calls
     local emptied = StatsDB.replaceSynced("moon", { mode = "all_synced" }, {})
     Assert.eq(emptied.imported, 0)

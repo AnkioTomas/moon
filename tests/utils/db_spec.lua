@@ -114,6 +114,7 @@ do
                     end
                     return nil
                 end,
+                resultset = function() return nil, 0 end,
                 close = function() end,
             }
         end,
@@ -151,6 +152,14 @@ do
     Assert.eq(got_nil, nil)
     Assert.eq(got_number, 3)
     Assert.eq(calls[2].args[1], text)
+
+    -- query 零行：带参 / 不带参一律交空表，调用方不得把「没行」当成「查询失败」
+    local rows, n = DbBase.query("SELECT text FROM sample WHERE 0")
+    Assert.eq(type(rows), "table")
+    Assert.eq(n, 0)
+    rows, n = DbBase.query("SELECT text FROM sample WHERE text=? AND 0", text)
+    Assert.eq(type(rows), "table")
+    Assert.eq(n, 0)
 
     DbBase.close()
     clearMods()

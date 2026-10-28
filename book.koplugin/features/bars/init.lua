@@ -107,12 +107,26 @@ function Bars.setSystemTop(ui, enabled)
     if config.status_line == next_val and height_ok then
         return
     end
+    local cre = doc._document
+    local settings = require("utils.settings").get("features.bars")
     if enabled and not height_ok then
-        local cre = doc._document
+        -- 改的是 KOReader 全局设置：记下原值，关顶栏时还原，免得关 bars 后 CREngine 自带页眉时钟莫名开着。
+        if settings.cre_header_clock_prev == nil then
+            settings.cre_header_clock_prev = G_reader_settings:readSetting("cre_header_clock") or false
+            require("utils.settings").save("features.bars", settings)
+        end
         if cre and type(cre.setIntProperty) == "function" then
             cre:setIntProperty("window.status.clock", 1)
         end
         G_reader_settings:saveSetting("cre_header_clock", 1)
+    elseif not enabled and settings.cre_header_clock_prev ~= nil then
+        local prev = settings.cre_header_clock_prev
+        G_reader_settings:saveSetting("cre_header_clock", prev or nil)
+        if cre and type(cre.setIntProperty) == "function" then
+            cre:setIntProperty("window.status.clock", prev == 1 and 1 or 0)
+        end
+        settings.cre_header_clock_prev = nil
+        require("utils.settings").save("features.bars", settings)
     end
     local Event = require("ui/event")
     ui:handleEvent(Event:new("ConfigChange", "status_line", next_val))

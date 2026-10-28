@@ -103,6 +103,16 @@ do
     release.runs[#release.runs].done({ ok = true })
     settle()
     Assert.is_false(share.pause_auto_suspend, "keepalive 关了才放行")
+
+    -- autoturn / 设备层直接写 pause_auto_suspend = true（没有 keepalive）：cache 结束还原原值，不清成 false
+    share.pause_auto_suspend = true
+    local over = Tasks.enqueue(spec("awake-over", "cache", { restartable = true }))
+    settle()
+    Assert.is_true(share.pause_auto_suspend)
+    over.runs[#over.runs].done({ ok = true })
+    settle()
+    Assert.is_true(share.pause_auto_suspend, "别人置的不息屏不被清掉")
+    share.pause_auto_suspend = false
 end
 
 -- 同类并行；异类等执行权；队首是异类时后面的同类不插队。

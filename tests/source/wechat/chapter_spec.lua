@@ -179,6 +179,18 @@ do
 end
 
 do
+    -- 进度定位缓存写盘失败（磁盘满）：正文已到手，照常交出，不当成章节失败
+    local Position = require("source.wechat.progress")
+    local saved = Position.remember
+    Position.remember = function() return nil, "disk full" end
+    local payload, err
+    Chapter.fetchContentAsync("book", { idx = 1, uid = "chapter", title = "第一章" }, function(p, e) payload, err = p, e end)
+    Position.remember = saved
+    Assert.is_nil(err)
+    Assert.is_true(payload.document ~= nil)
+end
+
+do
     -- 注释章：锚点 id → 注文（去掉 [n] 序号与标签，保留实体转义）
     local notes = Chapter._noteTexts('<p class="noteContent"><a href="../Text/chapter32.xhtml#zw116" id="zhu116">[116]</a>当时多用沙子&amp;吸干墨迹。</p>'
         .. '<p>无锚点</p><p class="noteContent"><a id="zhu117">[117]</a></p>')

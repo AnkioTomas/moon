@@ -188,13 +188,20 @@ function SubDB.order(grp, ids)
     end)
 end
 
+--- 删源：条目、源行、以及它名下的阅读范围（范围 id 的工作目录 / 目录缓存 / 隐藏书行由调用方按返回值清）。
 ---@param id integer
+---@return string[] scope_ids 被删掉的范围 id
 function SubDB.remove(id)
+    local result, n = DB.query("SELECT id FROM sub_scopes WHERE feed=?;", id)
+    local scopes = {}
+    for i = 1, n do scopes[i] = result[1][i] end
     DB.transaction(function()
         DB.exec("DELETE FROM sub_items WHERE feed_id=?;", id)
+        DB.exec("DELETE FROM sub_scopes WHERE feed=?;", id)
         DB.exec("DELETE FROM sub_feeds WHERE id=?;", id)
         return true
     end)
+    return scopes
 end
 
 --- 写入条目：已有的（同 guid，或同标题 + 时间）只更新标题，保留已读。seq 递增：同一时间（网页链接无时间）的新条目排在旧的前面、彼此保持页面顺序。

@@ -90,8 +90,10 @@ local change_scheduled = false
 --- 休眠中：restartable 任务不启动。
 local suspended = false
 
---- 上次写入的 pause_auto_suspend 目标（cache 忙 或 其它插件的 keepalive，如翻页器不息屏）。
+--- 是否正撑着 pause_auto_suspend（cache 忙 或 其它插件的 keepalive，如翻页器不息屏）。
 local holding_awake = false
+--- 升旗前 pause_auto_suspend 的原值：autoturn、reMarkable / Sony 设备层也写 true，降旗时还原而不是清成 false。
+local awake_before = nil
 
 --- 缓存任务在跑 / 排队 / 退避时不让 KOReader 自动休眠；waiting（等网络 / 唤醒）不算，否则永远睡不下去。
 --- passive 任务自己的 `hold()` 说「先别撑」（例如队列因空间不足暂停）时同样放行。
@@ -111,7 +113,13 @@ local function syncAwake()
     if want == holding_awake then return end
     holding_awake = want
     logger.info("book tasks pause_auto_suspend", want, "cache", busy, "keepalive", share.keepalive == true)
-    share.pause_auto_suspend = want
+    if want then
+        awake_before = share.pause_auto_suspend
+        share.pause_auto_suspend = true
+    else
+        share.pause_auto_suspend = awake_before
+        awake_before = nil
+    end
 end
 
 --- 通知观察者；订阅者只是 UI，绝不拥有或取消任务。

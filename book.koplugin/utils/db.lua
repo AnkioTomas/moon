@@ -163,7 +163,7 @@ function DB.query(sql, ...)
     end
     -- 空结果集（分页翻过头、筛选没命中）不是错误：resultset() 在零行时返回 nil，
     -- 调用方会当成「查询失败」显示「加载失败」。成功但没行一律交空表。
-    if argc > 0 and result == nil then result = {} end
+    if result == nil then result = {} end
     if elapsed_ms >= SLOW_QUERY_MS then
         logger.dbg("book.db slow read", "rows", tonumber(nrows) or 0, "ms", elapsed_ms,
             sql, "params", unpack(args, 1, argc))

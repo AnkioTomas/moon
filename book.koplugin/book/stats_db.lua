@@ -264,21 +264,29 @@ local function mergedDailyRows(source_id, start_ts, end_ts)
     return rows
 end
 
+--- 记录是否可入库：返回解析后的起始时间与时长，无效返回 nil。
+--- 云端会话的 0 秒是合法值：Kavita 的会话是「两次进度写入之间」，只写一次（开书 / 关书各一次）
+--- 就是 0 秒，但推进的页数是真的。拒掉它，详情页「已读页数 / 上次阅读」会整段消失。
+--- 其它记录类型（本地逐页 / 日桶 / 总量）没有时长就没有意义，照旧拒收。
+---@param row BookStatsRow
+---@return integer|nil start_time
+---@return integer|nil duration
+function StatsDB.valid(row)
+    local start_time = tonumber(row.start_time)
+    local duration = tonumber(row.duration)
+    local zero_ok = row.record_type == SESSION_RECORD and (tonumber(row.event_count) or 0) > 0
+    if not start_time or not duration or (duration <= 0 and not zero_ok) then return nil end
+    return start_time, duration
+end
+
 --- 追加一条阅读统计。
 ---@param row BookStatsRow
 ---@param status integer|nil sync_status，缺省 PENDING
 ---@return boolean
 function StatsDB.add(row, status)
     local source_id = row.source_id
-    local start_time = tonumber(row.start_time)
-    local duration = tonumber(row.duration)
-    -- 云端会话的 0 秒是合法值：Kavita 的会话是「两次进度写入之间」，只写一次（开书 / 关书各一次）
-    -- 就是 0 秒，但推进的页数是真的。拒掉它，详情页「已读页数 / 上次阅读」会整段消失。
-    -- 其它记录类型（本地逐页 / 日桶 / 总量）没有时长就没有意义，照旧拒收。
-    local zero_ok = row.record_type == SESSION_RECORD and (tonumber(row.event_count) or 0) > 0
-    if not start_time or not duration or (duration <= 0 and not zero_ok) then
-        return false
-    end
+    local start_time, duration = StatsDB.valid(row)
+    if not start_time then return false end
     local event_count
     if row.record_type == SESSION_RECORD then
         -- 云端会话的 event_count 是源算好的页数（漫画 = 本次新推进的页数，其他格式 = pagesRead），
@@ -437,14 +445,15 @@ function StatsDB.replaceSynced(source_id, replace, rows)
             end
         end
         if not clearRange() then return nil end
+        -- 一条坏记录（云端给的 0 秒 / 缺时间）只跳过它；整批回滚会让这个源的统计永远拉不下来。
         local counts = { imported = 0, skipped = 0 }
         for _idx, row in ipairs(rows) do
-            local duplicate = StatsDB.exists(row)
-            if not StatsDB.add(row, StatsDB.SYNCED) then return nil end
-            if duplicate then
+            if not StatsDB.valid(row) then
                 counts.skipped = counts.skipped + 1
             else
-                counts.imported = counts.imported + 1
+                local key = StatsDB.exists(row) and "skipped" or "imported"
+                if not StatsDB.add(row, StatsDB.SYNCED) then return nil end
+                counts[key] = counts[key] + 1
             end
         end
         return counts

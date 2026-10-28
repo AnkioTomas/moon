@@ -46,3 +46,14 @@ Assert.eq(flushed, 0, "不落盘，由调用方按顺序 flush")
 local home = open("home")
 Assert.len(Legacy.migrate(home, { "home_recent_list_rows" }, open), 0)
 Assert.eq(home.data.home_recent_list_rows, 3)
+
+-- 改过名的键：v0.2.0 settings/keyboard.lua 的 enabled → ime 的 hide_key；新文件已有值优先
+open("keyboard").data = { enabled = false }
+local ime = open("ime")
+touched = Legacy.migrate(ime, { "hide_key", "enabled" }, open)
+Assert.eq(ime.data.hide_key, false, "关掉收起键的用户升级后仍是关")
+Assert.is_nil(ime.data.enabled, "ime 自己的 enabled 不从 keyboard 搬")
+Assert.is_nil(files.keyboard.data.enabled, "旧键删掉")
+Assert.len(touched, 1)
+Assert.eq(touched[1], files.keyboard)
+Assert.len(Legacy.migrate(ime, { "hide_key" }, open), 0, "第二次没东西可搬")

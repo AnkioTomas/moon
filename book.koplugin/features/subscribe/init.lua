@@ -23,7 +23,8 @@ local Subscribe = {}
 
 --- 网页 / 订阅源超过这么大不解析：Readability 要建整棵树，3MB 页面去掉脚本后树也就几 MB，再大不碰。
 local MAX_PAGE = 3 * 1024 * 1024
---- 单张图片上限。
+--- 单张图片上限：整张先攒在内存里，RSS 一张几十 MB 的原图会把 Kindle 拖进 OOM；超过就断流当没图。
+local MAX_IMAGE = 5 * 1024 * 1024
 --- RSS 自带正文去掉标签后超过这么多字节才当全文（约 500 个汉字）；否则当摘要、去抓原文。
 local FULL_TEXT = 1500
 --- 摘要结尾带这些就是被截断的（省略号 / 阅读全文 / WordPress 的 "appeared first on"），不管多长都去抓原文。
@@ -194,7 +195,7 @@ local function imageDownloader(referer)
         local function fetch(target, hops, converted)
             if not lan and Subscribe.privateHost(target) then return cb(nil) end
             local Request = require("http.request")
-            local chunks, code, headers = {}, nil, nil
+            local chunks, size, code, headers = {}, 0, nil, nil
             job.inner = Request.stream({
                 url = target,
                 headers = { ["Accept"] = "image/*", ["Referer"] = referer },
@@ -204,7 +205,13 @@ local function imageDownloader(referer)
                     code, headers = tonumber(status), hdrs
                 end,
                 on_data = function(chunk)
-                    if code and code >= 300 and code < 400 then return end
+                    if code and code >= 300 and code < 400 or size > MAX_IMAGE then return end
+                    size = size + #chunk
+                    if size > MAX_IMAGE then
+                        chunks = {}
+                        if job.inner then job.inner:cancel() end -- 断流即 on_done("cancelled")
+                        return
+                    end
                     chunks[#chunks + 1] = chunk
                 end,
                 on_done = function(err)
@@ -214,7 +221,7 @@ local function imageDownloader(referer)
                         if not loc or loc == "" or hops >= 5 then return cb(nil) end
                         return fetch(Text.absoluteUrl(target, Text.trim(loc)), hops + 1, converted)
                     end
-                    if err or code ~= 200 then return cb(nil) end
+                    if err or code ~= 200 or size > MAX_IMAGE then return cb(nil) end
                     local body = table.concat(chunks)
                     -- KOReader 解不了 AVIF / HEIC（不论地址后缀，CDN 常按 Accept 协商）：公网图交给 wsrv.nl 转成 JPEG。
                     if not lan and not converted and Image.unsupported(body) then
@@ -525,11 +532,15 @@ function Subscribe.remove(feed)
         s.mp_removed[feed.url] = true
         require("utils.settings").save("features.subscribe")
     end
-    SubDB.remove(feed.id)
-    require("book.store").clearCache("subscribe", tostring(feed.id))
-    require("source.toc").drop("subscribe", tostring(feed.id))
+    -- 源本身和它名下的阅读范围（未读 / 搜索）各是一本隐藏书：工作目录、目录缓存、
     -- 阅读时登记的隐藏书行（deleted=1）连同章节、注解等依附记录一并撕掉。
-    require("book.books_db").remove("subscribe", tostring(feed.id))
+    local ids = SubDB.remove(feed.id)
+    ids[#ids + 1] = tostring(feed.id)
+    for _idx, id in ipairs(ids) do
+        require("book.store").clearCache("subscribe", id)
+        require("source.toc").drop("subscribe", id)
+        require("book.books_db").remove("subscribe", id)
+    end
 end
 
 ---@param feed_id integer|string
