@@ -154,3 +154,54 @@ do
     Assert.eq(Setting.parseToken('{"token":"xyz","is_vip":"0"}'), "xyz")
     Assert.eq(Setting.parseToken("{坏"), "")
 end
+
+-- 书城浏览：默认节点是「频道:分类:子分类:排序」四段；三段正则会让 cat2/order 为 nil 拼崩。
+do
+    local classify_q
+    package.loaded["source.qimao.client"] = nil
+    package.preload["source.qimao.client"] = function()
+        return {
+            classifyOptionsAsync = function(cb)
+                cb({
+                    data = {
+                        filters = {
+                            order = { { value = "click", label = "点击" }, { value = "a", label = "全部" } },
+                            channel = { { value = "0", label = "男生" }, { value = "a", label = "全部" } },
+                        },
+                        category = {},
+                    },
+                })
+                return { cancel = function() end }
+            end,
+            classifyAsync = function(q, cb)
+                classify_q = q
+                cb({ data = { book_list = {}, page_data = { page = "1", page_size = "15", count = "0" } } })
+                return { cancel = function() end }
+            end,
+        }
+    end
+    package.loaded["source.browse"] = nil
+    package.preload["source.browse"] = function()
+        return {
+            group = function(items, selected) return { items = items, selected = selected } end,
+            pages = function(fetch, _limit, groups, cb)
+                fetch(1, function(books, err, more)
+                    cb({ data = books or {}, groups = groups, more = more }, err)
+                end)
+                return { cancel = function() end }
+            end,
+        }
+    end
+    package.loaded["source.qimao"] = nil
+    package.loaded["source.qimao.init"] = nil
+    local Source = require("source.qimao").new()
+    local res, err
+    Source:browseAsync({}, function(r, e) res, err = r, e end)
+    Assert.is_nil(err)
+    Assert.is_true(res ~= nil)
+    Assert.eq(classify_q.channel, "0")
+    Assert.eq(classify_q.category1, "a")
+    Assert.eq(classify_q.category2, "a")
+    Assert.eq(classify_q.order, "click")
+    Assert.eq(res.groups[1].selected, "0:a:a:click")
+end

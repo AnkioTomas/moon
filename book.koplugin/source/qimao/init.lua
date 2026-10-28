@@ -175,7 +175,11 @@ function Source:browseAsync(opts, cb)
     local step = 0
     local function load(options)
         step = step + 1
-        local channel, cat1, cat2, order = (opts.node or "0:a:a:click"):match("^(%w+):(%w+):(%w+)$")
+        -- 四段：频道:分类:子分类:排序（默认男生原创 / 全部 / 全部 / 点击量）
+        local channel, cat1, cat2, order = (opts.node or "0:a:a:click"):match("^(%w+):(%w+):(%w+):(%w+)$")
+        if not channel then
+            channel, cat1, cat2, order = "0", "a", "a", "click"
+        end
         local function chips(rows, id_of)
             local out = {}
             for _idx, row in ipairs(rows) do
