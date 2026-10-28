@@ -1,7 +1,7 @@
 --[[--
 WebDAV 客户端（HTTP Basic，仅异步）。
 
-@module koplugin.book.http.webdav
+@module koplugin.book.source.local.dav
 --]]
 
 local util = require("util")

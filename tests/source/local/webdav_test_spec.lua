@@ -72,7 +72,7 @@ end
 do
     local ok, err, _, client = run({})
     Assert.is_false(ok)
-    Assert.eq(err, "未配置 WebDAV 地址")
+    Assert.eq(err, "未配置网盘")
     Assert.len(client.dav.calls, 0)
 end
 

@@ -3,7 +3,7 @@
 # 用法：./tools/webdav.sh
 # 环境变量：DAV_PORT（默认 8088）、DAV_USER / DAV_PASS（默认 moon / moon）、
 #          DAV_DIR（默认仓库根 webdav/，git 忽略，可随时 rm -rf）
-# 只开 Basic 认证：插件 http/webdav.lua 只会 Basic。
+# 只开 Basic 认证：插件 source/local/dav.lua 只会 Basic。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 

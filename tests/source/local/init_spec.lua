@@ -47,6 +47,7 @@ package.preload["source.local.client"] = function()
     local Client = {}
     function Client.new() return Client end
     function Client.isRemote(id) return id:sub(1, 9) == "webdav://" end
+    function Client:hasCloud() return webdav end
     function Client:isWebdav() return webdav end
     function Client:configured() return true end
     function Client:webdavBookRoot() return dir end

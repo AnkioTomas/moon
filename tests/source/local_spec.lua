@@ -20,6 +20,7 @@ package.preload["source.local.client"] = function()
                 configured = function()
                     return type(client_cfg.path) == "string" and client_cfg.path ~= ""
                 end,
+                hasCloud = function() return client_cfg.webdav_url ~= nil end,
                 isWebdav = function() return client_cfg.webdav_url ~= nil end,
                 pushBookAsync = function(_, stable_id, cover, cb)
                     pushes[#pushes + 1] = { stable_id = stable_id, cover = cover }
