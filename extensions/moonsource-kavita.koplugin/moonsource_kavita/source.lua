@@ -277,10 +277,12 @@ end
 ---@param toc table[]|nil
 ---@param current_id string|nil 刚写过的那一卷（调用方手里有现成 fraction，不必回读库）
 ---@param current_fraction number|nil
----@param fallback number 目录不可得时的兜底值（关查看器 = 本卷 fraction，回填 = 服务端比例）
----@return number
-local function volumeAggregate(source_id, series_id, toc, current_id, current_fraction, fallback)
-    if type(toc) ~= "table" or #toc == 0 then return fallback end
+--- 缺任何一卷的本地行时返回 nil：**缺行不等于未读**（只在别的设备读过、卷行是后加的
+--- 都会缺），拿 0 填会把书架百分比压到远低于真实值（实测 27 卷只认识 7 卷 → 0.13 vs 0.65）。
+---@param fallback number 未使用；保留参数位给调用方的显式兜底
+---@return number|nil
+local function volumeAggregate(source_id, series_id, toc, current_id, current_fraction)
+    if type(toc) ~= "table" or #toc == 0 then return nil end
     local ProgressDB = require("book.progress_db")
     local finished, best = 0, 0
     for _idx, entry in ipairs(toc) do
@@ -290,7 +292,8 @@ local function volumeAggregate(source_id, series_id, toc, current_id, current_fr
             fraction = tonumber(current_fraction) or 0
         else
             local row = ProgressDB.get(source_id, series_id .. ":" .. id)
-            fraction = row and tonumber(row.fraction) or 0
+            if not row then return nil end
+            fraction = tonumber(row.fraction) or 0
         end
         if fraction >= 1 then
             finished = finished + 1
@@ -457,9 +460,11 @@ local function backfillRead(source_id, series_list)
                 -- 图书馆「最近阅读」按系列行排（点开再选卷），首页「当前阅读」仍取卷行。
                 -- 不写 page：整部书的聚合进度不是「读到第几页」。
                 -- 显式允许回落：旧版本存过非零 / 未来时间，MAX 会把它留住（US 24）。
+                -- 卷行齐全才用卷级聚合；否则退回服务端比例（宁可两套口径，也不要低报）。
+                local aggregate = volumeAggregate(source_id, stable_id, toc)
+                    or math.min(1, read / pages)
                 if ProgressDB.upsertRemote(source_id, stable_id, {
-                    fraction = volumeAggregate(source_id, stable_id, toc, nil, nil,
-                        math.min(1, read / pages)),
+                    fraction = aggregate,
                     updated_at = at or 0,
                 }, { reset_updated_at = true }) then
                     changed = changed + 1
@@ -1339,11 +1344,19 @@ function Source:openEntry(ref, entry, toc, title, cb)
         rememberVolume(item)
         -- 容器行做聚合，并带上「刚读过」的时间戳：图书馆「最近阅读」按系列行排，
         -- 读完一卷立刻就能浮上去，不必等下一次同步。位置仍只在卷行上。
-        ProgressDB.upsertRemote(self.id, series_id, {
-            fraction = volumeAggregate(self.id, series_id, toc,
-                tostring(item.chapterId or item.uid), fraction, fraction),
-            updated_at = os.time(),
-        }, { reset_updated_at = true })
+        -- 聚合算不出来（本地缺卷行）时保留原值、只刷新时间，绝不拿「缺行 = 未读」低报。
+        local aggregate = volumeAggregate(self.id, series_id, toc,
+            tostring(item.chapterId or item.uid), fraction)
+        if not aggregate then
+            local container = ProgressDB.get(self.id, series_id)
+            aggregate = container and tonumber(container.fraction)
+        end
+        if aggregate then
+            ProgressDB.upsertRemote(self.id, series_id, {
+                fraction = aggregate,
+                updated_at = os.time(),
+            }, { reset_updated_at = true })
+        end
     end
 
     ---@param item table

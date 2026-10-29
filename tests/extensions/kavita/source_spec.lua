@@ -1457,7 +1457,8 @@ do
 
     -- on_close：卷行写物理页 / 物理总数 / 现在；容器行写聚合 fraction + 最近阅读时间。
     written, remembered = {}, {}
-    progress["60:6000"] = nil
+    -- 缺行不等于未读：卷行齐全（哪怕值是 0）才算得出聚合。
+    progress["60:6000"] = { fraction = 0 }
     opened[1].on_close(10, 20)
     local volume = written["60:6001"]
     Assert.eq(volume.page, 10, "卷行是唯一真实位置：物理页")
@@ -1485,13 +1486,18 @@ do
     Assert.eq(written["60"].fraction, 1, "两卷都读完 = 100%")
     progress["60:6000"] = nil
 
-    -- 目录拿不到：容器退「最靠后卷的 fraction」。
+    -- 目录拿不到 / 本地缺卷行：算不出聚合就不动容器（缺行 ≠ 未读，低报比不更新更糟）。
     written, opened = {}, {}
+    progress["60"] = nil
     reply = function() return {} end
     local solo = open(toc[2], NO_TOC)
     Assert.is_true(solo.meta and solo.meta.handled)
     opened[1].on_close(10, 20)
-    Assert.eq(written["60"].fraction, 0.5, "toc 缺失时容器退本卷 fraction")
+    Assert.is_nil(written["60"], "聚合算不出来时不写容器行（保留原值）")
+    progress["60"] = { fraction = 0.4 }
+    opened[1].on_close(10, 20)
+    Assert.eq(written["60"].fraction, 0.4, "有旧聚合就只刷新时间，不低报")
+    progress["60"] = nil
 
     -- 已有卷行：不重写元数据。
     books["60:6001"] = { stable_id = "60:6001", title = "已有" }
@@ -1805,7 +1811,8 @@ Assert.is_nil(written["700"].page, "epub 不写页码：Kavita 的页是 spine")
 -- 按 UTC 解析会存成 1770091506（8 小时后的未来），刚读完的书就会被它压在下面。
 Assert.eq(written["700"].updated_at, 1770062706, "latestReadDate 按服务器时区换成真 epoch")
 Assert.eq(written["701"].fraction, 1, "读完的写满比例，进步进「已读」")
-Assert.eq(written["710"].fraction, 0.15, "容器行按卷级聚合：(0 读完 + 在读卷 0.3) / 2 卷")
+Assert.eq(written["710"].fraction, 0.3,
+    "本地缺「下」卷行 → 退回服务端 pagesRead/pages（缺行不等于未读，宁可两套口径也不低报）")
 Assert.eq(written["710"].updated_at, 1770062706, "容器行带最近阅读时间，图书馆按系列行排序")
 Assert.eq(written_opts["710"] and written_opts["710"].reset_updated_at, true,
     "回填聚合要能回落时间戳（旧版本存过未来时间 / 0）")
@@ -1824,12 +1831,19 @@ Assert.eq(vol_result.pulled - vol_again.pulled, 1, "已对齐的卷行不再重�
 dropped = {}
 run("syncBooksAsync", { force = true })
 Assert.eq(#dropped, 0, "容器行保留（离线读过的量级回连后不被抹回未读）")
+-- 卷行齐全时容器行按卷级聚合（不是服务端页比）：(0 读完 + 在读卷 0.3) / 2 卷 = 0.15
+progress["710:7102"] = { fraction = 0 }
+written = {}
+run("syncBooksAsync", { force = true })
+Assert.eq(written["710"].fraction, 0.15, "卷行齐全 → 容器行按卷级聚合")
+progress["710:7102"] = nil
+
 -- 目录缓存过期不能让身份翻回容器行：过期目录照样算数，否则容器行会重新拿到
 -- 单书位置（整部书当成一卷）而不是聚合。
 toc_fresh, written = false, {}
 run("syncBooksAsync", { force = true })
 Assert.eq(written["710"].updated_at, 1770062706, "过期目录也认卷身份：容器行仍写系列级时间")
-Assert.eq(written["710"].fraction, 0.15, "容器行仍按卷级聚合")
+Assert.eq(written["710"].fraction, 0.3, "目录过期时同样退回服务端比例（仍缺「下」卷行）")
 Assert.is_nil(written["710"].page, "容器行只写聚合 fraction")
 toc_fresh = true
 written = {}
