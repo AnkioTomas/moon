@@ -1,5 +1,5 @@
 --[[--
-章节源共用目录缓存：持久化、TTL 与源隔离。
+章节源共用目录缓存：持久化、不做时间保鲜、源隔离。
 
 @module tests.source.toc_spec
 --]]
@@ -26,6 +26,9 @@ package.preload["book.books_db"] = function()
             rows[source_id .. ":" .. stable_id] = { payload = payload, at = now }
             return true
         end,
+        clearToc = function(source_id, stable_id)
+            rows[source_id .. ":" .. stable_id] = nil
+        end,
     }
 end
 package.preload["json"] = function()
@@ -48,14 +51,12 @@ local before = reads
 Assert.eq(Toc.index("jdread", "book-1", "chapter-1"), 1)
 Assert.eq(reads, before)
 
-do -- stale：过了 TTL 仍能取到（订阅章号基线），普通读取仍判过期
+do -- 有缓存就一直认：时间推进后仍可读（不再做 TTL 保鲜）
     Assert.is_true(Toc.put("subscribe", "9", { { idx = 1, uid = "g1" } }))
-    now = now + Toc.TTL + 1
-    Assert.is_nil(Toc.read("subscribe", "9"))
-    Assert.eq(Toc.read("subscribe", "9", true)[1].uid, "g1")
-    Assert.is_nil(Toc.uid("subscribe", "9", 1))
-    Assert.eq(Toc.uid("subscribe", "9", 1, true), "g1")
-    now = now - Toc.TTL - 1
+    now = now + 7 * 24 * 60 * 60
+    Assert.eq(Toc.read("subscribe", "9")[1].uid, "g1")
+    Assert.eq(Toc.uid("subscribe", "9", 1), "g1")
+    Assert.eq(Toc.read("subscribe", "9", true)[1].uid, "g1", "旧 stale 参数仍兼容")
 end
 
 do
@@ -144,8 +145,23 @@ do
     package.loaded["book.books_db"].setToc = setToc
 end
 
+-- 缓存池被「many」用例冲掉后仍能从库读回；时间推进不导致 miss。
+Toc.clear()
+Assert.eq(Toc.read("jdread", "book-1")[1].uid, "chapter-1")
 now = now + 6 * 60 * 60
-Assert.is_nil(Toc.read("jdread", "book-1"))
-Assert.is_true(reads > before)
+Assert.eq(Toc.read("jdread", "book-1")[1].uid, "chapter-1", "目录不做时间保鲜")
+
+do -- 开书拉新节流：成功看 fetched_at，失败看 last_attempt
+    Toc.clear()
+    Assert.is_true(Toc.allowRefresh("jdread", "book-1"), "间隔外允许拉新")
+    Assert.is_false(Toc.allowRefresh("jdread", "book-1"), "同间隔内第二次拒绝（失败也记尝试）")
+    now = now + Toc.REFRESH_INTERVAL + 1
+    Assert.is_true(Toc.allowRefresh("jdread", "book-1"), "过了间隔再允许")
+    Toc.clear()
+    Assert.is_true(Toc.put("jdread", "throttle", { { idx = 1, uid = "t1" } }))
+    Assert.is_false(Toc.allowRefresh("jdread", "throttle"), "刚 put 的目录不立刻再拉")
+    Toc.drop("jdread", "throttle")
+    Assert.is_true(Toc.allowRefresh("jdread", "throttle"), "drop 清掉尝试记录")
+end
 
 os.time = original_time

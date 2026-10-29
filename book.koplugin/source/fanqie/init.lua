@@ -223,13 +223,13 @@ function Source:getDetailAsync(identity, cb)
     return h
 end
 
-function Source:loadTocAsync(identity, cb)
+--- 强制拉目录并写回；失败由调用方继续用旧缓存。
+---@param identity BookIdentity
+---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:refreshTocAsync(identity, cb)
     local Toc = require("source.toc")
     local Content = require("source.fanqie.content")
-    local cached = Toc.read(self.id, identity.stable_id)
-    if cached and #cached > 0 then
-        return Base.defer(cb, cached)
-    end
     local h = handle()
     h.job = self.client:fetchChapterDirectoryAsync(identity.stable_id, function(wire, err)
         if h.cancelled then return end
@@ -257,6 +257,14 @@ function Source:loadTocAsync(identity, cb)
         cb(toc)
     end)
     return h
+end
+
+function Source:loadTocAsync(identity, cb)
+    local cached = require("source.toc").read(self.id, identity.stable_id)
+    if cached and #cached > 0 then
+        return Base.defer(cb, cached)
+    end
+    return self:refreshTocAsync(identity, cb)
 end
 
 local function comicPath(identity, chapter)

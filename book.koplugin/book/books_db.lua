@@ -23,7 +23,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
     普通同步与详情只补缺的键；强制刷新（reconcile force）与本地写入（扫盘 / 刮削）覆盖传入的键。
     rating 是 { score, by } 整体，分数和来源不会拆开合并。
   - 书架脏位只在单条 push 成功时清，禁止整源盲清。
-  - toc 是不透明 JSON，TTL 由调用方经 getToc(max_age) 解释，过期不删列。
+  - toc 是不透明 JSON；getToc 可选 max_age，章节源目录不做时间保鲜（有就一直用，开书后台静默拉新）。
 跨表：只读 JOIN chapters（已下载口径）。改名 / 收编在同一事务里调核心依附表的 moveIdentity，
 再经 utils.event 发 book_identity_changed 给 feature 的表；撕墓碑同理调 removeIdentity 再发 book_removed；
 手动已读调 ProgressDB.markFinished。

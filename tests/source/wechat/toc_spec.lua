@@ -107,8 +107,15 @@ do
     Assert.is_false(Toc.put("wechat", "failed", list))
     Assert.is_nil(Toc.read("wechat", "failed"))
     writes = true
+    -- put 用假 encode，clear 后回库解不开；这里直接灌一份合法 payload。
+    store["b3"] = {
+        payload = '[{"idx":1,"uid":"p1"},{"idx":2,"uid":"p2"},{"idx":3,"uid":"p3"}]',
+        at = now,
+    }
+    Toc.clear()
+    Assert.eq(Toc.read("wechat", "b3")[1].uid, "p1")
     now = now + 6 * 60 * 60
-    Assert.is_nil(Toc.read("wechat", "b3"), "过期内存缓存不能绕过数据库 TTL")
+    Assert.eq(Toc.read("wechat", "b3")[1].uid, "p1", "目录不做时间保鲜，旧缓存仍可用")
 end
 
 os.time = original_time
