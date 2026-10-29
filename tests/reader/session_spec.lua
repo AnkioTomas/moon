@@ -797,6 +797,37 @@ do
     resolved_source = nil
 end
 
+-- 没有 refreshTocAsync：有目录也走 loadTocAsync(..., force)，避免起点类源永久卡旧目录。
+do
+    stored_toc.chapters = { { idx = 1, title = "旧一" }, { idx = 2, title = "旧二" } }
+    toc_allow_refresh = true
+    local forced
+    local source = {
+        type = "chapter",
+        isTocCurrent = function() return true end,
+        loadTocAsync = function(_, _, cb, force)
+            forced = force
+            cb({ { idx = 1, title = "新一" }, { idx = 2, title = "新二" }, { idx = 3, title = "新三" } })
+            return { cancel = function() end }
+        end,
+        prefetchChaptersAsync = function()
+            return { cancel = function() end }
+        end,
+        putProgressAsync = default_source.putProgressAsync,
+        syncProgressAsync = default_source.syncProgressAsync,
+        syncNotesAsync = default_source.syncNotesAsync,
+        syncStatsAsync = default_source.syncStatsAsync,
+    }
+    resolved_source = source
+    local plugin = mkPlugin("/cache/1.html")
+    Session.onReaderReady(plugin)
+    Assert.is_true(forced, "无 refresh 时必须 force 跳过缓存")
+    Assert.len(Session.toc(), 3)
+    Assert.eq(Session.toc()[1].title, "新一")
+    Session.onCloseDocument(plugin)
+    resolved_source = nil
+end
+
 -- 节流：allowRefresh 为假时不打网。
 do
     stored_toc.chapters = { { idx = 1, title = "一" } }

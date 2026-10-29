@@ -213,11 +213,11 @@ function Source:getDetailAsync(identity, cb)
     return SourceBase.defer(cb, identity.book or require("book.books_db").get(self.id, identity.stable_id))
 end
 
-function Source:loadTocAsync(identity, cb)
-    local cached = Toc.read(self.id, identity.stable_id)
-    if cached and #cached > 0 then
-        return SourceBase.defer(cb, cached)
-    end
+--- 强制拉目录并写回；失败由调用方继续用旧缓存。
+---@param identity BookIdentity
+---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
+---@return { cancel: fun() }
+local function fetchTocAsync(self, identity, cb)
     local cancelled, job = false, nil
     job = Client.chaptersAsync(identity.stable_id, function(wire, err)
         if cancelled then return end
@@ -232,6 +232,22 @@ function Source:loadTocAsync(identity, cb)
         job.cancel()
     end }
 end
+
+---@param identity BookIdentity
+---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
+---@param force boolean|nil 真=跳过缓存强制拉
+---@return { cancel: fun() }
+function Source:loadTocAsync(identity, cb, force)
+    if not force then
+        local cached = Toc.read(self.id, identity.stable_id)
+        if cached and #cached > 0 then
+            return SourceBase.defer(cb, cached)
+        end
+    end
+    return fetchTocAsync(self, identity, cb)
+end
+
+Source.refreshTocAsync = fetchTocAsync
 
 ---@return ChapterFetchContent
 local function contentFetcher()
