@@ -251,13 +251,13 @@ function Detail:toggleRead()
     self:reload()
 end
 
---- 删除本书：先选软删除（书留库里、默认隐藏）还是彻底删除。
+--- 删除本书：先选软删除（清正文、进度划线可恢复）还是彻底删除。
 function Detail:deleteBook()
     Sheet:new{
         title = _("删除"),
         items = {
-            { text = _("软删除（隐藏，数据保留，可恢复）"), callback = function() self:softDelete() end },
-            { text = _("彻底删除（连同书架条目与进度一并移除）"), callback = function() self:hardDelete() end },
+            { text = _("软删除（清本地正文，进度划线可恢复）"), callback = function() self:softDelete() end },
+            { text = _("彻底删除（进度、划线与书架一并清除）"), callback = function() self:hardDelete() end },
         },
     }:show()
 end
@@ -266,7 +266,7 @@ end
 function Detail:hardDelete()
     local book = self.book
     Confirm:new{
-        text = T(_("确定删除《%1》？"), Book.title(book)),
+        text = T(_("彻底删除《%1》？\n\n会清理：本地文件与缓存、书架条目、阅读进度、划线与笔记、统计\n有云端时下次同步也会从远端删除，无法从「软删除」筛选恢复。"), Book.title(book)),
         ok_text = _("删除"),
         ok_callback = function()
             local source = bookOwnerSource(book, self.source)
@@ -329,12 +329,12 @@ function Detail:clearCache()
     purgeLocal(self, false, _("清理《%1》的本地缓存？\n正文、章节与图片需重新下载。"), _("清理"), _("缓存已清理"))
 end
 
---- 软删除：清掉本地文档，书留在库里（元数据、封面、进度、标注都在），默认不在书架显示，
+--- 软删除：清掉本地正文（封面留着），书留在库里（元数据、进度、标注都在），默认不在书架显示，
 --- 在书架筛选「软删除」里能找到并恢复。纯本地操作，不动远端。
 function Detail:softDelete()
     local book = self.book
     Confirm:new{
-        text = T(_("软删除《%1》？\n本地文档会被清理，书从书架隐藏，数据保留，可在筛选「软删除」中恢复。"), Book.title(book)),
+        text = T(_("软删除《%1》？\n\n会清理：本地正文与章节缓存\n会保留：书目、封面、阅读进度、划线与笔记\n书从书架隐藏，筛选「软删除」可恢复；不影响云端。"), Book.title(book)),
         ok_text = _("软删除"),
         ok_callback = function()
             if require("workers.tasks").get(cacheKey(book)) then

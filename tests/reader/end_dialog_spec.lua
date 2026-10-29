@@ -49,8 +49,8 @@ local function findItem(text)
         if item.text == text then return item end
     end
 end
-local function deleteItem() return findItem("彻底删除（连同书架条目与进度一并移除）") end
-local function softItem() return findItem("软删除（隐藏，数据保留，可恢复）") end
+local function deleteItem() return findItem("彻底删除（进度、划线与书架一并清除）") end
+local function softItem() return findItem("软删除（清本地正文，进度划线可恢复）") end
 
 -- 点「删除本书」只弹确认，不删
 do
