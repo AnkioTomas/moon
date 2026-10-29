@@ -99,6 +99,23 @@ local function loadCursor(cursor_path)
     return data
 end
 
+--- 断点已取完的页数。正文已齐返回 ``page_count``；没有可用断点返回 0。
+---@param dir string
+---@param page_count integer 当前文档页数（页数变了断点作废）
+---@return integer
+function Extract.donePages(dir, page_count)
+    page_count = tonumber(page_count) or 0
+    if page_count < 1 then return 0 end
+    if Extract.donePath(dir) then return page_count end
+    if not Extract.hasCheckpoint(dir) then return 0 end
+    local _part, _done, cursor_path = paths(dir)
+    local data = loadCursor(cursor_path)
+    if data and data.total == page_count and data.done > 0 and data.done < page_count then
+        return data.done
+    end
+    return 0
+end
+
 --- 相对上一页去重边界行，写入文件。
 --- 返回值 previous 只留末行：去重只靠它，整页挂在闭包里会让长书取字越跑可用内存越少。
 ---@param file file*
