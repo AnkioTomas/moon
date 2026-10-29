@@ -240,18 +240,18 @@ function Chapter.afterBootstrap(plugin, session)
     if not (chapter.open_refresh or not has_toc or not format_ok or near_end) then
         return
     end
-    -- 有强制刷新走强制；没有则仅在缺目录时 load（load 命中缓存不会打网）。
+    -- 有 refreshTocAsync 走强制；否则 loadTocAsync(..., true) 跳过缓存打网。
+    -- 以前「有目录且无 refresh」直接 return：起点等源永久卡在旧目录，「已是最后一页」。
     local refresh = source.refreshTocAsync
     if type(refresh) ~= "function" then
-        if has_toc then
+        local load = source.loadTocAsync
+        if type(load) ~= "function" then
             chapter.open_refresh = nil
             return
         end
-        refresh = source.loadTocAsync
-    end
-    if type(refresh) ~= "function" then
-        chapter.open_refresh = nil
-        return
+        refresh = function(src, id, cb)
+            return load(src, id, cb, true)
+        end
     end
     -- 节流：刚拉过 / 刚试过就跳过；挡住时保留 open_refresh，下次切章再试。
     if not require("source.toc").allowRefresh(identity.source_id, identity.stable_id) then

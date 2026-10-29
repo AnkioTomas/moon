@@ -249,13 +249,21 @@ function Source:getDetailAsync(identity, cb)
         end }
 end
 
-function Source:loadTocAsync(identity, cb)
-    local cached = Toc.read(identity.source_id, identity.stable_id)
-    if cached and #cached > 0 then
-        return SourceBase.defer(cb, cached)
+---@param identity BookIdentity
+---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
+---@param force boolean|nil 真=跳过缓存强制拉
+---@return { cancel: fun() }|nil
+function Source:loadTocAsync(identity, cb, force)
+    if not force then
+        local cached = Toc.read(identity.source_id, identity.stable_id)
+        if cached and #cached > 0 then
+            return SourceBase.defer(cb, cached)
+        end
     end
     return fetchTocAsync(self, identity, cb)
 end
+
+Source.refreshTocAsync = fetchTocAsync
 
 --- 不看 TTL 的目录：离线打开已下载章节用，过期目录也能把章号换成 uuid。
 ---@param identity BookIdentity
