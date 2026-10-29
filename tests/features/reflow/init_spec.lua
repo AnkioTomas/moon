@@ -28,6 +28,12 @@ package.preload["features.reflow.extract"] = function()
             cb(extract_tmp)
             return { cancel = function() end }
         end,
+        -- 成功收尾清断点：测试里的临时正文一并删掉，对齐工作目录 extract.txt 被清掉的行为。
+        clearCheckpoint = function()
+            if extract_tmp then os.remove(extract_tmp) end
+        end,
+        hasCheckpoint = function() return false end,
+        donePath = function() return nil end,
     }
 end
 local sidecars = {}

@@ -4,10 +4,11 @@
 文件（`<书的工作目录>/reflow/`，随清缓存 / 删书一起清掉）：
 - `book.epub`：排版版。
 - `meta.json`：`{ origin, file }`，排版版与它的原书路径。
+- `extract.txt` / `extract.txt.part` + `extract.cursor`：非 TXT 取字断点；取消 / 休眠可续，EPUB 成功后清掉。
 
 文字来源：TXT 直接读文件（保留原始换行，章节识别最准）；其余格式从打开的文档逐页取字（见 extract），
-流式文档与带文字层的 PDF/DjVu 都行。读文件、章节识别、打包都在子进程里（整本书在 UI 线程上要跑几十秒），
-取字、识别、打包串成一个后台任务，不再预览目录确认。
+流式文档与带文字层的 PDF/DjVu 都行。读文件、章节识别、打包都在子进程里；取字仍在 UI 线程分批
+（文档对象出不了主进程），批时长约 280ms。取字、识别、打包串成一个可转后台的 convert 任务。
 章节：原文档自带目录（`ui.toc`）的标题整行命中即切章，没有目录或标题对不上的再按常见章节写法识别。
 
 身份：排版版是同一本书的另一个文件，books.path 不动。开书时按 meta.json 解析回同一身份，
@@ -92,8 +93,9 @@ end
 
 --- 取全文、识别章节、打包成 EPUB 写进工作目录并记下 meta，完成后回调排版版路径。原书不动。
 --- 目录标题与原书路径开头就取好；TXT 由子进程读原文件，其余格式在 UI 线程上分批取字（批间让出输入），
---- 取字中途关书报「文档已关闭」。打包先写 `book.epub.part` 成功再改名（html2epub）：
---- 取消停掉当前一步并删掉半截 .part，已有的排版版不受影响。可取消，取消后 cb 不再触发。
+--- 取字断点落在工作目录（取消 / 休眠可续）；取字中途关书报「文档已关闭」。
+--- 打包先写 `book.epub.part` 成功再改名（html2epub）：取消停掉当前一步并删掉半截 .part，
+--- 已有的排版版与已取完的正文不受影响。可取消，取消后 cb 不再触发。
 ---@param ui table ReaderUI，正在读原书
 ---@param identity BookIdentity
 ---@param cb fun(path: string|nil, err: string|nil)
@@ -101,6 +103,7 @@ end
 ---@return { cancel: fun() }
 function Reflow.runAsync(ui, identity, cb, on_progress)
     local Paths = require("utils.paths")
+    local Extract = require("features.reflow.extract")
     local origin = ui.document.file
     local opts = buildOpts(origin, identity, tocHeadings(ui))
     local dir = workDir(identity)
@@ -125,26 +128,27 @@ function Reflow.runAsync(ui, identity, cb, on_progress)
             os.remove(meta_part)
             return cb(nil, err_rename)
         end
+        -- EPUB 已成：正文断点可清，省空间；下次「重新排版」会再取。
+        Extract.clearCheckpoint(dir)
         cb(dest)
     end
 
     ---@param text_file string|nil 提取出的临时 txt；nil 时子进程读原文件（TXT）
     local function build(text_file)
         if cancelled then
-            if text_file then os.remove(text_file) end
+            -- 工作目录断点留下；取消后晚到的缓存临时文件丢掉。
+            if text_file and text_file:sub(1, #dir + 1) ~= dir .. "/" then
+                os.remove(text_file)
+            end
             return
         end
         Paths.ensureBookWork(identity.stable_id, identity.source_id)
         local ok, err = Paths.ensureDir(dir)
-        if not ok then
-            if text_file then os.remove(text_file) end
-            return cb(nil, err)
-        end
+        if not ok then return cb(nil, err) end
         -- 全文只落盘，不进主进程字符串；子进程自己读。source 仍是原书路径（推断书名）。
         opts.text = nil
         opts.text_file = text_file
         current = Text2Epub.build(opts, function(ok_build, build_err)
-            if text_file then os.remove(text_file) end
             finish(ok_build, build_err)
         end, on_progress)
     end
@@ -152,19 +156,17 @@ function Reflow.runAsync(ui, identity, cb, on_progress)
     if origin:lower():match("%.txt$") then
         build(nil)
     else
-        current = require("features.reflow.extract").run(ui, function(text_file, err)
+        current = Extract.run(ui, function(text_file, err)
             if not text_file then return cb(nil, err) end
             build(text_file)
-        end, on_progress)
+        end, on_progress, { dir = dir })
     end
     return { cancel = function()
         cancelled = true
         if current then current.cancel() end
         os.remove(dest .. ".part")
-        if opts.text_file then
-            os.remove(opts.text_file)
-            opts.text_file = nil
-        end
+        -- 不删 kept_text / 工作目录断点：下次接着取或跳过取字。
+        opts.text_file = nil
     end }
 end
 
@@ -248,11 +250,14 @@ end
 --- 完成时若还在读原书就询问打开，否则只提示。
 ---@param ui table ReaderUI，正在读原书
 ---@param identity BookIdentity
-local function start(ui, identity)
+---@param wipe boolean|nil 真则清掉取字断点，整本重来
+local function start(ui, identity, wipe)
     local Toast = require("ui.themes.widgets.toast")
     local origin = ui.document.file
+    local dir = workDir(identity)
 
     local function run()
+        if wipe then require("features.reflow.extract").clearCheckpoint(dir) end
         require("workers.ui.task_dialog").start{
             key = taskKey(identity),
             kind = "convert",
@@ -260,7 +265,10 @@ local function start(ui, identity)
             restartable = true,
             run = function(report, done)
                 return Reflow.runAsync(ui, identity, function(path, err)
-                    done({ ok = path ~= nil, file = path, err = err })
+                    -- 取字有进展（断点 / 已完成正文）时失败不算白跑，队列可立刻续。
+                    local progressed = require("features.reflow.extract").hasCheckpoint(dir)
+                        or require("features.reflow.extract").donePath(dir) ~= nil
+                    done({ ok = path ~= nil, file = path, err = err, progressed = progressed })
                 end, report)
             end,
             on_done = function(result)
@@ -288,9 +296,13 @@ local function start(ui, identity)
         run()
         return
     end
+    local Extract = require("features.reflow.extract")
+    local resume = not wipe and (Extract.hasCheckpoint(dir) or Extract.donePath(dir))
     require("ui.themes.widgets.confirm"):new{
-        text = _("只保留文字并重新识别章节，图片、脚注和原排版会丢失；排版版另存，原书保留不变。继续？"),
-        ok_text = _("继续"),
+        text = resume
+            and _("检测到上次未完成的排版，将从断点继续。图片、脚注和原排版仍会丢失；排版版另存，原书保留不变。")
+            or _("只保留文字并重新识别章节，图片、脚注和原排版会丢失；排版版另存，原书保留不变。继续？"),
+        ok_text = resume and _("继续排版") or _("继续"),
         ok_callback = run,
     }:show()
 end
@@ -300,7 +312,8 @@ end
 function Reflow.show(ui)
     local identity = require("reader.session").current().identity
     local fraction = require("reader.session").current().fraction
-    local meta = readMeta(workDir(identity))
+    local dir = workDir(identity)
+    local meta = readMeta(dir)
     if meta and ui.document.file == meta.file then
         switchTo(ui, identity, meta.origin, fraction)
         return
@@ -310,13 +323,15 @@ function Reflow.show(ui)
         require("workers.ui.task_dialog").follow(running)
         return
     end
-    if not (meta and meta.origin == ui.document.file and isFile(meta.file)) then
-        start(ui, identity)
+    local Extract = require("features.reflow.extract")
+    local has_epub = meta and meta.origin == ui.document.file and isFile(meta.file)
+    if not has_epub then
+        start(ui, identity, false)
         return
     end
     require("ui.themes.widgets.sheet"):new{ title = _("优化排版"), items = {
         { text = _("打开排版版"), callback = function() switchTo(ui, identity, meta.file, fraction) end },
-        { text = _("重新排版"), callback = function() start(ui, identity) end },
+        { text = _("重新排版"), callback = function() start(ui, identity, true) end },
     } }:show()
 end
 

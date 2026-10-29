@@ -13,10 +13,12 @@ package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["device"] = function()
     return { screen = { getWidth = function() return 600 end, getHeight = function() return 800 end } }
 end
+package.preload["json"] = function() return require("support.json_stub") end
 -- 假时钟（毫秒）：每页耗时由用例的 doc.cost 决定，分批可预测
 local clock = 0
 package.preload["utils.perf"] = function() return { now = function() return clock end } end
 
+package.loaded["features.reflow.extract"] = nil
 local Extract = require("features.reflow.extract")
 
 local function ignore() end
@@ -163,9 +165,9 @@ do
     Assert.is_nil(err)
     Assert.eq(#pending, 0)
 
-    -- 页慢：一页就用完一批，下一批排队，每批报一次已取页数
+    -- 页慢：一页就用完一批（cost ≥ BATCH_MS），下一批排队，每批报一次已取页数
     ui = rollingUi(3, { "一", "二", "三" })
-    ui.document.cost = 100
+    ui.document.cost = 280
     local callbacks = 0
     local reported
     local handle = Extract.run(ui, function() callbacks = callbacks + 1 end,
@@ -184,7 +186,7 @@ do
     -- 中途换了文档：报错收尾，不去碰已关闭文档的阅读位置
     text, err = nil, nil
     ui = rollingUi(3, { "一", "二", "三" })
-    ui.document.cost = 100
+    ui.document.cost = 280
     local doc = ui.document
     Extract.run(ui, function(t, e) text, err = t, e end, ignore)
     tick()
@@ -196,4 +198,51 @@ do
     Assert.eq(#pending, 0)
 
     UIManager.scheduleIn, UIManager.nextTick = original_in, original_tick
+end
+
+-- 工作目录断点：取消保留，下次同页数接着取；完整成品直接复用
+do
+    local UIManager = require("ui/uimanager")
+    local original_in = UIManager.scheduleIn
+    local pending = {}
+    UIManager.scheduleIn = function(_self, _delay, fn) pending[#pending + 1] = fn end
+    local function tick() table.remove(pending, 1)() end
+    local dir = os.tmpname() .. "_reflow"
+    require("libs/libkoreader-lfs").mkdir(dir)
+
+    local ui = rollingUi(3, { "一", "二", "三" })
+    ui.document.cost = 280
+    local first
+    local handle = Extract.run(ui, function(path, e) first = { path, e } end, ignore, { dir = dir })
+    tick()
+    handle.cancel()
+    tick()
+    Assert.is_nil(first)
+    Assert.is_true(Extract.hasCheckpoint(dir), "取消留下断点")
+
+    -- 续跑：从第 2 页接着，不再取第 1 页
+    ui = rollingUi(3, { "一", "二", "三" })
+    local path, err
+    Extract.run(ui, function(p, e) path, err = p, e end, ignore, { dir = dir })
+    while #pending > 0 do tick() end
+    Assert.is_nil(err)
+    local f = assert(io.open(path, "rb"))
+    local body = f:read("*a")
+    f:close()
+    Assert.eq(body, "一\n二\n三")
+    Assert.eq(table.concat(ui.document.calls, ","), "p2>p3,screen:0,0,600,800:true", "断点续取跳过已完成页")
+    Assert.is_false(Extract.hasCheckpoint(dir))
+    Assert.eq(Extract.donePath(dir), path)
+
+    -- 已有成品：立刻交路径，不再碰文档
+    ui = rollingUi(3, { "X", "Y", "Z" })
+    local reused
+    Extract.run(ui, function(p) reused = p end, ignore, { dir = dir })
+    Assert.eq(reused, path)
+    Assert.len(ui.document.calls, 0)
+
+    Extract.clearCheckpoint(dir)
+    Assert.is_nil(Extract.donePath(dir))
+    os.remove(dir)
+    UIManager.scheduleIn = original_in
 end
