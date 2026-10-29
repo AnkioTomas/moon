@@ -1400,37 +1400,22 @@ function Source:openEntry(ref, entry, toc, title, cb)
             end)
     end
 
-    --- kamare journal 里的本机续读页（1-based）。缺 resume 能力 / 没记录返回 nil。
-    ---@param item table
-    ---@return integer|nil
-    local function journalPage(item)
-        local pages = math.max(1, tonumber(item.pages) or 1)
-        local resume = Cache.resumePage(item.chapterId, series_id)
-        if type(resume) ~= "table" then return nil end
-        local page = tonumber(resume.page)
-        if not page or page < 1 then return nil end
-        return math.min(page, pages)
-    end
-
-    --- 增强版起始页：服务端进度与 kamare journal 取**更靠后**的一个。
-    --- 增强版 `open` 只认 journal（kamarecache 的 resume_page），moon 不传就永远停在旧的
-    --- 本机位置 —— 「另一台设备读到 80%，这台还开在 30%」的根因。这里把算好的页当显式
-    --- start_page 传进去：viewer 第一帧就在正确位置，而不是先开在本地位置再跳。
-    --- 离线 / 请求失败 / 云端没记录：退回 journal 页（nil = 交 kamare 自己决定）。
+    --- 增强版起始页：把云端位置当**提示**传给 kamare，由它和本机 journal 合并。
+    --- 合并规则（回翻 vs 落后）只有一份，落在 kamare 的 `basePage` 判定里 —— moon 自己
+    --- 取 max 会把「读者故意回翻」也当成落后。增强版 `open` 不再自己查服务端，不传就只用
+    --- journal（所以「另一台设备读到 80%，这台还开在 30%」才会发生）。
+    --- 离线 / 请求失败 / 云端没记录：不传，交 kamare 用 journal / 快照决定。
     ---@param item table
     ---@param done fun(page: integer|nil)
     ---@return table|nil job
     local function resumeStartPage(item, done)
         local pages = math.max(1, tonumber(item.pages) or 1)
-        local journal = journalPage(item)
-        if not online() then return done(journal) end
+        if not online() then return done(nil) end
         return self.client:json("GET", "/api/Reader/get-progress", { chapterId = item.chapterId }, nil,
             function(remote)
                 if cancelled then return end
                 local read = tonumber(remote and remote.pageNum) or 0
-                local server = read > 0 and math.min(read + 1, pages) or nil
-                if not server or (journal and journal > server) then return done(journal) end
-                done(server)
+                done(read > 0 and math.min(read + 1, pages) or nil)
             end)
     end
 
