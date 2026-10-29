@@ -101,11 +101,12 @@ package.preload["book.store"] = function()
                     source = withEvents({ id = "local", type = "book" }),
                 }
             end
-            if path == "/cache/1.html" or path == "/cache/2.html" then
+            local cache_idx = path:match("^/cache/(%d+)%.html$")
+            if cache_idx then
                 return {
                     source_id = "moon",
                     stable_id = "chapters",
-                    chapter_idx = path == "/cache/1.html" and 1 or 2,
+                    chapter_idx = tonumber(cache_idx),
                     book = { title = "章节书" },
                     source = withEvents(resolved_source or chapter_default_source),
                 }
@@ -117,6 +118,7 @@ package.preload["book.store"] = function()
             ensureIdentity = identityFor,
         }
 end
+local toc_allow_refresh = true
 package.preload["source.toc"] = function()
     return {
         read = function(_source_id, stable_id, stale)
@@ -124,6 +126,7 @@ package.preload["source.toc"] = function()
             if stale then return stored_toc[stable_id] or stale_toc[stable_id] end
             return stored_toc[stable_id]
         end,
+        allowRefresh = function() return toc_allow_refresh end,
     }
 end
 
@@ -696,13 +699,14 @@ do
     Session.onCloseDocument(plugin)
 end
 
--- 目录过期/缺失时 afterBootstrap 必须走 loadTocAsync。
+-- 缺目录时 afterBootstrap 走 refreshTocAsync（没有则 loadTocAsync）补上。
 do
     stored_toc.chapters = nil
+    toc_allow_refresh = true
     local loaded
     local source = {
         type = "chapter",
-        loadTocAsync = function(_, identity, cb)
+        refreshTocAsync = function(_, identity, cb)
             loaded = identity.stable_id
             cb({ { idx = 1, title = "新" }, { idx = 2 } })
             return { cancel = function() end }
@@ -725,20 +729,16 @@ do
     resolved_source = nil
 end
 
--- 目录已过 TTL（只剩 stale 基线）且刷新失败（离线）：会话保留旧目录，
--- 章末切下一章而不是弹「本书已读完」，目录列表也是全本而不是当前单章。
+-- 已有目录时开书仍后台 refresh；失败不动旧目录、不提示，章末照常切章。
 do
-    stored_toc.chapters = nil
-    stale_toc.chapters = { { idx = 1, title = "一" }, { idx = 2, title = "二" }, { idx = 3, title = "三" } }
-    local opened_idx
+    stored_toc.chapters = { { idx = 1, title = "一" }, { idx = 2, title = "二" }, { idx = 3, title = "三" } }
+    toc_allow_refresh = true
+    local refreshed, opened_idx = false, nil
     local source = {
         type = "chapter",
         isTocCurrent = function() return true end,
-        loadTocAsync = function(_, _, cb)
-            cb(nil, "网络不可用")
-            return { cancel = function() end }
-        end,
         refreshTocAsync = function(_, _, cb)
+            refreshed = true
             cb(nil, "网络不可用")
             return { cancel = function() end }
         end,
@@ -759,14 +759,120 @@ do
     local plugin = mkPlugin("/cache/1.html")
     plugin.ui.status = { onEndOfBook = function() end }
     Session.onReaderReady(plugin)
-    Assert.len(Session.toc(), 3, "过期目录离线时仍是会话目录")
+    Assert.is_true(refreshed, "有目录也后台试拉新")
+    Assert.len(Session.toc(), 3, "刷新失败仍保留旧目录")
     Assert.eq(Session.chapterTitle(), "一")
     plugin.ui.status.onEndOfBook(plugin.ui.status)
     Assert.eq(opened_idx, 2, "章末应切下一章")
     Assert.is_nil(end_dialog_identity, "未读完不弹本书已读完")
     Session.onCloseDocument(plugin)
     resolved_source = nil
-    stale_toc.chapters = nil
+end
+
+-- 有目录且 refresh 成功：换成新目录。
+do
+    stored_toc.chapters = { { idx = 1, title = "旧一" }, { idx = 2, title = "旧二" } }
+    toc_allow_refresh = true
+    local source = {
+        type = "chapter",
+        isTocCurrent = function() return true end,
+        refreshTocAsync = function(_, _, cb)
+            cb({ { idx = 1, title = "新一" }, { idx = 2, title = "新二" }, { idx = 3, title = "新三" } })
+            return { cancel = function() end }
+        end,
+        prefetchChaptersAsync = function()
+            return { cancel = function() end }
+        end,
+        putProgressAsync = default_source.putProgressAsync,
+        syncProgressAsync = default_source.syncProgressAsync,
+        syncNotesAsync = default_source.syncNotesAsync,
+        syncStatsAsync = default_source.syncStatsAsync,
+    }
+    resolved_source = source
+    local plugin = mkPlugin("/cache/1.html")
+    Session.onReaderReady(plugin)
+    Assert.len(Session.toc(), 3)
+    Assert.eq(Session.toc()[1].title, "新一")
+    Session.onCloseDocument(plugin)
+    resolved_source = nil
+end
+
+-- 节流：allowRefresh 为假时不打网。
+do
+    stored_toc.chapters = { { idx = 1, title = "一" } }
+    toc_allow_refresh = false
+    local refreshed = false
+    local source = {
+        type = "chapter",
+        isTocCurrent = function() return true end,
+        refreshTocAsync = function(_, _, cb)
+            refreshed = true
+            cb({ { idx = 1, title = "不该到这" } })
+            return { cancel = function() end }
+        end,
+        prefetchChaptersAsync = function()
+            return { cancel = function() end }
+        end,
+        putProgressAsync = default_source.putProgressAsync,
+        syncProgressAsync = default_source.syncProgressAsync,
+        syncNotesAsync = default_source.syncNotesAsync,
+        syncStatsAsync = default_source.syncStatsAsync,
+    }
+    resolved_source = source
+    local plugin = mkPlugin("/cache/1.html")
+    Session.onReaderReady(plugin)
+    Assert.is_false(refreshed)
+    Assert.eq(Session.toc()[1].title, "一")
+    Session.onCloseDocument(plugin)
+    resolved_source = nil
+    toc_allow_refresh = true
+end
+
+-- 中间章切章不刷目录；剩余 ≤5 章才再刷。
+do
+    local toc = {}
+    for i = 1, 10 do toc[i] = { idx = i, title = "第" .. i } end
+    stored_toc.chapters = toc
+    toc_allow_refresh = true
+    local refresh_count = 0
+    local source = {
+        type = "chapter",
+        isTocCurrent = function() return true end,
+        refreshTocAsync = function(_, _, cb)
+            refresh_count = refresh_count + 1
+            cb(toc)
+            return { cancel = function() end }
+        end,
+        openBookAsync = function(_, _, opts, cb)
+            return asyncChapter("/cache/" .. opts.chapter_idx .. ".html", cb)
+        end,
+        prefetchChaptersAsync = function()
+            return { cancel = function() end }
+        end,
+        putProgressAsync = default_source.putProgressAsync,
+        syncProgressAsync = default_source.syncProgressAsync,
+        syncNotesAsync = default_source.syncNotesAsync,
+        syncStatsAsync = default_source.syncStatsAsync,
+    }
+    resolved_source = source
+    local plugin = mkPlugin("/cache/1.html")
+    plugin.ui.handleEvent = function() end
+    Session.onReaderReady(plugin)
+    Assert.eq(refresh_count, 1, "开书刷一次")
+    Assert.is_true(Session.gotoChapter(2))
+    Stubs.flush()
+    plugin.ui.document.file = "/cache/2.html"
+    Session.onReaderReady(plugin)
+    Stubs.flush()
+    Assert.eq(refresh_count, 1, "中间章不刷")
+    Assert.is_true(Session.gotoChapter(5))
+    Stubs.flush()
+    plugin.ui.document.file = "/cache/5.html"
+    Session.onReaderReady(plugin)
+    Stubs.flush()
+    Assert.eq(refresh_count, 2, "剩余 5 章（10-5）再刷")
+    Session.onCloseDocument(plugin)
+    resolved_source = nil
 end
 
 -- 属主源已不在（第三方源插件被卸载）：已落盘的章节照常打开，不给源发事件、不崩。

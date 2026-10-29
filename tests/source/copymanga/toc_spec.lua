@@ -14,7 +14,7 @@ package.preload["book.books_db"] = function()
     return {
         getToc = function(source_id, stable_id, max_age)
             local row = store[source_id .. "\31" .. stable_id]
-            if not row or now - row.at >= max_age then return nil end
+            if not row or (max_age and now - row.at >= max_age) then return nil end
             return row.payload, row.at
         end,
         setToc = function(source_id, stable_id, payload)
@@ -66,5 +66,5 @@ do
 end
 
 now = now + 6 * 60 * 60
-Assert.is_nil(Toc.read("copymanga", "comic-a"))
+Assert.eq(Toc.read("copymanga", "comic-a")[1].uid, "u1", "目录不做时间保鲜")
 os.time = original_time

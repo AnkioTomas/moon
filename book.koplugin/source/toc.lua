@@ -5,13 +5,14 @@ books.toc 只经 ``Toc.put`` 写入（同时接管内存缓存），
 翻页、按章补报统计这些高频路径不必反复查库 + decode 整份目录。
 缓存键含 source_id，各章节源共用这一份。
 
+有缓存就一直可用，不做时间保鲜；开书或剩余章不多时由章节会话后台静默拉新，
+成功 ``Toc.put`` 换掉，失败不动旧目录、不弹提示。
+拉新有节流（``REFRESH_INTERVAL``）：刚拉过或刚试过就跳过，避免反复开书 / 追更打爆源站。
+
 @module koplugin.book.source.toc
 --]]
 
 local Toc = {}
-
---- 目录缓存 TTL（秒）。
-Toc.TTL = 6 * 60 * 60
 
 ---@class SourceTocEntry
 ---@field list BookChapter[]
@@ -27,9 +28,14 @@ local CACHE_LIMIT = 32
 --- 字数回填后等多久把目录写回库（秒）。字数是派生缓存，丢了下次打开该章再算；
 --- 千章全本缓存按这个节奏合并写，而不是每章序列化一遍整份目录。
 Toc.WORDS_FLUSH_DELAY = 30
+--- 开书 / 临近章末拉新最短间隔（秒）。成功看 fetched_at，失败看本进程上次尝试时间。
+Toc.REFRESH_INTERVAL = 5 * 60
 --- 字数改了、还没写回库的目录：key → list。Toc.put 换新目录时作废。
 ---@type table<string, BookChapter[]>
 local pending_words = {}
+--- 本进程内上次「尝试拉新」的时间：key → unix。失败也要记，不然离线狂开书会连打。
+---@type table<string, integer>
+local last_attempt = {}
 
 --- 写入缓存；满了先整表清空再放新条目（活跃的只有在读的几本，清掉的下次查库重建）。
 ---@param key string
@@ -81,19 +87,16 @@ local function build(list, fetched_at)
         fetched_at = fetched_at }
 end
 
---- 取解码后的目录条目；未命中/过期/非法 JSON 一律返回 nil。
+--- 取解码后的目录条目；未命中 / 非法 JSON 返回 nil。有就一直认，不看写入时间。
 ---@param source_id string
 ---@param stable_id string
----@param stale boolean|nil 为真时不看 TTL
+---@param _stale boolean|nil 兼容旧调用方；已无 TTL，忽略
 ---@return SourceTocEntry|nil
-local function entry(source_id, stable_id, stale)
+local function entry(source_id, stable_id, _stale)
     local key = keyOf(source_id, stable_id)
     local hit = cache[key]
-    if hit and (stale or os.time() - hit.fetched_at < Toc.TTL) then
-        return hit
-    end
-    dropCache(key)
-    local payload, fetched_at = require("book.books_db").getToc(source_id, stable_id, not stale and Toc.TTL or nil)
+    if hit then return hit end
+    local payload, fetched_at = require("book.books_db").getToc(source_id, stable_id)
     if not payload then
         return nil
     end
@@ -104,14 +107,33 @@ local function entry(source_id, stable_id, stale)
     return putCache(key, build(list, fetched_at or os.time()))
 end
 
---- 读取并解码目录缓存；未命中/过期/非法 JSON 一律返回 nil。
+--- 读取并解码目录缓存；未命中 / 非法 JSON 返回 nil。
 ---@param source_id string
 ---@param stable_id string
----@param stale boolean|nil 为真时过期的也要：调用方拿它当「章号编号基线」，不是当新鲜目录用
+---@param stale boolean|nil 兼容旧调用方；已无 TTL，有缓存就返回
 ---@return BookChapter[]|nil
 function Toc.read(source_id, stable_id, stale)
     local hit = entry(source_id, stable_id, stale)
     return hit and hit.list
+end
+
+--- 开书要不要后台拉新：间隔内已成功拉过或已尝试过则否。真要拉时记一次尝试（失败也算）。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function Toc.allowRefresh(source_id, stable_id)
+    local key = keyOf(source_id, stable_id)
+    local now = os.time()
+    local attempted = last_attempt[key]
+    if attempted and now - attempted < Toc.REFRESH_INTERVAL then
+        return false
+    end
+    local hit = entry(source_id, stable_id)
+    if hit and now - hit.fetched_at < Toc.REFRESH_INTERVAL then
+        return false
+    end
+    last_attempt[key] = now
+    return true
 end
 
 --- 落库并接管内存缓存（目录刚拉到手，无需再 decode 一遍）。
@@ -188,7 +210,7 @@ end
 ---@param source_id string
 ---@param stable_id string
 ---@param idx integer|nil
----@param stale boolean|nil 为真时过期目录也认（uid 不随时间变，补报离线数据用）
+---@param stale boolean|nil 兼容旧调用方
 ---@return string|nil
 function Toc.uid(source_id, stable_id, idx, stale)
     local hit = entry(source_id, stable_id, stale)
@@ -200,7 +222,7 @@ end
 ---@param source_id string
 ---@param stable_id string
 ---@param idx number|nil
----@param stale boolean|nil 同 Toc.uid
+---@param stale boolean|nil 兼容旧调用方
 ---@return integer|nil
 function Toc.sourceIndex(source_id, stable_id, idx, stale)
     local hit = entry(source_id, stable_id, stale)
@@ -225,14 +247,17 @@ end
 ---@param source_id string
 ---@param stable_id string
 function Toc.drop(source_id, stable_id)
+    local key = keyOf(source_id, stable_id)
     require("book.books_db").clearToc(source_id, stable_id)
-    dropCache(keyOf(source_id, stable_id))
+    dropCache(key)
+    last_attempt[key] = nil
 end
 
 --- 清空进程内目录缓存；落库的 books.toc 不受影响。
 function Toc.clear()
     cache = {}
     count = 0
+    last_attempt = {}
 end
 
 return Toc
