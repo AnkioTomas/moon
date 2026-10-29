@@ -50,6 +50,45 @@ local function readerUi()
     return require("apps/reader/readerui").instance
 end
 
+--- KOReader 默认开着页内 EPUB 脚注；与「脚注弹窗」互斥：开弹窗就不在页底，关弹窗就页底直显。
+local INPAGE_EPUB = "footnote-inpage_epub"
+
+---@return table
+local function globalStyleTweaks()
+    local tweaks = G_reader_settings:readSetting("style_tweaks")
+    if tweaks then return tweaks end
+    local copy = {}
+    for key, value in pairs(require("ui/data/css_tweaks").DEFAULT_GLOBAL_STYLE_TWEAKS) do
+        copy[key] = value
+    end
+    return copy
+end
+
+--- 弹窗开 → 关页内脚注；弹窗关 → 开页内脚注。阅读中当场套样式。
+---@param on boolean
+local function setFootnotePopup(on)
+    G_reader_settings:saveSetting("footnote_link_in_popup", on)
+    local tweaks = globalStyleTweaks()
+    if on then
+        tweaks[INPAGE_EPUB] = nil
+    else
+        tweaks[INPAGE_EPUB] = true
+    end
+    G_reader_settings:saveSetting("style_tweaks", tweaks)
+    local ui = readerUi()
+    local styletweak = ui and ui.styletweak
+    if not styletweak then return end
+    styletweak.global_tweaks = tweaks
+    -- 清掉本书反向覆盖，否则全局改了书里还是旧的。
+    if styletweak.doc_tweaks then
+        local doc = styletweak.doc_tweaks[INPAGE_EPUB]
+        if (on and doc == true) or (not on and doc == false) then
+            styletweak.doc_tweaks[INPAGE_EPUB] = nil
+        end
+    end
+    styletweak:updateCssText(true)
+end
+
 --- 布尔开关行：翻转后落盘并重建桌面。
 ---@param desktop table
 ---@param section string 配置分区
@@ -152,10 +191,10 @@ function ReaderSettings:sections(desktop)
             return Row.widget({
                 width = iw,
                 icon = "article", title = _("脚注弹窗"),
-                subtitle = _("脚注链接在弹窗中显示，而不是跳转"),
+                subtitle = _("开：点按弹窗，不在页底；关：注文显示在页面底部"),
                 toggle = footnote_on,
                 callback = function()
-                    G_reader_settings:saveSetting("footnote_link_in_popup", not footnote_on)
+                    setFootnotePopup(not footnote_on)
                     desktop:updateView()
                 end,
             })
