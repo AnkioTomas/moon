@@ -256,12 +256,12 @@ end
 
 -- 增量书架：快照指纹没变、本地书架非空就跳过对账；漫画按已读页回填远端进度（本地同页不重写）。
 cfg.libraries = { ["2"] = true, ["1"] = true }
-Assert.eq(written["900"].page, 5, "首轮同步就回填漫画进度")
-Assert.eq(written["900"].fraction, 0.25)
+Assert.eq(written["900"].page, 6, "首轮同步就回填漫画进度（pageNum 5 → 本地第 6 页）")
+Assert.eq(written["900"].fraction, 0.3, "fraction 与 page 同口径")
 Assert.eq(written["900"].total_pages, 20)
 Assert.eq(written["900"].updated_at, 1767323045, "Kavita 时间按 UTC 解析")
 reconciled, shelf_ids = nil, { "1" }
-progress["900"] = { page = 5 }
+progress["900"] = { page = 6 }
 result = run("syncBooksAsync", nil)
 Assert.is_nil(reconciled, "快照没变不对账")
 Assert.eq(result.pulled, 0)
@@ -1434,28 +1434,31 @@ do
         source:openEntry(ref_arg or ref, entry, list, "漫画", function(path, err, meta)
             got = { path = path, err = err, meta = meta }
         end)
+        Stubs.flush()
         got = got or {}
         got.http = #calls - before
         return got
     end
 
-    -- 成功：同步回调 handled；零请求、不预取 get-progress、不传起始页。
+    -- 成功：同步回调 handled；开书先问一次云端进度，把「另一台设备读到哪」直接当起始页。
     reply = function() return { kind = "viewer" } end
+    routes["GET /api/Reader/get-progress"] = json({ pageNum = 12 })
     local ok = open(toc[2])
     Assert.is_nil(ok.path)
     Assert.is_nil(ok.err)
-    Assert.is_true(ok.meta and ok.meta.handled, "可见查看器：同步回调 handled，没有异步间隙")
-    Assert.eq(ok.http, 0, "交 kamare 打开：moon 侧零请求（不预取 get-progress）")
+    Assert.is_true(ok.meta and ok.meta.handled, "可见查看器：起始页 GET 回来后才回调 handled")
+    Assert.eq(ok.http, 1, "增强版开书只多问一次云端进度（起始页）")
     Assert.len(opened, 1)
     Assert.eq(opened[1].entry, toc[2])
     Assert.eq(opened[1].title, "漫画")
     Assert.eq(opened[1].base_url, "http://kav", "地址去尾斜杠")
     Assert.eq(opened[1].api_key, "k", "Key 去空白")
-    Assert.is_nil(opened[1].start_page, "起始页全归 Cache.open，moon 不传")
+    Assert.eq(opened[1].start_page, 13, "云端 pageNum 12 → 第 13 页：第一帧就落在云端位置")
 
     -- on_close：卷行写物理页 / 物理总数 / 现在；容器行写聚合 fraction + 最近阅读时间。
     written, remembered = {}, {}
-    progress["60:6000"] = nil
+    -- 缺行不等于未读：卷行齐全（哪怕值是 0）才算得出聚合。
+    progress["60:6000"] = { fraction = 0 }
     opened[1].on_close(10, 20)
     local volume = written["60:6001"]
     Assert.eq(volume.page, 10, "卷行是唯一真实位置：物理页")
@@ -1483,13 +1486,18 @@ do
     Assert.eq(written["60"].fraction, 1, "两卷都读完 = 100%")
     progress["60:6000"] = nil
 
-    -- 目录拿不到：容器退「最靠后卷的 fraction」。
+    -- 目录拿不到 / 本地缺卷行：算不出聚合就不动容器（缺行 ≠ 未读，低报比不更新更糟）。
     written, opened = {}, {}
+    progress["60"] = nil
     reply = function() return {} end
     local solo = open(toc[2], NO_TOC)
     Assert.is_true(solo.meta and solo.meta.handled)
     opened[1].on_close(10, 20)
-    Assert.eq(written["60"].fraction, 0.5, "toc 缺失时容器退本卷 fraction")
+    Assert.is_nil(written["60"], "聚合算不出来时不写容器行（保留原值）")
+    progress["60"] = { fraction = 0.4 }
+    opened[1].on_close(10, 20)
+    Assert.eq(written["60"].fraction, 0.4, "有旧聚合就只刷新时间，不低报")
+    progress["60"] = nil
 
     -- 已有卷行：不重写元数据。
     books["60:6001"] = { stable_id = "60:6001", title = "已有" }
@@ -1546,7 +1554,7 @@ do
     local offline = open(toc[2])
     Assert.is_nil(offline.path)
     Assert.eq(offline.err, "这一卷还没缓存，联网后可下载")
-    Assert.eq(offline.http, 0, "未缓存离线：零请求")
+    Assert.eq(offline.http, 1, "未缓存离线：只问过一次起始页")
 
     -- 旧 cbz：kamare 缓存优先；offline_not_cached 时回退到本地文件。
     os.execute("mkdir -p '" .. WORK .. "/60:6001'")
@@ -1571,9 +1579,10 @@ do
     Assert.eq(opened[1].entry.chapterId, 6001)
     -- 目录命中缓存也照样拉一次「最新进度」（点开系列 = 想看服务器上的已读状态）：
     -- 只问 series（libraryId）+ volumes（各卷 pagesRead），不重拉 metadata。
-    Assert.eq(#calls, before_book + 2, "开书只额外问一次最新进度")
+    Assert.eq(#calls, before_book + 3, "开书：目录刷新 2 次 + 起始页 1 次")
     Assert.matches(calls[before_book + 1].url, "^http://kav/api/Series/60$")
     Assert.matches(calls[before_book + 2].url, "^http://kav/api/Series/volumes%?seriesId=60")
+    Assert.matches(calls[before_book + 3].url, "^http://kav/api/Reader/get%-progress")
     Assert.not_nil(io.open(old_cbz), "旧 cbz 静默保留，不删用户数据")
 
     reply = function() return nil, "offline_not_cached", "这一卷还没缓存，联网后可下载" end
@@ -1587,7 +1596,7 @@ do
     local running = open(toc[2])
     Assert.is_nil(running.path)
     Assert.eq(running.err, "漫画阅读器已在运行")
-    Assert.eq(running.http, 0, "查看器已在运行：不下载、不请求")
+    Assert.eq(running.http, 1, "查看器已在运行：不下载（起始页那一次 GET 早已发出）")
 
     -- 未知失败 / 流式失败：在线 cbz 回退下载；image 报错。
     os.remove(old_cbz)
@@ -1605,19 +1614,45 @@ do
     local img = open(image)
     Assert.is_nil(img.path)
     Assert.not_nil(img.err, "image 下载不了：报错")
-    Assert.eq(#calls, img_before, "image 失败不回退下载")
+    Assert.eq(#calls, img_before + 1, "image 失败不回退下载（只有起始页那一次 GET）")
 
     reply = function() return nil, "no_pages", "这一卷没有可显示的页面" end
     local empty = open(toc[2])
     Assert.is_nil(empty.path)
     Assert.eq(empty.err, "这一卷没有可显示的页面")
-    Assert.eq(empty.http, 0)
+    Assert.eq(empty.http, 1)
 
     reply = function() return nil, "settings_write_failed", "无法写入 kamare 配置" end
     local bad_settings = open(toc[2])
     Assert.is_nil(bad_settings.path)
     Assert.eq(bad_settings.err, "无法写入 kamare 配置")
-    Assert.eq(bad_settings.http, 0)
+    Assert.eq(bad_settings.http, 1)
+
+    -- journal 与云端谁更靠后：起始页取 journal 更靠后的那一个；关书落库以 journal 为准。
+    -- （journal 自己已经做过「服务端更靠后 → 抬升」的合并，moon 复用它落库就不会出现
+    --  「书架 50%、打开 30%」这种两份事实打架。）
+    local kamare = package.loaded["kamarecache"]
+    kamare.capabilities.resume = true
+    local resume_reply = { page = 15, source = "journal" }
+    kamare.resume_page = function() return resume_reply end
+    Cache.reset()
+    routes["GET /api/Reader/get-progress"] = json({ pageNum = 5 })
+    opened = {}
+    reply = function() return { kind = "viewer" } end
+    local ahead = open(toc[2])
+    Assert.is_true(ahead.meta and ahead.meta.handled)
+    Assert.eq(opened[#opened].start_page, 6, "把云端位置当提示传给 kamare（journal 合并在那边做）")
+    written = {}
+    opened[#opened].on_close(9, 20)
+    Assert.eq(written["60:6001"].page, 15, "关书落库以 journal 为准（不写回调的瞬时页）")
+    -- snapshot 是下载时的服务端快照，可能已经很旧：不许它覆盖关书写回的位置。
+    resume_reply = { page = 3, source = "snapshot" }
+    written = {}
+    opened[#opened].on_close(9, 20)
+    Assert.eq(written["60:6001"].page, 9, "snapshot 不覆盖关书回调页")
+    kamare.capabilities.resume = nil
+    kamare.resume_page = nil
+    Cache.reset()
 
     -- 没有增强版（未装 / 官方版）：旧回退照旧，图片目录仍是「需要安装 kamare」。
     package.loaded["kamarecache"] = nil
@@ -1682,6 +1717,13 @@ do
     routes["GET /api/Reader/get-progress"] = json({ pageNum = 3 })
     viewer = select(3, openLegacy())
     Assert.eq(viewer.metadata.startPage, 4, "没有本地进度：云端 pageNum + 1")
+
+    -- 本机比云端靠后（云端进度被别处改旧了 / 刚在本地读了几页）：用本机，不往回拽。
+    progress["60:6001"] = { page = 7, total_pages = 20 }
+    routes["GET /api/Reader/get-progress"] = json({ pageNum = 3 })
+    viewer = select(3, openLegacy())
+    Assert.eq(viewer.metadata.startPage, 7, "本机更靠后：起始页用本机")
+    progress["60:6001"] = nil
 
     -- 云端也没读过：不给起始页，查看器从第 1 页开始。
     routes["GET /api/Reader/get-progress"] = json({ pageNum = 0 })
@@ -1769,7 +1811,8 @@ Assert.is_nil(written["700"].page, "epub 不写页码：Kavita 的页是 spine")
 -- 按 UTC 解析会存成 1770091506（8 小时后的未来），刚读完的书就会被它压在下面。
 Assert.eq(written["700"].updated_at, 1770062706, "latestReadDate 按服务器时区换成真 epoch")
 Assert.eq(written["701"].fraction, 1, "读完的写满比例，进步进「已读」")
-Assert.eq(written["710"].fraction, 0.3, "容器行改写服务端 series 级 pagesRead/pages")
+Assert.eq(written["710"].fraction, 0.3,
+    "本地缺「下」卷行 → 退回服务端 pagesRead/pages（缺行不等于未读，宁可两套口径也不低报）")
 Assert.eq(written["710"].updated_at, 1770062706, "容器行带最近阅读时间，图书馆按系列行排序")
 Assert.eq(written_opts["710"] and written_opts["710"].reset_updated_at, true,
     "回填聚合要能回落时间戳（旧版本存过未来时间 / 0）")
@@ -1788,12 +1831,19 @@ Assert.eq(vol_result.pulled - vol_again.pulled, 1, "已对齐的卷行不再重�
 dropped = {}
 run("syncBooksAsync", { force = true })
 Assert.eq(#dropped, 0, "容器行保留（离线读过的量级回连后不被抹回未读）")
+-- 卷行齐全时容器行按卷级聚合（不是服务端页比）：(0 读完 + 在读卷 0.3) / 2 卷 = 0.15
+progress["710:7102"] = { fraction = 0 }
+written = {}
+run("syncBooksAsync", { force = true })
+Assert.eq(written["710"].fraction, 0.15, "卷行齐全 → 容器行按卷级聚合")
+progress["710:7102"] = nil
+
 -- 目录缓存过期不能让身份翻回容器行：过期目录照样算数，否则容器行会重新拿到
 -- 单书位置（整部书当成一卷）而不是聚合。
 toc_fresh, written = false, {}
 run("syncBooksAsync", { force = true })
 Assert.eq(written["710"].updated_at, 1770062706, "过期目录也认卷身份：容器行仍写系列级时间")
-Assert.eq(written["710"].fraction, 0.3, "容器行仍写服务端聚合")
+Assert.eq(written["710"].fraction, 0.3, "目录过期时同样退回服务端比例（仍缺「下」卷行）")
 Assert.is_nil(written["710"].page, "容器行只写聚合 fraction")
 toc_fresh = true
 written = {}
@@ -1844,15 +1894,15 @@ do
     Assert.eq(table.concat(asked, ","), "8901")
     local row = written["8901:89010"]
     Assert.not_nil(row, "服务器说在读的那一卷补成本地卷行")
-    Assert.eq(row.fraction, 7 / 200)
-    Assert.eq(row.page, 7, "漫画写物理页")
+    Assert.eq(row.page, 8, "Kavita pageNum 是 0-based：本地 page 要 +1")
+    Assert.eq(row.fraction, 8 / 200, "fraction 与 page 同口径（1-based）")
     Assert.eq(row.total_pages, 200)
     Assert.eq(row.updated_at, 1770062706, "用章节的 UTC 阅读时间（换算成本地 epoch）")
     Assert.eq(remembered["8901:89010"].title, "系列甲 · 第2卷", "卷行继承容器元数据，标题带卷名")
     Assert.eq(remembered["8901:89010"].intro, "第2卷摘要", "卷简介用这一卷的摘要，不用整部简介")
     Assert.is_nil(written["8902:89020"], "读完的卷不补：continue-point 给的是下一章")
     -- 同一份服务端进度不重复写：每 5 分钟重写同一行会白刷首页。
-    progress["8901:89010"] = { fraction = 7 / 200, updated_at = 1770062706 }
+    progress["8901:89010"] = { page = 8, fraction = 8 / 200, updated_at = 1770062706 }
     written = {}
     run("syncBooksAsync", { force = true })
     Assert.is_nil(written["8901:89010"], "服务端没更新就不重写")
@@ -1862,7 +1912,8 @@ do
         lastReadingProgressUtc = "2026-02-03T01:05:06.1" })
     written = {}
     run("syncBooksAsync", { force = true })
-    Assert.eq(written["8901:89010"].fraction, 0.6, "服务器进度更新时覆盖本机卷行")
+    Assert.eq(written["8901:89010"].page, 121, "服务器更靠后：121 页（pageNum 120 + 1）")
+    Assert.eq(written["8901:89010"].fraction, 121 / 200, "百分比跟着页走，不和服务端差一页")
     progress["8901:89010"] = nil
     routes["POST /api/Series/all-v2"] = shelf_route
 end
