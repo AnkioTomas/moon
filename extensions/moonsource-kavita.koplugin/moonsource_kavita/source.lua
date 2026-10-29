@@ -268,6 +268,39 @@ local function progressedVolumes(source_id, series_id, ProgressDB)
     return toc, out
 end
 
+--- 容器行百分比：**卷级聚合** = (已读完卷数 + 在读卷最大 fraction) / toc 卷数。
+--- 卷行存真实位置、容器行只做聚合（06 A1）。以前容器行还有两种算法（关查看器用「本卷 fraction」、
+--- 回填用服务端 `pagesRead/pages`），同一本书在两者之间来回跳 1~N 个百分点；这里统一成一处。
+--- 目录不可得时退调用方给的 fallback（关查看器给本卷 fraction，回填给服务端比例）。
+---@param source_id string
+---@param series_id string
+---@param toc table[]|nil
+---@param current_id string|nil 刚写过的那一卷（调用方手里有现成 fraction，不必回读库）
+---@param current_fraction number|nil
+---@param fallback number 目录不可得时的兜底值（关查看器 = 本卷 fraction，回填 = 服务端比例）
+---@return number
+local function volumeAggregate(source_id, series_id, toc, current_id, current_fraction, fallback)
+    if type(toc) ~= "table" or #toc == 0 then return fallback end
+    local ProgressDB = require("book.progress_db")
+    local finished, best = 0, 0
+    for _idx, entry in ipairs(toc) do
+        local id = tostring(entry.chapterId or entry.uid)
+        local fraction
+        if current_id and id == current_id then
+            fraction = tonumber(current_fraction) or 0
+        else
+            local row = ProgressDB.get(source_id, series_id .. ":" .. id)
+            fraction = row and tonumber(row.fraction) or 0
+        end
+        if fraction >= 1 then
+            finished = finished + 1
+        elseif fraction > best then
+            best = fraction
+        end
+    end
+    return math.min(1, (finished + best) / #toc)
+end
+
 --- 卷行继承的元数据字段。
 local VOLUME_META_FIELDS = { "title", "authors", "intro", "category", "series" }
 
@@ -414,7 +447,7 @@ local function backfillRead(source_id, series_list)
             if here and at and (tonumber(here.updated_at) or 0) > now + 60 then
                 ProgressDB.fixRemoteTime(source_id, stable_id, at)
             end
-            local _toc, progressed = progressedVolumes(source_id, stable_id, ProgressDB)
+            local toc, progressed = progressedVolumes(source_id, stable_id, ProgressDB)
             if #progressed > 0 then
                 -- 读过的卷行继承容器元数据（作者 / 简介 / 分类），否则最近阅读里那几卷是未知作者。
                 -- 对齐计入 changed：同步只会报「变了」的域，首页 / 图书馆据此重画。
@@ -425,16 +458,31 @@ local function backfillRead(source_id, series_list)
                 -- 不写 page：整部书的聚合进度不是「读到第几页」。
                 -- 显式允许回落：旧版本存过非零 / 未来时间，MAX 会把它留住（US 24）。
                 if ProgressDB.upsertRemote(source_id, stable_id, {
-                    fraction = math.min(1, read / pages),
+                    fraction = volumeAggregate(source_id, stable_id, toc, nil, nil,
+                        math.min(1, read / pages)),
                     updated_at = at or 0,
                 }, { reset_updated_at = true }) then
                     changed = changed + 1
                 end
-            elseif (comic and not (here and here.page == read)) or (not comic and here == nil) then
+            elseif comic then
+                -- 漫画：服务端 pageNum 是 0-based 图像序号（读完 = pages），落库的 page 是 1-based
+                -- （ProgressPosition 的口径），所以 +1；fraction 与 page 同口径，避免同一行自相矛盾。
+                -- 只前进不后退：本机回退后的位置不被服务端旧值拉回去（回退由 kamare 的 base 判定处理）。
+                local page = math.min(read + 1, pages)
+                if not here or (tonumber(here.page) or 0) < page then
+                    if ProgressDB.upsertRemote(source_id, stable_id, {
+                        fraction = page / pages,
+                        page = page,
+                        total_pages = pages,
+                        updated_at = at,
+                    }) then
+                        changed = changed + 1
+                    end
+                end
+            elseif here == nil then
+                -- epub：series 级 pagesRead/pages 是 spine 比例，只给没有本机进度的书补占位。
                 if ProgressDB.upsertRemote(source_id, stable_id, {
                     fraction = math.min(1, read / pages),
-                    page = comic and read or nil,
-                    total_pages = comic and pages or nil,
                     updated_at = at,
                 }) then
                     changed = changed + 1
@@ -500,13 +548,17 @@ local function backfillCurrentVolume(source, series_list, cb)
             changed = changed + 1
         end
         local here = ProgressDB.get(source.id, stable_id)
-        -- 本机已有这一卷的进度：只有服务器明显更新（另一台设备接着读了）才采纳。
-        if here and at <= (tonumber(here.updated_at) or 0) + 60 then return changed end
+        -- 服务端 pageNum 是 0-based 图像序号，本地 page 是 1-based：+1 后再比。
+        local page = math.min(read + 1, pages)
+        -- 只前进：服务端更靠后才采纳，**不比时间戳**。`at` 是服务器时间、`here.updated_at` 是本机
+        -- 时钟，跨设备时钟偏差会让「明显更新」永久不成立（旧实现正是拿 `at > updated_at + 60` 卡的）。
+        -- 本机允许回退（kamare 的 base 判定），这种行不能被服务端旧值拉回去。
+        if here and (tonumber(here.page) or 0) >= page then return changed end
         if not ProgressDB.upsertRemote(source.id, stable_id, {
-            fraction = read / pages,
-            page = read,
+            fraction = page / pages,
+            page = page,
             total_pages = pages,
-            updated_at = at,
+            updated_at = (tonumber(at) or 0) > 0 and at or os.time(),
         }) then return changed end
         return changed + 1
     end
@@ -1246,23 +1298,6 @@ function Source:openEntry(ref, entry, toc, title, cb)
         return series_id .. ":" .. tostring(item.chapterId or item.uid)
     end
 
-    --- 聚合 = (其它已读完卷数 + 本卷 fraction) / toc 卷数；目录缺失退本卷 fraction。
-    ---@param item table
-    ---@param fraction number
-    ---@return number
-    local function aggregate(item, fraction)
-        if type(toc) ~= "table" or #toc == 0 then return fraction end
-        local ProgressDB = require("book.progress_db")
-        local finished = 0
-        for _idx, other in ipairs(toc) do
-            if tostring(other.chapterId or other.uid) ~= tostring(item.chapterId or item.uid) then
-                local row = ProgressDB.get(self.id, volumeId(other))
-                if row and (tonumber(row.fraction) or 0) >= 1 then finished = finished + 1 end
-            end
-        end
-        return math.min(1, (finished + fraction) / #toc)
-    end
-
     --- 卷行缺书时用目录卷名 + 容器元数据补一条（06 A2）：ProgressDB.recent 的 EXISTS books
     --- 会过滤掉没有书行的卷，最近阅读里就看不到它。
     ---@param item table
@@ -1283,6 +1318,16 @@ function Source:openEntry(ref, entry, toc, title, cb)
         total = tonumber(total) or tonumber(item.pages) or 0
         page = tonumber(page) or 1
         if total <= 0 then return end
+        -- 位置以 kamare 的 **journal** 为准（它有服务端比较与 superseded 判定），不用关闭回调的瞬时页：
+        -- 这样书架百分比、最近阅读和下次打开的位置是同一份事实，不会「显示 50%、打开 30%」。
+        -- 只认 source == "journal"：snapshot 是下载时的服务端快照，可能比服务端现状旧，不能拿它覆盖。
+        -- 官方 kamare / 缺 resume 能力时退回回调页（老行为）。
+        local resume = Cache.resumePage(item.chapterId, series_id)
+        if type(resume) == "table" and resume.source == "journal" then
+            local journal = tonumber(resume.page)
+            if journal then page = math.min(math.max(1, journal), total) end
+        end
+        page = math.min(page, total)
         local fraction = math.min(1, page / total)
         local ProgressDB = require("book.progress_db")
         ProgressDB.upsertRemote(self.id, volumeId(item), {
@@ -1295,7 +1340,8 @@ function Source:openEntry(ref, entry, toc, title, cb)
         -- 容器行做聚合，并带上「刚读过」的时间戳：图书馆「最近阅读」按系列行排，
         -- 读完一卷立刻就能浮上去，不必等下一次同步。位置仍只在卷行上。
         ProgressDB.upsertRemote(self.id, series_id, {
-            fraction = aggregate(item, fraction),
+            fraction = volumeAggregate(self.id, series_id, toc,
+                tostring(item.chapterId or item.uid), fraction, fraction),
             updated_at = os.time(),
         }, { reset_updated_at = true })
     end
@@ -1342,9 +1388,49 @@ function Source:openEntry(ref, entry, toc, title, cb)
             function(remote)
                 if cancelled then return end
                 local read = tonumber(remote and remote.pageNum) or 0
-                if read > 0 then return done(math.min(read + 1, pages)) end
+                local local_page = localPage()
+                if read > 0 then
+                    -- 服务端更靠后用服务端，本机更靠后用本机：只前进，不把读者往回拽。
+                    local server = math.min(read + 1, pages)
+                    if local_page and local_page > server then return done(local_page) end
+                    return done(server)
+                end
                 -- 云端没记录 / 请求失败：本地关书写过页就别退回第 1 页。
-                done(localPage())
+                done(local_page)
+            end)
+    end
+
+    --- kamare journal 里的本机续读页（1-based）。缺 resume 能力 / 没记录返回 nil。
+    ---@param item table
+    ---@return integer|nil
+    local function journalPage(item)
+        local pages = math.max(1, tonumber(item.pages) or 1)
+        local resume = Cache.resumePage(item.chapterId, series_id)
+        if type(resume) ~= "table" then return nil end
+        local page = tonumber(resume.page)
+        if not page or page < 1 then return nil end
+        return math.min(page, pages)
+    end
+
+    --- 增强版起始页：服务端进度与 kamare journal 取**更靠后**的一个。
+    --- 增强版 `open` 只认 journal（kamarecache 的 resume_page），moon 不传就永远停在旧的
+    --- 本机位置 —— 「另一台设备读到 80%，这台还开在 30%」的根因。这里把算好的页当显式
+    --- start_page 传进去：viewer 第一帧就在正确位置，而不是先开在本地位置再跳。
+    --- 离线 / 请求失败 / 云端没记录：退回 journal 页（nil = 交 kamare 自己决定）。
+    ---@param item table
+    ---@param done fun(page: integer|nil)
+    ---@return table|nil job
+    local function resumeStartPage(item, done)
+        local pages = math.max(1, tonumber(item.pages) or 1)
+        local journal = journalPage(item)
+        if not online() then return done(journal) end
+        return self.client:json("GET", "/api/Reader/get-progress", { chapterId = item.chapterId }, nil,
+            function(remote)
+                if cancelled then return end
+                local read = tonumber(remote and remote.pageNum) or 0
+                local server = read > 0 and math.min(read + 1, pages) or nil
+                if not server or (journal and journal > server) then return done(journal) end
+                done(server)
             end)
     end
 
@@ -1370,7 +1456,10 @@ function Source:openEntry(ref, entry, toc, title, cb)
     end
 
     if Cache.enhancedOpen() then
-        afterOpen(show(entry))
+        job = resumeStartPage(entry, function(start_page)
+            if cancelled then return end
+            afterOpen(show(entry, start_page))
+        end)
     else
         job = withStartPage(entry, function(start_page)
             if cancelled then return end
