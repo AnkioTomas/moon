@@ -106,7 +106,13 @@ end
 ---@param task table BookTask 或 Tasks.tasks() 快照项
 ---@return string
 function TaskDialog.status(task)
-    if task.state == "retry_wait" then return T(_("第 %1 次失败，稍后重试"), task.attempt) end
+    if task.state == "retry_wait" then
+        -- 已有进度数字时别说成「失败」（X-Ray 段已落库之类）；纯失败再报次数。
+        if task.count and task.count > 0 then
+            return T(_("已有进展，稍后继续（第 %1 次）"), math.max(task.attempt or 1, 1))
+        end
+        return T(_("第 %1 次失败，稍后重试"), math.max(task.attempt or 1, 1))
+    end
     if task.state == "running" then return detail(task) or state(task) end
     return state(task)
 end

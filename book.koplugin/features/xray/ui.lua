@@ -261,8 +261,11 @@ function UI.scanBook(ui, identity)
             retryable = function() return true end,
             on_done = function(result)
                 if not result.ok then
-                    info(T(_("X-Ray 全书分析中断：%1。再次分析会从断点继续"),
-                        tostring(result.err or _("未知错误")):match("[^\n]*")))
+                    -- 中途段已落库时 progressed 为真：强调续跑，别说成「整次失败」。
+                    local err = tostring(result.err or _("未知错误")):match("[^\n]*")
+                    info(result.progressed
+                        and T(_("X-Ray 已保存部分结果（%1）。再次分析会从断点继续"), err)
+                        or T(_("X-Ray 全书分析中断：%1。再次分析会从断点继续"), err))
                     return
                 end
                 info(_("X-Ray 全书分析完成"))

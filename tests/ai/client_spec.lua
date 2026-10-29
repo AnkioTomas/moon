@@ -156,9 +156,11 @@ local missing, err = Client.decodeResponse('{"error":{"message":"bad key"}}')
 Assert.is_nil(missing)
 Assert.eq(err, "bad key")
 
--- 只取 content，不回退到 reasoning 字段
+-- 优先 content；content 空时仅当 reasoning 像 JSON 才回落（#77 网关把答塞进 reasoning）
 Assert.eq(Client.decodeResponse('{"choices":[{"message":{"content":"hello"}}]}'), "hello")
 Assert.eq(Client.decodeResponse('{"choices":[{"message":{"content":"out","reasoning_content":"think"}}]}'), "out")
+Assert.eq(Client.decodeResponse(
+    '{"choices":[{"message":{"content":"","reasoning_content":"{\\"ok\\":true}"}}]}'), '{"ok":true}')
 -- 混在正文里的思考过程（含只剩结尾标签的）去掉；只有思考没有回答算空回复
 Assert.eq(Client.decodeResponse('{"choices":[{"message":{"content":"<think>先想想</think>\\n\\n回答"}}]}'), "回答")
 Assert.eq(Client.decodeResponse('{"choices":[{"message":{"content":"想了一半</think>回答"}}]}'), "回答")

@@ -145,7 +145,11 @@ Assert.eq(TaskDialog.status(snap), "1.0 MB")
 snap = { kind = "sync", state = "running", text = "正在上传 a.epub", count = 1, total = 3, attempt = 1 }
 Assert.eq(TaskDialog.status(snap), "正在上传 a.epub 1/3")
 snap.state = "retry_wait"
+snap.count = 0
 Assert.eq(TaskDialog.status(snap), "第 1 次失败，稍后重试")
+snap.count = 2
+Assert.eq(TaskDialog.status(snap), "已有进展，稍后继续（第 1 次）")
+snap.count = 0
 snap.state = "queued"
 Assert.eq(TaskDialog.status(snap), "排队中")
 snap = { kind = "cache", state = "finished", ok = true }

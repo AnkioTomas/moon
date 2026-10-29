@@ -228,6 +228,24 @@ Assert.eq(r_done.n, 3, "第 3 次失败不再重试")
 Assert.eq(#r_next.runs, 1)
 r_next.runs[1].done({})
 
+-- 有进展的失败：立刻续跑，不进 retry_wait（避免「第 N 次失败」误报，见 #77）
+local p_done
+local p = Tasks.enqueue(spec("prog", "ai", {
+    retryable = function(result) return not result.ok end,
+    on_done = function(result) p_done = result end,
+}))
+local before_sched = #scheduled
+p.runs[1].done({ ok = false, err = "chunk", progressed = true })
+Assert.eq(p.state, "running", "有进展立刻开下一次")
+Assert.eq(#p.runs, 2)
+Assert.eq(#scheduled, before_sched, "有进展不排退避定时器")
+Assert.eq(p.attempt, 1, "有进展清零后再 start 仍从 1 计")
+p.runs[2].done({ ok = false, err = "again" })
+Assert.eq(p.state, "retry_wait", "没进展才进退避")
+scheduled[#scheduled].fn()
+p.runs[3].done({ ok = true })
+Assert.is_true(p_done.ok)
+
 -- 退避中取消：撤掉定时器。
 local w = Tasks.enqueue(spec("w", "download", { retryable = function() return true end }))
 w.runs[1].done({})
