@@ -2,7 +2,7 @@
 l10n 目录一致性：en 与 zh_TW 键集必须双向一致，所有值是非空字符串。
 键漂移（漏翻）时失败消息列出差异键。
 
-@module tests.l10n_spec
+@module tests.l10n.dicts_spec
 --]]
 
 local Assert = require("support.assert")

@@ -3,7 +3,7 @@
 桌面壳：三层（内容 / 顶栏 / 底栏）拼装；active 才刷屏；外壳签名变了整壳重建全刷，
 否则只换内容层与底栏层、只刷顶栏以下；updateTopbar 只换顶栏、只刷顶栏；
 底栏点当前格吞掉点按不切页；换源重算 Tab 回首页；Destroy 补齐 Pause 且只做一次。
-@module tests.desktop_spec
+@module tests.desktop.init_spec
 --]]
 local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")

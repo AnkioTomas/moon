@@ -1,7 +1,7 @@
 --[[--
 html2epub 离线用例
 
-@module tests.html2epub_spec
+@module tests.convert.html2epub_spec
 --]]
 
 local Assert = require("support.assert")
