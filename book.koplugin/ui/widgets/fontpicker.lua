@@ -88,7 +88,12 @@ local function saveSelection(opts, id, name, item)
         if opts.on_done then opts.on_done(id, name) end
         return
     end
-    Fonts.set(id, name)
+    -- set 里 FreeType 实开校验：坏文件拒写，避免下次冷启动 FileManager 直接崩。
+    local ok, err = Fonts.set(id, name)
+    if not ok then
+        Toast:new{ text = err or _("字体无法打开") }:show()
+        return
+    end
     Toast:new{ text = T(_("已选择：%1"), name), timeout = 2 }:show()
     if opts.on_done then opts.on_done(id, name) end
 end

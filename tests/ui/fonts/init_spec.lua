@@ -56,6 +56,17 @@ end
 package.preload["ui/font"] = function()
     return { fontmap = { cfont = "NotoSans-Regular.ttf" }, faces = {} }
 end
+-- FreeType 实开：路径含 xwwk / corrupt 的模拟坏字体（与 KPW5 crash.log 同类）。
+package.preload["ffi/freetype"] = function()
+    return {
+        newFaceSize = function(path)
+            if path:find("xwwk", 1, true) or path:find("corrupt", 1, true) then
+                error("freetype error code: 8")
+            end
+            return { done = function() end }
+        end,
+    }
+end
 package.preload["json"] = function() return { decode = function() end } end
 package.preload["ffi/util"] = function() return { md5 = function() return "" end } end
 package.preload["logger"] = function() return { info = function() end, warn = function() end } end
@@ -107,6 +118,7 @@ package.preload["libs/libkoreader-lfs"] = function()
 end
 package.preload["fontlist"] = function()
     local FontList = {
+        fontdir = "/tmp/ko/fonts",
         fontlist = { "/tmp/reader-font.ttf", "/tmp/sys.ttf", "/tmp/broken.ttf", "/tmp/霞鹜 文楷.ttf" },
         fontinfo = fontinfo,
         getFontList = function(self) return self.fontlist end,
@@ -114,6 +126,9 @@ package.preload["fontlist"] = function()
     }
     return FontList
 end
+-- SAFE_UI 默认字体：当作内置目录里可打开，模拟干净的 KOReader 字库。
+files["/tmp/ko/fonts/NotoSans-Regular.ttf"] = true
+files["/tmp/ko/fonts/NotoSans-Bold.ttf"] = true
 package.preload["document/credocument"] = function()
     return {
         engineInit = function()
@@ -295,9 +310,54 @@ Assert.is_nil(miss_ok)
 Assert.eq(miss_err, "字体文件不存在")
 
 -- 配置字体已被删除：UI 退回首次备份的默认 fontmap
-Fonts.set("gone", "Gone")
+local gone_ok = Fonts.set("gone", "Gone")
+Assert.is_nil(gone_ok, "缺文件时 set 拒绝落盘")
+moon_settings.ui_font = "gone"
+moon_settings.ui_font_name = "Gone"
 Fonts.applyCurrent()
 Assert.eq(require("ui/font").fontmap.cfont, "NotoSans-Regular.ttf", "缺字体时恢复默认 fontmap")
+Assert.eq(moon_settings.ui_font, "", "缺字体时清掉坏配置")
+
+-- 文件在但 FreeType 打不开：拒绝 set；已落盘的坏配置 apply 时回退并删微信坏包
+local real_os_remove = os.remove
+os.remove = function(path) files[path] = nil return true end
+files["/tmp/fonts/xwwk.ttf"] = true
+local bad_ok, bad_err = Fonts.set("xwwk", "坏字体")
+Assert.is_nil(bad_ok)
+Assert.eq(bad_err, "字体文件损坏，无法用作界面字体")
+Assert.eq(Fonts.currentId(), "", "set 失败不改变当前 id")
+Assert.is_nil(files["/tmp/fonts/xwwk.ttf"], "微信坏包被删，可重新下载")
+files["/tmp/fonts/xwwk.ttf"] = true
+moon_settings.ui_font = "xwwk"
+moon_settings.ui_font_name = "坏字体"
+Fonts.applyCurrent()
+Assert.eq(require("ui/font").fontmap.cfont, "NotoSans-Regular.ttf", "坏字体不进 fontmap")
+Assert.eq(moon_settings.ui_font, "", "apply 清掉坏配置")
+Assert.is_nil(files["/tmp/fonts/xwwk.ttf"], "apply 也删微信坏包")
+os.remove = real_os_remove
+
+-- settings.reader.lua 已污染 fontmap：插件 init 前 Font.fontmap 已是坏 basename，
+-- 首次 applyCurrent 必须用 SAFE_UI 治愈，不能把毒药备份成「默认」。
+package.loaded["ui.fonts"] = nil
+local Fonts2 = require("ui.fonts")
+local Font2 = require("ui/font")
+Font2.fontmap.cfont = "xwwk.ttf"
+Font2.fontmap.smallinfofont = "xwwk.ttf"
+files["/tmp/fonts/xwwk.ttf"] = true
+local deleted_fontmap = false
+_G.G_reader_settings = {
+    has = function(_, key) return key == "fontmap" end,
+    delSetting = function(_, key) if key == "fontmap" then deleted_fontmap = true end end,
+}
+moon_settings.ui_font = ""
+Fonts2.applyCurrent()
+Assert.eq(Font2.fontmap.cfont, "NotoSans-Regular.ttf", "污染的 fontmap 被 SAFE_UI 覆盖")
+Assert.eq(Font2.fontmap.smallinfofont, "NotoSans-Regular.ttf")
+Assert.is_true(deleted_fontmap, "清掉持久化 fontmap，避免下次 reader.lua 再灌入")
+_G.G_reader_settings = nil
+os.remove = function(path) files[path] = nil return true end
+Fonts2.applyCurrent() -- 仍无用户字体
+os.remove = real_os_remove
 
 -- 字体信息缺失时 _readList 会把整个目录追加进 fontlist：只能留下已登记的那一条
 FontList._readList = function(self, dir)

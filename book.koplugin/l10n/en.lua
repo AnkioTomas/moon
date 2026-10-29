@@ -287,6 +287,8 @@ return {
     ["X-Ray 全书分析中断：%1。再次分析会从断点继续"] = "X-Ray whole-book analysis stopped: %1. Running it again resumes where it left off",
     ["X-Ray 已保存部分结果（%1）。再次分析会从断点继续"] = "X-Ray saved partial results (%1). Running it again resumes where it left off",
     ["已有进展，稍后继续（第 %1 次）"] = "Progress made, continuing soon (attempt %1)",
+    ["字体文件损坏，无法用作界面字体"] = "Font file is corrupt and can't be used as the UI font",
+    ["字体无法打开"] = "Can't open this font",
     ["上次全书分析进行到第 %1 / %2 段，继续从断点分析？"] = "The last whole-book analysis reached part %1 of %2. Resume from there?",
     ["逐段读取全书，由 AI 一次性提取所有人物、地点和专有名词，结果包含剧透。书越长请求越多、耗时越久，可转到后台运行。继续？"] = "The whole book will be sent to AI section by section to extract all characters, locations and terms at once. Results include spoilers. Longer books take more requests and time; it can run in the background. Continue?",
     ["前光开关"] = "Toggle frontlight",

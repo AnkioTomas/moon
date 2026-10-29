@@ -1,8 +1,9 @@
 --[[--
 月读插件字体：id → 文件 → CRE 字体名的解析，以及 UI 字体设置。
 
-  set(id, name)       只写 ui.ui_font / ui_font_name，绝不碰 Font.fontmap
-  applyCurrent()      唯一改 Font.fontmap 的入口；onCreate 每进程只调一次，设置页换字体后再调
+  set(id, name)       写 ui.ui_font / ui_font_name；非空 id 须 FreeType 能打开，否则拒绝
+  applyCurrent()      唯一改 Font.fontmap 的入口；坏字体/污染的 settings.fontmap 回退 SAFE_UI
+  canOpen(path)       FreeType 实开探测（选字体与 apply 共用）
   faceForId / faceNameForId  解析字体名（前者顺带注册进 CRE）；pathForId 只给文件路径
 
 字源：
@@ -36,6 +37,26 @@ local UI_FACES = {
     "rifont", "pgfont", "hfont",
     "infofont", "smallinfofont", "smallinfofontbold",
     "x_smallinfofont", "xx_smallinfofont",
+}
+
+-- KOReader frontend/ui/font.lua 默认值；settings.reader.lua 里的 fontmap 若已是坏字体，
+-- 进程里 Font.fontmap 在插件 init 前就被污染，不能当「恢复默认」的备份源。
+local SAFE_UI = {
+    cfont = "NotoSans-Regular.ttf",
+    tfont = "NotoSans-Bold.ttf",
+    smalltfont = "NotoSans-Bold.ttf",
+    x_smalltfont = "NotoSans-Bold.ttf",
+    ffont = "NotoSans-Regular.ttf",
+    smallffont = "NotoSans-Regular.ttf",
+    largeffont = "NotoSans-Regular.ttf",
+    rifont = "NotoSans-Regular.ttf",
+    pgfont = "NotoSans-Regular.ttf",
+    hfont = "NotoSans-Regular.ttf",
+    infofont = "NotoSans-Regular.ttf",
+    smallinfofont = "NotoSans-Regular.ttf",
+    smallinfofontbold = "NotoSans-Bold.ttf",
+    x_smallinfofont = "NotoSans-Regular.ttf",
+    xx_smallinfofont = "NotoSans-Regular.ttf",
 }
 
 local _defaults = nil
@@ -258,6 +279,47 @@ function Fonts.faceForId(id)
     return face
 end
 
+--- FreeType 能否真正打开该文件。文件在盘上 ≠ 可用：坏 ttf / 假后缀 / 截断下载
+--- 会让 KOReader 冷启动建 FileManager 时 face 为 nil 直接崩（见 KPW5 crash.log）。
+---@param path string
+---@return boolean
+function Fonts.canOpen(path)
+    if not Fonts.isFile(path) then return false end
+    local ok, size = pcall(function()
+        return require("ffi/freetype").newFaceSize(path, 16)
+    end)
+    if not ok or not size then return false end
+    -- newFaceSize 的 face 进弱缓存；size 用完立刻释放，避免无意义占坑。
+    if type(size) == "table" or type(size) == "cdata" then
+        pcall(function() size:done() end)
+    end
+    return true
+end
+
+--- fontmap 里的 basename（如 xwwk.ttf）能否被 FreeType 打开（内置目录或 FontList）。
+---@param basename string|nil
+---@return boolean
+local function canOpenMapped(basename)
+    if type(basename) ~= "string" or basename == "" then return false end
+    local dir = FontList.fontdir
+    if dir and Fonts.canOpen(dir .. "/" .. basename) then return true end
+    FontList:getFontList()
+    local escaped = basename:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+    for _idx, path in ipairs(FontList.fontlist or {}) do
+        if path:find(escaped, 1) and Fonts.canOpen(path) then return true end
+    end
+    return false
+end
+
+--- 清掉 KOReader 持久化的 fontmap（reader.lua 启动时会灌进 Font.fontmap，早于插件）。
+local function clearPersistedFontmap()
+    local settings = rawget(_G, "G_reader_settings")
+    if settings and settings.has and settings:has("fontmap") then
+        settings:delSetting("fontmap")
+        logger.warn("book.font cleared persisted fontmap")
+    end
+end
+
 --- 当前配置的 UI 字体 id；空串表示用系统默认 fontmap。
 ---@return string
 function Fonts.currentId()
@@ -273,25 +335,55 @@ function Fonts.currentName()
     return _("系统默认")
 end
 
+--- 写 ui.ui_font；非空 id 必须能被 FreeType 打开，否则拒绝落盘（避免一键砖机）。
 ---@param id string 空=恢复默认 fontmap
 ---@param name string|nil
+---@return boolean|nil ok, string|nil err
 function Fonts.set(id, name)
+    if id ~= "" then
+        local path, err = resolvePath(id)
+        if not path then return nil, err or _("字体文件不存在") end
+        if not Fonts.canOpen(path) then
+            -- 微信读书下载的坏包清掉，下次可选「重新下载」。
+            if path == Fonts.wereadPath(id) then Fonts.removeDownloaded(id) end
+            return nil, _("字体文件损坏，无法用作界面字体")
+        end
+    end
     local s = MoonSettings.get("ui")
     s.ui_font = id
     s.ui_font_name = id ~= "" and name or ""
     MoonSettings.save("ui")
     logger.info("book.font set", id, s.ui_font_name)
+    return true
+end
+
+--- 清掉已落盘的坏界面字体配置（不经 set 校验，避免循环）。
+local function clearUiFont()
+    local s = MoonSettings.get("ui")
+    s.ui_font = ""
+    s.ui_font_name = ""
+    MoonSettings.save("ui")
 end
 
 --- 把配置里的字体真正写进 Font.fontmap（唯一改 fontmap 的入口）。
---- 字体文件已不存在时退回系统默认，只记警告，不让 UI 因缺字体起不来。
+--- 文件缺失或 FreeType 打不开时退回系统默认并清配置，不让 KO 因坏字体起不来。
+--- 在 FileManager:setupLayout 之前由插件 init 调用，正好挡在冷启动崩点前。
 function Fonts.applyCurrent()
-    -- 只备份一次：这份快照是「恢复系统默认」的唯一依据，被后续 apply 覆盖过就找不回来了。
+    -- 只备份一次。settings 里已污染的 fontmap 不能当备份，改用 SAFE_UI。
     if not _defaults then
         _defaults = {}
+        local healed = false
         for _idx, key in ipairs(UI_FACES) do
-            _defaults[key] = Font.fontmap[key]
+            local cur = Font.fontmap[key]
+            if canOpenMapped(cur) then
+                _defaults[key] = cur
+            else
+                _defaults[key] = SAFE_UI[key] or "NotoSans-Regular.ttf"
+                Font.fontmap[key] = _defaults[key]
+                healed = true
+            end
         end
+        if healed then clearPersistedFontmap() end
     end
     -- 界面字体加粗：TextWidget / TextBoxWidget 创建时都经 getAdjustedFace 决定是否加粗，在这里统一打开。
     if not _bold_patched then
@@ -302,18 +394,23 @@ function Fonts.applyCurrent()
         end
     end
     local id = Fonts.currentId()
-    local path = id ~= "" and resolvePath(id)
-    if path then
+    local path = id ~= "" and select(1, resolvePath(id)) or nil
+    if path and Fonts.canOpen(path) then
         local base = Text.basename(path)
         for _idx, key in ipairs(UI_FACES) do
             Font.fontmap[key] = base
         end
-    else
-        if id ~= "" then logger.warn("book.font missing, fallback default", id) end
-        for key, val in pairs(_defaults) do
-            Font.fontmap[key] = val
-        end
+        return
     end
+    if id ~= "" then
+        logger.warn("book.font unusable, fallback default", id, path and "bad file" or "missing")
+        if path and path == Fonts.wereadPath(id) then Fonts.removeDownloaded(id) end
+        clearUiFont()
+    end
+    for key, val in pairs(_defaults) do
+        Font.fontmap[key] = val
+    end
+    clearPersistedFontmap()
 end
 
 --- 插件 init：UI fontmap 每进程应用一次，阅读字体组合按文档安装。
