@@ -73,10 +73,23 @@ local function config()
     return MoonSettings.get("desktop.pages.insight")
 end
 
+--- 显隐表：defaults 只在首次 adopt 补；残缺 / 被冲掉的配置这里兜成空表，避免统计页直接崩。
+---@param cfg table
+---@param key string
+---@return table
+local function hiddenMap(cfg, key)
+    local map = cfg[key]
+    if type(map) ~= "table" then
+        map = {}
+        cfg[key] = map
+    end
+    return map
+end
+
 --- 启用的页面（保持目录顺序）；用户全关时退回全部，翻页条不能没有页。
 ---@return InsightPageSpec[]
 function Layout.pages()
-    local hidden = config().hidden_pages
+    local hidden = hiddenMap(config(), "hidden_pages")
     local out = {}
     for _idx, page in ipairs(Layout.catalog()) do
         if not hidden[page.id] then out[#out + 1] = page end
@@ -88,13 +101,13 @@ end
 ---@param card_id string
 ---@return boolean
 function Layout.shown(page_id, card_id)
-    return not config().hidden_cards[page_id .. "." .. card_id]
+    return not hiddenMap(config(), "hidden_cards")[page_id .. "." .. card_id]
 end
 
 ---@param page_id string
 ---@return boolean
 function Layout.pageShown(page_id)
-    return not config().hidden_pages[page_id]
+    return not hiddenMap(config(), "hidden_pages")[page_id]
 end
 
 --- 切换页面显隐；只剩一页时拒绝关闭。
@@ -102,15 +115,16 @@ end
 ---@return boolean ok
 function Layout.togglePage(page_id)
     local cfg = config()
-    if cfg.hidden_pages[page_id] then
-        cfg.hidden_pages[page_id] = nil
+    local hidden = hiddenMap(cfg, "hidden_pages")
+    if hidden[page_id] then
+        hidden[page_id] = nil
     else
         local shown = 0
         for _idx, page in ipairs(Layout.catalog()) do
-            if not cfg.hidden_pages[page.id] then shown = shown + 1 end
+            if not hidden[page.id] then shown = shown + 1 end
         end
         if shown <= 1 then return false end
-        cfg.hidden_pages[page_id] = true
+        hidden[page_id] = true
     end
     MoonSettings.save("desktop.pages.insight", cfg)
     return true
@@ -120,8 +134,9 @@ end
 ---@param card_id string
 function Layout.toggleCard(page_id, card_id)
     local cfg = config()
+    local hidden = hiddenMap(cfg, "hidden_cards")
     local key = page_id .. "." .. card_id
-    cfg.hidden_cards[key] = (not cfg.hidden_cards[key]) or nil
+    hidden[key] = (not hidden[key]) or nil
     MoonSettings.save("desktop.pages.insight", cfg)
 end
 

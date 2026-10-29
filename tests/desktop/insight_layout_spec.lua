@@ -57,6 +57,14 @@ Assert.is_false(Layout.togglePage("day"))
 Assert.eq(#Layout.pages(), 1)
 cfg.hidden_pages = {}
 
+-- 残缺配置：hidden_* 缺失时不当崩，当成全显示。
+cfg.hidden_pages, cfg.hidden_cards = nil, nil
+Assert.is_true(#Layout.pages() >= 1)
+Assert.is_true(Layout.shown("day", "rings"))
+Assert.is_true(Layout.pageShown("day"))
+Assert.eq(type(cfg.hidden_pages), "table", "读路径写回空表")
+Assert.eq(type(cfg.hidden_cards), "table")
+
 -- 统计页总开关只控制桌面入口，不改各页和卡片的显隐配置。
 Kit.sections.desktop = {}
 package.preload["ui.themes.widgets.row"] = function()
