@@ -1635,7 +1635,7 @@ do
     reply = function() return { kind = "viewer" } end
     local ahead = open(toc[2])
     Assert.is_true(ahead.meta and ahead.meta.handled)
-    Assert.eq(opened[#opened].start_page, 15, "journal 比云端靠后：起始页用 journal，不往回拽")
+    Assert.eq(opened[#opened].start_page, 6, "把云端位置当提示传给 kamare（journal 合并在那边做）")
     written = {}
     opened[#opened].on_close(9, 20)
     Assert.eq(written["60:6001"].page, 15, "关书落库以 journal 为准（不写回调的瞬时页）")
