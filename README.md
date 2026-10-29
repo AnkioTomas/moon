@@ -546,6 +546,7 @@ Release 里另有两个独立插件包，需要同时安装月读才能使用：
 - 测试数据全部写到仓库根的 `test/` 沙箱（git 忽略，可随时删除），绝不碰模拟器数据。
 - 仓库根有 `koreader/` 克隆时 frontend 模块用真的；有模拟器构建时再多跑少数需要 native 库的 spec。没有也只是这几条 skip，其余全跑。
 - 静态检查（LuaLS，仓库根执行，两个路径必须是绝对路径）：`lua-language-server --check="$PWD" --configpath="$PWD/.luarc.json" --checklevel=Warning`，提交前应为 0 条。
+- 推到 `main` / 开 PR 时 GitHub Actions 自动跑全部测试（`.github/workflows/test.yml`）。
 
 本机模拟器需要仓库根目录下有 KOReader 源码和 Homebrew GNU 工具链：
 
