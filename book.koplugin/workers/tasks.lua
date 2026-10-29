@@ -235,6 +235,14 @@ local function settle(task, result)
     end
     if result.progressed then task.attempt = 0 end
     if task.retryable and task.attempt < MAX_ATTEMPTS and task.retryable(result) then
+        -- 本次已有进展（如 X-Ray 段已落库）：立刻续跑，不进 retry_wait。
+        -- 否则前台会显示「第 N 次失败」——用户看到库里已有结果，以为误报。
+        if result.progressed then
+            task.state = "queued"
+            changed()
+            startNext()
+            return
+        end
         -- 退避期间继续占执行权，避免异类任务趁窗口开跑。
         task.state = "retry_wait"
         task.retry_tick = function()

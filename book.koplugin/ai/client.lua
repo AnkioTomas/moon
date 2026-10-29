@@ -65,29 +65,41 @@ local function snip(s, n)
     return s:sub(1, n) .. ("…(" .. #s .. "B)")
 end
 
---- 提取 message 中用户可见正文（只取 content，reasoning_content 等推理字段一律不要）；数组形式按行拼接。
+--- 字符串字段里取出非空正文。
+---@param value any
+---@return string|nil
+local function nonEmptyString(value)
+    return type(value) == "string" and value ~= "" and value or nil
+end
+
+--- 提取 message 中用户可见正文；优先 content。部分网关把 JSON 答进 reasoning / reasoning_content
+--- 且 content 为空（见 issue #77 step-5-preview）：仅当该字段看起来像 JSON 对象时才回落采用。
 ---@param message table|nil
 ---@return string|nil
 local function messageContent(message)
-    local value = type(message) == "table" and message.content
+    if type(message) ~= "table" then return nil end
+    local value = message.content
     if type(value) == "string" then
-        return value ~= "" and value or nil
-    end
-    if type(value) ~= "table" then
-        return nil
-    end
-    local parts = {}
-    for _idx, part in ipairs(value) do
-        if type(part) == "string" and part ~= "" then
-            parts[#parts + 1] = part
-        elseif type(part) == "table" then
-            local text = part.text or part.content
-            if type(text) == "string" and text ~= "" then
-                parts[#parts + 1] = text
+        if value ~= "" then return value end
+    elseif type(value) == "table" then
+        local parts = {}
+        for _idx, part in ipairs(value) do
+            if type(part) == "string" and part ~= "" then
+                parts[#parts + 1] = part
+            elseif type(part) == "table" then
+                local text = part.text or part.content
+                if type(text) == "string" and text ~= "" then
+                    parts[#parts + 1] = text
+                end
             end
         end
+        if #parts > 0 then return table.concat(parts, "\n") end
     end
-    return #parts > 0 and table.concat(parts, "\n") or nil
+    for _idx, key in ipairs({ "reasoning_content", "reasoning" }) do
+        local alt = nonEmptyString(message[key])
+        if alt and alt:find("{", 1, true) then return alt end
+    end
+    return nil
 end
 
 --- 去掉混在正文里的思考过程：部分推理模型 / 网关把它包在 <think>…</think> 里放进 content

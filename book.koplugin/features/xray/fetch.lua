@@ -465,14 +465,33 @@ function Fetch.scanBook(identity, path)
                     title, author, math.floor(index * 100 / #bounds), chunk, "", Store.promptSnapshot(existing),
                     nil, profile()) },
             }
-            request = AI.jsonExtract(messages, { localize = true, max_tokens = profile().max_tokens, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
-                if not decoded then finish({ ok = false, err = err }); return end
+            --- 同段 AI 偶发失败（网关慢 / 截断）先就地再试一次，避免整次尝试直接进「失败」退避。
+            local retried = false
+            local function onChunk(decoded, err)
+                if not decoded then
+                    if not retried then
+                        retried = true
+                        require("utils.log").warn("xray.scan chunk retry", index, err)
+                        request = AI.jsonExtract(messages, {
+                            localize = true, max_tokens = profile().max_tokens,
+                            timeout = require("http.timeout").ai(1.5),
+                        }, onChunk)
+                        return
+                    end
+                    require("utils.log").warn("xray.scan chunk failed", index, err)
+                    finish({ ok = false, err = err })
+                    return
+                end
                 local ok, save_err = pcall(mergeAndSave, identity, filterGrounded(cleanPayload(decoded), chunk))
                 if not ok then finish({ ok = false, err = save_err }); return end
                 XrayDB.saveScanCursor(identity.source_id, identity.stable_id, digest, index, #bounds)
                 index = index + 1
                 step()
-            end)
+            end
+            request = AI.jsonExtract(messages, {
+                localize = true, max_tokens = profile().max_tokens,
+                timeout = require("http.timeout").ai(1.5),
+            }, onChunk)
         end
         step()
         return { cancel = function() if request then request.cancel() end end }
