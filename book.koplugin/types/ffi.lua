@@ -226,5 +226,5 @@ function FreeTypeSize:done() end
 
 --- KOReader 在 ffi/loadlib.lua 扩充的 LuaJIT FFI 字段。
 ---@class ffilib
----@field loadlib (fun(name: string): any)|nil
+---@field loadlib (fun(name: string, version: string|number|nil, ...): any)|nil
 ---@field log (fun(...: any))|nil

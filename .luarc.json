@@ -22,6 +22,7 @@
       ".git",
       "screenshots",
       "koreader",
+      "tests/support/thirdparty",
       "book.koplugin/source/qidian/fock_wasm.lua",
       "book.koplugin/source/qqreader/fock_wasm.lua"
     ],

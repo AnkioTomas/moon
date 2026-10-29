@@ -532,25 +532,26 @@ Release 里另有两个独立插件包，需要同时安装月读才能使用：
 
 ## 开发与测试
 
-项目不需要构建，插件交付物是 `book.koplugin/`，以及 `extensions/` 下可选的拓展书源插件。离线测试不会启动 KOReader：
+项目不需要构建，插件交付物是 `book.koplugin/`，以及 `extensions/` 下可选的拓展书源插件。
+
+离线测试只需要系统 `luajit` 和 `libsqlite3`（macOS 自带；Debian/Ubuntu `apt install luajit libsqlite3-0`），不启动 KOReader、不需要克隆 KOReader 源码：
 
 ```bash
-./tests/run.sh
+./tests/run.sh                            # 全部
+./tests/run.sh tests/book/catalog_spec.lua  # 单个文件（可多个）
 ```
 
-运行单个测试：
-
-```bash
-./tests/run.sh tests/book/catalog_spec.lua
-```
+- 测试文件 `tests/<模块镜像>/xxx_spec.lua`，与 `book.koplugin/` 目录一一对应；跨模块的架构检查（`feature_boundary_spec`、`text_box_bg_spec`）放 `tests/` 根。
+- 每个 spec 在独立 luajit 进程里跑，0 断言判失败。断言库 `tests/support/assert.lua`，KOReader 模块桩 `tests/support/stubs.lua`（缺什么补什么，不整树 stub），主题弹窗记录桩 `tests/support/theme_stubs.lua`。
+- 测试数据全部写到仓库根的 `test/` 沙箱（git 忽略，可随时删除），绝不碰模拟器数据。
+- 仓库根有 `koreader/` 克隆时 frontend 模块用真的；有模拟器构建时再多跑少数需要 native 库的 spec。没有也只是这几条 skip，其余全跑。
+- 静态检查（LuaLS，仓库根执行，两个路径必须是绝对路径）：`lua-language-server --check="$PWD" --configpath="$PWD/.luarc.json" --checklevel=Warning`，提交前应为 0 条。
 
 本机模拟器需要仓库根目录下有 KOReader 源码和 Homebrew GNU 工具链：
 
 ```bash
 ./run.sh
 ```
-
-测试数据写入仓库根目录的 `test/` 沙箱，不会写入本机 KOReader 的真实 `config/`。
 
 新增数据源遵循 `source/base.lua` 和 `source/registry.lua` 接口；第三方书源以独立插件形式提供 `moon_source.lua`，契约见 [`examples/moonsource-demo.koplugin/moon_source.lua`](examples/moonsource-demo.koplugin/moon_source.lua)。文字处理复用 `utils/text.lua`，SQLite 访问必须使用参数化查询，耗时文件与解析任务放到 worker，数据库写入留在主进程。
 
