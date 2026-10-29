@@ -45,7 +45,8 @@ end
 package.preload["ui.fonts"] = function()
     return {
         currentId = function() return "Font25.ttf" end,
-        set = function(id) selected = id end,
+        -- set 成功须返回真值；fontpicker 按 ok 决定 Toast「已选择」还是「无法打开」。
+        set = function(id) selected = id; return true end,
         downloadedPath = function(id) return id:match("^wr") and "/fonts/" .. id .. ".ttf" end,
     }
 end
