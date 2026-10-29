@@ -13,7 +13,7 @@ quick_panel_reader_actions 的 id 保持用户原来的启用和排序；不在�
 字段（注册时校验，不合法直接报错）：
 - 必填：`id` / `title` / `icon`（Material 图标名）/ `scope`
 - 多语言：`title` 必须经 gettext（`_()`），源字符串即简体中文；新文案同时加进
-  `l10n/en.lua` 与 `l10n/zh_TW.lua`（tests/l10n_spec.lua 双向校验）；模块顶部 `require("l10n").apply()`
+  `l10n/en.lua` 与 `l10n/zh_TW.lua`（tests/l10n/dicts_spec.lua 双向校验）；模块顶部 `require("l10n").apply()`
 - 二选一：`run(ctx)` 自己执行；或 `event` 广播 KOReader 事件名
 - 可选：`available(ctx)` 是否显示。设置页调用时 `ctx.ui` 为 nil，要能勾选就返回 true；
   `active(ctx)` 是否高亮；`active_icon` 高亮时的图标；`keep_open` 点完不关面板（随后刷新）；

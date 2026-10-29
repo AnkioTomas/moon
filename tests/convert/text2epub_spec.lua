@@ -1,7 +1,7 @@
 --[[--
 text2epub 文本解析用例。
 
-@module tests.text2epub_spec
+@module tests.convert.text2epub_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
