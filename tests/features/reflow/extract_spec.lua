@@ -77,7 +77,22 @@ local function pagingUi(lines_by_page)
     return { document = doc, paging = {} }
 end
 
--- 流式：前几页按相邻 xpointer 取，末页按屏幕范围取；相同的边界行只留一份；取完放回阅读位置
+-- 流式：有 DOM 接口时整棵倒出，不再逐页；剥标签后按行落盘
+do
+    local ui = rollingUi(3, { "第一行\n重复行", "重复行\n第二行", "第三行" })
+    function ui.document:getHTMLFromXPointer(xp, flags)
+        Assert.eq(xp, ".0")
+        Assert.eq(flags, 0x0020)
+        return "<RootNode><p>第一行</p><p>重复行</p><p>第二行</p><p>第三行</p></RootNode>"
+    end
+    local text, err = run(ui)
+    Assert.is_nil(err)
+    Assert.eq(text, "第一行\n重复行\n第二行\n第三行")
+    Assert.len(ui.document.calls, 0, "DOM 路径不碰逐页 API")
+    Assert.eq(ui.document.at, "reading")
+end
+
+-- 流式：没有 DOM 接口（或倒出失败）退回逐页；边界行去重；末页按屏幕取
 do
     local ui = rollingUi(3, { "第一行\n重复行", "重复行\n第二行", "第三行" })
     local text, err = run(ui)
@@ -85,6 +100,16 @@ do
     Assert.eq(text, "第一行\n重复行\n第二行\n第三行")
     Assert.eq(table.concat(ui.document.calls, ","), "p1>p2,p2>p3,screen:0,0,600,800:true")
     Assert.eq(ui.document.at, "reading")
+end
+
+-- DOM 倒出失败（空）：退回逐页仍能取到字
+do
+    local ui = rollingUi(2, { "甲", "乙" })
+    function ui.document:getHTMLFromXPointer() return "" end
+    local text, err = run(ui)
+    Assert.is_nil(err)
+    Assert.eq(text, "甲\n乙")
+    Assert.is_true(#ui.document.calls > 0, "空 DOM 应退逐页")
 end
 
 -- 固定版式：按行拼词，相邻两个 ASCII 词之间补空格，中文不加

@@ -6,9 +6,9 @@
 - `meta.json`：`{ origin, file }`，排版版与它的原书路径。
 - `extract.txt` / `extract.txt.part` + `extract.cursor`：非 TXT 取字断点；取消 / 休眠可续，EPUB 成功后清掉。
 
-文字来源：TXT 直接读文件（保留原始换行，章节识别最准）；其余格式从打开的文档逐页取字（见 extract），
-流式文档与带文字层的 PDF/DjVu 都行。读文件、章节识别、打包都在子进程里；取字仍在 UI 线程分批
-（文档对象出不了主进程），批时长约 280ms。取字、识别、打包串成一个可转后台的 convert 任务。
+文字来源：TXT 直接读文件（保留原始换行，章节识别最准）；流式书优先整棵 DOM 一次倒出再剥成纯文本，
+失败或固定版式（PDF/DjVu）再逐页取字（见 extract）。读文件、章节识别、打包都在子进程里；
+取字仍在 UI 线程（文档对象出不了主进程）。取字、识别、打包串成一个可转后台的 convert 任务。
 章节：原文档自带目录（`ui.toc`）的标题整行命中即切章，没有目录或标题对不上的再按常见章节写法识别。
 
 身份：排版版是同一本书的另一个文件，books.path 不动。开书时按 meta.json 解析回同一身份，
@@ -32,18 +32,18 @@ local Reflow = {}
 
 --- 章节识别 + 写 EPUB 的固定底（秒）。与页数弱相关，长书也不再叠乘。
 local EPUB_SECONDS = 90
---- 取字实测校准：至少处理这么多页才信 elapsed/页，否则用设备常数。
+--- 流式书 DOM 一次倒出的取字底（秒）；长书通常几十秒内，偏长一点报。
+local DOM_SECONDS = 45
+--- 逐页路径：取字实测校准，至少处理这么多页才信 elapsed/页。
 local ETA_WARMUP_PAGES = 20
+--- 逐页路径按 Kindle 估（约 35ms/页）。偏长比偏短好。
+local MS_PER_PAGE = 35
 
 ---@param identity BookIdentity
 ---@return string
 local function workDir(identity)
     return require("utils.paths").bookWorkDir(identity.stable_id, identity.source_id) .. "/reflow"
 end
-
---- 按 Kindle 取字速度估（约 35ms/页）。偏长比偏短好；进度跑起来后会改用实测速度。
---- 不探测 Device：离线测试 / 启动早期 require("device") 会拖进真机链。
-local MS_PER_PAGE = 35
 
 --- 把秒数收成「约 N 分钟」；向上取整，避免报短。
 ---@param seconds number|nil
@@ -56,7 +56,8 @@ function Reflow.formatEta(seconds)
     return string.format(_("约 %d 分钟"), minutes)
 end
 
---- 开跑前粗估整次排版秒数（取字剩余页 × 设备常数 + 转 EPUB 底）。
+--- 开跑前粗估整次排版秒数。
+--- 流式 + DOM：取字固定底 + 转 EPUB；固定版式 / DOM 不可用：剩余页 × 常数 + 转 EPUB。
 ---@param ui table ReaderUI
 ---@param identity BookIdentity
 ---@param wipe boolean|nil 真=丢掉断点整本重来
@@ -66,13 +67,18 @@ function Reflow.estimateSeconds(ui, identity, wipe)
     if type(path) == "string" and path:lower():match("%.txt$") then
         return EPUB_SECONDS
     end
+    local Extract = require("features.reflow.extract")
+    local dir = workDir(identity)
+    if not wipe and Extract.donePath(dir) then
+        return EPUB_SECONDS
+    end
+    if Extract.canDumpDom(ui) then
+        return DOM_SECONDS + EPUB_SECONDS
+    end
     local ok, count = pcall(function() return ui.document:getPageCount() end)
     count = ok and tonumber(count) or 0
     if count < 1 then return EPUB_SECONDS end
-    local done = 0
-    if not wipe then
-        done = require("features.reflow.extract").donePages(workDir(identity), count)
-    end
+    local done = wipe and 0 or Extract.donePages(dir, count)
     return math.max(0, count - done) * MS_PER_PAGE / 1000 + EPUB_SECONDS
 end
 
@@ -196,27 +202,37 @@ function Reflow.runAsync(ui, identity, cb, on_progress)
     if origin:lower():match("%.txt$") then
         build(nil)
     else
-        -- 取字进度带剩余时间：先用设备常数，跑过若干页后改用实测速度。
-        local t0 = require("utils.perf").now()
-        local ok_count, page_count = pcall(function() return ui.document:getPageCount() end)
-        page_count = ok_count and tonumber(page_count) or 0
-        local start_done = Extract.donePages(dir, page_count)
-        local function reportExtract(done, total)
-            local left = math.max(0, (tonumber(total) or 0) - (tonumber(done) or 0))
-            local processed = math.max(0, (tonumber(done) or 0) - start_done)
-            local extract_eta
-            if processed >= ETA_WARMUP_PAGES then
-                local elapsed = (require("utils.perf").now() - t0) / 1000
-                if elapsed > 0 then
-                    extract_eta = left * (elapsed / processed)
+        local reportExtract
+        if Extract.canDumpDom(ui) then
+            -- DOM 一次倒出：进度只有 0/1→1/1，报固定剩余（转 EPUB 为主）。
+            reportExtract = function(text, done, total)
+                on_progress(
+                    T(_("正在提取文字（预计剩余 %1）"), Reflow.formatEta(DOM_SECONDS + EPUB_SECONDS)),
+                    done, total)
+            end
+        else
+            -- 逐页：先用设备常数，跑过若干页后改用实测速度。
+            local t0 = require("utils.perf").now()
+            local ok_count, page_count = pcall(function() return ui.document:getPageCount() end)
+            page_count = ok_count and tonumber(page_count) or 0
+            local start_done = Extract.donePages(dir, page_count)
+            reportExtract = function(_text, done, total)
+                local left = math.max(0, (tonumber(total) or 0) - (tonumber(done) or 0))
+                local processed = math.max(0, (tonumber(done) or 0) - start_done)
+                local extract_eta
+                if processed >= ETA_WARMUP_PAGES then
+                    local elapsed = (require("utils.perf").now() - t0) / 1000
+                    if elapsed > 0 then
+                        extract_eta = left * (elapsed / processed)
+                    end
                 end
+                if not extract_eta then
+                    extract_eta = left * MS_PER_PAGE / 1000
+                end
+                on_progress(
+                    T(_("正在提取文字（预计剩余 %1）"), Reflow.formatEta(extract_eta + EPUB_SECONDS)),
+                    done, total)
             end
-            if not extract_eta then
-                extract_eta = left * MS_PER_PAGE / 1000
-            end
-            on_progress(
-                T(_("正在提取文字（预计剩余 %1）"), Reflow.formatEta(extract_eta + EPUB_SECONDS)),
-                done, total)
         end
         current = Extract.run(ui, function(text_file, err)
             if not text_file then return cb(nil, err) end
@@ -359,7 +375,11 @@ local function start(ui, identity, wipe)
         return
     end
     local Extract = require("features.reflow.extract")
-    local resume = not wipe and (Extract.hasCheckpoint(dir) or Extract.donePath(dir))
+    -- DOM 路径不认旧页断点；只有成品 txt 或（非 DOM 的）页断点才算续跑。
+    local resume = not wipe and (
+        Extract.donePath(dir) ~= nil
+        or (not Extract.canDumpDom(ui) and Extract.hasCheckpoint(dir))
+    )
     local eta = Reflow.formatEta(Reflow.estimateSeconds(ui, identity, wipe))
     local body = resume
         and _("检测到上次未完成的排版，将从断点继续。图片、脚注和原排版仍会丢失；排版版另存，原书保留不变。")
