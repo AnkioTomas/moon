@@ -36,6 +36,7 @@ package.preload["features.reflow.extract"] = function()
         hasCheckpoint = function() return false end,
         donePath = function() return nil end,
         donePages = function() return 0 end,
+        canDumpDom = function() return false end,
     }
 end
 local sidecars = {}
@@ -216,6 +217,7 @@ package.loaded["features.reflow.extract"] = {
     clearCheckpoint = function() end,
     hasCheckpoint = function() return false end,
     donePath = function() return nil end,
+    canDumpDom = function() return false end,
 }
 built = nil
 Text2Epub.build = function(opts, cb) built = opts return { cancel = function() end } end
@@ -334,18 +336,27 @@ Assert.matches(Themed.last("confirm").text, "预计需要")
 Assert.matches(Themed.last("confirm").text, "约 %d+ 分钟")
 Assert.is_true(#Themed.made > shown_before)
 
--- 耗时估算：按剩余页数；断点续跑只算没取完的
+-- 耗时估算：DOM 路径是固定底；逐页路径按剩余页数
 Assert.eq(Reflow.formatEta(30), "约 1 分钟")
 Assert.eq(Reflow.formatEta(90), "约 2 分钟")
 Assert.eq(Reflow.formatEta(3600), "约 1 小时 0 分")
-local est_ui = reader("/books/big.epub", "rolling")
-est_ui.document.getPageCount = function() return 12000 end
-local full = Reflow.estimateSeconds(est_ui, identity, true)
-Assert.is_true(full > 90, "长书取字主导耗时")
+local dom_ui = reader("/books/big.epub", "rolling")
+dom_ui.document.getPageCount = function() return 12000 end
+dom_ui.document.getHTMLFromXPointer = function() return "<p>x</p>" end
+package.loaded["features.reflow.extract"].canDumpDom = function() return true end
+local dom_sec = Reflow.estimateSeconds(dom_ui, identity, true)
+Assert.is_true(dom_sec < 300, "DOM 倒出不应再按万页估")
+Assert.is_true(dom_sec > 90, "仍含转 EPUB 底")
+package.loaded["features.reflow.extract"].canDumpDom = function() return false end
+local page_ui = reader("/books/scan.pdf", "pdf")
+page_ui.document.getPageCount = function() return 12000 end
+local full = Reflow.estimateSeconds(page_ui, identity, true)
+Assert.is_true(full > 90, "固定版式取字仍按页估")
 package.loaded["features.reflow.extract"].donePages = function() return 11000 end
-local resume_sec = Reflow.estimateSeconds(est_ui, identity, false)
+local resume_sec = Reflow.estimateSeconds(page_ui, identity, false)
 Assert.is_true(resume_sec < full, "续跑应明显短于整本重来")
 package.loaded["features.reflow.extract"].donePages = function() return 0 end
+package.loaded["features.reflow.extract"].canDumpDom = function() return false end
 
 -- 整个排版是一个后台任务（每本书一个 key，可取消、可转后台），不再弹预览
 local fresh_txt = os.tmpname() .. ".txt"
