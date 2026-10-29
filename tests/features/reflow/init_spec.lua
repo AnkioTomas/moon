@@ -19,12 +19,13 @@ local extracted_ui
 local extract_tmp
 package.preload["features.reflow.extract"] = function()
     return {
-        run = function(ui, cb)
+        run = function(ui, cb, on_progress)
             extracted_ui = ui
             extract_tmp = os.tmpname() .. ".txt"
             local f = assert(io.open(extract_tmp, "wb"))
             f:write("第一章 开始\n正文\n第二章 继续\n更多")
             f:close()
+            if on_progress then on_progress("extract", 1, 1) end
             cb(extract_tmp)
             return { cancel = function() end }
         end,
@@ -34,6 +35,7 @@ package.preload["features.reflow.extract"] = function()
         end,
         hasCheckpoint = function() return false end,
         donePath = function() return nil end,
+        donePages = function() return 0 end,
     }
 end
 local sidecars = {}
@@ -208,7 +210,13 @@ Assert.eq(assert(io.open(dir .. "/book.epub", "rb")):read("*a"), "epub", "旧排
 Assert.is_nil(path)
 -- 取字中取消：不再进入转换；晚到的路径回调只删临时文件
 local extract_cb
-package.loaded["features.reflow.extract"] = { run = function(ui, cb) extract_cb = cb return { cancel = function() end } end }
+package.loaded["features.reflow.extract"] = {
+    run = function(ui, cb) extract_cb = cb return { cancel = function() end } end,
+    donePages = function() return 0 end,
+    clearCheckpoint = function() end,
+    hasCheckpoint = function() return false end,
+    donePath = function() return nil end,
+}
 built = nil
 Text2Epub.build = function(opts, cb) built = opts return { cancel = function() end } end
 handle = Reflow.runAsync(reader("/books/a.epub", "rolling"), identity, function(p, e) path, err = p, e end, function() end)
@@ -314,13 +322,30 @@ Assert.is_false(Reflow.available(reader(bilingual_dir .. "/book.epub", "rolling"
 Assert.is_true(Reflow.available(reflowed_ui), "读自己的排版版仍可用（切回原书）")
 require("ffi/util").purgeDir(bilingual_dir)
 
--- 没有排版版：TXT 直接分析，其它格式先确认有损
+-- 没有排版版：TXT 直接分析，其它格式先确认有损，并带预计耗时
 require("ffi/util").purgeDir(dir)
 local shown_before = #Themed.made
-Reflow.show(reader("/books/a.epub", "rolling"))
+local epub_ui = reader("/books/a.epub", "rolling")
+epub_ui.document.getPageCount = function() return 600 end
+Reflow.show(epub_ui)
 Assert.eq(Themed.last("confirm").ok_text, "继续")
 Assert.matches(Themed.last("confirm").text, "原书保留不变")
+Assert.matches(Themed.last("confirm").text, "预计需要")
+Assert.matches(Themed.last("confirm").text, "约 %d+ 分钟")
 Assert.is_true(#Themed.made > shown_before)
+
+-- 耗时估算：按剩余页数；断点续跑只算没取完的
+Assert.eq(Reflow.formatEta(30), "约 1 分钟")
+Assert.eq(Reflow.formatEta(90), "约 2 分钟")
+Assert.eq(Reflow.formatEta(3600), "约 1 小时 0 分")
+local est_ui = reader("/books/big.epub", "rolling")
+est_ui.document.getPageCount = function() return 12000 end
+local full = Reflow.estimateSeconds(est_ui, identity, true)
+Assert.is_true(full > 90, "长书取字主导耗时")
+package.loaded["features.reflow.extract"].donePages = function() return 11000 end
+local resume_sec = Reflow.estimateSeconds(est_ui, identity, false)
+Assert.is_true(resume_sec < full, "续跑应明显短于整本重来")
+package.loaded["features.reflow.extract"].donePages = function() return 0 end
 
 -- 整个排版是一个后台任务（每本书一个 key，可取消、可转后台），不再弹预览
 local fresh_txt = os.tmpname() .. ".txt"
