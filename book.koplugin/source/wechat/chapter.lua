@@ -303,22 +303,22 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
         end }
 end
 
---- 把脚注 aside 块放到 body 末尾（空块原样返回），外包一层分割线 + 小号灰字。
---- 样式放外层 div 而不是 aside：脚注弹窗取的是 aside 自己的 HTML，样式写在 aside 上会连弹窗一起变小变灰。
+--- 把脚注 aside 块放到 body 末尾（空块原样返回）。
+--- 必须带 ``epub:type="footnote"``：KOReader 默认「页内 EPUB 脚注」靠它抽到当前页底部；脚注弹窗也认。
+--- 不加外层样式 div：页内脚注把 aside 抽走后，空壳分割线会留在章末。
 ---@param html string
 ---@param block string
 ---@return string
 local function appendBlock(html, block)
     if block == "" then return html end
-    block = '<div style="margin-top:2em;padding-top:0.5em;border-top:1px solid #888;font-size:0.8em;color:#555">\n'
-        .. block .. "\n</div>\n"
+    block = block .. "\n"
     local last = html:match(".*()</body>")
     if not last then return html .. block end
     return html:sub(1, last - 1) .. block .. html:sub(last)
 end
 
 --- 原书脚注是 ``<img class="qqreader-footnote" alt="注文">``，注文只在 alt 里，点了没东西可弹。
---- 图标原样包进 noteref 链接，注文放进 body 末尾的 footnote aside，交给 KOReader 脚注弹窗。
+--- 图标原样包进 noteref 链接，注文放进 body 末尾的 footnote aside，交给 KOReader（页底或弹窗由设置决定）。
 --- 不加 ``<p>``、不动正文文字：段落序号与字偏移不变，划线 range 照旧对得上。
 --- 图标尺寸写成行内 style：整书样式表拉取失败 / 缺规则时 CRE 会按 PNG 原始像素×DPI 画成两行高的大方块。
 local FOOTNOTE_STYLE = "height:0.8em;width:auto;vertical-align:super;border:0"
@@ -344,7 +344,9 @@ local function linkFootnotes(html)
     local asides = {}
     for i, alt in ipairs(notes) do
         -- alt 已是属性转义过的文本，直接当元素内容合法。
-        asides[i] = string.format('<aside id="wr-fn%d">[%d] %s <a href="#wr-fnref%d">↩</a></aside>', i, i, alt, i)
+        asides[i] = string.format(
+            '<aside id="wr-fn%d" epub:type="footnote">[%d] %s <a href="#wr-fnref%d">↩</a></aside>',
+            i, i, alt, i)
     end
     return appendBlock(html, table.concat(asides, "\n"))
 end
@@ -448,7 +450,9 @@ local function linkCrossNotes(bookId, html, cb)
         end)
         local asides = {}
         for i, note in ipairs(notes) do
-            asides[i] = string.format('<aside id="wr-nt%d">%s %s <a href="#wr-ntref%d">↩</a></aside>', i, note.label, note.text, i)
+            asides[i] = string.format(
+                '<aside id="wr-nt%d" epub:type="footnote">%s %s <a href="#wr-ntref%d">↩</a></aside>',
+                i, note.label, note.text, i)
         end
         cb(appendBlock(html, table.concat(asides, "\n")))
     end

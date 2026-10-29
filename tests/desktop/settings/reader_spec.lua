@@ -27,10 +27,18 @@ package.preload["ui/widget/buttondialog"] = function() return {} end
 require("support.theme_stubs").install()
 package.preload["ui/uimanager"] = function() return {} end
 
+local saved_settings = {}
 _G.G_reader_settings = {
-    isTrue = function() return false end,
-    saveSetting = function() end,
+    isTrue = function(_, key) return saved_settings[key] == true end,
+    readSetting = function(_, key) return saved_settings[key] end,
+    saveSetting = function(_, key, value) saved_settings[key] = value end,
 }
+package.preload["ui/data/css_tweaks"] = function()
+    return { DEFAULT_GLOBAL_STYLE_TWEAKS = { ["footnote-inpage_epub"] = true, ["footnote-inpage_fb2"] = true } }
+end
+package.preload["apps/reader/readerui"] = function()
+    return { instance = nil }
+end
 
 local Settings = require("desktop.pages.setting.reader")
 local updates = 0
@@ -41,6 +49,17 @@ Assert.eq(#sections, 1)
 Assert.eq(sections[1].title, "行为")
 Assert.eq(sections[1].rows[1](600).title, "脚注弹窗")
 Assert.is_false(sections[1].rows[1](600).toggle)
+Assert.eq(sections[1].rows[1](600).subtitle, "开：点按弹窗，不在页底；关：注文显示在页面底部")
+-- 开弹窗：关页内脚注；关弹窗：开页内脚注（互斥）。
+sections[1].rows[1](600).callback()
+Assert.is_true(saved_settings.footnote_link_in_popup)
+Assert.is_nil(saved_settings.style_tweaks["footnote-inpage_epub"])
+Assert.is_true(saved_settings.style_tweaks["footnote-inpage_fb2"], "写 style_tweaks 时保留其它默认项")
+Assert.is_true(Settings:sections(desktop)[1].rows[1](600).toggle)
+Settings:sections(desktop)[1].rows[1](600).callback()
+Assert.is_false(saved_settings.footnote_link_in_popup)
+Assert.is_true(saved_settings.style_tweaks["footnote-inpage_epub"])
+Assert.eq(updates, 2, "脚注开关来回各刷一次桌面")
 Assert.len(sections[1].rows, 6, "阅读行为不再提供独立西文字体入口")
 local auto_mark = sections[1].rows[2](600)
 Assert.eq(auto_mark.title, "读到 99% 自动标记已读")
@@ -54,7 +73,7 @@ local margin_popup = sections[1].rows[4](600)
 Assert.eq(margin_popup.title, "边距调整弹出提示")
 Assert.is_false(margin_popup.toggle)
 Assert.eq(saved_section.name, "reader")
-Assert.eq(updates, 1)
+Assert.eq(updates, 3)
 local back = sections[1].rows[5](600)
 Assert.eq(back.title, "返回键回月读")
 Assert.is_false(back.toggle)
