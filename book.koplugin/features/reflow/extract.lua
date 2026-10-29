@@ -29,8 +29,8 @@ local Extract = {}
 local BATCH_MS = 280
 --- 批间延迟（秒），必须为正：UIManager:handleInput 会把 nextTick 链一口气跑完、中间不轮询输入。
 local YIELD_S = 0.01
---- 每 N 批催一次 GC，别每批都 step（Kindle 上也贵）。
-local GC_EVERY = 5
+--- 每 N 批做一次完整 GC。step 不够：CREngine 取字垃圾在 Kindle 上会越积越少可用内存。
+local FULL_GC_EVERY = 8
 --- 临时文件序号：同一秒内两次提取（前一次取消后立刻重来）不能撞名
 local seq = 0
 
@@ -99,11 +99,12 @@ local function loadCursor(cursor_path)
     return data
 end
 
---- 相对上一页去重边界行，写入文件；返回新的上一页正文（供下次比较）与是否写入了非空白。
+--- 相对上一页去重边界行，写入文件。
+--- 返回值 previous 只留末行：去重只靠它，整页挂在闭包里会让长书取字越跑可用内存越少。
 ---@param file file*
----@param previous string
+---@param previous string 上一页末行（或空）
 ---@param raw string
----@return string previous
+---@return string previous_tail
 ---@return boolean wrote
 ---@return string|nil err 写盘失败原因
 local function appendPage(file, previous, raw)
@@ -112,12 +113,11 @@ local function appendPage(file, previous, raw)
         return previous, false
     end
     if previous ~= "" then
-        local last_line = previous:match("^.*\n([^\n]+)$") or previous:match("^[^\n]+$")
         local first_line, rest = page:match("^([^\n]+)\n(.*)$")
         if not first_line then
             first_line, rest = page, ""
         end
-        if last_line ~= nil and first_line == last_line then
+        if first_line == previous then
             page = rest
         end
     end
@@ -129,7 +129,8 @@ local function appendPage(file, previous, raw)
     if not ok then
         return previous, false, err
     end
-    return page, page:find("%S") ~= nil
+    local tail = page:match("^.*\n([^\n]+)$") or page
+    return tail, page:find("%S") ~= nil
 end
 
 --- 流式文档第 page 页：非末页取相邻两页 xpointer 之间，末页只能跳过去按屏幕范围取。
@@ -291,6 +292,7 @@ function Extract.run(ui, cb, on_progress, opts)
             end
             local wrote, write_err
             previous, wrote, write_err = appendPage(file, previous, chunk)
+            chunk = nil
             if write_err then
                 return fail(_("写入临时文件失败") .. ": " .. tostring(write_err))
             end
@@ -303,12 +305,14 @@ function Extract.run(ui, cb, on_progress, opts)
                     on_progress(_("正在提取文字"), page - 1, count)
                 end
                 if cursor_path then
-                    local tail = previous:match("^.*\n([^\n]+)$") or previous
-                    saveCursor(cursor_path, page - 1, count, tail)
+                    saveCursor(cursor_path, page - 1, count, previous)
                 end
                 batches = batches + 1
-                if batches % GC_EVERY == 0 then
-                    collectgarbage("step", 400)
+                -- 每批轻量 step；隔几批全量 collect，否则 Kindle 上可用内存只降不升。
+                if batches % FULL_GC_EVERY == 0 then
+                    collectgarbage("collect")
+                else
+                    collectgarbage("step", 800)
                 end
                 return later(function() step(page) end)
             end
