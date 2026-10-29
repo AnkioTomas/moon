@@ -67,3 +67,10 @@ for _idx, c in ipairs(calls) do
 end
 Assert.eq(table.concat(tombs, ","), "mina,harker")
 Assert.eq(calls[#calls].sql, "COMMIT;")
+
+-- 显式重生前清墓碑：整本书的 xray_removed 一把删掉
+calls = {}
+Assert.is_true(XrayDB.clearRemoved("moon", "b1"))
+Assert.matches(calls[#calls].sql, "DELETE FROM xray_removed")
+Assert.eq(calls[#calls].args[1], "moon")
+Assert.eq(calls[#calls].args[2], "b1")

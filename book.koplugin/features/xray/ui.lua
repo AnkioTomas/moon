@@ -63,7 +63,7 @@ end
 --- 生成完成后重载当前分栏的前向声明（定义在下面）。
 local refreshMainTab
 
---- 删除实体：名字与别名进墓碑，之后的识别不再加回；手动查词可重新收录。
+--- 删除实体：名字与别名进墓碑，自动预取不再加回；显式重新生成 / 划词补全可再收录。
 ---@param entity table
 local function removeEntity(entity)
     local identity = currentIdentity()
@@ -89,13 +89,19 @@ function UI.showEntity(entity)
         buttons = { { text = _("删除"), callback = function()
             viewer:close()
             require("ui.themes.widgets.confirm"):new{
-                text = T(_("删除「%1」？之后识别不会再把它加回来。"), entity.name),
+                text = T(_("删除「%1」？自动识别不会再加回；手动重新生成仍可收录。"), entity.name),
                 ok_text = _("删除"),
                 ok_callback = function() removeEntity(entity) end,
             }:show()
         end } },
     }
     viewer:show()
+end
+
+--- 用户点了重新生成类入口：先释放墓碑，否则删过的实体永远加不回来。
+---@param identity BookIdentity
+local function releaseRemoved(identity)
+    XrayDB.clearRemoved(identity.source_id, identity.stable_id)
 end
 
 --- 未配置 AI 或没联网时提示并拦下操作；离线立即失败，不等联网回调。
@@ -211,6 +217,7 @@ function UI.refresh(ui, identity)
     end
     local key = taskKey(identity)
     if followRunning(key) or not ensureReady() then return end
+    releaseRemoved(identity)
     require("workers.ui.task_dialog").start{
         key = key,
         kind = "ai",
@@ -244,6 +251,7 @@ function UI.scanBook(ui, identity)
     local key = taskKey(identity)
     if followRunning(key) or not ensureReady() then return end
     local function start()
+        releaseRemoved(identity)
         require("workers.ui.task_dialog").start{
             key = key,
             kind = "ai",
@@ -345,6 +353,7 @@ function UI.chapter(ui, identity)
         info(_("取不到本章正文"))
         return
     end
+    releaseRemoved(identity)
     require("workers.ui.task_dialog").start(chapterTask(identity, jobs, function(result)
         if result.ok then
             info(_("本章 X-Ray 已更新"))

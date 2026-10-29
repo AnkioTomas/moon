@@ -214,6 +214,15 @@ function XrayDB.restore(source_id, stable_id, kind, name)
         source_id, stable_id, kind, tombName(name)) ~= nil
 end
 
+--- 清掉这本书全部墓碑：显式「重新生成 / 分析全书 / 识别本章」时调用，让删过的实体能再被收录。
+--- 自动预取不调这个，单删的屏蔽仍然有效。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function XrayDB.clearRemoved(source_id, stable_id)
+    return DB.removeIdentity("xray_removed", source_id, stable_id)
+end
+
 ---@param source_id string
 ---@param stable_id string
 ---@param chapter_idx integer

@@ -20,7 +20,15 @@ package.preload["utils.text"] = function()
     return { trim = function(s) return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")) end }
 end
 package.preload["features.xray.kinds"] = function() return { label = function() return "人物" end } end
-package.preload["features.xray.db"] = function() return {} end
+local cleared_removed = {}
+package.preload["features.xray.db"] = function()
+    return {
+        clearRemoved = function(source_id, stable_id)
+            cleared_removed[#cleared_removed + 1] = source_id .. "\0" .. stable_id
+            return true
+        end,
+    }
+end
 local toasts = {}
 package.preload["ui.themes.widgets.toast"] = function()
     return { new = function(_, opts)
@@ -114,6 +122,8 @@ end
 
 local ui = {}
 require("features.xray.ui").refresh(ui)
+-- 显式重生先清墓碑，否则删过的实体加不回来
+Assert.eq(cleared_removed[1], "moon\0book-1")
 -- 按当前位置更新：ai 类后台任务，与全书分析共用 key
 Assert.eq(started.kind, "ai")
 Assert.eq(started.key, "xray\0moon\0book-1")
@@ -159,11 +169,14 @@ Assert.eq(looked_up, "爷爷")
 dialogs[#dialogs].on_cancel()
 Assert.eq(looked_up, "cancelled", "查询中可取消")
 
--- 分析全书：确认 → 入后台任务（ai 类、可重跑），取字在任务里
+-- 分析全书：确认 → 清墓碑 → 入后台任务（ai 类、可重跑），取字在任务里
 started = nil
+cleared_removed = {}
 require("features.xray.ui").scanBook(ui, identity)
 Assert.is_nil(started, "确认前不入队")
+Assert.len(cleared_removed, 0, "点继续前不清墓碑")
 confirm.ok_callback()
+Assert.eq(cleared_removed[1], "moon\0book-1", "确认后清墓碑")
 ---@cast started +BookTask
 Assert.eq(started.kind, "ai")
 Assert.eq(started.key, "xray\0moon\0book-1")
