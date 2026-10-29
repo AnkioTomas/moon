@@ -8,6 +8,9 @@
 每个 spec 在独立 luajit 进程中运行，避免跨文件卸/装 ffi 导致
 ctype 表重建（CI 段错误）或 Mac 上 static const 重复 cdef 失败。
 
+依赖：系统 luajit + libsqlite3，没有别的。有本机 koreader/ 克隆时 frontend 模块
+用真的，否则用 tests/support/stubs 的桩；有模拟器构建时再多跑需要 native 库的 spec。
+
 @module tests.run
 --]]
 
@@ -59,10 +62,12 @@ if #specs == 0 then
     os.exit(1)
 end
 
--- 父进程：逐个拉起子进程，汇总结果（子进程设 MOON_TEST_CHILD=1）
+local ko = ROOT .. "/koreader"
+
+-- 父进程：建沙箱，逐个拉起子进程，汇总结果（子进程设 MOON_TEST_CHILD=1）
 if os.getenv("MOON_TEST_CHILD") ~= "1" then
-    -- 与 tests/run.sh 一致地建沙箱：直接 `lua tests/run.lua`（含临时 worktree）时
-    -- 缺 common.lua 会让依赖沙箱的 spec 全部 skip。
+    -- 数据目录：KO_HOME 或仓库根 test/（沙箱，git 忽略）。测试会往里写配置、sqlite、
+    -- 缓存，绝不能落到模拟器的真实数据上。
     local home = (os.getenv("KO_HOME") or ""):gsub("/+$", "")
     if home == "" then home = ROOT .. "/test" end
     os.execute("mkdir -p " .. shellQuote(home .. "/.moon/settings") .. " "
@@ -78,11 +83,25 @@ if os.getenv("MOON_TEST_CHILD") ~= "1" then
             f:close()
         end
     end
+    -- 本机有模拟器构建（git 忽略）时把它的 native 库软链进沙箱只读使用，
+    -- 让 ime/real_frontend 这类要真 KOReader 的 spec 跑起来；没有就用 support/stubs 的桩。
+    -- 软链目标要绝对路径：ROOT 常是 "."，相对目标从 test/ 下解析就断了
+    local ko_abs = ko:sub(1, 1) == "/" and ko or (os.getenv("PWD") .. "/" .. ko:gsub("^%./", ""))
+    local emu_probe = io.popen("ls -d " .. shellQuote(ko_abs) .. "/koreader-emulator-*/koreader 2>/dev/null | sort -r")
+    local emu = emu_probe and emu_probe:read("*l")
+    if emu_probe then emu_probe:close() end
+    local lfs_so = emu and io.open(home .. "/libs/libkoreader-lfs.so", "r")
+    if lfs_so then
+        lfs_so:close()
+    elseif emu then
+        os.execute("ln -sfn " .. shellQuote(emu .. "/libs") .. " " .. shellQuote(home .. "/libs"))
+    end
     local passed, skipped, failed, total_asserts = 0, 0, 0, 0
     local self = arg[0]
     for _, path in ipairs(specs) do
         local cmd = table.concat({
             "MOON_TEST_CHILD=1",
+            "KO_HOME=" .. shellQuote(home),
             "luajit",
             shellQuote(self),
             shellQuote(path),
@@ -130,7 +149,6 @@ package.path = table.concat({
     package.path,
 }, ";")
 
-local ko = ROOT .. "/koreader"
 local f = io.open(ko .. "/frontend/ui/uimanager.lua", "r")
 if f then
     f:close()
@@ -143,23 +161,19 @@ if f then
     }, ";")
 end
 
--- 模拟器构建（git 忽略）里的 lua-ljsqlite3 + ffi.loadlib：有就让 sqlite spec 真跑。
+-- sqlite：KOReader 的 lua-ljsqlite3 副本（MIT，tests/support/thirdparty），连系统 libsqlite3，
+-- 不依赖 koreader/ 克隆或模拟器构建，CI 与新机器上 *_db 相关 spec 都真跑。
+-- 它要 KOReader 定制的 ffi.loadlib(name, version)；系统 LuaJIT 没有，按平台拼带版本的文件名。
 do
-    local probe = io.popen("ls -d " .. shellQuote(ko) .. "/koreader-emulator-*/koreader 2>/dev/null | sort -r")
-    local emu = probe and probe:read("*l")
-    if probe then probe:close() end
-    local lib = emu and io.open(emu .. "/common/lua-ljsqlite3/init.lua", "r")
-    if lib then
-        lib:close()
-        local ffi = require("ffi")
-        if not ffi.loadlib then
-            ffi.log = function() end
-            dofile(emu .. "/ffi/loadlib.lua")
+    local ffi = require("ffi")
+    if not ffi.loadlib then
+        ffi.loadlib = function(name, version)
+            local pattern = ffi.os == "OSX" and "lib%s.%s.dylib" or "lib%s.so.%s"
+            return ffi.load(pattern:format(name, version))
         end
-        -- 只放出 sqlite 一个模块：整个 common/ 进 path 会让真 turbo/ssl 顶掉测试桩。
-        package.preload["lua-ljsqlite3/init"] = function()
-            return dofile(emu .. "/common/lua-ljsqlite3/init.lua")
-        end
+    end
+    package.preload["lua-ljsqlite3/init"] = function()
+        return dofile(ROOT .. "/tests/support/thirdparty/lua-ljsqlite3/init.lua")
     end
 end
 
