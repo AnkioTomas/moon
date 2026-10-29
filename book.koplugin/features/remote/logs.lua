@@ -38,7 +38,7 @@ local SECRET_KEYS = {
 local VALUE = "[^%s&\"',;}]+"
 local MASK = "***"
 
--- 小写针：标识符里是否「含」密钥名（与旧 [%w_]*key[%w_]* 语义一致，含 wereadToken / provider⊃vid）
+-- 小写针：标识符里是否「含」密钥名（与旧 [%w_]*key[%w_]* 语义一致，含 XxxToken / provider⊃vid）
 local SECRET_NEEDLES = {}
 for _idx, s in ipairs(SECRET_KEYS) do
     SECRET_NEEDLES[#SECRET_NEEDLES + 1] = s:gsub("%-", "_"):lower()
