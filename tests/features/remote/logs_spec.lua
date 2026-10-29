@@ -44,6 +44,39 @@ do
     has(out, blob)
 end
 
+-- 无赋值符的大段正文必须快跳过密钥键扫描（旧实现 27 遍 gsub，Mac 上 1MB≈0.5s）
+do
+    local plain = ("abcdefghijklmnop qrstuvwxyz 0123456789\n"):rep(25000)
+    local t0 = os.clock()
+    Logs.redact(plain)
+    Assert.is_true(os.clock() - t0 < 0.2, "plain log redact must skip key loop")
+end
+
+-- finishExtras：延后读 settings / sdr，正文只托名（脱敏在 build）
+do
+    local d = os.tmpname()
+    os.remove(d)
+    os.execute("mkdir -p '" .. d .. "'")
+    local f = assert(io.open(d .. "/ui.lua", "wb"))
+    f:write('return { theme = "light", token = "LEAK" }\n')
+    f:close()
+    local extras, notes = Logs.finishExtras({}, {
+        roots = { { root = d, token = "$TMP" } },
+        settings_dir = d,
+        credential_ids = { wechat = true },
+        sdr_groups = {},
+    }, {})
+    Assert.eq(#notes, 0)
+    local text
+    for _idx, e in ipairs(extras) do
+        if e.name == "diag/moon-settings.txt" then text = e.text end
+    end
+    Assert.is_true(text ~= nil, "moon-settings present")
+    has(text, "token = \"LEAK\"") -- 尚未脱敏
+    has(text, "$TMP")
+    os.execute("rm -rf '" .. d .. "'")
+end
+
 -- 文件名
 Assert.is_true(Logs.fileName(os.time()):match("^moon%-logs%-%d%d%d%d%d%d%d%d%-%d%d%d%d%.zip$") ~= nil, "file name")
 
@@ -190,6 +223,22 @@ do
     }
     Assert.eq(Logs.scrubPaths("/Users/alice/.config/koreader/.moon/book.log", roots), "$MOON/book.log")
     Assert.eq(Logs.scrubPaths("/Users/alice/.config/koreader/settings.reader.lua", roots), "$DATA/settings.reader.lua")
+
+    -- pathRoots 必须丢掉 "." / "/"，否则 scrub 会把正文每个点都替换掉
+    do
+        local old_ds, old_paths = package.loaded["datastorage"], package.loaded["utils.paths"]
+        package.loaded["datastorage"] = {
+            getFullDataDir = function() return "/data" end,
+            getDataDir = function() return "." end,
+        }
+        package.loaded["utils.paths"] = { root = function() return "/data/.moon" end }
+        local got = Logs.pathRoots()
+        package.loaded["datastorage"], package.loaded["utils.paths"] = old_ds, old_paths
+        for _idx, r in ipairs(got) do
+            Assert.is_true(r.root ~= "." and r.root ~= "/", "root must not be trivial: " .. tostring(r.root))
+            Assert.is_true(#r.root >= 2)
+        end
+    end
 
     local dump = Logs.dumpTable({
         language = "zh_CN",

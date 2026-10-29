@@ -1210,12 +1210,13 @@ end
 --- 一键日志包：插件日志（含轮转件）+ KOReader crash.log 等，内容脱敏，附 info.txt
 --- 与 diag/* 诊断快照（插件列表、脱敏设置、源登录态、书库规模、采样 sdr）。
 --- 只按文件名白名单收日志；源凭证文件只记登录态，不进包。
---- 跑在 fork 子进程里：诊断快照（碰库、建源实例）由主进程先算好传进来。
----@param diag { name: string, text: string }[] Logs.gatherExtras 的结果
+--- 跑在 fork 子进程里：主进程只交轻量 diag + deferred（路径）；读盘/sdr 在此 finishExtras。
+---@param diag { name: string, text: string }[] Logs.gatherExtras 的轻量结果
 ---@param diag_notes string[]
+---@param deferred table|nil Logs.gatherExtras 的延后读盘计划
 ---@return string|nil output 临时 zip 路径
 ---@return any err
-local function buildLogsZip(diag, diag_notes)
+local function buildLogsZip(diag, diag_notes, deferred)
     local Logs = require("features.remote.logs")
     local DataStorage = require("datastorage")
     local Paths = require("utils.paths")
@@ -1253,8 +1254,9 @@ local function buildLogsZip(diag, diag_notes)
     for _idx, dir in ipairs(missing) do notes[#notes + 1] = "skipped (not found): " .. dir end
 
     local extras = {}
-    for _idx, e in ipairs(diag) do extras[#extras + 1] = e end
-    for _idx, n in ipairs(diag_notes) do notes[#notes + 1] = n end
+    for _idx, e in ipairs(diag or {}) do extras[#extras + 1] = e end
+    for _idx, n in ipairs(diag_notes or {}) do notes[#notes + 1] = n end
+    extras, notes = Logs.finishExtras(extras, deferred, notes)
     if is("isAndroid") then
         -- 应用只能读到自己进程的 logcat；取不到就记 skipped
         local ok_l, text = pcall(function()
@@ -1440,9 +1442,11 @@ function Remote.start()
             logs_zip = function(cb)
                 -- 先把缓冲里的插件日志刷盘，打包才完整
                 require("utils.log").flush()
-                -- 诊断快照要查 sqlite、建源实例：子进程禁止碰库，主进程先算
-                local diag, diag_notes = require("features.remote.logs").gatherExtras()
-                runFilesystem("remote-logs", function() return buildLogsZip(diag, diag_notes) end, cb)
+                -- 碰库 / 建源实例必须在主进程；读盘与脱敏进子进程（finishExtras + build）
+                local diag, diag_notes, deferred = require("features.remote.logs").gatherExtras()
+                runFilesystem("remote-logs", function()
+                    return buildLogsZip(diag, diag_notes, deferred)
+                end, cb)
             end,
             temp_path = tempPath,
             is_protected = isProtectedDisplay,

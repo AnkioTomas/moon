@@ -6,8 +6,9 @@
 日志与设置值逐项脱敏（token、密钥、口令、Cookie、Authorization、sk- 密钥、路径托名）。
 单文件只取末尾 PER_FILE 字节，总量封顶 TOTAL。源凭证文件只记「已配置/未配置」，不进包。
 
-纯函数为主（redact / collect / build / dump 依赖注入），便于离线测试；
-现场采集走 gatherExtras（全部 pcall，失败只记 notes）。
+纯函数为主（redact / collect / build / dump 依赖注入），便于离线测试。
+现场：主进程 gatherExtras 只碰库/源实例/内存设置（快）；读盘与脱敏在子进程
+finishExtras + build 各做一次（禁止主线程读 sdr / 设置文件，也禁止二次脱敏）。
 
 @module koplugin.book.features.remote.logs
 --]]
@@ -16,10 +17,10 @@ local M = {}
 
 M.PER_FILE = 4 * 1024 * 1024
 M.TOTAL = 16 * 1024 * 1024
-M.SAMPLE_PER_SOURCE = 3
-M.CHAPTERS_PER_BOOK = 2
-M.RECENT_HISTORY = 5
-M.SDR_MAX = 64 * 1024
+M.SAMPLE_PER_SOURCE = 1
+M.CHAPTERS_PER_BOOK = 1
+M.RECENT_HISTORY = 3
+M.SDR_MAX = 32 * 1024
 
 --- 大小写无关的 Lua 模式片段："token" → "[Tt][Oo][Kk][Ee][Nn]"
 ---@param word string
@@ -36,6 +37,25 @@ local SECRET_KEYS = {
 }
 local VALUE = "[^%s&\"',;}]+"
 local MASK = "***"
+
+-- 小写针：标识符里是否「含」密钥名（与旧 [%w_]*key[%w_]* 语义一致，含 wereadToken / provider⊃vid）
+local SECRET_NEEDLES = {}
+for _idx, s in ipairs(SECRET_KEYS) do
+    SECRET_NEEDLES[#SECRET_NEEDLES + 1] = s:gsub("%-", "_"):lower()
+end
+
+local function keyLooksSecret(key)
+    local lk = tostring(key):lower():gsub("%-", "_")
+    for _i, needle in ipairs(SECRET_NEEDLES) do
+        if lk:find(needle, 1, true) then return true end
+    end
+    return false
+end
+
+-- 固定模式预编译一次；密钥名改成单遍「键=值」回调，避免 27 次全串 gsub（Kindle 上 4MB 可到分钟级）
+local PAT_BEARER = "(" .. ci("bearer") .. "%s+)[%w%-%._~%+/=]+"
+local PAT_BASIC = "(" .. ci("basic") .. "%s+)[%w%+/=]+"
+local PAT_KV = "(%f[%w_])([%w_]+)([\"']?%s*[:=]%s*[\"']?)(" .. VALUE .. ")"
 
 --- 键名是否像凭证 / 账号标识（值一律 ***，不进包）。
 --- 只认整词或 `_` 分段（access_token 命中 token；provider 不命中 vid）。
@@ -92,27 +112,34 @@ function M.pathRoots()
     if home and home ~= "" then
         roots[#roots + 1] = { root = home, token = "$HOME" }
     end
-    table.sort(roots, function(a, b) return #a.root > #b.root end)
-    return roots
+    -- 模拟器 getDataDir 可能是 "."：scrub 会把正文里每个点都换成 $DATADIR
+    local cleaned = {}
+    for _idx, r in ipairs(roots) do
+        if r.root and #r.root >= 2 and r.root ~= "." and r.root ~= "/" then
+            cleaned[#cleaned + 1] = r
+        end
+    end
+    table.sort(cleaned, function(a, b) return #a.root > #b.root end)
+    return cleaned
 end
 
 --- 日志脱敏：key=value / "key": "value" / ?key= / Bearer xxx / sk-xxx 统一替换为 ***
 ---@param s string
 ---@return string
 function M.redact(s)
-    s = s:gsub("(" .. ci("bearer") .. "%s+)[%w%-%._~%+/=]+", "%1" .. MASK)
-    s = s:gsub("(" .. ci("basic") .. "%s+)[%w%+/=]+", "%1" .. MASK)
+    s = s:gsub(PAT_BEARER, "%1" .. MASK)
+    s = s:gsub(PAT_BASIC, "%1" .. MASK)
     s = s:gsub("sk%-[%w%-_]+", "sk-" .. MASK)
     s = s:gsub("([?&]t=)[^&%s\"']+", "%1" .. MASK)
-    for _idx, key in ipairs(SECRET_KEYS) do
-        local k = ci(key):gsub("%-", "%%-")
-        -- "key": "value" / key = value / key: value / ?key=value
-        -- %f 只从词首起配：不加的话每个字符都起一次 [%w_]*，长 base64 段是 O(n²)，Kindle 上能卡几十分钟
-        s = s:gsub("(%f[%w_][%w_]*" .. k .. "[%w_]*[\"']?%s*[:=]%s*[\"']?)(" .. VALUE .. ")", function(prefix, v)
-            if v == MASK then return prefix .. v end
-            return prefix .. MASK
-        end)
-    end
+    -- 无赋值符则密钥键模式不可能命中，跳过（纯日志正文常见）
+    if not s:find("[:=]") then return s end
+    -- 单遍：任意键=值，键名「含」密钥词则掩值（等价旧 27 次 [%w_]*key[%w_]* gsub）
+    s = s:gsub(PAT_KV, function(boundary, key, sep, v)
+        if v == MASK or not keyLooksSecret(key) then
+            return boundary .. key .. sep .. v
+        end
+        return boundary .. key .. sep .. MASK
+    end)
     return s
 end
 
@@ -440,7 +467,7 @@ local function readCapped(path, limit)
     return text, nil
 end
 
---- 读某文档的 sidecar，返回已托名/脱敏的采样行。
+--- 读某文档的 sidecar，返回已托名的采样行（正文脱敏交给 build，避免二次扫）。
 ---@param roots { root: string, token: string }[]
 ---@param source_id string
 ---@param stable_id string
@@ -463,20 +490,36 @@ local function sdrSample(roots, source_id, stable_id, kind, doc_path, DocSetting
         source_id = source_id, stable_id = scrubbed_sid, kind = kind,
         path = scrubbed_doc,
         sdr_path = M.scrubPaths(sdr, roots),
-        text = text and M.redact(M.scrubPaths(text, roots)) or nil,
+        text = text and M.scrubPaths(text, roots) or nil,
         note = note or (text and nil or "unreadable"),
     }
 end
 
---- 现场采集诊断 extras（失败只记 notes，不抛）。
----@return { name: string, text: string }[]
----@return string[]
+--- 现场采集诊断 extras（主进程：库 / 源 / 内存；读盘交给 finishExtras）。
+---@return { name: string, text: string }[] extras
+---@return string[] notes
+---@return { roots: table, settings_dir: string|nil, credential_ids: table, sdr_groups: table[] } deferred
 function M.gatherExtras()
     local extras, notes = {}, {}
     local roots = M.pathRoots()
+    local credential_ids = { zlib = true, opds = true }
+    ---@type { roots: table, settings_dir: string|nil, credential_ids: table, sdr_groups: table[] }
+    local deferred = {
+        roots = roots,
+        settings_dir = nil,
+        credential_ids = credential_ids,
+        sdr_groups = {},
+    }
 
     local function add(name, text)
         extras[#extras + 1] = { name = name, text = text or "" }
+    end
+    local function addSdrGroup(name, heading, jobs)
+        if jobs and #jobs > 0 then
+            deferred.sdr_groups[#deferred.sdr_groups + 1] = {
+                name = name, heading = heading, jobs = jobs,
+            }
+        end
     end
     local function try(label, fn)
         local ok, a, b = pcall(fn)
@@ -537,14 +580,13 @@ function M.gatherExtras()
         add("diag/plugins.txt", M.pluginsText(enabled, disabled))
     end)
 
-    -- 2) KOReader 全局设置（值脱敏 + 路径托名）
+    -- 2) KOReader 全局设置（密钥键已掩；字符串路径托名；正文脱敏在 build）
     try("koreader-settings", function()
         local data = G_reader_settings and G_reader_settings.data
         add("diag/koreader-settings.txt", M.dumpTable(data, roots))
     end)
 
     -- 3) 源登录态（只写 configured）
-    local credential_ids = { zlib = true, opds = true }
     try("accounts", function()
         local Registry = require("source.registry")
         local rows = {}
@@ -566,53 +608,13 @@ function M.gatherExtras()
         add("diag/accounts.txt", M.accountsText(rows))
     end)
 
-    -- 4) 月读设置：书源摘要 + settings 目录（源凭证文件只列名）
+    -- 4) 月读设置：书源摘要；settings 目录读盘延后到子进程
     try("moon-source", function()
         local MoonSettings = require("utils.settings")
         add("diag/moon-source.txt", M.moonSourceText(MoonSettings.get("source")))
     end)
     try("moon-settings", function()
-        local Paths = require("utils.paths")
-        local lfs = require("libs/libkoreader-lfs")
-        local dir = Paths.settingsDir()
-        local lines = {
-            "moon settings directory: " .. M.scrubPaths(dir, roots),
-            "source/store credential files listed as present only (content omitted).",
-            "",
-        }
-        local names = {}
-        local ok_d, iter, state = pcall(lfs.dir, dir)
-        if ok_d and iter then
-            for name in iter, state do
-                if name:match("%.lua$") then names[#names + 1] = name end
-            end
-        else
-            lines[#lines + 1] = "(settings dir missing)"
-            add("diag/moon-settings.txt", table.concat(lines, "\n") .. "\n")
-            return
-        end
-        table.sort(names)
-        for _idx, name in ipairs(names) do
-            local id = name:match("^(.*)%.lua$")
-            local path = dir .. "/" .. name
-            if credential_ids[id] then
-                lines[#lines + 1] = "==== " .. name .. " (credential file, content omitted) ===="
-                lines[#lines + 1] = "present: yes"
-                lines[#lines + 1] = ""
-            else
-                local text, note = readCapped(path, M.SDR_MAX)
-                lines[#lines + 1] = "==== " .. name .. " ===="
-                if note then lines[#lines + 1] = "note: " .. note end
-                if text then
-                    lines[#lines + 1] = M.redact(M.scrubPaths(text, roots))
-                    if text:sub(-1) ~= "\n" then lines[#lines + 1] = "" end
-                else
-                    lines[#lines + 1] = "(unreadable)"
-                    lines[#lines + 1] = ""
-                end
-            end
-        end
-        add("diag/moon-settings.txt", table.concat(lines, "\n"))
+        deferred.settings_dir = require("utils.paths").settingsDir()
     end)
 
     -- 5) 书库规模
@@ -661,7 +663,7 @@ function M.gatherExtras()
         add("diag/dirty.txt", M.dirtyText(rows))
     end)
 
-    -- 6) 当前阅读会话 + 其 sdr
+    -- 6) 当前阅读会话；sdr 路径留给子进程读
     try("session", function()
         local session = require("reader.session").current()
         if not session or not session.identity then
@@ -693,31 +695,30 @@ function M.gatherExtras()
             header_height = header,
         }, roots))
         if file then
-            local DocSettings = require("docsettings")
             local DB = require("utils.db")
-            local samples = {
-                sdrSample(roots, id.source_id, id.stable_id, "current", file, DocSettings),
+            local jobs = {
+                { source_id = id.source_id, stable_id = id.stable_id, kind = "current", path = file },
             }
-            -- 章会话：当前文件就是章；再抽同书另一章作对照。整书：抽登记过的章 sdr。
             local ch, cn = DB.query(
                 [[SELECT path FROM chapters WHERE source_id=? AND stable_id=? AND path!=? ORDER BY chapter_idx ASC LIMIT ?;]],
                 id.source_id, id.stable_id, file, M.CHAPTERS_PER_BOOK
             )
             for j = 1, cn do
-                samples[#samples + 1] = sdrSample(
-                    roots, id.source_id, id.stable_id, "chapter", ch[1][j], DocSettings)
+                jobs[#jobs + 1] = {
+                    source_id = id.source_id, stable_id = id.stable_id,
+                    kind = "chapter", path = ch[1][j],
+                }
             end
-            add("diag/sdr-current.txt", M.sdrSamplesText(samples, "current session sidecar (.sdr):"))
+            addSdrGroup("diag/sdr-current.txt", "current session sidecar (.sdr):", jobs)
         end
     end)
 
-    -- 7) 最近打开（KOReader history）
+    -- 7) 最近打开：只解析身份与路径
     try("sdr-recent", function()
         local ReadHistory = require("readhistory")
         pcall(function() ReadHistory:_read() end)
-        local DocSettings = require("docsettings")
         local Store = require("book.store")
-        local samples, seen = {}, {}
+        local jobs, seen = {}, {}
         local hist = ReadHistory.hist or {}
         local n = 0
         for _idx, item in ipairs(hist) do
@@ -727,43 +728,135 @@ function M.gatherExtras()
                 seen[file] = true
                 n = n + 1
                 local identity = Store.identityFor(file)
-                local source_id = identity and identity.source_id or "?"
-                local stable_id = identity and identity.stable_id or file
-                samples[#samples + 1] = sdrSample(
-                    roots, source_id, stable_id, "recent-" .. tostring(n), file, DocSettings)
+                jobs[#jobs + 1] = {
+                    source_id = identity and identity.source_id or "?",
+                    stable_id = identity and identity.stable_id or file,
+                    kind = "recent-" .. tostring(n),
+                    path = file,
+                }
             end
         end
-        add("diag/sdr-recent.txt", M.sdrSamplesText(samples, "recently opened sidecar (.sdr):"))
+        addSdrGroup("diag/sdr-recent.txt", "recently opened sidecar (.sdr):", jobs)
     end)
 
-    -- 8) 各源采样书 / 章 sdr（补漏：history 没覆盖到的源）
+    -- 8) 各源采样书 / 章路径（读盘延后）
     try("sdr-samples", function()
         local DB = require("utils.db")
-        local DocSettings = require("docsettings")
         local result, nrows = DB.query([[
 SELECT source_id, stable_id, path FROM books
  WHERE deleted=0 AND path IS NOT NULL AND path != ''
  ORDER BY source_id ASC, inserted_at DESC;
 ]])
-        local per, samples = {}, {}
+        local per, jobs = {}, {}
         for i = 1, nrows do
             local source_id, stable_id, path = result[1][i], result[2][i], result[3][i]
             local n = per[source_id] or 0
             if n < M.SAMPLE_PER_SOURCE then
                 per[source_id] = n + 1
-                samples[#samples + 1] = sdrSample(roots, source_id, stable_id, "book", path, DocSettings)
+                jobs[#jobs + 1] = {
+                    source_id = source_id, stable_id = stable_id, kind = "book", path = path,
+                }
                 local ch, cn = DB.query(
                     [[SELECT path FROM chapters WHERE source_id=? AND stable_id=? ORDER BY chapter_idx ASC LIMIT ?;]],
                     source_id, stable_id, M.CHAPTERS_PER_BOOK
                 )
                 for j = 1, cn do
-                    samples[#samples + 1] = sdrSample(
-                        roots, source_id, stable_id, "chapter", ch[1][j], DocSettings)
+                    jobs[#jobs + 1] = {
+                        source_id = source_id, stable_id = stable_id,
+                        kind = "chapter", path = ch[1][j],
+                    }
                 end
             end
         end
-        add("diag/sdr-samples.txt", M.sdrSamplesText(samples, "per-source sidecar (.sdr) samples:"))
+        addSdrGroup("diag/sdr-samples.txt", "per-source sidecar (.sdr) samples:", jobs)
     end)
+
+    return extras, notes, deferred
+end
+
+--- 子进程：读 settings / sdr，拼进 extras（只托名，脱敏交给 build）。
+---@param extras { name: string, text: string }[]
+---@param deferred { roots: table, settings_dir: string|nil, credential_ids: table, sdr_groups: table[] }|nil
+---@param notes string[]|nil
+---@return { name: string, text: string }[]
+---@return string[]
+function M.finishExtras(extras, deferred, notes)
+    extras = extras or {}
+    notes = notes or {}
+    if not deferred then return extras, notes end
+    local roots = deferred.roots or M.pathRoots()
+    local credential_ids = deferred.credential_ids or {}
+
+    if deferred.settings_dir then
+        local ok, err = pcall(function()
+            local lfs = require("libs/libkoreader-lfs")
+            local dir = deferred.settings_dir
+            local lines = {
+                "moon settings directory: " .. M.scrubPaths(dir, roots),
+                "source/store credential files listed as present only (content omitted).",
+                "",
+            }
+            local names = {}
+            local ok_d, iter, state = pcall(lfs.dir, dir)
+            if not ok_d or not iter then
+                lines[#lines + 1] = "(settings dir missing)"
+                extras[#extras + 1] = { name = "diag/moon-settings.txt", text = table.concat(lines, "\n") .. "\n" }
+                return
+            end
+            for name in iter, state do
+                if name:match("%.lua$") then names[#names + 1] = name end
+            end
+            table.sort(names)
+            for _idx, name in ipairs(names) do
+                local id = name:match("^(.*)%.lua$")
+                local path = dir .. "/" .. name
+                if credential_ids[id] then
+                    lines[#lines + 1] = "==== " .. name .. " (credential file, content omitted) ===="
+                    lines[#lines + 1] = "present: yes"
+                    lines[#lines + 1] = ""
+                else
+                    local text, note = readCapped(path, M.SDR_MAX)
+                    lines[#lines + 1] = "==== " .. name .. " ===="
+                    if note then lines[#lines + 1] = "note: " .. note end
+                    if text then
+                        lines[#lines + 1] = M.scrubPaths(text, roots)
+                        if text:sub(-1) ~= "\n" then lines[#lines + 1] = "" end
+                    else
+                        lines[#lines + 1] = "(unreadable)"
+                        lines[#lines + 1] = ""
+                    end
+                end
+            end
+            extras[#extras + 1] = { name = "diag/moon-settings.txt", text = table.concat(lines, "\n") }
+        end)
+        if not ok then
+            notes[#notes + 1] = "diag failed (moon-settings): " .. tostring(err)
+        end
+    end
+
+    if deferred.sdr_groups and #deferred.sdr_groups > 0 then
+        local ok_ds, DocSettings = pcall(require, "docsettings")
+        if not ok_ds then
+            notes[#notes + 1] = "diag failed (sdr): " .. tostring(DocSettings)
+        else
+            for _idx, group in ipairs(deferred.sdr_groups) do
+                local ok, err = pcall(function()
+                    local samples = {}
+                    for _j, job in ipairs(group.jobs or {}) do
+                        samples[#samples + 1] = sdrSample(
+                            roots, job.source_id, job.stable_id, job.kind, job.path, DocSettings)
+                    end
+                    extras[#extras + 1] = {
+                        name = group.name,
+                        text = M.sdrSamplesText(samples, group.heading),
+                    }
+                end)
+                if not ok then
+                    notes[#notes + 1] = "diag failed (" .. tostring(group.name) .. "): " .. tostring(err)
+                end
+            end
+        end
+    end
 
     return extras, notes
 end
@@ -815,12 +908,12 @@ local function readTail(path, limit)
     return s, truncated, read
 end
 
---- 生成 zip（内容全部经内存写入，脱敏后才落包）。
+--- 生成 zip（内容全部经内存写入；日志与 extras 在此各脱敏一次后落包）。
 ---@param output string 输出路径
 ---@param files table[] collect 的结果
 ---@param info table
 ---@param Writer table ffi/archiver Writer 类
----@param extras { name: string, text: string }[]|nil 内存条目（logcat、键名清单等），同样脱敏、计入上限
+---@param extras { name: string, text: string }[]|nil 内存条目（diag / logcat 等），计入上限；调用方勿预先 redact
 ---@param notes string[]|nil 预置说明（如 skipped 目录）
 ---@return string|nil output
 ---@return string|nil err
