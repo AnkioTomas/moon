@@ -18,6 +18,7 @@ local EN = table.concat({
 do
     local lex = Lexicon.parse(ZH)
     Assert.eq(lex.lang, "zh")
+    Assert.eq(lex.kind, "ruby", "缺 #kind 默认 ruby")
     Assert.eq(lex.meta.name, "测试拼音")
     Assert.eq(lex.count, 5)
     Assert.eq(lex.max_len, 2)
@@ -27,8 +28,10 @@ do
 end
 
 do
-    -- 缺 levels 用语言默认；没有条目报错。
+    -- 缺 levels 用语言默认；没有条目报错；#kind=wordwise。
     Assert.eq(Lexicon.parse("#lang=en\nfoo\t/f/\t3").levels[1], 20000)
+    Assert.eq(Lexicon.parse("#lang=en\n#kind=wordwise\nfoo\t短\t3").kind, "wordwise")
+    Assert.eq(Lexicon.parse("#lang=en\n#kind=nope\nfoo\t短\t3").kind, "ruby", "未知 kind 当 ruby")
     Assert.errors(function() Lexicon.parse("#lang=zh\n") end, "empty lexicon")
 end
 
@@ -84,4 +87,40 @@ do
     local manifest = mf:read("*a")
     mf:close()
     Assert.matches(manifest, '"raw_size": ' .. #text)
+end
+
+do
+    -- WordWise 中/英短义词库（tools/build_rare_gloss.py）：#kind=wordwise，短义够短。
+    for _idx, id in ipairs({ "en-gloss-zh", "en-gloss-en" }) do
+        local path = "assets/rare/" .. id .. "/lexicon.tsv.part.001"
+        local f = assert(io.open(path, "rb"))
+        local text = f:read("*a")
+        f:close()
+        local lex = Lexicon.parse(text)
+        Assert.eq(lex.lang, "en", id)
+        Assert.eq(lex.kind, "wordwise", id)
+        Assert.is_true(lex.count > 10000, id .. " 覆盖量")
+        local sample = lex.entries["ubiquitous"]
+        Assert.not_nil(sample, id .. " ubiquitous")
+        local ann = sample[1]
+        local n = select(2, ann:gsub("[^\128-\191]", ""))
+        Assert.is_true(n <= 24, id .. " 短义长度 " .. ann)
+        Assert.is_true(#text < 2 * 1024 * 1024, id .. " 体积")
+        local mf = assert(io.open("assets/rare/" .. id .. "/manifest.json", "rb"))
+        local manifest = mf:read("*a")
+        mf:close()
+        Assert.matches(manifest, '"raw_size": ' .. #text)
+    end
+end
+
+do
+    -- 同 span：wordwise 压过 ruby；不重叠的中英命中都保留。
+    local merged = Lexicon.dedupe({
+        { i = 1, n = 1, key = "龘", ann = "dá", kind = "ruby" },
+        { i = 3, n = 8, key = "obdurate", ann = "/ɒb/", kind = "ruby" },
+        { i = 3, n = 8, key = "obdurate", ann = "顽固的", kind = "wordwise" },
+    })
+    Assert.len(merged, 2)
+    Assert.eq(merged[1].ann, "顽固的", "英文同词留释义")
+    Assert.eq(merged[2].ann, "dá")
 end

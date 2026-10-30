@@ -2,7 +2,10 @@
 
 local Assert = require("support.assert")
 
-local settings = { rare_enabled = true, rare_level = "rare", rare_size = 0.5, rare_lexicons = { t = true }, rare_built_at = {} }
+local settings = {
+    rare_enabled = true, rare_ruby = true, rare_wordwise = false, rare_split_migrated = true,
+    rare_level = "rare", rare_size = 0.5, rare_lexicons = { t = true }, rare_built_at = {},
+}
 package.preload["utils.settings"] = function()
     return { get = function() return settings end, save = function() end }
 end
@@ -10,6 +13,8 @@ local lex
 package.preload["features.rare.catalog"] = function()
     return {
         active = function() return { lex } end,
+        warm = function() return 0 end,
+        kind = function() return "ruby" end,
         -- 翻页前只查文件是否在；桩给个假路径，配合下面的 lfs stub。
         path = function(id) return id == "t" and "/tmp/rare-overlay-stub.tsv" or nil end,
     }
@@ -196,7 +201,7 @@ do
     o:paint({})
     Assert.len(rendered, 1)
     Assert.eq(rendered[1].text, "dá")
-    Assert.eq(rendered[1].color, 0, "注音纯黑")
+    Assert.eq(rendered[1].color, 1, "注音深灰（与正文黑区分）")
     Assert.eq(calls.boxes, 1, "只给命中的字取框")
     -- 同一视口走缓存，不再走字。
     rendered = {}
@@ -231,18 +236,20 @@ do
     rendered = {}
     draw(o)
     Assert.len(rendered, 0, "关掉生字本就按档位")
-    -- 关闭开关：不画。
+    -- 关闭注音开关：不画。
     screen_text = "龘"
+    settings.rare_ruby = false
     settings.rare_enabled = false
     Overlay.invalidate()
     draw(o)
     Assert.len(rendered, 0)
+    settings.rare_ruby = true
     settings.rare_enabled = true
     screen_text = "普通文字龘"
 end
 
 do
-    -- 走字：空白不成单元，止于 pos1（含）；取框终点是同节点偏移 +1。
+    -- 走字：空白保留为空格单元（英文词界），止于 pos1（含）；取框终点是同节点偏移 +1。
     local text = { "a", " ", "b", "c", "d" }
     local function n(xp) return tonumber(xp:match("%d+$")) end
     local doc = {
@@ -255,5 +262,26 @@ do
     local units = Overlay.walk(doc, "p/text().0", "p/text().3")
     local got = {}
     for _, u in ipairs(units) do got[#got + 1] = u.text .. "@" .. u.xp .. ">" .. u.stop end
-    Assert.eq(table.concat(got, ","), "a@p/text().0>p/text().1,b@p/text().2>p/text().3,c@p/text().3>p/text().4")
+    Assert.eq(table.concat(got, ","), "a@p/text().0>p/text().1, @p/text().1>p/text().2,b@p/text().2>p/text().3,c@p/text().3>p/text().4")
+end
+
+do
+    -- 空格断词：walk 保留空格后，英文 lexicon 才能把 The ubiquitous 拆开（否则黏成 Theubiquitous）。
+    local text = { "T", "h", "e", " ", "u", "b", "i", "q", "u", "i", "t", "o", "u", "s", " ", "x" }
+    local function n(xp) return tonumber(xp:match("%d+$")) end
+    local doc = {
+        compareXPointers = function(_self, a, b)
+            return n(a) == n(b) and 0 or (n(a) < n(b) and 1 or -1)
+        end,
+        getNextVisibleChar = function(_self, xp) if n(xp) < #text - 1 then return "p/text()." .. (n(xp) + 1) end end,
+        getTextFromXPointers = function(_self, a, b) return table.concat(text, "", n(a) + 1, n(b)) end,
+    }
+    local units = Overlay.walk(doc, "p/text().0", "p/text()." .. (#text - 1))
+    local texts = {}
+    for i, u in ipairs(units) do texts[i] = u.text end
+    local Lexicon = require("features.rare.lexicon")
+    local lex = Lexicon.parse("#lang=en\n#kind=wordwise\n#levels=20000,8000,3000\nubiquitous\tomnipresent\t9000\n")
+    local hits = Lexicon.scan(lex, texts, 8000)
+    Assert.len(hits, 1)
+    Assert.eq(hits[1].key, "ubiquitous")
 end

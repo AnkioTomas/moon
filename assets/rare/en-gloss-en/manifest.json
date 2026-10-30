@@ -1,0 +1,14 @@
+{
+  "tag": "main",
+  "built_at": "2026-10-30 21:52:35",
+  "entries": 38191,
+  "raw_sha256": "b66e460b6ae03c1598b1022078edd8f578b08f7dc7c38f5b5734309170dc0842",
+  "raw_size": 1094143,
+  "parts": [
+    {
+      "file": "lexicon.tsv.part.001",
+      "size": 1094143,
+      "sha256": "b66e460b6ae03c1598b1022078edd8f578b08f7dc7c38f5b5734309170dc0842"
+    }
+  ]
+}

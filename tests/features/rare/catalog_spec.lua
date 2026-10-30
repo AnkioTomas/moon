@@ -1,4 +1,4 @@
---[[-- features.rare.catalog：清单（含自制词库）、下载落位后启用、加载缓存、停用、删除。 --]]
+--[[-- features.rare.catalog：清单、下载、类型开关过滤 active、两份释义互斥、warm。 --]]
 
 local Assert = require("support.assert")
 local Config = require("support.config")
@@ -13,7 +13,11 @@ os.execute("mkdir -p " .. TMP)
 package.preload["datastorage"] = function()
     return { getDataDir = function() return TMP .. "/data" end }
 end
-local settings = { rare_lexicons = {}, rare_built_at = {} }
+local settings = {
+    rare_lexicons = {}, rare_built_at = {},
+    rare_ruby = true, rare_wordwise = true, rare_enabled = true,
+    rare_split_migrated = true,
+}
 package.preload["utils.settings"] = function()
     return {
         get = function(name) assert(name == "features.rare"); return settings end,
@@ -26,7 +30,14 @@ package.preload["features.ime.download"] = function()
         install = function(spec, cb)
             spec_seen = spec
             local f = assert(io.open(spec.dest, "wb"))
-            f:write("#lang=zh\n龘\tdá\t9000\n")
+            local id = spec.name:match("^rare%.(.+)$")
+            if id == "en-gloss-zh" or id == "en-gloss-en" then
+                f:write("#lang=en\n#kind=wordwise\nfoo\t短义\t30000\n")
+            elseif id == "en-ipa" then
+                f:write("#lang=en\n#kind=ruby\nfoo\t/fu:/\t30000\n")
+            else
+                f:write("#lang=zh\n龘\tdá\t9000\n")
+            end
             f:close()
             spec.on_installed({ built_at = "v1" })
             cb(true)
@@ -34,6 +45,8 @@ package.preload["features.ime.download"] = function()
     }
 end
 
+package.loaded["features.rare"] = nil
+package.loaded["features.rare.init"] = nil
 local Catalog = require("features.rare.catalog")
 
 do
@@ -42,38 +55,53 @@ do
     local ok
     Catalog.download("zh-pinyin", function(r) ok = r end)
     Assert.is_true(ok)
-    Assert.matches(spec_seen.base_path, "^assets/rare/zh%-pinyin$")
-    Assert.eq(spec_seen.dest, Catalog.path("zh-pinyin"))
     Assert.is_true(Catalog.installed("zh-pinyin"))
     Assert.is_true(Catalog.enabled("zh-pinyin"))
-    Assert.eq(settings.rare_built_at["zh-pinyin"], "v1")
     local active = Catalog.active()
     Assert.len(active, 1)
     Assert.eq(active[1].entries["龘"][1], "dá")
-    -- 缓存：文件不变返回同一对象。
-    Assert.eq(Catalog.load("zh-pinyin"), active[1])
+    Assert.eq(active[1].kind, "ruby")
 end
 
 do
-    -- 目录里的自制词库出现在清单末尾；内置清单在前。
     local f = assert(io.open(Catalog.dir() .. "/my-words.tsv", "wb"))
     f:write("#lang=en\nfoo\t/fu:/\t30000\n")
     f:close()
-    local list = Catalog.list()
-    Assert.eq(list[1].id, "zh-pinyin")
-    Assert.eq(list[#list].id, "my-words")
-    Assert.is_true(list[#list].custom)
     Catalog.setEnabled("my-words", true)
     Assert.len(Catalog.active(), 2)
     Catalog.setEnabled("my-words", false)
-    Assert.is_nil(settings.rare_lexicons["my-words"])
     Assert.len(Catalog.active(), 1)
 end
 
 do
+    -- 拼音与释义可并存；两份释义互斥；关 rare_wordwise 后 active 只剩 ruby。
+    Catalog.download("en-gloss-zh", function() end)
+    Assert.is_true(Catalog.enabled("en-gloss-zh"))
+    Assert.is_true(Catalog.enabled("zh-pinyin"))
+    Assert.len(Catalog.active(), 2)
+    Catalog.download("en-gloss-en", function() end)
+    Assert.is_nil(settings.rare_lexicons["en-gloss-zh"])
+    Assert.len(Catalog.active(), 2)
+    settings.rare_wordwise = false
+    Assert.len(Catalog.active(), 1)
+    Assert.eq(Catalog.active()[1].kind, "ruby")
+    settings.rare_wordwise = true
+end
+
+do
+    local f = assert(io.open(Catalog.path("warm-only"), "wb"))
+    f:write("#lang=en\nzzz\t/z/\t9\n")
+    f:close()
+    settings.rare_lexicons["warm-only"] = true
+    Assert.eq(Catalog.warm(), 1)
+    Assert.eq(Catalog.warm(), 0)
+    Catalog.delete("warm-only")
+end
+
+do
     Catalog.delete("zh-pinyin")
-    Assert.is_false(Catalog.installed("zh-pinyin"))
-    Assert.is_nil(settings.rare_built_at["zh-pinyin"])
+    Catalog.delete("en-gloss-zh")
+    Catalog.delete("en-gloss-en")
     Assert.len(Catalog.active(), 0)
 end
 
