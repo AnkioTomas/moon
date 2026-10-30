@@ -16,6 +16,10 @@
   |   +--------------------------+   |
   +----------------------------------+
 
+键盘按竖屏高度排：横屏（尤其 KPW6）会裁掉底行，0 / 确认进不去。开窗时若当前是横屏，临时扳到
+DEVICE_ROTATED_UPRIGHT（不写旋转记忆），关窗后再经 utils.rotation.follow 还原；叠两层（设密码确认）
+用引用计数，只在最外层关完时还原。开窗期间吞掉陀螺仪，避免又转回横屏。
+
 on_submit(pin) 返回 true 关窗；返回字符串则清空输入、显示该提示。
 dismissable=false（解锁）时返回键、点空白都被吞掉；true（设置页）时多一个取消按钮，返回键也能取消。
 header=true（解锁）时左上角画设备头像 + 设备名称；on_forgot 给了、且 forgot() 为真时卡片内出现「忘记密码」。
@@ -43,6 +47,7 @@ local Image = require("ui.themes.widgets.image")
 local Modal = require("ui.themes.widgets.modal")
 local Text = require("ui.themes.widgets.text")
 local Theme = require("ui.themes")
+local Guard = require("ui.guard")
 require("l10n").apply()
 local _ = require("gettext")
 
@@ -75,7 +80,33 @@ Pad.MIN_LEN = 4
 Pad.MAX_LEN = 6
 Pad.REVEAL = 1 -- 刚输入的那位明文显示多少秒
 
+-- 横屏 → 临时竖屏：引用计数，手势密码页复用。奇数 mode 即横屏（与 KOReader DEVICE_ROTATED_* 一致）。
+local portrait_hold = 0
+local portrait_saved ---@type number|nil
+
+--- 开密码页前：横屏则扳竖屏，记住原方向；已竖屏不动。不写 fm/copt 记忆。
+function Pad.holdPortrait()
+    local mode = Screen:getRotationMode()
+    if portrait_hold == 0 and type(mode) == "number" and mode % 2 == 1 then
+        portrait_saved = mode
+        Screen:setRotationMode(Screen.DEVICE_ROTATED_UPRIGHT or 0)
+    end
+    portrait_hold = portrait_hold + 1
+end
+
+--- 关密码页：最外层才交出要还原的方向；调用方 nextTick 再 follow，避免关窗过程中转屏。
+---@return number|nil
+function Pad.releasePortrait()
+    if portrait_hold == 0 then return end
+    portrait_hold = portrait_hold - 1
+    if portrait_hold > 0 or portrait_saved == nil then return end
+    local mode = portrait_saved
+    portrait_saved = nil
+    return mode
+end
+
 function Pad:init()
+    Pad.holdPortrait()
     Modal.init(self)
     self.pin = ""
     self.message = nil
@@ -87,11 +118,30 @@ function Pad:init()
     self:updateView()
 end
 
+--- 开窗期间禁止改方向：横屏会裁底行；尺寸若变了只按当前屏重排。
+---@return boolean
+function Pad:onSetRotationMode()
+    return true
+end
+
+function Pad:onScreenResize()
+    UIManager:nextTick(function()
+        Guard.call("passcode pad relayout", self.relayout, self)
+    end)
+    return true
+end
+
 function Pad:onCloseWidget()
     UIManager:unschedule(self.mask)
     if self._backdrop and self._backdrop.free then self._backdrop:free() end
     self._backdrop = nil
+    local mode = Pad.releasePortrait()
     Modal.onCloseWidget(self)
+    if mode ~= nil then
+        UIManager:nextTick(function()
+            Guard.call("passcode restore rotation", require("utils.rotation").follow, mode)
+        end)
+    end
 end
 
 ---@param key string 数字或 del / ok

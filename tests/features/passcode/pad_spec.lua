@@ -108,4 +108,33 @@ Assert.len(Kit.buttons(cancel_pad), 13)
 press(cancel_pad, "cancel")
 Assert.eq(Kit.closed[#Kit.closed], cancel_pad)
 
+-- 横屏开密码页临时竖屏，关窗还原；开窗期间吞掉陀螺仪（KPW6 横屏底行被裁）。
+do
+    local Screen = require("device").screen
+    Screen:setRotationMode(1)
+    Assert.eq(Kit.rotation_mode, 1)
+    Assert.is_true(Kit.SCREEN_W > Kit.SCREEN_H)
+    local land = Pad:new{ title = "解锁", dismissable = false, on_submit = function() return true end }
+    Assert.eq(Kit.rotation_mode, 0, "开窗扳到竖屏")
+    Assert.is_true(Kit.SCREEN_W < Kit.SCREEN_H)
+    Assert.is_true(land:onSetRotationMode(3), "吞掉陀螺仪")
+    Assert.eq(Kit.rotation_mode, 0, "吞掉后仍竖屏")
+    land:close()
+    Assert.eq(Kit.rotation_mode, 1, "关窗还原横屏")
+    Assert.is_true(Kit.SCREEN_W > Kit.SCREEN_H)
+end
+
+-- 叠两层（设密码确认）只在最外层关完才还原。
+do
+    local Screen = require("device").screen
+    Screen:setRotationMode(1)
+    local first = Pad:new{ title = "一", dismissable = true, on_submit = function() return true end }
+    local second = Pad:new{ title = "二", dismissable = true, on_submit = function() return true end }
+    Assert.eq(Kit.rotation_mode, 0)
+    first:close()
+    Assert.eq(Kit.rotation_mode, 0, "内层还在，不还原")
+    second:close()
+    Assert.eq(Kit.rotation_mode, 1, "最外层关完才还原")
+end
+
 return true
