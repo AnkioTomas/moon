@@ -229,8 +229,8 @@ end
 local SHELF_LIMIT = 128
 
 --- 风格、排序、书单或封面到位情况变化才重画；书单摘要成 md5，免得把上百个 id 写进设置。
---- 仍有「带远程地址但本地没有」的封面时附带 lock_cycles：唤醒后 cache 失效才会再合成，
---- 不然占位海报能挂很多天。纯本地永远没封面的书不绑次数，避免每次唤醒整屏重画。
+--- 仍有「带远程地址但本地没有」的封面时绑 retry 桶（每 N 次锁屏）：落盘靠 prefetch 回调，
+--- 失败 / 离线才隔几次唤醒再合成，别每次唤醒整屏重画。纯本地缺封面不绑。
 ---@return string
 function M.cache_key()
     local parts = {}
@@ -249,7 +249,7 @@ function M.cache_key()
         end
     end
     local key = M.style() .. ":" .. M.sort() .. ":" .. require("ffi/sha2").md5(table.concat(parts, "\n"))
-    return key .. require("features.lockscreen.cycle").pending(retryable > 0)
+    return key .. require("features.lockscreen.cycle").retry(retryable > 0)
 end
 
 --- 风格的设置页选项。

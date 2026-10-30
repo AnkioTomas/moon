@@ -108,28 +108,75 @@ local function columnAt(t, rho)
 end
 
 -- 立体侧封面：整本 2:3 正图透视压进窄槽；外缘近、内缘远。
--- 梯形只采样一次缓存起来：逐像素 warp 每帧重做会拖死主循环（模拟器直接挂）。
+-- 梯形采样极贵：结果挂模块 LRU，滑动 refresh 重建控件时复用，widget 不拥有缓冲。
 ---@class BookRecentCardStereo : WidgetContainer
 ---@field dimen table
 ---@field src_w integer
 ---@field src_h integer
 ---@field side integer
 ---@field rho number
+---@field book_key string
 ---@field _warp BlitBuffer|nil
 ---@field _tops integer[]|nil
 ---@field _heights integer[]|nil
 local Stereo = WidgetContainer:extend{}
 
+local WARP_MAX = 24
+local warp_cache = {} ---@type table<string, { warp: BlitBuffer, tops: integer[], heights: integer[] }>
+local warp_order = {} ---@type string[]
+
+local function warpClear()
+    for key, entry in pairs(warp_cache) do
+        if entry.warp and entry.warp.free then entry.warp:free() end
+        warp_cache[key] = nil
+    end
+    warp_order = {}
+end
+
+---@param key string
+---@param entry { warp: BlitBuffer, tops: integer[], heights: integer[] }
+local function warpPut(key, entry)
+    if warp_cache[key] then
+        local old = warp_cache[key]
+        if old.warp and old.warp ~= entry.warp and old.warp.free then old.warp:free() end
+    else
+        warp_order[#warp_order + 1] = key
+    end
+    warp_cache[key] = entry
+    while #warp_order > WARP_MAX do
+        local evict = table.remove(warp_order, 1)
+        local old = warp_cache[evict]
+        warp_cache[evict] = nil
+        if old and old.warp and old.warp.free then old.warp:free() end
+    end
+end
+
 function Stereo:getSize()
     return self.dimen
 end
 
---- 生成梯形缓冲与每列 tops/heights；只在首次绘制时跑。
+--- widget 不拥有 _warp（归模块缓存）；只放下子控件。
+---@param full boolean|nil
+function Stereo:free(full)
+    self._warp, self._tops, self._heights = nil, nil, nil
+    WidgetContainer.free(self, full)
+end
+
+--- 生成梯形缓冲与每列 tops/heights；命中模块缓存则跳过采样。
 ---@param typ any|nil
 function Stereo:ensureWarp(typ)
     if self._warp then return end
     local sw, sh = self.src_w, self.src_h
     local dw, dh = self.dimen.w, self.dimen.h
+    local key = table.concat({
+        self.book_key or "", tostring(self.side or 0), tostring(sw), tostring(sh),
+        tostring(dw), tostring(dh), tostring(self.rho or 0), tostring(typ or ""),
+    }, "\0")
+    local hit = warp_cache[key]
+    if hit then
+        self._warp, self._tops, self._heights = hit.warp, hit.tops, hit.heights
+        return
+    end
     local src = typ and Blitbuffer.new(sw, sh, typ) or Blitbuffer.new(sw, sh)
     src:fill(Blitbuffer.COLOR_WHITE)
     self[1]:paintTo(src, 0, 0)
@@ -155,6 +202,7 @@ function Stereo:ensureWarp(typ)
         end
     end
     src:free()
+    warpPut(key, { warp = warp, tops = tops, heights = heights })
     self._warp, self._tops, self._heights = warp, tops, heights
 end
 
@@ -388,12 +436,15 @@ local function coverCard(ctx, item, on_tap, stereo)
     }))
     if item.dist > 0 then
         if stereo then
+            local book = item.book
             body = Stereo:new{
                 dimen = Geom:new{ w = item.cw, h = item.ch },
                 src_w = src_w,
                 src_h = src_h,
                 side = item.side,
                 rho = item.rho or STEREO.rho,
+                book_key = tostring(book.source_id or "") .. "\0"
+                    .. tostring(book.stable_id or book.title or ""),
                 body,
             }
         else
@@ -591,6 +642,19 @@ function M:createWidget()
         end
     end
     return CenterContainer:new{ dimen = Geom:new{ w = w, h = math.max(1, h) }, host }
+end
+
+--- 组件销毁时丢掉梯形缓存，别跨首页生命周期占着 BlitBuffer。
+function M:onDestroy()
+    warpClear()
+end
+
+--- 测试用：当前梯形缓存条数。
+---@return integer
+function M._warpCacheSize()
+    local n = 0
+    for _ in pairs(warp_cache) do n = n + 1 end
+    return n
 end
 
 return M

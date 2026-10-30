@@ -192,10 +192,16 @@ do -- 立体：两环五本、底边对齐；侧封面更窄；paintTo 走梯形
     local bb = Kit.canvas()
     slot:paintTo(bb, 0, 0)
     Assert.is_true(bb.pixels > 0, "立体 paintTo 采样写像素")
+    local cached = Cards._warpCacheSize()
+    Assert.is_true(cached > 0, "侧封面梯形进模块缓存")
     local host = slot[1][1]
     host:onSwipeCards({ direction = "west" })
     Assert.eq(cards.focus, 2)
+    local bb2 = Kit.canvas()
+    slot:paintTo(bb2, 0, 0)
+    Assert.is_true(Cards._warpCacheSize() >= cached, "滑动重建复用梯形缓存")
     cards:destroy()
+    Assert.eq(Cards._warpCacheSize(), 0, "destroy 清梯形缓存")
     Cards.saveLayout("stack")
     reading = {}
 end

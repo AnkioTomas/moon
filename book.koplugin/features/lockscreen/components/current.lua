@@ -108,7 +108,7 @@ function M.cache_key()
         parts[#parts + 1] = bucket.key .. "," .. bucket.seconds .. "," .. bucket.pages
     end
     return table.concat(parts, ":")
-        .. require("features.lockscreen.cycle").pending(not book.cover)
+        .. require("features.lockscreen.cycle").retry(not book.cover)
 end
 
 --- 指定书的带统计快照（阅读页侧栏票根用：书跟阅读身份走，不取「当前源最近在读」）。

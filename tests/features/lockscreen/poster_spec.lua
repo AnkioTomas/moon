@@ -139,7 +139,8 @@ Assert.eq(db_sorts[1], "recent_added")
 conf.lock_screen_poster_sort = nil
 Assert.eq(Poster.sort(), "recent_read", "非法/空回退最近阅读")
 
--- 缺封面且有远程地址：键带 lock_cycles；纯本地缺封面不绑次数；齐了也不绑。
+-- 缺封面且有远程地址：键带 retry 桶（每 5 次锁屏）；同桶稳定；跨桶才变。
+-- 纯本地缺封面不绑；齐了也不绑。
 do
     local Cycle = require("features.lockscreen.cycle")
     local prev_cycles = Cycle.lock_cycles
@@ -157,9 +158,12 @@ do
         }
     end
     local incomplete = Poster.cache_key()
-    Assert.matches(incomplete, "^standard:recent_read:%x+:3$")
+    Assert.matches(incomplete, "^standard:recent_read:%x+:0$")
     Cycle.lock_cycles = 4
-    Assert.is_true(Poster.cache_key() ~= incomplete, "可补封面时次数变了要重画")
+    Assert.eq(Poster.cache_key(), incomplete, "同桶不因唤醒重画")
+    Cycle.lock_cycles = 5
+    Assert.is_true(Poster.cache_key() ~= incomplete, "跨桶才重画")
+    Assert.matches(Poster.cache_key(), "^standard:recent_read:%x+:1$")
     Library.shelfBook = function(row, source_id)
         return {
             source_id = source_id,
@@ -174,6 +178,7 @@ do
     Cycle.lock_cycles = prev_cycles
     Assert.matches(Poster.cache_key(), "^standard:recent_read:%x+$", "封面齐了不带次数")
 end
+
 local std = placed(Poster.blocks({ x = 0, y = 0, w = 540, h = 720 }), "image")
 Assert.eq(#std, 16)
 Assert.eq(std[1].x, 0)

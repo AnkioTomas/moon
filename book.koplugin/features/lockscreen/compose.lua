@@ -133,14 +133,15 @@ local function buildBlocks(component, position, wide)
 end
 
 --- 背景就绪后合成。
---- 建块与写 PNG 一律下一拍再跑：本地背景 ensure 是同步回调，若当场 write 会卡死
---- 电源键 / 桌面激活 / 设置预览所在的主循环（低端 Kindle 上数秒）。
+--- 建块仍在主进程下一拍（要碰 UI 控件）；写 PNG 走 workers.job（heavy）：
+--- 低端 Kindle 整屏解码 + 画块 + 编码数秒，不能堵 UI 循环。
 ---@param plan table
 ---@param cb fun(ok: boolean, err: any, transparent: boolean|nil)
 ---@return table|nil
 function M.build(plan, cb)
     local cancelled = false
     local asset_job
+    local write_job
     local UIManager = require("ui/uimanager")
     asset_job = Background.ensure(plan.asset, function(path, err)
         if cancelled then return end
@@ -150,17 +151,50 @@ function M.build(plan, cb)
             local sw, sh = Layout.portraitSize()
             local backdrop = plan.asset.blocks and plan.asset.blocks({ x = 0, y = 0, w = sw, h = sh, pad = 0 })
             local blocks = buildBlocks(plan.component, plan.position, plan.wide)
-            local ok, render_err, transparent = require("features.lockscreen.render").write(COMPOSE_PATH,
-                { path = path, contain = plan.asset.contain, blocks = backdrop }, blocks)
-            if not ok and path and tostring(render_err):find("cannot decode background", 1, true) then
-                Background.invalidate(plan.asset)
+            local bg = { path = path, contain = plan.asset.contain, blocks = backdrop }
+            write_job = require("workers.job").run(function()
+                local ok, render_err, transparent = require("features.lockscreen.render").write(
+                    COMPOSE_PATH, bg, blocks)
+                if not ok then
+                    return { ok = false, err = render_err and tostring(render_err) or "render failed" }
+                end
+                return { ok = true, transparent = transparent or false }
+            end, {
+                name = "lockscreen.compose",
+                kind = "heavy",
+                timeout = 120,
+                on_done = function(result)
+                    write_job = nil
+                    if cancelled then return end
+                    if not (result and result.ok) then
+                        if path and result and result.err
+                            and tostring(result.err):find("cannot decode background", 1, true) then
+                            Background.invalidate(plan.asset)
+                        end
+                        return cb(false, result and result.err)
+                    end
+                    cb(true, nil, result.transparent)
+                end,
+                on_failed = function(job_err)
+                    write_job = nil
+                    if cancelled then return end
+                    cb(false, job_err)
+                end,
+                on_cancelled = function()
+                    write_job = nil
+                end,
+            })
+            if cancelled and write_job and write_job.cancel then
+                write_job:cancel()
+                write_job = nil
             end
-            cb(ok, render_err, transparent)
         end)
     end)
     return { cancel = function()
         cancelled = true
         if asset_job then asset_job:cancel() end
+        if write_job and write_job.cancel then write_job:cancel() end
+        write_job = nil
     end }
 end
 

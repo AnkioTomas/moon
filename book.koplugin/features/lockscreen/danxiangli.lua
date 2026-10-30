@@ -250,7 +250,7 @@ function M.cache_key()
     local date = os.date("*t") --[[@as osdate]]
     local lunar = M.lunarLines(M.daily(date))
     local key = os.date("%Y-%m-%d") .. (lunar and ("|" .. lunar.date) or "")
-    return key .. require("features.lockscreen.cycle").pending(not lunar)
+    return key .. require("features.lockscreen.cycle").retry(not lunar)
 end
 
 return M
