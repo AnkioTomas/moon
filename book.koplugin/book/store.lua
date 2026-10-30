@@ -292,11 +292,12 @@ function Store.identityFor(path)
         }
     end
     local book = BookDB.getByPath(path)
-    -- 旧版本给库外文件补的身份行：local 源、从没上过架（inserted_at=0）、path 即 stable_id。
-    -- 现在库外不管，这些遗留行当不存在；真正软删的 local 书 inserted_at>0。
-    if book and book.source_id == "local" and book.deleted == 1 and book.inserted_at == 0
-        and book.stable_id == book.path then
-        book = nil
+    -- 旧版本把库外打开的文件当 local 书登记过（path 即 stable_id）。
+    -- local 书只来自扫盘根目录，根目录之外的 local 行是遗留的库外文件，当不存在。
+    if book and book.source_id == "local" and book.path == book.stable_id then
+        local root = require("utils.text").rtrimSlashes(
+            require("utils.text").rtrim(require("utils.settings").getSource("local").path))
+        if root == "" or book.path:sub(1, #root + 1) ~= root .. "/" then book = nil end
     end
     if book then
         return {
