@@ -118,6 +118,18 @@ function Source:configured()
     return Kindle.available()
 end
 
+--- 只能编辑展示元信息（cc.db 只读，改动只落月读库）。
+function Source:capabilities()
+    return { scrape = false, edit = true, stats_pull = false, shelf_cache = false }
+end
+
+--- 编辑后标脏：reconcile 遇脏行不盖 title/authors，否则下一轮同步就把编辑覆盖回 cc.db 的值。
+function Source:onEvent(event, payload)
+    if event == "book_meta_changed" then
+        require("book.books_db").setLibraryMembership(self.id, payload.identity.stable_id, true)
+    end
+end
+
 --- 书架只来自本机 cc.db，没有远端可推。
 function Source:pushDirty() end
 

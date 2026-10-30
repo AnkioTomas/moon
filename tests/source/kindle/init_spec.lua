@@ -51,13 +51,14 @@ package.loaded["lua-ljsqlite3/init"] = {
     end,
 }
 
-local reconciled
+local reconciled, dirtied
 package.loaded["book.books_db"] = {
     reconcile = function(source_id, books, opts)
         reconciled = { source_id = source_id, books = books, opts = opts }
         return true, 0
     end,
     get = function() return { cover = thumb } end,
+    setLibraryMembership = function(source_id, stable_id, on) dirtied = { source_id, stable_id, on } end,
 }
 local touched
 package.loaded["book.store"] = { touch = function(path) touched = path; return true end }
@@ -195,6 +196,12 @@ do
     lfs.attributes = real_attributes
 end
 package.loaded["workers.tasks"], package.loaded["workers.ui.task_dialog"] = nil, nil
+
+-- 编辑元信息：能力开启，保存后标脏防止被下一轮 cc.db 快照覆盖
+Assert.is_true(source:capabilities().edit)
+source:onEvent("book_meta_changed", { identity = { source_id = "kindle", stable_id = "u1" } })
+Assert.eq(dirtied[2], "u1")
+Assert.is_true(dirtied[3])
 
 package.loaded["lua/open_file_ext"] = nil
 for _idx, p in ipairs({ cc_path, kfx, azw3, epub, thumb, placeholder }) do os.remove(p) end
