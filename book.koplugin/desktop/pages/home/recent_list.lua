@@ -108,11 +108,12 @@ function M.saveShowFirst(on)
     MoonSettings.save("desktop.pages.home", home)
 end
 
---- 列表要显示的书：其余在读，开关打开时第一本排在最前。
+--- 列表要显示的书：按设置丢掉已读完；其余在读，开关打开时第一本排在最前。
 ---@param recent Book|nil
 ---@param reading Book[]
 ---@return Book[]
 local function listBooks(recent, reading)
+    recent, reading = M.withoutFinished(recent, reading)
     if not (recent and M.showFirst()) then return reading end
     local books = { recent }
     for i, book in ipairs(reading) do books[i + 1] = book end
@@ -160,6 +161,10 @@ function M:showSettings(desktop)
             end },
             { text = M.showFirst() and _("✓ 显示第一本") or _("显示第一本"), callback = function()
                 M.saveShowFirst(not M.showFirst())
+                refresh()
+            end },
+            { text = M.hideFinished() and _("✓ 隐藏已读完") or _("隐藏已读完"), callback = function()
+                M.saveHideFinished(not M.hideFinished())
                 refresh()
             end },
         },

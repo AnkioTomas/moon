@@ -15,6 +15,8 @@ return {
         -- 第一本 = 最近读的那本；列表默认留给「当前阅读」大卡片，堆叠卡片默认放中间。
         home_recent_list_show_first = false,
         home_recent_cards_show_first = true,
+        -- 最近阅读列表 / 卡片共用：去掉 books.read_state=1 的已读完。
+        home_recent_hide_finished = false,
         -- 一言 / 书摘整个组件是否居中。
         home_hitokoto_center = false,
         home_excerpt_center = false,

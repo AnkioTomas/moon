@@ -76,7 +76,7 @@ function M.showFirst()
     return MoonSettings.get("desktop.pages.home").home_recent_cards_show_first ~= false
 end
 
---- 编辑态设置：是否显示第一本。
+--- 编辑态设置：是否显示第一本、是否隐藏已读完。
 ---@param desktop BookDesktop
 function M:showSettings(desktop)
     require("ui.themes.widgets.sheet"):new{
@@ -86,6 +86,10 @@ function M:showSettings(desktop)
                 local home = MoonSettings.get("desktop.pages.home")
                 home.home_recent_cards_show_first = not M.showFirst()
                 MoonSettings.save("desktop.pages.home", home)
+                desktop:onEvent("home_refresh")
+            end },
+            { text = M.hideFinished() and _("✓ 隐藏已读完") or _("隐藏已读完"), callback = function()
+                M.saveHideFinished(not M.hideFinished())
                 desktop:onEvent("home_refresh")
             end },
         },
@@ -246,6 +250,7 @@ function M:createWidget()
     local recent, reading, err = self:shelf()
     -- 书架顺序变了（读了别的书）焦点回到最近读的那本，否则堆叠停在旧位置
     if self.shelf_key ~= previous_key then self.focus = 1 end
+    recent, reading = M.withoutFinished(recent, reading)
     local books = {}
     if recent and M.showFirst() then books[1] = recent end
     if #books == 0 and #reading == 0 then return M.libraryPrompt(ctx, w, h, err) end
