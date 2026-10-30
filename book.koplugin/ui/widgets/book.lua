@@ -526,7 +526,22 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         req = source_req
     end
     local t = Theme.current()
-    local style = opts.shadow == false and t.image or t.raised
+    -- 封面圆角在 raised；image 半径故意为 0（通用图）。无阴影时不能整段换成 image，
+    -- 否则柔和主题侧封面丢圆角，堆叠底边对齐时只看见中间本顶部是圆的。
+    local style
+    if opts.shadow == false then
+        local flat, raised = t.image, t.raised
+        style = {
+            bg = flat.bg,
+            border = flat.border,
+            border_color = flat.border_color,
+            radius = raised.radius,
+            shadow = 0,
+            shadow_color = flat.shadow_color,
+        }
+    else
+        style = t.raised
+    end
     -- 内边距只让出边框：Box 先画边框再画子件，图贴着边框内沿。
     local cover_pad = Theme.px(style.border or 0)
     local cover_w = math.max(Theme.px(16), cw - cover_pad * 2)

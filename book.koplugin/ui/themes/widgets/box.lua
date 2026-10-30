@@ -10,7 +10,8 @@
 
 style 取 card / raised / dialog 这类表面令牌（bg/border/border_color/radius/shadow/shadow_color，
 逻辑像素）；缺 bg 不填底。width/height/padding 是物理像素，不给宽高时按子件加内边距撑开，
-子件在框内居中。圆角大于 0 时，子件画完后把四角圆外的像素还回去，直角图不会冒出框。
+子件在框内居中。圆角大于 0 时，先抄角外底色（在画阴影之前），子件画完再还回去，
+直角图不会冒出框；阴影偏右下，若画完阴影再抄，底角会还原成阴影色、看起来像直角。
 尺寸在 init 定死：内容变化的调用方重建 Box。
 
 @module koplugin.book.ui.themes.widgets.box
@@ -97,14 +98,15 @@ function Box:paintTo(bb, x, y)
     local w, h = self.box_w, self.box_h
     -- paintBorder 不夹半径，这里统一夹到短边一半，radius=999 即胶囊。
     local r = math.min(Theme.px(s.radius or 0), math.floor(math.min(w, h) / 2))
+    -- 角外底色必须在画阴影之前抄：阴影偏右下，画完再抄会把底角还原成阴影色，
+    -- 封面底边看起来像直角（柔和 raised 阴影 + 圆角封面就是这个坑）。
+    local saved = r > 0 and snapshotCorners(bb, x, y, w, h, r) or nil
     if self.shadow > 0 then
         bb:paintRoundedRect(x + self.shadow, y + self.shadow, w, h, Theme.color(s.shadow_color), r)
     end
     if s.bg and self.bg_alpha and self.bg_alpha < 100 then
-        -- 白底按比例向白提亮即「白色 + 透明度」；圆角外的像素还原。
-        local corners = r > 0 and snapshotCorners(bb, x, y, w, h, r) or nil
+        -- 白底按比例向白提亮即「白色 + 透明度」；直角提亮冒出的角外靠收尾还原。
         bb:lightenRect(x, y, w, h, self.bg_alpha / 100)
-        for _idx, pixel in ipairs(corners or {}) do bb:setPixel(pixel[1], pixel[2], pixel[3]) end
     elseif s.bg then
         local paint = s.bg > 0xFF and bb.paintRoundedRectRGB32 or bb.paintRoundedRect
         paint(bb, x, y, w, h, Theme.color(s.bg), r)
@@ -118,8 +120,12 @@ function Box:paintTo(bb, x, y)
             G_reader_settings:nilOrTrue("anti_alias_ui"))
     end
     local child = self[1]
-    if not child then return end
-    local saved = r > 0 and snapshotCorners(bb, x, y, w, h, r) or nil
+    if not child then
+        if saved then
+            for _idx, pixel in ipairs(saved) do bb:setPixel(pixel[1], pixel[2], pixel[3]) end
+        end
+        return
+    end
     local cs = child:getSize()
     child:paintTo(bb, x + math.floor((w - cs.w) / 2), y + math.floor((h - cs.h) / 2))
     if not saved then return end
