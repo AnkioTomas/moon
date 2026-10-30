@@ -539,7 +539,7 @@ do
         shown[#shown + 1] = widget
     end
 
-    local plugin, emitted = mkPlugin("/.moon/cache/moon/book/unknown/1.html")
+    local plugin, emitted = mkPlugin(require("utils.paths").root() .. "/cache/moon/book/unknown/1.html")
     stored_toc.chapters = { { idx = 1 } }
     Session.onReaderReady(mkPlugin("/cache/1.html"))
     local closed = 0
@@ -924,6 +924,19 @@ do
     Assert.not_nil(Session.current().chapter)
     Session.onCloseDocument(plugin)
     Store.ensureIdentity = original
+end
+
+-- 库外文件：不建会话、不提示、不接管结束事件。
+do
+    local UIManager = require("ui/uimanager")
+    local shown = 0
+    local old_show = UIManager.show
+    UIManager.show = function() shown = shown + 1 end
+    local plugin = mkPlugin("/outside/unknown.epub")
+    Session.onReaderReady(plugin)
+    UIManager.show = old_show
+    Assert.is_nil(Session.current())
+    Assert.eq(shown, 0)
 end
 
 -- 库外顺手登记的幽灵书（deleted=1）：只记完成，交回原生，不吞事件。
