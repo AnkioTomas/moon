@@ -317,9 +317,12 @@ do
 
     posted.web_read_reply = "{}"
     ok, err = nil, nil
-    client:putProgressAsync("99", { progress = 50, chapter_uid = 8 }, function(data, e) ok, err = data, e end)
+    local meta
+    client:putProgressAsync("99", { progress = 50, chapter_uid = 8 },
+        function(data, e, m) ok, err, meta = data, e, m end)
     Assert.is_nil(ok)
     Assert.not_nil(err)
+    Assert.is_true(meta and meta.permanent, "收下不记账必须 permanent，别每轮脏同步白撞")
 end
 
 -- bookCount 大于 books 条数也原样交回（专辑、公众号不在这三份列表里）

@@ -610,11 +610,22 @@ do
     Assert.is_nil(ok)
     Assert.eq(err, "缺少章节信息")
     Assert.is_nil(captured, "不得用当前章 uid 40 上报")
+    -- locator 对不上章节正文：永久失败（否则脏同步每轮白撞）
+    local map_ok, map_err, map_meta
+    src:putProgressAsync(REF, {
+        fraction = 0.5,
+        locator = "/html/body/div/text().0",
+        extra = UID,
+    }, function(v, e, meta) map_ok, map_err, map_meta = v, e, meta end)
+    Assert.is_nil(map_ok)
+    Assert.is_nil(captured)
+    Assert.is_true(map_meta and map_meta.permanent)
+    Assert.eq(map_err, "reading position not found in chapter")
     toc_payload["b1"] = nil
     require("source.wechat.toc").clear()
 end
 
--- putProgressAsync：失败时错误原样透传（client 层错误一律是字符串）
+-- putProgressAsync：失败时错误原样透传；client 的 permanent 元信息也要透传
 do
     fake_client.putProgressAsync = function(_, _, _, cb)
         cb(nil, "写入失败")
@@ -627,6 +638,18 @@ do
     }, function(v, e) ok, err = v, e end)
     Assert.is_nil(ok)
     Assert.eq(err, "写入失败")
+
+    fake_client.putProgressAsync = function(_, _, _, cb)
+        cb(nil, "上报响应异常", { permanent = true })
+        return { cancel = function() end }
+    end
+    local soft_ok, soft_err, soft_meta
+    src:putProgressAsync(REF, {
+        fraction = 0.5, chapter_fraction = 0, extra = { chapter_uid = 42, chapter_idx = 0 },
+    }, function(v, e, m) soft_ok, soft_err, soft_meta = v, e, m end)
+    Assert.is_nil(soft_ok)
+    Assert.eq(soft_err, "上报响应异常")
+    Assert.is_true(soft_meta and soft_meta.permanent)
 end
 
 -- getProgressAsync：percent → fraction（边界 0/100、缺进度兜底、已读完抬满）

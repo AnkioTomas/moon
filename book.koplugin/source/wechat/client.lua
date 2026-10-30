@@ -193,7 +193,7 @@ end
 --- 上报阅读进度：网页阅读会话的位置 payload，不附加或伪造阅读时长。
 ---@param bookId string
 ---@param opts { progress: number, chapter_uid: string|number, chapter_idx?: number, chapter_offset?: number, chapter_fraction?: number, summary?: string, book_version?: integer }
----@param cb fun(data: table|nil, err: any)
+---@param cb fun(data: table|nil, err: any, meta?: { permanent?: boolean })
 ---@return { cancel: fun() }
 function Client:putProgressAsync(bookId, opts, cb)
     if not Eink.credentials() then
@@ -220,8 +220,13 @@ function Client:putProgressAsync(bookId, opts, cb)
         job = postWebAsync("/web/book/read", body, Protocol.readerUrl(bookId, opts.chapter_uid), function(data, push_err)
             if cancelled then return end
             if not data then return cb(nil, push_err) end
+            -- 受理回包带 succ=1 或 synckey；都没有是「收下不记账」。换坐标前再推也白撞，permanent 丢掉。
             if not (data.succ == true or tonumber(data.succ) == 1 or data.synckey ~= nil) then
-                return cb(nil, _("上报响应异常"))
+                local snippet = ""
+                local enc_ok, encoded = pcall(JSON.encode, data)
+                if enc_ok and type(encoded) == "string" then snippet = encoded:sub(1, 200) end
+                logger.warn("weread report read not accepted", bookId, snippet)
+                return cb(nil, _("上报响应异常"), { permanent = true })
             end
             cb({ ok = true })
         end)

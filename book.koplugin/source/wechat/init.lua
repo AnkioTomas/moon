@@ -638,9 +638,9 @@ function Source:putProgressAsync(identity, pos, cb)
                 progress = progress, chapter_uid = uid, chapter_idx = source_idx,
                 chapter_offset = offset, chapter_fraction = fraction, summary = summary,
                 book_version = extra and extra.book_version,
-            }, function(wire, push_err)
+            }, function(wire, push_err, meta)
                 if cancelled then return end
-                cb(wire and true or nil, push_err)
+                cb(wire and true or nil, push_err, meta)
             end)
         end
         if not pos.locator and pos.chapter_fraction == 0 then
@@ -653,7 +653,12 @@ function Source:putProgressAsync(identity, pos, cb)
             if cancelled then return end
             if not source then cb(nil, format); return end
             local offset, summary, fraction, map_err = Position.encode(identity, chapter, pos, source, format)
-            if not offset then cb(nil, map_err); return end
+            -- offset=0 是章首合法坐标；只有 nil 才是映射失败。
+            -- 坐标对不上当前章 HTML 时再推也永远失败，标 permanent 让脏同步丢掉，别拖死整源。
+            if offset == nil then
+                cb(nil, map_err or _("无法定位阅读进度"), { permanent = true })
+                return
+            end
             send(offset, summary, fraction)
         end)
     end
