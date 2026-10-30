@@ -86,6 +86,31 @@ Box:new{ style = { bg = 1, radius = 8, border = 0, shadow = 0 }, width = 20, hei
 Assert.eq(pixels["0:0"], 9, "角外还回底色")
 Assert.eq(pixels["10:10"], 0, "圆内留下子件")
 
+-- 真机 getPixel 是画布引用：若不先拷成独立 Color，子件盖住角后再「还原」仍是封面色，圆角失效。
+pixels = {}
+local live_bb = {
+    getWidth = function() return 20 end,
+    getHeight = function() return 20 end,
+    getPixel = function(_, px, py)
+        -- 模拟 cdata 引用：读当前像素，且 type 不是 table（走 userdata 路径）。
+        local proxy = newproxy(true)
+        local mt = getmetatable(proxy)
+        mt.__index = {
+            getColorRGB32 = function()
+                return pixels[pixkey(px, py)] or 9
+            end,
+        }
+        return proxy
+    end,
+    setPixel = function(_, px, py, color) pixels[pixkey(px, py)] = color end,
+    paintRoundedRect = function() end,
+    paintBorder = function() end,
+}
+Box:new{ style = { bg = 1, radius = 8, border = 0, shadow = 0 }, width = 20, height = 20, fill }
+    :paintTo(live_bb, 0, 0)
+Assert.eq(pixels["0:0"], 9, "cdata 引用也必须先拷贝再还原")
+Assert.eq(pixels["10:10"], 0, "圆内留下子件")
+
 -- 有阴影时底角也还原成绘制前的底，不能抄成阴影色（否则底边像直角）。
 pixels = {}
 local shadow_bb = {
