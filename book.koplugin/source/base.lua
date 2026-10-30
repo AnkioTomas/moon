@@ -14,7 +14,7 @@ capabilities() 是 UI 开关（scrape / edit / stats_pull / shelf_cache，默认
 shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明，核心按 caps.shelf_cache == true 就地判），
 不是「有没有这个函数」；全本缓存看有没有 cacheAllChaptersAsync，进度双向看 get/putProgressAsync 是否都在。
 源外代码只碰 source.<id>（经 registry）和 source.<id>.setting；require("source.<id>")，禁止写 .init。
-新增内置源：source/<id>/init.lua（meta + new）、可选 setting.lua、registry 的 BUILTIN 加一项，测试放 tests/source/<id>/。
+新增内置源：source/<id>/init.lua（meta + new）、_meta.lua（id/name/type/description/abilities，meta() 经 SourceBase.loadMeta 读，启用页展示）、可选 setting.lua、registry 的 BUILTIN 加一项，测试放 tests/source/<id>/。
 标准拉快照 + add/remove 书架用 source.shelf；推墓碑一律 Shelf.pushDeletes。模块顶层不 require KOReader UI。
 
 @module koplugin.book.source.base
@@ -30,6 +30,8 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field id SourceId
 ---@field name string
 ---@field type BookSourceType 阅读形态
+---@field description string|nil 一句话说明（启用页展示）
+---@field abilities string[]|nil 能力清单（启用页展示；与运行时开关 capabilities() 无关）
 
 --- 能力是用户可用功能，不是「模块里有没有函数」。
 --- 仅保留 UI 实际读取的开关；Source 基础契约和阅读形态不放在能力表中。
@@ -195,6 +197,15 @@ end
 
 ---@class SourceBase : BookSource
 local SourceBase = {}
+
+--- 读 `source/<id>/_meta.lua`。返回浅拷贝：源实例直接以它为实例表，不能共享模块缓存里的那份。
+---@param id string
+---@return BookSourceMeta
+function SourceBase.loadMeta(id)
+    local copy = {}
+    for k, v in pairs(require("source." .. id .. "._meta")) do copy[k] = v end
+    return copy
+end
 SourceBase.__index = SourceBase
 
 --- 下一帧调 cb(...)，返回可取消句柄。IO 方法一律异步回调：命中缓存、当场失败也走这里，

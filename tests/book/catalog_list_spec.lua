@@ -27,9 +27,9 @@ local registry = {
     list = function() return {} end,
     listEnabled = function() return {} end,
     resolve = function(id)
-        if id ~= "ext.kavita" then return nil end
+        if id ~= "kavita" then return nil end
         return {
-            id = "ext.kavita",
+            id = "kavita",
             capabilities = function() return { shelf_cache = shelf_caps } end,
             shelfCache = function()
                 shelf_calls = shelf_calls + 1
@@ -75,7 +75,7 @@ end
 do
     local calls = {}
     local fail_count = false
-    -- 假结果集的行身份：书架缓存用例要拿 ext.kavita 的行来对投影。
+    -- 假结果集的行身份：书架缓存用例要拿 kavita 的行来对投影。
     local row_source, row_stable = "local", "/books/a.epub"
     local connection = {
         exec = function() end,
@@ -276,13 +276,13 @@ do
         mark = { ["700"] = true },
         cover = { ["700"] = "/cache/700.jpg" },
     }
-    row_source, row_stable = "ext.kavita", "700"
+    row_source, row_stable = "kavita", "700"
     calls = {}
-    rows = Catalog.listBooks("ext.kavita", { limit = 24 })
+    rows = Catalog.listBooks("kavita", { limit = 24 })
     Assert.is_true(rows[1].cache_mark, "投影 mark 命中：已缓存")
     row_stable = "701"
     calls = {}
-    rows = Catalog.listBooks("ext.kavita", { limit = 24 })
+    rows = Catalog.listBooks("kavita", { limit = 24 })
     Assert.is_nil(rows[1].cache_mark, "不在投影里：未缓存")
     -- 没有声明能力的源不看投影，也不多出 SQL。
     shelf_caps = false
@@ -307,9 +307,9 @@ do
         mark = { ["700"] = true },
         cover = {},
     }
-    row_source, row_stable = "ext.kavita", "700"
+    row_source, row_stable = "kavita", "700"
     calls = {}
-    rows, count = Catalog.listBooks("ext.kavita", {
+    rows, count = Catalog.listBooks("kavita", {
         offline_only = true, limit = 10, offset = 0, chapter_sources = { "wechat" },
     })
     local count_offline, list_offline = calls[1], calls[2]
@@ -320,7 +320,7 @@ do
         Assert.is_nil(q.sql:find("b.source_id NOT IN", 1, true), "单源全是缓存源：不加源限制")
     end
     Assert.eq(whereOf(count_offline.sql), whereOf(list_offline.sql), "count 与 select 共用同一 where")
-    Assert.eq(count_offline.args[1], "ext.kavita")
+    Assert.eq(count_offline.args[1], "kavita")
     Assert.eq(count_offline.args[2], "700", "series 参数在源参数之后")
     Assert.eq(count_offline.args[3], "wechat", "下载子句参数排在最后")
     Assert.eq(list_offline.args[#list_offline.args - 1], 10)
@@ -329,7 +329,7 @@ do
 
     -- random：同一条分页 SELECT（列序只有一份），只是不 COUNT、ORDER BY RANDOM()。
     calls = {}
-    rows = Catalog.listBooks("ext.kavita", { random = true, limit = 2, offline_only = true, chapter_sources = { "wechat" } })
+    rows = Catalog.listBooks("kavita", { random = true, limit = 2, offline_only = true, chapter_sources = { "wechat" } })
     Assert.len(calls, 1, "random 不先 COUNT")
     Assert.is_true(calls[1].sql:find("ORDER BY RANDOM()", 1, true) ~= nil)
     Assert.eq(whereOf(calls[1].sql), whereOf(list_offline.sql), "random 与分页同一 where")
@@ -339,15 +339,15 @@ do
 
     -- 混合源：只约束声明了 shelf_cache 的源，其它源的行原样放行（05 A4）。
     calls = {}
-    Catalog.listBooks({ "ext.kavita", "wechat" }, {
+    Catalog.listBooks({ "kavita", "wechat" }, {
         offline_only = true, limit = 24, chapter_sources = { "wechat" },
     })
     local mixed_count = calls[1]
     Assert.is_true(mixed_count.sql:find("b.source_id NOT IN (?)", 1, true) ~= nil,
         "同范围里别的源不受离线过滤")
-    Assert.eq(mixed_count.args[1], "ext.kavita")
+    Assert.eq(mixed_count.args[1], "kavita")
     Assert.eq(mixed_count.args[2], "wechat")
-    Assert.eq(mixed_count.args[3], "ext.kavita", "缓存源列表")
+    Assert.eq(mixed_count.args[3], "kavita", "缓存源列表")
     Assert.eq(mixed_count.args[4], "700")
 
     -- 参数上限：series 多到超过单条 IN 的分块大小就拆成多个 OR 组（SQLite 默认 999 个绑定参数）。
@@ -355,7 +355,7 @@ do
     for i = 1, 600 do many.series_ids["s" .. i] = true end
     shelf_caps, shelf_projection = true, many
     calls = {}
-    Catalog.listBooks("ext.kavita", { offline_only = true, limit = 24 })
+    Catalog.listBooks("kavita", { offline_only = true, limit = 24 })
     local groups = 0
     for _idx in calls[1].sql:gmatch("b%.stable_id IN %(") do groups = groups + 1 end
     Assert.eq(groups, 2, "600 个 series 拆成两块")
@@ -370,7 +370,7 @@ do
     }
     calls = {}
     local listed
-    Catalog.listLibraryAsync("ext.kavita", { offline_only = true, page = 2, page_size = 24 },
+    Catalog.listLibraryAsync("kavita", { offline_only = true, page = 2, page_size = 24 },
         function(res) listed = res and res.count end)
     Assert.eq(listed, 7)
     Assert.is_true(calls[1].sql:find("instr(b.stable_id, ':') > 0", 1, true) ~= nil, "离线子句到达查询")
@@ -381,10 +381,10 @@ do
     -- 离线书架仍要收窄到已下载 ∪ 卷行，否则会列出点开即死路的行（05 A4 / US 11）。
     shelf_caps, shelf_projection = true, nil
     shelf_calls = 0
-    Assert.is_true(Catalog.hasShelfCache("ext.kavita"), "声明了 shelf_cache 就算数，投影为 nil 也算")
+    Assert.is_true(Catalog.hasShelfCache("kavita"), "声明了 shelf_cache 就算数，投影为 nil 也算")
     Assert.eq(shelf_calls, 0, "hasShelfCache 只查能力，不为一次判断构建整份投影")
     calls = {}
-    Catalog.listBooks("ext.kavita", { offline_only = true, limit = 10, chapter_sources = {} })
+    Catalog.listBooks("kavita", { offline_only = true, limit = 10, chapter_sources = {} })
     Assert.is_nil(calls[1].sql:find("b.stable_id IN (?)", 1, true), "没有缓存 series：不加 IN 参数")
     Assert.is_true(calls[1].sql:find("COALESCE(b.path, '')<>''", 1, true) ~= nil, "已下载仍可离线")
     Assert.is_true(calls[1].sql:find("instr(b.stable_id, ':') > 0", 1, true) ~= nil, "卷行仍放行")
@@ -392,13 +392,13 @@ do
     -- 空投影同理：不能因为集合为空就关掉离线过滤。
     shelf_caps, shelf_projection = true, { series_ids = {}, mark = {}, cover = {} }
     calls = {}
-    Catalog.listBooks("ext.kavita", { offline_only = true, limit = 10, chapter_sources = {} })
+    Catalog.listBooks("kavita", { offline_only = true, limit = 10, chapter_sources = {} })
     Assert.is_true(calls[1].sql:find("COALESCE(b.path, '')<>''", 1, true) ~= nil, "空投影仍限制到已下载")
     Assert.is_true(calls[1].sql:find("instr(b.stable_id, ':') > 0", 1, true) ~= nil, "空投影仍放行卷行")
 
     -- 源的 shelfCache 抛错不吞：冒到入口弹错误页，而不是把「出错」当「没缓存」把整个书架限制到已下载。
     shelf_caps, shelf_projection = true, "boom"
-    Assert.errors(function() Catalog.shelfCaches({ "ext.kavita" }) end, "shelf cache boom")
+    Assert.errors(function() Catalog.shelfCaches({ "kavita" }) end, "shelf cache boom")
 
     DbBase.close()
     clearMods()

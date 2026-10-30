@@ -372,7 +372,7 @@ AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址�
 | Kavita | 安装拓展插件，填写服务器地址与 API Key，选择书库（0.9 及以上） |
 | BookOrbit | 安装拓展插件，填写服务器地址与 BookOrbit 里创建的 KOReader 同步账号；可导入官方插件的账号 |
 
-月读服务端项目见 [AnkioTomas/book](https://github.com/AnkioTomas/book)。拓展书源的安装见[拓展书源](#拓展书源可选)；自己写书源可参考示例 [`examples/moonsource-demo.koplugin/`](examples/moonsource-demo.koplugin/)，契约写在它的 `moon_source.lua` 头注释里。
+月读服务端项目见 [AnkioTomas/book](https://github.com/AnkioTomas/book)。自己写书源可参考示例 [`examples/moonsource-demo.koplugin/`](examples/moonsource-demo.koplugin/)，契约写在它的 `moon_source.lua` 头注释里。
 
 功能入口按当前数据源能力显示。未登录或未配置的在线源不能同步远端内容。
 
@@ -397,16 +397,9 @@ AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址�
 
 > 起点 VIP 章节解密改在子进程里运行并关闭 JIT，修复 Kindle 上通过目录跨章跳转时 KOReader 崩溃重启的问题（v0.2.13）。
 
-### 拓展书源（可选）
+### Kavita / BookOrbit
 
-Release 里另有两个独立插件包，需要同时安装月读才能使用：
-
-| 插件包 | 书源 |
-|---|---|
-| `moonsource-kavita.koplugin-<版本>.zip` | [Kavita](https://www.kavitareader.com/) 服务器（漫画阅读与缓存由 [kamare](https://github.com/backtracker/kamare.koplugin) 提供，需增强版才有缓存接口） |
-| `moonsource-bookorbit.koplugin-<版本>.zip` | BookOrbit 服务器 |
-
-解压后把 `moonsource-xxx.koplugin/` 目录和 `book.koplugin/` 一样放进 `plugins/`，重启 KOReader 后在月读的数据源里选择。
+Kavita（漫画缓存由 [kamare](https://github.com/backtracker/kamare.koplugin) 增强版提供）与 BookOrbit 已内置在 `book.koplugin/` 里，和其它数据源一样在月读的数据源里选择、可开关，不再需要单独安装。
 
 ### 翻页器（可选）
 
@@ -431,7 +424,7 @@ Release 里另有两个独立插件包，需要同时安装月读才能使用：
 
 ### 从源码安装
 
-直接复制仓库中的 `book.koplugin/`；拓展书源复制 `extensions/` 下对应的 `moonsource-xxx.koplugin/`。`tests/`、`assets/`、`koreader/` 等目录不是插件交付物，不需要复制到设备。
+直接复制仓库中的 `book.koplugin/`。`tests/`、`assets/`、`koreader/` 等目录不是插件交付物，不需要复制到设备。
 
 > **注意：** 插件目录名必须是 `book.koplugin`，不能改成 `book`，也不能多套一层仓库目录。
 
@@ -532,7 +525,7 @@ Release 里另有两个独立插件包，需要同时安装月读才能使用：
 
 ## 开发与测试
 
-项目不需要构建，插件交付物是 `book.koplugin/`，以及 `extensions/` 下可选的拓展书源插件。
+项目不需要构建，插件交付物是 `book.koplugin/`。
 
 离线测试只需要系统 `luajit` 和 `libsqlite3`（macOS 自带；Debian/Ubuntu `apt install luajit libsqlite3-0`），不启动 KOReader、不需要克隆 KOReader 源码：
 

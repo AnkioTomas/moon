@@ -42,6 +42,8 @@ for _, id in ipairs({
     end
 end
 
+-- 内置书源的首页组件不在本用例范围：给个不合规的占位，注册表会拒绝它
+package.preload["source.kavita.on_deck"] = function() return {} end
 local Base = require("desktop.pages.home.registry")
 local Layout = require("desktop.pages.home.layout")
 local Widgets = require("desktop.pages.home.placements")
