@@ -1,5 +1,5 @@
 --[[--
-插件自更新配置键（settings/update.lua）与设置：「自动检查更新」「检查更新」两行放在根页维护组。
+插件自更新配置键（settings/update.lua）与设置：「自动检查更新」「检查更新」两行放在维护组「功能与更新」。
 
 @module koplugin.book.features.update.setting
 --]]
@@ -21,6 +21,7 @@ function Setting.entries(desktop)
         {
             group = "maintenance",
             order = 50,
+            id = "update_auto",
             --- 只自动查询并提示，不自动安装。
             row = function(iw)
                 local MoonSettings = require("utils.settings")
@@ -42,6 +43,7 @@ function Setting.entries(desktop)
         {
             group = "maintenance",
             order = 60,
+            id = "update_check",
             row = function(iw)
                 local root = desktop.plugin.path
                 return require("ui.themes.widgets.row").widget({

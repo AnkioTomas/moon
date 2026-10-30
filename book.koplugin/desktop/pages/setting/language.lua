@@ -12,18 +12,29 @@ local LOCALES = { "zh_CN", "zh_TW", "C" }
 ---@class BookSettingsLanguage
 local Language = {}
 
---- 弹出界面语言选择列表。条目取自 KOReader 原生语言菜单项，切换行为完全交给它。
+--- 居中弹窗单选界面语言。条目文案与切换逻辑仍走 KOReader 原生 language API。
 local function pickLanguage()
     local LanguageApi = require("ui/language")
-    local items = {}
+    local current = G_reader_settings:readSetting("language") or "C"
+    local items, apply = {}, {}
     for _idx, locale in ipairs(LOCALES) do
         local item = LanguageApi:genLanguageSubItem(locale)
-        items[#items + 1] = { text = item.text, checked = item.checked_func(), callback = item.callback }
+        items[#items + 1] = { text = item.text, value = locale }
+        apply[locale] = item.callback
     end
-    List:new{ title = _("语言"), items = items }:show()
+    List:new{
+        title = _("语言"),
+        items = items,
+        current = current,
+        centered = true,
+        on_select = function(locale)
+            if locale == current then return end
+            apply[locale]()
+        end,
+    }:show()
 end
 
---- 造设置根页「语言」行：点击直接弹语言列表。
+--- 造设置「语言」行：点开居中单选弹窗。
 ---@return fun(iw: number): table
 function Language:row()
     return function(iw)

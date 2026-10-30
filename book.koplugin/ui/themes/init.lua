@@ -11,7 +11,8 @@
 彩色渲染开启时，导航、图标、标题、书名和统计共用一个主题色（色板见
 ui/themes/palettes.lua，含墨黑）；正文保持黑白。没选过色板时用旧 theme_color。
 彩色令牌按主题缓存，不改原始灰度令牌。彩屏（Kindle Color / Kaleido）会把颜色
-冲淡，主题色在收口处经 Theme.vivid 补饱和后再派生，存量配置不迁移。
+冲淡，主题色在收口处经 Theme.vivid 按 ui.color_saturation（低 / 标准 / 高 / 极致）
+补饱和后再派生，存量配置不迁移；缺省「标准」= 原先的 1.7 倍。
 「彩色用 accent / 灰度用 muted」走 Theme.chrome，别用 accent > 0xFF（墨黑是 0）。
 
 ui/themes 自成一体：除 KOReader 自带模块与 utils.settings / l10n 外不依赖插件其他 UI 组件。
@@ -73,6 +74,21 @@ function Theme.set(id)
     return id
 end
 
+--- 补饱和倍率（ui.color_saturation）。标准 = 1.7，与改档位前行为一致。
+Theme.SATURATION = {
+    low = 1.15,
+    standard = 1.7,
+    high = 2.4,
+    max = 3.2,
+}
+
+--- 当前补饱和倍率。
+---@return number
+function Theme.saturationFactor()
+    local id = MoonSettings.get("ui").color_saturation
+    return Theme.SATURATION[id] or Theme.SATURATION.standard
+end
+
 --- 补饱和：绕三通道均值拉开色差。彩色墨水屏的滤光层会把 RGB 往灰里冲，
 --- 存量主题色和拿 accent 往灰里掺的派生色都靠它补回来；灰度与等通道色原样返回。
 ---@param value number 0xRRGGBB 或灰度
@@ -83,8 +99,9 @@ function Theme.vivid(value)
     local g = math.floor(value / 0x100) % 0x100
     local b = value % 0x100
     local mean = (r + g + b) / 3
+    local factor = Theme.saturationFactor()
     local function boost(channel)
-        return math.max(0, math.min(0xFF, math.floor(mean + (channel - mean) * 1.7 + 0.5)))
+        return math.max(0, math.min(0xFF, math.floor(mean + (channel - mean) * factor + 0.5)))
     end
     return boost(r) * 0x10000 + boost(g) * 0x100 + boost(b)
 end
@@ -125,6 +142,7 @@ function Theme.current()
     if not Theme.colorful() then return base end
     local conf = MoonSettings.get("ui")
     local signature = tostring(conf.theme_preset) .. ":" .. tostring(conf.theme_color)
+        .. ":" .. tostring(conf.color_saturation)
     if not colored[base.id] or colored[base.id].signature ~= signature then
         local accent = Theme.vivid(require("ui.themes.palettes").color(conf.theme_preset, conf.theme_color))
         local t = {}

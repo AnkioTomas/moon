@@ -83,36 +83,47 @@ function Source:pickActive()
     pickSource(SourceRegistry.activeId())
 end
 
---- 「启用的书源」分节：每个源一行开关，说明来自源的 meta（内置源在 `_meta.lua`）。
---- 当前源不可停用（setEnabled 拒绝，提示原因）。
----@param desktop table 桌面实例
----@return table[]
-local function enabledRows(desktop)
-    local rows = {}
+--- 弹出多选框启用 / 停用书源。当前活跃源置灰不可关（setEnabled 也会拒绝）。
+---@param desktop BookDesktop
+function Source.pickEnabled(desktop)
+    local active = SourceRegistry.activeId()
+    local items = {}
     for _idx, meta in ipairs(SourceRegistry.list()) do
         local on = SourceRegistry.isEnabled(meta.id)
-        rows[#rows + 1] = function(iw)
-            return Row.widget({
-                width = iw, icon = "power_settings_new", title = meta.name or meta.id,
-                subtitle = meta.description, toggle = on,
-                callback = function()
-                    local ok, err = SourceRegistry.setEnabled(meta.id, not on)
-                    if not ok then
-                        Toast:new{ text = err, timeout = 2 }:show()
-                        return
-                    end
-                    if not on and meta.abilities then
-                        Toast:new{
-                            text = T(_("已启用 %1：%2"), meta.name or meta.id, table.concat(meta.abilities, _("、"))),
-                            timeout = 3,
-                        }:show()
-                    end
-                    desktop:updateView()
-                end,
-            })
-        end
+        items[#items + 1] = {
+            text = meta.name or meta.id,
+            value = meta.id,
+            checked = on,
+            enabled = meta.id ~= active,
+            mandatory = meta.id == active and _("当前") or nil,
+        }
     end
-    return rows
+    List:new{
+        title = _("启用的书源"),
+        subtitle = _("点按切换；当前书源不能关闭"),
+        multi = true,
+        items = items,
+        on_toggle = function(id, checked)
+            local ok, err = SourceRegistry.setEnabled(id, checked)
+            if not ok then
+                for _idx, item in ipairs(items) do
+                    if item.value == id then item.checked = not checked break end
+                end
+                Toast:new{ text = err, timeout = 2 }:show()
+                return
+            end
+            if checked then
+                local meta = SourceRegistry.meta(id)
+                if meta and meta.abilities and #meta.abilities > 0 then
+                    Toast:new{
+                        text = T(_("已启用 %1：%2"), meta.name or meta.id, table.concat(meta.abilities, _("、"))),
+                        timeout = 3,
+                    }:show()
+                end
+            end
+            desktop:updateView()
+        end,
+    }:show()
 end
 
 --- 账号页每个书源自己的图标（Material 名）；第三方源用设置模块的 rowIcon，都没有则 dns。
@@ -207,8 +218,8 @@ local function storeRow(desktop, plugin, def)
     end
 end
 
---- 账号页：本地书籍与各已启用书源各一行，点开进二级页面；书城后端同样。
---- 右上角的多选窗口决定哪些书源出现在这里。
+--- 账号页：本地书籍与各已启用书源各一行，点开进二级页面。
+--- 哪些源出现在这里由书库组顶部的「启用的书源」多选框决定。书城在桌面分组。
 ---@param ctx table
 ---@return table
 function Source:configSections(ctx)
@@ -225,7 +236,16 @@ function Source:configSections(ctx)
                 SOURCE_ICONS[meta.id] or (mod.rowIcon and mod.rowIcon()) or "dns")
         end
     end
+    return {
+        { title = _("书籍来源"), rows = sources },
+    }
+end
 
+--- 书城页：总开关 + Z-Library / OPDS 后端；挂在设置「桌面」分组。
+---@param ctx table
+---@return table
+function Source:storeSections(ctx)
+    local desktop, plugin = ctx.desktop, ctx.plugin
     local store = MoonSettings.get("store")
     local stores = { function(iw)
         local on = store.enabled
@@ -252,9 +272,7 @@ function Source:configSections(ctx)
         stores[#stores + 1] = storeRow(desktop, plugin, def)
     end
     return {
-        { title = _("书籍来源"), rows = sources },
         { title = _("书城"), rows = stores },
-        { title = _("启用的书源"), rows = enabledRows(desktop) },
     }
 end
 

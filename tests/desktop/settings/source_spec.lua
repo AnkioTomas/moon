@@ -18,6 +18,9 @@ local enabled = {
     { id = "copymanga", name = "拷贝漫画" },
     { id = "fanqie", name = "番茄小说" },
 }
+local enabled_map = {}
+for _idx, meta in ipairs(enabled) do enabled_map[meta.id] = true end
+local set_enabled_calls = {}
 package.preload["utils.settings"] = function()
     return {
         get = function(owner) return owner == "source" and source_cfg or store_cfg end,
@@ -29,12 +32,28 @@ local notified = 0
 package.preload["source.registry"] = function()
     return {
         activeId = function() return active end,
-        listEnabled = function() return enabled end,
+        listEnabled = function()
+            local out = {}
+            for _idx, meta in ipairs(enabled) do
+                if enabled_map[meta.id] then out[#out + 1] = meta end
+            end
+            return out
+        end,
         list = function() return enabled end,
-        isEnabled = function() return true end,
-        setEnabled = function() end,
+        isEnabled = function(id) return enabled_map[id] == true end,
+        setEnabled = function(id, on)
+            if not on and id == active then return false, "不能禁用当前使用的数据源" end
+            enabled_map[id] = on
+            set_enabled_calls[#set_enabled_calls + 1] = { id, on }
+            return true
+        end,
         setActive = function(id) set_active = id; active = id end,
-        meta = function(id) return { id = id, name = id } end,
+        meta = function(id)
+            for _idx, meta in ipairs(enabled) do
+                if meta.id == id then return meta end
+            end
+            return { id = id, name = id }
+        end,
         external = function(id)
             if id == "ext.demo" then
                 return { setting = { rows = function() return { function() return { id = "ext-row" } end } end } }
@@ -111,13 +130,36 @@ local config = src:configSections{
     desktop = desktop,
     plugin = nil,
 }
--- 账号页：书源一行一个入口（本地书籍在最前），书城后端、启用的书源各成一节；都不展开内容。
-Assert.len(config, 3)
+-- 书库组顶部：多选启用书源；当前活跃源置灰不可关。
+Source.pickEnabled(desktop)
+local multi = Themed.last("list")
+Assert.is_true(multi.multi)
+Assert.eq(multi.title, "启用的书源")
+Assert.len(multi.items, 6)
+local active_item, other_item
+for _idx, item in ipairs(multi.items) do
+    if item.value == active then active_item = item
+    elseif item.value == "fanqie" then other_item = item end
+end
+Assert.is_true(active_item.checked)
+Assert.is_false(active_item.enabled, "当前源不能关")
+Assert.eq(active_item.mandatory, "当前")
+Assert.is_true(other_item.enabled)
+multi.on_toggle("fanqie", false)
+Assert.eq(set_enabled_calls[#set_enabled_calls][1], "fanqie")
+Assert.is_false(set_enabled_calls[#set_enabled_calls][2])
+Assert.is_false(enabled_map.fanqie)
+
+-- 账号页：只剩书源入口；启用改到书库组顶部多选框；书城在桌面分组。
+Assert.len(config, 1)
 Assert.eq(config[1].title, "书籍来源")
 Assert.eq(config[1].rows[1]().title, "本地书籍")
-Assert.eq(config[2].title, "书城")
-Assert.eq(config[3].title, "启用的书源")
-local store_rows = config[2].rows
+
+local store = src:storeSections{ desktop = desktop, plugin = nil }
+Assert.len(store, 1)
+Assert.eq(store[1].title, "书城")
+local store_rows = store[1].rows
+Assert.eq(store_rows[1]().title, "书城")
 Assert.eq(store_rows[#store_rows - 1]().title, "Z-Library")
 Assert.eq(store_rows[#store_rows]().title, "OPDS")
 -- OPDS：未开启；二级页面里先只有开关一行，开启后才出现目录配置入口。
@@ -147,6 +189,7 @@ Assert.errors(function() src.loadSetting("broken") end, "boom")
 -- 第三方源的设置模块来自描述表，不按 source.<id>.setting 找文件。
 Assert.eq(src.loadSetting("ext.demo").rows()[1]().id, "ext-row")
 enabled[#enabled + 1] = { id = "ext.demo", name = "Demo" }
+enabled_map["ext.demo"] = true
 local with_ext = src:configSections{ desktop = desktop, plugin = nil }
 local found
 for _idx, row in ipairs(with_ext[1].rows) do

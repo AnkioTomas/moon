@@ -14,7 +14,7 @@ Setting.defaults = { enabled = false, mappings = {} }
 ---@return BookSettingEntry[]
 function Setting.entries(desktop)
     return { {
-        group = "reader", order = 18,
+        group = "reader", order = 18, id = "fontmap",
         row = function(iw)
             local Settings = require("utils.settings")
             local settings = Settings.get("features.fontmap")

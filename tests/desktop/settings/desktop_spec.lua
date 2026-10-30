@@ -27,6 +27,16 @@ end
 
 local desktop = { updateView = function() end }
 local Settings = require("desktop.pages.setting.desktop")
+
+ui_settings.tabbar_labels = nil
+local tabbar = Settings:tabbarLabelsRow(desktop)(600)
+Assert.eq(tabbar.title, "底部导航名称")
+Assert.is_true(tabbar.toggle, "缺省显示名称")
+tabbar.callback()
+Assert.eq(ui_settings.tabbar_labels, false)
+Assert.eq(saved_owner, "ui")
+Assert.is_false(Settings:tabbarLabelsRow(desktop)(600).toggle)
+
 local rows = Settings:rows(desktop, false)
 Assert.len(rows, 2)
 Assert.eq(rows[1](600).title, "启动打开桌面")

@@ -28,6 +28,18 @@ local COLOR_PRESETS = {}
 for _idx, palette in ipairs(Palettes.list) do
     COLOR_PRESETS[#COLOR_PRESETS + 1] = { value = palette.id, text = _(palette.name) }
 end
+local SATURATION_PRESETS = {
+    { value = "low", text = _("低") },
+    { value = "standard", text = _("标准") },
+    { value = "high", text = _("高") },
+    { value = "max", text = _("极致") },
+}
+local SATURATION_LABEL = {
+    low = _("低"),
+    standard = _("标准"),
+    high = _("高"),
+    max = _("极致"),
+}
 local REFRESH_PRESETS = {
     { value = 0, text = _("从不") },
     { value = 1, text = _("每页") },
@@ -73,6 +85,26 @@ local function refreshRow(desktop)
     end
 end
 
+--- KOReader 原生：含图片的页强制全刷（G_reader_settings.refresh_on_pages_with_images，默认开）。
+---@param desktop table
+---@return (fun(width: number): table|nil)|nil
+local function refreshOnImageRow(desktop)
+    if not Device:hasEinkScreen() then return nil end
+    return function(iw)
+        local on = G_reader_settings:nilOrTrue("refresh_on_pages_with_images")
+        return Row.widget({
+            width = iw,
+            icon = "image", title = _("遇到图片刷新"),
+            subtitle = _("翻到含图片的页时全刷，减轻残影"),
+            toggle = on,
+            callback = function()
+                UIManager:broadcastEvent(Event:new("ToggleFlashOnPagesWithImages"))
+                desktop:updateView()
+            end,
+        })
+    end
+end
+
 ---@param desktop table
 ---@return (fun(width: number): table|nil)|nil
 local function colorRow(desktop)
@@ -103,12 +135,70 @@ local function colorRow(desktop)
     end
 end
 
+---@param desktop BookDesktop
+---@return (fun(width: number): table)|nil
+local function themeColorRow(desktop)
+    if not (Device.screen.isColorEnabled and Device.screen:isColorEnabled()) then return nil end
+    return function(iw)
+        local conf = MoonSettings.get("ui")
+        local palette = Palettes.find(conf.theme_preset)
+        -- 没选过色板时仍在用旧单色：状态显示色值，选过后显示色板名。
+        local label = palette and _(palette.name)
+            or string.format("#%06X", conf.theme_color or 0x0756AD)
+        return Row.widget({
+            width = iw,
+            kind = "nav", icon = "palette", title = _("主题色"),
+            subtitle = _("彩色模式下按钮、图标、标题、导航、进度与统计的配色"),
+            status = label, status_on = true,
+            callback = function()
+                List:new{
+                    title = _("主题色"), items = COLOR_PRESETS,
+                    current = conf.theme_preset, centered = true,
+                    on_select = function(id)
+                        conf.theme_preset = id
+                        MoonSettings.save("ui", conf)
+                        desktop:updateView()
+                    end,
+                }:show()
+            end,
+        })
+    end
+end
+
+---@param desktop BookDesktop
+---@return (fun(width: number): table)|nil
+local function saturationRow(desktop)
+    if not (Device.screen.isColorEnabled and Device.screen:isColorEnabled()) then return nil end
+    return function(iw)
+        local conf = MoonSettings.get("ui")
+        local id = conf.color_saturation or "standard"
+        return Row.widget({
+            width = iw,
+            kind = "nav", icon = "tonality", title = _("色彩饱和度"),
+            subtitle = _("补偿彩屏滤光层冲淡；标准与旧版一致"),
+            status = SATURATION_LABEL[id] or SATURATION_LABEL.standard, status_on = true,
+            callback = function()
+                List:new{
+                    title = _("色彩饱和度"), items = SATURATION_PRESETS,
+                    current = id, centered = true,
+                    on_select = function(value)
+                        conf.color_saturation = value
+                        MoonSettings.save("ui", conf)
+                        desktop:updateView()
+                    end,
+                }:show()
+            end,
+        })
+    end
+end
+
+--- 主题与字体页：风格 / 字体与缩放 / 彩色（有彩屏才出第三节）。
 ---@param ctx table
----@return table
-function Display:appearanceRows(ctx)
+---@return BookThemeSection[]
+function Display:appearanceSections(ctx)
     local desktop = ctx.desktop
     local font_name, scale = ctx.font_name, ctx.scale
-    local rows = {
+    local style = {
         function(iw)
             local id = Theme.id()
             return Row.widget({
@@ -134,6 +224,22 @@ function Display:appearanceRows(ctx)
                 end,
             })
         end,
+        function(iw)
+            local conf = MoonSettings.get("ui")
+            return Row.widget({
+                width = iw,
+                icon = "texture", title = _("背景遮罩"),
+                subtitle = _("弹出面板和菜单时用网点压暗背景"),
+                toggle = conf.mesh_mask,
+                callback = function()
+                    conf.mesh_mask = not conf.mesh_mask
+                    MoonSettings.save("ui", conf)
+                    desktop:updateView()
+                end,
+            })
+        end,
+    }
+    local typography = {
         function(iw)
             return Row.widget({
                 width = iw,
@@ -182,64 +288,20 @@ function Display:appearanceRows(ctx)
                 end,
             })
         end,
-        function(iw)
-            local conf = MoonSettings.get("ui")
-            return Row.widget({
-                width = iw,
-                icon = "texture", title = _("背景遮罩"),
-                subtitle = _("弹出面板和菜单时用网点压暗背景"),
-                toggle = conf.mesh_mask,
-                callback = function()
-                    conf.mesh_mask = not conf.mesh_mask
-                    MoonSettings.save("ui", conf)
-                    desktop:updateView()
-                end,
-            })
-        end,
-        function(iw)
-            local conf = MoonSettings.get("ui")
-            return Row.widget({
-                width = iw,
-                icon = "label", title = _("底部导航名称"),
-                subtitle = _("关闭后仅显示图标"),
-                toggle = conf.tabbar_labels ~= false,
-                callback = function()
-                    conf.tabbar_labels = not (conf.tabbar_labels ~= false)
-                    MoonSettings.save("ui", conf)
-                    desktop:updateView()
-                end,
-            })
-        end,
     }
-    local color = colorRow(desktop)
-    if color then rows[#rows + 1] = color end
-    if Device.screen.isColorEnabled and Device.screen:isColorEnabled() then
-        rows[#rows + 1] = function(iw)
-            local conf = MoonSettings.get("ui")
-            local palette = Palettes.find(conf.theme_preset)
-            -- 没选过色板时仍在用旧单色：状态显示色值，选过后显示色板名。
-            local label = palette and _(palette.name)
-                or string.format("#%06X", conf.theme_color or 0x0756AD)
-            return Row.widget({
-                width = iw,
-                kind = "nav", icon = "palette", title = _("主题色"),
-                subtitle = _("彩色模式下按钮、图标、标题、导航、进度与统计的配色"),
-                status = label, status_on = true,
-                callback = function()
-                    List:new{
-                        title = _("主题色"), items = COLOR_PRESETS,
-                        current = conf.theme_preset, centered = true,
-                        on_select = function(id)
-                            conf.theme_preset = id
-                            MoonSettings.save("ui", conf)
-                            desktop:updateView()
-                        end,
-                    }:show()
-                end,
-            })
-        end
-    end
-    return rows
+    local sections = {
+        { title = _("风格"), rows = style },
+        { title = _("字体与缩放"), rows = typography },
+    }
+    local color = {}
+    local toggle = colorRow(desktop)
+    if toggle then color[#color + 1] = toggle end
+    local theme = themeColorRow(desktop)
+    if theme then color[#color + 1] = theme end
+    local sat = saturationRow(desktop)
+    if sat then color[#color + 1] = sat end
+    if #color > 0 then sections[#sections + 1] = { title = _("彩色"), rows = color } end
+    return sections
 end
 
 --- 墨水屏刷新条件行；夜间与亮度在 nightmode feature。
@@ -250,6 +312,8 @@ function Display:screenRows(ctx)
     local desktop = ctx.desktop
     local refresh = refreshRow(desktop)
     if refresh then rows[#rows + 1] = refresh end
+    local on_image = refreshOnImageRow(desktop)
+    if on_image then rows[#rows + 1] = on_image end
     return rows
 end
 
