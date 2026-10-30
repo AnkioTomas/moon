@@ -400,10 +400,11 @@ local ok_run, err_run = pcall(function()
     MoonSettings.save("features.lockscreen")
     conf.lock_screen_day = "stale"
     MoonSettings.save("features.lockscreen")
-    local cycles = Compose.lock_cycles
+    local Cycle = require("features.lockscreen.cycle")
+    local cycles = Cycle.lock_cycles
     local resume_logs_before = #logs
     LockScreen.onResume()
-    Assert.eq(Compose.lock_cycles, cycles + 1)
+    Assert.eq(Cycle.lock_cycles, cycles + 1)
     Stubs.flush()
     Assert.is_true(#logs > resume_logs_before, "唤醒后应尝试刷锁屏")
     Assert.matches(table.concat(logs, "\n", resume_logs_before + 1),

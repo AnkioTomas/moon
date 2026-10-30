@@ -244,11 +244,13 @@ function M.blocks(rect)
 end
 
 --- 一天一页；农历到货后键变，组合图重画。
+--- 农历还没有时绑锁屏次数：myrl 入队后唤醒才有机会重合成，不然当天一直缺农历。
 ---@return string
 function M.cache_key()
     local date = os.date("*t") --[[@as osdate]]
     local lunar = M.lunarLines(M.daily(date))
-    return os.date("%Y-%m-%d") .. (lunar and ("|" .. lunar.date) or "")
+    local key = os.date("%Y-%m-%d") .. (lunar and ("|" .. lunar.date) or "")
+    return key .. require("features.lockscreen.cycle").pending(not lunar)
 end
 
 return M

@@ -239,6 +239,12 @@ function M.setPosterStyle(style)
     if require("features.lockscreen.poster").validStyle(style) then save("lock_screen_poster_style", style) end
 end
 
+--- 设置海报墙排序；非法值忽略。
+---@param sort string
+function M.setPosterSort(sort)
+    if require("features.lockscreen.poster").validSort(sort) then save("lock_screen_poster_sort", sort) end
+end
+
 --- 设置统计页面背景的页面；非法值忽略。
 ---@param page string
 function M.setInsightPage(page)

@@ -16,6 +16,7 @@ Setting.defaults = {
     lock_screen_wide = true,
     lock_screen_bill_period = "7d",
     lock_screen_poster_style = "vertical",
+    lock_screen_poster_sort = "recent_read",
     lock_screen_insight_page = "random",
     lock_screen_custom_message = "读书不觉已春深，一寸光阴一寸金。",
 }

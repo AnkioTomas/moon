@@ -10,6 +10,7 @@ KOReader 先 Screensaver:setup/show 再广播 Suspend。电源键路径上绝不
 
 local lfs = require("libs/libkoreader-lfs")
 local Compose = require("features.lockscreen.compose")
+local Cycle = require("features.lockscreen.cycle")
 local Settings = require("features.lockscreen.settings")
 local MoonSettings = require("utils.settings")
 local Perf = require("utils.perf")
@@ -49,7 +50,7 @@ function M.refresh(cb, force, reason)
     end
     job = nil
     local started_at = Perf.now()
-    logger.dbg("book.lockscreen refresh start", reason,
+    logger.warn("book.lockscreen refresh start", reason,
         "force", force == true, "background", plan.asset.id,
         "component", plan.component.id, "position", plan.position,
         plan.wide and "wide" or "narrow")
@@ -160,10 +161,10 @@ function M.onCreate()
     require("ui/uimanager"):nextTick(function() require("ui.guard").call("lockscreen.create", M.refresh, nil, false, "onCreate") end)
 end
 
---- 唤醒：锁屏次数 +1（文字海报 / 文件夹按次换图）；下一拍异步刷失效缓存。
+--- 唤醒：锁屏次数 +1（文字海报 / 文件夹 / 未就绪内容按次换图）；下一拍异步刷失效缓存。
 --- 阅读页锁醒不回桌面也能换图；电源键路径仍禁止同步合成。
 function M.onResume()
-    Compose.lock_cycles = Compose.lock_cycles + 1
+    Cycle.lock_cycles = Cycle.lock_cycles + 1
     require("ui/uimanager"):nextTick(function()
         require("ui.guard").call("lockscreen.resume", refreshIfStale, "resume")
     end)

@@ -59,6 +59,7 @@ package.preload["features.lockscreen.settings"] = function()
         removeAds = function() return remove_ok end,
         setBackgroundMode = function(value) log[#log + 1] = "set:" .. value end,
         setPosterStyle = function(value) log[#log + 1] = "poster:" .. value end,
+        setPosterSort = function(value) log[#log + 1] = "sort:" .. value end,
         setCustomImage = function(value) log[#log + 1] = "image:" .. value end,
         setFolder = function(value) log[#log + 1] = "folder:" .. value end,
         setTypoFont = function(id) log[#log + 1] = "font:" .. id end,
@@ -78,6 +79,14 @@ package.preload["features.lockscreen.poster"] = function()
         style = function() return "vertical" end,
         styleLabel = function() return "竖屏排版" end,
         styleOptions = function() return {} end,
+        sort = function() return "recent_read" end,
+        sortLabel = function() return "最近阅读" end,
+        sortOptions = function()
+            return {
+                { text = "最近阅读", value = "recent_read" },
+                { text = "最近添加", value = "recent_added" },
+            }
+        end,
     }
 end
 package.preload["features.lockscreen.compose"] = function()
@@ -159,10 +168,10 @@ desktop.settings_overlay = nil
 refresh_cb(false, "boom")
 Assert.eq(log[#log], "show:生成失败: boom")
 
--- 海报墙背景：背景下面多一行「海报风格」，选中后写配置并走同一条刷新链路。
+-- 海报墙背景：背景下面多「海报风格」「海报排序」，选中后写配置并走同一条刷新链路。
 background_mode = "poster"
 local poster_rows = Lockscreen:rows(desktop)
-Assert.len(poster_rows, 4)
+Assert.len(poster_rows, 5)
 local style_row = poster_rows[3]({})
 Assert.eq(style_row.title, "海报风格")
 Assert.eq(style_row.status, "竖屏排版")
@@ -174,6 +183,18 @@ popup.on_select("vertical")
 Assert.len(ticks, 0, "选中当前值不重出图")
 popup.on_select("standard")
 Assert.eq(log[#log - 2], "poster:standard")
+Assert.len(ticks, 1)
+local sort_row = poster_rows[4]({})
+Assert.eq(sort_row.title, "海报排序")
+Assert.eq(sort_row.status, "最近阅读")
+sort_row.callback()
+popup = Themed.last("list")
+Assert.eq(popup.current, "recent_read")
+ticks = {}
+popup.on_select("recent_read")
+Assert.len(ticks, 0, "选中当前排序不重出图")
+popup.on_select("recent_added")
+Assert.eq(log[#log - 2], "sort:recent_added")
 Assert.len(ticks, 1)
 
 -- 自定义背景：多一行「选择图片」，只列图片文件；所在目录不存在时从主目录开始。

@@ -207,6 +207,11 @@ function Lockscreen:rows(desktop)
             icon = "view_module", title = _("海报风格"), status = Poster.styleLabel(style),
             items = Poster.styleOptions(), current = style, apply = Settings.setPosterStyle,
         })
+        local sort = Poster.sort()
+        rows[#rows + 1] = choiceRow(desktop, {
+            icon = "sort", title = _("海报排序"), status = Poster.sortLabel(sort),
+            items = Poster.sortOptions(), current = sort, apply = Settings.setPosterSort,
+        })
     elseif background == "insight" then
         local Insight = require("features.lockscreen.insight")
         local page = Insight.page()

@@ -821,7 +821,7 @@ end
 
 --- 每次锁屏换一句：键随锁屏次数变，锁过一次才重合成一次（每秒变的键会让每次回桌面都整屏重画）。
 function M.cache_key()
-    return require("features.lockscreen.compose").lock_cycles
+    return require("features.lockscreen.cycle").lock_cycles
 end
 
 return M

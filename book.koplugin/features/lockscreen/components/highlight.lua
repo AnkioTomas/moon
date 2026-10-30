@@ -15,8 +15,10 @@ local M = {
     id = "highlight",
     label = _("阅读高亮"),
     layout = "quote",
-    -- 每次锁屏轮换一句：键每秒都变，等于不缓存。
-    cache_key = os.time,
+    -- 每次锁屏轮换一句：跟锁屏次数走（别用 os.time，回桌面也会无意义重画）。
+    cache_key = function()
+        return require("features.lockscreen.cycle").lock_cycles
+    end,
 }
 
 --- 轮换一条当前书高亮，并生成章节/页码出处。
