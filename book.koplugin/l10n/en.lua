@@ -668,6 +668,8 @@ return {
     ["最近阅读 · %1"] = "Recently read · %1",
     ["最近阅读列表"] = "Recent reading list",
     ["最近阅读卡片"] = "Recent book cards",
+    ["堆叠"] = "Stack",
+    ["立体"] = "Stereo",
     ["月读"] = "月读",
     ["月读更新失败：%1"] = "月读 update failed: %1",
     ["更新完成，正在重启 KOReader…"] = "Update complete. Restarting KOReader…",

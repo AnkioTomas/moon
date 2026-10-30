@@ -257,6 +257,9 @@ function Kit.canvas()
         ops = ops,
         pixels = 0,
         setPixel = function(self) self.pixels = self.pixels + 1 end,
+        setPixelClamped = function(self) self.pixels = self.pixels + 1 end,
+        getPixel = function() return 0 end,
+        getType = function() return nil end,
         paintRoundedRect = function(_, x, y, w, h, c, r)
             ops[#ops + 1] = { op = "rect", x = x, y = y, w = w, h = h, c = c, r = r }
         end,
@@ -271,6 +274,10 @@ function Kit.canvas()
         end,
         getWidth = function() return Kit.SCREEN_W end,
         getHeight = function() return Kit.SCREEN_H end,
+        blitFrom = function(self, _source, x, y, _ox, _oy, w, h)
+            self.pixels = self.pixels + math.max(0, (w or 0) * (h or 0))
+            ops[#ops + 1] = { op = "blit", x = x, y = y, w = w, h = h }
+        end,
         colorblitFrom = function(_, _source, x, y, _ox, _oy, w, h)
             ops[#ops + 1] = { op = "colorblit", x = x, y = y, w = w, h = h }
         end,
@@ -314,6 +321,35 @@ function Kit.install(theme)
             isColor8 = function(v) return type(v) == "number" and v <= 0xFF end,
             ColorRGB32 = function(r, g, b) return r * 0x10000 + g * 0x100 + b end,
             COLOR_BLACK = 0, COLOR_WHITE = 255,
+            -- 离屏缓冲（立体封面梯形采样用）；像素按「行×宽+列」平铺。
+            new = function(w, h, typ)
+                local pixels = {}
+                local function key(px, py) return py * w + px end
+                return {
+                    w = w, h = h,
+                    getType = function() return typ end,
+                    fill = function(_, color)
+                        for py = 0, h - 1 do
+                            for px = 0, w - 1 do pixels[key(px, py)] = color end
+                        end
+                    end,
+                    getPixel = function(_, px, py) return pixels[key(px, py)] or 255 end,
+                    setPixel = function(_, px, py, color) pixels[key(px, py)] = color end,
+                    setPixelClamped = function(_, px, py, color)
+                        if px >= 0 and py >= 0 and px < w and py < h then
+                            pixels[key(px, py)] = color
+                        end
+                    end,
+                    blitFrom = function(self, src, dx, dy, sx, sy, bw, bh)
+                        for row = 0, (bh or 0) - 1 do
+                            for col = 0, (bw or 0) - 1 do
+                                self:setPixelClamped(dx + col, dy + row, src:getPixel(sx + col, sy + row))
+                            end
+                        end
+                    end,
+                    free = function() end,
+                }
+            end,
         },
         ["ffi/util"] = {
             template = function(s, ...)

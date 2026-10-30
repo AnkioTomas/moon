@@ -1,6 +1,6 @@
 --[[--
-最近阅读封面堆叠：最多九本、底边对齐、不出框；箭头 / 滑动循环切焦点只重建自己；
-空书架给图书馆入口；暂停下发 HomePause。
+最近阅读封面堆叠 / 立体：最多九本、底边对齐、不出框；箭头 / 滑动循环切焦点只重建自己；
+空书架给图书馆入口；暂停下发 HomePause；布局可在堆叠与立体间切换。
 @module tests.desktop.pages.home.recent_cards_spec
 --]]
 local Assert = require("support.assert")
@@ -115,16 +115,25 @@ do -- 关掉第一本：只在其余在读里轮换；其余也没有时给图�
     reading = { { title = "b1" }, { title = "b2" } }
     local events = {}
     local desktop = { onEvent = function(_, e) events[#events + 1] = e end }
+    Assert.eq(Cards.layout(), "stack", "缺省堆叠")
     Cards:showSettings(desktop)
     local sheet = Themed.last("sheet")
-    Assert.eq(sheet.items[1].text, "✓ 显示第一本", "缺省显示第一本")
-    Assert.eq(sheet.items[2].text, "隐藏已读完", "缺省不隐藏已读完")
-    sheet.items[1].callback()
-    Assert.is_false(Cards.showFirst())
+    Assert.eq(sheet.items[1].buttons[1].text, "✓ 堆叠")
+    Assert.eq(sheet.items[1].buttons[2].text, "立体")
+    Assert.eq(sheet.items[2].text, "✓ 显示第一本", "缺省显示第一本")
+    Assert.eq(sheet.items[3].text, "隐藏已读完", "缺省不隐藏已读完")
+    sheet.items[1].buttons[2].callback()
+    Assert.eq(Cards.layout(), "stereo")
     Assert.eq(events[1], "home_refresh")
-    sheet.items[2].callback()
-    Assert.is_true(Cards.hideFinished())
+    sheet.items[1].buttons[1].callback()
+    Assert.eq(Cards.layout(), "stack")
     Assert.eq(events[2], "home_refresh")
+    sheet.items[2].callback()
+    Assert.is_false(Cards.showFirst())
+    Assert.eq(events[3], "home_refresh")
+    sheet.items[3].callback()
+    Assert.is_true(Cards.hideFinished())
+    Assert.eq(events[4], "home_refresh")
     Cards.saveHideFinished(false)
 
     covers = {}
@@ -139,6 +148,56 @@ do -- 关掉第一本：只在其余在读里轮换；其余也没有时给图�
     local slot = Cards:new():build({ desktop = lib }, { width = 600, height = 220 })
     Assert.eq(Kit.texts(slot)[1], "去图书馆挑一本 ›")
     Kit.sections.home.home_recent_cards_show_first = nil
+end
+
+do -- 立体：两环五本、底边对齐；侧封面更窄；paintTo 走梯形采样
+    recent = { title = "心挣", authors = "初禾", percent = 25 }
+    for i = 1, 8 do reading[i] = { title = "b" .. i } end
+    Cards.saveLayout("stereo")
+    Assert.eq(Cards.layout(), "stereo")
+    covers = {}
+    local cards = Cards:new()
+    local slot = cards:build(ctx, { width = 600, height = 220 })
+    Assert.len(covers, 5, "立体最多两环：中间 + 左右各二")
+    ---@param cell table
+    ---@return table|nil
+    local function coverBook(cell)
+        local node = cell[1]
+        while node and not node.book do node = node[1] end
+        return node and node.book
+    end
+    local stack = slot[1][1][1][1][1]
+    local bottom, center_cell, side_cell
+    local cover_n = 0
+    for i = 1, #stack do
+        local cell = stack[i]
+        local book = coverBook(cell)
+        if book then
+            cover_n = cover_n + 1
+            local size = cell:getSize()
+            local edge = cell.overlap_offset[2] + size.h
+            bottom = bottom or edge
+            Assert.eq(edge, bottom, "立体封面共用底边")
+            Assert.is_true(cell.overlap_offset[1] >= 0)
+            Assert.is_true(cell.overlap_offset[1] + size.w <= stack.dimen.w)
+            if book == recent then center_cell = cell
+            elseif not side_cell then side_cell = cell end
+        end
+    end
+    Assert.eq(cover_n, 5)
+    Assert.is_true(center_cell ~= nil)
+    Assert.is_true(side_cell ~= nil)
+    Assert.is_true(side_cell:getSize().w < center_cell:getSize().w, "立体侧封面压扁")
+    cards:activate()
+    local bb = Kit.canvas()
+    slot:paintTo(bb, 0, 0)
+    Assert.is_true(bb.pixels > 0, "立体 paintTo 采样写像素")
+    local host = slot[1][1]
+    host:onSwipeCards({ direction = "west" })
+    Assert.eq(cards.focus, 2)
+    cards:destroy()
+    Cards.saveLayout("stack")
+    reading = {}
 end
 
 do -- 隐藏已读完：第一本与其余在读里 read_state=1 的都丢掉
