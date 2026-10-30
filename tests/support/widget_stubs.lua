@@ -294,11 +294,16 @@ function Kit.install(theme)
     package.loaded["ui.input"] = nil
     -- ui_scale = 100 且 scaleBySize 恒等：逻辑像素 = 物理像素，断言可以直接写令牌值。
     Kit.display = { ui_theme = theme or "paper", ui_scale = 100, mesh_mask = true, swipe_dismiss = "down", library_tabs = { "books", "author", "series", "category", "folder" } }
+    Kit.SCREEN_W, Kit.SCREEN_H = 600, 800
+    Kit.rotation_mode = 0
     -- 主题边框和 FrameContainer 一样读 KOReader 的「界面抗锯齿」；离线没有这个全局时按默认开。
-    _G.G_reader_settings = _G.G_reader_settings or {
+    -- saveSetting/flush：密码页关窗还原方向会走 utils.rotation.remember。
+    _G.G_reader_settings = {
         nilOrTrue = function() return true end,
         isTrue = function() return false end,
         readSetting = function() return nil end,
+        saveSetting = function(self) return self end,
+        flush = function() end,
     }
     Kit.shown, Kit.closed, Kit.dirty, Kit.scheduled, Kit.unscheduled = {}, {}, {}, {}, {}
     Kit.color_enabled = false
@@ -320,9 +325,21 @@ function Kit.install(theme)
         ["l10n"] = { apply = function() end },
         ["device"] = {
             screen = {
+                DEVICE_ROTATED_UPRIGHT = 0,
+                DEVICE_ROTATED_CLOCKWISE = 1,
+                DEVICE_ROTATED_UPSIDE_DOWN = 2,
+                DEVICE_ROTATED_COUNTER_CLOCKWISE = 3,
                 getSize = function() return geom{ x = 0, y = 0, w = Kit.SCREEN_W, h = Kit.SCREEN_H } end,
                 getWidth = function() return Kit.SCREEN_W end,
                 getHeight = function() return Kit.SCREEN_H end,
+                getRotationMode = function() return Kit.rotation_mode end,
+                setRotationMode = function(_, mode)
+                    local old = Kit.rotation_mode
+                    Kit.rotation_mode = mode
+                    if (old % 2) ~= (mode % 2) then
+                        Kit.SCREEN_W, Kit.SCREEN_H = Kit.SCREEN_H, Kit.SCREEN_W
+                    end
+                end,
                 scaleBySize = function(_, n) return n end,
                 scaleByDPI = function(_, n) return n end,
                 isColorEnabled = function() return Kit.color_enabled == true end,

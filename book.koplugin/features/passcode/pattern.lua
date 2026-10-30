@@ -4,6 +4,7 @@
 接口与数字键盘 `pad.lua` 一致：on_submit(seq) 返回 true 关窗；返回字符串则清空、显示该提示。
 手指抬起时提交；少于 MIN_LEN 个点直接提示。点序号串当 PIN 用，存储与校验沿用 `Passcode.verify`。
 外壳（背景 / 卡片 / 头像 / 忘记密码）复用 `Pad.setUnlockPanel`。
+横屏临时竖屏与数字键盘共用 `Pad.holdPortrait` / `releasePortrait`（见 pad.lua 头注释）。
 
 @module koplugin.book.features.passcode.pattern
 --]]
@@ -26,6 +27,7 @@ require("l10n").apply()
 local _ = require("gettext")
 
 local Screen = Device.screen
+local Guard = require("ui.guard")
 
 --- 点阵画布：只管画点与连线、把坐标换成点序号。
 ---@class BookPatternGrid : Widget
@@ -136,6 +138,7 @@ local Pattern = Modal:extend{
 Pattern.MIN_LEN = 4
 
 function Pattern:init()
+    Pad.holdPortrait()
     Modal.init(self)
     local t = self.theme
     local w, h = Screen:getWidth(), Screen:getHeight()
@@ -198,10 +201,29 @@ function Pattern:close()
     UIManager:nextTick(function() UIManager:setDirty("all", "full") end)
 end
 
+--- 开窗期间禁止改方向，与数字键盘同口径。
+---@return boolean
+function Pattern:onSetRotationMode()
+    return true
+end
+
+function Pattern:onScreenResize()
+    UIManager:nextTick(function()
+        Guard.call("passcode pattern relayout", self.relayout, self)
+    end)
+    return true
+end
+
 function Pattern:onCloseWidget()
     if self._backdrop and self._backdrop.free then self._backdrop:free() end
     self._backdrop = nil
+    local mode = Pad.releasePortrait()
     Modal.onCloseWidget(self)
+    if mode ~= nil then
+        UIManager:nextTick(function()
+            Guard.call("passcode restore rotation", require("utils.rotation").follow, mode)
+        end)
+    end
 end
 
 function Pattern:updateView()
