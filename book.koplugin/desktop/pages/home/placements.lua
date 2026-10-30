@@ -6,11 +6,18 @@
 
 local MoonSettings = require("utils.settings")
 
+---@class BookHomeWidgetMargin
+---@field top number
+---@field right number
+---@field bottom number
+---@field left number
+
 ---@class BookHomeWidgetPlacement
 ---@field id string
 ---@field page number
 ---@field order number
 ---@field height "default"|"fill"|number
+---@field margin BookHomeWidgetMargin|nil 上下左右外边距（物理像素）；全 0 时不落盘
 
 local M = {}
 
@@ -33,6 +40,45 @@ local function normalizeHeight(height)
     return "default"
 end
 
+--- 边距：四边 ≥0 的整数；全 0 返回 nil（不占设置项）。
+---@param raw any
+---@return BookHomeWidgetMargin|nil
+function M.normalizeMargin(raw)
+    if type(raw) ~= "table" then return nil end
+    local top = math.max(0, math.floor(tonumber(raw.top) or 0))
+    local right = math.max(0, math.floor(tonumber(raw.right) or 0))
+    local bottom = math.max(0, math.floor(tonumber(raw.bottom) or 0))
+    local left = math.max(0, math.floor(tonumber(raw.left) or 0))
+    if top == 0 and right == 0 and bottom == 0 and left == 0 then return nil end
+    return { top = top, right = right, bottom = bottom, left = left }
+end
+
+--- 读放置表边距；缺省四边 0。
+---@param placement BookHomeWidgetPlacement|nil
+---@return number top
+---@return number right
+---@return number bottom
+---@return number left
+function M.marginBox(placement)
+    local m = placement and placement.margin
+    if type(m) ~= "table" then return 0, 0, 0, 0 end
+    return m.top or 0, m.right or 0, m.bottom or 0, m.left or 0
+end
+
+---@param item BookHomeWidgetPlacement
+---@param page number
+---@param order number
+---@return BookHomeWidgetPlacement
+local function copyPlace(item, page, order)
+    return {
+        id = item.id,
+        page = page,
+        order = order,
+        height = item.height,
+        margin = item.margin,
+    }
+end
+
 --- 净化放置表：合法 id、去重、页/序规范化；没有可用记录时回到默认放置。
 ---@param components { id: string }[] 已注册组件，按注册顺序
 ---@return BookHomeWidgetPlacement[]
@@ -51,6 +97,7 @@ function M.sanitize(raw, components)
                     page = math.max(1, math.floor(tonumber(item.page) or 1)),
                     order = math.max(1, math.floor(tonumber(item.order) or (#out + 1))),
                     height = normalizeHeight(item.height),
+                    margin = M.normalizeMargin(item.margin),
                 }
             end
         end
@@ -85,12 +132,7 @@ function M.reindex(list)
             return a.id < b.id
         end)
         for i, item in ipairs(row) do
-            out[#out + 1] = {
-                id = item.id,
-                page = p,
-                order = i,
-                height = item.height,
-            }
+            out[#out + 1] = copyPlace(item, p, i)
         end
     end
     return out
@@ -109,12 +151,7 @@ function M.compactPages(list)
     for i, p in ipairs(pages) do map[p] = i end
     local out = {}
     for _idx, item in ipairs(list) do
-        out[#out + 1] = {
-            id = item.id,
-            page = map[item.page],
-            order = item.order,
-            height = item.height,
-        }
+        out[#out + 1] = copyPlace(item, map[item.page], item.order)
     end
     return M.reindex(out)
 end
@@ -222,6 +259,7 @@ function M.applyPacks(list, packs)
                     page = page,
                     order = order,
                     height = prev.height or "default",
+                    margin = prev.margin,
                 }
             end
         end
