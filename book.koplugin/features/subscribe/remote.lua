@@ -492,16 +492,21 @@ end
 function POST.catalog(b, cb)
     local src = require("features.subscribe.catalog").find(tostring(b.id))
     if not src then return cb(404, { error = _("订阅源不存在") }) end
-    S().fetchText(src.url, function(body, err)
-        if not body then return cb(502, { error = tostring(err or _("下载失败")) }) end
+    local function reply(raw)
         local have = {}
         for _idx, f in ipairs(SubDB.feeds()) do have[f.url] = true end
         local feeds = {}
-        for _idx, f in ipairs(Remote.parseOpml(body)) do
+        for _idx, f in ipairs(raw) do
             feeds[#feeds + 1] = { title = f.title, url = f.url, subscribed = have[f.url] == true }
         end
         if #feeds == 0 then return cb(422, { error = _("这个订阅源里没有找到订阅") }) end
         cb(200, { name = src.name, feeds = feeds })
+    end
+    -- 精选清单内嵌在目录里，不拉外站；其余仍是 OPML URL。
+    if src.feeds then return reply(src.feeds) end
+    S().fetchText(src.url, function(body, err)
+        if not body then return cb(502, { error = tostring(err or _("下载失败")) }) end
+        reply(Remote.parseOpml(body))
     end, true)
 end
 

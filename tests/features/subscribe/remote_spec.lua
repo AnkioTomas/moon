@@ -280,17 +280,32 @@ do
     Assert.eq(table.concat(store.groups, ","), "乙组")
 end
 
--- 在线订阅源：只认目录 id；清单带已订阅标记；勾选的条目入库进分组。
+-- 在线订阅源：只认目录 id；内嵌精选不拉网；OPML 源带已订阅标记；勾选入库。
 do
     local S = package.loaded["features.subscribe"]
     local Catalog = require("features.subscribe.catalog")
     local _c, list = call("GET", "catalog", {})
     Assert.eq(#list.sources, #Catalog.sources)
     Assert.eq(call("POST", "catalog", { id = "nope" }), 404)
-    local src = Catalog.sources[1]
+
+    local curated = Catalog.find("fulltext-news-cn")
+    Assert.is_true(curated ~= nil and curated.feeds ~= nil)
     local fetched
+    S.fetchText = function(url, cb) fetched = url; cb('<outline xmlUrl="https://cat.test/a" text="A"/>') end
+    local code, r = call("POST", "catalog", { id = curated.id })
+    Assert.eq(code, 200)
+    Assert.is_nil(fetched, "精选内嵌清单不得发 HTTP")
+    Assert.eq(#r.feeds, #curated.feeds)
+    Assert.eq(r.feeds[1].url, curated.feeds[1].url)
+
+    local src
+    for _idx, s in ipairs(Catalog.sources) do
+        if s.url then src = s; break end
+    end
+    Assert.is_true(src ~= nil)
+    fetched = nil
     S.fetchText = function(url, cb) fetched = url; cb('<outline xmlUrl="https://cat.test/a" text="A"/><outline xmlUrl="https://cat.test/b" text="B"/>') end
-    local code, r = call("POST", "catalog", { id = src.id })
+    code, r = call("POST", "catalog", { id = src.id })
     Assert.eq(code, 200)
     Assert.eq(fetched, src.url)
     Assert.eq(#r.feeds, 2)
