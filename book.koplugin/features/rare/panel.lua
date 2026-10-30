@@ -1,6 +1,5 @@
 --[[--
-生僻字注音的阅读快捷面板入口（同翻页动画那样放在阅读面板里）：点开二级菜单，
-开关与注音范围（最生僻 / 生僻 / 全部）当场切换，下一次重绘生效，不用退到设置页。
+行间标注快捷面板：注音、WordWise 释义各一个开关（可同时开）；长按打开档位菜单。
 
 @module koplugin.book.features.rare.panel
 --]]
@@ -17,25 +16,25 @@ local LEVELS = {
     { value = "all", text = _("全部") },
 }
 
---- 二级菜单：「开关」+ 三档范围；选范围会顺带打开注音。
-local function showMenu()
+--- 长按：标注范围二级菜单。
+---@param ctx table|nil
+local function showLevels(ctx)
     local Rare = require("features.rare")
-    local s = require("utils.settings").get("features.rare")
+    local s = Rare.migrate()
+    local ui = ctx and ctx.ui
     local function apply(fn, ...)
         fn(...)
         require("ui/uimanager"):setDirty("all", "partial")
     end
-    local items = {
-        { text = _("生僻字注音"), checked = s.rare_enabled and true or false, callback = function() apply(Rare.toggle) end },
-    }
+    local items = {}
     for _idx, level in ipairs(LEVELS) do
         items[#items + 1] = {
             text = level.text,
             checked = s.rare_level == level.value,
-            callback = function() apply(Rare.setLevel, level.value) end,
+            callback = function() apply(Rare.setLevel, level.value, ui) end,
         }
     end
-    require("ui.themes.widgets.list"):new{ title = _("生僻字注音"), items = items, centered = true }:show()
+    require("ui.themes.widgets.list"):new{ title = _("标注范围"), items = items, centered = true }:show()
 end
 
 ---@return BookQuickPanelAction[]
@@ -46,11 +45,32 @@ function Panel.actions()
             title = _("生僻字注音"),
             icon = "translate",
             scope = "reader",
+            keep_open = true,
             ---@return boolean
             active = function()
-                return require("utils.settings").get("features.rare").rare_enabled and true or false
+                return require("features.rare").kindOn("ruby")
             end,
-            run = showMenu,
+            ---@param ctx table|nil
+            run = function(ctx)
+                require("features.rare").toggleKind("ruby", ctx and ctx.ui)
+            end,
+            hold = showLevels,
+        },
+        {
+            id = "rare_wordwise",
+            title = _("WordWise 释义"),
+            icon = "menu_book",
+            scope = "reader",
+            keep_open = true,
+            ---@return boolean
+            active = function()
+                return require("features.rare").kindOn("wordwise")
+            end,
+            ---@param ctx table|nil
+            run = function(ctx)
+                require("features.rare").toggleKind("wordwise", ctx and ctx.ui)
+            end,
+            hold = showLevels,
         },
     }
 end

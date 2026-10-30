@@ -1,15 +1,16 @@
 --[[--
-生僻字注音词库：解析、查找、屏上文字匹配。纯函数，不碰 UI 与文件以外的东西。
+生僻字注音 / WordWise 释义词库：解析、查找、屏上文字匹配。纯函数，不碰 UI 与文件以外的东西。
 
 词库文件是 UTF-8 文本：
 
   #name=汉字拼音      元信息，# 开头，key=value
   #lang=zh           zh：逐字匹配 + 多字词组最长匹配；en：按字母切词、小写、简单词形还原
-  #levels=6500,3500,0  三档阈值：最生僻 / 生僻 / 全部；rank 大于阈值才注音
-  字<TAB>注音<TAB>rank
+  #kind=ruby         ruby：注音（拼音 / IPA）；wordwise：短释义；缺省 ruby
+  #levels=6500,3500,0  三档频率：最生僻 / 生僻 / 全部；rank 大于阈值才标注
+  字<TAB>标注<TAB>rank
 
 rank 越大越生僻：汉字用《通用规范汉字表》序号，表外字 9000，繁体字随对应简体字（tools/build_rare_pinyin.py）；英文用词频排名。
-levels 缺省 zh 6500,3500,0、en 20000,8000,0。en 查不到时依次试去掉 s / es / ies→y / ed / ing。
+levels 缺省 zh 6500,3500,0、en 20000,8000,3000。en 查不到时依次试去掉 s / es / ies→y / ed / ing。
 自制词库按同格式存为 $DATA/.moon/rare/<id>.tsv（id 只含字母数字 _-），设置页会列出。
 
 @module koplugin.book.features.rare.lexicon
@@ -20,14 +21,18 @@ local Lexicon = {}
 --- 档位在 levels 里的下标。
 Lexicon.LEVELS = { rarest = 1, rare = 2, all = 3 }
 
+--- 词库类型：ruby 注音；wordwise 短释义。中文 / 英文按 lang 分流，同 span 重叠时 wordwise 优先。
+Lexicon.KINDS = { ruby = true, wordwise = true }
+
 local DEFAULT_LEVELS = { zh = { 6500, 3500, 0 }, en = { 20000, 8000, 3000 } }
 
 ---@class RareLexicon
 ---@field count integer 有效词条数量
 ---@field meta table<string, string>
 ---@field lang string
+---@field kind "ruby"|"wordwise"
 ---@field levels number[]
----@field entries table<string, { [1]: string, [2]: number }> key → { 注音, rank }
+---@field entries table<string, { [1]: string, [2]: number }> key → { 标注, rank }
 ---@field max_len integer 最长 key 的字数（zh 词组最长匹配用）
 
 --- 解析词库文本；坏行跳过，没有任何条目时报错。
@@ -51,10 +56,11 @@ function Lexicon.parse(text)
     end
     if count == 0 then error("empty lexicon") end
     local lang = meta.lang == "zh" and "zh" or "en"
+    local kind = meta.kind == "wordwise" and "wordwise" or "ruby"
     local levels = {}
     for n in (meta.levels or ""):gmatch("%d+") do levels[#levels + 1] = tonumber(n) end
     if #levels ~= 3 then levels = DEFAULT_LEVELS[lang] end
-    return { meta = meta, lang = lang, levels = levels, entries = entries, max_len = max_len, count = count }
+    return { meta = meta, lang = lang, kind = kind, levels = levels, entries = entries, max_len = max_len, count = count }
 end
 
 ---@param lex RareLexicon
@@ -93,7 +99,7 @@ end
 
 --- 屏上逐字单元的全部命中（不去重，每处都注音）：{ i, n, key, ann }，i..i+n-1 是命中占的单元。
 --- zh：非 ASCII 字最长匹配；en：连续字母 / 撇号成词，≥3 字母才查（带撇号的如 obdurate's 查不到就不注）。
---- force[key] 为真的词（如生字本里的词或字）不看阈值，词库里有读音就注。
+--- force[key] 为真的词（如生字本里的词或字）不看频率，词库里有读音就注。
 ---@param lex RareLexicon
 ---@param units string[] 逐字文本
 ---@param threshold number
@@ -131,6 +137,30 @@ function Lexicon.scan(lex, units, threshold, force, limit)
             end
         end
         i = i + step
+    end
+    return out
+end
+
+--- 多词库命中合并：先 wordwise 后 ruby；已占单元不再标（Kindle：释义与注音按脚本分流，英文同词只留释义）。
+---@param hits { i: integer, n: integer, key: string, ann: string, kind?: string }[]
+---@return { i: integer, n: integer, key: string, ann: string }[]
+function Lexicon.dedupe(hits)
+    table.sort(hits, function(a, b)
+        local aw, bw = a.kind == "wordwise", b.kind == "wordwise"
+        if aw ~= bw then return aw end
+        if a.i ~= b.i then return a.i < b.i end
+        return a.n > b.n
+    end)
+    local occupied, out = {}, {}
+    for _idx, h in ipairs(hits) do
+        local free = true
+        for u = h.i, h.i + h.n - 1 do
+            if occupied[u] then free = false break end
+        end
+        if free then
+            for u = h.i, h.i + h.n - 1 do occupied[u] = true end
+            out[#out + 1] = { i = h.i, n = h.n, key = h.key, ann = h.ann }
+        end
     end
     return out
 end

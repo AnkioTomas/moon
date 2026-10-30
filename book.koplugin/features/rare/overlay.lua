@@ -196,23 +196,30 @@ local function nextOffset(xp)
 end
 
 --- 本屏逐字：从 pos0 起 getNextVisibleChar 走到 pos1（含），每个可见字一个单元 { text, xp, stop }。
---- stop 是该字之后的位置（取框用的终点）。空白不成单元。
+--- stop 是该字之后的位置（取框用的终点）。
+--- 空白保留为一个空格单元：英文靠它断词；中文扫描会跳过。若剥掉空格，The ubiquitous
+--- 会黏成 Theubiquitous，整句匹配失败，只剩被中文标点夹住的词（演示里就是下面那行清单）还能命中。
 ---@param document table CreDocument
 ---@param pos0 string
 ---@param pos1 string
 ---@return { text: string, xp: string, stop: string }[]
 function Overlay.walk(document, pos0, pos1)
     local units, xp = {}, pos0
+    local utf8 = require("utils.text").UTF8_CHAR
     while xp and #units < MAX_UNITS do
         local order = document:compareXPointers(xp, pos1)
         if not order or order < 0 then break end
         local nx = document:getNextVisibleChar(xp)
         local stop = nextOffset(xp) or nx
         local text = stop and document:getTextFromXPointers(xp, stop) or ""
-        text = text:gsub("%s+", "")
-        if text ~= "" then
-            -- 偶有一次取到多个字（节点边界）：只取第一个字，位置仍按这一格。
-            units[#units + 1] = { text = text:match("^" .. require("utils.text").UTF8_CHAR), xp = xp, stop = stop }
+        if text:match("^%s+$") then
+            units[#units + 1] = { text = " ", xp = xp, stop = stop }
+        else
+            text = text:gsub("%s+", "")
+            if text ~= "" then
+                -- 偶有一次取到多个字（节点边界）：只取第一个字，位置仍按这一格。
+                units[#units + 1] = { text = text:match("^" .. utf8), xp = xp, stop = stop }
+            end
         end
         if not nx or nx == xp then break end
         xp = nx
@@ -267,12 +274,22 @@ local function scanHits(self, lexicons, level, force)
     local texts = {}
     for i, u in ipairs(units) do texts[i] = u.text end
     local Lexicon = require("features.rare.lexicon")
+    -- wordwise 先扫：同 span 优先释义，且 locate（取框）有预算，别让 ruby 先占满。
+    table.sort(lexicons, function(a, b)
+        local aw, bw = a.kind == "wordwise", b.kind == "wordwise"
+        if aw ~= bw then return aw end
+        return false
+    end)
     local found = {}
     for _idx, lex in ipairs(lexicons) do
-        for _f, f in ipairs(Lexicon.scan(lex, texts, Lexicon.threshold(lex, level), force, MAX_HITS - #found)) do
+        local room = MAX_HITS - #found
+        if room <= 0 then break end
+        for _f, f in ipairs(Lexicon.scan(lex, texts, Lexicon.threshold(lex, level), force, room)) do
+            f.kind = lex.kind
             found[#found + 1] = f
         end
     end
+    found = Lexicon.dedupe(found)
     if #found == 0 then return {} end
     return locate(self, units, found, started_at)
 end
@@ -335,15 +352,23 @@ function Overlay:refresh(key)
         self.key = key
         return
     end
-    local settings = require("utils.settings").get("features.rare")
-    -- 先看有没有启用词库文件；完整 parse 放到 fork 后的子进程，别堵翻页这一帧。
+    local Rare = require("features.rare")
+    local settings = Rare.migrate()
+    if not Rare.anyOn(settings) then
+        self.key = key
+        return
+    end
+    -- 先看有没有启用词库文件；完整 parse 经 warm 进主进程，fork 后 COW 继承。
     local Catalog = require("features.rare.catalog")
     local lfs = require("libs/libkoreader-lfs")
     local has_lex = false
     for id, on in pairs(settings.rare_lexicons or {}) do
         if on and lfs.attributes(Catalog.path(id), "mode") then
-            has_lex = true
-            break
+            local kind = Catalog.kind(id)
+            if Rare.kindOn(kind, settings) then
+                has_lex = true
+                break
+            end
         end
     end
     if not has_lex then
@@ -353,6 +378,9 @@ function Overlay:refresh(key)
     local level = settings.rare_level
     -- 生字本读库：只能在主进程取（子进程禁碰 sqlite），结果经闭包进子进程。
     local force = settings.rare_vocab and require("features.rare.vocab").set() or nil
+    -- 主进程 warm：fork 后子进程 COW 继承词库哈希，否则每翻页重 parse 整份 gloss TSV。
+    local warmed = Catalog.warm()
+    if warmed > 0 then logger.dbg("book.rare warm", warmed, "lexicon(s)") end
     local started_at = Perf.now()
     local job = require("workers.job").run(function()
         local lexicons = require("features.rare.catalog").active()
@@ -396,7 +424,7 @@ local enabled_rev, enabled_on = -1, false
 function Overlay:paint(bb)
     if enabled_rev ~= revision then
         enabled_rev = revision
-        enabled_on = require("utils.settings").get("features.rare").rare_enabled == true
+        enabled_on = require("features.rare").anyOn()
     end
     if not enabled_on then return end
     local key = PageMarks.viewKey(self.ui, revision)
@@ -417,8 +445,8 @@ function Overlay:paint(bb)
     end
     if #self.items == 0 then return end
     local RenderText = require("ui/rendertext")
-    -- 纯黑：灰色在墨水屏上偏淡，小字号注音看不清。
-    local color = require("ffi/blitbuffer").COLOR_BLACK
+    -- 深灰：跟正文黑分开（Kindle WordWise 也是灰字）；比 COLOR_GRAY 深一档，小字在墨水屏上还能认。
+    local color = require("ffi/blitbuffer").COLOR_DARK_GRAY
     for _idx, item in ipairs(self.items) do
         RenderText:renderUtf8Text(bb, item.x, item.y, annFace(item.size), item.text, true, false, color)
     end
