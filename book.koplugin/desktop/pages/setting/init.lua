@@ -1,6 +1,7 @@
 --[[--
-设置页编排：根页功能目录，子页走详情叠层。
+设置页编排：根页是分组目录，点分组进叠层列该组条目；再点才是具体设置页。
 
+阅读组多一层分类：阅读界面 / 划词与词典 / 智能（只影响展示，条目仍挂 group=reader）。
 根页与各页面由「条目」按层级（分组 → 页面 → 分节）合并而成，规则见 tree.lua。
 本文件只声明核心条目；feature 的条目在各自的 setting.lua，扫描得到。各设置项实现位于 desktop/pages/setting/。
 
@@ -208,11 +209,12 @@ local function coreEntries(desktop)
     }
 end
 
---- 根页导航行：点开条目的页面叠层。
+--- 条目导航行。push=true 时叠在当前叠层上（组内进子页，返回回到组）。
 ---@param desktop BookDesktop
 ---@param entry BookSettingNode
+---@param push boolean|nil
 ---@return fun(iw: number): table
-local function navRow(desktop, entry)
+local function navRow(desktop, entry, push)
     return function(iw)
         return Row.widget({
             width = iw,
@@ -222,12 +224,110 @@ local function navRow(desktop, entry)
             subtitle = entry.subtitle,
             status = entry.status,
             status_on = entry.status_on,
-            callback = function() Overlay.open(desktop, entry.page) end,
+            callback = function()
+                if push then Overlay.push(desktop, entry.page) else Overlay.open(desktop, entry.page) end
+            end,
         })
     end
 end
 
---- 根页顶部的搜索行：首次点开才建索引（要把所有页面的行建一遍），缓存在本次 groups 上，根页重建即失效。
+--- 组内条目行：导航用 push，直接行原样。
+---@param desktop BookDesktop
+---@param entries BookSettingNode[]
+---@return (fun(iw: number): table)[]
+local function entryRows(desktop, entries)
+    local rows = {}
+    for _idx, entry in ipairs(entries) do
+        rows[#rows + 1] = entry.row or navRow(desktop, entry, true)
+    end
+    return rows
+end
+
+--- 阅读组内分类：只影响展示，条目仍挂 group=reader。未点名的归「阅读界面」。
+---@param entry BookSettingNode
+---@return "ui"|"lookup"|"smart"
+local function readerBucket(entry)
+    local id = entry.id or ""
+    if id == "lookup" or id == "popup_menu"
+        or id:find("^feature:dictionary", 1, false) or id:find("^feature:baike", 1, false)
+        or id:find("^feature:ocr", 1, false) or id:find("^feature:translate", 1, false)
+        or id:find("^feature:rare", 1, false) then
+        return "lookup"
+    end
+    if id == "ai" or id:find("^feature:xray", 1, false) or id:find("^feature:reviews", 1, false) then
+        return "smart"
+    end
+    return "ui"
+end
+
+---@param group { id: string, title: string, entries: BookSettingNode[] }
+---@param bucket "ui"|"lookup"|"smart"
+---@return BookSettingNode[]
+local function readerEntries(group, bucket)
+    local out = {}
+    for _idx, entry in ipairs(group.entries) do
+        if readerBucket(entry) == bucket then out[#out + 1] = entry end
+    end
+    return out
+end
+
+--- 普通分组叠层：该组全部条目一页列出。
+---@param desktop BookDesktop
+---@param group { id: string, title: string, entries: BookSettingNode[] }
+---@return BookSettingsOverlaySpec
+local function groupPage(desktop, group)
+    return {
+        id = "group:" .. group.id,
+        title = group.title,
+        sections = function()
+            return {{ title = group.title, rows = entryRows(desktop, group.entries) }}
+        end,
+    }
+end
+
+--- 阅读组叠层：先选分类，再 push 进该分类的条目列表。
+---@param desktop BookDesktop
+---@param group { id: string, title: string, entries: BookSettingNode[] }
+---@return BookSettingsOverlaySpec
+local function readerGroupPage(desktop, group)
+    local folders = {
+        { bucket = "ui", icon = "touch_app", title = _("阅读界面"), subtitle = _("行为、栏、侧栏、翻页与快捷面板") },
+        { bucket = "lookup", icon = "format_ink_highlighter", title = _("划词与词典"), subtitle = _("查词、词典、百科、翻译、OCR") },
+        { bucket = "smart", icon = "psychology", title = _("智能"), subtitle = _("X-Ray、AI、段评") },
+    }
+    return {
+        id = "group:reader",
+        title = group.title,
+        sections = function()
+            local rows = {}
+            for _idx, item in ipairs(folders) do
+                local folder = item
+                local entries = readerEntries(group, folder.bucket)
+                if #entries > 0 then
+                    rows[#rows + 1] = function(iw)
+                        return Row.widget({
+                            width = iw, kind = "nav", icon = folder.icon,
+                            title = folder.title, subtitle = folder.subtitle,
+                            status = string.format("%d", #entries), status_on = true,
+                            callback = function()
+                                Overlay.push(desktop, {
+                                    id = "group:reader:" .. folder.bucket,
+                                    title = folder.title,
+                                    sections = function()
+                                        return {{ title = folder.title, rows = entryRows(desktop, entries) }}
+                                    end,
+                                })
+                            end,
+                        })
+                    end
+                end
+            end
+            return {{ title = _("分类"), rows = rows }}
+        end,
+    }
+end
+
+--- 根页顶部的搜索行：首次点开才建索引，缓存在本次 groups 上，根页重建即失效。
 ---@param self BookSettings
 ---@param groups table[] Tree.build 的结果
 ---@return fun(iw: number): table
@@ -248,20 +348,42 @@ local function searchRow(self, groups)
     end
 end
 
---- 构建设置根页：核心条目 + 扫描到的 feature 条目按层级合并；按内容区尺寸现建，翻页经桌面 updateView 重建。
+--- 根页分组导航行：点开该组叠层。
+---@param desktop BookDesktop
+---@param group { id: string, title: string, icon: string|nil, entries: BookSettingNode[] }
+---@return fun(iw: number): table|nil
+local function groupRow(desktop, group)
+    if #group.entries == 0 then return nil end
+    return function(iw)
+        return Row.widget({
+            width = iw,
+            kind = "nav",
+            icon = group.icon,
+            title = group.title,
+            status = string.format("%d", #group.entries),
+            status_on = true,
+            callback = function()
+                local page = group.id == "reader" and readerGroupPage(desktop, group) or groupPage(desktop, group)
+                Overlay.open(desktop, page)
+            end,
+        })
+    end
+end
+
+--- 构建设置根页：只列搜索 + 分组目录；组内条目在叠层里。
 ---@return table
 function Settings:updateView()
     local desktop = self.desktop
     local entries = coreEntries(desktop)
     for _idx, entry in ipairs(Tree.features(desktop)) do entries[#entries + 1] = entry end
     local roots = {
-        { id = "library", title = _("书库") },
-        { id = "appearance", title = _("外观") },
-        { id = "desktop", title = _("桌面") },
-        { id = "reader", title = _("阅读") },
-        { id = "system", title = _("系统") },
-        { id = "security", title = _("安全") },
-        { id = "maintenance", title = _("维护") },
+        { id = "library", title = _("书库"), icon = "local_library" },
+        { id = "appearance", title = _("外观"), icon = "palette" },
+        { id = "desktop", title = _("桌面"), icon = "home" },
+        { id = "reader", title = _("阅读"), icon = "menu_book" },
+        { id = "system", title = _("系统"), icon = "settings" },
+        { id = "security", title = _("安全"), icon = "lock" },
+        { id = "maintenance", title = _("维护"), icon = "handyman" },
     }
     -- 扩展分组（setting.groups）插在 after 指定的分组后，没写 after 排在最后。
     for _idx, g in ipairs(require("utils.extension").list("setting.groups")) do
@@ -269,15 +391,23 @@ function Settings:updateView()
         for i, r in ipairs(roots) do
             if g.after and (r.id == g.after or r.after == g.after) then at = i + 1 end
         end
-        table.insert(roots, at, { id = g.id, title = g.title, after = g.after })
+        table.insert(roots, at, { id = g.id, title = g.title, after = g.after, icon = g.icon })
     end
     local groups = Tree.build(roots, entries)
-    local sections = {{ title = _("搜索"), rows = { searchRow(self, groups) } }}
+    -- Tree.build 不传 icon，从 roots 补回去。
+    local icons = {}
+    for _idx, r in ipairs(roots) do icons[r.id] = r.icon end
+    for _idx, group in ipairs(groups) do group.icon = icons[group.id] end
+
+    local group_rows = {}
     for _idx, group in ipairs(groups) do
-        local rows = {}
-        for _i, entry in ipairs(group.entries) do rows[#rows + 1] = entry.row or navRow(desktop, entry) end
-        sections[#sections + 1] = { title = group.title, rows = rows }
+        local row = groupRow(desktop, group)
+        if row then group_rows[#group_rows + 1] = row end
     end
+    local sections = {
+        { title = _("搜索"), rows = { searchRow(self, groups) } },
+        { title = _("分类"), rows = group_rows },
+    }
     local body
     body, self.page, self.pages = Sections.widget({
         width = desktop.dimen.w,

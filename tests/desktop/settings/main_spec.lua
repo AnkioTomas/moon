@@ -1,6 +1,6 @@
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
---[[-- 设置根页：核心条目 + 扫描到的 feature 条目按层级合并，点击打开叠层。 --]]
+--[[-- 设置根页：搜索 + 分组目录；点分组进叠层列条目，阅读组再分三类。 --]]
 
 local Assert = require("support.assert")
 
@@ -85,6 +85,9 @@ package.preload["desktop.pages.setting.overlay"] = function()
             end
         end,
         open = function(_, spec)
+            opened = spec
+        end,
+        push = function(_, spec)
             opened = spec
         end,
         close = function() end,
@@ -222,97 +225,127 @@ require("features").registerConventions()
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 49)
-local fontmap_row
-for _idx, row in ipairs(built_rows) do
-    if row.title == "书内字体映射" then fontmap_row = row end
-end
-Assert.eq(fontmap_row.kind, "toggle")
-Assert.eq(fontmap_row.status_on, false)
-Assert.eq(table.concat(section_titles, ","), "搜索,书库,订阅,外观,桌面,阅读,系统,安全,维护")
--- 订阅的开关直接放在根页「订阅」组，不另开子页。
-local sub_rows = {}
-for _, row in ipairs(built_rows) do
-    if row.title == "启用订阅" or row.title == "下载文章图片" then sub_rows[#sub_rows + 1] = row.title end
-end
-Assert.eq(table.concat(sub_rows, ","), "启用订阅,下载文章图片")
+-- 根页：搜索 + 8 个分组（含订阅扩展组），条目不直接铺开。
+Assert.eq(table.concat(section_titles, ","), "搜索,分类")
+Assert.len(built_rows, 9)
+Assert.eq(built_rows[1].title, "搜索设置")
+local root_groups = {}
+for i = 2, #built_rows do root_groups[#root_groups + 1] = built_rows[i].title end
+Assert.eq(table.concat(root_groups, ","), "书库,订阅,外观,桌面,阅读,系统,安全,维护")
 
-local expected = {
-    { title = "账号", id = "source_config" },
-    { title = "书架显示", id = "library_display" },
-    { title = "外观", id = "appearance" },
-    { title = "界面壁纸", id = "feature:wallpaper:main" },
-    { title = "屏幕", id = "display" },
-    { title = "启动与按键", id = "startup" },
-    { title = "桌面顶栏", id = "topbar" },
-    { title = "桌面快捷面板", id = "feature:panel:desktop" },
-    { title = "底栏拓展", id = "feature:extensions:main" },
-    { title = "阅读行为", id = "reader_behavior" },
-    { title = "翻页动画", id = "feature:animation:1" },
-    { title = "阅读侧栏", id = "feature:sidebar:1" },
-    { title = "X-Ray", id = "feature:xray:1" },
-    { title = "翻译", id = "feature:translate:1" },
-    { title = "段评", id = "feature:reviews:1" },
-    { title = "词典", id = "feature:dictionary:1" },
-    { title = "百科", id = "feature:baike:1" },
-    { title = "文字识别（OCR）", id = "feature:ocr:1" },
-    { title = "阅读页顶栏", id = "feature:bars:top" },
-    { title = "阅读页底栏", id = "feature:bars:bottom" },
-    { title = "阅读快捷面板", id = "feature:panel:reader" },
-    { title = "查词", id = "lookup" },
-    { title = "AI 接口", id = "ai" },
-    { title = "划词菜单", id = "popup_menu" },
-    { title = "网络", id = "network" },
-    { title = "时间", id = "feature:clock:main" },
-    { title = "输入法", id = "feature:ime:main" },
-    { title = "远程管理", id = "feature:remote:main" },
-    { title = "锁屏壁纸", id = "feature:lockscreen:main" },
-    { title = "锁屏密码", id = "feature:passcode:main" },
-}
-local pages = {}
-local nav = 1
-for _, row in ipairs(built_rows) do
-    local item = expected[nav]
-    if item and row.title == item.title and row.kind == "nav" then
-        Assert.is_true(type(row.subtitle) == "string" and row.subtitle ~= "", item.title .. " 缺副标题")
-        row.callback()
-        Assert.eq(opened.id, item.id)
-        pages[item.id] = opened
-        nav = nav + 1
-    end
-end
-Assert.eq(nav, #expected + 1)
-
-for _, title in ipairs({
-    "语言", "调试日志", "自动检查更新", "检查更新", "关于", "关闭桌面",
-}) do
-    local found = false
-    for _, row in ipairs(built_rows) do
-        if row.title == title then found = true break end
-    end
-    Assert.is_true(found)
-end
-
-local behavior = pages.reader_behavior
-Assert.eq(behavior.title, "阅读行为")
-Assert.is_nil(behavior.preview)
--- 第三层：feature 往核心页面追加分节，按 order 排在核心分节之间 / 之后
 local function sectionTitles(page)
     local titles = {}
     for _, section in ipairs(page.sections()) do titles[#titles + 1] = section.title end
     return table.concat(titles, ",")
 end
-Assert.eq(sectionTitles(behavior), "行为")
-Assert.eq(sectionTitles(pages.lookup), "选区")
-Assert.eq(sectionTitles(pages.popup_menu), "按钮")
-Assert.eq(sectionTitles(pages.display), "屏幕,夜间与亮度")
 
--- 根页上的开关 / 动作行：订阅两行在前，维护组里 update feature 的两行按 order 排在统计与调试日志之间
-local maintenance = {}
-for _, row in ipairs(built_rows) do
-    if row.kind == "action" or row.kind == "toggle" or row.toggle ~= nil then maintenance[#maintenance + 1] = row.title end
+local function openRoot(title)
+    for _, row in ipairs(built_rows) do
+        if row.title == title then
+            row.callback()
+            return opened
+        end
+    end
+    error("missing root group " .. title)
 end
-Assert.eq(table.concat(maintenance, ","), "启用订阅,下载文章图片,书内字体映射,清除当前源统计,导入 KOReader 统计,自动检查更新,检查更新,调试日志,关于,关闭桌面")
+
+local function buildSectionRows(page)
+    local before = #built_rows
+    for _, section in ipairs(page.sections()) do
+        for _, build in ipairs(section.rows) do build(600) end
+    end
+    local rows = {}
+    for i = before + 1, #built_rows do rows[#rows + 1] = built_rows[i] end
+    return rows
+end
+
+-- 书库组：当前书库 / 账号 / 书架显示（功能开关在维护）
+local library = openRoot("书库")
+Assert.eq(library.id, "group:library")
+local library_rows = buildSectionRows(library)
+local library_titles = {}
+for _, row in ipairs(library_rows) do library_titles[#library_titles + 1] = row.title end
+Assert.eq(table.concat(library_titles, ","), "当前书库,账号,书架显示")
+
+-- 订阅组：两行开关仍在组内（不再铺在根页）
+local subscribe = openRoot("订阅")
+Assert.eq(subscribe.id, "group:subscribe")
+local sub_rows = buildSectionRows(subscribe)
+Assert.eq(sub_rows[1].title .. "," .. sub_rows[2].title, "启用订阅,下载文章图片")
+
+-- 阅读组：先出三类目录
+local reader = openRoot("阅读")
+Assert.eq(reader.id, "group:reader")
+Assert.eq(sectionTitles(reader), "分类")
+local reader_folders = buildSectionRows(reader)
+local folder_titles = {}
+for _, row in ipairs(reader_folders) do folder_titles[#folder_titles + 1] = row.title end
+Assert.eq(table.concat(folder_titles, ","), "阅读界面,划词与词典,智能")
+
+-- 阅读界面：含字体映射开关与阅读行为等
+reader_folders[1].callback()
+Assert.eq(opened.id, "group:reader:ui")
+local ui_rows = buildSectionRows(opened)
+local fontmap_row, behavior_row
+local ui_titles = {}
+for _, row in ipairs(ui_rows) do
+    ui_titles[#ui_titles + 1] = row.title
+    if row.title == "书内字体映射" then fontmap_row = row end
+    if row.title == "阅读行为" then behavior_row = row end
+end
+Assert.is_true(fontmap_row ~= nil, "阅读界面应含字体映射")
+Assert.eq(fontmap_row.kind, "toggle")
+Assert.eq(fontmap_row.status_on, false)
+Assert.is_true(behavior_row ~= nil)
+Assert.is_true(table.concat(ui_titles, ","):find("翻页动画", 1, true) ~= nil)
+Assert.is_true(table.concat(ui_titles, ","):find("阅读快捷面板", 1, true) ~= nil)
+Assert.is_nil((function()
+    for _, t in ipairs(ui_titles) do if t == "查词" or t == "X-Ray" or t == "AI 接口" then return t end end
+end)())
+
+-- 划词与词典 / 智能 分类内容
+reader_folders[2].callback()
+Assert.eq(opened.id, "group:reader:lookup")
+local lookup_rows = buildSectionRows(opened)
+local lookup_titles = {}
+for _, row in ipairs(lookup_rows) do lookup_titles[#lookup_titles + 1] = row.title end
+Assert.eq(table.concat(lookup_titles, ","), "翻译,词典,百科,文字识别（OCR）,查词,划词菜单,生僻字注音")
+
+reader_folders[3].callback()
+Assert.eq(opened.id, "group:reader:smart")
+local smart_rows = buildSectionRows(opened)
+local smart_titles = {}
+for _, row in ipairs(smart_rows) do smart_titles[#smart_titles + 1] = row.title end
+Assert.eq(table.concat(smart_titles, ","), "X-Ray,段评,AI 接口")
+
+-- 组内导航 push 进具体页面，第三层分节仍在
+behavior_row.callback()
+Assert.eq(opened.id, "reader_behavior")
+Assert.eq(opened.title, "阅读行为")
+Assert.is_nil(opened.preview)
+Assert.eq(sectionTitles(opened), "行为")
+
+-- 外观组里的屏幕页仍带夜间分节；维护组含更新与关闭桌面
+local appearance = openRoot("外观")
+local appearance_rows = buildSectionRows(appearance)
+local display_row
+for _, row in ipairs(appearance_rows) do
+    if row.title == "屏幕" then display_row = row end
+end
+display_row.callback()
+Assert.eq(opened.id, "display")
+Assert.eq(sectionTitles(opened), "屏幕,夜间与亮度")
+
+local maintenance = openRoot("维护")
+local maintenance_rows = buildSectionRows(maintenance)
+local maintenance_titles = {}
+for _, row in ipairs(maintenance_rows) do maintenance_titles[#maintenance_titles + 1] = row.title end
+Assert.eq(maintenance_titles[1], "功能开关", "功能开关排在维护组最前")
+for _, title in ipairs({
+    "功能开关", "存储空间", "清除当前源统计", "导入 KOReader 统计", "自动检查更新", "检查更新", "调试日志", "关于", "关闭桌面",
+}) do
+    Assert.is_true(table.concat(maintenance_titles, ","):find(title, 1, true) ~= nil, title)
+end
 
 _G.G_reader_settings = previous_settings
 

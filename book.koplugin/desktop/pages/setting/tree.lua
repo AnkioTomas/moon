@@ -5,8 +5,8 @@
 （utils.extension）登记 `{ name, entries = fn(desktop) }`，按登记顺序收集。本模块不知道谁登记。
 
 每条必须有数字 `order`，且 `group` / `parent` 二选一：
-  - `group = 分组 id`：挂到根页该分组下。带 `page`（title、可选 preview / sections）是导航行，点开叠层；
-    带 `row = fn(iw)` 是直接放在分组里的行。
+  - `group = 分组 id`：挂到该分组（根页只列分组目录，点进叠层才看到组内条目）。带 `page`
+    （title、可选 preview / sections）是组内导航行，点开叠层；带 `row = fn(iw)` 是直接放在组内的行。
   - `parent = 页面 id`：往该页追加分节，`sections = fn() → BookThemeSection[]`，排在页面自带 sections 之后。
 同层按 order 升序；order 相同按收集顺序（核心在前，扩展点按登记顺序）。
 扩展点条目的页面 id 是 `feature:<name>:<id>`（id 省略用序号），核心页面用自己写的 id；parent 引用的就是这个 id。

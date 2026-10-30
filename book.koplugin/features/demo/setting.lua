@@ -7,8 +7,9 @@ Feature 设置模板。复制本目录后按需改 `defaults` / `entries`；既�
 只有配置、没有设置页时可以不写 `entries`。
 
 `entries` 的条目按层级合并进设置页（规则见 desktop/pages/setting/tree.lua），每条必须有 `order`：
-  - `group`：挂到根页分组（library 书库、desktop 桌面、reader 阅读、system 系统、maintenance 维护）。
-    带 `page` 是导航行，点开叠层（标题、可选 preview、sections）；带 `row = fn(iw)` 是直接放在分组里的行。
+  - `group`：挂到设置分组（library 书库、appearance 外观、desktop 桌面、reader 阅读、
+    system 系统、security 安全、maintenance 维护；扩展组如 subscribe）。根页只列分组，
+    带 `page` 是组内导航行，点开叠层；带 `row = fn(iw)` 是直接放在组内的行。
   - `parent`：往已有页面追加分节，`sections = fn()`。核心页面 id 有 display、lookup 等，
     feature 页面 id 是 feature:<name>:<id>。
 

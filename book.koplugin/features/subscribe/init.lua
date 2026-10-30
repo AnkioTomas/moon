@@ -672,7 +672,7 @@ Ext.add("desktop.opened", function(desk)
         if #added > 0 and desk.plugin and desk.plugin.desktop == desk and desk.tab == "subscribe" then desk:updateView() end
     end)
 end)
-Ext.add("setting.groups", { id = "subscribe", title = _("订阅"), after = "library" })
+Ext.add("setting.groups", { id = "subscribe", title = _("订阅"), after = "library", icon = "rss_feed" })
 -- 远程管理的订阅页（/subscribe.html）与接口（/api/subscribe/<action>，见 features.subscribe.remote）。
 Ext.add("web.routes", {
     name = "subscribe",

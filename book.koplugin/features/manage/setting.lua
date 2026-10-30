@@ -1,5 +1,5 @@
 --[[--
-功能开关设置页（维护组）：列出可停用的 feature，点按停用 / 再启用，重启 KOReader 后生效。
+功能开关设置页（维护组靠前）：列出可停用的 feature，点按停用 / 再启用，重启 KOReader 后生效。
 
 @module koplugin.book.features.manage.setting
 --]]
@@ -54,7 +54,7 @@ function Setting.entries(desktop)
     return {
         {
             group = "maintenance",
-            order = 20,
+            order = 5,
             id = "manage", icon = "delete_sweep", title = _("功能开关"),
             subtitle = _("停用用不到的功能，减少内存占用"),
             page = { title = _("功能开关"), sections = function() return sections(desktop) end },
