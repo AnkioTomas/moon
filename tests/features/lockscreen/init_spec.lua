@@ -347,6 +347,25 @@ local ok_run, err_run = pcall(function()
     Assert.eq(setup_seen[4].event, "poweroff")
     Assert.eq(setup_seen[4].writes, 0, "关机画面不生成锁屏图")
 
+    -- 没图：电源键路径撤下半接管，还原用户原 screensaver，避免冻住阅读页。
+    pcall(os.remove, compose_path)
+    saved.screensaver_type = "document_cover"
+    saved.screensaver_document_cover = compose_path
+    saved.screensaver_show_message = false
+    -- 先有一次成功接管留下的快照；clearCover 靠它还原。
+    saved.book_lockscreen_previous_screensaver = {
+        screensaver_type = { present = true, value = "cover" },
+        screensaver_document_cover = { present = true, value = "/old/cover.png" },
+        screensaver_show_message = { present = true, value = true },
+        screensaver_img_background = { present = false },
+        screensaver_stretch_images = { present = false },
+    }
+    Screensaver:setup()
+    Assert.eq(saved.screensaver_type, "cover", "no_cover 须还原用户锁屏方式")
+    Assert.eq(saved.screensaver_document_cover, "/old/cover.png")
+    Assert.is_true(saved.screensaver_show_message)
+    Assert.matches(table.concat(logs, "\n"), "book%.lockscreen suspend no_cover")
+
     -- 在飞生成期间改配置：旧任务作废，新请求必须重开，不能被 already_running 吞掉。
     local Background = require("features.lockscreen.background")
     local first, second
@@ -375,10 +394,20 @@ local ok_run, err_run = pcall(function()
     Assert.eq(saved.screensaver_document_cover, "/old/cover.png")
     Assert.is_true(saved.screensaver_show_message)
 
-    -- 唤醒 = 锁过一次屏：锁屏次数 +1，按它失效的背景（海报字）下次回桌面才重合成
+    -- 唤醒 = 锁过一次屏：次数 +1，下一拍异步刷失效缓存（不回桌面也能换图）
+    Settings.setMode("compose")
+    conf.lock_screen_background = "folder"
+    MoonSettings.save("features.lockscreen")
+    conf.lock_screen_day = "stale"
+    MoonSettings.save("features.lockscreen")
     local cycles = Compose.lock_cycles
+    local resume_logs_before = #logs
     LockScreen.onResume()
     Assert.eq(Compose.lock_cycles, cycles + 1)
+    Stubs.flush()
+    Assert.is_true(#logs > resume_logs_before, "唤醒后应尝试刷锁屏")
+    Assert.matches(table.concat(logs, "\n", resume_logs_before + 1),
+        "book%.lockscreen refresh")
 end)
 
 cleanup()

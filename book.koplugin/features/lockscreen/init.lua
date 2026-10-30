@@ -2,7 +2,7 @@
 锁屏组合图生命周期：生成、接管和宿主事件。
 
 KOReader 先 Screensaver:setup/show 再广播 Suspend。电源键路径上绝不同步解码/写 PNG：
-缓存命中或已有旧 compose.png 只接管路径；重建留给桌面回到前台 / 设置变更 / 联网后的异步刷新。
+缓存命中或已有旧 compose.png 只接管路径；重建留给唤醒 / 桌面回到前台 / 设置变更 / 联网后的异步刷新。
 低端 Kindle 上同步整屏合成会卡死数秒。
 
 @module koplugin.book.features.lockscreen
@@ -87,6 +87,7 @@ function M.running()
 end
 
 --- 休眠前只接管路径，绝不 Compose.build。命中缓存用新键；miss 时有旧图就顶上（过期也行）。
+--- 连旧图都没有：撤下半接管，还原用户原 screensaver，避免 document_cover 指向空文件冻住阅读页。
 local function prepareSuspend()
     if not Settings.isCompose() then
         logger.dbg("book.lockscreen suspend skipped", "mode_disabled")
@@ -104,6 +105,7 @@ local function prepareSuspend()
         logger.dbg("book.lockscreen suspend", "stale_cover", plan.output_path)
         return
     end
+    Settings.clearCover()
     logger.dbg("book.lockscreen suspend", "no_cover")
 end
 
@@ -122,7 +124,7 @@ local function hookScreensaver()
     end
 end
 
---- 缓存失效时异步重建（桌面回到前台 / 启动 / 联网）。不进电源键路径。
+--- 缓存失效时异步重建（唤醒 / 桌面回到前台 / 联网）。不进电源键路径。
 local function refreshIfStale(reason)
     if not Settings.isCompose() then return end
     local plan = Compose.plan()
@@ -142,7 +144,7 @@ local function hookDesktopActivated()
 end
 
 --- 插件启动：缓存失效时先撤下旧图；在线背景未就绪才下一帧下载合成。
---- 本地背景的重建留给 desktop.activated（用户回到桌面时），不进电源键、也不在开书路径卡主线程。
+--- 本地背景的重建留给唤醒 / desktop.activated，不进电源键、也不在开书路径卡主线程。
 function M.onCreate()
     hookScreensaver()
     hookDesktopActivated()
@@ -158,9 +160,13 @@ function M.onCreate()
     require("ui/uimanager"):nextTick(function() require("ui.guard").call("lockscreen.create", M.refresh, nil, false, "onCreate") end)
 end
 
---- 唤醒 = 刚锁过一次屏：按锁屏次数失效的背景（海报字）下次回桌面重合成一次。
+--- 唤醒：锁屏次数 +1（文字海报 / 文件夹按次换图）；下一拍异步刷失效缓存。
+--- 阅读页锁醒不回桌面也能换图；电源键路径仍禁止同步合成。
 function M.onResume()
     Compose.lock_cycles = Compose.lock_cycles + 1
+    require("ui/uimanager"):nextTick(function()
+        require("ui.guard").call("lockscreen.resume", refreshIfStale, "resume")
+    end)
 end
 
 --- 网络恢复：必应 / 摸鱼日报 / 一言可能刚就绪；内容没变就是缓存命中。

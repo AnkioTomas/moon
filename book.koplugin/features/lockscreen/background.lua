@@ -82,15 +82,13 @@ local function folderFiles(dir)
     return files
 end
 
---- 按日期依次轮换文件夹里的图：同一天固定一张，不落盘任何状态。
+--- 每次锁屏换一张：按 lock_cycles 轮换，不落盘。唤醒后 +1，下次合成取下一张。
 ---@return string|nil
 local function folderPick()
     local files = folderFiles(M.folder())
     if #files == 0 then return nil end
-    local t = os.date("*t")
-    ---@cast t osdate
-    local day = math.floor(os.time{ year = t.year, month = t.month, day = t.day, hour = 12 } / 86400)
-    return files[day % #files + 1]
+    local cycle = require("features.lockscreen.compose").lock_cycles
+    return files[(cycle % #files) + 1]
 end
 
 -- 背景描述：path 给图（contain 整图缩进，缺省铺满裁切），blocks 给自绘铺底，
@@ -134,7 +132,15 @@ local BACKGROUNDS = {
     },
     custom = { id = "custom", label = _("自定义"), path = M.customImage },
     cover = { id = "cover", label = _("当前阅读书籍封面"), path = coverPath },
-    folder = { id = "folder", label = _("文件夹壁纸"), path = folderPick },
+    folder = {
+        id = "folder",
+        label = _("文件夹壁纸"),
+        path = folderPick,
+        -- 与 folderPick 同源：锁一次键变一次，唤醒后 refreshIfStale 才会重合成。
+        cache_key = function()
+            return tostring(require("features.lockscreen.compose").lock_cycles)
+        end,
+    },
     poster = {
         id = "poster",
         label = _("海报墙"),

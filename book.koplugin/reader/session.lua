@@ -415,6 +415,9 @@ function Session.onResume(plugin)
     -- KOReader 在唤醒时可能重新应用 ReaderFooter/status_line 设置。
     -- 月读的用户偏好是持久状态，恢复阅读时必须再次收敛原生栏状态。
     require("utils.extension").emit("reader.preferences", plugin.ui)
+    -- screensaver 关 widget 后若不刷，eInk 上会留白；无 screensaver widget 的路径
+    -- （disable / no_cover）也不会走 Kindle 的 setDirty("all","full")。
+    require("ui/uimanager"):setDirty(plugin.ui.dialog or "all", "full")
     local session = Session._snapshot
     if not session then return end
     require("reader.session.stats").start(session)
