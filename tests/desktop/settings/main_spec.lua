@@ -235,7 +235,7 @@ require("features").registerConventions()
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
--- 根页：搜索 + 7 个分组，条目不直接铺开。
+-- 根页：搜索 + 非空分组（空的「游戏」组不显示），条目不直接铺开。
 Assert.eq(table.concat(section_titles, ","), "搜索,分类")
 Assert.len(built_rows, 8)
 Assert.eq(built_rows[1].title, "搜索设置")

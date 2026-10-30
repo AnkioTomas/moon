@@ -467,6 +467,7 @@ function Settings:updateView()
         { id = "library", title = _("书库"), icon = "local_library" },
         { id = "appearance", title = _("外观"), icon = "palette" },
         { id = "desktop", title = _("桌面"), icon = "home" },
+        { id = "games", title = _("游戏"), icon = "sports_esports" },
         { id = "reader", title = _("阅读"), icon = "menu_book" },
         { id = "system", title = _("系统"), icon = "settings" },
         { id = "security", title = _("安全"), icon = "lock" },
