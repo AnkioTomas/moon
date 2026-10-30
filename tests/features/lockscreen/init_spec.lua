@@ -27,6 +27,34 @@ package.preload["ui.themes"] = function()
     return { current = function() return { color = { accent = 0 } } end }
 end
 
+-- 合成写盘改走 workers.job；单测里经 nextTick 同步跑，交给 Stubs.flush。
+-- 清掉先前 spec 可能留下的 package.loaded，否则 preload 不生效。
+package.loaded["workers.job"] = nil
+package.preload["workers.job"] = function()
+    return {
+        run = function(worker, opts)
+            local cancelled = false
+            local handle = {
+                cancel = function(self)
+                    cancelled = true
+                    if opts.on_cancelled then opts.on_cancelled(self) end
+                end,
+            }
+            require("ui/uimanager"):nextTick(function()
+                if cancelled then return end
+                local ok, result = pcall(worker)
+                if cancelled then return end
+                if not ok then
+                    if opts.on_failed then opts.on_failed(result) end
+                    return
+                end
+                if opts.on_done then opts.on_done(result) end
+            end)
+            return handle
+        end,
+    }
+end
+
 local PNG8 = "\137PNG\r\n\26\n" .. string.rep("\0", 24)
 local last_download = {}
 local render_writes = 0

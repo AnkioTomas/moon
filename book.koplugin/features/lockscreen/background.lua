@@ -135,9 +135,9 @@ local BACKGROUNDS = {
         id = "cover",
         label = _("当前阅读书籍封面"),
         path = coverPath,
-        -- 封面还没落到本地时绑锁屏次数；有文件后 path 进 dayKey，不再靠次数。
+        -- 封面还没落到本地时按 retry 桶重试；有文件后 path 进 dayKey，不再靠次数。
         cache_key = function()
-            return require("features.lockscreen.cycle").pending(not coverPath())
+            return require("features.lockscreen.cycle").retry(not coverPath())
         end,
     },
     folder = {

@@ -77,7 +77,33 @@ package.preload["features.lockscreen.render"] = function()
             render_calls = render_calls + 1
             render_background = background
             Assert.eq(blocks[1].text, "center-center")
-            return true
+            return true, nil, false
+        end,
+    }
+end
+
+-- 单测里 heavy job 同步跑；真实路径 fork。
+package.preload["workers.job"] = function()
+    return {
+        run = function(worker, opts)
+            local cancelled = false
+            local handle = {
+                cancel = function()
+                    cancelled = true
+                    if opts.on_cancelled then opts.on_cancelled() end
+                end,
+            }
+            ticks[#ticks + 1] = function()
+                if cancelled then return end
+                local ok, result = pcall(worker)
+                if cancelled then return end
+                if not ok then
+                    if opts.on_failed then opts.on_failed(result) end
+                    return
+                end
+                if opts.on_done then opts.on_done(result) end
+            end
+            return handle
         end,
     }
 end
@@ -122,7 +148,7 @@ local function reset()
     ticks = {}
 end
 
--- 异步背景：返回可取消任务，背景到了下一拍才渲染，只回调一次。
+-- 异步背景：返回可取消任务；建块在 nextTick，写盘在 job（单测同步排进 ticks）。
 reset()
 local results = {}
 local job = Compose.build(plan(), function(ok, err)
@@ -131,7 +157,7 @@ end)
 Assert.not_nil(job)
 Assert.eq(render_calls, 0)
 asset_cb("/tmp/background.png")
-Assert.eq(render_calls, 0, "写盘在 nextTick")
+Assert.eq(render_calls, 0, "写盘不在 ensure 回调里")
 flush()
 Assert.eq(render_calls, 1)
 Assert.eq(#results, 1)
@@ -140,7 +166,7 @@ Assert.eq(render_background.path, "/tmp/background.png")
 Assert.is_nil(render_background.contain)
 Assert.is_nil(render_background.blocks)
 
--- 本地背景 ensure 同步回调：仍返回可取消句柄，合成在下一拍。
+-- 本地背景 ensure 同步回调：仍返回可取消句柄，合成经 nextTick + job。
 reset()
 ensure_mode = "success"
 local sync_result

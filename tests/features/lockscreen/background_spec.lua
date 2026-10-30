@@ -15,10 +15,19 @@ os.date = function(fmt)
     if fmt == "*t" then return { year = today.year, month = today.month, day = today.day } end
     return string.format("%04d-%02d-%02d", today.year, today.month, today.day)
 end
-local cycle_stub = { lock_cycles = 0, pending = function(pending)
-    if not pending then return "" end
-    return ":" .. tostring(cycle_stub.lock_cycles)
-end }
+local cycle_stub = {
+    lock_cycles = 0,
+    RETRY_EVERY = 5,
+    pending = function(pending)
+        if not pending then return "" end
+        return ":" .. tostring(cycle_stub.lock_cycles)
+    end,
+    retry = function(pending, every)
+        if not pending then return "" end
+        every = every or cycle_stub.RETRY_EVERY
+        return ":" .. tostring(math.floor(cycle_stub.lock_cycles / every))
+    end,
+}
 package.preload["features.lockscreen.cycle"] = function() return cycle_stub end
 
 local bing_path = "/tmp/moon-online-cache/bing.jpg"
