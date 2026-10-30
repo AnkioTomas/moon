@@ -2,7 +2,7 @@
 首页编辑叠层：组件顶栏工具条，其余区域网状遮罩压暗并吞手势。
 
   +------------------------------+
-  | [删] [移] [高] [设]          |   工具条（有 on_settings 才画设置）
+  | [删] [移] [高] [边] [设]     |   工具条（有 on_settings 才画设置）
   |░░░░░░░░ 组件内容 ░░░░░░░░░░░░|   遮罩：点按 / 长按 / 滑动都不落到组件
   +------------------------------+
 
@@ -26,6 +26,9 @@ local T = require("ffi/util").template
 
 -- 自定义高度的步进（物理像素）：逐像素点按太慢。
 local HEIGHT_STEP = 10
+-- 边距步进 / 上限（物理像素）。
+local MARGIN_STEP = 5
+local MARGIN_MAX = 120
 
 ---@class BookHomeEditOverlay
 local Edit = {}
@@ -50,6 +53,7 @@ end
 ---   on_delete: fun(id: string),
 ---   on_move: fun(id: string),
 ---   on_height: fun(id: string, range: table, placement: table),
+---   on_margin: fun(id: string, placement: table),
 ---   on_settings: fun(id: string)|nil,
 --- }
 ---@return table
@@ -65,6 +69,7 @@ function Edit.wrap(widget, meta, handlers)
     add("delete", function() handlers.on_delete(meta.id) end)
     add("swap_vert", function() handlers.on_move(meta.id) end)
     add("height", function() handlers.on_height(meta.id, meta.range, meta.placement) end)
+    add("margin", function() handlers.on_margin(meta.id, meta.placement) end)
     if handlers.on_settings then
         add("settings", function() handlers.on_settings(meta.id) end)
     end
@@ -148,6 +153,36 @@ function Edit.showHeightDialog(opts)
                 }:show()
             end },
         },
+    }:show()
+end
+
+--- 边距：上 / 右 / 下 / 左（物理像素），全 0 即清掉。
+---@param opts {
+---   label: string|nil,
+---   current: BookHomeWidgetMargin|nil,
+---   on_apply: fun(margin: BookHomeWidgetMargin|nil),
+--- }
+function Edit.showMarginDialog(opts)
+    local cur = opts.current or {}
+    local function side(key, label)
+        return {
+            value = math.max(0, math.floor(tonumber(cur[key]) or 0)),
+            min = 0, max = MARGIN_MAX, step = MARGIN_STEP, label = label,
+        }
+    end
+    Spin:new{
+        title = opts.label and T(_("%1 · 边距"), opts.label) or _("设置边距"),
+        fields = {
+            side("top", _("上")),
+            side("right", _("右")),
+            side("bottom", _("下")),
+            side("left", _("左")),
+        },
+        callback = function(top, right, bottom, left)
+            opts.on_apply(require("desktop.pages.home.placements").normalizeMargin({
+                top = top, right = right, bottom = bottom, left = left,
+            }))
+        end,
     }:show()
 end
 

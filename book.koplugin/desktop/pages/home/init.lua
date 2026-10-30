@@ -231,6 +231,26 @@ local function showHeight(self, id, range, placement)
     })
 end
 
+--- 打开组件上下左右边距设置，写回放置表后重排。
+---@param self BookHome
+---@param id string
+---@param placement table
+local function showMargin(self, id, placement)
+    local comp = Components.find(id)
+    Edit.showMarginDialog({
+        label = comp and comp.label or id,
+        current = placement.margin,
+        on_apply = function(margin)
+            local list = Components.widgets()
+            local item = Widgets.find(list, id)
+            if not item then return end
+            item.margin = margin
+            Components.saveWidgets(list)
+            redraw(self)
+        end,
+    })
+end
+
 --- 尚未摆上首页的已注册组件。
 ---@return table[] candidates { id, label } 列表，按注册顺序
 local function unplaced()
@@ -317,6 +337,7 @@ local function assemble(self)
                 on_delete = function(id) deleteWidget(self, id) end,
                 on_move = function(id) showMove(self, id) end,
                 on_height = function(id, range, placement) showHeight(self, id, range, placement) end,
+                on_margin = function(id, placement) showMargin(self, id, placement) end,
                 on_settings = type(open) == "function" and function() open(child, self.desktop) end or nil,
             })
         end

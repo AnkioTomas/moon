@@ -4,6 +4,8 @@
 @module koplugin.book.desktop.pages.home.layout
 --]]
 
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Registry = require("desktop.pages.home.registry")
@@ -47,23 +49,50 @@ local function specHeight(raw)
     return math.max(1, math.floor(raw.height))
 end
 
---- 切页用的高度：内容高与自定义像素高取小。自定义更矮时按它算（allocate 就是按它排的）；
+--- 放置表上下边距之和（占垂直空间，不进组件内容高）。
+---@param placement BookHomeWidgetPlacement|nil
+---@return number
+local function marginVertical(placement)
+    local top, _right, bottom = Widgets.marginBox(placement)
+    return top + bottom
+end
+
+--- 切页用的高度：内容高与自定义像素高取小，再加上下边距。自定义更矮时按它算；
 --- 自定义更高时仍按内容高，放不下由 allocate 等比压缩，不把页拆开。
 ---@param raw BookHomeHeightSpec
 ---@return number
 function Layout.packHeight(raw)
     local mode = raw.placement and raw.placement.height
     local h = specHeight(raw)
-    return type(mode) == "number" and math.min(mode, h) or h
+    local content = type(mode) == "number" and math.min(mode, h) or h
+    return content + marginVertical(raw.placement)
 end
 
---- 钉页分配：default 用内容高，自定义用像素，剩余均分给 fill；放不下时整体等比压缩。
---- 页边距由 build 整页扣一次，这里只算内容高和 gap。
+--- 在内容外包上下左右外边距；四边皆 0 时原样返回。
+---@param widget table
+---@param top number
+---@param right number
+---@param bottom number
+---@param left number
+---@return table
+function Layout.pad(widget, top, right, bottom, left)
+    if top <= 0 and right <= 0 and bottom <= 0 and left <= 0 then return widget end
+    local row = HorizontalGroup:new{ align = "top", widget }
+    if left > 0 then table.insert(row, 1, HorizontalSpan:new{ width = left }) end
+    if right > 0 then row[#row + 1] = HorizontalSpan:new{ width = right } end
+    local col = VerticalGroup:new{ align = "left", row }
+    if top > 0 then table.insert(col, 1, VerticalSpan:new{ width = top }) end
+    if bottom > 0 then col[#col + 1] = VerticalSpan:new{ width = bottom } end
+    return col
+end
+
+--- 钉页分配：default 用内容高，自定义用像素，再加上下边距；剩余均分给 fill；放不下时整体等比压缩。
+--- 页边距由 build 整页扣一次，这里只算内容高、组件边距和 gap。
 ---@param ranges BookHomeHeightSpec[] 各组件的内容高度
 ---@param available number 当前布局可用的总高度，单位像素
 ---@param gap number 相邻项目间距，单位像素
 ---@return table[] selected
----@return number[] heights
+---@return number[] heights 含边距的槽高
 ---@return number unused
 function Layout.allocate(ranges, available, gap)
     local selected, heights, fill_idx = {}, {}, {}
@@ -72,8 +101,9 @@ function Layout.allocate(ranges, available, gap)
     for i, raw in ipairs(ranges) do
         local mode = raw.placement and raw.placement.height or "default"
         local h = specHeight(raw)
-        selected[i] = { comp = raw.comp, id = raw.id, placement = raw.placement, height = h, fill = mode == "fill" }
-        heights[i] = type(mode) == "number" and mode or h
+        local mv = marginVertical(raw.placement)
+        selected[i] = { comp = raw.comp, id = raw.id, placement = raw.placement, height = h, fill = mode == "fill", margin_v = mv }
+        heights[i] = (type(mode) == "number" and mode or h) + mv
         if mode == "fill" then fill_idx[#fill_idx + 1] = i end
         used = used + heights[i]
     end
@@ -173,11 +203,27 @@ function Layout.build(ctx, components, page, opts)
     for i, item in ipairs(selected) do
         visible[item.id] = true
         if i > 1 then kids[#kids + 1] = VerticalSpan:new{ width = gap } end
-        local part = item.comp:build(ctx, { width = inner_w, height = heights[i] })
+        local top, right, bottom, left = Widgets.marginBox(item.placement)
+        local slot_h = heights[i]
+        -- 槽高 / 行宽不够吃边距时：先留 1px 内容，边距按比例压。
+        local mv = top + bottom
+        if mv > 0 and slot_h <= mv then
+            local scale = (slot_h - 1) / mv
+            top, bottom = math.max(0, math.floor(top * scale)), math.max(0, math.floor(bottom * scale))
+        end
+        local mh = left + right
+        if mh > 0 and inner_w <= mh then
+            local scale = (inner_w - 1) / mh
+            left, right = math.max(0, math.floor(left * scale)), math.max(0, math.floor(right * scale))
+        end
+        local content_h = math.max(1, slot_h - top - bottom)
+        local content_w = math.max(1, inner_w - left - right)
+        local part = item.comp:build(ctx, { width = content_w, height = content_h })
+        part = Layout.pad(part, top, right, bottom, left)
         if opts.wrap then
             part = opts.wrap(part, {
                 id = item.id,
-                height = heights[i],
+                height = slot_h,
                 width = inner_w,
                 placement = item.placement,
                 range = { height = item.height, fill = item.fill, limit = inner_h },
