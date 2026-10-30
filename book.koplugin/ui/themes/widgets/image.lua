@@ -17,7 +17,8 @@
 
   Image.fetchAsync / invalidate / await 见内核。
 
-image 表面半径保持 0。封面走 raised，圆角由 Box 在绘制后裁掉四角圆外的像素。
+image 表面半径保持 0（通用图）。封面走 raised 的圆角；无阴影时 Book.cover 仍借用
+raised.radius，不整段换成 image。圆角由 Box 在绘制后裁掉四角圆外的像素。
 
 @module koplugin.book.ui.themes.widgets.image
 --]]

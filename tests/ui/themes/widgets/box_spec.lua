@@ -86,6 +86,35 @@ Box:new{ style = { bg = 1, radius = 8, border = 0, shadow = 0 }, width = 20, hei
 Assert.eq(pixels["0:0"], 9, "角外还回底色")
 Assert.eq(pixels["10:10"], 0, "圆内留下子件")
 
+-- 有阴影时底角也还原成绘制前的底，不能抄成阴影色（否则底边像直角）。
+pixels = {}
+local shadow_bb = {
+    getWidth = function() return 24 end,
+    getHeight = function() return 24 end,
+    getPixel = function(_, px, py)
+        local value = pixels[pixkey(px, py)] or 9
+        return { getColorRGB32 = function() return value end }
+    end,
+    setPixel = function(_, px, py, color) pixels[pixkey(px, py)] = color end,
+    paintRoundedRect = function(_, x, y, _w, _h, color, _r)
+        -- 阴影偏右下 2px：只把阴影区涂成 7，模拟真实阴影占住底角。
+        for row = y, y + _h - 1 do
+            for col = x, x + _w - 1 do
+                if pixels[pixkey(col, row)] == nil then pixels[pixkey(col, row)] = color end
+            end
+        end
+    end,
+    paintBorder = function() end,
+}
+Box:new{
+    style = { bg = 1, radius = 8, border = 0, shadow = 2, shadow_color = 7 },
+    width = 20, height = 20, fill,
+}:paintTo(shadow_bb, 0, 0)
+Assert.eq(pixels["0:0"], 9, "顶角仍是页底")
+Assert.eq(pixels["0:19"], 9, "底角还原页底，不是阴影色")
+Assert.eq(pixels["19:19"], 9, "右下角同理")
+Assert.eq(pixels["10:10"], 0, "圆内留下子件")
+
 -- 无 bg 的样式什么都不画（透明表面）。
 bb = Kit.canvas()
 Box:new{ style = {}, width = 10, height = 10 }:paintTo(bb, 0, 0)

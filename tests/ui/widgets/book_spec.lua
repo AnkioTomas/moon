@@ -102,8 +102,9 @@ package.preload["ui.themes"] = function()
         current = function()
             return {
                 color = { ink = 1, page = 0, muted = 2, faint = 3, accent = 0x7038A0, headings = 0x7038A0 },
-                image = {},
-                raised = {},
+                -- 模拟 soft：image 半径 0、raised 有圆角；无阴影封面须继承 raised.radius。
+                image = { bg = 0xEE, border = 0, border_color = 0xEE, radius = 0, shadow = 0, shadow_color = 0xDD },
+                raised = { bg = 0xEE, border = 0, border_color = 0xEE, radius = 12, shadow = 2, shadow_color = 0xDD },
                 space = { xs = 4, sm = 8 },
                 control = { icon = 22 },
                 font = { caption = 11 },
@@ -271,6 +272,11 @@ Assert.eq(opening.overlap_offset[2], math.floor((120 - 22) / 2))
 
 local bare = select(1, Book.cover(nil, nil, {}, 80, 120, {}))
 Assert.is_nil(bare.overlap_offset)
+Assert.eq(bare.style.radius, 12, "默认封面用 raised 圆角")
+Assert.eq(bare.style.shadow, 2)
+local flat = select(1, Book.cover(nil, nil, {}, 80, 120, { shadow = false }))
+Assert.eq(flat.style.radius, 12, "无阴影也保留 raised 圆角，不回落 image 的 0")
+Assert.eq(flat.style.shadow, 0)
 
 -- 混合模式：封面按书的 source_id 解析属主源，不用活跃源冒充。
 resolved = {}
