@@ -230,6 +230,7 @@ return {
     ["后天"] = "In 2 days",
     ["想法列表暂不可用，稍后重试"] = "Review list unavailable, will retry later",
     ["显示第一本"] = "Show first book",
+    ["✓ 隐藏已读完"] = "✓ Hide finished",
     ["隐藏已读完"] = "Hide finished",
     ["✓ 显示第一本"] = "✓ Show first book",
     ["俄语"] = "Russian",
