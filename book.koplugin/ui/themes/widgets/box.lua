@@ -74,7 +74,11 @@ local function snapshotCorners(bb, x, y, w, h, r)
     local function take(px, py)
         if px < 0 or py < 0 or px >= bw or py >= bh then return end
         local color = bb:getPixel(px, py)
-        saved[#saved + 1] = { px, py, color:getColorRGB32() }
+        -- 真机 getPixel 返回 Color*；灰度桩 / 部分路径会直接给 number。
+        if type(color) == "table" and color.getColorRGB32 then
+            color = color:getColorRGB32()
+        end
+        saved[#saved + 1] = { px, py, color }
     end
     for j = 0, r - 1 do
         for i = 0, r - 1 do

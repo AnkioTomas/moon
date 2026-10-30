@@ -258,7 +258,10 @@ function Kit.canvas()
         pixels = 0,
         setPixel = function(self) self.pixels = self.pixels + 1 end,
         setPixelClamped = function(self) self.pixels = self.pixels + 1 end,
-        getPixel = function() return 0 end,
+        -- 与真机一致：返回带 getColorRGB32 的色值（灰度直接是自身）。
+        getPixel = function()
+            return { getColorRGB32 = function() return 0 end }
+        end,
         getType = function() return nil end,
         paintRoundedRect = function(_, x, y, w, h, c, r)
             ops[#ops + 1] = { op = "rect", x = x, y = y, w = w, h = h, c = c, r = r }

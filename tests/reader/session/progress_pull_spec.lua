@@ -27,7 +27,8 @@ local current_identity = {
 package.preload["ui/uimanager"] = function()
     return {
         show = function(_, widget) shown[#shown + 1] = widget end,
-        nextTick = function(fn) fn() end,
+        -- 冒号调用：首参是 self。
+        nextTick = function(_, fn) fn() end,
     }
 end
 package.loaded["ui/uimanager"] = nil
