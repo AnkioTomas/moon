@@ -104,8 +104,6 @@ local function coreEntries(desktop)
             subtitle = _("本地书籍、书源账号、Z-Library / OPDS 书城"),
             page = {
                 title = _("账号"),
-                right_icon = "checklist",
-                right_callback = function() Source.pickEnabled(desktop) end,
                 sections = function() return Source:configSections{ desktop = desktop, plugin = plugin } end,
             },
         },

@@ -18,7 +18,7 @@ local function sections(desktop)
     local Manage = require("features.manage")
     local Row = require("ui.themes.widgets.row")
     local rows = {}
-    for _idx, item in ipairs(Manage.ITEMS) do
+    for _idx, item in ipairs(Manage.items()) do
         local marked = Manage.isMarked(item.id)
         rows[#rows + 1] = function(iw)
             return Row.widget({
@@ -32,6 +32,7 @@ local function sections(desktop)
                         return
                     end
                     local text = T(_("停用「%1」？重启 KOReader 后生效，可随时再启用。"), item.label)
+                        .. "\n" .. T(_("包含：%1"), table.concat(item.abilities, _("、")))
                     require("ui.themes.widgets.confirm"):new{
                         text = text,
                         ok_text = _("停用"),

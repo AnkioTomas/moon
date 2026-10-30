@@ -101,7 +101,7 @@ end
 --- 返回 Kindle 源元信息。
 ---@return BookSourceMeta
 function Kindle.meta()
-    return { id = "kindle", name = _("Kindle 书库"), type = "book" }
+    return SourceBase.loadMeta("kindle")
 end
 
 ---@class KindleSource : SourceBase

@@ -8,6 +8,8 @@ setting.lua / topbar.lua 两种约定文件由加载器代为登记到 setting.e
 
 `list` 是唯一登记处：条目为目录名，对应模块 `features.<name>`；顺序即调用顺序
 （monkey-patch 同一 KOReader 方法的 feature 靠它定先后），不扫目录。
+每个 feature 目录必须有 `_meta.lua`（name / description / abilities，可选 removable=false）：功能开关页读它展示，
+`tests/meta_spec.lua` 强制存在。
 
 钩子都是可选的模块函数，名字就是 KOReader 事件名（onCreate 除外），参数只有插件实例；
 要分侧就看 `plugin.ui.document`（有文档 = 阅读器侧）。别用 `plugin.desktop`：那是桌面窗口，FM 侧也常为 nil。

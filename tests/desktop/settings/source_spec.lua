@@ -111,11 +111,12 @@ local config = src:configSections{
     desktop = desktop,
     plugin = nil,
 }
--- 账号页：书源一行一个入口（本地书籍在最前），书城后端另成一节；都不展开内容。
-Assert.len(config, 2)
+-- 账号页：书源一行一个入口（本地书籍在最前），书城后端、启用的书源各成一节；都不展开内容。
+Assert.len(config, 3)
 Assert.eq(config[1].title, "书籍来源")
 Assert.eq(config[1].rows[1]().title, "本地书籍")
 Assert.eq(config[2].title, "书城")
+Assert.eq(config[3].title, "启用的书源")
 local store_rows = config[2].rows
 Assert.eq(store_rows[#store_rows - 1]().title, "Z-Library")
 Assert.eq(store_rows[#store_rows]().title, "OPDS")

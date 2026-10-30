@@ -83,25 +83,36 @@ function Source:pickActive()
     pickSource(SourceRegistry.activeId())
 end
 
---- 弹出全部源的多选列表，勾选即时生效，关闭时重建桌面。
---- 当前源那一项不可取消勾选，否则会没有可用源。
+--- 「启用的书源」分节：每个源一行开关，说明来自源的 meta（内置源在 `_meta.lua`）。
+--- 当前源不可停用（setEnabled 拒绝，提示原因）。
 ---@param desktop table 桌面实例
-local function pickEnabledSources(desktop)
-    local active_id = SourceRegistry.activeId()
-    local items = {}
+---@return table[]
+local function enabledRows(desktop)
+    local rows = {}
     for _idx, meta in ipairs(SourceRegistry.list()) do
-        items[#items + 1] = {
-            text = meta.name or meta.id,
-            value = meta.id,
-            checked = SourceRegistry.isEnabled(meta.id),
-            enabled = meta.id ~= active_id,
-        }
+        local on = SourceRegistry.isEnabled(meta.id)
+        rows[#rows + 1] = function(iw)
+            return Row.widget({
+                width = iw, icon = "power_settings_new", title = meta.name or meta.id,
+                subtitle = meta.description, toggle = on,
+                callback = function()
+                    local ok, err = SourceRegistry.setEnabled(meta.id, not on)
+                    if not ok then
+                        Toast:new{ text = err, timeout = 2 }:show()
+                        return
+                    end
+                    if not on and meta.abilities then
+                        Toast:new{
+                            text = T(_("已启用 %1：%2"), meta.name or meta.id, table.concat(meta.abilities, _("、"))),
+                            timeout = 3,
+                        }:show()
+                    end
+                    desktop:updateView()
+                end,
+            })
+        end
     end
-    List:new{
-        title = _("启用源"), multi = true, items = items, centered = true,
-        on_toggle = function(id, on) SourceRegistry.setEnabled(id, on) end,
-        close_callback = function() desktop:updateView() end,
-    }:show()
+    return rows
 end
 
 --- 账号页每个书源自己的图标（Material 名）；第三方源用设置模块的 rowIcon，都没有则 dns。
@@ -243,11 +254,8 @@ function Source:configSections(ctx)
     return {
         { title = _("书籍来源"), rows = sources },
         { title = _("书城"), rows = stores },
+        { title = _("启用的书源"), rows = enabledRows(desktop) },
     }
 end
-
---- 右上角多选窗口：启用哪些书源。
----@type fun(desktop: table)
-Source.pickEnabled = pickEnabledSources
 
 return Source
