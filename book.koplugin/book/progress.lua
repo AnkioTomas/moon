@@ -176,7 +176,7 @@ local function syncOnce(source, opts, cb)
                 current_job = nil
                 if cancelled then return end
                 if ok ~= true and type(meta) == "table" and meta.permanent then
-                    -- 源判定这行永远推不上（如没有章节信息）：标为已同步丢弃，不再每次同步重试。
+                    -- 源判定这行永远推不上（缺章节 / 坐标对不上 / 服务端收下不记账）：标已同步丢弃。
                     logger.warn("book.progress push dropped", source.id, identity.stable_id, err)
                     ProgressDB.markSynced(source.id, identity.stable_id, row.updated_at, pos)
                     result.dropped = (result.dropped or 0) + 1
