@@ -13,9 +13,12 @@ local Widget = require("ui/widget/widget")
 Kit.sections.home = {}
 local covers, opened = {}, {}
 package.preload["ui.widgets.book"] = function()
-    return { captionExtra = function(show_title, show_author)
-        return (show_title ~= false and 26 or 0) + (show_author and 14 or 0)
-    end }
+    return {
+        captionExtra = function(show_title, show_author)
+            return (show_title ~= false and 26 or 0) + (show_author and 14 or 0)
+        end,
+        isRead = function(book) return tonumber(book and book.read_state) == 1 end,
+    }
 end
 package.preload["ui.widgets.cover"] = function()
     return {
@@ -189,6 +192,11 @@ do -- 设置 Sheet：行数按钮行、列数 Spin、标题 / 作者开关，改
     Assert.is_true(List.showFirst())
     Assert.len(events, 5)
     List.saveShowFirst(false)
+    Assert.eq(sheet.items[6].text, "隐藏已读完", "缺省不隐藏已读完")
+    sheet.items[6].callback()
+    Assert.is_true(List.hideFinished())
+    Assert.len(events, 6)
+    List.saveHideFinished(false)
 end
 
 do -- 第一本：缺省不进列表；打开后排最前、计入数量
@@ -207,6 +215,33 @@ do -- 第一本：缺省不进列表；打开后排最前、计入数量
     Assert.eq(Kit.texts(slot)[1], "最近阅读 · 6")
     List.saveShowFirst(false)
     first = nil
+end
+
+do -- 隐藏已读完：丢掉 read_state=1 的第一本与其余在读
+    List.saveRows(2)
+    List.saveCols(4)
+    List.saveShowFirst(true)
+    first = { title = "done", read_state = 1 }
+    shelf = {
+        { title = "open", read_state = 0 },
+        { title = "done2", read_state = 1 },
+        { title = "open2", read_state = 0 },
+    }
+    covers = {}
+    local slot = List:new():build(ctx, { width = 600, height = 500 })
+    Assert.len(covers, 4, "缺省不过滤：第一本 + 其余三本")
+    List.saveHideFinished(true)
+    covers = {}
+    slot = List:new():build(ctx, { width = 600, height = 500 })
+    Assert.len(covers, 2)
+    Assert.eq(covers[1].book.title, "open")
+    Assert.eq(covers[2].book.title, "open2")
+    Assert.eq(Kit.texts(slot)[1], "最近阅读 · 2")
+    List.saveHideFinished(false)
+    List.saveShowFirst(false)
+    first = nil
+    shelf = {}
+    for i = 1, 5 do shelf[i] = { title = "book" .. i } end
 end
 
 do -- 分配高度不够两行：封面压到装得下

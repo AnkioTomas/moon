@@ -23,6 +23,7 @@ package.preload["ui.widgets.book"] = function()
         author = function(book) return book.authors or "" end,
         pct = function(book) return book.percent or 0 end,
         title = function(book) return book.title end,
+        isRead = function(book) return tonumber(book and book.read_state) == 1 end,
     }
 end
 local recent, reading = nil, {}
@@ -117,9 +118,14 @@ do -- 关掉第一本：只在其余在读里轮换；其余也没有时给图�
     Cards:showSettings(desktop)
     local sheet = Themed.last("sheet")
     Assert.eq(sheet.items[1].text, "✓ 显示第一本", "缺省显示第一本")
+    Assert.eq(sheet.items[2].text, "隐藏已读完", "缺省不隐藏已读完")
     sheet.items[1].callback()
     Assert.is_false(Cards.showFirst())
     Assert.eq(events[1], "home_refresh")
+    sheet.items[2].callback()
+    Assert.is_true(Cards.hideFinished())
+    Assert.eq(events[2], "home_refresh")
+    Cards.saveHideFinished(false)
 
     covers = {}
     local cards = Cards:new()
@@ -133,6 +139,25 @@ do -- 关掉第一本：只在其余在读里轮换；其余也没有时给图�
     local slot = Cards:new():build({ desktop = lib }, { width = 600, height = 220 })
     Assert.eq(Kit.texts(slot)[1], "去图书馆挑一本 ›")
     Kit.sections.home.home_recent_cards_show_first = nil
+end
+
+do -- 隐藏已读完：第一本与其余在读里 read_state=1 的都丢掉
+    recent = { title = "done", read_state = 1 }
+    reading = {
+        { title = "open", read_state = 0 },
+        { title = "done2", read_state = 1 },
+    }
+    Kit.sections.home.home_recent_cards_show_first = true
+    Cards.saveHideFinished(true)
+    covers = {}
+    local cards = Cards:new()
+    cards:build(ctx, { width = 600, height = 220 })
+    Assert.eq(cards._book_n, 1)
+    Assert.eq(covers[#covers].book.title, "open")
+    cards:destroy()
+    Cards.saveHideFinished(false)
+    recent = { title = "心挣", authors = "初禾", percent = 25 }
+    reading = {}
 end
 
 do -- 空书架：图书馆入口
