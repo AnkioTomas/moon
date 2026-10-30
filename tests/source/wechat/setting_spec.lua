@@ -55,9 +55,9 @@ local Setting = require("source.wechat.setting")
 local updates = 0
 local plugin = { desktop = { updateView = function() updates = updates + 1 end } }
 
--- 未登录：账号、合并本地阅读时长、显示段评三行。
+-- 未登录：账号、合并本地阅读时长、显示段评、自定义分组代替分类四行。
 local rows = Setting.rows(plugin)
-Assert.len(rows, 3)
+Assert.len(rows, 4)
 Assert.eq(rows[1]().status, "未登录 · 点此扫码")
 
 -- 合并本地阅读时长默认关（云端优先）；点按落盘开启并刷新设置页。
@@ -79,13 +79,23 @@ reviews.callback()
 Assert.is_true(cfg.show_paragraph_reviews)
 Assert.is_true(rows[3]().status_on)
 
+-- 自定义分组代替分类默认关；点按开启并清增量游标。
+local groups = rows[4]()
+Assert.eq(groups.title, "使用自定义分组代替分类")
+Assert.is_false(groups.status_on)
+cfg.shelf_cursor = { vid = "1", synckey = 9 }
+groups.callback()
+Assert.is_true(cfg.category_as_group)
+Assert.is_nil(cfg.shelf_cursor)
+Assert.is_true(rows[4]().status_on)
+
 -- 已登录：追加续期与退出；退出先确认，确认后才清会话。
 logged_in = true
 rows = Setting.rows(plugin)
-Assert.len(rows, 5)
+Assert.len(rows, 6)
 Assert.eq(rows[1]().status, "tester")
-Assert.eq(rows[4]().title, "续期会话")
-local logout = rows[5]()
+Assert.eq(rows[5]().title, "续期会话")
+local logout = rows[6]()
 Assert.eq(logout.title, "退出登录")
 logout.callback()
 Assert.is_false(cleared, "未确认不退出")

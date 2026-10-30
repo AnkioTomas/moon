@@ -81,6 +81,25 @@ do
     Assert.eq(books[3].authors, "乙")
 end
 
+-- 分类开关：关 = 题材；开 = 自定义分组（互斥，不混合）。
+do
+    cfg.category_as_group = false
+    local off = Mapper.shelfList({
+        { bid = 1, cateName = "玄幻", _group_name = "追更", info = { bookId = 1, bookName = "甲", chanName = "玄幻" } },
+        { bid = 2, cateName = "都市", info = { bookId = 2, bookName = "乙", chanName = "都市" } },
+    })
+    Assert.eq(off[1].category, "玄幻", "关：进组仍用题材")
+    Assert.eq(off[2].category, "都市", "关：没进组用题材")
+    cfg.category_as_group = true
+    local on = Mapper.shelfList({
+        { bid = 1, cateName = "玄幻", _group_name = "追更", info = { bookId = 1, bookName = "甲", chanName = "玄幻" } },
+        { bid = 2, cateName = "都市", info = { bookId = 2, bookName = "乙", chanName = "都市" } },
+    })
+    Assert.eq(on[1].category, "追更", "开：进组用分组名")
+    Assert.is_nil(on[2].category, "开：没进组不写题材")
+    cfg.category_as_group = false
+end
+
 do
     local toc = Mapper.toc({ vs = {
         { vN = "卷一", cs = { { id = 11, cN = "第一章", cnt = 10, sS = 1, uT = "2022-10-07 10:22:55" } } },

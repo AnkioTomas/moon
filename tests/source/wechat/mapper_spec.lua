@@ -93,6 +93,10 @@ do
 end
 
 do
+    local Settings = require("utils.settings")
+    local cfg = Settings.getSource("wechat")
+    cfg.category_as_group = true
+    Settings.saveSource("wechat", cfg)
     local list = Mapper.shelfList({
         books = {
             { bookId = "1", title = "A", category = "官方" },
@@ -103,8 +107,19 @@ do
             { name = "其它", bookIds = { 1 } },
         },
     })
-    Assert.eq(list.data[1].category, "我的")
-    Assert.eq(list.data[2].category, "官方")
+    Assert.eq(list.data[1].category, "我的", "开：进组用分组名")
+    Assert.is_nil(list.data[2].category, "开：没进组不写题材，避免混合")
+    cfg.category_as_group = false
+    Settings.saveSource("wechat", cfg)
+    local genre = Mapper.shelfList({
+        books = {
+            { bookId = "1", title = "A", category = "官方" },
+            { bookId = "2", title = "B", category = "官方" },
+        },
+        archive = { { name = "我的", bookIds = { 1 } } },
+    })
+    Assert.eq(genre.data[1].category, "官方", "关：只用题材")
+    Assert.eq(genre.data[2].category, "官方", "关：忽略分组")
 end
 
 do
@@ -343,6 +358,10 @@ do
 end
 
 do
+    local Settings = require("utils.settings")
+    local cfg = Settings.getSource("wechat")
+    cfg.category_as_group = true
+    Settings.saveSource("wechat", cfg)
     local list = Mapper.shelfList({
         books = {
             { bookId = "1", title = "A", category = "官方" },
@@ -353,8 +372,19 @@ do
             { name = "其它", bookIds = { 1 } },
         },
     })
-    Assert.eq(list.data[1].category, "我的")
-    Assert.eq(list.data[2].category, "官方")
+    Assert.eq(list.data[1].category, "我的", "开：进组用分组名")
+    Assert.is_nil(list.data[2].category, "开：没进组不写题材，避免混合")
+    cfg.category_as_group = false
+    Settings.saveSource("wechat", cfg)
+    local genre = Mapper.shelfList({
+        books = {
+            { bookId = "1", title = "A", category = "官方" },
+            { bookId = "2", title = "B", category = "官方" },
+        },
+        archive = { { name = "我的", bookIds = { 1 } } },
+    })
+    Assert.eq(genre.data[1].category, "官方", "关：只用题材")
+    Assert.eq(genre.data[2].category, "官方", "关：忽略分组")
 end
 
 do
