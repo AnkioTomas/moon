@@ -111,15 +111,23 @@ end
 ---
 --- 按精度降级：XPointer > 页码 > 比例。比例会随字号、边距、字体变化漂移，
 --- 同一本书在两台设备上算出的比例根本对不齐，所以它只是最后的兜底手段。
+---
+--- 恢复位置会从开头跳到上次阅读处：paged / rolling 都会发 PageChangeAnimation，
+--- 翻页动画补丁会当成前进翻页播一次（彩屏 HTML 上尤其明显）。临时打标让
+--- features/animation 的 onPageChangeAnimation 跳过；下一拍清掉。
 ---@param ui table
 ---@param pos ProgressPosition|nil 位置；缺精确坐标时退回 pct
 ---@param pct number 文档内比例，最后手段
 local function applyPosition(ui, pos, pct)
     pct = Progress.clampFraction(pct)
+    ui._restoring_position = true
     if not gotoLocator(ui, pos and pos.locator) and not gotoPage(ui, pos) then
         ReaderProgress.gotoFraction(ui, pct)
     end
     saveDocSettings(ui, pct)
+    require("ui/uimanager"):nextTick(function()
+        ui._restoring_position = nil
+    end)
 end
 
 --- 阅读器是否还停在文档开头（sidecar 没能给出位置）。

@@ -45,4 +45,13 @@ view.inverse_reading_order = true
 view:onPageChangeAnimation(true)
 Assert.eq(calls[2][2], false, "反向阅读翻转方向")
 
+calls = {}
+view.inverse_reading_order = false
+view.ui = { _restoring_position = true }
+view:onPageChangeAnimation(true)
+Assert.len(calls, 0, "恢复阅读位置不播翻页动画")
+view.ui._restoring_position = nil
+view:onPageChangeAnimation(true)
+Assert.len(calls, 2, "标志清掉后恢复动画")
+
 return true
