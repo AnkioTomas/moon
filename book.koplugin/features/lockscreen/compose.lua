@@ -17,7 +17,7 @@ local Components = require("features.lockscreen.components.base")
 
 local M = {}
 local COMPOSE_PATH = Paths.screensaverDir() .. "/compose.png"
---- 本进程经历过的锁屏次数（唤醒时 +1）。「每次锁屏换一句」的背景把它当 cache_key：
+--- 本进程经历过的锁屏次数（唤醒时 +1）。文字海报 / 文件夹壁纸把它当 cache_key：
 --- 一次锁屏之后才重合成一次，而不是每次回桌面都整屏重画。
 M.lock_cycles = 0
 

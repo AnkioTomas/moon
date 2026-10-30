@@ -7,6 +7,7 @@
 
 刷新：翻页由 ReaderView 整页重画带上；时钟每分钟、设备状态事件经 refreshBars
 只刷栏区域；原生底栏的「只重画底栏」快路径被改成整页重画，免得盖住月读底栏。
+熄屏中（Device.screen_saver_mode）禁止栏 dirty / footer 重画，避免盖到 screensaver 上。
 
 @module koplugin.book.features.bars.init
 --]]
@@ -136,11 +137,14 @@ function Bars.setSystemTop(ui, enabled)
 end
 
 --- 设置系统底栏开/关（走原生 ReaderFooter 的模式切换）。
---- 目标状态与当前一致时直接返回，避免把 footer 切到别的模式。
+--- 目标状态与当前一致时不改 mode，但仍标脏：唤醒后可见性常已对，framebuffer 却可能是空白。
 ---@param ui table ReaderUI
 ---@param enabled boolean 是否显示系统底栏
 function Bars.setSystemBottom(ui, enabled)
     if Bars.bottomVisible(ui) == enabled then
+        if ui.dialog then
+            require("ui/uimanager"):setDirty(ui.dialog, "ui")
+        end
         return
     end
     local footer = ui.view.footer
@@ -301,10 +305,16 @@ local function hasLiveItems(which)
     return false
 end
 
+--- 熄屏中：栏区域 dirty / footer 快路径会盖到 screensaver 上（widgetRepaint 绕过窗口栈）。
+---@return boolean
+local function screensaverActive()
+    return Device.screen_saver_mode == true
+end
+
 --- 只刷新月读正在画、且含动态组件的栏区域；ReaderView 整页重画时会重新取数。
 ---@param ui table ReaderUI
 local function refreshBars(ui)
-    if not require("reader.session").current() then
+    if screensaverActive() or not require("reader.session").current() then
         return
     end
     local UIManager = require("ui/uimanager")
@@ -381,6 +391,10 @@ local function hijackFooter(ui)
     end
     local orig_update = footer.onUpdateFooter
     footer.onUpdateFooter = function(self, force_repaint, full_repaint)
+        -- 熄屏中禁止重画：原生 force_repaint 走 widgetRepaint 会直接盖到 screensaver 上。
+        if screensaverActive() then
+            return
+        end
         if force_repaint and ours(self) then
             full_repaint = true
         end

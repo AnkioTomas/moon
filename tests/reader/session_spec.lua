@@ -301,12 +301,24 @@ local function mkPlugin(path)
     return plugin, emitted
 end
 
--- 唤醒阅读器时必须重新应用顶栏/底栏偏好，防止 KOReader 恢复流程覆盖关闭状态。
+-- 唤醒阅读器时必须重新应用顶栏/底栏偏好，防止 KOReader 恢复流程覆盖关闭状态；
+-- 并整页标脏，避免 screensaver 关掉后 eInk 留白。
 do
     local plugin = mkPlugin("/other/plain.epub")
+    plugin.ui.dialog = "reader-dialog"
     current_resume_plugin = plugin
+    local UIManager = require("ui/uimanager")
+    local dirty = {}
+    local old_dirty = UIManager.setDirty
+    UIManager.setDirty = function(_, widget, mode)
+        dirty[#dirty + 1] = { widget = widget, mode = mode }
+    end
     Session.onResume(plugin)
+    UIManager.setDirty = old_dirty
     Assert.eq(bar_apply_count, 1)
+    Assert.len(dirty, 1)
+    Assert.eq(dirty[1].widget, "reader-dialog")
+    Assert.eq(dirty[1].mode, "full")
     current_resume_plugin = nil
 end
 

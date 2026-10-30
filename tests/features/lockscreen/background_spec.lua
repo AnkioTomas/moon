@@ -15,6 +15,8 @@ os.date = function(fmt)
     if fmt == "*t" then return { year = today.year, month = today.month, day = today.day } end
     return string.format("%04d-%02d-%02d", today.year, today.month, today.day)
 end
+local compose_stub = { lock_cycles = 0 }
+package.preload["features.lockscreen.compose"] = function() return compose_stub end
 
 local bing_path = "/tmp/moon-online-cache/bing.jpg"
 local myrl_path = "/tmp/moon-online-cache/myrl.png"
@@ -199,22 +201,25 @@ got = "sentinel"
 Background.ensure(background("folder"), function(path) got = path end)
 Assert.is_nil(got)
 
--- folder：同一天固定一张，第二天换下一张，不落盘任何状态
+-- folder：同一锁屏次数固定一张，次数 +1 换下一张，不落盘任何状态
 local wall = folder_dir .. "/a.png"
 files[folder_dir] = { mode = "directory", modification = 2 }
 files[folder_dir .. "/__dir__"] = { ".", "..", "a.png", "b.jpg", "notes.txt" }
 files[wall] = { mode = "file", size = 64 }
 files[folder_dir .. "/b.jpg"] = { mode = "file", size = 64 }
 files[folder_dir .. "/notes.txt"] = { mode = "file", size = 64 }
+compose_stub.lock_cycles = 0
 Background.ensure(background("folder"), function(path) got = path end)
 local first = got
 Assert.is_true(first == wall or first == folder_dir .. "/b.jpg", "只挑图片")
 Background.ensure(background("folder"), function(path) got = path end)
-Assert.eq(got, first)
-today.day = 3
+Assert.eq(got, first, "同一次数不换")
+Assert.eq(background("folder").cache_key(), "0")
+compose_stub.lock_cycles = 1
 Background.ensure(background("folder"), function(path) got = path end)
-Assert.is_true(got ~= first, "隔天轮换")
-today.day = 2
+Assert.is_true(got ~= first, "锁屏次数变了才换")
+Assert.eq(background("folder").cache_key(), "1")
+compose_stub.lock_cycles = 0
 Assert.is_nil(settings.lock_screen_asset_cache)
 
 -- 用户选的文件夹 / 自定义图优先于默认位置

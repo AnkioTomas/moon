@@ -62,6 +62,8 @@ function M.run(shelf)
                             landed = landed + 1
                         end
                     else
+                        -- 失败允许下次再试；tried 只挡并发重复，不永久拉黑。
+                        tried[key] = nil
                         logger.dbg("book.lockscreen poster cover failed", book.stable_id, err)
                     end
                     finish()

@@ -281,6 +281,16 @@ footer:onUpdateFooter(true)
 Assert.is_nil(update_args[2], "替代关闭时保持原生快路径")
 replace.bottom = true
 
+-- 熄屏中：禁止 footer 重画与栏区域 dirty，避免盖到 screensaver 上
+local Device = require("device")
+Device.screen_saver_mode = true
+update_args = nil
+footer:onUpdateFooter(true)
+Assert.is_nil(update_args, "熄屏中不调原生 onUpdateFooter")
+Device.screen_saver_mode = false
+footer:onUpdateFooter(true)
+Assert.is_true(update_args[2], "退出熄屏后恢复整页重画")
+
 -- 用户点底栏 / 手势切模式：回写底栏偏好
 replace.bottom = false
 Assert.is_true(Bars.bottomBarPreference())
@@ -313,6 +323,11 @@ Assert.eq(dirty[1].widget, "reader-dialog")
 Assert.eq(dirty[1].rect.h, 28 + 12, "顶栏 = 页眉 + 额外高度")
 Assert.eq(dirty[2].rect.y, 768 - 4, "底栏向上让出内缩")
 Assert.eq(dirty[2].rect.h, 32 + 4)
+Device.screen_saver_mode = true
+dirty = {}
+Bars.events.UpdateFooter(plugin)
+Assert.len(dirty, 0, "熄屏中不刷栏区域")
+Device.screen_saver_mode = false
 
 -- 绘制：字体现取月读界面字体（ffont），不复用 footer_text_face；进度条高度不复用
 -- ReaderFooter.progress_bar.height（KOReader 关掉原生进度条时为 0）。
