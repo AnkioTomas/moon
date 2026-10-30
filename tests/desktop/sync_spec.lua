@@ -117,6 +117,20 @@ Assert.eq(Themed.last("toast").text, "offline")
 desktop.tab = "home"
 connected = true
 
+-- 唤醒半联网：isConnected 为真但本机路由还不通，后台不弹 LuaSocket 原文；手动刷新仍提示。
+do
+    Themed.made = {}
+    source.syncBooksAsync = function(_, _, cb)
+        cb(nil, "无法连接 WebDAV 服务器：Could not connect: Network is unreachable")
+        return { cancel = function() end }
+    end
+    Sync.open(desktop)
+    Assert.is_nil(Themed.last("toast"), "唤醒半联网后台不打扰")
+    Sync.refresh(desktop)
+    Assert.eq(Themed.last("toast").text,
+        "无法连接 WebDAV 服务器：Could not connect: Network is unreachable")
+end
+
 -- 联网时后台同步失败（如 WebDAV 密码错）：提示一次，同一条错误不再重复；干净成功后再出错重新提示。
 do
     local fail = "WebDAV 认证失败：用户名或密码错误"
