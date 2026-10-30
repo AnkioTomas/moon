@@ -65,8 +65,26 @@ local function inScope(desktop, source)
     return desktop.source == source
 end
 
---- 书架同步出错的提示：手动刷新每次都提示；后台同步只在联网时提示（离线失败是常态），
---- 同一源同一条错误本次运行只提示一次，免得每次打开桌面都弹。err 为 nil 表示这轮干净成功。
+--- 本机网络栈还没就绪（唤醒后常见：isConnected 已真，TCP/路由还不通）。
+--- 跟没联网一样，后台同步不弹；connection refused / 认证错误仍提示。
+---@param err string
+---@return boolean
+local function localNetDown(err)
+    if err:find("网络不可用", 1, true) or err:find("DNS resolv error", 1, true) then
+        return true
+    end
+    for _idx, needle in ipairs({
+        "Network is unreachable", "No route to host", "Network is down",
+        "Host is unreachable", "Connection timed out", "Could not connect: -1",
+    }) do
+        if err:find(needle, 1, true) then return true end
+    end
+    return false
+end
+
+--- 书架同步出错的提示：手动刷新每次都提示；后台同步只在联网且是对端/配置问题时提示
+--- （离线、唤醒半联网是常态，不打扰），同一源同一条错误本次运行只提示一次。
+--- err 为 nil 表示这轮干净成功。
 ---@param source BookSource
 ---@param force boolean|nil
 ---@param err any
@@ -75,7 +93,11 @@ local function report(source, force, err)
     -- 登录失效由 Sync.promptLogin 的弹窗负责，后台不再叠加 toast。
     if not force and Auth.expired(source.id) then return end
     err = tostring(err)
-    if not force and (reported[source.id] == err or not require("ui/network/manager"):isConnected()) then return end
+    if not force and (reported[source.id] == err
+            or not require("ui/network/manager"):isConnected()
+            or localNetDown(err)) then
+        return
+    end
     reported[source.id] = err
     require("ui.themes.widgets.toast"):new{ text = err }:show()
 end
