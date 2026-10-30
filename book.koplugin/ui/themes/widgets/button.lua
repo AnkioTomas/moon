@@ -89,7 +89,7 @@ function Button:init()
     local content = self:content(t, ink, self.width and math.max(1, self.width - pad * 2))
     local border_color = v.border_color and (self.enabled and v.border_color or t.color.disabled)
     local bg = v.bg
-    if not self.enabled and t.color.accent > 0xFF then bg = bg and t.color.page end
+    if not self.enabled and Theme.colorful() then bg = bg and t.color.page end
     self[1] = Box:new{
         style = {
             bg = bg,

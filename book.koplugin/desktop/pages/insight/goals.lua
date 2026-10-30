@@ -59,7 +59,7 @@ function Goals:build(ctx)
 
     local function challengeBlock(extra)
         local title = Parts.caption(T(_("%1月挑战"), tonumber(os.date("%m", now))), width,
-            t.color.accent > 0xFF and t.color.accent or t.color.muted)
+            Theme.chrome())
         if not ch then
             return Tap.wrap(VerticalGroup:new{
                 align = "left",
@@ -96,7 +96,7 @@ function Goals:build(ctx)
         local col = VerticalGroup:new{ align = "left" }
         if #fc.books > 0 then
             col[#col + 1] = Parts.caption(_("预计读完"), width,
-                t.color.accent > 0xFF and t.color.accent or t.color.muted)
+                Theme.chrome())
             col[#col + 1] = VerticalSpan:new{ width = xs }
             for i = 1, math.min(3, #fc.books) do
                 local item = fc.books[i]

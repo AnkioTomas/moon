@@ -9,9 +9,10 @@
 三套主题的键集合完全一致（tests/ui/themes 校验），组件只读键、不判断主题 id。
 当前主题读 ui.ui_theme，未设或写错回落 paper。
 彩色渲染开启时，导航、图标、标题、书名和统计共用一个主题色（色板见
-ui/themes/palettes.lua）；正文保持黑白。没选过色板时用旧 theme_color。
+ui/themes/palettes.lua，含墨黑）；正文保持黑白。没选过色板时用旧 theme_color。
 彩色令牌按主题缓存，不改原始灰度令牌。彩屏（Kindle Color / Kaleido）会把颜色
 冲淡，主题色在收口处经 Theme.vivid 补饱和后再派生，存量配置不迁移。
+「彩色用 accent / 灰度用 muted」走 Theme.chrome，别用 accent > 0xFF（墨黑是 0）。
 
 ui/themes 自成一体：除 KOReader 自带模块与 utils.settings / l10n 外不依赖插件其他 UI 组件。
 缩放沿用设置 ui.ui_scale（百分比，100–180，缺省 130），与旧桌面同一个键。
@@ -101,12 +102,27 @@ local function onColor(rgb)
     return (lum + 0.05) / 0.05 >= 1.05 / (lum + 0.05) and 0x00 or 0xFF
 end
 
+--- 彩色渲染是否开启（主题色是否生效）。别用 accent > 0xFF 当代理：墨黑 accent 是 0。
+---@return boolean
+function Theme.colorful()
+    return Screen.isColorEnabled and Screen:isColorEnabled() or false
+end
+
+--- 分节标题等「彩色用 accent、灰度用 muted」的取色。
+---@param muted number|nil 灰度回退，默认当前主题 muted
+---@return number
+function Theme.chrome(muted)
+    local t = Theme.current()
+    if Theme.colorful() then return t.color.accent end
+    return muted or t.color.muted
+end
+
 --- 当前主题令牌表。彩色时全场共用一个主题色（色板见 ui/themes/palettes.lua）：
 --- 按钮、图标、标题、导航、统计全部取 accent——分角色着色实测看不出区别，不值一套管线，别再拆。
 ---@return table
 function Theme.current()
     local base = Theme.get(Theme.id())
-    if not (Screen.isColorEnabled and Screen:isColorEnabled()) then return base end
+    if not Theme.colorful() then return base end
     local conf = MoonSettings.get("ui")
     local signature = tostring(conf.theme_preset) .. ":" .. tostring(conf.theme_color)
     if not colored[base.id] or colored[base.id].signature ~= signature then

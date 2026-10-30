@@ -3,10 +3,11 @@
 
 mooncolor 是 12 套主题 × 多角色分色；月读实测分角色和全场单色看不出区别，
 不值一套角色管线，这里只取每套的代表色做单色主题。混色主题压成单色后
-主色重复的（极光 / 日落 / 竹影 / 浆果）不进名单，剩 8 个互不相同的颜色。
+主色重复的（极光 / 日落 / 竹影 / 浆果）不进名单；另加墨黑：彩屏开彩色时
+封面/插图仍彩色，UI 用纯黑避免中等饱和色被滤光层冲淡后发灰发淡。
 
 色值是存储值，Theme.current 派生时统一经 Theme.vivid 补饱和（彩屏会冲淡），
-这里不要预先补。
+这里不要预先补。墨黑是 0，vivid 原样返回。
 
 @module koplugin.book.ui.themes.palettes
 --]]
@@ -19,6 +20,7 @@ mooncolor 是 12 套主题 × 多角色分色；月读实测分角色和全场�
 local Palettes = {}
 
 Palettes.list = {
+    { id = "ink", name = "墨黑", rgb = 0x000000 },
     { id = "ocean", name = "深海蓝", rgb = 0x205CA8 },
     { id = "pine", name = "松石绿", rgb = 0x16685C },
     { id = "clay", name = "赤陶红", rgb = 0xA34434 },
