@@ -74,8 +74,10 @@ local function snapshotCorners(bb, x, y, w, h, r)
     local function take(px, py)
         if px < 0 or py < 0 or px >= bw or py >= bh then return end
         local color = bb:getPixel(px, py)
-        -- 真机 getPixel 返回 Color*；灰度桩 / 部分路径会直接给 number。
-        if type(color) == "table" and color.getColorRGB32 then
+        -- 真机 getPixel 的 cdata 是画布像素的引用（不是拷贝）。子件画完角位会被盖掉，
+        -- 必须先 getColorRGB32 成独立 Color；只判 table 会漏掉 cdata，圆角裁切等于没做。
+        -- 灰度桩可能直接给 number，没有 getColorRGB32。
+        if type(color) ~= "number" and color.getColorRGB32 then
             color = color:getColorRGB32()
         end
         saved[#saved + 1] = { px, py, color }
