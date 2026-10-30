@@ -12,7 +12,11 @@ local pending_row
 local identity = { source_id = "moon", stable_id = "b1", chapter_idx = 3 }
 
 package.preload["ui/uimanager"] = function()
-    return { show = function() end, nextTick = function(fn) fn() end }
+    return {
+        show = function() end,
+        -- UIManager:nextTick(fn)：冒号调用时首参是 self。
+        nextTick = function(_, fn) fn() end,
+    }
 end
 package.preload["ui/widget/infomessage"] = function()
     return { new = function(_, opts) return opts end }
@@ -52,8 +56,9 @@ local Progress = require("reader.session.progress")
 --- 造一个 rolling（重排版）文档：xpointer 有效性由 valid 集合决定。
 ---@param valid table<string, boolean>
 local function rollingUI(valid)
-    local log = { goto_xpointer = {}, from_proportion = 0, saved = {}, flushed = 0 }
-    return log, {
+    local log = { goto_xpointer = {}, from_proportion = 0, saved = {}, flushed = 0, restoring_during_goto = {} }
+    local ui
+    ui = {
         document = {
             isXPointerInDocument = function(_, xp) return valid[xp] == true end,
             getXPointerFromProportion = function(_, pct)
@@ -63,13 +68,17 @@ local function rollingUI(valid)
         },
         rolling = {
             xpointer = "xp:current",
-            onGotoXPointer = function(_, xp) log.goto_xpointer[#log.goto_xpointer + 1] = xp end,
+            onGotoXPointer = function(_, xp)
+                log.restoring_during_goto[#log.restoring_during_goto + 1] = ui._restoring_position == true
+                log.goto_xpointer[#log.goto_xpointer + 1] = xp
+            end,
         },
         doc_settings = {
             saveSetting = function(_, k, v) log.saved[k] = v end,
             flush = function() log.flushed = log.flushed + 1 end,
         },
     }
+    return log, ui
 end
 
 --- 造一个 paging（固定版式）文档：只有页码，没有 xpointer。
@@ -97,6 +106,8 @@ do
     Assert.len(log.goto_xpointer, 1)
     Assert.eq(log.goto_xpointer[1], "xp:saved")
     Assert.eq(log.from_proportion, 0, "有精确坐标就不该按比例折算")
+    Assert.is_true(log.restoring_during_goto[1], "跳转时打上恢复标志，避免翻页动画")
+    Assert.is_nil(ui._restoring_position, "nextTick 后清掉恢复标志")
     -- sidecar 同步落盘，供原生阅读器下次开书使用
     Assert.eq(log.saved.last_xpointer, "xp:current")
     Assert.eq(log.saved.percent_finished, 0.5)
