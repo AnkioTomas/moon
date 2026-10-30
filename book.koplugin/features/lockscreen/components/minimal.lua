@@ -22,8 +22,10 @@ local M = {
     label = _("极简"),
     supports_position = false,
     full_screen = true,
-    -- 含轮换高亮，每次锁屏都换一句：键每秒都变，等于不缓存。
-    cache_key = os.time,
+    -- 含轮换高亮，每次锁屏换一句：跟锁屏次数走。
+    cache_key = function()
+        return require("features.lockscreen.cycle").lock_cycles
+    end,
 }
 
 ---@param rect table 全屏矩形

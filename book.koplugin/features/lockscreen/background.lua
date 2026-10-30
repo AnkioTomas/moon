@@ -87,7 +87,7 @@ end
 local function folderPick()
     local files = folderFiles(M.folder())
     if #files == 0 then return nil end
-    local cycle = require("features.lockscreen.compose").lock_cycles
+    local cycle = require("features.lockscreen.cycle").lock_cycles
     return files[(cycle % #files) + 1]
 end
 
@@ -131,14 +131,22 @@ local BACKGROUNDS = {
         cache_key = function() return require("features.lockscreen.typo").cache_key() end,
     },
     custom = { id = "custom", label = _("自定义"), path = M.customImage },
-    cover = { id = "cover", label = _("当前阅读书籍封面"), path = coverPath },
+    cover = {
+        id = "cover",
+        label = _("当前阅读书籍封面"),
+        path = coverPath,
+        -- 封面还没落到本地时绑锁屏次数；有文件后 path 进 dayKey，不再靠次数。
+        cache_key = function()
+            return require("features.lockscreen.cycle").pending(not coverPath())
+        end,
+    },
     folder = {
         id = "folder",
         label = _("文件夹壁纸"),
         path = folderPick,
-        -- 与 folderPick 同源：锁一次键变一次，唤醒后 refreshIfStale 才会重合成。
+        -- 与 folderPick 同源：锁一次键变一次，唤醒后才会重合成。
         cache_key = function()
-            return tostring(require("features.lockscreen.compose").lock_cycles)
+            return tostring(require("features.lockscreen.cycle").lock_cycles)
         end,
     },
     poster = {

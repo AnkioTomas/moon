@@ -29,17 +29,13 @@ end
 
 local db_rows = {}
 local db_sources = {}
+local db_sorts = {}
 package.preload["book.catalog"] = function()
     return {
-        listBooks = function(source_id)
+        listBooks = function(source_id, opts)
             db_sources[#db_sources + 1] = source_id
+            db_sorts[#db_sorts + 1] = opts and opts.sort
             return db_rows, #db_rows
-        end,
-        recentBooks = function(source_id, limit)
-            db_sources[#db_sources + 1] = source_id
-            local rows = {}
-            for i = 1, math.min(limit, #db_rows) do rows[i] = db_rows[i] end
-            return rows
         end,
     }
 end
@@ -67,6 +63,7 @@ db_rows = {
 }
 local wall = placed(Poster.blocks({ x = 0, y = 0, w = 540, h = 720 }), "image")
 Assert.eq(db_sources[1], "moon")
+Assert.eq(db_sorts[1], "recent_read", "默认最近阅读")
 
 -- 错层：4 列均分铺满宽度，单数列上移半张；每列排到盖住屏幕底，5 本书循环补满 18 格。
 Assert.eq(#wall, 18)
@@ -119,7 +116,7 @@ Assert.is_true(not Poster.validStyle("bogus"))
 -- 标准布局：4 列 2:3 对齐铺满，行数向上取整、上下均分溢出，书不够循环补位。
 conf.lock_screen_poster_style = "standard"
 local poster_key = Poster.cache_key()
-Assert.matches(poster_key, "^standard:%x+$")
+Assert.matches(poster_key, "^standard:recent_read:%x+$")
 Assert.eq(Poster.cache_key(), poster_key, "书单不变键就稳定")
 local saved_rows = db_rows
 db_rows = { saved_rows[2], saved_rows[1] }
@@ -128,6 +125,55 @@ db_rows = saved_rows
 conf.lock_screen_poster_style = "vertical"
 Assert.is_true(Poster.cache_key() ~= poster_key, "换风格要重画")
 conf.lock_screen_poster_style = "standard"
+Assert.eq(Poster.sort(), "recent_read")
+Assert.is_true(Poster.validSort("recent_added"))
+Assert.is_true(not Poster.validSort("bogus"))
+conf.lock_screen_poster_sort = "recent_added"
+Assert.eq(Poster.sort(), "recent_added")
+Assert.eq(Poster.sortLabel("recent_added"), "最近添加")
+Assert.is_true(Poster.cache_key() ~= poster_key, "换排序要重画")
+Assert.matches(Poster.cache_key(), "^standard:recent_added:%x+$")
+db_sorts = {}
+Poster.blocks({ x = 0, y = 0, w = 540, h = 720 })
+Assert.eq(db_sorts[1], "recent_added")
+conf.lock_screen_poster_sort = nil
+Assert.eq(Poster.sort(), "recent_read", "非法/空回退最近阅读")
+
+-- 缺封面且有远程地址：键带 lock_cycles；纯本地缺封面不绑次数；齐了也不绑。
+do
+    local Cycle = require("features.lockscreen.cycle")
+    local prev_cycles = Cycle.lock_cycles
+    Cycle.lock_cycles = 3
+    local Library = require("features.lockscreen.components.library")
+    local prev = Library.shelfBook
+    Library.shelfBook = function(row, source_id)
+        return {
+            source_id = source_id,
+            stable_id = row.stable_id,
+            title = row.title,
+            percent = row.percent,
+            cover = nil,
+            cover_url = "https://example.test/" .. row.stable_id .. ".jpg",
+        }
+    end
+    local incomplete = Poster.cache_key()
+    Assert.matches(incomplete, "^standard:recent_read:%x+:3$")
+    Cycle.lock_cycles = 4
+    Assert.is_true(Poster.cache_key() ~= incomplete, "可补封面时次数变了要重画")
+    Library.shelfBook = function(row, source_id)
+        return {
+            source_id = source_id,
+            stable_id = row.stable_id,
+            title = row.title,
+            percent = row.percent,
+            cover = nil,
+        }
+    end
+    Assert.matches(Poster.cache_key(), "^standard:recent_read:%x+$", "纯本地缺封面不绑次数")
+    Library.shelfBook = prev
+    Cycle.lock_cycles = prev_cycles
+    Assert.matches(Poster.cache_key(), "^standard:recent_read:%x+$", "封面齐了不带次数")
+end
 local std = placed(Poster.blocks({ x = 0, y = 0, w = 540, h = 720 }), "image")
 Assert.eq(#std, 16)
 Assert.eq(std[1].x, 0)

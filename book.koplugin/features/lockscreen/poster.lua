@@ -19,21 +19,31 @@ local _ = require("gettext")
 local U = require("features.lockscreen.components.util")
 
 local DEFAULT_STYLE = "vertical"
+local DEFAULT_SORT = "recent_read"
 local SLANT = math.rad(12)
+
+local SORTS = {
+    { id = "recent_read", label = _("最近阅读") },
+    { id = "recent_added", label = _("最近添加") },
+}
+
+local SORT_BY_ID = {}
+for _idx, sort in ipairs(SORTS) do SORT_BY_ID[sort.id] = sort end
 
 local M = {}
 
---- 取当前源的书并按 stable_id 去重；最近打开的优先，不足再补全量书库。
+--- 取当前源的书并按 stable_id 去重；排序看设置（最近阅读 / 最近添加）。
 ---@param limit number
 ---@return table[]
 local function books(limit)
     local source_id = Library.activeSourceId()
     local result = {}
     local append = Library.shelfCollector(source_id)
-    append(result, Catalog.recentBooks(source_id, limit * 2), limit)
-    if #result < limit then
-        append(result, (Catalog.listBooks(source_id, { limit = limit * 2, offset = 0 })), limit)
-    end
+    append(result, (Catalog.listBooks(source_id, {
+        limit = limit * 2,
+        offset = 0,
+        sort = M.sort(),
+    })), limit)
     return result
 end
 
@@ -202,19 +212,44 @@ function M.style()
     return STYLE_BY_ID[style] and style or DEFAULT_STYLE
 end
 
+--- 排序是否合法。
+---@param sort string|nil
+---@return boolean
+function M.validSort(sort)
+    return SORT_BY_ID[sort] ~= nil
+end
+
+--- 当前排序；未设置或非法时按最近阅读（升级前：recentBooks 优先）。
+---@return string
+function M.sort()
+    local sort = MoonSettings.get("features.lockscreen").lock_screen_poster_sort
+    return SORT_BY_ID[sort] and sort or DEFAULT_SORT
+end
+
 local SHELF_LIMIT = 128
 
---- 风格、书单或封面到位情况变化才重画；书单摘要成 md5，免得把上百个 id 写进设置。
+--- 风格、排序、书单或封面到位情况变化才重画；书单摘要成 md5，免得把上百个 id 写进设置。
+--- 仍有「带远程地址但本地没有」的封面时附带 lock_cycles：唤醒后 cache 失效才会再合成，
+--- 不然占位海报能挂很多天。纯本地永远没封面的书不绑次数，避免每次唤醒整屏重画。
 ---@return string
 function M.cache_key()
     local parts = {}
+    local retryable = 0
     local shelf = books(SHELF_LIMIT)
     -- 没开过的网络书本地没封面：联网时后台补下载，落盘后键变化，下次锁屏重画。
     require("features.lockscreen.components.cover_prefetch").run(shelf)
     for _idx, book in ipairs(shelf) do
-        parts[#parts + 1] = (book.source_id or "") .. "\0" .. book.stable_id .. (book.cover and "+" or "-")
+        if book.cover then
+            parts[#parts + 1] = (book.source_id or "") .. "\0" .. book.stable_id .. "+"
+        else
+            parts[#parts + 1] = (book.source_id or "") .. "\0" .. book.stable_id .. "-"
+            if book.cover_url then
+                retryable = retryable + 1
+            end
+        end
     end
-    return M.style() .. ":" .. require("ffi/sha2").md5(table.concat(parts, "\n"))
+    local key = M.style() .. ":" .. M.sort() .. ":" .. require("ffi/sha2").md5(table.concat(parts, "\n"))
+    return key .. require("features.lockscreen.cycle").pending(retryable > 0)
 end
 
 --- 风格的设置页选项。
@@ -232,6 +267,23 @@ end
 ---@return string
 function M.styleLabel(style)
     return (STYLE_BY_ID[style] or STYLE_BY_ID[DEFAULT_STYLE]).label
+end
+
+--- 排序的设置页选项。
+---@return {text: string, value: string}[]
+function M.sortOptions()
+    local options = {}
+    for _idx, sort in ipairs(SORTS) do
+        options[#options + 1] = { text = sort.label, value = sort.id }
+    end
+    return options
+end
+
+--- 排序显示名。
+---@param sort string|nil
+---@return string
+function M.sortLabel(sort)
+    return (SORT_BY_ID[sort] or SORT_BY_ID[DEFAULT_SORT]).label
 end
 
 --- 全屏海报墙；书库为空时明确显示空态，不能伪装成普通壁纸。

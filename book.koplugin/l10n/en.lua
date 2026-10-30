@@ -427,6 +427,7 @@ return {
     ["每天随机"] = "Random daily",
     ["海报墙"] = "Poster wall",
     ["海报风格"] = "Poster style",
+    ["海报排序"] = "Poster sort",
     ["单向历"] = "One-Way Calendar",
     ["文字海报"] = "Typographic poster",
     ["海报版式"] = "Poster layout",

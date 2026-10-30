@@ -13,8 +13,13 @@ local M = {
     label = _("一言"),
     needs_network = true,
     layout = "quote",
+    -- 有缓存用正文；还在等网络时绑锁屏次数，不然回退句会挂很多天。
     cache_key = function()
-        return (Hitokoto:current() or Hitokoto.fallback()).text
+        Hitokoto:ensure()
+        local cur = Hitokoto:current()
+        if cur then return cur.text end
+        return Hitokoto.fallback().text
+            .. require("features.lockscreen.cycle").pending(true)
     end,
 }
 
@@ -23,6 +28,7 @@ local M = {
 ---@param wide boolean
 ---@return table[]
 function M.blocks(position, wide)
+    Hitokoto:ensure()
     local data = Hitokoto:current() or Hitokoto.fallback()
     return QuotePanel.blocks(data.text, data.source or "", position, wide)
 end

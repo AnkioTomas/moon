@@ -95,6 +95,7 @@ end
 
 --- 组合图缓存键：当前书、位置、封面与近 7 日统计任一变化都要重画。
 --- 依赖当前书的主体（统计 / 票根 / 卡片）共用这一个键，别各写一份漏字段。
+--- 本地还没有封面时绑锁屏次数（封面预取落盘后键变）；有封面后只跟内容走。
 ---@return string
 function M.cache_key()
     local book = M.book(true)
@@ -107,6 +108,7 @@ function M.cache_key()
         parts[#parts + 1] = bucket.key .. "," .. bucket.seconds .. "," .. bucket.pages
     end
     return table.concat(parts, ":")
+        .. require("features.lockscreen.cycle").pending(not book.cover)
 end
 
 --- 指定书的带统计快照（阅读页侧栏票根用：书跟阅读身份走，不取「当前源最近在读」）。
