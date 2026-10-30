@@ -250,7 +250,7 @@ do
     Assert.is_nil(done)
 end
 
--- 睡眠恢复：睡前开着且连着设备，唤醒后蓝牙停了 → 重新打开（/start）并连回睡前设备（/connect）。
+-- 睡眠恢复：睡前开着且连着设备，唤醒后蓝牙停了 → /start 并连回。
 do
     reset()
     routes["/status"] = ON_ONE
@@ -259,7 +259,7 @@ do
     Bluetooth.onSuspend()
     Stubs.flush()
     reset()
-    routes["/status"] = { STOPPED, ON_EMPTY, ON_EMPTY, ON_EMPTY, ON_ONE }
+    routes["/status"] = { STOPPED, ON_EMPTY, ON_EMPTY, ON_ONE }
     routes["/start"] = '{"ok":true}'
     routes["/connect"] = '{"ok":true}'
     Bluetooth.onResume()
@@ -269,7 +269,7 @@ do
     Assert.is_true(Bluetooth.isConnected(Bluetooth.current(), "AA:BB"))
 end
 
--- 睡眠恢复：唤醒后蓝牙还开着且设备还在 → 不发开关 / 连接命令；重复唤醒是空操作。
+-- 睡眠恢复：唤醒后还开着 → 不发 /start /connect；第二次唤醒被 resume_armed 吃掉。
 do
     reset()
     routes["/status"] = ON_ONE
@@ -289,19 +289,75 @@ do
     end
 end
 
--- 睡眠恢复：睡前关着 → 唤醒什么都不做。
+-- 睡眠恢复：用户关过蓝牙（wanted 已清）→ 唤醒什么都不做。
 do
     reset()
-    routes["/status"] = STOPPED
+    routes["/status"] = { ON_ONE, STOPPED, STOPPED }
+    routes["/stop"] = '{"ok":true}'
     Bluetooth.refresh()
     Stubs.flush()
+    Bluetooth.setEnabled(false, function() end)
+    Stubs.flush()
+    reset()
+    routes["/status"] = STOPPED
     Bluetooth.onSuspend()
     Stubs.flush()
     reset()
     routes["/status"] = STOPPED
     Bluetooth.onResume()
     Stubs.flush()
-    Assert.len(calls, 0, "睡前关着，唤醒不发任何请求")
+    Assert.len(calls, 0, "关过蓝牙，唤醒不恢复")
+end
+
+-- 关 Wi-Fi 带崩：曾开着 → NetworkDisconnected 后 /start 并连回（与睡醒同一条 restore）。
+do
+    reset()
+    routes["/status"] = ON_ONE
+    Bluetooth.refresh()
+    Stubs.flush()
+    reset()
+    routes["/status"] = { STOPPED, ON_EMPTY, ON_EMPTY, ON_ONE }
+    routes["/start"] = '{"ok":true}'
+    routes["/connect"] = '{"ok":true}'
+    Bluetooth.events.NetworkDisconnected({})
+    Stubs.flush()
+    Assert.contains(calls, "/start")
+    Assert.contains(calls, "/connect?addr=aa%3Abb&protocol=ble")
+end
+
+-- 关 Wi-Fi 时蓝牙还在 → setEnabled 空操作，不 /start /connect。
+do
+    reset()
+    routes["/status"] = ON_ONE
+    Bluetooth.refresh()
+    Stubs.flush()
+    reset()
+    routes["/status"] = ON_ONE
+    Bluetooth.events.NetworkDisconnected({})
+    Stubs.flush()
+    for _idx, call in ipairs(calls) do
+        Assert.is_nil(call:find("/start", 1, true), "蓝牙还开着不应 /start")
+        Assert.is_nil(call:find("/connect", 1, true), "不应重连")
+    end
+end
+
+-- 用户主动关过蓝牙 → wanted 已清，关 Wi-Fi 不再拉起。
+do
+    reset()
+    routes["/status"] = ON_ONE
+    Bluetooth.refresh()
+    Stubs.flush()
+    routes["/status"] = { ON_ONE, STOPPED, STOPPED }
+    routes["/stop"] = '{"ok":true}'
+    local ok
+    Bluetooth.setEnabled(false, function(r) ok = r end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    reset()
+    routes["/status"] = STOPPED
+    Bluetooth.events.NetworkDisconnected({})
+    Stubs.flush()
+    Assert.len(calls, 0, "主动关过蓝牙，关 Wi-Fi 不恢复")
 end
 
 os.execute = real_execute

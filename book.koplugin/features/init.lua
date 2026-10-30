@@ -119,7 +119,7 @@ Features.list = {
     "baike",
     "lockscreen",
     "wallpaper",
-    "bluetooth", -- 无 onCreate，进 list 只为收 onSuspend / onResume 做唤醒恢复蓝牙
+    "bluetooth", -- 无 onCreate：onSuspend/onResume 睡醒恢复；events.NetworkDisconnected 关 Wi-Fi 带崩后拉起
     "passcode", -- 必须在 remote 之前：remote 的 onCreate / onResume 要看到已锁
     "ime",
     "remote",

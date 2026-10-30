@@ -8,8 +8,9 @@
 守护进程会接管蓝牙芯片，所以排第一。kindle / kobo 是同步原语，经 sync.lua 适配成与 khp 相同的异步接口：
 available()、status(cb)、setEnabled(on, cb)、setConnected(dev, connect, cb)、scan(on_update, on_done)、pair(dev, cb)。
 
-Kindle 睡眠会把蓝牙关掉且唤醒后不自动恢复：onSuspend 记下睡前状态（进程内即可，睡眠不重启进程），
-onResume 时睡前开着就重新打开，并把睡前连着的设备逐个连回。
+Kindle 睡眠 / 关 Wi-Fi 都会把蓝牙射频掐掉：见 on 时记下 wanted（连接表），用户主动关才清。
+睡醒（onResume）与 NetworkDisconnected 共用 restore：重新打开并连回。睡眠中不抢跑 Wi-Fi 恢复。
+
 Android 的蓝牙在系统里，KOReader 没有接口；都没有时顶栏项与快捷开关都不出现。
 
 @module koplugin.book.features.bluetooth
@@ -21,6 +22,8 @@ local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
 
 local POLL_SECONDS = 30
+-- 关 Wi-Fi 后射频落定再动手；太短会跟还没死的旧状态打架
+local WIFI_RESTORE_DELAY = 2
 
 ---@class BookBluetoothDevice
 ---@field address string
@@ -88,11 +91,26 @@ function Bluetooth.name(dev)
     return dev.name or dev.address
 end
 
+--- 用户意图：见 on 记下连接表；只有主动关闭才清（睡眠 / Wi-Fi 带崩不记关）。
+---@type { connections: BookBluetoothDevice[] }|nil
+local wanted
+local sleeping = false
+--- onSuspend 置位，onResume 消费：FM/Reader 双实例只恢复一次。
+local resume_armed = false
+
+---@param st BookBluetoothStatus|nil
+local function noteWanted(st)
+    if st and st.state == "on" then
+        wanted = { connections = { unpack(st.connections or {}) } }
+    end
+end
+
 --- 读状态更新缓存并通知订阅方。
 ---@param cb fun(st: BookBluetoothStatus)|nil
 function Bluetooth.refresh(cb)
     backend().status(function(st)
         status = st
+        noteWanted(st)
         for _idx, fn in ipairs({ unpack(watchers) }) do fn() end
         if cb then cb(st) end
     end)
@@ -133,11 +151,14 @@ local function refreshed(cb)
     end
 end
 
---- 打开 / 关闭蓝牙。
+--- 打开 / 关闭蓝牙。主动关闭清掉 wanted，避免关 Wi-Fi 恢复逻辑把用户关的蓝牙又拉起来。
 ---@param on boolean
 ---@param cb fun(ok: boolean, err: any)
 function Bluetooth.setEnabled(on, cb)
-    backend().setEnabled(on, refreshed(cb))
+    backend().setEnabled(on, function(ok, err)
+        if ok and not on then wanted = nil end
+        refreshed(cb)(ok, err)
+    end)
 end
 
 --- 连接 / 断开已配对设备，等到连接表变化为止。
@@ -164,50 +185,57 @@ function Bluetooth.pair(dev, cb)
     return backend().pair(dev, refreshed(cb))
 end
 
---- 睡前快照（蓝牙关着为 nil）；睡眠前的刷新是异步的，回来晚了不能写进快照。
----@type { connections: BookBluetoothDevice[] }|nil
-local pre_sleep
-local sleeping = false
-
----@param st BookBluetoothStatus|nil
-local function snapshot(st)
-    if not st then return end
-    pre_sleep = st.state == "on" and { connections = { unpack(st.connections or {}) } } or nil
+--- 按 wanted 重新打开并连回（睡醒 / Wi-Fi 带崩共用）。setEnabled 已 refresh，直接读缓存。
+---@param tag string 日志标签 resume / wifi
+local function restore(tag)
+    if not wanted or not Bluetooth.installed() then return end
+    local conns = wanted.connections
+    Bluetooth.setEnabled(true, function(ok, err)
+        if not ok then
+            logger.warn("book.bluetooth " .. tag .. " restore failed:", err)
+            return
+        end
+        if #conns == 0 then return end
+        local st = Bluetooth.current()
+        for _idx, dev in ipairs(conns) do
+            if not Bluetooth.isConnected(st, dev.address) then
+                Bluetooth.setConnected(dev, true, function(done, conn_err)
+                    if not done then
+                        logger.warn("book.bluetooth " .. tag .. " reconnect failed:",
+                            dev.address, conn_err)
+                    end
+                end)
+            end
+        end
+    end)
 end
 
---- 睡眠前（Features 钩子，FM / Reader 两个实例都会调）：先记缓存再刷新一次修正，
---- Kindle 睡眠关掉的蓝牙靠唤醒时按这份快照恢复，这里不要动蓝牙本身。
+--- 睡眠前：武装一次唤醒恢复；顺手 refresh，射频还在时把 wanted 刷新到最新连接表。
 function Bluetooth.onSuspend()
     if not Bluetooth.installed() then return end
     sleeping = true
-    snapshot(status)
-    Bluetooth.refresh(function(st) if sleeping then snapshot(st) end end)
+    resume_armed = wanted ~= nil
+    Bluetooth.refresh()
 end
 
---- 唤醒（Features 钩子）：睡前开着才恢复——重新打开，连回睡前连着的设备。
---- 快照取走即清，第二个插件实例的重复唤醒是空操作。
+--- 唤醒：只跑一次（双实例），按 wanted 拉起。
 function Bluetooth.onResume()
     sleeping = false
-    local want = pre_sleep
-    pre_sleep = nil
-    if not want or not Bluetooth.installed() then return end
-    Bluetooth.setEnabled(true, function(ok, err)
-        if not ok then
-            logger.warn("book.bluetooth resume restore failed:", err)
-            return
-        end
-        if #want.connections == 0 then return end
-        Bluetooth.refresh(function(st)
-            for _idx, dev in ipairs(want.connections) do
-                if not Bluetooth.isConnected(st, dev.address) then
-                    Bluetooth.setConnected(dev, true, function(done, conn_err)
-                        if not done then logger.warn("book.bluetooth resume reconnect failed:", dev.address, conn_err) end
-                    end)
-                end
-            end
-        end)
-    end)
+    if not resume_armed then return end
+    resume_armed = false
+    restore("resume")
 end
+
+--- 关 Wi-Fi 常顺带掐蓝牙：延迟后按 wanted 拉起（已 on 时 setEnabled 是空操作）。
+Bluetooth.events = {
+    NetworkDisconnected = function(_plugin)
+        if sleeping or not wanted or not Bluetooth.installed() then return end
+        UIManager:scheduleIn(WIFI_RESTORE_DELAY, function()
+            if sleeping or not wanted then return end
+            restore("wifi")
+        end)
+    end,
+}
 
 --- 顶栏读数：还没读过（没装就不会读）不显示；连上一台显示名字（没名字只显示图标），多台显示台数。
 ---@return string|nil text
