@@ -335,7 +335,8 @@ local GROUP_FOLDERS = {
     },
     maintenance = {
         {
-            id = "features", icon = "delete_sweep", title = _("功能与更新"),
+            -- id 不能叫 features：边界检查会把裸 "features" 串当成 require("features")。
+            id = "manage", icon = "delete_sweep", title = _("功能与更新"),
             subtitle = _("功能开关与检查更新"),
             match = { "feature:manage", "update_auto", "update_check" },
         },
