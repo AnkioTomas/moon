@@ -185,7 +185,7 @@ function M:createWidget()
             Text.line("caption", _("没有书籍"), { color = t.color.muted }),
         }
     end
-    local accent = t.color.accent > 0xFF and t.color.accent or t.color.muted
+    local accent = Theme.chrome()
     local more = Tap.wrap(Text.line("caption", _("更多 ›"), { color = accent }), function()
         local desktop = ctx.desktop
         if not desktop then return end

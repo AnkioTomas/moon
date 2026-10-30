@@ -18,6 +18,7 @@ return {
     ["月读：关闭当前弹窗"] = "Moon: dismiss current dialog",
     ["主题色"] = "Accent color",
     ["彩色模式下按钮、图标、标题、导航、进度与统计的配色"] = "Colors for buttons, icons, headings, navigation, progress and statistics in color mode",
+    ["墨黑"] = "Ink Black",
     ["深海蓝"] = "Deep Ocean",
     ["松石绿"] = "Pine Green",
     ["赤陶红"] = "Terracotta",

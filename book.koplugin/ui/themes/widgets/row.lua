@@ -63,7 +63,7 @@ function Row.widget(opts)
     local t = Theme.current()
     local enabled = opts.enabled ~= false
     local sel = opts.selected == true
-    if not enabled and t.color.accent > 0xFF then sel = false end
+    if not enabled and Theme.colorful() then sel = false end
     local ink = not enabled and t.color.disabled or (sel and t.selected.ink or t.color.ink)
     -- 反色选中行上 muted 灰看不清，副文字跟主文字同色。
     local muted = not enabled and t.color.disabled or (sel and t.selected.ink or t.color.muted)

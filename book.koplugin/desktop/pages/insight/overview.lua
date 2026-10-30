@@ -225,7 +225,7 @@ function Overview:build(ctx)
             if not chart then return nil end
             return VerticalGroup:new{
                 align = "left",
-                Parts.caption(_("本月阅读时段"), width, t.color.accent > 0xFF and t.color.accent or t.color.muted),
+                Parts.caption(_("本月阅读时段"), width, Theme.chrome()),
                 VerticalSpan:new{ width = xs },
                 chart,
             }

@@ -164,6 +164,13 @@ Assert.eq(sakura.progress.fill, sakura.color.accent)
 Assert.eq(sakura.selected.ink, sakura.color.accent)
 Assert.eq(sakura.card.border_color, sakura.color.accent)
 Assert.eq(sakura.button.primary.ink, 0xFF, "深色主按钮用白字")
+display.theme_preset = "ink"
+local ink = Theme.current()
+Assert.eq(ink.color.accent, 0, "墨黑不补饱和")
+Assert.eq(ink.button.primary.bg, 0)
+Assert.eq(ink.button.primary.ink, 0xFF, "黑底主按钮用白字")
+Assert.is_true(Theme.colorful())
+Assert.eq(Theme.chrome(), 0, "彩色开着时 chrome 就是 accent，含墨黑")
 display.theme_preset = nil
 display.theme_color = 0xFFCC00
 Assert.eq(Theme.current().button.primary.ink, 0, "亮色主按钮用黑字")
@@ -171,6 +178,8 @@ Assert.eq(Theme.current().color.accent, Theme.vivid(0xFFCC00), "没选色板时�
 color_enabled = false
 Assert.eq(Theme.current().color.accent, 0, "灰度模式强调色就是墨色")
 Assert.eq(Theme.current(), Theme.get(Theme.id()), "关彩色后不受主题色影响")
+Assert.is_false(Theme.colorful())
+Assert.eq(Theme.chrome(), Theme.get(Theme.id()).color.muted, "关彩色 chrome 回落 muted")
 local screen = require("device").screen
 screen.isColorEnabled = nil
 Assert.eq(Theme.current(), Theme.get(Theme.id()), "旧屏幕没有彩色查询接口时保持灰度")
