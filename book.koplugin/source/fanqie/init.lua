@@ -78,7 +78,7 @@ local function errMsg(err)
     return tostring(err or _("番茄请求失败"))
 end
 
---- 进了平台自定义分组的书，分类用分组名（和微信/起点同一口径）；没进组不写分类。
+--- 分类口径见 source.category_setting：开 = 只用自定义分组，关 = 不写分类（番茄书架不带题材）。
 local function shelfBook(row)
     local book = {
         source_id = "fanqie",
@@ -88,9 +88,7 @@ local function shelfBook(row)
         intro = require("utils.text").stripHtml(row.abstract),
         cover = row.thumb_url,
     }
-    if type(row._group_name) == "string" and row._group_name ~= "" then
-        book.category = row._group_name
-    end
+    book.category = require("source.category_setting").apply("fanqie", nil, row._group_name)
     return book
 end
 

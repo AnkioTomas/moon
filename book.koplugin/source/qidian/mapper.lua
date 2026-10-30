@@ -94,11 +94,11 @@ function Mapper.shelfBook(row)
 end
 
 --- 书架行 → Book。有详情用详情，否则沿用本地完整行，都没有才退回书架行。
---- 进了平台自定义分组的书，分类用分组名（和微信读书同一口径：一本书多个组取拉取时记的第一个）；
---- 没进组的保留题材（shelfBook 的 cateName / 详情的 chanName）。
+--- 分类口径见 source.category_setting：开 = 只用自定义分组，关 = 只用题材（cateName / chanName）。
 ---@param rows table[]
 ---@return Book[]
 function Mapper.shelfList(rows)
+    local CategorySetting = require("source.category_setting")
     local books = {}
     for _idx, row in ipairs(rows) do
         local book
@@ -109,8 +109,7 @@ function Mapper.shelfList(rows)
             if type(book.cover) ~= "string" or book.cover == "" then
                 book.cover = Mapper.coverUrl(row.bid or book.stable_id)
             end
-            -- 沿用本地行时分类可能是上次同步的分组名：书架行自带题材，先刷新回题材，
-            -- 下面再按本次分组覆盖；移出分组后才能落回题材而不是卡在旧组里。
+            -- 沿用本地行时 category 可能是上次同步的分组名：先刷回书架题材，再按开关决定。
             if type(row.cateName) == "string" and row.cateName ~= "" then
                 book.category = row.cateName
             end
@@ -118,9 +117,7 @@ function Mapper.shelfList(rows)
             book = Mapper.shelfBook(row)
         end
         if book then
-            if type(row._group_name) == "string" and row._group_name ~= "" then
-                book.category = row._group_name
-            end
+            book.category = CategorySetting.apply(SOURCE_ID, book.category, row._group_name)
             books[#books + 1] = book
         end
     end

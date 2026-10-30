@@ -219,10 +219,12 @@ local function appendShelfRows(into, seen, rows)
 end
 
 --- 书架 wire → BookListResult。
+--- 分类口径见 source.category_setting：开 = 只用自定义分组，关 = 只用题材，不再混合。
 ---@param shelf table
 ---@param on_cover fun(stable_id: string, url: string)|nil
 ---@return BookListResult
 function Mapper.shelfList(shelf, on_cover)
+    local CategorySetting = require("source.category_setting")
     local prog_map = Mapper.progressByBookId(shelf)
     local groups = Mapper.groupByBookId(shelf)
     local books = {}
@@ -235,7 +237,7 @@ function Mapper.shelfList(shelf, on_cover)
         local b, cover = Mapper.book(row)
         if b then
             Mapper.applyProgress(b, prog_map[b.stable_id])
-            b.category = groups[b.stable_id] or b.category
+            b.category = CategorySetting.apply(SOURCE_ID, b.category, groups[b.stable_id])
             if cover and on_cover then
                 on_cover(b.stable_id, cover)
             end

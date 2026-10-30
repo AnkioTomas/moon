@@ -63,6 +63,7 @@ function M.rows(plugin)
                     if plugin and plugin.desktop then plugin.desktop:updateView() end
                 end })
         end,
+        require("source.category_setting").row("fanqie", plugin),
     }
 end
 

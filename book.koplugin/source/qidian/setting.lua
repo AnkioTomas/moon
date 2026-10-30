@@ -63,6 +63,7 @@ function Setting.rows(plugin)
     local rows = {
         CookieLogin.accountRow(SPEC, { subtitle = _("也可在「远程管理」里用浏览器授权登录") }),
         require("source.review_setting").row(SOURCE_ID, plugin),
+        require("source.category_setting").row(SOURCE_ID, plugin),
     }
     if loggedIn() then rows[#rows + 1] = CookieLogin.logoutRow(SPEC) end
     return rows

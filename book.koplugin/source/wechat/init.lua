@@ -103,10 +103,12 @@ function Source:onEvent(event, payload)
 end
 
 --- 把本地分类上行成书架分组：同名分组加入，没有就新建；分类清空则退出所有分组。
+--- 仅在「使用自定义分组代替分类」打开时上行；关着时分类是题材，不能写进分组。
 --- 新书不带分组，只有用户改分类才会走到这里。失败只记日志，分类留在本地。
 ---@param stable_id string
 ---@return { cancel: fun() }|nil
 function Source:pushCategoryAsync(stable_id)
+    if not require("source.category_setting").enabled(self.id) then return nil end
     local row = require("book.books_db").get(self.id, stable_id)
     local category = row and row.category or nil
     local client = self._client
@@ -347,11 +349,13 @@ function Source:syncBooksAsync(opts, cb)
                         changed[b.stable_id] = b
                     end
                 end
-                -- 分组已确认无变更：分组名优先用本地旧行，别被服务端题材分类覆盖掉。
-                local locals = BookDB.getMany(self.id, changed_ids)
-                for id, b in pairs(changed) do
-                    local old = locals[id]
-                    if old and old.category and old.category ~= "" then b.category = old.category end
+                -- 开了「分组代替分类」且分组无变更：保留本地分组名，别被详情里的题材盖掉。
+                if require("source.category_setting").enabled(self.id) then
+                    local locals = BookDB.getMany(self.id, changed_ids)
+                    for id, b in pairs(changed) do
+                        local old = locals[id]
+                        if old and old.category and old.category ~= "" then b.category = old.category end
+                    end
                 end
                 reconcileIncremental(changed)
             end)
