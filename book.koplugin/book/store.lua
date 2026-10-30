@@ -292,6 +292,12 @@ function Store.identityFor(path)
         }
     end
     local book = BookDB.getByPath(path)
+    -- 旧版本给库外文件补的身份行：local 源、从没上过架（inserted_at=0）、path 即 stable_id。
+    -- 现在库外不管，这些遗留行当不存在；真正软删的 local 书 inserted_at>0。
+    if book and book.source_id == "local" and book.deleted == 1 and book.inserted_at == 0
+        and book.stable_id == book.path then
+        book = nil
+    end
     if book then
         return {
             source_id = book.source_id,
@@ -308,8 +314,7 @@ function Store.identityFor(path)
 end
 
 --- 打开时确保身份：能解析则把 books.path 指向这次打开的文件；
---- .moon 内未知文件返回 nil（必须从月读桌面打开）；
---- .moon 外未入库文件一律当本地书登记（统计/进度挂到 local 源）。
+--- 未知文件（.moon 内外都算）返回 nil 且不写库：库外的书月读不管。
 --- 返回的身份附带属主源实例（source 字段，可能为 nil）：身份属于哪个源就用哪个源实例
 --- （registry.resolve：current 匹配直接用，否则按 id 建实例），不许错用 current（串书根因）。
 ---@param path string
@@ -317,43 +322,14 @@ end
 function Store.ensureIdentity(path)
     local registry = require("source.registry")
     local id = Store.identityFor(path)
-    if id then
-        id.source = registry.resolve(id.source_id)
-        id.ephemeral = id.source and id.source.ephemeral or false
-        -- 路径已在库里；章节文件可能绕过桌面（KOReader 历史）打开，books.path 跟到这一章
-        if not id.derived and not BookDB.touchPath(id.source_id, id.stable_id, path) then
-            logger.warn("book identity touch failed", id.source_id, id.stable_id, path)
-        end
-        return id
+    if not id then return nil end
+    id.source = registry.resolve(id.source_id)
+    id.ephemeral = id.source and id.source.ephemeral or false
+    -- 路径已在库里；章节文件可能绕过桌面（KOReader 历史）打开，books.path 跟到这一章
+    if not id.derived and not BookDB.touchPath(id.source_id, id.stable_id, path) then
+        logger.warn("book identity touch failed", id.source_id, id.stable_id, path)
     end
-    if Paths.isMoonPath(path) then
-        return nil -- .moon 内未知文件必须从月读桌面打开
-    end
-    -- 未入库 → 只 touch 身份行（deleted=1，不上架），挂进度/统计用。
-    -- 禁止 upsert 上架：否则库外打开的文件会被当成书架成员，EndOfBook 误接管。
-    if not BookDB.touchPath("local", path, path) then
-        logger.warn("book identity touch failed", "local", path, path)
-    end
-    local book = BookDB.get("local", path) or {
-        source_id = "local",
-        stable_id = path,
-        title = require("utils.text").basename(path):gsub("%.[^%.]+$", ""),
-        deleted = 1,
-        path = path,
-    }
-    if book.title == nil or book.title == "" then
-        book.title = require("utils.text").basename(path):gsub("%.[^%.]+$", "")
-    end
-    if book.md5 == nil then
-        book.md5 = require("util").partialMD5(path) --[[@as string|nil]]
-    end
-    return {
-        source_id = "local",
-        stable_id = path,
-        chapter_idx = nil,
-        book = book,
-        source = registry.resolve("local"),
-    }
+    return id
 end
 
 return Store

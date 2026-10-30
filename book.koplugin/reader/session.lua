@@ -30,7 +30,7 @@ local Session = {
 }
 
 --- 月读是否认这份文档：Store.identityFor 能解析，且是章节文件或书架成员。
---- ensureIdentity 给库外文件补的 deleted=1 登记不算——那只是挂进度/统计。
+--- deleted=1 是书架已移除的成员，交回原生。
 ---@param snapshot ReaderSessionSnapshot|nil
 ---@return boolean
 local function moonRecognizes(snapshot)
@@ -244,6 +244,8 @@ function Session.onReaderReady(plugin)
     local identity = Store.ensureIdentity(ui.document.file)
     if not identity then
         ChapterMode.clearActiveChapter(nil)
+        -- 库外的书月读不管：不建会话、不提示，交给原生阅读
+        if not require("utils.paths").isMoonPath(ui.document.file) then return end
         require("ui.themes.widgets.confirm"):new{
             text = _("无法识别此书，请从月读打开。"),
             ok_text = _("关闭文档"),

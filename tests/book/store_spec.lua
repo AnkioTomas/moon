@@ -353,44 +353,24 @@ do
     moon_paths["/data/.moon/cache/moon/book/noid/2.html"] = nil
 end
 
--- ── ensureIdentity：.moon 外未入库 → touch 身份行（deleted=1 不上架），不 upsert ──
+-- ── ensureIdentity：.moon 外未入库 → nil，不写库（库外的书月读不管） ──
 do
-    md5_by_path["/lib/new.book.epub"] = "digest-new"
-    local id = Store.ensureIdentity("/lib/new.book.epub")
-    Assert.eq(id.source_id, "local")
-    Assert.eq(id.stable_id, "/lib/new.book.epub")
-    Assert.is_nil(id.chapter_idx)
-    Assert.eq(id.book.title, "new.book")
-    Assert.eq(id.book.path, "/lib/new.book.epub")
-    Assert.eq(tonumber(id.book.deleted), 1, "库外顺手登记不上架")
-    Assert.eq(#book_upserts, 0, "禁止 upsert 上架")
-    Assert.eq(#touch_calls, 1)
-    Assert.eq(touch_calls[1].source_id, "local")
-    Assert.eq(touch_calls[1].stable_id, "/lib/new.book.epub")
-    Assert.eq(touch_calls[1].path, "/lib/new.book.epub")
-    Assert.eq(registry_created[#registry_created], "local")
-    Assert.eq(id.source.id, "local")
-    md5_by_path["/lib/new.book.epub"] = nil
-    touch_calls = {}
-    registry_created = {}
+    Assert.is_nil(Store.ensureIdentity("/lib/new.book.epub"))
+    Assert.eq(#book_upserts, 0)
+    Assert.eq(#touch_calls, 0)
+    Assert.eq(#registry_created, 0)
 end
 
--- ── ensureIdentity：local 已登记 → 不覆盖元数据，只补 path ──
+-- ── 旧版本遗留的库外身份行（local、deleted=1、inserted_at=0、path==stable_id）当不存在 ──
 do
-    book_rows_by_id["local\0/lib/scanned.epub"] = {
-        source_id = "local",
-        stable_id = "/lib/scanned.epub",
-        title = "扫盘解析的标题",
-        deleted = 0,
+    book_rows_by_path["/lib/ghost.epub"] = {
+        source_id = "local", stable_id = "/lib/ghost.epub", path = "/lib/ghost.epub",
+        deleted = 1, inserted_at = 0,
     }
-    local id = Store.ensureIdentity("/lib/scanned.epub")
-    Assert.eq(id.source_id, "local")
-    Assert.eq(id.stable_id, "/lib/scanned.epub")
-    Assert.eq(id.book.title, "扫盘解析的标题")
-    Assert.eq(#book_upserts, 0)
-    Assert.eq(#touch_calls, 1)
-    Assert.eq(touch_calls[1].path, "/lib/scanned.epub")
-    book_rows_by_id["local\0/lib/scanned.epub"] = nil
+    Assert.is_nil(Store.ensureIdentity("/lib/ghost.epub"))
+    book_rows_by_path["/lib/ghost.epub"].inserted_at = 1700000000
+    Assert.not_nil(Store.ensureIdentity("/lib/ghost.epub"), "真正软删的 local 书仍认")
+    book_rows_by_path["/lib/ghost.epub"] = nil
     touch_calls = {}
 end
 
@@ -406,29 +386,6 @@ do
     Assert.eq(#touch_calls, 0)
     package.loaded["reader.session.derived_note"] = { originOf = function() end }
     book_rows_by_path["/lib/a.epub"] = nil
-end
-
--- ── ensureIdentity：文件打不开 → partialMD5 返回 nil，仍 touch 身份 ────
-do
-    local id = Store.ensureIdentity("/lib/broken.epub")
-    Assert.eq(id.source_id, "local")
-    Assert.eq(id.book.title, "broken")
-    Assert.eq(#book_upserts, 0)
-    Assert.eq(#touch_calls, 1)
-    touch_calls = {}
-end
-
--- ── ensureIdentity：touch 失败仍返回身份，并记 warn ──
-do
-    warnings = {}
-    touch_ok = false
-    local id = Store.ensureIdentity("/lib/fail-register.epub")
-    Assert.eq(id.source_id, "local")
-    Assert.eq(id.stable_id, "/lib/fail-register.epub")
-    Assert.eq(warnings[1][1], "book identity touch failed")
-    touch_ok = true
-    touch_calls = {}
-    warnings = {}
 end
 
 -- ── markDeleted：标删成功、目录 purge 失败仍返回 true ──
