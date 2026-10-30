@@ -361,16 +361,21 @@ do
     Assert.eq(#registry_created, 0)
 end
 
--- ── 旧版本遗留的库外身份行（local、deleted=1、inserted_at=0、path==stable_id）当不存在 ──
+-- ── 旧版本把库外文件登记成 local 书：扫盘根目录之外的 local 行当不存在 ──
 do
-    book_rows_by_path["/lib/ghost.epub"] = {
-        source_id = "local", stable_id = "/lib/ghost.epub", path = "/lib/ghost.epub",
-        deleted = 1, inserted_at = 0,
-    }
-    Assert.is_nil(Store.ensureIdentity("/lib/ghost.epub"))
-    book_rows_by_path["/lib/ghost.epub"].inserted_at = 1700000000
-    Assert.not_nil(Store.ensureIdentity("/lib/ghost.epub"), "真正软删的 local 书仍认")
-    book_rows_by_path["/lib/ghost.epub"] = nil
+    local real_settings = package.loaded["utils.settings"]
+    local local_root = "/lib/"
+    package.loaded["utils.settings"] = { getSource = function() return { path = local_root } end }
+    local row = { source_id = "local", stable_id = "/out/a.epub", path = "/out/a.epub", deleted = 0 }
+    book_rows_by_path["/out/a.epub"] = row
+    Assert.is_nil(Store.ensureIdentity("/out/a.epub"), "库外 local 行不认")
+    row = { source_id = "local", stable_id = "/lib/b.epub", path = "/lib/b.epub", deleted = 0 }
+    book_rows_by_path["/lib/b.epub"] = row
+    Assert.not_nil(Store.ensureIdentity("/lib/b.epub"), "根目录内的 local 书照认")
+    local_root = ""
+    Assert.is_nil(Store.ensureIdentity("/lib/b.epub"), "没配根目录不认 local 行")
+    book_rows_by_path["/out/a.epub"], book_rows_by_path["/lib/b.epub"] = nil, nil
+    package.loaded["utils.settings"] = real_settings
     touch_calls = {}
 end
 
