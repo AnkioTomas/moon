@@ -27,7 +27,7 @@ local FETCH_INTERVAL = 1
 
 ---@return BookSourceMeta
 function Jjwxc.meta()
-    return { id = "jjwxc", name = _("晋江文学城"), type = "chapter" }
+    return SourceBase.loadMeta("jjwxc")
 end
 
 ---@class JjwxcSource : SourceBase

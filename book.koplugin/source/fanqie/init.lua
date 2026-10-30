@@ -28,7 +28,7 @@ local Source = setmetatable({}, { __index = Base })
 Source.__index = Source
 
 function M.meta()
-    return { id = "fanqie", name = _("番茄小说"), type = "chapter" }
+    return Base.loadMeta("fanqie")
 end
 
 function M.new()

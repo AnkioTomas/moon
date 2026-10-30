@@ -25,7 +25,7 @@ local Jdread = {}
 
 ---@return BookSourceMeta
 function Jdread.meta()
-    return { id = "jdread", name = _("京东读书"), type = "chapter" }
+    return SourceBase.loadMeta("jdread")
 end
 
 ---@class JdreadSource : SourceBase

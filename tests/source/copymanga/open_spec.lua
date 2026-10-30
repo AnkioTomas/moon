@@ -25,6 +25,7 @@ stub("gettext", function()
 end)
 stub("source.base", function()
     return {
+        loadMeta = function(id) return { id = id, name = id, type = "book" } end,
         defer = function(cb, ...)
             local args = { n = select("#", ...), ... }
             require("ui/uimanager"):nextTick(function() cb(unpack(args, 1, args.n)) end)
