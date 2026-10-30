@@ -3,7 +3,7 @@
 
 kamare 仍是执行者，这里只观察 queue_state / status；队列全局共享，所以进度只数本批的卷。
 
-@module tests.extensions.kavita.cache_task_spec
+@module tests.source.kavita.cache_task_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field, redundant-parameter
 
@@ -25,11 +25,11 @@ package.preload["utils.log"] = function()
     return { info = function() end, warn = function() end, err = function() end, dbg = function() end }
 end
 
-local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
+local PLUGIN = Config.root() .. "/book.koplugin/source/kavita"
 
 -- 缓存适配层：只提供 cache_task 用到的读接口；写操作不经过这里。
 local st = { queue = { state = "idle", entries = {} }, statuses = {}, queue_ok = true }
-package.preload["moonsource_kavita.cache"] = function()
+package.preload["source.kavita.cache"] = function()
     return {
         available = function(cap) return st.queue_ok and cap == "queue" end,
         queueState = function() return st.queue end,
@@ -41,7 +41,7 @@ package.preload["moonsource_kavita.cache"] = function()
 end
 
 local Tasks = require("workers.tasks")
-local CacheTask = dofile(PLUGIN .. "/moonsource_kavita/cache_task.lua")
+local CacheTask = dofile(PLUGIN .. "/cache_task.lua")
 
 local series = { stable_id = "900", title = "测试系列" }
 local entries = {

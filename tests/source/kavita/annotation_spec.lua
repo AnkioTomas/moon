@@ -5,7 +5,7 @@ extensions/moonsource-kavita.koplugin：注解线上形态（写入 / 读回）�
 纯文本 `commentPlainText` 由后端从 HTML 去标签算出来。拉取、推送、冲突判定必须
 共用这一套归一，否则同一段备注每次都会判「改过」→ 无限 update。
 
-@module tests.extensions.kavita.annotation_spec
+@module tests.source.kavita.annotation_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field
 
@@ -16,7 +16,7 @@ local JsonStub = require("support.json_stub")
 -- 模块内部 require("json")；这里给真实语义的往返桩（encode 出的串 decode 得回同一结构）。
 package.loaded["json"] = { encode = JsonStub.encode, decode = JsonStub.decode }
 
-local Annotation = dofile(Config.root() .. "/extensions/moonsource-kavita.koplugin/moonsource_kavita/annotation.lua")
+local Annotation = dofile(Config.root() .. "/book.koplugin/source/kavita/annotation.lua")
 
 -- 读回：空值集合一律空串（漏判的后果不是显示花括号，而是 note 变成 "{}" → 无限 update）。
 Assert.eq(Annotation.noteText(nil), "")

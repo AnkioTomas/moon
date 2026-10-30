@@ -256,7 +256,7 @@ do
     local connection, calls = makeConn()
     local DbBase, ProgressDB = loadProgress(connection)
 
-    Assert.is_true(ProgressDB.upsertRemote("ext.kavita", "700", { fraction = 0.5, updated_at = 0 },
+    Assert.is_true(ProgressDB.upsertRemote("kavita", "700", { fraction = 0.5, updated_at = 0 },
         { reset_updated_at = true }))
     local q = calls[#calls]
     Assert.is_true(q.sql:find("updated_at=excluded.updated_at", 1, true) ~= nil,
@@ -264,7 +264,7 @@ do
     Assert.is_nil(q.sql:find("MAX(excluded.updated_at", 1, true), "这条写入不再走 MAX")
     Assert.eq(q.args[11], 0, "容器行写 0，不进最近阅读")
 
-    Assert.is_true(ProgressDB.upsertRemote("ext.kavita", "700:7001", { fraction = 0.5, updated_at = 1000 }))
+    Assert.is_true(ProgressDB.upsertRemote("kavita", "700:7001", { fraction = 0.5, updated_at = 1000 }))
     q = calls[#calls]
     Assert.is_true(q.sql:find("updated_at=MAX(excluded.updated_at, pending_progress.updated_at)", 1, true) ~= nil,
         "普通进度仍只进不退")
@@ -280,13 +280,13 @@ do
     local DbBase, ProgressDB = loadProgress(connection)
     local before = #calls
 
-    Assert.is_true(ProgressDB.fixRemoteTime("ext.kavita", "700", 1770062706))
+    Assert.is_true(ProgressDB.fixRemoteTime("kavita", "700", 1770062706))
     local q = calls[before + 1]
     Assert.is_true(q.sql:find("UPDATE pending_progress SET updated_at=?", 1, true) ~= nil)
     Assert.is_true(q.sql:find("sync_status=1", 1, true) ~= nil, "只改干净行：脏行的时间归本地 revision")
     Assert.is_true(q.sql:find("updated_at>?", 1, true) ~= nil, "只降不升")
     Assert.eq(q.args[1], 1770062706)
-    Assert.eq(q.args[2], "ext.kavita")
+    Assert.eq(q.args[2], "kavita")
     Assert.eq(q.args[3], "700")
     Assert.eq(q.args[4], 1770062706)
     Assert.is_true(q.sql:find("INSERT INTO pending_progress", 1, true) == nil, "不新建行")

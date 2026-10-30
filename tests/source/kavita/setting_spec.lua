@@ -1,7 +1,7 @@
 --[[--
 Kavita 设置页：服务器 / API Key / 书库 / 漫画缓存 / 进度心跳 / 请求超时 / 连接测试。
 
-@module tests.extensions.kavita.setting_spec
+@module tests.source.kavita.setting_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field
 
@@ -27,7 +27,7 @@ end
 -- 源模块只在设置行里读两个默认值；真常量由 client_spec / source_spec 钉住。
 -- 「测试连接」还要走 client:request，返回内容由 request_reply 控制。
 local request_reply = { version = "0.9.0" }
-package.preload["moonsource_kavita.client"] = function()
+package.preload["source.kavita.client"] = function()
     return {
         DEFAULT_TIMEOUT = 60,
         new = function()
@@ -59,7 +59,7 @@ package.preload["ui/uimanager"] = function()
         nextTick = function(_, fn) pending_ticks[#pending_ticks + 1] = fn end,
     }
 end
-package.preload["moonsource_kavita.source"] = function()
+package.preload["source.kavita"] = function()
     return { DEFAULT_HEARTBEAT_INTERVAL = 30 }
 end
 package.preload["ui.themes.widgets.row"] = function()
@@ -105,7 +105,7 @@ local delete_ok, delete_code = true, nil
 local delete_all_ok, delete_all_code, delete_all_detail = true, nil, nil
 -- 占用 / 计划只在详情页各取一次（06 B 的「占用只算一次」）。
 local summary_calls, summary_all_calls, chapters_calls = 0, 0, 0
-package.preload["moonsource_kavita.cache"] = function()
+package.preload["source.kavita.cache"] = function()
     return {
         probe = function() return probe_result end,
         reprobe = function()
@@ -185,12 +185,12 @@ local Themed = require("support.theme_stubs")
 Themed.install()
 
 local Config = require("support.config")
-local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
-package.preload["moonsource_kavita.setting"] = function()
-    return dofile(PLUGIN .. "/moonsource_kavita/setting.lua")
+local PLUGIN = Config.root() .. "/book.koplugin/source/kavita"
+package.preload["source.kavita.setting"] = function()
+    return dofile(PLUGIN .. "/setting.lua")
 end
-package.preload["moonsource_kavita.busy"] = function()
-    return dofile(PLUGIN .. "/moonsource_kavita/busy.lua")
+package.preload["source.kavita.busy"] = function()
+    return dofile(PLUGIN .. "/busy.lua")
 end
 
 local overlays, shelf_events, overlay_updates = {}, {}, 0
@@ -209,7 +209,7 @@ package.preload["desktop.pages.setting.overlay"] = function()
     }
 end
 
-local Setting = require("moonsource_kavita.setting")
+local Setting = require("source.kavita.setting")
 
 local rows = Setting.rows({ path = PLUGIN, desktop = fake_desktop })
 -- 顺序用文案钉住（索引不再稳定），「漫画缓存」插在「书库」之后。
@@ -510,7 +510,7 @@ local install_text = install.rows[1](600).text or ""
 Assert.matches(install_text, "releases/latest")
 Assert.matches(install_text, "kamarecache.lua")
 Assert.matches(install_text, "增强版提供：缓存")
-Assert.matches(install_text, Config.root() .. "/extensions", "moon 自己的插件目录")
+Assert.matches(install_text, Config.root(), "插件目录（book.koplugin 的上级）")
 Assert.is_nil(findSection(missing, "清理"), "未安装不显示清理")
 
 -- 版本不兼容：安装说明前先讲清 API 不兼容（03 原型）。

@@ -1,17 +1,17 @@
 --[[--
-extensions/moonsource-kavita.koplugin/moonsource_kavita/cache.lua：kamare 缓存适配层。
+book.koplugin/source/kavita/cache.lua：kamare 缓存适配层。
 
 kamare 的 `kamarecache` 是唯一的缓存执行者。这里只做探测、能力门面、配置镜像、
 错误文案、书架投影与删除保护，所有 kamare 模块都在函数内 pcall require、不持有 table。
 
-@module tests.extensions.kavita.cache_spec
+@module tests.source.kavita.cache_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field
 
 local Assert = require("support.assert")
 local Config = require("support.config")
 
-local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
+local PLUGIN = Config.root() .. "/book.koplugin/source/kavita"
 
 -- 源配置：每个用例自己改；cache 只读 base_url / api_key。
 local cfg = {}
@@ -40,10 +40,10 @@ package.preload["utils.log"] = function()
     }
 end
 
-package.preload["moonsource_kavita.cache"] = function()
-    return dofile(PLUGIN .. "/moonsource_kavita/cache.lua")
+package.preload["source.kavita.cache"] = function()
+    return dofile(PLUGIN .. "/cache.lua")
 end
-local Cache = require("moonsource_kavita.cache")
+local Cache = require("source.kavita.cache")
 
 --- 清空 kamare 模块，模拟未安装。
 local function uninstall()

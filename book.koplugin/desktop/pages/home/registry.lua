@@ -29,6 +29,9 @@ local COMPONENT_MODULES = {
     "recent_hero", "recent_list", "recent_cards", "random", "shelf",
 }
 
+-- 内置书源自带的首页组件：源 id → 组件模块（id 前缀沿用 ext.<name>，已保存的首页布局不变）。
+local SOURCE_COMPONENTS = { ["kavita"] = "source.kavita.on_deck" }
+
 ---@type BookHomeComponent[]|nil
 local components
 local by_id = {}
@@ -129,6 +132,15 @@ function M.list()
         local component = require("desktop.pages.home." .. name)
         components[#components + 1] = component
         by_id[component.id] = component
+    end
+    for source_id, modname in pairs(SOURCE_COMPONENTS) do
+        local component, why = external(source_id, require(modname))
+        if component then
+            components[#components + 1] = component
+            by_id[component.id] = component
+        else
+            logger.error("desktop.home source component rejected", source_id, why)
+        end
     end
     for _idx, ext in ipairs(require("source.registry").extensions()) do
         for _cidx, item in ipairs(ext.home_widgets or {}) do

@@ -2,7 +2,7 @@
 extensions/moonsource-kavita.koplugin：经源注册表发现；书架、开书（单卷 / 选卷 / 失败）、
 封面、进度双向换算。HTTP 与书库全部打桩。
 
-@module tests.extensions.kavita.source_spec
+@module tests.source.kavita.source_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field
 
@@ -24,23 +24,26 @@ local JSON = {
 }
 package.loaded["json"] = JSON
 Themed.install()
-local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
+local PLUGIN = Config.root() .. "/book.koplugin/source/kavita"
 -- 走 preload 不改 package.path：runner 只还原 preload/loaded，插件根上的 main.lua 会顶掉月读的 main。
 for _idx, name in ipairs({ "client", "position", "annotation", "source", "setting", "cache", "volume_list", "stats" }) do
-    package.preload["moonsource_kavita." .. name] = function()
-        return dofile(PLUGIN .. "/moonsource_kavita/" .. name .. ".lua")
+    package.preload["source.kavita" .. (name == "source" and "" or "." .. name)] = function()
+        return dofile(PLUGIN .. "/" .. (name == "source" and "init" or name) .. ".lua")
     end
 end
 -- 首页组件另有 on_deck_spec；这里只验证描述表把它交出去。
-local on_deck = { id = "ext.kavita.on_deck" }
-package.preload["moonsource_kavita.on_deck"] = function() return on_deck end
+local on_deck = { id = "kavita.on_deck" }
+package.preload["source.kavita.on_deck"] = function() return on_deck end
 
 local cfg = { base_url = "http://kav/", api_key = " k ", libraries = { ["2"] = true, ["1"] = true } }
-local clock = { timezone = "CST-8" }
+local ffi = require("ffi")
+ffi.cdef("int setenv(const char *name, const char *value, int overwrite);")
+local function setTZ(tz) ffi.C.setenv("TZ", tz, 1) end
+setTZ("CST-8")
 package.preload["utils.settings"] = function()
     local common = { active_source = "local" }
     return {
-        get = function(key) return key == "features.clock" and clock or common end,
+        get = function() return common end,
         save = function() end,
         getSource = function() return cfg end,
         saveSource = function() end,
@@ -173,16 +176,14 @@ package.loaded["utils.paths"] = {
     bookWorkDir = function(id) return WORK .. "/" .. id end,
 }
 
-package.loaded["pluginloader"] = { enabled_plugins = { Config.selfPlugin(), { path = PLUGIN } } }
+package.loaded["pluginloader"] = { enabled_plugins = { Config.selfPlugin() } }
 package.loaded["source.registry"] = nil
 local Registry = require("source.registry")
 
-Assert.eq(Registry.meta("ext.kavita").type, "book")
-local source = Registry.resolve("ext.kavita")
+Assert.eq(Registry.meta("kavita").type, "book")
+local source = Registry.resolve("kavita")
 Assert.is_true(source:configured())
-Assert.eq(Registry.external("ext.kavita").setting, require("moonsource_kavita.setting"))
-Assert.eq(Registry.external("ext.kavita").home[1], on_deck)
-Assert.eq(require("moonsource_kavita.source").DEFAULT_HEARTBEAT_INTERVAL, 30, "设置页读的默认心跳间隔")
+Assert.eq(require("source.kavita").DEFAULT_HEARTBEAT_INTERVAL, 30, "设置页读的默认心跳间隔")
 
 ---@return any, any, any
 local function run(method, ...)
@@ -210,7 +211,7 @@ end
 local result = run("syncBooksAsync", nil)
 Assert.eq(#reconciled.books, 502)
 Assert.eq(result.pulled, 503, "对账 502 本 + 1 本漫画进度")
-Assert.eq(reconciled.source_id, "ext.kavita")
+Assert.eq(reconciled.source_id, "kavita")
 Assert.eq(reconciled.books[502].category, "漫画")
 Assert.eq(reconciled.books[1].stable_id, "1")
 Assert.eq(reconciled.books[1].meta.words, 120000, "书架带字数（0 = 未知，入库时丢掉）")
@@ -325,7 +326,7 @@ routes["GET /api/Series/metadata"] = metadata_route
 books["1"], books["2"], books["3"] = nil, nil, nil
 cfg.libraries = { ["1"] = true }
 
-local path = run("openBookAsync", { source_id = "ext.kavita", stable_id = "10", book = { title = "长夜" } }, nil)
+local path = run("openBookAsync", { source_id = "kavita", stable_id = "10", book = { title = "长夜" } }, nil)
 Assert.eq(path, WORK .. "/10/1000.epub")
 Assert.eq(touched[1].stable_id, "10")
 Assert.eq(tocs["10"][1].title, "Long Night", "卷名是纯数字、标题是哨兵时退到文件名")
@@ -337,7 +338,7 @@ Assert.eq(calls[#calls].headers["x-api-key"], "k", "下载带鉴权头")
 -- 已下载：直接开，不联网也不重新登记。
 online = false
 local before = #calls
-Assert.eq(run("openBookAsync", { source_id = "ext.kavita", stable_id = "10" }, nil), path)
+Assert.eq(run("openBookAsync", { source_id = "kavita", stable_id = "10" }, nil), path)
 Assert.eq(#calls, before)
 online = true
 
@@ -346,13 +347,13 @@ download.code, download.body = 500, "<html>oops</html>"
 routes["GET /api/Series/11"] = json({ id = 11, name = "坏书", libraryId = 1 })
 local saved = routes["GET /api/Series/volumes"]
 routes["GET /api/Series/volumes"] = json({ { id = 110, chapters = { { id = 1100, titleName = "坏", format = 3, pages = 1 } } } })
-local failed, ferr = run("openBookAsync", { source_id = "ext.kavita", stable_id = "11" }, nil)
+local failed, ferr = run("openBookAsync", { source_id = "kavita", stable_id = "11" }, nil)
 Assert.is_nil(failed)
 Assert.matches(ferr, "500")
 Assert.is_nil(io.open(WORK .. "/11/1100.epub"))
 download.code = 200
 tocs["11"] = nil
-failed, ferr = run("openBookAsync", { source_id = "ext.kavita", stable_id = "11" }, nil)
+failed, ferr = run("openBookAsync", { source_id = "kavita", stable_id = "11" }, nil)
 Assert.is_nil(failed)
 Assert.matches(ferr, "校验失败")
 Assert.is_nil(io.open(WORK .. "/11/1100.epub"))
@@ -360,19 +361,19 @@ routes["GET /api/Series/volumes"] = saved
 download.body = "PK\3\4epub"
 
 -- 图片目录格式没有可下载的单文件。
-failed, ferr = run("openBookAsync", { source_id = "ext.kavita", stable_id = "40" }, nil)
+failed, ferr = run("openBookAsync", { source_id = "kavita", stable_id = "40" }, nil)
 Assert.is_nil(failed)
 Assert.matches(ferr, "图片目录")
 
 -- 离线：没缓存目录就当场失败；有过期目录照用（这里卷已下载，直接开）。
 online = false
-failed, ferr = run("openBookAsync", { source_id = "ext.kavita", stable_id = "50" }, nil)
+failed, ferr = run("openBookAsync", { source_id = "kavita", stable_id = "50" }, nil)
 Assert.is_nil(failed)
 Assert.matches(ferr, "网络不可用")
 online = true
 
 -- 多卷：选卷列表标已读，选中后下到隐藏卷行。
-local multi = { source_id = "ext.kavita", stable_id = "20", book = { stable_id = "20", title = "合集", authors = "丙" } }
+local multi = { source_id = "kavita", stable_id = "20", book = { stable_id = "20", title = "合集", authors = "丙" } }
 local opened, oerr
 source:openBookAsync(multi, nil, function(p, e) opened, oerr = p, e end)
 Stubs.flush()
@@ -389,11 +390,11 @@ Assert.eq(remembered["20:2002"].authors, "丙", "卷行继承容器作者，最�
 Assert.is_nil(remembered["20:2002"].deleted, "卷行不上书架")
 
 -- 多卷 series 的阅读统计都记在卷行上：容器详情用 statsIdentities 把各卷并进来。
-local ids = source:statsIdentities({ source_id = "ext.kavita", stable_id = "20" })
+local ids = source:statsIdentities({ source_id = "kavita", stable_id = "20" })
 Assert.eq(table.concat(ids or {}, ","), "20:2001,20:2002")
-Assert.is_nil(source:statsIdentities({ source_id = "ext.kavita", stable_id = "20:2002" }),
+Assert.is_nil(source:statsIdentities({ source_id = "kavita", stable_id = "20:2002" }),
     "卷行只看自己")
-Assert.is_nil(source:statsIdentities({ source_id = "ext.kavita", stable_id = "10" }),
+Assert.is_nil(source:statsIdentities({ source_id = "kavita", stable_id = "10" }),
     "单卷 series 直接记在 series 行")
 
 -- 容器行的作者是 fetchToc 在这次开书里才写回的，identity.book 是开书那一刻的旧快照：
@@ -411,7 +412,7 @@ routes["GET /api/Series/volumes"] = function(opts)
     return volumes_route(opts)
 end
 source:openBookAsync(
-    { source_id = "ext.kavita", stable_id = "21", book = { stable_id = "21", title = "合集21" } },
+    { source_id = "kavita", stable_id = "21", book = { stable_id = "21", title = "合集21" } },
     nil, function() end)
 Stubs.flush()
 Themed.choose(Themed.last("list"), 1)
@@ -445,7 +446,7 @@ do
             { id = 871, chapters = { { id = 87011, titleName = "第2卷", format = 1, pages = 100, pagesRead = 30 } } },
         })
     end
-    source:openBookAsync({ source_id = "ext.kavita", stable_id = "8701", book = books["8701"] }, nil,
+    source:openBookAsync({ source_id = "kavita", stable_id = "8701", book = books["8701"] }, nil,
         function() end)
     Stubs.flush()
     Assert.eq(tocs["8701"][1].pagesRead, 100, "打开系列就拉到最新进度")
@@ -478,7 +479,7 @@ Assert.eq(source:volumeParent("20:2002"), "20")
 Assert.is_nil(source:volumeParent("20"))
 
 -- 拉进度：远端 spine + 锚点 → xpointer；没读过算空。
-local volume = { source_id = "ext.kavita", stable_id = "20:2002" }
+local volume = { source_id = "kavita", stable_id = "20:2002" }
 local remote = { pageNum = 3, bookScrollId = "//body/div[1]/p[5]" }
 routes["GET /api/Reader/get-progress"] = function() return json(remote) end
 local pos, _err, meta = run("getProgressAsync", volume)
@@ -532,7 +533,7 @@ run("putProgressAsync", volume, { fraction = 1, locator = "/body/DocFragment[10]
 Assert.eq(sent.pageNum, 10)
 
 -- PDF：按页换算；series 行靠登记的文件名认卷。
-local pdf = { source_id = "ext.kavita", stable_id = "30" }
+local pdf = { source_id = "kavita", stable_id = "30" }
 Assert.eq(run("openBookAsync", pdf, nil), nil, "文件头不是 %PDF")
 download.body = "%PDF-1.7"
 Assert.eq(run("openBookAsync", pdf, nil), WORK .. "/30/3000.pdf")
@@ -1322,7 +1323,7 @@ end
 
 -- 取不到当前用户（/api/Users/me 不可用）→ 不过滤 + 记日志，不能因此不落库。
 routes["GET /api/Users/me"] = { code = 404, body = "" }
-local fresh = require("moonsource_kavita.source").new()
+local fresh = require("source.kavita").new()
 local warned = {}
 local log = require("utils.log")
 local real_warn = log.warn
@@ -1357,23 +1358,23 @@ routes["GET /api/Series/metadata"] = function(opts)
     Assert.eq(query(opts, "seriesId"), "20")
     return json({ summary = "卷简介", writers = { { name = "丁" } } })
 end
-local detail = run("getDetailAsync", { source_id = "ext.kavita", stable_id = "20:2002" })
+local detail = run("getDetailAsync", { source_id = "kavita", stable_id = "20:2002" })
 Assert.eq(detail.intro, "第二卷简介", "详情补简介不能把卷摘要盖成整部简介")
 Assert.eq(remembered["20:2002"].authors, "丁")
 -- 目录里没有这一卷 / 这一卷没有摘要：保留行里已有的简介，最后才退回系列简介。
 tocs["20"][2].summary = nil
 books["20:2002"] = { intro = "已有卷简介" }
-Assert.eq(run("getDetailAsync", { source_id = "ext.kavita", stable_id = "20:2002" }).intro, "已有卷简介",
+Assert.eq(run("getDetailAsync", { source_id = "kavita", stable_id = "20:2002" }).intro, "已有卷简介",
     "没有卷摘要时不清空已有简介")
 books["20:2002"] = nil
-Assert.eq(run("getDetailAsync", { source_id = "ext.kavita", stable_id = "20:2002" }).intro, "卷简介",
+Assert.eq(run("getDetailAsync", { source_id = "kavita", stable_id = "20:2002" }).intro, "卷简介",
     "确认没有卷摘要才退回系列简介")
 -- 旧目录缓存不认识卷摘要（升级前拉的目录）：问一次单章接口，几 KB。
 routes["GET /api/Series/chapter"] = function(opts)
     Assert.eq(query(opts, "chapterId"), "2002")
     return json({ id = 2002, summary = "单章摘要" })
 end
-Assert.eq(run("getDetailAsync", { source_id = "ext.kavita", stable_id = "20:2002" }).intro, "单章摘要",
+Assert.eq(run("getDetailAsync", { source_id = "kavita", stable_id = "20:2002" }).intro, "单章摘要",
     "目录没带卷摘要时用单章接口补")
 routes["GET /api/Series/chapter"] = nil
 
@@ -1392,7 +1393,7 @@ do
     end
 
     -- 增强版：open 由 spec 控制返回；register_server 只用于镜像，不参与断言。
-    local Cache = require("moonsource_kavita.cache")
+    local Cache = require("source.kavita.cache")
     local opened, reply = {}, nil
     package.loaded["kamarecache"] = {
         api_version = 1,
@@ -1413,7 +1414,7 @@ do
     }
     tocs["60"] = toc
     books["60"] = { stable_id = "60", title = "漫画", authors = "甲", intro = "简介", category = "漫画" }
-    local ref = { source_id = "ext.kavita", stable_id = "60:6001", book = books["60"] }
+    local ref = { source_id = "kavita", stable_id = "60:6001", book = books["60"] }
 
     -- 阅读统计只由 core 落库：源这一路碰都不该碰。
     local stats_read = false
@@ -1476,7 +1477,7 @@ do
     Assert.eq(remembered["60:6001"].title, "漫画 · 第2话", "卷行缺书时用目录卷名补元数据")
     Assert.eq(remembered["60:6001"].authors, "甲", "卷行继承容器作者")
     Assert.eq(#dirty, 0, "不产生 dirty 行（sync_status=0 才进推送队列）")
-    Assert.eq(#require("book.progress_db").unsynced("ext.kavita"), 0, "身份不在 unsynced 里")
+    Assert.eq(#require("book.progress_db").unsynced("kavita"), 0, "身份不在 unsynced 里")
     Assert.is_false(stats_read, "不产生 reading_stats 行")
 
     -- 读完当前卷也只按卷数聚合：全卷读完才 100%。
@@ -1532,7 +1533,7 @@ do
     written, remembered, opened = {}, {}, {}
     reply = function() return { kind = "viewer" } end
     local single_path, single_err, single_meta
-    source:openBookAsync({ source_id = "ext.kavita", stable_id = "60", book = books["60"] }, nil,
+    source:openBookAsync({ source_id = "kavita", stable_id = "60", book = books["60"] }, nil,
         function(p, e, m) single_path, single_err, single_meta = p, e, m end)
     Stubs.flush()
     Assert.is_nil(single_path)
@@ -1563,7 +1564,7 @@ do
     old_file:write("PK\3\4cbz")
     old_file:close()
     books["60:6001"] = { stable_id = "60:6001", path = old_cbz }
-    local comic = { source_id = "ext.kavita", stable_id = "60", book = books["60"] }
+    local comic = { source_id = "kavita", stable_id = "60", book = books["60"] }
 
     opened = {}
     reply = function() return {} end
@@ -1587,7 +1588,7 @@ do
 
     reply = function() return nil, "offline_not_cached", "这一卷还没缓存，联网后可下载" end
     local offline_path, offline_err = run("openBookAsync",
-        { source_id = "ext.kavita", stable_id = "60:6001", book = books["60"] }, nil)
+        { source_id = "kavita", stable_id = "60:6001", book = books["60"] }, nil)
     Assert.eq(offline_path, old_cbz, "未缓存离线：先用盘上的旧 cbz")
     Assert.is_nil(offline_err)
 
@@ -1679,7 +1680,7 @@ end
 -- 官方 / 旧版 kamare（无 kamarecache）：没有 journal，起始页由 moon 补：
 -- 本地卷行（关查看器时写的真实页）优先，本机没读过才问 Kavita（03 A2 降级通道）。
 do
-    local Cache = require("moonsource_kavita.cache")
+    local Cache = require("source.kavita.cache")
     local legacy_shown = {}
     package.loaded["kamarecache"] = nil
     package.loaded["kamareimageviewer"] = { new = function(_self, spec) return spec end }
@@ -1691,7 +1692,7 @@ do
 
     local entry = { chapterId = 6001, volumeId = 601, libraryId = 3, seriesId = 60,
         format = "cbz", pages = 20, title = "第2话" }
-    local legacy_ref = { source_id = "ext.kavita", stable_id = "60:6001" }
+    local legacy_ref = { source_id = "kavita", stable_id = "60:6001" }
 
     ---@return table got, table|nil job, table|nil viewer
     local function openLegacy()
@@ -1767,7 +1768,7 @@ end
 
 -- 漫画 cbz 用内置阅读器时进度同样上报：页级 0-based，读完发 pages（Kavita 据此标已读）。
 sent = nil
-local cbz = { source_id = "ext.kavita", stable_id = "60:6000" }
+local cbz = { source_id = "kavita", stable_id = "60:6000" }
 Assert.is_true(run("putProgressAsync", cbz, { fraction = 0.1, page = 4, total_pages = 30 }))
 Assert.eq(sent.pageNum, 3, "cbz 页码 1-based → Kavita 0-based")
 Assert.eq(sent.chapterId, 6000)
@@ -2011,7 +2012,7 @@ do
     Assert.is_true(not source._heartbeat.busy, "回包落地后 busy 复位")
 
     -- 换书：停旧心跳，为新书重排。
-    local other = { source_id = "ext.kavita", stable_id = "20:2001" }
+    local other = { source_id = "kavita", stable_id = "20:2001" }
     source:onEvent("page_changed", { identity = other, position = { fraction = 0.1 } })
     Assert.len(scheduled, 1, "换书只留一个心跳")
     Assert.eq(source._heartbeat.identity.stable_id, "20:2001")
@@ -2108,7 +2109,7 @@ local function readFile(path)
     file:close()
     return content
 end
-local history = dofile(Config.root() .. "/tests/extensions/kavita/fixtures/history_7453.lua")
+local history = dofile(Config.root() .. "/tests/source/kavita/fixtures/history_7453.lua")
 local history_pages = { {}, {} }
 for _idx, entry in ipairs(history) do
     local page = #history_pages[1] < 50 and 1 or 2
@@ -2146,7 +2147,7 @@ for _idx, row in ipairs(pulled.rows) do
     if row.record_type == "total" then pulled_total = row end
 end
 Assert.eq(pulled_total.duration, 14237, "两页合并后与样本书基线一致")
-Assert.eq(pulled_total.source_id, "ext.kavita")
+Assert.eq(pulled_total.source_id, "kavita")
 Assert.eq(pulled.replace.mode, "ranges")
 Assert.len(pulled.replace.books, 2, "本次身份（7453 的 4 章里读过两卷）")
 Assert.contains(pulled.replace.books, "7453:11273")
@@ -2155,11 +2156,11 @@ Assert.len(history_calls, 2, "目录命中缓存，不为身份判定多请求")
 
 -- 设备时钟的 POSIX 串映射不出 IANA 时区（自定义 / 未知）时回退 UTC：服务端只认 IANA，
 -- 宁可与设备差一天，不静默用错时区。
-clock.timezone = "NOPE-1"
+setTZ("NOPE-1")
 history_calls = {}
 Assert.not_nil(run("pullStatsAsync"))
 Assert.matches(history_calls[1], "TimeZoneId=UTC", "无法识别的时区回退 UTC")
-clock.timezone = "CST-8"
+setTZ("CST-8")
 
 -- 身份判定：目录缓存里没有的系列走 Source:toc（在线拉目录）后逐卷记；目录拿不到的系列整条跳过
 -- （不猜单卷 / 多卷），不中断其它系列。判定结果随 commit 记进状态文件，下一轮不再请求目录。
@@ -2432,7 +2433,7 @@ end
 -- 框架集成：一次统计同步 = 先本地确认（push）再拉取（pull）落库；dirty_only（推脏）只推不拉。
 do
     local pending_stats = { {
-        id = 21, source_id = "ext.kavita", stable_id = "8661", record_type = "page", page = 3,
+        id = 21, source_id = "kavita", stable_id = "8661", record_type = "page", page = 3,
         start_time = 1000, duration = 30, total_pages = 10,
     } }
     local events, marked, replaced = {}, nil, nil
@@ -2466,7 +2467,7 @@ do
 
     local result = run("syncStatsAsync", nil)
     Assert.eq(marked[1], 21, "先本地确认本地待同步行")
-    Assert.eq(replaced.source_id, "ext.kavita")
+    Assert.eq(replaced.source_id, "kavita")
     local pulled_8661 = false
     for _idx, row in ipairs(replaced.rows) do
         if row.stable_id == "8661" then pulled_8661 = true end
@@ -2482,7 +2483,7 @@ do
 
     -- dirty_only（推脏队列）：只做本地确认，不发请求——拉取挂在打开 / 切换与手动刷新上。
     pending_stats = { {
-        id = 22, source_id = "ext.kavita", stable_id = "8661", record_type = "page", page = 4,
+        id = 22, source_id = "kavita", stable_id = "8661", record_type = "page", page = 4,
         start_time = 1100, duration = 30, total_pages = 10,
     } }
     marked, replaced, events = nil, nil, {}
@@ -2758,7 +2759,7 @@ end
 -- 已删除的「多设备统计合并」开关：旧配置残留的键在源实例化时清掉。
 ----------------------------------------------------------------------
 cfg.merge_local_stats = true
-require("moonsource_kavita.source").new()
+require("source.kavita").new()
 Assert.is_nil(cfg.merge_local_stats, "旧开关残留键不能让核心继续按开启合并")
 
 os.execute("rm -rf '" .. WORK .. "'")

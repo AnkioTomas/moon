@@ -1,14 +1,14 @@
 --[[--
 extensions/moonsource-kavita.koplugin：xpointer ↔ Kavita pageNum / bookScrollId 换算。
 
-@module tests.extensions.kavita.position_spec
+@module tests.source.kavita.position_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field
 
 local Assert = require("support.assert")
 local Config = require("support.config")
 
-local Position = dofile(Config.root() .. "/extensions/moonsource-kavita.koplugin/moonsource_kavita/position.lua")
+local Position = dofile(Config.root() .. "/book.koplugin/source/kavita/position.lua")
 
 -- spine：DocFragment[D] = spine D-1；单 spine 书没有下标。
 Assert.eq(Position.spine("/body/DocFragment[8]/body/p[2]/text().0"), 7)

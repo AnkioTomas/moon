@@ -1,9 +1,9 @@
 --[[--
-moonsource_kavita.stats：reading-history 条目 → reading_stats 行 / 替换指令 / 身份与时区映射。
+source.kavita.stats：reading-history 条目 → reading_stats 行 / 替换指令 / 身份与时区映射。
 
 对账基线 = research-kavita-stats-pull.md §3（样本 series 7453：64 条会话 / 14,237s）。
 
-@module tests.extensions.kavita.stats_spec
+@module tests.source.kavita.stats_spec
 --]]
 
 local Assert = require("support.assert")
@@ -26,11 +26,11 @@ package.preload["utils.log"] = function()
     }
 end
 
-local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
-package.preload["moonsource_kavita.stats"] = function()
-    return dofile(PLUGIN .. "/moonsource_kavita/stats.lua")
+local PLUGIN = Config.root() .. "/book.koplugin/source/kavita"
+package.preload["source.kavita.stats"] = function()
+    return dofile(PLUGIN .. "/stats.lua")
 end
-local Stats = require("moonsource_kavita.stats")
+local Stats = require("source.kavita.stats")
 
 -- 固定拉取时刻（2026-10-16T12:00:00Z，晚于样本最后一天）：last_time / book_total.start_time 都对它断言
 local FETCHED = 1792152000
@@ -62,9 +62,9 @@ end
 
 do
     -- 对账：样本《太空漫游 · 2010》64 条会话。逐日时长 / 页数为 research §3 的已知值。
-    local history = dofile(Config.root() .. "/tests/extensions/kavita/fixtures/history_7453.lua")
+    local history = dofile(Config.root() .. "/tests/source/kavita/fixtures/history_7453.lua")
     local result = Stats.fromHistory(history, {
-        source_id = "ext.kavita",
+        source_id = "kavita",
         fetched_at = FETCHED,
         volumes = { [7453] = 4 },
         seen = { "7453:11270" },
@@ -152,7 +152,7 @@ do
         -- 云端快照没有页坐标，所有行 page / total_pages 恒为 0
         Assert.eq(row.page, 0, "云端行 page=0")
         Assert.eq(row.total_pages, 0, "云端行 total_pages=0")
-        Assert.eq(row.source_id, "ext.kavita")
+        Assert.eq(row.source_id, "kavita")
     end
     Assert.eq(book_days, 8, "11271 一天 + 11273 七天")
     Assert.eq(book_totals, 2, "每卷一条累计快照")
@@ -202,7 +202,7 @@ do
         { seriesId = 66, localDate = "2026-10-10T00:00:00", chapters = {
             { chapterId = 21, durationSeconds = 70, pagesRead = 0 },
         } },
-    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [55] = 2, [66] = 1 } })
+    }, { source_id = "kavita", fetched_at = 2000, volumes = { [55] = 2, [66] = 1 } })
     local day = dayTs(2026, 10, 10)
     Assert.eq(find(result.rows, "book_day", "55:11", day).duration, 100)
     Assert.eq(find(result.rows, "book_day", "55:12", day).duration, 50)
@@ -235,7 +235,7 @@ do
                 { chapterId = 1, startTimeUtc = "2026-10-16T16:30:00", durationSeconds = 40, pagesRead = 0 },
                 { chapterId = 1, startTimeUtc = "2026-10-17T15:50:00", durationSeconds = 60, pagesRead = 0 },
             } },
-    }, { source_id = "ext.kavita", fetched_at = FETCHED, volumes = { [31] = 2, [32] = 2, [33] = 2 } })
+    }, { source_id = "kavita", fetched_at = FETCHED, volumes = { [31] = 2, [32] = 2, [33] = 2 } })
     local d16, d17 = dayTs(2026, 10, 16), dayTs(2026, 10, 17)
     Assert.eq(find(result.rows, "day", "__kv:day:" .. d16, d16).duration, 60, "本地 07:59 落本地当天")
     Assert.eq(find(result.rows, "hour", "__kv:hour:" .. hourTs(2026, 10, 16, 7)).duration, 60, "本地 7 点格")
@@ -257,7 +257,7 @@ do
         { seriesId = 7, localDate = "2026-10-02T00:00:00", chapters = {
             { chapterId = 1, durationSeconds = 10, pagesRead = -3 },
             { chapterId = 1, durationSeconds = 10, pagesRead = -4 } } },
-    }, { source_id = "ext.kavita", fetched_at = 3000, volumes = { [7] = 2 } })
+    }, { source_id = "kavita", fetched_at = 3000, volumes = { [7] = 2 } })
     Assert.eq(find(result.rows, "day", "__kv:day:" .. d1, d1).event_count, 0, "正负相抵为净 0")
     Assert.eq(find(result.rows, "day", "__kv:day:" .. d2, d2).event_count, 0, "负和钳制到 0")
     Assert.eq(find(result.rows, "day", "__kv:day:" .. d1, d1).duration, 20)
@@ -272,7 +272,7 @@ do
     local result = Stats.fromHistory({
         { seriesId = 21, localDate = "2026-10-16T00:00:00",
             chapters = { { chapterId = 1, durationSeconds = 300, pagesRead = 1 } } },
-    }, { source_id = "ext.kavita", fetched_at = fetched, volumes = { [21] = 2 } })
+    }, { source_id = "kavita", fetched_at = fetched, volumes = { [21] = 2 } })
     local day_range
     for _idx, range in ipairs(result.replace.ranges) do
         if range.stable_prefix == "__kv:day:" then day_range = range end
@@ -301,7 +301,7 @@ do
         -- 目录拿不到章数的系列判不出身份：整体跳过，不猜单卷 / 多卷
         { seriesId = 999, localDate = "2026-10-03T00:00:00", chapters = {
             { chapterId = 1, durationSeconds = 100, pagesRead = 1 } } },
-    }, { source_id = "ext.kavita", fetched_at = 4000, volumes = { [8] = 2 }, seen = { "8:1" } })
+    }, { source_id = "kavita", fetched_at = 4000, volumes = { [8] = 2 }, seen = { "8:1" } })
     Assert.eq(find(result.rows, "book_day", "8:1", d).duration, 60)
     Assert.eq(find(result.rows, "day", "__kv:day:" .. d, d).event_count, 0, "零时长条目的页数不算")
     Assert.eq(find(result.rows, "total", "__kv:total", 0).duration, 60, "跳过的系列不进总量")
@@ -316,7 +316,7 @@ do
     Assert.is_true(mentioned, "跳过的系列要能被日志定位")
 
     -- 空回包不炸：仍给出完整的替换指令（全量重拉窗口照旧清）
-    local empty = Stats.fromHistory(nil, { source_id = "ext.kavita", fetched_at = 4000 })
+    local empty = Stats.fromHistory(nil, { source_id = "kavita", fetched_at = 4000 })
     Assert.len(empty.rows, 0)
     Assert.len(empty.identities, 0)
     Assert.len(empty.replace.books, 0)
@@ -328,7 +328,7 @@ do
     local result = Stats.fromHistory({
         { seriesId = 9, localDate = "2026-10-04T00:00:00", chapters = {
             { chapterId = 1, durationSeconds = 5, pagesRead = 0 } } },
-    }, { source_id = "ext.kavita", fetched_at = 5000, volumes = { [9] = 2 },
+    }, { source_id = "kavita", fetched_at = 5000, volumes = { [9] = 2 },
         seen = { "9:1", "", "9:1", "stale" } })
     Assert.eq(#result.replace.books, 2)
     Assert.contains(result.replace.books, "9:1")
@@ -403,7 +403,7 @@ do
             { chapterId = 2, durationSeconds = 300, pagesRead = 3,
               startTimeUtc = "2026-10-10T09:20:00.0000000" },
         } },
-    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [66] = 1 } })
+    }, { source_id = "kavita", fetched_at = 2000, volumes = { [66] = 1 } })
 
     local first = find(result.rows, "cloud_session", "66", hourTs(2026, 10, 10, 17))
     Assert.not_nil(first, "会话行按章切片的本地起始时刻落行")
@@ -426,7 +426,7 @@ do
             { chapterId = 1, durationSeconds = 0, pagesRead = 0,
               startTimeUtc = "2026-10-10T10:00:00.0000000" },
         } },
-    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [66] = 1 } })
+    }, { source_id = "kavita", fetched_at = 2000, volumes = { [66] = 1 } })
     Assert.is_nil(find(zero.rows, "cloud_session", "66"), "打开没读的会话不落行")
 end
 
@@ -451,7 +451,7 @@ do
             { chapterId = 4, durationSeconds = 600, pagesRead = 7, startPage = 15, endPage = 15,
               totalPages = 22, startTimeUtc = "2026-10-10T11:00:00.0000000" },
         } },
-    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [70] = 1, [71] = 1, [72] = 1 } })
+    }, { source_id = "kavita", fetched_at = 2000, volumes = { [70] = 1, [71] = 1, [72] = 1 } })
 
     local image = find(result.rows, "cloud_session", "70", hourTs(2026, 10, 10, 17))
     Assert.not_nil(image, "Image 漫画的会话行")
@@ -518,7 +518,7 @@ do
     local day = dayTs(2026, 10, 10)
     local function check(entries, label)
         local result = Stats.fromHistory(entries,
-            { source_id = "ext.kavita", fetched_at = 2000, volumes = { [100] = 1 } })
+            { source_id = "kavita", fetched_at = 2000, volumes = { [100] = 1 } })
         local sum = 0
         local session_rows = 0
         for _idx, row in ipairs(result.rows) do
@@ -562,7 +562,7 @@ do
         { seriesId = 101, seriesFormat = 0, startTimeUtc = "2026-10-11T03:00:00", chapters = {
             { chapterId = 1, durationSeconds = 120, pagesRead = 5, startPage = 60, endPage = 70,
               totalPages = 100, startTimeUtc = "2026-10-11T03:00:00" } } },
-    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [101] = 1 } })
+    }, { source_id = "kavita", fetched_at = 2000, volumes = { [101] = 1 } })
 
     local jump = find(result.rows, "cloud_session", "101", hourTs(2026, 10, 11, 10))
     Assert.not_nil(jump, "零时长但有推进的章行也发行（页数是真推进）")
@@ -586,7 +586,7 @@ do
         { seriesId = 102, seriesFormat = 1, startTimeUtc = "2026-10-12T02:00:00", chapters = {
             { chapterId = 1, durationSeconds = 60, pagesRead = 40, startPage = 0, endPage = 250,
               totalPages = 194, startTimeUtc = "2026-10-12T02:00:00" } } },
-    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [102] = 1 } })
+    }, { source_id = "kavita", fetched_at = 2000, volumes = { [102] = 1 } })
     local row = find(result.rows, "cloud_session", "102", hourTs(2026, 10, 12, 10))
     Assert.not_nil(row)
     Assert.eq(row.event_count, 194, "推进钳到总页数")
@@ -598,7 +598,7 @@ do
         { seriesId = 103, seriesFormat = 0, startTimeUtc = "2026-10-12T05:00:00", chapters = {
             { chapterId = 1, durationSeconds = 60, pagesRead = 9, endPage = 77,
               startTimeUtc = "2026-10-12T05:00:00" } } },
-    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [103] = 1 } })
+    }, { source_id = "kavita", fetched_at = 2000, volumes = { [103] = 1 } })
     local no_total = find(unknown.rows, "cloud_session", "103", hourTs(2026, 10, 12, 13))
     Assert.not_nil(no_total)
     Assert.eq(no_total.event_count, 77, "缺总页数就照 endPage 算")
@@ -622,7 +622,7 @@ do
         { seriesId = 80, seriesFormat = 0, startTimeUtc = "2026-10-13T05:00:00", chapters = {
             { chapterId = 2, durationSeconds = 60, pagesRead = 45, endPage = 50, totalPages = 60,
               startTimeUtc = "2026-10-13T05:00:00" } } },
-    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [80] = 2 } })
+    }, { source_id = "kavita", fetched_at = 2000, volumes = { [80] = 2 } })
 
     Assert.eq(find(result.rows, "cloud_session", "80:1", hourTs(2026, 10, 13, 10)).event_count, 10)
     Assert.eq(find(result.rows, "cloud_session", "80:1", hourTs(2026, 10, 13, 11)).event_count, 20)
@@ -648,7 +648,7 @@ do
         { seriesId = 203, seriesFormat = 4, startTimeUtc = "2026-10-14T04:00:00", chapters = {
             { chapterId = 1, durationSeconds = 60, pagesRead = 4, endPage = 99,
               totalPages = 120, startTimeUtc = "2026-10-14T04:00:00" } } },
-    }, { source_id = "ext.kavita", fetched_at = 2000, volumes = { [202] = 1, [203] = 1 } })
+    }, { source_id = "kavita", fetched_at = 2000, volumes = { [202] = 1, [203] = 1 } })
 
     local first = find(result.rows, "cloud_session", "202", hourTs(2026, 10, 14, 10))
     local again = find(result.rows, "cloud_session", "202", hourTs(2026, 10, 14, 11))

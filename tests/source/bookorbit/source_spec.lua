@@ -2,7 +2,7 @@
 extensions/moonsource-bookorbit.koplugin：经源注册表发现；书架（按库分页、库名分类、空库保护）、
 开书（挑格式、下载、失败清理）、封面、详情、kosync 进度双向、划线上传。HTTP 与书库全部打桩。
 
-@module tests.extensions.bookorbit.source_spec
+@module tests.source.bookorbit.source_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field
 
@@ -30,11 +30,11 @@ local JSON = {
 }
 package.loaded["json"] = JSON
 Themed.install()
-local PLUGIN = Config.root() .. "/extensions/moonsource-bookorbit.koplugin"
+local PLUGIN = Config.root() .. "/book.koplugin/source/bookorbit"
 -- 走 preload 不改 package.path：runner 只还原 preload/loaded，插件根上的 main.lua 会顶掉月读的 main。
 for _idx, name in ipairs({ "client", "source", "setting" }) do
-    package.preload["moonsource_bookorbit." .. name] = function()
-        return dofile(PLUGIN .. "/moonsource_bookorbit/" .. name .. ".lua")
+    package.preload["source.bookorbit" .. (name == "source" and "" or "." .. name)] = function()
+        return dofile(PLUGIN .. "/" .. (name == "source" and "init" or name) .. ".lua")
     end
 end
 
@@ -116,14 +116,13 @@ package.loaded["utils.paths"] = {
     bookWorkDir = function(id) return WORK .. "/" .. id end,
 }
 
-package.loaded["pluginloader"] = { enabled_plugins = { Config.selfPlugin(), { path = PLUGIN } } }
+package.loaded["pluginloader"] = { enabled_plugins = { Config.selfPlugin() } }
 package.loaded["source.registry"] = nil
 local Registry = require("source.registry")
 
-Assert.eq(Registry.meta("ext.bookorbit").type, "book")
-local source = Registry.resolve("ext.bookorbit")
+Assert.eq(Registry.meta("bookorbit").type, "book")
+local source = Registry.resolve("bookorbit")
 Assert.is_true(source:configured())
-Assert.eq(Registry.external("ext.bookorbit").setting, require("moonsource_bookorbit.setting"))
 
 ---@return any, any, any
 local function run(method, ...)
@@ -137,7 +136,7 @@ local function run(method, ...)
 end
 
 -- 地址照抄 /api/v1 也认；用户名去首尾空白。
-local Client = require("moonsource_bookorbit.client")
+local Client = require("source.bookorbit.client")
 Assert.eq(Client.normalizeUrl(" https://b.example.com/api/v1/koreader/ "), "https://b.example.com")
 Assert.is_false(Client.new({ server_url = "http://x", username = "u" }):configured())
 
@@ -155,7 +154,7 @@ routes["GET /koreader/plugin/catalog/books"] = function(opts)
 end
 local result = run("syncBooksAsync", nil)
 Assert.eq(result.pulled, 3)
-Assert.eq(reconciled.source_id, "ext.bookorbit")
+Assert.eq(reconciled.source_id, "bookorbit")
 Assert.eq(reconciled.books[1].stable_id, "1")
 Assert.eq(reconciled.books[1].authors, "甲 / 乙")
 Assert.eq(reconciled.books[1].series, "夜")
@@ -194,7 +193,7 @@ routes["GET /koreader/plugin/catalog/books/1"] = function(opts)
         { id = 10, format = "m4b" }, { id = 11, format = "PDF" }, { id = 12, format = "EPUB", sizeBytes = 9 },
     } })
 end
-local path = run("openBookAsync", { source_id = "ext.bookorbit", stable_id = "1" }, nil)
+local path = run("openBookAsync", { source_id = "bookorbit", stable_id = "1" }, nil)
 Assert.eq(path, WORK .. "/1/12.epub")
 Assert.eq(touched[1].stable_id, "1")
 Assert.eq(remembered["1"].intro, "简介")
@@ -211,44 +210,44 @@ Assert.is_nil(io.open(path .. ".part"), "临时文件改名后不留")
 -- 已下载：直接开，不联网。
 online = false
 local before = #calls
-Assert.eq(run("openBookAsync", { source_id = "ext.bookorbit", stable_id = "1" }, nil), path)
+Assert.eq(run("openBookAsync", { source_id = "bookorbit", stable_id = "1" }, nil), path)
 Assert.eq(#calls, before)
-local offline, oerr = run("openBookAsync", { source_id = "ext.bookorbit", stable_id = "2" }, nil)
+local offline, oerr = run("openBookAsync", { source_id = "bookorbit", stable_id = "2" }, nil)
 Assert.is_nil(offline)
 Assert.matches(oerr, "网络不可用")
 online = true
 
 -- 没有能开的格式；下载非 2xx / 文件头不对都删文件报错。
 routes["GET /koreader/plugin/catalog/books/2"] = json({ id = 2, title = "听书", files = { { id = 20, format = "m4b" } } })
-local failed, ferr = run("openBookAsync", { source_id = "ext.bookorbit", stable_id = "2" }, nil)
+local failed, ferr = run("openBookAsync", { source_id = "bookorbit", stable_id = "2" }, nil)
 Assert.is_nil(failed)
 Assert.matches(ferr, "没有 KOReader 能打开")
 routes["GET /koreader/plugin/catalog/books/3"] = json({ id = 3, title = "坏书", files = { { id = 30, format = "epub" } } })
 download.code, download.body = 500, "<html>oops</html>"
-failed, ferr = run("openBookAsync", { source_id = "ext.bookorbit", stable_id = "3" }, nil)
+failed, ferr = run("openBookAsync", { source_id = "bookorbit", stable_id = "3" }, nil)
 Assert.is_nil(failed)
 Assert.matches(ferr, "500")
 Assert.is_nil(io.open(WORK .. "/3/30.epub.part"))
 download.code = 200
-failed, ferr = run("openBookAsync", { source_id = "ext.bookorbit", stable_id = "3" }, nil)
+failed, ferr = run("openBookAsync", { source_id = "bookorbit", stable_id = "3" }, nil)
 Assert.is_nil(failed)
 Assert.matches(ferr, "校验失败")
 Assert.is_nil(io.open(WORK .. "/3/30.epub"))
 download.body = "PK\3\4epub"
 
 -- 详情页补简介。
-local detail = run("getDetailAsync", { source_id = "ext.bookorbit", stable_id = "1" })
+local detail = run("getDetailAsync", { source_id = "bookorbit", stable_id = "1" })
 Assert.eq(detail.intro, "简介")
 Assert.eq(detail.title, "长夜")
 Assert.eq(detail.meta.isbn, "9787000000000")
 Assert.eq(decode_mode, SIMPLE, "响应按 simple 模式解析（null → nil）")
 routes["GET /koreader/plugin/catalog/books/4"] = json({ id = 4, title = "无日期", publishedYear = 1999, files = {} })
-Assert.eq(run("getDetailAsync", { source_id = "ext.bookorbit", stable_id = "4" }).meta.published, 1999, "没有日期退到年份")
+Assert.eq(run("getDetailAsync", { source_id = "bookorbit", stable_id = "4" }).meta.published, 1999, "没有日期退到年份")
 -- 简介若带 HTML（BookOrbit 常见），入库前剥成纯文本，详情页不再露出 div/p。
 routes["GET /koreader/plugin/catalog/books/5"] = json({
     id = 5, title = "带标签", description = "<div><p>第一段</p><p>第二段&amp;续</p></div>", files = {},
 })
-Assert.eq(run("getDetailAsync", { source_id = "ext.bookorbit", stable_id = "5" }).intro, "第一段\n第二段&续")
+Assert.eq(run("getDetailAsync", { source_id = "bookorbit", stable_id = "5" }).intro, "第一段\n第二段&续")
 Assert.eq(remembered["5"].intro, "第一段\n第二段&续")
 
 -- 封面：缩略图接口带鉴权头。
@@ -257,7 +256,7 @@ Assert.eq(cover.url, "http://bo/api/v1/koreader/plugin/catalog/books/1/thumbnail
 Assert.eq(cover.headers["x-auth-user"], "ann")
 
 -- 拉进度：按本地文件摘要查；xpointer → locator；同一 xpointer 交回本地行；{} 算空；没下载算空。
-local book1 = { source_id = "ext.bookorbit", stable_id = "1" }
+local book1 = { source_id = "bookorbit", stable_id = "1" }
 local DIGEST = ("a"):rep(32)
 local remote = { percentage = 0.42, progress = "/body/DocFragment[3]/body/p[2]/text().0", timestamp = 1700000000 }
 routes["GET /koreader/syncs/progress/" .. DIGEST] = function() return json(remote) end
@@ -277,7 +276,7 @@ remote = {}
 local empty, _e, meta = run("getProgressAsync", book1)
 Assert.is_nil(empty)
 Assert.is_true(meta.empty)
-_e, _e, meta = run("getProgressAsync", { source_id = "ext.bookorbit", stable_id = "9" })
+_e, _e, meta = run("getProgressAsync", { source_id = "bookorbit", stable_id = "9" })
 Assert.is_true(meta.empty, "没下载没有摘要")
 
 -- 推进度：xpointer / 页码串，时间用进度自己的；404 = 服务端不认识文件。
@@ -361,7 +360,7 @@ Assert.matches(sent.device_id, "^%x+$")
 Assert.eq(saved_cfg.device_id, sent.device_id)
 
 -- 设置：密码只存 MD5，空串清掉；装了官方插件且有账号时多一行导入。
-local Setting = require("moonsource_bookorbit.setting")
+local Setting = require("source.bookorbit.setting")
 local key_field = Setting.remote[3]
 Assert.eq(key_field.key, "userkey")
 Assert.is_true(key_field.secret)

@@ -59,23 +59,6 @@ jobs:
           echo "Packaged ${ASSET} (version ${VERSION})"
           unzip -l "$ASSET" | head -n 30
 
-      - name: Package extensions
-        id: ext
-        run: |
-          set -euo pipefail
-          TAG="${{ steps.ver.outputs.tag }}"
-
-          ASSETS=()
-          for DIR in extensions/*.koplugin; do
-            NAME="$(basename "$DIR" .koplugin)"
-            ZIP="${NAME}.koplugin-${TAG}.zip"
-            tools/package.sh "" "$ZIP" "$DIR"
-            sha256sum "$ZIP" > "${ZIP}.sha256"
-            ASSETS+=("$ZIP" "${ZIP}.sha256")
-          done
-          ls -lh "${ASSETS[@]}"
-          printf 'assets=%s\n' "${ASSETS[*]}" >> "$GITHUB_OUTPUT"
-
       - name: Assemble input method dictionaries
         id: ime
         run: |
@@ -118,9 +101,6 @@ jobs:
             echo "输入法词库（整库，手动 sideload）：\`${{ steps.ime.outputs.assets }}\`"
             echo
             echo "安装：解压后将 \`book.koplugin\` 复制到 KOReader 的 \`plugins\` 目录，然后重启。"
-            echo
-            echo "拓展书源（可选，需同时安装月读）：\`moonsource-kavita.koplugin-${TAG}.zip\`（Kavita）、"
-            echo "\`moonsource-bookorbit.koplugin-${TAG}.zip\`（BookOrbit）。解压后同样放进 \`plugins\` 目录。"
             echo
             echo "词库 sideload：下载对应布局的词库，直接放入 KOReader 数据目录下的"
             echo "\`.moon/\`（与 \`book.sqlite3\` 同级）。附件已使用最终文件名，无需重命名。"
@@ -191,8 +171,7 @@ jobs:
           TAG="${{ steps.ver.outputs.tag }}"
           ASSET="${{ steps.ver.outputs.asset }}"
           read -r -a DICTS <<< "${{ steps.ime.outputs.assets }}"
-          read -r -a EXTS <<< "${{ steps.ext.outputs.assets }}"
-          ARGS=(release create "$TAG" "$ASSET" "${ASSET}.sha256" "${EXTS[@]}" "${DICTS[@]}" --title "月读 ${TAG}" --notes-file RELEASE_NOTES.md)
+          ARGS=(release create "$TAG" "$ASSET" "${ASSET}.sha256" "${DICTS[@]}" --title "月读 ${TAG}" --notes-file RELEASE_NOTES.md)
 
           if [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
             ARGS+=(--prerelease)

@@ -3,7 +3,7 @@ extensions/moonsource-kavita.koplugin 首页组件 On Deck：在线且已配置�
 两行 × 5 列封面网格（网格尺寸走 CoverCell.denseCoverMetrics / Book.widget，同首页最近阅读），
 点开走月读开书；失败 / 空列表 / 离线给提示。
 
-@module tests.extensions.kavita.on_deck_spec
+@module tests.source.kavita.on_deck_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field
 
@@ -58,10 +58,10 @@ local source = {
         end,
     },
 }
-package.loaded["source.registry"] = { resolve = function(id) return id == "ext.kavita" and source or nil end }
+package.loaded["source.registry"] = { resolve = function(id) return id == "kavita" and source or nil end }
 
-local Deck = dofile(Config.root() .. "/extensions/moonsource-kavita.koplugin/moonsource_kavita/on_deck.lua")
-Assert.eq(Deck.id, "ext.kavita.on_deck")
+local Deck = dofile(Config.root() .. "/book.koplugin/source/kavita/on_deck.lua")
+Assert.eq(Deck.id, "kavita.on_deck")
 
 local desktop = { plugin = {} }
 local deck = Deck:new{}
@@ -79,7 +79,7 @@ local list = {}
 for i = 1, 12 do list[i] = { id = i, name = "S" .. i, pages = 10, pagesRead = i } end
 reply(list)
 Assert.eq(deck.data[3].stable_id, "3")
-Assert.eq(deck.data[3].source_id, "ext.kavita")
+Assert.eq(deck.data[3].source_id, "kavita")
 Assert.eq(deck.data[3].percent, 30)
 -- 一页 4 本（跟首页最近阅读一样），12 本分 3 页。
 Assert.eq(#covers, 4, "一页 4 本")
@@ -141,7 +141,7 @@ deck:activate()
 Assert.len(calls, before)
 
 -- 点封面走月读开书。
-deck.data = { { source_id = "ext.kavita", stable_id = "9", title = "九" } }
+deck.data = { { source_id = "kavita", stable_id = "9", title = "九" } }
 deck:refresh()
 local taps = Kit.taps(deck.slot)
 Assert.len(taps, 1)

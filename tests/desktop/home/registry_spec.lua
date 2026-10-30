@@ -19,6 +19,7 @@ for _idx, id in ipairs(BUILTIN) do
     package.preload["desktop.pages.home." .. id] = function() return { id = id, label = id } end
 end
 
+package.preload["source.kavita.on_deck"] = function() return {} end
 local home = {}
 package.loaded["utils.settings"] = {
     get = function() return home end,
@@ -27,10 +28,10 @@ package.loaded["utils.settings"] = {
 package.loaded["desktop.pages.home.placements"] = nil
 
 local Base = require("desktop.pages.home.base")
-local deck = setmetatable({ id = "ext.kavita.on_deck", label = "On Deck", icon = "x" }, Base)
+local deck = setmetatable({ id = "ext.deck.on_deck", label = "On Deck", icon = "x" }, Base)
 deck.__index = deck
 function deck:createWidget() return { kind = "deck" } end
-local boom = setmetatable({ id = "ext.kavita.boom", label = "Boom" }, Base)
+local boom = setmetatable({ id = "ext.deck.boom", label = "Boom" }, Base)
 boom.__index = boom
 function boom:createWidget() error("render boom") end
 function boom:heightRange() error("height boom") end
@@ -43,7 +44,7 @@ local hello = {
     settings = function(desktop, id) settings_opened = { desktop, id } end,
 }
 local extensions = {
-    { id = "ext.kavita", source = true, home_widgets = {
+    { id = "ext.deck", source = true, home_widgets = {
         deck, { id = "clock", createWidget = function() end }, deck, boom,
         { id = "ext.other.x", build = function() end },
     } },
@@ -67,13 +68,13 @@ Assert.is_nil(Registry.find("ext.other.x"), "id 必须是本插件命名空间")
 Assert.is_nil(Registry.find("ext.greeting.nobuild"), "简写表必须有 build")
 
 -- 完整组件类：包了一层，行为照旧
-local Deck = Registry.find("ext.kavita.on_deck")
+local Deck = Registry.find("ext.deck.on_deck")
 Assert.eq(components[#BUILTIN + 1], Deck)
 Assert.eq(Deck.label, "On Deck")
 Assert.eq(Deck:new{}:createWidget().kind, "deck")
 
 -- 出错的组件：渲染画空白占位，高度兜底，生命周期不向上抛
-local Boom = Registry.find("ext.kavita.boom")
+local Boom = Registry.find("ext.deck.boom")
 local b = Boom:new{}
 b.ctx, b.opts = {}, { width = 10, height = 20 }
 local placeholder = b:createWidget()

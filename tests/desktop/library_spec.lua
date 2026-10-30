@@ -497,7 +497,7 @@ end
 library.view, library.group = "list", "books"
 library.filter = {}
 local cached_page = render({
-    { source_id = "ext.kavita", stable_id = "700", title = "漫画一", downloaded = true, cache_mark = true },
+    { source_id = "kavita", stable_id = "700", title = "漫画一", downloaded = true, cache_mark = true },
 }, 1)
 local cached_texts = Kit.texts(cached_page)
 Assert.contains(cached_texts, "已缓存")
@@ -513,11 +513,11 @@ end
 
 -- 网格：缓存标记走封面左下角同一槽位；Kobo 风格收进封面下状态行（05 A5）。
 library.view = "grid"
-render({ { source_id = "ext.kavita", stable_id = "700", title = "漫画一", cache_mark = true } }, 1)
+render({ { source_id = "kavita", stable_id = "700", title = "漫画一", cache_mark = true } }, 1)
 Assert.is_true(grid_opts.cached, "网格格子带缓存标记")
 Assert.is_nil(grid_opts.status_icon)
 display.library_style = "kobo"
-render({ { source_id = "ext.kavita", stable_id = "700", title = "漫画一", cache_mark = true } }, 1)
+render({ { source_id = "kavita", stable_id = "700", title = "漫画一", cache_mark = true } }, 1)
 Assert.is_false(grid_opts.cached, "Kobo 不在封面上叠图标")
 Assert.eq(grid_opts.status_icon, "cached", "Kobo 状态行槽位画缓存图标")
 display.library_style = "kindle"

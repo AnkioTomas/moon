@@ -11,6 +11,8 @@ Kit.install("paper")
 local Themed = require("support.theme_stubs")
 Themed.install()
 
+-- 内置书源的首页组件不在本用例范围：给个不合规的占位，注册表会拒绝它
+package.preload["source.kavita.on_deck"] = function() return {} end
 local Widget = require("ui/widget/widget")
 local Base = require("desktop.pages.home.base")
 

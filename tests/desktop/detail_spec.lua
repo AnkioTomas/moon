@@ -678,7 +678,7 @@ page:close()
 local asked, owner_cb, owner_cancelled = 0, nil, false
 local net_online = true
 package.loaded["ui/network/manager"] = { isConnected = function() return net_online end }
-resolved = { id = "ext.kavita", getDetailAsync = function(_self, identity, cb)
+resolved = { id = "kavita", getDetailAsync = function(_self, identity, cb)
     asked = asked + 1
     Assert.eq(identity.stable_id, "k1")
     Assert.eq(identity.source, resolved)
@@ -686,7 +686,7 @@ resolved = { id = "ext.kavita", getDetailAsync = function(_self, identity, cb)
     return { cancel = function() owner_cancelled = true end }
 end }
 db_row = { title = "K" }
-local kbook = { source_id = "ext.kavita", stable_id = "k1", title = "K", percent = 30 }
+local kbook = { source_id = "kavita", stable_id = "k1", title = "K", percent = 30 }
 Detail.open(desktop, "library", kbook)
 page = desktop.detail
 Assert.eq(asked, 1)
@@ -707,43 +707,43 @@ Assert.contains(shown, "中文")
 Assert.contains(shown, "9787000000000")
 page:close()
 Assert.is_false(owner_cancelled)
-Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+Detail.open(desktop, "library", { source_id = "kavita", stable_id = "k1", title = "K" })
 desktop.detail:close()
 Assert.eq(asked, 1, "有简介且拉过详情不请求")
 db_row = { title = "K", intro = "简介", meta = { words = 1 } }
-Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+Detail.open(desktop, "library", { source_id = "kavita", stable_id = "k1", title = "K" })
 desktop.detail:close()
 Assert.eq(asked, 2, "书架快照带了部分元数据但没拉过详情仍请求")
 owner_cancelled = false
 db_row, net_online = { title = "K" }, false
-Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+Detail.open(desktop, "library", { source_id = "kavita", stable_id = "k1", title = "K" })
 desktop.detail:close()
 Assert.eq(asked, 2, "离线不请求")
 net_online = true
-Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+Detail.open(desktop, "library", { source_id = "kavita", stable_id = "k1", title = "K" })
 desktop.detail:close()
 Assert.is_true(owner_cancelled, "关窗取消在飞请求")
 do
     local before = asked
     db_row = { title = "K", authors = "库内作者", intro = "库内简介", meta = { detail_at = 100 } }
-    Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K", authors = "", intro = "" })
+    Detail.open(desktop, "library", { source_id = "kavita", stable_id = "k1", title = "K", authors = "", intro = "" })
     Assert.eq(asked, before)
     Assert.eq(desktop.detail.book.authors, "库内作者", "旧列表空值不能遮住已补齐的本地资料")
     Assert.eq(desktop.detail.book.intro, "库内简介")
     desktop.detail:close()
 
     db_row = { title = "K", authors = "", intro = "", meta = {} }
-    Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+    Detail.open(desktop, "library", { source_id = "kavita", stable_id = "k1", title = "K" })
     Assert.eq(asked, before + 1)
     owner_cb({})
     Assert.is_nil(db_row.meta.detail_at, "只回读本地空行不能记成详情补齐")
     desktop.detail:close()
-    Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+    Detail.open(desktop, "library", { source_id = "kavita", stable_id = "k1", title = "K" })
     Assert.eq(asked, before + 2, "仍缺资料，下次打开必须允许重试")
     desktop.detail:close()
 
     db_row = { title = "K", authors = "", intro = "简介", meta = { detail_at = 100 } }
-    Detail.open(desktop, "library", { source_id = "ext.kavita", stable_id = "k1", title = "K" })
+    Detail.open(desktop, "library", { source_id = "kavita", stable_id = "k1", title = "K" })
     Assert.eq(asked, before + 3, "旧的 detail_at 不能阻止缺作者的书补详情")
     owner_cb(nil, "network failed")
     Assert.eq(db_row.intro, "简介", "补拉失败保留已有资料")

@@ -4,7 +4,7 @@
 用假的 kamare 模块（真缓存适配层 + 真队列 + 真卷列表 + 真轮询），只把「下载」外包出去，
 其余全走产品代码：这是跨仓 E2E 在离线环境里能做到的最大范围（模拟器 / 真机另做手工冒烟）。
 
-@module tests.extensions.kavita.tasks_e2e_spec
+@module tests.source.kavita.tasks_e2e_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field, redundant-parameter
 
@@ -18,7 +18,7 @@ Themed.install()
 package.preload["ui.themes.widgets.list"] = nil
 package.loaded["ui.themes.widgets.list"] = nil
 
-local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
+local PLUGIN = Config.root() .. "/book.koplugin/source/kavita"
 
 -- 源配置：真 cache.lua 只读 base_url / api_key；其余键仍走 Kit 的主题设置桩。
 local cfg = { base_url = "http://kavita.local", api_key = "key" }
@@ -88,19 +88,19 @@ local function finishChapter(id)
     if next(queue.entries) == nil then queue.state = "idle" end
 end
 
-package.preload["moonsource_kavita.cache"] = function()
-    return dofile(PLUGIN .. "/moonsource_kavita/cache.lua")
+package.preload["source.kavita.cache"] = function()
+    return dofile(PLUGIN .. "/cache.lua")
 end
-package.preload["moonsource_kavita.cache_task"] = function()
-    return dofile(PLUGIN .. "/moonsource_kavita/cache_task.lua")
+package.preload["source.kavita.cache_task"] = function()
+    return dofile(PLUGIN .. "/cache_task.lua")
 end
-package.preload["moonsource_kavita.volume_list"] = function()
-    return dofile(PLUGIN .. "/moonsource_kavita/volume_list.lua")
+package.preload["source.kavita.volume_list"] = function()
+    return dofile(PLUGIN .. "/volume_list.lua")
 end
 
-local Cache = require("moonsource_kavita.cache")
+local Cache = require("source.kavita.cache")
 local Tasks = require("workers.tasks")
-local VolumeList = require("moonsource_kavita.volume_list")
+local VolumeList = require("source.kavita.volume_list")
 
 local series = { stable_id = "900", title = "测试系列" }
 local function entry(id, title, pages_read)

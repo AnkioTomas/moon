@@ -39,7 +39,7 @@ local Base = require("utils.db")
 local StatsDB = require("book.stats_db")
 Assert.not_nil(Base.open())
 
-local SRC = "ext.kavita"
+local SRC = "kavita"
 local DAY = os.time({ year = 2026, month = 10, day = 22, hour = 0 })
 local AT = DAY + 17 * 3600 + 54 * 60
 

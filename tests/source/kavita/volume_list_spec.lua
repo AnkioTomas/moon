@@ -5,7 +5,7 @@ Kavita 卷列表：真实 list 的行尾控件命中（04 A9）、状态字优�
 真实 list 与 Kit 一起用：A9 的「点图标不关窗」只能靠真行 / 真按钮的事件顺序证明。
 Themed 只负责记录弹窗参数；装完把它的 list 桩摘掉，require 真组件。
 
-@module tests.extensions.kavita.volume_list_spec
+@module tests.source.kavita.volume_list_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field
 
@@ -32,8 +32,8 @@ package.loaded["book.progress_db"] = {
     get = function(_source_id, stable_id) return local_progress[stable_id] end,
 }
 
-local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
-local RealCache = dofile(PLUGIN .. "/moonsource_kavita/cache.lua")
+local PLUGIN = Config.root() .. "/book.koplugin/source/kavita"
+local RealCache = dofile(PLUGIN .. "/cache.lua")
 
 local st, calls = {}, {}
 --- 后台任务句柄的记录（stub 与 reset 共用同一个 upvalue）。
@@ -129,9 +129,9 @@ function Cache.queueRetry(ids)
     calls.retry[#calls.retry + 1] = ids
     return st.retry_ok, st.retry_code
 end
-package.preload["moonsource_kavita.cache"] = function() return Cache end
+package.preload["source.kavita.cache"] = function() return Cache end
 -- 后台任务登记：这里只记调用与静音状态；真实轮询见 cache_task_spec 与 tasks_e2e_spec。
-package.preload["moonsource_kavita.cache_task"] = function()
+package.preload["source.kavita.cache_task"] = function()
     return {
         track = function(opts)
             local handle = { opts = opts, adds = {} }
@@ -142,14 +142,14 @@ package.preload["moonsource_kavita.cache_task"] = function()
         end,
     }
 end
-package.preload["moonsource_kavita.volume_list"] = function()
-    return dofile(PLUGIN .. "/moonsource_kavita/volume_list.lua")
+package.preload["source.kavita.volume_list"] = function()
+    return dofile(PLUGIN .. "/volume_list.lua")
 end
-package.preload["moonsource_kavita.busy"] = function()
-    return dofile(PLUGIN .. "/moonsource_kavita/busy.lua")
+package.preload["source.kavita.busy"] = function()
+    return dofile(PLUGIN .. "/busy.lua")
 end
 
-local VolumeList = require("moonsource_kavita.volume_list")
+local VolumeList = require("source.kavita.volume_list")
 
 ---@param id integer
 ---@param title string
@@ -166,7 +166,7 @@ local toc = {
     entry(602, "第 2 卷", 100, 40),
     entry(603, "第 3 卷", 100, 0),
 }
-local series = { source_id = "ext.kavita", stable_id = "900", title = "测试系列" }
+local series = { source_id = "kavita", stable_id = "900", title = "测试系列" }
 
 --- 子串断言：Assert.contains 只认数组，文案用这个。
 ---@param haystack string

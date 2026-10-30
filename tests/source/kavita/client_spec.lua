@@ -1,11 +1,11 @@
 --[[--
-extensions/moonsource-kavita.koplugin/moonsource_kavita/client.lua：请求超时可配置，
+book.koplugin/source/kavita/client.lua：请求超时可配置，
 统计分页的 URL 形态与 `Pagination` 头解析。
 
 慢设备 / 慢服务器上全量书架（all-v2）一次要几十秒，固定的 30s 上限会让整轮同步中断、
 书架永远加载不出来；这里锁住「默认足够宽 + 可在设置里调大 + 透传到 HTTP 层」。
 
-@module tests.extensions.kavita.client_spec
+@module tests.source.kavita.client_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field
 
@@ -24,11 +24,11 @@ package.loaded["http.request"] = {
         return { cancel = function() end }
     end,
 }
-local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
-package.preload["moonsource_kavita.client"] = function()
-    return dofile(PLUGIN .. "/moonsource_kavita/client.lua")
+local PLUGIN = Config.root() .. "/book.koplugin/source/kavita"
+package.preload["source.kavita.client"] = function()
+    return dofile(PLUGIN .. "/client.lua")
 end
-local Client = require("moonsource_kavita.client")
+local Client = require("source.kavita.client")
 
 local function make(timeout)
     return Client.new({ base_url = "http://kav/", api_key = "k", timeout = timeout })

@@ -4,7 +4,7 @@ syncBooksAsync 同步后预热（05 A1）、coverRequest 优先本地封面（05
 
 不复用 source_spec 的整套书架夹具：这里只碰钩子本身，HTTP / 书库 / 目录都最小打桩。
 
-@module tests.extensions.kavita.shelf_cache_spec
+@module tests.source.kavita.shelf_cache_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, inject-field
 
@@ -28,11 +28,11 @@ package.loaded["utils.log"] = {
     end,
 }
 
-local PLUGIN = Config.root() .. "/extensions/moonsource-kavita.koplugin"
+local PLUGIN = Config.root() .. "/book.koplugin/source/kavita"
 -- 走 preload 不改 package.path：插件根上的 main.lua 会顶掉月读的 main。
 for _idx, name in ipairs({ "client", "position", "annotation", "source", "cache", "volume_list", "stats" }) do
-    package.preload["moonsource_kavita." .. name] = function()
-        return dofile(PLUGIN .. "/moonsource_kavita/" .. name .. ".lua")
+    package.preload["source.kavita" .. (name == "source" and "" or "." .. name)] = function()
+        return dofile(PLUGIN .. "/" .. (name == "source" and "init" or name) .. ".lua")
     end
 end
 
@@ -101,8 +101,8 @@ package.loaded["source.shelf"] = {
 
 -- 封面路径只关心「本地缓存 / 在线地址」的分支：目录查不到卷时退回系列封面（卷封面见 source_spec）。
 package.loaded["source.toc"] = { read = function() return nil end }
-local SourceMod = require("moonsource_kavita.source")
-local Cache = require("moonsource_kavita.cache")
+local SourceMod = require("source.kavita")
+local Cache = require("source.kavita.cache")
 local source = SourceMod.new()
 
 -- 能力：声明 shelf_cache，UI 据此决定断网时是否收窄书架（05 A2）。
@@ -131,23 +131,23 @@ local file = assert(io.open(cover_path, "wb"))
 file:write("jpg")
 file:close()
 Cache.shelf = function() return { series_ids = {}, mark = {}, cover = { ["700"] = cover_path } } end
-local req = select(1, source:coverRequest({ source_id = "ext.kavita", stable_id = "700" }))
+local req = select(1, source:coverRequest({ source_id = "kavita", stable_id = "700" }))
 Assert.eq(req.url, cover_path, "已缓存系列用本地封面")
 Assert.is_nil(req.headers, "本地文件不需要鉴权头")
 Assert.eq(req.authoritative, true, "源封面压过本地抽页缓存")
 -- 卷身份同样借系列封面（chapter-cover 是扫描页，不能当封面）。
-req = select(1, source:coverRequest({ source_id = "ext.kavita", stable_id = "700:7001" }))
+req = select(1, source:coverRequest({ source_id = "kavita", stable_id = "700:7001" }))
 Assert.eq(req.url, cover_path, "卷身份也用已缓存系列封面")
 -- 投影给了路径但文件没了 → 维持在线系列封面。
 Cache.shelf = function() return { series_ids = {}, mark = {}, cover = { ["700"] = cover_path .. ".gone" } } end
-req = select(1, source:coverRequest({ source_id = "ext.kavita", stable_id = "700" }))
+req = select(1, source:coverRequest({ source_id = "kavita", stable_id = "700" }))
 Assert.is_true(req.url:find("series-cover", 1, true) ~= nil, "文件不存在退回在线封面")
 Assert.not_nil(req.headers)
-req = select(1, source:coverRequest({ source_id = "ext.kavita", stable_id = "700:7001" }))
+req = select(1, source:coverRequest({ source_id = "kavita", stable_id = "700:7001" }))
 Assert.is_true(req.url:find("series-cover", 1, true) ~= nil, "卷身份也走系列封面")
 -- 适配层没给投影（无 index）：照旧在线封面。
 Cache.shelf = function() return nil end
-req = select(1, source:coverRequest({ source_id = "ext.kavita", stable_id = "700" }))
+req = select(1, source:coverRequest({ source_id = "kavita", stable_id = "700" }))
 Assert.is_true(req.url:find("series-cover", 1, true) ~= nil)
 Cache.shelf = real_shelf
 
