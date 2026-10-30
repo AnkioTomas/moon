@@ -26,7 +26,7 @@ Ext.POINTS = {
     ["topbar.light_percent"] = "单一提供者：前光读数 fn(kind) -> number",
     ["topbar.items"] = "顶栏项来源 fn() -> BookTopBarItem[]（after 指定插在哪个核心项后）",
     ["setting.entries"] = "设置条目来源 { owner, entries = fn(desktop) -> BookSettingEntry[] }",
-    ["setting.groups"] = "设置根页分组 { id, title, after? }",
+    ["setting.groups"] = "设置根页分组 { id, title, after?, icon? }",
     ["highlight.relabel"] = "划词菜单按钮改名 fn(key) -> string|nil（按钮行为已由提供者接管时给新名字）",
     ["highlight.fill_selection"] = "单一提供者：划词无文字时补选区 fn(menu) -> bool",
     ["reader.ready"] = "阅读页就绪 fn(plugin)",
