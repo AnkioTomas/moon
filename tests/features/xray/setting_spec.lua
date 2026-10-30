@@ -7,7 +7,28 @@ package.preload["ffi/util"] = function()
     return { template = function(text, value) return (text:gsub("%%1", tostring(value))) end }
 end
 package.preload["ui.themes.widgets.row"] = function()
-    return { widget = function(opts) return opts end }
+    return {
+        widget = function(opts) return opts end,
+        -- 单选行替身：与 Row.choice 同约定，真实现由 row_spec 测
+        choice = function(opts)
+            opts.callback = function()
+                require("ui.themes.widgets.list"):new{
+                    title = opts.title, items = opts.items, current = opts.current,
+                    on_select = function(v) if v ~= nil and v ~= opts.current then opts.on_select(v) end end,
+                }:show()
+            end
+            return opts
+        end,
+    }
+end
+local lists = {}
+package.preload["ui.themes.widgets.list"] = function()
+    return {
+        new = function(_self, opts)
+            lists[#lists + 1] = opts
+            return { show = function() end }
+        end,
+    }
 end
 local conf = {
     xray = { book_xray_enabled = true, book_xray_show_marks = true, book_xray_mark_style = "dashed", book_xray_quality = "standard" },
@@ -37,20 +58,26 @@ Assert.eq(xray[1].order, 13)
 local section = xray[1].page.sections()[1]
 Assert.eq(section.title, "X-Ray")
 Assert.len(section.rows, 5)
-Assert.eq(section.rows[4](600).status, "标准")
-section.rows[4](600).callback()
+local quality_row = section.rows[4](600)
+Assert.eq(quality_row.current, "standard")
+Assert.len(quality_row.items, 3)
+Assert.eq(quality_row.items[1].value, "save")
+Assert.eq(quality_row.items[2].value, "standard")
+Assert.eq(quality_row.items[3].value, "high")
+quality_row.callback()
+Assert.len(lists, 1)
+Assert.eq(lists[1].current, "standard")
+lists[1].on_select("high")
 Assert.eq(conf.xray.book_xray_quality, "high")
-section.rows[4](600).callback()
-Assert.eq(conf.xray.book_xray_quality, "save")
-section.rows[4](600).callback()
-Assert.eq(conf.xray.book_xray_quality, "standard")
+Assert.eq(saved[#saved], "features.xray")
 Assert.eq(invalidated, 0, "档位不影响画线")
+Assert.eq(updates, 1)
 Assert.eq(section.rows[5](600).status, "虚线")
 section.rows[5](600).callback()
 Assert.eq(conf.xray.book_xray_mark_style, "solid")
 Assert.eq(saved[#saved], "features.xray")
 Assert.eq(invalidated, 1)
-Assert.eq(updates, 4)
+Assert.eq(updates, 2)
 section = xray[1].page.sections()[1]
 section.rows[1](600).callback()
 Assert.is_false(conf.xray.book_xray_enabled)
