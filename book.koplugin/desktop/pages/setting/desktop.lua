@@ -25,6 +25,26 @@ end
 ---@class BookSettingsDesktop
 local DesktopSettings = {}
 
+--- 底栏图标旁是否显示页签名；属桌面 chrome，不进主题页。
+---@param desktop table
+---@return fun(width: number): table
+function DesktopSettings:tabbarLabelsRow(desktop)
+    return function(iw)
+        local conf = Settings.get("ui")
+        return Row.widget({
+            width = iw,
+            icon = "label", title = _("底部导航名称"),
+            subtitle = _("关闭后仅显示图标"),
+            toggle = conf.tabbar_labels ~= false,
+            callback = function()
+                conf.tabbar_labels = not (conf.tabbar_labels ~= false)
+                Settings.save("ui", conf)
+                desktop:updateView()
+            end,
+        })
+    end
+end
+
 ---@param desktop table
 ---@param open_on boolean
 ---@return table

@@ -143,6 +143,12 @@ Assert.eq(Theme.mix(0xFF, 0x0756AD, 1), 0x0756AD)
 Assert.eq(Theme.vivid(0x88), 0x88)
 Assert.eq(Theme.vivid(0x808080), 0x808080)
 Assert.eq(Theme.vivid(0x0756AD), 0x0054E8)
+Assert.eq(Theme.saturationFactor(), 1.7, "缺省标准 = 旧 1.7")
+display.color_saturation = "max"
+Assert.eq(Theme.saturationFactor(), 3.2)
+Assert.is_true(Theme.vivid(0x0756AD) ~= 0x0054E8, "极致与标准结果不同")
+display.color_saturation = "standard"
+Assert.eq(Theme.vivid(0x0756AD), 0x0054E8)
 Assert.eq(Theme.mix(0xEE, 0x0054E8, 0.25), 0xA1C4FF, "低档热力色不被掺成灰")
 display.theme_color = 0x7038A0
 local purple = Theme.current()

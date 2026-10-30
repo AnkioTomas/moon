@@ -27,6 +27,8 @@ return {
         library_tabs = { "books", "author", "series", "category", "folder" },
         -- 随机一本的范围：new = 只抽没开始读的，reading = 再包含阅读中的。
         random_scope = "new",
+        -- 彩屏主题色补饱和：low / standard / high / max，见 Theme.SATURATION。
+        color_saturation = "standard",
     },
     -- ui_theme 为 nil = 默认主题，见 ui.themes；theme_preset 为 nil = 默认色板（v0.2.46–48 写过的 theme_color 单色仍认，见 ui.themes.palettes）。
     keys = { "ui_theme", "theme_preset", "theme_color" },

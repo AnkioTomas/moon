@@ -1,4 +1,4 @@
---[[-- 书架显示设置项（每行数量 + settings/ui.lua 的 library_*）。
+--[[-- 图书馆页设置（每行数量 + settings/ui.lua 的 library_*）；挂在桌面「页面」三级页。
 @module koplugin.book.desktop.pages.setting.library
 --]]
 

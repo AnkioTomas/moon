@@ -1,6 +1,6 @@
 ---@diagnostic disable: undefined-field, missing-fields, inject-field, assign-type-mismatch
 
---[[-- 设置「语言」行：一点即弹列表，只列插件有翻译的三种语言。 --]]
+--[[-- 设置「语言」行：点开居中单选弹窗，只列插件有翻译的三种语言。 --]]
 
 local Assert = require("support.assert")
 local Themed = require("support.theme_stubs")
@@ -35,14 +35,16 @@ Assert.eq(row_opts.status, "name:zh_TW")
 
 row_opts.callback()
 local list = Themed.last("list")
+Assert.is_true(list.centered, "居中弹窗单选")
+Assert.eq(list.current, "zh_TW")
 Assert.len(list.items, 3)
-Assert.eq(list.items[1].text, "name:zh_CN")
-Assert.eq(list.items[2].text, "name:zh_TW")
-Assert.eq(list.items[3].text, "name:C")
-Assert.is_true(list.items[2].checked)
-Assert.is_true(not list.items[1].checked)
+Assert.eq(list.items[1].value, "zh_CN")
+Assert.eq(list.items[2].value, "zh_TW")
+Assert.eq(list.items[3].value, "C")
 
-Themed.choose(list, 3)
+list.on_select("zh_TW")
+Assert.is_nil(changed, "选当前语言不切换")
+list.on_select("C")
 Assert.eq(changed, "C")
 
 _G.G_reader_settings = previous_settings
