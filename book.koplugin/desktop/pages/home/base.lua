@@ -13,6 +13,7 @@ active 为假时 refresh 只换内容不刷屏、request 不发请求；deactiva
 
 local Event = require("ui/event")
 local Geom = require("ui/geometry")
+local MoonSettings = require("utils.settings")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 
@@ -124,6 +125,36 @@ local function encode(value, out)
         encode(value[k], out)
     end
     out[#out + 1] = "}"
+end
+
+--- 最近阅读列表 / 卡片是否隐藏已读完（read_state=1）。
+---@return boolean
+function Base.hideFinished()
+    return MoonSettings.get("desktop.pages.home").home_recent_hide_finished == true
+end
+
+--- 规范化并保存「隐藏已读完」。
+---@param on boolean|nil
+function Base.saveHideFinished(on)
+    local home = MoonSettings.get("desktop.pages.home")
+    home.home_recent_hide_finished = on == true
+    MoonSettings.save("desktop.pages.home", home)
+end
+
+--- 按设置丢掉已读完；开关关时原样返回。
+---@param recent Book|nil
+---@param reading Book[]
+---@return Book|nil
+---@return Book[]
+function Base.withoutFinished(recent, reading)
+    if not Base.hideFinished() then return recent, reading end
+    local Book = require("ui.widgets.book")
+    local out = {}
+    for _idx, book in ipairs(reading) do
+        if not Book.isRead(book) then out[#out + 1] = book end
+    end
+    if recent and Book.isRead(recent) then recent = nil end
+    return recent, out
 end
 
 --- 最近书架显示快照签名；参数即 Catalog.recentShelf 的三个返回值。
