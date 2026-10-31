@@ -87,6 +87,7 @@ end
 local function init(self)
     allowInitModules(self.path)
     require("utils.event").init(require("features").listeners("events"))
+    Guard.call("source.legacy_ext", require("source.legacy_ext").run)
     logger.info("book plugin init", self.ui.document and "reader" or "filemanager")
     Desktop.startInDataDir(self)
     local started_at = Perf.now()

@@ -11,5 +11,5 @@ return {
         library_mixed = false,
     },
     -- enabled_sources 为 nil = 全部启用，见 source.registry。
-    keys = { "enabled_sources" },
+    keys = { "enabled_sources", "legacy_ext_done" },
 }

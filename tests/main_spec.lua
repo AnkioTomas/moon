@@ -18,6 +18,7 @@ local function stub(name, value)
     package.preload[name] = function() return value end
 end
 
+stub("source.legacy_ext", { run = function() end })
 stub("ui/widget/container/widgetcontainer", WidgetContainer)
 stub("ui/uimanager", {
     nextTick = function(_, fn) fn() end,
