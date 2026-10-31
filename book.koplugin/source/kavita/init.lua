@@ -279,7 +279,6 @@ end
 ---@param current_fraction number|nil
 --- 缺任何一卷的本地行时返回 nil：**缺行不等于未读**（只在别的设备读过、卷行是后加的
 --- 都会缺），拿 0 填会把书架百分比压到远低于真实值（实测 27 卷只认识 7 卷 → 0.13 vs 0.65）。
----@param fallback number 未使用；保留参数位给调用方的显式兜底
 ---@return number|nil
 local function volumeAggregate(source_id, series_id, toc, current_id, current_fraction)
     if type(toc) ~= "table" or #toc == 0 then return nil end

@@ -121,13 +121,17 @@ end
 local function applyPosition(ui, pos, pct)
     pct = Progress.clampFraction(pct)
     ui._restoring_position = true
-    if not gotoLocator(ui, pos and pos.locator) and not gotoPage(ui, pos) then
-        ReaderProgress.gotoFraction(ui, pct)
-    end
-    saveDocSettings(ui, pct)
+    -- 跳转抛错也要清标志，否则整个会话的翻页动画都被关掉；错误清完再抛。
+    local ok, err = pcall(function()
+        if not gotoLocator(ui, pos and pos.locator) and not gotoPage(ui, pos) then
+            ReaderProgress.gotoFraction(ui, pct)
+        end
+        saveDocSettings(ui, pct)
+    end)
     require("ui/uimanager"):nextTick(function()
         ui._restoring_position = nil
     end)
+    if not ok then error(err, 0) end
 end
 
 --- 阅读器是否还停在文档开头（sidecar 没能给出位置）。

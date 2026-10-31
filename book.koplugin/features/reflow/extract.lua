@@ -48,7 +48,9 @@ local function later(fn)
 end
 
 ---@param dir string
----@return string, string, string part, done, cursor
+---@return string part
+---@return string done
+---@return string cursor
 local function paths(dir)
     return dir .. "/" .. PART_NAME, dir .. "/" .. DONE_NAME, dir .. "/" .. CURSOR_NAME
 end
