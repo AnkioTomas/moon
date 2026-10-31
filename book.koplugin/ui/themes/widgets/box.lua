@@ -104,12 +104,12 @@ function Box:paintTo(bb, x, y)
     local w, h = self.box_w, self.box_h
     -- paintBorder 不夹半径，这里统一夹到短边一半，radius=999 即胶囊。
     local r = math.min(Theme.px(s.radius or 0), math.floor(math.min(w, h) / 2))
-    -- 角外底色必须在画阴影之前抄：阴影偏右下，画完再抄会把底角还原成阴影色，
-    -- 封面底边看起来像直角（柔和 raised 阴影 + 圆角封面就是这个坑）。
-    local saved = r > 0 and snapshotCorners(bb, x, y, w, h, r) or nil
     if self.shadow > 0 then
         bb:paintRoundedRect(x + self.shadow, y + self.shadow, w, h, Theme.color(s.shadow_color), r)
     end
+    -- 角外底色在阴影之后、本体之前抄：阴影偏右下，角外该露阴影的地方还原成阴影，
+    -- 否则右下角会被还原成白底，把阴影的圆角切出一块白色矩形。
+    local saved = r > 0 and snapshotCorners(bb, x, y, w, h, r) or nil
     if s.bg and self.bg_alpha and self.bg_alpha < 100 then
         -- 白底按比例向白提亮即「白色 + 透明度」；直角提亮冒出的角外靠收尾还原。
         bb:lightenRect(x, y, w, h, self.bg_alpha / 100)

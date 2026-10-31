@@ -111,7 +111,7 @@ Box:new{ style = { bg = 1, radius = 8, border = 0, shadow = 0 }, width = 20, hei
 Assert.eq(pixels["0:0"], 9, "cdata 引用也必须先拷贝再还原")
 Assert.eq(pixels["10:10"], 0, "圆内留下子件")
 
--- 有阴影时底角也还原成绘制前的底，不能抄成阴影色（否则底边像直角）。
+-- 有阴影时角外还原成「阴影画完后」的底：阴影覆盖处露阴影，没覆盖处是页底（不能还原成白，否则右下角缺一块）。
 pixels = {}
 local shadow_bb = {
     getWidth = function() return 24 end,
@@ -136,8 +136,8 @@ Box:new{
     width = 20, height = 20, fill,
 }:paintTo(shadow_bb, 0, 0)
 Assert.eq(pixels["0:0"], 9, "顶角仍是页底")
-Assert.eq(pixels["0:19"], 9, "底角还原页底，不是阴影色")
-Assert.eq(pixels["19:19"], 9, "右下角同理")
+Assert.eq(pixels["0:19"], 9, "阴影没覆盖的底角还原页底")
+Assert.eq(pixels["19:19"], 7, "右下角在阴影内，保留阴影色")
 Assert.eq(pixels["10:10"], 0, "圆内留下子件")
 
 -- 无 bg 的样式什么都不画（透明表面）。
