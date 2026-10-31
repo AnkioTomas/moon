@@ -445,8 +445,10 @@ function Overlay:paint(bb)
     end
     if #self.items == 0 then return end
     local RenderText = require("ui/rendertext")
-    -- 深灰：跟正文黑分开（Kindle WordWise 也是灰字）；比 COLOR_GRAY 深一档，小字在墨水屏上还能认。
-    local color = require("ffi/blitbuffer").COLOR_DARK_GRAY
+    local BB = require("ffi/blitbuffer")
+    -- 默认深灰跟正文黑分开（Kindle WordWise 同思路）；设置可改黑色，墨水屏小字更利索。
+    local color = require("utils.settings").get("features.rare").rare_color == "black"
+        and BB.COLOR_BLACK or BB.COLOR_DARK_GRAY
     for _idx, item in ipairs(self.items) do
         RenderText:renderUtf8Text(bb, item.x, item.y, annFace(item.size), item.text, true, false, color)
     end
