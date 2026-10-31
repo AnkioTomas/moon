@@ -131,6 +131,17 @@ do
         "无法连接 WebDAV 服务器：Could not connect: Network is unreachable")
 end
 
+-- 对端超时 / 原因不明的连接失败不算本机断网：后台照常提示。
+do
+    Themed.made = {}
+    source.syncBooksAsync = function(_, _, cb)
+        cb(nil, "Connection timed out")
+        return { cancel = function() end }
+    end
+    Sync.open(desktop)
+    Assert.eq(Themed.last("toast").text, "Connection timed out")
+end
+
 -- 联网时后台同步失败（如 WebDAV 密码错）：提示一次，同一条错误不再重复；干净成功后再出错重新提示。
 do
     local fail = "WebDAV 认证失败：用户名或密码错误"

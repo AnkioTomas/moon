@@ -1318,6 +1318,9 @@ do
     local src = WeChat.new()
     src.cfg.wr_vid = "v1"
     src.cfg.shelf_cursor = { vid = "v1", synckey = 100 }
+    local Settings = require("utils.settings")
+    local getSource = Settings.getSource
+    Settings.getSource = function() return { category_as_group = true } end
     local result
     src:syncBooksAsync(nil, function(r) result = r end)
     require("support.stubs").flush()
@@ -1334,6 +1337,7 @@ do
     Assert.is_nil(snap.gone, "removed 的书不进快照")
     Assert.not_nil(snap.c, "新增的书经 syncbook 补进快照")
     Assert.eq(src.cfg.shelf_cursor.synckey, 101, "reconcile 成功后推进游标")
+    Settings.getSource = getSource
     fake_client.shelfSyncIdsAsync, fake_client.shelfSyncBooksAsync = nil, nil
     remembered_stats_books.local_library, remembered_stats_books.local_rows = nil, nil
     remembered_stats_books.last_snapshot = nil

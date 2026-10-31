@@ -1,6 +1,6 @@
 --[[--
 起点书架分组：拉书架时记住自定义分组（默认分组 -100 不算，一本书多个组取第一个），
-Mapper 进组书的分类用分组名、没进组的保留题材；移出分组后本地旧行也要落回题材。
+开「分组代替分类」时进组书的分类用分组名、没进组不写分类；移出分组后本地旧行也要落回题材。
 
 @module tests.source.qidian.shelf_spec
 --]]
@@ -34,6 +34,11 @@ package.preload["http.request"] = function()
         end,
     }
 end
+local cfg = { category_as_group = true }
+package.loaded["utils.settings"] = nil
+package.preload["utils.settings"] = function()
+    return { getSource = function() return cfg end }
+end
 package.loaded["source.qidian.client"] = nil
 package.loaded["source.qidian.mapper"] = nil
 local Client = require("source.qidian.client")
@@ -51,7 +56,7 @@ do -- 逐组拉取后按 bookId 记组：乙在默认组先出现，进了「追
     Assert.eq(rows[3]._group_name, "追更")
 
     local books = Mapper.shelfList(rows)
-    Assert.eq(books[1].category, "玄幻", "没进组保留题材")
+    Assert.is_nil(books[1].category, "开：没进组不写题材")
     Assert.eq(books[2].category, "追更")
     Assert.eq(books[3].category, "追更")
 end
@@ -63,7 +68,7 @@ do -- 移出分组：本地旧行分类是旧分组名，书架行题材要把�
         { bid = 10, bName = "戊", cateName = "游戏", _group_name = "在读",
           local_book = { stable_id = "10", title = "戊", category = "历史", cover = "c" } },
     })
-    Assert.eq(books[1].category, "历史", "移出分组落回题材")
+    Assert.is_nil(books[1].category, "开：移出分组后不再沿用旧分组名")
     Assert.eq(books[2].category, "在读", "进了组用分组名覆盖本地旧分类")
 end
 
