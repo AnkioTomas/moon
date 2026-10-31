@@ -75,7 +75,7 @@ local function localNetDown(err)
     end
     for _idx, needle in ipairs({
         "Network is unreachable", "No route to host", "Network is down",
-        "Host is unreachable", "Connection timed out", "Could not connect: -1",
+        "Host is unreachable",
     }) do
         if err:find(needle, 1, true) then return true end
     end
