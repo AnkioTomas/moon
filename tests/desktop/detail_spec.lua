@@ -298,6 +298,25 @@ Detail.open(desktop, "library", { source_id = "wechat", stable_id = "w2", title 
 desktop.detail:restore()
 Assert.eq(hidden_set[3], false)
 desktop.detail:close()
+
+-- 书架行不带 hidden：详情从 books 行补上，筛选「软删除」才能看到「恢复」
+db_row = { hidden = 1 }
+resolved = chapter_src
+Detail.open(desktop, "library", { source_id = "wechat", stable_id = "w2", title = "书一", read_state = 0 })
+page = desktop.detail
+Assert.eq(page.book.hidden, 1)
+buttonBy(page, "more_horiz"):onTapThemeButton()
+local restore_item
+for _, item in ipairs(Themed.last("list").items) do
+    if item.text == "恢复" then restore_item = item end
+end
+Assert.is_true(restore_item ~= nil, "软删除的书详情菜单要有恢复")
+restore_item.callback()
+Assert.eq(hidden_set[3], false)
+Assert.eq(Themed.last("toast").text, "已恢复到书架")
+page:close()
+db_row = nil
+resolved = local_src
 Detail.open(desktop, "library", { source_id = "wechat", stable_id = "w2", title = "书一", read_state = 0 })
 page = desktop.detail
 
