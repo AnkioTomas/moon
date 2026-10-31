@@ -2,6 +2,7 @@
 侧栏票根页：锁屏「阅读票根」主体画成整屏 PNG，侧栏缩放展示，同一张图经远程管理分享。
 
 书跟阅读身份走（Current.snapshot），不取锁屏的「当前源最近在读」。
+文件名也跟身份走。所有书共用一张 ticket.png 时，分享链接不变，手机按 URL 缓存会一直打开第一本的图。
 
 @module koplugin.book.features.sidebar.ticket
 --]]
@@ -39,7 +40,12 @@ function Ticket.new(snapshot, on_ready)
     local Receipt = require("features.lockscreen.components.receipt")
     local Session = require("reader.session")
     local book = require("features.sidebar.info").book(snapshot)
-    local self = setmetatable({ path = Paths.screensaverDir() .. "/ticket.png", ready = false }, Ticket)
+    -- 身份进文件名：分享 URL 的 path 跟着变，换书不会命中手机上第一本的缓存。
+    local identity = tostring(book.source_id or "") .. "\0" .. tostring(book.stable_id or book.title or "")
+    local self = setmetatable({
+        path = Paths.screensaverDir() .. "/ticket-" .. require("ffi/sha2").md5(identity) --[[@as string]] .. ".png",
+        ready = false,
+    }, Ticket)
     local _w, sh = Layout.portraitSize()
     local book_page, book_total = Session.bookPages(snapshot)
     self.blocks = Receipt.blocks(Layout.panel{

@@ -148,9 +148,10 @@ function File.download(self, conn, method, path, inline)
     file:seek("set", 0)
     local name = real:match("([^/]+)$") or "file"
     local ctype = IMAGE_TYPES[name:lower():match("(%.[^.]*)$")] or "application/octet-stream"
-    local extra = nil
+    -- 同一路径会被原地覆盖（票根）。不标 no-store 时，浏览器按 URL 把第一张图一直存着。
+    local extra = { "Cache-Control: no-store" }
     if inline ~= "1" then
-        extra = { "Content-Disposition: attachment; filename*=UTF-8''" .. Text.urlEncode(name) }
+        extra[#extra + 1] = "Content-Disposition: attachment; filename*=UTF-8''" .. Text.urlEncode(name)
     end
     return self:_queueResponse(conn, {
         code = 200,
