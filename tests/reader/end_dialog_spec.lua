@@ -11,6 +11,8 @@ Themed.install()
 
 local order = {}
 local soft_result = { true }
+local clear_result = { true }
+local cached = { false }
 local running_task
 local desk = { events = {} }
 function desk:onEvent(name) self.events[#self.events + 1] = name end
@@ -22,6 +24,11 @@ package.preload["apps/filemanager/filemanager"] = function()
 end
 package.preload["book.store"] = function()
     return {
+        isCached = function() return cached[1] end,
+        clearCache = function(source_id, stable_id, keep_cover)
+            order[#order + 1] = "clear:" .. source_id .. "\0" .. stable_id .. "\0" .. tostring(keep_cover)
+            return clear_result[1], clear_result[2]
+        end,
         softDelete = function(source_id, stable_id)
             order[#order + 1] = "soft:" .. source_id .. "\0" .. stable_id
             return soft_result[1]
@@ -51,6 +58,7 @@ local function findItem(text)
 end
 local function deleteItem() return findItem("彻底删除（进度、划线与书架一并清除）") end
 local function softItem() return findItem("软删除（清本地正文，进度划线可恢复）") end
+local function cacheItem() return findItem("清理缓存") end
 
 -- 点「删除本书」只弹确认，不删
 do
@@ -132,6 +140,61 @@ do
     Assert.eq(order[2], "soft:local\0y.epub")
     Assert.eq(Themed.last("toast").text, "已软删除")
     Assert.eq(desk.events[1], "shelf_changed")
+end
+
+-- 未缓存（本地原书）不给清理缓存
+do
+    cached[1] = false
+    EndDialog.show({}, identity)
+    Assert.is_nil(cacheItem())
+end
+
+-- 已缓存：确认后先关书再清（连封面），成功刷新书架
+do
+    order, desk.events, cached, clear_result, running_task = {}, {}, { true }, { true }, nil
+    EndDialog.show({}, identity)
+    cacheItem().callback()
+    Assert.len(order, 0)
+    local confirm = Themed.last("confirm")
+    Assert.eq(confirm.text, "清理《A》的本地缓存？\n正文、章节与图片需重新下载。")
+    Assert.eq(confirm.ok_text, "清理")
+    confirm.ok_callback()
+    Assert.eq(order[1], "open_desktop")
+    Assert.eq(order[2], "clear:moon\0a.epub\0false")
+    Assert.eq(Themed.last("toast").text, "缓存已清理")
+    Assert.eq(desk.events[1], "shelf_changed")
+end
+
+-- 部分文件删不掉：仍算成功，提示并刷新
+do
+    order, desk.events, clear_result = {}, {}, { true, "partial" }
+    EndDialog.show({}, identity)
+    cacheItem().callback()
+    Themed.last("confirm").ok_callback()
+    Assert.eq(Themed.last("toast").text, "部分缓存文件未能删除")
+    Assert.eq(desk.events[1], "shelf_changed")
+end
+
+-- 清理失败：提示，不刷新书架
+do
+    order, desk.events, clear_result = {}, {}, { false }
+    EndDialog.show({}, identity)
+    cacheItem().callback()
+    Themed.last("confirm").ok_callback()
+    Assert.eq(Themed.last("toast").text, "清理缓存失败")
+    Assert.len(desk.events, 0)
+end
+
+-- 本书正在后台缓存：确认后中止，不关书不清缓存
+do
+    order, running_task = {}, { id = "cache" }
+    EndDialog.show({}, identity)
+    cacheItem().callback()
+    Themed.last("confirm").ok_callback()
+    Assert.eq(Themed.last("toast").text, "本书正在后台缓存，请稍后再试")
+    Assert.len(order, 0)
+    running_task = nil
+    cached[1] = false
 end
 
 for _, name in ipairs({ "desktop", "apps/filemanager/filemanager", "book.store", "workers.tasks", "reader.end_dialog" }) do
