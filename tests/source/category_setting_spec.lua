@@ -12,6 +12,12 @@ local CategorySetting = require("source.category_setting")
 local SOURCE = "wechat"
 local cfg = Settings.getSource(SOURCE)
 
+cfg.category_as_group = nil
+Settings.saveSource(SOURCE, cfg)
+Assert.is_true(CategorySetting.enabled(SOURCE), "缺省开")
+Assert.eq(CategorySetting.apply(SOURCE, "玄幻", "追更"), "追更", "缺省：只用分组")
+Assert.is_nil(CategorySetting.apply(SOURCE, "玄幻", nil), "缺省：没进组不写题材")
+
 cfg.category_as_group = false
 Settings.saveSource(SOURCE, cfg)
 Assert.is_false(CategorySetting.enabled(SOURCE))

@@ -205,6 +205,13 @@ end
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return table
 function Source:syncBooksAsync(opts, cb)
+    -- 旧版缺省为关，书架分类是题材。缺省改开后，增量会把非空本地分类当成分组名留住，
+    -- 必须清一次游标走全量，分组名才能写进来。写上 true，避免之后每次同步都清游标。
+    if self.cfg.category_as_group == nil then
+        self.cfg.category_as_group = true
+        self.cfg.shelf_cursor = nil
+        require("utils.settings").saveSource(self.id)
+    end
     if not legacy_mp_dropped then
         legacy_mp_dropped = true
         require("source.wechat.mp").dropLegacyBooks(require("book.books_db"))
@@ -349,12 +356,14 @@ function Source:syncBooksAsync(opts, cb)
                         changed[b.stable_id] = b
                     end
                 end
-                -- 开了「分组代替分类」且分组无变更：保留本地分组名，别被详情里的题材盖掉。
+                -- 分组变更已经回退全量。留在增量路说明分组没变：旧书沿用本地分类（含没进组），
+                -- 新书不在任何分组里。详情里的题材一律不写。
                 if require("source.category_setting").enabled(self.id) then
                     local locals = BookDB.getMany(self.id, changed_ids)
                     for id, b in pairs(changed) do
                         local old = locals[id]
-                        if old and old.category and old.category ~= "" then b.category = old.category end
+                        local kept = old and old.category
+                        b.category = (type(kept) == "string" and kept ~= "") and kept or nil
                     end
                 end
                 reconcileIncremental(changed)

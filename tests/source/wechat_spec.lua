@@ -1300,14 +1300,17 @@ do
     fake_client.shelfSyncIdsAsync = function(_, synckey, count, cb)
         ids_req = { synckey = synckey, count = count }
         cb({ synckey = 101, bookCount = 3, removed = { "gone" },
-            bookIds = { { bookId = "b", type = 0 }, { bookId = "c", type = 0 } },
+            bookIds = { { bookId = "a", type = 0 }, { bookId = "b", type = 0 }, { bookId = "c", type = 0 } },
             archive = {}, albumRemoved = {}, removedArchive = {} })
         return { cancel = function() end }
     end
     fake_client.shelfSyncBooksAsync = function(_, ids, cb)
         books_req = ids
-        cb({ books = { { bookId = "b", title = "乙新", category = "玄幻" }, { bookId = "c", title = "丙" } },
-            bookProgress = { { bookId = "c", progress = 50 } }, albums = {}, emptyInfoIds = {} })
+        cb({ books = {
+            { bookId = "a", title = "甲", category = "都市" },
+            { bookId = "b", title = "乙新", category = "玄幻" },
+            { bookId = "c", title = "丙", category = "玄幻" },
+        }, bookProgress = { { bookId = "c", progress = 50 } }, albums = {}, emptyInfoIds = {} })
         return { cancel = function() end }
     end
     fake_client.shelfSyncAsync = function(_, cb)
@@ -1317,6 +1320,7 @@ do
     end
     local src = WeChat.new()
     src.cfg.wr_vid = "v1"
+    src.cfg.category_as_group = true
     src.cfg.shelf_cursor = { vid = "v1", synckey = 100 }
     local Settings = require("utils.settings")
     local getSource = Settings.getSource
@@ -1328,14 +1332,16 @@ do
     Assert.is_false(full_called, "增量对得齐时不走全量")
     Assert.eq(ids_req.synckey, 100)
     Assert.eq(ids_req.count, 3)
-    Assert.len(books_req, 2)
+    Assert.len(books_req, 3)
     local snap = {}
     for _idx, b in ipairs(remembered_stats_books.last_snapshot) do snap[b.stable_id] = b end
     Assert.eq(snap.a.title, "甲")
+    Assert.is_nil(snap.a.category, "没进组的旧书不被详情题材盖掉")
     Assert.eq(snap.b.title, "乙新")
     Assert.eq(snap.b.category, "我的分组", "分组无变更时保留本地分组名")
     Assert.is_nil(snap.gone, "removed 的书不进快照")
     Assert.not_nil(snap.c, "新增的书经 syncbook 补进快照")
+    Assert.is_nil(snap.c.category, "新书没进组，不写详情题材")
     Assert.eq(src.cfg.shelf_cursor.synckey, 101, "reconcile 成功后推进游标")
     Settings.getSource = getSource
     fake_client.shelfSyncIdsAsync, fake_client.shelfSyncBooksAsync = nil, nil
@@ -1363,6 +1369,7 @@ do
     end
     local src = WeChat.new()
     src.cfg.wr_vid = "v1"
+    src.cfg.category_as_group = true
     src.cfg.shelf_cursor = { vid = "v1", synckey = 100 }
     local result
     src:syncBooksAsync(nil, function(r) result = r end)
@@ -1373,6 +1380,33 @@ do
     fake_client.shelfSyncIdsAsync = nil
     remembered_stats_books.local_library, remembered_stats_books.local_rows = nil, nil
     remembered_stats_books.last_snapshot = nil
+end
+
+-- 键没写过：缺省改开，清掉旧游标走全量，并落成 true。
+do
+    local full_called, ids_called = false, false
+    fake_client.shelfSyncIdsAsync = function()
+        ids_called = true
+        return { cancel = function() end }
+    end
+    fake_client.shelfSyncAsync = function(_, cb)
+        full_called = true
+        cb({ synckey = 7, books = { { bookId = "a", title = "甲" } } })
+        return { cancel = function() end }
+    end
+    local src = WeChat.new()
+    src.cfg.wr_vid = "v1"
+    src.cfg.category_as_group = nil
+    src.cfg.shelf_cursor = { vid = "v1", synckey = 100 }
+    local result
+    src:syncBooksAsync(nil, function(r) result = r end)
+    require("support.stubs").flush()
+    Assert.not_nil(result)
+    Assert.is_true(full_called, "缺省开应走全量")
+    Assert.is_false(ids_called, "游标已清，不拉增量")
+    Assert.is_true(src.cfg.category_as_group)
+    Assert.eq(src.cfg.shelf_cursor.synckey, 7)
+    fake_client.shelfSyncIdsAsync = nil
 end
 
 -- 书城浏览：目录树与榜单书每次都调 client，源不留实例缓存（新鲜度归 client 的 http 缓存）

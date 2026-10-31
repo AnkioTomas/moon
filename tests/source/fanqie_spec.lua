@@ -239,14 +239,14 @@ Assert.eq(count, 2)
 Assert.eq(stored[1].stable_id, "1234567890123456789")
 Assert.eq(stored[1].authors, "作者")
 Assert.eq(stored[1].title, "测试")
-Assert.is_nil(stored[1].category, "默认关：进组也不写分组名")
+Assert.eq(stored[1].category, "追更", "默认开：进组书分类用分组名")
 Assert.matches(stored[1].cover, "p6%-novel%.byteimg%.com")
 Assert.eq(stored[2].stable_id, "9876543210987654321")
 Assert.is_nil(stored[2].category, "没进组不写分类")
 
--- 打开「使用自定义分组代替分类」后再同步：进组书分类用分组名。
+-- 关掉「使用自定义分组代替分类」后再同步：番茄书架不带题材，分类清空。
 do
-    source_cfg.category_as_group = true
+    source_cfg.category_as_group = false
     local again = 0
     src:syncBooksAsync({ force = true }, function(r, e)
         Assert.not_nil(r)
@@ -255,9 +255,9 @@ do
     end)
     drain()
     Assert.eq(again, 2)
-    Assert.eq(stored[1].category, "追更", "开：进组书分类用分组名")
-    Assert.is_nil(stored[2].category, "开：没进组仍不写分类")
-    source_cfg.category_as_group = false
+    Assert.is_nil(stored[1].category, "关：进组也不写分组名")
+    Assert.is_nil(stored[2].category, "关：没进组不写分类")
+    source_cfg.category_as_group = nil
 end
 
 local ref = { source_id = "fanqie", stable_id = "1234567890123456789" }

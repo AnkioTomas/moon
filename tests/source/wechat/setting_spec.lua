@@ -79,15 +79,15 @@ reviews.callback()
 Assert.is_true(cfg.show_paragraph_reviews)
 Assert.is_true(rows[3]().status_on)
 
--- 自定义分组代替分类默认关；点按开启并清增量游标。
+-- 自定义分组代替分类默认开；点按关闭并清增量游标。
 local groups = rows[4]()
 Assert.eq(groups.title, "使用自定义分组代替分类")
-Assert.is_false(groups.status_on)
+Assert.is_true(groups.status_on)
 cfg.shelf_cursor = { vid = "1", synckey = 9 }
 groups.callback()
-Assert.is_true(cfg.category_as_group)
+Assert.is_false(cfg.category_as_group)
 Assert.is_nil(cfg.shelf_cursor)
-Assert.is_true(rows[4]().status_on)
+Assert.is_false(rows[4]().status_on)
 
 -- 已登录：追加续期与退出；退出先确认，确认后才清会话。
 logged_in = true

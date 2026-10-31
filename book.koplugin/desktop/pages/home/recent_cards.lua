@@ -206,12 +206,10 @@ function Stereo:ensureWarp(typ)
         self._warp, self._tops, self._heights = hit.warp, hit.tops, hit.heights
         return
     end
-    ---@type BlitBuffer
-    local src = typ and Blitbuffer.new(sw, sh, typ) or Blitbuffer.new(sw, sh)
+    local src = (typ and Blitbuffer.new(sw, sh, typ) or Blitbuffer.new(sw, sh)) --[[@as BlitBuffer]]
     src:fill(Blitbuffer.COLOR_WHITE)
     self[1]:paintTo(src, 0, 0)
-    ---@type BlitBuffer
-    local warp = typ and Blitbuffer.new(dw, dh, typ) or Blitbuffer.new(dw, dh)
+    local warp = (typ and Blitbuffer.new(dw, dh, typ) or Blitbuffer.new(dw, dh)) --[[@as BlitBuffer]]
     warp:fill(Blitbuffer.COLOR_WHITE)
     local outer_left = self.side < 0
     local radius = coverRadius(sw, sh)

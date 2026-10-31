@@ -1003,6 +1003,7 @@ function Source:pullStatsAsync(cb)
         materializeVolumes(result.identities, titles)
         -- 落库成功（核心的 result.commit）才更新状态：失败不前进，
         -- 上次身份还在，身份漂移留下的孤儿行下次还能清。
+        ---@diagnostic disable-next-line: inject-field
         result.commit = function()
             state:saveSetting("volumes", volumes)
             state:saveSetting("titles", titles)
