@@ -29,7 +29,7 @@ local COMPONENT_MODULES = {
     "recent_hero", "recent_list", "recent_cards", "random", "shelf",
 }
 
--- 内置书源自带的首页组件：源 id → 组件模块（id 前缀沿用 ext.<name>，已保存的首页布局不变）。
+-- 内置书源自带的首页组件：源 id → 组件模块（组件 id 前缀是源 id；旧 ext.<name>. 前缀由 source/legacy_ext 迁移）。
 local SOURCE_COMPONENTS = { ["kavita"] = "source.kavita.on_deck" }
 
 ---@type BookHomeComponent[]|nil
