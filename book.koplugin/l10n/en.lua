@@ -2573,4 +2573,7 @@ Current version: ",
     ["阅读页快捷面板"] = "Reader quick panel",
     ["页内段评标记"] = "In-page paragraph review marks",
     ["顶栏蓝牙状态"] = "Top bar Bluetooth status",
+    ["标注颜色"] = "Annotation color",
+    ["灰色"] = "Gray",
+    ["黑色"] = "Black",
 }
