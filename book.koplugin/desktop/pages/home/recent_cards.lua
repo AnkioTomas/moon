@@ -81,6 +81,27 @@ local STEREO = {
 }
 
 -- 侧封面保持竖直，仅缩小并重叠摆放；底边始终对齐，形成书堆纵深。
+-- 侧封面的圆角半径：和封面 Box（无阴影的 raised）同一套夹法。
+---@param w integer
+---@param h integer
+---@return integer
+local function coverRadius(w, h)
+    return math.min(Theme.px(Theme.current().raised.radius or 0), math.floor(math.min(w, h) / 2))
+end
+
+--- 圆角外的像素行数：距左/右缘 i 像素的那一列，上下各有多少行在圆外（透明）。
+---@param i integer
+---@param r integer
+---@return integer
+local function cornerInset(i, r)
+    if i >= r then return 0 end
+    for j = 0, r - 1 do
+        local dx, dy = r - i, r - j
+        if dx * dx + dy * dy <= r * r then return j end
+    end
+    return r
+end
+
 ---@class BookRecentCardPerspective : WidgetContainer
 ---@field dimen table
 local Perspective = WidgetContainer:extend{}
@@ -89,7 +110,15 @@ local Perspective = WidgetContainer:extend{}
 ---@param y integer
 function Perspective:paintTo(bb, x, y)
     self[1]:paintTo(bb, x, y)
-    bb:lightenRect(x, y, self.dimen.w, self.dimen.h)
+    -- 只提亮圆角以内：角外露的是下面邻卡 / 页面，整块提亮会在角上留白方块。
+    local w, h = self.dimen.w, self.dimen.h
+    local r = coverRadius(w, h)
+    bb:lightenRect(x, y + r, w, h - 2 * r)
+    for j = 0, r - 1 do
+        local inset = cornerInset(j, r)
+        bb:lightenRect(x + inset, y + j, w - 2 * inset, 1)
+        bb:lightenRect(x + inset, y + h - 1 - j, w - 2 * inset, 1)
+    end
 end
 
 --- 透视列映射：t=0 外缘（近、全高），t=1 内缘；rho 为内/外高度比。
@@ -177,12 +206,15 @@ function Stereo:ensureWarp(typ)
         self._warp, self._tops, self._heights = hit.warp, hit.tops, hit.heights
         return
     end
+    ---@type BlitBuffer
     local src = typ and Blitbuffer.new(sw, sh, typ) or Blitbuffer.new(sw, sh)
     src:fill(Blitbuffer.COLOR_WHITE)
     self[1]:paintTo(src, 0, 0)
+    ---@type BlitBuffer
     local warp = typ and Blitbuffer.new(dw, dh, typ) or Blitbuffer.new(dw, dh)
     warp:fill(Blitbuffer.COLOR_WHITE)
     local outer_left = self.side < 0
+    local radius = coverRadius(sw, sh)
     local rho = self.rho
     local last, src_last = dw - 1, sw - 1
     local tops, heights = {}, {}
@@ -194,12 +226,19 @@ function Stereo:ensureWarp(typ)
         local src_x = math.floor(pos + 0.5)
         local col_h = math.max(1, math.min(dh, math.floor(dh * relative_h + 0.5)))
         local top = math.floor((dh - col_h) / 2)
-        tops[dx + 1] = top
-        heights[dx + 1] = col_h
+        -- 源图圆角外的行不进梯形，否则角上是一块白。
+        local inset = cornerInset(math.min(src_x, sw - 1 - src_x), radius)
+        local first, last
         for dy = 0, col_h - 1 do
             local sy = col_h <= 1 and 0 or math.floor(dy * (sh - 1) / (col_h - 1) + 0.5)
-            warp:setPixelClamped(dx, top + dy, src:getPixel(src_x, sy))
+            if sy >= inset and sy <= sh - 1 - inset then
+                first = first or dy
+                last = dy
+                warp:setPixelClamped(dx, top + dy, src:getPixel(src_x, sy))
+            end
         end
+        tops[dx + 1] = top + (first or 0)
+        heights[dx + 1] = first and (last - first + 1) or 0
     end
     src:free()
     warpPut(key, { warp = warp, tops = tops, heights = heights })
@@ -218,6 +257,16 @@ function Stereo:paintTo(bb, x, y)
     end
     self:ensureWarp(bb.getType and bb:getType() or nil)
     local warp, tops, heights = self._warp, self._tops, self._heights
+    local raised = Theme.current().raised
+    local shadow = Theme.px(raised.shadow or 0)
+    if shadow > 0 and bb.paintRect then
+        local color = Theme.color(raised.shadow_color)
+        for dx = 0, dw - 1 do
+            if heights[dx + 1] > 0 then
+                bb:paintRect(x + dx + shadow, y + tops[dx + 1] + shadow, 1, heights[dx + 1], color)
+            end
+        end
+    end
     -- 按列合并同高段，blitFrom 一次画一截（无 alpha，只贴梯形本体）。
     if bb.blitFrom then
         local dx = 0
