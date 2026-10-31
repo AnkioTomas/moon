@@ -114,6 +114,8 @@ function Detail:mergeStored()
     if row then
         book.meta = row.meta
         book.authors, book.intro = row.authors or book.authors, row.intro or book.intro
+        -- 书架行不带 hidden。不补上的话，筛选「软删除」进详情永远看不到「恢复」。
+        if row.hidden ~= nil then book.hidden = row.hidden end
     end
     return row
 end
