@@ -24,7 +24,8 @@ package.preload["desktop.pages.setting.overlay"] = function()
 end
 local conf = {
     rare_ruby = false, rare_wordwise = false, rare_enabled = false,
-    rare_level = "rare", rare_size = 0.5, rare_min_spacing = 140, rare_vocab = false,
+    rare_level = "rare", rare_size = 0.5, rare_color = "gray",
+    rare_min_spacing = 140, rare_vocab = false,
     rare_lexicons = { a = true }, rare_split_migrated = true,
 }
 local saved = 0
@@ -82,12 +83,13 @@ Assert.eq(feature[1].title, "生僻字注音")
 Assert.eq(feature[2].title, "WordWise 释义")
 
 local display = expand(sections[2])
-Assert.len(display, 4)
-Assert.len(choices, 3)
+Assert.len(display, 5)
+Assert.len(choices, 4)
 Assert.eq(choices[1].title, "标注范围")
 Assert.eq(choices[2].title, "标注字号")
-Assert.eq(choices[3].title, "最小行距")
-Assert.eq(display[4].title, "生字本也标注")
+Assert.eq(choices[3].title, "标注颜色")
+Assert.eq(choices[4].title, "最小行距")
+Assert.eq(display[5].title, "生字本也标注")
 
 local lex = expand(sections[3])
 Assert.len(lex, 2)

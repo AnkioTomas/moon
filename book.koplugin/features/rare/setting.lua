@@ -11,7 +11,7 @@ local T = require("ffi/util").template
 local Setting = {}
 
 -- rare_ruby / rare_wordwise：注音与释义独立开关；rare_enabled 为二者或（兼容旧逻辑）；
--- rare_level / rare_size / rare_min_spacing / rare_vocab / rare_lexicons / rare_built_at 同前。
+-- rare_level / rare_size / rare_color / rare_min_spacing / rare_vocab / rare_lexicons / rare_built_at 同前。
 -- rare_mode 已废弃；rare_split_migrated 标记已从旧 rare_enabled 迁过。
 Setting.defaults = {
     rare_ruby = false,
@@ -19,6 +19,7 @@ Setting.defaults = {
     rare_enabled = false,
     rare_level = "rare",
     rare_size = 0.5,
+    rare_color = "gray", -- gray=深灰（默认，跟正文区分）；black=黑色（墨水屏小字更利索）
     rare_min_spacing = 140,
     rare_lookup_source = "",
     rare_lexicons = {},
@@ -43,6 +44,13 @@ local function sizes()
         { value = 0.5, text = "50%" },
         { value = 0.6, text = "60%" },
         { value = 0.7, text = "70%" },
+    }
+end
+
+local function colors()
+    return {
+        { value = "gray", text = _("灰色") },
+        { value = "black", text = _("黑色") },
     }
 end
 
@@ -270,6 +278,7 @@ local function sections(desktop)
             rows = {
                 function(iw) return pickRow(desktop, iw, "tune", _("标注范围"), levels(), "rare_level") end,
                 function(iw) return pickRow(desktop, iw, "format_size", _("标注字号"), sizes(), "rare_size") end,
+                function(iw) return pickRow(desktop, iw, "invert_colors", _("标注颜色"), colors(), "rare_color") end,
                 function(iw) return pickRow(desktop, iw, "format_line_spacing", _("最小行距"), spacings(), "rare_min_spacing") end,
                 function(iw)
                     return Row.widget({

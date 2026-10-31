@@ -4,7 +4,8 @@ local Assert = require("support.assert")
 
 local settings = {
     rare_enabled = true, rare_ruby = true, rare_wordwise = false, rare_split_migrated = true,
-    rare_level = "rare", rare_size = 0.5, rare_lexicons = { t = true }, rare_built_at = {},
+    rare_level = "rare", rare_size = 0.5, rare_color = "gray",
+    rare_lexicons = { t = true }, rare_built_at = {},
 }
 package.preload["utils.settings"] = function()
     return { get = function() return settings end, save = function() end }
@@ -203,6 +204,13 @@ do
     Assert.eq(rendered[1].text, "dá")
     Assert.eq(rendered[1].color, 1, "注音深灰（与正文黑区分）")
     Assert.eq(calls.boxes, 1, "只给命中的字取框")
+    -- 标注颜色切黑色：同视口只重画，不必重扫。
+    settings.rare_color = "black"
+    rendered = {}
+    o:paint({})
+    Assert.len(rendered, 1)
+    Assert.eq(rendered[1].color, 0, "注音黑色")
+    settings.rare_color = "gray"
     -- 同一视口走缓存，不再走字。
     rendered = {}
     o:paint({})
