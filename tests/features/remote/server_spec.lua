@@ -596,9 +596,16 @@ do
     end
     local c_share = newClient({ "GET /download?path=/dl/shared.bin HTTP/1.1\r\n\r\n" }, { no_token = true })
     drain(serve(c_share, handlers))
-    local code_share, body_share = parseResponse(c_share:output())
+    local code_share, body_share, head_share = parseResponse(c_share:output())
     Assert.eq(code_share, 200)
     Assert.eq(body_share, "SHARED")
+    has(head_share, "Cache-Control: no-store")
+    -- 分享链接带 v= 只为打破缓存，读的仍是 path 指向的文件，且不用配对。
+    local c_ver = newClient({ "GET /download?path=/dl/shared.bin&v=2-1-6 HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_ver, handlers))
+    local code_ver, body_ver = parseResponse(c_ver:output())
+    Assert.eq(code_ver, 200)
+    Assert.eq(body_ver, "SHARED")
     local c_unshared = newClient({ "GET /download?path=/dl/ok.bin HTTP/1.1\r\n\r\n" }, { no_token = true })
     drain(serve(c_unshared, handlers))
     Assert.eq((parseResponse(c_unshared:output())), 401)
@@ -969,6 +976,7 @@ do
     Assert.eq(body, "BYTES0123")
     has(head, "Content-Disposition: attachment")
     has(head, "Content-Length: 9")
+    has(head, "Cache-Control: no-store")
     Assert.eq(done_path, real)
     os.remove(real)
 
