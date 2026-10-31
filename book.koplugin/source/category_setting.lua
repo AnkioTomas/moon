@@ -1,9 +1,10 @@
 --[[--
 书源设置页的「使用自定义分组代替分类」开关（微信 / 起点 / 番茄共用）。
 
-开：书架分类只用平台自定义分组名，没进组的书归未分类，不用题材。
+缺省开。开：书架分类只用平台自定义分组名，没进组的书归未分类，不用题材。
 关：书架分类只用题材 / 频道，忽略自定义分组。
 两种模式互斥，不再混合进同一套分类。
+未写过这个键视为开；显式 false 才是关。微信升级见 syncBooksAsync：缺省从关改开时清增量游标，否则旧题材会被增量当成分组名留住。
 
 @module koplugin.book.source.category_setting
 --]]
@@ -15,7 +16,7 @@ local CategorySetting = {}
 ---@param source_id string
 ---@return boolean
 function CategorySetting.enabled(source_id)
-    return require("utils.settings").getSource(source_id).category_as_group == true
+    return require("utils.settings").getSource(source_id).category_as_group ~= false
 end
 
 --- 按开关决定落进 books.category 的值：开 → 分组名或 nil；关 → 题材（可空）。

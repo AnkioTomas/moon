@@ -56,7 +56,7 @@ local INPAGE_EPUB = "footnote-inpage_epub"
 ---@return table
 local function globalStyleTweaks()
     local tweaks = G_reader_settings:readSetting("style_tweaks")
-    if tweaks then return tweaks end
+    if type(tweaks) == "table" then return tweaks end
     local copy = {}
     for key, value in pairs(require("ui/data/css_tweaks").DEFAULT_GLOBAL_STYLE_TWEAKS) do
         copy[key] = value

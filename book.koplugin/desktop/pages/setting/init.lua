@@ -482,7 +482,7 @@ function Settings:updateView()
         end
         table.insert(roots, at, { id = g.id, title = g.title, after = g.after, icon = g.icon })
     end
-    local groups = Tree.build(roots, entries)
+    local groups = Tree.build(roots, entries) ---@type table[]
     -- Tree.build 不传 icon，从 roots 补回去。
     local icons = {}
     for _idx, r in ipairs(roots) do icons[r.id] = r.icon end

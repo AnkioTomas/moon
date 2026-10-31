@@ -285,6 +285,7 @@ local function scanHits(self, lexicons, level, force)
         local room = MAX_HITS - #found
         if room <= 0 then break end
         for _f, f in ipairs(Lexicon.scan(lex, texts, Lexicon.threshold(lex, level), force, room)) do
+            ---@diagnostic disable-next-line: inject-field
             f.kind = lex.kind
             found[#found + 1] = f
         end
