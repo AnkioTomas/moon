@@ -168,7 +168,8 @@ function Session.chapterPages(snapshot)
     return Toc.chapterPages(snapshot or Session._snapshot)
 end
 
---- 全书页码（按章打开时用目录字数估算；估不出则退回文档页码）。顶栏 / 侧栏 / 锁屏共用。
+--- 全书页码。按章打开用目录估算（没字数就按本章页数外推，估不出退回文档页码）；
+--- 整本书与章内页码同一套序号。顶栏 / 侧栏 / 锁屏共用。
 ---@param snapshot ReaderSessionSnapshot|nil 缺省当前会话
 ---@return integer page
 ---@return integer total
@@ -177,12 +178,14 @@ function Session.bookPages(snapshot)
     if not snapshot then return 0, 0 end
     local page = tonumber(snapshot.page) or 0
     local total = tonumber(snapshot.total_pages) or 0
+    local Pages = require("reader.session.pages")
     if snapshot.identity and snapshot.identity.chapter_idx ~= nil then
-        local p, t = require("reader.session.pages").estimate(
+        local estimated, estimated_total = Pages.estimate(
             Toc.list(snapshot), snapshot.identity.chapter_idx, page, total)
-        if p then return p, t end
+        if estimated then return estimated, estimated_total end
+        return page, total
     end
-    return page, total
+    return Pages.document(snapshot.ui, page, total)
 end
 
 --- 全书剩余阅读时间估算（秒）；数据不足或已读完返回 nil。
@@ -264,7 +267,7 @@ function Session.onReaderReady(plugin)
     else
         ChapterMode.clearActiveChapter(Session._snapshot)
         Snapshot.refresh(Session._snapshot)
-        -- sidecar 缺失（清缓存后重下 / 换设备）时文档停在开头：用本地进度回落。
+        -- 边车缺失，或仍停在同步前的旧位置：用本地进度回落。
         require("reader.session.progress").applyLocalPending(Session._snapshot)
         Snapshot.refresh(Session._snapshot)
         require("reader.session.auto_toc").start(Session._snapshot)
