@@ -93,6 +93,29 @@ do
     Assert.eq(out[#out].text, "九章")
 end
 
+-- 侧栏书签 / 书摘共用这份汇总，靠 match_table 按类型拆开。空串 drawer / note 当缺省。
+do
+    local live = {
+        { text = "页书签", page = "1" },
+        { text = "一段划线", drawer = "lighten", page = "2" },
+        { text = "带想法", drawer = "lighten", note = "批注", page = "3" },
+        { text = "空抽屉", drawer = "", note = "不算笔记", page = "4" },
+        { text = "空备注", drawer = "lighten", note = "", page = "5" },
+        { text = "", drawer = "lighten", page = "6" },
+    }
+    local function texts(match)
+        local out = BookNotes.collect("filter", "x", 1, live, {}, match)
+        local parts = {}
+        for _idx, entry in ipairs(out) do parts[#parts + 1] = entry.text end
+        return table.concat(parts, ",")
+    end
+    Assert.eq(texts(nil), "页书签,一段划线,带想法,空抽屉,空备注", "不过滤时丢掉空文本")
+    Assert.eq(texts({ bookmark = true }), "页书签,空抽屉")
+    Assert.eq(texts({ highlight = true, note = true }), "一段划线,带想法,空备注")
+    Assert.eq(texts({ highlight = true }), "一段划线,空备注")
+    Assert.eq(texts({ note = true }), "带想法")
+end
+
 local function fakeUi(live)
     local ui = { events = {}, annotation = { annotations = live } }
     function ui:handleEvent(ev) self.events[#self.events + 1] = ev end
@@ -149,4 +172,38 @@ do
     menu.left_callback()
     Assert.eq(state.closed, 1)
     Assert.eq(native(), 1)
+end
+
+-- 章节模式：书签和书摘按 match_table 各看各的；带查询的搜索仍走原生列表。
+do
+    local ui, native = fakeUi({
+        { text = "页书签", page = "1" },
+        { text = "一段划线", drawer = "lighten", page = "2" },
+        { text = "带想法", drawer = "lighten", note = "批注", page = "3" },
+    })
+    BookNotes.install(ui)
+    state.snapshot = {
+        identity = { source_id = "filter", stable_id = "x", chapter_idx = 1 },
+        chapter = { toc = { { idx = 1, title = "第一章" } } },
+    }
+    ui.bookmark.match_table = { bookmark = true }
+    ui.bookmark:onShowBookmark()
+    Assert.eq(native(), 0)
+    Assert.eq(#state.shown.items, 1)
+    Assert.eq(state.shown.items[1].text, "页书签")
+    Assert.matches(state.shown.title, "全书书签")
+
+    ui.bookmark.match_table = { highlight = true, note = true }
+    ui.bookmark:onShowBookmark()
+    Assert.eq(#state.shown.items, 2)
+    Assert.eq(state.shown.items[1].text, "一段划线")
+    Assert.is_nil(state.shown.items[1].icon)
+    Assert.eq(state.shown.items[2].text, "带想法")
+    Assert.eq(state.shown.items[2].icon, "edit_note")
+    Assert.matches(state.shown.title, "全书书摘")
+    Assert.eq(native(), 0, "书摘过滤后仍是全书列表")
+
+    ui.bookmark.match_table = { search_str = "页", bookmark = true, highlight = true, note = true }
+    ui.bookmark:onShowBookmark()
+    Assert.eq(native(), 1, "带查询的搜索交给原生列表")
 end
