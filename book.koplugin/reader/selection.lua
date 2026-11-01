@@ -1,8 +1,13 @@
 --[[--
-划词手柄：选区两端的可拖指示器，对齐 Kindle / Android。
+划词手柄：选区两端的可拖指示器。
 
-不另造选区。手柄只是 selected_text.pos0/pos1/sboxes 的视图；
-拖动手柄 = 固定一端，把另一端交给 document:getTextFromPositions。
+Kindle 电子纸没有划词放大镜（放大镜只用于图片和表格）。精度来自三件事：
+竖线落在字边界、圆点在行下所以手指不挡字；横着拖锁在当前行，
+越过半行才换行；拖动手柄按字符落点，不把两端扩成整词。
+长按起手仍由引擎选整词。
+
+不另造选区。手柄只是 selected_text.pos0/pos1/sboxes 的视图。
+拖动手柄 = 固定一端，另一端按上面的规则落点。
 
 叠层盖在划词菜单之上：命中手柄就拖，没命中就把事件转给菜单。
 菜单锚在选区+手柄的下方或上方，一开始拖就藏菜单，松手再按新手柄位置重开。
@@ -37,6 +42,8 @@ end
 ---@field ay number 描边起点
 ---@field edge_x number 选区端点（给 getTextFromPositions）
 ---@field edge_y number 选区端点
+---@field line_y number 这一端所在行的顶
+---@field line_h number 这一端所在行的高
 
 ---@class BookSelectionAnchors
 ---@field start BookSelectionHandle
@@ -107,6 +114,8 @@ function Selection.anchors(first, last, screen_h, radius, stem)
             ay = below and bottom or box.y,
             edge_x = edge_x,
             edge_y = box.y + box.h * 0.5,
+            line_y = box.y,
+            line_h = box.h,
         }
     end
     return {
@@ -186,7 +195,68 @@ function Selection.hit(anchors, pos, radius)
     return nil
 end
 
+--- 手指还在这一行的滞回带里就锁在行中线，明确换行才放行。
+--- 带是行高再向外半行：横拖时的纵向抖动留在带内。
+---@param line_y number|nil
+---@param line_h number|nil
+---@param py number
+---@return number
+function Selection.trackY(line_y, line_h, py)
+    if not line_y or not line_h or line_h <= 0 then
+        return py
+    end
+    local pad = line_h * 0.5
+    if py >= line_y - pad and py < line_y + line_h + pad then
+        return line_y + line_h * 0.5
+    end
+    return py
+end
+
+--- 底层 selectRange 已经改了选区，但没走 Lua 包装，页面缓存不会重画。
+--- 失败时把选区放回原来的两端，避免屏幕上的高亮和下一次重绘对不上。
+---@param document table
+---@param prev table|nil
+local function restoreSelection(document, prev)
+    if prev and prev.pos0 and prev.pos1 and document.getTextFromXPointers then
+        document:getTextFromXPointers(prev.pos0, prev.pos1, true)
+    end
+end
+
+--- 排版文档按字符取选区。Lua 包装没把 grabWords 透传，默认会把两端扩成整词。
+--- 没有底层接口时返回 nil, false，调用方退回包装。空结果返回 nil, true，不再扩词。
+---@param document table
+---@param a { x: number, y: number }
+---@param b { x: number, y: number }
+---@param prev table|nil 失败时用来恢复的原选区
+---@return table|nil
+---@return boolean tried
+local function charRange(document, a, b, prev)
+    local raw = document._document
+    if not raw or not raw.getTextFromPositions or not document.getScreenBoxesFromPositions then
+        return nil, false
+    end
+    local range = raw:getTextFromPositions(a.x, a.y, b.x, b.y, true, true, false, false)
+    if not range or not range.pos0 or not range.text or range.text == "" then
+        if range then
+            restoreSelection(document, prev)
+        end
+        return nil, true
+    end
+    local boxes = document:getScreenBoxesFromPositions(range.pos0, range.pos1, true)
+    if not boxes or #boxes == 0 then
+        restoreSelection(document, prev)
+        return nil, true
+    end
+    -- getTextFromPositions 包装会丢掉页面缓存。绕过包装后要自己丢掉，高亮才会跟着重画。
+    if document.resetBufferCache then
+        document:resetBufferCache()
+    end
+    range.sboxes = boxes
+    return range, true
+end
+
 --- 固定一端，把另一端移到 pos。空结果或引擎失败时保持原选区。
+--- 排版文档按字符落点；扫描页仍走引擎自己的词盒。
 ---@param highlight table
 ---@param which "start"|"finish"
 ---@param pos { x: number, y: number }
@@ -207,7 +277,17 @@ function Selection.move(highlight, which, pos, fixed)
     if which == "finish" then
         a, b = other, finger
     end
-    local new = ui.document:getTextFromPositions(a, b)
+    local new
+    if ui.rolling then
+        local range, tried = charRange(ui.document, a, b, highlight.selected_text)
+        if tried then
+            new = range
+        else
+            new = ui.document:getTextFromPositions(a, b)
+        end
+    else
+        new = ui.document:getTextFromPositions(a, b)
+    end
     if not new or not new.pos0 or not new.text or new.text == "" then
         return false
     end
@@ -282,6 +362,8 @@ function Handles:beginDrag(which, pos)
     self.fixed = { x = other.edge_x, y = other.edge_y }
     self.grab_dx = handle.edge_x - pos.x
     self.grab_dy = handle.edge_y - pos.y
+    self.line_y = handle.line_y
+    self.line_h = handle.line_h
 end
 
 function Handles:drag(pos)
@@ -293,14 +375,24 @@ function Handles:drag(pos)
         Selection.hideMenu(self.highlight)
     end
     local before = self:region()
+    local prev_line = self.line_y
     local moved = Selection.move(self.highlight, self.dragging, {
         x = pos.x + self.grab_dx,
-        y = pos.y + self.grab_dy,
+        y = Selection.trackY(self.line_y, self.line_h, pos.y + self.grab_dy),
     }, self.fixed)
     if not moved then
         return
     end
     self:layout()
+    local handle = self.anchors and self.anchors[self.dragging]
+    if handle then
+        -- 换行后以新行中线为落点，否则下一帧还用旧行的偏移，会在两行之间抖。
+        if prev_line and math.abs(handle.line_y - prev_line) > 0.5 then
+            self.grab_dy = handle.edge_y - pos.y
+        end
+        self.line_y = handle.line_y
+        self.line_h = handle.line_h
+    end
     local after = self:region()
     -- 重绘阅读页会连带重绘上层叠层；只刷新旧/新选区横带的并集。
     UIManager:setDirty(self.highlight.dialog, "ui", before and after and before:combine(after))
@@ -312,6 +404,7 @@ function Handles:endDrag()
     self.fixed = nil
     self.menu_hidden = nil
     self.grab_dx, self.grab_dy = nil, nil
+    self.line_y, self.line_h = nil, nil
     if hidden then
         Selection.showMenu(self.highlight)
     end
@@ -415,12 +508,15 @@ local function paintHandles(self, bb)
     local ring = Blitbuffer.COLOR_WHITE
     local function paint(handle)
         local cx, cy = math.floor(handle.x), math.floor(handle.y)
-        local ax, ay = math.floor(handle.ax), math.floor(handle.ay)
+        local ax = math.floor(handle.ax)
         local sw = m.stem_w
-        local y0 = math.min(ay, cy)
-        local h = math.abs(cy - ay)
-        if h > 0 then
-            bb:paintRect(math.floor(ax - sw / 2), y0, sw, h, fill)
+        -- 竖线从行顶拉到圆点：边界画在字上，圆点在行外。
+        local top = math.floor(handle.line_y)
+        local bot = math.floor(handle.line_y + handle.line_h)
+        local y0 = math.min(top, cy)
+        local y1 = math.max(bot, cy)
+        if y1 > y0 then
+            bb:paintRect(math.floor(ax - sw / 2), y0, sw, y1 - y0, fill)
         end
         bb:paintCircle(cx, cy, m.radius, ring)
         bb:paintCircle(cx, cy, math.max(1, m.radius - m.ring), fill)
