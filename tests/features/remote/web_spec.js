@@ -150,7 +150,7 @@ async function check(lang) {
     assert.equal(nodes['status-reading'].textContent, strings['状态不可用']);
     vm.runInContext(fs.readFileSync(root + '/book.koplugin/features/remote/html/update.js', 'utf8'), context);
     for (const [status, key] of [
-        [400, '这不是月读插件安装包'],
+        [400, '这不是 KOReader 插件安装包'],
         [409, '设备正在安装其它更新，请稍后再试'],
     ]) {
         context.jfetch = () => Promise.reject(Object.assign(new Error('server error'), { status }));

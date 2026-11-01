@@ -849,11 +849,11 @@ local PLUGIN_ROOT = debug.getinfo(1, "S").source:match("^@(.*)/features/remote/i
 ---@param cb fun(ok: boolean, err: string|nil)
 local function installUpdate(temp, cb)
     local Update = require("features.update")
-    Update.installArchive(temp, PLUGIN_ROOT, function(ok, err)
-        cb(ok, err)
+    Update.installArchive(temp, PLUGIN_ROOT, function(ok, detail)
+        cb(ok, ok and nil or detail)
         if not ok then return end
         require("ui.themes.widgets.toast"):new{
-            text = _("月读已通过远程管理更新，正在重启 KOReader…"),
+            text = T(_("插件 %1 已安装，正在重启 KOReader…"), detail),
         }:show()
         require("ui/uimanager"):scheduleIn(1, Update.restart)
     end)

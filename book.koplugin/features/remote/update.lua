@@ -1,5 +1,6 @@
 --[[--
-月读更新路由：POST|PUT /api/update，raw body 是插件发布包（book.koplugin-*.zip）。
+插件更新路由：POST|PUT /api/update，raw body 是 KOReader 插件 ZIP
+（解压后顶层恰好一个以 .koplugin 结尾的目录）。
 
 收齐后交给 handlers.install_update 装包；成功回 ok，设备随后自行重启 KOReader。
 
@@ -16,6 +17,8 @@ Update.MAX_BYTES = 100 * 1024 * 1024
 local ERROR_CODES = {
     ["busy"] = 409,
     ["not a moon plugin archive"] = 400,
+    ["not a koplugin archive"] = 400,
+    ["multiple koplugin directories"] = 400,
     ["cannot open update archive"] = 400,
 }
 

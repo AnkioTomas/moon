@@ -106,10 +106,59 @@ entries = {
     { path = "book.koplugin/main.lua", mode = "file", body = "return 'uploaded'\n" },
     { path = "book.koplugin/bookversion.lua", mode = "file", body = 'return "1.2.4"\n' },
 }
-local local_ok, local_err = Install.run(archive, current)
-Assert.is_true(local_ok, local_err)
+local local_ok, local_name = Install.run(archive, current)
+Assert.is_true(local_ok, local_name)
+Assert.eq(local_name, "book.koplugin")
 Assert.eq(assert(loadfile(current .. "/main.lua"))(), "uploaded")
 Assert.eq(assert(loadfile(tmp .. "/.book.koplugin-backup/main.lua"))(), "new")
+
+-- 其它插件：装到 book.koplugin 同级，不碰月读，也不动月读的备份。
+assert(lfs.mkdir(tmp .. "/other.koplugin"))
+write(tmp .. "/other.koplugin/main.lua", "return 'old-other'\n")
+entries = {
+    { path = "other.koplugin", mode = "directory", size = 0 },
+    { path = "other.koplugin/main.lua", mode = "file", body = "return 'new-other'\n" },
+}
+local other_ok, other_name = Install.run(archive, current)
+Assert.is_true(other_ok, other_name)
+Assert.eq(other_name, "other.koplugin")
+Assert.eq(assert(loadfile(tmp .. "/other.koplugin/main.lua"))(), "new-other")
+Assert.eq(assert(loadfile(tmp .. "/.other.koplugin-backup/main.lua"))(), "old-other")
+Assert.eq(assert(loadfile(current .. "/main.lua"))(), "uploaded")
+Assert.eq(assert(loadfile(tmp .. "/.book.koplugin-backup/main.lua"))(), "new")
+
+-- 目录还不存在：直接落位，不制造空备份。
+entries = {
+    { path = "fresh.koplugin", mode = "directory", size = 0 },
+    { path = "fresh.koplugin/main.lua", mode = "file", body = "return 'fresh'\n" },
+}
+local fresh_ok, fresh_name = Install.run(archive, current)
+Assert.is_true(fresh_ok, fresh_name)
+Assert.eq(fresh_name, "fresh.koplugin")
+Assert.eq(assert(loadfile(tmp .. "/fresh.koplugin/main.lua"))(), "fresh")
+Assert.is_nil(lfs.attributes(tmp .. "/.fresh.koplugin-backup"))
+Assert.eq(assert(loadfile(current .. "/main.lua"))(), "uploaded")
+
+-- 顶层没有 .koplugin 目录（同名文件不算）：拒绝，已装的插件不动。
+entries = { { path = "readme.koplugin", mode = "file", body = "nope\n" } }
+local bare_ok, bare_err = Install.run(archive, current)
+Assert.is_nil(bare_ok)
+Assert.eq(bare_err, "not a koplugin archive")
+Assert.eq(assert(loadfile(tmp .. "/other.koplugin/main.lua"))(), "new-other")
+Assert.is_nil(lfs.attributes(tmp .. "/.book.koplugin-update"))
+
+-- 顶层有两个插件目录：一个都不装。
+entries = {
+    { path = "a.koplugin", mode = "directory", size = 0 },
+    { path = "b.koplugin", mode = "directory", size = 0 },
+}
+local multi_ok, multi_err = Install.run(archive, current)
+Assert.is_nil(multi_ok)
+Assert.eq(multi_err, "multiple koplugin directories")
+Assert.eq(assert(loadfile(current .. "/main.lua"))(), "uploaded")
+Assert.eq(assert(loadfile(tmp .. "/other.koplugin/main.lua"))(), "new-other")
+Assert.is_nil(lfs.attributes(tmp .. "/a.koplugin"))
+Assert.is_nil(lfs.attributes(tmp .. "/.book.koplugin-update"))
 
 os.execute("rm -rf " .. tmp)
 

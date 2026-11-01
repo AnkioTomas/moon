@@ -439,9 +439,9 @@ Update.installArchive(busy_archive, "/plugins/book.koplugin", function(ok, e) bu
 Assert.is_false(busy_ok)
 Assert.eq(busy_err, "busy")
 Assert.is_false(exists(busy_archive))
-job_opts.on_done()
+job_opts.on_done("book.koplugin")
 Assert.is_true(archive_ok)
-Assert.is_nil(archive_err)
+Assert.eq(archive_err, "book.koplugin")
 Assert.is_false(exists(archive))
 
 archive = tempArchive()

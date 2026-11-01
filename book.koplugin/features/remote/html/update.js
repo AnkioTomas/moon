@@ -1,4 +1,4 @@
-/* 月读更新：选中或拖入安装包即上传，设备装好后自行重启。 */
+/* 插件更新：选中或拖入安装包即上传，设备装好后自行重启。 */
 var panel = el('uppanel');
 var input = el('upfile');
 var pick = el('uppick');
@@ -18,7 +18,7 @@ function install(file) {
         setState(state, '安装完成 ✓ KOReader 正在重启，稍后可重新连接。', 'ok');
     }).catch(function (err) {
         var msg = err.message || String(err);
-        if (err.status === 400) msg = '这不是月读插件安装包';
+        if (err.status === 400) msg = '这不是 KOReader 插件安装包';
         else if (err.status === 409) msg = '设备正在安装其它更新，请稍后再试';
         setState(state, t('安装失败: %1', t(msg)), 'err');
         busy = false;
