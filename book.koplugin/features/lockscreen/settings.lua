@@ -190,7 +190,7 @@ function M.setMode(mode)
     local Background = require("features.lockscreen.background")
     local Layout = require("features.lockscreen.layout")
     c.lock_screen = "compose"
-    c.lock_screen_component = Components.find(c.lock_screen_component) and c.lock_screen_component or "current"
+    c.lock_screen_component = Components.resolvable(c.lock_screen_component) and c.lock_screen_component or "current"
     c.lock_screen_background = Background.validMode(c.lock_screen_background) and c.lock_screen_background or "bing"
     c.lock_screen_position = Layout.validPosition(c.lock_screen_position) and c.lock_screen_position or "center-center"
     c.lock_screen_wide = c.lock_screen_wide ~= false
