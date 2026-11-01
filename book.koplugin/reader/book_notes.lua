@@ -6,6 +6,10 @@
 点一条跳过去：本章直接定位，其他章切章后定位。原生列表保留在标题栏左键，
 用于编辑 / 删除本章条目。
 
+侧栏的书签页和书摘页都走 onShowBookmark，事先写好 bookmark.match_table。
+这里按同一套类型留下对应条目，否则两个页签弹出的是同一份未过滤列表。
+带 search_str 的搜索仍交给原生列表（它在当前章里就地筛）。
+
 @module koplugin.book.reader.book_notes
 --]]
 
@@ -32,14 +36,28 @@ local function xpointerOf(item)
     return type(loc) == "string" and loc ~= "" and loc or nil
 end
 
+--- 与 ReaderBookmark.getBookmarkType 同一规则。空串当缺省：
+--- SQL / JSON 会把 nil 写成 ""，而空串在 Lua 里为真，会把书签判成划线、把划线判成笔记。
+---@param item table
+---@return string
+local function annotationType(item)
+    local drawer = item.drawer
+    if type(drawer) ~= "string" or drawer == "" then return "bookmark" end
+    local note = item.note
+    if type(note) == "string" and note ~= "" then return "note" end
+    return "highlight"
+end
+
 --- 汇总全书注解，按章节序排列；章内保持快照原顺序。
+--- match 即 ReaderBookmark.match_table：缺省不过滤；给出时只留 type 命中的条目。
 ---@param source_id string
 ---@param stable_id string
 ---@param current_idx integer 当前章（用 live 代替库里的旧快照）
 ---@param live table[] 当前章阅读器内存注解
 ---@param titles table<integer, string> 章节序 → 标题
+---@param match table|nil
 ---@return BookNoteEntry[]
-function BookNotes.collect(source_id, stable_id, current_idx, live, titles)
+function BookNotes.collect(source_id, stable_id, current_idx, live, titles, match)
     local chapters = { [current_idx] = live }
     for _idx, row in ipairs(NoteDB.all(source_id, stable_id)) do
         if row.chapter_idx ~= current_idx then
@@ -53,7 +71,7 @@ function BookNotes.collect(source_id, stable_id, current_idx, live, titles)
     for _idx, idx in ipairs(order) do
         for _idx, item in ipairs(chapters[idx]) do
             local text = type(item) == "table" and item.text
-            if type(text) == "string" and text ~= "" then
+            if type(text) == "string" and text ~= "" and (not match or match[annotationType(item)]) then
                 out[#out + 1] = {
                     chapter_idx = idx,
                     chapter = titles[idx] or item.chapter or "",
@@ -96,7 +114,8 @@ function BookNotes.show(ui, snapshot, native)
         if idx then titles[idx] = entry.title end
     end
     local live = ui.annotation and ui.annotation.annotations or {}
-    local entries = BookNotes.collect(identity.source_id, identity.stable_id, current_idx, live, titles)
+    local match = ui.bookmark and ui.bookmark.match_table
+    local entries = BookNotes.collect(identity.source_id, identity.stable_id, current_idx, live, titles, match)
 
     local items = {}
     for _idx, entry in ipairs(entries) do
@@ -107,9 +126,17 @@ function BookNotes.show(ui, snapshot, native)
             callback = function() jump(ui, entry, current_idx) end,
         }
     end
+    local title
+    if match and match.bookmark and not match.highlight and not match.note then
+        title = T(_("全书书签（%1）"), #items)
+    elseif match and not match.bookmark and (match.highlight or match.note) then
+        title = T(_("全书书摘（%1）"), #items)
+    else
+        title = T(_("全书笔记（%1）"), #items)
+    end
     local list
     list = require("ui.themes.widgets.list"):new{
-        title = T(_("全书笔记（%1）"), #items),
+        title = title,
         items = items,
         left_icon = "menu",
         left_callback = function()
@@ -130,6 +157,10 @@ function BookNotes.install(ui)
     bookmark.onShowBookmark = require("ui.guard").wrap("show bookmark", function(self)
         local snapshot = require("reader.session").current()
         if not (snapshot and snapshot.chapter and snapshot.identity.chapter_idx) then
+            return original(self)
+        end
+        -- 搜索在原生列表里就地筛当前章；全书列表没有搜索框，接过来会把查询丢掉。
+        if self.match_table and self.match_table.search_str then
             return original(self)
         end
         BookNotes.show(ui, snapshot, function() original(self) end)
