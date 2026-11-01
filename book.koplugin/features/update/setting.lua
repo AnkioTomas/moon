@@ -1,5 +1,6 @@
 --[[--
-插件自更新配置键（settings/update.lua）与设置：「自动检查更新」「检查更新」两行放在维护组「功能与更新」。
+插件自更新配置键（settings/update.lua）与设置。
+「自动检查更新」在维护组。手动检查挂在 setting.version_check：我的设备页的版本行点按 / 长按调用它。
 
 @module koplugin.book.features.update.setting
 --]]
@@ -40,27 +41,11 @@ function Setting.entries(desktop)
                 })
             end,
         },
-        {
-            group = "maintenance",
-            order = 60,
-            id = "update_check",
-            row = function(iw)
-                local root = desktop.plugin.path
-                return require("ui.themes.widgets.row").widget({
-                    width = iw, chevron = false,
-                    kind = "action", icon = "system_update", title = _("检查更新"),
-                    subtitle = _("长按强制重装最新包"),
-                    status = require("bookversion"), status_on = true,
-                    callback = function()
-                        require("features.update").manualCheck(root)
-                    end,
-                    hold_callback = function()
-                        require("features.update").manualCheck(root, true)
-                    end,
-                })
-            end,
-        },
     }
 end
+
+require("utils.extension").add("setting.version_check", function(root, force)
+    require("features.update").manualCheck(root, force)
+end)
 
 return Setting

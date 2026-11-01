@@ -1,17 +1,9 @@
---[[-- 维护与关于设置项。
+--[[-- 维护设置项。关于（版本、主页、加群）在设置根页「我的设备」。
 @module koplugin.book.desktop.pages.setting.maintenance
 --]]
 
-local Device = require("device")
 local UIManager = require("ui/uimanager")
-local VerticalGroup = require("ui/widget/verticalgroup")
-local VerticalSpan = require("ui/widget/verticalspan")
-local Theme = require("ui.themes")
 local Confirm = require("ui.themes.widgets.confirm")
-local Icon = require("ui.themes.widgets.icon")
-local QR = require("ui.themes.widgets.qr")
-local Sheet = require("ui.themes.widgets.sheet")
-local Text = require("ui.themes.widgets.text")
 local Toast = require("ui.themes.widgets.toast")
 local Row = require("ui.themes.widgets.row")
 local Cache = require("book.cache")
@@ -21,48 +13,6 @@ local T = require("ffi/util").template
 
 ---@class BookSettingsMaintenance
 local Maintenance = {}
-local REPO_URL = "https://github.com/AnkioTomas/moon"
-local REPO_HOST = "github.com/AnkioTomas/moon"
-local QQ_GROUP_URL = "https://qm.qq.com/q/Q9FHByplqC"
-local BUG_GROUP_URL = "https://qm.qq.com/q/btmL9F4Cl2"
-
---- 关于页正文：图标、名称、版本、简介、作者、仓库与许可证，居中排列。
----@param width number
----@return table
-local function aboutBody(width)
-    local t = Theme.current()
-    local muted = { color = t.color.muted }
-    local function gap(n) return VerticalSpan:new{ width = Theme.px(n) } end
-    return VerticalGroup:new{
-        align = "center",
-        Icon.widget{ name = "info", size = 44 },
-        gap(t.space.sm),
-        Text.line("title", _("月读")),
-        gap(t.space.xs),
-        Text.line("caption", T(_("版本 %1"), require("bookversion")), muted),
-        gap(t.space.md),
-        Text.box("caption", _("面向 KOReader 的书库桌面，支持多数据源与阅读进度同步。"), width,
-            { align = "center", color = t.color.muted, bg = t.dialog.bg }),
-        gap(t.space.md),
-        Text.line("body", "AnkioTomas"),
-        Text.line("caption", REPO_HOST, muted),
-        Text.line("caption", _("GNU GPLv3"), muted),
-    }
-end
-
---- 弹出「关于」：正文 + 外链与加群按钮（设备支持外部链接时才给「打开 GitHub」）。
-local function showAbout()
-    local items = { { widget = aboutBody }, { separator = true } }
-    if Device:canOpenLink() then
-        items[#items + 1] = { text = _("打开 GitHub"), callback = function() Device:openLink(REPO_URL) end }
-    end
-    items[#items + 1] = { buttons = {
-        { text = _("书友交流群"), callback = function() QR:new{ text = QQ_GROUP_URL }:show() end },
-        { text = _("Bug 反馈群"), callback = function() QR:new{ text = BUG_GROUP_URL }:show() end },
-    } }
-    items[#items + 1] = { text = _("关闭") }
-    Sheet:new{ title = _("关于"), items = items }:show()
-end
 
 --- 清空 .moon/cache：库先清、文件后删，成功后重扫书架并刷新桌面；同一时刻只跑一个。
 ---@param desktop table 桌面实例
@@ -187,14 +137,6 @@ function Maintenance:debugLogRow(desktop)
                 desktop:updateView()
             end,
         })
-    end
-end
-
---- 造「关于」设置行的构造器，状态位显示当前版本号。
----@return fun(iw: number): table
-function Maintenance:aboutRow()
-    return function(iw)
-        return Row.widget({ width = iw, kind = "nav", icon = "info", title = _("关于"), status = require("bookversion"), status_on = true, callback = showAbout })
     end
 end
 

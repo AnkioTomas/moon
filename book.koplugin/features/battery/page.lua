@@ -1,5 +1,5 @@
 --[[--
-「电池」页：健康度、循环、容量和瞬时电气量。
+电池读数：健康度、循环、容量和瞬时电气量。整页挂在「我的设备 → 本机 → 电池」。
 
 没有设计容量时不显示假的百分比，只说明不支持，并给出节点日志：
 复制后扫反馈群二维码发给开发者。日志正文是给开发者看的原始节点，不走翻译。
@@ -13,12 +13,14 @@ local _ = require("gettext")
 
 local Page = {}
 
--- 与维护页「关于」里的 Bug 反馈群是同一个群。
+-- 与设置「我的设备」里的 Bug 反馈群是同一个群。
 local BUG_GROUP_URL = "https://qm.qq.com/q/btmL9F4Cl2"
 
-local function infoRow(title, status)
+local function infoRow(icon, title, status, subtitle)
     return function(iw)
-        return Row.widget({ width = iw, chevron = false, title = title, status = status })
+        return Row.widget({
+            width = iw, chevron = false, icon = icon, title = title, status = status, subtitle = subtitle,
+        })
     end
 end
 
@@ -92,17 +94,10 @@ local function unsupported(report)
         {
             title = _("此设备不支持"),
             rows = {
+                infoRow("battery_android_full", _("健康度"), _("不支持"), _("内核没有设计容量，算不出来。")),
                 function(iw)
                     return Row.widget({
-                        width = iw, chevron = false,
-                        title = _("健康度"), status = _("不支持"),
-                        subtitle = _("内核没有设计容量，算不出来。"),
-                    })
-                end,
-                function(iw)
-                    return Row.widget({
-                        width = iw,
-                        kind = "nav",
+                        width = iw, kind = "nav", icon = "bug_report",
                         title = _("复制日志发给开发者"),
                         subtitle = _("点开后复制日志，再扫码发到反馈群。复制不了就截图。"),
                         callback = function() Page.showReport(report) end,
@@ -119,23 +114,23 @@ function Page.sections()
     if not result.supported then return unsupported(result.report) end
     local row = result.reading
     local rows = {
-        infoRow(_("健康度"), string.format("%.1f%%", row.health_pct)),
+        infoRow("battery_android_full", _("健康度"), string.format("%.1f%%", row.health_pct)),
     }
     if row.cycles then
-        rows[#rows + 1] = infoRow(_("循环次数"), string.format("%.0f", row.cycles))
+        rows[#rows + 1] = infoRow("autorenew", _("循环次数"), string.format("%.0f", row.cycles))
     end
-    local function add(title, text)
-        if text then rows[#rows + 1] = infoRow(title, text) end
+    local function add(icon, title, text)
+        if text then rows[#rows + 1] = infoRow(icon, title, text) end
     end
-    add(_("现在充满"), row.charge_full_mah and string.format("%.0f mAh", row.charge_full_mah))
-    add(_("设计容量"), row.charge_design_mah and string.format("%.0f mAh", row.charge_design_mah))
-    add(_("剩余容量"), row.charge_now_mah and string.format("%.0f mAh", row.charge_now_mah))
-    add(_("电量"), row.capacity and string.format("%.0f%%", row.capacity))
-    add(_("状态"), statusText(row.status))
-    add(_("供电状态"), supplyText(row.health))
-    add(_("温度"), row.temp_c and string.format("%.1f °C", row.temp_c))
-    add(_("电压"), row.voltage_v and string.format("%.3f V", row.voltage_v))
-    add(_("电流"), row.current_ma and string.format("%.0f mA", row.current_ma))
+    add("battery_full", _("现在充满"), row.charge_full_mah and string.format("%.0f mAh", row.charge_full_mah))
+    add("memory", _("设计容量"), row.charge_design_mah and string.format("%.0f mAh", row.charge_design_mah))
+    add("battery_5_bar", _("剩余容量"), row.charge_now_mah and string.format("%.0f mAh", row.charge_now_mah))
+    add("battery_android_full", _("电量"), row.capacity and string.format("%.0f%%", row.capacity))
+    add("power_settings_new", _("状态"), statusText(row.status))
+    add("electrical_services", _("供电状态"), supplyText(row.health))
+    add("device_thermostat", _("温度"), row.temp_c and string.format("%.1f °C", row.temp_c))
+    add("bolt", _("电压"), row.voltage_v and string.format("%.3f V", row.voltage_v))
+    add("electric_bolt", _("电流"), row.current_ma and string.format("%.0f mA", row.current_ma))
     return { { title = _("电池"), rows = rows } }
 end
 
