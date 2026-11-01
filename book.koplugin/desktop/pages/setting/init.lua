@@ -339,11 +339,6 @@ local GROUP_FOLDERS = {
             subtitle = _("启动、时间与输入法"), default = true,
             match = { "startup", "feature:clock", "feature:ime" },
         },
-        {
-            id = "status", icon = "monitoring", title = _("状态"),
-            subtitle = _("进程的内存与 CPU"),
-            match = { "feature:monitor" },
-        },
     },
     maintenance = {
         {
@@ -354,7 +349,7 @@ local GROUP_FOLDERS = {
         },
         {
             id = "data", icon = "storage", title = _("数据"),
-            subtitle = _("存储与统计"),
+            subtitle = _("统计"),
             match = { "feature:storage", "clear_stats", "import_stats" },
         },
         {

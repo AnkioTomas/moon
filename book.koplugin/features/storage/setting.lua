@@ -1,5 +1,5 @@
 --[[--
-存储空间管理：维护组里的导航页，类似手机的「存储空间」——设备占用条、月读各类目录占用（带占比）、
+存储空间管理：挂在「我的设备 → 本机」，点进去才是这一页。设备占用条、月读各类目录占用（带占比）、
 书籍内容按书查看并清理、一键清理缓存。数据库 / 设置 / 词库 / 字体不提供清理入口。
 
 统计结果缓存在桌面实例的 `storage_usage` 上（1 分钟内复用），算完后刷新叠层；没算完时显示「计算中…」。
@@ -200,16 +200,16 @@ end
 
 ---@param desktop BookDesktop
 ---@return BookSettingEntry[]
-function Setting.entries(desktop)
-    return {
-        {
-            group = "maintenance",
-            order = 10,
-            id = "storage", icon = "storage", title = _("存储空间"),
-            subtitle = _("查看设备空间与月读各类数据的占用"),
-            page = { title = _("存储空间"), sections = function() return sections(desktop) end },
-        },
-    }
+function Setting.entries(_desktop)
+    return {}
 end
+
+require("utils.extension").add("setting.device_section", {
+    id = "storage",
+    order = 10,
+    icon = "storage",
+    title = _("存储空间"),
+    sections = sections,
+})
 
 return Setting

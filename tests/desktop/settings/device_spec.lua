@@ -26,7 +26,7 @@ package.preload["ui.themes.widgets.qr"] = function()
     }
 end
 
-local opened_page, pushed
+local opened_page, pushed, pushed_desk
 package.preload["desktop.pages.setting.overlay"] = function()
     return {
         open = function(_desktop, page) opened_page = page end,
@@ -118,6 +118,8 @@ Ext.add("setting.device_section", {
     icon = "battery_android_full",
     title = "电池",
     refresh_seconds = 15,
+    right_icon = "swap_vert",
+    right_callback = function(target) pushed_desk = target end,
     sections = function()
         return { { title = "电池", rows = {
             function(iw)
@@ -149,6 +151,9 @@ sections[1].rows[4].callback()
 Assert.eq(pushed.id, "battery")
 Assert.eq(pushed.title, "电池")
 Assert.eq(pushed.refresh_seconds, 15)
+Assert.eq(pushed.right_icon, "swap_vert")
+pushed.right_callback()
+Assert.eq(pushed_desk, desk)
 Assert.eq(pushed.sections()[1].title, "电池")
 Assert.eq(pushed.sections()[1].rows[1](400).title, "健康度")
 Assert.eq(sections[1].rows[5].title, "KOReader")
@@ -174,17 +179,19 @@ end
 for _, item in ipairs(sections[2].rows) do
     Assert.is_true(item.icon ~= nil and item.icon ~= "", item.title)
 end
+Assert.eq(sections[2].rows[2].title, "书友交流群")
+Assert.eq(sections[2].rows[3].title, "Bug 反馈群")
+Assert.eq(sections[2].rows[4].title, "关于")
 Assert.is_nil(find("作者"))
 Assert.is_nil(find("打开 GitHub"))
-Assert.is_nil(find("书友交流群"))
-Assert.is_nil(find("Bug 反馈群"))
-Assert.eq(#sections[2].rows, 2)
 find("关于").callback()
 Assert.eq(sheet.title, "关于")
 local about_icons = {}
 for _, item in ipairs(sheet.items) do
     if item.icon then about_icons[item.icon] = item end
 end
+Assert.is_nil(about_icons.qr_code)
+Assert.is_nil(about_icons.bug_report)
 Assert.eq(about_icons.person.text, "作者  AnkioTomas")
 Assert.eq(about_icons.gavel.text, "许可证  GNU GPLv3")
 about_icons.link.callback()
@@ -192,9 +199,9 @@ Assert.eq(opened_url, "https://github.com/AnkioTomas/moon")
 Assert.is_nil(qr)
 
 hw.canOpenLink = function() return false end
-about_icons.qr_code.callback()
+find("书友交流群").callback()
 Assert.eq(qr.text, "https://qm.qq.com/q/Q9FHByplqC")
-about_icons.bug_report.callback()
+find("Bug 反馈群").callback()
 Assert.eq(qr.text, "https://qm.qq.com/q/btmL9F4Cl2")
 
 hw.model = nil
