@@ -91,4 +91,23 @@ Assert.eq(updates, 2)
 Assert.eq(cfg.hidden_pages, hidden_pages)
 Assert.eq(cfg.hidden_cards, hidden_cards)
 
+local import_row
+for _, section in ipairs(InsightSettings:sections(desktop)) do
+    for _, build in ipairs(section.rows) do
+        local row = build(600)
+        if row.title == "导入 KOReader 统计" then import_row = row end
+    end
+end
+Assert.eq(import_row.kind, "action")
+Assert.eq(import_row.subtitle, "按书匹配书库，已有的记录不会重复导入")
+local clear_row
+for _, section in ipairs(InsightSettings:sections(desktop)) do
+    for _, build in ipairs(section.rows) do
+        local row = build(600)
+        if row.title == "清除统计" then clear_row = row end
+    end
+end
+Assert.eq(clear_row.kind, "action")
+Assert.eq(clear_row.subtitle, "按源或按书清除，不影响云端")
+
 return true

@@ -211,8 +211,6 @@ package.preload["desktop.pages.setting.maintenance"] = function()
         end
     end
     return {
-        clearStatsRow = function() return row("清除当前源统计") end,
-        importKoreaderStatsRow = function() return row("导入 KOReader 统计") end,
         debugLogRow = function() return row("调试日志") end,
         closeRow = function() return row("关闭桌面") end,
     }
@@ -378,12 +376,15 @@ Assert.is_true(table.concat(system_titles, ","):find("网络", 1, true) ~= nil)
 
 local maintenance = openRoot("维护")
 Assert.eq(maintenance.id, "group:maintenance")
-Assert.eq(sectionTitles(maintenance), "功能与更新,数据,其它")
+Assert.eq(sectionTitles(maintenance), "功能与更新,其它")
 local maintenance_titles = {}
 for _, row in ipairs(buildSectionRows(maintenance)) do maintenance_titles[#maintenance_titles + 1] = row.title end
 Assert.eq(maintenance_titles[1], "功能开关")
 local maintenance_joined = "," .. table.concat(maintenance_titles, ",") .. ","
-Assert.is_true(maintenance_joined:find(",自动检查更新,", 1, true) ~= nil)
+Assert.is_nil(maintenance_joined:find(",导入 KOReader 统计,", 1, true))
+Assert.is_nil(maintenance_joined:find(",清除统计,", 1, true))
+Assert.is_nil(maintenance_joined:find(",清除当前源统计,", 1, true))
+Assert.is_nil(maintenance_joined:find(",自动检查更新,", 1, true))
 Assert.is_nil(maintenance_joined:find(",检查更新,", 1, true))
 Assert.is_nil(maintenance_joined:find(",关于,", 1, true))
 Assert.is_nil(maintenance_joined:find(",存储空间,", 1, true))

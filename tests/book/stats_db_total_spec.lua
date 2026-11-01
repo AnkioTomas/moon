@@ -64,5 +64,16 @@ Assert.is_true(Base.exec("UPDATE reading_stats SET last_time=0 WHERE record_type
 page(FETCHED + 900, 20, false)
 Assert.eq(StatsDB.summaryBySource("wechat").total_seconds, 7300 + 20)
 
+-- 清除列表：源含合成桶；书只留真实 stable_id，已删/未上架没有标题。
+local sources = StatsDB.distinctSources()
+Assert.eq(sources[1], "wechat")
+local recorded, seen = StatsDB.distinctBooks(), {}
+for _idx, book in ipairs(recorded) do
+    Assert.is_true(book.stable_id:sub(1, 2) ~= "__", book.stable_id)
+    seen[book.stable_id] = book
+end
+Assert.eq(seen[ID].source_id, "wechat")
+Assert.is_nil(seen[ID].title)
+
 Base.close()
 for _, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end
