@@ -11,6 +11,7 @@ local lfs = require("libs/libkoreader-lfs")
 local Image = require("utils.image")
 local Paths = require("utils.paths")
 local MoonSettings = require("utils.settings")
+local logger = require("utils.log")
 local _ = require("gettext")
 
 local M = {}
@@ -166,18 +167,90 @@ local BACKGROUNDS = {
 
 local BACKGROUND_IDS = { "custom", "bing", "myrl", "paper", "danxiangli", "cover", "folder", "poster", "typo", "insight", "none" }
 
---- 判断背景设置值是否合法。
+--- 第三方锁屏背景。插件未加载完时列表为空，第二返回值为假。
+--- 不合格的条目记日志跳过。没提供 backgrounds 的插件直接跳过。
+---@return table[] backgrounds, boolean ready
+local function externalBackgrounds()
+    local ok, External = pcall(require, "utils.external")
+    if not ok then return {}, true end
+    local items, ready = External.collect("lockscreen")
+    local out, seen = {}, {}
+    for id in pairs(BACKGROUNDS) do seen[id] = true end
+    for _idx, item in ipairs(items) do
+        local list = External.try(item.id .. " lockscreen backgrounds", item.mod.backgrounds)
+        if type(list) ~= "table" or list.id then
+            if list ~= nil then
+                logger.error("feature external lockscreen rejected: backgrounds must return a list", item.id)
+            end
+        else
+            for _i, raw in ipairs(list) do
+                local id = type(raw) == "table" and External.prefix(item.id, raw.id)
+                local paintable = type(raw) == "table"
+                    and (type(raw.blocks) == "function" or type(raw.path) == "function")
+                local why = not id and "background needs id"
+                    or seen[id] and "duplicate id"
+                    or type(raw.label) ~= "string" and "background needs label"
+                    or not paintable and "background needs blocks or path"
+                if why then
+                    logger.error("feature external lockscreen rejected", item.id, why)
+                else
+                    seen[id] = true
+                    local label = id .. " blocks"
+                    out[#out + 1] = {
+                        id = id,
+                        label = raw.label,
+                        contain = raw.contain == true,
+                        network = raw.network == true,
+                        cache_key = type(raw.cache_key) == "function" and function()
+                            return External.try(id .. " cache_key", raw.cache_key)
+                        end or nil,
+                        path = type(raw.path) == "function" and function()
+                            return External.try(id .. " path", raw.path)
+                        end or nil,
+                        blocks = type(raw.blocks) == "function" and function(rect)
+                            local result = External.try(label, raw.blocks, rect)
+                            if type(result) ~= "table" then return {} end
+                            return result
+                        end or nil,
+                    }
+                end
+            end
+        end
+    end
+    return out, ready
+end
+
+--- 按稳定 ID 查找背景。内置优先，再问已加载的第三方插件。
+---@param mode string|nil
+---@return table|nil
+function M.find(mode)
+    if BACKGROUNDS[mode] then return BACKGROUNDS[mode] end
+    for _idx, asset in ipairs(externalBackgrounds()) do
+        if asset.id == mode then return asset end
+    end
+end
+
+--- 判断背景设置值是否合法。未加载的第三方 id 不算合法，调用方用 resolvable 决定要不要留着。
 ---@param mode string|nil
 ---@return boolean
 function M.validMode(mode)
-    return BACKGROUNDS[mode] ~= nil
+    return M.find(mode) ~= nil
+end
+
+--- 插件还在加载时，认不出的 id 先留着，避免开机把第三方背景冲成必应。
+---@param mode string|nil
+---@return boolean
+function M.resolvable(mode)
+    if M.find(mode) then return true end
+    local _, ready = externalBackgrounds()
+    return not ready
 end
 
 --- 返回用户选择的背景资源；非法值回退到必应。
 ---@param mode string|nil
 ---@return table
 function M.background(mode)
-    return BACKGROUNDS[mode] or BACKGROUNDS.bing
+    return M.find(mode) or BACKGROUNDS.bing
 end
 
 --- 背景的显示名。
@@ -193,6 +266,9 @@ function M.options()
     local options = {}
     for _idx, id in ipairs(BACKGROUND_IDS) do
         options[#options + 1] = { text = BACKGROUNDS[id].label, value = id }
+    end
+    for _idx, asset in ipairs(externalBackgrounds()) do
+        options[#options + 1] = { text = asset.label, value = asset.id }
     end
     return options
 end

@@ -54,8 +54,9 @@ demo/ 不登记、打包时剔除。
   setting = { entries = fn(desktop) }、panel = { actions = fn() }、topbar = { items = fn() }、
   events = { [数据事件名] = fn(...) }、hooks = { onReaderReady = fn(plugin) }、
   lookup = { tabs = fn(), actions = fn() }（查词面板：tabs 底部 Tab，actions 操作行按钮，形状见 features.rare.lookup 的 externalTabs / externalActions；都可选，不写就不追加）、
-  lockscreen = { components = fn() -> 主体数组 }（追加到锁屏「主体组件」；每条 id / label / blocks，
-  可选 layout="free"|"quote"、supports_position、supports_narrow、cache_key、needs_network；id 自动加扩展前缀）。
+  lockscreen = { components = fn() -> 主体数组, backgrounds = fn() -> 背景数组 }（都可选。
+  主体追加到「主体组件」：每条 id / label / blocks，可选 layout="free"|"quote"、supports_position、supports_narrow、cache_key、needs_network。
+  背景追加到「背景」：每条 id / label，blocks 或 path 至少一个；可选 cache_key、contain、network。整屏铺底，主体仍叠在上面。id 自动加扩展前缀）。
 `External.collect(kind)` 收集它们，由收集点（设置树、快捷面板注册表、桌面顶栏、main 传给 utils.event、查词面板）追加在内置项之后。
 只开放 onReaderReady：其余生命周期与 KOReader 事件第三方插件自己的实例就能收到，月读不转发；补丁与页内标记不开放。
 规则：
