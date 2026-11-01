@@ -86,8 +86,8 @@ do
     local wire, err
     Client.shelfPushAsync({ { book_id = "1" } }, function(v, e) wire, err = v, e end)
     Assert.is_nil(wire)
-    Assert.eq(err, "七猫登录已失效，请重新登录")
-    Assert.eq(expired, "七猫登录已失效，请重新登录")
+    Assert.matches(err, "moon%-cookie%-storage")
+    Assert.eq(expired, err)
 end
 
 -- 没 token 不发请求。

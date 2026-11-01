@@ -63,7 +63,7 @@ do
     rows = nil
     Client.shelfAsync(function(v, e) rows, err = v, e end)
     Assert.is_nil(rows)
-    Assert.eq(err, "iRead 登录已失效，请重新登录")
+    Assert.matches(err, "iread%.ankio%.net/user/token")
     Assert.is_true(Auth.expired("iread"))
 end
 

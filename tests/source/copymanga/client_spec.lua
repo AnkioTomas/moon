@@ -95,7 +95,7 @@ do
     local err
     Client:new(settings.getSource("copymanga")):collectAllAsync(function(_rows, e) err = e end)
     Assert.eq(logins, 1)
-    Assert.eq(err, "拷贝漫画登录已失效，请在设置里重新登录")
+    Assert.matches(err, "拷贝漫画账号")
 end
 
 -- 重登失败（密码已改）或没存密码：直接提示重新登录。
@@ -105,13 +105,13 @@ do
     local err
     Client:new(settings.getSource("copymanga")):collectAllAsync(function(_rows, e) err = e end)
     Assert.eq(logins, 1)
-    Assert.eq(err, "拷贝漫画登录已失效，请在设置里重新登录")
+    Assert.matches(err, "拷贝漫画账号")
 
     session("")
     gets, logins, replies = {}, 0, { { code = 401, body = INVALID } }
     Client:new(settings.getSource("copymanga")):collectAllAsync(function(_rows, e) err = e end)
     Assert.eq(logins, 0)
-    Assert.eq(err, "拷贝漫画登录已失效，请在设置里重新登录")
+    Assert.matches(err, "拷贝漫画账号")
 end
 
 -- 并发 401：只登录一次，所有等待的请求都用新令牌重试成功；另一个实例也拿到新令牌。

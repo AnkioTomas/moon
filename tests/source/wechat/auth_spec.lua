@@ -447,7 +447,7 @@ for _idx, case in ipairs({ { rejected = true, expect = 1 }, { rejected = nil, ex
     local err
     auth.webGetAsync("https://weread.qq.com/web/x", nil, function(_d, e) err = e end)
     -- 明确拒绝：中文失效文案（接口原文 boom 只打日志）；超时/断网原样回错误。
-    Assert.eq(err, case.rejected and "微信读书登录已失效，请重新扫码登录" or "boom")
+    if case.rejected then Assert.matches(err, "扫一扫") else Assert.eq(err, "boom") end
     Assert.len(expired, case.expect)
 end
 
@@ -521,7 +521,7 @@ do
     Assert.len(expired, 0)
     -- 普通接口照旧判失效
     auth.webGetAsync("https://weread.qq.com/web/shelf/sync", nil, function(_d, e) err = e end)
-    Assert.eq(err, "微信读书登录已失效，请重新扫码登录")
+    Assert.matches(err, "扫一扫")
     Assert.eq(table.concat(expired, ","), "wechat")
 end
 package.loaded["source.auth"] = real_source_auth

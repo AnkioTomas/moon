@@ -80,7 +80,8 @@ function Client.decode(raw, err, cred)
         return wire.data == nil and {} or wire.data
     end
     if (code == 401 or code == 403) and isCurrent(cred) then
-        return nil, require("source.auth").expire(SOURCE_ID, _("iRead 登录已失效，请重新登录"))
+        return nil, require("source.auth").expire(SOURCE_ID, _("请按这个做：\n1. 点这个提示上的「重新登录」。没有按钮就打开「设置 → 书库 → 账号 → iRead → iRead 账号」。\n2. 用电脑浏览器打开 https://iread.ankio.net/user/token ，登录你的账号。\n3. 在页面上新建一个个人 Token，复制它。\n4. 回到月读的输入框，把 Token 贴进去，点「登录」。\n\n如果平时用的是浏览器扩展，不要新建 Token，改做下面这些：\n")
+            .. require("source.cookie_login").relogin(_("iRead"), "https://iread.ankio.net/user/token"))
     end
     return nil, type(wire.msg) == "string" and wire.msg ~= "" and wire.msg or _("请求失败")
 end

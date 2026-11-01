@@ -121,7 +121,7 @@ end
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:_getJson(path, cb)
-    local expired = _("拷贝漫画登录已失效，请在设置里重新登录")
+    local expired = _("点这个提示上的「重新登录」。没有按钮就打开「设置 → 书库 → 账号 → 拷贝漫画 → 拷贝漫画账号」。账号和密码重新填一遍，点「登录」。")
     local active, cancelled
     local function send(may_relogin)
         local sent = self:_latestToken()

@@ -488,7 +488,7 @@ function Eink.callAsync(method, path, opts, cb)
                 return
             end
             if code == -2041 then
-                cb(nil, _("需要在微信读书官方客户端完成人机验证") .. " (-2041)", meta)
+                cb(nil, _("打开手机上的微信读书 App，按它的提示完成人机验证。验证完回到月读，把这一章再打开一次。") .. " (-2041)", meta)
                 return
             end
             if not Request.ok(res.code) or (code ~= nil and code ~= 0) or not data then

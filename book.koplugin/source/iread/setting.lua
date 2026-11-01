@@ -94,7 +94,7 @@ end
 local function showLogin()
     require("ui.themes.widgets.input"):new{
         title = _("iRead 个人 Token"),
-        fields = { { text = "", hint = _("在 iread.ankio.net 的个人 Token 页创建后粘贴") } },
+        fields = { { text = "", hint = _("打开 iread.ankio.net/user/token ，新建个人 Token 后粘贴到这里") } },
         ok_text = _("登录"),
         callback = function(value)
             local token = Setting.parseToken(value or "")

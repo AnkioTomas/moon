@@ -34,7 +34,7 @@ local SPEC = {
     id = SOURCE_ID,
     title = _("晋江账号"),
     cookie_title = _("晋江登录 Cookie"),
-    cookie_hint = _("在电脑浏览器登录晋江手机版后粘贴 Cookie"),
+    cookie_hint = _("按键盘 F12，点「网络」，刷新网页，复制请求标头里的整段 Cookie"),
     logout_text = _("确定退出晋江账号？"),
     loggedIn = loggedIn,
     -- 拉一次收藏页校验 Cookie；通过即切到网页协议。
@@ -192,6 +192,15 @@ function showAccountLogin()
             showLogin(account, password)
         end,
     }:show()
+end
+
+--- 登录失效时的操作说明：账号密码和浏览器 Cookie 两条都写清。
+---@return string
+function Setting.expired()
+    return _("你在晋江用的是哪种登录，就做哪种。") .. "\n\n"
+        .. _("账号和密码：点这个提示上的「重新登录」。没有这个按钮的话，打开「设置 → 书库 → 账号 → 晋江文学城 → 晋江账号」。填笔名、邮箱或手机号，再填密码，点「登录」。要验证码就点「发到手机」或「发到邮箱」，把验证码填进去，再点「验证并登录」。")
+        .. "\n\n" .. require("source.cookie_login").relogin(_("晋江文学城"), "https://m.jjwxc.com/my/login")
+        .. "\n\n" .. _("不想装扩展、平时用的是网页 Cookie：打开「设置 → 书库 → 账号 → 晋江文学城 → 晋江账号」，点「用 Cookie 登录」。Cookie 这样复制：电脑登录后按 F12，点「网络」，刷新，点任意一条请求，复制「请求标头」里的整段 Cookie，贴进去点「登录」。")
 end
 
 --- 登录失效提示的「重新登录」直达入口（desktop.sync.promptLogin）。

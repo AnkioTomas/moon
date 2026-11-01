@@ -223,11 +223,11 @@ local function relogin(cb)
     if waiters then waiters[#waiters + 1] = cb; return end
     local cfg = require("utils.settings").getSource(SOURCE_ID)
     local account, password = cfg.account, cfg.password
-    if not (account and password) then cb(nil, require("source.auth").expire(SOURCE_ID, _("晋江登录已失效"))); return end
+    if not (account and password) then cb(nil, require("source.auth").expire(SOURCE_ID, require("source.jjwxc.setting").expired())); return end
     waiters = { cb }
     Token.loginAsync(account, password, nil, function(token, err, kind)
         if token then Token.save(account, password, token) end
-        if kind == "verify" then err = require("source.auth").expire(SOURCE_ID, _("晋江登录已失效")) end
+        if kind == "verify" then err = require("source.auth").expire(SOURCE_ID, require("source.jjwxc.setting").expired()) end
         local list = waiters
         waiters = nil
         for _idx, fn in ipairs(list) do fn(token, err) end

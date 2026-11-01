@@ -25,7 +25,7 @@ local DOWNLOAD_DENIED = 101
 
 --- 京东会话失效文案：网页 Cookie 无续期，只能引导重新扫码。
 local function authExpired()
-    return require("source.auth").expire("jdread", _("京东读书登录已失效，请重新扫码登录"))
+    return require("source.auth").expire("jdread", _("点这个提示上的「重新登录」。二维码出来以后，打开手机京东 App，找到「扫一扫」，对准屏幕上的二维码，在手机上点确认。"))
 end
 
 --- 响应 message 是否表示未登录 / 会话失效。

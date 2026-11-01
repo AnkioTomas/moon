@@ -232,7 +232,7 @@ local function sessionRequest(method, url, body, opts, cb)
                         attempt(true)
                     elseif rejected then
                         if renew_err then logger.warn("wechat auth renew rejected", renew_err) end
-                        cb(nil, require("source.auth").expire("wechat", _("微信读书登录已失效，请重新扫码登录")), res)
+                        cb(nil, require("source.auth").expire("wechat", _("点这个提示上的「重新登录」。二维码出来以后，打开手机微信，点右上角「+」，再点「扫一扫」，对准屏幕上的二维码，在手机上点确认。")), res)
                     else
                         cb(nil, renew_err or _("请求失败"), res)
                     end
@@ -246,7 +246,7 @@ local function sessionRequest(method, url, body, opts, cb)
                 if opts.no_expire then
                     cb(nil, _("微信读书拒绝了请求，请稍后再试"), res)
                 else
-                    cb(nil, require("source.auth").expire("wechat", _("微信读书登录已失效，请重新扫码登录")), res)
+                    cb(nil, require("source.auth").expire("wechat", _("点这个提示上的「重新登录」。二维码出来以后，打开手机微信，点右上角「+」，再点「扫一扫」，对准屏幕上的二维码，在手机上点确认。")), res)
                 end
                 return
             end

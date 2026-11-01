@@ -151,6 +151,20 @@ function CookieLogin.accountRow(spec, opts)
     end
 end
 
+--- 网页登录态失效时的操作说明。name 是远程管理「浏览器登录」列表里的源名称，url 是要重新打开的登录页。
+--- paste_where 非空时附上手动复制 Cookie 的路径（「源名 → 设置里的那一行」）。
+---@param name string
+---@param url string
+---@param paste_where string|nil
+---@return string
+function CookieLogin.relogin(name, url, paste_where)
+    local T = require("ffi/util").template
+    local steps = T(_("%1 的登录已经失效。请按顺序做完，再回到月读重新打开这本书：\n1. 用电脑浏览器打开 %2 。页面上如果已经登录，先点退出，再重新登录一次。\n2. 回到月读，依次点「设置」「系统」「连接」「远程管理」，把「远程管理服务」打开。屏幕上会出现网址和二维码。\n3. 用电脑浏览器打开这个网址，或者用电脑去扫屏幕上的二维码。月读问你允不允许，点「允许」。\n4. 网页里点「浏览器登录」。\n5. 如果网页说没有检测到浏览器扩展，点「前往 GitHub 安装 moon-cookie-storage」，按网页说明装上，然后刷新这个网页。\n6. 在列表里找到「%1」，点「继续授权」或「重新授权」。浏览器会打开官网让你登录，登录完回到这个网页，看到成功就行。"),
+        name, url)
+    if not paste_where then return steps end
+    return steps .. "\n\n" .. T(_("不想装扩展的话，用这个办法代替上面的第 2 步到第 6 步：电脑上按第 1 步登录好，按键盘上的 F12，点「网络」，再按一次刷新。点任意一条请求，在「请求标头」里找到 Cookie，从第一个字符复制到最后一个。回到月读，依次点「设置」「书库」「账号」「%1」，把复制的内容贴进输入框，点「登录」。"), paste_where)
+end
+
 --- 「粘贴 Cookie」行：主进法是扫码 / 账号密码的源在未登录时另给的入口。
 ---@param spec CookieLoginSpec
 ---@return fun(iw: integer): table

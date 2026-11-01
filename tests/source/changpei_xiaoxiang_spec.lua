@@ -231,6 +231,21 @@ do
     local CpSetting = require("source.changpei.setting")
     Assert.eq(CpSetting.parseCookie("Cookie: PHPSESSID=x; _c_n_=y\n"), "PHPSESSID=x; _c_n_=y")
     Assert.eq(CpSetting.parseCookie("  "), "")
+    local Settings = require("utils.settings")
+    local Auth = require("source.auth")
+    local cfg = Settings.getSource("changpei")
+    Auth.reset()
+    cfg.cookie = nil
+    Settings.saveSource("changpei", cfg)
+    Assert.eq(#CpSetting.rows(), 2, "未登录：账号 + 粘贴")
+    cfg.cookie = "PHPSESSID=T1"
+    Settings.saveSource("changpei", cfg)
+    Assert.eq(#CpSetting.rows(), 2, "已登录：账号 + 退出")
+    Auth.expire("changpei", "x")
+    Assert.eq(#CpSetting.rows(), 3, "失效后露出粘贴 Cookie")
+    cfg.cookie = nil
+    Settings.saveSource("changpei", cfg)
+    Auth.reset()
 
     local XxSetting = require("source.xiaoxiang.setting")
     Assert.eq(XxSetting.parseCookie("Cookie: a=1; b=2\n"), "a=1; b=2")
@@ -398,7 +413,7 @@ do
     local failed
     Client.historyAsync(function(w, err) failed = { w, err } end)
     Assert.is_nil(failed[1])
-    Assert.eq(failed[2], "长佩登录已失效，请重新登录")
+    Assert.matches(failed[2], "moon%-cookie%-storage")
     Assert.is_true(Auth.expired("changpei"))
 
     settings.saveSource("changpei", { cookie = "PHPSESSID=a; _c_n_=dev; moon_token=OLD" })

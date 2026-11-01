@@ -25,7 +25,7 @@ local SPEC = {
     id = SOURCE_ID,
     title = _("长佩账号"),
     cookie_title = _("长佩登录 Cookie"),
-    cookie_hint = _("登录长佩后，从开发者工具网络面板复制请求头里的 Cookie"),
+    cookie_hint = _("按键盘 F12，点「网络」，刷新网页，复制请求标头里的整段 Cookie"),
     logout_text = _("确定退出长佩账号？"),
     loggedIn = loggedIn,
     checkAsync = function(cookie, cb)
@@ -62,15 +62,26 @@ end
 ---@return table[]
 function Setting.rows()
     local rows = { CookieLogin.accountRow(SPEC, { callback = startQR }) }
-    if loggedIn() then
-        rows[#rows + 1] = CookieLogin.logoutRow(SPEC)
-    else
+    local on = loggedIn()
+    if on then rows[#rows + 1] = CookieLogin.logoutRow(SPEC) end
+    -- 未登录，或已保存的 Cookie 被标失效：给出换 Cookie 的入口。
+    if not on or require("source.auth").expired(SOURCE_ID) then
         rows[#rows + 1] = CookieLogin.pasteRow(SPEC)
     end
     return rows
 end
 
---- 登录失效提示的「重新登录」直达入口（desktop.sync.promptLogin）。
-Setting.login = startQR
+--- 登录失效提示的「重新登录」：扫码和粘贴都给出来，正文里的浏览器步骤不靠这个按钮。
+local function chooseLogin()
+    require("ui.themes.widgets.sheet"):new{
+        title = _("重新登录长佩"),
+        items = {
+            { text = _("用长佩 App 扫码"), callback = startQR },
+            { text = _("粘贴 Cookie"), callback = function() CookieLogin.prompt(SPEC) end },
+        },
+    }:show()
+end
+
+Setting.login = chooseLogin
 
 return Setting

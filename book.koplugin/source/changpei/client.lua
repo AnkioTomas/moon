@@ -21,6 +21,13 @@ local Client = {}
 local SOURCE_ID = "changpei"
 local LOGIN_REQUIRED = 9996
 
+--- 网页重新登录，再用扩展抓 Cookie；不装扩展就按设置路径粘贴。
+---@return string
+local function changpeiRelogin()
+    return require("source.cookie_login").relogin(
+        _("长佩文学"), "https://www.gongzicp.com/login/signin", _("长佩文学 → 粘贴 Cookie"))
+end
+
 local API = "https://www.gongzicp.com/webapi"
 Client.USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
     .. "Chrome/126.0.0.0 Safari/537.36"
@@ -110,9 +117,9 @@ local function reply(cookie, cb, retry)
             if wire.code == LOGIN_REQUIRED and cookie and cookie == Client.cookie() then
                 -- 只有 PHPSESSID 的 Cookie 登录是服务端会话，闲置（休眠）一阵就丢，没有续期凭据
                 if not (cookie:match("moon_refresh=") or cookie:match("ukey=")) then
-                    msg = _("长佩登录已失效。网页 Cookie 登录无法自动续期，请改用扫码登录")
+                    msg = _("这个登录是网页 Cookie，放一会儿就会失效，而且不能自动续上。请改用扫码登录：打开「设置 → 书库 → 账号 → 长佩文学 → 长佩账号」，用长佩 App 对准屏幕上的二维码扫一下，再在手机上点确认。提示上如果有「重新登录」，点它，选「用长佩 App 扫码」，是同一件事。")
                 else
-                    msg = _("长佩登录已失效，请重新登录")
+                    msg = changpeiRelogin()
                 end
                 if retry then
                     -- token 过期：用 refresh_token 换新的再重发一次；换不到才算登录失效
@@ -317,12 +324,13 @@ function Client.contentAsync(_novel_id, chapter_id, cb)
                 if res.text then cb(res.text); return end
                 if res.kind == "verify" then
                     if not Client.cookie() then
-                        cb(nil, _("长佩需要登录后阅读，请先在设置里登录长佩账号"))
+                        cb(nil, _("还没登录长佩。打开「设置 → 书库 → 账号 → 长佩文学 → 长佩账号」，用长佩 App 扫二维码。也可以点「粘贴 Cookie」，把网页里的 Cookie 贴进去。"))
                         return
                     end
-                    -- 登录态已不被服务端信任：标记失效，用户在浏览器过验证后可重新授权
+                    -- 登录态已不被服务端信任：标记失效。步骤写清网页重登、扩展重抓、以及设置里粘贴。
                     cb(nil, require("source.auth").expire("changpei",
-                        _("长佩要求人机验证，请先在浏览器打开 gongzicp.com 阅读一章完成验证，再重新授权")))
+                        _("先做下面这些。提示上的「重新登录」只是扫码或粘贴的快捷方式，不能代替这些步骤。")
+                        .. "\n\n" .. changpeiRelogin()))
                     return
                 end
                 cb(nil, res.err or _("长佩章节内容为空"), res.kind)

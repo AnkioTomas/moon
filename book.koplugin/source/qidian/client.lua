@@ -80,6 +80,13 @@ local function expired(cookie, msg)
     return msg
 end
 
+---@param cookie string
+---@return string
+local function loginGone(cookie)
+    return expired(cookie, require("source.cookie_login").relogin(
+        _("起点中文网"), "https://m.qidian.com/", _("起点中文网 → 起点账号")))
+end
+
 ---@param path string
 ---@param cookie string|nil
 ---@param cb fun(html: string|nil, err: string|nil)
@@ -93,7 +100,7 @@ local function webGet(path, cookie, cb, cache_ttl)
         if not raw then
             local code = res and tonumber(res.code)
             if code == 302 or code == 403 then
-                cb(nil, expired(cookie or "", _("起点登录已失效")))
+                cb(nil, loginGone(cookie or ""))
             else
                 cb(nil, err and tostring(err) or _("请求失败"))
             end
@@ -110,7 +117,7 @@ end
 local function okData(wire, cookie)
     if tonumber(wire.code) == 0 and type(wire.data) == "table" then return wire.data end
     local msg = type(wire.msg) == "string" and wire.msg ~= "" and wire.msg or _("响应无效")
-    if tonumber(wire.code) == 1403 then msg = expired(cookie, _("起点登录已失效")) end
+    if tonumber(wire.code) == 1403 then msg = loginGone(cookie) end
     return nil, msg
 end
 
@@ -128,7 +135,7 @@ local function apiGet(path, params, cookie, cb)
         if not raw then
             local code = res and tonumber(res.code)
             if code == 302 or code == 403 then
-                cb(nil, expired(cookie, _("起点登录已失效")))
+                cb(nil, loginGone(cookie))
             else
                 cb(nil, err and tostring(err) or _("请求失败"))
             end
@@ -250,7 +257,7 @@ function Client.loginCheckAsync(cookie, cb)
         if not html then cb(nil, err); return end
         local user = (Mapper.pageData(html) or {}).user
         if not (type(user) == "table" and (user.isLogin == true or user.login == true)) then
-            cb(nil, expired(cookie, _("起点登录已失效")))
+            cb(nil, loginGone(cookie))
             return
         end
         if cookie == Client.cookie() then require("source.auth").ok(SOURCE_ID) end
@@ -312,7 +319,7 @@ function Client.updateReadAsync(book_id, chapter_id, chapter_name, is_vip, updat
         -- 成功时 data 不是表（常为空）。不能走 okData，否则 code=0 也会被当成失败。
         if tonumber(wire.code) == 0 then cb(true); return end
         local msg = type(wire.msg) == "string" and wire.msg ~= "" and wire.msg or _("响应无效")
-        if tonumber(wire.code) == 1403 then msg = expired(cookie, _("起点登录已失效")) end
+        if tonumber(wire.code) == 1403 then msg = loginGone(cookie) end
         cb(nil, msg)
     end)
 end
@@ -432,7 +439,8 @@ function Client.contentAsync(book_id, chapter_id, cb)
             if not (uid and keypool and version and type(content) == "string") then
                 logger.warn("qidian decrypt inputs missing: uid", uid ~= nil, "keypool", keypool ~= nil,
                     "version", version ~= nil, "content", type(content))
-                cb(nil, _("起点 VIP 章节解密失败：缺少登录信息，请重新登录起点")); return
+                cb(nil, require("source.cookie_login").relogin(
+                    _("起点中文网"), "https://m.qidian.com/", _("起点中文网 → 起点账号"))); return
             end
         end
 

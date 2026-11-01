@@ -79,6 +79,13 @@ local function expired(cookie, msg)
     return msg
 end
 
+---@return string
+local function loginGone()
+    return _("点这个提示上的「重新登录」。没有按钮就打开「设置 → 书库 → 账号 → QQ阅读 → QQ阅读账号」。二维码出来后，打开手机上的 QQ阅读或起点 App，点扫一扫，对准屏幕，在手机上点确认。")
+        .. "\n\n" .. _("扫了还是进不去，就改用浏览器，按下面做：") .. "\n"
+        .. require("source.cookie_login").relogin(_("QQ阅读"), "https://book.qq.com/book-shelf")
+end
+
 ---@param raw string|nil
 ---@param err any
 ---@param cookie string|nil
@@ -93,7 +100,7 @@ local function decode(raw, err, cookie)
         return wire
     end
     local msg = type(wire.msg) == "string" and wire.msg ~= "" and wire.msg or _("请求失败")
-    if tonumber(wire.code) == AUTH_FAIL then msg = expired(cookie, _("QQ阅读登录已失效")) end
+    if tonumber(wire.code) == AUTH_FAIL then msg = expired(cookie, loginGone()) end
     return nil, msg
 end
 
@@ -131,7 +138,7 @@ function Client.loginCheckAsync(cookie, cb)
     end
     return call("GET", "/user/homepage", nil, nil, cookie, function(wire, err)
         if not wire or type(wire.data) ~= "table" then
-            cb(nil, err or _("QQ阅读登录已失效"))
+            cb(nil, err or loginGone())
             return
         end
         cb(true)

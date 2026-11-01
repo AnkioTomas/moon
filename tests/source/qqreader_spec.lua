@@ -152,13 +152,13 @@ do
     local ok, err
     Client.loginCheckAsync("ywguid=new", function(v, e) ok, err = v, e end)
     Assert.is_nil(ok)
-    Assert.eq(err, "QQ阅读登录已失效")
+    Assert.matches(err, "扫一扫")
     Assert.is_nil(expired)
 
     requests, replies, expired = {}, { { body = '{"code":-4,"msg":"登陆鉴权失败"}' } }, nil
     Client.loginCheckAsync(cfg.cookie, function(v, e) ok, err = v, e end)
-    Assert.eq(err, "QQ阅读登录已失效")
-    Assert.eq(expired, "QQ阅读登录已失效")
+    Assert.matches(err, "扫一扫")
+    Assert.eq(expired, err)
 
     requests, replies = {}, { { body = '{"code":0,"data":{"nickname":"甲"}}' } }
     Client.loginCheckAsync("ywguid=new", function(v, e) ok, err = v, e end)

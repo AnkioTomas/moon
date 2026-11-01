@@ -61,7 +61,7 @@ local function get(path, cookie, cb)
                 cb(nil, _("晋江 VIP 章节未购买"), "unpaid")
             elseif location then
                 -- 校验新 Cookie 时不能污染已保存的登录态。
-                local msg = _("晋江登录已失效")
+                local msg = require("source.jjwxc.setting").expired()
                 cb(nil, cookie == Web.cookie() and require("source.auth").expire(SOURCE_ID, msg) or msg)
             else
                 cb(nil, err and tostring(err) or _("请求失败"))

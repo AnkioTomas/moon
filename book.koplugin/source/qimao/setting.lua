@@ -89,7 +89,7 @@ Setting.browser = {
 local function showLogin()
     require("ui.themes.widgets.input"):new{
         title = _("七猫登录 token"),
-        fields = { { text = "", hint = _("在电脑浏览器登录七猫后粘贴 token") } },
+        fields = { { text = "", hint = _("按 F12，点「应用」里的本地存储，复制 ls_qimao_global_userinfo_data 中的 token") } },
         ok_text = _("登录"),
         callback = function(value)
             local token = Setting.parseToken(value or "")

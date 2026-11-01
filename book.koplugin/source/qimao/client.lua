@@ -56,7 +56,9 @@ local function decodeAccount(raw, err, token_checked)
         local title = errors.title or _("请求失败")
         if token_checked == Client.token()
             and (AUTH_CODES[tostring(errors.code)] or tostring(title):find("登录", 1, true)) then
-            return nil, require("source.auth").expire(SOURCE_ID, _("七猫登录已失效，请重新登录"))
+            return nil, require("source.auth").expire(SOURCE_ID,
+                require("source.cookie_login").relogin(_("七猫小说"), "https://www.qimao.com/login")
+                .. "\n\n" .. _("也可以不装扩展：点这个提示上的「重新登录」，或打开「设置 → 书库 → 账号 → 七猫小说 → 七猫账号」。电脑登录 https://www.qimao.com 后按 F12，点「应用」或 Application，左边点本地存储（Local Storage），点这个网站，找到 ls_qimao_global_userinfo_data，复制里面的 token，贴进输入框，点「登录」。"))
         end
         return nil, title
     end
