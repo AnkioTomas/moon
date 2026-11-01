@@ -147,10 +147,36 @@ local function atDocumentStart(snapshot)
     return frac <= eps
 end
 
+--- 边车恢复出来的位置和 pending 不是同一处。真表示要回落。
+--- 书架同步只改 pending，不改这台设备的 `.sdr`。流式文档用 XPointer：相同就是同一处，
+--- 页码随屏幕和字号变，不能拿来判。固定版式总页数一致时比页码。
+--- 都对不上时，全书比例差 ≥1% 才算不同，和开书冲突同一口径。
+---@param snapshot ReaderSessionSnapshot
+---@param row ProgressPosition
+---@return boolean
+local function documentMissesPending(snapshot, row)
+    if snapshot.ui.rolling then
+        local live = snapshot.ui.rolling.xpointer
+        if type(live) == "string" and live ~= "" and live == row.locator then
+            return false
+        end
+    else
+        local page = tonumber(snapshot.page)
+        local total = tonumber(snapshot.total_pages)
+        local saved_page = tonumber(row.page)
+        local saved_total = tonumber(row.total_pages)
+        if page and total and saved_page and saved_total
+            and total == saved_total and page == saved_page then
+            return false
+        end
+    end
+    return math.abs(Progress.clampFraction(snapshot.doc_fraction) - Progress.clampFraction(row.fraction)) >= 0.01
+end
+
 --- 冷打开：用本地记录恢复阅读位置。
 --- 按章书：pending 章序号与当前身份一致时恢复章内位置——locator 是章节文件内的坐标，跨章无意义。
---- 整本书：KOReader 的 `.sdr` 边车缺失（清缓存后重下、换设备）时文档会停在开头，
---- 用本地记录回落，避免「打开毫无反应」、随后关书又把开头位置写脏上推。
+--- 整本书：边车缺失（清缓存后重下、换设备）或边车仍停在同步前的旧位置时回落。
+--- 已经在 pending 那一处就不动。不回落的话，关书会把旧边车位置标脏推上去，盖掉较新的进度。
 ---@param snapshot ReaderSessionSnapshot
 function ReaderProgress.applyLocalPending(snapshot)
     local id = snapshot and snapshot.identity
@@ -163,14 +189,14 @@ function ReaderProgress.applyLocalPending(snapshot)
         applyPosition(snapshot.ui, row, row.chapter_fraction or 0)
         return
     end
-    -- 整本：sidecar 已把文档放到位时不动，只补「停在开头」的情况。
-    if not atDocumentStart(snapshot) then
-        logger.dbg("book.progress apply local skip: document positioned", id.source_id, id.stable_id)
-        return
-    end
     local pct = Progress.clampFraction(row.fraction)
     if pct <= 0 then
         logger.dbg("book.progress apply local skip: no local position", id.source_id, id.stable_id)
+        return
+    end
+    -- 整本：开头一定回落；边车已定位时，只有和 pending 不是同一处才回落。
+    if not atDocumentStart(snapshot) and not documentMissesPending(snapshot, row) then
+        logger.dbg("book.progress apply local skip: document positioned", id.source_id, id.stable_id)
         return
     end
     logger.dbg("book.progress apply local", id.source_id, id.stable_id, "pct", pct)

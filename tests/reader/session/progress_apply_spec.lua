@@ -180,7 +180,7 @@ do
     Assert.eq(log.saved.percent_finished, 0.4)
 end
 
--- ── 整本书：文档已被 sidecar 放到位，不再动它 ───────────────
+-- ── 整本书：文档已被 sidecar 放到位，且和 pending 是同一比例，不再动它 ─
 do
     local book_identity = { source_id = "moon", stable_id = "b9" }
     local log, ui = rollingUI({ ["xp:saved"] = true })
@@ -189,6 +189,43 @@ do
 
     Assert.len(log.goto_xpointer, 0)
     Assert.eq(log.flushed, 0)
+end
+
+-- ── 整本书：XPointer 相同就是同一处，比例漂移也不跳 ─────────
+do
+    local book_identity = { source_id = "moon", stable_id = "b9" }
+    local log, ui = rollingUI({ ["xp:saved"] = true })
+    ui.rolling.xpointer = "xp:saved"
+    pending_row = { fraction = 0.8, locator = "xp:saved" }
+    Progress.applyLocalPending({ identity = book_identity, ui = ui, doc_fraction = 0.2 })
+
+    Assert.len(log.goto_xpointer, 0)
+    Assert.eq(log.flushed, 0)
+end
+
+-- ── 整本书：边车停在旧位置，pending 已被同步改写 → 跳到 pending ─
+do
+    local book_identity = { source_id = "moon", stable_id = "b9" }
+    local log, ui = rollingUI({ ["xp:saved"] = true })
+    pending_row = { fraction = 0.62, locator = "xp:saved" }
+    Progress.applyLocalPending({ identity = book_identity, ui = ui, doc_fraction = 0.15 })
+
+    Assert.len(log.goto_xpointer, 1)
+    Assert.eq(log.goto_xpointer[1], "xp:saved")
+    Assert.eq(log.saved.percent_finished, 0.62)
+    Assert.eq(log.flushed, 1)
+end
+
+-- ── 整本书：旧 XPointer 不属于本文档，按 pending 比例回落 ───
+do
+    local book_identity = { source_id = "moon", stable_id = "b9" }
+    local log, ui = rollingUI({})
+    pending_row = { fraction = 0.55, locator = "xp:stale" }
+    Progress.applyLocalPending({ identity = book_identity, ui = ui, doc_fraction = 0.1 })
+
+    Assert.eq(log.from_proportion, 1)
+    Assert.eq(log.goto_xpointer[1], "xp:from_pct:0.55")
+    Assert.eq(log.flushed, 1)
 end
 
 -- ── 整本书：本地记录就在开头 → 不动文档 ─────────────────────
@@ -217,7 +254,7 @@ do
     Assert.eq(log.events[1].args[1], 42)
 end
 
--- ── 整本书：文档已在别处（page > 1）→ 不回落，交给 sidecar ─────
+-- ── 整本书：固定版式已在记录的那一页 → 不回落 ───────────────
 do
     local book_identity = { source_id = "moon", stable_id = "b9" }
     local log, ui = pagingUI(300)
@@ -229,6 +266,22 @@ do
 
     Assert.len(log.events, 0)
     Assert.eq(log.flushed, 0)
+end
+
+-- ── 整本书：固定版式边车停在旧页，总页数一致 → 跳到记录页 ───
+do
+    local book_identity = { source_id = "moon", stable_id = "b9" }
+    local log, ui = pagingUI(300)
+    pending_row = { fraction = 0.5, page = 42, total_pages = 300 }
+    Progress.applyLocalPending({
+        identity = book_identity, ui = ui,
+        page = 10, total_pages = 300, doc_fraction = 10 / 300,
+    })
+
+    Assert.len(log.events, 1)
+    Assert.eq(log.events[1].name, "GotoPage")
+    Assert.eq(log.events[1].args[1], 42)
+    Assert.eq(log.flushed, 1)
 end
 
 for _, name in ipairs({
