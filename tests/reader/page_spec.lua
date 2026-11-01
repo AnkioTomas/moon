@@ -80,6 +80,7 @@ package.preload["utils.settings"] = function()
     return {
         get = function() return moon_settings end,
         save = function() end,
+        getSource = function() return {} end,
     }
 end
 
