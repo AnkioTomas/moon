@@ -239,14 +239,46 @@ function Mirror.get(path, opts, cb)
 end
 
 --- 下载仓库文件到 dest，失败（含 check 不过）换源重下；内容校验由调用方负责。
+--- 一个网络超时（缺省 30 秒）内没有新字节就放弃这个源。总超时仍是调用方的 timeout，
+--- 不管慢速但还在传的连接。
 ---@param path string
 ---@param opts MirrorDownloadOpts 不含 url；可校验下载文件
 ---@param dest string
 ---@param cb fun(ok: boolean, err: any)
 ---@return table handle
 function Mirror.download(path, opts, dest, cb)
+    local idle_seconds = require("http.timeout").net(1)
     return chain(path, function(url, next_cb)
-        return Request.download(withUrl(opts, url), dest, function(ok, err, res)
+        local UIManager = require("ui/uimanager")
+        local dead, idle_fn = false, nil
+        local job
+        local function disarm()
+            if not idle_fn then return end
+            UIManager:unschedule(idle_fn)
+            idle_fn = nil
+        end
+        local function arm()
+            if dead then return end
+            disarm()
+            idle_fn = function()
+                idle_fn = nil
+                if dead then return end
+                dead = true
+                if job then job:cancel() end
+                next_cb("download stalled")
+            end
+            UIManager:scheduleIn(idle_seconds, idle_fn)
+        end
+        local request = withUrl(opts, url)
+        local progress = request.on_progress
+        request.on_progress = function(...)
+            arm()
+            if progress then progress(...) end
+        end
+        job = Request.download(request, dest, function(ok, err, res)
+            if dead then return end
+            dead = true
+            disarm()
             if ok and isHtml(res) then ok, err = false, "html response" end
             if ok and opts.check then ok, err = opts.check(dest) end
             if not ok then
@@ -255,6 +287,8 @@ function Mirror.download(path, opts, dest, cb)
             end
             next_cb(nil)
         end)
+        if not dead then arm() end
+        return job
     end, function(ok, err)
         cb(ok == true, err)
     end)

@@ -32,6 +32,10 @@ package.preload["http.request"] = function()
             end)
         end,
         download = function(opts, _dest, cb)
+            if plan[opts.url] == "hang" then
+                calls[#calls + 1] = opts.url
+                return { cancel = function() end }
+            end
             return reply(opts.url, function(r)
                 if r == "ok" then cb(true, nil, {}) else cb(false, r) end
             end)
@@ -80,6 +84,20 @@ do -- 全部失败时回报最后的错误，check 不过也算失败
     Assert.is_false(ok)
     Assert.eq(err, "size mismatch")
     Assert.eq(#calls, #Mirror.templates())
+end
+
+do -- 一片停滞：空等一个网络超时就换源，不把总超时耗完
+    calls = {}
+    local path = "assets/hang.bin"
+    local first = Mirror.templates()[1]:gsub("{path}", path)
+    plan[first] = "hang"
+    local ok
+    Mirror.download(path, {}, os.tmpname(), function(a) ok = a end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.eq(calls[1], first)
+    Assert.eq(#calls, 2)
+    plan[first] = nil
 end
 
 do -- 同步失败立刻换源时，cancel 取消的是正在进行的那个请求

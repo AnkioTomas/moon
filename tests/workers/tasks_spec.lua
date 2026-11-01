@@ -85,9 +85,10 @@ do
     Assert.is_false(share.pause_auto_suspend)
     local dl = Tasks.enqueue(spec("awake-dl", "download", { restartable = true }))
     settle()
-    Assert.is_false(share.pause_auto_suspend, "非缓存任务不拦休眠")
+    Assert.is_true(share.pause_auto_suspend, "下载任务不让休眠")
     dl.runs[#dl.runs].done({ ok = true })
     settle()
+    Assert.is_false(share.pause_auto_suspend)
 
     -- 翻页器 / KeepAlive 的 keepalive 为真时，cache 结束不能把不息屏清掉
     share.keepalive = true
@@ -441,6 +442,9 @@ do
     holds = false
     passive.runs[1].report(nil, 1, 3)
     drain()
+    Assert.is_true(share.pause_auto_suspend, "下载还在跑，继续不休眠")
+    dl.runs[1].done({ ok = true })
+    drain()
     Assert.is_false(share.pause_auto_suspend, "hold() 说放行就放行")
     holds = true
     passive.runs[1].report(nil, 2, 3)
@@ -448,7 +452,6 @@ do
     Assert.is_true(share.pause_auto_suspend, "恢复后继续撑住")
 
     passive.runs[1].done({ ok = true })
-    dl.runs[1].done({ ok = true })
     drain()
     Assert.is_false(share.pause_auto_suspend)
     Assert.len(Tasks.tasks(), 0, "passive 结束也离开未结束列表")

@@ -114,8 +114,9 @@ local function download(desktop, item)
         key = "rare:" .. item.id,
         kind = "download",
         title = T(_("词库：%1"), item.label),
+        cancellable = true,
         run = function(report, done)
-            Catalog.download(item.id, function(ok, err)
+            return Catalog.download(item.id, function(ok, err)
                 done({ ok = ok, err = err })
             end, function(stage, done_bytes, total)
                 if stage == "part" then

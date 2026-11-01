@@ -216,11 +216,12 @@ end
 ---@field tmp string|nil 续传目录，缺省 dest .. ".dl"
 ---@field on_installed fun(manifest: table) 落位成功后记版本、重置缓存
 
---- 拉并校验远端 manifest。成功 cb(manifest, 总字节)，失败 cb(nil, nil, err)。
+--- 拉并校验远端 manifest。成功 cb(manifest, 总字节)，失败 cb(nil, nil, err)。返回在途请求，可取消。
 ---@param spec { base_path: string }
 ---@param cb fun(manifest: table|nil, total: number|nil, err: any)
+---@return CancelHandle
 local function fetchManifest(spec, cb)
-    Mirror.get(spec.base_path .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
+    return Mirror.get(spec.base_path .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
         if err then
             cb(nil, nil, err)
             return
@@ -253,14 +254,26 @@ function M.outdated(spec, cb)
 end
 
 --- 按 manifest 下载有更新的分片并落位。重复请求通过 cb 返回失败，不并发写同一目标。
+--- 返回的句柄取消当前这一段（manifest / 分片 / 拼接），不回调 cb。分片留着续传，半截拼接文件删掉。
 ---@param spec BookDictSpec
 ---@param cb fun(ok: boolean, err: any)|nil
 ---@param on_progress fun(stage: string, done: number|nil, total: number|nil, idx: number|nil, count: number|nil)|nil
+---@return CancelHandle
 function M.install(spec, cb, on_progress)
     cb = cb or function() end
+    local state = { cancelled = false, cancel = function() end }
+    local handle = {
+        cancel = function()
+            if state.cancelled then return end
+            state.cancelled = true
+            M._downloading = false
+            state.cancel()
+            os.remove(spec.dest .. ".part")
+        end,
+    }
     if M._downloading then
         cb(false, "already downloading")
-        return
+        return { cancel = function() end }
     end
     local dest = spec.dest
     local started_at = Perf.now()
@@ -273,9 +286,12 @@ function M.install(spec, cb, on_progress)
             on_progress(...)
         end
     end
-    --- 收尾：解掉在飞标记并回调。
+    --- 收尾：解掉在飞标记并回调。取消之后不再回调。
     ---@param ok boolean
-    local function done(ok, err)
+    local function finish(ok, err)
+        if state.cancelled then return end
+        state.cancelled = true
+        state.cancel = function() end
         M._downloading = false
         if ok then
             logger.dbg("book dict download done", spec.name, Perf.elapsedMs(started_at), "ms")
@@ -284,28 +300,40 @@ function M.install(spec, cb, on_progress)
         end
         cb(ok, err)
     end
+    --- 换当前这段的取消函数。已经取消的请求立刻停掉，避免回调里又开下一段。
+    ---@param req CancelHandle|nil
+    local function bind(req)
+        if not req or type(req.cancel) ~= "function" then return end
+        if state.cancelled then
+            req:cancel()
+            return
+        end
+        state.cancel = function() req:cancel() end
+    end
 
     report("manifest")
-    fetchManifest(spec, function(manifest, total, err)
+    bind(fetchManifest(spec, function(manifest, total, err)
+        if state.cancelled then return end
         if err then
-            done(false, err)
+            finish(false, err)
             return
         end
         local attr = lfs.attributes(dest)
         if attr and attr.mode == "file" and attr.size == tonumber(manifest.raw_size)
             and spec.installed == manifest.built_at then
-            done(true)
+            finish(true)
             return
         end
         report("manifest", 0, total, 0, #manifest.parts)
         Paths.ensureDir(Paths.root())
         local synced, sync_err = syncTmpManifest(manifest, spec)
         if not synced then
-            done(false, sync_err)
+            finish(false, sync_err)
             return
         end
-        downloadParts(spec, manifest, 1, done, report, 0, total)
-    end)
+        downloadParts(spec, manifest, 1, finish, report, 0, total, state, bind)
+    end))
+    return handle
 end
 
 --- 输入法词库的下载规格。
@@ -332,28 +360,29 @@ end
 ---@param method "pinyin"|"wubi"|"cangjie"|"zhuyin"
 ---@param cb fun(ok: boolean, err: any)|nil
 ---@param on_progress function|nil
+---@return CancelHandle
 function M.ensure(method, cb, on_progress)
-    M.install(M.imeSpec(method), cb, on_progress)
+    return M.install(M.imeSpec(method), cb, on_progress)
 end
 
 -- 前向声明的实现。
-downloadParts = function(spec, manifest, idx, done, report, done_bytes, total)
+downloadParts = function(spec, manifest, idx, done, report, done_bytes, total, state, bind)
     local parts = manifest.parts
     if idx > #parts then
-        assembleInJob(spec, manifest, done, report)
+        assembleInJob(spec, manifest, done, report, state, bind)
         return
     end
     local part = parts[idx]
     if partComplete(part, spec) then
         local size = tonumber(part.size)
         report("part", done_bytes + size, total, idx, #parts)
-        downloadParts(spec, manifest, idx + 1, done, report, done_bytes + size, total)
+        downloadParts(spec, manifest, idx + 1, done, report, done_bytes + size, total, state, bind)
         return
     end
     -- 网络响应尚未返回时也先通知当前分片，避免进度框长时间停在上一阶段。
     report("part", done_bytes, total, idx, #parts)
     local file = tmpDir(spec) .. "/" .. part.file
-    Mirror.download(spec.base_path .. "/" .. part.file, {
+    bind(Mirror.download(spec.base_path .. "/" .. part.file, {
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
         -- 15MB 一片，断在中途整片重下太亏：保留 .part，换源/重试都带 Range 续传。
@@ -366,19 +395,20 @@ downloadParts = function(spec, manifest, idx, done, report, done_bytes, total)
             return false, "part size mismatch: " .. part.file
         end,
     }, file, function(ok, err)
+        if state.cancelled then return end
         if not ok then
             done(false, err)
             return
         end
-        downloadParts(spec, manifest, idx + 1, done, report, done_bytes + tonumber(part.size), total)
-    end)
+        downloadParts(spec, manifest, idx + 1, done, report, done_bytes + tonumber(part.size), total, state, bind)
+    end))
 end
 
-assembleInJob = function(spec, manifest, done, report)
+assembleInJob = function(spec, manifest, done, report, state, bind)
     local size, count = tonumber(manifest.raw_size), #manifest.parts
     report("assemble", 0, size, nil, count)
     local dir = tmpDir(spec)
-    Job.run(function(progress)
+    bind(Job.run(function(progress)
         local err = assemble(manifest, dir, spec.dest, progress)
         if err then
             error(err)
@@ -392,13 +422,15 @@ assembleInJob = function(spec, manifest, done, report)
             report("assemble", bytes, size, nil, count)
         end,
         on_done = function()
+            if state.cancelled then return end
             cleanupTmp(spec)
             spec.on_installed(manifest)
             done(true)
         end,
         on_failed = function(err)
+            if state.cancelled then return end
             done(false, err)
         end,
-    })
+    }))
 end
 return M

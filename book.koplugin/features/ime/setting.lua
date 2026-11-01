@@ -37,8 +37,9 @@ local function download(desktop, enable_after)
         key = "ime",
         kind = "download",
         title = _("输入法词库"),
+        cancellable = true,
         run = function(report, done)
-            IME.downloadDict(function(ok, err)
+            return IME.downloadDict(function(ok, err)
                 done({ ok = ok, err = err })
             end, function(stage, done_bytes, total)
                 if stage == "part" then
