@@ -17,7 +17,8 @@
 restartable 的任务归队列所有，队列可以随时中断并从头重跑它：
 休眠（`Tasks.onSuspend`）时中断、放回 waiting；断网导致的失败（result.ok 为假且设备未连网）
 也放回 waiting，不算失败、不消耗重试次数；`Tasks.onResume` / `Tasks.onNetworkConnected` 后按原顺序续跑。
-用户也只能取消 restartable 的任务。书架同步归桌面所有，不设 restartable，队列只展示。
+用户能取消 restartable 的任务，以及 `cancellable` 且 run 返回 `{ cancel }` 的任务。
+书架同步归桌面所有，不设 restartable，队列只展示。
 
   local task, reason = Tasks.enqueue{       -- 被拒时 task 为 nil，reason = running / queue_full
       key = "cache\0wechat\0123", kind = "cache", title = "书名",
@@ -34,8 +35,8 @@ restartable 的任务归队列所有，队列可以随时中断并从头重跑�
 run 跑在主进程，必须发起异步操作后立刻返回：等网络走 http.request，重计算走 workers.job。
 多阶段任务（下载 → Job 解压）返回的句柄要始终指向当前阶段，否则取消后子进程成孤儿；迟到的 done 按 token 丢弃。
 进度只报 report(text, count, total)，百分比由界面算；省略的 count / total 沿用上次值；download 类所有阶段都报字节。
-有缓存（cache）任务在跑 / 排队 / 退避时置 `PluginShare.pause_auto_suspend`，KOReader 不自动休眠；
-其它类不拦，只剩 waiting 的缓存任务时撤回。未结束任务上限 64（queue_full）；退避 15s、30s…；状态 queued → running → finished，旁路 retry_wait / waiting / cancelled。
+缓存（cache）和下载（download）在跑 / 排队 / 退避时置 `PluginShare.pause_auto_suspend`，KOReader 不自动休眠；
+sync / online / ai / convert 不拦。只剩 waiting 时撤回。未结束任务上限 64（queue_full）；退避 15s、30s…；状态 queued → running → finished，旁路 retry_wait / waiting / cancelled。
 
 @module koplugin.book.workers.tasks
 --]]
@@ -95,13 +96,14 @@ local holding_awake = false
 --- 升旗前 pause_auto_suspend 的原值：autoturn、reMarkable / Sony 设备层也写 true，降旗时还原而不是清成 false。
 local awake_before = nil
 
---- 缓存任务在跑 / 排队 / 退避时不让 KOReader 自动休眠；waiting（等网络 / 唤醒）不算，否则永远睡不下去。
+--- 缓存和下载在跑 / 排队 / 退避时不让 KOReader 自动休眠；waiting（等网络 / 唤醒）不算，否则永远睡不下去。
+--- 词库这种下载要几分钟，休眠会掐掉 Wi-Fi，进度停在当时的字节上。
 --- passive 任务自己的 `hold()` 说「先别撑」（例如队列因空间不足暂停）时同样放行。
--- keepalive（翻页器 / KeepAlive 插件）为真时也要撑着，不能在 cache 结束时把别人的不息屏清掉。
+-- keepalive（翻页器 / KeepAlive 插件）为真时也要撑着，不能在结束时把别人的不息屏清掉。
 local function syncAwake()
     local busy = false
     for _idx, task in ipairs(list) do
-        if task.kind == "cache" and task.state ~= "waiting" then
+        if (task.kind == "cache" or task.kind == "download") and task.state ~= "waiting" then
             if not task.hold or task.hold() then
                 busy = true
                 break

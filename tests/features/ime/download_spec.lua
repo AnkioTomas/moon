@@ -313,6 +313,24 @@ local ok_run, err_run = pcall(function()
     Assert.is_false(same)
     Assert.is_true(differ)
     Assert.eq(#downloads, 0)
+
+    -- 取消停掉在途请求：不回调，下载中标志清掉，半截拼接文件删掉。
+    local assemble_part = dest .. ".part"
+    local marker = assert(io.open(assemble_part, "wb"))
+    marker:write("partial")
+    marker:close()
+    manifest.built_at = "2026-08-21 00:00:00"
+    local cancel_calls = 0
+    local cancel_handle = Download.ensure("pinyin", function()
+        cancel_calls = cancel_calls + 1
+    end)
+    Assert.is_true(Download.downloading())
+    cancel_handle:cancel()
+    Stubs.flush()
+    Assert.eq(cancel_calls, 0)
+    Assert.is_false(Download.downloading())
+    Assert.is_nil(io.open(assemble_part, "rb"))
+    manifest.built_at = old_built_at
 end)
 
 cleanup()

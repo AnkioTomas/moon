@@ -206,7 +206,7 @@ end
 ---@param on_progress function|nil
 function Catalog.download(id, cb, on_progress)
     Paths.ensureDir(Catalog.dir())
-    require("features.ime.download").install(Catalog.spec(id), cb, on_progress)
+    return require("features.ime.download").install(Catalog.spec(id), cb, on_progress)
 end
 
 --- 删掉词库文件与记录。

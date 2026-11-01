@@ -2,7 +2,7 @@
 在线词库更新提醒：已装的注音词库、输入法词库，远端 manifest 版本和本地不同就提示一次。
 
 只对已经下载过的词库查（没装的不打扰）；只比 manifest 的 built_at，不下分片。
-随插件的「自动检查更新」开关，每天最多一次；用户确认后才下载，逐个装、前台进度窗。
+每天最多一次；用户确认后才下载，逐个装、前台进度窗。
 离线 / 查询失败静默，等下次。
 
 @module koplugin.book.features.update.resources
@@ -66,22 +66,34 @@ function Resources.updateAll(stale)
         key = "resources:update",
         kind = "download",
         title = _("更新词库"),
+        cancellable = true,
         run = function(report, done)
             local failed = {}
+            local stopped = false
+            local current = { cancel = function() end }
             local function step(i)
+                if stopped then return end
                 if i > #stale then
                     done({ failed = failed })
                     return
                 end
                 local item = stale[i]
-                Download.install(item.spec, function(ok)
+                local req = Download.install(item.spec, function(ok)
+                    if stopped then return end
                     if not ok then failed[#failed + 1] = item.label end
                     step(i + 1)
                 end, function(stage, bytes, total)
                     report(item.label, stage == "part" and bytes or nil, stage == "part" and total or nil)
                 end)
+                if req then current = req end
             end
             step(1)
+            return {
+                cancel = function()
+                    stopped = true
+                    current:cancel()
+                end,
+            }
         end,
         on_done = function(result)
             require("features.rare.overlay").invalidate()
@@ -97,7 +109,6 @@ end
 --- 按天静默检查；有更新才弹确认。没连网 / 正在下载不查。
 function Resources.autoCheck()
     local settings = MoonSettings.get("features.update")
-    if not settings.auto_update_check then return end
     if os.time() - settings.resource_last_checked_at < CHECK_INTERVAL then return end
     if not require("ui/network/manager"):isConnected() then return end
     if require("features.ime.download").downloading() then return end

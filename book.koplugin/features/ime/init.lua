@@ -127,13 +127,14 @@ end
 --- 手动下载或更新词库；离线时立即失败，由用户恢复网络后手动重试。
 ---@param cb fun(ok: boolean, err: any)|nil
 ---@param on_progress fun(stage: string, done: number|nil, total: number|nil, idx: number|nil, count: number|nil)|nil
+---@return CancelHandle|nil 离线时已经回调失败，没有在途请求
 function IME.downloadDict(cb, on_progress)
     cb = cb or function() end
     if not require("ui/network/manager"):isConnected() then
         cb(false, _("网络不可用，请先连接 Wi-Fi"))
         return
     end
-    require("features.ime.download").ensure(Registry.current().dictionary, cb, on_progress)
+    return require("features.ime.download").ensure(Registry.current().dictionary, cb, on_progress)
 end
 
 return IME
