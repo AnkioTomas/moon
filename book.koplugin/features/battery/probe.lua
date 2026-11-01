@@ -17,29 +17,6 @@ local ROOT = "/sys/class/power_supply"
 local MODEL = "/proc/device-tree/model"
 local CLIP = 240
 
-local function defaultFs()
-    local lfs = require("libs/libkoreader-lfs")
-    return {
-        read = function(path)
-            local f = io.open(path, "r")
-            if not f then return nil end
-            local data = f:read("*a")
-            f:close()
-            return data
-        end,
-        list = function(path)
-            local ok, iter, state = pcall(lfs.dir, path)
-            if not ok then return {} end
-            local out = {}
-            for name in iter, state do
-                if name ~= "." and name ~= ".." then out[#out + 1] = name end
-            end
-            table.sort(out)
-            return out
-        end,
-    }
-end
-
 ---@param raw string|nil
 ---@return string|nil
 local function clean(raw)
@@ -100,14 +77,11 @@ end
 local function report(fs, model)
     local lines = {}
     if model then lines[#lines + 1] = "model=" .. model end
-    local nodes = fs.list(ROOT) or {}
-    table.sort(nodes)
+    local nodes = fs.list(ROOT)
     if #nodes == 0 then lines[#lines + 1] = "power_supply: none" end
     for _idx, name in ipairs(nodes) do
         local dir = ROOT .. "/" .. name
-        local files = fs.list(dir) or {}
-        table.sort(files)
-        for _j, file in ipairs(files) do
+        for _j, file in ipairs(fs.list(dir)) do
             local raw = fs.read(dir .. "/" .. file)
             if raw then
                 lines[#lines + 1] = dir .. "/" .. file .. "=" .. clip(raw)
@@ -119,16 +93,16 @@ end
 
 --- 读电源节点。没有设计容量时 `supported` 为假，`reading` 仍可能有电量百分比。
 ---@param fs table|nil
----@return { supported: boolean, reading: table|nil, report: string }
+---@return { supported: boolean, reading: table|nil, report: string } report 仅在不支持时有内容
 function Probe.read(fs)
-    fs = fs or defaultFs()
+    fs = fs or require("utils.fs")
     local model = clean(fs.read(MODEL))
-    local nodes = fs.list(ROOT) or {}
+    local nodes = fs.list(ROOT)
     local bats = {}
     for _idx, name in ipairs(nodes) do
         local dir = ROOT .. "/" .. name
         local values = {}
-        for _j, file in ipairs(fs.list(dir) or {}) do
+        for _j, file in ipairs(fs.list(dir)) do
             local raw = fs.read(dir .. "/" .. file)
             if raw then values[file] = raw end
         end
@@ -148,10 +122,12 @@ function Probe.read(fs)
     end
     if not chosen then chosen = bats[1] end
     local row = chosen and reading(chosen.name, chosen.values) or nil
+    local supported = row ~= nil and row.health_pct ~= nil
     return {
-        supported = row ~= nil and row.health_pct ~= nil,
+        supported = supported,
         reading = row,
-        report = report(fs, model),
+        -- 诊断报告要把整棵 power_supply 再读一遍，只在不支持、用户要反馈时才有用。
+        report = supported and "" or report(fs, model),
     }
 end
 

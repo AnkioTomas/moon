@@ -39,15 +39,7 @@ local function workDir(identity, target)
     return require("utils.paths").bookWorkDir(identity.stable_id, identity.source_id) .. "/" .. TARGETS[target].dir
 end
 
----@param path string
----@return string|nil
-local function readFile(path)
-    local f = io.open(path, "rb")
-    if not f then return nil end
-    local data = f:read("*a")
-    f:close()
-    return data
-end
+local readFile = require("utils.fs").read
 
 --- 写临时文件再改名，读的一方不会看到半截文件。
 ---@param path string
