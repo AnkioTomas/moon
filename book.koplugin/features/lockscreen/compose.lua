@@ -117,7 +117,8 @@ end
 ---@param wide boolean
 ---@return table[]
 local function buildBlocks(component, position, wide)
-    if component.layout == "quote" then
+    -- quote / free：主体自己按位置算高度。其余走共享面板矩形。
+    if component.layout == "quote" or component.layout == "free" then
         return component.blocks(position, wide)
     end
     local sw, sh = Layout.portraitSize()
