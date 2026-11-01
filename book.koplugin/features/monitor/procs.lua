@@ -71,6 +71,15 @@ local function parseMem(text)
     return kb("MemTotal"), avail
 end
 
+--- 只读整机内存（KB）。读不到返回 nil，不扫进程。
+---@param fs table|nil
+---@return { total: integer, avail: integer }|nil
+function Procs.memory(fs)
+    local total, avail = parseMem((fs or defaultFs()).read("/proc/meminfo") or "")
+    if total <= 0 then return nil end
+    return { total = total, avail = avail }
+end
+
 --- /proc/<pid>/stat：comm 在括号里且可能含空格和括号，所以按最后一个右括号切。
 ---@param text string
 ---@return string|nil comm, integer ticks, integer rss_kb, string start

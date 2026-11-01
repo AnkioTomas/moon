@@ -214,16 +214,6 @@ local function coreEntries(desktop)
         },
         { group = "appearance", order = 40, id = "language", row = Language:row() },
         {
-            group = "device", order = 10, id = "device", icon = "account_circle", title = _("设备"),
-            subtitle = _("设备名称与头像"),
-            page = {
-                title = _("设备"),
-                sections = function()
-                    return { { title = _("设备"), rows = DeviceSettings:rows(desktop) } }
-                end,
-            },
-        },
-        {
             group = "device", order = 20, id = "my_device", icon = "devices", title = _("我的设备"),
             subtitle = _("型号、版本、更新与加群"),
             page = {
@@ -499,10 +489,6 @@ function Settings:updateView()
     for _idx, group in ipairs(groups) do
         if group.id == "device" then
             for _i, entry in ipairs(group.entries) do
-                -- 名称页的导航行换成头像 + 当前名称；page 仍留给搜索。
-                if entry.id == "device" then
-                    entry.row = DeviceSettings.profileRow(desktop, entry.page)
-                end
                 device_rows[#device_rows + 1] = entry.row or navRow(desktop, entry, false)
             end
         else

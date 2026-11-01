@@ -27,7 +27,7 @@ Ext.POINTS = {
     ["topbar.items"] = "顶栏项来源 fn() -> BookTopBarItem[]（after 指定插在哪个核心项后）",
     ["setting.entries"] = "设置条目来源 { owner, entries = fn(desktop) -> BookSettingEntry[] }",
     ["setting.version_check"] = "单一提供者：检查插件更新 fn(plugin_path, force?)。没人登记时版本行只展示版本",
-    ["setting.device_section"] = "我的设备「本机」追加一个子页 { id, order?, icon, title, refresh_seconds?, right_icon?, right_callback?(desktop), sections(desktop): BookThemeSection[] }。按 order 排在固件之后、KOReader 之前，点进去才是那一页；refresh_seconds 只刷子页",
+    ["setting.device_section"] = "我的设备「本机」追加一个子页 { id, order?, icon, title, status?(desktop): string|nil, refresh_seconds?, right_icon?, right_callback?(desktop), sections(desktop): BookThemeSection[] }。按 order 排在固件之后、KOReader 之前，点进去才是那一页；status 是这一行右侧的字；refresh_seconds 只刷子页",
     ["setting.groups"] = "设置根页分组 { id, title, after?, icon? }",
     ["highlight.relabel"] = "划词菜单按钮改名 fn(key) -> string|nil（按钮行为已由提供者接管时给新名字）",
     ["highlight.fill_selection"] = "单一提供者：划词无文字时补选区 fn(menu) -> bool",

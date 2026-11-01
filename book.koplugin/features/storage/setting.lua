@@ -385,6 +385,11 @@ require("utils.extension").add("setting.device_section", {
     order = 10,
     icon = "storage",
     title = _("存储空间"),
+    status = function()
+        local disk = require("features.storage").disk()
+        if not disk or not disk.total or disk.total <= 0 then return nil end
+        return T(_("%1 / %2"), friendly(disk.available), friendly(disk.total))
+    end,
     sections = sections,
 })
 
