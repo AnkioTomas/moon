@@ -360,4 +360,108 @@ do
     Assert.len(calls, 0, "主动关过蓝牙，关 Wi-Fi 不恢复")
 end
 
+-- 关蓝牙 / 断翻页器前先放开 uhid 事件节点。触摸屏不关。失败且节点还在则重开。
+do
+    local DEVICES = [[
+I: Bus=0005 Vendor=0000 Product=0000 Version=0000
+N: Name="BLE-M3"
+S: Sysfs=/devices/virtual/misc/uhid/0005:0000:0000.0001/input/input8
+U: Uniq=aa:bb:cc:dd:ee:ff
+H: Handlers=event5
+
+I: Bus=0005 Vendor=0000 Product=0000 Version=0000
+N: Name="Other"
+S: Sysfs=/devices/virtual/misc/uhid/0005:0000:0000.0002/input/input9
+U: Uniq=11:22:33:44:55:66
+H: Handlers=event6
+
+I: Bus=0018 Vendor=0000 Product=0000 Version=0000
+N: Name="touch"
+S: Sysfs=/devices/platform/touch/input/input1
+H: Handlers=event1
+]]
+    local real_open = io.open
+    io.open = function(path, mode)
+        if path == "/proc/bus/input/devices" then
+            return { read = function() return DEVICES end, close = function() end }
+        end
+        return real_open(path, mode)
+    end
+    local lfs = require("libs/libkoreader-lfs")
+    local real_attr = lfs.attributes
+    lfs.attributes = function(path, field)
+        if path:find("^/dev/input/event%d+$") then return "file" end
+        return real_attr(path, field)
+    end
+    local closed, opened, resets = {}, {}, 0
+    local input = {
+        opened_devices = {},
+        close = function(self, path)
+            closed[#closed + 1] = path
+            self.opened_devices[path] = nil
+        end,
+        open = function(self, path)
+            opened[#opened + 1] = path
+            self.opened_devices[path] = 99
+        end,
+        resetState = function() resets = resets + 1 end,
+    }
+    local function refill()
+        input.opened_devices = {
+            ["/dev/input/event5"] = 10,
+            ["/dev/input/event6"] = 11,
+            ["/dev/input/event1"] = 7,
+        }
+        closed, opened = {}, {}
+    end
+    local function has(list, path)
+        for _idx, item in ipairs(list) do
+            if item == path then return true end
+        end
+        return false
+    end
+    local prev_device = package.loaded["device"]
+    package.loaded["device"] = { input = input }
+
+    refill()
+    reset()
+    routes["/status"] = { ON_EMPTY, STOPPED }
+    routes["/stop"] = '{"ok":true}'
+    Bluetooth.setEnabled(false, function() end)
+    Stubs.flush()
+    Assert.is_true(has(closed, "/dev/input/event5"))
+    Assert.is_true(has(closed, "/dev/input/event6"))
+    Assert.is_false(has(closed, "/dev/input/event1"), "触摸屏不能关")
+    Assert.eq(resets, 1)
+    Assert.eq(#opened, 0, "关掉成功不重开")
+
+    refill()
+    local resets_before = resets
+    reset()
+    routes["/status"] = ON_EMPTY
+    routes["/disconnect"] = '{"ok":true}'
+    Bluetooth.setConnected({ address = "AA:BB:CC:DD:EE:FF", protocol = "ble" }, false, function() end)
+    Stubs.flush()
+    Assert.is_true(has(closed, "/dev/input/event5"))
+    Assert.is_false(has(closed, "/dev/input/event6"), "只放开这一台")
+    Assert.is_false(has(closed, "/dev/input/event1"))
+    Assert.eq(resets, resets_before + 1)
+
+    refill()
+    reset()
+    routes["/status"] = ON_EMPTY
+    routes["/stop"] = '{"ok":false,"error":"busy"}'
+    local ok
+    Bluetooth.setEnabled(false, function(r) ok = r end)
+    Stubs.flush()
+    Assert.is_false(ok)
+    Assert.is_true(has(opened, "/dev/input/event5"))
+    Assert.is_true(has(opened, "/dev/input/event6"))
+    Assert.is_false(has(opened, "/dev/input/event1"))
+
+    package.loaded["device"] = prev_device
+    io.open = real_open
+    lfs.attributes = real_attr
+end
+
 os.execute = real_execute
