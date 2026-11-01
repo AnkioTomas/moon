@@ -74,3 +74,19 @@ Assert.is_true(XrayDB.clearRemoved("moon", "b1"))
 Assert.matches(calls[#calls].sql, "DELETE FROM xray_removed")
 Assert.eq(calls[#calls].args[1], "moon")
 Assert.eq(calls[#calls].args[2], "b1")
+
+-- 重置此书 X-Ray：实体、游标、墓碑、章节记录四张表逐表经 DB.removeIdentity 清空，墓碑也清。
+-- 名单与 events.lua 的 book_removed 一致：只发 DELETE，不另写 SQL、不另起事务。
+calls = {}
+Assert.is_true(XrayDB.reset("moon", "b1"))
+local reset_tables = {}
+for _idx, c in ipairs(calls) do
+    local tbl = c.sql:match("^DELETE FROM ([%w_]+)")
+    Assert.not_nil(tbl, "reset 只走 DELETE，不另写 SQL")
+    reset_tables[#reset_tables + 1] = tbl
+    Assert.eq(c.sql, "DELETE FROM " .. tbl .. " WHERE source_id=? AND stable_id=?;")
+    Assert.eq(c.args[1], "moon")
+    Assert.eq(c.args[2], "b1")
+end
+Assert.eq(table.concat(reset_tables, ","), "xray_entities,xray_scan,xray_removed,xray_chapter")
+Assert.len(calls, 4, "四张表各一条 DELETE，不另起事务")
