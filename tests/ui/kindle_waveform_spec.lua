@@ -117,7 +117,7 @@ local device = {
     isMTK = function(self) return self._mtk end,
 }
 package.loaded["logger"] = { warn = function() end }
-package.loaded["utils.log"] = { warn = function() end }
+package.loaded["utils.log"] = { warn = function() end, info = function() end }
 Waveform.install({ device = device, ui_waveform = 10 })
 Assert.is_true(device.screen._moon_kindle_gray)
 Waveform.install({ device = device, ui_waveform = 10 })

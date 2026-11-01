@@ -45,10 +45,6 @@ require("l10n")
 require("features").load()
 -- 全局旋转记忆：登记 reader.doc_settings（模块只加载一次，勿放进 init —— FM/Reader 各建实例会重复挂）。
 require("utils.rotation")
--- Kindle 的 UI 波形会把笔画黑白像素交给 DU。翻页动画不改，只在刷新进驱动前把灰阶留住。
-local gray_ok, gray_err = pcall(function() require("ui.kindle_waveform").install() end)
-if not gray_ok then logger.warn("kindle waveform hook failed", gray_err) end
-
 local SourceRegistry = require("source.registry")
 local Desktop = require("desktop")
 local Features = require("features")
@@ -57,6 +53,9 @@ local Perf = require("utils.perf")
 local Menu = require("menu")
 local Session = require("reader.session")
 local Tasks = require("workers.tasks")
+
+-- Kindle 的 UI 波形会把笔画黑白像素交给 DU。翻页动画不改，只在刷新进驱动前把灰阶留住。
+Guard.call("kindle_waveform", require("ui.kindle_waveform").install)
 
 --- Book 插件实例（FM / Reader 各一份）
 ---@class BookPlugin : WidgetContainer
