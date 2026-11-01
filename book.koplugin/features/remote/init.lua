@@ -1594,14 +1594,13 @@ function Remote.shareUrl(path)
         Remote._once[real] = true
     end
     Remote._shared[real] = true
-    -- 票根会按书覆盖同名文件。链接不带会变的参数时，手机（微信扫码）按完整 URL 缓存第一次下到的图，
-    -- 后一本书扫出来仍是前一本。v 不参与读文件，只让每次分享的地址不同。
+    -- 同一本书的票根会被原地覆盖。链接不带会变的参数时，手机扫码时按完整 URL 缓存第一次下到的图，
+    -- 进度变了扫出来仍是旧图。v 不参与读文件，只让文件变了地址就变。
     local lfs = require("libs/libkoreader-lfs")
-    local modified = math.floor(tonumber(lfs.attributes(real, "modification")) or 0)
-    local size = tonumber(lfs.attributes(real, "size")) or 0
-    Remote._share_seq = (Remote._share_seq or 0) + 1
-    return string.format("http://%s:%d/download?path=%s&v=%d-%d-%d",
-        ip, Remote.port(), Text.urlEncode(real), Remote._share_seq, modified, size)
+    local modified = math.floor(lfs.attributes(real, "modification") or 0)
+    local size = lfs.attributes(real, "size") or 0
+    return string.format("http://%s:%d/download?path=%s&v=%d-%d",
+        ip, Remote.port(), Text.urlEncode(real), modified, size)
 end
 
 --- 浏览器访问地址；拿不到局域网 IP 时没有可扫、可输的地址。

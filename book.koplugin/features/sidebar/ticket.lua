@@ -30,6 +30,16 @@ local _ = require("gettext")
 local Ticket = {}
 Ticket.__index = Ticket
 
+--- 每本书一个文件名，只留当前这张；别的书留下的在这里清掉，存储页不让清屏保目录。
+---@param keep string
+function Ticket.pruneOthers(keep)
+    local dir = Paths.screensaverDir()
+    for _idx, name in ipairs(require("utils.fs").list(dir)) do
+        local path = dir .. "/" .. name
+        if name:match("^ticket.*%.png$") and path ~= keep then os.remove(path) end
+    end
+end
+
 --- 按当前阅读会话生成票根；封面落定后写 PNG 并回调 on_ready（可能同步回调）。
 ---@param snapshot ReaderSessionSnapshot
 ---@param on_ready fun()
@@ -41,11 +51,12 @@ function Ticket.new(snapshot, on_ready)
     local Session = require("reader.session")
     local book = require("features.sidebar.info").book(snapshot)
     -- 身份进文件名：分享 URL 的 path 跟着变，换书不会命中手机上第一本的缓存。
-    local identity = tostring(book.source_id or "") .. "\0" .. tostring(book.stable_id or book.title or "")
+    local identity = book.source_id .. "\0" .. book.stable_id
     local self = setmetatable({
         path = Paths.screensaverDir() .. "/ticket-" .. require("ffi/sha2").md5(identity) --[[@as string]] .. ".png",
         ready = false,
     }, Ticket)
+    Ticket.pruneOthers(self.path)
     local _w, sh = Layout.portraitSize()
     local book_page, book_total = Session.bookPages(snapshot)
     self.blocks = Receipt.blocks(Layout.panel{
