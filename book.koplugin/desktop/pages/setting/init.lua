@@ -37,7 +37,6 @@ local HttpSetting = require("http.proxy.setting")
 ---@field desktop BookDesktop
 ---@field page integer
 ---@field source BookSettingsSource 顶栏点源名经此换源
----@field cache_clear_job { cancel: fun() }|nil 清理缓存任务（不随页面取消，清理必须落地）
 local Settings = {}
 Settings.__index = Settings
 
