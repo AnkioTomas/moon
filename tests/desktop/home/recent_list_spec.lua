@@ -67,33 +67,34 @@ List.saveCols(4)
 List.saveRows(0)
 Assert.eq(List.rows(), 2, "非法行数回退两行")
 
--- 空书架只有一页：不留分页条高度
+-- 分页条始终占位，单页也不把底部留空
 local range = List:heightRange({}, { width = 600 })
-Assert.eq(range.height, SECTION + 176 * 2 + 10)
+Assert.eq(range.height, SECTION + PAGER + 176 * 2 + 10)
 Assert.is_nil(range.fill)
+Assert.is_true(range.shrink)
 List.saveRows(1)
-Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + 176)
+Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + PAGER + 176)
 List.saveShowTitle(false)
-Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + 150)
+Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + PAGER + 150)
 List.saveShowTitle(true)
 List.saveShowAuthor(true)
-Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + 190, "显示作者多一行高度")
+Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + PAGER + 190, "显示作者多一行高度")
 List.saveShowAuthor(false)
 for i = 1, 5 do shelf[i] = { title = "book" .. i } end
-Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + PAGER + 176, "一行四列五本两页：留分页条")
+Assert.eq(List:heightRange({}, { width = 600 }).height, SECTION + PAGER + 176, "一行四列，分页条不随页数消失")
 List.saveRows(2)
 local events = {}
 local desktop = { plugin = {}, onEvent = function(_, e) events[#events + 1] = e end }
 local ctx = { desktop = desktop, source = { id = "local" } }
 
-do -- 一页装下：五本、不画分页条；开书状态挂在组件实例上
+do -- 一页装下也画分页条，底部不是空条；开书状态挂在组件实例上
     local list = List:new()
     local h = List:heightRange(ctx, { width = 600 }).height
     Assert.eq(h, range.height)
     local slot = list:build(ctx, { width = 600, height = h })
     Assert.eq(slot:getSize().h, h)
-    Assert.len(Kit.buttons(slot), 0, "单页没有翻页按钮")
-    Assert.is_false(list.paged)
+    Assert.len(Kit.buttons(slot), 2, "单页也有左右翻页")
+    Assert.contains(Kit.texts(slot), "1 / 1")
     Assert.len(covers, 5)
     Assert.eq(covers[1].w, 100)
     Assert.is_false(covers[1].author, "图书馆开作者时最近阅读仍按自己开关（缺省关）")
@@ -129,20 +130,18 @@ do -- 一行三列：两页；翻页只重建自己并局部刷新；换源回�
     list:destroy()
 end
 
-do -- 书架变化让分页条出现 / 消失：高度跟着变，交给首页整页重排
+do -- 分页条始终在，书变少也不改高度，不整页重排
     List.saveRows(1)
     List.saveCols(3)
     local home_events = {}
     local list = List:new{ home = { onEvent = function(_, e) home_events[#home_events + 1] = e end } }
     list:build(ctx, { width = 600, height = 250 })
     list:activate()
-    Assert.is_true(list.paged)
     list:onEvent("shelf_changed")
-    Assert.len(home_events, 0, "分页条不变不重排")
     local saved = shelf
     shelf = { saved[1] }
     list:onEvent("shelf_changed")
-    Assert.eq(home_events[1], "home_changed")
+    Assert.len(home_events, 0, "单页多页都有分页条，高度不变")
     shelf = saved
     list:destroy()
 end

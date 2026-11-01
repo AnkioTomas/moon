@@ -1,10 +1,12 @@
 --[[--
-首页拼装器：钉页组件板。长按进编辑；底部主题翻页条（编辑态中间是「添加 / 完成」）。
+首页拼装器：钉页组件板。长按进编辑。
+浏览态只有一页时底部不放翻页条，高度还给正文；超过一页才放。
+编辑态翻页条中间是「添加 / 完成」，一页也留着。
 
   +-----------------------------+
   | [组件]                      |   Layout:build 按钉页记录排当前页
   | [组件]                      |
-  | [<]       ·  ●  ·       [>] |
+  | [<]       ·  ●  ·       [>] |   多页或编辑态
   +-----------------------------+
 
 每次 updateView 都新建整页（组件 build 新建各自的槽）；页内变化走 desktop:updateView。
@@ -19,7 +21,6 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
-local VerticalSpan = require("ui/widget/verticalspan")
 local Layout = require("desktop.pages.home.layout")
 local Components = require("desktop.pages.home.registry")
 local Widgets = require("desktop.pages.home.placements")
@@ -325,7 +326,11 @@ local function assemble(self)
     local ctx = self.desktop:ctx()
     local t = Theme.current()
     local w, h = ctx.width, ctx.height
-    local body_h = math.max(1, h - Theme.px(t.control.height))
+    local pager_h = Theme.px(t.control.height)
+    -- 浏览态先按整页排。只有一页就不放底部翻页条，高度还给内容。
+    -- 排出来超过一页再扣掉翻页条重排。编辑态翻页条中间是「添加 / 完成」，始终留着。
+    local show_pager = self.editing == true
+    local body_h = show_pager and math.max(1, h - pager_h) or h
     ensureLayout(self, ctx, body_h)
 
     local wrap
@@ -350,27 +355,34 @@ local function assemble(self)
         focus = self.focus,
     })
     self.focus = nil
+    if not show_pager and self.pages > 1 then
+        body:free()
+        show_pager = true
+        body_h = math.max(1, h - pager_h)
+        body, self.page, self.pages, self.visible = Layout.build(ctx, self.components, self.page, {
+            body_height = body_h,
+            wrap = wrap,
+        })
+    end
+    local column = { align = "left", body }
+    if show_pager then
+        column[#column + 1] = Pager.widget({
+            width = w,
+            page = self.page,
+            pages = self.pages,
+            dots = true,
+            center = self.editing and editActions(self, body_h, w) or nil,
+            keys = false,
+            on_page = function(page) self:turn(page - self.page) end,
+        })
+    end
     local holder = InputContainer:new{
         dimen = Geom:new{ w = w, h = h },
         Box:new{
             style = { bg = t.color.page },
             width = w,
             height = h,
-            VerticalGroup:new{
-                align = "left",
-                body,
-                -- 只有一页且非编辑态：不显示翻页条，留同高占位，正文高度不变、不跳动
-                (self.pages <= 1 and not self.editing) and VerticalSpan:new{ width = Theme.px(t.control.height) }
-                    or Pager.widget({
-                    width = w,
-                    page = self.page,
-                    pages = self.pages,
-                    dots = true,
-                    center = self.editing and editActions(self, body_h, w) or nil,
-                    keys = false,
-                    on_page = function(page) self:turn(page - self.page) end,
-                }),
-            },
+            VerticalGroup:new(column),
         },
     }
     if not self.editing then

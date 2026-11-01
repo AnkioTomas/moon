@@ -55,6 +55,16 @@ do -- build 新建固定尺寸槽；未绘制 / 不活跃时 refresh 只换内�
     comp:refresh()
 end
 
+do -- 内容比槽高时槽高不变，避免把后面的组件顶进首页翻页条
+    local Tall = setmetatable({ id = "tall" }, Base)
+    Tall.__index = Tall
+    function Tall:createWidget()
+        return Widget:new{ dimen = { w = 10, h = 80 } }
+    end
+    local slot = Tall:new():build(ctx, { width = 120, height = 40 })
+    Assert.eq(slot:getSize().h, 40)
+end
+
 do -- deactivate 向槽内下发 HomePause（封面取消在飞下载）
     local comp = Comp:new()
     comp:build(ctx, { width = 10, height = 10 })
