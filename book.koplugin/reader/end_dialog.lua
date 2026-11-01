@@ -12,9 +12,11 @@ local Toast = require("ui.themes.widgets.toast")
 ---@class BookReaderEndDialog
 local EndDialog = {}
 
---- 桌面要等回桌面后才拿得到实例，关书之后再查。
+--- 阅读中回桌面要等下一 tick，这一拍文件管理器还不存在。没有就跳过：
+--- 新桌面会按库重建书架，删除和清缓存已经落库。
 local function refreshShelf()
-    local desk = require("apps/filemanager/filemanager").instance.book.desktop
+    local fm = require("apps/filemanager/filemanager").instance
+    local desk = fm and fm.book and fm.book.desktop
     if desk and not desk.closed then desk:onEvent("shelf_changed") end
 end
 

@@ -16,11 +16,12 @@ local cached = { false }
 local running_task
 local desk = { events = {} }
 function desk:onEvent(name) self.events[#self.events + 1] = name end
+local fm = { instance = { book = { desktop = desk } } }
 package.preload["desktop"] = function()
     return { open = function() order[#order + 1] = "open_desktop" end }
 end
 package.preload["apps/filemanager/filemanager"] = function()
-    return { instance = { book = { desktop = desk } } }
+    return fm
 end
 package.preload["book.store"] = function()
     return {
@@ -98,6 +99,19 @@ do
     Assert.eq(order[2], "soft:moon\0a.epub")
     Assert.eq(Themed.last("toast").text, "已软删除")
     Assert.eq(desk.events[1], "shelf_changed")
+end
+
+-- 关书后文件管理器还没建好：软删成功，不崩，书架等新桌面自己建
+do
+    order, desk.events, soft_result, fm.instance = {}, {}, { true }, nil
+    EndDialog.show({}, identity)
+    softItem().callback()
+    Themed.last("confirm").ok_callback()
+    Assert.eq(order[1], "open_desktop")
+    Assert.eq(order[2], "soft:moon\0a.epub")
+    Assert.eq(Themed.last("toast").text, "已软删除")
+    Assert.len(desk.events, 0)
+    fm.instance = { book = { desktop = desk } }
 end
 
 -- 软删除失败：提示，不刷新书架
