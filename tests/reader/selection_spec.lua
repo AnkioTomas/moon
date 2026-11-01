@@ -128,6 +128,9 @@ Assert.eq(anchors.finish.edge_x, 260)
 Assert.eq(anchors.start.ay, 120)
 Assert.eq(anchors.start.y, 137)
 Assert.eq(anchors.start.edge_y, 110)
+Assert.eq(anchors.start.line_y, 100)
+Assert.eq(anchors.start.line_h, 20)
+Assert.eq(anchors.finish.line_y, 100)
 Assert.eq(anchors.finish.y, 137)
 
 local flipped = Selection.anchors(
@@ -151,6 +154,14 @@ Assert.eq(Selection.hit({
     start = { x = 10, y = 10 },
     finish = { x = 12, y = 10 },
 }, { x = 12, y = 10 }, 8), "finish")
+
+-- 行锁：带内锁在中线，越过半行才放行
+Assert.eq(Selection.trackY(100, 20, 113), 110)
+Assert.eq(Selection.trackY(100, 20, 90), 110)
+Assert.eq(Selection.trackY(100, 20, 89), 89)
+Assert.eq(Selection.trackY(100, 20, 130), 130)
+Assert.eq(Selection.trackY(nil, 20, 40), 40)
+Assert.eq(Selection.trackY(100, 0, 40), 40)
 
 -- 菜单锚点：手柄下方优先，贴底时翻到上方
 local band_top, band_bottom = Selection.band(first, last, anchors, 7)
@@ -258,6 +269,73 @@ Assert.is_false(Selection.move(highlight, "start", { x = 40, y = 110 }, { x = 40
 Assert.eq(highlight.selected_text.text, "新")
 Assert.is_false(Selection.move(highlight, "finish", { x = 1, y = 1 }, nil))
 
+-- 排版文档：拖动手柄按字符落点，不走会扩词的包装；成功后丢掉页面缓存，高亮才会重画
+local raw_calls = {}
+local word_fallback = false
+local trashed = 0
+local restored
+local cre_hl = {
+    selected_text = { text = "原", pos0 = "a", pos1 = "b" },
+    ui = {
+        rolling = true,
+        view = {
+            screenToPageTransform = function(_, pos)
+                return { x = pos.x, y = pos.y }
+            end,
+        },
+        document = {
+            _document = {
+                getTextFromPositions = function(_, x0, y0, x1, y1, draw, seg, images, grab)
+                    raw_calls[#raw_calls + 1] = {
+                        x0 = x0, y0 = y0, x1 = x1, y1 = y1,
+                        draw = draw, seg = seg, images = images, grab = grab,
+                    }
+                    return { text = "字", pos0 = "p0", pos1 = "p1" }
+                end,
+            },
+            getScreenBoxesFromPositions = function()
+                return { { x = 10, y = 20, w = 30, h = 16 } }
+            end,
+            getTextFromPositions = function()
+                word_fallback = true
+            end,
+            resetBufferCache = function()
+                trashed = trashed + 1
+            end,
+            getTextFromXPointers = function(_, pos0, pos1, draw)
+                restored = { pos0 = pos0, pos1 = pos1, draw = draw }
+            end,
+        },
+    },
+}
+Assert.is_true(Selection.move(cre_hl, "finish", { x = 50, y = 28 }, { x = 10, y = 28 }))
+Assert.eq(cre_hl.selected_text.text, "字")
+Assert.is_false(cre_hl.is_word_selection)
+Assert.eq(cre_hl.selected_text.sboxes[1].w, 30)
+Assert.eq(raw_calls[1].x0, 10)
+Assert.eq(raw_calls[1].x1, 50)
+Assert.is_true(raw_calls[1].draw)
+Assert.is_false(raw_calls[1].grab)
+Assert.is_false(word_fallback)
+Assert.eq(trashed, 1, "按字符落点也要丢掉页面缓存")
+Assert.is_nil(restored)
+
+cre_hl.ui.document.getScreenBoxesFromPositions = function() return {} end
+Assert.is_false(Selection.move(cre_hl, "finish", { x = 60, y = 28 }, { x = 10, y = 28 }))
+Assert.eq(cre_hl.selected_text.text, "字", "空盒保持原选区，不退回扩词")
+Assert.is_false(word_fallback)
+Assert.eq(trashed, 1, "失败不把缓存丢掉后留一张空选区")
+Assert.eq(restored.pos0, "p0")
+Assert.eq(restored.pos1, "p1")
+Assert.is_true(restored.draw)
+
+cre_hl.ui.document._document = {}
+cre_hl.ui.document.getTextFromPositions = function()
+    return { text = "词", pos0 = "a", pos1 = "b", sboxes = { { x = 1, y = 2, w = 3, h = 4 } } }
+end
+Assert.is_true(Selection.move(cre_hl, "finish", { x = 70, y = 28 }, { x = 10, y = 28 }))
+Assert.eq(cre_hl.selected_text.text, "词", "没有底层接口才退回包装")
+
 -- 生命周期：新划词才挂，已有标注 / 非触摸不挂；detach 可重复
 Selection.install()
 Assert.is_true(ReaderHighlight._book_handles_patched)
@@ -294,7 +372,7 @@ fresh.ui = {
                 text = "拖",
                 pos0 = a,
                 pos1 = b,
-                sboxes = { first, { x = b.x - 20, y = 100, w = 20, h = 20 } },
+                sboxes = { first, { x = b.x - 20, y = b.y > 130 and 160 or 100, w = 20, h = 20 } },
             }
         end,
     },
@@ -313,6 +391,7 @@ Assert.eq(fresh.highlight_dialog, menu_before, "按下还没拖，菜单还在")
 Assert.is_true(overlay:onPan(nil, { pos = { x = 300, y = 137 } }))
 Assert.eq(drag_calls[1].a.x, 40)
 Assert.eq(drag_calls[1].b.x, 300)
+Assert.eq(drag_calls[1].b.y, 110, "落点锁在行中线")
 Assert.is_nil(fresh.highlight_dialog, "一开始拖就藏菜单")
 Assert.eq(closed[1], menu_before)
 Assert.eq(closed_mode, "ui", "藏菜单不闪")
@@ -320,6 +399,13 @@ Assert.eq(dirty[#dirty], fresh.dialog)
 Assert.eq(dirty_mode, "ui")
 Assert.eq(dirty_region.y, 100, "拖动只刷选区横带")
 Assert.eq(dirty_region.h, 44)
+Assert.is_true(overlay:onPan(nil, { pos = { x = 304, y = 145 } }))
+Assert.eq(drag_calls[2].b.y, 110, "行内纵向抖动不换行")
+Assert.eq(drag_calls[2].b.x, 304)
+Assert.is_true(overlay:onPan(nil, { pos = { x = 304, y = 177 } }))
+Assert.eq(drag_calls[3].b.y, 150, "离开滞回带才把纵坐标交给引擎")
+Assert.is_true(overlay:onPan(nil, { pos = { x = 310, y = 177 } }))
+Assert.eq(drag_calls[4].b.y, 170, "换行后落点改锁到新行中线")
 Assert.is_true(overlay:onPanRelease())
 Assert.is_nil(overlay.dragging)
 Assert.is_true(fresh.reshown)
