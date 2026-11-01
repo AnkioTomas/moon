@@ -265,6 +265,20 @@ function Token.shelfAsync(cb)
     end }
 end
 
+--- 已购正文。encryptType 为 jj 时一定是 DES；漏标时不像章节的内容才解，解开后像章节才采用。
+---@param content string
+---@param encrypt_type string|nil
+---@return string|nil
+function Token.chapterText(content, encrypt_type)
+    local function readable(text)
+        return type(text) == "string" and (text:find("<br", 1, true) or text:find("[\228-\233]")) ~= nil
+    end
+    if encrypt_type ~= "jj" and readable(content) then return content end
+    local plain = require("crypto.des").decryptBase64(content, DES_KEY, DES_IV)
+    if encrypt_type == "jj" or (plain and readable(plain)) then return plain end
+    return nil
+end
+
 --- 带 token 取章节正文：已购 VIP 章的响应整包加密、content 又是 DES/Base64 密文，解密放子进程。
 --- token 无效（1004）重登一次再取；没买（1025）直接回 unpaid。
 --- CDN 偶发给出「头体自洽但整包 DES 解不开」的坏包（模拟器并行压测约千分之一到百分之二），
@@ -306,11 +320,7 @@ function Token.contentAsync(novel_id, chapter_id, cb)
             local encrypt_type = data.encryptType
             local content_len = #data.content
             job = Job.run(function()
-                local content = data.content
-                if encrypt_type == "jj" then
-                    content = require("crypto.des").decryptBase64(content, DES_KEY, DES_IV)
-                end
-                return { text = content }
+                return { text = Token.chapterText(data.content, encrypt_type) }
             end, {
                 name = "jjwxc_token_content",
                 kind = "light",

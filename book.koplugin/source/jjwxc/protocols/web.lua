@@ -2,9 +2,8 @@
 晋江「网页」协议：手机网页（m.jjwxc.com）+ 登录 Cookie。
 
 Cookie 来自远程管理里的「浏览器登录」，或在电脑浏览器登录后手动粘贴（手机网页登录要过数美验证，设备上做不了）。
-能做：个人收藏（/my/fav，GBK 的 HTML）、取消收藏、VIP 章正文（/vip/<书>/<章>，已购才有正文，反爬字体见 font.lua）、
+能做：个人收藏（/my/fav?p= 分页，GBK 的 HTML）、取消收藏、VIP 章正文（/vip/<书>/<章>，已购才有正文，反爬字体见 font.lua）、
 VIP 章购买状态。Cookie 失效时网页 302 到登录页。
-榜单页（/rank/…）不要登录，但同样是手机网页，放在这里。
 
 协议接口（protocols/init.lua 按设置选一个协议调用）：`available` / `shelfAsync` / `contentAsync`。
 
@@ -89,23 +88,40 @@ function Web.favAsync(cookie, cb)
     end)
 end
 
----@param cb fun(rows: table[]|nil, err: string|nil)
----@return HttpJob
-function Web.shelfAsync(cb)
-    return Web.favAsync(Web.cookie(), cb)
-end
+--- 收藏按页拉。页面上没有下一页链接，一页 30 本，空页才是尽头。
+--- 登录校验仍走 favAsync（只要第一页能解析）。
+--- 后面某页失败、或翻到上限这一页还有新书，整次失败：半截列表交给书架对账会把没拉到的书藏掉。
+local MAX_FAV_PAGES = 50
 
---- 手机榜单页：/rank/naturalmore/<榜单号>，一页按频道分好几节，每节 20 本。
----@param rank_id string
----@param cb fun(sections: table[]|nil, err: string|nil)
----@return HttpJob
-function Web.rankAsync(rank_id, cb)
-    return get("/rank/naturalmore/" .. rank_id, nil, function(html, err)
-        if not html then cb(nil, err); return end
-        local sections = Mapper.rankSections(html)
-        if #sections == 0 then cb(nil, _("晋江榜单无法解析")); return end
-        cb(sections)
-    end)
+---@param cb fun(rows: table[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Web.shelfAsync(cb)
+    local cookie = Web.cookie()
+    local rows, seen, handle = {}, {}, {}
+    local function page(n)
+        handle.inner = get("/my/fav?p=" .. n, cookie, function(html, err)
+            if not html then cb(nil, err); return end
+            local batch = Mapper.favRows(html)
+            if not batch then cb(nil, _("晋江收藏页无法解析")); return end
+            if n == 1 and cookie == Web.cookie() then require("source.auth").ok(SOURCE_ID) end
+            local added = 0
+            for _idx, row in ipairs(batch) do
+                if not seen[row.id] then
+                    seen[row.id] = true
+                    rows[#rows + 1] = row
+                    added = added + 1
+                end
+            end
+            if added == 0 then cb(rows); return end
+            if n >= MAX_FAV_PAGES then cb(nil, _("晋江收藏页过多，没有同步完")); return end
+            page(n + 1)
+        end)
+    end
+    page(1)
+    function handle.cancel()
+        if handle.inner then handle.inner:cancel() end
+    end
+    return handle
 end
 
 --- 取消收藏。网页是「确认页 → /my/delBookSure」两步，这里直接走第二步。

@@ -72,6 +72,58 @@ function Mapper.rankSections(html)
     return sections
 end
 
+--- 书城首页 getFullPage（channel=yq）里 type=rankings 的「六排行」。
+--- 没有频道列表的项（页面中间那条空位）丢掉。
+---@param home table
+---@return { title: string, channels: { id: string, title: string }[] }[]
+function Mapper.storeRanks(home)
+    local ranks = {}
+    for _idx, section in ipairs(type(home) == "table" and home or {}) do
+        if section.type == "rankings" then
+            for _i, item in ipairs(type(section.data) == "table" and section.data or {}) do
+                local more = item.more
+                local list = type(more) == "table" and more.channellist
+                if type(list) == "table" and more.rankName then
+                    local channels = {}
+                    for _j, ch in ipairs(list) do
+                        if type(ch.channelid) == "string" and ch.channelid:find("^[%w_]+$") and ch.channel then
+                            channels[#channels + 1] = { id = ch.channelid, title = ch.channel }
+                        end
+                    end
+                    if #channels > 0 then
+                        ranks[#ranks + 1] = { title = more.rankName, channels = channels }
+                    end
+                end
+            end
+        end
+    end
+    return ranks
+end
+
+--- 榜单分页（channelMore）里的书。封面、简介有就带上，没有书号的丢掉。
+---@param wire table|nil
+---@return Book[]
+function Mapper.rankBooks(wire)
+    local data = type(wire) == "table" and wire.data
+    local rows = type(data) == "table" and data.data or {}
+    local books = {}
+    for _idx, item in ipairs(type(rows) == "table" and rows or {}) do
+        local id = item.novelId or item.novelid
+        if id then
+            books[#books + 1] = {
+                source_id = SOURCE_ID,
+                stable_id = tostring(id),
+                title = item.novelName or item.novelname,
+                authors = item.authorName or item.authorname,
+                category = item.novelClass,
+                intro = item.novelIntroShort and Text.stripHtml(item.novelIntroShort),
+                cover = cover(item.cover or item.ebookurl),
+            }
+        end
+    end
+    return books
+end
+
 --- 收藏页 HTML → { id, title, author }[]；找不到收藏列表（页面改版 / 不是收藏页）返回 nil。
 --- 页面上的书名被截断，只作详情拉不到时的兜底。
 ---@param html string

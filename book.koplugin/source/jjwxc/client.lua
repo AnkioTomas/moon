@@ -1,5 +1,5 @@
 --[[--
-晋江文学城 HTTP 客户端（仅异步）：匿名 App JSON 接口（app-cdn.jjwxc.net/androidapi）。
+晋江文学城 HTTP 客户端（仅异步）：匿名 App JSON（app-cdn.jjwxc.net/androidapi）和书城榜单（/bookstore/getFullPage）。
 
 书的元数据、目录、免费章正文都不要登录。VIP 章正文需要登录态，交给 protocols/ 里用户选定的协议
 （web 网页 Cookie / app 账号 token，二选一，见 protocols/init.lua）。
@@ -15,6 +15,10 @@ local _ = require("gettext")
 local Client = {}
 
 local APP = "https://app-cdn.jjwxc.net/androidapi"
+local STORE = "https://app-cdn.jjwxc.net/bookstore"
+-- 榜单分页接口一页 25 本；首页 chip 缓存 10 分钟，翻页不缓存。
+Client.RANK_PAGE = 25
+local STORE_HOME_TTL = 600
 local APP_HEADERS = {
     ["User-Agent"] = "Mozilla/5.0 (Linux; Android 5.1; Lenovo) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 "
         .. "Chrome/39.0.0.0 Mobile Safari/537.36/JINJIANG-Android/206(Lenovo;android 5.1;Scale/2.0)",
@@ -43,6 +47,38 @@ local function appGet(path, params, cb, ratio, cache_ttl)
         if not ok or type(wire) ~= "table" then cb(nil, _("响应无效")); return end
         cb(wire)
     end)
+end
+
+local function storeGet(url, cb, cache_ttl)
+    return Request.get(url, {
+        accept = "application/json",
+        headers = APP_HEADERS,
+        timeout = require("http.timeout").net(0.5),
+        cache_ttl = cache_ttl,
+    }, function(raw, err)
+        if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
+        local ok, wire = pcall(JSON.decode, raw)
+        if not ok or type(wire) ~= "table" then cb(nil, _("响应无效")); return end
+        cb(wire)
+    end)
+end
+
+--- 书城首页。channel=yq 的六排行里已经带纯爱 / 原创 / 衍生频道。
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client.storeHomeAsync(cb)
+    return storeGet(STORE .. "/getFullPage?channel=yq&version=4", cb, STORE_HOME_TTL)
+end
+
+--- 某一个频道的一页。offset 从 0 起，每页 Client.RANK_PAGE 本。
+---@param channel_id string natural_592 这种频道号
+---@param offset integer
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client.rankPageAsync(channel_id, offset, cb)
+    local body = Text.urlEncode(string.format('{"%s":{"offset":"%d","limit":"%d"}}',
+        channel_id, offset, Client.RANK_PAGE))
+    return storeGet(STORE .. "/getFullPage?versionCode=185&channelMore=1&channelBody=" .. body, cb)
 end
 
 ---@param keyword string

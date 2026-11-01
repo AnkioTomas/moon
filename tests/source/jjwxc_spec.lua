@@ -36,6 +36,29 @@ do
     Assert.eq(sections[1].books[1].title, "甲&乙")
     Assert.len(sections[2].books, 2)
     Assert.len(Mapper.rankSections("<html></html>"), 0)
+    local ranks = Mapper.storeRanks({
+        { type = "img" },
+        { type = "rankings", data = {
+            { more = { rankName = "月榜", channellist = {
+                { channel = "言情", channelid = "natural_592" },
+                { channel = "纯爱", channelid = "natural_604" },
+                { channel = "坏", channelid = "a/b" },
+            } } },
+            { more = {} },
+        } },
+    })
+    Assert.len(ranks, 1)
+    Assert.eq(ranks[1].title, "月榜")
+    Assert.len(ranks[1].channels, 2)
+    Assert.eq(ranks[1].channels[2].id, "natural_604")
+    local books = Mapper.rankBooks({ data = { data = {
+        { novelId = "1", novelName = "甲", authorName = "乙", novelIntroShort = "<p>简介</p>" },
+        { novelname = "无号" },
+    } } })
+    Assert.len(books, 1)
+    Assert.eq(books[1].title, "甲")
+    Assert.eq(books[1].intro, "简介")
+    Assert.eq(books[1].authors, "乙")
 end
 
 do
@@ -94,6 +117,38 @@ do
         .. '<input name="cryptInfo" value="' .. enc(meta, "9942287.23.85927522.AcsRWK", 27, 11) .. '">'
         .. '<input name="content" value="' .. enc(body, "HqgOwYk179254410485927522", 12, 28) .. '"></div>'
     Assert.eq(require("source.jjwxc.vip").content(page), body)
+    -- 书号 + 章号为奇数时官方脚本换密钥（issue #78）。密文由 Node crypto 按脚本规则生成，
+    -- 不跟 Lua 实现共用派生，派生错了这里对不上。奇数章若仍是旧的点号密钥，也要能解开。
+    local odd = '<div id="contentvars"><input name="novelid" value="100"><input name="chapterid" value="1">'
+        .. '<input name="readerid" value="42"><input name="accessKey" value="Ab12">'
+        .. '<input name="cryptInfo" value="fuO73SNX9D4tRXsRYM3+AqBEUOk/rBNxSjkep0cnWPVHs/z7E3F5Lv4aD7VMrTOr0aFEh8aQNfh5YnvP6djkUhASTVDWdyOpNHzGhYFLPfE=">'
+        .. '<input name="content" value="lErz8EEQyFUYbBR62OfGFxuF2cmlnWeVhUZVe7FnX36I4WLn1A2qP2KisezEaSyHcvWsLD0HZys87HvdW/rPilJ2+znYbX2ls/Myl4wocCry6gXJjrFiENS688VyxfVezdvKwwwBVBUaY5CecSG2hrU+8W8ILu4uX31NgjgUFa0="></div>'
+    Assert.eq(require("source.jjwxc.vip").content(odd), body)
+    local odd_old = '<div id="contentvars"><input name="novelid" value="100"><input name="chapterid" value="1">'
+        .. '<input name="readerid" value="42"><input name="accessKey" value="Ab12">'
+        .. '<input name="cryptInfo" value="' .. enc(meta, "100.1.42.Ab12", 3, 9) .. '">'
+        .. '<input name="content" value="' .. enc(body, "HqgOwYk179254410442", 4, 18) .. '"></div>'
+    Assert.eq(require("source.jjwxc.vip").content(odd_old), body)
+    -- 现行 jjcontent.js：cryptInfo 是 DES，正文是固定窗口 AES。密文在这里用 Des/Aes 现算，不走 Vip 内部。
+    local Des = require("crypto.des")
+    local function turn(source, access)
+        local hex = md5(source)
+        local sum = 0
+        for i = 1, #access do sum = sum + access:byte(i) end
+        local off = sum % #hex
+        if off ~= 0 then hex = hex:sub(off + 1) .. hex:sub(1, off) end
+        return hex
+    end
+    local access, novel, chapter, reader = "Ab12Cd", "8718162", "19", "7"
+    local spun = turn(novel .. "." .. chapter .. "." .. reader .. "." .. access, access)
+    local info = Des.encryptBase64('{"key":"K1","time":1700000000}', spun:sub(-16, -9), spun:sub(1, 8))
+    spun = turn("K117000000007", access)
+    local content = Text.base64Encode(Aes.cbc_encrypt(body, spun:sub(1, 16), spun:sub(-16)))
+    local current = '<div id="contentvars"><input name="novelid" value="' .. novel .. '">'
+        .. '<input name="chapterid" value="' .. chapter .. '"><input name="readerid" value="' .. reader .. '">'
+        .. '<input name="accessKey" value="' .. access .. '"><input name="cryptInfo" value="' .. info .. '">'
+        .. '<input name="content" value="' .. content .. '"></div>'
+    Assert.eq(require("source.jjwxc.vip").content(current), body)
     -- 段缝：正文切成 c_ span，缝里的字挂在同页 <style> 的 :before/:after content 上（issue #67）。
     -- .c_zz 是同规则的配对类名（不在正文里），不得重复拼；\7f1d 是 CSS 十六进制转义。
     Assert.eq(Mapper.webContent([[<style>.c_aa:before, .c_zz:after{content:'缝1';} .c_bb:after{content:'\7f1d 2';}</style>]]
@@ -208,6 +263,12 @@ do
     local part2 = keystring:sub(start2 + 1, start2 + count2)
     local cipher2 = Hex.to_hex(Des.encrypt(plain, md5(part2 .. salt):sub(1, 8), md5(salt):sub(1, 8)))
     Assert.eq(Client.decryptBody(salt .. cipher2, "abd", keystring), plain)
+    local chapter = "甲<br>乙"
+    local chapter_cipher = Des.encryptBase64(chapter, "KW8Dvm2N", "1ae2c94b")
+    Assert.eq(Client.chapterText(chapter_cipher, nil), chapter)
+    Assert.eq(Client.chapterText(chapter_cipher, "jj"), chapter)
+    Assert.eq(Client.chapterText(chapter, nil), chapter)
+    Assert.is_nil(Client.chapterText("@@@@", "jj"))
 end
 
 do

@@ -1,20 +1,21 @@
 --[[--
 晋江 VIP 章网页（m.jjwxc.com/vip/<书>/<章>）正文解密。页面里正文是 #contentvars 的隐藏域，
-由官方 jjcontent 脚本在浏览器里解开；这里按脚本流程还原（jsver 20250926）：
+由官方 jjcontent.js 在浏览器里解开。现行脚本（jsver 不是 20220527 就自己报错）：
 
-1. s1 = md5("<novelid>.<chapterid>.<readerid>.<accessKey>")，AES-128-CBC 解 cryptInfo 得 base64(JSON{time,key})；
-2. s2 = md5(key .. time .. readerid)，同样解 content；
-   key / iv 都是摘要重复两遍（64 字符）里某个偏移起的 16 个字符；脚本里的偏移规则随请求变（只看到过
-   「accessKey 码点和 % 16」「+16」「key / iv 互换」等不同取法），所以不推规则，直接按解出内容的形状找：
-   CBC 第二块只依赖 key 和第一块密文，先逐偏移找 key，再逐偏移找 iv；
-3. 结果是 HTML 片段，多数页面经 encodeURIComponent，也有直接 UTF-8 的：`<br>` 分段，反爬字符写成 `&#xXXXX`（常缺分号）后跟 `&zwnj;`。
+1. s1 = md5("<novelid>.<chapterid>.<readerid>.<accessKey>") 的十六进制。按 accessKey 码点和
+   对 32 取余左旋，前 16 / 后 16 字符对调后各取 8 字节，DES-CBC 解 cryptInfo 得 JSON{time,key}；
+2. s2 = md5(key .. time .. readerid)，同样左旋（仍用 accessKey 的码点和），前 16 / 后 16 直接做
+   AES-128-CBC 解 content，这次不对调。
 
-脚本版本变了（jsver 不是 20250926）解不出来时返回 nil，调用方报错。
+这套解不开再退回旧页面：偶数章 AES 穷举窗口；奇数章（书号 + 章号）用
+md5("<accessKey>-<novelid>-<chapterid>-<readerid>") 左旋 33。正文仍是 AES。
+结果是 HTML 片段，多数经 encodeURIComponent，也有直接 UTF-8：`<br>` 分段。
 
 @module koplugin.book.source.jjwxc.vip
 --]]
 
 local Aes = require("crypto.aes")
+local Des = require("crypto.des")
 local Text = require("utils.text")
 local md5 = require("ffi/sha2").md5
 
@@ -64,6 +65,44 @@ function Vip.content(html)
             tostring(info ~= nil), tostring(content ~= nil))
     end
 
+    local function charSum(text)
+        local n = 0
+        for i = 1, #text do n = n + text:byte(i) end
+        return n
+    end
+    local function finish(text)
+        if text:find("^[%w%%%-_.!~*'()]+$") then return Text.urlDecode(text) end
+        return text
+    end
+
+    --- 现行脚本。cryptInfo 是 DES 解出的 JSON，不是旧页面那种再套一层 base64。
+    local function decryptCurrent()
+        local function turn(source)
+            local hex = md5(source)
+            local off = charSum(access) % #hex
+            if off ~= 0 then hex = hex:sub(off + 1) .. hex:sub(1, off) end
+            return hex
+        end
+        local spun = turn(novel .. "." .. chapter .. "." .. reader .. "." .. access)
+        local meta = Des.decryptBase64(info, spun:sub(-16, -9), spun:sub(1, 8))
+        local key, time = meta and meta:match('"key":"([^"]*)"'), meta and meta:match('"time":(%d+)')
+        if not (key and time) then return nil end
+        spun = turn(key .. time .. reader)
+        local ok, text = pcall(Aes.cbc_decrypt, Text.base64Decode(content), spun:sub(1, 16), spun:sub(-16))
+        if ok and looksText(text) then return finish(text) end
+    end
+    local current = decryptCurrent()
+    if current then return current end
+
+    --- 奇数章（书号 + 章号）的旧 cryptInfo 密钥。对不上时再走偶数那套搜索。
+    local function decryptOdd(data, access_key)
+        local digest = md5(access_key .. "-" .. novel .. "-" .. chapter .. "-" .. reader)
+        local shift = charSum(access_key) % 33
+        if shift ~= 0 then digest = digest:sub(shift + 1) .. digest:sub(1, shift) end
+        local ok, plain = pcall(Aes.cbc_decrypt, data, digest:sub(-16), digest:sub(1, 16))
+        if ok and plain:find("^[%w+/=]+$") then return plain end
+    end
+
     --- 在摘要的 32 个偏移里找出让密文解成 `shape` 的 key 和 iv，返回去填充后的明文。
     local function decrypt(data, source, shape)
         local digest = md5(source)
@@ -84,8 +123,14 @@ function Vip.content(html)
         end
     end
 
-    local meta = decrypt(Text.base64Decode(info), novel .. "." .. chapter .. "." .. reader .. "." .. access,
-        function(text) return text:find("^[%w+/=]+$") end)
+    local info_raw = Text.base64Decode(info)
+    local novel_n, chapter_n = tonumber(novel), tonumber(chapter)
+    local meta = novel_n and chapter_n and (novel_n + chapter_n) % 2 == 1
+        and decryptOdd(info_raw, access) or nil
+    if not meta then
+        meta = decrypt(info_raw, novel .. "." .. chapter .. "." .. reader .. "." .. access,
+            function(text) return text:find("^[%w+/=]+$") end)
+    end
     if not meta then return nil, "cryptInfo undecryptable, info_len=" .. #info end
     local params = Text.base64Decode(meta)
     local key, time = params:match('"key":"([^"]*)"'), params:match('"time":(%d+)')
@@ -93,8 +138,7 @@ function Vip.content(html)
     if not (key and time) then return nil, "meta without key/time, ver=" .. tostring(ver) end
     local text = decrypt(Text.base64Decode(content), key .. time .. reader, looksText)
     if not text then return nil, "content undecryptable, ver=" .. tostring(ver) .. " content_len=" .. #content end
-    if text:find("^[%w%%%-_.!~*'()]+$") then return Text.urlDecode(text) end
-    return text
+    return finish(text)
 end
 
 return Vip

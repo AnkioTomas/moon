@@ -129,32 +129,51 @@ function Source:searchAsync(keyword, cb)
     end)
 end
 
-local RANKS = {
-    { "5", _("月度榜") }, { "6", _("季度榜") }, { "30", _("半年榜") }, { "58", _("完结金榜") },
-    { "64", _("总分榜") }, { "42", _("霸王票总榜") }, { "44", _("读者栽培榜") },
-}
-
---- 书城浏览：榜单 / 频道两行 chip，节点是「榜单号:频道序号」，缺省月度榜第一个频道。
---- 榜单页一次给齐各频道各 20 本，频道 chip 由页面解析得出；这里的书只有书名和书号。
+--- 书城浏览：榜单 / 频道两行 chip，节点是「榜单序号:频道序号」（从 1 起），缺省月榜言情。
+--- 榜单名和频道来自书城首页；书按页拉到 opts.limit。
 ---@param opts { node?: string, limit?: integer }
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:browseAsync(opts, cb)
-    local rank, idx = (opts.node or RANKS[1][1] .. ":1"):match("^(%d+):(%d+)$")
-    return Web.rankAsync(rank, function(sections, err)
-        if not sections then
-            cb(nil, err)
-            return
+    local handle = {}
+    -- 首页缓存命中时回调是下一拍，不会在赋值前跑完；这里仍按同步回调记步，避免把已换上的翻页句柄盖掉。
+    local step = 0
+    local function load(ranks)
+        step = step + 1
+        if #ranks == 0 then cb(nil, _("晋江榜单无法解析")); return end
+        local rank_s, ch_s = (opts.node or "1:1"):match("^(%d+):(%d+)$")
+        local rank_i = tonumber(rank_s) or 1
+        if not ranks[rank_i] then rank_i = 1 end
+        local channels = ranks[rank_i].channels
+        local ch_i = tonumber(ch_s) or 1
+        if not channels[ch_i] then ch_i = 1 end
+        local node = rank_i .. ":" .. ch_i
+        local rank_chips, channel_chips = {}, {}
+        for i, rank in ipairs(ranks) do
+            local ci = rank.channels[ch_i] and ch_i or 1
+            rank_chips[#rank_chips + 1] = { id = i .. ":" .. ci, title = rank.title }
         end
-        local ranks, channels = {}, {}
-        for _idx, row in ipairs(RANKS) do ranks[#ranks + 1] = { id = row[1] .. ":" .. idx, title = row[2] } end
-        for i, section in ipairs(sections) do
-            channels[#channels + 1] = { id = rank .. ":" .. i, title = (section.title:gsub("排行$", "")) }
+        for i, ch in ipairs(channels) do
+            channel_chips[#channel_chips + 1] = { id = rank_i .. ":" .. i, title = ch.title }
         end
-        local node = rank .. ":" .. idx
-        local section = sections[tonumber(idx)] or sections[1]
-        cb({ data = section.books, groups = { Browse.group(ranks, node), Browse.group(channels, node) } })
+        local page_size = Client.RANK_PAGE
+        handle.inner = Browse.pages(function(page, done)
+            return Client.rankPageAsync(channels[ch_i].id, (page - 1) * page_size, function(wire, err)
+                if not wire then done(nil, err); return end
+                local books = Mapper.rankBooks(wire)
+                done(books, nil, #books >= page_size)
+            end)
+        end, opts.limit or 60, { Browse.group(rank_chips, node), Browse.group(channel_chips, node) }, cb)
+    end
+    local first = Client.storeHomeAsync(function(wire, err)
+        if not wire then cb(nil, err); return end
+        load(Mapper.storeRanks(wire))
     end)
+    if step == 0 then handle.inner = first end
+    function handle.cancel()
+        if handle.inner then handle.inner:cancel() end
+    end
+    return handle
 end
 
 function Source:getDetailAsync(identity, cb)
