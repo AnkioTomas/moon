@@ -35,6 +35,10 @@ function Setting.rows(plugin)
             title = _("本地书库目录"), status = path ~= "" and path or _("未设置"), status_on = path ~= "",
             callback = Setting.open })
     end
+    local function repaint()
+        local desktop = plugin and plugin.desktop
+        if desktop and desktop.settings_overlay then desktop.settings_overlay:updateView() end
+    end
     local function edit(key, title, password)
         local cfg = require("utils.settings").getSource(SOURCE_ID)
         require("ui.themes.widgets.input"):new{
@@ -45,7 +49,7 @@ function Setting.rows(plugin)
                 cfg[key] = Text.trim(text)
                 require("utils.settings").saveSource(SOURCE_ID, cfg)
                 require("source.registry").invalidate()
-                if plugin and plugin.desktop then plugin.desktop:updateView() end
+                repaint()
             end,
         }:show()
     end
@@ -84,8 +88,11 @@ function Setting.rows(plugin)
                 Settings.saveSource(SOURCE_ID, cfg)
                 -- 关闭：目录派生的分类 / 系列一次清掉，之后只由手动编辑设置；打开：下次扫盘按目录重算。
                 if on then require("book.books_db").clearCategories(SOURCE_ID) end
-                -- 重建源实例并通知桌面，桌面重开时照常后台扫盘（指纹快路径），分类 / 系列不一致会整轮写库。
-                require("source.registry").reload()
+                -- cfg 是源实例的共享表，改完即可见。只重扫本地书，不要 Registry.reload：
+                -- 那会广播换源，设置页把叠层全部关掉，人还停在这一行上就被扔回设置根页。
+                local desktop = plugin and plugin.desktop
+                if desktop and not desktop.closed then require("desktop.sync").rescan(desktop) end
+                repaint()
             end })
     end
     --- 上传本地书到 WebDAV（默认开）；关了只同步进度、笔记和统计，本地书留在本地。
@@ -100,6 +107,7 @@ function Setting.rows(plugin)
             callback = function()
                 cfg.webdav_upload_local = not on
                 Settings.saveSource(SOURCE_ID, cfg)
+                repaint()
             end })
     end
     return {
