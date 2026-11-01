@@ -184,7 +184,7 @@ do
     }
     local err
     Client.shelfAsync(function(_v, e) err = e end)
-    Assert.eq(err, "阅读服务器登录已失效，请检查账号密码")
+    Assert.matches(err, "阅读服务地址")
     Assert.is_true(Auth.expired("legado"))
     Auth.reset()
 

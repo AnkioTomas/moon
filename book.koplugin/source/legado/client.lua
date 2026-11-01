@@ -138,7 +138,7 @@ local function authed(go, cb)
     local user, password = credentials()
     if not user then return go(nil, cb) end
     local key = Client.base() .. "\0" .. user .. "\0" .. password
-    local expired_msg = _("阅读服务器登录已失效，请检查账号密码")
+    local expired_msg = _("打开「设置 → 书库 → 账号 → 开源阅读 → 阅读服务地址」。账号和密码重新填一遍，地址不用改，点「保存」。阅读 App 里如果改过密码，这里填新密码。")
     ---@type boolean, CancelHandle|nil
     local cancelled, job = false, nil
     local function run(retry)
