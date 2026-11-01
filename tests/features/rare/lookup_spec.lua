@@ -523,4 +523,49 @@ do
     os.execute("rm -rf '" .. dir .. "'")
 end
 
+-- 标题栏左上角的笔：改正在查的词，就地重查，空白留下原文
+do
+    local hl = { selected_text = { text = "彘" }, is_word_selection = true }
+    ui.highlight = hl
+    local p = Lookup.open{ ui = ui, text = "彘", from_highlight = true, context = { sentence = "杀彘", paragraph = "" } }
+    local queried = sdcv_word
+    local pen
+    for _idx, button in ipairs(Kit.buttons(p[1])) do
+        if button.icon == "ink_pen" then pen = button end
+    end
+    Assert.not_nil(pen, "标题栏左上角是笔")
+    local opened, toasted
+    package.loaded["ui.themes.widgets.input"] = nil
+    package.preload["ui.themes.widgets.input"] = function()
+        return { new = function(_, opts)
+            opened = opts
+            return { show = function() end }
+        end }
+    end
+    package.loaded["ui.themes.widgets.toast"] = nil
+    package.preload["ui.themes.widgets.toast"] = function()
+        return { new = function(_, opts)
+            toasted = opts.text
+            return { show = function() end }
+        end }
+    end
+    pen.callback()
+    Assert.eq(opened.fields[1].text, "彘")
+    Assert.eq(opened.fields[1].height, 120, "编辑框固定多行，不按一个词收成一行")
+    Assert.eq(opened.title, "编辑选中的文字")
+    opened.callback("   ")
+    Assert.eq(toasted, "选中的文字不能为空")
+    Assert.eq(p.text, "彘")
+    Assert.eq(sdcv_word, queried, "空白不重查")
+    opened.callback("  猪  ")
+    Assert.eq(p.text, "猪")
+    Assert.eq(p, Lookup.current, "就地改词，不关窗")
+    Assert.eq(sdcv_word, "猪")
+    Assert.eq(hl.selected_text.text, "猪")
+    Assert.is_false(hl.is_word_selection)
+    Assert.is_true(table.concat(Kit.texts(p[1]), "\n"):find("猪", 1, true) ~= nil, "标题换成新词")
+    ui.highlight = nil
+    p:close()
+end
+
 return true
