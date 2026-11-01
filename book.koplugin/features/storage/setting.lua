@@ -182,7 +182,7 @@ local function itemInUse(desktop, kind, key)
         return require("features.ime.registry").current().dictionary == key
     end
     if kind == "rare" then return require("features.rare.catalog").enabled(key) end
-    if key == "plugin-update.zip" then return require("features.update")._job ~= nil end
+    if key == "plugin-update.zip" then return require("features.update").busy() end
     return require("features.ime.download").downloading() == true
 end
 
@@ -207,12 +207,19 @@ end
 ---@param done fun(ok: boolean)
 local function deleteItem(kind, key, done)
     local Paths = require("utils.paths")
+    local lfs = require("libs/libkoreader-lfs")
+    --- 删一个文件；以「文件已不在」为成功，失败不假装成功。
+    local function gone(path)
+        os.remove(path)
+        return lfs.attributes(path, "mode") == nil
+    end
     if kind == "fonts" then
-        require("ui.fonts").removeDownloaded(key)
+        local Fonts = require("ui.fonts")
+        Fonts.removeDownloaded(key)
         local dir = Paths.fontsDir()
-        os.remove(dir .. "/" .. key .. ".otf")
-        os.remove(dir .. "/" .. key .. ".ttc")
-        done(true)
+        local ok = gone(dir .. "/" .. key .. ".otf")
+        ok = gone(dir .. "/" .. key .. ".ttc") and ok
+        done(ok and Fonts.wereadPath(key) == nil)
         return
     end
     if kind == "dict" then
@@ -220,35 +227,35 @@ local function deleteItem(kind, key, done)
         if known then require("features.ime.registry").reset(key) end
         local path = key == "pinyin" and Paths.root() .. "/dictionary.sqlite3"
             or Paths.root() .. "/dictionary-" .. key .. ".sqlite3"
-        os.remove(path)
-        os.remove(path .. "-wal")
-        os.remove(path .. "-shm")
-        if known then
+        local ok = gone(path)
+        ok = gone(path .. "-wal") and ok
+        ok = gone(path .. "-shm") and ok
+        if ok and known then
             local saved = require("utils.settings").get("features.ime")
             if saved.ime_dict_built_at then saved.ime_dict_built_at[key] = nil end
             require("utils.settings").save("features.ime")
         end
-        done(true)
+        done(ok)
         return
     end
     if kind == "rare" then
-        require("features.rare.catalog").delete(key)
-        done(true)
+        local Catalog = require("features.rare.catalog")
+        Catalog.delete(key)
+        done(not Catalog.installed(key))
         return
     end
     local root = Paths.root() .. "/"
     local body, part = require("features.storage.usage").leftoverTargets(key)
-    os.remove(root .. part)
+    local ok = gone(root .. part)
     if not body then
-        done(true)
+        done(ok)
         return
     end
     if body:sub(-3) == ".dl" then
-        require("features.storage.usage").removeAsync(root .. body, done)
+        require("features.storage.usage").removeAsync(root .. body, function(removed) done(removed and ok) end)
         return
     end
-    os.remove(root .. body)
-    done(true)
+    done(gone(root .. body) and ok)
 end
 
 --- 字体 / 词库 / 生僻字 / 下载残留按条列出。正在用的只展示，其余确认后删除。
@@ -372,12 +379,6 @@ local function sections(desktop)
     out[#out + 1] = { title = _("设备"), rows = device }
     out[#out + 1] = { title = title, rows = rows }
     return out
-end
-
----@param desktop BookDesktop
----@return BookSettingEntry[]
-function Setting.entries(_desktop)
-    return {}
 end
 
 require("utils.extension").add("setting.device_section", {

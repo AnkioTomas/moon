@@ -29,7 +29,7 @@ Assert.eq(items[3].title, "电池")
 Assert.eq(type(items[1].status), "function")
 Assert.eq(type(items[2].status), "function")
 Assert.eq(type(items[3].status), "function")
-Assert.eq(#require("features.storage.setting").entries({}), 0)
-Assert.eq(#require("features.monitor.setting").entries({}), 0)
+Assert.is_nil(require("features.storage.setting").entries)
+Assert.is_nil(require("features.monitor.setting").entries)
 
 return true

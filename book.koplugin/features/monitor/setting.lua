@@ -12,12 +12,6 @@ local Setting = {}
 
 local REFRESH_SECONDS = 10
 
----@param desktop BookDesktop
----@return BookSettingEntry[]
-function Setting.entries(_desktop)
-    return {}
-end
-
 require("utils.extension").add("setting.device_section", {
     id = "monitor",
     order = 20,
@@ -27,7 +21,7 @@ require("utils.extension").add("setting.device_section", {
         local mem = require("features.monitor.procs").memory()
         if not mem then return nil end
         local friendly = require("util").getFriendlySize
-        local function kb(n) return friendly(n * 1024) or (tostring(n) .. " KB") end
+        local function kb(n) return friendly(n * 1024) end
         return require("ffi/util").template(_("%1 / %2"), kb(mem.avail), kb(mem.total))
     end,
     refresh_seconds = REFRESH_SECONDS,
