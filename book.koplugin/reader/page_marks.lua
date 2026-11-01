@@ -436,9 +436,9 @@ local function drawGroup(group, bb, delta, thick, painted)
     if group.entry.layer.paint then group.entry.layer:paint(bb) end
 end
 
---- 作为 view module 被调用；每个图层各自经 guard 隔离，一层画坏不影响其它层。
+---@param self table
 ---@param bb any Blitbuffer
-function PageMarks:paintTo(bb)
+local function paint(self, bb)
     local taken = highlightBoxes(self.ui)
     local batch = {}
     for _idx, entry in ipairs(self.layers) do
@@ -451,6 +451,14 @@ function PageMarks:paintTo(bb)
         Guard.paint(group.entry.id .. ".paintTo", drawGroup, group, bb, delta, thick, painted)
     end
     self.painted = painted
+end
+
+--- 作为 view module 被调用。每个图层各自经 guard 隔离，一层画坏不影响其它层；
+--- 取框、帧缓冲像素采样这些公共步骤抛错时整个标记层本进程停画，不能带崩每次重绘。
+---@param bb any Blitbuffer
+function PageMarks:paintTo(bb)
+    self.painted = {}
+    Guard.paint("book_page_marks.paintTo", paint, self, bb)
 end
 
 --- 点按：只认上一帧实际画出的段。
