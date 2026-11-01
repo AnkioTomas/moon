@@ -103,3 +103,27 @@ Assert.eq(dirty[1].region, slider.dimen)
 Assert.is_true(slider:onTap(nil, { pos = { x = 165, y = 20 } }))
 Assert.len(changes, 1)
 Assert.len(dirty, 1)
+
+-- 亮度条最左端是 1%，不是 0。bar 起点 x = 72 + 8。
+Assert.is_true(slider:onTap(nil, { pos = { x = 80, y = 20 } }))
+Assert.eq(changes[2].fraction, 0.01)
+Assert.eq(slider.value, 1)
+Assert.eq(slider.value_label.text, "1%")
+
+local warmth_changes = {}
+local warmth = SliderRow:new{
+    width = 300,
+    height = 42,
+    kind = "warmth",
+    title = "冷暖色调",
+    value = 25,
+    show_parent = parent,
+    on_level = function(kind, fraction)
+        warmth_changes[#warmth_changes + 1] = { kind = kind, fraction = fraction }
+        return true
+    end,
+}
+Assert.is_true(warmth:onTap(nil, { pos = { x = 80, y = 20 } }))
+Assert.eq(warmth_changes[1].kind, "warmth")
+Assert.eq(warmth_changes[1].fraction, 0)
+Assert.eq(warmth.value, 0)
