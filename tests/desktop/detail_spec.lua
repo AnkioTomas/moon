@@ -615,6 +615,36 @@ end
 desktop.detail[1]:paintTo(Kit.canvas(), 0, 0)
 desktop.detail:close()
 
+-- 全本书有简介：不再为简介预扣高度，刚好放下时路径还在；再矮则丢掉前面的行，路径留下。
+Detail.open(desktop, "library", {
+    source_id = "local", stable_id = "/books/长书.epub", path = "/books/长书.epub", title = "长书",
+    filesize = 2048, inserted_at = added, intro = string.rep("这是一段很长的简介。", 40),
+})
+page = desktop.detail
+local tight_owner = require("desktop.detail.common").bookOwnerSource(page.book)
+local function has_text(root, needle)
+    for _idx, text in ipairs(Kit.texts(root)) do
+        if text:find(needle, 1, true) then return true end
+    end
+    return false
+end
+local full_h = page:buildBody(520, 2000, tight_owner):getSize().h
+local fitted = page:buildBody(520, full_h, tight_owner)
+Assert.is_true(has_text(fitted, "简介"))
+Assert.is_true(has_text(fitted, "来源"))
+Assert.is_true(has_text(fitted, "/books/长书.epub"), "有简介且刚好放下时路径还在")
+local dropped_earlier
+for h = full_h, full_h - 200, -10 do
+    local body = page:buildBody(520, h, tight_owner)
+    if not has_text(body, "来源") then
+        dropped_earlier = h
+        Assert.is_true(has_text(body, "/books/长书.epub"), "前面的行让掉以后路径还在")
+        break
+    end
+end
+Assert.is_true(dropped_earlier ~= nil, "高度收紧后前面的信息行会让位")
+page:close()
+
 -- 书城：补拉完整详情，关窗时取消在飞请求；底栏只有「加入书库」，简介直下。
 local detail_cb, detail_cancelled = nil, false
 local install_cb, install_progress, installs = nil, nil, 0

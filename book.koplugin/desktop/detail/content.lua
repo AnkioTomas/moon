@@ -71,7 +71,7 @@ local function infoItems(book, owner)
     return items
 end
 
---- 两列「标签 值」表；独占项单独一行。超出 max_h 的行从末尾整行丢弃。
+--- 两列「标签 值」表；独占项单独一行。超出 max_h 时留下最后一行，前面的行从末尾丢。
 --- item[4] 为真时点按弹出全文（长路径）。
 ---@param items table[]
 ---@param w number 物理像素
@@ -109,14 +109,26 @@ local function infoTable(items, w, max_h)
         end
     end
     local table_w = VerticalGroup:new{ align = "left" }
-    local used = 0
-    for _idx, row in ipairs(rows) do
-        local need = row:getSize().h + (used > 0 and gap or 0)
-        if used + need > max_h then break end
+    local function append(row, used)
         if used > 0 then table_w[#table_w + 1] = VerticalSpan:new{ width = gap } end
         table_w[#table_w + 1] = row
-        used = used + need
+        return used + row:getSize().h + (used > 0 and gap or 0)
     end
+    -- 最后一行（整本书的路径）单独占高。它自己放得下就先扣掉，前面的行装不下再丢。
+    local last = rows[#rows]
+    local hold, count = 0, #rows
+    if last and count > 1 and last:getSize().h <= max_h then
+        hold = last:getSize().h + gap
+        count = count - 1
+    end
+    local used = 0
+    for i = 1, count do
+        local row = rows[i]
+        local need = row:getSize().h + (used > 0 and gap or 0)
+        if used + need + hold > max_h then break end
+        used = append(row, used)
+    end
+    if hold > 0 then append(last, used) end
     return table_w
 end
 
@@ -448,7 +460,7 @@ function Detail:buildIntro(w, max_h)
 end
 
 --- 正文：头部，下接各节（指标带 / 简介 / 书籍信息），节间细线分隔。
---- 书籍信息先给简介留出几行再排，放不下的行从末尾丢；简介吃剩下的高度。
+--- 书籍信息按实际行高排进剩余高度，不为简介预扣；简介用剩下的高度。
 ---@param w number 物理像素
 ---@param h number 可用高度
 ---@param owner table|nil 属主源
@@ -471,8 +483,7 @@ function Detail:buildBody(w, h, owner, primary)
     if #items > 0 then
         local title = Common.sectionTitle(_("书籍信息"), w)
         local title_h = title:getSize().h + Theme.px(t.space.xs)
-        local reserve = Book.desc(self.book) ~= "" and sep_h + Theme.px(t.font.body) * 6 or 0
-        local rows = infoTable(items, w, h - used - sep_h - title_h - reserve)
+        local rows = infoTable(items, w, h - used - sep_h - title_h)
         if #rows > 0 then
             info = VerticalGroup:new{ align = "left", title, VerticalSpan:new{ width = Theme.px(t.space.xs) }, rows }
             used = used + sep_h + info:getSize().h
