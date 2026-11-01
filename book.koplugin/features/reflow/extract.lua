@@ -227,6 +227,11 @@ end
 ---@return { cancel: fun() }
 function Extract.run(ui, cb, on_progress, opts)
     local document = ui.document
+    -- 全书分析会在休眠后重跑，书可能已经关了。没有文档就没有字，别把空引用当成崩溃。
+    if not document then
+        cb(nil, _("文档已关闭"))
+        return { cancel = function() end }
+    end
     local rolling = ui.rolling ~= nil
     local count = document:getPageCount()
     -- 末页 gotoPage 会搬走阅读位置，收尾时放回（仅逐页末页路径会挪）。

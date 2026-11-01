@@ -77,6 +77,13 @@ local function pagingUi(lines_by_page)
     return { document = doc, paging = {} }
 end
 
+-- 进来时文档已经没了（休眠后续跑全书分析）：不崩，按关闭回报
+do
+    local text, err = run({})
+    Assert.is_nil(text)
+    Assert.eq(err, "文档已关闭")
+end
+
 -- 流式：有 DOM 接口时整棵倒出，不再逐页；剥标签后按行落盘
 do
     local ui = rollingUi(3, { "第一行\n重复行", "重复行\n第二行", "第三行" })
