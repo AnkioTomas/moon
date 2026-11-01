@@ -35,6 +35,8 @@ Assert.is_nil(dialog:getFocusableWidgetXY(a))
 Assert.eq(dialog.frames[1].style.border, 1)
 Assert.eq(dialog.frames[1].style.bg, 0xFF)
 Assert.eq(dialog.frames[1].style.border_color, 0x00)
+Assert.eq(dialog.frames[1].style.radius, 16, "输入框用对话框圆角，不套胶囊")
+Assert.eq(dialog.frames[2].style.radius, 16, "多行同样，高度仍由字段决定")
 Assert.eq(dialog.frames[2].style.border_color, 0x99)
 
 -- 贴顶给键盘让位。

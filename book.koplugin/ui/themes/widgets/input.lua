@@ -108,7 +108,8 @@ function Input:init()
                 bg = t.color.page,
                 border = math.max(1, t.control.border),
                 border_color = i == 1 and t.color.ink or t.color.rule,
-                radius = t.control.radius,
+                -- 胶囊半径是给矮按钮的。输入框随文字长高，套上会变成半圆，角外还原把上下行裁掉。
+                radius = math.min(t.control.radius, t.dialog.radius),
             },
             padding = pad,
             width = inner,
