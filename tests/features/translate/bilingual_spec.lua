@@ -77,18 +77,6 @@ do
     require("ffi/util").purgeDir(Paths.bookWorkDir(identity.stable_id, identity.source_id))
 end
 
-local function sizes(list)
-    local out = {}
-    for i, batch in ipairs(list) do out[i] = #batch end
-    return table.concat(out, ",")
-end
-
--- 分批：按段数上限切；超字符上限另起一批；单段超长也自成一批。
-Assert.eq(sizes(Bilingual._batches({ "a", "b", "c", "d", "e" }, 2, 100)), "2,2,1")
-Assert.eq(sizes(Bilingual._batches({ "aaaa", "bbbb", "cc" }, 10, 6)), "1,2")
-Assert.eq(sizes(Bilingual._batches({ string.rep("x", 50), "y" }, 10, 6)), "1,1")
-Assert.eq(sizes(Bilingual._batches({}, 10, 6)), "")
-
 local dir = require("support.config").dir() .. "/bilingual_spec"
 os.execute("rm -rf '" .. dir .. "' && mkdir -p '" .. dir .. "'")
 
@@ -109,6 +97,34 @@ local function read(path)
     f:close()
     return data
 end
+
+-- 分批：按段数上限切；超字符上限另起一批；单段超长也自成一批。读到解不开的行就停并报原因。
+local function pendingSizes(lines, size, chars)
+    local path = dir .. "/pending.jsonl"
+    write(path, table.concat(lines, "\n") .. (#lines > 0 and "\n" or ""))
+    local next_batch, close, open_err, corrupt = Bilingual._pendingBatches(path, size, chars)
+    Assert.is_nil(open_err)
+    local out = {}
+    while true do
+        local batch = next_batch()
+        if not batch then break end
+        out[#out + 1] = #batch
+    end
+    close()
+    return table.concat(out, ","), corrupt()
+end
+local function jsons(list)
+    local out = {}
+    for i, text in ipairs(list) do out[i] = require("support.json_stub").encode(text) end
+    return out
+end
+Assert.eq(pendingSizes(jsons({ "a", "b", "c", "d", "e" }), 2, 100), "2,2,1")
+Assert.eq(pendingSizes(jsons({ "aaaa", "bbbb", "cc" }), 10, 6), "1,2")
+Assert.eq(pendingSizes(jsons({ string.rep("x", 50), "y" }), 10, 6), "1,1")
+Assert.eq(pendingSizes({}, 10, 6), "")
+local sizes_bad, bad = pendingSizes({ '"a"', "{broken", '"c"' }, 10, 100)
+Assert.eq(sizes_bad, "1", "坏行之前的段照常成批，之后不再读")
+Assert.matches(bad, "pending file corrupt")
 
 local SOURCE = '<?xml version="1.0" encoding="UTF-8"?>\n<FictionBook><body><section>'
     .. "<title><p>Chapter</p></title><p>Hello</p><p>World</p><p>Hello</p></section></body></FictionBook>"
