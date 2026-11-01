@@ -7,12 +7,24 @@ package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["json"] = function() return require("support.json_stub") end
 package.loaded["json"] = nil
 
--- 子进程同步跑完。
+-- 子进程同步跑完。回传走真正的 worker 帧，待译原文塞进结果里会在这里失败。
+local job_frames = {}
 package.preload["workers.job"] = function()
+    local Protocol = require("workers.protocol")
     return {
         run = function(worker, opts)
             local ok, result = pcall(worker)
-            if ok then opts.on_done(result) else opts.on_failed(result) end
+            if not ok then
+                opts.on_failed(result)
+                return { cancel = function() end }
+            end
+            local framed, frame = pcall(Protocol.encode, { type = "done", result = result })
+            if not framed then
+                opts.on_failed(frame)
+                return { cancel = function() end }
+            end
+            job_frames[#job_frames + 1] = { name = opts.name, bytes = #frame }
+            opts.on_done(result)
             return { cancel = function() end }
         end,
     }
@@ -191,11 +203,42 @@ local cancelling = input("cancel")
 local handle4, _r4, results4 = start(cancelling)
 write(cancelling.dest .. ".part", "half")
 Assert.len(requests, 1)
+Assert.not_nil(read(cancelling.cache .. ".pending"), "分析后待译原文在文件里")
 handle4.cancel()
 Assert.is_true(requests[1].cancelled)
 requests[1].cb({ "你好", "世界" })
 Assert.len(results4, 0, "取消后应答不再结束任务")
 Assert.is_nil(read(cancelling.dest .. ".part"))
+Assert.is_nil(read(cancelling.cache .. ".pending"))
+
+-- 待译原文不进 worker 帧：整本书的段落超过协议 4MB 时，塞进结果会直接失败。
+requests = {}
+job_frames = {}
+local big = input("big")
+local paras = {}
+for i = 1, 200 do
+    paras[i] = "<p>Paragraph " .. i .. " says something distinct.</p>"
+end
+write(big.source, '<?xml version="1.0" encoding="UTF-8"?>\n<FictionBook><body><section>'
+    .. table.concat(paras) .. "</section></body></FictionBook>")
+local _hb, _rb, results_b = start(big)
+Assert.eq(job_frames[1].name, "bilingual.collect")
+Assert.is_true(job_frames[1].bytes < 2000, "collect frame " .. job_frames[1].bytes)
+Assert.eq(requests[1].texts[1], "Paragraph 1 says something distinct.")
+Assert.len(requests[1].texts, 40)
+local got, last = 0, nil
+while #requests > 0 do
+    local req = table.remove(requests, 1)
+    got = got + #req.texts
+    last = req.texts[#req.texts]
+    local translated = {}
+    for i = 1, #req.texts do translated[i] = "译" end
+    req.cb(translated)
+end
+Assert.eq(got, 200)
+Assert.eq(last, "Paragraph 200 says something distinct.")
+Assert.is_true(results_b[1].ok)
+Assert.is_nil(read(big.cache .. ".pending"))
 
 -- 入口：入后台任务队列（每本书一个 key，可取消、可转后台）；正在跑时再点入口只跟随进度
 do
