@@ -74,15 +74,7 @@ local function workDir(identity)
     return require("utils.paths").bookWorkDir(identity.stable_id, identity.source_id) .. "/bilingual"
 end
 
----@param path string
----@return string|nil
-local function readFile(path)
-    local f = io.open(path, "rb")
-    if not f then return nil end
-    local data = f:read("*a")
-    f:close()
-    return data
-end
+local readFile = require("utils.fs").read
 
 --- 写临时文件再改名，读的一方不会看到半截文件。
 ---@param path string
@@ -245,43 +237,27 @@ local function batchIterator(read, size, chars)
     end
 end
 
----@param texts string[]
----@param size integer
----@param chars integer
----@return string[][]
-local function batches(texts, size, chars)
-    local i = 1
-    local next_batch = batchIterator(function()
-        local text = texts[i]
-        i = i + 1
-        return text
-    end, size, chars)
-    local out = {}
-    while true do
-        local batch = next_batch()
-        if not batch then return out end
-        out[#out + 1] = batch
-    end
-end
-
 --- 主进程按批读 pending 文件。打不开时第三返回值是原因，前两个是空操作。
+--- 读到解不开的行就停止读取，第四返回值（读完后调用）给出原因；不能把没译的段当成已完成。
 ---@param path string
 ---@param size integer
 ---@param chars integer
 ---@return fun(): string[]|nil
 ---@return fun()
 ---@return string|nil
+---@return fun(): string|nil
 local function pendingBatches(path, size, chars)
     local f, open_err = io.open(path, "rb")
-    if not f then return function() return nil end, function() end, open_err end
+    if not f then return function() return nil end, function() end, open_err, function() return nil end end
     local closed = false
+    local corrupt = nil
     local function close()
         if closed then return end
         closed = true
         f:close()
     end
     local function read()
-        if closed then return nil end
+        if closed or corrupt then return nil end
         while true do
             local line = f:read("*l")
             -- 空行是 ""，只有 nil 才是读完。
@@ -289,10 +265,12 @@ local function pendingBatches(path, size, chars)
             if line ~= "" then
                 local ok, text = pcall(JSON.decode, line)
                 if ok and type(text) == "string" then return text end
+                corrupt = "pending file corrupt: " .. path
+                return nil
             end
         end
     end
-    return batchIterator(read, size, chars), close
+    return batchIterator(read, size, chars), close, nil, function() return corrupt end
 end
 
 ---@class BilingualInput
@@ -372,7 +350,7 @@ local function task(input)
 
         report(_("正在分析全书段落"))
         job("bilingual.collect", function() return collect(input) end, function(found)
-            local next_batch, close, open_err = pendingBatches(pendingPath(input), engine.size, engine.chars)
+            local next_batch, close, open_err, corrupt = pendingBatches(pendingPath(input), engine.size, engine.chars)
             if open_err then return finish({ ok = false, err = open_err }) end
             close_pending = close
             local inflight, done_reading = 0, false
@@ -383,6 +361,7 @@ local function task(input)
                     local texts = next_batch()
                     if not texts then
                         done_reading = true
+                        if corrupt() then return finish({ ok = false, err = corrupt() }) end
                         break
                     end
                     inflight = inflight + 1
@@ -676,8 +655,8 @@ end
 Bilingual.switchTo = switchTo
 Bilingual.ENGINES = ENGINES
 Bilingual._appendCache = appendCache
-Bilingual._batches = batches
 Bilingual._task = task
+Bilingual._pendingBatches = pendingBatches
 Bilingual._originalXPointer = originalXPointer
 
 return Bilingual
