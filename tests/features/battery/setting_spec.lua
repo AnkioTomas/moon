@@ -36,6 +36,7 @@ Assert.eq(#Setting.entries({}), 0)
 
 local item = Ext.list("setting.device_section")[1]
 Assert.eq(item.id, "battery")
+Assert.eq(item.order, 30)
 Assert.eq(item.icon, "battery_android_full")
 Assert.eq(item.title, "电池")
 Assert.eq(item.refresh_seconds, 15)

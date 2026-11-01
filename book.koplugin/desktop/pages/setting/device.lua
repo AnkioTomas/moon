@@ -86,7 +86,7 @@ local function screenText(screen)
     return string.format("%d×%d", w, h)
 end
 
---- 关于弹窗：简介、作者、许可证、GitHub、两个群。每行文案都带图标。
+--- 关于弹窗：简介、作者、许可证、GitHub。每行文案都带图标。
 local function showAbout()
     require("ui.themes.widgets.sheet"):new{
         title = _("关于"),
@@ -114,18 +114,12 @@ local function showAbout()
             { icon = "link", text = _("打开 GitHub"), callback = function()
                 openExternal(_("打开 GitHub"), REPO_URL)
             end },
-            { icon = "qr_code", text = _("书友交流群"), callback = function()
-                openExternal(_("书友交流群"), QQ_GROUP_URL)
-            end },
-            { icon = "bug_report", text = _("Bug 反馈群"), callback = function()
-                openExternal(_("Bug 反馈群"), BUG_GROUP_URL)
-            end },
             { icon = "close", text = _("关闭") },
         },
     }:show()
 end
 
---- 我的设备：本机事实（每行有图标）+ 版本（点按检查更新）+ 关于弹窗。
+--- 我的设备：本机事实（每行有图标）+ 版本（点按检查更新）+ 两个群 + 关于弹窗。
 ---@param desktop table
 ---@return BookThemeSection[]
 function Device.infoSections(desktop)
@@ -139,16 +133,24 @@ function Device.infoSections(desktop)
     if type(fw) == "string" and fw ~= "" and fw ~= "none" then
         rows[#rows + 1] = fact("memory", _("固件"), fw)
     end
+    local pages = {}
     for _, item in ipairs(require("utils.extension").list("setting.device_section")) do
+        pages[#pages + 1] = item
+    end
+    table.sort(pages, function(a, b) return (a.order or 0) < (b.order or 0) end)
+    for _, item in ipairs(pages) do
         rows[#rows + 1] = function(iw)
             return Row.widget({
                 width = iw, kind = "nav", icon = item.icon, title = item.title,
                 callback = function()
+                    local on_right = item.right_callback
                     require("desktop.pages.setting.overlay").push(desktop, {
                         id = item.id,
                         title = item.title,
                         refresh_seconds = item.refresh_seconds,
-                        sections = item.sections,
+                        right_icon = item.right_icon,
+                        right_callback = on_right and function() on_right(desktop) end or nil,
+                        sections = function() return item.sections(desktop) end,
                     })
                 end,
             })
@@ -168,6 +170,18 @@ function Device.infoSections(desktop)
                 chevron = check ~= nil,
                 callback = check and function() check(root) end or nil,
                 hold_callback = check and function() check(root, true) end or nil,
+            })
+        end,
+        function(iw)
+            return Row.widget({
+                width = iw, kind = "nav", icon = "qr_code", title = _("书友交流群"),
+                callback = function() openExternal(_("书友交流群"), QQ_GROUP_URL) end,
+            })
+        end,
+        function(iw)
+            return Row.widget({
+                width = iw, kind = "nav", icon = "bug_report", title = _("Bug 反馈群"),
+                callback = function() openExternal(_("Bug 反馈群"), BUG_GROUP_URL) end,
             })
         end,
         function(iw)

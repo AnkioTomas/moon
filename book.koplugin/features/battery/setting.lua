@@ -16,6 +16,7 @@ end
 
 require("utils.extension").add("setting.device_section", {
     id = "battery",
+    order = 30,
     icon = "battery_android_full",
     title = _("电池"),
     refresh_seconds = 15,

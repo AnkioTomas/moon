@@ -381,7 +381,7 @@ Assert.eq(table.concat(sub_rows, ","), "启用订阅,下载文章图片")
 
 local system = openRoot("系统")
 Assert.eq(system.id, "group:system")
-Assert.eq(sectionTitles(system), "连接,本机,状态")
+Assert.eq(sectionTitles(system), "连接,本机")
 local system_titles = {}
 for _, row in ipairs(buildSectionRows(system)) do system_titles[#system_titles + 1] = row.title end
 Assert.is_true(table.concat(system_titles, ","):find("启动与按键", 1, true) ~= nil)
@@ -398,6 +398,8 @@ local maintenance_joined = "," .. table.concat(maintenance_titles, ",") .. ","
 Assert.is_true(maintenance_joined:find(",自动检查更新,", 1, true) ~= nil)
 Assert.is_nil(maintenance_joined:find(",检查更新,", 1, true))
 Assert.is_nil(maintenance_joined:find(",关于,", 1, true))
+Assert.is_nil(maintenance_joined:find(",存储空间,", 1, true))
+Assert.is_nil(("," .. table.concat(system_titles, ",") .. ","):find(",运行状态,", 1, true))
 Assert.is_true(maintenance_joined:find(",关闭桌面,", 1, true) ~= nil)
 
 _G.G_reader_settings = previous_settings
