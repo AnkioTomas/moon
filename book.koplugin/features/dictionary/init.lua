@@ -99,11 +99,15 @@ function DictInit.onCreate()
         end
     end
 
-    -- 查词（划词「查词」、长按单词）改开多来源查词面板；维基百科（ReaderWikipedia 继承本类）不接管。
+    -- 查词改开多来源查词面板；维基百科（ReaderWikipedia 继承本类）不接管。
+    -- 单独开词典（菜单、历史、手势，没有划词对象）一律走面板：回退原生会弹出 KOReader 词典窗，
+    -- 上面的百科按钮再点一次才进月读面板。划词查词仍让未集成的原生按钮回退，避免把别人的按钮挡死；
+    -- 带关闭回调的是预设查询，要等窗口关掉再还原预设，也留给原生。
     local native_lookup = ReaderDictionary.onLookupWord
     ReaderDictionary.onLookupWord = function(self, word, is_sane, boxes, highlight, link, dict_close_callback)
+        local keep_native = highlight ~= nil or dict_close_callback
         if not (DictInit.isEnabled() and self.ui and self.ui.dictionary == self)
-            or DictInit.hasUnintegratedButtons(self, word) then
+            or (keep_native and DictInit.hasUnintegratedButtons(self, word)) then
             return native_lookup(self, word, is_sane, boxes, highlight, link, dict_close_callback)
         end
         require("ui.guard").call("dictionary lookup", function()
