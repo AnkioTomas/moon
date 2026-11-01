@@ -62,6 +62,13 @@ end
 Assert.eq(saw, 1, "duplicate id is skipped")
 Assert.is_true(Components.find("none") ~= nil)
 
+exts[2] = { id = "ext.bgonly", features = { lockscreen = {
+    backgrounds = function()
+        return { { id = "postcard", label = "只是背景", blocks = function() return {} end } }
+    end,
+} } }
+Assert.is_nil(Components.find("ext.bgonly.postcard"))
+
 ready = false
 exts[1] = nil
 Assert.is_true(Components.resolvable("ext.demo.postcard"))

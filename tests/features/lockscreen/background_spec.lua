@@ -254,4 +254,46 @@ Background.ensure(background("custom"), function(path) got = path end)
 Assert.eq(got, "/mnt/us/me.jpg")
 settings.lock_screen_custom_image = nil
 
+package.loaded["utils.external"] = nil
+package.loaded["source.registry"] = nil
+local ready = true
+local exts = {}
+package.preload["source.registry"] = function()
+    return {
+        extensions = function() return exts end,
+        extensionsReady = function() return ready end,
+    }
+end
+exts[1] = { id = "ext.demo", features = { lockscreen = {
+    backgrounds = function()
+        return {
+            { id = "postcard", label = "明信片", cache_key = function() return "k" end,
+                blocks = function(rect) return { { text = "ok", width = rect.w } } end },
+            { id = "postcard", label = "重复", blocks = function() return {} end },
+            { id = "blank", label = "没画面" },
+            { id = "boom", label = "会炸", blocks = function() error("boom") end },
+        }
+    end,
+} } }
+local found = Background.find("ext.demo.postcard")
+Assert.eq(found.label, "明信片")
+Assert.eq(found.cache_key(), "k")
+Assert.eq(found.blocks({ w = 8 })[1].text, "ok")
+Assert.eq(#Background.find("ext.demo.boom").blocks({}), 0)
+Assert.is_nil(Background.find("ext.demo.blank"))
+Assert.is_true(Background.validMode("ext.demo.postcard"))
+Assert.eq(Background.background("ext.demo.postcard").id, "ext.demo.postcard")
+Assert.eq(Background.background("nope").id, "bing")
+local saw = 0
+for _idx, item in ipairs(Background.options()) do
+    if item.value == "ext.demo.postcard" then saw = saw + 1 end
+end
+Assert.eq(saw, 1, "duplicate background id is skipped")
+ready = false
+exts[1] = nil
+Assert.is_true(Background.resolvable("ext.demo.postcard"))
+ready = true
+Assert.eq(Background.resolvable("ext.demo.postcard"), false)
+Assert.is_true(Background.resolvable("none"))
+
 os.date = original_date

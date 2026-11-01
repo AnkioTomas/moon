@@ -51,7 +51,9 @@ local function externalComponents()
     for _idx, item in ipairs(items) do
         local list = External.try(item.id .. " lockscreen", item.mod.components)
         if type(list) ~= "table" or list.id then
-            logger.error("feature external lockscreen rejected: components must return a list", item.id)
+            if list ~= nil then
+                logger.error("feature external lockscreen rejected: components must return a list", item.id)
+            end
         else
             for _i, raw in ipairs(list) do
                 local id = type(raw) == "table" and External.prefix(item.id, raw.id)
