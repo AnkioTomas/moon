@@ -19,6 +19,8 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
   - 本地删除 = deleted=1 + sync_status=0（墓碑），推云端成功后 remove 撕墓碑（连同依附表）；本地上架推 addToShelf 后 markSynced。
   - 远端 upsert 遇本地脏行（sync_status=0）不盖 title/authors/category/series/intro 与 deleted。
   - 远端展示字段的 nil / 空字符串表示缺资料，不清空已有值；主动清空走 upsertLocal。
+    例外：row.category_authoritative 为真时，这次是书架分类口径（分组开关），
+    nil / 空字符串写成未分类。脏行仍保留本地分类。
   - meta 只经 setMeta 写（三种 upsert 写完顺带调），按键合并、从不清键：
     普通同步与详情只补缺的键；强制刷新（reconcile force）与本地写入（扫盘 / 刮削）覆盖传入的键。
     rating 是 { score, by } 整体，分数和来源不会拆开合并。
@@ -277,6 +279,7 @@ end
 ---@param overwrite boolean|nil 用户强制刷新：meta 覆盖已有键，否则只补缺
 ---@param dated boolean|nil 快照行自带权威加入时间：为真且 row.inserted_at 有值时覆盖已有的占位值
 --- row.read_at：云端最近阅读时间（秒），只增不减。
+--- row.category_authoritative：这次快照声明了分类。nil / 空字符串写成未分类；否则缺省仍保留旧值。
 ---@return boolean
 function BookDB.upsertRemote(row, overwrite, dated)
     local source_id = row.source_id
@@ -300,8 +303,10 @@ function BookDB.upsertRemote(row, overwrite, dated)
                 THEN books.title ELSE COALESCE(NULLIF(excluded.title, ''), books.title) END,
             authors=CASE WHEN books.sync_status=0
                 THEN books.authors ELSE COALESCE(NULLIF(excluded.authors, ''), books.authors) END,
-            category=CASE WHEN books.sync_status=0
-                THEN books.category ELSE COALESCE(NULLIF(excluded.category, ''), books.category) END,
+            category=CASE
+                WHEN books.sync_status=0 THEN books.category
+                WHEN ?=1 THEN NULLIF(excluded.category, '')
+                ELSE COALESCE(NULLIF(excluded.category, ''), books.category) END,
             series=CASE WHEN books.sync_status=0
                 THEN books.series ELSE COALESCE(NULLIF(excluded.series, ''), books.series) END,
             intro=CASE WHEN books.sync_status=0
@@ -324,6 +329,7 @@ function BookDB.upsertRemote(row, overwrite, dated)
         source_id, stable_id, row.md5, row.title, row.authors,
         row.category, row.series, row.intro, row.cover, now, row.path,
         deleted, readAt(row.read_at),
+        row.category_authoritative and 1 or 0,
         authored and 1 or 0,
         has_membership and 1 or 0, has_membership and 1 or 0
     ) ~= nil and BookDB.setMeta(row, overwrite)

@@ -252,15 +252,16 @@ do
 
     Assert.is_true(BookDB.upsertRemote({ source_id = "moon", stable_id = "store.epub" }))
     local q = calls[#calls]
-    -- VALUES 13 绑定（含 read_at）+ sync_status 字面 1；UPDATE 三个 ?=1（权威加入时间 + 两个成员标志）→ argc=16
+    -- VALUES 13 绑定（含 read_at）+ sync_status 字面 1；UPDATE 四个 ?=1（分类口径 + 权威加入时间 + 两个成员标志）→ argc=17
     local qmarks = select(2, q.sql:gsub("%?", "%?"))
-    Assert.eq(qmarks, 16)
-    Assert.eq(q.argc, 16)
+    Assert.eq(qmarks, 17)
+    Assert.eq(q.argc, 17)
     Assert.eq(q.args[12], 1, "无 membership 时 deleted 默认 1")
     Assert.eq(q.args[13], 0, "没给云端阅读时间写 0")
-    Assert.eq(q.args[14], 0, "未声明权威加入时间时不得覆盖 inserted_at")
-    Assert.eq(q.args[15], 0, "未指定成员关系时不得改 deleted")
-    Assert.eq(q.args[16], 0, "未指定成员关系时不得改 sync_status")
+    Assert.eq(q.args[14], 0, "未声明分类口径时不得清空分类")
+    Assert.eq(q.args[15], 0, "未声明权威加入时间时不得覆盖 inserted_at")
+    Assert.eq(q.args[16], 0, "未指定成员关系时不得改 deleted")
+    Assert.eq(q.args[17], 0, "未指定成员关系时不得改 sync_status")
     Assert.is_true(q.sql:find("VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?)", 1, true) ~= nil)
     Assert.is_true(q.sql:find("WHEN books.sync_status=0", 1, true) ~= nil,
         "脏行保留展示字段与成员")
@@ -273,15 +274,15 @@ do
     }))
     q = calls[#calls]
     Assert.eq(q.args[12], 0, "deleted=0 → 在架")
-    Assert.eq(q.args[15], 1)
     Assert.eq(q.args[16], 1)
+    Assert.eq(q.args[17], 1)
 
     Assert.is_true(BookDB.upsertRemote({
         source_id = "moon", stable_id = "gone.epub", deleted = 1,
     }))
     q = calls[#calls]
     Assert.eq(q.args[12], 1)
-    Assert.eq(q.args[15], 1)
+    Assert.eq(q.args[16], 1)
 
     DbBase.close()
     clearMods()
@@ -395,12 +396,12 @@ do
         end
     end
     Assert.eq(#inserts, 2)
-    Assert.eq(inserts[1].argc, 16)
+    Assert.eq(inserts[1].argc, 17)
     Assert.eq(inserts[1].args[12], 1)
-    Assert.eq(inserts[1].args[15], 0)
-    Assert.eq(inserts[2].argc, 16)
+    Assert.eq(inserts[1].args[16], 0)
+    Assert.eq(inserts[2].argc, 17)
     Assert.eq(inserts[2].args[12], 1, "deleted=1")
-    Assert.eq(inserts[2].args[15], 1)
+    Assert.eq(inserts[2].args[16], 1)
 
     DbBase.close()
     clearMods()
@@ -437,10 +438,11 @@ do
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
             insert_calls[#insert_calls + 1] = call
-            Assert.eq(call.argc, 16)
+            Assert.eq(call.argc, 17)
             Assert.eq(call.args[12], 0, "对账入架 deleted=0")
-            Assert.eq(call.args[14], 0, "未声明权威加入时间")
-            Assert.eq(call.args[15], 1)
+            Assert.eq(call.args[14], 0, "未声明分类口径")
+            Assert.eq(call.args[15], 0, "未声明权威加入时间")
+            Assert.eq(call.args[16], 1)
         end
         if call.sql == "COMMIT;" then commit = true end
     end
@@ -601,7 +603,7 @@ do
     for _, call in ipairs(calls) do
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
-            Assert.eq(call.argc, 16)
+            Assert.eq(call.argc, 17)
         end
     end
     Assert.eq(inserts, 9)
