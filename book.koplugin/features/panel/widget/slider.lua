@@ -69,7 +69,10 @@ function SliderRow:setFromPosition(pos)
     if not pos then return false end
     local fraction = math.max(0, math.min(1, (pos.x - self.dimen.x - self.bar_x) / self.bar_w))
     local value = math.floor(fraction * 100 + 0.5)
+    -- 亮度 0 在 Kindle 上是关灯；调节块最低 1，关灯走前光开关。冷暖 0 是最冷，不动。
+    if self.kind == "brightness" then value = math.max(1, value) end
     if value == self.value then return true end
+    fraction = value / 100
     if not self.on_level(self.kind, fraction) then return false end
     self.value = value
     self.progress:setPercent(value)

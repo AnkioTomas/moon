@@ -177,6 +177,9 @@ Assert.is_true(powerd.resume_updated)
 Assert.is_true(Panel.setLevel("warmth", 0.75))
 Assert.eq(powerd.warmth, 75)
 
--- 亮度滑到最左端关闭前光。
+-- 调节块最低一档是开灯：正比例再小也落到 fl_min+1，不关灯。
+Assert.is_true(Panel.setLevel("brightness", 0.01))
+Assert.eq(powerd.intensity, 1)
+-- 自动亮度显式传 0 仍关灯。
 Assert.is_true(Panel.setLevel("brightness", 0))
 Assert.eq(powerd.intensity, 0)

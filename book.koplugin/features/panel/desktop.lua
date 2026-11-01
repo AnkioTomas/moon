@@ -141,8 +141,11 @@ function Panel.setLevel(kind, fraction)
     if kind == "brightness" then
         local min, max = tonumber(powerd.fl_min) or 0, tonumber(powerd.fl_max) or 100
         local native = math.floor(min + fraction * (max - min) + 0.5)
-        if native <= min then
+        -- fraction 0 是自动亮度的「关灯」。调节块不会传 0，正比例再小也停在最低开灯档。
+        if fraction <= 0 then
             powerd:turnOffFrontlight()
+        elseif native <= min then
+            powerd:setIntensity(math.min(max, min + 1))
         else
             powerd:setIntensity(native)
         end
