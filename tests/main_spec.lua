@@ -161,6 +161,7 @@ stub("features.lockscreen", noop_mod({
     onSuspend = function() calls.lock_refresh = (calls.lock_refresh or 0) + 1 end,
 }))
 stub("features.remote", noop_mod())
+stub("ui.kindle_waveform", { install = function() end })
 stub("features.nightmode", noop_mod())
 stub("features.ime", noop_mod())
 -- guard 本身在 tests/ui/guard_spec.lua；这里透传并记下经它挂上的入口。

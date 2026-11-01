@@ -58,11 +58,10 @@ end
 ---@return integer page
 ---@return integer total
 function Pages.document(ui, page, total)
-    page, total = tonumber(page) or 0, tonumber(total) or 0
+    page, total = page or 0, total or 0
     local pagemap = ui and ui.pagemap
     if pagemap and pagemap:wantsPageLabels() then
         local _label, idx, count = pagemap:getCurrentPageLabel(false)
-        idx, count = tonumber(idx), tonumber(count)
         if idx and count and idx > 0 and count > 0 then
             return idx, count
         end
@@ -71,7 +70,6 @@ function Pages.document(ui, page, total)
     if document and page > 0 and document:hasHiddenFlows() then
         local in_flow = document:getPageNumberInFlow(page)
         local pages = document:getTotalPagesInFlow(document:getPageFlow(page))
-        in_flow, pages = tonumber(in_flow), tonumber(pages)
         if in_flow and pages and in_flow > 0 and pages > 0 then
             return in_flow, pages
         end

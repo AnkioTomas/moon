@@ -41,8 +41,7 @@ end
 --- 不合格的条目记日志跳过。
 ---@return table[] components, boolean ready
 local function externalComponents()
-    local ok, External = pcall(require, "utils.external")
-    if not ok then return {}, true end
+    local External = require("utils.external")
     local items, ready = External.collect("lockscreen")
     local out, seen = {}, {}
     for _idx, component in ipairs(M.components) do

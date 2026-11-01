@@ -142,7 +142,7 @@ function DocumentToc.chapterPages(ui)
     if not page then return nil end
     local done = ui.toc:getChapterPagesDone(page)
     if not done then return nil end
-    local count = tonumber(ui.toc:getChapterPageCount(page))
+    local count = ui.toc:getChapterPageCount(page)
     local current = done + 1
     if not count or count <= 0 then return nil end
     local total = ui.document and ui.document:getPageCount()

@@ -13,13 +13,14 @@ fast / A2 仍是单色。没开翻页动画时不改任何波形。
 
 local Waveform = {}
 
---- 与翻页动画开关键相同。下层不引用该 feature，只认这一个已经落盘的设置。
+--- 与翻页动画开关键相同（`features/animation/init.lua` 的 `ENABLED_KEY`，两个运行时补丁也按它判断）。
+--- 下层不引用该 feature，只认这一个已经落盘的设置，改名要四处一起改。
 local ENABLED = "moon_page_turn_animation"
 
 ---@return boolean
 local function pageTurnOn()
     local settings = rawget(_G, "G_reader_settings")
-    return settings ~= nil and settings:isTrue(ENABLED) == true
+    return settings ~= nil and settings:isTrue(ENABLED)
 end
 
 --- 非 fast / A2 的刷新：黑白直方图跟灰阶直方图对齐。
@@ -129,7 +130,7 @@ function Waveform.install(opts)
             return
         end
         Waveform.hookUi(screen, mode)
-        log.warn("kindle waveform: mtk GC16_PARTIAL")
+        log.info("kindle waveform: mtk GC16_PARTIAL")
         return
     end
     if not (Device:isZelda() or Device:isRex()) then return end
@@ -139,7 +140,7 @@ function Waveform.install(opts)
         return
     end
     screen._moon_text_hist = text
-    log.warn("kindle waveform: zelda GL16 hist")
+    log.info("kindle waveform: zelda GL16 hist")
 end
 
 return Waveform
