@@ -23,6 +23,13 @@ require("utils.extension").add("setting.device_section", {
     order = 20,
     icon = "monitoring",
     title = _("运行状态"),
+    status = function()
+        local mem = require("features.monitor.procs").memory()
+        if not mem then return nil end
+        local friendly = require("util").getFriendlySize
+        local function kb(n) return friendly(n * 1024) or (tostring(n) .. " KB") end
+        return require("ffi/util").template(_("%1 / %2"), kb(mem.avail), kb(mem.total))
+    end,
     refresh_seconds = REFRESH_SECONDS,
     right_icon = "swap_vert",
     right_callback = function(desktop) require("features.monitor.page").toggleSort(desktop) end,

@@ -40,6 +40,7 @@ Assert.eq(item.order, 30)
 Assert.eq(item.icon, "battery_android_full")
 Assert.eq(item.title, "电池")
 Assert.eq(item.refresh_seconds, 15)
+Assert.eq(item.status(), "91.2%")
 Assert.is_nil(item.rows)
 
 local sections = item.sections()

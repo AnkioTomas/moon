@@ -1,4 +1,4 @@
---[[-- 设备设置：根页头像行、我的设备页的本机信息与关于动作。 --]]
+--[[-- 设备设置：我的设备页的名称与头像、本机信息与关于动作。 --]]
 
 local Assert = require("support.assert")
 
@@ -81,20 +81,6 @@ local function take()
     return rows
 end
 
-local profile = Page.profileRow({}, { id = "device" })(400)
-local row = take()[1]
-Assert.eq(profile, row)
-Assert.eq(row.title, "书房")
-Assert.eq(row.image, "logo.png")
-Assert.eq(row.image_w, 40)
-Assert.eq(row.subtitle, "点按修改名称与头像")
-row.callback()
-Assert.eq(opened_page.id, "device")
-
-store.device_name = "  "
-Page.profileRow({}, { id = "device" })(400)
-Assert.eq(take()[1].title, "月读 - Paperwhite")
-
 local function rowsOf(sections)
     local out = {}
     for _, section in ipairs(sections) do
@@ -117,6 +103,7 @@ Ext.add("setting.device_section", {
     id = "battery",
     icon = "battery_android_full",
     title = "电池",
+    status = function() return "91.2%" end,
     refresh_seconds = 15,
     right_icon = "swap_vert",
     right_callback = function(target) pushed_desk = target end,
@@ -132,22 +119,29 @@ Ext.add("setting.device_section", {
 })
 local desk = { plugin = { path = "/moon" } }
 local sections = rowsOf(Page.infoSections(desk))
-Assert.eq(sections[1].title, "本机")
-Assert.eq(sections[2].title, "月读")
+Assert.eq(sections[1].title, "设备名称与头像")
+Assert.eq(sections[2].title, "本机")
+Assert.eq(sections[3].title, "月读")
+Assert.eq(sections[1].rows[1].title, "设备名称")
+Assert.eq(sections[1].rows[1].status, "书房")
+Assert.eq(sections[1].rows[2].title, "设备头像")
+Assert.eq(sections[1].rows[3].title, "恢复默认头像")
 local facts = {}
-for _, item in ipairs(sections[1].rows) do
+for _, item in ipairs(sections[2].rows) do
     Assert.is_true(item.icon ~= nil and item.icon ~= "", item.title)
     facts[item.title] = item.status
 end
 Assert.eq(facts["型号"], "Paperwhite")
-Assert.eq(sections[1].rows[1].icon, "devices")
+Assert.eq(sections[2].rows[1].icon, "devices")
 Assert.eq(facts["屏幕"], "1072×1448 · 300 dpi")
 Assert.eq(facts["固件"], "5.16.2")
 Assert.is_nil(facts["健康度"])
-Assert.eq(sections[1].rows[4].title, "电池")
-Assert.eq(sections[1].rows[4].kind, "nav")
-Assert.eq(sections[1].rows[4].icon, "battery_android_full")
-sections[1].rows[4].callback()
+Assert.eq(sections[2].rows[4].title, "电池")
+Assert.eq(sections[2].rows[4].status, "91.2%")
+Assert.is_true(sections[2].rows[4].status_on)
+Assert.eq(sections[2].rows[4].kind, "nav")
+Assert.eq(sections[2].rows[4].icon, "battery_android_full")
+sections[2].rows[4].callback()
 Assert.eq(pushed.id, "battery")
 Assert.eq(pushed.title, "电池")
 Assert.eq(pushed.refresh_seconds, 15)
@@ -156,14 +150,14 @@ pushed.right_callback()
 Assert.eq(pushed_desk, desk)
 Assert.eq(pushed.sections()[1].title, "电池")
 Assert.eq(pushed.sections()[1].rows[1](400).title, "健康度")
-Assert.eq(sections[1].rows[5].title, "KOReader")
+Assert.eq(sections[2].rows[5].title, "KOReader")
 Assert.is_nil(facts["电量"])
 Assert.eq(facts["KOReader"], "v2026.07-1")
-Assert.eq(sections[2].rows[1].title, "版本")
-Assert.eq(sections[2].rows[1].icon, "system_update")
-Assert.eq(sections[2].rows[1].status, "0.0.0-dev")
-sections[2].rows[1].callback()
-sections[2].rows[1].hold_callback()
+Assert.eq(sections[3].rows[1].title, "版本")
+Assert.eq(sections[3].rows[1].icon, "system_update")
+Assert.eq(sections[3].rows[1].status, "0.0.0-dev")
+sections[3].rows[1].callback()
+sections[3].rows[1].hold_callback()
 Assert.eq(checks[1].path, "/moon")
 Assert.is_nil(checks[1].force)
 Assert.eq(checks[2].force, true)
@@ -176,12 +170,12 @@ local function find(title)
     end
 end
 
-for _, item in ipairs(sections[2].rows) do
+for _, item in ipairs(sections[3].rows) do
     Assert.is_true(item.icon ~= nil and item.icon ~= "", item.title)
 end
-Assert.eq(sections[2].rows[2].title, "书友交流群")
-Assert.eq(sections[2].rows[3].title, "Bug 反馈群")
-Assert.eq(sections[2].rows[4].title, "关于")
+Assert.eq(sections[3].rows[2].title, "书友交流群")
+Assert.eq(sections[3].rows[3].title, "Bug 反馈群")
+Assert.eq(sections[3].rows[4].title, "关于")
 Assert.is_nil(find("作者"))
 Assert.is_nil(find("打开 GitHub"))
 find("关于").callback()
@@ -204,13 +198,16 @@ Assert.eq(qr.text, "https://qm.qq.com/q/Q9FHByplqC")
 find("Bug 反馈群").callback()
 Assert.eq(qr.text, "https://qm.qq.com/q/btmL9F4Cl2")
 
+store.device_name = "  "
+Assert.eq(rowsOf(Page.infoSections(desk))[1].rows[1].status, "月读 - Paperwhite")
+store.device_name = "书房"
 hw.model = nil
 hw.firmware_rev = 34
 hw.hasBattery = function() return false end
 hw.screen.getDPI = function() return 0 end
 rev = nil
 local bare = {}
-for _, item in ipairs(rowsOf(Page.infoSections(desk))[1].rows) do bare[item.title] = item.status end
+for _, item in ipairs(rowsOf(Page.infoSections(desk))[2].rows) do bare[item.title] = item.status end
 Assert.eq(bare["屏幕"], "1072×1448")
 Assert.is_nil(bare["型号"])
 Assert.is_nil(bare["固件"])

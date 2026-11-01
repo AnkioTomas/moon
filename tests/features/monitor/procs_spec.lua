@@ -39,6 +39,9 @@ local p = Procs.new(fs())
 local first = p:sample()
 Assert.eq(first.mem_total, 1000)
 Assert.eq(first.mem_avail, 400)
+local mem = Procs.memory(fs())
+Assert.eq(mem.total, 1000)
+Assert.eq(mem.avail, 400)
 Assert.is_nil(first.cpu)
 Assert.len(first.procs, 2)
 Assert.is_nil(first.procs[1].cpu)
@@ -73,6 +76,7 @@ end
 -- 没有 /proc（非 Linux）
 files = {}
 Assert.is_nil(Procs.new(fs()):sample())
+Assert.is_nil(Procs.memory(fs()))
 
 -- 本进程内存构成
 files = { ["/proc/self/status"] = "VmRSS:\t  104876 kB\nRssAnon:\t   79524 kB\nRssFile:\t   25352 kB\n" }

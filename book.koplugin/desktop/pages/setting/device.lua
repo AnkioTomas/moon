@@ -1,7 +1,7 @@
 --[[-- 设备设置项。
 
-根页「设备」分组第一行是头像和名称，点进去改名称与头像（锁屏密码界面等处显示）。
-「我的设备」列出本机信息。setting.device_section 在固件后面加一行，点进去是单独的子页。
+「我的设备」第一组是名称与头像（锁屏密码界面等处显示），后面是本机信息。
+setting.device_section 在固件后面加一行，点进去是单独的子页。
 版本行点按走 setting.version_check（没人登记就只显示版本）。
 作者、许可证和 GitHub 在「关于」弹窗里。
 
@@ -44,26 +44,6 @@ local function openExternal(title, url)
         Hardware:openLink(url)
     else
         QR:new{ title = title, text = url, caption = url }:show()
-    end
-end
-
---- 根页设备分组第一行：头像 + 当前名称，点开名称与头像页。
----@param desktop table
----@param page BookSettingsOverlaySpec
----@return fun(iw: number): table
-function Device.profileRow(desktop, page)
-    return function(iw)
-        return Row.widget({
-            width = iw,
-            image = DeviceInfo.logo(),
-            image_w = 40,
-            image_h = 40,
-            title = DeviceInfo.name(),
-            subtitle = _("点按修改名称与头像"),
-            callback = function()
-                require("desktop.pages.setting.overlay").open(desktop, page)
-            end,
-        })
     end
 end
 
@@ -119,7 +99,7 @@ local function showAbout()
     }:show()
 end
 
---- 我的设备：本机事实（每行有图标）+ 版本（点按检查更新）+ 两个群 + 关于弹窗。
+--- 我的设备：名称与头像、本机事实（每行有图标）、版本（点按检查更新）、两个群、关于弹窗。
 ---@param desktop table
 ---@return BookThemeSection[]
 function Device.infoSections(desktop)
@@ -139,9 +119,11 @@ function Device.infoSections(desktop)
     end
     table.sort(pages, function(a, b) return (a.order or 0) < (b.order or 0) end)
     for _, item in ipairs(pages) do
+        local text = item.status and item.status(desktop) or nil
         rows[#rows + 1] = function(iw)
             return Row.widget({
                 width = iw, kind = "nav", icon = item.icon, title = item.title,
+                status = text, status_on = text ~= nil,
                 callback = function()
                     local on_right = item.right_callback
                     require("desktop.pages.setting.overlay").push(desktop, {
@@ -192,6 +174,7 @@ function Device.infoSections(desktop)
         end,
     }
     return {
+        { title = _("设备名称与头像"), rows = Device:rows(desktop) },
         { title = _("本机"), rows = rows },
         { title = _("月读"), rows = moon },
     }
