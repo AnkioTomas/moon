@@ -190,10 +190,11 @@ local function syncOnce(source, opts, cb)
                     nextIdentity()
                     return
                 end
-                -- 按推送时的修订号确认：推送期间写入的新版本保持脏
+                -- 按推送时的修订号确认：换章会抬修订号，这一版已经到云端，新版本保持脏，下一轮再推。
+                -- 确认失败不再中止整次同步，否则后面的书推不出去，下一轮开书又把旧云端当成冲突。
                 if not ProgressDB.markSynced(source.id, identity.stable_id, row.updated_at, pos) then
-                    logger.warn("book.progress confirm failed", identity.stable_id)
-                    finish(nil, "progress confirm failed")
+                    logger.dbg("book.progress confirm superseded", source.id, identity.stable_id)
+                    nextIdentity()
                     return
                 end
                 result.pushed = result.pushed + 1

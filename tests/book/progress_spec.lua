@@ -30,12 +30,20 @@ package.preload["book.progress_db"] = function()
         unsynced = unsynced,
         markSynced = function(source_id, stable_id, updated_at)
             marked[#marked + 1] = { source_id, stable_id, updated_at }
+            local hit = false
             for _, row in ipairs(rows) do
-                if row.source_id == source_id and row.stable_id == stable_id and row.updated_at == updated_at then
-                    row.sync_status = 1
+                if row.source_id == source_id and row.stable_id == stable_id then
+                    if row.supersede then
+                        row.updated_at = updated_at + 1
+                        row.supersede = nil
+                    end
+                    if row.updated_at == updated_at then
+                        row.sync_status = 1
+                        hit = true
+                    end
                 end
             end
-            return true
+            return hit
         end,
         get = function(source_id, stable_id)
             for _, row in ipairs(rows) do
@@ -161,6 +169,42 @@ do
     Assert.eq(status.m1, 1, "永久失败的行不再重试")
     Assert.eq(status.m2, 0)
     Assert.eq(status.m3, 1)
+end
+
+-- 推送期间修订号被抬走：旧位置已到云端，新版本保持脏，不算失败，后面的书照推。
+do
+    rows[#rows + 1] = {
+        source_id = "race", stable_id = "old.epub", fraction = 0.2,
+        updated_at = 10, sync_status = 0, supersede = true,
+    }
+    rows[#rows + 1] = {
+        source_id = "race", stable_id = "next.epub", fraction = 0.4,
+        updated_at = 11, sync_status = 0,
+    }
+    local order = {}
+    sources.race = {
+        id = "race",
+        putProgressAsync = function(_, identity, _, cb)
+            order[#order + 1] = identity.stable_id
+            cb(true)
+            return { cancel = function() end }
+        end,
+    }
+    local result, err
+    Progress.syncAsync(sources.race, { dirty_only = true }, function(r, e)
+        result, err = r, e
+    end)
+    Stubs.flush()
+    Assert.is_nil(err, "修订号被换章抬走不算同步失败")
+    Assert.eq(result.pushed, 1)
+    Assert.eq(table.concat(order, ","), "old.epub,next.epub")
+    local old_status, next_status
+    for _, row in ipairs(rows) do
+        if row.stable_id == "old.epub" then old_status = row.sync_status end
+        if row.stable_id == "next.epub" then next_status = row.sync_status end
+    end
+    Assert.eq(old_status, 0, "新修订保持脏")
+    Assert.eq(next_status, 1)
 end
 
 -- 修订号严格递增：同一秒连续取号也不重复。

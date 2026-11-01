@@ -441,6 +441,45 @@ Assert.matches(shown[1].text, "要从哪里继续读")
 Assert.len(adopted, 0)
 Assert.len(synced, 0)
 
+-- 屏幕上的章已经比库存、也比云端靠后：不拿旧行（版权页）弹窗，脏进度照推。
+current_identity.chapter_idx = 5
+source.getProgressAsync = function(_, _, cb)
+    cb({ fraction = 0.2, chapter_idx = 2, chapter_fraction = 0.32 })
+    return { cancel = function() end }
+end
+pullWith({
+    fraction = 0.05, chapter_idx = 1, chapter_fraction = 1, sync_status = 0,
+    synced = { fraction = 0.02, chapter_idx = 1, chapter_fraction = 0.5 },
+})
+Assert.eq(#shown, 0, "打开的章比云端靠后不弹冲突")
+Assert.eq(synced[1], "b1", "脏的本地进度仍然推上去")
+Assert.len(adopted, 0, "不能跳回更早的云端")
+
+-- 库存停在第 1 章，人已经读到第 5 章，云端在第 8 章：问的是当前章，不是旧行。
+source.getProgressAsync = function(_, _, cb)
+    cb({ fraction = 0.9, chapter_idx = 8, chapter_fraction = 0.1 })
+    return { cancel = function() end }
+end
+pullWith({
+    fraction = 0.05, chapter_idx = 1, chapter_fraction = 1, sync_status = 0,
+    synced = { fraction = 0.02, chapter_idx = 1, chapter_fraction = 0.5 },
+})
+Assert.len(shown, 1, "云端比当前章更靠后仍要问")
+Assert.matches(shown[1].text, "本地：第 5 章")
+Assert.is_nil(shown[1].text:find("本地：第 1 章", 1, true), "弹窗不能拿库存旧章当本地")
+current_identity.chapter_idx = 3
+
+-- 回包前已经换章：这次对比作废，不弹窗，脏行仍推。
+source.getProgressAsync = function(_, _, cb)
+    current_identity.chapter_idx = 6
+    cb({ fraction = 0.9, chapter_idx = 8, chapter_fraction = 0.1 })
+    return { cancel = function() end }
+end
+pullWith({ fraction = 0.4, chapter_idx = 3, chapter_fraction = 0.1, sync_status = 0, synced = base })
+Assert.eq(#shown, 0, "回包时已经换章不再问")
+Assert.eq(synced[1], "b1", "换章后脏进度仍推")
+current_identity.chapter_idx = 3
+
 -- ── 页级源（Kavita）：只按 spine 序号 + spine 内元素路径判，绝不按百分比 ──────
 -- 远端的比例是「第几个 spine」，本地是全书渲染页比例，两者不可比。
 local function kavitaPull(remote, row)
