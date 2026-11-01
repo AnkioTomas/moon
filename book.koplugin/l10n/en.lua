@@ -269,7 +269,6 @@ return {
     ["写入 epub 失败"] = "Failed to write epub",
     ["写入 mimetype 失败"] = "Failed to write mimetype",
     ["写入章节失败"] = "Failed to write chapter",
-    ["冷暖色调"] = "Warmth",
     ["冷暖色调滑块"] = "Warmth slider",
     ["亮度滑块"] = "Brightness slider",
     ["面板顶部的色温滑块"] = "Warmth slider at the top of the panel",
