@@ -3,6 +3,7 @@
 
 文件（`<书的工作目录>/bilingual/`，随清缓存 / 删书一起清掉）：
 - `<engine>-<lang>.jsonl`：译文缓存，一行一个 `[原文, 译文]`，只追加。中断、重试后跳过已译段落，换引擎各存各的。
+- `<engine>-<lang>.jsonl.pending`：这次要译的原文，一行一个 JSON 字符串。分析在子进程里写，主进程按批读，任务结束删除。不进 worker 帧。
 - `meta.json`：`{ origin, file }`，最近一次生成的双语版与它的原书路径。
 - `source.fb2|html`：非 EPUB 由 CREngine 导出的 DOM，生成成功后删除。
 
@@ -145,22 +146,34 @@ local function eachHtml(input, fn)
     reader:close()
 end
 
---- 子进程：去重后的段落总数，以及缓存里还没有的段落。
 ---@param input BilingualInput
----@return { pending: string[], total: integer }
+---@return string
+local function pendingPath(input)
+    return input.cache .. ".pending"
+end
+
+--- 子进程：去重后的段落总数，以及缓存里还没有的段落数。
+--- 待译原文写进 pending 文件。整本书塞进一条 worker 帧会超过协议 4MB 上限。
+---@param input BilingualInput
+---@return { pending: integer, total: integer }
 local function collect(input)
     local cached = loadCache(input.cache)
-    local seen, pending, total = {}, {}, 0
+    local seen, total, count = {}, 0, 0
+    local f = assert(io.open(pendingPath(input), "wb"))
     eachHtml(input, function(html)
         for _idx, block in ipairs(Markup.blocks(html)) do
             if not seen[block.text] then
                 seen[block.text] = true
                 total = total + 1
-                if not cached[block.text] then pending[#pending + 1] = block.text end
+                if not cached[block.text] then
+                    assert(f:write(JSON.encode(block.text), "\n"))
+                    count = count + 1
+                end
             end
         end
     end)
-    return { pending = pending, total = total }
+    assert(f:close())
+    return { pending = count, total = total }
 end
 
 --- 子进程：EPUB 逐项复制，XHTML 插入译文；mimetype 必须是第一项且不压缩。
@@ -206,22 +219,80 @@ local function build(input)
     return true
 end
 
+--- 按段数与字节数切批。单段超长单独成批（读下一条时放回）。
+---@param read fun(): string|nil
+---@param size integer
+---@param chars integer
+---@return fun(): string[]|nil
+local function batchIterator(read, size, chars)
+    local hold
+    return function()
+        local batch, count = {}, 0
+        while #batch < size do
+            local text = hold
+            hold = nil
+            if text == nil then text = read() end
+            if text == nil then break end
+            if #batch > 0 and count + #text > chars then
+                hold = text
+                break
+            end
+            batch[#batch + 1] = text
+            count = count + #text
+        end
+        if #batch == 0 then return nil end
+        return batch
+    end
+end
+
 ---@param texts string[]
 ---@param size integer
 ---@param chars integer
 ---@return string[][]
 local function batches(texts, size, chars)
-    local out, current, count = {}, {}, 0
-    for _idx, text in ipairs(texts) do
-        if #current > 0 and (#current >= size or count + #text > chars) then
-            out[#out + 1] = current
-            current, count = {}, 0
-        end
-        current[#current + 1] = text
-        count = count + #text
+    local i = 1
+    local next_batch = batchIterator(function()
+        local text = texts[i]
+        i = i + 1
+        return text
+    end, size, chars)
+    local out = {}
+    while true do
+        local batch = next_batch()
+        if not batch then return out end
+        out[#out + 1] = batch
     end
-    if #current > 0 then out[#out + 1] = current end
-    return out
+end
+
+--- 主进程按批读 pending 文件。打不开时第三返回值是原因，前两个是空操作。
+---@param path string
+---@param size integer
+---@param chars integer
+---@return fun(): string[]|nil
+---@return fun()
+---@return string|nil
+local function pendingBatches(path, size, chars)
+    local f, open_err = io.open(path, "rb")
+    if not f then return function() return nil end, function() end, open_err end
+    local closed = false
+    local function close()
+        if closed then return end
+        closed = true
+        f:close()
+    end
+    local function read()
+        if closed then return nil end
+        while true do
+            local line = f:read("*l")
+            -- 空行是 ""，只有 nil 才是读完。
+            if line == nil then return nil end
+            if line ~= "" then
+                local ok, text = pcall(JSON.decode, line)
+                if ok and type(text) == "string" then return text end
+            end
+        end
+    end
+    return batchIterator(read, size, chars), close
 end
 
 ---@class BilingualInput
@@ -237,13 +308,14 @@ end
 ---@field style string|nil 译文附加样式（`Markup.style`），任务开始时取自设置
 
 --- 任务体：分析 → 翻译缺的段落 → 生成双语版 → 写 meta。返回 run(report, done)，done 恰好一次。
---- run 返回 { cancel }：取消时停掉在途请求与子进程、删半截的 .part；已译段落留在缓存，下次接着翻。
+--- run 返回 { cancel }：取消时停掉在途请求与子进程、删半截的 .part 和 pending；已译段落留在缓存，下次接着翻。
 ---@param input BilingualInput
 ---@return fun(report: fun(text: string, count: integer|nil, total: integer|nil), done: fun(result: table)): { cancel: fun() }
 local function task(input)
     local engine = ENGINES[input.engine]
     return function(report, done)
         local slots, stopped = {}, false
+        local close_pending = function() end
 
         local function halt()
             stopped = true
@@ -254,6 +326,8 @@ local function task(input)
         local function finish(result)
             if stopped then return end
             halt()
+            close_pending()
+            os.remove(pendingPath(input))
             done(result)
         end
 
@@ -298,14 +372,20 @@ local function task(input)
 
         report(_("正在分析全书段落"))
         job("bilingual.collect", function() return collect(input) end, function(found)
-            local queue = batches(found.pending, engine.size, engine.chars)
-            local next_idx, inflight = 1, 0
-            local finished = found.total - #found.pending
+            local next_batch, close, open_err = pendingBatches(pendingPath(input), engine.size, engine.chars)
+            if open_err then return finish({ ok = false, err = open_err }) end
+            close_pending = close
+            local inflight, done_reading = 0, false
+            local finished = found.total - found.pending
             local function pump()
-                if next_idx > #queue and inflight == 0 then return produce() end
-                while not stopped and inflight < engine.parallel and next_idx <= #queue do
-                    local texts = queue[next_idx]
-                    next_idx, inflight = next_idx + 1, inflight + 1
+                if stopped then return end
+                while not stopped and inflight < engine.parallel and not done_reading do
+                    local texts = next_batch()
+                    if not texts then
+                        done_reading = true
+                        break
+                    end
+                    inflight = inflight + 1
                     step(function(settle)
                         return engine.translate(texts, input.lang, settle)
                     end, function(list, err)
@@ -317,13 +397,19 @@ local function task(input)
                         pump()
                     end)
                 end
+                if not stopped and done_reading and inflight == 0 then
+                    close_pending()
+                    produce()
+                end
             end
             report(_("正在翻译…"), finished, found.total)
             pump()
         end)
         return { cancel = function()
             halt()
+            close_pending()
             os.remove(input.dest .. ".part")
+            os.remove(pendingPath(input))
         end }
     end
 end
