@@ -238,6 +238,7 @@ function Mapper.shelfList(shelf, on_cover)
         if b then
             Mapper.applyProgress(b, prog_map[b.stable_id])
             b.category = CategorySetting.apply(SOURCE_ID, b.category, groups[b.stable_id])
+            b.category_authoritative = true
             if cover and on_cover then
                 on_cover(b.stable_id, cover)
             end

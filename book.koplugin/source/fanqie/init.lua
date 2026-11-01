@@ -78,7 +78,17 @@ local function errMsg(err)
     return tostring(err or _("番茄请求失败"))
 end
 
+--- 秒；毫秒值折成秒。无效为 nil。
+---@param value any
+---@return integer|nil
+local function shelfTime(value)
+    local n = tonumber(value) or 0
+    if n > 1e11 then n = n / 1000 end
+    if n > 0 then return math.floor(n) end
+end
+
 --- 分类口径见 source.category_setting：开 = 只用自定义分组，关 = 不写分类（番茄书架不带题材）。
+--- 书架行带最后打开时间（last_operate_time）和加入时间（add_shelf_time）。
 local function shelfBook(row)
     local book = {
         source_id = "fanqie",
@@ -87,6 +97,8 @@ local function shelfBook(row)
         authors = row.author_name,
         intro = require("utils.text").stripHtml(row.abstract),
         cover = row.thumb_url,
+        read_at = shelfTime(row.last_operate_time),
+        inserted_at = shelfTime(row.add_shelf_time),
     }
     book.category = require("source.category_setting").apply("fanqie", nil, row._group_name)
     return book
@@ -97,7 +109,10 @@ end
 local function shelfBooks(wire)
     local books = {}
     for _idx, row in ipairs(wire.data.detail_list) do
-        books[#books + 1] = shelfBook(row)
+        local book = shelfBook(row)
+        -- 书架快照就是分类口径：没进组要清掉旧分类。详情更新不带这个标记。
+        book.category_authoritative = true
+        books[#books + 1] = book
     end
     return books
 end
@@ -138,6 +153,8 @@ function Source:syncBooksAsync(opts, cb)
         if opts.dirty_only then return Base.skipped(cb, "fanqie not logged in") end
         return Base.defer(cb, nil, _("请在数据源设置中扫码登录番茄小说"))
     end
+    -- 加入时间来自书架 add_shelf_time，否则整架一次同步的 inserted_at 相同，「最近添加」只能按书号排。
+    opts.inserted_at_from_row = true
     return require("source.shelf").syncAsync(self.id, shelfRemote(self, opts.force), shelfBooks, opts, cb)
 end
 

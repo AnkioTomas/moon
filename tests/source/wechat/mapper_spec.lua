@@ -109,6 +109,8 @@ do
     })
     Assert.eq(list.data[1].category, "我的", "开：进组用分组名")
     Assert.is_nil(list.data[2].category, "开：没进组不写题材，避免混合")
+    Assert.is_true(list.data[1].category_authoritative)
+    Assert.is_true(list.data[2].category_authoritative, "没进组也是这次快照的分类口径")
     cfg.category_as_group = false
     Settings.saveSource("wechat", cfg)
     local genre = Mapper.shelfList({
@@ -374,6 +376,8 @@ do
     })
     Assert.eq(list.data[1].category, "我的", "开：进组用分组名")
     Assert.is_nil(list.data[2].category, "开：没进组不写题材，避免混合")
+    Assert.is_true(list.data[1].category_authoritative)
+    Assert.is_true(list.data[2].category_authoritative, "没进组也是这次快照的分类口径")
     cfg.category_as_group = false
     Settings.saveSource("wechat", cfg)
     local genre = Mapper.shelfList({

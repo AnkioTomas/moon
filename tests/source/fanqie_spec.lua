@@ -83,6 +83,8 @@ package.preload["source.fanqie.client"] = function()
                                         thumb_url = "https://p6-novel.byteimg.com/novel-pic/x~tplv-shrink:320:0.image",
                                         abstract = "简介",
                                         _group_name = "追更",
+                                        last_operate_time = 1793017940,
+                                        add_shelf_time = 1789912130,
                                     },
                                     {
                                         book_id = "9876543210987654321",
@@ -90,6 +92,8 @@ package.preload["source.fanqie.client"] = function()
                                         author_name = "作者乙",
                                         thumb_url = "https://p6-novel.byteimg.com/novel-pic/y~tplv-shrink:320:0.image",
                                         abstract = "简介乙",
+                                        last_operate_time = 1788754903,
+                                        add_shelf_time = 1788754903000,
                                     },
                                 },
                             },
@@ -240,9 +244,15 @@ Assert.eq(stored[1].stable_id, "1234567890123456789")
 Assert.eq(stored[1].authors, "作者")
 Assert.eq(stored[1].title, "测试")
 Assert.eq(stored[1].category, "追更", "默认开：进组书分类用分组名")
-Assert.matches(stored[1].cover, "p6%-novel%.byteimg%.com")
-Assert.eq(stored[2].stable_id, "9876543210987654321")
-Assert.is_nil(stored[2].category, "没进组不写分类")
+    Assert.is_true(stored[1].category_authoritative, "书架快照声明分类口径")
+    Assert.eq(stored[1].read_at, 1793017940, "最后打开时间进最近阅读")
+    Assert.eq(stored[1].inserted_at, 1789912130, "加入书架时间进最近添加")
+    Assert.matches(stored[1].cover, "p6%-novel%.byteimg%.com")
+    Assert.eq(stored[2].stable_id, "9876543210987654321")
+    Assert.is_nil(stored[2].category, "没进组不写分类")
+    Assert.is_true(stored[2].category_authoritative)
+    Assert.eq(stored[2].read_at, 1788754903)
+    Assert.eq(stored[2].inserted_at, 1788754903, "毫秒加入时间折成秒")
 
 -- 关掉「使用自定义分组代替分类」后再同步：番茄书架不带题材，分类清空。
 do

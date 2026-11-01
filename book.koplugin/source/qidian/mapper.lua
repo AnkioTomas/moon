@@ -118,6 +118,7 @@ function Mapper.shelfList(rows)
         end
         if book then
             book.category = CategorySetting.apply(SOURCE_ID, book.category, row._group_name)
+            book.category_authoritative = true
             books[#books + 1] = book
         end
     end

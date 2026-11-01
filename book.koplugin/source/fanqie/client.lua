@@ -347,8 +347,9 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
         local book_shelf_info = shelf_info.data.book_shelf_info
             or shelf_info.data.bookShelfInfo
             or shelf_info.data
-        -- 自定义分组：bookId→分组名（和微信/起点同一口径；无 group_name 的书不算分组）。
-        local shelf_book_ids, group_by_id = {}, {}
+        -- 自定义分组：bookId→分组名（无 group_name 的书不算分组）。
+        -- last_operate_time / add_shelf_time 是手机上的最后打开和加入书架时间，挂到详情行给排序用。
+        local shelf_book_ids, group_by_id, operate_by_id, added_by_id = {}, {}, {}, {}
         for _idx, item in ipairs(type(book_shelf_info) == "table" and book_shelf_info or {}) do
             if item.book_id then
                 local book_id = tostring(item.book_id)
@@ -356,6 +357,12 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
                 local name = item.group_name
                 if type(name) == "string" and name ~= "" then
                     group_by_id[book_id] = group_by_id[book_id] or name
+                end
+                if operate_by_id[book_id] == nil and item.last_operate_time ~= nil then
+                    operate_by_id[book_id] = item.last_operate_time
+                end
+                if added_by_id[book_id] == nil and item.add_shelf_time ~= nil then
+                    added_by_id[book_id] = item.add_shelf_time
                 end
             end
         end
@@ -381,6 +388,8 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
                 local row = by_id[book_id]
                 if row then
                     row._group_name = group_by_id[book_id]
+                    row.last_operate_time = operate_by_id[book_id]
+                    row.add_shelf_time = added_by_id[book_id]
                     detail_list[#detail_list + 1] = row
                 end
             end

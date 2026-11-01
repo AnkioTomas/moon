@@ -195,7 +195,7 @@ function Shelf.syncAsync(source_id, remote, to_books, opts, cb)
     ---@param pushed integer
     local function reconcile(books, pushed)
         report(T(_("正在写入书架（%1 本）"), #books))
-        local result, err = Shelf.reconcile(source_id, books, opts.force)
+        local result, err = Shelf.reconcile(source_id, books, opts.force, opts.inserted_at_from_row)
         if not result then cb(nil, err); return end
         result.pushed = pushed
         cb(result)

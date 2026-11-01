@@ -69,6 +69,7 @@ do -- 移出分组：本地旧行分类是旧分组名，书架行题材要把�
           local_book = { stable_id = "10", title = "戊", category = "历史", cover = "c" } },
     })
     Assert.is_nil(books[1].category, "开：移出分组后不再沿用旧分组名")
+    Assert.is_true(books[1].category_authoritative, "移出分组要能清掉库里的旧分类")
     Assert.eq(books[2].category, "在读", "进了组用分组名覆盖本地旧分类")
 end
 

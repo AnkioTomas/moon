@@ -16,6 +16,7 @@ end
 local SHELF_IDS = { "1", "2", "3" }
 -- book_id → group_name；空表 = 书架项不带分组字段（和没建文件夹的账号一致）。
 local SHELF_GROUPS = {}
+local SHELF_OPERATE, SHELF_ADDED = {}, {}
 local fail_ids = {}
 local gone_ids = {}
 local requests = 0
@@ -36,6 +37,12 @@ package.preload["http.request"] = function()
                     local item = '{"book_id":"' .. id .. '"'
                     if SHELF_GROUPS[id] then
                         item = item .. ',"group_id":"7","group_name":"' .. SHELF_GROUPS[id] .. '"'
+                    end
+                    if SHELF_OPERATE[id] then
+                        item = item .. ',"last_operate_time":' .. SHELF_OPERATE[id]
+                    end
+                    if SHELF_ADDED[id] then
+                        item = item .. ',"add_shelf_time":' .. SHELF_ADDED[id]
                     end
                     list[#list + 1] = item .. "}"
                 end
@@ -158,6 +165,16 @@ do -- 书架分组：book_shelf_info 上的 group_name 挂到详情行（没进�
     Assert.is_nil(data.data.detail_list[2]._group_name, "没进组不算分组")
     Assert.eq(data.data.detail_list[3]._group_name, "追更")
     SHELF_GROUPS = {}
+    SHELF_OPERATE = { ["1"] = 1793017940, ["2"] = 1788754903 }
+    SHELF_ADDED = { ["1"] = 1789912130 }
+    client:fetchShelfDetailAsync(true, function(d, e) data, err = d, e end)
+    drain()
+    Assert.is_nil(err)
+    Assert.eq(data.data.detail_list[1].last_operate_time, 1793017940)
+    Assert.eq(data.data.detail_list[1].add_shelf_time, 1789912130)
+    Assert.eq(data.data.detail_list[2].last_operate_time, 1788754903)
+    Assert.is_nil(data.data.detail_list[2].add_shelf_time, "没给加入时间就不写")
+    SHELF_OPERATE, SHELF_ADDED = {}, {}
 end
 
 do

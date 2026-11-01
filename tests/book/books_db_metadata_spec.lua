@@ -59,5 +59,32 @@ Assert.is_true(BookDB.upsertRemote({ source_id = full.source_id, stable_id = ful
     authors = "远端作者", intro = "远端简介", deleted = 0 }))
 Assert.eq(BookDB.get(full.source_id, full.stable_id).authors, full.authors, "非空本地脏资料仍优先")
 
+Assert.is_true(BookDB.markSynced(full.source_id, full.stable_id))
+Assert.is_true(BookDB.upsertRemote({
+    source_id = full.source_id, stable_id = full.stable_id, deleted = 0,
+    category_authoritative = true,
+}))
+local cleared_category = BookDB.get(full.source_id, full.stable_id)
+Assert.is_nil(cleared_category.category, "书架快照声明未分类时清掉旧分类")
+Assert.eq(cleared_category.title, full.title, "声明分类不顺手清别的字段")
+Assert.is_true(BookDB.upsertRemote({
+    source_id = full.source_id, stable_id = full.stable_id, deleted = 0,
+    category = "悬疑", category_authoritative = true,
+}))
+Assert.is_true(BookDB.upsertRemote({
+    source_id = full.source_id, stable_id = full.stable_id, deleted = 0,
+}))
+Assert.eq(BookDB.get(full.source_id, full.stable_id).category, "悬疑", "没声明分类口径的更新不清分类")
+Assert.is_true(BookDB.markDeleted(full.source_id, full.stable_id))
+Assert.is_true(BookDB.upsertLocal({
+    source_id = full.source_id, stable_id = full.stable_id,
+    title = full.title, category = "本地分组",
+}))
+Assert.is_true(BookDB.upsertRemote({
+    source_id = full.source_id, stable_id = full.stable_id, deleted = 0,
+    category_authoritative = true,
+}))
+Assert.eq(BookDB.get(full.source_id, full.stable_id).category, "本地分组", "脏行的分类不被快照清掉")
+
 DB.close()
 for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(path .. suffix) end
