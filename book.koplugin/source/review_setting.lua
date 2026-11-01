@@ -14,6 +14,16 @@ function ReviewSetting.enabled(source_id)
     return require("utils.settings").getSource(source_id).show_paragraph_reviews == true
 end
 
+--- 写入「显示段评」。书源设置页和阅读快捷面板都走这里。
+---@param source_id string
+---@param on boolean
+function ReviewSetting.set(source_id, on)
+    local settings = require("utils.settings")
+    local cfg = settings.getSource(source_id)
+    cfg.show_paragraph_reviews = on == true
+    settings.saveSource(source_id, cfg)
+end
+
 --- 设置页的一行（`Row.widget` 工厂）。
 ---@param source_id string
 ---@param plugin table|nil
@@ -25,10 +35,7 @@ function ReviewSetting.row(source_id, plugin)
             title = _("显示段评"), subtitle = _("阅读时给有他人段评的段落末尾画线，点按查看；需联网"),
             status = on and _("开") or _("关"), status_on = on,
             callback = function()
-                local settings = require("utils.settings")
-                local cfg = settings.getSource(source_id)
-                cfg.show_paragraph_reviews = not on
-                settings.saveSource(source_id, cfg)
+                ReviewSetting.set(source_id, not on)
                 if plugin and plugin.desktop then plugin.desktop:updateView() end
             end })
     end
