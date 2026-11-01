@@ -124,3 +124,4 @@ Assert.eq(settings.reader_popup_button_order, saved_order, "保存的顺序不�
 Assert.not_nil(settings.reader_popup_seen["12_0_make_handmade_toc_item"])
 Assert.is_false(settings.reader_popup_buttons["12_0_make_handmade_toc_item"], "显隐设置不动")
 Assert.not_nil(highlight.highlight_dialog)
+Assert.is_nil(highlight.highlight_dialog._added_widgets)

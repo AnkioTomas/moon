@@ -9,7 +9,7 @@ AI、百科、扩展 Tab 首次切到才请求（结果缓存，可取消，AI �
 入口：长按查词、划词「查词」「翻译」「AI 解释」。
 
   +-------------------------------+
-  |            彘             [×] |
+  | [笔]         彘             [×] |
   |            zhì                |
   |-------------------------------|
   | [现代汉语 ▼]                  |   词典 Tab（翻译 Tab 为语言按钮）
@@ -657,6 +657,56 @@ function Lookup:init()
     self:rebuild()
 end
 
+--- 换成用户改过的词，就地重查。空白不算改成功。不关窗，避免划词进来的选区被清掉。
+---@param raw string|nil
+---@return boolean
+function Lookup:applyWord(raw)
+    local text = require("utils.text").trim(raw)
+    if text == "" then
+        return false
+    end
+    if text == self.text then
+        return true
+    end
+    for _id, job in pairs(self.jobs) do job.cancel() end
+    self.jobs = {}
+    self.content, self.status = {}, {}
+    self.ai_messages = nil
+    self.text = text
+    self.reading = Lookup.readingOf(text)
+    self.dicts = Lookup.queryDicts(self.ui, text)
+    local highlight = self.ui and self.ui.highlight
+    local selected = highlight and highlight.selected_text
+    if selected then
+        selected.text = text
+        highlight.is_word_selection = false
+    end
+    local current = self:currentDict()
+    if not current or current.empty then
+        for _idx, dict in ipairs(self.dicts) do
+            if not dict.empty then
+                self.dict_name = dict.name
+                break
+            end
+        end
+    end
+    self:select(self.active)
+    return true
+end
+
+--- 标题栏左上角的笔：改正在查的词。
+function Lookup:editWord()
+    require("ui.themes.widgets.input"):new{
+        title = _("编辑选中的文字"),
+        fields = { { text = self.text, height = 120 } },
+        callback = function(value)
+            if self._gone then return end
+            if self:applyWord(value) then return end
+            require("ui.themes.widgets.toast"):new{ text = _("选中的文字不能为空"), timeout = 2 }:show()
+        end,
+    }:show()
+end
+
 --- 点词典里的词条链接：在同一个面板位置重开查这个词（外链忽略）。
 ---@param link { uri: string|nil }
 function Lookup:followLink(link)
@@ -699,6 +749,7 @@ function Lookup:rebuild()
     if #title > 60 then title = require("utils.text").truncateUtf8(title, 60) .. "…" end
     local bar = TitleBar.widget({
         width = w, title = title, subtitle = self.reading, subtitle_face = Lookup.readingFace(),
+        left_icon = "ink_pen", left_callback = function() self:editWord() end,
         right_icon = "close", right_callback = function() self:dismiss() end,
     })
     local group = VerticalGroup:new{ align = "left", HorizontalSpan:new{ width = inner } }
