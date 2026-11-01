@@ -217,7 +217,7 @@ local function jsonAsync(self, method, url, extra_headers, body, cb)
         if isAuthError(code, res.body, res) then
             -- 技术细节只打日志；弹窗给人看的中文由 Auth → Sync.promptLogin。
             logger.warn("fanqie auth expired", httpError(method, url, code, res.body, res))
-            cb(nil, Auth.expire("fanqie", _("番茄小说登录已失效，请重新扫码登录")))
+            cb(nil, Auth.expire("fanqie", _("点这个提示上的「重新登录」。二维码出来以后，打开手机上的番茄小说 App 或抖音，用扫一扫对准屏幕上的二维码，在手机上点确认。")))
             return
         end
         if not Request.ok(code) then

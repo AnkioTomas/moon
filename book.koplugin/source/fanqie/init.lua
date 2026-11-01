@@ -151,7 +151,7 @@ function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
     if not self:configured() then
         if opts.dirty_only then return Base.skipped(cb, "fanqie not logged in") end
-        return Base.defer(cb, nil, _("请在数据源设置中扫码登录番茄小说"))
+        return Base.defer(cb, nil, _("还没登录番茄小说。打开「设置 → 书库 → 账号 → 番茄小说 → 番茄账号与登录」，用番茄小说 App 或抖音扫屏幕上的二维码。"))
     end
     -- 加入时间来自书架 add_shelf_time，否则整架一次同步的 inserted_at 相同，「最近添加」只能按书号排。
     opts.inserted_at_from_row = true
