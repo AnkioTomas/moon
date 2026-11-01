@@ -1,7 +1,8 @@
 --[[--
 主体：最近阅读封面堆叠 / 立体。最多 9 本，底边对齐，中间封面压住两侧；
 堆叠侧封面竖直缩小提亮；立体侧封面按 SimpleUI Cover Deck「flow」同款透视
-（外缘近、内缘远的梯形），箭头和滑动循环切换；标题、作者、进度在封面下方。
+（外缘近、内缘远的梯形），箭头和滑动循环切换；书名、作者、进度在封面下方，
+三项各自可关，全关时这块高度还给封面。
 
 @module koplugin.book.desktop.pages.home.recent_cards
 --]]
@@ -314,11 +315,37 @@ function M.showFirst()
     return MoonSettings.get("desktop.pages.home").home_recent_cards_show_first ~= false
 end
 
+--- 说明区是否显示书名；缺省显示。
+---@return boolean
+function M.showTitle()
+    return MoonSettings.get("desktop.pages.home").home_recent_cards_show_title ~= false
+end
+
+--- 说明区是否显示作者；缺省显示。卡片本来就有作者行，不要抄列表的默认关。
+---@return boolean
+function M.showAuthor()
+    return MoonSettings.get("desktop.pages.home").home_recent_cards_show_author ~= false
+end
+
+--- 说明区是否显示进度（百分比和进度条）；缺省显示。
+---@return boolean
+function M.showProgress()
+    return MoonSettings.get("desktop.pages.home").home_recent_cards_show_progress ~= false
+end
+
 ---@param desktop BookDesktop
 function M:showSettings(desktop)
     local layout = M.layout()
     local function refresh()
         desktop:onEvent("home_refresh")
+    end
+    ---@param key string
+    ---@param read fun(): boolean
+    local function toggle(key, read)
+        local home = MoonSettings.get("desktop.pages.home")
+        home[key] = not read()
+        MoonSettings.save("desktop.pages.home", home)
+        refresh()
     end
     require("ui.themes.widgets.sheet"):new{
         title = M.label,
@@ -335,11 +362,17 @@ function M:showSettings(desktop)
                     refresh()
                 end },
             } },
+            { text = M.showTitle() and _("✓ 显示书名") or _("显示书名"), callback = function()
+                toggle("home_recent_cards_show_title", M.showTitle)
+            end },
+            { text = M.showAuthor() and _("✓ 显示作者") or _("显示作者"), callback = function()
+                toggle("home_recent_cards_show_author", M.showAuthor)
+            end },
+            { text = M.showProgress() and _("✓ 显示进度") or _("显示进度"), callback = function()
+                toggle("home_recent_cards_show_progress", M.showProgress)
+            end },
             { text = M.showFirst() and _("✓ 显示第一本") or _("显示第一本"), callback = function()
-                local home = MoonSettings.get("desktop.pages.home")
-                home.home_recent_cards_show_first = not M.showFirst()
-                MoonSettings.save("desktop.pages.home", home)
-                refresh()
+                toggle("home_recent_cards_show_first", M.showFirst)
             end },
             { text = M.hideFinished() and _("✓ 隐藏已读完") or _("隐藏已读完"), callback = function()
                 M.saveHideFinished(not M.hideFinished())
@@ -501,31 +534,41 @@ local function coverCard(ctx, item, on_tap, stereo)
     return Tap.wrap(body, on_tap)
 end
 
+--- 焦点书的说明区。三项都关时返回 nil，调用方把高度还给封面。
 ---@param book Book
 ---@param width integer
 ---@param on_tap fun()
----@return table
+---@return table|nil
 ---@return number
 local function captionBlock(book, width, on_tap)
     local t = Theme.current()
     local xs = Theme.px(t.space.xs)
-    local author = Book.author(book)
-    local pct = Book.pct(book)
-    local label = Text.line("caption", T(_("已读 %1%"), string.format("%.0f", pct)))
-    local col = VerticalGroup:new{
-        align = "center",
-        Text.line("title", Book.title(book), { width = width }),
-        VerticalSpan:new{ width = xs },
-        Text.line("caption", author ~= "" and author or _("未知作者"),
-            { width = width, color = t.color.muted }),
-        VerticalSpan:new{ width = xs },
-        HorizontalGroup:new{
+    local lines = {}
+    if M.showTitle() then
+        lines[#lines + 1] = Text.line("title", Book.title(book), { width = width })
+    end
+    if M.showAuthor() then
+        local author = Book.author(book)
+        lines[#lines + 1] = Text.line("caption", author ~= "" and author or _("未知作者"),
+            { width = width, color = t.color.muted })
+    end
+    if M.showProgress() then
+        local pct = Book.pct(book)
+        local label = Text.line("caption", T(_("已读 %1%"), string.format("%.0f", pct)))
+        lines[#lines + 1] = HorizontalGroup:new{
             align = "center",
             label,
             HorizontalSpan:new{ width = xs },
             Progress:new{ width = math.max(Theme.px(48), width - label:getSize().w - xs), percent = pct },
-        },
-    }
+        }
+    end
+    if #lines == 0 then return nil, 0 end
+    local col = { align = "center" }
+    for i, line in ipairs(lines) do
+        if i > 1 then col[#col + 1] = VerticalSpan:new{ width = xs } end
+        col[#col + 1] = line
+    end
+    col = VerticalGroup:new(col)
     return Tap.wrap(col, on_tap), col:getSize().h
 end
 
@@ -579,7 +622,8 @@ function M:createWidget()
     local caption, caption_h = captionBlock(center_book, caption_w, function()
         M.openBook(ctx, center_book)
     end)
-    local avail_h = math.max(1, h - caption_h - gap_cap)
+    local gap = caption and gap_cap or 0
+    local avail_h = math.max(1, h - caption_h - gap)
     local arrow_w = #books > 1 and math.min(Theme.px(28), math.floor(avail_w / 8)) or 0
     local fan_w = math.max(1, avail_w - arrow_w * 2)
     local main_cap = stereo and STEREO.main_cap or 120
@@ -654,18 +698,21 @@ function M:createWidget()
         return false
     end
 
-    local body = VerticalGroup:new{
+    local body_children = {
         align = "center",
         CenterContainer:new{
             dimen = Geom:new{ w = avail_w, h = avail_h },
             overlap,
         },
-        VerticalSpan:new{ width = gap_cap },
-        CenterContainer:new{
+    }
+    if caption then
+        body_children[#body_children + 1] = VerticalSpan:new{ width = gap }
+        body_children[#body_children + 1] = CenterContainer:new{
             dimen = Geom:new{ w = avail_w, h = caption_h },
             caption,
-        },
-    }
+        }
+    end
+    local body = VerticalGroup:new(body_children)
     local host = InputContainer:new{
         dimen = Geom:new{ w = avail_w, h = math.max(1, h) },
         body,

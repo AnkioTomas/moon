@@ -120,8 +120,11 @@ do -- 关掉第一本：只在其余在读里轮换；其余也没有时给图�
     local sheet = Themed.last("sheet")
     Assert.eq(sheet.items[1].buttons[1].text, "✓ 堆叠")
     Assert.eq(sheet.items[1].buttons[2].text, "立体")
-    Assert.eq(sheet.items[2].text, "✓ 显示第一本", "缺省显示第一本")
-    Assert.eq(sheet.items[3].text, "隐藏已读完", "缺省不隐藏已读完")
+    Assert.eq(sheet.items[2].text, "✓ 显示书名", "缺省显示书名")
+    Assert.eq(sheet.items[3].text, "✓ 显示作者", "缺省显示作者")
+    Assert.eq(sheet.items[4].text, "✓ 显示进度", "缺省显示进度")
+    Assert.eq(sheet.items[5].text, "✓ 显示第一本", "缺省显示第一本")
+    Assert.eq(sheet.items[6].text, "隐藏已读完", "缺省不隐藏已读完")
     sheet.items[1].buttons[2].callback()
     Assert.eq(Cards.layout(), "stereo")
     Assert.eq(events[1], "home_refresh")
@@ -129,12 +132,21 @@ do -- 关掉第一本：只在其余在读里轮换；其余也没有时给图�
     Assert.eq(Cards.layout(), "stack")
     Assert.eq(events[2], "home_refresh")
     sheet.items[2].callback()
-    Assert.is_false(Cards.showFirst())
-    Assert.eq(events[3], "home_refresh")
+    Assert.is_false(Cards.showTitle())
     sheet.items[3].callback()
+    Assert.is_false(Cards.showAuthor())
+    sheet.items[4].callback()
+    Assert.is_false(Cards.showProgress())
+    sheet.items[5].callback()
+    Assert.is_false(Cards.showFirst())
+    Assert.eq(events[6], "home_refresh")
+    sheet.items[6].callback()
     Assert.is_true(Cards.hideFinished())
-    Assert.eq(events[4], "home_refresh")
+    Assert.eq(events[7], "home_refresh")
     Cards.saveHideFinished(false)
+    Kit.sections.home.home_recent_cards_show_title = nil
+    Kit.sections.home.home_recent_cards_show_author = nil
+    Kit.sections.home.home_recent_cards_show_progress = nil
 
     covers = {}
     local cards = Cards:new()
@@ -223,6 +235,49 @@ do -- 隐藏已读完：第一本与其余在读里 read_state=1 的都丢掉
     Cards.saveHideFinished(false)
     recent = { title = "心挣", authors = "初禾", percent = 25 }
     reading = {}
+end
+
+do -- 说明区三项可关：关掉的行不画；全关不占高度，封面变高
+    recent = { title = "心挣", authors = "初禾", percent = 25 }
+    reading = {}
+    covers = {}
+    local full = Cards:new()
+    full:build(ctx, { width = 600, height = 220 })
+    local full_h = covers[1].dimen.h
+    full:destroy()
+
+    local function has(texts, value)
+        for _idx, item in ipairs(texts) do
+            if item == value then return true end
+        end
+    end
+    local home = Kit.sections.home
+    home.home_recent_cards_show_author = false
+    covers = {}
+    local cards = Cards:new()
+    local slot = cards:build(ctx, { width = 600, height = 220 })
+    local texts = Kit.texts(slot)
+    Assert.contains(texts, "心挣")
+    Assert.contains(texts, "已读 25%")
+    Assert.is_false(has(texts, "初禾"))
+    Assert.len(Kit.taps(slot), 2, "说明区还在")
+    cards:destroy()
+
+    home.home_recent_cards_show_title = false
+    home.home_recent_cards_show_progress = false
+    covers = {}
+    cards = Cards:new()
+    slot = cards:build(ctx, { width = 600, height = 220 })
+    texts = Kit.texts(slot)
+    Assert.is_false(has(texts, "心挣"))
+    Assert.is_false(has(texts, "初禾"))
+    Assert.is_false(has(texts, "已读 25%"))
+    Assert.len(Kit.taps(slot), 1, "没有说明区，只剩封面")
+    Assert.is_true(covers[1].dimen.h > full_h, "说明区高度还给封面")
+    cards:destroy()
+    home.home_recent_cards_show_title = nil
+    home.home_recent_cards_show_author = nil
+    home.home_recent_cards_show_progress = nil
 end
 
 do -- 空书架：图书馆入口

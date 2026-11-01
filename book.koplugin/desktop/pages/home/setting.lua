@@ -17,6 +17,10 @@ return {
         home_recent_cards_show_first = true,
         -- 最近阅读卡片布局：stack 堆叠（默认）/ stereo 立体透视。
         home_recent_cards_layout = "stack",
+        -- 卡片说明区。缺省全开，和加上开关之前的画面一致；作者默认开，不要抄列表的默认关。
+        home_recent_cards_show_title = true,
+        home_recent_cards_show_author = true,
+        home_recent_cards_show_progress = true,
         -- 最近阅读列表 / 卡片共用：去掉 books.read_state=1 的已读完。
         home_recent_hide_finished = false,
         -- 一言 / 书摘整个组件是否居中。
