@@ -39,6 +39,8 @@ Base.__index = Base
 local Slot = WidgetContainer:extend{}
 
 function Slot:getSize()
+    -- 尺寸是布局分下来的。内容更高时不能把槽撑大：正文盒子会居中这截超出，
+    -- 最后一块就被画进首页翻页条。
     return self.dimen
 end
 

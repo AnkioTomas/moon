@@ -82,7 +82,16 @@ selected, heights, unused = Layout.allocate({
 Assert.eq(heights[1], 99)
 Assert.eq(unused, 21)
 
--- 超高不跨页，整体压回 available。
+-- 超高不跨页。有 shrink 的组件让位，固定高度保持内容高，编辑框才包得住字。
+selected, heights, unused = Layout.allocate({
+    { id = "clock", height = 40, placement = { height = "default" } },
+    { id = "list", height = 80, shrink = true, placement = { height = "default" } },
+}, 100, 0)
+Assert.eq(heights[1], 40, "固定高度不被压缩")
+Assert.eq(heights[2], 60, "可压缩组件吃掉超出")
+Assert.eq(unused, 0)
+
+-- 没有可压缩组件时才全体压回 available。
 selected, heights, unused = Layout.allocate({
     { id = "a", height = 40, placement = { height = "default" } },
     { id = "b", height = 40, placement = { height = "default" } },

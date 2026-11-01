@@ -135,8 +135,8 @@ do -- 长按进编辑：翻页条中间换成「添加 / 完成」；添加塞�
         return n
     end
     Assert.eq(home.pages, 1)
-    Assert.eq(arrows(), 0, "只有一页的非编辑态不显示翻页")
-    Assert.eq(desktop.root:getSize().h, 800, "隐藏翻页条保留占位，整页高度不变")
+    Assert.eq(arrows(), 0, "单页底部不显示翻页")
+    Assert.eq(desktop.root:getSize().h, 800, "整页高度不变，翻页条的高度还给正文")
     desktop.root:onHoldHomeEdit()
     Assert.is_true(home.editing)
     Assert.eq(arrows(), 2, "编辑态仍显示左右翻页")

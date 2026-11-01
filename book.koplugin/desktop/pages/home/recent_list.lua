@@ -24,7 +24,6 @@ local MIN_COLS, MAX_COLS, DEFAULT_COLS = 3, 8, 4
 
 ---@class BookHomeRecentList : BookHomeComponent
 ---@field page number|nil 当前页码
----@field paged boolean|nil 本次构建是否画了分页条
 local M = {
     id = "recent_list",
     label = _("最近阅读列表"),
@@ -223,29 +222,16 @@ local function sectionHeight()
     return Text.line("caption", "0"):getSize().h + Theme.px(Theme.current().space.xs)
 end
 
---- 书架书数按当前行列能分几页。
----@param n number 书数
----@return number
-local function pageCount(n)
-    return math.max(1, math.ceil(n / (M.cols() * M.rows())))
-end
-
---- 只有一页时不画分页条；高度要和 createWidget 的取舍一致。
----@param ctx table 构建上下文
----@return boolean
-local function paged(ctx)
-    return pageCount(#listBooks(M.readShelf(ctx))) > 1
-end
-
---- 按所选行列计算内容高度；单页不留分页条。
----@param ctx table 构建上下文
+--- 按所选行列计算内容高度。分页条始终占位：单页也画出按钮，底部才不是一条空的。
+---@param _ctx table 构建上下文
 ---@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table
-function M:heightRange(ctx, opts)
+function M:heightRange(_ctx, opts)
     local _slot_w, _cw, _ch, _cols, _gap, row_gap, cell_h = gridMetrics(opts.width)
-    local pager = paged(ctx) and Theme.px(Theme.current().control.height) or 0
+    local pager = Theme.px(Theme.current().control.height)
     local h = sectionHeight() + pager + cell_h + (M.rows() - 1) * (row_gap + cell_h)
-    return { height = h }
+    -- 封面网格会按分配高度缩小；页放不下时压这里，别压时钟 / 统计那种固定内容。
+    return { height = h, shrink = true }
 end
 
 --- 按当前分页选取书籍并组装封面网格，返回布局和分页信息。
@@ -305,8 +291,7 @@ function M:createWidget()
     local w, h = opts.width, opts.height
     local recent, reading = self:shelf()
     local books = listBooks(recent, reading)
-    self.paged = pageCount(#books) > 1
-    local pager_h = self.paged and Theme.px(t.control.height) or 0
+    local pager_h = Theme.px(t.control.height)
     local section_h = sectionHeight()
     local grid_h = math.max(1, h - section_h - pager_h)
     local page, pages = 1, 1
@@ -316,8 +301,9 @@ function M:createWidget()
         ctx.on_detail = function(book)
             require("desktop.detail").open(ctx.desktop, "library", book)
         end
-        grid, used, page, pages = buildGrid(ctx, books, w, grid_h, self.page or 1, CoverCell.opener(self, ctx, require("desktop.open").book))
-        content = VerticalGroup:new{ align = "left", grid, VerticalSpan:new{ width = math.max(0, grid_h - used) } }
+        grid, _used, page, pages = buildGrid(ctx, books, w, grid_h, self.page or 1, CoverCell.opener(self, ctx, require("desktop.open").book))
+        -- 按格子真实高度留白。用 cell_h 记账会在格子更高时再垫一行，整列就高出分配高度。
+        content = VerticalGroup:new{ align = "left", grid, VerticalSpan:new{ width = math.max(0, grid_h - grid:getSize().h) } }
     else
         content = CenterContainer:new{
             dimen = Geom:new{ w = w, h = grid_h },
@@ -333,27 +319,21 @@ function M:createWidget()
             color = Theme.chrome(), bold = true }),
         VerticalSpan:new{ width = Theme.px(t.space.xs) },
         content,
-    }
-    if self.paged then
-        col[#col + 1] = Pager.widget({
+        Pager.widget({
             width = w,
             page = page,
             pages = pages,
             keys = false,
             on_page = function(target) self.page = target; self:refresh() end,
-        })
-    end
+        }),
+    }
     return col
 end
 
---- 书架变化让分页条出现 / 消失时组件高度跟着变，只能整页重排；否则只重建自己。
+--- 换源回到第一页。分页条始终在，书架变化只重建自己。
 ---@param event string|table 从父视图转发的事件标识或事件对象
 function M:onEvent(event)
     if event == "source_changed" then self.page = nil end
-    if event == "shelf_changed" and self.active and self.home and paged(self.ctx) ~= self.paged then
-        self.home:onEvent("home_changed")
-        return
-    end
     require("desktop.pages.home.base").onEvent(self, event)
 end
 

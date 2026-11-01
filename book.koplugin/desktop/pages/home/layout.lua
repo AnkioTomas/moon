@@ -15,6 +15,7 @@ local Box = require("ui.themes.widgets.box")
 
 ---@class BookHomeHeightSpec
 ---@field height number 内容自然高度
+---@field shrink boolean|nil 放不下时可以变矮（组件按分配高度自己重排）；不标的保持内容高
 ---@field id string|nil 组件标识（布局阶段补上）
 ---@field comp BookHomeComponent|nil 组件实例（布局阶段补上）
 ---@field placement BookHomeWidgetPlacement|nil 钉页记录（布局阶段补上）
@@ -86,8 +87,9 @@ function Layout.pad(widget, top, right, bottom, left)
     return col
 end
 
---- 钉页分配：default 用内容高，自定义用像素，再加上下边距；剩余均分给 fill；放不下时整体等比压缩。
---- 页边距由 build 整页扣一次，这里只算内容高、组件边距和 gap。
+--- 钉页分配：default 用内容高，自定义用像素，再加上下边距；剩余均分给 fill。
+--- 放不下时只压 shrink / fill（它们按分配高度重排）。固定高度的再被压矮，内容会画出槽外，编辑框就对不齐。
+--- 固定高度自己已经超过整页时才全体压缩。页边距由 build 整页扣一次，这里只算内容高、组件边距和 gap。
 ---@param ranges BookHomeHeightSpec[] 各组件的内容高度
 ---@param available number 当前布局可用的总高度，单位像素
 ---@param gap number 相邻项目间距，单位像素
@@ -102,7 +104,11 @@ function Layout.allocate(ranges, available, gap)
         local mode = raw.placement and raw.placement.height or "default"
         local h = specHeight(raw)
         local mv = marginVertical(raw.placement)
-        selected[i] = { comp = raw.comp, id = raw.id, placement = raw.placement, height = h, fill = mode == "fill", margin_v = mv }
+        local shrink = raw.shrink == true or mode == "fill"
+        selected[i] = {
+            comp = raw.comp, id = raw.id, placement = raw.placement,
+            height = h, fill = mode == "fill", shrink = shrink, margin_v = mv,
+        }
         heights[i] = (type(mode) == "number" and mode or h) + mv
         if mode == "fill" then fill_idx[#fill_idx + 1] = i end
         used = used + heights[i]
@@ -110,6 +116,26 @@ function Layout.allocate(ranges, available, gap)
     local remaining = available - used
 
     if remaining < 0 then
+        local fixed, flex_idx, flex_used = gaps, {}, 0
+        for i = 1, #heights do
+            if selected[i].shrink then
+                flex_idx[#flex_idx + 1] = i
+                flex_used = flex_used + heights[i]
+            else
+                fixed = fixed + heights[i]
+            end
+        end
+        local budget = available - fixed
+        -- 有可压缩组件、并且固定高度自己还放得下：只压那些组件。
+        if #flex_idx > 0 and budget > 0 then
+            local scale = budget / math.max(1, flex_used)
+            used = fixed
+            for _idx, i in ipairs(flex_idx) do
+                heights[i] = math.max(1, math.floor(heights[i] * scale))
+                used = used + heights[i]
+            end
+            return selected, heights, math.max(0, available - used)
+        end
         local scale = (available - gaps) / math.max(1, used - gaps)
         used = gaps
         for i = 1, #heights do
