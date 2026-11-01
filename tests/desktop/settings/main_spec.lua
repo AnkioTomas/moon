@@ -158,7 +158,20 @@ package.preload["desktop.pages.setting.ai"] = function()
     return { rows = function() return {} end }
 end
 package.preload["desktop.pages.setting.device"] = function()
-    return { rows = function() return {} end }
+    return {
+        rows = function() return {} end,
+        profileRow = function(desktop, page)
+            return function(width)
+                return require("ui.themes.widgets.row").widget({
+                    width = width, title = "月读", image = "logo.png",
+                    callback = function() require("desktop.pages.setting.overlay").open(desktop, page) end,
+                })
+            end
+        end,
+        infoSections = function()
+            return { { title = "本机", rows = {} }, { title = "月读", rows = {} } }
+        end,
+    }
 end
 package.preload["http.proxy.setting"] = function()
     return {
@@ -209,7 +222,6 @@ package.preload["desktop.pages.setting.maintenance"] = function()
         clearStatsRow = function() return row("清除当前源统计") end,
         importKoreaderStatsRow = function() return row("导入 KOReader 统计") end,
         debugLogRow = function() return row("调试日志") end,
-        aboutRow = function() return row("关于") end,
         closeRow = function() return row("关闭桌面") end,
     }
 end
@@ -235,12 +247,15 @@ require("features").registerConventions()
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
--- 根页：搜索 + 非空分组（空的「游戏」组不显示），条目不直接铺开。
-Assert.eq(table.concat(section_titles, ","), "搜索,分类")
-Assert.len(built_rows, 8)
+-- 根页：搜索行没有分组标题；下面是设备分组（头像行 + 我的设备），再是分类。
+Assert.eq(table.concat(section_titles, ","), "设备,分类")
+Assert.len(built_rows, 10)
 Assert.eq(built_rows[1].title, "搜索设置")
+Assert.eq(built_rows[2].title, "月读")
+Assert.eq(built_rows[2].image, "logo.png")
+Assert.eq(built_rows[3].title, "我的设备")
 local root_groups = {}
-for i = 2, #built_rows do root_groups[#root_groups + 1] = built_rows[i].title end
+for i = 4, #built_rows do root_groups[#root_groups + 1] = built_rows[i].title end
 Assert.eq(table.concat(root_groups, ","), "书库,外观,桌面,阅读,系统,安全,维护")
 
 local function sectionTitles(page)
@@ -268,6 +283,13 @@ local function buildSectionRows(page)
     for i = before + 1, #built_rows do rows[#rows + 1] = built_rows[i] end
     return rows
 end
+
+built_rows[2].callback()
+Assert.eq(opened.id, "device")
+Assert.eq(opened.title, "设备")
+built_rows[3].callback()
+Assert.eq(opened.id, "my_device")
+Assert.eq(sectionTitles(opened), "本机,月读")
 
 -- 书库组：启用的书源（多选）/ 当前书库 / 账号（书架显示已迁到桌面 → 图书馆）
 local library = openRoot("书库")
@@ -363,7 +385,7 @@ Assert.eq(sectionTitles(system), "连接,本机,状态")
 local system_titles = {}
 for _, row in ipairs(buildSectionRows(system)) do system_titles[#system_titles + 1] = row.title end
 Assert.is_true(table.concat(system_titles, ","):find("启动与按键", 1, true) ~= nil)
-Assert.is_true(table.concat(system_titles, ","):find("设备", 1, true) ~= nil)
+Assert.is_nil(table.concat(system_titles, ","):find("设备", 1, true), "名称与头像已挪到根页设备分组")
 Assert.is_true(table.concat(system_titles, ","):find("网络", 1, true) ~= nil)
 
 local maintenance = openRoot("维护")
@@ -372,8 +394,11 @@ Assert.eq(sectionTitles(maintenance), "功能与更新,数据,其它")
 local maintenance_titles = {}
 for _, row in ipairs(buildSectionRows(maintenance)) do maintenance_titles[#maintenance_titles + 1] = row.title end
 Assert.eq(maintenance_titles[1], "功能开关")
-Assert.is_true(table.concat(maintenance_titles, ","):find("检查更新", 1, true) ~= nil)
-Assert.is_true(table.concat(maintenance_titles, ","):find("关闭桌面", 1, true) ~= nil)
+local maintenance_joined = "," .. table.concat(maintenance_titles, ",") .. ","
+Assert.is_true(maintenance_joined:find(",自动检查更新,", 1, true) ~= nil)
+Assert.is_nil(maintenance_joined:find(",检查更新,", 1, true))
+Assert.is_nil(maintenance_joined:find(",关于,", 1, true))
+Assert.is_true(maintenance_joined:find(",关闭桌面,", 1, true) ~= nil)
 
 _G.G_reader_settings = previous_settings
 

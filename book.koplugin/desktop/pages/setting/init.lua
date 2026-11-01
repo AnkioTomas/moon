@@ -1,5 +1,5 @@
 --[[--
-设置页编排：根页是分组目录，点分组进叠层列该组条目；再点才是具体设置页。
+设置页编排：根页是搜索行、设备分组，然后是分组目录。点分组进叠层列该组条目；再点才是具体设置页。
 
 条目多的组（阅读 / 系统 / 维护）在组页里按分类分节平铺，不另开一层目录（总深度最多三层：根 → 组 → 设置页）。
 分类只影响展示，不改 group / 配置键；表见 GROUP_FOLDERS。
@@ -215,9 +215,22 @@ local function coreEntries(desktop)
         },
         { group = "appearance", order = 40, id = "language", row = Language:row() },
         {
-            group = "system", order = 50, id = "device", icon = "devices", title = _("设备"),
+            group = "device", order = 10, id = "device", icon = "account_circle", title = _("设备"),
             subtitle = _("设备名称与头像"),
-            page = { title = _("设备"), sections = function() return {{ title = _("设备"), rows = DeviceSettings:rows(desktop) }} end },
+            page = {
+                title = _("设备"),
+                sections = function()
+                    return { { title = _("设备"), rows = DeviceSettings:rows(desktop) } }
+                end,
+            },
+        },
+        {
+            group = "device", order = 20, id = "my_device", icon = "devices", title = _("我的设备"),
+            subtitle = _("型号、版本、更新与加群"),
+            page = {
+                title = _("我的设备"),
+                sections = function() return DeviceSettings.infoSections(desktop) end,
+            },
         },
         {
             group = "reader", order = 55, id = "ai", icon = "psychology", title = _("AI 接口"),
@@ -228,7 +241,6 @@ local function coreEntries(desktop)
         { group = "maintenance", order = 30, id = "clear_stats", row = Maintenance:clearStatsRow(desktop) },
         { group = "maintenance", order = 40, id = "import_stats", row = Maintenance:importKoreaderStatsRow(desktop) },
         { group = "maintenance", order = 70, id = "debug_log", row = Maintenance:debugLogRow(desktop) },
-        { group = "maintenance", order = 80, id = "about", row = Maintenance:aboutRow() },
         { group = "maintenance", order = 90, id = "close_desktop", row = Maintenance:closeRow(desktop) },
     }
 end
@@ -324,8 +336,8 @@ local GROUP_FOLDERS = {
         },
         {
             id = "local", icon = "devices", title = _("本机"),
-            subtitle = _("启动、时间、输入法与设备"), default = true,
-            match = { "startup", "device", "feature:clock", "feature:ime" },
+            subtitle = _("启动、时间与输入法"), default = true,
+            match = { "startup", "feature:clock", "feature:ime" },
         },
         {
             id = "status", icon = "monitoring", title = _("状态"),
@@ -337,8 +349,8 @@ local GROUP_FOLDERS = {
         {
             -- id 不能叫 features：边界检查会把裸 "features" 串当成 require("features")。
             id = "manage", icon = "delete_sweep", title = _("功能与更新"),
-            subtitle = _("功能开关与检查更新"),
-            match = { "feature:manage", "update_auto", "update_check" },
+            subtitle = _("功能开关与自动检查"),
+            match = { "feature:manage", "update_auto" },
         },
         {
             id = "data", icon = "storage", title = _("数据"),
@@ -347,8 +359,8 @@ local GROUP_FOLDERS = {
         },
         {
             id = "other", icon = "info", title = _("其它"),
-            subtitle = _("调试、关于与关闭桌面"), default = true,
-            match = { "debug_log", "about", "close_desktop" },
+            subtitle = _("调试与关闭桌面"), default = true,
+            match = { "debug_log", "close_desktop" },
         },
     },
 }
@@ -458,13 +470,14 @@ local function groupRow(desktop, group)
     end
 end
 
---- 构建设置根页：只列搜索 + 分组目录；组内条目在叠层里。
+--- 构建设置根页：搜索行（无分组标题）+ 设备分组 + 其余分组目录。
 ---@return table
 function Settings:updateView()
     local desktop = self.desktop
     local entries = coreEntries(desktop)
     for _idx, entry in ipairs(Tree.features(desktop)) do entries[#entries + 1] = entry end
     local roots = {
+        { id = "device", title = _("设备"), icon = "devices" },
         { id = "library", title = _("书库"), icon = "local_library" },
         { id = "appearance", title = _("外观"), icon = "palette" },
         { id = "desktop", title = _("桌面"), icon = "home" },
@@ -488,13 +501,24 @@ function Settings:updateView()
     for _idx, r in ipairs(roots) do icons[r.id] = r.icon end
     for _idx, group in ipairs(groups) do group.icon = icons[group.id] end
 
-    local group_rows = {}
+    local device_rows, group_rows = {}, {}
     for _idx, group in ipairs(groups) do
-        local row = groupRow(desktop, group)
-        if row then group_rows[#group_rows + 1] = row end
+        if group.id == "device" then
+            for _i, entry in ipairs(group.entries) do
+                -- 名称页的导航行换成头像 + 当前名称；page 仍留给搜索。
+                if entry.id == "device" then
+                    entry.row = DeviceSettings.profileRow(desktop, entry.page)
+                end
+                device_rows[#device_rows + 1] = entry.row or navRow(desktop, entry, false)
+            end
+        else
+            local row = groupRow(desktop, group)
+            if row then group_rows[#group_rows + 1] = row end
+        end
     end
     local sections = {
-        { title = _("搜索"), rows = { searchRow(self, groups) } },
+        { rows = { searchRow(self, groups) } },
+        { title = _("设备"), rows = device_rows },
         { title = _("分类"), rows = group_rows },
     }
     local body

@@ -37,7 +37,7 @@ function Welcome.promptDocs()
     Settings.save("desktop")
     Confirm:new{
         title = _("欢迎使用月读"),
-        text = _("要看看使用文档吗？\n之后也可以在「设置 → 维护 → 关于」里找到项目主页。"),
+        text = _("要看看使用文档吗？\n之后也可以在「设置 → 设备 → 我的设备」里找到项目主页。"),
         ok_text = _("查看文档"),
         cancel_text = _("以后再说"),
         extra_text = _("加入交流群"),

@@ -35,30 +35,32 @@ local Pager = require("ui.themes.widgets.pager")
 local Text = require("ui.themes.widgets.text")
 
 ---@class BookThemeSection
----@field title string
+---@field title string|nil 省略则不画分组标题，只排行
 ---@field rows (fun(width: number): table)[]
 
 ---@class BookThemeSections
 local Sections = {}
 
---- 分组标题块：间隔（首组没有）+ 标题 + 首行。
+--- 分组标题块：间隔（首组没有）+ 标题（可省略）+ 首行。
 ---@param t table 主题令牌
 ---@param section BookThemeSection
 ---@param width number
 ---@param first boolean
 ---@return table
 local function head(t, section, width, first)
-    local pad = Theme.px(t.space.md)
     local block = VerticalGroup:new{ align = "left" }
     if not first then block[#block + 1] = VerticalSpan:new{ width = Theme.px(t.space.md) } end
-    block[#block + 1] = LeftContainer:new{
-        dimen = Geom:new{ w = width, h = Theme.px(t.font.caption) + pad * 2 },
-        HorizontalGroup:new{
-            HorizontalSpan:new{ width = pad },
-            Text.line("caption", section.title, { width = width - pad * 2,
-                color = Theme.chrome() }),
-        },
-    }
+    if section.title and section.title ~= "" then
+        local pad = Theme.px(t.space.md)
+        block[#block + 1] = LeftContainer:new{
+            dimen = Geom:new{ w = width, h = Theme.px(t.font.caption) + pad * 2 },
+            HorizontalGroup:new{
+                HorizontalSpan:new{ width = pad },
+                Text.line("caption", section.title, { width = width - pad * 2,
+                    color = Theme.chrome() }),
+            },
+        }
+    end
     if section.rows[1] then block[#block + 1] = section.rows[1](width) end
     return block
 end
