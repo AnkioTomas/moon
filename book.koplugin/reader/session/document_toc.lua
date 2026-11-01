@@ -132,8 +132,8 @@ function DocumentToc.current(ui)
     return { idx = idx, title = entry.title }
 end
 
---- 当前页在本章的序号与本章页数（与 ReaderFooter 章节进度同口径，含页码标签与隐藏流）；
---- 首章之前或没有目录返回 nil。
+--- 当前页在本章的序号与本章页数（与 ReaderFooter 章节进度同口径，含页码标签与隐藏流）。
+--- 首章之前、没有目录、或章界没有把书切开（算出来和全书页码是同一个数）返回 nil。
 ---@param ui table|nil
 ---@return integer|nil page
 ---@return integer|nil count
@@ -142,7 +142,13 @@ function DocumentToc.chapterPages(ui)
     if not page then return nil end
     local done = ui.toc:getChapterPagesDone(page)
     if not done then return nil end
-    return done + 1, ui.toc:getChapterPageCount(page)
+    local count = tonumber(ui.toc:getChapterPageCount(page))
+    local current = done + 1
+    if not count or count <= 0 then return nil end
+    local total = ui.document and ui.document:getPageCount()
+    local book_page, book_total = require("reader.session.pages").document(ui, page, total)
+    if current == book_page and count == book_total then return nil end
+    return current, count
 end
 
 ---@param ui table|nil

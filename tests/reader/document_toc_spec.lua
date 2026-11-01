@@ -24,6 +24,7 @@ local ui = {
             }
         end,
         getPageCount = function() return 100 end,
+        hasHiddenFlows = function() return false end,
     },
     toc = {
         toc = nil,
@@ -74,5 +75,10 @@ do
     state.page = 15
     Assert.eq(DocumentToc.chapterPages(ui), 6)
     state.page = 5
+    Assert.is_nil(DocumentToc.chapterPages(ui))
+    -- 目录没把书切开：章内页码会和全书页码相同，不报。
+    ui.toc.getChapterPagesDone = function(_, p) return p - 1 end
+    ui.toc.getChapterPageCount = function() return 100 end
+    state.page = 12
     Assert.is_nil(DocumentToc.chapterPages(ui))
 end

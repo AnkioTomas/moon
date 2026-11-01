@@ -170,7 +170,8 @@ Items.CATALOG = {
     {
         id = "page", label = _("页码"), icon = "pin", top = true, bottom = true,
         glyph = "docs",
-        text = function(ctx) return fraction(ctx.page, ctx.total_pages, "%d/%d") end,
+        -- 不省前缀：和章内页码都是 N/M，图标区分不开，第一章当前页本来就相同。
+        text = function(ctx) return fraction(ctx.page, ctx.total_pages, _("全书 %d/%d")) end,
     },
     {
         id = "percent", label = _("进度"), icon = "percent", top = true, bottom = true,
@@ -186,8 +187,8 @@ Items.CATALOG = {
     {
         id = "chapter_page", label = _("章内页码"), icon = "auto_stories", top = true, bottom = true,
         glyph = "auto_stories",
-        text = function(ctx, icons)
-            return fraction(ctx.chapter_page, ctx.chapter_pages, _("本章 %d/%d"), icons)
+        text = function(ctx)
+            return fraction(ctx.chapter_page, ctx.chapter_pages, _("本章 %d/%d"))
         end,
     },
     {
