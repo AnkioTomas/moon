@@ -166,3 +166,139 @@ do
     Assert.eq(tapped, 1)
     Assert.is_false(inst:onTap({ pos = { x = 12, y = 25 } }), "气泡之外不响应")
 end
+
+--- 白底上若干行墨迹。rows[y] = true 表示这一行有字。
+local function inkBB(rows, inverse)
+    local bb = {
+        getWidth = function() return 400 end,
+        getHeight = function() return 400 end,
+        getPixel = function(_bb, _x, y)
+            local on = rows[y] == true
+            if inverse then on = not on end
+            local a = on and 0 or 255
+            return { getColor8 = function() return { a = a } end }
+        end,
+        rects = {},
+        paintRect = function(self, x, y, w) self.rects[#self.rects + 1] = { x = x, y = y, w = w } end,
+    }
+    if inverse then bb.getInverse = function() return 1 end end
+    return bb
+end
+
+local function fill(rows, y0, y1)
+    for y = y0, y1 do rows[y] = true end
+end
+
+local function lineYs(bb)
+    local ys = {}
+    for _idx, rect in ipairs(bb.rects) do ys[rect.y] = true end
+    local out = {}
+    for y in pairs(ys) do out[#out + 1] = y end
+    table.sort(out)
+    return out
+end
+
+do
+    -- 没有像素可读（测试画布）时仍贴着行框底，旧行为不变。
+    local ui = newUi()
+    local inst = PageMarks.add(ui, "reviews", 20, layer({
+        { boxes = { { x = 0, y = 0, w = 40, h = 20 } }, solid = true, tap = function() end },
+    }))
+    local bb = newBB()
+    inst:paintTo(bb)
+    Assert.eq(bb.rects[1].y, 19)
+end
+
+do
+    -- 字形在行框里偏上（下留白厚）：线要抬到两行墨迹正中，不能贴框底。
+    -- 行框 y=100 h=40，墨迹 105–125，下一行墨迹从 145 起。笔画厚 2，中心在 135。
+    local rows = {}
+    fill(rows, 105, 125)
+    fill(rows, 145, 165)
+    local ui = newUi()
+    local inst = PageMarks.add(ui, "reviews", 20, layer({
+        { boxes = { { x = 10, y = 100, w = 200, h = 40 } }, solid = true, tap = function() end },
+    }))
+    local bb = inkBB(rows)
+    inst:paintTo(bb)
+    Assert.eq(bb.rects[1].y, 134, "偏下的框底要抬到行距正中")
+end
+
+do
+    -- 字形框贴着墨迹、行距在框外：线要降到空隙里，不能贴着字底。
+    -- 行框 y=100 h=22，墨迹铺满 100–121，下一行从 140 起。空隙 122–139 的中心是 130.5。
+    local rows = {}
+    fill(rows, 100, 121)
+    fill(rows, 140, 158)
+    local ui = newUi()
+    local inst = PageMarks.add(ui, "reviews", 20, layer({
+        { boxes = { { x = 10, y = 100, w = 200, h = 22 } }, solid = true, tap = function() end },
+    }))
+    local bb = inkBB(rows)
+    inst:paintTo(bb)
+    Assert.eq(bb.rects[1].y, 130, "贴着字的框底要降到行距正中")
+    Assert.is_true(inst:onTap({ pos = { x = 20, y = 131 } }), "点在框外的线上也要命中")
+end
+
+do
+    -- 段距比行距厚：线留在正常行距里，不漂进两段之间的大空白。
+    -- 墨迹 105–120，下一段从 160 起（仍在一行高以内，但比本行留白厚）。按留白估下一行顶在 145，笔画顶 132。
+    local rows = {}
+    fill(rows, 105, 120)
+    fill(rows, 160, 180)
+    local ui = newUi()
+    local inst = PageMarks.add(ui, "reviews", 20, layer({
+        { boxes = { { x = 10, y = 100, w = 200, h = 40 } }, solid = true, tap = function() end },
+    }))
+    local bb = inkBB(rows)
+    inst:paintTo(bb)
+    Assert.eq(bb.rects[1].y, 132)
+end
+
+do
+    -- 同一行网格上，段首高框（段前距在上沿）和普通框用同一个偏移。
+    -- 夜间反色：墨迹是亮的，照样取中。
+    local rows = {}
+    fill(rows, 105, 125)
+    fill(rows, 145, 165)
+    local ui = newUi()
+    local inst = PageMarks.add(ui, "reviews", 20, layer({ {
+        boxes = {
+            { x = 10, y = 80, w = 200, h = 60 },
+            { x = 10, y = 140, w = 200, h = 40 },
+        },
+        solid = true,
+        tap = function() end,
+    } }))
+    local bb = inkBB(rows, true)
+    inst:paintTo(bb)
+    local ys = lineYs(bb)
+    Assert.eq(ys[1], 134, "段首高框对齐到行框底减同一个偏移")
+    Assert.eq(ys[2], 174, "普通框用同一个偏移")
+end
+
+do
+    -- 正文行数多过脚注时，按正文行高取中，不被更矮的框带跑。
+    local rows = {}
+    fill(rows, 105, 125)
+    fill(rows, 145, 165)
+    fill(rows, 185, 205)
+    fill(rows, 300, 319)
+    fill(rows, 330, 349)
+    local ui = newUi()
+    local inst = PageMarks.add(ui, "reviews", 20, layer({ {
+        boxes = {
+            { x = 10, y = 100, w = 200, h = 40 },
+            { x = 10, y = 140, w = 200, h = 40 },
+            { x = 10, y = 300, w = 40, h = 20 },
+        },
+        solid = true,
+        tap = function() end,
+    } }))
+    local bb = inkBB(rows)
+    inst:paintTo(bb)
+    local ys = lineYs(bb)
+    Assert.eq(ys[1], 134)
+    Assert.eq(ys[2], 174)
+    Assert.eq(ys[3], 314, "脚注跟着正文的偏移，不按自己更矮的框另算")
+end
