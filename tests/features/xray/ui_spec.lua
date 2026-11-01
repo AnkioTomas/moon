@@ -21,11 +21,17 @@ package.preload["utils.text"] = function()
 end
 package.preload["features.xray.kinds"] = function() return { label = function() return "人物" end } end
 local cleared_removed = {}
+local reset_calls = {}
+local reset_ok = true
 package.preload["features.xray.db"] = function()
     return {
         clearRemoved = function(source_id, stable_id)
             cleared_removed[#cleared_removed + 1] = source_id .. "\0" .. stable_id
             return true
+        end,
+        reset = function(source_id, stable_id)
+            reset_calls[#reset_calls + 1] = source_id .. "\0" .. stable_id
+            return reset_ok
         end,
     }
 end
@@ -215,6 +221,31 @@ connected, configured = true, false
 Assert.is_false(require("features.xray.ui").prefetch(ui, false))
 configured, running_task = true, { key = "x" }
 Assert.is_false(require("features.xray.ui").prefetch(ui, false))
+running_task = nil
+
+-- 重置此书 x-ray：先确认，确认后清掉这本书全部数据（实体、游标、墓碑、章节记录）
+reset_calls = {}
+require("features.xray.ui").resetBook(ui)
+Assert.len(reset_calls, 0, "确认前不动数据")
+Assert.eq(confirm.ok_text, "重置")
+confirm.ok_callback()
+Assert.eq(reset_calls[1], "moon\0book-1", "确认后清掉这本书全部 x-ray 数据")
+Assert.eq(toasts[#toasts], "已重置此书 X-Ray")
+
+-- 重置失败：只提示，不刷界面
+reset_ok = false
+require("features.xray.ui").resetBook(ui)
+confirm.ok_callback()
+Assert.eq(toasts[#toasts], "重置失败")
+reset_ok = true
+
+-- 这本书还有生成任务在跑：拒绝重置，不弹确认、不动数据
+running_task = { key = "xray\0moon\0book-1" }
+confirm, reset_calls = nil, {}
+require("features.xray.ui").resetBook(ui)
+Assert.is_nil(confirm, "任务在跑时不弹确认")
+Assert.len(reset_calls, 0, "任务在跑时不动数据")
+Assert.eq(toasts[#toasts], "本书 X-Ray 正在生成，请先取消或等待完成")
 running_task = nil
 
 return true

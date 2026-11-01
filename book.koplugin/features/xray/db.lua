@@ -261,4 +261,31 @@ function XrayDB.replace(source_id, stable_id, entities, updated_at)
     end) == true
 end
 
+--- 清掉这本书全部 X-Ray 数据：实体、续扫游标、墓碑、已识别章节记录（「重置此书 x-ray」用）。
+--- 墓碑也清：重置就是不保留任何历史，删过的实体重新生成时还能收录。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function XrayDB.reset(source_id, stable_id)
+    return DB.transaction(function()
+        if not DB.exec("DELETE FROM xray_entities WHERE source_id=? AND stable_id=?;",
+                source_id, stable_id) then
+            return false
+        end
+        if not DB.exec("DELETE FROM xray_scan WHERE source_id=? AND stable_id=?;",
+                source_id, stable_id) then
+            return false
+        end
+        if not DB.exec("DELETE FROM xray_removed WHERE source_id=? AND stable_id=?;",
+                source_id, stable_id) then
+            return false
+        end
+        if not DB.exec("DELETE FROM xray_chapter WHERE source_id=? AND stable_id=?;",
+                source_id, stable_id) then
+            return false
+        end
+        return true
+    end) == true
+end
+
 return XrayDB

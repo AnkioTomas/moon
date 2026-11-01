@@ -74,3 +74,25 @@ Assert.is_true(XrayDB.clearRemoved("moon", "b1"))
 Assert.matches(calls[#calls].sql, "DELETE FROM xray_removed")
 Assert.eq(calls[#calls].args[1], "moon")
 Assert.eq(calls[#calls].args[2], "b1")
+
+-- 重置此书 x-ray：实体、游标、墓碑、章节记录四张表同一事务里按身份清空，墓碑也清
+calls = {}
+Assert.is_true(XrayDB.reset("moon", "b1"))
+Assert.eq(calls[1].sql, "BEGIN IMMEDIATE;")
+local reset_tables = {}
+for _idx, c in ipairs(calls) do
+    local tbl = c.sql:match("^DELETE FROM ([%w_]+)")
+    if tbl then
+        reset_tables[#reset_tables + 1] = tbl
+        Assert.eq(c.args[1], "moon")
+        Assert.eq(c.args[2], "b1")
+    end
+end
+Assert.eq(table.concat(reset_tables, ","), "xray_entities,xray_scan,xray_removed,xray_chapter")
+Assert.eq(calls[#calls].sql, "COMMIT;")
+
+-- 事务中途失败：整体回滚，报告 false
+fail_commit = true
+Assert.is_false(XrayDB.reset("moon", "b1"))
+Assert.eq(calls[#calls].sql, "ROLLBACK;")
+fail_commit = false
