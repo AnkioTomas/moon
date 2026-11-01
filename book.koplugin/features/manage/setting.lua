@@ -20,11 +20,14 @@ local function sections(desktop)
     local rows = {}
     for _idx, item in ipairs(Manage.items()) do
         local marked = Manage.isMarked(item.id)
+        -- 这次启动就没加载：已停用。这次才点的：模块还在，重启后才停。
+        local status = ""
+        if marked then status = Manage.isSkipped(item.id) and _("已停用") or _("重启后停用") end
         rows[#rows + 1] = function(iw)
             return Row.widget({
                 width = iw, chevron = false, kind = "action", icon = "delete", title = item.label,
                 subtitle = item.subtitle,
-                status = marked and _("重启后停用") or "", status_on = marked,
+                status = status, status_on = marked,
                 callback = function()
                     if marked then
                         Manage.toggle(item.id)

@@ -59,6 +59,15 @@ local function marked()
     return require("utils.settings").get("features.manage").disabled
 end
 
+--- 本次启动 apply 时就已经跳过的 feature。之后再点停用的不在这里：模块还在，要等重启。
+local skipped = {}
+
+---@param id string
+---@return boolean
+function Manage.isSkipped(id)
+    return skipped[id] == true
+end
+
 ---@param id string
 ---@return boolean
 function Manage.isMarked(id)
@@ -98,6 +107,7 @@ function Manage.apply(list)
             end
         end
     end
+    skipped = off
     return off
 end
 
