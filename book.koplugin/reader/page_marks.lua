@@ -112,8 +112,11 @@ end
 ---@return boolean
 function PageMarks.hit(pos, box)
     local pad = math.max(8, math.floor((box.h or 0) * 0.5))
+    local bottom = box.y + box.h + 2
+    -- 线画在行框下面时（字形框贴着墨迹），点按要盖住线。
+    if box.line_y and box.line_y > bottom then bottom = box.line_y + 2 end
     return pos.x >= box.x and pos.x <= box.x + box.w
-        and pos.y >= box.y - pad and pos.y <= box.y + box.h + 2
+        and pos.y >= box.y - pad and pos.y <= bottom
 end
 
 --- 两框同一行：竖向重叠超过较矮者的一半（相邻两行只挨着边，不算）。
@@ -181,21 +184,168 @@ local function highlightBoxes(ui)
     return out
 end
 
---- 在段底画下划线（缺省虚线）。
+-- 行框是排版行高，不是字形。框底贴着下一行框顶，字形在框里的上下留白不对称，
+-- 线画在框底就会偏上或偏下。按已画好的正文像素，把线放在本行墨迹底和下一行墨迹顶的正中。
+local SAMPLE_MAX = 6
+local MIN_SAMPLE_W = 12
+
+---@param bb any
+---@param x number
+---@param y number
+---@return number|nil
+local function luminance(bb, x, y)
+    if x < 0 or y < 0 or x >= bb:getWidth() or y >= bb:getHeight() then return nil end
+    local color = bb:getPixel(x, y)
+    local gray = color and color.getColor8 and color:getColor8()
+    return gray and gray.a
+end
+
+---@param a number
+---@param dark boolean 夜间反色时墨迹是亮的
+---@return boolean
+local function isInk(a, dark)
+    if dark then return a < 128 end
+    return a > 128
+end
+
+---@param bb any
+---@param x number
+---@param w number
+---@param y number
+---@param dark boolean
+---@return boolean
+local function rowHasInk(bb, x, w, y, dark)
+    local step = math.max(1, math.floor(w / 5))
+    for px = x, x + w - 1, step do
+        local a = luminance(bb, px, y)
+        if a and isInk(a, dark) then return true end
+    end
+    return false
+end
+
+--- 行框里墨迹的首行、末行（屏幕 y）。
+---@param bb any
+---@param rect table
+---@param dark boolean
+---@return number|nil
+---@return number|nil
+local function inkEdges(bb, rect, dark)
+    local y1 = rect.y + rect.h - 1
+    local first
+    for y = rect.y, y1 do
+        if rowHasInk(bb, rect.x, rect.w, y, dark) then first = y; break end
+    end
+    if not first then return nil, nil end
+    for y = y1, first, -1 do
+        if rowHasInk(bb, rect.x, rect.w, y, dark) then return first, y end
+    end
+    return nil, nil
+end
+
+--- 行框下方、一行高以内的下一处墨迹。
+---@param bb any
+---@param rect table
+---@param dark boolean
+---@return number|nil
+local function nextInk(bb, rect, dark)
+    local y0 = rect.y + rect.h
+    local y1 = math.min(bb:getHeight() - 1, y0 + rect.h - 1)
+    for y = y0, y1 do
+        if rowHasInk(bb, rect.x, rect.w, y, dark) then return y end
+    end
+end
+
+--- 笔画顶边，使整段笔画的中心落在 last 与 nxt 两行墨迹的正中。
+---@param last number
+---@param nxt number
+---@param thick number
+---@return number
+local function strokeTop(last, nxt, thick)
+    return math.floor((last + nxt - (thick - 1)) / 2)
+end
+
+--- 本行自己的上下留白估出来的行距。段前距在行框上沿，比下留白厚一截就不当成下一行的留白。
+---@param rect table
+---@param first number
+---@param last number
+---@return number expected
+---@return number guessed 估出来的下一行墨迹顶
+local function expectedGap(rect, first, last)
+    local top_pad = first - rect.y
+    local bottom_pad = rect.y + rect.h - 1 - last
+    if top_pad > bottom_pad * 2 + 4 then top_pad = bottom_pad end
+    return top_pad + bottom_pad, rect.y + rect.h + top_pad
+end
+
+---@param values number[]
+---@return number
+local function median(values)
+    table.sort(values)
+    return values[math.ceil(#values / 2)]
+end
+
+--- 下划线顶边相对行框底边的偏移。量不到（无像素、空白）就贴框底。
+---@param bb any
+---@param pieces table[]
+---@param thick number
+---@return number
+local function lineDelta(bb, pieces, thick)
+    if not (bb.getPixel and bb.getWidth and bb.getHeight) then return -1 end
+    local dark = not (bb.getInverse and bb:getInverse() == 1)
+    local count = {}
+    local pitch, pitch_n
+    for _idx, rect in ipairs(pieces) do
+        if rect.w >= MIN_SAMPLE_W and rect.h > 0 then
+            count[rect.h] = (count[rect.h] or 0) + 1
+            if not pitch_n or count[rect.h] > pitch_n then pitch, pitch_n = rect.h, count[rect.h] end
+        end
+    end
+    if not pitch then return -1 end
+    local picked = {}
+    for _idx, rect in ipairs(pieces) do
+        if rect.w >= MIN_SAMPLE_W and math.abs(rect.h - pitch) <= 2 then
+            picked[#picked + 1] = rect
+        end
+    end
+    table.sort(picked, function(a, b) return a.w > b.w end)
+    local deltas = {}
+    for i = 1, math.min(SAMPLE_MAX, #picked) do
+        local rect = picked[i]
+        local first, last = inkEdges(bb, rect, dark)
+        if first and last then
+            local expected, guessed = expectedGap(rect, first, last)
+            local nxt = nextInk(bb, rect, dark)
+            local gap = nxt and nxt - last or 0
+            -- 留白很薄（字形框贴着墨迹）时，下一行在框外，一行高以内都算。
+            -- 段距比行距厚，不能把线拖进行距下面的空白。
+            local limit = expected < 4 and rect.h or expected * 1.5 + 2
+            local target = (gap > 0 and gap <= limit) and nxt or guessed
+            if target > last then
+                deltas[#deltas + 1] = strokeTop(last, target, thick) - (rect.y + rect.h)
+            end
+        end
+    end
+    if #deltas == 0 then return -1 end
+    return median(deltas)
+end
+
+--- 在段底画下划线（缺省虚线）。``delta`` 是相对行框底边的偏移。
 ---@param bb any Blitbuffer
 ---@param rect table
 ---@param solid boolean|nil
-local function underline(bb, rect, solid)
-    local Blitbuffer = require("ffi/blitbuffer")
-    local Size = require("ui/size")
-    local color = Blitbuffer.COLOR_DARK_GRAY
-    local line_y = rect.y + rect.h - 1
+---@param delta number
+---@param thick number
+local function underline(bb, rect, solid, delta, thick)
+    local color = require("ffi/blitbuffer").COLOR_DARK_GRAY
+    local line_y = rect.y + rect.h + delta
+    if line_y < rect.y then line_y = rect.y + rect.h - 1 end
+    rect.line_y = line_y
     if solid then
-        bb:paintRect(rect.x, line_y, rect.w, Size.line.thick, color)
+        bb:paintRect(rect.x, line_y, rect.w, thick, color)
         return
     end
     for i = rect.x, rect.x + rect.w - 8, 10 do
-        bb:paintRect(i, line_y, 6, Size.line.thick, color)
+        bb:paintRect(i, line_y, 6, thick, color)
     end
 end
 
@@ -235,32 +385,70 @@ local function bubble(bb, box, text)
     return { x = x, y = y, w = w, h = h + tail }
 end
 
---- 画一个图层：逐条占位，画剩余段，记入本帧已画列表。
+--- 占位，先不画。下划线的垂直位置要等本帧所有行框都齐了再量。
 ---@param entry { layer: PageMarkLayer }
----@param bb any Blitbuffer
 ---@param taken table[]
----@param painted table[]
-local function paintLayer(entry, bb, taken, painted)
+---@param batch table[]
+local function collectLayer(entry, taken, batch)
+    local items = {}
     for _idx, mark in ipairs(entry.layer:marks()) do
-        local pieces
         if mark.badge then
-            pieces = { bubble(bb, mark.boxes[#mark.boxes], mark.badge) }
+            items[#items + 1] = { mark = mark, badge = mark.boxes[#mark.boxes] }
         else
-            pieces = claim(mark, taken)
-            for _piece_idx, piece in ipairs(pieces) do underline(bb, piece, mark.solid) end
+            local pieces = claim(mark, taken)
+            if #pieces > 0 then items[#items + 1] = { mark = mark, pieces = pieces } end
         end
-        if #pieces > 0 then painted[#painted + 1] = { mark = mark, pieces = pieces } end
     end
-    if entry.layer.paint then entry.layer:paint(bb) end
+    batch[#batch + 1] = { entry = entry, items = items }
+end
+
+---@param batch table[]
+---@return table[]
+local function linePieces(batch)
+    local pieces = {}
+    for _idx, group in ipairs(batch) do
+        for _item_idx, item in ipairs(group.items) do
+            if item.pieces then
+                for _piece_idx, piece in ipairs(item.pieces) do pieces[#pieces + 1] = piece end
+            end
+        end
+    end
+    return pieces
+end
+
+--- 画一个图层：下划线、气泡、自绘，记入本帧已画列表。
+---@param group { entry: { layer: PageMarkLayer }, items: table[] }
+---@param bb any Blitbuffer
+---@param delta number
+---@param thick number
+---@param painted table[]
+local function drawGroup(group, bb, delta, thick, painted)
+    for _idx, item in ipairs(group.items) do
+        local pieces
+        if item.badge then
+            pieces = { bubble(bb, item.badge, item.mark.badge) }
+        else
+            pieces = item.pieces
+            for _piece_idx, piece in ipairs(pieces) do underline(bb, piece, item.mark.solid, delta, thick) end
+        end
+        if #pieces > 0 then painted[#painted + 1] = { mark = item.mark, pieces = pieces } end
+    end
+    if group.entry.layer.paint then group.entry.layer:paint(bb) end
 end
 
 --- 作为 view module 被调用；每个图层各自经 guard 隔离，一层画坏不影响其它层。
 ---@param bb any Blitbuffer
 function PageMarks:paintTo(bb)
     local taken = highlightBoxes(self.ui)
-    local painted = {}
+    local batch = {}
     for _idx, entry in ipairs(self.layers) do
-        Guard.paint(entry.id .. ".paintTo", paintLayer, entry, bb, taken, painted)
+        Guard.paint(entry.id .. ".paintTo", collectLayer, entry, taken, batch)
+    end
+    local thick = require("ui/size").line.thick
+    local delta = lineDelta(bb, linePieces(batch), thick)
+    local painted = {}
+    for _idx, group in ipairs(batch) do
+        Guard.paint(group.entry.id .. ".paintTo", drawGroup, group, bb, delta, thick, painted)
     end
     self.painted = painted
 end
