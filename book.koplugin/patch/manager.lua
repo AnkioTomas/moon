@@ -5,8 +5,9 @@
 描述要改哪些文件、在哪个锚点前插入什么，以及要随运行时补丁目录一起分发的静态文件，
 静态文件与 definition.lua 同目录。
 
-安装前先备份原文件到 `$DATA/.moon/backups/patches/<definition.name>/`，恢复时从备份
-回写。锚点匹配不到或备份缺失时直接失败，绝不猜测写入。
+安装前先备份原文件到 `$DATA/.moon/backups/patches/<definition.name>/`，恢复时优先
+从备份回写。备份缺失时只删除当初按定义插入的那一段（整段逐字节且唯一匹配）；
+匹配不到就失败，绝不猜测写入。
 
 @module koplugin.book.patch.manager
 --]]
@@ -254,8 +255,22 @@ function Manager._rollbackInstall(def, targets)
     return "; rollback failed, restore manually: " .. table.concat(failed, ", ")
 end
 
---- 恢复补丁：仅当目标仍带补丁标记时从备份回写；已失效（如升级被覆盖）则不
---- 用陈旧备份覆盖新文件，只清理运行时补丁文件。
+--- 备份丢失时摘掉安装时插入的那一段。安装写的是 `content .. "\n"`，整段唯一
+--- 命中才删；改过、重复出现或删完标记还在，都当匹配失败。
+---@param content string
+---@param f table
+---@return string|nil
+local function withoutInserted(content, f)
+    local needle = f.content .. "\n"
+    local at = content:find(needle, 1, true)
+    if not at or content:find(needle, at + 1, true) then return nil end
+    local stripped = content:sub(1, at - 1) .. content:sub(at + #needle)
+    if stripped:find(f.sentinel, 1, true) then return nil end
+    return stripped
+end
+
+--- 恢复补丁：仅当目标仍带补丁标记时回写。有备份用备份；没有就摘掉插入段。
+--- 已失效（如升级被覆盖）则不用陈旧备份覆盖新文件，只清理运行时补丁文件。
 ---@param dir string 补丁目录（含 definition.lua）
 ---@return table { ok = true } | { ok = false, err = string }
 function Manager.restore(dir)
@@ -270,11 +285,13 @@ function Manager.restore(dir)
             return { ok = false, err = "cannot read " .. path .. ": " .. tostring(rerr) }
         end
         if content:find(f.sentinel, 1, true) then
-            local backup = readFile(bdir .. "/" .. f.path)
-            if backup == nil then
+            -- 备份是整文件基线。没有备份时，插入段还和定义逐字节一致就能摘掉，
+            -- 否则关掉开关会永远失败（.moon/backups 被清掉、或文件早已打过补丁再装一次）。
+            local restored = readFile(bdir .. "/" .. f.path) or withoutInserted(content, f)
+            if restored == nil then
                 return { ok = false, err = "no backup for " .. path }
             end
-            local ok, werr = writeFile(path, backup)
+            local ok, werr = writeFile(path, restored)
             if not ok then
                 return { ok = false, err = "restore failed: " .. tostring(werr) }
             end

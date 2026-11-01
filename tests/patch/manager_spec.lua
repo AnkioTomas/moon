@@ -198,16 +198,29 @@ do
     Assert.is_true((res.err or ""):find("cannot read", 1, true) ~= nil)
 end
 
--- 无备份恢复：失败且不写目标
+-- 无备份：插入段还在就按定义摘掉，文件回到原样，运行时补丁清掉
 do
     local paths = setup(FAKE_TARGET)
     Assert.is_true(Manager.install(DIR).ok)
     os.remove(paths.backups .. "/frontend/ui/uimanager.lua")
-    local patched = read(paths.target)
+    local res = Manager.restore(DIR)
+    Assert.is_true(res.ok, res.err)
+    Assert.eq(read(paths.target), FAKE_TARGET)
+    Assert.is_nil(read(paths.patches .. "/2-swipe-animation-core.lua"))
+    Assert.is_false(Manager.isApplied(DIR))
+end
+
+-- 无备份且插入段已被改过：失败，不写目标
+do
+    local paths = setup(FAKE_TARGET)
+    Assert.is_true(Manager.install(DIR).ok)
+    os.remove(paths.backups .. "/frontend/ui/uimanager.lua")
+    local altered = read(paths.target):gsub("Screen.swipe_animations = false", "Screen.swipe_animations = true", 1)
+    write(paths.target, altered)
     local res = Manager.restore(DIR)
     Assert.is_false(res.ok)
     Assert.is_true((res.err or ""):find("no backup", 1, true) ~= nil)
-    Assert.eq(read(paths.target), patched)
+    Assert.eq(read(paths.target), altered)
 end
 
 -- 升级后（目标已不含标记）恢复：不用陈旧备份覆盖新文件，只清理补丁文件
