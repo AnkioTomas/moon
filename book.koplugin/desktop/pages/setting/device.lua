@@ -21,10 +21,11 @@ local _ = require("gettext")
 
 local REPO_URL = "https://github.com/AnkioTomas/moon"
 local QQ_GROUP_URL = "https://qm.qq.com/q/Q9FHByplqC"
-local BUG_GROUP_URL = "https://qm.qq.com/q/btmL9F4Cl2"
-
 ---@class BookSettingsDevice
 local Device = {}
+
+--- Bug 反馈群；电池页等 feature 也用同一个群。
+Device.BUG_GROUP_URL = "https://qm.qq.com/q/btmL9F4Cl2"
 
 ---@param desktop table
 ---@param key string utils 配置键
@@ -113,12 +114,9 @@ function Device.infoSections(desktop)
     if type(fw) == "string" and fw ~= "" and fw ~= "none" then
         rows[#rows + 1] = fact("memory", _("固件"), fw)
     end
-    local pages = {}
-    for _, item in ipairs(require("utils.extension").list("setting.device_section")) do
-        pages[#pages + 1] = item
-    end
+    local pages = require("utils.extension").list("setting.device_section")
     table.sort(pages, function(a, b) return (a.order or 0) < (b.order or 0) end)
-    for _, item in ipairs(pages) do
+    for _idx, item in ipairs(pages) do
         local text = item.status and item.status(desktop) or nil
         rows[#rows + 1] = function(iw)
             return Row.widget({
@@ -163,7 +161,7 @@ function Device.infoSections(desktop)
         function(iw)
             return Row.widget({
                 width = iw, kind = "nav", icon = "bug_report", title = _("Bug 反馈群"),
-                callback = function() openExternal(_("Bug 反馈群"), BUG_GROUP_URL) end,
+                callback = function() openExternal(_("Bug 反馈群"), Device.BUG_GROUP_URL) end,
             })
         end,
         function(iw)

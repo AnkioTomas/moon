@@ -13,9 +13,6 @@ local _ = require("gettext")
 
 local Page = {}
 
--- 与设置「我的设备」里的 Bug 反馈群是同一个群。
-local BUG_GROUP_URL = "https://qm.qq.com/q/btmL9F4Cl2"
-
 local function infoRow(icon, title, status, subtitle)
     return function(iw)
         return Row.widget({
@@ -65,7 +62,7 @@ function Page.showReport(report)
                 callback = function()
                     QR:new{
                         title = _("Bug 反馈群"),
-                        text = BUG_GROUP_URL,
+                        text = require("desktop.pages.setting.device").BUG_GROUP_URL,
                         caption = _("扫码进群，把刚复制的日志贴进去"),
                     }:show()
                 end,

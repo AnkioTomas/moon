@@ -21,28 +21,10 @@ local PAGE_KB = 4 -- 常驻页数 × 页大小；ARM / x86 的 Linux 与 Android
 ---@field cpu number|nil 整机占用 0~100，第一次采样为 nil
 ---@field procs { pid: integer, name: string, rss: integer, cpu: number|nil }[] rss 单位 KB
 
-local function defaultFs()
-    local lfs = require("libs/libkoreader-lfs")
-    return {
-        read = function(path)
-            local f = io.open(path, "r")
-            if not f then return nil end
-            local data = f:read("*a")
-            f:close()
-            return data
-        end,
-        list = function(path)
-            local out = {}
-            for name in lfs.dir(path) do out[#out + 1] = name end
-            return out
-        end,
-    }
-end
-
 ---@param fs table|nil
 ---@return table
 function Procs.new(fs)
-    return setmetatable({ fs = fs or defaultFs(), prev_total = nil, prev_idle = nil, prev_ticks = {} }, Procs)
+    return setmetatable({ fs = fs or require("utils.fs"), prev_total = nil, prev_idle = nil, prev_ticks = {} }, Procs)
 end
 
 --- /proc/stat 首行总时间、空闲时间与核数。
@@ -75,7 +57,7 @@ end
 ---@param fs table|nil
 ---@return { total: integer, avail: integer }|nil
 function Procs.memory(fs)
-    local total, avail = parseMem((fs or defaultFs()).read("/proc/meminfo") or "")
+    local total, avail = parseMem((fs or require("utils.fs")).read("/proc/meminfo") or "")
     if total <= 0 then return nil end
     return { total = total, avail = avail }
 end

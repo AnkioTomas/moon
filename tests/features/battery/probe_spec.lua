@@ -62,12 +62,7 @@ Assert.eq(ok.reading.voltage_v, 4.043)
 Assert.is_true(math.abs(ok.reading.current_ma - (-45.954)) < 1e-6)
 Assert.eq(ok.reading.status, "Discharging")
 Assert.eq(ok.reading.health, "Good")
-Assert.is_true(ok.report:find("model=MT8113 Bellatrix device", 1, true) ~= nil)
-Assert.is_true(ok.report:find("bd71827_ac/type=Mains", 1, true) ~= nil)
-local dumped = ok.report:match("battery_parameters=([^\n]*)")
-Assert.is_true(dumped:find("…", 1, true) ~= nil)
-Assert.is_true(#dumped < 260)
-Assert.is_true(not ok.report:find("charge_full=1450000 ", 1, true))
+Assert.eq(ok.report, "", "支持的设备不用诊断报告，不再整棵重读 sysfs")
 
 tree["/sys/class/power_supply/bd71827_bat/charge_full_design"] = nil
 local missing = Probe.read(fs())
@@ -75,6 +70,12 @@ Assert.is_true(not missing.supported)
 Assert.eq(missing.reading.capacity, 84)
 Assert.is_nil(missing.reading.health_pct)
 Assert.eq(missing.reading.cycles, 5)
+Assert.is_true(missing.report:find("model=MT8113 Bellatrix device", 1, true) ~= nil)
+Assert.is_true(missing.report:find("bd71827_ac/type=Mains", 1, true) ~= nil)
+local dumped = missing.report:match("battery_parameters=([^\n]*)")
+Assert.is_true(dumped:find("…", 1, true) ~= nil)
+Assert.is_true(#dumped < 260)
+Assert.is_true(not missing.report:find("charge_full=1450000 ", 1, true))
 
 tree["/sys/class/power_supply/bd71827_bat/battery_cycle"] = nil
 tree["/sys/class/power_supply/bd71827_bat/cycle_count"] = "12\n"

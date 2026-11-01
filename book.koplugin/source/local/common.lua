@@ -131,15 +131,7 @@ local function stem(rel)
     return (sidecarKey(rel):gsub("%.[^.]+$", ""))
 end
 
----@param path string
----@return string|nil
-local function readFile(path)
-    local file = io.open(path, "rb")
-    if not file then return nil end
-    local raw = file:read("*a")
-    file:close()
-    return raw
-end
+local readFile = require("utils.fs").read
 
 ---@param path string
 ---@param data string
