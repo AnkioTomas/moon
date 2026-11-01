@@ -88,7 +88,7 @@ package.preload["utils.paths"] = function()
     return { ensureDir = function() return true end, root = function() return "/tmp" end }
 end
 package.preload["utils.settings"] = function()
-    local update = { auto_update_check = false, update_last_checked_at = 0 }
+    local update = { update_last_checked_at = 0 }
     local http = { mirror_dead = {} }
     return {
         get = function(name) assert(name == "features.update" or name == "http"); return name == "http" and http or update end,
@@ -399,7 +399,7 @@ Assert.eq(force_prompt.buttons[2].text, "下载并安装")
 
 -- 自动检查：没连网不发请求；连上后照常查。
 local settings = require("utils.settings").get("features.update")
-settings.auto_update_check, settings.update_last_checked_at = true, 0
+settings.update_last_checked_at = 0
 connected = false
 local before = gets
 Update.autoCheck("/plugins/book.koplugin")

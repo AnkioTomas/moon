@@ -124,6 +124,43 @@ function StatsDB.deleteLocal(source_id, stable_id, from_ts, to_ts)
     return DB.exec("DELETE FROM reading_stats WHERE " .. table.concat(where, " AND ") .. ";", unpack(args)) ~= nil
 end
 
+--- 有统计行的源 id。账户合成桶也算，按源清除会把它们一起删掉。
+---@return string[]
+function StatsDB.distinctSources()
+    local result, nrows = DB.query("SELECT DISTINCT source_id FROM reading_stats ORDER BY source_id;")
+    local out = {}
+    for i = 1, nrows or 0 do out[i] = result[1][i] end
+    return out
+end
+
+--- 有统计行的书。账户合成桶（stable_id 以 __ 开头）不算书。
+--- 标题只取在架书；已删的书仍列出，title 为 nil，方便把残留统计清掉。
+---@return { source_id: string, stable_id: string, title: string|nil }[]
+function StatsDB.distinctBooks()
+    local result, nrows = DB.query([[
+        SELECT r.source_id, r.stable_id, MAX(CASE WHEN b.deleted = 0 THEN b.title END)
+        FROM reading_stats r
+        LEFT JOIN books b ON b.source_id = r.source_id AND b.stable_id = r.stable_id
+        WHERE substr(r.stable_id, 1, 2) != '__'
+        GROUP BY r.source_id, r.stable_id;
+    ]])
+    local out = {}
+    for i = 1, nrows or 0 do
+        local title = result[3][i]
+        if title == "" then title = nil end
+        out[i] = { source_id = result[1][i], stable_id = result[2][i], title = title }
+    end
+    -- 无标题的排最后。不能在 SQL 里 ORDER BY「标题 IS NULL」：旧 SQLite 会把这个
+    -- 常量表达式当成列号 0，直接报错，清除列表就变成空的。
+    table.sort(out, function(a, b)
+        local at, bt = a.title or "\255", b.title or "\255"
+        if at ~= bt then return at < bt end
+        if a.source_id ~= b.source_id then return a.source_id < b.source_id end
+        return a.stable_id < b.stable_id
+    end)
+    return out
+end
+
 --- 云端 pull 覆盖前的清理：**只删本次回包时间窗口内的合成行**。
 ---
 --- 两条边界都是数据事故的教训，不能放宽：

@@ -227,8 +227,6 @@ local function coreEntries(desktop)
             page = { title = _("AI 接口"), sections = function() return {{ title = _("AI"), rows = AISettings:rows(desktop) }} end },
         },
         network,
-        { group = "maintenance", order = 30, id = "clear_stats", row = Maintenance:clearStatsRow(desktop) },
-        { group = "maintenance", order = 40, id = "import_stats", row = Maintenance:importKoreaderStatsRow(desktop) },
         { group = "maintenance", order = 70, id = "debug_log", row = Maintenance:debugLogRow(desktop) },
         { group = "maintenance", order = 90, id = "close_desktop", row = Maintenance:closeRow(desktop) },
     }
@@ -333,13 +331,8 @@ local GROUP_FOLDERS = {
         {
             -- id 不能叫 features：边界检查会把裸 "features" 串当成 require("features")。
             id = "manage", icon = "delete_sweep", title = _("功能与更新"),
-            subtitle = _("功能开关与自动检查"),
-            match = { "feature:manage", "update_auto" },
-        },
-        {
-            id = "data", icon = "storage", title = _("数据"),
-            subtitle = _("统计"),
-            match = { "feature:storage", "clear_stats", "import_stats" },
+            subtitle = _("功能开关"),
+            match = { "feature:manage" },
         },
         {
             id = "other", icon = "info", title = _("其它"),
