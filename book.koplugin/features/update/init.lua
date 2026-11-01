@@ -27,6 +27,12 @@ local Update = {
     _job = nil,
 }
 
+--- 有请求 / 下载 / 安装在途。
+---@return boolean
+function Update.busy()
+    return Update._job ~= nil
+end
+
 -- api.ankio.net 是 GitHub API 的转发，挂了（522/552）就回落直连 GitHub。
 local API_URLS = {
     "https://api.ankio.net/gh/repos/AnkioTomas/moon/releases/latest",

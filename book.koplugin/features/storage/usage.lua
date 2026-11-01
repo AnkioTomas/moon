@@ -126,10 +126,10 @@ function Usage.removeAsync(path, cb)
             os.remove(target)
         end
         rm(path)
-        return true
+        return lfs.symlinkattributes(path) == nil
     end, {
         name = "storage.remove", kind = "light",
-        on_done = function() cb(true) end,
+        on_done = cb,
         on_failed = function(err)
             require("utils.log").warn("book storage remove failed", path, err)
             cb(false)
