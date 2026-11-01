@@ -68,7 +68,7 @@ local STATUS = {
 ---@field get_clipboard fun(): { text: string } 设备共享剪贴板（最后复制的文本）
 ---@field set_clipboard fun(text: string) 写入设备剪贴板并同步进激活输入框
 ---@field get_status fun(): table 首页设备状态快照
----@field install_update fun(temp: string, cb: fun(ok: boolean, err: string|nil)) 安装上传的月读插件包（临时文件所有权移交）
+---@field install_update fun(temp: string, cb: fun(ok: boolean, err: string|nil)) 安装上传的 KOReader 插件包（临时文件所有权移交）
 ---@field backup_zip fun(cb: fun(output: string|nil, err: any))|nil 打包 .moon（不含日志与缓存）
 ---@field reset_config fun(cb: fun(ok: boolean, err: string|nil))|nil 清除全部配置与 crash.log，成功后设备提示并重启
 ---@field restore_backup fun(temp: string, cb: fun(ok: boolean, err: string|nil))|nil 用上传的备份包替换 .moon，成功后设备提示并重启
@@ -83,7 +83,7 @@ local STATUS = {
 local Server = {}
 Server.__index = Server
 
--- 路由实现拆分：文件、远程输入、共享剪贴板、远程配置、月读更新各自独立。
+-- 路由实现拆分：文件、远程输入、共享剪贴板、远程配置、插件更新各自独立。
 -- （函数首参即 self；不反向 require server，无循环）
 local File = require("features.remote.file")
 local Input = require("features.remote.input")

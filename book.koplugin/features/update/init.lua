@@ -267,7 +267,7 @@ end
 --- 安装本地已有的更新包（远程管理上传）。无论成败都删包；装好后由调用方重启。
 ---@param archive string ZIP 路径，所有权移交本函数
 ---@param plugin_root string 当前插件目录
----@param cb fun(ok: boolean, err: string|nil) err 只取首行，不带子进程堆栈
+---@param cb fun(ok: boolean, detail: string|nil) 成功时 detail 是插件目录名；失败时是错误首行，不带子进程堆栈
 function Update.installArchive(archive, plugin_root, cb)
     if Update._job then
         os.remove(archive)
@@ -280,15 +280,16 @@ function Update.installArchive(archive, plugin_root, cb)
         os.remove(archive)
     end
     local job = Job.run(function()
-        local installed, install_err = Install.run(archive, plugin_root)
-        if not installed then error(install_err, 0) end
+        local installed, detail = Install.run(archive, plugin_root)
+        if not installed then error(detail, 0) end
+        return detail
     end, {
         name = "plugin.update",
         kind = "heavy",
         timeout = require("http.timeout").net(4),
-        on_done = function()
+        on_done = function(name)
             settle()
-            cb(true)
+            cb(true, name)
         end,
         on_failed = function(err)
             settle()

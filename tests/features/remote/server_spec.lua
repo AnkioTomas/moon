@@ -462,7 +462,7 @@ do
     local c_u = newClient({ "GET /update.html HTTP/1.1\r\n\r\n" })
     drain(serve(c_u))
     local _, b_u = parseResponse(c_u:output())
-    has(b_u, "月读更新")
+    has(b_u, "插件更新")
     has(b_u, "/update.js")
     local c_u_js = newClient({ "GET /update.js HTTP/1.1\r\n\r\n" })
     drain(serve(c_u_js))
@@ -919,7 +919,13 @@ do
     Assert.eq(body, '{"ok":true}')
 
     -- 不是月读包 → 400；正在装别的更新 → 409；其它失败 → 500，都带原因。
-    for err, want in pairs({ ["not a moon plugin archive"] = 400, busy = 409, ["disk full"] = 500 }) do
+    for err, want in pairs({
+        ["not a moon plugin archive"] = 400,
+        ["not a koplugin archive"] = 400,
+        ["multiple koplugin directories"] = 400,
+        busy = 409,
+        ["disk full"] = 500,
+    }) do
         local h = fakeHandlers({})
         h.install_update = function(temp, cb)
             os.remove(temp)
