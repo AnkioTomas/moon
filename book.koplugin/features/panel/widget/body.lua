@@ -146,13 +146,16 @@ function Body:updateView()
             row,
         })
     elseif #sliders > 0 then
+        local t = Theme.current()
         table.insert(group, VerticalSpan:new{ width = Theme.px(10) })
         for _idx, slider in ipairs(sliders) do
             table.insert(group, SliderRow:new{
                 width = self.width,
-                height = Theme.px(42),
+                height = Theme.px(t.control.height),
                 kind = slider.kind,
-                title = slider.title,
+                min = slider.min,
+                max = slider.max,
+                floor = slider.floor,
                 value = slider.value,
                 on_level = self.on_level,
                 show_parent = self.show_parent,

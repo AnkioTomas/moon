@@ -6,10 +6,7 @@
 @module koplugin.book.features.panel.desktop
 --]]
 
-require("l10n").apply()
-
 local Device = require("device")
-local _ = require("gettext")
 
 local ActionList = require("features.panel.action_list")
 local Registry = require("features.panel.actions.registry")
@@ -50,11 +47,13 @@ local list = ActionList.create("desktop", "quick_panel_actions", Registry.deskto
 ---@field active boolean
 ---@field hold boolean 动作声明了长按
 
---- 快捷面板灯光滑杆数据。
+--- 快捷面板灯光滑杆。value 是硬件档，不是 0..100。
 ---@class BookQuickPanelSlider
 ---@field kind "brightness"|"warmth"
----@field title string
----@field value number
+---@field min number 硬件最小档。亮度 0 是关灯
+---@field max number
+---@field floor number 手势最低档。亮度跳过 0
+---@field value number 当前档，灯关着时可以低于 floor
 
 --- 桌面动作执行选项。
 ---@class BookQuickPanelExecuteOpts
@@ -96,15 +95,42 @@ Panel.setEnabled = list.setEnabled
 Panel.move = list.move
 Panel.swap = list.swap
 
+--- 亮度或暖色的硬件档位。滑杆按这个刻度走，不再绕 0..100。
+---@param kind "brightness"|"warmth"
+---@return BookQuickPanelSlider
+local function lightSteps(kind)
+    local powerd = Device:getPowerDevice()
+    if kind == "brightness" then
+        local min = tonumber(powerd.fl_min) or 0
+        local max = tonumber(powerd.fl_max) or 100
+        return {
+            kind = kind,
+            min = min,
+            max = max,
+            floor = math.min(max, min + 1),
+            value = tonumber(powerd:frontlightIntensity()) or min,
+        }
+    end
+    local min = tonumber(powerd.fl_warmth_min) or 0
+    local max = tonumber(powerd.fl_warmth_max) or 100
+    return {
+        kind = kind,
+        min = min,
+        max = max,
+        floor = min,
+        value = powerd:toNativeWarmth(powerd:frontlightWarmth()),
+    }
+end
+
 --- 生成快捷面板灯光滑杆；按设备能力过滤。
 ---@return BookQuickPanelSlider[]
 function Panel.sliders()
     local sliders = {}
     if Device:hasFrontlight() and MoonSettings.get("features.panel").quick_panel_brightness then
-        sliders[#sliders + 1] = { kind = "brightness", title = _("亮度"), value = Panel.lightPercent("brightness") }
+        sliders[#sliders + 1] = lightSteps("brightness")
     end
     if Device:hasNaturalLight() and MoonSettings.get("features.panel").quick_panel_warmth then
-        sliders[#sliders + 1] = { kind = "warmth", title = _("冷暖色调"), value = Panel.lightPercent("warmth") }
+        sliders[#sliders + 1] = lightSteps("warmth")
     end
     return sliders
 end

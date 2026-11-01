@@ -100,13 +100,17 @@ Assert.eq(initial_menu[1].icon, "dark_mode")
 Assert.eq(initial_menu[2].id, "wifi")
 Assert.eq(initial_menu[2].icon, "wifi")
 
--- 滑杆按设备能力生成，并携带显示百分比。
+-- 滑杆按设备能力生成，刻度是硬件档（Kindle 0..24），不是显示百分比。
 local sliders = Panel.sliders()
 Assert.len(sliders, 2)
 Assert.eq(sliders[1].kind, "brightness")
-Assert.eq(sliders[1].value, 25)
+Assert.eq(sliders[1].min, 0)
+Assert.eq(sliders[1].max, 24)
+Assert.eq(sliders[1].floor, 1)
+Assert.eq(sliders[1].value, 6)
 Assert.eq(sliders[2].kind, "warmth")
-Assert.eq(sliders[2].value, 25)
+Assert.eq(sliders[2].floor, 0)
+Assert.eq(sliders[2].value, 6)
 
 -- 两个滑块可分别关掉。
 settings.quick_panel_warmth = false
@@ -119,9 +123,10 @@ settings.quick_panel_warmth = true
 Assert.eq(Panel.sliders()[1].kind, "warmth")
 settings.quick_panel_brightness = true
 
--- 暖色本身已是 0..100，避免原生刻度往返在非整倍值上丢精度。
+-- 顶栏百分比仍读 KOReader 的 0..100。滑杆单独走原生档，10% 对 24 档不是整数档。
 powerd.warmth = 10
 Assert.eq(Panel.lightPercent("warmth"), 10)
+Assert.eq(Panel.sliders()[2].value, 10 * 24 / 100)
 
 -- 启用顺序、去重与移动。
 settings.quick_panel_actions = {}

@@ -58,7 +58,9 @@ package.preload["ui/widget/verticalspan"] = widget
 package.preload["ui.themes"] = function()
     return {
         px = function(n) return n end,
-        current = function() return { space = { sm = 8 } } end,
+        current = function()
+            return { space = { xs = 4, sm = 8 }, control = { height = 40 } }
+        end,
     }
 end
 package.preload["ui.themes.widgets.icon"] = function()
@@ -117,6 +119,7 @@ Assert.eq(wraps, 0)
 Assert.eq(dones, 0)
 Assert.not_nil(body.ges_events)
 Assert.is_nil(body.ges_events.HoldPanelEdit, "长按不再进入编辑")
+Assert.eq(body[1][#body[1]].kind, "brightness")
 
 wraps, dones, adds = 0, 0, 0
 local editing = Body:new{
