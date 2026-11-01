@@ -49,7 +49,8 @@ local function attributes(path, key)
     elseif files[path] then
         attr = { mode = "file", size = 1 }
     end
-    return key and attr and attr[key] or attr
+    if key then return attr and attr[key] end
+    return attr
 end
 package.preload["libs/libkoreader-lfs"] = function()
     return {
@@ -402,14 +403,13 @@ Assert.eq(qr_opts.text, "http://192.168.1.2:9528/")
 Assert.eq(qr_opts.caption, qr_opts.text, "二维码底部必须明文显示 URL")
 Assert.eq(Remote.status(), qr_opts.text)
 
--- 分享链接每次带不同的 v。票根原地覆盖时，手机不能按同一个 URL 一直拿出第一张图。
+-- 分享链接带文件的 mtime-size。票根原地覆盖时，手机不能按同一个 URL 一直拿出旧图。
 local shared_file = book .. "/ticket.png"
 files[shared_file] = true
 local encoded = require("utils.text").urlEncode(shared_file)
 local url1, share_err = Remote.shareUrl(shared_file)
 Assert.is_nil(share_err)
-Assert.eq(url1, "http://192.168.1.2:9528/download?path=" .. encoded .. "&v=1-0-1")
-Assert.eq(Remote.shareUrl(shared_file), "http://192.168.1.2:9528/download?path=" .. encoded .. "&v=2-0-1")
+Assert.eq(url1, "http://192.168.1.2:9528/download?path=" .. encoded .. "&v=0-1")
 
 -- 拿不到局域网 IP：不弹扫了也打不开的码，退回文字提示。
 fake_ip = nil
