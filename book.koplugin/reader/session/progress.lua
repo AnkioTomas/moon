@@ -248,7 +248,8 @@ local function chapterToc(snapshot)
     return toc and #toc > 0 and toc or nil
 end
 
---- 开书对比用的本地进度：pending_progress 为准，同章时章内比例优先于章首快照。
+--- 开书对比用的本地进度。库存行是上次落盘的位置；屏幕上的章已经走到它前面时，
+--- 以打开的章为准，否则弹窗会拿旧章（版权页）去跟云端比，选「本地」还会跳回去。
 ---@param id BookIdentity
 ---@param snapshot ReaderSessionSnapshot
 ---@return ProgressPosition
@@ -259,8 +260,12 @@ local function localProgressForPull(id, snapshot)
         return live
     end
     local pos = Progress.rowPosition(row)
-    if pos.chapter_idx and live.chapter_idx
-        and tonumber(pos.chapter_idx) == tonumber(live.chapter_idx) then
+    local live_idx = tonumber(live.chapter_idx)
+    local saved_idx = tonumber(pos.chapter_idx)
+    if live_idx and saved_idx and live_idx > saved_idx then
+        return live
+    end
+    if live_idx and saved_idx and live_idx == saved_idx then
         if pos.chapter_fraction == nil and live.chapter_fraction ~= nil then
             pos.chapter_fraction = live.chapter_fraction
         end
@@ -453,6 +458,17 @@ local function spineCmp(local_pos, remote_pos)
     return 0
 end
 
+--- 按章书：打开的章序号比云端大。同章的章内先后仍走原来的冲突规则。
+---@param local_pos ProgressPosition|nil
+---@param remote_pos ProgressPosition
+---@return boolean
+local function chapterLocalAhead(local_pos, remote_pos)
+    local li = tonumber(local_pos and local_pos.chapter_idx)
+    local ri = tonumber(remote_pos and remote_pos.chapter_idx)
+    if not li or not ri then return false end
+    return li > ri
+end
+
 --- 当前阅读位置与 freshly pulled 远端进度是否冲突。
 ---@param local_pos ProgressPosition|nil
 ---@param remote_pos ProgressPosition
@@ -622,6 +638,8 @@ function ReaderProgress.pull(snapshot, opts)
         if not require("ui/network/manager"):isConnected() then return toast(_("网络不可用，请先连接 Wi-Fi")) end
         ReaderProgress.asked_conflicts[id.source_id .. "\31" .. id.stable_id] = nil
     end
+    -- 数字拷贝：回包前换章会改身份表上的 chapter_idx，不能拿回包时的值当起点。
+    local started_idx = tonumber(id.chapter_idx)
     logger.dbg("book.progress reader pull start", id.source_id, id.stable_id,
         id.chapter_idx or "book")
     source:getProgressAsync(id, function(remote_pos, err, meta)
@@ -641,6 +659,17 @@ function ReaderProgress.pull(snapshot, opts)
             logger.warn("book.progress reader pull failed", id.source_id, id.stable_id, err)
             return tell(T(_("拉取进度失败：%1"), tostring(err or "")))
         end
+        local now_idx = tonumber(id.chapter_idx)
+        if not manual and started_idx and now_idx and started_idx ~= now_idx then
+            -- 回包时人已经翻到别的章：这一次对比作废，别拿发起时的位置弹窗或把人拽走。
+            logger.dbg("book.progress reader pull skip: chapter changed",
+                id.stable_id, started_idx, now_idx)
+            local row = ProgressDB.get(id.source_id, id.stable_id)
+            if row and row.sync_status == 0 and source.syncProgressAsync then
+                source:syncProgressAsync({ identity = id, dirty_only = true }, function() end)
+            end
+            return
+        end
         local local_position = localProgressForPull(id, snapshot)
         local row = ProgressDB.get(id.source_id, id.stable_id)
         local page_level = type(meta) == "table" and meta.page_level == true
@@ -648,8 +677,9 @@ function ReaderProgress.pull(snapshot, opts)
             -- 只有两边自上次同步后都动过才问；手动拉取是用户要看对比，照常问。
             local cloud_moved = not (row and row.synced)
                 or progressDiffers(row.synced, remote_pos, id, snapshot, page_level)
-            -- 页级源：本地读得更靠后（spine 更大 / 同 spine 内元素更后）时不往回拽。
-            local local_ahead = page_level and spineCmp(local_position, remote_pos) == -1
+            -- 本地读得更靠后时不往回拽：页级源比 spine，按章书比章序号。
+            local local_ahead = (page_level and spineCmp(local_position, remote_pos) == -1)
+                or (not page_level and chapterLocalAhead(local_position, remote_pos))
             if manual or (cloud_moved and not (row and row.sync_status == 1) and not local_ahead) then
                 logger.dbg("book.progress reader pull conflict", id.source_id, id.stable_id)
                 askProgressConflict(id, snapshot, local_position, remote_pos)
