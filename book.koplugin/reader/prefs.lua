@@ -131,25 +131,12 @@ end
 --- 全局渲染模式。没人设过时写成平面，避免 KOReader 把新书落成网页模式。
 ---@return number
 local function globalRenderMode()
-    if not (G_reader_settings and G_reader_settings.readSetting) then
-        return RENDER_FLAT
-    end
     local mode = G_reader_settings:readSetting("copt_block_rendering_mode")
     if type(mode) ~= "number" then
         mode = RENDER_FLAT
-        if G_reader_settings.saveSetting then
-            G_reader_settings:saveSetting("copt_block_rendering_mode", mode)
-        end
+        G_reader_settings:saveSetting("copt_block_rendering_mode", mode)
     end
     return mode
-end
-
---- 只读不记的源（订阅）正文是网页，不参与平面降级。
----@param identity BookIdentity
----@return boolean
-local function keepsRenderMode(identity)
-    local source = require("source.registry").resolve(identity.source_id)
-    return source ~= nil and source.ephemeral == true
 end
 
 --- 全书快照里的网页模式不得压过非网页的全局。全局本身是网页时保留。
@@ -273,7 +260,7 @@ function M.inject(doc_settings, document)
     if not prefs then
         return false
     end
-    if keepsRenderMode(identity) then
+    if identity.ephemeral then
         -- 没存过渲染模式时，全局平面不能写进来：缺键会落到刚补上的全局平面。
         local saved_mode = saved and saved.copt and saved.copt.block_rendering_mode
         if type(saved_mode) ~= "number" then
