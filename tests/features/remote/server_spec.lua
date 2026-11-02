@@ -225,6 +225,16 @@ local function fakeHandlers(dirs)
                 reading = false,
             }
         end,
+        send_touch = function(x, y, kind, dir, dist)
+            if calls.screen_locked then return false, 403, "locked" end
+            calls.touch = { x, y, kind, dir, dist }
+            return true
+        end,
+        get_screen = function(etag)
+            if calls.screen_locked then return nil, 403, "locked" end
+            if etag == '"t"' then return nil, 304 end
+            return "PNGDATA", '"t"'
+        end,
         temp_path = function()
             return os.tmpname()
         end,
@@ -1433,6 +1443,51 @@ do
     Assert.eq(data.book, "测试书籍")
 
     local bad = newClient({ "POST /api/status HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(bad, handlers))
+    Assert.eq((parseResponse(bad:output())), 405)
+end
+
+-- ── 屏幕镜像 ───────────────────────────────────────────
+
+do
+    local handlers, calls = fakeHandlers({})
+    local client = newClient({ "GET /api/screen HTTP/1.1\r\n\r\n" })
+    drain(serve(client, handlers))
+    local code, body = parseResponse(client:output())
+    Assert.eq(code, 200)
+    Assert.eq(body, "PNGDATA")
+    Assert.matches(client:output(), 'ETag: "t"')
+
+    local same = newClient({ 'GET /api/screen HTTP/1.1\r\nIf-None-Match: "t"\r\n\r\n' })
+    drain(serve(same, handlers))
+    Assert.eq((parseResponse(same:output())), 304)
+
+    local touch = newClient({ "POST /api/screen?x=10&y=20&kind=hold HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(touch, handlers))
+    Assert.eq((parseResponse(touch:output())), 200)
+    Assert.eq(calls.touch[1], 10)
+    Assert.eq(calls.touch[3], "hold")
+
+    local swipe = newClient({ "POST /api/screen?x=5&y=6&kind=swipe&dir=south&dist=300 HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(swipe, handlers))
+    Assert.eq((parseResponse(swipe:output())), 200)
+    Assert.eq(calls.touch[4], "south")
+    Assert.eq(calls.touch[5], 300)
+
+    local badswipe = newClient({ "POST /api/screen?x=5&y=6&kind=swipe&dir=up&dist=3 HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(badswipe, handlers))
+    Assert.eq((parseResponse(badswipe:output())), 400)
+
+    local badtouch = newClient({ "POST /api/screen?x=a&y=1&kind=tap HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(badtouch, handlers))
+    Assert.eq((parseResponse(badtouch:output())), 400)
+
+    calls.screen_locked = true
+    local locked = newClient({ "GET /api/screen HTTP/1.1\r\n\r\n" })
+    drain(serve(locked, handlers))
+    Assert.eq((parseResponse(locked:output())), 403)
+
+    local bad = newClient({ "PUT /api/screen HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
     drain(serve(bad, handlers))
     Assert.eq((parseResponse(bad:output())), 405)
 end

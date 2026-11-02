@@ -348,4 +348,12 @@ return {
     ["第一次访问需要在 Kindle 上点「允许」。请查看设备屏幕。"] = "On first visit you need to tap \"Allow\" on the Kindle. Check the device screen.",
     ["Kindle 拒绝了这次授权"] = "The Kindle denied this request",
     ["与设备失去联系"] = "Lost contact with the device",
+    ["屏幕"] = "Screen",
+    ["屏幕镜像"] = "Screen mirror",
+    ["屏幕镜像 - 远程管理"] = "Screen mirror - Remote",
+    ["在浏览器里查看设备当前屏幕（可点击操作，锁屏密码界面不投）。"] = "View the device screen in your browser (clickable; not shown while the passcode screen is up).",
+    ["5 秒"] = "5 s",
+    ["设备屏幕"] = "Device screen",
+    ["设备已锁定，暂停投屏"] = "Device is locked, mirroring paused",
+    ["locked"] = "Device is locked, mirroring paused",
 }
