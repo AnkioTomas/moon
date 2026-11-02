@@ -67,7 +67,7 @@ package.preload["book.store"] = function()
         end,
         identityFor = function(path)
             if path == "/rss.html" then
-                return { source_id = "subscribe", stable_id = "feed-1", chapter_idx = 1 }
+                return { source_id = "subscribe", stable_id = "feed-1", chapter_idx = 1, ephemeral = true }
             end
             if path == "/chapter.html" then
                 return { source_id = "moon", stable_id = "book-1", chapter_idx = 1 }
@@ -76,14 +76,6 @@ package.preload["book.store"] = function()
                 return { source_id = "moon", stable_id = "book-1", chapter_idx = 2 }
             end
             return { source_id = "moon", stable_id = "book-1" }
-        end,
-    }
-end
-
-package.preload["source.registry"] = function()
-    return {
-        resolve = function(id)
-            if id == "subscribe" then return { ephemeral = true } end
         end,
     }
 end
@@ -349,7 +341,7 @@ local on_book = { data = { copt_embedded_fonts = 1 }, saveSetting = ui.doc_setti
 ReaderPrefs.inject(on_book, { file = "/x.epub", setFontFace = function() end })
 Assert.eq(on_book.data.copt_embedded_fonts, 1)
 local saved_g = _G.G_reader_settings
-_G.G_reader_settings = { has = function(_, k) return k == "copt_embedded_fonts" end, readSetting = function() end }
+_G.G_reader_settings = { has = function(_, k) return k == "copt_embedded_fonts" end, readSetting = function() end, saveSetting = function() end }
 local g_default = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
 ReaderPrefs.inject(g_default, { file = "/x.epub", setFontFace = function() end })
 Assert.is_nil(g_default.data.copt_embedded_fonts)
