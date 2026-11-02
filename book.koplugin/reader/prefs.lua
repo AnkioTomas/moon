@@ -5,6 +5,10 @@
 「保存为默认」写 G_reader_settings，并同步覆盖所有已有 reader_prefs；无 per-book 快照的章节书
 开书时从全局默认注入，避免旧章 sidecar 挡住默认。
 
+渲染模式例外：全局没写过时补成平面。全书快照里的网页模式在全局不是网页时改回全局，
+避免某一章的网页模式被拍进全书偏好后一直压过后来的全局平面。
+只读不记的源（订阅文章）不改：正文是网页，快照里的模式原样留着；没存过模式就维持网页。
+
 @module koplugin.book.reader.prefs
 --]]
 
@@ -21,6 +25,11 @@ local M = {}
 -- 超过此大小的书按「重」处理：默认不用内嵌字体和样式（固定阈值，不跟瞬时可用内存晃）。
 -- 开书确认阈值见 utils.mem.warnThresholdBytes（随可用内存在 8–40MB 间伸缩）。
 M.BIG_BOOK_BYTES = 20 * 1024 * 1024
+
+-- KOReader 没写过全局渲染模式时，新书落到网页模式（3）。网页模式打开全部浮动块，
+-- 页内脚注每次翻页都重排。章节书关书时会把这一章的模式拍进全书偏好，全局后来改成平面也盖不掉。
+local RENDER_FLAT = 1
+local RENDER_WEB = 3
 
 -- 不在 configurable 里、由 KOReader 的样式微调模块直接存进 sidecar 的排版键（行距 / 段距等微调与自定义 CSS 在这里）。
 local DOC_KEYS = {
@@ -119,6 +128,43 @@ function M.load(identity)
     return decode(BookDB.getReaderPrefs(identity.source_id, identity.stable_id))
 end
 
+--- 全局渲染模式。没人设过时写成平面，避免 KOReader 把新书落成网页模式。
+---@return number
+local function globalRenderMode()
+    if not (G_reader_settings and G_reader_settings.readSetting) then
+        return RENDER_FLAT
+    end
+    local mode = G_reader_settings:readSetting("copt_block_rendering_mode")
+    if type(mode) ~= "number" then
+        mode = RENDER_FLAT
+        if G_reader_settings.saveSetting then
+            G_reader_settings:saveSetting("copt_block_rendering_mode", mode)
+        end
+    end
+    return mode
+end
+
+--- 只读不记的源（订阅）正文是网页，不参与平面降级。
+---@param identity BookIdentity
+---@return boolean
+local function keepsRenderMode(identity)
+    local source = require("source.registry").resolve(identity.source_id)
+    return source ~= nil and source.ephemeral == true
+end
+
+--- 全书快照里的网页模式不得压过非网页的全局。全局本身是网页时保留。
+---@param prefs table|nil
+---@param global_mode number
+local function demoteWebRenderMode(prefs, global_mode)
+    local copt = prefs and prefs.copt
+    if type(copt) ~= "table" or global_mode == RENDER_WEB then
+        return
+    end
+    if copt.block_rendering_mode == RENDER_WEB then
+        copt.block_rendering_mode = global_mode
+    end
+end
+
 --- 从 G_reader_settings 组装与 capture 同形的 prefs（章节书无 per-book 快照时用）。
 ---@return table|nil
 function M.fromDefaults()
@@ -197,6 +243,8 @@ function M.inject(doc_settings, document)
     if type(document) ~= "table" or type(document.setFontFace) ~= "function" then
         return false
     end
+    -- 必须在原生 ReadSettings 之前写上全局键，新书才不会走 KOReader「缺省即网页」的回退。
+    local render_mode = globalRenderMode()
     -- 整本书不需要跨文件偏好注入，但插件字体仍须在原生 ReadSettings 前重新注册。
     -- 否则 sidecar 虽保留 font_face，CRE 冷启动时找不到该字体，只会静默回退默认字体。
     -- 新书没有自己的字体 id 时，用「保存为默认配置」记下的默认插件字体。
@@ -220,9 +268,20 @@ function M.inject(doc_settings, document)
     if not (identity and identity.chapter_idx) then
         return false
     end
-    local prefs = M.load(identity) or M.fromDefaults()
+    local saved = M.load(identity)
+    local prefs = saved or M.fromDefaults()
     if not prefs then
         return false
+    end
+    if keepsRenderMode(identity) then
+        -- 没存过渲染模式时，全局平面不能写进来：缺键会落到刚补上的全局平面。
+        local saved_mode = saved and saved.copt and saved.copt.block_rendering_mode
+        if type(saved_mode) ~= "number" then
+            prefs.copt = prefs.copt or {}
+            prefs.copt.block_rendering_mode = RENDER_WEB
+        end
+    else
+        demoteWebRenderMode(prefs, render_mode)
     end
     M.write(doc_settings, prefs)
     return true
