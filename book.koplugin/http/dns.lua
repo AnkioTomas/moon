@@ -7,7 +7,8 @@ LuaSocket 按主机名 connect 会在 UI 线程同步 getaddrinfo；设备上没
 
 每次查询把同一个包同时发给系统 DNS 和设置 ``http.dns`` 选的备选 DNS（阿里 / 腾讯，各两台），
 谁先应答用谁：路由器 DNS 挂了不用等它超时，备选被墙了系统的还在。只有地址 / NXDOMAIN 定局，
-SERVFAIL / REFUSED 继续等别的服务器。查询前先看 /etc/hosts（自建服务常靠它指到内网）。
+SERVFAIL / REFUSED 继续等别的服务器。查询前先看用户绑定（设置 ``http.dns_bind``，
+内网主机直接给地址，公网 DNS 对这种名字会秒回 NXDOMAIN 并抢先定局）和 /etc/hosts。
 系统 DNS 问 libc 自己的 resolver 状态（和 getaddrinfo 用的同一份，见 ``Dns.libcServers``），
 Android 经 JNI 问 ConnectivityManager，都拿不到才读 /etc/resolv.conf。解析结果缓存 10 分钟；
 查无此域名 / 没应答只记这一个主机 10 秒。一个包都发不出去（没网 "Network is unreachable"）当场失败，不记、不等。
@@ -361,13 +362,31 @@ function Dns.hostsLookup(host)
     return nil
 end
 
---- 主机名换地址，回调 cb(addr) 或 cb(nil, err)：IP 字面量 / /etc/hosts / 缓存命中 / 发不出去同步回调；
+--- 用户绑定的地址（设置 http.dns_bind，键是小写主机名，末尾点忽略）。没有返回 nil。
+--- 缺这张表、或值不是非空字符串，当成没绑定：坏配置不能让所有请求在解析这步炸掉。
+---@param host string
+---@return string|nil
+function Dns.binding(host)
+    local map = require("utils.settings").get("http").dns_bind
+    if type(map) ~= "table" then return nil end
+    local addr = map[host:lower():gsub("%.$", "")]
+    if type(addr) ~= "string" or addr == "" then return nil end
+    return addr
+end
+
+--- 主机名换地址，回调 cb(addr) 或 cb(nil, err)：IP 字面量 / 用户绑定 / /etc/hosts / 缓存命中 / 发不出去同步回调；
 --- 10 秒内失败过的直接回 nil；否则发查询，同主机并发只查一次、一起回。
+--- 绑定不进缓存：改完下一次就生效，连接失败也不会退回去再查 DNS。
 ---@param host string
 ---@param cb fun(addr: string|nil, err: string|nil)
 function Dns.resolve(host, cb)
     if host:match("^[%d%.]+$") or host:find(":", 1, true) then
         cb(host)
+        return
+    end
+    local bound = Dns.binding(host)
+    if bound then
+        cb(bound)
         return
     end
     local now = os.time()

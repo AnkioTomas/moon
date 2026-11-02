@@ -1,5 +1,5 @@
 --[[--
-网络设置：KOReader「HTTP 代理」的主题版入口。
+网络设置：KOReader「HTTP 代理」、备选 DNS、解析绑定、超时。
 
 和 KOReader 原生菜单是同一份设置（G_reader_settings 的 http_proxy / http_proxy_enabled），
 经 NetworkMgr:setHTTPProxy 生效，插件请求由 http.proxy 读 socket.http.PROXY 走代理。
@@ -17,6 +17,7 @@ local Row = require("ui.themes.widgets.row")
 local Toast = require("ui.themes.widgets.toast")
 local Request = require("http.request")
 local Proxy = require("http.proxy")
+local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -151,7 +152,7 @@ function Setting.entry(desktop)
             sections = function()
                 return {
                     { title = _("HTTP 代理"), rows = Setting.rows(desktop) },
-                    { title = _("DNS"), rows = { Setting.dnsRow(desktop) } },
+                    { title = _("DNS"), rows = { Setting.dnsRow(desktop), Setting.bindRow(desktop) } },
                     { title = _("超时"), rows = { Setting.timeoutRow(desktop) } },
                 }
             end,
@@ -187,6 +188,185 @@ function Setting.dnsRow(desktop)
                     }
                 end
                 require("ui.themes.widgets.sheet"):new{ title = _("备选 DNS"), items = items }:show()
+            end,
+        })
+    end
+end
+
+--- 绑定用的主机名：小写、去掉协议 / 路径 / 端口 / 末尾点。不是域名返回 nil。
+---@param raw string
+---@return string|nil
+local function hostKey(raw)
+    local host = Text.trim(raw):lower()
+    host = host:gsub("^%a[%w+.-]*://", "")
+    host = host:gsub("/.*$", "")
+    host = host:gsub(":%d+$", "")
+    host = host:gsub("%.$", "")
+    if host == "" or #host > 253 or host:find("..", 1, true) or host:sub(1, 1) == "." then
+        return nil
+    end
+    if host:match("^%d+%.%d+%.%d+%.%d+$") then return nil end
+    for label in host:gmatch("[^.]+") do
+        if #label > 63 or label:sub(-1) == "-" or not label:match("^[%w_][%w_%-]*$") then
+            return nil
+        end
+    end
+    return host
+end
+
+--- 收成四段十进制 IPv4；前导零按十进制吃掉（192.168.001.020 → 192.168.1.20）。
+---@param raw string
+---@return string|nil
+local function ipv4(raw)
+    local a, b, c, d = Text.trim(raw):match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+    if not a or #a > 3 or #b > 3 or #c > 3 or #d > 3 then return nil end
+    a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
+    if a > 255 or b > 255 or c > 255 or d > 255 then return nil end
+    return string.format("%d.%d.%d.%d", a, b, c, d)
+end
+
+--- 绑定表。缺了或被写成别的类型就补回空表，添加时才有地方写。
+---@return table<string, string>
+local function bindMap()
+    local http = require("utils.settings").get("http")
+    if type(http.dns_bind) ~= "table" then http.dns_bind = {} end
+    return http.dns_bind
+end
+
+---@return string[]
+local function bindHosts()
+    local hosts = {}
+    for host, ip in pairs(bindMap()) do
+        if type(host) == "string" and type(ip) == "string" and ip ~= "" then
+            hosts[#hosts + 1] = host
+        end
+    end
+    table.sort(hosts)
+    return hosts
+end
+
+local editBind
+
+--- 写入一条绑定。previous 是正在改的旧主机名，改了名就删掉旧键。
+---@param desktop BookDesktop
+---@param previous string|nil
+---@param host string
+---@param ip string
+local function saveBind(desktop, previous, host, ip)
+    local key = hostKey(host)
+    if not key then
+        editBind(desktop, previous, host, ip)
+        Toast:new{ text = _("域名不正确"), timeout = 3 }:show()
+        return
+    end
+    local addr = ipv4(ip)
+    if not addr then
+        editBind(desktop, previous, host, ip)
+        Toast:new{ text = _("地址必须是 IPv4"), timeout = 3 }:show()
+        return
+    end
+    local map = bindMap()
+    if previous and previous ~= key then map[previous] = nil end
+    map[key] = addr
+    local MoonSettings = require("utils.settings")
+    MoonSettings.save("http")
+    local Dns = require("http.dns")
+    Dns.forget(key)
+    if previous then Dns.forget(previous) end
+    desktop:updateView()
+end
+
+--- 添加（previous 为 nil）或编辑一条绑定。校验失败带着原文重开。
+---@param desktop BookDesktop
+---@param previous string|nil
+---@param host string
+---@param ip string
+editBind = function(desktop, previous, host, ip)
+    Input:new{
+        title = previous and _("编辑绑定") or _("添加绑定"),
+        fields = {
+            { label = _("域名"), text = host, hint = "nas.lan" },
+            { label = _("IP 地址"), text = ip, hint = "192.168.1.20" },
+        },
+        ok_text = _("保存"),
+        callback = function(raw_host, raw_ip) saveBind(desktop, previous, raw_host, raw_ip) end,
+    }:show()
+end
+
+---@param desktop BookDesktop
+---@param host string
+local function removeBind(desktop, host)
+    Confirm:new{
+        text = T(_("删除 %1 的解析绑定？"), host),
+        ok_text = _("删除"),
+        ok_callback = function()
+            bindMap()[host] = nil
+            require("utils.settings").save("http")
+            require("http.dns").forget(host)
+            desktop:updateView()
+        end,
+    }:show()
+end
+
+---@param desktop BookDesktop
+---@return BookSettingsOverlaySpec
+local function bindPage(desktop)
+    return {
+        title = _("解析绑定"),
+        sections = function()
+            local map = bindMap()
+            local rows = {}
+            for _idx, host in ipairs(bindHosts()) do
+                local ip = map[host]
+                rows[#rows + 1] = function(iw)
+                    return Row.widget({
+                        width = iw, kind = "nav", icon = "dns",
+                        title = host, status = ip, status_on = true,
+                        callback = function()
+                            require("ui.themes.widgets.sheet"):new{
+                                title = host,
+                                items = {
+                                    { text = _("编辑"), callback = function() editBind(desktop, host, host, ip) end },
+                                    { text = _("删除"), callback = function() removeBind(desktop, host) end },
+                                },
+                            }:show()
+                        end,
+                    })
+                end
+            end
+            rows[#rows + 1] = function(iw)
+                return Row.widget({
+                    width = iw, kind = "nav", icon = "add",
+                    title = _("添加绑定"),
+                    callback = function() editBind(desktop, nil, "", "") end,
+                })
+            end
+            return { { rows = rows } }
+        end,
+    }
+end
+
+--- 「解析绑定」：域名直接对应地址，不再查询 DNS。内网主机用这个，免得公网 DNS 抢先回 NXDOMAIN。
+---@param desktop BookDesktop
+---@return fun(iw: number): table
+function Setting.bindRow(desktop)
+    return function(iw)
+        local hosts = bindHosts()
+        local status, on
+        if #hosts == 0 then
+            status, on = _("未设置"), false
+        elseif #hosts == 1 then
+            status, on = hosts[1], true
+        else
+            status, on = T(_("已绑定 %1 个"), #hosts), true
+        end
+        return Row.widget({
+            width = iw, kind = "nav", icon = "dns",
+            title = _("解析绑定"),
+            subtitle = _("域名固定到这个地址，不再查询 DNS"),
+            status = status, status_on = on,
+            callback = function()
+                require("desktop.pages.setting.overlay").push(desktop, bindPage(desktop))
             end,
         })
     end
