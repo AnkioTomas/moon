@@ -182,7 +182,7 @@ local function itemInUse(desktop, kind, key)
         return require("features.ime.registry").current().dictionary == key
     end
     if kind == "rare" then return require("features.rare.catalog").enabled(key) end
-    if key == "plugin-update.zip" then return require("features.update").busy() end
+    if key == "plugin-update.zip" then return require("features.update"):busy() end
     return require("features.ime.download").downloading() == true
 end
 

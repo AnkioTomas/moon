@@ -168,6 +168,43 @@ Cache.reset()
 Assert.eq(Cache.probe().version, "0.9.9")
 
 ----------------------------------------------------------------------
+-- 功能清单：kamarefeatures.lua 原样展示；缺文件 / 版本不符 / 结构不合法都不显示。
+----------------------------------------------------------------------
+local function withManifest(value)
+    package.loaded["kamarefeatures"] = value
+    Cache.reset()
+    return Cache.featureText()
+end
+
+uninstall()
+installCache({ api_version = 1, capabilities = { open = true }, path = fake_path })
+Assert.eq(withManifest({ api_version = 1, features = { "缓存", "双页", "裁切" } }),
+    "缓存 · 双页 · 裁切", "按清单顺序拼接")
+Assert.eq(withManifest({ api_version = 1, features = { "缓存", "缓存", "", 42, "裁切" } }),
+    "缓存 · 裁切", "去重并忽略空串 / 非字符串")
+Assert.is_nil(withManifest({ api_version = 2, features = { "缓存" } }), "api_version 不符")
+Assert.is_nil(withManifest({ api_version = 1, features = {} }), "空清单")
+Assert.is_nil(withManifest({ api_version = 1, features = "缓存" }), "不是数组")
+Assert.is_nil(withManifest({ api_version = 1 }), "没有 features")
+Assert.is_nil(withManifest("not a table"), "不是表")
+package.loaded["kamarefeatures"] = nil
+Cache.reset()
+Assert.is_nil(Cache.featureText(), "没有清单不显示")
+
+-- 最多 8 项
+local many = {}
+for i = 1, 10 do many[i] = "功能" .. i end
+local text = withManifest({ api_version = 1, features = many })
+Assert.not_nil(text:find("功能8", 1, true), "保留前 8 项")
+Assert.is_nil(text:find("功能9", 1, true), "超出 8 项截断")
+
+-- 未安装 kamare 时，即使有清单也不显示。
+package.loaded["kamarefeatures"] = { api_version = 1, features = { "缓存" } }
+uninstall()
+Cache.reset()
+Assert.is_nil(Cache.featureText(), "非增强版不显示")
+
+----------------------------------------------------------------------
 -- 门面：每个能力一个显式包装，参数只从配置补 base_url；缺能力则 unsupported。
 ----------------------------------------------------------------------
 cfg = { base_url = "http://kav/", api_key = " k " }

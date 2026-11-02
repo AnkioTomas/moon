@@ -422,12 +422,12 @@ Assert.eq(toast_opts.text, "服务已启动：http://本机IP:9528/")
 -- 装完再崩会跳过重启。
 do
     local restart = function() end
+    package.preload["utils.restart"] = function() return { now = restart } end
     package.preload["features.update"] = function()
         return {
-            installArchive = function(_archive, _root, cb)
+            installArchive = function(_self, _archive, _root, cb)
                 cb(true, "book.koplugin")
             end,
-            restart = restart,
         }
     end
     package.loaded["features.update"] = nil
@@ -443,10 +443,9 @@ do
     package.loaded["features.update"] = nil
     package.preload["features.update"] = function()
         return {
-            installArchive = function(_archive, _root, cb)
+            installArchive = function(_self, _archive, _root, cb)
                 cb(false, "busy")
             end,
-            restart = restart,
         }
     end
     toast_opts = nil

@@ -844,18 +844,18 @@ end
 local PLUGIN_ROOT = debug.getinfo(1, "S").source:match("^@(.*)/features/remote/init%.lua$")
 
 --- 装上传的插件包；装好在设备上提示并稍后重启：留一秒让「成功」响应发回浏览器，
---- 不能久等（旧模块还在内存里，延迟加载会混进新版文件）。重启走 Update.restart，开着书也先落盘。
+--- 不能久等（旧模块还在内存里，延迟加载会混进新版文件）。重启走 utils.restart，开着书也先落盘。
 ---@param temp string
 ---@param cb fun(ok: boolean, err: string|nil)
 local function installUpdate(temp, cb)
     local Update = require("features.update")
-    Update.installArchive(temp, PLUGIN_ROOT, function(ok, detail)
+    Update:installArchive(temp, PLUGIN_ROOT, function(ok, detail)
         cb(ok, not ok and detail or nil)
         if not ok then return end
         require("ui.themes.widgets.toast"):new{
             text = require("ffi/util").template(_("插件 %1 已安装，正在重启 KOReader…"), detail),
         }:show()
-        require("ui/uimanager"):scheduleIn(1, Update.restart)
+        require("ui/uimanager"):scheduleIn(1, require("utils.restart").now)
     end)
 end
 
@@ -1310,7 +1310,7 @@ local function restoreBackup(temp, cb)
         require("ui.themes.widgets.toast"):new{
             text = _("备份已通过远程管理恢复，正在重启 KOReader…"),
         }:show()
-        require("ui/uimanager"):scheduleIn(1, require("features.update").restart)
+        require("ui/uimanager"):scheduleIn(1, require("utils.restart").now)
     end)
 end
 
@@ -1328,7 +1328,7 @@ local function resetConfig(cb)
         require("ui.themes.widgets.toast"):new{
             text = _("配置已通过远程管理清除，正在重启 KOReader…"),
         }:show()
-        require("ui/uimanager"):scheduleIn(1, require("features.update").restart)
+        require("ui/uimanager"):scheduleIn(1, require("utils.restart").now)
     end)
 end
 
