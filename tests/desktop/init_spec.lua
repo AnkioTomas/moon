@@ -183,6 +183,18 @@ do -- 换色板（主色相同也不能只看 accent）：整壳重建，顶栏�
     desk:updateView()
 end
 
+do -- 彩色墨水屏：换页签闪一次清残影，同页签刷新仍是 ui
+    Kit.color_enabled = true
+    desk:updateView()
+    local other = desk.tab == "library" and "home" or "library"
+    desk:switchTab(other)
+    Assert.eq(Kit.dirty[#Kit.dirty].mode, "flashui")
+    desk:updateView()
+    Assert.eq(Kit.dirty[#Kit.dirty].mode, "ui")
+    Kit.color_enabled = false
+    desk:updateView()
+end
+
 do -- 当前 Tab 被关掉（书城开关）：回退首页
     Kit.sections.store.zlib_enabled = true
     desk:switchTab("store")
