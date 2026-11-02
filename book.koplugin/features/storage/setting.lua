@@ -167,7 +167,7 @@ local function leftoverTitle(key)
     if method and DICT_NAME[method] then return DICT_NAME[method] end
     local rare_id = key:match("^rare/(.+)%.tsv%.dl$")
     if rare_id then return rareTitle(rare_id) end
-    if key == "plugin-update.zip" then return _("更新包") end
+    if require("features.storage.usage").UPDATE_ARCHIVES[key] then return _("更新包") end
     return key:match("([^/]+)$") or key
 end
 
@@ -182,7 +182,8 @@ local function itemInUse(desktop, kind, key)
         return require("features.ime.registry").current().dictionary == key
     end
     if kind == "rare" then return require("features.rare.catalog").enabled(key) end
-    if key == "plugin-update.zip" then return require("features.update"):busy() end
+    local updater = require("features.storage.usage").UPDATE_ARCHIVES[key]
+    if updater then return require(updater):busy() end
     return require("features.ime.download").downloading() == true
 end
 
