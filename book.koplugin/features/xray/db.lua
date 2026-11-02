@@ -261,4 +261,33 @@ function XrayDB.replace(source_id, stable_id, entities, updated_at)
     end) == true
 end
 
+-- 这本书的全部 X-Ray 状态。改身份、撕墓碑都只认这一份。
+local TABLES = { "xray_entities", "xray_scan", "xray_removed", "xray_chapter" }
+
+--- 书改名 / 收编。不另起事务，跑在调用方事务里。
+---@param source_id string
+---@param old_stable_id string
+---@param new_stable_id string
+---@param merge boolean|nil
+---@return boolean
+function XrayDB.moveIdentity(source_id, old_stable_id, new_stable_id, merge)
+    for _idx, tbl in ipairs(TABLES) do
+        if not DB.moveIdentity(tbl, source_id, old_stable_id, new_stable_id, merge) then
+            return false
+        end
+    end
+    return true
+end
+
+--- 撕墓碑。不另起事务：BookDB.remove 已经在事务里，这里再 BEGIN 会直接失败。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function XrayDB.removeIdentity(source_id, stable_id)
+    for _idx, tbl in ipairs(TABLES) do
+        if not DB.removeIdentity(tbl, source_id, stable_id) then return false end
+    end
+    return true
+end
+
 return XrayDB

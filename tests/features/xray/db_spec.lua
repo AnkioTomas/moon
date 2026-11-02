@@ -74,3 +74,13 @@ Assert.is_true(XrayDB.clearRemoved("moon", "b1"))
 Assert.matches(calls[#calls].sql, "DELETE FROM xray_removed")
 Assert.eq(calls[#calls].args[1], "moon")
 Assert.eq(calls[#calls].args[2], "b1")
+
+-- 撕墓碑走同一份名单，但不另起事务：外层 BookDB.remove 已经在事务里。
+calls = {}
+Assert.is_true(XrayDB.removeIdentity("moon", "b1"))
+local removed = {}
+for _idx, c in ipairs(calls) do
+    removed[#removed + 1] = c.sql:match("^DELETE FROM ([%w_]+)")
+end
+Assert.eq(table.concat(removed, ","), "xray_entities,xray_scan,xray_removed,xray_chapter")
+Assert.len(calls, 4, "撕墓碑不另起事务")
