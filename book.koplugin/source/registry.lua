@@ -128,8 +128,8 @@ local function sourceIds()
         list[i] = id
         seen[id] = true
     end
-    -- Kindle 书库只在有系统 cc.db 且装了 kindle.koplugin 时出现，排在内置源末尾。
-    if require("source.kindle").available() then
+    -- Kindle 书库只在有系统 cc.db（Kindle 设备）时出现，不管装没装 kindle.koplugin，排在内置源末尾。
+    if require("source.kindle").supported() then
         list[#list + 1] = "kindle"
         seen.kindle = true
     end

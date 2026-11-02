@@ -71,8 +71,10 @@ package.loaded["source.kindle"] = nil
 local Kindle = require("source.kindle")
 Kindle.CC_DB = cc_path
 
--- 没装 kindle.koplugin：不可用
+-- 没装 kindle.koplugin：书源仍出现（supported），只是不能开书
+Assert.is_true(Kindle.supported())
 Assert.is_false(Kindle.available())
+Assert.is_true(Kindle.new():configured())
 
 local prepared, epub_exists = {}, false
 local ofe = {

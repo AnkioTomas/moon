@@ -39,10 +39,16 @@ function Kindle.helper()
     return nil
 end
 
---- 有 cc.db 且装了 kindle.koplugin 才可用。
+--- 设备有 cc.db（Kindle）：书源就该出现，kindle.koplugin 装没装在源设置页里处理。
+---@return boolean
+function Kindle.supported()
+    return attr(Kindle.CC_DB, "mode") == "file"
+end
+
+--- 有 cc.db 且装了 kindle.koplugin 才能开书。
 ---@return boolean
 function Kindle.available()
-    return attr(Kindle.CC_DB, "mode") == "file" and Kindle.helper() ~= nil
+    return Kindle.supported() and Kindle.helper() ~= nil
 end
 
 --- kindle.koplugin 的缓存 EPUB（已转换才返回）。
@@ -115,7 +121,7 @@ function Kindle.new()
 end
 
 function Source:configured()
-    return Kindle.available()
+    return Kindle.supported()
 end
 
 --- 只能编辑展示元信息（cc.db 只读，改动只落月读库）。
