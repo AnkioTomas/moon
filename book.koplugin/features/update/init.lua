@@ -18,6 +18,7 @@ local MoonSettings = require("utils.settings")
 local Text = require("utils.text")
 local Job = require("workers.job")
 local Install = require("features.update.install")
+local Release = require("http.release")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -39,14 +40,8 @@ local API_URLS = {
     "https://api.github.com/repos/AnkioTomas/moon/releases/latest",
 }
 local CHECK_INTERVAL = 24 * 60 * 60
-local GITHUB = "https://github.com"
 local ASSET_PREFIX = "^https://github%.com/AnkioTomas/moon/releases/download/"
 local MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
-
---- 镜像不可信：包体只靠 Release 接口（api.ankio.net 转发的 GitHub API）给的 sha256 把关，校验值绝不走镜像。
-local MIRRORS = require("http.mirror").RELEASE_PROXIES
-local PROBE_MIRRORS = 5
-local PROBE_TIMEOUT_RATIO = 1 / 3 -- × 「网络超时」，缺省 10 秒
 
 --- candidate 是 parseRelease 验过的 x.y.z；installed 解析不出（开发版）一律视为更旧。
 local function newer(candidate, installed)
@@ -147,67 +142,6 @@ function Update.check(cb)
     fetch(1)
 end
 
---- 并发探测直连与随机几个镜像：最先回 200 且长度对得上的胜出，全部失败回落直连。
---- 选中结果一律 nextTick 回调，不在 turbo 回调栈里取消自己那条流。
----@param release table
----@param cb fun(url: string)
----@return table handle { cancel }
-local function pickDownloadUrl(release, cb)
-    local path = release.url:sub(#GITHUB + 1)
-    local Mirror = require("http.mirror")
-    local pool = {}
-    for _idx, prefix in ipairs(MIRRORS) do
-        if not Mirror.isDead(prefix) then pool[#pool + 1] = prefix end
-    end
-    local prefixes = { GITHUB }
-    for i = 1, math.min(PROBE_MIRRORS, #pool) do
-        local j = math.random(i, #pool)
-        pool[i], pool[j] = pool[j], pool[i]
-        prefixes[#prefixes + 1] = pool[i]
-    end
-    local jobs, pending, settled = {}, #prefixes, false
-    local bad, flagged = {}, {}
-    local function flag(i)
-        if i > 1 and not settled and not flagged[i] then
-            flagged[i] = true
-            bad[#bad + 1] = prefixes[i]
-        end
-    end
-    local function cancelAll()
-        settled = true
-        for _idx, job in ipairs(jobs) do job:cancel() end
-    end
-    local function settle(url)
-        if settled then return end
-        cancelAll()
-        -- 有源胜出说明网络通：同场已确定失败的镜像（不含直连）落盘拉黑
-        if url ~= release.url then Mirror.markDead(bad) end
-        logger.dbg("book.update download from", url)
-        cb(url)
-    end
-    for i, prefix in ipairs(prefixes) do
-        local url = prefix .. path
-        jobs[i] = Request.stream({ url = url, timeout = require("http.timeout").net(PROBE_TIMEOUT_RATIO), allow_redirects = true }, {
-            on_headers = function(code, headers)
-                local function reject() flag(i) end
-                if code ~= 200 then return reject() end
-                local length = tonumber((headers:get("Content-Length", true)))
-                if length and release.size and length ~= release.size then return reject() end
-                -- 死镜像常回 200 + 自家首页且不带长度，只凭长度拦不住。
-                local mime = headers:get("Content-Type", true)
-                if mime and mime:lower():find("text/html", 1, true) then return reject() end
-                UIManager:nextTick(require("ui.guard").wrap("update settle", function() settle(url) end))
-            end,
-            on_done = function(err)
-                if err then flag(i) end
-                pending = pending - 1
-                if pending == 0 then UIManager:nextTick(require("ui.guard").wrap("update settle", function() settle(release.url) end)) end
-            end,
-        })
-    end
-    return { cancel = cancelAll }
-end
-
 --- 从 url 下载并在子进程里装包；镜像下载失败或校验不过时回落直连重来一次。
 ---@param done fun(ok: boolean, err: any) 已负责清 _job
 ---@param on_installing fun()|nil 下载完、开始换目录：此后不能再取消
@@ -265,7 +199,7 @@ function Update.install(release, plugin_root, cb, on_progress, on_installing)
         Update._job = nil
         cb(ok, err)
     end
-    Update._job = pickDownloadUrl(release, function(url)
+    Update._job = Release.pick(release, function(url)
         installFrom(url, release, plugin_root, done, on_progress, on_installing)
     end)
 end
@@ -318,7 +252,7 @@ Update.onExit = Update.cancel
 --- 装好后重启 KOReader：走 KOReader 自己的重启动作（广播 Restart → DeviceListener → exitOrRestart），
 --- 阅读器 / 文件管理器先 onClose（sidecar、阅读会话、各 onExit 落盘）再退出；禁止直接 restartKOReader。
 function Update.restart()
-    UIManager:broadcastEvent(require("ui/event"):new("Restart"))
+    require("utils.restart").now()
 end
 
 --- 已知错误码 → 用户文案；子进程错误带堆栈，只取首行。

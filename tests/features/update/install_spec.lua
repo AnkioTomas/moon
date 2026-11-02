@@ -160,6 +160,33 @@ Assert.eq(assert(loadfile(tmp .. "/other.koplugin/main.lua"))(), "new-other")
 Assert.is_nil(lfs.attributes(tmp .. "/a.koplugin"))
 Assert.is_nil(lfs.attributes(tmp .. "/.book.koplugin-update"))
 
+-- 指定顶层目录与安装根目录：kamare 在线更新用（digest + name + parent）。
+local extra = tmp .. "/extra-plugins"
+assert(lfs.mkdir(extra))
+assert(lfs.mkdir(extra .. "/kamare.koplugin"))
+write(extra .. "/kamare.koplugin/main.lua", "return 'old-kamare'\n")
+entries = {
+    { path = "kamare.koplugin", mode = "directory", size = 0 },
+    { path = "kamare.koplugin/kamarecache.lua", mode = "file", body = "return 42\n" },
+}
+local kamare_ok, kamare_name = Install.run(archive, current, digest,
+    { name = "kamare.koplugin", parent = extra })
+Assert.is_true(kamare_ok, kamare_name)
+Assert.eq(kamare_name, "kamare.koplugin")
+Assert.eq(assert(loadfile(extra .. "/kamare.koplugin/kamarecache.lua"))(), 42)
+Assert.eq(assert(loadfile(extra .. "/.kamare.koplugin-backup/main.lua"))(), "old-kamare")
+Assert.eq(assert(loadfile(tmp .. "/other.koplugin/main.lua"))(), "new-other", "装到指定目录时不动月读与其它插件")
+
+-- 指定目录名对不上：整包拒绝，旧目录不动。
+entries = {
+    { path = "other.koplugin", mode = "directory", size = 0 },
+    { path = "other.koplugin/main.lua", mode = "file", body = "return 'wrong'\n" },
+}
+local named_ok, named_err = Install.run(archive, current, digest, { name = "kamare.koplugin" })
+Assert.is_nil(named_ok)
+Assert.eq(named_err, "not a koplugin archive")
+Assert.eq(assert(loadfile(extra .. "/kamare.koplugin/kamarecache.lua"))(), 42)
+
 os.execute("rm -rf " .. tmp)
 
 return true

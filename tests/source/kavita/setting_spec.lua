@@ -9,7 +9,7 @@ local Assert = require("support.assert")
 
 local cfg = {}
 local saved = 0
-local reloaded = 0
+local invalidated = 0
 local events = {}
 package.preload["utils.settings"] = function()
     return {
@@ -22,7 +22,7 @@ package.preload["utils.settings"] = function()
     }
 end
 package.preload["source.registry"] = function()
-    return { reload = function() reloaded = reloaded + 1 end }
+    return { invalidate = function() invalidated = invalidated + 1 end }
 end
 -- 源模块只在设置行里读两个默认值；真常量由 client_spec / source_spec 钉住。
 -- 「测试连接」还要走 client:request，返回内容由 request_reply 控制。
@@ -93,8 +93,8 @@ end
 
 -- 缓存适配层：探测 / 详情 / 保存后镜像；真实现由 cache_spec 钉住。
 local probe_result = { ok = false, state = "missing" }
+local feature_text = "缓存（离线阅读与清理） · 双页拆分 · 裁切边框"
 local mirror_failed = false
-local reprobed = 0
 local register_calls, register_ok = {}, true
 local available = {}
 local summary_result
@@ -108,10 +108,9 @@ local summary_calls, summary_all_calls, chapters_calls = 0, 0, 0
 package.preload["source.kavita.cache"] = function()
     return {
         probe = function() return probe_result end,
-        reprobe = function()
-            reprobed = reprobed + 1
-            return probe_result
-        end,
+        featureText = function() return feature_text end,
+        pluginsDir = function() return "/fake/plugins" end,
+        reprobe = function() return probe_result end,
         mirrorFailed = function() return mirror_failed end,
         registerServer = function(base_url, api_key)
             register_calls[#register_calls + 1] = { base_url = base_url, api_key = api_key }
@@ -183,6 +182,14 @@ package.preload["source.kavita.cache"] = function()
 end
 local Themed = require("support.theme_stubs")
 Themed.install()
+
+-- kamare 在线更新：设置页只负责把行接上，网络 / 安装流程由 kamare_update_spec 钉住。
+local kamare_started = 0
+package.preload["source.kavita.kamare_update"] = function()
+    return {
+        start = function() kamare_started = kamare_started + 1 end,
+    }
+end
 
 local Config = require("support.config")
 local PLUGIN = Config.root() .. "/book.koplugin/source/kavita"
@@ -258,36 +265,44 @@ Assert.is_true(hb.status_on)
 -- 副标题单行截断（行里有状态 + 箭头，文字位很窄），必须短到放得下；「为什么」在输入框提示里。
 Assert.eq(hb.subtitle, "阅读时补推进度，0 关闭")
 hb.callback()
-local input = Themed.last("input")
-Assert.eq(input.fields[1].text, "30")
-Assert.eq(input.fields[1].input_type, "number")
-input.callback("120")
+local spin = Themed.last("spin")
+Assert.eq(spin.fields[1].value, 30)
+Assert.eq(spin.fields[1].step, 10, "10 秒一档")
+Assert.eq(spin.fields[1].min, 0)
+Assert.eq(spin.fields[1].max, 600)
+Assert.eq(spin.fields[1].label, "秒")
+spin.callback(120)
 Assert.eq(cfg.heartbeat_interval, 120)
 Assert.eq(rowAt("进度心跳间隔").status, "120 秒")
-Assert.eq(input.shown and saved, 1, "保存一次")
+Assert.eq(spin.shown and saved, 1, "保存一次")
 
-input.callback("0")
+spin.callback(0)
 Assert.eq(cfg.heartbeat_interval, 0, "0 落盘成关闭")
 local off = rowAt("进度心跳间隔")
 Assert.eq(off.status, "已关闭")
 Assert.is_false(off.status_on)
 
-input.callback("")
-Assert.is_nil(cfg.heartbeat_interval, "空输入回默认值")
+spin.callback(30)
+Assert.is_nil(cfg.heartbeat_interval, "回到默认值不落盘")
 
--- 请求超时：默认 60 秒，可调大（慢设备拉书架）。
+-- 请求超时：默认 60 秒，10 秒一档。
 local to = rowAt("请求超时")
 Assert.eq(to.status, "60 秒")
 Assert.is_false(to.status_on, "默认值不高亮")
 to.callback()
-input = Themed.last("input")
-input.callback("180")
+spin = Themed.last("spin")
+Assert.eq(spin.fields[1].value, 60)
+Assert.eq(spin.fields[1].step, 10, "10 秒一档")
+Assert.eq(spin.fields[1].min, 10)
+spin.callback(180)
 Assert.eq(cfg.timeout, 180)
 Assert.eq(rowAt("请求超时").status, "180 秒")
 Assert.is_true(rowAt("请求超时").status_on)
+spin.callback(60)
+Assert.is_nil(cfg.timeout, "回到默认值不落盘")
 
-Assert.eq(saved, 4)
-Assert.eq(reloaded, 4, "每次保存都重建源实例，新配置立即生效")
+Assert.eq(saved, 5)
+Assert.eq(invalidated, 5, "每次保存都作废源实例，新配置立即生效，但不广播 SourceChanged")
 
 ----------------------------------------------------------------------
 -- 漫画缓存：七态（含旧接口/镜像失败）+ 只读详情 + 09 手动安装说明。
@@ -315,7 +330,7 @@ checkStatus({ ok = true, state = "enhanced", api_version = 1 }, "增强版（旧
 checkStatus({ ok = true, state = "enhanced", api_version = 1, version = "0.10.0-dev" },
     "配置同步失败", false, true)
 
--- 详情页：状态 → 清理 → 维护；增强态不显示安装说明。
+-- 详情页：状态 → 清理；增强态不显示安装说明。
 local MB = 1024 * 1024
 cfg.base_url, cfg.api_key = "http://kav", "k"
 local cache_path = "/fake/plugins/kamare.koplugin/src/kamarecache.lua"
@@ -378,9 +393,19 @@ Assert.eq(overlay_updates, 1, "算完刷新叠层")
 local sections = page.sections()
 Assert.eq(chapters_calls, 2, "重画不重算占用，只重取计划")
 local status_rows = sectionRows(sections, "状态")
-Assert.eq(statusOf(status_rows, "版本").status, "0.10.0-dev")
-Assert.eq(statusOf(status_rows, "增强版功能").subtitle,
-    "缓存（离线阅读与清理） · 双页拆分 · 裁切边框")
+local version_row = statusOf(status_rows, "kamare 增强版")
+Assert.eq(version_row.status, "0.10.0-dev")
+Assert.is_true(version_row.chevron, "版本行可点")
+Assert.eq(version_row.subtitle, "点按检查 kamare 增强版更新")
+version_row.callback()
+Assert.eq(kamare_started, 1, "版本行交给 kamare 在线更新模块")
+Assert.eq(statusOf(status_rows, "增强版功能").subtitle, feature_text, "功能清单原样显示")
+
+-- 清单缺失 / 不合法：不显示整行，版本行不受影响。
+feature_text = nil
+local without_features = sectionRows(page.sections(), "状态")
+Assert.is_nil(statusOf(without_features, "增强版功能"), "没有清单隐藏功能行")
+Assert.not_nil(statusOf(without_features, "kamare 增强版"), "版本行仍在")
 Assert.eq(statusOf(status_rows, "加载路径").subtitle, cache_path)
 Assert.eq(statusOf(status_rows, "缓存占用").status, "12 章")
 Assert.matches(statusOf(status_rows, "缓存占用").subtitle, "已用 3.0 MB，可用 9.0 MB")
@@ -394,9 +419,8 @@ Assert.eq(cleanup_rows[3].title, "清理全部")
 Assert.matches(cleanup_rows[3].subtitle, "含未关联服务器 · 15 章", "全部清理用合计，不用本服务器")
 Assert.is_nil(findSection(sections, "获取增强版"), "增强态不显示安装说明")
 
--- 重新检测：原地重建叠层。
-sectionRows(sections, "维护")[1].callback()
-Assert.eq(reprobed, 1, "重新检测")
+-- 维护组已移除：更新入口只在诊断页。
+Assert.is_nil(findSection(sections, "维护"))
 
 -- 清理已读：确认 → 忙碌窗 → 删除 → 复查 → 刷新。
 delete_calls = {}
@@ -504,12 +528,16 @@ available = {}
 cfg.base_url = ""
 rowAt("漫画缓存").callback()
 local missing = currentSections()
+local missing_version = statusOf(sectionRows(missing, "状态"), "kamare 增强版")
+Assert.eq(missing_version.status, "未安装")
+Assert.eq(missing_version.subtitle, "点按检查并安装 kamare 增强版", "没有 kamare 时引导点版本行")
 local install = findSection(missing, "获取增强版")
 Assert.not_nil(install, "非增强态显示安装说明")
 local install_text = install.rows[1](600).text or ""
 Assert.matches(install_text, "releases/latest")
 Assert.matches(install_text, "kamarecache.lua")
-Assert.matches(install_text, "增强版提供：缓存")
+Assert.matches(install_text, "增强版功能随版本不同")
+Assert.matches(install_text, "上方「kamare 增强版」")
 Assert.matches(install_text, Config.root(), "插件目录（book.koplugin 的上级）")
 Assert.is_nil(findSection(missing, "清理"), "未安装不显示清理")
 
@@ -544,7 +572,7 @@ probe_result = { ok = true, state = "enhanced", api_version = 1, version = "0.10
 register_calls, register_ok, events = {}, true, {}
 local before = saved
 rowAt("进度心跳间隔").callback()
-Themed.last("input").callback("75")
+Themed.last("spin").callback(70)
 Assert.eq(saved, before + 1)
 Assert.eq(register_calls[1].base_url, "http://kav")
 Assert.eq(register_calls[1].api_key, "k")
@@ -554,7 +582,7 @@ Assert.eq(events[#events], "register", "镜像失败也不影响 moon 保存")
 register_ok = false
 before = saved
 rowAt("进度心跳间隔").callback()
-Themed.last("input").callback("60")
+Themed.last("spin").callback(60)
 Assert.eq(Themed.last("toast").text, "无法同步配置到 kamare", "用户主动保存失败要提示")
 Assert.eq(saved, before + 1, "toast 不阻断 moon 自己的保存")
 
@@ -562,14 +590,14 @@ Assert.eq(saved, before + 1, "toast 不阻断 moon 自己的保存")
 probe_result = { ok = false, state = "missing" }
 register_calls = {}
 rowAt("进度心跳间隔").callback()
-Themed.last("input").callback("30")
+Themed.last("spin").callback(30)
 Assert.len(register_calls, 0, "没有缓存接口时跳过镜像")
 
 ----------------------------------------------------------------------
--- 测试连接：服务器连得上 ≠ 缓存可用，顺手报 kamare 状态。
+-- 测试连接：只测 Kavita，不碰 kamare。
 ----------------------------------------------------------------------
 Assert.eq(rowAt("测试连接").kind, "action")
-Assert.eq(rowAt("测试连接").subtitle, "同时检查漫画缓存插件")
+Assert.eq(rowAt("测试连接").subtitle, "检查 Kavita 服务器连接与版本")
 
 ---@param probe table
 ---@param mirror boolean|nil
@@ -586,19 +614,13 @@ end
 
 local enhanced = { ok = true, state = "enhanced", api_version = 1, version = "0.10.0-dev",
     capabilities = { chapters = true, delete = true, delete_all = true } }
-Assert.eq(connectToast(enhanced, false, "0.9.0"),
-    "连接正常\nKavita 0.9.0\nkamare 增强版 v0.10.0-dev")
-Assert.eq(connectToast({ ok = true, state = "enhanced", api_version = 1, version = "0.9.22" },
-        false, "0.9.0"),
-    "连接正常\nKavita 0.9.0\nkamare 增强版 v0.9.22（旧接口）")
-Assert.eq(connectToast(enhanced, true, "0.9.0"),
-    "连接正常\nKavita 0.9.0\nkamare 配置同步失败")
+Assert.eq(connectToast(enhanced, false, "0.9.0"), "连接正常\nKavita 0.9.0")
+Assert.eq(connectToast(enhanced, true, "0.9.0"), "连接正常\nKavita 0.9.0",
+    "kamare 镜像失败不影响 Kavita 连接结果")
 Assert.eq(connectToast({ ok = false, state = "missing" }, false, "0.9.0"),
-    "连接正常\nKavita 0.9.0\nkamare 未安装 / 未启用")
-Assert.eq(connectToast({ ok = false, state = "official" }, false, "0.9.0"),
-    "连接正常\nKavita 0.9.0\nkamare 官方版（无缓存接口）")
+    "连接正常\nKavita 0.9.0", "测试连接不碰 kamare")
 Assert.eq(connectToast({ ok = false, state = "incompatible", api_version = 2 }, false, "0.9.0"),
-    "连接正常\nKavita 0.9.0\nkamare 版本不兼容")
+    "连接正常\nKavita 0.9.0")
 -- 版本过旧 / 请求失败仍报真正原因，不能让缓存状态盖过去。
 Assert.eq(connectToast(enhanced, false, "0.8.9"),
     "连接正常\nKavita 0.8.9 过旧，需要 0.9 及以上")

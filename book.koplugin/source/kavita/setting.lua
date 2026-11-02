@@ -7,6 +7,7 @@ Kavita 源设置：服务器地址、API Key、书库选择、测试连接。
 
 local Text = require("utils.text")
 local Cache = require("source.kavita.cache")
+local KamareUpdate = require("source.kavita.kamare_update")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -25,17 +26,25 @@ local function toast(text, timeout)
     require("ui.themes.widgets.toast"):new{ text = text, timeout = timeout or 3 }:show()
 end
 
---- 落盘并重建源实例，让新地址 / Key / 书库立即生效，设置页随之刷新。
+--- 落盘并作废源实例，让新地址 / Key / 书库立即生效。
+--- 不走 SourceChanged：那会把设置页复位到根目录；这里只重画当前叠层。
 --- 保存后把配置镜像给 kamare（02 A5 第二处）；kamare 侧失败只提示，不阻断 moon 自己的保存。
 ---@param cfg table
-local function save(cfg)
+---@param plugin table|nil
+---@param refresh_shelf boolean|nil 连接配置 / 书库变了才让书架作废旧数据
+local function save(cfg, plugin, refresh_shelf)
     require("utils.settings").saveSource(ID, cfg)
     local configured = (cfg.base_url or "") ~= "" and (cfg.api_key or "") ~= ""
     if configured and Cache.probe().ok then
         local server_key, code = Cache.registerServer(cfg.base_url, cfg.api_key)
         if not server_key or code then toast(_("无法同步配置到 kamare")) end
     end
-    require("source.registry").reload()
+    require("source.registry").invalidate()
+    local desktop = plugin and plugin.desktop
+    if desktop then
+        if desktop.settings_overlay then desktop.settings_overlay:updateView() end
+        if refresh_shelf then desktop:onEvent("shelf_changed") end
+    end
 end
 
 --- 未配置 / 断网当场提示；否则带忙碌提示调 fn(client, done)，fn 结束时必须调 done()。
@@ -62,7 +71,7 @@ end
 ---@param normalize fun(value: string|nil): string
 ---@param icon string
 ---@return fun(iw: number): table
-local function field(key, title, hint, password, normalize, icon)
+local function field(plugin, key, title, hint, password, normalize, icon)
     return function(iw)
         local value = config()[key] or ""
         return require("ui.themes.widgets.row").widget({
@@ -78,7 +87,7 @@ local function field(key, title, hint, password, normalize, icon)
                     ok_text = _("保存"),
                     callback = function(input)
                         cfg[key] = normalize(input)
-                        save(cfg)
+                        save(cfg, plugin, true)
                     end,
                 }:show()
             end,
@@ -87,7 +96,7 @@ local function field(key, title, hint, password, normalize, icon)
 end
 
 --- 多选书库：只同步选中的库，书架分类即库名。
-local function pickLibraries()
+local function pickLibraries(plugin)
     withServer(function(client, done)
         client:json("GET", "/api/Library/libraries", nil, nil, function(libraries, err)
             done()
@@ -112,7 +121,7 @@ local function pickLibraries()
                         if item.checked then picked[item.value] = true end
                     end
                     cfg.libraries = picked
-                    save(cfg)
+                    save(cfg, plugin, true)
                 end,
             }:show()
         end)
@@ -122,7 +131,7 @@ end
 --- 请求超时（秒）：全量书架（all-v2）在慢设备 / 慢服务器上一次要几十秒，
 --- 硬上限会让整轮同步中断、书架永远加载不出来。留个设置行按设备调大。
 ---@return fun(iw: number): table
-local function timeoutRow()
+local function timeoutRow(plugin)
     return function(iw)
         local client = require("source.kavita.client")
         local value = tonumber(config().timeout) or client.DEFAULT_TIMEOUT
@@ -133,19 +142,16 @@ local function timeoutRow()
             status_on = value ~= client.DEFAULT_TIMEOUT,
             callback = function()
                 local cfg = config()
-                require("ui.themes.widgets.input"):new{
+                require("ui.themes.widgets.spin"):new{
                     title = _("请求超时"),
                     fields = { {
-                        text = tostring(tonumber(cfg.timeout) or client.DEFAULT_TIMEOUT),
-                        hint = _("秒，慢设备 / 慢服务器调大"),
-                        input_type = "number",
+                        value = tonumber(cfg.timeout) or client.DEFAULT_TIMEOUT,
+                        min = 10, max = 600, step = 10,
+                        label = _("秒"),
                     } },
-                    ok_text = _("保存"),
-                    callback = function(input)
-                        local seconds = math.floor(tonumber(input) or 0)
-                        -- 空 / 非正数回默认值；正数交给 Client 收敛到合法区间（5–600）。
-                        cfg.timeout = seconds > 0 and seconds or nil
-                        save(cfg)
+                    callback = function(seconds)
+                        cfg.timeout = seconds ~= client.DEFAULT_TIMEOUT and math.floor(seconds) or nil
+                        save(cfg, plugin)
                     end,
                 }:show()
             end,
@@ -156,7 +162,7 @@ end
 --- 进度心跳间隔（秒）：Kavita 的阅读会话时长 = 相邻两次进度写入的间隔，只在关书推一次会是
 --- 0 秒会话；阅读期按这个间隔补推当前位置。0 = 关闭（关书 / 切章 / 休眠的推送不受影响）。
 ---@return fun(iw: number): table
-local function heartbeatRow()
+local function heartbeatRow(plugin)
     return function(iw)
         local Source = require("source.kavita")
         local default = Source.DEFAULT_HEARTBEAT_INTERVAL
@@ -171,23 +177,16 @@ local function heartbeatRow()
             status_on = value > 0,
             callback = function()
                 local cfg = config()
-                require("ui.themes.widgets.input"):new{
+                require("ui.themes.widgets.spin"):new{
                     title = _("进度心跳间隔"),
                     fields = { {
-                        text = tostring(tonumber(cfg.heartbeat_interval) or default),
-                        hint = _("秒，0 = 关闭；Kavita 按写入间隔算阅读时长"),
-                        input_type = "number",
+                        value = tonumber(cfg.heartbeat_interval) or default,
+                        min = 0, max = 600, step = 10,
+                        label = _("秒"),
                     } },
-                    ok_text = _("保存"),
-                    callback = function(input)
-                        local seconds = tonumber(input)
-                        -- 空 / 非数字回默认值；0（或负数）交给源当成关闭。
-                        if not seconds or seconds < 0 then
-                            cfg.heartbeat_interval = nil
-                        else
-                            cfg.heartbeat_interval = math.floor(seconds)
-                        end
-                        save(cfg)
+                    callback = function(seconds)
+                        cfg.heartbeat_interval = seconds ~= default and math.floor(seconds) or nil
+                        save(cfg, plugin)
                     end,
                 }:show()
             end,
@@ -247,20 +246,18 @@ local function testConnection()
                 toast(connectResult(_("连接正常"),
                     T(_("Kavita %1 过旧，需要 0.9 及以上"), Text.trim(version))))
             else
-                -- 连上服务器不等于缓存能用：kamare 才是缓存的执行者，顺手报它的状态。
-                local status = cacheStatus(Cache.probe())
                 toast(table.concat({
                     _("连接正常"),
                     T(_("Kavita %1"), Text.trim(version)),
-                    T(_("kamare %1"), status),
                 }, "\n"))
             end
         end)
     end)
 end
 
+---@param plugin table|nil
 ---@return fun(iw: number): table
-local function libraryRow()
+local function libraryRow(plugin)
     return function(iw)
         local count = 0
         for _id in pairs(config().libraries or {}) do count = count + 1 end
@@ -269,7 +266,7 @@ local function libraryRow()
             kind = "nav", icon = "library_books", title = _("书库"),
             status = count > 0 and T(_("%1 个"), count) or _("未选择"),
             status_on = count > 0,
-            callback = pickLibraries,
+            callback = function() pickLibraries(plugin) end,
         })
     end
 end
@@ -280,7 +277,7 @@ local function testRow()
         return require("ui.themes.widgets.row").widget({
             width = iw,
             kind = "action", icon = "network_check", title = _("测试连接"),
-            subtitle = _("同时检查漫画缓存插件"),
+            subtitle = _("检查 Kavita 服务器连接与版本"),
             callback = testConnection,
         })
     end
@@ -294,24 +291,11 @@ local function tidyPath(path)
     return (path:gsub("/+", "/"))
 end
 
---- 插件安装目录（09）：kamare 已装用它当前所在目录（就地替换），否则用 moon 自己的。
+--- 插件安装目录（09）：kamare 已装用它当前所在目录（就地替换），否则用月读自己的。
 ---@param plugin table|nil
 ---@return string
 local function pluginsDir(plugin)
-    local path = Cache.probe().path
-    local installed = type(path) == "string" and tidyPath(path):match("^(.*)/[^/]+%.koplugin/")
-    if installed then return installed end
-    local own = plugin and plugin.path
-    if type(own) == "string" and own ~= "" then
-        own = tidyPath(own):gsub("/+$", "")
-        return own:match("^(.*)/[^/]+$") or own
-    end
-    local source = debug.getinfo(1, "S").source
-    if type(source) == "string" and source:sub(1, 1) == "@" then source = source:sub(2) end
-    -- 本文件在 <plugins>/book.koplugin/source/kavita/，往上四级
-    local plugins = source:match("^(.*)/[^/]+/source/kavita/[^/]+$")
-    if plugins then return plugins end
-    return "plugins"
+    return Cache.pluginsDir(plugin and plugin.path)
 end
 
 --- 只读占用：当前服务器。
@@ -376,12 +360,13 @@ local function installText(plugin)
         _("获取增强版"),
         _("  发布页：github.com/backtracker/kamare.koplugin/releases/latest"),
         T(_("  下载 kamare.koplugin.zip，解压后把 kamare.koplugin/ 放进：%1"), dir),
+        _("  也可点上方「kamare 增强版」检查并安装最新版。"),
         _("  重启 KOReader。包里要有 kamarecache.lua（没有就是官方版）；"),
         _("  增强版与官方版目录同名，不能共存；替换前先删掉旧的 kamare.koplugin/。"),
         T(_("  如该目录不可写，可改用：%1"),
             tidyPath(require("datastorage"):getDataDir() .. "/plugins")),
         "",
-        _("增强版提供：缓存（离线阅读与清理）、双页拆分、裁切边框。"),
+        _("增强版功能随版本不同，以实际安装的版本为准。"),
     }, "\n")
 end
 
@@ -394,7 +379,10 @@ local usage_stale = false
 local function refreshOverlay(plugin, reload_usage)
     if reload_usage then usage_stale = true end
     local desktop = plugin and plugin.desktop
-    if desktop and desktop.settings_overlay then desktop.settings_overlay:updateView() end
+    if desktop then
+        if desktop.settings_overlay then desktop.settings_overlay:updateView() end
+        if refresh_shelf then desktop:onEvent("shelf_changed") end
+    end
 end
 
 --- 删除后复查：请求里属于「删除前已缓存」的章如果还在，就是没删掉。
@@ -493,7 +481,7 @@ end
 ---@field usage table|nil 当前服务器（未配置时是所有服务器合计）
 ---@field all table|nil 所有服务器合计（「清理全部」用；拿不到就是 nil）
 
---- 详情页：状态 → 清理 → 维护（+ 非增强态的安装说明）。
+--- 详情页：状态 → 清理（+ 非增强态的安装说明）。
 ---@param plugin table|nil
 ---@param state KavitaCachePageState|nil
 ---@return BookThemeSection[]
@@ -508,13 +496,29 @@ local function cacheSections(plugin, state)
     local all_usage = state.all
     local out = {}
 
+    local version_status, version_hint
+    if probe.ok then
+        version_status, version_hint = probe.version, _("点按检查 kamare 增强版更新")
+    elseif probe.state == "official" then
+        version_status, version_hint = _("官方版"), _("点按安装 kamare 增强版")
+    elseif probe.state == "incompatible" then
+        version_status, version_hint = _("版本不兼容"), _("点按安装兼容的 kamare 增强版")
+    else
+        version_status, version_hint = _("未安装"), _("点按检查并安装 kamare 增强版")
+    end
     local status = {
-        mk({ icon = "info", title = _("版本"),
-            status = probe.version or _("未知"), status_on = probe.version ~= nil, chevron = false }),
+        mk({ icon = "info", title = _("kamare 增强版"),
+            subtitle = version_hint,
+            status = version_status, status_on = probe.ok == true,
+            chevron = true,
+            callback = function() KamareUpdate.start(plugin) end }),
     }
     if probe.ok then
-        status[#status + 1] = mk({ icon = "book", title = _("增强版功能"),
-            subtitle = _("缓存（离线阅读与清理） · 双页拆分 · 裁切边框"), chevron = false })
+        local features = Cache.featureText(probe)
+        if features then
+            status[#status + 1] = mk({ icon = "book", title = _("增强版功能"),
+                subtitle = features, chevron = false })
+        end
     end
     status[#status + 1] = mk({ icon = "info", title = _("加载路径"),
         subtitle = probe.path and tidyPath(probe.path) or _("未加载"), chevron = false })
@@ -615,18 +619,6 @@ local function cacheSections(plugin, state)
         } }
     end
 
-    out[#out + 1] = { title = _("维护"), rows = {
-        mk({
-            icon = "refresh", title = _("重新检测"),
-            subtitle = _("重新探测 kamare 的版本与能力"),
-            chevron = false,
-            callback = function()
-                Cache.reprobe()
-                refreshOverlay(plugin)
-            end,
-        }),
-    } }
-
     if not probe.ok then
         local rows = {}
         if probe.state == "incompatible" and probe.api_version then
@@ -714,14 +706,14 @@ function Setting.sections(plugin)
         {
             title = _("连接"),
             rows = {
-                field("base_url", _("服务器地址"), "https://kavita.example.com", false, normalizeUrl, "dns"),
-                field("api_key", _("API Key"), _("Kavita 用户设置 → API Key"), true, Text.stripWhitespace, "key"),
-                libraryRow(),
+                field(plugin, "base_url", _("服务器地址"), "https://kavita.example.com", false, normalizeUrl, "dns"),
+                field(plugin, "api_key", _("API Key"), _("Kavita 用户设置 → API Key"), true, Text.stripWhitespace, "key"),
+                libraryRow(plugin),
             },
         },
         {
             title = _("缓存与同步"),
-            rows = { cacheRow(plugin), heartbeatRow(), timeoutRow() },
+            rows = { cacheRow(plugin), heartbeatRow(plugin), timeoutRow(plugin) },
         },
         {
             title = _("诊断"),
