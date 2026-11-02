@@ -122,6 +122,20 @@ function Catalog.formatDuration(seconds)
     return T(_("%1分钟"), math.max(1, m))
 end
 
+--- 累计总量格式化：100 小时起省略分钟，1 万小时起写「X.X万小时」，窄卡放得下。
+---@param seconds number|nil
+---@return string
+function Catalog.formatTotal(seconds)
+    local h = math.floor((tonumber(seconds) or 0) / 3600)
+    if h < 100 then
+        return Catalog.formatDuration(seconds)
+    end
+    if h < 10000 then
+        return T(_("%1小时"), h)
+    end
+    return T(_("%1万小时"), string.format("%.1f", math.floor(h / 1000) / 10))
+end
+
 --- 展示查询范围：混合 → 已启用源 id 列表；否则原样返回 preferred_id。
 --- 单元素列表收成字符串，SQL 走 `=` 而不是 `IN`。
 ---@param preferred_id string|string[]|nil

@@ -125,6 +125,18 @@ do -- recent 与 list 同构（无显式 count）
     Assert.eq(r.data[1].title, "最近读")
 end
 
+-- ===== formatTotal：按量级降精度 =====
+
+do
+    Assert.eq(Catalog.formatTotal(0), "0分钟")
+    Assert.eq(Catalog.formatTotal(3600), "1小时0分钟")
+    Assert.eq(Catalog.formatTotal(99 * 3600 + 59 * 60), "99小时59分钟")
+    Assert.eq(Catalog.formatTotal(100 * 3600 + 1800), "100小时")
+    Assert.eq(Catalog.formatTotal(5250 * 3600 + 28 * 60), "5250小时")
+    Assert.eq(Catalog.formatTotal(12345 * 3600), "1.2万小时")
+    Assert.eq(Catalog.formatTotal(50000 * 3600), "5.0万小时")
+end
+
 -- ===== insight：formatDuration 各量级（经输出文案间接覆盖） =====
 
 do -- 0 / 负值 / nil → 「0分钟」，has_data = false

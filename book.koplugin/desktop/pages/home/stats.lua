@@ -69,7 +69,7 @@ local function summarize(source_id)
     end
     return {
         streak = currentStreak(daily),
-        total_text = Catalog.formatDuration(summary.total_seconds),
+        total_text = Catalog.formatTotal(summary.total_seconds),
         today_text = Catalog.formatDuration(today_seconds),
     }
 end
@@ -108,7 +108,7 @@ function M:showSettings(desktop)
     }:show()
 end
 
---- 三张卡里最长的那张（「1小时22分钟」）在真实卡宽下的高度。窄探针会少算换行。
+--- 三张卡里最长的那张（「99小时59分钟」）在真实卡宽下的高度。窄探针会少算换行。
 ---@param _ctx table|nil
 ---@param opts table|nil
 ---@return BookHomeHeightSpec
@@ -116,7 +116,7 @@ function M:heightRange(_ctx, opts)
     local w = opts and opts.width or Theme.px(300)
     local gap = Theme.px(Theme.current().space.sm)
     local card_w = math.max(1, math.floor((w - gap * 2) / 3))
-    local _card, h = Common.kpiCard(card_w, "1小时22分钟", "总阅读")
+    local _card, h = Common.kpiCard(card_w, "99小时59分钟", "总阅读")
     return { height = h }
 end
 
