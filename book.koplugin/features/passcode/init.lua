@@ -118,6 +118,11 @@ function Passcode.tooManyFails()
     return (MoonSettings.get(OWNER).fails or 0) >= MAX_FAILS
 end
 
+---@return boolean
+function Passcode.isLocked()
+    return locked
+end
+
 --- 解锁后执行 fn；没锁就立即执行。同 key 重复排队只留最后一个。
 ---@param key string
 ---@param fn fun()
