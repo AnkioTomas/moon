@@ -99,6 +99,12 @@ rex_screen.update_data.hist_gray_waveform_mode = "gc16"
 rex_screen:mech_refresh(false, "auto")
 Assert.eq(seen.bw, "gl16", "Basic 3 的动画刷新走 GL16")
 
+do
+    local basic2 = { model = "KindleBasic2", screen = { mech_refresh = function() end } }
+    Waveform.install({ device = basic2, text_hist = "gl16" })
+    Assert.eq(basic2.screen._moon_text_hist, "gl16", "Basic 2 也装")
+end
+
 for _idx, model in ipairs({ "KindlePaperWhite5", "KindlePaperWhite4", "KindleBasic4", "KindleOasis3", "KindleColorsoft" }) do
     local other = { model = model, screen = {} }
     Waveform.install({ device = other, text_hist = "gl16" })

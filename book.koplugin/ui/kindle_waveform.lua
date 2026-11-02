@@ -5,13 +5,15 @@ Kindle 上把翻页动画的 UI 刷新留在 16 级灰，不改动画、不多�
 非 REAGL 刷新把黑白直方图设成 DU。Kindle Basic 3（Rex）的灰阶直方图
 是 GC16：那是闪屏波形，低 dpi 上笔画几乎全是抗锯齿灰点，只把黑白直方图
 对齐过去，字还是灰。这种 UI 刷新把两条直方图都改成 GL16（16 级，不阻塞）。
-只对 Kindle Basic 3 生效，其它机型（含 MTK、Zelda、彩屏）不装任何钩子。
+只对 Kindle Basic 2 / 3 生效，其它机型（含 MTK、Zelda、彩屏）不装任何钩子。
 fast / A2 仍是单色。没开翻页动画时不改任何波形。
 
 @module koplugin.book.ui.kindle_waveform
 --]]
 
 local Waveform = {}
+
+local MODELS = { KindleBasic2 = true, KindleBasic3 = true }
 
 --- 与翻页动画开关键相同（`features/animation/init.lua` 的 `ENABLED_KEY`，两个运行时补丁也按它判断）。
 --- 下层不引用该 feature，只认这一个已经落盘的设置，改名要四处一起改。
@@ -85,12 +87,12 @@ function Waveform.zeldaTextHist()
     return C.WAVEFORM_MODE_ZELDA_GL16
 end
 
---- 只在 Kindle Basic 3 上装，其它机型一律不碰。同一块屏幕重复调用无效果。
+--- 只在 Kindle Basic 2 / 3 上装，其它机型一律不碰。同一块屏幕重复调用无效果。
 ---@param opts table|nil 测试注入 device / text_hist；正式调用不传
 function Waveform.install(opts)
     opts = opts or {}
     local Device = opts.device or require("device")
-    if Device.model ~= "KindleBasic3" then return end
+    if not MODELS[Device.model] then return end
     local screen = Device.screen
     if not screen or screen._moon_kindle_gray then return end
     screen._moon_kindle_gray = true
