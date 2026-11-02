@@ -2,7 +2,7 @@
 
 local Assert = require("support.assert")
 
-package.preload["ffi/blitbuffer"] = function() return { COLOR_DARK_GRAY = 1, COLOR_WHITE = 0 } end
+package.preload["ffi/blitbuffer"] = function() return { COLOR_DARK_GRAY = 1, COLOR_WHITE = 0, Color8 = function(v) return v end } end
 package.preload["ui/size"] = function() return { line = { thick = 2 } } end
 local reported = {}
 package.preload["ui.guard"] = function()
@@ -157,8 +157,9 @@ do
     } }))
     local bb = newBB()
     bb.getWidth = function() return 200 end
-    bb.paintRoundedRect = function() end
-    bb.paintBorder = function() end
+    bb.getHeight = function() return 200 end
+    bb.getPixel = function() return { getColor8 = function() return { a = 255 } end } end
+    bb.setPixel = function() end
     inst:paintTo(bb)
     local rect = inst.painted[1].pieces[1]
     Assert.is_true(rect.x + rect.w <= 200, "气泡不越过屏幕右缘")
