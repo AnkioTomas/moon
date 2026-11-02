@@ -360,6 +360,51 @@ do
     Assert.len(calls, 0, "主动关过蓝牙，关 Wi-Fi 不恢复")
 end
 
+-- 用户要开着蓝牙，守护进程却没在监听：轮询读到 off 就拉起来；冷却内不重复 spawn；
+-- 没有开启意图（主动关过）则不拉起。
+do
+    local real_time = os.time
+    local now = real_time() + 10000
+    os.time = function() return now end
+
+    reset()
+    routes["/status"] = ON_ONE
+    Bluetooth.refresh()
+    Stubs.flush()
+    routes["/status"] = { false, false, STOPPED, STOPPED, ON_ONE }
+    routes["/start"] = '{"ok":true}'
+    Bluetooth.refresh()
+    Stubs.flush()
+    Assert.eq(spawned, 1, "wanted 且接口不通：拉起守护进程")
+    Assert.eq(Bluetooth.current().state, "on")
+
+    reset()
+    routes["/status"] = false
+    now = now + 10
+    Bluetooth.refresh()
+    Stubs.flush()
+    Assert.eq(spawned, 0, "冷却内不重复拉起")
+
+    now = now + 200
+    routes["/status"] = { false, false, ON_ONE }
+    Bluetooth.refresh()
+    Stubs.flush()
+    Assert.eq(spawned, 1, "冷却过后再拉一次")
+
+    routes["/status"] = { ON_ONE, STOPPED, STOPPED }
+    routes["/stop"] = '{"ok":true}'
+    Bluetooth.setEnabled(false, function() end)
+    Stubs.flush()
+    reset()
+    now = now + 1000
+    routes["/status"] = false
+    Bluetooth.refresh()
+    Stubs.flush()
+    Assert.eq(spawned, 0, "主动关过蓝牙，不自动拉起")
+
+    os.time = real_time
+end
+
 -- 关蓝牙 / 断翻页器前先放开 uhid 事件节点。触摸屏不关。失败且节点还在则重开。
 do
     local DEVICES = [[
