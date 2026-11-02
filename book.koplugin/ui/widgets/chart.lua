@@ -7,6 +7,7 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local Text = require("ui.themes.widgets.text")
 local Theme = require("ui.themes")
+local spread = require("utils.spread")
 local Box = require("ui.themes.widgets.box")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -129,17 +130,10 @@ function Chart.bars(opts)
     local col_w = n > 0 and math.floor((width - gap * gaps) / n) or width
     if col_w < 1 then col_w = 1 end
     local slack = math.max(0, width - (n * col_w + gap * gaps))
-    ---@param i number
-    ---@return number
-    local function share(i)
-        if gaps <= 0 or slack <= 0 then return 0 end
-        return math.floor(i * slack / gaps) - math.floor((i - 1) * slack / gaps)
-    end
-
     local row = HorizontalGroup:new{ align = "center" }
     for i, point in ipairs(points) do
         if i > 1 then
-            table.insert(row, HorizontalSpan:new{ width = gap + share(i - 1) })
+            table.insert(row, HorizontalSpan:new{ width = gap + spread(i - 1, gaps, slack) })
         end
         local seconds = point.value or 0
         local current_h = peak > 0 and seconds > 0
