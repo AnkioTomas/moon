@@ -282,6 +282,37 @@ function UI.scanBook(ui, identity)
     }:show()
 end
 
+--- 重置此书 X-Ray：清掉实体、续扫游标、墓碑与已识别章节（确认后执行，之后需重新生成）。
+--- 询问期间任务可能从 waiting 被唤醒接着写库，所以检查必须放在确认回调里、真正删除之前，
+--- 不能拦在确认框弹出前：框开着时扫描继续，删完又被写回半截结果。
+---@param ui table|nil
+---@param identity BookIdentity|nil
+function UI.resetBook(ui, identity)
+    identity = identity or currentIdentity()
+    if not identity then
+        info(_("当前书籍没有可用身份"))
+        return
+    end
+    require("ui.themes.widgets.confirm"):new{
+        text = _("重置此书 X-Ray？将清空已收录的人物 / 地点 / 专有名词、删除记录与分析进度，之后需重新生成。"),
+        ok_text = _("重置"),
+        ok_callback = function()
+            -- 真正删除前再看一眼：确认框开着时任务可能已从 waiting 唤醒。
+            if require("workers.tasks").get(taskKey(identity)) then
+                info(_("本书 X-Ray 正在生成，请先取消或等待完成"))
+                return
+            end
+            if not XrayDB.reset(identity.source_id, identity.stable_id) then
+                info(_("重置失败"))
+                return
+            end
+            require("features.xray.marks").invalidate()
+            refreshMainTab(main_holder)
+            info(_("已重置此书 X-Ray"))
+        end,
+    }:show()
+end
+
 --- 本章（可选含下一章）里还没识别过的章：{ idx, text }。没有目录的书只有「整本」一份，章号记 0。
 ---@param ui table ReaderUI
 ---@param identity BookIdentity
@@ -407,6 +438,7 @@ function UI.openMain(ui, initial_tab)
                 { text = _("识别本章人物"), callback = function() UI.chapter(ui, identity) end },
                 { text = _("按当前位置更新"), callback = function() UI.refresh(ui, identity) end },
                 { text = _("分析全书（含剧透）"), callback = function() UI.scanBook(ui, identity) end },
+                { text = _("重置此书 X-Ray"), callback = function() UI.resetBook(ui, identity) end },
             } }:show()
         end,
         tabs = { tabs = Kinds, active = initial_tab, on_tab = function(tab_id)
