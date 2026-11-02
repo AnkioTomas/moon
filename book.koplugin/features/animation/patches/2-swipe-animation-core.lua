@@ -553,9 +553,7 @@ local ok, err = pcall(function()
             strip_align = nil
         end
         local frames = style(screen_w, screen_h, steps, strip_align, swipe_forward)
-        -- 夜间硬件反色下 DU 擦不掉旧墨；ui 刷新由 kindle_waveform 换成夜间波形。
-        local night_hw = Screen.night_mode and Device:canHWInvert()
-        local refresh_fn = anim_refresh_mode == "fast" and not night_hw and Screen.refreshFast or Screen.refreshUI
+        local refresh_fn = anim_refresh_mode == "fast" and Screen.refreshFast or Screen.refreshUI
 
         -- Draw the previous page as the starting background
         Screen.bb:blitFrom(saved_bb, 0, 0, 0, 0, screen_w, screen_h)

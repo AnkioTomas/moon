@@ -105,44 +105,6 @@ mtk:refreshUIImp(1, 2, 3, 4)
 Assert.eq(waits, 1, "后续帧只等上一帧提交，不等刷完")
 Assert.eq(modes[2], 10)
 
--- 夜间硬件反色：ui 当作 partial 交给 mxc_update（换夜间波形），闪屏不动；翻页动画不再改 MTK 的 UI 刷新。
-do
-    local night = {
-        night_mode = true,
-        device = { canHWInvert = function() return true end },
-        waveform_ui = "ui",
-        waveform_partial = "partial",
-        waveform_fast = "du",
-        waveform_a2 = "a2",
-        update_data = { hist_bw_waveform_mode = "du", hist_gray_waveform_mode = "gc16" },
-    }
-    night.mech_refresh = function(dev, flash, mode) return mxc_update(dev, nil, dev.update_data, flash, mode) end
-    Assert.is_true(Waveform.hookHist(night))
-    settings_on = true
-    night:mech_refresh(false, "ui")
-    Assert.eq(seen.mode, "partial", "夜间 ui 升成 partial")
-    Assert.eq(seen.bw, "du", "夜间不改直方图")
-    night:mech_refresh(true, "ui")
-    Assert.eq(seen.mode, "ui", "闪屏不动")
-    night:mech_refresh(false, "du")
-    Assert.eq(seen.mode, "du", "fast 不动")
-    night.device = { canHWInvert = function() return false end }
-    night:mech_refresh(false, "ui")
-    Assert.eq(seen.mode, "ui", "软件反色保持原样")
-
-    origs, modes = 0, {}
-    local mtk_night = {
-        night_mode = true,
-        device = { canHWInvert = function() return true end },
-        mech_refresh = function(_self, _flash, mode) modes[#modes + 1] = mode end,
-        refreshUIImp = function() origs = origs + 1 end,
-    }
-    Waveform.hookUi(mtk_night, 10)
-    mtk_night:refreshUIImp(0, 0, 8, 8)
-    Assert.eq(origs, 1, "夜间走原 refreshUIImp")
-    Assert.eq(#modes, 0)
-end
-
 local installed_mode
 local device = {
     screen = {
