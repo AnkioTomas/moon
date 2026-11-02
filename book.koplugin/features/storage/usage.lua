@@ -19,6 +19,13 @@ local _ = require("gettext")
 ---@field at integer|nil 主进程的缓存时间
 local Usage = {}
 
+--- 更新包暂存文件名（utils.plugin_update 的 target.archive）→ 负责它的更新器模块。
+Usage.UPDATE_ARCHIVES = {
+    ["plugin-update.zip"] = "features.update",
+    ["kamare-update.zip"] = "source.kavita.kamare_update",
+    ["kindle-plugin-update.zip"] = "source.kindle.plugin_update",
+}
+
 --- 每一类都写明是什么、能不能清。体积为 0 的不显示。
 ---@type { id: string, icon: string, name: string, note: string }[]
 Usage.CATEGORIES = {
@@ -48,7 +55,7 @@ function Usage.classify(rel)
     local top, second, third, fourth = rel:match("^([^/]+)/?([^/]*)/?([^/]*)/?([^/]*)")
     if not top then return "other" end
     -- 没下完的包：词库 / 字典 / 生僻字临时目录、分片、更新包。先于缓存目录判断，避免 .part 算进封面。
-    if rel:find(".dl/", 1, true) or rel:match("%.dl$") or top == "plugin-update.zip" or rel:sub(-5) == ".part" then
+    if rel:find(".dl/", 1, true) or rel:match("%.dl$") or Usage.UPDATE_ARCHIVES[top] or rel:sub(-5) == ".part" then
         return "leftover"
     end
     if top == "cache" then
@@ -90,7 +97,8 @@ function Usage.itemKey(cat, rel)
     if cat == "leftover" then
         local dl = rel:match("^(.-%.dl)/") or rel:match("^(.-%.dl)$")
         if dl then return dl end
-        if rel == "plugin-update.zip" or rel == "plugin-update.zip.part" then return "plugin-update.zip" end
+        local archive = rel:gsub("%.part$", "")
+        if Usage.UPDATE_ARCHIVES[archive] then return archive end
         if rel:sub(-5) == ".part" then return (rel:gsub("%.part$", "")) end
         return rel:match("^([^/]+)")
     end
@@ -101,7 +109,7 @@ end
 ---@return string|nil body 临时目录或更新包；只有分片时为 nil
 ---@return string part
 function Usage.leftoverTargets(key)
-    if key:sub(-3) == ".dl" or key == "plugin-update.zip" then return key, key .. ".part" end
+    if key:sub(-3) == ".dl" or Usage.UPDATE_ARCHIVES[key] then return key, key .. ".part" end
     return nil, key .. ".part"
 end
 
