@@ -1,7 +1,7 @@
 --[[--
 turbo 类补丁（会话内只打一次，由 http.turbo 建 loop 时调用）。主机名解析交给 http.dns（非阻塞 UDP）。
 
-补丁：SNI、CA、connect_fail、int64，以及 HTTPParser.get 的 strncasecmp 回退
+补丁：SNI、CA、connect_fail、int64、请求超时改空闲计时，以及 HTTPParser.get 的 strncasecmp 回退
 （turbo 靠 io.popen("uname") 选平台绑定，Android 上 popen 失败留 nil，一读响应头就崩）。
 
 @module koplugin.book.http.turbo.patch
@@ -143,6 +143,28 @@ function Patch.apply()
                 end
             end
             return value, count
+        end
+    end)
+
+    -- request_timeout 在 turbo 里是连上后的整包硬超时，大回包 / 大下载慢点就被砍。
+    -- 改成空闲超时：每次从 socket 读到数据就把定时器重排，持续有数据不会超时。
+    wrap(HTTPClient, "_handle_connect", function(orig)
+        return function(self)
+            self.iostream._book_client = self
+            return orig(self)
+        end
+    end)
+    wrap(IOStream, "_read_to_buffer", function(orig)
+        return function(self)
+            local sz = orig(self)
+            local client = self._book_client
+            if sz and sz > 0 and client and client.request_timeout_ref then
+                client.io_loop:remove_timeout(client.request_timeout_ref)
+                client.request_timeout_ref = client.io_loop:add_timeout(
+                    client.kwargs.request_timeout * 1000 + require("turbo.util").gettimemonotonic(),
+                    client._handle_request_timeout, client)
+            end
+            return sz
         end
     end)
 
