@@ -41,6 +41,12 @@ end
 function ReaderExit.closeToDesktop(ui)
     UIManager:nextTick(require("ui.guard").wrap("close to desktop", function()
         local started_at = Perf.now()
+        -- DocCache:serialize 按 lfs access 时间排序磁盘缓存，文件已被删就是 nil，排序直接崩；先摘掉失效项。
+        local DocCache = require("document/doccache")
+        local lfs = require("libs/libkoreader-lfs")
+        for key, file in pairs(DocCache.cached or {}) do
+            if not lfs.attributes(file, "access") then DocCache.cached[key] = nil end
+        end
         if ui and ui.onClose then ui:onClose() end
         Perf.slow("exit onClose", started_at)
         -- 打开书时 ReaderUI 会关掉 FileManager；这里先重建，否则关闭文档后窗口栈为空直接退出。
