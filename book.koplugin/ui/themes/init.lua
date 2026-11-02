@@ -106,19 +106,6 @@ function Theme.vivid(value)
     return boost(r) * 0x10000 + boost(g) * 0x100 + boost(b)
 end
 
---- 主按钮底色上的文字色：按相对亮度选黑或白（移植自 mooncolor 的 foreground）。
----@param rgb number 0xRRGGBB
----@return number 灰度 0x00 或 0xFF
-local function onColor(rgb)
-    local function lin(n)
-        n = n / 255
-        return n <= 0.04045 and n / 12.92 or ((n + 0.055) / 1.055) ^ 2.4
-    end
-    local lum = 0.2126 * lin(math.floor(rgb / 0x10000))
-        + 0.7152 * lin(math.floor(rgb / 0x100) % 0x100) + 0.0722 * lin(rgb % 0x100)
-    return (lum + 0.05) / 0.05 >= 1.05 / (lum + 0.05) and 0x00 or 0xFF
-end
-
 --- 彩色渲染是否开启（主题色是否生效）。别用 accent > 0xFF 当代理：墨黑 accent 是 0。
 ---@return boolean
 function Theme.colorful()
@@ -152,7 +139,8 @@ function Theme.current()
         t.color.accent = accent
         t.button = {
             normal = { bg = base.button.normal.bg, ink = accent, border_color = accent },
-            primary = { bg = accent, ink = onColor(accent), border_color = accent },
+            -- 主题色一律当深色：主按钮上的字和图标用白，不再按亮度改黑。
+            primary = { bg = accent, ink = 0xFF, border_color = accent },
             ghost = { ink = accent },
         }
         t.selected = {
