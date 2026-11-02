@@ -2639,3 +2639,7 @@ Current version: ",
     ["灰色"] = "Gray",
     ["黑色"] = "Black",
 }
+    ["书架太大时，借浏览器解码并分批导入"] = "Decode a large shelf in the browser and import it in batches",
+    ["书架数据太大，设备无法直接处理。请开启远程管理，在电脑浏览器打开「微信书架导入」页完成同步。"] = "The shelf is too large for the device to process. Turn on Remote Management and finish the sync on the \"WeChat shelf import\" page in a desktop browser.",
+    ["全量书架分批导入"] = "Batch import of full shelf",
+    ["微信书架导入"] = "WeChat shelf import",

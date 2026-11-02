@@ -444,6 +444,25 @@ function BookDB.reconcile(source_id, books, opts)
     return false
 end
 
+--- 把在架、已同步、且不在 keep 里的行标删（分批导入收尾：快照没法一次交给 reconcile）。
+--- keep 为空一律不动，与 reconcile 对空快照的口径一致。
+---@param source_id string
+---@param keep string[]
+---@return integer|nil hidden
+function BookDB.hideMissing(source_id, keep)
+    if #keep == 0 then return 0 end
+    local incoming = {}
+    for _idx, id in ipairs(keep) do incoming[tostring(id)] = true end
+    return DB.transaction(function()
+        local missing = {}
+        for _idx, stable_id in ipairs(BookDB.libraryStableIdsBySource(source_id)) do
+            if not incoming[stable_id] then missing[#missing + 1] = stable_id end
+        end
+        if not softDeleteIds(source_id, missing) then return nil end
+        return #missing
+    end)
+end
+
 --- 设置书架成员：on_shelf=true → deleted=0；false → deleted=1（软删待同步）。
 ---@param source_id string
 ---@param stable_id string
