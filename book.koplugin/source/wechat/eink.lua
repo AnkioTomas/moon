@@ -440,7 +440,7 @@ end
 --- 写请求只续期不重放（可能已落地，重放会重复写）。-2041 是人机验证，直接失败。
 ---@param method string
 ---@param path string 以 / 开头，相对 i.weread.qq.com
----@param opts { query: table|nil, body: table|nil, idempotent: boolean|nil, raw: boolean|nil }|nil raw：2xx 非 JSON 回包（zip）原样交给 cb（data = res），错误仍按 JSON 解码
+---@param opts { query: table|nil, body: table|nil, idempotent: boolean|nil, raw: boolean|nil, max_body: integer|nil }|nil raw：2xx 非 JSON 回包（zip）原样交给 cb（data = res），错误仍按 JSON 解码；max_body：2xx 回包超过这个字节数不解码（解码后内存是原文数倍），原样交给 cb（data = res，meta.oversize = true）
 ---@param cb fun(data: table|nil, err: string|nil, meta: WechatEinkCallMeta)
 ---@return { cancel: fun() }
 function Eink.callAsync(method, path, opts, cb)
@@ -471,6 +471,10 @@ function Eink.callAsync(method, path, opts, cb)
             end
             if opts.raw and Request.ok(res.code) and res.body:sub(1, 2) == "PK" then
                 cb(res, nil, { status = res.code })
+                return
+            end
+            if opts.max_body and Request.ok(res.code) and #res.body > opts.max_body then
+                cb(res, nil, { status = res.code, oversize = true })
                 return
             end
             local data = decode(res.body)

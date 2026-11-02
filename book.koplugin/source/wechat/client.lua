@@ -98,12 +98,23 @@ end
 
 --- 全量拉取书架（synckey=0 表示不做增量）。/shelf/sync 无分页参数、服务端一发全量。
 --- bookCount 含专辑、公众号等不在 books 里的条目，不能拿它卡这次同步。
+--- spill：回包超过 ShelfImport.LIMIT 时不解码，原文落盘交给网页端分批导入，cb 收到 nil + 说明。
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@param spill boolean|nil
 ---@return { cancel: fun() }|nil
-function Client:shelfSyncAsync(cb)
+function Client:shelfSyncAsync(cb, spill)
+    local ShelfImport = require("source.wechat.shelf_import")
     return Eink.callAsync("GET", "/shelf/sync", {
         query = { synckey = 0, teenmode = 0, album = 1, onlyBookid = 0, localBookCount = 0 },
-    }, cb)
+        max_body = spill and ShelfImport.LIMIT or nil,
+    }, function(data, err, meta)
+        if meta and meta.oversize then
+            local ok, werr = ShelfImport.stash(data.body)
+            cb(nil, ok and ShelfImport.TOO_LARGE or werr)
+            return
+        end
+        cb(data, err)
+    end)
 end
 
 --- 增量拉书架索引：自 synckey 以来删了哪些（removed）、变了哪些（bookIds，只要 id）、

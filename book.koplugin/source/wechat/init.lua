@@ -222,7 +222,10 @@ function Source:syncBooksAsync(opts, cb)
     -- 全量路（首次 / 强制 / dirty_only / 增量对不齐回退）：行为与原来一致，顺带存下游标。
     local function fullPull()
         local synckey
-        return Shelf.syncAsync(self.id, self._client, function(wire)
+        local remote = setmetatable({
+            shelfSyncAsync = function(_, done) return self._client:shelfSyncAsync(done, true) end,
+        }, { __index = self._client })
+        return Shelf.syncAsync(self.id, remote, function(wire)
             synckey = tonumber(wire.synckey) or synckey
             return Mapper.shelfList(wire, function(id, url) rememberCover(self, id, url) end).data
         end, opts, function(result, err)

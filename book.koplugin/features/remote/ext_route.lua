@@ -3,7 +3,7 @@
 
 提供者 { name, dir?, assets?, page?, l10n?, public?, handle, download? }：
 - /api/<name>/<action>：只读的 GET 带 query；有副作用的一律 POST（JSON body）。download(action) 给出附件时直接回文本下载，
-  其余交给 handle(method, action, params, cb(status, table))，连接转 pending 等回调，回调只认第一次。
+  大文件给 { ctype, filename, path }（按块流式发送，不进内存）；其余交给 handle(method, action, params, cb(status, table))，连接转 pending 等回调，回调只认第一次。
 - public：{ [action] = true } 免浏览器配对的动作（浏览器扩展回调之类拿不到令牌的调用方），须自带鉴权；其余动作都要配对（见 pair.lua）。
 - assets：dir 目录下随之开放的静态文件名（/<文件名>）。
 - page：{ href, title, title_long?, desc?, icon（svg path）, tile? }，经 /api/pages 补进顶栏与首页。
@@ -99,9 +99,16 @@ function ExtRoute.route(self, conn, method, headers, query, item, action)
     if method == "GET" then
         local file = item.download and item.download(action)
         if file then
-            return self:_queueResponse(conn, { code = 200, ctype = file.ctype,
+            local resp = { code = 200, ctype = file.ctype,
                 extra = { 'Content-Disposition: attachment; filename="' .. file.filename .. '"' },
-                body = file.body })
+                body = file.body }
+            if file.path then
+                resp.file = io.open(file.path, "rb")
+                if not resp.file then return self:_fail(conn, 404, "Not Found") end
+                resp.size = resp.file:seek("end")
+                resp.file:seek("set")
+            end
+            return self:_queueResponse(conn, resp)
         end
         return dispatch(self, conn, item, "GET", action, query or {})
     end

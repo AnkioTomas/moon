@@ -132,6 +132,7 @@ Features.list = {
     "storage",
     "subscribe",
     "cookie",
+    "wechat_import",
     "extensions",
 }
 

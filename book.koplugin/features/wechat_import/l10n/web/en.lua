@@ -1,0 +1,16 @@
+-- 微信书架导入网页文案（经 web.routes 的 l10n 合入远程管理 /api/i18n）。
+return {
+    ["微信书架导入"] = "WeChat shelf import",
+    ["微信书架导入 - 远程管理"] = "WeChat shelf import - Remote",
+    ["微信书架分批导入"] = "WeChat shelf batch import",
+    ["书架太大、设备无法直接同步时，用浏览器解码后分批导入。"] = "When the shelf is too large for the device, decode it in the browser and import in batches.",
+    ["设备上没有待导入的书架数据。请先在设备上对微信读书执行一次全量同步（强制刷新书架）。"] = "Nothing to import. Run a full sync (force refresh) of WeChat Reading on the device first.",
+    ["待导入书架数据 %1 KB"] = "Shelf data to import: %1 KB",
+    ["开始导入"] = "Start import",
+    ["丢弃数据"] = "Discard",
+    ["正在下载…"] = "Downloading…",
+    ["正在导入 %1 / %2"] = "Importing %1 / %2",
+    ["导入完成：%1 本，下架 %2 本"] = "Done: %1 books imported, %2 removed from shelf",
+    ["导入失败：%1"] = "Import failed: %1",
+    ["已丢弃"] = "Discarded",
+}
