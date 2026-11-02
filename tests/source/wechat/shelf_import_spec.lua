@@ -7,6 +7,7 @@ source.wechat.shelf_import：大快照落盘、分批入库、收尾对账（书
 
 local Assert = require("support.assert")
 local Config = require("support.config")
+local Stubs = require("support.stubs")
 
 local dir = Config.dir() .. "/shelf_import_spec"
 os.execute("mkdir -p '" .. dir .. "'")
@@ -52,3 +53,19 @@ Assert.eq(hidden_keep, ids)
 Assert.eq(saved.shelf_cursor.synckey, 77)
 Assert.eq(saved.shelf_cursor.vid, "v1")
 Assert.is_nil(ShelfImport.size())
+
+-- 待导入文件还在：不重下书架，只再亮一次导入页。
+do
+    local Client = require("source.wechat.client")
+    Assert.is_true(ShelfImport.stash("{}"))
+    local opened = 0
+    require("utils.extension").add("web.open_page", function() opened = opened + 1 end)
+    local got
+    local handle = Client.shelfSyncAsync({}, function(data, err) got = { data, err } end, true)
+    Assert.is_true(handle ~= nil)
+    Stubs.flush()
+    Assert.eq(opened, 1)
+    Assert.is_nil(got[1])
+    Assert.eq(got[2], ShelfImport.TOO_LARGE)
+    ShelfImport.discard()
+end

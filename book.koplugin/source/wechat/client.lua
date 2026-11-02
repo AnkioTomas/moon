@@ -104,6 +104,11 @@ end
 ---@return { cancel: fun() }|nil
 function Client:shelfSyncAsync(cb, spill)
     local ShelfImport = require("source.wechat.shelf_import")
+    -- 上次落盘的书架还没导完：不重下，只把导入页再亮出来。
+    if spill and ShelfImport.size() then
+        require("utils.extension").call("web.open_page", ShelfImport.PAGE, _("微信书架导入"), ShelfImport.TOO_LARGE)
+        return require("source.base").defer(cb, nil, ShelfImport.TOO_LARGE)
+    end
     local Awake = require("utils.awake")
     -- 大书架下载 + 落盘要几分钟，期间别让设备睡下去；回调或取消时放开。
     Awake.hold("wechat_shelf", true)
