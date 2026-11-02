@@ -11,6 +11,7 @@ local LeftContainer = require("ui/widget/container/leftcontainer")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local Common = require("desktop.detail.common")
 local Theme = require("ui.themes")
+local spread = require("utils.spread")
 local Text = require("ui.themes.widgets.text")
 
 ---@class BookInsightParts
@@ -32,8 +33,7 @@ function Parts.cards(items, width, gap)
     local row, row_h = HorizontalGroup:new{ align = "center" }, 0
     for i, item in ipairs(items) do
         if i > 1 then
-            local extra = math.floor((i - 1) * slack / gaps) - math.floor((i - 2) * slack / gaps)
-            table.insert(row, HorizontalSpan:new{ width = gap + extra })
+            table.insert(row, HorizontalSpan:new{ width = gap + spread(i - 1, gaps, slack) })
         end
         local card, card_h = Common.kpiCard(card_w, item.value, item.label)
         row_h = math.max(row_h, card_h)

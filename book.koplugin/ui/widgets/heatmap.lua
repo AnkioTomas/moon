@@ -11,6 +11,7 @@
 local Geom = require("ui/geometry")
 local Widget = require("ui/widget/widget")
 local Theme = require("ui.themes")
+local spread = require("utils.spread")
 
 ---@class BookHeatmap : Widget
 ---@field cols table[] cols[c][r] = { level } | false
@@ -22,16 +23,6 @@ local Heatmap = Widget:extend{
 
 local SHADES = { 0xEE, 0xC8, 0x98, 0x58, 0x00 }
 local GAP = 1
-
---- 把 slack 像素均匀分进 slots 个槽，返回第 i 槽（从 1 计）分到的像素。
----@param i number
----@param slots number
----@param slack number
----@return number
-local function share(i, slots, slack)
-    if slots <= 0 or slack <= 0 then return 0 end
-    return math.floor(i * slack / slots) - math.floor((i - 1) * slack / slots)
-end
 
 function Heatmap:init()
     local n = #self.cols
@@ -78,7 +69,7 @@ function Heatmap:paintTo(bb, x, y)
             end
         end
         if c < #self.cols then
-            cursor = cursor + self.cell + GAP + share(c, self.gaps, self.gap_slack)
+            cursor = cursor + self.cell + GAP + spread(c, self.gaps, self.gap_slack)
         end
     end
 end
