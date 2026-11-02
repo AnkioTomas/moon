@@ -23,10 +23,18 @@ local Parts = {}
 ---@return table row
 ---@return number height
 function Parts.cards(items, width, gap)
-    local card_w = math.floor((width - gap * (#items - 1)) / #items)
+    local n = #items
+    local gaps = math.max(0, n - 1)
+    local card_w = math.floor((width - gap * gaps) / n)
+    if card_w < 1 then card_w = 1 end
+    -- 卡等宽；余数摊进卡距，这一行正好等于 width。
+    local slack = math.max(0, width - gap * gaps - card_w * n)
     local row, row_h = HorizontalGroup:new{ align = "center" }, 0
     for i, item in ipairs(items) do
-        if i > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
+        if i > 1 then
+            local extra = math.floor((i - 1) * slack / gaps) - math.floor((i - 2) * slack / gaps)
+            table.insert(row, HorizontalSpan:new{ width = gap + extra })
+        end
         local card, card_h = Common.kpiCard(card_w, item.value, item.label)
         row_h = math.max(row_h, card_h)
         table.insert(row, card)
