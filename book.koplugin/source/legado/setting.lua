@@ -2,6 +2,7 @@
 阅读（Legado）源设置：Web 服务地址。
 
 在阅读 App「我的 → Web 服务」打开服务，把页面上的地址（如 http://192.168.1.8:1122）填进来；
+手机 IP 会变，也可以扫本机所在网段，认端口上的阅读服务。
 reader3 服务器版地址带 /reader3 后缀（如 http://host:8080/reader3）、轻阅读带 /api/5 后缀，
 并填账号密码（后端类型按后缀判断）；
 保存时先拉一次书架校验，通过才落盘并重载源。
@@ -51,6 +52,58 @@ local function save(address, user, password)
     end)
 end
 
+local scanning = false
+
+local function scan()
+    if scanning then return end
+    local NetworkMgr = require("ui/network/manager")
+    NetworkMgr:runWhenConnected(function()
+        if scanning then return end
+        scanning = true
+        local waiting, handle, closed
+        waiting = require("ui.themes.widgets.progress_dialog"):new{
+            title = _("开源阅读"),
+            text = _("正在扫描局域网…"),
+            dismissable = false,
+            on_cancel = function()
+                -- 弹窗自己先关。这里只停扫描。
+                if closed then return end
+                closed = true
+                scanning = false
+                if handle then handle.cancel() end
+            end,
+        }
+        waiting:show()
+        handle = require("source.legado.scan").find(function(found, err)
+            if closed then return end
+            closed = true
+            scanning = false
+            waiting:close()
+            local Toast = require("ui.themes.widgets.toast")
+            if type(found) ~= "table" or #found == 0 then
+                local text = err == "no-ip" and _("没有局域网地址") or _("没有找到阅读服务")
+                Toast:new{ text = text, timeout = 3 }:show()
+                return
+            end
+            local cfg = require("utils.settings").getSource(SOURCE_ID)
+            local user, password = cfg.username or "", cfg.password or ""
+            if #found == 1 then
+                save(found[1], user, password)
+                return
+            end
+            local items = {}
+            for _idx, address in ipairs(found) do
+                items[#items + 1] = { text = address, value = address }
+            end
+            require("ui.themes.widgets.list"):new{
+                title = _("选择阅读服务"),
+                items = items,
+                on_select = function(value) save(value, user, password) end,
+            }:show()
+        end)
+    end)
+end
+
 local function edit()
     local cfg = require("utils.settings").getSource(SOURCE_ID)
     require("ui.themes.widgets.input"):new{
@@ -86,6 +139,12 @@ function Setting.rows()
                 width = iw, chevron = true, kind = "nav", icon = "dns", title = _("阅读服务地址"),
                 status = require("source.legado.client").base() or status, status_on = status_on,
                 callback = edit,
+            })
+        end,
+        function(iw)
+            return require("ui.themes.widgets.row").widget({
+                width = iw, chevron = true, kind = "nav", icon = "wifi_find", title = _("扫描局域网"),
+                callback = scan,
             })
         end,
     }
