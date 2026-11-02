@@ -100,3 +100,62 @@ local picked = Probe.read(fs())
 Assert.is_true(picked.supported)
 Assert.eq(picked.reading.name, "zzz")
 Assert.eq(picked.reading.health_pct, 50)
+
+-- Oasis 2 的 max77796：电压毫伏、电流毫安、充满和剩余是毫安时，设计容量仍是微安时。
+-- 反馈截图上的 0.004 V、1 mAh、0.1% 就是这组数再按微单位除一次。
+tree = {
+    ["/sys/class/power_supply/max77796-battery/type"] = "Battery\n",
+    ["/sys/class/power_supply/max77796-battery/capacity"] = "77\n",
+    ["/sys/class/power_supply/max77796-battery/status"] = "Discharging\n",
+    ["/sys/class/power_supply/max77796-battery/health"] = "Good\n",
+    ["/sys/class/power_supply/max77796-battery/temp"] = "236\n",
+    ["/sys/class/power_supply/max77796-battery/voltage_now"] = "4000\n",
+    ["/sys/class/power_supply/max77796-battery/current_now"] = "-86\n",
+    ["/sys/class/power_supply/max77796-battery/charge_now"] = "779\n",
+    ["/sys/class/power_supply/max77796-battery/charge_full"] = "1000\n",
+    ["/sys/class/power_supply/max77796-battery/charge_full_design"] = "1012000\n",
+    ["/sys/class/power_supply/max77796-battery/cycle_count"] = "2\n",
+}
+local oasis = Probe.read(fs())
+Assert.is_true(oasis.supported)
+Assert.eq(oasis.reading.name, "max77796-battery")
+Assert.is_true(math.abs(oasis.reading.health_pct - (1000 / 1012 * 100)) < 1e-6)
+Assert.eq(oasis.reading.cycles, 2)
+Assert.eq(oasis.reading.charge_full_mah, 1000)
+Assert.eq(oasis.reading.charge_design_mah, 1012)
+Assert.eq(oasis.reading.charge_now_mah, 779)
+Assert.eq(oasis.reading.capacity, 77)
+Assert.eq(oasis.reading.temp_c, 23.6)
+Assert.eq(oasis.reading.voltage_v, 4)
+Assert.eq(oasis.reading.current_ma, -86)
+Assert.eq(oasis.reading.status, "Discharging")
+Assert.eq(oasis.reading.health, "Good")
+
+-- 遵守约定的节点，剩余很低、电流很小，仍按微单位换算。
+tree = {
+    ["/sys/class/power_supply/bd71827_bat/type"] = "Battery\n",
+    ["/sys/class/power_supply/bd71827_bat/voltage_now"] = "3600000\n",
+    ["/sys/class/power_supply/bd71827_bat/current_now"] = "-3000\n",
+    ["/sys/class/power_supply/bd71827_bat/charge_now"] = "5000\n",
+    ["/sys/class/power_supply/bd71827_bat/charge_full"] = "1450000\n",
+    ["/sys/class/power_supply/bd71827_bat/charge_full_design"] = "1453000\n",
+}
+local low = Probe.read(fs())
+Assert.eq(low.reading.charge_now_mah, 5)
+Assert.eq(low.reading.charge_full_mah, 1450)
+Assert.eq(low.reading.current_ma, -3)
+Assert.eq(low.reading.voltage_v, 3.6)
+
+-- 没有电压，但充满和设计容量都是微安时：剩余的小值也要跟着除。
+tree = {
+    ["/sys/class/power_supply/bat/type"] = "Battery\n",
+    ["/sys/class/power_supply/bat/current_now"] = "-45954\n",
+    ["/sys/class/power_supply/bat/charge_now"] = "5000\n",
+    ["/sys/class/power_supply/bat/charge_full"] = "1450000\n",
+    ["/sys/class/power_supply/bat/charge_full_design"] = "1453000\n",
+}
+local novolt = Probe.read(fs())
+Assert.eq(novolt.reading.charge_now_mah, 5)
+Assert.eq(novolt.reading.charge_full_mah, 1450)
+Assert.eq(novolt.reading.charge_design_mah, 1453)
+Assert.is_true(math.abs(novolt.reading.current_ma - (-45.954)) < 1e-6)
