@@ -35,7 +35,7 @@ restartable 的任务归队列所有，队列可以随时中断并从头重跑�
 run 跑在主进程，必须发起异步操作后立刻返回：等网络走 http.request，重计算走 workers.job。
 多阶段任务（下载 → Job 解压）返回的句柄要始终指向当前阶段，否则取消后子进程成孤儿；迟到的 done 按 token 丢弃。
 进度只报 report(text, count, total)，百分比由界面算；省略的 count / total 沿用上次值；download 类所有阶段都报字节。
-缓存（cache）和下载（download）在跑 / 排队 / 退避时置 `PluginShare.pause_auto_suspend`，KOReader 不自动休眠；
+缓存（cache）和下载（download）在跑 / 排队 / 退避、ai / convert / sync 在执行时置 `PluginShare.pause_auto_suspend`，KOReader 不自动休眠（`utils/awake`）；
 sync / online / ai / convert 不拦。只剩 waiting 时撤回。未结束任务上限 64（queue_full）；退避 15s、30s…；状态 queued → running → finished，旁路 retry_wait / waiting / cancelled。
 
 @module koplugin.book.workers.tasks
@@ -43,6 +43,7 @@ sync / online / ai / convert 不拦。只剩 waiting 时撤回。未结束任务
 
 local Guard = require("ui.guard")
 local logger = require("utils.log")
+local Awake = require("utils.awake")
 
 local Tasks = {}
 
@@ -91,19 +92,17 @@ local change_scheduled = false
 --- 休眠中：restartable 任务不启动。
 local suspended = false
 
---- 是否正撑着 pause_auto_suspend（cache 忙 或 其它插件的 keepalive，如翻页器不息屏）。
-local holding_awake = false
---- 升旗前 pause_auto_suspend 的原值：autoturn、reMarkable / Sony 设备层也写 true，降旗时还原而不是清成 false。
-local awake_before = nil
-
---- 缓存和下载在跑 / 排队 / 退避时不让 KOReader 自动休眠；waiting（等网络 / 唤醒）不算，否则永远睡不下去。
+--- 缓存和下载在跑 / 排队 / 退避、AI 分析 / 转换 / 同步在执行时不让 KOReader 自动休眠；waiting（等网络 / 唤醒）不算，否则永远睡不下去。
 --- 词库这种下载要几分钟，休眠会掐掉 Wi-Fi，进度停在当时的字节上。
 --- passive 任务自己的 `hold()` 说「先别撑」（例如队列因空间不足暂停）时同样放行。
 -- keepalive（翻页器 / KeepAlive 插件）为真时也要撑着，不能在结束时把别人的不息屏清掉。
+local tasks_awake = false
 local function syncAwake()
     local busy = false
     for _idx, task in ipairs(list) do
-        if (task.kind == "cache" or task.kind == "download") and task.state ~= "waiting" then
+        local long = task.kind == "cache" or task.kind == "download"
+        local running = (task.kind == "ai" or task.kind == "convert" or task.kind == "sync") and task.state == "running"
+        if (long and task.state ~= "waiting") or running then
             if not task.hold or task.hold() then
                 busy = true
                 break
@@ -112,16 +111,10 @@ local function syncAwake()
     end
     local share = require("pluginshare")
     local want = busy or share.keepalive == true
-    if want == holding_awake then return end
-    holding_awake = want
+    if want == tasks_awake then return end
+    tasks_awake = want
     logger.info("book tasks pause_auto_suspend", want, "cache", busy, "keepalive", share.keepalive == true)
-    if want then
-        awake_before = share.pause_auto_suspend
-        share.pause_auto_suspend = true
-    else
-        share.pause_auto_suspend = awake_before
-        awake_before = nil
-    end
+    Awake.hold("tasks", want)
 end
 
 --- 通知观察者；订阅者只是 UI，绝不拥有或取消任务。
@@ -345,7 +338,7 @@ end
 --- 休眠前：中断在跑的 restartable 任务放回 waiting，唤醒前不再启动它们。
 --- 退避中的任务不动：定时器唤醒后才会到点。
 function Tasks.onSuspend()
-    logger.info("book tasks suspend, pause_auto_suspend", holding_awake, "unfinished", #list)
+    logger.info("book tasks suspend, pause_auto_suspend", tasks_awake, "unfinished", #list)
     suspended = true
     for _idx, task in ipairs(list) do
         if task.restartable and task.state == "running" then

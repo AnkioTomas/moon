@@ -11,6 +11,7 @@ local Assert = require("support.assert")
 local scheduled, unscheduled = {}, {}
 package.preload["ui/uimanager"] = function()
     return {
+        event_hook = { execute = function() end },
         scheduleIn = function(_, delay, fn)
             scheduled[#scheduled + 1] = { delay = delay, fn = fn }
         end,
