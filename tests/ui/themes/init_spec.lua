@@ -179,7 +179,7 @@ Assert.is_true(Theme.colorful())
 Assert.eq(Theme.chrome(), 0, "彩色开着时 chrome 就是 accent，含墨黑")
 display.theme_preset = nil
 display.theme_color = 0xFFCC00
-Assert.eq(Theme.current().button.primary.ink, 0, "亮色主按钮用黑字")
+Assert.eq(Theme.current().button.primary.ink, 0xFF, "主题色一律当深色，主按钮用白字")
 Assert.eq(Theme.current().color.accent, Theme.vivid(0xFFCC00), "没选色板时回到单色展开")
 color_enabled = false
 Assert.eq(Theme.current().color.accent, 0, "灰度模式强调色就是墨色")
