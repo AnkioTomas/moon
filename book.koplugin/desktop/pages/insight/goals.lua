@@ -1,8 +1,8 @@
 --[[--
 统计页「进度」页：本月挑战、完成预测、连续记录与里程碑。
 
-本月挑战的目标默认由近 90 天日均 ×1.1 自动推算，点挑战块可自己设本月时长与今年读完本数（首页小卡同用）；
-完成预测按每本书自己的速度和近 30 天日均。
+本月挑战的目标默认由近 90 天日均 ×1.1 自动推算。点挑战块，或到设置「统计」里的「阅读目标」，
+可改本月时长与今年读完本数（首页小卡同用）。完成预测按每本书自己的速度和近 30 天日均。
 
 @module koplugin.book.desktop.pages.insight.goals
 --]]
@@ -27,6 +27,27 @@ local T = require("ffi/util").template
 ---@class BookInsightGoals
 local Goals = {}
 
+--- 阅读目标：本月小时（0 = 按近 90 天自动）与今年读完本数（0 = 不设）。设置页同一入口。
+---@param desktop table
+function Goals.edit(desktop)
+    local goals = MoonSettings.get("desktop.pages.insight")
+    require("ui.themes.widgets.spin"):new{
+        title = _("阅读目标"),
+        fields = {
+            { label = _("本月（小时）"), value = goals.month_goal_hours or 0, min = 0, max = 300,
+                format = function(v) return v == 0 and _("自动") or tostring(v) end },
+            { label = _("今年读完（本）"), value = goals.year_goal_books or 0, min = 0, max = 500,
+                format = function(v) return v == 0 and _("不设") or tostring(v) end },
+        },
+        callback = function(hours, books)
+            goals.month_goal_hours, goals.year_goal_books = hours, books
+            MoonSettings.save("desktop.pages.insight", goals)
+            if desktop.home then desktop:onEvent("home_refresh") end
+            desktop:updateView()
+        end,
+    }:show()
+end
+
 --- 构建进度页：本月挑战、预计读完、连续记录；挑战环吃余量。
 ---@param ctx { desktop: table, state: table, width: number, height: number, open_book: fun(book: table) }
 ---@return table
@@ -37,25 +58,9 @@ function Goals:build(ctx)
     local now = os.time()
     local days = state.calendar.days
     local goals = MoonSettings.get("desktop.pages.insight")
-    local ch = Calc.challenge(days, now, goals.month_goal_hours * 3600)
+    local ch = Calc.challenge(days, now, (goals.month_goal_hours or 0) * 3600)
     local fc = Calc.forecast(days, state.reading or {}, state.finished or {}, now)
-
-    local function editGoals()
-        require("ui.themes.widgets.spin"):new{
-            title = _("阅读目标"),
-            fields = {
-                { label = _("本月（小时）"), value = goals.month_goal_hours, min = 0, max = 300,
-                    format = function(v) return v == 0 and _("自动") or tostring(v) end },
-                { label = _("今年读完（本）"), value = goals.year_goal_books, min = 0, max = 500,
-                    format = function(v) return v == 0 and _("不设") or tostring(v) end },
-            },
-            callback = function(hours, books)
-                goals.month_goal_hours, goals.year_goal_books = hours, books
-                MoonSettings.save("desktop.pages.insight", goals)
-                ctx.desktop:updateView()
-            end,
-        }:show()
-    end
+    local function editGoals() Goals.edit(ctx.desktop) end
 
     local function challengeBlock(extra)
         local title = Parts.caption(T(_("%1月挑战"), tonumber(os.date("%m", now))), width,
@@ -88,6 +93,8 @@ function Goals:build(ctx)
                         { width = text_w, color = t.color.muted }),
                 },
             },
+            VerticalSpan:new{ width = xs },
+            Parts.caption(_("点按设置阅读目标"), width),
         }, editGoals)
     end
 

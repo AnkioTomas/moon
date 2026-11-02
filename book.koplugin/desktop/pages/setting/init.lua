@@ -190,7 +190,7 @@ local function coreEntries(desktop)
         },
         {
             group = "desktop", order = 43, id = "insight", icon = "monitoring", title = _("统计"),
-            subtitle = _("选择显示哪些页面与数据，其余自动拉伸"),
+            subtitle = _("阅读目标，以及显示哪些页面与数据"),
             page = { title = _("统计"), sections = function() return InsightSettings:sections(desktop) end },
         },
         {

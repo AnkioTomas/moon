@@ -1,4 +1,4 @@
---[[-- 统计页设置：选择显示哪些页面、每页显示哪些数据。目录与显隐规则在 desktop/pages/insight/layout.lua。
+--[[-- 统计页设置：阅读目标、显示哪些页面、每页显示哪些数据。目录与显隐规则在 desktop/pages/insight/layout.lua。
 @module koplugin.book.desktop.pages.setting.insight
 --]]
 
@@ -182,6 +182,26 @@ local function importRow(desktop)
     end
 end
 
+--- 阅读目标。0 小时 = 按近 90 天自动，0 本 = 今年不设目标。对话框在 goals.edit。
+---@param desktop table
+---@return fun(iw: number): table
+local function goalRow(desktop)
+    return function(iw)
+        local goals = Settings.get("desktop.pages.insight")
+        local hours = goals.month_goal_hours or 0
+        local books = goals.year_goal_books or 0
+        local month = hours == 0 and _("自动") or T(_("%1小时"), hours)
+        local year = books == 0 and _("不设") or T(_("%1本"), books)
+        return Row.widget({
+            width = iw,
+            kind = "nav", icon = "flag", title = _("阅读目标"),
+            subtitle = _("本月时长，今年读完本数"),
+            status = T(_("本月 %1 · 今年 %2"), month, year), status_on = true,
+            callback = function() require("desktop.pages.insight.goals").edit(desktop) end,
+        })
+    end
+end
+
 --- 第一节选页面；第二节每个已显示的页面一行，点开选该页的数据卡片。
 ---@param desktop table
 ---@return table[]
@@ -220,6 +240,7 @@ function InsightSettings:sections(desktop)
                     end,
                 })
             end,
+            goalRow(desktop),
             importRow(desktop),
             clearRow(desktop),
         } },
