@@ -22,6 +22,10 @@ local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
 
 local POLL_SECONDS = 30
+-- 后端不通（守护进程没跑）且用户没要开蓝牙时，没必要每 30 秒唤醒一次 CPU。
+local IDLE_POLL_SECONDS = 300
+-- 想开却拉不起来时，两次自动拉起之间的最短间隔，避免每个轮询周期都 spawn 一次。
+local REVIVE_COOLDOWN = 120
 -- 关 Wi-Fi 后射频落定再动手；太短会跟还没死的旧状态打架
 local WIFI_RESTORE_DELAY = 2
 
@@ -95,6 +99,10 @@ end
 ---@type { connections: BookBluetoothDevice[] }|nil
 local wanted
 local sleeping = false
+local restoring = false
+local last_revive = 0
+---@type fun(tag: string)
+local restore
 --- onSuspend 置位，onResume 消费：FM/Reader 双实例只恢复一次。
 local resume_armed = false
 
@@ -113,10 +121,16 @@ function Bluetooth.refresh(cb)
         noteWanted(st)
         for _idx, fn in ipairs({ unpack(watchers) }) do fn() end
         if cb then cb(st) end
+        -- 用户要开着蓝牙，守护进程却没在监听（崩了、被杀、开机后没起来）：拉起来。
+        if st.state == "off" and wanted and not sleeping and not restoring
+            and os.time() - last_revive >= REVIVE_COOLDOWN then
+            last_revive = os.time()
+            restore("revive")
+        end
     end)
 end
 
---- 订阅状态变化：有订阅方时每 POLL_SECONDS 读一次 /status，订阅时立即读一次。
+--- 订阅状态变化：有订阅方时每 POLL_SECONDS 读一次 /status（后端不通且没有开启意图时放慢到 IDLE_POLL_SECONDS），订阅时立即读一次。
 ---@param cb fun()
 ---@return CancelHandle
 function Bluetooth.watch(cb)
@@ -125,7 +139,8 @@ function Bluetooth.watch(cb)
     if not poll_tick then
         poll_tick = function()
             Bluetooth.refresh()
-            UIManager:scheduleIn(POLL_SECONDS, poll_tick)
+            local idle = status and status.state == "off" and not wanted
+            UIManager:scheduleIn(idle and IDLE_POLL_SECONDS or POLL_SECONDS, poll_tick)
         end
         poll_tick()
     end
@@ -187,10 +202,12 @@ end
 
 --- 按 wanted 重新打开并连回（睡醒 / Wi-Fi 带崩共用）。setEnabled 已 refresh，直接读缓存。
 ---@param tag string 日志标签 resume / wifi
-local function restore(tag)
-    if not wanted or not Bluetooth.installed() then return end
+function restore(tag)
+    if not wanted or not Bluetooth.installed() or restoring then return end
     local conns = wanted.connections
+    restoring = true
     Bluetooth.setEnabled(true, function(ok, err)
+        restoring = false
         if not ok then
             logger.warn("book.bluetooth " .. tag .. " restore failed:", err)
             return

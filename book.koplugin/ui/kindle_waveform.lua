@@ -56,7 +56,13 @@ function Waveform.hookHist(screen)
         if name == "mxc_update" and type(value) == "function" then
             local orig = value
             debug.setupvalue(refresh, index, function(fb, ioc_cmd, ioc_data, is_flashing, waveform_mode, ...)
-                if pageTurnOn() then
+                if Waveform.nightHW(fb) then
+                    -- 硬件反色下 ui（AUTO / GC16_FAST）清不掉旧墨，只有夜间波形可以：
+                    -- 当作 partial 交给 mxc_update，它会换成 waveform_night（必要时升 FULL）。
+                    if not is_flashing and waveform_mode == fb.waveform_ui then
+                        waveform_mode = fb.waveform_partial
+                    end
+                elseif pageTurnOn() then
                     Waveform.alignHist(fb, waveform_mode, ioc_data)
                 end
                 return orig(fb, ioc_cmd, ioc_data, is_flashing, waveform_mode, ...)
@@ -67,13 +73,20 @@ function Waveform.hookHist(screen)
     end
 end
 
+--- 夜间且走硬件反色：帧缓冲里仍是白底黑字，旧画面只有夜间波形擦得掉。
+---@param fb table
+---@return boolean
+function Waveform.nightHW(fb)
+    return fb.night_mode == true and fb.device ~= nil and fb.device:canHWInvert() == true
+end
+
 --- MTK：UI 刷新改用 16 级 partial 波形。没开翻页动画时仍走原来的 refreshUIImp。
 ---@param screen table
 ---@param mode number
 function Waveform.hookUi(screen, mode)
     local orig = screen.refreshUIImp
     function screen:refreshUIImp(x, y, w, h, dither)
-        if not pageTurnOn() then
+        if not pageTurnOn() or Waveform.nightHW(self) then
             return orig(self, x, y, w, h, dither)
         end
         local marker = self.marker
