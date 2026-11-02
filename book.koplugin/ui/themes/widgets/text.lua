@@ -59,9 +59,10 @@ function Text.tint(widget)
 end
 
 ---@param role string caption/body/title/hero
+---@param size number|nil 逻辑字号，缺省用该角色的主题字号
 ---@return table face
-function Text.face(role)
-    return Theme.face(FACES[role], Theme.current().font[role])
+function Text.face(role, size)
+    return Theme.face(FACES[role], size or Theme.current().font[role])
 end
 
 ---@param opts table

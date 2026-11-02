@@ -73,40 +73,80 @@ local function display(field, value)
     return field.format and field.format(value) or tostring(value)
 end
 
---- min / max / 初值里最宽的 hero 数字宽（"130%" 会超出固定宽而被截成省略号）。
+--- min / max / 初值里最宽的显示串。face 缺省是 hero。
 ---@param field BookThemeSpinField
+---@param face table|nil
 ---@return number
-local function digitWidth(field)
+local function digitWidth(field, face)
     local w = 0
     for _idx, v in ipairs({ field.min, field.max, field.value }) do
-        w = math.max(w, Text.line("hero", display(field, v)):getSize().w)
+        local line = Text.line("hero", display(field, v), face and { face = face } or nil)
+        w = math.max(w, line:getSize().w)
+        line:free()
     end
     return w
 end
 
---- 列宽：默认两个按钮高且容得下数字；整行超出 inner 时（年月日时分五列）每列只给数字宽加均分的余量。
+--- 数字默认 hero。整行放不下时，在 caption 到 hero 之间取仍放得下的最大字号。
+--- 降到 caption 仍放不下才把过宽的宽度交回去，由列宽去截断。
 ---@param fields BookThemeSpinField[]
+---@param gap number
+---@param inner number
+---@return table|nil face
+---@return number[] digit_widths
+local function valueFace(fields, gap, inner)
+    local function widthsAt(face)
+        local widths, total = {}, gap * math.max(0, #fields - 1)
+        for i, field in ipairs(fields) do
+            widths[i] = digitWidth(field, face)
+            total = total + widths[i]
+        end
+        return widths, total
+    end
+    local widths, total = widthsAt(nil)
+    if total <= inner then return nil, widths end
+    local font = Theme.current().font
+    local lo, hi = font.caption, font.hero - 1
+    local best_face, best_widths
+    while lo <= hi do
+        local mid = math.floor((lo + hi) / 2)
+        local face = Text.face("hero", mid)
+        local w, sum = widthsAt(face)
+        if sum <= inner then
+            best_face, best_widths = face, w
+            lo = mid + 1
+        else
+            hi = mid - 1
+        end
+    end
+    if best_widths then return best_face, best_widths end
+    local face = Text.face("hero", font.caption)
+    local w = widthsAt(face)
+    return face, w
+end
+
+--- 列宽：默认两个按钮高且容得下数字。整行超出 inner 时每列只给数字宽加均分的余量。
+--- 数字宽本身已经超过 inner（字号降到 caption 仍放不下）才按比例压窄，文字控件截断。
+---@param digits number[]
 ---@param base number 物理像素
 ---@param gap number
 ---@param inner number
 ---@return number[]
-local function columnWidths(fields, base, gap, inner)
-    local digits, widths, total, digits_total = {}, {}, gap * (#fields - 1), 0
-    for i, field in ipairs(fields) do
-        digits[i] = digitWidth(field)
-        widths[i] = math.max(base, digits[i])
+local function columnWidths(digits, base, gap, inner)
+    local widths, total, digits_total = {}, gap * (#digits - 1), 0
+    for i, digit in ipairs(digits) do
+        widths[i] = math.max(base, digit)
         total = total + widths[i]
-        digits_total = digits_total + digits[i]
+        digits_total = digits_total + digit
     end
     if total <= inner then return widths end
-    local avail = inner - gap * (#fields - 1)
+    local avail = inner - gap * (#digits - 1)
     if digits_total > avail then
-        -- 极窄屏连数字都放不下：按数字宽等比缩，整行不越界（数字由文本控件截断）。
-        for i = 1, #fields do widths[i] = math.max(1, math.floor(avail * digits[i] / digits_total)) end
+        for i = 1, #digits do widths[i] = math.max(1, math.floor(avail * digits[i] / digits_total)) end
         return widths
     end
-    local extra = math.floor((avail - digits_total) / #fields)
-    for i = 1, #fields do widths[i] = digits[i] + extra end
+    local extra = math.floor((avail - digits_total) / #digits)
+    for i = 1, #digits do widths[i] = digits[i] + extra end
     return widths
 end
 
@@ -115,13 +155,14 @@ function Spin:init()
     local t = self.theme
     local gap = Theme.px(t.space.lg)
     local inner = self:innerWidth()
-    local widths = columnWidths(self.fields, Theme.px(t.control.height) * 2, gap, inner)
+    local face, digits = valueFace(self.fields, gap, inner)
+    local widths = columnWidths(digits, Theme.px(t.control.height) * 2, gap, inner)
     self.values, self.labels = {}, {}
     local row = HorizontalGroup:new{ align = "center" }
     for i, field in ipairs(self.fields) do
         local col_w = widths[i]
         self.values[i] = field.value
-        self.labels[i] = Text.line("hero", display(field, field.value), { width = col_w })
+        self.labels[i] = Text.line("hero", display(field, field.value), { width = col_w, face = face })
         local col = VerticalGroup:new{ align = "center" }
         if field.label then
             col[#col + 1] = Text.line("caption", field.label, { width = col_w, color = t.color.muted })
