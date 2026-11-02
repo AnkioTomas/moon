@@ -121,4 +121,79 @@ Assert.eq(proxy_calls[5], false)
 Assert.is_nil(store.http_proxy)
 Assert.is_true(views > 0)
 
+-- 解析绑定：添加（网址粘贴收成主机名、前导零收成 IPv4）、改名删旧键、删除
+local http_cfg = { dns_bind = {} }
+package.loaded["utils.settings"] = nil
+package.preload["utils.settings"] = function()
+    return {
+        get = function(name)
+            if name ~= "http" then return {} end
+            return http_cfg
+        end,
+        save = function(name) Assert.eq(name, "http") end,
+    }
+end
+local pushed = {}
+package.loaded["desktop.pages.setting.overlay"] = nil
+package.preload["desktop.pages.setting.overlay"] = function()
+    return { push = function(_desktop, spec) pushed[#pushed + 1] = spec end }
+end
+
+local dns_rows = Setting.entry(desktop).page.sections()[2].rows
+Assert.eq(#dns_rows, 2)
+local bind = dns_rows[2](600)
+Assert.eq(bind.title, "解析绑定")
+Assert.eq(bind.status, "未设置")
+Assert.is_false(bind.status_on)
+bind.callback()
+Assert.eq(pushed[1].title, "解析绑定")
+local page_rows = pushed[1].sections()[1].rows
+Assert.eq(#page_rows, 1, "没有绑定时只有添加")
+page_rows[1](600).callback()
+local input = Themed.last("input")
+Assert.eq(input.title, "添加绑定")
+input.callback("???", "192.168.1.1")
+Assert.eq(Themed.last("toast").text, "域名不正确")
+Assert.eq(Themed.last("input").fields[1].text, "???")
+Themed.last("input").callback("http://Nas.LAN:8080/opds", "192.168.001.020")
+Assert.eq(http_cfg.dns_bind["nas.lan"], "192.168.1.20")
+Assert.eq(dns_rows[2](600).status, "nas.lan")
+
+page_rows = pushed[1].sections()[1].rows
+Assert.eq(#page_rows, 2)
+page_rows[2](600).callback()
+Themed.last("input").callback("printer.lan", "10.0.0.256")
+Assert.eq(Themed.last("toast").text, "地址必须是 IPv4")
+Themed.last("input").callback("printer.lan", "10.0.0.5")
+Assert.eq(http_cfg.dns_bind["printer.lan"], "10.0.0.5")
+Assert.eq(dns_rows[2](600).status, "已绑定 2 个")
+
+page_rows = pushed[1].sections()[1].rows
+Assert.eq(page_rows[1](600).title, "nas.lan")
+page_rows[1](600).callback()
+local sheet = Themed.last("sheet")
+Assert.eq(sheet.items[1].text, "编辑")
+Assert.eq(sheet.items[2].text, "删除")
+sheet.items[1].callback()
+Assert.eq(Themed.last("input").title, "编辑绑定")
+Themed.last("input").callback("nas.home", "192.168.1.21")
+Assert.is_nil(http_cfg.dns_bind["nas.lan"])
+Assert.eq(http_cfg.dns_bind["nas.home"], "192.168.1.21")
+
+page_rows = pushed[1].sections()[1].rows
+local victim
+for _idx, build in ipairs(page_rows) do
+    local row = build(600)
+    if row.title == "printer.lan" then victim = row end
+end
+Assert.not_nil(victim)
+victim.callback()
+Themed.last("sheet").items[2].callback()
+local confirm = Themed.last("confirm")
+Assert.eq(confirm.text, "删除 printer.lan 的解析绑定？")
+Assert.eq(http_cfg.dns_bind["printer.lan"], "10.0.0.5", "确认前不删")
+confirm.ok_callback()
+Assert.is_nil(http_cfg.dns_bind["printer.lan"])
+Assert.eq(dns_rows[2](600).status, "nas.home")
+
 _G.G_reader_settings = previous_settings
