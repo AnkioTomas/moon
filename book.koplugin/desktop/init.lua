@@ -588,11 +588,7 @@ function Desktop:updateView()
         if rescoped then backdrop.scope = self.tab end
         if self.active then
             local top_h = rescoped and 0 or TopBar.height()
-            -- 彩色墨水屏（Kaleido）的 ui 刷新擦不掉上一页：换页签时闪一次，同页签刷新仍走 ui。
-            local switched = self._painted_tab ~= self.tab
-            self._painted_tab = self.tab
-            local flash = switched and Screen.isColorEnabled and Screen:isColorEnabled()
-            UIManager:setDirty(self, flash and "flashui" or "ui", Geom:new{ x = 0, y = top_h, w = self.dimen.w, h = self.dimen.h - top_h })
+            UIManager:setDirty(self, "ui", Geom:new{ x = 0, y = top_h, w = self.dimen.w, h = self.dimen.h - top_h })
         end
     end
     logger.dbg("book.perf desktop.updateView", Perf.elapsedMs(started_at), "ms", self.tab)
