@@ -7,6 +7,7 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local Text = require("ui.themes.widgets.text")
 local Theme = require("ui.themes")
+local spread = require("utils.spread")
 local Box = require("ui.themes.widgets.box")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -124,14 +125,15 @@ function Chart.bars(opts)
     local axis_widget, axis_w = axis(peak, bar_h)
     local axis_gap = Theme.px(t.space.xs)
     local width = math.max(1, (opts.width or 0) - axis_w - axis_gap)
-    local col_w = n > 0
-        and math.max(1, math.floor((width - gap * math.max(0, n - 1)) / n))
-        or width
-
+    local gaps = math.max(0, n - 1)
+    -- 柱等宽；除不尽的像素摊进柱距，整图宽等于 opts.width，不再贴左留一截空白。
+    local col_w = n > 0 and math.floor((width - gap * gaps) / n) or width
+    if col_w < 1 then col_w = 1 end
+    local slack = math.max(0, width - (n * col_w + gap * gaps))
     local row = HorizontalGroup:new{ align = "center" }
     for i, point in ipairs(points) do
         if i > 1 then
-            table.insert(row, HorizontalSpan:new{ width = gap })
+            table.insert(row, HorizontalSpan:new{ width = gap + spread(i - 1, gaps, slack) })
         end
         local seconds = point.value or 0
         local current_h = peak > 0 and seconds > 0

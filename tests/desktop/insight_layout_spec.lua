@@ -11,7 +11,7 @@ Kit.install("paper")
 local Themed = require("support.theme_stubs")
 Themed.install()
 
-Kit.sections.insight = { hidden_pages = {}, hidden_cards = {} }
+Kit.sections.insight = { hidden_pages = {}, hidden_cards = {}, month_goal_hours = 0, year_goal_books = 0 }
 local Layout = require("desktop.pages.insight.layout")
 
 --- 高度 = base + extra 的假块。
@@ -109,5 +109,33 @@ for _, section in ipairs(InsightSettings:sections(desktop)) do
 end
 Assert.eq(clear_row.kind, "action")
 Assert.eq(clear_row.subtitle, "按源或按书清除，不影响云端")
+
+-- 阅读目标在统计设置里，不靠进度页挑战块才能找到。0 显示自动 / 不设。
+local goal_row
+for _, section in ipairs(InsightSettings:sections(desktop)) do
+    for _, build in ipairs(section.rows) do
+        local row = build(600)
+        if row.title == "阅读目标" then goal_row = row end
+    end
+end
+Assert.eq(goal_row.kind, "nav")
+Assert.eq(goal_row.status, "本月 自动 · 今年 不设")
+goal_row.callback()
+local spin = Themed.last("spin")
+Assert.eq(spin.title, "阅读目标")
+Assert.eq(#spin.fields, 2)
+Assert.eq(spin.fields[1].value, 0)
+Assert.eq(spin.fields[2].value, 0)
+spin.callback(20, 12)
+Assert.eq(cfg.month_goal_hours, 20)
+Assert.eq(cfg.year_goal_books, 12)
+Assert.eq(updates, 3, "改完目标刷新桌面")
+for _, section in ipairs(InsightSettings:sections(desktop)) do
+    for _, build in ipairs(section.rows) do
+        local row = build(600)
+        if row.title == "阅读目标" then goal_row = row end
+    end
+end
+Assert.eq(goal_row.status, "本月 20小时 · 今年 12本")
 
 return true

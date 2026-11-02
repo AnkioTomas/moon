@@ -20,6 +20,7 @@ _G.G_reader_settings = {
 
 local saved_payload
 local other_payload
+local rss_payload
 local fail_write
 local fail_replace
 local warnings = {}
@@ -29,6 +30,9 @@ package.preload["book.books_db"] = function()
         getReaderPrefs = function(source_id, stable_id)
             if source_id == "fanqie" and stable_id == "other" then
                 return other_payload
+            end
+            if source_id == "subscribe" then
+                return rss_payload
             end
             Assert.eq(source_id, "moon")
             Assert.eq(stable_id, "book-1")
@@ -62,6 +66,9 @@ package.preload["book.store"] = function()
             return { source_id = "moon", stable_id = "book-1", chapter_idx = 1 }
         end,
         identityFor = function(path)
+            if path == "/rss.html" then
+                return { source_id = "subscribe", stable_id = "feed-1", chapter_idx = 1, ephemeral = true }
+            end
             if path == "/chapter.html" then
                 return { source_id = "moon", stable_id = "book-1", chapter_idx = 1 }
             end
@@ -334,7 +341,7 @@ local on_book = { data = { copt_embedded_fonts = 1 }, saveSetting = ui.doc_setti
 ReaderPrefs.inject(on_book, { file = "/x.epub", setFontFace = function() end })
 Assert.eq(on_book.data.copt_embedded_fonts, 1)
 local saved_g = _G.G_reader_settings
-_G.G_reader_settings = { has = function(_, k) return k == "copt_embedded_fonts" end, readSetting = function() end }
+_G.G_reader_settings = { has = function(_, k) return k == "copt_embedded_fonts" end, readSetting = function() end, saveSetting = function() end }
 local g_default = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
 ReaderPrefs.inject(g_default, { file = "/x.epub", setFontFace = function() end })
 Assert.is_nil(g_default.data.copt_embedded_fonts)
@@ -554,5 +561,62 @@ Assert.is_false(ReaderPrefs.inject(new_file_book, { file = "/brand-new.epub", se
 Assert.is_nil(new_file_book.data.copt_font_size)
 -- 仅可能写入大书防护的 embedded 默认
 Assert.eq(new_file_book.data.copt_embedded_fonts, 0)
+
+-- 渲染模式：全局没写过时补成平面。章节书快照里的网页模式改回全局；
+-- 全局本身是网页、或这本书选的是书籍模式时不动。整本书的 sidecar 不改。
+for k in pairs(global_data) do global_data[k] = nil end
+saved_payload = nil
+local seeded = emptySidecar()
+Assert.is_true(ReaderPrefs.inject(seeded, { file = "/chapter.html", setFontFace = function() end }))
+Assert.eq(global_data.copt_block_rendering_mode, 1)
+Assert.eq(seeded.data.copt_block_rendering_mode, 1)
+
+saved_payload = require("json").encode({
+    font_face = "Book Face",
+    copt = { font_size = 18, block_rendering_mode = 3, word_expansion = 5 },
+})
+global_data.copt_block_rendering_mode = 1
+local demoted = emptySidecar()
+Assert.is_true(ReaderPrefs.inject(demoted, { file = "/chapter.html", setFontFace = function() end }))
+Assert.eq(demoted.data.copt_block_rendering_mode, 1)
+Assert.eq(demoted.data.copt_word_expansion, 5)
+Assert.eq(demoted.data.copt_font_size, 18)
+
+global_data.copt_block_rendering_mode = 3
+local keep_web = emptySidecar()
+Assert.is_true(ReaderPrefs.inject(keep_web, { file = "/chapter.html", setFontFace = function() end }))
+Assert.eq(keep_web.data.copt_block_rendering_mode, 3)
+
+global_data.copt_block_rendering_mode = 1
+saved_payload = require("json").encode({
+    copt = { block_rendering_mode = 2 },
+})
+local keep_book = emptySidecar()
+Assert.is_true(ReaderPrefs.inject(keep_book, { file = "/chapter.html", setFontFace = function() end }))
+Assert.eq(keep_book.data.copt_block_rendering_mode, 2)
+
+saved_payload = require("json").encode({ copt = { block_rendering_mode = 3 } })
+local whole_web = {
+    data = { copt_block_rendering_mode = 3 },
+    saveSetting = ui.doc_settings.saveSetting,
+    readSetting = ui.doc_settings.readSetting,
+    delSetting = ui.doc_settings.delSetting,
+}
+Assert.is_false(ReaderPrefs.inject(whole_web, { file = "/x.epub", setFontFace = function() end }))
+Assert.eq(whole_web.data.copt_block_rendering_mode, 3)
+
+-- 订阅文章（ephemeral 源）不降级。快照里的网页模式留下；没存过模式时写成网页，不吃全局平面。
+global_data.copt_block_rendering_mode = 1
+rss_payload = require("json").encode({
+    copt = { font_size = 22, block_rendering_mode = 3, word_expansion = 0 },
+})
+local rss_kept = emptySidecar()
+Assert.is_true(ReaderPrefs.inject(rss_kept, { file = "/rss.html", setFontFace = function() end }))
+Assert.eq(rss_kept.data.copt_block_rendering_mode, 3)
+Assert.eq(rss_kept.data.copt_font_size, 22)
+rss_payload = nil
+local rss_default = emptySidecar()
+Assert.is_true(ReaderPrefs.inject(rss_default, { file = "/rss.html", setFontFace = function() end }))
+Assert.eq(rss_default.data.copt_block_rendering_mode, 3)
 
 return true

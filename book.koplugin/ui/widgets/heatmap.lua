@@ -1,7 +1,7 @@
 --[[--
 热力图：一列一周、一行一天的方格，深浅表示当天阅读时长级别。
 
-  Heatmap:new{ cols = Calc.heatmap(...).cols, width = w }   -- 方格边长按宽度自适应
+  Heatmap:new{ cols = Calc.heatmap(...).cols, width = w }   -- 方格等宽，除不尽的像素摊进列距，铺满 width
 
 灰阶 5 级（0 = 空），墨水屏黑白也分得出。
 
@@ -11,6 +11,7 @@
 local Geom = require("ui/geometry")
 local Widget = require("ui/widget/widget")
 local Theme = require("ui.themes")
+local spread = require("utils.spread")
 
 ---@class BookHeatmap : Widget
 ---@field cols table[] cols[c][r] = { level } | false
@@ -25,11 +26,17 @@ local GAP = 1
 
 function Heatmap:init()
     local n = #self.cols
-    self.cell = math.max(2, math.floor((self.width - GAP * (n - 1)) / n))
+    local gaps = math.max(0, n - 1)
+    local cell = math.floor((self.width - GAP * gaps) / n)
+    if cell < 2 then cell = 2 end
+    local used = n * cell + GAP * gaps
+    self.cell = cell
+    self.gap_slack = math.max(0, self.width - used)
+    self.gaps = gaps
     self.dimen = Geom:new{
         x = 0, y = 0,
-        w = n * self.cell + (n - 1) * GAP,
-        h = 7 * self.cell + 6 * GAP,
+        w = used + self.gap_slack,
+        h = 7 * cell + 6 * GAP,
     }
 end
 
@@ -49,16 +56,20 @@ function Heatmap:paintTo(bb, x, y)
         shades = {}
         for level = 0, 4 do shades[level + 1] = Theme.mix(SHADES[1], fill, level / 4) end
     end
+    local cursor = x
     for c, col in ipairs(self.cols) do
         for r, cell in ipairs(col) do
             if cell then
                 local value = shades[cell.level + 1]
                 local paint = value > 0xFF and bb.paintRectRGB32 or bb.paintRect
                 paint(bb,
-                    x + (c - 1) * (self.cell + GAP), y + (r - 1) * (self.cell + GAP),
+                    cursor, y + (r - 1) * (self.cell + GAP),
                     self.cell, self.cell, Theme.color(value)
                 )
             end
+        end
+        if c < #self.cols then
+            cursor = cursor + self.cell + GAP + spread(c, self.gaps, self.gap_slack)
         end
     end
 end

@@ -135,10 +135,55 @@ do -- 无 current_condition 不是天气
     Assert.is_nil(Weather:parse('{"nearest_area":[]}'))
 end
 
-do -- 关键词兜底
+do -- 关键词兜底；近义现象先于「雨 / 雪 / 云」
     Assert.eq(Weather.iconKey(nil, "大雾"), "fog")
     Assert.eq(Weather.iconKey(nil, "Haze"), "haze")
+    Assert.eq(Weather.iconKey(nil, "薄雾"), "mist")
+    Assert.eq(Weather.iconKey(nil, "雨夹雪"), "sleet")
+    Assert.eq(Weather.iconKey(nil, "雷阵雨"), "storm")
+    Assert.eq(Weather.iconKey(nil, "扬沙"), "dust")
+    Assert.eq(Weather.iconKey(nil, "Partly cloudy"), "cloud")
     Assert.matches(Weather.iconUrl("unknown"), "assets/weather/unknow%.png$")
+    Assert.matches(Weather.iconUrl("wind"), "assets/weather/sha%.png$")
+end
+
+do -- 码表按现象分开，不再把雷、冻雨、雨夹雪、暴风雪塞进同一张图
+    Assert.eq(Weather.iconKey("119"), "cloudy")
+    Assert.eq(Weather.iconKey("143"), "mist")
+    Assert.eq(Weather.iconKey("185"), "freezing")
+    Assert.eq(Weather.iconKey("200"), "thunder")
+    Assert.eq(Weather.iconKey("230"), "blizzard")
+    Assert.eq(Weather.iconKey("263"), "drizzle")
+    Assert.eq(Weather.iconKey("308"), "heavy_rain")
+    Assert.eq(Weather.iconKey("311"), "freezing")
+    Assert.eq(Weather.iconKey("182"), "sleet")
+    Assert.eq(Weather.iconKey("338"), "heavy_snow")
+    Assert.eq(Weather.iconKey("350"), "ice")
+    Assert.eq(Weather.iconKey("386"), "storm")
+    Assert.eq(Weather.iconKey("395"), "thunder_snow")
+    Assert.eq(Weather.iconUrl("cloudy"), require("http.mirror").url("assets/weather/cloudy.png"))
+end
+
+do -- 官方 WWO 条件码 60 个都有图标；霾、烟、沙尘不靠描述碰运气
+    local codes = {
+        "113", "116", "119", "122", "125", "128", "131", "134", "137", "140",
+        "143", "146", "149", "152", "155", "158", "161", "176", "179", "182",
+        "185", "200", "227", "230", "248", "260", "263", "266", "281", "284",
+        "293", "296", "299", "302", "305", "308", "311", "314", "317", "320",
+        "323", "326", "329", "332", "335", "338", "350", "353", "356", "359",
+        "362", "365", "368", "371", "374", "377", "386", "389", "392", "395",
+    }
+    Assert.len(codes, 60)
+    for _i, code in ipairs(codes) do
+        Assert.is_true(Weather.iconKey(code) ~= "unknown", code)
+    end
+    Assert.eq(Weather.iconKey("125"), "haze")
+    Assert.eq(Weather.iconKey("134"), "dust")
+    Assert.eq(Weather.iconKey("137"), "dust")
+    Assert.eq(Weather.iconKey("146"), "haze")
+    Assert.eq(Weather.iconKey("152"), "haze")
+    Assert.eq(Weather.iconKey("161"), "dust")
+    Assert.eq(Weather.iconKey(nil, "Smoke"), "haze")
 end
 
 return true

@@ -78,53 +78,6 @@ screen:mech_refresh(false, "partial")
 Assert.eq(seen.bw, "glr16", "正文 partial 只对齐直方图")
 Assert.eq(screen.update_data.hist_gray_waveform_mode, "glr16", "正文 partial 的灰阶直方图不动")
 
--- MTK：开了动画时 UI 刷新改走 16 级 partial；关着走原实现。
-local waits, modes, origs = 0, {}, 0
-local mtk = {
-    marker = 0,
-    wait_for_submission_before = true,
-    dont_wait_for_marker = nil,
-    mech_wait_update_submission = function() waits = waits + 1 end,
-    mech_refresh = function(_self, _flash, mode) modes[#modes + 1] = mode end,
-    refreshUIImp = function() origs = origs + 1 end,
-}
-Waveform.hookUi(mtk, 10)
-
-settings_on = false
-mtk:refreshUIImp(0, 0, 8, 8)
-Assert.eq(origs, 1)
-Assert.eq(#modes, 0, "没开动画不换波形")
-
-settings_on = true
-mtk:refreshUIImp(0, 0, 8, 8)
-Assert.eq(modes[1], 10)
-Assert.eq(waits, 0, "第一帧 marker 为 0，不等待")
-
-mtk.marker = 4
-mtk:refreshUIImp(1, 2, 3, 4)
-Assert.eq(waits, 1, "后续帧只等上一帧提交，不等刷完")
-Assert.eq(modes[2], 10)
-
-local installed_mode
-local device = {
-    screen = {
-        mech_refresh = function(_self, _flash, mode) installed_mode = mode end,
-        refreshUIImp = function() end,
-    },
-    _kindle = true,
-    _mtk = true,
-    isKindle = function(self) return self._kindle end,
-    isMTK = function(self) return self._mtk end,
-}
-package.loaded["logger"] = { warn = function() end }
-package.loaded["utils.log"] = { warn = function() end, info = function() end }
-Waveform.install({ device = device, ui_waveform = 10 })
-Assert.is_true(device.screen._moon_kindle_gray)
-Waveform.install({ device = device, ui_waveform = 10 })
-settings_on = true
-device.screen:refreshUIImp(0, 0, 1, 1)
-Assert.eq(installed_mode, 10, "install 后的 UI 刷新走 16 级 partial")
-
 local rex_screen = {
     waveform_ui = "auto",
     waveform_fast = "du",
@@ -135,11 +88,8 @@ local rex_screen = {
     end,
 }
 local rex = {
+    model = "KindleBasic3",
     screen = rex_screen,
-    isKindle = function() return true end,
-    isMTK = function() return false end,
-    isZelda = function() return false end,
-    isRex = function() return true end,
 }
 Waveform.install({ device = rex, text_hist = "gl16" })
 Assert.eq(rex_screen._moon_text_hist, "gl16")
@@ -147,11 +97,18 @@ settings_on = true
 rex_screen.update_data.hist_bw_waveform_mode = "du"
 rex_screen.update_data.hist_gray_waveform_mode = "gc16"
 rex_screen:mech_refresh(false, "auto")
-Assert.eq(seen.bw, "gl16", "Basic 3 这种 Rex 的动画刷新走 GL16")
+Assert.eq(seen.bw, "gl16", "Basic 3 的动画刷新走 GL16")
 
-device._kindle = false
-local other = { screen = {}, isKindle = function() return false end, isMTK = function() return true end }
-Waveform.install({ device = other, ui_waveform = 10 })
-Assert.is_nil(other.screen._moon_kindle_gray, "非 Kindle 不装")
+do
+    local basic2 = { model = "KindleBasic2", screen = { mech_refresh = function() end } }
+    Waveform.install({ device = basic2, text_hist = "gl16" })
+    Assert.eq(basic2.screen._moon_text_hist, "gl16", "Basic 2 也装")
+end
+
+for _idx, model in ipairs({ "KindlePaperWhite5", "KindlePaperWhite4", "KindleBasic4", "KindleOasis3", "KindleColorsoft" }) do
+    local other = { model = model, screen = {} }
+    Waveform.install({ device = other, text_hist = "gl16" })
+    Assert.is_nil(other.screen._moon_kindle_gray, model .. " 不装钩子")
+end
 
 return true

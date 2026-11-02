@@ -41,7 +41,7 @@ package.preload["socket"] = function()
         end },
     }
 end
-local cfg = { http = {} }
+local cfg = { http = { dns_bind = {} } }
 package.preload["utils.settings"] = function()
     return { get = function(name) return cfg[name] end, save = function() end }
 end
@@ -327,6 +327,49 @@ udp_err = nil
 sent = {}
 Dns.resolve("nofd.example.com", function() end)
 Assert.eq(#sent, 2, "失败不留 pending、不记失败，下一次直接重新查")
+
+-- 解析绑定：大小写和末尾点无关，压过缓存、失败记录和 /etc/hosts，不发包。
+-- 空串 / 非字符串 / 整张表缺失都当成没绑定。先排空前面没走完的 poll。
+clock = clock + Dns.QUERY_TIMEOUT + 1
+tick()
+Dns.clear()
+cfg.http.dns_bind = { ["img.example.com"] = "10.9.8.7" }
+local function take(host)
+    local value
+    Dns.resolve(host, function(a) value = a or false end)
+    return value
+end
+sent = {}
+Assert.eq(take("Img.Example.com."), "10.9.8.7")
+Assert.eq(#sent, 0, "绑定命中不看缓存、不发包")
+sent = {}
+Dns.resolve("stuck.example", function() end)
+Assert.eq(#sent, 2)
+clock = clock + Dns.QUERY_TIMEOUT + 0.01
+tick()
+cfg.http.dns_bind["stuck.example"] = "10.1.1.1"
+Assert.eq(take("stuck.example"), "10.1.1.1", "绑定压过失败记录")
+Assert.eq(#sent, 2, "绑定命中不再发包")
+local hosts_bind = os.tmpname()
+local hbf = assert(io.open(hosts_bind, "w"))
+hbf:write("192.168.1.20 books.home\n")
+hbf:close()
+Dns.HOSTS = hosts_bind
+cfg.http.dns_bind["books.home"] = "10.2.2.2"
+Assert.eq(take("books.home"), "10.2.2.2", "绑定压过 /etc/hosts")
+Assert.eq(#sent, 2)
+os.remove(hosts_bind)
+cfg.http.dns_bind["empty.example"] = ""
+cfg.http.dns_bind["bad.example"] = 1
+sent = {}
+Dns.resolve("empty.example", function() end)
+Dns.resolve("bad.example", function() end)
+Assert.eq(#sent, 4, "空串和非字符串绑定忽略，照常查询")
+cfg.http.dns_bind = nil
+sent = {}
+Dns.resolve("plain.example", function() end)
+Assert.eq(#sent, 2, "没有绑定表不炸，照常查询")
+Assert.eq(take("8.8.8.8"), "8.8.8.8", "IP 字面量不查绑定表")
 
 -- 换备选 clear：缓存、失败记录全清
 cfg.http.dns = nil
