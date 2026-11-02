@@ -36,6 +36,7 @@ Ext.POINTS = {
     ["reader.doc_settings"] = "开书前改文档设置 fn(doc_settings, document)",
     ["reader.preferences"] = "开书后套用偏好 fn(ui)",
     ["web.routes"] = "远程管理接口 { name, handle(method, action, params, cb(status, table)), download?(action) -> { ctype, filename, body|path }|nil, dir?: string, assets?: string[], page?: { href, title, title_long?, desc?, icon, tile? }, l10n?: string, public?: { [action] = true } }（/api/<name>/<action>；assets 为 dir 下开放的静态文件；page 进顶栏与首页；l10n 为网页文案模块前缀；public 列出免浏览器配对的动作）",
+    ["web.open_page"] = "启动远程管理并弹二维码引导到某个网页 fn(path, title, text)，path 形如 /xxx.html；单一提供者，没人登记时调用方退化为文字提示",
     ["note.markup_classes"] = "页内插入的译文类元素 class（字符串）；划线端点落在其中时回退到原文",
 }
 

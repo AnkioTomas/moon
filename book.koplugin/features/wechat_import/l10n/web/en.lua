@@ -9,8 +9,13 @@ return {
     ["开始导入"] = "Start import",
     ["丢弃数据"] = "Discard",
     ["正在下载…"] = "Downloading…",
+    ["正在下载 %1 / %2 KB"] = "Downloading %1 / %2 KB",
+    ["正在解析…"] = "Parsing…",
     ["正在导入 %1 / %2"] = "Importing %1 / %2",
     ["导入完成：%1 本，下架 %2 本"] = "Done: %1 books imported, %2 removed from shelf",
+    ["下载"] = "download",
+    ["收尾"] = "finalize",
+    ["第 %1 / %2 批上传"] = "uploading batch %1 / %2",
     ["导入失败：%1"] = "Import failed: %1",
     ["已丢弃"] = "Discarded",
 }

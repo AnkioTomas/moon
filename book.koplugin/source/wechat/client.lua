@@ -104,17 +104,33 @@ end
 ---@return { cancel: fun() }|nil
 function Client:shelfSyncAsync(cb, spill)
     local ShelfImport = require("source.wechat.shelf_import")
-    return Eink.callAsync("GET", "/shelf/sync", {
+    local Awake = require("utils.awake")
+    -- 大书架下载 + 落盘要几分钟，期间别让设备睡下去；回调或取消时放开。
+    Awake.hold("wechat_shelf", true)
+    local handle = Eink.callAsync("GET", "/shelf/sync", {
         query = { synckey = 0, teenmode = 0, album = 1, onlyBookid = 0, localBookCount = 0 },
         max_body = spill and ShelfImport.LIMIT or nil,
     }, function(data, err, meta)
         if meta and meta.oversize then
             local ok, werr = ShelfImport.stash(data.body)
+            Awake.hold("wechat_shelf", false)
+            if ok then
+                require("utils.extension").call("web.open_page", ShelfImport.PAGE, _("微信书架导入"), ShelfImport.TOO_LARGE)
+            end
             cb(nil, ok and ShelfImport.TOO_LARGE or werr)
             return
         end
+        Awake.hold("wechat_shelf", false)
         cb(data, err)
     end)
+    if not handle then
+        Awake.hold("wechat_shelf", false)
+        return nil
+    end
+    return { cancel = function()
+        Awake.hold("wechat_shelf", false)
+        handle.cancel()
+    end }
 end
 
 --- 增量拉书架索引：自 synckey 以来删了哪些（removed）、变了哪些（bookIds，只要 id）、

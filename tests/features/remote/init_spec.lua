@@ -411,6 +411,12 @@ local url1, share_err = Remote.shareUrl(shared_file)
 Assert.is_nil(share_err)
 Assert.eq(url1, "http://192.168.1.2:9528/download?path=" .. encoded .. "&v=0-1")
 
+-- 其它模块引导用户去某个网页：二维码直达该页，说明与地址都写在底部。
+Remote.openPage("/wechat_import.html", "微信书架导入", "请扫码")
+Assert.eq(qr_opts.text, "http://192.168.1.2:9528/wechat_import.html")
+Assert.eq(qr_opts.caption, "请扫码\n" .. qr_opts.text)
+Assert.eq(require("utils.extension").last("web.open_page"), Remote.openPage)
+
 -- 拿不到局域网 IP：不弹扫了也打不开的码，退回文字提示。
 fake_ip = nil
 qr_opts = nil

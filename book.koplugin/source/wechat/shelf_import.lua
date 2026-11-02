@@ -18,7 +18,8 @@ local ShelfImport = {}
 --- 回包超过这个字节数就不在设备上解码（解码后内存是原文数倍）。
 ShelfImport.LIMIT = 1024 * 1024
 
-ShelfImport.TOO_LARGE = _("书架数据太大，设备无法直接处理。请开启远程管理，在电脑浏览器打开「微信书架导入」页完成同步。")
+ShelfImport.TOO_LARGE = _("书架数据太大，设备无法直接处理。已开启远程管理，请扫码在浏览器点「开始导入」完成同步。")
+ShelfImport.PAGE = "/wechat_import.html"
 
 ---@return string
 function ShelfImport.path()
