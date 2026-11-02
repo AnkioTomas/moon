@@ -418,4 +418,46 @@ Assert.is_false(Remote.showAccess())
 Assert.is_nil(qr_opts)
 Assert.eq(toast_opts.text, "服务已启动：http://本机IP:9528/")
 
+-- 远程装插件成功：文案走 ffi/util.template。全局 T 在 KOReader 2026.07 已不存在，
+-- 装完再崩会跳过重启。
+do
+    local restart = function() end
+    package.preload["features.update"] = function()
+        return {
+            installArchive = function(_archive, _root, cb)
+                cb(true, "book.koplugin")
+            end,
+            restart = restart,
+        }
+    end
+    package.loaded["features.update"] = nil
+    local n = #scheduled
+    local ok, err
+    server_opts.handlers.install_update("/tmp/plugin.zip", function(a, b) ok, err = a, b end)
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(toast_opts.text, "插件 book.koplugin 已安装，正在重启 KOReader…")
+    Assert.eq(#scheduled, n + 1)
+    Assert.eq(scheduled[#scheduled], restart)
+
+    package.loaded["features.update"] = nil
+    package.preload["features.update"] = function()
+        return {
+            installArchive = function(_archive, _root, cb)
+                cb(false, "busy")
+            end,
+            restart = restart,
+        }
+    end
+    toast_opts = nil
+    local failed_ok, failed_err
+    server_opts.handlers.install_update("/tmp/plugin.zip", function(a, b)
+        failed_ok, failed_err = a, b
+    end)
+    Assert.is_false(failed_ok)
+    Assert.eq(failed_err, "busy")
+    Assert.is_nil(toast_opts)
+    Assert.eq(#scheduled, n + 1)
+end
+
 return true
