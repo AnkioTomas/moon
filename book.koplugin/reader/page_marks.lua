@@ -349,40 +349,68 @@ local function underline(bb, rect, solid, delta, thick)
     end
 end
 
---- 在末行文字末尾画对话气泡（圆角框 + 朝下的小尖角指向文字末），返回点按矩形；超出右边缘就整体左移。
+--- 气泡字号占正文字号的比例。
+local BUBBLE_SCALE = 0.55
+
+--- 带抗锯齿地画气泡：圆角矩形 + 左侧菱形尖角的并集轮廓（1px 灰线，内部填白），按有向距离算每个像素的覆盖率再与底色混合。
+---@param bb any Blitbuffer
+---@param x number 矩形左
+---@param y number 矩形上
+---@param w number
+---@param h number
+---@param radius number
+---@param tail number 尖角伸出长度
+local function paintBubbleShape(bb, x, y, w, h, radius, tail)
+    local Blitbuffer = require("ffi/blitbuffer")
+    local dark = 0x88
+    local cx, cy = x + w / 2, y + h / 2
+    local hx, hy = w / 2 - radius, h / 2 - radius
+    local bw, bh = bb:getWidth(), bb:getHeight()
+    for py = math.max(0, y - 1), math.min(bh - 1, y + h) do
+        for px = math.max(0, x - tail - 1), math.min(bw - 1, x + w) do
+            local fx, fy = px + 0.5, py + 0.5
+            local qx, qy = math.abs(fx - cx) - hx, math.abs(fy - cy) - hy
+            local d = math.sqrt(math.max(qx, 0) ^ 2 + math.max(qy, 0) ^ 2) + math.min(math.max(qx, qy), 0) - radius
+            local dd = (math.abs(fx - x) + math.abs(fy - cy) - tail) / 1.4142
+            if dd < d then d = dd end
+            local fill = math.min(1, math.max(0, 0.5 - d))
+            local line = math.min(1, math.max(0, 1 - math.abs(d)))
+            if fill > 0 or line > 0 then
+                local base = bb:getPixel(px, py):getColor8().a
+                local v = base * (1 - fill) + 255 * fill
+                v = v * (1 - line) + dark * line
+                bb:setPixel(px, py, Blitbuffer.Color8(math.floor(v + 0.5)))
+            end
+        end
+    end
+end
+
+--- 在末行文字末尾画对话气泡（圆角描边框，左侧一个朝左的小尖角指向文字末），返回点按矩形；超出右边缘就整体左移。
 ---@param bb any Blitbuffer
 ---@param box table 末行屏幕框
 ---@param text string
+---@param body_size number|nil 正文字号；气泡字号取其 BUBBLE_SCALE，缺省按行高估
 ---@return table rect
-local function bubble(bb, box, text)
-    local Blitbuffer = require("ffi/blitbuffer")
-    local dark, white = Blitbuffer.COLOR_DARK_GRAY, Blitbuffer.COLOR_WHITE
+local function bubble(bb, box, text, body_size)
     local label = require("ui/widget/textwidget"):new{
         text = text,
-        face = require("ui/font"):getFace("cfont", math.max(7, math.floor(box.h * 0.26))),
-        fgcolor = dark,
+        face = require("ui/font"):getFace("cfont", math.max(6, math.floor(body_size and body_size * BUBBLE_SCALE or box.h * 0.2))),
+        fgcolor = require("ffi/blitbuffer").Color8(0x88),
     }
     local size = label:getSize()
-    local pad = 5
-    local w, h = size.w + pad * 2, size.h
-    local tail = 3
-    local radius = math.floor(h / 4)
-    -- 紧跟段末文字，垂直居中，只描边；尖角在左下
-    local x = math.min(box.x + box.w + 4, bb:getWidth() - w - 2)
-    local y = box.y + math.floor((box.h - h) / 2) - 1
-    bb:paintRoundedRect(x, y, w, h, white, radius)
-    bb:paintBorder(x, y, w, h, 1, dark, radius)
-    -- 尖角：从底边向下收成一点，顶行擦掉底边的一段再补两条斜边
-    local tx = x + radius + tail
-    for r = 0, tail do
-        local half, row = tail - r, y + h - 1 + r
-        if half >= 1 then bb:paintRect(tx - half + 1, row, 2 * half - 1, 1, white) end
-        bb:paintRect(tx - half, row, 1, 1, dark)
-        bb:paintRect(tx + half, row, 1, 1, dark)
-    end
-    label:paintTo(bb, x + pad, y)
+    -- 数字字形只占文本框的 0.165~0.67（中心在 0.42），按字形而不是文本框居中
+    local glyph = math.floor(size.h * 0.505 + 0.5)
+    local pad = math.max(3, math.floor(glyph * 0.45))
+    local w, h = size.w + pad * 2, glyph + pad * 2
+    local tail = math.max(3, math.floor(h / 4))
+    local radius = math.max(2, math.floor(h / 4))
+    local x = math.min(box.x + box.w + 2 + tail, bb:getWidth() - w - 2)
+    local cy = box.y + math.floor(box.h / 2)
+    local y = cy - math.floor(h / 2)
+    paintBubbleShape(bb, x, y, w, h, radius, tail)
+    label:paintTo(bb, x + pad, cy - math.floor(size.h * 0.42 + 0.5))
     label:free()
-    return { x = x, y = y, w = w, h = h + tail }
+    return { x = x - tail, y = y, w = w + tail, h = h }
 end
 
 --- 占位，先不画。下划线的垂直位置要等本帧所有行框都齐了再量。
@@ -422,11 +450,11 @@ end
 ---@param delta number
 ---@param thick number
 ---@param painted table[]
-local function drawGroup(group, bb, delta, thick, painted)
+local function drawGroup(group, bb, delta, thick, painted, body_size)
     for _idx, item in ipairs(group.items) do
         local pieces
         if item.badge then
-            pieces = { bubble(bb, item.badge, item.mark.badge) }
+            pieces = { bubble(bb, item.badge, item.mark.badge, body_size) }
         else
             pieces = item.pieces
             for _piece_idx, piece in ipairs(pieces) do underline(bb, piece, item.mark.solid, delta, thick) end
@@ -447,8 +475,10 @@ local function paint(self, bb)
     local thick = require("ui/size").line.thick
     local delta = lineDelta(bb, linePieces(batch), thick)
     local painted = {}
+    local font = self.ui.font and self.ui.font.configurable
+    local body_size = font and font.font_size
     for _idx, group in ipairs(batch) do
-        Guard.paint(group.entry.id .. ".paintTo", drawGroup, group, bb, delta, thick, painted)
+        Guard.paint(group.entry.id .. ".paintTo", drawGroup, group, bb, delta, thick, painted, body_size)
     end
     self.painted = painted
 end
