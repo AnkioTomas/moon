@@ -4,6 +4,8 @@
 @module koplugin.book.desktop.pages.insight.year
 --]]
 
+local Geom = require("ui/geometry")
+local CenterContainer = require("ui/widget/container/centercontainer")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -23,7 +25,7 @@ local T = require("ffi/util").template
 ---@class BookInsightYear
 local Year = {}
 
---- 封面墙：按读完先后一格一本，放不下的不画。
+--- 封面墙：按读完先后一格一本，放不下的不画。整墙在 width 里居中，末行不满也居中。
 ---@param desktop table
 ---@param books table[]
 ---@param width number
@@ -38,7 +40,7 @@ local function coverWall(desktop, books, width, extra, open_book)
     local per_row = math.max(1, math.floor((width + gap) / (cw + gap)))
     local rows = 1 + math.floor(extra / (ch + gap))
     if rows < 1 or #books == 0 then return nil end
-    local wall = VerticalGroup:new{ align = "left" }
+    local wall = VerticalGroup:new{ align = "center" }
     local shown = math.min(#books, per_row * rows)
     for first = 1, shown, per_row do
         local row = HorizontalGroup:new{ align = "top" }
@@ -53,7 +55,7 @@ local function coverWall(desktop, books, width, extra, open_book)
         if first > 1 then table.insert(wall, VerticalSpan:new{ width = gap }) end
         table.insert(wall, row)
     end
-    return wall
+    return CenterContainer:new{ dimen = Geom:new{ w = width, h = wall:getSize().h }, wall }
 end
 
 --- 构建本年页：指标卡、月图、热力图、封面墙，余量由 Layout.stack 分配（封面墙吃剩余高度）。

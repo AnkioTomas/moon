@@ -28,4 +28,9 @@ for _idx, s in ipairs(short) do
     Assert.is_true(s ~= "45分钟", "柱区放不下三格时不标中间刻度")
 end
 
+-- 12 根柱除不尽时，余数进柱距，整图宽仍是给定宽度（不再贴左留白）。
+local months = {}
+for month = 1, 12 do months[month] = { value = month, label = month .. "月" } end
+Assert.eq(Chart.bars({ points = months, width = 500, height = 88, gap = 4 }):getSize().w, 500)
+
 return true
