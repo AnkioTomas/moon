@@ -2667,4 +2667,5 @@ Current version: ",
     ["拿不到局域网 IP，请先连接 Wi-Fi 后在设置里开启远程管理"] = "No LAN IP. Connect to Wi-Fi first, then turn on Remote Management in Settings.",
     ["全量书架分批导入"] = "Batch import of full shelf",
     ["微信书架导入"] = "WeChat shelf import",
+    ["Kindle 书库依赖的插件，点按安装"] = "Plugin the Kindle library depends on. Tap to install",
 }

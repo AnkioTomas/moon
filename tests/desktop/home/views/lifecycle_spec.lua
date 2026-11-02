@@ -29,6 +29,7 @@ end
 package.preload["book.catalog"] = function()
     return {
         formatDuration = function(n) return tostring(n) end,
+        formatTotal = function(n) return tostring(n) end,
         libraryScope = function(id) return id end,
     }
 end
