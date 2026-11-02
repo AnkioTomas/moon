@@ -75,4 +75,53 @@ for _idx, button in ipairs(Kit.buttons(spin)) do
 end
 Assert.is_true(total <= spin:innerWidth(), "五列整行不溢出")
 
+-- 四列三位数字在 hero 下放不下：降到仍放得下「120」的最大字号，列宽不把数字截成省略号。
+local TextWidget = require("ui/widget/textwidget")
+TextWidget.getSize = function(self)
+    local size = self.face and self.face.size or 40
+    local w = #self.text * size
+    if self.max_width and w > self.max_width then w = self.max_width end
+    return { w = w, h = size }
+end
+local theme = Theme.current()
+spin = Spin:new{ fields = {
+    { value = 0, min = 0, max = 120, step = 5, label = "上" },
+    { value = 0, min = 0, max = 120, step = 5, label = "右" },
+    { value = 0, min = 0, max = 120, step = 5, label = "下" },
+    { value = 0, min = 0, max = 120, step = 5, label = "左" },
+} }
+local size = spin.labels[1].face.size
+local gap = Theme.px(theme.space.lg)
+local function rowAt(sz) return 3 * sz * 4 + gap * 3 end
+Assert.is_true(size < theme.font.hero, "hero 放不下就降字号")
+Assert.is_true(size >= theme.font.caption)
+Assert.is_true(rowAt(size) <= spin:innerWidth(), "降到的字号放得下四列 120")
+Assert.is_true(rowAt(size + 1) > spin:innerWidth(), "取的是放得下的最大字号")
+Assert.is_true(spin.labels[1].max_width >= 3 * size, "列宽够画 120，不截成省略号")
+buttons = Kit.buttons(spin)
+buttons[1]:onTapThemeButton()
+buttons[1]:onTapThemeButton()
+Assert.eq(spin.labels[1].text, "10")
+Assert.is_true(spin.labels[1].max_width >= 2 * size, "两位数仍在列宽里")
+
+-- 降到说明文字仍放不下：停在 caption，整行不溢出。
+TextWidget.getSize = function(self)
+    local size = self.face and self.face.size or 40
+    local w = #self.text * size * 100
+    if self.max_width and w > self.max_width then w = self.max_width end
+    return { w = w, h = size }
+end
+spin = Spin:new{ fields = {
+    { value = 0, min = 0, max = 120 },
+    { value = 0, min = 0, max = 120 },
+    { value = 0, min = 0, max = 120 },
+    { value = 0, min = 0, max = 120 },
+} }
+Assert.eq(spin.labels[1].face.size, theme.font.caption, "字号不再小于说明文字")
+total = Theme.px(theme.space.lg) * 3
+for _idx, button in ipairs(Kit.buttons(spin)) do
+    if button.icon == "add" then total = total + button.width end
+end
+Assert.is_true(total <= spin:innerWidth(), "降无可降时整行仍不溢出")
+
 return true
