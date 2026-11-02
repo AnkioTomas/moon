@@ -107,10 +107,10 @@ package.preload["workers.job"] = function()
     }
 end
 local install_args
-package.preload["features.update.install"] = function()
+package.preload["utils.plugin_install"] = function()
     return {
-        run = function(archive, root, sha)
-            install_args = { archive = archive, root = root, sha = sha }
+        run = function(archive, parent, sha)
+            install_args = { archive = archive, parent = parent, sha = sha }
             return true
         end,
     }
@@ -135,7 +135,7 @@ local function release(tag, body)
 end
 local function check(response)
     local got, got_err
-    Update.check(function(r, e) got, got_err = r, e end)
+    Update:check(function(r, e) got, got_err = r, e end)
     check_cb(response)
     return got, got_err
 end
@@ -143,7 +143,7 @@ end
 -- 转发接口失败（HTTP 552）回落直连 GitHub，不报错。
 do
     local got, got_err
-    Update.check(function(r, e) got, got_err = r, e end)
+    Update:check(function(r, e) got, got_err = r, e end)
     local before = gets
     check_cb(nil, "HTTP 552")
     Assert.eq(gets, before + 1)
@@ -154,7 +154,7 @@ end
 -- 两个入口都失败才报错。
 do
     local got_err
-    Update.check(function(_r, e) got_err = e end)
+    Update:check(function(_r, e) got_err = e end)
     check_cb(nil, "HTTP 552")
     check_cb(nil, "HTTP 503")
     Assert.eq(got_err, "HTTP 503")
@@ -239,7 +239,7 @@ local update_release = {
         size = 4096,
     }},
 }
-Update.manualCheck("/plugins/book.koplugin")
+Update:manualCheck("/plugins/book.koplugin")
 Assert.eq(shown[1].text, "正在检查月读更新…")
 Assert.is_nil(shown[1].timeout)
 check_cb(update_release)
@@ -304,7 +304,7 @@ Assert.eq(shown[5].text, "月读更新失败：network failed")
 local parsed_update = check(update_release)
 probes, download_opts = {}, nil
 local install_ok, install_err
-Update.install(parsed_update, "/plugins/book.koplugin", function(ok, e) install_ok, install_err = ok, e end)
+Update:install(parsed_update, "/plugins/book.koplugin", function(ok, e) install_ok, install_err = ok, e end)
 for _, probe in ipairs(probes) do probe.handlers.on_done("timeout") end
 Assert.is_nil(download_opts)
 flush()
@@ -315,7 +315,7 @@ Assert.eq(install_err, "direct failed")
 
 -- 镜像下载失败回落直连；直连装包的非校验错误不再重试。
 probes, download_opts = {}, nil
-Update.install(parsed_update, "/plugins/book.koplugin", function(ok, e) install_ok, install_err = ok, e end)
+Update:install(parsed_update, "/plugins/book.koplugin", function(ok, e) install_ok, install_err = ok, e end)
 probes[2].handlers.on_headers(200, headers(4096))
 flush()
 local mirror_url = download_opts.url
@@ -335,7 +335,7 @@ Assert.matches(select(2, check(bad)), "plugin archive")
 --- 手动检查 → 确认安装，返回下载进度窗。
 local function startFromPrompt()
     shown, closed, probes, download_opts = {}, {}, {}, nil
-    Update.manualCheck("/plugins/book.koplugin")
+    Update:manualCheck("/plugins/book.koplugin")
     check_cb(update_release)
     shown[2].buttons[2].callback()
     local dialog = shown[3]
@@ -373,15 +373,15 @@ Assert.eq(shown[#shown].text, "月读更新失败：更新包校验失败，请�
 
 -- 忙时手动检查：提示中文原因。
 shown = {}
-Update.check(function() end)
+Update:check(function() end)
 local pending_check = check_cb
-Update.manualCheck("/plugins/book.koplugin")
+Update:manualCheck("/plugins/book.koplugin")
 Assert.eq(shown[#shown].text, "检查更新失败：正在检查或安装更新，请稍候")
 pending_check(update_release)
 
 -- 普通检查已是最新：只 toast，不弹安装。
 shown, closed = {}, {}
-Update.manualCheck("/plugins/book.koplugin")
+Update:manualCheck("/plugins/book.koplugin")
 Assert.eq(shown[1].title, "检查更新")
 check_cb(release("v1.2.3"))
 Assert.eq(shown[#shown].text, "已是最新版本（1.2.3）")
@@ -389,7 +389,7 @@ Assert.is_nil(shown[2] and shown[2].buttons)
 
 -- 长按强制更新：已是最新也弹安装确认，文案标明强制重装。
 shown, closed = {}, {}
-Update.manualCheck("/plugins/book.koplugin", true)
+Update:manualCheck("/plugins/book.koplugin", true)
 Assert.eq(shown[1].title, "强制更新")
 check_cb(release("v1.2.3"))
 local force_prompt = shown[2]
@@ -424,18 +424,18 @@ local function exists(path)
 end
 local archive_ok, archive_err
 local archive = tempArchive()
-Update.installArchive(archive, "/plugins/book.koplugin", function(ok, e) archive_ok, archive_err = ok, e end)
+Update:installArchive(archive, "/plugins/book.koplugin", function(ok, e) archive_ok, archive_err = ok, e end)
 job_worker()
 Assert.eq(install_args.archive, archive)
-Assert.eq(install_args.root, "/plugins/book.koplugin")
+Assert.eq(install_args.parent, "/plugins")
 Assert.is_nil(install_args.sha)
 -- 装包期间在线更新与再次上传都是忙。
 local check_err
-Update.check(function(_, e) check_err = e end)
+Update:check(function(_, e) check_err = e end)
 Assert.eq(check_err, "busy")
 local busy_archive = tempArchive()
 local busy_ok, busy_err
-Update.installArchive(busy_archive, "/plugins/book.koplugin", function(ok, e) busy_ok, busy_err = ok, e end)
+Update:installArchive(busy_archive, "/plugins/book.koplugin", function(ok, e) busy_ok, busy_err = ok, e end)
 Assert.is_false(busy_ok)
 Assert.eq(busy_err, "busy")
 Assert.is_false(exists(busy_archive))
@@ -445,7 +445,7 @@ Assert.eq(archive_err, "book.koplugin")
 Assert.is_false(exists(archive))
 
 archive = tempArchive()
-Update.installArchive(archive, "/plugins/book.koplugin", function(ok, e) archive_ok, archive_err = ok, e end)
+Update:installArchive(archive, "/plugins/book.koplugin", function(ok, e) archive_ok, archive_err = ok, e end)
 job_opts.on_failed("not a moon plugin archive\nstack traceback:\n\tinstall.lua:1")
 Assert.is_false(archive_ok)
 Assert.eq(archive_err, "not a moon plugin archive")
@@ -453,7 +453,7 @@ Assert.is_false(exists(archive))
 
 -- fork 失败同步回调：不能留下「忙」。
 fork_fails = true
-Update.installArchive(tempArchive(), "/plugins/book.koplugin", function(ok, e) archive_ok, archive_err = ok, e end)
+Update:installArchive(tempArchive(), "/plugins/book.koplugin", function(ok, e) archive_ok, archive_err = ok, e end)
 fork_fails = false
 Assert.eq(archive_err, "fork failed")
 Assert.is_nil(Update._job)

@@ -1,6 +1,6 @@
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
---[[-- features.update.install：完整目录换位、校验与旧目录备份。 --]]
+--[[-- utils.plugin_install：完整目录换位、校验与旧目录备份。 --]]
 
 local Assert = require("support.assert")
 local Config = require("support.config")
@@ -63,38 +63,45 @@ package.preload["ffi/archiver"] = function()
     return { Reader = Reader }
 end
 
-local Install = require("features.update.install")
+local Install = require("utils.plugin_install")
 
 local zip_file = assert(io.open(archive, "rb"))
 local digest = sha256(assert(zip_file:read("*a")))
 zip_file:close()
 
-local ok, err = Install.run(archive, current, digest)
+local ok, err = Install.run(archive, tmp, digest, { name = "book.koplugin" })
 Assert.is_true(ok, err)
 Assert.is_nil(lfs.attributes(current .. "/stale.lua"), "旧版本残留文件必须消失")
 Assert.eq(assert(loadfile(current .. "/nested/value.lua"))(), 42)
 Assert.eq(assert(loadfile(tmp .. "/.book.koplugin-backup/main.lua"))(), "old")
 
 -- 校验失败发生在换位前，当前目录不得被碰。
-local bad_ok, bad_err = Install.run(archive, current, string.rep("0", 64))
+local bad_ok, bad_err = Install.run(archive, tmp, string.rep("0", 64), { name = "book.koplugin" })
 Assert.is_nil(bad_ok)
 Assert.matches(bad_err, "checksum mismatch")
 Assert.eq(assert(loadfile(current .. "/main.lua"))(), "new")
 
 -- 包里没有 book.koplugin/：换位失败回滚，当前目录原样恢复，暂存目录清掉。
 entries = { { path = "other", mode = "directory", size = 0 } }
-local wrong_ok, wrong_err = Install.run(archive, current, digest)
+local wrong_ok, wrong_err = Install.run(archive, tmp, digest, { name = "book.koplugin" })
 Assert.is_nil(wrong_ok)
 Assert.not_nil(wrong_err)
 Assert.eq(assert(loadfile(current .. "/main.lua"))(), "new")
 Assert.is_nil(lfs.attributes(tmp .. "/.book.koplugin-update"))
 
--- 有 book.koplugin/ 但没有 bookversion.lua：不是月读包，换位前就拒绝。
+-- 调用方的 verify 在换位前拒绝：当前目录不动，暂存目录清掉。
 entries = {
     { path = "book.koplugin", mode = "directory", size = 0 },
     { path = "book.koplugin/main.lua", mode = "file", body = "return 'evil'\n" },
 }
-local foreign_ok, foreign_err = Install.run(archive, current)
+local verified
+local foreign_ok, foreign_err = Install.run(archive, tmp, nil, {
+    verify = function(name, staging)
+        verified = lfs.attributes(staging .. "/" .. name .. "/main.lua", "mode")
+        return "not a moon plugin archive"
+    end,
+})
+Assert.eq(verified, "file", "verify 看到的是解压后的暂存目录")
 Assert.is_nil(foreign_ok)
 Assert.eq(foreign_err, "not a moon plugin archive")
 Assert.eq(assert(loadfile(current .. "/main.lua"))(), "new")
@@ -106,7 +113,7 @@ entries = {
     { path = "book.koplugin/main.lua", mode = "file", body = "return 'uploaded'\n" },
     { path = "book.koplugin/bookversion.lua", mode = "file", body = 'return "1.2.4"\n' },
 }
-local local_ok, local_name = Install.run(archive, current)
+local local_ok, local_name = Install.run(archive, tmp)
 Assert.is_true(local_ok, local_name)
 Assert.eq(local_name, "book.koplugin")
 Assert.eq(assert(loadfile(current .. "/main.lua"))(), "uploaded")
@@ -119,7 +126,7 @@ entries = {
     { path = "other.koplugin", mode = "directory", size = 0 },
     { path = "other.koplugin/main.lua", mode = "file", body = "return 'new-other'\n" },
 }
-local other_ok, other_name = Install.run(archive, current)
+local other_ok, other_name = Install.run(archive, tmp)
 Assert.is_true(other_ok, other_name)
 Assert.eq(other_name, "other.koplugin")
 Assert.eq(assert(loadfile(tmp .. "/other.koplugin/main.lua"))(), "new-other")
@@ -132,7 +139,7 @@ entries = {
     { path = "fresh.koplugin", mode = "directory", size = 0 },
     { path = "fresh.koplugin/main.lua", mode = "file", body = "return 'fresh'\n" },
 }
-local fresh_ok, fresh_name = Install.run(archive, current)
+local fresh_ok, fresh_name = Install.run(archive, tmp)
 Assert.is_true(fresh_ok, fresh_name)
 Assert.eq(fresh_name, "fresh.koplugin")
 Assert.eq(assert(loadfile(tmp .. "/fresh.koplugin/main.lua"))(), "fresh")
@@ -141,7 +148,7 @@ Assert.eq(assert(loadfile(current .. "/main.lua"))(), "uploaded")
 
 -- 顶层没有 .koplugin 目录（同名文件不算）：拒绝，已装的插件不动。
 entries = { { path = "readme.koplugin", mode = "file", body = "nope\n" } }
-local bare_ok, bare_err = Install.run(archive, current)
+local bare_ok, bare_err = Install.run(archive, tmp)
 Assert.is_nil(bare_ok)
 Assert.eq(bare_err, "not a koplugin archive")
 Assert.eq(assert(loadfile(tmp .. "/other.koplugin/main.lua"))(), "new-other")
@@ -152,13 +159,42 @@ entries = {
     { path = "a.koplugin", mode = "directory", size = 0 },
     { path = "b.koplugin", mode = "directory", size = 0 },
 }
-local multi_ok, multi_err = Install.run(archive, current)
+local multi_ok, multi_err = Install.run(archive, tmp)
 Assert.is_nil(multi_ok)
 Assert.eq(multi_err, "multiple koplugin directories")
 Assert.eq(assert(loadfile(current .. "/main.lua"))(), "uploaded")
 Assert.eq(assert(loadfile(tmp .. "/other.koplugin/main.lua"))(), "new-other")
 Assert.is_nil(lfs.attributes(tmp .. "/a.koplugin"))
 Assert.is_nil(lfs.attributes(tmp .. "/.book.koplugin-update"))
+
+-- 指定顶层目录与安装目录：kamare 在线更新用（digest + name + parent）。
+local extra = tmp .. "/extra-plugins"
+assert(lfs.mkdir(extra))
+assert(lfs.mkdir(extra .. "/kamare.koplugin"))
+write(extra .. "/kamare.koplugin/main.lua", "return 'old-kamare'\n")
+entries = {
+    { path = "kamare.koplugin", mode = "directory", size = 0 },
+    { path = "kamare.koplugin/kamarecache.lua", mode = "file", body = "return 42\n" },
+}
+local kamare_ok, kamare_name = Install.run(archive, extra, digest, { name = "kamare.koplugin" })
+Assert.is_true(kamare_ok, kamare_name)
+Assert.eq(kamare_name, "kamare.koplugin")
+Assert.eq(assert(loadfile(extra .. "/kamare.koplugin/kamarecache.lua"))(), 42)
+Assert.eq(assert(loadfile(extra .. "/.kamare.koplugin-backup/main.lua"))(), "old-kamare")
+Assert.is_nil(lfs.attributes(extra .. "/.kamare.koplugin-update"), "kamare 暂存目录装完即删")
+Assert.is_nil(lfs.attributes(extra .. "/.book.koplugin-update"), "kamare 不占用月读的暂存目录")
+Assert.eq(assert(loadfile(tmp .. "/other.koplugin/main.lua"))(), "new-other", "装到指定目录时不动月读与其它插件")
+
+-- 指定目录名对不上：整包拒绝，旧目录不动。
+entries = {
+    { path = "other.koplugin", mode = "directory", size = 0 },
+    { path = "other.koplugin/main.lua", mode = "file", body = "return 'wrong'\n" },
+}
+local named_ok, named_err = Install.run(archive, extra, digest, { name = "kamare.koplugin" })
+Assert.is_nil(named_ok)
+Assert.eq(named_err, "not a koplugin archive")
+Assert.is_nil(lfs.attributes(extra .. "/.kamare.koplugin-update"))
+Assert.eq(assert(loadfile(extra .. "/kamare.koplugin/kamarecache.lua"))(), 42)
 
 os.execute("rm -rf " .. tmp)
 

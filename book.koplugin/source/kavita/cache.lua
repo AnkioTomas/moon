@@ -243,6 +243,46 @@ function Cache.reprobe()
     return Cache.probe()
 end
 
+--- 插件根目录：kamare 已装用它当前所在目录（就地替换），否则用月读自己的。
+---@param own_path string|nil book.koplugin 目录
+---@return string
+function Cache.pluginsDir(own_path)
+    local path = Cache.probe().path
+    local installed = type(path) == "string" and path:gsub("/+", "/"):match("^(.*)/[^/]+%.koplugin/")
+    if installed then return installed end
+    if type(own_path) == "string" and own_path ~= "" then
+        local own = own_path:gsub("/+", "/"):gsub("/+$", "")
+        return own:match("^(.*)/[^/]+$") or own
+    end
+    local source = debug.getinfo(1, "S").source
+    if type(source) == "string" and source:sub(1, 1) == "@" then source = source:sub(2) end
+    -- 本文件在 <plugins>/book.koplugin/source/kavita/，往上四级
+    return source:match("^(.*)/[^/]+/source/kavita/[^/]+$") or "plugins"
+end
+
+--- 功能清单：kamare 随包提供的用户可见功能文案（kamarefeatures.lua）。
+--- 只用于展示；缺失 / api_version 不符 / 结构不合法都当没有清单，不做能力推断回退。
+---@param probe KamareProbe|nil
+---@return string|nil
+function Cache.featureText(probe)
+    probe = probe or Cache.probe()
+    if not probe.ok then return nil end
+    local ok, manifest = pcall(require, "kamarefeatures")
+    if not ok or type(manifest) ~= "table" or manifest.api_version ~= 1 then return nil end
+    local list = manifest.features
+    if type(list) ~= "table" then return nil end
+    local parts, seen = {}, {}
+    for _idx, item in ipairs(list) do
+        if type(item) == "string" and item ~= "" and not seen[item] then
+            seen[item] = true
+            parts[#parts + 1] = item
+            if #parts == 8 then break end
+        end
+    end
+    if #parts == 0 then return nil end
+    return table.concat(parts, " · ")
+end
+
 --- 能力是否可用。`open` 是唯一允许退回 legacy 通道的能力（02 A4）。
 ---@param cap string|nil
 ---@return boolean
