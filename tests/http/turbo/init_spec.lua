@@ -31,6 +31,7 @@ local Proxy = require("http.proxy")
 do
     local client_fail_msgs = {}
     local HTTPClient = {}
+    function HTTPClient:_handle_connect() end
     function HTTPClient:_handle_connect_fail(strerr)
         client_fail_msgs[#client_fail_msgs + 1] = "Could not connect: " .. tostring(strerr or "")
     end
@@ -47,6 +48,7 @@ do
         }
     end
     local handshake_calls = 0
+    package.preload["turbo.util"] = function() return { gettimemonotonic = function() return 1000 end } end
     package.preload["turbo.crypto"] = function()
         return {
             ssl_create_client_context = function() return 0, {} end,
@@ -68,6 +70,7 @@ do
                 self._handle_connect_fail("Network is unreachable")
             end
         end
+        function IOStream:_read_to_buffer() return self.incoming end
         function IOStream:_read_from_buffer()
             return self._read_buffer_size, self._read_bytes
         end
@@ -118,6 +121,25 @@ do
     Assert.eq(#dropped, 2)
     HTTPClient._handle_connect_fail({ hostname = "cdn.example.com" }, -1)
     Assert.eq(client_fail_msgs[3], "Could not connect: -1", "无真实错误时保留原样")
+    -- 请求超时是空闲计时：连上后每读到数据就重排，没读到不动。
+    local timeouts, removed = {}, {}
+    local loop = {
+        add_timeout = function(_, at, fn, arg) timeouts[#timeouts + 1] = { at = at, fn = fn, arg = arg }; return #timeouts end,
+        remove_timeout = function(_, ref) removed[#removed + 1] = ref end,
+    }
+    local client = { io_loop = loop, iostream = iostream.IOStream, kwargs = { request_timeout = 30 }, request_timeout_ref = 7,
+        _handle_request_timeout = function() end }
+    local conn = { incoming = 0 }
+    client.iostream = conn
+    HTTPClient._handle_connect(client)
+    Assert.eq(conn._book_client, client)
+    Assert.eq(iostream.IOStream._read_to_buffer(conn), 0)
+    Assert.len(timeouts, 0)
+    conn.incoming = 4096
+    Assert.eq(iostream.IOStream._read_to_buffer(conn), 4096)
+    Assert.eq(removed[1], 7)
+    Assert.eq(timeouts[1].at, 31000)
+    Assert.eq(client.request_timeout_ref, 1)
     -- 解析失败：按 turbo 自己的 DNS 失败路径立即失败，不让 LuaSocket 再阻塞解析一次。
     local nx = {}
     iostream.IOStream.connect(nx, "nx.invalid", 443, nil, nil, "fail-cb", "arg")
