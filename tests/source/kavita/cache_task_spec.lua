@@ -50,7 +50,7 @@ local entries = {
     { chapterId = 3, title = "第 3 卷" },
 }
 
---- 跑一条指定延迟的定时器：<1 是队列的变更拍，>=1 是轮询拍。
+--- 跑一条指定延迟的定时器：<1 是队列的变更拍，>=1 且 <60 是轮询拍（60 秒是防休眠的 InputEvent 补拍）。
 ---@param match fun(delay: number): boolean
 ---@return boolean
 local function runTimer(match)
@@ -71,7 +71,7 @@ end
 
 --- 跑一拍轮询。
 local function tick()
-    Assert.is_true(runTimer(function(delay) return delay >= 1 end), "排了下一拍轮询")
+    Assert.is_true(runTimer(function(delay) return delay >= 1 and delay < 60 end), "排了下一拍轮询")
 end
 
 local function reset()

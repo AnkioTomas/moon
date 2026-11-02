@@ -495,9 +495,6 @@ local function start(ui, identity, engine, lang, chapter)
     local input = chapter and chapter.input or prepare(ui, identity, engine, lang)
     input.style = Markup.style(require("utils.settings").get("features.translate"))
     local run = task(input)
-    -- 整书翻译常比自动休眠时长还久。AutoSuspend（Kindle 上是重置 powerd 的 t1）按最后一次 InputEvent 计时：
-    -- 每报一次进度就算一次操作，翻译结束自然恢复，不留开关状态。
-    local event_hook = require("ui/uimanager").event_hook
     require("workers.ui.task_dialog").start{
         key = taskKey(identity),
         kind = "convert",
@@ -505,7 +502,6 @@ local function start(ui, identity, engine, lang, chapter)
         restartable = true,
         run = function(report, done)
             return run(function(text, count, total)
-                event_hook:execute("InputEvent")
                 report(text, count, total)
             end, done)
         end,

@@ -392,6 +392,7 @@ function Kit.install(theme)
         ["ui/gesturerange"] = { new = function(_, o) return o end },
         ["ui/uimanager"] = {
             _window_stack = {},
+            event_hook = { execute = function() end },
             show = function(self, w)
                 Kit.shown[#Kit.shown + 1] = w
                 self._window_stack[#self._window_stack + 1] = { widget = w }
