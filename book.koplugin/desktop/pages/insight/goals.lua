@@ -34,9 +34,9 @@ function Goals.edit(desktop)
     require("ui.themes.widgets.spin"):new{
         title = _("阅读目标"),
         fields = {
-            { label = _("本月（小时）"), value = goals.month_goal_hours or 0, min = 0, max = 300,
+            { label = _("本月（小时）"), value = goals.month_goal_hours, min = 0, max = 300,
                 format = function(v) return v == 0 and _("自动") or tostring(v) end },
-            { label = _("今年读完（本）"), value = goals.year_goal_books or 0, min = 0, max = 500,
+            { label = _("今年读完（本）"), value = goals.year_goal_books, min = 0, max = 500,
                 format = function(v) return v == 0 and _("不设") or tostring(v) end },
         },
         callback = function(hours, books)
@@ -58,7 +58,7 @@ function Goals:build(ctx)
     local now = os.time()
     local days = state.calendar.days
     local goals = MoonSettings.get("desktop.pages.insight")
-    local ch = Calc.challenge(days, now, (goals.month_goal_hours or 0) * 3600)
+    local ch = Calc.challenge(days, now, goals.month_goal_hours * 3600)
     local fc = Calc.forecast(days, state.reading or {}, state.finished or {}, now)
     local function editGoals() Goals.edit(ctx.desktop) end
 
