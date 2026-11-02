@@ -107,6 +107,13 @@ local function rule(w, h, color)
     return LineWidget:new{ background = Blitbuffer.Color8(color), dimen = Geom:new{ w = w, h = h } }
 end
 
+--- 正文字体（原句与评论共用），按设置的缩放百分比放大主题正文字号。
+---@return table face
+function Sheet:bodyFace()
+    local pct = require("utils.settings").get("features.reviews").font_scale
+    return Text.face("body", math.floor(self.theme.font.body * pct / 100 + 0.5))
+end
+
 ---@return table
 function Sheet:quote()
     if self.quote_widget then return self.quote_widget end
@@ -114,7 +121,7 @@ function Sheet:quote()
     local gap = Theme.px(t.space.sm)
     local mark = Icon.widget{ name = "format_quote", size = t.control.icon, color = Blitbuffer.Color8(t.color.faint) }
     local text = Text.box("body", self.spot.text, self.inner_w - mark:getSize().w - gap,
-        { color = t.color.muted, max_lines = QUOTE_LINES, transparent = true })
+        { color = t.color.muted, max_lines = QUOTE_LINES, transparent = true, face = self:bodyFace() })
     self.quote_widget = VerticalGroup:new{
         align = "left",
         HorizontalGroup:new{
@@ -168,13 +175,14 @@ function Sheet:card(i, avail)
     local space = Theme.px(t.space.xs)
     local pics = self:thumbs(item.images or {})
     local pics_h = pics and pics:getSize().h + space or 0
-    local content = Text.box("body", item.content, w, { transparent = true })
+    local face = self:bodyFace()
+    local content = Text.box("body", item.content, w, { transparent = true, face = face })
     local room = (avail or self.body_h) - head:getSize().h - space - pics_h
     local truncated = content:getSize().h > room
     if truncated then
         local lines = math.max(1, math.floor(room / content:getLineHeight()))
         content:free()
-        content = Text.box("body", item.content, w, { max_lines = lines, transparent = true })
+        content = Text.box("body", item.content, w, { max_lines = lines, transparent = true, face = face })
     end
     local card = VerticalGroup:new{ align = "left", head, VerticalSpan:new{ width = space }, content }
     if pics then
