@@ -182,14 +182,14 @@ local function importRow(desktop)
     end
 end
 
---- 阅读目标。0 小时 = 按近 90 天自动，0 本 = 今年不设目标。对话框在 goals.edit。
+--- 阅读目标。0 小时 = 按近 90 天自动，0 本 = 今年不设目标。对话框在统计「进度」页模块的 edit。
 ---@param desktop table
 ---@return fun(iw: number): table
 local function goalRow(desktop)
     return function(iw)
         local goals = Settings.get("desktop.pages.insight")
-        local hours = goals.month_goal_hours or 0
-        local books = goals.year_goal_books or 0
+        local hours = goals.month_goal_hours
+        local books = goals.year_goal_books
         local month = hours == 0 and _("自动") or T(_("%1小时"), hours)
         local year = books == 0 and _("不设") or T(_("%1本"), books)
         return Row.widget({

@@ -11,7 +11,7 @@ Kit.install("paper")
 local Themed = require("support.theme_stubs")
 Themed.install()
 
-Kit.sections.insight = { hidden_pages = {}, hidden_cards = {} }
+Kit.sections.insight = { hidden_pages = {}, hidden_cards = {}, month_goal_hours = 0, year_goal_books = 0 }
 local Layout = require("desktop.pages.insight.layout")
 
 --- 高度 = base + extra 的假块。
