@@ -1667,11 +1667,12 @@ function Remote.shareUrl(path)
 end
 
 --- 浏览器访问地址；拿不到局域网 IP 时没有可扫、可输的地址。
+---@param path string|nil 以 / 开头，缺省首页
 ---@return string|nil
-local function accessUrl()
+local function accessUrl(path)
     local ip = localIP()
     if not ip then return nil end
-    return string.format("http://%s:%d/", ip, Remote.port())
+    return string.format("http://%s:%d%s", ip, Remote.port(), path or "/")
 end
 
 --- 运行状态文案：运行中给可访问地址（IP 尽力而为），否则「未运行」。
@@ -1698,5 +1699,22 @@ function Remote.showAccess()
     require("ui.themes.widgets.qr"):new{ title = _("远程管理"), text = url, caption = url }:show()
     return true
 end
+
+--- 其它模块要用户去网页上做事时：自动启动服务，弹直达 path 的二维码（`web.open_page` 挂点）。
+---@param path string
+---@param title string
+---@param text string 二维码上方说明
+function Remote.openPage(path, title, text)
+    local ok, err = Remote.start()
+    local url = ok and accessUrl(path)
+    local Toast = require("ui.themes.widgets.toast")
+    if not url then
+        Toast:new{ text = ok and _("拿不到局域网 IP，请先连接 Wi-Fi 后在设置里开启远程管理") or tostring(err), timeout = 6 }:show()
+        return
+    end
+    require("ui.themes.widgets.qr"):new{ title = title, text = url, caption = text .. "\n" .. url }:show()
+end
+
+require("utils.extension").add("web.open_page", Remote.openPage)
 
 return Remote
