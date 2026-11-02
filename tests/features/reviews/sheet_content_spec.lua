@@ -4,6 +4,7 @@
 local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
+Kit.sections.reviews = { font_scale = 100 }
 local Text = require("ui.themes.widgets.text")
 local box = Text.box
 local box_opts = {}

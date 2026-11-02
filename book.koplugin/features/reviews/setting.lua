@@ -11,6 +11,8 @@ local _ = require("gettext")
 
 local Setting = {}
 
+local FONT_MIN, FONT_MAX = 80, 200
+
 --- 已启用、且能力清单里有「他人段评」的源。
 --- 段评方法在源实例上，require 到的是门面，不能拿来判断。
 ---@return BookSourceMeta[]
@@ -29,9 +31,11 @@ local function reviewAccounts()
 end
 
 -- book_reviews_mark_style：dashed 虚线 / solid 实线。
+-- font_scale：段评列表正文字号百分比（80–200，设置页「段评字号」调整）。
 -- chapter_links：章会话的书（微信读书、京东读书）借段评用的关联，按「源 id\0书目 id」记，见 features.reviews.linked。
 Setting.defaults = {
     book_reviews_mark_style = "dashed",
+    font_scale = 100,
     chapter_links = {},
 }
 
@@ -89,6 +93,25 @@ function Setting.entries(desktop)
                                         local ui = require("apps/reader/readerui").instance
                                         if ui and ui.dialog then require("ui/uimanager"):setDirty(ui.dialog, "ui") end
                                         desktop:updateView()
+                                    end,
+                                })
+                            end,
+                            function(iw)
+                                return Row.widget({
+                                    width = iw, chevron = true,
+                                    kind = "nav", icon = "format_size", title = _("段评字号"),
+                                    status = reviews.font_scale .. "%",
+                                    callback = function()
+                                        require("ui.themes.widgets.spin"):new{
+                                            title = _("段评字号"),
+                                            fields = { { value = reviews.font_scale, min = FONT_MIN, max = FONT_MAX,
+                                                step = 10, format = function(v) return v .. "%" end } },
+                                            callback = function(pct)
+                                                reviews.font_scale = pct
+                                                MoonSettings.save("features.reviews", reviews)
+                                                desktop:updateView()
+                                            end,
+                                        }:show()
                                     end,
                                 })
                             end,

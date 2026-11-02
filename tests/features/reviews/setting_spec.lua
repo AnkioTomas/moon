@@ -6,7 +6,7 @@ package.preload["gettext"] = function() return function(text) return text end en
 package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
-local conf = { book_reviews_mark_style = "dashed" }
+local conf = { book_reviews_mark_style = "dashed", font_scale = 100 }
 local sources = { wechat = {}, qidian = { show_paragraph_reviews = true } }
 local saved = {}
 package.preload["utils.settings"] = function()
@@ -63,7 +63,7 @@ Assert.eq(entries[1].page.sections()[1].rows[1](600).status, "开")
 
 local style = sections[2]
 Assert.eq(style.title, "段评")
-Assert.len(style.rows, 1)
+Assert.len(style.rows, 2)
 Assert.eq(style.rows[1](600).status, "虚线")
 
 style.rows[1](600).callback()
@@ -74,3 +74,14 @@ Assert.eq(entries[1].page.sections()[2].rows[1](600).status, "实线")
 
 entries[1].page.sections()[2].rows[1](600).callback()
 Assert.eq(conf.book_reviews_mark_style, "dashed")
+
+local size = entries[1].page.sections()[2].rows[2](600)
+Assert.eq(size.status, "100%")
+local spin
+package.preload["ui.themes.widgets.spin"] = function()
+    return { new = function(_, o) spin = o; o.show = function() end; return o end }
+end
+size.callback()
+Assert.eq(spin.fields[1].value, 100)
+spin.callback(140)
+Assert.eq(conf.font_scale, 140)
