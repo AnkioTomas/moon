@@ -2,7 +2,7 @@
 网络设置：KOReader「HTTP 代理」、备选 DNS、解析绑定、超时。
 
 和 KOReader 原生菜单是同一份设置（G_reader_settings 的 http_proxy / http_proxy_enabled），
-经 NetworkMgr:setHTTPProxy 生效，插件请求由 http.proxy 读 socket.http.PROXY 走代理。
+经 NetworkMgr:setHTTPProxy 生效，插件请求由 http/proxy 读 socket.http.PROXY 走代理。
 只支持明文 http:// 代理；保存前校验格式并经该代理实测一次。
 
 @module koplugin.book.http.proxy.setting

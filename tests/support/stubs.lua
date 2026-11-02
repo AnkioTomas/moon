@@ -579,6 +579,8 @@ function Stubs.install()
     end
     installUIManager()
     installIfMissing("pluginshare", function() return {} end)
+    -- 真实 doccache 顶层会 dlopen mupdf，没有完整 native 库的机器上直接炸。
+    installIfMissing("document/doccache", function() return { cached = {} } end)
     installIfMissing("ui/network/manager", function()
         return {
             isOnline = function() return true end,
