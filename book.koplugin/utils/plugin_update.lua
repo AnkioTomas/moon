@@ -54,7 +54,7 @@ end
 function Updater.newer(candidate, installed)
     local function parts(version)
         local out = {}
-        for n in tostring(version):gmatch("%d+") do out[#out + 1] = tonumber(n) end
+        for n in version:gmatch("%d+") do out[#out + 1] = tonumber(n) end
         return out
     end
     local left, right = parts(candidate), parts(installed)

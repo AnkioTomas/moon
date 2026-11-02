@@ -225,12 +225,9 @@ local function ipv4(raw)
     return string.format("%d.%d.%d.%d", a, b, c, d)
 end
 
---- 绑定表。缺了或被写成别的类型就补回空表，添加时才有地方写。
 ---@return table<string, string>
 local function bindMap()
-    local http = require("utils.settings").get("http")
-    if type(http.dns_bind) ~= "table" then http.dns_bind = {} end
-    return http.dns_bind
+    return require("utils.settings").get("http").dns_bind
 end
 
 ---@return string[]

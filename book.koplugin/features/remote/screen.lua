@@ -1,5 +1,5 @@
 --[[--
-屏幕镜像只读路由：GET /api/screen 返回当前屏幕 PNG，If-None-Match 命中返回 304；
+屏幕镜像路由：GET /api/screen 返回当前屏幕 PNG，If-None-Match 命中返回 304；
 POST /api/screen?x=&y=&kind=tap|hold|swipe（swipe 另带 dir=north|south|east|west&dist=像素）在屏幕像素坐标注入触摸手势。
 
 @module koplugin.book.features.remote.screen
