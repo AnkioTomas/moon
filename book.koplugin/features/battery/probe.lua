@@ -6,6 +6,10 @@
 电压写成毫伏，电流写成毫安，charge_now 和 charge_full 写成毫安时，
 只有 charge_full_design 仍是微安时。直接拿原始值相除，Oasis 上就是 0.1%。
 
+max77696 所有板子共用一个 charge_full_design = 790000 µAh（790 mAh）。
+出厂电芯没换过也一样：muscat（Paperwhite 3）和 pinot（Voyage）写进电量计的 DESIGNCAP 是 0x0B00，
+0.5 mAh/LSB，即 1408 mAh。页面若仍用 790，健康度就是「现在充满 / 790」。
+
 单节锂电的电压要么 ~4e6 微伏，要么 ~4000 毫伏，中间没有合法值，用它判断这组节点的单位。
 没有电压时，充满和设计容量都 ≥10 万才当成微安时。没有设计容量的机型算不了，
 调用方应把 `report` 交给用户转给开发者，禁止把缺失补成 0。
@@ -27,6 +31,12 @@ local MICRO_VOLT = 100000
 local MICRO_AMP = 10000
 -- 100 mAh。设计容量写成微安时都在这之上，写成毫安时都在这之下。
 local MICRO_AH = 100000
+-- 见文件头。只在这个板级常量上改，固件若写出真实容量则不会撞上。
+local MAX77696_STALE_DESIGN_MAH = 790
+local MAX77696_CELL_MAH = {
+    KindlePaperWhite3 = 1408,
+    KindleVoyage = 1408,
+}
 
 ---@param raw string|nil
 ---@return string|nil
@@ -82,9 +92,11 @@ local function current_ma(raw, micro)
     return raw
 end
 
+---@param name string
 ---@param values table<string, string>
+---@param model string|nil
 ---@return table
-local function reading(name, values)
+local function reading(name, values, model)
     local full = num(values.charge_full)
     local design = num(values.charge_full_design)
     local now = num(values.charge_now)
@@ -95,6 +107,10 @@ local function reading(name, values)
     end
     local full_mah = charge_mah(full, micro)
     local design_mah = charge_mah(design, micro)
+    if name == "max77696-battery" and design_mah == MAX77696_STALE_DESIGN_MAH then
+        local cell = model and MAX77696_CELL_MAH[model]
+        if cell then design_mah = cell end
+    end
     local health_pct = nil
     if full_mah and design_mah and design_mah > 0 then
         health_pct = full_mah / design_mah * 100
@@ -136,11 +152,13 @@ local function report(fs, model)
 end
 
 --- 读电源节点。没有设计容量时 `supported` 为假，`reading` 仍可能有电量百分比。
+--- `model` 是机型名（`Device.model`）。max77696 的设计容量节点不随机型变，要靠它换成电量计里的数。
 ---@param fs table|nil
+---@param model string|nil
 ---@return { supported: boolean, reading: table|nil, report: string } report 仅在不支持时有内容
-function Probe.read(fs)
+function Probe.read(fs, model)
     fs = fs or require("utils.fs")
-    local model = clean(fs.read(MODEL))
+    local board = clean(fs.read(MODEL))
     local nodes = fs.list(ROOT)
     local bats = {}
     for _idx, name in ipairs(nodes) do
@@ -165,13 +183,13 @@ function Probe.read(fs)
         end
     end
     if not chosen then chosen = bats[1] end
-    local row = chosen and reading(chosen.name, chosen.values) or nil
+    local row = chosen and reading(chosen.name, chosen.values, model) or nil
     local supported = row ~= nil and row.health_pct ~= nil
     return {
         supported = supported,
         reading = row,
         -- 诊断报告要把整棵 power_supply 再读一遍，只在不支持、用户要反馈时才有用。
-        report = supported and "" or report(fs, model),
+        report = supported and "" or report(fs, board),
     }
 end
 

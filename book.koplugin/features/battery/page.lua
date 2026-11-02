@@ -107,7 +107,7 @@ end
 
 ---@return BookThemeSection[]
 function Page.sections()
-    local result = Probe.read()
+    local result = Probe.read(nil, require("device").model)
     if not result.supported then return unsupported(result.report) end
     local row = result.reading
     local rows = {

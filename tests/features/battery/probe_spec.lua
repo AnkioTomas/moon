@@ -159,3 +159,43 @@ Assert.eq(novolt.reading.charge_now_mah, 5)
 Assert.eq(novolt.reading.charge_full_mah, 1450)
 Assert.eq(novolt.reading.charge_design_mah, 1453)
 Assert.is_true(math.abs(novolt.reading.current_ma - (-45.954)) < 1e-6)
+
+-- Paperwhite 3 / Voyage：max77696 的 charge_full_design 是板级死值 790000 µAh。
+-- 电量计 DESIGNCAP 0x0B00 = 1408 mAh。不换的话健康度 = 现在充满 / 790。
+tree = {
+    ["/sys/class/power_supply/max77696-battery/type"] = "Battery\n",
+    ["/sys/class/power_supply/max77696-battery/capacity"] = "75\n",
+    ["/sys/class/power_supply/max77696-battery/voltage_now"] = "4100\n",
+    ["/sys/class/power_supply/max77696-battery/current_now"] = "-40\n",
+    ["/sys/class/power_supply/max77696-battery/charge_now"] = "1050\n",
+    ["/sys/class/power_supply/max77696-battery/charge_full"] = "1380\n",
+    ["/sys/class/power_supply/max77696-battery/charge_full_design"] = "790000\n",
+}
+local pw3 = Probe.read(fs(), "KindlePaperWhite3")
+Assert.eq(pw3.reading.charge_full_mah, 1380)
+Assert.eq(pw3.reading.charge_now_mah, 1050)
+Assert.eq(pw3.reading.charge_design_mah, 1408)
+Assert.is_true(math.abs(pw3.reading.health_pct - (1380 / 1408 * 100)) < 1e-6)
+Assert.eq(pw3.reading.voltage_v, 4.1)
+Assert.eq(pw3.reading.current_ma, -40)
+
+local voyage = Probe.read(fs(), "KindleVoyage")
+Assert.eq(voyage.reading.charge_design_mah, 1408)
+
+-- 不知道机型就保持节点原值，不拿 1408 去套别的 max77696。
+local unknown = Probe.read(fs())
+Assert.eq(unknown.reading.charge_design_mah, 790)
+Assert.is_true(math.abs(unknown.reading.health_pct - (1380 / 790 * 100)) < 1e-6)
+
+-- 死值写成毫安时而不是微安时，同样换掉。
+tree["/sys/class/power_supply/max77696-battery/charge_full_design"] = "790\n"
+local milli = Probe.read(fs(), "KindlePaperWhite3")
+Assert.eq(milli.reading.charge_design_mah, 1408)
+
+-- 不是这块板级死值就不要改，哪怕机型对得上。
+tree["/sys/class/power_supply/max77696-battery/charge_full_design"] = "1408000\n"
+local fixed = Probe.read(fs(), "KindlePaperWhite3")
+Assert.eq(fixed.reading.charge_design_mah, 1408)
+tree["/sys/class/power_supply/max77696-battery/charge_full_design"] = "1320000\n"
+local other = Probe.read(fs(), "KindlePaperWhite3")
+Assert.eq(other.reading.charge_design_mah, 1320)
