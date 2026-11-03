@@ -117,7 +117,7 @@ end
 
 --- 目录变了（刷新新增 / 淘汰旧条目）：按 guid 把旧章号挪到新章号，划线跟着文章走。
 --- 章节文件、双语章与 KOReader 边车（<n>.html / bilingual/<n>.html / 对应 .sdr）改名，月读注解改章号。
---- 按旧章号逐个看这四个路径在不在，不扫目录。已淘汰的删掉。章节登记撤掉，开章时 Store.touch 按新路径重登。
+--- 按旧章号逐个看这四个路径在不在；旧排版双语章（N.bi-*）文件名带 tag，扫一次目录。已淘汰的删掉。章节登记撤掉，开章时 Store.touch 按新路径重登。
 --- articles/、images/ 不动。
 ---@param identity BookIdentity
 ---@param old BookChapter[]
@@ -160,6 +160,17 @@ local function remapChapters(identity, old, toc)
                 local to_idx = map[i]
                 moves[#moves + 1] = { from = from, tmp = tmp, to = to_idx and (dir .. "/" .. destRel(name, to_idx)) or nil }
             end
+        end
+    end
+    -- 旧排版的双语章 N.bi-<tag>.html / .sdr 文件名带 tag，只能扫一次目录认。
+    for name in lfs.dir(dir) do
+        local n, rest = name:match("^(%d+)(%.bi%-.+)$")
+        if n and (rest:match("%.html$") or rest:match("%.sdr$")) then
+            local to_idx = map[tonumber(n)]
+            moves[#moves + 1] = {
+                from = dir .. "/" .. name, tmp = dir .. "/.mv-" .. name,
+                to = to_idx and (dir .. "/" .. to_idx .. rest) or nil,
+            }
         end
     end
     -- 两段改名：先全部挪到临时名，再落到新章号，避免 2→3、3→4 互相覆盖。
