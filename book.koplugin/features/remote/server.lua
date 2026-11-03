@@ -73,7 +73,7 @@ local STATUS = {
 ---@field get_screen fun(etag: string|nil): string|nil, string|number, string|nil 当前屏幕：PNG 与 ETag；画面没变返回 nil, 304；不可投屏返回 nil, 403, 原因
 ---@field install_update fun(temp: string, cb: fun(ok: boolean, err: string|nil)) 安装上传的 KOReader 插件包（临时文件所有权移交）
 ---@field backup_zip fun(cb: fun(output: string|nil, err: any))|nil 打包 .moon（不含日志与缓存）
----@field reset_config fun(cb: fun(ok: boolean, err: string|nil))|nil 清除全部配置与 crash.log，成功后设备提示并重启
+---@field reset_config fun(cb: fun(ok: boolean, err: string|nil))|nil 格式化月读数据与 crash.log，成功后设备提示并重启
 ---@field restore_backup fun(temp: string, cb: fun(ok: boolean, err: string|nil))|nil 用上传的备份包替换 .moon，成功后设备提示并重启
 ---@field is_paired fun(token: string): boolean 令牌是否属于已配对浏览器（见 pair.lua）
 ---@field is_shared fun(path: string): boolean /download?path= 是否设备主动分享出去的链接（免配对）

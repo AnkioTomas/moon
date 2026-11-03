@@ -45,6 +45,12 @@
 <button type="button" id="bkpick" class="primary">上传备份并恢复</button>
 </div>
 </section>
+<section class="panel" aria-labelledby="fm-title">
+<h2 id="fm-title">格式化月读数据</h2>
+<p class="state">删除月读的全部数据：书库、阅读进度、阅读记录、笔记、统计、全部配置（含各书源登录信息、AI 密钥、锁屏密码）、缓存和 KOReader 崩溃日志，相当于恢复出厂。设备上的书籍原文件、日志、字体不受影响。完成后自动重启 KOReader，不可恢复，建议先下载备份。</p>
+<div id="fmstate" class="state" role="status" aria-live="polite"></div>
+<div class="btns"><button type="button" id="fmbtn" class="primary">格式化月读数据</button></div>
+</section>
 </main>
 <div id="bkprog" class="overlay up-overlay" hidden>
 <div class="dialog progress-dialog" role="dialog" aria-modal="true" aria-labelledby="pg-title">

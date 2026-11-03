@@ -696,7 +696,7 @@ return {
     ["月读更新失败：%1"] = "月读 update failed: %1",
     ["更新完成，正在重启 KOReader…"] = "Update complete. Restarting KOReader…",
     ["备份已通过远程管理恢复，正在重启 KOReader…"] = "Backup restored via remote management. Restarting KOReader…",
-    ["配置已通过远程管理清除，正在重启 KOReader…"] = "Settings cleared via remote management. Restarting KOReader…",
+    ["月读数据已通过远程管理清除，正在重启 KOReader…"] = "Moon data cleared via remote management. Restarting KOReader…",
     ["插件 %1 已安装，正在重启 KOReader…"] = "Plugin %1 installed. Restarting KOReader…",
     ["正在安装月读更新…"] = "Installing 月读 update…",
     ["正在检查或安装更新，请稍候"] = "An update check or install is already running. Please wait.",

@@ -1375,19 +1375,21 @@ local function restoreBackup(temp, cb)
     end)
 end
 
---- 清除全部配置（.moon/settings 与 crash.log）：与恢复备份同一收尾——重载配置、提示、重启。
+--- 格式化月读数据（书库、进度、阅读记录、全部配置、缓存，保留日志、字体与补丁备份）与 crash.log：
+--- 先关库（子进程删文件时不许有连接握着），与恢复备份同一收尾——重载配置、提示、重启。
 ---@param cb fun(ok: boolean, err: string|nil)
 local function resetConfig(cb)
     local crash = require("datastorage"):getFullDataDir() .. "/crash.log"
+    require("utils.db").close()
     runFilesystem("remote-reset", function()
-        return require("features.remote.backup").clearConfig(
-            require("libs/libkoreader-lfs"), require("utils.paths").settingsDir(), { crash, crash .. ".old" })
+        return require("features.remote.backup").format(
+            require("libs/libkoreader-lfs"), require("utils.paths").root(), { crash, crash .. ".old" })
     end, function(done, err)
         if not done then return cb(false, err) end
         require("utils.settings").reload()
         cb(true)
         require("ui.themes.widgets.toast"):new{
-            text = _("配置已通过远程管理清除，正在重启 KOReader…"),
+            text = _("月读数据已通过远程管理清除，正在重启 KOReader…"),
         }:show()
         require("ui/uimanager"):scheduleIn(1, require("utils.restart").now)
     end)
