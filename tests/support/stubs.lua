@@ -422,7 +422,7 @@ end
 
 local function installUIManager()
     package.preload["ui/uimanager"] = function()
-        local UIManager = {}
+        local UIManager = { _window_stack = {} }
         function UIManager:nextTick(fn)
             _queue[#_queue + 1] = fn
         end

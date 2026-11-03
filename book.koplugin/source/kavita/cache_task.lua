@@ -225,7 +225,7 @@ function CacheTask.track(opts)
     local Tasks = tasksModule()
     if not Tasks then return nil end
     local series = type(opts.series) == "table" and opts.series or {}
-    local key = "kavita-cache\0" .. tostring(opts.key or series.stable_id or series.title or "series")
+    local key = "cache\0kavita\0" .. tostring(opts.key or series.stable_id or series.title or "series")
 
     local live = Tasks.get(key)
     if live and live._cache_state then
