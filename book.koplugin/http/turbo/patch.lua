@@ -35,6 +35,20 @@ local function dropAlt(stream)
 end
 
 --- 换上这一族的 socket。v4 且流上已经是 v4 socket 时不动（HTTPClient 建好的那只）。
+--- 关掉流上现有 socket：已登记进 ioloop 的先摘掉，否则 ioloop 一直 poll 到已关的 socket，
+--- 每拍报 "no handler for fd"，最终段错误（IPv6 失败退回 IPv4 时旧 socket 正是已登记状态）。
+---@param stream table
+---@param keep table|nil 不关的 socket
+local function closeSocket(stream, keep)
+    local old = stream.socket
+    if not old or old == keep then return end
+    if stream.io_loop then
+        stream.io_loop:remove_handler(old)
+        stream._state = nil
+    end
+    if old.close then old:close() end
+end
+
 ---@param stream table
 ---@param addr string
 ---@return boolean
@@ -49,7 +63,7 @@ local function install(stream, addr)
     if not sock then return false end
     sock:settimeout(0)
     pcall(sock.setoption, sock, "keepalive", true)
-    if stream.socket and stream.socket.close and stream.socket ~= sock then stream.socket:close() end
+    closeSocket(stream, sock)
     stream.socket = sock
     stream._book_v6 = want6
     return true
@@ -70,11 +84,7 @@ local function promote(stream, on_ok, on_fail, arg)
     local sock, addr, port = alt.sock, alt.addr, alt.port
     alt.sock = nil
     dropAlt(stream)
-    if stream.io_loop and stream._state and stream.socket then
-        stream.io_loop:remove_handler(stream.socket)
-        stream._state = nil
-    end
-    if stream.socket and stream.socket.close and stream.socket ~= sock then stream.socket:close() end
+    closeSocket(stream, sock)
     stream.socket = sock
     stream.address = addr
     stream.port = port
