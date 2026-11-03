@@ -28,7 +28,11 @@ if os.getenv("MOON_EMU_ONLINE") ~= "1" then
     end
 end
 
-local CMD, OUT, SHOTS = "/tmp/ko_cmd.lua", "/tmp/ko_out.txt", "/tmp/moon-shots"
+-- 默认路径给 tools/emu.sh。独立环境用 MOON_EMU_* 换一套，避免和已经开着的模拟器抢同一个命令文件。
+local CMD = os.getenv("MOON_EMU_CMD") or "/tmp/ko_cmd.lua"
+local OUT = os.getenv("MOON_EMU_OUT") or "/tmp/ko_out.txt"
+local SHOTS = os.getenv("MOON_EMU_SHOTS") or "/tmp/moon-shots"
+local BEAT = os.getenv("MOON_EMU_BEAT") or "/tmp/ko_emu_beat.txt"
 
 _G.D = {}
 
@@ -71,7 +75,7 @@ end
 
 local function poll()
     local ok_poll, err_poll = pcall(function()
-        local beat = io.open("/tmp/ko_emu_beat.txt", "w")
+        local beat = io.open(BEAT, "w")
         if beat then beat:write(tostring(os.time())); beat:close() end
         local f = io.open(CMD, "r")
         if f then

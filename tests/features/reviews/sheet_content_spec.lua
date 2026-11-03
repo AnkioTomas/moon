@@ -60,6 +60,34 @@ Assert.is_true(lastLines() < full_lines, "首页首条按剩余高度截断")
 Assert.is_true(first_card:getSize().h <= 90)
 Assert.is_true(type(first_card.onTapThemeArea) == "function", "截断后仍可点开全文")
 
+do -- 有回复数才出现入口；点开把评论 id 交给回复页。回复页本身不再往下开。
+    local opened
+    function Sheet.openReplies(_identity, item) opened = item.id end
+    local source = { paragraphReviewRepliesAsync = function() end }
+    local reply_card = setmetatable({
+        theme = theme, inner_w = 500, body_h = 200, cards = {},
+        identity = { source = source },
+        items = { { id = "c1", author = "甲", content = "hello", likes = 1, time = 1, replies = 3,
+            reply_to = "乙" } },
+    }, { __index = Sheet }):card(1)
+    local taps = Kit.taps(reply_card)
+    Assert.len(taps, 1)
+    taps[1]:onTapThemeArea()
+    Assert.eq(opened, "c1")
+    local prefixed
+    for _idx, call in ipairs(box_opts) do
+        if call.text:find("hello", 1, true) then prefixed = call.text end
+    end
+    Assert.eq(prefixed, "回复 乙：hello")
+
+    local nested = setmetatable({
+        theme = theme, inner_w = 500, body_h = 200, cards = {}, reply_page = true,
+        identity = { source = source },
+        items = { { id = "c2", author = "甲", content = "more", likes = 0, time = 1, replies = 8 } },
+    }, { __index = Sheet }):card(1)
+    Assert.len(Kit.taps(nested), 0, "回复页不再给下一级入口")
+end
+
 local image_url = "https://example.test/review.jpg"
 local image_card = setmetatable({
     theme = theme, inner_w = 500, body_h = 200, cards = {},
