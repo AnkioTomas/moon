@@ -800,6 +800,8 @@ function Source:pushStatsAsync(rows, cb)
                         finish(err)
                         return
                     end
+                    logger.info("wechat app report ok", book.id, "rows", #book.rows,
+                        "seconds", body.readingTime, "hours", #body.hours, "first", body.hours[1] and body.hours[1].startOfHour)
                     confirm(book)
                     nextBook()
                 end)
