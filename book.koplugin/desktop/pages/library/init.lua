@@ -840,6 +840,15 @@ function Library:buildPage(ctx)
         local lib = CoverCell.libraryConf()
         local on_tap = on_open
         if lib.tap_detail then on_tap = function(book) on_detail(book) end end
+        local ACTIONS = { open = on_open, detail = function(book) on_detail(book) end }
+        -- 文件夹条目没有书可开，只响应单击进目录。
+        local function bookOnly(action)
+            if not action then return nil end
+            return function(book, ...)
+                if not book.is_folder then action(book, ...) end
+            end
+        end
+        lib.extra = { double = bookOnly(ACTIONS[lib.double]), hold = bookOnly(ACTIONS[lib.hold]) }
         if g.id == "folder" then
             local tap_book = on_tap
             on_tap = function(book, ...)

@@ -33,6 +33,18 @@ Assert.is_nil(held:onHoldThemeArea(outer, {}))
 Assert.eq(table.concat(holds, ","), "hold")
 Assert.eq(table.concat(hits, ","), "outer,inner")
 
+-- 双击：独立事件；只有双击回调时单击区不存在。
+local doubles = {}
+local dbl = Tap.wrap(
+    { getSize = function() return { w = 10, h = 10 } end },
+    nil, nil, function() doubles[#doubles + 1] = "double" end)
+Assert.is_nil(dbl.ges_events.TapThemeArea)
+Assert.is_nil(dbl.ges_events.HoldThemeArea)
+Assert.eq(dbl.ges_events.DoubleTapThemeArea.args, dbl)
+Assert.is_true(dbl:onDoubleTapThemeArea(dbl, {}))
+Assert.is_nil(dbl:onDoubleTapThemeArea(outer, {}))
+Assert.eq(#doubles, 1)
+
 Assert.eq(Tap.wrap({ getSize = function() return { w = 1, h = 1 } end }, nil, nil).getSize().w, 1)
 
 return true
