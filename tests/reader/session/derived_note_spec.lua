@@ -35,6 +35,7 @@ end
 
 local DerivedNote = require("reader.session.derived_note")
 local Paths = require("utils.paths")
+require("utils.extension").add("note.derived_dirs", "reflow")
 
 --- xpointer 写成 "/p[页].偏移"，按页 * 1000 + 偏移排先后。
 local function order(xp)
@@ -108,6 +109,18 @@ f:close()
 f = assert(io.open(derived, "wb"))
 f:write("epub")
 f:close()
+-- 工作目录里的章节文件和未登记目录：收线不得扫到
+local noise = root .. "/other/book.epub"
+assert(Paths.ensureDir(root .. "/other"))
+f = assert(io.open(root .. "/other/meta.json", "wb"))
+f:write(JSON.encode({ origin = origin, file = noise }))
+f:close()
+f = assert(io.open(noise, "wb"))
+f:write("epub")
+f:close()
+f = assert(io.open(root .. "/1.html", "wb"))
+f:write("chapter")
+f:close()
 
 -- 衍生版判断：同目录 meta.json 的 file 就是自己
 Assert.eq(DerivedNote.originOf(derived), origin)
@@ -160,6 +173,9 @@ end
 
 -- 读原书：衍生版新划线收进原书（搜不到的记 false 不再重搜），衍生版删改的同步过来，然后存快照
 do
+    sidecars[noise] = {
+        annotations = { { datetime = "noise", drawer = "lighten", text = "月色", pageno = 1 } },
+    }
     sidecars[derived] = {
         doc_pages = 200,
         annotations = {

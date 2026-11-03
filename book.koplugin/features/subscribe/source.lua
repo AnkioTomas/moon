@@ -116,8 +116,9 @@ function M.toc(identity)
 end
 
 --- 目录变了（刷新新增 / 淘汰旧条目）：按 guid 把旧章号挪到新章号，划线跟着文章走。
---- 章节文件、双语章与 KOReader 边车（<n>.html / <n>.bi-*.html / 对应 .sdr）改名，月读注解改章号；
---- 已淘汰文章的这些一并删掉。章节登记撤掉，开章时 Store.touch 按新路径重登。articles/、images/ 不动。
+--- 章节文件、双语章与 KOReader 边车（<n>.html / bilingual/<n>.html / 对应 .sdr）改名，月读注解改章号。
+--- 按旧章号逐个看这四个路径在不在，不扫目录。已淘汰的删掉。章节登记撤掉，开章时 Store.touch 按新路径重登。
+--- articles/、images/ 不动。
 ---@param identity BookIdentity
 ---@param old BookChapter[]
 ---@param toc BookChapter[]
@@ -137,31 +138,44 @@ local function remapChapters(identity, old, toc)
         end
     end
     local moves = {}
-    for name in lfs.dir(dir) do
-        local n, rest = name:match("^(%d+)(%..+)$")
-        if name:sub(1, 4) == ".mv-" then
-            drop(dir .. "/" .. name) -- 上次改名中途失败留下的临时名：章节缓存，删了重开会重建
-        elseif n and (rest:match("^%.html$") or rest:match("^%.sdr$") or rest:match("^%.bi%-.+%.html$")
-            or rest:match("^%.bi%-.+%.sdr$")) then
-            moves[#moves + 1] = { name = name, to = map[tonumber(n)], rest = rest }
+    local function rels(idx)
+        return {
+            idx .. ".html",
+            idx .. ".sdr",
+            "bilingual/" .. idx .. ".html",
+            "bilingual/" .. idx .. ".sdr",
+        }
+    end
+    local function destRel(name, idx)
+        local suffix = name:match("(%.[^/]+)$")
+        if name:sub(1, 10) == "bilingual/" then return "bilingual/" .. idx .. suffix end
+        return idx .. suffix
+    end
+    for i = 1, #old do
+        for _idx, name in ipairs(rels(i)) do
+            local tmp = dir .. "/" .. name:gsub("([^/]+)$", ".mv-%1")
+            if lfs.attributes(tmp, "mode") then drop(tmp) end
+            local from = dir .. "/" .. name
+            if lfs.attributes(from, "mode") then
+                local to_idx = map[i]
+                moves[#moves + 1] = { from = from, tmp = tmp, to = to_idx and (dir .. "/" .. destRel(name, to_idx)) or nil }
+            end
         end
     end
     -- 两段改名：先全部挪到临时名，再落到新章号，避免 2→3、3→4 互相覆盖。
-    -- 改名失败的那份直接删（只是章节缓存），绝不留在旧章号上错位。
+    -- 改名失败或章已淘汰的那份直接删（只是章节缓存），绝不留在旧章号上错位。
     for _idx, m in ipairs(moves) do
-        local from = dir .. "/" .. m.name
-        if not (m.to and os.rename(from, dir .. "/.mv-" .. m.name)) then
-            if m.to then logger.warn("subscribe remap rename failed", from) end
+        if not (m.to and os.rename(m.from, m.tmp)) then
+            if m.to then logger.warn("subscribe remap rename failed", m.from) end
             m.to = nil
-            drop(from)
+            drop(m.from)
         end
     end
     for _idx, m in ipairs(moves) do
         if m.to then
-            local tmp = dir .. "/.mv-" .. m.name
-            if not os.rename(tmp, dir .. "/" .. m.to .. m.rest) then
-                logger.warn("subscribe remap rename failed", tmp)
-                drop(tmp)
+            if not os.rename(m.tmp, m.to) then
+                logger.warn("subscribe remap rename failed", m.tmp)
+                drop(m.tmp)
             end
         end
     end

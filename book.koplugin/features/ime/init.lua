@@ -137,4 +137,10 @@ function IME.downloadDict(cb, on_progress)
     return require("features.ime.download").ensure(Registry.current().dictionary, cb, on_progress)
 end
 
+-- 简繁转换版的目录；加载器 require 本模块时登记一次。
+local Ext = require("utils.extension")
+for _idx, dir in ipairs(require("features.ime.convert").DIRS) do
+    Ext.add("note.derived_dirs", dir)
+end
+
 return IME

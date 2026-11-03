@@ -63,14 +63,30 @@ function SessionNote._untranslate(document, items)
     end
 end
 
---- 按章源：注解写到同一章其它版本（原章 / 双语章）的 sidecar，两版的划线、书签、删改一致。
+--- 按章源：注解写到原章和已登记的同章衍生文件（双语章）的 sidecar。路径是算出来的，不扫工作目录。
+---@param identity BookIdentity
 ---@param file string
 ---@param items table[]
-local function mirror(file, items)
-    for _idx, other in ipairs(require("utils.paths").chapterVariants(file)) do
-        local settings = require("docsettings"):open(other)
-        settings:saveSetting("annotations", items)
-        settings:flush()
+local function mirror(identity, file, items)
+    local Paths = require("utils.paths")
+    local lfs = require("libs/libkoreader-lfs")
+    local origin = Paths.chapterOrigin(file)
+    local paths = {}
+    if origin ~= file then paths[1] = origin end
+    for _idx, fn in ipairs(require("utils.extension").list("note.chapter_variants")) do
+        local list = fn(identity, origin)
+        if type(list) == "table" then
+            for _j, path in ipairs(list) do
+                if path ~= file then paths[#paths + 1] = path end
+            end
+        end
+    end
+    for _idx, other in ipairs(paths) do
+        if lfs.attributes(other, "mode") == "file" then
+            local settings = require("docsettings"):open(other)
+            settings:saveSetting("annotations", items)
+            settings:flush()
+        end
     end
 end
 
@@ -112,7 +128,7 @@ function SessionNote.save(ui, identity, changed, done)
     local items = ui.annotation and ui.annotation.annotations
         or ui.doc_settings:readSetting("annotations")
         or {}
-    if identity.chapter_idx ~= nil and file then mirror(file, items) end
+    if identity.chapter_idx ~= nil and file then mirror(identity, file, items) end
     local total_pages = pageCount(ui)
     local source_id = identity.source_id
     local stable_id = identity.stable_id
@@ -210,9 +226,14 @@ end
 --- 读原书时顺带把衍生版里的划线收回来。
 ---@param ui table
 ---@param identity BookIdentity
+---@param span PerfSpan|nil 开章计时；拆开快照落点和衍生版目录扫描
 ---@return integer applied 写入阅读器的注解条数
-function SessionNote.applyLocal(ui, identity)
+function SessionNote.applyLocal(ui, identity, span)
+    local function lap(name)
+        if span then span:lap(name) end
+    end
     if not ui or not ui.doc_settings or not identity then
+        lap("notes")
         return 0
     end
     -- 异步回调回来时阅读器可能已换了文档（或同书换了章）
@@ -223,6 +244,7 @@ function SessionNote.applyLocal(ui, identity)
             or current_id.stable_id ~= identity.stable_id
             or current_id.chapter_idx ~= identity.chapter_idx then
         logger.dbg("book.note apply skip: document changed")
+        lap("notes")
         return 0
     end
     local Perf = require("utils.perf")
@@ -231,9 +253,12 @@ function SessionNote.applyLocal(ui, identity)
     if DerivedNote.originOf(ui.document.file) then
         DerivedNote.project(ui, identity)
         applied = #(ui.doc_settings:readSetting("annotations") or {})
+        lap("notes")
     else
         applied = applySnapshot(ui, identity)
+        lap("note_snap")
         DerivedNote.collect(ui, identity)
+        lap("note_derived")
     end
     Perf.slow("note.applyLocal", started_at)
     return applied

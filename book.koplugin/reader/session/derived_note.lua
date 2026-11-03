@@ -7,8 +7,8 @@ notes 表只存原书坐标：远端同步只认原书。衍生版和原书结�
 - 读原书时（`collect`）：各衍生版 sidecar 里新划的线在原书里搜出位置，写进原书，
   再由注解快照照常落库、推远端。只有 CREngine 原书能搜出 xpointer，PDF/DjVu 原书不收。
 
-衍生版的约定：文件同目录有 `meta.json` = `{ origin, file }` 且 file 就是它自己；
-都放在书的工作目录的一级子目录里（features/translate、features/reflow 各自生成）。
+衍生版的约定：文件同目录有 `meta.json` = `{ origin, file }` 且 file 就是它自己。
+目录名由各功能经 `note.derived_dirs` 登记（相对书的工作目录），收线只读这些目录的 meta.json。
 
 同一条划线在两边共用 KOReader 的 `datetime`。衍生版 sidecar 的 `book_note_linked`
 记下已经两边对上的 datetime（true），以及在原书里搜不到的（false，划在译文上之类，
@@ -57,7 +57,7 @@ function DerivedNote.originOf(file)
     return meta and meta.file == file and meta.origin or nil
 end
 
---- 书的工作目录里由 origin 生成、文件还在的衍生版路径。
+--- 已登记的衍生版目录里、由 origin 生成且文件还在的路径。
 ---@param identity BookIdentity
 ---@param origin string
 ---@return string[]
@@ -65,9 +65,8 @@ local function derivedFiles(identity, origin)
     local lfs = require("libs/libkoreader-lfs")
     local root = require("utils.paths").bookWorkDir(identity.stable_id, identity.source_id)
     local files = {}
-    if lfs.attributes(root, "mode") ~= "directory" then return files end
-    for name in lfs.dir(root) do
-        local meta = name ~= "." and name ~= ".." and DerivedNote.readMeta(root .. "/" .. name)
+    for _idx, name in ipairs(require("utils.extension").list("note.derived_dirs")) do
+        local meta = DerivedNote.readMeta(root .. "/" .. name)
         if meta and meta.origin == origin and lfs.attributes(meta.file, "mode") == "file" then
             files[#files + 1] = meta.file
         end

@@ -7,7 +7,10 @@ Moon 目录布局（$DATA/.moon）
     dictionary*.sqlite3  输入法词库
     cache/
       <source>/
-        book/<slug>/     整本 book.* 或章节 N.html；slug 由 stable_id 派生
+        book/<slug>/     slug = md5(stable_id)。章节是 N.html，整本是 book.*
+                         衍生版一律在子目录里：bilingual/ reflow/ hanzi-s2t/ hanzi-t2s/
+                         整本是 book.epub（或 fb2/html）加 meta.json
+                         双语章是 bilingual/N.html，路径由章号拼出，不跟原章坐在一层
         image/           网络图片 / 封面
       image/             不属于特定源的网络图片
       online/            ankio.net 接口 JSON；必应 / 摸鱼日报图同目录
@@ -150,36 +153,32 @@ function P.chapterPath(stable_id, idx, id)
     return P.bookWorkDir(stable_id, id) .. "/" .. idx .. ".html"
 end
 
---- 章节的双语版：与原章同目录（相对图片路径照样有效），tag 为 `<engine>-<lang>`。
----@param path string 原章路径
----@param tag string
+--- 章节双语版：与整本一样放在 bilingual/ 下。`.../N.html` → `.../bilingual/N.html`。
+---@param path string 原章或双语章
 ---@return string
-function P.bilingualChapterPath(path, tag)
-    return (path:gsub("%.html$", "")) .. ".bi-" .. tag .. ".html"
+function P.bilingualChapterPath(path)
+    local origin = P.chapterOrigin(path)
+    local dir, idx = origin:match("^(.*)/(%d+)%.html$")
+    if not dir then return origin end
+    return dir .. "/bilingual/" .. idx .. ".html"
 end
 
---- 双语章 → 原章；不是双语章原样返回。
+--- 旧排版：与原章同目录的 `N.bi-<tag>.html`。只用来探测已经生成的文件，不新建。
+---@param path string 原章或双语章
+---@param tag string `<engine>-<lang>`
+---@return string
+function P.legacyBilingualChapterPath(path, tag)
+    local origin = P.chapterOrigin(path)
+    return (origin:gsub("%.html$", "")) .. ".bi-" .. tag .. ".html"
+end
+
+--- 双语章 → 原章。新排版在 bilingual/ 下，旧排版是同目录的 `N.bi-<tag>.html`。其它路径原样返回。
 ---@param path string
 ---@return string
 function P.chapterOrigin(path)
+    local dir, idx = path:match("^(.*)/bilingual/(%d+)%.html$")
+    if dir then return dir .. "/" .. idx .. ".html" end
     return (path:gsub("%.bi%-[^/]+%.html$", ".html"))
-end
-
---- 同一章的其它版本（原章与各双语章，存在的），不含 path 自己。
----@param path string
----@return string[]
-function P.chapterVariants(path)
-    local origin = P.chapterOrigin(path)
-    local dir, idx = origin:match("^(.*)/(%d+)%.html$")
-    local out = {}
-    if not dir then return out end
-    if origin ~= path and lfs.attributes(origin, "mode") == "file" then out[1] = origin end
-    local pattern = "^" .. idx .. "%.bi%-.+%.html$"
-    for name in lfs.dir(dir) do
-        local file = dir .. "/" .. name
-        if file ~= path and name:match(pattern) then out[#out + 1] = file end
-    end
-    return out
 end
 
 --- 插件 SQLite 路径：$DATA/.moon/book.sqlite3

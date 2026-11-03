@@ -2,7 +2,8 @@
 章节源的双语对照：按书开关，每章各生成一份双语 HTML。
 
 - 开关存 settings/translate.lua 的 `chapter_bilingual["<source_id>:<stable_id>"] = { engine, lang }`。
-- 双语章与原章同目录：`<idx>.bi-<engine>-<lang>.html`，随清缓存 / 删书一起删；原章更新（mtime 更新）后作废。
+- 双语章与整本一样在 `bilingual/<idx>.html`，随清缓存 / 删书一起删；原章更新（mtime 更新）后作废。
+  图片和样式表在工作目录，生成时把相对路径改成 `../`。旧的 `<idx>.bi-<engine>-<lang>.html` 只读、不新建。
 - 开章时双语章已就绪就打开它，否则开原章；翻译只在用户从面板触发时做，走整书同一套
   进度窗 / 转后台 / 完成询问重开（features.translate.bilingual，input.chapter = true）。
 - 译文缓存与整书共用 `bilingual/<engine>-<lang>.jsonl`。
@@ -44,8 +45,26 @@ end
 ---@param path string
 ---@param conf { engine: string, lang: string }
 ---@return string
-function ChapterBi.pathFor(path, conf)
-    return Paths.bilingualChapterPath(path, conf.engine .. "-" .. conf.lang)
+function ChapterBi.pathFor(path, _conf)
+    return Paths.bilingualChapterPath(path)
+end
+
+--- 旧文件。当前引擎和语言拼出一个路径，调用方再看它在不在。
+---@param path string
+---@param conf { engine: string, lang: string }
+---@return string
+function ChapterBi.legacyPath(path, conf)
+    return Paths.legacyBilingualChapterPath(path, conf.engine .. "-" .. conf.lang)
+end
+
+--- 当前这本书的双语章路径。没开双语就是空表。新路径在前，旧路径在后，都是算出来的。
+---@param identity BookIdentity
+---@param origin string 原章
+---@return string[]
+function ChapterBi.variants(identity, origin)
+    local conf = ChapterBi.get(identity)
+    if not conf then return {} end
+    return { ChapterBi.pathFor(origin), ChapterBi.legacyPath(origin, conf) }
 end
 
 --- 双语章不比原章旧才算就绪。
@@ -64,7 +83,7 @@ end
 ---@param conf { engine: "edge"|"ai", lang: string }
 ---@return BilingualInput
 function ChapterBi.input(identity, origin, conf)
-    local dir = Paths.bookWorkDir(identity.stable_id, identity.source_id) .. "/bilingual"
+    local dir = Paths.bookWorkDir(identity.stable_id, identity.source_id) .. "/" .. require("features.translate.bilingual").DIR
     assert(Paths.ensureDir(dir))
     return {
         kind = "dom", chapter = true, origin = origin, source = origin,
@@ -82,8 +101,10 @@ end
 function ChapterBi.resolve(identity, _idx, path)
     local conf = ChapterBi.get(identity)
     if not conf then return nil end
-    local dest = ChapterBi.pathFor(path, conf)
-    return fresh(path, dest) and dest or nil
+    local dest = ChapterBi.pathFor(path)
+    if fresh(path, dest) then return dest end
+    local old = ChapterBi.legacyPath(path, conf)
+    return fresh(path, old) and old or nil
 end
 
 return ChapterBi

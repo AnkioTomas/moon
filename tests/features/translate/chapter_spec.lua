@@ -31,8 +31,9 @@ end
 local Paths = require("utils.paths")
 local ChapterBi = require("features.translate.chapter")
 
--- 路径：双语章与原章同目录，能换算回原章；普通文件不变。
-Assert.eq(Paths.bilingualChapterPath("/w/3.html", "edge-en"), "/w/3.bi-edge-en.html")
+-- 路径：双语章在 bilingual/ 下，能换算回原章；旧的同目录文件也能换算；普通文件不变。
+Assert.eq(Paths.bilingualChapterPath("/w/3.html"), "/w/bilingual/3.html")
+Assert.eq(Paths.chapterOrigin("/w/bilingual/3.html"), "/w/3.html")
 Assert.eq(Paths.chapterOrigin("/w/3.bi-edge-en.html"), "/w/3.html")
 Assert.eq(Paths.chapterOrigin("/w/3.html"), "/w/3.html")
 Assert.eq(Paths.chapterOrigin("/w/bilingual/book.epub"), "/w/bilingual/book.epub")
@@ -58,11 +59,14 @@ end
 local origin = Paths.chapterPath(identity.stable_id, 1, identity.source_id)
 write(origin, "<html><body><p>Hello</p></body></html>")
 Assert.is_nil(ChapterBi.resolve(identity, 1, origin))
+Assert.eq(#ChapterBi.variants(identity, origin), 0)
 
 -- 开启但双语章没生成：开原章，不在后台偷偷翻（翻译只由面板触发，走整书进度窗）。
 local conf = { engine = "edge", lang = "zh" }
 ChapterBi.set(identity, conf)
 Assert.eq(ChapterBi.get(identity).engine, "edge")
+Assert.eq(ChapterBi.variants(identity, origin)[1], ChapterBi.pathFor(origin, conf))
+Assert.eq(ChapterBi.variants(identity, origin)[2], work .. "/1.bi-edge-zh.html")
 Assert.is_nil(ChapterBi.resolve(identity, 1, origin))
 Assert.eq(#requests, 0, "开章不发翻译请求")
 
@@ -84,6 +88,11 @@ local lfs = require("libs/libkoreader-lfs")
 if lfs.touch then
     lfs.touch(dest, 1000, 1000)
     Assert.is_nil(ChapterBi.resolve(identity, 1, origin))
+    local old = ChapterBi.legacyPath(origin, conf)
+    write(old, "<html/>")
+    lfs.touch(origin, 2000, 2000)
+    lfs.touch(old, 5000, 5000)
+    Assert.eq(ChapterBi.resolve(identity, 1, origin), old, "旧排版的文件还在就用它")
 end
 
 -- 关闭。

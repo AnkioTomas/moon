@@ -200,6 +200,28 @@ do
     Assert.is_nil(read(dir .. "/meta.json"), "章节不写整书 meta")
 end
 
+-- 双语章在子目录里：相对图片和样式表改到上一级，页内锚点不动。
+do
+    local src = dir .. "/nest.html"
+    write(src, '<html><body><p>Hello</p><img src="images/a.jpg"/>'
+        .. '<link href="stylesheets.css"/><a href="#wr-fn1">x</a>'
+        .. '<p style="background:url(images/bq.jpg)"></p></body></html>')
+    write(dir .. "/nest.jsonl", '["Hello","你好"]\n')
+    local ch = {
+        kind = "dom", chapter = true, origin = src, source = src,
+        cache = dir .. "/nest.jsonl", dest = dir .. "/nest-out.html",
+        engine = "edge", lang = "zh",
+    }
+    local _hn, _rn, results_n = start(ch)
+    Assert.len(requests, 0, "缓存命中不发请求")
+    Assert.is_true(results_n[1].ok)
+    local body = read(ch.dest)
+    Assert.matches(body, 'src="../images/a.jpg"')
+    Assert.matches(body, 'href="../stylesheets.css"')
+    Assert.matches(body, "href=\"#wr%-fn1\"")
+    Assert.matches(body, "url%(%.%./images/bq%.jpg%)")
+end
+
 -- 失败：回调错误，已成功的批次留在缓存里，重来时续跑。
 requests = {}
 local failing = input("fail")
