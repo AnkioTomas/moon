@@ -47,7 +47,7 @@ local function refreshAfterChange(desktop)
                 updateOverlay(desktop)
                 Toast:new{
                     text = ok and _("锁屏图已更新")
-                        or T(_("生成失败: %1"), tostring(err or "")),
+                        or T(_("生成失败: %1"), tostring(err or ""):match("[^\n]*")),
                     timeout = 2,
                 }:show()
             end, nil, "settings")
