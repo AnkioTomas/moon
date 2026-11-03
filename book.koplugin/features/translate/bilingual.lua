@@ -30,6 +30,8 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 
 local Bilingual = {}
+--- 相对书的工作目录。收划线只认这个目录，见 note.derived_dirs。
+Bilingual.DIR = "bilingual"
 
 --- 每次请求的段数、字符数上限与并发数。AI 输出要逐条对齐，批小一些。
 local ENGINES = {
@@ -71,7 +73,7 @@ end
 ---@param identity BookIdentity
 ---@return string
 local function workDir(identity)
-    return require("utils.paths").bookWorkDir(identity.stable_id, identity.source_id) .. "/bilingual"
+    return require("utils.paths").bookWorkDir(identity.stable_id, identity.source_id) .. "/" .. Bilingual.DIR
 end
 
 local readFile = require("utils.fs").read
@@ -194,14 +196,33 @@ local function rewriteEpub(input, map, dest)
     writer:close()
 end
 
+--- 双语章比原章深一层（bilingual/）。相对引用改到上一级，锚点和绝对地址不动。
+---@param html string
+---@return string
+local function nestRefs(html)
+    local function lift(url)
+        if url == "" or url:sub(1, 1) == "#" then return url end
+        if url:match("^%a[%w+.-]*:") or url:match("^//") or url:match("^/") or url:match("^%.%./") then
+            return url
+        end
+        return "../" .. url
+    end
+    html = html:gsub("(src%s*=%s*[\"'])([^\"']*)", function(prefix, url) return prefix .. lift(url) end)
+    html = html:gsub("(href%s*=%s*[\"'])([^\"']*)", function(prefix, url) return prefix .. lift(url) end)
+    html = html:gsub("(url%s*%(%s*[\"']?)([^\"')]+)", function(prefix, url) return prefix .. lift(url) end)
+    return html
+end
+
 --- 子进程：按缓存插入译文，写成 input.dest。
 ---@param input BilingualInput
 local function build(input)
     local map = loadCache(input.cache)
     local tmp = input.dest .. ".part"
     if input.kind == "dom" then
+        local html = Markup.inject(assert(readFile(input.source)), map, input.style)
+        if input.chapter then html = nestRefs(html) end
         local f = assert(io.open(tmp, "wb"))
-        assert(f:write((Markup.inject(assert(readFile(input.source)), map, input.style))))
+        assert(f:write(html))
         assert(f:close())
     else
         rewriteEpub(input, map, tmp)

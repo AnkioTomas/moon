@@ -39,10 +39,13 @@ local ETA_WARMUP_PAGES = 20
 --- 逐页路径按 Kindle 估（约 35ms/页）。偏长比偏短好。
 local MS_PER_PAGE = 35
 
+--- 相对书的工作目录。收划线只认这个目录，见 note.derived_dirs。
+local DIR = "reflow"
+
 ---@param identity BookIdentity
 ---@return string
 local function workDir(identity)
-    return require("utils.paths").bookWorkDir(identity.stable_id, identity.source_id) .. "/reflow"
+    return require("utils.paths").bookWorkDir(identity.stable_id, identity.source_id) .. "/" .. DIR
 end
 
 --- 把秒数收成「约 N 分钟」；向上取整，避免报短。
@@ -418,5 +421,7 @@ function Reflow.show(ui)
         { text = _("重新排版"), callback = function() start(ui, identity, true) end },
     } }:show()
 end
+
+require("utils.extension").add("note.derived_dirs", DIR)
 
 return Reflow

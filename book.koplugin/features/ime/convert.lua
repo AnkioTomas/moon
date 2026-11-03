@@ -31,6 +31,8 @@ local TARGETS = {
     traditional = { dir = "hanzi-s2t", title = _("转为繁体") },
     simplified = { dir = "hanzi-t2s", title = _("转为简体") },
 }
+--- 相对书的工作目录，登记顺序即收线顺序。
+Convert.DIRS = { TARGETS.traditional.dir, TARGETS.simplified.dir }
 
 ---@param identity BookIdentity
 ---@param target "simplified"|"traditional"

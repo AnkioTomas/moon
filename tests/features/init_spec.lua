@@ -107,6 +107,8 @@ do
     Assert.len(Ext.list("reader.preferences"), 1)
     Assert.len(Ext.list("reader.ready"), 1)
     Assert.eq(Ext.list("note.markup_classes")[1], "moon-tr")
+    Assert.eq(table.concat(Ext.list("note.derived_dirs"), ","), "bilingual,reflow,hanzi-s2t,hanzi-t2s")
+    Assert.eq(type(Ext.list("note.chapter_variants")[1]), "function")
     Assert.len(Ext.list("setting.groups"), 0, "订阅已并入桌面组，不再挂独立 setting.groups")
     Assert.is_true(#Ext.list("setting.entries") > 10)
     Assert.is_true(#Ext.list("topbar.items") >= 1)

@@ -23,6 +23,9 @@ package.loaded["json"] = nil
 
 local Paths = require("utils.paths")
 local SessionNote = require("reader.session.note")
+require("utils.extension").add("note.chapter_variants", function(_identity, origin_path)
+    return { Paths.bilingualChapterPath(origin_path) }
+end)
 -- 译文元素 class 经扩展点 note.markup_classes 给（真机由翻译 feature 登记）
 require("utils.extension").add("note.markup_classes", "moon-tr")
 
@@ -59,17 +62,17 @@ Assert.eq(items[2].pos1, END)
 Assert.eq(items[3].pos0, P .. "/text().1")
 Assert.eq(items[3].text, "ell")
 
--- 存双语章：注解先退回原文，再镜像到原章和别的双语章；存原章也镜像到双语章。
+-- 存双语章：注解先退回原文，再镜像到原章；存原章也镜像到双语章。别的章不写。
 local identity = { source_id = "wechat", stable_id = "note-bi-spec", chapter_idx = 4 }
 local work = Paths.bookWorkDir(identity.stable_id, identity.source_id)
 assert(Paths.ensureDir(work))
 local origin = Paths.chapterPath(identity.stable_id, 4, identity.source_id)
-local bi = Paths.bilingualChapterPath(origin, "edge-en")
-local bi_ai = Paths.bilingualChapterPath(origin, "ai-en")
-for _idx, file in ipairs({ origin, bi, bi_ai, Paths.chapterPath(identity.stable_id, 40, identity.source_id) }) do
+local bi = Paths.bilingualChapterPath(origin)
+assert(Paths.ensureDir(bi:match("^(.*)/[^/]+$")))
+local other = Paths.chapterPath(identity.stable_id, 40, identity.source_id)
+for _idx, file in ipairs({ origin, bi, other }) do
     local f = assert(io.open(file, "wb")); f:write("<html/>"); f:close()
 end
-Assert.eq(#Paths.chapterVariants(bi), 2, "原章 + 另一双语章，不含 40 章")
 
 local annotations = { { pos0 = SPAN .. "/text().0", pos1 = SPAN .. "/text().2", text = "你好", drawer = "lighten",
     datetime = "2026-10-16 13:00:00" } }
@@ -87,8 +90,8 @@ SessionNote.save(ui, identity)
 Assert.eq(annotations[1].pos0, P, "落库前已退回原文")
 Assert.eq(doc_sidecar.annotations, annotations)
 Assert.eq(sidecars[origin].annotations[1].pos1, END)
-Assert.not_nil(sidecars[bi_ai])
 Assert.is_nil(sidecars[bi])
+Assert.is_nil(sidecars[other], "别的章不写")
 Assert.not_nil(stored)
 
 -- 在原章上删光：双语章 sidecar 跟着变空，删除不会从另一版复活。
@@ -97,5 +100,4 @@ ui.document = setmetatable({ file = origin, getPageCount = function() return 10 
 ui.annotation.annotations = {}
 SessionNote.save(ui, identity)
 Assert.eq(#sidecars[bi].annotations, 0)
-Assert.eq(#sidecars[bi_ai].annotations, 0)
 require("ffi/util").purgeDir(work)

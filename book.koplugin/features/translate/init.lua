@@ -73,6 +73,11 @@ function Translate.onCreate()
 end
 
 -- 扩展点登记（features 加载器 require 本模块时执行一次；见 utils/extension.lua）。
-require("utils.extension").add("note.markup_classes", require("features.translate.markup").CLASS)
+local Ext = require("utils.extension")
+Ext.add("note.markup_classes", require("features.translate.markup").CLASS)
+Ext.add("note.derived_dirs", require("features.translate.bilingual").DIR)
+Ext.add("note.chapter_variants", function(identity, origin)
+    return require("features.translate.chapter").variants(identity, origin)
+end)
 
 return Translate
