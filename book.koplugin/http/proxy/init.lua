@@ -20,6 +20,17 @@ local _ = require("gettext")
 
 local Proxy = {}
 
+--- host:port。IPv6 字面量加方括号，否则端口和地址粘在一起。
+---@param host string
+---@param port integer
+---@return string
+local function endpoint(host, port)
+    if host:find(":", 1, true) then
+        return "[" .. host .. "]:" .. port
+    end
+    return host .. ":" .. port
+end
+
 --- 校验并规范化明文 HTTP 代理地址。
 --- 与 LuaSocket 同语义：缺省 http://、缺省端口 80，user 与 password 都有才发 Basic 认证，不做 URL 解码。
 ---@param raw string|nil
@@ -37,15 +48,26 @@ function Proxy.parse(raw)
     rest = rest or raw
     local userinfo, hostport = rest:match("^([^@/]*)@([^/]*)")
     hostport = hostport or rest:match("^[^/]*")
-    local host, port = hostport:match("^(.-):(%d+)$")
-    host = host or hostport
+    local host, port
+    if hostport:sub(1, 1) == "[" then
+        host, port = hostport:match("^%[([^%]]+)%]:(%d+)")
+        if not host then
+            host = hostport:match("^%[([^%]]+)%]$")
+            port = "80"
+        end
+    else
+        host, port = hostport:match("^(.-):(%d+)$")
+        host = host or hostport
+    end
     port = tonumber(port) or 80
-    if host == "" or host:find("[%s:]") or port < 1 or port > 65535 then
+    if not host or host == "" or host:find("%s") or host:find(":", 1, true) and hostport:sub(1, 1) ~= "["
+        or port < 1 or port > 65535 then
         return nil, _("代理地址格式不正确")
     end
     local user, password = (userinfo or ""):match("^([^:]+):(.+)$")
+    local shown = host:find(":", 1, true) and ("[" .. host .. "]") or host
     return {
-        url = "http://" .. ((userinfo or "") ~= "" and userinfo .. "@" or "") .. host .. ":" .. port,
+        url = "http://" .. ((userinfo or "") ~= "" and userinfo .. "@" or "") .. shown .. ":" .. port,
         host = host,
         port = port,
         auth = user and ("Basic " .. Text.base64Encode(user .. ":" .. password)) or nil,
@@ -98,7 +120,7 @@ end
 ---@param auth string|nil Proxy-Authorization
 local function tunnel(stream, host, port, auth)
     local handshake = stream._do_ssl_handshake
-    local target = host .. ":" .. port
+    local target = endpoint(host, port)
     local req = "CONNECT " .. target .. " HTTP/1.1\r\nHost: " .. target .. "\r\n"
         .. (auth and ("Proxy-Authorization: " .. auth .. "\r\n") or "") .. "\r\n"
     stream._ssl_hostname = host
@@ -135,7 +157,7 @@ local function useProxy(client, proxy)
             return prepare(self)
         end
         local path, on_headers = self.path, self.kwargs.on_headers
-        self.path = ("http://%s:%d%s"):format(self.hostname, self.port, path or "/")
+        self.path = "http://" .. endpoint(self.hostname, self.port) .. (path or "/")
         if proxy.auth then
             self.kwargs.on_headers = function(headers)
                 if on_headers then on_headers(headers) end

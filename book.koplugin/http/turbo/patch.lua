@@ -13,6 +13,143 @@ local patched = false
 
 local Dns = require("http.dns")
 
+--- 另一族晚这么久再并行连（RFC 8305 的 Connection Attempt Delay）。IPv6 黑洞时不用等完整连接超时。
+local ATTEMPT_DELAY = 0.25
+
+---@param addr string
+---@return boolean
+local function is6(addr)
+    return addr:find(":", 1, true) ~= nil
+end
+
+--- 丢掉并行的那条连接。关流、成功、失败都走这里。
+---@param stream table
+local function dropAlt(stream)
+    local alt = stream._book_alt
+    if not alt then return end
+    stream._book_alt = nil
+    local UIManager = require("ui/uimanager")
+    if alt.delay then UIManager:unschedule(alt.delay) end
+    if alt.poll then UIManager:unschedule(alt.poll) end
+    if alt.sock then alt.sock:close() end
+end
+
+--- 换上这一族的 socket。v4 且流上已经是 v4 socket 时不动（HTTPClient 建好的那只）。
+--- 没有 LuaSocket（离线测试）时直接放行，让原来的 connect 拿地址。
+---@param stream table
+---@param addr string
+---@return boolean
+local function install(stream, addr)
+    local want6 = is6(addr)
+    if not want6 and stream.socket and not stream._book_v6 then return true end
+    local ok, socket = pcall(require, "socket")
+    if not ok or type(socket) ~= "table" then return true end
+    local make = want6 and socket.tcp6 or socket.tcp
+    -- 没有对应构造函数（离线测试的 socket 桩）：地址照旧交给原来的 connect。
+    if type(make) ~= "function" then return true end
+    local sock = make()
+    if not sock then return false end
+    sock:settimeout(0)
+    pcall(sock.setoption, sock, "keepalive", true)
+    if stream.socket and stream.socket.close and stream.socket ~= sock then stream.socket:close() end
+    stream.socket = sock
+    stream._book_v6 = want6
+    return true
+end
+
+--- 并行连接赢了：卸掉主连接，把赢的 socket 交给流，走 turbo 自己的「再 connect 一次看 already connected」。
+---@param stream table
+---@param on_ok function
+---@param on_fail function
+---@param arg any
+local function promote(stream, on_ok, on_fail, arg)
+    local alt = stream._book_alt
+    if not alt or not alt.sock or not stream._connecting then return end
+    if arg and arg.s_error then
+        dropAlt(stream)
+        return
+    end
+    local sock, addr, port = alt.sock, alt.addr, alt.port
+    alt.sock = nil
+    dropAlt(stream)
+    if stream.io_loop and stream._state and stream.socket then
+        stream.io_loop:remove_handler(stream.socket)
+        stream._state = nil
+    end
+    if stream.socket and stream.socket.close and stream.socket ~= sock then stream.socket:close() end
+    stream.socket = sock
+    stream.address = addr
+    stream.port = port
+    stream._book_v6 = is6(addr)
+    stream._connecting = true
+    stream._connect_callback = on_ok
+    stream._connect_fail_callback = on_fail
+    stream._connect_callback_arg = arg
+    stream:_handle_connect()
+end
+
+--- 主连接发出去之后，晚 ATTEMPT_DELAY 再连另一个地址。先成功的用。
+---@param stream table
+---@param addr string
+---@param port integer
+---@param on_ok function
+---@param on_fail function
+---@param arg any
+local function arm(stream, addr, port, on_ok, on_fail, arg)
+    local ok, socket = pcall(require, "socket")
+    if not ok or type(socket) ~= "table" or type(socket.select) ~= "function" then return end
+    local make = is6(addr) and socket.tcp6 or socket.tcp
+    if type(make) ~= "function" then return end
+    local alt = { addr = addr, port = port }
+    stream._book_alt = alt
+    local UIManager = require("ui/uimanager")
+    alt.delay = function()
+        if stream._book_alt ~= alt or not stream._connecting or (arg and arg.s_error) then return end
+        local sock = make()
+        if not sock then return end
+        sock:settimeout(0)
+        pcall(sock.setoption, sock, "keepalive", true)
+        local connected, err = sock:connect(addr, port)
+        -- 非阻塞 connect：正在连是 timeout（LuaSocket）或 Operation already in progress。
+        if not connected and err ~= "already connected" and err ~= "timeout"
+            and err ~= "Operation already in progress" then
+            sock:close()
+            return
+        end
+        alt.sock = sock
+        if connected or err == "already connected" then
+            promote(stream, on_ok, on_fail, arg)
+            return
+        end
+        alt.poll = function()
+            if stream._book_alt ~= alt or not alt.sock then return end
+            if not stream._connecting or (arg and arg.s_error) then
+                dropAlt(stream)
+                return
+            end
+            local _recv, writable = socket.select({}, { alt.sock }, 0)
+            local ready = false
+            if type(writable) == "table" then
+                for _idx, candidate in ipairs(writable) do
+                    if candidate == alt.sock then ready = true end
+                end
+            end
+            if not ready then
+                UIManager:scheduleIn(Dns.POLL, alt.poll)
+                return
+            end
+            local connected_now, err_now = alt.sock:connect(addr, port)
+            if connected_now or err_now == "already connected" then
+                promote(stream, on_ok, on_fail, arg)
+            else
+                dropAlt(stream)
+            end
+        end
+        UIManager:scheduleIn(Dns.POLL, alt.poll)
+    end
+    UIManager:scheduleIn(ATTEMPT_DELAY, alt.delay)
+end
+
 --- 包一层 target[name]。turbo 随 KOReader 版本变，方法不存在就跳过；
 --- 类上记标记，插件重载（本模块重新加载、turbo 类还在）不会包两层。
 ---@param target table|nil
@@ -81,9 +218,18 @@ function Patch.apply()
         end
     end)
 
+    -- 关流时收掉还在并行的另一族连接（取消、连接超时、连接失败都会关流）。
+    wrap(IOStream, "close", function(orig)
+        return function(self)
+            dropAlt(self)
+            return orig(self)
+        end
+    end)
+
     -- `self._handle_connect_fail(err)` 点号调用会把 self 变成错误字符串；主机名解析收口到 Dns.resolve（不阻塞）。
     -- HTTPClient 不看 connect 的返回值，只等 _handle_connect / _handle_connect_fail（外加自己的 connect 超时），
     -- 所以解析可以异步：先登记失败回调，地址到了再真正 connect。
+    -- 两族都有时先连 IPv6，ATTEMPT_DELAY 后并行连 IPv4，谁先通谁。IPv6 立刻失败就马上换 IPv4，不等那 250ms。
     wrap(IOStream, "connect", function(orig)
         local orig_fail = IOStream._handle_connect_fail
         return function(self, address, port, family, callback, fail_callback, arg)
@@ -95,17 +241,65 @@ function Patch.apply()
             end
             self._connect_fail_callback, self._connect_callback_arg = fail_callback, arg
             self._connecting = true
-            Dns.resolve(address, function(addr, err)
+            local function dial(list)
+                local index = 1
+                local function go()
+                    while list[index] and not install(self, list[index]) do index = index + 1 end
+                    local addr = list[index]
+                    if not addr then
+                        if fail_callback then fail_callback(arg, "no address") end
+                        return
+                    end
+                    local function on_ok(...)
+                        dropAlt(self)
+                        if arg and arg.s_error then return end
+                        if callback then return callback(...) end
+                    end
+                    local function on_fail(...)
+                        dropAlt(self)
+                        index = index + 1
+                        if list[index] then
+                            go()
+                            return
+                        end
+                        if fail_callback then return fail_callback(...) end
+                    end
+                    local fallback = list[index + 1]
+                    if fallback then arm(self, fallback, port, on_ok, on_fail, arg) end
+                    orig(self, addr, port, family, on_ok, on_fail, arg)
+                end
+                go()
+            end
+            Dns.resolve(address, function(addrs, err)
                 -- 等解析期间请求已取消 / 超时关流（close 只清 socket，不碰 _connecting）或已经失败过：什么都别做。
                 if (self.closed and self:closed()) or self._connect_fail_callback ~= fail_callback then return end
-                if not addr then
+                local list = {}
+                if type(addrs) == "table" then
+                    if addrs.v6 then list[#list + 1] = addrs.v6 end
+                    if addrs.v4 then list[#list + 1] = addrs.v4 end
+                end
+                if #list == 0 then
                     -- 与 turbo 自己解析失败同一条路：立即失败，不让 LuaSocket 再阻塞解析一次。
                     self._handle_connect_fail("DNS resolv error: " .. address .. " (" .. tostring(err) .. ")")
                     return
                 end
-                orig(self, addr, port, family, callback, fail_callback, arg)
+                dial(list)
             end)
             return 0
+        end
+    end)
+
+    -- URL 主机是 IPv6 字面量时 Host 要带方括号，否则对端按 RFC 拆不开。
+    wrap(HTTPClient, "_prepare_http_request", function(orig)
+        return function(self)
+            local host = self.hostname
+            if type(host) ~= "string" or not host:find(":", 1, true) or host:sub(1, 1) == "[" then
+                return orig(self)
+            end
+            self.hostname = "[" .. host .. "]"
+            local req = orig(self)
+            self.hostname = host
+            return req
         end
     end)
 

@@ -10,7 +10,7 @@ return {
         network_timeout = 30,
         -- 备选 DNS（与系统 DNS 竞速）：ali / tencent，见 http/dns.lua PROVIDERS。
         dns = "ali",
-        -- 主机名（小写）→ IPv4。命中后不再查询 DNS，给内网主机用。见 http/dns.lua Dns.binding。
+        -- 主机名（小写）→ IPv4 或 IPv6。命中后不再查询 DNS，给内网主机用。见 http/dns.lua Dns.binding。
         dns_bind = {},
         -- 上次下载成功的默认源模板，下次优先尝试。
         mirror_last = "",

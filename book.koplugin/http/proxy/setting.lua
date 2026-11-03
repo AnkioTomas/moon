@@ -225,6 +225,44 @@ local function ipv4(raw)
     return string.format("%d.%d.%d.%d", a, b, c, d)
 end
 
+--- IPv6 文本：一组 ``::``、每组 1～4 位十六进制，可带 %zone，可包在方括号里。存小写、不带括号。
+---@param raw string
+---@return string|nil
+local function ipv6(raw)
+    local s = Text.trim(raw):lower()
+    local inner = s:match("^%[(.+)%]$")
+    if inner then s = inner end
+    local zone = s:match("%%([%w%._:-]+)$")
+    if zone then s = s:sub(1, -(#zone + 2)) end
+    local _, doubles = s:gsub("::", "::")
+    if doubles > 1 or not s:find(":", 1, true) then return nil end
+    local function groups(part)
+        if part == "" then return 0 end
+        if part:sub(1, 1) == ":" or part:sub(-1) == ":" then return nil end
+        local n = 0
+        for g in part:gmatch("[^:]+") do
+            if not g:match("^%x%x?%x?%x?$") then return nil end
+            n = n + 1
+        end
+        return n
+    end
+    if doubles == 1 then
+        local left, right = s:match("^(.-)::(.*)$")
+        local ln, rn = groups(left), groups(right)
+        if not ln or not rn or ln + rn >= 8 then return nil end
+    elseif groups(s) ~= 8 then
+        return nil
+    end
+    if zone then s = s .. "%" .. zone end
+    return s
+end
+
+---@param raw string
+---@return string|nil
+local function parseIp(raw)
+    return ipv4(raw) or ipv6(raw)
+end
+
 ---@return table<string, string>
 local function bindMap()
     return require("utils.settings").get("http").dns_bind
@@ -256,10 +294,10 @@ local function saveBind(desktop, previous, host, ip)
         Toast:new{ text = _("域名不正确"), timeout = 3 }:show()
         return
     end
-    local addr = ipv4(ip)
+    local addr = parseIp(ip)
     if not addr then
         editBind(desktop, previous, host, ip)
-        Toast:new{ text = _("地址必须是 IPv4"), timeout = 3 }:show()
+        Toast:new{ text = _("地址必须是 IPv4 或 IPv6"), timeout = 3 }:show()
         return
     end
     local map = bindMap()
