@@ -75,7 +75,15 @@ Pair.cancel()
 Assert.is_true(Themed.last("confirm").closed)
 Assert.eq(Pair.poll(id4), "denied")
 
+-- 同一台机器同种浏览器重新授权：旧令牌被替换，不累加
+local again = Pair.request("Chrome · macOS", "192.168.1.9")
+Themed.last("confirm").ok_callback()
+local _state, token_again = Pair.poll(again)
+Assert.is_true(Pair.isPaired(token_again))
+Assert.is_false(Pair.isPaired(token), "旧令牌作废")
+Assert.eq(Pair.count(), 1)
+
 -- 撤销全部
 Pair.revokeAll()
-Assert.is_false(Pair.isPaired(token))
+Assert.is_false(Pair.isPaired(token_again))
 Assert.eq(Pair.count(), 0)
