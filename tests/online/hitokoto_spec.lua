@@ -34,7 +34,7 @@ package.preload["http.request"] = function()
 end
 
 local Hitokoto = require("online.hitokoto")
-Assert.eq(Hitokoto.ttl, 60)
+Assert.eq(Hitokoto.ttl, 3600)
 
 do -- 成功落盘
     requests = {}

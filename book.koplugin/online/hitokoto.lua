@@ -25,7 +25,7 @@ local FALLBACKS = {
 local Hitokoto = setmetatable({
     name = "hitokoto",
     title = "一言",
-    ttl = 60,
+    ttl = 3600,
 }, Online)
 Hitokoto.__index = Hitokoto
 
