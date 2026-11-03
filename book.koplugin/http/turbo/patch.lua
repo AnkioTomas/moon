@@ -22,6 +22,21 @@ local function is6(addr)
     return addr:find(":", 1, true) ~= nil
 end
 
+--- 本机能不能走 IPv6：UDP connect 只选路由、不发包，内核关了 IPv6 / 没地址 / 没路由都会立刻失败。
+--- 不通还照连 AAAA，每个请求先失败再退回 IPv4，封面等批量请求同时十几条这样重试后
+--- KOReader 几秒内段错误（Kindle 固件关 IPv6 时实测必现，开启 IPv6 后消失）；各平台通用。
+--- 没有 udp6（离线测试的 socket 桩）无法判断，照常尝试。
+---@return boolean
+function Patch.hasIPv6()
+    local socket = require("socket")
+    if type(socket.udp6) ~= "function" then return true end
+    local udp = socket.udp6()
+    if not udp then return false end
+    local routed = udp:setpeername("2001:4860:4860::8888", 53) == 1
+    udp:close()
+    return routed
+end
+
 --- 丢掉并行的那条连接。关流、成功、失败都走这里。
 ---@param stream table
 local function dropAlt(stream)
@@ -283,7 +298,7 @@ function Patch.apply()
                 if (self.closed and self:closed()) or self._connect_fail_callback ~= fail_callback then return end
                 local list = {}
                 if type(addrs) == "table" then
-                    if addrs.v6 then list[#list + 1] = addrs.v6 end
+                    if addrs.v6 and Patch.hasIPv6() then list[#list + 1] = addrs.v6 end
                     if addrs.v4 then list[#list + 1] = addrs.v4 end
                 end
                 if #list == 0 then
