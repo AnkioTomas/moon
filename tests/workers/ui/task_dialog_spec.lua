@@ -256,7 +256,7 @@ Assert.eq(#Tasks.tasks(), 0)
 
 -- passive 任务（漫画缓存，执行者是 kamare）：列表里照常显示进度，但没有取消手势。
 local passive = {
-    key = "kavita-cache\0900", kind = "cache", title = "测试系列", passive = true,
+    key = "cache\0kavita\0900", kind = "cache", title = "测试系列", passive = true,
     run = function(report, done)
         runs.passive = { report = report, done = done }
         return { cancel = function() runs.passive.cancelled = true end }

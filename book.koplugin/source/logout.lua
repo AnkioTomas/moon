@@ -18,20 +18,14 @@ local TASK_PREFIXES = { "dirty\0", "books\0", "books-upload\0", "cache\0", "inst
 --- 停掉这个源还在跑的同步和缓存，免得清完之后回调又写回来。
 ---@param source_id string
 function Logout.abort(source_id)
-    local tasks_ok, Tasks = pcall(require, "workers.tasks")
-    if tasks_ok then
-        for _idx, prefix in ipairs(TASK_PREFIXES) do
-            Tasks.cancelPrefixed(prefix .. source_id)
-        end
-        if source_id == "kavita" then Tasks.cancelPrefixed("kavita-cache") end
+    local Tasks = require("workers.tasks")
+    for _idx, prefix in ipairs(TASK_PREFIXES) do
+        Tasks.cancelPrefixed(prefix .. source_id)
     end
-    local ui_ok, UIManager = pcall(require, "ui/uimanager")
-    if not ui_ok or type(UIManager) ~= "table" or type(UIManager._window_stack) ~= "table" then return end
-    local stack = UIManager._window_stack
+    local stack = require("ui/uimanager")._window_stack
     for index = #stack, 1, -1 do
-        local entry = stack[index]
-        local widget = type(entry) == "table" and entry.widget or nil
-        if type(widget) == "table" and widget.name == "book_desktop" then
+        local widget = stack[index].widget
+        if widget.name == "book_desktop" then
             require("desktop.sync").abort(widget, source_id)
             return
         end
