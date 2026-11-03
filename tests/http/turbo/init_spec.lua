@@ -13,9 +13,15 @@ package.loaded["http.dns"] = nil
 package.preload["http.dns"] = function()
     return {
         resolve = function(host, cb)
-            if host:match("^[%d%.]+$") or host:find(":", 1, true) then return cb(host) end
+            local function done(addr)
+                if not addr then return cb(nil) end
+                if addr:find(":", 1, true) then return cb({ v6 = addr }) end
+                return cb({ v4 = addr })
+            end
+            if host:match("^[%d%.]+$") or host:find(":", 1, true) then return done(host) end
+            if host == "dual.example" then return cb({ v6 = "2001:db8::9", v4 = "9.9.9.9" }) end
             resolves[#resolves + 1] = host
-            local function fire() cb(host ~= "nx.invalid" and ("10.0.0." .. #resolves) or nil) end
+            local function fire() done(host ~= "nx.invalid" and ("10.0.0." .. #resolves) or nil) end
             if held then resolves.fire = fire else fire() end
         end,
         drop = function(host) dropped[#dropped + 1] = host end,
@@ -108,9 +114,15 @@ do
     Assert.eq(a.connected_to, "10.0.0." .. #resolves)
     local lit, n = {}, #resolves
     iostream.IOStream.connect(lit, "1.2.3.4", 443)
-    iostream.IOStream.connect({}, "2001:db8::1", 443)
+    local v6lit = {}
+    iostream.IOStream.connect(v6lit, "2001:db8::1", 443)
     Assert.eq(#resolves, n, "IP 字面量不得解析")
     Assert.eq(lit.connected_to, "1.2.3.4")
+    Assert.eq(v6lit.connected_to, "2001:db8::1")
+    -- 两族都有：先连 IPv6。离线测试没有 LuaSocket，不会起并行的第二条。
+    local dual = {}
+    iostream.IOStream.connect(dual, "dual.example", 443)
+    Assert.eq(dual.connected_to, "2001:db8::9")
     -- 同步失败：iostream 经 run_callback 调 HTTPClient:_handle_connect_fail(client, err) → 丢该主机地址缓存
     HTTPClient._handle_connect_fail({ hostname = "cdn.example.com" }, "Network is unreachable")
     Assert.eq(client_fail_msgs[1], "Could not connect: Network is unreachable")
@@ -351,6 +363,16 @@ do
     s:_do_ssl_handshake()
     Assert.eq(s.written, "CONNECT api.example.com:443 HTTP/1.1\r\nHost: api.example.com:443\r\n"
         .. "Proxy-Authorization: Basic dTpw\r\n\r\n")
+    c.hostname = "2001:db8::1"
+    c:_connect()
+    s = c.iostream
+    s._connecting = false
+    s:_do_ssl_handshake()
+    Assert.eq(s.written, "CONNECT [2001:db8::1]:443 HTTP/1.1\r\nHost: [2001:db8::1]:443\r\n"
+        .. "Proxy-Authorization: Basic dTpw\r\n\r\n")
+    c.schema, c.hostname, c.port, c.path = "http", "2001:db8::1", 80, "/a"
+    Assert.eq(c:_prepare_http_request().uri, "http://[2001:db8::1]:80/a")
+    c.schema, c.hostname, c.port, c.path = "https", "api.example.com", 443, "/a?b=1"
     Assert.eq(s._ssl_accepting, false, "交换期间放开明文读写")
     s.on_reply("HTTP/1.1 200 Connection established\r\n\r\n")
     Assert.eq(log[#log], "handshake:true")
@@ -404,6 +426,11 @@ do
     Assert.eq(p.auth, "Basic dTpw")
     Assert.eq(Proxy.parse("proxy.lan").url, "http://proxy.lan:80")
     Assert.eq(Proxy.parse("HTTP://proxy.lan:1").port, 1)
+    local v6proxy = Proxy.parse("http://[2001:db8::1]:8080")
+    Assert.eq(v6proxy.host, "2001:db8::1")
+    Assert.eq(v6proxy.port, 8080)
+    Assert.eq(v6proxy.url, "http://[2001:db8::1]:8080")
+    Assert.is_nil(Proxy.parse("http://2001:db8::1:8080"))
     for raw, msg in pairs({
         [""] = "代理地址为空",
         ["   "] = "代理地址为空",
