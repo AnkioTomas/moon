@@ -65,14 +65,14 @@ Assert.eq(#ChapterBi.variants(identity, origin), 0)
 local conf = { engine = "edge", lang = "zh" }
 ChapterBi.set(identity, conf)
 Assert.eq(ChapterBi.get(identity).engine, "edge")
-Assert.eq(ChapterBi.variants(identity, origin)[1], ChapterBi.pathFor(origin, conf))
+Assert.eq(ChapterBi.variants(identity, origin)[1], Paths.bilingualChapterPath(origin))
 Assert.eq(ChapterBi.variants(identity, origin)[2], work .. "/1.bi-edge-zh.html")
 Assert.is_nil(ChapterBi.resolve(identity, 1, origin))
 Assert.eq(#requests, 0, "开章不发翻译请求")
 
 -- 任务输入：单章 dom，source 即原章（完成不删原章、不写 meta），缓存与整书共用。
 local input = ChapterBi.input(identity, origin, conf)
-local dest = ChapterBi.pathFor(origin, conf)
+local dest = Paths.bilingualChapterPath(origin)
 Assert.is_true(input.chapter)
 Assert.eq(input.kind, "dom")
 Assert.eq(input.source, origin)
