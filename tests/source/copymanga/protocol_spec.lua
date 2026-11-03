@@ -22,8 +22,22 @@ do
     })
     Assert.is_nil(err)
     Assert.len(images, 2)
-    Assert.eq(images[1], "https://img.example/001.c1500x.webp")
-    Assert.eq(images[2], "https://img.example/002.c1500x.webp")
+    Assert.eq(images[1], "https://img.example/001.c800x.jpg")
+    Assert.eq(images[2], "https://img.example/002.c800x.jpg")
+end
+
+do
+    local images, err = Protocol.chapterImages({
+        chapter = {
+            contents = {
+                { url = "https://img.example/a.webp.c1500x.webp" },
+                { url = "https://img.example/b.jpg.c2000x.jpg" },
+            },
+        },
+    })
+    Assert.is_nil(err)
+    Assert.eq(images[1], "https://img.example/a.jpg.c800x.jpg")
+    Assert.eq(images[2], "https://img.example/b.jpg.c800x.jpg")
 end
 
 do

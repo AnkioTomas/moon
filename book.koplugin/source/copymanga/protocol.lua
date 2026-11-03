@@ -2,7 +2,8 @@
 拷贝漫画 App 章节载荷。
 
 chapter2 返回 ``contents``（图片 URL）和 ``words``（阅读序号）。
-低清 ``.c800x.`` 换成 ``.c1500x.``，与 kComics 一致。
+图床把宽度写在文件名里（``.c800x.`` / ``.c1500x.``）。手机端要 1500 宽 webp，
+墨水屏翻页会整页解码，长图会卡。这里固定要 800 宽 JPEG。没有档位的地址不动。
 
 @module koplugin.book.source.copymanga.protocol
 --]]
@@ -24,6 +25,15 @@ local function chapterRoot(wire)
     return nil
 end
 
+--- 图床档位改成 800 宽 JPEG。``.webp.c1500x.webp`` 与 ``.c800x.webp`` 两种写法都认。
+---@param url string
+---@return string
+local function screenUrl(url)
+    local rewritten = url:gsub("%.webp(%.c%d+x%.)webp", ".jpg%1jpg", 1)
+    rewritten = rewritten:gsub("%.c%d+x%.webp", ".c800x.jpg")
+    return (rewritten:gsub("%.c%d+x%.jpe?g", ".c800x.jpg"))
+end
+
 --- 解码章节页，返回按 ``words`` 排序的图片 URL。
 ---@param wire table|nil
 ---@return string[]|nil, string|nil
@@ -37,7 +47,7 @@ function Protocol.chapterImages(wire)
         local url = type(row) == "table" and row.url or nil
         if type(url) == "string" and url:match("^https?://") then
             pages[#pages + 1] = {
-                url = url:gsub("%.c800x%.", ".c1500x."),
+                url = screenUrl(url),
                 order = tonumber(words[i]) or (i - 1),
             }
         end
