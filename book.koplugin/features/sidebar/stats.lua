@@ -58,9 +58,8 @@ function Stats.rows()
         end
     end
     local function date(ts) return ts > 0 and os.date("%Y-%m-%d", ts) or "—" end
-    return {
+    local rows = {
         { _("累计时长"), Catalog.formatDuration(sum.total_seconds) },
-        { _("阅读时长"), Catalog.formatDuration(sum.local_seconds) },
         { _("阅读天数"), tostring(days) },
         { _("日均时长"), Catalog.formatDuration(days > 0 and sum.total_seconds / days or 0) },
         { _("首次阅读"), date(sum.first_read) },
@@ -72,6 +71,11 @@ function Stats.rows()
         { _("笔记"), tostring(notes) },
         { _("预计读完"), finish and date(finish) or "—" },
     }
+    -- 本机时长与累计（含云端快照）不同才单列，相同时只是重复一行
+    if math.floor(sum.local_seconds / 60) ~= math.floor(sum.total_seconds / 60) then
+        table.insert(rows, 2, { _("本机时长"), Catalog.formatDuration(sum.local_seconds) })
+    end
+    return rows
 end
 
 ---@param width number
