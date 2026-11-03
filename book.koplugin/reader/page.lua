@@ -27,21 +27,28 @@ end
 
 --- 阅读页 Create：挂原生菜单注入与阅读状态条。
 ---@param plugin table
-function Reader.onCreate(plugin)
+---@param span PerfSpan|nil 开章计时；拆开功能安装、定位和菜单
+function Reader.onCreate(plugin, span)
     local ui = plugin and plugin.ui
-    if not ui or ui._book_reader_attached then return end
+    if not ui or ui._book_reader_attached then
+        if span then span:lap("page") end
+        return
+    end
     ui._book_reader_attached = true
     applyMarginPopup()
     require("desktop.reader_exit").attach(ui)
 
     -- 面板、顶底栏和侧栏要在首绘之前装上。
     require("utils.extension").emit("reader.ready", plugin)
+    if span then span:lap("ready") end
     if ui.handleEvent then
         ui:handleEvent(Event:new("UpdatePos"))
     end
+    if span then span:lap("pos") end
     require("reader.highlight_menu").install(ui)
     require("reader.book_notes").install(ui)
     require("reader.selection").install(ui)
+    if span then span:lap("menus") end
 end
 
 return Reader
