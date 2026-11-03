@@ -187,6 +187,15 @@ function Setting.rows()
         libraryRow(),
         action("network_check", _("测试连接"), testConnection),
     }
+    local cfg = config()
+    if (cfg.username or "") ~= "" and (cfg.userkey or "") ~= "" then
+        rows[#rows + 1] = require("source.logout").row(ID, _("确定退出 BookOrbit 账号？"), function()
+            local current = config()
+            current.username, current.userkey = "", ""
+            -- 只落凭证。reload 会让桌面立刻同步，必须等本地书架清完再 reload。
+            require("utils.settings").saveSource(ID, current)
+        end)
+    end
     if officialAccount() then
         table.insert(rows, 1, action("download", _("从 BookOrbit 插件导入账号"), importOfficial))
     end

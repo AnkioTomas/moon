@@ -39,6 +39,11 @@ function SummaryDB.removeIdentity(source_id, stable_id)
     return DB.removeIdentity("chapter_summaries", source_id, stable_id)
 end
 
+--- 退出登录：删掉这个源的全部章节摘要。
+function SummaryDB.removeSource(source_id)
+    return DB.removeSource("chapter_summaries", source_id)
+end
+
 --- 写入（覆盖）一章摘要。
 ---@param source_id string
 ---@param stable_id string

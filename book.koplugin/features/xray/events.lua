@@ -16,4 +16,7 @@ return {
     book_removed = function(source_id, stable_id)
         return XrayDB.removeIdentity(source_id, stable_id)
     end,
+    source_forgotten = function(source_id)
+        return XrayDB.removeSource(source_id)
+    end,
 }

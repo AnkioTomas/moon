@@ -699,14 +699,25 @@ end
 ---@param plugin table|nil 月读插件实例（取 plugin.path 定位实际安装目录）
 ---@return BookThemeSection[]
 function Setting.sections(plugin)
+    local connect = {
+        field(plugin, "base_url", _("服务器地址"), "https://kavita.example.com", false, normalizeUrl, "dns"),
+        field(plugin, "api_key", _("API Key"), _("Kavita 用户设置 → API Key"), true, Text.stripWhitespace, "key"),
+        libraryRow(plugin),
+    }
+    if (config().api_key or "") ~= "" then
+        connect[#connect + 1] = require("source.logout").row(ID, _("确定退出 Kavita 账号？"), function()
+            local cfg = config()
+            cfg.api_key = ""
+            require("utils.settings").saveSource(ID, cfg)
+            local Cache = require("source.kavita.cache")
+            Cache.deleteAll()
+            Cache.reset()
+        end)
+    end
     return {
         {
             title = _("连接"),
-            rows = {
-                field(plugin, "base_url", _("服务器地址"), "https://kavita.example.com", false, normalizeUrl, "dns"),
-                field(plugin, "api_key", _("API Key"), _("Kavita 用户设置 → API Key"), true, Text.stripWhitespace, "key"),
-                libraryRow(plugin),
-            },
+            rows = connect,
         },
         {
             title = _("缓存与同步"),

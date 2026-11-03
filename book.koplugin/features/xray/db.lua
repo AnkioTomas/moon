@@ -290,4 +290,14 @@ function XrayDB.removeIdentity(source_id, stable_id)
     return true
 end
 
+--- 退出登录：删掉这个源的全部 X-Ray 行。不另起事务。
+---@param source_id string
+---@return boolean
+function XrayDB.removeSource(source_id)
+    for _idx, tbl in ipairs(TABLES) do
+        if not DB.removeSource(tbl, source_id) then return false end
+    end
+    return true
+end
+
 return XrayDB

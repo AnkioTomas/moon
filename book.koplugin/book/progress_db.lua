@@ -349,4 +349,9 @@ function ProgressDB.removeIdentity(source_id, stable_id)
     return DB.removeIdentity("pending_progress", source_id, stable_id)
 end
 
+--- 退出登录：删掉这个源的全部阅读进度。
+function ProgressDB.removeSource(source_id)
+    return DB.removeSource("pending_progress", source_id)
+end
+
 return ProgressDB

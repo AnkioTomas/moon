@@ -59,10 +59,19 @@ end
 --- Moon 设置页的行构造器列表：服务器地址、长期令牌。
 ---@return table[] 设置行构造器数组，元素为 fun(iw: number): table
 function Setting.rows()
-    return {
+    local rows = {
         field("base_url", _("服务器地址"), "https://book.example.com", false, Text.stripWhitespace, "dns"),
         field("token", _("长期令牌"), _("个人Token"), true, Text.stripWhitespace, "key"),
     }
+    local cfg = require("utils.settings").getSource(SOURCE_ID)
+    if (cfg.token or "") ~= "" then
+        rows[#rows + 1] = require("source.logout").row(SOURCE_ID, _("确定退出月读服务账号？"), function()
+            local current = require("utils.settings").getSource(SOURCE_ID)
+            current.token = ""
+            require("utils.settings").saveSource(SOURCE_ID, current)
+        end)
+    end
+    return rows
 end
 
 
