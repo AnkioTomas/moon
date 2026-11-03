@@ -61,7 +61,7 @@ do
                     { web_url = "https://p3-novel.byteimg.com/tos-cn-i-abc/up123~tplv-q-jpeg.heic?sig=2" },
                 } } },
                 create_timestamp = 1700000000000 },
-            stat = { digg_count = 9 },
+            stat = { digg_count = 9, reply_count = 4 },
         } } },
         common_list_info = { cursor = "20", has_more = true, total = 33 },
     } }
@@ -74,6 +74,7 @@ do
     Assert.eq(page.items[1].author, "书友")
     Assert.eq(page.items[1].content, "好看")
     Assert.eq(page.items[1].likes, 9)
+    Assert.eq(page.items[1].replies, 4)
     Assert.len(page.items[1].images, 2)
     Assert.matches(page.items[1].images[1].url, "awebp%?sig=1")
     Assert.eq(page.items[1].images[2].url,
@@ -95,6 +96,48 @@ do
     local err
     Reviews.pageAsync({}, "111", "900", 12, 0, function(p, e) Assert.is_nil(p) err = e end)
     Assert.matches(err, "data_list")
+end
+
+-- 回复：comment_source 必须是 5；楼中楼记被回复者；空列表且 total>0 不当成功
+do
+    reply = { data = {
+        reply_list = { {
+            reply_id = "rp1",
+            reply_to_user_info = { base_info = { user_name = "楼主" } },
+            Common = { user_info = { base_info = { user_name = "路人" } },
+                content = { text = "确实" }, create_timestamp = 1700000000 },
+            stat = { digg_count = 2, reply_count = 9 },
+        } },
+        comment_list_info = { cursor = "20", has_more = true, total = 6 },
+    } }
+    local page
+    Reviews.repliesAsync({}, "c1", 0, function(p) page = p end)
+    local call = calls[#calls]
+    Assert.eq(call.name, "reply_list")
+    Assert.eq(call.path, "/novel/commentapi/reply/list/c1/v1/")
+    Assert.matches(call.body, '"comment_source":5')
+    Assert.matches(call.body, '"cursor":""')
+    Assert.eq(page.items[1].author, "路人")
+    Assert.eq(page.items[1].content, "确实")
+    Assert.eq(page.items[1].reply_to, "楼主")
+    Assert.eq(page.items[1].replies, 0, "回复页不再往下开")
+    Assert.eq(page.items[1].likes, 2)
+    Assert.eq(page.total, 6)
+    Assert.eq(page.max_idx, "20")
+    Assert.is_true(page.more)
+
+    Reviews.repliesAsync({}, "c1", "20", function(p) page = p end)
+    Assert.matches(calls[#calls].body, '"cursor":"20"')
+    Assert.is_false(page.more, "游标停住就不再翻")
+
+    reply = { data = { reply_list = {}, comment_list_info = { total = 3, has_more = false, cursor = "" } } }
+    local err
+    Reviews.repliesAsync({}, "c1", 0, function(p, e) Assert.is_nil(p) err = e end)
+    Assert.matches(err, "为空")
+
+    reply = { data = {} }
+    Reviews.repliesAsync({}, "c1", 0, function(p, e) Assert.is_nil(p) err = e end)
+    Assert.matches(err, "reply_list")
 end
 
 -- 定位：按段序找 blk p_idx 对应段落，xpointer 覆盖整段；整段原文作引用

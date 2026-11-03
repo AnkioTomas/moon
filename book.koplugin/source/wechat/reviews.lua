@@ -12,6 +12,7 @@ local Annotations = require("book.annotations")
 local _ = require("gettext")
 
 local PAGE_SIZE = 30
+local COMMENT_PAGE = 20
 -- 服务端按 range 逐个查，整批 3 秒超时（errCode -10100）；实测每个约 30ms，一章常有 150～300 个。
 local BATCH_SIZE = 40
 -- 同时在飞的批数：串行时一章 8 批要 10 秒以上。
@@ -37,6 +38,8 @@ local Reviews = {}
 ---@field author string
 ---@field content string
 ---@field likes integer
+---@field replies integer 二级回复条数；0 表示没有，列表上不给入口
+---@field reply_to string|nil 这条是在回复谁（楼中楼），空则不是
 ---@field images { url: string, width: integer, height: integer }[]|nil 评论配图（目前只有番茄）
 ---@field time integer 秒
 
@@ -90,7 +93,54 @@ function Reviews.item(entry)
         author = type(review.author) == "table" and review.author.name or "",
         content = review.content,
         likes = tonumber(entry.likesCount) or 0,
+        replies = tonumber(entry.commentsCount) or tonumber(review.commentsCount) or 0,
         time = tonumber(review.createTime) or 0,
+    }
+end
+
+--- ``/review/single`` 的一条评论。楼中楼只带被回复者，展平在同一页。
+---@param entry table
+---@return WechatReview
+function Reviews.commentItem(entry)
+    local comment = type(entry.comment) == "table" and entry.comment or entry
+    local author = type(comment.author) == "table" and comment.author or entry.author
+    local reply_user = type(entry.replyUser) == "table" and entry.replyUser
+        or (type(comment.replyUser) == "table" and comment.replyUser or nil)
+    return {
+        id = tostring(entry.commentId or comment.commentId or ""),
+        author = type(author) == "table" and author.name or "",
+        content = tostring(comment.content or entry.content or ""),
+        likes = tonumber(entry.likesCount or comment.likesCount) or 0,
+        replies = 0,
+        reply_to = type(reply_user) == "table" and reply_user.name or nil,
+        time = tonumber(comment.createTime or entry.createTime) or 0,
+    }
+end
+
+--- 想法评论回包 → 一页。游标没前进就停，避免 hasMore 粘住时翻页死循环。
+--- 声称有评论却给空列表：当失败，不当成「0 条回复」。
+---@param wire table
+---@param max_idx integer
+---@return WechatReviewPage|nil
+---@return string|nil
+function Reviews.comments(wire, max_idx)
+    local list = wire.comments
+    local total = tonumber(wire.commentsCount) or 0
+    if list == nil and total == 0 then list = {} end
+    if type(list) ~= "table" then return nil, _("无法获取回复") end
+    local items = {}
+    for _idx, entry in ipairs(list) do
+        if type(entry) == "table" then items[#items + 1] = Reviews.commentItem(entry) end
+    end
+    if #items == 0 and total > 0 then return nil, _("无法获取回复") end
+    local next_idx = tonumber(wire.commentsMaxIdx)
+    local more = tonumber(wire.commentsHasMore) == 1 or wire.commentsHasMore == true
+    if not next_idx or next_idx == max_idx then more = false end
+    return {
+        items = items,
+        total = total > 0 and total or #items,
+        max_idx = next_idx or max_idx,
+        more = more and #items > 0,
     }
 end
 
@@ -184,6 +234,22 @@ function Reviews.pageAsync(client, book_id, chapter_uid, range, max_idx, cb)
             max_idx = tonumber(entry.maxIdx) or max_idx,
             more = tonumber(entry.hasMore) == 1,
         })
+    end)
+end
+
+--- 某条想法的一页回复。max_idx 首页 0，之后用上一页的 commentsMaxIdx。
+---@param client WechatClient
+---@param review_id string
+---@param max_idx integer
+---@param cb fun(page: WechatReviewPage|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Reviews.commentsAsync(client, review_id, max_idx, cb)
+    return client:reviewSingleAsync(review_id, max_idx, COMMENT_PAGE, function(wire, err)
+        if not wire then
+            cb(nil, err or _("无法获取回复"))
+            return
+        end
+        cb(Reviews.comments(wire, max_idx))
     end)
 end
 

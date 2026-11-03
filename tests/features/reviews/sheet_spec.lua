@@ -55,6 +55,29 @@ do
     Assert.is_false(fake.more)
 end
 
+do -- 回复页走 paragraphReviewRepliesAsync，评论 id 在 spot.range
+    local seen
+    local fake = setmetatable({
+        identity = { source = { paragraphReviewRepliesAsync = function(_self, _identity, review_id, max_idx, cb)
+            seen = { review_id, max_idx }
+            cb({ items = { { id = "c", author = "a", content = "r", likes = 0, time = 1 } },
+                total = 4, max_idx = 2, more = false })
+            return { cancel = function() end }
+        end } },
+        spot = { range = "rev1", text = "父评论", total = 4 },
+        reply_page = true, more = true, max_idx = 0, items = {}, page = 1,
+        paginate = function(self) self.pages = { { 1, #self.items } } end,
+        refresh = function() end,
+    }, { __index = Sheet })
+    fake:load()
+    Assert.eq(seen[1], "rev1")
+    Assert.eq(seen[2], 0)
+    Assert.eq(fake.total, 4)
+    Assert.len(fake.items, 1)
+    Assert.eq(fake.max_idx, 2)
+    Assert.is_false(fake.more)
+end
+
 -- 放得下照常同页。
 pages = paginate(20, { 30, 30 })
 Assert.len(pages, 1)

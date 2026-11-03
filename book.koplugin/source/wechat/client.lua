@@ -519,4 +519,22 @@ function Client:readReviewsAsync(bookId, chapter_uid, reviews, cb)
     } }, cb)
 end
 
+--- 一条想法及其评论。commentsCount 是本页条数，commentsMaxIdx 用上一页回包续拉（首页 0）。
+--- likesCount 置 0：只要评论，不拉点赞用户列表。
+---@param review_id string
+---@param max_idx integer
+---@param count integer
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:reviewSingleAsync(review_id, max_idx, count, cb)
+    return Eink.callAsync("GET", "/review/single", { query = {
+        reviewId = tostring(review_id),
+        synckey = 0,
+        commentsCount = count,
+        commentsDirection = 0,
+        commentsMaxIdx = max_idx,
+        likesCount = 0,
+    } }, cb)
+end
+
 return Client

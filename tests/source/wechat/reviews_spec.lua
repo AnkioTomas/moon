@@ -72,7 +72,52 @@ do
     Assert.eq(item.author, "橘枳")
     Assert.eq(item.content, "点评")
     Assert.eq(item.likes, 21)
+    Assert.eq(item.replies, 0)
     Assert.eq(item.time, 1788166709)
+    local with_replies = Reviews.item({
+        reviewId = "r", likesCount = 1, commentsCount = 4,
+        review = { content = "点评", createTime = 1, author = { name = "甲" } },
+    })
+    Assert.eq(with_replies.replies, 4)
+end
+
+do -- 想法下的评论页：楼中楼只记被回复者；空列表但声称有条数是失败；游标不前进就停
+    local page = Reviews.comments({
+        commentsCount = 3,
+        commentsHasMore = 1,
+        commentsMaxIdx = 2,
+        comments = {
+            { commentId = "c1", content = "说得对", createTime = 10, likesCount = 2, author = { name = "乙" } },
+            { commentId = "c2", content = "同意", createTime = 11, author = { name = "丙" },
+                replyUser = { name = "乙" } },
+        },
+    }, 0)
+    Assert.len(page.items, 2)
+    Assert.eq(page.items[1].id, "c1")
+    Assert.eq(page.items[1].author, "乙")
+    Assert.eq(page.items[1].likes, 2)
+    Assert.eq(page.items[1].replies, 0)
+    Assert.is_nil(page.items[1].reply_to)
+    Assert.eq(page.items[2].reply_to, "乙")
+    Assert.eq(page.total, 3)
+    Assert.eq(page.max_idx, 2)
+    Assert.is_true(page.more)
+
+    local again = Reviews.comments({ commentsCount = 3, commentsHasMore = 1, commentsMaxIdx = 2, comments = {
+        { commentId = "c3", content = "还有", createTime = 12, author = { name = "丁" } },
+    } }, 2)
+    Assert.is_false(again.more, "游标停在原地就不再翻")
+
+    local _empty, err = Reviews.comments({ commentsCount = 4, comments = {} }, 0)
+    Assert.is_nil(_empty)
+    Assert.eq(err, "无法获取回复")
+    _empty, err = Reviews.comments({ commentsCount = 1 }, 0)
+    Assert.is_nil(_empty)
+    Assert.eq(err, "无法获取回复")
+
+    local none = Reviews.comments({ commentsCount = 0, commentsHasMore = 0 }, 0)
+    Assert.len(none.items, 0)
+    Assert.is_false(none.more)
 end
 
 --- 回调由测试手动触发的假 client：每个请求的回调按发出顺序留在 calls 里。

@@ -1170,4 +1170,14 @@ function Source:paragraphReviewPageAsync(identity, range, max_idx, cb)
     end, cb)
 end
 
+--- 某条想法的一页回复。不走段评缓存：点开才拉，失败当场返回。
+---@param _identity BookIdentity
+---@param review_id string
+---@param max_idx integer
+---@param cb fun(page: WechatReviewPage|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:paragraphReviewRepliesAsync(_identity, review_id, max_idx, cb)
+    return Reviews.commentsAsync(self._client, review_id, max_idx, cb)
+end
+
 return WeChat

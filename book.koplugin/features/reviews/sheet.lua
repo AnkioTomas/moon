@@ -12,8 +12,11 @@
   | ----------------------------- |
   | 👤 包子铺      👍 403 2024-… |
   | ……                            |
+  | 3 条回复                       |
   | [<]          2 / 5+       [>] |
   +-------------------------------+
+有回复数、且属主源实现了 paragraphReviewRepliesAsync 时，卡片底部那行点开回复页
+（同一张表，引用换成这条评论）。回复页不再往下开。楼中楼写在正文前缀「回复 某人：」。
 
 @module koplugin.book.features.reviews.sheet
 --]]
@@ -67,6 +70,7 @@ end
 ---@class ReviewSheet : BookThemeModal
 ---@field identity BookIdentity
 ---@field spot { range: string, text: string, total: integer }
+---@field reply_page boolean|nil 打开的是某条评论的回复，而不是段评本身
 ---@field items WechatReview[]
 ---@field cards table[] 按 items 下标缓存的卡片
 ---@field pages { [1]: integer, [2]: integer }[] 每页的 items 起止下标
@@ -176,23 +180,33 @@ function Sheet:card(i, avail)
     local pics = self:thumbs(item.images or {})
     local pics_h = pics and pics:getSize().h + space or 0
     local face = self:bodyFace()
-    local content = Text.box("body", item.content, w, { transparent = true, face = face })
-    local room = (avail or self.body_h) - head:getSize().h - space - pics_h
+    local body = item.content
+    if type(item.reply_to) == "string" and item.reply_to ~= "" then
+        body = T(_("回复 %1：%2"), item.reply_to, item.content)
+    end
+    local replies = self:replyLine(item)
+    local replies_h = replies and replies:getSize().h + space or 0
+    local content = Text.box("body", body, w, { transparent = true, face = face })
+    local room = (avail or self.body_h) - head:getSize().h - space - pics_h - replies_h
     local truncated = content:getSize().h > room
     if truncated then
         local lines = math.max(1, math.floor(room / content:getLineHeight()))
         content:free()
-        content = Text.box("body", item.content, w, { max_lines = lines, transparent = true, face = face })
+        content = Text.box("body", body, w, { max_lines = lines, transparent = true, face = face })
     end
     local card = VerticalGroup:new{ align = "left", head, VerticalSpan:new{ width = space }, content }
     if pics then
         card[#card + 1] = VerticalSpan:new{ width = space }
         card[#card + 1] = pics
     end
+    if replies then
+        card[#card + 1] = VerticalSpan:new{ width = space }
+        card[#card + 1] = replies
+    end
     self.cards[i] = require("ui.themes.widgets.tap").wrap(card, truncated and function()
         require("ui.themes.widgets.text_viewer"):new{
             title = _("段评") .. " · " .. item.author,
-            text = item.content,
+            text = body,
         }:show()
     end or nil)
     return self.cards[i]
@@ -221,6 +235,20 @@ function Sheet:thumbs(images)
     return row
 end
 
+--- 回复入口。回复页本身、没有条数、源没有回复接口时不画。
+---@param item WechatReview
+---@return table|nil
+function Sheet:replyLine(item)
+    local source = self.identity and self.identity.source
+    if self.reply_page or (item.replies or 0) <= 0 or not (source and source.paragraphReviewRepliesAsync) then
+        return nil
+    end
+    local line = Text.line("caption", T(_("%1 条回复"), item.replies), { color = self.theme.color.muted })
+    return require("ui.themes.widgets.tap").wrap(line, function()
+        Sheet.openReplies(self.identity, item)
+    end)
+end
+
 --- 按卡片高度贪心分页；首页先放原句，首条按扣掉引用后的剩余高度截断，
 --- 避免长段评整条被挤到第二页、第一页只剩引用。
 function Sheet:paginate()
@@ -246,7 +274,9 @@ function Sheet:rebuild()
     if self.page == 1 then body[#body + 1] = self:quote() end
     local range = self.pages[self.page]
     if #self.items == 0 then
-        body[#body + 1] = Icon.label{ name = "forum", text = self.loaded and _("暂无段评") or _("正在加载段评…"),
+        body[#body + 1] = Icon.label{ name = "forum", text = self.loaded
+            and (self.reply_page and _("暂无回复") or _("暂无段评"))
+            or (self.reply_page and _("正在加载回复…") or _("正在加载段评…")),
             size = t.control.icon, color = Blitbuffer.Color8(t.color.faint),
             face = "cfont", font_size = t.font.body, gap = Theme.px(t.space.sm) }
     end
@@ -262,7 +292,9 @@ function Sheet:rebuild()
     local can_digest = #self.items > 0 and require("ai").isConfigured()
     local bar = TitleBar.widget({
         width = w,
-        title = self.loaded and T(_("段评 · 共 %1 条"), self.total) or _("段评"),
+        title = self.reply_page
+            and (self.loaded and T(_("回复 · 共 %1 条"), self.total) or _("回复"))
+            or (self.loaded and T(_("段评 · 共 %1 条"), self.total) or _("段评")),
         left_icon = can_digest and "auto_awesome" or nil,
         left_callback = can_digest and function()
             require("features.reviews.digest").run(self.spot.text, self.items)
@@ -310,11 +342,18 @@ function Sheet:load()
     if self.job or not self.more then return end
     local Toast = require("ui.themes.widgets.toast")
     local source = self.identity.source --[[@as ParagraphReviewSource]]
+    if self.reply_page and not source.paragraphReviewRepliesAsync then
+        Toast:new{ text = _("无法获取回复"), timeout = 2 }:show()
+        self.turn_after_load = false
+        if not self.loaded then self:close() end
+        return
+    end
+    local fetch = self.reply_page and source.paragraphReviewRepliesAsync or source.paragraphReviewPageAsync
     local done = false
-    local job = source:paragraphReviewPageAsync(self.identity, self.spot.range, self.max_idx, function(page, err)
+    local job = fetch(source, self.identity, self.spot.range, self.max_idx, function(page, err)
         done, self.job = true, nil
         if not page then
-            Toast:new{ text = err or _("无法获取段评"), timeout = 2 }:show()
+            Toast:new{ text = err or (self.reply_page and _("无法获取回复") or _("无法获取段评")), timeout = 2 }:show()
             self.turn_after_load = false
             if not self.loaded then self:close() end
             return
@@ -352,6 +391,17 @@ end
 ---@param spot { range: string, text: string, total: integer }
 function Sheet.open(identity, spot)
     Sheet:new{ identity = identity, spot = spot }:show()
+end
+
+--- 打开某条评论的回复。range 带评论 id，引用是这条评论的正文。
+---@param identity BookIdentity
+---@param item WechatReview
+function Sheet.openReplies(identity, item)
+    Sheet:new{
+        identity = identity,
+        reply_page = true,
+        spot = { range = item.id, text = item.content, total = item.replies },
+    }:show()
 end
 
 return Sheet

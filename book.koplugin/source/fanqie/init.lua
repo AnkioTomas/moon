@@ -496,4 +496,14 @@ function Source:paragraphReviewPageAsync(identity, range, max_idx, cb)
     end, cb)
 end
 
+--- 某条段评的一页回复。不走段评缓存。
+---@param _identity BookIdentity
+---@param review_id string
+---@param max_idx integer|string
+---@param cb fun(page: WechatReviewPage|nil, err: string|nil)
+---@return CancelHandle
+function Source:paragraphReviewRepliesAsync(_identity, review_id, max_idx, cb)
+    return require("source.fanqie.reviews").repliesAsync(self.settings, review_id, max_idx, cb)
+end
+
 return M

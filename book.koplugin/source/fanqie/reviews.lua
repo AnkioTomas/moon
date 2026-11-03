@@ -4,6 +4,7 @@
 协议要点（与正文同一套设备签名，见 reading.lua）：
 - 统计 ``idea/list`` 只能 GET 无 body；列表 ``comment/list`` 是 POST，body 里 comment_source=2、
   group_type=15，翻页游标是 body 里的字符串偏移（首屏空串）。
+- 回复 ``reply/list/{comment_id}`` 同样是 POST，comment_source 必须是 5；条数在评论的 stat.reply_count。
 - 签名不合规时服务端回 200 空响应，signedAsync 已把空响应归为失败，不会当成「没有段评」。
 - 章节正文段落形如 ``<p ...><blk p_idx="N">正文</blk></p>``，统计的键就是 blk 的 p_idx。
 
@@ -19,6 +20,8 @@ local Reviews = {}
 
 local STATS_PATH = "/novel/commentapi/idea/list/%s/v1/"
 local LIST_PATH = "/novel/commentapi/comment/list/%s/v1/"
+-- 回复哪条只由 URL 里的 comment_id 决定；body 的 comment_source 必须是 5，列表是 2。
+local REPLY_PATH = "/novel/commentapi/reply/list/%s/v1/"
 local PAGE_SIZE = 20
 -- 段评气泡跟在段末：只用段尾这么多个字定位（要唯一），气泡画在最后一行右侧。
 
@@ -117,6 +120,33 @@ local function item(entry)
         author = tostring(base.user_name or common.user_name or ""),
         content = tostring(content.text or common.text or ""),
         likes = tonumber(stat.digg_count) or 0,
+        replies = tonumber(stat.reply_count) or 0,
+        images = images(content),
+        time = created > 1e11 and math.floor(created / 1000) or created,
+    }
+end
+
+--- 回复条目。公共块字段名是 Common（也见过小写）；楼中楼用 reply_to_user_info，不再开下一页。
+---@param entry table
+---@return WechatReview
+local function replyItem(entry)
+    local common = type(entry.Common) == "table" and entry.Common
+        or (type(entry.common) == "table" and entry.common or {})
+    local user = type(common.user_info) == "table" and common.user_info or {}
+    local base = type(user.base_info) == "table" and user.base_info or user
+    local content = type(common.content) == "table" and common.content or {}
+    local stat = type(entry.stat) == "table" and entry.stat or {}
+    local to_info = type(entry.reply_to_user_info) == "table" and entry.reply_to_user_info or {}
+    local to_base = type(to_info.base_info) == "table" and to_info.base_info or to_info
+    local created = tonumber(common.create_timestamp or common.create_time) or 0
+    local reply_to = to_base.user_name
+    return {
+        id = tostring(entry.reply_id or ""),
+        author = tostring(base.user_name or ""),
+        content = tostring(content.text or ""),
+        likes = tonumber(stat.digg_count) or 0,
+        replies = 0,
+        reply_to = type(reply_to) == "string" and reply_to ~= "" and reply_to or nil,
         images = images(content),
         time = created > 1e11 and math.floor(created / 1000) or created,
     }
@@ -165,6 +195,56 @@ function Reviews.pageAsync(settings, book_id, item_id, para_index, max_idx, cb)
             total = tonumber(info.total) or #items,
             max_idx = cursor or max_idx,
             more = info.has_more == true and cursor ~= nil and cursor > max_idx and #items > 0,
+        })
+    end)
+end
+
+--- 某条段评的一页回复。max_idx 即游标（首页 0 → 空串）。
+--- 空列表且 total>0 是风控的空成功，不当成「没有回复」。
+---@param settings FanqieSettings
+---@param comment_id string
+---@param max_idx integer|string
+---@param cb fun(page: WechatReviewPage|nil, err: string|nil)
+---@return CancelHandle
+function Reviews.repliesAsync(settings, comment_id, max_idx, cb)
+    local JSON = require("json")
+    local prev = (max_idx == 0 or max_idx == "") and "" or tostring(max_idx)
+    return call(settings, "reply_list", REPLY_PATH:format(tostring(comment_id)), function()
+        return JSON.encode({
+            comment_id = tostring(comment_id),
+            comment_source = 5,
+            comment_type = 1,
+            group_type = 15,
+            count = PAGE_SIZE,
+            cursor = prev,
+        })
+    end, function(wire, err)
+        if not wire then
+            cb(nil, err)
+            return
+        end
+        local data = type(wire.data) == "table" and wire.data or {}
+        local list = data.reply_list
+        if type(list) ~= "table" then
+            cb(nil, "番茄段评回复响应缺少 reply_list")
+            return
+        end
+        local info = type(data.comment_list_info) == "table" and data.comment_list_info or {}
+        if #list == 0 and (tonumber(info.total) or 0) > 0 then
+            cb(nil, "番茄段评回复列表为空")
+            return
+        end
+        local items = {}
+        for _idx, entry in ipairs(list) do
+            if type(entry) == "table" then items[#items + 1] = replyItem(entry) end
+        end
+        local cursor = info.cursor
+        local next_cursor = cursor == nil and prev or tostring(cursor)
+        cb({
+            items = items,
+            total = tonumber(info.total) or #items,
+            max_idx = next_cursor,
+            more = info.has_more == true and next_cursor ~= "" and next_cursor ~= prev and #items > 0,
         })
     end)
 end
