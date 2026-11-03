@@ -97,7 +97,7 @@ Assert.eq(fetches, 1)
 local ChapterBi = require("features.translate.chapter")
 require("source.chapter").variant = ChapterBi.resolve
 ChapterBi.set(identity, { engine = "edge", lang = "zh" })
-local bi = ChapterBi.pathFor(origin, ChapterBi.get(identity))
+local bi = Paths.bilingualChapterPath(origin)
 assert(require("utils.paths").ensureDir(bi:match("^(.*)/[^/]+$")))
 local translated = assert(io.open(bi, "wb"))
 assert(translated:write(html .. "<!-- translated -->"))
