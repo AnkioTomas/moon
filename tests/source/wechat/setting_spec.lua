@@ -47,7 +47,10 @@ package.preload["ui.themes.widgets.row"] = function()
 end
 local auth_changed = 0
 package.preload["source.registry"] = function()
-    return { reload = function() auth_changed = auth_changed + 1 end }
+    return {
+        reload = function() auth_changed = auth_changed + 1 end,
+        invalidate = function() end,
+    }
 end
 
 package.loaded["source.wechat.setting"] = nil

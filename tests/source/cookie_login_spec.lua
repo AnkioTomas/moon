@@ -31,7 +31,10 @@ Assert.eq(CookieLogin.fromPayload(payload, "qq.com"), "")
 -- save：空串不打接口；校验失败不写配置；通过才写配置 + auth.ok + 重载源；store 可自定义
 do
     local reloads, oks, checks = 0, {}, {}
-    package.loaded["source.registry"] = { reload = function() reloads = reloads + 1 end }
+    package.loaded["source.registry"] = {
+        reload = function() reloads = reloads + 1 end,
+        invalidate = function() end,
+    }
     package.loaded["source.auth"] = { ok = function(id) oks[#oks + 1] = id end, expired = function() return false end }
     local Settings = require("utils.settings")
     local cfg = Settings.getSource("cookietest")
