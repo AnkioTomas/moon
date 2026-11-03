@@ -32,11 +32,16 @@ end
 ---@return string|nil err
 function ShelfImport.stash(body)
     Paths.ensureDir(Paths.sourceCacheDir(SOURCE_ID))
-    local file, err = io.open(ShelfImport.path(), "wb")
+    local path = ShelfImport.path()
+    local file, err = io.open(path .. ".part", "wb")
     if not file then return false, tostring(err) end
     local ok, werr = file:write(body)
     file:close()
-    if not ok then return false, tostring(werr) end
+    if ok then ok, werr = os.rename(path .. ".part", path) end
+    if not ok then
+        os.remove(path .. ".part")
+        return false, tostring(werr)
+    end
     return true
 end
 

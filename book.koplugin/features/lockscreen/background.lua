@@ -171,8 +171,7 @@ local BACKGROUND_IDS = { "custom", "bing", "myrl", "paper", "danxiangli", "cover
 --- 不合格的条目记日志跳过。没提供 backgrounds 的插件直接跳过。
 ---@return table[] backgrounds, boolean ready
 local function externalBackgrounds()
-    local ok, External = pcall(require, "utils.external")
-    if not ok then return {}, true end
+    local External = require("utils.external")
     local items, ready = External.collect("lockscreen")
     local out, seen = {}, {}
     for id in pairs(BACKGROUNDS) do seen[id] = true end
