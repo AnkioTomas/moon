@@ -21,6 +21,11 @@ local TAPS = {
     { value = "open", text = _("打开书籍") },
     { value = "detail", text = _("进入详情") },
 }
+local EXTRA_ACTIONS = {
+    { value = "none", text = _("无动作") },
+    { value = "open", text = _("打开书籍") },
+    { value = "detail", text = _("进入详情") },
+}
 
 ---@param desktop table
 ---@param key string settings/ui.lua 里的键
@@ -132,6 +137,9 @@ function Library:sections(desktop)
         { title = _("书库"), rows = {
             tabsRow(desktop),
             choiceRow(desktop, "library_tap", "touch_app", _("点击书籍"), _("点封面时的动作"), TAPS),
+            choiceRow(desktop, "library_double_tap", "touch_app", _("双击书籍"),
+                _("开启后书库里的单击会多等一瞬，以区分双击"), EXTRA_ACTIONS),
+            choiceRow(desktop, "library_hold", "touch_app", _("长按书籍"), _("长按封面时的动作"), EXTRA_ACTIONS),
         } },
         { title = _("随机一本"), rows = {
             toggleRow(desktop, "library_random", "casino", _("显示随机一本"),

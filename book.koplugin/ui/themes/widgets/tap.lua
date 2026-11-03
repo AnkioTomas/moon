@@ -1,9 +1,10 @@
 --[[--
 点击区：给任意控件套一层 tap / hold 手势，尺寸取控件本身。
-点按与长按都为 nil 时原样返回控件（不吞事件）。
+点按、长按、双击都为 nil 时原样返回控件（不吞事件）。
+双击只在顶层窗口开着 `disable_double_tap = false` 时才会送达，且此时单击要多等一个双击间隔。
 
   Tap.wrap(widget, function(ges) … end)
-  Tap.wrap(widget, tap_fn, hold_fn)   -- ges.pos 是点按 / 长按坐标；点击区自身位置在返回值的 dimen
+  Tap.wrap(widget, tap_fn, hold_fn, double_fn)   -- ges.pos 是点按 / 长按 / 双击坐标；点击区自身位置在返回值的 dimen
 
 @module koplugin.book.ui.themes.widgets.tap
 --]]
@@ -18,9 +19,10 @@ local Tap = {}
 ---@param widget table
 ---@param callback fun(ges: table)|nil
 ---@param hold_callback fun(ges: table)|nil
+---@param double_callback fun(ges: table)|nil
 ---@return table
-function Tap.wrap(widget, callback, hold_callback)
-    if not callback and not hold_callback then return widget end
+function Tap.wrap(widget, callback, hold_callback, double_callback)
+    if not callback and not hold_callback and not double_callback then return widget end
     local size = widget:getSize()
     local tap = InputContainer:new{ dimen = Geom:new{ x = 0, y = 0, w = size.w, h = size.h }, widget }
     tap.ges_events = {}
@@ -44,6 +46,17 @@ function Tap.wrap(widget, callback, hold_callback)
         function tap:onHoldThemeArea(owner, ges)
             if owner ~= nil and owner ~= self then return end
             hold_callback(ges)
+            return true
+        end
+    end
+    if double_callback then
+        tap.ges_events.DoubleTapThemeArea = {
+            GestureRange:new{ ges = "double_tap", range = function() return tap.dimen end },
+            args = tap,
+        }
+        function tap:onDoubleTapThemeArea(owner, ges)
+            if owner ~= nil and owner ~= self then return end
+            double_callback(ges)
             return true
         end
     end

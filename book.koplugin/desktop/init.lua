@@ -297,6 +297,7 @@ function Desktop:init()
     self.insight = Insight:new{ desktop = self, name = "insight" }
     self.settings = Settings:new{ desktop = self }
     self:restoreView()
+    self:syncDoubleTap()
     self.topbar = TopBar:new{ desktop = self }
     self.ges_events = {
         SwipeTopBar = Gesture.range("swipe", function() return 0 end, TopBar.height),
@@ -591,9 +592,21 @@ function Desktop:updateView()
             UIManager:setDirty(self, "ui", Geom:new{ x = 0, y = top_h, w = self.dimen.w, h = self.dimen.h - top_h })
         end
     end
+    self:syncDoubleTap()
     logger.dbg("book.perf desktop.updateView", Perf.elapsedMs(started_at), "ms", self.tab)
     if self.settings_overlay then
         self.settings_overlay:updateView()
+    end
+end
+
+--- 只有书库页配了双击封面才让 KOReader 识别双击（识别双击要让所有单击多等一个间隔）。
+--- UIManager 只在窗口开关时重读这个标志，桌面就在最上层时直接改输入层。
+function Desktop:syncDoubleTap()
+    local want = self.tab == "library" and MoonSettings.get("ui").library_double_tap ~= "none"
+    self.disable_double_tap = not want
+    local stack = UIManager._window_stack
+    if stack[#stack] and stack[#stack].widget == self then
+        Device.input.disable_double_tap = not want
     end
 end
 

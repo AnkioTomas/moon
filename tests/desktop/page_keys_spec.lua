@@ -17,6 +17,7 @@ for _, name in ipairs({
     package.preload[name] = ctorModule
 end
 package.preload["ui/geometry"] = ctorModule
+package.preload["ui/uimanager"] = function() return { _window_stack = {} } end
 package.preload["desktop.gesture"] = function() return { range = function() return {} end } end
 package.preload["gettext"] = function() return function(text) return text end end
 local desktop_settings = {}
