@@ -126,3 +126,17 @@ pollWhileVisible(refreshStatus, 30000);
         xhr.send(file);
     };
 })();
+
+/* 格式化：清空月读全部数据后设备自动重启。 */
+el('fmbtn').onclick = function () {
+    var state = el('fmstate');
+    if (!window.confirm(t('将清空月读的书库、进度、阅读记录、笔记和全部配置，并重启 KOReader，无法恢复，继续吗？'))) return;
+    el('fmbtn').disabled = true;
+    setState(state, '清除中…', '');
+    jfetch('/api/reset', { method: 'POST' }).then(function () {
+        setState(state, '已清除 ✓ KOReader 正在重启，稍后可重新连接。', 'ok');
+    }).catch(function (err) {
+        setState(state, t('清除失败：%1', err.message || String(err)), 'err');
+        el('fmbtn').disabled = false;
+    });
+};

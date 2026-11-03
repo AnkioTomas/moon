@@ -108,18 +108,23 @@ local function rmtree(lfs, path)
     end
 end
 
---- 清除全部配置：删 settings 目录整棵树与给定文件（crash.log 等），书库、字体、词库不动。
+--- 格式化：删 root 下全部顶层条目（书库、笔记、进度、统计、配置、缓存、词库……）与给定文件（crash.log 等）。
+--- 保留 fonts（主进程 mmap 着，删了会 SIGBUS）、backups（补丁原文件，还原核心补丁要用）与 book.log*。
 ---@param lfs table
----@param settings_dir string
+---@param root string
 ---@param files string[]
 ---@return boolean ok
 ---@return string|nil err
-function Backup.clearConfig(lfs, settings_dir, files)
-    rmtree(lfs, settings_dir)
-    for _idx, path in ipairs(files) do os.remove(path) end
-    if lfs.attributes(settings_dir, "mode") then
-        return false, "settings not fully removed"
+function Backup.format(lfs, root, files)
+    local left = false
+    for name in lfs.dir(root) do
+        if name ~= "." and name ~= ".." and name ~= "fonts" and name ~= "backups" and not name:match("^book%.log") then
+            rmtree(lfs, root .. "/" .. name)
+            if lfs.attributes(root .. "/" .. name, "mode") then left = true end
+        end
     end
+    for _idx, path in ipairs(files) do os.remove(path) end
+    if left then return false, "not fully removed" end
     return true
 end
 
@@ -270,7 +275,7 @@ function Backup.route(self, conn, method, headers)
     end)
 end
 
---- 路由：POST /api/reset 清除全部配置与 crash.log，设备提示后重启（由 handlers.reset_config 负责）。
+--- 路由：POST /api/reset 格式化月读数据（见 Backup.format），设备提示后重启（由 handlers.reset_config 负责）。
 ---@param conn table
 ---@param method string
 function Backup.reset(self, conn, method)
