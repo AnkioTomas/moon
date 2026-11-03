@@ -8,6 +8,7 @@ local Assert = require("support.assert")
 local Probe = require("features.battery.probe")
 
 local tree
+local gauge_word
 
 local function fs()
     return {
@@ -27,6 +28,7 @@ local function fs()
             table.sort(out)
             return out
         end,
+        i2c_word = function(_bus, _addr, _reg) return gauge_word end,
     }
 end
 
@@ -160,8 +162,8 @@ Assert.eq(novolt.reading.charge_full_mah, 1450)
 Assert.eq(novolt.reading.charge_design_mah, 1453)
 Assert.is_true(math.abs(novolt.reading.current_ma - (-45.954)) < 1e-6)
 
--- Paperwhite 3 / Voyage：max77696 的 charge_full_design 是板级死值 790000 µAh。
--- 电量计 DESIGNCAP 0x0B00 = 1408 mAh。不换的话健康度 = 现在充满 / 790。
+-- max77696 的 charge_full_design 是板级死值 790 mAh。设计容量在电量计 DESIGNCAP，0.5 mAh/LSB。
+-- 0x0B00 = 1408，0x075A = 941。不读寄存器时，充满 1380 的健康度是 1380/790。
 tree = {
     ["/sys/class/power_supply/max77696-battery/type"] = "Battery\n",
     ["/sys/class/power_supply/max77696-battery/capacity"] = "75\n",
@@ -170,32 +172,85 @@ tree = {
     ["/sys/class/power_supply/max77696-battery/charge_now"] = "1050\n",
     ["/sys/class/power_supply/max77696-battery/charge_full"] = "1380\n",
     ["/sys/class/power_supply/max77696-battery/charge_full_design"] = "790000\n",
+    ["/sys/bus/i2c/devices/0-0034/name"] = "max77696-battery\n",
 }
-local pw3 = Probe.read(fs(), "KindlePaperWhite3")
-Assert.eq(pw3.reading.charge_full_mah, 1380)
-Assert.eq(pw3.reading.charge_now_mah, 1050)
-Assert.eq(pw3.reading.charge_design_mah, 1408)
-Assert.is_true(math.abs(pw3.reading.health_pct - (1380 / 1408 * 100)) < 1e-6)
-Assert.eq(pw3.reading.voltage_v, 4.1)
-Assert.eq(pw3.reading.current_ma, -40)
+gauge_word = 0x0B00
+local from_gauge = Probe.read(fs())
+Assert.eq(from_gauge.reading.charge_full_mah, 1380)
+Assert.eq(from_gauge.reading.charge_now_mah, 1050)
+Assert.eq(from_gauge.reading.charge_design_mah, 1408)
+Assert.is_true(math.abs(from_gauge.reading.health_pct - (1380 / 1408 * 100)) < 1e-6)
+Assert.eq(from_gauge.reading.voltage_v, 4.1)
+Assert.eq(from_gauge.reading.current_ma, -40)
 
-local voyage = Probe.read(fs(), "KindleVoyage")
-Assert.eq(voyage.reading.charge_design_mah, 1408)
+gauge_word = 0x075A
+local bourbon = Probe.read(fs())
+Assert.eq(bourbon.reading.charge_design_mah, 941)
+Assert.is_nil(bourbon.reading.health_pct, "充满高于设计容量：电量计没学到衰减，不给健康度")
 
--- 不知道机型就保持节点原值，不拿 1408 去套别的 max77696。
-local unknown = Probe.read(fs())
-Assert.eq(unknown.reading.charge_design_mah, 790)
-Assert.is_true(math.abs(unknown.reading.health_pct - (1380 / 790 * 100)) < 1e-6)
+-- 寄存器越界（当没读到）和读失败都不用 790 冒充。
+gauge_word = 0xFFFF
+local huge = Probe.read(fs())
+Assert.is_nil(huge.reading.health_pct)
+Assert.is_nil(huge.reading.charge_design_mah)
+gauge_word = nil
+local unread = Probe.read(fs())
+Assert.is_true(not unread.supported)
+Assert.is_nil(unread.reading.health_pct)
+Assert.is_nil(unread.reading.charge_design_mah)
+Assert.eq(unread.reading.charge_full_mah, 1380)
 
--- 死值写成毫安时而不是微安时，同样换掉。
-tree["/sys/class/power_supply/max77696-battery/charge_full_design"] = "790\n"
-local milli = Probe.read(fs(), "KindlePaperWhite3")
-Assert.eq(milli.reading.charge_design_mah, 1408)
-
--- 不是这块板级死值就不要改，哪怕机型对得上。
+-- 不是这块死值就不要碰电量计，哪怕寄存器里是另一颗电芯的数。
+gauge_word = 0x075A
 tree["/sys/class/power_supply/max77696-battery/charge_full_design"] = "1408000\n"
-local fixed = Probe.read(fs(), "KindlePaperWhite3")
+local fixed = Probe.read(fs())
 Assert.eq(fixed.reading.charge_design_mah, 1408)
 tree["/sys/class/power_supply/max77696-battery/charge_full_design"] = "1320000\n"
-local other = Probe.read(fs(), "KindlePaperWhite3")
+local other = Probe.read(fs())
 Assert.eq(other.reading.charge_design_mah, 1320)
+
+-- 这台 Kindle Basic 的节点：DESIGNCAP 0x075A，充满已经等于设计容量。
+tree = {
+    ["/sys/class/power_supply/max77696-battery/type"] = "Battery\n",
+    ["/sys/class/power_supply/max77696-battery/capacity"] = "89\n",
+    ["/sys/class/power_supply/max77696-battery/voltage_now"] = "4059\n",
+    ["/sys/class/power_supply/max77696-battery/current_now"] = "-124\n",
+    ["/sys/class/power_supply/max77696-battery/charge_now"] = "860\n",
+    ["/sys/class/power_supply/max77696-battery/charge_full"] = "941\n",
+    ["/sys/class/power_supply/max77696-battery/charge_full_design"] = "790000\n",
+    ["/sys/class/power_supply/max77696-battery/cycle_count"] = "112\n",
+    ["/sys/bus/i2c/devices/0-0034/name"] = "max77696-battery\n",
+}
+gauge_word = 0x075A
+local basic = Probe.read(fs())
+Assert.eq(basic.reading.charge_full_mah, 941)
+Assert.eq(basic.reading.charge_now_mah, 860)
+Assert.eq(basic.reading.charge_design_mah, 941)
+Assert.eq(basic.reading.cycles, 112)
+Assert.is_nil(basic.reading.health_pct, "充满等于设计容量：无法判断")
+Assert.is_true(basic.supported)
+Assert.eq(basic.reading.voltage_v, 4.059)
+Assert.eq(basic.reading.current_ma, -124)
+
+-- 多块电池：容量求和，健康度 = 总充满 / 总设计；没设计容量的不参与。
+tree = {
+    ["/sys/class/power_supply/bat0/type"] = "Battery\n",
+    ["/sys/class/power_supply/bat0/charge_now"] = "1000000\n",
+    ["/sys/class/power_supply/bat0/charge_full"] = "2000000\n",
+    ["/sys/class/power_supply/bat0/charge_full_design"] = "2500000\n",
+    ["/sys/class/power_supply/bat0/battery_cycle"] = "10\n",
+    ["/sys/class/power_supply/bat1/type"] = "Battery\n",
+    ["/sys/class/power_supply/bat1/charge_now"] = "500000\n",
+    ["/sys/class/power_supply/bat1/charge_full"] = "1000000\n",
+    ["/sys/class/power_supply/bat1/charge_full_design"] = "1500000\n",
+    ["/sys/class/power_supply/bat1/battery_cycle"] = "30\n",
+    ["/sys/class/power_supply/bat2/type"] = "Battery\n",
+}
+local pair = Probe.read(fs())
+Assert.is_true(pair.supported)
+Assert.eq(pair.reading.charge_full_mah, 3000)
+Assert.eq(pair.reading.charge_design_mah, 4000)
+Assert.eq(pair.reading.charge_now_mah, 1500)
+Assert.eq(pair.reading.health_pct, 75)
+Assert.eq(pair.reading.capacity, 50)
+Assert.eq(pair.reading.cycles, 30)

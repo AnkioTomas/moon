@@ -20,9 +20,10 @@ require("utils.extension").add("setting.device_section", {
     icon = "battery_android_full",
     title = _("电池"),
     status = function()
-        local result = require("features.battery.probe").read(nil, require("device").model)
+        local result = require("features.battery.probe").read()
         if not result.supported or not result.reading then return _("不支持") end
-        return string.format("%.1f%%", result.reading.health_pct)
+        local pct = result.reading.health_pct
+        return pct and string.format("%.1f%%", pct) or _("无法判断")
     end,
     refresh_seconds = 15,
     sections = function() return require("features.battery.page").sections() end,

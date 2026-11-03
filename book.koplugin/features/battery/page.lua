@@ -91,7 +91,7 @@ local function unsupported(report)
         {
             title = _("此设备不支持"),
             rows = {
-                infoRow("battery_android_full", _("健康度"), _("不支持"), _("内核没有设计容量，算不出来。")),
+                infoRow("battery_android_full", _("健康度"), _("不支持"), _("读不到设计容量，算不出来。")),
                 function(iw)
                     return Row.widget({
                         width = iw, kind = "nav", icon = "bug_report",
@@ -107,11 +107,13 @@ end
 
 ---@return BookThemeSection[]
 function Page.sections()
-    local result = Probe.read(nil, require("device").model)
+    local result = Probe.read()
     if not result.supported then return unsupported(result.report) end
     local row = result.reading
     local rows = {
-        infoRow("battery_android_full", _("健康度"), string.format("%.1f%%", row.health_pct)),
+        infoRow("battery_android_full", _("健康度"),
+            row.health_pct and string.format("%.1f%%", row.health_pct) or _("无法判断"),
+            not row.health_pct and _("电量计没有记录到容量衰减，读数等于或高于出厂值。") or nil),
     }
     if row.cycles then
         rows[#rows + 1] = infoRow("autorenew", _("循环次数"), string.format("%.0f", row.cycles))
