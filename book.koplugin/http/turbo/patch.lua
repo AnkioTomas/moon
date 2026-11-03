@@ -35,15 +35,13 @@ local function dropAlt(stream)
 end
 
 --- 换上这一族的 socket。v4 且流上已经是 v4 socket 时不动（HTTPClient 建好的那只）。
---- 没有 LuaSocket（离线测试）时直接放行，让原来的 connect 拿地址。
 ---@param stream table
 ---@param addr string
 ---@return boolean
 local function install(stream, addr)
     local want6 = is6(addr)
     if not want6 and stream.socket and not stream._book_v6 then return true end
-    local ok, socket = pcall(require, "socket")
-    if not ok or type(socket) ~= "table" then return true end
+    local socket = require("socket")
     local make = want6 and socket.tcp6 or socket.tcp
     -- 没有对应构造函数（离线测试的 socket 桩）：地址照旧交给原来的 connect。
     if type(make) ~= "function" then return true end
@@ -96,8 +94,8 @@ end
 ---@param on_fail function
 ---@param arg any
 local function arm(stream, addr, port, on_ok, on_fail, arg)
-    local ok, socket = pcall(require, "socket")
-    if not ok or type(socket) ~= "table" or type(socket.select) ~= "function" then return end
+    local socket = require("socket")
+    if type(socket.select) ~= "function" then return end
     local make = is6(addr) and socket.tcp6 or socket.tcp
     if type(make) ~= "function" then return end
     local alt = { addr = addr, port = port }
