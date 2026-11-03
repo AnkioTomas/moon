@@ -98,15 +98,20 @@ end
 ---@param plugin table
 ---@param session ReaderSessionSnapshot
 ---@param skip_pull boolean|nil 连续章节切章导航：跳过云端进度拉取与注解拉取
-local function bootstrapReading(plugin, session, skip_pull)
+---@param span PerfSpan reader.ready 分段；各步单独记，慢在 warn 行里能看见
+local function bootstrapReading(plugin, session, skip_pull, span)
     require("reader.session.stats").start(session)
-    require("reader.page").onCreate(plugin)
+    span:lap("stats")
+    -- page.onCreate 自己再拆 features / pos / menus。
+    require("reader.page").onCreate(plugin, span)
     -- 首绘前同步写入注解：晚一个 tick 云端划线就要等下次刷新才出现。切章同样要重来，
-    -- 因为注解按 chapter_idx 分片。
-    require("reader.session.note").applyLocal(plugin.ui, session.identity)
+    -- 因为注解按 chapter_idx 分片。applyLocal 再拆 note_snap / note_derived。
+    require("reader.session.note").applyLocal(plugin.ui, session.identity, span)
     if skip_pull then return end
     require("reader.session.progress").pull(session)
+    span:lap("progress")
     require("reader.session.note").pull(plugin.ui, session.identity)
+    span:lap("pull")
 end
 
 --- 整书用已打开的文档补本地封面：云端没封面的书下载后靠它显示（书架/详情/锁屏认这个文件）。
@@ -275,8 +280,8 @@ function Session.onReaderReady(plugin)
     end
     span:lap("snapshot")
     updateReadState(Session._snapshot)
-    bootstrapReading(plugin, Session._snapshot, skip_pull)
-    span:lap("bootstrap")
+    span:lap("state")
+    bootstrapReading(plugin, Session._snapshot, skip_pull, span)
     if chapter_mode then
         ChapterMode.afterBootstrap(plugin, Session._snapshot)
         span:lap("after")
@@ -284,13 +289,18 @@ function Session.onReaderReady(plugin)
     span:finish(Session.SLOW_READY_MS, identity.source_id, chapter_mode and "chapter" or "book")
 end
 
---- 推送当前进度和注解。
+--- 推送当前进度和注解。span 可选：关书 / 休眠把同步段拆进同一条 warn。
 ---@param plugin table
-local function syncReading(plugin)
+---@param span PerfSpan|nil
+local function syncReading(plugin, span)
+    local function lap(name)
+        if span then span:lap(name) end
+    end
     local identity = Session._snapshot and Session._snapshot.identity
     local source = identity and identity.source
     -- 进度要在时长之后推：微信时长上报也会写云端位置，最后落地的必须是精确进度。
     if source then source:onEvent("reading_stopped", { identity = identity }) end
+    lap("event")
     local waiting, progress_saved = 2, false
     local function pushProgress()
         waiting = waiting - 1
@@ -307,6 +317,7 @@ local function syncReading(plugin)
             progress_saved = ok
             pushProgress()
         end)
+        lap("progress")
         require("reader.session.note").save(plugin.ui, identity, nil, function(ok)
             if ok and source.syncNotesAsync then
                 -- 关书只推脏注解；完整 pull 留给下次 ReaderReady，避免未收敛远端盖本地。
@@ -316,6 +327,7 @@ local function syncReading(plugin)
                 }, function() end)
             end
         end)
+        lap("notes")
     end
     require("reader.session.stats").stop(function()
         if source and source.syncStatsAsync then
@@ -326,25 +338,25 @@ local function syncReading(plugin)
             pushProgress()
         end
     end)
+    lap("stats")
 end
 
 --- CloseDocument：结清阅读状态；切章保留目录，真正关书清除全部章节状态。
 ---@param plugin table Book 插件实例
 function Session.onCloseDocument(plugin)
-    local Perf = require("utils.perf")
-    local started_at = Perf.now()
+    local span = require("utils.perf").begin("reader.close")
     if Session._snapshot and plugin.ui then
         require("reader.prefs").captureAndSave(plugin.ui, Session._snapshot.identity)
     end
-    Perf.slow("close prefs", started_at)
-    syncReading(plugin)
-    Perf.slow("close sync", started_at)
+    span:lap("prefs")
+    syncReading(plugin, span)
     require("reader.session.auto_toc").stop(Session._snapshot)
-    Perf.slow("close total", started_at)
     if ChapterMode.onCloseDocument(Session._snapshot) then
         require("reader.session.progress").clearConflicts()
     end
     Session._snapshot = nil
+    span:lap("rest")
+    span:finish(Session.SLOW_READY_MS)
 end
 
 --- PageUpdate（分页视图）：结清上一页统计、刷新快照，并通知属主源。重画归 ReaderView，这里不再 setDirty（会多一次整屏刷新）。
@@ -403,10 +415,13 @@ end
 ---@param plugin table Book 插件实例
 function Session.onSuspend(plugin)
     if not plugin.ui.document then return end
+    local span = require("utils.perf").begin("reader.suspend")
     if Session._snapshot then
         require("reader.prefs").captureAndSave(plugin.ui, Session._snapshot.identity)
     end
-    syncReading(plugin)
+    span:lap("prefs")
+    syncReading(plugin, span)
+    span:finish(Session.SLOW_READY_MS)
 end
 
 --- 唤醒后恢复当前阅读会话的统计计时，并通知属主源（休眠时停掉的定时任务在这里重启）。
