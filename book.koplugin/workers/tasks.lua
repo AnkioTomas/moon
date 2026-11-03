@@ -1,7 +1,7 @@
 --[[--
 后台任务队列：用户发起、耗时长的操作，按 kind 分五类：
 `download` 资源下载（书城、字典、输入法词库）、`sync` 书库同步、`cache` 书籍缓存、
-`online` ankio.net 公共接口（天气 / 一言 / 摸鱼日报 / 必应；自动入队，不弹进度窗）、
+`online` ankio.net 公共接口（天气 / 一言 / 摸鱼日报 / 必应；自动入队，不弹进度窗，任务列表与顶栏计数不显示）、
 `ai` 逐段调用 AI 的整书分析（X-Ray 全书分析）、`convert` 生成整书衍生版（双语对照、重新排版）。
 
 同类可以并行，异类互斥：有任务在跑（或退避占位）时只放行同类；队首排队的是异类时后面的同类不插队，
@@ -386,13 +386,13 @@ end
 
 local ORDER = { running = 1, retry_wait = 1, waiting = 2, queued = 3 }
 
---- 任务快照：运行 / 退避中的在前，其次等待网络的，最后排队的；同组按入队顺序。返回副本。
+--- 任务快照（不含 online：天气 / 一言等后台小请求不在任务列表里露面）：运行 / 退避中的在前，其次等待网络的，最后排队的；同组按入队顺序。返回副本。
 ---@return { key: string, kind: BookTaskKind, title: string|nil, state: string, text: string|nil, count: integer, total: integer, attempt: integer, restartable: boolean }[]
 function Tasks.tasks()
     local out = {}
     for group = 1, 3 do
         for _idx, task in ipairs(list) do
-            if ORDER[task.state] == group then out[#out + 1] = snapshot(task) end
+            if ORDER[task.state] == group and task.kind ~= "online" then out[#out + 1] = snapshot(task) end
         end
     end
     return out
@@ -401,7 +401,11 @@ end
 --- 最近结束的任务（最多 10 条，新的在前，取消的不算）；state 为 finished，ok 表示成功。返回副本。
 ---@return table[]
 function Tasks.finished()
-    return { unpack(finished) }
+    local out = {}
+    for _idx, item in ipairs(finished) do
+        if item.kind ~= "online" then out[#out + 1] = item end
+    end
+    return out
 end
 
 --- 订阅状态改变。返回的 cancel 只注销观察者，绝不影响任务。

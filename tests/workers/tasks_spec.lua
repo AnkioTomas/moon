@@ -61,8 +61,10 @@ end
 Assert.errors(function() Tasks.enqueue(spec("bad", "other")) end, "unknown task kind")
 local online_ok = Tasks.enqueue(spec("online-ok", "online"))
 Assert.eq(online_ok.kind, "online")
+Assert.eq(#Tasks.tasks(), 0)
 online_ok.runs[1].done({ ok = true })
 Assert.eq(#Tasks.tasks(), 0)
+Assert.eq(#Tasks.finished(), 0, "online 不进最近结束")
 
 -- 有未结束任务（非 waiting）时压住自动休眠，空了 / 只剩 waiting 撤回。
 do
