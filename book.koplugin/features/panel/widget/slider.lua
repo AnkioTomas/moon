@@ -216,8 +216,11 @@ end
 ---@param ges table|nil
 ---@return boolean
 function SliderRow:onPan(_arg, ges)
-    local pos = ges and ges.pos
-    if self:zone(pos) ~= "track" then return true end
+    -- 起点不在轨道上（从别处按住滑过来）一律不调，也不让手势继续往下传。
+    local start = ges.start_pos
+    local inside = start.y >= self.dimen.y and start.y < self.dimen.y + self.dimen.h
+    if not inside or self:zone(start) ~= "track" or self:zone(ges.pos) ~= "track" then return true end
+    local pos = ges.pos
     return self:setFromPosition(pos, true)
 end
 
