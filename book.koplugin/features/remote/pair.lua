@@ -10,7 +10,7 @@
   GET  /api/pair?id=      轮询：{ state = "pending"|"approved"|"denied", token? }
 
 设备端（本文件下半部分，UI 函数内延迟加载）：同一时刻只有一个待批请求，新请求顶掉旧弹窗；
-批准即签发令牌写进 `features.remote` 设置的 `remote_paired[token] = { name, at }`，撤销 = 清表。
+批准即签发令牌写进 `features.remote` 设置的 `remote_paired[token] = { name, ip, at }`（同名同 IP 的旧令牌被替换），撤销 = 清表。
 
 @module koplugin.book.features.remote.pair
 --]]
@@ -107,7 +107,12 @@ local function settle(pending, state)
     if state == "approved" then
         local Settings = require("utils.settings")
         pending.token = randomHex()
-        Settings.get("features.remote").remote_paired[pending.token] = { name = pending.name, at = os.time() }
+        local paired = Settings.get("features.remote").remote_paired
+        -- 同一台机器的同一种浏览器重新授权（清了站点数据、换了设备地址）只留最新一条，别越攒越多。
+        for old, entry in pairs(paired) do
+            if entry.name == pending.name and entry.ip == pending.ip then paired[old] = nil end
+        end
+        paired[pending.token] = { name = pending.name, ip = pending.ip, at = os.time() }
         Settings.save("features.remote")
     end
 end
@@ -118,7 +123,7 @@ end
 ---@return string id
 function Pair.request(name, ip)
     Pair.cancel()
-    local pending = { id = randomHex(), name = name, state = "pending" }
+    local pending = { id = randomHex(), name = name, ip = ip, state = "pending" }
     Pair._pending = pending
     local T = require("ffi/util").template
     pending.dialog = require("ui.themes.widgets.confirm"):new{
