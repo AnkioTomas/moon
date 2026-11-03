@@ -25,6 +25,8 @@ return {
         home_recent_hide_finished = false,
         -- 一言 / 书摘整个组件是否居中。
         home_hitokoto_center = false,
+        -- 一言联网刷新间隔（秒）；0 = 不联网，只用内置句子与已有缓存。
+        home_hitokoto_ttl = 3600,
         home_excerpt_center = false,
         -- 阅读统计卡片底色不透明度（阅读统计、阅读小卡共用；百分比，0 = 全透明，露出壁纸）。
         home_stats_opacity = 100,

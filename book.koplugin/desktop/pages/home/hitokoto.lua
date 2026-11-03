@@ -27,6 +27,13 @@ local M = {
 setmetatable(M, require("desktop.pages.home.base"))
 M.__index = M
 
+local INTERVALS = {
+    { ttl = 600, label = _("联网刷新：10 分钟") },
+    { ttl = 3600, label = _("联网刷新：1 小时") },
+    { ttl = 86400, label = _("联网刷新：1 天") },
+    { ttl = 0, label = _("不联网（只用内置句子）") },
+}
+
 --- 署名一行：优先 source；否则 —— 作者 · 书名。
 ---@param quote table
 ---@return string
@@ -71,18 +78,26 @@ end
 ---@param desktop BookDesktop
 function M:showSettings(desktop)
     local on = self:centered()
-    require("ui.themes.widgets.sheet"):new{
-        title = self.label,
-        items = { {
-            text = (on and "✓ " or "") .. _("居中"),
+    local home = MoonSettings.get("desktop.pages.home")
+    local items = { {
+        text = (on and "✓ " or "") .. _("居中"),
+        callback = function()
+            home[self.center_key] = not on
+            MoonSettings.save("desktop.pages.home", home)
+            desktop:onEvent("home_refresh")
+        end,
+    } }
+    for _idx, opt in ipairs(INTERVALS) do
+        items[#items + 1] = {
+            text = (home.home_hitokoto_ttl == opt.ttl and "✓ " or "") .. opt.label,
             callback = function()
-                local home = MoonSettings.get("desktop.pages.home")
-                home[self.center_key] = not on
+                home.home_hitokoto_ttl = opt.ttl
                 MoonSettings.save("desktop.pages.home", home)
                 desktop:onEvent("home_refresh")
             end,
-        } },
-    }:show()
+        }
+    end
+    require("ui.themes.widgets.sheet"):new{ title = self.label, items = items }:show()
 end
 
 --- 正文（最多两行，heightRange 只留了两行）+ 加粗署名；默认靠左 / 署名靠右，居中时整块居中。
@@ -108,6 +123,9 @@ end
 
 --- 组件在页上才拉一言；没放一言组件的用户不产生后台任务。
 function M:onActivate()
+    local ttl = MoonSettings.get("desktop.pages.home").home_hitokoto_ttl
+    if ttl == 0 then return end
+    Hitokoto.ttl = ttl
     Hitokoto:ensure()
 end
 
