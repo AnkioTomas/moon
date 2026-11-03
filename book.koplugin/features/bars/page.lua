@@ -315,7 +315,6 @@ function ReaderBar:page(desktop, which)
                         value = m,
                         min = top and Layout.TOP_MARGIN_MIN or Layout.BOTTOM_MARGIN_MIN,
                         max = top and Layout.TOP_MARGIN_MAX or Layout.BOTTOM_MARGIN_MAX,
-                        step = 2,
                     } },
                     callback = function(v)
                         if top then Layout.setTopMargin(v) else writeFooterBottomMargin(v) end
