@@ -28,6 +28,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
   - toc 是不透明 JSON；getToc 可选 max_age，章节源目录不做时间保鲜（有就一直用，开书后台静默拉新）。
 跨表：只读 JOIN chapters（已下载口径）。改名 / 收编在同一事务里调核心依附表的 moveIdentity，
 再经 utils.event 发 book_identity_changed 给 feature 的表；撕墓碑同理调 removeIdentity 再发 book_removed；
+退出登录走 forgetSource：整源 DELETE（含在架行），不写墓碑，再发 source_forgotten。
 手动已读调 ProgressDB.markFinished。
 别的表只经其模块函数改，本表不写别的表的 SQL。
 
@@ -1021,6 +1022,19 @@ function BookDB.remove(source_id, stable_id)
             if not require(name).removeIdentity(source_id, stable_id) then return false end
         end
         return Event.emit("book_removed", source_id, stable_id)
+    end) == true
+end
+
+--- 退出登录：删掉这个源的全部书籍行和依附表，不留墓碑（留墓碑会被下次登录推成远端删除）。
+---@param source_id string
+---@return boolean
+function BookDB.forgetSource(source_id)
+    return DB.transaction(function()
+        if not DB.exec([[DELETE FROM books WHERE source_id=?;]], source_id) then return false end
+        for _idx, name in ipairs(IDENTITY_MODULES) do
+            if not require(name).removeSource(source_id) then return false end
+        end
+        return Event.emit("source_forgotten", source_id)
     end) == true
 end
 

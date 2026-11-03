@@ -458,6 +458,20 @@ do
     Assert.len(Tasks.tasks(), 0, "passive 结束也离开未结束列表")
 end
 
+-- cancelPrefixed：按 \0 边界取消，不误伤前缀相邻的 key。
+do
+    local mine = spec("dirty\0wechat", "sync")
+    local neighbor = spec("dirty\0wechat2", "ai")
+    Assert.not_nil(Tasks.enqueue(mine))
+    Assert.not_nil(Tasks.enqueue(neighbor))
+    Tasks.cancelPrefixed("dirty\0wechat")
+    Assert.is_nil(Tasks.get("dirty\0wechat"))
+    Assert.is_true(mine.runs[1].cancelled)
+    Assert.not_nil(Tasks.get("dirty\0wechat2"))
+    Tasks.get("dirty\0wechat2").cancel()
+    Assert.len(Tasks.tasks(), 0)
+end
+
 -- 未结束任务满 64 个后拒绝入队，带 queue_full（同类并行时在跑的也算）。
 do
     local accepted, reason = 0, nil

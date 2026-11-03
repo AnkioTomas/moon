@@ -33,6 +33,11 @@ function ChapterDB.removeIdentity(source_id, stable_id)
     return DB.removeIdentity("chapters", source_id, stable_id)
 end
 
+--- 退出登录：删掉这个源的全部章节登记。
+function ChapterDB.removeSource(source_id)
+    return DB.removeSource("chapters", source_id)
+end
+
 --- 按章节文件路径取身份
 ---@param path string
 ---@return { source_id: string, stable_id: string, chapter_idx: integer }|nil

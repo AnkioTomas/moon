@@ -287,6 +287,14 @@ function DB.removeIdentity(tbl, source_id, stable_id)
     return DB.exec("DELETE FROM " .. tbl .. " WHERE source_id=? AND stable_id=?;", source_id, stable_id) ~= nil
 end
 
+--- 删掉表里某个源的全部行（退出登录清本地记录；不留墓碑，也不上传）。
+---@param tbl string 表名（调用方保证可信，不含用户输入）
+---@param source_id string
+---@return boolean
+function DB.removeSource(tbl, source_id)
+    return DB.exec("DELETE FROM " .. tbl .. " WHERE source_id=?;", source_id) ~= nil
+end
+
 --- 把 source_id（单源字符串或多源表）收成 `col=?` / `col IN (…)`，并追加绑定参数。
 ---@param column string SQL 列名（调用方保证可信，不含用户输入）
 ---@param source_id string|string[]

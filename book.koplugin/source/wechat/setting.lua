@@ -166,20 +166,7 @@ function Setting.rows(plugin)
                 end)
             end })
     end
-    rows[#rows + 1] = function(iw)
-        return Row.widget({ width = iw, chevron = false, kind = "action", icon = "logout", title = _("退出登录"),
-            callback = function()
-                require("ui.themes.widgets.confirm"):new{
-                    text = _("确定退出微信读书账号？"),
-                    ok_text = _("退出登录"),
-                    ok_callback = function()
-                        Auth.clearSession()
-                        Toast:new{ text = _("已退出"), timeout = 2 }:show()
-                        require("source.registry").reload()
-                    end,
-                }:show()
-            end })
-    end
+    rows[#rows + 1] = require("source.logout").row(SOURCE_ID, _("确定退出微信读书账号？"), Auth.clearSession)
     return rows
 end
 

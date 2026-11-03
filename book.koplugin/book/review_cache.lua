@@ -47,6 +47,11 @@ function ReviewCache.removeIdentity(source_id, stable_id)
     return DB.removeIdentity("review_cache", source_id, stable_id)
 end
 
+--- 退出登录：删掉这个源的全部段评缓存。
+function ReviewCache.removeSource(source_id)
+    return DB.removeSource("review_cache", source_id)
+end
+
 ---@param identity ReviewCacheIdentity
 ---@param kind "hot"|"page"
 ---@param key string

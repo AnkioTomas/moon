@@ -367,11 +367,11 @@ Assert.is_true(key_field.secret)
 Assert.eq(key_field.normalize(" pw "), require("ffi/sha2").md5("pw"))
 Assert.eq(key_field.normalize("  "), "")
 Assert.eq(Setting.remote[1].normalize("http://x/api/v1/"), "http://x")
-Assert.len(Setting.rows(), 5)
+Assert.len(Setting.rows(), 6, "已填账号时多一行退出登录")
 _G.G_reader_settings = { readSetting = function(_self, key)
     return key == "bookorbit" and { server_url = "http://bo/api/v1", username = "u", userkey = "kk" } or nil
 end }
-Assert.len(Setting.rows(), 6)
+Assert.len(Setting.rows(), 7, "官方插件账号再多一行导入")
 _G.G_reader_settings = nil
 
 os.execute("rm -rf '" .. WORK .. "'")

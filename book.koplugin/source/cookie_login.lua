@@ -175,28 +175,16 @@ function CookieLogin.pasteRow(spec)
     end
 end
 
---- 退出登录行：确认后清配置、重载源。
+--- 退出登录行：确认后清凭证，并清掉这个源的本地书架和阅读记录。
 ---@param spec CookieLoginSpec
 ---@return fun(iw: integer): table
 function CookieLogin.logoutRow(spec)
-    return function(iw)
-        return require("ui.themes.widgets.row").widget({ width = iw, chevron = false, kind = "action", icon = "logout",
-            title = _("退出登录"),
-            callback = function()
-                require("ui.themes.widgets.confirm"):new{
-                    text = spec.logout_text,
-                    ok_text = _("退出登录"),
-                    ok_callback = function()
-                        local settings = require("utils.settings")
-                        local cfg = settings.getSource(spec.id)
-                        if spec.clear then spec.clear(cfg) else cfg.cookie = nil end
-                        settings.saveSource(spec.id, cfg)
-                        require("ui.themes.widgets.toast"):new{ text = _("已退出登录"), timeout = 2 }:show()
-                        require("source.registry").reload()
-                    end,
-                }:show()
-            end })
-    end
+    return require("source.logout").row(spec.id, spec.logout_text, function()
+        local settings = require("utils.settings")
+        local cfg = settings.getSource(spec.id)
+        if spec.clear then spec.clear(cfg) else cfg.cookie = nil end
+        settings.saveSource(spec.id, cfg)
+    end)
 end
 
 return CookieLogin

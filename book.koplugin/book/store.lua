@@ -128,6 +128,29 @@ function Store.markDeleted(source_id, stable_id)
     return true, leftover
 end
 
+--- 退出登录：删掉这个源的全部本地记录（书架、进度、笔记、统计、章节登记、缓存文件）。
+--- 直接删行，不写墓碑。墓碑会被下次登录推上去，变成远端删书。
+---@param source_id string
+---@return boolean
+function Store.forgetSource(source_id)
+    if not BookDB.forgetSource(source_id) then return false end
+    local dir = Paths.sourceCacheDir(source_id)
+    local lfs = require("libs/libkoreader-lfs")
+    if lfs.attributes(dir, "mode") ~= "directory" then return true end
+    trash_seq = trash_seq + 1
+    local trash = Paths.cacheDir() .. "/.trash"
+    local moved = trash .. "/" .. os.time() .. "-" .. trash_seq
+    lfs.mkdir(trash)
+    if os.rename(dir, moved) then
+        require("book.cache").purgeAsync(moved)
+        return true
+    end
+    if not require("ffi/util").purgeDir(dir) then
+        logger.warn("book cache purge failed", dir)
+    end
+    return true
+end
+
 --- 清单书本地缓存：工作目录、封面、封面网络图，以及 .moon/cache 内的 books.path。
 --- 元数据、目录、进度、统计保留；.moon/cache 外的原书（本地源）不动。
 --- keep_cover 为真（软删除）只删文档，封面文件与封面网络图也留着。

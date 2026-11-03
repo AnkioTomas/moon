@@ -93,6 +93,11 @@ function StatsDB.removeIdentity(source_id, stable_id)
     return DB.removeIdentity("reading_stats", source_id, stable_id)
 end
 
+--- 退出登录：删掉这个源的全部阅读统计。
+function StatsDB.removeSource(source_id)
+    return DB.removeSource("reading_stats", source_id)
+end
+
 --- 删除本地阅读统计。
 --- 这是纯本地操作，不会触碰远端；缺少 stable_id 时按源清除，
 --- 传入时间范围时使用半开区间 [from_ts, to_ts)。

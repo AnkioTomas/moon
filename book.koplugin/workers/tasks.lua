@@ -370,6 +370,20 @@ function Tasks.get(key)
     return by_key[key]
 end
 
+--- 取消 key 恰好是 prefix，或以 `prefix .. "\\0"` 开头的未结束任务。
+--- 边界用 \\0，避免 `wechat` 误伤 `wechat2`。
+---@param prefix string
+function Tasks.cancelPrefixed(prefix)
+    local doomed = {}
+    local boundary = prefix .. "\0"
+    for _idx, task in ipairs(list) do
+        if task.key == prefix or task.key:sub(1, #boundary) == boundary then
+            doomed[#doomed + 1] = task
+        end
+    end
+    for _idx, task in ipairs(doomed) do cancel(task) end
+end
+
 local ORDER = { running = 1, retry_wait = 1, waiting = 2, queued = 3 }
 
 --- 任务快照：运行 / 退避中的在前，其次等待网络的，最后排队的；同组按入队顺序。返回副本。

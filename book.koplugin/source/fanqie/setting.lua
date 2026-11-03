@@ -44,7 +44,7 @@ end
 ---@return table[]
 function M.rows(plugin)
     local Row = require("ui.themes.widgets.row")
-    return {
+    local rows = {
         function(iw)
             local status, status_on = M.rowStatus()
             return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "account_circle",
@@ -65,6 +65,15 @@ function M.rows(plugin)
         end,
         require("source.category_setting").row("fanqie", plugin),
     }
+    local _status, logged_in = M.rowStatus()
+    if logged_in then
+        rows[#rows + 1] = require("source.logout").row("fanqie", _("确定退出番茄账号？"), function()
+            local settings = require("source.fanqie.settings"):new()
+            settings:set("cookies", nil)
+            settings:flush()
+        end)
+    end
+    return rows
 end
 
 return M

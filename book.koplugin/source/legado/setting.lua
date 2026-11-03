@@ -132,7 +132,7 @@ end
 
 ---@return table[]
 function Setting.rows()
-    return {
+    local rows = {
         function(iw)
             local status, status_on = Setting.rowStatus()
             return require("ui.themes.widgets.row").widget({
@@ -148,6 +148,15 @@ function Setting.rows()
             })
         end,
     }
+    if require("source.legado.client").base() ~= nil then
+        rows[#rows + 1] = require("source.logout").row(SOURCE_ID, _("确定退出开源阅读？"), function()
+            local settings = require("utils.settings")
+            local cfg = settings.getSource(SOURCE_ID)
+            cfg.server_address, cfg.username, cfg.password = nil, nil, nil
+            settings.saveSource(SOURCE_ID, cfg)
+        end)
+    end
+    return rows
 end
 
 return Setting

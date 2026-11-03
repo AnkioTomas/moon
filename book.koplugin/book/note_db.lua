@@ -46,6 +46,11 @@ function NoteDB.removeIdentity(source_id, stable_id)
     return DB.removeIdentity("notes", source_id, stable_id)
 end
 
+--- 退出登录：删掉这个源的全部笔记。
+function NoteDB.removeSource(source_id)
+    return DB.removeSource("notes", source_id)
+end
+
 --- 覆盖指定书籍或章节的注解快照。
 ---@param source_id string
 ---@param stable_id string

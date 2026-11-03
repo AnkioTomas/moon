@@ -24,6 +24,9 @@ local BACKGROUND_SYNC_INTERVAL = 5 * 60
 ---@type table<string, number> 源 id → 最近一次统计同步尝试时间
 local stats_at = {}
 
+---@type table<string, { cancel: fun() }|nil> 源 id → 在飞统计同步句柄
+local stats_jobs = {}
+
 ---@type table<string, number> 源 id → 混合模式最近一次书架后台同步时间
 local books_at = {}
 
@@ -230,7 +233,8 @@ local function syncStats(desktop, source, force)
     logger.dbg("book stats sync start", source.id)
     stats_at[source.id] = os.time()
     desktop._stats_sync[source.id] = true
-    source:syncStatsAsync(nil, function(result, err)
+    local job = source:syncStatsAsync(nil, function(result, err)
+        stats_jobs[source.id] = nil
         desktop._stats_sync[source.id] = nil
         if not inScope(desktop, source) then return end
         if not result then
@@ -241,6 +245,23 @@ local function syncStats(desktop, source, force)
         desktop:onEvent("stats_changed")
         if desktop.tab == "insight" then desktop:updateView() end
     end)
+    -- 同步回调的源在返回前已经把在飞标记清掉，不要把句柄再挂回去。
+    if desktop._stats_sync[source.id] then stats_jobs[source.id] = job end
+end
+
+--- 退出登录：停掉这个源还在飞的书架 / 统计同步，免得回调在清完本地记录之后又写回来。
+---@param desktop table
+---@param source_id string
+function Sync.abort(desktop, source_id)
+    local flight = desktop._books_sync and desktop._books_sync[source_id]
+    if type(flight) == "table" and flight.cancel and flight.cancel.cancel then
+        flight.cancel:cancel()
+    end
+    if desktop._books_sync then desktop._books_sync[source_id] = nil end
+    local job = stats_jobs[source_id]
+    stats_jobs[source_id] = nil
+    if type(job) == "table" and job.cancel then job:cancel() end
+    if desktop._stats_sync then desktop._stats_sync[source_id] = nil end
 end
 
 --- 桌面变为可见（新开 / 换源）：后台同步统计（5 分钟节流）与书架。首页先读本地数据，成功后由回调刷新。
