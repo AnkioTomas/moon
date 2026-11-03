@@ -277,6 +277,12 @@ function Session.onReaderReady(plugin)
         Snapshot.refresh(Session._snapshot)
         require("reader.session.auto_toc").start(Session._snapshot)
         ensureCover(ui, identity)
+        local description = (ui.doc_props or {}).description
+        if ((identity.book or {}).intro or "") == "" and type(description) == "string" then
+            -- 首页「当前阅读」只读库，文件自带的简介要落库才显示得出来
+            require("book.books_db").fillIntro(identity.source_id, identity.stable_id,
+                require("utils.text").stripHtml(description))
+        end
     end
     span:lap("snapshot")
     updateReadState(Session._snapshot)

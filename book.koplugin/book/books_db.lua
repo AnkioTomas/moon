@@ -228,6 +228,15 @@ function BookDB.setMeta(row, overwrite)
         JSON.encode(merged), row.source_id, row.stable_id) ~= nil
 end
 
+--- 简介为空时用书文件自带的简介补上（不动 sync_status：只是本地展示缓存）。
+---@param source_id string
+---@param stable_id string
+---@param intro string
+function BookDB.fillIntro(source_id, stable_id, intro)
+    DB.exec("UPDATE books SET intro=? WHERE source_id=? AND stable_id=? AND COALESCE(intro, '')='';",
+        intro, source_id, stable_id)
+end
+
 --- 插入或更新 books 行（本地可信写入：扫盘/本地登记），标脏待上传。
 ---@param row table
 ---@return boolean
