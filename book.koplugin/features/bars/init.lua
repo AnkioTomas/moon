@@ -202,12 +202,54 @@ function Bars.injectStatusLine(doc_settings, document)
         return
     end
     doc_settings:saveSetting("copt_status_line", Bars.topBarPreference() and 0 or 1)
+    Bars.hookTopMargin(document)
+    document._book_bars_top_reserve = Bars.topReserve()
+end
+
+--- 顶栏边距要占正文空间：给这份文档的 setPageMargins 套一层，顶部页边距加上预留量（zen-os 同款做法）。
+--- 在文档首次排版前挂上，新书不用排两遍；预留量由 syncTopMargin 维护。
+---@param document table
+function Bars.hookTopMargin(document)
+    if document._book_bars_margin_hooked or type(document.setPageMargins) ~= "function" then
+        return
+    end
+    document._book_bars_margin_hooked = true
+    local orig = document.setPageMargins
+    document.setPageMargins = function(self, left, top, right, bottom)
+        return orig(self, left, top + (self._book_bars_top_reserve or 0), right, bottom)
+    end
+end
+
+--- 顶栏边距要预留的像素：只有月读接管顶栏时才占。
+---@return number
+function Bars.topReserve()
+    if Bars.topBarPreference() and Layout.replace("top") then
+        return Screen:scaleBySize(Layout.topMargin())
+    end
+    return 0
+end
+
+--- 预留量变了（改边距、开关顶栏 / 替代）就重排正文；没变不动。
+---@param ui table ReaderUI
+function Bars.syncTopMargin(ui)
+    local doc = ui.document
+    if not doc or not ui.rolling or not doc._book_bars_margin_hooked then
+        return
+    end
+    local reserve = Bars.topReserve()
+    if doc._book_bars_top_reserve == reserve then
+        return
+    end
+    doc._book_bars_top_reserve = reserve
+    ui:handleEvent(require("ui/event"):new("SetPageMargins", ui.typeset.unscaled_margins))
 end
 
 --- 按 Book 设置同步系统顶底栏。
 ---@param ui table ReaderUI
 function Bars.applyPreferences(ui)
     Bars.setSystemTop(ui, Bars.topBarPreference())
+    Bars.hookTopMargin(ui.document)
+    Bars.syncTopMargin(ui)
     Bars.setSystemBottom(ui, Bars.bottomBarPreference())
 end
 
@@ -258,7 +300,7 @@ local function topRect(ui, x, y)
         x = x,
         y = y,
         w = ui.view.dimen.w,
-        h = header_h + Screen:scaleBySize(Layout.topHeight()),
+        h = header_h + Screen:scaleBySize(Layout.topHeight() + Layout.topMargin()),
     }
 end
 
@@ -504,8 +546,9 @@ local function paint(self, bb, x, y)
             bb:paintRect(rect.x, rect.y + rect.h - 1, rect.w, 1, Blitbuffer.COLOR_BLACK)
         end
         local margin = Screen:scaleBySize(Layout.BAR_HORIZONTAL_PADDING)
+        local top_margin = Screen:scaleBySize(Layout.topMargin())
         Items.paint(
-            bb, rect.x + margin, rect.y, math.max(1, rect.w - margin * 2), rect.h,
+            bb, rect.x + margin, rect.y + top_margin, math.max(1, rect.w - margin * 2), rect.h - top_margin,
             Layout.get("top"), ctx, {
                 face = topTextFace(ui.view.footer, header_h),
                 fgcolor = Blitbuffer.COLOR_BLACK,
@@ -530,7 +573,7 @@ local function paint(self, bb, x, y)
         local margin = Screen:scaleBySize(Layout.BAR_HORIZONTAL_PADDING)
         Items.paint(
             bb, rect.x + margin, rect.y, math.max(1, rect.w - margin * 2),
-            rect.h - Screen:scaleBySize(BOTTOM_CONTENT_INSET),
+            rect.h - Screen:scaleBySize(BOTTOM_CONTENT_INSET) - footer.bottom_padding,
             Layout.get("bottom"), ctx, {
                 face = bottomTextFace(footer),
                 fgcolor = Blitbuffer.COLOR_BLACK,

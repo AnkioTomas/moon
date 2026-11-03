@@ -60,8 +60,10 @@ function Preview.build(width, which)
     local t = Theme.current()
     local face, size = Preview.face(which, (Preview.footerSettings()))
     local bar_h = Preview.barHeight(which, size)
+    local Screen = require("device").screen
+    local margin = Screen:scaleBySize(which == "top" and Layout.topMargin() or Layout.bottomMargin((Preview.footerSettings())))
     local inner = Widget:new{
-        dimen = Geom:new{ w = math.max(1, width - 2), h = math.max(1, bar_h - 2) },
+        dimen = Geom:new{ w = math.max(1, width - 2), h = math.max(1, bar_h + margin - 2) },
     }
     function inner:paintTo(bb, x, y)
         bb:paintRect(x, y, self.dimen.w, self.dimen.h, Blitbuffer.Color8(t.color.page))
@@ -71,14 +73,15 @@ function Preview.build(width, which)
         end
         local ctx = Items.sampleContext()
         local pad = require("device").screen:scaleBySize(Layout.BAR_HORIZONTAL_PADDING)
-        Items.paint(bb, x + pad, y, math.max(1, self.dimen.w - pad * 2), self.dimen.h, Layout.get(which), ctx, {
+        Items.paint(bb, x + pad, which == "top" and y + margin or y, math.max(1, self.dimen.w - pad * 2),
+            self.dimen.h - margin, Layout.get(which), ctx, {
             face = face,
             fgcolor = Blitbuffer.Color8(t.color.ink),
             bar_h = Theme.px(t.progress.height),
             icons = Layout.icons(),
         })
     end
-    return Overlay.previewBox(width, inner, bar_h)
+    return Overlay.previewBox(width, inner, bar_h + margin)
 end
 
 return Preview
