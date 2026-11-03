@@ -24,6 +24,7 @@ package.preload["features.bars"] = function()
         topBarPreference = function() return true end,
         bottomBarPreference = function() return false end,
         setTopBarPreference = function() end,
+        syncTopMargin = function() end,
         setBottomBarPreference = function(enabled, ui)
             bottom_calls[#bottom_calls + 1] = { enabled = enabled, ui = ui }
         end,
@@ -59,6 +60,9 @@ package.preload["features.bars.layout"] = function()
         topFontCustom = function() return font.top ~= nil end,
         setFontSize = function(which, v) font[which] = v end,
         topHeight = function() return top_height end,
+        topMargin = function() return 0 end,
+        bottomMargin = function() return 1 end,
+        TOP_MARGIN_MIN = 0, TOP_MARGIN_MAX = 60, BOTTOM_MARGIN_MIN = 0, BOTTOM_MARGIN_MAX = 49,
         setTopHeight = function(v) top_height = v end,
         icons = function() return icons_on end,
         divider = function(which) return dividers[which] == true end,
@@ -120,6 +124,7 @@ Assert.eq(page.sections[1].rows[6](600).status, "12")
 page.sections[1].rows[6](600).callback()
 spins[#spins].callback(24)
 Assert.eq(top_height, 24)
+Assert.eq(page.sections[1].rows[7](600).title, "边距")
 Assert.eq(page.sections[2].title, "组件")
 Assert.eq(page.sections[2].rows[1](600).title, "章节")
 Assert.eq(page.sections[2].rows[1](600).status, "左 · 第 1 位")
@@ -128,7 +133,8 @@ local bottom = ReaderBar:page(desktop, "bottom")
 Assert.eq(bottom.sections[1].rows[1](600).title, "替代系统底栏")
 Assert.eq(bottom.sections[1].rows[2](600).title, "开启底栏")
 Assert.is_false(bottom.sections[1].rows[2](600).status_on)
-Assert.len(bottom.sections[1].rows, 5, "底栏没有高度")
+Assert.len(bottom.sections[1].rows, 6, "底栏没有高度，只有边距")
+Assert.eq(bottom.sections[1].rows[6](600).title, "边距")
 
 -- 底栏文字大小写回开着书的 KOReader 状态栏并立即重排。
 local footer_calls = {}

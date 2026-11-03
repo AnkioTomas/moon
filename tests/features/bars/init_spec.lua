@@ -50,6 +50,9 @@ package.preload["features.bars.layout"] = function()
         get = function(which) return layouts[which] end,
         setReplace = function() end,
         topHeight = function() return 12 end,
+        topMargin = function() return 0 end,
+        bottomMargin = function() return 1 end,
+        TOP_MARGIN_MIN = 0, TOP_MARGIN_MAX = 60, BOTTOM_MARGIN_MIN = 0, BOTTOM_MARGIN_MAX = 49,
         BAR_HORIZONTAL_PADDING = 12,
         fontSize = function(_which, fs) return fs and fs.text_font_size or 14 end,
     }
@@ -108,6 +111,7 @@ local ui_top = {
         state = { offset = { y = 12 } },
         footer_visible = true,
         footer = {
+            bottom_padding = 0,
             getHeight = function() return 32 end,
             mode = 1,
             mode_list = { off = 0, page_progress = 1 },
@@ -211,6 +215,7 @@ local footer = {
     applyFooterMode = function() end,
     rescheduleFooterAutoRefreshIfNeeded = function() end,
     getHeight = function() return 32 end,
+    bottom_padding = 0,
 }
 ui_top.view.footer = footer
 ui_top.view.footer_visible = true
@@ -422,3 +427,14 @@ Bars:startClock()
 Assert.not_nil(Bars._clock)
 Bars.events.CloseDocument(plugin)
 Assert.is_nil(Bars._clock)
+
+-- 顶栏边距：setPageMargins 的顶部页边距加上预留量，其余不变。
+do
+    local got
+    local doc = { setPageMargins = function(_self, l, t, r, b) got = { l, t, r, b } end }
+    Bars.hookTopMargin(doc)
+    doc._book_bars_top_reserve = 10
+    doc:setPageMargins(1, 2, 3, 4)
+    Assert.eq(got[2], 12)
+    Assert.eq(got[4], 4)
+end

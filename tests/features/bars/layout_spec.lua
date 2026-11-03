@@ -126,4 +126,12 @@ Assert.eq(Layout.topHeight(), 0)
 Layout.setTopHeight(24)
 Assert.eq(Layout.topHeight(), 24)
 
+-- 顶栏边距：缺省 0，越界钳住；底栏边距读 KOReader 状态栏 container_bottom_padding，缺省 1。
+Assert.eq(Layout.topMargin(), 0)
+Layout.setTopMargin(100)
+Assert.eq(Layout.topMargin(), 60)
+Assert.eq(Layout.bottomMargin(nil), 1)
+Assert.eq(Layout.bottomMargin({ container_bottom_padding = 20 }), 20)
+Assert.eq(Layout.bottomMargin({ container_bottom_padding = 99 }), 49)
+
 return true

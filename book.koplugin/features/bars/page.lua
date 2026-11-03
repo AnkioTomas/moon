@@ -55,8 +55,24 @@ local function writeFooterFont(size)
     end
 end
 
+--- 底栏边距就是 KOReader 状态栏的「Bottom margin」，写回去并让 footer 重排（正文随之让位）。
+---@param v number
+local function writeFooterBottomMargin(v)
+    local settings, footer = footerSettings()
+    if not settings then return end
+    settings.container_bottom_padding = v
+    if footer then
+        footer.bottom_padding = require("device").screen:scaleBySize(v)
+        footer:refreshFooter(true, true)
+    elseif G_reader_settings and G_reader_settings.saveSetting then
+        G_reader_settings:saveSetting("footer", settings)
+    end
+end
+
 ---@param desktop table
 local function refresh(desktop)
+    local ui = readerUi()
+    if ui then Bars.syncTopMargin(ui) end
     refreshReaderUi()
     desktop:updateView()
 end
@@ -281,6 +297,34 @@ function ReaderBar:page(desktop, which)
             })
         end)
     end
+    table.insert(page.sections[1].rows, function(iw)
+        local m = top and Layout.topMargin() or Layout.bottomMargin((footerSettings()))
+        return Row.widget({
+            width = iw,
+            kind = "nav",
+            icon = top and "vertical_align_top" or "vertical_align_bottom",
+            title = _("边距"),
+            subtitle = top and _("顶栏离屏幕顶部的距离，正文随之下移")
+                or _("底栏离屏幕底部的距离，与 KOReader 状态栏「Bottom margin」同步"),
+            status = tostring(m),
+            status_on = true,
+            callback = function()
+                Spin:new{
+                    title = _("边距"),
+                    fields = { {
+                        value = m,
+                        min = top and Layout.TOP_MARGIN_MIN or Layout.BOTTOM_MARGIN_MIN,
+                        max = top and Layout.TOP_MARGIN_MAX or Layout.BOTTOM_MARGIN_MAX,
+                        step = 2,
+                    } },
+                    callback = function(v)
+                        if top then Layout.setTopMargin(v) else writeFooterBottomMargin(v) end
+                        refresh(desktop)
+                    end,
+                }:show()
+            end,
+        })
+    end)
     return page
 end
 

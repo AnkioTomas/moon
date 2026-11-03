@@ -235,6 +235,32 @@ function Layout.setTopHeight(v)
     MoonSettings.save("features.bars", bars)
 end
 
+--- 顶栏离屏幕顶部的边距（未缩放像素）。靠文档顶部页边距预留空间，正文随之下移，见 Bars.syncTopMargin。
+Layout.TOP_MARGIN_MIN, Layout.TOP_MARGIN_MAX, Layout.TOP_MARGIN_DEFAULT = 0, 60, 0
+--- 底栏离屏幕底部的边距：就是 KOReader 状态栏「Bottom margin」（container_bottom_padding），范围与缺省同它。
+Layout.BOTTOM_MARGIN_MIN, Layout.BOTTOM_MARGIN_MAX, Layout.BOTTOM_MARGIN_DEFAULT = 0, 49, 1
+
+---@return number
+function Layout.topMargin()
+    return clampInt(MoonSettings.get("features.bars").book_reader_top_bar_margin,
+        Layout.TOP_MARGIN_MIN, Layout.TOP_MARGIN_MAX) or Layout.TOP_MARGIN_DEFAULT
+end
+
+---@param v number
+function Layout.setTopMargin(v)
+    local bars = MoonSettings.get("features.bars")
+    bars.book_reader_top_bar_margin = clampInt(v, Layout.TOP_MARGIN_MIN, Layout.TOP_MARGIN_MAX)
+    MoonSettings.save("features.bars", bars)
+end
+
+---@param footer_settings table|nil KOReader ReaderFooter.settings
+---@return number
+function Layout.bottomMargin(footer_settings)
+    return footer_settings
+        and clampInt(footer_settings.container_bottom_padding, Layout.BOTTOM_MARGIN_MIN, Layout.BOTTOM_MARGIN_MAX)
+        or Layout.BOTTOM_MARGIN_DEFAULT
+end
+
 --- 组件在布局里的下标；不在返回 nil。
 ---@param layout table
 ---@param id string
