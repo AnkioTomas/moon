@@ -233,7 +233,7 @@ local function fromContext(ui, identity, existing, cb)
             title, author, progressPercent(), ctx.current_page, ctx.prior_text, Store.promptSnapshot(existing),
             storySoFar(identity), profile()) },
     }
-    return AI.jsonExtract(messages, { localize = true, max_tokens = profile().max_tokens, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
+    return AI.jsonExtract(messages, { localize = true, stream = true, max_tokens = profile().max_tokens, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
         if not decoded then cb(nil, err); return end
         persist(identity, filterGrounded(cleanPayload(decoded), readingContext(ctx)), cb)
     end)
@@ -385,7 +385,7 @@ function Fetch.chapter(identity, text, cb)
                 title, author, progressPercent(), chunk, "", Store.promptSnapshot(existing),
                 storySoFar(identity), profile()) },
         }
-        request = AI.jsonExtract(messages, { localize = true, max_tokens = profile().max_tokens, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
+        request = AI.jsonExtract(messages, { localize = true, stream = true, max_tokens = profile().max_tokens, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
             if cancelled then return end
             if not decoded then cb(nil, err); return end
             local ok, save_err = pcall(mergeAndSave, identity, filterGrounded(cleanPayload(decoded), chunk))
@@ -473,7 +473,7 @@ function Fetch.scanBook(identity, path)
                         retried = true
                         require("utils.log").warn("xray.scan chunk retry", index, err)
                         request = AI.jsonExtract(messages, {
-                            localize = true, max_tokens = profile().max_tokens,
+                            localize = true, stream = true, max_tokens = profile().max_tokens,
                             timeout = require("http.timeout").ai(1.5),
                         }, onChunk)
                         return
@@ -489,7 +489,7 @@ function Fetch.scanBook(identity, path)
                 step()
             end
             request = AI.jsonExtract(messages, {
-                localize = true, max_tokens = profile().max_tokens,
+                localize = true, stream = true, max_tokens = profile().max_tokens,
                 timeout = require("http.timeout").ai(1.5),
             }, onChunk)
         end

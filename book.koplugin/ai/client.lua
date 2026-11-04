@@ -264,7 +264,81 @@ local function localize(messages)
     return out
 end
 
---- 非流式 Chat Completions；cb(content, err)。
+--- 流式（SSE）累加器：喂原始块，done() 给出与非流式响应体等价的 JSON 串。
+--- 服务端没按 SSE 回（忽略 stream 参数直接给整段 JSON）时原样返回收到的内容。
+---@return table
+local function sseAccumulator()
+    local acc = { raw = {}, buf = "", content = {}, reasoning = {}, finish = nil, events = 0, failure = nil }
+
+    local function line(text)
+        local data = text:match("^data:%s?(.*)$")
+        if not data or data == "[DONE]" then return end
+        local ok, event = pcall(JSON.decode, data)
+        if not ok or type(event) ~= "table" then return end
+        acc.events = acc.events + 1
+        if event.error then acc.failure = event end
+        local choice = event.choices and event.choices[1]
+        local delta = choice and choice.delta
+        if type(delta) == "table" then
+            if type(delta.content) == "string" then acc.content[#acc.content + 1] = delta.content end
+            if type(delta.reasoning_content) == "string" then acc.reasoning[#acc.reasoning + 1] = delta.reasoning_content end
+        end
+        if choice and choice.finish_reason then acc.finish = choice.finish_reason end
+    end
+
+    function acc.feed(chunk)
+        acc.raw[#acc.raw + 1] = chunk
+        acc.buf = acc.buf .. chunk
+        while true do
+            local nl = acc.buf:find("\n", 1, true)
+            if not nl then break end
+            line((acc.buf:sub(1, nl - 1):gsub("\r$", "")))
+            acc.buf = acc.buf:sub(nl + 1)
+        end
+    end
+
+    function acc.done()
+        if acc.buf ~= "" then line((acc.buf:gsub("\r$", ""))) end
+        acc.buf = ""
+        if acc.events == 0 then return table.concat(acc.raw) end
+        if acc.failure then return JSON.encode({ error = acc.failure.error }) end
+        return JSON.encode({ choices = { {
+            finish_reason = acc.finish,
+            message = { content = table.concat(acc.content), reasoning_content = table.concat(acc.reasoning) },
+        } } })
+    end
+    return acc
+end
+
+--- 流式发送：模型边写边收，连接一直有数据，不会因「整包要写很久」被空闲超时砍掉。
+--- 回调形状与 Request.post 一致：cb(body, err, raw)。
+---@param url string
+---@param body string
+---@param opts table Request.post 的 opts（headers / timeout / connect_timeout / content_type / accept）
+---@param cb fun(body: string|nil, err: any, raw: table|nil)
+---@return table
+local function postStream(url, body, opts, cb)
+    local headers = require("http.request.header").forRequest(opts.headers, opts.accept)
+    headers["Content-Type"] = opts.content_type
+    local acc, code = sseAccumulator(), nil
+    return Request.stream({
+        url = url, method = "POST", body = body, headers = headers,
+        timeout = opts.timeout, connect_timeout = opts.connect_timeout,
+    }, {
+        on_headers = function(status) code = status end,
+        on_data = acc.feed,
+        on_done = function(err)
+            local text = acc.done()
+            if err then
+                cb(nil, err, { code = code, body = text })
+            else
+                cb(text, nil, { code = code })
+            end
+        end,
+    })
+end
+
+--- Chat Completions；cb(content, err)。opts.stream 为真时走 SSE 流式（长输出必用，见 postStream）。
 ---@param messages table[]
 ---@param opts table|nil
 ---@param cb fun(content: string|nil, err: any)
@@ -292,6 +366,7 @@ function Client.chat(messages, opts, cb)
             messages = messages,
             temperature = opts.temperature or 0.2,
             max_tokens = budget,
+            stream = opts.stream or nil,
         }
         -- 混合推理模型默认先写一大段思考，吃光 max_tokens，回答被截断：按服务商关掉。
         local fields = think_off and thinkOff(endpoint)
@@ -303,7 +378,7 @@ function Client.chat(messages, opts, cb)
             cb(nil, body)
             return nil
         end
-        return Request.post(endpoint, body, {
+        return (opts.stream and postStream or Request.post)(endpoint, body, {
             content_type = "application/json",
             accept = "application/json",
             timeout = timeout,

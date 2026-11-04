@@ -43,7 +43,7 @@ function AI.priorSummaries(identity, current_idx, chapters)
     return table.concat(parts, "\n\n")
 end
 
---- 非流式 JSON 抽取；cb(table|nil, err)。opts.partial：输出被截断时保留已完整的部分。
+--- JSON 抽取；cb(table|nil, err)。opts 透传给 Client.chat（opts.stream 走流式）。opts.partial：输出被截断时保留已完整的部分。
 ---@param messages table[]
 ---@param opts table|nil
 ---@param cb fun(result: table|nil, err: any)
