@@ -167,6 +167,8 @@ function Source:syncBooksAsync(opts, cb)
                         authors = authorsOf(item.authors),
                         series = item.seriesName,
                         category = library.title,
+                        -- Shelf.reconcile 见 percent>=100 就自动标已读（不覆盖手动未读）。
+                        percent = (item.readStatus == "read" or item.readStatus == "skimmed") and 100 or nil,
                     }
                 end
                 if data.hasNext == true then
