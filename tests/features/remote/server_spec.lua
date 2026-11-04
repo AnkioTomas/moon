@@ -537,6 +537,11 @@ do
     local c_bad = newClient({ "GET /api/list?path=/ HTTP/1.1\r\nCookie: moon_token=nope\r\n\r\n" }, { no_token = true })
     drain(serve(c_bad, handlers))
     Assert.eq((parseResponse(c_bad:output())), 401)
+    -- 同名 Cookie 有多个（旧的排前面）：任一个有效即放行
+    local c_dup = newClient(
+        { "GET /api/list?path=/ HTTP/1.1\r\nCookie: moon_token=stale; moon_token=" .. TOKEN .. "\r\n\r\n" }, { no_token = true })
+    drain(serve(c_dup, handlers))
+    Assert.eq((parseResponse(c_dup:output())), 200)
     local c_del = newClient(
         { "POST /api/delete?path=/a HTTP/1.1\r\nContent-Length: 0\r\n\r\n" }, { no_token = true })
     drain(serve(c_del, handlers))
