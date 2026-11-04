@@ -167,4 +167,11 @@ last_handlers.on_move("rotate", 1)
 Assert.eq(swaps[1], "rotate>night")
 Assert.eq(swaps[2], "rotate>suspend")
 
+Body:new{
+    width = 300, editing = true, actions = {},
+    addable = function() return {} end,
+    on_add_plugin = function() end,
+}
+Assert.eq(adds, 2, "内置动作都启用后仍能添加插件入口")
+
 return true

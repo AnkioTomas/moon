@@ -89,18 +89,18 @@ package.preload["utils.settings"] = function()
 end
 
 local QuickPanel = require("features.panel.settings")
-local desktop = { updateView = function() end }
+local desktop = { plugin = { ui = {} }, updateView = function() end }
 local desktop_rows = QuickPanel.rows("desktop", desktop)
 local reader_rows = QuickPanel.rows("reader", desktop)
 
-Assert.len(desktop_rows, 2)
-Assert.len(reader_rows, 1)
+Assert.len(desktop_rows, 3)
+Assert.len(reader_rows, 2)
 
 -- 有前光 / 色温的设备多出两个滑块开关，点一下翻转并落盘。
 lights.hasNaturalLight, lights.hasFrontlight = true, true
 local with_toggles = QuickPanel.rows("desktop", desktop)
-Assert.len(with_toggles, 4)
-Assert.len(QuickPanel.rows("reader", desktop), 1)
+Assert.len(with_toggles, 5)
+Assert.len(QuickPanel.rows("reader", desktop), 2)
 with_toggles[1](400)
 Assert.eq(built.title, "亮度滑块")
 built.callback()
@@ -142,3 +142,16 @@ Assert.is_true(built.chevron)
 
 Assert.eq(QuickPanel.enabledCount("desktop"), 1)
 Assert.eq(QuickPanel.enabledCount("reader"), 1)
+
+local requested
+package.preload["features.panel.plugin_actions"] = function()
+    return { choose = function(scope, ctx, on_add) requested = { scope, ctx, on_add } end }
+end
+desktop_rows[3](400)
+Assert.eq(built.title, "添加插件入口")
+built.callback()
+Assert.eq(requested[1], "desktop")
+Assert.eq(requested[2].ui, desktop.plugin.ui)
+reader_rows[2](400)
+built.callback()
+Assert.eq(requested[1], "reader")

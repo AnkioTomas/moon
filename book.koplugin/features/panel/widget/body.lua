@@ -50,6 +50,7 @@ end
 ---@field on_move fun(id: string, other_id: string)|nil 与可见的前 / 后邻居互换
 ---@field on_disable fun(id: string)|nil 停用动作
 ---@field on_add fun(id: string)|nil 启用并追加动作
+---@field on_add_plugin fun()|nil 添加原生插件入口
 ---@field addable (fun(): BookQuickPanelEditAddOption[])|nil 可添加动作列表工厂
 ---@field show_parent table|nil 原生菜单宿主，供滑杆脏区使用
 ---@field dimen table|nil 当前内容绝对尺寸
@@ -131,9 +132,9 @@ function Body:updateView()
         local t = Theme.current()
         local row = HorizontalGroup:new{ align = "center" }
         local addable = self.addable()
-        if #addable > 0 then
+        if #addable > 0 or self.on_add_plugin then
             row[#row + 1] = Button:new{ icon = "add", text = _("添加"), callback = function()
-                Edit.showAddDialog(addable, self.on_add)
+                Edit.showAddDialog(addable, self.on_add, self.on_add_plugin)
             end }
             row[#row + 1] = HorizontalSpan:new{ width = Theme.px(t.space.sm) }
         end
