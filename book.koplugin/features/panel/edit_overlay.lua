@@ -41,7 +41,7 @@ local _ = require("gettext")
 
 ---@class BookQuickPanelEditOverlay
 ---@field wrap fun(widget: table, meta: BookQuickPanelEditMeta, handlers: BookQuickPanelEditHandlers): table
----@field showAddDialog fun(options: BookQuickPanelEditAddOption[], on_pick: fun(id: string)): nil
+---@field showAddDialog fun(options: BookQuickPanelEditAddOption[], on_pick: fun(id: string), on_plugin: (fun())|nil): nil
 local Edit = {}
 
 --- 在命中范围内吞掉点按 / 长按 / 滑动 / 拖动，不让底层动作收到。
@@ -131,7 +131,8 @@ end
 --- 从未启用动作里挑选要添加的项。
 ---@param options BookQuickPanelEditAddOption[] 可添加的动作选项
 ---@param on_pick fun(id: string) 选中后的回调
-function Edit.showAddDialog(options, on_pick)
+---@param on_plugin fun()|nil
+function Edit.showAddDialog(options, on_pick, on_plugin)
     local items = {}
     for _idx, option in ipairs(options) do
         local id = option.id
@@ -139,6 +140,9 @@ function Edit.showAddDialog(options, on_pick)
     end
     if #items == 0 then
         items[1] = { text = _("没有可添加的动作"), enabled = false }
+    end
+    if on_plugin then
+        items[#items + 1] = { text = _("添加插件入口"), icon = "extension", callback = on_plugin }
     end
     items[#items + 1] = { separator = true }
     items[#items + 1] = { text = _("关闭") }

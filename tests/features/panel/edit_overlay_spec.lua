@@ -69,4 +69,11 @@ sheet = Themed.last("sheet")
 Assert.eq(sheet.items[1].text, "没有可添加的动作")
 Assert.is_true(sheet.items[1].enabled == false)
 
+local plugin_picked = false
+Edit.showAddDialog({}, function() end, function() plugin_picked = true end)
+sheet = Themed.last("sheet")
+Assert.eq(sheet.items[2].text, "添加插件入口")
+sheet.items[2].callback()
+Assert.is_true(plugin_picked)
+
 return true

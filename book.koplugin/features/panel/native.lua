@@ -145,6 +145,12 @@ local function buildPanel(menu, W)
             panel.setEnabled(id, true)
             Menu.refresh(menu)
         end,
+        on_add_plugin = function()
+            require("features.panel.plugin_actions").choose(mode, { ui = tab._book_ui }, function(id)
+                panel.setEnabled(id, true)
+                Menu.refresh(menu)
+            end)
+        end,
         addable = function()
             local out = {}
             for _idx, option in ipairs(panel.options()) do

@@ -172,7 +172,7 @@ end
 ---@return BookQuickPanelAction|nil
 function Registry.get(id)
     ensureLoaded()
-    return builtins[id] or extra[id]
+    return builtins[id] or extra[id] or require("features.panel.plugin_actions").get(id)
 end
 
 --- 桌面动作设置页顺序：内置项，然后是 feature 开关。
@@ -180,14 +180,16 @@ end
 ---@return string[]
 function Registry.desktopOrder()
     ensureLoaded()
-    return withFeatures(DESKTOP_ORDER, extra_desktop)
+    return withFeatures(withFeatures(DESKTOP_ORDER, extra_desktop),
+        require("features.panel.plugin_actions").order("desktop"))
 end
 
 --- 阅读页动作顺序：内置项，然后是 feature 开关。
 ---@return string[]
 function Registry.readerOrder()
     ensureLoaded()
-    return withFeatures(READER_ORDER, extra_reader)
+    return withFeatures(withFeatures(READER_ORDER, extra_reader),
+        require("features.panel.plugin_actions").order("reader"))
 end
 
 ---@param action BookQuickPanelAction|nil

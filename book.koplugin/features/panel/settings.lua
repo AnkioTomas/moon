@@ -21,8 +21,7 @@ local QuickPanel = {}
 ---@field title string
 ---@field rows BookQuickPanelSettingRowFactory[]
 
----@class BookQuickPanelSettingRowFactory
----@field __call fun(self: BookQuickPanelSettingRowFactory, width: number): table
+---@alias BookQuickPanelSettingRowFactory fun(width: number): table
 
 --- 动作作用域 → 配置后端。
 ---@type table<string, BookQuickPanelDesktop|BookQuickPanelReader>
@@ -46,6 +45,12 @@ local function configure(desktop, option)
         text = option.enabled and _("停用") or _("启用"),
         callback = apply(function() panel.setEnabled(option.id, not option.enabled) end),
     }}
+    local plugins = require("utils.settings").get("features.panel").quick_panel_plugins or {}
+    if plugins[option.id] then
+        items[#items + 1] = { text = _("图标"), callback = function()
+            require("features.panel.plugin_actions").chooseIcon(option.id, function() desktop:updateView() end)
+        end }
+    end
     if option.enabled then
         items[#items + 1] = {
             text = _("上移"), enabled = option.position ~= nil and option.position > 1,
@@ -110,6 +115,17 @@ end
 ---@return BookQuickPanelSettingRowFactory[]
 function QuickPanel.rows(scope, desktop)
     local rows = optionRows(desktop, PANELS[scope].options())
+    rows[#rows + 1] = function(iw)
+        return Row.widget({
+            width = iw, icon = "extension", title = _("添加插件入口"),
+            callback = function()
+                require("features.panel.plugin_actions").choose(scope, { ui = desktop.plugin.ui }, function(id)
+                    PANELS[scope].setEnabled(id, true)
+                    desktop:updateView()
+                end)
+            end,
+        })
+    end
     if scope == "desktop" then
         local Device = require("device")
         local toggles = {

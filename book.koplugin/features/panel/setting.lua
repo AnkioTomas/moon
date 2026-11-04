@@ -11,6 +11,7 @@ local Setting = {}
 
 -- 新安装默认启用的动作，顺序即面板顺序。feature 新开关不在这份列表里就保持关闭；已有配置仍保持用户选择。
 Setting.defaults = {
+    quick_panel_plugins = {},
     quick_panel_actions = {
         "night", "wifi", "tasks", "remote", "rotate", "refresh", "screenshot", "frontlight", "autolight", "suspend", "power",
     },
