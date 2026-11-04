@@ -47,3 +47,8 @@ local custom = Row.choice({ width = 600, title = "铺法", status = "跟随全�
 Assert.contains(Kit.texts(custom), "跟随全局")
 local blank = Row.choice({ width = 600, title = "铺法", items = ITEMS, current = "zzz", on_select = error })
 Assert.is_true(blank ~= nil)
+
+-- 行间说明：文字起点与带图标行的标题列对齐，高度随文本撑开。
+local note = Row.note(600, "说明文字")
+Assert.eq(note:getSize().w, 600)
+Assert.is_true(note:getSize().h > 0)

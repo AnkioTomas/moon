@@ -328,25 +328,6 @@ local function loadUsage(need_all)
     return serverUsage(), need_all and allUsage() or nil
 end
 
---- 多行说明段（安装说明）：设置行的 rows 是构建函数，这里返回一个带内边距的文本块。
-local function textRow(text)
-    return function(iw)
-        local Theme = require("ui.themes")
-        local Geom = require("ui/geometry")
-        local CenterContainer = require("ui/widget/container/centercontainer")
-        local TextBlock = require("ui.themes.widgets.text")
-        local t = Theme.current()
-        local pad = Theme.px(t.space.md)
-        local box = TextBlock.box("caption", text, iw - pad * 2,
-            { color = t.color.muted, bg = t.color.page })
-        return CenterContainer:new{
-            dimen = Geom:new{ w = iw, h = box:getSize().h },
-            box,
-            text = text,
-        }
-    end
-end
-
 --- 设置行的构建函数（sections 每次重绘都按新宽度重建）。
 local function mk(opts)
     return function(iw)
@@ -626,7 +607,8 @@ local function cacheSections(plugin, state)
                 chevron = false,
             })
         end
-        rows[#rows + 1] = textRow(installText(plugin))
+        local text = installText(plugin)
+        rows[#rows + 1] = function(iw) return require("ui.themes.widgets.row").note(iw, text) end
         out[#out + 1] = {
             title = probe.state == "incompatible" and _("版本与获取") or _("获取增强版"),
             rows = rows,
