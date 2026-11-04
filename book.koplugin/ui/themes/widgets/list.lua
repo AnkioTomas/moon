@@ -82,20 +82,26 @@ local List = Modal:extend{
 function List:init()
     self.covers_fullscreen = not self.centered
     Modal.init(self)
+    self:updateView()
+end
+
+function List:updateView()
     local t = self.theme
-    local pad = Theme.px(t.space.lg)
     self.row_w = self.centered and self:innerWidth() or self.dimen.w
     self.pitch = Row.height(false) + Theme.px(t.row.divider)
-    local chrome = Theme.px(t.control.height)                      -- 翻页条
-        + (self.centered and pad * 4 + Theme.px(t.font.title * 2)   -- 面板边距 + 标题
-            or TitleBar.height() + (self.tabs and Tabbar.height() or 0))
+    local chrome = TitleBar.height() + (self.tabs and Tabbar.height() or 0)
+    if self.centered then
+        self:setDialog{ title = self.title }
+        chrome = self[1]:getSize().h + Theme.px(t.space.sm) * 2
+    end
+    chrome = chrome + Theme.px(t.control.height)
     local room = self.dimen.h
     local a = self.anchor
     if type(a) == "table" then
         room = math.max(a.y, self.dimen.h - a.y - a.h) - Theme.px(t.space.sm) * 2
     end
     self.per_page = math.max(1, math.floor((room - chrome) / self.pitch))
-    self.page = self:checkedPage()
+    self.page = math.max(1, math.min(self:pages(), self.page or self:checkedPage()))
     self:rebuild()
 end
 
