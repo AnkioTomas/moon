@@ -167,6 +167,11 @@ function Job:_poll()
     if self.pid and ffiUtil.isSubProcessDone(self.pid) then
         self:_read()
         local ok, err = Protocol.finish(self.decoder)
+        if ok then
+            -- 子进程没留下任何结果就没了：多半是被 OOM killer 杀掉，留下可用内存供日志排查
+            local mem = require("workers.system"):memAvailableMB()
+            logger.warn("book.worker child died silently", self.name, mem and ("MemAvailable " .. math.floor(mem) .. "MB") or "")
+        end
         self:_finish("failed", nil, ok and "job exited without result" or err)
         return
     end
