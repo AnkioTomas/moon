@@ -76,7 +76,8 @@ local function folderFiles(dir)
     local files = {}
     for name in lfs.dir(dir) do
         local path = dir .. "/" .. name
-        if Image.suffix(name) and fileOk(path) then files[#files + 1] = path end
+        -- 跳过隐藏文件：macOS 拷贝带出的 ._xxx.jpg（AppleDouble）后缀是图片，内容解不出来。
+        if name:sub(1, 1) ~= "." and Image.suffix(name) and fileOk(path) then files[#files + 1] = path end
     end
     table.sort(files)
     folder_cache = { dir = dir, modification = modification, files = files }
