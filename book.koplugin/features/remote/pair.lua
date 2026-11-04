@@ -28,8 +28,12 @@ Pair.BODY_LIMIT = 4096
 ---@return boolean
 function Pair.authorized(self, headers)
     local cookie = headers["cookie"]
-    local token = type(cookie) == "string" and cookie:match("%f[%w_]moon_token=([%w]+)") or nil
-    return token ~= nil and self.handlers.is_paired(token) == true
+    if type(cookie) ~= "string" then return false end
+    -- 同名 Cookie 可能有多个（不同 path / 旧版本遗留的），逐个试，别只认排在最前的那个。
+    for token in cookie:gmatch("%f[%w_]moon_token=([%w]+)") do
+        if self.handlers.is_paired(token) == true then return true end
+    end
+    return false
 end
 
 ---@param self table server
