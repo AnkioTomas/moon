@@ -904,6 +904,19 @@ do
     Assert.not_nil(db_rows[rowKey("local", "/books/gone.epub")])
     Assert.len(removed, 0)
 
+    -- 开文档时子进程被杀：书仍入库，书名取自文件名
+    CRASH_AT["/books/boom.epub"] = true
+    ok, err = nil, nil
+    Client.new({ path = "/books" }):indexOneAsync("/books/boom.epub", function(o, e)
+        ok, err = o, e
+    end)
+    Stubs.flush()
+    CRASH_AT["/books/boom.epub"] = nil
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.not_nil(db_rows[rowKey("local", "/books/boom.epub")])
+    Assert.eq(db_rows[rowKey("local", "/books/boom.epub")].title, "boom")
+
     -- 非法扩展名 / 空路径
     ok, err = true, nil
     Client.new({ path = "/books" }):indexOneAsync("/books/old.cbr", function(o, e)

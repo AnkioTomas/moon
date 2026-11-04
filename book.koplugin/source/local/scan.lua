@@ -597,6 +597,15 @@ function Scan.indexOneAsync(self, path, cb)
     local index = ScanDB.all()
     local attr = lfs.attributes(path)
     local fp = attr and (attr.size .. ":" .. attr.modification) or nil
+    local opening
+    local function commit(f)
+        if commitFiles({ f }, known) then
+            ScanDB.save(index, { f }, true)
+            cb(true)
+        else
+            cb(nil, "failed to commit local book")
+        end
+    end
     local job = Job.run(function(progress)
         local f = parseFile({ name = name, path = path, fp = fp }, known, digests, index)
         progress(path)
@@ -612,17 +621,20 @@ function Scan.indexOneAsync(self, path, cb)
     end, {
         name = "local.index",
         kind = "light",
-        on_done = function(f)
-            if commitFiles({ f }, known) then
-                ScanDB.save(index, { f }, true)
-                cb(true)
-            else
-                cb(nil, "failed to commit local book")
-            end
+        on_progress = function(value)
+            opening = value or nil
         end,
+        on_done = commit,
         on_failed = function(err)
-            require("utils.log").warn("book local index failed", err)
-            cb(nil, err)
+            if not opening then
+                require("utils.log").warn("book local index failed", err)
+                return cb(nil, err)
+            end
+            -- 开文档时子进程被杀（引擎崩溃 / 内存不足）：书照常入库，书名取文件名，不再开文档
+            require("utils.log").warn("book local index crashed; import by filename", path, err)
+            local f = parseFile({ name = name, path = path, fp = fp }, known, digests, index)
+            f.cover_tried = true
+            commit(f)
         end,
     })
     return { cancel = function()
