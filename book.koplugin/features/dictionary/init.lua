@@ -57,7 +57,10 @@ function DictInit.hasUnintegratedButtons(dict, word)
                 local ok, result = pcall(spec.show_func, { word = word, lookupword = word, ui = dict.ui })
                 show = not ok or (result and true or false)
             end
-            if show then return true end
+            if show then
+                require("utils.log").warn("dictionary: native lookup kept for plugin button", id)
+                return true
+            end
         end
     end
     return false
