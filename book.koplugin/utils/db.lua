@@ -24,6 +24,29 @@ local DB = {}
 
 local conn = nil
 local SLOW_QUERY_MS = 20
+local corrupt = false
+local tx_depth = 0
+
+--- 库文件损坏（corrupt / notadb）没法在原地修：记下来，下次取连接时把坏库整套挪开重建。
+--- 事务进行中不动连接（后续语句还在这个事务里跑）。
+---@param err any
+local function noteError(err)
+    if not corrupt and type(err) == "string" and (err:find("[corrupt]", 1, true) or err:find("[notadb]", 1, true)) then
+        corrupt = true
+    end
+end
+
+--- 坏库改名留作取证（覆盖上一份），本地书靠扫盘、远端书靠同步重建；新库由 open 重新建表。
+local function quarantine()
+    corrupt = false
+    DB.close()
+    local path = Paths.dbPath()
+    logger.warn("book.db corrupt; moved aside and recreated", path)
+    for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do
+        os.remove(path .. ".corrupt" .. suffix)
+        os.rename(path .. suffix, path .. ".corrupt" .. suffix)
+    end
+end
 
 --- 打开 SQLite 连接（不改模块级 conn）
 ---@return SQLiteConnection|nil, string|nil
@@ -75,6 +98,7 @@ function DB.exec(sql, ...)
     closeStmt(stmt)
     local elapsed_ms = Perf.elapsedMs(started_at)
     if not ok then
+        noteError(err)
         logger.warn("book.db exec failed", err, sql, "params", unpack(args, 1, argc))
         return nil, err
     end
@@ -91,7 +115,9 @@ end
 ---@return T|nil result 提交成功时为 fn 的返回值
 function DB.transaction(fn)
     if not DB.exec("BEGIN IMMEDIATE;") then return nil end
+    tx_depth = tx_depth + 1
     local ok, result = pcall(fn)
+    tx_depth = tx_depth - 1
     if ok and result and DB.exec("COMMIT;") then return result end
     DB.exec("ROLLBACK;")
     if not ok then error(result, 0) end
@@ -121,6 +147,7 @@ function DB.rowexec(sql, ...)
     closeStmt(stmt)
     local elapsed_ms = Perf.elapsedMs(started_at)
     if not ok then
+        noteError(row)
         logger.warn("book.db rowexec failed", row, sql, "params", unpack(args, 1, argc))
         return nil
     end
@@ -158,6 +185,7 @@ function DB.query(sql, ...)
     closeStmt(stmt)
     local elapsed_ms = Perf.elapsedMs(started_at)
     if not ok then
+        noteError(result)
         logger.warn("book.db query failed", result, sql, "params", unpack(args, 1, argc))
         return nil, 0
     end
@@ -210,7 +238,7 @@ end
 --- 省掉每次提交的 fsync（翻页写统计每页一次）；页缓存压到 512KB（默认约 2MB）。
 --- SQL 在当前进程同步执行；调用方自行保证写操作顺序。
 ---@return SQLiteConnection|nil, string|nil
-function DB.open()
+function DB.open(retried)
     if conn then
         return conn
     end
@@ -230,6 +258,10 @@ function DB.open()
     if not schema_ok then
         logger.warn("book.db schema init failed", schema_err)
         DB.close()
+        if corrupt and not retried then
+            quarantine()
+            return DB.open(true)
+        end
         return nil, schema_err
     end
     schema_ready = true
@@ -253,6 +285,7 @@ function DB.ensure()
         error("book.db: database access is forbidden in subprocess; use an instant job", 3)
     end
 
+    if corrupt and tx_depth == 0 then quarantine() end
     if conn then
         return conn
     end

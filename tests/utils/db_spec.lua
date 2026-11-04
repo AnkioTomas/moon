@@ -321,3 +321,34 @@ do
     Assert.is_false(schema:find("DROP TABLE", 1, true) ~= nil)
     Assert.is_false(schema:find("UPDATE books", 1, true) ~= nil, "进度表建表不直接改 books")
 end
+
+-- ── 库文件损坏：事务外下一次取连接时整套挪开重建，事务内不动连接 ──
+do
+    local renamed, opened = {}, 0
+    local real_rename, real_remove = os.rename, os.remove
+    os.rename = function(from, to) renamed[#renamed + 1] = from .. ">" .. to; return true end
+    os.remove = function() return true end
+    stubDbDeps()
+    package.preload["lua-ljsqlite3/init"] = function()
+        return { open = function()
+            opened = opened + 1
+            local first = opened == 1
+            return {
+                exec = function(_self, sql)
+                    if first and sql:find("BEGIN", 1, true) then error("ljsqlite3[notadb] file is not a database") end
+                end,
+                close = function() end,
+            }
+        end }
+    end
+    package.loaded["utils.db"] = nil
+    local DbBase = require("utils.db")
+    DbBase.schema("t", function() return true end)
+    local conn, err = DbBase.open()
+    Assert.is_true(conn ~= nil, tostring(err))
+    Assert.eq(opened, 2)
+    Assert.eq(renamed[1], "unused.sqlite3>unused.sqlite3.corrupt")
+    Assert.eq(#renamed, 3)
+    os.rename, os.remove = real_rename, real_remove
+    clearMods()
+end
