@@ -217,14 +217,15 @@ Assert.is_nil(got)
 -- folder：同一锁屏次数固定一张，次数 +1 换下一张，不落盘任何状态
 local wall = folder_dir .. "/a.png"
 files[folder_dir] = { mode = "directory", modification = 2 }
-files[folder_dir .. "/__dir__"] = { ".", "..", "a.png", "b.jpg", "notes.txt" }
+files[folder_dir .. "/__dir__"] = { ".", "..", "a.png", "b.jpg", "notes.txt", "._a.png" }
 files[wall] = { mode = "file", size = 64 }
 files[folder_dir .. "/b.jpg"] = { mode = "file", size = 64 }
 files[folder_dir .. "/notes.txt"] = { mode = "file", size = 64 }
+files[folder_dir .. "/._a.png"] = { mode = "file", size = 64 }
 cycle_stub.lock_cycles = 0
 Background.ensure(background("folder"), function(path) got = path end)
 local first = got
-Assert.is_true(first == wall or first == folder_dir .. "/b.jpg", "只挑图片")
+Assert.is_true(first == wall or first == folder_dir .. "/b.jpg", "只挑图片，不挑 ._ 隐藏文件")
 Background.ensure(background("folder"), function(path) got = path end)
 Assert.eq(got, first, "同一次数不换")
 Assert.eq(background("folder").cache_key(), "0")
