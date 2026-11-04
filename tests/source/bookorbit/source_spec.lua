@@ -147,10 +147,10 @@ routes["GET /koreader/plugin/catalog/sections/libraries"] = json({ items = {
 routes["GET /koreader/plugin/catalog/books"] = function(opts)
     local lib, page = query(opts, "libraryId"), query(opts, "page")
     if lib == "1" and page == "1" then
-        return json({ hasNext = true, items = { { id = 1, title = "长夜", authors = { "甲", "乙" }, seriesName = "夜" } } })
+        return json({ hasNext = true, items = { { id = 1, title = "长夜", authors = { "甲", "乙" }, seriesName = "夜", readStatus = "read" } } })
     end
     if lib == "1" then return json({ hasNext = false, items = { { id = 2, title = "白昼", authors = {} } } }) end
-    return json({ hasNext = false, items = { { id = 3, title = "图册" } } })
+    return json({ hasNext = false, items = { { id = 3, title = "图册", readStatus = "reading" } } })
 end
 local result = run("syncBooksAsync", nil)
 Assert.eq(result.pulled, 3)
@@ -160,6 +160,8 @@ Assert.eq(reconciled.books[1].authors, "甲 / 乙")
 Assert.eq(reconciled.books[1].series, "夜")
 Assert.eq(reconciled.books[1].category, "小说")
 Assert.is_nil(reconciled.books[2].authors)
+Assert.eq(reconciled.books[1].percent, 100)
+Assert.is_nil(reconciled.books[3].percent)
 Assert.eq(reconciled.books[3].category, "漫画")
 Assert.eq(calls[1].headers["x-auth-user"], "ann")
 Assert.eq(calls[1].headers["x-auth-key"], "k")
