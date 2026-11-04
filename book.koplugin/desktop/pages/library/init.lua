@@ -822,6 +822,7 @@ function Library:buildPage(ctx)
     local books = state.books
     local on_open = CoverCell.opener(self, ctx, require("desktop.open").book)
     local on_detail = function(book) require("desktop.detail").open(ctx.desktop, "library", book) end
+    ctx.on_detail = on_detail
     local body
     if not books or #books == 0 then
         if books and #books == 0 and self.offline and not state.err and g.id ~= "folder" then
@@ -833,10 +834,10 @@ function Library:buildPage(ctx)
     elseif self.view == "list" and g.id ~= "folder" then
         body = VerticalGroup:new{ align = "left" }
         for i = 1, math.min(#books, m.rows) do
-            body[i] = Rows.book(ctx, books[i], w, m.row_h, on_open, on_detail)
+            body[i] = Rows.book(ctx, books[i], w, m.row_h, on_open,
+                CoverCell.moreAction(ctx, books[i], CoverCell.libraryConf().more))
         end
     else
-        ctx.on_detail = on_detail
         local lib = CoverCell.libraryConf()
         local on_tap = on_open
         if lib.tap_detail then on_tap = function(book) on_detail(book) end end
