@@ -65,9 +65,9 @@ end
 ---@param w number 行宽
 ---@param h number 行高（含分隔线）
 ---@param on_open fun(book: Book, cover: table, cw: number, ch: number)
----@param on_detail fun(book: Book)
+---@param on_more (fun(dimen: table))|nil 「更多」动作；nil 不画按钮
 ---@return table
-function Rows.book(ctx, book, w, h, on_open, on_detail)
+function Rows.book(ctx, book, w, h, on_open, on_more)
     local t = Theme.current()
     local pad, gap = Theme.px(t.space.md), Theme.px(t.space.md)
     local rule = Theme.px(t.row.divider)
@@ -80,12 +80,15 @@ function Rows.book(ctx, book, w, h, on_open, on_detail)
         (Book.cover(ctx.plugin, ctx.source, book, cw, ch, { show_parent = ctx.desktop })),
     }
 
-    local more_w = Theme.px(t.control.height)
-    local more = Book.tappable(more_w, inner_h, function() on_detail(book) end)
-    more[1] = CenterContainer:new{
-        dimen = Geom:new{ w = more_w, h = inner_h },
-        Icon.widget{ name = "more_vert", size = t.control.icon, color = Theme.color(t.color.accent) },
-    }
+    local more
+    if on_more then
+        local more_w = Theme.px(t.control.height)
+        more = Book.tappable(more_w, inner_h, on_more)
+        more[1] = CenterContainer:new{
+            dimen = Geom:new{ w = more_w, h = inner_h },
+            Icon.widget{ name = "more_vert", size = t.control.icon, color = Theme.color(t.color.accent) },
+        }
+    end
     local side = HorizontalGroup:new{ align = "center" }
     -- 已缓存优先：同时成立时打开实际走本地缓存，标「已下载」会误导（05 A5）。
     if book.cache_mark then
@@ -101,7 +104,7 @@ function Rows.book(ctx, book, w, h, on_open, on_detail)
             Text.line("caption", _("已下载")),
         }
     end
-    side[#side + 1] = more
+    if more then side[#side + 1] = more end
     local side_w = 0
     for _idx, child in ipairs(side) do side_w = side_w + child:getSize().w end
 

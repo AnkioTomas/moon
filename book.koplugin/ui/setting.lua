@@ -25,6 +25,8 @@ return {
         -- 双击 / 长按封面：none / open / detail。开双击后书库页的单击要多等一个双击间隔。
         library_double_tap = "none",
         library_hold = "none",
+        -- 封面 / 列表行的「更多」：detail 进详情、menu 弹详情页右上角菜单、none 不显示。
+        library_more = "detail",
         library_random = true,
         -- 书库显示哪些分组页签（书籍恒显示）；文件夹只对本地源生效。
         library_tabs = { "books", "author", "series", "category", "folder" },

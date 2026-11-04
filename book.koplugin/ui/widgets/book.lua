@@ -234,7 +234,7 @@ function Book.tappable(w, h, on_tap, on_hold)
         end
     end
     tap.onTapBookInfo = function()
-        if on_tap then on_tap() end
+        if on_tap then on_tap(tap.dimen) end
         return true
     end
     return tap

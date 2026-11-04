@@ -59,6 +59,19 @@ function CoverCell.opener(owner, ctx, open)
     end
 end
 
+--- 「更多」按钮的动作：mode 为 "none" 不给（按钮不画），"menu" 弹详情页右上角菜单，其余进详情。
+---@param ctx table 需要 desktop 与 on_detail
+---@param book Book
+---@param mode string|nil
+---@return (fun(dimen: table))|nil
+function CoverCell.moreAction(ctx, book, mode)
+    if mode == "none" then return nil end
+    if mode == "menu" then
+        return function(dimen) require("desktop.detail").openMenu(ctx.desktop, book, dimen) end
+    end
+    return function() ctx.on_detail(book) end
+end
+
 --- 构建封面格子；show_status 为 false 时不画状态角标与「更多」，整卡即 on_open。
 --- show_author 缺省关闭。打开后格子变高，调用方要用同样的开关算槽高。
 ---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
@@ -83,7 +96,7 @@ function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_t
         download = status,
         cached = status,
         -- 图书馆右下角「更多」进详情（角标自带点击区，先于整卡收到点按）；书城整卡即详情，不画「更多」。
-        more = status and function() ctx.on_detail(book) end,
+        more = status and CoverCell.moreAction(ctx, book, lib and lib.more),
         show_parent = ctx.desktop,
     }
     if lib and lib.kobo then
@@ -99,7 +112,7 @@ function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_t
             else
                 opts.status_pct = Book.isRead(book) and 100 or Book.pct(book)
             end
-            opts.status_more = function() ctx.on_detail(book) end
+            opts.status_more = CoverCell.moreAction(ctx, book, lib.more)
         end
     end
     local card, _card_h, cover = Book.widget(ctx.plugin, ctx.source, book, cw, ch, opts)
@@ -123,6 +136,7 @@ function CoverCell.libraryConf()
         tap_detail = conf.library_tap == "detail",
         double = conf.library_double_tap,
         hold = conf.library_hold,
+        more = conf.library_more,
     }
 end
 

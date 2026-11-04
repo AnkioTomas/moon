@@ -4,6 +4,7 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local UIManager = require("ui/uimanager")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local List = require("ui.themes.widgets.list")
@@ -29,21 +30,48 @@ local ACTIONS = {
 }
 
 return function(Detail)
---- 右上角「更多」：贴着按钮弹出的窄下拉，工具项按 actionPlan 顺序（删除在末尾）。
+--- 贴着锚点弹出的窄下拉，工具项按 actionPlan 顺序（删除在末尾）。
+---@param self table Detail 实例，或 Detail.openMenu 造的宿主
 ---@param tools table[] Detail.actionPlan 的工具项
-function Detail:showMenu(tools)
+---@param anchor table 锚点矩形 { x, y, w, h }
+local function showTools(self, tools, anchor)
     local items = {}
     for i, def in ipairs(tools) do
         local method = ACTIONS[def.id]
         items[i] = { icon = def.icon, text = def.text, callback = function() self[method](self) end }
     end
+    List:new{ centered = true, inner_width = Theme.px(MENU_W), anchor = anchor, items = items }:show()
+end
+
+--- 右上角「更多」。
+---@param tools table[] Detail.actionPlan 的工具项
+function Detail:showMenu(tools)
     local slot = Theme.px(self.theme.control.height)
-    List:new{
-        centered = true,
-        inner_width = Theme.px(MENU_W),
-        anchor = { x = self.dimen.w - slot, y = 0, w = slot, h = TitleBar.height() },
-        items = items,
-    }:show()
+    showTools(self, tools, { x = self.dimen.w - slot, y = 0, w = slot, h = TitleBar.height() })
+end
+
+--- 不开详情页，直接弹详情页右上角同一份菜单（书库「更多」用）。
+--- 宿主只带动作要用的字段；没有详情页可关 / 可重画，改动后重建桌面。
+---@param desktop table BookDesktop
+---@param book table
+---@param anchor table 触发按钮的矩形
+function Detail.openMenu(desktop, book, anchor)
+    local tools = Detail.actionPlan(book, bookOwnerSource(book, desktop.source))
+    if #tools == 0 then return end
+    local function rebuild()
+        desktop:onEvent("detail_dirty")
+        if desktop.tab ~= "home" then desktop:updateView() end
+        UIManager:setDirty(desktop, "ui")
+    end
+    local host = setmetatable({
+        book = book, plugin = desktop.plugin, source = desktop.source, desktop = desktop, origin = "library",
+        close = rebuild,
+        reload = function()
+            desktop:onEvent("shelf_changed")
+            rebuild()
+        end,
+    }, { __index = Detail })
+    showTools(host, tools, anchor)
 end
 
 function Detail:updateView()
