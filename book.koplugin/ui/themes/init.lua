@@ -239,6 +239,10 @@ function Theme.root()
     if not _root then
         local src = debug.getinfo(1, "S").source
         _root = src:sub(1, 1) == "@" and src:sub(2):match("(.*/)ui/themes/[^/]+$") or ""
+        if _root:sub(1, 1) ~= "/" then
+            local cwd = require("libs/libkoreader-lfs").currentdir()
+            _root = cwd .. "/" .. _root:gsub("^%./", "")
+        end
     end
     return _root
 end

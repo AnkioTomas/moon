@@ -38,6 +38,7 @@ local FACE = "moon_icon"
 local FONT_FILE = "MaterialSymbolsOutlined-Regular.ttf"
 
 local _ensured = false
+local _unavailable = false
 
 --- 把图标字体登记进 FontList，并固定 moon_icon 字面（换 UI 字体不影响图标）。
 local function ensureFont()
@@ -59,7 +60,12 @@ end
 ---@return table
 function Icon.face(size)
     ensureFont()
-    return Font:getFace(FACE, size)
+    if not _unavailable then
+        local face = Font:getFace(FACE, size)
+        if face then return face end
+        _unavailable = true
+    end
+    return Font:getFace("cfont", size)
 end
 
 ---@param opts { name: string, size: number, color: table|nil, box: boolean|nil }
@@ -67,9 +73,10 @@ end
 function Icon.widget(opts)
     opts = opts or {}
     if type(opts.name) ~= "string" or opts.name == "" then return nil end
+    local face = Icon.face(Theme.fontSize(opts.size))
     local glyph = Text.tint(TextWidget:new{
-        text = opts.name,
-        face = Icon.face(Theme.fontSize(opts.size)),
+        text = _unavailable and "?" or opts.name,
+        face = face,
         fgcolor = opts.color or Theme.color(Theme.current().color.accent),
         use_xtext = true,
     })

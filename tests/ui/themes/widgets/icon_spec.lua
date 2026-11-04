@@ -23,10 +23,18 @@ end
 package.preload["ui/geometry"] = function()
     return { new = function(_, opts) return opts end }
 end
+local fail_icon = false
+local icon_attempts = 0
 package.preload["ui/font"] = function()
     return {
         fontmap = {},
-        getFace = function(_, face, size) return { face = face, size = size } end,
+        getFace = function(_, face, size)
+            if face == "moon_icon" then
+                icon_attempts = icon_attempts + 1
+                if fail_icon then return nil end
+            end
+            return { face = face, size = size }
+        end,
     }
 end
 local FontList = { fontlist = {}, getFontList = function() end }
@@ -69,4 +77,12 @@ Assert.eq(label[3].fgcolor, 7)
 local metric = Icon.label{ name = "wifi", text = "Wi-Fi", size = 12, color = 7, text_color = 0 }
 Assert.eq(metric[1][1].fgcolor, 7)
 Assert.eq(metric[3].fgcolor, 0, "指标读数与图标可分色")
+
+fail_icon = true
+local fallback = Icon.widget{ name = "home", size = 14 }
+Assert.eq(fallback[1].face.face, "cfont", "字体加载失败不能把 nil face 交给 TextWidget")
+Assert.eq(fallback[1].text, "?", "降级时不显示未经连字处理的图标名")
+local attempts = icon_attempts
+Assert.eq(Icon.face(20).face, "cfont")
+Assert.eq(icon_attempts, attempts, "坏字体不反复尝试加载")
 return true
