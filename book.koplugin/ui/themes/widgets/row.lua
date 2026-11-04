@@ -19,6 +19,8 @@
       hold_callback = fn,  -- 可选长按；与 callback 互不影响
   })
 
+  Row.note(w, "说明文字")   -- 行间 muted 小字，文字与上方行的标题列对齐
+
   Row.choice({ width = w, icon = …, title = …, items = { { value, text } … }, current = v,
       on_select = fn(value) })   -- 单选行：点开列表；status 缺省取当前项文案
 
@@ -29,6 +31,7 @@ local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local RightContainer = require("ui/widget/container/rightcontainer")
@@ -144,6 +147,22 @@ function Row.widget(opts)
     -- 设置搜索靠这两个字段取行文字，不必解析控件树。
     widget.row_title, widget.row_subtitle = opts.title, opts.subtitle
     return widget
+end
+
+--- 行间说明：muted 小字，左边与 Row 的标题列对齐（有图标行的文字起点），多行自动撑高。
+---@param width number
+---@param text string
+---@return table
+function Row.note(width, text)
+    local t = Theme.current()
+    local left = Theme.px(t.space.md) + Theme.px(t.control.icon) + Theme.px(t.space.sm)
+    local pad = Theme.px(t.space.xs)
+    local box = Text.box("caption", text, math.max(1, width - left - Theme.px(t.space.md)),
+        { color = t.color.muted, transparent = true })
+    return LeftContainer:new{
+        dimen = Geom:new{ w = width, h = box:getSize().h + pad * 2 },
+        HorizontalGroup:new{ HorizontalSpan:new{ width = left }, box },
+    }
 end
 
 --- 单选行：导航行，点开单选列表（标题同行标题），选了与 current 不同的值才回调 on_select。

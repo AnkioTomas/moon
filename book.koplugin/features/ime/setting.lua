@@ -9,25 +9,6 @@ local T = require("ffi/util").template
 
 local RELEASES_URL = "https://github.com/AnkioTomas/moon/releases"
 
---- 造一行小字灰色提示，高度按文本实测撑开。
----@param width number
----@param text string
----@return table
-local function hintRow(width, text)
-    local Geom = require("ui/geometry")
-    local LeftContainer = require("ui/widget/container/leftcontainer")
-    local Text = require("ui.themes.widgets.text")
-    local Theme = require("ui.themes")
-    local t = Theme.current()
-    local box_w = math.max(1, width - Theme.px(t.space.xs))
-    local box = Text.box("caption", text, box_w, { color = t.color.muted, transparent = true })
-    local box_h = box:getSize().h
-    return LeftContainer:new{
-        dimen = Geom:new{ w = width, h = box_h },
-        box,
-    }
-end
-
 ---@param desktop BookDesktop
 ---@param enable_after boolean|nil
 local function download(desktop, enable_after)
@@ -238,9 +219,22 @@ local function sections(desktop)
                     })
                 end,
                 function(iw)
-                    return hintRow(iw, T(_(
-                        "若在线下载过慢，可到 GitHub Release（%1）下载对应词库，直接放入：%2"
-                    ), RELEASES_URL, dict_path))
+                    return Row.widget({
+                        width = iw,
+                        chevron = true,
+                        kind = "nav",
+                        icon = "folder_open",
+                        title = _("手动安装词库"),
+                        subtitle = _("在线下载过慢时使用"),
+                        callback = function()
+                            require("ui.themes.widgets.text_viewer"):new{
+                                title = _("手动安装词库"),
+                                fullscreen = false,
+                                text = T(_("1. 打开 GitHub Release：\n%1\n\n2. 下载当前输入法对应的词库文件。\n\n3. 放入：\n%2"),
+                                    RELEASES_URL, dict_path),
+                            }:show()
+                        end,
+                    })
                 end,
     }
     if method.optional_labels then table.insert(rows, 3, keycaps_row) end

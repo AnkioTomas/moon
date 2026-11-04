@@ -21,4 +21,4 @@ status, on = Setting.rowStatus()
 Assert.eq(status, "v0.0.11")
 Assert.is_true(on)
 
-Assert.len(Setting.rows(nil), 1)
+Assert.len(Setting.rows(nil), 2, "插件行 + 安装说明")

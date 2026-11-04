@@ -63,7 +63,7 @@ package.preload["source.kavita"] = function()
     return { DEFAULT_HEARTBEAT_INTERVAL = 30 }
 end
 package.preload["ui.themes.widgets.row"] = function()
-    return { widget = function(opts) return opts end }
+    return { widget = function(opts) return opts end, note = function(_width, text) return { text = text } end }
 end
 package.loaded["ui.themes"] = nil
 package.preload["ui.themes"] = function()

@@ -36,7 +36,13 @@ end
 ---@param plugin table|nil
 ---@return BookThemeSection[]
 function Setting.sections(plugin)
-    return { { title = _("Kindle 书库"), rows = { pluginRow(plugin) } } }
+    return { { title = _("Kindle 书库"), rows = {
+        pluginRow(plugin),
+        function(iw)
+            return require("ui.themes.widgets.row").note(iw,
+                _("开书转换依赖 kindle.koplugin：点上方一行在线安装或更新，装好后重启 KOReader 生效。"))
+        end,
+    } } }
 end
 
 ---@param plugin table|nil
