@@ -266,7 +266,29 @@ function Patch.apply()
             self._connecting = true
             local function dial(list)
                 local index = 1
-                local function go()
+                local go
+                local function advance()
+                    dropAlt(self)
+                    if not list[index + 1] then return false end
+                    index = index + 1
+                    go()
+                    return true
+                end
+                -- SSLIOStream 的异步连接失败不经 fail_callback，而是清空 errhandler / callback / arg 后直接调
+                -- _ssl_connect_errhandler；截住它，还有下一个地址就放回这三样再退回去。
+                local ssl_final = self._ssl_connect_errhandler
+                local ssl_callback, ssl_arg = self._ssl_connect_callback, self._ssl_connect_callback_arg
+                local function ssl_retry(...)
+                    if list[index + 1] then
+                        self._ssl_connect_errhandler = ssl_retry
+                        self._ssl_connect_callback, self._ssl_connect_callback_arg = ssl_callback, ssl_arg
+                        advance()
+                        return
+                    end
+                    return ssl_final(...)
+                end
+                if ssl_final then self._ssl_connect_errhandler = ssl_retry end
+                function go()
                     while list[index] and not install(self, list[index]) do index = index + 1 end
                     local addr = list[index]
                     if not addr then
@@ -279,12 +301,7 @@ function Patch.apply()
                         if callback then return callback(...) end
                     end
                     local function on_fail(...)
-                        dropAlt(self)
-                        index = index + 1
-                        if list[index] then
-                            go()
-                            return
-                        end
+                        if advance() then return end
                         if fail_callback then return fail_callback(...) end
                     end
                     local fallback = list[index + 1]
