@@ -123,6 +123,26 @@ do
     local dual = {}
     iostream.IOStream.connect(dual, "dual.example", 443)
     Assert.eq(dual.connected_to, "2001:db8::9")
+    -- SSL 的异步失败：SSLIOStream 先清空 errhandler / callback / arg 再直接调 errhandler，不经 fail_callback。
+    -- IPv6 失败要退回 IPv4，三样放回去；两个地址都失败才交给 HTTPClient 的 errhandler。
+    local final_errs = {}
+    local function final(arg_, ...) final_errs[#final_errs + 1] = { arg_, ... } end
+    local ssl = { _ssl_connect_errhandler = final, _ssl_connect_callback = "cb", _ssl_connect_callback_arg = "arg" }
+    iostream.IOStream.connect(ssl, "dual.example", 443)
+    Assert.eq(ssl.connected_to, "2001:db8::9")
+    local function sslFail(stream)
+        local handler = stream._ssl_connect_errhandler
+        stream._ssl_connect_errhandler, stream._ssl_connect_callback, stream._ssl_connect_callback_arg = nil, nil, nil
+        handler("arg", -1, "refused")
+    end
+    sslFail(ssl)
+    Assert.eq(ssl.connected_to, "9.9.9.9")
+    Assert.eq(#final_errs, 0)
+    Assert.eq(ssl._ssl_connect_callback, "cb")
+    Assert.eq(ssl._ssl_connect_callback_arg, "arg")
+    sslFail(ssl)
+    Assert.eq(#final_errs, 1)
+    Assert.eq(final_errs[1][3], "refused")
     -- 同步失败：iostream 经 run_callback 调 HTTPClient:_handle_connect_fail(client, err) → 丢该主机地址缓存
     HTTPClient._handle_connect_fail({ hostname = "cdn.example.com" }, "Network is unreachable")
     Assert.eq(client_fail_msgs[1], "Could not connect: Network is unreachable")
