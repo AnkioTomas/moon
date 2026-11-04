@@ -45,9 +45,14 @@ end
 function Markup.blocks(html)
     local blocks = {}
     local open_name, open_end
+    local in_nav = 0
     for at, slash, name, after in html:gmatch("()<(/?)([%w:%-]+)[^>]*>()") do
         name = name:lower():gsub("^.*:", "")
-        if LEAF[name] or BOUNDARY[name] then
+        if name == "nav" then
+            -- 目录（nav.xhtml）的条目就是目录标题，插入译文会让阅读器认不出目录
+            in_nav = math.max(0, in_nav + (slash == "/" and -1 or 1))
+            open_name, open_end = nil, nil
+        elseif in_nav == 0 and (LEAF[name] or BOUNDARY[name]) then
             if slash == "/" and open_name == name then
                 local text = plain(html:sub(open_end, at - 1))
                 if text:find("[%a\128-\255]") then

@@ -61,3 +61,9 @@ local style = Markup.style({ bilingual_color = "#555555", bilingual_scale = 90 }
 Assert.eq(style, "color:#555555;font-size:90%")
 Assert.eq((Markup.inject("<p>A</p>", { A = "甲" }, style)),
     '<p>A<br/><span class="moon-tr" style="display:block;color:#555555;font-size:90%">甲</span></p>')
+
+-- 目录 nav 里的条目不译，正文照常。
+local navdoc = '<nav epub:type="toc"><ol><li><a href="a.xhtml">Chapter</a></li></ol></nav><p>Body</p>'
+Assert.eq(#Markup.blocks(navdoc), 1)
+Assert.eq((Markup.inject(navdoc, { Chapter = "章", Body = "正文" })),
+    '<nav epub:type="toc"><ol><li><a href="a.xhtml">Chapter</a></li></ol></nav><p>Body<br/><span class="moon-tr" style="display:block">正文</span></p>')
