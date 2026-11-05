@@ -385,6 +385,8 @@ function Kit.install(theme)
             },
             hasKeys = function() return false end,
             hasFewKeys = function() return false end,
+            hasEinkScreen = function() return true end,
+            isSDL = function() return false end,
             input = { group = { Back = "Back" } },
         },
         ["ui/geometry"] = { new = function(_, o) return geom(o) end },
