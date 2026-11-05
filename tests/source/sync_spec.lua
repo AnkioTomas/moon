@@ -76,6 +76,7 @@ do
     local spec, result = runPush(sourceOf("moon"))
     Assert.eq(spec.key, "dirty\0moon")
     Assert.eq(spec.kind, "sync")
+    Assert.eq(spec.label, "同步本地改动", "推脏行不再显示成「同步书架」")
     Assert.eq(spec.title, "moon-name")
     Assert.is_true(spec.restartable)
     Assert.is_true(result.ok)
@@ -162,6 +163,20 @@ do
     pending_cb({ pushed = 1 })
     Assert.eq(#source.calls, 0, "取消后不推进度")
     Assert.is_false(finished)
+end
+
+-- 只拉的源（Kavita）：书架脏行不算可推域，任务只推进度 / 统计，标题也不再叫「同步书架」。
+do
+    books, notes, stats_rows = { { stable_id = "b1" } }, {}, {}
+    progress = { { stable_id = "p1" } }
+    local source = sourceOf("kavita")
+    source.capabilities = function() return { shelf_push = false } end
+    local spec, result = runPush(source)
+    Assert.eq(spec.label, "同步本地改动")
+    Assert.eq(#source.calls, 1, "只推能推的域，书架 no-op 不进来")
+    Assert.eq(source.calls[1][1], "progress")
+    Assert.is_true(result.ok)
+    books, progress = {}, {}
 end
 
 -- 只有待上传笔记也算脏（经存在性查询，不读 payload）。

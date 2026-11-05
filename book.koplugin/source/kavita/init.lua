@@ -66,6 +66,47 @@ local function meta()
     return SourceBase.loadMeta("kavita")
 end
 
+--- 旧版本把卷行写成了书架行（deleted=0），还把整部简介 / 作者只写进部分卷行。
+--- 卷行只是进度身份，列表只该出现系列：一次性把空字段从容器补齐，再改回隐藏。
+--- 每次 new() 都会走到，状态文件里的 schema_version 保证只真正执行一次。
+local function migrateLegacyVolumes()
+    local state = require("luasettings"):open(require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua")
+    if (tonumber(state:readSetting("schema_version")) or 0) >= 1 then return end
+    local ok, err = pcall(function()
+        local DB = require("utils.db")
+        if (tonumber(DB.rowexec("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='books';")) or 0) == 0 then
+            return -- 书库还没建表（新装 / 测试打桩）：下次再来。
+        end
+        -- 卷行的空作者 / 简介从容器行补：旧版本只写了其中一项，或写成空串。
+        local filled = DB.exec([[
+            UPDATE books SET
+                authors = COALESCE(NULLIF(authors, ''), (
+                    SELECT p.authors FROM books p
+                    WHERE p.source_id = books.source_id
+                      AND p.stable_id = substr(books.stable_id, 1, instr(books.stable_id, ':') - 1)
+                )),
+                intro = COALESCE(NULLIF(intro, ''), (
+                    SELECT p.intro FROM books p
+                    WHERE p.source_id = books.source_id
+                      AND p.stable_id = substr(books.stable_id, 1, instr(books.stable_id, ':') - 1)
+                ))
+            WHERE source_id = ?
+              AND instr(stable_id, ':') > 0
+              AND (COALESCE(authors, '') = '' OR COALESCE(intro, '') = '');
+        ]], ID)
+        if not filled then return end
+        -- 卷行不上书架：旧版本写成 deleted=0 的一律收回（进度 / 缓存文件保留）。
+        if not DB.exec([[UPDATE books SET deleted=1, sync_status=1
+            WHERE source_id=? AND deleted=0 AND instr(stable_id, ':')>0;]], ID) then
+            return
+        end
+        state:saveSetting("schema_version", 1)
+        state:flush()
+    end)
+    -- 迁移失败不能拖垮源：下次 new() 还会再试（schema_version 没落盘）。
+    if not ok then require("utils.log").warn("kavita legacy volume migration failed", err) end
+end
+
 ---@return KavitaSource
 local function new()
     -- 换源 / 改配置经 Registry.reload() 重建实例：顺手丢掉旧服务器的书架投影（05 A1）。
@@ -80,6 +121,7 @@ local function new()
     end
     local self = setmetatable(meta(), Source) --[[@as KavitaSource]]
     self.client = Client.new(cfg)
+    migrateLegacyVolumes()
     return self
 end
 
@@ -89,11 +131,13 @@ end
 
 --- 能力：书架 + 统计拉取（推送是纯本地确认，见 pushStatsAsync），其余走基类默认（全 false）。
 --- shelf_cache：断网时书架按适配层的缓存投影收窄可见集（05 A2）。
+--- shelf_push = false：Kavita 的书架只拉不推，推脏任务里跳过书架域（进度 / 笔记 / 统计照常）。
 ---@return SourceCapabilities
 function Source:capabilities()
     local caps = SourceBase.capabilities(self)
     caps.stats_pull = true
     caps.shelf_cache = true
+    caps.shelf_push = false
     return caps
 end
 
@@ -188,7 +232,7 @@ end
 local function withMetadata(row, metadata)
     local publishers = {}
     for _idx, person in ipairs(metadata.publishers or {}) do publishers[#publishers + 1] = person.name end
-    row.authors, row.intro = authorsOf(metadata), metadata.summary
+    row.authors, row.intro = authorsOf(metadata), summary(metadata.summary)
     row.meta = {
         publisher = table.concat(publishers, " / "),
         published = metadata.releaseYear,
@@ -379,18 +423,22 @@ end
 local function syncVolumeMeta(series, series_id, entries)
     if not series or #entries == 0 then return 0 end
     local BookDB = require("book.books_db")
-    local rows = {}
+    local rows, changed = {}, 0
     for _idx, entry in ipairs(entries) do
         local stable_id = series_id .. ":" .. tostring(entry.chapterId or entry.uid)
         local cur = BookDB.get(ID, stable_id)
         local row = volumeRow(series, stable_id, entry.title, volumeIntro(entry.summary, cur, series))
-        if not untouched(cur, row) then
+        if cur and cur.sync_status == 0 then
+            -- 脏行：用户改过的非空字段保留，只把空的作者 / 简介补上。
+            if BookDB.fillEmptyMeta(ID, stable_id, row.authors, row.intro) then
+                changed = changed + 1
+            end
+        elseif not untouched(cur, row) then
             rows[#rows + 1] = row
         end
     end
-    if #rows == 0 then return 0 end
-    require("book.store").rememberMany(rows)
-    return #rows
+    if #rows > 0 then require("book.store").rememberMany(rows) end
+    return #rows + changed
 end
 
 --- 缺行卷物化：本次拉取里读到、但本机没有书行的卷补一条轻量身份行。
@@ -586,33 +634,120 @@ local function backfillCurrentVolume(source, series_list, cb)
     end }
 end
 
---- 后台逐本补简介 / 作者（all-v2 不带，metadata 一本一请求）。已有简介的跳过；
---- 补过的 series 记在 settings/moonsource_kavita_meta.lua（书库把空简介存成 NULL，
---- 没简介的书靠它才不会每次同步都重拉）。单本失败跳过，连续失败才当网络问题整轮收工。
+--- 补全状态 TTL：缺数据的行到期重试，完整行永久跳过。
+local META_TTL = 7 * 86400
+--- 单轮补全的时间预算：到点停，下次同步靠 checked_at 接着补。
+local META_BUDGET = 60
+--- 每处理多少本落一次状态：进程被杀也不丢整轮进度。
+local META_FLUSH_EVERY = 20
+--- 补全期间首页刷新的节流间隔。
+local META_NOTIFY_EVERY = 10
+
+--- 字段是否有内容：空串 / 纯空白都算缺。
+---@param value any
+---@return boolean
+local function filled(value)
+    return type(value) == "string" and value:match("%S") ~= nil
+end
+
+--- 系列行是否完整：简介与作者都有值。完整性每轮从行实时判断，
+--- 不把 complete 落进状态文件（那会变成第二个「终身判据」）。
+---@param book table|nil
+---@return boolean
+local function complete(book)
+    return book ~= nil and filled(book.intro) and filled(book.authors)
+end
+
+--- 后台逐本补简介 / 作者（all-v2 不带，metadata 一本一请求）。
+--- 完整行永久跳过；缺数据的行按 `checked_at + TTL` 重试。状态记在
+--- settings/moonsource_kavita_meta.lua，顶层按 base_url 分区：换服务器不继承旧标记。
+--- 单本失败跳过（不推进 checked_at），连续失败才当网络问题整轮收工。
 ---@param series_ids string[]
-function Source:backfillMeta(series_ids)
+---@param opts { force?: boolean, on_changed?: fun() }|nil force 忽略 TTL；on_changed 有写入时通知 UI
+function Source:backfillMeta(series_ids, opts)
+    opts = opts or {}
     if self.backfill then self.backfill.cancel() end
     local BookDB = require("book.books_db")
     local UIManager = require("ui/uimanager")
     local state = require("luasettings"):open(require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua")
-    local done = state:readSetting("done", {})
-    local index, fails, cancelled, job, timer = 0, 0, false, nil, nil
+    -- 换服务器 / 换回旧服务器都不继承旧标记：同一个 seriesId 在另一台服务器上可能是别的书。
+    local server = self.client.base_url
+    if state:readSetting("server") ~= server then
+        state:saveSetting("server", server)
+        state:saveSetting("done", {})
+    end
+    local stored = state:readSetting("done", {})
+    if type(stored) ~= "table" then stored = {} end
+    -- 书架 id 里混着卷行（seriesId:chapterId，快照没变时 syncBooksAsync 直接取全量书架 id）：
+    -- 卷行不补 series 级元数据，拿它请求 /Series/metadata 会被 Kavita 判 400。
+    local ids = {}
+    for _idx, id in ipairs(series_ids) do
+        local key = tostring(id)
+        if not key:find(":", 1, true) then ids[#ids + 1] = key end
+    end
+    local done = {}
+    if #ids > 0 then
+        -- 只保留本轮书架里的 series：系列删除 / 取消勾选库后状态不会无限增长。
+        local keep = {}
+        for _idx, id in ipairs(ids) do keep[id] = true end
+        for id, value in pairs(stored) do
+            -- 旧版本的布尔 true 当作「很久以前检查过」：完整行照样跳过，缺数据行补一次。
+            local key = tostring(id)
+            if keep[key] then done[key] = type(value) == "number" and value or 0 end
+        end
+    else
+        -- 空书架（接口抖动 / 还没拉到）不能当成「全部消失」。
+        for id, value in pairs(stored) do
+            done[tostring(id)] = type(value) == "number" and value or 0
+        end
+    end
+    state:saveSetting("done", done)
+
+    local started, index, fails, cancelled, job, timer = os.time(), 0, 0, false, nil, nil
+    local writes, last_notify, notify_pending = 0, nil, false
+
+    local function notify()
+        if not opts.on_changed then return end
+        local now = os.time()
+        if last_notify and now - last_notify < META_NOTIFY_EVERY then return end
+        last_notify, notify_pending = now, false
+        opts.on_changed()
+    end
+
     local function stop()
         self.backfill = nil
         state:flush()
+        -- 收工补发：节流窗口内攒下的写入也要让首页看到。
+        if notify_pending and opts.on_changed then
+            notify_pending = false
+            opts.on_changed()
+        end
     end
+
+    --- 这一行要不要跳过：不存在 / 已完整 / TTL 内检查过都跳过。
+    local function settled(series_id, book)
+        if not book or complete(book) then return true end
+        if opts.force then return false end
+        local checked = done[tostring(series_id)]
+        if type(checked) ~= "number" then return false end
+        local age = os.time() - checked
+        -- 未来时间（时钟回拨）当成已过期，别把行永久锁住。
+        return age >= 0 and age < META_TTL
+    end
+
     local function step()
         local series_id, book
         repeat
             index = index + 1
-            series_id = series_ids[index]
-            book = series_id and not done[series_id] and BookDB.get(self.id, series_id)
-        until not series_id or (book and book.intro == nil)
+            series_id = ids[index]
+            book = series_id and BookDB.get(self.id, series_id)
+        until not series_id or not settled(series_id, book)
         if not series_id or not online() then return stop() end
+        if os.time() - started >= META_BUDGET then return stop() end
         job = self.client:json("GET", "/api/Series/metadata", { seriesId = series_id }, nil, function(metadata)
             if cancelled then return end
-            if not metadata then
-                -- 单本失败不拖住后面：连续失败才当网络问题整轮收工，下次同步接着补。
+            if type(metadata) ~= "table" then
+                -- 单本失败不拖住后面：不推进 checked_at，下次同步接着补。
                 fails = fails + 1
                 if fails >= 3 then return stop() end
                 timer = step
@@ -620,14 +755,23 @@ function Source:backfillMeta(series_ids)
                 return
             end
             fails = 0
-            require("book.store").rememberMany({
-                withMetadata({ source_id = self.id, stable_id = series_id }, metadata),
-            })
-            done[series_id] = true
+            local updated = withMetadata({ source_id = self.id, stable_id = tostring(series_id) }, metadata)
+            require("book.store").rememberMany({ updated })
+            -- 脏行（用户编辑过）书库不覆盖；空字段仍从服务端补上，别让「未知作者」永远留着。
+            if book and book.sync_status == 0 then
+                BookDB.fillEmptyMeta(self.id, tostring(series_id), updated.authors, updated.intro)
+            end
+            -- 空 DTO 也算「检查过」：服务端这次没给，TTL 后再看。
+            done[tostring(series_id)] = os.time()
+            writes = writes + 1
+            notify_pending = true
+            if writes % META_FLUSH_EVERY == 0 then state:flush() end
+            notify()
             timer = step
             UIManager:scheduleIn(0.3, timer)
         end)
     end
+
     self.backfill = { cancel = function()
         cancelled = true
         if job then job:cancel() end
@@ -822,7 +966,7 @@ end
 --- 本地删除留墓碑，对账不会复活。
 --- 远端快照（库 + 每本 id/名称/库名/字数）的指纹没变、本地书架也非空时跳过对账：
 --- 本地书架只会被对账和删除改动，删除留墓碑本来就不用对账；force 刷新照常对账。
----@param opts { dirty_only?: boolean, force?: boolean, on_progress?: fun(text: string|nil, done: integer|nil, total: integer|nil) }|nil
+---@param opts { dirty_only?: boolean, force?: boolean, on_progress?: fun(text: string|nil, done: integer|nil, total: integer|nil), on_changed?: fun() }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }
 function Source:syncBooksAsync(opts, cb)
@@ -866,7 +1010,7 @@ function Source:syncBooksAsync(opts, cb)
         end
         -- 简介 / 作者是逐本后台补的，跟快照变不变无关：换源 / 断网中断过，下次同步必须接着补，
         -- 否则没补到的书永远停在「未知作者」。
-        self:backfillMeta(ids)
+        self:backfillMeta(ids, { force = opts.force, on_changed = opts.on_changed })
         -- 服务端已读进度同理：网页端 / 别的设备读过，书架也得进「最近阅读」与「已读」。
         result.pulled = result.pulled + backfillRead(self.id, reads)
         -- 书架投影预热：开桌面必跑本方法，进书架时命中记忆（05 A1）。失败不影响同步结果，
