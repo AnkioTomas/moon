@@ -5,6 +5,7 @@ utils.inflate：raw / zlib / gzip 分块解压、截断容忍、坏流报错。
 --]]
 
 local Assert = require("support.assert")
+local ffi = require("ffi")
 local Inflate = require("utils.inflate")
 
 local function unhex(h) return (h:gsub("%x%x", function(x) return string.char(tonumber(x, 16)) end)) end
@@ -13,7 +14,22 @@ local RAW = unhex("7b36a7e3c5fadd0ab9f9f9790a997969398925a90ac505a9c90acf4625462
 local ZLIB = unhex("789c7b36a7e3c5fadd0ab9f9f9790a997969398925a90ac505a9c90acf462546254625868b040087babd88")
 local GZIP = unhex("1f8b08000000000002ff7b36a7e3c5fadd0ab9f9f9790a997969398925a90ac505a9c90acf462546254625868b04000cb786a9e8030000")
 
+-- 系统没有裸 libz.so 时，必须经 KOReader 的版本化 / 合并库加载器。
+local original_load, original_loadlib = ffi.load, ffi.loadlib
+local load_count = 0
+ffi.load = function(name, ...)
+    if name == "z" then error("libz.so: cannot open shared object file") end
+    return original_load(name, ...)
+end
+ffi.loadlib = function(name, version)
+    Assert.eq(name, "z")
+    Assert.eq(version, 1)
+    load_count = load_count + 1
+    return original_loadlib(name, version)
+end
 Assert.eq(Inflate.raw(RAW), TEXT)
+ffi.load, ffi.loadlib = original_load, original_loadlib
+Assert.eq(load_count, 1)
 Assert.eq(Inflate.all(ZLIB, 15), TEXT)
 Assert.eq(Inflate.all(GZIP, 15 + 16), TEXT)
 Assert.eq(Inflate.all(GZIP, 15 + 32), TEXT, "15+32 自动识别 gzip")

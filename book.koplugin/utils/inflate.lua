@@ -1,5 +1,5 @@
 --[[--
-deflate / zlib / gzip 解压，经 FFI 调系统 libz，分块输出。
+deflate / zlib / gzip 解压，经 KOReader FFI 加载 libz，分块输出。
 
 不整表分配输出缓冲：大 CJK 字体的 glyf 表有几十 MB，一次性解压会在小内存设备上 OOM；
 调用方要整串就在 sink 里 concat。
@@ -42,7 +42,7 @@ local function lib()
     }) do
         pcall(ffi.cdef, decl)
     end
-    libz = ffi.load("z")
+    libz = ffi.loadlib("z", 1)
     return libz
 end
 
