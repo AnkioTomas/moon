@@ -156,6 +156,28 @@ do
         }
         iostream.IOStream._handle_write_nonconst(failed)
         Assert.is_true(error_closed, "非 timeout 错误仍关闭连接")
+
+        local timeouts, removed = {}, {}
+        local loop = {
+            add_timeout = function(_, at) timeouts[#timeouts + 1] = at; return #timeouts end,
+            remove_timeout = function(_, ref) removed[#removed + 1] = ref end,
+        }
+        local idle = {
+            socket = { send = function(_, data) return #data end },
+            _write_buffer_offset = 0,
+            _write_buffer_size = 4,
+            _write_buffer = { get = function() return buffer, 4 end, clear = function() end },
+            _book_client = {
+                io_loop = loop,
+                kwargs = { request_timeout = 30 },
+                request_timeout_ref = 9,
+                _handle_request_timeout = function() end,
+            },
+            _run_callback = function() end,
+        }
+        iostream.IOStream._handle_write_nonconst(idle)
+        Assert.eq(removed[1], 9, "写出字节重排空闲超时")
+        Assert.eq(timeouts[1], 31000)
     end
     local fail_stream = { should_fail = true }
     iostream.IOStream.connect(fail_stream, "example.com", 443)

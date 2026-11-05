@@ -55,24 +55,22 @@ function Stats.push(source, done)
     end
 
     --- 处理 Source 上传结果；远端确认后再确认本地版本。
+    --- 部分成功时结果里带 synced_ids，同时 err 非空：先确认写上的行，再按失败结束，
+    --- 剩下的行留到下一轮，不在这一轮里立刻重试把网络再拖死。
     local function onResult(result, err)
         release()
-        if not result then
+        local listed = type(result) == "table" and type(result.synced_ids) == "table"
+        local confirm_ids = listed and result.synced_ids or (result and ids)
+        if confirm_ids and #confirm_ids > 0 and not StatsDB.markSynced(confirm_ids) then
+            logger.warn("book.stats confirm failed", #confirm_ids)
+            if done then done(false, "failed to confirm reading stats") end
+            return
+        end
+        if not result or err then
             if done then done(false, err) end
             return
         end
-        local confirm_ids = type(result) == "table" and type(result.synced_ids) == "table"
-            and result.synced_ids or ids
-        if #confirm_ids == 0 then
-            if done then done(true, result, 0) end
-            return
-        end
-        if StatsDB.markSynced(confirm_ids) then
-            if done then done(true, result, #confirm_ids) end
-        else
-            logger.warn("book.stats confirm failed", #confirm_ids)
-            if done then done(false, "failed to confirm reading stats") end
-        end
+        if done then done(true, result, confirm_ids and #confirm_ids or 0) end
     end
     pushing[source.id] = token
     local job = source:pushStatsAsync(rows, onResult)

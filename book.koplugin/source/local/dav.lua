@@ -28,6 +28,14 @@ local T = ffiUtil.template
 local Webdav = {}
 Webdav.__index = Webdav
 
+--- 同一台 WebDAV 同时只飞一个请求。笔记、统计、书架、上传并行时，PW3 的 Wi-Fi 会把每一路都拖到超时。
+---@type table<string, { running: boolean, queue: function[] }>
+local lanes = {}
+
+--- 本进程已经确认存在的目录（完整 URL）。建过或探测过就不再 MKCOL。
+---@type table<string, boolean>
+local collections = {}
+
 local PROPFIND_LIST = [[<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/></d:prop></d:propfind>]]
 
 local trimSlashes = Text.trimSlashes
@@ -82,6 +90,51 @@ function Webdav:join(path, as_dir)
     return url
 end
 
+--- 同一 url 上的请求串行。start(release) 开始一次请求，结束时必须 release（含失败）。
+--- 回调先于 release：回调里再发的请求排在后面，不会和当前这次重叠，也不会死锁。
+---@param start fun(release: fun()): { cancel: fun() }|nil
+---@return { cancel: fun() }
+function Webdav:_one(start)
+    local key = self.url
+    local lane = lanes[key]
+    if not lane then
+        lane = { running = false, queue = {} }
+        lanes[key] = lane
+    end
+    local handle = {}
+    local function go()
+        local released = false
+        local function release()
+            if released then return end
+            released = true
+            local nxt = table.remove(lane.queue, 1)
+            if nxt then
+                nxt()
+            elseif lanes[key] == lane then
+                lanes[key] = nil
+            end
+        end
+        local job = start(release)
+        handle.cancel = function()
+            if job and job.cancel then job:cancel() end
+            release()
+        end
+    end
+    if lane.running then
+        local entry = go
+        lane.queue[#lane.queue + 1] = entry
+        handle.cancel = function()
+            for i = #lane.queue, 1, -1 do
+                if lane.queue[i] == entry then table.remove(lane.queue, i) end
+            end
+        end
+    else
+        lane.running = true
+        go()
+    end
+    return handle
+end
+
 --- 带 Basic 凭据发请求：成功 cb(res)；非 2xx cb(nil, 文案, code)；网络错误 cb(nil, err)。
 ---@param opts HttpRequest
 ---@param cb fun(res: table|nil, err: string|nil, code: number|nil)
@@ -89,14 +142,29 @@ end
 function Webdav:_request(opts, cb)
     opts.auth_username = self.username
     opts.auth_password = self.password
-    return Request.request(opts, function(res, err)
-        if err then
-            cb(nil, networkErr(err))
-        elseif not Request.ok(res.code) then
-            cb(nil, statusErr(res.code), tonumber(res.code))
-        else
-            cb(res)
+    return self:_one(function(release)
+        local fired = false
+        local function finish(res, err)
+            if fired then return end
+            fired = true
+            -- 回调抛错也要放行，否则这条队列会永远占着这台服务器。
+            local pok, err_obj = xpcall(function()
+                if err then
+                    cb(nil, networkErr(err))
+                elseif not res or not Request.ok(res.code) then
+                    cb(nil, statusErr(res and res.code), res and tonumber(res.code))
+                else
+                    cb(res)
+                end
+            end, debug.traceback)
+            release()
+            if not pok then error(err_obj, 0) end
         end
+        local job = Request.request(opts, finish)
+        return { cancel = function()
+            if job and job.cancel then job:cancel() end
+            if not fired then fired = true; release() end
+        end }
     end)
 end
 
@@ -193,33 +261,48 @@ end
 ---@return HttpJob
 function Webdav:getAsync(path, dest, opts, cb)
     opts = opts or {}
-    return Request.download({
-        url = self:join(path, false),
-        headers = Header.forDownload(opts.headers),
-        auth_username = self.username,
-        auth_password = self.password,
-        timeout = opts.timeout or require("http.timeout").net(10),
-        on_progress = opts.on_progress,
-    }, dest, function(ok, err, res)
-        if ok then
-            cb(true)
-        elseif res and res.code and not Request.ok(res.code) then
-            cb(nil, statusErr(res.code), tonumber(res.code))
-        elseif res and not res.code then
-            cb(nil, networkErr(err))
-        else
-            -- 没开始请求（res=nil）或已收到 2xx：本地写盘 / 改名失败，不是 WebDAV 的问题
-            cb(nil, err)
+    return self:_one(function(release)
+        local fired = false
+        local function finish(ok, err, res)
+            if fired then return end
+            fired = true
+            local pok, err_obj = xpcall(function()
+                if ok then
+                    cb(true)
+                elseif res and res.code and not Request.ok(res.code) then
+                    cb(nil, statusErr(res.code), tonumber(res.code))
+                elseif res and not res.code then
+                    cb(nil, networkErr(err))
+                else
+                    -- 没开始请求（res=nil）或已收到 2xx：本地写盘 / 改名失败，不是 WebDAV 的问题
+                    cb(nil, err)
+                end
+            end, debug.traceback)
+            release()
+            if not pok then error(err_obj, 0) end
         end
+        local job = Request.download({
+            url = self:join(path, false),
+            headers = Header.forDownload(opts.headers),
+            auth_username = self.username,
+            auth_password = self.password,
+            timeout = opts.timeout or require("http.timeout").net(10),
+            on_progress = opts.on_progress,
+        }, dest, finish)
+        return { cancel = function()
+            if job and job.cancel then job:cancel() end
+            if not fired then fired = true; release() end
+        end }
     end)
 end
 
---- 上传本地文件到 WebDAV。
+--- 上传本地文件到 WebDAV。timeout 缺省是下载档（整本 epub）；笔记 / 统计 / 进度传普通请求超时。
 ---@param path string
 ---@param local_path string
 ---@param cb fun(ok: boolean|nil, err: string|nil, code: number|nil) code 非 nil 表示服务器回了状态码，nil 是传输层失败
+---@param timeout number|nil
 ---@return HttpJob|nil
-function Webdav:putFileAsync(path, local_path, cb)
+function Webdav:putFileAsync(path, local_path, cb, timeout)
     local file, open_err = io.open(local_path, "rb")
     if not file then
         cb(nil, open_err or _("无法读取待上传文件"))
@@ -237,20 +320,27 @@ function Webdav:putFileAsync(path, local_path, cb)
         headers = Header.forRequest({ ["Content-Type"] = "application/octet-stream" }),
         body_file = local_path,
         body_size = size,
-        timeout = require("http.timeout").net(10),
+        timeout = timeout or require("http.timeout").net(10),
     }, function(res, err, code)
         cb(res and true, err, code)
     end)
 end
 
---- 创建目录。WebDAV 对已存在目录通常返回 405/409，这两种结果都视为成功。
+--- 创建目录。405 是目录已在。409 先列一下：列得出来才当已存在，列不出来就是父目录没有，不能当成成功。
 ---@param path string
 ---@param cb fun(ok: boolean|nil, err: string|nil)
----@return HttpJob
+---@return HttpJob|nil
 function Webdav:makeCollectionAsync(path, cb)
-    return self:_request({ url = self:join(path, true), method = "MKCOL" }, function(res, err, code)
-        if res or code == 405 or code == 409 then
+    local url = self:join(path, true)
+    if collections[url] then cb(true); return nil end
+    return self:_request({ url = url, method = "MKCOL" }, function(res, err, code)
+        if res or code == 405 then
+            collections[url] = true
             cb(true)
+        elseif code == 409 then
+            self:listAsync(path, function(entries)
+                if entries then collections[url] = true; cb(true) else cb(nil, err) end
+            end)
         else
             cb(nil, err)
         end
