@@ -193,8 +193,8 @@ function Dns.libcServers()
     return out
 end
 
---- Android：DNS 在 ConnectivityService 的 LinkProperties 里，原生层没有（8.0 起 net.dns* 属性为空、也没有 resolv.conf），
---- 经 KOReader 启动器的 JNI 桥调 ConnectivityManager.getLinkProperties(getActiveNetwork()).getDnsServers()。
+--- Android 6.0 起经 JNI 取 LinkProperties 的 DNS；旧版读 net.dns*（8.0 起这些属性为空）。
+--- getActiveNetwork 是 API 23，旧版 JNI 包装会拿空 methodID 调用，ExceptionCheck 来不及保护。
 --- 任一步 Java 抛异常就清掉返回已拿到的部分（不清下一次 JNI 调用会崩进程）。
 ---@param ffi table
 ---@return string[]
@@ -202,6 +202,19 @@ function Dns.androidServers(ffi)
     local out = {}
     local ok, android = pcall(require, "android")
     if not ok or type(android) ~= "table" or not android.jni or not android.app then return out end
+    if android.app.activity.sdkVersion < 23 then
+        local value = ffi.new("char[92]") -- Android PROP_VALUE_MAX
+        for i = 1, 4 do
+            local size = ffi.C.__system_property_get("net.dns" .. i, value)
+            if size > 0 then
+                local ip = ffi.string(value, size)
+                if ip:match("^%d+%.%d+%.%d+%.%d+$") or ip:find(":", 1, true) then
+                    out[#out + 1] = ip
+                end
+            end
+        end
+        return out
+    end
     pcall(android.jni.context, android.jni, android.app.activity.vm, function(jni)
         local env = jni.env
         local function failed()

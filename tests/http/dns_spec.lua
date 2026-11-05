@@ -96,6 +96,7 @@ end
 -- Android：经 KOReader 的 JNI 桥取 ConnectivityManager 的 DNS（Java 对象用表模拟，方法名即键）
 do
     local pending_exception = false
+    local jni_calls = 0
     local env = { [0] = {
         ExceptionCheck = function() return pending_exception and 1 or 0 end,
         ExceptionClear = function() pending_exception = false end,
@@ -103,7 +104,10 @@ do
         DeleteLocalRef = function() end,
     } }
     local jni = { env = env }
-    function jni:context(_vm, fn) return fn(self) end
+    function jni:context(_vm, fn)
+        jni_calls = jni_calls + 1
+        return fn(self)
+    end
     function jni:callObjectMethod(obj, method, _sig, arg)
         local f = obj[method]
         if type(f) == "function" then return f(arg) end
@@ -120,8 +124,34 @@ do
         getLinkProperties = function(n) Assert.eq(n, network); return { getDnsServers = list } end,
     }
     local activity = { getSystemService = function(name) Assert.eq(name.jstring, "connectivity"); return cm end }
-    package.loaded.android = { jni = jni, app = { activity = { clazz = activity, vm = {} } } }
-    local fake_ffi = { cast = function(_t, v) return v end }
+    local activity_info = { clazz = activity, vm = {}, sdkVersion = 23 }
+    package.loaded.android = { jni = jni, app = { activity = activity_info } }
+    local ffi = require("ffi")
+    local properties = {}
+    local fake_ffi = {
+        cast = function(_t, v) return v end,
+        new = ffi.new,
+        string = ffi.string,
+        C = {
+            __system_property_get = function(name, value)
+                local text = properties[name] or ""
+                ffi.copy(value, text)
+                return #text
+            end,
+        },
+    }
+
+    for _idx, sdk in ipairs({ 19, 22 }) do
+        activity_info.sdkVersion = sdk
+        properties = { ["net.dns1"] = "10.0.2.3", ["net.dns2"] = "fec0::3" }
+        Assert.eq(table.concat(Dns.androidServers(fake_ffi), ","), "10.0.2.3,fec0::3",
+            "旧 Android 从系统属性取 DNS，保留局域网解析")
+        Assert.eq(jni_calls, 0, "API 23 以下不能进入调用 getActiveNetwork 的 JNI 路径")
+    end
+    properties = {}
+    Assert.len(Dns.androidServers(fake_ffi), 0, "旧 Android 没有系统 DNS 时交给现有备选")
+    Assert.eq(jni_calls, 0, "没有系统 DNS 也不能调用不存在的 Java 方法")
+    activity_info.sdkVersion = 23
 
     Assert.eq(table.concat(Dns.androidServers(fake_ffi), ","), "fec0::3,10.0.2.3,10.0.2.4", "IPv6 一并收下，顺序照旧")
 
