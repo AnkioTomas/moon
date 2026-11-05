@@ -37,6 +37,7 @@ local SHELF_CACHE = {}
 local AUTH_ERROR_CODES = {
     [-2012] = true,
     [-2041] = true,
+    [101108] = true, -- 无用户信息
     [101119] = true, -- BOOKSHELF_GET_ERROR：无有效 sessionid
 }
 

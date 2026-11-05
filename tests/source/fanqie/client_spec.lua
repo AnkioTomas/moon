@@ -263,9 +263,13 @@ do -- 搜索免登录（不带 Cookie、App UA）；书架加 / 删走网页接�
     Assert.matches(seen.url, "/bookshelf/delete/")
     Assert.is_nil(seen.body:find("add_book_source", 1, true))
     reply = '{"code":101108,"message":"无用户信息"}'
+    local Auth = require("source.auth")
+    Auth.reset()
     c:shelfActionAsync("delete", "42", function(r, err) d, e = r, err end)
     Assert.is_nil(d)
-    Assert.matches(e, "code=101108")
+    Assert.matches(e, "重新登录")
+    Assert.is_true(Auth.expired("fanqie"))
+    Auth.reset()
 
     -- HTTP 错误给用户只留短句：诊断串（URL/状态码拼接）只进日志；
     -- 非 JSON 回包（风控 HTML 页）同样只报「响应无效」。
