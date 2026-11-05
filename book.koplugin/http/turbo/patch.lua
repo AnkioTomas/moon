@@ -12,6 +12,7 @@ local Patch = {}
 local patched = false
 
 local Dns = require("http.dns")
+local logger = require("utils.log")
 
 --- 另一族晚这么久再并行连（RFC 8305 的 Connection Attempt Delay）。IPv6 黑洞时不用等完整连接超时。
 local ATTEMPT_DELAY = 0.25
@@ -205,6 +206,42 @@ function Patch.apply()
     ---@type table|nil 补丁动的都是私有字段，类型桩里没有
     local IOStream = iostream and iostream.IOStream
     local HTTPClient = turbo and turbo.async and turbo.async.HTTPClient
+
+    if rawget(_G, "__TURBO_USE_LUASOCKET__") then
+        -- LuaSocket reports nonblocking partial writes as nil, "timeout", bytes_sent.
+        -- Keep the stream alive and advance only by bytes actually sent.
+        wrap(IOStream, "_handle_write_nonconst", function()
+            local ffi = require("ffi")
+            return function(self)
+                local ptr = self._write_buffer:get()
+                local write_size = math.min(self._write_buffer_size, 1024 * 128)
+                local num_bytes, err, partial = self.socket:send(
+                    ffi.string(ptr + self._write_buffer_offset, write_size))
+                local sent = num_bytes
+                if err == "timeout" then
+                    sent = partial or 0
+                elseif err then
+                    logger.warn("book.http write failed", err)
+                    self:close()
+                    return
+                end
+
+                self._write_buffer_offset = self._write_buffer_offset + sent
+                self._write_buffer_size = self._write_buffer_size - sent
+                if self._write_buffer_size == 0 then
+                    self._write_buffer:clear()
+                    self._write_buffer_offset = 0
+                    if self._write_callback then
+                        local callback = self._write_callback
+                        local arg = self._write_callback_arg
+                        self._write_callback = nil
+                        self._write_callback_arg = nil
+                        self:_run_callback(callback, arg)
+                    end
+                end
+            end
+        end)
+    end
 
     -- Cloudflare 等按 SNI 分流；官方 turbo 存了 hostname 却不发。
     wrap(crypto, "ssl_do_handshake", function(orig)
