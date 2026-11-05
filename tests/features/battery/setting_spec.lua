@@ -1,6 +1,8 @@
 --[[-- 电池是「我的设备 → 本机」里的单独一页，读数不拆进行里。 --]]
 
 local Assert = require("support.assert")
+local health_pct = 91.2
+local supported = true
 
 package.preload["gettext"] = function() return function(text) return text end end
 package.preload["device"] = function() return { model = "test" } end
@@ -12,9 +14,10 @@ package.preload["features.battery.probe"] = function()
     return {
         read = function()
             return {
-                supported = true,
+                supported = supported,
+                report = "power_supply: none",
                 reading = {
-                    health_pct = 91.2,
+                    health_pct = health_pct,
                     cycles = 12,
                     charge_full_mah = 1000,
                     charge_design_mah = 1100,
@@ -58,5 +61,15 @@ Assert.eq(by_title["循环次数"], "12")
 Assert.eq(by_title["电量"], "73%")
 Assert.eq(by_title["状态"], "充电中")
 Assert.eq(by_title["温度"], "31.5 °C")
+
+health_pct = 100
+Assert.eq(item.status(), "100.0%")
+local health_row = item.sections()[1].rows[1](400)
+Assert.eq(health_row.status, "100.0%")
+Assert.eq(health_row.subtitle, "按电量计容量估算，仅供参考。")
+
+supported = false
+Assert.eq(item.status(), "不支持")
+Assert.eq(item.sections()[1].rows[1](400).status, "不支持")
 
 return true

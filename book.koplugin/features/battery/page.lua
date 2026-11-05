@@ -112,8 +112,8 @@ function Page.sections()
     local row = result.reading
     local rows = {
         infoRow("battery_android_full", _("健康度"),
-            row.health_pct and string.format("%.1f%%", row.health_pct) or _("无法判断"),
-            not row.health_pct and _("电量计没有记录到容量衰减，读数等于或高于出厂值。") or nil),
+            string.format("%.1f%%", row.health_pct),
+            _("按电量计容量估算，仅供参考。")),
     }
     if row.cycles then
         rows[#rows + 1] = infoRow("autorenew", _("循环次数"), string.format("%.0f", row.cycles))

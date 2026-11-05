@@ -22,8 +22,7 @@ require("utils.extension").add("setting.device_section", {
     status = function()
         local result = require("features.battery.probe").read()
         if not result.supported or not result.reading then return _("不支持") end
-        local pct = result.reading.health_pct
-        return pct and string.format("%.1f%%", pct) or _("无法判断")
+        return string.format("%.1f%%", result.reading.health_pct)
     end,
     refresh_seconds = 15,
     sections = function() return require("features.battery.page").sections() end,
