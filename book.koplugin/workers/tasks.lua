@@ -53,6 +53,7 @@ local Tasks = {}
 ---@field key string
 ---@field kind BookTaskKind
 ---@field title string|nil
+---@field label string|nil 类型显示名（缺省按 kind 取，如脏行推送用「同步本地改动」）
 ---@field restartable boolean|nil
 ---@field cancellable boolean|nil 非 restartable 的任务也给进度窗取消键
 ---@field passive boolean|nil 只展示、不占执行权（执行者是别的插件）
@@ -150,6 +151,7 @@ local function snapshot(task)
         key = task.key,
         kind = task.kind,
         title = task.title,
+        label = task.label,
         state = task.state,
         text = task.text,
         count = task.count,
