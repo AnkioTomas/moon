@@ -40,6 +40,7 @@ package.preload["features.bars.layout"] = function()
         TOP_MARGIN_MIN = 0, TOP_MARGIN_MAX = 60, BOTTOM_MARGIN_MIN = 0, BOTTOM_MARGIN_MAX = 49,
         get = function() return {} end,
         icons = function() return true end,
+        percentDecimals = function() return false end,
         divider = function() return false end,
     }
 end

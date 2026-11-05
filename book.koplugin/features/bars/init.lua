@@ -510,6 +510,7 @@ local function liveContext()
         title = book and book.title or "",
         clock = Bars.timeText(),
         percent = cur.percent,
+        percent_decimals = require("features.bars.layout").percentDecimals(),
         chapter_idx = Session.chapterIndex(cur) or cur.identity.chapter_idx,
         chapter_count = toc and #toc or nil,
         page = page,

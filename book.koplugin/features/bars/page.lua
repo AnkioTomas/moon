@@ -272,6 +272,25 @@ function ReaderBar:page(desktop, which)
             },
         },
     }
+    if not top then
+        table.insert(page.sections[1].rows, 4, function(iw)
+            local decimals_on = Layout.percentDecimals()
+            return Row.widget({
+                width = iw,
+                chevron = false,
+                kind = "toggle",
+                icon = "percent",
+                title = _("总进度显示两位小数"),
+                subtitle = _("关闭时显示整数百分比"),
+                status = decimals_on and _("开") or _("关"),
+                status_on = decimals_on,
+                callback = function()
+                    Layout.setPercentDecimals(not decimals_on)
+                    refresh(desktop)
+                end,
+            })
+        end)
+    end
     if top then
         -- 顶栏高度：插在「组件图标」「文字大小」之后。
         table.insert(page.sections[1].rows, function(iw)

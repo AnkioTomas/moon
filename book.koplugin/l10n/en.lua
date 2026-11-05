@@ -685,6 +685,8 @@ return {
     ["顶栏与正文之间画一条细线"] = "A thin line between the top bar and the text",
     ["底栏与正文之间画一条细线"] = "A thin line between the bottom bar and the text",
     ["组件图标"] = "Item icons",
+    ["总进度显示两位小数"] = "Show total progress to two decimal places",
+    ["关闭时显示整数百分比"] = "Show whole-number percentage when off",
     ["文字大小"] = "Text size",
     ["跟随底栏 · %1"] = "Follow bottom bar · %1",
     ["顶栏文字字号；未设置时跟随底栏"] = "Top bar font size; follows the bottom bar when unset",

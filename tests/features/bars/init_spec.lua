@@ -49,6 +49,7 @@ package.preload["features.bars.layout"] = function()
         replace = function(which) return replace[which] end,
         get = function(which) return layouts[which] end,
         setReplace = function() end,
+        percentDecimals = function() return false end,
         topHeight = function() return 12 end,
         topMargin = function() return 0 end,
         bottomMargin = function() return 1 end,

@@ -7,14 +7,7 @@ local Assert = require("support.assert")
 local store = {
     book_reader_replace_top_bar = true,
     book_reader_replace_bottom_bar = true,
-    book_reader_top_bar_layout = {
-        { id = "chapter", align = "left" },
-        { id = "clock", align = "right" },
-    },
-    book_reader_bottom_bar_layout = {
-        { id = "progress_bar", align = "left" },
-        { id = "percent", align = "right" },
-    },
+    book_reader_percent_decimals = false,
 }
 
 package.preload["utils.settings"] = function()
@@ -56,6 +49,13 @@ Assert.eq(top[1].align, "left")
 Assert.eq(top[2].id, "clock")
 Assert.not_nil(Layout.slot("top", "clock"))
 Assert.is_nil(Layout.slot("top", "percent"))
+
+Assert.not_nil(Layout.slot("bottom", "percent"), "总进度组件保留原默认布局")
+Assert.is_false(Layout.percentDecimals(), "两位小数默认关闭")
+Layout.setPercentDecimals(true)
+Assert.is_true(Layout.percentDecimals(), "用户可手动开启两位小数")
+Layout.setPercentDecimals(false)
+Assert.is_false(Layout.percentDecimals())
 
 Layout.toggle("top", "percent")
 Assert.not_nil(Layout.slot("top", "percent"))
