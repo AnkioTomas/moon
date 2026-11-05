@@ -199,7 +199,7 @@ function Source:openBookAsync(identity, opts, cb)
     local open = opts and opts.chapter_idx and Chapter.openAsync or Chapter.openWithUi
     return open(self, identity, identity.book, opts, {
         loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
-        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, true),
+        fetchContent = Chapter.vipFetcher(self, Client.openContentAsync, true),
     }, cb)
 end
 

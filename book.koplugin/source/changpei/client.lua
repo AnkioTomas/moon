@@ -2,8 +2,8 @@
 长佩文学网 HTTP 客户端（仅异步）。
 
 走官网网页的 JSON 接口（www.gongzicp.com/webapi），请求头照网页端：`Client: pc` + 桌面浏览器 UA。
-正文是 AES 密文，解密放子进程。回包 data.check 是服务端的风险等级：登录态 Cookie（PHPSESSID 等）+ `Client: pc` 时为 1，
-匿名或 `Client: h5` 时 ≥ 2，此时正文为空 / 被换字打乱，要在浏览器过人机验证，不能用（本客户端当作未通过）。
+正文是 AES 密文，解密放子进程。data.check > 1 表示需要人机验证，不表示登录失效；
+用户开章时经远程管理完成验证，后台预取只返回错误，不弹窗。
 登录态是网页 Cookie（setting.lua：扫码 / 浏览器授权 / 粘贴），Cookie 失效回包 code 9996；没买的 VIP 章不出正文。
 
 @module koplugin.book.source.changpei.client
@@ -20,6 +20,7 @@ local Client = {}
 
 local SOURCE_ID = "changpei"
 local LOGIN_REQUIRED = 9996
+Client.VERIFY_REQUIRED = _("长佩需要滑块验证，请打开章节并扫码完成验证，无需重新登录。")
 
 --- 网页重新登录，再用扩展抓 Cookie；不装扩展就按设置路径粘贴。
 ---@return string
@@ -77,16 +78,14 @@ function Client.renewAsync(cb)
         renewing = nil
         for _idx, waiter in ipairs(waiters) do waiter(ok) end
     end
+    local head = headers(cookie)
+    head["Content-Type"] = "application/grpc-web+proto"
+    head["X-Grpc-Web"] = "1"
+    head["version"] = "1"
+    head["imei"] = imei
+    head["_c_n_"] = imei
     Request.post("https://www.gongzicp.com/cp.UserExternal/get_token", QRLogin.frame(refresh, 5), {
-        headers = {
-            ["Content-Type"] = "application/grpc-web+proto",
-            ["X-Grpc-Web"] = "1",
-            ["Client"] = "pc",
-            ["version"] = "1",
-            ["imei"] = imei,
-            ["Referer"] = "https://www.gongzicp.com/",
-            ["User-Agent"] = Client.USER_AGENT,
-        },
+        headers = head,
         content_type = "application/grpc-web+proto",
         timeout = require("http.timeout").net(0.5),
     }, function(body, _err, res)
@@ -275,6 +274,18 @@ function Client.shelfAddAsync(stable_id, cb) return collect(stable_id, 1, cb) en
 ---@return { cancel: fun() }
 function Client.shelfRemoveAsync(stable_id, cb) return collect(stable_id, 0, cb) end
 
+--- 由设备使用自己的登录态提交浏览器完成的滑块凭据。
+---@param token string
+---@param cb fun(ok: boolean, err: string|nil)
+---@return { cancel: fun() }
+function Client.readCheckAsync(token, cb)
+    return post("/novel/readCheck", { token = token }, JSON.encode({ token = token }), function(wire, err)
+        local data = wire and wire.data
+        local ok = type(data) == "table" and data.code == 200
+        cb(ok, not ok and (err or (type(data) == "table" and data.msg) or _("验证失败，请重新滑动验证")) or nil)
+    end)
+end
+
 --- 阅读历史：服务端按 novel_id 记最近读到的章（latest_read_cid）。
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return HttpJob
@@ -305,7 +316,7 @@ end
 --- 一章正文（纯文本，段落以换行分隔）。
 ---@param _novel_id string
 ---@param chapter_id string
----@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil)
+---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|"verify"|nil)
 ---@return { cancel: fun() }
 function Client.contentAsync(_novel_id, chapter_id, cb)
     local cancelled, job = false, nil
@@ -327,10 +338,7 @@ function Client.contentAsync(_novel_id, chapter_id, cb)
                         cb(nil, _("还没登录长佩。打开「设置 → 书库 → 账号 → 长佩文学 → 长佩账号」，用长佩 App 扫二维码。也可以点「粘贴 Cookie」，把网页里的 Cookie 贴进去。"))
                         return
                     end
-                    -- 登录态已不被服务端信任：标记失效。步骤写清网页重登、扩展重抓、以及设置里粘贴。
-                    cb(nil, require("source.auth").expire("changpei",
-                        _("先做下面这些。提示上的「重新登录」只是扫码或粘贴的快捷方式，不能代替这些步骤。")
-                        .. "\n\n" .. changpeiRelogin()))
+                    cb(nil, Client.VERIFY_REQUIRED, "verify")
                     return
                 end
                 cb(nil, res.err or _("长佩章节内容为空"), res.kind)
@@ -342,6 +350,28 @@ function Client.contentAsync(_novel_id, chapter_id, cb)
     return { cancel = function()
         cancelled = true
         job:cancel()
+    end }
+end
+
+--- 只有用户开章才等扫码验证；成功后只重试一次，避免服务端一直要求验证时循环弹窗。
+---@param novel_id string
+---@param chapter_id string
+---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|"verify"|nil)
+---@return { cancel: fun() }
+function Client.openContentAsync(novel_id, chapter_id, cb)
+    local cancelled, job = false, nil
+    job = Client.contentAsync(novel_id, chapter_id, function(text, err, kind)
+        if cancelled then return end
+        if kind ~= "verify" then cb(text, err, kind); return end
+        job = require("source.changpei.verify").new(function(ok, verify_err)
+            if cancelled then return end
+            if not ok then cb(nil, verify_err); return end
+            job = Client.contentAsync(novel_id, chapter_id, cb)
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job then job:cancel() end
     end }
 end
 
