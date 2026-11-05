@@ -7,7 +7,16 @@ package.preload["gettext"] = function() return function(value) return value end 
 package.preload["ffi/util"] = function()
     return { template = function(value) return value end }
 end
-package.preload["ui.themes.widgets.list"] = function() return {} end
+local list_options
+package.preload["ui.themes.widgets.list"] = function()
+    return { new = function(_self, opts)
+        list_options = opts
+        opts.tabs = { active = "character" }
+        opts.setItems = function() end
+        opts.show = function() end
+        return opts
+    end }
+end
 local viewer
 package.preload["ui.themes.widgets.text_viewer"] = function()
     return { new = function(_self, o)
@@ -20,13 +29,18 @@ package.preload["utils.text"] = function()
     return { trim = function(s) return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")) end }
 end
 package.preload["features.xray.kinds"] = function() return { label = function() return "人物" end } end
-local cleared_removed = {}
+local cleared_removed, reset_result = {}, true
 package.preload["features.xray.db"] = function()
     return {
         clearRemoved = function(source_id, stable_id)
             cleared_removed[#cleared_removed + 1] = source_id .. "\0" .. stable_id
             return true
         end,
+        reset = function(source_id, stable_id)
+            cleared_removed[#cleared_removed + 1] = "reset\0" .. source_id .. "\0" .. stable_id
+            return reset_result
+        end,
+        list = function() return {} end,
     }
 end
 local toasts = {}
@@ -66,7 +80,10 @@ package.preload["reader.session"] = function()
 end
 
 local captured
-package.preload["features.xray.marks"] = function() return { invalidate = function() end } end
+local invalidations = 0
+package.preload["features.xray.marks"] = function()
+    return { invalidate = function() invalidations = invalidations + 1 end }
+end
 local local_entities = {}
 local looked_up
 local scan_progress
@@ -96,10 +113,16 @@ package.preload["features.xray.fetch"] = function()
         end,
     }
 end
-local confirm
+---@type string|nil
+local confirm_text
+---@type fun()|nil
+local confirm_callback
 package.preload["ui.themes.widgets.confirm"] = function()
     return { new = function(_, opts)
-        opts.show = function() confirm = opts end
+        opts.show = function()
+            confirm_text = opts.text
+            confirm_callback = opts.ok_callback
+        end
         return opts
     end }
 end
@@ -110,6 +133,15 @@ end
 local running_task
 package.preload["workers.tasks"] = function()
     return { get = function() return running_task end }
+end
+---@type { items: { text: string, callback: fun() }[] }|nil
+local sheet
+package.preload["ui.themes.widgets.sheet"] = function()
+    return { new = function(_self, opts)
+        sheet = opts
+        opts.show = function() end
+        return opts
+    end }
 end
 ---@type BookTask|nil, BookTask|nil
 local started, followed
@@ -175,7 +207,7 @@ cleared_removed = {}
 require("features.xray.ui").scanBook(ui, identity)
 Assert.is_nil(started, "确认前不入队")
 Assert.len(cleared_removed, 0, "点继续前不清墓碑")
-confirm.ok_callback()
+confirm_callback()
 Assert.eq(cleared_removed[1], "moon\0book-1", "确认后清墓碑")
 ---@cast started +BookTask
 Assert.eq(started.kind, "ai")
@@ -198,14 +230,14 @@ Assert.is_true(scan_done.ok, "extract 交出路径后应进入 scanBook")
 -- 上次没分析完：确认框报断点
 scan_progress = { done = 3, total = 10 }
 require("features.xray.ui").scanBook(ui, identity)
-Assert.eq(confirm.text, "上次全书分析进行到第 %1 / %2 段，继续从断点分析？")
+Assert.eq(confirm_text, "上次全书分析进行到第 %1 / %2 段，继续从断点分析？")
 scan_progress = nil
 
 -- 同一本书已在分析：只跟随进度，不再取字
-running_task, confirm = { key = "xray\0moon\0book-1" }, nil
+running_task, confirm_callback = { key = "xray\0moon\0book-1" }, nil
 require("features.xray.ui").scanBook(ui, identity)
 Assert.eq(followed, running_task)
-Assert.is_nil(confirm)
+Assert.is_nil(confirm_callback)
 
 -- 自动预取：没网 / 没配 AI / 已有任务都不入队，返回 false 让下次翻页再试
 running_task = nil
@@ -216,5 +248,34 @@ Assert.is_false(require("features.xray.ui").prefetch(ui, false))
 configured, running_task = true, { key = "x" }
 Assert.is_false(require("features.xray.ui").prefetch(ui, false))
 running_task = nil
+
+-- 主菜单中可打开重置项；确认时检查运行任务，成功后清数据并刷新标记。
+local XrayUI = require("features.xray.ui")
+XrayUI.openMain(ui)
+list_options.left_callback()
+local reset_item
+for _idx, item in ipairs(sheet.items) do
+    if item.text == "重置此书 X-Ray" then reset_item = item end
+end
+Assert.not_nil(reset_item)
+reset_item.callback()
+Assert.eq(confirm_text, "重置此书 X-Ray？将清空已收录的人物 / 地点 / 专有名词、删除记录与分析进度，之后需重新生成。")
+local invalidations_before_reset = invalidations
+running_task = { key = "xray\0moon\0book-1" }
+confirm_callback()
+Assert.eq(toasts[#toasts], "本书 X-Ray 正在生成，请先取消或等待完成")
+Assert.eq(invalidations, invalidations_before_reset)
+running_task = nil
+confirm_callback()
+Assert.eq(cleared_removed[#cleared_removed], "reset\0moon\0book-1")
+Assert.eq(toasts[#toasts], "已重置此书 X-Ray")
+Assert.eq(invalidations, invalidations_before_reset + 1)
+
+-- 数据库失败时明确提示，不冒充成功。
+reset_result = false
+reset_item.callback()
+confirm_callback()
+Assert.eq(toasts[#toasts], "重置失败")
+Assert.eq(invalidations, invalidations_before_reset + 1)
 
 return true
