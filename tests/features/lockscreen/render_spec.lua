@@ -5,9 +5,13 @@ features.lockscreen.render：widget 释放、绘制失败与 PNG 原子替换。
 --]]
 
 local Assert = require("support.assert")
+local ffi = require("ffi")
 
 local canvas_frees = 0
 local ensured = 0
+local ensure_ok = true
+local encode_ok = true
+local encoded_channels
 local removed
 local renamed
 local rename_ok = true
@@ -27,6 +31,7 @@ local accent = 0x0756AD
 
 local function buffer()
     return {
+        data = ffi.new("uint8_t[?]", 100 * 200 * 4),
         fill = function() end,
         paintRect = function(_self, _x, _y, _w, _h, color) shape_log = { color = color, rgb = false } end,
         paintRectRGB32 = function(_self, _x, _y, _w, _h, color) shape_log = { color = color, rgb = true } end,
@@ -52,12 +57,22 @@ local function buffer()
             if paint_order then paint_order[#paint_order + 1] = "snapshot" end
             return { free = function() snapshot_frees = snapshot_frees + 1 end }
         end,
-        writePNG = function(_, path)
-            writes = writes + 1
-            Assert.matches(path, "%.part$")
-        end,
         free = function()
             canvas_frees = canvas_frees + 1
+        end,
+    }
+end
+
+package.preload["ffi/png"] = function()
+    return {
+        encodeToFile = function(path, data, width, height, channels)
+            writes = writes + 1
+            encoded_channels = channels
+            Assert.matches(path, "%.part$")
+            Assert.is_true(data ~= nil)
+            Assert.eq(width, 100)
+            Assert.eq(height, 200)
+            return encode_ok, encode_ok and nil or "failed to open file for writing"
         end,
     }
 end
@@ -127,7 +142,11 @@ end
 
 package.preload["utils.paths"] = function()
     return {
-        ensureScreensaverDir = function() ensured = ensured + 1 end,
+        ensureDir = function(path)
+            ensured = ensured + 1
+            Assert.eq(path, "/tmp")
+            return ensure_ok, ensure_ok and nil or "Permission denied"
+        end,
     }
 end
 
@@ -160,6 +179,9 @@ end
 local function reset()
     canvas_frees = 0
     ensured = 0
+    ensure_ok = true
+    encode_ok = true
+    encoded_channels = nil
     removed = nil
     renamed = nil
     rename_ok = true
@@ -196,12 +218,14 @@ local ok_run, err_run = pcall(function()
     Assert.is_nil(removed)
     Assert.eq(ensured, 1)
     Assert.eq(buffer_types[1], 2, "彩屏组合图必须使用彩色缓冲，不能提前丢弃背景颜色")
+    Assert.eq(encoded_channels, 4)
 
     -- 灰度屏：最终显示也是灰度，直接用 BB8 画布省 3/4 内存。
     reset()
     color_screen = false
     Assert.is_true((Render.write("/tmp/compose.png", nil, {})))
     Assert.eq(buffer_types[1], 1, "灰度屏用 BB8 画布")
+    Assert.eq(encoded_channels, 1)
     color_screen = true
 
     -- 旧屏幕接口没有彩色能力查询时，仍按灰度合成而不是调用 nil。
@@ -410,6 +434,45 @@ local ok_run, err_run = pcall(function()
     Assert.eq(writes, 0)
     Assert.is_nil(renamed)
     Assert.eq(warnings, 0, "渲染错误由锁屏刷新入口统一记录，底层不得重复报警")
+
+    -- 创建目录失败直接报原因，不分配画布、不写图，主体仍由本次调用释放。
+    reset()
+    ensure_ok = false
+    frees = 0
+    screen.night_mode = true
+    ok, err = Render.write("/tmp/compose.png", nil, {
+        { kind = "widget", widget = shared, x = 0, y = 0 },
+    })
+    Assert.is_false(ok)
+    Assert.matches(tostring(err), "cannot create PNG directory /tmp: Permission denied")
+    Assert.eq(frees, 1)
+    Assert.eq(canvas_frees, 0)
+    Assert.eq(writes, 0)
+    Assert.is_nil(renamed)
+    Assert.is_true(screen.night_mode)
+    screen.night_mode = false
+
+    -- 编码器失败保留原始原因，不能再被后续 rename 的 ENOENT 掩盖。
+    for _, color in ipairs({ false, true }) do
+        reset()
+        color_screen = color
+        encode_ok = false
+        frees = 0
+        screen.night_mode = true
+        ok, err = Render.write("/tmp/compose.png", nil, {
+            { kind = "widget", widget = shared, x = 0, y = 0 },
+        })
+        Assert.is_false(ok)
+        Assert.matches(tostring(err), "cannot write PNG /tmp/compose%.png%.part: failed to open file for writing")
+        Assert.eq(frees, 1)
+        Assert.eq(canvas_frees, 1)
+        Assert.eq(writes, 1)
+        Assert.is_nil(renamed)
+        Assert.eq(removed, "/tmp/compose.png.part")
+        Assert.is_true(screen.night_mode)
+    end
+    color_screen = true
+    screen.night_mode = false
 
     -- rename 失败必须删除临时文件，旧 compose.png 不受影响。
     reset()

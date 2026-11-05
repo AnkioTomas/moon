@@ -89,15 +89,23 @@ local function writePNG(path, width, height, paint, transparent)
     local night = Screen.night_mode
     Screen.night_mode = false
     local ok, err = xpcall(function()
+        local dir = path:match("(.+)/[^/]+$")
+        if dir then
+            local created, reason = Paths.ensureDir(dir)
+            if not created then error("cannot create PNG directory " .. dir .. ": " .. tostring(reason)) end
+        end
         -- 灰度屏用 BB8：整屏画布 RGB32 要 8 MiB，灰度 PNG 也小得多。透明背景只有 RGB32 带 alpha。
+        local channels = (transparent or (Screen.isColorEnabled and Screen:isColorEnabled())) and 4 or 1
         bb = Blitbuffer.new(width, height,
-            (transparent or (Screen.isColorEnabled and Screen:isColorEnabled()))
-                and Blitbuffer.TYPE_BBRGB32 or Blitbuffer.TYPE_BB8)
+            channels == 4 and Blitbuffer.TYPE_BBRGB32 or Blitbuffer.TYPE_BB8)
         ---@diagnostic disable-next-line: cast-type-mismatch
         ---@cast bb BlitBuffer
         if not transparent then bb:fill(Blitbuffer.COLOR_WHITE) end
         paint(bb)
-        if bb:writePNG(tmp) == false then error("PNG write failed") end
+        -- 新画布无旋转、无行尾填充；直接编码，避免 writePNG 吞掉编码器错误和额外拷贝整屏。
+        local encoded, reason = require("ffi/png").encodeToFile(tmp,
+            require("ffi").cast("const unsigned char *", bb.data), width, height, channels)
+        if not encoded then error("cannot write PNG " .. tmp .. ": " .. tostring(reason)) end
         local renamed, reason = os.rename(tmp, path)
         if not renamed then error(reason or "rename failed") end
     end, debug.traceback)
@@ -418,7 +426,6 @@ end
 --- 第三个返回值为 true；主体自己画的卡片/文字都不透明。
 ---@return boolean, any, boolean|nil
 function M.write(path, background, blocks, fill)
-    Paths.ensureScreensaverDir()
     local w, h = Layout.portraitSize()
     local backdrop = background and background.blocks or {}
     local background_copy, alpha_bg, source
