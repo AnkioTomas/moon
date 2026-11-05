@@ -3,7 +3,8 @@
 @module tests.features.remote.web_spec
 --]]
 local Assert = require("support.assert")
-if os.execute("command -v node >/dev/null 2>&1") ~= 0 then
+local status = os.execute("command -v node >/dev/null 2>&1")
+if status ~= 0 and status ~= true then
     Assert.skip("需要 Node 运行网页脚本回归")
 end
 local root = require("support.config").root()

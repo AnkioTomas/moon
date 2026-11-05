@@ -1,0 +1,33 @@
+name: Complete offline tests
+description: Run every spec with Node and a pinned official KOReader runtime.
+runs:
+  using: composite
+  steps:
+    - name: Prepare test dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install -y luajit libsqlite3-0 nodejs
+        RUNTIME="$PWD/koreader/koreader-emulator-ci-debug/koreader"
+        ARCHIVE="$RUNNER_TEMP/moon-koreader.tar.xz"
+        curl --fail --location --retry 3 \
+          https://github.com/koreader/koreader/releases/download/v2026.07.1/koreader-linux-x86_64-v2026.07.1.tar.xz \
+          --output "$ARCHIVE"
+        echo "299aadb28147a25e9432ced1214ea444a4184393b5ae97cf42402c8a61b1a1b0  $ARCHIVE" | sha256sum --check
+        mkdir -p "$RUNTIME"
+        tar -xJf "$ARCHIVE" -C "$RUNTIME" --strip-components=2 lib/koreader
+        ln -s koreader-emulator-ci-debug/koreader/frontend koreader/frontend
+        ln -s koreader-emulator-ci-debug/koreader koreader/base
+        {
+          echo "LUA_PATH=$RUNTIME/common/?.lua;$RUNTIME/common/?/init.lua;;"
+          echo "LD_LIBRARY_PATH=$RUNTIME/libs"
+        } >> "$GITHUB_ENV"
+
+    - name: Run every spec without skips
+      shell: bash
+      run: |
+        set -euo pipefail
+        node --version
+        ./tests/run.sh | tee "$RUNNER_TEMP/moon-tests.log"
+        ! grep -Eq '^[0-9]+ passed, [1-9][0-9]* skipped,' "$RUNNER_TEMP/moon-tests.log"
