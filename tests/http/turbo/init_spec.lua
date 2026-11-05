@@ -66,6 +66,7 @@ do
     end
     package.preload["turbo.iostream"] = function()
         local IOStream = {}
+        function IOStream:_handle_write_nonconst() error("unpatched LuaSocket writer") end
         function IOStream:_handle_connect_fail(err)
             self.fail_self = self
             self.fail_err = err
@@ -102,6 +103,60 @@ do
     Assert.eq(handshake_calls, 4)
 
     local iostream = require("turbo.iostream")
+    do
+        local ffi = require("ffi")
+        local payload = "large-body"
+        local buffer = ffi.new("char[?]", #payload, payload)
+        local writes, transmitted, closed, cleared, callback_arg = {}, {}, 0, false, nil
+        local stream = {
+            socket = {
+                send = function(_, data)
+                    writes[#writes + 1] = data
+                    if #writes == 1 then
+                        transmitted[#transmitted + 1] = data:sub(1, 4)
+                        return nil, "timeout", 4
+                    end
+                    transmitted[#transmitted + 1] = data
+                    return #data
+                end,
+            },
+            _write_buffer_offset = 0,
+            _write_buffer_size = #payload,
+            _write_buffer = {
+                get = function() return buffer, #payload end,
+                clear = function() cleared = true end,
+            },
+            _write_callback = function(arg) callback_arg = arg end,
+            _write_callback_arg = "write-done",
+            close = function() closed = closed + 1 end,
+            _run_callback = function(_, callback, arg) callback(arg) end,
+        }
+        iostream.IOStream._handle_write_nonconst(stream)
+        Assert.eq(stream._write_buffer_offset, 4, "timeout 时记录 partial 字节")
+        Assert.eq(stream._write_buffer_size, #payload - 4)
+        Assert.eq(closed, 0, "timeout 不关闭连接")
+        Assert.is_nil(callback_arg, "未写完不能回调")
+
+        iostream.IOStream._handle_write_nonconst(stream)
+        Assert.eq(writes[2], payload:sub(5), "续传从 partial 后继续")
+        Assert.eq(table.concat(transmitted), payload, "实际发送内容完整且无重复")
+        Assert.eq(stream._write_buffer_size, 0)
+        Assert.eq(stream._write_buffer_offset, 0)
+        Assert.is_true(cleared)
+        Assert.eq(callback_arg, "write-done", "全部写完后回调一次")
+        Assert.eq(closed, 0)
+
+        local error_closed = false
+        local failed = {
+            socket = { send = function() return nil, "closed", 0 end },
+            _write_buffer_offset = 0,
+            _write_buffer_size = 1,
+            _write_buffer = { get = function() return buffer, 1 end },
+            close = function() error_closed = true end,
+        }
+        iostream.IOStream._handle_write_nonconst(failed)
+        Assert.is_true(error_closed, "非 timeout 错误仍关闭连接")
+    end
     local fail_stream = { should_fail = true }
     iostream.IOStream.connect(fail_stream, "example.com", 443)
     Assert.eq(fail_stream.fail_err, "Network is unreachable")
