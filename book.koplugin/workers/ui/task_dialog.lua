@@ -67,7 +67,7 @@ end
 ---@param task table BookTask 或快照项
 ---@return string
 local function heading(task)
-    local label = TaskDialog.label(task.kind)
+    local label = task.label or TaskDialog.label(task.kind)
     return task.title and T(_("%1：%2"), label, task.title) or label
 end
 
