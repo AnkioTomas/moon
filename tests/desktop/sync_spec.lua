@@ -399,23 +399,30 @@ do
     Registry.meta = function(id)
         return { name = id == "jdread" and "京东读书" or id }
     end
-    settings.jdread = { login = function() end }
+    local logins = 0
+    settings.jdread = { login = function() logins = logins + 1 end }
 
     Themed.made = {}
     Sync.promptLogin({ desktop = desktop }, "jdread", "NOT.LOGIN")
     Stubs.flush()
-    local box = Themed.last("confirm")
+    local box = Themed.last("text_viewer")
     Assert.not_nil(box)
     Assert.matches(box.text, "京东读书%s+登录已失效")
     Assert.is_true(not tostring(box.text):find("NOT.LOGIN", 1, true))
-    Assert.eq(box.ok_text, "重新登录")
+    Assert.eq(box.buttons[2].text, "重新登录")
+    box.buttons[2].callback()
+    Assert.is_true(box.closed)
+    Assert.eq(logins, 1)
 
     Themed.made = {}
     Sync.promptLogin({ desktop = desktop }, "jdread",
         "京东读书登录已失效，请重新扫码登录")
     Stubs.flush()
-    box = Themed.last("confirm")
+    box = Themed.last("text_viewer")
     Assert.matches(box.text, "请重新扫码登录")
+    box.buttons[1].callback()
+    Assert.is_true(box.closed)
+    Assert.eq(logins, 1, "稍后只关窗，不重新登录")
 
     Registry.meta = saved_meta
 end

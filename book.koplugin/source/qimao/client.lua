@@ -43,7 +43,7 @@ function Client.token()
 end
 
 --- 账号接口回包：无 errors.code 即成功（同步类接口 data 可能为空串）。
----@param token_checked string 本次请求用的 token（校验新 token 时不能污染已有登录态）
+---@param token_checked string|nil 本次请求用的 token；登录请求不带 token，不改变已有登录态。
 ---@param raw string|nil
 ---@param err any
 ---@return table|nil, string|nil
@@ -54,21 +54,21 @@ local function decodeAccount(raw, err, token_checked)
     local errors = wire.errors
     if type(errors) == "table" and errors.code then
         local title = errors.title or _("请求失败")
-        if token_checked == Client.token()
+        if token_checked and token_checked == Client.token()
             and (AUTH_CODES[tostring(errors.code)] or tostring(title):find("登录", 1, true)) then
             return nil, require("source.auth").expire(SOURCE_ID,
                 require("source.cookie_login").relogin(_("七猫小说"), "https://www.qimao.com/login")
-                .. "\n\n" .. _("也可以不装扩展：点这个提示上的「重新登录」，或打开「设置 → 书库 → 账号 → 七猫小说 → 七猫账号」。电脑登录 https://www.qimao.com 后按 F12，点「应用」或 Application，左边点本地存储（Local Storage），点这个网站，找到 ls_qimao_global_userinfo_data，复制里面的 token，贴进输入框，点「登录」。"))
+                .. "\n\n" .. _("点「重新登录」或打开「设置 → 书库 → 账号 → 七猫小说 → 七猫账号」，填写手机号，点「发送验证码」。扫码只做滑块，短信验证码回到设备填写。也可点「用 token 登录」保留原来的登录方式。"))
         end
         return nil, title
     end
-    if token_checked == Client.token() then require("source.auth").ok(SOURCE_ID) end
+    if token_checked and token_checked == Client.token() then require("source.auth").ok(SOURCE_ID) end
     return wire
 end
 
 ---@param url string
 ---@param form table<string, any>
----@param token string
+---@param token string|nil
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return HttpJob
 local function post(url, form, token, cb)
@@ -78,6 +78,29 @@ local function post(url, form, token, cb)
         content_type = "application/x-www-form-urlencoded",
         timeout = require("http.timeout").net(0.5),
     }, function(raw, err) cb(decodeAccount(raw, err, token)) end)
+end
+
+---@param phone string
+---@param rid string 数美滑块返回的凭据；手机号留在设备。
+---@param cb fun(ok: boolean, err: string|nil)
+---@return HttpJob
+function Client.sendCodeAsync(phone, rid, cb)
+    return post(USER .. "/api/pc/v1/login/send-code", { phone = phone, rid = rid }, nil, function(wire, err)
+        cb(wire ~= nil, err)
+    end)
+end
+
+---@param phone string
+---@param code string 设备上填写的短信验证码。
+---@param cb fun(token: string|nil, err: string|nil)
+---@return HttpJob
+function Client.loginAsync(phone, code, cb)
+    return post(USER .. "/api/pc/v1/login/index", { phone = phone, code = code }, nil, function(wire, err)
+        if not wire then return cb(nil, err) end
+        local token = type(wire.data) == "table" and wire.data.token
+        if type(token) ~= "string" or token == "" then return cb(nil, _("七猫登录响应缺少 token")) end
+        cb(token)
+    end)
 end
 
 --- 校验 token 并取账号信息（登录入口用，token 由调用方显式给）。

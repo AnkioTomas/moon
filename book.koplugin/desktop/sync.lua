@@ -353,15 +353,18 @@ function Sync.promptLogin(plugin, id, msg)
         end
         local setting = require("desktop.pages.setting.source").loadSetting(id)
         local login = setting and (setting.login or setting.open)
+        local dialog
+        local buttons = { { text = _("稍后"), callback = function() dialog:close() end } }
         if type(login) == "function" then
-            require("ui.themes.widgets.confirm"):new{
-                text = text,
-                ok_text = _("重新登录"),
-                ok_callback = function() login(plugin) end,
-            }:show()
-        else
-            require("ui.themes.widgets.toast"):new{ text = text }:show()
+            buttons[#buttons + 1] = {
+                text = _("重新登录"), variant = "primary",
+                callback = function() dialog:close(); login(plugin) end,
+            }
         end
+        dialog = require("ui.themes.widgets.text_viewer"):new{
+            title = _("登录已失效"), text = text, fullscreen = false, buttons = buttons,
+        }
+        dialog:show()
     end)
 end
 

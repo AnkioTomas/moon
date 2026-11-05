@@ -416,6 +416,12 @@ Remote.openPage("/wechat_import.html", "微信书架导入", "请扫码")
 Assert.eq(qr_opts.text, "http://192.168.1.2:9528/wechat_import.html")
 Assert.eq(qr_opts.caption, "请扫码\n" .. qr_opts.text)
 Assert.eq(require("utils.extension").last("web.open_page"), Remote.openPage)
+local close_callback = function() end
+local page_dialog = Remote.openPage("/verification.html#ticket", "验证", "请扫码", {
+    close_callback = close_callback,
+})
+Assert.eq(page_dialog, qr_opts, "调用方能在完成验证后关闭对应二维码")
+Assert.eq(qr_opts.close_callback, close_callback, "关窗通知验证拥有者，避免开书一直等待")
 
 -- 拿不到局域网 IP：不弹扫了也打不开的码，退回文字提示。
 fake_ip = nil

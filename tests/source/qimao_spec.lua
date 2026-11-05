@@ -45,6 +45,35 @@ local Client = require("source.qimao.client")
 local Mapper = require("source.qimao.mapper")
 local Setting = require("source.qimao.setting")
 
+-- 滑块只交 rid；设备发短信、再用短信码登录，不提前覆盖已有账号。
+do
+    requests, replies = {}, { '{"data":""}', '{"data":{"token":"new-token"}}' }
+    local sent, token, err
+    Client.sendCodeAsync("13800000000", "slider-proof", function(ok, message) sent, err = ok, message end)
+    Assert.is_true(sent)
+    Assert.is_nil(err)
+    Assert.matches(requests[1].url, "/api/pc/v1/login/send%-code$")
+    Assert.matches(requests[1].body, "phone=13800000000")
+    Assert.matches(requests[1].body, "rid=slider%-proof")
+    Assert.is_nil(requests[1].opts.headers.Authorization, "登录请求不携带已登录账号的 token")
+    Client.loginAsync("13800000000", "001234", function(value, message) token, err = value, message end)
+    Assert.eq(token, "new-token")
+    Assert.is_nil(err)
+    Assert.matches(requests[2].url, "/api/pc/v1/login/index$")
+    Assert.matches(requests[2].body, "code=001234", "短信码保留前导零")
+    Assert.eq(cfg.token, "tk-1", "新 token 经设置页校验后才保存")
+
+    expired, replies = nil, { '{"errors":{"code":"40001002","title":"短信验证码错误"}}', '{"data":{}}' }
+    Client.loginAsync("13800000000", "wrong", function(value, message) token, err = value, message end)
+    Assert.is_nil(token)
+    Assert.eq(err, "短信验证码错误")
+    Assert.is_nil(expired, "尝试新登录不能把原账号标记失效")
+    Client.loginAsync("13800000000", "001234", function(value, message) token, err = value, message end)
+    Assert.is_nil(token)
+    Assert.eq(err, "七猫登录响应缺少 token")
+    requests = {}
+end
+
 -- 书架分页：按 meta.total_pages 翻完，请求带 Authorization。
 do
     replies = {

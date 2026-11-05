@@ -1,8 +1,8 @@
 --[[--
 七猫源设置：登录。
 
-七猫网页登录的短信验证码要先过数美滑块，墨水屏上做不了；登录态就是网页的 token（每个请求的
-`Authorization`），在电脑浏览器登录七猫后复制 token 粘贴进来即可，粘贴时会先向服务端校验。
+手机号与短信验证码在设备上填写，发送短信前的数美滑块经远程管理桥接。
+登录态仍是网页 token（`Authorization`）；保留原来的 token 导入，保存前向服务端校验。
 
 @module koplugin.book.source.qimao.setting
 --]]
@@ -86,7 +86,7 @@ Setting.browser = {
     end,
 }
 
-local function showLogin()
+local function showTokenLogin()
     require("ui.themes.widgets.input"):new{
         title = _("七猫登录 token"),
         fields = { { text = "", hint = _("按 F12，点「应用」里的本地存储，复制 ls_qimao_global_userinfo_data 中的 token") } },
@@ -102,6 +102,82 @@ local function showLogin()
     }:show()
 end
 
+local function showLogin()
+    local Toast = require("ui.themes.widgets.toast")
+    local verification, dialog
+    local agreed, closed = false, false
+    local function consent(run)
+        if agreed then return run() end
+        require("ui.themes.widgets.confirm"):new{
+            title = _("七猫账号"),
+            text = _("未注册的手机号将自动注册七猫账号。继续即同意七猫用户协议和隐私政策。")
+                .. "\nhttps://www.qimao.com/user_agreed.html\nhttps://www.qimao.com/privacy_agreed.html",
+            ok_text = _("同意并继续"),
+            ok_callback = function() agreed = true; run() end,
+        }:show()
+    end
+    local function validPhone(phone)
+        if #phone == 11 and phone:match("^1%d+$") then return true end
+        Toast:new{ text = _("请填写正确的手机号"), timeout = 3 }:show()
+        return false
+    end
+    dialog = require("ui.themes.widgets.input"):new{
+        title = _("七猫账号"),
+        fields = {
+            { label = _("手机号"), text = "", input_type = "number" },
+            { label = _("验证码"), text = "", input_type = "number" },
+        },
+        ok_text = _("登录"),
+        close_callback = function()
+            closed = true
+            if verification then verification:cancel() end
+        end,
+        actions = {
+            { text = _("发送验证码"), callback = function(phone)
+                phone = require("utils.text").trim(phone)
+                if not validPhone(phone) then return end
+                consent(function()
+                    require("ui/network/manager"):runWhenConnected(function()
+                        if closed then return end
+                        if verification then verification:cancel() end
+                        verification = require("source.qimao.verify").new(phone, function(ok, err)
+                            Toast:new{ text = ok and _("短信已发送，请在设备上填写验证码") or err, timeout = 3 }:show()
+                        end)
+                    end)
+                end)
+            end },
+        },
+        callback = function(phone, code)
+            phone, code = require("utils.text").trim(phone), require("utils.text").trim(code)
+            if not validPhone(phone) then return end
+            if code == "" then
+                Toast:new{ text = _("请先填写验证码"), timeout = 3 }:show()
+                return
+            end
+            consent(function()
+                require("ui/network/manager"):runWhenConnected(function()
+                    local waiting = require("ui.themes.widgets.progress_dialog"):new{
+                        title = _("七猫账号"), text = _("正在登录…"), dismissable = false,
+                    }
+                    waiting:show()
+                    require("source.qimao.client").loginAsync(phone, code, function(token, err)
+                        if not token then
+                            waiting:close()
+                            Toast:new{ text = err, timeout = 3 }:show()
+                            return
+                        end
+                        saveToken(token, function(ok, message)
+                            waiting:close()
+                            Toast:new{ text = ok and _("登录成功") or message, timeout = ok and 2 or 3 }:show()
+                        end)
+                    end)
+                end)
+            end)
+        end,
+    }
+    dialog:show()
+end
+
 ---@return table[]
 function Setting.rows()
     local Row = require("ui.themes.widgets.row")
@@ -112,6 +188,10 @@ function Setting.rows()
                 title = _("七猫账号"), status = status, status_on = status_on,
                 subtitle = not status_on and _("也可在「远程管理」里用浏览器授权登录") or nil,
                 callback = function() showLogin() end })
+        end,
+        function(iw)
+            return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "key",
+                title = _("用 token 登录"), callback = showTokenLogin })
         end,
     }
     if not loggedIn() then return rows end
