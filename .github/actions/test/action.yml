@@ -3,12 +3,18 @@ description: Run every spec with Node and a pinned official KOReader runtime.
 runs:
   using: composite
   steps:
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+
     - name: Prepare test dependencies
       shell: bash
       run: |
         set -euo pipefail
         sudo apt-get update
-        sudo apt-get install -y luajit libsqlite3-0 nodejs
+        sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+          luajit libsqlite3-0 xz-utils zlib1g-dev
         RUNTIME="$PWD/koreader/koreader-emulator-ci-debug/koreader"
         ARCHIVE="$RUNNER_TEMP/moon-koreader.tar.xz"
         curl --fail --location --retry 3 \
@@ -19,10 +25,7 @@ runs:
         tar -xJf "$ARCHIVE" -C "$RUNTIME" --strip-components=2 lib/koreader
         ln -s koreader-emulator-ci-debug/koreader/frontend koreader/frontend
         ln -s koreader-emulator-ci-debug/koreader koreader/base
-        {
-          echo "LUA_PATH=$RUNTIME/common/?.lua;$RUNTIME/common/?/init.lua;;"
-          echo "LD_LIBRARY_PATH=$RUNTIME/libs"
-        } >> "$GITHUB_ENV"
+        echo "LD_LIBRARY_PATH=$RUNTIME/libs" >> "$GITHUB_ENV"
 
     - name: Run every spec without skips
       shell: bash
