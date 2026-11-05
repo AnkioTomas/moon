@@ -111,6 +111,19 @@ package.loaded["book.books_db"] = {
     get = function(_sid, id) return books[id] end,
     getToc = function(_sid, id) return stale[id] end,
     libraryStableIdsBySource = function() return shelf_ids end,
+    -- 补空字段：脏行也允许补，但不覆盖非空值（与真实现同步）。
+    fillEmptyMeta = function(_sid, id, authors, intro)
+        local row = books[id]
+        if not row then return false end
+        local changed = false
+        if authors and authors ~= "" and (row.authors == nil or row.authors == "") then
+            row.authors, changed = authors, true
+        end
+        if intro and intro ~= "" and (row.intro == nil or row.intro == "") then
+            row.intro, changed = intro, true
+        end
+        return changed
+    end,
 }
 package.loaded["book.progress_db"] = {
     get = function(_sid, id) return progress[id] end,
@@ -272,9 +285,9 @@ shelf_ids = {}
 run("syncBooksAsync", nil)
 Assert.is_true(reconciled ~= nil, "本地书架空了（书库被清）照常对账")
 
--- 对账后后台补简介：只补 intro 为 nil 的行，一本一请求，失败就停。
+-- 对账后后台补简介 / 作者：缺任意一项就补，一本一请求，失败就跳过。
 reconciled = nil
-books["1"], books["2"], books["3"] = { intro = "已有" }, {}, {}
+books["1"], books["2"], books["3"] = { intro = "已有", authors = "甲" }, {}, {}
 local meta_calls = {}
 local metadata_route = routes["GET /api/Series/metadata"]
 routes["GET /api/Series/metadata"] = function(opts)
@@ -291,15 +304,17 @@ Assert.eq(remembered["2"].meta.publisher, "某出版社")
 Assert.eq(remembered["2"].meta.published, 2019)
 Assert.eq(remembered["2"].meta.language, "zh")
 Assert.is_nil(remembered["2"].title, "不碰标题")
--- 书库把空简介存成 NULL：补过的记在单独文件里，否则没简介的书每次同步都重拉。
+-- 书库把空简介存成 NULL：补过的记在单独文件里，TTL 内不再重拉。
 meta_calls, books["2"], books["3"] = {}, {}, {}
-run("syncBooksAsync", { force = true })
+source:backfillMeta({ "2", "3" })
+Stubs.flush()
 Assert.len(meta_calls, 0, "补过的不再补")
 local done_file = require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lua"
-Assert.is_true(require("luasettings"):open(done_file):readSetting("done")["2"])
+Assert.eq(type(require("luasettings"):open(done_file):readSetting("done")["2"]), "number",
+    "状态记的是检查时间戳，不是终身布尔")
 -- 指纹没变（不对账）也要接着补：换源 / 断网中断过的书不能永远停在未知作者。
 meta_calls, remembered["3"] = {}, nil
-books["2"], books["3"] = { intro = "已有" }, {}
+books["2"], books["3"] = { intro = "已有", authors = "甲" }, {}
 os.remove(done_file)
 Assert.is_true(run("syncBooksAsync", nil).skipped == false, "快照没变也跑完整同步（补简介）")
 Assert.eq(table.concat(meta_calls, ","), "3", "没补过的接着补")
@@ -323,6 +338,147 @@ Stubs.flush()
 Assert.len(meta_calls, 0, "离线不补")
 online = true
 routes["GET /api/Series/metadata"] = metadata_route
+
+-- 补全门禁：空串算缺数据、旧布尔当过期、TTL / force / server 分区 / 裁剪 / 失败与空响应。
+local State = function() return require("luasettings"):open(done_file) end
+local function reset_state(done, server)
+    local st = State()
+    st:saveSetting("server", server or "http://kav")
+    st:saveSetting("done", done or {})
+    st:flush()
+end
+local function state_done() return State():readSetting("done") or {} end
+local function flush_backfill(...)
+    source:backfillMeta(...)
+    Stubs.flush()
+end
+
+local record_route = function(opts)
+    meta_calls[#meta_calls + 1] = query(opts, "seriesId")
+    return metadata_route
+end
+routes["GET /api/Series/metadata"] = record_route
+
+os.remove(done_file)
+reset_state({ ["2"] = true })
+books["2"] = { intro = "", authors = "" }
+meta_calls = {}
+flush_backfill({ "2" })
+Assert.eq(table.concat(meta_calls, ","), "2", "intro='' + 旧布尔 true 也要补（空串不是已补全）")
+Assert.eq(type(state_done()["2"]), "number", "补完写检查时间戳")
+
+reset_state({ ["2"] = os.time() })
+books["2"] = {}
+meta_calls = {}
+flush_backfill({ "2" })
+Assert.len(meta_calls, 0, "TTL 内不重拉")
+
+reset_state({ ["2"] = os.time() - 8 * 86400 })
+meta_calls = {}
+flush_backfill({ "2" })
+Assert.eq(table.concat(meta_calls, ","), "2", "TTL 过期重试")
+
+reset_state({ ["2"] = os.time() })
+meta_calls = {}
+flush_backfill({ "2" }, { force = true })
+Assert.eq(table.concat(meta_calls, ","), "2", "手动刷新忽略 TTL")
+
+reset_state({ ["2"] = true })
+books["2"] = { intro = "有", authors = "甲" }
+meta_calls = {}
+flush_backfill({ "2" })
+Assert.len(meta_calls, 0, "完整行永久跳过，旧布尔也一样")
+
+reset_state({ ["2"] = os.time() }, "http://old")
+books["2"] = {}
+meta_calls = {}
+flush_backfill({ "2" })
+Assert.eq(table.concat(meta_calls, ","), "2", "换服务器后旧标记作废")
+Assert.eq(State():readSetting("server"), "http://kav", "记录当前服务器")
+
+reset_state({})
+books["2"] = {}
+meta_calls = {}
+local good_route = record_route
+routes["GET /api/Series/metadata"] = { code = 500, body = "" }
+flush_backfill({ "2" })
+Assert.is_nil(state_done()["2"], "请求失败不推进 checked_at")
+routes["GET /api/Series/metadata"] = json({})
+flush_backfill({ "2" })
+Assert.eq(type(state_done()["2"]), "number", "空 DTO 也算检查过（TTL 后再看）")
+routes["GET /api/Series/metadata"] = good_route
+
+reset_state({ ["2"] = os.time(), ["999"] = os.time() })
+meta_calls = {}
+flush_backfill({ "2" })
+Assert.is_nil(state_done()["999"], "不在本轮书架的 series 从状态里裁掉")
+
+-- 快照没变时书架 id 里混着卷行（seriesId:chapterId）：不能拿它请求 series metadata（Kavita 判 400）。
+reset_state({})
+books["2"], books["2:2001"] = {}, { title = "第二卷" }
+meta_calls = {}
+flush_backfill({ "2", "2:2001" })
+Assert.eq(table.concat(meta_calls, ","), "2", "卷行 id 不补 series 元数据")
+books["2:2001"] = nil
+
+reset_state({})
+books["2"] = {}
+routes["GET /api/Series/metadata"] = json({ summary = "   ", writers = {} })
+flush_backfill({ "2" })
+Assert.is_nil(remembered["2"].intro, "空白 summary 归一成 nil，不写空串")
+Assert.is_nil(remembered["2"].authors, "空 writers 归一成 nil")
+routes["GET /api/Series/metadata"] = good_route
+
+-- 60 秒预算：到点停止，已处理的记 checked_at，下一轮接着补。
+reset_state({})
+books["31"], books["32"], books["33"] = {}, {}, {}
+meta_calls = {}
+local real_time, fake_now = os.time, os.time()
+os.time = function() return fake_now end
+routes["GET /api/Series/metadata"] = function(opts)
+    meta_calls[#meta_calls + 1] = query(opts, "seriesId")
+    fake_now = fake_now + 61
+    return metadata_route
+end
+flush_backfill({ "31", "32", "33" }, { force = true })
+os.time = real_time
+routes["GET /api/Series/metadata"] = good_route
+Assert.eq(table.concat(meta_calls, ","), "31", "预算到点停止")
+Assert.eq(type(state_done()["31"]), "number", "已处理的记时间戳")
+Assert.is_nil(state_done()["32"], "没处理的不记，下一轮续跑")
+books["31"], books["32"], books["33"] = nil, nil, nil
+
+-- 容器补全后，读过的卷行在同步里自动继承作者 / 简介（不用展示层兜底）。
+local saved_all = routes["POST /api/Series/all-v2"]
+routes["POST /api/Series/all-v2"] = function(opts)
+    local body = JSON.decode(opts.body)
+    if body.Statements[1].Value == "2" then
+        return json({ { id = 71, name = "漫画七", libraryName = "漫画", format = 1, pages = 10, pagesRead = 5,
+            latestReadDate = "2026-01-02T03:04:05.123" } })
+    end
+    return json({})
+end
+tocs["71"] = { { chapterId = 7101, title = "第1话", pages = 10 } }
+progress["71:7101"] = { page = 5, fraction = 0.5 }
+books["71"] = { title = "漫画七", authors = "作者甲", intro = "整部简介" }
+books["71:7101"] = { title = "漫画七 · 第1话" }
+shelf_ids = {}
+run("syncBooksAsync", { force = true })
+Assert.eq(remembered["71:7101"].authors, "作者甲", "卷行继承容器作者")
+Assert.eq(remembered["71:7101"].intro, "整部简介", "卷行继承容器简介")
+
+-- 脏卷行：本地改过的标题保留，空的作者 / 简介从容器补上（不走 upsertRemote 覆盖）。
+books["71:7101"] = { title = "本地改名", sync_status = 0 }
+remembered["71:7101"] = nil
+run("syncBooksAsync", { force = true })
+Assert.eq(books["71:7101"].authors, "作者甲", "脏卷行只补空作者")
+Assert.eq(books["71:7101"].title, "本地改名", "本地标题保留")
+Assert.is_nil(remembered["71:7101"], "脏行不走远端整行覆盖")
+
+routes["POST /api/Series/all-v2"] = saved_all
+books["71"], books["71:7101"] = nil, nil
+tocs["71"], progress["71:7101"] = nil, nil
+
 books["1"], books["2"], books["3"] = nil, nil, nil
 cfg.libraries = { ["1"] = true }
 

@@ -168,6 +168,11 @@ local function syncBooks(desktop, source, force, follow)
     local function run(progress, finish)
         return source:syncBooksAsync({
             force = force,
+            on_changed = function()
+                -- 补全 / 对齐写库后首页要重读；桌面已关（人在阅读器里）就等下一次自然事件。
+                if desktop.closed then return end
+                desktop:onEvent("shelf_changed")
+            end,
             on_progress = function(text, done, total)
                 if desktop._books_sync[source.id] ~= flight then return end
                 progress(text, done, total)

@@ -237,6 +237,28 @@ function BookDB.fillIntro(source_id, stable_id, intro)
         intro, source_id, stable_id)
 end
 
+--- 只补空字段：库里为 NULL / 空串才写入，非空值一律保留（用户编辑优先）。
+--- 不改 sync_status / deleted：脏行补空后仍是用户编辑行，等本地操作自行同步。
+---@param source_id string
+---@param stable_id string
+---@param authors string|nil
+---@param intro string|nil
+---@return boolean changed 是否真的写入了字段
+function BookDB.fillEmptyMeta(source_id, stable_id, authors, intro)
+    local changed = false
+    local function fill(column, value)
+        if not value then return end
+        if not DB.exec("UPDATE books SET " .. column .. "=? WHERE source_id=? AND stable_id=? AND COALESCE("
+                .. column .. ", '')='';", value, source_id, stable_id) then
+            return
+        end
+        if (tonumber(DB.rowexec("SELECT changes();")) or 0) > 0 then changed = true end
+    end
+    fill("authors", authors)
+    fill("intro", intro)
+    return changed
+end
+
 --- 插入或更新 books 行（本地可信写入：扫盘/本地登记），标脏待上传。
 ---@param row table
 ---@return boolean
