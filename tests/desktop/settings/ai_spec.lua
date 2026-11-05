@@ -22,8 +22,9 @@ package.preload["ui.themes.widgets.row"] = function()
 end
 
 local settings = { ai_endpoint = "", ai_api_key = "", ai_model = "", }
+local saved
 package.preload["utils.settings"] = function()
-    return { get = function() return settings end, save = function() end }
+    return { get = function() return settings end, save = function(owner) saved = owner end }
 end
 
 package.preload["ffi/util"] = function()
@@ -56,7 +57,7 @@ end
 local AI = require("desktop.pages.setting.ai")
 local desktop = { updateView = function() end, lifecycle = { state = "Resume" } }
 local rows = AI:rows(desktop)
-Assert.len(rows, 7)
+Assert.len(rows, 8)
 
 -- 第 4 行是 AI 请求超时：spin 选值后写入设置。
 rows[4](400)
@@ -130,3 +131,23 @@ Assert.eq(updates, 1)
 rows[2](400)
 built.callback()
 Assert.eq(Themed.last("input").fields[1].text_type, "password")
+
+rows[8](400)
+Assert.eq(built.title, "温度")
+Assert.eq(built.status, "未设置")
+built.callback()
+local temperature_spin = spins[#spins]
+Assert.eq(temperature_spin.fields[1].value, 2)
+Assert.eq(temperature_spin.fields[1].format(10), "1.0")
+temperature_spin.callback(10)
+Assert.eq(settings.ai_temperature, 1)
+Assert.eq(saved, "ai")
+Assert.eq(updates, 2)
+rows[8](400)
+Assert.eq(built.status, "1.0")
+built.callback()
+Assert.eq(spins[#spins].fields[1].value, 10)
+spins[#spins].callback(0)
+rows[8](400)
+Assert.eq(settings.ai_temperature, 0)
+Assert.eq(built.status, "0.0")
