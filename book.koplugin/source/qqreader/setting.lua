@@ -60,7 +60,11 @@ Setting.browser = {
 
 local function startQR()
     require("ui/network/manager"):runWhenConnected(function()
-        require("source.qqreader.qrlogin"):new(function(cookie) CookieLogin.verify(SPEC, cookie) end):start()
+        require("source.yuewen_qr"):new({
+            app_id = "1450000220", area_id = "1", return_url = "https://book.qq.com/",
+            referer = "https://login.book.qq.com/login.html",
+            title = _("QQ阅读扫码登录"), caption = _("用 QQ阅读或起点 App 扫一扫"),
+        }, function(cookie) CookieLogin.verify(SPEC, cookie) end):start()
     end)
 end
 

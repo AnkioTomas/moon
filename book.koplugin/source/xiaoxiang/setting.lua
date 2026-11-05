@@ -1,8 +1,8 @@
 --[[--
 潇湘源设置：登录。
 
-潇湘账号在新站 www.xxsypro.com（阅文通行证，只有 QQ / 微信 / 阅文账号，没有扫码）。登录态是网页 Cookie：
-浏览器扩展授权（check 靠 personal 接口 data.isLogin），或在电脑浏览器登录后把请求里的 Cookie 请求头粘贴进来。拿到 Cookie 先校验再保存。
+潇湘新站 www.xxsypro.com 使用阅文通行证：设备上展示 App 扫码，保留浏览器扩展与手动 Cookie 导入。
+拿到 Cookie 先用 personal 接口的 data.isLogin 校验，通过才保存。
 
 @module koplugin.book.source.xiaoxiang.setting
 --]]
@@ -52,16 +52,25 @@ Setting.browser = {
     apply = function(payload, cb) CookieLogin.save(SPEC, CookieLogin.fromPayload(payload, "xxsypro.com"), cb) end,
 }
 
+local function startQR()
+    require("ui/network/manager"):runWhenConnected(function()
+        require("source.yuewen_qr"):new({
+            app_id = "57", area_id = "5", return_url = "https://www.xxsypro.com/",
+            referer = "https://passport.yuewen.com/yuewen.html",
+            title = _("潇湘扫码登录"), caption = _("用 QQ阅读或起点 App 扫一扫"),
+        }, function(cookie) CookieLogin.verify(SPEC, cookie) end):start()
+    end)
+end
+
 ---@return table[]
 function Setting.rows()
-    local rows = { CookieLogin.accountRow(SPEC) }
+    local rows = { CookieLogin.accountRow(SPEC, { callback = startQR, off_text = _("未登录 · 点此扫码") }) }
     if loggedIn() then rows[#rows + 1] = CookieLogin.logoutRow(SPEC) end
+    rows[#rows + 1] = CookieLogin.pasteRow(SPEC)
     return rows
 end
 
 --- 登录失效提示的「重新登录」直达入口（desktop.sync.promptLogin）。
-function Setting.login()
-    CookieLogin.prompt(SPEC)
-end
+Setting.login = startQR
 
 return Setting

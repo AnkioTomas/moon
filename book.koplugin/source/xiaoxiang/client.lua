@@ -129,8 +129,8 @@ local function authed(path, query, body, cb)
         if cancelled then return end
         if not info then
             verified.cookie = nil
-            cb(nil, cookie and Auth.expire(SOURCE_ID, require("source.cookie_login").relogin(
-                _("潇湘书院"), "https://www.xxsypro.com/", _("潇湘书院 → 潇湘账号"))) or _("未登录潇湘"))
+            cb(nil, cookie and Auth.expire(SOURCE_ID,
+                _("潇湘登录已失效，请点「重新登录」，用 QQ阅读或起点 App 扫码。也可在账号设置里粘贴 Cookie。")) or _("未登录潇湘"))
             return
         end
         verified.cookie, verified.at = cookie, os.time()

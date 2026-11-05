@@ -1,12 +1,12 @@
 --[[--
-QQ阅读扫码登录。
+阅文 App 扫码登录（QQ阅读、起点、潇湘共用）。
 
 阅文自己的码，用 QQ阅读或起点 App 扫，不是手机 QQ。
 GET /login/qrcode 拿 sessionKey，二维码内容是固定的 scanlogin URL。
 轮询 /login/qrcodelogin。scanStatus 5 时取 ywguid / ywkey；只有 302url 时跟跳收 Set-Cookie。
 拿到 Cookie 交给 on_cookie，由设置页走现有账号校验再保存。
 
-@module koplugin.book.source.qqreader.qrlogin
+@module koplugin.book.source.yuewen_qr
 --]]
 
 require("l10n").apply()
@@ -19,10 +19,7 @@ local _ = require("gettext")
 local QRLogin = {}
 QRLogin.__index = QRLogin
 
-local APP_ID = "1450000220"
-local AREA_ID = "1"
 local BASE = "https://ptlogin.yuewen.com"
-local RETURN_URL = "https://book.qq.com/"
 local POLL_INTERVAL = 3
 local POLL_MAX = 40
 local DEADLINE = 180
@@ -39,19 +36,13 @@ local function text(value)
     if type(value) == "number" then return tostring(value) end
 end
 
----@param params table
----@return string
-local function query(params)
-    return Text.formEncode(params)
-end
-
 ---@return table
-local function baseParams()
+function QRLogin:baseParams()
     return {
-        appId = APP_ID,
-        areaId = AREA_ID,
+        appId = self.spec.app_id,
+        areaId = self.spec.area_id,
         format = "json",
-        returnurl = RETURN_URL,
+        returnurl = self.spec.return_url,
         target = "top",
         ticket = "0",
         autotime = "14",
@@ -62,11 +53,11 @@ end
 --- 二维码内容。和官方图里的 URL 同一组参数，顺序无所谓。
 ---@param session_key string
 ---@return string
-function QRLogin.scanUrl(session_key)
-    return BASE .. "/mobile/scanlogin?" .. query({
+function QRLogin:scanUrl(session_key)
+    return BASE .. "/mobile/scanlogin?" .. Text.formEncode({
         sessionkey = session_key,
-        appid = APP_ID,
-        areaid = AREA_ID,
+        appid = self.spec.app_id,
+        areaid = self.spec.area_id,
         bookId = "0",
         chapterId = "0",
     })
@@ -119,9 +110,19 @@ local function ready(jar)
     return jar.ywguid ~= nil and jar.ywguid ~= "" and jar.ywkey ~= nil and jar.ywkey ~= ""
 end
 
+---@class YuewenQRSpec
+---@field app_id string
+---@field area_id string
+---@field return_url string
+---@field referer string
+---@field title string
+---@field caption string
+
+---@param spec YuewenQRSpec
 ---@param on_cookie fun(cookie: string)
-function QRLogin.new(_class, on_cookie)
+function QRLogin.new(_class, spec, on_cookie)
     local self = setmetatable({}, QRLogin)
+    self.spec = spec
     self.on_cookie = on_cookie
     self.generation = 0
     self.jar = {}
@@ -151,7 +152,7 @@ end
 function QRLogin:showBusy(text_msg)
     self:closeBusy()
     self.busy = require("ui.themes.widgets.progress_dialog"):new{
-        title = _("QQ阅读扫码登录"), text = text_msg, dismissable = false,
+        title = self.spec.title, text = text_msg, dismissable = false,
     }
     self.busy:show()
 end
@@ -196,7 +197,7 @@ function QRLogin:_get(url, cb)
     local headers = {
         ["User-Agent"] = UA,
         Accept = "application/json, text/javascript, */*",
-        Referer = "https://login.book.qq.com/login.html",
+        Referer = self.spec.referer,
     }
     local cookie = cookieHeader(self.jar)
     if cookie ~= "" then headers.Cookie = cookie end
@@ -251,9 +252,9 @@ function QRLogin:_show(gen, session)
     self.polls = 0
     local dialog
     dialog = require("ui.themes.widgets.qr"):new{
-        title = _("QQ阅读扫码登录"),
-        text = QRLogin.scanUrl(session),
-        caption = _("用 QQ阅读或起点 App 扫一扫"),
+        title = self.spec.title,
+        text = self:scanUrl(session),
+        caption = self.spec.caption,
         close_callback = function()
             if self.dialog == dialog then self.dialog = nil end
             if gen == self.generation and not self.login_completed then
@@ -264,7 +265,7 @@ function QRLogin:_show(gen, session)
     }
     self.dialog = dialog
     dialog:show()
-    logger.info("[QQReaderQR] 二维码已显示")
+    logger.info("[YuewenQR] 二维码已显示")
     self:_later(gen, session)
 end
 
@@ -274,14 +275,14 @@ function QRLogin:start()
     self.started = os.time()
     self.jar = {}
     self:showBusy(_("获取二维码中..."))
-    local params = baseParams()
-    self:_get(BASE .. "/login/qrcode?" .. query(params), function(res, err)
+    local params = self:baseParams()
+    self:_get(BASE .. "/login/qrcode?" .. Text.formEncode(params), function(res, err)
         if gen ~= self.generation then return end
         local wire = decode(res)
         local session = wire and type(wire.data) == "table" and text(wire.data.sessionKey)
         if not session or tonumber(wire.code) ~= 0 then
             self:closeBusy()
-            logger.warn("[QQReaderQR] 获取二维码失败:", err or (wire and wire.message))
+            logger.warn("[YuewenQR] 获取二维码失败:", err or (wire and wire.message))
             self:show_retry(_("获取二维码失败"))
             return
         end
@@ -304,7 +305,7 @@ function QRLogin:_done(gen, jar)
     self:_close_retry()
     self:closeBusy()
     local cookie = cookieHeader(jar)
-    logger.info("[QQReaderQR] 登录态已拿到")
+    logger.info("[YuewenQR] 登录态已拿到")
     if self.on_cookie then self.on_cookie(cookie) end
 end
 
@@ -321,7 +322,7 @@ function QRLogin:_follow(gen, url, hop)
     self:_get(url, function(res, err)
         if gen ~= self.generation then return end
         if not res then
-            logger.warn("[QQReaderQR] 跟跳失败:", err)
+            logger.warn("[YuewenQR] 跟跳失败:", err)
             self:show_retry(_("登录失败：未获取到登录态"))
             return
         end
@@ -368,7 +369,7 @@ function QRLogin:_on_poll(gen, session, wire, res)
         return
     end
     if status == 3 then
-        logger.info("[QQReaderQR] 手机取消，刷新二维码")
+        logger.info("[YuewenQR] 手机取消，刷新二维码")
         self.generation = self.generation + 1
         self:_close_dialog()
         self:start()
@@ -396,14 +397,14 @@ function QRLogin:_poll(gen, session)
         return
     end
     self.polls = self.polls + 1
-    local params = baseParams()
+    local params = self:baseParams()
     params.qrcode = session
-    self:_get(BASE .. "/login/qrcodelogin?" .. query(params), function(res, err)
+    self:_get(BASE .. "/login/qrcodelogin?" .. Text.formEncode(params), function(res, err)
         if gen ~= self.generation or session ~= self.session then return end
         local wire = decode(res)
         if not wire then
             if self.polls == 1 or self.polls % 5 == 0 then
-                logger.warn("[QQReaderQR] 轮询失败:", err)
+                logger.warn("[YuewenQR] 轮询失败:", err)
             end
             if self:_expired() then
                 self:show_retry(_("二维码已过期"))

@@ -169,7 +169,7 @@ do
     local ok, err
     Client.loginCheckAsync(cfg.cookie, function(v, e) ok, err = v, e end)
     Assert.is_nil(ok)
-    Assert.matches(err, "moon%-cookie%-storage")
+    Assert.matches(err, "QQ阅读或起点 App 扫码")
     Assert.eq(expired, err)
 end
 
@@ -206,7 +206,7 @@ do
     requests, replies, expired = {}, { { body = '{"code":1403,"msg":"登录失效"}' } }, nil
     Client.updateReadAsync("9", "11", "c1", 0, "1665109375", function(v, e) ok, err = v, e end)
     Assert.is_nil(ok)
-    Assert.matches(err, "moon%-cookie%-storage")
+    Assert.matches(err, "QQ阅读或起点 App 扫码")
     Assert.eq(expired, err)
 end
 

@@ -1,9 +1,8 @@
 --[[--
 起点源设置：登录。
 
-起点登录要过验证码，墨水屏上做不了；登录态就是手机站 Cookie，两种进法：
-远程管理里的「浏览器登录」（浏览器扩展交 Cookie），或在电脑浏览器登录后把 Cookie 请求头粘贴进来。
-两条路都先拉一次书架页校验，通过才保存。Cookie 里必须有 _csrfToken，否则书架接口 403。
+优先在设备上展示阅文二维码，用起点或 QQ阅读 App 扫码；保留浏览器扩展与手动 Cookie 导入。
+拿到登录态先拉书架页校验，通过才保存。Cookie 里的 _csrfToken 与请求参数同值。
 
 @module koplugin.book.source.qidian.setting
 --]]
@@ -58,20 +57,31 @@ Setting.browser = {
     apply = function(payload, cb) CookieLogin.save(SPEC, Setting.fromPayload(payload), cb) end,
 }
 
+local function startQR()
+    require("ui/network/manager"):runWhenConnected(function()
+        require("source.yuewen_qr"):new({
+            app_id = "13", area_id = "31", return_url = "https://m.qidian.com/",
+            referer = "https://passport.qidian.com/mobile/login",
+            title = _("起点扫码登录"), caption = _("用 QQ阅读或起点 App 扫一扫"),
+        }, function(cookie)
+            CookieLogin.verify(SPEC, cookie .. "; _csrfToken=" .. require("utils.random").hex(16))
+        end):start()
+    end)
+end
+
 ---@return table[]
 function Setting.rows(plugin)
     local rows = {
-        CookieLogin.accountRow(SPEC, { subtitle = _("也可在「远程管理」里用浏览器授权登录") }),
+        CookieLogin.accountRow(SPEC, { callback = startQR, off_text = _("未登录 · 点此扫码") }),
         require("source.review_setting").row(SOURCE_ID, plugin),
         require("source.category_setting").row(SOURCE_ID, plugin),
     }
     if loggedIn() then rows[#rows + 1] = CookieLogin.logoutRow(SPEC) end
+    rows[#rows + 1] = CookieLogin.pasteRow(SPEC)
     return rows
 end
 
 --- 登录失效提示的「重新登录」直达入口（desktop.sync.promptLogin）。
-function Setting.login()
-    CookieLogin.prompt(SPEC)
-end
+Setting.login = startQR
 
 return Setting

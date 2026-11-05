@@ -83,8 +83,7 @@ end
 ---@param cookie string
 ---@return string
 local function loginGone(cookie)
-    return expired(cookie, require("source.cookie_login").relogin(
-        _("起点中文网"), "https://m.qidian.com/", _("起点中文网 → 起点账号")))
+    return expired(cookie, _("起点登录已失效，请点「重新登录」，用 QQ阅读或起点 App 扫码。也可在账号设置里粘贴 Cookie。"))
 end
 
 ---@param path string

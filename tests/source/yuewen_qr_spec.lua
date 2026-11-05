@@ -1,8 +1,8 @@
 --[[--
-source.qqreader.qrlogin：取码 → 轮询 → ywguid/ywkey 或跟跳 Set-Cookie。
+source.yuewen_qr：取码 → 轮询 → ywguid/ywkey 或跟跳 Set-Cookie。
 过期、关窗、手机取消刷新不把迟到的登录态交给 on_cookie。
 浏览器扩展绑定仍指向 book.qq.com。
-@module tests.source.qqreader.qrlogin_spec
+@module tests.source.yuewen_qr_spec
 --]]
 
 local Assert = require("support.assert")
@@ -58,7 +58,12 @@ package.preload["ui.themes.widgets.confirm"] = widget("confirm")
 package.preload["ui.themes.widgets.toast"] = widget("toast")
 package.preload["ui.themes.widgets.progress_dialog"] = widget("busy")
 
-local QRLogin = require("source.qqreader.qrlogin")
+local QRLogin = require("source.yuewen_qr")
+local SPEC = {
+    app_id = "1450000220", area_id = "1", return_url = "https://book.qq.com/",
+    referer = "https://login.book.qq.com/login.html",
+    title = "QQ阅读扫码登录", caption = "用 QQ阅读或起点 App 扫一扫",
+}
 
 local QR_PREFIX = "https://ptlogin.yuewen.com/login/qrcode?"
 local POLL_PREFIX = "https://ptlogin.yuewen.com/login/qrcodelogin?"
@@ -92,7 +97,7 @@ local function poll(body, extra)
 end
 
 do -- 扫码 URL 与官方同一组参数，顺序由 formEncode 排定
-    Assert.eq(QRLogin.scanUrl("sk/1"),
+    Assert.eq(QRLogin:new(SPEC, function() end):scanUrl("sk/1"),
         "https://ptlogin.yuewen.com/mobile/scanlogin?appid=1450000220&areaid=1"
         .. "&bookId=0&chapterId=0&sessionkey=sk%2F1")
 end
@@ -103,7 +108,7 @@ do -- 等待是字符串 "0"，成功后 JSON 里的 ywGuid/ywKey 排成 Cookie
     respond(POLL_PREFIX, poll('{"code":-11019,"scanStatus":"0"}'))
     respond(POLL_PREFIX, poll('{"code":0,"scanStatus":"5","data":{"ywGuid":"g1","ywKey":"k1","ywOpenId":"o1"}}'))
     local got
-    QRLogin:new(function(cookie) got = cookie end):start()
+    QRLogin:new(SPEC, function(cookie) got = cookie end):start()
     Stubs.flush()
     Assert.eq(find("qr").text,
         "https://ptlogin.yuewen.com/mobile/scanlogin?appid=1450000220&areaid=1"
@@ -124,7 +129,7 @@ do -- 已扫码只提示一次，确认后仍把登录态交出去
     respond(POLL_PREFIX, poll('{"code":0,"scanStatus":1}'))
     respond(POLL_PREFIX, poll('{"code":0,"scanStatus":"5","ywGuid":"g2","ywKey":"k2"}'))
     local got
-    QRLogin:new(function(cookie) got = cookie end):start()
+    QRLogin:new(SPEC, function(cookie) got = cookie end):start()
     Stubs.flush()
     Assert.eq(got, "ywguid=g2; ywkey=k2")
     Assert.eq(toastCount("已扫码，请在手机上确认"), 1)
@@ -135,7 +140,7 @@ do -- 过期：重试框，不交登录态
     respond(QR_PREFIX, qrcode("sk1"))
     respond(POLL_PREFIX, poll('{"code":0,"scanStatus":"4"}'))
     local got
-    QRLogin:new(function(cookie) got = cookie end):start()
+    QRLogin:new(SPEC, function(cookie) got = cookie end):start()
     Stubs.flush()
     Assert.is_nil(got)
     Assert.eq(find("confirm").text, "二维码已过期")
@@ -150,7 +155,7 @@ do -- 用户关掉二维码：迟到的成功不交登录态，也不再轮询
         hook = function() find("qr"):close() end,
     }))
     local got
-    QRLogin:new(function(cookie) got = cookie end):start()
+    QRLogin:new(SPEC, function(cookie) got = cookie end):start()
     Stubs.flush()
     Assert.is_nil(got)
     Assert.eq(#requested, 2, "关闭后不再轮询")
@@ -168,7 +173,7 @@ do -- 只有 302url：跟跳收 Set-Cookie，相对 Location 拼回原 host；�
         code = 200, headers = { ["Set-Cookie"] = "ywkey=k3; Path=/, ywopenid=o3; Secure" },
     })
     local got
-    QRLogin:new(function(cookie) got = cookie end):start()
+    QRLogin:new(SPEC, function(cookie) got = cookie end):start()
     Stubs.flush()
     Assert.eq(got, "ywguid=g3; ywkey=k3; ywopenid=o3")
     Assert.is_nil(got and got:find("Path", 1, true))
@@ -180,7 +185,7 @@ do -- 非 https 跳转不跟，不交登录态
     respond(QR_PREFIX, qrcode("sk1"))
     respond(POLL_PREFIX, poll('{"code":0,"scanStatus":"5","data":{"302url":"http://evil.example/x"}}'))
     local got
-    QRLogin:new(function(cookie) got = cookie end):start()
+    QRLogin:new(SPEC, function(cookie) got = cookie end):start()
     Stubs.flush()
     Assert.is_nil(got)
     Assert.eq(find("confirm").text, "登录失败：未获取到登录态")
@@ -194,7 +199,7 @@ do -- 手机取消：关掉旧码不提示已取消，再要一张新码
     respond(QR_PREFIX, qrcode("new"))
     respond(POLL_PREFIX, poll('{"code":0,"scanStatus":"5","data":{"ywGuid":"g4","ywKey":"k4"}}'))
     local got
-    QRLogin:new(function(cookie) got = cookie end):start()
+    QRLogin:new(SPEC, function(cookie) got = cookie end):start()
     Stubs.flush()
     Assert.eq(got, "ywguid=g4; ywkey=k4")
     Assert.eq(toastCount("已取消登录"), 0)
@@ -202,6 +207,26 @@ do -- 手机取消：关掉旧码不提示已取消，再要一张新码
     Assert.eq(requested[3].url:sub(1, #QR_PREFIX), QR_PREFIX)
     Assert.is_true(requested[4].url:find("qrcode=new", 1, true) ~= nil)
     Assert.len(script, 0)
+end
+
+for _idx, spec in ipairs({
+    { app_id = "13", area_id = "31", return_url = "https://m.qidian.com/",
+        referer = "https://passport.qidian.com/mobile/login", title = "起点扫码登录", caption = SPEC.caption },
+    { app_id = "57", area_id = "5", return_url = "https://www.xxsypro.com/",
+        referer = "https://passport.yuewen.com/yuewen.html", title = "潇湘扫码登录", caption = SPEC.caption },
+}) do
+    reset()
+    respond(QR_PREFIX, qrcode("source-session"))
+    respond(POLL_PREFIX, poll('{"code":0,"scanStatus":5,"data":{"ywGuid":"source-guid","ywKey":"source-key"}}'))
+    local got
+    QRLogin:new(spec, function(cookie) got = cookie end):start()
+    Stubs.flush()
+    Assert.eq(find("qr").title, spec.title)
+    Assert.matches(find("qr").text, "appid=" .. spec.app_id .. "&areaid=" .. spec.area_id)
+    Assert.matches(requested[1].url, "appId=" .. spec.app_id .. "&areaId=" .. spec.area_id)
+    Assert.matches(requested[2].url, "appId=" .. spec.app_id .. "&areaId=" .. spec.area_id)
+    Assert.eq(requested[1].headers.Referer, spec.referer)
+    Assert.eq(got, "ywguid=source-guid; ywkey=source-key")
 end
 
 do -- 浏览器扩展绑定不改到 passport
