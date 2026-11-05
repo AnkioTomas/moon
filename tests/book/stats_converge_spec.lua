@@ -130,3 +130,25 @@ Assert.eq(result.pushed, 0)
 Assert.eq(result.pulled, 1)
 Assert.eq(result.push_error, "upload failed")
 
+-- 部分写入：确认 synced_ids，其余留下次，这一轮不再立刻重推。
+order, result = {}, nil
+pending = {
+    {
+        id = 11, source_id = "wechat", stable_id = "book-a",
+        record_type = "page", page = 1, start_time = 1300, duration = 10, total_pages = 10,
+    },
+    {
+        id = 12, source_id = "wechat", stable_id = "book-b",
+        record_type = "page", page = 1, start_time = 1400, duration = 10, total_pages = 10,
+    },
+}
+source.pushStatsAsync = function(_, rows, cb)
+    order[#order + 1] = "push"
+    cb({ synced_ids = { rows[1].id } }, "timeout")
+end
+Stats.syncAsync(source, { dirty_only = true }, function(value) result = value end)
+Assert.eq(table.concat(order, ","), "push", "失败后不在本轮接着推下一批")
+Assert.eq(result.push_error, "timeout")
+Assert.eq(#pending, 1)
+Assert.eq(pending[1].id, 12)
+

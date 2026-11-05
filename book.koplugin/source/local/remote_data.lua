@@ -317,11 +317,12 @@ local function commitIndex(self, before, written, own, cb, device_id)
     end }
 end
 
---- 按书并入统计行并更新总表。任何一本失败整批算失败（行留待重推，按 statKey 去重不会重复写入）。
+--- 按书并入统计行并更新总表。总表写成功后，done_files 里的书可以确认；
+--- 没写上的书留在 done_files 外面，调用方只确认写上的那些，不要整批重来。
 ---@param self LocalClient
 ---@param by_file table<string, table[]> 文件名 → wire 行
 ---@param own boolean 见 commitIndex
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, done_files: table<string, boolean>|nil)
 ---@return { cancel: fun() }|nil
 local function writeBooks(self, by_file, own, cb, device_id)
     local writer_device_id = require("utils.device_id").ensure()
@@ -330,6 +331,7 @@ local function writeBooks(self, by_file, own, cb, device_id)
     table.sort(files)
     if #files == 0 then return defer(cb, true) end
     local cancelled, active, failed, written, count = false, nil, nil, {}, 0
+    local done_files = {}
     active = readIndexAt(self, statsIndexPath(self, device_id), function(before, err)
         if cancelled then return end
         if not before then return cb(nil, err) end
@@ -339,18 +341,21 @@ local function writeBooks(self, by_file, own, cb, device_id)
                 if hash then
                     written[filename] = { updated_at = os.time(), device_id = writer_device_id, hash = hash }
                     count = count + 1
-                elseif hash == nil then
+                elseif hash == false then
+                    done_files[filename] = true
+                else
                     failed = merge_err
                 end
                 next_item()
             end, device_id)
         end, function()
             if cancelled then return end
-            if count == 0 then return cb(not failed or nil, failed) end
+            if count == 0 then return cb(not failed or nil, failed, done_files) end
             active = commitIndex(self, before, written, own, function(ok, commit_err)
                 if cancelled then return end
-                if not ok then return cb(nil, commit_err) end
-                cb(not failed or nil, failed)
+                if not ok then return cb(nil, commit_err, done_files) end
+                for filename in pairs(written) do done_files[filename] = true end
+                cb(not failed or nil, failed, done_files)
             end, device_id)
         end)
     end)
@@ -369,7 +374,7 @@ end
 ---@param self LocalClient
 function RemoteData.pushStatsAsync(self, rows, cb)
     local device_id = require("utils.device_id").ensure()
-    local by_file = {}
+    local by_file, ids_by_file = {}, {}
     for _idx, row in ipairs(rows) do
         local filename = remoteRelativePath(row.stable_id) or row.stable_id
         by_file[filename] = by_file[filename] or {}
@@ -378,9 +383,19 @@ function RemoteData.pushStatsAsync(self, rows, cb)
             page = row.page, start_time = row.start_time,
             duration = row.duration, total_pages = row.total_pages,
         })
+        if row.id then
+            ids_by_file[filename] = ids_by_file[filename] or {}
+            table.insert(ids_by_file[filename], row.id)
+        end
     end
-    return writeBooks(self, by_file, true, function(ok, err)
-        if ok then cb({}) else cb(nil, err) end
+    return writeBooks(self, by_file, true, function(ok, err, done_files)
+        if ok then return cb({}) end
+        local synced = {}
+        for filename in pairs(done_files or {}) do
+            for _idx, id in ipairs(ids_by_file[filename] or {}) do synced[#synced + 1] = id end
+        end
+        if #synced == 0 then return cb(nil, err) end
+        cb({ synced_ids = synced }, err)
     end, device_id)
 end
 

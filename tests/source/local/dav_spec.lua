@@ -41,7 +41,9 @@ package.preload["http.request"] = function()
         end,
         request = function(opts, cb)
             captured[#captured + 1] = opts
-            cb(canned_res, canned_err)
+            local res, err = canned_res, canned_err
+            if type(canned_res) == "function" then res, err = canned_res(opts) end
+            cb(res, err)
             return { cancel = function() end }
         end,
         download = function(opts, _dest, cb)
@@ -265,16 +267,20 @@ do
     local dav = Webdav.new({ url = "http://example.com/dav/", username = "u", password = "p" })
     local ok, err
     dav:putFileAsync("书.epub", path, function(v, e) ok, err = v, e end)
+    local req = captured[#captured]
+    dav:putFileAsync("书.epub", path, function() end, 12)
+    local short = captured[#captured]
     os.remove(path)
     Assert.is_true(ok)
     Assert.is_nil(err)
-    local req = captured[#captured]
     Assert.eq(req.method, "PUT")
     Assert.eq(req.url, "http://example.com/dav/%E4%B9%A6.epub")
     Assert.eq(req.body_file, path)
     Assert.eq(req.body_size, 9)
     Assert.eq(req.auth_username, "u")
     Assert.eq(req.auth_password, "p")
+    Assert.eq(req.timeout, require("http.timeout").net(10), "整本上传用下载档超时")
+    Assert.eq(short.timeout, 12, "小文件调用方传入普通超时")
 end
 
 -- ── ensurePathAsync：逐级 MKCOL，已存在目录（405）继续 ─────
@@ -328,6 +334,82 @@ do
     Assert.is_true(entries[1].is_dir)
     Assert.eq(entries[2].name, "b.epub")
     Assert.eq(entries[2].size, 42)
+end
+
+-- ── ensurePath：405 记入已存在，同一目录不再 MKCOL ─────────
+do
+    local dav = Webdav.new({ url = "http://example.com/dav/", username = "u", password = "p" })
+    canned_res = { code = 405, body = "" }
+    canned_err = nil
+    local before = #captured
+    dav:ensurePathAsync("Apps/Books/.Moon+", function() end)
+    Assert.eq(#captured, before, "上一轮 405 过的目录直接跳过")
+end
+
+-- ── MKCOL 409：列得出目录算已存在，列不出就失败且不继续下级 ─
+do
+    local dav = Webdav.new({ url = "http://example.com/fresh/", username = "u", password = "p" })
+    canned_res = function(opts)
+        if opts.method == "PROPFIND" then
+            return { code = 404, body = "" }, nil
+        end
+        return { code = 409, body = "" }, nil
+    end
+    local ok, err
+    local before = #captured
+    dav:ensurePathAsync("A/B", function(v, e) ok, err = v, e end)
+    Assert.is_nil(ok)
+    Assert.eq(err, "WebDAV 请求失败（HTTP 409）")
+    Assert.eq(#captured, before + 2, "MKCOL 之后只探测一次，不再建下一级")
+    Assert.eq(captured[before + 1].method, "MKCOL")
+    Assert.eq(captured[before + 2].method, "PROPFIND")
+
+    canned_res = function(opts)
+        if opts.method == "PROPFIND" then
+            return { code = 207, body = "" }, nil
+        end
+        return { code = 409, body = "" }, nil
+    end
+    before = #captured
+    ok = nil
+    dav:ensurePathAsync("Kept", function(v) ok = v end)
+    Assert.is_true(ok)
+    Assert.eq(#captured, before + 2)
+    before = #captured
+    dav:ensurePathAsync("Kept", function(v) ok = v end)
+    Assert.is_true(ok)
+    Assert.eq(#captured, before, "探测成功后记入已存在")
+    canned_res = { code = 204, body = "" }
+end
+
+-- ── 同一服务器同时只飞一个请求 ───────────────────────────
+do
+    local Request = require("http.request")
+    local orig = Request.request
+    local held
+    Request.request = function(opts, cb)
+        captured[#captured + 1] = opts
+        if opts.url:find("hold", 1, true) then
+            held = function() cb({ code = 204, body = "" }, nil) end
+            return { cancel = function() held = nil end }
+        end
+        return orig(opts, cb)
+    end
+    local dav = Webdav.new({ url = "http://example.com/serial/", username = "u", password = "p" })
+    local first, second = 0, 0
+    dav:deleteAsync("hold", function() first = first + 1 end)
+    dav:deleteAsync("next", function() second = second + 1 end)
+    Assert.eq(first, 0)
+    Assert.eq(second, 0)
+    local saw_next = false
+    for i = 1, #captured do
+        if captured[i].url:find("next", 1, true) then saw_next = true end
+    end
+    Assert.is_false(saw_next, "前一个没结束，下一个不能发出")
+    held()
+    Assert.eq(first, 1)
+    Assert.eq(second, 1)
+    Request.request = orig
 end
 
 -- ── 还原现场（不影响后续 spec 文件）────────────────────────

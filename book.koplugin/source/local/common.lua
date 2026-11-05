@@ -399,7 +399,8 @@ end
 local function fetchText(self, remote, temp, cb)
     temp = uniqueTemp(temp)
     ensureParent(temp)
-    return self.dav:getAsync(remote, temp, nil, function(ok, err, code)
+    -- 书目 / 进度 / 笔记 / 统计都是小文件。下载档超时（默认 300 秒）会让一次卡住的请求占满界面。
+    return self.dav:getAsync(remote, temp, { timeout = require("http.timeout").net(1) }, function(ok, err, code)
         local raw = ok and readFile(temp)
         os.remove(temp)
         if raw then return cb(raw) end
@@ -424,7 +425,7 @@ local function putText(self, remote, temp, data, cb)
         active = self.dav:putFileAsync(remote, temp, function(ok, err)
             os.remove(temp)
             if not cancelled then cb(ok, err) end
-        end)
+        end, require("http.timeout").net(1))
     end)
     active = active or directory_job
     return { cancel = function()

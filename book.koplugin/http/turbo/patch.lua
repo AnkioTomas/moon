@@ -179,6 +179,17 @@ end
 ---@param target table|nil
 ---@param name string
 ---@param make fun(orig: function): function
+--- 请求超时是空闲计时。读到或写出字节都重排，慢但还在传的大文件不会被整段砍掉。
+---@param stream table|nil
+local function touchIdle(stream)
+    local client = stream and stream._book_client
+    if not client or not client.request_timeout_ref or not client.io_loop then return end
+    client.io_loop:remove_timeout(client.request_timeout_ref)
+    client.request_timeout_ref = client.io_loop:add_timeout(
+        client.kwargs.request_timeout * 1000 + require("turbo.util").gettimemonotonic(),
+        client._handle_request_timeout, client)
+end
+
 local function wrap(target, name, make)
     local mark = "_book_patched_" .. name
     if type(target) ~= "table" or type(target[name]) ~= "function" or target[mark] then
@@ -228,6 +239,7 @@ function Patch.apply()
 
                 self._write_buffer_offset = self._write_buffer_offset + sent
                 self._write_buffer_size = self._write_buffer_size - sent
+                if sent > 0 then touchIdle(self) end
                 if self._write_buffer_size == 0 then
                     self._write_buffer:clear()
                     self._write_buffer_offset = 0
@@ -428,13 +440,7 @@ function Patch.apply()
     wrap(IOStream, "_read_to_buffer", function(orig)
         return function(self)
             local sz = orig(self)
-            local client = self._book_client
-            if sz and sz > 0 and client and client.request_timeout_ref then
-                client.io_loop:remove_timeout(client.request_timeout_ref)
-                client.request_timeout_ref = client.io_loop:add_timeout(
-                    client.kwargs.request_timeout * 1000 + require("turbo.util").gettimemonotonic(),
-                    client._handle_request_timeout, client)
-            end
+            if sz and sz > 0 then touchIdle(self) end
             return sz
         end
     end)

@@ -1468,6 +1468,32 @@ do
     Assert.is_nil(pulled.replace)
 end
 
+-- 统计：一本失败只留下这本书，已经写上的书通过 synced_ids 确认，不整批重来。
+do
+    local dav = fakeDav()
+    local c = statsClient(dav)
+    local T = os.time() - 3600
+    local put = dav.putFileAsync
+    function dav:putFileAsync(path, local_path, cb)
+        if path:find(md5("b.epub"), 1, true) then
+            self.calls[#self.calls + 1] = "PUT " .. path
+            return cb(nil, "timeout")
+        end
+        return put(self, path, local_path, cb)
+    end
+    local result, err
+    c:pushStatsAsync({
+        { id = 1, stable_id = "webdav://a.epub", page = 1, start_time = T, duration = 10, total_pages = 9 },
+        { id = 2, stable_id = "webdav://b.epub", page = 1, start_time = T + 1, duration = 10, total_pages = 9 },
+    }, function(r, e) result, err = r, e end)
+    Stubs.flush()
+    Assert.eq(err, "timeout")
+    Assert.eq(result.synced_ids[1], 1)
+    Assert.eq(#result.synced_ids, 1)
+    Assert.not_nil(dav.files[deviceStatsFile("a.epub", "dev-A")])
+    Assert.is_nil(dav.files[deviceStatsFile("b.epub", "dev-A")])
+end
+
 -- 旧版单文件 stats.json：拉取时按书并进按书文件（30 天前的逐页行按 设备+文件+小时 并成汇总行）再删掉。
 do
     local STATS = STATS_DIR .. "/stats.json"
