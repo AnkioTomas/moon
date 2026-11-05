@@ -131,11 +131,13 @@ end
 
 --- 能力：书架 + 统计拉取（推送是纯本地确认，见 pushStatsAsync），其余走基类默认（全 false）。
 --- shelf_cache：断网时书架按适配层的缓存投影收窄可见集（05 A2）。
+--- shelf_push = false：Kavita 的书架只拉不推，推脏任务里跳过书架域（进度 / 笔记 / 统计照常）。
 ---@return SourceCapabilities
 function Source:capabilities()
     local caps = SourceBase.capabilities(self)
     caps.stats_pull = true
     caps.shelf_cache = true
+    caps.shelf_push = false
     return caps
 end
 

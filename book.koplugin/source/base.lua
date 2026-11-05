@@ -10,7 +10,7 @@
 
 IO 一律 XxxAsync(..., cb) 返回 { cancel }，取消后不回调；当场能回的结果也用 SourceBase.defer(cb, ...) 下一帧回调，
 不支持的域用 SourceBase.skipped(cb, reason)。无 IO 的 capabilities / configured / coverRequest 保持同步。
-capabilities() 是 UI 开关（scrape / edit / stats_pull / shelf_cache，默认 false，用 SourceCapabilities.supports* 判断；
+capabilities() 是 UI / 后台开关（scrape / edit / stats_pull / shelf_cache / shelf_push，默认 false / true，用 SourceCapabilities.supports* 判断；
 shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明，核心按 caps.shelf_cache == true 就地判），
 不是「有没有这个函数」；全本缓存看有没有 cacheAllChaptersAsync，进度双向看 get/putProgressAsync 是否都在。
 源外代码只碰 source.<id>（经 registry）和 source.<id>.setting；require("source.<id>")，禁止写 .init。
@@ -44,6 +44,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field edit boolean 支持编辑展示元信息（仅 local 为 true）
 ---@field stats_pull boolean 是否从远端拉取阅读统计并写入本地 reading_stats（各源自决映射与替换策略）
 ---@field shelf_cache boolean 是否提供书架缓存投影（声明 true 且实现 shelfCache 才进离线书架，见 05 A2）
+---@field shelf_push boolean 本地书架改动能否推到远端；只拉（Kavita）为 false，推脏时跳过书架域
 
 --- 书架缓存投影：源从自己的缓存索引投影出的三张表，同步、只读本地记忆（05 A2）。
 ---@class ShelfCacheProjection
@@ -231,7 +232,7 @@ end
 --- 返回默认全 false 能力集。书架缓存是可选项：默认 false，源自己置 true 并实现 shelfCache。
 ---@return SourceCapabilities
 function SourceBase:capabilities()
-    return { scrape = false, edit = false, stats_pull = false, shelf_cache = false }
+    return { scrape = false, edit = false, stats_pull = false, shelf_cache = false, shelf_push = true }
 end
 
 --- 是否已配置。
@@ -269,7 +270,8 @@ end
 --- 域能不能推看源有没有对应的上行方法（书架人人都有）；阅读会话对每个源都写脏行，
 --- 没远端的域（jjwxc / kindle 的进度、大多数源的笔记统计）不算脏，否则每次唤醒都入队一条空任务。
 local DOMAINS = {
-    { method = "syncBooksAsync", dirty = function(id) return #require("book.books_db").unsynced(id) > 0 end },
+    { method = "syncBooksAsync", capability = "shelf_push",
+        dirty = function(id) return #require("book.books_db").unsynced(id) > 0 end },
     { method = "syncNotesAsync", push = "pushNotesAsync", dirty = function(id) return require("book.note_db").hasUnsynced(id) end },
     { method = "syncStatsAsync", push = "pushStatsAsync", dirty = function(id) return #require("book.stats_db").unsyncedBySource(id, 1) > 0 end },
     { method = "syncProgressAsync", push = "putProgressAsync", dirty = function(id) return #require("book.progress_db").unsynced(id) > 0 end },
@@ -280,8 +282,11 @@ local DOMAINS = {
 ---@return string[] 同步方法名
 local function dirtyDomains(source)
     local out = {}
+    local caps = type(source.capabilities) == "function" and source:capabilities() or nil
     for _idx, domain in ipairs(DOMAINS) do
-        if (not domain.push or type(source[domain.push]) == "function") and domain.dirty(source.id) then
+        -- 能力被显式关掉的域不算脏：只拉的源不要为了一个 no-op 书架调用去建任务。
+        local allowed = not domain.capability or not caps or caps[domain.capability] ~= false
+        if allowed and (not domain.push or type(source[domain.push]) == "function") and domain.dirty(source.id) then
             out[#out + 1] = domain.method
         end
     end
@@ -308,6 +313,7 @@ function SourceBase:pushDirty()
     require("workers.tasks").enqueue{
         key = "dirty\0" .. self.id,
         kind = "sync",
+        label = _("同步本地改动"),
         title = self.name,
         restartable = true,
         run = function(report, done)
