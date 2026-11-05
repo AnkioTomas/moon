@@ -23,6 +23,7 @@ local Text = require("utils.text")
 --- 本地章节 HTML 的可见 rune 流（定位划线用），见 ``Annotations.flow``。
 ---@class WechatRuneFlow: WechatWireMapping
 ---@field paths string[] 文本节点序号 → crengine xpointer（``starts[i]`` 即该序号，``ends[i]`` 为节点内偏移 + 1）
+---@field element_boundaries table<string, integer> 元素 XPointer 路径 → 元素前的可见 rune 数
 
 ---@param str string
 ---@return string[]
@@ -239,6 +240,7 @@ local NO_SPACE_TEXT = {
 ---@field counts table<string, integer> 子元素按名计数
 ---@field texts integer 文本子节点数
 ---@field skip boolean 子树不算正文
+---@field before integer 元素前已累积的可见 rune 数
 
 ---@param node WechatDomNode
 ---@return string
@@ -266,9 +268,10 @@ function Annotations.flow(html)
     html = Text.stripBom(tostring(html or ""))
     local b = newBuilder()
     ---@type WechatDomNode
-    local root = { name = "", ord = 1, counts = {}, texts = 0, skip = false }
+    local root = { name = "", ord = 1, counts = {}, texts = 0, skip = false, before = 0 }
     local top = root
     local text_nodes = {}
+    local element_nodes = {}
 
     local function onText(raw)
         if top.skip then return end
@@ -315,13 +318,15 @@ function Annotations.flow(html)
                     if BLOCK_TAGS[name] then blockBoundary(b) end
                 end
             elseif name and tag:sub(1, 1) ~= "!" and tag:sub(1, 1) ~= "?" then
+                if BLOCK_TAGS[name] then blockBoundary(b) end
                 top.counts[name] = (top.counts[name] or 0) + 1
                 ---@type WechatDomNode
                 local node = {
                     parent = top, name = name, ord = top.counts[name], counts = {}, texts = 0,
                     skip = top.skip or SKIPPED_TAGS[name] or tag:find('epub:type="footnote"', 1, true) ~= nil,
+                    before = #b.runes,
                 }
-                if BLOCK_TAGS[name] then blockBoundary(b) end
+                element_nodes[#element_nodes + 1] = node
                 if not VOID_TAGS[name] and not tag:match("/%s*$") then top = node end
             end
         end
@@ -334,6 +339,11 @@ function Annotations.flow(html)
         paths[id] = elementPath(node.parent) .. step
     end
     mapping.paths = paths
+    local element_boundaries = {}
+    for _idx, node in ipairs(element_nodes) do
+        element_boundaries[elementPath(node)] = node.before
+    end
+    mapping.element_boundaries = element_boundaries
     return mapping
 end
 
@@ -381,6 +391,12 @@ local function headAtXPointer(flow, pos)
         if flow.ends[i] - 1 == offset and flow.paths[flow.starts[i]] == path then
             return i
         end
+    end
+    -- KOReader 的 last_xpointer 也可能指向图片等没有 text() 子节点的元素。
+    -- 用元素之后最近的可见正文作为同步坐标；只有元素在正文末尾时才退回前一个字符。
+    local boundary = flow.element_boundaries[path]
+    if boundary ~= nil and flow.count > 0 then
+        return boundary < flow.count and boundary + 1 or flow.count
     end
     return nil
 end

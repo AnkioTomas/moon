@@ -673,9 +673,9 @@ function Source:putProgressAsync(identity, pos, cb)
             if not source then cb(nil, format); return end
             local offset, summary, fraction, map_err = Position.encode(identity, chapter, pos, source, format)
             -- offset=0 是章首合法坐标；只有 nil 才是映射失败。
-            -- 坐标对不上当前章 HTML 时再推也永远失败，标 permanent 让脏同步丢掉，别拖死整源。
+            -- 坐标暂时无法映射时保留脏行，不能把未上传的进度标成已同步。
             if offset == nil then
-                cb(nil, map_err or _("无法定位阅读进度"), { permanent = true })
+                cb(nil, map_err or _("无法定位阅读进度"))
                 return
             end
             send(offset, summary, fraction)

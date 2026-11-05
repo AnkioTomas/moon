@@ -619,7 +619,7 @@ do
     }, function(v, e, meta) map_ok, map_err, map_meta = v, e, meta end)
     Assert.is_nil(map_ok)
     Assert.is_nil(captured)
-    Assert.is_true(map_meta and map_meta.permanent)
+    Assert.is_nil(map_meta and map_meta.permanent, "映射失败的进度必须保留脏状态等待重试")
     Assert.eq(map_err, "reading position not found in chapter")
     toc_payload["b1"] = nil
     require("source.wechat.toc").clear()
