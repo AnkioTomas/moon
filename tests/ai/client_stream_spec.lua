@@ -1,7 +1,8 @@
 -- ai.client：SSE 流式拼装。
 local Assert = require("support.assert")
+local settings = { ai_endpoint = "https://example.test/v1", ai_api_key = "k", ai_model = "m", ai_temperature = 1 }
 package.preload["utils.settings"] = function()
-    return { get = function() return { ai_endpoint = "https://example.test/v1", ai_api_key = "k", ai_model = "m" } end }
+    return { get = function() return settings end }
 end
 package.preload["json"] = function() return require("support.json_stub") end
 local req
@@ -14,6 +15,7 @@ local content, failure
 Client.chat({ { role = "user", content = "hi" } }, { stream = true }, function(c, e) content, failure = c, e end)
 Assert.is_true(req.opts.method == "POST")
 Assert.matches(req.opts.body, '"stream":true')
+Assert.matches(req.opts.body, '"temperature":1')
 req.h.on_headers(200, {})
 req.h.on_data('data: {"choices":[{"delta":{"reasoning_content":"think"}}]}\n\ndata: {"choices":[{"delta":{"con')
 req.h.on_data('tent":"{\\"a\\":"}}]}\r\n\r\ndata: {"choices":[{"delta":{"content":"1}"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')

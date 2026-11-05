@@ -190,6 +190,33 @@ local function providerRow(desktop)
 end
 
 ---@param desktop table
+---@return fun(iw: number): table
+local function temperatureRow(desktop)
+    return function(iw)
+        local value = Settings.get("ai").ai_temperature
+        return Row.widget({
+            width = iw,
+            kind = "nav", icon = "device_thermostat", title = _("温度"),
+            subtitle = _("设置后对所有 AI 请求生效；Kimi 等模型需设为 1"),
+            status = value and string.format("%.1f", value) or _("未设置"),
+            status_on = value ~= nil,
+            callback = function()
+                require("ui.themes.widgets.spin"):new{
+                    title = _("温度"),
+                    fields = { { value = (value or 0.2) * 10, min = 0, max = 20,
+                        format = function(v) return string.format("%.1f", v / 10) end } },
+                    callback = function(v)
+                        Settings.get("ai").ai_temperature = v / 10
+                        Settings.save("ai")
+                        desktop:updateView()
+                    end,
+                }:show()
+            end,
+        })
+    end
+end
+
+---@param desktop table
 ---@return table
 function AI:rows(desktop)
     return {
@@ -203,6 +230,7 @@ function AI:rows(desktop)
         testRow(desktop),
         languageRow(desktop),
         providerRow(desktop),
+        temperatureRow(desktop),
     }
 end
 

@@ -354,6 +354,7 @@ function Client.chat(messages, opts, cb)
     -- 调用方用 Timeout.ai(倍率) 传入；不传 = 「AI 请求超时」本身。
     local timeout = opts.timeout or require("http.timeout").ai()
     local max_tokens = opts.max_tokens or Client.DEFAULT_MAX_TOKENS
+    local temperature = Settings.get("ai").ai_temperature or opts.temperature or 0.2
     local current, cancelled
     if opts.localize then messages = localize(messages) end
 
@@ -364,7 +365,7 @@ function Client.chat(messages, opts, cb)
         local payload = {
             model = opts.model or model,
             messages = messages,
-            temperature = opts.temperature or 0.2,
+            temperature = temperature,
             max_tokens = budget,
             stream = opts.stream or nil,
         }

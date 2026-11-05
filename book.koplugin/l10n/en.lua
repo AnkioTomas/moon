@@ -353,6 +353,7 @@ return {
     ["启动打开桌面"] = "Open on start",
     ["抽屉图标打开桌面"] = "Drawer icon opens desktop",
     ["AI 请求超时"] = "AI request timeout",
+    ["设置后对所有 AI 请求生效；Kimi 等模型需设为 1"] = "Applies to all AI requests when set; models such as Kimi require 1",
     ["服务商"] = "Provider",
     ["自动识别"] = "Auto-detect",
     ["决定怎么关闭推理模型的思考，避免回答被思考过程吃光而截断"] = "How to turn off reasoning-model thinking, so answers are not cut off by the thinking process",

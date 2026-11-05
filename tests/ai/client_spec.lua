@@ -64,6 +64,21 @@ Assert.eq(sent.opts.connect_timeout, 120)
 Assert.eq(content, "ok")
 Assert.is_nil(failure)
 
+Assert.eq(sent.payload.temperature, 0.2)
+Client.chat({ { role = "user", content = "hello" } }, { temperature = 0 }, function() end)
+Assert.eq(sent.payload.temperature, 0, "未设置时保留功能指定的温度")
+settings.ai_temperature = 1
+Client.chat({ { role = "user", content = "hello" } }, { temperature = 0 }, function() end)
+Assert.eq(sent.payload.temperature, 1, "手动设置覆盖功能温度，兼容 Kimi")
+replies, posts = { "length" }, {}
+Client.chat({ { role = "user", content = "ping" } }, { max_tokens = 64 }, function() end)
+Assert.eq(posts[1].payload.temperature, 1, "测试连接使用手动温度")
+Assert.eq(posts[2].payload.temperature, 1, "重试保留手动温度")
+settings.ai_temperature = 0
+Client.chat({ { role = "user", content = "hello" } }, nil, function() end)
+Assert.eq(sent.payload.temperature, 0)
+settings.ai_temperature = nil
+
 -- 严格端点不认 chat_template_kwargs（400）：去掉重发一次，本进程内不再带
 replies, posts = { 400 }, {}
 Client.chat({ { role = "user", content = "hello" } }, nil, function(value, err) content, failure = value, err end)

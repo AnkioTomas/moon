@@ -7,6 +7,8 @@ AI 接口与阅读助手的配置声明（settings/ai.lua，经 `utils.settings.
 --]]
 
 return {
+    -- 未设置时保留各功能的温度；手动设置后统一覆盖。
+    keys = { "ai_temperature" },
     defaults = {
         ai_endpoint = "", ai_api_key = "", ai_model = "",
         -- AI 请求超时（秒）：各 AI 功能按倍率 × 它；120 = 原先的缺省，见 http/timeout.lua。
