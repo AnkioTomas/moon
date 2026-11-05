@@ -1321,6 +1321,11 @@ local md5 = require("ffi/sha2").md5
 local STATS_DIR = ROOT .. "/.Moon+/Stats"
 local STATS_INDEX = STATS_DIR .. "/index.json"
 local function statsFile(filename) return STATS_DIR .. "/books/" .. md5(filename) .. ".json" end
+local function deviceStatsRoot(device) return STATS_DIR .. "/devices/" .. md5(device) end
+local function deviceStatsFile(filename, device)
+    return deviceStatsRoot(device) .. "/books/" .. md5(filename) .. ".json"
+end
+local function deviceStatsIndex(device) return deviceStatsRoot(device) .. "/index.json" end
 --- 模拟别的设备写一本书：书文件 + 总表条目。
 local function putStatsBook(dav, filename, rows, device)
     local data = Json.encode(rows)
@@ -1366,21 +1371,30 @@ do
     Stubs.flush()
     Assert.eq(type(result), "table")
     Assert.is_nil(result.synced_ids, "整批确认")
-    local remote = Json.decode(dav.files[statsFile("a.epub")].data)
-    Assert.len(remote, 2)
-    Assert.eq(remote[2].device_id, "dev-A")
-    Assert.eq(remote[2].filename, "a.epub")
-    Assert.eq(Json.decode(dav.files[statsFile("/books/local.epub")].data)[1].filename, "/books/local.epub")
-    Assert.not_nil(dav.files[statsFile("x/同名.epub")])
-    Assert.not_nil(dav.files[statsFile("y/同名.epub")], "不同目录同名书各自一个文件")
+    local legacy = Json.decode(dav.files[statsFile("a.epub")].data)
+    local remote = Json.decode(dav.files[deviceStatsFile("a.epub", "dev-A")].data)
+    Assert.len(legacy, 1, "新设备不能改写旧共享文件")
+    Assert.len(remote, 1)
+    Assert.eq(remote[1].device_id, "dev-A")
+    Assert.eq(remote[1].filename, "a.epub")
+    Assert.eq(Json.decode(dav.files[deviceStatsFile("/books/local.epub", "dev-A")].data)[1].filename,
+        "/books/local.epub")
+    Assert.not_nil(dav.files[deviceStatsFile("x/同名.epub", "dev-A")])
+    Assert.not_nil(dav.files[deviceStatsFile("y/同名.epub", "dev-A")], "不同目录同名书各自一个文件")
     local index = Json.decode(dav.files[STATS_INDEX].data)
-    Assert.eq(index.books["a.epub"].device_id, "dev-A")
-    Assert.eq(index.books["a.epub"].hash, md5(dav.files[statsFile("a.epub")].data))
+    Assert.eq(index.books["a.epub"].device_id, "dev-B")
+    local own_index = Json.decode(dav.files[deviceStatsIndex("dev-A")].data)
+    Assert.eq(own_index.device_id, "dev-A")
+    Assert.eq(own_index.books["a.epub"].hash, md5(dav.files[deviceStatsFile("a.epub", "dev-A")].data))
+    Assert.eq(c._stats_seen["device:dev-A\31a.epub"], own_index.books["a.epub"].hash,
+        "上传后本设备版本应记为已入库")
 
-    -- 拉取：自己写的新书不再下载；a.epub 有别的设备的行、本地没入过，要下载。
-    local gets = dav:count("GET " .. STATS_DIR .. "/books/")
+    -- 拉取：旧共享分片变化时，连同设备分片一起取回，才能整本替换。
+    local legacy_gets = dav:count("GET " .. statsFile("a.epub"))
+    local own_gets = dav:count("GET " .. deviceStatsFile("a.epub", "dev-A"))
     pulled = pullStats(c)
-    Assert.eq(dav:count("GET " .. STATS_DIR .. "/books/"), gets + 1, "只下载 a.epub")
+    Assert.eq(dav:count("GET " .. statsFile("a.epub")), legacy_gets + 1)
+    Assert.eq(dav:count("GET " .. deviceStatsFile("a.epub", "dev-A")), own_gets + 1)
     Assert.eq(pulled.replace.mode, "synced_books")
     Assert.eq(table.concat(pulled.replace.stable_ids, ","), "webdav://a.epub")
     local ids = {}
@@ -1391,13 +1405,16 @@ do
 
     -- 没 commit（入库失败）：下一轮重拉。
     pulled = pullStats(c)
-    Assert.eq(dav:count("GET " .. STATS_DIR .. "/books/"), gets + 2)
+    Assert.eq(dav:count("GET " .. statsFile("a.epub")), legacy_gets + 2)
+    Assert.eq(dav:count("GET " .. deviceStatsFile("a.epub", "dev-A")), own_gets + 2)
     pulled.commit()
 
     -- commit 后远端没变：不下载，不交 replace。
-    gets = dav:count("GET " .. STATS_DIR .. "/books/")
+    legacy_gets = dav:count("GET " .. statsFile("a.epub"))
+    own_gets = dav:count("GET " .. deviceStatsFile("a.epub", "dev-A"))
     pulled = pullStats(c)
-    Assert.eq(dav:count("GET " .. STATS_DIR .. "/books/"), gets)
+    Assert.eq(dav:count("GET " .. statsFile("a.epub")), legacy_gets)
+    Assert.eq(dav:count("GET " .. deviceStatsFile("a.epub", "dev-A")), own_gets)
     Assert.len(pulled, 0)
     Assert.is_nil(pulled.replace)
 
@@ -1405,9 +1422,11 @@ do
     c:pushStatsAsync({ { stable_id = "webdav://a.epub", page = 5, start_time = T + 500, duration = 9 } },
         function(r) result = r end)
     Stubs.flush()
-    gets = dav:count("GET " .. STATS_DIR .. "/books/")
+    legacy_gets = dav:count("GET " .. statsFile("a.epub"))
+    own_gets = dav:count("GET " .. deviceStatsFile("a.epub", "dev-A"))
     pulled = pullStats(c)
-    Assert.eq(dav:count("GET " .. STATS_DIR .. "/books/"), gets)
+    Assert.eq(dav:count("GET " .. statsFile("a.epub")), legacy_gets)
+    Assert.eq(dav:count("GET " .. deviceStatsFile("a.epub", "dev-A")), own_gets)
     Assert.len(pulled, 0)
 
     -- 别的设备写过 a.epub：只下载这一本；别的设备的绝对路径书不认、不下载。
@@ -1417,20 +1436,30 @@ do
     putStatsBook(dav, "/sdcard/b.epub",
         { { filename = "/sdcard/b.epub", device_id = "dev-B", page = 1, start_time = T + 50, duration = 5 } }, "dev-B")
     pulled = pullStats(c)
-    Assert.eq(dav:count("GET " .. STATS_DIR .. "/books/"), gets + 1)
+    Assert.eq(dav:count("GET " .. statsFile("a.epub")), legacy_gets + 1)
+    Assert.eq(dav:count("GET " .. deviceStatsFile("a.epub", "dev-A")), own_gets + 1,
+        "一个设备的版本变化时要合并该书所有设备分片")
     Assert.eq(dav:count("GET " .. statsFile("/sdcard/b.epub")), 0)
     Assert.len(pulled.rows, 4)
     pulled.commit()
 
-    -- 书文件损坏：推送失败，不拿本地行覆盖掉别的设备的数据；拉取跳过这本、不记版本。
-    dav:put(statsFile("a.epub"), "{broken")
+    -- 本设备分片损坏：推送失败不覆盖文件；拉取跳过整本书，不记版本。
+    dav:put(deviceStatsFile("a.epub", "dev-A"), "{broken")
     local err
     c:pushStatsAsync({ { stable_id = "webdav://a.epub", start_time = T + 700, duration = 1 } },
         function(r, e) result, err = r, e end)
     Stubs.flush()
     Assert.is_nil(result)
     Assert.eq(err, "阅读统计文件损坏")
-    Assert.eq(dav.files[statsFile("a.epub")].data, "{broken")
+    Assert.eq(dav.files[deviceStatsFile("a.epub", "dev-A")].data, "{broken")
+    own_index = Json.decode(dav.files[deviceStatsIndex("dev-A")].data)
+    own_index.books["a.epub"].hash = "changed"
+    dav:put(deviceStatsIndex("dev-A"), Json.encode(own_index))
+    pulled = pullStats(c)
+    Assert.len(pulled, 0)
+    Assert.is_nil(pulled.replace)
+
+    -- 旧版共享分片依然独立追踪版本。
     index = Json.decode(dav.files[STATS_INDEX].data)
     index.books["a.epub"].hash = "changed"
     dav:put(STATS_INDEX, Json.encode(index))
@@ -1824,6 +1853,9 @@ do
         function(r) pushed = r end)
     Stubs.flush()
     Assert.not_nil(pushed)
+    Assert.eq(Json.decode(dav.files[deviceStatsFile("共读.epub", "dev-A")].data)[1].duration, 120)
+    Assert.eq(Json.decode(dav.files[deviceStatsFile("共读.epub", "dev-B")].data)[1].duration, 300,
+        "设备各自写入分片，不覆盖对方记录")
     Assert.len(pullStats(b), 0, "B 不重下自己刚写的")
     as("dev-A")
     pulled = pullStats(a)
@@ -1859,4 +1891,3 @@ do
     Assert.eq(dav:count("GET " .. ROOT .. "/直接传的.epub"), 0, "正文不下载")
     books = {}
 end
-

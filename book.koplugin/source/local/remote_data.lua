@@ -144,27 +144,47 @@ local function compactStats(rows, before_ts)
     return out, compacted
 end
 
---[[ 统计布局（本插件私有，所有设备共用）：
+--[[ 旧统计布局（兼容读取与旧版 stats.json 迁移）：
   Stats/index.json          总表 { version = 1, books = { [filename] = { updated_at, device_id, hash } } }
                             （hash = 书文件内容 md5，作版本号；updated_at 只到秒，同秒连写会撞）
   Stats/books/<md5>.json    一本书全部设备的统计行（JSON 数组，行形如 book 服务端 /index/stats/import 的
                             stats[]，外加 device_id；30 天前的并成带 event_count 的小时汇总行）
   Stats/stats.json          旧版单文件，拉取时并进按书文件后删除
-本地 <缓存>/stats_index.json 记每本书已入库的版本（只比相等，不比先后）。]]
+新格式写入 Stats/devices/<md5(device_id)>/index.json 与该设备独立的 books 文件。
+本地 <缓存>/stats_index.json 按旧版 / 设备+文件名记已入库版本。]]
 local STATS_INDEX = "Stats/index.json"
 local LEGACY_STATS = "Stats/stats.json"
 
---- 一本书的统计文件：按文件名哈希，不同目录同名书不撞。
+---@param self LocalClient
+---@param device_id string
+local function deviceStatsRoot(self, device_id)
+    return moonPath(self, "Stats/devices/" .. md5(device_id))
+end
+
+---@param self LocalClient
+---@param device_id string|nil nil 表示旧版共享索引
+local function statsIndexPath(self, device_id)
+    return device_id and (deviceStatsRoot(self, device_id) .. "/index.json")
+        or moonPath(self, STATS_INDEX)
+end
+
 ---@param self LocalClient
 ---@param filename string
-local function bookStatsPath(self, filename)
-    return moonPath(self, "Stats/books/" .. md5(filename) .. ".json")
+---@param device_id string|nil nil 表示旧版共享文件
+local function bookStatsPath(self, filename, device_id)
+    local root = device_id and (deviceStatsRoot(self, device_id) .. "/books")
+        or moonPath(self, "Stats/books")
+    return root .. "/" .. md5(filename) .. ".json"
 end
 
 ---@param entry table|nil 总表条目
 ---@return string|nil
 local function rev(entry)
     return entry and entry.hash
+end
+
+local function seenKey(filename, device_id)
+    return device_id and ("device:" .. device_id .. "\31" .. filename) or filename
 end
 
 --- 读远端统计 JSON；不存在时 cb(nil, nil, true)。
@@ -184,14 +204,18 @@ end
 
 --- 读总表；不存在为空表。
 ---@param self LocalClient
----@param cb fun(index: { version: integer|nil, books: table<string, table> }|nil, err: string|nil)
+---@param cb fun(index: { version: integer|nil, books: table<string, table>, device_id?: string }|nil, err: string|nil)
 ---@return { cancel: fun() }
-local function readIndex(self, cb)
-    return readJson(self, moonPath(self, STATS_INDEX), function(index, err, missing)
+local function readIndexAt(self, path, cb)
+    return readJson(self, path, function(index, err, missing)
         if missing then return cb({ books = {} }) end
         if index and type(index.books) ~= "table" then return cb(nil, _("阅读统计文件损坏")) end
         cb(index, err)
     end)
+end
+
+local function readIndex(self, cb)
+    return readIndexAt(self, statsIndexPath(self), cb)
 end
 
 ---@param self LocalClient
@@ -224,8 +248,8 @@ end
 ---@param rows table[] wire 行
 ---@param cb fun(hash: string|false|nil, err: string|nil) 写回时为新内容 md5，无变化 false，失败 nil
 ---@return { cancel: fun() }
-local function mergeBook(self, filename, rows, cb)
-    local path, cancelled, active = bookStatsPath(self, filename), false, nil
+local function mergeBook(self, filename, rows, cb, device_id)
+    local path, cancelled, active = bookStatsPath(self, filename, device_id), false, nil
     active = readJson(self, path, function(remote, err, missing)
         if cancelled then return end
         if not remote and not missing then return cb(nil, err) end
@@ -265,19 +289,22 @@ end
 ---@param own boolean
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }
-local function commitIndex(self, before, written, own, cb)
+local function commitIndex(self, before, written, own, cb, device_id)
     local cancelled, active = false, nil
-    active = readIndex(self, function(index, err)
+    active = readIndexAt(self, statsIndexPath(self, device_id), function(index, err)
         if cancelled then return end
         if not index then return cb(nil, err) end
         local seen, advance = loadSeen(self), {}
         for filename, entry in pairs(written) do
             local old = rev(before.books[filename])
-            if own and seen[filename] == old and rev(index.books[filename]) == old then advance[filename] = rev(entry) end
+            local key = seenKey(filename, device_id)
+            if own and seen[key] == old and rev(index.books[filename]) == old then advance[key] = rev(entry) end
             index.books[filename] = entry
         end
         index.version = 1
-        active = putText(self, moonPath(self, STATS_INDEX), self:webdavCacheRoot() .. "/.stats.index",
+        if device_id then index.device_id = device_id end
+        active = putText(self, statsIndexPath(self, device_id),
+            self:webdavCacheRoot() .. (device_id and "/.stats.device.index" or "/.stats.index"),
             require("json").encode(index), function(ok, put_err)
                 if cancelled then return end
                 if ok then saveSeen(self, advance) end
@@ -296,27 +323,27 @@ end
 ---@param own boolean 见 commitIndex
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
-local function writeBooks(self, by_file, own, cb)
-    local device_id = require("utils.device_id").ensure()
+local function writeBooks(self, by_file, own, cb, device_id)
+    local writer_device_id = require("utils.device_id").ensure()
     local files = {}
     for filename in pairs(by_file) do files[#files + 1] = filename end
     table.sort(files)
     if #files == 0 then return defer(cb, true) end
     local cancelled, active, failed, written, count = false, nil, nil, {}, 0
-    active = readIndex(self, function(before, err)
+    active = readIndexAt(self, statsIndexPath(self, device_id), function(before, err)
         if cancelled then return end
         if not before then return cb(nil, err) end
         eachAsync(files, function(filename, next_item)
             active = mergeBook(self, filename, by_file[filename], function(hash, merge_err)
                 if cancelled then return end
                 if hash then
-                    written[filename] = { updated_at = os.time(), device_id = device_id, hash = hash }
+                    written[filename] = { updated_at = os.time(), device_id = writer_device_id, hash = hash }
                     count = count + 1
                 elseif hash == nil then
                     failed = merge_err
                 end
                 next_item()
-            end)
+            end, device_id)
         end, function()
             if cancelled then return end
             if count == 0 then return cb(not failed or nil, failed) end
@@ -324,7 +351,7 @@ local function writeBooks(self, by_file, own, cb)
                 if cancelled then return end
                 if not ok then return cb(nil, commit_err) end
                 cb(not failed or nil, failed)
-            end)
+            end, device_id)
         end)
     end)
     return { cancel = function()
@@ -333,8 +360,8 @@ local function writeBooks(self, by_file, own, cb)
     end }
 end
 
---- 上报统计：按书并入各自的统计文件，再更新总表。两台设备同时写同一本书 / 总表仍可能互相覆盖，
---- 写前先读把窗口缩到最小，消不掉。早于 30 天的行已在远端并成汇总，同一行重推（确认丢失）会再计一次。
+--- 上报统计：每台设备写自己的统计分区，避免跨设备读改写互相覆盖。
+--- 早于 30 天的本机行按小时汇总；同一行重推按设备、书籍和开始时间去重。
 --- WebDAV 书写相对路径（和 book 服务端同构）；其它本地书写绝对路径，拉取时只认本设备的。
 ---@param rows BookStatsRow[]
 ---@param cb fun(result: BookStatsPushResult|nil, err: string|nil)
@@ -354,7 +381,7 @@ function RemoteData.pushStatsAsync(self, rows, cb)
     end
     return writeBooks(self, by_file, true, function(ok, err)
         if ok then cb({}) else cb(nil, err) end
-    end)
+    end, device_id)
 end
 
 ---@param entries WebdavEntry[]|nil
@@ -368,17 +395,17 @@ end
 --- 旧版单文件 stats.json（含旧版插件之后又写进去的）：行按书并进按书文件，
 --- 并完确认文件没被改过再删，改过就留到下次再并（按 statKey 去重，不会重复）。
 ---@param self LocalClient
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, entries: WebdavEntry[]|nil)
 ---@return { cancel: fun() }
 local function foldLegacy(self, cb)
     local cancelled, active = false, nil
     active = self.dav:listAsync(moonPath(self, "Stats"), function(entries)
         if cancelled then return end
         local legacy = legacyEntry(entries)
-        if not legacy then return cb(true) end
+        if not legacy then return cb(true, nil, entries or {}) end
         active = readJson(self, moonPath(self, LEGACY_STATS), function(rows, err, missing)
             if cancelled then return end
-            if missing then return cb(true) end
+            if missing then return cb(true, nil, entries or {}) end
             if not rows then return cb(nil, err) end
             local by_file = {}
             for _idx, row in ipairs(rows) do
@@ -394,9 +421,11 @@ local function foldLegacy(self, cb)
                 active = self.dav:listAsync(moonPath(self, "Stats"), function(after)
                     if cancelled then return end
                     local now = legacyEntry(after)
-                    if not now or now.size ~= legacy.size or now.mtime ~= legacy.mtime then return cb(true) end
+                    if not now or now.size ~= legacy.size or now.mtime ~= legacy.mtime then
+                        return cb(true, nil, after or {})
+                    end
                     active = self.dav:deleteAsync(moonPath(self, LEGACY_STATS), function()
-                        if not cancelled then cb(true) end
+                        if not cancelled then cb(true, nil, after or {}) end
                     end)
                 end)
             end)
@@ -461,44 +490,121 @@ end
 function RemoteData.pullStatsAsync(self, cb)
     local device_id = require("utils.device_id").ensure()
     local cancelled, active = false, nil
-    active = foldLegacy(self, function(ok, fold_err)
+    active = foldLegacy(self, function(ok, fold_err, entries)
         if cancelled then return end
         if not ok then return cb(nil, fold_err) end
         active = readIndex(self, function(index, err)
             if cancelled then return end
             if not index then return cb(nil, err) end
-            local seen, changed = loadSeen(self), {}
-            for filename, entry in pairs(index.books) do
-                -- 别的设备的非 WebDAV 书（绝对路径）一行都不认，不下载
-                local mine = filename:sub(1, 1) ~= "/" or entry.device_id == device_id
-                if mine and seen[filename] ~= rev(entry) then changed[#changed + 1] = filename end
-            end
-            table.sort(changed)
-            local out, updates, fetched = { rows = {}, rollups = {}, ids = {}, seen_ids = {} }, {}, 0
-            eachAsync(changed, function(filename, next_item)
-                active = readJson(self, bookStatsPath(self, filename), function(remote, book_err)
-                    if cancelled then return end
-                    if not remote then
-                        require("utils.log").warn("book webdav stats book skipped", filename, book_err)
-                        return next_item()
-                    end
-                    if filename:sub(1, 1) ~= "/" and not out.seen_ids[remoteStableId(filename)] then
-                        out.seen_ids[remoteStableId(filename)] = true
-                        out.ids[#out.ids + 1] = remoteStableId(filename)
-                    end
-                    collectBook(remote, device_id, out)
-                    updates[filename] = rev(index.books[filename])
-                    fetched = fetched + 1
-                    next_item()
-                end)
-            end, function()
+            local sources = { { index = index } }
+            local function pullBooks()
                 if cancelled then return end
-                if fetched == 0 then return cb({}) end
-                cb({
-                    rows = out.rows,
-                    replace = { mode = "synced_books", stable_ids = out.ids },
-                    commit = function() saveSeen(self, updates) end,
-                })
+                local seen, changed = loadSeen(self), {}
+                local function eligible(source, filename, entry)
+                    local owner = source.device_id or entry.device_id
+                    return filename:sub(1, 1) ~= "/" or owner == device_id
+                end
+                for _idx, source in ipairs(sources) do
+                    for filename, entry in pairs(source.index.books) do
+                        local key = seenKey(filename, source.device_id)
+                        if eligible(source, filename, entry) and seen[key] ~= rev(entry) then
+                            changed[filename] = true
+                        end
+                    end
+                end
+                local filenames = {}
+                for filename in pairs(changed) do filenames[#filenames + 1] = filename end
+                table.sort(filenames)
+                if #filenames == 0 then return cb({}) end
+
+                local out, updates, fetched = { rows = {}, ids = {}, seen_ids = {} }, {}, 0
+                eachAsync(filenames, function(filename, next_file)
+                    local targets = {}
+                    for _idx, source in ipairs(sources) do
+                        local entry = source.index.books[filename]
+                        if entry and eligible(source, filename, entry) then
+                            targets[#targets + 1] = {
+                                source = source,
+                                entry = entry,
+                                path = bookStatsPath(self, filename, source.device_id),
+                            }
+                        end
+                    end
+                    local book_out = { rows = {}, rollups = {}, ids = {}, seen_ids = {} }
+                    local book_updates, failed = {}, false
+                    eachAsync(targets, function(target, next_target)
+                        active = readJson(self, target.path, function(remote, book_err)
+                            if cancelled then return end
+                            if not remote then
+                                require("utils.log").warn("book webdav stats book skipped", filename, book_err)
+                                failed = true
+                                return next_target()
+                            end
+                            collectBook(remote, target.source.device_id or device_id, book_out)
+                            book_updates[seenKey(filename, target.source.device_id)] = rev(target.entry)
+                            next_target()
+                        end)
+                    end, function()
+                        if cancelled then return end
+                        if not failed then
+                            fetched = fetched + 1
+                            for _idx, row in ipairs(book_out.rows) do
+                                out.rows[#out.rows + 1] = row
+                            end
+                            if filename:sub(1, 1) ~= "/" then
+                                local stable_id = remoteStableId(filename)
+                                if not out.seen_ids[stable_id] then
+                                    out.seen_ids[stable_id] = true
+                                    out.ids[#out.ids + 1] = stable_id
+                                end
+                            end
+                            for key, value in pairs(book_updates) do updates[key] = value end
+                        end
+                        next_file()
+                    end)
+                end, function()
+                    if cancelled then return end
+                    if fetched == 0 then return cb({}) end
+                    cb({
+                        rows = out.rows,
+                        replace = { mode = "synced_books", stable_ids = out.ids },
+                        commit = function() saveSeen(self, updates) end,
+                    })
+                end)
+            end
+            local devices_entry
+            for _idx, entry in ipairs(entries or {}) do
+                if entry.name == "devices" and entry.is_dir then
+                    devices_entry = entry
+                    break
+                end
+            end
+            if not devices_entry then return pullBooks() end
+            active = self.dav:listAsync(devices_entry.path, function(device_dirs, list_err)
+                if cancelled then return end
+                if not device_dirs then return cb(nil, list_err) end
+                local dirs = {}
+                for _idx, entry in ipairs(device_dirs) do
+                    if entry.is_dir then dirs[#dirs + 1] = entry.name end
+                end
+                eachAsync(dirs, function(dir, next_dir)
+                    local path = devices_entry.path .. "/" .. dir .. "/index.json"
+                    active = readIndexAt(self, path, function(device_index, index_err)
+                        if cancelled then return end
+                        if not device_index then
+                            return cb(nil, index_err)
+                        end
+                        local owner = device_index.device_id
+                        if next(device_index.books) and
+                            (type(owner) ~= "string" or owner == "" or md5(owner) ~= dir) then
+                            return cb(nil, _("阅读统计文件损坏"))
+                        end
+                        if owner and next(device_index.books) then
+                            sources[#sources + 1] = { index = device_index, device_id = owner }
+                        end
+                        next_dir()
+                    end)
+                end, pullBooks)
             end)
         end)
     end)
