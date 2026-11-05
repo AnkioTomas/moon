@@ -196,6 +196,7 @@ local Registry = require("source.registry")
 Assert.eq(Registry.meta("kavita").type, "book")
 local source = Registry.resolve("kavita")
 Assert.is_true(source:configured())
+Assert.is_false(source:capabilities().shelf_push, "Kavita 书架只拉不推")
 Assert.eq(require("source.kavita").DEFAULT_HEARTBEAT_INTERVAL, 30, "设置页读的默认心跳间隔")
 
 ---@return any, any, any
