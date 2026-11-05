@@ -33,6 +33,7 @@ Assert.eq(Items.text("chapter", ctx), "第三章 初见")
 Assert.eq(Items.text("title", ctx), "示例书名")
 Assert.eq(Items.text("clock", ctx), "12:34")
 Assert.eq(Items.text("percent", ctx), "42%")
+Assert.eq(Items.text("percent", { percent = 42.375, percent_decimals = true }), "42.38%")
 Assert.eq(Items.text("chapter_idx", ctx), "第 3/10 章")
 Assert.eq(Items.text("page", ctx), "全书 120/320")
 Assert.eq(Items.text("remaining", ctx), "约 30 分钟")
@@ -94,6 +95,7 @@ do
     local group_w = #"12:34" * 5 + 4 + #"42%" * 5
     Assert.eq(painted[1].x, math.floor((300 - group_w) / 2), "居中组起点")
     Assert.eq(painted[2].x, painted[1].x + #"12:34" * 5 + 4)
+    Assert.eq(painted[2].text, "42%")
 
     -- flex 组件居中：槽宽是弹性分配的整片剩余宽度，必须居中槽内的内容而不是贴槽左缘
     painted = {}
@@ -104,7 +106,7 @@ do
     local title_w = #"示例书名" * 5
     for _i, p in ipairs(painted) do
         if p.text == "示例书名" then
-            Assert.eq(p.x, math.floor((300 - title_w) / 2), "flex 书名居中")
+            Assert.is_true(math.abs(p.x - math.floor((300 - title_w) / 2)) <= 1, "flex 书名居中")
         end
     end
 

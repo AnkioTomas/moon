@@ -175,7 +175,9 @@ Items.CATALOG = {
     },
     {
         id = "percent", label = _("进度"), icon = "percent", top = true, bottom = true,
-        text = function(ctx) return string.format("%.0f%%", clampPercent(ctx.percent)) end,
+        text = function(ctx)
+            return string.format(ctx.percent_decimals and "%.2f%%" or "%.0f%%", clampPercent(ctx.percent))
+        end,
     },
     {
         id = "chapter_idx", label = _("章节序号"), icon = "format_list_numbered", top = true, bottom = true,
@@ -232,6 +234,7 @@ function Items.sampleContext()
         title = _("示例书名"),
         clock = "12:34",
         percent = 42,
+        percent_decimals = false,
         chapter_idx = 3,
         chapter_count = 10,
         page = 120,

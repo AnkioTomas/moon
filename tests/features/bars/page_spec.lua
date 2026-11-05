@@ -46,6 +46,7 @@ local icons_on = true
 local dividers = {}
 local font = { top = nil, bottom = nil }
 local top_height = 12
+local percent_decimals = false
 local spins = {}
 package.preload["ui.themes.widgets.spin"] = function()
     return { new = function(_, o) o.show = function(self) spins[#spins + 1] = self end; return o end }
@@ -67,6 +68,8 @@ package.preload["features.bars.layout"] = function()
         icons = function() return icons_on end,
         divider = function(which) return dividers[which] == true end,
         setDivider = function(which, on) dividers[which] = on end,
+        percentDecimals = function() return percent_decimals end,
+        setPercentDecimals = function(on) percent_decimals = on end,
         setIcons = function(on) icons_on = on end,
         replace = function() return true end,
         setReplace = function() end,
@@ -133,8 +136,13 @@ local bottom = ReaderBar:page(desktop, "bottom")
 Assert.eq(bottom.sections[1].rows[1](600).title, "替代系统底栏")
 Assert.eq(bottom.sections[1].rows[2](600).title, "开启底栏")
 Assert.is_false(bottom.sections[1].rows[2](600).status_on)
-Assert.len(bottom.sections[1].rows, 6, "底栏没有高度，只有边距")
-Assert.eq(bottom.sections[1].rows[6](600).title, "边距")
+Assert.len(bottom.sections[1].rows, 7, "底栏有两位小数开关")
+Assert.eq(bottom.sections[1].rows[4](600).title, "总进度显示两位小数")
+Assert.is_false(bottom.sections[1].rows[4](600).status_on)
+bottom.sections[1].rows[4](600).callback()
+Assert.is_true(percent_decimals)
+Assert.is_true(bottom.sections[1].rows[4](600).status_on)
+Assert.eq(bottom.sections[1].rows[7](600).title, "边距")
 
 -- 底栏文字大小写回开着书的 KOReader 状态栏并立即重排。
 local footer_calls = {}
@@ -142,12 +150,12 @@ local footer = { settings = { text_font_size = 14 },
     updateFooterFont = function() footer_calls[#footer_calls + 1] = "font" end,
     refreshFooter = function() footer_calls[#footer_calls + 1] = "refresh" end }
 ReaderUIStub.instance = { document = {}, dialog = {}, view = { footer = footer } }
-bottom.sections[1].rows[5](600).callback()
+bottom.sections[1].rows[6](600).callback()
 spins[#spins].callback(18)
 Assert.eq(font.bottom, 18)
 Assert.eq(footer.settings.text_font_size, 18)
 Assert.eq(table.concat(footer_calls, ","), "font,refresh")
-Assert.eq(bottom.sections[1].rows[5](600).status, "18")
+Assert.eq(bottom.sections[1].rows[6](600).status, "18")
 ReaderUIStub.instance = nil
 
 -- 关书时 closeDocument 已清 document、instance 尚未清：不得把半死的 ReaderUI 交给底栏

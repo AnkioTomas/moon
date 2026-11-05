@@ -21,6 +21,8 @@ local REPLACE_KEY = {
     bottom = "book_reader_replace_bottom_bar",
 }
 
+local PERCENT_DECIMALS_KEY = "book_reader_percent_decimals"
+
 local SETTING_DEFAULTS = require("features.bars.setting").defaults
 local DEFAULTS = {
     top = SETTING_DEFAULTS.book_reader_top_bar_layout,
@@ -153,6 +155,19 @@ end
 function Layout.setIcons(on)
     local bars = MoonSettings.get("features.bars")
     bars.book_reader_bar_icons = on
+    MoonSettings.save("features.bars", bars)
+end
+
+--- 总进度是否显示两位小数。
+---@return boolean
+function Layout.percentDecimals()
+    return MoonSettings.get("features.bars")[PERCENT_DECIMALS_KEY] == true
+end
+
+---@param on boolean
+function Layout.setPercentDecimals(on)
+    local bars = MoonSettings.get("features.bars")
+    bars[PERCENT_DECIMALS_KEY] = on
     MoonSettings.save("features.bars", bars)
 end
 

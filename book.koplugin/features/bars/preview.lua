@@ -72,6 +72,7 @@ function Preview.build(width, which)
                 Blitbuffer.Color8(t.color.ink))
         end
         local ctx = Items.sampleContext()
+        ctx.percent_decimals = Layout.percentDecimals()
         local pad = require("device").screen:scaleBySize(Layout.BAR_HORIZONTAL_PADDING)
         Items.paint(bb, x + pad, which == "top" and y + margin or y, math.max(1, self.dimen.w - pad * 2),
             self.dimen.h - margin, Layout.get(which), ctx, {
