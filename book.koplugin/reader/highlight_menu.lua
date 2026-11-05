@@ -5,6 +5,12 @@
 所有已注册按钮（KOReader 自带、其它插件、用户补丁、本插件）都受显隐与排序设置控制：
 弹窗时扫描到的按钮记进 `reader_popup_seen`（设置键 → { title, origin }），设置页据此列出。
 
+按住起手还要补一次高亮：原生长按选词后把 `selected_text.sboxes` 直接赋给
+`view.highlight.temp`，而 `getWordFromPosition` 并不保证给盒子（原生注释只对
+crengine 作保）。盒子是 nil 时高亮就不画，看着像"没反应"，要等滑动走了
+range 那条路才显形。这里在按住起手后补算盒子、落进 temp 并刷选区，
+按下即见所选。菜单仍按原生时机弹，不提前弹。
+
 @module koplugin.book.reader.highlight_menu
 --]]
 
@@ -268,10 +274,74 @@ local function patchShowMenu()
     ReaderHighlight.onShowHighlightMenu = require("ui.guard").wrap("highlight menu", showMenu)
 end
 
+--- 选区首尾的屏幕盒。没有盒（或拿不到）返回 nil。
+---@param selected table selected_text
+---@return table[]|nil
+local function selectedBoxes(selected)
+    local boxes = selected.sboxes
+    if not boxes or #boxes == 0 then
+        boxes = selected.pboxes
+    end
+    if boxes and #boxes > 0 then
+        return boxes
+    end
+end
+
+--- 按住起手就把高亮画出来。
+--- 原生把 `selected_text.sboxes` 直接赋给 `view.highlight.temp`，
+--- 而 `getWordFromPosition` 不保证给盒子（原生注释只对 crengine 作保）：
+--- 盒子是 nil 时 `temp[page] = nil`，高亮不画，看着像"没反应"，
+--- 要等滑动走了 range 那条路才显形。这里补算盒子、落进 temp 再刷选区。
+--- 菜单、手柄都不动：仍按原生时机（松手弹菜单）走。
+local function patchHoldMenu()
+    local ReaderHighlight = require("apps/reader/modules/readerhighlight")
+    if ReaderHighlight._book_hold_highlight_patched then
+        return
+    end
+    ReaderHighlight._book_hold_highlight_patched = true
+
+    local orig_on_hold = ReaderHighlight.onHold
+    function ReaderHighlight:onHold(arg, ges)
+        local handled = orig_on_hold(self, arg, ges)
+        -- 只在原生选上了词时补：按在图片 / 页外 / 长按压成"什么都不做"不碰。
+        if not handled or not self.selected_text then
+            return handled
+        end
+        require("ui.guard").call("highlight hold", function()
+            local document = self.ui and self.ui.document
+            local selected = self.selected_text
+            local boxes = selectedBoxes(selected)
+            if not boxes and document and document.getScreenBoxesFromPositions
+                and selected.pos0 and selected.pos1 then
+                -- 与 selection.lua 的 charRange 同一思路：引擎不给盒就按两端坐标算。
+                local ok, computed = pcall(document.getScreenBoxesFromPositions,
+                    document, selected.pos0, selected.pos1, true)
+                if ok and computed and #computed > 0 then
+                    boxes = computed
+                    selected.sboxes = computed
+                end
+            end
+            if not boxes then
+                return
+            end
+            -- paging 模式高亮画在 view.highlight.temp 上；滚动模式 crengine 自己画选区。
+            if self.ui and self.ui.paging and self.view and self.view.highlight then
+                local page = selected.pos0 and selected.pos0.page
+                if page then
+                    self.view.highlight.temp[page] = boxes
+                end
+            end
+            require("ui/uimanager"):setDirty(self.dialog, "ui")
+        end)
+        return handled
+    end
+end
+
 --- 安装划词弹窗显隐门控；重复调用无副作用。
 ---@param ui table|nil
 function HighlightMenu.install(ui)
     patchShowMenu()
+    patchHoldMenu()
     if not ui or not ui.highlight then
         return
     end
