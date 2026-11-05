@@ -16,6 +16,7 @@
 --]]
 
 local CenterContainer = require("ui/widget/container/centercontainer")
+local Device = require("device")
 local Geom = require("ui/geometry")
 local QRWidget = require("ui/widget/qrwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -23,6 +24,7 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Theme = require("ui.themes")
 local Modal = require("ui.themes.widgets.modal")
 local Text = require("ui.themes.widgets.text")
+local _ = require("gettext")
 
 ---@class BookThemeQR : BookThemeModal
 ---@field title string|nil
@@ -52,7 +54,15 @@ function QR:init()
         body[#body + 1] = Text.box("caption", self.caption, inner,
             { align = "center", color = t.color.muted, bg = t.dialog.bg })
     end
-    self:setDialog{ title = self.title, body = body }
+    local buttons
+    if self.text:match("^https?://") and (not Device:hasEinkScreen() or Device:isSDL()) and Device:canOpenLink() then
+        buttons = { { text = _("在本机打开"), variant = "primary", callback = function()
+            if not Device:openLink(self.text) then
+                require("ui.themes.widgets.toast"):new{ text = _("无法打开浏览器，请扫码或手动输入网址") }:show()
+            end
+        end } }
+    end
+    self:setDialog{ title = self.title, body = body, buttons = buttons }
 end
 
 return QR

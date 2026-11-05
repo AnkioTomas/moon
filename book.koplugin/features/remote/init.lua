@@ -1706,7 +1706,9 @@ end
 ---@param path string
 ---@param title string
 ---@param text string 二维码上方说明
-function Remote.openPage(path, title, text)
+---@param opts table|nil close_callback：用户关闭二维码时通知调用方
+---@return BookThemeQR|nil
+function Remote.openPage(path, title, text, opts)
     local ok, err = Remote.start()
     local url = ok and accessUrl(path)
     local Toast = require("ui.themes.widgets.toast")
@@ -1714,7 +1716,12 @@ function Remote.openPage(path, title, text)
         Toast:new{ text = ok and _("拿不到局域网 IP，请先连接 Wi-Fi 后在设置里开启远程管理") or tostring(err), timeout = 6 }:show()
         return
     end
-    require("ui.themes.widgets.qr"):new{ title = title, text = url, caption = text .. "\n" .. url }:show()
+    local dialog = require("ui.themes.widgets.qr"):new{
+        title = title, text = url, caption = text .. "\n" .. url,
+        close_callback = opts and opts.close_callback,
+    }
+    dialog:show()
+    return dialog
 end
 
 require("utils.extension").add("web.open_page", Remote.openPage)
