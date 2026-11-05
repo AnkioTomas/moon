@@ -139,7 +139,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field capabilities fun(self: BookSource): SourceCapabilities 能力表
 ---@field configured fun(self: BookSource): boolean 是否已配置到可请求
 ---@field close fun(self: BookSource)|nil 释放资源
----@field syncBooksAsync fun(self: BookSource, opts: { force?: boolean, dirty_only?: boolean, on_progress?: fun(text: string, done: integer|nil, total: integer|nil) }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛书架；dirty_only 只推本地删/加；on_progress 在真实步骤（拉取/上传/写库…）处上报，done/total 为该步计数
+---@field syncBooksAsync fun(self: BookSource, opts: { force?: boolean, dirty_only?: boolean, on_changed?: fun(), on_progress?: fun(text: string, done: integer|nil, total: integer|nil) }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛书架；dirty_only 只推本地删/加；on_changed 在后台补全写库后通知界面重读；on_progress 在真实步骤（拉取/上传/写库…）处上报，done/total 为该步计数
 ---@field syncProgressAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛进度
 ---@field syncNotesAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛笔记
 ---@field cleanAnnotations fun(self: BookSource, items: table[], total_pages: integer|nil): table[]|nil 清洗并透传源私有注解字段

@@ -59,6 +59,24 @@ Assert.is_true(BookDB.upsertRemote({ source_id = full.source_id, stable_id = ful
     authors = "远端作者", intro = "远端简介", deleted = 0 }))
 Assert.eq(BookDB.get(full.source_id, full.stable_id).authors, full.authors, "非空本地脏资料仍优先")
 
+-- 脏行也允许补空字段：用户改过的非空值保留，空的作者 / 简介可以拿远端补上。
+local fill_id = "fill_empty_meta"
+Assert.is_true(BookDB.upsertLocal({ source_id = full.source_id, stable_id = fill_id, title = "空字段",
+    authors = "", intro = nil }))
+Assert.eq(BookDB.get(full.source_id, fill_id).sync_status, 0, "本地写入是脏行")
+Assert.is_true(BookDB.fillEmptyMeta(full.source_id, fill_id, "远端作者", "远端简介"))
+local filled = BookDB.get(full.source_id, fill_id)
+Assert.eq(filled.authors, "远端作者", "空作者被补上")
+Assert.eq(filled.intro, "远端简介", "空简介被补上")
+Assert.eq(filled.sync_status, 0, "补空不动脏标记")
+Assert.is_false(BookDB.fillEmptyMeta(full.source_id, fill_id, "另一个作者", "另一段简介"),
+    "没有空字段就不再写")
+Assert.is_true(BookDB.upsertLocal({ source_id = full.source_id, stable_id = fill_id, title = "空字段",
+    authors = "本地作者", intro = "" }))
+Assert.is_true(BookDB.fillEmptyMeta(full.source_id, fill_id, "远端作者", "远端简介"))
+Assert.eq(BookDB.get(full.source_id, fill_id).authors, "本地作者", "非空本地作者不被覆盖")
+Assert.eq(BookDB.get(full.source_id, fill_id).intro, "远端简介", "只补空的那一项")
+
 Assert.is_true(BookDB.markSynced(full.source_id, full.stable_id))
 Assert.is_true(BookDB.upsertRemote({
     source_id = full.source_id, stable_id = full.stable_id, deleted = 0,
