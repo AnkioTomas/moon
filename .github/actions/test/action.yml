@@ -25,12 +25,15 @@ runs:
         tar -xJf "$ARCHIVE" -C "$RUNTIME" --strip-components=2 lib/koreader
         ln -s koreader-emulator-ci-debug/koreader/frontend koreader/frontend
         ln -s koreader-emulator-ci-debug/koreader koreader/base
-        echo "LD_LIBRARY_PATH=$RUNTIME/libs" >> "$GITHUB_ENV"
-
     - name: Run every spec without skips
       shell: bash
       run: |
         set -euo pipefail
+        export LD_LIBRARY_PATH="$PWD/koreader/koreader-emulator-ci-debug/koreader/libs"
         node --version
         ./tests/run.sh | tee "$RUNNER_TEMP/moon-tests.log"
         ! grep -Eq '^[0-9]+ passed, [1-9][0-9]* skipped,' "$RUNNER_TEMP/moon-tests.log"
+
+    - name: Check release tool isolation
+      shell: bash
+      run: python3 -c 'import sqlite3; print("Release SQLite:", sqlite3.sqlite_version)'
