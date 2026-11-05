@@ -35,20 +35,7 @@ local function le64(n)
     return table.concat(out)
 end
 
---- n 字节随机数：优先 /dev/urandom，读不到或不足 n 字节时退回 math.random。
----@param n integer
----@return string
-function Crypto.urandom(n)
-    local f = io.open("/dev/urandom", "rb")
-    if f then
-        local d = f:read(n)
-        f:close()
-        if d and #d == n then return d end
-    end
-    local t = {}
-    for i = 1, n do t[i] = string.char(math.random(0, 255)) end
-    return table.concat(t)
-end
+Crypto.urandom = require("utils.random").bytes
 
 local function uuid_iv()
     return (Aes.to_hex(Crypto.urandom(16)):sub(1, 16))
@@ -226,16 +213,7 @@ function Crypto.build_unsigned_headers(device, ts_ms)
     local ua = string.format(
         "com.dragon.read.oversea.gp/%s (Linux; U; Android %s; zh_CN; %s; Build/%s;tt-ok/3.12.13.4-tiktok)",
         vc, device.os_version or "12", device.device_type or "P30", rom)
-    local rnd = ""
-    do
-        local f = io.open("/dev/urandom", "rb")
-        if f then
-            local d = f:read(4)
-            f:close()
-            if d then rnd = Aes.to_hex(d) end
-        end
-        if rnd == "" then rnd = string.format("%08x", math.random(0, 0xffffffff)) end
-    end
+    local rnd = require("utils.random").hex(4)
     return {
         ["User-Agent"] = ua,
         ["Accept"] = "application/json; charset=utf-8,application/x-protobuf",

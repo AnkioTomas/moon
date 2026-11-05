@@ -65,7 +65,7 @@ end
 function Passcode.setPin(pin, mode)
     local conf = MoonSettings.get(OWNER)
     conf.mode = mode == "pattern" and "pattern" or nil
-    conf.salt = sha2.md5(os.time() .. os.clock() .. math.random()) --[[@as string]]
+    conf.salt = require("utils.random").hex(16)
     conf.hash = digest(conf.salt, pin)
     conf.fails, conf.locked_until = nil, nil
     MoonSettings.save(OWNER)

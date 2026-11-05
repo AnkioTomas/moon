@@ -65,15 +65,6 @@ end
 ---@type table|nil
 Pair._pending = nil
 
---- 32 个十六进制字符的随机串（/dev/urandom）。
----@return string
-local function randomHex()
-    local f = assert(io.open("/dev/urandom", "rb"))
-    local bytes = f:read(16)
-    f:close()
-    return (bytes:gsub(".", function(ch) return string.format("%02x", ch:byte()) end))
-end
-
 ---@return table paired token → { name, at }
 local function pairedTable()
     return require("utils.settings").get("features.remote").remote_paired
@@ -110,7 +101,7 @@ local function settle(pending, state)
     pending.dialog = nil
     if state == "approved" then
         local Settings = require("utils.settings")
-        pending.token = randomHex()
+        pending.token = require("utils.random").hex(16)
         local paired = Settings.get("features.remote").remote_paired
         -- 同一台机器的同一种浏览器重新授权（清了站点数据、换了设备地址）只留最新一条，别越攒越多。
         for old, entry in pairs(paired) do
@@ -127,7 +118,7 @@ end
 ---@return string id
 function Pair.request(name, ip)
     Pair.cancel()
-    local pending = { id = randomHex(), name = name, ip = ip, state = "pending" }
+    local pending = { id = require("utils.random").hex(16), name = name, ip = ip, state = "pending" }
     Pair._pending = pending
     local T = require("ffi/util").template
     pending.dialog = require("ui.themes.widgets.confirm"):new{

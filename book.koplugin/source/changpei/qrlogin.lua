@@ -199,8 +199,7 @@ end
 function QRLogin:start()
     self:cancel()
     local gen = self.generation
-    local device = ""
-    for _i = 1, 32 do device = device .. string.format("%x", math.random(0, 15)) end
+    local device = require("utils.random").hex(16)
     self.jar, self.scanned = { _c_n_ = device, _c_n_n_ = device }, false
     self:_session(function(ok)
         if gen ~= self.generation then return end

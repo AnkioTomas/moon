@@ -1,7 +1,7 @@
 --[[--
 RSA PKCS#1 v1.5。n、e、d 都是无符号大端，不带 ASN.1 的符号字节。
 密文和签名与 n 等长。签名摘要支持 md5、sha1、sha256，默认 sha256。
-e 缺省 65537。随机填充缺省读 /dev/urandom。
+e 缺省 65537。随机填充使用 utils.random 的安全随机源。
 
 明文最长 #n - 11（00 02 + 至少 8 字节非 0 填充 + 00）。rng(n) 必须返回恰好 n 个非 0 字节。
 verify 长度不对报错、内容不匹配返回 false。keypair(bits, e) 的 bits 为 32 的倍数，512–4096。
@@ -14,6 +14,7 @@ local bor = bit.bor
 
 local Bn = require("crypto.bn")
 local sha2 = require("ffi/sha2")
+local Random = require("utils.random")
 
 local Rsa = {}
 
@@ -36,15 +37,6 @@ local PREFIX = {
 }
 
 local E_DEFAULT = "\1\0\1"
-
-local function urandom(n)
-    local f = io.open("/dev/urandom", "rb")
-    if not f then error("rsa: no urandom") end
-    local data = f:read(n)
-    f:close()
-    if not data or #data ~= n then error("rsa: urandom") end
-    return data
-end
 
 local function check_n(n)
     if type(n) ~= "string" or #n < 2 or #n % 2 ~= 0 or n:byte(1) == 0 then
@@ -76,7 +68,7 @@ local function nonzero(n, rng)
     end
     local t = {}
     while #t < n do
-        local block = urandom(n)
+        local block = Random.bytes(n)
         for i = 1, #block do
             local b = block:byte(i)
             if b ~= 0 then
@@ -403,7 +395,7 @@ local function probable_prime(raw)
     for _round = 1, 8 do
         local a
         for _try = 1, 32 do
-            local cand = N.try_import(urandom(#raw))
+            local cand = N.try_import(Random.bytes(#raw))
             if cand and not N.is_zero(cand) and not N.eq(cand, N.one) then
                 a = N.export(cand)
                 break
@@ -428,7 +420,7 @@ end
 
 local function random_prime(nbytes)
     while true do
-        local raw = urandom(nbytes)
+        local raw = Random.bytes(nbytes)
         local top = bor(raw:byte(1), 0x80)
         local bot = bor(raw:byte(nbytes), 0x01)
         raw = string.char(top) .. raw:sub(2, nbytes - 1) .. string.char(bot)
