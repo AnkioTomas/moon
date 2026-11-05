@@ -96,6 +96,27 @@ Assert.eq(refreshes, 2)
 Sync.refresh(desktop)
 Assert.is_true(desktop._stats_sync.test)
 
+-- 后台补全写库后由 desktop 统一发 shelf_changed；桌面已关（人在阅读器里）不通知。
+do
+    local seen_opts, events = nil, 0
+    local original_on_event = desktop.onEvent
+    desktop.onEvent = function(_, event) if event == "shelf_changed" then events = events + 1 end end
+    source.syncBooksAsync = function(_, opts, cb)
+        seen_opts = opts
+        cb({ skipped = false, pulled = 0, pushed = 0, hidden = 0 })
+        return { cancel = function() end }
+    end
+    Sync.open(desktop)
+    Assert.eq(type(seen_opts.on_changed), "function", "同步把 on_changed 传给源")
+    seen_opts.on_changed()
+    Assert.eq(events, 1, "补全写库后首页重读")
+    desktop.closed = true
+    seen_opts.on_changed()
+    Assert.eq(events, 1, "桌面已关不通知")
+    desktop.closed = nil
+    desktop.onEvent = original_on_event
+end
+
 -- 书架同步失败：首页展示的是本地数据，不因失败重建。
 source.syncBooksAsync = function(_, _, cb)
     cb(nil, "offline")
