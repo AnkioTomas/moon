@@ -39,14 +39,6 @@ local function unb64url(s)
     return Text.base64Decode(s .. string.rep("=", (4 - #s % 4) % 4))
 end
 
----@return string
-local function randomTicket()
-    local f = assert(io.open("/dev/urandom", "rb"))
-    local bytes = f:read(32)
-    f:close()
-    return b64url(bytes)
-end
-
 -- 每个源本进程内成功授权的次数。已授权的源重新授权时，网页靠它判断新一轮授权是否完成。
 ---@type table<string, integer>
 local applied = {}
@@ -149,7 +141,7 @@ function Remote.handle(method, action, params, cb)
         if not browser then return cb(404, { error = _("该数据源不支持浏览器登录") }) end
         local now = os.time()
         sweep(now)
-        local ticket = randomTicket()
+        local ticket = b64url(require("utils.random").bytes(32))
         tickets[b64url(sha2.hex_to_bin(sha2.sha256(ticket)))] = { ticket = ticket, source = params.source, expires = now + TICKET_TTL }
         return cb(200, {
             domain = browser.domain, scope = browser.scope, login = browser.login, check = browser.check, check_json = browser.check_json,

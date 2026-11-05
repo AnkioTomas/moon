@@ -4,7 +4,7 @@ SM2 签名与公钥加密。曲线 sm2p256v1。
 签名是 r||s 各 32 字节。默认用户标识 1234567812345678。
 密文是 C1||C3||C2：C1 为 04||X||Y（65 字节），C3 为 32 字节 SM3。
 公钥同样接受 65 字节（带 04）或 64 字节 X||Y。
-随机数缺省读 /dev/urandom；测试可传入 32 字节 k。
+随机数使用 utils.random 的安全随机源；测试可传入 32 字节 k。
 
 @module koplugin.book.crypto.sm2
 --]]
@@ -147,18 +147,9 @@ local function scalar(raw)
     return s
 end
 
-local function urandom(n)
-    local f = io.open("/dev/urandom", "rb")
-    if not f then error("sm2: no urandom") end
-    local data = f:read(n)
-    f:close()
-    if not data or #data ~= n then error("sm2: urandom") end
-    return data
-end
-
 local function random_scalar()
     for _try = 1, 16 do
-        local s = Fn.try_import(urandom(32))
+        local s = Fn.try_import(require("utils.random").bytes(32))
         if s and not Fn.is_zero(s) then return s end
     end
     error("sm2: rng failed")
