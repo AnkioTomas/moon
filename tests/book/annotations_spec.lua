@@ -35,6 +35,21 @@ do
 end
 
 do
+    local html = '<html><body><div><img src="cover.jpg"/><p>图片后的正文</p></div>'
+        .. '<div></div></body></html>'
+    local wire, flow = Annotations.wireMapping(html), Annotations.flow(html)
+    local offset, summary = Annotations.toWirePosition(wire, flow, "/html/body/div[1]/img.0")
+    local expected = assert(html:find("图片后的正文", 1, true)) - 1
+    Assert.eq(offset, expected, "图片位置映射到之后最近的可见正文")
+    Assert.eq(summary, "图片后的正文")
+
+    local end_html = "<html><body><p>章节正文</p><img src=\"tail.jpg\"/></body></html>"
+    local end_wire, end_flow = Annotations.wireMapping(end_html), Annotations.flow(end_html)
+    local end_offset = Annotations.toWirePosition(end_wire, end_flow, "/html/body/img.0")
+    Assert.eq(end_offset, end_wire.starts[end_wire.count], "文末图片回退到最近的前文位置")
+end
+
+do
     local wire = Annotations.plainMapping("目标正文")
     local flow = Annotations.flow("<html><body><p>目标正文</p><p>目标正文</p></body></html>")
     Assert.eq(Annotations.fromWireOffset(wire, flow, 0), nil, "改写后重复次数不符不能随便挑一个")
