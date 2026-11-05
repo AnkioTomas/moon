@@ -186,7 +186,7 @@ Assert.eq(from_gauge.reading.current_ma, -40)
 gauge_word = 0x075A
 local bourbon = Probe.read(fs())
 Assert.eq(bourbon.reading.charge_design_mah, 941)
-Assert.is_nil(bourbon.reading.health_pct, "充满高于设计容量：电量计没学到衰减，不给健康度")
+Assert.eq(bourbon.reading.health_pct, 100, "充满高于设计容量：估算值上限为 100%")
 
 -- 寄存器越界（当没读到）和读失败都不用 790 冒充。
 gauge_word = 0xFFFF
@@ -227,10 +227,24 @@ Assert.eq(basic.reading.charge_full_mah, 941)
 Assert.eq(basic.reading.charge_now_mah, 860)
 Assert.eq(basic.reading.charge_design_mah, 941)
 Assert.eq(basic.reading.cycles, 112)
-Assert.is_nil(basic.reading.health_pct, "充满等于设计容量：无法判断")
+Assert.eq(basic.reading.health_pct, 100, "充满等于设计容量：仍显示电量计估算值")
 Assert.is_true(basic.supported)
 Assert.eq(basic.reading.voltage_v, 4.059)
 Assert.eq(basic.reading.current_ma, -124)
+
+-- 用户反馈：充满与设计都是 1293 mAh，循环 483 次；有读数不能当成读不到。
+tree = {
+    ["/sys/class/power_supply/bd71827_bat/type"] = "Battery\n",
+    ["/sys/class/power_supply/bd71827_bat/charge_full"] = "1293000\n",
+    ["/sys/class/power_supply/bd71827_bat/charge_full_design"] = "1293000\n",
+    ["/sys/class/power_supply/bd71827_bat/charge_now"] = "1556000\n",
+    ["/sys/class/power_supply/bd71827_bat/battery_cycle"] = "483\n",
+}
+local equal = Probe.read(fs())
+Assert.is_true(equal.supported)
+Assert.eq(equal.reading.health_pct, 100)
+Assert.eq(equal.reading.charge_now_mah, 1556)
+Assert.eq(equal.reading.cycles, 483)
 
 -- 多块电池：容量求和，健康度 = 总充满 / 总设计；没设计容量的不参与。
 tree = {
@@ -254,3 +268,8 @@ Assert.eq(pair.reading.charge_now_mah, 1500)
 Assert.eq(pair.reading.health_pct, 75)
 Assert.eq(pair.reading.capacity, 50)
 Assert.eq(pair.reading.cycles, 30)
+
+tree["/sys/class/power_supply/bat0/charge_full"] = "3000000\n"
+Assert.eq(Probe.read(fs()).reading.health_pct, 100, "多电池总充满等于总设计容量")
+tree["/sys/class/power_supply/bat0/charge_full"] = "3500000\n"
+Assert.eq(Probe.read(fs()).reading.health_pct, 100, "多电池按总容量计算后再限制上限")

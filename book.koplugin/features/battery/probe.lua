@@ -1,7 +1,8 @@
 --[[--
 读 Linux 电源节点，算出电池健康度和总容量。
 
-健康度 = 现在充满 / 设计容量，两边都先换成毫安时再除。多块电池（有设计容量的）按毫安时求和。
+健康度 = 现在充满 / 设计容量（最高 100%），只是电量计估算，不代表实际老化程度。
+两边都先换成毫安时再除。多块电池（有设计容量的）按毫安时求和。
 内核约定是微伏、微安、微安时，bd71827 遵守。Kindle 的 max77696 / max77796 不遵守：
 电压写成毫伏，电流写成毫安，charge_now 和 charge_full 写成毫安时，
 只有 charge_full_design 仍是微安时。单位由 `MILLI_DRIVERS` 按节点名决定，不靠数值大小猜；
@@ -209,16 +210,6 @@ local function reading(name, values, fs)
     }
 end
 
---- 充满不低于设计容量时电量计没学到衰减（旧机器常见，FullCAP 还会略高于设计值），
---- 算出 100% 是假的，返回 nil 让界面说「无法判断」。
----@param full number
----@param design number
----@return number|nil
-local function health(full, design)
-    if full >= design then return nil end
-    return full / design * 100
-end
-
 --- 多块电池合成一份：容量求和，健康度 = 总充满 / 总设计；电压、温度、状态取第一块。
 ---@param rows table[]
 ---@return table
@@ -226,7 +217,7 @@ local function total(rows)
     local out = {}
     for k, v in pairs(rows[1]) do out[k] = v end
     if #rows == 1 then
-        out.health_pct = health(out.charge_full_mah, out.charge_design_mah)
+        out.health_pct = math.min(out.charge_full_mah / out.charge_design_mah * 100, 100)
         return out
     end
     local full, design, now = 0, 0, 0
@@ -242,7 +233,7 @@ local function total(rows)
     out.charge_full_mah = full
     out.charge_design_mah = design
     out.charge_now_mah = now
-    out.health_pct = health(full, design)
+    out.health_pct = math.min(full / design * 100, 100)
     if now > 0 then out.capacity = now / full * 100 end
     return out
 end
