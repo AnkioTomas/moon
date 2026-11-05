@@ -290,6 +290,19 @@ function XrayDB.removeIdentity(source_id, stable_id)
     return true
 end
 
+--- 清空这本书的全部 X-Ray 数据，包括实体、续扫游标、墓碑和已识别章节。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function XrayDB.reset(source_id, stable_id)
+    return DB.transaction(function()
+        for _idx, tbl in ipairs(TABLES) do
+            if not DB.removeIdentity(tbl, source_id, stable_id) then return false end
+        end
+        return true
+    end) == true
+end
+
 --- 退出登录：删掉这个源的全部 X-Ray 行。不另起事务。
 ---@param source_id string
 ---@return boolean

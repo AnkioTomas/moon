@@ -4,6 +4,7 @@ local Assert = require("support.assert")
 
 local calls = {}
 local fail_commit = false
+local fail_statement
 local connection = {
     exec = function(connection, sql)
         calls[#calls + 1] = { sql = sql, args = {} }
@@ -11,6 +12,7 @@ local connection = {
     end,
     close = function() end,
     prepare = function(connection, sql)
+        if fail_statement and sql:find(fail_statement, 1, true) then error("statement failed") end
         local call = { sql = sql }
         calls[#calls + 1] = call
         return {
@@ -84,3 +86,23 @@ for _idx, c in ipairs(calls) do
 end
 Assert.eq(table.concat(removed, ","), "xray_entities,xray_scan,xray_removed,xray_chapter")
 Assert.len(calls, 4, "撕墓碑不另起事务")
+
+-- 重置所有 X-Ray 数据在同一事务内完成，单表失败时不留下部分清理结果。
+calls = {}
+Assert.is_true(XrayDB.reset("moon", "b1"))
+Assert.eq(calls[1].sql, "BEGIN IMMEDIATE;")
+local reset_tables = {}
+for _idx, c in ipairs(calls) do
+    local tbl = c.sql:match("^DELETE FROM ([%w_]+)")
+    if tbl then reset_tables[#reset_tables + 1] = tbl end
+end
+Assert.eq(table.concat(reset_tables, ","), "xray_entities,xray_scan,xray_removed,xray_chapter")
+Assert.eq(calls[#calls].sql, "COMMIT;")
+
+calls = {}
+fail_statement = "DELETE FROM xray_removed"
+Assert.is_false(XrayDB.reset("moon", "b1"))
+Assert.eq(calls[#calls].sql, "ROLLBACK;")
+fail_statement = nil
+
+return true
