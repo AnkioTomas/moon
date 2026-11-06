@@ -98,6 +98,16 @@ Assert.eq(zero.entry.chapterId, 102)
 Assert.is_nil(CP.pick({}, {}))
 Assert.is_nil(CP.pick(nil, nil))
 
+-- 服务端已读完、本机重新打开留下 1%：仍按已读完处理，主线顺延下一卷。
+local reread = CP.pick({
+    vol(101, "第 1 卷", 100, 100),
+    vol(102, "第 2 卷", 100, 100),
+    vol(103, "第 3 卷", 100, 0),
+}, { fraction = function(e) return e.chapterId == 102 and 0.01 or nil end })
+Assert.eq(reread.entry.chapterId, 103, "已读完的卷不会被本机低进度拖回主线")
+Assert.eq(reread.kind, "continue")
+
+
 -- 卷名：优先标题；空 / 退化成系列名时兜底第 N 卷
 Assert.eq(CP.label({ idx = 3, title = "ONE PIECE (3)" }, "航海王"), "ONE PIECE (3)")
 Assert.eq(CP.label({ idx = 3, title = "" }, "航海王"), "第 3 卷")
