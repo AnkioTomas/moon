@@ -58,6 +58,18 @@ show.run({ ui = ui })
 Assert.eq(store.fanqie.show_paragraph_reviews, false)
 Assert.is_nil(store.wechat)
 
+local zhihu = { id = "zhihu", chapterReviewHotspotsAsync = function() end }
+identity = { source_id = "zhihu", stable_id = "1/2", source = zhihu }
+Assert.is_true(show.available({ ui = ui }), "整篇 EPUB 的章末段评也有阅读开关")
+Assert.is_false(show.active())
+show.run({ ui = ui })
+Assert.is_true(store.zhihu.show_paragraph_reviews)
+Assert.is_true(show.active())
+identity = { source_id = "zhihu", stable_id = "1", chapter_idx = 3, source = zhihu }
+show.run({ ui = ui })
+Assert.is_false(store.zhihu.show_paragraph_reviews, "长篇与短篇共用知乎开关")
+Assert.is_nil(store.wechat, "知乎章末段评不能误写微信开关")
+
 wechat_on = true
 identity = { source_id = "local", stable_id = "/a.epub", source = { id = "local" } }
 Assert.is_true(show.available({ ui = ui }), "本地书借微信段评")

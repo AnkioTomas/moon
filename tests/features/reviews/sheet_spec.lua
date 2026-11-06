@@ -78,6 +78,26 @@ do -- 回复页走 paragraphReviewRepliesAsync，评论 id 在 spot.range
     Assert.is_false(fake.more)
 end
 
+do
+    local offsets = {}
+    local fake = setmetatable({
+        identity = { source = { paragraphReviewPageAsync = function(_self, _identity, _range, offset, cb)
+            offsets[#offsets + 1] = offset
+            cb({ items = { { id = tostring(#offsets) } }, total = 2, max_idx = "sr1:opaque",
+                more = #offsets == 1 })
+        end } },
+        spot = { range = "chapter", text = "本章", total = 2 },
+        more = true, max_idx = 0, items = {}, page = 1,
+        paginate = function(self) self.pages = { { 1, #self.items } } end,
+        refresh = function() end,
+    }, { __index = Sheet })
+    fake:load()
+    fake:load()
+    Assert.eq(offsets[2], "sr1:opaque", "评论列表原样传回字符串游标")
+    Assert.len(fake.items, 2)
+    Assert.is_false(fake.more)
+end
+
 -- 放得下照常同页。
 pages = paginate(20, { 30, 30 })
 Assert.len(pages, 1)

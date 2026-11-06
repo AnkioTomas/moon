@@ -267,3 +267,85 @@ marks:updateView()
 Assert.len(marks:marks(), 0, "没关联不标")
 package.loaded["source.registry"] = real_registry
 Linked.getFor, Linked.chapterHotspotsAsync = real_get_for, real_borrow
+
+-- 章末目标不读文档文件：短篇整本 EPUB 与长篇章节都只在文档末页显示。
+local end_source = { calls = 0, enabled = false }
+function end_source:paragraphReviewsEnabled() return self.enabled end
+function end_source:chapterReviewHotspotsAsync(_identity, cb)
+    self.calls = self.calls + 1
+    cb({ { range = "section", text = "本章", total = 4, badge = "4",
+        heading = "章节评论", anchor = "moon-chapter-reviews" } })
+    return { cancel = function() end }
+end
+local current_page, end_lookups = 1, 0
+ui.getCurrentPage = function() return current_page end
+ui.document.getVisiblePageCount = function() return 1 end
+ui.document.getPageCount = function() return 5 end
+ui.document.getPageMargins = function() return { right = 0, bottom = 0 } end
+ui.document.getNormalizedXPointer = function() return nil end
+ui.document.getTextFromPositions = function(_self, first, last, no_selection)
+    end_lookups = end_lookups + 1
+    Assert.eq(first, last)
+    Assert.eq(first.x, 99)
+    Assert.eq(first.y, 99)
+    Assert.is_true(no_selection, "定位不改变原生选区")
+    return { sboxes = { { x = 1, y = 10, w = 20, h = 10 }, { x = 1, y = 30, w = 30, h = 10 } } }
+end
+identity = { source_id = "zhihu", stable_id = "1/2", source = end_source }
+session = { identity = identity }
+Assert.len(marks:marks(), 0)
+Assert.eq(end_source.calls, 0, "关闭章末段评时不发请求")
+end_source.enabled = true
+Assert.len(marks:marks(), 0, "短篇前面的页不显示章末评论")
+Assert.eq(end_lookups, 0, "没到末页不问文本框")
+current_page = 5
+Assert.len(marks:marks(), 1)
+Assert.eq(end_source.calls, 1, "翻页不重拉评论")
+Assert.eq(marks.current[1].badge, "4")
+Assert.eq(marks.current[1].heading, "章节评论")
+Assert.eq(marks.current[1].boxes[1].y, 50, "旧缓存的入口在正文下方，不贴在最后一行上")
+marks.current[1].tap()
+Assert.eq(opened.identity, identity)
+Assert.eq(opened.spot.range, "section")
+identity = { source_id = "zhihu", stable_id = "1", chapter_idx = 2, source = end_source }
+session = { identity = identity }
+Assert.len(marks:marks(), 1)
+Assert.eq(end_source.calls, 2, "长篇换章使用新目标")
+marks.current[1].tap()
+Assert.eq(opened.identity.chapter_idx, 2)
+
+current_page = 4
+ui.document.getVisiblePageCount = function() return 2 end
+Assert.len(marks:marks(), 1, "双栏的右栏到达末页也显示入口")
+local scroll_pos = 409
+ui.view.view_mode = "scroll"
+ui.view.footer = { getHeight = function() return 10 end }
+ui.document.info = { doc_height = 500 }
+ui.document.getCurrentPos = function() return scroll_pos end
+Assert.len(marks:marks(), 0, "滚动模式尚未到底不显示入口")
+scroll_pos = 410
+Assert.len(marks:marks(), 1, "滚动到底后显示入口，不依赖顶端页码恰好为末页")
+end_source.enabled = false
+Assert.len(marks:marks(), 0, "关闭开关立即移除章末入口")
+Assert.eq(end_source.calls, 2, "关闭不触发重新拉取或借其它源")
+end_source.enabled = true
+Assert.len(marks:marks(), 1, "再次打开开关即恢复入口")
+Assert.eq(end_source.calls, 3)
+
+ui.document.getNormalizedXPointer = function(_document, xp)
+    if xp == "#moon-chapter-reviews" then return "/html/body/div" end
+end
+ui.document.getScreenPositionFromXPointer = function() return 45, 3 end
+marks.render_key = nil
+Assert.eq(marks:marks()[1].boxes[1].y, 45, "新缓存直接使用排版预留区，不猜正文结束位置")
+
+ui.document.getNormalizedXPointer = function(_document, xp)
+    if xp == "/body/DocFragment" or xp == "/body/DocFragment[1]" or xp == "/body/DocFragment[2]" then return xp end
+    if xp == "#_doc_fragment_1_ moon-chapter-reviews" then return "/body/DocFragment[2]/body/div" end
+end
+ui.document.getPageXPointer = function() return "/body/DocFragment[1]/body/p/text().0" end
+marks.render_key = nil
+Assert.eq(marks:marks()[1].boxes[1].y, 45, "EPUB 末页可同时包含多个 spine，仍能找到最后一个的章评区")
+marks.data[1].total, marks.data[1].badge = 0, "0"
+marks.render_key = nil
+Assert.len(marks:marks(), 1, "独立章节评论区显示 0，不被段落热点的零条过滤规则删掉")
