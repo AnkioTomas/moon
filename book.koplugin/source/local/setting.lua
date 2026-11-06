@@ -129,6 +129,13 @@ function Setting.isKindleDocuments(path)
     return type(path) == "string" and path:gsub("/+$", "") == "/mnt/us/documents"
 end
 
+--- 路径是否含不允许的字符。允许英文、数字、下划线、连字符和斜杠；nil 不算。
+---@param path string|nil
+---@return boolean
+function Setting.hasNonAlnum(path)
+    return type(path) == "string" and path:find("[^A-Za-z0-9_/-]") ~= nil
+end
+
 --- 列出可作书库的子目录名（排序，跳过 .sdr）；目录不可读（如 Android 的 /storage）返回 nil, err。
 ---@param path string
 ---@return string[]|nil, string|nil
@@ -194,12 +201,17 @@ function Setting.open(on_saved)
             require("source.registry").reload()
             if type(on_saved) == "function" then on_saved() end
         end
-        -- Kindle 的 documents 先劝一句：列表不关，「重新选择」接着挑子目录
-        local warn = Setting.isKindleDocuments(path)
-        local items = { { text = _("使用此目录"), icon = "check", keep_open = warn, callback = function()
-            if not warn then return save() end
+        -- 先劝一句再决定：列表不关，「重新选择」接着挑。documents 优先于字符提醒。
+        local warning
+        if Setting.isKindleDocuments(path) then
+            warning = _("这是 Kindle 的 documents 目录，里面有系统文件、.sdr 边车和 Kindle 书库的书，扫描会慢且杂。建议在里面新建一个子文件夹专门放书。")
+        elseif Setting.hasNonAlnum(path) then
+            warning = _("这个路径含有英文和数字以外的字符。建议换成只含英文和数字的目录。")
+        end
+        local items = { { text = _("使用此目录"), icon = "check", keep_open = warning ~= nil, callback = function()
+            if not warning then return save() end
             require("ui.themes.widgets.confirm"):new{
-                text = _("这是 Kindle 的 documents 目录，里面有系统文件、.sdr 边车和 Kindle 书库的书，扫描会慢且杂。建议在里面新建一个子文件夹专门放书。"),
+                text = warning,
                 ok_text = _("仍然使用"),
                 cancel_text = _("重新选择"),
                 ok_callback = function()
