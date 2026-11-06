@@ -21,6 +21,7 @@ local DB = require("utils.db")
 local BookDB = require("book.books_db")
 local ChapterDB = require("book.chapters_db")
 local logger = require("utils.log")
+local _ = require("gettext")
 
 local Store = {}
 
@@ -50,6 +51,21 @@ function Store.rememberMany(books)
         return
     end
     BookDB.upsertRemoteMany(payload)
+end
+
+--- 保存单本详情，不改变书架成员关系或覆盖本地脏字段。
+---@param book Book
+---@return Book|nil
+---@return string|nil
+function Store.rememberDetail(book)
+    local existing = BookDB.get(book.source_id, book.stable_id)
+    book.deleted = existing and existing.deleted
+    book.meta = book.meta or {}
+    book.meta.detail_at = os.time()
+    if not DB.transaction(function() return BookDB.upsertRemote(book, true) end) then
+        return nil, _("书籍信息保存失败")
+    end
+    return BookDB.get(book.source_id, book.stable_id)
 end
 
 ---@param path string|nil

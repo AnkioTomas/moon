@@ -1,0 +1,17 @@
+--[[--
+书源元信息：id / 名称 / 类型，加上启用页展示用的说明与能力清单。`init.lua` 的 `meta()` 直接返回本表。
+
+得到 PC（www.dedao.cn）用得到 App 扫码。书架是「已购 - 电子书」。正文是网页同款 AES 的 SVG。
+
+@module source.dedao._meta
+--]]
+
+local _ = require("gettext")
+
+return {
+    id = "dedao",
+    name = _("得到"),
+    type = "chapter",
+    description = _("得到电子书书架与在线阅读"),
+    abilities = { _("搜索与发现"), _("书架同步"), _("进度同步"), _("VIP 章节") },
+}

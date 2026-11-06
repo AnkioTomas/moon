@@ -36,6 +36,11 @@
 ---@field tar string|nil 微信章节资源包 URL
 ---@field words integer|nil 微信章节字数（按篇幅对齐本地书用）
 ---@field raw string|nil iRead 章节对象原样 JSON（开章接口要整个带回）
+---@field content_url string|nil 源端正文地址或内容编号
+---@field slice boolean|nil 本章是同一份正文中的段落切片
+---@field end_pid string|nil 段落切片的结束编号（不含）
+---@field sec_id string|nil 源端阅读位置上报使用的章节编号
+---@field word_count number|nil 源端章节字数（阅读位置上报使用）
 
 local Paths = require("utils.paths")
 local Progress = require("book.progress")
