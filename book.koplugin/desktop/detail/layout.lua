@@ -27,6 +27,7 @@ local ACTIONS = {
     clear_cache = "clearCache",
     restore = "restore",
     delete = "deleteBook",
+    volumes = "chooseVolume",
 }
 
 return function(Detail)
