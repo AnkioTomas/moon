@@ -212,6 +212,20 @@ Assert.len(highlight.ui.view.highlight.temp[3], 1, "补算的盒落进 temp")
 Assert.eq(highlight.selected_text.sboxes[1].x, 10, "sboxes 回填，菜单锚点也准")
 Assert.len(dirty, 1, "补刷一次选区")
 
+-- 情形二·补：只有 pboxes(Kindle/KOPT 只有页面盒)——pboxes 是页面坐标，
+-- 不能当屏幕盒上屏，也不能因为它非空就跳过 getScreenBoxesFromPositions。
+-- 应仍按 pos0/pos1 现算屏幕盒落进 temp。
+highlight.selected_text = {
+    text = "Mina", pos0 = { page = 4 }, pos1 = { page = 4 },
+    pboxes = { { x = 900, y = 900, w = 5, h = 5 } }, -- 页面坐标，故意和屏幕盒差远
+}
+dirty = {}
+ReaderHighlight.onHold(highlight)
+Assert.eq(doc_boxes_calls, 2, "只有 pboxes 也按位置补算，不拿页面坐标顶替屏幕坐标")
+Assert.eq(highlight.ui.view.highlight.temp[4][1].x, 10, "落进 temp 的是现算屏幕盒，不是 pboxes 页面坐标")
+Assert.eq(highlight.ui.view.highlight.temp[4], highlight.selected_text.sboxes, "屏幕盒回填 selected_text")
+Assert.len(dirty, 1, "补刷一次选区")
+
 -- 情形三：补算也拿不到 —— 不画也不崩，松手菜单照旧。
 highlight.selected_text = { text = "Mina", pos0 = { page = 5 }, pos1 = { page = 5 } }
 highlight.ui.document.getScreenBoxesFromPositions = nil

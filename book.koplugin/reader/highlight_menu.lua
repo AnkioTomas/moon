@@ -274,14 +274,16 @@ local function patchShowMenu()
     ReaderHighlight.onShowHighlightMenu = require("ui.guard").wrap("highlight menu", showMenu)
 end
 
---- 选区首尾的屏幕盒。没有盒（或拿不到）返回 nil。
+--- 选区首尾的屏幕盒。没有屏幕盒（或拿不到）返回 nil。
+--- 只用 `sboxes`：它是屏幕坐标，`view.highlight.temp` 要的正是屏幕盒。
+--- `pboxes` 是页面坐标（KOPT 的 pbox 与 sbox 明确分开），Kindle/KOPT 文档
+--- 常只有 pboxes；拿页面坐标当屏幕盒会画错位置，还会让调用方以为"有盒"而跳过
+--- `getScreenBoxesFromPositions` 的现算。所以这里不回退 pboxes：
+--- 没有 sboxes 就返回 nil，交给调用方按 pos0/pos1 现算，拿不到就不画。
 ---@param selected table selected_text
 ---@return table[]|nil
 local function selectedBoxes(selected)
     local boxes = selected.sboxes
-    if not boxes or #boxes == 0 then
-        boxes = selected.pboxes
-    end
     if boxes and #boxes > 0 then
         return boxes
     end
