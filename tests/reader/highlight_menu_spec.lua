@@ -36,7 +36,22 @@ local factories = {
     end,
 }
 
-local highlight = { _highlight_buttons = factories }
+-- ReaderHighlight 类 stub 带原生 onHold / onHoldRelease：补丁要包它们，
+-- 装上时就看得见原生方法，不用像别的补丁那样等补丁装完再摆回来。
+local hold_returns = true
+local ReaderHighlight = {
+    onHold = function(self, arg, ges)
+        self.hold_arg = { arg = arg, ges = ges }
+        return hold_returns
+    end,
+    onHoldRelease = function(self)
+        return "native"
+    end,
+}
+package.preload["apps/reader/modules/readerhighlight"] = function() return ReaderHighlight end
+
+-- highlight 实例经 __index 走类 stub：self.selected_text / self:onHoldRelease() 都在类上。
+local highlight = setmetatable({ _highlight_buttons = factories }, { __index = ReaderHighlight })
 local ui = { highlight = highlight }
 
 local HighlightMenu = require("reader.highlight_menu")
@@ -100,8 +115,6 @@ local order = HighlightMenu.order()
 Assert.eq(order[#order], "12_0_make_handmade_toc_item")
 
 -- 弹窗时已注册的就是全部：卸掉的插件按钮从设置页消失，显隐设置保留
-local ReaderHighlight = {}
-package.preload["apps/reader/modules/readerhighlight"] = function() return ReaderHighlight end
 package.preload["ui/widget/buttondialog"] = function()
     return { new = function(_, o) o.movable = { dimen = {} } return o end }
 end
@@ -125,3 +138,117 @@ Assert.not_nil(settings.reader_popup_seen["12_0_make_handmade_toc_item"])
 Assert.is_false(settings.reader_popup_buttons["12_0_make_handmade_toc_item"], "显隐设置不动")
 Assert.not_nil(highlight.highlight_dialog)
 Assert.is_nil(highlight.highlight_dialog._added_widgets)
+
+-- 按住起手即画高亮：原生选词后 getWordFromPosition 不给盒子，temp[page] 会是 nil，
+-- 高亮不画，看着像没反应，要等滑动才显形。这里补算盒子落进 temp 并刷选区。
+local dirty = {}
+package.loaded["ui/uimanager"] = nil
+package.preload["ui/uimanager"] = function()
+    local UIManager = {}
+    function UIManager:show() end
+    function UIManager:setDirty(widget, mode)
+        dirty[#dirty + 1] = mode
+    end
+    function UIManager:close() end
+    return UIManager
+end
+local attach_calls = 0
+package.loaded["reader.selection"] = nil
+package.preload["reader.selection"] = function()
+    return {
+        enabled = function() return false end,
+        attach = function() attach_calls = attach_calls + 1 return true end,
+        screenBoxes = function() return nil end,
+    }
+end
+package.loaded["ui.guard"] = nil
+local guard_isolated = false
+package.preload["ui.guard"] = function()
+    return {
+        wrap = function(_label, fn) return fn end,
+        call = function(_label, fn)
+            if guard_isolated then return end
+            fn()
+        end,
+    }
+end
+
+-- 情形一：原生给了盒子 —— 只要把 temp 落好并刷屏，不另算。
+local doc_boxes_calls = 0
+highlight.highlight_dialog = nil -- 划词菜单留下的；按住不弹自己弹的窗
+highlight.ui = {
+    paging = true,
+    document = {
+        getScreenBoxesFromPositions = function()
+            doc_boxes_calls = doc_boxes_calls + 1
+            return { { x = 10, y = 20, w = 30, h = 12 } }
+        end,
+    },
+    view = {
+        highlight = { temp = {} },
+    },
+}
+-- ReaderHighlight 实例自身的 view（真实 KOReader 里就是 ui.view）
+highlight.view = highlight.ui.view
+highlight.selected_text = {
+    text = "Mina", pos0 = { page = 7 }, pos1 = { page = 7 },
+    sboxes = { { x = 1, y = 2, w = 3, h = 4 } },
+}
+hold_returns = true
+dirty = {}
+ReaderHighlight.onHold(highlight)
+Assert.eq(highlight.ui.view.highlight.temp[7], highlight.selected_text.sboxes, "原生给了盒就照用")
+Assert.eq(doc_boxes_calls, 0, "有盒不补算")
+Assert.len(dirty, 1, "补刷一次选区")
+Assert.eq(dirty[1], "ui")
+Assert.is_nil(highlight.highlight_dialog, "按住不弹菜单")
+
+-- 情形二：原生没给盒子 —— 按 pos0/pos1 补算，落进 temp，高亮当场画出来。
+highlight.selected_text = { text = "Mina", pos0 = { page = 3 }, pos1 = { page = 3 } }
+dirty = {}
+ReaderHighlight.onHold(highlight)
+Assert.eq(doc_boxes_calls, 1, "没盒才补算")
+Assert.len(highlight.ui.view.highlight.temp[3], 1, "补算的盒落进 temp")
+Assert.eq(highlight.selected_text.sboxes[1].x, 10, "sboxes 回填，菜单锚点也准")
+Assert.len(dirty, 1, "补刷一次选区")
+
+-- 情形二·补：只有 pboxes(Kindle/KOPT 只有页面盒)——pboxes 是页面坐标，
+-- 不能当屏幕盒上屏，也不能因为它非空就跳过 getScreenBoxesFromPositions。
+-- 应仍按 pos0/pos1 现算屏幕盒落进 temp。
+highlight.selected_text = {
+    text = "Mina", pos0 = { page = 4 }, pos1 = { page = 4 },
+    pboxes = { { x = 900, y = 900, w = 5, h = 5 } }, -- 页面坐标，故意和屏幕盒差远
+}
+dirty = {}
+ReaderHighlight.onHold(highlight)
+Assert.eq(doc_boxes_calls, 2, "只有 pboxes 也按位置补算，不拿页面坐标顶替屏幕坐标")
+Assert.eq(highlight.ui.view.highlight.temp[4][1].x, 10, "落进 temp 的是现算屏幕盒，不是 pboxes 页面坐标")
+Assert.eq(highlight.ui.view.highlight.temp[4], highlight.selected_text.sboxes, "屏幕盒回填 selected_text")
+Assert.len(dirty, 1, "补刷一次选区")
+
+-- 情形三：补算也拿不到 —— 不画也不崩，松手菜单照旧。
+highlight.selected_text = { text = "Mina", pos0 = { page = 5 }, pos1 = { page = 5 } }
+highlight.ui.document.getScreenBoxesFromPositions = nil
+dirty = {}
+ReaderHighlight.onHold(highlight)
+Assert.is_nil(highlight.ui.view.highlight.temp[5], "拿不到盒不写 nil 覆盖")
+Assert.len(dirty, 0, "没盒不刷")
+Assert.eq(ReaderHighlight.onHoldRelease(highlight), "native", "松手仍走原生，不拦")
+
+-- 情形四：原生没接住（按在图片 / 页外 / 长按压成"什么都不做"）—— 完全不碰。
+local before_text = highlight.selected_text
+highlight.selected_text = nil
+hold_returns = false
+Assert.is_false(ReaderHighlight.onHold(highlight))
+Assert.is_nil(highlight.selected_text, "没选上不自己选")
+Assert.len(dirty, 0, "没选上不刷")
+hold_returns = true
+highlight.selected_text = before_text
+
+-- 补算抛错只隔离，不影响原生起手返回值。
+local orig_boxes = highlight.ui.document.getScreenBoxesFromPositions
+highlight.ui.document.getScreenBoxesFromPositions = function() error("boom") end
+guard_isolated = true -- guard 隔离：这段里出错静默，不当成没处理
+Assert.is_true(ReaderHighlight.onHold(highlight))
+highlight.ui.document.getScreenBoxesFromPositions = orig_boxes
+guard_isolated = false
