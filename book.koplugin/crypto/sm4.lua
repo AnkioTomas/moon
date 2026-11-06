@@ -52,12 +52,13 @@ local function rotl(x, n)
     return bor(lshift(x, n), rshift(x, 32 - n))
 end
 
-local function tau(a)
+local function tau(a, sbox)
+    sbox = sbox or SBOX
     local x = u32(a)
-    local b0 = SBOX[math.floor(x / 16777216) + 1]
-    local b1 = SBOX[math.floor(x / 65536) % 256 + 1]
-    local b2 = SBOX[math.floor(x / 256) % 256 + 1]
-    local b3 = SBOX[x % 256 + 1]
+    local b0 = sbox[math.floor(x / 16777216) + 1]
+    local b1 = sbox[math.floor(x / 65536) % 256 + 1]
+    local b2 = sbox[math.floor(x / 256) % 256 + 1]
+    local b3 = sbox[x % 256 + 1]
     return ((b0 * 256 + b1) * 256 + b2) * 256 + b3
 end
 
@@ -104,14 +105,20 @@ local function expand(key)
     return rk
 end
 
-local function crypt_block(block, rk)
+---@param block string 16 字节
+---@param rk number[] 已展开的 32 个轮密钥
+---@param sbox number[]|nil 256 字节替换表；缺省为标准 SM4
+---@return string
+local function crypt_block(block, rk, sbox)
     local x = load_words(block)
     for i = 1, 32 do
         local t = u32(bxor(x[i + 1], x[i + 2], x[i + 3], rk[i]))
-        x[i + 4] = u32(bxor(x[i], ell(tau(t))))
+        x[i + 4] = u32(bxor(x[i], ell(tau(t, sbox))))
     end
     return store_word(x[36]) .. store_word(x[35]) .. store_word(x[34]) .. store_word(x[33])
 end
+
+Sm4.block = crypt_block
 
 local function round_keys(key, decrypt)
     local rk = expand(key)
