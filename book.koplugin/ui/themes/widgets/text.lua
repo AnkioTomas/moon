@@ -73,6 +73,31 @@ local function bold(opts, role)
     return BOLD[role] == true
 end
 
+---@param text string
+---@param images table<string, { url: string, headers?: table<string, string> }>
+---@return string
+---@return table[]
+local function inlineText(text, images)
+    local Utils = require("utils.text")
+    local out, slots, offset, pos = {}, {}, 0, 1
+    for first, code, after in text:gmatch("()(%b[])()") do
+        local before = text:sub(pos, first - 1)
+        out[#out + 1] = before
+        offset = offset + #Utils.chars(before)
+        if images[code] then
+            out[#out + 1] = "\227\128\128"
+            slots[#slots + 1] = { pos = offset + 1, image = images[code], text = code }
+            offset = offset + 1
+        else
+            out[#out + 1] = code
+            offset = offset + #Utils.chars(code)
+        end
+        pos = after
+    end
+    out[#out + 1] = text:sub(pos)
+    return table.concat(out), slots
+end
+
 --- 单行文字。
 ---@param role string caption/body/title/hero
 ---@param text string
@@ -96,10 +121,12 @@ end
 ---@param role string caption/body/title/hero
 ---@param text string
 ---@param width number 物理像素
----@param opts table|nil color/bg/transparent/bold/face/align/height/ellipsis/max_lines
+---@param opts table|nil color/bg/transparent/bold/face/align/height/ellipsis/max_lines/inline_images
 ---@return table TextBoxWidget 放没放下看 getAllLineCount() > getVisLineCount()
 function Text.box(role, text, width, opts)
     opts = opts or {}
+    local slots
+    if opts.inline_images then text, slots = inlineText(text, opts.inline_images) end
     local theme = Theme.current()
     local ink = Theme.color(opts.color or (BOLD[role] and theme.color.accent or theme.color.ink))
     local bg = Theme.color(opts.bg or theme.color.page)
@@ -136,6 +163,33 @@ function Text.box(role, text, width, opts)
         local height = opts.max_lines * box:getLineHeight()
         box:free()
         box = build(height)
+    end
+    if slots and #slots > 0 then
+        local size = box.face.size
+        for _idx, slot in ipairs(slots) do
+            box[#box + 1] = require("ui.themes.widgets.image").widget{
+                src = slot.image.url, headers = slot.image.headers, width = size, height = size,
+                style = {}, alpha = true, stretch = true,
+                fallback = Text.line("caption", slot.text, { width = size }),
+            }
+        end
+        local paint, free = box.paintTo, box.free
+        function box:paintTo(bb, x, y)
+            paint(self, bb, x, y)
+            for idx, slot in ipairs(slots) do
+                local px, py, line_num = self:_getXYForCharPos(slot.pos)
+                local line = self.vertical_string_list[self.virtual_line_num + line_num - 1]
+                if py >= 0 and py + size <= self:getSize().h
+                    and (not line.end_offset or slot.pos <= line.end_offset)
+                    and slot.pos ~= line.idx_to_substitute_with_ellipsis then
+                    self[idx]:paintTo(bb, x + px, y + py + math.floor((self:getLineHeight() - size) / 2))
+                end
+            end
+        end
+        function box:free(full)
+            for _idx, image in ipairs(self) do image:free(full) end
+            free(self, full)
+        end
     end
     return box
 end
