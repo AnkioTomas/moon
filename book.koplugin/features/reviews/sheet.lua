@@ -47,12 +47,12 @@ local MAX_THUMBS = 3
 local IMAGE_HEADERS = { Referer = "https://fanqienovel.com/" }
 
 --- 全屏查看段评配图；按比例缩进屏幕（不拉变形），点任意处或返回键退出。
----@param url string
-local function showImage(url)
+---@param picture { url: string, headers?: table<string, string> }
+local function showImage(picture)
     local viewer = Modal:new{ covers_fullscreen = true, close_on_tap = true }
     local image = Image.widget{
-        src = url,
-        headers = IMAGE_HEADERS,
+        src = picture.url,
+        headers = picture.headers or IMAGE_HEADERS,
         width = viewer.dimen.w,
         height = viewer.dimen.h,
         stretch = true,
@@ -75,7 +75,7 @@ end
 ---@field cards table[] 按 items 下标缓存的卡片
 ---@field pages { [1]: integer, [2]: integer }[] 每页的 items 起止下标
 ---@field page integer
----@field max_idx integer
+---@field max_idx integer|string
 ---@field more boolean
 ---@field loaded boolean 首批已到
 ---@field job { cancel: fun() }|nil
@@ -186,13 +186,14 @@ function Sheet:card(i, avail)
     end
     local replies = self:replyLine(item)
     local replies_h = replies and replies:getSize().h + space or 0
-    local content = Text.box("body", body, w, { transparent = true, face = face })
+    local content = Text.box("body", body, w, { transparent = true, face = face, inline_images = item.inline_images })
     local room = (avail or self.body_h) - head:getSize().h - space - pics_h - replies_h
     local truncated = content:getSize().h > room
     if truncated then
         local lines = math.max(1, math.floor(room / content:getLineHeight()))
         content:free()
-        content = Text.box("body", body, w, { max_lines = lines, transparent = true, face = face })
+        content = Text.box("body", body, w, { max_lines = lines, transparent = true, face = face,
+            inline_images = item.inline_images })
     end
     local card = VerticalGroup:new{ align = "left", head, VerticalSpan:new{ width = space }, content }
     if pics then
@@ -207,13 +208,14 @@ function Sheet:card(i, avail)
         require("ui.themes.widgets.text_viewer"):new{
             title = _("段评") .. " · " .. item.author,
             text = body,
+            inline_images = item.inline_images,
         }:show()
     end or nil)
     return self.cards[i]
 end
 
 --- 评论配图缩略图一行（固定方块，保证分页高度可算）；至多 MAX_THUMBS 张，多出的在末尾标张数。
----@param images { url: string }[]
+---@param images { url: string, headers?: table<string, string> }[]
 ---@return table|nil
 function Sheet:thumbs(images)
     if #images == 0 then return nil end
@@ -225,8 +227,8 @@ function Sheet:thumbs(images)
         if n > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
         local image = images[n]
         row[#row + 1] = require("ui.themes.widgets.tap").wrap(
-            Image.widget{ src = image.url, headers = IMAGE_HEADERS, width = size, height = size },
-            function() showImage(image.url) end)
+            Image.widget{ src = image.url, headers = image.headers or IMAGE_HEADERS, width = size, height = size },
+            function() showImage(image) end)
     end
     if #images > MAX_THUMBS then
         row[#row + 1] = HorizontalSpan:new{ width = gap }
@@ -239,7 +241,7 @@ end
 ---@param item WechatReview
 ---@return table|nil
 function Sheet:replyLine(item)
-    local source = self.identity and self.identity.source
+    local source = self.identity and self.identity.source --[[@as ParagraphReviewSource|nil]]
     if self.reply_page or (item.replies or 0) <= 0 or not (source and source.paragraphReviewRepliesAsync) then
         return nil
     end

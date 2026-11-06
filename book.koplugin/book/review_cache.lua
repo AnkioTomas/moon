@@ -60,7 +60,7 @@ local function read(identity, kind, key)
     local payload, expire = DB.rowexec(
         [[SELECT payload, expire FROM review_cache
           WHERE source_id=? AND stable_id=? AND chapter_idx=? AND kind=? AND key=?;]],
-        identity.source_id, identity.stable_id, tonumber(identity.chapter_idx), kind, key)
+        identity.source_id, identity.stable_id, tonumber(identity.chapter_idx) or 0, kind, key)
     if not payload or (tonumber(expire) or 0) <= os.time() then return nil end
     return JSON.decode(payload)
 end
@@ -81,12 +81,12 @@ local function write(identity, kind, key, value)
     DB.exec(
         [[INSERT OR REPLACE INTO review_cache (source_id, stable_id, chapter_idx, kind, key, payload, expire)
           VALUES (?,?,?,?,?,?,?);]],
-        identity.source_id, identity.stable_id, tonumber(identity.chapter_idx), kind, key,
+        identity.source_id, identity.stable_id, tonumber(identity.chapter_idx) or 0, kind, key,
         JSON.encode(value), now + (count > 0 and TTL or EMPTY_TTL))
 end
 
 ---@param range string
----@param max_idx integer
+---@param max_idx integer|string
 ---@return string
 local function pageKey(range, max_idx)
     return range .. "\0" .. max_idx
@@ -102,7 +102,7 @@ end
 --- 某句某页的评论缓存（未过期才有）。
 ---@param identity ReviewCacheIdentity
 ---@param range string
----@param max_idx integer
+---@param max_idx integer|string
 ---@return table|nil
 function ReviewCache.page(identity, range, max_idx)
     return read(identity, "page", pageKey(range, max_idx))

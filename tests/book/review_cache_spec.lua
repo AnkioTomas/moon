@@ -180,6 +180,24 @@ do
     os.time = real
 end
 
+do
+    connected = true
+    local whole = { source_id = "zhihu", stable_id = "1/2" }
+    local page = fetcher({ items = { { id = "whole" } }, total = 2, max_idx = "sr1:opaque", more = true })
+    ReviewCache.pageAsync(whole, "chapter", 0, page.fetch, function() end)
+    ReviewCache.pageAsync(whole, "chapter", "sr1:opaque", page.fetch, function() end)
+    Assert.eq(ReviewCache.page(whole, "chapter", 0).items[1].id, "whole")
+    Assert.eq(ReviewCache.page(whole, "chapter", "sr1:opaque").max_idx, "sr1:opaque")
+    Assert.not_nil(rows[rowKey("zhihu", "1/2", 0, "page", "chapter\0" .. 0)],
+        "整本身份存为 chapter_idx=0，不向 NOT NULL 列写 nil")
+    connected = false
+    local got
+    ReviewCache.pageAsync(whole, "chapter", "sr1:opaque", page.fetch, function(v) got = v end)
+    Stubs.flush()
+    Assert.eq(got.items[1].id, "whole")
+    Assert.eq(page.calls, 2, "整本评论离线命中，不再联网")
+end
+
 package.preload["source.chapter"] = function()
     return { cacheRange = function(toc, range)
         if not range then return 0, #toc end

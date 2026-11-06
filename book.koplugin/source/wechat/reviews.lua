@@ -24,6 +24,8 @@ local Reviews = {}
 ---@class WechatReviewHotspot
 ---@field chapter_idx integer|nil 归属章序号
 ---@field badge string|nil 标记文案
+---@field heading string|nil 独立分隔区的标题
+---@field anchor string|nil 正文末尾预留区的 HTML id
 ---@field range string wire range，翻页时原样带回
 ---@field text string 原句
 ---@field total integer 段评总数
@@ -37,16 +39,17 @@ local Reviews = {}
 ---@field id string
 ---@field author string
 ---@field content string
+---@field inline_images table<string, { url: string, headers?: table<string, string> }>|nil 正文内表情占位符
 ---@field likes integer
 ---@field replies integer 二级回复条数；0 表示没有，列表上不给入口
 ---@field reply_to string|nil 这条是在回复谁（楼中楼），空则不是
----@field images { url: string, width: integer, height: integer }[]|nil 评论配图（目前只有番茄）
+---@field images { url: string, width?: integer, height?: integer, headers?: table<string, string> }[]|nil 评论配图
 ---@field time integer 秒
 
 ---@class WechatReviewPage
 ---@field items WechatReview[]
 ---@field total integer
----@field max_idx integer 下一页请求带回
+---@field max_idx integer|string 下一页请求带回
 ---@field more boolean
 
 --- readReviews 回包 → 有段评的热点（未定位）。

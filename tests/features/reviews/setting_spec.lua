@@ -7,7 +7,7 @@ package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
 local conf = { book_reviews_mark_style = "dashed", font_scale = 100 }
-local sources = { wechat = {}, qidian = { show_paragraph_reviews = true } }
+local sources = { wechat = {}, qidian = { show_paragraph_reviews = true }, zhihu = {} }
 local saved = {}
 package.preload["utils.settings"] = function()
     return {
@@ -24,6 +24,7 @@ package.preload["source.registry"] = function()
                 { id = "wechat", name = "微信读书", abilities = { "他人段评" } },
                 { id = "local", name = "本地书籍", abilities = { "书架同步" } },
                 { id = "qidian", name = "起点读书", abilities = { "书架同步", "他人段评" } },
+                require("source.zhihu._meta"),
             }
         end,
     }
@@ -46,7 +47,7 @@ Assert.eq(entries[1].group, "reader")
 Assert.eq(entries[1].order, 15)
 local sections = entries[1].page.sections()
 Assert.eq(sections[1].title, "账号")
-Assert.len(sections[1].rows, 2)
+Assert.len(sections[1].rows, 3, "知乎真实能力声明使它出现在阅读→段评设置")
 local wechat = sections[1].rows[1](600)
 local qidian = sections[1].rows[2](600)
 Assert.eq(wechat.title, "微信读书")
@@ -85,3 +86,11 @@ size.callback()
 Assert.eq(spin.fields[1].value, 100)
 spin.callback(140)
 Assert.eq(conf.font_scale, 140)
+
+local zhihu = entries[1].page.sections()[1].rows[3](600)
+Assert.eq(zhihu.title, "知乎盐选")
+Assert.eq(zhihu.kind, "toggle")
+Assert.eq(zhihu.status, "关")
+zhihu.callback()
+Assert.is_true(sources.zhihu.show_paragraph_reviews)
+Assert.eq(entries[1].page.sections()[1].rows[3](600).status, "开")

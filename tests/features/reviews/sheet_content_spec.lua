@@ -60,6 +60,16 @@ Assert.is_true(lastLines() < full_lines, "首页首条按剩余高度截断")
 Assert.is_true(first_card:getSize().h <= 90)
 Assert.is_true(type(first_card.onTapThemeArea) == "function", "截断后仍可点开全文")
 
+local inline_images = { ["[捂脸]"] = { url = "https://pic.test/emoticon.png" } }
+local rich_page = setmetatable({
+    theme = theme, inner_w = 500, body_h = 200, cards = {},
+    items = { { author = "Emoji author", content = long, likes = 0, time = 1, inline_images = inline_images } },
+}, { __index = Sheet })
+local rich_card = rich_page:card(1)
+Assert.eq(box_opts[#box_opts].opts.inline_images, inline_images, "段评预览交给主题文字渲染内联表情")
+rich_card:onTapThemeArea()
+Assert.eq(Kit.shown[#Kit.shown].inline_images, inline_images, "打开全文也保留表情")
+
 do -- 有回复数才出现入口；点开把评论 id 交给回复页。回复页本身不再往下开。
     local opened
     function Sheet.openReplies(_identity, item) opened = item.id end
@@ -117,3 +127,13 @@ Assert.is_true(displayed_image ~= nil, "预览使用点击的图片地址")
 Assert.is_true(displayed_image.image_opts.stretch, "全屏预览按比例缩进，不拉满变形")
 viewer.close_callback()
 Assert.is_true(displayed_image.cancelled, "关闭预览取消图片下载")
+
+local custom_headers = { Referer = "https://www.zhihu.com/" }
+local custom_image = { url = "https://pic.test/zhihu.jpg", headers = custom_headers }
+local thumbs = fake:thumbs({ custom_image })
+local thumbnail = Kit.find(thumbs, function(widget) return widget.src == custom_image.url end)[1]
+Assert.eq(thumbnail.image_opts.headers, custom_headers, "缩略图使用所属图片的请求头")
+Kit.taps(thumbs)[1]:onTapThemeArea()
+local custom_viewer = Kit.shown[#Kit.shown]
+local full_image = Kit.find(custom_viewer, function(widget) return widget.src == custom_image.url end)[1]
+Assert.eq(full_image.image_opts.headers, custom_headers, "展开图片不误发其它源的 Referer")
