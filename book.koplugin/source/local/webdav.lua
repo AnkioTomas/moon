@@ -552,7 +552,12 @@ local function indexLocal(self, run, done)
     for i, rel in ipairs(rels) do
         local item, row = run.local_files[rel], rows[ids[i]]
         if remote[rel] then
-            if trusted and (not row or row.path ~= item.path) then adoptLocal(item, ids[i]) end
+            -- 同一文件还挂着绝对路径身份（收编被跳过留下的残留）时也要并过来，
+            -- 否则开书解析到那行，进度、笔记、统计一直写在孤儿身份上。
+            local legacy = local_rows[paths[i]]
+            if trusted and (not row or row.path ~= item.path or (legacy and legacy.stable_id ~= ids[i])) then
+                adoptLocal(item, ids[i])
+            end
         elseif not row and not local_rows[paths[i]] then
             pending[#pending + 1] = item
         end

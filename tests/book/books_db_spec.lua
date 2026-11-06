@@ -701,7 +701,8 @@ do
     Assert.eq(book.path, "/cache/moon/book/x/book.epub")
     Assert.eq(book.deleted, 1)
     local q = calls[#calls]
-    Assert.is_true(q.sql:find("FROM books WHERE path=? LIMIT 1;", 1, true) ~= nil)
+    -- 同一路径可能挂着在架行与收编残留的墓碑行，必须按 deleted 优先取在架那行
+    Assert.is_true(q.sql:find("ORDER BY deleted ASC, inserted_at DESC LIMIT 1;", 1, true) ~= nil)
     Assert.eq(q.argc, 1)
     Assert.eq(q.args[1], "/cache/moon/book/x/book.epub")
 

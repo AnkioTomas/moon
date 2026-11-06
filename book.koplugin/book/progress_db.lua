@@ -335,11 +335,13 @@ ON CONFLICT(source_id, stable_id) DO UPDATE SET
 end
 
 --- 书改名 / 收编时由 books_db 调用。
---- 收编（merge）时旧身份的进度还没推就比新身份的已同步副本新，先清掉新身份那份。
+--- 收编（merge）时旧身份的进度比新身份新（更晚更新，或本地还没推）就先清掉新身份那份，
+--- 否则 UPDATE OR IGNORE 会留下新身份，旧身份更靠后的真实进度被 DELETE 丢掉。
 function ProgressDB.moveIdentity(source_id, old_stable_id, new_stable_id, merge)
     return (not merge or DB.exec(
         [[DELETE FROM pending_progress WHERE source_id=? AND stable_id=? AND EXISTS (
-            SELECT 1 FROM pending_progress WHERE source_id=? AND stable_id=? AND sync_status=0);]],
+            SELECT 1 FROM pending_progress o WHERE o.source_id=? AND o.stable_id=?
+              AND (o.sync_status=0 OR o.updated_at > pending_progress.updated_at));]],
         source_id, new_stable_id, source_id, old_stable_id) ~= nil)
         and DB.moveIdentity("pending_progress", source_id, old_stable_id, new_stable_id, merge)
 end

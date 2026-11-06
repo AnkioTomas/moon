@@ -642,12 +642,14 @@ function BookDB.getMany(source_id, stable_ids)
     return out
 end
 
---- 按本地路径取 books 行
+--- 按本地路径取 books 行。
+--- 同一路径可能挂两行（WebDAV 收编留下绝对路径墓碑，见 adoptStableId），无 ORDER BY 时取到哪行不确定。
+--- 在架行优先；同为在架/墓碑时取最近插入的。
 ---@param path string
 ---@return Book|nil
 function BookDB.getByPath(path)
     return rowToBook(DB.rowexec(
-        "SELECT " .. COLUMNS .. " FROM books WHERE path=? LIMIT 1;",
+        "SELECT " .. COLUMNS .. " FROM books WHERE path=? ORDER BY deleted ASC, inserted_at DESC LIMIT 1;",
         path
     ))
 end
