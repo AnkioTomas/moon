@@ -1,14 +1,14 @@
 --[[--
-QQ阅读乱序字体还原：把章节字体里的字形认回真字。
+乱序字体的字形识别：把字体里的字形认回真字。
 
-反盗版有两层：randomFont 把最常用的一批字换成生僻码位（CJK 扩展 A）；fixedFont 把次常用的 2000 字
-码位不变、字形互换（码位“陵”画出来是“李”）。都没有码位→字的表，所以只能“看”：把字形和候选字（GB2312 一二级，用 KOReader 自带 Noto Sans CJK 画）
+常用字可能换成生僻码位（CJK 扩展 A），也可能码位不变、字形互换（码位“陵”画出来是“李”）。
+没有码位→字的表，所以只能“看”：把字形和候选字（GB2312 一二级，用 KOReader 自带 Noto Sans CJK 画）
 按外框归一后缩到 16x16 比相关系数。字形可能被镜像（页面 CSS 再翻回来），两种朝向都比，取高者。
 先 8x8 粗筛取前几名再用 16x16 精排；得分低于 THRESHOLD 的不认（宁缺勿错）。
 标点（，。“” 等）不在 GB2312 汉字里，且外框归一后形状几乎一样，只能靠外框在字面里的位置认：
 网页字体与参考字体是同一套 Noto 字形，同一个标点的外框位置几乎重合。
 
-@module source.yuewen_fonts.glyph
+@module utils.glyph
 --]]--
 
 local ffi = require("ffi")
@@ -17,7 +17,7 @@ local Glyph = {}
 
 local CHAR = require("utils.text").UTF8_CHAR
 
-local CANDIDATES = require("source.yuewen_fonts.glyph_chars")
+local CANDIDATES = require("utils.glyph_chars")
 local PX = 56
 local FINE, COARSE = 16, 8
 local SHORTLIST = 12
@@ -91,8 +91,9 @@ local function dot(a, a_off, b, b_off, len)
 end
 
 -- “一”只有一横，归一化后是均匀块、签名无效，和标点一样靠外框位置认。
-local PUNCTUATION = "一，。、；：？！“”‘’（）《》…「」『』【】"
+local PUNCTUATION = "一，。、；：？！“”‘’（）《》…—「」『』【】"
 local PUNCT_TOLERANCE = 0.035
+local CORNER_QUOTES = { ["「"] = true, ["」"] = true, ["『"] = true, ["』"] = true }
 
 --- 字形外框占字面（PX）的比例 { 左, 下, 右, 上 }；渲染不出来返回 nil。
 local function extent(size, code)
@@ -103,19 +104,24 @@ local function extent(size, code)
     return { g.l / PX, (g.t - h) / PX, (g.l + w) / PX, g.t / PX }
 end
 
---- 参考字体里各标点的外框。
+--- 参考标点的外框；直角引号另存形状，兼容不同字体版本的字面位置偏移。
 local function punctuationRefs(ref_path)
     local size = require("ffi/freetype").newFaceSize(ref_path, PX)
     local refs = {}
     for ch in PUNCTUATION:gmatch(CHAR) do
         local box = extent(size, Glyph.codepoint(ch))
-        if box then refs[#refs + 1] = { ch = ch, box = box } end
+        if box then
+            refs[#refs + 1] = {
+                ch = ch, box = box,
+                signature = CORNER_QUOTES[ch] and signature(size, Glyph.codepoint(ch), FINE),
+            }
+        end
     end
     return refs
 end
 
 --- 外框与某个标点的四边偏差都在容差内就认作它（取偏差总和最小）。
-local function matchPunctuation(refs, box)
+local function matchPunctuation(refs, box, glyph)
     local best, best_dist = nil, math.huge
     for _idx, ref in ipairs(refs) do
         local dist, fit = 0, true
@@ -125,6 +131,15 @@ local function matchPunctuation(refs, box)
             dist = dist + d
         end
         if fit and dist < best_dist then best, best_dist = ref.ch, dist end
+    end
+    if not best and glyph then
+        local best_score = CONFIDENT
+        for _idx, ref in ipairs(refs) do
+            if ref.signature then
+                local score = dot(glyph, 0, ref.signature, 0, FINE * FINE) / (SCALE * SCALE)
+                if score > best_score then best, best_score = ref.ch, score end
+            end
+        end
     end
     return best
 end
@@ -184,16 +199,16 @@ end
 
 --- 一种字体里要认的字。limit：候选字只取 GB2312 序的前多少个（一级 3755 字，全集 6763）。
 --- 不能按字体 cmap 收窄：字形互换后，字体画出的真字集合和它的码位集合并不相同。
----@class QQGlyphTask
+---@class FontGlyphTask
 ---@field font_path string
 ---@field codes integer[]
 ---@field limit integer
----@field threshold number|nil 认字阈值，缺省 0.75；起点有些字形更接近，传 0.65
+---@field threshold number|nil 认字阈值，缺省 0.75
 
 --- 把各字体里指定码位的字形认成真字。
 ---@param ref_path string 参考字体（Noto Sans CJK SC）
 ---@param cache_path string 参考字签名缓存文件
----@param tasks QQGlyphTask[]
+---@param tasks FontGlyphTask[]
 ---@return table<integer, string|false>[] maps 与 tasks 同序，码位 → 真字；字体里有字形但认不出是 false，字体没有该码位不在表里
 function Glyph.recognize(ref_path, cache_path, tasks)
     local FT = require("ffi/freetype")
@@ -218,7 +233,7 @@ function Glyph.recognize(ref_path, cache_path, tasks)
             local best_char, best_score = nil, -1
             local scored = {}
             local box = has and extent(gsize, cp)
-            local punct = box and matchPunctuation(puncts, box)
+            local punct = box and matchPunctuation(puncts, box, gf0)
             if punct then best_char, best_score = punct, 1 end
             for mirror = 0, (gf0 and not punct) and 1 or -1 do
                 -- 原朝向已经认得很准就不必再试镜像
