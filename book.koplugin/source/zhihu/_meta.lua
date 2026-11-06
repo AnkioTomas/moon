@@ -13,5 +13,5 @@ return {
     name = _("知乎盐选"),
     type = "chapter",
     description = _("知乎盐选在线阅读"),
-    abilities = { _("搜索与发现"), _("VIP 章节") },
+    abilities = { _("搜索与发现"), _("VIP 章节"), _("登录"), _("进度同步"), _("他人段评") },
 }

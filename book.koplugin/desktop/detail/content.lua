@@ -33,7 +33,7 @@ local RECENT_DAYS = 14
 local function scoreLine(m)
     local parts = {}
     if m.rating then
-        local by = ({ weread = _("微信读书"), douban = _("豆瓣") })[m.rating.by] or m.rating.by
+        local by = ({ weread = _("微信读书"), douban = _("豆瓣"), zhihu = _("知乎盐选") })[m.rating.by] or m.rating.by
         parts[1] = string.format("★ %.1f", m.rating.score) .. (by and " " .. by or "")
     end
     local words = m.words

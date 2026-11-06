@@ -308,6 +308,19 @@ do
         function(o, e) ok, err = o, e end)
     Assert.is_true(ok)
 
+    local tail = '<div id="chapter-end"></div>'
+    Text2Epub.build({
+        dest = "/tmp/out.epub", title = "书", text = "甲乙丙丁\n戊己庚辛",
+        max_part_chars = 4, tail_html = tail,
+    }, function(o, e) ok, err = o, e end)
+    Assert.is_true(ok)
+    Assert.is_true(#written.chapters > 1)
+    for idx, chapter in ipairs(written.chapters) do
+        Assert.eq(chapter.html:find(tail, 1, true) ~= nil, idx == #written.chapters,
+            "章末预留区只附在最后一个物理分片")
+    end
+    Assert.eq(written.chapters[#written.chapters].html:sub(-#tail), tail)
+
     -- text_file：提取落盘的临时文件，优先于 source
     local extracted = os.tmpname()
     local ef = assert(io.open(extracted, "wb"))

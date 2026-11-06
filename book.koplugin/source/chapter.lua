@@ -137,6 +137,16 @@ local function localPosition(identity)
     end
 end
 
+--- 已落盘的章节能不能直接用。源可以要求文件头带自己的 mark，没有就当过期。
+---@param path string
+---@param ops table
+---@return boolean
+local function reusable(path, ops)
+    if not chapterReady(path) then return false end
+    if ops.reuse and not ops.reuse(path) then return false end
+    return true
+end
+
 --- 本地已有章节文件时返回路径，供快开；否则 nil。
 ---@param identity BookIdentity
 ---@param opts table
@@ -148,7 +158,7 @@ local function existingLocalPath(identity, opts, ops)
     local idx = tonumber(opts.chapter_idx)
     if idx then
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-        if chapterReady(path) then return path, idx end
+        if reusable(path, ops) then return path, idx end
         return nil
     end
     local pos = localPosition(identity)
@@ -161,7 +171,7 @@ local function existingLocalPath(identity, opts, ops)
         idx = 1
     end
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-    if chapterReady(path) then return path, idx end
+    if reusable(path, ops) then return path, idx end
     return nil
 end
 
@@ -363,7 +373,7 @@ end
 ---@return { cancel: fun() }|nil
 local function ensure(identity, toc, idx, ops, cb)
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-    if not ops.volatile and chapterReady(path) then
+    if not ops.volatile and reusable(path, ops) then
         -- 已缓存但目录还没字数：补一次，估页码越读越准。
         local item = toc[idx]
         if item and not (tonumber(item.words) and tonumber(item.words) > 0) then
@@ -648,7 +658,7 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
             return
         end
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-        if not ops.volatile and chapterReady(path) then
+        if not ops.volatile and reusable(path, ops) then
             cached_count = cached_count + 1
             report()
             require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter prefetch", nextIndex))
