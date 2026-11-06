@@ -213,6 +213,50 @@ do
     Assert.eq(series.fraction, 0.4)
 end
 
+-- 同一物理路径可能同时挂着在架行与收编残留的绝对路径墓碑行（WebDAV 收编前扫盘登记过）：
+-- getByPath 必须取在架那行，否则开书解析到墓碑身份，进度 / 笔记永远写在没人看的那行上。
+do
+    local P = "/mnt/us/documents/books/书.epub"
+    Assert.is_true(BookDB.upsertRemote({ source_id = "local", stable_id = P, title = "旧", inserted_at = 100 }))
+    Assert.is_true(BookDB.markDeleted("local", P), "绝对路径身份成了墓碑")
+    Assert.is_true(BookDB.upsertRemote({ source_id = "local", stable_id = "webdav://书.epub",
+        title = "新", deleted = 0, inserted_at = 200 }))
+    Assert.is_true(BookDB.touchPath("local", "webdav://书.epub", P))
+
+    local picked = BookDB.getByPath(P)
+    Assert.not_nil(picked)
+    Assert.eq(picked.stable_id, "webdav://书.epub", "有在架行时不取同路径的墓碑行")
+
+    -- 两侧都是墓碑时取最近插入的（markDeleted 会清 path，这里只下架不清理路径）。
+    Assert.is_true(BookDB.setLibraryMembership("local", "webdav://书.epub", false))
+    Assert.eq(BookDB.getByPath(P).stable_id, "webdav://书.epub", "两侧都是墓碑时取最近的")
+    Assert.is_true(BookDB.setLibraryMembership("local", "webdav://书.epub", true))
+end
+
+-- 收编：旧身份进度比新身份新（更晚更新或还没推）时以旧身份为准，否则真实阅读进度会被丢掉。
+do
+    local function pend(id, fraction, at, dirty)
+        return Base.exec([[INSERT INTO pending_progress (source_id, stable_id, fraction, updated_at, sync_status)
+            VALUES ('local', ?, ?, ?, ?) ON CONFLICT(source_id, stable_id) DO UPDATE SET
+            fraction=excluded.fraction, updated_at=excluded.updated_at, sync_status=excluded.sync_status;]],
+            id, fraction, at, dirty and 0 or 1)
+    end
+    -- 旧身份 1.0 更新更晚（本机读完），新身份 0.75 是旧同步结果
+    Assert.not_nil(pend("old-a", 1.0, 200))
+    Assert.not_nil(pend("new-a", 0.75, 100))
+    Assert.is_true(require("book.progress_db").moveIdentity("local", "old-a", "new-a", true))
+    local merged = require("book.progress_db").get("local", "new-a")
+    Assert.not_nil(merged, "身份并到新 stable_id")
+    Assert.eq(merged.fraction, 1.0, "旧身份较新时以旧身份为准，不当成被盖掉的副本")
+    Assert.is_nil(require("book.progress_db").get("local", "old-a"))
+
+    -- 反之：新身份较新，旧身份那份是过时的，让位
+    Assert.not_nil(pend("old-b", 0.2, 100))
+    Assert.not_nil(pend("new-b", 0.9, 300))
+    Assert.is_true(require("book.progress_db").moveIdentity("local", "old-b", "new-b", true))
+    Assert.eq(require("book.progress_db").get("local", "new-b").fraction, 0.9, "新身份较新时保留新身份")
+end
+
 Base.close()
 for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end
 
