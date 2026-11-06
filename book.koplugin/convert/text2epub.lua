@@ -552,6 +552,7 @@ end
 ---   reflow: boolean|nil,
 ---   max_part_chars: number|nil,
 ---   headings: string[]|nil,
+---   tail_html: string|nil,
 --- }
 ---@param cb fun(ok: boolean|nil, err: any)
 ---@param on_progress fun(text: string, done: integer, total: integer)|nil
@@ -564,6 +565,10 @@ function Text2Epub.build(opts, cb, on_progress)
         if not text then return { err = err } end
         local book = Text2Epub.parse(text, opts, function(done, total) report(_("正在识别章节"), done, total) end)
         text = nil
+        if opts.tail_html then
+            local last = book.chapters[#book.chapters]
+            last.html = last.html .. opts.tail_html
+        end
         local ok, write_err = Html2Epub.write({
             dest = opts.dest,
             title = book.title,
