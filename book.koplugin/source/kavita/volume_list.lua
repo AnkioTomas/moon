@@ -590,8 +590,9 @@ function VolumeList.pick(series, toc, cb, opts)
         return out.url, out.headers
     end
 
-    --- 卷内页数进度（只给在读的卷）。
+    --- 卷内页数进度（只给在读的卷；已读完的卷不显示低进度）。
     local function progressText(entry)
+        if readOf(ctx, entry) ~= "reading" then return nil end
         local row = local_progress[tostring(entry.chapterId)]
         local pages = tonumber(entry.pages) or 0
         local read = tonumber(entry.pagesRead) or 0

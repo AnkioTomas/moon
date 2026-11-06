@@ -1139,4 +1139,16 @@ list = open({
 Assert.not_nil(findRow(list, "第 1 卷"), "标题退化成系列名时用第 N 卷")
 
 
+-- 服务端已读完、本机重新打开留下 1/194：行仍显示「已读」，不显示 1%，主线跳过它。
+reset()
+local_progress["900:682"] = { fraction = 0.005, page = 1, total_pages = 194, updated_at = 999 }
+list = open({
+    entry(681, "第 1 卷", 210, 210),
+    entry(682, "第 2 卷", 194, 194),
+    entry(683, "第 3 卷", 200, 0),
+})
+Assert.eq(findRow(list, "第 2 卷").row_subtitle, "上次翻阅", "已读完的卷不再显示 1/194")
+Assert.not_nil(findRow(list, "继续阅读 · 第 3 卷"), "主线跳过已读完的第 2 卷")
+
+
 return true
