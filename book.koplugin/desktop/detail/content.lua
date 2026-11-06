@@ -276,9 +276,15 @@ function Detail:buildHead(w, owner, primary)
     if primary then
         bottom[1] = Button:new{ icon = primary.icon, text = primary.text, variant = "primary", width = sw,
             callback = primary.callback }
+        -- 按钮只有一行：续读的页码放在按钮下方，和主按钮一起读。
+        if primary.caption then
+            bottom[#bottom + 1] = VerticalSpan:new{ width = Theme.px(t.space.xs) }
+            bottom[#bottom + 1] = Text.line("caption", primary.caption,
+                { width = sw, color = t.color.muted })
+        end
     end
     local pct = Book.pct(book)
-    if self.origin ~= "store" and pct > 0 then
+    if self.origin ~= "store" and pct > 0 and not (primary and primary.caption) then
         if #bottom > 0 then bottom[#bottom + 1] = VerticalSpan:new{ width = Theme.px(t.space.sm) } end
         bottom[#bottom + 1] = self:progressRow(sw, pct)
     end

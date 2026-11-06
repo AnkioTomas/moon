@@ -180,9 +180,10 @@ end
 --- 打开卷列表；返回 list、选中回调的接收表。
 ---@param volumes table[]|nil 缺省用共享的 toc（全读退化等用例换一份目录）
 ---@return table, table
-local function open(volumes)
+local function open(volumes, opts)
     local picked = {}
-    local list = assert(VolumeList.pick(series, volumes or toc, function(value) picked.value = value end))
+    local list = assert(VolumeList.pick(series, volumes or toc,
+        function(value) picked.value = value end, opts))
     list:show()
     list:paintTo(Kit.canvas(), 0, 0)
     return list, picked
@@ -214,6 +215,26 @@ local function tap(list, widget)
     ges.ges = "tap"
     list:handleEvent(require("ui/event"):new("Gesture", ges))
 end
+
+--- 按行标题找控件：续读卡也在控件树里，固定下标会被它挤偏。
+---@param list table
+---@param title string
+---@return table|nil
+local function findRow(list, title)
+    for _idx, w in ipairs(Kit.taps(list)) do
+        if w.row_title == title then return w end
+    end
+end
+
+--- 按行标题点按。
+---@param list table
+---@param title string
+local function tapRow(list, title)
+    local row = findRow(list, title)
+    if not row then error("row not found: " .. tostring(title)) end
+    tap(list, row)
+end
+
 
 --- 这个窗口被 UIManager 关过吗（真实组件不写 `.closed`，只能看桩的关闭记录）。
 ---@param widget table
@@ -296,7 +317,7 @@ for _idx, button in ipairs(tails(list)) do icons[#icons + 1] = button.icon end
 Assert.eq(table.concat(icons, ","), "delete,download,download")
 
 -- 点标题区域仍然是选中（关窗后回调）。
-tap(list, Kit.taps(list)[2])
+tapRow(list, "第 2 卷")
 Assert.eq(picked.value and picked.value.chapterId, 602)
 
 reset()
@@ -661,7 +682,7 @@ reset()
 offline = true
 list, picked = open()
 textContains(table.concat(Kit.texts(list), "\n"), "未缓存 · 离线")
-tap(list, Kit.taps(list)[3])
+tapRow(list, "第 3 卷")
 Assert.is_nil(picked.value, "离线未缓存行不选中")
 textContains(Themed.last("toast").text, "这一卷还没缓存，联网后可下载")
 
@@ -1070,5 +1091,52 @@ textContains(table.concat(Kit.texts(live), "\n"), "第 1 卷", "空回包不清�
 live.closed = true
 live.refreshToc({ entry(631, "第 1 卷", 100, 0) })
 Assert.eq(#live.items, 2, "关掉的列表不再吃回包")
+
+-- 续读卡：主线 = 最远有进度的卷，标题写卷名 + 页数；点卡片直接选中它。
+reset()
+local cover_hits = {}
+list, picked = open(nil, {
+    cover = function(e)
+        cover_hits[#cover_hits + 1] = e.chapterId
+        return "http://cover/" .. e.chapterId .. ".jpg", { ["x-api-key"] = "k" }
+    end,
+})
+local card = findRow(list, "继续阅读 · 第 2 卷")
+Assert.not_nil(card, "续读卡写明是哪一卷")
+Assert.eq(card.row_subtitle, "第 40/100 页 · 40%")
+Assert.eq(#cover_hits, 3, "每一卷都取了封面（卡片复用同一张，不重复取）")
+tap(list, card)
+Assert.eq(picked.value and picked.value.chapterId, 602, "点卡片直接开第 2 卷")
+Assert.is_true(wasClosed(list), "点卡片关列表")
+
+-- 回顾旧卷：主线仍是第 2 卷，第 1 卷只标「上次翻阅」。
+reset()
+local_progress["900:601"] = { fraction = 1, page = 100, total_pages = 100, updated_at = 500 }
+local_progress["900:602"] = { fraction = 0.4, page = 40, total_pages = 100, updated_at = 100 }
+list = open()
+Assert.not_nil(findRow(list, "继续阅读 · 第 2 卷"), "回顾旧卷不劫持主线")
+Assert.eq(findRow(list, "第 1 卷").row_subtitle, "上次翻阅")
+Assert.eq(findRow(list, "第 2 卷").row_subtitle, "第 40/100 页 · 40%")
+
+-- 全部读完：卡片写「已读完 · 共 N 卷」，点它重读第一卷。
+reset()
+list, picked = open({
+    entry(661, "第 1 卷", 100, 100),
+    entry(662, "第 2 卷", 100, 100),
+})
+local done = findRow(list, "已读完 · 共 2 卷")
+Assert.not_nil(done, "读完的系列有重读入口")
+Assert.eq(done.row_subtitle, "重读 · 第 1 卷")
+tap(list, done)
+Assert.eq(picked.value and picked.value.chapterId, 661, "重读回到第一卷")
+
+-- 卷名缺失 / 退化成系列名：兜底「第 N 卷」。
+reset()
+list = open({
+    { idx = 1, chapterId = 671, volumeId = 1, seriesId = 900, libraryId = 1,
+        title = "测试系列", pages = 100, pagesRead = 0 },
+})
+Assert.not_nil(findRow(list, "第 1 卷"), "标题退化成系列名时用第 N 卷")
+
 
 return true
