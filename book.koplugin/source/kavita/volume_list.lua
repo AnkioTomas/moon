@@ -560,6 +560,8 @@ function VolumeList.pick(series, toc, cb, opts)
                     return { page = tonumber(row.page), total = tonumber(row.total_pages) }
                 end
             end,
+            -- 行上显示「已读」的卷，绝不能同时成为续读主线。
+            complete = function(entry) return readOf(ctx, entry) == "read" end,
         })
     end
     local continue_target = computeTarget()
