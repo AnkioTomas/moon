@@ -52,9 +52,12 @@ function M.pick(toc, opts)
                 fraction = (tonumber(e.pagesRead) or 0) / pages
             end
             fraction = math.max(0, math.min(1, fraction))
-            -- 服务端说这卷已经读完：本机重新打开留下的低进度不改变「已读完」，
+            -- 服务端 / 调用方说这卷已经读完：本机重新打开留下的低进度不改变「已读完」，
             -- 否则回顾旧卷会把主线拖回去，列表也会出现「已读 · 1/194 页」。
-            if (tonumber(e.pagesRead) or 0) >= pages then fraction = 1 end
+            if (tonumber(e.pagesRead) or 0) >= pages
+                or (opts.complete and opts.complete(e)) then
+                fraction = 1
+            end
             entries[#entries + 1] = { entry = e, fraction = fraction }
         end
     end

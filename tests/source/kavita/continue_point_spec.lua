@@ -108,6 +108,17 @@ Assert.eq(reread.entry.chapterId, 103, "已读完的卷不会被本机低进度�
 Assert.eq(reread.kind, "continue")
 
 
+-- 调用方说已读完（kamare 三源）时同样按 fraction 1，不再被本机低进度拖回。
+local by_caller = CP.pick({
+    vol(101, "第 1 卷", 100, 0),
+    vol(102, "第 2 卷", 100, 0),
+}, {
+    fraction = function(e) return e.chapterId == 101 and 0.01 or nil end,
+    complete = function(e) return e.chapterId == 101 end,
+})
+Assert.eq(by_caller.entry.chapterId, 102, "调用方标记已读完的卷不会成为主线")
+
+
 -- 卷名：优先标题；空 / 退化成系列名时兜底第 N 卷
 Assert.eq(CP.label({ idx = 3, title = "ONE PIECE (3)" }, "航海王"), "ONE PIECE (3)")
 Assert.eq(CP.label({ idx = 3, title = "" }, "航海王"), "第 3 卷")
