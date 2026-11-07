@@ -65,6 +65,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 ---@field page integer|nil 展示用页码（来自 pending_progress，非 books 列）
 ---@field total_pages integer|nil 展示用总页数（来自 pending_progress，非 books 列）
 ---@field category string|nil 分类 / 标签
+---@field category_authoritative boolean|nil 同步快照明确分类口径，允许清除旧分类（非 books 列）
 ---@field series string|nil 系列名
 ---@field intro string|nil 简介
 ---@field inserted_at integer|nil 本行首次写入时间；0 表示仅身份行；内存展示行可能没有

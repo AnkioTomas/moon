@@ -330,9 +330,9 @@ function StatsDB.add(row, status)
     local start_time, duration = StatsDB.valid(row)
     if not start_time then return false end
     local event_count
-    if row.record_type == SESSION_RECORD then
+    if row.record_type == SESSION_RECORD or (not LOCAL_RECORDS[row.record_type] and row.event_count == 0) then
         -- 云端会话的 event_count 是源算好的页数（漫画 = 本次新推进的页数，其他格式 = pagesRead），
-        -- **0 是合法值**（打开没翻页 / 重读同一段）。夹到 1 会让每天的页数凭空多一页。
+        -- 合成时长桶显式给 0 也不能补页数：只有时长，没有页坐标。
         event_count = math.max(0, tonumber(row.event_count) or 0)
     else
         -- 本地逐页 / 压缩行缺字段时按一页算，沿用旧口径。

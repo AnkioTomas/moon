@@ -1,14 +1,16 @@
 --[[--
-豆瓣阅读账号：只用豆瓣阅读 App 扫码。登录态是 read.douban.com 的 Cookie 和用户编号。
+豆瓣阅读账号：App 扫码或电脑浏览器 Cookie。登录态是 read.douban.com 的 Cookie 和用户编号。
 
 @module source.douban.setting
 --]]
 
 require("l10n").apply()
 local _ = require("gettext")
+local CookieLogin = require("source.cookie_login")
 
 local SOURCE_ID = "douban"
 local Setting = {}
+local LOGIN_URL = "https://read.douban.com/oidc/login"
 
 ---@return boolean
 local function loggedIn()
@@ -23,6 +25,37 @@ local function save(user)
     require("ui.themes.widgets.toast"):new{ text = name, timeout = 2 }:show()
 end
 
+local SPEC = {
+    id = SOURCE_ID,
+    title = _("豆瓣阅读账号"),
+    cookie_title = _("豆瓣阅读登录 Cookie"),
+    cookie_hint = _("按键盘 F12，点「网络」，刷新网页，复制请求标头里的整段 Cookie"),
+    logout_text = _("确定退出豆瓣阅读账号？"),
+    loggedIn = loggedIn,
+    checkAsync = function(cookie, cb)
+        return require("source.douban.client").newLogin(cookie):checkCookieAsync(cb)
+    end,
+    store = function(cfg, _cookie)
+        cfg.cookie = require("source.douban.client").cookieFor("read.douban.com")
+    end,
+}
+
+Setting.browser = {
+    domain = "read.douban.com",
+    scope = "cookie",
+    login = LOGIN_URL,
+    check = "https://read.douban.com/",
+    isAuthorized = function() return CookieLogin.authorized(SPEC) end,
+    apply = function(payload, cb)
+        local cookies = {}
+        for _idx, cookie in ipairs(type(payload.cookies) == "table" and payload.cookies or {}) do
+            local domain = type(cookie.domain) == "string" and cookie.domain:gsub("^%.", ""):lower()
+            if domain == "douban.com" or domain == "read.douban.com" then cookies[#cookies + 1] = cookie end
+        end
+        CookieLogin.save(SPEC, CookieLogin.fromPayload({ cookies = cookies }, "douban.com"), cb)
+    end,
+}
+
 function Setting.rowTitle()
     return _("豆瓣阅读账号")
 end
@@ -34,13 +67,16 @@ function Setting.rowStatus()
 end
 
 function Setting.open()
-    require("ui/network/manager"):runWhenConnected(function()
-        require("source.douban.qrlogin"):new(save):start()
-    end)
+    if not require("ui/network/manager"):isConnected() then
+        require("ui.themes.widgets.toast"):new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
+        return
+    end
+    require("source.douban.qrlogin"):new(save):start()
 end
 
+---@param plugin table|nil
 ---@return table[]
-function Setting.rows()
+function Setting.rows(plugin)
     local Row = require("ui.themes.widgets.row")
     local rows = {
         function(iw)
@@ -54,7 +90,28 @@ function Setting.rows()
             })
         end,
     }
-    rows[#rows + 1] = require("source.review_setting").row(SOURCE_ID)
+    rows[#rows + 1] = function(iw)
+        return Row.widget({
+            width = iw, chevron = true, kind = "nav", icon = "sms",
+            title = _("手机号验证码登录"),
+            callback = function() require("source.douban.phone_login"):new(save):start() end,
+        })
+    end
+    rows[#rows + 1] = function(iw)
+        return Row.widget({
+            width = iw, chevron = true, kind = "nav", icon = "language",
+            title = _("电脑浏览器登录"), subtitle = _("在电脑浏览器完成官方授权"),
+            callback = function()
+                require("ui.themes.widgets.text_viewer"):new{
+                    title = _("电脑浏览器登录"),
+                    text = CookieLogin.relogin(_("豆瓣阅读"), LOGIN_URL, _("豆瓣阅读登录 Cookie")),
+                }:show()
+            end,
+        })
+    end
+    rows[#rows + 1] = CookieLogin.pasteRow(SPEC)
+    rows[#rows + 1] = require("source.category_setting").row(SOURCE_ID, plugin)
+    rows[#rows + 1] = require("source.review_setting").row(SOURCE_ID, plugin)
     if loggedIn() then
         rows[#rows + 1] = require("source.logout").row(SOURCE_ID, _("确定退出豆瓣阅读账号？"), function()
             local settings = require("utils.settings")

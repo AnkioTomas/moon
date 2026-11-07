@@ -19,15 +19,21 @@ local function load(chapter, cb)
     local handle = {}
     local start_pid = chapter.slice and tonumber(chapter.uid) or nil
     local end_pid = chapter.slice and tonumber(chapter.end_pid) or nil
-    handle.job = Client.articleAsync(chapter.content_url, function(article, err)
+    local pending = true
+    local first = Client.articleAsync(chapter.content_url, function(article, err)
+        pending = false
+        if handle.cancelled then return end
         if not article then cb(nil, nil, err); return end
         local pids = Mapper.paragraphIds(article, start_pid, end_pid)
         handle.job = Client.annotationsAsync(chapter.content_url, pids, function(rows, reason)
+            if handle.cancelled then return end
             if not rows then cb(nil, nil, reason); return end
             cb(rows, pids)
         end)
     end)
+    if pending then handle.job = first end
     return { cancel = function()
+        handle.cancelled = true
         if handle.job and handle.job.cancel then handle.job.cancel() end
     end }
 end

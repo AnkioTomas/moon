@@ -27,6 +27,20 @@ function QRLogin:cancel()
     self.generation = self.generation + 1
     if self.job and self.job.cancel then self.job.cancel() end
     self.job = nil
+    if self.session then self.session:cancel() end
+end
+
+function QRLogin:_request(method, callback, ...)
+    local args = { ... }
+    local count, pending, gen = select("#", ...) + 1, true, self.generation
+    args[count] = function(...)
+        pending = false
+        if gen ~= self.generation then return end
+        self.job = nil
+        callback(...)
+    end
+    local job = self.session[method](self.session, unpack(args, 1, count))
+    if pending then self.job = job end
 end
 
 ---@param text string
@@ -38,8 +52,9 @@ end
 function QRLogin:_retry(text)
     self:cancel()
     if self.dialog then
-        self.dialog:close()
+        local dialog = self.dialog
         self.dialog = nil
+        dialog:close()
     end
     require("ui.themes.widgets.confirm"):new{
         text = text,
@@ -54,44 +69,46 @@ end
 ---@param polls integer
 function QRLogin:_poll(gen, code, authorize, polls)
     if gen ~= self.generation then return end
-    if polls > POLL_LIMIT then
+    if polls > POLL_LIMIT or os.time() >= self.deadline then
         self:_retry(_("二维码已过期"))
         return
     end
-    self.job = Client.qrStatusAsync(code, function(kind, _err)
+    self:_request("qrStatusAsync", function(kind, err)
         if gen ~= self.generation then return end
         self.job = nil
         if kind == "ok" then
-            self.job = Client.finishQrAsync(authorize, function(user, err)
+            self:_request("finishQrAsync", function(user, reason)
                 if gen ~= self.generation then return end
                 self.job = nil
                 if not user then
-                    self:_retry(err or _("登录失败"))
+                    self:_retry(reason or _("登录失败"))
                     return
                 end
                 self:cancel()
                 if self.dialog then
-                    self.dialog:close()
+                    local dialog = self.dialog
                     self.dialog = nil
+                    dialog:close()
                 end
                 self.on_user(user)
-            end)
+            end, authorize)
             return
         end
         if kind ~= "wait" then
-            self:_retry(_("登录失败"))
+            self:_retry(err or _("登录失败"))
             return
         end
         require("ui/uimanager"):scheduleIn(POLL_INTERVAL, function()
             if gen == self.generation then self:_poll(gen, code, authorize, polls + 1) end
         end)
-    end)
+    end, code)
 end
 
 function QRLogin:start()
     self:cancel()
+    self.session = Client.newLogin()
     local gen = self.generation
-    self.job = Client.beginQrAsync(function(ticket, err)
+    self:_request("beginQrAsync", function(ticket, err)
         if gen ~= self.generation then return end
         self.job = nil
         if not ticket then
@@ -112,6 +129,7 @@ function QRLogin:start()
             end,
         }
         self.dialog = dialog
+        self.deadline = os.time() + ticket.expires_in
         dialog:show()
         self:_poll(gen, ticket.code, ticket.authorize, 1)
     end)

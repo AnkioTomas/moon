@@ -9,6 +9,7 @@
 --]]
 
 local Aes = require("crypto.aes")
+local CategorySetting = require("source.category_setting")
 local JSON = require("json")
 local Text = require("utils.text")
 local _ = require("gettext")
@@ -17,19 +18,21 @@ local Mapper = {}
 
 local SOURCE_ID = "douban"
 
-Mapper.TOC_VERSION = 1
+Mapper.TOC_VERSION = 2
 Mapper.SEARCH_HASH = "sha256:92911ffc68782f44a56764094edc0068f283c29fb447277f8ed2911af6bbd0a0"
 Mapper.ACCESS_HASH = "sha256:bf9257d4f673ee55c4ef0fbf7f495a4cf1fd972048ef4a823d92f40636c36f25"
 Mapper.INFO_HASH = "sha256:2ba0b5cafe47036cf931fcf749803c0fed974b448cd479e48fc35edd75e540a7"
 --- 书架页先拿编号，再用这条查询补 title / author / cover。
 Mapper.SHELF_WORKS_HASH = "sha256:d9cff923ff4ed25849b6dc0d493b027533c4f252647107f2226de11b78f7b831"
+Mapper.SHELF_FOLDERS_HASH = "sha256:226417726ce78055a35e7281426637272fdaaef4a001e15a975a41e37a2331cc"
+Mapper.READING_TIME_HASH = "sha256:03a310ea89efc4801c0071c4d3c5bcae7ae9227cada95c731e7222a0811e491f"
 
 local SEARCH_VARIABLES = {
     includeRating = false,
     includeBookRating = false,
     includeUpdateTime = false,
     includeSaleInfo = false,
-    includePurchase = true,
+    includePurchase = false,
     includeLibraryCount = false,
     includeFandom = false,
     includeFanfictionTags = false,
@@ -113,6 +116,52 @@ function Mapper.searchBody(keyword)
         extensions = { persistedQuery = { version = 1, sha256Hash = Mapper.SEARCH_HASH } },
         variables = SEARCH_VARIABLES,
     }
+end
+
+---@param opts table
+---@param page integer
+---@return table
+function Mapper.catalogBody(opts, page)
+    local body = {
+        kind = tonumber(opts.category),
+        sort = opts.sort,
+        page = page,
+        extensions = { persistedQuery = { version = 1, sha256Hash = Mapper.SEARCH_HASH } },
+        variables = SEARCH_VARIABLES,
+    }
+    if opts.pay == "free" then body.minPrice, body.maxPrice = 0, 0
+    elseif opts.pay == "paid" then body.minPrice = 1 end
+    if opts.state == "complete" then body.isFinished = true
+    elseif opts.state == "serial" then body.isFinished = false end
+    return body
+end
+
+---@param html string
+---@return table<string, { id: string, title: string }[]>|nil
+---@return string|nil
+function Mapper.categories(html)
+    local raw = type(html) == "string" and html:match("Ark%.kindTree%s*=%s*(%b[])")
+    local ok, tree = pcall(JSON.decode, raw or "")
+    if not ok or type(tree) ~= "table" then return nil, _("响应无效") end
+    local categories = { original = {}, publish = {} }
+    local function append(rows, out)
+        for _idx, row in ipairs(rows) do
+            if type(row) ~= "table" or type(row.id) ~= "number" or type(row.name) ~= "string"
+                or type(row.children) ~= "table" then return false end
+            out[#out + 1] = { id = tostring(row.id), title = clean(row.name) }
+            if not append(row.children, out) then return false end
+        end
+        return true
+    end
+    for _idx, root in ipairs(tree) do
+        if type(root) ~= "table" then return nil, _("响应无效") end
+        local channel = root.id == 0 and "original" or root.id == 1 and "publish" or nil
+        if channel and (type(root.children) ~= "table" or not append(root.children, categories[channel])) then
+            return nil, _("响应无效")
+        end
+    end
+    if #categories.original == 0 or #categories.publish == 0 then return nil, _("响应无效") end
+    return categories
 end
 
 ---@param item table
@@ -224,6 +273,20 @@ function Mapper.decrypt(b64, user_id)
     return article
 end
 
+---@param data table|nil
+---@return string
+local function paragraphText(data)
+    local text = data and data.text
+    if type(text) == "table" then
+        local parts = {}
+        for _idx, run in ipairs(text) do
+            if run.kind == "plaintext" then parts[#parts + 1] = run.content end
+        end
+        text = table.concat(parts)
+    end
+    return type(text) == "string" and Text.trim(text) or ""
+end
+
 ---@param article table
 ---@param start_pid number|nil
 ---@param end_pid number|nil
@@ -238,8 +301,10 @@ function Mapper.blocksText(article, start_pid, end_pid)
                 local id = type(block) == "table" and tonumber(block.id) or nil
                 local in_range = not start_pid or (id and id >= start_pid and (not end_pid or id < end_pid))
                 local kind = type(block) == "table" and block.type or nil
-                local text = in_range and (kind == "paragraph" or kind == "headline") and block.data and block.data.text or nil
-                if type(text) == "string" and Text.trim(text) ~= "" then lines[#lines + 1] = Text.trim(text) end
+                if in_range and (kind == "paragraph" or kind == "headline") then
+                    local text = paragraphText(block.data)
+                    if text ~= "" then lines[#lines + 1] = text end
+                end
             end
         end
     end
@@ -261,8 +326,7 @@ function Mapper.paragraphIds(article, start_pid, end_pid)
                 local id = type(block) == "table" and tonumber(block.id) or nil
                 local in_range = not start_pid or (id and id >= start_pid and (not end_pid or id < end_pid))
                 local kind = type(block) == "table" and block.type or nil
-                local text = in_range and (kind == "paragraph" or kind == "headline") and block.data and block.data.text or nil
-                if id and type(text) == "string" and Text.trim(text) ~= "" then
+                if id and in_range and (kind == "paragraph" or kind == "headline") and paragraphText(block.data) ~= "" then
                     ids[#ids + 1] = tostring(block.id)
                 end
             end
@@ -398,7 +462,7 @@ end
 ---@return string[]|nil
 ---@return string|nil
 function Mapper.shelfIds(wire)
-    if type(wire) ~= "table" then return nil, _("豆瓣阅读书架数据无法识别") end
+    if type(wire) ~= "table" or wire.errors then return nil, _("豆瓣阅读书架数据无法识别") end
     local rows = wire.worksIds
     if type(rows) ~= "table" then
         local user = type(wire.data) == "table" and wire.data.user or nil
@@ -406,16 +470,65 @@ function Mapper.shelfIds(wire)
         local library = type(shelf) == "table" and shelf.libraryList or nil
         rows = type(library) == "table" and library.list or nil
     end
-    if type(rows) ~= "table" then return nil, _("豆瓣阅读书架数据无法识别") end
+    if type(rows) ~= "table" or (next(rows) ~= nil and rows[1] == nil) then
+        return nil, _("豆瓣阅读书架数据无法识别")
+    end
     local ids = {}
     for _idx, item in ipairs(rows) do
         local id = item
         if type(item) == "table" then id = item.worksId or item.id or item.works_id end
         if type(id) == "number" then id = tostring(id) end
-        if type(id) == "string" and id ~= "" then ids[#ids + 1] = id end
+        if type(id) ~= "string" or id == "" then return nil, _("豆瓣阅读书架数据无法识别") end
+        ids[#ids + 1] = id
     end
-    if #ids == 0 and #rows > 0 then return nil, _("豆瓣阅读书架数据无法识别") end
+
     return ids
+end
+
+---@param wire table|nil
+---@return (string|number)[]|nil
+---@return string|nil
+function Mapper.folderIds(wire)
+    local ids = type(wire) == "table" and wire.folderIds
+    if type(ids) ~= "table" or (next(ids) ~= nil and ids[1] == nil) then return nil, _("响应无效") end
+    for _idx, id in ipairs(ids) do
+        if (type(id) ~= "string" and type(id) ~= "number") or id == "" then return nil, _("响应无效") end
+    end
+    return ids
+end
+
+--- 与微信相同：多组成员按官网分组顺序取第一个，响应顺序不决定分类。
+---@param wire table|nil
+---@param ids (string|number)[]
+---@return table<string, string>|nil
+---@return string|nil
+function Mapper.shelfGroups(wire, ids)
+    if type(wire) ~= "table" or wire.errors then return nil, _("响应无效") end
+    local user = type(wire.data) == "table" and wire.data.user
+    local shelf = type(user) == "table" and user.bookshelf
+    local folders = type(shelf) == "table" and shelf.folders
+    local list = type(folders) == "table" and folders.list
+    if type(list) ~= "table" or (next(list) ~= nil and list[1] == nil) then return nil, _("响应无效") end
+    local by_id = {}
+    for _idx, folder in ipairs(list) do
+        if type(folder) ~= "table" or (type(folder.id) ~= "string" and type(folder.id) ~= "number")
+            or folder.id == "" or type(folder.name) ~= "string" or folder.name == ""
+            or type(folder.libraryList) ~= "table" or by_id[tostring(folder.id)] then
+            return nil, _("响应无效")
+        end
+        local members, err = Mapper.shelfIds({ worksIds = folder.libraryList.list })
+        if not members then return nil, err end
+        by_id[tostring(folder.id)] = { name = folder.name, members = members }
+    end
+    local groups = {}
+    for _idx, id in ipairs(ids) do
+        local folder = by_id[tostring(id)]
+        if not folder then return nil, _("响应无效") end
+        for _member_idx, works_id in ipairs(folder.members) do
+            groups[works_id] = groups[works_id] or folder.name
+        end
+    end
+    return groups
 end
 
 ---@param ids string[]
@@ -429,16 +542,36 @@ end
 
 --- 编号查回来的作品。有声书不进书架。
 ---@param wire table|nil
+---@param groups table<string, string>|nil
+---@param ids string[]|nil
 ---@return Book[]|nil
 ---@return string|nil
-function Mapper.shelfWorks(wire)
+function Mapper.shelfWorks(wire, groups, ids)
+    if type(wire) ~= "table" or wire.errors then return nil, _("豆瓣阅读书架数据无法识别") end
     local data = type(wire) == "table" and wire.data or nil
     local list = type(data) == "table" and data.worksList or nil
-    if type(list) ~= "table" then return nil, _("豆瓣阅读书架数据无法识别") end
-    local books = {}
+    if type(list) ~= "table" or (next(list) ~= nil and list[1] == nil) then
+        return nil, _("豆瓣阅读书架数据无法识别")
+    end
+    local books, seen = {}, {}
     for _idx, item in ipairs(list) do
+        if type(item) ~= "table" or item.id == nil then return nil, _("豆瓣阅读书架数据无法识别") end
+        seen[tostring(item.id)] = true
         local row = worksBook(item)
-        if row then books[#books + 1] = row end
+        if row then
+            local genre = row.category
+            if not genre and type(item.isOrigin) == "boolean" then
+                genre = item.isOrigin and _("原创") or _("出版")
+            end
+            row.category = CategorySetting.apply(SOURCE_ID, genre, groups and groups[row.stable_id])
+            row.category_authoritative = true
+            books[#books + 1] = row
+        elseif item.isAudio ~= true and item.isBundle ~= true then
+            return nil, _("豆瓣阅读书架数据无法识别")
+        end
+    end
+    for _idx, id in ipairs(ids or {}) do
+        if not seen[id] then return nil, _("豆瓣阅读书架数据无法识别") end
     end
     if #books == 0 and #list > 0 then return nil, _("豆瓣阅读书架数据无法识别") end
     return books
@@ -483,7 +616,8 @@ function Mapper.user(html)
     local raw = html:match("Ark%.user%s*=%s*(%b{})")
     if not raw then return nil end
     local ok, user = pcall(JSON.decode, raw)
-    if not ok or type(user) ~= "table" or user.isAnonymous == true or user.id == nil then return nil end
+    if not ok or type(user) ~= "table" or user.isAnonymous == true
+        or (type(user.id) ~= "string" and type(user.id) ~= "number") or tostring(user.id) == "" then return nil end
     local name = user.name or user.nickname or user.screenName or ""
     return { id = tostring(user.id), name = type(name) == "string" and name or "" }
 end
@@ -495,6 +629,7 @@ function Mapper.qr(wire, origin)
     if type(wire) ~= "table" or type(wire.url) ~= "string" or wire.url == "" then return nil end
     local code = wire.url:match("[?&]code=([^&]+)")
     if not code or code == "" then return nil end
+    if wire.url:sub(1, 1) ~= "/" or wire.url:sub(1, 2) == "//" then return nil end
     return { qr = origin .. wire.url, code = code, expires_in = tonumber(wire.expires_in) or 300 }
 end
 
@@ -515,8 +650,10 @@ function Mapper.progress(wire)
     local item = wire.progress
     -- 网页把 r 当布尔用：0 是成功。Lua 里 0 为真，不能直接 if wire.r。
     local failed = wire.r ~= nil and wire.r ~= false and wire.r ~= 0
-    if failed or type(item) ~= "table" or item.paragraph_id == nil or tostring(item.paragraph_id) == "" then
-        return nil, true
+    if failed then return nil, false end
+    if item == nil or item == JSON.null then return nil, true end
+    if type(item) ~= "table" or item.paragraph_id == nil or tostring(item.paragraph_id) == "" then
+        return nil, false
     end
     return { paragraph_id = tostring(item.paragraph_id) }, false
 end
@@ -532,13 +669,93 @@ function Mapper.firstParagraphId(article)
         if type(contents) == "table" then
             for _bidx, block in ipairs(contents) do
                 local kind = type(block) == "table" and block.type or nil
-                if block.id ~= nil and (kind == "paragraph" or kind == "headline") then
+                if block.id ~= nil and kind == "paragraph" and paragraphText(block.data) ~= "" then
                     return tostring(block.id)
                 end
+
             end
         end
     end
     return nil
+end
+
+--- 官网分段索引来自 posts[].contents[]，不是月读章节号。
+---@param article table
+---@param pid string
+---@param end_pid string|nil
+---@return table|nil
+function Mapper.progressPosition(article, pid, end_pid)
+    local reached = false
+    for part_idx, post in ipairs(article.posts or {}) do
+        for paragraph_idx, block in ipairs(post.contents or {}) do
+            local id = block.id ~= nil and tostring(block.id) or nil
+            if id == pid then reached = true end
+            if reached and end_pid and id == end_pid then return nil end
+            if reached and id and block.type == "paragraph" and paragraphText(block.data) ~= "" then
+                return {
+                    paragraph_id = id,
+                    part_sequence = part_idx - 1,
+                    part_paragraph_sequence = paragraph_idx - 1,
+                }
+            end
+        end
+    end
+    return nil
+end
+
+---@param wire table
+---@param begin_date string
+---@param fetched_at number
+---@return BookStatsPullResult|nil
+---@return string|nil
+function Mapper.readingStats(wire, begin_date, fetched_at)
+    if type(wire) ~= "table" or wire.errors then return nil, _("响应无效") end
+    local user = type(wire) == "table" and type(wire.data) == "table" and wire.data.user
+    local total = type(user) == "table" and user.readingTimeTotal
+    local history = type(user) == "table" and user.readingTimeHistory
+    local function seconds(value)
+        return type(value) == "number" and value >= 0 and value < math.huge and value or nil
+    end
+    if type(total) ~= "table" or not seconds(total.duration) or type(history) ~= "table"
+        or (next(history) ~= nil and history[1] == nil) then return nil, _("响应无效") end
+    local function midnight(date)
+        if type(date) ~= "string" then return nil end
+        local year, month, day = date:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+        if not year then return nil end
+        local time = os.time({ year = tonumber(year), month = tonumber(month), day = tonumber(day), hour = 0 })
+        return time and os.date("%Y-%m-%d", time) == date and time or nil
+    end
+    local from = midnight(begin_date)
+    if not from then return nil, _("响应无效") end
+    local rows, seen = {}, {}
+    local function row(id, kind, start_time, duration)
+        if duration > 0 then
+            rows[#rows + 1] = {
+                source_id = SOURCE_ID, stable_id = id, record_type = kind,
+                start_time = start_time, duration = duration, last_time = fetched_at,
+                page = 0, total_pages = 0, event_count = 0,
+            }
+        end
+    end
+    row("__douban:total", "total", fetched_at, total.duration)
+    for _idx, item in ipairs(history) do
+        local date = type(item) == "table" and item.date
+        local time = midnight(date)
+        local reading = type(item) == "table" and item.readingTime
+        local duration = type(reading) == "table" and seconds(reading.duration)
+        if not time or not duration or time < from or time > fetched_at or seen[date] then
+            return nil, _("响应无效")
+        end
+        seen[date] = true
+        row("__douban:day:" .. date, "day", time, duration)
+    end
+    return {
+        rows = rows,
+        replace = { mode = "ranges", ranges = {
+            { stable_prefix = "__douban:day:", from_ts = from, to_ts = fetched_at },
+            { stable_prefix = "__douban:total", from_ts = 0, to_ts = fetched_at },
+        } },
+    }
 end
 
 return Mapper

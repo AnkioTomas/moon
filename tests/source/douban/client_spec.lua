@@ -14,6 +14,15 @@ local Json = require("support.json_stub")
 local Text = require("utils.text")
 local Mapper = require("source.douban.mapper")
 
+local cfg = {}
+package.preload["utils.settings"] = function()
+    return {
+        getSource = function() return cfg end,
+        saveSource = function() end,
+        get = function() return {} end,
+    }
+end
+
 local sha2 = require("ffi/sha2")
 local iv = string.rep("\1", 16)
 local plain = Json.encode({
@@ -21,7 +30,10 @@ local plain = Json.encode({
         title = "序",
         contents = {
             { type = "headline", id = 10, data = { text = "标题" } },
-            { type = "paragraph", id = 11, data = { text = "第一段" } },
+            { type = "paragraph", id = 11, data = { text = {
+                { kind = "plaintext", content = "第一" },
+                { kind = "plaintext", content = "段" },
+            } } },
             { type = "pagebreak", id = 11.5, data = {} },
             { type = "paragraph", id = 12, data = { text = "第二段" } },
         },
@@ -79,6 +91,21 @@ Assert.eq(chapters[1].toc_version, Mapper.TOC_VERSION)
 Assert.eq(chapters[2].title, "第 2 章")
 Assert.eq(chapters[2].vip, false)
 Assert.is_nil(chapters[2].end_pid)
+
+local rich = { posts = { { contents = {
+    { id = 1, type = "paragraph", data = { text = {
+        { kind = "plaintext", content = " 前文 " }, { kind = "plaintext", content = " 后文 " },
+    } } },
+    { id = 2, type = "paragraph", data = { text = {} } },
+    { id = 3, type = "paragraph", data = { text = { { kind = "plaintext", content = " \n " } } } },
+    { id = 4, type = "paragraph", data = { text = "尾段" } },
+} } }, toc = { { paragraph_id = 1, title = "开篇" }, { paragraph_id = 4, title = "结尾" } } }
+Assert.eq(Mapper.blocksText(rich), "前文  后文\n尾段")
+Assert.eq(Mapper.blocksText(rich, 1, 4), "前文  后文")
+Assert.eq(Mapper.paragraphIds(rich)[1], "1")
+Assert.eq(Mapper.paragraphIds(rich)[2], "4")
+Assert.eq(#Mapper.paragraphIds(rich), 2)
+Assert.eq(Mapper.ebookChapters(rich, "test")[1].vip, false)
 
 local found = Mapper.searchBooks({
     list = {
@@ -162,24 +189,18 @@ Assert.eq(Mapper.qrStatus({ confirmed = false }), "wait")
 Assert.eq(Mapper.qrStatus({ confirmed = true }), "ok")
 local progress = Mapper.progress({ r = 0, progress = { paragraph_id = 10, paragraph_offset = 0 } })
 Assert.eq(progress.paragraph_id, "10")
-Assert.eq(select(2, Mapper.progress({ r = 1 })), true)
-Assert.eq(select(2, Mapper.progress({ progress = {} })), true)
+Assert.eq(select(2, Mapper.progress({ r = 1 })), false)
+Assert.eq(select(2, Mapper.progress({ progress = {} })), false)
+Assert.eq(select(2, Mapper.progress({ r = 0 })), true)
 Assert.eq(Mapper.firstParagraphId({
-    posts = { { contents = { { id = 3, type = "headline" }, { id = 4, type = "paragraph" } } } },
-}), "3")
+    posts = { { contents = { { id = 3, type = "headline" }, { id = 4, type = "paragraph", data = { text = "正文" } } } } },
+}), "4")
 Assert.eq(Mapper.searchBody("三体").extensions.persistedQuery.sha256Hash, Mapper.SEARCH_HASH)
 
-local cfg = {}
 local requests = {}
 local authorize_hits = 0
 local deferred_requests, defer_column = false, false
-package.preload["utils.settings"] = function()
-    return {
-        getSource = function() return cfg end,
-        saveSource = function() end,
-        get = function() return {} end,
-    }
-end
+local progress_write_body = Json.encode({ r = 0 })
 package.preload["http.request"] = function()
     return {
         header = function(res, name)
@@ -231,21 +252,35 @@ package.preload["http.request"] = function()
                     res.headers.Location = "https://read.douban.com/"
                 end
             elseif opts.url:find("/oidc/qrcode/generate", 1, true) then
-                res.body = Json.encode({ url = "/oidc/qrcode/confirm?code=abc", expires_in = 300 })
+                if opts.headers.Referer ~= "https://accounts.arkread.com/" then
+                    res.code = 400
+                    res.body = Json.encode({ code = 1002, message = "The referrer header is missing." })
+                else
+                    res.body = Json.encode({ url = "/oidc/qrcode/confirm?code=abc", expires_in = 300 })
+                end
             elseif opts.url:find("/oidc/qrcode/status", 1, true) then
-                res.body = Json.encode({ confirmed = false })
+                if opts.headers.Referer ~= "https://accounts.arkread.com/" then
+                    res.code = 400
+                    res.body = Json.encode({ code = 1002, message = "The referrer header is missing." })
+                else
+                    res.body = Json.encode({ confirmed = false })
+                end
             elseif opts.url == "https://read.douban.com/" then
                 res.body = 'CSRF_TOKEN = \'shelf-tok\'; Ark.user = {"id":"42","name":"读","isAnonymous":false}'
                 res.headers["Set-Cookie"] = "session=s1; Path=/"
             elseif opts.url:find("/j/progress/", 1, true) and opts.method == "GET" then
                 res.body = Json.encode({ r = 0, progress = { paragraph_id = "10", paragraph_offset = 0 } })
-            elseif opts.url:find("/j/progress/", 1, true) or opts.url:find("/j/reading_time", 1, true) then
+            elseif opts.url:find("/j/progress/", 1, true) then
+                res.body = progress_write_body
+            elseif opts.url:find("/j/reading_time", 1, true) then
                 res.body = ""
             elseif opts.url:find("/annotations_by_paragraphs", 1, true) then
                 res.body = '['
                     .. '{"id":"1","note":"好看","startContainerId":"11","n_favorites":2,"owner":{"name":"甲"},"create_time":1700000000},'
                     .. '{"note":"","startContainerId":"10"}'
                     .. ']'
+            elseif opts.url:find("/j/bookshelf/folder/", 1, true) then
+                res.body = Json.encode({ folderIds = {} })
             elseif opts.url:find("/j/bookshelf/", 1, true) and opts.method == "GET" then
                 res.body = Json.encode({ worksIds = { "9" } })
             elseif opts.url:find("/j/bookshelf/", 1, true) then
@@ -303,18 +338,19 @@ Stubs.flush()
 Assert.eq(denied, "未登录豆瓣阅读")
 
 local ticket
-Client.beginQrAsync(function(value) ticket = value end)
+local login = Client.newLogin()
+login:beginQrAsync(function(value) ticket = value end)
 Assert.eq(ticket.code, "abc")
 Assert.eq(ticket.qr, "https://accounts.arkread.com/oidc/qrcode/confirm?code=abc")
 Assert.eq(ticket.authorize, "https://accounts.arkread.com/oauth2/authorize?client_id=public")
 Assert.eq(requests[#requests].headers["X-CSRF-Token"], "tok123")
 
 local waiting
-Client.qrStatusAsync("abc", function(kind) waiting = kind end)
+login:qrStatusAsync("abc", function(kind) waiting = kind end)
 Assert.eq(waiting, "wait")
 
 local logged
-Client.finishQrAsync(ticket.authorize, function(value) logged = value end)
+login:finishQrAsync(ticket.authorize, function(value) logged = value end)
 Assert.eq(logged.id, "42")
 Assert.eq(cfg.logged_in, true)
 Assert.eq(cfg.user_id, "42")
@@ -349,7 +385,23 @@ Client.putProgressAsync("9", "10", 2, 4, true, function(ok) progress_saved = ok 
 Assert.eq(progress_saved, true)
 Assert.eq(requests[#requests].method, "POST")
 Assert.is_true(requests[#requests].url:find("/j/progress/", 1, true) ~= nil)
-Assert.is_true(requests[#requests].body:find('"percentage":50', 1, true) ~= nil)
+Assert.is_true(requests[#requests].body:find("percentage=25", 1, true) ~= nil)
+Assert.eq(requests[#requests].headers["Content-Type"], "application/x-www-form-urlencoded")
+
+local progress_failure
+progress_write_body = Json.encode({ r = 1 })
+Client.putProgressAsync("9", "10", 2, 4, true, function(ok, err)
+    progress_saved, progress_failure = ok, err
+end)
+Assert.is_nil(progress_saved)
+Assert.eq(progress_failure, "豆瓣阅读进度保存失败")
+progress_write_body = "<html>upstream error</html>"
+Client.putProgressAsync("9", "10", 2, 4, true, function(ok, err)
+    progress_saved, progress_failure = ok, err
+end)
+Assert.is_nil(progress_saved)
+Assert.eq(progress_failure, "豆瓣阅读进度保存失败")
+progress_write_body = Json.encode({ r = 0 })
 
 local reading_saved
 Client.pushReadingAsync({
@@ -433,7 +485,7 @@ end
 for cancel_at = 0, 2 do
     authorize_hits = 0
     local calls = 0
-    local job = Client.beginQrAsync(function() calls = calls + 1 end)
+    local job = Client.newLogin():beginQrAsync(function() calls = calls + 1 end)
     local active = requests[#requests]
     for _step = 1, cancel_at do
         active.reply()
@@ -449,7 +501,7 @@ end
 
 authorize_hits = 1
 local finish_calls = 0
-local finish_job = Client.finishQrAsync("https://accounts.arkread.com/oauth2/authorize?client_id=public",
+local finish_job = Client.newLogin():finishQrAsync("https://accounts.arkread.com/oauth2/authorize?client_id=public",
     function() finish_calls = finish_calls + 1 end)
 requests[#requests].reply()
 local final = requests[#requests]

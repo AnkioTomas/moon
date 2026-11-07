@@ -12,6 +12,7 @@ require("l10n").apply()
 local JSON = require("json")
 local Mapper = require("source.douban.mapper")
 local Request = require("http.request")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local Client = {}
@@ -24,46 +25,39 @@ local ACCOUNT = "https://" .. ACCOUNT_HOST
 local LOGIN_URL = READ .. "/oidc/login?redir=https%3A%2F%2Fread.douban.com%2F"
 local LOGIN_EXPIRED = "豆瓣阅读登录已失效，请点「重新登录」，用豆瓣阅读 App 扫码。"
 
-local jars = {}
-local csrf_token
-local read_csrf
+local active = { jars = {} }
+local anonymous = { jars = {}, public = true }
+local login_epoch = 0
 local article_cache = {}
 local loaded = false
 
-local function remember(host, header)
+local function remember(host, header, session)
     if type(host) ~= "string" or type(header) ~= "string" or header == "" then return end
-    local jar = jars[host] or {}
-    jars[host] = jar
-    for part in header:gmatch("[^;]+") do
-        local name, value = part:match("^%s*([^=;%s]+)=([^%s].*)$")
-        if not name then name, value = part:match("^%s*([^=;%s]+)=(.*)$") end
-        if name and value and name ~= "Path" and name ~= "Domain" and name ~= "Expires"
-            and name ~= "Max-Age" and name ~= "SameSite" then
-            jar[name] = value
-        end
-    end
+    session = session or active
+    local jar = session.jars[host] or {}
+    session.jars[host] = jar
+    local name, value = header:match("^%s*([^=;%s]+)=([^;]*)")
+    if name then jar[name] = value ~= "" and value or nil end
 end
 
 function Client.reset()
-    jars = {}
-    csrf_token = nil
-    read_csrf = nil
+    active = { jars = {} }
+    login_epoch = login_epoch + 1
     article_cache = {}
     loaded = false
 end
 
 function Client.load()
-    jars = {}
-    csrf_token = nil
-    read_csrf = nil
-    remember(READ_HOST, require("utils.settings").getSource(SOURCE_ID).cookie)
+    active = { jars = {} }
+    local cookie = require("utils.settings").getSource(SOURCE_ID).cookie
+    for pair in (cookie or ""):gmatch("[^;]+") do remember(READ_HOST, pair) end
     loaded = true
 end
 
 ---@param host string
 ---@return string|nil
-function Client.cookieFor(host)
-    local jar = jars[host]
+function Client.cookieFor(host, session)
+    local jar = (session or active).jars[host]
     if not jar then return nil end
     local names = {}
     for name in pairs(jar) do names[#names + 1] = name end
@@ -89,21 +83,24 @@ function Client.userId()
 end
 
 ---@param user { id: string, name: string }
-function Client.persist(user)
+local function persist(user, session)
     local settings = require("utils.settings")
     local cfg = settings.getSource(SOURCE_ID)
-    cfg.cookie = Client.cookieFor(READ_HOST)
+    cfg.cookie = Client.cookieFor(READ_HOST, session)
     cfg.user_id = user.id
     cfg.name = user.name
     cfg.logged_in = true
     settings.saveSource(SOURCE_ID)
+    login_epoch = login_epoch + 1
+    Client.load()
+    active.read_csrf = session.read_csrf
     article_cache = {}
 end
 
 ---@param url string
 ---@return string
 local function hostOf(url)
-    return url:match("^https://([^/]+)") or READ_HOST
+    return url:match("^https://([^/?#]+)")
 end
 
 ---@param code any
@@ -116,18 +113,19 @@ end
 ---@param host string
 ---@param res table|nil
 ---@return string|nil
-local function expired(host, res)
+local function expired(host, res, cookie)
     if host == READ_HOST and tonumber(res and res.code) == 401
-        and require("utils.settings").getSource(SOURCE_ID).logged_in == true then
+        and cookie == require("utils.settings").getSource(SOURCE_ID).cookie
+        and Client.loggedIn() then
         return require("source.auth").expire(SOURCE_ID, _(LOGIN_EXPIRED))
     end
     return nil
 end
 
 ---@param res table|nil
-local function absorb(host, res)
+local function absorb(host, res, session)
     if not res then return end
-    for _idx, line in ipairs(Request.headerAll(res, "Set-Cookie")) do remember(host, line) end
+    for _idx, line in ipairs(Request.headerAll(res, "Set-Cookie")) do remember(host, line, session) end
 end
 
 ---@param method string
@@ -136,26 +134,35 @@ end
 ---@param content_type string|nil
 ---@param cb fun(res: table|nil, err: string|nil)
 ---@return HttpJob
-local function raw(method, url, body, content_type, cb)
+local function raw(method, url, body, content_type, cb, session)
     if not loaded then Client.load() end
+    session = session or active
     local host = hostOf(url)
+    if host ~= READ_HOST and host ~= ACCOUNT_HOST then
+        return require("source.base").defer(cb, nil, _("登录跳转地址无效"))
+    end
     local headers = { Accept = "application/json, text/html;q=0.8" }
-    local cookie = Client.cookieFor(host)
+    local cookie = not session.public and Client.cookieFor(host, session) or nil
     if cookie then headers.Cookie = cookie end
     if content_type then headers["Content-Type"] = content_type end
-    if host == ACCOUNT_HOST and csrf_token then headers["X-CSRF-Token"] = csrf_token end
-    if host == READ_HOST and method ~= "GET" and read_csrf then headers["X-CSRF-Token"] = read_csrf end
+    if host == ACCOUNT_HOST and session.csrf then
+        headers["X-CSRF-Token"] = session.csrf
+        headers.Referer = ACCOUNT .. "/"
+    end
+    if host == READ_HOST and method ~= "GET" and session.read_csrf then headers["X-CSRF-Token"] = session.read_csrf end
     return Request.request({
         url = url,
         method = method,
         body = body,
         headers = headers,
+        cache_ttl = 0,
         timeout = require("http.timeout").net(0.5),
     }, function(res, err)
-        absorb(host, res)
+        if session.cancelled then return end
+        if not session.public then absorb(host, res, session) end
         if res and host == READ_HOST then
             local token = Mapper.readCsrf(res.body)
-            if token then read_csrf = token end
+            if token then session.read_csrf = token end
         end
         if err or not res then cb(nil, err and tostring(err) or _("请求失败")); return end
         cb(res)
@@ -170,7 +177,9 @@ end
 ---@param cb fun(res: table|nil, err: string|nil)
 ---@return HttpJob
 local function send(method, url, body, content_type, cb)
-    if method == "GET" or hostOf(url) ~= READ_HOST or read_csrf or not Client.loggedIn() then
+    if not loaded then Client.load() end
+    local session = active
+    if method == "GET" or hostOf(url) ~= READ_HOST or session.read_csrf or not Client.loggedIn() then
         return raw(method, url, body, content_type, cb)
     end
     local cancelled, job = false, nil
@@ -182,8 +191,9 @@ local function send(method, url, body, content_type, cb)
     local first = raw("GET", READ .. "/", nil, nil, function(res, err)
         advanced = true
         if cancelled then return end
+        if session ~= active then cb(nil, _("登录状态已变化，请重试")); return end
         if not res or not httpOk(res.code) then cb(nil, err or _("请求失败")); return end
-        if not read_csrf then cb(nil, _("请求失败")); return end
+        if not session.read_csrf then cb(nil, _("请求失败")); return end
         job = raw(method, url, body, content_type, function(res2, err2)
             if not cancelled then cb(res2, err2) end
         end)
@@ -197,28 +207,34 @@ end
 ---@param payload table|nil
 ---@param cb fun(wire: table|nil, err: string|nil, res: table|nil)
 ---@return HttpJob
-local function jsonCall(method, url, payload, cb)
+local function jsonCall(method, url, payload, cb, public)
     local body, content_type
     if method ~= "GET" then
         body = payload and JSON.encode(payload) or "{}"
         content_type = "application/json"
     end
-    return send(method, url, body, content_type, function(res, err)
+    local cookie = require("utils.settings").getSource(SOURCE_ID).cookie
+    local function done(res, err)
         if not res then cb(nil, err or _("请求失败")); return end
-        local reason = expired(hostOf(url), res)
+        if not public and cookie ~= require("utils.settings").getSource(SOURCE_ID).cookie then
+            cb(nil, _("登录状态已变化，请重试")); return
+        end
+        local reason = not public and expired(hostOf(url), res, cookie)
         if reason then cb(nil, reason, res); return end
         if not httpOk(res.code) then cb(nil, _("请求失败"), res); return end
         local ok, wire = pcall(JSON.decode, res.body or "")
         if not ok or type(wire) ~= "table" then cb(nil, _("请求失败"), res); return end
         cb(wire, nil, res)
-    end)
+    end
+    if public then return raw(method, url, body, content_type, done, anonymous) end
+    return send(method, url, body, content_type, done)
 end
 
 ---@param url string
 ---@param hops integer
 ---@param cb fun(body: string|nil, err: string|nil, final_url: string|nil)
 ---@return HttpJob
-local function follow(url, hops, cb)
+local function follow(url, hops, cb, session)
     local cancelled, job = false, nil
     local function step(current, count)
         local advanced = false
@@ -231,13 +247,14 @@ local function follow(url, hops, cb)
                 if count >= 6 then cb(nil, _("登录失败")); return end
                 local location = Request.header(res, "Location")
                 if type(location) ~= "string" or location == "" then cb(nil, _("登录失败")); return end
-                if location:sub(1, 1) == "/" then location = current:match("^(https://[^/]+)") .. location end
+                if location:sub(1, 2) == "//" then location = "https:" .. location
+                elseif location:sub(1, 1) == "/" then location = current:match("^(https://[^/]+)") .. location end
                 step(location, count + 1)
                 return
             end
             if not httpOk(code) then cb(nil, _("登录失败")); return end
             cb(res.body or "", nil, current)
-        end)
+        end, session)
         if not advanced then job = next_job end
     end
     step(url, hops)
@@ -254,7 +271,24 @@ function Client.searchAsync(keyword, cb)
     return jsonCall("POST", READ .. "/j/search_v2", Mapper.searchBody(keyword), function(wire, err)
         if not wire then cb(nil, err); return end
         cb(Mapper.searchBooks(wire))
-    end)
+    end, true)
+end
+
+function Client.categoriesAsync(cb)
+    return raw("GET", READ .. "/category/", nil, nil, function(res, err)
+        if not res or not httpOk(res.code) then cb(nil, err or _("请求失败")); return end
+        cb(Mapper.categories(res.body))
+    end, anonymous)
+end
+
+function Client.catalogAsync(opts, page, cb)
+    return jsonCall("POST", READ .. "/j/kind/", Mapper.catalogBody(opts, page), function(wire, err)
+        if not wire then cb(nil, err); return end
+        local books, reason = Mapper.searchBooks(wire)
+        local total = tonumber(wire.total)
+        if not books or not total or total < 0 then cb(nil, reason or _("响应无效")); return end
+        cb(books, nil, #wire.list == 20 and page * 20 < total)
+    end, true)
 end
 
 ---@param works_id string
@@ -308,10 +342,15 @@ end
 function Client.articleAsync(aid, cb)
     local cached = article_cache[aid]
     if cached then return require("source.base").defer(cb, cached) end
-    return send("POST", READ .. "/j/article_v2/get_reader_data", "aid=" .. aid,
+    local user_id = Client.userId()
+    local cookie = require("utils.settings").getSource(SOURCE_ID).cookie
+    return send("POST", READ .. "/j/article_v2/get_reader_data", "aid=" .. Text.urlEncode(tostring(aid)),
         "application/x-www-form-urlencoded", function(res, err)
             if not res then cb(nil, err or _("请求失败")); return end
-            local reason = expired(READ_HOST, res)
+            if cookie ~= require("utils.settings").getSource(SOURCE_ID).cookie then
+                cb(nil, _("登录状态已变化，请重试")); return
+            end
+            local reason = expired(READ_HOST, res, cookie)
             if reason then cb(nil, reason); return end
             if not httpOk(res.code) then cb(nil, _("请求失败")); return end
             local ok, wire = pcall(JSON.decode, res.body or "")
@@ -321,7 +360,7 @@ function Client.articleAsync(aid, cb)
                 return
             end
             if type(wire.data) ~= "string" or wire.data == "" then cb(nil, _("正文为空")); return end
-            local article, decrypt_err = Mapper.decrypt(wire.data, Client.userId())
+            local article, decrypt_err = Mapper.decrypt(wire.data, user_id)
             if not article then cb(nil, decrypt_err); return end
             article_cache[tostring(aid)] = article
             cb(article)
@@ -368,16 +407,18 @@ function Client.annotationsAsync(aid, paragraph_ids, cb)
     if type(paragraph_ids) ~= "table" or paragraph_ids[1] == nil then
         return require("source.base").defer(cb, {})
     end
-    local Text = require("utils.text")
+    local cookie = require("utils.settings").getSource(SOURCE_ID).cookie
     local body = "paragraph_ids=" .. Text.urlEncode(table.concat(paragraph_ids, ","))
     local url = READ .. "/j/article_v2/" .. Text.urlEncode(tostring(aid)) .. "/annotations_by_paragraphs"
     return send("POST", url, body, "application/x-www-form-urlencoded", function(res, err)
         if not res then cb(nil, err or _("请求失败")); return end
-        local reason = expired(READ_HOST, res)
+        local reason = expired(READ_HOST, res, cookie)
         if reason then cb(nil, reason); return end
         if not httpOk(res.code) then cb(nil, _("请求失败")); return end
         local ok, wire = pcall(JSON.decode, res.body or "")
-        if not ok or type(wire) ~= "table" then cb(nil, _("请求失败")); return end
+        if not ok or type(wire) ~= "table" or (next(wire) ~= nil and wire[1] == nil) then
+            cb(nil, _("响应无效")); return
+        end
         cb(wire)
     end)
 end
@@ -401,6 +442,41 @@ end
 function Client.shelfAsync(cb)
     if not Client.loggedIn() then return require("source.base").defer(cb, nil, _("未登录豆瓣阅读")) end
     local cancelled, job = false, nil
+    local function loadWorks(ids, groups)
+        job = jsonCall("POST", READ .. "/j/graphql", Mapper.shelfWorksBody(ids), function(detail, err)
+            if cancelled then return end
+            if not detail then cb(nil, err); return end
+            cb(Mapper.shelfWorks(detail, groups, ids))
+        end)
+    end
+    local function loadGroupDetails(ids, folder_ids)
+        local advanced = false
+        local pending = jsonCall("POST", READ .. "/j/graphql", {
+            variables = { folderIds = folder_ids, userId = Client.userId() },
+            extensions = { persistedQuery = { version = 1, sha256Hash = Mapper.SHELF_FOLDERS_HASH } },
+        }, function(wire, err)
+            advanced = true
+            if cancelled then return end
+            if not wire then cb(nil, err); return end
+            local groups, group_err = Mapper.shelfGroups(wire, folder_ids)
+            if not groups then cb(nil, group_err); return end
+            loadWorks(ids, groups)
+        end)
+        if not advanced then job = pending end
+    end
+    local function loadGroups(ids)
+        local advanced = false
+        local pending = jsonCall("GET", READ .. "/j/bookshelf/folder/", nil, function(wire, err)
+            advanced = true
+            if cancelled then return end
+            if not wire then cb(nil, err); return end
+            local folder_ids, folder_err = Mapper.folderIds(wire)
+            if not folder_ids then cb(nil, folder_err); return end
+            if #folder_ids == 0 then loadWorks(ids, {}); return end
+            loadGroupDetails(ids, folder_ids)
+        end)
+        if not advanced then job = pending end
+    end
     local advanced = false
     local first = jsonCall("GET", READ .. "/j/bookshelf/", nil, function(wire, err)
         advanced = true
@@ -409,11 +485,8 @@ function Client.shelfAsync(cb)
         local ids, id_err = Mapper.shelfIds(wire)
         if not ids then cb(nil, id_err); return end
         if #ids == 0 then cb({}); return end
-        job = jsonCall("POST", READ .. "/j/graphql", Mapper.shelfWorksBody(ids), function(detail, detail_err)
-            if cancelled then return end
-            if not detail then cb(nil, detail_err); return end
-            cb(Mapper.shelfWorks(detail))
-        end)
+        if require("source.category_setting").enabled(SOURCE_ID) then loadGroups(ids)
+        else loadWorks(ids) end
     end)
     if not advanced then job = first end
     return { cancel = function()
@@ -445,16 +518,26 @@ end
 --- 进度和阅读时长的回包没有字段可用，2xx 就算写上了。
 ---@param url string
 ---@param body string
+---@param content_type string
 ---@param fail string
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return HttpJob
-local function writeJson(url, body, fail, cb)
+local function write(url, body, content_type, fail, cb)
     if not Client.loggedIn() then return require("source.base").defer(cb, nil, _("未登录豆瓣阅读")) end
-    return send("POST", url, body, "application/json", function(res, err)
+    local cookie = require("utils.settings").getSource(SOURCE_ID).cookie
+    return send("POST", url, body, content_type, function(res, err)
         if not res then cb(nil, err or fail); return end
-        local reason = expired(READ_HOST, res)
+        local reason = expired(READ_HOST, res, cookie)
         if reason then cb(nil, reason); return end
         if not httpOk(res.code) then cb(nil, fail); return end
+        if res.body and res.body ~= "" then
+            local ok, wire = pcall(JSON.decode, res.body)
+            if not ok or type(wire) ~= "table"
+                or (wire.r ~= nil and wire.r ~= 0 and wire.r ~= false) then
+                cb(nil, fail)
+                return
+            end
+        end
         cb(true)
     end)
 end
@@ -473,25 +556,27 @@ function Client.progressAsync(works_id, cb)
     end)
 end
 
---- 电子书的 paragraph_id 是目录段落。百分比只在整本（非专栏）时带上，和网页一致。
+--- 上传正文段落及分段索引；百分比只在整本（非专栏）时带上，和网页一致。
 ---@param works_id string
 ---@param paragraph_id string
 ---@param idx integer
 ---@param total integer
 ---@param with_percent boolean
 ---@param cb fun(ok: boolean|nil, err: string|nil)
+---@param position table|nil 官网正文分段索引
 ---@return HttpJob
-function Client.putProgressAsync(works_id, paragraph_id, idx, total, with_percent, cb)
+function Client.putProgressAsync(works_id, paragraph_id, idx, total, with_percent, cb, position)
     local count = total > 0 and total or 1
     local payload = {
         works_id = tonumber(works_id) or works_id,
         paragraph_id = tonumber(paragraph_id) or paragraph_id,
         paragraph_offset = 0,
-        part_sequence = idx - 1,
-        part_paragraph_sequence = 0,
+        part_sequence = position and position.part_sequence or idx - 1,
+        part_paragraph_sequence = position and position.part_paragraph_sequence or 0,
     }
-    if with_percent then payload.percentage = math.floor(idx / count * 100 + 0.5) end
-    return writeJson(READ .. "/j/progress/", JSON.encode(payload), _("豆瓣阅读进度保存失败"), cb)
+    if with_percent then payload.percentage = math.floor((idx - 1) / count * 100) end
+    return write(READ .. "/j/progress/", Text.formEncode(payload),
+        "application/x-www-form-urlencoded", _("豆瓣阅读进度保存失败"), cb)
 end
 
 --- 阅读时长。网页把会话数组原样 POST 到 /j/reading_time，时间是 ISO。
@@ -499,22 +584,134 @@ end
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return HttpJob
 function Client.pushReadingAsync(sessions, cb)
-    return writeJson(READ .. "/j/reading_time", JSON.encode(sessions), _("豆瓣阅读阅读记录保存失败"), cb)
+    return write(READ .. "/j/reading_time", JSON.encode(sessions),
+        "application/json", _("豆瓣阅读阅读记录保存失败"), cb)
 end
 
----@param cb fun(ticket: { qr: string, code: string, authorize: string }|nil, err: string|nil)
+function Client.readingStatsAsync(begin_date, cb)
+    if not Client.loggedIn() then return require("source.base").defer(cb, nil, _("未登录豆瓣阅读")) end
+    return jsonCall("POST", READ .. "/j/graphql", {
+        variables = { userId = Client.userId(), beginDate = begin_date },
+        extensions = { persistedQuery = { version = 1, sha256Hash = Mapper.READING_TIME_HASH } },
+    }, cb)
+end
+
+---@class DoubanLogin
+---@field jars table
+---@field epoch integer
+---@field cancelled boolean|nil
+---@field csrf string|nil
+---@field read_csrf string|nil
+local Login = {}
+Login.__index = Login
+
+---@param cookie string|nil
+---@return DoubanLogin
+function Client.newLogin(cookie)
+    local session = setmetatable({ jars = {}, epoch = login_epoch }, Login)
+    for pair in (cookie or ""):gmatch("[^;]+") do remember(READ_HOST, pair, session) end
+    return session
+end
+
+function Login:cancel()
+    self.cancelled = true
+end
+
+function Login:commit(user)
+    if self.cancelled or self.epoch ~= login_epoch then return nil, _("登录状态已变化，请重试") end
+    local cfg = require("utils.settings").getSource(SOURCE_ID)
+    if (cfg.logged_in or cfg.cookie or cfg.user_id) and cfg.user_id ~= user.id then
+        return nil, _("切换豆瓣阅读账号前，请先退出旧账号；退出会清理该源的本地书架和阅读记录")
+    end
+    if not Client.cookieFor(READ_HOST, self) then return nil, _("登录失败") end
+    persist(user, self)
+    return true
+end
+
+function Login:checkCookieAsync(cb)
+    return follow(READ .. "/", 0, function(html, err, final_url)
+        local user = html and hostOf(final_url) == READ_HOST and Mapper.user(html)
+        if not user then cb(false, err or _("登录失败")); return end
+        local ok, reason = self:commit(user)
+        cb(ok == true, reason)
+    end, self)
+end
+
+---@param cb fun(authorize: string|nil, err: string|nil)
 ---@return HttpJob
-function Client.beginQrAsync(cb)
-    Client.load()
-    csrf_token = nil
+function Login:beginAsync(cb)
+    return follow(LOGIN_URL, 0, function(html, err, authorize)
+        if not html then cb(nil, err or _("登录失败")); return end
+        self.csrf = Mapper.csrf(html)
+        if not self.csrf or hostOf(authorize) ~= ACCOUNT_HOST then cb(nil, _("登录失败")); return end
+        self.authorize = authorize
+        cb(authorize)
+    end, self)
+end
+
+local function accountResponse(res, err)
+    if not res then return nil, err or _("请求失败") end
+    local ok, wire = pcall(JSON.decode, res.body or "")
+    if not httpOk(res.code) then
+        if ok and type(wire) == "table" and type(wire.message) == "string" and wire.message ~= "" then
+            return nil, wire.message
+        end
+        return nil, _("请求失败")
+    end
+    if not ok or type(wire) ~= "table" then return nil, _("响应无效") end
+    return wire
+end
+
+---@param phone string 国际区号与手机号，例如 +86…
+---@param cb fun(retry_after: number|nil, err: string|nil)
+---@return HttpJob
+function Login:sendPhoneCodeAsync(phone, cb)
+    return raw("POST", ACCOUNT .. "/oidc/phone/verify_code", JSON.encode({ phone_number = phone }),
+        "application/json", function(res, err)
+            local wire, reason = accountResponse(res, err)
+            if not wire then cb(nil, reason); return end
+            if not (type(wire.retry_after) == "number" and wire.retry_after >= 0 and wire.retry_after < math.huge) then
+                cb(nil, _("响应无效")); return
+            end
+            cb(wire.retry_after)
+        end, self)
+end
+
+---@param phone string
+---@param code string
+---@param cb fun(user: table|nil, err: string|nil)
+---@return HttpJob
+function Login:verifyPhoneAsync(phone, code, cb)
+    local cancelled, job, advanced = false, nil, false
+    local first = raw("POST", ACCOUNT .. "/oidc/phone/verify", JSON.encode({ phone_number = phone, code = code }),
+        "application/json", function(res, err)
+            advanced = true
+            if cancelled then return end
+            local wire, reason = accountResponse(res, err)
+            if not wire then cb(nil, reason); return end
+            if type(wire.transfer_info) == "table" then
+                cb(nil, _("此账号需要在豆瓣阅读官网确认历史数据授权，完成后再登录")); return
+            end
+            job = self:finishQrAsync(self.authorize, function(user, finish_err)
+                if not cancelled then cb(user, finish_err) end
+            end)
+        end, self)
+    if not advanced then job = first end
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
+end
+
+---@param cb fun(ticket: { qr: string, code: string, authorize: string, expires_in: number }|nil, err: string|nil)
+---@return HttpJob
+function Login:beginQrAsync(cb)
     local cancelled, job = false, nil
     local advanced = false
-    local first = follow(LOGIN_URL, 0, function(html, err, authorize)
+    local first = self:beginAsync(function(authorize, err)
         advanced = true
         if cancelled then return end
-        if not html then cb(nil, err or _("获取二维码失败")); return end
-        csrf_token = Mapper.csrf(html)
-        if not csrf_token then cb(nil, _("获取二维码失败")); return end
+        if not authorize then cb(nil, err or _("获取二维码失败")); return end
         job = raw("POST", ACCOUNT .. "/oidc/qrcode/generate", nil, "application/json", function(res, gen_err)
             if cancelled then return end
             if not res or not httpOk(res.code) then cb(nil, gen_err or _("获取二维码失败")); return end
@@ -522,8 +719,8 @@ function Client.beginQrAsync(cb)
             if not decoded then cb(nil, _("获取二维码失败")); return end
             local ticket = wire and Mapper.qr(wire, ACCOUNT)
             if not ticket or type(authorize) ~= "string" then cb(nil, gen_err or _("获取二维码失败")); return end
-            cb({ qr = ticket.qr, code = ticket.code, authorize = authorize })
-        end)
+            cb({ qr = ticket.qr, code = ticket.code, authorize = authorize, expires_in = ticket.expires_in })
+        end, self)
     end)
     if not advanced then job = first end
     return { cancel = function()
@@ -535,18 +732,20 @@ end
 ---@param code string
 ---@param cb fun(kind: string|nil, err: string|nil)
 ---@return HttpJob
-function Client.qrStatusAsync(code, cb)
-    return jsonCall("POST", ACCOUNT .. "/oidc/qrcode/status", { code = code }, function(wire, err)
-        local kind = wire and Mapper.qrStatus(wire)
-        if not kind then cb(nil, err or _("登录失败")); return end
+function Login:qrStatusAsync(code, cb)
+    return raw("POST", ACCOUNT .. "/oidc/qrcode/status", JSON.encode({ code = code }), "application/json", function(res, err)
+        if not res or not httpOk(res.code) then cb(nil, err or _("登录失败")); return end
+        local decoded, wire = pcall(JSON.decode, res.body or "")
+        local kind = decoded and Mapper.qrStatus(wire)
+        if not kind then cb(nil, _("登录失败")); return end
         cb(kind)
-    end)
+    end, self)
 end
 
 ---@param authorize string
 ---@param cb fun(user: { id: string, name: string }|nil, err: string|nil)
 ---@return HttpJob
-function Client.finishQrAsync(authorize, cb)
+function Login:finishQrAsync(authorize, cb)
     local cancelled, job = false, nil
     local advanced = false
     local first = follow(authorize, 0, function(html, err, final_url)
@@ -554,16 +753,20 @@ function Client.finishQrAsync(authorize, cb)
         if cancelled then return end
         if not html then cb(nil, err or _("登录失败")); return end
         local user = Mapper.user(html)
-        if user then Client.persist(user); cb(user); return end
-        if type(final_url) == "string" and final_url:find(READ_HOST, 1, true) then cb(nil, _("登录失败")); return end
+        if user and hostOf(final_url) == READ_HOST then
+            local ok, reason = self:commit(user)
+            cb(ok and user or nil, reason)
+            return
+        end
+        if hostOf(final_url) == READ_HOST then cb(nil, _("登录失败")); return end
         job = follow(READ .. "/", 0, function(home, home_err)
             if cancelled then return end
             user = home and Mapper.user(home)
             if not user then cb(nil, home_err or _("登录失败")); return end
-            Client.persist(user)
-            cb(user)
-        end)
-    end)
+            local ok, reason = self:commit(user)
+            cb(ok and user or nil, reason)
+        end, self)
+    end, self)
     if not advanced then job = first end
     return { cancel = function()
         cancelled = true

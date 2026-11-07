@@ -10,6 +10,7 @@
 
 require("l10n").apply()
 local Client = require("source.douban.client")
+local Browse = require("source.browse")
 local Mapper = require("source.douban.mapper")
 local Shelf = require("source.shelf")
 local SourceBase = require("source.base")
@@ -37,6 +38,12 @@ end
 ---@return boolean
 function Source:configured()
     return Client.loggedIn()
+end
+
+function Source:capabilities()
+    local caps = SourceBase.capabilities(self)
+    caps.stats_pull = true
+    return caps
 end
 
 local Remote = {}
@@ -69,6 +76,85 @@ function Source:searchAsync(keyword, cb)
     end)
 end
 
+---@param opts { node?: string, limit?: integer }|nil
+---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
+function Source:browseAsync(opts, cb)
+    local limit = opts and opts.limit or 60
+    local channel, category, sort, pay, state = (opts and opts.node or ""):match(
+        "^(%a+):(%d+):([%a_]+):(%a+):(%a+)$")
+    if channel ~= "publish" then channel = "original" end
+    local root = channel == "original" and "0" or "1"
+    category, sort, pay, state = category or root, sort or "hot", pay or "all", state or "all"
+    local sorts = {
+        { id = "hot", title = _("热门") }, { id = "new", title = _("最新") },
+        { id = "sales", title = _("销量") }, { id = "rating", title = _("好评") },
+    }
+    if channel == "publish" then
+        state = "all"
+        sorts[#sorts + 1] = { id = "price_asc", title = _("价格最低") }
+        sorts[#sorts + 1] = { id = "book_rating", title = _("豆瓣高分") }
+    end
+    local valid_sort = false
+    for _idx, row in ipairs(sorts) do if row.id == sort then valid_sort = true end end
+    if not valid_sort then sort = "hot" end
+    if pay ~= "free" and (pay ~= "paid" or channel ~= "publish") then pay = "all" end
+    if state ~= "serial" and state ~= "complete" then state = "all" end
+    local handle, pending = {}, true
+    local initial = Client.categoriesAsync(function(categories, err)
+        pending = false
+        if handle.cancelled then return end
+        if not categories then cb(nil, err); return end
+        local valid_category = category == root
+        for _idx, row in ipairs(categories[channel]) do if row.id == category then valid_category = true end end
+        if not valid_category then category = root end
+        local values = { channel, category, sort, pay, state }
+        local function chips(title, rows, position)
+            local list = {}
+            for _idx, row in ipairs(rows) do
+                local node = { unpack(values) }
+                node[position] = row.id
+                if position == 1 then node[2], node[3], node[4], node[5] = row.id == "publish" and "1" or "0", "hot", "all", "all" end
+                list[#list + 1] = { id = table.concat(node, ":"), title = row.title }
+            end
+            local current = { unpack(values) }
+            if position == 1 then current[2], current[3], current[4], current[5] = root, "hot", "all", "all" end
+            local group = Browse.group(list, table.concat(current, ":"))
+            group.title = title
+            return group
+        end
+        local cats = { { id = root, title = _("全部") } }
+        for _idx, row in ipairs(categories[channel]) do cats[#cats + 1] = row end
+        local prices = { { id = "all", title = _("全部") }, { id = "free", title = _("免费") } }
+        if channel == "publish" then prices[#prices + 1] = { id = "paid", title = _("付费") } end
+        local groups = {
+            chips(nil, { { id = "original", title = _("原创") }, { id = "publish", title = _("出版") } }, 1),
+            chips(_("分类"), cats, 2),
+            chips(_("排序"), sorts, 3),
+            chips(_("价格"), prices, 4),
+        }
+        if channel == "original" then
+            groups[#groups + 1] = chips(_("状态"), {
+                { id = "all", title = _("全部") }, { id = "serial", title = _("连载中") },
+                { id = "complete", title = _("已完结") },
+            }, 5)
+        end
+        handle.job = Browse.pages(function(page, done)
+            return Client.catalogAsync({ category = category, sort = sort, pay = pay, state = state }, page, done)
+        end, limit, groups, function(result, reason)
+            if result then
+                for idx = #result.data, limit + 1, -1 do result.data[idx] = nil end
+            end
+            if not handle.cancelled then cb(result, reason) end
+        end)
+    end)
+    if pending then handle.job = initial end
+    function handle.cancel()
+        handle.cancelled = true
+        if handle.job then handle.job.cancel() end
+    end
+    return handle
+end
+
 function Source:getDetailAsync(identity, cb)
     return Client.detailAsync(identity.stable_id, function(book, err)
         if book then cb(require("book.store").rememberDetail(book)); return end
@@ -93,7 +179,8 @@ end
 function Source:loadTocAsync(identity, cb, force)
     if not force then
         local cached = Toc.read(self.id, identity.stable_id)
-        if cached and #cached > 0 and cached[1].toc_version == Mapper.TOC_VERSION then
+        if cached and #cached > 0 and (cached[1].toc_version == Mapper.TOC_VERSION
+            or not require("ui/network/manager"):isConnected()) then
             return SourceBase.defer(cb, cached)
         end
     end
@@ -161,12 +248,12 @@ end
 
 function Source:getProgressAsync(identity, cb)
     if not self:configured() then return SourceBase.defer(cb, nil, _("未登录豆瓣阅读")) end
-    local cancelled, job = false, nil
-    job = Client.progressAsync(identity.stable_id, function(mark, err)
+    local cancelled, progress_job, toc_job = false, nil, nil
+    progress_job = Client.progressAsync(identity.stable_id, function(mark, err)
         if cancelled then return end
         if err then cb(nil, err); return end
         if not mark then cb(nil, nil, { empty = true }); return end
-        job = self:loadTocAsync(identity, function(toc, reason)
+        toc_job = self:loadTocAsync(identity, function(toc, reason)
             if cancelled then return end
             if not toc or #toc == 0 then cb(nil, reason or _("豆瓣阅读目录为空")); return end
             local idx = chapterAt(toc, mark.paragraph_id)
@@ -181,14 +268,16 @@ function Source:getProgressAsync(identity, cb)
     end)
     return { cancel = function()
         cancelled = true
-        if job and job.cancel then job.cancel() end
+        if progress_job then progress_job.cancel() end
+        if toc_job then toc_job.cancel() end
     end }
 end
 
 function Source:putProgressAsync(identity, pos, cb)
     if not self:configured() then return SourceBase.defer(cb, nil, _("未登录豆瓣阅读")) end
-    local cancelled, job = false, nil
-    job = self:loadTocAsync(identity, function(toc, err)
+    local cancelled = false
+    local toc_job, works_job, article_job
+    toc_job = self:loadTocAsync(identity, function(toc, err)
         if cancelled then return end
         if not toc then cb(nil, err); return end
         local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
@@ -198,26 +287,21 @@ function Source:putProgressAsync(identity, pos, cb)
             if cancelled then return end
             cb(ok and true or nil, perr)
         end
-        if chapter.slice then
-            job = Client.putProgressAsync(identity.stable_id, chapter.uid, idx, #toc, true, posted)
-            return
-        end
-        -- 专栏阅读器按章节 article 取进度，作品 id 上的记录只给月读自己对上章节。
-        job = Client.putProgressAsync(identity.stable_id, chapter.uid, idx, #toc, false, function(ok, perr)
+        article_job = Client.articleAsync(chapter.content_url, function(article, article_err)
             if cancelled then return end
-            if not ok then cb(nil, perr); return end
-            job = Client.articleAsync(chapter.uid, function(article, article_err)
-                if cancelled then return end
-                if not article then cb(nil, article_err); return end
-                local pid = Mapper.firstParagraphId(article)
-                if not pid then cb(nil, _("缺少豆瓣阅读章节位置")); return end
-                job = Client.putProgressAsync(chapter.uid, pid, idx, #toc, false, posted)
-            end)
+            if not article then cb(nil, article_err); return end
+            local pid = chapter.slice and chapter.uid or Mapper.firstParagraphId(article)
+            local position = pid and Mapper.progressPosition(article, pid, chapter.end_pid)
+            if not position then cb(nil, _("缺少豆瓣阅读章节位置")); return end
+            local works_id = chapter.slice and identity.stable_id or chapter.content_url
+            works_job = Client.putProgressAsync(works_id, position.paragraph_id, idx, #toc, chapter.slice == true, posted, position)
         end)
     end)
     return { cancel = function()
         cancelled = true
-        if job and job.cancel then job.cancel() end
+        for _idx, job in pairs({ toc_job, works_job, article_job }) do
+            job.cancel()
+        end
     end }
 end
 
@@ -251,6 +335,18 @@ function Source:pushStatsAsync(rows, cb)
     end)
 end
 
+function Source:pullStatsAsync(cb)
+    local fetched_at = os.time()
+    local date = os.date("*t", fetched_at)
+    date.day, date.hour, date.min, date.sec = date.day - 29, 0, 0, 0
+    date.isdst = nil
+    local begin_date = os.date("%Y-%m-%d", os.time(date))
+    return Client.readingStatsAsync(begin_date, function(wire, err)
+        if not wire then cb(nil, err); return end
+        cb(Mapper.readingStats(wire, begin_date, fetched_at))
+    end)
+end
+
 function Source:paragraphReviewsEnabled()
     return require("source.review_setting").enabled(self.id)
 end
@@ -276,15 +372,18 @@ local function chapterOf(self, identity, cb)
 end
 
 function Source:paragraphHotspotsAsync(identity, cb)
-    local cancelled, job = false, nil
-    job = chapterOf(self, identity, function(chapter, err)
+    local cancelled, chapter_job, review_job = false, nil, nil
+    chapter_job = chapterOf(self, identity, function(chapter, err)
         if cancelled then return end
         if not chapter then cb(nil, err); return end
-        job = require("source.douban.reviews").hotspotsAsync(chapter, cb)
+        review_job = require("source.douban.reviews").hotspotsAsync(chapter, function(rows, reason)
+            if not cancelled then cb(rows, reason) end
+        end)
     end)
     return { cancel = function()
         cancelled = true
-        if job and job.cancel then job.cancel() end
+        if chapter_job then chapter_job.cancel() end
+        if review_job then review_job.cancel() end
     end }
 end
 
@@ -294,15 +393,18 @@ function Source:locateHotspots(hotspots, html)
 end
 
 function Source:paragraphReviewPageAsync(identity, range, _max_idx, cb)
-    local cancelled, job = false, nil
-    job = chapterOf(self, identity, function(chapter, err)
+    local cancelled, chapter_job, review_job = false, nil, nil
+    chapter_job = chapterOf(self, identity, function(chapter, err)
         if cancelled then return end
         if not chapter then cb(nil, err); return end
-        job = require("source.douban.reviews").pageAsync(chapter, range, cb)
+        review_job = require("source.douban.reviews").pageAsync(chapter, range, function(page, reason)
+            if not cancelled then cb(page, reason) end
+        end)
     end)
     return { cancel = function()
         cancelled = true
-        if job and job.cancel then job.cancel() end
+        if chapter_job then chapter_job.cancel() end
+        if review_job then review_job.cancel() end
     end }
 end
 
