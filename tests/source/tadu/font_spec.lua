@@ -22,8 +22,35 @@ local shapes = {
 }
 local index = {
     [SHA.sha256("64|1,0,0;1,20,0;1,20,20;1,0,20|1,30,10;1,50,10;1,50,30;1,30,30")] = 0x7532,
+    [string.rep("00", 32)] = 0x20000,
+    [string.rep("00", 31) .. "01"] = 0x4e59,
+    [string.rep("ff", 32)] = 0x10ffff,
 }
-package.loaded["json"] = { decode = function(_data) return index end }
+local keys, records = {}, { "MTF1" }
+for hash in pairs(index) do keys[#keys + 1] = hash end
+table.sort(keys)
+for _idx, hash in ipairs(keys) do
+    local cp = index[hash]
+    records[#records + 1] = hash:gsub("%x%x", function(hex) return string.char(tonumber(hex, 16)) end)
+        .. string.char(math.floor(cp / 65536), math.floor(cp / 256) % 256, cp % 256)
+end
+local raw_index = table.concat(records)
+local open = io.open
+io.open = function(name, mode)
+    if name:match("/source/tadu/font_table%.bin$") then
+        Assert.eq(mode, "rb")
+        return {
+            read = function(_self, format)
+                Assert.eq(format, "*a")
+                return raw_index
+            end,
+            close = function() return true end,
+        }
+    end
+    return open(name, mode)
+end
+local sha256, forced_hash = SHA.sha256, nil
+SHA.sha256 = function(shape) return forced_hash or sha256(shape) end
 local rotated, unknown, invalid, load_failed, pending
 local options, worker_result, closed, html, message, completed
 local face = { glyph = { advance = { x = 64 * 64 } } }
@@ -103,6 +130,29 @@ rotated = true
 run()
 Assert.eq(html, decoded, "轮廓换起点、换次序仍是同一字形")
 rotated = false
+for _idx, hash in ipairs(keys) do
+    forced_hash = hash
+    run()
+    local ch = require("utils.text").utf8char(index[hash])
+    Assert.eq(html, '<p title="的">' .. ch .. '&amp;' .. ch .. '<b>原</b></p>',
+        "二分查找覆盖首尾、共享前缀及非 BMP 码点")
+    Assert.is_nil(message)
+    cleaned()
+end
+forced_hash = string.rep("00", 31) .. "02"
+run()
+Assert.is_nil(html, "必须匹配全部 32 字节，不能按指纹前缀猜字")
+Assert.matches(message, "字体还原失败")
+forced_hash = nil
+local valid_index = raw_index
+for _idx, malformed in ipairs({ "BAD1" .. raw_index:sub(5), raw_index:sub(1, -2) }) do
+    raw_index = malformed
+    run()
+    Assert.is_nil(html, "损坏索引不能产出正文")
+    Assert.matches(message, "invalid tadu font index")
+    cleaned()
+end
+raw_index = valid_index
 unknown = true
 run()
 Assert.is_nil(html, "未知字形不能保存错码正文")
@@ -126,15 +176,15 @@ Assert.is_nil(html)
 Assert.matches(message, "字体还原失败")
 cleaned()
 bytes = "\0\1\0\0fixture"
-local open = io.open
+local index_open = io.open
 io.open = function(name, mode)
     if name == path and mode == "wb" then return nil, "permission denied" end
-    return open(name, mode)
+    return index_open(name, mode)
 end
 run()
 Assert.is_nil(html)
 Assert.matches(message, "permission denied")
-io.open = open
+io.open = index_open
 pending = true
 run():cancel()
 Assert.is_true(worker_result.html ~= nil)
@@ -143,6 +193,8 @@ cleaned()
 pending = false
 ffi.loadlib = original_loadlib
 os.tmpname = tmpname
+io.open = open
+SHA.sha256 = sha256
 
 package.loaded["source.tadu.client"] = {
     contentAsync = function(_id, _part, cb) cb(decoded) end,

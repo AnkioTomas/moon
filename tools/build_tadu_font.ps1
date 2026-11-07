@@ -13,7 +13,6 @@ using System.Text;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Windows.Media;
-using System.Web.Script.Serialization;
 
 public class TaduFontIndex {
     readonly byte[] data;
@@ -127,11 +126,21 @@ public class TaduFontIndex {
                 ambiguous.Add(hash);
             } else rows[hash] = cp;
         }
-        var json = new JavaScriptSerializer { MaxJsonLength = Int32.MaxValue };
-        File.WriteAllText(output, json.Serialize(rows), new UTF8Encoding(false));
+        // MTF1 + sorted records: full SHA-256 (32 bytes), Unicode (3 bytes, big-endian).
+        using (var file = File.Create(output)) {
+            file.Write(Encoding.ASCII.GetBytes("MTF1"), 0, 4);
+            foreach (var row in rows) {
+                for (int i = 0; i < row.Key.Length; i += 2) {
+                    file.WriteByte(Convert.ToByte(row.Key.Substring(i, 2), 16));
+                }
+                file.WriteByte((byte)(row.Value >> 16));
+                file.WriteByte((byte)(row.Value >> 8));
+                file.WriteByte((byte)row.Value);
+            }
+        }
         Console.WriteLine("fingerprints={0}; ambiguous={1}", rows.Count, ambiguous.Count);
     }
 }
-'@ -ReferencedAssemblies PresentationCore, WindowsBase, System.Web.Extensions
+'@ -ReferencedAssemblies PresentationCore, WindowsBase
 
 [TaduFontIndex]::Build($FontPath, $OutputPath)

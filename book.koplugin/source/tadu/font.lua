@@ -9,9 +9,29 @@ require("l10n").apply()
 local Glyph = require("utils.glyph")
 local Text = require("utils.text")
 local _ = require("gettext")
-local TABLE_PATH = debug.getinfo(1, "S").source:sub(2):match("^(.*)/") .. "/font_table.json"
+local TABLE_PATH = debug.getinfo(1, "S").source:sub(2):match("^(.*)/") .. "/font_table.bin"
+-- MTF1 + sorted records: 32-byte SHA-256, 3-byte big-endian Unicode codepoint.
+local RECORD_SIZE = 35
 
 local Font = {}
+
+local function findCodepoint(index, hash)
+    local key = hash:gsub("%x%x", function(hex) return string.char(tonumber(hex, 16)) end)
+    local low, high = 0, (#index - 4) / RECORD_SIZE - 1
+    while low <= high do
+        local mid = math.floor((low + high) / 2)
+        local pos = 5 + mid * RECORD_SIZE
+        local candidate = index:sub(pos, pos + 31)
+        if candidate == key then
+            local a, b, c = index:byte(pos + 32, pos + 34)
+            return a * 65536 + b * 256 + c
+        elseif candidate < key then
+            low = mid + 1
+        else
+            high = mid - 1
+        end
+    end
+end
 
 local function fingerprint(outline, advance)
     local paths, begin = {}, 0
@@ -44,9 +64,9 @@ local function restore(html, bytes, path)
     assert(file:write(bytes))
     assert(file:close())
     local index_file = assert(io.open(TABLE_PATH, "rb"))
-    local raw_index = assert(index_file:read("*a"))
+    local index = assert(index_file:read("*a"))
     assert(index_file:close())
-    local index = assert(require("json").decode(raw_index))
+    assert(index:sub(1, 4) == "MTF1" and (#index - 4) % RECORD_SIZE == 0, "invalid tadu font index")
     local font = require("ffi/freetype").newFaceSize(path, 2048) --[[@as FreeTypeSize]]
     local ft2 = assert(require("ffi").loadlib)("freetype", "6")
     local map, seen = {}, {}
@@ -72,7 +92,7 @@ local function restore(html, bytes, path)
                     assert(ft2.FT_Load_Char(font.face, cp, 10) == 0, "FreeType glyph load failed")
                     local glyph = font.face.glyph
                     if glyph.outline.n_points > 0 then
-                        local decoded = index[fingerprint(glyph.outline, glyph.advance.x)]
+                        local decoded = findCodepoint(index, fingerprint(glyph.outline, glyph.advance.x))
                         if not decoded then
                             font:done()
                             require("utils.log").warn("tadu font glyph not mapped", cp)
