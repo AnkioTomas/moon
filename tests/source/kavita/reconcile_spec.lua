@@ -246,15 +246,13 @@ local day_count = 0
 for _ymd in pairs(days) do day_count = day_count + 1 end
 Assert.eq(day_count, #CLOUD_DAYS, "只有有有效时长的日子落桶（10-02 三条会话全零时长）")
 Assert.is_nil(days["2026-10-02"], "零时长日不留桶")
--- 页数：本地逐页记录按条累加（10-14 的本机 900s 是 1 页）；云端日桶的 event_count 到了
--- StatsDB.add 会被兜底成 ≥1（page 行本来就该 ≥1），于是云端当天 0 页的 5 天各显示 1 页。
--- 这是 stats_db.add 的既有实现，本票不改核心，只按真实入库口径对账（显示差记在 acceptance）。
+-- 本地逐页记录按条累加；云端日桶显式 0 页不能被补成 1 页。
 local ZERO_PAGE_DAYS = 0
 for _idx, expected in ipairs(CLOUD_DAYS) do
     local row = days[expected[1]]
     Assert.not_nil(row, "缺日桶 " .. expected[1])
     Assert.eq(row.seconds, expected[2], "日时长 " .. expected[1])
-    local stored_pages = math.max(1, expected[3]) + (expected[1] == "2026-10-14" and 1 or 0)
+    local stored_pages = expected[3] + (expected[1] == "2026-10-14" and 1 or 0)
     if expected[3] == 0 then ZERO_PAGE_DAYS = ZERO_PAGE_DAYS + 1 end
     Assert.eq(row.pages, stored_pages, "日页数增量 " .. expected[1])
 end
