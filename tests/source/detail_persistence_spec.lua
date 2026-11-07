@@ -32,6 +32,7 @@ for _idx, id in ipairs({ "dedao", "douban", "ireader", "kuaikan", "netease", "sh
     package.loaded["source." .. id .. ".client"] = {
         detailAsync = respond, infoAsync = respond, topicAsync = respond,
         catalogAsync = respond, simpleAsync = respond,
+        hasAccount = function() return false end,
     }
     local Mapper = require("source." .. id .. ".mapper")
     Mapper.detail = function() return detail end
