@@ -45,21 +45,25 @@ end
 
 --- 书架行没有简介。本地没有简介的书逐本补拉详情，拉不到就退回书架行。
 ---@param rows table[]
----@param cb fun(rows: table[])
+---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 local function fillDetails(rows, cb)
     local BookDB = require("book.books_db")
-    local cancelled, job, index = false, nil, 0
+    local cancelled, job, index, cookie = false, nil, 0, Client.cookie()
     local function nextRow()
         if cancelled then return end
+        if Client.cookie() ~= cookie then cb(nil, _("账号已变化，请重新登录")); return end
         index = index + 1
         local row = rows[index]
         if not row then cb(rows); return end
         row.local_book = BookDB.get(QQReader.meta().id, tostring(row.bid))
         local intro = row.local_book and row.local_book.intro
         if intro and intro ~= "" then nextRow(); return end
-        job = Client.detailAsync(row.bid, function(info, err)
+        local pending = true
+        local inner = Client.detailAsync(row.bid, function(info, err)
+            pending = false
             if cancelled then return end
+            if Client.cookie() ~= cookie then cb(nil, _("账号已变化，请重新登录")); return end
             if info then
                 row.info = info
             else
@@ -67,6 +71,7 @@ local function fillDetails(rows, cb)
             end
             nextRow()
         end)
+        if pending then job = inner end
     end
     nextRow()
     return { cancel = function()
@@ -79,9 +84,10 @@ end
 local Remote = {}
 
 function Remote:shelfSyncAsync(cb)
-    local cancelled, job, fill = false, nil, nil
-    job = Client.shelfAsync(Client.cookie(), function(rows, err)
+    local cancelled, job, fill, cookie = false, nil, nil, Client.cookie()
+    job = Client.shelfAsync(cookie, function(rows, err)
         if cancelled then return end
+        if Client.cookie() ~= cookie then cb(nil, _("账号已变化，请重新登录")); return end
         if not rows then cb(nil, err); return end
         fill = fillDetails(rows, cb)
     end)
@@ -108,14 +114,18 @@ end
 --- 详情上的 lastReadChapterId 就是书架行那一章。0 是没读过。
 function Source:getProgressAsync(identity, cb)
     if not self:configured() then return SourceBase.defer(cb, nil, _("未登录 QQ阅读")) end
-    local cancelled, job = false, nil
-    job = Client.detailAsync(identity.stable_id, function(info, err)
+    local cancelled, job, cookie = false, nil, Client.cookie()
+    local pending = true
+    local inner = Client.detailAsync(identity.stable_id, function(info, err)
+        pending = false
         if cancelled then return end
+        if Client.cookie() ~= cookie then cb(nil, _("账号已变化，请重新登录")); return end
         if not info then cb(nil, err); return end
         local read = Mapper.readChapter(info)
         if not read then cb(nil, nil, { empty = true }); return end
         job = self:loadTocAsync(identity, function(toc, reason)
             if cancelled then return end
+            if Client.cookie() ~= cookie then cb(nil, _("账号已变化，请重新登录")); return end
             if not toc or #toc == 0 then cb(nil, reason or _("QQ阅读目录为空")); return end
             local idx = Toc.index(self.id, identity.stable_id, read.uid)
             if not idx then cb(nil, nil, { empty = true }); return end
@@ -128,6 +138,7 @@ function Source:getProgressAsync(identity, cb)
             })
         end)
     end)
+    if pending then job = inner end
     return { cancel = function()
         cancelled = true
         if job and job.cancel then job.cancel() end
@@ -137,8 +148,12 @@ end
 function Source:putProgressAsync(identity, pos, cb)
     if not self:configured() then return SourceBase.defer(cb, nil, _("未登录 QQ阅读")) end
     local cancelled, job = false, nil
-    job = self:loadTocAsync(identity, function(toc, err)
+    local cookie = Client.cookie()
+    local pending = true
+    local inner = self:loadTocAsync(identity, function(toc, err)
+        pending = false
         if cancelled then return end
+        if Client.cookie() ~= cookie then cb(nil, _("账号已变化，请重新登录")); return end
         if not toc then cb(nil, err); return end
         local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
         local chapter = idx and toc[idx]
@@ -146,16 +161,22 @@ function Source:putProgressAsync(identity, pos, cb)
             cb(nil, _("缺少 QQ阅读章节位置"))
             return
         end
-        job = Client.detailAsync(identity.stable_id, function(info, reason)
+        local checking = true
+        local detail = Client.detailAsync(identity.stable_id, function(info, reason)
+            checking = false
             if cancelled then return end
+            if Client.cookie() ~= cookie then cb(nil, _("账号已变化，请重新登录")); return end
             if not info then cb(nil, reason); return end
             if not Mapper.onShelf(info) then cb(nil, _("这本书不在 QQ阅读书架上")); return end
             job = Client.updateReadAsync(identity.stable_id, chapter.uid, function(ok, push_err)
                 if cancelled then return end
+                if Client.cookie() ~= cookie then cb(nil, _("账号已变化，请重新登录")); return end
                 cb(ok and true or nil, push_err)
             end)
         end)
+        if checking then job = detail end
     end)
+    if pending then job = inner end
     return { cancel = function()
         cancelled = true
         if job and job.cancel then job.cancel() end
@@ -167,13 +188,7 @@ end
 ---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Source:searchAsync(keyword, cb)
-    return Client.searchAsync(keyword, function(books, err)
-        if not books then
-            cb(nil, err)
-            return
-        end
-        cb({ data = books })
-    end)
+    return Browse.pages(function(page, done) return Client.searchAsync(keyword, done, page) end, 200, {}, cb)
 end
 
 local RANKS = {
@@ -185,34 +200,39 @@ local RANKS = {
     { id = "rank:publish-sell", title = _("出版热门榜") }, { id = "rank:publish-new", title = _("出版新书榜") },
     { id = "rank:publish-knowledge", title = _("出版新知榜") },
 }
-local CATS = {
-    { id = "cate:0", title = _("全部") }, { id = "cate:20001", title = _("玄幻") },
-    { id = "cate:20005", title = _("奇幻") }, { id = "cate:20010", title = _("武侠") },
-    { id = "cate:20014", title = _("仙侠") }, { id = "cate:20019", title = _("都市") },
-    { id = "cate:20065", title = _("现实") }, { id = "cate:20028", title = _("历史") },
-    { id = "cate:20032", title = _("军事") }, { id = "cate:20050", title = _("游戏") },
-    { id = "cate:20054", title = _("体育") }, { id = "cate:20042", title = _("科幻") },
-    { id = "cate:20037", title = _("悬疑") }, { id = "cate:20059", title = _("轻小说") },
-    { id = "cate:20109", title = _("诸天无限") }, { id = "cate:20076", title = _("短篇") },
-}
-
---- 书城浏览：榜单 / 分类两行 chip，节点是「rank:榜单名」或「cate:分类号」，缺省男生热门榜。每页 20 本。
+--- 缺省仍为男生热门榜；分类沿用旧 cate:分类号，并支持官网八段筛选节点。
 ---@param opts { node?: string, limit?: integer }
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:browseAsync(opts, cb)
     local node = opts.node or RANKS[1].id
     local kind, name = node:match("^(%a+):(.+)$")
-    local groups = { Browse.group(RANKS, node), Browse.group(CATS, node) }
+    if kind == "cate" then return require("source.qqreader.browse").run(opts, cb) end
+    local known = false
+    for _idx, rank in ipairs(RANKS) do if rank.id == node then known = true; break end end
+    if not known then return SourceBase.defer(cb, nil, _("QQ阅读分类条件无效")) end
+    local ranks = Browse.group(RANKS, node)
+    ranks.title = _("排行榜")
+    local groups = { ranks, Browse.group({ { id = "cate:0", title = _("分类") } }, node) }
     return Browse.pages(function(page, done)
-        local path
-        if kind == "rank" then
-            path = "/book-rank/" .. name .. "/cycle-1" .. (page > 1 and "-" .. page or "")
-        else
-            path = "/book-cate/" .. name .. "-0-0-0-0-0-0-" .. page
-        end
+        local path = "/book-rank/" .. name .. "/cycle-1" .. (page > 1 and "-" .. page or "")
         return Client.listAsync(path, done)
     end, opts.limit or 60, groups, cb)
+end
+
+--- 这是整书书评。官网可能只返回十五条且不给下一页游标，不能冒充完整书评。
+function Source:bookReviewsAsync(identity, cb)
+    return Client.bookCommentsAsync(identity.stable_id, function(data, err)
+        if not data then cb(nil, err); return end
+        local items = Mapper.bookComments(data.comments)
+        local total = tonumber(data.commentCount)
+        cb({
+            title = #items < total and require("ffi/util").template(_("书评（预览 %1/%2）"), #items, total) or _("书评"),
+            items = items,
+            total = total,
+            more = #items < total,
+        })
+    end)
 end
 
 function Source:getDetailAsync(identity, cb)

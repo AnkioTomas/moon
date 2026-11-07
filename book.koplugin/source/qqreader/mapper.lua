@@ -109,6 +109,23 @@ function Mapper.shelfList(rows)
     return books
 end
 
+---@param rows table[]
+---@return table[]
+function Mapper.bookComments(rows)
+    local items = {}
+    for _idx, row in ipairs(rows) do
+        local user = row.user or {}
+        local title, content = row.title or "", row.content or ""
+        items[#items + 1] = {
+            id = row.commentId,
+            author = user.nickname,
+            text = title ~= "" and (title .. "\n" .. content) or content,
+            time = row.createTime and math.floor(row.createTime / 1000) or nil,
+        }
+    end
+    return items
+end
+
 --- 详情或书架行里的阅读位置。0 就是没读过。
 ---@param row table|nil
 ---@return { uid: string }|nil
@@ -161,7 +178,9 @@ end
 ---@param info table|nil
 ---@return boolean
 function Mapper.locked(info)
-    return type(info) == "table" and on(info.chapterVipFlag) and (tonumber(info.authStatus) or 0) == 0
+    if type(info) ~= "table" or not on(info.chapterVipFlag) then return false end
+    local status = tonumber(info.authStatus)
+    return status ~= 1 and status ~= 2
 end
 
 return Mapper
