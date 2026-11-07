@@ -136,6 +136,30 @@ do
     Assert.is_nil(seen.allow_empty, "远端源强制刷新不得把空快照当下架依据")
     package.loaded["source.shelf"] = nil
 end
+-- 原有源仍可把 wire 映射为 Book[]；网易传入已经映射好的数组不改变此契约。
+do
+    local values, result
+    package.loaded["book.books_db"] = {
+        pendingDeleteIds = function() return {} end,
+        pendingShelfAddIds = function() return {} end,
+        reconcile = function(_id, books) values = books; return true, 0 end,
+    }
+    package.loaded["source.shelf"] = nil
+    local S = require("source.shelf")
+    local remote = {
+        shelfSyncAsync = function(_self, cb)
+            cb({ entries = { { uuid = "mapped", name = "书" } } })
+            return { cancel = noop }
+        end,
+    }
+    S.syncAsync("mapped_source", remote, function(wire)
+        return { { stable_id = wire.entries[1].uuid, title = wire.entries[1].name } }
+    end, nil, function(value) result = value end)
+    Stubs.flush()
+    Assert.eq(values[1].stable_id, "mapped")
+    Assert.eq(values[1].title, "书")
+    Assert.eq(result.pulled, 1)
+end
 package.preload["book.books_db"] = nil
 package.loaded["book.books_db"] = nil
 package.loaded["source.shelf"] = nil

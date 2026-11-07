@@ -179,6 +179,21 @@ Assert.contains(Kit.texts(library:build(ctx, { books = {} }, {})), "没有书籍
 Assert.contains(Kit.texts(library:build(ctx, { books = {}, err = "断网" }, {})), "断网")
 Assert.contains(Kit.texts(library:build(ctx, { books = {} }, { empty_text = "没结果" })), "没结果")
 
+local many_categories = {}
+for i = 1, 30 do many_categories[i] = { id = "cat" .. i, title = "分类 " .. i } end
+local selected_category
+local category_page = library:build(ctx, { books = { book } }, {
+    groups = { { title = "分类", chips = many_categories, active = "cat30" } },
+    on_chip = function(id) selected_category = id end,
+})
+button(category_page, "arrow_drop_down"):onTapThemeButton()
+local menu = Themed.last("list")
+Assert.len(menu.items, 30)
+Assert.is_true(menu.items[30].checked)
+menu.items[20].callback()
+Assert.eq(selected_category, "cat20")
+Assert.eq(button(category_page, "arrow_drop_down").text, "分类", "筛选折叠时保留分组名，不是多个含糊的更多")
+
 -- 图书馆默认：书籍页签 + 网格；工具条显示总数、排序、状态，整页同样铺满。
 Assert.eq(library.view, "grid")
 page = render({ book }, 7)

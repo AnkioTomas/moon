@@ -1,107 +1,129 @@
 --[[--
-网易云阅读账号。登录页没有扫码：密码直接提交，短信要先在浏览器里填图形码。
+网易云阅读电脑端账号：手机号密码、微信扫码、电脑浏览器 Cookie。
 
 @module source.netease.setting
 --]]
 
 require("l10n").apply()
 local _ = require("gettext")
+local CookieLogin = require("source.cookie_login")
 
 local SOURCE_ID = "netease"
 local Setting = {}
+local LOGIN_URL = "https://yuedu.163.com/loginForm.do?targetUrl=https%3A%2F%2Fyuedu.163.com%2Fmyinfor.do"
 
----@return boolean
 local function loggedIn()
     return require("source.netease.client").loggedIn()
 end
 
----@param phone string
----@return boolean
-local function validPhone(phone)
-    if #phone == 11 and phone:match("^%d+$") then return true end
-    require("ui.themes.widgets.toast"):new{ text = _("请填写正确的手机号"), timeout = 3 }:show()
+local SPEC = {
+    id = SOURCE_ID,
+    title = _("网易云阅读账号"),
+    cookie_title = _("网易云阅读登录 Cookie"),
+    cookie_hint = _("按键盘 F12，点「网络」，刷新网页，复制请求标头里的整段 Cookie"),
+    logout_text = _("确定退出网易云阅读账号？"),
+    loggedIn = loggedIn,
+    checkAsync = function(cookie, cb)
+        return require("source.netease.client").loginCheckAsync(cookie, cb)
+    end,
+    store = function(cfg, cookie)
+        cfg.cookie, cfg.logged_in, cfg.csrf = cookie, true, nil
+    end,
+    clear = function(cfg)
+        cfg.cookie, cfg.csrf, cfg.logged_in = nil, nil, nil
+    end,
+}
+
+Setting.browser = {
+    domain = "yuedu.163.com",
+    scope = "cookie",
+    login = LOGIN_URL,
+    check = "https://yuedu.163.com/myinfor.do",
+    isAuthorized = function() return CookieLogin.authorized(SPEC) end,
+    apply = function(payload, cb)
+        CookieLogin.save(SPEC, CookieLogin.fromPayload(payload, "163.com"), cb)
+    end,
+}
+
+local function connected()
+    if require("ui/network/manager"):isConnected() then return true end
+    require("ui.themes.widgets.toast"):new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
     return false
+end
+
+local function onLogin()
+    require("source.registry").reload()
+    require("ui.themes.widgets.toast"):new{ text = _("登录成功"), timeout = 2 }:show()
 end
 
 local function showLogin()
     local Toast = require("ui.themes.widgets.toast")
-    local verification
-    local closed = false
-    local dialog = require("ui.themes.widgets.input"):new{
+    local session = require("source.netease.auth").new()
+    local closed, busy, verification, waiting = false, false, nil, nil
+    local dialog
+    local function submit(phone, password, code)
+        if closed or busy or not connected() then return end
+        busy = true
+        waiting = require("ui.themes.widgets.progress_dialog"):new{
+            title = _("网易云阅读账号"), text = _("正在登录…"),
+            on_cancel = function()
+                session:cancel()
+                busy = false
+                waiting:close()
+                waiting = nil
+            end,
+        }
+        waiting:show()
+        session:passwordAsync(phone, password, code, function(ok, err, needs_code)
+            busy = false
+            waiting:close()
+            waiting = nil
+            if closed then return end
+            if ok then dialog:close(); onLogin(); return end
+            Toast:new{ text = err or _("登录失败"), timeout = 3 }:show()
+            if needs_code then
+                verification = require("source.netease.verify").new(session, function(value)
+                    verification = nil
+                    if value then submit(phone, password, value) end
+                end)
+            end
+        end)
+    end
+    dialog = require("ui.themes.widgets.input"):new{
         title = _("网易云阅读账号"),
+        keep_open = true,
         fields = {
             { label = _("手机号"), text = "", input_type = "number" },
             { label = _("密码"), text = "", text_type = "password" },
-            { label = _("短信验证码"), text = "", input_type = "number" },
         },
         ok_text = _("登录"),
         close_callback = function()
             closed = true
             if verification then verification:cancel() end
+            session:cancel()
+            if waiting then waiting:close(); waiting = nil end
         end,
-        actions = {
-            { text = _("获取验证码"), callback = function(phone)
-                phone = require("utils.text").trim(phone)
-                if not validPhone(phone) then return end
-                require("ui/network/manager"):runWhenConnected(function()
-                    if closed then return end
-                    if verification then verification:cancel() end
-                    verification = require("source.netease.verify").new(phone, function(ok, err)
-                        Toast:new{
-                            text = ok and _("短信已发送，请在设备上填写验证码") or err,
-                            timeout = 3,
-                        }:show()
-                    end)
-                end)
-            end },
-        },
-        callback = function(phone, password, code)
-            local Text = require("utils.text")
-            phone, password, code = Text.trim(phone), Text.trim(password), Text.trim(code)
-            if not validPhone(phone) then return end
-            local use_password = code == ""
-            if use_password and password == "" then
-                Toast:new{ text = _("请填写密码或验证码"), timeout = 3 }:show()
+        callback = function(phone, password)
+            phone = require("utils.text").trim(phone)
+            if #phone ~= 11 or not phone:match("^%d+$") then
+                Toast:new{ text = _("请填写正确的手机号"), timeout = 3 }:show()
                 return
             end
-            if password ~= "" and (#password < 6 or #password > 16) then
-                Toast:new{ text = _("密码长度为 6 到 16 位"), timeout = 3 }:show()
+            if password == "" then
+                Toast:new{ text = _("请填写密码"), timeout = 3 }:show()
                 return
             end
-            require("ui/network/manager"):runWhenConnected(function()
-                local waiting = require("ui.themes.widgets.progress_dialog"):new{
-                    title = _("网易云阅读账号"), text = _("正在登录…"), dismissable = false,
-                }
-                waiting:show()
-                local function done(ok, err)
-                    waiting:close()
-                    if not ok then
-                        Toast:new{ text = err or _("登录失败"), timeout = 3 }:show()
-                        return
-                    end
-                    require("source.auth").ok(SOURCE_ID)
-                    require("source.registry").reload()
-                    Toast:new{ text = _("登录成功"), timeout = 2 }:show()
-                end
-                local Client = require("source.netease.client")
-                if use_password then
-                    Client.passwordLoginAsync(phone, password, done)
-                else
-                    Client.smsLoginAsync(phone, code, password, done)
-                end
-            end)
+            submit(phone, password)
         end,
     }
     dialog:show()
 end
 
----@return string, boolean
 function Setting.rowStatus()
     local on = loggedIn()
     return on and _("已登录") or _("未登录 · 点此登录"), on
 end
 
----@return table[]
 function Setting.rows()
     local Row = require("ui.themes.widgets.row")
     local rows = {
@@ -109,21 +131,34 @@ function Setting.rows()
             local status, status_on = Setting.rowStatus()
             return Row.widget({
                 width = iw, chevron = true, kind = "nav", icon = "account_circle",
-                title = _("网易云阅读账号"),
-                subtitle = not status_on and _("图形码在同一 Wi-Fi 的浏览器里填写") or nil,
-                status = status, status_on = status_on,
-                callback = function() showLogin() end,
+                title = _("网易云阅读账号"), subtitle = _("手机号密码登录"),
+                status = status, status_on = status_on, callback = showLogin,
             })
         end,
+        function(iw)
+            return Row.widget({
+                width = iw, chevron = true, kind = "nav", icon = "qr_code",
+                title = _("微信扫码登录"), subtitle = _("打开微信，扫屏幕上的二维码"),
+                callback = function()
+                    if connected() then require("source.netease.qrlogin"):new(onLogin):start() end
+                end,
+            })
+        end,
+        function(iw)
+            return Row.widget({
+                width = iw, chevron = true, kind = "nav", icon = "language",
+                title = _("电脑浏览器登录"), subtitle = _("在电脑浏览器完成官方授权"),
+                callback = function()
+                    require("ui.themes.widgets.text_viewer"):new{
+                        title = _("电脑浏览器登录"),
+                        text = CookieLogin.relogin(_("网易云阅读"), LOGIN_URL, _("网易云阅读登录 Cookie")),
+                    }:show()
+                end,
+            })
+        end,
+        CookieLogin.pasteRow(SPEC),
     }
-    if not loggedIn() then return rows end
-    rows[#rows + 1] = require("source.logout").row(SOURCE_ID, _("确定退出网易云阅读账号？"), function()
-        local settings = require("utils.settings")
-        local cfg = settings.getSource(SOURCE_ID)
-        cfg.cookie, cfg.csrf, cfg.logged_in = nil, nil, nil
-        settings.saveSource(SOURCE_ID)
-        require("source.netease.client").reset()
-    end)
+    if loggedIn() then rows[#rows + 1] = CookieLogin.logoutRow(SPEC) end
     return rows
 end
 
