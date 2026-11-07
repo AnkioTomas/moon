@@ -15,6 +15,36 @@ Mapper.TOC_VERSION = 1
 local SOURCE_ID = "zymk"
 local COVER = "https://chapter-cover.yyhao.com/file/cover/%s.jpg-300x400"
 
+---@class ZymkAccount
+---@field openid string
+---@field type string
+
+--- 官网用 type + openid 访问账号；device 是匿名身份，不能算登录。
+---@param data any
+---@return ZymkAccount|nil
+function Mapper.account(data)
+    if type(data) ~= "table" or type(data.openid) ~= "string" or data.openid == ""
+        or type(data.type) ~= "string" or data.type == "" or data.type == "device" then return nil end
+    return { openid = data.openid, type = data.type }
+end
+
+---@class ZymkCaptcha
+---@field image string
+---@field width number
+---@field height number
+---@field content string
+
+---@param data any
+---@return ZymkCaptcha|nil
+function Mapper.captcha(data)
+    if type(data) ~= "table" or type(data.Image) ~= "string" or data.Image == ""
+        or type(data.Content) ~= "string" or data.Content == "" then return nil end
+    local width, height = tonumber(data.Width), tonumber(data.Height)
+    if not width or width <= 0 or not height or height <= 0 then return nil end
+    return { image = data.Image, width = width, height = height, content = data.Content }
+end
+
+
 ---@param value any
 ---@return string
 local function clean(value)
@@ -42,18 +72,48 @@ function Mapper.list(wire)
     if type(rows) ~= "table" then return nil end
     local out = {}
     for _idx, row in ipairs(rows) do
-        if type(row) == "table" and row.comic_id ~= nil and clean(row.comic_name) ~= "" then
-            out[#out + 1] = {
-                source_id = SOURCE_ID,
-                stable_id = tostring(row.comic_id),
-                title = clean(row.comic_name),
-                authors = "",
-                cover = Mapper.cover(row.comic_id),
-                intro = clean(row.comic_feature),
-            }
-        end
+        if type(row) ~= "table" or row.comic_id == nil or clean(row.comic_name) == "" then return nil end
+        out[#out + 1] = {
+            source_id = SOURCE_ID,
+            stable_id = tostring(row.comic_id),
+            title = clean(row.comic_name),
+            authors = "",
+            cover = Mapper.cover(row.comic_id),
+            intro = clean(row.comic_feature),
+        }
     end
     return out
+end
+
+--- 官网空收藏可能省略 ubook；非空的坏行不能变成空书架。
+---@param data any
+---@return Book[]|nil
+function Mapper.shelf(data)
+    if type(data) ~= "table" then return nil end
+    local rows = data.ubook
+    if rows == nil then
+        if next(data) == nil or type(data.urecord) == "table" then return {} end
+        return nil
+    end
+    if type(rows) ~= "table" then return nil end
+    local count = 0
+    for index, row in pairs(rows) do
+        count = count + 1
+        if type(index) ~= "number" or index % 1 ~= 0 or index < 1 or index > #rows
+            or type(row) ~= "table" or not tostring(row.comic_id):match("^%d+$")
+            or clean(row.comic_name) == "" then return nil end
+    end
+    if count ~= #rows then return nil end
+    local books = {}
+    for _index, row in ipairs(rows) do
+        local added = tonumber(row.addtime)
+        books[#books + 1] = {
+            source_id = SOURCE_ID, stable_id = tostring(row.comic_id),
+            title = clean(row.comic_name), cover = Mapper.cover(row.comic_id),
+            inserted_at = added and math.floor(added / 1000) or nil,
+        }
+    end
+    return books
 end
 
 ---@param page table|nil
@@ -79,25 +139,24 @@ end
 function Mapper.chapters(comic_id, rows)
     if comic_id == nil or type(rows) ~= "table" then return nil end
     local copy = {}
-    for index, row in ipairs(rows) do copy[index] = row end
+    for index, row in ipairs(rows) do
+        if type(row) ~= "table" or not tonumber(row.order_num)
+            or type(row.chapter_newid) ~= "string" or row.chapter_newid == ""
+            or clean(row.chapter_name) == "" then return nil end
+        copy[index] = row
+    end
     table.sort(copy, function(left, right)
-        local left_order = type(left) == "table" and tonumber(left.order_num) or 0
-        local right_order = type(right) == "table" and tonumber(right.order_num) or 0
-        return left_order < right_order
+        return tonumber(left.order_num) < tonumber(right.order_num)
     end)
     local prefix = tostring(comic_id) .. "/"
     local out = {}
     for _idx, row in ipairs(copy) do
-        local newid = type(row) == "table" and row.chapter_newid or nil
-        local title = type(row) == "table" and clean(row.chapter_name) or ""
-        if type(newid) == "string" and newid ~= "" and title ~= "" then
-            out[#out + 1] = {
-                idx = #out + 1,
-                uid = prefix .. newid,
-                title = title,
-                vip = (tonumber(row.price) or 0) > 0,
-            }
-        end
+        out[#out + 1] = {
+            idx = #out + 1,
+            uid = prefix .. row.chapter_newid,
+            title = clean(row.chapter_name),
+            vip = (tonumber(row.price) or 0) > 0,
+        }
     end
     if not out[1] then return nil end
     out[1].toc_version = Mapper.TOC_VERSION
@@ -115,7 +174,8 @@ function Mapper.images(wire)
     local urls = {}
     if type(chapter.chapter_img_list) == "table" then
         for _idx, url in ipairs(chapter.chapter_img_list) do
-            if type(url) == "string" and url ~= "" then urls[#urls + 1] = url end
+            if type(url) ~= "string" or not url:match("^https?://") then return nil end
+            urls[#urls + 1] = url
         end
     end
     if #urls == 0 then
@@ -125,6 +185,29 @@ function Mapper.images(wire)
         return nil
     end
     return urls
+end
+
+---@param stable_id string
+---@param page integer
+---@param wire table
+---@return table|nil
+function Mapper.reviews(stable_id, page, wire)
+    if type(wire) ~= "table" or tonumber(wire.status) ~= 1 or type(wire.data) ~= "table" then return nil end
+    local items = {}
+    for _idx, row in ipairs(wire.data) do
+        if type(row) ~= "table" or row.id == nil or tostring(row.ssid) ~= stable_id or tonumber(row.ssidtype) ~= 0
+            or type(row.content) ~= "string" or type(row.uname) ~= "string" then return nil end
+        local timestamp = tonumber(row.createtime) or 0
+        if timestamp >= 1e12 then timestamp = timestamp / 1000 end
+        items[#items + 1] = {
+            id = tostring(row.id),
+            author = row.uname,
+            text = Text.stripHtml(row.content),
+            time = timestamp > 0 and os.date("%Y-%m-%d", timestamp) or "",
+        }
+    end
+    -- 列表没有总数；满页只表明可能还有下一页，不能伪造精确页数。
+    return { items = items, more = #wire.data == 20, pages = #wire.data == 20 and page + 1 or page }
 end
 
 return Mapper

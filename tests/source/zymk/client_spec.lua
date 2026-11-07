@@ -30,6 +30,7 @@ Assert.eq(found[1].intro, "简介")
 Assert.eq(found[1].cover, Mapper.cover(4982))
 Assert.eq(#Mapper.list({ status = 0, data = { page = { comic_list = {} } } }), 0)
 Assert.is_nil(Mapper.list({ status = 1 }))
+Assert.is_nil(Mapper.list({ status = 0, data = { page = { comic_list = { { comic_name = "缺身份" } } } } }))
 
 local html = [[
 <meta property="og:novel:book_name" content="长相思">
@@ -85,7 +86,7 @@ package.preload["http.request"] = function()
         get = function(url, _options, callback)
             requests[#requests + 1] = url
             if url:find("key=", 1, true) then
-                callback(Json.encode({ status = 0, data = { page = { comic_list = { { comic_id = 4982, comic_name = "长相思" } } } } }), nil, nil)
+                callback(Json.encode({ status = 0, data = { page = { total_page = 1, comic_list = { { comic_id = 4982, comic_name = "长相思" } } } } }), nil, nil)
             elseif url:find("/apinew/getsortlist/", 1, true) then
                 callback(Json.encode({ status = 0, data = { page = { comic_list = { { comic_id = 101, comic_name = "凤逆天下" } } } } }), nil, nil)
             elseif url:find(".html", 1, true) then
@@ -114,10 +115,6 @@ local books
 Client.searchAsync("长相思", function(list) books = list end)
 Assert.eq(books[1].stable_id, "4982")
 
-local ranked
-Client.browseAsync(function(list) ranked = list end)
-Assert.eq(ranked[1].stable_id, "101")
-
 local loaded
 Client.catalogAsync("4982", function(value) loaded = value end)
 Assert.eq(loaded.book.title, "长相思")
@@ -129,3 +126,10 @@ Client.imagesAsync("25289/xu", function(list) images = list end)
 Assert.eq(images[1], "https://img/1.jpg")
 Assert.is_true(requests[#requests]:find("isWebp=0", 1, true) ~= nil)
 Assert.is_true(requests[#requests]:find("chapter_newid=xu", 1, true) ~= nil)
+
+Assert.is_nil(Mapper.chapters(25289, { { chapter_name = "无序号", chapter_newid = "xu" } }))
+Assert.is_nil(Mapper.images({
+    status = 0, data = { current_chapter = { chapter_img_list = { "https://img/1.jpg", false } } },
+}))
+local escaped = Page.detail(html:gsub('content="长相思"', 'content="A &amp; B"'))
+Assert.eq(escaped.title, "A & B")

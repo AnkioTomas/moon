@@ -1,7 +1,7 @@
 --[[--
 知音漫客数据源。
 
-阅读发生在站点跳过去的看漫画。未登录没有书架列表，对账会清空本地书架，所以上行关掉。
+阅读发生在站点跳过去的看漫画。账号登录与公开阅读分离；登录后拉取收藏。
 一话是一组图片，打成 CBZ。
 
 @module source.zymk
@@ -22,16 +22,20 @@ function Zhiyinmanke.meta()
 end
 
 ---@class ZhiyinmankeSource : SourceBase
+---@field account ZymkAccount|nil
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
 ---@return ZhiyinmankeSource
 function Zhiyinmanke.new()
     local meta = Zhiyinmanke.meta()
-    return setmetatable({ id = meta.id, name = meta.name, type = meta.type }, Source)
+    return setmetatable({
+        id = meta.id, name = meta.name, type = meta.type,
+        account = require("utils.settings").getSource("zymk").account,
+    }, Source)
 end
 
---- 未登录没有可对账的书架。
+--- 只拉收藏，不推本地成员变更。
 ---@return SourceCapabilities
 function Source:capabilities()
     local caps = SourceBase.capabilities(self)
@@ -44,6 +48,26 @@ function Source:configured()
     return true
 end
 
+---@param opts { force?: boolean, dirty_only?: boolean, on_progress?: ShelfReport }|nil
+---@param cb fun(result: SyncResult|nil, err: string|nil)
+function Source:syncBooksAsync(opts, cb)
+    opts = opts or {}
+    if opts.dirty_only then return SourceBase.skipped(cb, "unsupported") end
+    if not self.account then return SourceBase.skipped(cb, "zymk not logged in") end
+    if opts.on_progress then opts.on_progress(_("正在拉取书架…")) end
+    local cancelled = false
+    local job = Client.shelfAsync(self.account, function(books, err)
+        if cancelled then return end
+        if not books then cb(nil, err); return end
+        local result, reason = require("source.shelf").reconcile(self.id, books, opts.force, true)
+        cb(result, reason)
+    end)
+    return { cancel = function()
+        cancelled = true
+        job.cancel()
+    end }
+end
+
 ---@param keyword string
 ---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
 function Source:searchAsync(keyword, cb)
@@ -53,13 +77,14 @@ function Source:searchAsync(keyword, cb)
     end)
 end
 
----@param _opts table|nil
+---@param opts table|nil
 ---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
-function Source:browseAsync(_opts, cb)
-    return Client.browseAsync(function(books, err)
-        if not books then cb(nil, err or _("请求失败")); return end
-        cb({ data = books })
-    end)
+function Source:browseAsync(opts, cb)
+    return require("source.zymk.browse").run(opts or {}, cb)
+end
+
+function Source:bookReviewsAsync(identity, cb)
+    return Client.reviewsAsync(identity.stable_id, 1, cb)
 end
 
 ---@param self ZhiyinmankeSource
@@ -127,7 +152,7 @@ function Source:openBookAsync(identity, opts, cb)
         cb(ok and path or nil, err)
     end
     local toc = Toc.read(identity.source_id, identity.stable_id)
-    if toc then
+    if toc and #toc > 0 then
         local idx = startIndex(identity, opts, toc)
         local path = Chapter.existing(identity, toc[idx])
         if path then return SourceBase.defer(finish, path, idx) end
@@ -148,21 +173,27 @@ function Source:openBookAsync(identity, opts, cb)
         }
         dialog:show()
         dialog:set(_("正在准备漫画…"))
-        active = self:loadTocAsync(identity, function(fresh, err)
+        local loading = true
+        local toc_job = self:loadTocAsync(identity, function(fresh, err)
+            loading = false
             active = nil
             if cancelled then return end
             if not fresh then closeDialog(); cb(nil, err); return end
             local idx = startIndex(identity, opts, fresh)
-            active = Chapter.materializeAsync(identity, fresh[idx], function(done, total)
+            local preparing = true
+            local chapter_job = Chapter.materializeAsync(identity, fresh[idx], function(done, total)
                 if dialog and total > 0 then dialog:update(_("正在准备漫画…"), done, total) end
             end, function(path, materialize_err)
+                preparing = false
                 active = nil
                 closeDialog()
                 if cancelled then return end
                 if not path then cb(nil, materialize_err); return end
                 finish(path, idx)
             end)
+            if preparing then active = chapter_job end
         end)
+        if loading then active = toc_job end
     end)
     return { cancel = function()
         cancelled = true
@@ -177,17 +208,25 @@ end
 
 function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
     local cancelled, active = false, nil
-    active = self:loadTocAsync(identity, function(toc, err)
+    local loading = true
+    local toc_job = self:loadTocAsync(identity, function(toc, err)
+        loading = false
+        active = nil
         if cancelled then return end
         if not toc then cb(false, 0, err, 0, 0); return end
         local from_idx, count = require("source.chapter").cacheRange(toc, range)
-        active = require("source.zymk.chapter").prefetchAsync(identity, toc, from_idx, count, {
+        local caching = true
+        local cache_job = require("source.zymk.chapter").prefetchAsync(identity, toc, from_idx, count, {
             progress = on_progress,
             interval_seconds = 1.5,
         }, function(cached, total, failed, last_err)
+            caching = false
+            active = nil
             if not cancelled then cb(failed == 0, cached, last_err, total, failed) end
         end)
+        if caching then active = cache_job end
     end)
+    if loading then active = toc_job end
     return { cancel = function()
         cancelled = true
         if active then active.cancel() end
