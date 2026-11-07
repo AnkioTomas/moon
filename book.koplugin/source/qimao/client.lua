@@ -206,7 +206,8 @@ end
 function Client.classifyAsync(query, cb)
     return wwwGet("/api/classify/book-list", {
         channel = query.channel, category1 = query.category1, category2 = query.category2,
-        order = query.order, page = query.page, words = "a", update_time = "a", is_vip = "a", is_over = "a",
+        order = query.order, page = query.page, words = query.words or "a", update_time = query.update_time or "a",
+        is_vip = "a", is_over = query.is_over or "a",
     }, cb)
 end
 

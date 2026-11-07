@@ -22,6 +22,20 @@ local Qimao = {}
 -- 匿名接口按 IP 限流，预取与整本缓存逐章间隔请求。
 local FETCH_INTERVAL = 1
 
+---@class QimaoRequestState
+---@field cancelled boolean
+---@field step integer
+---@field job { cancel: fun() }|nil
+--- 同步回调启动下一阶段时，旧请求返回后不能覆盖新句柄。
+---@param state QimaoRequestState
+---@param request fun(): { cancel: fun() }|nil
+local function startStep(state, request)
+    state.step = state.step + 1
+    local step = state.step
+    local job = request()
+    if state.step == step then state.job = job end
+end
+
 ---@return BookSourceMeta
 function Qimao.meta()
     return SourceBase.loadMeta("qimao")
@@ -64,9 +78,10 @@ end
 
 function Source:getProgressAsync(identity, cb)
     if not self:configured() then return SourceBase.defer(cb, nil, _("未登录七猫")) end
-    local cancelled, job = false, nil
-    job = Client.shelfSyncAsync(function(rows, err)
-        if cancelled then return end
+    ---@type QimaoRequestState
+    local state = { cancelled = false, step = 0 }
+    startStep(state, function() return Client.shelfSyncAsync(function(rows, err)
+        if state.cancelled then return end
         if not rows then cb(nil, err); return end
         local row
         for _idx, item in ipairs(rows) do
@@ -74,8 +89,8 @@ function Source:getProgressAsync(identity, cb)
         end
         local read = Mapper.readChapter(row)
         if not read then cb(nil, nil, { empty = true }); return end
-        job = self:loadTocAsync(identity, function(toc, reason)
-            if cancelled then return end
+        startStep(state, function() return self:loadTocAsync(identity, function(toc, reason)
+            if state.cancelled then return end
             if not toc or #toc == 0 then cb(nil, reason or _("七猫目录为空")); return end
             local idx = Toc.index(self.id, identity.stable_id, read.uid)
             if not idx then cb(nil, nil, { empty = true }); return end
@@ -85,19 +100,20 @@ function Source:getProgressAsync(identity, cb)
                 fraction = (idx - 1) / #toc,
                 extra = { chapter_uid = read.uid, chapter_idx = idx },
             })
-        end)
-    end)
+        end) end)
+    end) end)
     return { cancel = function()
-        cancelled = true
-        if job and job.cancel then job.cancel() end
+        state.cancelled = true
+        if state.job and state.job.cancel then state.job.cancel() end
     end }
 end
 
 function Source:putProgressAsync(identity, pos, cb)
     if not self:configured() then return SourceBase.defer(cb, nil, _("未登录七猫")) end
-    local cancelled, job = false, nil
-    job = self:loadTocAsync(identity, function(toc, err)
-        if cancelled then return end
+    ---@type QimaoRequestState
+    local state = { cancelled = false, step = 0 }
+    startStep(state, function() return self:loadTocAsync(identity, function(toc, err)
+        if state.cancelled then return end
         if not toc then cb(nil, err); return end
         local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
         local chapter = idx and toc[idx]
@@ -105,25 +121,25 @@ function Source:putProgressAsync(identity, pos, cb)
             cb(nil, _("缺少七猫章节位置"))
             return
         end
-        job = Client.shelfSyncAsync(function(rows, reason)
-            if cancelled then return end
+        startStep(state, function() return Client.shelfSyncAsync(function(rows, reason)
+            if state.cancelled then return end
             if not rows then cb(nil, reason); return end
             local row
             for _item, item in ipairs(rows) do
                 if tostring(item.book_id) == tostring(identity.stable_id) then row = item; break end
             end
             if not row then cb(nil, _("这本书不在七猫书架上")); return end
-            job = Client.shelfPushAsync({ Mapper.progressItem(row, {
+            startStep(state, function() return Client.shelfPushAsync({ Mapper.progressItem(row, {
                 uid = chapter.uid, title = chapter.title, idx = idx,
             }) }, function(wire, push_err)
-                if cancelled then return end
+                if state.cancelled then return end
                 cb(wire and true or nil, push_err)
-            end)
-        end)
-    end)
+            end) end)
+        end) end)
+    end) end)
     return { cancel = function()
-        cancelled = true
-        if job and job.cancel then job.cancel() end
+        state.cancelled = true
+        if state.job and state.job.cancel then state.job.cancel() end
     end }
 end
 
@@ -141,7 +157,7 @@ function Source:searchAsync(keyword, cb)
     end)
 end
 
---- 书城浏览：排序 / 频道 / 分类 / 子分类四行 chip（选项来自书库筛选接口），节点是「频道:分类:子分类:排序」，
+--- 书城浏览：筛选项来自书库接口，节点是「频道:分类:子分类:排序:字数:更新时间:状态」，
 --- 缺省男生原创按点击量；选项每次都调 client，新鲜度由数据获取层缓存（source.store_cache）管。
 ---@param opts { node?: string, limit?: integer }
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
@@ -152,38 +168,63 @@ function Source:browseAsync(opts, cb)
     local step = 0
     local function load(options)
         step = step + 1
-        -- 四段：频道:分类:子分类:排序（默认男生原创 / 全部 / 全部 / 点击量）
-        local channel, cat1, cat2, order = (opts.node or "0:a:a:click"):match("^(%w+):(%w+):(%w+):(%w+)$")
+        -- 七段：频道:分类:子分类:排序:字数:更新时间:状态；兼容旧的四段节点。
+        local channel, cat1, cat2, order, words, update_time, is_over =
+            (opts.node or ""):match("^([%w_]+):([%w_]+):([%w_]+):([%w_]+):([%w_]+):([%w_]+):([%w_]+)$")
         if not channel then
-            channel, cat1, cat2, order = "0", "a", "a", "click"
+            channel, cat1, cat2, order = (opts.node or ""):match("^([%w_]+):([%w_]+):([%w_]+):([%w_]+)$")
+            words, update_time, is_over = "a", "a", "a"
         end
-        local function chips(rows, id_of)
+        if not channel then
+            channel, cat1, cat2, order, words, update_time, is_over = "0", "a", "a", "click", "a", "a", "a"
+        end
+        local function nodeFor(_channel, _cat1, _cat2, _order, _words, _update_time, _is_over)
+            return table.concat({ _channel, _cat1, _cat2, _order, _words, _update_time, _is_over }, ":")
+        end
+        local function chips(rows, id_of, include_all)
             local out = {}
             for _idx, row in ipairs(rows) do
-                if row.value ~= "a" then out[#out + 1] = { id = id_of(row.value), title = row.label } end
+                if include_all or row.value ~= "a" then
+                    out[#out + 1] = { id = id_of(row.value), title = row.label }
+                end
             end
             return out
         end
-        local orders = chips(options.filters.order, function(v) return channel .. ":" .. cat1 .. ":" .. cat2 .. ":" .. v end)
-        local channels = chips(options.filters.channel, function(v) return v .. ":a:a:" .. order end)
-        local tops, subs = { { id = channel .. ":a:a:" .. order, title = _("全部") } }, nil
+        local orders = chips(options.filters.order, function(v) return nodeFor(channel, cat1, cat2, v, words, update_time, is_over) end)
+        local channels = chips(options.filters.channel, function(v) return nodeFor(v, "a", "a", order, words, update_time, is_over) end)
+        local word_counts = chips(options.filters.words, function(v) return nodeFor(channel, cat1, cat2, order, v, update_time, is_over) end, true)
+        local update_times = chips(options.filters.update_time, function(v) return nodeFor(channel, cat1, cat2, order, words, v, is_over) end, true)
+        local completion = chips(options.filters.is_over, function(v) return nodeFor(channel, cat1, cat2, order, words, update_time, v) end, true)
+        local tops, subs = { { id = nodeFor(channel, "a", "a", order, words, update_time, is_over), title = _("全部") } }, nil
         for _idx, cat in ipairs(options.category) do
             if cat.type == channel then
-                tops[#tops + 1] = { id = channel .. ":" .. cat.id .. ":a:" .. order, title = cat.name }
+                tops[#tops + 1] = { id = nodeFor(channel, cat.id, "a", order, words, update_time, is_over), title = cat.name }
                 if cat.id == cat1 then
-                    subs = { { id = channel .. ":" .. cat1 .. ":a:" .. order, title = _("全部") } }
+                    subs = { { id = nodeFor(channel, cat1, "a", order, words, update_time, is_over), title = _("全部") } }
                     for _idx2, sub in ipairs(cat.children) do
-                        subs[#subs + 1] = { id = channel .. ":" .. cat1 .. ":" .. sub.id .. ":" .. order, title = sub.name }
+                        subs[#subs + 1] = { id = nodeFor(channel, cat1, sub.id, order, words, update_time, is_over), title = sub.name }
                     end
                 end
             end
         end
-        local node = channel .. ":" .. cat1 .. ":" .. cat2 .. ":" .. order
-        local groups = { Browse.group(orders, node), Browse.group(channels, channel .. ":a:a:" .. order),
-            Browse.group(tops, channel .. ":" .. cat1 .. ":a:" .. order) }
+        local node = nodeFor(channel, cat1, cat2, order, words, update_time, is_over)
+        local groups = { Browse.group(orders, node),
+            Browse.group(channels, nodeFor(channel, "a", "a", order, words, update_time, is_over)),
+            Browse.group(tops, nodeFor(channel, cat1, "a", order, words, update_time, is_over)) }
+        groups[1].title, groups[2].title, groups[3].title = _("排序"), _("频道"), _("分类")
         if subs then groups[4] = Browse.group(subs, node) end
+        if subs then groups[4].title = _("子分类") end
+        groups[#groups + 1] = Browse.group(word_counts, node)
+        groups[#groups].title = _("字数")
+        groups[#groups + 1] = Browse.group(update_times, node)
+        groups[#groups].title = _("更新时间")
+        groups[#groups + 1] = Browse.group(completion, node)
+        groups[#groups].title = _("状态")
         handle.inner = Browse.pages(function(page, done)
-            return Client.classifyAsync({ channel = channel, category1 = cat1, category2 = cat2, order = order, page = page },
+            return Client.classifyAsync({
+                channel = channel, category1 = cat1, category2 = cat2, order = order,
+                words = words, update_time = update_time, is_over = is_over, page = page,
+            },
                 function(wire, err)
                     if not wire then
                         done(nil, err)
