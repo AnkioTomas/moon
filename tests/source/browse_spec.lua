@@ -59,3 +59,29 @@ do
     Assert.eq(g.active, "y")
     Assert.is_nil(Browse.group({ { id = "x", title = "X" } }, "z").active)
 end
+
+do
+    local late, cancelled, completed
+    local handle = Browse.pages(function(page, done)
+        if page == 1 then
+            done({ { source_id = "test", stable_id = "one" } }, nil, true)
+            return { cancel = function() error("cancelled completed first request") end }
+        end
+        late = done
+        return { cancel = function() cancelled = true end }
+    end, 60, {}, function() completed = true end)
+    handle.cancel()
+    Assert.is_true(cancelled)
+    late({ { source_id = "test", stable_id = "two" } }, nil, false)
+    Assert.is_nil(completed)
+end
+
+do
+    local calls, err = 0, nil
+    Browse.pages(function(_page, done)
+        calls = calls + 1
+        done({ { source_id = "test", stable_id = "same" } }, nil, true)
+    end, 60, {}, function(res, reason) Assert.is_nil(res); err = reason end)
+    Assert.eq(calls, 2)
+    Assert.eq(err, "响应无效")
+end

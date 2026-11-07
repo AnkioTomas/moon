@@ -235,9 +235,14 @@ local function render(payload, opts)
     if type(book_title) ~= "string" or book_title == "" then
         book_title = title
     end
-    return "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\"/><title>"
+    local html = "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\"/><title>"
         .. Text.xmlEscape(book_title) .. "</title><style>" .. DEFAULT_CSS
         .. "</style></head><body>" .. content .. "</body></html>"
+    local mark = type(payload) == "table" and payload.mark or nil
+    if type(mark) == "string" and mark ~= "" and not mark:find("--", 1, true) then
+        html = "<!--" .. mark .. "-->" .. html
+    end
+    return html
 end
 
 Chapter.render = render
