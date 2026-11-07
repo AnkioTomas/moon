@@ -320,6 +320,14 @@ do
     Assert.eq(m.words, 1200)
     Assert.eq(m.rating.score, 9.6, "10 分制一位小数，9.55 不能被浮点误差舍成 9.5")
     Assert.eq(m.rating.by, "weread")
+    local source_meta = { wechat = { pay_type = 2, book_type = 3, ended = false, private = "opaque" } }
+    Assert.is_true(BookDB.upsertRemote({
+        source_id = "wechat", stable_id = "w1", meta = { source = source_meta },
+    }))
+    Assert.eq(written().source.wechat.pay_type, 2)
+    Assert.eq(written().source.wechat.book_type, 3)
+    Assert.eq(written().source.wechat.ended, false, "未完结要留住 false，不能当成未知")
+    Assert.eq(written().source.wechat.private, "opaque", "通用书库不解释源私有元数据")
 
     -- 未知值（空串 / 0 / 年份 0 / 位数不对的 ISBN / 超范围评分）丢掉；全是未知不发 SQL
     before = #calls
