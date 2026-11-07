@@ -7,9 +7,14 @@ iRead：个人 Token 请求形状、回包解码、空书架验登录态、表�
 
 local Assert = require("support.assert")
 local JSONStub = require("support.json_stub")
+local json_null = function() end
 
 package.preload["json"] = function()
-    return { decode = JSONStub.decode, encode = JSONStub.encode }
+    return {
+        decode = setmetatable({ simple = {} }, { __call = function(_decoder, raw) return JSONStub.decode(raw) end }),
+        encode = JSONStub.encode,
+        util = { null = json_null },
+    }
 end
 
 local cfg = { token = "a1b2" }
@@ -27,6 +32,7 @@ package.preload["http.request"] = function()
             return { cancel = function() end }
         end,
         header = function(res) return res and res.cookie end,
+        headerAll = function(res) return res and res.cookie and { res.cookie } or {} end,
     }
 end
 
@@ -67,17 +73,17 @@ do
     Assert.is_true(Auth.expired("iread"))
 end
 
--- 非 200：带出 msg；没登录直接报错，不发请求。
+-- 非 200：带出 msg；游客也可读取接口，但不能修改远端书架或进度。
 do
     requests = {}
     replies = { '{"code":400,"msg":"书籍数据错误"}' }
     local err
-    Client.chaptersAsync({ name = "书" }, function(_, e) err = e end)
+    Client.saveProgressAsync({ name = "书" }, { index = 0, offset = 0 }, function(_ok, e) err = e end)
     Assert.eq(err, "书籍数据错误")
 
     cfg.token = nil
     requests = {}
-    Client.chaptersAsync({ name = "书" }, function(_, e) err = e end)
+    Client.saveProgressAsync({ name = "书" }, { index = 0, offset = 0 }, function(_ok, e) err = e end)
     Assert.len(requests, 0)
     cfg.token = "a1b2"
 end
@@ -109,9 +115,13 @@ end
 -- 进度：整行带回，只改位置字段；嵌套表按 PHP 的 a[b] / a[0] 摊平。
 do
     requests = {}
-    replies = { '{"code":200,"data":{}}' }
+    replies = {
+        '{"code":200,"data":{}}',
+        '{"code":200,"data":[{"name":"书","durChapterIndex":4,"durChapterPos":12}]}',
+    }
     local ok
-    Client.saveProgressAsync({ name = "书", sourceId = 3, variable = { k = "v" }, tags = { "x", "y" } },
+    Client.saveProgressAsync({ name = "书", sourceId = 3, variable = { k = "v" }, tags = { "x", "y" },
+        customIntro = json_null },
         { index = 4, title = "第5章", offset = 12 }, function(v) ok = v end)
     Assert.is_true(ok)
     local body = requests[1].body
@@ -122,6 +132,7 @@ do
     Assert.matches(body, "variable%%5Bk%%5D=v")
     Assert.matches(body, "tags%%5B0%%5D=x")
     Assert.matches(body, "tags%%5B1%%5D=y")
+    Assert.is_nil(body:find("customIntro", 1, true), "旧元数据里的 JSON null 不能变成 Lua 函数地址发送")
 end
 
 -- 正文：book / chapter 是 JSON 字符串，index 0 基；空正文报错。
