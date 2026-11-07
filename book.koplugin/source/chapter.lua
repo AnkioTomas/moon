@@ -777,14 +777,16 @@ end
 ---@param source BookSource
 ---@param content_async fun(book_id: string, chapter_id: string, cb: fun(text: string|nil, err: string|nil, kind: "unpaid"|nil)): table|nil
 ---@param open boolean
+---@param prepare_html? fun(html: string): string
 ---@return ChapterFetchContent
-function Chapter.vipFetcher(source, content_async, open)
+function Chapter.vipFetcher(source, content_async, open, prepare_html)
     local Toc = require("source.toc")
     return function(identity, chapter, done)
         return content_async(identity.stable_id, chapter.uid, function(text, err, kind)
             if text then
                 if chapter.vip then Toc.markPaid(source.id, identity.stable_id, chapter.uid, true) end
-                done({ title = chapter.title, html = Text.chapterHtml(chapter.title, text) })
+                local html = Text.chapterHtml(chapter.title, text)
+                done({ title = chapter.title, html = prepare_html and prepare_html(html) or html })
             elseif open and kind == "unpaid" then
                 Toc.markPaid(source.id, identity.stable_id, chapter.uid, false)
                 local notice = string.format(_("这是 VIP 章节，你还没有购买。\n请先在%s购买本章，再回来阅读。"), source.name)

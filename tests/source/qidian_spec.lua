@@ -237,9 +237,43 @@ do
     Assert.eq(books[1].intro, "简\n介")
     Assert.eq(books[2].authors, "丁")
 
-    requests, replies = {}, { { body = page({ bookInfo = { records = {} } }) } }
+    requests, replies = {}, { { body = JSONStub.encode({ code = 0, data = { bookInfo = { records = {} } } }) } }
     local got
     Client.searchAsync("斗罗", function(v) got = v end)
-    Assert.matches(requests[1].url, "/soushu/%%E6%%96%%97%%E7%%BD%%97%.html$")
+    Assert.matches(requests[1].url, "/webcommon/search/list%?")
+    Assert.matches(requests[1].url, "kw=%%E6%%96%%97%%E7%%BD%%97")
     Assert.is_true(got.bookInfo ~= nil)
+end
+
+do
+    requests, replies = {}, { { body = JSONStub.encode({ code = 0, data = { records = {}, isLast = 0 } }) } }
+    local got
+    Client.rankPageAsync("readindex", "21", 2, function(data) got = data end)
+    Assert.matches(requests[1].url, "/webcommon/rank/readIndexlist%?")
+    Assert.matches(requests[1].url, "pageNum=2")
+    Assert.matches(requests[1].url, "catId=21")
+    Assert.matches(requests[1].url, "gender=male")
+    Assert.is_false((requests[1].opts.headers.Cookie or ""):find("ywguid", 1, true) ~= nil)
+    Assert.len(got.records, 0)
+
+    replies = { { body = JSONStub.encode({ code = 0, data = {} }) } }
+    local err
+    Client.rankPageAsync("yuepiao", "-1", 1, function(data, reason) got, err = data, reason end)
+    Assert.is_nil(got)
+    Assert.eq(err, "起点榜单响应无效")
+end
+
+do
+    requests, replies = {}, { { body = page({ bookCirclePost = {
+        bookCirclePostCount = 8, bookCirclePostList = {},
+    } }) } }
+    local got, err
+    Client.bookCircleAsync("7", function(data, reason) got, err = data, reason end)
+    Assert.matches(requests[1].url, "/readersCircle/7/$")
+    Assert.is_true(requests[1].opts.headers.Cookie == nil, "公共整书讨论不发送账号 Cookie")
+    Assert.eq(got.bookCirclePostCount, 8)
+    replies = { { body = page({}) } }
+    Client.bookCircleAsync("7", function(data, reason) got, err = data, reason end)
+    Assert.is_nil(got)
+    Assert.eq(err, "起点书友圈响应无效")
 end

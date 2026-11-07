@@ -18,12 +18,14 @@ package.preload["utils.settings"] = function()
     return { getSource = function() return cfg end }
 end
 
-local replies = {}
+local replies, deferred, requested_cookie = {}, nil, nil
 package.preload["http.request"] = function()
     return {
         get = function(url, opts, cb)
+            requested_cookie = opts.headers and opts.headers.Cookie
             local reply = table.remove(replies, 1)
-            cb(reply and reply.body, reply and reply.err, reply and reply.res)
+            if reply and reply.defer then deferred = function() cb(reply.body, reply.err, reply.res) end
+            else cb(reply and reply.body, reply and reply.err, reply and reply.res) end
             return { cancel = function() end }
         end,
     }
@@ -58,9 +60,9 @@ package.loaded["source.qidian.client"] = nil
 package.loaded["source.qidian.mapper"] = nil
 local Client = require("source.qidian.client")
 
-local function page(info)
+local function page(info, user)
     return '<script id="vite-plugin-ssr_pageContext" type="application/json">'
-        .. JSONStub.encode({ pageContext = { pageProps = { pageData = { chapterInfo = info } } } }) .. "</script>"
+        .. JSONStub.encode({ pageContext = { pageProps = { pageData = { chapterInfo = info, user = user } } } }) .. "</script>"
 end
 
 local function fkp()
@@ -74,6 +76,41 @@ local function info(extra)
     }
     for k, v in pairs(extra or {}) do out[k] = v end
     return out
+end
+
+do
+    -- 扫码 Cookie 的 GUID 不一定是章节响应的解码身份；用响应确认的 GUID。
+    local html = page(info({ fEnS = 1 })):gsub('"pageData":{', '"pageData":{"user":{"guid":1234567890123456},')
+    replies = { { body = html } }
+    fock_calls = {}
+    local text
+    Client.contentAsync("1", "2", function(value) text = value end)
+    Assert.is_true(text ~= nil)
+    Assert.eq(fock_calls[1].uid, "1234567890123456", "LuaJIT tostring 会把长整数变成科学计数法")
+end
+
+do
+    -- 请求发出后换账号，旧响应仍绑定原请求，不重新读新 Cookie。
+    cfg.cookie = "ywguid=123; ywkey=old"
+    replies = { { defer = true, body = page(info({ fEnS = 1 })) } }
+    fock_calls = {}
+    Client.contentAsync("1", "2", function() end)
+    Assert.eq(requested_cookie, cfg.cookie)
+    cfg.cookie = "ywguid=999; ywkey=new"
+    deferred()
+    Assert.eq(fock_calls[1].uid, "123")
+    cfg.cookie = "ywguid=123; ywkey=k"
+end
+
+do
+    replies = { { defer = true, body = page(info({ fEnS = 1 })) } }
+    fock_calls = {}
+    local called = false
+    local job = Client.contentAsync("1", "2", function() called = true end)
+    job.cancel()
+    deferred()
+    Assert.is_false(called, "取消后不交付迟到正文")
+    Assert.len(fock_calls, 0)
 end
 
 do

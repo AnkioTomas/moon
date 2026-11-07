@@ -141,6 +141,26 @@ end
 
 do
     connected = true
+    local ci = { source_id = "qidian", stable_id = "preview", chapter_idx = 3 }
+    local f = fetcher({ items = { { id = "parent", content = "主评论", replies = 65,
+        reply_preview = {
+            { id = "r1", content = "第一条回复", reply_to = "乙" },
+            { id = "r2", content = "第二条回复" },
+        } } }, total = 1, max_idx = 1, more = false })
+    ReviewCache.pageAsync(ci, "1", 0, f.fetch, function() end)
+    connected = false
+    local got
+    ReviewCache.pageAsync(ci, "1", 0, f.fetch, function(v) got = v end)
+    Stubs.flush()
+    Assert.eq(f.calls, 1, "离线二级预览随主评论读缓存，不发网络请求")
+    Assert.eq(got.items[1].content, "主评论")
+    Assert.eq(got.items[1].replies, 65)
+    Assert.len(got.items[1].reply_preview, 2)
+    Assert.eq(got.items[1].reply_preview[1].reply_to, "乙")
+end
+
+do
+    connected = true
     local ci = { source_id = "wechat", stable_id = "empty-hotspot", chapter_idx = 23 }
     local hot = { { range = "gone", total = 3 }, { range = "keep", total = 2 } }
     ReviewCache.hotspotsAsync(ci, fetcher(hot).fetch, function() end)

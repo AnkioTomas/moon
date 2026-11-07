@@ -42,6 +42,7 @@ local Reviews = {}
 ---@field inline_images table<string, { url: string, headers?: table<string, string> }>|nil 正文内表情占位符
 ---@field likes integer
 ---@field replies integer 二级回复条数；0 表示没有，列表上不给入口
+---@field reply_preview WechatReview[]|nil 主评论附带的有限回复预览，不代表完整回复列表
 ---@field reply_to string|nil 这条是在回复谁（楼中楼），空则不是
 ---@field images { url: string, width?: integer, height?: integer, headers?: table<string, string> }[]|nil 评论配图
 ---@field time integer 秒

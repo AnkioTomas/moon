@@ -257,6 +257,39 @@ local function currentTarget(self)
     local identity = cur and cur.identity
     if not identity then return nil end
     local source = identity.source --[[@as ParagraphReviewSource|nil]]
+    if identity.chapter_idx and source and source.chapterReviewHotspotsAsync and source.paragraphHotspotsAsync then
+        if not source:paragraphReviewsEnabled() then return nil end
+        local targets = { chapterTarget(self, identity, source), chapterEndTarget(self, identity, source) }
+        return {
+            key = targets[1].key .. "\0end",
+            fetch = function(cb)
+                local data, job, cancelled = {}, nil, false
+                local function load(index)
+                    local pending = true
+                    local inner = targets[index].fetch(function(list, err)
+                        pending = false
+                        if cancelled then return end
+                        if not list then cb(nil, err); return end
+                        data[index] = list
+                        if index == #targets then cb(data) else load(index + 1) end
+                    end)
+                    if pending then job = inner end
+                end
+                load(1)
+                return { cancel = function()
+                    cancelled = true
+                    if job then job.cancel() end
+                end }
+            end,
+            place = function(data)
+                local out = {}
+                for index, target in ipairs(targets) do
+                    for _idx, placement in ipairs(target.place(data[index])) do out[#out + 1] = placement end
+                end
+                return out
+            end,
+        }
+    end
     if source and source.chapterReviewHotspotsAsync then
         return source:paragraphReviewsEnabled() and chapterEndTarget(self, identity, source) or nil
     end
@@ -287,7 +320,9 @@ local function fetch(self, target)
     self.key = target.key
     local done = false
     local job = target.fetch(function(data, err)
-        done, self.job = true, nil
+        done = true
+        if self.key ~= target.key then return end
+        self.job = nil
         if not data then
             logger.warn("book.reviews fetch failed", err)
             self.retry_at = os.time() + RETRY

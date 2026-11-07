@@ -46,7 +46,7 @@ for _idx, id in ipairs({ "qqreader", "qidian", "xiaoxiang" }) do
             cookie = function() return configs[id] and configs[id].cookie end,
             loginCheckAsync = function(cookie, cb)
                 checked = cookie
-                cb(not reject, reject and "rejected" or nil)
+                cb(not reject, reject and "rejected" or nil, { id = "123" })
             end,
             userAsync = function(cookie, cb)
                 checked = cookie
