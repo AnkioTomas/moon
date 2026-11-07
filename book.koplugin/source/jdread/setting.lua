@@ -147,14 +147,21 @@ Setting.browser = {
     domain = "e.m.jd.com",
     scope = "cookie",
     login = "https://e.m.jd.com/",
-    check = "https://e.m.jd.com/",
+    check = function()
+        local client = require("source.jdread.client"):new{}
+        return client:apiUrl("/jdread/api/bookshelf/sort")
+    end,
+    check_json = { path = "result_code", ok = { 0 } },
     icon = "https://e.m.jd.com/toc-web/ico.png",
     isAuthorized = function()
         return require("source.jdread.auth").hasSession()
             and not require("source.auth").expired("jdread")
     end,
     apply = function(payload, cb)
-        require("source.jdread.auth").importBrowserAsync(payload, cb)
+        return require("source.jdread.auth").importBrowserAsync(payload, function(ok, err)
+            if ok then require("source.registry").reload() end
+            cb(ok, err)
+        end)
     end,
 }
 
@@ -173,7 +180,7 @@ function Setting.rows()
         end,
     }
     if not Auth.hasSession() then return rows end
-    rows[#rows + 1] = require("source.logout").row(SOURCE_ID, _("确定退出京东读书账号？"), Auth.clearSession)
+    rows[#rows + 1] = require("source.logout").row("jdread", _("确定退出京东读书账号？"), Auth.clearSession)
     return rows
 end
 

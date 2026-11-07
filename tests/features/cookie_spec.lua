@@ -42,12 +42,13 @@ io.open = function(path, mode)
 end
 
 local applied, authorized = 0, false
+local browser_check = "https://www.qimao.com/user/bookshelf"
 package.preload["desktop.pages.setting.source"] = function()
     return {
         loadSetting = function()
             return { browser = {
                 domain = "www.qimao.com", scope = "local", login = "https://www.qimao.com/login",
-                check = "https://www.qimao.com/user/bookshelf",
+                check = browser_check,
                 check_json = { path = "code", ok = { 200 } },
                 icon = "https://cdn-front.qimao.com/global/static/images/favicon2022.ico",
                 isAuthorized = function() return authorized end,
@@ -108,5 +109,24 @@ local s2 = call("GET", "login", { data = json(ENV) })
 Assert.eq(s2, 200)
 Assert.eq(applied, 1, "repeat callback is idempotent")
 Assert.eq((call("GET", "login", { data = json({ v = 1, ticketId = "zzz" }) })), 400)
+
+-- 每张授权票据固定当次 check；动态签名不能在回传时重新生成，别的地址也不能混用。
+browser_check = "https://www.qimao.com/user/another"
+call("POST", "ticket", { source = "qimao" })
+Assert.eq((call("GET", "login", { data = json(ENV) })), 400)
+Assert.eq(applied, 1)
+local check_calls = 0
+browser_check = function()
+    check_calls = check_calls + 1
+    return check_calls == 1 and "https://www.qimao.com/user/bookshelf"
+        or "https://www.qimao.com/user/bookshelf?signature=changed"
+end
+local dynamic_status, dynamic = call("POST", "ticket", { source = "qimao" })
+Assert.eq(dynamic_status, 200)
+Assert.eq(dynamic.check, "https://www.qimao.com/user/bookshelf")
+Assert.eq(check_calls, 1)
+Assert.eq((call("GET", "login", { data = json(ENV) })), 200)
+Assert.eq(check_calls, 1, "回传和源枚举不重新签名")
+Assert.eq(applied, 2)
 
 io.open = real_open

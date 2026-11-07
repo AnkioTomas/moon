@@ -4,6 +4,7 @@
 @module koplugin.book.source.jdread.auth
 --]]
 
+require("l10n").apply()
 local JSON = require("json")
 local Request = require("http.request")
 local Image = require("utils.image")
@@ -17,7 +18,7 @@ local LOGIN_PAGE = "https://passport.jd.com/new/login.aspx?ReturnUrl=https%3A%2F
 local HOME = "https://e.m.jd.com/"
 local LOGIN_UA = Request.randomUA()
 local QR_COOKIE_KEYS = { "QRCodeKey", "wlfstk_smdl", "guid" }
--- 真正代表已登录的 cookie：至少要有其一才算成功，其余埋点 cookie 不算。
+-- 候选会话 Cookie；是否登录仍须由书架 API 确认。
 local LOGIN_COOKIE_KEYS = { "thor", "pt_key", "pin", "pt_pin" }
 local MAX_HOPS = 5
 local qr_seq = 0
@@ -29,7 +30,7 @@ local TICKET_ERRORS = {
     [59] = "二维码已失效，请重新登录",
     [60] = "京东登录失败",
     [70] = "京东登录失败",
-    [80] = "京东判定本次扫码存在风险，请稍后重试",
+    [80] = "京东判定本次扫码存在风险，官方要求改用密码登录",
 }
 
 ---@return table
@@ -130,21 +131,18 @@ local function dropQrCookies(jar)
     end
 end
 
----@param base string
----@param loc string|nil
+local LOGIN_HOSTS = { ["passport.jd.com"] = true, ["e.m.jd.com"] = true, ["aq.jd.com"] = true }
+
+---@param url string|nil
 ---@return string|nil
-local function absUrl(base, loc)
-    if type(loc) ~= "string" or loc == "" then return nil end
-    if loc:find("^https?://") then return loc end
-    -- 协议相对地址 //host/path：沿用当前协议，不能拼在当前 host 后面。
-    if loc:sub(1, 2) == "//" then
-        local scheme = type(base) == "string" and base:match("^(https?):") or "https"
-        return scheme .. ":" .. loc
-    end
-    local origin = type(base) == "string" and base:match("^(https?://[^/]+)")
-    if not origin then return nil end
-    if loc:sub(1, 1) == "/" then return origin .. loc end
-    return origin .. "/" .. loc
+local function loginUrl(url)
+    if type(url) ~= "string" then return nil end
+    local host, tail = url:match("^https?://([^/?#]+)(.*)$")
+    if not host then return nil end
+    host = host:lower():gsub(":443$", "")
+    if not LOGIN_HOSTS[host] then return nil end
+    -- 官方仍返回 http relay；直接走已验证的 HTTPS 中转，不能明文发送候选会话。
+    return "https://" .. host .. tail
 end
 
 ---@return boolean
@@ -182,6 +180,7 @@ function Auth.beginQrLoginAsync(cb)
     })
     local job = Request.get(url, {
         headers = browserHeaders(jar),
+        cache_ttl = 0,
         timeout = require("http.timeout").net(1),
     }, function(body, err, res)
         if cancelled then return end
@@ -231,6 +230,7 @@ function Auth.waitQrLoginAsync(login, cb)
         })
         request_job = Request.get(url, {
             headers = browserHeaders(jar),
+            cache_ttl = 0,
             timeout = require("http.timeout").net(2 / 3),
         }, function(raw, err, res)
             if cancelled then return end
@@ -312,11 +312,44 @@ local function pageRedirect(body)
     return target
 end
 Auth._pageRedirect = pageRedirect
-Auth._absUrl = absUrl
+Auth._absUrl = Text.absoluteUrl
+
+--- 扫码和浏览器授权共用：书架接口确认会话有效后才替换持久凭证。
+---@param jar table
+---@param cb fun(ok: boolean, err: string|nil)
+---@return { cancel: fun() }
+local function saveSessionAsync(jar, cb)
+    local current = cfg()
+    local uuid = current.uuid
+    if type(uuid) ~= "string" or uuid == "" then
+        uuid = "h5" .. require("ffi/sha2").md5(require("utils.device_id").ensure())
+    end
+    local cookie = cookieHeader(jar)
+    local client = require("source.jdread.client"):new{ cookie = cookie, uuid = uuid }
+    local cancelled = false
+    local job = client:checkSessionAsync(function(wire, err)
+        if cancelled then return end
+        if not wire then
+            cb(false, err or _("京东登录校验失败"))
+            return
+        end
+        current = require("utils.settings").getSource("jdread")
+        current.cookie = cookie
+        current.uuid = uuid
+        current.user_name = Text.urlDecode(jar.unick or jar.pin or jar.pt_pin or "") or ""
+        require("utils.settings").saveSource("jdread", current)
+        require("source.auth").ok("jdread")
+        cb(true)
+    end)
+    return { cancel = function()
+        cancelled = true
+        job.cancel()
+    end }
+end
 
 --- 使用扫码 ticket 换取登录 Cookie 并原子保存源配置。
---- 成功 = jar 里出现 thor/pt_key/pin 等登录 cookie；校验之后跟 Location / data.url / 页面跳转最多 5 跳，
---- 都没拿到再补一跳 e.m.jd.com。每一步只记 cookie 名，不记值。
+--- 先走完官方跳转，再用书架接口校验；Cookie 不能跳过账号安全验证。
+--- 风控或 certified 页面明确失败，不覆盖原会话。
 ---@param info { ticket: string, jar: table } waitQrLoginAsync 的结果
 ---@param cb fun(user: { user_name: string }|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -324,6 +357,7 @@ function Auth.completeQrLoginAsync(info, cb)
     local jar = info.jar
     local cancelled = false
     local job
+    local seq = 0
     local hops = 0
     local visited = {}
 
@@ -342,59 +376,67 @@ function Auth.completeQrLoginAsync(info, cb)
         if not hasLoginCookie(jar) then
             logger.warn("jdread login no session cookie", "hops", hops, "jar", cookieNames(jar))
             clearQrFile()
-            -- 中转页跳 aq.jd.com/certified：京东风控要求账号安全验证，扫码这条路拿不到会话。
-            local certified = false
-            for url in pairs(visited) do
-                if url:find("^https?://aq%.jd%.com/certified") then certified = true end
-            end
-            cb(nil, certified and _("京东要求先完成账号安全验证，请在京东 App 或网页登录一次完成验证后再扫码")
-                or _("登录未拿到会话 Cookie"))
+            cb(nil, _("登录未拿到会话 Cookie"))
             return
         end
-        local cookie = cookieHeader(jar)
-        local Settings = require("utils.settings")
-        local current = Settings.getSource("jdread")
-        local name = Text.urlDecode(jar.unick or jar.pin or "") or ""
-        current.cookie = cookie
-        current.uuid = current.uuid ~= nil and current.uuid ~= ""
-            and current.uuid or ("h5" .. require("ffi/sha2").md5(require("utils.device_id").ensure()))
-        current.user_name = name
-        Settings.saveSource("jdread", current)
-        logger.info("jdread login ok", "hops", hops, "jar", cookieNames(jar))
-        clearQrFile()
-        cb({ user_name = name })
+        seq = seq + 1
+        local mine = seq
+        local handle = saveSessionAsync(jar, function(ok, err)
+            if cancelled then return end
+            clearQrFile()
+            if not ok then
+                logger.warn("jdread login session check failed", tostring(err))
+                cb(nil, err)
+                return
+            end
+            logger.info("jdread login ok", "hops", hops, "jar", cookieNames(jar))
+            cb({ user_name = Auth.userLabel() or "" })
+        end)
+        if seq == mine then job = handle end
     end
 
     local follow
-    --- 下一跳：Location → 页面跳转 → 兜底首页；都用过了返回 nil。
+    --- 只有没有跳转且没有候选会话时才补首页，不能吞掉跳转错误。
     local function nextUrl(base, body, res)
-        if hops >= MAX_HOPS then return nil end
-        -- 候选可能为 nil，不能用 ipairs。
-        local candidates = {
-            absUrl(base, Request.header(res, "Location")) or false,
-            absUrl(base, pageRedirect(body)) or false,
-            HOME,
-        }
-        for i = 1, #candidates do
-            local url = candidates[i]
-            if url and not visited[url] then return url end
-        end
-        return nil
+        local redirect = Request.header(res, "Location") or pageRedirect(body)
+        if redirect then return Text.absoluteUrl(base, redirect) end
+        if not hasLoginCookie(jar) and not visited[HOME] then return HOME end
     end
 
     --- 不走 Request.allow_redirects，302 的 Set-Cookie 在 res 里。
     follow = function(url)
+        url = loginUrl(url)
+        if not url then
+            clearQrFile()
+            cb(nil, _("京东登录跳转地址无效"))
+            return
+        end
+        local path = url:match("^https://aq%.jd%.com([^?#]*)")
+        if path == "/certified" or (path and path:find("^/certified/")) then
+            clearQrFile()
+            cb(nil, _("京东要求账号安全验证，当前扫码流程尚不支持验证续接"))
+            return
+        end
+        if visited[url] or hops >= MAX_HOPS then
+            clearQrFile()
+            cb(nil, _("京东登录校验失败"))
+            return
+        end
         hops = hops + 1
         visited[url] = true
-        job = Request.get(url, {
+        seq = seq + 1
+        local mine = seq
+        local handle = Request.get(url, {
             headers = browserHeaders(jar),
+            cache_ttl = 0,
             timeout = require("http.timeout").net(1),
-        }, function(body, _err, res)
+        }, function(body, err, res)
             if cancelled then return end
             local names = mergeCookies(jar, res)
             trace("hop " .. hops, url, res, names)
-            if hasLoginCookie(jar) then
-                persist()
+            if not body and not Request.header(res, "Location") then
+                clearQrFile()
+                cb(nil, err or _("京东登录校验失败"))
                 return
             end
             local next_url = nextUrl(url, body, res)
@@ -404,14 +446,18 @@ function Auth.completeQrLoginAsync(info, cb)
             end
             persist()
         end)
+        if seq == mine then job = handle end
     end
 
     local url = "https://passport.jd.com/uc/qrCodeTicketValidation?" .. Text.formEncode({
         t = info.ticket,
         ReturnUrl = HOME,
     })
-    job = Request.get(url, {
+    seq = seq + 1
+    local mine = seq
+    local handle = Request.get(url, {
         headers = browserHeaders(jar),
+        cache_ttl = 0,
         timeout = require("http.timeout").net(1),
     }, function(raw, err, res)
         if cancelled then return end
@@ -433,13 +479,15 @@ function Auth.completeQrLoginAsync(info, cb)
             cb(nil, code and (msg .. " (" .. code .. ")") or msg)
             return
         end
-        if hasLoginCookie(jar) then
+        if type(data.url) == "string" and data.url ~= "" then
+            follow(Text.absoluteUrl(url, data.url))
+        elseif hasLoginCookie(jar) then
             persist()
-            return
+        else
+            follow(HOME)
         end
-        local hop = data.url
-        follow(absUrl(url, type(hop) == "string" and hop ~= "" and hop or nil) or HOME)
     end)
+    if seq == mine then job = handle end
     return { cancel = function()
             cancelled = true
             if job then job.cancel() end
@@ -472,25 +520,7 @@ function Auth.importBrowserAsync(payload, cb)
         return nil
     end
 
-    local current = cfg()
-    local uuid = current.uuid
-    if type(uuid) ~= "string" or uuid == "" then
-        uuid = "h5" .. require("ffi/sha2").md5(require("utils.device_id").ensure())
-    end
-    local cookie = cookieHeader(jar)
-    local client = require("source.jdread.client"):new{ cookie = cookie, uuid = uuid }
-    return client:apiGetAsync("/jdread/api/bookshelf/sort", nil, function(wire, err)
-        if not wire then
-            cb(false, err or _("京东登录校验失败"))
-            return
-        end
-        current = require("utils.settings").getSource("jdread")
-        current.cookie = cookie
-        current.uuid = uuid
-        current.user_name = Text.urlDecode(jar.unick or jar.pin or jar.pt_pin or "") or ""
-        require("utils.settings").saveSource("jdread", current)
-        cb(true)
-    end)
+    return saveSessionAsync(jar, cb)
 end
 
 return Auth
