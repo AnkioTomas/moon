@@ -32,27 +32,49 @@ function Setting.parseToken(input)
     return (require("utils.text").trim(input):gsub("^[Bb]earer%s+", ""))
 end
 
---- 浏览器扩展交来的 payload.cookies → Cookie 请求头；只收发往 ankio.net 及其子域的 Cookie。
+---- 保留本站和有效父域 Cookie，不收 ankio.net 下其他站点的登录态。
 ---@param payload table
 ---@return string
 function Setting.fromPayload(payload)
-    return require("source.cookie_login").fromPayload(payload, "ankio.net")
+    local cookies = {}
+    for _idx, cookie in ipairs(type(payload.cookies) == "table" and payload.cookies or {}) do
+        local host = type(cookie) == "table" and type(cookie.domain) == "string"
+            and cookie.domain:gsub("^%.", ""):lower()
+        if host == "ankio.net" or host == "iread.ankio.net" then cookies[#cookies + 1] = cookie end
+    end
+    return require("source.cookie_login").fromPayload({ cookies = cookies }, "ankio.net")
 end
 
 --- 校验凭据，通过才保存（Token 与 Cookie 互斥）并重载源。
 ---@param cred IReadCredential
 ---@param cb fun(user: table|nil, err: string|nil)
-local function save(cred, cb)
-    require("source.iread.client").userAsync(cred, function(user, err)
+---@return { cancel: fun() }
+function Setting.save(cred, cb)
+    local client = require("source.iread.client")
+    local settings = require("utils.settings")
+    local cfg = settings.getSource(SOURCE_ID)
+    local previous_token, previous_cookie = cfg.token, cfg.cookie
+    local previous = client.credential()
+    local cancelled = false
+    local job = client.userAsync(cred, function(user, err)
+        if cancelled then return end
+        if cfg.token ~= previous_token or cfg.cookie ~= previous_cookie then
+            cb(nil, _("登录状态已变化，请重试")); return
+        end
         if not user then return cb(nil, err or _("登录失败")) end
-        local settings = require("utils.settings")
-        local cfg = settings.getSource(SOURCE_ID)
+        if previous and (cred.token ~= previous.token or cred.cookie ~= previous.cookie) then
+            cb(nil, _("无法确认是否为同一 iRead 账号，请先退出当前账号再登录")); return
+        end
         cfg.token, cfg.cookie = cred.token, cred.cookie
         settings.saveSource(SOURCE_ID, cfg)
         require("source.auth").ok(SOURCE_ID)
         require("source.registry").reload()
         cb(user)
     end)
+    return { cancel = function()
+        cancelled = true
+        job.cancel()
+    end }
 end
 
 --- 浏览器扩展登录（features/cookie）。
@@ -68,22 +90,24 @@ Setting.browser = {
     apply = function(payload, cb)
         local cookie = Setting.fromPayload(payload)
         if cookie == "" then return cb(false, _("没有读到 Cookie")) end
-        save({ cookie = cookie }, function(user, err) cb(user ~= nil, err) end)
+        return Setting.save({ cookie = cookie }, function(user, err) cb(user ~= nil, err) end)
     end,
 }
 
----@param token string
-local function verify(token)
+---@param cred IReadCredential
+local function verify(cred)
     local Toast = require("ui.themes.widgets.toast")
     require("ui/network/manager"):runWhenConnected(function()
+        local job
         local waiting = require("ui.themes.widgets.progress_dialog"):new{
-            title = _("iRead"), text = _("正在校验 Token…"), dismissable = false,
+            title = _("iRead"), text = _("正在校验登录…"), dismissable = false,
+            on_cancel = function() if job then job.cancel() end end,
         }
         waiting:show()
-        save({ token = token }, function(user, err)
+        job = Setting.save(cred, function(user, err)
             waiting:close()
             if not user then
-                Toast:new{ text = err or _("Token 无效"), timeout = 3 }:show()
+                Toast:new{ text = err or _("登录失败"), timeout = 3 }:show()
                 return
             end
             Toast:new{ text = T(_("已登录：%1"), user.nickname), timeout = 2 }:show()
@@ -102,7 +126,23 @@ local function showLogin()
                 require("ui.themes.widgets.toast"):new{ text = _("没有读到 Token"), timeout = 3 }:show()
                 return
             end
-            verify(token)
+            verify({ token = token })
+        end,
+    }:show()
+end
+
+local function showCookieLogin()
+    require("ui.themes.widgets.input"):new{
+        title = _("iRead 登录 Cookie"),
+        fields = { { text = "", hint = _("按键盘 F12，点「网络」，刷新网页，复制请求标头里的整段 Cookie") } },
+        ok_text = _("登录"),
+        callback = function(value)
+            local cookie = require("source.cookie_login").parse(value or "")
+            if cookie == "" then
+                require("ui.themes.widgets.toast"):new{ text = _("没有读到 Cookie"), timeout = 3 }:show()
+                return
+            end
+            verify({ cookie = cookie })
         end,
     }:show()
 end
@@ -117,6 +157,10 @@ function Setting.rows()
                 title = _("iRead 账号"), status = status, status_on = status_on,
                 subtitle = not status_on and _("也可在「远程管理」里用浏览器授权登录") or nil,
                 callback = function() showLogin() end })
+        end,
+        function(iw)
+            return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "content_paste",
+                title = _("粘贴 Cookie"), callback = showCookieLogin })
         end,
     }
     if not loggedIn() then return rows end

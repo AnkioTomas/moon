@@ -38,6 +38,7 @@ function Mapper.shelfList(rows)
                 category = row.kind,
                 intro = row.intro and Text.stripHtml(row.intro),
                 cover = cover(row),
+                meta = { source = { iread = row } },
             }
         end
     end
