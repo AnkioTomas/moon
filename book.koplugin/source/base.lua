@@ -309,7 +309,8 @@ end
 --- 休眠中断、断网失败由队列放回等待并续跑；联网时失败退避重试。某一域失败不影响后面的域。
 --- main 在启动、唤醒、联网时对有脏行的启用源调用：Wi-Fi 常开时 KOReader 不再发 NetworkConnected，
 --- 只靠联网事件，失败重试和上次遗留的脏行会一直等着。
-function SourceBase:pushDirty()
+---@param progress_first boolean|nil WebDAV 统计不改云端位置，进度不必等书架 / 笔记 / 统计
+function SourceBase:pushDirty(progress_first)
     if #dirtyDomains(self) == 0 then return end
     require("workers.tasks").enqueue{
         key = "dirty\0" .. self.id,
@@ -319,6 +320,14 @@ function SourceBase:pushDirty()
         restartable = true,
         run = function(report, done)
             local domains, index, failed, job = dirtyDomains(self), 0, nil, nil
+            if progress_first then
+                for i, method in ipairs(domains) do
+                    if method == "syncProgressAsync" then
+                        table.insert(domains, 1, table.remove(domains, i))
+                        break
+                    end
+                end
+            end
             local cancelled = false
             local function nextDomain()
                 if cancelled then return end
