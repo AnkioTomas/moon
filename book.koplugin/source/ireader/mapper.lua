@@ -34,6 +34,32 @@ function Mapper.content(html)
     return not unknown and decoded or nil
 end
 
+--- 只读取官网书评首屏。
+---@class IReaderReviewPage
+---@field items { author: string, text: string, time: string, grade: number|nil }[]
+
+---@param html string
+---@return IReaderReviewPage|nil
+function Mapper.reviews(html)
+    local list = html:match('<ul[^>]*class="sns_commentlist"[^>]*>(.-)</ul>')
+    if not list then return nil end
+    local items = {}
+    for card in list:gmatch("<li[^>]*>(.-)</li>") do
+        local author = card:match('<i[^>]*class="vm"[^>]*>(.-)</i>')
+        local body = card:match('<p[^>]*class="con_dec"[^>]*>(.-)</p>')
+        local time = card:match('<span[^>]*class="sns_time"[^>]*>(.-)</span>')
+        if not author or not body or not time then return nil end
+        items[#items + 1] = {
+            author = Text.stripHtml(author),
+            text = Text.stripHtml(body),
+            time = Text.stripHtml(time),
+            grade = tonumber(card:match('class="cur r(%d+)"')),
+        }
+    end
+    if #items == 0 and Text.trim(list) ~= "" then return nil end
+    return { items = items }
+end
+
 --- 目录缓存格式。首章携带，变了就当缓存失效。
 Mapper.TOC_VERSION = 1
 

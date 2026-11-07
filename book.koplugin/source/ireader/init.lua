@@ -76,6 +76,13 @@ function Source:searchAsync(keyword, cb)
     end)
 end
 
+---@param identity BookIdentity
+---@param cb fun(page: IReaderReviewPage|nil, err: string|nil)
+---@return HttpJob
+function Source:bookReviewsAsync(identity, cb)
+    return Client.reviewsAsync(identity.stable_id, cb)
+end
+
 ---@param opts { node?: string, limit?: integer }|nil
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 function Source:browseAsync(opts, cb)

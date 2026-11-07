@@ -420,6 +420,29 @@ local STORE_HEADERS = {
     ["User-Agent"] = "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36",
 }
 
+---@param book_id string
+---@param cb fun(result: IReaderReviewPage|nil, err: string|nil)
+---@return HttpJob
+function Client.reviewsAsync(book_id, cb)
+    local target = STORE .. "/comment/" .. Text.urlEncode(book_id)
+    local cancelled = false
+    local job = Request.get(target, {
+        accept = "text/html",
+        headers = STORE_HEADERS,
+        timeout = require("http.timeout").net(0.5),
+    }, function(raw, err)
+        if cancelled then return end
+        if err or not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
+        local result = Mapper.reviews(raw)
+        if not result then cb(nil, _("响应无效")); return end
+        cb(result)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
+end
+
 ---@param keyword string
 ---@param cb fun(html: string|nil, err: string|nil)
 ---@return HttpJob
