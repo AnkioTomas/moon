@@ -116,6 +116,7 @@ Assert.eq(Mapper.mark({ data = { detail = { { bid = 9, chapterid = 11, cname = "
 
 local cfg = {}
 local requests = {}
+local shelf_rows = { { bid = 9, title = "书架书", author = "丁", chapterid = 11, cname = "第一章", percent = 0.5 } }
 package.preload["utils.settings"] = function()
     return {
         getSource = function() return cfg end,
@@ -150,7 +151,14 @@ package.preload["http.request"] = function()
             elseif url:find("book/info", 1, true) then
                 body = Json.encode({ state = 200, data = { bookId = 3, bookName = "详情", authorName = "丙" } })
             elseif url:find("sync/bookmarks", 1, true) then
-                body = Json.encode({ detail = { { bid = 9, title = "书架书", author = "丁", chapterid = 11, cname = "第一章", percent = 0.5 } } })
+                if payload:find("action%22%3A1", 1, true) then
+                    shelf_rows = { { bid = 9, title = "书架书", author = "丁", chapterid = 11, cname = "第一章", percent = 0.5 } }
+                elseif payload:find("action%22%3A3", 1, true) then
+                    shelf_rows = {}
+                elseif payload:find("action%22%3A2", 1, true) then
+                    shelf_rows = { { bid = 9, title = "书架书", chapterid = 11, percent = 0.5 } }
+                end
+                body = Json.encode({ detail = shelf_rows })
             end
             callback(body, nil, nil)
             return { cancel = function() end }
@@ -213,14 +221,15 @@ Assert.is_true(requests[#requests].body:find("userid%22%3A7", 1, true) ~= nil)
 local added
 Client.addAsync("9", function(ok) added = ok end)
 Assert.eq(added, true)
-Assert.is_true(requests[#requests].body:find("action%22%3A1", 1, true) ~= nil)
+Assert.is_true(requests[#requests - 1].body:find("action%22%3A1", 1, true) ~= nil)
 
 local removed
 Client.removeAsync("9", function(ok) removed = ok end)
 Assert.eq(removed, true)
-Assert.is_true(requests[#requests].body:find("action%22%3A3", 1, true) ~= nil)
+Assert.is_true(requests[#requests - 1].body:find("action%22%3A3", 1, true) ~= nil)
 
 local mark_row
+shelf_rows = { { bid = 9, chapterid = 11, percent = 0.5 } }
 Client.progressAsync("9", function(value) mark_row = value end)
 Assert.eq(mark_row.chapter_id, "11")
 Assert.eq(mark_row.fraction, 0.5)
@@ -228,5 +237,5 @@ Assert.eq(mark_row.fraction, 0.5)
 local saved
 Client.putProgressAsync("9", "11", "第一章", 0.5, function(ok) saved = ok end)
 Assert.eq(saved, true)
-Assert.is_true(requests[#requests].body:find("action%22%3A2", 1, true) ~= nil)
-Assert.is_true(requests[#requests].body:find("percent%22%3A5000", 1, true) ~= nil)
+Assert.is_true(requests[#requests - 1].body:find("action%22%3A2", 1, true) ~= nil)
+Assert.is_true(requests[#requests - 1].body:find("percent%22%3A5000", 1, true) ~= nil)

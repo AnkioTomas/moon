@@ -132,7 +132,83 @@ function Mapper.searchBooks(wire)
         local info = type(wire) == "table" and wire.info or nil
         return nil, type(info) == "table" and info.message or nil
     end
+    if type(wire.data) ~= "table" then return nil, "响应无效" end
     return books(wire.data)
+end
+
+--- 节点只允许官网书库的筛选参数，不接受任意 URL。
+---@param node string|nil
+---@return string|nil
+function Mapper.storeNode(node)
+    if type(node) ~= "string" or node == "" then return nil end
+    local fields = {}
+    for part in node:gmatch("[^&]+") do
+        local key, value = part:match("^([%w]+)=(.+)$")
+        if not key or not ({ sz = true, fc = true, wd = true, tm = true, st = true })[key]
+            or fields[key] then return nil end
+        value = Text.urlDecode(value)
+        if not value:match("^%d+[,%d]*$") then return nil end
+        fields[key] = value
+    end
+    if not fields.sz then return nil end
+    return Text.formEncode(fields)
+end
+
+---@param html string
+---@return Book[]|nil, StoreChipGroup[]|nil, boolean|nil
+function Mapper.store(html)
+    local list = html:match('<ul class="store%-ul[^"]*"[^>]*>(.-)</ul>')
+    if not list then return nil end
+    local out, groups = {}, {}
+    for card in list:gmatch("<li[^>]*>(.-)</li>") do
+        local id = card:match('href="/book/(%d+)%.html"')
+        local title = card:match("<h3[^>]*>(.-)</h3>")
+        local author = card:match('href="/author/[^"]*"[^>]*>作者：(.-)</a>')
+        local intro = card:match('<p class="store%-des"[^>]*>(.-)</p>')
+        local cover = card:match('<img[^>]*src="([^"]+)"')
+        if not id or not title then return nil end
+        out[#out + 1] = book(id, Text.stripHtml(title), author, intro, cover)
+    end
+    local filters = html:match('<div class="selectview[^"]*"[^>]*>(.-)<div class="store%-content"')
+    if not filters then return nil end
+    filters = filters:gsub("<script[^>]*>.-</script>", ""):gsub("<!%-%-.-%-%->", "")
+    for title, block in filters:gmatch('<h6[^>]*>(.-)</h6>(.-)</ul>') do
+        local chips, active = {}, nil
+        for attrs, link, label in block:gmatch('<([%w]+[^>]-)>%s*<a[^>]*href="([^"]+)"[^>]*>(.-)</a>') do
+            local query = Text.xmlDecode(link):match("^/store%?(.+)$")
+            local node = Mapper.storeNode(query)
+            if node then
+                chips[#chips + 1] = { id = node, title = Text.trim(Text.stripHtml(label)) }
+                if attrs:find("active", 1, true) then active = node end
+            end
+        end
+        if #chips > 1 then
+            groups[#groups + 1] = { title = Text.trim(Text.stripHtml(title)):gsub(":$", ""), chips = chips, active = active }
+        end
+    end
+    if #groups == 0 then return nil end
+    return out, groups, html:find('>下一页</a>', 1, true) ~= nil
+end
+
+---@param wire table
+---@param book_id string
+---@return table|nil
+function Mapper.reviews(wire, book_id)
+    if tonumber(wire.status) ~= 200 or type(wire.data) ~= "table" or type(wire.info) ~= "table"
+        or not tonumber(wire.info.total) or not tonumber(wire.info.count) then return nil end
+    local items = {}
+    for _idx, row in ipairs(wire.data) do
+        if type(row) ~= "table" or tostring(row.bookId) ~= book_id or not row.mid
+            or type(row.text) ~= "string" then return nil end
+        local timestamp = tonumber(row.pubTime)
+        if row.pubTime ~= nil and not timestamp then return nil end
+        items[#items + 1] = {
+            id = tostring(row.mid), author = row.nickName,
+            text = Text.trim(Text.stripHtml(Text.xmlDecode(row.text))),
+            time = timestamp and os.date("%Y-%m-%d %H:%M", timestamp) or nil,
+        }
+    end
+    return { items = items, total = tonumber(wire.info.total), pages = tonumber(wire.info.count) }
 end
 
 ---@param wire table|nil
@@ -274,6 +350,32 @@ function Mapper.session(wire)
     }
 end
 
+--- 网页 Cookie 里的会话字段；只解析，不据此认定已登录。
+---@param cookie string
+---@return table|nil
+function Mapper.cookieSession(cookie)
+    local values = {}
+    for name, value in cookie:gmatch("([^;=%s]+)=([^;]*)") do
+        values[name] = Text.urlDecode(value:gsub("%+", "%%2B"))
+    end
+    local id, token = values.shuqi_user_id, values.shuqi_token
+    if not id or not id:match("^%d+$") or tonumber(id) == 0 or id == "8000000"
+        or not token or token == "" or token:find("[%s;\r\n]") then return nil end
+    return { user_id = id, token = token, name = "", fingerprint = values.shuqi_fingerprint }
+end
+
+--- userBaseInfo 的 data 按用户编号索引；必须和待校验 Cookie 的账号一致。
+---@param wire table|nil
+---@param user_id string
+---@return table|nil
+function Mapper.account(wire, user_id)
+    if type(wire) ~= "table" or (tonumber(wire.status) or tonumber(wire.state)) ~= 200
+        or type(wire.data) ~= "table" then return nil end
+    local info = wire.data[user_id]
+    if type(info) ~= "table" or tostring(info.userId) ~= user_id then return nil end
+    return { user_id = user_id, name = type(info.nickName) == "string" and info.nickName or "" }
+end
+
 --- 短信接口。status / state 为 200 算发送成功。
 ---@param wire table|nil
 ---@return boolean
@@ -290,6 +392,7 @@ end
 ---@return table|nil
 local function shelfRows(wire)
     if type(wire) ~= "table" then return nil end
+    if wire.status ~= nil and tonumber(wire.status) ~= 200 then return nil end
     if type(wire.detail) == "table" then return wire.detail end
     local data = wire.data
     if type(data) == "table" and type(data.detail) == "table" then return data.detail end

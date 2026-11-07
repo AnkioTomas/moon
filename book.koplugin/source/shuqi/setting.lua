@@ -1,22 +1,92 @@
 --[[--
-书旗账号：手机验证码。滑块在同一 Wi-Fi 的浏览器里完成，短信码回到设备填写。
+书旗账号：手机验证码、官网浏览器授权和 Cookie 导入。
 
 @module source.shuqi.setting
 --]]
 
 require("l10n").apply()
 local _ = require("gettext")
+local CookieLogin = require("source.cookie_login")
 
 local SOURCE_ID = "shuqi"
 local Setting = {}
+local LOGIN_URL = "https://t2.shuqi.com/oauth/login?priority=code&redirect_uri=https%3A%2F%2Ft.shuqi.com%2Fmyself"
 
 ---@return boolean
 local function loggedIn()
     return require("source.shuqi.client").loggedIn()
 end
 
+---@param cookie string
+---@param cb fun(ok: boolean, err: string|nil)
+local function saveCookie(cookie, cb)
+    return require("source.shuqi.client").loginCookieAsync(cookie, function(session, err)
+        if session then
+            require("source.auth").ok(SOURCE_ID)
+            require("source.registry").reload()
+        end
+        cb(session ~= nil, err)
+    end)
+end
+
+local function pasteCookie()
+    local Toast = require("ui.themes.widgets.toast")
+    if not require("ui/network/manager"):isConnected() then
+        Toast:new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
+        return
+    end
+    require("ui.themes.widgets.input"):new{
+        title = _("书旗登录 Cookie"),
+        fields = { { text = "", hint = _("在官网登录后，复制 t.shuqi.com 请求标头里的完整 Cookie") } },
+        ok_text = _("登录"),
+        callback = function(value)
+            if not require("ui/network/manager"):isConnected() then
+                Toast:new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
+                return
+            end
+            local job, cancelled
+            local waiting = require("ui.themes.widgets.progress_dialog"):new{
+                title = _("书旗账号"), text = _("正在校验登录…"), dismissable = false,
+                on_cancel = function()
+                    cancelled = true
+                    if job then job.cancel() end
+                end,
+            }
+            waiting:show()
+            job = saveCookie(value, function(ok, err)
+                if cancelled then return end
+                waiting:close()
+                Toast:new{ text = ok and _("登录成功") or err, timeout = ok and 2 or 3 }:show()
+            end)
+        end,
+    }:show()
+end
+
+Setting.browser = {
+    domain = "t.shuqi.com", scope = "cookie", login = LOGIN_URL,
+    check = "https://t.shuqi.com/myself",
+    isAuthorized = function() return loggedIn() and not require("source.auth").expired(SOURCE_ID) end,
+    apply = function(payload, cb)
+        local cookies = {}
+        for _idx, cookie in ipairs(type(payload.cookies) == "table" and payload.cookies or {}) do
+            local host = type(cookie) == "table" and type(cookie.domain) == "string"
+                and cookie.domain:gsub("^%.", ""):lower()
+            if host == "shuqi.com" or host == "t.shuqi.com" then cookies[#cookies + 1] = cookie end
+        end
+        return saveCookie(CookieLogin.fromPayload({ cookies = cookies }, "shuqi.com"), cb)
+    end,
+}
+
 local function showLogin()
     local Toast = require("ui.themes.widgets.toast")
+    local function connected(run)
+        if require("ui/network/manager"):isConnected() then return run() end
+        Toast:new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
+    end
+    if not require("ui/network/manager"):isConnected() then
+        Toast:new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
+        return
+    end
     local verification, dialog
     local agreed, closed = false, false
     local function consent(run)
@@ -49,7 +119,7 @@ local function showLogin()
                 phone = require("utils.text").trim(phone)
                 if not validPhone(phone) then return end
                 consent(function()
-                    require("ui/network/manager"):runWhenConnected(function()
+                    connected(function()
                         if closed then return end
                         if verification then verification:cancel() end
                         verification = require("source.shuqi.verify").new(phone, function(ok, err)
@@ -67,13 +137,19 @@ local function showLogin()
                 return
             end
             consent(function()
-                require("ui/network/manager"):runWhenConnected(function()
+                connected(function()
+                    local job, cancelled = nil, false
                     local waiting = require("ui.themes.widgets.progress_dialog"):new{
                         title = _("书旗账号"), text = _("正在登录…"), dismissable = false,
+                        on_cancel = function()
+                            cancelled = true
+                            if job then job.cancel() end
+                        end,
                     }
                     waiting:show()
-                    local browser = require("source.shuqi.verify").browser()
-                    require("source.shuqi.client").loginAsync(phone, code, browser, function(session, err)
+                    local browser = verification and verification.phone == phone and verification.browser or nil
+                    job = require("source.shuqi.client").loginAsync(phone, code, browser, function(session, err)
+                        if cancelled then return end
                         waiting:close()
                         if not session then
                             Toast:new{ text = err or _("登录失败"), timeout = 3 }:show()
@@ -109,6 +185,22 @@ function Setting.rows()
                 status = status, status_on = status_on,
                 callback = function() showLogin() end,
             })
+        end,
+        function(iw)
+            return Row.widget({
+                width = iw, chevron = true, kind = "nav", icon = "language",
+                title = _("电脑浏览器登录"), subtitle = _("账号密码和短信验证码请在官网完成"),
+                callback = function()
+                    require("ui.themes.widgets.text_viewer"):new{
+                        title = _("电脑浏览器登录"),
+                        text = CookieLogin.relogin(_("书旗"), LOGIN_URL, _("书旗登录 Cookie")),
+                    }:show()
+                end,
+            })
+        end,
+        function(iw)
+            return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "content_paste",
+                title = _("粘贴 Cookie"), callback = pasteCookie })
         end,
     }
     if not loggedIn() then return rows end

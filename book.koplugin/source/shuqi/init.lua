@@ -69,44 +69,59 @@ function Source:searchAsync(keyword, cb)
     end)
 end
 
----@param wire table|nil
----@param node string|nil
----@return StoreChipGroup[], string|nil
-local function groupsOf(wire, node)
-    local channels = wire and Mapper.channels(wire) or nil
-    if not channels then return {}, node end
-    local specs = {
-        { key = "male", title = _("男频") },
-        { key = "female", title = _("女频") },
-        { key = "press", title = _("出版") },
-    }
-    local groups = {}
-    local picked = node
-    for _idx, spec in ipairs(specs) do
-        local chips = channels[spec.key]
-        if chips and chips[1] then
-            if not picked or picked == "" then picked = chips[1].id end
-            groups[#groups + 1] = Browse.group(chips, picked)
-            groups[#groups].title = spec.title
-        end
-    end
-    return groups, picked
-end
-
----@param opts { node?: string }|nil
+---@param opts { node?: string, limit?: integer }|nil
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 function Source:browseAsync(opts, cb)
+    local node = Mapper.storeNode(opts and opts.node)
+    local limit = opts and opts.limit or 60
     local handle = {}
-    handle.job = Client.categoriesAsync(function(wire)
-        local groups, tag = groupsOf(wire, opts and opts.node)
-        handle.job = Client.rankAsync(tag, function(books, err)
-            if not books then cb(nil, err or _("请求失败")); return end
-            cb({ data = books, groups = groups })
+    local function firstPage()
+        local pending = true
+        local first = Client.storeAsync(node, 1, function(html, err)
+            pending = false
+            if handle.cancelled then return end
+            if not html then cb(nil, err); return end
+            local books, groups, more = Mapper.store(html)
+            if not books or not groups then cb(nil, _("响应无效")); return end
+            -- 旧版保存分类名；用官网当前链接迁移，不维护分类 ID 对照表。
+            if not node and opts and opts.node then
+                for _idx, group in ipairs(groups) do
+                    for _chip_idx, chip in ipairs(group.chips) do
+                        if chip.title == opts.node then node = chip.id; firstPage(); return end
+                    end
+                end
+            end
+            local titles = {
+                ["作品类型"] = _("频道"), ["作品分类"] = _("分类"), ["作品状态"] = _("状态"),
+                ["作品字数"] = _("字数"), ["更新时间"] = _("更新时间"),
+            }
+            for _idx, group in ipairs(groups) do group.title = titles[group.title] or group.title end
+            handle.inner = Browse.pages(function(page, done)
+                if page == 1 then done(books, nil, more); return end
+                return Client.storeAsync(node, page, function(raw, reason)
+                    if not raw then done(nil, reason); return end
+                    local list, _groups, has_more = Mapper.store(raw)
+                    done(list, not list and _("响应无效") or nil, has_more)
+                end)
+            end, limit, groups, function(result, reason)
+                if result then
+                    for index = #result.data, limit + 1, -1 do result.data[index] = nil end
+                end
+                cb(result, reason)
+            end)
         end)
-    end)
-    return { cancel = function()
-        if handle.job and handle.job.cancel then handle.job.cancel() end
-    end }
+        if pending then handle.inner = first end
+    end
+    firstPage()
+    function handle.cancel()
+        handle.cancelled = true
+        if handle.inner then handle.inner.cancel() end
+    end
+    return handle
+end
+
+function Source:bookReviewsAsync(identity, cb)
+    return Client.reviewsAsync(identity.stable_id, 1, cb)
 end
 
 function Source:getDetailAsync(identity, cb)
@@ -183,8 +198,9 @@ end
 
 function Source:getProgressAsync(identity, cb)
     if not self:configured() then return SourceBase.defer(cb, nil, _("未登录书旗")) end
-    local cancelled, job = false, nil
-    job = Client.progressAsync(identity.stable_id, function(mark, err)
+    local cancelled, job, pending = false, nil, true
+    local first = Client.progressAsync(identity.stable_id, function(mark, err)
+        pending = false
         if cancelled then return end
         if err then cb(nil, err); return end
         if not mark then cb(nil, nil, { empty = true }); return end
@@ -203,6 +219,7 @@ function Source:getProgressAsync(identity, cb)
             })
         end)
     end)
+    if pending then job = first end
     return { cancel = function()
         cancelled = true
         if job and job.cancel then job.cancel() end
@@ -211,17 +228,20 @@ end
 
 function Source:putProgressAsync(identity, pos, cb)
     if not self:configured() then return SourceBase.defer(cb, nil, _("未登录书旗")) end
-    local cancelled, job = false, nil
-    job = self:loadTocAsync(identity, function(toc, err)
+    local cancelled, job, pending = false, nil, true
+    local first = self:loadTocAsync(identity, function(toc, err)
+        pending = false
         if cancelled then return end
         if not toc then cb(nil, err); return end
         local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
         local chapter = idx and toc[idx]
         if not chapter then cb(nil, _("缺少书旗章节位置")); return end
         job = Client.putProgressAsync(identity.stable_id, chapter.uid, chapter.title, idx / #toc, function(ok, perr)
+            if cancelled then return end
             cb(ok and true or nil, perr)
         end)
     end)
+    if pending then job = first end
     return { cancel = function()
         cancelled = true
         if job and job.cancel then job.cancel() end

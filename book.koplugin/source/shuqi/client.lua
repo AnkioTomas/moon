@@ -1,8 +1,8 @@
 --[[--
 书旗网页接口。
 
-搜索、分类、目录、免费正文不登录。登录是手机验证码，滑块参数由远程页交回。
-书架是一次书签同步，没有单独的增删接口。
+搜索、分类、目录、免费正文不登录。登录支持手机验证码与官网 Cookie。
+书架增删和阅读位置走书签同步，写入后另拉快照确认。
 
 @module source.shuqi.client
 --]]
@@ -24,13 +24,83 @@ local BOOKMARK = "https://jbookmark.shuqireader.com/api/v1/sync/bookmarks"
 local ANON_USER = "8000000"
 
 local env = {}
+local login_epoch = 0
+
+---@class ShuqiBookmarkRequest
+---@field pending boolean
+---@field start fun()
+---@field job HttpJob|nil
+
+---@class ShuqiBookmarkSession
+---@field epoch integer
+---@field requests ShuqiBookmarkRequest[]
+local BookmarkSession = {}
+BookmarkSession.__index = BookmarkSession
+
+---@return ShuqiBookmarkSession
+function BookmarkSession.new()
+    return setmetatable({ epoch = login_epoch, requests = {} }, BookmarkSession)
+end
+
+---@param entry ShuqiBookmarkRequest
+function BookmarkSession:remove(entry)
+    for index, request in ipairs(self.requests) do
+        if request == entry then
+            table.remove(self.requests, index)
+            if index == 1 and self.requests[1] then
+                require("ui/uimanager"):nextTick(
+                    require("ui.guard").wrap("shuqi.bookmarks.start", self.requests[1].start))
+            end
+            return
+        end
+    end
+end
+
+-- 同一账号的书签接口拒绝并发请求（10006）；队列归登录会话所有。
+---@param url string
+---@param body string
+---@param options HttpRequestOpts
+---@param cb fun(raw: string|nil, err: any)
+---@return HttpJob
+function BookmarkSession:post(url, body, options, cb)
+    ---@type ShuqiBookmarkRequest
+    local entry
+    entry = {
+        pending = true,
+        start = function()
+            if not entry.pending then return end
+            if self.epoch ~= login_epoch then
+                entry.pending = false
+                self:remove(entry)
+                cb(nil, _("登录状态已变化，请重试"))
+                return
+            end
+            local job = Request.post(url, body, options, function(raw, err)
+                if not entry.pending then return end
+                entry.pending = false
+                self:remove(entry)
+                cb(raw, err)
+            end)
+            if entry.pending then entry.job = job end
+        end,
+    }
+    self.requests[#self.requests + 1] = entry
+    if #self.requests == 1 then entry.start() end
+    return { cancel = function()
+        if not entry.pending then return end
+        entry.pending = false
+        if entry.job then entry.job.cancel() end
+        self:remove(entry)
+    end }
+end
 
 function Client.reset()
     env = {}
+    login_epoch = login_epoch + 1
 end
 
 function Client.load()
-    Client.reset()
+    env = { bookmarks = env.bookmarks }
     local cfg = require("utils.settings").getSource(SOURCE_ID)
     env.token = cfg.token
     env.user_id = cfg.user_id
@@ -55,12 +125,11 @@ function Client.persist(session, browser)
     cfg.user_id = session.user_id
     cfg.name = session.name
     cfg.logged_in = true
-    if browser then
-        cfg.imei = browser.fingerprint
-        cfg.umidtoken = browser.umidtoken
-        cfg.wua = browser.wua
-    end
+    cfg.imei = browser and browser.fingerprint or nil
+    cfg.umidtoken = browser and browser.umidtoken or nil
+    cfg.wua = browser and browser.wua or nil
     settings.saveSource(SOURCE_ID)
+    login_epoch = login_epoch + 1
     Client.load()
 end
 
@@ -69,7 +138,7 @@ local function decode(cb)
     return function(raw, err)
         if not raw or raw == "" then cb(nil, err and tostring(err) or _("请求失败")); return end
         local ok, wire = pcall(JSON.decode, raw)
-        if not ok or type(wire) ~= "table" then cb(nil, _("请求失败")); return end
+        if not ok or type(wire) ~= "table" then cb(nil, _("响应无效")); return end
         cb(wire)
     end
 end
@@ -168,6 +237,35 @@ function Client.rankAsync(tag, cb)
     end)
 end
 
+---@param node string|nil
+---@param page integer
+---@param cb fun(html: string|nil, err: string|nil)
+---@return HttpJob
+function Client.storeAsync(node, page, cb)
+    local query = node and Mapper.storeNode(node)
+    if node and not query then return require("source.base").defer(cb, nil, _("响应无效")) end
+    local options = opts()
+    options.accept = "text/html"
+    options.headers = { Accept = "text/html", Referer = "https://www.shuqi.com/store" }
+    return Request.get("https://www.shuqi.com/store?" .. (query and query .. "&" or "") .. "page=" .. page, options, cb)
+end
+
+---@param book_id string
+---@param page integer
+---@param cb fun(page: table|nil, err: string|nil)
+---@return HttpJob
+function Client.reviewsAsync(book_id, page, cb)
+    local url = "https://comment.alwx.alibaba.com/novel/i.php?" .. Text.formEncode({
+        ["do"] = "sp_get", bookId = book_id, fetch = "merge",
+        sqUid = ANON_USER, source = "store", size = 20, page = page, score = "yes",
+    })
+    return get(url, function(wire, err)
+        if not wire then cb(nil, err); return end
+        local result = Mapper.reviews(wire, book_id)
+        cb(result, not result and _("响应无效") or nil)
+    end)
+end
+
 ---@param book_id string
 ---@param cb fun(book: Book|nil, err: string|nil)
 ---@return HttpJob
@@ -191,6 +289,9 @@ function Client.chaptersAsync(book_id, cb)
     local _timestamp, fields = contentFields(book_id)
     fields.sign = Mapper.contentSign(fields)
     fields.platform = "0"
+    fields.tk = env.token or ""
+    fields.imei = env.imei or ""
+    fields.sn = env.imei or ""
     local url = CONTENT .. "/openapi/book/chapterlist?" .. Text.formEncode(fields)
     return get(url, function(wire, err)
         if not wire then cb(nil, err); return end
@@ -221,12 +322,77 @@ local function gatewayBody(fields)
     return Text.formEncode(fields)
 end
 
+---@param session table
+---@param browser table|nil
+---@param cb fun(session: table|nil, err: string|nil)
+local function acceptSession(session, browser, cb)
+    if not session.user_id then cb(nil, _("书旗账号缺少用户编号")); return end
+    local cfg = require("utils.settings").getSource(SOURCE_ID)
+    if cfg.logged_in and cfg.user_id ~= session.user_id then
+        cb(nil, _("请先退出旧书旗账号再换号；退出会清除本机该源的书架、进度、笔记和缓存。"))
+        return
+    end
+    Client.persist(session, browser)
+    cb(session)
+end
+
+---@param wire table|nil
+---@return string
+local function loginError(wire)
+    if type(wire) ~= "table" then return _("登录响应无效") end
+    local message = wire.message or wire.msg
+    if type(message) == "string" and message ~= "" then return message end
+    local status = wire.status or wire.state
+    if tonumber(status) == 200 then return _("登录响应无效") end
+    if type(status) == "string" or type(status) == "number" then
+        return string.format(_("书旗登录失败（状态：%s）"), tostring(status))
+    end
+    return _("登录响应无效")
+end
+
+--- 只向官方账号接口提交 Cookie 中的会话，不发送其他 Cookie，不缓存账号响应。
+---@param cookie string
+---@param cb fun(session: table|nil, err: string|nil)
+---@return HttpJob|nil
+function Client.loginCookieAsync(cookie, cb)
+    local candidate = Mapper.cookieSession(require("source.cookie_login").parse(cookie))
+    if not candidate then return require("source.base").defer(cb, nil, _("书旗 Cookie 缺少有效的登录凭证")) end
+    local epoch, cancelled = login_epoch, false
+    local fields = { userId = candidate.user_id, sqSv = "1.0" }
+    fields.sign = Mapper.gatewaySign(fields)
+    fields.key = "sq_h5_gateway"
+    fields._public = Text.formEncode({
+        platform = "0", user_id = candidate.user_id,
+        imei = candidate.fingerprint or "", sn = candidate.fingerprint or "",
+    })
+    local options = opts()
+    options.cache_ttl = 0
+    options.headers.Authorization = "Bearer " .. candidate.token
+    local job = Request.get(OCEAN .. "/webapi/jaccount/accountapi/v1/sapi/account/userBaseInfo?"
+        .. Text.formEncode(fields), options, function(raw, err)
+        if cancelled then return end
+        if epoch ~= login_epoch then cb(nil, _("登录状态已变化，请重试")); return end
+        if not raw or raw == "" then cb(nil, err and tostring(err) or _("请求失败")); return end
+        local ok, wire = pcall(JSON.decode, raw)
+        if not ok then cb(nil, _("登录响应无效")); return end
+        local account = Mapper.account(wire, candidate.user_id)
+        if not account then cb(nil, loginError(wire)); return end
+        candidate.name = account.name
+        acceptSession(candidate, { fingerprint = candidate.fingerprint }, cb)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
+end
+
 --- 发送登录短信。手机号只在设备上，滑块字符串由远程页交回。
 ---@param phone string
 ---@param captcha string
 ---@param cb fun(ok: boolean|nil, err: string|nil)
+---@param browser { user_agent: string|nil }|nil
 ---@return HttpJob
-function Client.sendCodeAsync(phone, captcha, cb)
+function Client.sendCodeAsync(phone, captcha, cb, browser)
     local timestamp = tostring(os.time())
     local fields = {
         mobile = phone,
@@ -245,7 +411,9 @@ function Client.sendCodeAsync(phone, captcha, cb)
             redirect_uri = "https://t.shuqi.com/myself",
         }),
     }
-    return Request.post(OCEAN .. "/api/jaccount/sso/captcha/sendCode", gatewayBody(fields), opts(), function(raw, err)
+    local options = opts()
+    if browser and browser.user_agent and browser.user_agent ~= "" then options.headers["User-Agent"] = browser.user_agent end
+    return Request.post(OCEAN .. "/api/jaccount/sso/captcha/sendCode", gatewayBody(fields), options, function(raw, err)
         if not raw or raw == "" then cb(nil, err and tostring(err) or _("请求失败")); return end
         local ok, wire = pcall(JSON.decode, raw)
         if not ok then cb(nil, _("请求失败")); return end
@@ -258,10 +426,11 @@ end
 --- 验证码登录。browser 是远程页带回来的设备指纹，没有就空着。
 ---@param phone string
 ---@param code string
----@param browser { fingerprint: string|nil, umidtoken: string|nil, wua: string|nil }|nil
+---@param browser { fingerprint: string|nil, umidtoken: string|nil, wua: string|nil, user_agent: string|nil }|nil
 ---@param cb fun(session: table|nil, err: string|nil)
 ---@return HttpJob
 function Client.loginAsync(phone, code, browser, cb)
+    local cancelled, epoch = false, login_epoch
     local mark = browser or {}
     local fingerprint = type(mark.fingerprint) == "string" and mark.fingerprint or ""
     local fields = {
@@ -279,16 +448,25 @@ function Client.loginAsync(phone, code, browser, cb)
         appName = "sqH5",
         agent = "chrome",
     }
-    return Request.post(OCEAN .. "/api/jaccount/sso/vcode/login", gatewayBody(fields), opts(), function(raw, err)
+    local options = opts()
+    if mark.user_agent and mark.user_agent ~= "" then options.headers["User-Agent"] = mark.user_agent end
+    local job = Request.post(OCEAN .. "/api/jaccount/sso/vcode/login", gatewayBody(fields), options, function(raw, err)
+        if cancelled then return end
+        if epoch ~= login_epoch then cb(nil, _("登录状态已变化，请重试")); return end
         if not raw or raw == "" then cb(nil, err and tostring(err) or _("请求失败")); return end
         local ok, wire = pcall(JSON.decode, raw)
-        if not ok then cb(nil, _("登录失败")); return end
+        if not ok then
+            cb(nil, raw:match("^%s*<") and _("书旗登录触发安全验证，请在官网登录后导入 Cookie。") or _("登录响应无效"))
+            return
+        end
         local session, reason = Mapper.session(wire)
-        if not session then cb(nil, reason or _("登录失败")); return end
-        if not session.user_id then cb(nil, _("书旗账号缺少用户编号")); return end
-        Client.persist(session, mark)
-        cb(session)
+        if not session then cb(nil, reason or loginError(wire)); return end
+        acceptSession(session, mark, cb)
     end)
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
 end
 
 ---@param bookmark table[]
@@ -304,6 +482,7 @@ local function syncAsync(bookmark, cb)
     -- 空表会被编成 {}。书签接口认 bookmark 是数组，对象的话直接回空书架。
     local marks = bookmark
     if JSON.util and JSON.util.InitArray then marks = JSON.util.InitArray(bookmark) end
+    local epoch = login_epoch
     local data = JSON.encode({
         userid = tonumber(env.user_id) or env.user_id,
         t = os.time(),
@@ -322,7 +501,11 @@ local function syncAsync(bookmark, cb)
         data = data,
     })
     local url = BOOKMARK .. "?" .. Text.formEncode({ ["_"] = tostring(os.time()), nom9 = "1" })
-    return Request.post(url, body, opts(), function(raw, err)
+    if not env.bookmarks or env.bookmarks.epoch ~= epoch then
+        env.bookmarks = BookmarkSession.new()
+    end
+    return env.bookmarks:post(url, body, opts(), function(raw, err)
+        if epoch ~= login_epoch then cb(nil, _("登录状态已变化，请重试")); return end
         if not raw or raw == "" then
             cb(nil, err and tostring(err) or _("书旗登录已失效，请点「重新登录」，用手机验证码登录。"))
             return
@@ -330,7 +513,12 @@ local function syncAsync(bookmark, cb)
         local ok, wire = pcall(JSON.decode, raw)
         if not ok then cb(nil, _("请求失败")); return end
         local books, reason = Mapper.shelf(wire)
-        if not books then cb(nil, reason or _("书旗登录已失效，请点「重新登录」，用手机验证码登录。")); return end
+        if not books then
+            local status = type(wire) == "table" and tonumber(wire.status)
+            if status then reason = (reason or _("请求失败")) .. " (" .. status .. ")" end
+            cb(nil, reason or _("书旗登录已失效，请点「重新登录」，用手机验证码登录。"))
+            return
+        end
         cb(books, nil, wire)
     end)
 end
@@ -364,22 +552,44 @@ local function changeAsync(stable_id, action, extra, cb)
         if type(extra.author) == "string" and extra.author ~= "" then row.author = extra.author end
         if type(extra.cover) == "string" and extra.cover ~= "" then row.cover = extra.cover end
     end
-    return syncAsync({ row }, function(books, err)
+    local cancelled, job, pending = false, nil, true
+    local first = syncAsync({ row }, function(books, err)
+        pending = false
+        if cancelled then return end
         if not books then cb(nil, err or (action == 3 and _("移出书旗书架失败") or _("加入书旗书架失败"))); return end
-        cb(true)
+        job = Client.shelfAsync(function(fresh, reason)
+            if cancelled then return end
+            if not fresh then cb(nil, reason); return end
+            local present = false
+            for _idx, book in ipairs(fresh) do
+                if book.stable_id == stable_id then present = true; break end
+            end
+            if present ~= (action == 1) then cb(nil, _("同步结果未确认，请重试")); return end
+            cb(true)
+        end)
     end)
+    if pending then job = first end
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
 end
 
 ---@param stable_id string
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 function Client.addAsync(stable_id, cb)
-    return Client.detailAsync(stable_id, function(book)
-        local extra = nil
-        if book then
-            extra = { title = book.title, author = book.authors, cover = book.cover }
-        end
-        changeAsync(stable_id, 1, extra, cb)
+    local cancelled, job, pending = false, nil, true
+    local first = Client.detailAsync(stable_id, function(book, err)
+        pending = false
+        if cancelled then return end
+        if not book then cb(nil, err); return end
+        job = changeAsync(stable_id, 1, { title = book.title, author = book.authors, cover = book.cover }, cb)
     end)
+    if pending then job = first end
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
 end
 
 ---@param stable_id string
@@ -408,7 +618,7 @@ end
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return HttpJob|nil
 function Client.putProgressAsync(stable_id, chapter_id, title, fraction, cb)
-    local now = os.time() * 1000
+    local now = os.time()
     local percent = math.floor((tonumber(fraction) or 0) * 10000 + 0.5)
     if percent < 1 then percent = 1 end
     if percent > 10000 then percent = 10000 end
@@ -421,13 +631,31 @@ function Client.putProgressAsync(stable_id, chapter_id, title, fraction, cb)
         state = "",
         chapterid = tonumber(chapter_id) or chapter_id,
         cname = title or "",
-        add_time = now,
-        last_update = now,
+        add_time = now * 1000,
+        last_update = tostring(now),
     }
-    return syncAsync({ row }, function(books, err)
+    local cancelled, job, pending = false, nil, true
+    local first = syncAsync({ row }, function(books, err)
+        pending = false
+        if cancelled then return end
         if not books then cb(nil, err or _("书旗进度保存失败")); return end
-        cb(true)
+        job = Client.progressAsync(stable_id, function(mark, reason)
+            if cancelled then return end
+            if reason then cb(nil, reason); return end
+            -- 服务端回读只保留三位小数，按同一精度确认，不能把舍入当成上传失败。
+            if not mark or mark.chapter_id ~= chapter_id
+                or math.floor(mark.fraction * 1000 + 0.5) ~= math.floor(percent / 10 + 0.5) then
+                cb(nil, _("同步结果未确认，请重试"))
+                return
+            end
+            cb(true)
+        end)
     end)
+    if pending then job = first end
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
 end
 
 return Client

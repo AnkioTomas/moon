@@ -20,18 +20,12 @@ local _ = require("gettext")
 ---@field pending table|nil
 ---@field timeout function
 ---@field done boolean|nil
+---@field browser table|nil
 local Verification = {}
 Verification.__index = Verification
 
 ---@type table<string, ShuqiVerification>
 local sessions = {}
-
---- 最近一次滑块页带回来的设备指纹。登录请求要用，不落盘到日志。
-local browser = {}
-
-function Verification.browser()
-    return browser
-end
 
 function Verification:cancel()
     if self.done then return end
@@ -101,7 +95,9 @@ local function handle(method, action, params, cb)
             pending = _("正在发送短信…"),
             success = _("验证通过，短信已发送，请回到设备填写验证码。"),
             failure = _("验证失败，请重新滑动"),
-            load_error = _("滑块加载失败，请检查网络后刷新网页"),
+            load_error = _("登录验证脚本加载失败，可能被广告拦截插件阻止。请检查插件设置或网络，也可改用 Cookie 登录。"),
+            load_timeout = _("登录验证脚本加载超时，可能被广告拦截插件阻止。请检查插件设置或网络后重试，也可改用 Cookie 登录。"),
+            environment_error = _("登录环境初始化失败，请刷新重试"),
             retry = _("重试"),
         })
     end
@@ -109,11 +105,13 @@ local function handle(method, action, params, cb)
     local fingerprint = bounded(params.fingerprint, 256)
     local umidtoken = bounded(params.umidtoken, 4096)
     local wua = bounded(params.wua, 8192)
+    local user_agent = bounded(params.user_agent, 512)
     if not captcha or captcha == "" or not fingerprint or not umidtoken or not wua then
         return reply(400, { error = _("验证凭据无效") })
     end
+    if not user_agent or user_agent:find("[\r\n]") then return reply(400, { error = _("验证凭据无效") }) end
     if session.pending then return reply(409, { error = _("正在发送短信…") }) end
-    browser = { fingerprint = fingerprint, umidtoken = umidtoken, wua = wua }
+    local browser = { fingerprint = fingerprint, umidtoken = umidtoken, wua = wua, user_agent = user_agent }
     local operation = {}
     session.pending = operation
     operation.job = Client.sendCodeAsync(session.phone, captcha, function(ok, err)
@@ -125,9 +123,10 @@ local function handle(method, action, params, cb)
         end
         session.pending = nil
         if not ok then return reply(400, { error = err or _("验证失败，请重新滑动") }) end
+        session.browser = browser
         reply(200, { ok = true })
         session:finish(true)
-    end)
+    end, browser)
 end
 
 local dir = debug.getinfo(1, "S").source:sub(2):match("(.*/)")

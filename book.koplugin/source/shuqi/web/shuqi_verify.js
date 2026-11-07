@@ -3,11 +3,8 @@
     const ticket = location.hash.slice(1);
     const status = document.getElementById('status');
     const retry = document.getElementById('retry');
-    let messages, captcha;
-    function cookie(name) {
-        const matched = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
-        return matched ? decodeURIComponent(matched[1]) : '';
-    }
+    let messages, captcha, browser;
+    let loading = true;
     async function request(action, body) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 45000);
@@ -29,20 +26,66 @@
         status.textContent = error.message || messages.failure;
         retry.hidden = false;
     }
-    function loadScript(src) {
+    function loadScript(src, ready) {
+        if (ready()) return Promise.resolve();
         return new Promise((resolve, reject) => {
             const script = document.createElement('script');
-            const timer = setTimeout(() => reject(new Error(messages.load_error)), 20000);
+            const timer = setTimeout(() => finish(messages.load_timeout || messages.load_error), 20000);
+            function finish(error) {
+                clearTimeout(timer);
+                script.onload = script.onerror = null;
+                if (error) {
+                    script.remove();
+                    reject(new Error(error + '\n' + src));
+                } else resolve();
+            }
             script.src = src;
-            script.onload = () => { clearTimeout(timer); resolve(); };
-            script.onerror = () => { clearTimeout(timer); reject(new Error(messages.load_error)); };
+            script.onload = () => finish(ready() ? null : messages.load_error);
+            script.onerror = () => finish(messages.load_error);
             document.head.appendChild(script);
         });
     }
-    async function loadCaptcha() {
-        if (!window.initAliyunCaptcha) {
-            await loadScript('https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js');
+    async function prepareBrowser() {
+        const scripts = await Promise.allSettled([
+            loadScript('https://render-resource.11222.cn/third/fingerprint2/fingerprint2.min.js',
+                () => typeof window.Fingerprint2 === 'function'),
+            loadScript('https://g.alicdn.com/AWSC/AWSC/awsc.js', () => typeof window.AWSC?.use === 'function'),
+        ]);
+        const failedScript = scripts.find(result => result.status === 'rejected');
+        if (failedScript) throw failedScript.reason;
+        const fingerprint = await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error(messages.environment_error)), 20000);
+            new window.Fingerprint2().get((result) => {
+                clearTimeout(timer);
+                if (!result) reject(new Error(messages.environment_error));
+                else resolve(result + '_shuqi_touch');
+            });
+        });
+        function module(name) {
+            return new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error(messages.environment_error)), 20000);
+                window.AWSC.use(name, (state, sdk) => {
+                    clearTimeout(timer);
+                    if (state === 'loaded') resolve(sdk);
+                    else reject(new Error(messages.environment_error));
+                });
+            });
         }
+        const [um, uab] = await Promise.all([module('um'), module('uab')]);
+        const umidtoken = await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error(messages.environment_error)), 20000);
+            um.init({ appName: 'wenxue-activity-proxy' }, (state, result) => {
+                clearTimeout(timer);
+                if (state === 'success' && result && result.tn) resolve(result.tn);
+                else reject(new Error(messages.environment_error));
+            });
+        });
+        return { fingerprint, umidtoken, uab };
+    }
+    async function loadCaptcha() {
+        if (!browser) browser = await prepareBrowser();
+        await loadScript('https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js',
+            () => typeof window.initAliyunCaptcha === 'function');
         window.initAliyunCaptcha({
             SceneId: '1fujd071',
             prefix: '1ff4ot',
@@ -54,18 +97,13 @@
             timeout: 2000,
             captchaVerifyCallback: async (captchaVerifyParam) => {
                 status.textContent = messages.pending;
-                let wua = '';
-                try {
-                    if (window.uabModule && window.uabModule.getUA) wua = window.uabModule.getUA() || '';
-                } catch (error) {
-                    wua = '';
-                }
                 try {
                     await request('verify', {
                         captcha: String(captchaVerifyParam || ''),
-                        umidtoken: window.umidToken || '',
-                        wua,
-                        fingerprint: cookie('shuqi_fingerprint'),
+                        umidtoken: browser.umidtoken,
+                        wua: browser.uab.getUA(),
+                        fingerprint: browser.fingerprint,
+                        user_agent: navigator.userAgent,
                     });
                     status.textContent = messages.success;
                     document.getElementById('captcha-element').hidden = true;
@@ -80,12 +118,20 @@
             getInstance: (instance) => { captcha = instance; },
         });
     }
-    retry.onclick = () => {
+    retry.onclick = async () => {
+        if (loading) return;
         retry.hidden = true;
         status.textContent = '';
         document.getElementById('captcha-element').hidden = false;
-        if (captcha && captcha.refresh) captcha.refresh();
-        else loadCaptcha().catch(failed);
+        loading = true;
+        try {
+            if (captcha && captcha.refresh) await captcha.refresh();
+            else await loadCaptcha();
+        } catch (error) {
+            failed(error);
+        } finally {
+            loading = false;
+        }
     };
     try {
         messages = await request('config', {});
@@ -96,5 +142,7 @@
     } catch (error) {
         if (messages) failed(error);
         else status.textContent = error.message;
+    } finally {
+        loading = false;
     }
 })();
