@@ -69,7 +69,7 @@ end
 
 --- 纯本地目录没有远端：书库外开过的书、进度、统计会一直是脏行，入队只会每次唤醒空跑一轮。
 function Source:pushDirty()
-    if self._client:isWebdav() then SourceBase.pushDirty(self) end
+    if self._client:isWebdav() then SourceBase.pushDirty(self, true) end
 end
 
 --- 删除。WebDAV 书：删本地镜像后走基类本地优先删除，远端文件与书目条目由下一轮同步的 pushDeletes 推删。
