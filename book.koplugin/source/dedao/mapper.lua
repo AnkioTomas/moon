@@ -104,6 +104,46 @@ function Mapper.search(wire)
 end
 
 ---@param body table|nil
+---@return Book[]|nil
+function Mapper.catalog(body)
+    if type(body) ~= "table" or type(body.product_list) ~= "table" then return nil end
+    local out = {}
+    for _idx, row in ipairs(body.product_list) do
+        if tonumber(row.item_type) == 2 and type(row.id_out) == "string" and row.id_out ~= "" then
+            local authors = type(row.author_list) == "table" and table.concat(row.author_list, "、") or ""
+            local item = book(row.id_out, row.name, authors, row.intro or row.introduction, row.index_img)
+            if item.title ~= "" then out[#out + 1] = item end
+        end
+    end
+    return out
+end
+
+---@param body table
+---@return table[]
+function Mapper.reviews(body)
+    local out = {}
+    for _idx, row in ipairs(body.list) do
+        local text = Text.stripHtml(row.note_line)
+        local note = Text.stripHtml(row.note)
+        if note ~= "" then text = text ~= "" and text .. "\n" .. note or note end
+        if text == "" then text = Text.stripHtml(row.content) end
+        if text ~= "" then
+            local owner = type(row.notes_owner) == "table" and row.notes_owner or {}
+            local extra = type(row.extra) == "table" and row.extra or {}
+            local created = tonumber(row.create_time)
+            out[#out + 1] = {
+                id = row.note_id_hazy,
+                author = owner.name or "",
+                text = text,
+                time = created and os.date("%Y-%m-%d", created) or nil,
+                grade = tonumber(extra.score_str),
+            }
+        end
+    end
+    return out
+end
+
+---@param body table|nil
 ---@param stable_id string
 ---@return Book|nil
 function Mapper.detail(body, stable_id)
@@ -161,7 +201,89 @@ function Mapper.progressUid(findex)
     return findex
 end
 
+local FULL_SLACK = 36
+local INDENT = 15
+
+---@param tag string
+---@param name string
+---@return number|nil
+local function attrNum(tag, name)
+    local value = tag:match(name .. '%s*=%s*"([%-%d%.]+)"')
+        or tag:match(name .. "%s*=%s*'([%-%d%.]+)'")
+    return tonumber(value)
+end
+
+--- 一个字一个 text。空白字要留着，英文单词靠它隔开。
+---@param inner string
+---@return string|nil
+local function glyphText(inner)
+    local text = Text.xmlDecode(inner:gsub("<[^>]+>", ""):gsub("</?hl>", ""))
+    if text == "" then return nil end
+    if Text.trim(text) == "" then return " " end
+    return text
+end
+
+---@param buf string
+---@param row string
+---@return string
+local function joinLine(buf, row)
+    local prev, nxt = buf:byte(-1), row:byte(1)
+    if prev and nxt and prev < 128 and nxt < 128 and buf:match("[%w]$") and row:match("^[%w]") then
+        return buf .. " " .. row
+    end
+    return buf .. row
+end
+
+--- 同一基线是一行。没排满的行结束上一段；相对页边缩进的行另起一段。
+---@param glyphs { text: string, x: number, y: number, i: integer }[]
+---@return string
+local function flow(glyphs)
+    local lines = {}
+    for _, g in ipairs(glyphs) do
+        local last = lines[#lines]
+        if last and math.abs(g.y - last.y) <= 2 then
+            last.glyphs[#last.glyphs + 1] = g
+            if g.x < last.x0 then last.x0 = g.x end
+            if g.x > last.x1 then last.x1 = g.x end
+        else
+            lines[#lines + 1] = { y = g.y, x0 = g.x, x1 = g.x, glyphs = { g } }
+        end
+    end
+    local margin, right, min_gap = lines[1].x0, lines[1].x1, nil
+    for idx, line in ipairs(lines) do
+        if line.x0 < margin then margin = line.x0 end
+        if line.x1 > right then right = line.x1 end
+        local gap = idx > 1 and line.y - lines[idx - 1].y or 0
+        if gap > 2 and (not min_gap or gap < min_gap) then min_gap = gap end
+    end
+    local paras, buf, prev = {}, "", nil
+    for _, line in ipairs(lines) do
+        table.sort(line.glyphs, function(a, b)
+            if a.x == b.x then return a.i < b.i end
+            return a.x < b.x
+        end)
+        local parts = {}
+        for _, g in ipairs(line.glyphs) do parts[#parts + 1] = g.text end
+        local row = table.concat(parts)
+        local gap = prev and line.y - prev.y or 0
+        local fresh = not prev
+            or line.x0 > margin + INDENT
+            or prev.x1 < right - FULL_SLACK
+            or (min_gap and gap > min_gap * 1.5)
+        if fresh then
+            if buf ~= "" then paras[#paras + 1] = buf end
+            buf = row
+        else
+            buf = joinLine(buf, row)
+        end
+        prev = line
+    end
+    if buf ~= "" then paras[#paras + 1] = buf end
+    return table.concat(paras, "\n")
+end
+
 --- 解开一页 SVG，抽出文字；空白页返回空串，解密失败返回 nil。
+--- 没有坐标的 text 仍是一段一个节点。有 x/y 的按基线排回段落。
 ---@param cipher string|nil
 ---@return string|nil
 function Mapper.pageText(cipher)
@@ -170,12 +292,24 @@ function Mapper.pageText(cipher)
     if #raw == 0 or #raw % 16 ~= 0 then return nil end
     local ok, svg = pcall(Aes.cbc_decrypt, raw, SVG_KEY, SVG_IV)
     if not ok or type(svg) ~= "string" or svg == "" then return nil end
-    local parts = {}
-    for block in svg:gmatch("<text[^>]*>(.-)</text>") do
-        local text = clean(block:gsub("<[^>]+>", ""))
-        if text ~= "" then parts[#parts + 1] = text end
+    local glyphs, positioned = {}, true
+    local index = 0
+    for tag, inner in svg:gmatch("<text([^>]*)>(.-)</text>") do
+        local text = glyphText(inner)
+        if text then
+            index = index + 1
+            local y = attrNum(tag, "y")
+            if not y then positioned = false end
+            glyphs[#glyphs + 1] = { text = text, x = attrNum(tag, "x") or 0, y = y or 0, i = index }
+        end
     end
-    return table.concat(parts, "\n")
+    if #glyphs == 0 then return "" end
+    if not positioned then
+        local parts = {}
+        for _, g in ipairs(glyphs) do parts[#parts + 1] = Text.trim(g.text) end
+        return table.concat(parts, "\n")
+    end
+    return flow(glyphs)
 end
 
 return Mapper

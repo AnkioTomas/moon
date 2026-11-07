@@ -122,6 +122,35 @@ Assert.eq(assert(io.open(path, "rb")):read("*a"), DOC)
 Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, function(p) path = p end)
 Assert.len(fetched, 1)
 
+-- 源要求文件头带标记时，旧缓存重新下载，新文件带上标记。
+local marked = 0
+Chapter.openAsync({ type = "chapter" }, identity, { title = "书" }, { chapter_idx = 2 }, {
+    loadToc = ops.loadToc,
+    reuse = function(file)
+        local handle = assert(io.open(file, "rb"))
+        local head = handle:read(32) or ""
+        handle:close()
+        return head:find("flow:1", 1, true) ~= nil
+    end,
+    fetchContent = function(_, item, cb)
+        marked = marked + 1
+        cb({ title = item.title, html = "<p>重排</p>", mark = "flow:1" })
+    end,
+}, function(p) path = p end)
+Assert.eq(marked, 1)
+Assert.is_true(assert(io.open(path, "rb")):read(32):find("<!--flow:1-->", 1, true) ~= nil)
+Chapter.openAsync({ type = "chapter" }, identity, { title = "书" }, { chapter_idx = 2 }, {
+    loadToc = ops.loadToc,
+    reuse = function(file)
+        local handle = assert(io.open(file, "rb"))
+        local head = handle:read(32) or ""
+        handle:close()
+        return head:find("flow:1", 1, true) ~= nil
+    end,
+    fetchContent = function() marked = marked + 1 end,
+}, function(p) path = p end)
+Assert.eq(marked, 1)
+
 -- 进程外落盘（重启后、内存判定缓存为空）的本地化 HTML 也直接复用。
 local restored = io.open(tmp .. "/3.html", "wb")
 restored:write('<!DOCTYPE html><html><body><img src="images/a.png"/></body></html>')

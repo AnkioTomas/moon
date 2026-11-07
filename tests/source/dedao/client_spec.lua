@@ -84,8 +84,11 @@ local function reply(url, payload)
     if url:find("/bookshelf/add", 1, true) then
         return Json.encode({ h = { c = 0 }, c = { data = { n = 1 } } })
     end
-    if url:find("/bookshelf/remove", 1, true) then
-        return remove_reply or Json.encode({ h = { c = 0 }, c = {} })
+    if url:find("/product/pcremove", 1, true) then
+        return remove_reply or Json.encode({ h = { c = 0 }, c = { n = 0 } })
+    end
+    if url:find("/api/pc/user/info", 1, true) then
+        return Json.encode({ h = { c = 0 }, c = { uid_hazy = "test-user" } })
     end
     if url:find("/api/search/pc/tophits", 1, true) then
         return Json.encode({ h = { c = 0 }, c = { data = { moduleList = { { layerDataList = {
@@ -151,12 +154,12 @@ Assert.eq(code, "igetweb9")
 Assert.eq(requests[#requests].headers["X-Oauth-Access-Token"], "oauth-token")
 
 local rows
-Client.shelfAsync(function(body) rows = Mapper.shelf(body) end)
+Client:shelfSyncAsync(function(body) rows = Mapper.shelf(body) end)
 Assert.eq(#rows, 1)
 Assert.is_true(requests[#requests].body:find('"category":"ebook"', 1, true) ~= nil)
 
 local added
-Client.addAsync("e1", function(ok) added = ok end)
+Client:addToShelfAsync("e1", function(ok) added = ok end)
 Assert.eq(added, true)
 Assert.is_true(requests[#requests].body:find('"book_enids":["e1"]', 1, true) ~= nil)
 Assert.is_true(requests[#requests].body:find('"ptype":2', 1, true) ~= nil)
@@ -201,8 +204,13 @@ Assert.is_true(requests[#requests].body:find('"findex":"c1"', 1, true) ~= nil)
 
 cookies, qr_status = { "session=new-login; Path=/" }, 1
 local login
-Client.qrPollAsync("oauth-token", "igetweb9", function(wire) login = wire end)
+local candidate = { csrfToken = "candidate" }
+local old_cookie = settings.cookie
+Client.qrPollAsync("oauth-token", "igetweb9", function(wire) login = wire end, candidate)
 Assert.eq(login.data.status, 1)
+Assert.eq(settings.cookie, old_cookie)
+Assert.eq(candidate.session, "new-login")
+Client.confirmLoginAsync(candidate, function(ok) Assert.is_true(ok) end)
 Assert.matches(settings.cookie, "session=new%-login")
 Assert.matches(Client.cookie(), "session=new%-login")
 Client.loggedIn()
@@ -213,15 +221,17 @@ local removed, remove_err
 for _idx, bad in ipairs({ "<html>upstream unavailable</html>", "broken", "{}", '{"h":{},"c":{}}',
     '{"h":{"c":401},"c":{}}' }) do
     remove_reply = bad
-    Client.removeAsync("e1", function(ok, err) removed, remove_err = ok, err end)
+    Client:removeFromShelfAsync("e1", function(ok, err) removed, remove_err = ok, err end)
     Assert.is_nil(removed)
     Assert.is_true(remove_err ~= nil)
 end
 settings.logged_in = true
 remove_reply = nil
-Client.removeAsync("e1", function(ok, err) removed, remove_err = ok, err end)
+Client:removeFromShelfAsync("e1", function(ok, err) removed, remove_err = ok, err end)
 Assert.is_true(removed)
 Assert.is_nil(remove_err)
+Assert.eq(Json.decode(requests[#requests].body).data[1].pid, "e1")
+Assert.eq(Json.decode(requests[#requests].body).data[1].ptype, 2)
 
 local function chapterResult()
     text, terr = nil, nil
@@ -260,9 +270,18 @@ Assert.eq(terr, "响应无效")
 
 local Aes = require("crypto.aes")
 local Text = require("utils.text")
-local blank = Text.base64Encode(Aes.cbc_encrypt("<svg></svg>",
-    "3e4r06tjkpjcevlbslr3d96gdb5ahbmo", "6fd89a1b3a7f48fb"))
+local SVG_KEY, SVG_IV = "3e4r06tjkpjcevlbslr3d96gdb5ahbmo", "6fd89a1b3a7f48fb"
+local function svgCipher(svg)
+    return Text.base64Encode(Aes.cbc_encrypt(svg, SVG_KEY, SVG_IV))
+end
+local blank = svgCipher("<svg></svg>")
 Assert.eq(Mapper.pageText(blank), "")
+-- 同一基线的字拼成一行。上一行没排满就换段；排满的行和页边续行合成一段。
+Assert.eq(Mapper.pageText(svgCipher('<text x="10" y="20">膝</text><text x="40" y="20">盖</text>')), "膝盖")
+Assert.eq(Mapper.pageText(svgCipher([[<text x="80" y="20">甲</text>
+<text x="30" y="56">乙</text><text x="50" y="56">丙</text><text x="740" y="56">。</text>
+<text x="30" y="92">下</text>]])), "甲\n乙丙。下")
+Assert.eq(Mapper.pageText(svgCipher('<text x="70" y="20">A</text><text x="740" y="20">c</text><text x="30" y="56">D</text>')), "Ac D")
 page_count = 0
 pages_reply = function()
     page_count = page_count + 1

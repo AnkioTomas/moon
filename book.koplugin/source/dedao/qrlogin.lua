@@ -38,10 +38,9 @@ end
 ---@param text string
 function QRLogin:_retry(text)
     self:cancel()
-    if self.dialog then
-        self.dialog:close()
-        self.dialog = nil
-    end
+    local dialog = self.dialog
+    self.dialog = nil
+    if dialog then dialog:close() end
     require("ui.themes.widgets.confirm"):new{
         text = text,
         ok_text = _("重新获取"),
@@ -59,23 +58,29 @@ function QRLogin:_poll(gen, oauth, code, polls)
         self:_retry(_("二维码已过期"))
         return
     end
-    self.job = Client.qrPollAsync(oauth, code, function(wire, _err)
+    local pending = true
+    local job = Client.qrPollAsync(oauth, code, function(wire, err)
+        pending = false
         if gen ~= self.generation then return end
         self.job = nil
         if not wire then
-            require("ui/uimanager"):scheduleIn(POLL_INTERVAL, function()
-                if gen == self.generation then self:_poll(gen, oauth, code, polls + 1) end
-            end)
+            self:_retry(err or _("请求失败"))
             return
         end
         local kind = Mapper.login(wire)
         if kind == "ok" then
-            self:cancel()
-            if self.dialog then
-                self.dialog:close()
+            local confirming = true
+            local confirm = Client.confirmLoginAsync(self.jar, function(ok, reason)
+                confirming = false
+                if gen ~= self.generation then return end
+                if not ok then self:_retry(reason or _("登录失败")); return end
+                self:cancel()
+                local dialog = self.dialog
                 self.dialog = nil
-            end
-            self.on_user()
+                if dialog then dialog:close() end
+                self.on_user()
+            end)
+            if confirming then self.job = confirm end
             return
         end
         if kind ~= "wait" then
@@ -85,19 +90,25 @@ function QRLogin:_poll(gen, oauth, code, polls)
         require("ui/uimanager"):scheduleIn(POLL_INTERVAL, function()
             if gen == self.generation then self:_poll(gen, oauth, code, polls + 1) end
         end)
-    end)
+    end, self.jar)
+    if pending then self.job = job end
 end
 
 function QRLogin:start()
     self:cancel()
     local gen = self.generation
-    self.job = Client.accessTokenAsync(function(oauth, err)
+    self.jar = {}
+    local pending = true
+    local initial = Client.accessTokenAsync(function(oauth, err)
+        pending = false
         if gen ~= self.generation then return end
         if not oauth then
             self:toast(err or _("获取二维码失败"))
             return
         end
-        self.job = Client.qrCreateAsync(oauth, function(code, reason)
+        local creating = true
+        local created = Client.qrCreateAsync(oauth, function(code, reason)
+            creating = false
             if gen ~= self.generation then return end
             self.job = nil
             if not code then
@@ -120,8 +131,10 @@ function QRLogin:start()
             self.dialog = dialog
             dialog:show()
             self:_poll(gen, oauth, code, 1)
-        end)
-    end)
+        end, self.jar)
+        if creating then self.job = created end
+    end, self.jar)
+    if pending then self.job = initial end
 end
 
 return QRLogin
