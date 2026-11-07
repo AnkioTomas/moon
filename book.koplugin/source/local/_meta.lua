@@ -10,6 +10,7 @@ return {
     id = "local",
     name = _("本地书籍"),
     type = "book",
-    description = _("设备与 WebDAV 上的电子书"),
-    abilities = { _("扫描本地文件夹"), _("WebDAV 同步"), _("导入书籍"), _("进度、笔记与统计") },
+    description = _("扫描本地书籍目录，或同步 WebDAV 书库"),
+    abilities = { _("本地扫描、书目编辑与元数据补全"), _("WebDAV 书架和书籍文件同步"),
+        _("书城下载导入"), _("WebDAV 进度、笔记与统计同步") },
 }

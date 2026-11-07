@@ -10,6 +10,6 @@ return {
     id = "legado",
     name = _("开源阅读"),
     type = "chapter",
-    description = _("连接开源阅读（Legado）服务"),
-    abilities = { _("书架同步"), _("进度同步"), _("删除书籍") },
+    description = _("连接阅读 App、reader3 或轻阅读服务"),
+    abilities = { _("书架与章节正文"), _("目录及整本缓存"), _("进度同步"), _("从服务端书架删除") },
 }
