@@ -34,3 +34,12 @@ Device.openLink = function() return false end
 local failure = QR:new{ text = qr.text }
 Kit.buttons(failure)[1]:onTapThemeButton()
 Assert.eq(Kit.shown[#Kit.shown].text, "无法打开浏览器，请扫码或手动输入网址")
+
+local refreshed = false
+local image = QR:new{
+    image = {}, close_on_tap = false,
+    actions = { { text = "刷新", callback = function() refreshed = true end } },
+}
+Assert.len(Kit.buttons(image), 1, "官方二维码图片不生成网址或本机浏览器按钮")
+Kit.buttons(image)[1]:onTapThemeButton()
+Assert.is_true(refreshed)
