@@ -558,7 +558,7 @@ local function chipLayout(w, groups, on_pick)
         end
         local dropdown
         dropdown = Button:new{
-            text = _("更多"), icon = "arrow_drop_down", trailing = true, size = "small", variant = "ghost",
+            text = group.title or _("更多"), icon = "arrow_drop_down", trailing = true, size = "small", variant = "ghost",
             callback = function()
                 local items = {}
                 for i, chip in ipairs(group.chips) do

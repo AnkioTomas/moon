@@ -59,8 +59,11 @@ local _ = require("gettext")
 ---@field ok_text string|nil
 ---@field cancel_text string|nil
 ---@field callback fun(...: string)|nil
+---@field validate (fun(...: string): boolean)|nil 返回 false 时保留输入与键盘
+---@field keep_open boolean|nil 异步提交时由调用方成功后关窗
 ---@field cancel_callback fun()|nil
 ---@field actions { text: string, callback: fun(...: string) }[]|nil 额外按钮，不关窗
+---@field header_widget table|nil 字段上方的内容，由弹窗释放
 local Input = Modal:extend{
     -- 键盘是压在上面的独立窗口，键盘没接的点按 UIManager 只转给 is_always_active 的下层窗口（同 InputDialog）。
     is_always_active = true,
@@ -82,6 +85,10 @@ function Input:init()
     self.inputs, self.frames = {}, {}
     self.focus_idx = 1
     local body = VerticalGroup:new{ align = "left" }
+    if self.header_widget then
+        body[#body + 1] = self.header_widget
+        body[#body + 1] = VerticalSpan:new{ width = Theme.px(t.space.md) }
+    end
     for i, field in ipairs(self.fields) do
         if i > 1 then body[#body + 1] = VerticalSpan:new{ width = Theme.px(t.space.md) } end
         if field.label then
@@ -218,7 +225,8 @@ end
 
 function Input:confirm()
     local texts = self:texts()
-    self:close()
+    if self.validate and not self.validate(unpack(texts)) then return end
+    if not self.keep_open then self:close() end
     if self.callback then self.callback(unpack(texts)) end
 end
 

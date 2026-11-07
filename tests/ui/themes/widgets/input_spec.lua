@@ -10,6 +10,42 @@ Kit.install("soft")
 
 local Input = require("ui.themes.widgets.input")
 
+local plain = Input:new{ fields = { { text = "" } } }
+local header = require("ui/widget/verticalspan"):new{ width = 64 }
+local with_header = Input:new{ header_widget = header, fields = { { text = "" } } }
+Assert.len(Kit.find(with_header, function(w) return w == header end), 1)
+Assert.is_true(with_header.field_bottoms[1] >= plain.field_bottoms[1] + 64,
+    "验证码图片占据正文高度，输入框与键盘避让必须计入它")
+with_header:onShow()
+Assert.is_true(with_header.panel_y + with_header.field_bottoms[1]
+    <= Kit.SCREEN_H - with_header.inputs[1]:getKeyboardDimen().h)
+
+local accepted
+local validated = Input:new{
+    fields = { { text = "" } },
+    validate = function(value) return value == "1234" end,
+    callback = function(value) accepted = value end,
+}
+validated:onShow()
+local previous_closed = #Kit.closed
+validated:confirm()
+Assert.eq(#Kit.closed, previous_closed)
+Assert.is_nil(accepted)
+Assert.is_true(validated.inputs[1].kb, "校验失败保留输入与键盘")
+validated.inputs[1].text = "1234"
+validated:confirm()
+Assert.eq(accepted, "1234")
+Assert.is_false(validated.inputs[1].kb)
+local asynchronous = Input:new{
+    fields = { { text = "验证码" } }, keep_open = true,
+    callback = function(value) accepted = value end,
+}
+previous_closed = #Kit.closed
+asynchronous:confirm()
+Assert.eq(accepted, "验证码")
+Assert.eq(#Kit.closed, previous_closed, "异步验证失败或取消时仍能继续编辑原字段")
+asynchronous:close()
+
 local got, cancelled
 local dialog = Input:new{
     title = "登录",
