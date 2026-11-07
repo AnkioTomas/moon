@@ -62,7 +62,9 @@ local function fillDetails(rows, cb)
         local cover = row.local_book and row.local_book.cover
         if cover and cover ~= "" then nextRow(); return end
         row.local_book = nil
-        job = Client.detailAsync(row.id, function(info, err)
+        local pending = true
+        local initial = Client.detailAsync(row.id, function(info, err)
+            pending = false
             if cancelled then return end
             if info then
                 row.info = info
@@ -71,6 +73,7 @@ local function fillDetails(rows, cb)
             end
             nextRow()
         end)
+        if pending then job = initial end
     end
     nextRow()
     return { cancel = function()
@@ -129,16 +132,21 @@ function Source:searchAsync(keyword, cb)
     end)
 end
 
---- 书城浏览：榜单 / 频道两行 chip，节点是「榜单序号:频道序号」（从 1 起），缺省月榜言情。
+--- 书城浏览：默认官网分类库；兼容「榜单序号:频道序号」旧节点。
 --- 榜单名和频道来自书城首页；书按页拉到 opts.limit。
 ---@param opts { node?: string, limit?: integer }
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:browseAsync(opts, cb)
+    opts = opts or {}
+    if not opts.node or opts.node:sub(1, 5) == "cate:" then
+        return require("source.jjwxc.browse").run(opts, cb)
+    end
     local handle = {}
     -- 首页缓存命中时回调是下一拍，不会在赋值前跑完；这里仍按同步回调记步，避免把已换上的翻页句柄盖掉。
     local step = 0
     local function load(ranks)
+        if handle.cancelled then return end
         step = step + 1
         if #ranks == 0 then cb(nil, _("晋江榜单无法解析")); return end
         local rank_s, ch_s = (opts.node or "1:1"):match("^(%d+):(%d+)$")
@@ -163,14 +171,17 @@ function Source:browseAsync(opts, cb)
                 local books = Mapper.rankBooks(wire)
                 done(books, nil, #books >= page_size)
             end)
-        end, opts.limit or 60, { Browse.group(rank_chips, node), Browse.group(channel_chips, node) }, cb)
+        end, opts.limit or 60, { Browse.group(rank_chips, node), Browse.group(channel_chips, node),
+            { title = _("分类书库"), chips = { { id = "cate:0:0:0:0:0:0:2", title = _("分类书库") } } } }, cb)
     end
     local first = Client.storeHomeAsync(function(wire, err)
+        if handle.cancelled then return end
         if not wire then cb(nil, err); return end
         load(Mapper.storeRanks(wire))
     end)
     if step == 0 then handle.inner = first end
     function handle.cancel()
+        handle.cancelled = true
         if handle.inner then handle.inner:cancel() end
     end
     return handle
@@ -212,7 +223,9 @@ local function probePaid(self, identity, toc)
             if changed then Toc.put(self.id, identity.stable_id, toc) end
             return
         end
-        job = Web.paidAsync(identity.stable_id, chapter.uid, function(paid)
+        local pending = true
+        local initial = Web.paidAsync(identity.stable_id, chapter.uid, function(paid)
+            pending = false
             if cancelled then return end
             if paid == nil then
                 pos = #todo
@@ -221,6 +234,7 @@ local function probePaid(self, identity, toc)
             end
             nextChapter()
         end)
+        if pending then job = initial end
     end
     self.probe = probe
     nextChapter()
@@ -271,24 +285,31 @@ Source.refreshTocAsync = fetchTocAsync
 
 function Source:openBookAsync(identity, opts, cb)
     local Chapter = require("source.chapter")
+    local locate = require("book.review_locate")
+    local reviews = self:paragraphReviewsEnabled()
     local open = opts and opts.chapter_idx and Chapter.openAsync or Chapter.openWithUi
     return open(self, identity, identity.book, opts, {
         loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
-        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, true),
+        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, true, reviews and locate.prepareChapterEnd or nil),
+        reuse = reviews and locate.reuseChapterEnd or nil,
     }, cb)
 end
 
 function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
     local Chapter = require("source.chapter")
+    local locate = require("book.review_locate")
+    local reviews = self:paragraphReviewsEnabled()
     return Chapter.prefetchAsync(identity, identity.book, toc, from_idx, count, {
-        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, false),
+        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, false, reviews and locate.prepareChapterEnd or nil),
+        reuse = reviews and locate.reuseChapterEnd or nil,
         interval_seconds = FETCH_INTERVAL,
     }, cb)
 end
 
 function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
     local Chapter = require("source.chapter")
-    return Chapter.cacheAllAsync(self, identity, Chapter.vipFetcher(self, Client.contentAsync, false), on_progress, cb,
+    local prepare = self:paragraphReviewsEnabled() and require("book.review_locate").prepareChapterEnd or nil
+    return Chapter.cacheAllAsync(self, identity, Chapter.vipFetcher(self, Client.contentAsync, false, prepare), on_progress, cb,
         FETCH_INTERVAL, range)
 end
 
@@ -302,13 +323,39 @@ end
 ---@param identity BookIdentity
 ---@param cb fun(hotspots: JjwxcReviewHotspot[]|nil, err: string|nil)
 ---@return { cancel: fun() }
-function Source:paragraphHotspotsAsync(identity, cb)
+local function hotspotsAsync(self, identity, cb)
     local withUid = require("source.with_chapter_uid")
     return ReviewCache.hotspotsAsync(identity, function(done)
         return withUid.run(self, identity, _("缺少晋江章节位置"), function(uid, finish)
             return require("source.jjwxc.reviews").hotspotsAsync(identity.stable_id, uid, finish)
         end, done)
     end, cb)
+end
+
+function Source:paragraphHotspotsAsync(identity, cb)
+    return hotspotsAsync(self, identity, function(list, err)
+        if not list then cb(nil, err); return end
+        local paragraphs = {}
+        for _idx, spot in ipairs(list) do
+            if tonumber(spot.range) > 0 then paragraphs[#paragraphs + 1] = spot end
+        end
+        cb(paragraphs)
+    end)
+end
+
+function Source:chapterReviewHotspotsAsync(identity, cb)
+    return hotspotsAsync(self, identity, function(list, err)
+        if not list then cb(nil, err); return end
+        local ending = {}
+        for _idx, spot in ipairs(list) do
+            if spot.range == "-2" then
+                ending[#ending + 1] = { range = spot.range, text = _("本章讨论"), total = spot.total,
+                    badge = tostring(spot.total), heading = _("章节评论"),
+                    anchor = require("book.review_locate").CHAPTER_ANCHOR }
+            end
+        end
+        cb(ending)
+    end)
 end
 
 --- 段落按段末文字定位到章节 HTML（子进程里跑，不碰实例状态）。
@@ -327,11 +374,21 @@ end
 ---@return { cancel: fun() }
 function Source:paragraphReviewPageAsync(identity, range, max_idx, cb)
     local withUid = require("source.with_chapter_uid")
+    local Reviews = require("source.jjwxc.reviews")
+    local Text = require("utils.text")
     return ReviewCache.pageAsync(identity, range, max_idx, function(done)
         return withUid.run(self, identity, _("缺少晋江章节位置"), function(uid, finish)
-            return require("source.jjwxc.reviews").pageAsync(identity.stable_id, uid, tonumber(range), max_idx, finish)
+            return Reviews.pageAsync(identity.stable_id, uid, tonumber(range), max_idx, finish)
         end, done)
-    end, cb)
+    end, function(page, err)
+        if page then
+            for _idx, item in ipairs(page.items) do
+                item.content = Text.stripHtml(item.content)
+                if not item.inline_images then item.inline_images = Reviews.inlineImages(item.content) end
+            end
+        end
+        cb(page, err)
+    end)
 end
 
 return Jjwxc

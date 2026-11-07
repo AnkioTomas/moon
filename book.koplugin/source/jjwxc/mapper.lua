@@ -124,6 +124,46 @@ function Mapper.rankBooks(wire)
     return books
 end
 
+--- 分类页表单与结果；缺分页信息不是空书库，而是响应格式错误。
+---@param html string
+---@return table|nil, string|nil
+function Mapper.category(html)
+    local filters = {}
+    for label in html:gmatch("<label[^>]*>(.-)</label>") do
+        local name = label:match("name%s*=%s*['\"]([%w_]+)['\"]")
+        local key, value
+        if name then key, value = name:match("^(%a+)(%d+)$") end
+        if key and value then
+            filters[key] = filters[key] or {}
+            filters[key][#filters[key] + 1] = { id = value, title = Text.stripHtml(label) }
+        end
+    end
+    for tag, body in html:gmatch("(<select[^>]*>)(.-)</select>") do
+        local key = tag:match("name%s*=%s*['\"]([%w_]+)['\"]")
+        if key then
+            local options = {}
+            for value, text in body:gmatch("<option[^>]-value%s*=%s*['\"](%d+)['\"][^>]*>([^<]*)") do
+                options[#options + 1] = { id = value, title = Text.stripHtml(text) }
+            end
+            filters[key] = options
+        end
+    end
+    local pages, page = html:match("共(%d+)页，当前第(%d+)页")
+    local body = html:match('<table[^>]-width="100%%"[^>]*>(.-)</table>')
+    if not pages or not page or not body then return nil, require("gettext")("晋江分类响应无效") end
+    local books, seen = {}, {}
+    for row in body:gmatch("<tr[^>]*>(.-)</tr>") do
+        local id, title = row:match('<a[^>]-href="/book2/(%d+)"[^>]*>(.-)</a>')
+        if id and not seen[id] then
+            seen[id] = true
+            books[#books + 1] = { source_id = SOURCE_ID, stable_id = id, title = Text.stripHtml(title),
+                cover = "https://i9-static.jjwxc.net/novelimage.php?novelid=" .. id,
+                authors = Text.stripHtml(row:match('<a[^>]-href="/wapauthor/%d+"[^>]*>(.-)</a>') or "") }
+        end
+    end
+    return { filters = filters, books = books, pages = tonumber(pages), page = tonumber(page) }
+end
+
 --- 收藏页 HTML → { id, title, author }[]；找不到收藏列表（页面改版 / 不是收藏页）返回 nil。
 --- 页面上的书名被截断，只作详情拉不到时的兜底。
 ---@param html string

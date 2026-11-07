@@ -53,6 +53,7 @@ local function get(path, cookie, cb)
     return Request.get(HOST .. path, {
         headers = { Cookie = cookie, ["User-Agent"] = UA },
         timeout = require("http.timeout").net(0.5),
+        cache_ttl = 0,
     }, function(raw, err, res)
         if not raw then
             local location = res and tonumber(res.code) == 302 and Request.header(res, "Location")
@@ -99,7 +100,11 @@ function Web.shelfAsync(cb)
     local cookie = Web.cookie()
     local rows, seen, handle = {}, {}, {}
     local function page(n)
-        handle.inner = get("/my/fav?p=" .. n, cookie, function(html, err)
+        local pending = true
+        local initial = get("/my/fav?p=" .. n, cookie, function(html, err)
+            pending = false
+            if handle.cancelled then return end
+            if cookie ~= Web.cookie() then cb(nil, _("账号已变化，请重新登录")); return end
             if not html then cb(nil, err); return end
             local batch = Mapper.favRows(html)
             if not batch then cb(nil, _("晋江收藏页无法解析")); return end
@@ -112,13 +117,16 @@ function Web.shelfAsync(cb)
                     added = added + 1
                 end
             end
-            if added == 0 then cb(rows); return end
+            if #batch == 0 then cb(rows); return end
+            if added == 0 then cb(nil, _("晋江收藏页无法解析")); return end
             if n >= MAX_FAV_PAGES then cb(nil, _("晋江收藏页过多，没有同步完")); return end
             page(n + 1)
         end)
+        if pending then handle.inner = initial end
     end
     page(1)
     function handle.cancel()
+        handle.cancelled = true
         if handle.inner then handle.inner:cancel() end
     end
     return handle
@@ -131,9 +139,26 @@ end
 function Web.favRemoveAsync(novel_id, cb)
     local cookie = Web.cookie()
     if not cookie then return require("source.base").defer(cb, nil, _("未登录晋江")) end
-    return get("/my/delBookSure?novelid=" .. novel_id, cookie, function(html, err)
-        cb(html and true or nil, err)
+    local cancelled, job, pending = false, nil, true
+    local initial = get("/my/delBookSure?novelid=" .. novel_id, cookie, function(html, err)
+        pending = false
+        if cancelled then return end
+        if not html then cb(nil, err); return end
+        if cookie ~= Web.cookie() then cb(nil, _("账号已变化，请重新登录")); return end
+        job = Web.shelfAsync(function(rows, reason)
+            if cancelled then return end
+            if not rows then cb(nil, reason); return end
+            for _idx, row in ipairs(rows) do
+                if row.id == novel_id then cb(nil, _("晋江没有确认取消收藏")); return end
+            end
+            cb(true)
+        end)
     end)
+    if pending then job = initial end
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
 end
 
 --- 这章 VIP 买了没有：true 已购、false 未购、nil 没问出来（未登录 / 网络 / Cookie 失效）。
@@ -159,9 +184,11 @@ end
 ---@return { cancel: fun() }
 local function decodeFont(text, font, cancelled, cb)
     local job
-    job = Request.get(FONT_URL:format(font), {
+    local pending = true
+    local initial = Request.get(FONT_URL:format(font), {
         timeout = require("http.timeout").net(0.5),
     }, function(ttf, font_err)
+        pending = false
         if cancelled() then return end
         if not ttf then cb(nil, font_err and tostring(font_err) or _("晋江 VIP 章节字体无法解析")); return end
         job = Job.run(function()
@@ -179,7 +206,8 @@ local function decodeFont(text, font, cancelled, cb)
             on_cancelled = function() end,
         })
     end)
-    return { cancel = function() job:cancel() end }
+    if pending then job = initial end
+    return { cancel = function() if job then job:cancel() end end }
 end
 
 --- VIP 章正文（纯文本，段落以换行分隔）：网页只有已购章节才有正文。
@@ -190,27 +218,27 @@ end
 function Web.contentAsync(novel_id, chapter_id, cb)
     local cancelled, job = false, nil
     local function isCancelled() return cancelled end
-    job = get("/vip/" .. novel_id .. "/" .. chapter_id, Web.cookie(), function(html, web_err, kind)
+    local pending = true
+    local initial = get("/vip/" .. novel_id .. "/" .. chapter_id, Web.cookie(), function(html, web_err, kind)
+        pending = false
         if cancelled then return end
         if not html then
             cb(nil, web_err or _("晋江 VIP 章节未购买"), kind and "unpaid" or nil)
             return
         end
         -- AES 解密与字体解析都是纯 Lua 重活，放子进程，免得卡 UI
-        job = Job.run(function() local text, why = Mapper.webContent(html); return { text = text, why = why } end, {
+        local decoding = true
+        local decoder = Job.run(function() local text, why = Mapper.webContent(html); return { text = text, why = why } end, {
             name = "jjwxc_vip",
             kind = "light",
             timeout = 60,
             on_done = function(res)
+                decoding = false
                 if cancelled then return end
                 local text = res.text
                 if not text then
                     if html:find('id="contentvars"', 1, true) then
-                        local scripts = {}
-                        for src in html:gmatch('<script[^>]-src="([^"]*)"') do scripts[#scripts + 1] = src end
-                        require("utils.log").warn("jjwxc vip decrypt failed", novel_id, chapter_id, res.why,
-                            "scripts", table.concat(scripts, " "),
-                            "contentvars", (html:match('id="contentvars".-</div>') or "none"):sub(1, 8000))
+                        require("utils.log").warn("jjwxc vip decrypt failed", novel_id, chapter_id, res.why)
                         cb(nil, _("晋江 VIP 章节解密失败"))
                     else
                         cb(nil, _("晋江 VIP 章节未购买"), "unpaid")
@@ -224,10 +252,12 @@ function Web.contentAsync(novel_id, chapter_id, cb)
             on_failed = function(err) if not cancelled then cb(nil, tostring(err)) end end,
             on_cancelled = function() end,
         })
+        if decoding then job = decoder end
     end)
+    if pending then job = initial end
     return { cancel = function()
         cancelled = true
-        job:cancel()
+        if job then job:cancel() end
     end }
 end
 

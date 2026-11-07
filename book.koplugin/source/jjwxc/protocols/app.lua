@@ -1,8 +1,7 @@
 --[[--
 晋江「App」协议：账号密码登录拿 token（android API）。
 
-账号、密码和 token 都存在源设置里：token 失效（接口回 1004「登入验证失败」）时用保存的账号密码静默重登，
-重登还要设备验证码才算登录过期，交给 Auth 弹登录。和网页 Cookie 协议（web.lua）互不相干；
+只保存账号与 token，不保存密码；token 失效时交给 Auth 提示重新登录。和网页 Cookie 协议（web.lua）互不相干；
 token 的请求头各接口不同，响应既可能是明文 JSON，也可能整包加密（密钥由响应头 accesskey / keystring 派生，见 decryptBody）。
 
 协议接口（protocols/init.lua 按设置选一个协议调用）：`available` / `shelfAsync` / `contentAsync`。
@@ -48,7 +47,13 @@ function Token.label() return _("App 账号") end
 
 ---@return string|nil
 function Token.get()
-    local token = require("utils.settings").getSource(SOURCE_ID).token
+    local Settings = require("utils.settings")
+    local cfg = Settings.getSource(SOURCE_ID)
+    if cfg.password ~= nil then
+        cfg.password = nil
+        Settings.saveSource(SOURCE_ID)
+    end
+    local token = cfg.token
     return type(token) == "string" and token ~= "" and token or nil
 end
 
@@ -63,14 +68,14 @@ function Token.commentAuth()
     return token and "&token=" .. Text.urlEncode(token) or "", {}
 end
 
---- 登录成功后保存，重登与书架都靠它。
+--- 登录成功后保存账号与 token。
 ---@param account string
----@param password string
+---@param _password string 仅为旧调用签名保留，不落盘
 ---@param token string
-function Token.save(account, password, token)
+function Token.save(account, _password, token)
     local Settings = require("utils.settings")
     local cfg = Settings.getSource(SOURCE_ID)
-    cfg.account, cfg.password, cfg.token = account, password, token
+    cfg.account, cfg.password, cfg.token = account, nil, token
     Settings.saveSource(SOURCE_ID)
 end
 
@@ -108,35 +113,45 @@ local function get(path, params, headers, cb)
     local query = {}
     for key, value in pairs(params) do query[#query + 1] = key .. "=" .. tostring(value) end
     table.sort(query)
-    return Request.get(APP .. path .. "?" .. table.concat(query, "&"), {
+    local cancelled, job, pending = false, nil, true
+    local initial = Request.get(APP .. path .. "?" .. table.concat(query, "&"), {
         accept = "application/json",
         headers = headers,
         timeout = require("http.timeout").net(1),
+        cache_ttl = 0,
     }, function(raw, err, res)
+        pending = false
+        if cancelled then return end
         if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
         local ok, wire = pcall(JSON.decode, raw)
         if ok and type(wire) == "table" then cb(wire); return end
         local accesskey, keystring = Request.header(res, "accesskey"), Request.header(res, "keystring")
         if not (accesskey and keystring and keystring ~= "") then
-            require("utils.log").warn("jjwxc invalid response", path, #raw, raw:sub(1, 300))
+            require("utils.log").warn("jjwxc invalid response", path, #raw)
             cb(nil, _("响应无效"))
             return
         end
         -- DES 是纯 Lua 重活，放子进程
-        Job.run(function() return { plain = Token.decryptBody(raw, accesskey, keystring) } end, {
+        job = Job.run(function() return { plain = Token.decryptBody(raw, accesskey, keystring) } end, {
             name = "jjwxc_body",
             kind = "light",
             timeout = 60,
             on_done = function(r)
+                if cancelled then return end
                 local ok2, wire2 = pcall(JSON.decode, r.plain or "")
                 if ok2 and type(wire2) == "table" then cb(wire2); return end
                 require("utils.log").warn("jjwxc decrypt body failed", path, #raw)
                 cb(nil, _("响应无效"))
             end,
-            on_failed = function(e) cb(nil, tostring(e)) end,
+            on_failed = function(e) if not cancelled then cb(nil, tostring(e)) end end,
             on_cancelled = function() end,
         })
     end)
+    if pending then job = initial end
+    return { cancel = function()
+        cancelled = true
+        if job then job:cancel() end
+    end }
 end
 
 ---@param value any
@@ -215,41 +230,23 @@ function Token.sendCodeAsync(account, checktype, cb)
     end)
 end
 
-local waiters
-
---- 用保存的账号密码重登（同一时刻只发一个请求）。要设备验证则登录过期，交给 Auth 弹登录。
----@param cb fun(token: string|nil, err: string|nil)
-local function relogin(cb)
-    if waiters then waiters[#waiters + 1] = cb; return end
-    local cfg = require("utils.settings").getSource(SOURCE_ID)
-    local account, password = cfg.account, cfg.password
-    if not (account and password) then cb(nil, require("source.auth").expire(SOURCE_ID, require("source.jjwxc.setting").expired())); return end
-    waiters = { cb }
-    Token.loginAsync(account, password, nil, function(token, err, kind)
-        if token then Token.save(account, password, token) end
-        if kind == "verify" then err = require("source.auth").expire(SOURCE_ID, require("source.jjwxc.setting").expired()) end
-        local list = waiters
-        waiters = nil
-        for _idx, fn in ipairs(list) do fn(token, err) end
-    end)
-end
-
---- 带 token 的书架（App 增量收藏接口），token 被拒就重登一次再取。
+--- 带 token 的书架；旧请求不能让新登录态过期。
 ---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Token.shelfAsync(cb)
     ---@type boolean, CancelHandle|nil
     local cancelled, job = false, nil
     local function fetch(token, retry)
-        job = get("/incrementFavorite", { versionCode = 185, token = Text.urlEncode(token), backupTime = 1041350400, order = 1 },
+        local pending = true
+        local initial = get("/incrementFavorite", { versionCode = 185, token = Text.urlEncode(token), backupTime = 1041350400, order = 1 },
             ACCOUNT_HEADERS, function(wire, err)
+                pending = false
                 if cancelled then return end
                 if not wire then cb(nil, err); return end
                 if tonumber(wire.code) == LOGIN_CODE and retry then
-                    relogin(function(fresh, rerr)
-                        if cancelled then return end
-                        if fresh then fetch(fresh, false) else cb(nil, rerr) end
-                    end)
+                    local fresh = Token.get()
+                    if fresh and fresh ~= token then fetch(fresh, false)
+                    else cb(nil, require("source.auth").expire(SOURCE_ID, require("source.jjwxc.setting").expired())) end
                     return
                 end
                 local list = wire.addData
@@ -257,6 +254,7 @@ function Token.shelfAsync(cb)
                 require("source.auth").ok(SOURCE_ID)
                 cb(Mapper.tokenFavRows(list))
             end)
+        if pending then job = initial end
     end
     fetch(Token.get(), true)
     return { cancel = function()
@@ -280,7 +278,7 @@ function Token.chapterText(content, encrypt_type)
 end
 
 --- 带 token 取章节正文：已购 VIP 章的响应整包加密、content 又是 DES/Base64 密文，解密放子进程。
---- token 无效（1004）重登一次再取；没买（1025）直接回 unpaid。
+--- token 无效（1004）提示重新登录；没买（1025）直接回 unpaid。
 --- CDN 偶发给出「头体自洽但整包 DES 解不开」的坏包（模拟器并行压测约千分之一到百分之二），
 --- 失败落成「响应无效」/「已购章节解密失败」且不落盘，看起来像隔一章才能看：整次请求重试一次。
 ---@param novel_id string
@@ -291,9 +289,11 @@ function Token.contentAsync(novel_id, chapter_id, cb)
     ---@type boolean, CancelHandle|nil
     local cancelled, job = false, nil
     local function fetch(token, retry_login, retry_decrypt)
-        job = get("/chapterContent", {
+        local pending = true
+        local initial = get("/chapterContent", {
             novelId = novel_id, chapterId = chapter_id, versionCode = 381, token = Text.urlEncode(token),
         }, CONTENT_HEADERS, function(wire, err)
+            pending = false
             if cancelled then return end
             if not wire then
                 if retry_decrypt and err == _("响应无效") then
@@ -308,10 +308,9 @@ function Token.contentAsync(novel_id, chapter_id, cb)
             local code = tonumber(wire.code)
             if code == LOGIN_CODE or code == UNPAID_CODE or type(data.content) ~= "string" or data.content == "" then
                 if code == LOGIN_CODE and retry_login then
-                    relogin(function(fresh, rerr)
-                        if cancelled then return end
-                        if fresh then fetch(fresh, false, retry_decrypt) else cb(nil, rerr) end
-                    end)
+                    local fresh = Token.get()
+                    if fresh and fresh ~= token then fetch(fresh, false, retry_decrypt)
+                    else cb(nil, require("source.auth").expire(SOURCE_ID, require("source.jjwxc.setting").expired())) end
                     return
                 end
                 cb(nil, wire.message or _("晋江章节内容为空"), code == UNPAID_CODE and "unpaid" or nil)
@@ -319,13 +318,15 @@ function Token.contentAsync(novel_id, chapter_id, cb)
             end
             local encrypt_type = data.encryptType
             local content_len = #data.content
-            job = Job.run(function()
+            local decoding = true
+            local decoder = Job.run(function()
                 return { text = Token.chapterText(data.content, encrypt_type) }
             end, {
                 name = "jjwxc_token_content",
                 kind = "light",
                 timeout = 60,
                 on_done = function(res)
+                    decoding = false
                     if cancelled then return end
                     if res.text then cb(res.text); return end
                     require("utils.log").warn("jjwxc content DES failed", novel_id, chapter_id,
@@ -339,7 +340,9 @@ function Token.contentAsync(novel_id, chapter_id, cb)
                 on_failed = function(e) if not cancelled then cb(nil, tostring(e)) end end,
                 on_cancelled = function() end,
             })
+            if decoding then job = decoder end
         end)
+        if pending then job = initial end
     end
     fetch(Token.get(), true, true)
     return { cancel = function()

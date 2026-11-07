@@ -4,7 +4,7 @@
 晋江手机网页的登录要过数美验证，墨水屏上做不了；登录协议有两套（protocols/web.lua、protocols/app.lua），只用其中一个：
 1. 网页 Cookie：远程管理里的「浏览器登录」（浏览器扩展交 Cookie），或在电脑浏览器登录后把 Cookie 请求头粘贴进来，
    先拉一次收藏页校验，通过才保存。能同步收藏、取消收藏、读已购 VIP 章。
-2. App 账号：设备上直接输账号密码（新设备要手机 / 邮箱验证码），保存账号密码与 token，token 失效自动重登。
+2. App 账号：设备上直接输账号密码（新设备要手机 / 邮箱验证码），只保存账号与 token，token 失效后重新登录。
    能同步书架、读已购 VIP 章。
 登录成功即切到该协议；两套都登录过时可在设置里改用哪一个。
 
@@ -39,9 +39,20 @@ local SPEC = {
     loggedIn = loggedIn,
     -- 拉一次收藏页校验 Cookie；通过即切到网页协议。
     checkAsync = function(cookie, cb)
-        require("source.jjwxc.protocols.web").favAsync(cookie, function(rows, err) cb(rows ~= nil, err) end)
+        return require("source.jjwxc.protocols.web").favAsync(cookie, function(rows, err) cb(rows ~= nil, err) end)
     end,
-    store = function(cfg, cookie) cfg.cookie, cfg.protocol = cookie, "web" end,
+    commit = function(cookie, _account, cb)
+        local Settings = require("utils.settings")
+        local cfg = Settings.getSource(SOURCE_ID)
+        if (cfg.cookie or cfg.token) and cfg.cookie ~= cookie then
+            return cb(false, _("无法确认旧账号，请先退出旧账号再登录"))
+        end
+        cfg.cookie, cfg.protocol = cookie, "web"
+        Settings.saveSource(SOURCE_ID)
+        require("source.auth").ok(SOURCE_ID)
+        require("source.registry").reload()
+        cb(true)
+    end,
     clear = function(cfg) cfg.cookie, cfg.token, cfg.account, cfg.password, cfg.protocol = nil, nil, nil, nil, nil end,
 }
 
@@ -62,7 +73,7 @@ Setting.browser = {
     check = "https://m.jjwxc.com/my/fav",
     icon = "https://m-static.jjwxc.net/images/wap/logo2.png",
     isAuthorized = function() return CookieLogin.authorized(SPEC) end,
-    apply = function(payload, cb) CookieLogin.save(SPEC, Setting.fromPayload(payload), cb) end,
+    apply = function(payload, cb) return CookieLogin.save(SPEC, Setting.fromPayload(payload), cb) end,
 }
 
 local showAccountLogin
@@ -124,10 +135,8 @@ local function showVerify(account, password, message)
     local checktype = "phone"
     local function send(kind)
         checktype = kind
-        require("ui/network/manager"):runWhenConnected(function()
-            Token.sendCodeAsync(account, kind, function(msg, err)
-                Toast:new{ text = msg or err, timeout = 3 }:show()
-            end)
+        Token.sendCodeAsync(account, kind, function(msg, err)
+            Toast:new{ text = msg or err, timeout = 3 }:show()
         end)
     end
     require("ui.themes.widgets.input"):new{
@@ -155,22 +164,38 @@ end
 ---@param verify { checktype: string, code: string }|nil
 function showLogin(account, password, verify)
     local Toast = require("ui.themes.widgets.toast")
-    require("ui/network/manager"):runWhenConnected(function()
-        local waiting = require("ui.themes.widgets.progress_dialog"):new{
-            title = _("晋江账号"), text = _("正在登录…"), dismissable = false,
-        }
-        waiting:show()
-        require("source.jjwxc.protocols.app").loginAsync(account, password, verify, function(token, err, kind)
-            waiting:close()
-            if token then
-                saveToken(account, password, token)
-                Toast:new{ text = _("登录成功"), timeout = 2 }:show()
-            elseif kind == "verify" then
-                showVerify(account, password, err)
-            else
-                Toast:new{ text = err, timeout = 3 }:show()
-            end
-        end)
+    if not require("ui/network/manager"):isConnected() then
+        Toast:new{ text = _("未联网"), timeout = 3 }:show()
+        return
+    end
+    local cfg = require("utils.settings").getSource(SOURCE_ID)
+    local previous_cookie, previous_token = cfg.cookie, cfg.token
+    if previous_cookie or previous_token then
+        Toast:new{ text = _("无法确认旧账号，请先退出旧账号再登录"), timeout = 3 }:show()
+        return
+    end
+    local cancelled, job = false, nil
+    local waiting = require("ui.themes.widgets.progress_dialog"):new{
+        title = _("晋江账号"), text = _("正在登录…"), dismissable = false,
+        on_cancel = function()
+            cancelled = true
+            if job then job.cancel() end
+        end,
+    }
+    waiting:show()
+    job = require("source.jjwxc.protocols.app").loginAsync(account, password, verify, function(token, err, kind)
+        if cancelled then return end
+        waiting:close()
+        if cfg.cookie ~= previous_cookie or cfg.token ~= previous_token then
+            Toast:new{ text = _("账号已变化，请重新登录"), timeout = 3 }:show()
+        elseif token then
+            saveToken(account, password, token)
+            Toast:new{ text = _("登录成功"), timeout = 2 }:show()
+        elseif kind == "verify" then
+            showVerify(account, password, err)
+        else
+            Toast:new{ text = err, timeout = 3 }:show()
+        end
     end)
 end
 
@@ -197,7 +222,8 @@ end
 --- 登录失效时的操作说明：账号密码和浏览器 Cookie 两条都写清。
 ---@return string
 function Setting.expired()
-    return _("你在晋江用的是哪种登录，就做哪种。") .. "\n\n"
+    return _("无法确认旧账号，请先退出旧账号再登录") .. "\n\n"
+        .. _("你在晋江用的是哪种登录，就做哪种。") .. "\n\n"
         .. _("账号和密码：点这个提示上的「重新登录」。没有这个按钮的话，打开「设置 → 书库 → 账号 → 晋江文学城 → 晋江账号」。填笔名、邮箱或手机号，再填密码，点「登录」。要验证码就点「发到手机」或「发到邮箱」，把验证码填进去，再点「验证并登录」。")
         .. "\n\n" .. require("source.cookie_login").relogin(_("晋江文学城"), "https://m.jjwxc.com/my/login")
         .. "\n\n" .. _("不想装扩展、平时用的是网页 Cookie：打开「设置 → 书库 → 账号 → 晋江文学城 → 晋江账号」，点「用 Cookie 登录」。Cookie 这样复制：电脑登录后按 F12，点「网络」，刷新，点任意一条请求，复制「请求标头」里的整段 Cookie，贴进去点「登录」。")
