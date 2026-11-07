@@ -664,7 +664,12 @@ do
     Assert.eq(captured.progress, 100)
     local BookDB = require("book.books_db")
     local orig_book = BookDB.get
-    BookDB.get = function() return { meta = { weread_pay = 2, weread_ended = false } } end
+    BookDB.get = function()
+        return { meta = {
+            weread_ended = true,
+            source = { wechat = { pay_type = 2, ended = false } },
+        } }
+    end
     Assert.is_true(put({ fraction = 1, extra = UID }))
     Assert.eq(captured.progress, 99, "未完结连载的书架进度封顶 99")
     Assert.eq(captured.current_progress, 100)
@@ -673,6 +678,9 @@ do
     require("support.stubs").flush()
     Assert.is_true(serial_done)
     Assert.eq(captured.progress, 99, "手动读完连载仍封顶，读完标记走 markstatus")
+    BookDB.get = function() return { meta = { weread_pay = 2, weread_ended = false } } end
+    Assert.is_true(put({ fraction = 1, extra = UID }))
+    Assert.eq(captured.progress, 99, "兼容已保存的旧版微信元数据")
     BookDB.get = orig_book
     require("source.toc").clear()
     -- stable_id 透传

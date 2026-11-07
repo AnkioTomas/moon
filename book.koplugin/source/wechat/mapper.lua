@@ -94,9 +94,13 @@ function Mapper.book(row)
             language = book.language,
             words = book.totalWords,
             rating = { score = (tonumber(book.newRating) or 0) / 100, by = "weread" },
-            weread_pay = tonumber(book.payType),
-            weread_type = tonumber(book.type),
-            weread_ended = book.finished ~= nil and (book.finished == 1 or book.finished == true) or nil,
+            source = {
+                [SOURCE_ID] = {
+                    pay_type = tonumber(book.payType),
+                    book_type = tonumber(book.type),
+                    ended = book.finished ~= nil and (book.finished == 1 or book.finished == true) or nil,
+                },
+            },
         },
     }
     local intro = book.intro or book.description or book.summary

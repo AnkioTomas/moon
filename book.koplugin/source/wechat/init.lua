@@ -941,9 +941,12 @@ end
 local function openSerial(source_id, stable_id)
     local book = require("book.books_db").get(source_id, stable_id)
     local meta = book and book.meta
-    local pay = tonumber(meta and meta.weread_pay) or 0
-    local typ = tonumber(meta and meta.weread_type)
-    local ended = meta and meta.weread_ended == true
+    local data = meta and meta.source and meta.source.wechat
+    local pay = tonumber(data and data.pay_type or meta and meta.weread_pay) or 0
+    local typ = tonumber(data and data.book_type or meta and meta.weread_type)
+    local ended = data and data.ended
+    if ended == nil then ended = meta and meta.weread_ended end
+    ended = ended == true
     local serial = math.floor(pay / 2) % 2 == 1 or typ == 3
         or tostring(stable_id):sub(1, 7) == "MP_WXS_"
     return serial and not ended

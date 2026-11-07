@@ -61,9 +61,9 @@ end
 do
     local b = Mapper.book({ bookId = "1", finished = 1, progress = 20, payType = 2, type = 0 })
     Assert.eq(b.percent, 20)
-    Assert.eq(b.meta.weread_pay, 2)
-    Assert.eq(b.meta.weread_type, 0)
-    Assert.eq(b.meta.weread_ended, true)
+    Assert.eq(b.meta.source.wechat.pay_type, 2)
+    Assert.eq(b.meta.source.wechat.book_type, 0)
+    Assert.eq(b.meta.source.wechat.ended, true)
 end
 
 do
@@ -332,9 +332,9 @@ end
 do
     local b = Mapper.book({ bookId = "1", finished = 1, progress = 20, payType = 2, type = 0 })
     Assert.eq(b.percent, 20)
-    Assert.eq(b.meta.weread_pay, 2)
-    Assert.eq(b.meta.weread_type, 0)
-    Assert.eq(b.meta.weread_ended, true)
+    Assert.eq(b.meta.source.wechat.pay_type, 2)
+    Assert.eq(b.meta.source.wechat.book_type, 0)
+    Assert.eq(b.meta.source.wechat.ended, true)
 end
 
 do
