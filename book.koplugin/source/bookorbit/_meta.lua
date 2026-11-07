@@ -10,6 +10,6 @@ return {
     id = "bookorbit",
     name = _("BookOrbit"),
     type = "book",
-    description = _("连接 BookOrbit 服务器"),
-    abilities = { _("书架同步"), _("进度同步"), _("笔记同步") },
+    description = _("连接 BookOrbit KOReader 接口"),
+    abilities = { _("书架与整本下载"), _("已下载书籍进度同步"), _("已下载书籍划线上传") },
 }

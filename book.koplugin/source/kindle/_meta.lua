@@ -10,6 +10,6 @@ return {
     id = "kindle",
     name = _("Kindle 书库"),
     type = "book",
-    description = _("读取 Kindle 设备自带的书库"),
-    abilities = { _("书架同步") },
+    description = _("读取 Kindle 系统书库，开书依赖 kindle.koplugin"),
+    abilities = { _("读取 Kindle 系统书架"), _("DRM／KFX 书籍交由 kindle.koplugin 打开") },
 }
