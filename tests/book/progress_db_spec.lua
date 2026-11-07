@@ -369,16 +369,17 @@ do
         { fraction = 0.5, chapter_idx = 2, page = 9 }))
     Assert.eq(calls[#calls].sql, "SELECT changes();")
     local q = calls[#calls - 1]
-    Assert.is_true(q.sql:find("UPDATE pending_progress SET sync_status=1, synced=?", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("UPDATE pending_progress SET sync_status=1, synced=?, extra=?", 1, true) ~= nil)
     Assert.is_true(q.sql:find("source_id=? AND stable_id=? AND updated_at=?", 1, true) ~= nil)
-    Assert.eq(q.argc, 4)
+    Assert.eq(q.argc, 5)
     local synced = require("json").decode(q.args[1])
     Assert.eq(synced.fraction, 0.5)
     Assert.eq(synced.chapter_idx, 2)
     Assert.is_nil(synced.page, "基准只存冲突判断用得到的坐标")
-    Assert.eq(q.args[2], "moon")
-    Assert.eq(q.args[3], "a'); DROP TABLE pending_progress;--")
-    Assert.eq(q.args[4], 1234)
+    Assert.is_nil(q.args[2], "没有源坐标就写成 NULL，不能留着旧偏移")
+    Assert.eq(q.args[3], "moon")
+    Assert.eq(q.args[4], "a'); DROP TABLE pending_progress;--")
+    Assert.eq(q.args[5], 1234)
     Assert.is_false(q.sql:find("DROP TABLE", 1, true) ~= nil)
 
     local before = #calls

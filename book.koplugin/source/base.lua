@@ -117,6 +117,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field text string|nil 纯文本（无 html 时由宿主转段落）
 ---@field file string|nil 源已落盘的章节文件（如漫画 CBZ）：宿主原样登记，不写 HTML，优先于其余字段
 ---@field document string|nil 完整 HTML/XHTML 文档：宿主原样落盘，不套外壳、不改内容（优先于 html/text）
+---@field mark string|nil 写在文档最前面的注释标记；旧缓存没有它就重新下载
 
 --- 统一数据源实例接口。
 --- IO 方法一律异步：XxxAsync(...) 经 cb(data, err) 回传，返回值是可取消 job 或 nil；
@@ -358,6 +359,7 @@ end
 --- 业务事件，调用方直接对属主源调用；基类空操作，源按需覆盖。事件清单：
 ---   page_changed      — 翻页（仅源身份书籍），payload = { identity, page, total_pages, percent, position }
 ---   chapter_changed   — 按章会话开读章节（含首章），payload = { identity, position }
+---   reading_started  — 打开阅读会话，payload = { identity, position }
 ---   reading_stopped   — 关书 / 休眠，payload = { identity }；阅读中起的定时任务在这里停
 ---   reading_resumed   — 阅读中唤醒，payload = { identity, position }；休眠停掉的定时任务在这里重启
 ---   book_meta_changed — 编辑 / 刮削已写库，payload = { identity, cover }（cover=封面换过）；
