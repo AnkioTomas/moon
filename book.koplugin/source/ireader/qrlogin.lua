@@ -40,8 +40,9 @@ end
 function QRLogin:_retry(text)
     self:cancel()
     if self.dialog then
-        self.dialog:close()
+        local previous = self.dialog
         self.dialog = nil
+        previous:close()
     end
     require("ui.themes.widgets.confirm"):new{
         text = text,
@@ -55,27 +56,39 @@ end
 ---@param polls integer
 function QRLogin:_poll(gen, code, polls)
     if gen ~= self.generation then return end
-    if polls > POLL_LIMIT then
+    if not require("ui/network/manager"):isConnected() then
+        self:_retry(_("网络不可用，请先连接 Wi-Fi"))
+        return
+    end
+    if polls > POLL_LIMIT or os.time() >= self.deadline then
         self:_retry(_("二维码已过期"))
         return
     end
-    self.job = Client.qrPollAsync(code, function(wire, _err)
+    local pending = true
+    local job = Client.qrPollAsync(code, function(wire, err)
+        pending = false
         if gen ~= self.generation then return end
         self.job = nil
         if not wire then
-            require("ui/uimanager"):scheduleIn(POLL_INTERVAL, function()
-                if gen == self.generation then self:_poll(gen, code, polls + 1) end
-            end)
+            self:_retry(err or _("请求失败"))
             return
         end
         local user, kind = Mapper.login(wire)
         if user then
-            self:cancel()
-            if self.dialog then
-                self.dialog:close()
-                self.dialog = nil
-            end
-            self.on_user(user)
+            local checking = true
+            local check = Client.checkSessionAsync(user, function(ok, reason)
+                checking = false
+                if gen ~= self.generation then return end
+                if not ok then self:_retry(reason or _("登录失败")); return end
+                self:cancel()
+                if self.dialog then
+                    local previous = self.dialog
+                    self.dialog = nil
+                    previous:close()
+                end
+                self.on_user(user)
+            end)
+            if checking then self.job = check end
             return
         end
         if kind ~= "wait" then
@@ -86,12 +99,25 @@ function QRLogin:_poll(gen, code, polls)
             if gen == self.generation then self:_poll(gen, code, polls + 1) end
         end)
     end)
+    if pending then self.job = job end
 end
 
 function QRLogin:start()
     self:cancel()
+    if self.dialog then
+        local previous = self.dialog
+        self.dialog = nil
+        previous:close()
+    end
+    if not require("ui/network/manager"):isConnected() then
+        self:toast(_("网络不可用，请先连接 Wi-Fi"))
+        return
+    end
     local gen = self.generation
-    self.job = Client.qrCreateAsync(function(code, err)
+    self.deadline = os.time() + POLL_INTERVAL * POLL_LIMIT
+    local pending = true
+    local job = Client.qrCreateAsync(function(code, err)
+        pending = false
         if gen ~= self.generation then return end
         self.job = nil
         if not code then
@@ -103,6 +129,7 @@ function QRLogin:start()
             title = _("掌阅扫码登录"),
             text = "web_login:" .. code,
             caption = _("用掌阅 App 扫一扫"),
+            actions = { { text = _("重新获取"), callback = function() self:start() end } },
             close_callback = function()
                 if self.dialog == dialog then
                     self.dialog = nil
@@ -115,6 +142,7 @@ function QRLogin:start()
         dialog:show()
         self:_poll(gen, code, 1)
     end)
+    if pending then self.job = job end
 end
 
 return QRLogin

@@ -5,7 +5,7 @@
 设备参数 p29/p2/p3/p4/p33 来自 PC 站运行时配置，每次请求都带，和网页 axios 拦截器一致。
 书城搜索与频道是手机站 m.zhangyue.com 的页面，不走这套 JSON。
 
-登录态是扫码回包里的 usr（账号名）和 zysid（session_id）。网页没有移出书架的接口。
+插件保存扫码回包里的 usr（账号名）和 zysid（session_id），不依赖浏览器 Cookie。
 
 @module source.ireader.client
 --]]
@@ -80,6 +80,8 @@ end
 ---@return any|nil
 ---@return string|nil
 local function bodyOf(wire, session)
+    local current = Client.session()
+    local active = session and current and current.usr == session.usr and current.zysid == session.zysid
     local code = tonumber(wire.code)
     if code == SUCCESS or (code == nil and type(wire.bookContent) == "string") then
         if type(wire.bookContent) == "string" then return wire end
@@ -88,12 +90,13 @@ local function bodyOf(wire, session)
             local ok, inner = pcall(JSON.decode, body)
             if ok and inner ~= nil then body = inner end
         end
-        if session then require("source.auth").ok(SOURCE_ID) end
+        if active then require("source.auth").ok(SOURCE_ID) end
         if body == nil then return true end
         return body
     end
-    if code == LOGIN_EXPIRED and session then
-        return nil, require("source.auth").expire(SOURCE_ID, _("掌阅登录已失效，请点「重新登录」，用掌阅 App 扫码。"))
+    if code == LOGIN_EXPIRED then
+        local message = _("掌阅登录已失效，请点「重新登录」，用掌阅 App 扫码。")
+        return nil, active and require("source.auth").expire(SOURCE_ID, message) or message
     end
     if code == 100001 and not session then return nil, _("未登录掌阅") end
     return nil, type(wire.msg) == "string" and wire.msg ~= "" and wire.msg or _("请求失败")
@@ -112,12 +115,13 @@ end
 
 ---@param path string
 ---@param params table|nil
+---@param session table|nil
 ---@param cb fun(body: any, err: string|nil)
 ---@return HttpJob
-function Client.get(path, params, cb)
-    local session = Client.session()
+local function get(path, params, session, cb)
     return Request.get(url(path, session, params), {
         accept = "application/json",
+        cache_ttl = 0,
         timeout = require("http.timeout").net(0.5),
     }, function(raw, err)
         local wire, reason = envelope(raw, err)
@@ -125,6 +129,10 @@ function Client.get(path, params, cb)
         local body, message = bodyOf(wire, session)
         cb(body, message)
     end)
+end
+
+function Client.get(path, params, cb)
+    return get(path, params, Client.session(), cb)
 end
 
 ---@param path string
@@ -164,7 +172,7 @@ end
 ---@param cb fun(code: string|nil, err: string|nil)
 ---@return HttpJob
 function Client.qrCreateAsync(cb)
-    return Client.get("/bookstore/open/user/qrcode/get", nil, function(body, err)
+    return get("/bookstore/open/user/qrcode/get", nil, nil, function(body, err)
         local code = Mapper.qrCode(body)
         if not code then cb(nil, err or _("获取二维码失败")); return end
         cb(code)
@@ -178,6 +186,7 @@ end
 function Client.qrPollAsync(code, cb)
     return Request.get(url("/bookstore/open/user/qrcode/result", nil, { code = code }), {
         accept = "application/json",
+        cache_ttl = 0,
         timeout = require("http.timeout").net(0.5),
     }, function(raw, err)
         local wire, reason = envelope(raw, err)
@@ -188,7 +197,20 @@ end
 ---@param cb fun(body: table|nil, err: string|nil)
 ---@return HttpJob
 function Client.shelfAsync(cb)
-    return Client.get("/bookstore/open/cloud/bookshelf/list", nil, cb)
+    return Client.get("/bookstore/open/cloud/bookshelf/list", nil, function(body, err)
+        if type(body) ~= "table" or type(body.data) ~= "table" then cb(nil, err or _("响应无效")); return end
+        cb(body)
+    end)
+end
+
+---@param session table
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return HttpJob
+function Client.checkSessionAsync(session, cb)
+    return get("/bookstore/open/cloud/bookshelf/list", nil, session, function(body, err)
+        if type(body) ~= "table" or type(body.data) ~= "table" then cb(nil, err or _("响应无效")); return end
+        cb(true)
+    end)
 end
 
 --- 新书插到未置顶书的最前：order 取当前最小再减一，和网页 insert 一致。
@@ -213,9 +235,16 @@ Client.shelfCursor = shelfCursor
 function Client.addAsync(stable_id, title, cb)
     local session = Client.session()
     if not session then return require("source.base").defer(cb, nil, _("未登录掌阅")) end
-    local handle = {}
-    handle.job = Client.shelfAsync(function(shelf, err)
-        if type(shelf) ~= "table" then cb(nil, err or _("请求失败")); return end
+    local handle, pending = {}, true
+    local initial = Client.shelfAsync(function(shelf, err)
+        pending = false
+        if handle.cancelled then return end
+        if not shelf then cb(nil, err); return end
+        local current = Client.session()
+        if not current or current.usr ~= session.usr or current.zysid ~= session.zysid then
+            cb(nil, _("登录状态已变化，请重试"))
+            return
+        end
         local order, version = shelfCursor(shelf.data, shelf.current_version)
         local data = JSON.encode({ {
             dtype = 0,
@@ -246,11 +275,15 @@ function Client.addAsync(stable_id, title, cb)
             content_type = content_type,
             timeout = require("http.timeout").net(0.5),
         }, function(raw, post_err)
+            if handle.cancelled then return end
             local wire, reason = envelope(raw, post_err)
             if not wire then cb(nil, reason); return end
             local code = tonumber(wire.code)
             if code == SUCCESS or code == HAS_IN_SHELF then
-                require("source.auth").ok(SOURCE_ID)
+                local active = Client.session()
+                if active and active.usr == session.usr and active.zysid == session.zysid then
+                    require("source.auth").ok(SOURCE_ID)
+                end
                 cb(true)
                 return
             end
@@ -258,7 +291,9 @@ function Client.addAsync(stable_id, title, cb)
             cb(nil, message)
         end)
     end)
+    if pending then handle.job = initial end
     return { cancel = function()
+        handle.cancelled = true
         if handle.job and handle.job.cancel then handle.job.cancel() end
     end }
 end
@@ -281,22 +316,37 @@ end
 function Client.chaptersAsync(book_id, cb)
     local handle, rows = {}, {}
     local function nextPage(page)
-        handle.job = Client.get("/bookstore/open/book/chapter/web/list", {
+        local pending = true
+        local initial = Client.get("/bookstore/open/book/chapter/web/list", {
             book_id = book_id, page = page, size = 50,
         }, function(body, err)
-            if type(body) ~= "table" then cb(nil, err); return end
-            local list = type(body.list) == "table" and body.list or {}
-            for _idx, row in ipairs(list) do rows[#rows + 1] = row end
-            local total = type(body.page) == "table" and tonumber(body.page.totalPage) or page
+            pending = false
+            if handle.cancelled then return end
+            if type(body) ~= "table" or type(body.list) ~= "table" then cb(nil, err or _("响应无效")); return end
+            local list = body.list
+            local total = type(body.page) == "table" and tonumber(body.page.totalPage)
+            if not total or total < page or total % 1 ~= 0 or (#list == 0 and page < total) then
+                cb(nil, _("响应无效"))
+                return
+            end
+            for _idx, row in ipairs(list) do
+                if type(row) ~= "table" or (row.id == nil and row.chapter_id == nil) then
+                    cb(nil, _("响应无效"))
+                    return
+                end
+                rows[#rows + 1] = row
+            end
             if page < total and #list > 0 then
                 nextPage(page + 1)
                 return
             end
             cb(rows)
         end)
+        if pending then handle.job = initial end
     end
     nextPage(1)
     return { cancel = function()
+        handle.cancelled = true
         if handle.job and handle.job.cancel then handle.job.cancel() end
     end }
 end
@@ -312,7 +362,7 @@ function Client.contentAsync(book_id, chapter_id, cb)
         chapter_id = chapter_id,
         is_whole_book = whole and "true" or "false",
     }, function(body, err)
-        if type(body) ~= "table" then cb(nil, err); return end
+        if type(body) ~= "table" then cb(nil, err or _("响应无效")); return end
         -- 免费章的 charging_info 是 JSON null，LuaJSON 解成函数，不能当成未购买。
         -- 未购买才是计费表，而且 is_buy 不为真。已购章也带这张表，正文仍在 bookContent。
         local info = body.charging_info
@@ -322,7 +372,8 @@ function Client.contentAsync(book_id, chapter_id, cb)
             cb(nil, _("响应无效"))
             return
         end
-        cb(body.bookContent)
+        local html = Mapper.content(body.bookContent)
+        cb(html, not html and _("掌阅正文含未知字码，请更新插件后重试") or nil)
     end)
 end
 
@@ -331,7 +382,7 @@ end
 ---@return HttpJob
 function Client.progressAsync(book_id, cb)
     return Client.get("/bookstore/open/cloud/book/getProgress", { bookIds = book_id }, function(body, err)
-        if type(body) ~= "table" then cb(nil, err); return end
+        if type(body) ~= "table" then cb(nil, err or _("响应无效")); return end
         local key = tostring(book_id)
         cb(body[key] or body[tonumber(key)])
     end)
@@ -389,6 +440,47 @@ function Client.channelAsync(channel_id, cb)
         headers = STORE_HEADERS,
         timeout = require("http.timeout").net(0.5),
     }, function(raw, err) cb(raw, err and tostring(err) or nil) end)
+end
+
+---@param parent string
+---@param category string
+---@param cb fun(page: table|nil, err: string|nil)
+---@return HttpJob
+function Client.categoriesAsync(parent, category, cb)
+    return Request.get(STORE .. "/category/" .. parent .. "/" .. category .. "?currentPage=1", {
+        accept = "text/html", headers = STORE_HEADERS,
+        timeout = require("http.timeout").net(0.5),
+    }, function(raw, err)
+        local page = raw and Mapper.categories(raw)
+        if not page then cb(nil, err and tostring(err) or _("响应无效")); return end
+        cb(page)
+    end)
+end
+
+---@param opts table
+---@param page integer
+---@param cb fun(books: Book[]|nil, err: string|nil, more: boolean|nil)
+---@return HttpJob
+function Client.catalogAsync(opts, page, cb)
+    return Request.get(STORE .. "/category/" .. opts.parent .. "/" .. opts.category .. "?" .. Text.formEncode({
+        isAjax = 1, currentPage = page, pageSize = 20, order = opts.order, status = opts.status,
+    }), {
+        accept = "application/json", headers = STORE_HEADERS,
+        timeout = require("http.timeout").net(0.5),
+    }, function(raw, err)
+        local wire, reason = envelope(raw, err)
+        if not wire then cb(nil, reason); return end
+        if tonumber(wire.code) ~= SUCCESS then cb(nil, wire.msg or _("请求失败")); return end
+        local body = wire.body
+        if type(wire.html) ~= "string" or type(body) ~= "table"
+            or tonumber(body.current_page) ~= page or not tonumber(body.page_total) then
+            cb(nil, _("响应无效"))
+            return
+        end
+        local books = Mapper.catalog(wire.html)
+        if #books == 0 and Text.trim(wire.html) ~= "" then cb(nil, _("响应无效")); return end
+        cb(books, nil, page < tonumber(body.page_total))
+    end)
 end
 
 return Client

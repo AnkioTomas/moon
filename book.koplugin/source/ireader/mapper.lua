@@ -10,6 +10,30 @@ local Mapper = {}
 
 local SOURCE_ID = "ireader"
 
+-- 官网 FZYouH_509R_V1.10.ttf 的二十个私用字形；两个连续区间，中间 A–F 没有字形。
+local CONTENT_CHARS = {}
+for first, chars in pairs({
+    [0xF0000] = "的一是了在有他我这们",
+    [0xF0010] = "来去说就事你对也还但",
+}) do
+    for idx, ch in ipairs(Text.chars(chars)) do
+        CONTENT_CHARS[Text.utf8char(first + idx - 1)] = ch
+    end
+end
+
+--- 官网用补充私用区 A 代替常用字；还原为普通 Unicode，不要求用户安装官网字体。
+---@param html string
+---@return string|nil 未知私用字码不能当作有效正文缓存
+function Mapper.content(html)
+    local unknown = false
+    local decoded = html:gsub("\243[\176-\191][\128-\191][\128-\191]", function(ch)
+        local plain = CONTENT_CHARS[ch]
+        if not plain then unknown = true end
+        return plain
+    end)
+    return not unknown and decoded or nil
+end
+
 --- 目录缓存格式。首章携带，变了就当缓存失效。
 Mapper.TOC_VERSION = 1
 
@@ -127,9 +151,52 @@ function Mapper.channel(html)
             local cover = html:sub(stop, math.min(#html, stop + 500)):match('src="(https://[^"]+)"')
             out[#out + 1] = book(id, title, nil, nil, cover)
         end
+
         pos = stop
     end
     return out
+end
+
+---@param html string
+---@return Book[]
+function Mapper.catalog(html)
+    local out, seen = {}, {}
+    for id, card in html:gmatch('<li[^>]-data%-type="book"[^>]-data%-id="(%d+)"[^>]*>(.-)</li>') do
+        local title = card:match("<dt[^>]*>(.-)</dt>")
+        if title and not seen[id] then
+            seen[id] = true
+            out[#out + 1] = book(id, title, card:match('class="author[^"]*"[^>]*>([^<]*)'),
+                card:match('class="content[^"]*"[^>]*>([^<]*)'), card:match('data%-src="([^"]+)"'))
+        end
+    end
+    return out
+end
+
+---@param html string
+---@return table|nil
+function Mapper.categories(html)
+    local parent, category = html:match("var parentId%s*=%s*'(%d+)'%s*,%s*categoryId%s*=%s*'(%d+)'")
+    if not parent then return nil end
+    local result = { parent = parent, category = category, channels = {}, categories = {}, orders = {}, statuses = {} }
+    local seen = {}
+    for p, id, title in html:gmatch('<a[^>]-href="[^"]-/category/(%d+)/(%d+)[^"]*"[^>]*>([^<]+)</a>') do
+        local key = p .. ":" .. id
+        if not seen[key] then
+            seen[key] = true
+            if p == id then
+                result.channels[#result.channels + 1] = { id = p, title = Text.xmlDecode(title) }
+            elseif p == parent then
+                result.categories[#result.categories + 1] = { id = id, title = Text.xmlDecode(title) }
+            end
+        end
+    end
+    for field, list in pairs({ order = result.orders, status = result.statuses }) do
+        for id, title in html:gmatch('<span[^>]-data%-' .. field .. '="([%w]+)"[^>]*>([^<]+)</span>') do
+            list[#list + 1] = { id = id, title = Text.xmlDecode(title) }
+        end
+    end
+    if #result.channels == 0 or #result.categories == 0 or #result.orders == 0 or #result.statuses == 0 then return nil end
+    return result
 end
 
 ---@param body table|nil

@@ -745,8 +745,9 @@ end
 ---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer, failed_idx: integer[]|nil)
 ---@param interval_seconds number|nil 两次正文请求的间隔，缺省 1.5；风控严的源传更大值
 ---@param range ChapterCacheRange|nil 缺省全本
+---@param reuse (fun(path: string): boolean)|nil 缓存文件可复用才返回真
 ---@return { cancel: fun() }
-function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb, interval_seconds, range)
+function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb, interval_seconds, range, reuse)
     local cancelled, active = false, nil
     active = source:loadTocAsync(identity, function(toc, err)
         if cancelled then return end
@@ -758,6 +759,7 @@ function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb, 
             progress = on_progress,
             -- 全本缓存让服务端有喘息时间；阅读期预取仍保持无间隔。
             interval_seconds = interval_seconds or 1.5,
+            reuse = reuse,
         }, function(cached, total, failed, last_err, failed_idx)
             if not cancelled then
                 cb(failed == 0, cached, last_err, total, failed, failed_idx)

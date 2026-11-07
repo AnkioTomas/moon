@@ -1,5 +1,5 @@
 --[[--
-掌阅账号：只用掌阅 App 扫码。登录态是 usr + zysid，没有 Cookie。
+掌阅账号：用掌阅 App 扫码，插件保存 usr + zysid，不导入浏览器 Cookie。
 
 @module source.ireader.setting
 --]]
@@ -19,6 +19,12 @@ end
 local function save(user)
     local settings = require("utils.settings")
     local cfg = settings.getSource(SOURCE_ID)
+    if cfg.usr and cfg.usr ~= "" and cfg.usr ~= user.usr then
+        require("ui.themes.widgets.toast"):new{
+            text = _("请先退出当前账号，再登录其他账号"), timeout = 3,
+        }:show()
+        return
+    end
     cfg.usr = user.usr
     cfg.zysid = user.zysid
     cfg.name = user.name
@@ -40,9 +46,7 @@ function Setting.rowStatus()
 end
 
 function Setting.open()
-    require("ui/network/manager"):runWhenConnected(function()
-        require("source.ireader.qrlogin"):new(save):start()
-    end)
+    require("source.ireader.qrlogin"):new(save):start()
 end
 
 ---@return table[]
