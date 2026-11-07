@@ -13,5 +13,5 @@ return {
     name = _("塔读"),
     type = "chapter",
     description = _("塔读书架与在线阅读"),
-    abilities = { _("搜索与发现"), _("书架同步") },
+    abilities = { _("搜索与发现"), _("书架同步"), _("书评"), _("离线缓存") },
 }

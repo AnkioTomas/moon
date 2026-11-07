@@ -53,11 +53,15 @@ function QRLogin:_poll(gen, uuid, last)
         self:_retry(_("二维码已过期"))
         return
     end
-    self.job = Client.qrPollAsync(uuid, last, function(kind, wx_code, errcode)
+    local pending = true
+    local job = Client.qrPollAsync(uuid, last, function(kind, wx_code, errcode, reason)
+        pending = false
         if gen ~= self.generation then return end
         self.job = nil
         if kind == "ok" then
-            self.job = Client.exchangeAsync(wx_code, function(user, err)
+            local exchanging = true
+            local exchange = Client.exchangeAsync(wx_code, function(user, err)
+                exchanging = false
                 if gen ~= self.generation then return end
                 self.job = nil
                 if not user then
@@ -71,6 +75,7 @@ function QRLogin:_poll(gen, uuid, last)
                 end
                 self.on_user(user)
             end)
+            if exchanging and gen == self.generation then self.job = exchange end
             return
         end
         if kind == "wait" then
@@ -83,15 +88,22 @@ function QRLogin:_poll(gen, uuid, last)
             self:_retry(_("已在微信中拒绝登录"))
             return
         end
+        if kind == "error" then
+            self:_retry(reason or _("请求失败"))
+            return
+        end
         self:_retry(_("二维码已过期"))
     end)
+    if pending and gen == self.generation then self.job = job end
 end
 
 function QRLogin:start()
     self:cancel()
     local gen = self.generation
     self.deadline = os.time() + DEADLINE
-    self.job = Client.qrCreateAsync(function(uuid, err)
+    local pending = true
+    local job = Client.qrCreateAsync(function(uuid, err)
+        pending = false
         if gen ~= self.generation then return end
         self.job = nil
         if not uuid then
@@ -110,6 +122,7 @@ function QRLogin:start()
         self.dialog:show()
         self:_poll(gen, uuid, nil)
     end)
+    if pending and gen == self.generation then self.job = job end
 end
 
 return QRLogin

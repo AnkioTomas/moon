@@ -20,12 +20,6 @@ local Tadu = {}
 
 local FETCH_INTERVAL = 0.5
 
-local CHANNELS = {
-    { id = "98-a-0-15-a-20-p-1-98", title = "男频" },
-    { id = "122-a-0-15-a-20-p-1-122", title = "女频" },
-    { id = "79-a-0-15-a-20-p-1-79", title = "出版" },
-}
-
 ---@return BookSourceMeta
 function Tadu.meta()
     return SourceBase.loadMeta("tadu")
@@ -72,34 +66,58 @@ end
 function Source:searchAsync(keyword, cb)
     return Client.searchAsync(keyword, function(html, err)
         if not html then cb(nil, err or _("请求失败")); return end
-        cb({ data = Mapper.books(html) })
+        local books = Mapper.listPage(html)
+        if not books then cb(nil, _("响应无效")); return end
+        cb({ data = books })
     end)
 end
 
----@param opts { node?: string }|nil
+---@param opts { node?: string, limit?: integer }|nil
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 function Source:browseAsync(opts, cb)
-    local node = opts and opts.node or CHANNELS[1].id
-    local known = false
-    local chips = {}
-    for _idx, channel in ipairs(CHANNELS) do
-        chips[#chips + 1] = { id = channel.id, title = _(channel.title) }
-        if channel.id == node then known = true end
-    end
-    if not known then node = CHANNELS[1].id end
-    return Client.channelAsync(node, function(html, err)
+    local node = opts and opts.node
+    if not Mapper.storeNode(node) then node = nil end
+    if node then node = Mapper.storePage(node, 1) end
+    local handle, pending = {}, true
+    local first = Client.channelAsync(node, function(html, err)
+        pending = false
+        if handle.cancelled then return end
         if not html then cb(nil, err or _("请求失败")); return end
-        cb({ data = Mapper.books(html), groups = { Browse.group(chips, node) } })
+        local groups = Mapper.storeGroups(html)
+        local books = Mapper.listPage(html)
+        if not books or not groups[1] then cb(nil, _("响应无效")); return end
+        local titles = {
+            ["频道"] = _("频道"), ["分类"] = _("分类"), ["状态"] = _("状态"),
+            ["字数"] = _("字数"), ["排序"] = _("排序"),
+        }
+        for _idx, group in ipairs(groups) do group.title = titles[group.title] or group.title end
+        node = node or groups[1].active
+        if not node then cb(nil, _("响应无效")); return end
+        handle.inner = Browse.pages(function(page, done)
+            if page == 1 then
+                done(books, nil, Mapper.storeMore(html, node, page))
+                return
+            end
+            return Client.channelAsync(Mapper.storePage(node, page), function(raw, reason)
+                if not raw then done(nil, reason); return end
+                local list = Mapper.listPage(raw)
+                done(list, not list and _("响应无效") or nil, Mapper.storeMore(raw, node, page))
+            end)
+        end, opts and opts.limit or 60, groups, cb)
     end)
+    if pending then handle.inner = first end
+    function handle.cancel()
+        handle.cancelled = true
+        if handle.inner then handle.inner.cancel() end
+    end
+    return handle
 end
 
 function Source:getDetailAsync(identity, cb)
     return Client.detailAsync(identity.stable_id, function(html, err)
         local detail = Mapper.detail(html, identity.stable_id)
         if detail then cb(require("book.store").rememberDetail(detail)); return end
-        local row = identity.book or require("book.books_db").get(self.id, identity.stable_id)
-        if row then cb(row); return end
-        cb(nil, err or _("请求失败"))
+        cb(nil, err or _("响应无效"))
     end)
 end
 
@@ -129,13 +147,16 @@ end
 Source.refreshTocAsync = fetchTocAsync
 
 ---@return ChapterFetchContent
-local function fetcher()
+local function fetcher(interactive)
     return function(identity, chapter, done)
         local part = chapter.source_idx or tostring(chapter.idx)
         return Client.contentAsync(identity.stable_id, part, function(html, err)
-            if html then done({ title = chapter.title, html = html }); return end
+            if html then
+                done({ title = chapter.title, html = html })
+                return
+            end
             done(nil, err)
-        end)
+        end, chapter.uid, interactive)
     end
 end
 
@@ -144,7 +165,7 @@ function Source:openBookAsync(identity, opts, cb)
     local open = opts and opts.chapter_idx and Chapter.openAsync or Chapter.openWithUi
     return open(self, identity, identity.book, opts, {
         loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
-        fetchContent = fetcher(),
+        fetchContent = fetcher(true),
     }, cb)
 end
 
@@ -159,6 +180,13 @@ end
 function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
     local Chapter = require("source.chapter")
     return Chapter.cacheAllAsync(self, identity, fetcher(), on_progress, cb, FETCH_INTERVAL, range)
+end
+
+function Source:bookReviewsAsync(identity, cb)
+    return Client.reviewsAsync(identity.stable_id, function(items, err, pages)
+        if not items then cb(nil, err); return end
+        cb({ items = items, pages = pages })
+    end)
 end
 
 return Tadu

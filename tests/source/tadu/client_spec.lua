@@ -96,14 +96,15 @@ Assert.eq(toc[2].title, "第2章 系统脚踏两条船")
 
 local text = Mapper.content({
     status = 200,
-    data = { content = "<p>正文</p><p>塔读小说APP更多优质免费小说</p><p>下一段</p>" },
-})
-Assert.eq(text, "<p>正文</p><p>下一段</p>")
+    data = { content = '<p>正文中提及塔读</p><p data-limit="OQ==">隐藏</p><p>下一段</p>' },
+}, "9")
+Assert.eq(text, "<p>正文中提及塔读</p><p>下一段</p>")
 local denied = select(2, Mapper.content({ status = 500, msg = "请登录" }))
 Assert.eq(denied, "请登录")
 
 local settings = {}
 local requests = {}
+local deleted = false
 local function reply(url, payload)
     if url:find("long.open.weixin.qq.com", 1, true) then
         return '{"wx_errcode":405,"wx_code":"wx1"}'
@@ -116,6 +117,7 @@ local function reply(url, payload)
         return Json.encode({ data = { user = { nickname = "塔" } } })
     end
     if url:find("pgNum=1", 1, true) then
+        if deleted then return '<title>个人中心-塔读文学网</title><div class="bookrack_table_kong"></div>' end
         return '<title>个人中心-塔读文学网</title><a class="check_btn" data-bookid="9"></a><a class="linkBlock" href="/book/9/">一书</a><a href="/tadu/space/reader?pgNum=2">'
     end
     if url:find("pgNum=2", 1, true) then
@@ -125,11 +127,15 @@ local function reply(url, payload)
         return Json.encode({ status = 902, msg = "已收藏" })
     end
     if url:find("/delFavorites", 1, true) then
+        deleted = true
         return Json.encode({ status = 200 })
     end
     if url:find("/search", 1, true) then return card end
+    if url:find("/book/1034377/9/", 1, true) then
+        return '<input id="bookPartResourceUrl" value="/getPartContentByCodeTable/1034377/1">'
+    end
     if url:find("/getPartContentByCodeTable/", 1, true) then
-        return Json.encode({ status = 200, data = { content = "<p>正文</p><p>塔读APP</p>" } })
+        return Json.encode({ status = 200, data = { content = '<p>正文</p><p data-limit="OQ==">塔读APP</p>' } })
     end
     return payload
 end
@@ -191,7 +197,11 @@ Assert.eq(added, true)
 local removed
 Client.removeAsync("9", function(ok) removed = ok end)
 Assert.eq(removed, true)
-Assert.is_true(requests[#requests].body:find("bookId=9", 1, true) ~= nil)
+local removal
+for _idx, request in ipairs(requests) do
+    if request.url:find("/delFavorites", 1, true) then removal = request end
+end
+Assert.eq(removal.body, "bookId=9")
 
 local books
 Client.searchAsync("三体", function(html) books = Mapper.books(html) end)
@@ -199,6 +209,6 @@ Assert.eq(books[1].title, "三体宇宙")
 Assert.is_true(requests[#requests].body:find("query=", 1, true) ~= nil)
 
 local chapter
-Client.contentAsync("1034377", "1", function(html) chapter = html end)
+Client.contentAsync("1034377", "1", function(html) chapter = html end, "9")
 Assert.eq(chapter, "<p>正文</p>")
 Assert.is_true(requests[#requests].url:find("/getPartContentByCodeTable/1034377/1", 1, true) ~= nil)

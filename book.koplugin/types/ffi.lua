@@ -218,11 +218,33 @@ function ArchiverWriter:close() end
 
 --- ffi/freetype.lua 的 FT_Size 元表。
 ---@class FreeTypeSize : ffi.cdata*
+---@field face FreeTypeFace
 local FreeTypeSize = {}
 ---@param codepoint integer
 ---@return boolean
 function FreeTypeSize:hasGlyph(codepoint) end
 function FreeTypeSize:done() end
+
+---@class FreeTypeFace : ffi.cdata*
+---@field glyph FreeTypeGlyphSlot
+
+---@class FreeTypeGlyphSlot : ffi.cdata*
+---@field outline FreeTypeOutline
+---@field advance FreeTypeVector
+
+---@class FreeTypeOutline : ffi.cdata*
+---@field n_contours integer
+---@field n_points integer
+---@field contours ffi.cdata*
+---@field points FreeTypeVectorArray
+---@field tags ffi.cdata*
+
+---@class FreeTypeVectorArray : ffi.cdata*
+---@field [integer] FreeTypeVector
+
+---@class FreeTypeVector : ffi.cdata*
+---@field x integer
+---@field y integer
 
 --- KOReader 在 ffi/loadlib.lua 扩充的 LuaJIT FFI 字段。
 ---@class ffilib

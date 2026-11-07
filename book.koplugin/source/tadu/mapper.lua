@@ -17,7 +17,7 @@ Mapper.TOC_VERSION = 1
 ---@return string
 local function flat(html)
     if type(html) ~= "string" then return "" end
-    return (html:gsub("%s+", " "))
+    return (html:gsub("<!%-%-.-%-%->", ""):gsub("%s+", " "))
 end
 
 ---@param value string|nil
@@ -114,7 +114,8 @@ function Mapper.books(html)
         local forward = text:sub(stop, math.min(#text, stop + 500))
         local next_card = forward:find('class="bookNm"', 2, true)
         if next_card then forward = forward:sub(1, next_card - 1) end
-        local author = forward:match('class="authorNm"[^>]*>(.-)</div>')
+        local author = forward:match('class="authorNm"[^>]*>(.-)</a>')
+            or forward:match('class="authorNm"[^>]*>(.-)</div>')
         local intro = forward:match('class="bookIntro"[^>]*>(.-)</a>')
         local cover
         for found in back:gmatch('data%-src="([^"]+)"') do cover = found end
@@ -178,8 +179,91 @@ end
 function Mapper.shelfHasNext(html, page)
     if type(html) ~= "string" then return false end
     local next_page = tostring(page + 1)
-    return html:find("pgNum=" .. next_page, 1, true) ~= nil
-        or html:find("/tadu/space/my-bookshelf/" .. next_page, 1, true) ~= nil
+    return html:find("pgNum=" .. next_page .. "%D") ~= nil
+        or html:find("/tadu/space/my%-bookshelf/" .. next_page .. "%D") ~= nil
+end
+
+--- 只接受官网书库的九段节点，禁止把节点当任意路径。
+function Mapper.storeNode(node)
+    return type(node) == "string"
+        and node:match("^%d+%-[atfsq]%-[0-9]+%-[0-9]+%-[atf]%-[0-9]+%-[pt]%-[0-9]+%-[0-9]+$") ~= nil
+end
+
+function Mapper.storePage(node, page)
+    return (node:gsub("%-([pt])%-%d+%-(%d+)$", "-%1-" .. page .. "-%2"))
+end
+
+--- 从实际可见链接取筛选；注释里的出版、资费入口不是可用能力。
+function Mapper.storeGroups(html)
+    local text, groups = flat(html), {}
+    for block in text:gmatch('<div class="lkLine[^"]*"[^>]*>(.-)</div>') do
+        local title = clean(block:match("<span[^>]*>(.-)</span>"))
+        local chips, active = {}, nil
+        for attrs, name in block:gmatch("<a([^>]+)>(.-)</a>") do
+            local node = attrs:match('href="/store/([^"]+)"')
+            if Mapper.storeNode(node) then
+                chips[#chips + 1] = { id = node, title = clean(name) }
+                if attrs:find("current", 1, true) then active = node end
+            end
+        end
+        if #chips > 1 then groups[#groups + 1] = { title = title, chips = chips, active = active } end
+    end
+    local sort = text:match('<div class="tabList">(.-)<div class="rtIcon">')
+    if sort then
+        local chips, active = {}, nil
+        for attrs, name in sort:gmatch("<span([^>]+)>(.-)</span>") do
+            local node = attrs:match("/store/([%w%-]+)")
+            if Mapper.storeNode(node) then
+                chips[#chips + 1] = { id = node, title = clean(name) }
+                active = node
+            end
+        end
+        for attrs, name in sort:gmatch("<a([^>]+)>(.-)</a>") do
+            local node = attrs:match('href="/store/([^"]+)"')
+            if Mapper.storeNode(node) then
+                chips[#chips + 1] = { id = node, title = clean(name) }
+                if attrs:find("current", 1, true) then active = node end
+            end
+        end
+        if #chips > 1 then groups[#groups + 1] = { title = "排序", chips = chips, active = active } end
+    end
+    return groups
+end
+
+function Mapper.storeMore(html, node, page)
+    return flat(html):find('href="/store/' .. Mapper.storePage(node, page + 1) .. '"', 1, true) ~= nil
+end
+
+--- 列表页必须有结果容器，错误页不是空结果。
+function Mapper.listPage(html)
+    local text = flat(html)
+    local books = Mapper.books(text)
+    if #books > 0 or text:find('class="bookList', 1, true)
+        or text:find("没有找到", 1, true) then return books end
+    return nil, "响应无效"
+end
+
+--- 作品评论区绑定 bookId，不是章评。这里只读已核对的网页列表。
+function Mapper.reviews(html)
+    local text, items = flat(html), {}
+    local _text, expected = text:gsub('<div class="commentIntro">', "")
+    for block, date in text:gmatch('<div class="commentIntro">(.-)<span class="time"[^>]*>(.-)</span>') do
+        local body = clean(block:match("<p[^>]*>(.-)</p>"))
+        local title = clean(block:match("<h5[^>]*>(.-)</h5>"))
+        if body ~= "" or title ~= "" then
+            items[#items + 1] = {
+                author = clean(block:match("<h4[^>]*>(.-)</h4>")),
+                text = title ~= "" and title .. "\n" .. body or body,
+                time = clean(date),
+            }
+        end
+    end
+    if #items ~= expected then return nil end
+    if #items == 0 and not text:find("作品评论区", 1, true)
+        and not text:find("暂无评论", 1, true) then return nil end
+    local pages = 1
+    for page in text:gmatch("/v4/book/comment/%d+/%d+/(%d+)") do pages = math.max(pages, tonumber(page)) end
+    return items, pages
 end
 
 --- 书籍页。
@@ -220,11 +304,35 @@ function Mapper.chapters(html)
     return toc
 end
 
+--- 扫码限制只在阅读页声明；正文接口仍会返回 status=200 的预览。
+---@param html string
+---@param stable_id string
+---@return table|nil
+function Mapper.reading(html, stable_id)
+    local text, resource, gated = flat(html), nil, false
+    for tag in text:gmatch("<[^>]+>") do
+        if tag:match('id="bookPartResourceUrl"') then
+            resource = tag:match('value="([^"]+)"')
+        end
+        local classes = tag:match('class="([^"]+)"')
+        if classes and (" " .. classes .. " "):find(" appQrCode ", 1, true) then
+            if tag:match('data%-url="([^"]+)"') ~= "/qrcode/invoke"
+                or tag:match('data%-status="([^"]+)"') ~= "/qrcode/check" then return nil end
+            gated = true
+        end
+    end
+    local id, part
+    if resource then id, part = resource:match("^/getPartContentByCodeTable/(%d+)/(%d+)$") end
+    if id ~= stable_id or not part then return nil end
+    return { resource = resource, gated = gated }
+end
+
 --- 正文 JSON。夹带的塔读推广段丢掉。
 ---@param wire table|nil
 ---@return string|nil
 ---@return string|nil
-function Mapper.content(wire)
+---@return {url: string, html: string}|nil
+function Mapper.content(wire, chapter_uid)
     if type(wire) ~= "table" then return nil, "响应无效" end
     if tostring(wire.status or "") ~= "200" then
         local msg = type(wire.msg) == "string" and wire.msg ~= "" and wire.msg or "响应无效"
@@ -233,7 +341,16 @@ function Mapper.content(wire)
     local data = wire.data
     local html = type(data) == "table" and data.content or nil
     if type(html) ~= "string" or html == "" then return nil, "响应无效" end
-    html = html:gsub("<p[^>]*>[^<]*塔读[^<]*</p>", "")
+    if chapter_uid then
+        local hidden = Text.base64Encode(tostring(chapter_uid))
+        html = html:gsub('<p([^>]*)>(.-)</p>', function(attrs, body)
+            if attrs:match('data%-limit="([^"]+)"') == hidden then return "" end
+            return "<p" .. attrs .. ">" .. body .. "</p>"
+        end)
+    end
+    if type(data.url) == "string" and data.url ~= "" then
+        return nil, "塔读章节字体还原失败，请重试", { url = data.url, html = html }
+    end
     return html
 end
 

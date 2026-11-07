@@ -38,6 +38,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@class StoreChipGroup
 ---@field chips { id: string, title: string }[]
 ---@field active string|nil
+---@field title string|nil 折叠菜单标题，缺省为「更多」
 
 ---@class SourceCapabilities
 ---@field scrape boolean 支持把外部元数据写入本地书籍记录（仅 local 为 true）

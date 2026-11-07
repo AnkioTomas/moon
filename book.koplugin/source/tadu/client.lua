@@ -1,8 +1,6 @@
 --[[--
-塔读网页接口。
-
-登录是微信开放平台扫码：qrconnect 拿 uuid，长轮询拿到 code 后交给
-/webchat/invoke/ 换 Cookie。书架、搜索、目录是 HTML，正文是 JSON。
+塔读电脑 Web 接口。公开查询不带 Cookie，书架和付费正文使用当前登录。
+扫码兑换的 Cookie 归请求实例所有，校验通过才替换持久会话。
 
 @module source.tadu.client
 --]]
@@ -15,264 +13,417 @@ local Text = require("utils.text")
 local _ = require("gettext")
 
 local Client = {}
-
 local SOURCE_ID = "tadu"
 local ORIGIN = "https://www.tadu.com"
-local LOGIN_EXPIRED = "塔读登录已失效，请点「重新登录」，用微信扫码。"
-local SHELF_PAGES = 30
 
-local jar = {}
-
-local function remember(header)
-    if type(header) ~= "string" or header == "" then return end
-    for part in header:gmatch("[^;]+") do
-        local name, value = part:match("^%s*([^=;%s]+)=([^%s].*)$")
-        if not name then name, value = part:match("^%s*([^=;%s]+)=(.*)$") end
-        if name and value and name ~= "Path" and name ~= "Domain" and name ~= "Expires"
-            and name ~= "Max-Age" and name ~= "SameSite" then
-            jar[name] = value
-        end
-    end
-end
-
-function Client.reset()
-    jar = {}
-end
-
-function Client.load()
-    Client.reset()
-    remember(require("utils.settings").getSource(SOURCE_ID).cookie)
-end
-
----@return string|nil
 function Client.cookie()
-    local names = {}
-    for name in pairs(jar) do names[#names + 1] = name end
-    table.sort(names)
-    if #names == 0 then return nil end
-    local parts = {}
-    for _idx, name in ipairs(names) do parts[#parts + 1] = name .. "=" .. jar[name] end
-    return table.concat(parts, "; ")
+    return require("utils.settings").getSource(SOURCE_ID).cookie
 end
 
----@return boolean
 function Client.loggedIn()
-    if Client.cookie() == nil then Client.load() end
-    return require("utils.settings").getSource(SOURCE_ID).logged_in == true and Client.cookie() ~= nil
+    local cfg = require("utils.settings").getSource(SOURCE_ID)
+    return cfg.logged_in == true and type(cfg.cookie) == "string" and cfg.cookie ~= ""
+        and not require("source.auth").expired(SOURCE_ID)
 end
 
----@param user { name: string }|nil
-function Client.persist(user)
-    local settings = require("utils.settings")
-    local cfg = settings.getSource(SOURCE_ID)
-    cfg.cookie = Client.cookie()
-    cfg.logged_in = true
-    if user and type(user.name) == "string" and user.name ~= "" then cfg.name = user.name end
-    settings.saveSource(SOURCE_ID)
-end
-
----@param res table|nil
-local function absorb(res)
-    if not res then return end
-    for _idx, line in ipairs(Request.headerAll(res, "Set-Cookie")) do remember(line) end
-end
-
----@param accept string
----@return table
-local function opts(accept)
-    local headers = {
-        Accept = accept,
-        Referer = ORIGIN .. "/",
+local function opts(accept, cookie)
+    return {
+        accept = accept, cache_ttl = 0,
+        headers = { Referer = ORIGIN .. "/", Cookie = cookie },
+        timeout = require("http.timeout").net(1),
     }
-    local cookie = Client.cookie()
-    if cookie then headers.Cookie = cookie end
-    return { accept = accept, headers = headers, timeout = require("http.timeout").net(1) }
 end
 
----@param cb fun(body: string|nil, err: string|nil)
 local function doneHtml(cb)
-    return function(raw, err, res)
-        absorb(res)
-        if not raw or raw == "" then cb(nil, err and tostring(err) or _("请求失败")); return end
+    return function(raw, err)
+        if err or not raw or raw == "" then
+            cb(nil, err and tostring(err) or _("请求失败"))
+            return
+        end
         cb(raw)
     end
 end
 
----@param url string
----@param cb fun(body: string|nil, err: string|nil)
----@return HttpJob
-local function getHtml(url, cb)
-    return Request.get(url, opts("text/html"), doneHtml(cb))
+local function decoded(raw, err)
+    if err or not raw then return nil, err and tostring(err) or _("请求失败") end
+    local ok, wire = pcall(JSON.decode, raw)
+    if not ok or type(wire) ~= "table" then return nil, _("响应无效") end
+    return wire
 end
 
---- 微信扫码页。uuid 在页面的 /connect/qrcode/<uuid> 里。
----@param cb fun(uuid: string|nil, err: string|nil)
----@return HttpJob
+local function expired(cookie)
+    local reason = _("塔读登录已失效，请在官网重新登录")
+    if cookie == Client.cookie() then require("source.auth").expire(SOURCE_ID, reason) end
+    return reason
+end
+
+--- 尚未核实稳定账号 ID：不同 Cookie 必须先经已有退出确认清掉旧账号数据。
+local function replacement(cookie, previous)
+    if Client.cookie() ~= previous then return _("塔读登录已改变，请重试") end
+    local old = require("source.cookie_login").parse(previous or "")
+    if old ~= "" and old ~= require("source.cookie_login").parse(cookie) then
+        return _("更换塔读登录前，请先退出旧账号；退出会清除本地阅读记录和缓存")
+    end
+end
+
+function Client.loginCheckAsync(cookie, cb)
+    local previous = Client.cookie()
+    return Request.post(ORIGIN .. "/user/info", "", opts("application/json", cookie), function(raw, err)
+        local wire, reason = decoded(raw, err)
+        if not wire then cb(false, reason); return end
+        local user = Mapper.user(wire)
+        if not user then cb(false, _("未登录塔读")); return end
+        reason = replacement(cookie, previous)
+        cb(reason == nil, reason)
+    end)
+end
+
 function Client.qrCreateAsync(cb)
     local url = "https://open.weixin.qq.com/connect/qrconnect?" .. Text.formEncode({
         appid = "wxbb4e499689feeef9",
-        redirect_uri = "https://www.tadu.com/webchat/invoke/",
-        response_type = "code",
-        scope = "snsapi_login",
-        state = "STATE",
+        redirect_uri = ORIGIN .. "/webchat/invoke/",
+        response_type = "code", scope = "snsapi_login", state = "STATE",
     })
-    return Request.get(url, {
-        accept = "text/html",
-        timeout = require("http.timeout").net(1),
-    }, function(raw, err)
-        local uuid = Mapper.qrUuid(raw)
-        if not uuid then cb(nil, err and tostring(err) or _("获取二维码失败")); return end
-        cb(uuid)
-    end)
+    return Request.get(url, { accept = "text/html", cache_ttl = 0, timeout = require("http.timeout").net(1) },
+        function(raw, err)
+            if err then cb(nil, tostring(err)); return end
+            local uuid = Mapper.qrUuid(raw)
+            cb(uuid, not uuid and _("获取二维码失败") or nil)
+        end)
 end
 
---- 长轮询。微信会把连接挂到约 30 秒，超时给到默认网络超时的 1.5 倍。
----@param uuid string
----@param last integer|nil
----@param cb fun(kind: "ok"|"wait"|"fail"|"expired", wx_code: string|nil, errcode: integer|nil)
----@return HttpJob
 function Client.qrPollAsync(uuid, last, cb)
-    local query = { f = "json", uuid = uuid }
-    if last then query["last"] = tostring(last) end
+    local query = { f = "json", uuid = uuid, last = last and tostring(last) }
     return Request.get("https://long.open.weixin.qq.com/connect/l/qrconnect?" .. Text.formEncode(query), {
-        accept = "application/json",
-        timeout = require("http.timeout").net(1.5),
-    }, function(raw, _err)
-        local kind, wx_code, errcode = Mapper.wxStatus(raw)
-        cb(kind, wx_code, errcode)
+        accept = "application/json", cache_ttl = 0, timeout = require("http.timeout").net(1.5),
+    }, function(raw, err)
+        if err then cb("error", nil, nil, tostring(err)); return end
+        local kind, code, status = Mapper.wxStatus(raw)
+        if not status then cb("error", nil, nil, _("响应无效")); return end
+        cb(kind, code, status)
     end)
 end
 
---- code 换塔读会话，再用 /user/info 确认。
----@param wx_code string
----@param cb fun(user: { name: string }|nil, err: string|nil)
----@return { cancel: fun() }
 function Client.exchangeAsync(wx_code, cb)
-    local handle = {}
-    Client.load()
-    local url = ORIGIN .. "/webchat/invoke/?" .. Text.formEncode({ code = wx_code, state = "STATE" })
-    handle.job = Request.get(url, opts("text/html"), function(_raw, err, res)
-        absorb(res)
-        if err and not Client.cookie() then cb(nil, tostring(err)); return end
-        handle.job = Request.post(ORIGIN .. "/user/info", "", opts("application/json"), function(raw, reason, info_res)
-            absorb(info_res)
-            local ok, wire = pcall(JSON.decode, raw or "")
-            local user = ok and Mapper.user(wire) or nil
-            if not user then cb(nil, reason and tostring(reason) or _("未登录塔读")); return end
-            Client.persist(user)
+    local handle, cookies, previous = {}, {}, Client.cookie()
+    local function cookie()
+        local names, parts = {}, {}
+        for name in pairs(cookies) do names[#names + 1] = name end
+        table.sort(names)
+        for _idx, name in ipairs(names) do parts[#parts + 1] = name .. "=" .. cookies[name] end
+        return table.concat(parts, "; ")
+    end
+    local function request(method, url, done)
+        local pending = true
+        local function reply(raw, err, res)
+            pending = false
+            if handle.cancelled then return end
+            handle.job = nil
+            for _idx, line in ipairs(Request.headerAll(res, "Set-Cookie")) do
+                local name, value = line:match("^%s*([^=;%s]+)=([^;]*)")
+                if name then cookies[name] = value ~= "" and value ~= '""' and value or nil end
+            end
+            done(raw, err, res)
+        end
+        local options = opts(method == "POST" and "application/json" or "text/html", cookie())
+        local job
+        if method == "POST" then job = Request.post(url, "", options, reply)
+        else job = Request.get(url, options, reply) end
+        if pending then handle.job = job end
+    end
+    local function confirm()
+        request("POST", ORIGIN .. "/user/info", function(raw, err)
+            local wire, reason = decoded(raw, err)
+            local user = wire and Mapper.user(wire)
+            if not user or cookie() == "" then cb(nil, reason or _("未登录塔读")); return end
+            reason = replacement(cookie(), previous)
+            if reason then cb(nil, reason); return end
+            local settings = require("utils.settings")
+            local cfg = settings.getSource(SOURCE_ID)
+            cfg.cookie, cfg.logged_in, cfg.name = cookie(), true, user.name
+            settings.saveSource(SOURCE_ID)
             cb(user)
         end)
-    end)
-    return { cancel = function()
-        if handle.job and handle.job.cancel then handle.job.cancel() end
-    end }
-end
-
----@param cb fun(html: string|nil, err: string|nil)
----@return { cancel: fun() }
-function Client.shelfAsync(cb)
-    Client.load()
-    local handle = {}
-    local chunks = {}
-    local function page(n)
-        handle.job = getHtml(ORIGIN .. "/tadu/space/reader?pgNum=" .. n, function(html, err)
-            if not html then cb(nil, err); return end
-            if n == 1 then
-                local books, reason = Mapper.shelfPage(html)
-                if not books then
-                cb(nil, reason == "未登录塔读" and _("未登录塔读") or _("塔读书架页面无法识别"))
+    end
+    local function follow(url, remaining)
+        request("GET", url, function(raw, err, res)
+            local status = res and tonumber(res.code)
+            if status and status >= 300 and status < 400 then
+                local location = Request.header(res, "Location")
+                if location and location:sub(1, 1) == "/" and location:sub(1, 2) ~= "//" then
+                    location = ORIGIN .. location
+                end
+                if remaining == 0 or type(location) ~= "string"
+                    or location:sub(1, #ORIGIN + 1) ~= ORIGIN .. "/" then
+                    cb(nil, _("塔读登录回调无效"))
+                    return
+                end
+                follow(location, remaining - 1)
                 return
             end
-            end
-            chunks[#chunks + 1] = html
-            if n < SHELF_PAGES and Mapper.shelfHasNext(html, n) then page(n + 1); return end
-            cb(table.concat(chunks, "\n"))
+            if err or not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
+            confirm()
         end)
     end
-    page(1)
-    return { cancel = function()
-        if handle.job and handle.job.cancel then handle.job.cancel() end
-    end }
+    follow(ORIGIN .. "/webchat/invoke/?" .. Text.formEncode({ code = wx_code, state = "STATE" }), 5)
+    function handle.cancel()
+        handle.cancelled = true
+        if handle.job then handle.job.cancel() end
+    end
+    return handle
 end
 
----@param stable_id string
----@param cb fun(ok: boolean|nil, err: string|nil)
----@return HttpJob
-function Client.addAsync(stable_id, cb)
-    Client.load()
-    return Request.get(ORIGIN .. "/api/v1/favorite/" .. Text.urlEncode(stable_id), opts("application/json"), function(raw, err, res)
-        absorb(res)
-        local ok, wire = pcall(JSON.decode, raw or "")
-        local status = ok and type(wire) == "table" and tostring(wire.status) or ""
-        if status == "901" and Client.loggedIn() then
-            cb(nil, require("source.auth").expire(SOURCE_ID, _(LOGIN_EXPIRED)))
+function Client.shelfAsync(cb)
+    local handle, chunks, cookie = {}, {}, Client.cookie()
+    local function page(n)
+        local pending = true
+        local job = Request.get(ORIGIN .. "/tadu/space/reader?pgNum=" .. n, opts("text/html", cookie),
+            function(raw, err)
+                pending = false
+                if handle.cancelled then return end
+                handle.job = nil
+                if err or not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
+                if cookie ~= Client.cookie() then cb(nil, _("塔读登录已改变，请重试")); return end
+                local books, reason = Mapper.shelfPage(raw)
+                if not books then
+                    cb(nil, reason == "未登录塔读" and expired(cookie) or _("塔读书架页面无法识别"))
+                    return
+                end
+                chunks[#chunks + 1] = raw
+                if Mapper.shelfHasNext(raw, n) then
+                    if n == 1000 then cb(nil, _("塔读书架分页异常")); return end
+                    page(n + 1)
+                    return
+                end
+                cb(table.concat(chunks, "\n"))
+            end)
+        if pending then handle.job = job end
+    end
+    page(1)
+    function handle.cancel()
+        handle.cancelled = true
+        if handle.job then handle.job.cancel() end
+    end
+    return handle
+end
+
+local function changeShelf(method, url, body, stable_id, cb)
+    local cookie = Client.cookie()
+    local handle, pending = {}, true
+    local function done(raw, err)
+        pending = false
+        if handle.cancelled then return end
+        handle.job = nil
+        local wire, reason = decoded(raw, err)
+        if not wire then cb(nil, reason); return end
+        if cookie ~= Client.cookie() then cb(nil, _("塔读登录已改变，请重试")); return end
+        local status = tonumber(wire.status)
+        if status == 901 then cb(nil, expired(cookie)); return end
+        if status == 200 or (method == "GET" and status == 902) then
+            local checking = true
+            local job = Client.shelfAsync(function(html, shelf_err)
+                checking = false
+                if handle.cancelled then return end
+                handle.job = nil
+                if cookie ~= Client.cookie() then cb(nil, _("塔读登录已改变，请重试")); return end
+                if not html then cb(nil, shelf_err); return end
+                local found = false
+                for _idx, book in ipairs(Mapper.shelf(html)) do
+                    if book.stable_id == stable_id then found = true; break end
+                end
+                if found ~= (method == "GET") then cb(nil, _("塔读书架修改未确认，请稍后重试")); return end
+                cb(true)
+            end)
+            if checking then handle.job = job end
             return
         end
-        if status == "200" or status == "902" then cb(true); return end
-        local msg = ok and type(wire) == "table" and type(wire.msg) == "string" and wire.msg or nil
-        cb(nil, msg or (err and tostring(err)) or _("请求失败"))
-    end)
+        cb(nil, type(wire.msg) == "string" and wire.msg ~= "" and wire.msg or _("响应无效"))
+    end
+    local job
+    if method == "GET" then job = Request.get(url, opts("application/json", cookie), done)
+    else job = Request.post(url, body, opts("application/json", cookie), done) end
+    if pending then handle.job = job end
+    function handle.cancel()
+        handle.cancelled = true
+        if handle.job then handle.job.cancel() end
+    end
+    return handle
 end
 
----@param stable_id string
----@param cb fun(ok: boolean|nil, err: string|nil)
----@return HttpJob
+function Client.addAsync(stable_id, cb)
+    return changeShelf("GET", ORIGIN .. "/api/v1/favorite/" .. Text.urlEncode(stable_id), nil, stable_id, cb)
+end
+
 function Client.removeAsync(stable_id, cb)
-    Client.load()
-    return Request.post(ORIGIN .. "/tadu/api/v1/delFavorites", "bookId=" .. Text.urlEncode(stable_id), opts("application/json"), function(raw, err, res)
-        absorb(res)
-        local ok, wire = pcall(JSON.decode, raw or "")
-        local status = ok and type(wire) == "table" and tostring(wire.status) or ""
-        if status == "200" then cb(true); return end
-        local msg = ok and type(wire) == "table" and type(wire.msg) == "string" and wire.msg or nil
-        cb(nil, msg or (err and tostring(err)) or _("移出塔读书架失败"))
-    end)
+    return changeShelf("POST", ORIGIN .. "/tadu/api/v1/delFavorites", "bookId=" .. Text.urlEncode(stable_id), stable_id, cb)
 end
 
----@param keyword string
----@param cb fun(html: string|nil, err: string|nil)
----@return HttpJob
 function Client.searchAsync(keyword, cb)
     return Request.post(ORIGIN .. "/search", "query=" .. Text.urlEncode(keyword), opts("text/html"), doneHtml(cb))
 end
 
----@param node string
----@param cb fun(html: string|nil, err: string|nil)
----@return HttpJob
 function Client.channelAsync(node, cb)
-    return getHtml(ORIGIN .. "/store/" .. node, cb)
+    if node ~= nil and not Mapper.storeNode(node) then
+        return require("source.base").defer(cb, nil, _("响应无效"))
+    end
+    return Request.get(ORIGIN .. "/store" .. (node and "/" .. node or ""), opts("text/html"), doneHtml(cb))
 end
 
----@param stable_id string
----@param cb fun(html: string|nil, err: string|nil)
----@return HttpJob
 function Client.detailAsync(stable_id, cb)
-    return getHtml(ORIGIN .. "/book/" .. Text.urlEncode(stable_id), cb)
+    return Request.get(ORIGIN .. "/book/" .. Text.urlEncode(stable_id), opts("text/html"), doneHtml(cb))
 end
 
----@param stable_id string
----@param cb fun(html: string|nil, err: string|nil)
----@return HttpJob
 function Client.chaptersAsync(stable_id, cb)
-    return getHtml(ORIGIN .. "/book/read/catalogue/" .. Text.urlEncode(stable_id), cb)
+    return Request.get(ORIGIN .. "/book/read/catalogue/" .. Text.urlEncode(stable_id), opts("text/html"), doneHtml(cb))
 end
 
----@param stable_id string
----@param part string
----@param cb fun(html: string|nil, err: string|nil)
----@return HttpJob
-function Client.contentAsync(stable_id, part, cb)
-    local url = ORIGIN .. "/getPartContentByCodeTable/" .. Text.urlEncode(stable_id) .. "/" .. Text.urlEncode(part)
-    return Request.get(url, opts("application/json"), function(raw, err, res)
-        absorb(res)
-        if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
-        local ok, wire = pcall(JSON.decode, raw)
-        if not ok then cb(nil, _("响应无效")); return end
-        local html, reason = Mapper.content(wire)
-        if html then cb(html); return end
-        if reason == "响应无效" or not reason then cb(nil, _("响应无效")); return end
-        cb(nil, reason)
+---@class TaduReading
+---@field stable_id string
+---@field chapter_uid string
+---@field previous string|nil
+---@field cookie string|nil
+---@field active table|nil
+---@field authorization TaduReadAuth|nil
+---@field cancelled boolean|nil
+local Reading = {}
+Reading.__index = Reading
+
+function Reading:stop()
+    local active = self.active
+    self.active = nil
+    if active and active.job then active.job.cancel() end
+end
+
+function Reading:cancel()
+    self.cancelled = true
+    self:stop()
+    if self.authorization then self.authorization:cancel() end
+end
+
+function Reading:request(path, accept, cb)
+    if self.cancelled then return end
+    local active = {}
+    self.active = active
+    active.job = Request.get(ORIGIN .. path, opts(accept, self.cookie), function(raw, err, res)
+        if self.active ~= active or self.cancelled then return end
+        self.active = nil
+        if self.previous ~= Client.cookie() then cb(nil, _("塔读登录已改变，请重试")); return end
+        if err or not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
+        local cookies, names, parts = {}, {}, {}
+        for name, value in (self.cookie or ""):gmatch("([^=;%s]+)=([^;]*)") do cookies[name] = value end
+        for _idx, line in ipairs(Request.headerAll(res, "Set-Cookie")) do
+            local name, value = line:match("^%s*([^=;%s]+)=([^;]*)")
+            if name then cookies[name] = value ~= "" and value ~= '""' and value or nil end
+        end
+        for name in pairs(cookies) do names[#names + 1] = name end
+        table.sort(names)
+        for _idx, name in ipairs(names) do parts[#parts + 1] = name .. "=" .. cookies[name] end
+        self.cookie = table.concat(parts, "; ")
+        cb(raw)
     end)
+end
+
+function Reading:qrCreateAsync(cb)
+    self:request("/qrcode/invoke", "application/json", function(raw, err)
+        local wire, reason = decoded(raw, err)
+        local data = wire and wire.data
+        if not wire or wire.status ~= 200 or type(data) ~= "table"
+            or type(data.qid) ~= "string" or data.qid == ""
+            or type(data.token) ~= "string" or data.token == ""
+            or type(data.qrcode) ~= "string" then
+            cb(nil, reason or _("获取二维码失败"))
+            return
+        end
+        local encoded = data.qrcode:match("^data:image/png;base64,([A-Za-z0-9+/=]+)$")
+        local image = encoded and Text.base64Decode(encoded)
+        if not image or image == "" then cb(nil, _("获取二维码失败")); return end
+        cb({ qid = data.qid, token = data.token, image = image })
+    end)
+end
+
+function Reading:qrPollAsync(ticket, cb)
+    self:request("/qrcode/check?" .. Text.formEncode({ qid = ticket.qid, token = ticket.token }),
+        "application/json", function(raw, err)
+            local wire, reason = decoded(raw, err)
+            if not wire or type(wire.status) ~= "number" then cb(nil, reason or _("响应无效")); return end
+            cb(wire.status)
+        end)
+end
+
+function Reading:complete(html, err, cb)
+    if self.previous ~= Client.cookie() then cb(nil, _("塔读登录已改变，请重试")); return end
+    if html then
+        local settings = require("utils.settings")
+        local cfg = settings.getSource(SOURCE_ID)
+        if self.cookie ~= (self.previous or "")
+            and (cfg.read_cookie ~= self.cookie or cfg.read_cookie_for ~= (self.previous or "")) then
+            cfg.read_cookie, cfg.read_cookie_for = self.cookie, self.previous or ""
+            settings.saveSource(SOURCE_ID)
+        end
+    end
+    cb(html, err)
+end
+
+function Reading:fontAsync(font, cb)
+    if font.url:sub(1, #ORIGIN + 1) ~= ORIGIN .. "/" then
+        cb(nil, _("塔读章节字体还原失败，请重试"))
+        return
+    end
+    self:request(font.url:sub(#ORIGIN + 1), "application/octet-stream", function(bytes, err)
+        if not bytes then cb(nil, err); return end
+        local active = {}
+        self.active = active
+        local job = require("source.tadu.font").restoreAsync(font.html, bytes, function(html, reason)
+            if self.cancelled or self.active ~= active then return end
+            self.active = nil
+            self:complete(html, reason, cb)
+        end)
+        active.job = { cancel = function() job:cancel() end }
+    end)
+end
+
+function Reading:contentAsync(cb, interactive)
+    self:request("/book/" .. Text.urlEncode(self.stable_id) .. "/" .. Text.urlEncode(self.chapter_uid) .. "/",
+        "text/html", function(page, err)
+            if not page then cb(nil, err); return end
+            local reading = Mapper.reading(page, self.stable_id)
+            if not reading then cb(nil, _("塔读阅读页无法识别")); return end
+            if reading.gated then
+                if interactive then
+                    self.authorization = require("source.tadu.read_auth").new(self, cb)
+                else
+                    cb(nil, _("塔读此章节需要 App 扫码授权，请先打开章节扫码阅读"))
+                end
+                return
+            end
+            self:request(reading.resource, "application/json", function(raw, content_err)
+                local wire, reason = decoded(raw, content_err)
+                if not wire then cb(nil, reason); return end
+                local html, parse_err, font = Mapper.content(wire, self.chapter_uid)
+                if font then self:fontAsync(font, cb); return end
+                self:complete(html, html == nil and parse_err and _(parse_err) or nil, cb)
+            end)
+        end)
+end
+
+function Client.contentAsync(stable_id, _part, cb, chapter_uid, interactive)
+    local previous = Client.cookie()
+    local cfg = require("utils.settings").getSource(SOURCE_ID)
+    local reading = setmetatable({
+        stable_id = stable_id, chapter_uid = chapter_uid, previous = previous,
+        cookie = cfg.read_cookie_for == (previous or "") and cfg.read_cookie or previous,
+    }, Reading)
+    reading:contentAsync(cb, interactive)
+    return { cancel = function() reading:cancel() end }
+end
+
+function Client.reviewsAsync(stable_id, cb)
+    return Request.get(ORIGIN .. "/v4/book/comment/" .. Text.urlEncode(stable_id) .. "/1/1",
+        opts("text/html"), function(raw, err)
+            if err or not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
+            local items, pages = Mapper.reviews(raw)
+            cb(items, not items and _("响应无效") or nil, pages)
+        end)
 end
 
 return Client
