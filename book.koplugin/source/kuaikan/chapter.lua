@@ -43,14 +43,9 @@ function Chapter.materializeAsync(identity, chapter, on_progress, cb)
         end))
         return { cancel = function() state.cancelled = true end }
     end
-    if chapter.vip then
-        require("ui/uimanager"):nextTick(require("ui.guard").wrap("kuaikan callback", function()
-            if not state.cancelled then cb(nil, _("本章未购买")) end
-        end))
-        return { cancel = function() state.cancelled = true end }
-    end
-
-    state.active = Client.imagesAsync(chapter.uid, function(urls, err)
+    local fetched = false
+    local image_job = Client.imagesAsync(chapter.uid, function(urls, err)
+        fetched = true
         state.active = nil
         if state.cancelled then return end
         if not urls then cb(nil, err); return end
@@ -75,11 +70,13 @@ function Chapter.materializeAsync(identity, chapter, on_progress, cb)
                 require("ui/uimanager"):nextTick(require("ui.guard").wrap("kuaikan image", nextImage))
                 return
             end
+            local downloaded = false
             local handle = require("http.request").download({
                 url = url,
                 timeout = require("http.timeout").net(3),
                 max_bytes = 32 * 1024 * 1024,
             }, path, function(ok, download_err)
+                downloaded = true
                 state.active = nil
                 if state.cancelled then return end
                 if not ok or not Image.ok(path) then
@@ -89,12 +86,13 @@ function Chapter.materializeAsync(identity, chapter, on_progress, cb)
                 end
                 if on_progress then on_progress(current, #urls) end
                 current = current + 1
-                nextImage()
+                require("ui/uimanager"):nextTick(require("ui.guard").wrap("kuaikan image", nextImage))
             end)
-            state.active = handle
+            if not downloaded then state.active = handle end
         end
         nextImage()
     end)
+    if not fetched then state.active = image_job end
 
     return { cancel = function()
         if state.cancelled then return end

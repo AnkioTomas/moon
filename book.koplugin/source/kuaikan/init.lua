@@ -1,7 +1,7 @@
 --[[--
 快看漫画数据源。
 
-免费话不需要登录。收藏接口在未登录时返回空列表，对账会把书架清空，所以关掉书架上行。
+免费话不需要登录。登录后默认双向同步收藏与阅读进度。
 一话是一组图片，打成 CBZ。
 
 @module source.kuaikan
@@ -24,24 +24,149 @@ end
 ---@class KuaikanSource : SourceBase
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
+local putProgressAsync
 
 ---@return KuaikanSource
 function Kuaikan.new()
     local meta = Kuaikan.meta()
-    return setmetatable({ id = meta.id, name = meta.name, type = meta.type }, Source)
+    return setmetatable({
+        id = meta.id, name = meta.name, type = meta.type,
+        putProgressAsync = Client.hasAccount() and putProgressAsync or nil,
+    }, Source)
 end
 
 --- 未登录的收藏列表是空的，不能拿来对账。
 ---@return SourceCapabilities
 function Source:capabilities()
     local caps = SourceBase.capabilities(self)
-    caps.shelf_push = false
+    caps.shelf_push = Client.hasAccount()
     return caps
 end
 
 ---@return boolean
 function Source:configured()
     return true
+end
+
+---@param opts { force?: boolean, dirty_only?: boolean, on_progress?: fun(text: string, done: integer|nil, total: integer|nil) }|nil
+---@param cb fun(result: SyncResult|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:syncBooksAsync(opts, cb)
+    opts = opts or {}
+    local remote, pipeline = Client.newSync(false), nil
+    if remote.cookie == "" then return SourceBase.skipped(cb, "not_logged_in") end
+    remote:checkAsync(function(account, err)
+        if remote.cancelled then return end
+        if not account then cb(nil, err); return end
+        local settings = require("utils.settings")
+        local cfg = settings.getSource(self.id)
+        if remote.user_id ~= account.user_id or cfg.logged_in ~= true then
+            cfg.user_id, cfg.logged_in = account.user_id, true
+            settings.saveSource(self.id)
+            remote.user_id = account.user_id
+        end
+        remote.writing = true
+        self.putProgressAsync = putProgressAsync
+        local pending = true
+        local job = require("source.shelf").syncAsync(self.id, remote, nil, opts, function(result, reason)
+            pending, pipeline = false, nil
+            if remote.cancelled then return end
+            if not remote:current() then cb(nil, _("登录状态已变化，请重试")); return end
+            if result and remote.push_error then
+                if not opts.dirty_only then cb(nil, remote.push_error); return end
+                result.push_error = remote.push_error
+            end
+            cb(result, reason)
+        end)
+        if pending then pipeline = job end
+    end)
+    return { cancel = function()
+        remote:cancel()
+        if pipeline then pipeline:cancel() end
+    end }
+end
+
+---@param identity BookIdentity
+---@param cb fun(pos: ProgressPosition|nil, err: string|nil, meta: table|nil)
+function Source:getProgressAsync(identity, cb)
+    local cfg = require("utils.settings").getSource(self.id)
+    if not cfg.cookie or cfg.cookie == "" then return SourceBase.defer(cb, nil, nil, { empty = true }) end
+    local remote, toc_job = Client.newSync(false), nil
+    remote:checkAsync(function(account, err)
+        if remote.cancelled then return end
+        if not account then cb(nil, err); return end
+        remote:historyAsync(identity.stable_id, function(comic_id, reason)
+            if not comic_id then cb(nil, reason, not reason and { empty = true } or nil); return end
+            local function load(force)
+                local pending = true
+                local job = self:loadTocAsync(identity, function(toc, toc_err)
+                    pending, toc_job = false, nil
+                    if remote.cancelled then return end
+                    if not remote:current() then cb(nil, _("登录状态已变化，请重试")); return end
+                    if not toc then cb(nil, toc_err); return end
+                    for idx, chapter in ipairs(toc) do
+                        if chapter.uid == comic_id then
+                            cb({ chapter_idx = idx, chapter_title = chapter.title, fraction = (idx - 1) / #toc })
+                            return
+                        end
+                    end
+                    if not force then load(true); return end
+                    cb(nil, _("快看云端章节不在当前目录中"))
+                end, force)
+                if pending then toc_job = job end
+            end
+            load(false)
+        end)
+    end)
+    return { cancel = function()
+        remote:cancel()
+        if toc_job then toc_job:cancel() end
+    end }
+end
+
+---@param self KuaikanSource
+---@param identity BookIdentity
+---@param pos ProgressPosition
+---@param cb fun(ok: boolean|nil, err: string|nil)
+putProgressAsync = function(self, identity, pos, cb)
+    local remote, extra_job = Client.newSync(true), nil
+    remote:checkAsync(function(account, err)
+        if remote.cancelled then return end
+        if not account then cb(nil, err); return end
+        local pending = true
+        local job = self:loadTocAsync(identity, function(toc, toc_err)
+            pending, extra_job = false, nil
+            if remote.cancelled then return end
+            if not remote:current() then cb(nil, _("登录状态已变化，请重试")); return end
+            if not toc then cb(nil, toc_err); return end
+            local idx = pos.chapter_idx or identity.chapter_idx
+            if not idx then idx = math.min(#toc, math.floor(pos.fraction * #toc) + 1) end
+            if not toc[idx] then cb(nil, _("快看云端章节不在当前目录中")); return end
+            local function report(count)
+                if remote.cancelled then return end
+                if not remote:current() then cb(nil, _("登录状态已变化，请重试")); return end
+                local fraction = pos.chapter_fraction
+                if not fraction then fraction = math.max(0, math.min(1, pos.fraction * #toc - (idx - 1))) end
+                local record = Mapper.progressReport(identity.stable_id, toc[idx].uid, pos, fraction, count, os.time() * 1000)
+                if not record then cb(nil, _("响应无效")); return end
+                remote:reportProgressAsync(record, cb)
+            end
+            if pos.total_pages and pos.total_pages > 0 then report(pos.total_pages); return end
+            local fetching = true
+            local images_job = Client.imagesAsync(toc[idx].uid, function(urls, image_err)
+                fetching, extra_job = false, nil
+                if remote.cancelled then return end
+                if not urls then cb(nil, image_err); return end
+                report(#urls)
+            end)
+            if fetching then extra_job = images_job end
+        end)
+        if pending then extra_job = job end
+    end)
+    return { cancel = function()
+        remote:cancel()
+        if extra_job then extra_job:cancel() end
+    end }
 end
 
 ---@param keyword string
@@ -53,13 +178,36 @@ function Source:searchAsync(keyword, cb)
     end)
 end
 
----@param _opts table|nil
+---@param opts table|nil
 ---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
-function Source:browseAsync(_opts, cb)
-    return Client.homeAsync(function(books, err)
-        if not books then cb(nil, err or _("请求失败")); return end
-        cb({ data = books })
+function Source:browseAsync(opts, cb)
+    local node, limit = Mapper.storeNode(opts and opts.node), opts and opts.limit or 60
+    local cancelled, active = false, nil
+    local loaded = false
+    local first = Client.storeAsync(node, 1, function(books, err, more, groups)
+        loaded = true
+        if cancelled then return end
+        active = nil
+        if not books then cb(nil, err); return end
+        local finished = false
+        local pages = require("source.browse").pages(function(page, done)
+            if page == 1 then done(books, nil, more); return end
+            return Client.storeAsync(node, page, done)
+        end, limit, groups, function(result, reason)
+            finished, active = true, nil
+            if cancelled then return end
+            if result then
+                for index = #result.data, limit + 1, -1 do result.data[index] = nil end
+            end
+            cb(result, reason)
+        end)
+        if not finished then active = pages end
     end)
+    if not loaded then active = first end
+    return { cancel = function()
+        cancelled = true
+        if active then active.cancel() end
+    end }
 end
 
 ---@param self KuaikanSource
@@ -131,7 +279,7 @@ function Source:openBookAsync(identity, opts, cb)
         cb(ok and path or nil, err)
     end
     local toc = Toc.read(identity.source_id, identity.stable_id)
-    if toc then
+    if toc and #toc > 0 then
         local idx = startIndex(identity, opts, toc)
         local path = Chapter.existing(identity, toc[idx])
         if path then return SourceBase.defer(finish, path, idx) end
@@ -152,21 +300,27 @@ function Source:openBookAsync(identity, opts, cb)
         }
         dialog:show()
         dialog:set(_("正在准备漫画…"))
-        active = self:loadTocAsync(identity, function(fresh, err)
+        local loaded = false
+        local toc_job = self:loadTocAsync(identity, function(fresh, err)
+            loaded = true
             active = nil
             if cancelled then return end
             if not fresh then closeDialog(); cb(nil, err); return end
             local idx = startIndex(identity, opts, fresh)
-            active = Chapter.materializeAsync(identity, fresh[idx], function(done, total)
+            local materialized = false
+            local chapter_job = Chapter.materializeAsync(identity, fresh[idx], function(done, total)
                 if dialog and total > 0 then dialog:update(_("正在准备漫画…"), done, total) end
             end, function(path, materialize_err)
+                materialized = true
                 active = nil
                 closeDialog()
                 if cancelled then return end
                 if not path then cb(nil, materialize_err); return end
                 finish(path, idx)
             end)
+            if not materialized then active = chapter_job end
         end)
+        if not loaded then active = toc_job end
     end)
     return { cancel = function()
         cancelled = true
@@ -178,7 +332,7 @@ end
 function Source:bookReviewsAsync(identity, cb)
     return Client.commentsAsync(identity.stable_id, function(items, err, pages)
         if not items then cb(nil, err); return end
-        cb({ items = items, pages = pages })
+        cb({ items = items, pages = pages, title = _("话题页评论（首话）") })
     end)
 end
 
@@ -188,17 +342,24 @@ end
 
 function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
     local cancelled, active = false, nil
-    active = self:loadTocAsync(identity, function(toc, err)
+    local loaded = false
+    local toc_job = self:loadTocAsync(identity, function(toc, err)
+        loaded = true
+        active = nil
         if cancelled then return end
         if not toc then cb(false, 0, err, 0, 0); return end
         local from_idx, count = require("source.chapter").cacheRange(toc, range)
-        active = require("source.kuaikan.chapter").prefetchAsync(identity, toc, from_idx, count, {
+        local finished = false
+        local cache_job = require("source.kuaikan.chapter").prefetchAsync(identity, toc, from_idx, count, {
             progress = on_progress,
             interval_seconds = 1.5,
         }, function(cached, total, failed, last_err)
+            finished, active = true, nil
             if not cancelled then cb(failed == 0, cached, last_err, total, failed) end
         end)
+        if not finished then active = cache_job end
     end)
+    if not loaded then active = toc_job end
     return { cancel = function()
         cancelled = true
         if active then active.cancel() end

@@ -8,32 +8,10 @@
 --]]
 
 local Page = {}
+local JSON = require("json")
 
 --- 参数位置上的对象 / null。不能把 nil 塞进数组，否则后面的参数整体错位。
 local HOLE = {}
-
----@param code integer
----@return string
-local function utf8char(code)
-    if code < 0x80 then return string.char(code) end
-    if code < 0x800 then
-        return string.char(0xC0 + math.floor(code / 64), 0x80 + code % 64)
-    end
-    return string.char(
-        0xE0 + math.floor(code / 4096),
-        0x80 + math.floor(code / 64) % 64,
-        0x80 + code % 64
-    )
-end
-
----@param text string
----@return string
-local function unescape(text)
-    text = text:gsub("\\u(%x%x%x%x)", function(hex)
-        return utf8char(tonumber(hex, 16) or 0)
-    end)
-    return (text:gsub("\\(.)", "%1"))
-end
 
 ---@param source string
 ---@param index integer
@@ -48,22 +26,20 @@ end
 ---@return integer|nil
 local function readString(source, index)
     local quote = source:sub(index, index)
-    local parts, cursor = {}, index + 1
+    local cursor = index + 1
     while cursor <= #source do
         local char = source:sub(cursor, cursor)
         if char == "\\" then
-            local next_char = source:sub(cursor + 1, cursor + 1)
-            if next_char == "u" then
-                parts[#parts + 1] = utf8char(tonumber(source:sub(cursor + 2, cursor + 5), 16) or 0)
-                cursor = cursor + 6
-            else
-                parts[#parts + 1] = next_char
-                cursor = cursor + 2
-            end
+            cursor = cursor + 2
         elseif char == quote then
-            return table.concat(parts), cursor + 1
+            local literal = source:sub(index, cursor)
+            if quote ~= '"' then
+                literal = '"' .. literal:sub(2, -2):gsub("\\'", "'"):gsub('"', '\\"') .. '"'
+            end
+            local ok, value = pcall(JSON.decode, literal)
+            if not ok or type(value) ~= "string" then return nil end
+            return value, cursor + 1
         else
-            parts[#parts + 1] = char
             cursor = cursor + 1
         end
     end
@@ -148,7 +124,7 @@ local function readObject(source, index, env)
         index = index + #key
         if source:sub(index, index) ~= ":" then return nil end
         local value, next_index = readValue(source, index + 1, env)
-        if not next_index then return nil end
+        if not next_index or next_index <= index then return nil end
         fields[key] = value
         index = skip(source, next_index)
         if source:sub(index, index) == "," then
@@ -170,10 +146,12 @@ local function readArgs(source, index)
         index = skip(source, index)
         if source:sub(index, index) == ")" then return args end
         local value, next_index = readValue(source, index, {})
-        if not next_index then return nil end
+        if not next_index or next_index <= index then return nil end
         args[#args + 1] = value == nil and HOLE or value
         index = skip(source, next_index)
-        if source:sub(index, index) == "," then index = index + 1 end
+        local separator = source:sub(index, index)
+        if separator == "," then index = index + 1
+        elseif separator ~= ")" then return nil end
     end
     return nil
 end
@@ -231,27 +209,29 @@ function Page.topic(html)
     local chapters = {}
     while cursor and script:sub(cursor, cursor) == "{" do
         local row, next_cursor = readObject(script, cursor, env)
-        if not row then break end
-        if row.id ~= nil and type(row.title) == "string" and row.title ~= "" then
-            chapters[#chapters + 1] = {
-                id = row.id,
-                title = row.title,
-                locked = row.locked == true,
-            }
-        end
+        if not row then return nil end
+        if row.id == nil or type(row.title) ~= "string" or row.title == "" then return nil end
+        chapters[#chapters + 1] = {
+            id = row.id,
+            title = row.title,
+            locked = row.locked == true,
+        }
         cursor = skip(script, next_cursor)
         if script:sub(cursor, cursor) == "," then
             cursor = skip(script, cursor + 1)
-        else
+        elseif script:sub(cursor, cursor) == "]" then
             break
+        else
+            return nil
         end
     end
-    if #chapters == 0 then return nil end
+    if #chapters == 0 or script:sub(cursor, cursor) ~= "]" then return nil end
 
-    local nickname = script:match('%.nickname="([^"]*)"')
+    local nickname_at = script:find('%.nickname="')
+    local nickname = nickname_at and readString(script, nickname_at + #".nickname=")
     return {
         info = info,
-        nickname = nickname and unescape(nickname) or "",
+        nickname = nickname or "",
         chapters = chapters,
     }
 end
