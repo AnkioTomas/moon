@@ -157,12 +157,27 @@ do
     Assert.eq(mint.signature, App.sign({ "gt", "dev-1", string.format("%.0f", mint.timestamp), tostring(mint.random), "rt-1" }))
     Assert.is_nil(mint.deviceType, "App 续期体没有 deviceType")
     Assert.eq(mint.wxToken, 0)
+    Assert.eq(mint.refCgi, "")
     Assert.eq(state.requests[3].headers.accessToken, "at-2")
     Assert.eq(data.ok, 1)
     Assert.eq(state.cfg.wr_skey, "at-2")
     Assert.eq(state.cfg.eink.refresh_token, "rt-2")
     Assert.eq(state.cfg.eink.device_id, "dev-1")
     Assert.eq(state.cfg.eink.install_id, "inst", "续期不丢安装 ID")
+end
+
+-- 公众号授权：同一次 /login，wxToken=1，refCgi 是失败的那次请求。
+do
+    logged_in()
+    state.responder = function() return reply(200, { vid = 42, accessToken = "at-wx", refreshToken = "rt-wx" }) end
+    local ok
+    Eink.refreshAsync(function(o) ok = o end, { wxToken = 1, refCgi = "https://weread.qq.com/web/mp/articles?bookId=MP_WXS_1" })
+    local mint = JsonStub.decode(state.requests[1].body)
+    Assert.is_true(ok)
+    Assert.eq(mint.wxToken, 1)
+    Assert.eq(mint.refCgi, "https://weread.qq.com/web/mp/articles?bookId=MP_WXS_1")
+    Assert.eq(mint.kickType, 1)
+    Assert.eq(state.cfg.eink.refresh_token, "rt-wx")
 end
 
 -- 续期回包不带 refreshToken（线上常态）：沿用旧 refreshToken，仍算成功。
@@ -214,6 +229,23 @@ do
     Assert.eq(#state.requests, 1)
     Assert.matches(err, "%-2041")
     Assert.eq(meta.errcode, -2041)
+end
+
+-- 官方 10.2.2：errMsg 等于错误码时不原样展示。-2025 进阅读错误页「加载失败」；有中文说明则保留。
+do
+    logged_in()
+    state.responder = function() return { code = 499, body = '{"errCode":-2025,"errMsg":"-2025"}' } end
+    local err, meta
+    Eink.callAsync("GET", "/book/chapterdownload", nil, function(_, e, m) err, meta = e, m end)
+    Assert.eq(err, "加载失败")
+    Assert.eq(meta.errcode, -2025)
+    Assert.eq(Eink.userMessage(-2030, "-2030"), "本书已下架")
+    Assert.eq(Eink.userMessage(-2112, ""), "余额不足")
+    Assert.eq(Eink.userMessage(-2223, "-2223", 402), "试读结束")
+    Assert.eq(Eink.userMessage(-2281, "-2281"), "章节价格已更新，请重新购买")
+    Assert.eq(Eink.userMessage(-2202, nil), "章节已经购买过，请勿重复购买")
+    Assert.eq(Eink.userMessage(-1, "服务器忙"), "服务器忙")
+    Assert.eq(Eink.userMessage(nil, "", 500), "HTTP 500")
 end
 
 -- 未登录直接失败，不发请求；退出登录保留设备 ID。

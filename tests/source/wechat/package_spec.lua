@@ -41,3 +41,30 @@ Assert.eq(Composed.chapterHtml(book, 27), "<html><body><h1>T</h1><p>a</p><p>b</p
 local miss, merr = Composed.chapterHtml(book, 99)
 Assert.is_nil(miss)
 Assert.matches(merr, "not in package")
+
+local function tarHeader(name, size)
+    local h = string.rep("\0", 512)
+    local function poke(off, s)
+        h = h:sub(1, off - 1) .. s .. h:sub(off + #s)
+    end
+    poke(1, name)
+    poke(125, string.format("%011o", size))
+    poke(157, "0")
+    poke(258, "ustar\0")
+    return h
+end
+
+local function tarEntry(name, data)
+    local padded = data .. string.rep("\0", (512 - (#data % 512)) % 512)
+    return tarHeader(name, #data) .. padded
+end
+
+local tar = tarEntry("info.txt", "{}")
+    .. tarEntry("820954_1", "\239\187\191甲")
+    .. tarEntry("820954_1_0001", "乙")
+    .. tarEntry("820954_12", "别章")
+    .. string.rep("\0", 1024)
+local text = Package.chapterText(tar, "820954", 1)
+Assert.eq(text, "甲乙")
+local absent = Package.chapterText(tar, "820954", 9)
+Assert.is_nil(absent)

@@ -1,7 +1,7 @@
 --[[--
 微信读书公众号（订阅页用）：公众号列表、文章分页、文章页 → 正文。
 
-列表走 ``/web/mp/articles``（每次实测最多回 20 篇），正文走 ``/web/mp/content`` 的文章页 HTML，
+列表走 App ``GET /mp/chapters``（一页 ``count`` 篇），正文走 ``/web/mp/content`` 的文章页 HTML，
 普通图文取 ``#js_content``，图片 / 纯文字消息取脚本里的正文。
 
 @module koplugin.book.source.wechat.mp
@@ -45,23 +45,36 @@ function Mp.dropLegacyBooks(BookDB)
     return n
 end
 
---- /web/mp/articles 回包 → 文章列表（新到旧）。
----@param data table ``{ reviews = { { createTime, subReviews = { { reviewId, review = { mpInfo } } } } } }``
+--- 文章列表（新到旧）。App ``/mp/chapters`` 是 ``data[] = { reviewId, createTime, mpInfo }``；
+--- 旧网页回包是 ``reviews[].subReviews[]``，两种都认。
+---@param data table
 ---@return { guid: string, title: string, time: integer }[]
 function Mp.articles(data)
     local out, seen = {}, {}
+    local function add(uid, time, title)
+        uid = tostring(uid or "")
+        if uid == "" or seen[uid] then return end
+        seen[uid] = true
+        time = tonumber(time) or 0
+        if type(title) ~= "string" or title == "" then title = os.date("%Y-%m-%d", time) end
+        out[#out + 1] = { guid = uid, title = title, time = time }
+    end
+    local rows = type(data) == "table" and type(data.data) == "table" and data.data or nil
+    if rows and type(rows[1]) == "table" and rows[1].reviewId ~= nil then
+        for _idx, ch in ipairs(rows) do
+            if type(ch) == "table" then
+                local info = type(ch.mpInfo) == "table" and ch.mpInfo or {}
+                add(ch.reviewId, ch.createTime, info.title)
+            end
+        end
+        table.sort(out, function(a, b) return a.time > b.time end)
+        return out
+    end
     for _g, group in ipairs(type(data) == "table" and type(data.reviews) == "table" and data.reviews or {}) do
         for _s, sub in ipairs(type(group) == "table" and type(group.subReviews) == "table" and group.subReviews or {}) do
             local review = type(sub) == "table" and (type(sub.review) == "table" and sub.review or sub) or {}
             local info = type(review.mpInfo) == "table" and review.mpInfo or {}
-            local uid = tostring(review.reviewId or sub.reviewId or "")
-            if uid ~= "" and not seen[uid] then
-                seen[uid] = true
-                local time = tonumber(review.createTime or group.createTime) or 0
-                local title = type(info.title) == "string" and info.title ~= "" and info.title
-                    or os.date("%Y-%m-%d", time)
-                out[#out + 1] = { guid = uid, title = title, time = time }
-            end
+            add(review.reviewId or sub.reviewId, review.createTime or group.createTime, info.title)
         end
     end
     table.sort(out, function(a, b) return a.time > b.time end)
@@ -222,8 +235,31 @@ function Mp.extractBody(html)
 end
 
 --- 网页端 /web/login/renewal 回包头里的公众号凭据（x-wr-ticket / x-wrpa-0）：缺了会被风控回 -2041 或「验证」页。
---- 只在内存里留：进程重启后第一次被拒时再续一次。
+--- 只在内存里留。网页续期之后仍是 -2041，说明微信侧授权过期：再按 App 的 NeedWxToken 续一次（wxToken=1）。
 local mp_headers = {}
+
+local function dropMpHeaders()
+    for key in pairs(mp_headers) do mp_headers[key] = nil end
+end
+
+--- 网页凭据续过仍被拒：清掉旧头，用 wxToken=1 续登录，再拿一次网页头。失败回调 false。
+---@param url string 这次失败的地址，App 把它放进 refCgi
+---@param cb fun(ok: boolean)
+---@return { cancel: fun() }|nil
+local function refreshWxAsync(url, cb)
+    dropMpHeaders()
+    local current
+    current = require("source.wechat.eink").refreshAsync(function(ok)
+        if not ok then
+            cb(false)
+            return
+        end
+        current = Mp.renewAsync(function() cb(true) end)
+    end, { wxToken = 1, refCgi = url })
+    return { cancel = function()
+        if current and current.cancel then current.cancel() end
+    end }
+end
 
 --- 续期公众号凭据并记下回包里的 ticket / wrpa 头；失败也回调（调用方照旧重试，由重试结果判生死）。
 ---@param cb fun()
@@ -239,73 +275,48 @@ function Mp.renewAsync(cb)
         end)
 end
 
---- 带公众号凭据头的 GET；回 -2041 时续期一次再重试。
----@param url string
----@param opts table
----@param cb fun(raw: string|nil, err: any, res: table|nil)
+--- 一页文章列表（App ``GET /mp/chapters``）。offset / 第三个回调都是篇数，满一页才继续翻。
+--- -2041 用 wxToken=1 续一次登录再拉；还是 -2041 就是公众号授权失效。
+---@param book_id string MP_WXS_ 开头
+---@param offset integer 已拉到的篇数
+---@param cb fun(items: table[]|nil, err: any, count: integer|nil)
 ---@return { cancel: fun() }
-local function mpGetAsync(url, opts, cb)
+function Mp.fetchArticlesAsync(book_id, offset, cb)
+    local Eink = require("source.wechat.eink")
+    local query = { bookId = book_id, count = Mp.PAGE, offset = offset or 0 }
+    local ref = "https://i.weread.qq.com/mp/chapters?" .. Text.formEncode(query)
     local cancelled, job = false, nil
-    local function go(renewed)
-        local headers = {}
-        for k, v in pairs(opts.headers or {}) do headers[k] = v end
-        for k, v in pairs(mp_headers) do headers[k] = v end
-        local sent = {}
-        for k, v in pairs(opts) do sent[k] = v end
-        sent.headers = headers
-        job = Auth.webGetAsync(url, sent, function(raw, err, res)
+    local function go(stage)
+        job = Eink.callAsync("GET", "/mp/chapters", { query = query }, function(data, err, meta)
             if cancelled then return end
-            -- 会话层续期重试后仍被拒时 raw 为 nil、res.json 也没填，回包只在 res.body 里
-            local data = res and res.json
-            if data == nil and res and res.body and res.body:find("2041", 1, true) then
-                local ok, decoded = pcall(require("utils.json").decode, res.body)
-                data = ok and decoded or nil
-            end
-            if not renewed and type(data) == "table" and tonumber(data.errcode or data.errCode) == -2041 then
-                job = Mp.renewAsync(function() if not cancelled then go(true) end end)
+            if meta and tonumber(meta.errcode) == -2041 then
+                if stage == 0 then
+                    job = refreshWxAsync(ref, function(ok)
+                        if cancelled then return end
+                        if not ok then
+                            cb(nil, _(Mp.AUTH_EXPIRED))
+                            return
+                        end
+                        go(1)
+                    end)
+                    return
+                end
+                cb(nil, _(Mp.AUTH_EXPIRED))
                 return
             end
-            cb(raw, err, res)
+            if type(data) ~= "table" then
+                cb(nil, err or _("返回非 JSON"))
+                return
+            end
+            local items = Mp.articles(data)
+            cb(items, nil, #items)
         end)
     end
-    go(false)
+    go(0)
     return { cancel = function()
         cancelled = true
-        if job and job.cancel then job:cancel() end
+        if job and job.cancel then job.cancel() end
     end }
-end
-
---- 一页文章列表。offset 以「推送」（reviews 一组，一组可含多篇）为单位，不是篇数；
---- 旧的 maxIdx 参数服务端直接无视（永远回第一页）。cb 的第三个参数是这页的推送数，翻页游标按它累加。
----@param book_id string MP_WXS_ 开头
----@param offset integer 已拉到的推送数
----@param cb fun(items: table[]|nil, err: any, groups: integer|nil)
----@return { cancel: fun() }|nil
-function Mp.fetchArticlesAsync(book_id, offset, cb)
-    local url = WEB .. "/web/mp/articles?" .. Text.formEncode({ bookId = book_id, offset = offset or 0, count = Mp.PAGE })
-    return mpGetAsync(url, { no_expire = true }, function(raw, err, res)
-        -- 会话层已为判失效解过的直接用，只解一次；utils.json 修好标题里 emoji 的代理对。
-        local data = res and res.json
-        local body = raw or (res and res.body)
-        if data == nil and body then
-            local ok, decoded = pcall(require("utils.json").decode, body)
-            data = ok and decoded or nil
-        end
-        -- -2041（续期后仍是）：公众号授权失效，要在 App 里重新授权；不判登录失效
-        if type(data) == "table" and tonumber(data.errcode or data.errCode) == -2041 then
-            cb(nil, _(Mp.AUTH_EXPIRED))
-            return
-        end
-        if not raw or type(data) ~= "table" then
-            cb(nil, err or _("返回非 JSON"))
-            return
-        end
-        if tonumber(data.errcode or data.errCode or 0) ~= 0 then
-            cb(nil, data.errmsg or data.errMsg or _("加载失败"))
-            return
-        end
-        cb(Mp.articles(data), nil, #(data.reviews or {}))
-    end)
 end
 
 --- 文章页遇「验证」页时的最多请求次数。
@@ -324,8 +335,8 @@ end
 ---@return { cancel: fun() }
 local function mpStreamGet(url, cb)
     local Auth = require("source.wechat.auth")
-    local cancelled, inner, renewed = false, nil, false
-    local function go()
+    local cancelled, inner = false, nil
+    local function go(stage)
         local headers = Auth.sessionHeaders({
             ["Accept"] = "text/html,application/xhtml+xml,*/*",
             ["Referer"] = WEB .. "/",
@@ -343,12 +354,26 @@ local function mpStreamGet(url, cb)
                 if err then return cb(nil, err) end
                 local raw = table.concat(chunks)
                 chunks = nil
-                -- -2041：续期一次再重试（与 mpGetAsync 对齐）
-                if not renewed and raw:find("2041", 1, true) then
+                -- -2041：先续网页头，还不行再 wxToken=1
+                if raw:find("2041", 1, true) then
                     local ok, data = pcall(require("utils.json").decode, raw)
                     if ok and type(data) == "table" and tonumber(data.errcode or data.errCode) == -2041 then
-                        renewed = true
-                        inner = Mp.renewAsync(function() if not cancelled then go() end end)
+                        if stage == 0 then
+                            inner = Mp.renewAsync(function() if not cancelled then go(1) end end)
+                            return
+                        end
+                        if stage == 1 then
+                            inner = refreshWxAsync(url, function(wx_ok)
+                                if cancelled then return end
+                                if not wx_ok then
+                                    cb(nil, _(Mp.AUTH_EXPIRED))
+                                    return
+                                end
+                                go(2)
+                            end)
+                            return
+                        end
+                        cb(nil, _(Mp.AUTH_EXPIRED))
                         return
                     end
                 end
@@ -356,7 +381,7 @@ local function mpStreamGet(url, cb)
             end,
         })
     end
-    go()
+    go(0)
     return { cancel = function()
         cancelled = true
         if inner and inner.cancel then inner:cancel() end

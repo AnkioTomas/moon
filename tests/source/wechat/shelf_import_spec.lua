@@ -27,7 +27,20 @@ package.loaded["book.books_db"] = {
         return 2
     end,
 }
-package.loaded["source.wechat.eink"] = { save = function(patch) saved = patch end }
+local oversize_next = false
+package.loaded["source.wechat.eink"] = {
+    save = function(patch) saved = patch end,
+    callAsync = function(_method, _path, _opts, cb)
+        if oversize_next then
+            oversize_next = false
+            cb({ body = "{}" }, nil, { oversize = true })
+        else
+            cb({})
+        end
+        return { cancel = function() end }
+    end,
+}
+package.loaded["utils.awake"] = { hold = function() end }
 package.loaded["utils.settings"] = { getSource = function() return { wr_vid = "v1" } end }
 package.loaded["source.wechat.shelf_import"] = nil
 package.loaded["source.wechat.mapper"] = nil
@@ -54,17 +67,46 @@ Assert.eq(saved.shelf_cursor.synckey, 77)
 Assert.eq(saved.shelf_cursor.vid, "v1")
 Assert.is_nil(ShelfImport.size())
 
--- 待导入文件还在：不重下书架，只再亮一次导入页。
+-- 后台同步发现/重试待导入快照时不弹窗；用户手动刷新才打开导入页。
 do
     local Client = require("source.wechat.client")
     Assert.is_true(ShelfImport.stash("{}"))
     local opened = 0
     require("utils.extension").add("web.open_page", function() opened = opened + 1 end)
     local got
-    local handle = Client.shelfSyncAsync({}, function(data, err) got = { data, err } end, true)
+    local handle = Client.shelfSyncAsync({}, function(data, err) got = { data, err } end, true, false)
     Assert.is_true(handle ~= nil)
     Stubs.flush()
-    Assert.eq(opened, 1)
+    Assert.eq(opened, 0, "后台重试不重复弹出待导入页")
+    Assert.is_nil(got[1])
+    Assert.eq(got[2], ShelfImport.TOO_LARGE)
+
+    got = nil
+    handle = Client.shelfSyncAsync({}, function(data, err) got = { data, err } end, true, true)
+    Assert.is_true(handle ~= nil)
+    Stubs.flush()
+    Assert.eq(opened, 1, "手动强制刷新可重新打开待导入页")
+    Assert.is_nil(got[1])
+    Assert.eq(got[2], ShelfImport.TOO_LARGE)
+    ShelfImport.discard()
+
+    -- 首次后台全量超限只保存快照，不能在用户已进入阅读器后突然弹页。
+    oversize_next = true
+    got = nil
+    handle = Client.shelfSyncAsync({}, function(data, err) got = { data, err } end, true, false)
+    Assert.is_true(handle ~= nil)
+    Assert.eq(opened, 1, "后台首次遇到超大书架只保存快照")
+    Assert.is_nil(got[1])
+    Assert.eq(got[2], ShelfImport.TOO_LARGE)
+    Assert.is_true(ShelfImport.size() ~= nil)
+    ShelfImport.discard()
+
+    -- 显式刷新触发的全量超限仍应直接打开导入页。
+    oversize_next = true
+    got = nil
+    handle = Client.shelfSyncAsync({}, function(data, err) got = { data, err } end, true, true)
+    Assert.is_true(handle ~= nil)
+    Assert.eq(opened, 2, "手动刷新遇到超大书架打开导入页")
     Assert.is_nil(got[1])
     Assert.eq(got[2], ShelfImport.TOO_LARGE)
     ShelfImport.discard()

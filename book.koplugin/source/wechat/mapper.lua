@@ -94,6 +94,9 @@ function Mapper.book(row)
             language = book.language,
             words = book.totalWords,
             rating = { score = (tonumber(book.newRating) or 0) / 100, by = "weread" },
+            weread_pay = tonumber(book.payType),
+            weread_type = tonumber(book.type),
+            weread_ended = book.finished ~= nil and (book.finished == 1 or book.finished == true) or nil,
         },
     }
     local intro = book.intro or book.description or book.summary
@@ -290,6 +293,9 @@ function Mapper.chapters(data, bookId)
         return nil, "empty"
     end
     local chapters_raw = entry.updated or entry.chapterInfos or entry.chapters or {}
+    -- 网文（format=txt）的章名不带序号，微信客户端按 chapterIdx 拼「第 N 章」；出版书原样。
+    -- 同一份 format 跟到每一章：拉正文时 bookType 用它，不再猜。
+    local txt = type(entry.book) == "table" and entry.book.format == "txt"
     local chapters = {}
     for _idx, ch in ipairs(chapters_raw) do
         local wc = tonumber(ch.wordCount or 0) or 0
@@ -316,14 +322,13 @@ function Mapper.chapters(data, bookId)
                 title = title,
                 words = wc,
                 tar = type(ch.tar) == "string" and ch.tar ~= "" and ch.tar or nil,
+                format = txt and "txt" or nil,
             }
         end
     end
     table.sort(chapters, function(a, b)
         return (tonumber(a.source_idx) or 0) < (tonumber(b.source_idx) or 0)
     end)
-    -- 网文（format=txt）的章名不带序号，微信客户端按 chapterIdx 拼「第 N 章」；出版书原样。
-    local txt = type(entry.book) == "table" and entry.book.format == "txt"
     for i, ch in ipairs(chapters) do
         ch.idx = i
         local number = "第" .. (ch.source_idx or tostring(i)) .. "章"

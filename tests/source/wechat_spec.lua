@@ -18,7 +18,12 @@ local function stub(name, factory)
 end
 
 -- 可控假 client：每个用例按需覆写方法
-local fake_client = {}
+local fake_client = {
+    markFinishedAsync = function(_, _book_id, cb)
+        cb({ status = 4 })
+        return { cancel = function() end }
+    end,
+}
 local chapter_open = {}
 local chapter_range_html = "<html><body><p>" .. string.rep("正文", 8000) .. "</p></body></html>"
 local chapter_fetches = 0
@@ -294,7 +299,7 @@ toc_payload["bp"] = require("support.json_stub").encode({
     { idx = 2, source_idx = 5, uid = "u2", title = "二" },
 })
 
--- pushStatsAsync 按 App 协议上报：一本书一个请求，行按小时分桶；成功才确认，失败停在原地。
+-- pushStatsAsync 按 App 离线上报：全部书一次 batchUploadProgress；成功才确认，失败一本都不确认。
 do
     local Eink = require("source.wechat.eink")
     local real_creds, real_install = Eink.credentials, Eink.installId
@@ -302,15 +307,15 @@ do
     Eink.installId = function() return "inst1" end
     local src = WeChat.new()
     local posted = {}
-    local fail_book
+    local fail_batch
     fake_client.guestTokenAsync = function(_, cb) cb("tok") end
     fake_client.getProgressAsync = function(_, _book_id, cb)
         cb({ book = { chapterUid = 12, chapterIdx = 9, chapterOffset = 23456,
             progress = 77, summary = "云端最新位置" } })
     end
-    fake_client.reportAppReadAsync = function(_, body, cb)
-        posted[#posted + 1] = body
-        if body.bookId == fail_book then cb(nil, "boom") else cb({ succ = 1 }) end
+    fake_client.reportBatchAsync = function(_, books, cb)
+        posted = books
+        if fail_batch then cb(nil, "boom") else cb({ succ = 1 }) end
     end
     local rows = {
         { id = 1, stable_id = "bp", chapter_idx = 1, chapter_fraction = 0.5, start_time = 3590, duration = 20 },
@@ -320,13 +325,18 @@ do
     local data, err
     src:pushStatsAsync(rows, function(value, e) data, err = value, e end)
     Assert.is_nil(err)
-    Assert.len(posted, 2, "时长上报不依赖本地目录缓存")
+    Assert.len(posted, 2, "两本书一次离线上报，不按本拆请求")
+    Assert.eq(posted[1].isResendReadingInfo, 1)
+    Assert.eq(posted[2].isResendReadingInfo, 1)
     local body = posted[1]
     Assert.eq(body.bookId, "bp")
     Assert.eq(body.chapterUid, 12)
     Assert.eq(body.chapterIdx, 9, "保留云端最新章节，不用旧统计行的位置")
     Assert.eq(body.chapterOffset, 23456, "原文偏移可超过 10000")
     Assert.eq(body.currentProgress, 77)
+    Assert.eq(body.progress, 77)
+    Assert.eq(body.readUpdateTime, 7310, "批量体带这段阅读结束的时间，不是发送时刻")
+    Assert.eq(posted[2].readUpdateTime, 105)
     Assert.eq(body.summary, "云端最新位置")
     Assert.eq(body.deviceId, "dev1")
     Assert.eq(body.installId, "inst1")
@@ -337,12 +347,69 @@ do
     Assert.eq(#body.signature, 64)
     Assert.len(data.synced_ids, 3, "上报成功与无目录跳过的行都确认")
 
-    posted, fail_book = {}, "bp"
+    local ProgressDB = require("book.progress_db")
+    local orig_get = ProgressDB.get
+    local progress_hits = 0
+    local cloud_progress = fake_client.getProgressAsync
+    fake_client.getProgressAsync = function(_, book_id, cb)
+        progress_hits = progress_hits + 1
+        cloud_progress(_, book_id, cb)
+    end
+    ProgressDB.get = function(_, stable_id)
+        if stable_id ~= "bp" then return nil end
+        return {
+            sync_status = 1, fraction = 0.4, chapter_idx = 1, chapter_fraction = 0.5,
+            extra = {
+                chapter_uid = 8, chapter_idx = 1, chapter_offset = 999,
+                summary = "本地位置", book_version = 3,
+            },
+        }
+    end
+    posted = {}
+    src:pushStatsAsync(rows, function(value, e) data, err = value, e end)
+    Assert.is_nil(err)
+    Assert.eq(posted[1].chapterUid, 8)
+    Assert.eq(posted[1].chapterIdx, 3, "本地章序号要换成微信原始 chapterIdx")
+    Assert.eq(posted[1].chapterOffset, 999, "时长上报带上次确认的本地坐标，不抄云端")
+    Assert.eq(posted[1].currentProgress, 40)
+    Assert.eq(posted[1].progress, 40)
+    Assert.eq(posted[1].summary, "本地位置")
+    Assert.eq(posted[1].bookVersion, 3)
+    Assert.eq(posted[1].chapterProgress, 50)
+    Assert.eq(progress_hits, 1, "有本地坐标的书不再拉云端进度")
+    Assert.eq(posted[2].chapterOffset, 23456)
+
+    ProgressDB.get = function(_, stable_id)
+        if stable_id == "bp" then return { sync_status = 0 } end
+    end
+    posted = {}
+    src:pushStatsAsync(rows, function(value, e) data, err = value, e end)
+    Assert.is_nil(err)
+    Assert.len(posted, 1, "进度还是脏的，这本书的时长留给进度请求")
+    Assert.eq(posted[1].bookId, "nobook")
+    Assert.len(data.synced_ids, 1)
+    Assert.eq(data.synced_ids[1], 3)
+
+    local Session = require("reader.session")
+    local orig_current = Session.current
+    Session.current = function()
+        return { identity = { source_id = "wechat", stable_id = "bp" } }
+    end
+    ProgressDB.get = orig_get
+    posted = {}
+    src:pushStatsAsync(rows, function(value, e) data, err = value, e end)
+    Assert.is_nil(err)
+    Assert.len(posted, 1, "书正开着，时长先别报")
+    Assert.eq(posted[1].bookId, "nobook")
+    Session.current = orig_current
+    fake_client.getProgressAsync = cloud_progress
+
+    posted, fail_batch = {}, true
     src:pushStatsAsync(rows, function(value, e) data, err = value, e end)
     Assert.is_nil(data)
-    Assert.eq(err, "boom", "一本都没成功就报错，行留作脏行")
+    Assert.eq(err, "boom", "整批失败就报错，行留作脏行")
 
-    fake_client.guestTokenAsync, fake_client.reportAppReadAsync, fake_client.getProgressAsync = nil, nil, nil
+    fake_client.guestTokenAsync, fake_client.reportBatchAsync, fake_client.getProgressAsync = nil, nil, nil
     Eink.credentials, Eink.installId = real_creds, real_install
 end
 
@@ -527,14 +594,26 @@ do
          {"idx":3,"source_idx":7,"uid":"42"}]
     ]]
     local captured
+    local StatsDB = require("book.stats_db")
+    local orig_unsynced, orig_mark = StatsDB.unsyncedBySource, StatsDB.markSynced
+    local marked_hours
+    StatsDB.unsyncedBySource = function()
+        return { { id = 7, stable_id = "b1", start_time = 3600, duration = 15 } }
+    end
+    StatsDB.markSynced = function(ids)
+        marked_hours = ids
+        return true
+    end
     fake_client.putProgressAsync = function(_, stable_id, opts, cb)
         captured = {
             stable_id = stable_id,
             progress = opts.progress,
+            current_progress = opts.current_progress,
             chapter_uid = opts.chapter_uid,
             chapter_idx = opts.chapter_idx,
             chapter_offset = opts.chapter_offset,
             summary = opts.summary,
+            hours = opts.hours,
         }
         cb({ ok = true })
         return { cancel = function() end }
@@ -554,8 +633,12 @@ do
     local UID = { chapter_uid = 42, chapter_idx = 0, chapter_offset = 12345 }
     Assert.is_true(put({ fraction = 0, extra = UID }))
     Assert.eq(captured.progress, 0)
+    Assert.eq(captured.hours[1].readingTime, 15, "进度请求带上还没报的时长")
+    Assert.eq(marked_hours[1], 7, "报成功才确认这些统计行")
+    Assert.eq(UID.chapter_offset, 0, "编码出的坐标写回 extra，下一轮时长才带得走")
     Assert.is_true(put({ fraction = 1, extra = UID }))
     Assert.eq(captured.progress, 100)
+    Assert.eq(captured.current_progress, 100)
     Assert.is_true(put({ fraction = 0.5, extra = UID }))
     Assert.eq(captured.progress, 50)
     -- 四舍五入：0.666 → 67
@@ -579,6 +662,18 @@ do
     Assert.eq(captured.chapter_uid, "42")
     Assert.eq(captured.chapter_offset, 16015, "章末取真实原文坐标，不是固定 10000")
     Assert.eq(captured.progress, 100)
+    local BookDB = require("book.books_db")
+    local orig_book = BookDB.get
+    BookDB.get = function() return { meta = { weread_pay = 2, weread_ended = false } } end
+    Assert.is_true(put({ fraction = 1, extra = UID }))
+    Assert.eq(captured.progress, 99, "未完结连载的书架进度封顶 99")
+    Assert.eq(captured.current_progress, 100)
+    local serial_done
+    src:putProgressAsync(REF, { fraction = 1 }, function(v) serial_done = v end)
+    require("support.stubs").flush()
+    Assert.is_true(serial_done)
+    Assert.eq(captured.progress, 99, "手动读完连载仍封顶，读完标记走 markstatus")
+    BookDB.get = orig_book
     require("source.toc").clear()
     -- stable_id 透传
     Assert.eq(captured.stable_id, "b1")
@@ -623,6 +718,7 @@ do
     Assert.eq(map_err, "reading position not found in chapter")
     toc_payload["b1"] = nil
     require("source.wechat.toc").clear()
+    StatsDB.unsyncedBySource, StatsDB.markSynced = orig_unsynced, orig_mark
 end
 
 -- putProgressAsync：失败时错误原样透传；client 的 permanent 元信息也要透传
@@ -1147,10 +1243,15 @@ end
 -- 长按删除：本地先标删，已连网时顺手入队推脏；推脏的书架域推云端真删并撕墓碑
 do
     remembered_stats_books.marked_deleted, remembered_stats_books.removed = nil, nil
-    local removed
+    local removed, full_syncs = nil, 0
     fake_client.removeFromShelfAsync = function(_, bookId, cb)
         removed = bookId
         cb({ ok = true })
+        return { cancel = function() end }
+    end
+    fake_client.shelfSyncAsync = function(_, cb)
+        full_syncs = full_syncs + 1
+        cb({ books = {} })
         return { cancel = function() end }
     end
     local enqueued = {}
@@ -1168,7 +1269,9 @@ do
     require("support.stubs").flush()
     Assert.eq(removed, "del1")
     Assert.eq(remembered_stats_books.removed.stable_id, "del1")
+    Assert.eq(full_syncs, 0, "推脏不拉全量书架")
     package.loaded["workers.tasks"] = nil
+    fake_client.removeFromShelfAsync, fake_client.shelfSyncAsync = nil, nil
 end
 
 -- 段评：开关读源配置；按目录解析本章 chapter_uid，章节 HTML 读本地文件定位。
@@ -1329,7 +1432,7 @@ do
     src:syncBooksAsync(nil, function(r) result = r end)
     require("support.stubs").flush()
     Assert.not_nil(result)
-    Assert.is_false(full_called, "增量对得齐时不走全量")
+    Assert.is_false(full_called, "后台刷新应优先走增量，对不齐再回退全量")
     Assert.eq(ids_req.synckey, 100)
     Assert.eq(ids_req.count, 3)
     Assert.len(books_req, 3)
@@ -1347,6 +1450,75 @@ do
     fake_client.shelfSyncIdsAsync, fake_client.shelfSyncBooksAsync = nil, nil
     remembered_stats_books.local_library, remembered_stats_books.local_rows = nil, nil
     remembered_stats_books.last_snapshot = nil
+end
+
+-- 手动刷新使用全量快照，即使已有增量游标也不走 id 增量接口。
+do
+    local full_called, ids_called = false, false
+    fake_client.shelfSyncIdsAsync = function()
+        ids_called = true
+        return { cancel = function() end }
+    end
+    fake_client.shelfSyncAsync = function(_, cb, _spill, open_import)
+        full_called = true
+        Assert.is_true(open_import, "手动全量可打开大书架导入页")
+        cb({ synckey = 8, books = { { bookId = "a", title = "甲" } } })
+        return { cancel = function() end }
+    end
+    local src = WeChat.new()
+    src.cfg.wr_vid = "v1"
+    src.cfg.category_as_group = true
+    src.cfg.shelf_cursor = { vid = "v1", synckey = 7 }
+    local result
+    src:syncBooksAsync({ force = true }, function(r) result = r end)
+    require("support.stubs").flush()
+    Assert.not_nil(result)
+    Assert.is_true(full_called)
+    Assert.is_false(ids_called)
+    fake_client.shelfSyncIdsAsync, fake_client.shelfSyncAsync = nil, nil
+end
+
+-- 未完成的全量导入优先于增量：后台同步不弹页，手动强制刷新才能重新打开。
+do
+    local saved_import = package.loaded["source.wechat.shelf_import"]
+    package.loaded["source.wechat.shelf_import"] = {
+        size = function() return 100 end,
+        TOO_LARGE = "pending import",
+    }
+    local src = WeChat.new()
+    src.cfg.wr_vid = "v1"
+    src.cfg.category_as_group = true
+    src.cfg.shelf_cursor = { vid = "v1", synckey = 100 }
+
+    local ids_called, reopen_pending = false, nil
+    fake_client.shelfSyncIdsAsync = function()
+        ids_called = true
+        return { cancel = function() end }
+    end
+    fake_client.shelfSyncAsync = function(_, cb, spill, reopen)
+        Assert.is_true(spill)
+        reopen_pending = reopen
+        cb(nil, "pending import")
+        return { cancel = function() end }
+    end
+
+    local result, err
+    src:syncBooksAsync(nil, function(r, e) result, err = r, e end)
+    require("support.stubs").flush()
+    Assert.is_false(ids_called, "待导入快照期间不继续增量")
+    Assert.is_true(result.skipped, "后台发现待导入快照时安静跳过")
+    Assert.eq(result.reason, "pending_import")
+    Assert.is_nil(err)
+    Assert.is_nil(reopen_pending, "后台重试不重新打开导入页")
+
+    src:syncBooksAsync({ force = true }, function(r, e) result, err = r, e end)
+    require("support.stubs").flush()
+    Assert.is_false(ids_called)
+    Assert.is_true(reopen_pending, "手动强制刷新重新打开已有导入页")
+    Assert.eq(err, "pending import")
+
+    fake_client.shelfSyncIdsAsync, fake_client.shelfSyncAsync = nil, nil
+    package.loaded["source.wechat.shelf_import"] = saved_import
 end
 
 -- 增量对不齐（数量对不上）回退全量，全量成功后游标取全量回包的 synckey
@@ -1442,6 +1614,168 @@ do
     browse_handle.cancel()
     Assert.eq(cancelled, 1)
     fake_client.storeCategoriesAsync, fake_client.storeBooksAsync = nil, nil
+end
+
+-- 翻页先保存本地进度，解决开书冲突后最多 5 秒上推一次；在途更新会再推最新修订。
+do
+    local Session = require("reader.session")
+    local old_current = Session.current
+    local old_progress = package.loaded["reader.session.progress"]
+    local old_uimanager = package.loaded["ui/uimanager"]
+    local Network = require("ui/network/manager")
+    local old_is_connected = Network.isConnected
+    local connected = true
+    local active = {
+        identity = { source_id = "wechat", stable_id = "page-sync" },
+        progress_sync_ready = false,
+    }
+    local saves, scheduled, ticks, sync_callbacks = 0, {}, {}, {}
+    local cancelled = 0
+    local manager = {
+        scheduleIn = function(_, delay, fn)
+            scheduled[#scheduled + 1] = { delay = delay, fn = fn }
+        end,
+        unschedule = function(_, fn)
+            for _idx, item in ipairs(scheduled) do
+                if item.fn == fn then item.cancelled = true end
+            end
+        end,
+        nextTick = function(_, fn) ticks[#ticks + 1] = fn end,
+    }
+    Session.current = function() return active end
+    Network.isConnected = function() return connected end
+    package.loaded["reader.session.progress"] = {
+        save = function(_snapshot, cb)
+            saves = saves + 1
+            cb(true)
+        end,
+    }
+    package.loaded["ui/uimanager"] = manager
+    existing_progress = { sync_status = 0 }
+
+    local src = WeChat.new()
+    local sync_calls = 0
+    src.syncProgressAsync = function(_, opts, cb)
+        sync_calls = sync_calls + 1
+        Assert.eq(opts.identity.stable_id, "page-sync")
+        Assert.is_true(opts.dirty_only)
+        sync_callbacks[#sync_callbacks + 1] = cb
+        return { cancel = function() cancelled = cancelled + 1 end }
+    end
+    local event = { identity = active.identity, position = { fraction = 0.2 } }
+    src:onEvent("page_changed", event)
+    Assert.eq(saves, 1)
+    Assert.eq(#scheduled, 0, "开书进度尚未决议时不能推送")
+
+    active.progress_sync_ready = true
+    src:onEvent("page_changed", event)
+    src:onEvent("page_changed", event)
+    Assert.eq(saves, 3)
+    Assert.eq(#scheduled, 1, "快速翻页合并为一个定时请求")
+    Assert.eq(scheduled[1].delay, 5)
+
+    scheduled[1].fn()
+    Assert.eq(sync_calls, 1)
+    src:onEvent("page_changed", event)
+    sync_callbacks[1]({ pushed = 1 })
+    ticks[1]()
+    Assert.eq(#scheduled, 2, "在途请求期间位置变化后，旧修订确认后继续推最新位置")
+
+    scheduled[2].fn()
+    Assert.eq(sync_calls, 2)
+    src:onEvent("reading_stopped", { identity = active.identity })
+    Assert.eq(cancelled, 0, "不能取消可能已被服务端接收的阅读上报")
+    sync_callbacks[2]({ pushed = 1 })
+    ticks[2]()
+    Assert.eq(#scheduled, 3, "关书前写入的新修订在旧请求完成后继续上推")
+
+    src:onEvent("reading_stopped", { identity = active.identity })
+    Assert.is_true(scheduled[3].cancelled, "关书或休眠取消未触发的定时请求")
+
+    connected = false
+    src:onEvent("page_changed", event)
+    Assert.eq(saves, 5)
+    Assert.eq(#scheduled, 3, "离线仍保存进度，但不启动网络同步")
+
+    Session.current = old_current
+    Network.isConnected = old_is_connected
+    package.loaded["reader.session.progress"] = old_progress
+    package.loaded["ui/uimanager"] = old_uimanager
+    existing_progress = nil
+end
+
+-- 阅读会话启动 Web 在读心跳，零时长且停读后不再续发。
+do
+    local Session = require("reader.session")
+    local Network = require("ui/network/manager")
+    local Toc = require("source.wechat.toc")
+    local old_current, old_connected = Session.current, Network.isConnected
+    local old_manager = package.loaded["ui/uimanager"]
+    local old_context = package.loaded["source.wechat.context"]
+    local old_progress_db = package.loaded["book.progress_db"]
+    local old_uid, old_source_index = Toc.uid, Toc.sourceIndex
+    local old_report = fake_client.reportReadAsync
+    local active = {
+        identity = { source_id = "wechat", stable_id = "presence" },
+        progress_sync_ready = true,
+    }
+    local scheduled, sent = {}, {}
+    Session.current = function() return active end
+    Network.isConnected = function() return true end
+    package.loaded["ui/uimanager"] = {
+        scheduleIn = function(_, delay, fn)
+            scheduled[#scheduled + 1] = { delay = delay, fn = fn }
+        end,
+        unschedule = function(_, fn)
+            for _idx, timer in ipairs(scheduled) do
+                if timer.fn == fn then timer.cancelled = true end
+            end
+        end,
+    }
+    local web_session = { psvts = "ps", pclts = "pc", token = "tk" }
+    package.loaded["source.wechat.context"] = {
+        sessionAsync = function(_, book_id, _force, cb)
+            Assert.eq(book_id, "presence")
+            cb(web_session)
+        end,
+    }
+    package.loaded["book.progress_db"] = {
+        get = function() return { extra = { chapter_idx = 1, chapter_offset = 345 } } end,
+    }
+    Toc.uid = function() return "chapter-uid" end
+    Toc.sourceIndex = function() return 11 end
+    fake_client.reportReadAsync = function(_, body, _referer, cb)
+        sent[#sent + 1] = body
+        cb({ succ = 1 })
+    end
+
+    local src = WeChat.new()
+    src:onEvent("reading_started", {
+        identity = active.identity,
+        position = {
+            chapter_idx = 1, chapter_title = "测试章节", chapter_fraction = 0.6, fraction = 0.42,
+        },
+    })
+    Assert.eq(#sent, 2, "首次心跳先 enter，再发送在读状态")
+    Assert.eq(sent[1].ci, 11)
+    Assert.eq(sent[1].co, 345, "心跳重用最近确认的精确 App 坐标")
+    Assert.eq(sent[1].pr, 42)
+    Assert.eq(sent[2].rt, 0, "Web 心跳不重复计时")
+    Assert.eq(#scheduled, 1)
+    Assert.eq(scheduled[1].delay, 30)
+
+    scheduled[1].fn()
+    Assert.eq(#sent, 3)
+    Assert.eq(sent[3].rt, 0)
+    src:onEvent("reading_stopped", { identity = active.identity })
+    Assert.is_true(scheduled[2].cancelled, "关书后停止心跳")
+
+    Session.current, Network.isConnected = old_current, old_connected
+    package.loaded["ui/uimanager"] = old_manager
+    package.loaded["source.wechat.context"] = old_context
+    package.loaded["book.progress_db"] = old_progress_db
+    Toc.uid, Toc.sourceIndex = old_uid, old_source_index
+    fake_client.reportReadAsync = old_report
 end
 
 -- 还原打桩，避免影响本文件之后的其它用例

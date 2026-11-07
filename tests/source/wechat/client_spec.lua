@@ -101,6 +101,8 @@ package.preload["source.wechat.eink"] = function()
                 else
                     cb({ hasMore = 0, reviews = { { review = { reviewId = "c", content = "丙" } } } })
                 end
+            elseif path == "/store/search" then
+                cb(posted.search_reply or { data = { { bookInfo = { bookId = "9", title = "三体" } } } })
             elseif path == "/review/list" then
                 cb({
                     totalCount = 3,
@@ -126,32 +128,6 @@ package.preload["source.wechat.client"] = nil
 package.loaded["source.wechat.client"] = nil
 
 local client = require("source.wechat.client")
-
--- 阅读页取会话参数：psvts 必需，pclts / token 可缺；没有 psvts 的页面（登录页、WAF）按失败。
-do
-    local Protocol = require("source.wechat.protocol")
-    local url = Protocol.readerUrl("rs1")
-    web_replies[url] = '<script>window.__INITIAL_STATE__={"reader":{"psvts":"PS","pclts":"PC","token":"TK"}}</script>'
-    local state
-    client:readerStateAsync("rs1", function(s) state = s end)
-    Assert.eq(captured[#captured], url)
-    Assert.eq(state.psvts, "PS")
-    Assert.eq(state.pclts, "PC")
-    Assert.eq(state.token, "TK")
-
-    web_replies[url] = '<script>{"psvts" : "PS2"}</script>'
-    client:readerStateAsync("rs1", function(s) state = s end)
-    Assert.eq(state.psvts, "PS2")
-    Assert.is_nil(state.pclts)
-    Assert.is_nil(state.token)
-
-    web_replies[url] = "<html>login</html>"
-    local err
-    client:readerStateAsync("rs1", function(s, e) state, err = s, e end)
-    Assert.is_nil(state)
-    Assert.eq(err, "reader.psvts not found")
-    web_replies[url] = nil
-end
 
 do
     -- 书架 / 进度 / 详情 / 目录 / 想法 / 划线全走 App 协议
@@ -234,6 +210,13 @@ do
     Assert.eq(req.path, "/book/readreviews")
     Assert.eq(req.body.chapterUid, 4)
     Assert.eq(req.body.reviews[1].range, "386-407")
+
+    req = call(client.searchAsync, client, "三体", function(d) wire = d end)
+    Assert.eq(req.path, "/store/search")
+    Assert.eq(req.query.keyword, "三体")
+    Assert.eq(req.query.v, 2)
+    Assert.eq(req.query.type, 0)
+    Assert.eq(wire.books[1].bookInfo.bookId, "9")
 end
 
 do
@@ -290,39 +273,136 @@ do
 end
 
 do
-    -- 进度走真实网页会话；原文偏移不换算成百分比，也不附带阅读时长。
-    package.preload["source.wechat.eink"] = nil
+    -- 进度走 App /book/read：本地坐标，阅读时长为 0。时长在统计上报里，不在这里重计。
     local Eink = require("source.wechat.eink")
-    Eink.credentials = function() return { vid = "1", device_id = "d" } end
+    local orig_call = Eink.callAsync
+    Eink.credentials = function() return { vid = "1", device_id = "d", refresh_token = "r" } end
     Eink.installId = function() return "i" end
     Eink.setGuestToken = function() end
-    require("source.wechat.context").clear()
-    web_replies["/web/reader/"] = '{"psvts":"ps","pclts":"pc"}'
+    local fail_read = false
+    Eink.callAsync = function(method, path, opts, cb)
+        posted.eink = { method = method, path = path, body = opts and opts.body, query = opts and opts.query }
+        if path == "/feature" then
+            cb({ feature = { guest_token = "gt" } })
+        elseif path == "/book/read" then
+            cb(fail_read and { succ = 0 } or { succ = 1 })
+        else
+            cb({})
+        end
+        return { cancel = function() end }
+    end
     posted = {}
     local ok, err
     client:putProgressAsync("99", {
-        progress = 50, chapter_uid = 8, chapter_idx = 3, chapter_offset = 24000, chapter_fraction = 0.35,
-    },
-        function(data, e) ok, err = data, e end)
-    Assert.eq(posted.url, "https://weread.qq.com/web/book/read")
-    Assert.eq(posted.body.pr, 50)
-    Assert.eq(posted.body.c, require("source.wechat.protocol").encode(8))
-    Assert.eq(posted.body.co, 24000)
-    Assert.eq(posted.body.ps, "ps")
-    Assert.eq(posted.body.pc, "pc")
-    Assert.is_nil(posted.body.rt)
-    Assert.is_nil(posted.body.hours)
-    Assert.not_nil(posted.body.s)
+        progress = 50, chapter_uid = 8, chapter_idx = 3, chapter_offset = 24000, chapter_fraction = 0.5,
+    }, function(data, e) ok, err = data, e end)
+    Assert.eq(posted.eink.path, "/book/read")
+    Assert.eq(posted.eink.method, "POST")
+    Assert.eq(posted.eink.body.bookId, "99")
+    Assert.eq(posted.eink.body.chapterUid, 8)
+    Assert.eq(posted.eink.body.chapterIdx, 3)
+    Assert.eq(posted.eink.body.chapterOffset, 24000)
+    Assert.eq(posted.eink.body.chapterProgress, 50)
+    Assert.eq(posted.eink.body.progress, 50)
+    Assert.eq(posted.eink.body.currentProgress, 50)
+    Assert.eq(posted.eink.body.readingTime, 0)
+    Assert.eq(#posted.eink.body.hours, 0)
+    Assert.is_nil(posted.eink.body.readUpdateTime, "单条 /book/read 不带进度时间")
+    Assert.is_nil(posted.eink.body.isResendReadingInfo)
+    Assert.not_nil(posted.eink.body.signature)
+    Assert.not_nil(ok)
+    Assert.is_nil(err)
+    Assert.is_nil(posted.url, "进度不再打网页阅读接口")
+
+    client:putProgressAsync("99", {
+        progress = 50, chapter_uid = 8, chapter_idx = 3, chapter_offset = 24000,
+        chapter_fraction = 0.5,
+        hours = { { startOfHour = 3600, readingTime = 15, timeZone = "+08:00", ttsTime = 0 } },
+    }, function(data, e) ok, err = data, e end)
+    Assert.eq(posted.eink.body.readingTime, 15, "时长随进度一起报，服务端才改坐标")
+    Assert.eq(posted.eink.body.hours[1].startOfHour, 3600)
+    Assert.eq(posted.eink.body.chapterOffset, 24000)
     Assert.not_nil(ok)
 
-    posted.web_read_reply = "{}"
+    fail_read = true
     ok, err = nil, nil
-    local meta
     client:putProgressAsync("99", { progress = 50, chapter_uid = 8 },
-        function(data, e, m) ok, err, meta = data, e, m end)
+        function(data, e) ok, err = data, e end)
     Assert.is_nil(ok)
     Assert.not_nil(err)
-    Assert.is_true(meta and meta.permanent, "收下不记账必须 permanent，别每轮脏同步白撞")
+
+    -- 跨小时走离线批量。-2054 丢掉 /config token，换新 token 再签一次。
+    local sha256 = require("ffi/sha2").sha256
+    local configs, batches, reject = 0, {}, true
+    Eink.callAsync = function(method, path, opts, cb)
+        posted.eink = { method = method, path = path, body = opts and opts.body, query = opts and opts.query }
+        if path == "/feature" then
+            cb({ feature = { guest_token = "gt" } })
+        elseif path == "/config" then
+            configs = configs + 1
+            cb({ token = "t" .. configs })
+        elseif path == "/book/batchUploadProgress" then
+            batches[#batches + 1] = opts.body
+            if reject then
+                reject = false
+                cb(nil, "expired", { errcode = -2054 })
+            else
+                cb({ succ = 1 })
+            end
+        elseif path == "/book/read" then
+            cb({ succ = 1 })
+        else
+            cb({})
+        end
+        return { cancel = function() end }
+    end
+    ok, err = nil, nil
+    client:putProgressAsync("99", {
+        progress = 50, chapter_uid = 8, chapter_idx = 3, chapter_offset = 24000,
+        hours = {
+            { startOfHour = 0, readingTime = 10, timeZone = "+08:00", ttsTime = 0 },
+            { startOfHour = 3600, readingTime = 15, timeZone = "+08:00", ttsTime = 0 },
+        },
+    }, function(data, e) ok, err = data, e end)
+    Assert.not_nil(ok)
+    Assert.is_nil(err)
+    Assert.eq(configs, 2, "-2054 之后重新取 token")
+    Assert.eq(#batches, 2)
+    Assert.eq(posted.eink.path, "/book/batchUploadProgress")
+    Assert.eq(posted.eink.query, nil)
+    Assert.eq(batches[1].books[1].isResendReadingInfo, 0, "实时跨小时不是补报积压")
+    Assert.eq(batches[1].books[1].readingTime, 25)
+    Assert.eq(#batches[1].books[1].hours, 2)
+    Assert.eq(batches[1].books[1].chapterOffset, 24000)
+    Assert.eq(batches[1].books[1].readUpdateTime, batches[1].books[1].timestamp)
+    Assert.eq(#batches[1].books[1].signature, 64, "每本仍用 guest 签名")
+    local function outer(batch, token)
+        return sha256(tostring(batch.timestamp) .. token .. tostring(batch.random))
+    end
+    Assert.eq(batches[1].signature, outer(batches[1], "t1"))
+    Assert.eq(batches[2].signature, outer(batches[2], "t2"))
+    Assert.is_true(batches[1].signature ~= batches[2].signature)
+
+    local marked
+    Eink.callAsync = function(_method, path, opts, cb)
+        if path == "/book/markstatus" then
+            marked = opts.body
+            cb({ status = 4 })
+        else
+            cb(nil, "no")
+        end
+        return { cancel = function() end }
+    end
+    ok, err = nil, nil
+    client:markFinishedAsync("99", function(data, e) ok, err = data, e end)
+    Assert.eq(marked.bookId, "99")
+    Assert.eq(marked.status, 4)
+    Assert.eq(marked.finishInfo, 0)
+    Assert.eq(marked.isCancel, 0)
+    Assert.eq(marked.auto, 1)
+    Assert.eq(ok.status, 4)
+    Assert.is_nil(err)
+    Eink.callAsync = orig_call
 end
 
 -- bookCount 大于 books 条数也原样交回（专辑、公众号不在这三份列表里）
@@ -334,4 +414,33 @@ do
     Assert.eq(data.bookCount, 3)
     Assert.eq(#data.books, 2)
     posted = {}
+end
+
+-- Web reader session supplies the token for a zero-duration presence heartbeat only.
+do
+    web_replies["/web/reader/"] = '<html>{"psvts":"ps","pclts":"pc","token":"tk"}</html>'
+    local state, state_err
+    client:readerStateAsync("99", function(value, err) state, state_err = value, err end)
+    Assert.eq(state.psvts, "ps")
+    Assert.eq(state.pclts, "pc")
+    Assert.eq(state.token, "tk")
+    Assert.is_nil(state_err)
+    Assert.is_true(captured[#captured]:find("/web/reader/", 1, true) ~= nil)
+
+    posted.web_read_reply = '{"succ":1}'
+    local result, report_err
+    client:reportReadAsync({ rt = 0 }, "https://weread.qq.com/web/reader/99",
+        function(value, err) result, report_err = value, err end)
+    Assert.eq(posted.url, "https://weread.qq.com/web/book/read")
+    Assert.eq(posted.body.rt, 0)
+    Assert.eq(posted.referer, "https://weread.qq.com/web/reader/99")
+    Assert.not_nil(result)
+    Assert.is_nil(report_err)
+
+    posted.web_read_reply = "{}"
+    result, report_err = nil, nil
+    client:reportReadAsync({ rt = 0 }, nil, function(value, err) result, report_err = value, err end)
+    Assert.is_nil(result)
+    Assert.not_nil(report_err)
+    web_replies["/web/reader/"] = nil
 end
