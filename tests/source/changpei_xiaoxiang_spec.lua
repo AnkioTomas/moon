@@ -237,12 +237,12 @@ do
     Auth.reset()
     cfg.cookie = nil
     Settings.saveSource("changpei", cfg)
-    Assert.eq(#CpSetting.rows(), 2, "未登录：账号 + 粘贴")
+    Assert.eq(#CpSetting.rows(), 3, "未登录：账号 + 粘贴 + 章评")
     cfg.cookie = "PHPSESSID=T1"
     Settings.saveSource("changpei", cfg)
-    Assert.eq(#CpSetting.rows(), 2, "已登录：账号 + 退出")
+    Assert.eq(#CpSetting.rows(), 3, "已登录：账号 + 退出 + 章评")
     Auth.expire("changpei", "x")
-    Assert.eq(#CpSetting.rows(), 3, "失效后露出粘贴 Cookie")
+    Assert.eq(#CpSetting.rows(), 4, "失效后露出粘贴 Cookie")
     cfg.cookie = nil
     Settings.saveSource("changpei", cfg)
     Auth.reset()
@@ -344,7 +344,7 @@ end
 
 do
     local token = ("a"):rep(32)
-    local fields = QRLogin.decode("\0\0\0\0\35\10\32" .. token .. "\16\200\1")
+    local fields = QRLogin.decode("\0\0\0\0\37\10\32" .. token .. "\16\200\1")
     Assert.eq(fields[1], token)
     Assert.eq(fields[2], 200)
     local poll = QRLogin.decode("\0\0\0\0\36\8\4\26\32" .. token)
@@ -448,7 +448,7 @@ do
     local res
     source:browseAsync({ node = "1:3" }, function(r) res = r end)
     Assert.eq(res.data[1].stable_id, "9")
-    Assert.len(res.groups[1].chips, 2)
+    Assert.len(res.groups[1].chips, 3)
     Assert.eq(res.groups[1].active, "1:1")
     Assert.eq(res.groups[2].active, "1:3")
     package.preload["http.request"] = nil

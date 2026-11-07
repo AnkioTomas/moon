@@ -59,52 +59,47 @@ local function headers(cookie)
     return out
 end
 
----@type (fun(ok: boolean))[]|nil 正在换 token 时排队的回调；并发的 9996 只换一次
-local renewing
-
 --- 登录 token 过期：用 refresh_token（扫码登录存的 moon_refresh，或浏览器 Cookie 里的 ukey）换新 token，
 --- 写回已保存的 Cookie。没有 refresh_token 或服务端拒绝返回 false。
----@param cb fun(ok: boolean)
+---@param cb fun(ok: boolean, err: string|nil)
 function Client.renewAsync(cb)
-    if renewing then renewing[#renewing + 1] = cb; return end
     local cookie = Client.cookie()
     local refresh = cookie and (cookie:match("moon_refresh=([^;%s]+)") or cookie:match("ukey=([^;%s]+)"))
     local imei = cookie and cookie:match("_c_n_=([^;%s]+)")
     if not refresh or not imei then cb(false); return end
-    renewing = { cb }
+    local cancelled = false
     local QRLogin = require("source.changpei.qrlogin")
-    local function finish(ok)
-        local waiters = renewing
-        renewing = nil
-        for _idx, waiter in ipairs(waiters) do waiter(ok) end
-    end
     local head = headers(cookie)
     head["Content-Type"] = "application/grpc-web+proto"
     head["X-Grpc-Web"] = "1"
     head["version"] = "1"
     head["imei"] = imei
     head["_c_n_"] = imei
-    Request.post("https://www.gongzicp.com/cp.UserExternal/get_token", QRLogin.frame(refresh, 5), {
+    local job = Request.post("https://www.gongzicp.com/cp.UserExternal/get_token", QRLogin.frame(refresh, 5), {
         headers = head,
         content_type = "application/grpc-web+proto",
         timeout = require("http.timeout").net(0.5),
-    }, function(body, _err, res)
+    }, function(body, err, res)
+        if cancelled then return end
+        if cookie ~= Client.cookie() then cb(false, _("账号已变化，请重新登录")); return end
+        if not body then cb(false, err and tostring(err) or _("请求失败")); return end
         -- get_token 回包：token(3)。grpc-status 非 0 = refresh_token 也失效
         local token = body and (tonumber(Request.header(res, "grpc-status")) or 0) == 0 and QRLogin.decode(body)[3]
-        if type(token) ~= "string" or token == "" then finish(false); return end
+        if type(token) ~= "string" or token == "" then cb(false); return end
         local settings = require("utils.settings")
         local cfg = settings.getSource(SOURCE_ID)
         local saved = cfg.cookie:gsub(";?%s*moon_token=[^;%s]+", "")
         cfg.cookie = saved .. "; moon_token=" .. token
         settings.saveSource(SOURCE_ID, cfg)
-        finish(true)
+        cb(true)
     end)
+    return { cancel = function() cancelled = true; job:cancel() end }
 end
 
 --- cookie 显式传入：登录入口要先校验再保存，校验用的新 Cookie 失效不能污染已保存的登录态。
 ---@param cookie string|nil
 ---@param cb fun(wire: table|nil, err: string|nil)
----@param retry boolean|nil
+---@param retry function|nil
 ---@return fun(raw: string|nil, err: any)
 local function reply(cookie, cb, retry)
     return function(raw, err)
@@ -122,10 +117,12 @@ local function reply(cookie, cb, retry)
                 end
                 if retry then
                     -- token 过期：用 refresh_token 换新的再重发一次；换不到才算登录失效
-                    Client.renewAsync(function(renewed)
-                        if renewed then retry() else cb(nil, require("source.auth").expire(SOURCE_ID, msg)) end
+                    return Client.renewAsync(function(renewed, reason)
+                        if renewed then retry()
+                        elseif reason then cb(nil, reason)
+                        elseif cookie == Client.cookie() then cb(nil, require("source.auth").expire(SOURCE_ID, msg))
+                        else cb(nil, _("账号已变化，请重新登录")) end
                     end)
-                    return
                 end
                 msg = require("source.auth").expire(SOURCE_ID, msg)
             end
@@ -138,19 +135,32 @@ local function reply(cookie, cb, retry)
 end
 
 local function get(path, query, cookie, cb, renewed, cache_ttl)
-    local cancelled, job = false, nil
-    local retry = cookie and not renewed and function()
-        if not cancelled then job = get(path, query, Client.cookie(), cb, true) end
+    local cancelled, job, pending = false, nil, true
+    local managed = cookie ~= nil and cookie == Client.cookie()
+    local retry
+    if cookie and not renewed then
+        retry = function()
+            if not cancelled then job = get(path, query, Client.cookie(), cb, true, cache_ttl) end
+        end
     end
-    job = Request.get(API .. path .. "?" .. query, {
+    local respond = reply(cookie, cb, retry)
+    local initial = Request.get(API .. path .. "?" .. query, {
         accept = "application/json",
         headers = headers(cookie),
         timeout = require("http.timeout").net(0.5),
-        cache_ttl = cache_ttl,
-    }, reply(cookie, cb, retry))
+        cache_ttl = cache_ttl or 0,
+    }, function(raw, err)
+        pending = false
+        if cancelled then return end
+        if managed and cookie ~= Client.cookie() then cb(nil, _("账号已变化，请重新登录")); return end
+        local previous = job
+        local renewing = respond(raw, err)
+        if renewing and job == previous then job = renewing end
+    end)
+    if pending then job = initial end
     return { cancel = function()
         cancelled = true
-        job.cancel()
+        if job then job:cancel() end
     end }
 end
 
@@ -178,12 +188,17 @@ end
 ---@return { cancel: fun() }
 local function post(path, params, body, cb, renewed)
     local cookie = Client.cookie()
-    local cancelled, job = false, nil
-    local retry = cookie and not renewed and function()
-        if not cancelled then job = post(path, params, body, cb, true) end
+    local cancelled, job, pending = false, nil, true
+    local retry
+    if cookie and not renewed then
+        retry = function()
+            if not cancelled then job = post(path, params, body, cb, true) end
+        end
     end
-    job = get("/system/init", "", nil, function(init, err)
+    local initial = get("/system/init", "", nil, function(init, err)
+        pending = false
         if cancelled then return end
+        if cookie ~= Client.cookie() then cb(nil, _("账号已变化，请重新登录")); return end
         local timestamp = (init and type(init.data) == "table" and init.data.timestamp) --[[@as string|number|nil]]
         if not timestamp then cb(nil, err or _("响应无效")); return end
         ---@cast timestamp string|number
@@ -191,16 +206,27 @@ local function post(path, params, body, cb, renewed)
         local head = headers(cookie)
         head["Timestamp"] = timestamp
         head["Rand-Str"] = sign(params, timestamp)
-        job = Request.post(API .. path, body, {
+        local posting = true
+        local respond = reply(cookie, cb, retry)
+        local posted = Request.post(API .. path, body, {
             accept = "application/json",
             headers = head,
             content_type = "application/json",
             timeout = require("http.timeout").net(0.5),
-        }, reply(cookie, cb, retry))
+        }, function(raw, reason)
+            posting = false
+            if cancelled then return end
+            if cookie ~= Client.cookie() then cb(nil, _("账号已变化，请重新登录")); return end
+            local previous = job
+            local renewing = respond(raw, reason)
+            if renewing and job == previous then job = renewing end
+        end)
+        if posting then job = posted end
     end)
+    if pending then job = initial end
     return { cancel = function()
         cancelled = true
-        job:cancel()
+        if job then job:cancel() end
     end }
 end
 
@@ -233,22 +259,46 @@ function Client.rankAsync(rid, tid, page, cb)
     return get("/novel/rankingGetList", ("tid=0&rid=%d&date=%d&page=%d"):format(rid, tid, page), nil, cb, true)
 end
 
+function Client.typesAsync(id, cb)
+    return get("/novel/typeGetList", id and ("id=" .. id) or "", nil, cb, true)
+end
+
+function Client.libraryAsync(params, page, cb)
+    local query = { "page=" .. page, "size=10", "field=" .. params.field, "order=0" }
+    for _idx, key in ipairs({ "tid", "process", "sell", "number" }) do
+        if params[key] ~= nil then query[#query + 1] = key .. "=" .. params[key] end
+    end
+    return get("/novel/novelGetList", table.concat(query, "&"), nil, cb, true)
+end
+
+function Client.detailAsync(novel_id, cb)
+    return get("/novel/novelInfo", "id=" .. novel_id, nil, cb, true)
+end
+
+function Client.commentsAsync(module, id, page, cb)
+    return get("/comment/getList", "module=" .. module .. "&cid=" .. id .. "&gift=0&page=" .. page, nil, cb, true)
+end
+
 --- 网页书架（根目录，不含分组里的书），逐页取到空页为止。
 ---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client.shelfAsync(cb)
     local rows, cancelled, job = {}, false, nil
     local function page(n)
-        job = get("/usercoll/getList", "filter=0&sort_key=1&sort_flag=2&did=0&page=" .. n, Client.cookie(),
+        local pending = true
+        local initial = get("/usercoll/getList", "filter=0&sort_key=1&sort_flag=2&did=0&page=" .. n, Client.cookie(),
             function(wire, err)
+                pending = false
                 if cancelled then return end
                 if not wire then cb(nil, err); return end
-                local list = type(wire.data) == "table" and wire.data.list or {}
+                local list = type(wire.data) == "table" and wire.data.list
+                if type(list) ~= "table" then cb(nil, _("响应无效")); return end
                 for _idx, row in ipairs(list) do
                     if row.type == "novel" then rows[#rows + 1] = row end
                 end
                 if #list == 0 then cb(rows) else page(n + 1) end
             end)
+        if pending then job = initial end
     end
     page(1)
     return { cancel = function()
@@ -298,9 +348,29 @@ end
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return HttpJob
 function Client.markReadAsync(chapter_id, cb)
-    return get("/novel/chapterGetInfo", "cid=" .. chapter_id .. "&server=0", Client.cookie(), function(wire, err)
-        cb(wire and true or nil, err)
+    local cancelled, job, pending = false, nil, true
+    local initial = get("/novel/chapterGetInfo", "cid=" .. chapter_id .. "&server=0", Client.cookie(), function(wire, err)
+        pending = false
+        if cancelled then return end
+        if not wire then cb(nil, err); return end
+        if type(wire.data) ~= "table" or type(wire.data.chapterInfo) ~= "table" then
+            cb(nil, _("响应无效")); return
+        end
+        if (tonumber(wire.data.check) or 0) > 1 then cb(nil, Client.VERIFY_REQUIRED); return end
+        job = Client.historyAsync(function(history, reason)
+            if cancelled then return end
+            if not history then cb(nil, reason); return end
+            for _id, uid in pairs(Mapper.history(history)) do
+                if uid == tostring(chapter_id) then cb(true); return end
+            end
+            cb(nil, _("长佩阅读进度未确认"))
+        end)
     end)
+    if pending then job = initial end
+    return { cancel = function()
+        cancelled = true
+        if job then job:cancel() end
+    end }
 end
 
 --- 校验 cookie：返回账号信息（nickname 等），失效回调错误。
@@ -309,8 +379,14 @@ end
 ---@return HttpJob
 function Client.userAsync(cookie, cb)
     return get("/user/getUserInfo", "", cookie, function(wire, err)
-        cb(wire and wire.data or nil, err)
-    end)
+        if not wire then cb(nil, err); return end
+        local info = type(wire.data) == "table" and wire.data.info
+        local uid = type(info) == "table" and tonumber(info.show_uid)
+        if not uid or uid <= 0 then
+            cb(nil, _("长佩账号标识缺失")); return
+        end
+        cb({ uid = uid })
+    end, true)
 end
 
 --- 一章正文（纯文本，段落以换行分隔）。
@@ -319,8 +395,9 @@ end
 ---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|"verify"|nil)
 ---@return { cancel: fun() }
 function Client.contentAsync(_novel_id, chapter_id, cb)
-    local cancelled, job = false, nil
-    job = get("/novel/chapterGetInfo", "cid=" .. chapter_id .. "&server=0", Client.cookie(), function(wire, err)
+    local cancelled, job, pending = false, nil, true
+    local initial = get("/novel/chapterGetInfo", "cid=" .. chapter_id .. "&server=0", Client.cookie(), function(wire, err)
+        pending = false
         if cancelled then return end
         if not wire then cb(nil, err); return end
         job = Job.run(function()
@@ -347,9 +424,10 @@ function Client.contentAsync(_novel_id, chapter_id, cb)
             on_cancelled = function() end,
         })
     end)
+    if pending then job = initial end
     return { cancel = function()
         cancelled = true
-        job:cancel()
+        if job then job:cancel() end
     end }
 end
 
@@ -359,16 +437,23 @@ end
 ---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|"verify"|nil)
 ---@return { cancel: fun() }
 function Client.openContentAsync(novel_id, chapter_id, cb)
-    local cancelled, job = false, nil
-    job = Client.contentAsync(novel_id, chapter_id, function(text, err, kind)
+    local cancelled, job, pending = false, nil, true
+    local initial = Client.contentAsync(novel_id, chapter_id, function(text, err, kind)
+        pending = false
         if cancelled then return end
         if kind ~= "verify" then cb(text, err, kind); return end
-        job = require("source.changpei.verify").new(function(ok, verify_err)
+        local verifying = true
+        local verification = require("source.changpei.verify").new(function(ok, verify_err)
+            verifying = false
             if cancelled then return end
             if not ok then cb(nil, verify_err); return end
-            job = Client.contentAsync(novel_id, chapter_id, cb)
+            job = Client.contentAsync(novel_id, chapter_id, function(value, reason, result_kind)
+                if not cancelled then cb(value, reason, result_kind) end
+            end)
         end)
+        if verifying then job = verification end
     end)
+    if pending then job = initial end
     return { cancel = function()
         cancelled = true
         if job then job:cancel() end

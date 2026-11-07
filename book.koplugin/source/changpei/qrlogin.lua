@@ -24,21 +24,31 @@ local DEADLINE = 180
 
 local STATUS_WAITING_AUTH, STATUS_REJECT, STATUS_APPROVED = 2, 3, 4
 
---- 一帧 gRPC-web：0x00 + 4 字节长度 + protobuf。只有一个字符串字段（默认 1，字段号 < 16、值 < 128 字节）。
+---- 一帧 gRPC-web：0x00 + 4 字节长度 + protobuf 字符串字段。
 ---@param value string
 ---@param field? integer
 ---@return string
 function QRLogin.frame(value, field)
-    local msg = string.char((field or 1) * 8 + 2, #value) .. value
+    local length, bytes = #value, {}
+    repeat
+        local byte = length % 128
+        length = math.floor(length / 128)
+        bytes[#bytes + 1] = string.char(byte + (length > 0 and 128 or 0))
+    until length == 0
+    local msg = string.char((field or 1) * 8 + 2) .. table.concat(bytes) .. value
     local n = #msg
-    return string.char(0, 0, 0, math.floor(n / 256), n % 256) .. msg
+    return string.char(0, math.floor(n / 16777216) % 256, math.floor(n / 65536) % 256,
+        math.floor(n / 256) % 256, n % 256) .. msg
 end
 
 --- 解一帧里的顶层 protobuf 字段：varint → 数字，其余 → 字符串；同号取首个。
 ---@param body string
 ---@return table<integer, number|string>
 function QRLogin.decode(body)
-    return QRLogin.fields(#body < 5 and "" or body:sub(6))
+    if #body < 5 or body:byte(1) ~= 0 then return {} end
+    local length = body:byte(2) * 16777216 + body:byte(3) * 65536 + body:byte(4) * 256 + body:byte(5)
+    if length > #body - 5 then return {} end
+    return QRLogin.fields(body:sub(6, 5 + length))
 end
 
 --- 解一段裸 protobuf（不带 gRPC 帧头）。
@@ -108,6 +118,7 @@ end
 ---@param value string
 ---@param cb fun(fields: table|nil, res: table|nil, err: string|nil)
 function QRLogin:_call(method, value, cb)
+    local gen, pending = self.generation, true
     local headers = {
         ["Content-Type"] = "application/grpc-web+proto",
         ["X-Grpc-Web"] = "1",
@@ -119,11 +130,14 @@ function QRLogin:_call(method, value, cb)
     }
     local cookie = cookieHeader(self.jar)
     if cookie ~= "" then headers["Cookie"] = cookie end
-    self.job = Request.post(ORIGIN .. "/cp.UserExternal/" .. method, QRLogin.frame(value), {
+    local job = Request.post(ORIGIN .. "/cp.UserExternal/" .. method, QRLogin.frame(value), {
         headers = headers,
         content_type = "application/grpc-web+proto",
-        timeout = require("http.timeout").net(0.5),
+        -- 官网待扫码响应会挂起约 30 秒，不能套用普通请求的 15 秒超时。
+        timeout = method == "qrcode_polling" and DEADLINE or require("http.timeout").net(0.5),
     }, function(body, err, res)
+        pending = false
+        if gen ~= self.generation then return end
         self.job = nil
         if not body then cb(nil, res, err and tostring(err) or _("请求失败")); return end
         takeCookies(self.jar, res)
@@ -131,6 +145,7 @@ function QRLogin:_call(method, value, cb)
         if status ~= 0 then cb(nil, res, "grpc " .. status); return end
         cb(QRLogin.decode(body), res)
     end)
+    if pending then self.job = job end
 end
 
 function QRLogin:_closeDialog()
@@ -158,15 +173,21 @@ end
 ---@param token string
 ---@param started integer
 function QRLogin:_poll(gen, token, started)
-    self:_call("qrcode_polling", token, function(fields)
+    if os.time() - started >= DEADLINE then self:_retry(_("二维码已过期")); return end
+    self:_call("qrcode_polling", token, function(fields, _res, err)
         if gen ~= self.generation then return end
         if not fields then
             -- grpc-status 非 0：二维码失效；网络错误同样重新获取，比无声地一直轮询好
-            self:_retry(_("二维码已过期"))
+            self:_retry(err and err:match("^grpc ") and _("二维码已过期") or err or _("请求失败"))
             return
         end
         local status = fields[1]
         if status == STATUS_APPROVED then
+            if self.saved_cookie ~= require("source.changpei.client").cookie() then
+                self:cancel()
+                self:toast(_("账号已变化，请重新登录"))
+                return
+            end
             local cookie = self.jar.PHPSESSID and cookieHeader(self.jar)
             -- login_res(2).web_data(4).token(1)：网页端后续请求靠它认人；refresh_token(2) 在 token 失效时换新的
             local login = type(fields[2]) == "string" and QRLogin.fields(fields[2]) or {}
@@ -182,8 +203,10 @@ function QRLogin:_poll(gen, token, started)
             self.on_cookie(cookie)
         elseif status == STATUS_REJECT then
             self:_retry(_("已在手机上拒绝登录"))
-        elseif os.time() - started > DEADLINE then
+        elseif status == 5 or os.time() - started >= DEADLINE then
             self:_retry(_("二维码已过期"))
+        elseif status ~= 1 and status ~= STATUS_WAITING_AUTH then
+            self:_retry(_("响应无效"))
         else
             if status == STATUS_WAITING_AUTH and not self.scanned then
                 self.scanned = true
@@ -198,6 +221,7 @@ end
 
 function QRLogin:start()
     self:cancel()
+    self.saved_cookie = require("source.changpei.client").cookie()
     local gen = self.generation
     local device = require("utils.random").hex(16)
     self.jar, self.scanned = { _c_n_ = device, _c_n_n_ = device }, false
@@ -218,14 +242,18 @@ end
 ---@param cb fun(ok: boolean)
 function QRLogin:_session(cb)
     local client = require("source.changpei.client")
-    self.job = Request.get(ORIGIN .. "/webapi/system/init", {
+    local gen, pending = self.generation, true
+    local job = Request.get(ORIGIN .. "/webapi/system/init", {
         headers = { ["Client"] = "pc", ["User-Agent"] = client.USER_AGENT, ["Cookie"] = cookieHeader(self.jar) },
         timeout = require("http.timeout").net(0.5),
     }, function(_body, _err, res)
+        pending = false
+        if gen ~= self.generation then return end
         self.job = nil
         if res then takeCookies(self.jar, res) end
         cb(self.jar.PHPSESSID ~= nil)
     end)
+    if pending then self.job = job end
 end
 
 ---@param gen integer
