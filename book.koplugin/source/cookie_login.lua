@@ -18,7 +18,8 @@ local _ = require("gettext")
 ---@field cookie_hint string 粘贴窗提示
 ---@field logout_text string 退出确认文案
 ---@field loggedIn fun(): boolean
----@field checkAsync fun(cookie: string, cb: fun(ok: boolean, err: string|nil)) 校验 Cookie，通过才保存
+---@field checkAsync fun(cookie: string, cb: fun(ok: boolean, err: string|nil, account: table|nil)): HttpJob|nil 校验 Cookie，通过才保存
+---@field commit fun(cookie: string, account: table|nil, cb: fun(ok: boolean, err: string|nil)): HttpJob|nil 可选的源级账号边界与保存
 ---@field store fun(cfg: table, cookie: string)|nil 写入配置；默认 cfg.cookie = cookie
 ---@field clear fun(cfg: table)|nil 退出时清配置；默认 cfg.cookie = nil
 
@@ -82,8 +83,20 @@ end
 ---@param cb fun(ok: boolean, err: string|nil)
 function CookieLogin.save(spec, cookie, cb)
     if cookie == "" then return cb(false, _("没有读到 Cookie")) end
-    spec.checkAsync(cookie, function(ok, err)
+    local cancelled, job, pending = false, nil, true
+    local check = spec.checkAsync(cookie, function(ok, err, account)
+        pending = false
+        if cancelled then return end
         if not ok then return cb(false, err or _("登录失败")) end
+        if spec.commit then
+            local committing = true
+            local inner = spec.commit(cookie, account, function(saved, reason)
+                committing = false
+                if not cancelled then cb(saved, reason) end
+            end)
+            if committing then job = inner end
+            return
+        end
         local settings = require("utils.settings")
         local cfg = settings.getSource(spec.id)
         if spec.store then spec.store(cfg, cookie) else cfg.cookie = cookie end
@@ -92,6 +105,11 @@ function CookieLogin.save(spec, cookie, cb)
         require("source.registry").reload()
         cb(true)
     end)
+    if pending then job = check end
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
 end
 
 --- 联网后带进度窗校验保存，结果 toast。

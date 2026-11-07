@@ -328,6 +328,7 @@ Assert.len(marks:marks(), 1, "滚动到底后显示入口，不依赖顶端页�
 end_source.enabled = false
 Assert.len(marks:marks(), 0, "关闭开关立即移除章末入口")
 Assert.eq(end_source.calls, 2, "关闭不触发重新拉取或借其它源")
+
 end_source.enabled = true
 Assert.len(marks:marks(), 1, "再次打开开关即恢复入口")
 Assert.eq(end_source.calls, 3)
@@ -349,3 +350,21 @@ Assert.eq(marks:marks()[1].boxes[1].y, 45, "EPUB 末页可同时包含多个 spi
 marks.data[1].total, marks.data[1].badge = 0, "0"
 marks.render_key = nil
 Assert.len(marks:marks(), 1, "独立章节评论区显示 0，不被段落热点的零条过滤规则删掉")
+
+-- 同一源同时提供段评和章末评论：两种目标都保留，仍只有一个公共标记图层。
+ui.view.view_mode = "page"
+ui.document.getVisiblePageCount = function() return 1 end
+current_page = 5
+pages.a0, pages.a1 = 5, 5
+ui.document.getCurrentPos = function() return 0 end
+source.chapterReviewHotspotsAsync = end_source.chapterReviewHotspotsAsync
+source.calls, source.enabled = 0, true
+session = { identity = { source_id = "qidian", stable_id = "combined", chapter_idx = 1, source = source } }
+marks:updateView()
+source.fetches[#source.fetches].cb({ { range = "1", text = "段落", total = 2, pos0 = "a0", pos1 = "a1" } })
+marks:updateView()
+Assert.len(marks.current, 2, "增加章末能力不能挤掉段评")
+Assert.eq(source.calls, 1)
+Assert.eq(marks.current[1].spot.range, "1")
+Assert.eq(marks.current[2].spot.range, "section")
+source.chapterReviewHotspotsAsync = nil
