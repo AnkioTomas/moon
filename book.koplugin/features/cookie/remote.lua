@@ -7,6 +7,7 @@
 
 数据源在 setting.lua 声明 `Setting.browser = { domain, scope, login, check, check_json?, icon, isAuthorized, apply(payload, cb(ok, err)) }`：
 payload 是扩展采集的明文（cookies / local / session），apply 负责校验登录态并保存。
+check 可为函数，每次签发 ticket 时生成签名检查地址；回传绑定当次地址，不重新生成。
 ticket 只在内存里：10 分钟过期；成功后保留回执 2 分钟，重复回调返回同一确认（幂等）。
 
 @module koplugin.book.features.cookie.remote
@@ -23,7 +24,7 @@ local TICKET_TTL = 10 * 60
 local RECEIPT_TTL = 2 * 60
 local CALLBACK = "/api/cookie/login"
 
----@type table<string, { ticket: string, source: string, expires: integer, receipt_until: integer|nil, pending: function[]|nil }>
+---@type table<string, { ticket: string, source: string, check: string, domain: string, expires: integer, receipt_until: integer|nil, pending: function[]|nil }>
 local tickets = {}
 
 ---@param s string
@@ -110,7 +111,7 @@ local function login(params, cb)
     if entry.expires < now then return reply(400, { error = _("授权已过期，请回到网页重新发起") }) end
     if entry.applying then return reply(409, { error = _("正在校验，请稍候") }) end
     local browser = findSource(entry.source)
-    if not browser or payload.domain ~= browser.domain or payload.check ~= browser.check then
+    if not browser or payload.domain ~= browser.domain or payload.domain ~= entry.domain or payload.check ~= entry.check then
         return reply(400, { error = _("授权域名与数据源不符") })
     end
     entry.applying = true
@@ -142,9 +143,12 @@ function Remote.handle(method, action, params, cb)
         local now = os.time()
         sweep(now)
         local ticket = b64url(require("utils.random").bytes(32))
-        tickets[b64url(sha2.hex_to_bin(sha2.sha256(ticket)))] = { ticket = ticket, source = params.source, expires = now + TICKET_TTL }
+        local check = type(browser.check) == "function" and browser.check() or browser.check
+        tickets[b64url(sha2.hex_to_bin(sha2.sha256(ticket)))] = {
+            ticket = ticket, source = params.source, check = check, domain = browser.domain, expires = now + TICKET_TTL,
+        }
         return cb(200, {
-            domain = browser.domain, scope = browser.scope, login = browser.login, check = browser.check, check_json = browser.check_json,
+            domain = browser.domain, scope = browser.scope, login = browser.login, check = check, check_json = browser.check_json,
             ticket = ticket, callback = CALLBACK,
         })
     elseif action == "login" and method == "GET" then
