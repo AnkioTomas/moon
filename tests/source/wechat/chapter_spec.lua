@@ -16,6 +16,9 @@ end
 
 local queries = {}
 local app_err = nil
+local trial = false
+local bom = false
+local txt_zip = false
 
 package.preload["workers.job"] = function()
     return {
@@ -41,7 +44,12 @@ package.preload["source.wechat.eink"] = function()
             if app_err then
                 cb(nil, app_err)
             else
-                local body = opts.query.bookType == "txt" and (string.rep("\0", 257) .. "ustar") or "PK"
+                local body
+                if opts.query.bookType == "txt" and not txt_zip then
+                    body = string.rep("\0", 257) .. "ustar"
+                else
+                    body = "PK"
+                end
                 cb({ body = body, code = 200 })
             end
             return { cancel = function() end }
@@ -65,8 +73,6 @@ local FULL = '<?xml version="1.0"?><html><head><title></title>'
     .. '<?xml version="1.0"?><html><head><title></title></head><body><p>第二段文档</p></body></html>'
 local PLAIN = "\239\187\191第一行 <b>\n  第二行"
 local TRIAL = "“第四路，已过浔阳！”\n这是李善德发明的脚程格眼。..."
-local trial = false
-local bom = false
 
 package.preload["source.wechat.protocol"] = function()
     return {
@@ -85,11 +91,16 @@ package.preload["source.wechat.package"] = function()
             return { dummy = true }
         end,
         chapterHtml = function()
+            if txt_zip then error("TXT ZIP with text entry must not fall back to chapterHtml") end
             if trial then return TRIAL end
             if bom then return "\239\187\191" .. FULL end
             return FULL
         end,
         chapterText = function() return PLAIN end,
+        chapterZipText = function()
+            if txt_zip then return PLAIN end
+            return nil
+        end,
     }
 end
 
@@ -244,4 +255,19 @@ do
     Assert.is_nil(html_out)
     Assert.eq(err, "加载失败")
     Assert.eq(#queries, n + 1)
+end
+
+do
+    -- 部分 TXT 章回包是加密 ZIP（非 ustar）：走 chapterZipText，不按 HTML 清单解析。
+    txt_zip = true
+    local body, range_source, format, err
+    Chapter.fetchHtmlAsync("book", { uid = "1595", format = "txt" }, function(html, e, raw, fmt)
+        body, err, range_source, format = html, e, raw, fmt
+    end)
+    txt_zip = false
+    Assert.is_nil(err)
+    Assert.eq(range_source, PLAIN)
+    Assert.eq(format, "txt")
+    Assert.is_true(body:find("<p>", 1, true) ~= nil)
+    Assert.eq(queries[#queries].bookType, "txt")
 end

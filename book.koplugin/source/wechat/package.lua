@@ -134,6 +134,9 @@ function Package.chapterHtml(files, uid)
     local info = files["info.txt"] and JSON.decode(files["info.txt"])
     for _idx, chapter in ipairs(info and info.chapters or {}) do
         if tostring(chapter.chapterUid) == tostring(uid) then
+            if type(chapter.files) ~= "table" or type(chapter.files[1]) ~= "string" then
+                return nil, "package: no HTML files for chapter " .. tostring(uid)
+            end
             local html = files[chapter.files[1]]
             if not html then return nil, "package: missing " .. tostring(chapter.files[1]) end
             for i = 2, #chapter.files do
@@ -173,14 +176,11 @@ local function untar(data)
 end
 
 --- TXT 章节包：条目名是 ``bookId_uid``，续篇是 ``bookId_uid_...``。info.txt 是目录，不是正文。
----@param data string tar
+---@param entries { name: string, data: string }[]
 ---@param book_id string
 ---@param uid string|number
 ---@return string|nil text
----@return string|nil err
-function Package.chapterText(data, book_id, uid)
-    local entries, err = untar(data)
-    if not entries then return nil, err end
+local function readTextEntries(entries, book_id, uid)
     local prefix = book_id .. "_" .. tostring(uid)
     local parts = {}
     for _idx, entry in ipairs(entries) do
@@ -189,13 +189,39 @@ function Package.chapterText(data, book_id, uid)
             parts[#parts + 1] = entry
         end
     end
-    table.sort(parts, function(a, b) return a.name < b.name end)
-    if #parts == 0 then return nil, "tar: chapter " .. tostring(uid) .. " not in package" end
+    -- TAR 主文件是 bookId_uid；ZIP 主文件常见 bookId_uid_o。二者都排在 _000N 续篇前。
+    local function rank(entry)
+        local name = entry.name:match("([^/]+)$")
+        if name == prefix or name == prefix .. "_o" then return "" end
+        return name:sub(#prefix + 2)
+    end
+    table.sort(parts, function(a, b)
+        local ra, rb = rank(a), rank(b)
+        if ra ~= rb then return ra < rb end
+        return a.name < b.name
+    end)
+    if #parts == 0 then return nil end
     local chunks = {}
     for i, entry in ipairs(parts) do
         chunks[i] = Text.stripBom(entry.data)
     end
     return table.concat(chunks)
+end
+
+function Package.chapterText(data, book_id, uid)
+    local entries, err = untar(data)
+    if not entries then return nil, err end
+    local text = readTextEntries(entries, book_id, uid)
+    if text then return text end
+    return nil, "tar: chapter " .. tostring(uid) .. " not in package"
+end
+
+function Package.chapterZipText(files, book_id, uid)
+    local entries = {}
+    for name, data in pairs(files) do
+        entries[#entries + 1] = { name = name, data = data }
+    end
+    return readTextEntries(entries, book_id, uid)
 end
 
 return Package
