@@ -26,10 +26,20 @@ package.loaded["utils.log"] = {
 }
 local offline = false
 local local_progress = {}
+local progress_list_calls = 0
 package.loaded["ui/network/manager"] = { isConnected = function() return not offline end }
 -- 本地卷进度（ProgressDB）：卷行在阅读器关闭时写回，比 toc 快照新。
 package.loaded["book.progress_db"] = {
     get = function(_source_id, stable_id) return local_progress[stable_id] end,
+    list = function(_source_id, series_id)
+        progress_list_calls = progress_list_calls + 1
+        local out = {}
+        local prefix = tostring(series_id) .. ":"
+        for stable, row in pairs(local_progress) do
+            if stable:sub(1, #prefix) == prefix then out[stable] = row end
+        end
+        return out
+    end,
 }
 package.loaded["source.registry"] = {
     resolve = function()
@@ -46,6 +56,7 @@ local tracked = {}
 local function reset(overrides)
     calls = { enqueue = {}, delete = {}, retry = {}, pause = 0, resume = 0, resume_page = 0, chapters = 0 }
     local_progress = {}
+    progress_list_calls = 0
     tracked = {}
     st.probe = { ok = true, state = "enhanced", capabilities = {
         status = true, queue = true, queue_control = true,
@@ -1185,5 +1196,18 @@ list:paintTo(Kit.canvas(), 0, 0)
 Assert.not_nil(findRow(list, "继续阅读 · 第 3 卷"), "最新完成状态不能被刷新前的 ctx 遮住")
 Assert.eq(VolumeList.continueTarget(series, toc).entry.chapterId, 603,
     "对外目标和列表使用同一套 kamare 完成事实")
+
+-- 目标计算不逐卷读 resumePage（那是列表行「待同步」才需要的）。
+reset()
+st.plan = { { chapterId = 601, pages = 100, read = true, bytes = 1 } }
+VolumeList.continueTarget(series, toc)
+Assert.eq(calls.resume_page, 0, "续读目标不读 resume_page")
+
+
+-- 卷进度整列一次查询，不再逐卷 get。
+reset()
+list = open()
+Assert.eq(progress_list_calls, 1, "打开列表只读一次整列进度")
+
 
 return true
