@@ -65,6 +65,8 @@ local TitleBar = require("ui.themes.widgets.titlebar")
 ---@field on_toggle fun(value: any, checked: boolean, item: table)|nil
 ---@field page integer
 ---@field per_page integer
+---@field header table|fun(width: number): table|nil 标题栏下方的固定内容（卷列表的续读卡）
+---@field row_height number|nil 行高（逻辑像素）；nil 用主题行高
 local List = Modal:extend{
     title = nil,
     subtitle = nil,
@@ -77,7 +79,17 @@ local List = Modal:extend{
     current = nil,
     on_select = nil,
     on_toggle = nil,
+    header = nil,
+    row_height = nil,
 }
+
+--- 固定头部：给了函数就每次重建（续读进度会变），给了控件就复用。
+---@return table|nil
+function List:buildHeader()
+    local header = self.header
+    if type(header) == "function" then header = header(self.row_w) end
+    return header
+end
 
 function List:init()
     self.covers_fullscreen = not self.centered
@@ -88,13 +100,16 @@ end
 function List:updateView()
     local t = self.theme
     self.row_w = self.centered and self:innerWidth() or self.dimen.w
-    self.pitch = Row.height(false) + Theme.px(t.row.divider)
+    self.row_h = self.row_height and Theme.px(self.row_height) or Row.height(false)
+    self.pitch = self.row_h + Theme.px(t.row.divider)
+    self.header_widget = self:buildHeader()
+    local header_h = self.header_widget and self.header_widget:getSize().h or 0
     local chrome = TitleBar.height() + (self.tabs and Tabbar.height() or 0)
     if self.centered then
         self:setDialog{ title = self.title }
         chrome = self[1]:getSize().h + Theme.px(t.space.sm) * 2
     end
-    chrome = chrome + Theme.px(t.control.height)
+    chrome = chrome + Theme.px(t.control.height) + header_h
     local room = self.dimen.h
     local a = self.anchor
     if type(a) == "table" then
@@ -186,6 +201,9 @@ function List:rebuild()
             image_w = item.image_w,
             image_h = item.image_h,
             title = item.text,
+            subtitle = item.subtitle,
+            height = self.row_height,
+            image_headers = item.image_headers,
             status = status or item.mandatory,
             chevron = item.chevron == true,
             selected = not self.multi and self:checked(item) == true,
@@ -223,14 +241,17 @@ function List:rebuild()
         active = self.tabs.active,
         on_tab = function(id) self:switchTab(id) end,
     })
-    local used = bar:getSize().h + rows:getSize().h
+    self.header_widget = self:buildHeader()
+    local header_h = self.header_widget and self.header_widget:getSize().h or 0
+    local used = bar:getSize().h + header_h + rows:getSize().h
         + (pager and pager:getSize().h or 0) + (tabbar and tabbar:getSize().h or 0)
     local page = VerticalGroup:new{
         align = "left",
         bar,
-        rows,
-        VerticalSpan:new{ width = math.max(0, self.dimen.h - used) },
     }
+    if self.header_widget then page[#page + 1] = self.header_widget end
+    page[#page + 1] = rows
+    page[#page + 1] = VerticalSpan:new{ width = math.max(0, self.dimen.h - used) }
     if pager then page[#page + 1] = pager end
     if tabbar then page[#page + 1] = tabbar end
     self:setPanel(Box:new{ style = { bg = t.color.page }, width = self.dimen.w, height = self.dimen.h, page })
