@@ -304,8 +304,8 @@ function Sheet:rebuild()
     local range = self.pages[self.page]
     if #self.items == 0 then
         body[#body + 1] = Icon.label{ name = "forum", text = self.loaded
-            and (self.snapshot and _("暂无书评") or self.reply_page and _("暂无回复") or _("暂无段评"))
-            or (self.reply_page and _("正在加载回复…") or _("正在加载段评…")),
+            and (self.snapshot and _("暂无书评") or self.reply_page and _("暂无回复") or _("暂无评论"))
+            or (self.reply_page and _("正在加载回复…") or _("正在加载评论…")),
             size = t.control.icon, color = Blitbuffer.Color8(t.color.faint),
             face = "cfont", font_size = t.font.body, gap = Theme.px(t.space.sm) }
     end
@@ -382,7 +382,7 @@ function Sheet:load()
     local job = fetch(source, self.identity, self.spot.range, self.max_idx, function(page, err)
         done, self.job = true, nil
         if not page then
-            Toast:new{ text = err or (self.reply_page and _("无法获取回复") or _("无法获取段评")), timeout = 2 }:show()
+            Toast:new{ text = err or (self.reply_page and _("无法获取回复") or _("无法获取评论")), timeout = 2 }:show()
             self.turn_after_load = false
             if not self.loaded then self:close() end
             return
@@ -390,7 +390,7 @@ function Sheet:load()
         if not self.loaded then self.spot.total = page.total end
         for _idx, item in ipairs(page.items) do self.items[#self.items + 1] = item end
         self.loaded, self.total, self.max_idx = true, page.total, page.max_idx
-        self.more = page.more and #page.items > 0
+        self.more = page.more
         self:paginate()
         if self.turn_after_load and self.page < #self.pages then self.page = self.page + 1 end
         self.turn_after_load = false
@@ -417,9 +417,9 @@ end
 
 --- 打开某句的段评；在线取最新，离线且没缓存由源立即回错。
 ---@param identity BookIdentity 章会话身份（属主源提供 paragraphReviewPageAsync）
----@param spot { range: string, text: string, total: integer }
+---@param spot { range: string, text: string, total: integer, heading?: string }
 function Sheet.open(identity, spot)
-    Sheet:new{ identity = identity, spot = spot }:show()
+    Sheet:new{ identity = identity, spot = spot, title = spot.heading }:show()
 end
 
 --- 打开某条评论的回复。range 带评论 id，引用是这条评论的正文。

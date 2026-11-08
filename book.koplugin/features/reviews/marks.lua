@@ -204,6 +204,18 @@ local function chapterEndTarget(self, identity, source)
         place = function(spots)
             local document = self.ui.document
             local width, height = PageMarks.screenSize(self.ui)
+            if document.info.has_pages then
+                if PageMarks.currentPage(self.ui) ~= document.info.number_of_pages then return {} end
+                local Theme = require("ui.themes")
+                local margin, band = Theme.px(8), Theme.px(28)
+                local box = { x = margin, y = height - self.ui.view.footer:getHeight() - band,
+                    w = width - margin * 2, h = band }
+                local entries = {}
+                for _idx, spot in ipairs(spots) do
+                    entries[#entries + 1] = { entry = { identity = identity, spot = spot }, boxes = { box } }
+                end
+                return entries
+            end
             if self.ui.view.view_mode == "scroll" then
                 local bottom = document:getCurrentPos() + height - self.ui.view.footer:getHeight()
                 if bottom < document.info.doc_height then return {} end

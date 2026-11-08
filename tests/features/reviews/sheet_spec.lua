@@ -14,6 +14,22 @@ end
 
 local Sheet = require("features.reviews.sheet")
 
+do
+    local original_new = Sheet.new
+    ---@type {title?: string}|nil
+    local shown
+    Sheet.new = function(_self, opts)
+        shown = opts
+        return { show = function() end }
+    end
+    Sheet.open({ source_id = "test", stable_id = "book" },
+        { range = "chapter", text = "本章", total = 0, heading = "章节评论" })
+    Assert.eq(shown.title, "章节评论", "章评窗口不误标为段评")
+    Sheet.open({ source_id = "test", stable_id = "book" }, { range = "p1", text = "原句", total = 0 })
+    Assert.is_nil(shown.title, "普通段评保持默认标题")
+    Sheet.new = original_new
+end
+
 local function widget(h) return { getSize = function() return { w = 10, h = h } end } end
 
 --- 引用高 quote_h，卡片自然高依次为 heights（按所在页可用高度截断），卡片间隔 10，正文区高 100。
@@ -75,6 +91,27 @@ do -- 回复页走 paragraphReviewRepliesAsync，评论 id 在 spot.range
     Assert.eq(fake.total, 4)
     Assert.len(fake.items, 1)
     Assert.eq(fake.max_idx, 2)
+    Assert.is_false(fake.more)
+end
+
+do
+    local offsets = {}
+    local fake = setmetatable({
+        identity = { source = { paragraphReviewPageAsync = function(_self, _identity, _range, offset, cb)
+            offsets[#offsets + 1] = offset
+            cb({ items = offset == 0 and {} or { { id = "main" } },
+                total = 51, max_idx = offset == 0 and 50 or 51, more = offset == 0 })
+        end } },
+        spot = { range = "chapter", text = "本章", total = 51 },
+        more = true, max_idx = 0, items = {}, page = 1,
+        paginate = function(self) self.pages = { { 1, #self.items } } end,
+        refresh = function() end,
+    }, { __index = Sheet })
+    fake:load()
+    Assert.is_true(fake.more, "过滤后没有主楼不代表源站没有后续页")
+    fake:load()
+    Assert.eq(offsets[2], 50)
+    Assert.len(fake.items, 1)
     Assert.is_false(fake.more)
 end
 
