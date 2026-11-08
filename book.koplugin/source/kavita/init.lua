@@ -1335,9 +1335,6 @@ function Source:toc(series_id, cb)
     local cached = require("source.toc").read(self.id, series_id)
     if cached then return SourceBase.defer(cb, cached) end
     if online() then return self:fetchToc(series_id, cb) end
-    local payload = require("book.books_db").getToc(self.id, series_id)
-    local ok, stale = pcall(require("json").decode, payload or "")
-    if ok and type(stale) == "table" then return SourceBase.defer(cb, stale) end
     return SourceBase.defer(cb, nil, _("网络不可用，请先连接 Wi-Fi"))
 end
 
@@ -1350,11 +1347,6 @@ function Source:statsIdentities(identity)
     local series_id, chapter_id = splitId(identity.stable_id)
     if chapter_id then return nil end
     local toc = require("source.toc").read(self.id, series_id)
-    if not toc then
-        local payload = require("book.books_db").getToc(self.id, series_id)
-        local ok, decoded = pcall(require("json").decode, payload or "")
-        if ok and type(decoded) == "table" then toc = decoded end
-    end
     if type(toc) ~= "table" or #toc <= 1 then return nil end
     local ids = {}
     for _idx, entry in ipairs(toc) do

@@ -142,7 +142,8 @@ function Mapper.toc(html)
             idx = #toc + 1,
             uid = href,
             title = Text.trim(Text.xmlDecode(text)),
-            origin = Text.absoluteUrl(BASE, href),
+            -- 客户端同时接受站内路径与旧绝对地址；不用为每章再造一条带相同长前缀的字符串。
+            origin = href,
         }
     end
     return toc

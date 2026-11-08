@@ -30,6 +30,7 @@ package.preload["utils.paths"] = function()
     return {
         chapterPath = function(_, idx) return tmp .. "/" .. idx .. ".html" end,
         ensureDir = function() return true end,
+        dbPath = function() return tmp .. "/toc.sqlite3" end,
     }
 end
 package.preload["book.progress_db"] = function()

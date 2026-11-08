@@ -53,7 +53,13 @@ local online = true
 package.loaded["ui/network/manager"] = { isConnected = function() return online end }
 local ops
 local toc = { { idx = 1, uid = path } }
-package.loaded["source.toc"] = { read = function() return toc end, put = function() return false end }
+package.loaded["source.toc"] = {
+    readAsync = function(_source_id, _stable_id, cb) return require("source.base").defer(cb, toc) end,
+    parseAsync = function(_source_id, _stable_id, parse, cb)
+        Assert.len(parse(), 1)
+        return require("source.base").defer(cb, nil, "章节目录保存失败")
+    end,
+}
 package.loaded["source.chapter"] = {
     openAsync = function(_source, _identity, _book, _options, options) ops = options end,
 }
@@ -85,5 +91,6 @@ source.client.bookAsync = function(_self, _id, cb)
     cb('<ul id="ul_all_chapters"><li><a href="' .. path .. '" title="章">章节</a></li></ul>')
 end
 source:refreshTocAsync({ stable_id = "9" }, done)
+Stubs.flush()
 Assert.is_nil(result)
 Assert.eq(reason, "章节目录保存失败")

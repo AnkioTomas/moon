@@ -41,3 +41,21 @@ end
 
 Assert.eq(Position.fraction({ doc_fraction = -1 }, nil), 0)
 Assert.eq(Position.fraction({ doc_fraction = 2 }, nil), 1)
+
+-- 冷恢复期间仍保存当前章 / 精确位置，但章末不能把全书误标为已读。
+do
+    local snapshot = {
+        doc_fraction = 1, identity = { chapter_idx = 3 },
+        chapter = { fallback_fraction = 0.05 },
+        ui = { rolling = { xpointer = "last-line" } },
+    }
+    local pos = Position.position(snapshot, nil)
+    Assert.eq(pos.fraction, 0.05)
+    Assert.eq(pos.chapter_idx, 3)
+    Assert.eq(pos.chapter_fraction, 1)
+    Assert.eq(pos.locator, "last-line")
+    Assert.eq(Position.fraction(snapshot, {}), 0.05)
+    Assert.eq(Position.fraction(snapshot, { {}, {}, {}, {} }), 0.75, "目录恢复后立即用实际章数折算")
+    snapshot.identity = {}
+    Assert.eq(Position.fraction(snapshot, nil), 1, "整书文档不受冷目录状态影响")
+end

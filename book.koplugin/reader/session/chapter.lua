@@ -9,7 +9,8 @@ local _ = require("gettext")
 
 ---@class ReaderChapterSession
 ---@field identity BookIdentity|nil 书籍身份与属主源
----@field toc BookChapter[] 从 books.toc 恢复的目录快照；开书 / 临近章末后台静默拉新，失败仍用这份
+---@field toc BookChapter[]|nil 目录快照；冷启动异步恢复，后台刷新失败仍用这份
+---@field fallback_fraction number|nil 目录未恢复时保留已知全书进度，不能把章内比例当全书比例
 ---@field open_refresh boolean|nil 新开这本书：afterBootstrap 应尝试拉目录（节流挡住则保留到下次）
 ---@field request { cancel: fun() }|nil 在途章节打开任务
 ---@field target { path: string, within: number|nil, direction: "prev"|"next"|nil, xpointer: string|nil }|nil 已下载、等待 ReaderReady 的目标
@@ -187,13 +188,17 @@ function Chapter.onReaderReady(plugin, session)
         Chapter.clearActiveChapter(nil)
         -- 有缓存就先装上：离线时它是唯一真相（目录展示、章末切章都靠它）。
         -- 拉新交给 afterBootstrap 后台静默做，失败不动这份。
-        local toc = require("source.toc").read(identity.source_id, identity.stable_id)
+        local toc = require("source.toc").peek(identity.source_id, identity.stable_id)
         chapter = {
             identity = identity,
             toc = toc,
             open_refresh = true,
             switching = false,
         }
+        if not toc or #toc == 0 then
+            local progress = require("book.progress_db").get(identity.source_id, identity.stable_id)
+            chapter.fallback_fraction = progress and progress.fraction or 0
+        end
         chapter_session = chapter
     end
 
@@ -223,6 +228,20 @@ function Chapter.afterBootstrap(plugin, session)
     -- 属主源可能已不在（第三方源插件被卸载）：章节照读，只是不发源事件、不预取。
     local source = chapter and session.identity.source
     if not source then return end
+    if chapter.toc == nil then
+        if chapter.toc_job then return end
+        local identity = chapter.identity
+        chapter.toc_job = require("source.toc").readAsync(identity.source_id, identity.stable_id, function(toc, err)
+            chapter.toc_job = nil
+            if chapter_session ~= chapter or session.chapter ~= chapter then return end
+            chapter.toc = toc or {}
+            if toc and #toc > 0 then chapter.fallback_fraction = nil end
+            Snapshot.refresh(session)
+            require("ui/uimanager"):setDirty(plugin.ui.dialog, "ui")
+            if not err then Chapter.afterBootstrap(plugin, session) end
+        end)
+        return
+    end
     source:onEvent("chapter_changed", {
         identity = session.identity,
         position = require("reader.session.progress").position(session),
@@ -268,6 +287,7 @@ function Chapter.afterBootstrap(plugin, session)
             return
         end
         chapter.toc = toc
+        chapter.fallback_fraction = nil
         Snapshot.refresh(session)
         require("ui/uimanager"):setDirty(plugin.ui.dialog, "ui")
         schedulePrefetch(chapter)
