@@ -6,6 +6,7 @@ book.progress_db：pending_progress 表 CRUD（待上传进度）
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
+local SQLite = require("lua-ljsqlite3/init")
 
 local function stubTask(in_sub)
     package.preload["utils.task"] = function()
@@ -117,6 +118,7 @@ local function loadProgress(connection)
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
+    package.loaded["lua-ljsqlite3/init"] = nil
     package.loaded["utils.db"] = nil
     package.loaded["book.progress_db"] = nil
     local DbBase = require("utils.db")
@@ -308,6 +310,7 @@ do
                 { 2000, 1000 },
                 { 1, 1 },
                 { nil, nil },
+                { 0, 0 },
             }, 2
         end,
     })
@@ -418,6 +421,7 @@ do
                 { 1000, 2000 },
                 { 0, 1 },
                 { '{"fraction":0.5,"chapter_idx":3}', nil },
+                { 1, 0 },
             }, 2
         end,
     })
@@ -427,6 +431,7 @@ do
     Assert.eq(#rows, 2)
     Assert.eq(rows[1].source_id, "moon")
     Assert.eq(rows[1].stable_id, "a.epub")
+    Assert.eq(rows[1].decision_pending, 1)
     Assert.eq(rows[1].fraction, 0.5)
     Assert.eq(rows[1].chapter_idx, 3)
     Assert.eq(rows[1].chapter_title, "第三章")
@@ -465,7 +470,7 @@ do
             return {
                 { "moon" }, { "queued.epub" }, { 0.3 },
                 { nil }, { nil }, { nil }, { nil }, { nil }, { nil }, { nil },
-                { 99 }, { 0 }, { nil },
+                { 99 }, { 0 }, { nil }, { 0 },
             }, 1
         end,
     })
@@ -539,4 +544,42 @@ do
 
     DbBase.close()
     clearMods()
+end
+
+-- 真实 SQLite：旧表增量迁移；本地采样和重启不丢未决保护。
+do
+    local Config = require("support.config")
+    local path = Config.dir() .. "/progress_decision_spec.sqlite3"
+    for _, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(path .. suffix) end
+    package.preload["lua-ljsqlite3/init"] = function() return SQLite end
+    local connection = SQLite.open(path)
+    connection:exec([[CREATE TABLE pending_progress (
+        source_id TEXT NOT NULL, stable_id TEXT NOT NULL, fraction REAL,
+        chapter_idx INTEGER, chapter_title TEXT, chapter_fraction REAL,
+        page INTEGER, total_pages INTEGER, locator TEXT, extra TEXT,
+        updated_at INTEGER NOT NULL, sync_status INTEGER NOT NULL DEFAULT 0, synced TEXT,
+        PRIMARY KEY(source_id, stable_id));]])
+    connection:close()
+    package.preload["utils.paths"] = function()
+        return { dbPath = function() return path end, ensureSettings = function() end }
+    end
+    package.loaded["utils.paths"] = nil
+    local Base = require("utils.db")
+    local ProgressDB = require("book.progress_db")
+    Assert.is_true(ProgressDB.upsert("moon", "decision", { fraction = 0.4, updated_at = 1 }))
+    Assert.is_true(ProgressDB.setDecisionPending("moon", "decision", true))
+    Assert.is_true(ProgressDB.upsert("moon", "decision", { fraction = 0.5, updated_at = 2 }))
+    Assert.eq(ProgressDB.get("moon", "decision").decision_pending, 1, "采样不解除未决保护")
+    Base.close()
+    Assert.not_nil(Base.open())
+    local row = ProgressDB.get("moon", "decision")
+    Assert.eq(row.fraction, 0.5)
+    Assert.eq(row.sync_status, 0)
+    Assert.eq(row.decision_pending, 1, "重开数据库仍保留未决脏行")
+    Assert.is_true(ProgressDB.adoptRemote("moon", "decision", { fraction = 0.8 }))
+    Assert.is_true(ProgressDB.setDecisionPending("moon", "decision", false))
+    Assert.eq(ProgressDB.get("moon", "decision").decision_pending, 0)
+    Base.close()
+    clearMods()
+    for _, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(path .. suffix) end
 end

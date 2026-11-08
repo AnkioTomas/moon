@@ -32,17 +32,30 @@ function Logout.abort(source_id)
     end
 end
 
---- 先删凭证并丢掉内存里的源实例，再清本地记录。清库失败也保持登出：宁可本地残留，不许带着凭证改书架。
+--- 退出与换号共用清理；不弹提示，不发远端删书请求。
 ---@param source_id string
 ---@param clear fun()
 ---@return boolean
-function Logout.perform(source_id, clear)
+function Logout.clear(source_id, clear)
+    local snapshot = require("reader.session").current()
+    if snapshot and snapshot.identity and snapshot.identity.source_id == source_id then snapshot.ui:onClose() end
+    require("source.auth").beginLogin(source_id)
     Logout.abort(source_id)
     clear()
     local Registry = require("source.registry")
     Registry.invalidate()
     local forgotten = require("book.store").forgetSource(source_id)
-    Registry.reload()
+    if not forgotten then Registry.reload() end
+    return forgotten
+end
+
+--- 清库失败也保持登出：宁可本地残留，不许带着凭证改书架。
+---@param source_id string
+---@param clear fun()
+---@return boolean
+function Logout.perform(source_id, clear)
+    local forgotten = Logout.clear(source_id, clear)
+    if forgotten then require("source.registry").reload() end
     require("ui.themes.widgets.toast"):new{
         text = forgotten and _("已退出登录") or _("清除本地记录失败"),
         timeout = forgotten and 2 or 3,

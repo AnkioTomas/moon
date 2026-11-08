@@ -7,6 +7,30 @@ local calls = {}
 Auth.onExpired(function(id, msg) calls[#calls + 1] = { id = id, msg = msg } end)
 
 do
+    local first = Auth.beginLogin("version-test")
+    Auth.ok("version-test")
+    Assert.is_true(first(), "普通接口成功不使登录尝试失效")
+    local second = Auth.beginLogin("version-test")
+    Assert.is_false(first(), "新登录尝试使旧回包失效")
+    Assert.is_true(second())
+    Auth.beginLogin("another-source")
+    Auth.reset()
+    Assert.is_true(second(), "别的源登录和重载只重置失效提示，不改变本源账号版本")
+    Auth.beginLogin("version-test")
+    Assert.is_false(second(), "退出使用同一版本边界")
+end
+
+do
+    local manager = package.loaded["ui/uimanager"]
+    local preload = package.preload["ui/uimanager"]
+    package.loaded["ui/uimanager"] = nil
+    package.preload["ui/uimanager"] = function() error("UI initialization failed") end
+    Assert.errors(function() Auth.ok("load-failure") end, "UI initialization failed")
+    package.loaded["ui/uimanager"] = manager
+    package.preload["ui/uimanager"] = preload
+end
+
+do
     Assert.is_false(Auth.expired("moon"))
     Assert.eq("bad", Auth.expire("moon", "bad"))
     Assert.is_true(Auth.expired("moon"))

@@ -208,6 +208,46 @@ do
 end
 
 -- 修订号严格递增：同一秒连续取号也不重复。
+do
+    local identity = { source_id = "decisions", stable_id = "held.epub" }
+    local state = Progress.decision(identity)
+    state.phase = "pulling"
+    Assert.is_false(Progress.canPush(identity), "拉取中不能抢先推旧位置")
+    local held = {
+        source_id = identity.source_id, stable_id = identity.stable_id,
+        fraction = 0.4, updated_at = 70, sync_status = 0, decision_pending = 1,
+    }
+    rows[#rows + 1] = held
+    state.phase = "choosing"
+    Assert.is_false(Progress.canPush(identity))
+    Progress.closeDecision(identity)
+    Assert.is_false(Progress.canPush(identity), "关书后未决标记仍保护脏行")
+    rows[#rows + 1] = {
+        source_id = identity.source_id, stable_id = "ready.epub",
+        fraction = 0.7, updated_at = 71, sync_status = 0,
+    }
+    local sent = {}
+    ---@type SyncResult|nil
+    local result
+    local source = {
+        id = identity.source_id,
+        putProgressAsync = function(_self, ref, _pos, cb)
+            sent[#sent + 1] = ref.stable_id
+            cb(true)
+        end,
+    }
+    Progress.syncAsync(source, { dirty_only = true }, function(value) result = value end)
+    Stubs.flush()
+    Assert.eq(table.concat(sent, ","), "ready.epub", "整源推脏跳过未决书，继续处理其它书")
+    Assert.eq(result.deferred, 1)
+    Assert.eq(held.sync_status, 0, "延期不是上传成功，不能清脏")
+    held.decision_pending = 0
+    Assert.is_true(Progress.canPush(identity))
+    Progress.syncAsync(source, { dirty_only = true })
+    Stubs.flush()
+    Assert.eq(sent[2], "held.epub", "决议后脏行仍可收敛")
+end
+
 local r1 = Progress.nextRevision()
 Assert.is_true(Progress.nextRevision() > r1)
 

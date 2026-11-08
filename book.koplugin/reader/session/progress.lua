@@ -13,9 +13,7 @@ local Text = require("utils.text")
 local T = require("ffi/util").template
 local _ = require("gettext")
 
-local ReaderProgress = {
-    asked_conflicts = {},
-}
+local ReaderProgress = {}
 
 --- 当前 ProgressPosition；位置完全来自 ReaderSession 快照。
 ---@param snapshot ReaderSessionSnapshot
@@ -568,6 +566,14 @@ local function adoptCloud(id, remote_pos)
     if live and isSameBook(id) then
         applyChosenPos(live.ui, live.identity, remote_pos, remote_pos.fraction, true)
     end
+    return true
+end
+
+local function resolveDecision(id, state)
+    if not ProgressDB.setDecisionPending(id.source_id, id.stable_id, false) then
+        error("book.progress resolve decision failed: " .. id.stable_id)
+    end
+    state.phase, state.resolved, state.dialog = "ready", true, nil
 end
 
 --- 本地与云端进度不一致：询问用户用哪个（本次阅读会话只问一次）。
@@ -577,30 +583,35 @@ end
 ---@param local_pos ProgressPosition
 ---@param remote_pos ProgressPosition
 local function askProgressConflict(id, snapshot, local_pos, remote_pos)
-    local key = id.source_id .. "\31" .. id.stable_id
-    if ReaderProgress.asked_conflicts[key] then return end
-    -- 弹出即记：弹窗未答时再来一次 pull（换章 / 唤醒）不能叠第二个窗。
-    ReaderProgress.asked_conflicts[key] = true
-    snapshot.progress_sync_ready = false
+    local state = Progress.decision(id)
+    if state.resolved then return end
+    state.phase = "choosing"
+    if not ProgressDB.get(id.source_id, id.stable_id) then
+        local_pos.updated_at = Progress.nextRevision()
+        if not ProgressDB.upsert(id.source_id, id.stable_id, local_pos) then
+            error("book.progress preserve local decision failed: " .. id.stable_id)
+        end
+    end
+    if not ProgressDB.setDecisionPending(id.source_id, id.stable_id, true) then
+        error("book.progress preserve decision failed: " .. id.stable_id)
+    end
     local local_desc = conflictLabel(local_pos, id, snapshot)
     local remote_desc = conflictLabel(remote_pos, id, snapshot)
-    require("ui.themes.widgets.confirm"):new{
+    state.dialog = require("ui.themes.widgets.confirm"):new{
         text = T(_("这本书在本地和云端的阅读位置不同，要从哪里继续读？\n\n本地：%1\n云端：%2"), local_desc, remote_desc),
         ok_text = _("云端"),
         cancel_text = _("本地"),
         -- 两个按钮都是选择：主题 Confirm 点空白 / 返回键等同「取消」= 选本地并上推，必须关掉。
         dismissable = false,
         ok_callback = function()
-            local current = require("reader.session").current()
-            if current and isSameBook(id) then current.progress_sync_ready = true end
-            adoptCloud(id, remote_pos)
+            if not state.active then return end
+            if adoptCloud(id, remote_pos) then resolveDecision(id, state) end
         end,
         cancel_callback = function()
             local Session = require("reader.session")
-            if not Session.current() or not isSameBook(id) then
+            if not state.active or not Session.current() or not isSameBook(id) then
                 return
             end
-            Session.current().progress_sync_ready = true
             -- 落回弹窗上展示的那份本地进度，不能重新采样实时位置：冷打开的落点
             -- 可能比本地记录更靠前，那会把「保留本地」变成覆盖本地。
             local adopt = {}
@@ -610,6 +621,7 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
                 logger.warn("book.progress adopt local failed", id.stable_id)
                 return
             end
+            resolveDecision(id, state)
             local live = Session.current()
             if live and isSameBook(id) then
                 applyChosenPos(live.ui, live.identity, adopt, adopt.fraction, false)
@@ -618,7 +630,8 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
                 id.source:syncProgressAsync({ identity = id, dirty_only = true }, function() end)
             end
         end,
-    }:show()
+    }
+    state.dialog:show()
 end
 
 ---@param text string
@@ -636,21 +649,24 @@ function ReaderProgress.pull(snapshot, opts)
     if not id then return end
     local source = id.source
     if not source or type(source.getProgressAsync) ~= "function" then
-        snapshot.progress_sync_ready = true
         return
     end
+    local state = Progress.decision(id)
+    if state.phase ~= "ready" then return end
     local manual = opts and opts.manual
     local tell = manual and toast or function() end
     if manual then
         if not require("ui/network/manager"):isConnected() then return toast(_("网络不可用，请先连接 Wi-Fi")) end
-        ReaderProgress.asked_conflicts[id.source_id .. "\31" .. id.stable_id] = nil
+        state.resolved = nil
     end
-    snapshot.progress_sync_ready = false
+    state.phase = "pulling"
     -- 数字拷贝：回包前换章会改身份表上的 chapter_idx，不能拿回包时的值当起点。
     local started_idx = tonumber(id.chapter_idx)
     logger.dbg("book.progress reader pull start", id.source_id, id.stable_id,
         id.chapter_idx or "book")
-    source:getProgressAsync(id, function(remote_pos, err, meta)
+    local job = source:getProgressAsync(id, function(remote_pos, err, meta)
+        if not state.active then return end
+        state.job, state.phase = nil, "ready"
         if not isSameBook(id) then
             logger.dbg("book.progress pull skip: document changed")
             return
@@ -658,7 +674,6 @@ function ReaderProgress.pull(snapshot, opts)
         -- 按章阅读时等回包期间可能已切章：拿现在的会话比，不用发起时的快照。
         snapshot = require("reader.session").current()
         id = snapshot.identity
-        snapshot.progress_sync_ready = true
         if type(meta) == "table" and meta.empty then
             logger.dbg("book.progress reader pull empty", id.source_id, id.stable_id)
             return tell(_("云端没有这本书的进度"))
@@ -689,7 +704,8 @@ function ReaderProgress.pull(snapshot, opts)
             -- 本地读得更靠后时不往回拽：页级源比 spine，按章书比章序号。
             local local_ahead = (page_level and spineCmp(local_position, remote_pos) == -1)
                 or (not page_level and chapterLocalAhead(local_position, remote_pos))
-            if manual or (cloud_moved and not (row and row.sync_status == 1) and not local_ahead) then
+            if (row and row.decision_pending == 1) or manual
+                or (cloud_moved and not (row and row.sync_status == 1) and not local_ahead) then
                 logger.dbg("book.progress reader pull conflict", id.source_id, id.stable_id)
                 askProgressConflict(id, snapshot, local_position, remote_pos)
             elseif cloud_moved and not local_ahead then
@@ -704,6 +720,7 @@ function ReaderProgress.pull(snapshot, opts)
             end
             return
         end
+        if row and row.decision_pending == 1 then resolveDecision(id, state) end
         tell(_("本地与云端进度一致"))
         if row and row.sync_status == 0 then
             -- 本地脏版本与云端基本一致时只推不拉；上面已经拿到了最新远端，
@@ -726,6 +743,7 @@ function ReaderProgress.pull(snapshot, opts)
         end
         logger.dbg("book.progress reader pull done", id.source_id, id.stable_id, "matched")
     end)
+    if state.phase == "pulling" then state.job = job end
 end
 
 --- 快捷面板手动推送：先把当前位置落本地（标脏），再推给属主源。
@@ -735,6 +753,7 @@ function ReaderProgress.push(snapshot)
     local id = snapshot.identity
     ReaderProgress.save(snapshot, function(ok)
         if not ok then return toast(_("进度保存失败")) end
+        if not Progress.canPush(id) then return toast(_("等待选择阅读进度")) end
         if not require("ui/network/manager"):isConnected() then
             return toast(_("已保存到本地，联网后自动同步"))
         end
@@ -746,8 +765,10 @@ end
 
 --- 清空「已问过进度冲突」的记忆，下次开书会重新弹 ConfirmBox。
 --- 由 Session.onCloseDocument 在真正关书（非切章）时调用。
-function ReaderProgress.clearConflicts()
-    ReaderProgress.asked_conflicts = {}
+function ReaderProgress.clearConflicts(identity)
+    local snapshot = require("reader.session").current()
+    identity = identity or (snapshot and snapshot.identity)
+    if identity then Progress.closeDecision(identity) end
 end
 
 return ReaderProgress

@@ -19,7 +19,7 @@ local _ = require("gettext")
 ---@field logout_text string 退出确认文案
 ---@field loggedIn fun(): boolean
 ---@field checkAsync fun(cookie: string, cb: fun(ok: boolean, err: string|nil, account: table|nil)): HttpJob|nil 校验 Cookie，通过才保存
----@field commit fun(cookie: string, account: table|nil, cb: fun(ok: boolean, err: string|nil)): HttpJob|nil 可选的源级账号边界与保存
+---@field commit (fun(cookie: string, account: table|nil, cb: fun(ok: boolean, err: string|nil), current: fun(): boolean): HttpJob|nil)|nil 可选的源级账号边界与保存
 ---@field store fun(cfg: table, cookie: string)|nil 写入配置；默认 cfg.cookie = cookie
 ---@field clear fun(cfg: table)|nil 退出时清配置；默认 cfg.cookie = nil
 
@@ -83,22 +83,36 @@ end
 ---@param cb fun(ok: boolean, err: string|nil)
 function CookieLogin.save(spec, cookie, cb)
     if cookie == "" then return cb(false, _("没有读到 Cookie")) end
+    local Auth = require("source.auth")
+    local current = Auth.beginLogin(spec.id)
+    local settings = require("utils.settings")
+    local cfg = settings.getSource(spec.id)
+    local previous = cfg.cookie
+    local function unchanged()
+        return current() and cfg.cookie == previous
+    end
     local cancelled, job, pending = false, nil, true
     local check = spec.checkAsync(cookie, function(ok, err, account)
         pending = false
         if cancelled then return end
+        if not unchanged() then return cb(false, _("账号已变化，请重新登录")) end
         if not ok then return cb(false, err or _("登录失败")) end
         if spec.commit then
             local committing = true
             local inner = spec.commit(cookie, account, function(saved, reason)
                 committing = false
                 if not cancelled then cb(saved, reason) end
-            end)
+            end, unchanged)
             if committing then job = inner end
             return
         end
-        local settings = require("utils.settings")
-        local cfg = settings.getSource(spec.id)
+        if previous and previous ~= cookie then
+            local cleared = require("source.logout").clear(spec.id, function()
+                if spec.clear then spec.clear(cfg) else cfg.cookie = nil end
+                settings.saveSource(spec.id, cfg)
+            end)
+            if not cleared then return cb(false, _("清除本地记录失败")) end
+        end
         if spec.store then spec.store(cfg, cookie) else cfg.cookie = cookie end
         settings.saveSource(spec.id, cfg)
         require("source.auth").ok(spec.id)
@@ -110,6 +124,33 @@ function CookieLogin.save(spec, cookie, cb)
         cancelled = true
         if job then job.cancel() end
     end }
+end
+
+--- 同账号续期保留本地数据；换号直接清旧凭据与本源记录，不询问也不查旧账号。
+---@param source_id string
+---@param cookie string
+---@param account_id string
+---@param cb fun(ok: boolean, err: string|nil)
+---@param current fun(): boolean
+function CookieLogin.commitAccount(source_id, cookie, account_id, cb, current)
+    local Settings = require("utils.settings")
+    local cfg = Settings.getSource(source_id)
+    local previous_id = cfg.account_id
+    if not current() then return cb(false, _("账号已变化，请重新登录")) end
+    local switching = previous_id and previous_id ~= account_id
+        or not previous_id and cfg.cookie and cfg.cookie ~= cookie
+    if switching then
+        local cleared = require("source.logout").clear(source_id, function()
+            cfg.cookie, cfg.account_id = nil, nil
+            Settings.saveSource(source_id, cfg)
+        end)
+        if not cleared then return cb(false, _("清除本地记录失败")) end
+    end
+    cfg.cookie, cfg.account_id = cookie, account_id
+    Settings.saveSource(source_id, cfg)
+    require("source.auth").ok(source_id)
+    require("source.registry").reload()
+    cb(true)
 end
 
 --- 联网后带进度窗校验保存，结果 toast；成功后留在当前账号页（auth.ok 刷新状态）。

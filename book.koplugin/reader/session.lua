@@ -317,6 +317,7 @@ local function syncReading(plugin, span)
     local function pushProgress()
         waiting = waiting - 1
         if waiting > 0 or not progress_saved or not source.syncProgressAsync then return end
+        if not require("book.progress").canPush(identity) then return end
         -- 关书只负责把本地新版本推上去。立即回拉可能读到微信尚未收敛的
         -- 旧值，再把刚上传的进度覆盖掉；远端拉取统一留给下次 ReaderReady。
         source:syncProgressAsync({
@@ -364,7 +365,7 @@ function Session.onCloseDocument(plugin)
     syncReading(plugin, span)
     require("reader.session.auto_toc").stop(Session._snapshot)
     if ChapterMode.onCloseDocument(Session._snapshot) then
-        require("reader.session.progress").clearConflicts()
+        require("reader.session.progress").clearConflicts(Session._snapshot and Session._snapshot.identity)
     end
     Session._snapshot = nil
     span:lap("rest")

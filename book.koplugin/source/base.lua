@@ -56,6 +56,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@class SyncResult
 ---@field pulled integer
 ---@field pushed integer
+---@field deferred integer|nil 因阅读进度未决而保留的脏行数
 ---@field hidden integer
 ---@field conflicts integer
 ---@field skipped boolean

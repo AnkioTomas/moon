@@ -62,7 +62,11 @@ function Setting.save(cred, cb)
         end
         if not user then return cb(nil, err or _("登录失败")) end
         if previous and (cred.token ~= previous.token or cred.cookie ~= previous.cookie) then
-            cb(nil, _("无法确认是否为同一 iRead 账号，请先退出当前账号再登录")); return
+            local cleared = require("source.logout").clear(SOURCE_ID, function()
+                cfg.token, cfg.cookie = nil, nil
+                settings.saveSource(SOURCE_ID, cfg)
+            end)
+            if not cleared then cb(nil, _("清除本地记录失败")); return end
         end
         cfg.token, cfg.cookie = cred.token, cred.cookie
         settings.saveSource(SOURCE_ID, cfg)

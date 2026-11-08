@@ -7,6 +7,7 @@ source.cookie_login：Cookie 文本 / 扩展 payload 规范化、校验保存、
 
 local Assert = require("support.assert")
 local CookieLogin = require("source.cookie_login")
+local beginLogin = require("source.auth").beginLogin
 
 -- parse：丢格式不对的项、按名排序、接受 devtools 复制带的 `Cookie:` 前缀与换行
 Assert.eq(CookieLogin.parse("b=2; a=1;bad name=3; c="), "a=1; b=2")
@@ -35,7 +36,10 @@ do
         reload = function() reloads = reloads + 1 end,
         invalidate = function() end,
     }
-    package.loaded["source.auth"] = { ok = function(id) oks[#oks + 1] = id end, expired = function() return false end }
+    package.loaded["source.auth"] = {
+        beginLogin = beginLogin,
+        ok = function(id) oks[#oks + 1] = id end, expired = function() return false end,
+    }
     local Settings = require("utils.settings")
     local cfg = Settings.getSource("cookietest")
     cfg.cookie, cfg.protocol = nil, nil

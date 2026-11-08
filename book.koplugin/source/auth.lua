@@ -22,6 +22,16 @@ local expired = {}
 local handler
 ---@type table<string, boolean> 本次运行已提示过的源；只在重新登录（reset）时清掉，免得反复弹
 local prompted = {}
+local login_versions = {}
+
+--- 登录尝试拥有源级版本；新尝试或退出使旧回包失效，普通请求成功不改变它。
+---@param id string
+---@return fun(): boolean
+function Auth.beginLogin(id)
+    local version = (login_versions[id] or 0) + 1
+    login_versions[id] = version
+    return function() return login_versions[id] == version end
+end
 
 --- 接口原文 / 调试串：不能进弹窗。
 ---@param msg any
@@ -70,8 +80,7 @@ end
 ---@param id string
 function Auth.ok(id)
     expired[id] = nil
-    local ok, UIManager = pcall(require, "ui/uimanager")
-    if not ok or not UIManager then return end
+    local UIManager = require("ui/uimanager")
     for _idx, entry in ipairs(UIManager._window_stack or {}) do
         local widget = entry.widget
         if widget and widget.name == "book_desktop" and widget.settings_overlay then

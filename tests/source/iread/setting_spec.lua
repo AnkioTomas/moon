@@ -10,6 +10,10 @@ local Themed = require("support.theme_stubs")
 Themed.install()
 package.loaded["ui.themes.widgets.row"] = { widget = function(spec) return spec end }
 local cfg, saved, reloaded = { token = "old-token" }, 0, 0
+local cleared = 0
+package.loaded["source.logout"] = { row = require("source.logout").row, clear = function(_id, clear)
+    clear(); cleared = cleared + 1; return true
+end }
 package.loaded["utils.settings"] = {
     getSource = function() return cfg end,
     saveSource = function() saved = saved + 1 end,
@@ -55,11 +59,13 @@ Assert.eq(saved, 0)
 
 Setting.save({ token = "different-token" }, done)
 requests[4].cb({ nickname = "测试" })
-Assert.is_nil(result)
-Assert.eq(reason, "无法确认是否为同一 iRead 账号，请先退出当前账号再登录")
-Assert.eq(cfg.token, "new-token")
-Assert.eq(saved, 0, "未经确认的账号切换不能替换凭证或清空本地记录")
+Assert.is_true(result ~= nil)
+Assert.is_nil(reason)
+Assert.eq(cfg.token, "different-token")
+Assert.eq(cleared, 1, "凭据变化时直接清旧源")
+Assert.is_nil(Themed.last("confirm"))
 cfg.token = nil
+saved, reloaded = 0, 0
 
 handle = Setting.browser.apply({ cookies = {
     { domain = ".ankio.net", name = "parent", value = "ok" },
