@@ -29,6 +29,7 @@ require("utils.extension").add("setting.device_section", {
     order = 30,
     icon = "battery_android_full",
     title = _("电池"),
+    docs = "/manual/device/battery",
     status = function()
         local result = require("features.battery.probe").read()
         if not result.supported or not result.reading then return _("不支持") end

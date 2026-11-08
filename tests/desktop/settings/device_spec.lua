@@ -103,6 +103,7 @@ Ext.add("setting.device_section", {
     id = "battery",
     icon = "battery_android_full",
     title = "电池",
+    docs = "/manual/device/battery",
     status = function() return "91.2%" end,
     refresh_seconds = 15,
     right_icon = "swap_vert",
@@ -144,6 +145,7 @@ Assert.eq(sections[2].rows[4].icon, "battery_android_full")
 sections[2].rows[4].callback()
 Assert.eq(pushed.id, "battery")
 Assert.eq(pushed.title, "电池")
+Assert.eq(pushed.docs, "/manual/device/battery")
 Assert.eq(pushed.refresh_seconds, 15)
 Assert.eq(pushed.right_icon, "swap_vert")
 pushed.right_callback()
@@ -175,9 +177,12 @@ for _, item in ipairs(sections[3].rows) do
 end
 Assert.eq(sections[3].rows[2].title, "书友交流群")
 Assert.eq(sections[3].rows[3].title, "Bug 反馈群")
-Assert.eq(sections[3].rows[4].title, "关于")
+Assert.eq(sections[3].rows[4].title, "使用指南")
+Assert.eq(sections[3].rows[5].title, "关于")
 Assert.is_nil(find("作者"))
 Assert.is_nil(find("打开 GitHub"))
+find("使用指南").callback()
+Assert.eq(opened_url, "https://moon.ankio.net/manual")
 find("关于").callback()
 Assert.eq(sheet.title, "关于")
 local about_icons = {}

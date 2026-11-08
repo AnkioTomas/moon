@@ -60,7 +60,11 @@ function Setting.entries(desktop)
             order = 5,
             id = "manage", icon = "delete_sweep", title = _("功能开关"),
             subtitle = _("停用用不到的功能，减少内存占用"),
-            page = { title = _("功能开关"), sections = function() return sections(desktop) end },
+            page = {
+                title = _("功能开关"),
+                docs = "/manual/maintenance/storage",
+                sections = function() return sections(desktop) end,
+            },
         },
     }
 end

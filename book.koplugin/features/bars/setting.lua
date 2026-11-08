@@ -47,6 +47,7 @@ function Setting.entries(desktop)
             subtitle = subtitle,
             page = {
                 title = title,
+                docs = "/manual/reader/ui/bars",
                 preview = function(width)
                     return require("features.bars.page"):page(desktop, which).preview(width)
                 end,

@@ -22,6 +22,7 @@ function Setting.entries(desktop)
             subtitle = _("划词查百科"),
             page = {
                 title = _("百科"),
+                docs = "/manual/reader/lookup/lookup",
                 sections = function()
                     local MoonSettings = require("utils.settings")
                     local current = MoonSettings.get("features.baike")

@@ -104,3 +104,24 @@ Assert.is_true(built > before, "返回上一层时重算设置项")
 Overlay.push(desktop, spec)
 Overlay.closeAll(desktop)
 Assert.is_nil(desktop.settings_overlay)
+
+-- docs：页底追加「帮助 / 查看指南」分节，不改原 sections 表。
+desktop.closed = nil
+desktop.settings_overlay = nil
+local raw_sections
+local with_docs = {
+    title = "有指南",
+    docs = "/manual/device",
+    sections = function()
+        raw_sections = { { title = "正文", rows = {
+            function(width) return Row.widget({ width = width, title = "项" }) end,
+        } } }
+        return raw_sections
+    end,
+}
+Overlay.open(desktop, with_docs)
+local help = desktop.settings_overlay
+help:paintTo(Kit.canvas(), 0, 0)
+Assert.contains(Kit.texts(help), "帮助")
+Assert.contains(Kit.texts(help), "查看指南")
+Assert.eq(#raw_sections, 1, "原 sections 不被原地追加")

@@ -44,6 +44,7 @@ function Setting.entries(desktop)
             status_on = on,
             page = {
                 title = _("锁屏壁纸"),
+                docs = "/manual/security/lockscreen",
                 preview = function(width)
                     return Lockscreen.preview(width)
                 end,

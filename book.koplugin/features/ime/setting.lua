@@ -271,6 +271,7 @@ function Setting.entries(desktop)
             status_on = on,
             page = {
                 title = _("输入法"),
+                docs = "/manual/system/local/ime",
                 sections = function() return sections(desktop) end,
             },
         },

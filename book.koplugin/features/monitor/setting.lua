@@ -17,6 +17,7 @@ require("utils.extension").add("setting.device_section", {
     order = 20,
     icon = "monitoring",
     title = _("运行状态"),
+    docs = "/manual/device/monitor",
     status = function()
         local mem = require("features.monitor.procs").memory()
         if not mem then return nil end

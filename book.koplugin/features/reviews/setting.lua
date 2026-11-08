@@ -51,6 +51,7 @@ function Setting.entries(desktop)
             subtitle = _("他人段评的页内标记"),
             page = {
                 title = _("段评"),
+                docs = "/manual/reader/ui/reviews",
                 sections = function()
                     local MoonSettings = require("utils.settings")
                     local ReviewSetting = require("source.review_setting")

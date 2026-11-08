@@ -43,6 +43,7 @@ function Setting.entries(desktop)
             subtitle = _("人物、地点与专有名词的识别"),
             page = {
                 title = _("X-Ray"),
+                docs = "/manual/reader/smart/xray",
                 sections = function()
                     local MoonSettings = require("utils.settings")
                     local Row = require("ui.themes.widgets.row")

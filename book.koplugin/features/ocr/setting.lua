@@ -20,6 +20,7 @@ function Setting.entries(desktop)
             subtitle = _("扫描版 PDF / DjVu 的 OCR"),
             page = {
                 title = _("文字识别（OCR）"),
+                docs = "/manual/reader/lookup/ocr",
                 sections = function()
                     local Row = require("ui.themes.widgets.row")
                     local Manager = require("features.ocr.manager")

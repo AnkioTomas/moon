@@ -31,6 +31,7 @@ function Setting.entries(desktop)
             subtitle = _("月读词典与词典管理"),
             page = {
                 title = _("词典"),
+                docs = "/manual/reader/lookup/lookup",
                 sections = function()
                     local MoonSettings = require("utils.settings")
                     local current = MoonSettings.get("features.dictionary")
