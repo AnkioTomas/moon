@@ -5,6 +5,9 @@
 弹全屏错误页（版本 + 位置 + 堆栈，可复制）让用户反馈，出错的这次调用视为未处理。
 业务内部不要用它，异常应一路冒到入口。
 
+堆栈里若出现其它 `.koplugin`（排除 guard 自身帧），归到该插件：引导用户找对应作者，
+不要把锅甩给月读。
+
   BookPlugin.onPageUpdate = Guard.wrap("onPageUpdate", Session.onPageUpdate)
   Guard.call("feature bars.onCreate", fn, plugin)
 
@@ -18,6 +21,33 @@ local Guard = {}
 --- 错误页在屏上时后续错误只记日志：每页都抛的 bug 不能刷出一摞对话框。
 local showing = false
 
+--- 本插件目录名（交付物固定叫 book.koplugin）。
+local OURS = "book.koplugin"
+
+--- 从堆栈找出其它 `.koplugin` 目录名（含后缀）。跳过 guard 自身帧；没有则视为月读。
+---@param trace string
+---@return string[]|nil
+function Guard.foreignPlugins(trace)
+    local seen, list = {}, {}
+    for line in tostring(trace):gmatch("[^\r\n]+") do
+        if not line:find("[/\\]ui[/\\]guard%.lua", 1) then
+            local name = line:match("([^/\\]+%.koplugin)[/\\]")
+            if name and name ~= OURS and not seen[name] then
+                seen[name] = true
+                list[#list + 1] = name
+            end
+        end
+    end
+    if #list == 0 then return nil end
+    return list
+end
+
+---@param dir string foo.koplugin
+---@return string foo
+local function pluginLabel(dir)
+    return (dir:gsub("%.koplugin$", ""))
+end
+
 --- UI 依赖全在这里延迟加载：guard 挂在 main / desktop / features 顶上，只有出错才需要它们。
 ---@param label string
 ---@param trace string
@@ -28,12 +58,28 @@ local function show(label, trace)
     local T = require("ffi/util").template
     local TextViewer = require("ui.themes.widgets.text_viewer")
     local Toast = require("ui.themes.widgets.toast")
-    local report = T(_("月读版本：%1\nKOReader：%2\n设备：%3\n位置：%4\n\n%5"),
+
+    local foreign = Guard.foreignPlugins(trace)
+    local title, guide, ownership
+    if foreign then
+        local labels = {}
+        for i, dir in ipairs(foreign) do labels[i] = pluginLabel(dir) end
+        local joined = table.concat(labels, _("、"))
+        title = _("其它插件出错了")
+        guide = T(_("这个错误看起来来自插件「%1」，不是月读本身。请把下面的信息反馈给该插件的作者，而不是月读。"), joined)
+        ownership = T(_("归属：其它插件 %1"), table.concat(foreign, ", "))
+    else
+        title = _("月读出错了")
+        guide = _("月读遇到了一个错误，已跳过出错的操作。请复制或截图下面的信息反馈给开发者。")
+        ownership = _("归属：月读")
+    end
+
+    local report = ownership .. "\n" .. T(_("月读版本：%1\nKOReader：%2\n设备：%3\n位置：%4\n\n%5"),
         require("bookversion"), require("version"):getShortVersion(), Device.model, label, trace)
     local dialog
     dialog = TextViewer:new{
-        title = _("月读出错了"),
-        text = _("月读遇到了一个错误，已跳过出错的操作。请复制或截图下面的信息反馈给开发者。") .. "\n\n" .. report,
+        title = title,
+        text = guide .. "\n\n" .. report,
         close_callback = function() showing = false end,
         buttons = {
             { text = _("关闭"), callback = function() dialog:close() end },
