@@ -18,6 +18,7 @@
 --]]
 
 local Html2Epub = require("convert.html2epub")
+local Hierarchy = require("convert.chapter_hierarchy")
 local Text = require("utils.text")
 local _ = require("gettext")
 
@@ -26,27 +27,12 @@ local Text2Epub = {}
 local trim = Text.trim
 local xmlEscape = Text.xmlEscape
 local DEFAULT_PART_CHARS = 256 * 1024
-local CHINESE_NUMBER_CHARS = { "零", "〇", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "百", "千", "万", "两" }
 --- 内嵌目录条目的长度上限（字节，约 40 个汉字）；更长的是正文。
 local MAX_TOC_ENTRY_BYTES = 120
 --- 连续空章达到这个数就是正文里印的目录页，不是章节（见 dropTocEchoes）。
 local MIN_LISTING = 3
 local TOC_HEADERS = { ["目录"] = true, ["目錄"] = true, ["content"] = true, ["contents"] = true, ["table of contents"] = true }
 local INVALID_VOLUME_SUFFIX = { ["门"] = true, ["队"] = true, ["属"] = true, ["分"] = true, ["件"] = true, ["落"] = true }
-
----@param value string
----@return boolean
-local function isNumberToken(value)
-    value = value:gsub("%s+", "")
-    if value == "" or value:match("^%d+$") or value:match("^[IVXLCDMivxlcdm]+$") then
-        return value ~= ""
-    end
-    local rest = value
-    for _idx, char in ipairs(CHINESE_NUMBER_CHARS) do
-        rest = rest:gsub(char, "")
-    end
-    return rest == ""
-end
 
 ---@param line string
 ---@return string|nil
@@ -65,7 +51,7 @@ local function chapterTitle(line)
     if line:sub(1, 3) == "第" then
         for _idx, marker in ipairs({ "章", "回", "节", "集", "幕", "卷", "部", "篇" }) do
             local number, suffix = line:match("^第%s*(.-)%s*" .. marker .. "(.*)$")
-            if number and isNumberToken(number) then
+            if number and Hierarchy.isNumberToken(number) then
                 -- “第一部门/部队”是正文，不是“第一部”章节。
                 if marker ~= "部" or not INVALID_VOLUME_SUFFIX[suffix:sub(1, 3)]
                 then
@@ -103,6 +89,24 @@ local function isHardLine(line)
         or line:match("^%s*[“\"「『]") ~= nil
 end
 
+--- 段首的全角空格只用来识别分段，缩进交给生成的 EPUB 样式。
+---@param raw string
+---@return string line, boolean indented
+local function paragraphLine(raw)
+    local line = trim(raw)
+    local indented = false
+    while true do
+        if line:sub(1, 3) == "　" then
+            line = line:sub(4):gsub("^%s+", "")
+            indented = true
+        elseif line:sub(1, 2) == "\194\160" then
+            line = line:sub(3):gsub("^%s+", "")
+        else
+            return line, indented
+        end
+    end
+end
+
 --- 将物理行合并为段落。TXT 的换行常是编辑器软换行，不能逐行生成 p。
 ---@param lines string[]
 ---@param reflow boolean|nil
@@ -127,17 +131,17 @@ local function paragraphsFromLines(lines, reflow)
         end
     end
     for _idx, raw in ipairs(lines) do
-        local line = Text.rtrim(raw)
-        if trim(line) == "" then
+        local line, indented = paragraphLine(raw)
+        if line == "" then
             flush()
         elseif isHardLine(line) then
             flush()
-            paragraphs[#paragraphs + 1] = { trim(line) }
+            paragraphs[#paragraphs + 1] = { line }
         else
-            if #current > 0 and current[#current]:match("[。！？!?；;]$") then
+            if indented or (#current > 0 and current[#current]:match("[。！？!?；;]$")) then
                 flush()
             end
-            current[#current + 1] = trim(line)
+            current[#current + 1] = line
         end
     end
     flush()
@@ -300,6 +304,27 @@ local function dropTocEchoes(sections)
     return kept
 end
 
+--- 不单独入目录的卷名提及接回上一节正文；仅供目录的补建父节点没有原文可接。
+---@param sections table[]
+---@return table[]
+local function mergeVolumeMentions(sections)
+    local kept = {}
+    for _idx, section in ipairs(sections) do
+        local previous = kept[#kept]
+        if section.toc ~= false or not previous then
+            kept[#kept + 1] = section
+        elseif section.lines then
+            local lines = previous.lines or {}
+            previous.lines = lines
+            lines[#lines + 1] = ""
+            lines[#lines + 1] = section.title
+            lines[#lines + 1] = ""
+            for _line_idx, line in ipairs(section.lines) do lines[#lines + 1] = line end
+        end
+    end
+    return kept
+end
+
 --- 正文里的内嵌目录：表头（目录 / Contents）之后连续的短行，遇到重复的标题（正文开始了）为止。
 --- 只有这样收尾的才算数：遇到长行或到文末都没重复，说明条目对不上正文（如带页码），
 --- 收到的多半混进了正文短句，整批丢掉，否则全书每出现一次这句就切一章。
@@ -332,18 +357,28 @@ end
 ---@param text string
 ---@param opts table|nil
 ---@param progress fun(done: integer, total: integer)|nil 每排完一节
----@return { title: string, author: string|nil, chapters: { title: string, html: string, toc: boolean }[] }
+---@return { title: string, author: string|nil, chapters: { title: string, html: string, toc: boolean, depth: integer|nil }[] }
 function Text2Epub.parse(text, opts, progress)
     opts = opts or {}
     text = Text.stripBom(Text.normalizeNewlines(text))
     local known = {}
+    local source_titles = {}
     for _idx, heading in ipairs(opts.headings or {}) do
-        known[trim(heading)] = true
+        local title = type(heading) == "table" and heading.title or heading
+        if type(title) == "string" and trim(title) ~= "" then
+            known[trim(title)] = true
+            if type(heading) == "table" then
+                local key = Hierarchy.titleKey(title)
+                if key ~= "" then source_titles[key] = true end
+            end
+        end
     end
+    local has_source_titles = next(source_titles) ~= nil
     ---@param line string 已 trim 的非空行
     ---@return string|nil
     local function headingOf(line)
-        return known[line] and line or chapterTitle(line)
+        if known[line] or has_source_titles and source_titles[Hierarchy.titleKey(line)] then return line end
+        return chapterTitle(line)
     end
 
     local lines = {}
@@ -361,7 +396,7 @@ function Text2Epub.parse(text, opts, progress)
 
     for index, raw in ipairs(lines) do
         local line = trim(raw)
-        if line ~= "" and headingOf(line) then
+        if metadata_open and line ~= "" and headingOf(line) then
             metadata_open = false
         end
         local metadata_title
@@ -454,16 +489,18 @@ function Text2Epub.parse(text, opts, progress)
         sections[1].title = title
     end
 
+    sections = mergeVolumeMentions(Hierarchy.organize(sections, opts.headings))
     local chapters = {}
     local max_part_chars = opts.max_part_chars or DEFAULT_PART_CHARS
     for index, section in ipairs(sections) do
-        local parts = chapterParts(section.title, section.lines, max_part_chars, opts.reflow == true)
+        local parts = chapterParts(section.title, section.lines or {}, max_part_chars, opts.reflow == true)
         section.lines = nil
         for part_index, html in ipairs(parts) do
             chapters[#chapters + 1] = {
                 title = section.title,
                 html = html,
-                toc = part_index == 1,
+                toc = part_index == 1 and section.toc ~= false,
+                depth = section.depth,
             }
         end
         if progress then progress(index, #sections) end
@@ -551,7 +588,7 @@ end
 ---   identifier: string|nil,
 ---   reflow: boolean|nil,
 ---   max_part_chars: number|nil,
----   headings: string[]|nil,
+---   headings: (string|{ title: string, depth: integer|nil })[]|nil,
 ---   tail_html: string|nil,
 --- }
 ---@param cb fun(ok: boolean|nil, err: any)
