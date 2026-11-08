@@ -4,10 +4,24 @@
 @module koplugin.book.source.copymanga.mapper
 --]]
 
+require("l10n").apply()
 local Text = require("utils.text")
+local _ = require("gettext")
 
 local Mapper = {}
 local SOURCE_ID = "copymanga"
+
+---@param wire table
+---@param offset integer|nil
+---@return table[]|nil, string|nil, boolean|nil
+function Mapper.list(wire, offset)
+    local root = wire.results
+    if type(root) ~= "table" or type(root.list) ~= "table" then return nil, _("响应无效") end
+    local total = tonumber(root.total)
+    offset = offset or tonumber(root.offset) or 0
+    if total and #root.list == 0 and offset < total then return nil, _("响应无效") end
+    return root.list, nil, total and offset + #root.list < total or (not total and #root.list > 0)
+end
 
 ---@param rows table[]|nil
 ---@return string|nil
@@ -60,28 +74,29 @@ end
 
 --- 搜索 wire → Book[]。
 ---@param wire table
----@return Book[]
+---@return Book[]|nil, string|nil, boolean|nil
 function Mapper.search(wire)
+    local rows, err, more = Mapper.list(wire)
+    if not rows then return nil, err end
     local out = {}
-    local rows = resultsOf(wire).list
-    for _idx, row in ipairs(type(rows) == "table" and rows or {}) do
+    for _idx, row in ipairs(rows) do
         local book = Mapper.book(row)
-        if book then out[#out + 1] = book end
+        if not book then return nil, _("响应无效") end
+        out[#out + 1] = book
     end
-    return out
+    return out, nil, more
 end
 
 --- 收藏行（见 Client:collectAllAsync）→ 在架书。
 ---@param rows table[]
----@return Book[]
+---@return Book[]|nil, string|nil
 function Mapper.collect(rows)
     local books = {}
     for _idx, row in ipairs(rows) do
         local book = Mapper.book(row)
-        if book then
-            book.deleted = 0
-            books[#books + 1] = book
-        end
+        if not book then return nil, _("响应无效") end
+        book.deleted = 0
+        books[#books + 1] = book
     end
     return books
 end

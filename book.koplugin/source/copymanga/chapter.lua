@@ -5,7 +5,6 @@
 --]]
 
 local Cbz = require("source.cbz")
-local Client = require("source.copymanga.client")
 local Image = require("utils.image")
 local Paths = require("utils.paths")
 local Protocol = require("source.copymanga.protocol")
@@ -80,7 +79,7 @@ function Chapter.materializeAsync(client, identity, chapter, on_progress, cb)
             local mine = current
             local handle = require("http.request").download({
                 url = url,
-                headers = Client.headers(client.token),
+                headers = { ["Referer"] = client.base_url .. "/" },
                 timeout = require("http.timeout").net(3),
                 max_bytes = 32 * 1024 * 1024,
             }, path, function(ok, download_err)

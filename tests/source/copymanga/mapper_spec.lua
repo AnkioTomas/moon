@@ -90,13 +90,15 @@ do
                 author = { { name = "作者丙" } },
             },
         },
-        { comic = { name = "坏行" } },
     })
     Assert.len(books, 1)
     Assert.eq(books[1].stable_id, "fav-comic")
     Assert.eq(books[1].title, "收藏漫画")
     Assert.eq(books[1].authors, "作者丙")
     Assert.eq(books[1].deleted, 0)
+    local invalid, err = Mapper.collect({ { comic = { name = "坏行" } } })
+    Assert.is_nil(invalid)
+    Assert.eq(err, "响应无效")
 end
 
 do
