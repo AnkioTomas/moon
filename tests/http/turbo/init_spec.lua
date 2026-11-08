@@ -157,6 +157,28 @@ do
         iostream.IOStream._handle_write_nonconst(failed)
         Assert.is_true(error_closed, "非 timeout 错误仍关闭连接")
 
+        -- LuaSec 非阻塞 TLS 每轮都可能回 wantwrite；这是重试信号，不能关流。
+        local ww_closed, ww_calls, ww_done = 0, 0, false
+        local want = {
+            socket = { send = function(_, data)
+                ww_calls = ww_calls + 1
+                if ww_calls == 1 then return nil, "wantwrite", 4 end
+                return #data
+            end },
+            _write_buffer_offset = 0,
+            _write_buffer_size = 8,
+            _write_buffer = { get = function() return buffer, 8 end, clear = function() end },
+            _write_callback = function() ww_done = true end,
+            close = function() ww_closed = ww_closed + 1 end,
+            _run_callback = function(_, cb, arg) cb(arg) end,
+        }
+        iostream.IOStream._handle_write_nonconst(want)
+        Assert.eq(ww_closed, 0, "wantwrite 不关闭连接")
+        Assert.eq(want._write_buffer_offset, 4, "wantwrite 记录 partial 字节")
+        iostream.IOStream._handle_write_nonconst(want)
+        Assert.eq(ww_closed, 0)
+        Assert.is_true(ww_done, "wantwrite 后续写完回调一次")
+
         local timeouts, removed = {}, {}
         local loop = {
             add_timeout = function(_, at) timeouts[#timeouts + 1] = at; return #timeouts end,
