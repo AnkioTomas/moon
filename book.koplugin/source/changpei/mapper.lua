@@ -170,34 +170,41 @@ function Mapper.toc(wire)
     return toc
 end
 
---- chapterGetInfo → 正文纯文本；没买的 VIP 章返回 nil, "unpaid"；服务端要求人机验证（data.check > 1）时
---- 正文被换字打乱，返回 nil, "verify"。
+--- chapterGetInfo → 正文纯文本；没买的 VIP 章返回 nil, "unpaid"。
+--- data.check > 1 要人机验证：官网仍解密并展示，check < 3 验完只关弹窗，≥ 3 才整页重拉。
+--- 第四返回值是 check，开章路径据此决定验后用已有正文还是重取。
 ---@param wire table
 ---@return string|nil text
 ---@return string|nil err
 ---@return "unpaid"|"verify"|nil kind
+---@return integer|nil check
 function Mapper.content(wire)
     local info = type(wire.data) == "table" and wire.data.chapterInfo
     if type(info) ~= "table" then return nil, wire.msg end
-    if (tonumber(wire.data.check) or 0) > 1 then return nil, nil, "verify" end
+    local check = tonumber(wire.data.check) or 0
     -- isSub 在接口里是 "0" / "1" 字符串（"0" 在 Lua 里是真值）
     local locked = (tonumber(info.chapterPrice) or 0) > 0 and not (info.isSub == true or tonumber(info.isSub) == 1)
+    local text
+    if type(info.content) == "string" and info.content ~= "" then
+        local plain = Aes.cbc_decrypt(Text.base64Decode(info.content), KEY, IV)
+        if plain then
+            local lines = {}
+            for line in (plain .. "\n"):gmatch("(.-)\r?\n") do
+                line = Text.trim(line)
+                if line ~= "" then lines[#lines + 1] = line end
+            end
+            if #lines > 0 then text = table.concat(lines, "\n") end
+        elseif not locked and check <= 1 then
+            return nil, _("长佩章节解密失败")
+        end
+    end
+    if check > 1 then return text, nil, "verify", check end
+    if text then return text end
+    if locked then return nil, nil, "unpaid" end
     if type(info.content) ~= "string" or info.content == "" then
-        if locked then return nil, nil, "unpaid" end
         return nil, _("长佩章节内容为空")
     end
-    local plain = Aes.cbc_decrypt(Text.base64Decode(info.content), KEY, IV)
-    if not plain then
-        if locked then return nil, nil, "unpaid" end
-        return nil, _("长佩章节解密失败")
-    end
-    local lines = {}
-    for line in (plain .. "\n"):gmatch("(.-)\r?\n") do
-        line = Text.trim(line)
-        if line ~= "" then lines[#lines + 1] = line end
-    end
-    if #lines == 0 then return nil, nil, locked and "unpaid" or nil end
-    return table.concat(lines, "\n")
+    return nil, _("长佩章节解密失败")
 end
 
 return Mapper

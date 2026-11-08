@@ -3,7 +3,8 @@
 
 走官网网页的 JSON 接口（www.gongzicp.com/webapi），请求头照网页端：`Client: pc` + 桌面浏览器 UA。
 正文是 AES 密文，解密放子进程。data.check > 1 表示需要人机验证，不表示登录失效；
-用户开章时经远程管理完成验证，后台预取只返回错误，不弹窗。
+用户开章时经远程管理完成验证。官网：check < 3 验完沿用已解密正文，≥ 3 才重拉；
+后台预取只返回错误，不弹窗、不缓存待验证正文。
 登录态是网页 Cookie（setting.lua：扫码 / 浏览器授权 / 粘贴），Cookie 失效回包 code 9996；没买的 VIP 章不出正文。
 
 @module koplugin.book.source.changpei.client
@@ -389,38 +390,28 @@ function Client.userAsync(cookie, cb)
     end, true)
 end
 
---- 一章正文（纯文本，段落以换行分隔）。
----@param _novel_id string
+local LOGIN_HINT = _("还没登录长佩。打开「设置 → 书库 → 账号 → 长佩文学 → 长佩账号」，用长佩 App 扫二维码。也可以点「粘贴 Cookie」，把网页里的 Cookie 贴进去。")
+
+--- 取章并解密；on_done 收到 Mapper.content 的打包结果（含 check）。
 ---@param chapter_id string
----@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|"verify"|nil)
+---@param on_done fun(res: { text: string|nil, err: string|nil, kind: "unpaid"|"verify"|nil, check: integer|nil })
+---@param on_failed fun(reason: string)
 ---@return { cancel: fun() }
-function Client.contentAsync(_novel_id, chapter_id, cb)
+local function fetchContent(chapter_id, on_done, on_failed)
     local cancelled, job, pending = false, nil, true
     local initial = get("/novel/chapterGetInfo", "cid=" .. chapter_id .. "&server=0", Client.cookie(), function(wire, err)
         pending = false
         if cancelled then return end
-        if not wire then cb(nil, err); return end
+        if not wire then on_failed(err or _("请求失败")); return end
         job = Job.run(function()
-            local text, reason, kind = Mapper.content(wire)
-            return { text = text, err = reason, kind = kind }
+            local text, reason, kind, check = Mapper.content(wire)
+            return { text = text, err = reason, kind = kind, check = check }
         end, {
             name = "changpei_content",
             kind = "light",
             timeout = 60,
-            on_done = function(res)
-                if cancelled then return end
-                if res.text then cb(res.text); return end
-                if res.kind == "verify" then
-                    if not Client.cookie() then
-                        cb(nil, _("还没登录长佩。打开「设置 → 书库 → 账号 → 长佩文学 → 长佩账号」，用长佩 App 扫二维码。也可以点「粘贴 Cookie」，把网页里的 Cookie 贴进去。"))
-                        return
-                    end
-                    cb(nil, Client.VERIFY_REQUIRED, "verify")
-                    return
-                end
-                cb(nil, res.err or _("长佩章节内容为空"), res.kind)
-            end,
-            on_failed = function(reason) if not cancelled then cb(nil, tostring(reason)) end end,
+            on_done = function(res) if not cancelled then on_done(res) end end,
+            on_failed = function(reason) if not cancelled then on_failed(tostring(reason)) end end,
             on_cancelled = function() end,
         })
     end)
@@ -431,29 +422,59 @@ function Client.contentAsync(_novel_id, chapter_id, cb)
     end }
 end
 
---- 只有用户开章才等扫码验证；成功后只重试一次，避免服务端一直要求验证时循环弹窗。
----@param novel_id string
+--- 一章正文（纯文本，段落以换行分隔）。后台预取用：待验证不回正文，避免把未验证章写进缓存。
+---@param _novel_id string
 ---@param chapter_id string
 ---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|"verify"|nil)
 ---@return { cancel: fun() }
-function Client.openContentAsync(novel_id, chapter_id, cb)
-    local cancelled, job, pending = false, nil, true
-    local initial = Client.contentAsync(novel_id, chapter_id, function(text, err, kind)
-        pending = false
+function Client.contentAsync(_novel_id, chapter_id, cb)
+    return fetchContent(chapter_id, function(res)
+        if res.kind == "verify" then
+            if not Client.cookie() then cb(nil, LOGIN_HINT); return end
+            cb(nil, Client.VERIFY_REQUIRED, "verify")
+            return
+        end
+        if res.text then cb(res.text); return end
+        cb(nil, res.err or _("长佩章节内容为空"), res.kind)
+    end, function(reason) cb(nil, reason) end)
+end
+
+--- 只有用户开章才等扫码验证。对齐官网：check < 3 且已有正文则验完直接用；≥ 3 或无正文才重拉一次。
+---@param _novel_id string
+---@param chapter_id string
+---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|"verify"|nil)
+---@return { cancel: fun() }
+function Client.openContentAsync(_novel_id, chapter_id, cb)
+    local cancelled, job = false, nil
+    local function accept(res)
+        if res.kind == "verify" then
+            if res.text and (res.check or 0) < 3 then cb(res.text); return end
+            cb(nil, Client.VERIFY_REQUIRED, "verify")
+            return
+        end
+        if res.text then cb(res.text); return end
+        cb(nil, res.err or _("长佩章节内容为空"), res.kind)
+    end
+    local function fail(reason) cb(nil, reason) end
+    job = fetchContent(chapter_id, function(res)
         if cancelled then return end
-        if kind ~= "verify" then cb(text, err, kind); return end
+        if res.kind ~= "verify" then accept(res); return end
+        if not Client.cookie() then cb(nil, LOGIN_HINT); return end
+        -- 官网 check < 3：验完只关弹窗，正文早已解密；≥ 3 才 location.reload 重取。
+        local held = res.text
+        local reload = (res.check or 0) >= 3 or not held
         local verifying = true
         local verification = require("source.changpei.verify").new(function(ok, verify_err)
             verifying = false
             if cancelled then return end
             if not ok then cb(nil, verify_err); return end
-            job = Client.contentAsync(novel_id, chapter_id, function(value, reason, result_kind)
-                if not cancelled then cb(value, reason, result_kind) end
-            end)
+            if not reload then cb(held); return end
+            job = fetchContent(chapter_id, function(again)
+                if not cancelled then accept(again) end
+            end, function(reason) if not cancelled then fail(reason) end end)
         end)
         if verifying then job = verification end
-    end)
-    if pending then job = initial end
+    end, function(reason) if not cancelled then fail(reason) end end)
     return { cancel = function()
         cancelled = true
         if job then job:cancel() end

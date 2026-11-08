@@ -21,7 +21,8 @@ end
 package.preload["source.changpei.mapper"] = function()
     return {
         content = function(wire)
-            if wire.data.check > 1 then return nil, nil, "verify" end
+            local level = wire.data.check
+            if level > 1 then return "chapter text", nil, "verify", level end
             return "chapter text"
         end,
     }
@@ -123,25 +124,39 @@ package.preload["source.changpei.verify"] = function()
         end,
     }
 end
-result, message = nil, nil
+-- check == 2：官网验完只关弹窗，沿用已解密正文，不重拉。
+check, result, message, verification_done = 2, nil, nil, nil
 local first_job = #jobs + 1
+local before = #requests
 Client.openContentAsync("n", "c", function(text, err) result, message = text, err end)
 jobs[first_job]()
 Assert.not_nil(verification_done, "用户开章遇验证才打开扫码页")
 Assert.is_nil(message, "等待验证时不提前结束开书")
+verification_done(true)
+Assert.eq(#requests, before + 1, "check < 3 验完不重取章节")
+Assert.eq(#jobs, first_job, "check < 3 验完不再跑解密任务")
+Assert.eq(result, "chapter text", "验完直接用开章时已解密的正文")
+Assert.is_nil(message)
+
+-- check >= 3：验完像官网 reload，重取一次；重取降到 1 则成功。
+check, result, message, verification_done = 3, nil, nil, nil
+first_job = #jobs + 1
+Client.openContentAsync("n", "c", function(text, err) result, message = text, err end)
+jobs[first_job]()
+Assert.not_nil(verification_done)
 check = 1
 verification_done(true)
 jobs[first_job + 1]()
-Assert.eq(result, "chapter text", "验证后自动重新取章")
+Assert.eq(result, "chapter text", "check >= 3 验证后自动重新取章")
 Assert.is_nil(message)
 
-check, result, verification_done = 3, nil, nil
+check, result, verification_done, verification_cancelled = 3, nil, nil, nil
 first_job = #jobs + 1
 local handle = Client.openContentAsync("n", "c", function(text) result = text end)
 jobs[first_job]()
 handle:cancel()
 Assert.is_true(verification_cancelled)
-local before = #requests
+before = #requests
 verification_done(true)
 Assert.eq(#requests, before, "取消后迟到的验证结果不能重开章节")
 Assert.is_nil(result)
@@ -153,7 +168,8 @@ jobs[first_job]()
 verification_done(false, "verification cancelled")
 Assert.eq(message, "verification cancelled")
 
-verification_done = nil
+-- check >= 3 且重取仍被门控：即使有正文也不收下，只报错、不反复弹二维码。
+check, result, message, verification_done = 3, nil, nil, nil
 first_job = #jobs + 1
 Client.openContentAsync("n", "c", function(_text, err) message = err end)
 jobs[first_job]()
@@ -162,3 +178,11 @@ verification_done = nil
 jobs[first_job + 1]()
 Assert.is_nil(verification_done, "验证后仍被拦截只报错，不反复弹二维码")
 Assert.eq(message, Client.VERIFY_REQUIRED)
+
+-- 后台预取遇验证不回正文，避免未验证章进缓存。
+result, message, result_kind = nil, nil, nil
+Client.contentAsync("n", "c", function(text, err, kind) result, message, result_kind = text, err, kind end)
+jobs[#jobs]()
+Assert.is_nil(result)
+Assert.eq(message, Client.VERIFY_REQUIRED)
+Assert.eq(result_kind, "verify")
