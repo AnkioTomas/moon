@@ -90,6 +90,51 @@ do
         end
     end
 
+    added = {}
+    got_ok, got_err = M.write({
+        dest = "/tmp/moon-test-html2epub.epub",
+        title = "卷章目录",
+        chapters = {
+            { title = "第一卷", html = "", depth = 1 },
+            { title = "第一章", html = "", depth = 2 },
+            { title = "第一章续片", html = "<p>续片正文</p>", toc = false, depth = 2 },
+            { title = "小节", html = "", depth = 3 },
+            { title = "第二章", html = "", depth = 2 },
+            { title = "第二卷", html = "", depth = 1 },
+            { title = "第一章", html = "", depth = 2 },
+        },
+    })
+    Assert.is_true(got_ok)
+    Assert.is_nil(got_err)
+    local ncx
+    for _idx, file in ipairs(added) do
+        if file.path == "OEBPS/toc.ncx" then ncx = file.content end
+    end
+    Assert.is_true(ncx ~= nil)
+    Assert.is_true(ncx:find('name="dtb:depth" content="3"', 1, true) ~= nil)
+    Assert.is_nil(ncx:find("第一章续片", 1, true))
+    local stack, parents, count = {}, {}, 0
+    for closing, attributes in ncx:gmatch("<(/?)navPoint([^>]*)>") do
+        if closing == "/" then
+            Assert.is_true(#stack > 0)
+            stack[#stack] = nil
+        else
+            count = count + 1
+            local id = attributes:match('id="([^"]+)"')
+            Assert.eq(tonumber(attributes:match('playOrder="(%d+)"')), count)
+            parents[id] = stack[#stack]
+            stack[#stack + 1] = id
+        end
+    end
+    Assert.len(stack, 0)
+    Assert.eq(count, 6)
+    Assert.is_nil(parents.n1)
+    Assert.eq(parents.n2, "n1")
+    Assert.eq(parents.n3, "n2")
+    Assert.eq(parents.n4, "n1")
+    Assert.is_nil(parents.n5)
+    Assert.eq(parents.n6, "n5")
+
     -- 关键条目写失败：必须报错，不能 rename 成品。
     for _, path in ipairs({ "META-INF/container.xml", "OEBPS/content.opf", "OEBPS/toc.ncx" }) do
         fail_path = path

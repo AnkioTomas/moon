@@ -143,6 +143,31 @@ do
     Assert.len(shown, 1)
 end
 
+-- 合写卷章标题拆成折叠目录，补建卷节点沿用首章定位。
+do
+    jobs = {}
+    local session = mkSession({
+        "　第一卷-第一章 开始", "甲。", "　第二章 继续", "乙。", "　第二卷-第一章 再启",
+    })
+    AutoToc.start(session)
+    jobs[1].opts.on_done(jobs[1].result)
+    local toc = session.ui.handmade.toc
+    Assert.len(toc, 5)
+    Assert.eq(toc[1].title, "第一卷")
+    Assert.eq(toc[1].depth, 1)
+    Assert.eq(toc[2].title, "第一章 开始")
+    Assert.eq(toc[2].depth, 2)
+    Assert.eq(toc[1].xpointer, toc[2].xpointer)
+    Assert.eq(toc[1].page, 10)
+    Assert.eq(toc[3].title, "第二章 继续")
+    Assert.eq(toc[3].depth, 2)
+    Assert.eq(toc[4].title, "第二卷")
+    Assert.eq(toc[4].depth, 1)
+    Assert.eq(toc[5].title, "第一章 再启")
+    Assert.eq(toc[5].depth, 2)
+    Assert.eq(toc[4].xpointer, toc[5].xpointer)
+end
+
 -- h 标签足够：用备用目录，不扫描、不碰自定义目录
 do
     jobs = {}
