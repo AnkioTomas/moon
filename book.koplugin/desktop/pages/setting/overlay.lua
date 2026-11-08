@@ -14,6 +14,7 @@
 @module koplugin.book.desktop.pages.setting.overlay
 --]]
 
+require("l10n").apply()
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
@@ -26,12 +27,14 @@ local Modal = require("ui.themes.widgets.modal")
 local Sections = require("ui.themes.widgets.sections")
 local Text = require("ui.themes.widgets.text")
 local TitleBar = require("ui.themes.widgets.titlebar")
+local _ = require("gettext")
 
 ---@class BookSettingsOverlaySpec
 ---@field id string|nil
 ---@field title string
 ---@field preview (fun(width: number): table)|nil
 ---@field sections fun(): BookThemeSection[]
+---@field docs string|nil 官网手册路径（相对 moon.ankio.net）；有则页底追加「查看指南」
 ---@field on_close (fun())|nil
 ---@field refresh_seconds number|nil 页面在最上层时每隔这么久重算一次（运行状态这类实时页）
 ---@field right_icon string|nil 标题栏右上角图标
@@ -163,11 +166,19 @@ function Overlay:rebuild()
         }
         head_h = head_h + block_h + rule
     end
+    local sections = self.spec.sections()
+    if self.spec.docs then
+        local Docs = require("utils.docs")
+        local out = {}
+        for i = 1, #sections do out[i] = sections[i] end
+        out[#out + 1] = { title = _("帮助"), rows = { Docs.row(self.spec.docs) } }
+        sections = out
+    end
     local body
     body, self.page = Sections.widget({
         width = w,
         height = h - head_h,
-        sections = self.spec.sections(),
+        sections = sections,
         page = self.page,
         range = self.dimen,
         on_page = function(p) self.page = p; self:updateView() end,

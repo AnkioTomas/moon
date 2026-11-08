@@ -11,10 +11,10 @@ require("l10n").apply()
 local Device = require("device")
 local Settings = require("utils.settings")
 local Confirm = require("ui.themes.widgets.confirm")
+local Docs = require("utils.docs")
 local QR = require("ui.themes.widgets.qr")
 local _ = require("gettext")
 
-local DOCS_URL = "https://moon.ankio.net"
 local GROUP_URL = "https://qm.qq.com/q/yLPC4fxb1K"
 
 local Welcome = {}
@@ -42,11 +42,11 @@ function Welcome.promptDocs(desk)
     end
     Confirm:new{
         title = _("欢迎使用月读"),
-        text = _("先在账号页登录要用的书源。要看看使用文档吗？\n之后也可以在「设置 → 设备 → 我的设备」里找到项目主页。"),
-        ok_text = _("查看文档"),
+        text = _("先在账号页登录要用的书源。要看看使用指南吗？\n之后也可以在「设置 → 设备 → 我的设备 → 使用指南」打开。"),
+        ok_text = _("查看指南"),
         cancel_text = _("以后再说"),
         extra_text = _("加入交流群"),
-        ok_callback = function() open(DOCS_URL, _("使用文档")) end,
+        ok_callback = function() Docs.open("/manual", _("使用指南")) end,
         extra_callback = function() open(GROUP_URL, _("加入交流群")) end,
     }:show()
 end

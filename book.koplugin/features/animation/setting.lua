@@ -20,6 +20,7 @@ function Setting.entries(desktop)
             subtitle = _("开关、动画风格与速度"),
             page = {
                 title = _("翻页动画"),
+                docs = "/manual/reader/ui/animation",
                 sections = function()
                     local Animation = require("features.animation")
                     local Row = require("ui.themes.widgets.row")

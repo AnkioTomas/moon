@@ -127,6 +127,7 @@ function Device.infoSections(desktop)
                     require("desktop.pages.setting.overlay").push(desktop, {
                         id = item.id,
                         title = item.title,
+                        docs = item.docs,
                         refresh_seconds = item.refresh_seconds,
                         right_icon = item.right_icon,
                         right_callback = on_right and function() on_right(desktop) end or nil,
@@ -162,6 +163,13 @@ function Device.infoSections(desktop)
             return Row.widget({
                 width = iw, kind = "nav", icon = "bug_report", title = _("Bug 反馈群"),
                 callback = function() openExternal(_("Bug 反馈群"), Device.BUG_GROUP_URL) end,
+            })
+        end,
+        function(iw)
+            return Row.widget({
+                width = iw, kind = "nav", icon = "menu_book", title = _("使用指南"),
+                subtitle = _("官网用户手册"),
+                callback = function() require("utils.docs").open("/manual", _("使用指南")) end,
             })
         end,
         function(iw)

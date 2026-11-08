@@ -41,6 +41,7 @@ function Setting.entries(desktop)
             subtitle = _("底栏订阅与文章图片"),
             page = {
                 title = _("订阅"),
+                docs = "/manual/desktop/pages/subscribe",
                 sections = function()
                     return {{
                         title = _("订阅"),

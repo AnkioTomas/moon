@@ -156,6 +156,7 @@ function Setting.entries(desktop)
             status_on = running,
             page = {
                 title = _("远程管理"),
+                docs = "/manual/system/connect/remote",
                 sections = function()
                     return { { title = _("远程"), rows = rows(desktop) } }
                 end,

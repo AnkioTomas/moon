@@ -179,6 +179,7 @@ function Setting.entries(desktop)
             subtitle = _("呼出手势与页面"),
             page = {
                 title = _("阅读侧栏"),
+                docs = "/manual/reader/ui/bars",
                 sections = function()
                     local settings = MoonSettings.get("features.sidebar")
                     local current = settings.sidebar_gesture

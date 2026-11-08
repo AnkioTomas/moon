@@ -171,8 +171,10 @@ end
 ---@param mod table
 ---@param title string
 ---@param icon string
+---@param source_id string|nil
 ---@return fun(iw: number): table
-local function entryRow(desktop, plugin, mod, title, icon)
+local function entryRow(desktop, plugin, mod, title, icon, source_id)
+    local docs = require("utils.docs").source(source_id)
     return function(iw)
         local status, status_on
         if type(mod.rowStatus) == "function" then status, status_on = mod.rowStatus() end
@@ -183,6 +185,7 @@ local function entryRow(desktop, plugin, mod, title, icon)
                 if type(mod.rows) ~= "function" then return mod.open(plugin) end
                 require("desktop.pages.setting.overlay").push(desktop, {
                     title = title,
+                    docs = docs,
                     sections = function()
                         -- 模块可以自己分组（Kavita：连接 / 缓存与同步 / 诊断）；
                         -- 没给 sections 的沿用一整块，标题就是源名。
@@ -204,6 +207,7 @@ local function storeRow(desktop, plugin, def)
     local store = MoonSettings.get("store")
     local key = def.id .. "_enabled"
     local setting = require("store." .. def.id .. ".setting")
+    local docs = require("utils.docs").store(def.id)
     return function(iw)
         return Row.widget({
             width = iw, kind = "nav", icon = def.icon, title = def.title,
@@ -211,6 +215,7 @@ local function storeRow(desktop, plugin, def)
             callback = function()
                 require("desktop.pages.setting.overlay").push(desktop, {
                     title = def.title,
+                    docs = docs,
                     sections = function()
                         local rows = { function(w)
                             local on = store[key]
@@ -251,6 +256,7 @@ function Source.openAccount(desktop, source_id)
     local Overlay = require("desktop.pages.setting.overlay")
     Overlay.open(desktop, {
         title = _("账号"),
+        docs = "/manual/library/sources",
         sections = function()
             return Source:configSections{ desktop = desktop, plugin = desktop.plugin }
         end,
@@ -266,6 +272,7 @@ function Source.openAccount(desktop, source_id)
     end
     Overlay.push(desktop, {
         title = title,
+        docs = require("utils.docs").source(source_id),
         sections = function()
             if type(mod.sections) == "function" then return mod.sections(desktop.plugin) end
             return {{ title = title, rows = mod.rows(desktop.plugin) }}
@@ -282,13 +289,13 @@ function Source:configSections(ctx)
     local sources = {}
     local local_mod = Source.loadSetting("local")
     if configurable(local_mod) then
-        sources[1] = entryRow(desktop, plugin, local_mod, _("本地书籍"), SOURCE_ICONS["local"])
+        sources[1] = entryRow(desktop, plugin, local_mod, _("本地书籍"), SOURCE_ICONS["local"], "local")
     end
     for _idx, meta in ipairs(SourceRegistry.listEnabled()) do
         local mod = Source.loadSetting(meta.id)
         if meta.id ~= "local" and configurable(mod) then
             sources[#sources + 1] = entryRow(desktop, plugin, mod, meta.name or meta.id,
-                SOURCE_ICONS[meta.id] or (mod.rowIcon and mod.rowIcon()) or "dns")
+                SOURCE_ICONS[meta.id] or (mod.rowIcon and mod.rowIcon()) or "dns", meta.id)
         end
     end
     return {

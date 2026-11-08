@@ -118,6 +118,7 @@ local function coreEntries(desktop)
             subtitle = _("本地书籍与书源账号"),
             page = {
                 title = _("账号"),
+                docs = "/manual/library/sources",
                 sections = function() return Source:configSections{ desktop = desktop, plugin = plugin } end,
             },
         },
@@ -127,6 +128,7 @@ local function coreEntries(desktop)
             status = string.format("%d%%", Theme.scale()), status_on = true,
             page = {
                 title = _("主题与字体"),
+                docs = "/manual/appearance/theme",
                 sections = function()
                     return Display:appearanceSections{
                         desktop = desktop, font_name = Fonts.currentName(), scale = Theme.scale(),
@@ -139,6 +141,7 @@ local function coreEntries(desktop)
             subtitle = _("屏幕刷新、夜间、亮度"),
             page = {
                 title = _("屏幕"),
+                docs = "/manual/appearance/nightmode",
                 sections = function()
                     local rows = Display:screenRows{ desktop = desktop }
                     return #rows > 0 and {{ title = _("屏幕"), rows = rows }} or {}
@@ -150,6 +153,7 @@ local function coreEntries(desktop)
             subtitle = _("启动进入月读、翻页键"),
             page = {
                 title = _("启动与按键"),
+                docs = "/manual/system/local/startup",
                 sections = function()
                     return {
                         { title = _("启动与按键"), rows = DesktopSettings:rows(desktop, require("menu").openOnStart()) },
@@ -167,6 +171,7 @@ local function coreEntries(desktop)
             subtitle = _("时钟、电量等状态项"),
             page = {
                 title = _("桌面顶栏"),
+                docs = "/manual/desktop/bar",
                 preview = function(width) return TopbarSettings.preview(width) end,
                 sections = function() return {{ title = _("顶栏"), rows = TopbarSettings:rows(desktop) }} end,
             },
@@ -177,6 +182,7 @@ local function coreEntries(desktop)
             subtitle = _("书架布局、封面与点击行为"),
             page = {
                 title = _("图书馆"),
+                docs = "/manual/desktop/pages/shelf",
                 sections = function() return LibrarySettings:sections(desktop) end,
             },
         },
@@ -185,23 +191,32 @@ local function coreEntries(desktop)
             subtitle = _("底栏书城与 Z站、OPDS"),
             page = {
                 title = _("书城"),
+                docs = "/manual/desktop/pages",
                 sections = function() return Source:storeSections{ desktop = desktop, plugin = plugin } end,
             },
         },
         {
             group = "desktop", order = 43, id = "insight", icon = "monitoring", title = _("统计"),
             subtitle = _("阅读目标，以及显示哪些页面与数据"),
-            page = { title = _("统计"), sections = function() return InsightSettings:sections(desktop) end },
+            page = {
+                title = _("统计"),
+                docs = "/manual/desktop/pages/insight",
+                sections = function() return InsightSettings:sections(desktop) end,
+            },
         },
         {
             group = "reader", order = 10, id = "reader_behavior", icon = "touch_app", title = _("阅读行为"),
             subtitle = _("脚注与阅读行为"),
-            page = { title = _("阅读行为"), sections = function() return ReaderSettings:sections(desktop) end },
+            page = {
+                title = _("阅读行为"),
+                docs = "/manual/reader/ui/behavior",
+                sections = function() return ReaderSettings:sections(desktop) end,
+            },
         },
         {
             group = "reader", order = 50, id = "lookup", icon = "format_ink_highlighter", title = _("查词"),
             subtitle = _("选区与划词"),
-            page = { title = _("查词") },
+            page = { title = _("查词"), docs = "/manual/reader/lookup/lookup" },
         },
         { parent = "lookup", order = 10, sections = function() return ReaderSettings:lookupSections(desktop) end },
         {
@@ -209,6 +224,7 @@ local function coreEntries(desktop)
             subtitle = _("按钮开关、顺序与来源"),
             page = {
                 title = _("划词菜单"),
+                docs = "/manual/reader/lookup/lookup",
                 sections = function() return {{ title = _("按钮"), rows = ReaderSettings:popupRows(desktop) }} end,
             },
         },
@@ -218,13 +234,18 @@ local function coreEntries(desktop)
             subtitle = _("型号、版本、更新与加群"),
             page = {
                 title = _("我的设备"),
+                docs = "/manual/device/my-device",
                 sections = function() return DeviceSettings.infoSections(desktop) end,
             },
         },
         {
             group = "reader", order = 55, id = "ai", icon = "psychology", title = _("AI 接口"),
             subtitle = _("X-Ray 使用的大模型接口"),
-            page = { title = _("AI 接口"), sections = function() return {{ title = _("AI"), rows = AISettings:rows(desktop) }} end },
+            page = {
+                title = _("AI 接口"),
+                docs = "/manual/reader/smart/ai",
+                sections = function() return {{ title = _("AI"), rows = AISettings:rows(desktop) }} end,
+            },
         },
         network,
         { group = "maintenance", order = 70, id = "debug_log", row = Maintenance:debugLogRow(desktop) },
@@ -375,6 +396,7 @@ local function groupPage(desktop, group)
     return {
         id = "group:" .. group.id,
         title = group.title,
+        docs = require("utils.docs").group(group.id),
         sections = function()
             return {{ title = group.title, rows = entryRows(desktop, group.entries) }}
         end,
@@ -390,6 +412,7 @@ local function folderGroupPage(desktop, group, folders)
     return {
         id = "group:" .. group.id,
         title = group.title,
+        docs = require("utils.docs").group(group.id),
         sections = function()
             local sections = {}
             for _idx, folder in ipairs(folders) do

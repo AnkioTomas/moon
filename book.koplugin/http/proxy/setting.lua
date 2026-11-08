@@ -149,6 +149,7 @@ function Setting.entry(desktop)
         status_on = on and proxy ~= nil,
         page = {
             title = _("网络"),
+            docs = "/manual/system/connect/network",
             sections = function()
                 return {
                     { title = _("HTTP 代理"), rows = Setting.rows(desktop) },

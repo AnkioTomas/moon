@@ -32,6 +32,7 @@ function Setting.entries(desktop)
             status = T(_("已启用 %1 项"), QuickPanel.enabledCount("desktop")), status_on = true,
             page = {
                 title = _("桌面快捷面板"),
+                docs = "/manual/desktop/actions",
                 preview = function(width) return QuickPanel.preview("desktop", width) end,
                 sections = function() return {{ title = _("桌面"), rows = QuickPanel.rows("desktop", desktop) }} end,
             },
@@ -42,6 +43,7 @@ function Setting.entries(desktop)
             status = T(_("已启用 %1 项"), QuickPanel.enabledCount("reader")), status_on = true,
             page = {
                 title = _("阅读快捷面板"),
+                docs = "/manual/reader/ui/panel",
                 preview = function(width) return QuickPanel.preview("reader", width) end,
                 sections = function() return {{ title = _("阅读"), rows = QuickPanel.rows("reader", desktop) }} end,
             },

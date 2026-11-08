@@ -26,6 +26,7 @@ function Setting.entries(desktop)
             status_on = on,
             page = {
                 title = _("锁屏密码"),
+                docs = "/manual/security/passcode",
                 sections = function()
                     return { { title = _("密码"), rows = require("features.passcode.page").rows(desktop) } }
                 end,

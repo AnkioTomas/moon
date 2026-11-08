@@ -1,6 +1,6 @@
 --[[--
 首次使用引导：标记为真只弹一次文档询问，弹之前先清标记；老用户（标记为假）不弹。
-「查看文档」与「加入交流群」同一套打开方式：能开链接直接开，开不了出二维码。
+「查看指南」与「加入交流群」同一套打开方式：能开链接直接开，开不了出二维码。
 @module tests.desktop.welcome_spec
 --]]
 local Assert = require("support.assert")
@@ -38,7 +38,7 @@ Assert.matches(dlg.text, "账号页")
 
 dlg.ok_callback()
 Assert.matches(opened, "^https://")
-Assert.eq(opened, "https://moon.ankio.net")
+Assert.eq(opened, "https://moon.ankio.net/manual")
 
 opened = nil
 dlg.extra_callback()
@@ -53,8 +53,8 @@ Welcome.promptDocs(desk)
 dlg = Themed.last("confirm")
 dlg.ok_callback()
 local qr = Themed.last("qr")
-Assert.eq(qr.text, "https://moon.ankio.net")
-Assert.eq(qr.caption, "https://moon.ankio.net")
+Assert.eq(qr.text, "https://moon.ankio.net/manual")
+Assert.eq(qr.caption, "https://moon.ankio.net/manual")
 dlg.extra_callback()
 qr = Themed.last("qr")
 Assert.eq(qr.title, "加入交流群")

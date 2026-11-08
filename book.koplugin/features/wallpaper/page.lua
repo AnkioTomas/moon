@@ -203,6 +203,7 @@ end
 function Page.spec(desktop)
     return {
         title = _("界面壁纸"),
+        docs = "/manual/appearance/wallpaper",
         preview = function(width) return Page.preview(width) end,
         sections = function() return Page.sections(desktop) end,
     }

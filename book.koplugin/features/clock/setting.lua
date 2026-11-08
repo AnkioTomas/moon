@@ -31,6 +31,7 @@ function Setting.entries(desktop)
             status_on = true,
             page = {
                 title = _("时间"),
+                docs = "/manual/system/local/clock",
                 sections = function() return require("features.clock.page").sections(desktop) end,
             },
         },

@@ -27,6 +27,7 @@ function Setting.entries(desktop)
             subtitle = _("Edge 翻译与双语对照"),
             page = {
                 title = _("翻译"),
+                docs = "/manual/reader/smart/translate",
                 sections = function()
                     local MoonSettings = require("utils.settings")
                     local Row = require("ui.themes.widgets.row")

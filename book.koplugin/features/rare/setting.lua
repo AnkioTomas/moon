@@ -336,6 +336,7 @@ function Setting.entries(desktop)
             status_on = on,
             page = {
                 title = _("行间标注"),
+                docs = "/manual/reader/lookup/rare",
                 sections = function() return sections(desktop) end,
             },
         },

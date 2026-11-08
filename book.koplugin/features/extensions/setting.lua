@@ -29,6 +29,7 @@ function Setting.entries(desktop)
             status_on = settings.enabled,
             page = {
                 title = _("底栏拓展"),
+                docs = "/manual/desktop/bar/extensions",
                 sections = function()
                     local Extensions = require("features.extensions")
                     local Row = require("ui.themes.widgets.row")
