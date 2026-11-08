@@ -651,12 +651,12 @@ function BookDB.getMany(source_id, stable_ids)
     return out
 end
 
---- 按本地路径取 books 行
+--- 按本地路径取 books 行；历史同路径残留优先取在架、较新身份。
 ---@param path string
 ---@return Book|nil
 function BookDB.getByPath(path)
     return rowToBook(DB.rowexec(
-        "SELECT " .. COLUMNS .. " FROM books WHERE path=? LIMIT 1;",
+        "SELECT " .. COLUMNS .. " FROM books WHERE path=? ORDER BY deleted ASC, inserted_at DESC, stable_id ASC LIMIT 1;",
         path
     ))
 end

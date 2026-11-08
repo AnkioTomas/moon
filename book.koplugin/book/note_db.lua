@@ -32,13 +32,20 @@ CREATE TABLE IF NOT EXISTS notes (
 end)
 
 --- 书改名 / 收编时由 books_db 调用。
---- 收编（merge）时旧身份的笔记还没推就比新身份的已同步副本新，先清掉新身份那份。
+--- 收编逐章选快照：旧脏行优先，否则只覆盖较旧的已同步副本；其它章不动。
 function NoteDB.moveIdentity(source_id, old_stable_id, new_stable_id, merge)
-    return (not merge or DB.exec(
+    if merge and (not DB.exec(
         [[DELETE FROM notes WHERE source_id=? AND stable_id=? AND EXISTS (
-            SELECT 1 FROM notes WHERE source_id=? AND stable_id=? AND sync_status=0);]],
-        source_id, new_stable_id, source_id, old_stable_id) ~= nil)
-        and DB.moveIdentity("notes", source_id, old_stable_id, new_stable_id, merge)
+            SELECT 1 FROM notes AS old WHERE old.source_id=? AND old.stable_id=?
+            AND old.chapter_idx=notes.chapter_idx
+            AND (old.sync_status=0 OR (notes.sync_status=1 AND old.updated_at>notes.updated_at)));]],
+        source_id, new_stable_id, source_id, old_stable_id)
+        or not DB.exec(
+            [[UPDATE notes SET sync_status=0 WHERE source_id=? AND stable_id=? AND NOT EXISTS (
+                SELECT 1 FROM notes AS target WHERE target.source_id=? AND target.stable_id=?
+                AND target.chapter_idx=notes.chapter_idx);]],
+            source_id, old_stable_id, source_id, new_stable_id)) then return false end
+    return DB.moveIdentity("notes", source_id, old_stable_id, new_stable_id, merge)
 end
 
 --- 书被删（墓碑撕掉）时由 books_db 调用。

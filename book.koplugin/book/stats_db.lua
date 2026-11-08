@@ -85,6 +85,10 @@ end)
 
 --- 书改名 / 收编时由 books_db 调用。
 function StatsDB.moveIdentity(source_id, old_stable_id, new_stable_id, merge)
+    if merge and not DB.exec(
+        [[UPDATE reading_stats SET sync_status=0 WHERE source_id=? AND stable_id=?
+          AND sync_status=1 AND record_type IN ('page', 'page_rollup');]],
+        source_id, old_stable_id) then return false end
     return DB.moveIdentity("reading_stats", source_id, old_stable_id, new_stable_id, merge)
 end
 

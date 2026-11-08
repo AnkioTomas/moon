@@ -54,7 +54,7 @@ end
 ---   子进程只做文件系统轻活（遍历、md5），**不碰 sqlite、不开文档**。
 ---   主进程在 fork 前查好已入库行；批内落索引与书库；扫完再开补齐子进程提封面。
 
---- 主进程：扫盘解析过的行（有 md5 且有书名），按 stable_id（即路径）索引；
+--- 主进程：扫盘解析过的行（有 md5 且有书名），按物理路径索引；
 --- 另附全部行（含残缺行与墓碑）的内容 md5，供子进程识别同路径换了文件；以及全部行本身。
 ---@return table<string, Book> known, table<string, string> digests, table<string, Book> rows
 local function knownBooks()
@@ -67,6 +67,17 @@ local function knownBooks()
         -- 无 md5 的身份行（开书时登记）下一轮扫盘当新书用文件名补齐，封面留给补齐进程。
         if row.md5 and type(row.title) == "string" and row.title ~= "" then
             known[stable_id] = row
+        end
+    end
+    for stable_id, row in pairs(rows) do
+        if remoteRelativePath(stable_id) and row.path then
+            local owner = BookDB.getByPath(row.path)
+            if owner and owner.source_id == SOURCE_ID then
+                digests[row.path] = owner.md5
+                -- 云端书名已经可信，缺本地 md5 不等于需要按文件名重写。
+                known[row.path] = (owner.md5 or remoteRelativePath(owner.stable_id))
+                    and type(owner.title) == "string" and owner.title ~= "" and owner or nil
+            end
         end
     end
     return known, digests, rows
@@ -111,7 +122,7 @@ local function parseFile(f, known, digests, index)
     local old = digests[f.path]
     f.changed = f.md5 ~= nil and old ~= nil and old ~= f.md5
     if f.changed then
-        os.remove(coverPath(f.path))
+        os.remove(coverPath(known[f.path] and known[f.path].stable_id or f.path))
         f.cover_tried = nil
     elseif known[f.path] then
         return f
@@ -129,7 +140,9 @@ local function movedFrom(f)
     local BookDB = require("book.books_db")
     if not f.md5 or BookDB.get(SOURCE_ID, f.path) then return nil end
     for _idx, stable_id in ipairs(BookDB.stableIdsByMd5(SOURCE_ID, f.md5)) do
-        if not lfs.attributes(stable_id, "mode") then return BookDB.get(SOURCE_ID, stable_id) end
+        if not remoteRelativePath(stable_id) and not lfs.attributes(stable_id, "mode") then
+            return BookDB.get(SOURCE_ID, stable_id)
+        end
     end
 end
 
@@ -145,7 +158,9 @@ local function commitFiles(files, known, full_snapshot, kept)
     local BookDB = require("book.books_db")
     for _idx, f in ipairs(files) do
         local cached = known[f.path]
-        local moved = not cached and movedFrom(f)
+        local owner = cached or BookDB.getByPath(f.path)
+        local stable_id = owner and owner.source_id == SOURCE_ID and owner.stable_id or f.path
+        local moved = not owner and movedFrom(f)
         if moved then
             if not BookDB.renameStableId(SOURCE_ID, moved.stable_id, f.path, f.category, f.series) then
                 return false, "rename " .. f.path
@@ -154,19 +169,19 @@ local function commitFiles(files, known, full_snapshot, kept)
         end
         if full_snapshot then
             f.source_id = SOURCE_ID
-            f.stable_id = f.path
+            f.stable_id = stable_id
             f.deleted = 0
         end
         if cached and not f.changed then
             if not full_snapshot and cached.deleted ~= 0
-                and not BookDB.setLibraryMembership(SOURCE_ID, f.path, true) then
+                and not BookDB.setLibraryMembership(SOURCE_ID, stable_id, true) then
                 return false, "restore " .. f.path
             end
         -- knownBooks 只把解析过的行交给 worker；移动过来的旧行也会
         -- 在这里用本次解析结果补齐。不要把“已存在”误当成“无需更新”。
         -- 换了内容的行即便走快照也要本地可信写入：reconcile 对脏行保留旧书名。
         elseif (f.changed or not full_snapshot) and not BookDB.upsert({
-            source_id = SOURCE_ID, stable_id = f.path, md5 = f.md5,
+            source_id = SOURCE_ID, stable_id = stable_id, md5 = f.md5,
             title = f.title, authors = f.authors, intro = f.intro, meta = { language = f.language },
             category = f.category, series = f.series,
             inserted_at = moved and moved.inserted_at or os.time(), path = f.path,
@@ -174,11 +189,11 @@ local function commitFiles(files, known, full_snapshot, kept)
             return false, "upsert " .. f.path
         end
         if f.changed then
-            require("ui.themes.widgets.image").invalidate(coverPath(f.path))
+            require("ui.themes.widgets.image").invalidate(coverPath(stable_id))
         end
         -- 批内续扫：后续 movedFrom / 去重认得出本轮刚写入的行
         if not cached or f.changed then
-            known[f.path] = BookDB.get(SOURCE_ID, f.path) or known[f.path]
+            known[f.path] = BookDB.get(SOURCE_ID, stable_id) or known[f.path]
         end
     end
     if not full_snapshot then return true end
@@ -193,7 +208,9 @@ local function commitFiles(files, known, full_snapshot, kept)
     -- 库目录就是纯本地书的“远端”：扫到即确认。不清脏的话文件被外部删掉后 reconcile 永远不下架它。
     -- 库目录外开过的书不在快照里，保持脏行，不被下架。
     local ids = {}
-    for i, f in ipairs(files) do ids[i] = f.path end
+    for _idx, f in ipairs(files) do
+        if not remoteRelativePath(f.stable_id) then ids[#ids + 1] = f.stable_id end
+    end
     if not BookDB.markSyncedMany(SOURCE_ID, ids) then return false, "mark synced" end
     return true
 end
@@ -594,6 +611,8 @@ function Scan.indexOneAsync(self, path, cb)
         return defer(cb, nil, _("不支持的文件格式"))
     end
     local known, digests = knownBooks()
+    local owner = known[path] or require("book.books_db").getByPath(path)
+    local cover_key = owner and owner.source_id == SOURCE_ID and owner.stable_id or path
     local index = ScanDB.all()
     local attr = lfs.attributes(path)
     local fp = attr and (attr.size .. ":" .. attr.modification) or nil
@@ -609,7 +628,7 @@ function Scan.indexOneAsync(self, path, cb)
     local job = Job.run(function(progress)
         local f = parseFile({ name = name, path = path, fp = fp }, known, digests, index)
         progress(path)
-        local props = parseBookProps(path) or {}
+        local props = parseBookProps(path, cover_key) or {}
         progress(false)
         f.cover_tried = true
         if props.title and props.title ~= "" then

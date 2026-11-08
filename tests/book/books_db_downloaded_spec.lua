@@ -213,6 +213,94 @@ do
     Assert.eq(series.fraction, 0.4)
 end
 
+-- 同一镜像文件留下两种身份：选在架身份，并把旧身份的数据完整收编。
+do
+    local path, id = "/library/identity.epub", "webdav://identity.epub"
+    local NoteDB = require("book.note_db")
+    require("book.stats_db")
+    Assert.is_true(BookDB.upsertRemote({ source_id = "local", stable_id = path, title = "旧身份", path = path, deleted = 0 }))
+    Assert.is_true(BookDB.upsertRemote({ source_id = "local", stable_id = id, title = "云端身份", path = path, deleted = 0 }))
+    Assert.is_true(BookDB.setLibraryMembership("local", path, false))
+    Assert.eq(BookDB.getByPath(path).stable_id, id, "同路径的旧墓碑不能接走阅读数据")
+    Assert.is_true(ProgressDB.upsertRemote("local", path, { fraction = 1, updated_at = 200 }))
+    Assert.is_true(ProgressDB.upsertRemote("local", id, { fraction = 0.75, updated_at = 100 }))
+    Assert.is_true(NoteDB.upsert("local", path, 0, '[{"text":"new"}]', 200, true))
+    Assert.is_true(NoteDB.upsert("local", id, 0, '[{"text":"old"}]', 100, true))
+    Assert.is_true(NoteDB.upsert("local", id, 1, '[{"text":"other chapter"}]', 100, true))
+    Assert.not_nil(Base.exec([[INSERT INTO reading_stats
+        (source_id, stable_id, record_type, page, start_time, duration, sync_status)
+        VALUES (?,?,?,?,?,?,?);]], "local", path, "page", 1, 100, 30, 1))
+    Assert.not_nil(Base.exec([[INSERT INTO reading_stats
+        (source_id, stable_id, record_type, page, start_time, duration, sync_status)
+        VALUES (?,?,?,?,?,?,?);]], "local", path, "page", 2, 130, 20, 2))
+    Assert.is_true(BookDB.adoptStableId("local", path, id, path))
+    Assert.is_nil(BookDB.get("local", path))
+    Assert.eq(BookDB.getByPath(path).stable_id, id)
+    Assert.eq(tonumber(Base.rowexec("SELECT COUNT(*) FROM books WHERE path=?;", path)), 1)
+    Assert.is_nil(ProgressDB.get("local", path))
+    local progress = ProgressDB.get("local", id)
+    Assert.eq(progress.fraction, 1, "已同步但更新的旧进度不能被丢掉")
+    Assert.eq(progress.sync_status, 0, "换了远端身份，旧进度必须重新上行")
+    Assert.is_nil(progress.synced, "旧身份的同步基线不能冒充新身份的基线")
+    Assert.eq(NoteDB.get("local", id, 0).payload, '[{"text":"new"}]')
+    Assert.eq(NoteDB.get("local", id, 0).sync_status, 0)
+    Assert.eq(NoteDB.get("local", id, 1).payload, '[{"text":"other chapter"}]')
+    Assert.is_nil(NoteDB.get("local", path, 0))
+    Assert.eq(tonumber(Base.rowexec(
+        "SELECT sync_status FROM reading_stats WHERE source_id=? AND stable_id=? AND record_type='page' AND page=1;",
+        "local", id)), 0)
+    Assert.eq(tonumber(Base.rowexec(
+        "SELECT sync_status FROM reading_stats WHERE source_id=? AND stable_id=? AND page=2;",
+        "local", id)), 2, "原生导入统计仍不上传")
+    Assert.is_nil(Base.rowexec("SELECT 1 FROM reading_stats WHERE stable_id=?;", path))
+
+    -- 新身份的未上传改动不能被旧身份的已同步快照覆盖。
+    Assert.is_true(ProgressDB.upsertRemote("local", path, { fraction = 0.9, updated_at = 300 }))
+    Assert.is_true(ProgressDB.upsert("local", id, { fraction = 0.5, updated_at = 250 }))
+    Assert.is_true(NoteDB.upsert("local", path, 0, "clean old", 300, true))
+    Assert.is_true(NoteDB.upsert("local", id, 0, "dirty new", 250))
+    Assert.is_true(BookDB.adoptStableId("local", path, id, path))
+    Assert.eq(ProgressDB.get("local", id).fraction, 0.5)
+    Assert.eq(NoteDB.get("local", id, 0).payload, "dirty new")
+
+    -- 旧身份只有某章待上传，不得清掉新身份其它章的笔记。
+    Assert.is_true(NoteDB.upsert("local", path, 0, "dirty old", 400))
+    Assert.is_true(BookDB.adoptStableId("local", path, id, path))
+    Assert.eq(NoteDB.get("local", id, 0).payload, "dirty old")
+    Assert.not_nil(NoteDB.get("local", id, 1))
+
+    Assert.is_true(ProgressDB.upsertRemote("local", path, { fraction = 0.9, updated_at = 500 }))
+    Assert.is_true(ProgressDB.markSynced("local", id, 250, ProgressDB.get("local", id)))
+    Assert.is_true(ProgressDB.upsertRemote("local", id, { fraction = 0.2, updated_at = 600 }))
+    Assert.is_true(BookDB.adoptStableId("local", path, id, path))
+    Assert.eq(ProgressDB.get("local", id).fraction, 0.2, "两边已同步时保留较新进度，不取最大百分比")
+    Assert.eq(ProgressDB.get("local", id).sync_status, 1)
+
+    -- 依附表已改、数据事件失败：书行、笔记和统计必须一起回滚。
+    Assert.is_true(BookDB.upsertRemote({
+        source_id = "local", stable_id = path, path = path, deleted = 0, title = "回滚旧身份",
+    }))
+    Assert.is_true(NoteDB.upsert("local", path, 0, "rollback note", 700))
+    Assert.not_nil(Base.exec([[INSERT INTO reading_stats
+        (source_id, stable_id, record_type, page, start_time, duration, sync_status)
+        VALUES (?,?,?,?,?,?,?);]], "local", path, "page", 3, 700, 10, 1))
+    local Event = require("utils.event")
+    local emit = Event.emit
+    Event.emit = function() return false end
+    local adopted = BookDB.adoptStableId("local", path, id, path)
+    Event.emit = emit
+    Assert.is_false(adopted)
+    Assert.not_nil(BookDB.get("local", path))
+    Assert.eq(BookDB.get("local", id).title, "云端身份")
+    Assert.eq(NoteDB.get("local", path, 0).payload, "rollback note")
+    Assert.eq(NoteDB.get("local", id, 0).payload, "dirty old")
+    Assert.eq(tonumber(Base.rowexec(
+        "SELECT sync_status FROM reading_stats WHERE source_id=? AND stable_id=? AND page=3;",
+        "local", path)), 1)
+    Assert.is_nil(Base.rowexec(
+        "SELECT 1 FROM reading_stats WHERE source_id=? AND stable_id=? AND page=3;", "local", id))
+end
+
 Base.close()
 for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end
 

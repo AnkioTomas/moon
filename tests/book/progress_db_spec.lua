@@ -528,13 +528,14 @@ do
     for i = mark + 1, #calls do
         if calls[i].sql:find("pending_progress", 1, true) then own[#own + 1] = calls[i] end
     end
-    Assert.len(own, 3)
+    Assert.len(own, 4)
     Assert.is_true(own[1].sql:find("DELETE FROM pending_progress WHERE source_id=? AND stable_id=? AND EXISTS", 1, true) ~= nil)
     Assert.is_true(own[1].sql:find("sync_status=0", 1, true) ~= nil)
     Assert.eq(own[1].args[2], "/new.epub")
     Assert.eq(own[1].args[4], "/old.epub")
-    Assert.is_true(own[2].sql:find("UPDATE OR IGNORE pending_progress", 1, true) ~= nil)
-    Assert.eq(own[3].sql, "DELETE FROM pending_progress WHERE source_id=? AND stable_id=?;")
+    Assert.is_true(own[2].sql:find("UPDATE pending_progress SET sync_status=0, synced=NULL", 1, true) ~= nil)
+    Assert.is_true(own[3].sql:find("UPDATE OR IGNORE pending_progress", 1, true) ~= nil)
+    Assert.eq(own[4].sql, "DELETE FROM pending_progress WHERE source_id=? AND stable_id=?;")
 
     DbBase.close()
     clearMods()
