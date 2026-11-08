@@ -238,6 +238,11 @@ package.preload["book.books_db"] = function()
             end
             return out
         end,
+        getByPath = function(path)
+            for _key, row in pairs(db_rows) do
+                if row.path == path then return row end
+            end
+        end,
         stableIdsByMd5 = function(source_id, md5)
             local out = {}
             for _, row in pairs(db_rows) do
@@ -384,6 +389,51 @@ local function reset()
     CRASH_AT = {}
     job_runs = 0
     scan_rows = {}
+end
+
+-- 已下载的 WebDAV 镜像：关闭 WebDAV 后扫盘 / 单本导入不能重新创建绝对路径身份。
+do
+    reset()
+    local path, id = "/books/a.epub", "webdav://a.epub"
+    db_rows[rowKey("local", id)] = {
+        source_id = "local", stable_id = id, path = path,
+        title = "云端书", deleted = 0, sync_status = 1,
+    }
+    local c = Client.new({ path = "/books" })
+    local ok
+    c:indexOneAsync(path, function(value) ok = value end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.is_nil(db_rows[rowKey("local", path)], "镜像已归云端身份，不另建本地书")
+    Assert.eq(db_rows[rowKey("local", id)].path, path)
+    Assert.eq(db_rows[rowKey("local", id)].title, "云端书", "未采集本地 md5 不能覆盖既有云端书名")
+    c:scanAsync(function(value) ok = value end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.is_nil(db_rows[rowKey("local", path)], "全量扫盘也复用物理路径的既有身份")
+    Assert.eq(db_rows[rowKey("local", id)].deleted, 0)
+    Assert.eq(db_rows[rowKey("local", id)].title, "云端书")
+end
+
+-- 相同内容的另一份实体文件是独立本地书，不能把 WebDAV URI 当成“已丢失的旧路径”来改名。
+do
+    reset()
+    local util = require("util")
+    local partial_md5 = util.partialMD5
+    util.partialMD5 = function() return "same-content" end
+    local id = "webdav://a.epub"
+    db_rows[rowKey("local", id)] = {
+        source_id = "local", stable_id = id, path = "/books/a.epub",
+        title = "云端书", md5 = "same-content", deleted = 0, sync_status = 1,
+    }
+    local ok
+    Client.new({ path = "/books" }):indexOneAsync("/books/sub/c.pdf", function(value) ok = value end)
+    Stubs.flush()
+    util.partialMD5 = partial_md5
+    Assert.is_true(ok)
+    Assert.not_nil(db_rows[rowKey("local", id)])
+    Assert.not_nil(db_rows[rowKey("local", "/books/sub/c.pdf")])
+    Assert.len(renames, 0)
 end
 
 --- 扫盘 on_done 后再跑补齐 Job：两次 flush。

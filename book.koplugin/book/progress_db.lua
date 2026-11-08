@@ -339,13 +339,20 @@ ON CONFLICT(source_id, stable_id) DO UPDATE SET
 end
 
 --- 书改名 / 收编时由 books_db 调用。
---- 收编（merge）时旧身份的进度还没推就比新身份的已同步副本新，先清掉新身份那份。
+--- 收编保留旧身份的脏进度，或比新身份已同步副本更新的进度；迁入的新身份重新上行。
 function ProgressDB.moveIdentity(source_id, old_stable_id, new_stable_id, merge)
-    return (not merge or DB.exec(
+    if merge and (not DB.exec(
         [[DELETE FROM pending_progress WHERE source_id=? AND stable_id=? AND EXISTS (
-            SELECT 1 FROM pending_progress WHERE source_id=? AND stable_id=? AND sync_status=0);]],
-        source_id, new_stable_id, source_id, old_stable_id) ~= nil)
-        and DB.moveIdentity("pending_progress", source_id, old_stable_id, new_stable_id, merge)
+            SELECT 1 FROM pending_progress AS old WHERE old.source_id=? AND old.stable_id=?
+            AND (old.sync_status=0 OR (pending_progress.sync_status=1
+                AND old.updated_at>pending_progress.updated_at)));]],
+        source_id, new_stable_id, source_id, old_stable_id)
+        or not DB.exec(
+            [[UPDATE pending_progress SET sync_status=0, synced=NULL
+              WHERE source_id=? AND stable_id=? AND NOT EXISTS (
+                SELECT 1 FROM pending_progress WHERE source_id=? AND stable_id=?);]],
+            source_id, old_stable_id, source_id, new_stable_id)) then return false end
+    return DB.moveIdentity("pending_progress", source_id, old_stable_id, new_stable_id, merge)
 end
 
 --- 书被删（墓碑撕掉）时由 books_db 调用。

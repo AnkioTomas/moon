@@ -506,8 +506,8 @@ end
 ---@param path string
 ---@return boolean
 local function isOpenInReader(path)
-    local ok, ReaderUI = pcall(require, "apps/reader/readerui")
-    local ui = ok and ReaderUI.instance
+    local ReaderUI = package.loaded["apps/reader/readerui"]
+    local ui = ReaderUI and ReaderUI.instance
     return ui and ui.document and ui.document.file == path or false
 end
 
@@ -520,11 +520,15 @@ local function adoptLocal(item, stable_id)
     if not BookDB.get(SOURCE_ID, item.path) then
         return BookDB.touchPath(SOURCE_ID, stable_id, item.path)
     end
+    -- 关书仍会写旧身份；所有收编入口都等到阅读结束后再迁移。
+    if isOpenInReader(item.path) then return true end
     if lfs.attributes(coverPath(stable_id), "mode") ~= "file" then
         local cover = readFile(coverPath(item.path))
         if cover then writeFile(coverPath(stable_id), cover) end
     end
-    return BookDB.adoptStableId(SOURCE_ID, item.path, stable_id, item.path)
+    local ok = BookDB.adoptStableId(SOURCE_ID, item.path, stable_id, item.path)
+    if not ok then require("utils.log").warn("book webdav identity adoption failed", item.path, stable_id) end
+    return ok
 end
 
 --- 设置「上传本地书到 WebDAV」（默认开）；关了本地书不上传，也不会被当成待上传。
@@ -556,7 +560,9 @@ local function indexLocal(self, run, done)
     for i, rel in ipairs(rels) do
         local item, row = run.local_files[rel], rows[ids[i]]
         if remote[rel] then
-            if trusted and (not row or row.path ~= item.path) then adoptLocal(item, ids[i]) end
+            if trusted and not (row and row.deleted == 1 and row.sync_status == 0)
+                and (not row or row.path ~= item.path or local_rows[item.path])
+                and not adoptLocal(item, ids[i]) then return done(_("更新书籍身份失败")) end
         elseif not row and not local_rows[paths[i]] then
             pending[#pending + 1] = item
         end
@@ -598,14 +604,19 @@ local function uploadLocal(self, run, done)
     local rels = {}
     for rel in pairs(run.local_files) do rels[#rels + 1] = rel end
     table.sort(rels)
-    local ids = {}
-    for i, rel in ipairs(rels) do ids[i] = remoteStableId(rel) end
-    local rows = BookDB.getMany(SOURCE_ID, ids)
+    local ids, paths = {}, {}
+    for i, rel in ipairs(rels) do
+        ids[i] = remoteStableId(rel)
+        paths[i] = run.local_files[rel].path
+    end
+    local rows, local_rows = BookDB.getMany(SOURCE_ID, ids), BookDB.getMany(SOURCE_ID, paths)
     local pending = {}
     for i, rel in ipairs(rels) do
         local item, row = run.local_files[rel], rows[ids[i]]
         if remote[rel] then
-            if not row or row.path ~= item.path then adoptLocal(item, ids[i]) end
+            if not (row and row.deleted == 1 and row.sync_status == 0)
+                and (not row or row.path ~= item.path or local_rows[item.path])
+                and not adoptLocal(item, ids[i]) then return done(_("更新书籍身份失败")) end
         elseif not (row and row.deleted == 1 and row.sync_status == 0)
             and os.time() - (self.upload_failed[rel] or 0) > UPLOAD_COOLDOWN then
             pending[#pending + 1] = rel
@@ -642,8 +653,10 @@ local function uploadLocal(self, run, done)
                         fail(rel, err, code == nil)
                         return next_item()
                     end
-                    -- 正在阅读的书先不换身份（关书时进度会写回旧身份）；下一轮同步 indexLocal 再收编。
-                    if not isOpenInReader(item.path) then adoptLocal(item, stable_id) end
+                    if not adoptLocal(item, stable_id) then
+                        fail(rel, _("更新书籍身份失败"), false)
+                        return next_item()
+                    end
                     local row = BookDB.get(SOURCE_ID, stable_id)
                     BookDB.upsertRemote({
                         source_id = SOURCE_ID, stable_id = stable_id,
@@ -1120,7 +1133,8 @@ function Webdav.importWebdavAsync(self, temp_path, filename, cb)
         local stem_name, ext = filename:match("^(.*)(%.[^.]*)$")
         stem_name, ext = stem_name or filename, ext or ""
         local name, n = filename, 2
-        while remote[name] or BookDB.get(SOURCE_ID, remoteStableId(name)) do
+        while remote[name] or BookDB.get(SOURCE_ID, remoteStableId(name))
+            or lfs.attributes(self:webdavBookRoot() .. "/" .. name) do
             name = string.format("%s (%d)%s", stem_name, n, ext)
             n = n + 1
         end

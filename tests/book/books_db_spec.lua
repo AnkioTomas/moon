@@ -712,7 +712,7 @@ do
     Assert.eq(book.path, "/cache/moon/book/x/book.epub")
     Assert.eq(book.deleted, 1)
     local q = calls[#calls]
-    Assert.is_true(q.sql:find("FROM books WHERE path=? LIMIT 1;", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("FROM books WHERE path=? ORDER BY deleted ASC, inserted_at DESC, stable_id ASC LIMIT 1;", 1, true) ~= nil)
     Assert.eq(q.argc, 1)
     Assert.eq(q.args[1], "/cache/moon/book/x/book.epub")
 

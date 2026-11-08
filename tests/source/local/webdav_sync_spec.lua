@@ -733,6 +733,12 @@ do
     -- 以前按绝对路径登记过（扫盘/从文件管理器打开）且改过书名；远端曾删过同名书（墓碑）。
     books[L .. "/分类/旧.epub"] = { stable_id = L .. "/分类/旧.epub", title = "旧书", deleted = 0, sync_status = 0 }
     books["webdav://分类/旧.epub"] = { stable_id = "webdav://分类/旧.epub", title = "旧", deleted = 1, sync_status = 1 }
+    books[L .. "/both.epub"] = {
+        stable_id = L .. "/both.epub", path = L .. "/both.epub", deleted = 1, sync_status = 1,
+    }
+    books["webdav://both.epub"] = {
+        stable_id = "webdav://both.epub", path = L .. "/both.epub", deleted = 0, sync_status = 1,
+    }
     local dav = fakeDav()
     dav:put(ROOT .. "/both.epub", "both")
     dav:put(ROOT .. "/远端.epub", "remote")
@@ -747,11 +753,56 @@ do
 
     -- 日常同步：以书目为准扫本地、上传新书；书目里有的不补传（远端文件丢了只有刷新列目录才知道）。
     Assert.is_true(scan(c))
+    Assert.is_nil(books[L .. "/both.epub"], "云端行路径已正确时，仍须收编残留的绝对路径身份")
     Assert.eq(dav.files[ROOT .. "/新书.epub"].data, "new", "日常同步上传本地新书")
     Assert.not_nil(remoteEntries(dav)["新书.epub"], "日常同步写进书目")
     Assert.is_nil(dav.files[ROOT .. "/恢复.epub"], "书目里有 = 当远端已有")
     Assert.eq(books["webdav://恢复.epub"].path, L .. "/恢复.epub", "书目里有的收编本地文件")
     Assert.eq(books["webdav://失踪.epub"].deleted, 0, "书目是唯一依据")
+
+    local reader_module = package.loaded["apps/reader/readerui"]
+    package.loaded["apps/reader/readerui"] = { instance = { document = { file = L .. "/both.epub" } } }
+    books[L .. "/both.epub"] = {
+        stable_id = L .. "/both.epub", path = L .. "/both.epub", deleted = 0, sync_status = 0,
+    }
+    books["webdav://both.epub"].path = nil
+    Assert.is_true(scan(c))
+    Assert.not_nil(books[L .. "/both.epub"], "阅读中不迁身份，关书仍会写旧身份")
+    package.loaded["apps/reader/readerui"] = reader_module
+    Assert.is_true(scan(c))
+    Assert.is_nil(books[L .. "/both.epub"], "关书后的同步完成收编")
+
+    local adopt = BookDB.adoptStableId
+    books[L .. "/both.epub"] = {
+        stable_id = L .. "/both.epub", path = L .. "/both.epub", deleted = 1, sync_status = 1,
+    }
+    BookDB.adoptStableId = function() return false end
+    local ok, err = scan(c)
+    BookDB.adoptStableId = adopt
+    Assert.is_false(ok, "迁移失败不能伪装成同步成功")
+    Assert.matches(err, "更新书籍身份失败")
+    Assert.not_nil(books[L .. "/both.epub"])
+    Assert.is_true(scan(c))
+    Assert.is_nil(books[L .. "/both.epub"], "失败后下一轮可重试收编")
+
+    books[L .. "/both.epub"] = {
+        stable_id = L .. "/both.epub", path = L .. "/both.epub", deleted = 0, sync_status = 0,
+    }
+    BookDB.markDeleted("local", "webdav://both.epub")
+    local delete = dav.deleteAsync
+    function dav:deleteAsync(path, cb)
+        if path == ROOT .. "/both.epub" then
+            cb(nil, "forbidden", 403)
+            return { cancel = function() end }
+        end
+        return delete(self, path, cb)
+    end
+    Assert.is_true(scan(c))
+    Assert.eq(books["webdav://both.epub"].deleted, 1, "删除未确认时不得通过收编复活墓碑")
+    Assert.eq(books["webdav://both.epub"].sync_status, 0)
+    dav.deleteAsync = delete
+    books["webdav://both.epub"].deleted, books["webdav://both.epub"].sync_status = 0, 1
+    Assert.is_true(scan(c))
 
     Assert.is_true(refresh(c))
     Assert.eq(dav.files[ROOT .. "/新书.epub"].data, "new", "本地新书 → 上传")
@@ -1589,6 +1640,24 @@ do
     Assert.eq(books["webdav://三体 (2).epub"].sync_status, 1, "书目写成即清脏")
     Assert.not_nil(remoteEntries(dav)["三体 (2).epub"])
     Assert.not_nil(remoteEntries(dav)["三体.epub"], "其它条目原样保留")
+
+    local L = require("support.config").dir() .. "/webdav-import-local"
+    Paths.ensureDir(L)
+    local path = L .. "/本地同名.epub"
+    f = assert(io.open(path, "wb"))
+    f:write("local original")
+    f:close()
+    books[path] = { stable_id = path, path = path, deleted = 0, sync_status = 1 }
+    local c = Client.new({ webdav_url = "https://dav.example", path = L })
+    c.dav = dav
+    c:importWebdavAsync(temp, "本地同名.epub", function(v, e) ok, err = v, e end)
+    Stubs.flush()
+    Assert.is_true(ok, err)
+    Assert.is_nil(dav.files[ROOT .. "/本地同名.epub"], "本地实体文件也占用镜像文件名")
+    Assert.eq(dav.files[ROOT .. "/本地同名 (2).epub"].data, "new")
+    Assert.eq(readFile(path), "local original", "不同内容的同名导入不能借走旧书的物理路径")
+    Assert.not_nil(books[path])
+    os.remove(path)
     os.remove(temp)
     books = {}
 end
