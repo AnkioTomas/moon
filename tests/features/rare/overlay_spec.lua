@@ -294,6 +294,24 @@ do
 end
 
 do
+    screen_text = "酩酊大醉"
+    lex = require("features.rare.lexicon").parse(table.concat({
+        "#lang=zh", "酩\tmǐng\t5400", "酊\tdīng\t5000", "大\tdà\t32", "醉\tzuì\t2400",
+        "酩酊大醉\tmǐng dǐng dà zuì\t5400",
+    }, "\n"))
+    Overlay.invalidate()
+    local ui, calls = newUi()
+    rendered = {}
+    draw(Overlay.new(ui))
+    Assert.eq(calls.boxes, 2, "只给词组里的生僻单字取框")
+    Assert.len(rendered, 2)
+    Assert.eq(rendered[1].text, "mǐng")
+    Assert.eq(rendered[2].text, "dǐng")
+    Assert.is_true(rendered[2].x < 60, "第二个读音落在第二个字，不跨整词")
+    screen_text = "普通文字龘"
+end
+
+do
     -- 走字：空白保留为空格单元（英文词界），止于 pos1（含）；取框终点是同节点偏移 +1。
     local text = { "a", " ", "b", "c", "d" }
     local function n(xp) return tonumber(xp:match("%d+$")) end
