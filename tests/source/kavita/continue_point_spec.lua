@@ -32,6 +32,9 @@ local fresh = CP.pick({
 Assert.eq(fresh.kind, "fresh")
 Assert.eq(fresh.entry.chapterId, 101)
 Assert.eq(fresh.page, 0)
+local fresh_text, fresh_caption = CP.describe(fresh, "系列")
+Assert.eq(fresh_text, "开始阅读 · 第 1 卷")
+Assert.eq(fresh_caption, "共 100 页")
 
 -- 读到第 2 卷一半：主线是第 2 卷
 local mid = CP.pick(toc, {})
@@ -40,6 +43,9 @@ Assert.eq(mid.entry.chapterId, 102)
 Assert.eq(mid.fraction, 0.4)
 Assert.eq(mid.page, 40)
 Assert.eq(mid.total_pages, 100)
+local mid_text, mid_caption = CP.describe(mid, "系列")
+Assert.eq(mid_text, "继续阅读 · 第 2 卷")
+Assert.eq(mid_caption, "第 40/100 页 · 40%")
 Assert.is_nil(mid.browsed)
 
 -- 第 2 卷读完：顺延第 3 卷

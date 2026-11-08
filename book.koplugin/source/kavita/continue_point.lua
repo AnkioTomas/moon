@@ -28,6 +28,27 @@ function M.label(entry, series_title)
     return title
 end
 
+---@param target ContinueTarget
+---@param series_title string|nil
+---@return string text, string|nil caption
+function M.describe(target, series_title)
+    local label = M.label(target.entry, series_title)
+    local text, caption
+    if target.kind == "done" then
+        text = T(_("重读 · %1"), label)
+    elseif target.kind == "fresh" then
+        text = T(_("开始阅读 · %1"), label)
+        if target.total_pages > 0 then caption = T(_("共 %1 页"), target.total_pages) end
+    else
+        text = T(_("继续阅读 · %1"), label)
+        if target.total_pages > 0 then
+            caption = T(_("第 %1/%2 页 · %3%"), target.page, target.total_pages,
+                math.floor(target.fraction * 100 + 0.5))
+        end
+    end
+    return text, caption
+end
+
 ---@class ContinueTarget
 ---@field entry table            要打开的卷
 ---@field kind "fresh"|"continue"|"done"
@@ -39,7 +60,8 @@ end
 --- 选主线。
 ---@param toc table[]   卷目录（toc 顺序即阅读顺序）
 ---@param opts table    { fraction = fun(entry):number|nil, updated_at = fun(entry):number|nil,
----                       page = fun(entry):{page:number,total:number}|nil }
+---                       page = fun(entry):{page:number,total:number}|nil,
+---                       complete = fun(entry):boolean }
 ---@return ContinueTarget|nil
 function M.pick(toc, opts)
     opts = opts or {}

@@ -31,6 +31,11 @@ package.loaded["ui/network/manager"] = { isConnected = function() return not off
 package.loaded["book.progress_db"] = {
     get = function(_source_id, stable_id) return local_progress[stable_id] end,
 }
+package.loaded["source.registry"] = {
+    resolve = function()
+        return { coverRequest = function() end }
+    end,
+}
 
 local PLUGIN = Config.root() .. "/book.koplugin/source/kavita"
 local RealCache = dofile(PLUGIN .. "/cache.lua")
@@ -1150,5 +1155,35 @@ list = open({
 Assert.eq(findRow(list, "第 2 卷").row_subtitle, "上次翻阅", "已读完的卷不再显示 1/194")
 Assert.not_nil(findRow(list, "继续阅读 · 第 3 卷"), "主线跳过已读完的第 2 卷")
 
+-- 离线续读卡和普通卷行使用同一套选择保护。
+reset()
+offline = true
+list, picked = open()
+local offline_card = findRow(list, "继续阅读 · 第 2 卷")
+tap(list, offline_card)
+Assert.is_nil(picked.value, "未缓存卷不能从续读卡绕过离线保护")
+Assert.is_false(wasClosed(list), "离线失败后保留卷列表，仍能挑别的缓存卷")
+Assert.eq(Themed.last("toast").text, "这一卷还没缓存，联网后可下载")
+
+reset()
+offline = true
+st.statuses["602"] = { state = "complete", bytes = 2048 }
+list, picked = open()
+tap(list, findRow(list, "继续阅读 · 第 2 卷"))
+Assert.eq(picked.value.chapterId, 602, "已缓存的续读卷离线照常打开")
+Assert.is_true(wasClosed(list))
+
+-- kamare 完成状态参与列表与对外目标计算；刷新后卡片也必须顺延。
+reset()
+st.probe.capabilities.chapters = true
+st.plan = { { chapterId = 602, pages = 100, read = false, bytes = 2048 } }
+list = open()
+Assert.not_nil(findRow(list, "继续阅读 · 第 2 卷"))
+st.plan[1].read = true
+list.refreshToc({ unpack(toc) })
+list:paintTo(Kit.canvas(), 0, 0)
+Assert.not_nil(findRow(list, "继续阅读 · 第 3 卷"), "最新完成状态不能被刷新前的 ctx 遮住")
+Assert.eq(VolumeList.continueTarget(series, toc).entry.chapterId, 603,
+    "对外目标和列表使用同一套 kamare 完成事实")
 
 return true

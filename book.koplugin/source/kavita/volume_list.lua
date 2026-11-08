@@ -23,6 +23,10 @@ local ContinuePoint = require("source.kavita.continue_point")
 -- 主题组件一律函数内 require：没有 kamare 的安装（旧「已下载」列表）不该为了加载
 -- 这个模块把整套 ui.themes.widgets 拉进来，source.lua 的既有测试也不装它们。
 
+---@class KavitaVolumeListOptions
+---@field fallback? fun(entry: table): string|nil
+---@field cover? fun(entry: table): string|nil, table|nil
+
 local VolumeList = {}
 
 --- 与 source.lua 的 online() 同口径：系统联网状态。
@@ -143,10 +147,7 @@ local function localReadStates(series, toc)
     end
     local series_id = tostring(series.stable_id)
     if series_id:find(":", 1, true) then return out, rows end
-    local ok, ProgressDB = pcall(require, "book.progress_db")
-    if not ok or type(ProgressDB) ~= "table" or type(ProgressDB.get) ~= "function" then
-        return out, rows
-    end
+    local ProgressDB = require("book.progress_db")
     for _idx, entry in ipairs(toc) do
         local row = ProgressDB.get(series.source_id, series_id .. ":" .. tostring(entry.chapterId))
         if row then rows[tostring(entry.chapterId)] = row end
@@ -258,6 +259,39 @@ local function scan(toc, series_id, memo, pending, local_reads)
         local_reads = local_reads,
         offline = not online(),
     }
+end
+
+---@param toc table[]
+---@param rows table<string, table>
+---@param ctx table
+---@return ContinueTarget|nil
+local function pickTarget(toc, rows, ctx)
+    return ContinuePoint.pick(toc, {
+        fraction = function(entry)
+            local row = rows[tostring(entry.chapterId)]
+            return row and tonumber(row.fraction)
+        end,
+        updated_at = function(entry)
+            local row = rows[tostring(entry.chapterId)]
+            return row and tonumber(row.updated_at)
+        end,
+        page = function(entry)
+            local row = rows[tostring(entry.chapterId)]
+            if row and row.page and row.total_pages then
+                return { page = row.page, total = row.total_pages }
+            end
+        end,
+        complete = function(entry) return readOf(ctx, entry) == "read" end,
+    })
+end
+
+--- 与卷列表共用本地进度及 kamare 完成状态，不发网络请求。
+---@param series Book
+---@param toc table[]
+---@return ContinueTarget|nil
+function VolumeList.continueTarget(series, toc)
+    local states, rows = localReadStates(series, toc)
+    return pickTarget(toc, rows, scan(toc, series.stable_id, nil, nil, states))
 end
 
 --- 一行要显示的状态字与动作；优先级见 04 A2。
@@ -532,7 +566,7 @@ local PAUSE_REASONS = {
 ---@param series Book
 ---@param toc table[]
 ---@param cb fun(entry: table)
----@param opts { fallback: fun(entry: table): string|nil }|nil 没有缓存能力时的右侧状态字（旧「已下载」）
+---@param opts KavitaVolumeListOptions|nil
 ---@return table
 function VolumeList.pick(series, toc, cb, opts)
     opts = type(opts) == "table" and opts or {}
@@ -540,31 +574,8 @@ function VolumeList.pick(series, toc, cb, opts)
     local pending = {}
     -- 本地卷进度只取一次：列表开着的时候不会在后台读书，轮询没必要每秒重扫 ProgressDB。
     local local_reads, local_progress = localReadStates(series, toc)
-    local_progress = local_progress or {}
     local ctx = scan(toc, series and series.stable_id, nil, pending, local_reads)
-
-    --- 续读主线：最远有进度的卷，读完顺延；「上次翻阅」只作行标记。
-    local function computeTarget()
-        return ContinuePoint.pick(toc, {
-            fraction = function(entry)
-                local row = local_progress[tostring(entry.chapterId)]
-                return row and tonumber(row.fraction) or nil
-            end,
-            updated_at = function(entry)
-                local row = local_progress[tostring(entry.chapterId)]
-                return row and tonumber(row.updated_at) or nil
-            end,
-            page = function(entry)
-                local row = local_progress[tostring(entry.chapterId)]
-                if row and tonumber(row.page) and tonumber(row.total_pages) then
-                    return { page = tonumber(row.page), total = tonumber(row.total_pages) }
-                end
-            end,
-            -- 行上显示「已读」的卷，绝不能同时成为续读主线。
-            complete = function(entry) return readOf(ctx, entry) == "read" end,
-        })
-    end
-    local continue_target = computeTarget()
+    local continue_target = pickTarget(toc, local_progress, ctx)
 
     --- 卷封面（按 chapterId 记忆）：volume-cover 走属主源，离线退回系列封面 / 本地缓存。
     local cover_cache = {}
@@ -575,17 +586,13 @@ function VolumeList.pick(series, toc, cb, opts)
         local url, headers
         if opts.cover then url, headers = opts.cover(entry) end
         if not url and series and series.source_id and series.stable_id then
-            -- 属主源解析 / 取图都可能在旧安装里失败：封面拿不到不该拖垮整个列表。
-            local ok, req = pcall(function()
-                local source = require("source.registry").resolve(series.source_id)
-                if source and type(source.coverRequest) == "function" then
-                    return source:coverRequest({
-                        source_id = series.source_id,
-                        stable_id = tostring(series.stable_id) .. ":" .. key,
-                    })
-                end
-            end)
-            if ok and type(req) == "table" then url, headers = req.url, req.headers end
+            local source, err = require("source.registry").resolve(series.source_id)
+            if not source then error(err) end
+            local req = source:coverRequest({
+                source_id = series.source_id,
+                stable_id = tostring(series.stable_id) .. ":" .. key,
+            })
+            if req then url, headers = req.url, req.headers end
         end
         local out = { url = url, headers = headers }
         cover_cache[key] = out
@@ -675,6 +682,7 @@ function VolumeList.pick(series, toc, cb, opts)
     refresh = function(reuse_resume)
         ctx = scan(toc, series and series.stable_id, reuse_resume and ctx.resumes or nil, pending,
             ctx.local_reads)
+        continue_target = pickTarget(toc, local_progress, ctx)
         if list and not list.closed then list:setItems(items()) end
     end
 
@@ -1116,19 +1124,10 @@ function VolumeList.pick(series, toc, cb, opts)
     local function continueCard(width)
         local target = continue_target
         if not target then return nil end
-        local label = ContinuePoint.label(target.entry, series and series.title)
-        local title, subtitle
+        local title, subtitle = ContinuePoint.describe(target, series and series.title)
         if target.kind == "done" then
+            subtitle = title
             title = T(_("已读完 · 共 %1 卷"), #toc)
-            subtitle = T(_("重读 · %1"), label)
-        else
-            title = (target.kind == "fresh" and _("开始阅读") or _("继续阅读"))
-                .. " · " .. label
-            local total = target.total_pages or 0
-            subtitle = total > 0
-                and T(_("第 %1/%2 页 · %3%"), target.page, total,
-                    math.floor(target.fraction * 100 + 0.5))
-                or nil
         end
         local url, headers = coverFor(target.entry)
         return require("ui.themes.widgets.row").widget{
@@ -1137,7 +1136,7 @@ function VolumeList.pick(series, toc, cb, opts)
             image = url, image_w = 62, image_h = 88, image_headers = headers,
             title = title,
             subtitle = subtitle,
-            callback = function() list:choose({ value = target.entry }) end,
+            callback = function() list:choose(item(target.entry)) end,
         }
     end
 
@@ -1175,7 +1174,6 @@ function VolumeList.pick(series, toc, cb, opts)
         for i, entry in ipairs(fresh) do toc[i] = entry end
         local states, rows = localReadStates(series, toc)
         ctx.local_reads, local_progress = states, rows
-        continue_target = computeTarget()
         refresh(true)
     end
     return list
