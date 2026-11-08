@@ -12,7 +12,8 @@
 --]]
 
 local UIManager = require("ui/uimanager")
-local Screen = require("device").screen
+local Device = require("device")
+local Screen = Device.screen
 local Event = require("ui/event")
 local Geom = require("ui/geometry")
 local time = require("ui/time")
@@ -20,35 +21,20 @@ local time = require("ui/time")
 -- 默认联网。要故意断网测离线路径：MOON_EMU_ONLINE=0 ./run.sh
 -- （旧默认断网是怕 LuaSocket×macOS 并发 getaddrinfo SIGSEGV；现在默认放开。）
 if os.getenv("MOON_EMU_ONLINE") == "0" then
-    local ok_nm, NM = pcall(require, "ui/network/manager")
-    if ok_nm and NM then
-        NM.isConnected = function() return false end
-        if NM.isOnline then NM.isOnline = function() return false end end
-    end
+    local NM = require("ui/network/manager")
+    NM.isConnected = function() return false end
+    NM.isOnline = function() return false end
 end
 
--- macOS 模拟器点击全部变成长按的根因：
--- SDL3.lua 用 CLOCK_MONOTONIC_COARSE 给触摸事件打戳；在 Darwin 上这是
--- CLOCK_MONOTONIC_RAW_APPROX，比 CLOCK_MONOTONIC / time.now() 慢约 500ms。
--- GestureDetector 却把触摸戳识别成 MONOTONIC，hold deadline = origin+500ms ≈ now，
--- 长按定时器几乎立刻触发，tap 永远出不来。clock_id=-1 让 Input:setTimeout 改走
--- time.now()+delay；并拦掉后续 probeClockSource，避免首触又探回 MONOTONIC。
--- （book.koplugin/main.lua 里也有同款；驱动先装时补丁更早生效。）
-local function fixHoldClock()
-    local ok_dev, Device = pcall(require, "device")
-    if not ok_dev or not Device then return end
-    local ok_gd, GD = pcall(require, "device/gesturedetector")
-    if ok_gd and GD and not GD._moon_emu_hold_fixed then
-        function GD:probeClockSource(_timev)
-            self.clock_id = -1
-        end
-        GD._moon_emu_hold_fixed = true
+-- Darwin 的 SDL 触摸戳用 RAW_APPROX，与 UI 的 MONOTONIC 有偏差。
+-- 仅当前模拟器实例改用 UI 时间计算超时，重置探测后仍保持这条规则。
+if require("ffi").os == "OSX" and Device:isEmulator() then
+    local gd = Device.input.gesture_detector
+    function gd:probeClockSource(_timev)
+        self.clock_id = -1
     end
-    local gd = Device.input and Device.input.gesture_detector
-    if gd then gd.clock_id = -1 end
+    gd.clock_id = -1
 end
-fixHoldClock()
-UIManager:nextTick(fixHoldClock)
 
 -- 默认路径给 tools/emu.sh。独立环境用 MOON_EMU_* 换一套，避免和已经开着的模拟器抢同一个命令文件。
 local CMD = os.getenv("MOON_EMU_CMD") or "/tmp/ko_cmd.lua"
