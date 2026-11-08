@@ -171,7 +171,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field volumeParent fun(self: BookSource, stable_id: string): string|nil 卷身份所属系列 id（可选、同步、纯构造）。声明后「最近阅读」把卷行归并成系列行（一部漫画一条，点开再选卷），首页「当前阅读」仍取卷行；返回 nil 表示不是卷身份
 ---@field readingTarget fun(self: BookSource, book: Book, opts: { meta_only: boolean|nil }|nil): BookReadingTarget|nil 阅读入口的本地目标（可选、同步，不发网络请求）；meta_only 只回选卷入口；没有目标时保持原开书流程
 ---@field shelfCache fun(self: BookSource): ShelfCacheProjection|nil 书架缓存投影（可选、同步、只读本地记忆）。仅 capabilities().shelf_cache 为 true 的源实现；series_ids/mark 是 [stable_id]=true，cover 是 [stable_id]=本地封面绝对路径。不支持的源不实现（nil）
----@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil Z-Library 导入目标（local 移入）
+---@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil, path: string|nil)): table|nil Z-Library 导入目标（local 移入；成功时 path 为入库 stable_id）
 ---@field pushStatsAsync fun(self: BookSource, rows: BookStatsRow[], cb: fun(data: BookStatsPushResult|nil, err: string|nil)): table|nil 上报领域统计记录；协议细节由源处理
 ---@field pullStatsAsync fun(self: BookSource, cb: fun(result: BookStatsRow[]|BookStatsPullResult|nil, err: string|nil)): table|nil 拉取领域统计记录（可选 replace 覆盖策略）
 ---@field statsIdentities fun(self: BookSource, identity: BookIdentity): string[]|nil 详情页阅读统计要并入的书身份（如多卷书把卷行并进 series 行）；缺省只看书自己
