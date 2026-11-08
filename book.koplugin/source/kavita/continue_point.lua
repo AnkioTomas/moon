@@ -11,7 +11,7 @@
 --]]
 
 local T = require("ffi/util").template
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 
 local M = {}
 

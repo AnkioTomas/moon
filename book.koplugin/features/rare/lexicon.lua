@@ -10,6 +10,7 @@
   字<TAB>标注<TAB>rank
 
 rank 越大越生僻：汉字用《通用规范汉字表》序号，表外字 9000，繁体字随对应简体字（tools/build_rare_pinyin.py）；英文用词频排名。
+中文拼音词组只用于定音，按各单字 rank 筛选标注；无法按空白拆成逐字读音的自制词组保留整词标注。
 levels 缺省 zh 6500,3500,0、en 20000,8000,3000。en 查不到时依次试去掉 s / es / ies→y / ed / ing。
 自制词库按同格式存为 $DATA/.moon/rare/<id>.tsv（id 只含字母数字 _-），设置页会列出。
 
@@ -34,12 +35,14 @@ local DEFAULT_LEVELS = { zh = { 6500, 3500, 0 }, en = { 20000, 8000, 3000 } }
 ---@field levels number[]
 ---@field entries table<string, { [1]: string, [2]: number }> key → { 标注, rank }
 ---@field max_len integer 最长 key 的字数（zh 词组最长匹配用）
+---@field phrase_lengths table<string, integer> 首字 → 以它开头的最长词组字数
 
 --- 解析词库文本；坏行跳过，没有任何条目时报错。
 ---@param text string
 ---@return RareLexicon
 function Lexicon.parse(text)
     local meta, entries, max_len, count = {}, {}, 1, 0
+    local phrase_lengths = {}
     for line in text:gmatch("[^\r\n]+") do
         if line:sub(1, 1) == "#" then
             local k, v = line:match("^#%s*([%w_]+)%s*=%s*(.-)%s*$")
@@ -51,6 +54,10 @@ function Lexicon.parse(text)
                 count = count + 1
                 local n = select(2, key:gsub("[^\128-\191]", ""))
                 if n > max_len then max_len = n end
+                if n > 1 then
+                    local first = key:match("^[%z\1-\127\194-\244][\128-\191]*")
+                    phrase_lengths[first] = math.max(phrase_lengths[first] or 1, n)
+                end
             end
         end
     end
@@ -60,7 +67,8 @@ function Lexicon.parse(text)
     local levels = {}
     for n in (meta.levels or ""):gmatch("%d+") do levels[#levels + 1] = tonumber(n) end
     if #levels ~= 3 then levels = DEFAULT_LEVELS[lang] end
-    return { meta = meta, lang = lang, kind = kind, levels = levels, entries = entries, max_len = max_len, count = count }
+    return { meta = meta, lang = lang, kind = kind, levels = levels, entries = entries, max_len = max_len,
+        phrase_lengths = phrase_lengths, count = count }
 end
 
 ---@param lex RareLexicon
@@ -97,8 +105,47 @@ local function lookupWord(lex, word)
     end
 end
 
+---@param lex RareLexicon
+---@param units string[]
+---@param i integer
+---@param out { i: integer, n: integer, key: string, ann: string }[]
+---@param limit number
+---@param want fun(key: string, entry: table): boolean|nil
+---@param force table<string, boolean>
+---@return integer
+local function scanChinese(lex, units, i, out, limit, want, force)
+    local key, length = units[i], 1
+    local entry = lex.entries[key]
+    for n = math.min(lex.phrase_lengths[key] or 1, #units - i + 1), 2, -1 do
+        local candidate = table.concat(units, "", i, i + n - 1)
+        if lex.entries[candidate] then
+            key, entry, length = candidate, lex.entries[candidate], n
+            break
+        end
+    end
+    if not entry then return 1 end
+    local readings
+    if lex.kind == "ruby" and length > 1 then
+        readings = {}
+        for ann in entry[1]:gmatch("%S+") do readings[#readings + 1] = ann end
+    end
+    if not readings or #readings ~= length then
+        if want(key, entry) then out[#out + 1] = { i = i, n = length, key = key, ann = entry[1] } end
+        return length
+    end
+    local forced = force[key] or force[key:lower()]
+    for offset, ann in ipairs(readings) do
+        local pos = i + offset - 1
+        local char = units[pos]
+        if #out < limit and (forced or want(char, lex.entries[char] or entry)) then
+            out[#out + 1] = { i = pos, n = 1, key = char, ann = ann }
+        end
+    end
+    return length
+end
+
 --- 屏上逐字单元的全部命中（不去重，每处都注音）：{ i, n, key, ann }，i..i+n-1 是命中占的单元。
---- zh：非 ASCII 字最长匹配；en：连续字母 / 撇号成词，≥3 字母才查（带撇号的如 obdurate's 查不到就不注）。
+--- zh：最长词组定音，ruby 按单字筛选；en：连续字母 / 撇号成词，≥3 字母才查（带撇号的如 obdurate's 查不到就不注）。
 --- force[key] 为真的词（如生字本里的词或字）不看频率，词库里有读音就注。
 ---@param lex RareLexicon
 ---@param units string[] 逐字文本
@@ -126,15 +173,7 @@ function Lexicon.scan(lex, units, threshold, force, limit)
                 step = j - i + 1
             end
         elseif #units[i] > 1 then
-            for n = math.min(lex.max_len, total - i + 1), 1, -1 do
-                local key = table.concat(units, "", i, i + n - 1)
-                local e = lex.entries[key]
-                if e then
-                    if want(key, e) then out[#out + 1] = { i = i, n = n, key = key, ann = e[1] } end
-                    step = n
-                    break
-                end
-            end
+            step = scanChinese(lex, units, i, out, limit, want, force)
         end
         i = i + step
     end

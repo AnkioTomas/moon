@@ -22,6 +22,7 @@ Ext.POINTS = {
     ["modal.backdrop"] = "单一提供者：主题弹窗在遮罩之下先画背景 fn(modal, bb, x, y)",
     ["desktop.activated"] = "桌面回到前台 fn(desktop)",
     ["desktop.opened"] = "桌面打开并显示后 fn(desktop)",
+    ["desktop.comments"] = "单一提供者：展示整书评论首批 fn(book, page)，page = { title?, items: { author?, text?, time?, grade?, reply_to? }[] }，items 非空；未登记时退化为文字列表",
     ["quickpanel.show"] = "单一提供者：打开快捷面板 fn(scope)",
     ["topbar.light_percent"] = "单一提供者：前光读数 fn(kind) -> number",
     ["topbar.items"] = "顶栏项来源 fn() -> BookTopBarItem[]（after 指定插在哪个核心项后）",

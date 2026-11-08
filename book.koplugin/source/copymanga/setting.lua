@@ -4,14 +4,37 @@
 @module koplugin.book.source.copymanga.setting
 --]]
 
-require("l10n").apply()
 local Client = require("source.copymanga.client")
-local _ = require("gettext")
+local _ = require("l10n").get("source.copymanga")
 
 local SOURCE_ID = "copymanga"
 local Setting = {}
+local editBaseUrl
 
-local function editBaseUrl()
+local function selectBaseUrl()
+    local settings = require("utils.settings")
+    local cfg = settings.getSource(SOURCE_ID)
+    local current = Client.normalizeBaseUrl(cfg.base_url)
+    local items = {}
+    for _idx, url in ipairs(Client.SITES) do
+        items[#items + 1] = {
+            text = url,
+            variant = Client.normalizeBaseUrl(url) == current and "primary" or "normal",
+            callback = function()
+                cfg.base_url = url
+                settings.saveSource(SOURCE_ID, cfg)
+                require("source.registry").reload()
+            end,
+        }
+    end
+    items[#items + 1] = {
+        text = _("自定义"),
+        callback = function() editBaseUrl() end,
+    }
+    require("ui.themes.widgets.sheet"):new{ title = _("站点地址"), items = items }:show()
+end
+
+editBaseUrl = function()
     local settings = require("utils.settings")
     local cfg = settings.getSource(SOURCE_ID)
     require("ui.themes.widgets.input"):new{
@@ -19,7 +42,12 @@ local function editBaseUrl()
         fields = { { text = Client.normalizeBaseUrl(cfg.base_url), hint = Client.DEFAULT_BASE_URL } },
         ok_text = _("保存"),
         callback = function(value)
-            cfg.base_url = Client.normalizeBaseUrl(value)
+            local url = Client.normalizeBaseUrl(value)
+            if not url:match("^https?://[^/%s?#]+$") then
+                require("ui.themes.widgets.toast"):new{ text = _("站点地址无效"), timeout = 3 }:show()
+                return
+            end
+            cfg.base_url = url
             settings.saveSource(SOURCE_ID, cfg)
             require("source.registry").reload()
         end,
@@ -32,20 +60,23 @@ local function doLogin(username, password)
     local Auth = require("source.copymanga.auth")
     local NetworkMgr = require("ui/network/manager")
     local Toast = require("ui.themes.widgets.toast")
-    NetworkMgr:runWhenConnected(function()
-        local waiting = require("ui.themes.widgets.progress_dialog"):new{
-            title = _("拷贝漫画账号"), text = _("正在登录…"), dismissable = false,
-        }
-        waiting:show()
-        Auth.loginAsync(username, password, function(ok, err)
-            waiting:close()
-            if not ok then
-                Toast:new{ text = err or _("登录失败"), timeout = 3 }:show()
-                return
-            end
-            Toast:new{ text = _("登录成功"), timeout = 2 }:show()
-            require("source.registry").reload()
-        end)
+    if not NetworkMgr:isConnected() then
+        Toast:new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
+        return
+    end
+    local job
+    local waiting = require("ui.themes.widgets.progress_dialog"):new{
+        title = _("拷贝漫画账号"), text = _("正在登录…"), dismissable = false,
+        on_cancel = function() if job then job.cancel() end end,
+    }
+    job = waiting:showWhile(Auth.loginAsync, username, password, function(ok, err)
+        waiting:close()
+        if not ok then
+            Toast:new{ text = err or _("登录失败"), timeout = 3 }:show()
+            return
+        end
+        Toast:new{ text = _("登录成功"), timeout = 2 }:show()
+        require("source.registry").reload()
     end)
 end
 
@@ -82,7 +113,7 @@ function Setting.rows()
                 title = _("站点地址"),
                 status = Client.normalizeBaseUrl(cfg.base_url),
                 status_on = true,
-                callback = function() editBaseUrl() end,
+                callback = selectBaseUrl,
             })
         end,
         function(iw)

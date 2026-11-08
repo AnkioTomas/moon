@@ -9,7 +9,7 @@ kamare 已装就地替换，没装装进月读同级插件目录。装好立即�
 
 local Cache = require("source.kavita.cache")
 local Updater = require("utils.plugin_update")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 local T = require("ffi/util").template
 
 local NAME = "kamare.koplugin"

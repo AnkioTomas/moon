@@ -2,10 +2,6 @@
 
 local Assert = require("support.assert")
 
-package.preload["gettext"] = function()
-    return function(text) return text end
-end
-
 local cfg = {}
 local pushes = {}
 local webdav_opened = {}

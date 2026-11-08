@@ -218,6 +218,37 @@ local function storeRow(desktop, plugin, def)
     end
 end
 
+--- 打开账号页；source_id 非空时再推进该源的二级设置页。
+--- 首次使用、图书馆 / 书城需登录、登录失效「重新登录」都走这里，不要只弹文案。
+---@param desktop BookDesktop
+---@param source_id string|nil
+function Source.openAccount(desktop, source_id)
+    if not desktop then return end
+    local Overlay = require("desktop.pages.setting.overlay")
+    Overlay.open(desktop, {
+        title = _("账号"),
+        sections = function()
+            return Source:configSections{ desktop = desktop, plugin = desktop.plugin }
+        end,
+    })
+    if not source_id then return end
+    local mod = Source.loadSetting(source_id)
+    if not configurable(mod) then return end
+    local meta = SourceRegistry.meta(source_id)
+    local title = (meta and meta.name) or source_id
+    if type(mod.rows) ~= "function" then
+        if type(mod.open) == "function" then mod.open(desktop.plugin) end
+        return
+    end
+    Overlay.push(desktop, {
+        title = title,
+        sections = function()
+            if type(mod.sections) == "function" then return mod.sections(desktop.plugin) end
+            return {{ title = title, rows = mod.rows(desktop.plugin) }}
+        end,
+    })
+end
+
 --- 账号页：本地书籍与各已启用书源各一行，点开进二级页面。
 --- 哪些源出现在这里由书库组顶部的「启用的书源」多选框决定。书城在桌面分组。
 ---@param ctx table

@@ -9,7 +9,7 @@
 local lfs = require("libs/libkoreader-lfs")
 local Text = require("utils.text")
 local Paths = require("utils.paths")
-local _ = require("gettext")
+local _ = require("l10n").get("source.local")
 local defer = require("source.base").defer
 
 local SOURCE_ID = "local"

@@ -8,6 +8,37 @@
 local Text = require("utils.text")
 
 local ReviewLocate = {}
+ReviewLocate.CHAPTER_ANCHOR = "moon-chapter-reviews"
+
+--- 预留章末评论区；追加在正文之后，不改变原文段落的 xpointer。
+---@param html string
+---@return string
+function ReviewLocate.prepareChapterEnd(html)
+    if html:find('id="' .. ReviewLocate.CHAPTER_ANCHOR .. '"', 1, true) then return html end
+    local footer = '<div id="' .. ReviewLocate.CHAPTER_ANCHOR .. '" style="height:4em;page-break-inside:avoid"></div>'
+    local ending = html:find("</body>", 1, true)
+    if ending then return html:sub(1, ending - 1) .. footer .. html:sub(ending) end
+    return html .. footer
+end
+
+---@param path string
+---@return boolean
+function ReviewLocate.reuseChapterEnd(path)
+    local file = assert(io.open(path, "rb"))
+    local raw, read_err = file:read("*a")
+    file:close()
+    assert(raw, read_err)
+    local html = ReviewLocate.prepareChapterEnd(raw)
+    if html == raw then return true end
+    local temp = path .. ".part"
+    file = assert(io.open(temp, "wb"))
+    local written, write_err = file:write(html)
+    local closed, close_err = file:close()
+    if not written or not closed then os.remove(temp); error(write_err or close_err) end
+    local renamed, rename_err = os.rename(temp, path)
+    if not renamed then os.remove(temp); error(rename_err) end
+    return true
+end
 
 -- 气泡跟在段末：只用段尾这么多个字定位（要唯一），气泡画在最后一行右侧。
 local MARK_RUNES = 24

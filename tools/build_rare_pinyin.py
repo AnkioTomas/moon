@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生僻字注音的汉字拼音词库（assets/rare/zh-pinyin）补繁体字。
+"""生僻字注音的汉字拼音词库（assets/rare/zh-pinyin）补繁体字与常用多音词组。
 
 原词库只收《通用规范汉字表》的简体字与简体词组（rank = 字表序号，表外字 9000），繁体书里
 時 / 尋 / 讀 / 無 这类字查不到、「全部」档也不注音。本脚本在已有词库上追加：
@@ -11,11 +11,13 @@
     （简 → 繁，一对多取首选）转成繁体，和原词组不同且词库里没有时追加，读音与 rank 照抄。
 
   - 表外冷僻字：pinyin-data 有读音、词库里没有的 BMP 汉字（叕 龘 沝 秏…），rank 9000（最生僻档）。
+  - 常用多音词组：jieba 词频 ≥1000、只含一级字且读音与单字默认不同的词，
+    从 phrase-pinyin-data 取逐字读音。只用于语境定音，不让常见字混入「生僻」档。
 
 已在词库里的键一律不动（脚本可重复运行，结果不变）。只用 Python 标准库；数据版本固定在下方常量。
 输出：覆盖 lexicon.tsv.part.001 并重写 manifest.json（entries / sha256 / size / built_at）。
 
-  python3 tools/build_rare_pinyin.py            # 联网拉 OpenCC 与 pinyin-data
+  python3 tools/build_rare_pinyin.py            # 联网拉固定版本数据
   python3 tools/build_rare_pinyin.py --data DIR # 用 DIR 下已下载的同名文件（离线）
 """
 
@@ -28,18 +30,25 @@ import urllib.request
 
 OPENCC = "https://raw.githubusercontent.com/BYVoid/OpenCC/ver.1.1.9/data/dictionary/"
 PINYIN = "https://raw.githubusercontent.com/mozillazg/pinyin-data/v0.15.0/"
+PHRASES = "https://raw.githubusercontent.com/mozillazg/phrase-pinyin-data/v0.19.0/"
+JIEBA = "https://raw.githubusercontent.com/fxsjy/jieba/v0.42.1/jieba/"
 FILES = {
     "TSCharacters.txt": OPENCC,
     "STCharacters.txt": OPENCC,
     "STPhrases.txt": OPENCC,
     "pinyin.txt": PINYIN,
+    "large_pinyin.txt": PHRASES,
+    "dict.txt": JIEBA,
 }
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "rare", "zh-pinyin")
 PART = "lexicon.tsv.part.001"
 OUT_OF_TABLE_RANK = 9000
+COMMON_RANK = 3500
+MIN_PHRASE_FREQUENCY = 1000
 NAME = "#name=汉字拼音（通用规范汉字表，含繁体）"
 LICENSE = ("#license=MIT (mozillazg/pinyin-data, phrase-pinyin-data); 字序: 通用规范汉字表 "
-           "(ben-hua/general_standard_chinese, Apache-2.0); 繁简对照: OpenCC (Apache-2.0)")
+           "(ben-hua/general_standard_chinese, Apache-2.0); 繁简对照: OpenCC (Apache-2.0); "
+           "词频: jieba (MIT)")
 
 
 def load(name, data_dir):
@@ -75,7 +84,18 @@ def readings(text):
     return out
 
 
-def build(lines, ts, st_chars, st_phrases, pinyin):
+def phrase_readings(text):
+    """phrase-pinyin-data：词组 → 逐字读音。"""
+    out = {}
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        key, ann = line.split(": ", 1)
+        out[key] = ann.split()
+    return out
+
+
+def build(lines, ts, st_chars, st_phrases, pinyin, phrases, frequencies):
     """lines：原词库行（含 # 元信息）。返回新行列表与新增条数（纯函数，供自检）。"""
     meta, entries = [], {}
     order = []
@@ -87,6 +107,19 @@ def build(lines, ts, st_chars, st_phrases, pinyin):
         if len(parts) >= 3:
             entries[parts[0]] = (parts[1], int(parts[2]))
             order.append(parts[0])
+    contexts = 0
+    for word, frequency in sorted(frequencies.items()):
+        if frequency < MIN_PHRASE_FREQUENCY or len(word) < 2 or word in entries:
+            continue
+        anns = phrases.get(word)
+        if not anns or len(anns) != len(word) or any(c not in entries for c in word):
+            continue
+        rank = max(entries[c][1] for c in word)
+        if rank > COMMON_RANK or all(ann == entries[c][0] for c, ann in zip(word, anns)):
+            continue
+        entries[word] = (" ".join(anns), rank)
+        order.append(word)
+        contexts += 1
     added = []
     for trad, simps in sorted(ts.items()):
         if len(trad) != 1 or trad in entries:
@@ -122,7 +155,7 @@ def build(lines, ts, st_chars, st_phrases, pinyin):
             line = "#version=" + datetime.date.today().strftime("%Y.%m.%d")
         out_meta.append(line)
     body = ["%s\t%s\t%d" % (k, *entries[k]) for k in order] + ["%s\t%s\t%d" % row for row in added]
-    return out_meta + body, len(added)
+    return out_meta + body, contexts + len(added)
 
 
 def main():
@@ -136,7 +169,10 @@ def main():
     st_chars = pairs(load("STCharacters.txt", args.data))
     st_phrases = pairs(load("STPhrases.txt", args.data))
     pinyin = readings(load("pinyin.txt", args.data))
-    out, n = build(lines, ts, st_chars, st_phrases, pinyin)
+    phrases = phrase_readings(load("large_pinyin.txt", args.data))
+    frequencies = {word: int(freq) for word, freq, _pos in
+                   (line.split() for line in load("dict.txt", args.data).splitlines() if line)}
+    out, n = build(lines, ts, st_chars, st_phrases, pinyin, phrases, frequencies)
     raw = ("\n".join(out) + "\n").encode("utf-8")
     with open(path, "wb") as f:
         f.write(raw)

@@ -284,28 +284,29 @@ Assert.is_nil(desktop._books_sync.test)
 Assert.eq(stale_events, 0)
 desktop.source = source
 
--- 未配置：后台打开静默跳过；手动刷新说明原因，源有设置入口就给直达按钮。
+-- 未配置：后台打开静默跳过；手动刷新打开对应源账号页。
 local calls_before = #pending
 source.configured = function() return false end
 Sync.open(desktop)
 Assert.eq(#pending, calls_before)
 Assert.is_nil(Themed.last("confirm"))
 
-local opened_with
-settings.test = { open = function(plugin) opened_with = plugin end }
+local opened = {}
+package.loaded["desktop.pages.setting.source"] = {
+    loadSetting = function(id) return settings[id] end,
+    openAccount = function(desk, id)
+        opened[#opened + 1] = { desk = desk, id = id }
+    end,
+}
 desktop.plugin = {}
 Sync.refresh(desktop)
 Assert.eq(#pending, calls_before)
 local confirm = Themed.last("confirm")
 Assert.eq(confirm.text, "请先完成数据源设置，再刷新书库。")
-Assert.eq(confirm.ok_text, "立即设置")
+Assert.eq(confirm.ok_text, "去登录")
 confirm.ok_callback()
-Assert.eq(opened_with, desktop.plugin)
-
--- 源没有设置入口：只提示，不给按钮。
-settings.test = nil
-Sync.refresh(desktop)
-Assert.eq(Themed.last("toast").text, "请先完成数据源设置，再刷新书库。")
+Assert.eq(opened[1].desk, desktop)
+Assert.eq(opened[1].id, source.id)
 
 -- 混合模式（#42）：活跃源是本地书籍时，其它已启用、已登录源的远端书架也要同步；未配置的跳过不提示。
 do
@@ -379,19 +380,28 @@ do
     Sync.open(desk)
     Assert.eq(#synced, 0, "混合模式书架后台同步节流")
 
-    -- 一个已配置的源都没有：手动刷新要说明原因。
+    -- 一个已配置的源都没有：手动刷新打开账号页，不要只 toast。
     pool["local"].configured = function() return false end
     pool.wechat.configured = function() return false end
-    Themed.last("toast").text = nil
+    Themed.made = {}
+    local opened_mixed = {}
+    package.loaded["desktop.pages.setting.source"] = {
+        openAccount = function(d, id) opened_mixed[#opened_mixed + 1] = { desk = d, id = id } end,
+    }
     Sync.refresh(desk)
     Assert.eq(#synced, 0)
-    Assert.eq(Themed.last("toast").text, "请先完成数据源设置，再刷新书库。")
+    local mixed_confirm = Themed.last("confirm")
+    Assert.eq(mixed_confirm.text, "请先完成数据源设置，再刷新书库。")
+    Assert.eq(mixed_confirm.ok_text, "去登录")
+    mixed_confirm.ok_callback()
+    Assert.eq(opened_mixed[1].desk, desk)
+    Assert.is_nil(opened_mixed[1].id)
 
     for k, fn in pairs(saved) do Registry[k] = fn end
     MoonSettings.get("source").library_mixed = was_mixed
 end
 
--- 登录失效弹窗：永远中文模板；接口原文（NOT.LOGIN）不进正文；中文说明才附上。
+-- 登录失效弹窗：永远中文模板；接口原文（NOT.LOGIN）不进正文；中文说明才附上；重新登录进账号页。
 do
     local Stubs = require("support.stubs")
     local Registry = require("source.registry")
@@ -399,8 +409,10 @@ do
     Registry.meta = function(id)
         return { name = id == "jdread" and "京东读书" or id }
     end
-    local logins = 0
-    settings.jdread = { login = function() logins = logins + 1 end }
+    local opened = {}
+    package.loaded["desktop.pages.setting.source"] = {
+        openAccount = function(desk, id) opened[#opened + 1] = { desk = desk, id = id } end,
+    }
 
     Themed.made = {}
     Sync.promptLogin({ desktop = desktop }, "jdread", "NOT.LOGIN")
@@ -412,7 +424,8 @@ do
     Assert.eq(box.buttons[2].text, "重新登录")
     box.buttons[2].callback()
     Assert.is_true(box.closed)
-    Assert.eq(logins, 1)
+    Assert.eq(opened[1].id, "jdread")
+    Assert.eq(opened[1].desk, desktop)
 
     Themed.made = {}
     Sync.promptLogin({ desktop = desktop }, "jdread",
@@ -422,7 +435,7 @@ do
     Assert.matches(box.text, "请重新扫码登录")
     box.buttons[1].callback()
     Assert.is_true(box.closed)
-    Assert.eq(logins, 1, "稍后只关窗，不重新登录")
+    Assert.len(opened, 1, "稍后只关窗，不打开账号页")
 
     Registry.meta = saved_meta
 end

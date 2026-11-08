@@ -8,7 +8,7 @@ chapter2 返回 ``contents``（图片 URL）和 ``words``（阅读序号）。
 @module koplugin.book.source.copymanga.protocol
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.copymanga")
 
 local Protocol = {}
 

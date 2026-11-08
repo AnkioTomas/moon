@@ -1,9 +1,10 @@
 --[[--
 页内段评标记：本章他人段评的句子画下划线（虚线 / 实线见 `features.reviews.setting`），点按弹出段评列表。
 
-两种目标，都是「键 + fetch + place」：键变了才重新 fetch，视口变了才重新 place。
+三种目标，都是「键 + fetch + place」：键变了才重新 fetch，视口变了才重新 place。
 - 微信读书章会话：fetch 拉本章热点并在子进程里定位到本章文件；place 只问当前页附近句子的屏幕框。
 - 关联了微信书目的本地书（见 ``features.reviews.linked``）：fetch 拉微信目录；place 按当前页拉章、找句、取框。
+- 章末段评：fetch 拉本章评论；place 只在文档末行挂入口，章节 HTML 与整篇 EPUB 共用。
 拉取失败（含离线且无缓存）过 ``RETRY`` 秒再试。
 
 @module koplugin.book.features.reviews.marks
@@ -28,8 +29,10 @@ local RETRY = 60
 ---@field isTocCurrent fun(self: ParagraphReviewSource, toc: BookChapter[]|nil): boolean
 ---@field searchBooksAsync fun(self: ParagraphReviewSource, keyword: string, cb: fun(books: WechatSearchBook[]|nil, err: string|nil)): { cancel: fun() }|nil
 ---@field paragraphHotspotsAsync fun(self: ParagraphReviewSource, identity: BookIdentity, cb: fun(hotspots: WechatReviewHotspot[]|nil, err: string|nil)): { cancel: fun() }
+---@field chapterReviewHotspotsAsync (fun(self: ParagraphReviewSource, identity: BookIdentity, cb: fun(hotspots: WechatReviewHotspot[]|nil, err: string|nil)): { cancel: fun() })|nil
 ---@field locateHotspots fun(self: ParagraphReviewSource, hotspots: WechatReviewHotspot[], html: string): WechatReviewSpot[]
----@field paragraphReviewPageAsync fun(self: ParagraphReviewSource, identity: BookIdentity, range: string, max_idx: integer, cb: fun(page: WechatReviewPage|nil, err: string|nil)): { cancel: fun() }
+---@field paragraphReviewPageAsync fun(self: ParagraphReviewSource, identity: BookIdentity, range: string, max_idx: integer|string, cb: fun(page: WechatReviewPage|nil, err: string|nil)): { cancel: fun() }
+---@field paragraphReviewRepliesAsync (fun(self: ParagraphReviewSource, identity: BookIdentity, review_id: string, max_idx: integer|string, cb: fun(page: WechatReviewPage|nil, err: string|nil)): { cancel: fun() })|nil
 
 ---@class ReviewTarget
 ---@field key string
@@ -189,6 +192,75 @@ local function chapterTarget(self, identity, source)
     }
 end
 
+--- 章末评论直接锚定当前文档末行；不读章节 HTML，因此整篇 EPUB 也用同一入口。
+---@param self ReviewMarks
+---@param identity BookIdentity
+---@param source ParagraphReviewSource
+---@return ReviewTarget
+local function chapterEndTarget(self, identity, source)
+    return {
+        key = table.concat({ "end", identity.source_id, identity.stable_id, identity.chapter_idx or 0 }, "\0"),
+        fetch = function(cb) return source:chapterReviewHotspotsAsync(identity, cb) end,
+        place = function(spots)
+            local document = self.ui.document
+            local width, height = PageMarks.screenSize(self.ui)
+            if document.info.has_pages then
+                if PageMarks.currentPage(self.ui) ~= document.info.number_of_pages then return {} end
+                local Theme = require("ui.themes")
+                local margin, band = Theme.px(8), Theme.px(28)
+                local box = { x = margin, y = height - self.ui.view.footer:getHeight() - band,
+                    w = width - margin * 2, h = band }
+                local entries = {}
+                for _idx, spot in ipairs(spots) do
+                    entries[#entries + 1] = { entry = { identity = identity, spot = spot }, boxes = { box } }
+                end
+                return entries
+            end
+            if self.ui.view.view_mode == "scroll" then
+                local bottom = document:getCurrentPos() + height - self.ui.view.footer:getHeight()
+                if bottom < document.info.doc_height then return {} end
+            elseif PageMarks.currentPage(self.ui) + document:getVisiblePageCount() - 1 < document:getPageCount() then
+                return {}
+            end
+            local margins = document:getPageMargins()
+            local out = {}
+            for _idx, spot in ipairs(spots) do
+                local box
+                local anchor = spot.anchor and document:getNormalizedXPointer("#" .. spot.anchor)
+                if spot.anchor and not anchor and document:getNormalizedXPointer("/body/DocFragment") then
+                    local last_page = document:getPageXPointer(document:getPageCount())
+                    local idx = tonumber(last_page:match("DocFragment%[(%d+)%]")) or 1
+                    while not anchor and document:getNormalizedXPointer("/body/DocFragment[" .. idx .. "]") do
+                        anchor = document:getNormalizedXPointer("#_doc_fragment_" .. (idx - 1) .. "_ " .. spot.anchor)
+                        idx = idx + 1
+                    end
+                end
+                if anchor then
+                    local y, x = document:getScreenPositionFromXPointer(anchor)
+                    local column = width / document:getVisiblePageCount()
+                    box = { x = math.floor(x / column) * column + (margins.left or 0), y = y,
+                        w = column - (margins.left or 0) - margins.right, h = height - y - margins.bottom }
+                else
+                    local pos = { x = width - margins.right - 1, y = height - margins.bottom - 1 }
+                    local ending = document:getTextFromPositions(pos, pos, true)
+                    local boxes = ending and ending.sboxes
+                    box = boxes and boxes[#boxes]
+                    if box and spot.heading then
+                        local size = self.ui.font and self.ui.font.configurable.font_size or box.h
+                        box = { x = margins.left or 0, y = box.y + box.h + size,
+                            w = width - (margins.left or 0) - margins.right, h = size * 3 }
+                        if box.y + box.h > height - margins.bottom then box = nil end
+                    end
+                end
+                if PageMarks.intersects(box, width, height) then
+                    out[#out + 1] = { entry = { identity = identity, spot = spot }, boxes = { box } }
+                end
+            end
+            return out
+        end,
+    }
+end
+
 --- 当前位置的段评目标；nil = 不显示。
 ---@param self ReviewMarks
 ---@return ReviewTarget|nil
@@ -197,6 +269,42 @@ local function currentTarget(self)
     local identity = cur and cur.identity
     if not identity then return nil end
     local source = identity.source --[[@as ParagraphReviewSource|nil]]
+    if identity.chapter_idx and source and source.chapterReviewHotspotsAsync and source.paragraphHotspotsAsync then
+        if not source:paragraphReviewsEnabled() then return nil end
+        local targets = { chapterTarget(self, identity, source), chapterEndTarget(self, identity, source) }
+        return {
+            key = targets[1].key .. "\0end",
+            fetch = function(cb)
+                local data, job, cancelled = {}, nil, false
+                local function load(index)
+                    local pending = true
+                    local inner = targets[index].fetch(function(list, err)
+                        pending = false
+                        if cancelled then return end
+                        if not list then cb(nil, err); return end
+                        data[index] = list
+                        if index == #targets then cb(data) else load(index + 1) end
+                    end)
+                    if pending then job = inner end
+                end
+                load(1)
+                return { cancel = function()
+                    cancelled = true
+                    if job then job.cancel() end
+                end }
+            end,
+            place = function(data)
+                local out = {}
+                for index, target in ipairs(targets) do
+                    for _idx, placement in ipairs(target.place(data[index])) do out[#out + 1] = placement end
+                end
+                return out
+            end,
+        }
+    end
+    if source and source.chapterReviewHotspotsAsync then
+        return source:paragraphReviewsEnabled() and chapterEndTarget(self, identity, source) or nil
+    end
     if identity.chapter_idx and source and source.paragraphHotspotsAsync then
         return source:paragraphReviewsEnabled() and chapterTarget(self, identity, source) or nil
     end
@@ -224,7 +332,9 @@ local function fetch(self, target)
     self.key = target.key
     local done = false
     local job = target.fetch(function(data, err)
-        done, self.job = true, nil
+        done = true
+        if self.key ~= target.key then return end
+        self.job = nil
         if not data then
             logger.warn("book.reviews fetch failed", err)
             self.retry_at = os.time() + RETRY
@@ -259,6 +369,7 @@ function ReviewMarks:updateView()
             spot = entry.spot,
             boxes = placement.boxes,
             badge = entry.spot.badge,
+            heading = entry.spot.heading,
             tap = function() require("features.reviews.sheet").open(entry.identity, entry.spot) end,
         }
     end
@@ -273,7 +384,7 @@ function ReviewMarks:marks()
     local solid = require("utils.settings").get("features.reviews").book_reviews_mark_style == "solid"
     for i = #self.current, 1, -1 do
         local mark = self.current[i]
-        if mark.spot.total == 0 then
+        if mark.spot.total == 0 and not mark.heading then
             table.remove(self.current, i)
         else
             mark.solid = solid

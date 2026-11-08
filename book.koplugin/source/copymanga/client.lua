@@ -8,18 +8,25 @@
 
 local JSON = require("json")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.copymanga")
 local Auth = require("source.auth")
 
 ---@class CopymangaClient
 ---@field base_url string
 ---@field token string
+---@field progress_supported boolean
 local Client = {}
 Client.__index = Client
 
 local DEFAULT_BASE_URL = "https://api.copy202601.com"
 
 Client.DEFAULT_BASE_URL = DEFAULT_BASE_URL
+Client.CURRENT_BASE_URL = "https://api.manga2026.xyz"
+Client.SITES = { "https://www.mangacopy.com", "https://www.copy4000.com", Client.CURRENT_BASE_URL }
+local SITE_APIS = {
+    ["https://www.mangacopy.com"] = "https://api.mangacopy.com",
+    ["https://www.copy4000.com"] = "https://api.copy4000.com",
+}
 
 ---@return string
 function Client.normalizeBaseUrl(url)
@@ -27,7 +34,7 @@ function Client.normalizeBaseUrl(url)
     if url == "" then
         return DEFAULT_BASE_URL
     end
-    return url
+    return SITE_APIS[url] or url
 end
 
 --- App 请求头。登录与章节接口都靠这组字段识别客户端。
@@ -50,9 +57,11 @@ end
 ---@param cfg { base_url: string|nil, token: string|nil }
 ---@return CopymangaClient
 function Client:new(cfg)
+    local base_url = Client.normalizeBaseUrl(cfg.base_url)
     return setmetatable({
-        base_url = Client.normalizeBaseUrl(cfg.base_url),
+        base_url = base_url,
         token = cfg.token or "",
+        progress_supported = base_url ~= Client.CURRENT_BASE_URL,
     }, self)
 end
 
@@ -61,7 +70,7 @@ function Client:configured()
     return self.base_url:match("^https?://[^/]+$") ~= nil
 end
 
---- 解 App 接口回包：code 200 才算成功，210 是风控。登录也走这里。
+--- code 200 才算成功；拒绝请求时保留服务端原因，不据 210 推断用户账号状态。
 ---@param raw string|nil
 ---@param err string|nil
 ---@return table|nil, string|nil
@@ -72,11 +81,11 @@ function Client.decode(raw, err)
         return nil, _("响应无效")
     end
     local code = tonumber(wire.code)
-    if code == 210 then
-        return nil, _("账号被风控，请稍后再试")
-    end
     if code ~= 200 then
-        return nil, wire.message or _("请求失败")
+        if type(wire.message) == "string" and wire.message ~= "" then
+            return nil, wire.message
+        end
+        return nil, code == 210 and _("拷贝漫画 API 拒绝请求（210），请按官网提示处理") or _("请求失败")
     end
     return wire
 end
@@ -107,11 +116,12 @@ local function relogin(cb)
     end)
 end
 
---- 设置里的最新令牌（别的实例重登后写进去的），没有就用本实例的。
+--- 只使用当前站点的最新令牌，退出或切站后不复用旧实例的登录态。
 ---@return string
 function Client:_latestToken()
-    local token = require("utils.settings").getSource("copymanga").token
-    if type(token) == "string" and token ~= "" then self.token = token end
+    local cfg = require("utils.settings").getSource("copymanga")
+    if Client.normalizeBaseUrl(cfg.base_url) ~= self.base_url then return "" end
+    self.token = type(cfg.token) == "string" and cfg.token or ""
     return self.token
 end
 
@@ -120,18 +130,20 @@ end
 ---@param path string
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return { cancel: fun() }
-function Client:_getJson(path, cb)
+function Client:_getJson(path, cb, public)
     local expired = _("点这个提示上的「重新登录」。没有按钮就打开「设置 → 书库 → 账号 → 拷贝漫画 → 拷贝漫画账号」。账号和密码重新填一遍，点「登录」。")
     local active, cancelled
     local function send(may_relogin)
-        local sent = self:_latestToken()
-        active = require("http.request").get(self.base_url .. path, {
+        local sent = public and "" or self:_latestToken()
+        local pending = true
+        local handle = require("http.request").get(self.base_url .. path, {
             accept = "application/json",
             headers = Client.headers(sent),
-            allow_redirects = true,
+            allow_redirects = public == true,
             timeout = require("http.timeout").net(2),
             connect_timeout = require("http.timeout").net(1),
         }, function(raw, err, res)
+            pending = false
             if cancelled then return end
             if not (res and res.code == 401) then
                 cb(Client.decode(raw, err))
@@ -152,6 +164,7 @@ function Client:_getJson(path, cb)
                 cb(nil, rejected and Auth.expire("copymanga", expired) or (login_err or _("请求失败")))
             end)
         end)
+        if pending then active = handle end
     end
     send(true)
     return { cancel = function()
@@ -164,14 +177,14 @@ end
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:detailAsync(stable_id, cb)
-    return self:_getJson("/api/v3/comic2/" .. Text.urlEncode(stable_id) .. "?platform=1", cb)
+    return self:_getJson("/api/v3/comic2/" .. Text.urlEncode(stable_id) .. "?platform=1", cb, true)
 end
 
 ---@param keyword string
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:searchAsync(keyword, cb)
-    return self:_getJson("/api/v3/search/comic?limit=30&offset=0&platform=1&q_type=&q=" .. Text.urlEncode(keyword), cb)
+    return self:_getJson("/api/v3/search/comic?limit=30&offset=0&platform=1&q_type=&q=" .. Text.urlEncode(keyword), cb, true)
 end
 
 --- 排行榜一页（20 部）。audience 为 male / female，nil 是全部；date_type 1 日 2 周 3 月 4 总。
@@ -183,7 +196,7 @@ end
 function Client:rankAsync(date_type, audience, offset, cb)
     local path = "/api/v3/ranks?limit=20&type=1&platform=1&offset=" .. offset .. "&date_type=" .. date_type
     if audience then path = path .. "&audience_type=" .. audience end
-    return self:_getJson(path, cb)
+    return self:_getJson(path, cb, true)
 end
 
 --- 分类列表一页（20 部），按人气。
@@ -193,7 +206,7 @@ end
 ---@return { cancel: fun() }
 function Client:themeAsync(theme, offset, cb)
     return self:_getJson("/api/v3/comics?limit=20&free_type=1&ordering=-popular&offset=" .. offset
-        .. "&theme=" .. Text.urlEncode(theme), cb)
+        .. "&theme=" .. Text.urlEncode(theme), cb, true)
 end
 
 --- 云端浏览记录（需登录）。browse 为 null 表示从未读过。
@@ -227,12 +240,15 @@ function Client:chaptersAsync(stable_id, groups, cb)
         local path = "/api/v3/comic/" .. Text.urlEncode(stable_id)
             .. "/group/" .. Text.urlEncode(group.path_word)
             .. "/chapters?limit=" .. limit .. "&offset=" .. offset .. "&platform=1"
-        active = self:_getJson(path, function(wire, err)
+        local pending = true
+        local handle = self:_getJson(path, function(wire, err)
+            pending = false
             active = nil
             if cancelled then return end
             if not wire then cb(nil, err); return end
-            local root = type(wire.results) == "table" and wire.results or {}
-            local list = root.list or {}
+            local list, parse_err = require("source.copymanga.mapper").list(wire, offset)
+            if not list then cb(nil, parse_err); return end
+            local root = wire.results
             for _idx, row in ipairs(list) do
                 if type(row) == "table" and type(row.uuid) == "string" and row.uuid ~= "" then
                     rows[#rows + 1] = {
@@ -250,7 +266,8 @@ function Client:chaptersAsync(stable_id, groups, cb)
                 offset = 0
             end
             step()
-        end)
+        end, true)
+        if pending then active = handle end
     end
 
     step()
@@ -265,8 +282,9 @@ end
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:chapterAsync(stable_id, chapter_uid, cb)
+    local endpoint = self.base_url == Client.CURRENT_BASE_URL and "/chapter/" or "/chapter2/"
     local path = "/api/v3/comic/" .. Text.urlEncode(stable_id)
-        .. "/chapter2/" .. Text.urlEncode(chapter_uid) .. "?platform=1"
+        .. endpoint .. Text.urlEncode(chapter_uid) .. "?platform=1"
     return self:_getJson(path, cb)
 end
 
@@ -293,6 +311,8 @@ function Client:setCollectAsync(comic_id, collect, cb)
             accept = "application/json",
             headers = Client.headers(self.token),
             content_type = "application/x-www-form-urlencoded;charset=utf-8",
+            allow_redirects = false,
+            cache_ttl = 0,
             timeout = require("http.timeout").net(1),
             connect_timeout = require("http.timeout").net(1),
         },
@@ -318,12 +338,15 @@ function Client:collectAllAsync(cb)
     local active
 
     local function step()
-        active = self:_getJson("/api/v3/member/collect/comics?free_type=1&limit=" .. COLLECT_PAGE
+        local pending = true
+        local handle = self:_getJson("/api/v3/member/collect/comics?free_type=1&limit=" .. COLLECT_PAGE
             .. "&offset=" .. offset .. "&ordering=-datetime_updated", function(wire, err)
+            pending = false
             if cancelled then return end
             if not wire then cb(nil, err); return end
-            local root = type(wire.results) == "table" and wire.results or {}
-            local list = root.list or {}
+            local list, parse_err = require("source.copymanga.mapper").list(wire, offset)
+            if not list then cb(nil, parse_err); return end
+            local root = wire.results
             for _idx, row in ipairs(list) do
                 rows[#rows + 1] = row
             end
@@ -334,13 +357,81 @@ function Client:collectAllAsync(cb)
             end
             step()
         end)
+        if pending then active = handle end
     end
 
     step()
     return { cancel = function()
             cancelled = true
-            active.cancel()
+            if active then active.cancel() end
         end }
+end
+
+---@param cb fun(books: Book[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:shelfSyncAsync(cb)
+    return self:collectAllAsync(function(rows, err)
+        if not rows then cb(nil, err); return end
+        cb(require("source.copymanga.mapper").collect(rows))
+    end)
+end
+
+---@param client CopymangaClient
+---@param stable_id string
+---@param collect boolean
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return { cancel: fun() }
+local function changeCollect(client, stable_id, collect, cb)
+    local cancelled, active, pending = false, nil, true
+    local detail = client:detailAsync(stable_id, function(wire, err)
+        pending = false
+        if cancelled then return end
+        local comic_id = wire and require("source.copymanga.mapper").comicId(wire)
+        if not comic_id then cb(nil, err or _("漫画详情解析失败")); return end
+        local writing = true
+        local write = client:setCollectAsync(comic_id, collect, function(result, write_err)
+            writing = false
+            if cancelled then return end
+            if not result then cb(nil, write_err); return end
+            local reading = true
+            local readback = client:collectAllAsync(function(rows, read_err)
+                reading = false
+                if cancelled then return end
+                if not rows then cb(nil, read_err); return end
+                local found = false
+                for _idx, row in ipairs(rows) do
+                    local comic = type(row) == "table" and row.comic
+                    if type(comic) ~= "table" or type(comic.uuid) ~= "string" or comic.uuid == "" then
+                        cb(nil, _("响应无效")); return
+                    end
+                    if comic.uuid == comic_id then found = true end
+                end
+                if found ~= collect then cb(nil, _("书架同步未确认")); return end
+                cb(result)
+            end)
+            if reading then active = readback end
+        end)
+        if writing then active = write end
+    end)
+    if pending then active = detail end
+    return { cancel = function()
+        cancelled = true
+        if active then active.cancel() end
+    end }
+end
+
+---@param stable_id string
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:addToShelfAsync(stable_id, cb)
+    return changeCollect(self, stable_id, true, cb)
+end
+
+---@param stable_id string
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:removeFromShelfAsync(stable_id, cb)
+    return changeCollect(self, stable_id, false, cb)
 end
 
 return Client

@@ -191,7 +191,7 @@ end
 
 -- ── 内存 WebDAV：files[path] = { data, mtime }；目录由路径前缀推出 ──
 local function fakeDav()
-    local dav = { files = {}, calls = {} }
+    local dav = { files = {}, calls = {}, timeouts = {} }
     function dav:put(path, data, mtime) self.files[path] = { data = data, mtime = mtime or os.time() } end
     function dav:listAsync(path, cb)
         self.calls[#self.calls + 1] = "PROPFIND " .. path
@@ -210,8 +210,9 @@ local function fakeDav()
         end
         cb(out)
     end
-    function dav:getAsync(path, dest, _, cb)
+    function dav:getAsync(path, dest, opts, cb)
         self.calls[#self.calls + 1] = "GET " .. path
+        self.timeouts[path] = opts and opts.timeout
         local f = self.files[path]
         if not f then return cb(nil, "HTTP 404", 404) end
         local out = assert(io.open(dest, "wb"))
@@ -219,8 +220,9 @@ local function fakeDav()
         out:close()
         cb(true)
     end
-    function dav:putFileAsync(path, local_path, cb)
+    function dav:putFileAsync(path, local_path, cb, timeout)
         self.calls[#self.calls + 1] = "PUT " .. path
+        self.timeouts[path] = timeout
         self:put(path, readFile(local_path))
         cb(true)
     end
@@ -484,6 +486,8 @@ do
     Assert.eq(progress["webdav://new.epub"].chapter_idx, 21)
     Assert.eq(progress["webdav://new.epub"].updated_at, 1800000000)
     Assert.eq(dav:count("GET " .. ROOT .. "/.Moon+/Cache/old.epub.po"), 0, "远端不比本地新就不下载")
+    Assert.eq(dav:count("GET " .. ROOT .. "/.Moon+/Cache/dirty.epub.po"), 0, "本地脏行不下载会被丢弃的远端进度")
+    Assert.eq(dav:count("GET " .. ROOT .. "/.Moon+/Cache/new.epub.po.json"), 0, "目录里没有精确坐标就不发 404 请求")
     Assert.eq(progress["webdav://old.epub"].fraction, 0.5)
     Assert.eq(progress["webdav://dirty.epub"].fraction, 0.9)
     books, progress = {}, {}
@@ -697,6 +701,9 @@ do
     Assert.is_true(refresh(c))
     Assert.eq(readFile(down), "PNG-down")
     Assert.eq(dav.files[ROOT .. "/.Moon+/Cover/up.epub_2.png"].data, "PNG-up")
+    local timeout = require("http.timeout").net(1)
+    Assert.eq(dav.timeouts[ROOT .. "/.Moon+/Cover/down.epub_2.png"], timeout, "封面下载不用整本书的长超时")
+    Assert.eq(dav.timeouts[ROOT .. "/.Moon+/Cover/up.epub_2.png"], timeout, "封面上传不用整本书的长超时")
     local puts = dav:count("PUT " .. ROOT .. "/.Moon+/Cover/")
     Assert.is_true(refresh(c))
     Assert.eq(dav:count("PUT " .. ROOT .. "/.Moon+/Cover/"), puts)
@@ -1133,6 +1140,7 @@ do
     Stubs.flush()
     Assert.is_true(ok)
     Assert.eq(dav.files[ROOT .. "/.Moon+/Cover/局外人.epub_2.png"].data, "new-cover")
+    Assert.eq(dav.timeouts[ROOT .. "/.Moon+/Cover/局外人.epub_2.png"], require("http.timeout").net(1))
     local entries = remoteEntries(dav)
     Assert.eq(entries["局外人.epub"].bookName, "局外人（刮削）")
     Assert.eq(entries["局外人.epub"].favorite, "小说")
@@ -1745,16 +1753,22 @@ do
     Settings.saveSource("local", cfg)
     local dav = fakeDav()
     putSync(dav, { { filename = "已有.epub", bookName = "已有" } })
+    local cover = Paths.coverPath("webdav://已有.epub", "local")
+    local cover_file = assert(io.open(cover, "wb"))
+    cover_file:write("local-cover")
+    cover_file:close()
     local c = deviceClient(dav, "A", L)
     local start
     c:scanWebdavAsync(function() end, { on_background = function(fn) start = fn end })
     Stubs.flush()
     Assert.is_nil(start, "关了不交出后台上传")
     Assert.is_nil(dav.files[ROOT .. "/不传.epub"], "不上传")
+    Assert.eq(dav:count("PUT " .. ROOT .. "/.Moon+/Cover/"), 0, "关闭上传本地书后不补传封面")
     Assert.not_nil(books[L .. "/不传.epub"], "本地照常入库")
     cfg.webdav_upload_local = nil
     Settings.saveSource("local", cfg)
     os.remove(L .. "/不传.epub")
+    os.remove(cover)
     books = {}
 end
 

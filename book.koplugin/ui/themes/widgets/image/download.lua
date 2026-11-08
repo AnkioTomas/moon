@@ -112,8 +112,8 @@ function Queue:pump()
             allow_redirects = true,
             timeout = require("http.timeout").net(2),
             connect_timeout = require("http.timeout").net(1),
-        }, task.tmp, function(ok, err)
-            task:_onHttp(ok, err)
+        }, task.tmp, function(ok, err, response)
+            task:_onHttp(ok, err, response)
         end)
     end
 end
@@ -150,8 +150,33 @@ function Download:_complete(path, err)
     end
 end
 
+--- CDN 可忽略 Accept-Encoding: identity，按实际响应头解压；只保留压缩输入，输出分块写回临时文件。
+---@param path string
+---@return boolean|nil, string|nil
+local function gunzip(path)
+    local input, err = io.open(path, "rb")
+    if not input then return nil, err end
+    local data, read_err = input:read("*a")
+    input:close()
+    if not data then return nil, read_err end
+    local output, open_err = io.open(path, "wb")
+    if not output then return nil, open_err end
+    local write_err
+    local total, inflate_err = require("utils.inflate").stream(data, 0, #data, 31, function(chunk)
+        if not write_err then
+            local ok, reason = output:write(chunk)
+            if not ok then write_err = reason end
+        end
+    end)
+    local closed, close_err = output:close()
+    if not total then return nil, inflate_err end
+    if write_err or not closed then return nil, write_err or close_err end
+    return true
+end
+
 ---@param ok boolean
-function Download:_onHttp(ok, err)
+---@param response table|nil
+function Download:_onHttp(ok, err, response)
     if self.settled then
         return
     end
@@ -164,6 +189,11 @@ function Download:_onHttp(ok, err)
             failed[self.url] = os.time() + FAILED_TTL
         end
         return self:_complete(nil, err or "download failed")
+    end
+    local encoding = response and Request.header(response, "Content-Encoding")
+    if encoding and encoding:lower() == "gzip" then
+        local decoded, decode_err = gunzip(self.tmp)
+        if not decoded then return self:_complete(nil, decode_err) end
     end
     local attr = lfs.attributes(self.tmp)
     if not attr or not attr.size or attr.size < 1 then

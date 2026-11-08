@@ -16,16 +16,20 @@ local M = {}
 ---@param cb fun(value: any, err: string|nil)
 ---@return { cancel: fun() }
 function M.run(source, identity, missing_err, start, cb)
-    local cancelled, job = false, nil
-    job = source:loadTocAsync(identity, function(toc, err)
+    local cancelled, job, pending = false, nil, true
+    local initial = source:loadTocAsync(identity, function(toc, err)
+        pending = false
         if cancelled then return end
         local chapter = toc and toc[tonumber(identity.chapter_idx)]
         if not chapter then
             cb(nil, err or missing_err)
             return
         end
-        job = start(chapter.uid, cb)
+        job = start(chapter.uid, function(value, reason)
+            if not cancelled then cb(value, reason) end
+        end)
     end)
+    if pending then job = initial end
     return { cancel = function()
         cancelled = true
         if job then job.cancel() end

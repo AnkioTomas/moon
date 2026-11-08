@@ -20,9 +20,6 @@ local function stub(name, factory)
     package.loaded[name] = nil
 end
 
-stub("gettext", function()
-    return function(value) return value end
-end)
 stub("source.base", function()
     return {
         loadMeta = function(id) return { id = id, name = id, type = "book" } end,

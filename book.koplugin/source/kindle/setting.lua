@@ -6,7 +6,7 @@ Kindle 书库源设置：kindle.koplugin（开书转换依赖）的安装状态�
 --]]
 
 local Update = require("source.kindle.plugin_update")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kindle")
 
 local Setting = {}
 

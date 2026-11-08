@@ -8,7 +8,7 @@ kamare 的模块一律在函数内 `pcall(require, …)`，绝不顶层 require�
 @module source.kavita.cache
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 local T = require("ffi/util").template
 local logger = require("utils.log")
 

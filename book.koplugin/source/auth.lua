@@ -66,9 +66,20 @@ function Auth.expire(id, msg)
     return msg
 end
 
---- 带凭据的请求成功：清掉失效标记。
+--- 带凭据的请求成功：清掉失效标记；账号叠层开着就刷新状态行（留在本页）。
 ---@param id string
-function Auth.ok(id) expired[id] = nil end
+function Auth.ok(id)
+    expired[id] = nil
+    local ok, UIManager = pcall(require, "ui/uimanager")
+    if not ok or not UIManager then return end
+    for _idx, entry in ipairs(UIManager._window_stack or {}) do
+        local widget = entry.widget
+        if widget and widget.name == "book_desktop" and widget.settings_overlay then
+            widget.settings_overlay:updateView()
+            return
+        end
+    end
+end
 
 ---@param id string
 ---@return boolean

@@ -14,7 +14,7 @@ iRead（iread.ankio.net）HTTP 客户端（仅异步）。
 local JSON = require("json")
 local Request = require("http.request")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.iread")
 
 local Client = {}
 
@@ -39,6 +39,7 @@ end
 ---@return boolean
 local function isCurrent(cred)
     local saved = Client.credential()
+    if not saved then return cred.token == nil and cred.cookie == nil end
     return saved ~= nil and saved.token == cred.token and saved.cookie == cred.cookie
 end
 
@@ -52,7 +53,7 @@ local function flatten(out, key, value)
         for k, v in pairs(value) do
             flatten(out, key .. "[" .. (is_list and (k - 1) or tostring(k)) .. "]", v)
         end
-    elseif value ~= nil then
+    elseif value ~= nil and value ~= JSON.util.null then
         out[key] = tostring(value)
     end
 end
@@ -71,15 +72,15 @@ end
 ---@param cred IReadCredential 发请求时用的凭据
 ---@return any|nil data, string|nil err
 function Client.decode(raw, err, cred)
-    if not raw then return nil, err and tostring(err) or _("请求失败") end
-    local ok, wire = pcall(JSON.decode, raw)
+    if err then return nil, tostring(err) end
+    if not raw then return nil, _("请求失败") end
+    local ok, wire = pcall(JSON.decode, raw, JSON.decode.simple)
     if not ok or type(wire) ~= "table" then return nil, _("响应无效") end
     local code = tonumber(wire.code)
     if code == 200 then
-        if isCurrent(cred) then require("source.auth").ok(SOURCE_ID) end
         return wire.data == nil and {} or wire.data
     end
-    if (code == 401 or code == 403) and isCurrent(cred) then
+    if (code == 401 or code == 403) and (cred.token or cred.cookie) and isCurrent(cred) then
         return nil, require("source.auth").expire(SOURCE_ID, _("请按这个做：\n1. 点这个提示上的「重新登录」。没有按钮就打开「设置 → 书库 → 账号 → iRead → iRead 账号」。\n2. 用电脑浏览器打开 https://iread.ankio.net/user/token ，登录你的账号。\n3. 在页面上新建一个个人 Token，复制它。\n4. 回到月读的输入框，把 Token 贴进去，点「登录」。\n\n如果平时用的是浏览器扩展，不要新建 Token，改做下面这些：\n")
             .. require("source.cookie_login").relogin(_("iRead"), "https://iread.ankio.net/user/token"))
     end
@@ -94,10 +95,12 @@ end
 ---@param session string|nil 服务端会话 Cookie（搜索结果存在会话里，轮询必须带回）
 ---@return { cancel: fun() }
 local function post(path, form, cred, ratio, cb, session)
+    local cookie = session and require("source.cookie_login").parse((cred.cookie or "") .. "; " .. session)
+        or cred.cookie
     return Request.post(Client.BASE .. path, encode(form), {
         accept = "application/json",
-        headers = cred.cookie and { Cookie = cred.cookie }
-            or { Authorization = "Bearer " .. cred.token, Cookie = session },
+        headers = { Cookie = cookie, Authorization = cred.token and ("Bearer " .. cred.token),
+            ["X-Requested-With"] = "XMLHttpRequest" },
         content_type = "application/x-www-form-urlencoded",
         timeout = require("http.timeout").net(ratio),
     }, function(raw, err, res)
@@ -106,7 +109,7 @@ local function post(path, form, cred, ratio, cb, session)
     end)
 end
 
---- 带已保存 Token 的请求；没登录直接报错。
+--- 读取接口允许游客；已登录时使用用户配置的书源。
 ---@param path string
 ---@param form table<string, any>
 ---@param ratio number
@@ -114,9 +117,11 @@ end
 ---@param session string|nil
 ---@return { cancel: fun() }
 local function call(path, form, ratio, cb, session)
-    local cred = Client.credential()
-    if not cred then return require("source.base").defer(cb, nil, _("未登录 iRead")) end
-    return post(path, form, cred, ratio, cb, session)
+    local cred = Client.credential() or {}
+    return post(path, form, cred, ratio, function(data, err, res)
+        if not isCurrent(cred) then cb(nil, _("登录状态已变化，请重试")); return end
+        cb(data, err, res)
+    end, session)
 end
 
 --- 校验凭据并取账号信息（设置页用，凭据由调用方显式给）。
@@ -125,25 +130,57 @@ end
 ---@return { cancel: fun() }
 function Client.userAsync(cred, cb)
     return post("/user/home", {}, cred, 0.5, function(data, err)
-        if type(data) ~= "table" or data.nickname == nil then cb(nil, err or _("iRead 账号信息为空")); return end
+        if type(data) ~= "table" or type(data.nickname) ~= "string" or data.nickname == "" then
+            cb(nil, err or _("iRead 账号信息为空")); return
+        end
+        if isCurrent(cred) then require("source.auth").ok(SOURCE_ID) end
         cb(data)
     end)
+end
+
+--- 列表响应必须是连续数组；坏行不能被 ipairs 静默丢掉并参与书架对账。
+---@param rows any
+---@param field string
+---@return boolean
+local function validRows(rows, field)
+    if type(rows) ~= "table" then return false end
+    local count = 0
+    for key, row in pairs(rows) do
+        if type(key) ~= "number" or key < 1 or key % 1 ~= 0
+            or type(row) ~= "table" or type(row[field]) ~= "string" or row[field] == "" then return false end
+        count = count + 1
+    end
+    return count == #rows
 end
 
 --- 个人书架（服务端书记录原行）。空书架要另验登录态。
 ---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client.shelfAsync(cb)
-    local job
-    job = call("/book/list", {}, 0.5, function(data, err)
-        if type(data) ~= "table" then cb(nil, err); return end
-        if #data > 0 then cb(data); return end
-        job = call("/user/home", {}, 0.5, function(user, user_err)
-            if type(user) ~= "table" then cb(nil, user_err); return end
+    local cred = Client.credential()
+    if not cred then return require("source.base").defer(cb, nil, _("未登录 iRead")) end
+    local job, cancelled, pending = nil, false, true
+    local first = post("/book/list", {}, cred, 0.5, function(data, err)
+        pending = false
+        if cancelled then return end
+        if not isCurrent(cred) then cb(nil, _("登录状态已变化，请重试")); return end
+        if not validRows(data, "name") then cb(nil, err or _("响应无效")); return end
+        if #data > 0 then
+            require("source.auth").ok(SOURCE_ID)
+            cb(data); return
+        end
+        job = Client.userAsync(cred, function(user, user_err)
+            if cancelled then return end
+            if not isCurrent(cred) then cb(nil, _("登录状态已变化，请重试")); return end
+            if not user then cb(nil, user_err); return end
             cb({})
         end)
     end)
-    return { cancel = function() job.cancel() end }
+    if pending then job = first end
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
 end
 
 --- 目录：章节对象数组，顺序即阅读顺序。
@@ -152,7 +189,8 @@ end
 ---@return { cancel: fun() }
 function Client.chaptersAsync(row, cb)
     return call("/book/chapters", row, 1, function(data, err)
-        if type(data) ~= "table" or #data == 0 then cb(nil, err or _("iRead 目录为空")); return end
+        if not validRows(data, "title") then cb(nil, err or _("响应无效")); return end
+        if #data == 0 then cb(nil, _("iRead 目录为空")); return end
         cb(data)
     end)
 end
@@ -178,13 +216,33 @@ end
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client.saveProgressAsync(row, pos, cb)
+    if not Client.credential() then return require("source.base").defer(cb, nil, _("未登录 iRead")) end
     local body = {}
     for key, value in pairs(row) do body[key] = value end
     body.durChapterIndex = pos.index
     body.durChapterPos = pos.offset
     body.durChapterTitle = pos.title or ""
     body.durChapterTime = os.time() * 1000
-    return call("/book/process", body, 0.5, function(data, err) cb(data ~= nil or nil, err) end)
+    local cancelled, job, pending = false, nil, true
+    local first = call("/book/process", body, 0.5, function(data, err)
+        pending = false
+        if cancelled then return end
+        if data == nil then cb(nil, err); return end
+        job = Client.shelfAsync(function(rows, reason)
+            if cancelled then return end
+            if not rows then cb(nil, reason); return end
+            for _idx, saved in ipairs(rows) do
+                if saved.name == row.name and tonumber(saved.durChapterIndex) == pos.index
+                    and tonumber(saved.durChapterPos) == pos.offset then cb(true); return end
+            end
+            cb(nil, _("iRead 阅读进度更新未生效"))
+        end)
+    end)
+    if pending then job = first end
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
 end
 
 local SEARCH_INTERVAL = 2
@@ -196,36 +254,60 @@ local SEARCH_TRIES = 30
 ---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 local function runAsync(form, cb)
+    local cred = Client.credential() or {}
     local UIManager = require("ui/uimanager")
     local job, tick, done = nil, nil, false
-    local rows, tries = {}, 0
+    local rows, seen, tries = {}, {}, 0
+    local function finish(data, err)
+        done = true
+        cb(data, err)
+    end
     local function poll(task, session)
+        if done then return end
+        if not isCurrent(cred) then finish(nil, _("登录状态已变化，请重试")); return end
         tries = tries + 1
-        job = call("/book/search/result", { task = task }, 0.5, function(data, err)
+        local pending = true
+        local inner = post("/book/search/result", { task = task }, cred, 0.5, function(data, err)
+            pending = false
             if done then return end
-            if type(data) ~= "table" then cb(nil, err); return end
-            for _idx, row in ipairs(data.result or {}) do rows[#rows + 1] = row end
-            if (tonumber(data.remaining) or 0) == 0 or tries >= SEARCH_TRIES then
-                done = true
-                cb(rows)
-                return
+            if not isCurrent(cred) then finish(nil, _("登录状态已变化，请重试")); return end
+            local remaining = type(data) == "table" and tonumber(data.remaining)
+            if not remaining or remaining < 0 or remaining % 1 ~= 0 or not validRows(data.result, "name") then
+                finish(nil, err or _("响应无效")); return
             end
+            for _idx, row in ipairs(data.result) do
+                if not seen[row.name] then
+                    seen[row.name] = true
+                    rows[#rows + 1] = row
+                end
+            end
+            if remaining == 0 then finish(rows); return end
+            if tries >= SEARCH_TRIES then finish(nil, _("iRead 搜索超时，请重试")); return end
             tick = function() poll(task, session) end
             UIManager:scheduleIn(SEARCH_INTERVAL, tick)
         end, session)
+        if pending then job = inner end
     end
-    job = call("/book/search", form, 0.5, function(data, err, res)
+    local pending = true
+    local first = post("/book/search", form, cred, 0.5, function(data, err, res)
+        pending = false
         if done then return end
-        if type(data) ~= "table" or type(data.task) ~= "string" then cb(nil, err or _("请求失败")); return end
-        local set_cookie = Request.header(res, "Set-Cookie")
-        local session = type(set_cookie) == "table" and set_cookie[1] or set_cookie
-        poll(data.task, session and session:match("^([^;]+)"))
+        if not isCurrent(cred) then finish(nil, _("登录状态已变化，请重试")); return end
+        if type(data) ~= "table" or type(data.task) ~= "string" or data.task == "" then
+            finish(nil, err or _("响应无效")); return
+        end
+        local cookies = {}
+        for _idx, value in ipairs(Request.headerAll(res, "Set-Cookie")) do
+            cookies[#cookies + 1] = value:match("^([^;]+)")
+        end
+        poll(data.task, table.concat(cookies, "; "))
     end)
+    if pending then job = first end
     return {
         cancel = function()
             done = true
             if tick then UIManager:unschedule(tick) end
-            job.cancel()
+            if job then job.cancel() end
         end,
     }
 end
@@ -250,14 +332,27 @@ end
 ---@param cb fun(rules: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client.exploreRulesAsync(cb)
-    return call("/kindle/exploreRules", {}, 0.5, cb)
+    return call("/kindle/exploreRules", {}, 0.5, function(rules, err)
+        if not validRows(rules, "bookSourceName") then cb(nil, err or _("响应无效")); return end
+        for _idx, rule in ipairs(rules) do
+            if type(rule.id) ~= "number" or rule.id < 1 or rule.id % 1 ~= 0
+                or rule.exploreUrl ~= nil and not validRows(rule.exploreUrl, "title") then
+                cb(nil, _("响应无效")); return
+            end
+            for _entry_idx, entry in ipairs(rule.exploreUrl or {}) do
+                if type(entry.url) ~= "string" then cb(nil, _("响应无效")); return end
+            end
+        end
+        cb(rules)
+    end)
 end
 
---- 把书移出书架。/book/favourite 是开关，调用方必须先确认书还在书架上。
+--- 切换收藏状态。调用方必须先读书架判断是否需要切换，并在写后确认状态。
 ---@param row table
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }
-function Client.removeAsync(row, cb)
+function Client.favouriteAsync(row, cb)
+    if not Client.credential() then return require("source.base").defer(cb, nil, _("未登录 iRead")) end
     return call("/book/favourite", row, 0.5, function(data, err) cb(data ~= nil or nil, err) end)
 end
 

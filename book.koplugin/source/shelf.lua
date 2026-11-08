@@ -2,7 +2,7 @@
 书架双向同步：本地删/加上行 + 远端快照 reconcile。
 
 - `pushDeletes`：所有有远端删除接口的源共用（moon / copymanga / wechat / jdread），源只给「删一本」。
-- `syncAsync`：有 add/remove 书架 API 的源（微信读书、京东读书）共用；远端由调用方显式传入 ``remote``，
+- `syncAsync`：有 add/remove 书架 API 的源（微信读书、京东读书、网易云阅读）共用；远端由调用方显式传入 ``remote``，
   需提供冒号方法 ``shelfSyncAsync(cb)`` / ``addToShelfAsync(stable_id, cb)`` / ``removeFromShelfAsync(stable_id, cb)``。
 - `reconcile`：远端快照对账，返回 SyncResult。
 
@@ -149,7 +149,7 @@ Shelf.pushAdded = pushAdded
 --- 全量：先推删 → 拉远端 → 推本地新加 →（有推送则再拉）→ reconcile。
 ---@param source_id string
 ---@param remote table 书架远端（见模块头注释）
----@param to_books fun(wire: table): Book[] 书架 wire 映射（封面等副产物由源在这里自己记）
+---@param to_books (fun(wire: table): Book[])|nil 书架 wire 映射；远端已返回 Book[] 时省略
 ---@param opts { dirty_only?: boolean, force?: boolean, on_progress?: ShelfReport }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }
@@ -188,7 +188,9 @@ function Shelf.syncAsync(source_id, remote, to_books, opts, cb)
         job = remote:shelfSyncAsync(function(wire, err)
             if cancelled then return end
             if not wire then cb(nil, err); return end
-            next_step(to_books(wire))
+            local books = wire
+            if to_books then books = to_books(wire) end
+            next_step(books)
         end)
     end
     ---@param books Book[]

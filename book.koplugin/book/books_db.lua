@@ -65,6 +65,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 ---@field page integer|nil 展示用页码（来自 pending_progress，非 books 列）
 ---@field total_pages integer|nil 展示用总页数（来自 pending_progress，非 books 列）
 ---@field category string|nil 分类 / 标签
+---@field category_authoritative boolean|nil 同步快照明确分类口径，允许清除旧分类（非 books 列）
 ---@field series string|nil 系列名
 ---@field intro string|nil 简介
 ---@field inserted_at integer|nil 本行首次写入时间；0 表示仅身份行；内存展示行可能没有
@@ -98,8 +99,11 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 ---@field isbn string|nil ISBN：10 / 13 位，只含数字与 X
 ---@field language string|nil 语言主码，小写（zh / en / ja）
 ---@field words integer|nil 字数，> 0
+---@field status string|nil 连载状态文案（连载 / 完结 / 源站原文）
+---@field tags string|nil 标签，用「 · 」拼接
 ---@field rating { score: number, by: string|nil }|nil 十分制一位小数 + 来源 id（weread / douban）
 ---@field detail_at integer|nil 最近一次拉单本详情的时间；详情页据此决定还要不要拉
+---@field source table|nil 各书源自己的元数据，按 source_id 隔离；内容由属主源解释
 
 --- 书籍详情（继承 Book 全部字段，含 intro）。
 --- 详情页 / 悬浮菜单简介区使用；列表接口不必填 intro。
@@ -197,12 +201,17 @@ local function normalizeMeta(raw)
     if language and #language <= 3 then out.language = language end
     local words = math.floor(tonumber(raw.words) or 0)
     if words > 0 then out.words = words end
+    local status = type(raw.status) == "string" and Text.trim(raw.status) or ""
+    if status ~= "" then out.status = status end
+    local tags = type(raw.tags) == "string" and Text.trim(raw.tags) or ""
+    if tags ~= "" then out.tags = tags end
     local score = type(raw.rating) == "table" and tonumber(raw.rating.score)
     if score and score > 0 and score <= 10 then
         -- 1e-9：9.55 之类的浮点乘 10 后略小于 95.5，不补会舍成 9.5
         out.rating = { score = math.floor(score * 10 + 0.5 + 1e-9) / 10, by = raw.rating.by }
     end
     out.detail_at = tonumber(raw.detail_at)
+    if type(raw.source) == "table" then out.source = raw.source end
     return next(out) and out or nil
 end
 
