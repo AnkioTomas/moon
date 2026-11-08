@@ -20,10 +20,24 @@ local function config()
     return require("utils.settings").getSource(ID)
 end
 
+--- 服务器身份：地址 + 用户名。换了就是另一套书架。
+local function libraryFingerprint(cfg)
+    return table.concat({
+        Client.normalizeUrl(cfg.server_url or ""),
+        Text.trim(cfg.username or ""),
+    }, "\0")
+end
+
 --- 落盘并重建源实例，让新地址 / 账号 / 书库立即生效，设置页随之刷新。
+--- 换服务器 / 用户：整源清本地书架。
 ---@param cfg table
-local function save(cfg)
+---@param previous_fingerprint string|nil
+local function save(cfg, previous_fingerprint)
     require("utils.settings").saveSource(ID, cfg)
+    if previous_fingerprint and previous_fingerprint ~= libraryFingerprint(cfg) then
+        require("source.logout").replaceLibrary(ID)
+        return
+    end
     require("source.registry").reload()
 end
 
@@ -91,8 +105,10 @@ local function field(key, title, hint, password, normalize, icon)
                         text_type = password and "password" or nil } },
                     ok_text = _("保存"),
                     callback = function(input)
+                        local before = libraryFingerprint(cfg)
                         cfg[key] = normalize(input)
-                        save(cfg)
+                        -- 只改密码不算换库；地址 / 用户名变了才撕本地书架。
+                        save(cfg, (key == "server_url" or key == "username") and before or nil)
                     end,
                 }:show()
             end,
@@ -173,8 +189,9 @@ local function importOfficial()
     local account = officialAccount()
     if not account then return end
     local cfg = config()
+    local before = libraryFingerprint(cfg)
     cfg.server_url, cfg.username, cfg.userkey = account.server_url, account.username, account.userkey
-    save(cfg)
+    save(cfg, before)
     toast(T(_("已导入账号 %1"), account.username))
 end
 
@@ -209,5 +226,7 @@ Setting.remote = {
     { key = "username", label = _("用户名"), normalize = Text.trim },
     { key = "userkey", label = _("密码"), secret = true, normalize = userkey },
 }
+--- 这些键变了 = 换库，远程保存后整源清本地书架。
+Setting.replace_on_remote = { "server_url", "username" }
 
 return Setting

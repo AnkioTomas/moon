@@ -75,6 +75,38 @@ Assert.eq(cleared, 2, "清库失败也已经登出")
 Assert.eq(reloads, 2)
 Assert.eq(Themed.last("toast").text, "清除本地记录失败")
 
+-- 换库身份：不改凭证回调，整源 forget + 必定 reload
+forget_ok, order, reloads, forgotten = true, {}, 0, {}
+Assert.is_true(Logout.replaceLibrary("kavita"))
+Assert.eq(table.concat(order, ","), "abort,invalidate,forget")
+Assert.eq(forgotten[1], "kavita")
+Assert.eq(reloads, 1)
+
+-- 换 WebDAV：走 forgetWebdav，不动整源 forgetSource
+local webdav = 0
+package.preload["book.store"] = function()
+    return {
+        forgetSource = function(id)
+            order[#order + 1] = "forget"
+            forgotten[#forgotten + 1] = id
+            return forget_ok
+        end,
+        forgetWebdav = function()
+            order[#order + 1] = "forgetWebdav"
+            webdav = webdav + 1
+            return true
+        end,
+    }
+end
+package.loaded["book.store"] = nil
+package.loaded["source.logout"] = nil
+Logout = require("source.logout")
+order, reloads = {}, 0
+Assert.is_true(Logout.replaceWebdav())
+Assert.eq(table.concat(order, ","), "abort,invalidate,forgetWebdav")
+Assert.eq(webdav, 1)
+Assert.eq(reloads, 1)
+
 package.preload["ui.themes.widgets.row"] = nil
 
 return true

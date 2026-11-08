@@ -12,8 +12,15 @@ local SOURCE_ID = "moon"
 
 local Setting = {}
 
+local function libraryFingerprint(cfg)
+    return table.concat({
+        Text.stripWhitespace(cfg.base_url),
+        Text.stripWhitespace(cfg.token),
+    }, "\0")
+end
+
 --- 弹出单字段输入框修改 Moon 配置项并落盘。
---- 保存后作废 registry 缓存的源实例，让新地址/令牌立即生效。
+--- 换服务器 / 令牌：整源清本地书架；否则只 reload。
 ---@param key string 配置字段名
 ---@param title string 对话框标题
 ---@param hint string 输入框提示
@@ -26,9 +33,14 @@ local function edit(key, title, hint, password, normalize)
         fields = { { text = tostring(cfg[key] or ""), hint = hint, text_type = password and "password" or nil } },
         ok_text = _("保存"),
         callback = function(value)
+            local before = libraryFingerprint(cfg)
             cfg[key] = normalize(value)
             require("utils.settings").saveSource(SOURCE_ID, cfg)
-            require("source.registry").reload()
+            if before ~= libraryFingerprint(cfg) then
+                require("source.logout").replaceLibrary(SOURCE_ID)
+            else
+                require("source.registry").reload()
+            end
         end,
     }:show()
 end
@@ -97,11 +109,16 @@ function Setting.open()
         },
         ok_text = _("保存"),
         callback = function(base_url, token)
+            local before = libraryFingerprint(cfg)
             cfg.base_url = Text.stripWhitespace(base_url)
             cfg.token = Text.stripWhitespace(token)
             MoonSettings.saveSource(SOURCE_ID, cfg)
             require("ui.themes.widgets.toast"):new{ text = _("已保存"), timeout = 2 }:show()
-            require("source.registry").reload()
+            if before ~= libraryFingerprint(cfg) then
+                require("source.logout").replaceLibrary(SOURCE_ID)
+            else
+                require("source.registry").reload()
+            end
         end,
     }:show()
 end

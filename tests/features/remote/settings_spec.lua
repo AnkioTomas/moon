@@ -13,9 +13,11 @@ local store = {
     zlib = { email = "", password = "", base_url = nil },
     opds = {},
     copymanga = {},
-    ["local"] = { path = "/mnt/books" },
+    ["local"] = { path = "/mnt/books", webdav_url = "", webdav_path = "", webdav_username = "" },
 }
 local invalidated = 0
+local reloads = 0
+local replaced = {}
 
 package.preload["utils.settings"] = function()
     return {
@@ -44,12 +46,31 @@ package.preload["source.registry"] = function()
         end,
         external = function(id) return external[id] end,
         invalidate = function() invalidated = invalidated + 1 end,
+        reload = function()
+            reloads = reloads + 1
+            invalidated = invalidated + 1
+        end,
         notifyChanged = function()
             require("ui/uimanager"):broadcastEvent(require("ui/event"):new("SourceChanged"))
         end,
     }
 end
+package.preload["source.logout"] = function()
+    return {
+        replaceLibrary = function(id)
+            replaced[#replaced + 1] = id
+            require("source.registry").reload()
+            return true
+        end,
+        replaceWebdav = function()
+            replaced[#replaced + 1] = "webdav"
+            require("source.registry").reload()
+            return true
+        end,
+    }
+end
 
+package.loaded["features.remote.settings"] = nil
 local SettingsApi = require("features.remote.settings")
 
 -- 初始快照：密钥脱敏
@@ -92,12 +113,25 @@ do
     Assert.eq(store.ai.ai_model, "new-model")
 end
 
--- Moon 变更触发 registry.invalidate
+-- Moon 换服务器 / 令牌：整源清书架（replaceLibrary → reload）
 do
-    invalidated = 0
+    invalidated, reloads, replaced = 0, 0, {}
     SettingsApi.apply({ moon = { base_url = "https://moon.test", token = "bk" } })
-    Assert.eq(invalidated, 1)
+    Assert.eq(replaced[1], "moon")
+    Assert.eq(reloads, 1)
     Assert.eq(store.moon.base_url, "https://moon.test")
+end
+
+-- 本地 WebDAV 换地址：replaceWebdav；只改密码不换库
+do
+    replaced, reloads = {}, 0
+    SettingsApi.apply({ ["local"] = { webdav_url = "https://dav.test/dav" } })
+    Assert.eq(replaced[1], "webdav")
+    Assert.eq(reloads, 1)
+    replaced, reloads, invalidated = {}, 0, 0
+    SettingsApi.apply({ ["local"] = { webdav_password = "secret" } })
+    Assert.len(replaced, 0, "只改密码不撕 WebDAV 书")
+    Assert.eq(invalidated, 1)
 end
 
 -- 远程 API 是部分更新：未提交的字段（尤其密钥）必须原样保留。

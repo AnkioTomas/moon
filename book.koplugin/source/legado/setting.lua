@@ -22,6 +22,10 @@ function Setting.rowStatus()
     return on and _("已配置") or _("未配置"), on
 end
 
+local function libraryFingerprint(address, user)
+    return table.concat({ tostring(address or ""), tostring(user or "") }, "\0")
+end
+
 ---@param address string
 ---@param user string
 ---@param password string
@@ -30,6 +34,7 @@ local function save(address, user, password)
     local settings = require("utils.settings")
     local cfg = settings.getSource(SOURCE_ID)
     local previous = { cfg.server_address, cfg.username, cfg.password }
+    local before = libraryFingerprint(previous[1], previous[2])
     cfg.server_address, cfg.username, cfg.password = address, user ~= "" and user or nil, password ~= "" and password or nil
     local Client = require("source.legado.client")
     local waiting = require("ui.themes.widgets.progress_dialog"):new{
@@ -46,7 +51,12 @@ local function save(address, user, password)
             Toast:new{ text = err or _("连接失败"), timeout = 3 }:show()
             return
         end
-        require("source.registry").reload()
+        -- 换服务地址 / 账号：旧库投影必须撕掉（书 ID 会撞）。
+        if before ~= libraryFingerprint(address, user ~= "" and user or nil) then
+            require("source.logout").replaceLibrary(SOURCE_ID)
+        else
+            require("source.registry").reload()
+        end
         Toast:new{ text = T(_("已连接，书架共 %1 本"), #rows), timeout = 2 }:show()
     end)
 end
@@ -117,9 +127,14 @@ local function edit()
             local Text = require("utils.text")
             local address = Text.stripWhitespace(value)
             if address == "" then
+                local had = (cfg.server_address or "") ~= ""
                 cfg.server_address, cfg.username, cfg.password = nil, nil, nil
                 require("utils.settings").saveSource(SOURCE_ID, cfg)
-                require("source.registry").reload()
+                if had then
+                    require("source.logout").replaceLibrary(SOURCE_ID)
+                else
+                    require("source.registry").reload()
+                end
                 return
             end
             require("ui/network/manager"):runWhenConnected(function()

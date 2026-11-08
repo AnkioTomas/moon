@@ -1,9 +1,12 @@
 --[[--
-账号源退出登录。
+账号源退出登录；换服务器 / 换 WebDAV 根时清本地书架。
 
 先停在飞同步、删掉本地凭证、丢掉还握着令牌的源实例，再清书架和阅读记录。
 凭证还在时不许动本地书架：清库一旦被看成删书，同步就会把远端书架删掉。
 清库本身不写墓碑、不上传。
+
+换库身份（`replaceLibrary` / `replaceWebdav`）时凭证已是新库的：只撕本地投影，
+不写墓碑，避免把旧库的书推成新库上的删除。
 
 @module koplugin.book.source.logout
 --]]
@@ -32,13 +35,21 @@ function Logout.abort(source_id)
     end
 end
 
+--- 正在读这个源的书就先关文档，免得清库后会话握着幽灵身份。
+---@param source_id string
+local function closeReader(source_id)
+    local snapshot = require("reader.session").current()
+    if snapshot and snapshot.identity and snapshot.identity.source_id == source_id then
+        snapshot.ui:onClose()
+    end
+end
+
 --- 退出与换号共用清理；不弹提示，不发远端删书请求。
 ---@param source_id string
 ---@param clear fun()
 ---@return boolean
 function Logout.clear(source_id, clear)
-    local snapshot = require("reader.session").current()
-    if snapshot and snapshot.identity and snapshot.identity.source_id == source_id then snapshot.ui:onClose() end
+    closeReader(source_id)
     require("source.auth").beginLogin(source_id)
     Logout.abort(source_id)
     clear()
@@ -46,6 +57,32 @@ function Logout.clear(source_id, clear)
     Registry.invalidate()
     local forgotten = require("book.store").forgetSource(source_id)
     if not forgotten then Registry.reload() end
+    return forgotten
+end
+
+--- 换服务器 / 换账号库：本地书架与旧库无关，整源撕掉再 reload 拉新库。
+--- 调用方须先把新凭证落盘；本函数不改配置、不写墓碑。
+---@param source_id string
+---@return boolean
+function Logout.replaceLibrary(source_id)
+    closeReader(source_id)
+    Logout.abort(source_id)
+    local Registry = require("source.registry")
+    Registry.invalidate()
+    local forgotten = require("book.store").forgetSource(source_id)
+    Registry.reload()
+    return forgotten
+end
+
+--- 换 WebDAV 地址 / 目录：只撕 local 源里 webdav:// 的书；纯本地绝对路径书不动。
+---@return boolean
+function Logout.replaceWebdav()
+    closeReader("local")
+    Logout.abort("local")
+    local Registry = require("source.registry")
+    Registry.invalidate()
+    local forgotten = require("book.store").forgetWebdav()
+    Registry.reload()
     return forgotten
 end
 

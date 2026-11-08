@@ -167,6 +167,38 @@ function Store.forgetSource(source_id)
     return true
 end
 
+--- 撕掉一批书的工作目录 / 封面（库行已由 BookDB 清掉）。
+---@param source_id string
+---@param ids string[]
+local function purgeForgotten(source_id, ids)
+    for _idx, stable_id in ipairs(ids) do
+        local purged, leftover = purgeBookFiles(source_id, stable_id, true, false)
+        if not purged then
+            logger.warn("book cache purge failed", source_id, stable_id, leftover)
+        end
+    end
+end
+
+--- 换 WebDAV 根：只撕 local 源里 webdav:// 书的库行与缓存；纯本地书不动。
+---@return boolean
+function Store.forgetWebdav()
+    local ok, ids = BookDB.forgetPrefix("local", "webdav://")
+    if not ok then return false end
+    purgeForgotten("local", ids)
+    return true
+end
+
+--- 换本地书库目录：旧根下、新根外的纯本地书整本撕掉（书架 / 进度 / 笔记 / 统计 / 缓存）。
+---@param old_root string|nil
+---@param new_root string|nil
+---@return boolean
+function Store.forgetOldRoot(old_root, new_root)
+    local ok, ids = BookDB.forgetOldRoot("local", old_root, new_root)
+    if not ok then return false end
+    purgeForgotten("local", ids)
+    return true
+end
+
 --- 清单书本地缓存：工作目录、封面、封面网络图，以及 .moon/cache 内的 books.path。
 --- 元数据、目录、进度、统计保留；.moon/cache 外的原书（本地源）不动。
 --- keep_cover 为真（软删除）只删文档，封面文件与封面网络图也留着。

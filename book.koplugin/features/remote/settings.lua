@@ -31,7 +31,8 @@ SettingsApi.BODY_LIMIT = 256 * 1024
 ---@field fields RemoteSettingField[]
 ---@field owner string|nil utils.settings 的拥有者分区；缺省是同 id 的源配置（getSource）
 ---@field invalidate boolean|nil 落盘后作废源实例（连接配置变了）
----@field on_change nil|fun(cfg: table, changed: table<string, boolean>) 字段已改、落盘之前
+---@field on_change nil|fun(cfg: table, changed: table<string, boolean>) 字段已改、落盘之前（可改 cfg）
+---@field after_store nil|fun(cfg: table, changed: table<string, boolean>): boolean|nil 落盘之后；返回真=已 reload，跳过 invalidate
 ---@field commit nil|fun(cfg: table, values: table<string, string>): boolean 自己落盘，返回有无变化
 
 ---@param v string
@@ -67,6 +68,12 @@ local BUILTIN = {
                 normalize = Text.stripWhitespace },
             { key = "token", label = "长期令牌", secret = true, placeholder = "个人Token", normalize = Text.stripWhitespace },
         },
+        after_store = function(_cfg, changed)
+            if changed.base_url or changed.token then
+                require("source.logout").replaceLibrary("moon")
+                return true
+            end
+        end,
     },
     {
         id = "zlib", name = "Z-Library（下载账号）",
@@ -114,19 +121,52 @@ local BUILTIN = {
             { key = "webdav_password", label = "密码", secret = true },
             { key = "webdav_path", label = "目录" },
         },
+        after_store = function(_cfg, changed)
+            if changed.webdav_url or changed.webdav_path or changed.webdav_username then
+                require("source.logout").replaceWebdav()
+                return true
+            end
+        end,
     },
 }
 
---- 第三方源在设置模块里声明的远程表单字段：`setting.remote = RemoteSettingField[]`。
+--- 已在 BUILTIN 里声明的源 id：下面扫 setting.remote 时跳过，避免表单重复。
+local BUILTIN_IDS = {}
+for _idx, form in ipairs(BUILTIN) do BUILTIN_IDS[form.id] = true end
+
+--- 源设置模块里的 `setting.remote`（第三方扩展 + 内置 kavita/bookorbit）。
+--- 可选 `setting.replace_on_remote = { "base_url", ... }`：这些键变了就整源清本地书架。
 ---@return RemoteSettingForm[]
 local function externalForms()
     local Registry = require("source.registry")
     local out = {}
     for _idx, meta in ipairs(Registry.list()) do
-        local desc = Registry.external(meta.id)
-        local fields = desc and desc.setting and desc.setting.remote
-        if fields then
-            out[#out + 1] = { id = meta.id, name = meta.name, fields = fields, invalidate = true }
+        if not BUILTIN_IDS[meta.id] then
+            local desc = Registry.external(meta.id)
+            local setting = desc and desc.setting
+            if not setting then
+                local ok, mod = pcall(require, "source." .. meta.id .. ".setting")
+                if ok and type(mod) == "table" and mod.remote then setting = mod end
+            end
+            local fields = setting and setting.remote
+            if fields then
+                local replace_keys = setting.replace_on_remote
+                local after_store
+                if type(replace_keys) == "table" then
+                    after_store = function(_cfg, changed)
+                        for _k, key in ipairs(replace_keys) do
+                            if changed[key] then
+                                require("source.logout").replaceLibrary(meta.id)
+                                return true
+                            end
+                        end
+                    end
+                end
+                out[#out + 1] = {
+                    id = meta.id, name = meta.name, fields = fields,
+                    invalidate = true, after_store = after_store,
+                }
+            end
         end
     end
     return out
@@ -136,8 +176,8 @@ end
 ---@return table
 local function load(form)
     local Settings = require("utils.settings")
-    if form.owner then return Settings.get(form.owner) end
-    return Settings.getSource(form.id)
+    if form.owner then return Settings.get(form.owner) or {} end
+    return Settings.getSource(form.id) or {}
 end
 
 ---@param form RemoteSettingForm
@@ -205,7 +245,9 @@ local function applyForm(form, incoming)
     if next(changed) == nil then return false end
     if form.on_change then form.on_change(cfg, changed) end
     store(form, cfg)
-    if form.invalidate then require("source.registry").invalidate() end
+    -- 换库身份须在落盘之后清书架（新凭证已在盘上）；after_store 返回真表示已 reload。
+    local replaced = form.after_store and form.after_store(cfg, changed)
+    if form.invalidate and not replaced then require("source.registry").invalidate() end
     return true
 end
 
