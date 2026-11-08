@@ -327,6 +327,21 @@ local function installLeafStubs()
         function Geom:new(options)
             return setmetatable(options or {}, self)
         end
+        function Geom.boundingBox(boxes)
+            local x, y, right, bottom
+            for _idx, box in ipairs(boxes) do
+                x, y = math.min(x or box.x, box.x), math.min(y or box.y, box.y)
+                right = math.max(right or box.x + box.w, box.x + box.w)
+                bottom = math.max(bottom or box.y + box.h, box.y + box.h)
+            end
+            if x then return Geom:new{ x = x, y = y, w = right - x, h = bottom - y } end
+        end
+        function Geom:intersect(other)
+            local x, y = math.max(self.x, other.x), math.max(self.y, other.y)
+            local right = math.min(self.x + self.w, other.x + other.w)
+            local bottom = math.min(self.y + self.h, other.y + other.h)
+            return Geom:new{ x = x, y = y, w = right - x, h = bottom - y }
+        end
         return Geom
     end)
     for _idx, name in ipairs({ "ui/widget/linewidget", "ui/widget/container/topcontainer" }) do
@@ -440,6 +455,7 @@ local function installUIManager()
         end
         function UIManager:close(widget)
         end
+        function UIManager:avoidFlashOnNextRepaint() end
         function UIManager:setDirty(widget, refresh)
         end
         function UIManager:insertZMQ()
