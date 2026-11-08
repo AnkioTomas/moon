@@ -583,3 +583,40 @@ do
     clearMods()
     for _, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(path .. suffix) end
 end
+
+-- ── list：一次查询取整列卷进度 ──────────────────────────
+do
+    local result = {}
+    for c = 1, 14 do result[c] = {} end
+    result[1] = { "moon", "moon" }
+    result[2] = { "900:1", "900:2" }
+    result[3] = { 0.5, 0.1 }
+    result[4] = { 1, 2 }
+    result[5] = { "第一卷", "第二卷" }
+    result[6] = { 0.5, 0.1 }
+    result[7] = { 5, 2 }
+    result[8] = { 10, 20 }
+    result[9] = { "", "" }
+    result[10] = { "{}", "{}" }
+    result[11] = { 100, 200 }
+    result[12] = { 1, 0 }
+    result[13] = { "{}", "{}" }
+    result[14] = { 0, 0 }
+    local connection, calls = makeConn({
+        resultset = function(sql)
+            if sql:find("LIKE", 1, true) then return result, 2 end
+            return nil, 0
+        end,
+    })
+    local DbBase, ProgressDB = loadProgress(connection)
+    local by_id = ProgressDB.list("moon", "900")
+    Assert.eq(by_id["900:1"].fraction, 0.5)
+    Assert.eq(by_id["900:1"].page, 5)
+    Assert.eq(by_id["900:2"].total_pages, 20)
+    local call = calls[#calls]
+    Assert.is_true(call.sql:find("stable_id LIKE", 1, true) ~= nil)
+    Assert.eq(call.args[1], "moon")
+    Assert.eq(call.args[2], "900:%")
+    DbBase.close()
+    clearMods()
+end
