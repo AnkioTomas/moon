@@ -79,22 +79,34 @@ end
 ---@return table[]
 local function inlineText(text, images)
     local Utils = require("utils.text")
+    local prefixes = {}
+    for token in pairs(images) do
+        if token ~= "" then
+            local first = token:sub(1, 1)
+            prefixes[first] = prefixes[first] or {}
+            table.insert(prefixes[first], token)
+        end
+    end
+    for _first, tokens in pairs(prefixes) do
+        table.sort(tokens, function(a, b) return #a > #b end)
+    end
     local out, slots, offset, pos = {}, {}, 0, 1
-    for first, code, after in text:gmatch("()(%b[])()") do
-        local before = text:sub(pos, first - 1)
-        out[#out + 1] = before
-        offset = offset + #Utils.chars(before)
-        if images[code] then
+    while pos <= #text do
+        local code, tokens = nil, prefixes[text:sub(pos, pos)]
+        for idx = 1, tokens and #tokens or 0 do
+            local token = tokens[idx]
+            if text:sub(pos, pos + #token - 1) == token then code = token; break end
+        end
+        if code then
             out[#out + 1] = "\227\128\128"
             slots[#slots + 1] = { pos = offset + 1, image = images[code], text = code }
-            offset = offset + 1
         else
+            code = text:match(Utils.UTF8_CHAR, pos)
             out[#out + 1] = code
-            offset = offset + #Utils.chars(code)
         end
-        pos = after
+        offset = offset + 1
+        pos = pos + #code
     end
-    out[#out + 1] = text:sub(pos)
     return table.concat(out), slots
 end
 
@@ -121,12 +133,14 @@ end
 ---@param role string caption/body/title/hero
 ---@param text string
 ---@param width number 物理像素
----@param opts table|nil color/bg/transparent/bold/face/align/height/ellipsis/max_lines/inline_images
+---@param opts table|nil color/bg/transparent/bold/face/align/height/ellipsis/max_lines/inline_images/emoji
 ---@return table TextBoxWidget 放没放下看 getAllLineCount() > getVisLineCount()
 function Text.box(role, text, width, opts)
     opts = opts or {}
     local slots
-    if opts.inline_images then text, slots = inlineText(text, opts.inline_images) end
+    local images = opts.emoji and require("ui.themes.widgets.text.emoji").images(text, opts.inline_images)
+        or opts.inline_images
+    if images then text, slots = inlineText(text, images) end
     local theme = Theme.current()
     local ink = Theme.color(opts.color or (BOLD[role] and theme.color.accent or theme.color.ink))
     local bg = Theme.color(opts.bg or theme.color.page)

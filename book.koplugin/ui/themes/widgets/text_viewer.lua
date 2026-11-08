@@ -36,6 +36,7 @@ local TitleBar = require("ui.themes.widgets.titlebar")
 ---@field title string|nil
 ---@field text string
 ---@field inline_images table<string, { url: string, headers?: table<string, string> }>|nil
+---@field emoji boolean|nil 正文中的 Unicode emoji 使用行内图片
 ---@field fullscreen boolean 全屏页（缺省）；false 为居中弹窗卡片
 ---@field page integer
 ---@field pages integer
@@ -78,7 +79,7 @@ function TextViewer:init()
     self.pager_h = Theme.px(t.control.height)
     self.body_h = math.max(1, h - self.bar:getSize().h - self.pager_h - pad * 2 - button_h)
     self.body = Text.box("body", self.text, w - pad * 2,
-        { height = self.body_h, transparent = true, inline_images = self.inline_images })
+        { height = self.body_h, transparent = true, emoji = self.emoji, inline_images = self.inline_images })
     self.pages = math.max(1, math.ceil(self.body:getAllLineCount() / self.body:getVisLineCount()))
     self.page = 1
     -- 不足一页时 TextBoxWidget 把高度压到实际行数，单页也不显示翻页条：空出的高度
