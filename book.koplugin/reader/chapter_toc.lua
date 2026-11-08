@@ -51,7 +51,22 @@ function ChapterToc.show(toc, current_idx, on_select)
         collapsed_toc = {},
         collapse_depth = 2,
         expanded_nodes = {},
-        pageno = chapter_pages[tonumber(current_idx)],
+        -- current_idx 可能为 nil（进度未落库、或当前章不在目录里）。直接传给
+        -- ReaderToc:getTocIndexByPage 会让核心在 `_v.page > pageno` 处报
+        -- "attempt to compare nil with number"。这里退化为"不大于当前 idx 的
+        -- 最近一章"，再不行就从第一页开始。
+        pageno = (function()
+            local cur = tonumber(current_idx)
+            if not cur then return 1 end
+            if chapter_pages[cur] then return chapter_pages[cur] end
+            local best, best_idx
+            for idx, page in pairs(chapter_pages) do
+                if idx <= cur and (not best_idx or idx > best_idx) then
+                    best, best_idx = page, idx
+                end
+            end
+            return best or 1
+        end)(),
         view = {
             shouldInvertBiDiLayoutMirroring = function() return false end,
         },
