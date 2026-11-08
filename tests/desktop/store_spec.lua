@@ -68,10 +68,18 @@ local searchable = {
     end,
 }
 local active_id = nil
+local browse_only
 package.preload["source.registry"] = function()
     return {
-        listEnabled = function() return { { id = "local", name = "本地" }, { id = "wechat", name = "微信读书" } } end,
-        resolve = function(id) return id == "wechat" and searchable or {} end,
+        listEnabled = function()
+            local list = { { id = "local", name = "本地" }, { id = "wechat", name = "微信读书" } }
+            if browse_only then list[#list + 1] = { id = "18ta", name = "爱看书" } end
+            return list
+        end,
+        resolve = function(id)
+            if id == "wechat" then return searchable end
+            return id == "18ta" and browse_only or {}
+        end,
         activeId = function() return active_id end,
     }
 end
@@ -144,6 +152,36 @@ store.provider_id = nil
 Assert.eq(store:provider().id, "wechat")
 active_id = nil
 store.provider_id = store_settings.provider
+
+-- 只浏览的源也要进入书城，切过去清掉不支持的搜索，不能显示死搜索按钮。
+local browse_opts
+browse_only = {
+    browseAsync = function(_self, opts, cb)
+        browse_opts = opts
+        cb({ data = { { source_id = "18ta", stable_id = "1" } }, groups = {} })
+        return { cancel = function() end }
+    end,
+}
+Assert.len(Store.providers(), 3)
+active_id = "18ta"
+Assert.eq(Store.providers()[1].id, "18ta")
+active_id = nil
+store:build({ desktop = desktop }, {}, {})
+store.search = "旧关键词"
+build_opts.provider.on_pick({})
+picker.items[3].callback()
+Assert.eq(store.provider_id, "18ta")
+Assert.is_nil(store.search)
+store:build({ desktop = desktop }, {}, {})
+Assert.is_nil(build_opts.on_search)
+store:fetch()
+Assert.eq(browse_opts.limit, 60)
+Assert.eq(store.books[1].source_id, "18ta")
+browse_only = nil
+store.provider_id, store_settings.provider = "", ""
+store:reset()
+saved, view_updates = 0, 0
+store:build({ desktop = desktop }, {}, {})
 
 -- 混合：记住的优先，否则 Z站，再否则第一个。
 source_settings.library_mixed = true

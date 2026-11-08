@@ -680,7 +680,9 @@ function Library:build(ctx, state, opts)
         }
         left[#left + 1] = pick
     end
-    left[#left + 1] = Button:new{ icon = "search", variant = "ghost", size = "small", callback = opts.on_search }
+    if opts.on_search then
+        left[#left + 1] = Button:new{ icon = "search", variant = "ghost", size = "small", callback = opts.on_search }
+    end
     local total = Text.line("caption", T(_("共%1"), opts.total or 0), { color = t.color.muted })
     local books = state.books
     local body
