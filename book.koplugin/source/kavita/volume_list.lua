@@ -180,8 +180,9 @@ end
 ---@param memo table|nil 上一次的 resume_page 结果：轮询复用，别每秒为整列扫 journal
 ---@param pending table<string, boolean>|nil 本地入队记忆：缺 queue 能力时没有别的「排队」来源
 ---@param local_reads table<string, "read"|"reading">|nil 本地卷进度（ProgressDB），见 localReadStates
+---@param opts { skip_resumes: boolean|nil }|nil 目标计算不需要「待同步」时跳过逐卷 resume_page
 ---@return table
-local function scan(toc, series_id, memo, pending, local_reads)
+local function scan(toc, series_id, memo, pending, local_reads, opts)
     local probe = Cache.probe()
     local capabilities = probe.ok and (probe.capabilities or {}) or {}
     local queue_capable = has(capabilities, "queue")
@@ -227,7 +228,7 @@ local function scan(toc, series_id, memo, pending, local_reads)
             end
             -- 06 A4：只有读过 / 已缓存的行才可能有「待同步」；结果按章记忆，
             -- 每秒轮询不再重复读 journal（false = 查过没有）。
-            if resumes[cid] == nil then
+            if not (opts and opts.skip_resumes) and resumes[cid] == nil then
                 local cached = Cache.isCached(statuses[cid])
                 if cached or readState(entry) ~= nil then
                     resumes[cid] = Cache.resumePage(entry.chapterId) or false
@@ -291,7 +292,9 @@ end
 ---@return ContinueTarget|nil
 function VolumeList.continueTarget(series, toc)
     local states, rows = localReadStates(series, toc)
-    return pickTarget(toc, rows, scan(toc, series.stable_id, nil, nil, states))
+    -- 目标只看「完成/进度」；逐卷 resume_page 是列表行显示「待同步」才需要的。
+    local ctx = scan(toc, series.stable_id, nil, nil, states, { skip_resumes = true })
+    return pickTarget(toc, rows, ctx)
 end
 
 --- 一行要显示的状态字与动作；优先级见 04 A2。
