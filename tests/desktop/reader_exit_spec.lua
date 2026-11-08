@@ -6,6 +6,10 @@ package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
 package.preload["logger"] = function() return { err = function() end } end
 package.preload["device"] = function() return { isTouchDevice = function() return true end } end
+package.loaded["patch.manager"] = nil
+package.preload["patch.manager"] = function()
+    error("阅读菜单接管不应加载核心文件补丁管理器")
+end
 
 local next_tick
 package.preload["ui/uimanager"] = function()
@@ -68,7 +72,8 @@ local function drawerTab(menu) return menu.tab_item_table[1] end
 local reader_closed = 0
 local menu = newReaderMenu({ onClose = function() reader_closed = reader_closed + 1 end })
 local native_tab = menu.menu_items.filemanager
-require("desktop.reader_exit").install()
+local installed, install_err = pcall(require("desktop.reader_exit").install, "/plugin")
+Assert.is_true(installed, install_err)
 menu:setUpdateItemTable()
 Assert.is_nil(menu.menu_items.filemanager)
 local tab = drawerTab(menu)
