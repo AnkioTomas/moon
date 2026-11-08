@@ -8,6 +8,7 @@
 
 local Fetch = require("http.request.fetch")
 local Turbo = require("http.turbo")
+local logger = require("utils.log")
 local T = require("ffi/util").template
 local _ = require("gettext")
 
@@ -90,9 +91,11 @@ function Stream.open(opts, handlers)
                 return self:_throw_error(errors.NO_HEADERS,
                     "No data receive after connect. Expected HTTP headers.")
             end
-            local parsed, headers = xpcall(httputil.HTTPParser, function() end,
-                data, httputil.hdr_t["HTTP_RESPONSE"])
+            local parsed, headers = pcall(httputil.HTTPParser, data, httputil.hdr_t["HTTP_RESPONSE"])
             if not parsed then
+                logger.warn("book.http response header parse failed", ctx.id, ctx.method, ctx.url,
+                    "bytes", #data, "reason", tostring(headers))
+                logger.flush()
                 return self:_throw_error(errors.PARSE_ERROR_HEADERS,
                     "Could not parse HTTP response header")
             end

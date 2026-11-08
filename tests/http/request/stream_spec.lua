@@ -70,11 +70,14 @@ do
         missing = { code = 404, length = "3" },
         unsatisfiable = { code = 416, length = "3" },
     }
+    local invalid_header = "HTTP/1.1 200 OK\r\nContent-Length: invalid\r\nSet-Cookie: token=private\r\n\r\n"
+    local parse_reason = "libturbo_parser could not parse HTTP header. HPE_INVALID_CONTENT_LENGTH invalid character in content-length header"
     local first_hop = "first"
     package.preload["turbo.httputil"] = function()
         return {
             hdr_t = { HTTP_RESPONSE = 1 },
             HTTPParser = function(data)
+                if data == invalid_header then error(parse_reason) end
                 local response = responses[data]
                 return {
                     get_status_code = function() return response.code end,
@@ -93,6 +96,9 @@ do
     package.preload["turbo"] = function()
         local methods = {}
         function methods:_chunked_data() end
+        function methods:_throw_error(code, message)
+            assert(coroutine.resume(self.future.co, { error = { code = code, message = message } }))
+        end
         function methods:_handle_body(data)
             self.payload = data
             self:_finalize_request()
@@ -167,6 +173,36 @@ do
     Assert.eq(codes[2], 200)
     Assert.eq(table.concat(chunks), "xx")
     Assert.is_nil(done_err)
+
+    local logger = require("utils.log")
+    local original_warn, original_flush = logger.warn, logger.flush
+    local warnings, flushed = {}, 0
+    logger.warn = function(...)
+        local parts = {}
+        for i = 1, select("#", ...) do parts[i] = tostring(select(i, ...)) end
+        warnings[#warnings + 1] = table.concat(parts, " ")
+    end
+    logger.flush = function() flushed = flushed + 1 end
+    first_hop = invalid_header
+    local parse_err, parse_done, parse_chunks = nil, 0, {}
+    Request.stream({ url = "https://user:secret@example.test/file?token=hidden#private" }, {
+        on_data = function(chunk) parse_chunks[#parse_chunks + 1] = chunk end,
+        on_done = function(err) parse_err, parse_done = err, parse_done + 1 end,
+    })
+    logger.warn, logger.flush = original_warn, original_flush
+    Assert.eq(parse_err, "Could not parse HTTP response header", "保持原来的用户提示")
+    Assert.eq(parse_done, 1)
+    Assert.len(parse_chunks, 0)
+    Assert.len(warnings, 1)
+    Assert.not_nil(warnings[1]:find("book.http response header parse failed", 1, true))
+    Assert.not_nil(warnings[1]:find("GET https://example.test/file", 1, true))
+    Assert.not_nil(warnings[1]:find("bytes " .. #invalid_header, 1, true))
+    Assert.not_nil(warnings[1]:find(parse_reason, 1, true))
+    Assert.is_nil(warnings[1]:find("user:secret", 1, true))
+    Assert.is_nil(warnings[1]:find("token=hidden", 1, true))
+    Assert.is_nil(warnings[1]:find("#private", 1, true))
+    Assert.is_nil(warnings[1]:find("token=private", 1, true))
+    Assert.eq(flushed, 1, "失败日志不必等到凑够批次")
 
     -- 不跟随的 302 + Content-Length: 0：当场收尾，不等 keep-alive 连接关闭。
     first_hop = "empty"
