@@ -154,6 +154,20 @@ Assert.is_false(enabled_map.fanqie)
 Assert.len(config, 1)
 Assert.eq(config[1].title, "书籍来源")
 Assert.eq(config[1].rows[1]().title, "本地书籍")
+Assert.eq(config[1].rows[1]().icon, "folder", "本地书籍用文件夹图标")
+do
+    local by_title = {}
+    for _idx, row in ipairs(config[1].rows) do
+        local w = row()
+        by_title[w.title] = w.icon
+    end
+    Assert.eq(by_title["微信读书"], "chat")
+    Assert.eq(by_title["京东读书"], "shopping_bag")
+    Assert.eq(by_title["番茄小说"], "eco")
+    Assert.eq(by_title["拷贝漫画"], "photo_library")
+    Assert.is_true(by_title["Moon"] ~= "dns", "内置源不能掉回默认 dns")
+    Assert.eq(by_title["Moon"], "nightlight")
+end
 
 local store = src:storeSections{ desktop = desktop, plugin = nil }
 Assert.len(store, 1)
