@@ -1,5 +1,5 @@
 --[[--
-拷贝漫画账号会话：App 登录，持久化 Token。
+拷贝漫画账号会话：按所选站点的 API 登录，只持久化 Token，不保存新密码。
 
 登录规则与 kComics / 官方 App 一致：
   salt = 6 位随机整数
@@ -100,6 +100,10 @@ function Auth.loginAsync(username, password, cb)
         return nil
     end
 
+    local current = cfg()
+    local base_url = Client.normalizeBaseUrl(current.base_url)
+    local old_token, old_user_id = current.token, current.user_id
+    local cancelled = false
     local salt = newSalt()
     local body = Text.formEncode({
         username = username,
@@ -109,14 +113,17 @@ function Auth.loginAsync(username, password, cb)
     local headers = Client.headers()
     headers["Content-Type"] = "application/x-www-form-urlencoded;charset=utf-8"
 
-    return require("http.request").request({
-        url = Client.normalizeBaseUrl(cfg().base_url) .. "/api/v3/login",
+    local request = require("http.request").request({
+        url = base_url .. "/api/v3/login",
         method = "POST",
         body = body,
         headers = headers,
+        cache_ttl = 0,
+        allow_redirects = false,
         timeout = require("http.timeout").net(1),
         connect_timeout = require("http.timeout").net(1),
     }, function(res, err)
+        if cancelled then return end
         local wire, decode_err = Client.decode(res and res.body, err)
         if not wire then
             -- 第三个参数：服务端回了包并拒绝（密码错 / 风控），区别于网络错误。
@@ -129,15 +136,32 @@ function Auth.loginAsync(username, password, cb)
             cb(nil, _("登录失败：未返回令牌"), true)
             return
         end
+        if cfg().token ~= old_token or Client.normalizeBaseUrl(cfg().base_url) ~= base_url then
+            cb(nil, _("登录状态已改变，请重试"))
+            return
+        end
+        local user_id = tostring(results.user_id or "")
+        if user_id == "" then
+            cb(nil, _("登录失败：未返回账号标识"), true)
+            return
+        end
+        if old_token and old_token ~= "" and (not old_user_id or old_user_id == "" or user_id ~= old_user_id) then
+            cb(nil, _("请先退出当前账号"))
+            return
+        end
         save({
             token = token,
             user_id = tostring(results.user_id or ""),
             username = tostring(results.username or username),
             nickname = tostring(results.nickname or results.username or username),
-            password = password,
+            password = "",
         })
         cb(true)
     end)
+    return { cancel = function()
+        cancelled = true
+        request.cancel()
+    end }
 end
 
 return Auth
