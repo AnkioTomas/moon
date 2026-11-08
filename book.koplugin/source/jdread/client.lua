@@ -112,6 +112,19 @@ function Client:apiGetAsync(path, extra, cb)
     end)
 end
 
+---@param book_id string
+---@param page integer
+---@param cb fun(wire: table|nil, err: string|nil)
+function Client:bookCommentsAsync(book_id, page, cb)
+    local headers = self:headers(API .. "/")
+    headers.Cookie = nil
+    return Request.get(self:apiUrl("/jdread/api/ebook/" .. Text.urlEncode(book_id) .. "/comment", {
+        page = page, page_size = 20, sort = 0,
+    }), { headers = headers }, function(raw, err)
+        cb(decodeApi(raw, err, false))
+    end)
+end
+
 --- 新登录会话的校验不改变旧账号的过期状态；成功后由登录流程保存凭证。
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }

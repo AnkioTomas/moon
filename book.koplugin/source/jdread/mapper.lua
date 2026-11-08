@@ -6,6 +6,7 @@
 
 local Progress = require("book.progress")
 local Text = require("utils.text")
+local _ = require("gettext")
 
 local Mapper = {}
 local SOURCE_ID = "jdread"
@@ -197,6 +198,31 @@ function Mapper.progress(wire)
         chapter_title = current.epub_chapter_title,
         updated_at = tonumber(current.version or current.created_at),
     }, current.chapter_id and tostring(current.chapter_id) or nil
+end
+
+---@param wire table
+---@return table|nil, string|nil
+function Mapper.bookReviewPage(wire)
+    local data = type(wire) == "table" and wire.data
+    local rows = type(data) == "table" and data.ebook_comment_infos
+    local total = type(data) == "table" and tonumber(data.total)
+    if type(rows) ~= "table" or not total or total < 0 then
+        return nil, _("京东读书响应无效")
+    end
+    local items = {}
+    for _idx, row in ipairs(rows) do
+        if type(row) ~= "table" or row.id == nil or type(row.comment) ~= "string"
+            or type(row.created) ~= "number" then
+            return nil, _("京东读书响应无效")
+        end
+        items[#items + 1] = {
+            id = tostring(row.id), author = type(row.nickname) == "string" and row.nickname or "",
+            text = row.comment, time = os.date("%Y-%m-%d", math.floor(row.created / 1000)),
+            likes = tonumber(row.like_count), grade = tonumber(row.comment_rate),
+        }
+    end
+    return { items = items, total = total, pages = math.max(1, math.ceil(total / 20)),
+        more = #items < total, title = #items < total and _("书评预览") or _("书评") }
 end
 
 return Mapper
