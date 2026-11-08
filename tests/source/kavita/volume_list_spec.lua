@@ -1186,4 +1186,11 @@ Assert.not_nil(findRow(list, "继续阅读 · 第 3 卷"), "最新完成状态�
 Assert.eq(VolumeList.continueTarget(series, toc).entry.chapterId, 603,
     "对外目标和列表使用同一套 kamare 完成事实")
 
+-- 目标计算不逐卷读 resumePage（那是列表行「待同步」才需要的）。
+reset()
+st.plan = { { chapterId = 601, pages = 100, read = true, bytes = 1 } }
+VolumeList.continueTarget(series, toc)
+Assert.eq(calls.resume_page, 0, "续读目标不读 resume_page")
+
+
 return true
