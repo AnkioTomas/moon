@@ -261,6 +261,21 @@ local function rows(result, nrows)
     return out
 end
 
+--- 本系列的卷进度行（一次查询；key = stable_id）。没有行返回空表。
+---@param source_id string
+---@param series_id string|number
+---@return table<string, PendingProgress>
+function ProgressDB.list(source_id, series_id)
+    local out = {}
+    local result, nrows = DB.query(
+        "SELECT " .. COLUMNS .. " FROM pending_progress WHERE source_id=? AND stable_id LIKE ?;",
+        source_id, tostring(series_id) .. ":%")
+    for _, row in ipairs(rows(result, nrows)) do
+        out[row.stable_id] = row
+    end
+    return out
+end
+
 ---@param source_id string
 ---@return PendingProgress[]
 function ProgressDB.unsynced(source_id)
