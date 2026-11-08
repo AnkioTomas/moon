@@ -17,7 +17,6 @@ return {
     ["筛选"] = "Filters",
     ["获取验证码前请阅读并同意阅文用户服务协议和隐私政策"] = "Before requesting a code, read and agree to the Yuewen terms of service and privacy policy.",
     ["请输入验证码"] = "Enter the verification code.",
-    ["账号已变化，请重新登录"] = "The account changed. Sign in again.",
     ["起点分类响应无效"] = "Invalid Qidian category response.",
     ["起点分类条件无效"] = "Invalid Qidian category filters.",
     ["起点安全验证"] = "Qidian security verification",

@@ -6,11 +6,16 @@
 ---@diagnostic disable: undefined-field, missing-fields, param-type-mismatch
 
 local Assert = require("support.assert")
+local beginLogin = require("source.auth").beginLogin
 local Themed = require("support.theme_stubs")
 Themed.install()
 package.loaded["ui.themes.widgets.row"] = { widget = function(spec) return spec end }
 
 local cfg, saved, reloaded, callback = { usr = "old", zysid = "original" }, 0, 0, nil
+local cleared = 0
+package.loaded["source.logout"] = { row = require("source.logout").row, clear = function(_id, clear)
+    clear(); cleared = cleared + 1; return true
+end }
 local checks = {}
 package.loaded["utils.settings"] = {
     getSource = function() return cfg end,
@@ -18,6 +23,7 @@ package.loaded["utils.settings"] = {
 }
 package.loaded["source.registry"] = { reload = function() reloaded = reloaded + 1 end }
 package.loaded["source.auth"] = {
+    beginLogin = beginLogin,
     ok = function() end,
     expired = function() return false end,
 }
@@ -48,15 +54,15 @@ local Setting = require("source.ireader.setting")
 
 Setting.open()
 callback({ usr = "other", zysid = "candidate" })
-Assert.eq(cfg.usr, "old")
-Assert.eq(cfg.zysid, "original")
-Assert.eq(saved, 0)
-Assert.eq(reloaded, 0)
-Assert.eq(Themed.last("toast").text, "请先退出当前账号，再登录其他账号")
-callback({ usr = "old", zysid = "renewed" })
+Assert.eq(cfg.usr, "other")
+Assert.eq(cfg.zysid, "candidate")
+Assert.eq(cleared, 1)
+Assert.is_nil(Themed.last("confirm"))
+callback({ usr = "other", zysid = "renewed" })
 Assert.eq(cfg.zysid, "renewed")
-Assert.eq(saved, 1)
-Assert.eq(reloaded, 1)
+Assert.eq(saved, 3)
+Assert.eq(reloaded, 2)
+Assert.eq(cleared, 1, "同账号续期不清本地")
 Assert.eq(Themed.last("toast").text, "登录成功")
 
 Assert.is_true(type(Setting.browser) == "table")

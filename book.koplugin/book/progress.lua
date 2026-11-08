@@ -28,7 +28,48 @@ local ProgressDB = require("book.progress_db")
 local Progress = {
     last_revision = 0,
     sync_runs = {},
+    decisions = {},
 }
+
+---@class ProgressDecision
+---@field phase "pulling"|"choosing"|"ready"
+---@field resolved boolean|nil 本次阅读会话已经做过冲突选择
+---@field active boolean
+---@field job { cancel: fun() }|nil
+---@field dialog table|nil
+
+---@param identity BookIdentity
+---@return ProgressDecision
+function Progress.decision(identity)
+    local key = identity.source_id .. "\31" .. identity.stable_id
+    local state = Progress.decisions[key]
+    if not state then
+        state = { phase = "ready", active = true }
+        Progress.decisions[key] = state
+    end
+    return state
+end
+
+--- 发送前再查：覆盖阅读中、休眠与整源推脏，持久的未决标记也保护关书/重启后的同步。
+---@param identity BookIdentity
+---@return boolean
+function Progress.canPush(identity)
+    local state = Progress.decisions[identity.source_id .. "\31" .. identity.stable_id]
+    if state and state.phase ~= "ready" then return false end
+    local row = ProgressDB.get(identity.source_id, identity.stable_id)
+    return not row or row.decision_pending ~= 1
+end
+
+---@param identity BookIdentity
+function Progress.closeDecision(identity)
+    local key = identity.source_id .. "\31" .. identity.stable_id
+    local state = Progress.decisions[key]
+    if not state then return end
+    state.active = false
+    if state.job then state.job.cancel() end
+    if state.dialog then state.dialog:close() end
+    Progress.decisions[key] = nil
+end
 
 --- fraction 钳制到 0..1。
 ---@return number
@@ -171,6 +212,12 @@ local function syncOnce(source, opts, cb)
 
         local row = ProgressDB.get(source.id, identity.stable_id)
         if row and row.sync_status == 0 then
+            if not Progress.canPush(identity) then
+                result.deferred = (result.deferred or 0) + 1
+                logger.dbg("book.progress push deferred: decision pending", source.id, identity.stable_id)
+                nextIdentity()
+                return
+            end
             local pos = Progress.rowPosition(row)
             current_job = source:putProgressAsync(identity, pos, function(ok, err, meta)
                 current_job = nil

@@ -6,8 +6,16 @@
 ---@diagnostic disable: undefined-field, missing-fields, param-type-mismatch
 
 local Assert = require("support.assert")
+local beginLogin = require("source.auth").beginLogin
 local Json = require("support.json_stub")
 local cfg = { cookie = "csrfToken=old; session=old", logged_in = true }
+local cleared = 0
+package.loaded["source.logout"] = { clear = function(id, clear)
+    beginLogin(id)
+    clear()
+    cleared = cleared + 1
+    return true
+end }
 local fixtures, held, async, requests = {}, {}, {}, {}
 local expired = 0
 local warnings = {}
@@ -18,14 +26,17 @@ package.preload["utils.log"] = function()
         warnings[#warnings + 1] = table.concat(fields, " ")
     end }
 end
+package.loaded["utils.log"] = nil
 
 package.preload["json"] = function() return Json end
 package.preload["utils.settings"] = function()
     return { getSource = function() return cfg end, saveSource = function() end }
 end
+package.loaded["source.auth"] = nil
 package.preload["source.auth"] = function()
     return {
         ok = function() end,
+        beginLogin = beginLogin,
         expire = function(_id, message) expired = expired + 1; return message end,
     }
 end
@@ -127,6 +138,7 @@ Client.load()
 Assert.matches(Client.cookie(), "session=new")
 
 fixtures["/api/pc/user/info"] = function() return wire({ uid_hazy = "user-one" }) end
+fixtures["/"] = function() return "<html></html>" end
 local logged, login_err
 local candidate = { csrfToken = "candidate", session = "candidate-session" }
 Client.confirmLoginAsync(candidate, function(ok, err) logged, login_err = ok, err end)
@@ -137,9 +149,11 @@ Assert.eq(cfg.cookie, "csrfToken=candidate; session=candidate-session")
 
 fixtures["/api/pc/user/info"] = function() return wire({ uid_hazy = "user-two" }) end
 Client.confirmLoginAsync({ session = "other" }, function(ok, err) logged, login_err = ok, err end)
-Assert.is_nil(logged)
-Assert.eq(login_err, "请先退出当前账号，再登录其他账号")
-Assert.matches(cfg.cookie, "candidate%-session")
+Assert.is_true(logged)
+Assert.is_nil(login_err)
+Assert.eq(cfg.uid, "user-two")
+Assert.eq(cfg.cookie, "session=other")
+Assert.eq(cleared, 2, "包括旧配置缺账号标识时，直接清旧源再换号")
 
 local review_path = "/pc/ebook2/v1/comment/list"
 fixtures[review_path] = function(body)
@@ -212,3 +226,26 @@ Assert.matches(warnings[1], "GET /ebk_web/v1/get_book_info timeout")
 Assert.matches(warnings[1], "timeout_seconds")
 Assert.is_nil(warnings[1]:find("token", 1, true), "失败日志不记录查询参数或原始错误里的凭证")
 Assert.is_nil(warnings[1]:find("private-proof", 1, true))
+
+-- 校验只交回候选账号；退出使此前的提交请求失效。
+do
+    local path = "/api/pc/user/info"
+    async[path] = true
+    local before_cookie, before_uid = cfg.cookie, cfg.uid
+    local user
+    Client.checkLoginAsync({ session = "candidate" }, function(value) user = value end)
+    held[path].done(wire({ uid_hazy = "late-user" }), nil, {})
+    Assert.eq(user.uid_hazy, "late-user")
+    Assert.eq(cfg.cookie, before_cookie)
+    Assert.eq(cfg.uid, before_uid)
+    Client.confirmLoginAsync({ session = "late" }, function(ok, err) logged, login_err = ok, err end)
+    beginLogin("dedao")
+    cfg.cookie, cfg.uid, cfg.logged_in = nil, nil, nil
+    Client.reset()
+    held[path].done(wire({ uid_hazy = "late-user" }), nil, {})
+    Assert.is_nil(logged)
+    Assert.eq(login_err, "账号已变化，请重新登录")
+    Assert.is_nil(cfg.cookie)
+    Assert.is_nil(cfg.uid)
+    Assert.is_nil(cfg.logged_in)
+end

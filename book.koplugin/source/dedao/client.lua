@@ -257,6 +257,7 @@ function Client.accessTokenAsync(cb, login_jar)
 end
 
 ---@class DedaoSMSLoginSession
+---@field current fun(): boolean 本次登录尝试仍属于当前账号
 ---@field oauth string
 ---@field jar table<string, string>
 ---@field phone string
@@ -289,14 +290,17 @@ end
 ---@param cb fun(session: DedaoSMSLoginSession|nil, err: string|nil, challenge: DedaoSMSChallenge|nil)
 ---@return { cancel: fun() }
 function Client.sendCodeAsync(phone, cb)
+    local current = require("source.auth").beginLogin(SOURCE_ID)
     local login_jar = {}
     local handle = sequence()
     handle.run(Client.accessTokenAsync, function(token, err)
         if handle.cancelled then return end
+        if not current() then cb(nil, _("账号已变化，请重新登录")); return end
         if not token then cb(nil, err); return end
-        local session = { oauth = token, jar = login_jar, phone = phone }
+        local session = { oauth = token, jar = login_jar, phone = phone, current = current }
         handle.run(Client.sendSessionCodeAsync, session, nil, function(ok, reason, captcha_id)
             if handle.cancelled then return end
+            if not current() then cb(nil, _("账号已变化，请重新登录")); return end
             if captcha_id then
                 cb(nil, nil, { session = session, captcha_id = captcha_id })
                 return
@@ -309,22 +313,41 @@ function Client.sendCodeAsync(phone, cb)
 end
 
 ---@param login_jar table<string, string>
----@param cb fun(ok: boolean|nil, err: string|nil)
-function Client.confirmLoginAsync(login_jar, cb)
+---@param cb fun(user: table|nil, err: string|nil)
+function Client.checkLoginAsync(login_jar, cb)
     return call("GET", "/api/pc/user/info", nil, nil, nil, function(user, reason)
         if type(user) ~= "table" or type(user.uid_hazy) ~= "string" or user.uid_hazy == "" then
             cb(nil, reason or _("登录失败"))
             return
         end
-        local cfg = require("utils.settings").getSource(SOURCE_ID)
-        if cfg.uid and cfg.uid ~= user.uid_hazy then
-            cb(nil, _("请先退出当前账号，再登录其他账号"))
-            return
+        cb(user)
+    end, login_jar)
+end
+
+---@param login_jar table<string, string>
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@param current (fun(): boolean)|nil
+function Client.confirmLoginAsync(login_jar, cb, current)
+    current = current or require("source.auth").beginLogin(SOURCE_ID)
+    local cfg = require("utils.settings").getSource(SOURCE_ID)
+    local previous, previous_uid = cfg.cookie, cfg.uid
+    return Client.checkLoginAsync(login_jar, function(user, reason)
+        if not current() or cfg.cookie ~= previous or cfg.uid ~= previous_uid then
+            cb(nil, _("账号已变化，请重新登录")); return
         end
-        cfg.uid = user.uid_hazy
+        if not user then cb(nil, reason); return end
+        if (cfg.uid or cfg.cookie or cfg.logged_in) and cfg.uid ~= user.uid_hazy then
+            local cleared = require("source.logout").clear(SOURCE_ID, function()
+                cfg.cookie, cfg.uid, cfg.logged_in = nil, nil, nil
+                require("utils.settings").saveSource(SOURCE_ID)
+                Client.reset()
+            end)
+            if not cleared then cb(nil, _("清除本地记录失败")); return end
+        end
+        cfg.uid, cfg.logged_in = user.uid_hazy, true
         Client.persist(login_jar)
         cb(true)
-    end, login_jar)
+    end)
 end
 
 ---@param session DedaoSMSLoginSession
@@ -343,7 +366,7 @@ function Client.smsLoginAsync(session, code, cb)
         if type(data.errorMessage) == "string" and data.errorMessage ~= "" then cb(nil, data.errorMessage); return end
         handle.run(Client.confirmLoginAsync, session.jar, function(ok, reason)
             if not handle.cancelled then cb(ok, reason) end
-        end)
+        end, session.current)
     end, session.jar)
     return handle
 end

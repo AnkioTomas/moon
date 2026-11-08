@@ -328,8 +328,13 @@ local function acceptSession(session, browser, cb)
     if not session.user_id then cb(nil, _("书旗账号缺少用户编号")); return end
     local cfg = require("utils.settings").getSource(SOURCE_ID)
     if cfg.logged_in and cfg.user_id ~= session.user_id then
-        cb(nil, _("请先退出旧书旗账号再换号；退出会清除本机该源的书架、进度、笔记和缓存。"))
-        return
+        local cleared = require("source.logout").clear(SOURCE_ID, function()
+            cfg.token, cfg.user_id, cfg.name = nil, nil, nil
+            cfg.logged_in, cfg.imei, cfg.umidtoken, cfg.wua = nil, nil, nil, nil
+            require("utils.settings").saveSource(SOURCE_ID)
+            Client.reset()
+        end)
+        if not cleared then cb(nil, _("清除本地记录失败")); return end
     end
     Client.persist(session, browser)
     cb(session)

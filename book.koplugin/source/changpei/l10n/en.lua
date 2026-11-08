@@ -19,7 +19,6 @@ return {
     ["切换账号"] = "Switch account",
     ["无法确认旧账号，请先退出旧账号再登录"] = "Cannot identify the previous account. Sign out before signing in again.",
     ["本章讨论"] = "Chapter discussion",
-    ["账号已变化，请重新登录"] = "The account changed. Sign in again.",
     ["人气"] = "Popularity",
     ["连载"] = "Ongoing",
     ["滑块加载失败，请检查网络后刷新网页"] = "Could not load the slider. Check your connection and refresh the page.",

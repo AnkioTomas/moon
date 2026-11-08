@@ -65,6 +65,7 @@ local cipher = "UzX9+34+GWS32TeZD7pKPYHRf4jS1JHrdgxu4mR6gj5QxmZ0tAASG61dGrB/0C0+
 Assert.eq(Mapper.pageText(cipher), "第一段\n第二段")
 
 local settings = { cookie = "csrfToken=c; token=t", logged_in = true }
+package.loaded["source.logout"] = { clear = function(_id, clear) clear(); return true end }
 local requests = {}
 local cookies, qr_status = {}, 0
 local pages_reply, remove_reply

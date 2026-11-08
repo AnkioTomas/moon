@@ -56,13 +56,22 @@ local function expired(cookie)
     return reason
 end
 
---- 尚未核实稳定账号 ID：不同 Cookie 必须先经已有退出确认清掉旧账号数据。
-local function replacement(cookie, previous)
-    if Client.cookie() ~= previous then return _("塔读登录已改变，请重试") end
-    local old = require("source.cookie_login").parse(previous or "")
+--- 站点没有稳定账号 ID：凭据变化就直接清旧源记录。
+function Client.commitLogin(cookie, user)
+    local Settings = require("utils.settings")
+    local cfg = Settings.getSource(SOURCE_ID)
+    local old = require("source.cookie_login").parse(Client.cookie() or "")
     if old ~= "" and old ~= require("source.cookie_login").parse(cookie) then
-        return _("更换塔读登录前，请先退出旧账号；退出会清除本地阅读记录和缓存")
+        local cleared = require("source.logout").clear(SOURCE_ID, function()
+            cfg.cookie, cfg.logged_in, cfg.name = nil, nil, nil
+            cfg.read_cookie, cfg.read_cookie_for = nil, nil
+            Settings.saveSource(SOURCE_ID)
+        end)
+        if not cleared then return nil, _("清除本地记录失败") end
     end
+    cfg.cookie, cfg.logged_in, cfg.name = cookie, true, user.name
+    Settings.saveSource(SOURCE_ID)
+    return true
 end
 
 function Client.loginCheckAsync(cookie, cb)
@@ -72,8 +81,8 @@ function Client.loginCheckAsync(cookie, cb)
         if not wire then cb(false, reason); return end
         local user = Mapper.user(wire)
         if not user then cb(false, _("未登录塔读")); return end
-        reason = replacement(cookie, previous)
-        cb(reason == nil, reason)
+        if Client.cookie() ~= previous then cb(false, _("塔读登录已改变，请重试")); return end
+        cb(true, nil, user)
     end)
 end
 
@@ -135,12 +144,9 @@ function Client.exchangeAsync(wx_code, cb)
             local wire, reason = decoded(raw, err)
             local user = wire and Mapper.user(wire)
             if not user or cookie() == "" then cb(nil, reason or _("未登录塔读")); return end
-            reason = replacement(cookie(), previous)
-            if reason then cb(nil, reason); return end
-            local settings = require("utils.settings")
-            local cfg = settings.getSource(SOURCE_ID)
-            cfg.cookie, cfg.logged_in, cfg.name = cookie(), true, user.name
-            settings.saveSource(SOURCE_ID)
+            if Client.cookie() ~= previous then cb(nil, _("塔读登录已改变，请重试")); return end
+            local ok, failure = Client.commitLogin(cookie(), user)
+            if not ok then cb(nil, failure); return end
             cb(user)
         end)
     end

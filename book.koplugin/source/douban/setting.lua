@@ -32,10 +32,18 @@ local SPEC = {
     logout_text = _("确定退出豆瓣阅读账号？"),
     loggedIn = loggedIn,
     checkAsync = function(cookie, cb)
-        return require("source.douban.client").newLogin(cookie):checkCookieAsync(cb)
+        local login = require("source.douban.client").newLogin(cookie)
+        return login:checkCookieAsync(function(ok, err, user)
+            cb(ok, err, user and { user = user, login = login })
+        end)
     end,
-    store = function(cfg, _cookie)
-        cfg.cookie = require("source.douban.client").cookieFor("read.douban.com")
+    commit = function(_cookie, candidate, cb)
+        local ok, err = candidate.login:commit(candidate.user)
+        if ok then
+            require("source.auth").ok(SOURCE_ID)
+            require("source.registry").reload()
+        end
+        cb(ok == true, err)
     end,
 }
 
@@ -52,13 +60,9 @@ Setting.browser = {
             local domain = type(cookie.domain) == "string" and cookie.domain:gsub("^%.", ""):lower()
             if domain == "douban.com" or domain == "read.douban.com" then cookies[#cookies + 1] = cookie end
         end
-        CookieLogin.save(SPEC, CookieLogin.fromPayload({ cookies = cookies }, "douban.com"), cb)
+        return CookieLogin.save(SPEC, CookieLogin.fromPayload({ cookies = cookies }, "douban.com"), cb)
     end,
 }
-
-function Setting.rowTitle()
-    return _("豆瓣阅读账号")
-end
 
 ---@return string, boolean
 function Setting.rowStatus()
@@ -83,7 +87,7 @@ function Setting.rows(plugin)
             local status, status_on = Setting.rowStatus()
             return Row.widget({
                 width = iw, chevron = true, kind = "nav", icon = "account_circle",
-                title = Setting.rowTitle(),
+                title = SPEC.title,
                 subtitle = _("打开豆瓣阅读 App，扫屏幕上的二维码"),
                 status = status, status_on = status_on,
                 callback = function() Setting.open() end,

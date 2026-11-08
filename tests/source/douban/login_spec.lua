@@ -9,6 +9,10 @@ local Assert = require("support.assert")
 local Stubs = require("support.stubs")
 package.preload["json"] = function() return require("support.json_stub") end
 local cfg = { cookie = "session=old", logged_in = true, user_id = "42" }
+local cleared = 0
+package.loaded["source.logout"] = { clear = function(_id, clear)
+    clear(); cleared = cleared + 1; return true
+end }
 local requests, delayed, status, body, location = {}, false, 200, nil, nil
 local next_status
 package.preload["utils.settings"] = function()
@@ -32,7 +36,20 @@ end
 local Client = require("source.douban.client")
 Client.load()
 local ok, err
-Client.newLogin("session=pasted"):checkCookieAsync(function(value, reason) ok, err = value, reason end)
+local function signIn(cookie, cb)
+    local login = Client.newLogin(cookie)
+    return login:checkCookieAsync(function(valid, reason, user)
+        if valid then valid, reason = login:commit(user) end
+        cb(valid == true, reason)
+    end)
+end
+Client.newLogin("session=pasted"):checkCookieAsync(function(valid, reason, user)
+    Assert.is_true(valid)
+    Assert.is_nil(reason)
+    Assert.eq(user.id, "42")
+    Assert.eq(cfg.cookie, "session=old", "校验候选不写当前登录")
+end)
+signIn("session=pasted", function(value, reason) ok, err = value, reason end)
 Assert.is_true(ok)
 Assert.eq(cfg.cookie, "session=new")
 Assert.is_nil(cfg.cookie:find("Path", 1, true))
@@ -40,38 +57,39 @@ Assert.is_nil(cfg.cookie:find("HttpOnly", 1, true))
 Assert.eq(requests[1].opts.headers.Cookie, "session=pasted")
 
 body = 'Ark.user = {"id":"99","isAnonymous":false}'
-Client.newLogin("session=other"):checkCookieAsync(function(value, reason) ok, err = value, reason end)
-Assert.eq(ok, false)
-Assert.matches(err, "先退出旧账号")
-Assert.eq(cfg.user_id, "42")
+signIn("session=other", function(value, reason) ok, err = value, reason end)
+Assert.is_true(ok)
+Assert.is_nil(err)
+Assert.eq(cfg.user_id, "99")
+Assert.eq(cleared, 1)
 Assert.eq(cfg.cookie, "session=new")
 
 status, body = 0, nil
-Client.newLogin("session=bad"):checkCookieAsync(function(value, reason) ok, err = value, reason end)
+signIn("session=bad", function(value, reason) ok, err = value, reason end)
 Assert.eq(ok, false)
 Assert.eq(err, "network failed")
 Assert.eq(cfg.logged_in, true)
 
 status, location = 302, "https://untrusted.invalid/collect"
 local before = #requests
-Client.newLogin("session=bad"):checkCookieAsync(function(value, reason) ok, err = value, reason end)
+signIn("session=bad", function(value, reason) ok, err = value, reason end)
 Stubs.flush()
 Assert.eq(ok, false)
 Assert.eq(#requests, before + 1)
 Assert.eq(cfg.cookie, "session=new")
 
 status, location, next_status = 302, "https://accounts.arkread.com/oidc/login", 200
-Client.newLogin("session=bad"):checkCookieAsync(function(value, reason) ok, err = value, reason end)
+signIn("session=bad", function(value, reason) ok, err = value, reason end)
 status, location = 200, nil
 Stubs.flush()
 Assert.eq(ok, false)
 Assert.eq(cfg.cookie, "session=new")
 
 body = 'Ark.user = {"id":"","isAnonymous":false}'
-Client.newLogin("session=bad"):checkCookieAsync(function(value) ok = value end)
+signIn("session=bad", function(value) ok = value end)
 Assert.eq(ok, false)
 body = 'Ark.user = {"id":{},"isAnonymous":false}'
-Client.newLogin("session=bad"):checkCookieAsync(function(value) ok = value end)
+signIn("session=bad", function(value) ok = value end)
 Assert.eq(ok, false)
 body = nil
 
@@ -89,13 +107,22 @@ local stale = Client.newLogin("session=stale")
 stale:checkCookieAsync(function(value, reason) ok, err = value, reason end)
 local old = requests[#requests]
 delayed = false
-Client.newLogin("session=recent"):checkCookieAsync(function(value) Assert.is_true(value) end)
+signIn("session=recent", function(value) Assert.is_true(value) end)
 old.reply()
 Assert.eq(ok, false)
 Assert.eq(err, "登录状态已变化，请重试")
 Assert.eq(cfg.cookie, "session=new")
 
 cfg.user_id = nil
-Client.newLogin("session=migration"):checkCookieAsync(function(value, reason) ok, err = value, reason end)
-Assert.eq(ok, false)
-Assert.matches(err, "先退出旧账号")
+signIn("session=migration", function(value, reason) ok, err = value, reason end)
+Assert.is_true(ok)
+Assert.is_nil(err)
+Assert.eq(cfg.user_id, "42", "旧配置缺用户标识也直接换号")
+
+package.loaded["source.registry"] = { reload = function() end }
+local Setting = require("source.douban.setting")
+Setting.browser.apply({ cookies = { { domain = ".douban.com", name = "session", value = "browser" } } },
+    function(value, reason) ok, err = value, reason end)
+Assert.is_true(ok, "浏览器校验与提交分阶段，不误判正常登录为账号已变化")
+Assert.is_nil(err)
+Assert.eq(cfg.user_id, "42")

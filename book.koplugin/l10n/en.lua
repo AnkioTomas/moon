@@ -1,4 +1,6 @@
 return {
+    ["等待选择阅读进度"] = "Waiting for a reading position choice",
+    ["账号已变化，请重新登录"] = "The account has changed. Please sign in again",
     ["标签"] = "Tags",
     ["生活"] = "Slice of life",
     ["阅读样式菜单兼容补丁安装失败：%1"] = "Could not install the reading style menu compatibility patch: %1",

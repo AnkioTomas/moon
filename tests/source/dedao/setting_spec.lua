@@ -5,6 +5,7 @@
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, param-type-mismatch
 local Assert = require("support.assert")
+local beginLogin = require("source.auth").beginLogin
 local Theme = require("support.theme_stubs")
 Theme.install()
 local Input = require("ui.themes.widgets.input")
@@ -27,7 +28,10 @@ package.preload["utils.settings"] = function()
     }
 end
 package.preload["source.registry"] = function() return { reload = function() reloads = reloads + 1 end } end
-package.preload["source.auth"] = function() return { ok = function(_id) accepted = accepted + 1 end } end
+package.loaded["source.auth"] = nil
+package.preload["source.auth"] = function()
+    return { beginLogin = beginLogin, ok = function(_id) accepted = accepted + 1 end }
+end
 package.preload["ui/network/manager"] = function()
     return { runWhenConnected = function(_network, cb) cb() end }
 end
@@ -113,9 +117,9 @@ package.preload["source.dedao.client"] = function()
     return {
         loggedIn = function() return cfg.logged_in == true and cfg.cookie ~= nil end,
         reset = function() end,
-        confirmLoginAsync = function(jar, cb)
+        checkLoginAsync = function(jar, cb)
             cookie_calls[#cookie_calls + 1] = jar
-            cb(true)
+            cb({ uid_hazy = "browser-account" })
             return { cancel = function() end }
         end,
         sendCodeAsync = function(_phone, cb)

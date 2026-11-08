@@ -6,13 +6,18 @@
 ---@diagnostic disable: undefined-field, missing-fields, param-type-mismatch
 
 local Assert = require("support.assert")
+local beginLogin = require("source.auth").beginLogin
 local Themed = require("support.theme_stubs")
 Themed.install()
 local cfg, online, pending, cancelled, stored = {}, true, nil, false, 0
+local cleared = 0
+package.loaded["source.logout"] = { clear = function(_id, clear)
+    clear(); cleared = cleared + 1; return true
+end }
 local cookie_pending, cookie_cancelled, cookie_async
 package.loaded["utils.settings"] = { getSource = function() return cfg end, saveSource = function() end }
 package.loaded["source.registry"] = { reload = function() end }
-package.loaded["source.auth"] = { ok = function() end }
+package.loaded["source.auth"] = { beginLogin = beginLogin, ok = function() end }
 package.loaded["ui/network/manager"] = { isConnected = function() return online end }
 local App = {
     loginAsync = function(_account, password, _verify, cb)
@@ -52,11 +57,13 @@ local result, reason
 cfg.cookie = "sid=old"
 Setting.browser.apply({ cookies = { { domain = ".jjwxc.com", name = "sid", value = "new" } } },
     function(ok, err) result, reason = ok, err end)
-Assert.is_false(result)
-Assert.eq(reason, "无法确认旧账号，请先退出旧账号再登录")
-Assert.eq(cfg.cookie, "sid=old")
+Assert.is_true(result)
+Assert.is_nil(reason)
+Assert.eq(cfg.cookie, "sid=new")
+Assert.eq(cleared, 1)
+Assert.is_nil(Themed.last("confirm"))
 cfg.token = nil
-Setting.browser.apply({ cookies = { { domain = ".jjwxc.com", name = "sid", value = "old" } } },
+Setting.browser.apply({ cookies = { { domain = ".jjwxc.com", name = "sid", value = "new" } } },
     function(ok) result = ok end)
 Assert.is_true(result, "同一 Cookie 重新校验不清库")
 

@@ -1635,7 +1635,6 @@ do
     local connected = true
     local active = {
         identity = { source_id = "wechat", stable_id = "page-sync" },
-        progress_sync_ready = false,
     }
     local saves, scheduled, ticks, sync_callbacks = 0, {}, {}, {}
     local cancelled = 0
@@ -1651,6 +1650,8 @@ do
         nextTick = function(_, fn) ticks[#ticks + 1] = fn end,
     }
     Session.current = function() return active end
+    local decision = require("book.progress").decision(active.identity)
+    decision.phase = "pulling"
     Network.isConnected = function() return connected end
     package.loaded["reader.session.progress"] = {
         save = function(_snapshot, cb)
@@ -1675,7 +1676,7 @@ do
     Assert.eq(saves, 1)
     Assert.eq(#scheduled, 0, "开书进度尚未决议时不能推送")
 
-    active.progress_sync_ready = true
+    decision.phase = "ready"
     src:onEvent("page_changed", event)
     src:onEvent("page_changed", event)
     Assert.eq(saves, 3)
@@ -1710,6 +1711,7 @@ do
     package.loaded["reader.session.progress"] = old_progress
     package.loaded["ui/uimanager"] = old_uimanager
     existing_progress = nil
+    require("book.progress").closeDecision(active.identity)
 end
 
 -- 阅读会话启动 Web 在读心跳，零时长且停读后不再续发。
@@ -1725,7 +1727,6 @@ do
     local old_report = fake_client.reportReadAsync
     local active = {
         identity = { source_id = "wechat", stable_id = "presence" },
-        progress_sync_ready = true,
     }
     local scheduled, sent = {}, {}
     Session.current = function() return active end

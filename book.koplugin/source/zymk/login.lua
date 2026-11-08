@@ -66,7 +66,11 @@ function Login:confirm(fields, cb)
             cb(nil, _("登录响应无效")); return
         end
         if self.previous and (self.previous.openid ~= account.openid or self.previous.type ~= account.type) then
-            cb(nil, _("请先退出旧知音漫客账号，再登录其他账号")); return
+            local cleared = require("source.logout").clear("zymk", function()
+                Settings.getSource("zymk").account = nil
+                Settings.saveSource("zymk")
+            end)
+            if not cleared then cb(nil, _("清除本地记录失败")); return end
         end
         Settings.getSource("zymk").account = account
         Settings.saveSource("zymk")

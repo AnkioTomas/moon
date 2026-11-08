@@ -19,67 +19,11 @@ local function loggedIn()
     return require("source.changpei.client").cookie() ~= nil
 end
 
-local function commit(cookie, account, cb)
-    local Settings = require("utils.settings")
-    local cfg = Settings.getSource(SOURCE_ID)
-    local previous, previous_id = cfg.cookie, cfg.account_id
-    local cancelled, job, dialog = false, nil, nil
-    local function save(switching)
-        if cancelled then return end
-        if cfg.cookie ~= previous then cb(false, _("账号已变化，请重新登录")); return end
-        if switching then
-            local snapshot = require("reader.session").current()
-            if snapshot and snapshot.identity and snapshot.identity.source_id == SOURCE_ID then snapshot.ui:onClose() end
-            require("source.logout").abort(SOURCE_ID)
-            cfg.cookie = nil
-            Settings.saveSource(SOURCE_ID, cfg)
-            require("source.registry").invalidate()
-            if not require("book.store").forgetSource(SOURCE_ID) then
-                cfg.cookie = previous
-                Settings.saveSource(SOURCE_ID, cfg)
-                require("source.registry").reload()
-                cb(false, _("清除本地记录失败")); return
-            end
-        end
-        cfg.cookie, cfg.account_id = cookie, tostring(account.uid)
-        Settings.saveSource(SOURCE_ID, cfg)
-        require("source.auth").ok(SOURCE_ID)
-        require("source.registry").reload()
-        cb(true)
-    end
-    local function compare(id)
-        if tostring(id) == tostring(account.uid) then save(false); return end
-        dialog = require("ui.themes.widgets.confirm"):new{
-            text = _("切换长佩账号会清除这台设备上长佩的书架、阅读进度、笔记和缓存，包括尚未同步的记录。不会删除远端书架。确定继续？"),
-            ok_text = _("切换账号"),
-            ok_callback = function() save(true) end,
-            cancel_callback = function() if not cancelled then cb(false, _("已取消登录")) end end,
-        }
-        dialog:show()
-    end
+local function commit(cookie, account, cb, current)
     if not account or not tonumber(account.uid) or tonumber(account.uid) <= 0 then
-        cb(false, _("长佩账号标识缺失"))
-    elseif not previous or previous == cookie then
-        save(false)
-    elseif previous_id then
-        compare(previous_id)
-    else
-        local pending = true
-        local initial = require("source.changpei.client").userAsync(previous, function(old_account, err)
-            pending = false
-            if cancelled then return end
-            if not old_account then
-                cb(false, _("无法确认旧账号，请先退出旧账号再登录") .. (err and ("：" .. err) or "")); return
-            end
-            compare(old_account.uid)
-        end)
-        if pending then job = initial end
+        cb(false, _("长佩账号标识缺失")); return
     end
-    return { cancel = function()
-        cancelled = true
-        if job then job.cancel() end
-        if dialog then dialog:close() end
-    end }
+    return CookieLogin.commitAccount(SOURCE_ID, cookie, tostring(account.uid), cb, current)
 end
 
 ---@type CookieLoginSpec

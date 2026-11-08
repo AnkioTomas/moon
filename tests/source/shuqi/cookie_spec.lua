@@ -10,6 +10,10 @@ local Themed = require("support.theme_stubs")
 Themed.install()
 package.loaded["json"] = JSON
 local cfg, requests = {}, {}
+local cleared = 0
+package.loaded["source.logout"] = { row = require("source.logout").row, clear = function(_id, clear)
+    clear(); cleared = cleared + 1; return true
+end }
 package.loaded["utils.settings"] = { getSource = function() return cfg end, saveSource = function() end }
 package.loaded["http.request"] = {
     get = function(url, opts, cb)
@@ -82,9 +86,10 @@ Assert.eq(cfg.token, "latest")
 Assert.eq(reason, "登录状态已变化，请重试")
 Client.loginCookieAsync("shuqi_user_id=8; shuqi_token=other", function(value, err) result, reason = value, err end)
 requests[#requests].cb(JSON.encode({ status = 200, data = { ["8"] = { userId = 8 } } }))
-Assert.is_nil(result)
-Assert.matches(reason, "请先退出旧书旗账号")
-Assert.eq(cfg.token, "latest")
+Assert.is_true(result ~= nil)
+Assert.is_nil(reason)
+Assert.eq(cfg.token, "other")
+Assert.eq(cleared, 1)
 
 local reloaded = 0
 package.loaded["source.auth"] = { ok = function() end, expired = function() return false end }

@@ -9,7 +9,6 @@ return {
     ["分类书库"] = "Category library",
     ["无法确认旧账号，请先退出旧账号再登录"] = "Cannot identify the previous account. Sign out before signing in again.",
     ["本章讨论"] = "Chapter discussion",
-    ["账号已变化，请重新登录"] = "The account changed. Sign in again.",
     ["原创"] = "Original",
     ["频道"] = "Channel",
     ["章节评论"] = "Chapter comments",

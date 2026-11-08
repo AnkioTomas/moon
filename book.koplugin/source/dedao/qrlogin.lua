@@ -78,7 +78,7 @@ function QRLogin:_poll(gen, oauth, code, polls)
                 self.dialog = nil
                 if dialog then dialog:close() end
                 self.on_user()
-            end)
+            end, self.current)
             if confirming then self.job = confirm end
             return
         end
@@ -96,6 +96,8 @@ end
 function QRLogin:start()
     self:cancel()
     local gen = self.generation
+    local current = require("source.auth").beginLogin("dedao")
+    self.current = function() return gen == self.generation and current() end
     self.jar = {}
     local pending = true
     local initial = Client.accessTokenAsync(function(oauth, err)

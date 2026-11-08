@@ -12,6 +12,10 @@ local Themed = require("support.theme_stubs")
 Themed.install()
 package.loaded["json"] = JSON
 local cfg, requests, reloads, expired, connected = {}, {}, 0, false, true
+local cleared = 0
+package.loaded["source.logout"] = { clear = function(_id, clear)
+    clear(); cleared = cleared + 1; return true
+end }
 local synchronous
 package.loaded["utils.settings"] = { getSource = function() return cfg end, saveSource = function() end }
 package.loaded["source.registry"] = { reload = function() reloads = reloads + 1 end }
@@ -94,8 +98,9 @@ Assert.eq(reason, "登录响应无效")
 Assert.eq(cfg.account, previous)
 Login.new():confirm({ type = "mkxq", token = "other" }, done)
 requests[#requests].cb(JSON.encode({ status = 0, data = { openid = "account-b", type = "mkxq" } }))
-Assert.eq(reason, "请先退出旧知音漫客账号，再登录其他账号")
-Assert.eq(cfg.account, previous)
+Assert.is_nil(reason)
+Assert.eq(cfg.account.openid, "account-b")
+Assert.eq(cleared, 1)
 local stale = Login.new()
 stale:confirm({ type = "mkxq", token = "old" }, done)
 cfg.account = nil

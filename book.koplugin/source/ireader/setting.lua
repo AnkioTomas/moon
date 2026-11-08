@@ -52,7 +52,11 @@ local function commitUser(user)
     local settings = require("utils.settings")
     local cfg = settings.getSource(SOURCE_ID)
     if cfg.usr and cfg.usr ~= "" and cfg.usr ~= user.usr then
-        return false, _("请先退出当前账号，再登录其他账号")
+        local cleared = require("source.logout").clear(SOURCE_ID, function()
+            cfg.usr, cfg.zysid, cfg.name, cfg.avatar = nil, nil, nil, nil
+            settings.saveSource(SOURCE_ID)
+        end)
+        if not cleared then return false, _("清除本地记录失败") end
     end
     cfg.usr = user.usr
     cfg.zysid = user.zysid
@@ -72,10 +76,6 @@ local function save(user)
         return
     end
     require("ui.themes.widgets.toast"):new{ text = _("登录成功"), timeout = 2 }:show()
-end
-
-function Setting.rowTitle()
-    return _("掌阅账号")
 end
 
 ---@return string, boolean
@@ -133,7 +133,7 @@ Setting.browser = {
     icon = "https://static-efe-front-h.zhangyuecdn.com/sfm-production/logos/bf7fe8aa-35e2-4961-9e1a-e2a095950ff2.png",
     isAuthorized = function() return CookieLogin.authorized(SPEC) end,
     apply = function(payload, cb)
-        CookieLogin.save(SPEC, cookieFromPayload(payload), cb)
+        return CookieLogin.save(SPEC, cookieFromPayload(payload), cb)
     end,
 }
 
@@ -145,7 +145,7 @@ function Setting.rows()
             local status, status_on = Setting.rowStatus()
             return Row.widget({
                 width = iw, chevron = true, kind = "nav", icon = "account_circle",
-                title = Setting.rowTitle(),
+                title = _("掌阅账号"),
                 subtitle = _("在掌阅 App「我的」页右上角使用扫一扫"),
                 status = status, status_on = status_on,
                 callback = function() Setting.open() end,

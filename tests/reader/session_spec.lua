@@ -11,6 +11,7 @@ Stubs.install()
 Stubs.reset()
 
 local calls = { tracker = {}, progress = {}, chapter = {}, reader = {}, book = {} }
+local progress_saves = 0
 -- KOReader 全局设置桩：repairMetadataArc 读写
 local ko_settings, ko_deleted = {}, {}
 _G.G_reader_settings = {
@@ -199,7 +200,10 @@ end
 
 package.preload["reader.session.progress"] = function()
     return {
-        save = function(_, cb) if cb then cb(true) end end,
+        save = function(_snapshot, cb)
+            progress_saves = progress_saves + 1
+            if cb then cb(true) end
+        end,
         pull = function(snapshot)
             calls.progress[#calls.progress + 1] = { "pull", snapshot and snapshot.identity }
         end,
@@ -652,6 +656,20 @@ do
     Assert.eq(emitted[#emitted].ev, "reading_resumed")
     Assert.eq(emitted[#emitted].payload.identity.stable_id, "b1")
     Assert.not_nil(emitted[#emitted].payload.position)
+
+    local progress = require("book.progress")
+    local decision = progress.decision(cur.identity)
+    decision.phase = "choosing"
+    local saves_before = #calls.progress
+    local saved_before = progress_saves
+    Session.onSuspend(plugin)
+    local pushed = false
+    for index = saves_before + 1, #calls.progress do
+        if calls.progress[index][1] == "sync" then pushed = true end
+    end
+    Assert.is_true(progress_saves > saved_before, "未决时休眠仍保存本地进度")
+    Assert.is_false(pushed, "休眠不替用户选择本地，也不上推")
+    decision.phase = "ready"
 
     -- 关文档：推进度/结清/通知源/清会话（真关书还会清进度冲突记忆）
     defer_tracker_stop = true

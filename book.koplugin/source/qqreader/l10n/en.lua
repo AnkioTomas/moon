@@ -4,7 +4,6 @@ return {
     ["切换账号"] = "Switch account",
     ["无法确认旧账号，请先退出旧账号再登录"] = "Cannot identify the previous account. Sign out before signing in again.",
     ["筛选"] = "Filters",
-    ["账号已变化，请重新登录"] = "The account changed. Sign in again.",
     ["连载"] = "Ongoing",
     ["扫码登录"] = "Sign in with QR code",
     ["扫了还是进不去，就改用浏览器，按下面做："] = "If scanning still does not get you in, use a browser and follow the steps below:",

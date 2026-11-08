@@ -44,7 +44,11 @@ local SPEC = {
         local Settings = require("utils.settings")
         local cfg = Settings.getSource(SOURCE_ID)
         if (cfg.cookie or cfg.token) and cfg.cookie ~= cookie then
-            return cb(false, _("无法确认旧账号，请先退出旧账号再登录"))
+            local cleared = require("source.logout").clear(SOURCE_ID, function()
+                cfg.cookie, cfg.token, cfg.account, cfg.password, cfg.protocol = nil, nil, nil, nil, nil
+                Settings.saveSource(SOURCE_ID)
+            end)
+            if not cleared then return cb(false, _("清除本地记录失败")) end
         end
         cfg.cookie, cfg.protocol = cookie, "web"
         Settings.saveSource(SOURCE_ID)
@@ -171,10 +175,7 @@ function showLogin(account, password, verify)
     end
     local cfg = require("utils.settings").getSource(SOURCE_ID)
     local previous_cookie, previous_token = cfg.cookie, cfg.token
-    if previous_cookie or previous_token then
-        Toast:new{ text = _("无法确认旧账号，请先退出旧账号再登录"), timeout = 3 }:show()
-        return
-    end
+    local current = require("source.auth").beginLogin(SOURCE_ID)
     local cancelled, job = false, nil
     local waiting = require("ui.themes.widgets.progress_dialog"):new{
         title = _("晋江账号"), text = _("正在登录…"), dismissable = false,
@@ -187,9 +188,16 @@ function showLogin(account, password, verify)
     job = require("source.jjwxc.protocols.app").loginAsync(account, password, verify, function(token, err, kind)
         if cancelled then return end
         waiting:close()
-        if cfg.cookie ~= previous_cookie or cfg.token ~= previous_token then
+        if not current() or cfg.cookie ~= previous_cookie or cfg.token ~= previous_token then
             Toast:new{ text = _("账号已变化，请重新登录"), timeout = 3 }:show()
         elseif token then
+            if cfg.cookie or (cfg.token and cfg.account ~= account) then
+                local cleared = require("source.logout").clear(SOURCE_ID, function()
+                    cfg.cookie, cfg.token, cfg.account, cfg.password, cfg.protocol = nil, nil, nil, nil, nil
+                    require("utils.settings").saveSource(SOURCE_ID)
+                end)
+                if not cleared then Toast:new{ text = _("清除本地记录失败"), timeout = 3 }:show(); return end
+            end
             saveToken(account, password, token)
             Toast:new{ text = _("登录成功"), timeout = 2 }:show()
         elseif kind == "verify" then
@@ -222,8 +230,7 @@ end
 --- 登录失效时的操作说明：账号密码和浏览器 Cookie 两条都写清。
 ---@return string
 function Setting.expired()
-    return _("无法确认旧账号，请先退出旧账号再登录") .. "\n\n"
-        .. _("你在晋江用的是哪种登录，就做哪种。") .. "\n\n"
+    return _("你在晋江用的是哪种登录，就做哪种。") .. "\n\n"
         .. _("账号和密码：点这个提示上的「重新登录」。没有这个按钮的话，打开「设置 → 书库 → 账号 → 晋江文学城 → 晋江账号」。填笔名、邮箱或手机号，再填密码，点「登录」。要验证码就点「发到手机」或「发到邮箱」，把验证码填进去，再点「验证并登录」。")
         .. "\n\n" .. require("source.cookie_login").relogin(_("晋江文学城"), "https://m.jjwxc.com/my/login")
         .. "\n\n" .. _("不想装扩展、平时用的是网页 Cookie：打开「设置 → 书库 → 账号 → 晋江文学城 → 晋江账号」，点「用 Cookie 登录」。Cookie 这样复制：电脑登录后按 F12，点「网络」，刷新，点任意一条请求，复制「请求标头」里的整段 Cookie，贴进去点「登录」。")

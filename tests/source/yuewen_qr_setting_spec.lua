@@ -5,6 +5,7 @@
 --]]
 
 local Assert = require("support.assert")
+local beginLogin = require("source.auth").beginLogin
 local Themed = require("support.theme_stubs")
 Themed.install()
 package.preload["ui.themes.widgets.row"] = function()
@@ -24,8 +25,9 @@ package.preload["utils.settings"] = function()
         saveSource = function(id) saved_id = id end,
     }
 end
+package.loaded["source.auth"] = nil
 package.preload["source.auth"] = function()
-    return { ok = function(id) authorized = id end, expired = function() return false end }
+    return { beginLogin = beginLogin, ok = function(id) authorized = id end, expired = function() return false end }
 end
 package.preload["source.registry"] = function()
     return { reload = function() reloads = reloads + 1 end }

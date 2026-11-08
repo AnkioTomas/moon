@@ -18,10 +18,11 @@ waitState() {
     while [ "$(lipc-get-prop com.lab126.powerd state)" != "$1" ] && [ $i -lt 20 ]; do sleep 1; i=$((i+1)); done
     echo "state $1 after $i s"
 }
-P=$(awk '{print $4}' /proc/$(pgrep -o reader.lua)/stat)
+READER=$(pgrep -o reader.lua) || exit 1
+P=$(awk '{print $4}' /proc/$READER/stat)
 lipc-set-prop -i com.lab126.powerd powerButton 1; waitState screenSaver; sleep 3
 lipc-set-prop -i com.lab126.powerd powerButton 1; waitState active; sleep 3
-killall -TERM reader.lua
+kill -TERM "$READER"
 i=0; while [ -d /proc/$P ] && [ $i -lt 60 ]; do sleep 1; i=$((i+1)); done
 echo "old exited after $i s"
 # /mnt/us 是 FUSE（fsp），唤醒 + 原生框架恢复期间会短暂 Stale file handle。

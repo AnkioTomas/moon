@@ -618,21 +618,26 @@ end
 
 function Login:commit(user)
     if self.cancelled or self.epoch ~= login_epoch then return nil, _("登录状态已变化，请重试") end
+    if not Client.cookieFor(READ_HOST, self) then return nil, _("登录失败") end
     local cfg = require("utils.settings").getSource(SOURCE_ID)
     if (cfg.logged_in or cfg.cookie or cfg.user_id) and cfg.user_id ~= user.id then
-        return nil, _("切换豆瓣阅读账号前，请先退出旧账号；退出会清理该源的本地书架和阅读记录")
+        local cleared = require("source.logout").clear(SOURCE_ID, function()
+            cfg.cookie, cfg.user_id, cfg.name, cfg.logged_in = nil, nil, nil, nil
+            require("utils.settings").saveSource(SOURCE_ID)
+            Client.reset()
+        end)
+        if not cleared then return nil, _("清除本地记录失败") end
     end
-    if not Client.cookieFor(READ_HOST, self) then return nil, _("登录失败") end
     persist(user, self)
     return true
 end
 
 function Login:checkCookieAsync(cb)
     return follow(READ .. "/", 0, function(html, err, final_url)
+        if self.cancelled or self.epoch ~= login_epoch then cb(false, _("登录状态已变化，请重试")); return end
         local user = html and hostOf(final_url) == READ_HOST and Mapper.user(html)
         if not user then cb(false, err or _("登录失败")); return end
-        local ok, reason = self:commit(user)
-        cb(ok == true, reason)
+        cb(true, nil, user)
     end, self)
 end
 

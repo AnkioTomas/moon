@@ -9,6 +9,10 @@ local Assert = require("support.assert")
 local JSON = require("support.json_stub")
 package.loaded["json"] = JSON
 local cfg, requests, saved = {}, {}, 0
+local cleared = 0
+package.loaded["source.logout"] = { clear = function(_id, clear)
+    clear(); cleared = cleared + 1; return true
+end }
 package.loaded["utils.settings"] = {
     getSource = function() return cfg end,
     saveSource = function() saved = saved + 1 end,
@@ -53,23 +57,24 @@ Assert.eq(saved, 1)
 
 cfg.cookie = "session=old"
 Client.exchangeAsync("test", function(value, err) result, reason = value, err end)
-Assert.is_nil(result)
-Assert.matches(reason, "先退出旧账号")
-Assert.eq(cfg.cookie, "session=old")
-Assert.eq(saved, 1)
+Assert.is_true(result ~= nil)
+Assert.is_nil(reason)
+Assert.eq(cfg.cookie, "session=new")
+Assert.eq(cleared, 1)
+Assert.eq(saved, 3)
 
 mode = "redirect"
 Client.exchangeAsync("test", function(value, err) result, reason = value, err end)
 Assert.is_nil(result)
 Assert.eq(reason, "塔读登录回调无效")
-Assert.eq(cfg.cookie, "session=old")
+Assert.eq(cfg.cookie, "session=new")
 
 mode = "delayed"
 Client.loginCheckAsync("session=old", function(value, err) result, reason = value, err end)
 requests[#requests].cb(nil, "network down")
 Assert.eq(result, false)
 Assert.eq(reason, "network down")
-Assert.eq(cfg.cookie, "session=old")
+Assert.eq(cfg.cookie, "session=new")
 
 Client.loginCheckAsync("session=old", function(value, err) result, reason = value, err end)
 cfg.cookie = "session=changed"

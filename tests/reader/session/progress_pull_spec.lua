@@ -17,6 +17,7 @@ local pending_row
 local live_xpointer -- 测试桩会话的 rolling.xpointer（页级源无进度行时的本地位置）
 local precise_document
 local goto_calls = {}
+local live_snapshot = {}
 local current_identity = {
     source_id = "wechat",
     stable_id = "b1",
@@ -53,13 +54,14 @@ package.preload["reader.session"] = function()
                 and id.chapter_idx == current_identity.chapter_idx
         end,
         current = function()
-            return {
-                identity = current_identity,
-                ui = { document = precise_document or { getPageCount = function() return 10 end }, handleEvent = function() end,
-                    rolling = live_xpointer and { xpointer = live_xpointer } },
-                chapter = { toc = { {}, {}, {}, {}, {} } },
-                doc_fraction = 0,
+            live_snapshot.identity = current_identity
+            live_snapshot.ui = {
+                document = precise_document or { getPageCount = function() return 10 end },
+                handleEvent = function() end, rolling = live_xpointer and { xpointer = live_xpointer },
             }
+            live_snapshot.chapter = { toc = { {}, {}, {}, {}, {} } }
+            live_snapshot.doc_fraction = 0
+            return live_snapshot
         end,
         chapterTitle = function() return "" end,
         gotoChapter = function(idx, opts)
@@ -86,6 +88,10 @@ package.preload["book.progress_db"] = function()
             return true
         end,
         adoptRemote = function(_, _, pos) adopted[#adopted + 1] = pos; return true end,
+        setDecisionPending = function(_source_id, _stable_id, pending)
+            if pending_row then pending_row.decision_pending = pending and 1 or 0 end
+            return true
+        end,
     }
 end
 
@@ -166,11 +172,16 @@ do
     Progress.pull(snapshot())
     Stubs.flush()
     Assert.len(shown, 1)
+    Assert.is_false(require("book.progress").canPush(current_identity))
+    local before = pulled
     Progress.pull(snapshot())
     Stubs.flush()
     Assert.len(shown, 1, "未答的冲突框不能叠窗")
+    Assert.eq(pulled, before, "未答时不能重新拉取并解锁")
+    Assert.is_false(require("book.progress").canPush(current_identity))
     shown[1].ok_callback()
     Stubs.flush()
+    Assert.is_true(require("book.progress").canPush(current_identity), "选择后才允许上推")
     shown = {}
     Progress.pull(snapshot())
     Stubs.flush()
@@ -606,8 +617,13 @@ Stubs.flush()
 Assert.len(shown, 1, "自动拉取每会话只问一次")
 Progress.pull(snapshot(), { manual = true })
 Stubs.flush()
-Assert.len(shown, 2, "手动拉取重新询问")
+Assert.len(shown, 1, "手动拉取也不能解锁或叠加未答的冲突窗")
+shown[1].cancel_callback()
+Progress.pull(snapshot(), { manual = true })
+Stubs.flush()
+Assert.len(shown, 2, "已决议之后，手动拉取重新询问")
 Assert.matches(shown[2].text, "云端")
+shown[2].cancel_callback()
 
 local function lastText()
     Stubs.flush()

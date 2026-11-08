@@ -28,10 +28,6 @@ local function save(user)
     require("ui.themes.widgets.toast"):new{ text = _("登录成功"), timeout = 2 }:show()
 end
 
-function Setting.rowTitle()
-    return _("塔读账号")
-end
-
 ---@return string, boolean
 function Setting.rowStatus()
     local on = loggedIn()
@@ -52,7 +48,10 @@ local SPEC = {
     logout_text = _("确定退出塔读账号？"),
     loggedIn = loggedIn,
     checkAsync = require("source.tadu.client").loginCheckAsync,
-    store = function(cfg, cookie) cfg.cookie, cfg.logged_in = cookie, true end,
+    commit = function(cookie, user, cb)
+        local ok, err = require("source.tadu.client").commitLogin(cookie, user)
+        cb(ok == true, err)
+    end,
     clear = function(cfg)
         cfg.cookie, cfg.logged_in, cfg.name = nil, nil, nil
         cfg.read_cookie, cfg.read_cookie_for = nil, nil
@@ -65,7 +64,7 @@ Setting.browser = {
     icon = "https://media3.tadu.com/web_dubbo_static/images/tadu.ico",
     isAuthorized = function() return CookieLogin.authorized(SPEC) end,
     apply = function(payload, cb)
-        CookieLogin.save(SPEC, CookieLogin.fromPayload(payload, "tadu.com"), cb)
+        return CookieLogin.save(SPEC, CookieLogin.fromPayload(payload, "tadu.com"), cb)
     end,
 }
 
@@ -77,7 +76,7 @@ function Setting.rows()
             local status, status_on = Setting.rowStatus()
             return Row.widget({
                 width = iw, chevron = true, kind = "nav", icon = "account_circle",
-                title = Setting.rowTitle(),
+                title = _("塔读账号"),
                 subtitle = _("打开微信，扫屏幕上的二维码"),
                 status = status, status_on = status_on,
                 callback = function() Setting.open() end,

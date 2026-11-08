@@ -160,12 +160,17 @@ function Login:accept(account, cb)
         cb(nil, _("登录状态已变化，请重试"))
         return
     end
-    if self.previous_id and tostring(self.previous_id) ~= account.user_id then
-        cb(nil, _("请先退出旧快看账号，再登录其他账号"))
-        return
-    end
     local cookie = self:cookie(Client.ACCOUNT_URL)
     if cookie == "" then cb(nil, _("没有读到 Cookie")); return end
+    if (self.previous_id and tostring(self.previous_id) ~= account.user_id)
+        or (not self.previous_id and self.previous_cookie and cookie ~= CookieLogin.parse(self.previous_cookie)) then
+        local cleared = require("source.logout").clear("kuaikan", function()
+            cfg.cookie, cfg.user_id, cfg.logged_in = nil, nil, nil
+            Client.login_revision = Client.login_revision + 1
+            settings.saveSource("kuaikan")
+        end)
+        if not cleared then cb(nil, _("清除本地记录失败")); return end
+    end
     cfg.cookie, cfg.user_id, cfg.logged_in = cookie, account.user_id, true
     settings.saveSource("kuaikan")
     Client.login_revision = Client.login_revision + 1
@@ -179,23 +184,6 @@ function Login:confirm(cb)
     self:request(Client.ACCOUNT_URL, function(raw, err, res)
         local account, reason = Client.accountResponse(raw, err, res)
         if not account then cb(nil, reason); return end
-        local old = CookieLogin.parse(self.previous_cookie or "")
-        if not self.previous_id and old ~= "" and old ~= self:cookie(Client.ACCOUNT_URL) then
-            self:request(Client.ACCOUNT_URL, function(old_raw, old_err, old_res)
-                local previous, why, expired = Client.accountResponse(old_raw, old_err, old_res)
-                if not previous and not expired then cb(nil, why); return end
-                if not previous then
-                    cb(nil, _("旧快看账号身份无法确认，请先退出旧登录后重试"))
-                    return
-                end
-                if previous and previous.user_id ~= account.user_id then
-                    cb(nil, _("请先退出旧快看账号，再登录其他账号"))
-                    return
-                end
-                self:accept(account, cb)
-            end, old)
-            return
-        end
         self:accept(account, cb)
     end)
 end

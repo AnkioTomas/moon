@@ -132,7 +132,7 @@ local function pushPageProgress(self, identity)
             local current = require("reader.session").current()
             if not current or not isCurrentBook(current, identity) then
                 pushPageProgress(self, identity)
-            elseif current.progress_sync_ready ~= false then
+            elseif require("book.progress").canPush(identity) then
                 schedulePageProgressSync(self, identity)
             end
         end)
@@ -151,7 +151,7 @@ schedulePageProgressSync = function(self, identity)
         self._page_sync_timer = nil
         local Session = require("reader.session")
         local session = Session.current()
-        if not isCurrentBook(session, identity) or session.progress_sync_ready == false
+        if not isCurrentBook(session, identity) or not require("book.progress").canPush(identity)
             or not require("ui/network/manager"):isConnected() then
             return
         end
@@ -252,7 +252,7 @@ local function beatPresence(self, presence)
         stopPresence(self)
         return
     end
-    if session.progress_sync_ready == false then
+    if not require("book.progress").canPush(presence.identity) then
         schedule()
         return
     end
@@ -349,7 +349,7 @@ function Source:onEvent(event, payload)
         end
         if self._presence then touchPresence(self, identity, payload.position) end
         require("reader.session.progress").save(session, function(ok)
-            if ok and session.progress_sync_ready ~= false
+            if ok and require("book.progress").canPush(identity)
                 and require("ui/network/manager"):isConnected() then
                 schedulePageProgressSync(self, identity)
             end

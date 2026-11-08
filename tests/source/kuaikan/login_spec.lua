@@ -10,6 +10,10 @@ local JSON = require("support.json_stub")
 local Text = require("utils.text")
 package.loaded["json"] = JSON
 local cfg, requests, saves = {}, {}, 0
+local cleared = 0
+package.loaded["source.logout"] = { clear = function(_id, clear)
+    clear(); cleared = cleared + 1; return true
+end }
 package.loaded["utils.settings"] = {
     getSource = function() return cfg end,
     saveSource = function() saves = saves + 1 end,
@@ -64,8 +68,9 @@ for _idx, response in ipairs({
 end
 session, request = cookie("sid=other")
 request.cb(account(8))
-Assert.matches(reason, "请先退出旧快看账号")
-Assert.eq(cfg.user_id, "7")
+Assert.is_nil(reason)
+Assert.eq(cfg.user_id, "8")
+Assert.eq(cleared, 1)
 
 local calls = 0
 session = Login.new()
@@ -75,7 +80,7 @@ session:cancel()
 Assert.is_true(request.cancelled)
 request.cb(account(7))
 Assert.eq(calls, 0)
-Assert.eq(cfg.cookie, "sid=first")
+Assert.eq(cfg.cookie, "sid=other")
 
 local _old, late = cookie("sid=old")
 session, request = cookie("sid=latest")
@@ -91,31 +96,28 @@ Assert.is_nil(cfg.cookie)
 
 cfg = { cookie = "sid=legacy" }
 session, request = cookie("sid=renewed")
+local before = #requests
 request.cb(account(7))
-request = requests[#requests]
-Assert.eq(request.opts.headers.Cookie, "sid=legacy")
-request.cb(account(7))
+Assert.eq(#requests, before, "不再查询旧 Cookie")
 Assert.eq(cfg.cookie, "sid=renewed")
 Assert.eq(cfg.user_id, "7")
 cfg = { cookie = "sid=legacy-other" }
 session, request = cookie("sid=new")
 request.cb(account(8))
-requests[#requests].cb(account(7))
-Assert.eq(cfg.cookie, "sid=legacy-other")
-Assert.matches(reason, "请先退出旧快看账号")
+Assert.eq(cfg.cookie, "sid=new")
+Assert.eq(cfg.user_id, "8")
+Assert.is_nil(reason)
 cfg = { cookie = "sid=legacy-offline" }
 session, request = cookie("sid=new")
-request.cb(account(8))
-requests[#requests].cb(nil, "network")
+request.cb(nil, "network")
 Assert.eq(reason, "network")
 Assert.eq(cfg.cookie, "sid=legacy-offline")
 cfg = { cookie = "sid=legacy-expired" }
 session, request = cookie("sid=new")
 request.cb(account(8))
-requests[#requests].cb(account(0, 0))
-Assert.is_nil(cfg.user_id)
-Assert.eq(cfg.cookie, "sid=legacy-expired")
-Assert.eq(reason, "旧快看账号身份无法确认，请先退出旧登录后重试")
+Assert.eq(cfg.user_id, "8")
+Assert.eq(cfg.cookie, "sid=new", "旧账号失效不妨碍新账号登录")
+Assert.is_nil(reason)
 
 local redirect = "https://open.weixin.qq.com/connect/qrconnect?" .. Text.formEncode({
     appid = "wx92ba65b18ed55877", scope = "snsapi_login", response_type = "code",

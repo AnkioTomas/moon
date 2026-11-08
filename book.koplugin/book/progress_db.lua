@@ -7,6 +7,7 @@
   - markSynced 靠 updated_at 乐观锁，推送期间又更新过的行不会被误标已同步。
   - synced 是最近一次与云端一致的位置（推送成功 / 远端落库时写入，本地保存不动）：
     开书拉到的云端位置和它一致，说明云端没被别的设备改过，不算冲突。
+  - decision_pending=1 表示用户尚未选择冲突进度；本地保存保留它，关书/重启后仍不得自动上推。
   - 进度写到 100% 调 BookDB.markReadAutomatically（books 自动标已读）；建表时对已读完的行回填一次。
 books_db 调用：markFinished（手动已读补 100% 待上传进度）、moveIdentity（迁身份）。
 
@@ -28,6 +29,7 @@ books_db 调用：markFinished（手动已读补 100% 待上传进度）、moveI
 ---@field updated_at integer 更新时间戳
 ---@field sync_status integer 0=待同步，1=已同步
 ---@field synced ProgressPosition|nil 最近一次与云端一致的位置；旧行为 nil
+---@field decision_pending integer 1=冲突未决，0=允许同步
 
 local DB = require("utils.db")
 local JSON = require("json")
@@ -43,17 +45,23 @@ CREATE TABLE IF NOT EXISTS pending_progress (
   chapter_idx INTEGER, chapter_title TEXT, chapter_fraction REAL,
   page INTEGER, total_pages INTEGER, locator TEXT, extra TEXT,
   updated_at INTEGER NOT NULL, sync_status INTEGER NOT NULL DEFAULT 0, synced TEXT,
+  decision_pending INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (source_id, stable_id)
 );
 CREATE INDEX IF NOT EXISTS idx_pending_progress_recent
   ON pending_progress(source_id, updated_at DESC);
 ]]) then return false end
     local columns, ncols = DB.query("PRAGMA table_info(pending_progress);")
-    local has_synced = false
+    local has_synced, has_decision_pending = false, false
     for i = 1, ncols do
         if columns[2][i] == "synced" then has_synced = true end
+        if columns[2][i] == "decision_pending" then has_decision_pending = true end
     end
     if not has_synced and not DB.exec("ALTER TABLE pending_progress ADD COLUMN synced TEXT;") then
+        return false
+    end
+    if not has_decision_pending
+        and not DB.exec("ALTER TABLE pending_progress ADD COLUMN decision_pending INTEGER NOT NULL DEFAULT 0;") then
         return false
     end
     -- 旧库回填：read_state 列加入前已读完的书。
@@ -64,7 +72,7 @@ CREATE INDEX IF NOT EXISTS idx_pending_progress_recent
     return true
 end)
 
-local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, extra, updated_at, sync_status, synced"
+local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, extra, updated_at, sync_status, synced, decision_pending"
 
 ---@return integer|nil
 local function positiveInt(value)
@@ -195,10 +203,19 @@ function ProgressDB.adoptRemote(source_id, stable_id, pos)
     return write(source_id, stable_id, pos, 1)
 end
 
+---@param source_id string
+---@param stable_id string
+---@param pending boolean
+---@return boolean
+function ProgressDB.setDecisionPending(source_id, stable_id, pending)
+    return DB.exec("UPDATE pending_progress SET decision_pending=? WHERE source_id=? AND stable_id=?;",
+        pending and 1 or 0, source_id, stable_id) ~= nil
+end
+
 --- COLUMNS 顺序的位置参数 → PendingProgress
 ---@return PendingProgress|nil
 local function toProgress(source, stable, fraction, chapter_idx, chapter_title, chapter_fraction,
-                          page, total_pages, locator, extra, updated_at, sync_status, synced)
+                          page, total_pages, locator, extra, updated_at, sync_status, synced, decision_pending)
     if not source then
         return nil
     end
@@ -216,6 +233,7 @@ local function toProgress(source, stable, fraction, chapter_idx, chapter_title, 
         updated_at = tonumber(updated_at) or 0,
         sync_status = tonumber(sync_status) or 0,
         synced = decodeJson(synced),
+        decision_pending = tonumber(decision_pending) or 0,
     }
 end
 
@@ -237,8 +255,8 @@ local function rows(result, nrows)
     local out = {}
     for i = 1, nrows do
         local row = {}
-        for c = 1, 13 do row[c] = result[c][i] end
-        out[i] = toProgress(unpack(row, 1, 13))
+        for c = 1, 14 do row[c] = result[c][i] end
+        out[i] = toProgress(unpack(row, 1, 14))
     end
     return out
 end

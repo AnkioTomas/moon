@@ -1,11 +1,11 @@
---[[-- 起点三种登录统一账号边界：续期、旧配置迁移、确认换号、清库失败与候选取消。 @module tests.source.qidian.setting_spec --]]
+--[[-- 起点账号：续期保留本地；换号直接清旧源，不询问、不查询旧账号。 @module tests.source.qidian.setting_spec --]]
 ---@diagnostic disable: undefined-field, missing-fields, param-type-mismatch
-
 local Assert = require("support.assert")
 local Theme = require("support.theme_stubs")
 Theme.install()
-local cfg, checks, cleared, aborted, closed, late = {}, {}, 0, 0, 0, nil
-local clear_ok, old_ok, delay_old = true, true, false
+local beginLogin = require("source.auth").beginLogin
+local cfg, checks, cleared, closed = {}, 0, 0, 0
+local clear_ok, delayed, late = true, false, nil
 package.preload["utils.settings"] = function()
     return { getSource = function() return cfg end, saveSource = function() end }
 end
@@ -13,22 +13,27 @@ package.preload["source.qidian.client"] = function()
     return {
         cookie = function() return cfg.cookie end,
         loginCheckAsync = function(cookie, cb)
-            checks[#checks + 1] = cookie
+            checks = checks + 1
+            Assert.is_true(cookie ~= "old", "换号不能查询旧凭据")
             local function done()
-                if cookie == "old" then cb(old_ok, old_ok and nil or "offline", { id = "111" })
-                else cb(true, nil, { id = cookie == "same" and "111" or "222" }) end
+                cb(cookie ~= "bad", cookie == "bad" and "expired" or nil,
+                    { id = cookie == "same" and "111" or "222" })
             end
-            if cookie == "old" and delay_old then late = done else done() end
-            return { cancel = function() aborted = aborted + 1 end }
+            if delayed then late = done else done() end
+            return { cancel = function() end }
         end,
     }
 end
+package.loaded["source.auth"] = nil
+package.preload["source.auth"] = function()
+    return { beginLogin = beginLogin, ok = function() end, expired = function() return false end }
+end
 package.preload["source.registry"] = function() return { reload = function() end, invalidate = function() end } end
-package.preload["source.auth"] = function() return { ok = function() end, expired = function() return false end } end
-package.preload["source.logout"] = function() return { abort = function() aborted = aborted + 1 end } end
 package.preload["book.store"] = function()
-    return { forgetSource = function()
-        Assert.is_nil(cfg.cookie, "清库前隔离旧凭据，不能把本地清理上行")
+    return { forgetSource = function(id)
+        Assert.eq(id, "qidian", "只清当前源")
+        Assert.is_nil(cfg.cookie, "清书架前移除旧凭据")
+        Assert.is_nil(cfg.account_id)
         cleared = cleared + 1
         return clear_ok
     end }
@@ -38,88 +43,48 @@ package.preload["reader.session"] = function()
         identity = { source_id = "qidian" }, ui = { onClose = function() closed = closed + 1 end },
     } end }
 end
-local Setting = require("source.qidian.setting")
-
-do
-    cfg = { cookie = "old", account_id = "111" }
-    local ok
-    Setting.browser.apply({ cookies = { { domain = ".qidian.com", name = "same", value = "x" } } },
-        function(value) ok = value end)
-    -- 直接规范化的 Cookie 是 same=x，候选测试账号是 222，所以先有换号确认。
-    Assert.is_nil(ok)
-    Theme.last("confirm").cancel_callback()
-    Assert.is_false(ok)
-    Assert.eq(cfg.cookie, "old")
-    Assert.eq(cleared, 0)
-end
-
 local CookieLogin = require("source.cookie_login")
-local original_parse = CookieLogin.fromPayload
 CookieLogin.fromPayload = function(payload) return payload.cookie end
-
-do
-    cfg = { cookie = "old", account_id = "111" }
-    local ok
-    Setting.browser.apply({ cookie = "same" }, function(value) ok = value end)
-    Assert.is_true(ok)
-    Assert.eq(cfg.cookie, "same")
-    Assert.eq(cfg.account_id, "111")
-    Assert.eq(cleared, 0, "同账号续期不清书架、进度或笔记")
-end
-
-do
-    cfg = { cookie = "old" }
-    checks = {}
-    local ok
-    Setting.browser.apply({ cookie = "same" }, function(value) ok = value end)
-    Assert.is_true(ok)
-    Assert.len(checks, 2, "旧配置先验证原 Cookie 的稳定账号身份")
-    Assert.eq(cfg.account_id, "111")
-    Assert.eq(cleared, 0)
-end
-
-do
-    cfg = { cookie = "old", account_id = "111" }
-    local ok
-    Setting.browser.apply({ cookie = "new" }, function(value) ok = value end)
-    Assert.is_nil(ok)
-    Assert.eq(cfg.cookie, "old", "确认前不替换登录态")
-    Theme.last("confirm").ok_callback()
-    Assert.is_true(ok)
-    Assert.eq(cfg.cookie, "new")
-    Assert.eq(cfg.account_id, "222")
-    Assert.eq(cleared, 1)
-    Assert.eq(closed, 1, "正常结束旧阅读会话")
-end
-
-do
-    cfg, clear_ok = { cookie = "old", account_id = "111" }, false
-    local ok
-    Setting.browser.apply({ cookie = "new" }, function(value) ok = value end)
-    Theme.last("confirm").ok_callback()
-    Assert.is_false(ok)
-    Assert.eq(cfg.cookie, "old", "清库失败不保存新账号")
-    Assert.eq(cfg.account_id, "111")
-    clear_ok = true
-end
-
-do
-    cfg, old_ok = { cookie = "old" }, false
+local Setting = require("source.qidian.setting")
+local function apply(cookie)
     local ok, err
-    Setting.browser.apply({ cookie = "same" }, function(value, reason) ok, err = value, reason end)
-    Assert.is_false(ok)
-    Assert.matches(err, "无法确认旧账号")
-    Assert.eq(cfg.cookie, "old")
-    old_ok = true
+    local job = Setting.browser.apply({ cookie = cookie }, function(value, reason) ok, err = value, reason end)
+    return ok, err, job
 end
 
-do
-    cfg, delay_old = { cookie = "old" }, true
-    local called = false
-    local job = Setting.browser.apply({ cookie = "same" }, function() called = true end)
-    job.cancel()
-    late()
-    Assert.is_false(called, "取消后旧身份校验不能保存候选账号")
-    Assert.eq(cfg.cookie, "old")
-end
-CookieLogin.fromPayload = original_parse
+cfg = { cookie = "old", account_id = "111" }
+Assert.is_true(apply("same"))
+Assert.eq(cleared, 0, "同账号续期保留本地")
+cfg = { cookie = "old", account_id = "111" }
+Assert.is_true(apply("new"))
+Assert.eq(cfg.cookie, "new")
+Assert.eq(cfg.account_id, "222")
+Assert.eq(cleared, 1)
+Assert.eq(closed, 1)
+Assert.is_nil(Theme.last("confirm"), "换号不弹确认")
+cfg = { cookie = "old" }
+local before = checks
+Assert.is_true(apply("same"))
+Assert.eq(checks, before + 1, "旧配置缺身份时不多查一次")
+Assert.eq(cleared, 2)
+cfg = { cookie = "new", account_id = "111" }
+Assert.is_true(apply("new"))
+Assert.eq(cleared, 3, "账号身份变了，即使 Cookie 字符串相同也清旧源")
+cfg, clear_ok = { cookie = "old", account_id = "111" }, false
+local ok, err = apply("new")
+Assert.is_false(ok)
+Assert.eq(err, "清除本地记录失败")
+Assert.is_nil(cfg.cookie, "清理失败保持登出，不恢复旧凭据")
+clear_ok = true
+cfg = { cookie = "old", account_id = "111" }
+ok, err = apply("bad")
+Assert.is_false(ok)
+Assert.eq(err, "expired")
+Assert.eq(cfg.cookie, "old", "无效新凭据不清旧账号")
+delayed = true
+local called = false
+local job = Setting.browser.apply({ cookie = "same" }, function() called = true end)
+job.cancel()
+late()
+Assert.is_false(called, "取消后的校验回包不提交")
+Assert.eq(cfg.cookie, "old")

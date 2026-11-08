@@ -42,10 +42,6 @@ local function save()
     require("ui.themes.widgets.toast"):new{ text = _("登录成功"), timeout = 2 }:show()
 end
 
-function Setting.rowTitle()
-    return _("得到账号")
-end
-
 ---@return string, boolean
 function Setting.rowStatus()
     local on = loggedIn()
@@ -188,12 +184,28 @@ local SPEC = {
     checkAsync = function(cookie, cb)
         local jar = jarFromHeader(cookie)
         if not next(jar) then return cb(false, _("没有读到 Cookie")) end
-        return require("source.dedao.client").confirmLoginAsync(jar, function(ok, err)
-            cb(ok == true, err)
+        return require("source.dedao.client").checkLoginAsync(jar, function(user, err)
+            cb(user ~= nil, err, user)
         end)
     end,
-    store = function(cfg, cookie)
-        cfg.cookie, cfg.logged_in = cookie, true
+    commit = function(cookie, user, cb, current)
+        local Settings = require("utils.settings")
+        local cfg = Settings.getSource(SOURCE_ID)
+        if not current() then return cb(false, _("账号已变化，请重新登录")) end
+        if (cfg.uid or cfg.cookie or cfg.logged_in) and cfg.uid ~= user.uid_hazy then
+            local cleared = require("source.logout").clear(SOURCE_ID, function()
+                cfg.cookie, cfg.uid, cfg.logged_in = nil, nil, nil
+                Settings.saveSource(SOURCE_ID)
+                require("source.dedao.client").reset()
+            end)
+            if not cleared then return cb(false, _("清除本地记录失败")) end
+        end
+        cfg.cookie, cfg.logged_in, cfg.uid = cookie, true, user.uid_hazy
+        Settings.saveSource(SOURCE_ID)
+        require("source.dedao.client").reset()
+        require("source.auth").ok(SOURCE_ID)
+        require("source.registry").reload()
+        cb(true)
     end,
     clear = function(cfg)
         cfg.cookie, cfg.logged_in, cfg.uid = nil, nil, nil
@@ -207,7 +219,7 @@ Setting.browser = {
     icon = "https://www.dedao.cn/apple-touch-icon.png",
     isAuthorized = function() return CookieLogin.authorized(SPEC) end,
     apply = function(payload, cb)
-        CookieLogin.save(SPEC, CookieLogin.fromPayload(payload, "dedao.cn"), cb)
+        return CookieLogin.save(SPEC, CookieLogin.fromPayload(payload, "dedao.cn"), cb)
     end,
 }
 
@@ -219,7 +231,7 @@ function Setting.rows()
             local status, status_on = Setting.rowStatus()
             return Row.widget({
                 width = iw, chevron = true, kind = "nav", icon = "account_circle",
-                title = Setting.rowTitle(),
+                title = SPEC.title,
                 subtitle = _("手机号验证码或得到 App 扫码登录"),
                 status = status, status_on = status_on,
                 callback = function() Setting.open() end,
