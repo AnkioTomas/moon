@@ -103,22 +103,43 @@ do
     Assert.eq(body.items[1].ebook_id, 30533530)
 end
 
--- 缺失 / 非数字 ID 必须整轮失败，不能把 table 地址拼进 URL，也不能用残缺快照对账。
+-- 非法 ID 跳过、不进 URL；合法 ID 照常分批。全是脏行则空快照成功返回（不下架策略由 shelf 管）。
 do
     for _idx, bad in ipairs({ {}, { book_id = 2 }, { ebook_id = false }, "2 3", "" }) do
         local malformed = Client:new{ cookie = "thor=test", uuid = "h5-test" }
-        local calls = 0
-        function malformed:apiGetAsync(_path, _extra, cb)
-            calls = calls + 1
-            cb({ data = { book_ids = { { ebook_id = 1 }, bad } } })
+        local paths = {}
+        function malformed:apiGetAsync(path, _extra, cb)
+            paths[#paths + 1] = path
+            if #paths == 1 then
+                cb({ data = { book_ids = { { ebook_id = 1 }, bad, { ebook_id = 3 } } } })
+            else
+                cb({ data = { { ebook_id = 1, name = "一" }, { ebook_id = 3, name = "三" } } })
+            end
             return { cancel = function() end }
         end
         local wire, err
         malformed:shelfSyncAsync(function(value, e) wire, err = value, e end)
-        Assert.eq(calls, 1, "非法 ID 不应发起分批请求")
-        Assert.is_nil(wire)
-        Assert.eq(err, "京东读书响应无效")
+        Assert.is_nil(err)
+        Assert.eq(paths[2], "/jdread/api/ebooks/lite/1,3")
+        Assert.len(wire, 2)
+        Assert.eq(wire[1].ebook_id, 1)
+        Assert.eq(wire[2].ebook_id, 3)
     end
+end
+
+do
+    local all_bad = Client:new{ cookie = "thor=test", uuid = "h5-test" }
+    local calls = 0
+    function all_bad:apiGetAsync(_path, _extra, cb)
+        calls = calls + 1
+        cb({ data = { book_ids = { {}, { ebook_id = false }, "" } } })
+        return { cancel = function() end }
+    end
+    local wire, err
+    all_bad:shelfSyncAsync(function(value, e) wire, err = value, e end)
+    Assert.eq(calls, 1, "全脏行不应发起分批请求")
+    Assert.is_nil(err)
+    Assert.len(wire, 0)
 end
 
 do

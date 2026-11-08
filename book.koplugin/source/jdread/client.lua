@@ -188,16 +188,16 @@ function Client:shelfSyncAsync(cb)
         if not wire then cb(nil, err); return end
         local data = type(wire.data) == "table" and wire.data or {}
         local seen = {}
-        for index, row in ipairs(data.book_ids or {}) do
+        -- 脏行跳过：不能把 table 地址拼进 URL，但一条坏 ID 不能拖死整架。
+        for row_idx, row in ipairs(data.book_ids or {}) do
             local id = row
             if type(row) == "table" then id = row.ebook_id end
-            id = tostring(id)
+            id = id ~= nil and tostring(id) or ""
             if not id:match("^%d+$") then
-                logger.warn("jdread shelf invalid ebook_id", "row", index)
-                cb(nil, _("京东读书响应无效"))
-                return
-            end
-            if not seen[id] then
+                logger.warn("jdread shelf skip invalid ebook_id", "row", row_idx,
+                    "type", type(row),
+                    type(row) == "table" and ("ebook_id=" .. tostring(row.ebook_id)) or id)
+            elseif not seen[id] then
                 seen[id] = true
                 ids[#ids + 1] = id
             end
