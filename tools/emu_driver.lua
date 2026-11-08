@@ -30,16 +30,25 @@ end
 -- macOS 模拟器点击全部变成长按的根因：
 -- SDL3.lua 用 CLOCK_MONOTONIC_COARSE 给触摸事件打戳；在 Darwin 上这是
 -- CLOCK_MONOTONIC_RAW_APPROX，比 CLOCK_MONOTONIC / time.now() 慢约 500ms。
--- GestureDetector 却把时钟戳识别成 MONOTONIC，hold deadline = origin+500ms ≈ now，
+-- GestureDetector 却把触摸戳识别成 MONOTONIC，hold deadline = origin+500ms ≈ now，
 -- 长按定时器几乎立刻触发，tap 永远出不来。clock_id=-1 让 Input:setTimeout 改走
--- time.now()+delay，不再拿慢了半秒的 origin 算绝对截止时间。
-UIManager:nextTick(function()
+-- time.now()+delay；并拦掉后续 probeClockSource，避免首触又探回 MONOTONIC。
+-- （book.koplugin/main.lua 里也有同款；驱动先装时补丁更早生效。）
+local function fixHoldClock()
     local ok_dev, Device = pcall(require, "device")
-    local gd = ok_dev and Device.input and Device.input.gesture_detector
-    if gd then
-        gd.clock_id = -1
+    if not ok_dev or not Device then return end
+    local ok_gd, GD = pcall(require, "device/gesturedetector")
+    if ok_gd and GD and not GD._moon_emu_hold_fixed then
+        function GD:probeClockSource(_timev)
+            self.clock_id = -1
+        end
+        GD._moon_emu_hold_fixed = true
     end
-end)
+    local gd = Device.input and Device.input.gesture_detector
+    if gd then gd.clock_id = -1 end
+end
+fixHoldClock()
+UIManager:nextTick(fixHoldClock)
 
 -- 默认路径给 tools/emu.sh。独立环境用 MOON_EMU_* 换一套，避免和已经开着的模拟器抢同一个命令文件。
 local CMD = os.getenv("MOON_EMU_CMD") or "/tmp/ko_cmd.lua"
