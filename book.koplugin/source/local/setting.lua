@@ -33,11 +33,22 @@ function Setting.rows(plugin)
         local path = require("utils.settings").getSource(SOURCE_ID).path or ""
         return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "folder",
             title = _("本地书库目录"), status = path ~= "" and path or _("未设置"), status_on = path ~= "",
-            callback = Setting.open })
+            -- 跟「按文件夹分类」一样：有桌面就强制重扫，不要 Registry.reload（会关设置叠层）。
+            callback = function()
+                Setting.open(function() repaint() end, plugin and plugin.desktop)
+            end })
     end
     local function repaint()
         local desktop = plugin and plugin.desktop
         if desktop and desktop.settings_overlay then desktop.settings_overlay:updateView() end
+    end
+    --- WebDAV 库身份：地址 / 目录 / 用户。任一项变了旧 webdav:// 书必须撕掉（会撞相对路径）。
+    local function webdavFingerprint(cfg)
+        return table.concat({
+            Text.trim(cfg.webdav_url or ""),
+            Text.trim(cfg.webdav_path or ""),
+            Text.trim(cfg.webdav_username or ""),
+        }, "\0")
     end
     local function edit(key, title, password)
         local cfg = require("utils.settings").getSource(SOURCE_ID)
@@ -46,9 +57,14 @@ function Setting.rows(plugin)
             fields = { { text = tostring(cfg[key] or ""), text_type = password and "password" or nil } },
             ok_text = _("保存"),
             callback = function(text)
+                local before = webdavFingerprint(cfg)
                 cfg[key] = Text.trim(text)
                 require("utils.settings").saveSource(SOURCE_ID, cfg)
-                require("source.registry").invalidate()
+                if before ~= webdavFingerprint(cfg) then
+                    require("source.logout").replaceWebdav()
+                else
+                    require("source.registry").invalidate()
+                end
                 repaint()
             end,
         }:show()
@@ -158,11 +174,14 @@ end
 
 --- 目录选择列表：逐层浏览（原地换项），首行「使用此目录」确认当前目录。
 ---@param on_saved fun()|nil 保存目录后回调（书城下载前引导配置用）
-function Setting.open(on_saved)
+---@param desktop table|nil 有桌面时换目录立刻下架旧根书并强制重扫；没有则 Registry.reload
+function Setting.open(on_saved, desktop)
     local lfs = require("libs/libkoreader-lfs")
+    local Text = require("utils.text")
     local List = require("ui.themes.widgets.list")
     local MoonSettings = require("utils.settings")
     local cfg = MoonSettings.getSource(SOURCE_ID)
+    local previous = Text.rtrimSlashes(Text.rtrim(cfg.path))
     local start_path = cfg.path
     if type(start_path) ~= "string" or start_path == "" then
         local home = G_reader_settings:readSetting("home_dir")
@@ -195,10 +214,19 @@ function Setting.open(on_saved)
             return nil
         end
         local function save()
+            local next_path = Text.rtrimSlashes(Text.rtrim(path))
             cfg.path = path
             MoonSettings.saveSource(SOURCE_ID, cfg)
+            -- 换目录 = 换库：旧根书连同进度 / 笔记 / 统计整本撕掉（软下架会留在「最近阅读」里）。
+            if previous ~= next_path then
+                require("book.store").forgetOldRoot(previous, next_path)
+            end
             require("ui.themes.widgets.toast"):new{ text = _("已保存"), timeout = 2 }:show()
-            require("source.registry").reload()
+            if desktop and not desktop.closed then
+                require("desktop.sync").rescan(desktop)
+            else
+                require("source.registry").reload()
+            end
             if type(on_saved) == "function" then on_saved() end
         end
         -- 先劝一句再决定：列表不关，「重新选择」接着挑。documents 优先于字符提醒。

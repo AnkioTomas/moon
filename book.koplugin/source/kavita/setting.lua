@@ -37,18 +37,34 @@ local function shelfChanged(plugin)
     if plugin and plugin.desktop then plugin.desktop:onEvent("shelf_changed") end
 end
 
+--- 服务器身份：地址 + API Key。换了就是另一套书架（seriesId 会撞）。
+local function libraryFingerprint(cfg)
+    return table.concat({
+        Text.rtrimSlashes(Text.stripWhitespace(cfg.base_url)),
+        Text.stripWhitespace(cfg.api_key),
+    }, "\0")
+end
+
 --- 落盘并作废源实例，让新地址 / Key / 书库立即生效。
 --- 不走 SourceChanged：那会把设置页复位到根目录；这里只重画当前叠层。
 --- 保存后把配置镜像给 kamare（02 A5 第二处）；kamare 侧失败只提示，不阻断 moon 自己的保存。
+--- 换服务器 / Key：整源撕本地书架（replaceLibrary 会 reload），不再只靠下次 reconcile。
 ---@param cfg table
 ---@param plugin table|nil
 ---@param refresh_shelf boolean|nil 连接配置 / 书库变了才让书架作废旧数据
-local function save(cfg, plugin, refresh_shelf)
+---@param previous_fingerprint string|nil 保存前的库身份；与现在不同则清书架
+local function save(cfg, plugin, refresh_shelf, previous_fingerprint)
     require("utils.settings").saveSource(ID, cfg)
     local configured = (cfg.base_url or "") ~= "" and (cfg.api_key or "") ~= ""
     if configured and Cache.probe().ok then
         local server_key, code = Cache.registerServer(cfg.base_url, cfg.api_key)
         if not server_key or code then toast(_("无法同步配置到 kamare")) end
+    end
+    local now = libraryFingerprint(cfg)
+    if previous_fingerprint and previous_fingerprint ~= now then
+        require("source.logout").replaceLibrary(ID)
+        repaint(plugin)
+        return
     end
     require("source.registry").invalidate()
     repaint(plugin)
@@ -94,8 +110,9 @@ local function field(plugin, key, title, hint, password, normalize, icon)
                     fields = { { text = cfg[key] or "", hint = hint, text_type = password and "password" or nil } },
                     ok_text = _("保存"),
                     callback = function(input)
+                        local before = libraryFingerprint(cfg)
                         cfg[key] = normalize(input)
-                        save(cfg, plugin, true)
+                        save(cfg, plugin, true, before)
                     end,
                 }:show()
             end,
@@ -728,5 +745,6 @@ Setting.remote = {
         normalize = normalizeUrl },
     { key = "api_key", label = _("API Key"), secret = true, normalize = Text.stripWhitespace },
 }
+Setting.replace_on_remote = { "base_url", "api_key" }
 
 return Setting

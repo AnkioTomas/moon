@@ -25,7 +25,7 @@ package.preload["utils.paths"] = function()
 end
 for _idx, name in ipairs({
     "utils.db", "utils.event", "book.books_db", "book.chapters_db", "book.progress_db",
-    "book.note_db", "book.stats_db", "book.review_cache", "ai.summary_db",
+    "book.note_db", "book.stats_db", "book.review_cache", "ai.summary_db", "book.toc_db",
     "features.xray.db", "features.xray.events",
 }) do
     package.loaded[name] = nil
@@ -41,6 +41,7 @@ local StatsDB = require("book.stats_db")
 local SummaryDB = require("ai.summary_db")
 local XrayDB = require("features.xray.db")
 require("book.review_cache")
+require("book.toc_db")
 Assert.not_nil(DB.open())
 Event.init({ require("features.xray.events") })
 
@@ -96,6 +97,66 @@ Assert.len(XrayDB.list(SOURCE, "live"), 0)
 Assert.len(XrayDB.list("local", "/keep.epub"), 1)
 Assert.is_nil(DB.rowexec(
     [[SELECT payload FROM review_cache WHERE source_id=?;]], SOURCE))
+
+-- forgetPrefix：只撕 webdav://，纯本地路径留下
+Assert.is_true(BookDB.upsert({
+    source_id = "local", stable_id = "webdav://cloud.epub", title = "云端",
+}))
+Assert.is_true(ProgressDB.upsert("local", "webdav://cloud.epub", { fraction = 0.5 }))
+local ok_prefix, dropped = BookDB.forgetPrefix("local", "webdav://")
+Assert.is_true(ok_prefix)
+Assert.eq(table.concat(dropped, ","), "webdav://cloud.epub")
+Assert.is_nil(BookDB.get("local", "webdav://cloud.epub"))
+Assert.is_nil(ProgressDB.get("local", "webdav://cloud.epub"))
+Assert.eq(BookDB.get("local", "/keep.epub").title, "别的源", "纯本地书不动")
+
+-- forgetOldRoot：换目录整本撕掉（书架+进度+统计）；新根内 / WebDAV / 库外不动
+Assert.is_true(BookDB.upsert({
+    source_id = "local", stable_id = "/mnt/us/documents/a.epub", title = "旧根",
+}))
+Assert.is_true(BookDB.upsert({
+    source_id = "local", stable_id = "/mnt/us/documents/Books/b.epub", title = "新根内",
+}))
+Assert.is_true(BookDB.upsert({
+    source_id = "local", stable_id = "/mnt/us/other/c.epub", title = "库外",
+}))
+Assert.is_true(BookDB.upsert({
+    source_id = "local", stable_id = "webdav://keep.epub", title = "云端留",
+}))
+Assert.is_true(ProgressDB.upsert("local", "/mnt/us/documents/a.epub", { fraction = 0.3 }))
+Assert.is_true(StatsDB.add({
+    source_id = "local", stable_id = "/mnt/us/documents/a.epub", record_type = "page",
+    page = 1, start_time = 2000, duration = 10, total_pages = 5,
+}))
+-- 墓碑也要清：否则「最近阅读」还挂着
+Assert.is_true(BookDB.upsert({
+    source_id = "local", stable_id = "/mnt/us/documents/gone.epub", title = "墓碑",
+}))
+Assert.is_true(BookDB.markDeleted("local", "/mnt/us/documents/gone.epub"))
+Assert.is_true(ProgressDB.upsert("local", "/mnt/us/documents/gone.epub", { fraction = 0.9 }))
+
+local ok_root, root_dropped = BookDB.forgetOldRoot(
+    "local", "/mnt/us/documents", "/mnt/us/documents/Books")
+Assert.is_true(ok_root)
+table.sort(root_dropped)
+Assert.eq(table.concat(root_dropped, ","),
+    "/mnt/us/documents/a.epub,/mnt/us/documents/gone.epub")
+Assert.is_nil(BookDB.get("local", "/mnt/us/documents/a.epub"))
+Assert.is_nil(ProgressDB.get("local", "/mnt/us/documents/a.epub"))
+Assert.is_nil(ProgressDB.get("local", "/mnt/us/documents/gone.epub"))
+Assert.eq(BookDB.get("local", "/mnt/us/documents/Books/b.epub").title, "新根内")
+Assert.eq(BookDB.get("local", "/mnt/us/other/c.epub").title, "库外")
+Assert.eq(BookDB.get("local", "webdav://keep.epub").title, "云端留")
+Assert.eq(BookDB.get("local", "/keep.epub").title, "别的源")
+local stats_left = StatsDB.distinctBooks()
+local stats_ids = {}
+for _idx, row in ipairs(stats_left) do stats_ids[#stats_ids + 1] = row.stable_id end
+table.sort(stats_ids)
+Assert.is_true(not table.concat(stats_ids, ","):find("/mnt/us/documents/a.epub", 1, true),
+    "旧根统计已清")
+
+Assert.is_true(BookDB.forgetOldRoot("local", "/mnt/us/documents", "/mnt/us/documents"), "同根空操作")
+Assert.is_true(BookDB.forgetOldRoot("local", "", "/mnt/us/books"), "无旧根空操作")
 
 DB.close()
 for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end

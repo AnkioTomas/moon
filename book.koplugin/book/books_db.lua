@@ -25,7 +25,8 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
     普通同步与详情只补缺的键；强制刷新（reconcile force）与本地写入（扫盘 / 刮削）覆盖传入的键。
     rating 是 { score, by } 整体，分数和来源不会拆开合并。
   - 书架脏位只在单条 push 成功时清，禁止整源盲清。
-  - toc 是不透明 JSON；getToc 可选 max_age，章节源目录不做时间保鲜（有就一直用，开书后台静默拉新）。
+  - toc 是兼容旧缓存的 JSON；source.toc 按书迁移到 book.toc_db 后清空它。
+    逐章目录的拉取时间由 toc_snapshots 持有，本地字数 / 购买状态更新不冒充远端刷新。
 跨表：只读 JOIN chapters（已下载口径）。改名 / 收编在同一事务里调核心依附表的 moveIdentity，
 再经 utils.event 发 book_identity_changed 给 feature 的表；撕墓碑同理调 removeIdentity 再发 book_removed；
 退出登录走 forgetSource：整源 DELETE（含在架行），不写墓碑，再发 source_forgotten。
@@ -110,6 +111,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 ---@class BookDetail : Book
 
 local DB = require("utils.db")
+local TocDB = require("book.toc_db")
 local Event = require("utils.event")
 local JSON = require("json")
 local Text = require("utils.text")
@@ -789,7 +791,7 @@ end
 
 --- 挂在书身份上的核心表模块；note / progress / stats 顶层 require 本模块，只能延迟加载。
 local IDENTITY_MODULES = {
-    "book.chapters_db", "book.note_db", "book.progress_db", "book.stats_db", "book.review_cache", "ai.summary_db",
+    "book.chapters_db", "book.note_db", "book.progress_db", "book.stats_db", "book.review_cache", "ai.summary_db", "book.toc_db",
 }
 
 --- 依附表跟着迁身份：先核心表，再发事件给 feature 的表。须在调用方事务内。
@@ -1078,6 +1080,76 @@ function BookDB.forgetSource(source_id)
     end) == true
 end
 
+--- 撕掉一本：books 行 + 依附表 + book_removed。不留墓碑。须在调用方事务内。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+local function forgetOne(source_id, stable_id)
+    if not DB.exec([[DELETE FROM books WHERE source_id=? AND stable_id=?;]], source_id, stable_id) then
+        return false
+    end
+    for _mod_idx, name in ipairs(IDENTITY_MODULES) do
+        if not require(name).removeIdentity(source_id, stable_id) then return false end
+    end
+    return Event.emit("book_removed", source_id, stable_id)
+end
+
+--- 撕掉本源里 stable_id 带指定前缀的书（及依附表），不留墓碑。
+--- 给 local 换 WebDAV 用：前缀 `webdav://`，纯本地绝对路径书不动。
+---@param source_id string
+---@param prefix string
+---@return boolean
+---@return string[] forgotten 被撕掉的 stable_id（调用方清缓存用）
+function BookDB.forgetPrefix(source_id, prefix)
+    local forgotten = {}
+    local ok = DB.transaction(function()
+        local ids = stringColumn(
+            [[SELECT stable_id FROM books WHERE source_id=? AND stable_id LIKE ? ESCAPE '\' ORDER BY stable_id;]],
+            source_id, prefix:gsub("([%%_\\])", "\\%1") .. "%"
+        )
+        for _idx, stable_id in ipairs(ids) do
+            if not forgetOne(source_id, stable_id) then return false end
+            forgotten[#forgotten + 1] = stable_id
+        end
+        return true
+    end) == true
+    return ok, forgotten
+end
+
+--- 换本地书库根：旧根下、新根外的纯本地书整本撕掉（书架 + 进度 + 笔记 + 统计 + 目录…）。
+--- 软下架不够：「最近阅读」仍认带进度的 deleted=1 行。WebDAV 身份不动；新根是旧根子目录时只踢外面的。
+--- 含墓碑行；原书文件还在盘上，只清月读库。
+---@param source_id string
+---@param old_root string|nil
+---@param new_root string|nil
+---@return boolean
+---@return string[] forgotten
+function BookDB.forgetOldRoot(source_id, old_root, new_root)
+    local Text = require("utils.text")
+    old_root = Text.rtrimSlashes(Text.rtrim(old_root))
+    new_root = Text.rtrimSlashes(Text.rtrim(new_root))
+    local forgotten = {}
+    if old_root == "" or old_root == new_root then return true, forgotten end
+    ---@param path string
+    ---@param root string
+    ---@return boolean
+    local function under(path, root)
+        return path == root or path:sub(1, #root + 1) == root .. "/"
+    end
+    local ok = DB.transaction(function()
+        for _idx, stable_id in ipairs(BookDB.stableIdsBySource(source_id)) do
+            if stable_id:sub(1, 9) ~= "webdav://"
+                and under(stable_id, old_root)
+                and not (new_root ~= "" and under(stable_id, new_root)) then
+                if not forgetOne(source_id, stable_id) then return false end
+                forgotten[#forgotten + 1] = stable_id
+            end
+        end
+        return true
+    end) == true
+    return ok, forgotten
+end
+
 --- 读取书籍目录缓存；max_age 秒内才命中。
 ---@param source_id string
 ---@param stable_id string
@@ -1100,7 +1172,7 @@ end
 --- 写入书籍目录缓存。
 ---@param source_id string
 ---@param stable_id string
----@param payload string
+---@param payload string|nil nil 只清旧载荷，目录已迁到逐章表
 ---@return boolean
 function BookDB.setToc(source_id, stable_id, payload)
     return DB.exec(
@@ -1118,10 +1190,12 @@ end
 ---@param stable_id string
 ---@return boolean
 function BookDB.clearToc(source_id, stable_id)
-    return DB.exec(
-        [[UPDATE books SET toc=NULL, toc_fetched_at=0 WHERE source_id=? AND stable_id=?;]],
-        source_id, stable_id
-    ) ~= nil
+    return DB.transaction(function()
+        return DB.exec(
+            [[UPDATE books SET toc=NULL, toc_fetched_at=0 WHERE source_id=? AND stable_id=?;]],
+            source_id, stable_id
+        ) and TocDB.removeIdentity(source_id, stable_id)
+    end) == true
 end
 
 --- 读取全书阅读排版偏好（JSON 串）。

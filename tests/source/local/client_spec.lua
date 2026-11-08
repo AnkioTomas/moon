@@ -529,6 +529,15 @@ do
     Assert.not_nil(db_rows[rowKey("local", "/books/a.epub")])
     -- 封面：解析成功的 5 本都尝试提取（bad.epub 无引擎不提取）
     Assert.len(covers_saved, 5)
+
+    -- 换书库根到子目录：旧根下不在新根内的书应被 reconcile 下架（documents → documents/books）
+    removed, upserts = {}, {}
+    Client.new({ path = "/books/sub" }):scanAsync(function(o, e) ok, err = o, e end)
+    flushScan()
+    Assert.is_true(ok)
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 1, "旧根书下架")
+    Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].deleted, 0, "新根内保留")
+    Assert.is_true(hasValue(removed, "/books/a.epub"))
 end
 
 -- ── 已有行缺少作者/简介时，扫描必须补齐元数据，不能被 title 命中永久冻结 ──
