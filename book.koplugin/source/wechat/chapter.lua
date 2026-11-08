@@ -19,73 +19,119 @@ local Assets = require("source.wechat.assets")
 local Text = require("utils.text")
 local Paths = require("utils.paths")
 local Toc = require("source.wechat.toc")
+local Client = require("source.wechat.client")
+local Context = require("source.wechat.context")
+local Mapper = require("source.wechat.mapper")
 local _ = require("l10n").get("source.wechat")
 
 local Chapter = {}
 
 --- App 章节包：chapters 填章 uid（"0" 是整书资源：样式表、公共图片）。
---- EPUB 是加密 zip，口令在响应头 encryptKey；TXT 是未加密 tar。
+--- EPUB 是加密 zip，口令在响应头 encryptKey；TXT 支持 tar 和 zip。
+--- bookVersion 用书籍版本；-2063 按回包的新版本或刷新详情后最多重试一次。
 ---@param bookId string
 ---@param chapters string
 ---@param book_type '"epub"'|'"txt"'
 ---@param pick fun(files: table<string, string>): string|nil, string|nil 在子进程里从解开的 zip 取需要的那一份文本
----@param cb fun(text: string|nil, err: any)
+---@param cb fun(text: string|nil, err: any, style: string|nil)
 ---@return { cancel: fun() }
 local function downloadPackageAsync(bookId, chapters, book_type, pick, cb)
-    local job
-    local call = Eink.callAsync("GET", "/book/chapterdownload", {
-        raw = true,
-        query = {
-            bookId = bookId, chapters = chapters,
-            pf = "wechat_wx-2001-android-100-weread", pfkey = "pfKey", zoneId = "1",
-            bookVersion = "0", bookType = book_type, quote = "", release = "1",
-            stopAutoPayWhenBNE = "1", preload = "0", preview = "0", offline = "0",
-            giftPayingCard = "0", enVersion = "10.2.2", modernVersion = "10.2.2", teenmode = "0",
-        },
-    }, function(res, err)
-        if not res then
-            cb(nil, err)
-            return
-        end
-        local body = res.body or ""
-        if body:sub(258, 262) == "ustar" then
+    local cancelled, call, job = false, nil, nil
+    local download
+    local function fetchVersion(attempt)
+        local fired = false
+        local next_call = Client:bookInfoAsync(bookId, function(wire, err)
+            fired = true
+            if cancelled then return end
+            if not wire then
+                cb(nil, err)
+                return
+            end
+            local version = Mapper.bookVersion(wire)
+            if not version then
+                cb(nil, _("缺少书籍版本"))
+                return
+            end
+            Context.rememberBookVersion(bookId, version)
+            download(attempt, version)
+        end)
+        if not fired then call = next_call end
+    end
+    download = function(attempt, version)
+        local fired = false
+        local next_call = Eink.callAsync("GET", "/book/chapterdownload", {
+            raw = true,
+            query = {
+                bookId = bookId, chapters = chapters,
+                pf = "wechat_wx-2001-android-100-weread", pfkey = "pfKey", zoneId = "1",
+                bookVersion = version, bookType = book_type, quote = "", release = "1",
+                stopAutoPayWhenBNE = "1", preload = "0", preview = "0", offline = "0",
+                giftPayingCard = "0", enVersion = "10.2.2", modernVersion = "10.2.2", teenmode = "0",
+            },
+        }, function(res, err, meta)
+            fired = true
+            if cancelled then return end
+            if not res and attempt == 1 and meta and meta.errcode == -2063 then
+                local info = meta.body and meta.body.info
+                local next_version = type(info) == "table" and tonumber(info.bookVersion)
+                logger.warn("weread chapter book version expired", bookId, version, next_version)
+                if next_version and next_version > 0 and next_version ~= version then
+                    Context.rememberBookVersion(bookId, next_version)
+                    download(2, next_version)
+                else
+                    fetchVersion(2)
+                end
+                return
+            end
+            if not res then
+                cb(nil, err)
+                return
+            end
+            local body = res.body or ""
+            if body:sub(258, 262) == "ustar" then
+                job = Job.run(function()
+                    local text, terr = Package.chapterText(body, bookId, chapters)
+                    return { text = text, err = terr }
+                end, {
+                    name = "weread_chapter_package",
+                    kind = "light",
+                    timeout = 60,
+                    on_done = function(out) if not cancelled then cb(out.text, out.err) end end,
+                    on_failed = function(jerr) if not cancelled then cb(nil, tostring(jerr)) end end,
+                    on_cancelled = function() end,
+                })
+                return
+            end
+            local key = Request.header(res, "encryptKey")
+            local password = key and Package.password(Eink.credentials().vid, key)
+            if not password then
+                cb(nil, "chapterdownload: no encryptKey")
+                return
+            end
+            -- 解密 + 解压是逐字节纯 Lua，放子进程；包里的图片不回传（JSON 帧装不下二进制）
+            -- 样式表是文本，随章包顺手带回，避免整书 Styles/ 缺失时正文失去 text-indent。
             job = Job.run(function()
-                local text, terr = Package.chapterText(body, bookId, chapters)
-                return { text = text, err = terr }
+                local files, zerr = Package.unzip(body, password)
+                if not files then return { err = zerr } end
+                local text, perr = pick(files)
+                return { text = text, err = perr, style = Package.pickStyle(files) }
             end, {
                 name = "weread_chapter_package",
                 kind = "light",
                 timeout = 60,
-                on_done = function(out) cb(out.text, out.err) end,
-                on_failed = function(jerr) cb(nil, tostring(jerr)) end,
+                on_done = function(out) if not cancelled then cb(out.text, out.err, out.style) end end,
+                on_failed = function(jerr) if not cancelled then cb(nil, tostring(jerr)) end end,
                 on_cancelled = function() end,
             })
-            return
-        end
-        local key = Request.header(res, "encryptKey")
-        local password = key and Package.password(Eink.credentials().vid, key)
-        if not password then
-            cb(nil, "chapterdownload: no encryptKey")
-            return
-        end
-        -- 解密 + 解压是逐字节纯 Lua，放子进程；包里的图片不回传（JSON 帧装不下二进制）
-        -- 样式表是文本，随章包顺手带回，避免整书 Styles/ 缺失时正文失去 text-indent。
-        job = Job.run(function()
-            local files, zerr = Package.unzip(res.body, password)
-            if not files then return { err = zerr } end
-            local text, perr = pick(files)
-            return { text = text, err = perr, style = Package.pickStyle(files) }
-        end, {
-            name = "weread_chapter_package",
-            kind = "light",
-            timeout = 60,
-            on_done = function(out) cb(out.text, out.err, out.style) end,
-            on_failed = function(jerr) cb(nil, tostring(jerr)) end,
-            on_cancelled = function() end,
-        })
-    end)
+        end)
+        -- 同步回调可能已经发出了重试或解包，不能拿旧请求覆盖当前句柄。
+        if not fired then call = next_call end
+    end
+    local version = Context.bookVersion(bookId)
+    if version then download(1, version) else fetchVersion(1) end
     return { cancel = function()
-            call:cancel()
+            cancelled = true
+            if call then call:cancel() end
             if job then job:cancel() end
         end }
 end
@@ -134,7 +180,8 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
         if book_type == "txt" then
             -- 部分 TXT 章节以 ZIP 返回，正文条目可直接按书和章节定位。
             local text = Package.chapterZipText(files, bookId, uid)
-            if text then return text end
+            if not text then return nil, "zip: chapter " .. uid .. " not in package" end
+            return text
         end
         return Package.chapterHtml(files, uid)
     end, function(text, err, style)

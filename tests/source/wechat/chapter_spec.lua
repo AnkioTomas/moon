@@ -19,6 +19,9 @@ local app_err = nil
 local trial = false
 local bom = false
 local txt_zip = false
+local zip_text_missing = false
+local info_requests = {}
+local app_response
 
 package.preload["workers.job"] = function()
     return {
@@ -39,8 +42,17 @@ end
 package.preload["source.wechat.eink"] = function()
     return {
         credentials = function() return { vid = "42" } end,
-        callAsync = function(_method, _path, opts, cb)
-            queries[#queries + 1] = opts.query
+        callAsync = function(method, path, opts, cb)
+            if path == "/book/info" then
+                info_requests[#info_requests + 1] = opts.query
+            else
+                queries[#queries + 1] = opts.query
+            end
+            if app_response then return app_response(method, path, opts, cb) end
+            if path == "/book/info" then
+                cb({ book = { version = 7 } })
+                return { cancel = function() end }
+            end
             if app_err then
                 cb(nil, app_err)
             else
@@ -101,7 +113,7 @@ package.preload["source.wechat.package"] = function()
         end,
         chapterText = function() return PLAIN end,
         chapterZipText = function()
-            if txt_zip then return PLAIN end
+            if txt_zip and not zip_text_missing then return PLAIN end
             return nil
         end,
     }
@@ -124,6 +136,9 @@ for _, name in ipairs({
     package.loaded[name] = nil
 end
 local Chapter = require("source.wechat.chapter")
+local Context = require("source.wechat.context")
+Context.clear()
+Context.rememberBookVersion("book", 7)
 
 do
     -- EPUB：解码后的 xhtml 原样交出，不抽 body、不删虚线 / title、不改脚注；range 坐标原文同一份。
@@ -138,6 +153,7 @@ do
     Assert.eq(#queries, 1)
     Assert.eq(queries[1].bookType, "epub")
     Assert.eq(queries[1].chapters, "chapter")
+    Assert.eq(queries[1].bookVersion, 7)
 end
 
 do
@@ -273,4 +289,160 @@ do
     Assert.eq(format, "txt")
     Assert.is_true(body:find("<p>", 1, true) ~= nil)
     Assert.eq(queries[#queries].bookType, "txt")
+end
+
+do
+    -- 未缓存的书先拿真实版本，下一章直接复用，不把 0 当通用版本。
+    local before = #info_requests
+    Chapter.fetchHtmlAsync("fresh-book", { uid = "1" }, function(html, err)
+        Assert.is_nil(err)
+        Assert.eq(html, FULL)
+    end)
+    Assert.eq(queries[#queries].bookVersion, 7)
+    Chapter.fetchHtmlAsync("fresh-book", { uid = "2" }, function(html, err)
+        Assert.is_nil(err)
+        Assert.eq(html, FULL)
+    end)
+    Assert.eq(#info_requests, before + 1)
+end
+
+do
+    -- -2063 的 info.bookVersion 直接用于唯一一次重试，不额外拉详情。
+    local attempts, callbacks, before = 0, 0, #info_requests
+    Context.rememberBookVersion("updated-book", 3)
+    app_response = function(_method, path, opts, cb)
+        Assert.eq(path, "/book/chapterdownload")
+        attempts = attempts + 1
+        if attempts == 1 then
+            Assert.eq(opts.query.bookVersion, 3)
+            cb(nil, "version expired", { errcode = -2063, body = { info = { bookVersion = "8" } } })
+        else
+            Assert.eq(opts.query.bookVersion, 8)
+            cb({ body = "PK", code = 200 })
+        end
+        return { cancel = function() end }
+    end
+    Chapter.fetchHtmlAsync("updated-book", { uid = "1" }, function(html, err)
+        callbacks = callbacks + 1
+        Assert.is_nil(err)
+        Assert.eq(html, FULL)
+    end)
+    app_response = nil
+    Assert.eq(attempts, 2)
+    Assert.eq(callbacks, 1)
+    Assert.eq(#info_requests, before)
+    Assert.eq(Context.bookVersion("updated-book"), 8)
+end
+
+do
+    -- 回包没有可用新版本（包括 0）时刷新详情；第二次过期直接失败。
+    for i, info in ipairs({ {}, { bookVersion = "0" }, { bookVersion = "bad" }, { bookVersion = "4" } }) do
+        local book_id = "expired-book-" .. i
+        local attempts, details, callbacks = 0, 0, 0
+        Context.rememberBookVersion(book_id, 4)
+        app_response = function(_method, path, opts, cb)
+            if path == "/book/info" then
+                details = details + 1
+                cb({ book = { version = 9 } })
+            else
+                attempts = attempts + 1
+                Assert.eq(opts.query.bookVersion, attempts == 1 and 4 or 9)
+                cb(nil, "version expired", { errcode = -2063, body = { info = info } })
+            end
+            return { cancel = function() end }
+        end
+        Chapter.fetchHtmlAsync(book_id, { uid = "1" }, function(html, err)
+            callbacks = callbacks + 1
+            Assert.is_nil(html)
+            Assert.eq(err, "version expired")
+        end)
+        app_response = nil
+        Assert.eq(attempts, 2)
+        Assert.eq(details, 1)
+        Assert.eq(callbacks, 1)
+    end
+end
+
+do
+    -- 获取版本失败或详情缺字段，必须交出错误，不能假装成功或盲发版本 0。
+    for i, reply in ipairs({ { err = "network failed" }, { wire = {}, err = "缺少书籍版本" } }) do
+        local before = #queries
+        app_response = function(_method, path, _opts, cb)
+            Assert.eq(path, "/book/info")
+            cb(reply.wire, reply.wire and nil or reply.err)
+            return { cancel = function() end }
+        end
+        Chapter.fetchHtmlAsync("bad-info-" .. i, { uid = "1" }, function(html, err)
+            Assert.is_nil(html)
+            Assert.eq(err, reply.err)
+        end)
+        app_response = nil
+        Assert.eq(#queries, before)
+    end
+end
+
+do
+    -- 详情获取与过期恢复都能取消；迟来的回调不能继续下载或通知结果。
+    for _idx, phase in ipairs({ "initial-info", "retry-download", "refresh-info" }) do
+        local book_id = "cancel-" .. phase
+        local pending, cancelled_path, callbacks
+        callbacks = 0
+        if phase ~= "initial-info" then Context.rememberBookVersion(book_id, 4) end
+        local attempts = 0
+        app_response = function(_method, path, _opts, cb)
+            if path == "/book/chapterdownload" then
+                attempts = attempts + 1
+                if attempts == 1 then
+                    local info = phase == "retry-download" and { bookVersion = 9 } or {}
+                    cb(nil, "version expired", { errcode = -2063, body = { info = info } })
+                    return { cancel = function() error("cancelled stale request") end }
+                end
+            end
+            pending = cb
+            return { cancel = function() cancelled_path = path end }
+        end
+        local handle = Chapter.fetchHtmlAsync(book_id, { uid = "1" }, function() callbacks = callbacks + 1 end)
+        Assert.not_nil(pending)
+        handle:cancel()
+        Assert.eq(cancelled_path, phase == "retry-download" and "/book/chapterdownload" or "/book/info")
+        local before = #queries
+        if phase == "retry-download" then pending({ body = "PK", code = 200 })
+        else pending({ book = { version = 9 } }) end
+        Assert.eq(#queries, before)
+        Assert.eq(callbacks, 0)
+        app_response = nil
+    end
+end
+
+do
+    -- 已开始解包也能取消，Job 的迟到完成/失败不能再交出结果。
+    local Job = require("workers.job")
+    local run = Job.run
+    for _idx, format in ipairs({ "epub", "txt" }) do
+        local pending, cancelled, callbacks = nil, false, 0
+        Job.run = function(_fn, opts)
+            pending = opts
+            return { cancel = function() cancelled = true end }
+        end
+        local handle = Chapter.fetchHtmlAsync("book", { uid = "1", format = format }, function()
+            callbacks = callbacks + 1
+        end)
+        Assert.not_nil(pending)
+        handle:cancel()
+        Assert.is_true(cancelled)
+        pending.on_done({ text = format == "txt" and PLAIN or FULL })
+        pending.on_failed("late failure")
+        Assert.eq(callbacks, 0)
+    end
+    Job.run = run
+end
+
+do
+    -- TXT ZIP 缺正文就报包错误，不能退回 EPUB 清单。
+    txt_zip, zip_text_missing = true, true
+    Chapter.fetchHtmlAsync("book", { uid = "1595", format = "txt" }, function(html, err)
+        Assert.is_nil(html)
+        Assert.matches(err, "zip: chapter 1595 not in package")
+    end)
+    txt_zip, zip_text_missing = false, false
 end
