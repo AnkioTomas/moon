@@ -27,9 +27,13 @@ function Toc.current(session)
     if session.identity.chapter_idx ~= nil then
         local idx = tonumber(session.identity.chapter_idx)
         if not idx then return nil end
+        -- 目录里可能有标题为空的章节（reader3 的 EPUB 就出现过 title=""），
+        -- Chapter.chapterTitle 对空标题返回 nil。原来这里直接 return nil，导致
+        -- Session.chapterIndex() 变成 nil，进而把 nil 页码传给 KOReader 的
+        -- ReaderToc:getTocIndexByPage，触发 "attempt to compare nil with number"。
+        -- 标题只用于显示，不能因为没标题就把当前章判成不存在。
         local title = Chapter.chapterTitle(session)
-        if not title then return nil end
-        return { idx = idx, title = title }
+        return { idx = idx, title = title or ("#" .. tostring(idx)) }
     end
     return DocumentToc.current(session.ui)
 end
