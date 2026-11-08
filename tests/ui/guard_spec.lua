@@ -75,6 +75,8 @@ Assert.matches(logged[1], "stack traceback")
 Assert.len(shown, 1)
 local dialog = shown[1]
 Assert.eq(dialog.title, "月读出错了")
+Assert.matches(dialog.text, "反馈给开发者")
+Assert.matches(dialog.text, "归属：月读")
 for _, want in ipairs({ "1%.2%.3", "2026%.07", "KindlePW5", "feature bars%.onCreate", "boom" }) do
     Assert.matches(dialog.text, want)
 end
@@ -82,8 +84,21 @@ end
 -- 复制按钮：剪贴板拿到报告（不含给用户的引导语），并提示
 dialog.buttons[2].callback()
 Assert.matches(clipboard, "boom")
+Assert.matches(clipboard, "归属：月读")
 Assert.is_nil(clipboard:find("反馈给开发者", 1, true))
 Assert.eq(toasts, 1)
+
+-- 归属解析：其它 .koplugin 归对方；跳过 guard 自身与本插件
+Assert.is_nil(Guard.foreignPlugins("stack traceback:\n\t/mnt/us/koreader/plugins/book.koplugin/ui/foo.lua:1: in function 'x'"))
+Assert.is_nil(Guard.foreignPlugins("stack traceback:\n\t/mnt/us/koreader/plugins/book.koplugin/ui/guard.lua:10: in function 'call'"))
+local foreign = Guard.foreignPlugins(table.concat({
+    "stack traceback:",
+    "\t[C]: in function 'error'",
+    "\t/mnt/us/koreader/plugins/weather.koplugin/main.lua:42: in function 'refresh'",
+    "\t/mnt/us/koreader/plugins/book.koplugin/ui/guard.lua:87: in function 'call'",
+}, "\n"))
+Assert.eq(#foreign, 1)
+Assert.eq(foreign[1], "weather.koplugin")
 
 -- 错误页还在：后续错误只记日志，不叠窗
 Guard.call("again", function() error("second") end)
@@ -140,3 +155,21 @@ local painted
 Guard.paint("xray.paintTo", function(bb, x) painted = { bb, x } end, "bb", 3)
 Assert.eq(painted[1], "bb")
 Assert.eq(painted[2], 3)
+
+-- 其它插件：换标题与引导，复制内容带归属（假堆栈）
+shown[#shown]:close()
+local real_tb = debug.traceback
+debug.traceback = function(msg)
+    return tostring(msg) .. "\nstack traceback:\n\t/tmp/plugins/maps.koplugin/init.lua:3: in function 'draw'\n\t/tmp/plugins/book.koplugin/ui/guard.lua:1: in function 'call'"
+end
+Guard.call("feature panel", function() error("foreign boom") end)
+debug.traceback = real_tb
+local foreign_dialog = shown[#shown]
+Assert.eq(foreign_dialog.title, "其它插件出错了")
+Assert.matches(foreign_dialog.text, "插件「maps」")
+Assert.matches(foreign_dialog.text, "反馈给该插件的作者")
+Assert.matches(foreign_dialog.text, "归属：其它插件 maps%.koplugin")
+foreign_dialog.buttons[2].callback()
+Assert.matches(clipboard, "归属：其它插件 maps%.koplugin")
+Assert.is_nil(clipboard:find("反馈给该插件的作者", 1, true))
+foreign_dialog:close()
