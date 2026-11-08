@@ -13,6 +13,49 @@ Stubs.reset()
 
 local Text2Epub = require("convert.text2epub")
 
+do
+    for _idx, reflow in ipairs({ false, true }) do
+        local book = Text2Epub.parse("第一章\n \t　\194\160　第一段。\n第二段。", { reflow = reflow })
+        Assert.is_true(book.chapters[1].html:find("<p>第一段。</p>", 1, true) ~= nil,
+            "硬换行与重新排版都只用 CSS 缩进")
+        Assert.is_true(book.chapters[1].html:find("<p>第二段。</p>", 1, true) ~= nil)
+    end
+end
+
+do
+    local book = Text2Epub.parse("雨夜\n甲。\n归途\n乙。", {
+        title = "书",
+        reflow = true,
+        headings = {
+            { title = "第一卷", depth = 1 },
+            { title = "雨夜", depth = 2 },
+            { title = "归途", depth = 2 },
+        },
+    })
+    Assert.len(book.chapters, 3)
+    Assert.eq(book.chapters[1].title, "第一卷")
+    Assert.eq(book.chapters[1].depth, 1)
+    Assert.eq(book.chapters[2].depth, 2)
+    Assert.eq(book.chapters[3].depth, 2)
+    Assert.is_true(book.chapters[2].html:find("<p>甲。</p>", 1, true) ~= nil)
+    Assert.is_true(book.chapters[3].html:find("<p>乙。</p>", 1, true) ~= nil)
+end
+
+do
+    local book = Text2Epub.parse(table.concat({
+        "第一卷 起卷", "第一章", "甲。", "第二章", "乙。",
+        "第一卷", "卷末提及。", "第二卷", "第一章", "丙。",
+    }, "\n"), { title = "书", reflow = true })
+    Assert.len(book.chapters, 5)
+    Assert.eq(book.chapters[3].title, "第二章")
+    Assert.is_true(book.chapters[3].html:find("<p>第一卷</p>", 1, true) ~= nil)
+    Assert.is_true(book.chapters[3].html:find("<p>卷末提及。</p>", 1, true) ~= nil)
+    Assert.eq(book.chapters[4].title, "第二卷")
+    Assert.eq(book.chapters[4].depth, 1)
+    Assert.eq(book.chapters[5].title, "第一章")
+    Assert.eq(book.chapters[5].depth, 2)
+end
+
 -- 元数据、中文章节和 XHTML 排版
 do
     local book = Text2Epub.parse([[

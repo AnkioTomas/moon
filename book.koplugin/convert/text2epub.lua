@@ -34,10 +34,28 @@ local MIN_LISTING = 3
 local TOC_HEADERS = { ["目录"] = true, ["目錄"] = true, ["content"] = true, ["contents"] = true, ["table of contents"] = true }
 local INVALID_VOLUME_SUFFIX = { ["门"] = true, ["队"] = true, ["属"] = true, ["分"] = true, ["件"] = true, ["落"] = true }
 
+--- 段首的全角空格只用来识别分段，缩进交给生成的 EPUB 样式。
+---@param raw string
+---@return string line, boolean indented
+local function paragraphLine(raw)
+    local line = trim(raw)
+    local indented = false
+    while true do
+        if line:sub(1, 3) == "　" then
+            line = line:sub(4):gsub("^%s+", "")
+            indented = true
+        elseif line:sub(1, 2) == "\194\160" then
+            line = line:sub(3):gsub("^%s+", "")
+        else
+            return line, indented
+        end
+    end
+end
+
 ---@param line string
 ---@return string|nil
 local function chapterTitle(line)
-    line = trim(line)
+    line = paragraphLine(line)
     -- 常见 TXT 章节会用 === 包裹标题；这里只剥离等号，避免吞掉正文。
     line = line:gsub("^=+%s*", ""):gsub("%s*=+$", "")
 
@@ -89,24 +107,6 @@ local function isHardLine(line)
         or line:match("^%s*[“\"「『]") ~= nil
 end
 
---- 段首的全角空格只用来识别分段，缩进交给生成的 EPUB 样式。
----@param raw string
----@return string line, boolean indented
-local function paragraphLine(raw)
-    local line = trim(raw)
-    local indented = false
-    while true do
-        if line:sub(1, 3) == "　" then
-            line = line:sub(4):gsub("^%s+", "")
-            indented = true
-        elseif line:sub(1, 2) == "\194\160" then
-            line = line:sub(3):gsub("^%s+", "")
-        else
-            return line, indented
-        end
-    end
-end
-
 --- 将物理行合并为段落。TXT 的换行常是编辑器软换行，不能逐行生成 p。
 ---@param lines string[]
 ---@param reflow boolean|nil
@@ -115,7 +115,7 @@ local function paragraphsFromLines(lines, reflow)
     local paragraphs = {}
     if not reflow then
         for _idx, raw in ipairs(lines) do
-            local line = trim(raw)
+            local line = paragraphLine(raw)
             if line ~= "" then
                 paragraphs[#paragraphs + 1] = { line }
             end
