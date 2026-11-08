@@ -203,9 +203,27 @@ local function fetcher(self, open)
         local start_pid = chapter.slice and tonumber(chapter.uid) or nil
         local end_pid = chapter.slice and tonumber(chapter.end_pid) or nil
         return Client.textAsync(chapter.content_url, start_pid, end_pid, function(text, err)
-            if text then done({ title = chapter.title, html = Text.chapterHtml(chapter.title, text) }); return end
+            if text then
+                local html = Text.chapterHtml(chapter.title, text)
+                if not chapter.slice and self:paragraphReviewsEnabled() then
+                    html = require("book.review_locate").prepareChapterEnd(html)
+                end
+                done({ title = chapter.title, html = html })
+                return
+            end
             done(nil, err)
         end)
+    end
+end
+
+local function reuseChapterEnd(self, identity)
+    if not self:paragraphReviewsEnabled() then return nil end
+    return function(path)
+        local toc = Toc.read(self.id, identity.stable_id)
+        if toc and toc[1] and not toc[1].slice then
+            return require("book.review_locate").reuseChapterEnd(path)
+        end
+        return true
     end
 end
 
@@ -215,6 +233,7 @@ function Source:openBookAsync(identity, opts, cb)
     return open(self, identity, identity.book, opts, {
         loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
         fetchContent = fetcher(self, true),
+        reuse = reuseChapterEnd(self, identity),
     }, cb)
 end
 
@@ -222,12 +241,14 @@ function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
     local Chapter = require("source.chapter")
     return Chapter.prefetchAsync(identity, identity.book, toc, from_idx, count, {
         fetchContent = fetcher(self, false),
+        reuse = reuseChapterEnd(self, identity),
     }, cb)
 end
 
 function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
     local Chapter = require("source.chapter")
-    return Chapter.cacheAllAsync(self, identity, fetcher(self, false), on_progress, cb, nil, range)
+    return Chapter.cacheAllAsync(self, identity, fetcher(self, false), on_progress, cb, nil, range,
+        reuseChapterEnd(self, identity))
 end
 
 ---@param toc BookChapter[]
@@ -392,7 +413,15 @@ function Source:locateHotspots(hotspots, html)
     return ReviewLocate.locate(ReviewLocate.paragraphs(html), hotspots, html)
 end
 
-function Source:paragraphReviewPageAsync(identity, range, _max_idx, cb)
+function Source:paragraphReviewPageAsync(identity, range, max_idx, cb)
+    if range == "chapter" then
+        return require("book.review_cache").pageAsync(identity, range, max_idx, function(done)
+            return require("source.with_chapter_uid").run(self, identity, _("豆瓣阅读目录为空"),
+                function(uid, finish)
+                    return Client.communityAsync(identity.stable_id, uid, max_idx, finish)
+                end, done)
+        end, cb)
+    end
     local cancelled, chapter_job, review_job = false, nil, nil
     chapter_job = chapterOf(self, identity, function(chapter, err)
         if cancelled then return end
@@ -406,6 +435,23 @@ function Source:paragraphReviewPageAsync(identity, range, _max_idx, cb)
         if chapter_job then chapter_job.cancel() end
         if review_job then review_job.cancel() end
     end }
+end
+
+function Source:bookReviewsAsync(identity, cb)
+    local ref = { source_id = self.id, stable_id = identity.stable_id }
+    return require("book.review_cache").pageAsync(ref, "book", 0, function(done)
+        return Client.communityAsync(identity.stable_id, nil, 0, done)
+    end, cb)
+end
+
+function Source:chapterReviewHotspotsAsync(identity, cb)
+    return self:paragraphReviewPageAsync(identity, "chapter", 0, function(page, err)
+        if not page then cb(nil, err); return end
+        if page.unsupported then cb({}); return end
+        cb({ { range = "chapter", text = identity.book and identity.book.title or "",
+            total = page.total, badge = tostring(page.total), heading = _("章节评论"),
+            anchor = require("book.review_locate").CHAPTER_ANCHOR } })
+    end)
 end
 
 return Douban

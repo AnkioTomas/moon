@@ -758,4 +758,56 @@ function Mapper.readingStats(wire, begin_date, fetched_at)
     }
 end
 
+---@param wire table
+---@param offset integer
+---@param chapter_id string|nil
+---@return table|nil, string|nil
+function Mapper.communityPage(wire, offset, chapter_id)
+    if type(wire) == "table" and type(wire.errors) == "table" then
+        for _idx, err in ipairs(wire.errors) do
+            if type(err) == "table" and err.message == "AnonymousError" then
+                return nil, _("请先登录豆瓣阅读")
+            end
+        end
+    end
+    local works = type(wire) == "table" and type(wire.data) == "table" and wire.data.works
+    local comments = type(works) == "table" and works.comments
+    local rows = type(comments) == "table" and comments.list
+    local total = type(comments) == "table" and tonumber(comments.total)
+    if type(wire) ~= "table" or wire.errors ~= nil and (type(wire.errors) ~= "table" or #wire.errors > 0)
+        or type(rows) ~= "table"
+        or not total or total < 0 or #rows == 0 and offset < total then
+        return nil, _("响应无效")
+    end
+    local items = {}
+    for _idx, row in ipairs(rows) do
+        local scope = type(row) == "table" and row.works
+        local stamp = type(row) == "table" and type(row.createTime) == "string"
+            and row.createTime:match("^%d%d%d%d%-%d%d%-%d%d")
+        if type(row) ~= "table" or (type(row.id) ~= "string" and type(row.id) ~= "number")
+            or row.id == "" or type(row.content) ~= "string"
+            or not stamp or type(scope) ~= "table"
+            or row.commentType ~= (chapter_id and "Discussion" or "Review")
+            or chapter_id and (scope.isChapter ~= true or tostring(scope.id) ~= chapter_id)
+            or not chapter_id and scope.isChapter ~= false then
+            return nil, _("响应无效")
+        end
+        local content = Text.stripHtml(row.content)
+        if type(row.title) == "string" and row.title ~= "" then
+            content = row.title .. "\n" .. content
+        end
+        local user = type(row.user) == "table" and row.user or {}
+        items[#items + 1] = {
+            id = tostring(row.id), author = type(user.name) == "string" and user.name or "",
+            text = content, content = content, time = stamp,
+            likes = tonumber(row.upvoteCount), grade = tonumber(row.rating),
+            replies = 0,
+        }
+    end
+    local next_idx = offset + #rows
+    return { items = items, total = total, max_idx = next_idx, more = next_idx < total,
+        pages = math.max(1, math.ceil(total / 20)),
+        title = not chapter_id and (#items < total and _("书评预览") or _("书评")) or nil }
+end
+
 return Mapper

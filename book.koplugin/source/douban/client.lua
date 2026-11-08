@@ -294,13 +294,13 @@ end
 ---@param works_id string
 ---@param cb fun(target: table|nil, err: string|nil)
 ---@return HttpJob
-local function accessAsync(works_id, cb)
+local function accessAsync(works_id, cb, public)
     return jsonCall("POST", READ .. "/j/graphql", Mapper.worksBody(works_id, Mapper.ACCESS_HASH), function(wire, err)
         if not wire then cb(nil, err); return end
         local target = Mapper.reader(Mapper.readerUrl(wire))
         if not target then cb(nil, _("请求失败")); return end
         cb(target)
-    end)
+    end, public)
 end
 
 ---@param works_id string
@@ -768,6 +768,52 @@ function Login:finishQrAsync(authorize, cb)
         end, self)
     end, self)
     if not advanced then job = first end
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
+end
+
+---@param works_id string
+---@param chapter_id string|nil
+---@param offset integer
+---@param cb fun(page: table|nil, err: string|nil)
+---@return HttpJob
+function Client.communityAsync(works_id, chapter_id, offset, cb)
+    if offset > 0 and not Client.loggedIn() then
+        return require("source.base").defer(cb, nil, _("请先登录豆瓣阅读"))
+    end
+    local cancelled, job, pending = false, nil, true
+    local function fetch(column_id)
+        local body = Mapper.worksBody(works_id,
+            "sha256:ec47b1cca2876392e72ca83dd4d59b12e2e27b72366d2c1b7a8e9ff672f4bb7c")
+        if chapter_id then
+            body.extensions.persistedQuery.sha256Hash =
+                "sha256:161b3ceea6f04246919461367c6c071d62020836125a9ba6c42022295717a30a"
+            body.variables.worksId = nil
+            body.variables.columnId = column_id
+            body.variables.chapterId = chapter_id
+        end
+        body.variables.start, body.variables.limit = offset, 20
+        body.variables.sort, body.variables.isAdmin = "TIME_DESC", false
+        return jsonCall("POST", READ .. "/j/graphql", body, function(wire, err)
+            if cancelled then return end
+            if not wire then cb(nil, err); return end
+            cb(Mapper.communityPage(wire, offset, chapter_id))
+        end, offset == 0)
+    end
+    if not chapter_id then return fetch() end
+    local first = accessAsync(works_id, function(target, err)
+        pending = false
+        if cancelled then return end
+        if not target then cb(nil, err); return end
+        if target.kind ~= "column" then
+            cb({ items = {}, total = 0, more = false, max_idx = offset, unsupported = true })
+            return
+        end
+        job = fetch(target.column_id)
+    end, true)
+    if pending then job = first end
     return { cancel = function()
         cancelled = true
         if job then job.cancel() end
