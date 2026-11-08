@@ -189,7 +189,17 @@ local function readTextEntries(entries, book_id, uid)
             parts[#parts + 1] = entry
         end
     end
-    table.sort(parts, function(a, b) return a.name < b.name end)
+    -- TAR 主文件是 bookId_uid；ZIP 主文件常见 bookId_uid_o。二者都排在 _000N 续篇前。
+    local function rank(entry)
+        local name = entry.name:match("([^/]+)$")
+        if name == prefix or name == prefix .. "_o" then return "" end
+        return name:sub(#prefix + 2)
+    end
+    table.sort(parts, function(a, b)
+        local ra, rb = rank(a), rank(b)
+        if ra ~= rb then return ra < rb end
+        return a.name < b.name
+    end)
     if #parts == 0 then return nil end
     local chunks = {}
     for i, entry in ipairs(parts) do

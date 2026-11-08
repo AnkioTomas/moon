@@ -42,6 +42,29 @@ local miss, merr = Composed.chapterHtml(book, 99)
 Assert.is_nil(miss)
 Assert.matches(merr, "not in package")
 
+-- TXT 走 ZIP 时 info.txt 只有 chapterUid、没有 files：不能再索引 files[1] 崩掉。
+package.loaded["json"] = {
+    decode = function()
+        return { chapters = { { chapterUid = 1595 } } }
+    end,
+}
+package.loaded["source.wechat.package"] = nil
+local NoFiles = require("source.wechat.package")
+local bare, bare_err = NoFiles.chapterHtml({ ["info.txt"] = "bare" }, 1595)
+Assert.is_nil(bare)
+Assert.matches(bare_err, "no HTML files")
+
+-- ZIP 解开后的 map：正文条目 bookId_uid / bookId_uid_o（实机样本）及续篇。
+local zip_map = {
+    ["info.txt"] = '{"chapters":[{"chapterUid":1595}]}',
+    ["820954_1595_o"] = "\239\187\191甲",
+    ["820954_1595_0001"] = "乙",
+    ["820954_1596_o"] = "别章",
+}
+Assert.eq(Package.chapterZipText(zip_map, "820954", 1595), "甲乙", "_o 主文件须排在 _0001 续篇前")
+Assert.is_nil(Package.chapterZipText(zip_map, "820954", 9))
+Assert.is_nil(Package.chapterZipText({ ["info.txt"] = "{}" }, "820954", 1))
+
 local function tarHeader(name, size)
     local h = string.rep("\0", 512)
     local function poke(off, s)
