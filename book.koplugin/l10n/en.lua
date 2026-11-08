@@ -1,4 +1,10 @@
 return {
+    ["使用指南"] = "User guide",
+    ["先在账号页登录要用的书源。要看看使用指南吗？\n之后也可以在「设置 → 设备 → 我的设备 → 使用指南」打开。"] = "Sign in to your book source on the Accounts page first. Would you like to view the user guide?\nYou can also open it later from Settings → Device → My device → User guide.",
+    ["官网用户手册"] = "Official user manual",
+    ["帮助"] = "Help",
+    ["打开官网对应说明"] = "Open the relevant guide on the official website",
+    ["查看指南"] = "View guide",
     ["等待选择阅读进度"] = "Waiting for a reading position choice",
     ["账号已变化，请重新登录"] = "The account has changed. Please sign in again",
     ["标签"] = "Tags",

@@ -85,6 +85,7 @@ package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
 package.preload["gettext"] = function() return function(s) return s end end
+package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["ffi/util"] = function()
     return { template = function(fmt, a, b) return fmt:gsub("%%1", tostring(a)):gsub("%%2", tostring(b or "")) end }
 end
