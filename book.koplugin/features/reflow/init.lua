@@ -9,7 +9,7 @@
 文字来源：TXT 直接读文件（保留原始换行，章节识别最准）；流式书优先整棵 DOM 一次倒出再剥成纯文本，
 失败或固定版式（PDF/DjVu）再逐页取字（见 extract）。读文件、章节识别、打包都在子进程里；
 取字仍在 UI 线程（文档对象出不了主进程）。取字、识别、打包串成一个可转后台的 convert 任务。
-章节：原文档自带目录（`ui.toc`）的标题整行命中即切章，没有目录或标题对不上的再按常见章节写法识别。
+章节：原目录（`ui.toc`）的标题整行命中即切章，并保留原有层级；目录平铺或缺失时按卷章标题分组。
 
 身份：排版版是同一本书的另一个文件，books.path 不动。开书时按 meta.json 解析回同一身份，
 进度、统计都记在这本书上；上次读的版本记在原书 sidecar（`DerivedNote.remember`），桌面开书时恢复。排版版结构和原书不同，xpointer 不通用，切换时按全书比例落位；
@@ -114,7 +114,7 @@ end
 
 ---@param origin string 原书路径
 ---@param identity BookIdentity
----@param headings string[]
+---@param headings { title: string, depth: integer|nil }[]
 ---@return table
 local function buildOpts(origin, identity, headings)
     local book = identity.book
@@ -128,14 +128,16 @@ local function buildOpts(origin, identity, headings)
     }
 end
 
---- 原文档自带目录的标题。
+--- 保留原文档的目录层级，供 EPUB 重建目录。TXT 的自动目录可能已拆过合写标题，
+--- 与原文件不再逐项对应；仍用它提供标题，但卷章关系按原文重新判断。
 ---@param ui table ReaderUI
----@return string[]
-local function tocHeadings(ui)
+---@param keep_depth boolean
+---@return { title: string, depth: integer|nil }[]
+local function tocHeadings(ui, keep_depth)
     ui.toc:fillToc()
     local headings = {}
     for _idx, item in ipairs(ui.toc.toc) do
-        headings[#headings + 1] = item.title
+        headings[#headings + 1] = { title = item.title, depth = keep_depth and item.depth or nil }
     end
     return headings
 end
@@ -154,7 +156,8 @@ function Reflow.runAsync(ui, identity, cb, on_progress)
     local Paths = require("utils.paths")
     local Extract = require("features.reflow.extract")
     local origin = ui.document.file
-    local opts = buildOpts(origin, identity, tocHeadings(ui))
+    local is_txt = origin:lower():match("%.txt$") ~= nil
+    local opts = buildOpts(origin, identity, tocHeadings(ui, not is_txt))
     local dir = workDir(identity)
     local dest = dir .. "/book.epub"
     opts.dest = dest
@@ -202,7 +205,7 @@ function Reflow.runAsync(ui, identity, cb, on_progress)
         end, on_progress)
     end
 
-    if origin:lower():match("%.txt$") then
+    if is_txt then
         build(nil)
     else
         local reportExtract
