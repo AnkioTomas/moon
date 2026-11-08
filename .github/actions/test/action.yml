@@ -33,26 +33,31 @@ runs:
         ARCHIVE="$RUNNER_TEMP/moon-koreader.tar.xz"
         RUNTIME="$PWD/koreader/koreader-emulator-ci-debug/koreader"
 
+        # browser URL 常 504；API + token 走另一条链路，优先它。
         download() {
           local url="$1"; shift
           local tmp="$ARCHIVE.download"
           rm -f "$tmp"
-          curl --fail --location --retry 8 --retry-delay 5 --retry-all-errors \
+          if ! curl --fail --location --retry 5 --retry-delay 3 --retry-all-errors \
             --connect-timeout 20 --max-time 300 \
             "$@" -o "$tmp" "$url"
+          then
+            rm -f "$tmp"
+            return 1
+          fi
           mv "$tmp" "$ARCHIVE"
         }
 
         if [[ ! -f "$ARCHIVE" ]]; then
           echo "KOReader archive cache miss; downloading…"
           if ! download \
-            "https://github.com/koreader/koreader/releases/download/${VER}/koreader-linux-x86_64-${VER}.tar.xz"
+            "https://api.github.com/repos/koreader/koreader/releases/assets/${ASSET_ID}" \
+            -H "Accept: application/octet-stream" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}"
           then
-            echo "Browser URL failed; trying GitHub API asset download…"
+            echo "API asset failed; trying browser download URL…"
             download \
-              "https://api.github.com/repos/koreader/koreader/releases/assets/${ASSET_ID}" \
-              -H "Accept: application/octet-stream" \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "https://github.com/koreader/koreader/releases/download/${VER}/koreader-linux-x86_64-${VER}.tar.xz" \
             || rm -f "$ARCHIVE"
           fi
         else
@@ -68,6 +73,7 @@ runs:
         else
           # Release CDN 全挂时：源码树有 frontend，native 走测试 stub。
           echo "Release asset unavailable; cloning KOReader ${VER} frontend from git"
+          rm -rf koreader
           git clone --depth 1 --branch "$VER" \
             https://github.com/koreader/koreader.git koreader
           test -f koreader/frontend/ui/uimanager.lua
