@@ -326,6 +326,7 @@ layouts.bottom = { { id = "battery", align = "right" } }
 Bars.events.FrontlightStateChanged(plugin)
 Assert.len(dirty, 2)
 Assert.eq(dirty[1].widget, "reader-dialog")
+Assert.eq(dirty[1].mode, "ui", "栏刷新是带矩形的局部刷新")
 Assert.eq(dirty[1].rect.h, 28 + 12, "顶栏 = 页眉 + 额外高度")
 Assert.eq(dirty[2].rect.y, 768 - 4, "底栏向上让出内缩")
 Assert.eq(dirty[2].rect.h, 32 + 4)
