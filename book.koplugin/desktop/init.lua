@@ -72,7 +72,7 @@ local Tabbar = require("ui.themes.widgets.tabbar")
 ---@field _tabs table[]
 ---@field _shell string|nil 外壳签名：屏幕尺寸 / 主题 / 缩放
 ---@field _books_sync table<string, { cancel: { cancel: fun(self) }|nil }> 源 id → 在飞书架同步（desktop.sync）
----@field _stats_sync table<string, boolean> 源 id → 统计同步在飞
+---@field _stats_sync table<string, { cancel: { cancel: fun(self) }|nil }> 源 id → 在飞统计同步（desktop.sync）
 local Desktop = InputContainer:extend{
     name = "book_desktop",
     -- 月读自己的窗口：退出兜底（BookPlugin:onExit）按此标记清理残留
@@ -363,6 +363,11 @@ function Desktop:destroy()
     } }
     if self.active then self:deactivate() end
     self.closed = true
+    local stats = self._stats_sync
+    self._stats_sync = {}
+    for _source_id, flight in pairs(stats) do
+        if flight.cancel and flight.cancel.cancel then flight.cancel:cancel() end
+    end
     -- 桌面打开的子窗口一并关掉，否则退出时残留在窗口栈上，KOReader 等不到空栈不退出。
     -- 先摘引用再关：子窗口的 close_callback 见 desktop.closed 直接返回，不会回头重画桌面。
     local overlay, detail = self.settings_overlay, self.detail

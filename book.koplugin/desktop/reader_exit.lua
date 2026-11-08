@@ -12,6 +12,7 @@
 
 local UIManager = require("ui/uimanager")
 local Perf = require("utils.perf")
+local Guard = require("ui.guard")
 
 local ReaderExit = {}
 
@@ -22,7 +23,7 @@ function ReaderExit.attach(ui)
     ui._book_back_attached = true
     for _idx, handler in ipairs({ "onKeyPress", "onKeyRepeat" }) do
         local original = ui[handler]
-        ui[handler] = function(self, key)
+        ui[handler] = Guard.wrap("reader exit " .. handler, function(self, key)
             if require("utils.settings").get("reader").back_to_desktop == true
                 and key:match({ require("device").input.group.Back }) then
                 if not require("ui.input").isTop(self.dialog or self) then return false end
@@ -32,14 +33,14 @@ function ReaderExit.attach(ui)
                 end
             end
             return original(self, key)
-        end
+        end)
     end
 end
 
 --- 下一 tick 关闭文档并回到月读桌面（点击调用栈里不能同步关文档）。
 ---@param ui table|nil ReaderUI
 function ReaderExit.closeToDesktop(ui)
-    UIManager:nextTick(require("ui.guard").wrap("close to desktop", function()
+    UIManager:nextTick(Guard.wrap("close to desktop", function()
         local started_at = Perf.now()
         -- DocCache:serialize 按 lfs access 时间排序磁盘缓存，文件已被删就是 nil，排序直接崩；先摘掉失效项。
         local DocCache = require("document/doccache")
@@ -83,11 +84,11 @@ function ReaderExit.install()
         if not tab or tab._book_drawer_patched then return end
         tab._book_drawer_patched = true
         local native = tab.callback
-        tab.callback = function()
+        tab.callback = Guard.wrap("reader exit drawer", function()
             if not ReaderExit.drawerOpensDesktop() then return native() end
             self:onTapCloseMenu()
             ReaderExit.closeToDesktop(self.ui)
-        end
+        end)
     end
 end
 

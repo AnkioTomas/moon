@@ -493,4 +493,72 @@ do
     task.cancel()
 end
 
+-- 统计句柄归桌面：旧桌面回包不清新句柄，取消不串桌面，迟到回包不清后继请求。
+do
+    local requests = {}
+    local stat_source = setmetatable({
+        id = "stats_race", name = "Stats",
+        configured = function() return true end,
+        capabilities = function() return { stats_pull = true } end,
+        syncBooksAsync = function(_self, _opts, cb)
+            cb({ skipped = true })
+            return { cancel = function() end }
+        end,
+        syncStatsAsync = function(_self, _opts, cb)
+            local request = { cb = cb, cancelled = 0 }
+            requests[#requests + 1] = request
+            return { cancel = function()
+                request.cancelled = request.cancelled + 1
+                cb({ pulled = 1 })
+            end }
+        end,
+    }, { __index = SourceBase })
+    local events = 0
+    local function owner()
+        return { source = stat_source, tab = "home", _books_sync = {}, _stats_sync = {},
+            onEvent = function() events = events + 1 end, updateView = function() end }
+    end
+
+    local old, current = owner(), owner()
+    Sync.refresh(old)
+    old.closed = true
+    Sync.refresh(current)
+    requests[1].cb({ skipped = true })
+    Assert.not_nil(current._stats_sync.stats_race)
+    Sync.abort(current, stat_source.id)
+    Assert.eq(requests[2].cancelled, 1, "旧桌面回包不丢新桌面的取消句柄")
+    Assert.is_nil(current._stats_sync.stats_race)
+    Assert.eq(events, 0, "取消句柄同步回调时，请求已经作废")
+
+    local a, b = owner(), owner()
+    Sync.refresh(a)
+    Sync.refresh(b)
+    Sync.abort(a, stat_source.id)
+    Assert.eq(requests[3].cancelled, 1)
+    Assert.eq(requests[4].cancelled, 0, "取消只作用于调用方桌面")
+    Assert.not_nil(b._stats_sync.stats_race)
+    Sync.abort(b, stat_source.id)
+
+    local desk = owner()
+    Sync.refresh(desk)
+    Sync.abort(desk, stat_source.id)
+    Sync.refresh(desk)
+    local flight = desk._stats_sync.stats_race
+    requests[5].cb({ pulled = 1 })
+    Assert.eq(desk._stats_sync.stats_race, flight, "迟到的旧回包不清后继请求")
+    Assert.eq(events, 0)
+    Sync.abort(desk, stat_source.id)
+    Assert.eq(requests[6].cancelled, 1)
+
+    local synchronous_cancelled = 0
+    stat_source.syncStatsAsync = function(_self, _opts, cb)
+        cb({ skipped = true })
+        return { cancel = function() synchronous_cancelled = synchronous_cancelled + 1 end }
+    end
+    Sync.refresh(desk)
+    Assert.is_nil(desk._stats_sync.stats_race, "同步完成不残留句柄")
+    Sync.abort(desk, stat_source.id)
+    Assert.eq(synchronous_cancelled, 0)
+end
+
 return true
