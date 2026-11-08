@@ -20,6 +20,13 @@ local DIR = debug.getinfo(1, "S").source:match("^@(.*)/[^/]+$")
 local FOOTNOTE_SRC = "../Images/note.png"
 local STYLE_NAME = "stylesheets.css"
 
+-- 原书样式拉不到时的兜底：微信 EPUB 正文几乎都靠 .content 的 text-indent:2em。
+-- 没有这层，CRE 只按默认 p 排，段首顶格、靠段间距分段落——正是用户反馈的「没缩进」。
+local FALLBACK_STYLE = "<style type=\"text/css\">"
+    .. ".content,.content1{text-indent:2em;text-align:justify}"
+    .. ".bold,.firstTitle,.secondTitle,.thirdTitle,.contentCR,.contentCR1,.contentCR2{text-indent:0}"
+    .. "</style>"
+
 --- 脚注图标落到 images/，返回相对 href。
 ---@param images_dir string
 ---@return string|nil
@@ -88,7 +95,23 @@ local function wrapTitlePage(html)
     return head .. '<div class="moon-title">' .. rest:sub(1, pos - 1) .. "</div>" .. rest:sub(pos)
 end
 
---- 样式表每本书只拉一次；拉不到就保留原 link，下一章再试。
+--- 相对 css link 解不到文件时 CRE 不会应用 .content 缩进；去掉坏相对 link，换上兜底样式。
+---@param html string
+---@return string
+local function withFallbackStyle(html)
+    html = html:gsub("(<link%s[^>]-href=)([\"'])([^\"']-%.css)%2([^>]*>)", function(prefix, quote, href, suffix)
+        if href:match("^%a[%w+.-]*:") or href:match("^//") then
+            return prefix .. quote .. href .. quote .. suffix
+        end
+        return ""
+    end)
+    if html:find("</head>", 1, true) then
+        return (html:gsub("</head>", FALLBACK_STYLE .. "</head>", 1))
+    end
+    return FALLBACK_STYLE .. html
+end
+
+--- 样式表每本书只拉一次；拉不到就去掉坏 link、注入兜底缩进，下一章仍会再试整书包。
 ---@param work_dir string
 ---@param html string
 ---@param fetch_style fun(done: fun(css: string|nil)): { cancel: fun() }|nil
@@ -112,7 +135,7 @@ local function localizeStyleAsync(work_dir, html, fetch_style, cb)
         if css and writeFile(path, (css:gsub("%.%./Images/", "images/"))) then
             cb(rewritten)
         else
-            cb(html)
+            cb(withFallbackStyle(html))
         end
     end)
 end

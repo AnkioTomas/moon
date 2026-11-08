@@ -69,16 +69,17 @@ local function downloadPackageAsync(bookId, chapters, book_type, pick, cb)
             return
         end
         -- 解密 + 解压是逐字节纯 Lua，放子进程；包里的图片不回传（JSON 帧装不下二进制）
+        -- 样式表是文本，随章包顺手带回，避免整书 Styles/ 缺失时正文失去 text-indent。
         job = Job.run(function()
             local files, zerr = Package.unzip(res.body, password)
             if not files then return { err = zerr } end
             local text, perr = pick(files)
-            return { text = text, err = perr }
+            return { text = text, err = perr, style = Package.pickStyle(files) }
         end, {
             name = "weread_chapter_package",
             kind = "light",
             timeout = 60,
-            on_done = function(out) cb(out.text, out.err) end,
+            on_done = function(out) cb(out.text, out.err, out.style) end,
             on_failed = function(jerr) cb(nil, tostring(jerr)) end,
             on_cancelled = function() end,
         })
@@ -89,8 +90,8 @@ local function downloadPackageAsync(bookId, chapters, book_type, pick, cb)
         end }
 end
 
---- 整书样式表（章节 link 指向的 ../Styles/stylesheets.css）。
---- 包里没有就回 nil，由调用方保留原 link。
+--- 整书样式表（章节 link 指向 Styles/stylesheets.css 或 stylesheet.css）。
+--- 包里没有就回 nil；调用方可改用章包里顺手带回的样式，或注入兜底缩进。
 ---@param bookId string
 ---@param _uid string
 ---@param work_dir string 整书公共图（样式表里 ../Images/ 引用的背景等）落到它的 images/
@@ -107,7 +108,7 @@ local function fetchStyleAsync(bookId, _uid, work_dir, done)
                 f:close()
             end
         end
-        return files["Styles/stylesheets.css"]
+        return Package.pickStyle(files)
     end, function(css, err)
         if not css then logger.warn("weread stylesheet app fetch", bookId, err) end
         done(css)
@@ -115,11 +116,12 @@ local function fetchStyleAsync(bookId, _uid, work_dir, done)
 end
 
 --- 异步拉取章节正文。失败就是失败，不再改走网页阅读接口。
---- 第三个回调参数是划线 range 的坐标原文：EPUB 为包内 xhtml，TXT 为包内纯文本
+--- 第三、四个回调参数是划线 range 的坐标原文与格式：EPUB 为包内 xhtml，TXT 为包内纯文本
 --- （format 分别为 "html" / "txt"）；不能用清理或段落化后的正文，否则 range 整体偏移。
+--- 第五个是章包里顺带解出的样式表（有就有，没有为 nil）。
 ---@param bookId string
 ---@param chapter BookChapter
----@param cb fun(html: string|nil, err: any, range_source: string|nil, format: '"html"'|'"txt"'|nil)
+---@param cb fun(html: string|nil, err: any, range_source: string|nil, format: '"html"'|'"txt"'|nil, style: string|nil)
 ---@return { cancel: fun() }
 function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     local uid = chapter.uid
@@ -135,7 +137,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
             if text then return text end
         end
         return Package.chapterHtml(files, uid)
-    end, function(text, err)
+    end, function(text, err, style)
         if not text then
             logger.warn("weread chapter app fetch", bookId, chapter.idx, err)
             cb(nil, err)
@@ -150,7 +152,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
             cb(nil, _("试读结束"))
             return
         end
-        cb(text, nil, text, "html")
+        cb(text, nil, text, "html", style)
     end)
 end
 
@@ -359,7 +361,7 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
     local title = chapter.title or string.format(_("第 %d 章"), tonumber(chapter.idx) or 0)
     local cancelled, asset_job, note_job = false, nil, nil
     local reader_url = Protocol.readerUrl(bookId, chapter.uid)
-    local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter, function(html, err, source, format)
+    local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter, function(html, err, source, format, style)
         if cancelled then return end
         if not html then
             logger.warn("weread chapter fetch", bookId, chapter.idx, err)
@@ -374,8 +376,14 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
             cb({ title = title, html = "<h1>" .. Text.xmlEscape(title) .. "</h1>" .. html })
             return
         end
+        local work_dir = Paths.bookWorkDir(bookId, "wechat")
         asset_job = Assets.localizeAsync(bookId, chapter, html, reader_url, function(done)
-            return fetchStyleAsync(bookId, chapter.uid, Paths.bookWorkDir(bookId, "wechat"), done)
+            -- 章包里已有样式就不再打整书包；整书包才带公共背景图。
+            if type(style) == "string" and style ~= "" then
+                done(style)
+                return { cancel = function() end }
+            end
+            return fetchStyleAsync(bookId, chapter.uid, work_dir, done)
         end, function(localized)
             if cancelled then return end
             note_job = linkCrossNotes(bookId, linkFootnotes(localizeAnchors(localized)), function(document)

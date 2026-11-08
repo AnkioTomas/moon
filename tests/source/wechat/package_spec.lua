@@ -91,3 +91,12 @@ local text = Package.chapterText(tar, "820954", 1)
 Assert.eq(text, "甲乙")
 local absent = Package.chapterText(tar, "820954", 9)
 Assert.is_nil(absent)
+
+Assert.eq(Package.pickStyle({ ["Styles/stylesheets.css"] = "a" }), "a")
+Assert.eq(Package.pickStyle({ ["Styles/stylesheet.css"] = "b" }), "b")
+Assert.eq(Package.pickStyle({
+    ["Styles/extra.css"] = "x",
+    ["Styles/stylesheet.css"] = "b",
+}), "b")
+Assert.eq(Package.pickStyle({ ["Styles/a.css"] = "1", ["Styles/z.css"] = "2" }), "1")
+Assert.is_nil(Package.pickStyle({ ["Text/a.xhtml"] = "<p/>" }))

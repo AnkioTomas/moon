@@ -90,6 +90,9 @@ package.preload["source.wechat.package"] = function()
             end
             return { dummy = true }
         end,
+        pickStyle = function(files)
+            return files["Styles/stylesheets.css"] or files["Styles/stylesheet.css"]
+        end,
         chapterHtml = function()
             if txt_zip then error("TXT ZIP with text entry must not fall back to chapterHtml") end
             if trial then return TRIAL end

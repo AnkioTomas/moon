@@ -125,6 +125,22 @@ function Package.unzip(data, password)
     return files
 end
 
+--- 整书 / 章包里的样式表。常见 ``Styles/stylesheets.css``，也有书只用 ``stylesheet.css``。
+---@param files table<string, string> Package.unzip 的结果
+---@return string|nil css
+function Package.pickStyle(files)
+    local css = files["Styles/stylesheets.css"] or files["Styles/stylesheet.css"]
+    if css then return css end
+    local names = {}
+    for name in pairs(files) do
+        if name:match("^Styles/[^/]+%.css$") then
+            names[#names + 1] = name
+        end
+    end
+    table.sort(names)
+    return names[1] and files[names[1]] or nil
+end
+
 --- 取某章的 xhtml：章节由主文件（标题 / 插图）加若干 _000N 续篇组成，续篇 body 依次并入主文件 body 末尾。
 ---@param files table<string, string> Package.unzip 的结果
 ---@param uid string|number

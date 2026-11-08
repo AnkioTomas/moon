@@ -114,7 +114,8 @@ do
     Assert.is_false(require("utils.text").hasRemoteImageSrc(html_out))
 end
 
--- 脚注图标 + 整书样式表：只改 src / href，其余字节原样；样式表每本书只拉一次，拉不到保留原 link。
+-- 脚注图标 + 整书样式表：只改 src / href，其余字节原样；样式表每本书只拉一次。
+-- 拉不到时去掉坏相对 link，注入 .content 兜底缩进（否则段首顶格）。
 do
     local Paths = require("utils.paths")
     local work_dir = Paths.bookWorkDir("book-3", "wechat")
@@ -127,6 +128,10 @@ do
         .. " .moon-title { background-image: url(images/bq.jpg); background-size: cover;"
         .. " background-position: center bottom; height: 90vh; padding-top: 30vh;"
         .. " page-break-before: always; page-break-after: always; }</style>"
+    local fallback = "<style type=\"text/css\">"
+        .. ".content,.content1{text-indent:2em;text-align:justify}"
+        .. ".bold,.firstTitle,.secondTitle,.thirdTitle,.contentCR,.contentCR1,.contentCR2{text-indent:0}"
+        .. "</style>"
     local body = '</head><body><p class="content">正文<img class="qqreader-footnote" alt="注文" '
         .. 'src="../Images/note.png" /></p></body></html>'
     local sample = head .. link .. abs .. body
@@ -147,7 +152,10 @@ do
 
     local failed = run(fetchStyle(nil))
     Assert.eq(fetches, 1)
-    Assert.is_true(failed:find(link, 1, true) ~= nil, "拉不到样式表保留原 link")
+    Assert.is_nil(failed:find(link, 1, true), "拉不到样式表去掉坏相对 link")
+    Assert.is_true(failed:find(abs, 1, true) ~= nil, "绝对 css link 保留")
+    Assert.is_true(failed:find("text-indent:2em", 1, true) ~= nil, "注入兜底缩进")
+    Assert.is_true(failed:find(fallback, 1, true) ~= nil, "兜底样式整段写入")
     Assert.is_nil(io.open(work_dir .. "/stylesheets.css", "rb"))
 
     local out = run(fetchStyle(".content{text-indent:2em}"))
