@@ -2923,7 +2923,9 @@ do
     }
     Cache.probe = function() return { ok = true, capabilities = { chapters = true, queue = true } } end
     Cache.queueState = function() return { state = "idle", entries = {} } end
+    local chapter_calls = 0
     Cache.chapters = function()
+        chapter_calls = chapter_calls + 1
         return { { chapterId = 9901, pages = 100, read = true, bytes = 1024 } }
     end
     Cache.resumePage = function() end
@@ -2934,8 +2936,12 @@ do
     }
     tocs["9900"], toc_fresh = toc, true
     progress["9900:9901"] = { fraction = 0.01, page = 1, total_pages = 100 }
+    local meta = source:readingTarget(series, { meta_only = true })
+    Assert.eq(meta.select_text, "选择卷")
+    Assert.eq(chapter_calls, 0, "meta_only 不扫缓存")
     local before = #calls
     local target = source:readingTarget(series)
+    Assert.is_true(chapter_calls > 0, "完整目标才读 kamare 缓存")
     local list_target = require("source.kavita.volume_list").continueTarget(series, toc)
     Assert.eq(target.book.stable_id, "9900:" .. list_target.entry.chapterId,
         "详情目标与列表同源；kamare 完成事实优先于本机回顾进度")

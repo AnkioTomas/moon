@@ -103,6 +103,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field synced_ids number[]|nil 已被远端接受的 reading_stats 行 id；缺省表示本次全部行
 
 --- 源提供的本地阅读目标；桌面不解释源私有身份或目录。
+--- `opts.meta_only` 只要选卷入口（select_text），不做进度/缓存扫描。
 ---@class BookReadingTarget
 ---@field book Book 直接打开的书籍身份与元信息
 ---@field text string 主按钮文案（由源翻译）
@@ -168,7 +169,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field putProgressAsync fun(self: BookSource, identity: BookIdentity, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil, meta: table|nil)): table|nil 推送进度
 ---@field coverRequest fun(self: BookSource, identity: BookIdentity): (BookCoverRequest|nil, string|nil) 封面请求描述（纯构造，无 IO）
 ---@field volumeParent fun(self: BookSource, stable_id: string): string|nil 卷身份所属系列 id（可选、同步、纯构造）。声明后「最近阅读」把卷行归并成系列行（一部漫画一条，点开再选卷），首页「当前阅读」仍取卷行；返回 nil 表示不是卷身份
----@field readingTarget fun(self: BookSource, book: Book): BookReadingTarget|nil 阅读入口的本地目标（可选、同步，不发网络请求）；没有目标时保持原开书流程
+---@field readingTarget fun(self: BookSource, book: Book, opts: { meta_only: boolean|nil }|nil): BookReadingTarget|nil 阅读入口的本地目标（可选、同步，不发网络请求）；meta_only 只回选卷入口；没有目标时保持原开书流程
 ---@field shelfCache fun(self: BookSource): ShelfCacheProjection|nil 书架缓存投影（可选、同步、只读本地记忆）。仅 capabilities().shelf_cache 为 true 的源实现；series_ids/mark 是 [stable_id]=true，cover 是 [stable_id]=本地封面绝对路径。不支持的源不实现（nil）
 ---@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil, path: string|nil)): table|nil Z-Library 导入目标（local 移入；成功时 path 为入库 stable_id）
 ---@field pushStatsAsync fun(self: BookSource, rows: BookStatsRow[], cb: fun(data: BookStatsPushResult|nil, err: string|nil)): table|nil 上报领域统计记录；协议细节由源处理

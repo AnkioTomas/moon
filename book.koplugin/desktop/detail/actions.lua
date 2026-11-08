@@ -85,12 +85,29 @@ function Detail:storePrimary()
     }
 end
 
+--- 续读目标按详情页缓存：updateView 与 openBook 复用，一次打开只算一次。
+--- `false` 表示算过、没有目标（继续走原开书流程），避免每帧重试。
+---@return BookReadingTarget|nil
+function Detail:readingTarget()
+    if self._reading_target == nil then
+        local owner = bookOwnerSource(self.book, self.source)
+        local target = owner and owner.readingTarget and owner:readingTarget(self.book)
+        self._reading_target = target or false
+    end
+    return self._reading_target or nil
+end
+
 --- 主按钮：源提供了阅读目标就直接开，否则保持原开书流程。
 function Detail:openBook()
     local plugin = self.plugin
     local b = self:storeReadableBook() or self.book
-    local owner = bookOwnerSource(b, self.source)
-    local target = owner and owner.readingTarget and owner:readingTarget(b)
+    local target
+    if b == self.book then
+        target = self:readingTarget()
+    else
+        local owner = bookOwnerSource(b, self.source)
+        target = owner and owner.readingTarget and owner:readingTarget(b)
+    end
     self:close()
     if not plugin then return end
     require("desktop.open").book(plugin, target and target.book or b)
@@ -427,8 +444,9 @@ end
 --- 编辑/刮削/下载/清理缓存按属主源能力出现；已读切换与删除只要身份完整就给。
 ---@param book table 当前书籍
 ---@param owner table|nil 属主源
+---@param target BookReadingTarget|nil|false 已算好的续读目标（详情页复用）；nil 时现算
 ---@return table tools, table|nil primary
-function Detail.actionPlan(book, owner)
+function Detail.actionPlan(book, owner, target)
     local tools = {}
     if bookSupportsEdit(book, owner) then
         tools[#tools + 1] = { id = "edit", icon = "edit", text = _("编辑") }
@@ -464,10 +482,12 @@ function Detail.actionPlan(book, owner)
         tools[#tools + 1] = { id = "delete", icon = "delete", text = _("删除") }
     end
     local primary
-    local target = can_read and owner.readingTarget and owner:readingTarget(book)
+    if target == nil and can_read and owner.readingTarget then
+        target = owner:readingTarget(book)
+    end
     if can_read then
         local text
-        if target then
+        if target and target.text then
             text = target.text
         else
             local pct = Book.pct(book)

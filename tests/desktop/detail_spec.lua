@@ -937,6 +937,33 @@ do
     resolved = local_src
 end
 
+-- 一次打开只算一次续读目标；书库「更多」只读目录元信息。
+do
+    local selected = { source_id = "moon", stable_id = "selected", title = "目标卷" }
+    local calls, seen_opts = 0, {}
+    resolved = {
+        id = "moon", type = "book",
+        readingTarget = function(_, _, opts)
+            calls = calls + 1
+            seen_opts[#seen_opts + 1] = opts
+            return { book = selected, text = "继续阅读 · 目标卷" }
+        end,
+    }
+    local container = { source_id = "moon", stable_id = "container", title = "容器" }
+    local previous = package.loaded["desktop.open"]
+    package.loaded["desktop.open"] = { book = function() end }
+    Detail.open(desktop, "library", container)
+    desktop.detail:openBook()
+    Assert.eq(calls, 1, "updateView 与 openBook 复用同一份续读目标")
+    calls = 0
+    Detail.openMenu(desktop, container, { x = 0, y = 0, w = 1, h = 1 })
+    Assert.eq(calls, 1, "书库菜单只请求一次")
+    Assert.eq(seen_opts[#seen_opts] and seen_opts[#seen_opts].meta_only, true,
+        "书库菜单只读目录元信息")
+    package.loaded["desktop.open"] = previous
+    resolved = local_src
+end
+
 -- 桌面已关：关详情不再碰桌面。
 desktop.closed = true
 Detail.open(desktop, "library", { source_id = "local", stable_id = "b1", title = "书一" })
