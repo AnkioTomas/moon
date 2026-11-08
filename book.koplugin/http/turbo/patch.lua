@@ -219,8 +219,11 @@ function Patch.apply()
     local HTTPClient = turbo and turbo.async and turbo.async.HTTPClient
 
     if rawget(_G, "__TURBO_USE_LUASOCKET__") then
-        -- LuaSocket reports nonblocking partial writes as nil, "timeout", bytes_sent.
+        -- LuaSocket reports nonblocking partial writes as nil, "timeout", bytes_sent；
+        -- LuaSec 对非阻塞 TLS 更是常态返回 "wantwrite"/"wantread"：那是「稍后再试」，不是错误。
+        -- 当错误关流会让写完成回调永不触发，请求只能等到 request_timeout 报超时。
         -- Keep the stream alive and advance only by bytes actually sent.
+        local RETRY = { timeout = true, wantwrite = true, wantread = true }
         wrap(IOStream, "_handle_write_nonconst", function()
             local ffi = require("ffi")
             return function(self)
@@ -229,7 +232,7 @@ function Patch.apply()
                 local num_bytes, err, partial = self.socket:send(
                     ffi.string(ptr + self._write_buffer_offset, write_size))
                 local sent = num_bytes
-                if err == "timeout" then
+                if err and RETRY[err] then
                     sent = partial or 0
                 elseif err then
                     logger.warn("book.http write failed", err)
