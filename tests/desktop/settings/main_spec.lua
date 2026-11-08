@@ -391,6 +391,19 @@ Assert.is_nil(maintenance_joined:find(",存储空间,", 1, true))
 Assert.is_nil(("," .. table.concat(system_titles, ",") .. ","):find(",运行状态,", 1, true))
 Assert.is_true(maintenance_joined:find(",关闭桌面,", 1, true) ~= nil)
 
+-- 阅读中直达「阅读」组：无桌面时建轻量宿主；有桌面复用。
+opened = nil
+Assert.is_true(require("desktop.pages.setting").openReader(nil))
+Assert.eq(opened.id, "group:reader")
+Assert.eq(sectionTitles(opened), "阅读界面,划词与词典,智能")
+
+local host = require("desktop.pages.setting").host(nil)
+Assert.is_nil(host.plugin)
+host.settings_overlay = { updated = 0, updateView = function(self) self.updated = self.updated + 1 end }
+host:updateView()
+Assert.eq(host.settings_overlay.updated, 1)
+Assert.eq(require("desktop.pages.setting").host({ desktop = desktop }), desktop)
+
 _G.G_reader_settings = previous_settings
 
 return true

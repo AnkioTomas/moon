@@ -1224,6 +1224,7 @@ return {
     ["侧栏手势"] = "Sidebar gesture",
     ["也可在 KOReader 手势管理中绑定「打开月读侧栏」"] = "You can also bind \"Open Moon sidebar\" in KOReader gesture manager",
     ["阅读侧栏"] = "Reader sidebar",
+    ["阅读设置"] = "Reading settings",
     ["侧栏页面"] = "Sidebar pages",
     ["页面顺序"] = "Page order",
     ["调整侧栏底部页面的排列顺序"] = "Reorder the pages at the bottom of the sidebar",

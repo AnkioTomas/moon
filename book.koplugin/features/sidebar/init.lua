@@ -84,6 +84,12 @@ local OPENERS = {
     xray = function(ui) require("features.xray.ui").openMain(ui) end,
 }
 
+--- 关掉侧栏后打开设置「阅读」分组（与快捷面板同一条路径）。
+---@param ui table
+local function openSettings(ui)
+    require("desktop.pages.setting").openReader(ui and ui.book)
+end
+
 --- 执行 open()，截下其中第一次 UIManager:show，期间 Menu / 主题 List 缺省宽高改成 width × height。
 --- 调用方都不给它们传宽高（全屏列表），所以缺省值决定尺寸。
 --- 截到的不是列表（如只弹了一条提示）就照常显示，返回 nil。
@@ -160,13 +166,22 @@ function Sidebar:init()
     for _idx, tab in ipairs(Setting.orderedTabs(settings)) do
         local available = AVAILABLE[tab.id]
         if not hidden[tab.id] and (not available or available(self.ui)) then
-            self.tabs[#self.tabs + 1] = tab.id
+            -- 阅读设置只占底栏一格：点开叠层，不进内容页（避免滑过去空白 / 只剩它时无页可显）。
             self.bar_tabs[#self.bar_tabs + 1] = tab
+            if tab.id ~= "settings" then
+                self.tabs[#self.tabs + 1] = tab.id
+            end
         end
     end
-    -- 设置页不让全隐藏，但只留了条件页、条件又不满足时会空：退回书籍页
+    -- 设置页不让全隐藏，但只留了条件页、条件又不满足时会空：退回书籍页（底栏动作格 settings 保留）
     if #self.tabs == 0 then
-        self.tabs, self.bar_tabs = { "info" }, { Setting.TABS[1] }
+        self.tabs = { "info" }
+        local actions = {}
+        for _idx, tab in ipairs(self.bar_tabs) do
+            if tab.id == "settings" then actions[#actions + 1] = tab end
+        end
+        self.bar_tabs = { Setting.TABS[1] }
+        for _idx, tab in ipairs(actions) do self.bar_tabs[#self.bar_tabs + 1] = tab end
     end
     self.tab = 1
     self.menus = {}
@@ -357,6 +372,11 @@ function Sidebar:render()
                 active = id,
                 tabs = self.bar_tabs,
                 on_tab = function(tab_id)
+                    if tab_id == "settings" then
+                        self:onClose()
+                        openSettings(self.ui)
+                        return
+                    end
                     for index, other in ipairs(self.tabs) do
                         if other == tab_id then self:goTab(index) end
                     end
