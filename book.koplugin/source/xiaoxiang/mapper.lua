@@ -1,44 +1,84 @@
 --[[--
-潇湘书院数据映射（纯函数）：PC 搜索页 HTML、手机站目录 / 章节页 → 领域对象。
+潇湘书院数据映射（纯函数）：新站 JSON、官网 SSR 与旧榜单 HTML → 领域对象。
 
 @module koplugin.book.source.xiaoxiang.mapper
 --]]
 
 local JSON = require("json")
 local Text = require("utils.text")
+local _ = require("gettext")
 
 local Mapper = {}
 
 local SOURCE_ID = "xiaoxiang"
 
---- 搜索页 HTML → Book[]。
----@param html string
----@return Book[]
-function Mapper.search(html)
-    local out = {}
-    for item in html:gmatch('<li style="padding%-bottom:15px;">(.-)</li>') do
-        local id, title = item:match('<h4><a href="/book/(%d+)"[^>]*>([^<]*)</a>')
-        if id then
-            local sub = item:match('<span class="subtitle">(.-)</h4>') or ""
-            local cover = item:match('<img src="([^"]*)"')
-            out[#out + 1] = {
-                source_id = SOURCE_ID,
-                stable_id = id,
-                title = Text.xmlDecode(title),
-                authors = Text.trim(Text.xmlDecode(sub:match("</i>([^<]*)</a>") or "")),
-                category = sub:match("</a><span>([^<]*)</span>"),
-                intro = Text.trim(Text.xmlDecode(item:match('<p class="detail"[^>]*>(.-)</p>') or "")),
-                cover = cover and (cover:gsub("^//", "https://")),
-            }
-        end
-    end
-    return out
+--- 新站 JSON 的整数身份不能经过 Lua number；不匹配小数、指数或字符串里的转义引号。
+function Mapper.decode(raw)
+    local encoded = raw:gsub('("[%w_]+"%s*:%s*)(%d+)([,}%]%s])', function(key, value, tail)
+        return key .. (#value >= 16 and ('"' .. value .. '"') or value) .. tail
+    end)
+    local ok, data = pcall(JSON.decode, encoded)
+    if not ok or type(data) ~= "table" then return nil, _("响应无效") end
+    return data
 end
 
---- 手机站榜单页 HTML → Book[]。每本是一个 `<a href="/book/ID">`，封面 alt 是书名，book-module 是「作者·状态·字数」。
+--- 电脑与移动官网共用的 SSR 容器，只取公开页面数据。
+function Mapper.state(html)
+    local raw = html:match('<script[^>]-id="vite%-plugin%-ssr_pageContext"[^>]*>(.-)</script>')
+    if not raw then return nil, _("响应无效") end
+    local data = Mapper.decode(raw)
+    local context = data and data.pageContext
+    local props = type(context) == "table" and context.pageProps
+    local page_data = type(props) == "table" and props.pageData
+    if type(page_data) ~= "table" then return nil, _("响应无效") end
+    return page_data
+end
+
+--- 分类库、搜索与详情的公开字段有两套命名，身份始终保留字符串。
+function Mapper.books(rows)
+    if type(rows) ~= "table" then return nil, _("响应无效") end
+    local books = {}
+    for _idx, row in ipairs(rows) do
+        if type(row) ~= "table" then return nil, _("响应无效") end
+        local id, title = row.cbId or row.cbid, row.bookName or row.title
+        if type(id) ~= "string" or not id:match("^%d+$") or type(title) ~= "string" then
+            return nil, _("响应无效")
+        end
+        books[#books + 1] = {
+            source_id = SOURCE_ID, stable_id = id, title = Text.trim(title),
+            authors = Text.trim(row.authorName or row.author or ""),
+            category = row.cate2Name or row.catel2name or row.categoryShortName,
+            intro = Text.trim(row.intro or ""), words = tonumber(row.totalWords),
+            cover = "https://bookcover.yuewen.com/qdbimg/349573/c_" .. id .. "/180",
+        }
+    end
+    return books
+end
+
+function Mapper.detail(html)
+    local data, err = Mapper.state(html)
+    if not data then return nil, err end
+    local detail = data.detailData or data.bookInfo or data
+    local books, reason = Mapper.books({ detail })
+    return books and books[1], reason
+end
+
+--- 手机站榜单 SSR 中按栏目名选当前榜单；兼容旧 HTML。
 ---@param html string
----@return Book[]
-function Mapper.rank(html)
+---@param title string|nil
+---@return Book[]|nil
+---@return string|nil
+function Mapper.rank(html, title)
+    if title and html:find('id="vite-plugin-ssr_pageContext"', 1, true) then
+        local data, err = Mapper.state(html)
+        if not data then return nil, err end
+        for _idx, section in ipairs(data) do
+            if type(section) ~= "table" then return nil, _("响应无效") end
+            local info = section.columnInfo
+            if type(info) == "table" and info.name == title then return Mapper.books(section.bookList) end
+        end
+        return nil, _("响应无效")
+    end
     local out = {}
     for id, item in html:gmatch('<a href="/book/(%d+)"[^>]*data%-bookid=.-(<div class="common%-img".-)</a>') do
         local title = item:match('class="book%-title"[^>]*>([^<]*)<')
@@ -55,6 +95,7 @@ function Mapper.rank(html)
             }
         end
     end
+    if #out == 0 then return nil, _("响应无效") end
     return out
 end
 
@@ -63,18 +104,30 @@ Mapper.TOC_VERSION = 1
 
 --- 手机站目录页 → 目录。页面内嵌 SSR JSON，`"chapters":[` 之后是扁平对象：type 0 是卷，type 1 是章（price > 0 为 VIP）。
 ---@param html string
----@return BookChapter[]
+---@return BookChapter[]|nil
+---@return string|nil
 function Mapper.toc(html)
     local toc = {}
-    local start = html:find('"chapters":[{"type":0', 1, true)
-    if not start then return toc end
-    for obj in html:sub(start + 12):gmatch("%b{}") do
-        local ok, row = pcall(JSON.decode, obj)
-        if not (ok and type(row) == "table" and row.type) then break end
+    local rows
+    if html:find('id="vite-plugin-ssr_pageContext"', 1, true) then
+        local data, err = Mapper.state(html)
+        if not data then return nil, err end
+        rows = data.chapters or data.chapterListData
+    else
+        local raw = html:match('"chapters":%s*(%b[])')
+        rows = raw and Mapper.decode('{"rows":' .. raw .. "}")
+        rows = rows and rows.rows
+    end
+    if type(rows) ~= "table" then return nil, _("响应无效") end
+    for _idx, row in ipairs(rows) do
+        if type(row) ~= "table" or (row.type ~= 0 and row.type ~= 1) then return nil, _("响应无效") end
         if row.type == 1 then
+            if type(row.ccid) ~= "string" or not row.ccid:match("^%d+$") or type(row.title) ~= "string" then
+                return nil, _("响应无效")
+            end
             toc[#toc + 1] = {
                 idx = #toc + 1,
-                uid = tostring(row.ccid),
+                uid = row.ccid,
                 title = row.title,
                 vip = (tonumber(row.price) or 0) > 0 or nil,
             }
@@ -94,10 +147,13 @@ function Mapper.content(wire)
     local chapters = type(wire.data) == "table" and wire.data.chapterContents
     local chapter = chapters and chapters[1]
     if type(chapter) ~= "table" then return nil end
-    if (tonumber(chapter.chapterPrice) or 0) > 0 and chapter.auth ~= true then return nil, "unpaid" end
+    local price = tonumber(chapter.chapterPrice)
+    if not price then return nil end
+    if price > 0 and chapter.auth ~= true then return nil, "unpaid" end
     if chapter.encrypt == true then return nil, "encrypted", chapter end
+    if type(chapter.chapterContent) ~= "string" then return nil end
     local lines = {}
-    for line in tostring(chapter.chapterContent or ""):gmatch("[^\r\n]+") do
+    for line in chapter.chapterContent:gmatch("[^\r\n]+") do
         line = Text.trim(line)
         while line:sub(1, 3) == "\227\128\128" do line = Text.trim(line:sub(4)) end
         if line ~= "" then lines[#lines + 1] = line end

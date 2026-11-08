@@ -66,18 +66,6 @@ do
 end
 
 do
-    local html = '<ul><li style="padding-bottom:15px;"><img src="//c.example/1.jpg"><h4><a href="/book/123" target="_blank">书名</a>'
-        .. '<span class="subtitle"><a><i></i>某作者</a><a></a><span>玄幻</span></span></h4>'
-        .. '<p class="detail">简介&amp;内容</p></li></ul>'
-    local books = Xiaoxiang.search(html)
-    Assert.len(books, 1)
-    Assert.eq(books[1].stable_id, "123")
-    Assert.eq(books[1].authors, "某作者")
-    Assert.eq(books[1].cover, "https://c.example/1.jpg")
-    Assert.eq(books[1].intro, "简介&内容")
-end
-
-do
     local html = 'x"chapters":[{"type":0,"isVip":-1,"title":"正文"},'
         .. '{"type":1,"ccid":"11","title":"第1章","price":0},'
         .. '{"type":1,"ccid":"12","title":"第2章","price":10}],"other":{"a":1}'
@@ -86,7 +74,9 @@ do
     Assert.eq(toc[2].uid, "12")
     Assert.is_nil(toc[1].vip)
     Assert.is_true(toc[2].vip)
-    Assert.len(Xiaoxiang.toc("<html></html>"), 0)
+    local missing, err = Xiaoxiang.toc("<html></html>")
+    Assert.is_nil(missing)
+    Assert.eq(err, "响应无效")
 end
 
 do
@@ -103,7 +93,7 @@ do
     Assert.eq(books[1].authors, "千山茶客")
     Assert.eq(books[1].cover, "https://bookcover.yuewen.com/a/90.webp")
     Assert.eq(books[2].title, "乙")
-    Assert.len(Xiaoxiang.rank("<html></html>"), 0)
+    Assert.is_nil(Xiaoxiang.rank("<html></html>"))
 end
 
 do
@@ -161,20 +151,29 @@ do
     Assert.is_true(require("source.auth").expired("xiaoxiang"))
     Assert.is_nil(seen.post_url)
 
-    seen.reply = '{"code":0,"data":{"isLogin":1}}'
+    seen.reply = '{"code":0,"data":{"isLogin":1,"user":{"guid":"42"}}}'
     Client.userAsync("a=1", function(info) seen.info = info end)
     Assert.eq(seen.info.isLogin, 1)
     Assert.eq(seen.headers.Cookie, "a=1; csrfToken=moon")
     Assert.matches(seen.url, "_csrfToken=moon")
 
-    local replies = { '{"code":0,"data":{"isLogin":1}}', '{"code":0,"msg":"ok","data":null}' }
+    local replies = { '{"code":0,"data":{"isLogin":1,"user":{"guid":"42"}}}', '{"code":0,"msg":"ok","data":null}' }
     package.loaded["source.auth"].reset()
     seen.reply = nil
     local n = 0
     package.loaded["http.request"] = nil
     package.preload["http.request"] = function()
         return {
-            get = function(url, opts, cb) n = n + 1; seen.url = url; cb(replies[1]) return {} end,
+            get = function(url, opts, cb)
+                seen.url = url
+                if url:find("/bookshelf/pc/page", 1, true) then
+                    cb('{"code":0,"data":{"data":[],"pageCount":0}}')
+                else
+                    n = n + 1
+                    cb(replies[1])
+                end
+                return {}
+            end,
             post = function(url, body, opts, cb) seen.post_url, seen.body = url, body; cb(replies[2]) return {} end,
         }
     end
@@ -196,7 +195,7 @@ do
     Assert.eq(n, 2, "换了 Cookie 重新校验")
     Client.AUTH_TTL = 0
     Client.shelfRemoveAsync("35554414603847007", function(wire) ok = wire ~= nil end)
-    Assert.eq(n, 3, "过期重新校验")
+    Assert.eq(n, 4, "过期后写入与回读分别重新校验")
     Client.AUTH_TTL = 600
 
     replies[2] = '{"code":0,"data":{"chapterContents":[{"ccid":35554414603847008,"chapterPrice":"0","auth":true,"chapterContent":"甲"}]}}'
@@ -237,12 +236,12 @@ do
     Auth.reset()
     cfg.cookie = nil
     Settings.saveSource("changpei", cfg)
-    Assert.eq(#CpSetting.rows(), 3, "未登录：账号 + 粘贴 + 章评")
+    Assert.eq(#CpSetting.rows(), 4, "未登录：账号 + 浏览器 + 粘贴 + 章评")
     cfg.cookie = "PHPSESSID=T1"
     Settings.saveSource("changpei", cfg)
-    Assert.eq(#CpSetting.rows(), 3, "已登录：账号 + 退出 + 章评")
+    Assert.eq(#CpSetting.rows(), 5, "已登录：账号 + 浏览器 + 粘贴 + 退出 + 章评")
     Auth.expire("changpei", "x")
-    Assert.eq(#CpSetting.rows(), 4, "失效后露出粘贴 Cookie")
+    Assert.eq(#CpSetting.rows(), 5, "失效后仍保留浏览器与粘贴入口")
     cfg.cookie = nil
     Settings.saveSource("changpei", cfg)
     Auth.reset()
@@ -495,7 +494,7 @@ do
                     pages = pages + 1
                     cb('{"code":0,"data":{"pageCount":60,"data":[{"restype":1,"groupId":-100,"bookid":"1","title":"甲"}]}}')
                 else
-                    cb('{"code":0,"data":{"isLogin":1}}')
+                    cb('{"code":0,"data":{"isLogin":1,"user":{"guid":"42"}}}')
                 end
                 return {}
             end,
