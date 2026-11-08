@@ -97,10 +97,10 @@ jobs:
             echo
             echo "输入法词库（整库，手动 sideload）：\`${{ steps.ime.outputs.assets }}\`"
             echo
-            echo "安装：解压后将 \`book.koplugin\` 复制到 KOReader 的 \`plugins\` 目录，然后重启。"
+            echo "安装：解压后将 \`book.koplugin\` 复制到 \`koreader/plugins/\`，然后重启。"
             echo
-            echo "词库 sideload：下载对应布局的词库，直接放入 KOReader 数据目录下的"
-            echo "\`.moon/\`（与 \`book.sqlite3\` 同级）。附件已使用最终文件名，无需重命名。"
+            echo "词库 sideload：下载对应布局的词库，直接放入 \`koreader/.moon/\`"
+            echo "（与 \`book.sqlite3\` 同级）。附件已使用最终文件名，无需重命名。"
             echo
             echo "### 更新内容"
             echo
