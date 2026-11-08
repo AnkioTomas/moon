@@ -1319,7 +1319,6 @@ return {
     ["这个错误看起来来自插件「%1」，不是月读本身。请把下面的信息反馈给该插件的作者，而不是月读。"] = "This error looks like it comes from the plugin \"%1\", not Moon Reader. Please send the details below to that plugin's author, not to Moon Reader.",
     ["归属：月读"] = "Owner: Moon Reader",
     ["归属：其它插件 %1"] = "Owner: other plugin %1",
-    ["、"] = ", ",
     ["月读版本：%1\nKOReader：%2\n设备：%3\n位置：%4\n\n%5"] = "Moon Reader: %1\nKOReader: %2\nDevice: %3\nWhere: %4\n\n%5",
     ["已复制"] = "Copied",
     ["网络"] = "Network",

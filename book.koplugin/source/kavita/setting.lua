@@ -291,12 +291,11 @@ local function testRow()
     end
 end
 
---- 路径展示归一：KOReader 的 data 目录插件路径常带 `//`（`plugins//x.koplugin`），
---- 文件系统不介意，但显示给人看要干净（安装说明里的目录也会被复制去用）。
+--- 路径展示归一：压缩 `//`，再换成用户认的 `koreader/...`（USB 里看得见的文件夹名）。
 ---@param path string
 ---@return string
 local function tidyPath(path)
-    return (path:gsub("/+", "/"))
+    return require("utils.paths").userPath((path:gsub("/+", "/")))
 end
 
 --- 只读占用：当前服务器。
@@ -337,7 +336,7 @@ local function mk(opts)
 end
 
 local function installText(plugin)
-    local dir = Cache.pluginsDir(plugin and plugin.path)
+    local dir = tidyPath(Cache.pluginsDir(plugin and plugin.path))
     return table.concat({
         _("获取增强版"),
         _("  发布页：github.com/backtracker/kamare.koplugin/releases/latest"),

@@ -137,6 +137,20 @@ do
     Assert.is_false(Paths.isMoonPath(Paths.root() .. "-other/file"))
 end
 
+-- userPath：给用户看的路径固定 koreader/ 前缀（USB 里认的文件夹名）
+do
+    local DataStorage = require("datastorage")
+    local data = DataStorage:getDataDir()
+    Assert.eq(Paths.userPath(data), "koreader")
+    Assert.eq(Paths.userPath(data .. "/.moon/dictionary.sqlite3"), "koreader/.moon/dictionary.sqlite3")
+    Assert.eq(Paths.userPath(data .. "/plugins"), "koreader/plugins")
+    Assert.eq(Paths.userPath(data .. "//plugins//x"), "koreader/plugins/x", "压缩重复斜杠")
+    Assert.eq(Paths.userPath("/mnt/us/koreader/.moon/dictionary.sqlite3"), "koreader/.moon/dictionary.sqlite3",
+        "绝对路径里能截到 /koreader/")
+    Assert.eq(Paths.userPath("koreader/plugins"), "koreader/plugins")
+    Assert.eq(Paths.userPath("/tmp/outside"), "/tmp/outside", "数据目录外且无 koreader 段时原样")
+end
+
 -- 只删本测试创建的目录（空目录才能删，天然保护误删）
 cleanup()
 Assert.is_nil(lfs.attributes(Paths.sourceCacheDir(TEST_SOURCE)))
