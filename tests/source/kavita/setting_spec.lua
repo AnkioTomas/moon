@@ -538,7 +538,7 @@ Assert.matches(install_text, "releases/latest")
 Assert.matches(install_text, "kamarecache.lua")
 Assert.matches(install_text, "增强版功能随版本不同")
 Assert.matches(install_text, "上方「kamare 增强版」")
-Assert.matches(install_text, Config.root(), "插件目录（book.koplugin 的上级）")
+Assert.matches(install_text, "koreader/plugins", "手动安装路径带 koreader/ 前缀")
 Assert.is_nil(findSection(missing, "清理"), "未安装不显示清理")
 
 -- 版本不兼容：安装说明前先讲清 API 不兼容（03 原型）。

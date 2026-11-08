@@ -120,7 +120,7 @@ local function sections(desktop)
     local Paths = require("utils.paths")
     local Row = require("ui.themes.widgets.row")
     local method = Registry.current()
-    local dict_path = Paths.imeDictPath(method.dictionary)
+    local dict_path = Paths.userPath(Paths.imeDictPath(method.dictionary))
     local keycaps_row = function(iw)
         local on = require("utils.settings").get("features.ime").ime_keycaps
         return Row.widget({

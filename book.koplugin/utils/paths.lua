@@ -66,6 +66,35 @@ function P.root()
     return DataStorage:getDataDir() .. "/.moon"
 end
 
+--- 给用户看的路径：相对 KOReader 数据目录，固定以 `koreader/` 开头。
+--- USB / 文件管理器里用户认的是 koreader 文件夹，不认 /mnt/us、.adds 这类绝对前缀。
+--- 不在数据目录下时：能截到 `/koreader/` 就截；否则原样返回（已是相对路径或外部路径）。
+---@param path string|nil
+---@return string
+function P.userPath(path)
+    if type(path) ~= "string" or path == "" then
+        return "koreader"
+    end
+    path = path:gsub("/+", "/"):gsub("/$", "")
+    local data = tostring(DataStorage:getDataDir() or ""):gsub("/+", "/"):gsub("/$", "")
+    local rel
+    if data ~= "" and path == data then
+        rel = ""
+    elseif data ~= "" and path:sub(1, #data + 1) == data .. "/" then
+        rel = path:sub(#data + 2)
+    else
+        local rest = path:match("/koreader/(.*)$") or path:match("^koreader/(.*)$")
+        if rest then
+            return rest == "" and "koreader" or ("koreader/" .. rest)
+        end
+        if path == "koreader" then
+            return "koreader"
+        end
+        return path
+    end
+    return rel == "" and "koreader" or ("koreader/" .. rel)
+end
+
 --- 缓存根：$DATA/.moon/cache
 ---@return string
 function P.cacheDir()
