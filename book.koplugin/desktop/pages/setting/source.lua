@@ -126,12 +126,36 @@ function Source.pickEnabled(desktop)
     }:show()
 end
 
---- 账号页每个书源自己的图标（Material 名）；第三方源用设置模块的 rowIcon，都没有则 dns。
+--- 账号页每个书源自己的图标（Material Symbols 名）。
+--- 内置源必须在这里有条目；第三方源用设置模块的 rowIcon，都没有才退回 dns。
 local SOURCE_ICONS = {
-    ["local"] = "folder", wechat = "chat", jdread = "shopping_bag", fanqie = "eco",
-    qidian = "auto_stories", qimao = "import_contacts", qqreader = "face", jjwxc = "favorite",
-    changpei = "local_florist", iread = "headphones", xiaoxiang = "forest", legado = "android",
-    moon = "nightlight", kindle = "tablet_mac", copymanga = "photo_library",
+    ["local"] = "folder",
+    moon = "nightlight",
+    kindle = "tablet_mac",
+    wechat = "chat",
+    jdread = "shopping_bag",
+    fanqie = "eco",
+    qidian = "auto_stories",
+    qimao = "pets",
+    qqreader = "sms",
+    jjwxc = "favorite",
+    changpei = "local_florist",
+    iread = "headphones",
+    xiaoxiang = "forest",
+    legado = "android",
+    copymanga = "photo_library",
+    kavita = "hub",
+    bookorbit = "travel_explore",
+    ireader = "chrome_reader_mode",
+    dedao = "school",
+    tadu = "fort",
+    shuqi = "flag",
+    douban = "rate_review",
+    netease = "cloud",
+    kuaikan = "manga",
+    zymk = "comic_bubble",
+    zhihu = "psychology",
+    ["18ta"] = "local_library",
 }
 
 --- 一个设置模块能不能出现在账号页：有 rows 或 open 就行。
