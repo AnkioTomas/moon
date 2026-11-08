@@ -2915,6 +2915,41 @@ end
 ----------------------------------------------------------------------
 -- 已删除的「多设备统计合并」开关：旧配置残留的键在源实例化时清掉。
 ----------------------------------------------------------------------
+do
+    local Cache = require("source.kavita.cache")
+    local original = {
+        probe = Cache.probe, queueState = Cache.queueState,
+        chapters = Cache.chapters, resumePage = Cache.resumePage,
+    }
+    Cache.probe = function() return { ok = true, capabilities = { chapters = true, queue = true } } end
+    Cache.queueState = function() return { state = "idle", entries = {} } end
+    Cache.chapters = function()
+        return { { chapterId = 9901, pages = 100, read = true, bytes = 1024 } }
+    end
+    Cache.resumePage = function() end
+    local series = { source_id = "kavita", stable_id = "9900", title = "续读测试", authors = "作者" }
+    local toc = {
+        { chapterId = 9901, title = "卷一", pages = 100, pagesRead = 1 },
+        { chapterId = 9902, title = "卷二", pages = 100, pagesRead = 0 },
+    }
+    tocs["9900"], toc_fresh = toc, true
+    progress["9900:9901"] = { fraction = 0.01, page = 1, total_pages = 100 }
+    local before = #calls
+    local target = source:readingTarget(series)
+    local list_target = require("source.kavita.volume_list").continueTarget(series, toc)
+    Assert.eq(target.book.stable_id, "9900:" .. list_target.entry.chapterId,
+        "详情目标与列表同源；kamare 完成事实优先于本机回顾进度")
+    Assert.eq(target.book.stable_id, "9900:9902")
+    Assert.eq(target.book.authors, "作者", "目标卷继承容器元数据")
+    Assert.eq(target.text, "继续阅读 · 卷二")
+    Assert.eq(target.select_text, "选择卷")
+    Assert.eq(#calls, before, "读取续读目标不发网络请求")
+    Assert.is_nil(source:readingTarget(target.book), "单卷不重新计算容器续读目标")
+    Assert.is_nil(source:readingTarget({ source_id = "kavita", stable_id = "9909" }),
+        "没有本地目录就保留原开书流程")
+    for name, method in pairs(original) do Cache[name] = method end
+end
+
 cfg.merge_local_stats = true
 require("source.kavita").new()
 Assert.is_nil(cfg.merge_local_stats, "旧开关残留键不能让核心继续按开启合并")

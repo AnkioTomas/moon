@@ -31,6 +31,7 @@ local Annotation = require("source.kavita.annotation")
 local Position = require("source.kavita.position")
 local Stats = require("source.kavita.stats")
 local Cache = require("source.kavita.cache")
+local ContinuePoint = require("source.kavita.continue_point")
 local VolumeList = require("source.kavita.volume_list")
 local SourceBase = require("source.base")
 local Normalize = require("book.note.normalize")
@@ -1700,6 +1701,28 @@ function Source:openBookAsync(identity, _opts, cb)
         cancelled = true
         job:cancel()
     end }
+end
+
+--- 详情页只消费目标与文案，卷身份和续读状态留在源内。
+---@param series Book
+---@return BookReadingTarget|nil
+function Source:readingTarget(series)
+    local series_id, chapter_id = splitId(series.stable_id)
+    if chapter_id then return nil end
+    local toc = require("source.toc").read(self.id, series_id)
+    if not toc then return nil end
+    local target = VolumeList.continueTarget(series, toc)
+    if not target then return nil end
+    local entry = target.entry
+    local stable_id = series.stable_id .. ":" .. tostring(entry.chapterId)
+    local cur = require("book.books_db").get(self.id, stable_id)
+    local text, caption = ContinuePoint.describe(target, series.title)
+    return {
+        book = volumeRow(series, stable_id, entry.title, volumeIntro(entry.summary, cur, series)),
+        text = text,
+        caption = caption,
+        select_text = #toc > 1 and _("选择卷") or nil,
+    }
 end
 
 --- 卷身份 → Kavita volumeId（按 chapterId 从目录缓存反查）。目录还没拉过就没有。
