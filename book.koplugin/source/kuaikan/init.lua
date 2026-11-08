@@ -366,4 +366,33 @@ function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
     end }
 end
 
+function Source:paragraphReviewsEnabled()
+    return require("source.review_setting").enabled(self.id)
+end
+
+function Source:paragraphReviewPageAsync(identity, range, max_idx, cb)
+    return require("book.review_cache").pageAsync(identity, range, max_idx, function(done)
+        return require("source.with_chapter_uid").run(self, identity, _("目录为空"),
+            function(uid, finish)
+                return Client.commentPageAsync(uid, max_idx, function(items, err, _pages, page)
+                    if not items then finish(nil, err); return end
+                    for _idx, item in ipairs(items) do
+                        if not item.id or item.id == "" or item.id == "0" then finish(nil, _("响应无效")); return end
+                        item.content, item.replies = item.text, 0
+                        item.time = item.time or ""
+                    end
+                    finish({ items = items, total = page.total, max_idx = page.max_idx, more = page.more })
+                end)
+            end, done)
+    end, cb)
+end
+
+function Source:chapterReviewHotspotsAsync(identity, cb)
+    return self:paragraphReviewPageAsync(identity, "chapter", 0, function(page, err)
+        if not page then cb(nil, err); return end
+        cb({ { range = "chapter", text = identity.book and identity.book.title or "",
+            total = page.total, badge = tostring(page.total), heading = _("章节评论") } })
+    end)
+end
+
 return Kuaikan

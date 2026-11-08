@@ -82,7 +82,7 @@ function Setting.login()
     require("source.kuaikan.qrlogin").new(onLogin):start()
 end
 
-function Setting.rows()
+function Setting.rows(plugin)
     local Row = require("ui.themes.widgets.row")
     local rows = {
         function(iw)
@@ -106,6 +106,17 @@ function Setting.rows()
             return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "sms",
                 title = _("短信登录"), callback = function()
                     require("source.kuaikan.phone_login").new("sms", onLogin):start()
+                end })
+        end,
+        function(iw)
+            local reviews = require("source.review_setting")
+            local on = reviews.enabled("kuaikan")
+            return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = "forum",
+                title = _("章节评论"), subtitle = _("在章末显示本章讨论，不是段落评论"),
+                status = on and _("开") or _("关"), status_on = on,
+                callback = function()
+                    reviews.set("kuaikan", not on)
+                    if plugin and plugin.desktop then plugin.desktop:updateView() end
                 end })
         end,
     }

@@ -204,7 +204,7 @@ end
 --- 话题评论。网页只展示 `replied_comment_id` 为 0 的楼，字段是 user.nickname、content、created_at_info、likes_count。
 --- 第二返回值是 data.total。
 ---@param wire table|nil
----@return { author: string, text: string, time: string|nil, likes: number|nil }[]|nil
+---@return { id: string|nil, author: string, text: string, time: string|nil, likes: number|nil }[]|nil
 ---@return integer|nil
 function Mapper.comments(wire)
     if type(wire) ~= "table" or tonumber(wire.code) ~= 200 or type(wire.data) ~= "table" then
@@ -222,6 +222,7 @@ function Mapper.comments(wire)
             local user = type(row.user) == "table" and row.user or {}
             local stamp = type(row.created_at_info) == "string" and row.created_at_info:match("^(%S+)") or nil
             out[#out + 1] = {
+                id = (type(row.id) == "string" or type(row.id) == "number") and tostring(row.id) or nil,
                 author = type(user.nickname) == "string" and user.nickname or "",
                 text = row.content,
                 time = stamp,

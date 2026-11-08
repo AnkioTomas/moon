@@ -61,6 +61,7 @@ local ui = {
         registerViewModule = function(_self, name, module) registered.module = { name, module } end,
     },
     document = {
+        info = {},
         file = chapter_file,
         getCurrentPos = function() return 0 end,
         getDocumentRenderingHash = function() return render_hash end,
@@ -368,3 +369,21 @@ Assert.eq(source.calls, 1)
 Assert.eq(marks.current[1].spot.range, "1")
 Assert.eq(marks.current[2].spot.range, "section")
 source.chapterReviewHotspotsAsync = nil
+
+-- 固定版式没有 CREngine 的文字、页边距和 xpointer 接口。
+package.loaded["ui.themes"] = { px = function(n) return n end }
+ui.document = { info = { has_pages = true, number_of_pages = 5 } }
+session = { identity = { source_id = "kuaikan", stable_id = "comic", chapter_idx = 1, source = end_source } }
+current_page = 1
+Assert.len(marks:marks(), 0, "漫画前页不显示章评入口")
+current_page = 5
+Assert.len(marks:marks(), 1, "漫画末页通过固定页数显示章评")
+Assert.eq(marks.current[1].boxes[1].y, 62, "入口不盖住底部状态栏")
+marks.current[1].tap()
+Assert.eq(opened.identity.source_id, "kuaikan")
+Assert.eq(opened.identity.chapter_idx, 1)
+current_page = 4
+Assert.len(marks:marks(), 0, "翻回前页立即移除漫画章评入口")
+end_source.enabled = false
+current_page = 5
+Assert.len(marks:marks(), 0, "关闭开关后漫画末页也不显示")

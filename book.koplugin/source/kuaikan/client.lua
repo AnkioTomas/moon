@@ -533,7 +533,7 @@ end
 
 ---@param comic_id string
 ---@param offset integer
----@param cb fun(items: table[]|nil, err: string|nil, pages: integer|nil)
+---@param cb fun(items: table[]|nil, err: string|nil, pages: integer|nil, pagination: {total: integer, max_idx: integer, more: boolean}|nil)
 function Client.commentPageAsync(comic_id, offset, cb)
     local url = HOST .. "/v2/comments/comic/" .. Text.urlEncode(comic_id)
         .. "/order/score?offset=" .. offset .. "&limit=50&total=true"
@@ -543,7 +543,10 @@ function Client.commentPageAsync(comic_id, offset, cb)
         if not ok then cb(nil, _("响应无效")); return end
         local items, total = Mapper.comments(wire)
         if not items or not total then cb(nil, _("快看漫画书评加载失败")); return end
-        cb(items, nil, math.max(1, math.ceil(total / 50)))
+        local next_idx = offset + #wire.data.comments
+        cb(items, nil, math.max(1, math.ceil(total / 50)), {
+            total = total, max_idx = next_idx, more = #wire.data.comments > 0 and next_idx < total,
+        })
     end)
 end
 
