@@ -163,7 +163,7 @@ end
 ---@param source BookSource|nil
 ---@param book Book|nil
 ---@param on_progress fun(bytes: number)|nil
----@param cb fun(ok: boolean|nil, err: string|nil, filename: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, filename: string|nil, path: string|nil)
 ---@return { cancel: fun() }|nil
 function Zlib.installAsync(source, book, on_progress, cb)
     if not (source and type(source.importBookAsync) == "function") then
@@ -194,7 +194,7 @@ function Zlib.installAsync(source, book, on_progress, cb)
                 cb(nil, err)
                 return
             end
-            job = source:importBookAsync(temp, filename, function(imported, import_err)
+            job = source:importBookAsync(temp, filename, function(imported, import_err, path)
                 os.remove(temp)
                 if cancelled then return end
                 if imported then
@@ -202,7 +202,7 @@ function Zlib.installAsync(source, book, on_progress, cb)
                 else
                     logger.warn("book.zlib install failed", book.stable_id, "import", import_err)
                 end
-                cb(imported, import_err, filename)
+                cb(imported, import_err, filename, path)
             end)
         end)
     end

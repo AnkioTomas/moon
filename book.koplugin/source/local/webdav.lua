@@ -1149,7 +1149,7 @@ function Webdav.importWebdavAsync(self, temp_path, filename, cb)
                 BookDB.upsertRemote({ source_id = SOURCE_ID, stable_id = stable_id, deleted = 0, title = stem(name) })
                 active = Webdav.pushBookAsync(self, stable_id, false, function(listed, err)
                     if not listed then require("utils.log").warn("book webdav import entry failed", name, err) end
-                    if not cancelled then cb(true) end
+                    if not cancelled then cb(true, nil, stable_id) end
                 end)
             end)
         end)

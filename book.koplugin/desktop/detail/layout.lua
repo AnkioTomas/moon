@@ -83,7 +83,7 @@ function Detail:updateView()
     local owner = bookOwnerSource(self.book, self.source)
     local tools, primary = {}, nil
     if self.origin == "store" then
-        primary = { icon = "add", text = _("加入书库"), callback = function() self:installStoreBook() end }
+        primary = self:storePrimary()
     else
         tools, primary = Detail.actionPlan(self.book, owner)
         if primary then primary.callback = function() self:openBook() end end
