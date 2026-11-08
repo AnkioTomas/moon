@@ -198,4 +198,10 @@ return {
     ["第 %1 卷"] = "Vol. %1",
     ["上次翻阅"] = "Last opened",
     ["已读完 · 共 %1 卷"] = "Finished · %1 volumes",
+    ["开始阅读 · %1"] = "Start reading · %1",
+    ["第 %1/%2 页 · %3%"] = "Page %1/%2 · %3%",
+    ["继续阅读 · %1"] = "Continue reading · %1",
+    ["重读 · %1"] = "Read again · %1",
+    ["共 %1 页"] = "%1 pages total",
+    ["选择卷"] = "Choose a volume",
 }

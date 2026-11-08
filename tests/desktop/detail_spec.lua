@@ -864,6 +864,39 @@ do
 end
 db_row = nil
 
+-- 详情页不解释源私有目录：展示、开书、显式选择均消费通用源接口。
+do
+    local selected = { source_id = "moon", stable_id = "selected", title = "目标卷" }
+    resolved = {
+        id = "moon", type = "book",
+        readingTarget = function()
+            return { book = selected, text = "继续阅读 · 目标卷",
+                caption = "第 2/10 页", select_text = "另选目标" }
+        end,
+    }
+    local container = { source_id = "moon", stable_id = "container", title = "容器" }
+    local tools, primary = Detail.actionPlan(container, resolved)
+    Assert.eq(primary.text, "继续阅读 · 目标卷")
+    Assert.eq(primary.caption, "第 2/10 页")
+    Assert.eq(tools[#tools].id, "volumes")
+    Assert.eq(tools[#tools].text, "另选目标", "目标选择文案由源负责")
+    local previous = package.loaded["desktop.open"]
+    local opened
+    package.loaded["desktop.open"] = { book = function(_plugin, book) opened = book end }
+    Detail.open(desktop, "library", container)
+    desktop.detail:openBook()
+    Assert.eq(opened, selected, "主按钮直接打开源提供的身份")
+    Detail.open(desktop, "library", container)
+    desktop.detail:chooseVolume()
+    Assert.eq(opened.stable_id, container.stable_id, "显式选择仍走容器的原开书流程")
+    resolved.readingTarget = function() end
+    Detail.open(desktop, "library", container)
+    desktop.detail:openBook()
+    Assert.eq(opened.stable_id, container.stable_id, "无目标时保持原开书行为")
+    package.loaded["desktop.open"] = previous
+    resolved = local_src
+end
+
 -- 桌面已关：关详情不再碰桌面。
 desktop.closed = true
 Detail.open(desktop, "library", { source_id = "local", stable_id = "b1", title = "书一" })

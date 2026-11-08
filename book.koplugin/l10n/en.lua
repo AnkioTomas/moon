@@ -2099,10 +2099,4 @@ return {
     ["在线下载过慢时使用"] = "For when the online download is slow",
     ["手动安装词库"] = "Install dictionary manually",
     ["1. 打开 GitHub Release：\n%1\n\n2. 下载当前输入法对应的词库文件。\n\n3. 放入：\n%2"] = "1. Open GitHub Releases:\n%1\n\n2. Download the dictionary file for the current input method.\n\n3. Put it at:\n%2",
-    ["开始阅读 · %1"] = "Start reading · %1",
-    ["第 %1/%2 页 · %3%"] = "Page %1/%2 · %3%",
-    ["继续阅读 · %1"] = "Continue reading · %1",
-    ["重读 · %1"] = "Read again · %1",
-    ["共 %1 页"] = "%1 pages total",
-    ["选择卷"] = "Select volume",
 }
