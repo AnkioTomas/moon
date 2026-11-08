@@ -54,21 +54,27 @@ end
 ---@param refresh_shelf boolean|nil 连接配置 / 书库变了才让书架作废旧数据
 ---@param previous_fingerprint string|nil 保存前的库身份；与现在不同则清书架
 local function save(cfg, plugin, refresh_shelf, previous_fingerprint)
-    require("utils.settings").saveSource(ID, cfg)
+    local function commit()
+        require("utils.settings").saveSource(ID, cfg)
+    end
+    local replaced = previous_fingerprint and previous_fingerprint ~= libraryFingerprint(cfg)
+    if replaced then
+        if not require("source.logout").replaceLibrary(ID, commit) then
+            toast(_("清除本地记录失败"))
+            return false
+        end
+    else
+        commit()
+        require("source.registry").invalidate()
+    end
     local configured = (cfg.base_url or "") ~= "" and (cfg.api_key or "") ~= ""
     if configured and Cache.probe().ok then
         local server_key, code = Cache.registerServer(cfg.base_url, cfg.api_key)
         if not server_key or code then toast(_("无法同步配置到 kamare")) end
     end
-    local now = libraryFingerprint(cfg)
-    if previous_fingerprint and previous_fingerprint ~= now then
-        require("source.logout").replaceLibrary(ID)
-        repaint(plugin)
-        return
-    end
-    require("source.registry").invalidate()
     repaint(plugin)
-    if refresh_shelf then shelfChanged(plugin) end
+    if refresh_shelf and not replaced then shelfChanged(plugin) end
+    return true
 end
 
 --- 未配置 / 断网当场提示；否则带忙碌提示调 fn(client, done)，fn 结束时必须调 done()。
@@ -111,8 +117,9 @@ local function field(plugin, key, title, hint, password, normalize, icon)
                     ok_text = _("保存"),
                     callback = function(input)
                         local before = libraryFingerprint(cfg)
-                        cfg[key] = normalize(input)
-                        save(cfg, plugin, true, before)
+                        local next_cfg = require("util").tableDeepCopy(cfg)
+                        next_cfg[key] = normalize(input)
+                        save(next_cfg, plugin, true, before)
                     end,
                 }:show()
             end,
@@ -308,13 +315,6 @@ local function testRow()
     end
 end
 
---- 路径展示归一：压缩 `//`，再换成用户认的 `koreader/...`（USB 里看得见的文件夹名）。
----@param path string
----@return string
-local function tidyPath(path)
-    return require("utils.paths").userPath((path:gsub("/+", "/")))
-end
-
 --- 只读占用：当前服务器。
 ---@return table|nil
 local function serverUsage()
@@ -353,7 +353,7 @@ local function mk(opts)
 end
 
 local function installText(plugin)
-    local dir = tidyPath(Cache.pluginsDir(plugin and plugin.path))
+    local dir = require("utils.paths").userPath(Cache.pluginsDir(plugin and plugin.path))
     return table.concat({
         _("获取增强版"),
         _("  发布页：github.com/backtracker/kamare.koplugin/releases/latest"),
@@ -362,7 +362,7 @@ local function installText(plugin)
         _("  重启 KOReader。包里要有 kamarecache.lua（没有就是官方版）；"),
         _("  增强版与官方版目录同名，不能共存；替换前先删掉旧的 kamare.koplugin/。"),
         T(_("  如该目录不可写，可改用：%1"),
-            tidyPath(require("datastorage"):getDataDir() .. "/plugins")),
+            require("utils.paths").userPath(require("datastorage"):getDataDir() .. "/plugins")),
         "",
         _("增强版功能随版本不同，以实际安装的版本为准。"),
     }, "\n")
@@ -515,7 +515,7 @@ local function cacheSections(plugin, state)
         end
     end
     status[#status + 1] = mk({ icon = "info", title = _("加载路径"),
-        subtitle = probe.path and tidyPath(probe.path) or _("未加载"), chevron = false })
+        subtitle = probe.path and require("utils.paths").userPath(probe.path) or _("未加载"), chevron = false })
     if state.pending and Cache.available("summary") then
         status[#status + 1] = mk({
             icon = "storage", title = _("缓存占用"),

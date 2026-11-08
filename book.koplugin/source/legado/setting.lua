@@ -33,32 +33,36 @@ local function save(address, user, password)
     local Toast = require("ui.themes.widgets.toast")
     local settings = require("utils.settings")
     local cfg = settings.getSource(SOURCE_ID)
-    local previous = { cfg.server_address, cfg.username, cfg.password }
-    local before = libraryFingerprint(previous[1], previous[2])
-    cfg.server_address, cfg.username, cfg.password = address, user ~= "" and user or nil, password ~= "" and password or nil
+    local before = libraryFingerprint(cfg.server_address, cfg.username)
+    local next_cfg = { server_address = address, username = user ~= "" and user or nil,
+        password = password ~= "" and password or nil }
+    local function commit()
+        cfg.server_address, cfg.username, cfg.password = next_cfg.server_address, next_cfg.username, next_cfg.password
+        settings.saveSource(SOURCE_ID, cfg)
+    end
     local Client = require("source.legado.client")
     local waiting = require("ui.themes.widgets.progress_dialog"):new{
         title = _("开源阅读"), text = _("正在连接阅读服务…"), dismissable = false,
     }
     waiting:show()
-    -- 先落盘才能让 Client 读到新配置；校验失败再还原。
-    settings.saveSource(SOURCE_ID, cfg)
     Client.shelfAsync(function(rows, err)
         waiting:close()
         if not rows then
-            cfg.server_address, cfg.username, cfg.password = previous[1], previous[2], previous[3]
-            settings.saveSource(SOURCE_ID, cfg)
             Toast:new{ text = err or _("连接失败"), timeout = 3 }:show()
             return
         end
         -- 换服务地址 / 账号：旧库投影必须撕掉（书 ID 会撞）。
         if before ~= libraryFingerprint(address, user ~= "" and user or nil) then
-            require("source.logout").replaceLibrary(SOURCE_ID)
+            if not require("source.logout").replaceLibrary(SOURCE_ID, commit) then
+                Toast:new{ text = _("清除本地记录失败"), timeout = 3 }:show()
+                return
+            end
         else
+            commit()
             require("source.registry").reload()
         end
         Toast:new{ text = T(_("已连接，书架共 %1 本"), #rows), timeout = 2 }:show()
-    end)
+    end, next_cfg)
 end
 
 local scanning = false
@@ -128,11 +132,16 @@ local function edit()
             local address = Text.stripWhitespace(value)
             if address == "" then
                 local had = (cfg.server_address or "") ~= ""
-                cfg.server_address, cfg.username, cfg.password = nil, nil, nil
-                require("utils.settings").saveSource(SOURCE_ID, cfg)
+                local function commit()
+                    cfg.server_address, cfg.username, cfg.password = nil, nil, nil
+                    require("utils.settings").saveSource(SOURCE_ID, cfg)
+                end
                 if had then
-                    require("source.logout").replaceLibrary(SOURCE_ID)
+                    if not require("source.logout").replaceLibrary(SOURCE_ID, commit) then
+                        require("ui.themes.widgets.toast"):new{ text = _("清除本地记录失败"), timeout = 3 }:show()
+                    end
                 else
+                    commit()
                     require("source.registry").reload()
                 end
                 return

@@ -29,6 +29,10 @@ end
 function Setting.rows(plugin)
     local Row = require("ui.themes.widgets.row")
     local Text = require("utils.text")
+    local function repaint()
+        local desktop = plugin and plugin.desktop
+        if desktop and desktop.settings_overlay then desktop.settings_overlay:updateView() end
+    end
     local function localPathRow(iw)
         local path = require("utils.settings").getSource(SOURCE_ID).path or ""
         return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "folder",
@@ -37,10 +41,6 @@ function Setting.rows(plugin)
             callback = function()
                 Setting.open(function() repaint() end, plugin and plugin.desktop)
             end })
-    end
-    local function repaint()
-        local desktop = plugin and plugin.desktop
-        if desktop and desktop.settings_overlay then desktop.settings_overlay:updateView() end
     end
     --- WebDAV 库身份：地址 / 目录 / 用户。任一项变了旧 webdav:// 书必须撕掉（会撞相对路径）。
     local function webdavFingerprint(cfg)
@@ -58,11 +58,19 @@ function Setting.rows(plugin)
             ok_text = _("保存"),
             callback = function(text)
                 local before = webdavFingerprint(cfg)
-                cfg[key] = Text.trim(text)
-                require("utils.settings").saveSource(SOURCE_ID, cfg)
-                if before ~= webdavFingerprint(cfg) then
-                    require("source.logout").replaceWebdav()
+                local next_cfg = require("util").tableDeepCopy(cfg)
+                next_cfg[key] = Text.trim(text)
+                local function save()
+                    cfg[key] = next_cfg[key]
+                    require("utils.settings").saveSource(SOURCE_ID, cfg)
+                end
+                if before ~= webdavFingerprint(next_cfg) then
+                    if not require("source.logout").replaceWebdav(save) then
+                        require("ui.themes.widgets.toast"):new{ text = _("清除本地记录失败"), timeout = 3 }:show()
+                        return
+                    end
                 else
+                    save()
                     require("source.registry").invalidate()
                 end
                 repaint()
@@ -215,12 +223,13 @@ function Setting.open(on_saved, desktop)
         end
         local function save()
             local next_path = Text.rtrimSlashes(Text.rtrim(path))
+            -- 换目录 = 换库：旧根书连同进度 / 笔记 / 统计整本撕掉（软下架会留在「最近阅读」里）。
+            if previous ~= next_path and not require("book.store").forgetOldRoot(previous, next_path) then
+                require("ui.themes.widgets.toast"):new{ text = _("清除本地记录失败"), timeout = 3 }:show()
+                return
+            end
             cfg.path = path
             MoonSettings.saveSource(SOURCE_ID, cfg)
-            -- 换目录 = 换库：旧根书连同进度 / 笔记 / 统计整本撕掉（软下架会留在「最近阅读」里）。
-            if previous ~= next_path then
-                require("book.store").forgetOldRoot(previous, next_path)
-            end
             require("ui.themes.widgets.toast"):new{ text = _("已保存"), timeout = 2 }:show()
             if desktop and not desktop.closed then
                 require("desktop.sync").rescan(desktop)

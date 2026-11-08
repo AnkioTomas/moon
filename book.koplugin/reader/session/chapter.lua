@@ -238,6 +238,9 @@ function Chapter.afterBootstrap(plugin, session)
             if toc and #toc > 0 then chapter.fallback_fraction = nil end
             Snapshot.refresh(session)
             require("ui/uimanager"):setDirty(plugin.ui.dialog, "ui")
+            if err or toc and #toc > 0 then
+                require("reader.session.progress").onTocReady(session, err)
+            end
             if not err then Chapter.afterBootstrap(plugin, session) end
         end)
         return
@@ -266,6 +269,7 @@ function Chapter.afterBootstrap(plugin, session)
         local load = source.loadTocAsync
         if type(load) ~= "function" then
             chapter.open_refresh = nil
+            if not has_toc then require("reader.session.progress").onTocReady(session, _("目录为空")) end
             return
         end
         refresh = function(src, id, cb)
@@ -274,14 +278,16 @@ function Chapter.afterBootstrap(plugin, session)
     end
     -- 节流：刚拉过 / 刚试过就跳过；挡住时保留 open_refresh，下次切章再试。
     if not require("source.toc").allowRefresh(identity.source_id, identity.stable_id) then
+        if not has_toc then require("reader.session.progress").onTocReady(session, _("目录为空")) end
         return
     end
     chapter.open_refresh = nil
     if chapter.toc_job and chapter.toc_job.cancel then chapter.toc_job.cancel() end
-    chapter.toc_job = refresh(source, identity, function(toc)
+    chapter.toc_job = refresh(source, identity, function(toc, err)
         chapter.toc_job = nil
         if chapter_session ~= chapter or session.chapter ~= chapter then return end
         if type(toc) ~= "table" or #toc == 0 then
+            if not has_toc then require("reader.session.progress").onTocReady(session, err or _("目录为空")) end
             -- 失败：旧目录不动、不提示；有旧目录就继续预取。
             if has_toc and format_ok then schedulePrefetch(chapter) end
             return
@@ -290,6 +296,7 @@ function Chapter.afterBootstrap(plugin, session)
         chapter.fallback_fraction = nil
         Snapshot.refresh(session)
         require("ui/uimanager"):setDirty(plugin.ui.dialog, "ui")
+        require("reader.session.progress").onTocReady(session)
         schedulePrefetch(chapter)
     end)
 end

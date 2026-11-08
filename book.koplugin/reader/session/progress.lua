@@ -639,6 +639,20 @@ local function toast(text)
     require("ui.themes.widgets.toast"):new{ text = text, timeout = 2 }:show()
 end
 
+---@param snapshot ReaderSessionSnapshot
+---@param err string|nil
+function ReaderProgress.onTocReady(snapshot, err)
+    local id = snapshot.identity
+    local state = Progress.decisions[id.source_id .. "\31" .. id.stable_id]
+    if state and state.active and state.toc_ready then
+        local ready = state.toc_ready
+        state.toc_ready = nil
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("book.progress toc ready", function()
+            ready(err)
+        end))
+    end
+end
+
 --- 开书后拉远端进度并与当前阅读位置对比；冲突时弹窗，一致则直接收敛。
 --- syncProgressAsync 只推不拉；本函数是进度 pull 的唯一入口。
 --- manual（快捷面板手动拉取）：本次会话问过的冲突也再问一次，离线 / 无记录 / 失败 / 一致都提示。
@@ -660,6 +674,23 @@ function ReaderProgress.pull(snapshot, opts)
         state.resolved = nil
     end
     state.phase = "pulling"
+    if snapshot.chapter and not chapterToc(snapshot) then
+        if snapshot.chapter.toc ~= nil and not snapshot.chapter.toc_job then
+            state.phase = "ready"
+            logger.warn("book.progress waiting toc failed", id.stable_id, "empty toc")
+            return tell(_("目录为空"))
+        end
+        state.toc_ready = function(err)
+            state.toc_ready, state.phase = nil, "ready"
+            if not state.active or not isSameBook(id) then return end
+            if err then
+                logger.warn("book.progress waiting toc failed", id.stable_id, err)
+                return tell(T(_("拉取进度失败：%1"), err))
+            end
+            ReaderProgress.pull(require("reader.session").current(), opts)
+        end
+        return
+    end
     -- 数字拷贝：回包前换章会改身份表上的 chapter_idx，不能拿回包时的值当起点。
     local started_idx = tonumber(id.chapter_idx)
     logger.dbg("book.progress reader pull start", id.source_id, id.stable_id,

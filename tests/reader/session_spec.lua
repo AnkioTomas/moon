@@ -218,6 +218,9 @@ package.preload["reader.session.progress"] = function()
         pull = function(snapshot)
             calls.progress[#calls.progress + 1] = { "pull", snapshot and snapshot.identity }
         end,
+        onTocReady = function(snapshot, err)
+            calls.progress[#calls.progress + 1] = { "toc_ready", snapshot.identity, err }
+        end,
         push = function(ui, identity)
             calls.progress[#calls.progress + 1] = { "push", identity }
         end,

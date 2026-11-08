@@ -148,15 +148,10 @@ local function localReadStates(series, toc)
     local series_id = tostring(series.stable_id)
     if series_id:find(":", 1, true) then return out, rows end
     local ProgressDB = require("book.progress_db")
-    -- 整列一次查询；`list` 缺失（旧安装 / 测试桩）才退回逐条。
-    local all
-    if type(ProgressDB.list) == "function" then
-        all = ProgressDB.list(series.source_id, series_id)
-    end
+    local all = ProgressDB.list(series.source_id, series_id)
     for _idx, entry in ipairs(toc) do
         local stable_id = series_id .. ":" .. tostring(entry.chapterId)
-        local row
-        if all then row = all[stable_id] else row = ProgressDB.get(series.source_id, stable_id) end
+        local row = all[stable_id]
         if row then rows[tostring(entry.chapterId)] = row end
         local fraction = row and tonumber(row.fraction) or 0
         if fraction >= 1 then

@@ -5,8 +5,8 @@
 凭证还在时不许动本地书架：清库一旦被看成删书，同步就会把远端书架删掉。
 清库本身不写墓碑、不上传。
 
-换库身份（`replaceLibrary` / `replaceWebdav`）时凭证已是新库的：只撕本地投影，
-不写墓碑，避免把旧库的书推成新库上的删除。
+换库身份（`replaceLibrary` / `replaceWebdav`）时先清旧库投影，成功后才保存新凭证并重载。
+清理失败保留旧配置与源实例，不写墓碑，不把旧库记录送往新库。
 
 @module koplugin.book.source.logout
 --]]
@@ -61,29 +61,33 @@ function Logout.clear(source_id, clear)
 end
 
 --- 换服务器 / 换账号库：本地书架与旧库无关，整源撕掉再 reload 拉新库。
---- 调用方须先把新凭证落盘；本函数不改配置、不写墓碑。
+--- 新配置通过 commit 在清理成功后落盘；不写墓碑。
 ---@param source_id string
+---@param commit fun()|nil
 ---@return boolean
-function Logout.replaceLibrary(source_id)
+function Logout.replaceLibrary(source_id, commit)
     closeReader(source_id)
     Logout.abort(source_id)
+    if not require("book.store").forgetSource(source_id) then return false end
     local Registry = require("source.registry")
     Registry.invalidate()
-    local forgotten = require("book.store").forgetSource(source_id)
+    if commit then commit() end
     Registry.reload()
-    return forgotten
+    return true
 end
 
 --- 换 WebDAV 地址 / 目录：只撕 local 源里 webdav:// 的书；纯本地绝对路径书不动。
+---@param commit fun()|nil
 ---@return boolean
-function Logout.replaceWebdav()
+function Logout.replaceWebdav(commit)
     closeReader("local")
     Logout.abort("local")
+    if not require("book.store").forgetWebdav() then return false end
     local Registry = require("source.registry")
     Registry.invalidate()
-    local forgotten = require("book.store").forgetWebdav()
+    if commit then commit() end
     Registry.reload()
-    return forgotten
+    return true
 end
 
 --- 清库失败也保持登出：宁可本地残留，不许带着凭证改书架。

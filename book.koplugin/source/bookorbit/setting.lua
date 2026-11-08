@@ -28,22 +28,29 @@ local function libraryFingerprint(cfg)
     }, "\0")
 end
 
---- 落盘并重建源实例，让新地址 / 账号 / 书库立即生效，设置页随之刷新。
---- 换服务器 / 用户：整源清本地书架。
----@param cfg table
----@param previous_fingerprint string|nil
-local function save(cfg, previous_fingerprint)
-    require("utils.settings").saveSource(ID, cfg)
-    if previous_fingerprint and previous_fingerprint ~= libraryFingerprint(cfg) then
-        require("source.logout").replaceLibrary(ID)
-        return
-    end
-    require("source.registry").reload()
-end
-
 ---@param text string
 local function toast(text)
     require("ui.themes.widgets.toast"):new{ text = text, timeout = 3 }:show()
+end
+
+--- 落盘并重建源实例；换服务器 / 用户先清本地书架。
+---@param cfg table
+---@param previous_fingerprint string|nil
+---@return boolean
+local function save(cfg, previous_fingerprint)
+    local function commit()
+        require("utils.settings").saveSource(ID, cfg)
+    end
+    if previous_fingerprint and previous_fingerprint ~= libraryFingerprint(cfg) then
+        if not require("source.logout").replaceLibrary(ID, commit) then
+            toast(_("清除本地记录失败"))
+            return false
+        end
+    else
+        commit()
+        require("source.registry").reload()
+    end
+    return true
 end
 
 --- 密码 → x-auth-key（MD5，同 kosync）；空串表示清掉。
@@ -106,9 +113,10 @@ local function field(key, title, hint, password, normalize, icon)
                     ok_text = _("保存"),
                     callback = function(input)
                         local before = libraryFingerprint(cfg)
-                        cfg[key] = normalize(input)
+                        local next_cfg = require("util").tableDeepCopy(cfg)
+                        next_cfg[key] = normalize(input)
                         -- 只改密码不算换库；地址 / 用户名变了才撕本地书架。
-                        save(cfg, (key == "server_url" or key == "username") and before or nil)
+                        save(next_cfg, (key == "server_url" or key == "username") and before or nil)
                     end,
                 }:show()
             end,
@@ -188,10 +196,10 @@ end
 local function importOfficial()
     local account = officialAccount()
     if not account then return end
-    local cfg = config()
-    local before = libraryFingerprint(cfg)
+    local before = libraryFingerprint(config())
+    local cfg = require("util").tableDeepCopy(config())
     cfg.server_url, cfg.username, cfg.userkey = account.server_url, account.username, account.userkey
-    save(cfg, before)
+    if not save(cfg, before) then return end
     toast(T(_("已导入账号 %1"), account.username))
 end
 

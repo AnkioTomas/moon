@@ -672,6 +672,77 @@ Progress.push(snapshot())
 Assert.eq(lastText(), "推送进度失败：denied")
 package.loaded["ui/network/manager"] = nil
 
+-- 冷目录：不提前请求或决议；目录恢复后再比较，选择云端必须跳章。
+do
+    local current = Session.current
+    local next_tick = UIManager.nextTick
+    local ready_calls = {}
+    UIManager.nextTick = function(_self, fn) ready_calls[#ready_calls + 1] = fn end
+    local id = { source_id = "jdread", stable_id = "b1", chapter_idx = 3 }
+    local pages, requests = 0, 0
+    id.source = {
+        getProgressAsync = function(_self, _identity, cb)
+            requests = requests + 1
+            cb({ fraction = 0.85, chapter_idx = 9 })
+            return { cancel = function() end }
+        end,
+    }
+    local cold = {
+        identity = id, chapter = {},
+        ui = { document = { getPageCount = function() return 10 end },
+            handleEvent = function() pages = pages + 1 end },
+        doc_fraction = 0,
+    }
+    Session.current = function() return cold end
+    package.loaded["ui/network/manager"] = { isConnected = function() return true end }
+    Progress.clearConflicts(id)
+    pending_row = { fraction = 0.2, chapter_idx = 3, sync_status = 0 }
+    shown, adopted, goto_calls = {}, {}, {}
+    Progress.pull(cold)
+    Assert.eq(requests, 0, "目录未就绪时不能按整书比例处理远端位置")
+    Assert.len(shown, 0)
+    Assert.is_false(require("book.progress").canPush(id), "等待目录期间同样禁止上传")
+    cold.chapter.toc = {}
+    for idx = 1, 10 do cold.chapter.toc[idx] = { idx = idx, title = "章" .. idx } end
+    Progress.onTocReady(cold)
+    Progress.onTocReady(cold)
+    Assert.eq(requests, 0, "目录完成回调不在当前重绘/章节初始化栈内发起拉取")
+    Assert.len(ready_calls, 1, "同一目录完成通知不能排两次拉取")
+    table.remove(ready_calls, 1)()
+    Assert.eq(requests, 1)
+    Assert.len(shown, 1)
+    shown[1].ok_callback()
+    Assert.eq(adopted[1].chapter_idx, 9)
+    Assert.eq(goto_calls[1].idx, 9)
+    Assert.eq(pages, 0, "不能在第 3 章内按全书比例跳页")
+
+    Progress.clearConflicts(id)
+    cold.chapter.toc = nil
+    pending_row.decision_pending = 1
+    shown, adopted = {}, {}
+    Progress.pull(cold, { manual = true })
+    Progress.onTocReady(cold, "toc failed")
+    table.remove(ready_calls, 1)()
+    Assert.eq(requests, 1, "目录失败不拉进度、不采纳远端")
+    Assert.len(adopted, 0)
+    Assert.eq(shown[1].text, "拉取进度失败：toc failed")
+    Assert.is_false(require("book.progress").canPush(id), "持久未决标记不能因目录失败被解除")
+
+    cold.chapter.toc = {}
+    Progress.pull(cold, { manual = true })
+    Assert.eq(shown[#shown].text, "目录为空", "已失败的目录不能让手动重试悬挂")
+    cold.chapter.toc = nil
+    Progress.pull(cold)
+    cold.chapter.toc = { { idx = 1 } }
+    Progress.onTocReady(cold)
+    Progress.clearConflicts(id)
+    table.remove(ready_calls, 1)()
+    Assert.eq(requests, 1, "关书后目录回调不能重启拉取")
+    Session.current = current
+    UIManager.nextTick = next_tick
+    package.loaded["ui/network/manager"] = nil
+end
+
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",
     "reader.session.toc", "reader.session", "logger",
