@@ -8,7 +8,7 @@ Kavita 源设置：服务器地址、API Key、书库选择、测试连接。
 local Text = require("utils.text")
 local Cache = require("source.kavita.cache")
 local KamareUpdate = require("source.kavita.kamare_update")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 local T = require("ffi/util").template
 
 local ID = "kavita"

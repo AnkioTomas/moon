@@ -8,7 +8,7 @@ Kavita HTTP 客户端：x-api-key 认证，只回 wire，不做领域转换。
 local JSON = require("json")
 local Request = require("http.request")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 local T = require("ffi/util").template
 
 --- 单次请求默认超时（秒）。全量书架（`all-v2`）在慢设备 / 慢服务器上 30s 拉不完，

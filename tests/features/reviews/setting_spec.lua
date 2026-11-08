@@ -2,7 +2,6 @@
 
 local Assert = require("support.assert")
 
-package.preload["gettext"] = function() return function(text) return text end end
 package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end

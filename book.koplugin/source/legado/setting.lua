@@ -10,8 +10,7 @@ reader3 服务器版地址带 /reader3 后缀（如 http://host:8080/reader3）�
 @module koplugin.book.source.legado.setting
 --]]
 
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.legado")
 local T = require("ffi/util").template
 
 local SOURCE_ID = "legado"

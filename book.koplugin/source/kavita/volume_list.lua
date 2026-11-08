@@ -15,7 +15,7 @@ Kavita 卷列表：选卷阅读 + 缓存管理（04 A1–A9 / 07 A1–A7）。
 @module source.kavita.volume_list
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 local T = require("ffi/util").template
 local Cache = require("source.kavita.cache")
 

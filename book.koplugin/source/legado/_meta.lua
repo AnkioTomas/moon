@@ -4,7 +4,7 @@
 @module source.legado._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.legado")
 
 return {
     id = "legado",

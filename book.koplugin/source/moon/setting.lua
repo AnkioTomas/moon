@@ -6,7 +6,7 @@ Moon 源设置 UI（服务器/令牌表单由本模块自绘）。
 --]]
 
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.moon")
 
 local SOURCE_ID = "moon"
 

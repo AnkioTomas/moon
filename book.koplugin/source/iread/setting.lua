@@ -7,8 +7,7 @@ iRead 源设置：登录。
 @module koplugin.book.source.iread.setting
 --]]
 
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.iread")
 local T = require("ffi/util").template
 
 local SOURCE_ID = "iread"

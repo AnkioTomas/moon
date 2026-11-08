@@ -8,7 +8,7 @@ local Cbz = require("source.cbz")
 local Image = require("utils.image")
 local Paths = require("utils.paths")
 local Protocol = require("source.copymanga.protocol")
-local _ = require("gettext")
+local _ = require("l10n").get("source.copymanga")
 
 local Chapter = {}
 

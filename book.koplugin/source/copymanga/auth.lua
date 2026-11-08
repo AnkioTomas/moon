@@ -11,7 +11,7 @@
 
 local Client = require("source.copymanga.client")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.copymanga")
 
 local Auth = {}
 local SOURCE_ID = "copymanga"

@@ -4,9 +4,8 @@
 @module koplugin.book.source.copymanga.mapper
 --]]
 
-require("l10n").apply()
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.copymanga")
 
 local Mapper = {}
 local SOURCE_ID = "copymanga"

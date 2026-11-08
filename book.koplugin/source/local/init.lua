@@ -8,7 +8,7 @@ syncBooksAsync = 扫盘或 WebDAV 同步（force 强制 / 否则节流自动同�
 
 local SourceBase = require("source.base")
 local Client = require("source.local.client")
-local _ = require("gettext")
+local _ = require("l10n").get("source.local")
 
 local Local = {}
 

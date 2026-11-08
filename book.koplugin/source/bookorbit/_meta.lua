@@ -4,7 +4,7 @@
 @module source.bookorbit._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.bookorbit")
 
 return {
     id = "bookorbit",
