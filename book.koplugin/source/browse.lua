@@ -27,6 +27,7 @@ function Browse.pages(fetch, limit, groups, cb)
             end
             local added = 0
             for _idx, book in ipairs(list) do
+                if #books >= limit then break end
                 local key = type(book) == "table" and book.stable_id
                     and (book.source_id or "") .. "\0" .. book.stable_id
                 if not key or not seen[key] then

@@ -21,9 +21,19 @@ do
     local calls, out = {}, nil
     local group = { chips = { { id = "g", title = "组" } }, active = "g" }
     Browse.pages(fetcher({ { "a", "b" }, { "c", "d" }, { "e" } }, calls), 3, { group }, function(res) out = res end)
-    Assert.len(out.data, 4)
+    Assert.len(out.data, 3)
     Assert.len(calls, 2)
     Assert.eq(out.groups[1], group)
+end
+
+do
+    local calls, out = {}, nil
+    local oversized = {}
+    for index = 1, 67 do oversized[index] = { source_id = "test", stable_id = tostring(index) } end
+    Browse.pages(fetcher({ oversized }, calls), 60, {}, function(res) out = res end)
+    Assert.len(out.data, 60, "站点返回超大一页时仍遵守调用方上限")
+    Assert.eq(out.data[60].stable_id, "60")
+    Assert.len(calls, 1)
 end
 
 do
