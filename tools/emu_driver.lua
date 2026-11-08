@@ -17,16 +17,29 @@ local Event = require("ui/event")
 local Geom = require("ui/geometry")
 local time = require("ui/time")
 
--- 模拟器上 LuaSocket×macOS Network 框架在并发 getaddrinfo 时会 SIGSEGV。
--- 验证会话默认断网：挡住启动时的书架同步 / NTP，避免驱动还没轮询就崩。
--- 需要联网测试时：MOON_EMU_ONLINE=1 ./run.sh
-if os.getenv("MOON_EMU_ONLINE") ~= "1" then
+-- 默认联网。要故意断网测离线路径：MOON_EMU_ONLINE=0 ./run.sh
+-- （旧默认断网是怕 LuaSocket×macOS 并发 getaddrinfo SIGSEGV；现在默认放开。）
+if os.getenv("MOON_EMU_ONLINE") == "0" then
     local ok_nm, NM = pcall(require, "ui/network/manager")
     if ok_nm and NM then
         NM.isConnected = function() return false end
         if NM.isOnline then NM.isOnline = function() return false end end
     end
 end
+
+-- macOS 模拟器点击全部变成长按的根因：
+-- SDL3.lua 用 CLOCK_MONOTONIC_COARSE 给触摸事件打戳；在 Darwin 上这是
+-- CLOCK_MONOTONIC_RAW_APPROX，比 CLOCK_MONOTONIC / time.now() 慢约 500ms。
+-- GestureDetector 却把时钟戳识别成 MONOTONIC，hold deadline = origin+500ms ≈ now，
+-- 长按定时器几乎立刻触发，tap 永远出不来。clock_id=-1 让 Input:setTimeout 改走
+-- time.now()+delay，不再拿慢了半秒的 origin 算绝对截止时间。
+UIManager:nextTick(function()
+    local ok_dev, Device = pcall(require, "device")
+    local gd = ok_dev and Device.input and Device.input.gesture_detector
+    if gd then
+        gd.clock_id = -1
+    end
+end)
 
 -- 默认路径给 tools/emu.sh。独立环境用 MOON_EMU_* 换一套，避免和已经开着的模拟器抢同一个命令文件。
 local CMD = os.getenv("MOON_EMU_CMD") or "/tmp/ko_cmd.lua"
