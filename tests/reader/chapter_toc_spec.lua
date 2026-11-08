@@ -52,3 +52,15 @@ Assert.eq(shown.toc[5].title, "第四章")
 Assert.eq(shown:getTitle(), "目录")
 Assert.eq(selected, 1)
 Assert.eq(selected_anchor.title, "第一章")
+
+-- pageno 永远是数字：nil / 不在目录 / 空标题章都不能把 nil 传给 ReaderToc。
+local toc = {
+    { idx = 1, title = "一" },
+    { idx = 3, title = "" },
+    { idx = 5, title = "五" },
+}
+Assert.eq(ChapterToc.show(toc, nil, function() end).pageno, 1)
+Assert.eq(ChapterToc.show(toc, 3, function() end).pageno, 2, "空标题章仍有页码")
+Assert.eq(ChapterToc.show(toc, 3, function() end).toc[2].title, "#3")
+Assert.eq(ChapterToc.show(toc, 4, function() end).pageno, 2, "缺章时落到不大于当前 idx 的最近一章")
+Assert.eq(ChapterToc.show(toc, 99, function() end).pageno, 3)
