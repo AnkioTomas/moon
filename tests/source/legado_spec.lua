@@ -166,6 +166,13 @@ do
     Assert.eq(Client.mode(), "reader3")
     Assert.eq(Client.imageUrl("__API_ROOT__/book-assets/a b.png"), "http://h:8080/book-assets/a b.png?accessToken=T2")
     Assert.eq(Client.imageUrl("https://x/y.jpg"), "https://x/y.jpg")
+    local resource = "http://h:8080/proxy/book-assets/Text/chapter.xhtml?accessToken=T2"
+    Assert.eq(Client.imageUrl("../Images/cover%20one.png", resource),
+        "http://h:8080/proxy/book-assets/Images/cover%20one.png?accessToken=T2")
+    Assert.eq(Client.imageUrl("../Images/cover.png?v=1#cover", resource),
+        "http://h:8080/proxy/book-assets/Images/cover.png?v=1&accessToken=T2#cover")
+    Assert.eq(Client.imageUrl("//cdn.example/cover.png", resource), "http://cdn.example/cover.png")
+    Assert.eq(Client.imageUrl("data:image/png;base64,AAAA", resource), "data:image/png;base64,AAAA")
     requests = {}
     replies = { '{"isSuccess":true,"data":[{"index":0,"title":"序"}]}' }
     local rows
@@ -189,6 +196,21 @@ do
     Auth.reset()
 
     cfg.username, cfg.password = nil, nil
+end
+
+-- EPUB 正文不靠 <p> 判空；保留实体文本、转换 SVG、规范化图片属性及 URL。
+do
+    local base = "http://h/book-assets/Text/chapter.xhtml"
+    local function imageUrl(src, document_url) return require("utils.text").absoluteUrl(document_url, src) end
+    local html = Mapper.assetHtml("章", '<?xml version="1.0"?><html><head><title>壳</title></head>'
+        .. '<body><style>p{color:red}</style><script>alert(1)</script><div>&amp;</div></body></html>', base, imageUrl)
+    Assert.eq(html, "<h1>章</h1>\n<div>&amp;</div>")
+    Assert.is_nil(Mapper.assetHtml("只有标题", "<body><div>&nbsp; &#160;</div></body>", base, imageUrl))
+    html = Mapper.assetHtml("图", '<body><svg><image xlink:href="../Images/封 面%20图.png"/></svg>'
+        .. "<img src = '../Images/a.png?a=1&amp;b=2'/></body>", base, imageUrl)
+    Assert.matches(html, 'src="http://h/book%-assets/Images/%%E5%%B0%%81%%20%%E9%%9D%%A2%%20%%E5%%9B%%BE%.png"')
+    Assert.matches(html, 'src="http://h/book%-assets/Images/a%.png%?a=1&amp;b=2"')
+    Assert.is_nil(html:find("<svg", 1, true))
 end
 
 -- 轻阅读：/api/N 后缀；表单 POST，登录带 model=web，目录 / 正文带书源，正文回包是 { text }。

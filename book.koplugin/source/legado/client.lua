@@ -206,19 +206,28 @@ end
 
 --- 书内图片地址：服务端给的相对路径补成可直接下载的 URL（app 的相对路径没有意义，原样返回）。
 ---@param src string
+---@param base string|nil EPUB 章节 URL，按它解析相对引用；只给同服务器的资源带令牌。
 ---@return string
-function Client.imageUrl(src)
-    if src:find("^https?://") then return src end
-    local mode = Client.mode()
+function Client.imageUrl(src, base)
     local out
-    if mode == "app" then return src end
-    if mode == "qread" then
-        out = src:find("^baseurl/") and (Client.base() .. src:sub(8))
-            or (Client.base() .. "/proxypng?url=" .. Text.urlEncode(src))
+    if base then
+        out = assert(Text.absoluteUrl(base, src), "invalid chapter resource URL")
+        if out:match("^(https?://[^/]+)") ~= root():match("^(https?://[^/]+)") then return out end
     else
-        out = root() .. src:gsub("^__API_ROOT__", "")
+        if src:find("^https?://") then return src end
+        local mode = Client.mode()
+        if mode == "app" then return src end
+        if mode == "qread" then
+            out = src:find("^baseurl/") and (Client.base() .. src:sub(8))
+                or (Client.base() .. "/proxypng?url=" .. Text.urlEncode(src))
+        else
+            out = root() .. src:gsub("^__API_ROOT__", "")
+        end
     end
-    if session.token then out = out .. (out:find("?", 1, true) and "&" or "?") .. "accessToken=" .. session.token end
+    if session.token then
+        local target, fragment = out:match("^([^#]*)(.*)$")
+        out = target .. (target:find("?", 1, true) and "&" or "?") .. "accessToken=" .. session.token .. fragment
+    end
     return out
 end
 

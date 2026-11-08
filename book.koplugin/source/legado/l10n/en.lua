@@ -14,6 +14,7 @@ return {
     ["缺少阅读章节位置"] = "Missing Legado chapter position",
     ["阅读目录为空"] = "Legado table of contents is empty",
     ["阅读章节内容为空"] = "Chapter content is empty",
+    ["阅读插图下载失败，请重试"] = "Failed to download chapter illustrations. Please retry.",
     ["阅读服务"] = "Legado server",
     ["账号（reader3 服务器版才需要）"] = "Account (reader3 server only)",
     ["阅读服务地址"] = "Legado server address",

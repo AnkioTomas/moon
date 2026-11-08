@@ -84,4 +84,35 @@ function Mapper.chapterHtml(title, text, imageUrl)
     return (Text.chapterHtml(title, text):gsub("\1(%d+)\1", function(n) return imgs[tonumber(n)] end))
 end
 
+--- reader3 本地 EPUB 资源 → 正文片段；图片按章节 URL 解析并规范化属性，供公共 Assets 落地。
+---@param title string
+---@param raw string
+---@param base string
+---@param imageUrl fun(src: string, base: string): string
+---@return string|nil
+function Mapper.assetHtml(title, raw, base, imageUrl)
+    local inner = Text.htmlBodyFragment(raw)
+        :gsub("<script[^>]*>.-</script>", "")
+        :gsub("<style[^>]*>.-</style>", "")
+    local function svgToImg(block)
+        local href = block:match('xlink:href%s*=%s*"([^"]*)"')
+            or block:match("xlink:href%s*=%s*'([^']*)'")
+            or block:match('href%s*=%s*"([^"]*)"')
+            or block:match("href%s*=%s*'([^']*)'")
+        if not href or href == "" then return "" end
+        return '<img src="' .. Text.xmlEscape(Text.xmlDecode(href)) .. '"/>'
+    end
+    inner = inner:gsub("<svg[^>]*>.-</svg>", svgToImg)
+        :gsub("<image%s[^>]-/>", svgToImg)
+    inner = inner:gsub("<img%s+[^>]*>", function(tag)
+        return (tag:gsub("src%s*=%s*(['\"])(.-)%1", function(_quote, src)
+            if src == "" then return 'src=""' end
+            local url = Text.escapeUrl(imageUrl(Text.xmlDecode(src), base))
+            return 'src="' .. Text.xmlEscape(url) .. '"'
+        end, 1))
+    end)
+    if not inner:find("<img", 1, true) and Text.stripHtml(inner) == "" then return nil end
+    return "<h1>" .. Text.xmlEscape(title) .. "</h1>\n" .. inner
+end
+
 return Mapper
