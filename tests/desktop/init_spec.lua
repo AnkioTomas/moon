@@ -322,11 +322,19 @@ do -- Destroy：活跃时先补 Pause；关叠层、清 plugin.desktop；只做�
     drain()
     local overlay_closed = false
     desk.settings_overlay = { close = function() overlay_closed = true end, updateView = function() end }
+    local stats_cancelled, books_cancelled = 0, 0
+    desk._stats_sync.test = { cancel = { cancel = function()
+        Assert.is_nil(desk._stats_sync.test, "先作废统计请求，再取消可能同步回调的句柄")
+        stats_cancelled = stats_cancelled + 1
+    end } }
+    desk._books_sync.test = { cancel = { cancel = function() books_cancelled = books_cancelled + 1 end } }
     desk:onClose()
     Assert.is_true(desk.closed)
     Assert.is_true(overlay_closed)
     Assert.is_nil(plugin.desktop)
     Assert.eq(Kit.closed[#Kit.closed], desk)
+    Assert.eq(stats_cancelled, 1)
+    Assert.eq(books_cancelled, 0, "销毁桌面不取消已转后台的书架同步")
     local out = drain()
     Assert.matches(out, "^topbar%.pause,home%.pause")
     Assert.matches(out, "topbar%.destroy,home%.destroy,library%.destroy,store%.destroy,insight%.destroy,settings%.destroy$")
@@ -336,6 +344,7 @@ do -- Destroy：活跃时先补 Pause；关叠层、清 plugin.desktop；只做�
     desk:updateView()
     Assert.eq(drain(), "")
     Assert.is_false(desk.active)
+    Assert.eq(stats_cancelled, 1, "重复销毁不会再次取消")
 end
 
 do -- Desktop.open：无源只提示；有源建桌面、显示、Resume、通知源；再开先销毁旧桌面

@@ -1,11 +1,24 @@
 --[[-- 阅读模式下 filebrowser Tab 重定向到 Book 桌面的离线用例。 --]]
 
 local Assert = require("support.assert")
+local Themed = require("support.theme_stubs")
+Themed.install()
+
+local logged = {}
+package.preload["utils.log"] = function()
+    return {
+        error = function(...) logged[#logged + 1] = { ... } end,
+        flush = function() end, warn = function() end, info = function() end, dbg = function() end,
+    }
+end
+package.preload["version"] = function() return { getShortVersion = function() return "2026.07" end } end
 
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
 package.preload["logger"] = function() return { err = function() end } end
-package.preload["device"] = function() return { isTouchDevice = function() return true end } end
+package.preload["device"] = function()
+    return { model = "Test", isTouchDevice = function() return true end, input = { group = { Back = { "Back" } } } }
+end
 package.loaded["patch.manager"] = nil
 package.preload["patch.manager"] = function()
     error("阅读菜单接管不应加载核心文件补丁管理器")
@@ -20,6 +33,7 @@ package.preload["ui/uimanager"] = function()
 end
 
 local drawer_on = true
+local back_on, settings_error = false, nil
 local opened_desktop = 0
 package.preload["desktop"] = function()
     return {
@@ -28,7 +42,10 @@ package.preload["desktop"] = function()
     }
 end
 package.preload["utils.settings"] = function()
-    return { get = function() return { drawer_opens_desktop = drawer_on } end }
+    return { get = function()
+        if settings_error then error(settings_error) end
+        return { drawer_opens_desktop = drawer_on, back_to_desktop = back_on }
+    end }
 end
 package.preload["menu"] = function()
     return { openOnStart = function() return true end }
@@ -112,6 +129,47 @@ Assert.eq(opened_desktop, 3)
 
 -- 开关关：走原生文件浏览器，不回桌面（只测正式版形状）。
 drawer_on = false
-tab.callback()
+Assert.eq(tab.callback(), "native", "关闭接管时保留原生返回值")
 Assert.eq(native_calls, 1)
 Assert.eq(opened_desktop, 3)
+
+local reader_on_top, link_selected = true, false
+package.loaded["ui.input"] = { isTop = function() return reader_on_top end }
+local key = { match = function() return true end }
+local ui = {
+    link = { isPageLinkSelected = function() return link_selected end },
+    onKeyPress = function(_self, event) return "native press", event end,
+    onKeyRepeat = function(_self, event) return "native repeat", event end,
+}
+local ReaderExit = require("desktop.reader_exit")
+ReaderExit.attach(ui)
+local result, returned_key = ui:onKeyPress(key)
+Assert.eq(result, "native press")
+Assert.eq(returned_key, key, "原生多返回值透传")
+Assert.eq(ui:onKeyRepeat(key), "native repeat")
+back_on = true
+Assert.is_true(ui:onKeyPress(key))
+local scheduled = next_tick
+Assert.is_true(ui:onKeyRepeat(key))
+Assert.eq(next_tick, scheduled, "按键重复不再次安排关书")
+link_selected = true
+Assert.eq(ui:onKeyPress(key), "native press", "链接选择仍交给原生处理")
+reader_on_top = false
+Assert.is_false(ui:onKeyPress(key), "阅读器被弹窗盖住时不响应返回键")
+
+settings_error = "injected reader setting failure"
+drawer_on = true
+for _idx, handler in ipairs({ "onKeyPress", "onKeyRepeat" }) do
+    Assert.is_nil(ui[handler](ui, key), "注入回调错误不得外抛")
+    Assert.eq(logged[#logged][2], "reader exit " .. handler)
+    local box = Themed.last("text_viewer")
+    Assert.matches(box.text, settings_error)
+    box:close()
+end
+local closed_before = menu.closed
+Assert.is_nil(tab.callback(), "抽屉同步回调的错误也被隔离")
+Assert.eq(logged[#logged][2], "reader exit drawer")
+Assert.matches(Themed.last("text_viewer").text, settings_error)
+Assert.eq(menu.closed, closed_before)
+Assert.eq(next_tick, scheduled, "出错不安排关书")
+Themed.last("text_viewer"):close()
