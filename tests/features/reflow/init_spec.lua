@@ -126,7 +126,7 @@ local function reader(file, kind)
         switchDocument = function(_, target) switched = target end,
         toc = { fillToc = function(self)
             self.toc = {}
-            for i, title in ipairs(toc_titles) do self.toc[i] = { title = title, page = i } end
+            for i, title in ipairs(toc_titles) do self.toc[i] = { title = title, page = i, depth = 1 } end
         end },
     }
     if kind == "rolling" then ui.rolling = {} end
@@ -171,7 +171,8 @@ Assert.is_nil(extracted_ui, "TXT 不走逐页提取")
 Assert.is_nil(built.text, "TXT 全文不进主进程，子进程读原文件")
 Assert.is_nil(sidecars[path].annotations, "重新排版同一路径：旧划线坐标指向旧结构，清掉")
 Assert.is_nil(sidecars[path].book_note_linked)
-Assert.eq(built.headings[1], "甲", "原文档目录标题带到转换")
+Assert.eq(built.headings[1].title, "甲", "原文档目录标题带到转换")
+Assert.is_nil(built.headings[1].depth, "TXT 的目录层级按原文重新推断")
 Assert.eq(built.source, txt, "书名 / 作者仍可从原书文件名推断")
 Assert.is_true(built.reflow)
 local meta = require("support.json_stub").decode(assert(io.open(dir .. "/meta.json")):read("*a"))
@@ -180,8 +181,11 @@ Assert.eq(meta.file, dir .. "/book.epub")
 
 -- 其它格式：先从打开的文档逐页取字落盘，再交给转换（主进程不持有全文）
 local pdf_ui = reader("/books/a.pdf", "pdf")
+toc_titles = { "甲" }
 Reflow.runAsync(pdf_ui, identity, function(p, e) path, err = p, e end, function() end)
+toc_titles = {}
 Assert.eq(extracted_ui, pdf_ui)
+Assert.eq(built.headings[1].depth, 1, "源文档目录层级带到转换")
 Assert.is_nil(built.text, "全文不进主进程")
 Assert.eq(built.text_file, extract_tmp)
 Assert.is_nil(io.open(extract_tmp), "转换结束后删临时文件")
