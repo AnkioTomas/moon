@@ -131,13 +131,12 @@ end
 
 ---@return table[]
 function Setting.rows()
-    local rows = { CookieLogin.accountRow(SPEC, { callback = startQR }) }
-    local on = loggedIn()
-    if on then rows[#rows + 1] = CookieLogin.logoutRow(SPEC) end
-    -- 未登录，或已保存的 Cookie 被标失效：给出换 Cookie 的入口。
-    if not on or require("source.auth").expired(SOURCE_ID) then
-        rows[#rows + 1] = CookieLogin.pasteRow(SPEC)
-    end
+    local rows = {
+        CookieLogin.accountRow(SPEC, { callback = startQR }),
+        CookieLogin.browserRow(),
+        CookieLogin.pasteRow(SPEC),
+    }
+    if loggedIn() then rows[#rows + 1] = CookieLogin.logoutRow(SPEC) end
     rows[#rows + 1] = function(iw)
         local ReviewSetting = require("source.review_setting")
         local enabled = ReviewSetting.enabled(SOURCE_ID)
@@ -151,15 +150,9 @@ function Setting.rows()
     return rows
 end
 
---- 登录失效提示的「重新登录」：扫码和粘贴都给出来，正文里的浏览器步骤不靠这个按钮。
+--- 登录失效提示的「重新登录」直达账号页里的扫码行。
 local function chooseLogin()
-    require("ui.themes.widgets.sheet"):new{
-        title = _("重新登录长佩"),
-        items = {
-            { text = _("用长佩 App 扫码"), callback = startQR },
-            { text = _("粘贴 Cookie"), callback = function() CookieLogin.prompt(SPEC) end },
-        },
-    }:show()
+    startQR()
 end
 
 Setting.login = chooseLogin

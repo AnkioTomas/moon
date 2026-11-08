@@ -48,9 +48,13 @@ end
 
 local saved = 0
 local store_settings = { enabled = true, zlib_enabled = true, opds_enabled = false, provider = "" }
+local source_settings = { library_mixed = false }
 package.preload["utils.settings"] = function()
     return {
-        get = function() return store_settings end,
+        get = function(name)
+            if name == "source" then return source_settings end
+            return store_settings
+        end,
         save = function() saved = saved + 1 end,
     }
 end
@@ -63,10 +67,12 @@ local searchable = {
         return { cancel = function() end }
     end,
 }
+local active_id = nil
 package.preload["source.registry"] = function()
     return {
         listEnabled = function() return { { id = "local", name = "本地" }, { id = "wechat", name = "微信读书" } } end,
         resolve = function(id) return id == "wechat" and searchable or {} end,
+        activeId = function() return active_id end,
     }
 end
 local picker
@@ -128,6 +134,25 @@ local providers = Store.providers()
 Assert.len(providers, 2)
 Assert.eq(providers[1].id, "zlib")
 Assert.eq(providers[2].id, "wechat")
+
+-- 非混合：当前活跃源可搜时排到最前，默认也选它。
+active_id = "wechat"
+providers = Store.providers()
+Assert.eq(providers[1].id, "wechat")
+Assert.eq(providers[2].id, "zlib")
+store.provider_id = nil
+Assert.eq(store:provider().id, "wechat")
+active_id = nil
+store.provider_id = store_settings.provider
+
+-- 混合：记住的优先，否则 Z站，再否则第一个。
+source_settings.library_mixed = true
+store.provider_id = nil
+Assert.eq(store:provider().id, "zlib")
+store.provider_id = "wechat"
+Assert.eq(store:provider().id, "wechat")
+source_settings.library_mixed = false
+store.provider_id = store_settings.provider
 
 -- 总开关关闭：没有任何来源，底栏不显示书城。
 store_settings.enabled = false

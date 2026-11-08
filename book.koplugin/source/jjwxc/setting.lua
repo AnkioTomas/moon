@@ -84,7 +84,9 @@ function Setting.rows(plugin)
     local Row = require("ui.themes.widgets.row")
     local rows = {
         CookieLogin.accountRow(SPEC, { callback = function() showAccountLogin() end,
-            subtitle = _("也可在「远程管理」里用浏览器授权登录") }),
+            off_text = _("未登录 · 点此用账号密码") }),
+        CookieLogin.browserRow(),
+        CookieLogin.pasteRow(SPEC),
         require("source.review_setting").row(SOURCE_ID, plugin),
     }
     if not loggedIn() then return rows end
@@ -207,7 +209,6 @@ function showAccountLogin()
             { label = _("密码"), text = "", text_type = "password" },
         },
         ok_text = _("登录"),
-        actions = { { text = _("用 Cookie 登录"), callback = function() CookieLogin.prompt(SPEC) end } },
         callback = function(account, password)
             account = (account or ""):gsub("^%s+", ""):gsub("%s+$", "")
             if account == "" or (password or "") == "" then

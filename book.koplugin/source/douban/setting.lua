@@ -45,6 +45,7 @@ Setting.browser = {
     scope = "cookie",
     login = LOGIN_URL,
     check = "https://read.douban.com/",
+    icon = "https://static.arkread.com/ark/pics/favicon/v6/favicon.10c09c23.ico",
     isAuthorized = function() return CookieLogin.authorized(SPEC) end,
     apply = function(payload, cb)
         local cookies = {}
@@ -97,18 +98,7 @@ function Setting.rows(plugin)
             callback = function() require("source.douban.phone_login"):new(save):start() end,
         })
     end
-    rows[#rows + 1] = function(iw)
-        return Row.widget({
-            width = iw, chevron = true, kind = "nav", icon = "language",
-            title = _("电脑浏览器登录"), subtitle = _("在电脑浏览器完成官方授权"),
-            callback = function()
-                require("ui.themes.widgets.text_viewer"):new{
-                    title = _("电脑浏览器登录"),
-                    text = CookieLogin.relogin(_("豆瓣阅读"), LOGIN_URL, _("豆瓣阅读登录 Cookie")),
-                }:show()
-            end,
-        })
-    end
+    rows[#rows + 1] = CookieLogin.browserRow()
     rows[#rows + 1] = CookieLogin.pasteRow(SPEC)
     rows[#rows + 1] = require("source.category_setting").row(SOURCE_ID, plugin)
     rows[#rows + 1] = require("source.review_setting").row(SOURCE_ID, plugin)

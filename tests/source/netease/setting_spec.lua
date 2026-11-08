@@ -84,8 +84,17 @@ Assert.eq(cancelled, 3)
 local rows = Setting.rows()
 rows[2](400).callback()
 Assert.eq(qr_started, 1)
+local opened
+package.loaded["utils.extension"] = {
+    call = function(name, path, title)
+        opened = { name = name, path = path, title = title }
+        return { close = function() end }
+    end,
+}
+Assert.eq(rows[3](400).title, "浏览器登录")
 rows[3](400).callback()
-Assert.eq(Themed.last("text_viewer").title, "电脑浏览器登录")
+Assert.eq(opened.path, "/cookie.html")
+package.loaded["utils.extension"] = nil
 rows[4](400).callback()
 Assert.eq(Themed.last("input").title, "网易云阅读登录 Cookie")
 Assert.eq(Setting.browser.domain, "yuedu.163.com")

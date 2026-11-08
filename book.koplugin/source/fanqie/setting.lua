@@ -7,6 +7,7 @@
 require("l10n").apply()
 local _ = require("gettext")
 
+local SOURCE_ID = "fanqie"
 local M = {}
 
 function M.rowTitle()
@@ -32,6 +33,7 @@ function M.open()
         self.busy:show()
     end
     function owner:onLoginSuccess()
+        require("source.auth").ok(SOURCE_ID)
         require("source.registry").reload()
     end
     require("ui/network/manager"):runWhenConnected(function()

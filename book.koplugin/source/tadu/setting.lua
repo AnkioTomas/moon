@@ -63,6 +63,7 @@ local SPEC = {
 Setting.browser = {
     domain = "www.tadu.com", scope = "cookie", login = LOGIN_URL,
     check = "https://www.tadu.com/tadu/space/reader",
+    icon = "https://media3.tadu.com/web_dubbo_static/images/tadu.ico",
     isAuthorized = function() return CookieLogin.authorized(SPEC) end,
     apply = function(payload, cb)
         CookieLogin.save(SPEC, CookieLogin.fromPayload(payload, "tadu.com"), cb)
@@ -83,19 +84,7 @@ function Setting.rows()
                 callback = function() Setting.open() end,
             })
         end,
-        function(iw)
-            return Row.widget({
-                width = iw, chevron = true, kind = "nav", icon = "language",
-                title = _("电脑浏览器登录"),
-                subtitle = _("账号密码和短信验证码请在官网完成"),
-                callback = function()
-                    require("ui.themes.widgets.text_viewer"):new{
-                        title = _("电脑浏览器登录"),
-                        text = CookieLogin.relogin(_("塔读"), LOGIN_URL, _("塔读登录 Cookie")),
-                    }:show()
-                end,
-            })
-        end,
+        CookieLogin.browserRow(),
         CookieLogin.pasteRow(SPEC),
     }
     local cookie = require("source.tadu.client").cookie()

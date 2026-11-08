@@ -65,6 +65,7 @@ end
 Setting.browser = {
     domain = "t.shuqi.com", scope = "cookie", login = LOGIN_URL,
     check = "https://t.shuqi.com/myself",
+    icon = "https://t.shuqi.com/favicon.ico",
     isAuthorized = function() return loggedIn() and not require("source.auth").expired(SOURCE_ID) end,
     apply = function(payload, cb)
         local cookies = {}
@@ -186,18 +187,7 @@ function Setting.rows()
                 callback = function() showLogin() end,
             })
         end,
-        function(iw)
-            return Row.widget({
-                width = iw, chevron = true, kind = "nav", icon = "language",
-                title = _("电脑浏览器登录"), subtitle = _("账号密码和短信验证码请在官网完成"),
-                callback = function()
-                    require("ui.themes.widgets.text_viewer"):new{
-                        title = _("电脑浏览器登录"),
-                        text = CookieLogin.relogin(_("书旗"), LOGIN_URL, _("书旗登录 Cookie")),
-                    }:show()
-                end,
-            })
-        end,
+        CookieLogin.browserRow(),
         function(iw)
             return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "content_paste",
                 title = _("粘贴 Cookie"), callback = pasteCookie })

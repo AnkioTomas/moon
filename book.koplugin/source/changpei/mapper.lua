@@ -31,6 +31,7 @@ function Mapper.search(wire)
     local list = type(wire.data) == "table" and wire.data.list or {}
     for _idx, row in ipairs(list) do
         if row.novel_id then
+            local process = tonumber(row.novel_process or row.process)
             out[#out + 1] = {
                 source_id = SOURCE_ID,
                 stable_id = tostring(row.novel_id),
@@ -39,7 +40,10 @@ function Mapper.search(wire)
                 category = row.novel_type ~= "" and row.novel_type or nil,
                 intro = Text.trim(row.novel_info or row.novel_desc or ""),
                 cover = cover(row.novel_cover),
-                meta = { words = tonumber(row.novel_wordnumber) },
+                meta = {
+                    words = tonumber(row.novel_wordnumber),
+                    status = process == 1 and "连载" or process == 2 and "完结" or nil,
+                },
             }
         end
 

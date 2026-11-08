@@ -324,7 +324,7 @@ function Desktop:activate()
     notify(self:page(self.tab), "activate")
     -- 扩展的前台维护（更新检查、校时等）走桌面 Resume，不在插件 init / 网络回调里抢跑。
     Ext.emit("desktop.activated", self)
-    require("desktop.welcome").promptDocs()
+    require("desktop.welcome").promptDocs(self)
     -- 回前台再扫一次（本地 60s / 混合模式 5min 节流）：USB 拷书后唤醒能发现新书。
     Sync.open(self)
 end

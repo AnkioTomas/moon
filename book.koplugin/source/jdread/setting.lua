@@ -170,14 +170,15 @@ Setting.browser = {
 function Setting.rows()
     local Row = require("ui.themes.widgets.row")
     local Auth = require("source.jdread.auth")
+    local CookieLogin = require("source.cookie_login")
     local rows = {
         function(iw)
             local status, status_on = Setting.rowStatus()
             return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "account_circle", title = _("京东读书账号"),
                 status = status, status_on = status_on,
-                subtitle = not status_on and _("也可在「远程管理」里用浏览器授权登录") or nil,
                 callback = function() showQrLogin() end })
         end,
+        CookieLogin.browserRow(),
     }
     if not Auth.hasSession() then return rows end
     rows[#rows + 1] = require("source.logout").row("jdread", _("确定退出京东读书账号？"), Auth.clearSession)

@@ -1,18 +1,36 @@
 --[[--
-得到账号：手机号短信验证码或得到 App 扫码。
+得到账号：手机号短信验证码、得到 App 扫码、官网浏览器登录及 Cookie 导入。
 
 @module source.dedao.setting
 --]]
 
 require("l10n").apply()
 local _ = require("gettext")
+local CookieLogin = require("source.cookie_login")
 
 local SOURCE_ID = "dedao"
 local Setting = {}
+local LOGIN_URL = "https://www.dedao.cn/"
 
 ---@return boolean
 local function loggedIn()
     return require("source.dedao.client").loggedIn()
+end
+
+--- Cookie 请求头 → 得到 client 用的 jar。
+---@param header string
+---@return table<string, string>
+local function jarFromHeader(header)
+    local jar = {}
+    for part in tostring(header):gmatch("[^;]+") do
+        local name, value = part:match("^%s*([^=;%s]+)=([^%s].*)$")
+        if not name then name, value = part:match("^%s*([^=;%s]+)=(.*)$") end
+        if name and value and name ~= "Path" and name ~= "Domain" and name ~= "Expires"
+            and name ~= "Max-Age" and name ~= "SameSite" then
+            jar[name] = value
+        end
+    end
+    return jar
 end
 
 local function save()
@@ -163,6 +181,37 @@ function Setting.open()
     }:show()
 end
 
+local SPEC = {
+    id = SOURCE_ID, title = _("得到账号"), cookie_title = _("得到登录 Cookie"),
+    cookie_hint = _("按键盘 F12，点「网络」，刷新网页，复制请求标头里的整段 Cookie"),
+    logout_text = _("确定退出得到账号？"),
+    loggedIn = loggedIn,
+    checkAsync = function(cookie, cb)
+        local jar = jarFromHeader(cookie)
+        if not next(jar) then return cb(false, _("没有读到 Cookie")) end
+        return require("source.dedao.client").confirmLoginAsync(jar, function(ok, err)
+            cb(ok == true, err)
+        end)
+    end,
+    store = function(cfg, cookie)
+        cfg.cookie, cfg.logged_in = cookie, true
+    end,
+    clear = function(cfg)
+        cfg.cookie, cfg.logged_in, cfg.uid = nil, nil, nil
+        require("source.dedao.client").reset()
+    end,
+}
+
+Setting.browser = {
+    domain = "www.dedao.cn", scope = "cookie", login = LOGIN_URL,
+    check = "https://www.dedao.cn/api/pc/user/info",
+    icon = "https://www.dedao.cn/apple-touch-icon.png",
+    isAuthorized = function() return CookieLogin.authorized(SPEC) end,
+    apply = function(payload, cb)
+        CookieLogin.save(SPEC, CookieLogin.fromPayload(payload, "dedao.cn"), cb)
+    end,
+}
+
 ---@return table[]
 function Setting.rows()
     local Row = require("ui.themes.widgets.row")
@@ -177,15 +226,11 @@ function Setting.rows()
                 callback = function() Setting.open() end,
             })
         end,
+        CookieLogin.browserRow(),
+        CookieLogin.pasteRow(SPEC),
     }
     if loggedIn() then
-        rows[#rows + 1] = require("source.logout").row(SOURCE_ID, _("确定退出得到账号？"), function()
-            local settings = require("utils.settings")
-            local cfg = settings.getSource(SOURCE_ID)
-            cfg.cookie, cfg.logged_in, cfg.uid = nil, nil, nil
-            settings.saveSource(SOURCE_ID)
-            require("source.dedao.client").reset()
-        end)
+        rows[#rows + 1] = CookieLogin.logoutRow(SPEC)
     end
     return rows
 end

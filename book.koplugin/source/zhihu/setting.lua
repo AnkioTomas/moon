@@ -58,6 +58,7 @@ function Setting.rows(plugin)
             subtitle = _("用知乎 App 扫一扫"),
             callback = showLogin,
         }),
+        CookieLogin.browserRow(),
         CookieLogin.pasteRow(SPEC),
         require("source.review_setting").row("zhihu", plugin),
     }

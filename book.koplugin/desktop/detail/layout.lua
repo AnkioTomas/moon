@@ -27,6 +27,7 @@ local ACTIONS = {
     clear_cache = "clearCache",
     restore = "restore",
     delete = "deleteBook",
+    reviews = "showReviews",
 }
 
 return function(Detail)

@@ -25,6 +25,10 @@ end
 ---@return Book
 function Mapper.book(info)
     local words = tonumber((tostring(info.novelSize or ""):gsub(",", "")))
+    local status = type(info.novelStep) == "string" and Text.trim(info.novelStep) or ""
+    local tags = type(info.novelTags) == "string" and Text.trim(info.novelTags)
+        or type(info.novelTag) == "string" and Text.trim(info.novelTag) or ""
+    if tags ~= "" then tags = (tags:gsub("[,%s；;]+", " · ")) end
     return {
         source_id = SOURCE_ID,
         stable_id = tostring(info.novelId),
@@ -33,7 +37,17 @@ function Mapper.book(info)
         category = info.novelClass,
         intro = info.novelIntro and Text.stripHtml(info.novelIntro),
         cover = cover(info.novelCover),
-        meta = { words = words },
+        meta = {
+            words = words,
+            status = status ~= "" and status or nil,
+            tags = tags ~= "" and tags or nil,
+            source = {
+                [SOURCE_ID] = {
+                    protagonist = type(info.protagonist) == "string" and info.protagonist or nil,
+                    perspective = type(info.mainview) == "string" and info.mainview or nil,
+                },
+            },
+        },
     }
 end
 

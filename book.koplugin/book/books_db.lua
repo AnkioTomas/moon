@@ -99,6 +99,8 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 ---@field isbn string|nil ISBN：10 / 13 位，只含数字与 X
 ---@field language string|nil 语言主码，小写（zh / en / ja）
 ---@field words integer|nil 字数，> 0
+---@field status string|nil 连载状态文案（连载 / 完结 / 源站原文）
+---@field tags string|nil 标签，用「 · 」拼接
 ---@field rating { score: number, by: string|nil }|nil 十分制一位小数 + 来源 id（weread / douban）
 ---@field detail_at integer|nil 最近一次拉单本详情的时间；详情页据此决定还要不要拉
 ---@field source table|nil 各书源自己的元数据，按 source_id 隔离；内容由属主源解释
@@ -199,6 +201,10 @@ local function normalizeMeta(raw)
     if language and #language <= 3 then out.language = language end
     local words = math.floor(tonumber(raw.words) or 0)
     if words > 0 then out.words = words end
+    local status = type(raw.status) == "string" and Text.trim(raw.status) or ""
+    if status ~= "" then out.status = status end
+    local tags = type(raw.tags) == "string" and Text.trim(raw.tags) or ""
+    if tags ~= "" then out.tags = tags end
     local score = type(raw.rating) == "table" and tonumber(raw.rating.score)
     if score and score > 0 and score <= 10 then
         -- 1e-9：9.55 之类的浮点乘 10 后略小于 95.5，不补会舍成 9.5

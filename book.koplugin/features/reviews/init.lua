@@ -6,7 +6,27 @@
 @module koplugin.book.features.reviews
 --]]
 
+require("l10n").apply()
+
+local _ = require("gettext")
+local Ext = require("utils.extension")
 local Reviews = {}
+
+Ext.add("desktop.comments", function(book, page)
+    local items = {}
+    for _idx, item in ipairs(page.items) do
+        items[#items + 1] = {
+            id = "", author = item.author or "", content = item.text or "",
+            time = item.time or "", grade = item.grade, reply_to = item.reply_to,
+            replies = 0,
+        }
+    end
+    require("features.reviews.sheet"):new{
+        title = page.title or _("书评"),
+        snapshot = items,
+        spot = { range = "", text = book.title, total = #items },
+    }:show()
+end)
 
 ---@param plugin BookPlugin
 function Reviews.onReaderReady(plugin)

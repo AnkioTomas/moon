@@ -6,6 +6,8 @@
 
 require("l10n").apply()
 local Login = require("source.zymk.login")
+local Client = require("source.zymk.client")
+local CookieLogin = require("source.cookie_login")
 local _ = require("gettext")
 local Setting = {}
 
@@ -13,6 +15,23 @@ function Setting.rowStatus()
     local on = Login.hasAccount()
     return on and _("已登录") or _("未登录 · 点此登录"), on
 end
+
+Setting.browser = {
+    domain = "www.zymk.cn",
+    scope = "cookie",
+    login = Client.LOGIN_URL,
+    check = "https://www.zymk.cn/",
+    icon = "https://www.zymk.cn/static/images/default/favicon.ico",
+    isAuthorized = function() return Login.hasAccount() end,
+    apply = function(payload, cb)
+        local cookie = CookieLogin.fromPayload(payload, "zymk.cn")
+        if cookie == "" then cookie = CookieLogin.fromPayload(payload, "kanman.com") end
+        if cookie == "" then return cb(false, _("没有读到 Cookie")) end
+        return Login.new():cookieAsync(cookie, function(account, err)
+            cb(account ~= nil, err)
+        end)
+    end,
+}
 
 local function onLogin()
     require("ui.themes.widgets.toast"):new{ text = _("登录成功"), timeout = 2 }:show()
@@ -63,6 +82,7 @@ function Setting.rows()
             return Row.widget({ width = iw, kind = "nav", title = _("密码登录"), icon = "password",
                 callback = function() Setting.prompt(true) end })
         end,
+        CookieLogin.browserRow(),
         function(iw)
             return Row.widget({ width = iw, kind = "nav", title = _("粘贴 Cookie"), icon = "content_paste",
                 callback = function() Setting.prompt(false) end })

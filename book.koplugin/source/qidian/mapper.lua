@@ -38,6 +38,14 @@ end
 ---@return Book
 function Mapper.book(info)
     local id = tostring(info.bookId)
+    local status = type(info.bookStatus) == "string" and info.bookStatus
+        or type(info.actionStatus) == "string" and info.actionStatus
+        or tonumber(info.actionStatus) == 1 and "连载"
+        or tonumber(info.actionStatus) == 2 and "完结"
+        or nil
+    local tags = type(info.tagName) == "string" and info.tagName ~= "" and info.tagName
+        or type(info.tags) == "string" and info.tags ~= "" and info.tags or nil
+    if tags then tags = (tags:gsub("[,%s；;|/]+", " · ")) end
     return {
         source_id = SOURCE_ID,
         stable_id = id,
@@ -46,7 +54,11 @@ function Mapper.book(info)
         category = info.chanName,
         intro = info.desc and Text.stripHtml(info.desc),
         cover = Mapper.coverUrl(id),
-        meta = { words = tonumber(info.wordsCnt) },
+        meta = {
+            words = tonumber(info.wordsCnt),
+            status = status,
+            tags = tags,
+        },
     }
 end
 

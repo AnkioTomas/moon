@@ -149,11 +149,12 @@ function Setting.rows(plugin)
                 end,
             }
         end,
+        CookieLogin.browserRow(),
+        CookieLogin.pasteRow(SPEC),
         require("source.review_setting").row(SOURCE_ID, plugin),
         require("source.category_setting").row(SOURCE_ID, plugin),
     }
     if loggedIn() then rows[#rows + 1] = CookieLogin.logoutRow(SPEC) end
-    rows[#rows + 1] = CookieLogin.pasteRow(SPEC)
     return rows
 end
 

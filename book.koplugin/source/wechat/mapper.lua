@@ -93,6 +93,8 @@ function Mapper.book(row)
             isbn = book.isbn,
             language = book.language,
             words = book.totalWords,
+            status = (book.finished == 1 or book.finished == true) and "完结"
+                or (book.finished == 0 or book.finished == false) and "连载" or nil,
             rating = { score = (tonumber(book.newRating) or 0) / 100, by = "weread" },
             source = {
                 [SOURCE_ID] = {

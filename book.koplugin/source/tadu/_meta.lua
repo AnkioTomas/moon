@@ -10,7 +10,7 @@ local _ = require("gettext")
 
 return {
     id = "tadu",
-    name = _("塔读"),
+    name = _("塔读小说"),
     type = "chapter",
     description = _("塔读书架与在线阅读"),
     abilities = { _("搜索与发现"), _("书架同步"), _("书评"), _("离线缓存") },

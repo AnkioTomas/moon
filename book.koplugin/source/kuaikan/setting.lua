@@ -56,6 +56,7 @@ Setting.browser = {
     domain = "www.kuaikanmanhua.com", scope = "cookie",
     login = Client.LOGIN_URL, check = Client.ACCOUNT_URL,
     check_json = { path = "data.user_info.authenticate", ok = { 1 } },
+    icon = "https://festatic.v3mh.com/static-resource/img/32x32/favicon.ico",
     isAuthorized = function() local _status, on = Setting.rowStatus(); return on end,
     apply = function(payload, cb)
         local cookies = {}
@@ -90,17 +91,7 @@ function Setting.rows()
                 title = _("快看漫画账号"), status = status, status_on = on,
                 subtitle = _("微信扫码登录"), callback = Setting.login })
         end,
-        function(iw)
-            return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "language",
-                title = _("电脑浏览器登录"), subtitle = _("账号密码和短信验证码请在官网完成"),
-                callback = function()
-                    require("ui.themes.widgets.text_viewer"):new{
-                        title = _("电脑浏览器登录"),
-                        text = _("账号密码和短信验证码请在官网完成") .. "\n\n" .. Client.LOGIN_URL .. "\n\n"
-                            .. _("登录后，在远程管理的「浏览器登录」中授权快看漫画；也可回到快看账号页粘贴 Cookie。"),
-                    }:show()
-                end })
-        end,
+        CookieLogin.browserRow(),
         function(iw)
             return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "content_paste",
                 title = _("粘贴 Cookie"), callback = pasteCookie })

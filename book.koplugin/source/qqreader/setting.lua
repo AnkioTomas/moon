@@ -135,12 +135,12 @@ end
 
 ---@return table[]
 function Setting.rows()
-    local rows = { CookieLogin.accountRow(SPEC, { callback = startQR, off_text = _("未登录 · 点此扫码") }) }
-    if loggedIn() then
-        rows[#rows + 1] = CookieLogin.logoutRow(SPEC)
-    else
-        rows[#rows + 1] = CookieLogin.pasteRow(SPEC)
-    end
+    local rows = {
+        CookieLogin.accountRow(SPEC, { callback = startQR, off_text = _("未登录 · 点此扫码") }),
+        CookieLogin.browserRow(),
+        CookieLogin.pasteRow(SPEC),
+    }
+    if loggedIn() then rows[#rows + 1] = CookieLogin.logoutRow(SPEC) end
     return rows
 end
 

@@ -14,7 +14,7 @@ local cached = { { uid = "legacy-chapter", title = "旧目录" } }
 package.preload["json"] = function() return Json end
 package.preload["source.base"] = function()
     return {
-        loadMeta = function() return { id = "dedao", name = "得到", type = "chapter" } end,
+        loadMeta = function() return { id = "dedao", name = "得到阅读", type = "chapter" } end,
         defer = function(done, ...)
             done(...)
             return { cancel = function() end }

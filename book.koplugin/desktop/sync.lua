@@ -304,23 +304,25 @@ function Sync.refresh(desktop)
     local source = desktop.source
     if not source then return end
     if not mixed() and not source:configured() then
-        local text = _("请先完成数据源设置，再刷新书库。")
-        local setting = require("desktop.pages.setting.source").loadSetting(source.id)
-        if setting and type(setting.open) == "function" then
-            require("ui.themes.widgets.confirm"):new{
-                text = text,
-                ok_text = _("立即设置"),
-                ok_callback = function() setting.open(desktop.plugin) end,
-            }:show()
-        else
-            require("ui.themes.widgets.toast"):new{ text = text }:show()
-        end
+        require("ui.themes.widgets.confirm"):new{
+            text = _("请先完成数据源设置，再刷新书库。"),
+            ok_text = _("去登录"),
+            ok_callback = function()
+                require("desktop.pages.setting.source").openAccount(desktop, source.id)
+            end,
+        }:show()
         return
     end
     local list = targets(desktop)
     if #list == 0 then
-        -- 混合模式下一个已配置的源都没有：说明原因，不要毫无反应。
-        require("ui.themes.widgets.toast"):new{ text = _("请先完成数据源设置，再刷新书库。") }:show()
+        -- 混合模式下一个已配置的源都没有：打开账号页，不要只 toast。
+        require("ui.themes.widgets.confirm"):new{
+            text = _("请先完成数据源设置，再刷新书库。"),
+            ok_text = _("去登录"),
+            ok_callback = function()
+                require("desktop.pages.setting.source").openAccount(desktop)
+            end,
+        }:show()
         return
     end
     for _idx, target in ipairs(list) do
@@ -351,16 +353,24 @@ function Sync.promptLogin(plugin, id, msg)
         if detail and detail ~= "" then
             text = text .. "\n\n" .. detail
         end
-        local setting = require("desktop.pages.setting.source").loadSetting(id)
-        local login = setting and (setting.login or setting.open)
         local dialog
-        local buttons = { { text = _("稍后"), callback = function() dialog:close() end } }
-        if type(login) == "function" then
-            buttons[#buttons + 1] = {
+        local buttons = {
+            { text = _("稍后"), callback = function() dialog:close() end },
+            {
                 text = _("重新登录"), variant = "primary",
-                callback = function() dialog:close(); login(plugin) end,
-            }
-        end
+                callback = function()
+                    dialog:close()
+                    local desktop = plugin and plugin.desktop
+                    if desktop then
+                        require("desktop.pages.setting.source").openAccount(desktop, id)
+                    else
+                        local setting = require("desktop.pages.setting.source").loadSetting(id)
+                        local login = setting and (setting.login or setting.open)
+                        if type(login) == "function" then login(plugin) end
+                    end
+                end,
+            },
+        }
         dialog = require("ui.themes.widgets.text_viewer"):new{
             title = _("登录已失效"), text = text, fullscreen = false, buttons = buttons,
         }

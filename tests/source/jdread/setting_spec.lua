@@ -161,12 +161,13 @@ package.loaded["book.store"] = {
 }
 has_session = true
 local rows = Setting.rows()
-Assert.len(rows, 2)
-rows[2](300).callback()
+Assert.len(rows, 3)
+Assert.eq(rows[2](300).title, "浏览器登录")
+rows[3](300).callback()
 Assert.is_false(cleared)
 Themed.last("confirm").ok_callback()
 Assert.is_true(cleared)
 Assert.eq(forgotten, "jdread")
 Assert.eq(cancelled[1], "dirty\0jdread")
 Assert.eq(reloads, 2)
-Assert.len(Setting.rows(), 1)
+Assert.len(Setting.rows(), 2)

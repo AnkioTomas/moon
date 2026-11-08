@@ -62,6 +62,8 @@ function Mapper.book(info)
     local id = tostring(info.bid)
     local category = info.category3Name
     if type(category) ~= "string" or category == "" then category = info.category2Name end
+    local finish = tonumber(info.finishStatus)
+    local status = finish == 1 and "完结" or finish == 0 and "连载" or nil
     return {
         source_id = SOURCE_ID,
         stable_id = id,
@@ -70,7 +72,10 @@ function Mapper.book(info)
         category = category,
         intro = info.intro,
         cover = Mapper.coverUrl(id),
-        meta = { words = tonumber(info.totalWords) },
+        meta = {
+            words = tonumber(info.totalWords),
+            status = status,
+        },
     }
 end
 

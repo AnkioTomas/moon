@@ -105,3 +105,48 @@ Assert.is_true(input.closed, "HTTP 异步成功也关闭原输入窗")
 Assert.eq(saves, 2)
 Assert.eq(reloads, 2)
 Assert.eq(Theme.last("toast").text, "登录成功")
+
+-- Cookie / 浏览器登录行与校验保存
+package.loaded["ui.themes.widgets.row"] = { widget = function(spec) return spec end }
+local cookie_calls = {}
+package.preload["source.dedao.client"] = function()
+    return {
+        loggedIn = function() return cfg.logged_in == true and cfg.cookie ~= nil end,
+        reset = function() end,
+        confirmLoginAsync = function(jar, cb)
+            cookie_calls[#cookie_calls + 1] = jar
+            cb(true)
+            return { cancel = function() end }
+        end,
+        sendCodeAsync = function(_phone, cb)
+            sent = cb
+            cb(nil, nil, { session = candidate, captcha_id = "test-id" })
+            return { cancel = function() request_cancelled = true end }
+        end,
+        smsLoginAsync = function(session, code, cb)
+            sms_session, sms_code = session, code
+            login_callback = cb
+            if not defer_login then cb(login_ok, not login_ok and "test-login-error" or nil) end
+            return { cancel = function() request_cancelled = true end }
+        end,
+    }
+end
+package.loaded["source.dedao.client"] = nil
+package.loaded["source.dedao.setting"] = nil
+package.loaded["source.cookie_login"] = nil
+Setting = require("source.dedao.setting")
+Assert.is_true(type(Setting.browser) == "table")
+Assert.eq(Setting.browser.domain, "www.dedao.cn")
+Assert.is_true(type(Setting.browser.icon) == "string" and Setting.browser.icon:match("^https://"))
+cfg = {}
+local rows = Setting.rows()
+Assert.eq(rows[2](400).title, "浏览器登录")
+Assert.eq(rows[3](400).title, "粘贴 Cookie")
+rows[3](400).callback()
+local paste = Theme.last("input")
+Assert.eq(paste.title, "得到登录 Cookie")
+paste.callback("csrfToken=abc; token=xyz")
+Assert.eq(cookie_calls[1].csrfToken, "abc")
+Assert.eq(cookie_calls[1].token, "xyz")
+Assert.eq(cfg.cookie, "csrfToken=abc; token=xyz")
+Assert.is_true(cfg.logged_in)

@@ -10,8 +10,8 @@ local _ = require("gettext")
 
 return {
     id = "ireader",
-    name = _("掌阅"),
+    name = _("掌阅书城"),
     type = "chapter",
     description = _("掌阅书架与在线阅读"),
-    abilities = { _("搜索与发现"), _("书架同步"), _("进度同步"), _("VIP 章节"), _("书评") },
+    abilities = { _("搜索与发现"), _("书架同步"), _("进度同步"), _("VIP 章节"), _("书评"), _("扫码登录"), _("浏览器登录") },
 }

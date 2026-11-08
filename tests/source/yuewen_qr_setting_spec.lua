@@ -50,7 +50,7 @@ for _idx, id in ipairs({ "qqreader", "qidian", "xiaoxiang" }) do
             end,
             userAsync = function(cookie, cb)
                 checked = cookie
-                cb(not reject and {} or nil, reject and "rejected" or nil)
+                cb(not reject and { id = "123" } or nil, reject and "rejected" or nil)
             end,
         }
     end
@@ -90,7 +90,13 @@ for _idx, source in ipairs({
     Setting.login()
     Assert.is_true(started, "登录失效的直达入口也走设备扫码")
     if source.id ~= "qqreader" then
-        rows[#rows](400).callback()
+        local paste
+        for _idx, factory in ipairs(Setting.rows()) do
+            local row = factory(400)
+            if row.title == "粘贴 Cookie" then paste = row; break end
+        end
+        Assert.not_nil(paste)
+        paste.callback()
         Assert.eq(Themed.last("input").title, source.id == "qidian" and "起点登录 Cookie" or "潇湘登录 Cookie")
     end
 end

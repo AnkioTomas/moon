@@ -150,14 +150,15 @@ end
 ---@return table[]
 function Setting.rows()
     local Row = require("ui.themes.widgets.row")
+    local CookieLogin = require("source.cookie_login")
     local rows = {
         function(iw)
             local status, status_on = Setting.rowStatus()
             return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "account_circle",
                 title = _("iRead 账号"), status = status, status_on = status_on,
-                subtitle = not status_on and _("也可在「远程管理」里用浏览器授权登录") or nil,
                 callback = function() showLogin() end })
         end,
+        CookieLogin.browserRow(),
         function(iw)
             return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "content_paste",
                 title = _("粘贴 Cookie"), callback = showCookieLogin })

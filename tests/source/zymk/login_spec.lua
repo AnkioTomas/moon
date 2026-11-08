@@ -128,10 +128,11 @@ Assert.is_nil(Mapper.captcha({ Width = 320, Height = 120 }))
 
 package.loaded["source.logout"] = { row = function() return function() return { title = "退出登录" } end end }
 local rows = Setting.rows()
-Assert.eq(#rows, 4)
+Assert.eq(#rows, 5)
 Assert.eq(rows[1](400).title, "短信验证码登录")
 Assert.eq(rows[2](400).title, "密码登录")
-Assert.eq(rows[3](400).title, "粘贴 Cookie")
+Assert.eq(rows[3](400).title, "浏览器登录")
+Assert.eq(rows[4](400).title, "粘贴 Cookie")
 for _index, row in ipairs(rows) do
     local title = row(400).title
     Assert.is_true(title ~= "微信扫码登录" and title ~= "电脑浏览器登录")
@@ -143,7 +144,7 @@ pending = requests[#requests]
 Themed.last("progress_dialog").on_cancel()
 Assert.is_true(pending.cancelled)
 pending.cb(token)
-Assert.eq(#Setting.rows(), 4)
+Assert.eq(#Setting.rows(), 5)
 local cookie = "user=" .. Text.urlEncode(JSON.encode({ openid = "account-a", type = "mkxq" }))
 local cookie_previous = cfg.account
 Login.new():cookieAsync(cookie, done)

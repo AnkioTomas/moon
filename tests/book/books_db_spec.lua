@@ -309,6 +309,7 @@ do
         source_id = "wechat", stable_id = "w1", meta = {
             publisher = "  某出版社 ", published = "2022-01-01 00:00:00", isbn = "978-7-5404-9876-5",
             language = "zh-Hans", words = "1200.7", rating = { score = 9.55, by = "weread" },
+            status = " 完结 ", tags = " 玄幻 · 脑洞 ",
         },
     }))
     Assert.eq(#calls, before + 3, "upsert 之后读一次 meta 再写一次")
@@ -318,6 +319,8 @@ do
     Assert.eq(m.isbn, "9787540498765", "ISBN 去掉连字符")
     Assert.eq(m.language, "zh", "语言只留主码小写")
     Assert.eq(m.words, 1200)
+    Assert.eq(m.status, "完结")
+    Assert.eq(m.tags, "玄幻 · 脑洞")
     Assert.eq(m.rating.score, 9.6, "10 分制一位小数，9.55 不能被浮点误差舍成 9.5")
     Assert.eq(m.rating.by, "weread")
     local source_meta = { wechat = { pay_type = 2, book_type = 3, ended = false, private = "opaque" } }

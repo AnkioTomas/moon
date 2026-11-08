@@ -67,9 +67,18 @@ rows[3](400).callback()
 Themed.last("input").callback("sid=offline")
 Assert.eq(#requests, count)
 Assert.eq(Themed.last("toast").text, "网络不可用，请先连接 Wi-Fi")
+local opened
+package.loaded["utils.extension"] = {
+    call = function(name, path, title)
+        opened = { name = name, path = path, title = title }
+        return { close = function() end }
+    end,
+}
+Assert.eq(rows[2](400).title, "浏览器登录")
 rows[2](400).callback()
-Assert.matches(Themed.last("text_viewer").text, "https://www%.kuaikanmanhua%.com/webs/loginh")
-Assert.matches(Themed.last("text_viewer").text, "浏览器登录")
+Assert.eq(opened.name, "web.open_page")
+Assert.eq(opened.path, "/cookie.html")
+package.loaded["utils.extension"] = nil
 
 Assert.is_true(require("source.kuaikan.client").hasAccount())
 for _index, row in ipairs(rows) do Assert.is_true(row(400).title ~= "快看云端同步") end

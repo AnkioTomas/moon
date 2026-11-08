@@ -10,7 +10,7 @@ local _ = require("gettext")
 
 return {
     id = "shuqi",
-    name = _("书旗"),
+    name = _("书旗小说"),
     type = "chapter",
     description = _("书旗书架与在线阅读"),
     abilities = { _("搜索与发现"), _("书架同步"), _("进度同步"), _("书评"), _("VIP 章节") },

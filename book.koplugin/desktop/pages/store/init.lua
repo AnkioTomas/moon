@@ -56,6 +56,7 @@ local BROWSE_RESULTS = 60
 ---@field backend table 当前来源的实现（书城后端模块或书源），可选带 browseAsync
 
 --- 可搜索来源：已启用的 Z-Library / OPDS，再接已启用且带 searchAsync 的书源。
+--- 非混合时把当前活跃源（若可搜）挪到列表最前，方便「优先显示当前源相关书城」。
 ---@return StoreProvider[]
 function Store.providers()
     local settings = MoonSettings.get("store")
@@ -70,17 +71,37 @@ function Store.providers()
             list[#list + 1] = { id = meta.id, name = meta.name, source = source, backend = source }
         end
     end
+    if MoonSettings.get("source").library_mixed then return list end
+    local active = Registry.activeId()
+    if not active then return list end
+    for i, p in ipairs(list) do
+        if p.id == active then
+            if i > 1 then
+                table.remove(list, i)
+                table.insert(list, 1, p)
+            end
+            break
+        end
+    end
     return list
 end
 
---- 当前来源；记住的 id 不在可用列表里（被禁用）就退回第一个。
+--- 当前来源。
+--- 非混合：记住的仍可用 → 当前活跃源（可搜）→ Z站 → 列表第一个。
+--- 混合：记住的仍可用 → Z站 → 列表第一个。
 ---@return StoreProvider|nil
 function Store:provider()
     local list = Store.providers()
-    for _idx, p in ipairs(list) do
-        if p.id == self.provider_id then return p end
+    if #list == 0 then return nil end
+    local by_id = {}
+    for _idx, p in ipairs(list) do by_id[p.id] = p end
+    if self.provider_id and by_id[self.provider_id] then return by_id[self.provider_id] end
+    local mixed = MoonSettings.get("source").library_mixed
+    if not mixed then
+        local active = require("source.registry").activeId()
+        if active and by_id[active] then return by_id[active] end
     end
-    return list[1]
+    return by_id.zlib or list[1]
 end
 
 --- 当前来源能浏览（带 browseAsync：书源或 Z 站等书城后端）：没搜索词时展示 chip 分组 + 书列表。
@@ -171,6 +192,24 @@ end
 ---@return table
 function Store:build(ctx, state, opts)
     opts.empty_text = self.search and _("没有找到相关书籍") or _("点击搜索按钮查找书籍")
+    local err = state and state.err
+    if type(err) == "string"
+        and (err:find("未配置", 1, true) or err:find("登录", 1, true) or err:find("账号", 1, true)
+            or err:find("凭据", 1, true) or err:find("密码", 1, true)) then
+        local provider = self:provider()
+        opts.empty_text = err
+        opts.empty_action = {
+            text = _("去登录"),
+            callback = function()
+                local Source = require("desktop.pages.setting.source")
+                if provider and not provider.store then
+                    Source.openAccount(self.desktop, provider.id)
+                else
+                    Source.openAccount(self.desktop)
+                end
+            end,
+        }
+    end
     opts.groups = self:chipGroups()
     opts.on_chip = function(id)
         self.node = id

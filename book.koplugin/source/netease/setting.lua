@@ -39,6 +39,7 @@ Setting.browser = {
     scope = "cookie",
     login = LOGIN_URL,
     check = "https://yuedu.163.com/myinfor.do",
+    icon = "https://yuedust.yuedu.126.net/favicon.ico",
     isAuthorized = function() return CookieLogin.authorized(SPEC) end,
     apply = function(payload, cb)
         CookieLogin.save(SPEC, CookieLogin.fromPayload(payload, "163.com"), cb)
@@ -144,18 +145,7 @@ function Setting.rows()
                 end,
             })
         end,
-        function(iw)
-            return Row.widget({
-                width = iw, chevron = true, kind = "nav", icon = "language",
-                title = _("电脑浏览器登录"), subtitle = _("在电脑浏览器完成官方授权"),
-                callback = function()
-                    require("ui.themes.widgets.text_viewer"):new{
-                        title = _("电脑浏览器登录"),
-                        text = CookieLogin.relogin(_("网易云阅读"), LOGIN_URL, _("网易云阅读登录 Cookie")),
-                    }:show()
-                end,
-            })
-        end,
+        CookieLogin.browserRow(),
         CookieLogin.pasteRow(SPEC),
     }
     if loggedIn() then rows[#rows + 1] = CookieLogin.logoutRow(SPEC) end
