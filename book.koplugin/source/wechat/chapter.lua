@@ -1,6 +1,6 @@
 --[[--
 微信读书章节正文：只走官方 App 的 /book/chapterdownload。
-EPUB 是加密 zip，TXT 是 tar（bookType 与书架 format 一致）。
+EPUB 使用加密 ZIP，TXT 可能以 TAR 或 ZIP 返回（bookType 与书架 format 一致）。
 EPUB 章节交出服务端 XHTML 原文，除资源本地化（插图、脚注图标、整书样式表）和脚注接弹窗外不改一个字节；
 不写盘、不打 EPUB。个人划线通过 bookmarklist 同步为 KOReader 原生注解。
 
@@ -129,6 +129,11 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     end
     local book_type = chapter.format == "txt" and "txt" or "epub"
     return downloadPackageAsync(bookId, uid, book_type, function(files)
+        if book_type == "txt" then
+            -- 部分 TXT 章节以 ZIP 返回，正文条目可直接按书和章节定位。
+            local text = Package.chapterZipText(files, bookId, uid)
+            if text then return text end
+        end
         return Package.chapterHtml(files, uid)
     end, function(text, err)
         if not text then
