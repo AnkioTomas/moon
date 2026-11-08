@@ -446,6 +446,9 @@ function Detail.actionPlan(book, owner)
     if cached then
         tools[#tools + 1] = { id = "clear_cache", icon = "cleaning_services", text = _("清理缓存") }
     end
+    if owner and type(owner.bookReviewsAsync) == "function" then
+        tools[#tools + 1] = { id = "reviews", icon = "forum", text = _("书评") }
+    end
     if book.source_id and book.stable_id then
         if tonumber(book.read_state) == 1 then
             tools[#tools + 1] = { id = "unread", icon = "undo", text = _("未读") }
@@ -489,6 +492,60 @@ function Detail.actionPlan(book, owner)
         tools[#tools + 1] = { id = "volumes", icon = "list", text = _("选择卷") }
     end
     return tools, primary
+end
+
+function Detail:showReviews()
+    local owner = bookOwnerSource(self.book, self.source)
+    if not owner or type(owner.bookReviewsAsync) ~= "function" then return end
+    require("ui/network/manager"):runWhenConnected(function()
+        local cancelled, job = false, nil
+        local waiting = require("ui.themes.widgets.progress_dialog"):new{
+            title = _("书评"), text = _("正在加载书评…"), dismissable = false,
+            on_cancel = function()
+                cancelled = true
+                if job and job.cancel then job.cancel() end
+            end,
+        }
+        job = waiting:showWhile(owner.bookReviewsAsync, owner, self.book, function(page, err)
+            waiting:close()
+            if cancelled or self.closed then return end
+            if not page then
+                Toast:new{ text = err or _("请求失败"), timeout = 3 }:show()
+                return
+            end
+            local items = page.items or {}
+            if #items == 0 then
+                Toast:new{ text = _("暂无书评"), timeout = 2 }:show()
+                return
+            end
+            local show = require("utils.extension").last("desktop.comments")
+            if show then
+                show(self.book, page)
+                return
+            end
+            local lines = {}
+            for _idx, item in ipairs(items) do
+                local head = item.author or ""
+                if item.time and item.time ~= "" then head = head .. "  " .. item.time end
+                lines[#lines + 1] = head
+                if item.grade and not item.reply_to then
+                    lines[#lines + 1] = _("评分") .. " " .. tostring(item.grade)
+                end
+                local body = item.text or ""
+                if item.reply_to and item.reply_to ~= "" then
+                    body = T(_("回复 %1：%2"), item.reply_to, body)
+                end
+                lines[#lines + 1] = body
+                lines[#lines + 1] = ""
+            end
+            if page.pages and page.pages > 1 then
+                lines[#lines + 1] = _("还有更多书评")
+            end
+            require("ui.themes.widgets.text_viewer"):new{
+                title = page.title or _("书评"), text = table.concat(lines, "\n"),
+            }:show()
+        end)
+    end)
 end
 
 function Detail:startScrape()

@@ -111,6 +111,22 @@ do
     Assert.eq(table.concat(names, ","), "books,notes,stats,progress")
 end
 
+-- WebDAV 可先推独立的进度，不等整份书目、笔记和统计传完；默认顺序保持不变。
+do
+    books, notes, stats_rows, progress = { {} }, { {} }, { {} }, { {} }
+    local source = sourceOf("local")
+    source._client = { isWebdav = function() return true end }
+    source.pushDirty = require("source.local").new().pushDirty
+    local _spec, result = runPush(source)
+    local names = {}
+    for _idx, call in ipairs(source.calls) do
+        names[#names + 1] = call[1]
+        Assert.is_true(call[2])
+    end
+    Assert.eq(table.concat(names, ","), "progress,books,notes,stats", "WebDAV 进度不等待其它域")
+    Assert.is_true(result.ok)
+end
+
 -- 书架失败不拦住后面的进度；整轮记失败，交给队列重试。
 do
     books = { { stable_id = "b1" } }

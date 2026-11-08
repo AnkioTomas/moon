@@ -150,4 +150,52 @@ function Package.chapterHtml(files, uid)
     return nil, "package: chapter " .. tostring(uid) .. " not in package"
 end
 
+--- 解开 ustar。只取普通文件。
+---@param data string
+---@return { name: string, data: string }[]|nil
+---@return string|nil err
+local function untar(data)
+    if data:sub(258, 262) ~= "ustar" then return nil, "tar: not ustar" end
+    local entries, offset = {}, 1
+    while offset + 511 <= #data do
+        local header = data:sub(offset, offset + 511)
+        if header:match("^%z+$") then break end
+        local name = (header:sub(1, 100):gsub("%z.*$", ""))
+        local size = tonumber((header:sub(125, 136):gsub("%z.*$", ""):gsub("%s", "")), 8) or 0
+        local typeflag = header:sub(157, 157)
+        local body_start = offset + 512
+        if name ~= "" and (typeflag == "0" or typeflag == "" or typeflag == "\0") and size > 0 then
+            entries[#entries + 1] = { name = name, data = data:sub(body_start, body_start + size - 1) }
+        end
+        offset = body_start + math.ceil(size / 512) * 512
+    end
+    return entries
+end
+
+--- TXT 章节包：条目名是 ``bookId_uid``，续篇是 ``bookId_uid_...``。info.txt 是目录，不是正文。
+---@param data string tar
+---@param book_id string
+---@param uid string|number
+---@return string|nil text
+---@return string|nil err
+function Package.chapterText(data, book_id, uid)
+    local entries, err = untar(data)
+    if not entries then return nil, err end
+    local prefix = book_id .. "_" .. tostring(uid)
+    local parts = {}
+    for _idx, entry in ipairs(entries) do
+        local name = entry.name:match("([^/]+)$")
+        if name ~= "info.txt" and (name == prefix or name:sub(1, #prefix + 1) == prefix .. "_") then
+            parts[#parts + 1] = entry
+        end
+    end
+    table.sort(parts, function(a, b) return a.name < b.name end)
+    if #parts == 0 then return nil, "tar: chapter " .. tostring(uid) .. " not in package" end
+    local chunks = {}
+    for i, entry in ipairs(parts) do
+        chunks[i] = Text.stripBom(entry.data)
+    end
+    return table.concat(chunks)
+end
+
 return Package

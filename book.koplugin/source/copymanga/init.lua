@@ -1,7 +1,7 @@
 --[[--
 拷贝漫画数据源门面。
 
-书架是收藏列表：删除 = 查 comic_id 再取消收藏，交给 Shelf.pushDeletes；没有加架上行。进度双向（章粒度），无笔记、统计。
+书架是收藏列表，经 Shelf 双向同步；进度双向（章粒度），无远端笔记、统计。
 一章是一组图片 URL，章节 CBZ 按章节 uuid 命名（分组拼接后章号会整体后移）。重登后用最新 token。
 
 @module koplugin.book.source.copymanga
@@ -14,8 +14,7 @@ local SourceBase = require("source.base")
 local Shelf = require("source.shelf")
 local Toc = require("source.toc")
 local logger = require("utils.log")
-local _ = require("gettext")
-local T = require("ffi/util").template
+local _ = require("l10n").get("source.copymanga")
 
 local Copymanga = {}
 
@@ -33,12 +32,18 @@ Source.__index = Source
 function Copymanga.new()
     local cfg = require("utils.settings").getSource("copymanga")
     local meta = Copymanga.meta()
+    local client = Client:new(cfg)
+    -- 新节点只验证了读章节，不能把拿到图片当作云端进度写入成功。
+    local function index(_instance, key)
+        if client.progress_supported == false and (key == "getProgressAsync" or key == "putProgressAsync") then return nil end
+        return Source[key]
+    end
     return setmetatable({
         id = meta.id,
         name = meta.name,
         type = meta.type,
-        _client = Client:new(cfg),
-    }, Source)
+        _client = client,
+    }, { __index = index })
 end
 
 ---@return boolean
@@ -46,25 +51,7 @@ function Source:configured()
     return self._client:configured()
 end
 
---- 云端取消收藏一本：先查 comic_id 再 setCollect(false)。
----@param self CopymangaSource
----@param stable_id string
----@param done fun(ok: any)
----@return { cancel: fun() }
-local function removeCollect(self, stable_id, done)
-    local job
-    job = self._client:detailAsync(stable_id, function(wire)
-        local comic_id = wire and Mapper.comicId(wire)
-        if not comic_id then
-            done(false)
-            return
-        end
-        job = self._client:setCollectAsync(comic_id, false, done)
-    end)
-    return { cancel = function() job.cancel() end }
-end
-
---- 书架是收藏列表，没有加架上行：先推本地删除，再拉收藏对账。
+--- API 收藏双向同步，写入后的确认由客户端回读完成。
 ---@param opts { dirty_only?: boolean, force?: boolean, on_progress?: fun(text: string|nil, done: integer|nil, total: integer|nil) }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }
@@ -73,35 +60,7 @@ function Source:syncBooksAsync(opts, cb)
     if not require("source.copymanga.auth").hasSession() then
         return SourceBase.syncBooksAsync(self, opts, cb)
     end
-    local report = opts.on_progress or function(...) end
-    local function removeOne(stable_id, done) return removeCollect(self, stable_id, done) end
-    if opts.dirty_only then
-        return Shelf.pushDeletes(self.id, removeOne, report, function(pushed)
-            cb({ pulled = 0, pushed = pushed, hidden = 0, conflicts = 0, skipped = false })
-        end)
-    end
-    local cancelled, job, delete_job = false, nil, nil
-    delete_job = Shelf.pushDeletes(self.id, removeOne, report, function(pushed)
-        if cancelled then return end
-        report(_("正在拉取书架…"))
-        job = self._client:collectAllAsync(function(rows, err)
-            if cancelled then return end
-            if not rows then
-                cb(nil, err)
-                return
-            end
-            local books = Mapper.collect(rows)
-            report(T(_("正在写入书架（%1 本）"), #books))
-            local result, rerr = Shelf.reconcile(self.id, books)
-            if result then result.pushed = pushed end
-            cb(result, rerr)
-        end)
-    end)
-    return { cancel = function()
-        cancelled = true
-        delete_job.cancel()
-        if job then job.cancel() end
-    end }
+    return Shelf.syncAsync(self.id, self._client, nil, opts, cb)
 end
 
 ---@param client CopymangaClient
@@ -154,7 +113,8 @@ function Source:searchAsync(keyword, cb)
             cb(nil, err)
             return
         end
-        cb({ data = Mapper.search(wire) })
+        local books, parse_err = Mapper.search(wire)
+        cb(books and { data = books } or nil, parse_err)
     end)
 end
 
@@ -186,9 +146,14 @@ local AUDIENCES = { { "all", _("全部") }, { "male", _("男频") }, { "female",
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:browseAsync(opts, cb)
+    opts = opts or {}
     local node = opts.node or "day:all"
     local theme = node:match("^theme:(.+)$")
     local period, audience = node:match("^(%a+):(%a+)$")
+    local valid_period, valid_audience = false, false
+    for _idx, row in ipairs(PERIODS) do if row[1] == period then valid_period = true end end
+    for _idx, row in ipairs(AUDIENCES) do if row[1] == audience then valid_audience = true end end
+    if not theme and (not valid_period or not valid_audience) then period, audience, node = "day", "all", "day:all" end
     if theme then period, audience = "day", "all" end
     local periods, filters = {}, {}
     for _idx, row in ipairs(PERIODS) do periods[#periods + 1] = { id = row[1] .. ":" .. audience, title = row[2] } end

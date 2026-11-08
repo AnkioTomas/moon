@@ -18,7 +18,7 @@ local Header = require("http.request.header")
 local Text = require("utils.text")
 local App = require("source.wechat.app")
 local sha256 = require("ffi/sha2").sha256
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 local Eink = {}
 
@@ -176,6 +176,41 @@ end
 local function errMsg(data)
     if type(data) ~= "table" then return "" end
     return tostring(data.errMsg or data.errmsg or "")
+end
+
+-- 官方 10.2.2 真正展示给用户的固定句（资源名 / 调用点）：
+--   -2030 reader_load_chapter_soldout，阅读页下架
+--   -2112 BookFragment toast
+--   -2202/-2228 pay_buy_chapters_all_paid_already
+--   -2204 pay_buy_sold_out_book
+--   -2281 阅读器 refreshChapterPrice（购买接口另有「支付失败，书籍价格已更新，请重新购买」）
+-- 没有固定句的业务码（-2024/-2025/-2063 等）官方进阅读错误页，正文是 reader_load_chapter_fail「加载失败」。
+-- -2223 与 HTTP 402 官方不进错误页，打开购买页，页标题是「试读结束」。
+local OFFICIAL_ERR = {
+    [-2030] = "本书已下架",
+    [-2112] = "余额不足",
+    [-2202] = "章节已经购买过，请勿重复购买",
+    [-2204] = "本书已下架，部分内容不再支持购买",
+    [-2228] = "章节已经购买过，请勿重复购买",
+    [-2281] = "章节价格已更新，请重新购买",
+}
+
+--- 业务错误的用户可见句。服务端 errmsg 是说明而不是错误码数字时原样用。
+---@param code number|nil
+---@param msg string|nil
+---@param http number|nil
+---@return string
+function Eink.userMessage(code, msg, http)
+    if type(msg) ~= "string" then msg = "" end
+    if msg ~= "" and msg ~= tostring(code) and not msg:match("^%-?%d+$") then
+        return msg
+    end
+    local key = code and OFFICIAL_ERR[code]
+    if key then return _(key) end
+    if http == 402 or code == -2223 then return _("试读结束") end
+    if code ~= nil then return _("加载失败") end
+    if http then return "HTTP " .. tostring(http) end
+    return _("加载失败")
 end
 
 --- POST /login 回包 → 凭据；缺令牌按失败。续期回包可不带 refreshToken，表示沿用旧的。
@@ -341,9 +376,14 @@ function Eink.completeQrLoginAsync(info, cb)
     end)
 end
 
---- 在飞续期的等待者；并发请求共享同一次 /login。
+--- 在飞续期的等待者；同一种续期合并成一次 /login。
 ---@type (fun(ok: boolean, err: string|nil, rejected: boolean|nil))[]|nil
 local mint_waiters
+--- 在飞这次带不带 wxToken。普通续期是 0；公众号授权是 1。
+local mint_wx = 0
+--- 普通续期在飞时来了公众号续期：等这次落盘后再打 wxToken=1，不能共用同一次 /login。
+---@type { ref: string, waiters: (fun(ok: boolean, err: string|nil, rejected: boolean|nil))[] }|nil
+local mint_follow
 
 --- 是否有续期在飞（调用方据此排队而不是另起 / 走冷却）。
 ---@return boolean
@@ -385,11 +425,23 @@ local function withGuestToken(creds, cb)
 end
 
 --- 用 refreshToken 换新 accessToken 并落盘。
---- rejected 只在服务器明确拒绝（有回包且非 5xx）时为真；超时 / 断网 / 5xx 不能当成登录失效。
+--- 普通续期 wxToken=0。公众号授权过期时 App 对带 NeedWxToken 的接口再续一次，wxToken=1，
+--- refCgi 是这次失败的地址。rejected 只在服务器明确拒绝（有回包且非 5xx）时为真。
 ---@param cb fun(ok: boolean, err: string|nil, rejected: boolean|nil)
-function Eink.refreshAsync(cb)
+---@param opts { wxToken: integer|nil, refCgi: string|nil }|nil
+function Eink.refreshAsync(cb, opts)
+    opts = opts or {}
+    local wx = opts.wxToken == 1 and 1 or 0
+    local ref = type(opts.refCgi) == "string" and opts.refCgi or ""
     if mint_waiters then
-        mint_waiters[#mint_waiters + 1] = cb
+        -- wxToken=1 在飞时，普通续期直接等这次结果。反过来不行：0 续不了公众号授权。
+        if wx == 0 or mint_wx == 1 then
+            mint_waiters[#mint_waiters + 1] = cb
+            return
+        end
+        mint_follow = mint_follow or { ref = ref, waiters = {} }
+        mint_follow.ref = ref
+        mint_follow.waiters[#mint_follow.waiters + 1] = cb
         return
     end
     local creds = Eink.credentials()
@@ -398,6 +450,7 @@ function Eink.refreshAsync(cb)
         return
     end
     mint_waiters = { cb }
+    mint_wx = wx
     local timestamp, random = nowMs(), math.random(0, 999)
     -- App 续期的防重放签名要 guest_token；没缓存时取一次（拿不到就空串，由服务端决定）。
     withGuestToken(creds, function(guest_token)
@@ -407,14 +460,14 @@ function Eink.refreshAsync(cb)
         inBackground = 0,
         kickType = 1,
         random = random,
-        refCgi = "",
+        refCgi = ref,
         refreshToken = creds.refresh_token,
         signature = App.sign({
             guest_token, creds.device_id, string.format("%.0f", timestamp), tostring(random), creds.refresh_token,
         }),
         timestamp = timestamp,
         trackId = "",
-        wxToken = 0,
+        wxToken = wx,
     }, function(res, err)
         local data, login_err = loginResult(res, err, creds.refresh_token)
         if data then
@@ -424,9 +477,13 @@ function Eink.refreshAsync(cb)
             logger.warn("weread eink refresh failed", login_err)
         end
         local waiters = mint_waiters
-        mint_waiters = nil
+        local follow = mint_follow
+        mint_waiters, mint_follow = nil, nil
         local rejected = data == nil and not err and res ~= nil and (tonumber(res.code) or 0) < 500
         for _idx, waiter in ipairs(waiters) do waiter(data ~= nil, login_err, rejected) end
+        if follow then Eink.refreshAsync(function(ok, follow_err, follow_rejected)
+            for _idx, waiter in ipairs(follow.waiters) do waiter(ok, follow_err, follow_rejected) end
+        end, { wxToken = 1, refCgi = follow.ref }) end
     end)
     end)
 end
@@ -469,7 +526,8 @@ function Eink.callAsync(method, path, opts, cb)
                 cb(nil, tostring(err), {})
                 return
             end
-            if opts.raw and Request.ok(res.code) and res.body:sub(1, 2) == "PK" then
+            if opts.raw and Request.ok(res.code)
+                and (res.body:sub(1, 2) == "PK" or res.body:sub(258, 262) == "ustar") then
                 cb(res, nil, { status = res.code })
                 return
             end
@@ -496,7 +554,12 @@ function Eink.callAsync(method, path, opts, cb)
                 return
             end
             if not Request.ok(res.code) or (code ~= nil and code ~= 0) or not data then
-                cb(nil, tostring(code or ("HTTP " .. tostring(res.code))) .. " " .. errMsg(data), meta)
+                local raw = errMsg(data)
+                local shown = Eink.userMessage(code, raw, res.code)
+                if shown ~= raw then
+                    logger.warn("weread api", method, path, res.code, code, raw ~= "" and raw or nil)
+                end
+                cb(nil, shown, meta)
                 return
             end
             cb(data, nil, meta)

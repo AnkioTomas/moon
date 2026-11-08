@@ -2,7 +2,7 @@
 QQ阅读 HTTP 客户端（仅异步）。
 
 接口在 https://book.qq.com/api/ ，code 0 成功，-4 是登录失效（HTTP 仍是 200）。
-目录和免费章匿名可读。付费章同样 code 0，但只有预览：chapterVipFlag=1 且 authStatus 不是 1。
+目录和免费章匿名可读。付费章同样 code 0；authStatus=1 已购、2 会员，其余状态不能缓存预览。
 encrypt / fontEncrypt 为真是 Fock 加密 + 乱序字体（已购章），解密见 fock.lua / scramble.lua / glyph.lua。
 书架分页 pageNo / pageSize / hasNext，置顶和普通列表拼在一起。
 进度只到章：POST bookshelf/update/reading/process，只传 bid 和 lastReadChapterId。
@@ -10,7 +10,6 @@ encrypt / fontEncrypt 为真是 Fock 加密 + 乱序字体（已购章），解�
 @module koplugin.book.source.qqreader.client
 --]]
 
-require("l10n").apply()
 local Fock = require("source.qqreader.fock")
 local JSON = require("json")
 local logger = require("utils.log")
@@ -18,7 +17,7 @@ local Mapper = require("source.qqreader.mapper")
 local Request = require("http.request")
 local SourceBase = require("source.base")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qqreader")
 
 local Client = {}
 
@@ -37,13 +36,13 @@ function Client.cookie()
 end
 
 ---@param cookie string|nil
+---@param referer string|nil
 ---@return table
-local function headers(cookie)
+local function headers(cookie, referer)
     return {
         Cookie = cookie,
         ["User-Agent"] = UA,
-        Referer = WEB .. "/book-shelf",
-        Origin = WEB,
+        Referer = referer or WEB .. "/book-shelf",
     }
 end
 
@@ -110,19 +109,26 @@ end
 ---@param body string|nil
 ---@param cookie string|nil
 ---@param cb fun(wire: table|nil, err: string|nil)
+---@param referer string|nil
 ---@return HttpJob
-local function call(method, path, params, body, cookie, cb)
+local function call(method, path, params, body, cookie, cb, referer)
     local url = API .. path
     if params then url = url .. "?" .. query(params) end
     local opts = {
         accept = "application/json",
-        headers = headers(cookie),
+        headers = headers(cookie, referer),
         timeout = require("http.timeout").net(1),
     }
-    local function done(raw, err)
+    local function done(raw, err, res)
+        local status = res and tonumber(res.code)
+        if not raw and cookie and (status == 302 or status == 401) then
+            cb(nil, expired(cookie, loginGone()))
+            return
+        end
         cb(decode(raw, err, cookie))
     end
     if method == "POST" then
+        opts.headers.Origin = WEB
         opts.content_type = "application/json"
         return Request.post(url, body, opts, done)
     end
@@ -130,7 +136,7 @@ local function call(method, path, params, body, cookie, cb)
 end
 
 ---@param cookie string
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, account: { id: string }|nil)
 ---@return { cancel: fun() }
 function Client.loginCheckAsync(cookie, cb)
     if type(cookie) ~= "string" or cookie == "" then
@@ -141,11 +147,17 @@ function Client.loginCheckAsync(cookie, cb)
             cb(nil, err or loginGone())
             return
         end
-        cb(true)
+        local guid = cookie:match("^ywguid=([^;]+)") or cookie:match(";%s*ywguid=([^;]+)")
+        local uid = cookie:match("^uid=([^;]+)") or cookie:match(";%s*uid=([^;]+)")
+        local id = guid or uid
+        if not id or not id:match("^%d+$") or (guid and uid and guid ~= uid) then
+            cb(nil, _("QQ阅读账号标识缺失")); return
+        end
+        cb(true, nil, { id = id })
     end)
 end
 
---- 拉书架。每页把置顶和普通列表拼上，hasNext 为假或空页就停。
+--- 拉书架。每页拼接置顶和普通列表；hasNext 为真但没有新书时明确失败。
 ---@param cookie string
 ---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -157,7 +169,8 @@ function Client.shelfAsync(cookie, cb)
     local function add(list)
         local n = 0
         for _idx, row in ipairs(type(list) == "table" and list or {}) do
-            local id = row.bid and tostring(row.bid)
+            if type(row) ~= "table" or not row.bid then return nil end
+            local id = tostring(row.bid)
             if id and not seen[id] then
                 seen[id] = true
                 books[#books + 1] = row
@@ -168,14 +181,24 @@ function Client.shelfAsync(cookie, cb)
     end
     local function page(n)
         if cancelled then return end
-        job = call("GET", "/bookshelf/query", { pageNo = n, pageSize = PAGE_SIZE }, nil, cookie, function(wire, err)
+        local pending = true
+        local inner = call("GET", "/bookshelf/query", { pageNo = n, pageSize = PAGE_SIZE }, nil, cookie, function(wire, err)
+            pending = false
             if cancelled then return end
             if not wire then cb(nil, err); return end
-            local data = type(wire.data) == "table" and wire.data or {}
-            local added = add(data.topBookList) + add(data.bookList)
+            local data = wire.data
+            if type(data) ~= "table" or type(data.bookList) ~= "table"
+                or (data.topBookList ~= nil and type(data.topBookList) ~= "table") then
+                cb(nil, _("QQ阅读书架响应无效")); return
+            end
+            local top, normal = add(data.topBookList), add(data.bookList)
+            if not top or not normal then cb(nil, _("QQ阅读书架响应无效")); return end
+            local added = top + normal
             local more = data.hasNext == true or tonumber(data.hasNext) == 1
-            if not more or added == 0 then cb(books) else page(n + 1) end
+            if more and added == 0 then cb(nil, _("QQ阅读书架分页没有进展")); return end
+            if not more then cb(books) else page(n + 1) end
         end)
+        if pending then job = inner end
     end
     page(1)
     return { cancel = function()
@@ -222,25 +245,97 @@ function Client.updateReadAsync(book_id, chapter_id, cb)
     end)
 end
 
---- 搜索：官网没有 JSON 搜索接口，取服务端渲染的 /so/<关键词> 页（匿名，一页 10 条）。
+--- 官网 JSON 搜索；匿名，每页十条，hasNext 决定后续页。
 ---@param keyword string
----@param cb fun(books: Book[]|nil, err: string|nil)
+---@param cb fun(books: Book[]|nil, err: string|nil, more: boolean|nil)
+---@param page integer|nil
 ---@return HttpJob
-function Client.searchAsync(keyword, cb)
-    return Client.listAsync("/so/" .. Text.urlEncode(keyword), cb)
+function Client.searchAsync(keyword, cb, page)
+    return call("GET", "/booksearch/query", { keyWord = keyword, pageNo = page or 1, pageSize = 10 },
+        nil, nil, function(wire, err)
+            if not wire then cb(nil, err); return end
+            local data = wire.data
+            if type(data) ~= "table" or type(data.bookList) ~= "table" then
+                cb(nil, _("QQ阅读搜索响应无效")); return
+            end
+            local books = {}
+            for _idx, row in ipairs(data.bookList) do
+                if type(row) ~= "table" or not row.bid or type(row.title) ~= "string" then
+                    cb(nil, _("QQ阅读搜索响应无效")); return
+                end
+                books[#books + 1] = Mapper.book(row)
+            end
+            cb(books, nil, data.hasNext == true or tonumber(data.hasNext) == 1)
+        end)
 end
 
---- 书城列表页（搜索 / 榜单 / 分类同一种 HTML 卡片）→ Book[]。
+--- 官网榜单 / 分类 SSR 书卡 → Book[]。
 ---@param path string
 ---@param cb fun(books: Book[]|nil, err: string|nil)
 ---@return HttpJob
 function Client.listAsync(path, cb)
     return Request.get(WEB .. path, {
-        headers = headers(nil),
+        accept = "text/html",
+        headers = headers(nil, WEB .. path),
         timeout = require("http.timeout").net(1),
     }, function(raw, err)
         if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
-        cb(Mapper.searchHtml(raw))
+        if not raw:find('class="book-rank main"', 1, true)
+            and not raw:find('class="book-cate main"', 1, true) then
+            cb(nil, _("QQ阅读列表响应无效")); return
+        end
+        local books = Mapper.searchHtml(raw)
+        if #books == 0 and raw:find("/book-detail/%d+") then cb(nil, _("QQ阅读列表响应无效")); return end
+        cb(books)
+    end)
+end
+
+---@param filters string 官网分类路径的八段条件
+---@param cb fun(data: table|nil, err: string|nil)
+---@return HttpJob
+function Client.categoryAsync(filters, cb)
+    return call("GET", "/category/" .. filters, nil, nil, nil, function(wire, err)
+        if not wire then cb(nil, err); return end
+        local data = wire.data
+        if type(data) ~= "table" or type(data.books) ~= "table" or type(data.categoryList) ~= "table"
+            or type(data.params) ~= "table" or not tonumber(data.total) then
+            cb(nil, _("QQ阅读分类响应无效")); return
+        end
+        for _idx, key in ipairs({ "categoryId2", "categoryId3", "finishStatus", "priceStatus", "words", "updateTime", "orderBy", "pageNo" }) do
+            if not tonumber(data.params[key]) then cb(nil, _("QQ阅读分类响应无效")); return end
+        end
+        for _idx, category in ipairs(data.categoryList) do
+            if type(category) ~= "table" or type(category.name) ~= "string" or type(category.subCategories) ~= "table" then
+                cb(nil, _("QQ阅读分类响应无效")); return
+            end
+        end
+        for _idx, row in ipairs(data.books) do
+            if type(row) ~= "table" or not row.bid or type(row.title) ~= "string" then
+                cb(nil, _("QQ阅读分类响应无效")); return
+            end
+        end
+        cb(data)
+    end, WEB .. "/book-cate/" .. filters)
+end
+
+---@param book_id string
+---@param cb fun(data: table|nil, err: string|nil)
+---@param cursor string|nil
+---@return HttpJob
+function Client.bookCommentsAsync(book_id, cb, cursor)
+    return call("GET", "/bookcomment/list", { bid = book_id, cursor = cursor }, nil, nil, function(wire, err)
+        if not wire then cb(nil, err); return end
+        local data = wire.data
+        if type(data) ~= "table" or type(data.comments) ~= "table" or not tonumber(data.commentCount) then
+            cb(nil, _("QQ阅读书评响应无效")); return
+        end
+        for _idx, row in ipairs(data.comments) do
+            if type(row) ~= "table" or type(row.content) ~= "string" or type(row.user) ~= "table"
+                or (row.createTime ~= nil and not tonumber(row.createTime)) then
+                cb(nil, _("QQ阅读书评响应无效")); return
+            end
+        end
+        cb(data)
     end)
 end
 
@@ -272,11 +367,12 @@ end
 ---@param fuid string|nil 加密章要带 piracy 给的 fuid，密文跟它绑定
 ---@param cb fun(info: table|nil, err: string|nil)
 ---@return HttpJob
-local function readAsync(book_id, chapter_id, fuid, cb)
-    return call("GET", "/book/read", { bid = book_id, cid = chapter_id, fuid = fuid }, nil, Client.cookie(),
+local function readAsync(book_id, chapter_id, fuid, cookie, cb)
+    return call("GET", "/book/read", { bid = book_id, cid = chapter_id, fuid = fuid }, nil, cookie,
         function(wire, err)
             if not wire then cb(nil, err); return end
-            cb(type(wire.data) == "table" and wire.data or {})
+            if type(wire.data) ~= "table" then cb(nil, _("QQ阅读章节内容为空")); return end
+            cb(wire.data)
         end)
 end
 
@@ -287,7 +383,17 @@ end
 ---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil) kind = "unpaid"：这章没买
 ---@return table handle { cancel }
 function Client.contentAsync(book_id, chapter_id, cb)
-    local current
+    local current, cancelled, cookie = nil, false, Client.cookie()
+    local function request(start, done)
+        local pending = true
+        local job = start(function(...)
+            pending = false
+            if cancelled then return end
+            current = nil
+            done(...)
+        end)
+        if pending then current = job end
+    end
     local function finish(text)
         if type(text) ~= "string" or Text.trim(text) == "" then cb(nil, _("QQ阅读章节内容为空")); return end
         cb(text)
@@ -302,9 +408,10 @@ function Client.contentAsync(book_id, chapter_id, cb)
             cb(nil, _("QQ阅读章节解密失败")); return
         end
         local function run(fixed_font)
-            current = Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, tostring(pirate.fuid),
+            request(function(done)
+                return Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, pirate.fuid, done)
+            end,
                 function(text, derr)
-                    current = nil
                     if not text then
                         logger.warn("qqreader fock decrypt failed:", derr)
                         cb(nil, _("QQ阅读章节解密失败")); return
@@ -317,7 +424,9 @@ function Client.contentAsync(book_id, chapter_id, cb)
             logger.warn("qqreader decrypt: fixedFontTtf missing")
             cb(nil, _("QQ阅读章节解密失败")); return
         end
-        current = Request.get(font.fixedFontTtf, { timeout = require("http.timeout").net(1) }, function(ttf, ferr)
+        request(function(done)
+            return Request.get(font.fixedFontTtf, { timeout = require("http.timeout").net(1) }, done)
+        end, function(ttf, ferr)
             if not ttf or #ttf < 4 then
                 logger.warn("qqreader font download failed:", ferr, ttf and #ttf)
                 cb(nil, _("QQ阅读章节解密失败")); return
@@ -325,20 +434,30 @@ function Client.contentAsync(book_id, chapter_id, cb)
             run(ttf)
         end)
     end
-    current = readAsync(book_id, chapter_id, nil, function(info, err)
+    request(function(done) return readAsync(book_id, chapter_id, nil, cookie, done) end, function(info, err)
         if not info then cb(nil, err); return end
         if Mapper.locked(info) then cb(nil, _("QQ阅读 VIP 章节未购买"), "unpaid"); return end
         if not Mapper.encrypted(info) then finish(info.content); return end
-        current = call("GET", "/user/index/piracy", nil, nil, Client.cookie(), function(wire, perr)
+        request(function(done) return call("GET", "/user/index/piracy", nil, nil, cookie, done) end, function(wire, perr)
             if not wire then cb(nil, perr); return end
             local pirate = type(wire.data) == "table" and wire.data or {}
-            current = readAsync(book_id, chapter_id, pirate.fuid, function(enc, rerr)
+            if type(pirate.fuid) ~= "string" and type(pirate.fuid) ~= "number" then
+                cb(nil, _("QQ阅读章节解密失败")); return
+            end
+            pirate.fuid = type(pirate.fuid) == "number" and string.format("%.0f", pirate.fuid) or pirate.fuid
+            if pirate.fuid == "" then cb(nil, _("QQ阅读章节解密失败")); return end
+            request(function(done) return readAsync(book_id, chapter_id, pirate.fuid, cookie, done) end, function(enc, rerr)
                 if not enc then cb(nil, rerr); return end
+                if Mapper.locked(enc) then cb(nil, _("QQ阅读 VIP 章节未购买"), "unpaid"); return end
+                if not Mapper.encrypted(enc) then finish(enc.content); return end
                 decrypt(enc, pirate)
             end)
         end)
     end)
-    return { cancel = function() if current then current:cancel() end end }
+    return { cancel = function()
+        cancelled = true
+        if current then current:cancel() end
+    end }
 end
 
 return Client

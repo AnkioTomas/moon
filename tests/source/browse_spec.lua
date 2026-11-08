@@ -21,9 +21,19 @@ do
     local calls, out = {}, nil
     local group = { chips = { { id = "g", title = "组" } }, active = "g" }
     Browse.pages(fetcher({ { "a", "b" }, { "c", "d" }, { "e" } }, calls), 3, { group }, function(res) out = res end)
-    Assert.len(out.data, 4)
+    Assert.len(out.data, 3)
     Assert.len(calls, 2)
     Assert.eq(out.groups[1], group)
+end
+
+do
+    local calls, out = {}, nil
+    local oversized = {}
+    for index = 1, 67 do oversized[index] = { source_id = "test", stable_id = tostring(index) } end
+    Browse.pages(fetcher({ oversized }, calls), 60, {}, function(res) out = res end)
+    Assert.len(out.data, 60, "站点返回超大一页时仍遵守调用方上限")
+    Assert.eq(out.data[60].stable_id, "60")
+    Assert.len(calls, 1)
 end
 
 do
@@ -58,4 +68,30 @@ do
     local g = Browse.group({ { id = "x", title = "X" }, { id = "y", title = "Y" } }, "y")
     Assert.eq(g.active, "y")
     Assert.is_nil(Browse.group({ { id = "x", title = "X" } }, "z").active)
+end
+
+do
+    local late, cancelled, completed
+    local handle = Browse.pages(function(page, done)
+        if page == 1 then
+            done({ { source_id = "test", stable_id = "one" } }, nil, true)
+            return { cancel = function() error("cancelled completed first request") end }
+        end
+        late = done
+        return { cancel = function() cancelled = true end }
+    end, 60, {}, function() completed = true end)
+    handle.cancel()
+    Assert.is_true(cancelled)
+    late({ { source_id = "test", stable_id = "two" } }, nil, false)
+    Assert.is_nil(completed)
+end
+
+do
+    local calls, err = 0, nil
+    Browse.pages(function(_page, done)
+        calls = calls + 1
+        done({ { source_id = "test", stable_id = "same" } }, nil, true)
+    end, 60, {}, function(res, reason) Assert.is_nil(res); err = reason end)
+    Assert.eq(calls, 2)
+    Assert.eq(err, "响应无效")
 end

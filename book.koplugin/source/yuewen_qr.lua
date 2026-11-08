@@ -44,7 +44,7 @@ function QRLogin:baseParams()
         format = "json",
         returnurl = self.spec.return_url,
         target = "top",
-        ticket = "0",
+        ticket = self.spec.ticket or "0",
         autotime = "14",
         auto = "0",
     }
@@ -95,7 +95,8 @@ end
 ---@param jar table
 local function takeJson(data, jar)
     if type(data) ~= "table" then return end
-    local guid = text(data.ywGuid or data.ywguid)
+    local value = data.ywGuid or data.ywguid
+    local guid = type(value) == "number" and string.format("%.0f", value) or text(value)
     local key = text(data.ywKey or data.ywkey)
     local openid = text(data.ywOpenId or data.ywopenid)
     if guid then jar.ywguid = guid end
@@ -117,6 +118,7 @@ end
 ---@field referer string
 ---@field title string
 ---@field caption string
+---@field ticket string|nil 非 0 时必须兑换本站 Web 会话
 
 ---@param spec YuewenQRSpec
 ---@param on_cookie fun(cookie: string)
@@ -199,15 +201,21 @@ function QRLogin:_get(url, cb)
         Accept = "application/json, text/javascript, */*",
         Referer = self.spec.referer,
     }
-    local cookie = cookieHeader(self.jar)
-    if cookie ~= "" then headers.Cookie = cookie end
-    self.job = Request.request({
+    local host = url:match("^https://([^/?#]+)")
+    if host == self.spec.return_url:match("^https://([^/?#]+)") then
+        local cookie = cookieHeader(self.jar)
+        if cookie ~= "" then headers.Cookie = cookie end
+    end
+    local pending, gen = true, self.generation
+    local job = Request.request({
         url = url,
         method = "GET",
         headers = headers,
         timeout = require("http.timeout").net(0.5),
         allow_redirects = false,
     }, function(res, err)
+        pending = false
+        if gen ~= self.generation then return end
         self.job = nil
         if err or not res then
             cb(nil, err and tostring(err) or _("请求失败"))
@@ -220,6 +228,7 @@ function QRLogin:_get(url, cb)
         end
         cb(res)
     end)
+    if pending then self.job = job end
 end
 
 ---@param res table|nil
@@ -314,7 +323,11 @@ end
 ---@param hop integer
 function QRLogin:_follow(gen, url, hop)
     if gen ~= self.generation then return end
-    if type(url) ~= "string" or not url:match("^https://") or hop > MAX_HOPS then
+    local host = type(url) == "string" and url:match("^https://([^/?#]+)")
+    local target = self.spec.return_url:match("^https://([^/?#]+)")
+    if not host or (host ~= target and host ~= "ptlogin.yuewen.com"
+        and host ~= "passport.yuewen.com" and host ~= "passport.qidian.com"
+        and host ~= "login.book.qq.com") or hop > MAX_HOPS then
         self:show_retry(_("登录失败：未获取到登录态"))
         return
     end
@@ -326,12 +339,17 @@ function QRLogin:_follow(gen, url, hop)
             self:show_retry(_("登录失败：未获取到登录态"))
             return
         end
-        takeCookies(self.jar, Request.header(res, "Set-Cookie"))
-        if ready(self.jar) then
+        for _idx, value in ipairs(Request.headerAll(res, "Set-Cookie")) do takeCookies(self.jar, value) end
+        local location = Text.absoluteUrl(url, Request.header(res, "Location"))
+        if tonumber(res.code) >= 300 then
+            if not location then self:_error(gen, _("登录失败：未获取到登录态")); return end
+            self:_follow(gen, location, hop + 1)
+            return
+        end
+        if ready(self.jar) and (self.spec.ticket ~= "1" or host == target) then
             self:_done(gen, self.jar)
             return
         end
-        local location = Text.absoluteUrl(url, Request.header(res, "Location"))
         if not location then
             self:show_retry(_("登录失败：未获取到登录态"))
             return
@@ -345,7 +363,7 @@ end
 ---@param wire table
 ---@param res table
 function QRLogin:_on_poll(gen, session, wire, res)
-    takeCookies(self.jar, Request.header(res, "Set-Cookie"))
+    for _idx, value in ipairs(Request.headerAll(res, "Set-Cookie")) do takeCookies(self.jar, value) end
     local data = type(wire.data) == "table" and wire.data or {}
     takeJson(data, self.jar)
     takeJson(wire, self.jar)
@@ -356,13 +374,18 @@ function QRLogin:_on_poll(gen, session, wire, res)
         return
     end
     if status == 5 and code == 0 then
-        if ready(self.jar) then
-            self:_done(gen, self.jar)
-            return
-        end
         local jump = text(data["302url"]) or text(wire["302url"])
+        if not jump and self.spec.ticket == "1" and text(data.ticket) then
+            jump = self.spec.return_url .. (self.spec.return_url:find("?", 1, true) and "&" or "?")
+                .. Text.formEncode({ ticket = data.ticket, ywguid = self.jar.ywguid,
+                    ywOpenId = self.jar.ywopenid or "" })
+        end
         if jump then
             self:_follow(gen, jump, 1)
+            return
+        end
+        if ready(self.jar) and self.spec.ticket ~= "1" then
+            self:_done(gen, self.jar)
             return
         end
         self:show_retry(_("登录失败：未获取到登录态"))

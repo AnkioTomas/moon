@@ -10,7 +10,7 @@ local Request = require("http.request")
 local Aes = require("crypto.aes")
 local logger = require("utils.log")
 local bit = require("bit")
-local _ = require("gettext")
+local _ = require("l10n").get("source.fanqie")
 
 local Device = {}
 

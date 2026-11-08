@@ -18,7 +18,8 @@ local _ = require("gettext")
 ---@field cookie_hint string 粘贴窗提示
 ---@field logout_text string 退出确认文案
 ---@field loggedIn fun(): boolean
----@field checkAsync fun(cookie: string, cb: fun(ok: boolean, err: string|nil)) 校验 Cookie，通过才保存
+---@field checkAsync fun(cookie: string, cb: fun(ok: boolean, err: string|nil, account: table|nil)): HttpJob|nil 校验 Cookie，通过才保存
+---@field commit fun(cookie: string, account: table|nil, cb: fun(ok: boolean, err: string|nil)): HttpJob|nil 可选的源级账号边界与保存
 ---@field store fun(cfg: table, cookie: string)|nil 写入配置；默认 cfg.cookie = cookie
 ---@field clear fun(cfg: table)|nil 退出时清配置；默认 cfg.cookie = nil
 
@@ -76,14 +77,26 @@ function CookieLogin.fromPayload(payload, domain)
     return header(jar)
 end
 
---- 校验 Cookie，通过才保存并重载源。
+--- 校验 Cookie，通过才保存并重载源；成功走 auth.ok，由它刷新当前账号叠层（不关页）。
 ---@param spec CookieLoginSpec
 ---@param cookie string
 ---@param cb fun(ok: boolean, err: string|nil)
 function CookieLogin.save(spec, cookie, cb)
     if cookie == "" then return cb(false, _("没有读到 Cookie")) end
-    spec.checkAsync(cookie, function(ok, err)
+    local cancelled, job, pending = false, nil, true
+    local check = spec.checkAsync(cookie, function(ok, err, account)
+        pending = false
+        if cancelled then return end
         if not ok then return cb(false, err or _("登录失败")) end
+        if spec.commit then
+            local committing = true
+            local inner = spec.commit(cookie, account, function(saved, reason)
+                committing = false
+                if not cancelled then cb(saved, reason) end
+            end)
+            if committing then job = inner end
+            return
+        end
         local settings = require("utils.settings")
         local cfg = settings.getSource(spec.id)
         if spec.store then spec.store(cfg, cookie) else cfg.cookie = cookie end
@@ -92,9 +105,14 @@ function CookieLogin.save(spec, cookie, cb)
         require("source.registry").reload()
         cb(true)
     end)
+    if pending then job = check end
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
 end
 
---- 联网后带进度窗校验保存，结果 toast。
+--- 联网后带进度窗校验保存，结果 toast；成功后留在当前账号页（auth.ok 刷新状态）。
 ---@param spec CookieLoginSpec
 ---@param cookie string
 function CookieLogin.verify(spec, cookie)
@@ -165,13 +183,35 @@ function CookieLogin.relogin(name, url, paste_where)
     return steps .. "\n\n" .. T(_("不想装扩展的话，用这个办法代替上面的第 2 步到第 6 步：电脑上按第 1 步登录好，按键盘上的 F12，点「网络」，再按一次刷新。点任意一条请求，在「请求标头」里找到 Cookie，从第一个字符复制到最后一个。回到月读，依次点「设置」「书库」「账号」「%1」，把复制的内容贴进输入框，点「登录」。"), paste_where)
 end
 
---- 「粘贴 Cookie」行：主进法是扫码 / 账号密码的源在未登录时另给的入口。
+--- 「粘贴 Cookie」行：与其它登录方式并列，单独一行，不混进账号/密码窗。
 ---@param spec CookieLoginSpec
 ---@return fun(iw: integer): table
 function CookieLogin.pasteRow(spec)
     return function(iw)
         return require("ui.themes.widgets.row").widget({ width = iw, chevron = true, kind = "nav", icon = "content_paste",
             title = _("粘贴 Cookie"), callback = function() CookieLogin.prompt(spec) end })
+    end
+end
+
+--- 「浏览器登录」行：起远程管理并直达 Cookie 授权页（`/cookie.html`）。
+--- 有 `Setting.browser` 的源都该挂这一行；不要再用 TextViewer 塞长篇说明书。
+---@return fun(iw: integer): table
+function CookieLogin.browserRow()
+    return function(iw)
+        return require("ui.themes.widgets.row").widget({
+            width = iw, chevron = true, kind = "nav", icon = "language",
+            title = _("浏览器登录"),
+            callback = function()
+                local dialog = require("utils.extension").call("web.open_page", "/cookie.html",
+                    _("浏览器登录"), _("用电脑浏览器打开下方网址，在网页里授权当前书源"))
+                if not dialog then
+                    require("ui.themes.widgets.toast"):new{
+                        text = _("请先在「设置 → 系统 → 连接 → 远程管理」打开服务"),
+                        timeout = 4,
+                    }:show()
+                end
+            end,
+        })
     end
 end
 

@@ -18,6 +18,7 @@ local Guard = require("ui.guard")
 ---@field boxes table[] 屏幕框（每行一段）
 ---@field solid boolean|nil 实线下划线（缺省虚线）
 ---@field badge string|nil 有则不画下划线，在末行文字右侧画带这行字的气泡（只用最后一个框），点按气泡
+---@field heading string|nil 有则在框内画独立分隔线、标题和数量气泡，整行可点
 ---@field tap fun() 点按回调
 
 --- 标记图层：每帧调用 ``marks``，返回当前屏上标记（无则空表）。
@@ -413,6 +414,28 @@ local function bubble(bb, box, text, body_size)
     return { x = x - tail, y = y, w = w + tail, h = h }
 end
 
+---@param bb any
+---@param box table 正文预留区
+---@param mark PageMark
+---@param body_size number|nil
+---@return table
+local function section(bb, box, mark, body_size)
+    local Blitbuffer = require("ffi/blitbuffer")
+    local size = math.max(12, math.floor(body_size or box.h / 4))
+    local gap = math.max(8, math.floor(size / 2))
+    bb:paintRect(box.x, box.y, box.w, 1, Blitbuffer.Color8(0xBB))
+    local label = require("ui/widget/textwidget"):new{
+        text = mark.heading, face = require("ui/font"):getFace("cfont", size),
+        fgcolor = Blitbuffer.COLOR_DARK_GRAY, bold = true,
+    }
+    local dimen = label:getSize()
+    local title = { x = box.x + gap, y = box.y + gap, w = dimen.w + gap, h = dimen.h }
+    label:paintTo(bb, title.x, title.y)
+    label:free()
+    bubble(bb, title, mark.badge, body_size)
+    return { x = box.x, y = box.y, w = box.w, h = gap + dimen.h + gap }
+end
+
 --- 占位，先不画。下划线的垂直位置要等本帧所有行框都齐了再量。
 ---@param entry { layer: PageMarkLayer }
 ---@param taken table[]
@@ -454,7 +477,8 @@ local function drawGroup(group, bb, delta, thick, painted, body_size)
     for _idx, item in ipairs(group.items) do
         local pieces
         if item.badge then
-            pieces = { bubble(bb, item.badge, item.mark.badge, body_size) }
+            pieces = { item.mark.heading and section(bb, item.badge, item.mark, body_size)
+                or bubble(bb, item.badge, item.mark.badge, body_size) }
         else
             pieces = item.pieces
             for _piece_idx, piece in ipairs(pieces) do underline(bb, piece, item.mark.solid, delta, thick) end

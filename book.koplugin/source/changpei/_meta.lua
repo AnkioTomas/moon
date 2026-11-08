@@ -4,12 +4,12 @@
 @module source.changpei._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.changpei")
 
 return {
     id = "changpei",
     name = _("长佩文学"),
     type = "chapter",
     description = _("长佩文学书架与在线阅读"),
-    abilities = { _("搜索与发现"), _("书架同步"), _("进度同步") },
+    abilities = { _("搜索与发现"), _("书架同步"), _("进度同步"), _("书评"), _("章节评论") },
 }

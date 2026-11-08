@@ -22,7 +22,7 @@ local Cookie = require("source.fanqie.cookie")
 local Text = require("utils.text")
 local logger = require("utils.log")
 local JSON = require("json")
-local _ = require("gettext")
+local _ = require("l10n").get("source.fanqie")
 
 local QRLogin = {}
 QRLogin.__index = QRLogin

@@ -62,6 +62,8 @@ function Mapper.book(info)
     local id = tostring(info.bid)
     local category = info.category3Name
     if type(category) ~= "string" or category == "" then category = info.category2Name end
+    local finish = tonumber(info.finishStatus)
+    local status = finish == 1 and "完结" or finish == 0 and "连载" or nil
     return {
         source_id = SOURCE_ID,
         stable_id = id,
@@ -70,7 +72,10 @@ function Mapper.book(info)
         category = category,
         intro = info.intro,
         cover = Mapper.coverUrl(id),
-        meta = { words = tonumber(info.totalWords) },
+        meta = {
+            words = tonumber(info.totalWords),
+            status = status,
+        },
     }
 end
 
@@ -107,6 +112,23 @@ function Mapper.shelfList(rows)
         end
     end
     return books
+end
+
+---@param rows table[]
+---@return table[]
+function Mapper.bookComments(rows)
+    local items = {}
+    for _idx, row in ipairs(rows) do
+        local user = row.user or {}
+        local title, content = row.title or "", row.content or ""
+        items[#items + 1] = {
+            id = row.commentId,
+            author = user.nickname,
+            text = title ~= "" and (title .. "\n" .. content) or content,
+            time = row.createTime and math.floor(row.createTime / 1000) or nil,
+        }
+    end
+    return items
 end
 
 --- 详情或书架行里的阅读位置。0 就是没读过。
@@ -161,7 +183,9 @@ end
 ---@param info table|nil
 ---@return boolean
 function Mapper.locked(info)
-    return type(info) == "table" and on(info.chapterVipFlag) and (tonumber(info.authStatus) or 0) == 0
+    if type(info) ~= "table" or not on(info.chapterVipFlag) then return false end
+    local status = tonumber(info.authStatus)
+    return status ~= 1 and status ~= 2
 end
 
 return Mapper

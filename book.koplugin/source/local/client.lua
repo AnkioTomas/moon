@@ -12,7 +12,7 @@ common（共享原语）。子模块函数首参即 self，在这里装配为方
 
 local lfs = require("libs/libkoreader-lfs")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.local")
 local Webdav = require("source.local.dav")
 local Paths = require("utils.paths")
 local Common = require("source.local.common")

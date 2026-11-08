@@ -30,3 +30,40 @@ Assert.eq(hours[2].startOfHour, 3600)
 Assert.eq(hours[2].readingTime, 10)
 Assert.eq(hours[3].startOfHour, 7200)
 Assert.eq(hours[3].readingTime, 10)
+
+-- 离线批量的外层签名是 sha256(timestamp + token + random)，不是单本 guest 签名。
+local sha256 = require("ffi/sha2").sha256
+local batch = App.batchBody({ { bookId = "1" } }, "trouble")
+Assert.eq(batch.books[1].bookId, "1")
+Assert.eq(batch.recordCreateTimeZone, App.timeZone())
+Assert.eq(batch.signature, sha256(tostring(batch.timestamp) .. "trouble" .. tostring(batch.random)))
+
+-- 没有小时桶时 payload 以 _ 结尾，和 App generatePayLoad 一致。有小时桶时这个 _ 就是分隔符，不能再多一个。
+local old_time, old_random = os.time, math.random
+os.time = function() return 1700000000 end
+math.random = function() return 7 end
+local empty = App.readBody({
+    vid = "1", device_id = "d", install_id = "i", guest_token = "gt",
+    book_id = "b", chapter_uid = 1, chapter_idx = 1, chapter_offset = 0,
+    chapter_progress = 0, current_progress = 0, progress = 0, hours = {},
+})
+local empty_payload = table.concat({ "1", "d", "d", "b", "0", App.timeZone(), "0", "0" }, "_") .. "_"
+Assert.eq(empty.signature, App.sign({ "gt", "7", "1700000000", empty_payload }))
+Assert.is_nil(empty.readUpdateTime)
+Assert.is_nil(empty.isResendReadingInfo)
+local spanned = App.readBody({
+    vid = "1", device_id = "d", install_id = "i", guest_token = "gt",
+    book_id = "b", chapter_uid = 1, chapter_idx = 1, chapter_offset = 0,
+    chapter_progress = 0, current_progress = 40, progress = 99,
+    hours = { { startOfHour = 3600, readingTime = 5, timeZone = "+08:00", ttsTime = 0 } },
+    resend = 1, read_update = 1699990000,
+})
+local spanned_payload = table.concat({
+    "1", "d", "d", "b", "0", App.timeZone(), "5", "0", "3600", "+08:00", "5", "0",
+}, "_")
+Assert.eq(spanned.signature, App.sign({ "gt", "7", "1700000000", spanned_payload }))
+Assert.eq(spanned.progress, 99)
+Assert.eq(spanned.currentProgress, 40)
+Assert.eq(spanned.readUpdateTime, 1699990000)
+Assert.eq(spanned.isResendReadingInfo, 1)
+os.time, math.random = old_time, old_random

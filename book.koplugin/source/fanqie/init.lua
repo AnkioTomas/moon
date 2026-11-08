@@ -14,8 +14,7 @@ local Cbz = require("source.cbz")
 local Comic = require("source.fanqie.comic")
 local Paths = require("utils.paths")
 local ReviewCache = require("book.review_cache")
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.fanqie")
 local T = require("ffi/util").template
 
 local M = {}

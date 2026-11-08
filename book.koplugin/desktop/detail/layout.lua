@@ -28,6 +28,7 @@ local ACTIONS = {
     restore = "restore",
     delete = "deleteBook",
     volumes = "chooseVolume",
+    reviews = "showReviews",
 }
 
 return function(Detail)

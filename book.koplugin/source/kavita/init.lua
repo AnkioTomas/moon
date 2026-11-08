@@ -35,7 +35,7 @@ local VolumeList = require("source.kavita.volume_list")
 local SourceBase = require("source.base")
 local Normalize = require("book.note.normalize")
 local logger = require("utils.log")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 local T = require("ffi/util").template
 
 local ID = "kavita"
@@ -2958,6 +2958,18 @@ function Source:pushNotesAsync(identity, annotations, cb)
         cancelled = true
         job:cancel()
     end }
+end
+
+function Source:bookReviewsAsync(identity, cb)
+    local series_id = splitId(identity.stable_id)
+    local ref = { source_id = self.id, stable_id = series_id }
+    return require("book.review_cache").pageAsync(ref, "book", 0, function(done)
+        return self.client:json("GET", "/api/Metadata/series-detail-plus",
+            { seriesId = tonumber(series_id) }, nil, function(wire, err)
+                if not wire then done(nil, err); return end
+                done(require("source.kavita.mapper").bookReviewPage(wire, series_id))
+            end)
+    end, cb)
 end
 
 return { meta = meta, new = new, DEFAULT_HEARTBEAT_INTERVAL = DEFAULT_HEARTBEAT_INTERVAL }

@@ -57,10 +57,13 @@ do
     Assert.eq(b.meta.rating.by, "weread")
 end
 
--- 微信作品完结 finished=1 不当作用户读完
+-- 微信作品完结 finished=1 不当作用户读完。连载判断要的 payType / type / 完结留下。
 do
-    local b = Mapper.book({ bookId = "1", finished = 1, progress = 20 })
+    local b = Mapper.book({ bookId = "1", finished = 1, progress = 20, payType = 2, type = 0 })
     Assert.eq(b.percent, 20)
+    Assert.eq(b.meta.source.wechat.pay_type, 2)
+    Assert.eq(b.meta.source.wechat.book_type, 0)
+    Assert.eq(b.meta.source.wechat.ended, true)
 end
 
 do
@@ -191,6 +194,7 @@ do
     local titles = {}
     for i, ch in ipairs(chapters) do titles[i] = ch.title end
     Assert.eq(table.concat(titles, "|"), "第1章 万年之后|第二章 想整我？|第3章 第一次见面|第4章|第12章")
+    Assert.eq(chapters[1].format, "txt")
 end
 
 do
@@ -324,10 +328,13 @@ do
     Assert.eq(b.meta.rating.by, "weread")
 end
 
--- 微信作品完结 finished=1 不当作用户读完
+-- 微信作品完结 finished=1 不当作用户读完。连载判断要的 payType / type / 完结留下。
 do
-    local b = Mapper.book({ bookId = "1", finished = 1, progress = 20 })
+    local b = Mapper.book({ bookId = "1", finished = 1, progress = 20, payType = 2, type = 0 })
     Assert.eq(b.percent, 20)
+    Assert.eq(b.meta.source.wechat.pay_type, 2)
+    Assert.eq(b.meta.source.wechat.book_type, 0)
+    Assert.eq(b.meta.source.wechat.ended, true)
 end
 
 do
@@ -439,6 +446,7 @@ do
     local titles = {}
     for i, ch in ipairs(chapters) do titles[i] = ch.title end
     Assert.eq(table.concat(titles, "|"), "第1章 万年之后|第二章 想整我？|第3章 第一次见面|第4章|第12章")
+    Assert.eq(chapters[1].format, "txt")
 end
 
 do

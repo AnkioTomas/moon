@@ -4,7 +4,7 @@
 @module source.xiaoxiang._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.xiaoxiang")
 
 return {
     id = "xiaoxiang",

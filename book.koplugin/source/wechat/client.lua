@@ -1,8 +1,8 @@
 --[[--
 微信读书协议客户端：只返回 wire，不做领域转换（仅异步）。
 
-书架、章节、想法、划线与统计走 Eink ``i.weread.qq.com``（App 协议）。
-进度写入走网页阅读接口：App 时长上报即使成功，也不保证更新阅读位置。
+书架、章节、想法、划线、搜索、进度与统计走 Eink ``i.weread.qq.com``（App 协议）。
+进度与时长都是 ``POST /book/read``。跨了多个小时，或补报离线积压，改走 ``POST /book/batchUploadProgress``。
 
 @module koplugin.book.source.wechat.client
 --]]
@@ -11,9 +11,8 @@ local JSON = require("json")
 local logger = require("utils.log")
 local Auth = require("source.wechat.auth")
 local Eink = require("source.wechat.eink")
-local Protocol = require("source.wechat.protocol")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 local WEB = "https://weread.qq.com"
 -- 本人想法每页条数与翻页上限（hasMore=1 时按回包 maxIdx 续拉）
@@ -43,7 +42,7 @@ local function webWire(url, cb)
         end
         local errcode = tonumber(data.errcode or data.errCode)
         if errcode and errcode ~= 0 then
-            cb(nil, data.errmsg or data.errMsg or (_("微信读书错误 ") .. tostring(errcode)))
+            cb(nil, Eink.userMessage(errcode, data.errmsg or data.errMsg))
             return
         end
         cb(data)
@@ -70,12 +69,27 @@ local function postWebAsync(path, body, referer, cb)
         webWire(url, cb))
 end
 
---- 书城搜索：``books[]`` 每条 ``{ type, bookInfo = { bookId, title, author, publisher, … } }``。
+--- 书城搜索（App ``GET /store/search``）。回包书在 ``data[]``，每条 ``bookInfo``；补成 ``books[]`` 交给 mapper。
 ---@param keyword string
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:searchAsync(keyword, cb)
-    return getWebAsync("/web/search/global", { keyword = keyword, maxIdx = 0, fragmentSize = 120, count = 20 }, cb)
+    return Eink.callAsync("GET", "/store/search", {
+        query = {
+            keyword = keyword, author = "", authorVids = "", categoryId = "",
+            count = 20, maxIdx = 0, type = 0, v = 2, outer = 0, fromBookId = "",
+            scope = 0, scene = 0, filterType = 0, filterField = "", queryUid = "", isQueryWord = 0,
+        },
+    }, function(data, err)
+        if not data then
+            cb(nil, err)
+            return
+        end
+        if type(data.books) ~= "table" then
+            data.books = type(data.data) == "table" and data.data or {}
+        end
+        cb(data)
+    end)
 end
 
 --- 书城榜单与分类目录：``data[]`` 分组，``categories[]`` 里 CategoryId / title / sublist（公开接口，无需登录）。
@@ -101,12 +115,15 @@ end
 --- spill：回包超过 ShelfImport.LIMIT 时不解码，原文落盘交给网页端分批导入，cb 收到 nil + 说明。
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@param spill boolean|nil
+---@param open_import boolean|nil 是否打开导入页（仅用户主动刷新）
 ---@return { cancel: fun() }|nil
-function Client:shelfSyncAsync(cb, spill)
+function Client:shelfSyncAsync(cb, spill, open_import)
     local ShelfImport = require("source.wechat.shelf_import")
-    -- 上次落盘的书架还没导完：不重下，只把导入页再亮出来。
+    -- 待导入快照保留到用户明确完成或丢弃；后台同步不重复弹导入页。
     if spill and ShelfImport.size() then
-        require("utils.extension").call("web.open_page", ShelfImport.PAGE, _("微信书架导入"), ShelfImport.TOO_LARGE)
+        if open_import then
+            require("utils.extension").call("web.open_page", ShelfImport.PAGE, _("微信书架导入"), ShelfImport.TOO_LARGE)
+        end
         return require("source.base").defer(cb, nil, ShelfImport.TOO_LARGE)
     end
     local Awake = require("utils.awake")
@@ -119,7 +136,7 @@ function Client:shelfSyncAsync(cb, spill)
         if meta and meta.oversize then
             local ok, werr = ShelfImport.stash(data.body)
             Awake.hold("wechat_shelf", false)
-            if ok then
+            if ok and open_import then
                 require("utils.extension").call("web.open_page", ShelfImport.PAGE, _("微信书架导入"), ShelfImport.TOO_LARGE)
             end
             cb(nil, ok and ShelfImport.TOO_LARGE or werr)
@@ -222,9 +239,9 @@ function Client:getProgressAsync(bookId, cb)
     }, cb)
 end
 
---- 上报阅读进度：网页阅读会话的位置 payload，不附加或伪造阅读时长。
+--- 上报阅读进度：App ``POST /book/read``，本地坐标，可带尚未上报的小时桶。不下载网页阅读页。
 ---@param bookId string
----@param opts { progress: number, chapter_uid: string|number, chapter_idx?: number, chapter_offset?: number, chapter_fraction?: number, summary?: string, book_version?: integer }
+---@param opts { progress: number, current_progress?: number, chapter_uid: string|number, chapter_idx?: number, chapter_offset?: number, chapter_fraction?: number, summary?: string, book_version?: integer, hours?: WechatAppHour[] }
 ---@param cb fun(data: table|nil, err: any, meta?: { permanent?: boolean })
 ---@return { cancel: fun() }
 function Client:putProgressAsync(bookId, opts, cb)
@@ -232,72 +249,81 @@ function Client:putProgressAsync(bookId, opts, cb)
         require("ui/uimanager"):nextTick(function() cb(nil, _("请先扫码登录微信读书墨水屏")) end)
         return { cancel = function() end }
     end
-    local cancelled, job = false, nil
-    local session_job = require("source.wechat.context").sessionAsync(self, bookId, false, function(session, err)
+    local cancelled, current = false, nil
+    local function bind(next_job)
+        if next_job then current = next_job end
+    end
+    bind(self:guestTokenAsync(function(token, err)
         if cancelled then return end
-        if not session then
+        if not token then
             cb(nil, err)
             return
         end
-        local body = Protocol.makeEnterReadPayload({
+        local creds = Eink.credentials()
+        if not creds then
+            cb(nil, _("请先扫码登录微信读书墨水屏"))
+            return
+        end
+        local function percentOf(value)
+            return math.max(0, math.min(100, math.floor(tonumber(value) or 0)))
+        end
+        local current_raw = opts.current_progress
+        if current_raw == nil then current_raw = opts.progress end
+        local current = percentOf(current_raw)
+        local hours = type(opts.hours) == "table" and opts.hours or {}
+        local body = require("source.wechat.app").readBody({
+            vid = creds.vid,
+            device_id = creds.device_id,
+            install_id = Eink.installId(),
+            guest_token = token,
             book_id = bookId,
-            chapter_uid = opts.chapter_uid,
+            chapter_uid = tonumber(opts.chapter_uid) or 0,
             chapter_idx = opts.chapter_idx or 0,
             chapter_offset = opts.chapter_offset or 0,
-            progress = opts.progress,
+            chapter_progress = math.max(0, math.min(100,
+                math.floor((tonumber(opts.chapter_fraction) or 0) * 100 + 0.5))),
+            progress = percentOf(opts.progress),
+            current_progress = current,
             summary = opts.summary,
-            psvts = session.psvts,
-            pclts = session.pclts,
+            book_version = opts.book_version,
+            hours = hours,
+            -- 一个小时以内走 /book/read。跨小时走批量，resend=0。
+            resend = #hours > 1 and 0 or nil,
         })
-        job = postWebAsync("/web/book/read", body, Protocol.readerUrl(bookId, opts.chapter_uid), function(data, push_err)
+        local function done(data, push_err)
             if cancelled then return end
             if not data then return cb(nil, push_err) end
-            -- 受理回包带 succ=1 或 synckey；都没有是「收下不记账」。换坐标前再推也白撞，permanent 丢掉。
-            if not (data.succ == true or tonumber(data.succ) == 1 or data.synckey ~= nil) then
-                local snippet = ""
-                local enc_ok, encoded = pcall(JSON.encode, data)
-                if enc_ok and type(encoded) == "string" then snippet = encoded:sub(1, 200) end
-                logger.warn("weread report read not accepted", bookId, snippet)
-                return cb(nil, _("上报响应异常"), { permanent = true })
-            end
             cb({ ok = true })
-        end)
-    end)
-    job = job or session_job
+        end
+        if body.isResendReadingInfo ~= nil then
+            bind(self:reportBatchAsync({ body }, done))
+        else
+            bind(self:reportAppReadAsync(body, done))
+        end
+    end))
     return { cancel = function()
             cancelled = true
-            if job then job.cancel() end
+            if current and current.cancel then current.cancel() end
         end }
 end
 
---- 打开网页阅读页，取时长上报会话参数 psvts / pclts / token（weread.koplugin 同款正则）。
+--- 标记读完。App 读到结尾走 ``POST /book/markstatus``，书架的 finishReading 从这里来。
 ---@param bookId string
----@param cb fun(state: { psvts: string, pclts: string|nil, token: string|nil }|nil, err: string|nil)
+---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
-function Client:readerStateAsync(bookId, cb)
-    local url = Protocol.readerUrl(bookId)
-    return Auth.webGetAsync(url, { headers = { Referer = url } }, function(raw, err)
-        if not raw then
-            cb(nil, err)
-            return
-        end
-        local psvts = raw:match([["psvts"%s*:%s*"([^"]+)"]])
-        if not psvts then
-            logger.warn("weread reader page without psvts", raw:sub(1, 120))
-            cb(nil, "reader.psvts not found")
-            return
-        end
-        cb({
-            psvts = psvts,
-            pclts = raw:match([["pclts"%s*:%s*"([^"]+)"]]),
-            token = raw:match([["token"%s*:%s*"([^"]+)"]]),
-        })
-    end)
+function Client:markFinishedAsync(bookId, cb)
+    return Eink.callAsync("POST", "/book/markstatus", {
+        body = { bookId = tostring(bookId), status = 4, finishInfo = 0, isCancel = 0, auto = 1 },
+    }, cb)
 end
 
 --- App 防重放签名用的 guest_token（``/feature`` 配置里的同名项），进程内缓存。
 ---@type string|nil
 local guest_token
+
+--- 离线批量签名用的 token（``GET /config?token=1``）。只留在进程里，-2054 作废。
+---@type string|nil
+local read_trouble
 
 ---@param cb fun(token: string|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
@@ -319,6 +345,25 @@ function Client:guestTokenAsync(cb)
     end)
 end
 
+--- 离线批量的外层 token。空串不缓存，下次再取。
+---@param cb fun(token: string|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:encryptTokenAsync(cb)
+    if read_trouble and read_trouble ~= "" then
+        cb(read_trouble)
+        return nil
+    end
+    return Eink.callAsync("GET", "/config", { query = { token = 1 } }, function(data, err)
+        local token = data and data.token
+        if type(token) ~= "string" or token == "" then
+            cb(nil, err or _("上报响应异常"))
+            return
+        end
+        read_trouble = token
+        cb(token)
+    end)
+end
+
 --- 上报阅读时长（App ``/book/read``，按小时分桶，可补报离线时段）。
 --- 写请求不自动重放：续期后由调用方下一轮重推（未确认的行仍是脏行）。
 ---@param body table 已签名的请求体
@@ -337,6 +382,92 @@ function Client:reportAppReadAsync(body, cb)
         end
         cb(data)
     end)
+end
+
+--- 读取网页阅读器会话参数；仅用于维持网页端「在读」状态。
+---@param bookId string
+---@param cb fun(state: { psvts: string, pclts: string|nil, token: string|nil }|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:readerStateAsync(bookId, cb)
+    local url = require("source.wechat.protocol").readerUrl(bookId)
+    return Auth.webGetAsync(url, { headers = { Referer = url } }, function(raw, err)
+        if not raw then
+            cb(nil, err)
+            return
+        end
+        local psvts = raw:match([["psvts"%s*:%s*"([^"]+)"]])
+        if not psvts then
+            logger.warn("weread reader page without psvts", raw:sub(1, 120))
+            cb(nil, "reader.psvts not found")
+            return
+        end
+        cb({
+            psvts = psvts,
+            pclts = raw:match([["pclts"%s*:%s*"([^"]+)"]]),
+            token = raw:match([["token"%s*:%s*"([^"]+)"]]),
+        })
+    end)
+end
+
+--- 上报网页阅读状态；调用方固定传 ``rt=0``，阅读时长只由 App 小时桶上报。
+---@param body table 已签名的请求体
+---@param referer string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:reportReadAsync(body, referer, cb)
+    return postWebAsync("/web/book/read", body, referer, function(data, err)
+        if not data then
+            cb(nil, err)
+            return
+        end
+        if not (data.succ == true or tonumber(data.succ) == 1 or data.synckey ~= nil) then
+            logger.warn("weread web presence not accepted")
+            cb(nil, _("上报响应异常"))
+            return
+        end
+        cb(data)
+    end)
+end
+
+--- 离线上报（App ``POST /book/batchUploadProgress``）。
+--- books 是已经签过名的单本体。外层签名用 /config 的 token；-2054 丢掉 token 再签一次。
+---@param books table[]
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:reportBatchAsync(books, cb)
+    local cancelled, current = false, nil
+    local function bind(next_job)
+        if next_job then current = next_job end
+    end
+    local function attempt(n)
+        bind(self:encryptTokenAsync(function(token, err)
+            if cancelled then return end
+            if not token then
+                cb(nil, err)
+                return
+            end
+            local body = require("source.wechat.app").batchBody(books, token)
+            bind(Eink.callAsync("POST", "/book/batchUploadProgress", { body = body }, function(data, post_err, meta)
+                if cancelled then return end
+                if n == 1 and type(meta) == "table" and meta.errcode == -2054 then
+                    read_trouble = nil
+                    attempt(2)
+                    return
+                end
+                if not data or tonumber(data.succ) ~= 1 then
+                    logger.warn("weread app batch report not accepted")
+                    cb(nil, post_err or _("上报响应异常"))
+                    return
+                end
+                cb(data)
+            end))
+        end))
+    end
+    attempt(1)
+    return { cancel = function()
+        cancelled = true
+        if current and current.cancel then current.cancel() end
+    end }
 end
 
 --- 拉取阅读统计明细（Eink ``/readdata/detail``）。

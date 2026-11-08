@@ -1,10 +1,7 @@
 --[[--
-微信读书阅读上下文缓存：按章记住 reader 状态（psvts / pclts），供正文拉取、进度与时长上报复用。
+微信读书阅读上下文缓存：按章记住本地 reader 状态（psvts / pclts），以及书籍版本号。
 
-网页阅读页里的 psvts 只是出页时间的 encode，token 是固定默认值、pclts 为 0，
-所以正文与进度按当前时间本地生成，不为它们下载阅读页（大书阅读页内嵌全书目录，可达数 MB）。
-reader 状态模拟一次网页阅读会话；超过 TTL 重新生成，并重新发进入阅读上报。
-阅读时长另用 sessionAsync：参数取自真实阅读页，每本书每 15 分钟最多拉一次。
+App 进度与时长走 App ``POST /book/read``；Web 在读状态用独立的网页会话。
 
 @module koplugin.book.source.wechat.context
 --]]
@@ -21,19 +18,19 @@ local READER_TTL = 15 * 60
 ---@field at integer 生成时间
 ---@field entered boolean|nil 本会话已发过进入阅读上报
 
----@class WechatReportSession
----@field psvts string
----@field pclts string
----@field token string|nil
----@field built_at integer
----@field entered boolean|nil 本会话已发过进入阅读上报
-
 ---@type table<string, WechatReaderState>
 local readers = {}
 ---@type table<string, WechatReportSession>
 local sessions = {}
 ---@type table<string, number>
 local book_version_by_id = {}
+
+---@class WechatReportSession
+---@field psvts string
+---@field pclts string
+---@field token string|nil
+---@field built_at integer
+---@field entered boolean|nil
 
 local function key(book_id, chapter_uid)
     return tostring(book_id) .. "\31" .. tostring(chapter_uid)
@@ -54,11 +51,10 @@ function Context.reader(book_id, chapter_uid)
     return state
 end
 
---- 本书的阅读时长上报会话，对齐 weread.koplugin：参数取自真实网页阅读页，按书一份，
---- 自建成起满 TTL（或 force）就重开阅读页重建，重建后要重新进入阅读。
+--- 获取网页阅读会话；真实 psvts / pclts / token 只用于在读心跳，不用于累计时长。
 ---@param client WechatClient
 ---@param book_id string
----@param force boolean
+---@param force boolean|nil
 ---@param cb fun(session: WechatReportSession|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Context.sessionAsync(client, book_id, force, cb)

@@ -49,6 +49,12 @@ do
     Reviews.hotspotsAsync({}, "900", function(list, e) Assert.is_nil(list) err = e end)
     Assert.eq(err, "comment_stats 空响应")
     reply_err = nil
+
+    for _idx, data in ipairs({ {}, { data = { ["1"] = {} } } }) do
+        reply = { data = data }
+        Reviews.hotspotsAsync({}, "900", function(list, e) Assert.is_nil(list); err = e end)
+        Assert.matches(err, "统计", "坏响应不能覆盖缓存成空热点")
+    end
 end
 
 -- 评论页：POST body 带段序与游标；毫秒时间归一成秒；has_more 且游标前进才算还有
@@ -96,6 +102,23 @@ do
     local err
     Reviews.pageAsync({}, "111", "900", 12, 0, function(p, e) Assert.is_nil(p) err = e end)
     Assert.matches(err, "data_list")
+
+    reply = { data = { data_list = {}, common_list_info = { total = 3 } } }
+    Reviews.pageAsync({}, "111", "900", 12, 0, function(p, e) Assert.is_nil(p); err = e end)
+    Assert.matches(err, "为空", "风控空成功不删除已有热点")
+    reply.data.common_list_info.total = 0
+    Reviews.pageAsync({}, "111", "900", 12, 0, function(p) page = p end)
+    Assert.len(page.items, 0, "真正空列表正常返回")
+    Assert.is_false(page.more)
+
+    reply = { data = { data_list = { { comment = { common = {
+        content = { text = "甲[笑]乙[哭][笑][因果]😀" },
+    } } } }, common_list_info = { total = 1 } } }
+    Reviews.pageAsync({}, "111", "900", 12, 0, function(p) page = p end)
+    Assert.eq(page.items[1].content, "甲[笑]乙[哭][笑][因果]😀", "原文供引用、复制与缓存，不做破坏性替换")
+    Assert.matches(page.items[1].inline_images["[笑]"].url, "/1f604%.png$")
+    Assert.matches(page.items[1].inline_images["[哭]"].url, "/1f622%.png$")
+    Assert.is_nil(page.items[1].inline_images["[因果]"], "书中术语不是表情")
 end
 
 -- 回复：comment_source 必须是 5；楼中楼记被回复者；空列表且 total>0 不当成功
@@ -105,7 +128,7 @@ do
             reply_id = "rp1",
             reply_to_user_info = { base_info = { user_name = "楼主" } },
             Common = { user_info = { base_info = { user_name = "路人" } },
-                content = { text = "确实" }, create_timestamp = 1700000000 },
+                content = { text = "确实[吃瓜]" }, create_timestamp = 1700000000 },
             stat = { digg_count = 2, reply_count = 9 },
         } },
         comment_list_info = { cursor = "20", has_more = true, total = 6 },
@@ -118,7 +141,8 @@ do
     Assert.matches(call.body, '"comment_source":5')
     Assert.matches(call.body, '"cursor":""')
     Assert.eq(page.items[1].author, "路人")
-    Assert.eq(page.items[1].content, "确实")
+    Assert.eq(page.items[1].content, "确实[吃瓜]")
+    Assert.matches(page.items[1].inline_images["[吃瓜]"].url, "/1f349%.png$", "回复与主评论共用表情映射")
     Assert.eq(page.items[1].reply_to, "楼主")
     Assert.eq(page.items[1].replies, 0, "回复页不再往下开")
     Assert.eq(page.items[1].likes, 2)
@@ -138,6 +162,47 @@ do
     reply = { data = {} }
     Reviews.repliesAsync({}, "c1", 0, function(p, e) Assert.is_nil(p) err = e end)
     Assert.matches(err, "reply_list")
+end
+
+do -- 同步设备桩不能把正在请求的句柄覆盖掉；关闭后忽略迟到回包。
+    local Device = require("source.fanqie.reading.device")
+    local Reading = require("source.fanqie.reading")
+    local ensure, signed = Device.ensureAsync, Reading.signedAsync
+    local pending_device, pending_response
+    local registration_cancelled, request_cancelled, received = false, false, false
+    local signed_calls = 0
+    Reading.signedAsync = function(_device, _name, _path, _query, _body, cb)
+        signed_calls = signed_calls + 1
+        pending_response = cb
+        return { cancel = function() request_cancelled = true end }
+    end
+    local job = Reviews.hotspotsAsync({}, "900", function() received = true end)
+    job.cancel()
+    Assert.is_true(request_cancelled, "同步注册回调后取消实际段评请求")
+    pending_response({ data = { data = {} } })
+    Assert.is_false(received, "窗口关闭后不接受迟到响应")
+
+    Device.ensureAsync = function(_settings, cb)
+        pending_device = cb
+        return { cancel = function() registration_cancelled = true end }
+    end
+    request_cancelled = false
+    job = Reviews.hotspotsAsync({}, "900", function() received = true end)
+    job.cancel()
+    Assert.is_true(registration_cancelled)
+    pending_device({})
+    Assert.is_false(request_cancelled)
+    Assert.eq(signed_calls, 1, "取消注册后迟到回调不得启动段评请求")
+    Assert.is_false(received)
+
+    job = Reviews.hotspotsAsync({}, "900", function() received = true end)
+    pending_device({})
+    Assert.eq(signed_calls, 2, "异步注册正常进入段评请求")
+    job.cancel()
+    Assert.is_true(request_cancelled, "异步注册完成后取消当前请求")
+    pending_response({ data = { data = {} } })
+    Assert.is_false(received)
+    Device.ensureAsync, Reading.signedAsync = ensure, signed
 end
 
 -- 定位：按段序找 blk p_idx 对应段落，xpointer 覆盖整段；整段原文作引用

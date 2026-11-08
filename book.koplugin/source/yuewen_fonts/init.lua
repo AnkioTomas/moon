@@ -3,7 +3,7 @@
 
 Fock 解出的 HTML 里，常用字码位被换成别的字，靠随章下发的 fixedFont 画回真字；
 扩展 A 区的生僻码位再靠 randomFont + CSS 排序/伪元素还原。这里把
-`source.yuewen_fonts.glyph` 的字形识别和 `source.yuewen_fonts.scramble` 的 HTML 解析拼起来。
+`utils.glyph` 的字形识别和 `source.yuewen_fonts.scramble` 的 HTML 解析拼起来。
 
 字体是随章下发的，写临时文件给 FreeType 读；参考字签名会落盘缓存。
 
@@ -88,7 +88,7 @@ local function recognize(random_font, fixed_font, rare, han, opts)
             break
         end
     end
-    local ok, maps = pcall(require("source.yuewen_fonts.glyph").recognize, ref, cache, tasks)
+    local ok, maps = pcall(require("utils.glyph").recognize, ref, cache, tasks)
     cleanup()
     if not ok then error(maps, 0) end
     local rare_map, han_map = {}, {}

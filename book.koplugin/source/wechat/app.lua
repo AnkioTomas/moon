@@ -126,7 +126,10 @@ local function signPayload(vid, body)
     for _idx, hour in ipairs(body.hours) do
         parts[#parts + 1] = hour.startOfHour .. "_" .. hour.timeZone .. "_" .. hour.readingTime .. "_" .. hour.ttsTime
     end
-    return table.concat(parts, "_")
+    local payload = table.concat(parts, "_")
+    -- App 在 ttsTime 后面固定再拼一个 _。有小时桶时它就是分隔符；没有小时桶时 payload 以 _ 结尾。
+    if #body.hours == 0 then payload = payload .. "_" end
+    return payload
 end
 
 ---@class WechatAppReadOpts
@@ -140,9 +143,12 @@ end
 ---@field chapter_offset integer 章节原文字符偏移（EPUB 包含 HTML 标签）
 ---@field chapter_progress integer 章内百分比 0..100
 ---@field hours WechatAppHour[]
----@field current_progress integer|nil 全书进度百分比 0..100（上报进度时带上）
+---@field progress integer|nil 书架进度。未完结连载封顶 99，和当前位置不是同一个数
+---@field current_progress integer|nil 当前位置的百分比 0..100
 ---@field summary string|nil 当前位置摘要
 ---@field book_version integer|nil
+---@field read_update integer|nil 进度落在本地的时间（秒）。只进批量体
+---@field resend integer|nil 离线批量才带：0 实时跨小时，1 补报积压
 
 --- 组装已签名的 ``/book/read`` 请求体。
 ---@param opts WechatAppReadOpts
@@ -150,6 +156,9 @@ end
 function App.readBody(opts)
     local total = 0
     for _idx, hour in ipairs(opts.hours) do total = total + hour.readingTime end
+    local current = opts.current_progress
+    local progress = opts.progress
+    if progress == nil then progress = current end
     local body = {
         appId = opts.device_id,
         autoTime = 0,
@@ -159,7 +168,8 @@ function App.readBody(opts)
         chapterOffset = opts.chapter_offset,
         chapterProgress = opts.chapter_progress,
         chapterUid = opts.chapter_uid,
-        currentProgress = opts.current_progress,
+        currentProgress = current,
+        progress = progress,
         deviceId = opts.device_id,
         hours = opts.hours,
         installId = opts.install_id,
@@ -180,10 +190,39 @@ function App.readBody(opts)
         voiceType = -1,
         wordCount = 0,
     }
+    if opts.resend ~= nil then
+        -- 单本 /book/read 不带这两个字段。离线批量才有：实时跨小时 resend=0，补报积压是 1。
+        body.isResendReadingInfo = opts.resend
+        body.readUpdateTime = opts.read_update or body.timestamp
+    end
     body.signature = App.sign({
         opts.guest_token, tostring(body.random), tostring(body.timestamp), signPayload(opts.vid, body),
     })
     return body
+end
+
+--- 离线批量的外层签名：sha256(timestamp + ``/config`` token + random)，不是单本的 guest 签名。
+---@param token string
+---@param timestamp integer
+---@param random integer
+---@return string
+function App.batchSignature(token, timestamp, random)
+    return sha256(tostring(timestamp) .. token .. tostring(random)) --[[@as string]]
+end
+
+--- ``POST /book/batchUploadProgress``。books 里每本仍是已签名的 /book/read 体。
+---@param books table[]
+---@param token string
+---@return table
+function App.batchBody(books, token)
+    local timestamp, random = os.time(), math.random(0, 999)
+    return {
+        books = books,
+        timestamp = timestamp,
+        random = random,
+        recordCreateTimeZone = App.timeZone(),
+        signature = App.batchSignature(token, timestamp, random),
+    }
 end
 
 return App

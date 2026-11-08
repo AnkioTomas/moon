@@ -48,6 +48,8 @@ function Mapper.book(row)
     if type(description) == "string" then
         description = Text.stripHtml(description)
     end
+    local year = tonumber(row.year)
+    local language = type(row.language) == "string" and row.language:lower():match("^%a+") or nil
     return {
         source_id = "zlib", stable_id = stable_id,
         title = (type(row.title) == "string" and row.title ~= "") and row.title or _("未知书名"),
@@ -60,6 +62,12 @@ function Mapper.book(row)
         cover_url = cover,
         filesize = tonumber(row.filesize),
         format = row.extension or row.format,
+        meta = {
+            publisher = type(row.publisher) == "string" and row.publisher or nil,
+            published = year and year > 0 and tostring(year) or nil,
+            language = language,
+            isbn = type(row.isbn) == "string" and row.isbn or nil,
+        },
     }
 end
 

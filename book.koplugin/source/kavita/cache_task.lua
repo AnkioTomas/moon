@@ -15,7 +15,7 @@ kamare 仍是唯一的执行者与写入者：这里不下载、不取消队列�
 @module source.kavita.cache_task
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 local T = require("ffi/util").template
 local Cache = require("source.kavita.cache")
 

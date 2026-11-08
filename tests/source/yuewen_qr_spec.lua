@@ -36,6 +36,10 @@ package.preload["http.request"] = function()
             return { cancel = function() end }
         end,
         header = function(res, name) return res and res.headers and res.headers[name] end,
+        headerAll = function(res, name)
+            local value = res and res.headers and res.headers[name]
+            return type(value) == "table" and value or (value and { value } or {})
+        end,
     }
 end
 
@@ -122,6 +126,16 @@ do -- 等待是字符串 "0"，成功后 JSON 里的 ywGuid/ywKey 排成 Cookie
     Assert.len(script, 0)
 end
 
+do -- 数字 GUID 要完整十进制；LuaJIT tostring 的科学计数法会毁掉 Fock 身份
+    reset()
+    respond(QR_PREFIX, qrcode("long-guid"))
+    respond(POLL_PREFIX, poll('{"code":0,"scanStatus":5,"data":{"ywGuid":1234567890123456,"ywKey":"key"}}'))
+    local got
+    QRLogin:new(SPEC, function(cookie) got = cookie end):start()
+    Stubs.flush()
+    Assert.eq(got, "ywguid=1234567890123456; ywkey=key")
+end
+
 do -- 已扫码只提示一次，确认后仍把登录态交出去
     reset()
     respond(QR_PREFIX, qrcode("sk1"))
@@ -190,6 +204,55 @@ do -- 非 https 跳转不跟，不交登录态
     Assert.is_nil(got)
     Assert.eq(find("confirm").text, "登录失败：未获取到登录态")
     Assert.eq(#requested, 2)
+end
+
+do -- 已拿到临时凭据仍须走 302url，不能把跨站身份当本站会话保存
+    reset()
+    respond(QR_PREFIX, qrcode("exchange"))
+    respond(POLL_PREFIX, poll('{"code":0,"scanStatus":5,"data":{"ywGuid":"temporary","ywKey":"old",'
+        .. '"302url":"https://ptlogin.yuewen.com/exchange"}}'))
+    respond("https://ptlogin.yuewen.com/exchange", {
+        code = 302, headers = { Location = "https://m.qidian.com/finish",
+            ["Set-Cookie"] = { "ywguid=intermediate; Path=/", "ywkey=intermediate; Path=/" } },
+    })
+    respond("https://m.qidian.com/finish", {
+        code = 200, headers = { ["Set-Cookie"] = { "ywguid=321; Path=/", "ywkey=web; Path=/" } },
+    })
+    local spec = { app_id = "13", area_id = "31", return_url = "https://m.qidian.com/", ticket = "1" }
+    local got
+    QRLogin:new(spec, function(cookie) got = cookie end):start()
+    Stubs.flush()
+    Assert.eq(got, "ywguid=321; ywkey=web")
+    Assert.len(requested, 4)
+    Assert.is_nil(requested[3].headers.Cookie, "第三方扫码域不带书源 Cookie")
+    Assert.matches(requested[1].url, "ticket=1")
+end
+
+do -- 官网 ticket 路径必须兑换，本站回包替换扫码 JSON 中的身份
+    reset()
+    respond(QR_PREFIX, qrcode("ticket"))
+    respond(POLL_PREFIX, poll('{"code":0,"scanStatus":5,"data":{"ticket":"one-use","ywGuid":"temporary","ywKey":"old"}}'))
+    respond("https://m.qidian.com/?ticket=", {
+        code = 200, headers = { ["Set-Cookie"] = { "ywguid=456; Path=/", "ywkey=web; Path=/" } },
+    })
+    local spec = { app_id = "13", area_id = "31", return_url = "https://m.qidian.com/", ticket = "1" }
+    local got
+    QRLogin:new(spec, function(cookie) got = cookie end):start()
+    Stubs.flush()
+    Assert.eq(got, "ywguid=456; ywkey=web")
+    Assert.len(requested, 3)
+end
+
+do -- 即使临时凭据完整，也不跟陌生 HTTPS 地址
+    reset()
+    respond(QR_PREFIX, qrcode("foreign"))
+    respond(POLL_PREFIX, poll('{"code":0,"scanStatus":5,"data":{"ywGuid":"g","ywKey":"k",'
+        .. '"302url":"https://qidian.com.evil.example/steal"}}'))
+    local got
+    QRLogin:new(SPEC, function(cookie) got = cookie end):start()
+    Stubs.flush()
+    Assert.is_nil(got)
+    Assert.len(requested, 2)
 end
 
 do -- 手机取消：关掉旧码不提示已取消，再要一张新码

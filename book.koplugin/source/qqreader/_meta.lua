@@ -4,12 +4,12 @@
 @module source.qqreader._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.qqreader")
 
 return {
     id = "qqreader",
     name = _("QQ阅读"),
     type = "chapter",
     description = _("QQ阅读书架与在线阅读"),
-    abilities = { _("搜索与发现"), _("书架同步"), _("进度同步") },
+    abilities = { _("扫码登录"), _("搜索与发现"), _("书架同步"), _("VIP 章节"), _("书评"), _("进度同步") },
 }

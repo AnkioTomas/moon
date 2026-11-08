@@ -150,7 +150,7 @@ do
     cfg.cookie = "ywguid=old"
     requests, replies = {}, { { body = '{"code":-4,"msg":"登陆鉴权失败"}' } }
     local ok, err
-    Client.loginCheckAsync("ywguid=new", function(v, e) ok, err = v, e end)
+    Client.loginCheckAsync("ywguid=123", function(v, e) ok, err = v, e end)
     Assert.is_nil(ok)
     Assert.matches(err, "扫一扫")
     Assert.is_nil(expired)
@@ -161,7 +161,7 @@ do
     Assert.eq(expired, err)
 
     requests, replies = {}, { { body = '{"code":0,"data":{"nickname":"甲"}}' } }
-    Client.loginCheckAsync("ywguid=new", function(v, e) ok, err = v, e end)
+    Client.loginCheckAsync("ywguid=123", function(v, e) ok, err = v, e end)
     Assert.is_true(ok)
 end
 

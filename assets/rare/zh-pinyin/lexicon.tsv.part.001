@@ -1,7 +1,7 @@
 #name=汉字拼音（通用规范汉字表，含繁体）
 #lang=zh
-#version=2026.10.24
-#license=MIT (mozillazg/pinyin-data, phrase-pinyin-data); 字序: 通用规范汉字表 (ben-hua/general_standard_chinese, Apache-2.0); 繁简对照: OpenCC (Apache-2.0)
+#version=2026.11.08
+#license=MIT (mozillazg/pinyin-data, phrase-pinyin-data); 字序: 通用规范汉字表 (ben-hua/general_standard_chinese, Apache-2.0); 繁简对照: OpenCC (Apache-2.0); 词频: jieba (MIT)
 #levels=6500,3500,0
 㑇	zhòu	6602
 㑊	yì	6700
@@ -33200,3 +33200,587 @@
 鿼	jiā	9000
 鿾	làng	9000
 鿿	xìng	9000
+一个	yí gè	45
+一代	yí dài	271
+一会儿	yī huì er	486
+一半	yí bàn	307
+一口气	yì kǒu qì	122
+一只	yī zhī	246
+一向	yí xiàng	480
+一场	yī cháng	367
+一天	yì tiān	78
+一定	yí dìng	1276
+一度	yí dù	1622
+一方面	yì fāng miàn	1455
+一旦	yí dàn	235
+一流	yì liú	2080
+一点	yì diǎn	1469
+一点儿	yī diǎn er	1469
+一直	yì zhí	1011
+一致	yí zhì	1879
+一般	yì bān	1980
+一贯	yí guàn	1351
+一起	yì qǐ	1789
+一部分	yī bù fen	2044
+一面	yí miàn	1455
+三藏	sān zàng	3392
+下来	xià lai	707
+下载	xià zǎi	1787
+不了	bù liǎo	91
+不会	bú huì	486
+不住	bú zhù	783
+不到	bú dào	1063
+不是	bú shì	1479
+不由得	bù yóu de	2341
+不禁	bù jīn	2863
+不要	bú yào	1441
+不见	bú jiàn	118
+两边	liǎng bian	697
+丫头	yā tou	310
+中毒	zhòng dú	1362
+为主	wéi zhǔ	300
+为止	wéi zhǐ	165
+为首	wéi shǒu	1651
+主意	zhǔ yi	2996
+乐器	yuè qì	3348
+乡长	xiāng cháng	127
+书记	shū ji	323
+了解	liǎo jiě	2981
+事儿	shì er	1038
+事情	shì qing	2438
+人为	rén wéi	165
+仔细	zǐ xì	1340
+以为	yǐ wéi	182
+会计	kuài jì	486
+似乎	sì hū	481
+位置	wèi zhi	2931
+佛教	fó jiào	2179
+作为	zuò wéi	777
+使得	shǐ de	2341
+供奉	gòng fèng	1138
+供应	gōng yìng	1138
+供给	gōng jǐ	1758
+便宜	pián yi	1556
+值得	zhí de	2341
+充分	chōng fèn	525
+先生	xiān sheng	446
+免得	miǎn de	2341
+全长	quán cháng	485
+公子	gōng zǐ	148
+兴趣	xìng qù	3194
+内蒙古	nèi měng gǔ	2859
+冠军	guàn jūn	1705
+几乎	jī hū	280
+分为	fēn wéi	165
+分子	fèn zǐ	146
+列为	liè wéi	399
+刘少奇	liú shào qí	1050
+刚刚	gāng gang	441
+力气	lì qi	122
+功夫	gōng fu	202
+势力	shì li	977
+勉强	miǎn qiǎng	2802
+半个	bàn ge	307
+华山	huà shān	472
+协调	xié tiáo	2123
+南京长江大桥	nán jīng cháng jiāng dà qiáo	1841
+厉害	lì hai	2097
+原子	yuán zǐ	1868
+参与	cān yù	1334
+反应	fǎn yìng	836
+叔叔	shū shu	1065
+变为	biàn wéi	1204
+变得	biàn de	2341
+变更	biàn gēng	1204
+另一方面	lìng yì fāng miàn	1455
+可不是	kě bú shì	1479
+名为	míng wéi	505
+名字	míng zi	548
+味道	wèi dao	2745
+呼吁	hū yù	1099
+响应	xiǎng yìng	1509
+哥哥	gē ge	1852
+哪个	nǎ ge	1515
+商量	shāng liáng	2616
+喜欢	xǐ huan	2523
+喝道	hè dào	2745
+嘴巴	zuǐ ba	3342
+回去	huí qu	438
+回来	huí lai	707
+地处	dì chǔ	366
+坐下	zuò xia	797
+基本上	jī běn shang	2193
+处于	chǔ yú	294
+处理	chǔ lǐ	2157
+处罚	chǔ fá	1519
+处置	chǔ zhì	2931
+多个	duō ge	507
+夜里	yè li	1209
+大为	dà wéi	165
+大伙儿	dà huǒ er	475
+大将	dà jiàng	1617
+大部分	dà bù fèn	2044
+大都	dà dū	1801
+天子	tiān zǐ	78
+太太	tài tai	93
+太子	tài zǐ	93
+太监	tài jiàn	1883
+太阳	tài yang	572
+头发	tóu fà	339
+夺得	duó de	2341
+女子	nǚ zǐ	67
+奴才	nú cai	333
+奶奶	nǎi nai	332
+妈妈	mā ma	583
+妹妹	mèi mei	1324
+妻子	qī zǐ	1056
+姐姐	jiě jie	1326
+姑姑	gū gu	1325
+姑娘	gū niang	2144
+娃娃	wá wa	1735
+娘子	niáng zǐ	2144
+婆婆	pó po	2435
+子口	zǐ kǒu	64
+子女	zǐ nǚ	67
+子孙	zǐ sūn	570
+子弹	zǐ dàn	2473
+孔子	kǒng zǐ	179
+学生	xué sheng	1273
+孩儿	hái er	1730
+客气	kè qi	1703
+家伙	jiā huo	2099
+对付	duì fu	341
+对应	duì yìng	836
+寻思	xín sī	1500
+将士	jiàng shì	1617
+将领	jiàng lǐng	2354
+小姐	xiǎo jie	1326
+小子	xiǎo zǐ	64
+少女	shào nǚ	110
+少将	shào jiàng	1617
+少年	shào nián	444
+少林	shào lín	1018
+少林寺	shào lín sì	1018
+屁股	pì gu	1186
+差不多	chà bu duō	1640
+差别	chā bié	1640
+差异	chā yì	1640
+差距	chā jù	2273
+师傅	shī fu	2691
+干净	gān jìng	1221
+干扰	gān rǎo	618
+干旱	gān hàn	714
+干涉	gān shè	2070
+干燥	gān zào	3430
+干脆	gān cuì	1994
+应付	yìng fù	836
+应用	yìng yòng	836
+度假	dù jià	2337
+康有为	kāng yǒu wéi	2385
+延长	yán cháng	464
+弟子	dì zǐ	854
+弟弟	dì di	854
+弹性	tán xìng	2473
+强迫	qiǎng pò	2802
+当作	dàng zuò	777
+当天	dàng tiān	418
+当真	dàng zhēn	1832
+心里	xīn li	721
+忍不住	rěn bu zhù	925
+念头	niàn tou	1177
+总书记	zǒng shū ji	1654
+情形	qíng xing	2438
+想不到	xiǎng bú dào	2867
+意思	yì si	2996
+懂得	dǒng de	3300
+戏曲	xì qǔ	584
+成为	chéng wéi	401
+成分	chéng fèn	401
+成都	chéng dū	1801
+所得	suǒ de	2341
+打倒	dǎ dǎo	1960
+投降	tóu xiáng	1321
+招呼	zhāo hu	1099
+挑战	tiǎo zhàn	1468
+挣扎	zhēng zhá	1391
+擅长	shàn cháng	3318
+改为	gǎi wéi	908
+效应	xiào yìng	2034
+教会	jiāo huì	2179
+教学	jiāo xué	2179
+教训	jiào xun	2179
+时候	shí hou	1964
+时辰	shí chen	717
+明白	míng bai	1087
+是不是	shì bú shì	1479
+显得	xiǎn de	2341
+晓得	xiǎo de	2341
+晚上	wǎn shang	2270
+更为	gèng wéi	693
+更名	gēng míng	693
+更新	gēng xīn	2994
+最为	zuì wéi	2614
+月亮	yuè liang	1621
+有时候	yǒu shí hou	1964
+朋友	péng you	1185
+朝鲜	cháo xiǎn	3135
+极为	jí wéi	687
+柏林	bó lín	1432
+检察长	jiǎn chá cháng	3174
+棉花	mián hua	2574
+棺材	guān cai	2577
+模样	mú yàng	3078
+歌曲	gē qǔ	3084
+泊位	bó wèi	1249
+测量	cè liáng	2616
+济南	jǐ nán	1678
+消息	xiāo xi	2071
+清楚	qīng chu	2864
+漂亮	piào liàng	3163
+漫长	màn cháng	3164
+灾难	zāi nàn	2147
+热闹	rè nao	1809
+照片	zhào piān	2911
+照顾	zhào gu	2911
+燕京	yān jīng	3319
+父子	fù zǐ	141
+爷爷	yé ye	492
+爸爸	bà ba	1171
+爹爹	diē die	1985
+特务	tè wu	1938
+猛地	měng de	2370
+率领	shuài lǐng	2395
+甚么	shén me	1400
+电子	diàn zǐ	242
+男子	nán zǐ	733
+的确	dí què	2591
+监利	jiàn lì	1883
+目的	mù dì	1155
+目的地	mù dì dì	1155
+相似	xiāng sì	1430
+相应	xiāng yìng	1430
+看上去	kàn shang qu	1539
+真是	zhēn shi	1832
+眼睛	yǎn jing	2895
+着实	zhuó shí	2398
+着急	zháo jí	2398
+着手	zhuó shǒu	2398
+着重	zhuó zhòng	2398
+睡着	shuì zháo	2900
+睡觉	shuì jiào	2900
+知识分子	zhī shí fèn zǐ	1122
+石头	shí tou	310
+离子	lí zǐ	2035
+种植	zhòng zhí	2566
+积累	jī lěi	2282
+称为	chēng wéi	1948
+称之为	chēng zhī wéi	1948
+笑话	xiào hua	1952
+第一次世界大战	dì yí cì shì jiè dà zhàn	2322
+答应	dā yìng	2687
+类似	lèi sì	1646
+粒子	lì zǐ	2404
+累计	lěi jì	2282
+组成部分	zǔ chéng bù fèn	2044
+给予	jǐ yǔ	1758
+绝大部分	jué dà bù fen	2044
+老太太	lǎo tài tai	360
+老爷	lǎo ye	492
+耳朵	ěr duo	497
+聪明	cōng ming	3206
+肚子	dǔ zi	805
+胡同	hú tòng	1419
+脑袋	nǎo dai	2325
+脾气	pí qi	2713
+船只	chuán zhī	2345
+花岗岩	huā gāng yán	1106
+若干	ruò gān	1002
+莲子	lián zǐ	1823
+落下	là xià	2557
+蒙古	měng gǔ	2859
+蒙古族	měng gǔ zú	2859
+藏族	zàng zú	3392
+行业	háng yè	483
+行为	xíng wéi	483
+行情	háng qíng	2438
+衙门	yá men	2964
+西藏	xī zàng	3392
+要求	yāo qiú	1441
+视为	shì wéi	1294
+觉得	jué de	2341
+角色	jué sè	814
+誉为	yù wéi	3024
+认为	rèn wéi	171
+认得	rèn de	2341
+记住	jì zhu	783
+记得	jì de	2341
+记载	jì zǎi	1787
+讲究	jiǎng jiu	881
+评为	píng wéi	887
+诸葛亮	zhū gě liàng	2550
+谁知	shéi zhī	2122
+调控	tiáo kòng	2187
+调整	tiáo zhěng	3333
+调节	tiáo jié	2123
+谢谢	xiè xie	2795
+起来	qǐ lai	1789
+跪下	guì xia	2917
+身分	shēn fèn	786
+较为	jiào wéi	1876
+过分	guò fèn	379
+运气	yùn qi	611
+这个	zhè ge	837
+这会儿	zhè huì er	837
+进一步	jìn yí bù	710
+适应	shì yìng	1546
+适当	shì dàng	1546
+逮捕	dài bǔ	2469
+道理	dào li	2745
+那个	nà ge	564
+那些	nèi xiē	1069
+部分	bù fèn	2044
+重复	chóng fù	1553
+重庆	chóng qìng	1552
+重建	chóng jiàn	1552
+重新	chóng xīn	2994
+重重	chóng chóng	1552
+银行	yín háng	2309
+长剑	cháng jiàn	1587
+长城	cháng chéng	1373
+长安	cháng ān	549
+长度	cháng dù	1622
+长方形	cháng fāng xíng	604
+长期	cháng qī	2542
+长江	cháng jiāng	538
+长江流域	cháng jiāng liú yù	2164
+长沙	cháng shā	860
+间接	jiàn jiē	2185
+青少年	qīng shào nián	947
+音乐	yīn yuè	1632
+首相	shǒu xiàng	1651
+首都	shǒu dū	1801
+高兴	gāo xìng	2021
+鱼肚	yú dǔ	1194
+麻烦	má fan	2379
+𡠹	zhì	9000
+𡾱	mí	9000
+𣯶	sān	9000
+𤫩	líng	9000
+𥢢	tuí	9000
+𦪙	tà	9000
+𧜵	xiè	9000
+𧵳	shé	9000
+𨊰	qì	9000
+𨊸	yuè	9000
+𩞯	liáng	9000
+𩶘	lì	9000
+一個	yí gè	45
+一會兒	yī huì er	486
+一口氣	yì kǒu qì	122
+一隻	yī zhī	246
+一場	yī cháng	367
+一點	yì diǎn	1469
+一點兒	yī diǎn er	1469
+一貫	yí guàn	1351
+下來	xià lai	707
+下載	xià zǎi	1787
+不會	bú huì	486
+不見	bú jiàn	118
+兩邊	liǎng bian	697
+丫頭	yā tou	310
+爲主	wéi zhǔ	300
+爲止	wéi zhǐ	165
+爲首	wéi shǒu	1651
+樂器	yuè qì	3348
+鄉長	xiāng cháng	127
+書記	shū ji	323
+瞭解	liǎo jiě	2981
+事兒	shì er	1038
+人爲	rén wéi	165
+仔細	zǐ xì	1340
+以爲	yǐ wéi	182
+會計	kuài jì	486
+作爲	zuò wéi	777
+供應	gōng yìng	1138
+供給	gōng jǐ	1758
+全長	quán cháng	485
+興趣	xìng qù	3194
+內蒙古	nèi měng gǔ	2859
+冠軍	guàn jūn	1705
+幾乎	jī hū	280
+分爲	fēn wéi	165
+列爲	liè wéi	399
+劉少奇	liú shào qí	1050
+剛剛	gāng gang	441
+力氣	lì qi	122
+勢力	shì li	977
+勉強	miǎn qiǎng	2802
+半個	bàn ge	307
+華山	huà shān	472
+協調	xié tiáo	2123
+南京長江大橋	nán jīng cháng jiāng dà qiáo	1841
+厲害	lì hai	2097
+參與	cān yù	1334
+反應	fǎn yìng	836
+變爲	biàn wéi	1204
+變得	biàn de	2341
+變更	biàn gēng	1204
+名爲	míng wéi	505
+呼籲	hū yù	1099
+響應	xiǎng yìng	1509
+哪個	nǎ ge	1515
+喜歡	xǐ huan	2523
+回來	huí lai	707
+地處	dì chǔ	366
+處於	chǔ yú	294
+處理	chǔ lǐ	2157
+處罰	chǔ fá	1519
+處置	chǔ zhì	2931
+多個	duō ge	507
+夜裏	yè li	1209
+大爲	dà wéi	165
+大夥兒	dà huǒ er	475
+大將	dà jiàng	1617
+太監	tài jiàn	1883
+太陽	tài yang	572
+頭髮	tóu fà	339
+奪得	duó de	2341
+媽媽	mā ma	583
+子孫	zǐ sūn	570
+子彈	zǐ dàn	2473
+學生	xué sheng	1273
+孩兒	hái er	1730
+客氣	kè qi	1703
+傢伙	jiā huo	2099
+對付	duì fu	341
+對應	duì yìng	836
+尋思	xín sī	1500
+將士	jiàng shì	1617
+將領	jiàng lǐng	2354
+少將	shào jiàng	1617
+差別	chā bié	1640
+差異	chā yì	1640
+師傅	shī fu	2691
+乾淨	gān jìng	1221
+干擾	gān rǎo	618
+乾旱	gān hàn	714
+乾燥	gān zào	3430
+乾脆	gān cuì	1994
+應付	yìng fù	836
+應用	yìng yòng	836
+康有爲	kāng yǒu wéi	2385
+延長	yán cháng	464
+彈性	tán xìng	2473
+強迫	qiǎng pò	2802
+當作	dàng zuò	777
+當天	dàng tiān	418
+當真	dàng zhēn	1832
+心裏	xīn li	721
+念頭	niàn tou	1177
+總書記	zǒng shū ji	1654
+戲曲	xì qǔ	584
+成爲	chéng wéi	401
+挑戰	tiǎo zhàn	1468
+掙扎	zhēng zhá	1391
+擅長	shàn cháng	3318
+改爲	gǎi wéi	908
+效應	xiào yìng	2034
+教會	jiāo huì	2179
+教學	jiāo xué	2179
+教訓	jiào xun	2179
+時候	shí hou	1964
+時辰	shí chen	717
+顯得	xiǎn de	2341
+曉得	xiǎo de	2341
+更爲	gèng wéi	693
+最爲	zuì wéi	2614
+有時候	yǒu shí hou	1964
+朝鮮	cháo xiǎn	3135
+極爲	jí wéi	687
+檢察長	jiǎn chá cháng	3174
+模樣	mú yàng	3078
+測量	cè liáng	2616
+濟南	jǐ nán	1678
+漫長	màn cháng	3164
+災難	zāi nàn	2147
+熱鬧	rè nao	1809
+照顧	zhào gu	2911
+爺爺	yé ye	492
+特務	tè wu	1938
+率領	shuài lǐng	2395
+甚麼	shén me	1400
+電子	diàn zǐ	242
+的確	dí què	2591
+監利	jiàn lì	1883
+相應	xiāng yìng	1430
+着實	zhuó shí	2398
+睡覺	shuì jiào	2900
+知識分子	zhī shí fèn zǐ	1122
+石頭	shí tou	310
+離子	lí zǐ	2035
+種植	zhòng zhí	2566
+積累	jī lěi	2282
+稱爲	chēng wéi	1948
+稱之爲	chēng zhī wéi	1948
+笑話	xiào hua	1952
+第一次世界大戰	dì yí cì shì jiè dà zhàn	2322
+答應	dā yìng	2687
+類似	lèi sì	1646
+累計	lěi jì	2282
+組成部分	zǔ chéng bù fèn	2044
+給予	jǐ yǔ	1758
+絕大部分	jué dà bù fen	2044
+老爺	lǎo ye	492
+聰明	cōng ming	3206
+衚衕	hú tòng	1419
+腦袋	nǎo dai	2325
+脾氣	pí qi	2713
+船隻	chuán zhī	2345
+花崗岩	huā gāng yán	1106
+蓮子	lián zǐ	1823
+行業	háng yè	483
+行爲	xíng wéi	483
+衙門	yá men	2964
+視爲	shì wéi	1294
+覺得	jué de	2341
+譽爲	yù wéi	3024
+認爲	rèn wéi	171
+認得	rèn de	2341
+記住	jì zhu	783
+記得	jì de	2341
+記載	jì zǎi	1787
+講究	jiǎng jiu	881
+評爲	píng wéi	887
+諸葛亮	zhū gě liàng	2550
+誰知	shéi zhī	2122
+調控	tiáo kòng	2187
+調整	tiáo zhěng	3333
+調節	tiáo jié	2123
+謝謝	xiè xie	2795
+起來	qǐ lai	1789
+較爲	jiào wéi	1876
+過分	guò fèn	379
+運氣	yùn qi	611
+這個	zhè ge	837
+這會兒	zhè huì er	837
+進一步	jìn yí bù	710
+適應	shì yìng	1546
+適當	shì dàng	1546
+那個	nà ge	564
+重複	chóng fù	1553
+重慶	chóng qìng	1552
+銀行	yín háng	2309
+長劍	cháng jiàn	1587
+長城	cháng chéng	1373
+長安	cháng ān	549
+長度	cháng dù	1622
+長方形	cháng fāng xíng	604
+長期	cháng qī	2542
+長江	cháng jiāng	538
+長江流域	cháng jiāng liú yù	2164
+長沙	cháng shā	860
+間接	jiàn jiē	2185
+音樂	yīn yuè	1632
+高興	gāo xìng	2021
+魚肚	yú dǔ	1194
+麻煩	má fan	2379

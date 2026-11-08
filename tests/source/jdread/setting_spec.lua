@@ -37,9 +37,19 @@ end
 
 local begin_cb, wait_cb, complete_cb, browser_payload
 local begin_cancels, wait_cancels, begin_count = 0, 0, 0
+local has_session, cleared = false, false
+local reloads = 0
+package.loaded["source.registry"] = {
+    invalidate = function() end,
+    reload = function() reloads = reloads + 1 end,
+}
+package.preload["utils.device_id"] = function()
+    return { ensure = function() return "jd-browser-test-device" end }
+end
 package.preload["source.jdread.auth"] = function()
     return {
-        hasSession = function() return false end,
+        hasSession = function() return has_session end,
+        clearSession = function() cleared = true; has_session = false end,
         userLabel = function() return nil end,
         beginQrLoginAsync = function(cb)
             begin_count = begin_count + 1
@@ -72,10 +82,16 @@ local login = Setting.rows()[1]().callback
 browser_payload = {}
 Assert.eq(Setting.browser.domain, "e.m.jd.com")
 Assert.eq(Setting.browser.scope, "cookie")
-Assert.eq(Setting.browser.login, Setting.browser.check)
+Assert.matches(Setting.browser.check(), "^https://e%.m%.jd%.com/jdread/api/bookshelf/sort%?")
+Assert.eq(Setting.browser.check_json.path, "result_code")
+Assert.eq(Setting.browser.check_json.ok[1], 0)
 local browser_ok
 Setting.browser.apply(browser_payload, function(ok) browser_ok = ok end)
 Assert.is_true(browser_ok)
+Assert.eq(reloads, 1)
+Setting.browser.apply({}, function(ok) browser_ok = ok end)
+Assert.is_false(browser_ok)
+Assert.eq(reloads, 1, "失败授权不重建源实例")
 
 -- 点击即同步出占位框盖住入口，不等取码网络往返。
 login()
@@ -134,3 +150,24 @@ failed:close()
 retry.callback()
 Assert.eq(begin_count, begins + 1)
 Assert.eq(content(Themed.last("sheet")).text, "正在获取二维码…")
+
+-- 走真实退出入口，确保设置页提供源 id，确认后确实清凭证与该源本地记录。
+local cancelled, forgotten = {}, nil
+package.loaded["workers.tasks"] = {
+    cancelPrefixed = function(prefix) cancelled[#cancelled + 1] = prefix end,
+}
+package.loaded["book.store"] = {
+    forgetSource = function(id) forgotten = id; return true end,
+}
+has_session = true
+local rows = Setting.rows()
+Assert.len(rows, 3)
+Assert.eq(rows[2](300).title, "浏览器登录")
+rows[3](300).callback()
+Assert.is_false(cleared)
+Themed.last("confirm").ok_callback()
+Assert.is_true(cleared)
+Assert.eq(forgotten, "jdread")
+Assert.eq(cancelled[1], "dirty\0jdread")
+Assert.eq(reloads, 2)
+Assert.len(Setting.rows(), 2)

@@ -9,7 +9,7 @@ stable_id 是 cc.db 的 p_uuid；已转换的书用它的缓存 EPUB 作文件�
 --]]
 
 local SourceBase = require("source.base")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kindle")
 local T = require("ffi/util").template
 
 local Kindle = {}

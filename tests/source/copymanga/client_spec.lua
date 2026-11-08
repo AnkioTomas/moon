@@ -66,11 +66,33 @@ end
 local settings = require("utils.settings")
 local function session(password)
     local cfg = settings.getSource("copymanga")
+    cfg.base_url = nil
+    cfg.user_id = "1"
     cfg.token, cfg.username, cfg.password = "stale", "user", password
     settings.saveSource("copymanga", cfg)
 end
 local INVALID = '{"code":401,"message":"Invalid token header. Please login again."}'
 local OK = '{"code":200,"results":{"list":[],"total":0}}'
+
+-- 匿名 API 被拒绝时保留真实原因，不误称用户账号被风控，也不自动重登。
+do
+    session("secret")
+    gets, logins, replies = {}, 0, {
+        { code = 200, body = '{"code":210,"message":"请更新官方 App 并等待限制解除"}' },
+    }
+    local result, err
+    Client:new(settings.getSource("copymanga")):detailAsync("test", function(wire, e) result, err = wire, e end)
+    Assert.is_nil(result)
+    Assert.eq(err, "请更新官方 App 并等待限制解除")
+    Assert.is_nil(gets[1].auth)
+    Assert.eq(logins, 0)
+    result, err = Client.decode('{"code":210}')
+    Assert.is_nil(result)
+    Assert.eq(err, "拷贝漫画 API 拒绝请求（210），请按官网提示处理")
+    result, err = Client.decode('{"code":210,"message":false}')
+    Assert.is_nil(result)
+    Assert.eq(err, "拷贝漫画 API 拒绝请求（210），请按官网提示处理")
+end
 
 -- #42：令牌被挤掉后返回 401，用保存的账号密码重登一次，换新令牌重试。
 do

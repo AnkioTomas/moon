@@ -581,6 +581,7 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
     if ReaderProgress.asked_conflicts[key] then return end
     -- 弹出即记：弹窗未答时再来一次 pull（换章 / 唤醒）不能叠第二个窗。
     ReaderProgress.asked_conflicts[key] = true
+    snapshot.progress_sync_ready = false
     local local_desc = conflictLabel(local_pos, id, snapshot)
     local remote_desc = conflictLabel(remote_pos, id, snapshot)
     require("ui.themes.widgets.confirm"):new{
@@ -589,12 +590,17 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
         cancel_text = _("本地"),
         -- 两个按钮都是选择：主题 Confirm 点空白 / 返回键等同「取消」= 选本地并上推，必须关掉。
         dismissable = false,
-        ok_callback = function() adoptCloud(id, remote_pos) end,
+        ok_callback = function()
+            local current = require("reader.session").current()
+            if current and isSameBook(id) then current.progress_sync_ready = true end
+            adoptCloud(id, remote_pos)
+        end,
         cancel_callback = function()
             local Session = require("reader.session")
             if not Session.current() or not isSameBook(id) then
                 return
             end
+            Session.current().progress_sync_ready = true
             -- 落回弹窗上展示的那份本地进度，不能重新采样实时位置：冷打开的落点
             -- 可能比本地记录更靠前，那会把「保留本地」变成覆盖本地。
             local adopt = {}
@@ -630,6 +636,7 @@ function ReaderProgress.pull(snapshot, opts)
     if not id then return end
     local source = id.source
     if not source or type(source.getProgressAsync) ~= "function" then
+        snapshot.progress_sync_ready = true
         return
     end
     local manual = opts and opts.manual
@@ -638,6 +645,7 @@ function ReaderProgress.pull(snapshot, opts)
         if not require("ui/network/manager"):isConnected() then return toast(_("网络不可用，请先连接 Wi-Fi")) end
         ReaderProgress.asked_conflicts[id.source_id .. "\31" .. id.stable_id] = nil
     end
+    snapshot.progress_sync_ready = false
     -- 数字拷贝：回包前换章会改身份表上的 chapter_idx，不能拿回包时的值当起点。
     local started_idx = tonumber(id.chapter_idx)
     logger.dbg("book.progress reader pull start", id.source_id, id.stable_id,
@@ -650,6 +658,7 @@ function ReaderProgress.pull(snapshot, opts)
         -- 按章阅读时等回包期间可能已切章：拿现在的会话比，不用发起时的快照。
         snapshot = require("reader.session").current()
         id = snapshot.identity
+        snapshot.progress_sync_ready = true
         if type(meta) == "table" and meta.empty then
             logger.dbg("book.progress reader pull empty", id.source_id, id.stable_id)
             return tell(_("云端没有这本书的进度"))

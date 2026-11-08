@@ -21,8 +21,8 @@ local function sourceId()
     local cur = require("reader.session").current()
     local identity = cur and cur.identity
     if not identity or identity.ephemeral then return nil, false end
-    local source = identity.source
-    if identity.chapter_idx and source and source.paragraphHotspotsAsync then
+    local source = identity.source --[[@as ParagraphReviewSource|nil]]
+    if source and (source.chapterReviewHotspotsAsync or (identity.chapter_idx and source.paragraphHotspotsAsync)) then
         return source.id, true
     end
     local wechat = require("source.registry").resolve("wechat")

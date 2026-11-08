@@ -399,7 +399,24 @@ function Overlay:refresh(key)
             self.items, self.key = {}, key
             self.items = arrange(self, hits or {}, require("device").screen.bb)
             logger.dbg("book.perf rare.view", Perf.elapsedMs(started_at), "ms items", #self.items)
-            if #self.items > 0 then require("ui/uimanager"):setDirty(ui.dialog, "ui") end
+            if #self.items == 0 then return end
+            local Geom = require("ui/geometry")
+            local ann, boxes = Overlay.annInk(), {}
+            for _idx, item in ipairs(self.items) do
+                -- 留一像素覆盖字形取整和横向出界的墨迹。
+                local x = item.x - 1
+                local y = math.floor(item.y - (ann.em - ann.bottom_em) * item.size) - 1
+                boxes[#boxes + 1] = {
+                    x = x, y = y, w = math.ceil(item.w) + 2,
+                    h = math.ceil(item.y + ann.bottom_em * item.size) + 1 - y,
+                }
+            end
+            local rect = Geom.boundingBox(boxes)
+            local width, height = PageMarks.screenSize(ui)
+            if PageMarks.intersects(rect, width, height) then
+                rect = rect:intersect(Geom:new{ x = 0, y = 0, w = width, h = height })
+                require("ui/uimanager"):setDirty(ui.dialog, "ui", rect)
+            end
         end,
         on_failed = function(err)
             if self.scheduled ~= key then return end

@@ -15,6 +15,7 @@
 ---@field chapter_fraction number|nil 当前章节阅读比例（0..1）
 ---@field percent number|nil 全书阅读百分比（0..100）
 ---@field position table|nil 最近一次 refresh 算出的进度位置（`reader.session.progress.position`）
+---@field progress_sync_ready boolean|nil 开书云端进度尚未决议时禁止阅读中自动上推
 ---@field reading_chapter_idx integer|nil 当前目录章序号（两种模式 toc 可用时）
 ---@field chapter ReaderChapterSession|nil 当前文档的章节上下文
 ---@field auto_toc_job table|nil 整书自动目录扫描任务

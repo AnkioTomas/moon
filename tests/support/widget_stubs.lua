@@ -361,7 +361,10 @@ function Kit.install(theme)
             end,
         },
         ["gettext"] = function(s) return s end,
-        ["l10n"] = { apply = function() end },
+        ["l10n"] = {
+            apply = function() end,
+            get = function() return require("gettext") end,
+        },
         ["device"] = {
             screen = {
                 DEVICE_ROTATED_UPRIGHT = 0,

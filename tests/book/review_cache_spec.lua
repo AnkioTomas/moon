@@ -141,6 +141,26 @@ end
 
 do
     connected = true
+    local ci = { source_id = "qidian", stable_id = "preview", chapter_idx = 3 }
+    local f = fetcher({ items = { { id = "parent", content = "主评论", replies = 65,
+        reply_preview = {
+            { id = "r1", content = "第一条回复", reply_to = "乙" },
+            { id = "r2", content = "第二条回复" },
+        } } }, total = 1, max_idx = 1, more = false })
+    ReviewCache.pageAsync(ci, "1", 0, f.fetch, function() end)
+    connected = false
+    local got
+    ReviewCache.pageAsync(ci, "1", 0, f.fetch, function(v) got = v end)
+    Stubs.flush()
+    Assert.eq(f.calls, 1, "离线二级预览随主评论读缓存，不发网络请求")
+    Assert.eq(got.items[1].content, "主评论")
+    Assert.eq(got.items[1].replies, 65)
+    Assert.len(got.items[1].reply_preview, 2)
+    Assert.eq(got.items[1].reply_preview[1].reply_to, "乙")
+end
+
+do
+    connected = true
     local ci = { source_id = "wechat", stable_id = "empty-hotspot", chapter_idx = 23 }
     local hot = { { range = "gone", total = 3 }, { range = "keep", total = 2 } }
     ReviewCache.hotspotsAsync(ci, fetcher(hot).fetch, function() end)
@@ -178,6 +198,24 @@ do
     os.time = function() return real() + 301 end
     Assert.is_nil(ReviewCache.page(ident, "empty", 0), "空结果过 5 分钟重拉")
     os.time = real
+end
+
+do
+    connected = true
+    local whole = { source_id = "zhihu", stable_id = "1/2" }
+    local page = fetcher({ items = { { id = "whole" } }, total = 2, max_idx = "sr1:opaque", more = true })
+    ReviewCache.pageAsync(whole, "chapter", 0, page.fetch, function() end)
+    ReviewCache.pageAsync(whole, "chapter", "sr1:opaque", page.fetch, function() end)
+    Assert.eq(ReviewCache.page(whole, "chapter", 0).items[1].id, "whole")
+    Assert.eq(ReviewCache.page(whole, "chapter", "sr1:opaque").max_idx, "sr1:opaque")
+    Assert.not_nil(rows[rowKey("zhihu", "1/2", 0, "page", "chapter\0" .. 0)],
+        "整本身份存为 chapter_idx=0，不向 NOT NULL 列写 nil")
+    connected = false
+    local got
+    ReviewCache.pageAsync(whole, "chapter", "sr1:opaque", page.fetch, function(v) got = v end)
+    Stubs.flush()
+    Assert.eq(got.items[1].id, "whole")
+    Assert.eq(page.calls, 2, "整本评论离线命中，不再联网")
 end
 
 package.preload["source.chapter"] = function()

@@ -8,7 +8,8 @@ local JSON = require("json")
 local Protocol = require("source.jdread.protocol")
 local Request = require("http.request")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.jdread")
+local logger = require("utils.log")
 
 ---@class JdreadClient
 ---@field cookie string|nil
@@ -53,7 +54,7 @@ local function decodeApi(raw, err, authed)
     if not ok or type(wire) ~= "table" then return nil, _("京东读书响应无效") end
     if tonumber(wire.result_code) ~= 0 then
         if isLoginFailure(wire.message) then
-            return nil, authExpired()
+            return nil, authed and authExpired() or _("京东登录校验失败")
         end
         return nil, wire.message or (_("京东读书错误 ") .. tostring(wire.result_code))
     end
@@ -93,14 +94,46 @@ end
 
 ---@param path string
 ---@param extra table|nil
+---@return string
+function Client:apiUrl(path, extra)
+    local query = Text.formEncode(Protocol.signedParams(path, self:signUuid(), extra))
+    return API .. path .. "?" .. query
+end
+
+---@param path string
+---@param extra table|nil
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:apiGetAsync(path, extra, cb)
-    local query = Text.formEncode(Protocol.signedParams(path, self:signUuid(), extra))
-    return Request.get(API .. path .. "?" .. query, {
+    return Request.get(self:apiUrl(path, extra), {
         headers = self:headers(API .. "/"),
     }, function(raw, err)
         cb(decodeApi(raw, err, self:configured()))
+    end)
+end
+
+---@param book_id string
+---@param page integer
+---@param cb fun(wire: table|nil, err: string|nil)
+function Client:bookCommentsAsync(book_id, page, cb)
+    local headers = self:headers(API .. "/")
+    headers.Cookie = nil
+    return Request.get(self:apiUrl("/jdread/api/ebook/" .. Text.urlEncode(book_id) .. "/comment", {
+        page = page, page_size = 20, sort = 0,
+    }), { headers = headers }, function(raw, err)
+        cb(decodeApi(raw, err, false))
+    end)
+end
+
+--- 新登录会话的校验不改变旧账号的过期状态；成功后由登录流程保存凭证。
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:checkSessionAsync(cb)
+    return Request.get(self:apiUrl("/jdread/api/bookshelf/sort"), {
+        headers = self:headers(API .. "/"),
+        cache_ttl = 0,
+    }, function(raw, err)
+        cb(decodeApi(raw, err, false))
     end)
 end
 
@@ -109,8 +142,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:apiPostAsync(path, body, cb)
-    local query = Text.formEncode(Protocol.signedParams(path, self:signUuid()))
-    return Request.post(API .. path .. "?" .. query, JSON.encode(body), {
+    return Request.post(self:apiUrl(path), JSON.encode(body), {
         headers = self:headers(API .. "/reader/"),
         content_type = "application/json",
     }, function(raw, err)
@@ -156,10 +188,16 @@ function Client:shelfSyncAsync(cb)
         if not wire then cb(nil, err); return end
         local data = type(wire.data) == "table" and wire.data or {}
         local seen = {}
-        for _idx, row in ipairs(data.book_ids or {}) do
-            local id = type(row) == "table" and row.ebook_id or row
-            id = id ~= nil and tostring(id) or nil
-            if id and id ~= "" and not seen[id] then
+        for index, row in ipairs(data.book_ids or {}) do
+            local id = row
+            if type(row) == "table" then id = row.ebook_id end
+            id = tostring(id)
+            if not id:match("^%d+$") then
+                logger.warn("jdread shelf invalid ebook_id", "row", index)
+                cb(nil, _("京东读书响应无效"))
+                return
+            end
+            if not seen[id] then
                 seen[id] = true
                 ids[#ids + 1] = id
             end

@@ -1,8 +1,8 @@
 --[[--
 潇湘书院数据源。
 
-搜索、目录、榜单走 PC / 手机站页面，账号、正文、书架、进度走新站 xxsypro.com 的 JSON 接口（client.lua）。
-登录态是新站 Cookie（阅文通行证，只有 QQ / 微信 / 阅文账号，没有扫码）：浏览器扩展授权，或粘贴 Cookie（setting.lua）。
+分类、搜索、账号、正文、书架、进度走新站 JSON；详情、目录、旧榜单走电脑／移动官网 SSR（client.lua）。
+登录态是新站 Cookie（阅文通行证）：App 扫码、浏览器扩展授权，或粘贴 Cookie（setting.lua）。
 书架双向同步（Shelf.syncAsync），进度按章：读书架行的 ccid，写 readingProcess/add。没买的 VIP 章开章给临时提示页，目录标「未购」。
 
 @module koplugin.book.source.xiaoxiang
@@ -14,7 +14,7 @@ local SourceBase = require("source.base")
 local Browse = require("source.browse")
 local Shelf = require("source.shelf")
 local Toc = require("source.toc")
-local _ = require("gettext")
+local _ = require("l10n").get("source.xiaoxiang")
 
 local Xiaoxiang = {}
 
@@ -59,14 +59,19 @@ end
 --- 进度只到章：读书架行里这本书最近读到的章（ccid）。
 function Source:getProgressAsync(identity, cb)
     if not self:configured() then return SourceBase.defer(cb, nil, _("未登录潇湘")) end
+    local cookie = Client.cookie()
     local cancelled, job = false, nil
-    job = Client.shelfAsync(function(rows, err)
+    local pending = true
+    local initial = Client.shelfAsync(function(rows, err)
+        pending = false
         if cancelled then return end
+        if Client.cookie() ~= cookie then cb(nil, _("账号已变化，请重新登录")); return end
         if not rows then cb(nil, err); return end
         local uid = Mapper.progress(rows)[tostring(identity.stable_id)]
         if not uid then cb(nil, nil, { empty = true }); return end
         job = self:loadTocAsync(identity, function(toc, reason)
             if cancelled then return end
+            if Client.cookie() ~= cookie then cb(nil, _("账号已变化，请重新登录")); return end
             if not toc or #toc == 0 then cb(nil, reason or _("潇湘目录为空")); return end
             local idx = Toc.index(self.id, identity.stable_id, uid)
             if not idx then cb(nil, nil, { empty = true }); return end
@@ -78,6 +83,7 @@ function Source:getProgressAsync(identity, cb)
             })
         end)
     end)
+    if pending then job = initial end
     return { cancel = function()
         cancelled = true
         if job and job.cancel then job.cancel() end
@@ -86,15 +92,22 @@ end
 
 function Source:putProgressAsync(identity, pos, cb)
     if not self:configured() then return SourceBase.defer(cb, nil, _("未登录潇湘")) end
+    local cookie = Client.cookie()
     local cancelled, job = false, nil
-    job = self:loadTocAsync(identity, function(toc, err)
+    local pending = true
+    local initial = self:loadTocAsync(identity, function(toc, err)
+        pending = false
         if cancelled then return end
+        if Client.cookie() ~= cookie then cb(nil, _("账号已变化，请重新登录")); return end
         if not toc then cb(nil, err); return end
         local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
         local chapter = idx and toc[idx]
         if not chapter then cb(nil, _("缺少潇湘章节位置")); return end
-        job = Client.progressAsync(identity.stable_id, chapter.uid, function(wire, perr) cb(wire and true, perr) end)
+        job = Client.progressAsync(identity.stable_id, chapter.uid, function(wire, perr)
+            if not cancelled then cb(wire and true, perr) end
+        end)
     end)
+    if pending then job = initial end
     return { cancel = function()
         cancelled = true
         if job and job.cancel then job.cancel() end
@@ -127,6 +140,10 @@ local RANKS = {
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:browseAsync(opts, cb)
+    opts = opts or {}
+    local legacy = opts.node == "rank"
+    for _idx, row in ipairs(RANKS) do if row.id == opts.node then legacy = true end end
+    if not legacy then return require("source.xiaoxiang.browse").run(opts, cb) end
     local rank = RANKS[1]
     for _idx, row in ipairs(RANKS) do
         if row.id == opts.node then rank = row end
@@ -134,14 +151,17 @@ function Source:browseAsync(opts, cb)
     local chips = {}
     for _idx, row in ipairs(RANKS) do chips[#chips + 1] = { id = row.id, title = _(row.title) } end
     local groups = { Browse.group(chips, rank.id) }
+    groups[1].title = _("排行榜")
+    groups[1].chips[#groups[1].chips + 1] = { id = "cate:-1:-1:-1:-1:10:0:-1", title = _("分类库") }
     return Client.rankAsync(rank.id, function(books, err)
         if not books then cb(nil, err); return end
+        if opts.limit then for index = #books, opts.limit + 1, -1 do books[index] = nil end end
         cb({ data = books, groups = groups })
-    end)
+    end, rank.title)
 end
 
 function Source:getDetailAsync(identity, cb)
-    return SourceBase.defer(cb, identity.book or require("book.books_db").get(self.id, identity.stable_id))
+    return Client.detailAsync(identity.stable_id, cb)
 end
 
 --- 强制拉目录并写回；失败由调用方继续用旧缓存。

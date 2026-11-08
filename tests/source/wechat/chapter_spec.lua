@@ -14,30 +14,46 @@ package.preload["json"] = function()
     }
 end
 
-local txt = false
-local gets = 0
-local empty_e0 = 0
+local queries = {}
+local app_err = nil
+
+package.preload["workers.job"] = function()
+    return {
+        run = function(fn, opts)
+            opts.on_done(fn())
+            return { cancel = function() end }
+        end,
+    }
+end
+
+package.preload["http.request"] = function()
+    return {
+        header = function() return "encrypt-key" end,
+        ok = function(code) return type(code) == "number" and code >= 200 and code < 300 end,
+    }
+end
+
+package.preload["source.wechat.eink"] = function()
+    return {
+        credentials = function() return { vid = "42" } end,
+        callAsync = function(_method, _path, opts, cb)
+            queries[#queries + 1] = opts.query
+            if app_err then
+                cb(nil, app_err)
+            else
+                local body = opts.query.bookType == "txt" and (string.rep("\0", 257) .. "ustar") or "PK"
+                cb({ body = body, code = 200 })
+            end
+            return { cancel = function() end }
+        end,
+    }
+end
 
 package.preload["source.wechat.auth"] = function()
     return {
         hasSession = function() return true end,
-        webGetAsync = function()
-            gets = gets + 1
-            return { cancel = function() end }
-        end,
-        webPostAsync = function(url, _, _, cb)
-            if url:match("/e_0$") and empty_e0 > 0 then
-                empty_e0 = empty_e0 - 1
-                cb("{}")
-            elseif url:match("/e_0$") then
-                cb(txt and '{"bookId":"1"}' or "e0")
-            elseif url:match("/e_2$") then
-                cb("e2")
-            else
-                cb(url:match("/e_1$") and "e1" or url:match("/t_0$") and "t0" or url:match("/t_1$") and "t1" or "e3")
-            end
-            return { cancel = function() end }
-        end,
+        webPostAsync = function() error("chapter download must not fall back to the web reader") end,
+        webGetAsync = function() error("chapter download must not fall back to the web reader") end,
     }
 end
 
@@ -51,29 +67,29 @@ local PLAIN = "\239\187\191第一行 <b>\n  第二行"
 local TRIAL = "“第四路，已过浔阳！”\n这是李善德发明的脚程格眼。..."
 local trial = false
 local bom = false
-local signed_with = {}
-local styles = {}
 
 package.preload["source.wechat.protocol"] = function()
     return {
         readerUrl = function() return "https://weread.qq.com/web/reader/id" end,
-        contentParams = function(_, _, psvts, opts)
-            signed_with[#signed_with + 1] = psvts
-            styles[#styles + 1] = opts.style
-            return {}
-        end,
-        decodeShards = function(first)
-            if first == "e2" then return ".content{text-indent:2em}" end
-            if trial then return TRIAL end
-            if bom then return "\239\187\191" .. FULL end
-            return txt and PLAIN or FULL
-        end,
     }
 end
 
-package.preload["source.wechat.context"] = function()
+package.preload["source.wechat.package"] = function()
     return {
-        reader = function(book_id, uid) return { psvts = "ps-" .. book_id .. ":" .. uid } end,
+        password = function() return "pw" end,
+        unzip = function()
+            local q = queries[#queries]
+            if q.chapters == "0" then
+                return { ["Styles/stylesheets.css"] = ".content{text-indent:2em}" }
+            end
+            return { dummy = true }
+        end,
+        chapterHtml = function()
+            if trial then return TRIAL end
+            if bom then return "\239\187\191" .. FULL end
+            return FULL
+        end,
+        chapterText = function() return PLAIN end,
     }
 end
 
@@ -88,7 +104,11 @@ package.preload["source.wechat.assets"] = function()
     }
 end
 
-package.loaded["source.wechat.chapter"] = nil
+for _, name in ipairs({
+    "workers.job", "http.request", "source.wechat.eink", "source.wechat.package", "source.wechat.chapter",
+}) do
+    package.loaded[name] = nil
+end
 local Chapter = require("source.wechat.chapter")
 
 do
@@ -101,39 +121,36 @@ do
     Assert.eq(html_out, FULL)
     Assert.eq(range_source, FULL)
     Assert.eq(format, "html")
-    -- 不下载阅读页：分片直接用 Context 本地生成的 psvts 签名。
-    Assert.eq(gets, 0, "不再请求阅读页")
-    Assert.len(signed_with, 3)
-    for _, ps in ipairs(signed_with) do Assert.eq(ps, "ps-book:chapter") end
-    -- st=1 时服务端回整书样式表而不是正文（实测），正文分片必须 st=0。
-    for _, style in ipairs(styles) do Assert.is_false(style) end
+    Assert.eq(#queries, 1)
+    Assert.eq(queries[1].bookType, "epub")
+    Assert.eq(queries[1].chapters, "chapter")
 end
 
 do
-    -- TXT：range 按解码后的纯文本逐 rune 计，段落化后的 HTML 只用于显示。
-    txt = true
+    -- TXT：bookType=txt，range 按包内纯文本逐 rune 计，段落化后的 HTML 只用于显示。
     local body, range_source, format
-    Chapter.fetchHtmlAsync("book", { uid = "c2" }, function(html, err, raw, fmt)
+    Chapter.fetchHtmlAsync("book", { uid = "c2", format = "txt" }, function(html, err, raw, fmt)
         Assert.is_nil(err)
         body, range_source, format = html, raw, fmt
     end)
-    txt = false
     Assert.eq(range_source, PLAIN)
     Assert.eq(format, "txt")
     Assert.is_true(body:find("<p>", 1, true) ~= nil)
     -- 段首空白只在显示用 HTML 里剥掉，缩进统一由 CSS 给。
     Assert.is_true(body:find("<p>第二行</p>", 1, true) ~= nil)
-    Assert.eq(gets, 0)
+    Assert.eq(queries[#queries].bookType, "txt")
+    Assert.eq(queries[#queries].chapters, "c2")
 end
 
 do
     -- 交给宿主：EPUB 是整份 document，只改资源引用；TXT 仍是 html 片段走外壳。
     local payload
-    styles = {}
+    local before = #queries
     Chapter.fetchContentAsync("book", { idx = 1, uid = "chapter", title = "第一章" }, function(p) payload = p end)
-    -- e_0/e_1/e_3 正文 st=0，最后 e_2 拉整书样式表 st=1。
-    Assert.eq(table.concat({ tostring(styles[1]), tostring(styles[2]), tostring(styles[3]), tostring(styles[4]) }, ","),
-        "false,false,false,true")
+    -- 正文一次，样式表一次（chapters=0），没有网页分片。
+    Assert.eq(queries[before + 1].chapters, "chapter")
+    Assert.eq(queries[before + 1].bookType, "epub")
+    Assert.eq(queries[before + 2].chapters, "0")
     Assert.is_nil(payload.html)
     local note = '<img class="qqreader-footnote" alt="注" src="../Images/note.png" />'
     local expected = FULL:gsub("https://res%.weread%.qq%.com/x%.png", "images/x.png")
@@ -146,9 +163,7 @@ do
     -- 脚注图标尺寸不依赖整书样式表：行内 style 压到 0.8em 上标，原有 style 被替换。
     Assert.is_true(payload.document:find('height:0.8em', 1, true) ~= nil)
 
-    txt = true
-    Chapter.fetchContentAsync("book", { idx = 2, uid = "c2", title = "第2章 想<整>我" }, function(p) payload = p end)
-    txt = false
+    Chapter.fetchContentAsync("book", { idx = 2, uid = "c2", format = "txt", title = "第2章 想<整>我" }, function(p) payload = p end)
     Assert.is_nil(payload.document)
     -- TXT 正文不带章名：章首补 h1（转义），EPUB 原文自带标题不补。
     local heading = "<h1>第2章 想&lt;整&gt;我</h1>"
@@ -220,41 +235,13 @@ do
 end
 
 do
-    -- e_0 偶发回 "{}"（同一章稍后重拉就有正文）：延时重拉，不直接判失败。
-    local delays = {}
-    Chapter._schedule = function(sec, fn) delays[#delays + 1] = sec; fn() end
-    empty_e0 = 2
+    -- App 通道失败就结束，不再改走网页。
+    app_err = "加载失败"
+    local n = #queries
     local html_out, err
     Chapter.fetchHtmlAsync("book", { uid = "flaky" }, function(h, e) html_out, err = h, e end)
-    Assert.is_nil(err)
-    Assert.eq(html_out, FULL)
-    Assert.len(delays, 2)
-
-    -- 退避：0.5s 起翻倍，单次封顶 8s，抖动不超过 0.2s。
-    local base = { 0.5, 1, 2, 4, 8, 8, 8, 8, 8, 8 }
-    for i, b in ipairs(base) do
-        local d = Chapter._retryDelay(i - 1)
-        Assert.is_true(d >= b and d <= b + 0.2, "delay " .. i)
-    end
-
-    -- 重试 10 次用尽仍为空才报错。
-    delays = {}
-    empty_e0 = 11
-    html_out, err = nil, nil
-    Chapter.fetchHtmlAsync("book", { uid = "flaky" }, function(h, e) html_out, err = h, e end)
+    app_err = nil
     Assert.is_nil(html_out)
-    Assert.matches(err, "empty")
-    Assert.len(delays, 10)
-    empty_e0 = 0
-
-    -- 取消后不再重拉。
-    local pending
-    Chapter._schedule = function(_, fn) pending = fn end
-    empty_e0 = 1
-    local called = false
-    local job = Chapter.fetchHtmlAsync("book", { uid = "flaky" }, function() called = true end)
-    job:cancel()
-    pending()
-    Assert.is_false(called)
-    empty_e0 = 0
+    Assert.eq(err, "加载失败")
+    Assert.eq(#queries, n + 1)
 end

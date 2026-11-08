@@ -8,7 +8,7 @@
 @module koplugin.book.source.local.remote_data
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.local")
 local Common = require("source.local.common")
 
 local SOURCE_ID = Common.SOURCE_ID
@@ -26,7 +26,8 @@ local RemoteData = {}
 ---@param cb fun(pos: ProgressPosition|nil, err: string|nil, meta: table|nil)
 ---@return { cancel: fun() }|nil
 ---@param self LocalClient
-function RemoteData.getProgressAsync(self, stable_id, cb)
+---@param opts { metadata_present?: boolean }|nil 批量同步已列目录时，跳过确定不存在的精确坐标文件
+function RemoteData.getProgressAsync(self, stable_id, cb, opts)
     local rel = remoteRelativePath(stable_id)
     if not rel then return defer(cb, nil, nil, { empty = true }) end
     local cancelled, active = false, nil
@@ -38,6 +39,7 @@ function RemoteData.getProgressAsync(self, stable_id, cb)
             if not raw then return cb(nil, err) end
             local pos = decodeProgress(raw)
             if not pos then return cb(nil, _("进度为空")) end
+            if opts and opts.metadata_present == false then return cb(pos) end
             active = fetchText(self, remote .. ".json", self:webdavCacheRoot() .. "/.position.get",
                 function(metadata, meta_err, absent)
                     if cancelled then return end

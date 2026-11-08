@@ -103,6 +103,42 @@ do
     Assert.eq(body.items[1].ebook_id, 30533530)
 end
 
+-- 缺失 / 非数字 ID 必须整轮失败，不能把 table 地址拼进 URL，也不能用残缺快照对账。
+do
+    for _idx, bad in ipairs({ {}, { book_id = 2 }, { ebook_id = false }, "2 3", "" }) do
+        local malformed = Client:new{ cookie = "thor=test", uuid = "h5-test" }
+        local calls = 0
+        function malformed:apiGetAsync(_path, _extra, cb)
+            calls = calls + 1
+            cb({ data = { book_ids = { { ebook_id = 1 }, bad } } })
+            return { cancel = function() end }
+        end
+        local wire, err
+        malformed:shelfSyncAsync(function(value, e) wire, err = value, e end)
+        Assert.eq(calls, 1, "非法 ID 不应发起分批请求")
+        Assert.is_nil(wire)
+        Assert.eq(err, "京东读书响应无效")
+    end
+end
+
+do
+    local mixed = Client:new{ cookie = "thor=test", uuid = "h5-test" }
+    local paths = {}
+    function mixed:apiGetAsync(path, _extra, cb)
+        paths[#paths + 1] = path
+        if #paths == 1 then
+            cb({ data = { book_ids = { 2, { ebook_id = "1" }, "2" } } })
+        else
+            cb({ data = { { ebook_id = 2 }, { ebook_id = 1 } } })
+        end
+        return { cancel = function() end }
+    end
+    local wire
+    mixed:shelfSyncAsync(function(value) wire = value end)
+    Assert.eq(paths[2], "/jdread/api/ebooks/lite/2,1")
+    Assert.len(wire, 2)
+end
+
 do
     local wire, err
     client:removeFromShelfAsync("30533530", function(value, e) wire, err = value, e end)
@@ -253,5 +289,19 @@ do
     anon:apiGetAsync("/jdread/api/rank", nil, function() end)
     Assert.eq(oks, 0, "匿名成功不 Auth.ok")
     c:apiGetAsync("/jdread/api/bookshelf/sort", nil, function() end)
+    Assert.eq(oks, 1)
+
+    -- 候选会话校验不允许把旧账号标过期，也不能在保存新凭证之前清掉旧过期状态。
+    bodies[1] = '{"result_code":3,"message":"NOT.LOGIN"}'
+    c:checkSessionAsync(function(_wire, err) got_err = err end)
+    Assert.eq(got_err, "京东登录校验失败")
+    Assert.len(expired, 2)
+    bodies[1] = '{"result_code":0,"data":{"book_ids":[]}}'
+    local checked
+    c:checkSessionAsync(function(wire, err)
+        checked = wire
+        Assert.is_nil(err)
+    end)
+    Assert.not_nil(checked)
     Assert.eq(oks, 1)
 end

@@ -57,6 +57,13 @@ end
 package.preload["device"] = function() return { screen = { bb = {} } } end
 local Stubs = require("support.stubs")
 local Overlay = require("features.rare.overlay")
+local dirty = {}
+local UIManager = require("ui/uimanager")
+local orig_dirty = UIManager.setDirty
+UIManager.setDirty = function(self, widget, mode, region)
+    dirty[#dirty + 1] = { widget = widget, mode = mode, region = region }
+    return orig_dirty(self, widget, mode, region)
+end
 
 --- 视口变了：这一帧排队，下一 tick 重算，再画一帧。
 local function draw(o)
@@ -187,7 +194,7 @@ local function newUi()
         end,
         getCurrentPos = function() return 0 end,
     }
-    local ui = { rolling = {}, document = doc, view = { dimen = { w = 600, h = 800 } } }
+    local ui = { dialog = "reader-dialog", rolling = {}, document = doc, view = { dimen = { w = 600, h = 800 } } }
     return ui, calls
 end
 
@@ -198,7 +205,12 @@ do
     o:paint({})
     Assert.len(rendered, 0, "翻页这一帧只排队，不同步重算")
     Assert.eq(calls.walks, 0)
+    dirty = {}
     Stubs.flush()
+    Assert.len(dirty, 1, "有注音才补刷")
+    Assert.eq(dirty[1].mode, "ui", "注音补刷是带矩形的局部刷新")
+    Assert.eq(dirty[1].widget, "reader-dialog")
+    Assert.is_true(dirty[1].region.h < 40, "只盖注音字形，不整页")
     o:paint({})
     Assert.len(rendered, 1)
     Assert.eq(rendered[1].text, "dá")
@@ -219,9 +231,10 @@ do
     -- 没有生僻字：不取框，不画。
     screen_text = "普通文字"
     Overlay.invalidate()
-    rendered = {}
+    rendered, dirty = {}, {}
     draw(o)
     Assert.len(rendered, 0)
+    Assert.len(dirty, 0, "没有注音不补刷")
     Assert.eq(calls.boxes, 1)
     -- 「全部」：屏上每个字都注（不再有 80 词 / findText 预算上限）。
     settings.rare_level = "all"
@@ -253,6 +266,48 @@ do
     Assert.len(rendered, 0)
     settings.rare_ruby = true
     settings.rare_enabled = true
+    screen_text = "普通文字龘"
+end
+
+do
+    screen_text = "龘龘"
+    Overlay.invalidate()
+    local ui = newUi()
+    ui.document.getScreenBoxesFromPositions = function(_self, a)
+        if a == "t.0" then return { { x = -20, y = 0, w = 30, h = 30 } } end
+        return { { x = 590, y = 790, w = 30, h = 30 } }
+    end
+    rendered, dirty = {}, {}
+    draw(Overlay.new(ui))
+    Assert.len(rendered, 2)
+    Assert.len(dirty, 1, "多处注音合并为一次补刷")
+    local rect = dirty[1].region
+    Assert.eq(rect.x, 0, "左侧字形余量裁到屏内")
+    Assert.eq(rect.y, 0, "顶部字形余量裁到屏内")
+    Assert.is_true(rect.x + rect.w <= 600)
+    Assert.is_true(rect.y + rect.h <= 800)
+    for _idx, item in ipairs(rendered) do
+        Assert.is_true(rect.y <= item.y - item.size, "刷新覆盖声调升部")
+        Assert.is_true(rect.y + rect.h >= item.y + item.size * 0.3, "刷新覆盖下伸部")
+    end
+    screen_text = "普通文字龘"
+end
+
+do
+    screen_text = "酩酊大醉"
+    lex = require("features.rare.lexicon").parse(table.concat({
+        "#lang=zh", "酩\tmǐng\t5400", "酊\tdīng\t5000", "大\tdà\t32", "醉\tzuì\t2400",
+        "酩酊大醉\tmǐng dǐng dà zuì\t5400",
+    }, "\n"))
+    Overlay.invalidate()
+    local ui, calls = newUi()
+    rendered = {}
+    draw(Overlay.new(ui))
+    Assert.eq(calls.boxes, 2, "只给词组里的生僻单字取框")
+    Assert.len(rendered, 2)
+    Assert.eq(rendered[1].text, "mǐng")
+    Assert.eq(rendered[2].text, "dǐng")
+    Assert.is_true(rendered[2].x < 60, "第二个读音落在第二个字，不跨整词")
     screen_text = "普通文字龘"
 end
 

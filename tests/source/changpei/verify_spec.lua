@@ -12,7 +12,9 @@ local Ext = require("utils.extension")
 Ext.reset()
 local cookie = "device-session"
 local submit, submit_cancelled, submitted_token
-package.preload["l10n"] = function() return { apply = function() end } end
+package.preload["l10n"] = function()
+    return { apply = function() end, get = function() return require("gettext") end }
+end
 package.preload["source.changpei.client"] = function()
     return {
         cookie = function() return cookie end,

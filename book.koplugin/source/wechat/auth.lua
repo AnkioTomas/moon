@@ -17,7 +17,7 @@ local Header = require("http.request.header")
 local Protocol = require("source.wechat.protocol")
 local Eink = require("source.wechat.eink")
 local Context = require("source.wechat.context")
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 local Auth = {}
 

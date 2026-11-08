@@ -51,3 +51,7 @@ src:browseAsync({ limit = 1 }, function(r) res = r end)
 Assert.eq(calls[2], "rank:day:nil:0")
 Assert.eq(res.groups[1].active, "day:all")
 Assert.eq(res.groups[2].active, "day:all")
+
+src:browseAsync({ node = "web:ordering=-popular&theme=rexue", limit = 1 }, function(r) res = r end)
+Assert.eq(calls[3], "rank:day:nil:0", "切回 App 后不能把官网节点当榜单周期")
+Assert.eq(res.groups[1].active, "day:all")

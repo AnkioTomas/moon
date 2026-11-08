@@ -14,7 +14,7 @@ BookOrbit 书源（整本模式）。走 BookOrbit 给 KOReader 插件开的接�
 
 local Client = require("source.bookorbit.client")
 local SourceBase = require("source.base")
-local _ = require("gettext")
+local _ = require("l10n").get("source.bookorbit")
 local T = require("ffi/util").template
 
 local ID = "bookorbit"

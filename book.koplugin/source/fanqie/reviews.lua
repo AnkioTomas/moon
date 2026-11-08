@@ -15,8 +15,36 @@ local Crypto = require("source.fanqie.reading.crypto")
 local Device = require("source.fanqie.reading.device")
 local Reading = require("source.fanqie.reading")
 local Text = require("utils.text")
+local _ = require("l10n").get("source.fanqie")
 
 local Reviews = {}
+local EMOTICONS = {
+    ["[笑]"] = "1f604", ["[微笑]"] = "1f642", ["[大笑]"] = "1f606",
+    ["[偷笑]"] = "1f601", ["[笑哭]"] = "1f602", ["[奸笑]"] = "1f60f",
+    ["[捂脸]"] = "1f926", ["[哭]"] = "1f622", ["[思考]"] = "1f914",
+    ["[什么]"] = "2753", ["[害羞]"] = "1f633", ["[赞]"] = "1f44d",
+    ["[怒]"] = "1f621", ["[吃瓜]"] = "1f349", ["[盯]"] = "1f440",
+    ["[恐惧]"] = "1f631", ["[撇嘴]"] = "1f615", ["[酷]"] = "1f60e",
+    ["[爱慕]"] = "1f60d", ["[你细品]"] = "1f928", ["[尬笑]"] = "1f605",
+    ["[震惊]"] = "1f632", ["[快哭了]"] = "1f625", ["[送心]"] = "1f496",
+    ["[委屈]"] = "1f97a", ["[做鬼脸]"] = "1f61c", ["[舔屏]"] = "1f924",
+    ["[飞吻]"] = "1f618", ["[OK]"] = "1f44c", ["[翻白眼]"] = "1f644",
+    ["[惊呆]"] = "1f62e", ["[抓狂]"] = "1f62b", ["[吐]"] = "1f92e",
+}
+
+--- 只映射已知表情；书中术语（如 [因果]）与未知标记保留原文，不猜图片地址。
+---@param text string
+---@return table|nil
+local function inlineImages(text)
+    local images = {}
+    for token in text:gmatch("%b[]") do
+        local hex = EMOTICONS[token]
+        if hex then
+            images[token] = { url = require("ui.themes.widgets.text.emoji").BASE .. hex .. ".png" }
+        end
+    end
+    return next(images) and images or nil
+end
 
 local STATS_PATH = "/novel/commentapi/idea/list/%s/v1/"
 local LIST_PATH = "/novel/commentapi/comment/list/%s/v1/"
@@ -39,15 +67,23 @@ end
 --- 先确保设备身份，再发一次签名请求。
 ---@return CancelHandle
 local function call(settings, name, path, build_body, cb)
-    local job
-    job = Device.ensureAsync(settings, function(device, err)
+    local job, cancelled, ready = nil, false, false
+    local registration = Device.ensureAsync(settings, function(device, err)
+        ready = true
+        if cancelled then return end
         if not device then
             cb(nil, err)
             return
         end
-        job = Reading.signedAsync(device, name, path, query, build_body, cb)
+        job = Reading.signedAsync(device, name, path, query, build_body, function(wire, reason)
+            if not cancelled then cb(wire, reason) end
+        end)
     end)
-    return { cancel = function() if job then job.cancel() end end }
+    if not ready then job = registration end
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
 end
 
 --- 本章有评论的段落。
@@ -61,11 +97,19 @@ function Reviews.hotspotsAsync(settings, item_id, cb)
             cb(nil, err)
             return
         end
-        local raw = type(wire.data.data) == "table" and wire.data.data or {}
+        local raw = wire.data.data
+        if type(raw) ~= "table" then
+            cb(nil, _("番茄段评响应缺少段落统计"))
+            return
+        end
         local out = {}
         for key, info in pairs(raw) do
-            local pid, total = tonumber(key), type(info) == "table" and tonumber(info.count) or 0
-            if pid and total > 0 then
+            local pid, total = tonumber(key), type(info) == "table" and tonumber(info.count)
+            if not pid or not total or total < 0 then
+                cb(nil, _("番茄段评响应包含无效段落统计"))
+                return
+            end
+            if total > 0 then
                 out[#out + 1] = { range = tostring(pid), text = "", total = total }
             end
         end
@@ -115,10 +159,12 @@ local function item(entry)
     local content = type(common.content) == "table" and common.content or {}
     local stat = type(c.stat) == "table" and c.stat or {}
     local created = tonumber(common.create_timestamp or common.create_time) or 0
+    local text = tostring(content.text or common.text or "")
     return {
         id = tostring(c.comment_id or ""),
         author = tostring(base.user_name or common.user_name or ""),
-        content = tostring(content.text or common.text or ""),
+        content = text,
+        inline_images = inlineImages(text),
         likes = tonumber(stat.digg_count) or 0,
         replies = tonumber(stat.reply_count) or 0,
         images = images(content),
@@ -140,10 +186,12 @@ local function replyItem(entry)
     local to_base = type(to_info.base_info) == "table" and to_info.base_info or to_info
     local created = tonumber(common.create_timestamp or common.create_time) or 0
     local reply_to = to_base.user_name
+    local text = tostring(content.text or "")
     return {
         id = tostring(entry.reply_id or ""),
         author = tostring(base.user_name or ""),
-        content = tostring(content.text or ""),
+        content = text,
+        inline_images = inlineImages(text),
         likes = tonumber(stat.digg_count) or 0,
         replies = 0,
         reply_to = type(reply_to) == "string" and reply_to ~= "" and reply_to or nil,
@@ -185,6 +233,10 @@ function Reviews.pageAsync(settings, book_id, item_id, para_index, max_idx, cb)
             return
         end
         local info = type(wire.data.common_list_info) == "table" and wire.data.common_list_info or {}
+        if #list == 0 and max_idx == 0 and (tonumber(info.total) or 0) > 0 then
+            cb(nil, _("番茄段评列表为空"))
+            return
+        end
         local items = {}
         for _idx, entry in ipairs(list) do
             if type(entry) == "table" then items[#items + 1] = item(entry) end

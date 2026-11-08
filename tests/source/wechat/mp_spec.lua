@@ -8,6 +8,7 @@ package.loaded["json"] = { decode = require("support.json_stub").decode }
 local pages, urls = {}, {}
 local localized = {}
 local renewals = 0
+local wx_refreshes = {}
 package.loaded["source.wechat.auth"] = {
     sessionHeaders = function(extra)
         local h = { Cookie = "wr_vid=1; wr_skey=2" }
@@ -74,6 +75,29 @@ package.loaded["source.wechat.assets"] = {
         return { cancel = function() end }
     end,
 }
+package.loaded["source.wechat.eink"] = {
+    refreshAsync = function(cb, opts)
+        wx_refreshes[#wx_refreshes + 1] = opts
+        cb(true)
+        return { cancel = function() end }
+    end,
+    callAsync = function(_method, path, opts, cb)
+        local q = opts and opts.query or {}
+        urls[#urls + 1] = path .. "?" .. require("utils.text").formEncode(q)
+        local raw = pages.list
+        if type(raw) ~= "string" then
+            cb(nil, "微信读书拒绝了请求，请稍后再试", { errcode = -2041 })
+            return { cancel = function() end }
+        end
+        local data = package.loaded["json"].decode(raw)
+        if type(data) == "table" and (data.errcode or data.errCode) then
+            cb(nil, data.errmsg or data.errMsg, { errcode = tonumber(data.errcode or data.errCode) })
+        else
+            cb(data)
+        end
+        return { cancel = function() end }
+    end,
+}
 package.loaded["source.wechat.mp"] = nil
 local Mp = require("source.wechat.mp")
 
@@ -92,33 +116,41 @@ Assert.eq(list[1].guid, "r2")
 Assert.eq(list[1].title, os.date("%Y-%m-%d", 200))
 Assert.eq(list[2].title, "一")
 Assert.len(Mp.articles({}), 0)
+local flat = Mp.articles({ data = {
+    { reviewId = "a", createTime = 10, mpInfo = { title = "甲" } },
+    { reviewId = "b", createTime = 30, mpInfo = { title = "" } },
+    { reviewId = "a", createTime = 10, mpInfo = { title = "甲" } },
+} })
+Assert.len(flat, 2)
+Assert.eq(flat[1].guid, "b")
+Assert.eq(flat[1].title, os.date("%Y-%m-%d", 30))
+Assert.eq(flat[2].title, "甲")
 
--- 分页：offset 以推送组为单位（maxIdx 被服务端无视），第三个回调参数是这页的组数。
-pages.list = '{"reviews":[{"createTime":9,"subReviews":[{"reviewId":"r9","review":{"reviewId":"r9","createTime":9,"mpInfo":{"title":"九"}}}]}]}'
+-- 分页：App /mp/chapters，offset 与第三个回调都是篇数。
+pages.list = '{"data":[{"reviewId":"r9","createTime":9,"mpInfo":{"title":"九"}}]}'
 local got, groups
 Mp.fetchArticlesAsync("MP_WXS_1", 40, function(items, _e, n) got, groups = items, n end)
 Assert.eq(got[1].guid, "r9")
 Assert.eq(groups, 1)
+Assert.matches(urls[#urls], "/mp/chapters?")
 Assert.matches(urls[#urls], "offset=40")
 Assert.matches(urls[#urls], "count=20")
-Assert.is_true(not urls[#urls]:find("maxIdx", 1, true))
 pages.list = '{"errcode":-2010,"errmsg":"登录超时"}'
 local err
 Mp.fetchArticlesAsync("MP_WXS_1", 0, function(items, e) got, err = items, e end)
 Assert.eq(got, nil)
 Assert.eq(err, "登录超时")
--- -2041（会话层续期后仍被拒，cb 给的是 err + res）：换成公众号授权失效提示
+-- -2041：wxToken=1 后续一次仍被拒，换成公众号授权失效。
 pages.list = nil
-local auth = package.loaded["source.wechat.auth"]
-local orig = auth.webGetAsync
-auth.webGetAsync = function(_url, _opts, cb)
-    cb(nil, "微信读书拒绝了请求，请稍后再试", { body = '{"errCode":-2041,"errMsg":"-2041"}' })
-    return { cancel = function() end }
-end
+renewals = 0
+wx_refreshes = {}
 Mp.fetchArticlesAsync("MP_WXS_1", 0, function(items, e) got, err = items, e end)
 Assert.eq(got, nil)
 Assert.eq(err, Mp.AUTH_EXPIRED)
-auth.webGetAsync = orig
+Assert.eq(renewals, 1, "wxToken=1 成功后补一次网页头")
+Assert.eq(#wx_refreshes, 1)
+Assert.eq(wx_refreshes[1].wxToken, 1)
+Assert.matches(wx_refreshes[1].refCgi, "/mp/chapters")
 
 -- 书架里的公众号：books 行、mp.book 单对象、data.officialAccounts 都收，去重；分组取 archive 名。
 local accounts = Mp.accounts({
@@ -228,67 +260,49 @@ Mp.fetchContentAsync("v", nil, function(p, e) got, err = p, e end)
 Assert.eq(calls, Mp.VERIFY_TRIES); Assert.eq(got, nil); Assert.matches(err, "验证")
 stream_override = nil
 
--- 回 -2041：续期拿到 ticket / wrpa 头后带头重试；之后的请求直接带头。
+-- 正文 -2041：先续网页头再重试，续上了不再打 wxToken=1。
 do
-    local real = package.loaded["source.wechat.auth"].webGetAsync
     local sent = {}
-    package.loaded["source.wechat.auth"].webGetAsync = function(_url, opts, cb)
+    stream_override = function(opts, h)
         sent[#sent + 1] = opts.headers or {}
-        if #sent == 1 then
-            cb(nil, "x", { json = { errcode = -2041 } })
-        else
-            cb("{...}", nil, { json = wire({ { "r6", 6, "六" } }) })
-        end
+        if h.on_headers then h.on_headers(200, {}) end
+        h.on_data(#sent == 1 and '{"errcode":-2041}' or '<div id="js_content">六</div>')
+        h.on_done(nil)
         return { cancel = function() end }
     end
-    local items
+    local html
     renewals = 0
-    Mp.fetchArticlesAsync("MP_WXS_1", 0, function(list) items = list end)
+    wx_refreshes = {}
+    Mp.fetchContentAsync("r6", nil, function(h) html = h end)
     Assert.eq(renewals, 1)
-    Assert.eq(items[1].guid, "r6")
+    Assert.eq(#wx_refreshes, 0, "网页头续上了就不再打 wxToken=1")
+    Assert.matches(html, "六")
     Assert.eq(sent[2]["x-wr-ticket"], "T1")
     Assert.eq(sent[2]["x-wrpa-0"], "W1")
-    package.loaded["source.wechat.auth"].webGetAsync = real
+    stream_override = nil
 end
 
--- 会话层续期重试后仍被拒：raw=nil、res 只有 body，也要走公众号凭据续期再重试。
+-- 网页头续完仍是 -2041：wxToken=1 之后第三次拉到正文。
 do
-    local real = package.loaded["source.wechat.auth"].webGetAsync
-    local sent = {}
-    package.loaded["source.wechat.auth"].webGetAsync = function(_url, opts, cb)
-        sent[#sent + 1] = opts.headers or {}
-        if #sent == 1 then
-            cb(nil, "微信读书拒绝了请求，请稍后再试", { body = '{"errCode":-2041,"errMsg":"-2041"}' })
-        else
-            cb("{...}", nil, { json = wire({ { "r7", 7, "七" } }) })
-        end
+    local sent = 0
+    stream_override = function(_opts, h)
+        sent = sent + 1
+        if h.on_headers then h.on_headers(200, {}) end
+        h.on_data(sent < 3 and '{"errcode":-2041,"errMsg":"-2041"}' or '<div id="js_content">八</div>')
+        h.on_done(nil)
         return { cancel = function() end }
     end
-    local items
+    local html
     renewals = 0
-    Mp.fetchArticlesAsync("MP_WXS_1", 0, function(list) items = list end)
-    Assert.eq(renewals, 1)
-    Assert.eq(items[1].guid, "r7")
-    Assert.eq(sent[2]["x-wr-ticket"], "T1")
-    package.loaded["source.wechat.auth"].webGetAsync = real
-end
-
--- 只解一次：会话层已解过（res.json）就直接用，不再 decode。
-do
-    local real = package.loaded["source.wechat.auth"].webGetAsync
-    local decodes = 0
-    local real_decode = package.loaded["json"].decode
-    package.loaded["json"].decode = function(...) decodes = decodes + 1; return real_decode(...) end
-    package.loaded["source.wechat.auth"].webGetAsync = function(_url, _opts, cb)
-        cb("{...}", nil, { json = wire({ { "r5", 5, "五" } }) })
-        return { cancel = function() end }
-    end
-    local items
-    Mp.fetchArticlesAsync("MP_WXS_1", 0, function(list) items = list end)
-    Assert.eq(items[1].guid, "r5")
-    Assert.eq(decodes, 0, "res.json 已解过，不再解")
-    package.loaded["source.wechat.auth"].webGetAsync = real
-    package.loaded["json"].decode = real_decode
+    wx_refreshes = {}
+    Mp.fetchContentAsync("r8", nil, function(h) html = h end)
+    Assert.eq(sent, 3)
+    Assert.eq(renewals, 2)
+    Assert.eq(#wx_refreshes, 1)
+    Assert.eq(wx_refreshes[1].wxToken, 1)
+    Assert.matches(wx_refreshes[1].refCgi, "/web/mp/content")
+    Assert.matches(html, "八")
+    stream_override = nil
 end
 
 -- 正文先按 id 切片：js_content 之前的大段脚本不参与匹配；属性顺序不同也认。

@@ -14,7 +14,7 @@ local Toc = require("source.wechat.toc")
 local Position = require("source.wechat.progress")
 local Context = require("source.wechat.context")
 local Mapper = require("source.wechat.mapper")
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 ---@class WechatNotesPush
 ---@field client WechatClient

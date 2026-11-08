@@ -4,7 +4,7 @@
 @module source.copymanga._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.copymanga")
 
 return {
     id = "copymanga",

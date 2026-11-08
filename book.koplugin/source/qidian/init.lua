@@ -1,15 +1,14 @@
 --[[--
 起点中文网数据源。
 
-详情 / 目录 / 章节走手机站页面（client.lua）。登录是浏览器登录态的 Cookie（setting.lua）；
+详情 / 目录 / 章节走手机站页面（client.lua）。扫码、短信与浏览器 Cookie 经统一校验保存（setting.lua）；
 登录后书架双向同步（source.shelf）：拉取、本地加入上行、本地删除上行。
-进度只到章：开书从书架行的 readCid 拉，关书经 updReadStatus 推。笔记和统计没有接口。
+进度只到章：开书从书架行的 readCid 拉，关书经 updReadStatus 推。笔记与统计仅本地记录。
 VIP 章未购买时打开一页临时提示，目录标注已购 / 未购（打开过才知道）。
 
 @module koplugin.book.source.qidian
 --]]
 
-require("l10n").apply()
 local Browse = require("source.browse")
 local Client = require("source.qidian.client")
 local Mapper = require("source.qidian.mapper")
@@ -17,32 +16,12 @@ local ReviewCache = require("book.review_cache")
 local Shelf = require("source.shelf")
 local SourceBase = require("source.base")
 local Toc = require("source.toc")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qidian")
 
 local Qidian = {}
 
 -- 章节页不小，预取与整本缓存逐章间隔请求。
 local FETCH_INTERVAL = 1
-
--- 旧版只做 Fock，不认 cES=2 的字体层，缓存下来的是错字 HTML。
--- 每个书的工作目录一次性清掉旧章节缓存，避免升级后仍打开旧文件。
-local function migrateFontCache(stable_id)
-    local Paths = require("utils.paths")
-    local lfs = require("libs/libkoreader-lfs")
-    local dir = Paths.bookWorkDir(stable_id, "qidian")
-    if lfs.attributes(dir, "mode") ~= "directory" then return end
-    local marker = dir .. "/.qidian-font-v1"
-    local f = io.open(marker, "rb")
-    if f then f:close(); return end
-    for entry in lfs.dir(dir) do
-        if entry:match("%.html$") then os.remove(dir .. "/" .. entry) end
-    end
-    local out = io.open(marker, "wb")
-    if out then
-        out:write("1")
-        out:close()
-    end
-end
 
 ---@return BookSourceMeta
 function Qidian.meta()
@@ -50,6 +29,7 @@ function Qidian.meta()
 end
 
 ---@class QidianSource : SourceBase
+---@field category_info table[]|nil 官网男频分类目录
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -209,13 +189,13 @@ end
 ---@param cb fun(res: { data: Book[] }|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Source:searchAsync(keyword, cb)
-    return Client.searchAsync(keyword, function(data, err)
-        if not data then
-            cb(nil, err)
-            return
-        end
-        cb({ data = Mapper.search(data) })
-    end)
+    return Browse.pages(function(page, done)
+        return Client.searchAsync(keyword, function(data, err)
+            if not data then done(nil, err); return end
+            local info = data.bookInfo
+            done(Mapper.search(data), nil, info.isLast ~= 1 and info.isLast ~= true)
+        end, page)
+    end, 200, {}, cb)
 end
 
 local RANKS = {
@@ -235,28 +215,45 @@ local CATS = {
     { id = "10", title = _("悬疑灵异") }, { id = "20109", title = _("诸天无限") }, { id = "12", title = _("轻小说") },
 }
 
---- 书城浏览：榜单 × 分类两行 chip，节点是「榜单键:分类号」，缺省月票榜全站。榜单页只有一页（20 本）。
+--- 默认分类书库；兼容「榜单键:分类号」旧节点，分类和榜单均聚合后续页。
 ---@param opts { node?: string, limit?: integer }
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:browseAsync(opts, cb)
+    if not opts.node or opts.node:sub(1, 9) == "category?" then
+        return require("source.qidian.browse").run(self, opts, cb)
+    end
     local key, cat = (opts.node or RANKS[1].key .. ":-1"):match("^(%w+):(-?%d+)$")
+    if not key then return SourceBase.defer(cb, nil, _("起点分类条件无效")) end
     local ranks, cats = {}, {}
     for _idx, rank in ipairs(RANKS) do ranks[#ranks + 1] = { id = rank.key .. ":" .. cat, title = rank.title } end
     for _idx, row in ipairs(CATS) do cats[#cats + 1] = { id = key .. ":" .. row.id, title = row.title } end
     local node = key .. ":" .. cat
+    table.insert(ranks, 1, { id = "category?catId=21&gender=male", title = _("分类书库") })
     local groups = { Browse.group(ranks, node), Browse.group(cats, node) }
-    return Client.rankAsync("/rank/" .. key .. "/" .. (cat == "-1" and "" or "catid" .. cat .. "/"), function(data, err)
-        if not data then
-            cb(nil, err)
-            return
-        end
-        cb({ data = Mapper.rank(data), groups = groups })
-    end)
+    return Browse.pages(function(page, done)
+        return Client.rankPageAsync(key, cat, page, function(data, err)
+            if not data then done(nil, err); return end
+            done(Mapper.rank(data), nil, data.isLast ~= 1 and data.isLast ~= true)
+        end)
+    end, opts.limit or 60, groups, cb)
 end
 
 function Source:getDetailAsync(identity, cb)
     return SourceBase.defer(cb, identity.book or require("book.books_db").get(self.id, identity.stable_id))
+end
+
+---@param identity BookIdentity
+---@param cb fun(page: table|nil, err: string|nil)
+---@return HttpJob
+function Source:bookReviewsAsync(identity, cb)
+    if not require("ui/network/manager"):isConnected() then
+        return SourceBase.defer(cb, nil, _("网络不可用，请先连接 Wi-Fi"))
+    end
+    return Client.bookCircleAsync(identity.stable_id, function(data, err)
+        if not data then cb(nil, err); return end
+        cb(require("source.qidian.reviews").bookPage(data))
+    end)
 end
 
 --- 强制拉目录并写回；失败由调用方继续用旧缓存。
@@ -296,28 +293,32 @@ end
 Source.refreshTocAsync = fetchTocAsync
 
 function Source:openBookAsync(identity, opts, cb)
-    migrateFontCache(identity.stable_id)
     local Chapter = require("source.chapter")
     local open = opts and opts.chapter_idx and Chapter.openAsync or Chapter.openWithUi
+    local locate = require("book.review_locate")
+    local reviews = self:paragraphReviewsEnabled()
     return open(self, identity, identity.book, opts, {
         loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
-        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, true),
+        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, true, reviews and locate.prepareChapterEnd or nil),
+        reuse = reviews and locate.reuseChapterEnd or nil,
     }, cb)
 end
 
 function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
-    migrateFontCache(identity.stable_id)
     local Chapter = require("source.chapter")
+    local locate = require("book.review_locate")
+    local reviews = self:paragraphReviewsEnabled()
     return Chapter.prefetchAsync(identity, identity.book, toc, from_idx, count, {
-        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, false),
+        fetchContent = Chapter.vipFetcher(self, Client.contentAsync, false, reviews and locate.prepareChapterEnd or nil),
+        reuse = reviews and locate.reuseChapterEnd or nil,
         interval_seconds = FETCH_INTERVAL,
     }, cb)
 end
 
 function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
-    migrateFontCache(identity.stable_id)
     local Chapter = require("source.chapter")
-    return Chapter.cacheAllAsync(self, identity, Chapter.vipFetcher(self, Client.contentAsync, false), on_progress, cb,
+    local prepare = self:paragraphReviewsEnabled() and require("book.review_locate").prepareChapterEnd or nil
+    return Chapter.cacheAllAsync(self, identity, Chapter.vipFetcher(self, Client.contentAsync, false, prepare), on_progress, cb,
         FETCH_INTERVAL, range)
 end
 
@@ -331,13 +332,39 @@ end
 ---@param identity BookIdentity
 ---@param cb fun(hotspots: QidianReviewHotspot[]|nil, err: string|nil)
 ---@return { cancel: fun() }
-function Source:paragraphHotspotsAsync(identity, cb)
+local function hotspotsAsync(self, identity, cb)
     local withUid = require("source.with_chapter_uid")
     return ReviewCache.hotspotsAsync(identity, function(done)
         return withUid.run(self, identity, _("缺少起点章节位置"), function(uid, finish)
             return require("source.qidian.reviews").hotspotsAsync(identity.stable_id, uid, finish)
         end, done)
     end, cb)
+end
+
+function Source:paragraphHotspotsAsync(identity, cb)
+    return hotspotsAsync(self, identity, function(list, err)
+        if not list then cb(nil, err); return end
+        local paragraphs = {}
+        for _idx, spot in ipairs(list) do
+            if tonumber(spot.range) > 0 then paragraphs[#paragraphs + 1] = spot end
+        end
+        cb(paragraphs)
+    end)
+end
+
+function Source:chapterReviewHotspotsAsync(identity, cb)
+    return hotspotsAsync(self, identity, function(list, err)
+        if not list then cb(nil, err); return end
+        local ending = {}
+        for _idx, spot in ipairs(list) do
+            if spot.range == "-1" then
+                ending[#ending + 1] = { range = spot.range, text = _("本章讨论"), total = spot.total,
+                    badge = tostring(spot.total), heading = _("章节评论"),
+                    anchor = require("book.review_locate").CHAPTER_ANCHOR }
+            end
+        end
+        cb(ending)
+    end)
 end
 
 --- 段落按段序定位到章节 HTML（子进程里跑，不碰实例状态）。

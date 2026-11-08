@@ -5,7 +5,7 @@
 @module koplugin.book.source.wechat.setting
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 local T = require("ffi/util").template
 
 local SOURCE_ID = "wechat"

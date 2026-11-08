@@ -4,12 +4,13 @@
 @module source.qidian._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.qidian")
 
 return {
     id = "qidian",
     name = _("起点中文网"),
     type = "chapter",
     description = _("起点中文网书架与在线阅读"),
-    abilities = { _("搜索与发现"), _("书架同步"), _("进度同步"), _("VIP 章节"), _("他人段评") },
+    abilities = { _("扫码登录"), _("手机号验证码登录"), _("搜索与发现"), _("书架同步"),
+        _("进度同步"), _("VIP 章节"), _("他人段评"), _("章节评论"), _("书友圈帖子预览") },
 }

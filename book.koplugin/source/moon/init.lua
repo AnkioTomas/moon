@@ -14,7 +14,7 @@ local Mapper = require("source.moon.mapper")
 local SourceBase = require("source.base")
 local Shelf = require("source.shelf")
 local Progress = require("book.progress")
-local _ = require("gettext")
+local _ = require("l10n").get("source.moon")
 local T = require("ffi/util").template
 
 local Moon = {}

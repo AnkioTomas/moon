@@ -96,10 +96,16 @@ do
     requests, replies = {}, { '{"data":{"book_list":[{"book_id":"9","title":"甲","author":"乙","image_link":"http://c/x.jpg"}],'
         .. '"page_data":{"count":"31","page":"2","page_size":"15"}}}' }
     local wire
-    Client.classifyAsync({ channel = "0", category1 = "202", category2 = "a", order = "click", page = 2 },
+    Client.classifyAsync({
+        channel = "0", category1 = "202", category2 = "a", order = "click",
+        words = "3", update_time = "2", is_over = "1", page = 2,
+    },
         function(v) wire = v end)
     Assert.matches(requests[1].url, "^https://www%.qimao%.com/api/classify/book%-list%?")
     Assert.matches(requests[1].url, "category1=202")
+    Assert.matches(requests[1].url, "words=3")
+    Assert.matches(requests[1].url, "update_time=2")
+    Assert.matches(requests[1].url, "is_over=1")
     local books, more = Mapper.classify(wire)
     Assert.eq(books[1].stable_id, "9")
     Assert.eq(books[1].authors, "乙")
@@ -196,8 +202,15 @@ do
                         filters = {
                             order = { { value = "click", label = "点击" }, { value = "a", label = "全部" } },
                             channel = { { value = "0", label = "男生" }, { value = "a", label = "全部" } },
+                            words = { { value = "a", label = "全部" }, { value = "3", label = "50万-100万" } },
+                            update_time = { { value = "a", label = "全部" }, { value = "2", label = "7天内" } },
+                            is_over = { { value = "a", label = "全部" }, { value = "1", label = "已完结" } },
                         },
-                        category = {},
+                        category = {
+                            { id = "202", name = "玄幻奇幻", type = "0", children = {
+                                { id = "37", name = "东方玄幻", type = "0" },
+                            } },
+                        },
                     },
                 })
                 return { cancel = function() end }
@@ -232,5 +245,27 @@ do
     Assert.eq(classify_q.category1, "a")
     Assert.eq(classify_q.category2, "a")
     Assert.eq(classify_q.order, "click")
-    Assert.eq(res.groups[1].selected, "0:a:a:click")
+    Assert.eq(classify_q.words, "a")
+    Assert.eq(classify_q.update_time, "a")
+    Assert.eq(classify_q.is_over, "a")
+    Assert.eq(res.groups[1].selected, "0:a:a:click:a:a:a")
+    Assert.eq(res.groups[4].title, "字数")
+    Assert.eq(res.groups[4].items[1].id, "0:a:a:click:a:a:a")
+
+    Source:browseAsync({ node = "0:202:37:words_num:3:2:1" }, function(r, e) res, err = r, e end)
+    Assert.is_nil(err)
+    Assert.eq(classify_q.order, "words_num", "排序值包含下划线")
+    Assert.eq(classify_q.category1, "202")
+    Assert.eq(classify_q.category2, "37")
+    Assert.eq(classify_q.words, "3")
+    Assert.eq(classify_q.update_time, "2")
+    Assert.eq(classify_q.is_over, "1")
+    Assert.eq(res.groups[1].selected, "0:202:37:words_num:3:2:1")
+    Assert.eq(res.groups[5].title, "字数")
+
+    Source:browseAsync({ node = "0:202:37:words_num" }, function(r, e) res, err = r, e end)
+    Assert.eq(classify_q.order, "words_num", "兼容已有四段筛选节点")
+    Assert.eq(classify_q.words, "a")
+    Assert.eq(classify_q.update_time, "a")
+    Assert.eq(classify_q.is_over, "a")
 end

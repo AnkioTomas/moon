@@ -91,7 +91,16 @@ Assert.is_nil(cfg.phone, "不持久化手机号或短信码")
 Assert.is_nil(cfg.code)
 Assert.is_true(Themed.last("progress_dialog").closed)
 
-Setting.rows()[2](400).callback()
+local token_row
+for _idx, make_row in ipairs(Setting.rows()) do
+    local row = make_row(400)
+    if row.title == "用 token 登录" then
+        token_row = row
+        break
+    end
+end
+Assert.not_nil(token_row, "保留 token 登录入口，不依赖账号页行顺序")
+token_row.callback()
 local imported = Themed.last("input")
 Assert.eq(imported.title, "七猫登录 token")
 Assert.len(imported.fields, 1)

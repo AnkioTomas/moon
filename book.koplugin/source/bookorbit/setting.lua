@@ -8,7 +8,7 @@ BookOrbit 源设置：服务器地址、KOReader 同步账号、书库选择、�
 
 local Client = require("source.bookorbit.client")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.bookorbit")
 local T = require("ffi/util").template
 
 local ID = "bookorbit"

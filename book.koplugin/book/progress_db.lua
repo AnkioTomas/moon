@@ -281,10 +281,14 @@ end
 ---@param pos ProgressPosition 推上去的位置，记为与云端一致的位置
 ---@return boolean 命中该修订号的行才算确认；期间被改写过返回 false
 function ProgressDB.markSynced(source_id, stable_id, updated_at, pos)
+    -- extra 写成这次推上去的坐标。没有就 NULL，不能把旧的 chapter_offset 留在列里。
+    local extra, extra_err = encodeExtra(pos.extra)
+    if extra_err then return false end
     return DB.exec(
-        [[UPDATE pending_progress SET sync_status=1, synced=?
+        [[UPDATE pending_progress SET sync_status=1, synced=?, extra=?
           WHERE source_id=? AND stable_id=? AND updated_at=?;]],
         encodeSynced(pos),
+        extra,
         source_id,
         stable_id,
         updated_at

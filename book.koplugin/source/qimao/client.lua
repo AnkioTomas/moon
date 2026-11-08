@@ -11,7 +11,7 @@ local JSON = require("json")
 local Protocol = require("source.qimao.protocol")
 local Request = require("http.request")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qimao")
 
 local Client = {}
 
@@ -206,7 +206,8 @@ end
 function Client.classifyAsync(query, cb)
     return wwwGet("/api/classify/book-list", {
         channel = query.channel, category1 = query.category1, category2 = query.category2,
-        order = query.order, page = query.page, words = "a", update_time = "a", is_vip = "a", is_over = "a",
+        order = query.order, page = query.page, words = query.words or "a", update_time = query.update_time or "a",
+        is_vip = "a", is_over = query.is_over or "a",
     }, cb)
 end
 

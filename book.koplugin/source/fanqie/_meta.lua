@@ -4,12 +4,12 @@
 @module source.fanqie._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.fanqie")
 
 return {
     id = "fanqie",
     name = _("番茄小说"),
     type = "chapter",
     description = _("番茄小说书架与在线阅读"),
-    abilities = { _("搜索与发现"), _("书架同步"), _("进度同步"), _("他人段评") },
+    abilities = { _("搜索与发现"), _("书架同步"), _("进度同步"), _("他人段评"), _("扫码登录") },
 }

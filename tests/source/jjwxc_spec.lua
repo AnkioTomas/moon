@@ -212,10 +212,11 @@ do
         { paragraph_id = "1", comment_total = "24148" },
         { paragraph_id = "2", comment_total = "0" },
     })
-    Assert.len(hot, 2)
-    Assert.eq(hot[1].range, "1")
-    Assert.eq(hot[2].range, "3")
-    Assert.eq(hot[2].total, 7)
+    Assert.len(hot, 3)
+    Assert.eq(hot[1].range, "-2")
+    Assert.eq(hot[2].range, "1")
+    Assert.eq(hot[3].range, "3")
+    Assert.eq(hot[3].total, 7)
 
     local page = Reviews.page({ commentTotal = "45", commentList = {
         { commentId = "9", commentAuthor = "甲", commentBody = "好&amp;看<br/>真的", agreenum = "6", comment_date_time = "1792324141" },

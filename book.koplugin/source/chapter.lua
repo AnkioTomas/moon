@@ -36,6 +36,11 @@
 ---@field tar string|nil 微信章节资源包 URL
 ---@field words integer|nil 微信章节字数（按篇幅对齐本地书用）
 ---@field raw string|nil iRead 章节对象原样 JSON（开章接口要整个带回）
+---@field content_url string|nil 源端正文地址或内容编号
+---@field slice boolean|nil 本章是同一份正文中的段落切片
+---@field end_pid string|nil 段落切片的结束编号（不含）
+---@field sec_id string|nil 源端阅读位置上报使用的章节编号
+---@field word_count number|nil 源端章节字数（阅读位置上报使用）
 
 local Paths = require("utils.paths")
 local Progress = require("book.progress")
@@ -132,6 +137,16 @@ local function localPosition(identity)
     end
 end
 
+--- 已落盘的章节能不能直接用。源可以要求文件头带自己的 mark，没有就当过期。
+---@param path string
+---@param ops table
+---@return boolean
+local function reusable(path, ops)
+    if not chapterReady(path) then return false end
+    if ops.reuse and not ops.reuse(path) then return false end
+    return true
+end
+
 --- 本地已有章节文件时返回路径，供快开；否则 nil。
 ---@param identity BookIdentity
 ---@param opts table
@@ -143,7 +158,7 @@ local function existingLocalPath(identity, opts, ops)
     local idx = tonumber(opts.chapter_idx)
     if idx then
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-        if chapterReady(path) then return path, idx end
+        if reusable(path, ops) then return path, idx end
         return nil
     end
     local pos = localPosition(identity)
@@ -156,7 +171,7 @@ local function existingLocalPath(identity, opts, ops)
         idx = 1
     end
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-    if chapterReady(path) then return path, idx end
+    if reusable(path, ops) then return path, idx end
     return nil
 end
 
@@ -220,9 +235,14 @@ local function render(payload, opts)
     if type(book_title) ~= "string" or book_title == "" then
         book_title = title
     end
-    return "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\"/><title>"
+    local html = "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\"/><title>"
         .. Text.xmlEscape(book_title) .. "</title><style>" .. DEFAULT_CSS
         .. "</style></head><body>" .. content .. "</body></html>"
+    local mark = type(payload) == "table" and payload.mark or nil
+    if type(mark) == "string" and mark ~= "" and not mark:find("--", 1, true) then
+        html = "<!--" .. mark .. "-->" .. html
+    end
+    return html
 end
 
 Chapter.render = render
@@ -358,7 +378,7 @@ end
 ---@return { cancel: fun() }|nil
 local function ensure(identity, toc, idx, ops, cb)
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-    if not ops.volatile and chapterReady(path) then
+    if not ops.volatile and reusable(path, ops) then
         -- 已缓存但目录还没字数：补一次，估页码越读越准。
         local item = toc[idx]
         if item and not (tonumber(item.words) and tonumber(item.words) > 0) then
@@ -643,7 +663,7 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
             return
         end
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-        if not ops.volatile and chapterReady(path) then
+        if not ops.volatile and reusable(path, ops) then
             cached_count = cached_count + 1
             report()
             require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter prefetch", nextIndex))
@@ -725,8 +745,9 @@ end
 ---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer, failed_idx: integer[]|nil)
 ---@param interval_seconds number|nil 两次正文请求的间隔，缺省 1.5；风控严的源传更大值
 ---@param range ChapterCacheRange|nil 缺省全本
+---@param reuse (fun(path: string): boolean)|nil 缓存文件可复用才返回真
 ---@return { cancel: fun() }
-function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb, interval_seconds, range)
+function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb, interval_seconds, range, reuse)
     local cancelled, active = false, nil
     active = source:loadTocAsync(identity, function(toc, err)
         if cancelled then return end
@@ -738,6 +759,7 @@ function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb, 
             progress = on_progress,
             -- 全本缓存让服务端有喘息时间；阅读期预取仍保持无间隔。
             interval_seconds = interval_seconds or 1.5,
+            reuse = reuse,
         }, function(cached, total, failed, last_err, failed_idx)
             if not cancelled then
                 cb(failed == 0, cached, last_err, total, failed, failed_idx)
@@ -755,14 +777,16 @@ end
 ---@param source BookSource
 ---@param content_async fun(book_id: string, chapter_id: string, cb: fun(text: string|nil, err: string|nil, kind: "unpaid"|nil)): table|nil
 ---@param open boolean
+---@param prepare_html? fun(html: string): string
 ---@return ChapterFetchContent
-function Chapter.vipFetcher(source, content_async, open)
+function Chapter.vipFetcher(source, content_async, open, prepare_html)
     local Toc = require("source.toc")
     return function(identity, chapter, done)
         return content_async(identity.stable_id, chapter.uid, function(text, err, kind)
             if text then
                 if chapter.vip then Toc.markPaid(source.id, identity.stable_id, chapter.uid, true) end
-                done({ title = chapter.title, html = Text.chapterHtml(chapter.title, text) })
+                local html = Text.chapterHtml(chapter.title, text)
+                done({ title = chapter.title, html = prepare_html and prepare_html(html) or html })
             elseif open and kind == "unpaid" then
                 Toc.markPaid(source.id, identity.stable_id, chapter.uid, false)
                 local notice = string.format(_("这是 VIP 章节，你还没有购买。\n请先在%s购买本章，再回来阅读。"), source.name)

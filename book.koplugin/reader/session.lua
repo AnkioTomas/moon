@@ -292,6 +292,12 @@ function Session.onReaderReady(plugin)
         ChapterMode.afterBootstrap(plugin, Session._snapshot)
         span:lap("after")
     end
+    if identity.source then
+        identity.source:onEvent("reading_started", {
+            identity = identity,
+            position = require("reader.session.progress").position(Session._snapshot),
+        })
+    end
     span:finish(Session.SLOW_READY_MS, identity.source_id, chapter_mode and "chapter" or "book")
 end
 
@@ -304,7 +310,7 @@ local function syncReading(plugin, span)
     end
     local identity = Session._snapshot and Session._snapshot.identity
     local source = identity and identity.source
-    -- 进度要在时长之后推：微信时长上报也会写云端位置，最后落地的必须是精确进度。
+    -- 进度要在时长之后推：微信开着的书时长先让给进度请求（坐标和时长同一条 /book/read），最后落地的才是本地位置。
     if source then source:onEvent("reading_stopped", { identity = identity }) end
     lap("event")
     local waiting, progress_saved = 2, false

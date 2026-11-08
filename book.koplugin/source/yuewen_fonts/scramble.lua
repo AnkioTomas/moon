@@ -9,7 +9,7 @@ QQ阅读正文乱序还原：Fock 解出的是带反爬样式的 HTML，真正�
 @module source.yuewen_fonts.scramble
 --]]--
 
-local Glyph = require("source.yuewen_fonts.glyph")
+local Glyph = require("utils.glyph")
 
 local Scramble = {}
 

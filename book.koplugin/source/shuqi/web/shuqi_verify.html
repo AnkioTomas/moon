@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>月读</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+main{max-width:520px;margin:12vh auto;padding:24px}
+.panel{padding:24px}#captcha-element{min-height:180px;margin:24px 0}
+#status{overflow-wrap:anywhere;white-space:pre-line}button[hidden]{display:none}
+</style>
+</head>
+<body>
+<main><section class="panel">
+<h1 id="title">月读</h1>
+<p id="instruction"></p>
+<div id="captcha-element"></div>
+<p id="status" role="status" aria-live="polite"></p>
+<button id="retry" type="button" hidden></button>
+</section></main>
+<script src="/shuqi_verify.js"></script>
+</body>
+</html>

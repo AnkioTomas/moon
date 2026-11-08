@@ -4,8 +4,7 @@
 @module koplugin.book.source.jdread.setting
 --]]
 
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.jdread")
 
 local Setting = {}
 
@@ -147,14 +146,21 @@ Setting.browser = {
     domain = "e.m.jd.com",
     scope = "cookie",
     login = "https://e.m.jd.com/",
-    check = "https://e.m.jd.com/",
+    check = function()
+        local client = require("source.jdread.client"):new{}
+        return client:apiUrl("/jdread/api/bookshelf/sort")
+    end,
+    check_json = { path = "result_code", ok = { 0 } },
     icon = "https://e.m.jd.com/toc-web/ico.png",
     isAuthorized = function()
         return require("source.jdread.auth").hasSession()
             and not require("source.auth").expired("jdread")
     end,
     apply = function(payload, cb)
-        require("source.jdread.auth").importBrowserAsync(payload, cb)
+        return require("source.jdread.auth").importBrowserAsync(payload, function(ok, err)
+            if ok then require("source.registry").reload() end
+            cb(ok, err)
+        end)
     end,
 }
 
@@ -163,17 +169,18 @@ Setting.browser = {
 function Setting.rows()
     local Row = require("ui.themes.widgets.row")
     local Auth = require("source.jdread.auth")
+    local CookieLogin = require("source.cookie_login")
     local rows = {
         function(iw)
             local status, status_on = Setting.rowStatus()
             return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "account_circle", title = _("京东读书账号"),
                 status = status, status_on = status_on,
-                subtitle = not status_on and _("也可在「远程管理」里用浏览器授权登录") or nil,
                 callback = function() showQrLogin() end })
         end,
+        CookieLogin.browserRow(),
     }
     if not Auth.hasSession() then return rows end
-    rows[#rows + 1] = require("source.logout").row(SOURCE_ID, _("确定退出京东读书账号？"), Auth.clearSession)
+    rows[#rows + 1] = require("source.logout").row("jdread", _("确定退出京东读书账号？"), Auth.clearSession)
     return rows
 end
 

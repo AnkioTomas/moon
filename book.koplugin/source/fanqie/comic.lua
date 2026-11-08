@@ -10,7 +10,7 @@ local Gcm = require("crypto.gcm")
 local Cbz = require("source.cbz")
 local Image = require("utils.image")
 local Paths = require("utils.paths")
-local _ = require("gettext")
+local _ = require("l10n").get("source.fanqie")
 
 local Comic = {}
 

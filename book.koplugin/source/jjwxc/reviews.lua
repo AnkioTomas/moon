@@ -13,7 +13,7 @@ local JSON = require("json")
 local Request = require("http.request")
 local ReviewLocate = require("book.review_locate")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.jjwxc")
 
 local Reviews = {}
 
@@ -56,14 +56,17 @@ local function get(name, query, novel_id, chapter_id, cb)
     end)
 end
 
---- 统计回包 → 有评论的段落（未定位）；章末总评（-2）不是段，丢弃。
+--- 统计回包 → 有评论的段落与章末（-2）；源入口按粒度分开。
 ---@param data table
----@return JjwxcReviewHotspot[]
+---@return JjwxcReviewHotspot[]|nil, string|nil
 function Reviews.hotspots(data)
+    if next(data) and data[1] == nil then return nil, _("响应无效") end
     local out = {}
     for _idx, row in ipairs(data) do
-        local pid, total = tonumber(row.paragraph_id), tonumber(row.comment_total) or 0
-        if pid and pid > 0 and total > 0 then
+        if type(row) ~= "table" then return nil, _("响应无效") end
+        local pid, total = tonumber(row.paragraph_id), tonumber(row.comment_total)
+        if not pid or not total or total < 0 then return nil, _("响应无效") end
+        if (pid > 0 or pid == -2) and total > 0 then
             out[#out + 1] = { range = tostring(pid), text = "", total = total }
         end
     end
@@ -71,15 +74,29 @@ function Reviews.hotspots(data)
     return out
 end
 
---- 评论表情是「[紫糖]」这样的文字标记，原样保留；正文里偶有 HTML 实体 / 换行标签。
+--- 表情标记交给主题行内图片渲染；保留原文供离线缺图时显示。
+---@param content string
+---@return table<string, { url: string, headers: table<string, string> }>|nil
+function Reviews.inlineImages(content)
+    local emoticons = require("source.jjwxc.emoticons")
+    local images = {}
+    for placeholder in content:gmatch("%b[]") do
+        local url = emoticons[placeholder]
+        if url then images[placeholder] = { url = url, headers = { Referer = "https://www.jjwxc.net/" } } end
+    end
+    return next(images) and images or nil
+end
+
+--- 正文里偶有 HTML 实体 / 换行标签。
 ---@param row table
 ---@return WechatReview
 function Reviews.item(row)
-    local body = Text.xmlDecode((tostring(row.commentBody or ""):gsub("<[Bb][Rr]%s*/?>", "\n")))
+    local body = Text.stripHtml(row.commentBody)
     return {
         id = tostring(row.commentId or ""),
         author = tostring(row.commentAuthor or ""),
-        content = Text.trim(body),
+        content = body,
+        inline_images = Reviews.inlineImages(body),
         likes = tonumber(row.agreenum) or 0,
         images = {},
         time = tonumber(row.comment_date_time) or 0,
@@ -93,11 +110,14 @@ end
 function Reviews.page(data, offset)
     local list = data.commentList
     if type(list) ~= "table" then return nil, _("晋江段评响应缺少评论列表") end
+    if next(list) and list[1] == nil then return nil, _("晋江段评响应缺少评论列表") end
+    local total = tonumber(data.commentTotal)
+    if not total or total < 0 then return nil, _("晋江段评响应缺少评论列表") end
     local items = {}
     for _idx, row in ipairs(list) do
-        if type(row) == "table" then items[#items + 1] = Reviews.item(row) end
+        if type(row) ~= "table" or not row.commentId then return nil, _("晋江段评响应缺少评论列表") end
+        items[#items + 1] = Reviews.item(row)
     end
-    local total = tonumber(data.commentTotal) or #items
     local next_offset = offset + #items
     return { items = items, total = total, max_idx = next_offset, more = #items > 0 and next_offset < total }
 end

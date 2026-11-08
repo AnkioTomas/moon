@@ -8,7 +8,7 @@
 
 local lfs = require("libs/libkoreader-lfs")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.local")
 local T = require("ffi/util").template
 local Job = require("workers.job")
 local Common = require("source.local.common")
@@ -375,14 +375,17 @@ local function pullProgress(self, run, done)
             require("utils.log").warn("book webdav progress list failed", err)
             return done()
         end
-        local by_key = {}
+        local by_key, metadata = {}, {}
         for _idx, rel in ipairs(run.files) do by_key[sidecarKey(rel)] = rel end
+        for _idx, entry in ipairs(entries) do metadata[entry.name] = true end
         local pending = {}
         for _idx, entry in ipairs(entries) do
             local rel = by_key[entry.name:match("^(.+)%.po$") or ""]
             local pos = rel and ProgressDB.get(SOURCE_ID, remoteStableId(rel))
-            if rel and entry.mtime and (not pos or entry.mtime > (tonumber(pos.updated_at) or 0)) then
-                pending[#pending + 1] = { rel = rel, mtime = entry.mtime }
+            if rel and entry.mtime and (not pos or pos.sync_status ~= 0
+                and entry.mtime > (tonumber(pos.updated_at) or 0)) then
+                pending[#pending + 1] = { rel = rel, mtime = entry.mtime,
+                    metadata_present = metadata[entry.name .. ".json"] == true }
             end
         end
         eachAsync(pending, function(item, next_item, i)
@@ -396,7 +399,7 @@ local function pullProgress(self, run, done)
                     require("utils.log").warn("book webdav progress failed", item.rel, err)
                 end
                 next_item()
-            end)
+            end, { metadata_present = item.metadata_present })
         end, done)
     end)
 end
@@ -430,7 +433,8 @@ local function pullCovers(self, run, done)
             run.report(T(_("正在下载封面 %1"), rel), i, #pending)
             local target = coverPath(remoteStableId(rel))
             ensureParent(target)
-            run.active = self.dav:getAsync(coverRemotePath(self, rel), target .. ".part", nil, function(ok)
+            run.active = self.dav:getAsync(coverRemotePath(self, rel), target .. ".part",
+                { timeout = require("http.timeout").net(1) }, function(ok)
                 if run.cancelled then return end
                 if ok then
                     os.remove(target)
@@ -668,6 +672,7 @@ end
 ---@param run WebdavRun
 ---@param done fun(err: string|nil)
 local function uploadCovers(self, run, done)
+    if not uploadEnabled() then return done() end
     local pending = {}
     for _idx, rel in ipairs(run.files) do
         if not run.covers[sidecarKey(rel)]
@@ -677,10 +682,11 @@ local function uploadCovers(self, run, done)
     end
     eachAsync(pending, function(rel, next_item, i)
         run.report(T(_("正在上传封面 %1"), rel), i, #pending)
-        run.active = self.dav:putFileAsync(coverRemotePath(self, rel), coverPath(remoteStableId(rel)), function()
+        run.active = self.dav:putFileAsync(coverRemotePath(self, rel), coverPath(remoteStableId(rel)), function(ok, err)
             if run.cancelled then return end
+            if not ok then require("utils.log").warn("book webdav cover upload failed", rel, err) end
             next_item()
-        end)
+        end, require("http.timeout").net(1))
     end, done)
 end
 
@@ -1083,7 +1089,7 @@ function Webdav.pushBookAsync(self, stable_id, cover, cb)
                 active = self.dav:ensurePathAsync(moonPath(self, "Cover"), function(ok_dir, dir_err)
                     if cancelled then return end
                     if not ok_dir then return afterCover(false, dir_err) end
-                    active = self.dav:putFileAsync(remote, path, afterCover)
+                    active = self.dav:putFileAsync(remote, path, afterCover, require("http.timeout").net(1))
                 end)
             end
         end

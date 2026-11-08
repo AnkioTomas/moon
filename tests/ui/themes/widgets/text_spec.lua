@@ -67,3 +67,53 @@ canvas = Kit.canvas()
 local plain = Text.line("body", "正文", { color = 0x00 })
 plain:paintTo(canvas, 5, 6)
 Assert.eq(canvas.ops[#canvas.ops].op, "colorblit", "灰色文字走原生灰度路径")
+
+do
+    local images = {}
+    package.loaded["ui.themes.widgets.image"] = {
+        widget = function(opts)
+            local image = {
+                opts = opts,
+                paintTo = function(self, _bb, x, y) self.painted = { x, y } end,
+                free = function(self) self.freed = true end,
+            }
+            images[#images + 1] = image
+            return image
+        end,
+    }
+    local rich = Text.box("body", "甲[捂脸]乙\n[未知][捂脸]", 100, {
+        face = { size = 10 }, height = 30, transparent = true,
+        inline_images = { ["[捂脸]"] = { url = "https://pic.test/emoji.png", headers = { Referer = "fixture" } } },
+    })
+    Assert.eq(rich.text, "甲　乙\n[未知]　", "已知表情占一字宽，未知标记保留")
+    Assert.len(images, 2, "同一表情重复出现要分别占位")
+    local positions = {}
+    rich.virtual_line_num = 1
+    rich.vertical_string_list = { { end_offset = 3 }, { end_offset = 9 } }
+    function rich:_getXYForCharPos(pos)
+        positions[#positions + 1] = pos
+        return pos == 2 and 10 or 50, pos == 2 and 0 or 10, pos == 2 and 1 or 2
+    end
+    rich:paintTo(Kit.canvas(), 5, 6)
+    Assert.eq(positions[1], 2, "字符位置按 UTF-8 字符算，不按字节算")
+    Assert.eq(positions[2], 9, "换行及未知占位符计入后续字符位置")
+    Assert.eq(images[1].painted[1], 15)
+    Assert.eq(images[2].painted[2], 16)
+    Assert.eq(images[1].opts.headers.Referer, "fixture")
+    images[1].painted, images[2].painted = nil, nil
+    rich.vertical_string_list[1].idx_to_substitute_with_ellipsis = 2
+    rich.height = 10
+    rich:paintTo(Kit.canvas(), 0, 0)
+    Assert.is_nil(images[1].painted, "被省略号替换的表情不画")
+    Assert.is_nil(images[2].painted, "超出可见高度的表情不画")
+    rich:free()
+    Assert.is_true(images[1].freed and images[2].freed, "释放文字同时取消图片与迟到回调")
+
+    local composite = Text.box("body", "甲😀👍🏽👩‍💻❤️乙", 100, { emoji = true })
+    Assert.eq(composite.text, "甲　　　　乙", "复合 emoji 各占一个字符槽")
+    Assert.matches(images[3].opts.src, "/1f600%.png$")
+    Assert.matches(images[4].opts.src, "/1f44d%-1f3fd%.png$")
+    Assert.matches(images[5].opts.src, "/1f469%-200d%-1f4bb%.png$")
+    composite:free()
+    Assert.eq(Text.box("body", "甲😀乙", 100).text, "甲😀乙", "其它控件不改变旧的文字行为")
+end

@@ -4,12 +4,12 @@
 @module source.jjwxc._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.jjwxc")
 
 return {
     id = "jjwxc",
     name = _("晋江文学城"),
     type = "chapter",
     description = _("晋江文学城书架与在线阅读"),
-    abilities = { _("搜索与发现"), _("书架同步"), _("VIP 章节"), _("他人段评") },
+    abilities = { _("搜索与发现"), _("分类书库"), _("书架同步"), _("VIP 章节"), _("他人段评"), _("章节评论") },
 }

@@ -2,7 +2,9 @@
 微信读书数据源门面（仅异步网络）
 
 eink.lua 管扫码会话与 App 接口，auth.lua 管网页会话。
-进度按章节原文字符坐标同步；时长从本地统计补报，并保留最新云端位置。
+进度与时长都走 App ``/book/read``：进度带本地坐标和还没报的时长。
+跨小时，或补报离线积压，改走 ``/book/batchUploadProgress``。
+时长单独上报只发生在进度已同步、书也没开着的时候，坐标用上次报上去的本地位置。
 划线经 notes.lua / annotations.lua 与网页 range 互定位。
 
 @module koplugin.book.source.wechat
@@ -25,7 +27,7 @@ local App = require("source.wechat.app")
 local Eink = require("source.wechat.eink")
 local logger = require("utils.log")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 local WeChat = {}
 
@@ -39,6 +41,10 @@ end
 ---@field cfg table
 ---@field _client table
 ---@field _covers table<string, string>
+---@field _page_sync_timer function|nil
+---@field _page_sync_job table|nil
+---@field _page_sync_again boolean|nil
+---@field _presence table|nil
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -55,6 +61,10 @@ function WeChat.new()
         cfg = cfg,
         _client = Client,
         _covers = {},
+        _page_sync_timer = nil,
+        _page_sync_job = nil,
+        _page_sync_again = false,
+        _presence = nil,
     }, Source)
 end
 
@@ -84,11 +94,289 @@ function Source:configured()
     return Auth.hasSession()
 end
 
---- 开章只补报已落库的时长；进度由阅读会话在解决冲突后推送，不能在拉取前抢写。
+local PAGE_PROGRESS_SYNC_DELAY = 5
+
+---@param session ReaderSessionSnapshot|nil
+---@param identity BookIdentity
+---@return boolean
+local function isCurrentBook(session, identity)
+    local id = session and session.identity
+    return id ~= nil and id.source_id == identity.source_id and id.stable_id == identity.stable_id
+end
+
+local schedulePageProgressSync
+
+---@param self WechatSource
+---@param identity BookIdentity
+local function pushPageProgress(self, identity)
+    if self._page_sync_job then
+        self._page_sync_again = true
+        return
+    end
+    if not self:configured() or not require("ui/network/manager"):isConnected() then return end
+
+    local job
+    job = self:syncProgressAsync({ identity = identity, dirty_only = true }, function(result)
+        require("ui/uimanager"):nextTick(function()
+            if self._page_sync_job ~= job then return end
+            self._page_sync_job = nil
+            if not self._page_sync_again then return end
+            self._page_sync_again = false
+            if not result or (result.pushed or 0) == 0 then return end
+
+            local row = require("book.progress_db").get(self.id, identity.stable_id)
+            if not row or row.sync_status ~= 0 or not self:configured()
+                or not require("ui/network/manager"):isConnected() then
+                return
+            end
+            local current = require("reader.session").current()
+            if not current or not isCurrentBook(current, identity) then
+                pushPageProgress(self, identity)
+            elseif current.progress_sync_ready ~= false then
+                schedulePageProgressSync(self, identity)
+            end
+        end)
+    end)
+    self._page_sync_job = job
+end
+
+---@param self WechatSource
+---@param identity BookIdentity
+schedulePageProgressSync = function(self, identity)
+    if self._page_sync_timer then return end
+
+    local timer
+    timer = function()
+        if self._page_sync_timer ~= timer then return end
+        self._page_sync_timer = nil
+        local Session = require("reader.session")
+        local session = Session.current()
+        if not isCurrentBook(session, identity) or session.progress_sync_ready == false
+            or not require("ui/network/manager"):isConnected() then
+            return
+        end
+        if self._presence and self._presence.busy then
+            schedulePageProgressSync(self, session.identity)
+            return
+        end
+        pushPageProgress(self, session.identity)
+    end
+    self._page_sync_timer = timer
+    require("ui/uimanager"):scheduleIn(PAGE_PROGRESS_SYNC_DELAY, timer)
+end
+
+---@param self WechatSource
+local function stopPageProgressSync(self)
+    if self._page_sync_timer then
+        require("ui/uimanager"):unschedule(self._page_sync_timer)
+        self._page_sync_timer = nil
+    end
+    self._page_sync_again = self._page_sync_job ~= nil
+end
+
+local PRESENCE_INTERVAL = 30
+
+---@param self WechatSource
+local function stopPresence(self)
+    local presence = self._presence
+    self._presence = nil
+    if not presence then return end
+    if presence.timer then require("ui/uimanager"):unschedule(presence.timer) end
+    if presence.job then presence.job.cancel() end
+end
+
+---@param self WechatSource
+---@param presence table
+---@param position table
+---@param cb fun(data: table|nil, err: string|nil)
+local function reportPresence(self, presence, position, cb)
+    local Protocol = require("source.wechat.protocol")
+    local web_position = {}
+    for key, value in pairs(position) do web_position[key] = value end
+    web_position.psvts = presence.session.psvts
+    web_position.pclts = presence.session.pclts
+    web_position.token = presence.session.token
+    local referer = Protocol.readerUrl(web_position.book_id)
+
+    local function sendRead()
+        web_position.elapsed_seconds = 0
+        local finished = false
+        local job = self._client:reportReadAsync(Protocol.makeReadPayload(web_position), referer,
+            function(data, err)
+                finished = true
+                cb(data, err)
+            end)
+        if not finished and self._presence == presence then presence.job = job end
+    end
+
+    if presence.session.entered then
+        sendRead()
+        return
+    end
+    local finished = false
+    local job = self._client:reportReadAsync(Protocol.makeEnterReadPayload(web_position), referer,
+        function(data, err)
+            finished = true
+            if not data then
+                cb(nil, err)
+                return
+            end
+            presence.session.entered = true
+            sendRead()
+        end)
+    if not finished and self._presence == presence then presence.job = job end
+end
+
+---@param self WechatSource
+---@param presence table
+local function beatPresence(self, presence)
+    if self._presence ~= presence then return end
+    presence.timer = nil
+    local function schedule(delay)
+        if self._presence ~= presence or presence.timer then return end
+        local timer
+        timer = function()
+            if self._presence ~= presence or presence.timer ~= timer then return end
+            presence.timer = nil
+            beatPresence(self, presence)
+        end
+        presence.timer = timer
+        require("ui/uimanager"):scheduleIn(delay or PRESENCE_INTERVAL, timer)
+    end
+    if presence.busy or not require("ui/network/manager"):isConnected() then
+        schedule()
+        return
+    end
+    local session = require("reader.session").current()
+    if not isCurrentBook(session, presence.identity) then
+        stopPresence(self)
+        return
+    end
+    if session.progress_sync_ready == false then
+        schedule()
+        return
+    end
+    if self._page_sync_timer or self._page_sync_job then
+        schedule(PAGE_PROGRESS_SYNC_DELAY)
+        return
+    end
+
+    local identity, pos = presence.identity, presence.position
+    local chapter_idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
+    local chapter_uid = chapter_idx and Toc.uid(identity.source_id, identity.stable_id, chapter_idx)
+    if not chapter_idx or not chapter_uid then
+        schedule()
+        return
+    end
+    local row = require("book.progress_db").get(self.id, identity.stable_id)
+    local bridge = row and row.extra
+    local offset = bridge and tonumber(bridge.chapter_idx) == chapter_idx
+        and tonumber(bridge.chapter_offset) or 0
+    local position = {
+        book_id = identity.stable_id,
+        chapter_uid = chapter_uid,
+        chapter_idx = Toc.sourceIndex(identity.source_id, identity.stable_id, chapter_idx) or chapter_idx,
+        chapter_offset = offset,
+        summary = pos.chapter_title or "",
+        progress = math.floor(Progress.clampFraction(pos.fraction) * 100 + 0.5),
+    }
+
+    schedule()
+    presence.busy = true
+    local function attempt(force)
+        if self._presence ~= presence then return end
+        local finished = false
+        local job = require("source.wechat.context").sessionAsync(self._client,
+            identity.stable_id, force, function(report_session, err)
+                finished = true
+                if self._presence ~= presence then return end
+                if not report_session then
+                    presence.busy = false
+                    logger.warn("wechat presence session failed", identity.stable_id, err)
+                    return
+                end
+                presence.session = report_session
+                reportPresence(self, presence, position, function(data, report_err)
+                    if self._presence ~= presence then return end
+                    if not data and not force then
+                        presence.job = nil
+                        attempt(true)
+                        return
+                    end
+                    presence.busy = false
+                    presence.job = nil
+                    if not data then
+                        logger.warn("wechat presence heartbeat failed", identity.stable_id, report_err)
+                    end
+                end)
+            end)
+        if not finished and self._presence == presence then presence.job = job end
+    end
+    attempt(false)
+end
+
+---@param self WechatSource
+---@param identity BookIdentity
+---@param position ProgressPosition|nil
+local function touchPresence(self, identity, position)
+    if not self:configured() then return end
+    local presence = self._presence
+    if presence and (presence.identity.source_id ~= identity.source_id
+        or presence.identity.stable_id ~= identity.stable_id) then
+        stopPresence(self)
+        presence = nil
+    end
+    if not presence then
+        presence = { identity = identity, position = position or {}, busy = false }
+        self._presence = presence
+        beatPresence(self, presence)
+        return
+    end
+    presence.identity = identity
+    presence.position = position or presence.position
+end
+
+--- 开章补报已落库时长；阅读中按页节流推送进度，开书冲突决议前不推。
 ---@param event string
 ---@param payload table|nil
 function Source:onEvent(event, payload)
+    if event == "page_changed" then
+        local identity = payload and payload.identity
+        local session = require("reader.session").current()
+        if not identity or identity.source_id ~= self.id or not isCurrentBook(session, identity)
+            or not self:configured() then
+            return
+        end
+        if self._presence then touchPresence(self, identity, payload.position) end
+        require("reader.session.progress").save(session, function(ok)
+            if ok and session.progress_sync_ready ~= false
+                and require("ui/network/manager"):isConnected() then
+                schedulePageProgressSync(self, identity)
+            end
+        end)
+        return
+    end
+    if event == "reading_stopped" then
+        stopPageProgressSync(self)
+        stopPresence(self)
+        return
+    end
+    if event == "reading_resumed" then
+        if payload and payload.identity and payload.identity.source_id == self.id then
+            touchPresence(self, payload.identity, payload.position)
+        end
+        return
+    end
+    if event == "reading_started" then
+        if payload and payload.identity and payload.identity.source_id == self.id then
+            touchPresence(self, payload.identity, payload.position)
+        end
+        return
+    end
     if event == "chapter_changed" then
+        if payload and payload.identity and payload.identity.source_id == self.id then
+            touchPresence(self, payload.identity, payload.position)
+        end
         -- 上一章的时长这时已落库：有网就顺手补报（Stats.push 自带在飞去重，没网留作脏行）。
         if self:configured() and require("ui/network/manager"):isConnected() then
             require("book.stats").push(self)
@@ -157,6 +445,7 @@ end
 --- 关闭这个实例：清实例自己的封面表。Context（psvts）与 Toc 是进程级的，
 --- 换源时关旧实例若把它们一起清了，正在阅读那本书的上报会报「请先打开该章节」。
 function Source:close()
+    stopPresence(self)
     self._covers = {}
 end
 
@@ -219,15 +508,21 @@ function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
     local report = opts.on_progress or function(...) end
 
-    -- 全量路（首次 / 强制 / dirty_only / 增量对不齐回退）：行为与原来一致，顺带存下游标。
+    local client = self._client
+    local remote = {
+        shelfSyncAsync = function(_, done)
+            return client:shelfSyncAsync(done, true, opts.force == true)
+        end,
+        addToShelfAsync = function(_, id, done) return client:addToShelfAsync(id, done) end,
+        removeFromShelfAsync = function(_, id, done) return client:removeFromShelfAsync(id, done) end,
+    }
+
+    -- 本地脏书架只推加删，不拉全量快照。
+    if opts.dirty_only then return Shelf.syncAsync(self.id, remote, nil, opts, cb) end
+
+    -- 全量路（手动强刷 / 首次 / 增量对不齐回退）：行为与原来一致，顺带存下游标。
     local function fullPull()
         local synckey
-        local client = self._client
-        local remote = {
-            shelfSyncAsync = function(_, done) return client:shelfSyncAsync(done, true) end,
-            addToShelfAsync = function(_, id, done) return client:addToShelfAsync(id, done) end,
-            removeFromShelfAsync = function(_, id, done) return client:removeFromShelfAsync(id, done) end,
-        }
         return Shelf.syncAsync(self.id, remote, function(wire)
             synckey = tonumber(wire.synckey) or synckey
             return Mapper.shelfList(wire, function(id, url) rememberCover(self, id, url) end).data
@@ -237,7 +532,14 @@ function Source:syncBooksAsync(opts, cb)
         end)
     end
 
-    if opts.dirty_only or opts.force then return fullPull() end
+    if opts.force then return fullPull() end
+    local pending_import = require("source.wechat.shelf_import")
+    if pending_import.size() then
+        return SourceBase.defer(cb, {
+            pulled = 0, pushed = 0, hidden = 0, conflicts = 0,
+            skipped = true, reason = "pending_import",
+        })
+    end
     local cursor = shelfCursor(self)
     if not cursor then return fullPull() end
 
@@ -632,17 +934,53 @@ function Source:getProgressAsync(identity, cb)
         end }
 end
 
+--- 未完结连载（按章购买，或公众号）。App 的 progress 封顶 99，读完标记另走 markstatus。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+local function openSerial(source_id, stable_id)
+    local book = require("book.books_db").get(source_id, stable_id)
+    local meta = book and book.meta
+    local data = meta and meta.source and meta.source.wechat
+    local pay = tonumber(data and data.pay_type or meta and meta.weread_pay) or 0
+    local typ = tonumber(data and data.book_type or meta and meta.weread_type)
+    local ended = data and data.ended
+    if ended == nil then ended = meta and meta.weread_ended end
+    ended = ended == true
+    local serial = math.floor(pay / 2) % 2 == 1 or typ == 3
+        or tostring(stable_id):sub(1, 7) == "MP_WXS_"
+    return serial and not ended
+end
+
+--- 这本书还没确认的阅读时长。和进度同一次 /book/read 报上去，服务端才肯改坐标。
+---@param source_id string
+---@param stable_id string
+---@return WechatAppHour[], integer[]
+local function pendingHours(source_id, stable_id)
+    local rows, ids = {}, {}
+    for _idx, row in ipairs(require("book.stats_db").unsyncedBySource(source_id, 500)) do
+        if row.stable_id == stable_id and (tonumber(row.duration) or 0) > 0 then
+            rows[#rows + 1] = row
+            ids[#ids + 1] = row.id
+        end
+    end
+    return App.hours(rows, App.timeZone()), ids
+end
+
 --- 上报阅读进度：需要 chapter_uid，优先复用 pos.extra 缓存的坐标，否则回查目录解析。
+--- 同一条请求带上这本书还没报的时长，成功后确认这些统计行，并把编码出的坐标写回 pos.extra。
 ---@param identity BookIdentity
 ---@param pos ProgressPosition|nil 缺省视为空位置
 ---@param cb fun(ok: boolean|nil, err: string|nil, meta?: { permanent?: boolean })
 ---@return { cancel: fun() }
 function Source:putProgressAsync(identity, pos, cb)
     pos = pos or {}
+    local reported = pos
     local frac = Progress.clampFraction(pos.fraction)
     local progress = math.max(0, math.min(100, math.floor(frac * 100 + 0.5)))
     local chapter_idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx) or 0
     local cancelled = false
+    local explicit_finish = false
     local resolve_job, push_job, position_job
     -- 只有 extra 记录的章与本次上报的章一致时才复用 uid，避免翻章后报错位置。
     local extra = pos.extra
@@ -653,13 +991,43 @@ function Source:putProgressAsync(identity, pos, cb)
         local source_idx = Toc.sourceIndex(identity.source_id, identity.stable_id, chapter_idx)
             or chapter_idx
         local function send(offset, summary, fraction)
+            local hours, hour_ids = pendingHours(self.id, identity.stable_id)
+            local serial = openSerial(self.id, identity.stable_id)
+            local mark_finished = explicit_finish or (progress == 100 and not serial)
             push_job = self._client:putProgressAsync(identity.stable_id, {
-                progress = progress, chapter_uid = uid, chapter_idx = source_idx,
+                progress = serial and math.min(progress, 99) or progress,
+                current_progress = progress,
+                chapter_uid = uid, chapter_idx = source_idx,
                 chapter_offset = offset, chapter_fraction = fraction, summary = summary,
                 book_version = extra and extra.book_version,
+                hours = hours,
             }, function(wire, push_err, meta)
                 if cancelled then return end
-                cb(wire and true or nil, push_err, meta)
+                if wire and #hour_ids > 0 then
+                    if not require("book.stats_db").markSynced(hour_ids) then
+                        logger.warn("wechat read hours confirm failed", identity.stable_id, #hour_ids)
+                    end
+                end
+                if wire then
+                    local bridge = reported.extra
+                    if type(bridge) ~= "table" then
+                        bridge = {}
+                        reported.extra = bridge
+                    end
+                    bridge.chapter_uid = tonumber(uid) or uid
+                    bridge.chapter_idx = chapter_idx
+                    bridge.chapter_offset = offset
+                    if type(summary) == "string" and summary ~= "" then bridge.summary = summary end
+                end
+                if not wire or not mark_finished then
+                    cb(wire and true or nil, push_err, meta)
+                    return
+                end
+                -- 时长已经在上面确认。读完接口失败只重推进度，小时桶不会再报一遍。
+                push_job = self._client:markFinishedAsync(identity.stable_id, function(marked, mark_err)
+                    if cancelled then return end
+                    cb(marked and true or nil, mark_err)
+                end)
             end)
         end
         if not pos.locator and pos.chapter_fraction == 0 then
@@ -691,6 +1059,7 @@ function Source:putProgressAsync(identity, pos, cb)
                 if not cancelled then cb(nil, missing, { permanent = true }) end
             end)
         else
+            explicit_finish = true
             resolve_job = self:loadTocAsync(identity, function(toc)
                 if cancelled then return end
                 local last = type(toc) == "table" and #toc or 0
@@ -722,14 +1091,52 @@ function Source:putProgressAsync(identity, pos, cb)
         end }
 end
 
---- 按 App 协议（``/book/read``）上报本地阅读时长，一本书一个请求，时长按小时分桶，
---- 离线攒下的时段联网后照原时间补报。成功的书确认其全部行，失败就停，其余行留给下一轮。
---- 统计行不含正文坐标，必须保留最新云端位置，不能用采样时的页比例伪造 chapterOffset。
+--- 这本书的时长先别报：进度还是脏的，或者书正开着。交给 putProgress 和本地坐标一次报。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+local function holdHours(source_id, stable_id)
+    local snap = require("reader.session").current()
+    local id = snap and snap.identity
+    if id and id.source_id == source_id and id.stable_id == stable_id then return true end
+    local row = require("book.progress_db").get(source_id, stable_id)
+    return row ~= nil and row.sync_status == 0
+end
+
+--- 上次进度确认时落下的本地坐标。没有章节 uid / 偏移，或目录对不上源章节序号，就返回 nil。
+---@param source_id string
+---@param stable_id string
+---@return table|nil
+local function savedPosition(source_id, stable_id)
+    local row = require("book.progress_db").get(source_id, stable_id)
+    local bridge = row and row.extra
+    local uid = bridge and tonumber(bridge.chapter_uid)
+    local offset = bridge and tonumber(bridge.chapter_offset)
+    if not row or row.sync_status == 0 or not uid or offset == nil then return nil end
+    local local_idx = tonumber(bridge.chapter_idx) or tonumber(row.chapter_idx) or 0
+    local source_idx = Toc.sourceIndex(source_id, stable_id, local_idx)
+    if source_idx == nil then return nil end
+    local percent = math.max(0, math.min(100, math.floor((tonumber(row.fraction) or 0) * 100 + 0.5)))
+    return {
+        chapter_uid = uid,
+        chapter_idx = source_idx,
+        chapter_offset = offset,
+        chapter_progress = math.max(0, math.min(100,
+            math.floor((tonumber(row.chapter_fraction) or 0) * 100 + 0.5))),
+        current_progress = percent,
+        summary = bridge.summary or "",
+        book_version = bridge.book_version or 0,
+    }
+end
+
+--- 补报离线积压的阅读时长：全部书一次 ``POST /book/batchUploadProgress``，每本 isResendReadingInfo=1。
+--- 进度还没推，或者书正开着：这些行不报也不确认，留给 putProgress 带上本地坐标。
+--- 进度已同步：用上次写入的本地坐标；没有这份坐标才退回云端位置。
+--- 不能用页比例伪造 chapterOffset。整批成功才确认，失败一本都不确认。
 ---@param rows table[]|nil
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Source:pushStatsAsync(rows, cb)
-    local synced = {}
     local order, books = {}, {}
     for _idx, row in ipairs(rows or {}) do
         local book = books[row.stable_id]
@@ -740,6 +1147,15 @@ function Source:pushStatsAsync(rows, cb)
         end
         book.rows[#book.rows + 1] = row
     end
+    local pending = {}
+    for _idx, book in ipairs(order) do
+        if not holdHours(self.id, book.id) then pending[#pending + 1] = book end
+    end
+    if #pending == 0 then
+        cb({ ok = true, synced_ids = {} })
+        return { cancel = function() end }
+    end
+    local synced = {}
     local cancelled, job = false, nil
     local function finish(err)
         if #synced == 0 and err then
@@ -751,7 +1167,7 @@ function Source:pushStatsAsync(rows, cb)
     local function confirm(book)
         for _idx, row in ipairs(book.rows) do synced[#synced + 1] = row.id end
     end
-    job = self._client:guestTokenAsync(function(token, token_err)
+    local token_job = self._client:guestTokenAsync(function(token, token_err)
         if cancelled then return end
         if not token then
             finish(token_err)
@@ -762,12 +1178,63 @@ function Source:pushStatsAsync(rows, cb)
             finish(_("请先扫码登录微信读书墨水屏"))
             return
         end
-        local index = 0
+        local index, bodies = 0, {}
+        local function flush()
+            job = self._client:reportBatchAsync(bodies, function(data, err)
+                if cancelled then return end
+                if not data then
+                    logger.warn("wechat app batch report failed", #bodies, err)
+                    finish(err)
+                    return
+                end
+                for _idx, book in ipairs(pending) do confirm(book) end
+                logger.info("wechat app batch report ok", "books", #bodies)
+                finish()
+            end)
+        end
         local function nextBook()
             index = index + 1
-            local book = order[index]
+            local book = pending[index]
             if not book then
-                finish()
+                flush()
+                return
+            end
+            local function spanEnd(rows)
+                local at = 0
+                for _idx, row in ipairs(rows) do
+                    local end_at = (tonumber(row.start_time) or 0) + (tonumber(row.duration) or 0)
+                    if end_at > at then at = end_at end
+                end
+                return at > 0 and at or nil
+            end
+            local function take(where)
+                local current = where.current_progress
+                local serial = openSerial(self.id, book.id)
+                local book_progress = current
+                if serial and tonumber(current) then book_progress = math.min(current, 99) end
+                bodies[#bodies + 1] = App.readBody({
+                    vid = creds.vid,
+                    device_id = creds.device_id,
+                    install_id = Eink.installId(),
+                    guest_token = token,
+                    book_id = book.id,
+                    chapter_uid = where.chapter_uid,
+                    chapter_idx = where.chapter_idx,
+                    chapter_offset = where.chapter_offset,
+                    chapter_progress = where.chapter_progress,
+                    progress = book_progress,
+                    current_progress = current,
+                    summary = where.summary or "",
+                    book_version = where.book_version or 0,
+                    hours = App.hours(book.rows, App.timeZone()),
+                    read_update = spanEnd(book.rows),
+                    resend = 1,
+                })
+                nextBook()
+            end
+            local where = savedPosition(self.id, book.id)
+            if where then
+                take(where)
                 return
             end
             job = self._client:getProgressAsync(book.id, function(wire, progress_err)
@@ -778,12 +1245,7 @@ function Source:pushStatsAsync(rows, cb)
                     finish(_("缺少章节信息"))
                     return
                 end
-                local body = App.readBody({
-                    vid = creds.vid,
-                    device_id = creds.device_id,
-                    install_id = Eink.installId(),
-                    guest_token = token,
-                    book_id = book.id,
+                take({
                     chapter_uid = tonumber(node.chapterUid),
                     chapter_idx = node.chapterIdx,
                     chapter_offset = node.chapterOffset,
@@ -791,24 +1253,12 @@ function Source:pushStatsAsync(rows, cb)
                     current_progress = node.progress,
                     summary = node.summary or "",
                     book_version = node.bookVersion or 0,
-                    hours = App.hours(book.rows, App.timeZone()),
                 })
-                job = self._client:reportAppReadAsync(body, function(data, err)
-                    if cancelled then return end
-                    if not data then
-                        logger.warn("wechat app report failed", book.id, err)
-                        finish(err)
-                        return
-                    end
-                    logger.info("wechat app report ok", book.id, "rows", #book.rows,
-                        "seconds", body.readingTime, "hours", #body.hours, "first", body.hours[1] and body.hours[1].startOfHour)
-                    confirm(book)
-                    nextBook()
-                end)
             end)
         end
         nextBook()
     end)
+    if token_job then job = token_job end
     return { cancel = function()
         cancelled = true
         if job and job.cancel then job.cancel() end

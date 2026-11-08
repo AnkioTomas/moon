@@ -8,9 +8,10 @@
 --]]
 
 local JSON = require("json")
+local Charset = require("utils.charset")
 local Request = require("http.request")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.jjwxc")
 
 local Client = {}
 
@@ -81,6 +82,23 @@ function Client.rankPageAsync(channel_id, offset, cb)
     return storeGet(STORE .. "/getFullPage?versionCode=185&channelMore=1&channelBody=" .. body, cb)
 end
 
+--- 官网高级分类库；匿名请求，筛选编码由页面表单提供。
+---@param params table<string, string|number>
+---@param cb fun(page: table|nil, err: string|nil)
+---@return HttpJob
+function Client.categoryAsync(params, cb)
+    return Request.get("https://m.jjwxc.com/assort?" .. Text.formEncode(params), {
+        headers = { ["User-Agent"] = APP_HEADERS["User-Agent"] },
+        timeout = require("http.timeout").net(1),
+        cache_ttl = 600,
+    }, function(raw, err, res)
+        if not raw then cb(nil, err and tostring(err) or _("请求失败")); return end
+        local html, reason = Charset.toUtf8(raw, Request.header(res, "Content-Type"))
+        if not html then cb(nil, reason); return end
+        cb(require("source.jjwxc.mapper").category(html))
+    end)
+end
+
 ---@param keyword string
 ---@param cb fun(wire: table|nil, err: string|nil)
 ---@return HttpJob
@@ -113,7 +131,9 @@ end
 ---@return { cancel: fun() }
 function Client.contentAsync(novel_id, chapter_id, cb)
     local cancelled, job = false, nil
-    job = appGet("/chapterContent", { novelId = novel_id, chapterId = chapter_id }, function(wire, err)
+    local pending = true
+    local initial = appGet("/chapterContent", { novelId = novel_id, chapterId = chapter_id }, function(wire, err)
+        pending = false
         if cancelled then return end
         if wire and type(wire.content) == "string" and wire.content ~= "" then
             cb(wire.content)
@@ -124,11 +144,14 @@ function Client.contentAsync(novel_id, chapter_id, cb)
             cb(nil, err or (wire and wire.message) or _("晋江章节内容为空"))
             return
         end
-        job = protocol.contentAsync(novel_id, chapter_id, cb)
+        job = protocol.contentAsync(novel_id, chapter_id, function(text, why, kind)
+            if not cancelled then cb(text, why, kind) end
+        end)
     end)
+    if pending then job = initial end
     return { cancel = function()
         cancelled = true
-        job:cancel()
+        if job then job:cancel() end
     end }
 end
 

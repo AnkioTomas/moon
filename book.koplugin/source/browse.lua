@@ -13,23 +13,40 @@ local Browse = {}
 ---@param cb fun(res: { data: Book[], groups: StoreChipGroup[] }|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Browse.pages(fetch, limit, groups, cb)
-    local handle, books = {}, {}
+    local handle, books, seen = {}, {}, {}
     local function more(page)
-        handle.inner = fetch(page, function(list, err, has_more)
+        if handle.cancelled then return end
+        local pending = true
+        local inner = fetch(page, function(list, err, has_more)
+            pending = false
+            if handle.cancelled then return end
+            handle.inner = nil
             if not list then
                 cb(nil, err)
                 return
             end
-            for _idx, book in ipairs(list) do books[#books + 1] = book end
+            local added = 0
+            for _idx, book in ipairs(list) do
+                if #books >= limit then break end
+                local key = type(book) == "table" and book.stable_id
+                    and (book.source_id or "") .. "\0" .. book.stable_id
+                if not key or not seen[key] then
+                    if key then seen[key] = true end
+                    books[#books + 1], added = book, added + 1
+                end
+            end
             if #books < limit and #list > 0 and has_more ~= false then
+                if added == 0 then cb(nil, require("gettext")("响应无效")); return end
                 more(page + 1)
                 return
             end
             cb({ data = books, groups = groups })
         end)
+        if pending then handle.inner = inner end
     end
     more(1)
     function handle.cancel()
+        handle.cancelled = true
         if handle.inner then handle.inner.cancel() end
     end
     return handle

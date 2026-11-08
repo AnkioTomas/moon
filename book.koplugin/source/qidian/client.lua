@@ -10,7 +10,6 @@ chapterUpdateTime 必须是章节更新时间的 unix 秒，空字符串会把 g
 @module koplugin.book.source.qidian.client
 --]]
 
-require("l10n").apply()
 local Fock = require("source.qidian.fock")
 local JSON = require("json")
 local logger = require("utils.log")
@@ -18,7 +17,7 @@ local Mapper = require("source.qidian.mapper")
 local Request = require("http.request")
 local SourceBase = require("source.base")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qidian")
 
 local Client = {}
 
@@ -27,6 +26,12 @@ local WEB = "https://m.qidian.com"
 local UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) "
     .. "Version/16.0 Mobile/15E148 Safari/604.1"
 local PAGE_SIZE = 20
+local anon_csrf
+
+local function anonymousCookie()
+    if not anon_csrf then anon_csrf = "_csrfToken=" .. require("utils.random").hex(16) end
+    return anon_csrf
+end
 
 ---@return string|nil
 function Client.cookie()
@@ -42,6 +47,14 @@ function Client.csrf(cookie)
         cookie:match("^_csrfToken=([^;]+)") or cookie:match(";%s*_csrfToken=([^;]+)"))
     if not token or token == "" then return nil end
     return token
+end
+
+---@param cookie string|nil
+---@return string|nil
+function Client.guid(cookie)
+    local value = type(cookie) == "string" and (cookie:match("^ywguid=([^;]+)")
+        or cookie:match(";%s*ywguid=([^;]+)"))
+    return value and value:match("^%d+$") and value or nil
 end
 
 ---@param cookie string|nil
@@ -98,7 +111,7 @@ local function webGet(path, cookie, cb, cache_ttl)
     }, function(raw, err, res)
         if not raw then
             local code = res and tonumber(res.code)
-            if code == 302 or code == 403 then
+            if cookie and cookie ~= "" and (code == 302 or code == 403) then
                 cb(nil, loginGone(cookie or ""))
             else
                 cb(nil, err and tostring(err) or _("请求失败"))
@@ -133,7 +146,7 @@ local function apiGet(path, params, cookie, cb)
     }, function(raw, err, res)
         if not raw then
             local code = res and tonumber(res.code)
-            if code == 302 or code == 403 then
+            if cookie:find("ywkey=", 1, true) and (code == 302 or code == 403) then
                 cb(nil, loginGone(cookie))
             else
                 cb(nil, err and tostring(err) or _("请求失败"))
@@ -243,7 +256,7 @@ end
 
 --- 校验 Cookie：书架页 200 且 pageData.user.isLogin。cookie 显式传入，登录入口先校验再保存。
 ---@param cookie string
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, account: { id: string }|nil)
 ---@return { cancel: fun() }
 function Client.loginCheckAsync(cookie, cb)
     if type(cookie) ~= "string" or cookie == "" then
@@ -259,8 +272,14 @@ function Client.loginCheckAsync(cookie, cb)
             cb(nil, loginGone(cookie))
             return
         end
+        local guid = user.guid
+        if type(guid) ~= "number" and type(guid) ~= "string" then
+            cb(nil, _("起点账号标识缺失")); return
+        end
+        local id = type(guid) == "number" and string.format("%.0f", guid) or guid
+        if not id:match("^%d+$") then cb(nil, _("起点账号标识缺失")); return end
         if cookie == Client.cookie() then require("source.auth").ok(SOURCE_ID) end
-        cb(true)
+        cb(true, nil, { id = id })
     end)
 end
 
@@ -336,15 +355,17 @@ function Client.removeAsync(book_id, cb)
     end)
 end
 
---- 搜索：匿名取手机站 SSR 搜索页（一页 20 条）。
+--- 搜索：匿名双提交 CSRF，首页及后续页同一接口。
 ---@param keyword string
 ---@param cb fun(data: table|nil, err: string|nil)
+---@param page integer|nil
 ---@return HttpJob
-function Client.searchAsync(keyword, cb)
-    return webGet("/soushu/" .. Text.urlEncode(keyword) .. ".html", nil, function(html, err)
-        if not html then cb(nil, err); return end
-        local data = Mapper.pageData(html)
-        if not data then cb(nil, _("起点书籍信息为空")); return end
+function Client.searchAsync(keyword, cb, page)
+    return apiGet("/webcommon/search/list", { kw = keyword, pageNum = page or 1 }, anonymousCookie(), function(data, err)
+        if not data then cb(nil, err); return end
+        if type(data.bookInfo) ~= "table" or type(data.bookInfo.records) ~= "table" then
+            cb(nil, _("起点搜索响应无效")); return
+        end
         cb(data)
     end)
 end
@@ -362,6 +383,22 @@ function Client.rankAsync(path, cb)
     end)
 end
 
+---@param key string
+---@param cat string
+---@param page integer
+---@param cb fun(data: table|nil, err: string|nil)
+---@return HttpJob
+function Client.rankPageAsync(key, cat, page, cb)
+    local kind = key == "readindex" and "readIndex" or key
+    return apiGet("/webcommon/rank/" .. kind .. "list", {
+        catId = cat, gender = "male", pageNum = page,
+    }, anonymousCookie(), function(data, err)
+        if not data then cb(nil, err); return end
+        if type(data.records) ~= "table" then cb(nil, _("起点榜单响应无效")); return end
+        cb(data)
+    end)
+end
+
 ---@param book_id string
 ---@param cb fun(info: table|nil, err: string|nil)
 ---@return HttpJob
@@ -373,7 +410,22 @@ function Client.detailAsync(book_id, cb)
             cb(nil, _("起点书籍信息为空"))
             return
         end
+
         cb(info)
+    end)
+end
+
+---@param book_id string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return HttpJob
+function Client.bookCircleAsync(book_id, cb)
+    return webGet("/readersCircle/" .. book_id .. "/", nil, function(html, err)
+        if not html then cb(nil, err); return end
+        local data = Mapper.pageData(html)
+        if not data or type(data.bookCirclePost) ~= "table" then
+            cb(nil, _("起点书友圈响应无效")); return
+        end
+        cb(data.bookCirclePost)
     end)
 end
 
@@ -395,6 +447,7 @@ end
 ---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|nil) kind = "unpaid"：这章没买
 ---@return HttpJob
 function Client.contentAsync(book_id, chapter_id, cb)
+    local cookie, cancelled = Client.cookie(), false
     local decrypting, font_job
     local function finish_html(content)
         local text = Mapper.chapterText(content)
@@ -406,6 +459,7 @@ function Client.contentAsync(book_id, chapter_id, cb)
         cb(text)
     end
     local function decrypt_done(text, derr)
+        if cancelled then return end
         decrypting = nil
         if not text then
             logger.warn("qidian fock decrypt failed:", derr)
@@ -413,9 +467,11 @@ function Client.contentAsync(book_id, chapter_id, cb)
         end
         finish_text(text)
     end
-    local fetch = webGet("/chapter/" .. book_id .. "/" .. chapter_id .. "/", Client.cookie(), function(html, err)
+    local fetch = webGet("/chapter/" .. book_id .. "/" .. chapter_id .. "/", cookie, function(html, err)
+        if cancelled then return end
         if not html then cb(nil, err); return end
-        local info = (Mapper.pageData(html) or {}).chapterInfo
+        local data = Mapper.pageData(html) or {}
+        local info = data.chapterInfo
         if type(info) ~= "table" then cb(nil, _("起点章节内容为空")); return end
         if Mapper.locked(info) then cb(nil, _("起点 VIP 章节未购买"), "unpaid"); return end
         local content = info.content
@@ -430,12 +486,16 @@ function Client.contentAsync(book_id, chapter_id, cb)
 
         local keypool, version, uid
         if fock then
-            local cookie = Client.cookie()
-            uid = cookie and cookie:match("ywguid=(%d+)")
+            local page_guid = type(data.user) == "table" and data.user.guid
+            uid = type(page_guid) == "number" and string.format("%.0f", page_guid)
+                or (type(page_guid) == "string" and page_guid or Client.guid(cookie))
+            if page_guid and uid ~= Client.guid(cookie) then
+                logger.warn("qidian chapter identity differs from login cookie; using response identity")
+            end
             -- fkp 是 base64 的 `window.onkeyfocus("<密钥池>", <版本>)`，只取参数，不执行
             keypool, version = Text.base64Decode(tostring(info.fkp or ""))
                 :match('onkeyfocus%("([^"]+)",%s*(%d+)%)')
-            if not (uid and keypool and version and type(content) == "string") then
+            if not (uid and uid:match("^%d+$") and keypool and version and type(content) == "string") then
                 logger.warn("qidian decrypt inputs missing: uid", uid ~= nil, "keypool", keypool ~= nil,
                     "version", version ~= nil, "content", type(content))
                 cb(nil, require("source.cookie_login").relogin(
@@ -444,14 +504,22 @@ function Client.contentAsync(book_id, chapter_id, cb)
         end
 
         local function run(fixed_font)
+            local pending = true
+            local function done(plain, derr)
+                pending = false
+                decrypt_done(plain, derr)
+            end
+            local job
             if font_protected then
                 if fock then
-                    decrypting = Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, uid, decrypt_done)
+                    job = Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, uid, done)
                 else
-                    decrypting = Fock.restoreAsync(content, info, fixed_font, decrypt_done)
+                    job = Fock.restoreAsync(content, info, fixed_font, done)
                 end
             else
-                decrypting = Fock.decryptAsync(content, chapter_id, keypool, version, uid, function(plain, derr)
+                job = Fock.decryptAsync(content, chapter_id, keypool, version, uid, function(plain, derr)
+                    pending = false
+                    if cancelled then return end
                     decrypting = nil
                     if not plain then
                         logger.warn("qidian fock decrypt failed:", derr)
@@ -460,6 +528,7 @@ function Client.contentAsync(book_id, chapter_id, cb)
                     finish_html(plain)
                 end)
             end
+            if pending then decrypting = job end
         end
 
         if not font_protected then run(nil); return end
@@ -474,6 +543,7 @@ function Client.contentAsync(book_id, chapter_id, cb)
             headers = { ["User-Agent"] = UA, ["Referer"] = "https://m.qidian.com/" },
             timeout = require("http.timeout").net(3),
         }, function(ttf, ferr, res)
+            if cancelled then return end
             font_job = nil
             if not ttf or #ttf == 0 then
                 logger.warn("qidian font download failed:", ferr, "code", res and res.code, "len", ttf and #ttf)
@@ -487,23 +557,36 @@ function Client.contentAsync(book_id, chapter_id, cb)
         end)
     end)
     return { cancel = function()
+        cancelled = true
         fetch.cancel()
         if font_job then font_job:cancel() end
         if decrypting then decrypting:cancel() end
     end }
 end
 
--- 段评接口匿名可读，但 Cookie 与参数里的 _csrfToken 必须一致（双提交），没登录就本地编一个。
-local anon_csrf
----@return string
-local function reviewCookie()
-    if Client.cookie() then return Client.cookie() end
-    if not anon_csrf then
-        local hex = {}
-        for i = 1, 32 do hex[i] = string.format("%x", math.random(0, 15)) end
-        anon_csrf = "_csrfToken=" .. table.concat(hex)
-    end
-    return anon_csrf
+--- 分类目录或分类首屏（含官网动态筛选元数据），公共请求不带账号。
+---@param cat_id string|nil
+---@param cb fun(data: table|nil, err: string|nil)
+---@return HttpJob
+function Client.categoryAsync(cat_id, cb)
+    return webGet("/category/" .. (cat_id and ("catid" .. cat_id .. "/") or ""), nil, function(html, err)
+        if not html then cb(nil, err); return end
+        local data = Mapper.pageData(html)
+        if not data then cb(nil, _("起点分类响应无效")); return end
+        cb(data)
+    end)
+end
+
+--- 分类后续页，匿名 CSRF 双提交。
+---@param params table
+---@param cb fun(data: table|nil, err: string|nil)
+---@return HttpJob
+function Client.categoryListAsync(params, cb)
+    return apiGet("/webcommon/category/list", params, anonymousCookie(), function(data, err)
+        if not data then cb(nil, err); return end
+        if type(data.records) ~= "table" then cb(nil, _("起点分类响应无效")); return end
+        cb(data)
+    end)
 end
 
 --- 本章各段评论数；list[].paragraphId 从 1 数，-1 是章末总评；enableReview = 0 表示这本书没开段评。
@@ -513,7 +596,7 @@ end
 ---@return HttpJob
 function Client.reviewSummaryAsync(book_id, chapter_id, cb)
     return apiGet("/webcommon/chapterreview/reviewsummary4m", { bookId = book_id, chapterId = chapter_id },
-        reviewCookie(), cb)
+        Client.cookie() or anonymousCookie(), cb)
 end
 
 --- 某段的一页评论（page 从 1 起，每页 10 条左右）。
@@ -526,7 +609,7 @@ end
 function Client.reviewListAsync(book_id, chapter_id, paragraph_id, page, cb)
     return apiGet("/webcommon/chapterreview/reviewlist4m", {
         bookId = book_id, chapterId = chapter_id, paragraphId = paragraph_id, page = page,
-    }, reviewCookie(), cb)
+    }, Client.cookie() or anonymousCookie(), cb)
 end
 
 return Client

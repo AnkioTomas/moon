@@ -27,13 +27,13 @@ local Common = require("desktop.detail.common")
 -- 「阅读记录」里列出的天数；估算读完日期仍用 loadStats 取的全部记录。
 local RECENT_DAYS = 14
 
---- 头部第四行：「★ 9.6 微信读书 · 43.2 万字」；都没有返回 nil。
+--- 头部第四行：「★ 9.6 微信读书 · 43.2 万字 · 完结」；都没有返回 nil。
 ---@param m BookMeta
 ---@return string|nil
 local function scoreLine(m)
     local parts = {}
     if m.rating then
-        local by = ({ weread = _("微信读书"), douban = _("豆瓣") })[m.rating.by] or m.rating.by
+        local by = ({ weread = _("微信读书"), douban = _("豆瓣"), zhihu = _("知乎盐选") })[m.rating.by] or m.rating.by
         parts[1] = string.format("★ %.1f", m.rating.score) .. (by and " " .. by or "")
     end
     local words = m.words
@@ -41,6 +41,7 @@ local function scoreLine(m)
         parts[#parts + 1] = words >= 10000 and T(_("%1 万字"), string.format("%.1f", words / 10000))
             or T(_("%1 字"), words)
     end
+    if m.status and m.status ~= "" then parts[#parts + 1] = m.status end
     return #parts > 0 and table.concat(parts, " · ") or nil
 end
 
@@ -59,6 +60,8 @@ local function infoItems(book, owner)
     for _idx, item in ipairs({
         { _("来源"), sid == "zlib" and _("Z站") or sid == "opds" and _("OPDS")
             or sid and ((require("source.registry").meta(sid) or {}).name or sid) },
+        { _("状态"), m.status },
+        { _("标签"), m.tags, true, true },
         { _("格式"), format and format:upper() },
         { _("大小"), size and size > 0 and require("util").getFriendlySize(size) },
         { _("加入"), added > 0 and os.date("%Y-%m-%d", added) },
@@ -257,6 +260,7 @@ function Detail:buildHead(w, owner, primary)
     if book.series and book.series ~= "" then tags[#tags + 1] = book.series end
     if book.category and book.category ~= "" then tags[#tags + 1] = (book.category:gsub("[,\n]+", " · ")) end
     local m = book.meta or {}
+    if m.tags and m.tags ~= "" then tags[#tags + 1] = m.tags end
     local pub = {}
     if m.publisher then pub[#pub + 1] = m.publisher end
     if m.published then pub[#pub + 1] = m.published end

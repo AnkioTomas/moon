@@ -4,12 +4,13 @@
 @module source.kavita._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 
 return {
     id = "kavita",
     name = _("Kavita"),
     type = "book",
-    description = _("连接 Kavita 服务器的漫画与电子书"),
-    abilities = { _("书架同步"), _("进度同步"), _("笔记同步"), _("统计同步"), _("漫画缓存（需 kamare 增强版）") },
+    description = _("同步 Kavita 书架、电子书与漫画"),
+    abilities = { _("书架与卷目录同步（只读）"), _("进度同步"), _("EPUB 划线同步"), _("阅读历史拉取"),
+        _("漫画在线阅读与缓存（需 kamare 增强版）"), _("书评") },
 }

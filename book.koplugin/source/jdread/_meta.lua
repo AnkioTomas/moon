@@ -4,12 +4,12 @@
 @module source.jdread._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.jdread")
 
 return {
     id = "jdread",
     name = _("京东读书"),
     type = "chapter",
     description = _("京东读书书架与在线阅读"),
-    abilities = { _("搜索与发现"), _("书架同步"), _("进度同步") },
+    abilities = { _("搜索与发现"), _("书架同步"), _("进度同步"), _("书评") },
 }
