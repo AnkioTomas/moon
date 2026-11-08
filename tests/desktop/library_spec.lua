@@ -108,7 +108,7 @@ CoverCell.denseCoverMetrics = function() return 40, 40, 60, 1, 0, 0, 86 end
 local Library = require("desktop.pages.library")
 
 local view_updates = 0
-local source = { id = "moon" }
+local source = { id = "moon", configured = function() return true end }
 local desktop = {
     plugin = {},
     dimen = { w = 600 },
