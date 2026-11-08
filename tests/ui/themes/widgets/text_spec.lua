@@ -108,4 +108,12 @@ do
     Assert.is_nil(images[2].painted, "超出可见高度的表情不画")
     rich:free()
     Assert.is_true(images[1].freed and images[2].freed, "释放文字同时取消图片与迟到回调")
+
+    local composite = Text.box("body", "甲😀👍🏽👩‍💻❤️乙", 100, { emoji = true })
+    Assert.eq(composite.text, "甲　　　　乙", "复合 emoji 各占一个字符槽")
+    Assert.matches(images[3].opts.src, "/1f600%.png$")
+    Assert.matches(images[4].opts.src, "/1f44d%-1f3fd%.png$")
+    Assert.matches(images[5].opts.src, "/1f469%-200d%-1f4bb%.png$")
+    composite:free()
+    Assert.eq(Text.box("body", "甲😀乙", 100).text, "甲😀乙", "其它控件不改变旧的文字行为")
 end
