@@ -187,6 +187,7 @@ end
 --- 走到这说明底层数据已变，打脏标记，关闭详情时桌面要清缓存重建而不是纯重画。
 function Detail:reload()
     self._dirty = true
+    self._reading_target = nil
     if self.desktop then self.desktop:onEvent("shelf_changed") end
     if self.closed then return end
     local book = self.book

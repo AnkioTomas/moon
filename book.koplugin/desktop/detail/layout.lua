@@ -58,7 +58,10 @@ end
 ---@param book table
 ---@param anchor table 触发按钮的矩形
 function Detail.openMenu(desktop, book, anchor)
-    local tools = Detail.actionPlan(book, bookOwnerSource(book, desktop.source))
+    local owner = bookOwnerSource(book, desktop.source)
+    -- 菜单只要「选择卷」入口：只读目录元信息，不做续读目标的全量扫描。
+    local meta = owner and owner.readingTarget and owner:readingTarget(book, { meta_only = true }) or nil
+    local tools = Detail.actionPlan(book, owner, meta)
     if #tools == 0 then return end
     local function rebuild()
         desktop:onEvent("detail_dirty")
@@ -85,7 +88,7 @@ function Detail:updateView()
     if self.origin == "store" then
         primary = self:storePrimary()
     else
-        tools, primary = Detail.actionPlan(self.book, owner)
+        tools, primary = Detail.actionPlan(self.book, owner, self:readingTarget())
         if primary then primary.callback = function() self:openBook() end end
     end
 
