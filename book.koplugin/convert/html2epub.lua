@@ -54,7 +54,7 @@ end
 ---   author: string|nil,
 ---   language: string|nil,
 ---   identifier: string|nil,
----   chapters: { title: string, href: string, xhtml: string, toc?: boolean }[],
+---   chapters: { title: string, href: string, xhtml: string, toc?: boolean, depth?: integer }[],
 --- }
 ---@param dest string
 ---@param progress fun(done: integer, total: integer)|nil 每写完一章
@@ -107,6 +107,7 @@ local function writeEpubPackage(opts, dest, progress)
     }
     local spine = {}
     local nav = {}
+    local nav_depth, max_depth, nav_count = 0, 0, 0
     for i, ch in ipairs(chapters) do
         local id = string.format("ch%d", i)
         manifest[#manifest + 1] = string.format(
@@ -115,13 +116,20 @@ local function writeEpubPackage(opts, dest, progress)
         )
         spine[#spine + 1] = string.format('    <itemref idref="%s"/>', id)
         if ch.toc ~= false then
+            local depth = math.min(nav_depth + 1, math.max(1, math.floor(tonumber(ch.depth) or 1)))
+            while nav_depth >= depth do
+                nav[#nav + 1] = "    </navPoint>"
+                nav_depth = nav_depth - 1
+            end
+            nav_count = nav_count + 1
+            nav_depth, max_depth = depth, math.max(max_depth, depth)
             nav[#nav + 1] = string.format([[
     <navPoint id="n%d" playOrder="%d">
       <navLabel><text>%s</text></navLabel>
-      <content src="%s"/>
-    </navPoint>]], #nav + 1, #nav + 1, Text.xmlEscape(ch.title or id), ch.href)
+      <content src="%s"/>]], nav_count, nav_count, Text.xmlEscape(ch.title or id), ch.href)
         end
     end
+    for _depth = 1, nav_depth do nav[#nav + 1] = "    </navPoint>" end
 
     local creator = ""
     if author ~= "" then
@@ -152,13 +160,13 @@ local function writeEpubPackage(opts, dest, progress)
     local ncx = string.format([[
 <?xml version="1.0" encoding="UTF-8"?>
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
-  <head><meta name="dtb:uid" content="%s"/></head>
+  <head><meta name="dtb:uid" content="%s"/><meta name="dtb:depth" content="%d"/></head>
   <docTitle><text>%s</text></docTitle>
   <navMap>
 %s
   </navMap>
 </ncx>
-]], Text.xmlEscape(identifier), Text.xmlEscape(title), table.concat(nav, "\n"))
+]], Text.xmlEscape(identifier), max_depth, Text.xmlEscape(title), table.concat(nav, "\n"))
     if not epub:addFileFromMemory("OEBPS/toc.ncx", ncx, mtime) then
         return abort(_("写入 epub 失败"))
     end
@@ -186,7 +194,7 @@ end
 ---   author: string|nil,
 ---   language: string|nil,
 ---   identifier: string|nil,
----   chapters: { title: string, html: string, toc: boolean|nil }[],
+---   chapters: { title: string, html: string, toc: boolean|nil, depth: integer|nil }[],
 --- }
 ---@param progress fun(done: integer, total: integer)|nil 每写完一章
 ---@return boolean|nil, string|nil
@@ -196,6 +204,7 @@ function Html2Epub.write(opts, progress)
         chapters[index] = {
             title = chapter.title,
             toc = chapter.toc,
+            depth = chapter.depth,
             href = string.format("chapter_%03d.xhtml", index),
             xhtml = wrapXhtml(chapter.title, chapter.html),
         }

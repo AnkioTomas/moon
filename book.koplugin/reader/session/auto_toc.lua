@@ -15,6 +15,7 @@ require("l10n").apply()
 local Event = require("ui/event")
 local Job = require("workers.job")
 local Text2Epub = require("convert.text2epub")
+local Hierarchy = require("convert.chapter_hierarchy")
 local DocumentToc = require("reader.session.document_toc")
 local logger = require("utils.log")
 local T = require("ffi/util").template
@@ -56,7 +57,6 @@ end
 local function install(ui, entries)
     for _idx, entry in ipairs(entries) do
         entry.page = ui.document:getPageFromXPointer(entry.xpointer)
-        entry.depth = 1
     end
     local handmade = ui.handmade
     handmade.toc = entries
@@ -101,10 +101,14 @@ function AutoToc.start(session)
         on_done = function(entries)
             session.auto_toc_job = nil
             ui.doc_settings:saveSetting(SCANNED_KEY, true)
-            if #entries < 2 then return end
-            install(ui, entries)
+            local visible = {}
+            for _idx, entry in ipairs(Hierarchy.organize(entries)) do
+                if entry.toc ~= false then visible[#visible + 1] = entry end
+            end
+            if #visible < 2 then return end
+            install(ui, visible)
             require("ui.themes.widgets.toast"):new{
-                text = T(_("已自动生成目录（%1 章）"), #entries),
+                text = T(_("已自动生成目录（%1 章）"), #visible),
                 timeout = 2,
             }:show()
         end,
