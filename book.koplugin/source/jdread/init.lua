@@ -329,12 +329,6 @@ end
 ---@return { cancel: fun() }|nil
 local function migrateLayout(self, identity, cb)
     local old = Toc.read(self.id, identity.stable_id)
-    if old == nil then
-        local payload = require("book.books_db").getToc(self.id, identity.stable_id)
-        -- 不看 TTL 的原始目录；坏 JSON 等同没有旧目录。
-        local ok, list = pcall(require("json").decode, payload or "")
-        old = ok and type(list) == "table" and list or nil
-    end
     if not old or #old == 0 or self:isTocCurrent(old)
         or not require("ui/network/manager"):isConnected() then
         cb()

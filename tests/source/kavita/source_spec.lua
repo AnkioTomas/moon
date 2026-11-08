@@ -164,7 +164,9 @@ package.loaded["book.store"] = {
 }
 package.loaded["source.toc"] = {
     -- allow_stale：过期目录也认（身份判定用；卷数 / 卷身份不随时间变）。
-    read = function(_sid, id, allow_stale) return (allow_stale or toc_fresh) and tocs[id] or nil end,
+    read = function(_sid, id, allow_stale)
+        return (allow_stale or toc_fresh) and tocs[id] or (stale[id] and JSON.decode(stale[id]))
+    end,
     put = function(_sid, id, list)
         tocs[id] = list
         return true

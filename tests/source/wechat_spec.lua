@@ -8,6 +8,9 @@ client/auth/chapter/settings 用 package.preload 打桩；mapper 用真实实现
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
+local db_path = require("support.config").dir() .. "/wechat_source_spec.sqlite3"
+for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end
+require("utils.paths").dbPath = function() return db_path end
 
 -- 顶掉网络/会话依赖；结束后统一还原
 local saved_preload = {}
@@ -725,6 +728,7 @@ do
     Assert.is_nil(map_meta and map_meta.permanent, "映射失败的进度必须保留脏状态等待重试")
     Assert.eq(map_err, "reading position not found in chapter")
     toc_payload["b1"] = nil
+    require("book.toc_db").removeIdentity("wechat", "b1")
     require("source.wechat.toc").clear()
     StatsDB.unsyncedBySource, StatsDB.markSynced = orig_unsynced, orig_mark
 end
@@ -952,6 +956,7 @@ do
 
     -- 目录缓存没有、也拉不到：章节号留空，绝不回退成原始序号 6（本地第 6 章是别的章）。
     toc_payload["bpull"] = nil
+    require("book.toc_db").removeIdentity("wechat", "bpull")
     require("source.toc").clear()
     fake_client.chapterInfosAsync = function(_, _, cb)
         cb(nil, "目录拉取失败")
@@ -1285,6 +1290,7 @@ end
 -- 段评：开关读源配置；按目录解析本章 chapter_uid，章节 HTML 读本地文件定位。
 do
     toc_payload["b1"] = [[ [{"idx":1,"source_idx":2,"uid":"40"}] ]]
+    require("book.toc_db").removeIdentity("wechat", "b1")
     local Settings = require("utils.settings")
     local src = WeChat.new()
     Assert.is_false(src:paragraphReviewsEnabled())
@@ -1337,6 +1343,7 @@ do
     Assert.not_nil(err)
     Assert.len(calls, 3)
     toc_payload["b1"] = nil
+    require("book.toc_db").removeIdentity("wechat", "b1")
     require("source.wechat.toc").clear()
 
     -- 书名搜索：只留带 bookId 的书目。
@@ -1394,6 +1401,7 @@ do
     Assert.is_true(ok)
     Assert.eq(requests, 1)
     toc_payload["bcancel"] = nil
+    require("book.toc_db").removeIdentity("wechat", "bcancel")
     fake_client.bookmarkListAsync = nil
     fake_client.myReviewsAsync = nil
 end

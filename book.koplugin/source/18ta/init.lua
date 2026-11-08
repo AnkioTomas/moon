@@ -87,29 +87,37 @@ function Source:getDetailAsync(identity, cb)
 end
 
 function Source:loadTocAsync(identity, cb, force)
-    if not force then
-        local cached = Toc.read(self.id, identity.stable_id)
-        if cached and #cached > 0 then
-            return SourceBase.defer(cb, cached)
-        end
-    end
-    return self:refreshTocAsync(identity, cb)
+    if force then return self:refreshTocAsync(identity, cb) end
+    local cancelled, active = false, nil
+    active = Toc.readAsync(self.id, identity.stable_id, function(cached, err)
+        if cancelled then return end
+        if cached and #cached > 0 then cb(cached); return end
+        if err then cb(nil, err); return end
+        active = self:refreshTocAsync(identity, cb)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if active then active.cancel() end
+    end }
 end
 
 function Source:refreshTocAsync(identity, cb)
-    return self.client:bookAsync(identity.stable_id, function(html, err)
+    local cancelled, active, pending = false, nil, true
+    local request = self.client:bookAsync(identity.stable_id, function(html, err)
+        pending = false
+        if cancelled then return end
         if not html then cb(nil, err) return end
-        local toc = Mapper.toc(html)
-        if #toc == 0 then
-            cb(nil, _("章节列表为空"))
-            return
-        end
-        if not Toc.put(self.id, identity.stable_id, toc) then
-            cb(nil, _("章节目录保存失败"))
-            return
-        end
-        cb(toc)
+        active = Toc.parseAsync(self.id, identity.stable_id, function()
+            local toc = Mapper.toc(html)
+            if #toc == 0 then return nil, _("章节列表为空") end
+            return toc
+        end, cb)
     end)
+    if pending then active = request end
+    return { cancel = function()
+        cancelled = true
+        if active then active.cancel() end
+    end }
 end
 
 ---@return ChapterFetchContent

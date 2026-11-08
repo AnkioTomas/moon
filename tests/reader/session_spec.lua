@@ -122,6 +122,17 @@ end
 local toc_allow_refresh = true
 package.preload["source.toc"] = function()
     return {
+        peek = function(_source_id, stable_id)
+            toc_reads = toc_reads + 1
+            return stored_toc[stable_id]
+        end,
+        readAsync = function(_source_id, stable_id, cb)
+            local cancelled = false
+            require("ui/uimanager"):nextTick(function()
+                if not cancelled then cb(stored_toc[stable_id] or stale_toc[stable_id]) end
+            end)
+            return { cancel = function() cancelled = true end }
+        end,
         read = function(_source_id, stable_id, stale)
             toc_reads = toc_reads + 1
             if stale then return stored_toc[stable_id] or stale_toc[stable_id] end
@@ -755,6 +766,9 @@ do
     resolved_source = source
     local plugin = mkPlugin("/cache/1.html")
     Session.onReaderReady(plugin)
+    Assert.is_nil(loaded, "首绘不等待冷目录")
+    Assert.not_nil(Session.current(), "目录未恢复时当前章节仍可阅读")
+    require("support.stubs").flush()
     Assert.eq(loaded, "chapters")
     Assert.len(Session.toc(), 2)
     Assert.eq(Session.toc()[1].title, "新")

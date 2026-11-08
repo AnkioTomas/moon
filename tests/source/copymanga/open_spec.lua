@@ -33,8 +33,10 @@ end)
 stub("source.shelf", function() return {} end)
 stub("source.toc", function()
     return {
-        -- 目录过期也照用：离线开书要靠它把章号换成 uuid。
-        read = function() return nil end,
+        -- 统一目录接口始终提供持久化快照，不再绕回旧 JSON 字段。
+        read = function()
+            return { { idx = 1, uid = "uuid-1" }, { idx = 2, uid = "uuid-2" }, { idx = 3, uid = "uuid-3" } }
+        end,
     }
 end)
 stub("source.copymanga.mapper", function() return {} end)

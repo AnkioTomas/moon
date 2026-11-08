@@ -1,8 +1,8 @@
 --[[--
-章节源目录缓存：books.toc（JSON 载荷）的读取、按 idx/uid 定位与进程内缓存。
+章节源目录缓存：逐章 sqlite、按 idx/uid 定位与进程内缓存。
 
-books.toc 只经 ``Toc.put`` 写入（同时接管内存缓存），
-翻页、按章补报统计这些高频路径不必反复查库 + decode 整份目录。
+目录经 ``Toc.put`` 写入（同时接管内存缓存），旧 books.toc 首次读取时按书迁移。
+翻页、按章补报统计这些高频路径不必反复查库；字数 / 购买状态只更新一章。
 缓存键含 source_id，各章节源共用这一份。
 
 有缓存就一直可用，不做时间保鲜；开书或剩余章不多时由章节会话后台静默拉新
@@ -14,6 +14,8 @@ books.toc 只经 ``Toc.put`` 写入（同时接管内存缓存），
 --]]
 
 local Toc = {}
+local TocDB = require("book.toc_db")
+local logger = require("utils.log")
 
 ---@class SourceTocEntry
 ---@field list BookChapter[]
@@ -26,14 +28,8 @@ local cache = {}
 local count = 0
 local CACHE_LIMIT = 32
 
---- 字数回填后等多久把目录写回库（秒）。字数是派生缓存，丢了下次打开该章再算；
---- 千章全本缓存按这个节奏合并写，而不是每章序列化一遍整份目录。
-Toc.WORDS_FLUSH_DELAY = 30
 --- 开书 / 临近章末拉新最短间隔（秒）。成功看 fetched_at，失败看本进程上次尝试时间。
 Toc.REFRESH_INTERVAL = 5 * 60
---- 字数改了、还没写回库的目录：key → list。Toc.put 换新目录时作废。
----@type table<string, BookChapter[]>
-local pending_words = {}
 --- 本进程内上次「尝试拉新」的时间：key → unix。失败也要记，不然离线狂开书会连打。
 ---@type table<string, integer>
 local last_attempt = {}
@@ -97,13 +93,21 @@ local function entry(source_id, stable_id, _stale)
     local key = keyOf(source_id, stable_id)
     local hit = cache[key]
     if hit then return hit end
-    local payload, fetched_at = require("book.books_db").getToc(source_id, stable_id)
-    if not payload then
-        return nil
-    end
-    local ok, list = pcall(require("json").decode, payload)
-    if not ok or type(list) ~= "table" then
-        return nil
+    local list, fetched_at = TocDB.read(source_id, stable_id)
+    if not list then
+        local payload
+        payload, fetched_at = require("book.books_db").getToc(source_id, stable_id)
+        if not payload then return nil end
+        local decoded, _position, err = require("dkjson").decode(payload)
+        if type(decoded) ~= "table" then
+            logger.warn("book.toc legacy decode failed", source_id, stable_id, err)
+            return nil
+        end
+        if not TocDB.put(source_id, stable_id, decoded, fetched_at) then
+            logger.warn("book.toc migration failed", source_id, stable_id)
+            return nil
+        end
+        list = decoded
     end
     return putCache(key, build(list, fetched_at or os.time()))
 end
@@ -116,6 +120,147 @@ end
 function Toc.read(source_id, stable_id, stale)
     local hit = entry(source_id, stable_id, stale)
     return hit and hit.list
+end
+
+--- 首绘只看已装入的目录，冷读交给 readAsync。
+function Toc.peek(source_id, stable_id)
+    local hit = cache[keyOf(source_id, stable_id)]
+    return hit and hit.list
+end
+
+--- 子进程只解析 / 写临时文件；主进程每次接收 16 章，成功后原子发布。
+--- 不把整份大目录塞进 Job 的 JSON 管道，也不在子进程访问业务库。
+---@param source_id string
+---@param stable_id string
+---@param parse fun(): BookChapter[]|nil, string|nil
+---@param cb fun(list: BookChapter[]|nil, err: string|nil)
+---@param fetched_at integer|nil
+---@return { cancel: fun() }
+function Toc.parseAsync(source_id, stable_id, parse, cb, fetched_at)
+    local UI = require("ui/uimanager")
+    local path = os.tmpname()
+    local file, job, step
+    local finished = false
+    local list = {}
+    local _old_at, revision = TocDB.snapshot(source_id, stable_id)
+    local function cleanup()
+        if step then UI:unschedule(step) end
+        if file then file:close(); file = nil end
+        os.remove(path)
+    end
+    local function finish(result, err)
+        if finished then return end
+        finished = true
+        cleanup()
+        if err then logger.warn("book.toc parse failed", source_id, stable_id, err) end
+        cb(result, err)
+    end
+    job = require("workers.job").run(function()
+        local parsed, err = parse()
+        if not parsed then return { error = err or "invalid toc" } end
+        local output = assert(io.open(path, "wb"))
+        for _idx, chapter in ipairs(parsed) do
+            assert(output:write(require("dkjson").encode(chapter), "\n"))
+        end
+        assert(output:close())
+        return { count = #parsed }
+    end, {
+        name = "toc parse " .. source_id,
+        kind = "light",
+        on_failed = function(err) finish(nil, err) end,
+        on_done = function(result)
+            if result.error then finish(nil, result.error); return end
+            local err
+            file, err = io.open(path, "rb")
+            if not file then finish(nil, err); return end
+            step = require("ui.guard").wrap("toc receive", function()
+                for _idx = 1, 16 do
+                    local line, read_err = file:read("*l")
+                    if read_err then finish(nil, read_err); return end
+                    if not line then
+                        local _current_at, current_revision = TocDB.snapshot(source_id, stable_id)
+                        if #list ~= result.count then
+                            finish(nil, "incomplete toc transfer")
+                        elseif revision ~= current_revision then
+                            finish(nil, "toc snapshot changed")
+                        elseif not TocDB.put(source_id, stable_id, list, fetched_at) then
+                            finish(nil, require("l10n").get("source." .. source_id)("章节目录保存失败"))
+                        else
+                            putCache(keyOf(source_id, stable_id), build(list, fetched_at or os.time()))
+                            finish(list)
+                        end
+                        return
+                    end
+                    local chapter, _position, decode_err = require("dkjson").decode(line)
+                    if type(chapter) ~= "table" then finish(nil, decode_err or "invalid toc entry"); return end
+                    list[#list + 1] = chapter
+                end
+                UI:scheduleIn(0.01, step)
+            end)
+            UI:nextTick(step)
+        end,
+    })
+    return { cancel = function()
+        if finished then return end
+        finished = true
+        job:cancel()
+        cleanup()
+    end }
+end
+
+--- 缓存命中仍立即复用；冷目录分批读取，旧大 JSON 在子进程迁移。
+---@param source_id string
+---@param stable_id string
+---@param cb fun(list: BookChapter[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Toc.readAsync(source_id, stable_id, cb)
+    local UI = require("ui/uimanager")
+    local key = keyOf(source_id, stable_id)
+    local finished, active, step = false, nil, nil
+    local list, after, fetched_at, revision = {}, 0, nil, nil
+    local function finish(result, err)
+        if finished then return end
+        finished = true
+        if err then logger.warn("book.toc read failed", source_id, stable_id, err) end
+        cb(result, err)
+    end
+    step = require("ui.guard").wrap("toc read", function()
+        if finished then return end
+        if cache[key] then finish(cache[key].list); return end
+        local current_at, current_revision = TocDB.snapshot(source_id, stable_id)
+        if not revision then
+            if not current_revision then
+                local payload, legacy_at = require("book.books_db").getToc(source_id, stable_id)
+                if not payload then finish(nil); return end
+                active = Toc.parseAsync(source_id, stable_id, function()
+                    local decoded, _position, err = require("dkjson").decode(payload)
+                    if type(decoded) ~= "table" then return nil, err or "invalid legacy toc" end
+                    return decoded
+                end, finish, legacy_at)
+                return
+            end
+            fetched_at, revision = current_at, current_revision
+        elseif revision ~= current_revision then
+            finish(nil, "toc snapshot changed"); return
+        end
+        local page = TocDB.readPage(source_id, stable_id, after)
+        if not page then finish(nil, "toc read failed"); return end
+        for _idx, chapter in ipairs(page) do list[#list + 1] = chapter end
+        if #page < 16 then
+            putCache(key, build(list, fetched_at))
+            finish(list)
+        else
+            after = page[#page].idx
+            UI:scheduleIn(0.01, step)
+        end
+    end)
+    UI:nextTick(step)
+    return { cancel = function()
+        if finished then return end
+        finished = true
+        UI:unschedule(step)
+        if active then active.cancel() end
+    end }
 end
 
 --- 开书要不要后台拉新：间隔内已成功拉过或已尝试过则否。真要拉时记一次尝试（失败也算）。
@@ -143,16 +288,13 @@ end
 ---@param list BookChapter[]
 ---@return boolean
 function Toc.put(source_id, stable_id, list)
-    local ok, payload = pcall(require("json").encode, list)
-    if not ok or type(payload) ~= "string" then return false end
-    if not require("book.books_db").setToc(source_id, stable_id, payload) then return false end
+    if not TocDB.put(source_id, stable_id, list) then return false end
     local key = keyOf(source_id, stable_id)
-    pending_words[key] = nil
     putCache(key, build(list, os.time()))
     return true
 end
 
---- 补一章字数（缓存正文后回填）：内存目录立即生效，落库延迟合并。番茄等目录不带字数时靠这个估全书页码。
+--- 补一章字数（缓存正文后回填）：只写这一行，不序列化目录、不改变拉取时间。
 ---@param source_id string
 ---@param stable_id string
 ---@param idx integer
@@ -164,21 +306,11 @@ function Toc.setWords(source_id, stable_id, idx, words)
     local list = Toc.read(source_id, stable_id, true)
     local chapter = list and list[idx]
     if not chapter or tonumber(chapter.words) == words then return end
+    if not TocDB.update(source_id, stable_id, idx, "words", words) then
+        logger.warn("book.toc setWords failed", source_id, stable_id, idx)
+        return
+    end
     chapter.words = words
-    local key = keyOf(source_id, stable_id)
-    local scheduled = pending_words[key] ~= nil
-    pending_words[key] = list
-    if scheduled then return end
-    require("ui/uimanager"):scheduleIn(Toc.WORDS_FLUSH_DELAY, function()
-        local dirty = pending_words[key]
-        pending_words[key] = nil
-        if not dirty then return end
-        local ok, payload = pcall(require("json").encode, dirty)
-        if not ok or type(payload) ~= "string"
-            or not require("book.books_db").setToc(source_id, stable_id, payload) then
-            require("logger").warn("book.toc setWords flush failed", source_id, stable_id, payload)
-        end
-    end)
 end
 
 --- 记下一章 VIP 的购买状态（目录里显示「已购 / 未购」）；变了才落库。
@@ -191,8 +323,11 @@ function Toc.markPaid(source_id, stable_id, uid, paid)
     local idx = Toc.index(source_id, stable_id, uid)
     local chapter = list and idx and list[idx]
     if chapter and chapter.vip and chapter.paid ~= paid then
+        if not TocDB.update(source_id, stable_id, idx, "paid", paid) then
+            logger.warn("book.toc markPaid failed", source_id, stable_id, idx)
+            return
+        end
         chapter.paid = paid
-        Toc.put(source_id, stable_id, list)
     end
 end
 
@@ -248,8 +383,16 @@ end
 ---@param source_id string
 ---@param stable_id string
 function Toc.drop(source_id, stable_id)
+    if not require("book.books_db").clearToc(source_id, stable_id) then
+        logger.warn("book.toc clear failed", source_id, stable_id)
+        return
+    end
+    Toc.invalidate(source_id, stable_id)
+end
+
+--- 库中的身份 / 快照变更后作废对应内存，不再访问数据库。
+function Toc.invalidate(source_id, stable_id)
     local key = keyOf(source_id, stable_id)
-    require("book.books_db").clearToc(source_id, stable_id)
     dropCache(key)
     last_attempt[key] = nil
 end

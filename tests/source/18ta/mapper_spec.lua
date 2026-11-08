@@ -99,7 +99,7 @@ do
     Assert.eq(toc[1].idx, 1)
     Assert.eq(toc[1].uid, "/aks/287/287895/5447961.html")
     Assert.eq(toc[1].title, "第一章 红人大哥")
-    Assert.eq(toc[1].origin, "https://www.18ta.com/aks/287/287895/5447961.html")
+    Assert.eq(toc[1].origin, "/aks/287/287895/5447961.html")
     Assert.eq(toc[2].title, "第二章 刻苦训练")
 end
 

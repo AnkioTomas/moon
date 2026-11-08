@@ -234,12 +234,7 @@ Source.refreshTocAsync = fetchTocAsync
 ---@param identity BookIdentity
 ---@return BookChapter[]|nil
 local function anyToc(identity)
-    local toc = Toc.read(identity.source_id, identity.stable_id)
-    if toc then return toc end
-    local payload = require("book.books_db").getToc(identity.source_id, identity.stable_id)
-    -- 坏 JSON 等同没有目录，走联网重拉。
-    local ok, list = pcall(require("json").decode, payload or "")
-    return ok and type(list) == "table" and #list > 0 and list or nil
+    return Toc.read(identity.source_id, identity.stable_id)
 end
 
 --- 起始章：显式章号 > 本地进度章号 > 本地进度全书比例 > 第一章。

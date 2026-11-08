@@ -2,6 +2,10 @@
 source.wechat.toc：目录缓存读取与按 idx/uid 定位。 --]]
 
 local Assert = require("support.assert")
+local Config = require("support.config")
+local db_path = Config.dir() .. "/wechat_toc_spec.sqlite3"
+for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end
+package.preload["utils.paths"] = function() return { dbPath = function() return db_path end } end
 
 local store = {}
 local upserted = {}
@@ -35,6 +39,11 @@ end
 
 package.loaded["source.wechat.toc"] = nil
 local Toc = require("source.wechat.toc")
+local readToc = require("book.toc_db").read
+require("book.toc_db").read = function(...)
+    reads = reads + 1
+    return readToc(...)
+end
 
 do
     Assert.is_nil(Toc.read("wechat", "missing"))
@@ -67,6 +76,8 @@ do
     -- 解码结果进内存：库里的行没了也照样命中，翻页/按章补报不再反复 decode 整份目录。
     local before = reads
     store["b2"] = nil
+    require("utils.db").removeIdentity("toc_entries", "wechat", "b2")
+    require("utils.db").removeIdentity("toc_snapshots", "wechat", "b2")
     Assert.eq(Toc.uid("wechat", "b2", 1), "u1")
     Assert.eq(Toc.index("wechat", "b2", "u2"), 2)
     Assert.eq(reads, before, "命中内存缓存时不得再查库")
@@ -81,7 +92,7 @@ do
     -- put 落库并直接接管缓存，无需再 decode 一遍
     local list = { { idx = 1, uid = "p1" }, { idx = 2, uid = "p2" }, { idx = 3, uid = "p3" } }
     Toc.put("wechat", "b3", list)
-    Assert.eq(upserted["b3"], "encoded:3")
+    Assert.is_nil(upserted["b3"], "不再写旧 JSON 列")
     local before = reads
     Assert.eq(Toc.uid("wechat", "b3", 3), "p3")
     Assert.eq(Toc.index("wechat", "b3", "p2"), 2)
@@ -107,11 +118,7 @@ do
     Assert.is_false(Toc.put("wechat", "failed", list))
     Assert.is_nil(Toc.read("wechat", "failed"))
     writes = true
-    -- put 用假 encode，clear 后回库解不开；这里直接灌一份合法 payload。
-    store["b3"] = {
-        payload = '[{"idx":1,"uid":"p1"},{"idx":2,"uid":"p2"},{"idx":3,"uid":"p3"}]',
-        at = now,
-    }
+    -- 清内存后直接从逐章表恢复。
     Toc.clear()
     Assert.eq(Toc.read("wechat", "b3")[1].uid, "p1")
     now = now + 6 * 60 * 60
@@ -119,3 +126,5 @@ do
 end
 
 os.time = original_time
+require("utils.db").close()
+for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end

@@ -6,6 +6,10 @@
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
+local Config = require("support.config")
+local db_path = Config.dir() .. "/source_toc_spec.sqlite3"
+for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end
+package.preload["utils.paths"] = function() return { dbPath = function() return db_path end } end
 local now = 1000
 local original_time = os.time
 os.time = function() return now end
@@ -28,6 +32,7 @@ package.preload["book.books_db"] = function()
         end,
         clearToc = function(source_id, stable_id)
             rows[source_id .. ":" .. stable_id] = nil
+            return require("book.toc_db").removeIdentity(source_id, stable_id)
         end,
     }
 end
@@ -75,10 +80,7 @@ end
 do
     Assert.is_true(Toc.put("jdread", "drop", { { idx = 1, uid = "old" } }))
     Assert.eq(Toc.uid("jdread", "drop", 1), "old")
-    rows["jdread:drop"] = {
-        payload = require("json").encode({ { idx = 1, uid = "new" } }),
-        at = now,
-    }
+    Assert.is_true(require("book.toc_db").put("jdread", "drop", { { idx = 1, uid = "new" } }, now))
     Toc.clear()
     Assert.eq(Toc.uid("jdread", "drop", 1), "new")
 end
@@ -97,7 +99,7 @@ do
 end
 
 do
-    -- 回填字数：内存立即可见，落库合并成一次延迟写（千章全本缓存不再序列化目录一千遍）。
+    -- 字数只更新一行，不重写旧载荷，不改变远端拉取时间。
     local Stubs = require("support.stubs")
     Stubs.reset()
     local saved = 0
@@ -113,10 +115,10 @@ do
     Toc.setWords("fanqie", "words", 2, 800)
     Assert.eq(Toc.read("fanqie", "words")[1].words, 1200, "内存目录立即带字数")
     Assert.eq(Toc.read("fanqie", "words")[2].words, 800)
-    Assert.eq(saved, 0, "setWords 不同步写库")
+    Assert.eq(saved, 0, "setWords 不重写整份目录")
     Stubs.flush()
-    Assert.eq(saved, 1, "多次回填合并成一次写")
-    local stored = require("json").decode(rows["fanqie:words"].payload)
+    Assert.eq(saved, 0)
+    local stored = require("book.toc_db").read("fanqie", "words")
     Assert.eq(stored[1].words, 1200)
     Assert.eq(stored[2].words, 800)
 
@@ -126,9 +128,9 @@ do
     Toc.setWords("fanqie", "words", nil, 5)
     Toc.setWords("fanqie", "nope", 1, 5)
     Stubs.flush()
-    Assert.eq(saved, 1)
+    Assert.eq(saved, 0)
 
-    -- 等待落库期间目录被重新 put：新目录为准，过期的字数写不再覆盖它。
+    -- 换成另一章后旧字数不能挂到同位置的新身份。
     Toc.setWords("fanqie", "words", 1, 1300)
     Assert.is_true(Toc.put("fanqie", "words", { { idx = 1, uid = "w1-new" } }))
     saved = 0
@@ -136,12 +138,14 @@ do
     Assert.eq(saved, 0)
     Assert.eq(Toc.uid("fanqie", "words", 1), "w1-new")
 
-    -- 落库失败只告警，不抛。
+    -- 落库失败告警，并保持内存与数据库一致。
+    local DB = require("utils.db")
+    local exec = DB.exec
+    DB.exec = function() return nil, "write failed" end
     Toc.setWords("fanqie", "words", 1, 50)
-    writes = false
+    DB.exec = exec
     Stubs.flush()
-    writes = true
-    Assert.eq(Toc.read("fanqie", "words")[1].words, 50)
+    Assert.is_nil(Toc.read("fanqie", "words")[1].words)
     package.loaded["book.books_db"].setToc = setToc
 end
 
@@ -165,3 +169,5 @@ do -- 开书拉新节流：成功看 fetched_at，失败看 last_attempt
 end
 
 os.time = original_time
+require("utils.db").close()
+for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end

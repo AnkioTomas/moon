@@ -532,6 +532,17 @@ local function installLuaSocket()
 end
 
 local function installJson()
+    installIfMissing("dkjson", function()
+        local JSON = require("support.json_stub")
+        return {
+            encode = JSON.encode,
+            decode = function(payload)
+                local ok, value = pcall(JSON.decode, payload)
+                if not ok then return nil, 1, value end
+                return value, #payload + 1
+            end,
+        }
+    end)
     -- Api/Auth 顶层 require("json")；离线测用不到真实编解码时顶个空壳即可
     package.preload["json"] = function()
         return {
