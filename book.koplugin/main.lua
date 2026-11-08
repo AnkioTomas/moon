@@ -70,6 +70,7 @@ local BookPlugin = WidgetContainer:extend {
 function BookPlugin:handleEvent(event)
     return WidgetContainer.handleEvent(self, event) or Features.handleEvent(event, self)
 end
+BookPlugin.handleEvent = Guard.wrap("handleEvent", BookPlugin.handleEvent)
 
 -- ── 插件生命周期 ─────────────────
 

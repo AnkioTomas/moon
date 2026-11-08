@@ -11,6 +11,9 @@ function WidgetContainer:extend(def)
     def.__index = def
     return setmetatable(def, { __index = self })
 end
+function WidgetContainer:handleEvent(event)
+    return event.native_result
+end
 
 local calls = {}
 local version_current = 202607000000
@@ -182,6 +185,10 @@ local feature_hooks, feature_loads = {}, 0
 stub("features", {
     load = function() feature_loads = feature_loads + 1 end,
     emit = function(hook, host) feature_hooks[#feature_hooks + 1] = hook .. ":" .. host.path end,
+    handleEvent = function(event, host)
+        calls.feature_event = { event, host }
+        return event.feature_result
+    end,
     scan = function() return {} end,
     listeners = function() return {} end,
 })
@@ -219,6 +226,19 @@ Assert.is_nil(calls.boot, "init 不直接挂功能，全部进 features")
 Assert.eq(feature_loads, 1, "加载器在 main 顶层调一次")
 Assert.eq(table.concat(feature_hooks, ","), "onCreate:book.koplugin")
 feature_hooks = {}
+
+-- 宿主事件优先，未处理的事件交给 feature，整个事件入口经 guard。
+do
+    local native_event = { native_result = true, feature_result = true }
+    Assert.is_true(plugin:handleEvent(native_event))
+    Assert.is_nil(calls.feature_event, "宿主已处理时不再分发给 feature")
+    local feature_event = { native_result = false, feature_result = true }
+    Assert.is_true(plugin:handleEvent(feature_event))
+    Assert.eq(calls.feature_event[1], feature_event)
+    Assert.eq(calls.feature_event[2], plugin)
+    Assert.is_false(plugin:handleEvent({ native_result = false, feature_result = false }))
+    Assert.is_true(guard_labels.handleEvent, "转屏等未单独包装的事件也经 guard")
+end
 
 -- 主菜单：demo/ 目录存在才转发给演示模块（打包剔除 demo/ 后不出现）
 do
