@@ -4,7 +4,7 @@
 @module source.wechat._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 return {
     id = "wechat",

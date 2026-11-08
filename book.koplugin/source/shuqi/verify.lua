@@ -5,11 +5,10 @@
 @module koplugin.book.source.shuqi.verify
 --]]
 
-require("l10n").apply()
 
 local Ext = require("utils.extension")
 local Client = require("source.shuqi.client")
-local _ = require("gettext")
+local _ = require("l10n").get("source.shuqi")
 
 ---@class ShuqiVerification
 ---@field ticket string

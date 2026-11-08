@@ -4,9 +4,8 @@
 @module source.qidian.phone_login
 --]]
 
-require("l10n").apply()
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qidian")
 ---@class QidianPhoneLogin
 ---@field session QidianLogin
 ---@field on_cookie fun(cookie: string)

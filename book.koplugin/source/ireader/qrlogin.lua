@@ -8,10 +8,9 @@ GET /bookstore/open/user/qrcode/get 的 body 是登录码，二维码内容是 w
 @module source.ireader.qrlogin
 --]]
 
-require("l10n").apply()
 local Client = require("source.ireader.client")
 local Mapper = require("source.ireader.mapper")
-local _ = require("gettext")
+local _ = require("l10n").get("source.ireader")
 
 local QRLogin = {}
 QRLogin.__index = QRLogin

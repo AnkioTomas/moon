@@ -12,7 +12,7 @@ local Aes = require("crypto.aes")
 local CategorySetting = require("source.category_setting")
 local JSON = require("json")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.douban")
 
 local Mapper = {}
 

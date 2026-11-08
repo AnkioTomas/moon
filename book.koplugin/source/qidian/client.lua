@@ -10,7 +10,6 @@ chapterUpdateTime 必须是章节更新时间的 unix 秒，空字符串会把 g
 @module koplugin.book.source.qidian.client
 --]]
 
-require("l10n").apply()
 local Fock = require("source.qidian.fock")
 local JSON = require("json")
 local logger = require("utils.log")
@@ -18,7 +17,7 @@ local Mapper = require("source.qidian.mapper")
 local Request = require("http.request")
 local SourceBase = require("source.base")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qidian")
 
 local Client = {}
 

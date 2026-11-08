@@ -6,7 +6,7 @@
 @module source.shuqi._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.shuqi")
 
 return {
     id = "shuqi",

@@ -5,10 +5,9 @@ local Stubs = require("support.stubs")
 Stubs.install()
 Stubs.reset()
 
-package.preload["l10n"] = function() return { apply = function() end } end
-package.preload["gettext"] = function() return function(value) return value end end
-
-package.preload["l10n"] = function() return { apply = function() end } end
+package.preload["l10n"] = function()
+    return { apply = function() end, get = function() return require("gettext") end }
+end
 package.preload["gettext"] = function() return function(value) return value end end
 package.preload["device"] = function()
     return {

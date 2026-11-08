@@ -15,7 +15,7 @@ local Font = require("source.jjwxc.font")
 local Job = require("workers.job")
 local Mapper = require("source.jjwxc.mapper")
 local Request = require("http.request")
-local _ = require("gettext")
+local _ = require("l10n").get("source.jjwxc")
 
 local Web = {}
 

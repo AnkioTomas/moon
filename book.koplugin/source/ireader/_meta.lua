@@ -6,7 +6,7 @@
 @module source.ireader._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.ireader")
 
 return {
     id = "ireader",

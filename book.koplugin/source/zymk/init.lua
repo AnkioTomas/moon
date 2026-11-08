@@ -7,12 +7,11 @@
 @module source.zymk
 --]]
 
-require("l10n").apply()
 local Client = require("source.zymk.client")
 local Mapper = require("source.zymk.mapper")
 local SourceBase = require("source.base")
 local Toc = require("source.toc")
-local _ = require("gettext")
+local _ = require("l10n").get("source.zymk")
 
 local Zhiyinmanke = {}
 

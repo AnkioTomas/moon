@@ -4,8 +4,7 @@
 @module source.tadu.setting
 --]]
 
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.tadu")
 local CookieLogin = require("source.cookie_login")
 
 local SOURCE_ID = "tadu"

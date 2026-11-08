@@ -5,7 +5,7 @@
 @module koplugin.book.source.local.setting
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.local")
 
 local SOURCE_ID = "local"
 

@@ -4,8 +4,7 @@
 @module source.shuqi.setting
 --]]
 
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.shuqi")
 local CookieLogin = require("source.cookie_login")
 
 local SOURCE_ID = "shuqi"

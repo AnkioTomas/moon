@@ -4,11 +4,10 @@
 @module source.jjwxc.browse
 --]]
 
-require("l10n").apply()
 local Browse = require("source.browse")
 local Client = require("source.jjwxc.client")
 local SourceBase = require("source.base")
-local _ = require("gettext")
+local _ = require("l10n").get("source.jjwxc")
 
 local Library = {}
 local FILTERS = {

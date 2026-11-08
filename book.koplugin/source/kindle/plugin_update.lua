@@ -8,7 +8,7 @@ kindle.koplugin（Kindle 书库依赖）在线更新：流程在 utils.plugin_up
 --]]
 
 local Updater = require("utils.plugin_update")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kindle")
 local T = require("ffi/util").template
 
 local NAME = "kindle.koplugin"

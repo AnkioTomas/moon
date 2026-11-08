@@ -4,10 +4,9 @@
 @module source.kuaikan.setting
 --]]
 
-require("l10n").apply()
 local Client = require("source.kuaikan.client")
 local CookieLogin = require("source.cookie_login")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kuaikan")
 
 local Setting = {}
 local COOKIE_PATHS = { ["/"] = true, ["/v2"] = true, ["/v2/"] = true, ["/v2/pweb"] = true, ["/v2/pweb/"] = true }

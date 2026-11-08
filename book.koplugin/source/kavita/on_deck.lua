@@ -19,7 +19,7 @@ local Pager = require("ui.themes.widgets.pager")
 local Theme = require("ui.themes")
 local Tap = require("ui.themes.widgets.tap")
 local Text = require("ui.themes.widgets.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 
 local ID = "kavita"
 local MAX_BOOKS = 10

@@ -8,7 +8,7 @@
 
 local lfs = require("libs/libkoreader-lfs")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.local")
 local T = require("ffi/util").template
 local Job = require("workers.job")
 local Common = require("source.local.common")

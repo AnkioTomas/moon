@@ -19,7 +19,7 @@ local Shelf = require("source.shelf")
 local Browse = require("source.browse")
 local Progress = require("book.progress")
 local logger = require("utils.log")
-local _ = require("gettext")
+local _ = require("l10n").get("source.jdread")
 
 local Jdread = {}
 

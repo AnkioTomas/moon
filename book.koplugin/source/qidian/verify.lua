@@ -4,9 +4,8 @@
 @module source.qidian.verify
 --]]
 
-require("l10n").apply()
 local Ext = require("utils.extension")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qidian")
 ---@class QidianVerification
 ---@field session QidianLogin
 ---@field challenge table

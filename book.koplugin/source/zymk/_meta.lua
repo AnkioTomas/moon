@@ -4,7 +4,7 @@
 @module source.zymk._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.zymk")
 
 return {
     id = "zymk",

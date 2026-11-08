@@ -13,7 +13,7 @@ local Mapper = require("source.legado.mapper")
 local Shelf = require("source.shelf")
 local SourceBase = require("source.base")
 local Toc = require("source.toc")
-local _ = require("gettext")
+local _ = require("l10n").get("source.legado")
 
 local Legado = {}
 

@@ -4,9 +4,8 @@ Kavita 系列书评映射；个人评价列表和章节评价不混入系列书�
 @module source.kavita.mapper
 --]]
 
-require("l10n").apply()
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 
 local Mapper = {}
 

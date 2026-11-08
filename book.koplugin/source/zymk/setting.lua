@@ -4,11 +4,10 @@
 @module source.zymk.setting
 --]]
 
-require("l10n").apply()
 local Login = require("source.zymk.login")
 local Client = require("source.zymk.client")
 local CookieLogin = require("source.cookie_login")
-local _ = require("gettext")
+local _ = require("l10n").get("source.zymk")
 local Setting = {}
 
 function Setting.rowStatus()

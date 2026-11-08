@@ -4,12 +4,11 @@
 @module source.xiaoxiang.browse
 --]]
 
-require("l10n").apply()
 local Browse = require("source.browse")
 local Client = require("source.xiaoxiang.client")
 local Mapper = require("source.xiaoxiang.mapper")
 local JSON_NULL = require("json").decode("null")
-local _ = require("gettext")
+local _ = require("l10n").get("source.xiaoxiang")
 
 local Library = {}
 local KEYS = { "state", "charge", "update", "words", "order", "category", "tag" }

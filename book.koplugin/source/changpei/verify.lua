@@ -5,12 +5,11 @@
 @module koplugin.book.source.changpei.verify
 --]]
 
-require("l10n").apply()
 
 local Ext = require("utils.extension")
 local Random = require("utils.random")
 local Client = require("source.changpei.client")
-local _ = require("gettext")
+local _ = require("l10n").get("source.changpei")
 
 ---@class ChangpeiVerification
 ---@field ticket string

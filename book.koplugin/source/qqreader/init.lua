@@ -9,14 +9,13 @@ QQ阅读数据源。
 @module koplugin.book.source.qqreader
 --]]
 
-require("l10n").apply()
 local Browse = require("source.browse")
 local Client = require("source.qqreader.client")
 local Mapper = require("source.qqreader.mapper")
 local Shelf = require("source.shelf")
 local SourceBase = require("source.base")
 local Toc = require("source.toc")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qqreader")
 
 local QQReader = {}
 

@@ -5,10 +5,9 @@
 @module source.tadu.font
 --]]
 
-require("l10n").apply()
 local Glyph = require("utils.glyph")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.tadu")
 local TABLE_PATH = debug.getinfo(1, "S").source:sub(2):match("^(.*)/") .. "/font_table.bin"
 -- MTF1 + sorted records: 32-byte SHA-256, 3-byte big-endian Unicode codepoint.
 local RECORD_SIZE = 35

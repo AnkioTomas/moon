@@ -7,7 +7,6 @@
 @module koplugin.book.source.shuqi
 --]]
 
-require("l10n").apply()
 local Browse = require("source.browse")
 local Client = require("source.shuqi.client")
 local Mapper = require("source.shuqi.mapper")
@@ -15,7 +14,7 @@ local Shelf = require("source.shelf")
 local SourceBase = require("source.base")
 local Text = require("utils.text")
 local Toc = require("source.toc")
-local _ = require("gettext")
+local _ = require("l10n").get("source.shuqi")
 
 local Shuqi = {}
 

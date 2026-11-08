@@ -7,10 +7,9 @@ m.igetget.com 的 authorize 链接，轮询 check_login。status 0 继续等，1
 @module source.dedao.qrlogin
 --]]
 
-require("l10n").apply()
 local Client = require("source.dedao.client")
 local Mapper = require("source.dedao.mapper")
-local _ = require("gettext")
+local _ = require("l10n").get("source.dedao")
 
 local QRLogin = {}
 QRLogin.__index = QRLogin

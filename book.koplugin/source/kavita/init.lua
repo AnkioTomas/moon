@@ -35,7 +35,7 @@ local VolumeList = require("source.kavita.volume_list")
 local SourceBase = require("source.base")
 local Normalize = require("book.note.normalize")
 local logger = require("utils.log")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 local T = require("ffi/util").template
 
 local ID = "kavita"

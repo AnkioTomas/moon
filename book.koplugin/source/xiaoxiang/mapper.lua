@@ -6,7 +6,7 @@
 
 local JSON = require("json")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.xiaoxiang")
 
 local Mapper = {}
 

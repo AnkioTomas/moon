@@ -5,10 +5,9 @@
 @module source.dedao.verify
 --]]
 
-require("l10n").apply()
 local Ext = require("utils.extension")
 local Client = require("source.dedao.client")
-local _ = require("gettext")
+local _ = require("l10n").get("source.dedao")
 
 ---@class DedaoVerification
 ---@field ticket string

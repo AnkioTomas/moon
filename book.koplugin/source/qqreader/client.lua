@@ -10,7 +10,6 @@ encrypt / fontEncrypt 为真是 Fock 加密 + 乱序字体（已购章），解�
 @module koplugin.book.source.qqreader.client
 --]]
 
-require("l10n").apply()
 local Fock = require("source.qqreader.fock")
 local JSON = require("json")
 local logger = require("utils.log")
@@ -18,7 +17,7 @@ local Mapper = require("source.qqreader.mapper")
 local Request = require("http.request")
 local SourceBase = require("source.base")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qqreader")
 
 local Client = {}
 

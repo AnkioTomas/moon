@@ -8,7 +8,7 @@ local Cbz = require("source.cbz")
 local Client = require("source.kuaikan.client")
 local Image = require("utils.image")
 local Paths = require("utils.paths")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kuaikan")
 
 local Chapter = {}
 

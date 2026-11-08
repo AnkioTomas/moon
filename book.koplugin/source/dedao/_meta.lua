@@ -6,7 +6,7 @@
 @module source.dedao._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.dedao")
 
 return {
     id = "dedao",

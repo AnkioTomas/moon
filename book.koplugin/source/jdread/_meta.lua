@@ -4,7 +4,7 @@
 @module source.jdread._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.jdread")
 
 return {
     id = "jdread",

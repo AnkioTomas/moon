@@ -14,7 +14,7 @@ iRead（iread.ankio.net）HTTP 客户端（仅异步）。
 local JSON = require("json")
 local Request = require("http.request")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.iread")
 
 local Client = {}
 

@@ -14,7 +14,7 @@ local SourceBase = require("source.base")
 local Shelf = require("source.shelf")
 local Toc = require("source.toc")
 local logger = require("utils.log")
-local _ = require("gettext")
+local _ = require("l10n").get("source.copymanga")
 
 local Copymanga = {}
 

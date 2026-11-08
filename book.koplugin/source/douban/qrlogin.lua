@@ -7,9 +7,8 @@
 @module source.douban.qrlogin
 --]]
 
-require("l10n").apply()
 local Client = require("source.douban.client")
-local _ = require("gettext")
+local _ = require("l10n").get("source.douban")
 
 local QRLogin = {}
 QRLogin.__index = QRLogin

@@ -4,8 +4,7 @@
 @module koplugin.book.source.fanqie.setting
 --]]
 
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.fanqie")
 
 local SOURCE_ID = "fanqie"
 local M = {}

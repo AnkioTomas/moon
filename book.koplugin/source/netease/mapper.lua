@@ -9,7 +9,7 @@
 
 local Text = require("utils.text")
 local JSON = require("json")
-local _ = require("gettext")
+local _ = require("l10n").get("source.netease")
 
 ---@class NeteaseChapter : BookChapter
 ---@field big_content_id string|nil

@@ -7,8 +7,7 @@
 @module koplugin.book.source.qidian.setting
 --]]
 
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.qidian")
 local CookieLogin = require("source.cookie_login")
 
 local SOURCE_ID = "qidian"

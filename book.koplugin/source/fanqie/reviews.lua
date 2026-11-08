@@ -15,8 +15,7 @@ local Crypto = require("source.fanqie.reading.crypto")
 local Device = require("source.fanqie.reading.device")
 local Reading = require("source.fanqie.reading")
 local Text = require("utils.text")
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.fanqie")
 
 local Reviews = {}
 local EMOTICONS = {

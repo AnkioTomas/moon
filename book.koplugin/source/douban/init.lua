@@ -8,7 +8,6 @@
 @module koplugin.book.source.douban
 --]]
 
-require("l10n").apply()
 local Client = require("source.douban.client")
 local Browse = require("source.browse")
 local Mapper = require("source.douban.mapper")
@@ -16,7 +15,7 @@ local Shelf = require("source.shelf")
 local SourceBase = require("source.base")
 local Text = require("utils.text")
 local Toc = require("source.toc")
-local _ = require("gettext")
+local _ = require("l10n").get("source.douban")
 
 local Douban = {}
 

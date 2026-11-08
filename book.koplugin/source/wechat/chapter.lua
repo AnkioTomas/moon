@@ -19,7 +19,7 @@ local Assets = require("source.wechat.assets")
 local Text = require("utils.text")
 local Paths = require("utils.paths")
 local Toc = require("source.wechat.toc")
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 local Chapter = {}
 

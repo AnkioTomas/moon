@@ -7,7 +7,6 @@
 @module koplugin.book.source.ireader
 --]]
 
-require("l10n").apply()
 local Assets = require("source.assets")
 local Browse = require("source.browse")
 local Client = require("source.ireader.client")
@@ -17,7 +16,7 @@ local Shelf = require("source.shelf")
 local SourceBase = require("source.base")
 local Toc = require("source.toc")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.ireader")
 
 local IReader = {}
 

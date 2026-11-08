@@ -27,7 +27,7 @@ local App = require("source.wechat.app")
 local Eink = require("source.wechat.eink")
 local logger = require("utils.log")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 local WeChat = {}
 

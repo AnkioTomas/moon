@@ -4,7 +4,7 @@
 @module source.qidian._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.qidian")
 
 return {
     id = "qidian",

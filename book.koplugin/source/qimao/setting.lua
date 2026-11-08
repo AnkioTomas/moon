@@ -7,8 +7,7 @@
 @module koplugin.book.source.qimao.setting
 --]]
 
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.qimao")
 
 local SOURCE_ID = "qimao"
 local Setting = {}

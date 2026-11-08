@@ -7,10 +7,9 @@
 @module source.tadu.qrlogin
 --]]
 
-require("l10n").apply()
 local Client = require("source.tadu.client")
 local Mapper = require("source.tadu.mapper")
-local _ = require("gettext")
+local _ = require("l10n").get("source.tadu")
 
 local QRLogin = {}
 QRLogin.__index = QRLogin

@@ -4,12 +4,11 @@
 @module source.changpei.browse
 --]]
 
-require("l10n").apply()
 local Browse = require("source.browse")
 local Client = require("source.changpei.client")
 local Mapper = require("source.changpei.mapper")
 local SourceBase = require("source.base")
-local _ = require("gettext")
+local _ = require("l10n").get("source.changpei")
 
 local Library = {}
 local KEYS = { "channel", "category", "process", "sell", "number", "field" }

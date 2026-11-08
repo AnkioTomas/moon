@@ -4,10 +4,9 @@
 @module source.zhihu.story
 --]]
 
-require("l10n").apply()
 local Paths = require("utils.paths")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.zhihu")
 
 local Story = {}
 

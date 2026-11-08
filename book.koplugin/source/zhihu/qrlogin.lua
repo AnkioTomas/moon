@@ -7,9 +7,8 @@ POST /api/v3/account/api/login/qrcode 返回 token 和二维码内容。
 @module source.zhihu.qrlogin
 --]]
 
-require("l10n").apply()
 local Client = require("source.zhihu.client")
-local _ = require("gettext")
+local _ = require("l10n").get("source.zhihu")
 
 local QRLogin = {}
 QRLogin.__index = QRLogin

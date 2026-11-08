@@ -7,12 +7,11 @@
 @module source.shuqi.client
 --]]
 
-require("l10n").apply()
 local JSON = require("json")
 local Mapper = require("source.shuqi.mapper")
 local Request = require("http.request")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.shuqi")
 
 local Client = {}
 

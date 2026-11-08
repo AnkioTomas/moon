@@ -4,12 +4,11 @@
 @module source.qidian.browse
 --]]
 
-require("l10n").apply()
 local Client = require("source.qidian.client")
 local Mapper = require("source.qidian.mapper")
 local Browse = require("source.browse")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qidian")
 
 local Library = {}
 -- 官网动态标签：预译已知标签，未知标签仍沿用 gettext 的原文回退。

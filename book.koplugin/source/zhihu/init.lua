@@ -6,14 +6,13 @@
 @module source.zhihu
 --]]
 
-require("l10n").apply()
 local Client = require("source.zhihu.client")
 local Mapper = require("source.zhihu.mapper")
 local SourceBase = require("source.base")
 local Browse = require("source.browse")
 local Text = require("utils.text")
 local Toc = require("source.toc")
-local _ = require("gettext")
+local _ = require("l10n").get("source.zhihu")
 
 local Zhihu = {}
 

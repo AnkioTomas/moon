@@ -103,7 +103,7 @@ function Mapper.store(wire, node, page)
     if type(wire) ~= "table" or tonumber(wire.code) ~= 200 or type(wire.hits) ~= "table" then return nil end
     local rows, tags, total = wire.hits.topicMessageList, wire.hits.topicCategories, tonumber(wire.total)
     if type(rows) ~= "table" or type(tags) ~= "table" or not total or total < 0 then return nil end
-    local _ = require("gettext")
+    local _ = require("l10n").get("source.kuaikan")
     local parts = {}
     for value in Mapper.storeNode(node):gmatch("%d+") do parts[#parts + 1] = value end
     local categories = {}

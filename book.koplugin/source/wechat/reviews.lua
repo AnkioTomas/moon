@@ -9,7 +9,7 @@
 --]]
 
 local Annotations = require("book.annotations")
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 local PAGE_SIZE = 30
 local COMMENT_PAGE = 20

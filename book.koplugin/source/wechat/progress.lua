@@ -13,8 +13,7 @@ local Annotations = require("book.annotations")
 local JSON = require("json")
 local Paths = require("utils.paths")
 local Text = require("utils.text")
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 local Position = {}
 

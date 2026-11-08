@@ -4,12 +4,11 @@
 @module source.zymk.browse
 --]]
 
-require("l10n").apply()
 local Client = require("source.zymk.client")
 local Mapper = require("source.zymk.mapper")
 local Browse = require("source.browse")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.zymk")
 
 local Library = {}
 local SORTS = {

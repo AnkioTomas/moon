@@ -8,8 +8,7 @@ book.qq.com 下的 HTTPS，不能指到 passport。书架页未登录也是 200�
 @module koplugin.book.source.qqreader.setting
 --]]
 
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.qqreader")
 local CookieLogin = require("source.cookie_login")
 
 local SOURCE_ID = "qqreader"

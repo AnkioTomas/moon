@@ -25,7 +25,9 @@ package.preload["device"] = function()
     }
 end
 package.preload["gettext"] = function() return function(s) return s end end
-package.preload["l10n"] = function() return { apply = function() end } end
+package.preload["l10n"] = function()
+    return { apply = function() end, get = function() return require("gettext") end }
+end
 local function widget()
     local w = {}
     function w:extend()

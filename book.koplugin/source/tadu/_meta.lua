@@ -6,7 +6,7 @@
 @module source.tadu._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.tadu")
 
 return {
     id = "tadu",

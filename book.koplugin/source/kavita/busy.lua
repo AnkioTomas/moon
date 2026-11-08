@@ -8,7 +8,7 @@
 @module source.kavita.busy
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.kavita")
 
 local Busy = {}
 

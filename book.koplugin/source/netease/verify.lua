@@ -4,9 +4,8 @@
 @module source.netease.verify
 --]]
 
-require("l10n").apply()
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.netease")
 
 local Verification = {}
 Verification.__index = Verification

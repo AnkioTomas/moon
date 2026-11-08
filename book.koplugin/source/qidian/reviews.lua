@@ -12,7 +12,7 @@
 local Client = require("source.qidian.client")
 local ReviewLocate = require("book.review_locate")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qidian")
 local T = require("ffi/util").template
 
 local Reviews = {}

@@ -5,9 +5,8 @@
 @module source.zymk.phone_login
 --]]
 
-require("l10n").apply()
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.zymk")
 
 ---@class ZymkPhoneLogin
 ---@field session ZymkLogin

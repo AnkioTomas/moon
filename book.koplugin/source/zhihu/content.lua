@@ -68,7 +68,7 @@ function Content.upgradeStory(path, original)
     local read_err = reader.err
     reader:close()
     if read_err then return nil, read_err end
-    if not last then return nil, require("gettext")("无文本内容") end
+    if not last then return nil, require("l10n").get("source.zhihu")("无文本内容") end
     local updated = Content.prepare(last.data)
     local _quote, watermark = original:match("<span%s[^>]-id%s*=%s*([\"'])vipyxcode%1[^>]*>(.-)</span>")
     if watermark then

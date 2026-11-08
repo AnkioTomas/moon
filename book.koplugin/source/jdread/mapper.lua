@@ -6,7 +6,7 @@
 
 local Progress = require("book.progress")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.jdread")
 
 local Mapper = {}
 local SOURCE_ID = "jdread"

@@ -8,14 +8,13 @@
 @module koplugin.book.source.xiaoxiang
 --]]
 
-require("l10n").apply()
 local Client = require("source.xiaoxiang.client")
 local Mapper = require("source.xiaoxiang.mapper")
 local SourceBase = require("source.base")
 local Browse = require("source.browse")
 local Shelf = require("source.shelf")
 local Toc = require("source.toc")
-local _ = require("gettext")
+local _ = require("l10n").get("source.xiaoxiang")
 
 local Xiaoxiang = {}
 

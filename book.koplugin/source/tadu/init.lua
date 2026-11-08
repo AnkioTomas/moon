@@ -7,14 +7,13 @@ getPartContentByCodeTable。书城搜索和频道不需要登录。
 @module koplugin.book.source.tadu
 --]]
 
-require("l10n").apply()
 local Browse = require("source.browse")
 local Client = require("source.tadu.client")
 local Mapper = require("source.tadu.mapper")
 local Shelf = require("source.shelf")
 local SourceBase = require("source.base")
 local Toc = require("source.toc")
-local _ = require("gettext")
+local _ = require("l10n").get("source.tadu")
 
 local Tadu = {}
 

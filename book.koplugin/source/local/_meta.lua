@@ -4,7 +4,7 @@
 @module source.local._meta
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.local")
 
 return {
     id = "local",

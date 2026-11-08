@@ -4,8 +4,7 @@
 @module source.tadu.read_auth
 --]]
 
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.tadu")
 
 ---@class TaduReadAuth
 ---@field session TaduReading

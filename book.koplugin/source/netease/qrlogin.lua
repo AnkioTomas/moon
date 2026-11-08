@@ -4,9 +4,8 @@
 @module source.netease.qrlogin
 --]]
 
-require("l10n").apply()
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.netease")
 
 local QRLogin = {}
 QRLogin.__index = QRLogin

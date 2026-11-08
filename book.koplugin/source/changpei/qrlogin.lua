@@ -11,9 +11,8 @@ Cookie 交给 on_cookie，由设置页走账号校验再保存。
 @module koplugin.book.source.changpei.qrlogin
 --]]
 
-require("l10n").apply()
 local Request = require("http.request")
-local _ = require("gettext")
+local _ = require("l10n").get("source.changpei")
 
 local QRLogin = {}
 QRLogin.__index = QRLogin

@@ -8,14 +8,13 @@
 @module koplugin.book.source.changpei
 --]]
 
-require("l10n").apply()
 local Browse = require("source.browse")
 local Client = require("source.changpei.client")
 local Mapper = require("source.changpei.mapper")
 local Shelf = require("source.shelf")
 local SourceBase = require("source.base")
 local Toc = require("source.toc")
-local _ = require("gettext")
+local _ = require("l10n").get("source.changpei")
 
 local Changpei = {}
 

@@ -5,13 +5,12 @@
 @module source.zymk.login
 --]]
 
-require("l10n").apply()
 local Client = require("source.zymk.client")
 local Mapper = require("source.zymk.mapper")
 local Settings = require("utils.settings")
 local JSON = require("json")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.zymk")
 
 ---@class ZymkLogin
 ---@field previous ZymkAccount|nil

@@ -4,11 +4,10 @@ QQ阅读官网动态分类与筛选，兼容旧 cate:分类号节点。
 @module source.qqreader.browse
 --]]
 
-require("l10n").apply()
 local Browse = require("source.browse")
 local Client = require("source.qqreader.client")
 local SourceBase = require("source.base")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qqreader")
 
 local Library = {}
 local KEYS = { "categoryId2", "categoryId3", "finishStatus", "priceStatus", "words", "updateTime", "orderBy", "pageNo" }

@@ -6,7 +6,6 @@
 @module koplugin.book.source.dedao
 --]]
 
-require("l10n").apply()
 local Client = require("source.dedao.client")
 local Mapper = require("source.dedao.mapper")
 local Shelf = require("source.shelf")
@@ -15,7 +14,7 @@ local Toc = require("source.toc")
 local Text = require("utils.text")
 local Browse = require("source.browse")
 local JSON = require("json")
-local _ = require("gettext")
+local _ = require("l10n").get("source.dedao")
 
 local Dedao = {}
 

@@ -4,10 +4,9 @@
 @module source.kuaikan.phone_login
 --]]
 
-require("l10n").apply()
 local Mapper = require("source.kuaikan.mapper")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kuaikan")
 
 ---@class KuaikanPhoneLogin
 ---@field mode string

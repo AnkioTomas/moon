@@ -4,9 +4,8 @@
 @module koplugin.book.source.zhihu.setting
 --]]
 
-require("l10n").apply()
 local CookieLogin = require("source.cookie_login")
-local _ = require("gettext")
+local _ = require("l10n").get("source.zhihu")
 
 local Setting = {}
 

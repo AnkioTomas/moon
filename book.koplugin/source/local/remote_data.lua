@@ -8,7 +8,7 @@
 @module koplugin.book.source.local.remote_data
 --]]
 
-local _ = require("gettext")
+local _ = require("l10n").get("source.local")
 local Common = require("source.local.common")
 
 local SOURCE_ID = Common.SOURCE_ID

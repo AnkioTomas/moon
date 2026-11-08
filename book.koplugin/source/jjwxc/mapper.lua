@@ -164,7 +164,7 @@ function Mapper.category(html)
     end
     local pages, page = html:match("共(%d+)页，当前第(%d+)页")
     local body = html:match('<table[^>]-width="100%%"[^>]*>(.-)</table>')
-    if not pages or not page or not body then return nil, require("gettext")("晋江分类响应无效") end
+    if not pages or not page or not body then return nil, require("l10n").get("source.jjwxc")("晋江分类响应无效") end
     local books, seen = {}, {}
     for row in body:gmatch("<tr[^>]*>(.-)</tr>") do
         local id, title = row:match('<a[^>]-href="/book2/(%d+)"[^>]*>(.-)</a>')

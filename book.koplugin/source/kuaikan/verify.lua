@@ -5,9 +5,8 @@
 @module source.kuaikan.verify
 --]]
 
-require("l10n").apply()
 local Ext = require("utils.extension")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kuaikan")
 
 ---@class KuaikanVerification
 ---@field ticket string

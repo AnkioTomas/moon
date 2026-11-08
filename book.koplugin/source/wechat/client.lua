@@ -12,7 +12,7 @@ local logger = require("utils.log")
 local Auth = require("source.wechat.auth")
 local Eink = require("source.wechat.eink")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 local WEB = "https://weread.qq.com"
 -- 本人想法每页条数与翻页上限（hasMore=1 时按回包 maxIdx 续拉）

@@ -4,8 +4,7 @@
 @module koplugin.book.source.jdread.setting
 --]]
 
-require("l10n").apply()
-local _ = require("gettext")
+local _ = require("l10n").get("source.jdread")
 
 local Setting = {}
 

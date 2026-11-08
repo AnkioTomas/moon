@@ -5,11 +5,10 @@
 @module source.zhihu.verify
 --]]
 
-require("l10n").apply()
 
 local Client = require("source.zhihu.client")
 local Ext = require("utils.extension")
-local _ = require("gettext")
+local _ = require("l10n").get("source.zhihu")
 
 ---@class ZhihuVerification
 ---@field ticket string

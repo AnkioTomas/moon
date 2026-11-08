@@ -4,9 +4,8 @@
 @module source.kuaikan.qrlogin
 --]]
 
-require("l10n").apply()
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.kuaikan")
 
 ---@class KuaikanQRLogin
 ---@field generation integer

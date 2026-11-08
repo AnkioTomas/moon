@@ -18,7 +18,7 @@ local Header = require("http.request.header")
 local Text = require("utils.text")
 local App = require("source.wechat.app")
 local sha256 = require("ffi/sha2").sha256
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 local Eink = {}
 

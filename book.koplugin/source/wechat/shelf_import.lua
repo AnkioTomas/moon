@@ -9,7 +9,7 @@
 --]]
 
 local Paths = require("utils.paths")
-local _ = require("gettext")
+local _ = require("l10n").get("source.wechat")
 
 local SOURCE_ID = "wechat"
 

@@ -5,11 +5,10 @@
 @module koplugin.book.source.qimao.verify
 --]]
 
-require("l10n").apply()
 
 local Ext = require("utils.extension")
 local Client = require("source.qimao.client")
-local _ = require("gettext")
+local _ = require("l10n").get("source.qimao")
 
 ---@class QimaoVerification
 ---@field ticket string

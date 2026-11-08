@@ -4,12 +4,11 @@
 @module koplugin.book.source.jdread.auth
 --]]
 
-require("l10n").apply()
 local JSON = require("json")
 local Request = require("http.request")
 local Image = require("utils.image")
 local Text = require("utils.text")
-local _ = require("gettext")
+local _ = require("l10n").get("source.jdread")
 local logger = require("utils.log")
 
 local Auth = {}
