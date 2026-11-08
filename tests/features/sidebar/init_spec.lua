@@ -489,9 +489,10 @@ do
     local strip = jump[1][1][2][1].strip
     Assert.eq(strip.width, 510)
     Assert.eq(strip.active, "info")
-    Assert.len(strip.tabs, 6)
+    Assert.len(strip.tabs, 7)
     Assert.eq(strip.tabs[6].id, "ticket")
     Assert.eq(strip.tabs[6].icon, "confirmation_number")
+    Assert.eq(strip.tabs[7].id, "settings")
     local opened, tickets = #state.opened, #state.tickets
     strip.on_tab("ticket")
     Assert.eq(jump.tab, 6)
@@ -501,14 +502,31 @@ do
     jump:onClose()
 end
 
+-- 阅读设置：只占底栏，点开后关侧栏并走设置入口；不进内容页。
+do
+    local opened_settings = 0
+    package.preload["desktop.pages.setting"] = function()
+        return { openReader = function() opened_settings = opened_settings + 1 return true end }
+    end
+    package.loaded["desktop.pages.setting"] = nil
+    local jump = Sidebar:new{ ui = ui, snapshot = state.snapshot }
+    local before = #state.closed
+    jump[1][1][2][1].strip.on_tab("settings")
+    Assert.eq(state.closed[#state.closed], jump)
+    Assert.eq(#state.closed, before + 1)
+    Assert.eq(opened_settings, 1)
+    Assert.eq(jump.tab, 1, "设置不是内容页，当前页签不动")
+end
+
 -- 用户隐藏的页不出现，顺序不变；条件页不满足时也不出现；全空退回书籍页。
 do
     state.sidebar.sidebar_hidden_tabs = { "toc", "ticket" }
     local trimmed = Sidebar:new{ ui = ui, snapshot = state.snapshot }
     Assert.eq(table.concat(trimmed.tabs, ","), "info,bookmarks,notes,xray")
     local strip = trimmed[1][1][2][1].strip
-    Assert.len(strip.tabs, 4)
+    Assert.len(strip.tabs, 5)
     Assert.eq(strip.tabs[4].id, "xray")
+    Assert.eq(strip.tabs[5].id, "settings")
 
     state.sidebar.sidebar_tab_order = { "xray", "notes" }
     local reordered = Sidebar:new{ ui = ui, snapshot = state.snapshot }
@@ -520,6 +538,7 @@ do
     local fallback = Sidebar:new{ ui = ui, snapshot = state.snapshot }
     Assert.eq(table.concat(fallback.tabs, ","), "info", "只剩不可用的 X-Ray：退回书籍页")
     Assert.eq(fallback[1][1][2][1].strip.tabs[1].id, "info")
+    Assert.eq(fallback[1][1][2][1].strip.tabs[2].id, "settings")
 
     state.sidebar.sidebar_hidden_tabs = {}
     state.xray = { book_xray_enabled = true }

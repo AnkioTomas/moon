@@ -438,19 +438,15 @@ local function groupRow(desktop, group)
             title = group.title,
             status = string.format("%d", #group.entries),
             status_on = true,
-            callback = function()
-                local folders = GROUP_FOLDERS[group.id]
-                local page = folders and folderGroupPage(desktop, group, folders) or groupPage(desktop, group)
-                Overlay.open(desktop, page)
-            end,
+            callback = function() Settings.openGroup(desktop, group.id) end,
         })
     end
 end
 
---- 构建设置根页：搜索行（无分组标题）+ 设备分组 + 其余分组目录。
----@return table
-function Settings:updateView()
-    local desktop = self.desktop
+--- 收集根页全部分组（含 icon）；阅读中直达某一组也走同一份树。
+---@param desktop BookDesktop
+---@return table[]
+function Settings.groups(desktop)
     local entries = coreEntries(desktop)
     for _idx, entry in ipairs(Tree.features(desktop)) do entries[#entries + 1] = entry end
     local roots = {
@@ -477,6 +473,52 @@ function Settings:updateView()
     local icons = {}
     for _idx, r in ipairs(roots) do icons[r.id] = r.icon end
     for _idx, group in ipairs(groups) do group.icon = icons[group.id] end
+    return groups
+end
+
+--- 阅读中没有桌面实例时给叠层一个宿主：只扛 settings_overlay / updateView / plugin。
+---@param plugin BookPlugin|nil
+---@return BookDesktop
+function Settings.host(plugin)
+    if plugin and plugin.desktop and not plugin.desktop.closed then
+        return plugin.desktop
+    end
+    local host = { plugin = plugin, closed = false, settings_overlay = nil }
+    function host:updateView()
+        if self.settings_overlay then self.settings_overlay:updateView() end
+    end
+    ---@cast host BookDesktop
+    return host
+end
+
+--- 打开某一分组叠层（与根页点分组同一页）。没有该组或组内无条目返回 false。
+---@param desktop BookDesktop
+---@param group_id string
+---@return boolean
+function Settings.openGroup(desktop, group_id)
+    for _idx, group in ipairs(Settings.groups(desktop)) do
+        if group.id == group_id then
+            if #group.entries == 0 then return false end
+            local folders = GROUP_FOLDERS[group.id]
+            Overlay.open(desktop, folders and folderGroupPage(desktop, group, folders) or groupPage(desktop, group))
+            return true
+        end
+    end
+    return false
+end
+
+--- 阅读页入口：有桌面复用，没有就建轻量宿主，打开「阅读」分组。
+---@param plugin BookPlugin|nil
+---@return boolean
+function Settings.openReader(plugin)
+    return Settings.openGroup(Settings.host(plugin), "reader")
+end
+
+--- 构建设置根页：搜索行（无分组标题）+ 设备分组 + 其余分组目录。
+---@return table
+function Settings:updateView()
+    local desktop = self.desktop
+    local groups = Settings.groups(desktop)
 
     local device_rows, group_rows = {}, {}
     for _idx, group in ipairs(groups) do

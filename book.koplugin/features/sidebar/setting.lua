@@ -34,6 +34,7 @@ Setting.TABS = {
     { id = "xray", text = _("X-Ray"), icon = "person_search", note = _("开启 X-Ray 后显示") },
     { id = "ticket", text = _("阅读票根"), icon = "confirmation_number" },
     { id = "stats", text = _("统计"), icon = "insights", note = _("订阅文章不显示") },
+    { id = "settings", text = _("阅读设置"), icon = "settings" },
 }
 
 -- sidebar_gesture 取 GESTURES 的 value；sidebar_hidden_tabs 记隐藏的页 id（新加的页缺省显示）；
