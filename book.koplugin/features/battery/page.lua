@@ -1,13 +1,15 @@
 --[[--
-电池读数：健康度、循环、容量和瞬时电气量。整页挂在「我的设备 → 本机 → 电池」。
+电池读数：健康度 / 容量快照 + 用法统计（每小时耗电、预估可用）。
+整页挂在「我的设备 → 本机 → 电池」。
 
-没有设计容量时不显示假的百分比，只说明不支持，并给出节点日志：
-复制后扫反馈群二维码发给开发者。日志正文是给开发者看的原始节点，不走翻译。
+健康度仍要设计容量；没有就标明不支持并给节点日志。
+用法统计只看电量百分比变化，不支持健康度的设备也能看。
 
 @module koplugin.book.features.battery.page
 --]]
 
 local Probe = require("features.battery.probe")
+local Stats = require("features.battery.stats")
 local Row = require("ui.themes.widgets.row")
 local _ = require("gettext")
 
@@ -85,31 +87,24 @@ function Page.showReport(report)
 end
 
 ---@param report string
----@return BookThemeSection[]
-local function unsupported(report)
+---@return (fun(iw: number): table)[]
+local function unsupportedRows(report)
     return {
-        {
-            title = _("此设备不支持"),
-            rows = {
-                infoRow("battery_android_full", _("健康度"), _("不支持"), _("读不到设计容量，算不出来。")),
-                function(iw)
-                    return Row.widget({
-                        width = iw, kind = "nav", icon = "bug_report",
-                        title = _("复制日志发给开发者"),
-                        subtitle = _("点开后复制日志，再扫码发到反馈群。复制不了就截图。"),
-                        callback = function() Page.showReport(report) end,
-                    })
-                end,
-            },
-        },
+        infoRow("battery_android_full", _("健康度"), _("不支持"), _("读不到设计容量，算不出来。")),
+        function(iw)
+            return Row.widget({
+                width = iw, kind = "nav", icon = "bug_report",
+                title = _("复制日志发给开发者"),
+                subtitle = _("点开后复制日志，再扫码发到反馈群。复制不了就截图。"),
+                callback = function() Page.showReport(report) end,
+            })
+        end,
     }
 end
 
----@return BookThemeSection[]
-function Page.sections()
-    local result = Probe.read()
-    if not result.supported then return unsupported(result.report) end
-    local row = result.reading
+---@param row table
+---@return (fun(iw: number): table)[]
+local function hardwareRows(row)
     local rows = {
         infoRow("battery_android_full", _("健康度"),
             string.format("%.1f%%", row.health_pct),
@@ -130,7 +125,75 @@ function Page.sections()
     add("device_thermostat", _("温度"), row.temp_c and string.format("%.1f °C", row.temp_c))
     add("bolt", _("电压"), row.voltage_v and string.format("%.3f V", row.voltage_v))
     add("electric_bolt", _("电流"), row.current_ma and string.format("%.0f mA", row.current_ma))
-    return { { title = _("电池"), rows = rows } }
+    return rows
+end
+
+--- 一组用法：总时长 / 消耗或充电 / 每小时 / 预估。
+---@param title string
+---@param block table
+---@param consumed_title string
+---@param estimate_title string
+---@return (fun(iw: number): table)[]
+local function usageRows(title, block, consumed_title, estimate_title)
+    return {
+        infoRow("schedule", title, Stats.formatDuration(block.time)),
+        infoRow("battery_android_full", consumed_title, block.consumed),
+        infoRow("speed", _("每小时电量变化"), block.rate),
+        infoRow("timelapse", estimate_title, block.remaining),
+    }
+end
+
+---@param desktop BookDesktop|nil
+---@return (fun(iw: number): table)[]
+local function statsRows(desktop)
+    local sum = Stats.summary()
+    local rows = {
+        infoRow("info", _("说明"), nil, _("按电量百分比变化估算，高电量段可能不准。")),
+    }
+    local function append(list)
+        for _idx, row in ipairs(list) do rows[#rows + 1] = row end
+    end
+    append(usageRows(_("上次充电以来的唤醒"), sum.awake, _("已消耗"), _("预计可用时长")))
+    append(usageRows(_("上次充电以来的休眠"), sum.sleeping, _("已消耗"), _("预计可用时长")))
+    append(usageRows(_("上次充电"), sum.charging_usage, _("已充电"), _("预计充满用时")))
+    append(usageRows(_("自从上次充电"), sum.discharging, _("已消耗"), _("预计可用时长")))
+    rows[#rows + 1] = function(iw)
+        return Row.widget({
+            width = iw, kind = "action", icon = "restart_alt",
+            title = _("重置用法统计"),
+            subtitle = _("清空累计，从现在重新采样"),
+            callback = function()
+                require("ui.themes.widgets.confirm"):new{
+                    text = _("清空用法统计？健康度与容量读数不受影响。"),
+                    ok_text = _("清空"),
+                    ok_callback = function()
+                        Stats.reset()
+                        if desktop and desktop.settings_overlay then
+                            desktop.settings_overlay:updateView()
+                        end
+                    end,
+                }:show()
+            end,
+        })
+    end
+    return rows
+end
+
+---@param desktop BookDesktop|nil
+---@return BookThemeSection[]
+function Page.sections(desktop)
+    local result = Probe.read()
+    local sections = {}
+    if result.supported then
+        sections[#sections + 1] = { title = _("电池"), rows = hardwareRows(result.reading) }
+    else
+        sections[#sections + 1] = { title = _("此设备不支持"), rows = unsupportedRows(result.report) }
+    end
+    sections[#sections + 1] = {
+        title = _("用法统计"),
+        rows = statsRows(desktop),
+    }
+    return sections
 end
 
 return Page

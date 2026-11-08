@@ -9,7 +9,7 @@ local _ = require("gettext")
 
 return {
     name = _("电池"),
-    description = _("健康度、循环次数与充放电"),
-    abilities = { _("电池健康度") },
+    description = _("健康度、用法统计与充放电"),
+    abilities = { _("电池健康度"), _("每小时耗电"), _("预估可用") },
     removable = false,
 }
