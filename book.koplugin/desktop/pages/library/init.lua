@@ -408,26 +408,31 @@ local function buildGrid(ctx, books, m, on_open, show_status, lib)
     return grid
 end
 
---- 正文空态：加载中 / 错误 / 空列表；sub 是离线专用副文案（无按钮，05 A6）。
+--- 正文空态：加载中 / 错误 / 空列表；sub 是副文案；action 是可选按钮（去登录等）。
 ---@param w number
 ---@param h number
 ---@param msg string
 ---@param sub string|nil
+---@param action { text: string, callback: fun() }|nil
 ---@return table
-local function emptyBody(w, h, msg, sub)
+local function emptyBody(w, h, msg, sub, action)
     local t = Theme.current()
     local width = w - Theme.px(t.space.md) * 2
     local body = Text.line("body", msg, { color = t.color.muted, width = width })
-    local inner
+    local parts = { body }
     if type(sub) == "string" and sub ~= "" then
-        inner = VerticalGroup:new{
-            align = "center",
-            body,
-            VerticalSpan:new{ width = Theme.px(t.space.xs) },
-            Text.line("caption", sub, { color = t.color.muted, width = width }),
-        }
-    else
-        inner = body
+        parts[#parts + 1] = VerticalSpan:new{ width = Theme.px(t.space.xs) }
+        parts[#parts + 1] = Text.line("caption", sub, { color = t.color.muted, width = width })
+    end
+    if action and action.text and action.callback then
+        parts[#parts + 1] = VerticalSpan:new{ width = Theme.px(t.space.md) }
+        parts[#parts + 1] = Button:new{ text = action.text, variant = "primary", size = "small",
+            callback = action.callback }
+    end
+    local inner = body
+    if #parts > 1 then
+        inner = VerticalGroup:new{ align = "center" }
+        for i = 1, #parts do inner[i] = parts[i] end
     end
     return CenterContainer:new{
         dimen = Geom:new{ w = w, h = h },
@@ -682,7 +687,8 @@ function Library:build(ctx, state, opts)
     if books and #books > 0 then
         body = buildGrid(ctx, books, m, opts.on_open, opts.show_status)
     else
-        body = emptyBody(w, m.grid_h, not books and _("加载中…") or state.err or opts.empty_text or _("没有书籍"))
+        body = emptyBody(w, m.grid_h, not books and _("加载中…") or state.err or opts.empty_text or _("没有书籍"),
+            opts.empty_sub, opts.empty_action)
     end
     local head = { toolbar(w, m.top_h, left, { total }) }
     for _idx, row in ipairs(chipRows(w, groups, opts.on_chip)) do head[#head + 1] = row end
@@ -825,9 +831,20 @@ function Library:buildPage(ctx)
     ctx.on_detail = on_detail
     local body
     if not books or #books == 0 then
+        local source = self.desktop and self.desktop.source
+        local need_login = books and #books == 0 and not state.err and g.id ~= "folder"
+            and source and source.id ~= "local" and not source:configured()
+            and not MoonSettings.get("source").library_mixed
         if books and #books == 0 and self.offline and not state.err and g.id ~= "folder" then
             body = emptyBody(w, m.grid_h, _("离线：Kavita 里还没有可离线阅读的书"),
                 _("联网后可在漫画详情里下载卷"))
+        elseif need_login then
+            body = emptyBody(w, m.grid_h, _("需要登录后才能同步书库"), nil, {
+                text = _("去登录"),
+                callback = function()
+                    require("desktop.pages.setting.source").openAccount(self.desktop, source.id)
+                end,
+            })
         else
             body = emptyBody(w, m.grid_h, not books and _("加载中…") or state.err or _("没有书籍"))
         end

@@ -19,14 +19,22 @@ package.loaded["utils.settings"] = {
     save = function(name) saved[#saved + 1] = name end,
 }
 
+local opened_account = 0
+package.loaded["desktop.pages.setting.source"] = {
+    openAccount = function() opened_account = opened_account + 1 end,
+}
+
 local Welcome = require("desktop.welcome")
 
-Welcome.promptDocs()
+local desk = { name = "book_desktop" }
+Welcome.promptDocs(desk)
 local dlg = Themed.last("confirm")
 Assert.is_true(dlg.shown)
 Assert.eq(desktop.docs_prompt_pending, false)
 Assert.eq(saved[1], "desktop")
 Assert.eq(dlg.extra_text, "加入交流群")
+Assert.eq(opened_account, 1, "首次使用打开账号页")
+Assert.matches(dlg.text, "账号页")
 
 dlg.ok_callback()
 Assert.matches(opened, "^https://")
@@ -41,7 +49,7 @@ Assert.is_nil(Themed.last("qr"), "能开链接时不出二维码")
 can_open = false
 opened = nil
 desktop.docs_prompt_pending = true
-Welcome.promptDocs()
+Welcome.promptDocs(desk)
 dlg = Themed.last("confirm")
 dlg.ok_callback()
 local qr = Themed.last("qr")
@@ -53,7 +61,9 @@ Assert.eq(qr.title, "加入交流群")
 Assert.eq(qr.text, "https://qm.qq.com/q/yLPC4fxb1K")
 Assert.eq(qr.caption, "https://qm.qq.com/q/yLPC4fxb1K")
 Assert.is_nil(opened)
+Assert.eq(opened_account, 2)
 
 Themed.made = {}
-Welcome.promptDocs()
+Welcome.promptDocs(desk)
 Assert.is_nil(Themed.last("confirm"))
+Assert.eq(opened_account, 2, "只引导一次")

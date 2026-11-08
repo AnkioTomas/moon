@@ -15,7 +15,7 @@
   | 3 条回复                       |
   | [<]          2 / 5+       [>] |
   +-------------------------------+
-有回复数、且属主源实现了 paragraphReviewRepliesAsync 时，卡片底部那行点开回复页
+有回复数、且属主源实现了 paragraphReviewRepliesAsync 或附带 reply_preview 时，卡片底部那行点开回复页
 （同一张表，引用换成这条评论）。回复页不再往下开。楼中楼写在正文前缀「回复 某人：」。
 
 @module koplugin.book.features.reviews.sheet
@@ -67,11 +67,19 @@ local function showImage(picture)
     viewer:show()
 end
 
+---@class ReviewSheetItem: WechatReview
+---@field time integer|string
+---@field likes number|nil
+---@field grade number|nil
+
 ---@class ReviewSheet : BookThemeModal
 ---@field identity BookIdentity
----@field spot { range: string, text: string, total: integer }
+---@field spot { range: string, text: string, total: integer, inline_images?: table }
 ---@field reply_page boolean|nil 打开的是某条评论的回复，而不是段评本身
----@field items WechatReview[]
+---@field reply_preview WechatReview[]|nil 直接显示已有预览，不请求或假造完整回复分页
+---@field snapshot ReviewSheetItem[]|nil 整书评论首批，只做本地排版翻页
+---@field title string|nil 整书评论标题
+---@field items (WechatReview|ReviewSheetItem)[]
 ---@field cards table[] 按 items 下标缓存的卡片
 ---@field pages { [1]: integer, [2]: integer }[] 每页的 items 起止下标
 ---@field page integer
@@ -92,7 +100,10 @@ function Sheet:init()
     self.pad = Theme.px(t.space.lg)
     self.inner_w = self.dimen.w - self.pad * 2
     self.body_h = self.dimen.h - TitleBar.height() - Theme.px(t.control.height) - self.pad * 2
-    self.items, self.cards, self.page, self.max_idx, self.more = {}, {}, 1, 0, true
+    self.items, self.cards, self.page, self.max_idx = self.snapshot or self.reply_preview or {}, {}, 1, 0
+    self.loaded = self.snapshot ~= nil or self.reply_preview ~= nil
+    self.more = not self.loaded
+    if self.loaded then self.total = self.spot.total end
     self.close_callback = function()
         if self.job then self.job.cancel() end
         self.job = nil
@@ -125,7 +136,8 @@ function Sheet:quote()
     local gap = Theme.px(t.space.sm)
     local mark = Icon.widget{ name = "format_quote", size = t.control.icon, color = Blitbuffer.Color8(t.color.faint) }
     local text = Text.box("body", self.spot.text, self.inner_w - mark:getSize().w - gap,
-        { color = t.color.muted, max_lines = QUOTE_LINES, transparent = true, face = self:bodyFace() })
+        { color = t.color.muted, max_lines = QUOTE_LINES, transparent = true, face = self:bodyFace(),
+            emoji = true, inline_images = self.spot.inline_images })
     self.quote_widget = VerticalGroup:new{
         align = "left",
         HorizontalGroup:new{
@@ -157,13 +169,23 @@ function Sheet:card(i, avail)
     local item = self.items[i]
     local faint = Blitbuffer.Color8(t.color.faint)
     local gap = Theme.px(t.space.sm)
-    local meta = HorizontalGroup:new{
-        align = "center",
-        Icon.label{ name = "thumb_up", text = tostring(item.likes), size = t.font.body,
-            color = faint, font_size = t.font.caption },
-        HorizontalSpan:new{ width = gap },
-        Text.line("caption", os.date("%Y-%m-%d", item.time) --[[@as string]], { color = t.color.faint }),
-    }
+    local meta = HorizontalGroup:new{ align = "center" }
+    if item.grade and not item.reply_to then
+        meta[#meta + 1] = Text.line("caption", _("评分") .. " " .. item.grade, { color = t.color.faint })
+        meta[#meta + 1] = HorizontalSpan:new{ width = gap }
+    elseif item.likes then
+        meta[#meta + 1] = Icon.label{ name = "thumb_up", text = tostring(item.likes), size = t.font.body,
+            color = faint, font_size = t.font.caption }
+        meta[#meta + 1] = HorizontalSpan:new{ width = gap }
+    end
+    local value = item.time
+    local time
+    if type(value) == "string" then
+        time = value
+    else
+        time = os.date("%Y-%m-%d", value) --[[@as string]]
+    end
+    meta[#meta + 1] = Text.line("caption", time, { color = t.color.faint })
     local avatar = Icon.widget{ name = "account_circle", size = t.font.title + 3,
         color = Blitbuffer.Color8(t.color.muted) }
     local fixed = avatar:getSize().w + gap + meta:getSize().w + gap
@@ -186,14 +208,15 @@ function Sheet:card(i, avail)
     end
     local replies = self:replyLine(item)
     local replies_h = replies and replies:getSize().h + space or 0
-    local content = Text.box("body", body, w, { transparent = true, face = face, inline_images = item.inline_images })
+    local content = Text.box("body", body, w, { transparent = true, face = face,
+        emoji = true, inline_images = item.inline_images })
     local room = (avail or self.body_h) - head:getSize().h - space - pics_h - replies_h
     local truncated = content:getSize().h > room
     if truncated then
         local lines = math.max(1, math.floor(room / content:getLineHeight()))
         content:free()
         content = Text.box("body", body, w, { max_lines = lines, transparent = true, face = face,
-            inline_images = item.inline_images })
+            emoji = true, inline_images = item.inline_images })
     end
     local card = VerticalGroup:new{ align = "left", head, VerticalSpan:new{ width = space }, content }
     if pics then
@@ -206,8 +229,9 @@ function Sheet:card(i, avail)
     end
     self.cards[i] = require("ui.themes.widgets.tap").wrap(card, truncated and function()
         require("ui.themes.widgets.text_viewer"):new{
-            title = _("段评") .. " · " .. item.author,
+            title = (self.title or _("段评")) .. " · " .. item.author,
             text = body,
+            emoji = true,
             inline_images = item.inline_images,
         }:show()
     end or nil)
@@ -237,15 +261,18 @@ function Sheet:thumbs(images)
     return row
 end
 
---- 回复入口。回复页本身、没有条数、源没有回复接口时不画。
----@param item WechatReview
+--- 回复入口；完整接口优先，否则明确显示已有预览的数量。
+---@param item WechatReview|ReviewSheetItem
 ---@return table|nil
 function Sheet:replyLine(item)
     local source = self.identity and self.identity.source --[[@as ParagraphReviewSource|nil]]
-    if self.reply_page or (item.replies or 0) <= 0 or not (source and source.paragraphReviewRepliesAsync) then
+    local full = source and source.paragraphReviewRepliesAsync
+    local preview = not full and item.reply_preview
+    if self.reply_page or (item.replies or 0) <= 0 or not (full or (preview and #preview > 0)) then
         return nil
     end
-    local line = Text.line("caption", T(_("%1 条回复"), item.replies), { color = self.theme.color.muted })
+    local label = preview and T(_("回复预览（%1/%2）"), #preview, item.replies) or T(_("%1 条回复"), item.replies)
+    local line = Text.line("caption", label, { color = self.theme.color.muted })
     return require("ui.themes.widgets.tap").wrap(line, function()
         Sheet.openReplies(self.identity, item)
     end)
@@ -277,7 +304,7 @@ function Sheet:rebuild()
     local range = self.pages[self.page]
     if #self.items == 0 then
         body[#body + 1] = Icon.label{ name = "forum", text = self.loaded
-            and (self.reply_page and _("暂无回复") or _("暂无段评"))
+            and (self.snapshot and _("暂无书评") or self.reply_page and _("暂无回复") or _("暂无段评"))
             or (self.reply_page and _("正在加载回复…") or _("正在加载段评…")),
             size = t.control.icon, color = Blitbuffer.Color8(t.color.faint),
             face = "cfont", font_size = t.font.body, gap = Theme.px(t.space.sm) }
@@ -291,10 +318,10 @@ function Sheet:rebuild()
         body[#body + 1] = self:card(i)
     end
     local pages = #self.pages
-    local can_digest = #self.items > 0 and require("ai").isConfigured()
+    local can_digest = not self.snapshot and #self.items > 0 and require("ai").isConfigured()
     local bar = TitleBar.widget({
         width = w,
-        title = self.reply_page
+        title = self.title or self.reply_preview and T(_("回复预览（%1/%2）"), #self.items, self.total) or self.reply_page
             and (self.loaded and T(_("回复 · 共 %1 条"), self.total) or _("回复"))
             or (self.loaded and T(_("段评 · 共 %1 条"), self.total) or _("段评")),
         left_icon = can_digest and "auto_awesome" or nil,
@@ -399,10 +426,12 @@ end
 ---@param identity BookIdentity
 ---@param item WechatReview
 function Sheet.openReplies(identity, item)
+    local source = identity.source --[[@as ParagraphReviewSource]]
     Sheet:new{
         identity = identity,
         reply_page = true,
-        spot = { range = item.id, text = item.content, total = item.replies },
+        reply_preview = not source.paragraphReviewRepliesAsync and item.reply_preview or nil,
+        spot = { range = item.id, text = item.content, total = item.replies, inline_images = item.inline_images },
     }:show()
 end
 

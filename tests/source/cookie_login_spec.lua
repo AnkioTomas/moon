@@ -95,4 +95,25 @@ do
     package.loaded["source.registry"], package.loaded["source.auth"] = nil, nil
 end
 
+-- browserRow：直开远程管理 Cookie 页，不再弹说明书。
+do
+    local Themed = require("support.theme_stubs")
+    Themed.install()
+    package.loaded["ui.themes.widgets.row"] = { widget = function(o) return o end }
+    local opened
+    package.loaded["utils.extension"] = {
+        call = function(name, path, title, text)
+            opened = { name = name, path = path, title = title, text = text }
+            return { close = function() end }
+        end,
+    }
+    local row = CookieLogin.browserRow()(300)
+    Assert.eq(row.title, "浏览器登录")
+    row.callback()
+    Assert.eq(opened.name, "web.open_page")
+    Assert.eq(opened.path, "/cookie.html")
+    package.loaded["ui.themes.widgets.row"] = nil
+    package.loaded["utils.extension"] = nil
+end
+
 return true

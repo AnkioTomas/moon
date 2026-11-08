@@ -219,7 +219,70 @@ Kit.buttons(page)[1]:onTapThemeButton()
 Assert.is_true(page.closed)
 Assert.is_nil(desktop.detail)
 Assert.eq(desktop.updates, 0)
+
+-- 评论页可声明实际粒度；其它源继续使用默认的「书评」标题。
+package.loaded["ui/network/manager"] = { runWhenConnected = function(_self, cb) cb() end }
+for _idx, title in ipairs({ "话题页评论（首话）", false }) do
+    resolved = {
+        bookReviewsAsync = function(_self, _identity, cb)
+            cb({ title = title or nil, items = { { author = "作者", text = "评论" } } })
+        end,
+    }
+    Detail.showReviews({ book = { source_id = "kuaikan", stable_id = "book" } })
+    Assert.eq(Themed.last("text_viewer").title, title or "书评")
+    Assert.is_true(Themed.last("progress_dialog").closed)
+end
 Assert.is_true(dirtied(desktop))
+
+-- 首批书评交给通用展示挂点；取消与关详情后忽略迟到结果。
+local review_requests = {}
+resolved = {
+    bookReviewsAsync = function(_self, identity, cb)
+        local request = { identity = identity, cb = cb }
+        review_requests[#review_requests + 1] = request
+        return { cancel = function() request.cancelled = true end }
+    end,
+}
+local review_detail = setmetatable({ book = { source_id = "ireader", stable_id = "review-book" } },
+    { __index = Detail })
+local Ext = require("utils.extension")
+local displayed = {}
+Ext.add("desktop.comments", function(book, comments)
+    displayed[#displayed + 1] = { book = book, page = comments }
+end)
+local comments = { items = { { author = "读者", text = "书评" } } }
+local old_viewer = Themed.last("text_viewer")
+review_detail:showReviews()
+review_requests[1].cb(comments)
+Assert.eq(displayed[1].book, review_detail.book)
+Assert.eq(displayed[1].page, comments)
+Assert.eq(Themed.last("text_viewer"), old_viewer, "有卡片展示提供者时不再开文字列表")
+Assert.len(review_requests, 1)
+review_detail:showReviews()
+local review_waiting = Themed.last("progress_dialog")
+review_waiting:close()
+review_waiting.on_cancel()
+Assert.is_true(review_requests[2].cancelled)
+review_requests[2].cb(comments)
+Assert.len(displayed, 1, "取消后不展示迟到书评")
+review_detail:showReviews()
+review_detail.closed = true
+review_requests[3].cb(comments)
+Assert.len(displayed, 1, "已关闭详情不展示迟到书评")
+review_detail.closed = false
+review_detail:showReviews()
+review_requests[4].cb(nil, "书评网络失败")
+Assert.eq(Themed.last("toast").text, "书评网络失败")
+Assert.len(displayed, 1)
+review_detail:showReviews()
+review_requests[5].cb({ items = {} })
+Assert.eq(Themed.last("toast").text, "暂无书评")
+Assert.len(displayed, 1, "空书评不打开卡片列表")
+resolved = { bookReviewsAsync = function() error("书评入口错误") end }
+Assert.errors(function() Detail.showReviews({ book = { source_id = "ireader", stable_id = "book" } }) end,
+    "书评入口错误")
+Assert.is_true(Themed.last("progress_dialog").closed, "启动请求抛错也关闭等待窗")
+Ext.reset()
 
 -- 标记已读：写库、打脏、通知书架已变，在线就当场推这本书的进度；关窗时桌面重建。
 local online = true
