@@ -193,127 +193,68 @@ end
 Source.refreshTocAsync = fetchTocAsync
 
 ---@return ChapterFetchContent
--- 本地 EPUB（reader3 的 loc_book）章节：/getBookContent 返回的是章节资源路径
--- （形如 /book-assets/.../Text/xxx.xhtml），不是正文。下面把它当资源抓下来转成 HTML。
-local function isAssetPath(s)
-    if type(s) ~= "string" or #s == 0 or #s > 4096 then return false end
-    if s:find("<", 1, true) then return false end
-    return s:match("^/book%-assets/") ~= nil
-        or s:match("%.xhtml$") ~= nil
-        or s:match("%.html$") ~= nil
-end
-
-local function serverRoot()
-    local base = Client.base()
-    if not base then return nil end
-    return (base:gsub("/reader3$", ""):gsub("/api/%d+$", ""))
-end
-
-local function encodePath(p)
-    return (p:gsub("[^/]+", function(seg) return Text.urlEncode(seg) end))
-end
-
-local function dirOf(p)
-    return (p:gsub("/[^/]*$", ""))
-end
-
--- 相对地址（../Images/a.jpg）解析为服务器根相对路径（/book-assets/...）
-local function resolvePath(base, rel)
-    if rel:match("^%a[%w+.-]*://") or rel:match("^//") then return rel end
-    if rel:sub(1, 1) == "/" then return rel end
-    local segs = {}
-    local joined = base .. "/" .. rel
-    for seg in joined:gmatch("[^/]+") do
-        if seg == ".." then
-            if #segs > 0 then table.remove(segs) end
-        elseif seg ~= "." then
-            segs[#segs + 1] = seg
-        end
-    end
-    return "/" .. table.concat(segs, "/")
-end
-
--- 去掉标签后是否还有可见文字（判断"空章节"用，不能只看有没有 <p>）
-local function hasVisibleText(html)
-    local text = html:gsub("<[^>]*>", "")
-    text = text:gsub("&nbsp;", ""):gsub("&amp;", ""):gsub("%s+", "")
-    return #text > 0
-end
-
-local function assetToHtml(path, body, chapter)
-    local inner = body:match("<body[^>]*>(.-)</body>") or body
-    inner = inner:gsub("<script[^>]*>.-</script>", "")
-    inner = inner:gsub("<style[^>]*>.-</style>", "")
-    inner = inner:gsub("<%?xml.-%?>", "")
-
-    -- 部分 EPUB 用内联 SVG 放图：<svg><image xlink:href="cover.jpeg"/></svg>。
-    -- crengine 对内联 SVG 支持有限，这里转成普通 <img>，好走下面的图片本地化。
-    local function svgToImg(block)
-        local href = block:match('xlink:href%s*=%s*"([^"]*)"')
-            or block:match("xlink:href%s*=%s*'([^']*)'")
-            or block:match('href%s*=%s*"([^"]*)"')
-            or block:match("href%s*=%s*'([^']*)'")
-        if not href then return "" end
-        return '<img src="' .. href .. '"/>'
-    end
-    inner = inner:gsub("<svg[^>]*>.-</svg>", svgToImg)
-    inner = inner:gsub("<image%s[^>]-/>", svgToImg)
-
-    local base_dir = dirOf(path)
-    local function fix(src)
-        local resolved = resolvePath(base_dir, src)
-        if resolved:match("^/") then
-            return Client.imageUrl(encodePath(resolved))
-        end
-        return resolved
-    end
-    inner = inner:gsub('(src%s*=%s*")([^"]*)(")', function(a, s2, c) return a .. fix(s2) .. c end)
-    inner = inner:gsub("(src%s*=%s*')([^']*)(')", function(a, s2, c) return a .. fix(s2) .. c end)
-    return "<h1>" .. Text.xmlEscape(chapter.title) .. "</h1>\n" .. inner, inner
-end
-
 local function contentFetcher()
     return function(identity, chapter, done)
-        return Client.contentAsync(identity.stable_id, tonumber(chapter.uid), chapter.origin, function(text, err)
-            if not text then done(nil, err); return end
-            if isAssetPath(text) then
-                local url
-                if text:match("^https?://") then
-                    url = text
-                else
-                    local root = serverRoot()
-                    if not root then done(nil, _("未配置服务器地址")); return end
-                    url = root .. encodePath(text)
-                end
-                return Request.get(url, { timeout = 20 }, function(body, ferr)
-                    if type(body) ~= "string" or body == "" then
-                        done(nil, ferr or _("章节资源为空")); return
+        local cancelled = false
+        ---@type { job: CancelHandle|nil }|nil
+        local active
+        ---@param start fun(cb: function): CancelHandle|nil
+        ---@param finish function
+        local function run(start, finish)
+            local stage = {}
+            active = stage
+            stage.job = start(function(...)
+                if cancelled or active ~= stage then return end
+                active = nil
+                finish(...)
+            end)
+        end
+        local function fetchAsset(path)
+            local url = Text.escapeUrl(Client.imageUrl(path))
+            run(function(cb)
+                return Request.get(url, { timeout = 20 }, cb)
+            end, function(raw, err)
+                if not raw or raw == "" then done(nil, err or _("阅读章节内容为空")); return end
+                local html = Mapper.assetHtml(chapter.title, raw, url, Client.imageUrl)
+                if not html then done(nil, _("阅读章节内容为空")); return end
+                local image_err
+                run(function(cb)
+                    return Assets.localizeAsync(html, Paths.bookWorkDir(identity.stable_id, identity.source_id) .. "/images",
+                        function(image_url, on_done)
+                            return Request.get(image_url, { timeout = 45 }, function(data, reason)
+                                if reason then image_err = tostring(reason) end
+                                on_done(data, reason)
+                            end)
+                        end, cb)
+                end, function(localized)
+                    if Text.hasRemoteImageSrc(localized) then
+                        done(nil, image_err or _("阅读插图下载失败，请重试"))
+                        return
                     end
-                    local html, inner = assetToHtml(text, body, chapter)
-                    -- 有的章节只有 <div> 和文字（如"总目录"），没有 <p>；
-                    -- 有的封面是 SVG 图。都不能按"没有 <p>"判成空章节。
-                    if not html:find("<img", 1, true) and not hasVisibleText(inner) then
-                        done(nil, _("阅读章节内容为空")); return
-                    end
-                    -- crengine 不会自己拉网络图片：把图片下载到章节同目录的 images/
-                    -- 再把 src 改写成相对路径，否则正文能出、图全是空白。
-                    local hpath = Paths.chapterPath(identity.stable_id, tonumber(chapter.uid),
-                                                    identity.source_id or "legado")
-                    local images_dir = (hpath or ""):gsub("/[^/]+$", "") .. "/images"
-                    return Assets.localizeAsync(html, images_dir, function(url2, on_done)
-                        return Request.get(url2, { timeout = 45 }, function(raw)
-                            on_done(type(raw) == "string" and raw ~= "" and raw or nil)
-                        end)
-                    end, function(final_html)
-                        done({ title = chapter.title, html = final_html })
-                    end)
+                    done({ title = chapter.title, html = localized })
                 end)
+            end)
+        end
+        run(function(cb)
+            return Client.contentAsync(identity.stable_id, tonumber(chapter.uid), chapter.origin, cb)
+        end, function(text, err)
+            if not text then done(nil, err); return end
+            -- 只有 reader3 的明确资源前缀才是 EPUB 路径，不能按 .html 后缀猜正文类型。
+            if Client.mode() == "reader3" and text:find("^/book%-assets/") then
+                fetchAsset(text)
+                return
             end
             local html = Mapper.chapterHtml(chapter.title, text, Client.imageUrl)
             -- 只有 <h1> 没有段落 = 服务器给的是空白正文，不能当成功落盘缓存。
             if not html:find("<p", 1, true) then done(nil, _("阅读章节内容为空")); return end
             done({ title = chapter.title, html = html })
         end)
+        return { cancel = function()
+            cancelled = true
+            local job = active and active.job
+            active = nil
+            if job then job.cancel() end
+        end }
     end
 end
 
