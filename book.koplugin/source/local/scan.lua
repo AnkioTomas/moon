@@ -468,7 +468,7 @@ end
 --- 防重名加 " (n)"；os.rename 失败（跨设备）退化为流式复制，失败不留半截文件。
 ---@param temp_path string
 ---@param filename string
----@param cb fun(ok: boolean|nil, err: any)
+---@param cb fun(ok: boolean|nil, err: any, path: string|nil) 成功时第三参回传入库路径
 ---@return { cancel: fun() }|nil
 ---@param self LocalClient
 function Scan.importAsync(self, temp_path, filename, cb)
@@ -602,7 +602,7 @@ end
 --- 单文件入库（不扫盘、不清失效）。同步解析在子进程跑——单本导入用户在等，开一次引擎拿元数据+封面。
 --- 导入落根目录，category/series 恒为 nil（与扫盘根层语义一致）。
 ---@param path string 绝对路径（即 stable_id）
----@param cb fun(ok: boolean|nil, err: any)
+---@param cb fun(ok: boolean|nil, err: any, path: string|nil) 成功时第三参回传入库路径
 ---@return { cancel: fun() }|nil
 ---@param self LocalClient
 function Scan.indexOneAsync(self, path, cb)
@@ -620,7 +620,7 @@ function Scan.indexOneAsync(self, path, cb)
     local function commit(f)
         if commitFiles({ f }, known) then
             ScanDB.save(index, { f }, true)
-            cb(true)
+            cb(true, nil, path)
         else
             cb(nil, "failed to commit local book")
         end

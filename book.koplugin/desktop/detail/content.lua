@@ -241,7 +241,8 @@ function Detail:buildHead(w, owner, primary)
     local cw = math.floor(w * 0.38)
     local ch = math.floor(cw * 3 / 2)
     local cover = (Book.cover(self.plugin, owner, book, cw, ch, { badge = false, show_parent = self }))
-    if primary and self.origin ~= "store" then
+    -- 书城「加入书库」只点按钮；已在架 / 可开读时封面点按与主按钮同开书。
+    if primary and (self.origin ~= "store" or primary.id == "open") then
         local tap = Book.tappable(cw, ch, primary.callback)
         tap[1] = cover
         cover = tap

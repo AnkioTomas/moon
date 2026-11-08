@@ -49,10 +49,46 @@ local function notifyCached(result)
 end
 
 return function(Detail)
+--- 书城详情：已在架可开读的书（书源在架行，或本页刚装进本地书库的书）。
+---@return table|nil
+function Detail:storeReadableBook()
+    if self._installed then return self._installed end
+    local book = self.book
+    if storeBackend(book) or not (book.source_id and book.stable_id) then return nil end
+    local row = require("book.books_db").get(book.source_id, book.stable_id)
+    if not row or tonumber(row.deleted) ~= 0 then return nil end
+    if book.percent == nil then
+        local prog = require("book.progress_db").get(book.source_id, book.stable_id)
+        if prog then book.percent = math.floor((tonumber(prog.fraction) or 0) * 100 + 0.5) end
+    end
+    return book
+end
+
+--- 书城详情主按钮：未入库「加入书库」；已在架 / 刚加入成功则「开始阅读」。
+---@return table
+function Detail:storePrimary()
+    local readable = self:storeReadableBook()
+    if readable then
+        local pct = Book.pct(readable)
+        return {
+            id = "open",
+            icon = "play_arrow",
+            text = pct > 0 and pct < 100 and _("继续阅读") or _("开始阅读"),
+            callback = function() self:openBook() end,
+        }
+    end
+    return {
+        id = "install",
+        icon = "add",
+        text = _("加入书库"),
+        callback = function() self:installStoreBook() end,
+    }
+end
+
 --- 主按钮：源提供了阅读目标就直接开，否则保持原开书流程。
 function Detail:openBook()
     local plugin = self.plugin
-    local b = self.book
+    local b = self:storeReadableBook() or self.book
     local owner = bookOwnerSource(b, self.source)
     local target = owner and owner.readingTarget and owner:readingTarget(b)
     self:close()
@@ -206,8 +242,8 @@ function Detail:installStoreBook()
         run = function(report, done)
             return store.installAsync(local_src, book, function(bytes)
                 report(nil, bytes, total)
-            end, function(ok, err, filename)
-                done({ ok = ok, err = err, filename = filename })
+            end, function(ok, err, filename, path)
+                done({ ok = ok, err = err, filename = filename, path = path })
             end)
         end,
         on_done = function(result)
@@ -222,6 +258,16 @@ function Detail:installStoreBook()
             if desk and not desk.closed then
                 desk:onEvent("shelf_changed")
                 if desk.tab == "library" then desk:updateView() end
+            end
+            -- 本页还开着：记住刚导入的本地书，主按钮立刻改成「开始阅读」。
+            if not self.closed and result.path then
+                self._installed = {
+                    source_id = "local",
+                    stable_id = result.path,
+                    path = result.path,
+                    title = book.title,
+                }
+                self:refresh()
             end
         end,
     }
@@ -242,6 +288,7 @@ function Detail:addToShelf()
     end
     local desk = self.desktop
     if desk and not desk.closed then desk:onEvent("shelf_changed") end
+    if not self.closed then self:refresh() end
 end
 
 --- 手动切换已读 / 未读（语义与图书馆长按菜单相同）。

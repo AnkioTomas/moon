@@ -107,9 +107,15 @@ package.preload["book.books_db"] = function()
         get = function() return db_row end,
         upsertLocal = function(row)
             upserted = row
+            db_row = db_row or {}
+            for key, value in pairs(row) do db_row[key] = value end
+            db_row.deleted = 0
             return upsert_ok
         end,
     }
+end
+package.preload["book.progress_db"] = function()
+    return { get = function() return nil end }
 end
 
 local Detail = require("desktop.detail")
@@ -773,18 +779,52 @@ local Tasks = require("workers.tasks")
 install_progress(40)
 Assert.eq(Tasks.tasks()[1].count, 40)
 Assert.eq(Tasks.tasks()[1].total, 100)
-install_cb(true, nil, "书城书.epub")
+install_cb(true, nil, "书城书.epub", "/books/书城书.epub")
 Assert.eq(Themed.last("toast").text, "已加入书库：书城书.epub")
 Assert.eq(desktop.events[1], "shelf_changed")
 Assert.eq(desktop.updates, 1)
 Assert.eq(#Tasks.tasks(), 0)
+Assert.contains(Kit.texts(page), "开始阅读", "书城下载完成后主按钮改成开始阅读")
+Assert.is_nil((function()
+    for _idx, text in ipairs(Kit.texts(page)) do
+        if text == "加入书库" then return text end
+    end
+end)(), "下载完成后不再显示加入书库")
 
 -- 下载失败：提示错误，任务出列，可重新加入。
+-- 上一本已装进本地：主按钮已是开始阅读，再测失败路径先清掉会话态重开。
+page:close()
+Detail.open(desktop, "store", { source_id = "zlib", stable_id = "1:fail", title = "失败书", filesize = 100 })
+page = desktop.detail
 page:installStoreBook()
 install_cb(nil, "网络错误")
 Assert.eq(Themed.last("toast").text, "网络错误")
 Assert.eq(#Tasks.tasks(), 0)
+Assert.contains(Kit.texts(page), "加入书库", "失败后仍是加入书库")
 page:close()
+
+-- 书源书城结果：已在架直接「开始阅读」；未在架加入后立刻翻成「开始阅读」。
+db_row = { deleted = 0, title = "搜到的书", percent = 0 }
+resolved = { id = "wechat", type = "chapter", configured = function() return true end, pushDirty = function() end }
+Detail.open(desktop, "store", { source_id = "wechat", stable_id = "w-shelf", title = "搜到的书" })
+page = desktop.detail
+Assert.contains(Kit.texts(page), "开始阅读")
+Assert.is_nil((function()
+    for _idx, text in ipairs(Kit.texts(page)) do
+        if text == "加入书库" then return text end
+    end
+end)())
+page:close()
+
+db_row = nil
+Detail.open(desktop, "store", { source_id = "wechat", stable_id = "w-new", title = "新搜到的书" })
+page = desktop.detail
+Assert.contains(Kit.texts(page), "加入书库")
+page:addToShelf()
+Assert.eq(Themed.last("toast").text, "已加入书库：新搜到的书")
+Assert.contains(Kit.texts(page), "开始阅读", "书源加入后主按钮立刻改成开始阅读")
+page:close()
+db_row = nil
 
 -- 库内书缺简介：在线时向属主源要一次详情（源负责落库），只并简介 / 作者；有简介、离线都不请求。
 local asked, owner_cb, owner_cancelled = 0, nil, false
