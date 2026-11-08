@@ -2,7 +2,7 @@
 书城 Tab：Z-Library / OPDS 与各启用书源的搜索。默认不加载任何书，只有搜索按钮；
 工具条左侧的下拉切换搜索来源（见 Store.providers）。
 Z-Library / OPDS 是书城后端（`store.<id>` 提供 listStoreAsync / installAsync，下载后导入本地书库）；
-书源是带 `searchAsync` 的启用源，结果进详情页后加入本地书库（脏行，由源同步上行）。
+书源是带 `searchAsync` 或 `browseAsync` 的启用源，结果进详情页后加入本地书库。
 OPDS 导航项带 feed，点开压入 trail 下钻，「上级」出栈。
 
 布局（同 Library.build）：
@@ -55,7 +55,7 @@ local BROWSE_RESULTS = 60
 ---@field source BookSource|nil
 ---@field backend table 当前来源的实现（书城后端模块或书源），可选带 browseAsync
 
---- 可搜索来源：已启用的 Z-Library / OPDS，再接已启用且带 searchAsync 的书源。
+--- 书城来源：已启用的 Z-Library / OPDS，再接能搜索或浏览的启用书源。
 --- 非混合时把当前活跃源（若可搜）挪到列表最前，方便「优先显示当前源相关书城」。
 ---@return StoreProvider[]
 function Store.providers()
@@ -67,7 +67,7 @@ function Store.providers()
     local Registry = require("source.registry")
     for _idx, meta in ipairs(Registry.listEnabled()) do
         local source = Registry.resolve(meta.id)
-        if source and source.searchAsync then
+        if source and (source.searchAsync or source.browseAsync) then
             list[#list + 1] = { id = meta.id, name = meta.name, source = source, backend = source }
         end
     end
@@ -233,9 +233,9 @@ function Store:build(ctx, state, opts)
     opts.on_back = #self.trail > 0 and function()
         self:browse(function(trail) trail[#trail] = nil end)
     end or nil
-    opts.on_search = function()
+    opts.on_search = current and (current.store or current.backend.searchAsync) and function()
         self:showSearch()
-    end
+    end or nil
     return ctx.desktop.library:build(ctx, state, opts)
 end
 
@@ -254,6 +254,7 @@ function Store:pickProvider(anchor)
                 settings.provider = p.id
                 MoonSettings.save("store")
                 self.trail, self.node, self.groups = {}, nil, nil
+                if not p.store and not p.backend.searchAsync then self.search = nil end
                 self:browse()
             end,
         }
