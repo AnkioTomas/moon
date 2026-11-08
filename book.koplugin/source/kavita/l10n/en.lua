@@ -101,7 +101,6 @@ return {
     ["缓存 %1 卷"] = "Cache %1 volumes",
     ["缓存这一卷"] = "Cache this volume",
     ["设备可用 %1"] = "%1 available",
-    ["选择卷"] = "Choose a volume",
     ["部分失败"] = "Partly failed",
     ["重试"] = "Retry",
     ["重试失败项并继续"] = "Retry failures and continue",
@@ -196,4 +195,7 @@ return {
     ["进度同步"] = "Progress sync",
     ["漫画缓存（需 kamare 增强版）"] = "Comic cache (needs kamare enhanced build)",
     ["连接 Kavita 服务器的漫画与电子书"] = "Comics and e-books from a Kavita server",
+    ["第 %1 卷"] = "Vol. %1",
+    ["上次翻阅"] = "Last opened",
+    ["已读完 · 共 %1 卷"] = "Finished · %1 volumes",
 }

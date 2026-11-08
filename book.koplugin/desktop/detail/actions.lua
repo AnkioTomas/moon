@@ -9,6 +9,7 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 
 
+local ContinuePoint = require("source.kavita.continue_point")
 local Common = require("desktop.detail.common")
 local storeBackend = Common.storeBackend
 local bookOwnerSource = Common.bookOwnerSource
@@ -48,8 +49,63 @@ local function notifyCached(result)
     Toast:new{ text = text, timeout = 5 }:show()
 end
 
+--- 续读目标（只对 Kavita 多卷系列）：本地 toc + ProgressDB，零额外请求。
+---@param book table
+---@param owner table|nil 属主源
+---@return table|nil target, table|nil toc
+local function continueTarget(book, owner)
+    if not owner or owner.id ~= "kavita" then return nil end
+    if type(book.stable_id) ~= "string" or book.stable_id:find(":", 1, true) then return nil end
+    -- 目录缓存 / books_db 在旧安装或测试桩里可能缺方法：拿不到就退回旧按钮，不拖垮详情页。
+    local ok_read, toc = pcall(function()
+        return require("source.toc").read(owner.id, book.stable_id)
+    end)
+    if not ok_read then toc = nil end
+    if not toc then
+        local ok_db, payload = pcall(function()
+            return require("book.books_db").getToc(owner.id, book.stable_id)
+        end)
+        if ok_db and payload then
+            local ok, decoded = pcall(require("json").decode, payload)
+            if ok and type(decoded) == "table" then toc = decoded end
+        end
+    end
+    if type(toc) ~= "table" or #toc == 0 then return nil end
+    local ProgressDB = require("book.progress_db")
+    local function progressRow(entry)
+        return ProgressDB.get(book.source_id, book.stable_id .. ":" .. tostring(entry.chapterId))
+    end
+    local target = ContinuePoint.pick(toc, {
+        fraction = function(e) local row = progressRow(e); return row and tonumber(row.fraction) end,
+        updated_at = function(e) local row = progressRow(e); return row and tonumber(row.updated_at) end,
+        page = function(e)
+            local row = progressRow(e)
+            if row and tonumber(row.page) and tonumber(row.total_pages) then
+                return { page = tonumber(row.page), total = tonumber(row.total_pages) }
+            end
+        end,
+    })
+    return target, toc
+end
+
 return function(Detail)
+--- 主按钮：直接开续读目标卷（跳过选卷）；拿不到目录时退回原来的开书流程。
 function Detail:openBook()
+    local plugin = self.plugin
+    local b = self.book
+    local owner = bookOwnerSource(b, self.source)
+    local target = continueTarget(b, owner)
+    self:close()
+    if not plugin then return end
+    if target and type(owner.volumeBook) == "function" then
+        local vol = owner:volumeBook(b, target.entry)
+        if vol then return require("desktop.open").book(plugin, vol) end
+    end
+    require("desktop.open").book(plugin, b)
+end
+
+--- 「选择卷」：不直接开目标卷，走原来的选卷列表。
+function Detail:chooseVolume()
     local plugin = self.plugin
     local b = self.book
     self:close()
@@ -405,13 +461,35 @@ function Detail.actionPlan(book, owner)
         tools[#tools + 1] = { id = "delete", icon = "delete", text = _("删除") }
     end
     local primary
+    local target, toc = continueTarget(book, owner)
     if can_read then
-        local pct = Book.pct(book)
-        primary = {
-            id = "open",
-            icon = "play_arrow",
-            text = pct > 0 and pct < 100 and _("继续阅读") or _("开始阅读"),
-        }
+        local text
+        if target then
+            local label = ContinuePoint.label(target.entry, book.title)
+            if target.kind == "done" then
+                text = T(_("重读 · %1"), label)
+            elseif target.kind == "fresh" then
+                text = T(_("开始阅读 · %1"), label)
+            else
+                text = T(_("继续阅读 · %1"), label)
+            end
+        else
+            local pct = Book.pct(book)
+            text = pct > 0 and pct < 100 and _("继续阅读") or _("开始阅读")
+        end
+        primary = { id = "open", icon = "play_arrow", text = text }
+        if target and (target.total_pages or 0) > 0 then
+            if target.kind == "continue" then
+                primary.caption = T(_("第 %1/%2 页 · %3%"), target.page, target.total_pages,
+                    math.floor(target.fraction * 100 + 0.5))
+            elseif target.kind == "fresh" then
+                primary.caption = T(_("共 %1 页"), target.total_pages)
+            end
+        end
+    end
+    --- 多卷系列：主按钮直接进续读卷，这里留一个「选择卷」回到列表。
+    if target and toc and #toc > 1 and can_read then
+        tools[#tools + 1] = { id = "volumes", icon = "list", text = _("选择卷") }
     end
     return tools, primary
 end

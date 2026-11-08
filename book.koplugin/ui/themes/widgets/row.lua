@@ -47,11 +47,13 @@ local _ = require("gettext")
 ---@class BookThemeRow
 local Row = {}
 
---- 行高：单行取 row.height，有副标题再加一行说明字。
+--- 行高：单行取 row.height，有副标题再加一行说明字；给了 height 就用它（封面行）。
 ---@param has_subtitle boolean
+---@param height number|nil 逻辑像素；nil 用主题行高
 ---@return number 物理像素
-function Row.height(has_subtitle)
+function Row.height(has_subtitle, height)
     local t = Theme.current()
+    if height then return Theme.px(height) end
     return Theme.px(t.row.height) + (has_subtitle and Theme.px(t.font.caption + t.space.xs) or 0)
 end
 
@@ -73,7 +75,7 @@ function Row.widget(opts)
     local chevron = opts.chevron
     if chevron == nil then chevron = opts.callback ~= nil end
 
-    local h = Row.height(opts.subtitle ~= nil)
+    local h = Row.height(opts.subtitle ~= nil, opts.height)
     local inner = opts.width - Theme.px(t.space.md) * 2
     local icon_sz = Theme.px(t.control.icon)
     local gap = Theme.px(t.space.sm)
@@ -102,7 +104,8 @@ function Row.widget(opts)
     if opts.image then
         content[#content + 1] = LeftContainer:new{
             dimen = Geom:new{ w = image_w + gap, h = h },
-            Image.widget({ src = opts.image, width = image_w, height = image_h }),
+            Image.widget({ src = opts.image, headers = opts.image_headers,
+                width = image_w, height = image_h }),
         }
     end
     local texts = VerticalGroup:new{

@@ -1702,6 +1702,18 @@ function Source:openBookAsync(identity, _opts, cb)
     end }
 end
 
+--- 续读目标卷的书籍行：详情页主按钮直接开这一卷，不再经过选卷列表。
+---@param series Book|table 容器书行
+---@param entry table toc 条目
+---@return table|nil
+function Source:volumeBook(series, entry)
+    if type(series) ~= "table" or type(entry) ~= "table" then return nil end
+    if type(series.stable_id) ~= "string" or entry.chapterId == nil then return nil end
+    local stable_id = series.stable_id .. ":" .. tostring(entry.chapterId)
+    local cur = require("book.books_db").get(self.id, stable_id)
+    return volumeRow(series, stable_id, entry.title, volumeIntro(entry.summary, cur, series))
+end
+
 --- 卷身份 → Kavita volumeId（按 chapterId 从目录缓存反查）。目录还没拉过就没有。
 ---@param series_id string
 ---@param chapter_id string
