@@ -117,13 +117,14 @@ do
             end
             return { cancel = function() end }
         end
-        local wire, err
-        malformed:shelfSyncAsync(function(value, e) wire, err = value, e end)
+        local wire, err, meta
+        malformed:shelfSyncAsync(function(value, e, m) wire, err, meta = value, e, m end)
         Assert.is_nil(err)
         Assert.eq(paths[2], "/jdread/api/ebooks/lite/1,3")
         Assert.len(wire, 2)
         Assert.eq(wire[1].ebook_id, 1)
         Assert.eq(wire[2].ebook_id, 3)
+        Assert.is_true(meta.incomplete, "合法条目可用，但坏 ID 使快照不完整")
     end
 end
 
@@ -135,11 +136,12 @@ do
         cb({ data = { book_ids = { {}, { ebook_id = false }, "" } } })
         return { cancel = function() end }
     end
-    local wire, err
-    all_bad:shelfSyncAsync(function(value, e) wire, err = value, e end)
+    local wire, err, meta
+    all_bad:shelfSyncAsync(function(value, e, m) wire, err, meta = value, e, m end)
     Assert.eq(calls, 1, "全脏行不应发起分批请求")
     Assert.is_nil(err)
     Assert.len(wire, 0)
+    Assert.is_true(meta.incomplete)
 end
 
 do

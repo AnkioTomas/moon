@@ -75,12 +75,24 @@ Assert.eq(cleared, 2, "清库失败也已经登出")
 Assert.eq(reloads, 2)
 Assert.eq(Themed.last("toast").text, "清除本地记录失败")
 
--- 换库身份：不改凭证回调，整源 forget + 必定 reload
+-- 换库身份：清理成功才提交新配置并重载。
 forget_ok, order, reloads, forgotten = true, {}, 0, {}
-Assert.is_true(Logout.replaceLibrary("kavita"))
-Assert.eq(table.concat(order, ","), "abort,invalidate,forget")
+local commits = 0
+local function commit()
+    commits = commits + 1
+    order[#order + 1] = "commit"
+end
+Assert.is_true(Logout.replaceLibrary("kavita", commit))
+Assert.eq(table.concat(order, ","), "abort,forget,invalidate,commit")
 Assert.eq(forgotten[1], "kavita")
 Assert.eq(reloads, 1)
+Assert.eq(commits, 1)
+
+forget_ok, order, reloads, commits = false, {}, 0, 0
+Assert.is_false(Logout.replaceLibrary("kavita", commit))
+Assert.eq(table.concat(order, ","), "abort,forget")
+Assert.eq(commits, 0, "清库失败不得提交新凭证")
+Assert.eq(reloads, 0, "清库失败不得激活新源")
 
 -- 换 WebDAV：走 forgetWebdav，不动整源 forgetSource
 local webdav = 0
@@ -94,18 +106,52 @@ package.preload["book.store"] = function()
         forgetWebdav = function()
             order[#order + 1] = "forgetWebdav"
             webdav = webdav + 1
-            return true
+            return forget_ok
         end,
     }
 end
 package.loaded["book.store"] = nil
 package.loaded["source.logout"] = nil
 Logout = require("source.logout")
-order, reloads = {}, 0
-Assert.is_true(Logout.replaceWebdav())
-Assert.eq(table.concat(order, ","), "abort,invalidate,forgetWebdav")
+forget_ok, order, reloads, commits = true, {}, 0, 0
+Assert.is_true(Logout.replaceWebdav(commit))
+Assert.eq(table.concat(order, ","), "abort,forgetWebdav,invalidate,commit")
 Assert.eq(webdav, 1)
 Assert.eq(reloads, 1)
+Assert.eq(commits, 1)
+
+forget_ok, order, reloads, commits = false, {}, 0, 0
+Assert.is_false(Logout.replaceWebdav(commit))
+Assert.eq(table.concat(order, ","), "abort,forgetWebdav")
+Assert.eq(commits, 0)
+Assert.eq(reloads, 0)
+
+-- 实际账号设置行必须在清理前保留旧配置，而不是只补一条错误提示。
+do
+    local configs = {
+        moon = { base_url = "https://old.test", token = "old-token" },
+        bookorbit = { server_url = "https://old.test", username = "old", userkey = "key" },
+    }
+    local saved = 0
+    package.loaded["utils.settings"] = {
+        getSource = function(id) return configs[id] end,
+        saveSource = function(id, cfg) configs[id] = cfg; saved = saved + 1 end,
+    }
+    for _idx, id in ipairs({ "moon", "bookorbit" }) do
+        local key = id == "moon" and "base_url" or "server_url"
+        local Setting = require("source." .. id .. ".setting")
+        Setting.rows()[1](300).callback()
+        Themed.last("input").callback("https://new.test")
+        Assert.eq(configs[id][key], "https://old.test")
+        Assert.eq(saved, 0)
+        Assert.eq(Themed.last("toast").text, "清除本地记录失败")
+        forget_ok = true
+        Setting.rows()[1](300).callback()
+        Themed.last("input").callback("https://new.test")
+        Assert.eq(configs[id][key], "https://new.test")
+        saved, forget_ok = 0, false
+    end
+end
 
 package.preload["ui.themes.widgets.row"] = nil
 

@@ -68,6 +68,30 @@ do
     Assert.eq(err, "响应无效")
 end
 
+-- 校验新库使用显式配置：地址与登录凭据不落盘，也不替换当前配置。
+do
+    requests = {}
+    replies = {
+        '{"isSuccess":true,"data":{"accessToken":"probe-token"}}',
+        '{"isSuccess":true,"data":[{"bookUrl":"probe-book"}]}',
+    }
+    local rows, err
+    Client.shelfAsync(function(value, reason) rows, err = value, reason end, {
+        server_address = "https://probe.test/reader3", username = "probe-user", password = "probe-password",
+    })
+    Assert.is_nil(err)
+    Assert.eq(rows[1].bookUrl, "probe-book")
+    Assert.matches(requests[1].url, "^https://probe.test/reader3/login$")
+    Assert.matches(requests[1].body, '"username":"probe%-user"')
+    Assert.matches(requests[2].url, "^https://probe.test/reader3/getBookshelf%?")
+    Assert.matches(requests[2].url, "accessToken=probe%-token")
+    Assert.eq(Client.base(), "http://h:1122", "探测新库时当前客户端仍读旧库配置")
+    requests, replies = {}, { '{"isSuccess":true,"data":[]}' }
+    Client.shelfAsync(function() end)
+    Assert.matches(requests[1].url, "^http://h:1122/getBookshelf%?")
+    Assert.is_nil(requests[1].url:find("probe%-token"), "探测令牌不能污染旧库请求")
+end
+
 -- 正文：index 0 基、url 编码；空正文报错。
 do
     requests = {}
@@ -244,4 +268,62 @@ do
     Assert.eq(Client.imageUrl("baseurl/proxypng?url=a"), "http://h:1122/api/5/proxypng?url=a&accessToken=Q1")
     Assert.eq(Client.coverUrl("/c.jpg"), "http://h:1122/api/5/proxypng?url=%2Fc.jpg&accessToken=Q1")
     cfg.server_address, cfg.username, cfg.password = "http://h:1122", nil, nil
+end
+
+-- 设备设置：网络校验期间保留旧配置；清库失败不能把新配置落盘或谎报已连接。
+do
+    local Themed = require("support.theme_stubs")
+    Themed.install()
+    package.loaded["ui.themes.widgets.row"] = { widget = function(opts) return opts end }
+    cfg = { server_address = "http://old/reader3", username = "old-user", password = "old-password" }
+    local saved, reloaded, cleanup_ok = 0, 0, false
+    package.loaded["utils.settings"] = {
+        getSource = function() return cfg end,
+        saveSource = function() saved = saved + 1 end,
+    }
+    package.loaded["source.registry"] = { reload = function() reloaded = reloaded + 1 end }
+    package.loaded["source.logout"] = {
+        row = require("source.logout").row,
+        replaceLibrary = function(_id, commit)
+            if not cleanup_ok then return false end
+            commit()
+            require("source.registry").reload()
+            return true
+        end,
+    }
+    package.loaded["ui/network/manager"] = { runWhenConnected = function(_self, fn) fn() end }
+    local pending, candidate
+    local shelf = Client.shelfAsync
+    Client.shelfAsync = function(cb, settings)
+        pending, candidate = cb, settings
+        return { cancel = function() end }
+    end
+    local Setting = require("source.legado.setting")
+    Setting.rows()[1](300).callback()
+    Themed.last("input").callback("http://new/reader3", "new-user", "new-password")
+    Assert.eq(candidate.server_address, "http://new/reader3")
+    Assert.eq(candidate.username, "new-user")
+    Assert.eq(cfg.server_address, "http://old/reader3", "校验期间当前源仍握着旧库")
+    Assert.eq(saved, 0)
+    pending({ { bookUrl = "new-book" } })
+    Assert.eq(cfg.server_address, "http://old/reader3")
+    Assert.eq(cfg.username, "old-user")
+    Assert.eq(saved, 0)
+    Assert.eq(reloaded, 0)
+    Assert.eq(Themed.last("toast").text, "清除本地记录失败")
+
+    Setting.rows()[1](300).callback()
+    Themed.last("input").callback("", "", "")
+    Assert.eq(cfg.server_address, "http://old/reader3", "清空地址失败也不能丢掉旧凭据")
+    Assert.eq(saved, 0)
+
+    cleanup_ok = true
+    Setting.rows()[1](300).callback()
+    Themed.last("input").callback("http://new/reader3", "new-user", "new-password")
+    pending({ { bookUrl = "new-book" } })
+    Assert.eq(cfg.server_address, "http://new/reader3")
+    Assert.eq(cfg.username, "new-user")
+    Assert.eq(saved, 1)
+    Assert.eq(reloaded, 1)
+    Client.shelfAsync = shelf
 end

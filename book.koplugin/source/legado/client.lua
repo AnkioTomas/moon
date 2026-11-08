@@ -19,9 +19,10 @@ local Client = {}
 local SOURCE_ID = "legado"
 
 --- 服务器地址，缺协议头按 http 补；没配置返回 nil。
+---@param cfg table|nil 校验待保存配置时显式传入，不改变当前库
 ---@return string|nil
-function Client.base()
-    local addr = require("utils.settings").getSource(SOURCE_ID).server_address
+function Client.base(cfg)
+    local addr = (cfg or require("utils.settings").getSource(SOURCE_ID)).server_address
     if type(addr) ~= "string" or addr == "" then return nil end
     if not addr:match("^https?://") then addr = "http://" .. addr end
     return (addr:gsub("/+$", ""))
@@ -43,9 +44,10 @@ end
 ---@alias LegadoMode "app"|"reader3"|"qread"
 
 --- 后端类型，看地址路径的最后一段。
+---@param cfg table|nil
 ---@return LegadoMode
-function Client.mode()
-    local base = Client.base() or ""
+function Client.mode(cfg)
+    local base = Client.base(cfg) or ""
     if base:find("/reader3$") then return "reader3" end
     if base:find("/api/%d+$") then return "qread" end
     return "app"
@@ -59,9 +61,10 @@ end
 
 ---@param path string
 ---@param query table<string, any>|nil
+---@param cfg table|nil
 ---@return string|nil
-local function url(path, query)
-    local base = Client.base()
+local function url(path, query, cfg)
+    local base = Client.base(cfg)
     if not base then return nil end
     local out = base .. path
     if query then
@@ -72,9 +75,10 @@ local function url(path, query)
 end
 
 --- 账号密码（阅读 App 的 Web 服务没有账号）；缺一项视为无需登录。
+---@param cfg table|nil
 ---@return string|nil user, string|nil password
-local function credentials()
-    local cfg = require("utils.settings").getSource(SOURCE_ID)
+local function credentials(cfg)
+    cfg = cfg or require("utils.settings").getSource(SOURCE_ID)
     if type(cfg.username) == "string" and cfg.username ~= "" and type(cfg.password) == "string" and cfg.password ~= "" then
         return cfg.username, cfg.password
     end
@@ -109,13 +113,13 @@ end
 
 ---@param user string
 ---@param password string
----@param key string
 ---@param cb fun(token: string|nil, err: string|nil)
+---@param cfg table|nil
 ---@return { cancel: fun() }
-local function login(user, password, key, cb)
-    local target = url("/login")
+local function login(user, password, cb, cfg)
+    local target = url("/login", nil, cfg)
     if not target then return require("source.base").defer(cb, nil, _("未配置阅读服务器地址")) end
-    local qread = Client.mode() == "qread"
+    local qread = Client.mode(cfg) == "qread"
     local body = qread and { username = user, password = password, model = "web" }
         or { username = user, password = password, code = "", isLogin = true, v = os.time() }
     return send("POST", qread and "form" or "json", target, body, 0.5, function(data, reason)
@@ -124,7 +128,6 @@ local function login(user, password, key, cb)
             cb(nil, reason or _("登录失败"))
             return
         end
-        session.key, session.token = key, token
         cb(token)
     end)
 end
@@ -133,11 +136,13 @@ end
 --- 重登仍失败 / 仍 NEED_LOGIN → Auth.expire，引导用户检查账号密码。
 ---@param go fun(token: string|nil, done: fun(data: any|nil, err: string|nil)): { cancel: fun() }
 ---@param cb fun(data: any|nil, err: string|nil)
+---@param cfg table|nil
 ---@return { cancel: fun() }
-local function authed(go, cb)
-    local user, password = credentials()
+local function authed(go, cb, cfg)
+    local user, password = credentials(cfg)
     if not user then return go(nil, cb) end
-    local key = Client.base() .. "\0" .. user .. "\0" .. password
+    local auth_session = cfg and {} or session
+    local key = Client.base(cfg) .. "\0" .. user .. "\0" .. password
     local expired_msg = _("打开「设置 → 书库 → 账号 → 开源阅读 → 阅读服务地址」。账号和密码重新填一遍，地址不用改，点「保存」。阅读 App 里如果改过密码，这里填新密码。")
     ---@type boolean, CancelHandle|nil
     local cancelled, job = false, nil
@@ -146,7 +151,7 @@ local function authed(go, cb)
             job = go(token, function(data, err)
                 if cancelled then return end
                 if retry and err and err:find("NEED_LOGIN", 1, true) then
-                    session.token = nil
+                    auth_session.token = nil
                     run(false)
                     return
                 end
@@ -156,10 +161,10 @@ local function authed(go, cb)
                 cb(data, err)
             end)
         end
-        if session.key == key and session.token then
-            call(session.token)
+        if auth_session.key == key and auth_session.token then
+            call(auth_session.token)
         else
-            job = login(user, password, key, function(token, err)
+            job = login(user, password, function(token, err)
                 if cancelled then return end
                 if not token then
                     -- 令牌过期后的重登失败：明确通知；首次配置错误登录仍原样返回。
@@ -169,9 +174,10 @@ local function authed(go, cb)
                     cb(nil, err)
                     return
                 end
+                auth_session.key, auth_session.token = key, token
                 require("source.auth").ok(SOURCE_ID)
                 call(token)
-            end)
+            end, cfg)
         end
     end
     run(true)
@@ -187,9 +193,10 @@ end
 ---@param ratio number 超时倍率
 ---@param kind "shelf"|"read"|"write"
 ---@param cb fun(data: any|nil, err: string|nil)
+---@param cfg table|nil
 ---@return { cancel: fun() }
-local function call(path, params, ratio, kind, cb)
-    local mode = Client.mode()
+local function call(path, params, ratio, kind, cb, cfg)
+    local mode = Client.mode(cfg)
     local get = (kind == "shelf" and mode ~= "qread") or (kind == "read" and mode == "app")
     local method = get and "GET" or "POST"
     return authed(function(token, done)
@@ -198,10 +205,10 @@ local function call(path, params, ratio, kind, cb)
             query = query or {}
             for k, v in pairs(params) do query[k] = v end
         end
-        local target = url(path, query)
+        local target = url(path, query, cfg)
         if not target then return require("source.base").defer(done, nil, _("未配置阅读服务器地址")) end
         return send(method, mode == "qread" and "form" or "json", target, params, ratio, done)
-    end, cb)
+    end, cb, cfg)
 end
 
 --- 书内图片地址：服务端给的相对路径补成可直接下载的 URL（app 的相对路径没有意义，原样返回）。
@@ -240,13 +247,14 @@ function Client.coverUrl(path)
 end
 
 ---@param cb fun(rows: table[]|nil, err: string|nil)
+---@param cfg table|nil 待保存配置；缺省读取当前配置
 ---@return { cancel: fun() }
-function Client.shelfAsync(cb)
+function Client.shelfAsync(cb, cfg)
     local params = { app = { refresh = 0 }, reader3 = { refresh = 0 }, qread = { version = "3.2.1" } }
-    return call("/getBookshelf", params[Client.mode()], 0.5, "shelf", function(data, err)
+    return call("/getBookshelf", params[Client.mode(cfg)], 0.5, "shelf", function(data, err)
         if type(data) ~= "table" then cb(nil, err); return end
         cb(data)
-    end)
+    end, cfg)
 end
 
 --- 目录。book_url + 书源（轻阅读必需，其余忽略）。

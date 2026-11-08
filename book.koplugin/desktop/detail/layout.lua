@@ -88,7 +88,7 @@ function Detail:updateView()
     if self.origin == "store" then
         primary = self:storePrimary()
     else
-        tools, primary = Detail.actionPlan(self.book, owner, self:readingTarget())
+        tools, primary = Detail.actionPlan(self.book, owner, self:readingTarget() or false)
         if primary then primary.callback = function() self:openBook() end end
     end
 

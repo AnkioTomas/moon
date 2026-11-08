@@ -960,6 +960,13 @@ do
     Assert.eq(calls, 1, "书库菜单只请求一次")
     Assert.eq(seen_opts[#seen_opts] and seen_opts[#seen_opts].meta_only, true,
         "书库菜单只读目录元信息")
+    calls = 0
+    resolved.readingTarget = function() calls = calls + 1 end
+    Detail.open(desktop, "library", container)
+    desktop.detail:updateView()
+    desktop.detail:updateView()
+    desktop.detail:openBook()
+    Assert.eq(calls, 1, "没有续读目标也要缓存，更新布局与开书不能重算")
     package.loaded["desktop.open"] = previous
     resolved = local_src
 end

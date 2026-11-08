@@ -18,6 +18,7 @@ local store = {
 local invalidated = 0
 local reloads = 0
 local replaced = {}
+local replace_ok = true
 
 package.preload["utils.settings"] = function()
     return {
@@ -57,13 +58,17 @@ package.preload["source.registry"] = function()
 end
 package.preload["source.logout"] = function()
     return {
-        replaceLibrary = function(id)
+        replaceLibrary = function(id, save)
             replaced[#replaced + 1] = id
+            if not replace_ok then return false end
+            save()
             require("source.registry").reload()
             return true
         end,
-        replaceWebdav = function()
+        replaceWebdav = function(save)
             replaced[#replaced + 1] = "webdav"
+            if not replace_ok then return false end
+            save()
             require("source.registry").reload()
             return true
         end,
@@ -132,6 +137,25 @@ do
     SettingsApi.apply({ ["local"] = { webdav_password = "secret" } })
     Assert.len(replaced, 0, "只改密码不撕 WebDAV 书")
     Assert.eq(invalidated, 1)
+end
+
+-- 清理失败：保留共享配置与磁盘值，API 明确失败，不重载新凭据。
+do
+    replace_ok, invalidated, reloads = false, 0, 0
+    local moon_url, moon_token = store.moon.base_url, store.moon.token
+    local result, err = SettingsApi.apply({ moon = { base_url = "https://failed.test", token = "new-token" } })
+    Assert.is_nil(result)
+    Assert.eq(err, "清除本地记录失败")
+    Assert.eq(store.moon.base_url, moon_url)
+    Assert.eq(store.moon.token, moon_token)
+    local webdav_url = store["local"].webdav_url
+    result, err = SettingsApi.apply({ ["local"] = { webdav_url = "https://failed.dav" } })
+    Assert.is_nil(result)
+    Assert.eq(err, "清除本地记录失败")
+    Assert.eq(store["local"].webdav_url, webdav_url)
+    Assert.eq(reloads, 0)
+    Assert.eq(invalidated, 0)
+    replace_ok = true
 end
 
 -- 远程 API 是部分更新：未提交的字段（尤其密钥）必须原样保留。
@@ -282,6 +306,17 @@ do
     result = SettingsApi.apply({ external = { ["ext.kav"] = { api_key = "k2" }, ["ext.none"] = { x = 1 } } })
     Assert.is_false(result.changed)
     Assert.eq(invalidated, 2)
+    external["ext.kav"].setting.replace_on_remote = { "base_url" }
+    replace_ok = false
+    local old_url, old_key = store["ext.kav"].base_url, store["ext.kav"].api_key
+    local failed, err = SettingsApi.apply({ external = { ["ext.kav"] = {
+        base_url = "http://failed", api_key = "failed-key",
+    } } })
+    Assert.is_nil(failed)
+    Assert.eq(err, "清除本地记录失败")
+    Assert.eq(store["ext.kav"].base_url, old_url)
+    Assert.eq(store["ext.kav"].api_key, old_key)
+    replace_ok = true
 end
 
 for _, name in ipairs({

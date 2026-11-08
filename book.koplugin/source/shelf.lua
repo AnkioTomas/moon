@@ -27,12 +27,14 @@ local Shelf = {}
 ---@param books Book[]
 ---@param force boolean|nil 用户强制刷新：快照里的 meta 覆盖本地已有键
 ---@param inserted_at_from_row boolean|nil 快照行自带权威加入时间（如 Kavita 的 lastChapterAddedUtc）
+---@param incomplete boolean|nil 不完整快照只合入成员，不按缺席下架
 ---@return SyncResult|nil result
 ---@return string|nil err
-function Shelf.reconcile(source_id, books, force, inserted_at_from_row)
+function Shelf.reconcile(source_id, books, force, inserted_at_from_row, incomplete)
     local ok, hidden = require("book.books_db").reconcile(source_id, books, {
         force = force,
         inserted_at_from_row = inserted_at_from_row,
+        incomplete = incomplete,
     })
     if not ok then return nil, "failed to reconcile books" end
     -- 远端书架快照自带的进度（percent 0..100）：读完必标已读，读到 99% 看设置，与本机阅读会话同一规则。
@@ -150,7 +152,7 @@ Shelf.pushAdded = pushAdded
 ---@param source_id string
 ---@param remote table 书架远端（见模块头注释）
 ---@param to_books (fun(wire: table): Book[])|nil 书架 wire 映射；远端已返回 Book[] 时省略
----@param opts { dirty_only?: boolean, force?: boolean, on_progress?: ShelfReport }|nil
+---@param opts { dirty_only?: boolean, force?: boolean, on_progress?: ShelfReport, inserted_at_from_row?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }
 function Shelf.syncAsync(source_id, remote, to_books, opts, cb)
@@ -182,22 +184,23 @@ function Shelf.syncAsync(source_id, remote, to_books, opts, cb)
         return handle
     end
 
-    ---@param next_step fun(books: Book[])
+    ---@param next_step fun(books: Book[], incomplete: boolean|nil)
     local function pull(next_step)
         report(_("正在拉取书架…"))
-        job = remote:shelfSyncAsync(function(wire, err)
+        job = remote:shelfSyncAsync(function(wire, err, meta)
             if cancelled then return end
             if not wire then cb(nil, err); return end
             local books = wire
             if to_books then books = to_books(wire) end
-            next_step(books)
+            next_step(books, meta and meta.incomplete)
         end)
     end
     ---@param books Book[]
     ---@param pushed integer
-    local function reconcile(books, pushed)
+    ---@param incomplete boolean|nil
+    local function reconcile(books, pushed, incomplete)
         report(T(_("正在写入书架（%1 本）"), #books))
-        local result, err = Shelf.reconcile(source_id, books, opts.force, opts.inserted_at_from_row)
+        local result, err = Shelf.reconcile(source_id, books, opts.force, opts.inserted_at_from_row, incomplete)
         if not result then cb(nil, err); return end
         result.pushed = pushed
         cb(result)
@@ -205,16 +208,16 @@ function Shelf.syncAsync(source_id, remote, to_books, opts, cb)
 
     delete_job = Shelf.pushDeletes(source_id, removeOne, report, function(deleted_n)
         if cancelled then return end
-        pull(function(books)
+        pull(function(books, incomplete)
             local remote_ids = {}
             for _idx, book in ipairs(books) do remote_ids[book.stable_id] = true end
             push_job = pushAdded(source_id, remote, remote_ids, report, function(pushed)
                 if cancelled then return end
                 if pushed == 0 then
-                    reconcile(books, deleted_n)
+                    reconcile(books, deleted_n, incomplete)
                     return
                 end
-                pull(function(fresh) reconcile(fresh, deleted_n + pushed) end)
+                pull(function(fresh, partial) reconcile(fresh, deleted_n + pushed, partial) end)
             end)
         end)
     end)

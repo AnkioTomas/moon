@@ -150,16 +150,17 @@ function Client:apiPostAsync(path, body, cb)
     end)
 end
 
---- 拉取完整个人书架，回调 ebooks/lite 行数组。
----@param cb fun(rows: table[]|nil, err: string|nil)
+--- 拉取个人书架；坏 ID 跳过，但不完整快照不能作为下架依据。
+---@param cb fun(rows: table[]|nil, err: string|nil, meta: { incomplete: boolean }|nil)
 ---@return { cancel: fun() }
 function Client:shelfSyncAsync(cb)
     local cancelled, active = false, nil
     local ids, books, index = {}, {}, 1
+    local incomplete = false
 
     local function nextBatch()
         if index > #ids then
-            cb(books)
+            cb(books, nil, { incomplete = incomplete })
             return
         end
         local batch = {}
@@ -194,6 +195,7 @@ function Client:shelfSyncAsync(cb)
             if type(row) == "table" then id = row.ebook_id end
             id = id ~= nil and tostring(id) or ""
             if not id:match("^%d+$") then
+                incomplete = true
                 logger.warn("jdread shelf skip invalid ebook_id", "row", row_idx,
                     "type", type(row),
                     type(row) == "table" and ("ebook_id=" .. tostring(row.ebook_id)) or id)

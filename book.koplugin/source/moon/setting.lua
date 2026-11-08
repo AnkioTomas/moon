@@ -34,11 +34,18 @@ local function edit(key, title, hint, password, normalize)
         ok_text = _("保存"),
         callback = function(value)
             local before = libraryFingerprint(cfg)
-            cfg[key] = normalize(value)
-            require("utils.settings").saveSource(SOURCE_ID, cfg)
-            if before ~= libraryFingerprint(cfg) then
-                require("source.logout").replaceLibrary(SOURCE_ID)
+            local next_cfg = { base_url = cfg.base_url, token = cfg.token }
+            next_cfg[key] = normalize(value)
+            local function save()
+                cfg[key] = next_cfg[key]
+                require("utils.settings").saveSource(SOURCE_ID, cfg)
+            end
+            if before ~= libraryFingerprint(next_cfg) then
+                if not require("source.logout").replaceLibrary(SOURCE_ID, save) then
+                    require("ui.themes.widgets.toast"):new{ text = _("清除本地记录失败"), timeout = 3 }:show()
+                end
             else
+                save()
                 require("source.registry").reload()
             end
         end,
@@ -110,15 +117,21 @@ function Setting.open()
         ok_text = _("保存"),
         callback = function(base_url, token)
             local before = libraryFingerprint(cfg)
-            cfg.base_url = Text.stripWhitespace(base_url)
-            cfg.token = Text.stripWhitespace(token)
-            MoonSettings.saveSource(SOURCE_ID, cfg)
-            require("ui.themes.widgets.toast"):new{ text = _("已保存"), timeout = 2 }:show()
-            if before ~= libraryFingerprint(cfg) then
-                require("source.logout").replaceLibrary(SOURCE_ID)
+            local next_cfg = { base_url = Text.stripWhitespace(base_url), token = Text.stripWhitespace(token) }
+            local function save()
+                cfg.base_url, cfg.token = next_cfg.base_url, next_cfg.token
+                MoonSettings.saveSource(SOURCE_ID, cfg)
+            end
+            if before ~= libraryFingerprint(next_cfg) then
+                if not require("source.logout").replaceLibrary(SOURCE_ID, save) then
+                    require("ui.themes.widgets.toast"):new{ text = _("清除本地记录失败"), timeout = 3 }:show()
+                    return
+                end
             else
+                save()
                 require("source.registry").reload()
             end
+            require("ui.themes.widgets.toast"):new{ text = _("已保存"), timeout = 2 }:show()
         end,
     }:show()
 end

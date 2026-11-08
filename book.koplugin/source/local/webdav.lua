@@ -1117,7 +1117,7 @@ end
 --- 书目没写成保留脏行，下一轮 pushBooksSync 补上；正文不留本地，打开时按需下载。
 ---@param temp_path string
 ---@param filename string
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, stable_id: string|nil)
 ---@return { cancel: fun() }|nil
 ---@param self LocalClient
 function Webdav.importWebdavAsync(self, temp_path, filename, cb)

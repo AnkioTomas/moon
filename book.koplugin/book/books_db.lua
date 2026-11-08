@@ -444,10 +444,11 @@ end
 --- 以前是「全表 deleted=1 再逐本救回」：千本书架每次同步多写一遍；现在只碰缺席的。
 ---@param source_id string
 ---@param books table[]
----@param opts { clear_missing_paths: boolean|nil, force: boolean|nil, allow_empty: boolean|nil, inserted_at_from_row: boolean|nil }|nil
+---@param opts { clear_missing_paths: boolean|nil, force: boolean|nil, allow_empty: boolean|nil, inserted_at_from_row: boolean|nil, incomplete: boolean|nil }|nil
 ---   force：用户强制刷新，快照里的 meta 覆盖已有键；
 ---   allow_empty：空快照也照常下架（仅本地 / kindle 扫盘：快照来自本机文件系统，空就是真空）；
 ---   inserted_at_from_row：行自带权威加入时间（源提供），覆盖本地占位值
+---   incomplete：响应中有坏行，仅合入合法成员，不据缺席下架
 ---@return boolean ok
 ---@return integer|nil hidden 原本在架、本次快照里缺席的行数
 function BookDB.reconcile(source_id, books, opts)
@@ -457,24 +458,26 @@ function BookDB.reconcile(source_id, books, opts)
         return true, 0
     end
     local hidden = DB.transaction(function()
-        local incoming = {}
-        for _idx, book in ipairs(books) do
-            if book.stable_id ~= nil then incoming[tostring(book.stable_id)] = true end
-        end
         local missing = {}
-        for _idx, stable_id in ipairs(BookDB.libraryStableIdsBySource(source_id)) do
-            if not incoming[stable_id] then missing[#missing + 1] = stable_id end
-        end
-        if #books == 0 then
-            -- 空快照 + allow_empty：整源已同步在架行全部下架。
-            local deactivate = opts.clear_missing_paths
-                and [[UPDATE books SET deleted=1, path=NULL
-                    WHERE source_id=? AND deleted=0 AND sync_status=1;]]
-                or [[UPDATE books SET deleted=1
-                    WHERE source_id=? AND deleted=0 AND sync_status=1;]]
-            if not DB.exec(deactivate, source_id) then return nil end
-        elseif not softDeleteIds(source_id, missing, opts.clear_missing_paths) then
-            return nil
+        if not opts.incomplete then
+            local incoming = {}
+            for _idx, book in ipairs(books) do
+                if book.stable_id ~= nil then incoming[tostring(book.stable_id)] = true end
+            end
+            for _idx, stable_id in ipairs(BookDB.libraryStableIdsBySource(source_id)) do
+                if not incoming[stable_id] then missing[#missing + 1] = stable_id end
+            end
+            if #books == 0 then
+                -- 空快照 + allow_empty：整源已同步在架行全部下架。
+                local deactivate = opts.clear_missing_paths
+                    and [[UPDATE books SET deleted=1, path=NULL
+                        WHERE source_id=? AND deleted=0 AND sync_status=1;]]
+                    or [[UPDATE books SET deleted=1
+                        WHERE source_id=? AND deleted=0 AND sync_status=1;]]
+                if not DB.exec(deactivate, source_id) then return nil end
+            elseif not softDeleteIds(source_id, missing, opts.clear_missing_paths) then
+                return nil
+            end
         end
         for _idx, row in ipairs(books) do
             row.source_id = source_id

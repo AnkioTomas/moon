@@ -884,7 +884,7 @@ end
 ---@param hb KavitaHeartbeat
 local function pushProgress(self, hb)
     if self._heartbeat ~= hb then return end
-    if hb.busy or not online() then return end
+    if hb.busy or not require("book.progress").canPush(hb.identity) or not online() then return end
     if os.time() - hb.last_push < hb.interval then return end
     local key = positionKey(hb.position)
     if key == hb.pushed then return end

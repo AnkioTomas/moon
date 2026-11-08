@@ -230,13 +230,6 @@ end
 
 Source.refreshTocAsync = fetchTocAsync
 
---- 不看 TTL 的目录：离线打开已下载章节用，过期目录也能把章号换成 uuid。
----@param identity BookIdentity
----@return BookChapter[]|nil
-local function anyToc(identity)
-    return Toc.read(identity.source_id, identity.stable_id)
-end
-
 --- 起始章：显式章号 > 本地进度章号 > 本地进度全书比例 > 第一章。
 ---@param identity BookIdentity
 ---@param opts table
@@ -267,7 +260,7 @@ function Source:openBookAsync(identity, opts, cb)
     end
 
     -- 已下载章节直接交给阅读器；这条路径不能先经过联网门控。
-    local toc = anyToc(identity)
+    local toc = Toc.read(identity.source_id, identity.stable_id)
     if toc then
         local idx = startIndex(identity, opts, toc)
         local path = Chapter.existing(identity, toc[idx])

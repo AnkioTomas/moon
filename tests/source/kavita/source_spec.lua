@@ -127,6 +127,14 @@ package.loaded["book.books_db"] = {
 }
 package.loaded["book.progress_db"] = {
     get = function(_sid, id) return progress[id] end,
+    list = function(_sid, series_id)
+        local rows = {}
+        local prefix = series_id .. ":"
+        for id, row in pairs(progress) do
+            if id:sub(1, #prefix) == prefix then rows[id] = row end
+        end
+        return rows
+    end,
     upsertRemote = function(_sid, id, pos, opts)
         written[id] = pos
         written_opts[id] = opts
@@ -2109,6 +2117,20 @@ do
     Assert.len(scheduled, 1, "同一本书只有一个心跳")
     Assert.eq(scheduled[1].delay, 30, "拍间隔就是设置的心跳间隔（默认 30 秒）")
     Assert.is_nil(sent, "起心跳不当场发请求（避开开书拉取）")
+
+    local Progress = require("book.progress")
+    local decision = Progress.decision(volume)
+    decision.phase = "choosing"
+    advance(31)
+    source:onEvent("page_changed", {
+        identity = volume,
+        position = { fraction = 0.54, locator = "/body/DocFragment[6]/body/div/p[2]/text().0" },
+    })
+    Assert.is_nil(sent, "未决议时心跳不能绕过门禁")
+    decision.phase = "ready"
+    fire()
+    Assert.eq(sent.pageNum, 5, "解锁后下一拍补推保留的位置")
+    Assert.eq(sent.bookScrollId, "//body/div[1]/p[2]")
 
     -- 位置一变就补推：Kavita 认的是两次写入之间的跨度，必须真的把新位置写上去。
     advance(31)

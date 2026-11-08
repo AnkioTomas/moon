@@ -32,7 +32,7 @@ SettingsApi.BODY_LIMIT = 256 * 1024
 ---@field owner string|nil utils.settings 的拥有者分区；缺省是同 id 的源配置（getSource）
 ---@field invalidate boolean|nil 落盘后作废源实例（连接配置变了）
 ---@field on_change nil|fun(cfg: table, changed: table<string, boolean>) 字段已改、落盘之前（可改 cfg）
----@field after_store nil|fun(cfg: table, changed: table<string, boolean>): boolean|nil 落盘之后；返回真=已 reload，跳过 invalidate
+---@field replace nil|fun(changed: table<string, boolean>, save: fun()): boolean|nil 换库：清理成功才 save；nil=不需换库，false=失败
 ---@field commit nil|fun(cfg: table, values: table<string, string>): boolean 自己落盘，返回有无变化
 
 ---@param v string
@@ -68,10 +68,9 @@ local BUILTIN = {
                 normalize = Text.stripWhitespace },
             { key = "token", label = "长期令牌", secret = true, placeholder = "个人Token", normalize = Text.stripWhitespace },
         },
-        after_store = function(_cfg, changed)
+        replace = function(changed, save)
             if changed.base_url or changed.token then
-                require("source.logout").replaceLibrary("moon")
-                return true
+                return require("source.logout").replaceLibrary("moon", save)
             end
         end,
     },
@@ -121,10 +120,9 @@ local BUILTIN = {
             { key = "webdav_password", label = "密码", secret = true },
             { key = "webdav_path", label = "目录" },
         },
-        after_store = function(_cfg, changed)
+        replace = function(changed, save)
             if changed.webdav_url or changed.webdav_path or changed.webdav_username then
-                require("source.logout").replaceWebdav()
-                return true
+                return require("source.logout").replaceWebdav(save)
             end
         end,
     },
@@ -151,20 +149,19 @@ local function externalForms()
             local fields = setting and setting.remote
             if fields then
                 local replace_keys = setting.replace_on_remote
-                local after_store
+                local replace
                 if type(replace_keys) == "table" then
-                    after_store = function(_cfg, changed)
+                    replace = function(changed, save)
                         for _k, key in ipairs(replace_keys) do
                             if changed[key] then
-                                require("source.logout").replaceLibrary(meta.id)
-                                return true
+                                return require("source.logout").replaceLibrary(meta.id, save)
                             end
                         end
                     end
                 end
                 out[#out + 1] = {
                     id = meta.id, name = meta.name, fields = fields,
-                    invalidate = true, after_store = after_store,
+                    invalidate = true, replace = replace,
                 }
             end
         end
@@ -176,8 +173,8 @@ end
 ---@return table
 local function load(form)
     local Settings = require("utils.settings")
-    if form.owner then return Settings.get(form.owner) or {} end
-    return Settings.getSource(form.id) or {}
+    if form.owner then return Settings.get(form.owner) end
+    return Settings.getSource(form.id)
 end
 
 ---@param form RemoteSettingForm
@@ -220,7 +217,8 @@ end
 --- 部分更新一张表单：只认声明过的键，缺省键与密钥占位符不动。
 ---@param form RemoteSettingForm
 ---@param incoming table 网页提交的键值
----@return boolean changed
+---@return boolean|nil changed
+---@return string|nil err
 local function applyForm(form, incoming)
     local cfg = load(form)
     local values = {}
@@ -231,23 +229,29 @@ local function applyForm(form, incoming)
         end
     end
     if form.commit then return form.commit(cfg, values) end
-    local changed = {}
+    local changed, normalized = {}, {}
     for _idx, field in ipairs(form.fields) do
         local v = values[field.key]
         if v ~= nil then
             local value = (field.normalize or Text.trim)(v)
             if cfg[field.key] ~= value then
-                cfg[field.key] = value
+                normalized[field.key] = value
                 changed[field.key] = true
             end
         end
     end
     if next(changed) == nil then return false end
-    if form.on_change then form.on_change(cfg, changed) end
-    store(form, cfg)
-    -- 换库身份须在落盘之后清书架（新凭证已在盘上）；after_store 返回真表示已 reload。
-    local replaced = form.after_store and form.after_store(cfg, changed)
-    if form.invalidate and not replaced then require("source.registry").invalidate() end
+    local function save()
+        for key in pairs(changed) do cfg[key] = normalized[key] end
+        if form.on_change then form.on_change(cfg, changed) end
+        store(form, cfg)
+    end
+    local replaced = form.replace and form.replace(changed, save)
+    if replaced == false then return nil, "清除本地记录失败" end
+    if not replaced then
+        save()
+        if form.invalidate then require("source.registry").invalidate() end
+    end
     return true
 end
 
@@ -275,13 +279,17 @@ function SettingsApi.apply(payload)
     local changed = false
     for _idx, form in ipairs(BUILTIN) do
         if type(payload[form.id]) == "table" then
-            changed = applyForm(form, payload[form.id]) or changed
+            local applied, err = applyForm(form, payload[form.id])
+            if applied == nil then return nil, err end
+            changed = applied or changed
         end
     end
     if type(payload.external) == "table" then
         for _idx, form in ipairs(externalForms()) do
             if type(payload.external[form.id]) == "table" then
-                changed = applyForm(form, payload.external[form.id]) or changed
+                local applied, err = applyForm(form, payload.external[form.id])
+                if applied == nil then return nil, err end
+                changed = applied or changed
             end
         end
     end

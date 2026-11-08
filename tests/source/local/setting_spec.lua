@@ -14,6 +14,8 @@ local cleared = false
 local rescanned = false
 local painted = 0
 local forgotten = {}
+local forget_ok = true
+local last_toast
 local list
 
 package.preload["utils.settings"] = function()
@@ -35,7 +37,7 @@ package.preload["book.store"] = function()
     return {
         forgetOldRoot = function(old_root, new_root)
             forgotten[#forgotten + 1] = { old_root, new_root }
-            return true
+            return forget_ok
         end,
     }
 end
@@ -43,7 +45,7 @@ package.preload["desktop.sync"] = function()
     return { rescan = function() rescanned = true end }
 end
 package.preload["ui.themes.widgets.toast"] = function()
-    return { new = function() return { show = function() end } end }
+    return { new = function(_self, opts) last_toast = opts.text; return { show = function() end } end }
 end
 package.preload["ui.themes.widgets.confirm"] = function()
     return { new = function(_, opts)
@@ -143,7 +145,7 @@ Assert.is_true(not reloaded)
 -- 换书库目录：进子目录确认 → 整本撕旧根书 + 强制重扫，不 reload
 cfg.path = "/mnt/us/documents"
 forgotten, rescanned, reloaded = {}, false, false
-Setting.open(function() painted = painted + 1 end, plugin.desktop)
+row(1).callback()
 Assert.not_nil(list)
 item("books").callback()
 Assert.eq(list.subtitle, "/mnt/us/documents/books")
@@ -165,3 +167,17 @@ item("使用此目录").callback()
 Assert.len(forgotten, 1)
 Assert.is_true(reloaded)
 Assert.is_true(not rescanned)
+
+-- 清理失败不保存新根、不扫描或重载，也不能执行成功回调。
+cfg.path, forget_ok = "/mnt/us/documents", false
+rescanned, reloaded = false, false
+local saved_before, completed = saved, false
+Setting.open(function() completed = true end, plugin.desktop)
+item("books").callback()
+item("使用此目录").callback()
+Assert.eq(cfg.path, "/mnt/us/documents")
+Assert.eq(saved, saved_before)
+Assert.eq(last_toast, "清除本地记录失败")
+Assert.is_false(rescanned)
+Assert.is_false(reloaded)
+Assert.is_false(completed)

@@ -37,6 +37,7 @@ local Progress = {
 ---@field active boolean
 ---@field job { cancel: fun() }|nil
 ---@field dialog table|nil
+---@field toc_ready fun(err: string|nil)|nil 等章节目录准备完成后继续拉取
 
 ---@param identity BookIdentity
 ---@return ProgressDecision

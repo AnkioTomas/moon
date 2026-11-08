@@ -626,3 +626,19 @@ Assert.eq(connectToast(enhanced, false, "0.8.9"),
     "连接正常\nKavita 0.8.9 过旧，需要 0.9 及以上")
 Assert.eq(connectToast(enhanced, false, nil, "HTTP 401"), "连接失败\nHTTP 401")
 Assert.eq(connectToast(enhanced, false, nil, nil), "连接正常\n无法识别 Kavita 版本")
+
+-- 换服务器清理失败：共享配置、磁盘、kamare 镜像都必须保持旧值。
+do
+    cfg.base_url, cfg.api_key = "http://old", "old-key"
+    local saved_before, mirrored_before = saved, #register_calls
+    package.loaded["source.logout"] = {
+        replaceLibrary = function() return false end,
+    }
+    rowAt("服务器地址").callback()
+    Themed.last("input").callback("http://new")
+    Assert.eq(cfg.base_url, "http://old")
+    Assert.eq(cfg.api_key, "old-key")
+    Assert.eq(saved, saved_before)
+    Assert.eq(#register_calls, mirrored_before)
+    Assert.eq(Themed.last("toast").text, "清除本地记录失败")
+end
