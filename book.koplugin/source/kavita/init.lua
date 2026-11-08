@@ -1705,12 +1705,17 @@ end
 
 --- 详情页只消费目标与文案，卷身份和续读状态留在源内。
 ---@param series Book
+---@param opts { meta_only: boolean|nil }|nil
 ---@return BookReadingTarget|nil
-function Source:readingTarget(series)
+function Source:readingTarget(series, opts)
     local series_id, chapter_id = splitId(series.stable_id)
     if chapter_id then return nil end
     local toc = require("source.toc").read(self.id, series_id)
     if not toc then return nil end
+    local select_text = #toc > 1 and _("选择卷") or nil
+    if opts and opts.meta_only then
+        return { select_text = select_text }
+    end
     local target = VolumeList.continueTarget(series, toc)
     if not target then return nil end
     local entry = target.entry
@@ -1721,7 +1726,7 @@ function Source:readingTarget(series)
         book = volumeRow(series, stable_id, entry.title, volumeIntro(entry.summary, cur, series)),
         text = text,
         caption = caption,
-        select_text = #toc > 1 and _("选择卷") or nil,
+        select_text = select_text,
     }
 end
 
