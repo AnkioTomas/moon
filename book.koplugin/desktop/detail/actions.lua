@@ -49,7 +49,19 @@ local function notifyCached(result)
 end
 
 return function(Detail)
+--- 主按钮：源提供了阅读目标就直接开，否则保持原开书流程。
 function Detail:openBook()
+    local plugin = self.plugin
+    local b = self.book
+    local owner = bookOwnerSource(b, self.source)
+    local target = owner and owner.readingTarget and owner:readingTarget(b)
+    self:close()
+    if not plugin then return end
+    require("desktop.open").book(plugin, target and target.book or b)
+end
+
+--- 「选择卷」：不直接开目标卷，走原来的选卷列表。
+function Detail:chooseVolume()
     local plugin = self.plugin
     local b = self.book
     self:close()
@@ -405,13 +417,20 @@ function Detail.actionPlan(book, owner)
         tools[#tools + 1] = { id = "delete", icon = "delete", text = _("删除") }
     end
     local primary
+    local target = can_read and owner.readingTarget and owner:readingTarget(book)
     if can_read then
-        local pct = Book.pct(book)
-        primary = {
-            id = "open",
-            icon = "play_arrow",
-            text = pct > 0 and pct < 100 and _("继续阅读") or _("开始阅读"),
-        }
+        local text
+        if target then
+            text = target.text
+        else
+            local pct = Book.pct(book)
+            text = pct > 0 and pct < 100 and _("继续阅读") or _("开始阅读")
+        end
+        primary = { id = "open", icon = "play_arrow", text = text,
+            caption = target and target.caption or nil }
+    end
+    if target and target.select_text then
+        tools[#tools + 1] = { id = "volumes", icon = "list", text = target.select_text }
     end
     return tools, primary
 end
