@@ -2141,13 +2141,10 @@ return {
     ["KOReader 输入法"] = "KOReader keyboard",
     ["KOReader 自带键盘"] = "Built-in KOReader keyboard",
 
-    ["Android 键盘（微信输入法等）"] = "Android keyboard (WeChat Keyboard, etc.)",
     ["Windows 系统输入法（微软拼音等）"] = "Windows system input method (Microsoft Pinyin, etc.)",
     ["macOS 系统输入法"] = "macOS system input method",
     ["系统输入法（fcitx5 / ibus）"] = "System input method (fcitx5 / ibus)",
     ["WSL 不支持 Windows 输入法；需先装 fcitx5"] = "WSL cannot use Windows input methods; install fcitx5 first",
-    ["使用本机系统输入法，候选、联想与语音由系统提供。"] = "Uses the system input method; candidates, suggestions and voice input come from the system.",
-    ["使用本机系统输入法，候选与联想由系统提供。"] = "Uses the system input method; candidates and suggestions come from the system.",
 
     ["WSL 无法使用 Windows 输入法（微软拼音 / 微信输入法）。请先在 WSL 内安装 fcitx5，并用 fcitx5 --disable=wayland 启动，设置 XMODIFIERS=@im=fcitx 后再启动 KOReader。"] = "WSL cannot use Windows input methods (Microsoft Pinyin / WeChat Keyboard). Install fcitx5 inside WSL, start it with fcitx5 --disable=wayland, set XMODIFIERS=@im=fcitx, then start KOReader.",
     ["系统文本输入"] = "System text input",

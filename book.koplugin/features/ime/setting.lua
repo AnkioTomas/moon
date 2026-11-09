@@ -121,12 +121,12 @@ local function modeLabel(mode)
     return mode == "system" and _("系统输入法") or _("KOReader 输入法")
 end
 
---- 系统输入法的平台副标题；墨水屏没有这一行，返回内置键盘说明。
+--- 系统输入法的平台副标题；Android 不再写具体输入法示例。
 ---@param platform string
----@return string
+---@return string|nil
 local function platformSubtitle(platform)
     if platform == "android" then
-        return _("Android 键盘（微信输入法等）")
+        return nil
     elseif platform == "windows" then
         return _("Windows 系统输入法（微软拼音等）")
     elseif platform == "macos" then
@@ -139,15 +139,10 @@ local function platformSubtitle(platform)
     return _("KOReader 自带键盘")
 end
 
----@param platform string
+--- WSL 的 fcitx5 准备说明；Android 不再显示说明文字。
 ---@return string
-local function systemNote(platform)
-    if platform == "wsl" then
-        return _("WSL 无法使用 Windows 输入法（微软拼音 / 微信输入法）。请先在 WSL 内安装 fcitx5，并用 fcitx5 --disable=wayland 启动，设置 XMODIFIERS=@im=fcitx 后再启动 KOReader。")
-    elseif platform == "android" then
-        return _("使用本机系统输入法，候选、联想与语音由系统提供。")
-    end
-    return _("使用本机系统输入法，候选与联想由系统提供。")
+local function systemNote()
+    return _("WSL 无法使用 Windows 输入法（微软拼音 / 微信输入法）。请先在 WSL 内安装 fcitx5，并用 fcitx5 --disable=wayland 启动，设置 XMODIFIERS=@im=fcitx 后再启动 KOReader。")
 end
 
 ---@param text string
@@ -359,8 +354,9 @@ end
 ---@return table
 local function systemSection(desktop, platform)
     local rows = {}
-    if platform == "android" or platform == "wsl" then
-        rows[#rows + 1] = noteRow(systemNote(platform))
+    -- 只有 WSL 需要 fcitx5 准备说明；Android 的系统输入法不再加说明行。
+    if platform == "wsl" then
+        rows[#rows + 1] = noteRow(systemNote())
     end
     if platform == "android" then
         if require("utils.settings").get("features.system_ime").last_status == "not_ready" then
@@ -421,6 +417,13 @@ function Setting.entries(desktop)
     local IME = require("features.ime")
     local platform = Platform.current()
     local mode = IME.inputMode()
+    -- 不能写 `a and b or c`：Android 的 b 是 nil，会错误落成「KOReader 自带键盘」。
+    local subtitle
+    if mode == "system" then
+        subtitle = platformSubtitle(platform)
+    else
+        subtitle = _("KOReader 自带键盘")
+    end
     return {
         {
             id = "main",
@@ -428,7 +431,7 @@ function Setting.entries(desktop)
             order = 30,
             icon = "keyboard",
             title = _("输入法"),
-            subtitle = mode == "system" and platformSubtitle(platform) or _("KOReader 自带键盘"),
+            subtitle = subtitle,
             status = modeLabel(mode),
             status_on = mode == "system",
             page = {

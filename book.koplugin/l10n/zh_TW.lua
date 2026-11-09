@@ -2140,13 +2140,10 @@ return {
     ["KOReader 输入法"] = "KOReader 輸入法",
     ["KOReader 自带键盘"] = "KOReader 內建鍵盤",
 
-    ["Android 键盘（微信输入法等）"] = "Android 鍵盤（微信輸入法等）",
     ["Windows 系统输入法（微软拼音等）"] = "Windows 系統輸入法（微軟拼音等）",
     ["macOS 系统输入法"] = "macOS 系統輸入法",
     ["系统输入法（fcitx5 / ibus）"] = "系統輸入法（fcitx5 / ibus）",
     ["WSL 不支持 Windows 输入法；需先装 fcitx5"] = "WSL 不支援 Windows 輸入法；需先安裝 fcitx5",
-    ["使用本机系统输入法，候选、联想与语音由系统提供。"] = "使用本機系統輸入法，候選、聯想與語音由系統提供。",
-    ["使用本机系统输入法，候选与联想由系统提供。"] = "使用本機系統輸入法，候選與聯想由系統提供。",
 
     ["WSL 无法使用 Windows 输入法（微软拼音 / 微信输入法）。请先在 WSL 内安装 fcitx5，并用 fcitx5 --disable=wayland 启动，设置 XMODIFIERS=@im=fcitx 后再启动 KOReader。"] = "WSL 無法使用 Windows 輸入法（微軟拼音 / 微信輸入法）。請先在 WSL 內安裝 fcitx5，並用 fcitx5 --disable=wayland 啟動，設定 XMODIFIERS=@im=fcitx 後再啟動 KOReader。",
     ["系统文本输入"] = "系統文字輸入",
