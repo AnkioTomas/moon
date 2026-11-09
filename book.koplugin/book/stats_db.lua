@@ -102,6 +102,16 @@ function StatsDB.removeSource(source_id)
     return DB.removeSource("reading_stats", source_id)
 end
 
+--- 只重推本机采集的历史，云端合成桶和 KOReader 导入记录不能冒充新阅读。
+---@param source_id string
+---@param stable_prefix string|nil
+---@return boolean
+function StatsDB.prepareAccountSync(source_id, stable_prefix)
+    return DB.exec([[UPDATE reading_stats SET sync_status=0
+        WHERE source_id=? AND instr(stable_id, ?)=1 AND sync_status=1
+        AND record_type IN ('page', 'page_rollup');]], source_id, stable_prefix or "") ~= nil
+end
+
 --- 删除本地阅读统计。
 --- 这是纯本地操作，不会触碰远端；缺少 stable_id 时按源清除，
 --- 传入时间范围时使用半开区间 [from_ts, to_ts)。
@@ -1048,6 +1058,9 @@ end
 
 --- 读完（finished=true）或在读的书，附带最后阅读时间和本机累计时长。
 --- 读完 = 手动已读，或未被标未读且进度 ≥ 99%；在读 = 有进度但没读完。
+--- 读完穿过书架过滤：含 `hidden=1`（产品「软删除」）与 `deleted=1`（下架墓碑）；
+--- 下架/隐藏 ≠ 没读过，统计/目标/封面墙要计。在读只看在架且未隐藏。
+--- 彻底删除撕行后自然不再计。
 --- 最后阅读时间取本机记录，没有就退回进度更新时间。
 ---@param source_id string|string[]
 ---@param finished boolean
@@ -1058,6 +1071,8 @@ function StatsDB.progressBooks(source_id, finished, limit)
     local cond = finished
         and "(b.read_state=1 OR (b.read_state=0 AND COALESCE(p.fraction,0)>=0.99))"
         or "(b.read_state=0 AND COALESCE(p.fraction,0)>0 AND p.fraction<0.99)"
+    -- 在读必须在架且未软删；读完历史要穿过 hidden / deleted。
+    local shelf = finished and "" or " AND b.deleted=0 AND b.hidden=0"
     local tail = ""
     if not finished then
         tail = " ORDER BY 7 DESC LIMIT ?"
@@ -1074,7 +1089,7 @@ function StatsDB.progressBooks(source_id, finished, limit)
                              AND r.record_type IN ('page','page_rollup')), 0)
           FROM books b LEFT JOIN pending_progress p
             ON p.source_id=b.source_id AND p.stable_id=b.stable_id
-          WHERE ]] .. src .. " AND b.deleted=0 AND b.hidden=0 AND " .. cond .. tail .. ";",
+          WHERE ]] .. src .. shelf .. " AND " .. cond .. tail .. ";",
         unpack(args)
     )
     local rows = {}
