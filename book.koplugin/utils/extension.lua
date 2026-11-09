@@ -20,6 +20,7 @@ Ext.POINTS = {
     ["desktop.tabs"] = "底栏页签 { id, text, icon, after?, enabled():bool, create?(opts):page, tap?(desktop, rect, cell_id?), cells?(room):{id,text,icon}[]|nil（按屏宽剩余空格数换成多个格子，nil = 仍是一格） }",
     ["desktop.backdrop"] = "单一提供者：桌面背景 { content(page, tab), tabbar(bar, tab), plain_tabbar(tab) -> boolean（底栏未选中格文字不变灰）, wrap(w, h, child, tab) -> widget }（tab 为当前页签 id；透底 / 垫在三层之下）",
     ["modal.backdrop"] = "单一提供者：主题弹窗在遮罩之下先画背景 fn(modal, bb, x, y)",
+    ["modal.text_input_reset"] = "单一提供者：复位未提交的系统输入法组合串 fn()（切焦点 / 关窗时调用；没人登记时无操作）",
     ["desktop.activated"] = "桌面回到前台 fn(desktop)",
     ["desktop.opened"] = "桌面打开并显示后 fn(desktop)",
     ["desktop.comments"] = "单一提供者：展示整书评论首批 fn(book, page)，page = { title?, items: { author?, text?, time?, grade?, reply_to? }[] }，items 非空；未登记时退化为文字列表",

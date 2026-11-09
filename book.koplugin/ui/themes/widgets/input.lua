@@ -43,6 +43,7 @@ local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Modal = require("ui.themes.widgets.modal")
 local Text = require("ui.themes.widgets.text")
+local Ext = require("utils.extension")
 local _ = require("gettext")
 
 ---@class BookThemeInputField
@@ -169,7 +170,13 @@ end
 
 --- 键盘上的收起键关掉键盘（VirtualKeyboard:onCloseWithKey 回调）。
 function Input:onKeyboardClosed()
+    self:resetTextInput()
     self:place()
+end
+
+--- 丢弃系统输入法未提交的组合串；没有系统后端时无操作。
+function Input:resetTextInput()
+    Ext.call("modal.text_input_reset")
 end
 
 --- 切换键盘布局后键盘变高（如换到带候选栏的中文）时 VirtualKeyboard 回调这里，焦点字段可能又被挡住。
@@ -183,6 +190,7 @@ function Input:onSwitchFocus(input)
         cur:unfocus()
         cur:onCloseKeyboard()
         input:focus()
+        self:resetTextInput()
         local t = self.theme
         for i, it in ipairs(self.inputs) do
             if it == input then self.focus_idx = i end
@@ -236,6 +244,8 @@ function Input:dismiss()
 end
 
 function Input:onCloseWidget()
+    -- 先复位未提交的组合串，再收各字段键盘；避免复位把已关闭的文本输入重新打开。
+    self:resetTextInput()
     for _i, input in ipairs(self.inputs) do input:onCloseKeyboard() end
     Modal.onCloseWidget(self)
 end

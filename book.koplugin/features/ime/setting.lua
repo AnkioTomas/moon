@@ -143,7 +143,7 @@ end
 ---@return string
 local function systemNote(platform)
     if platform == "wsl" then
-        return _("WSL 无法使用 Windows 输入法（微软拼音 / 微信输入法）。请先在 WSL 内安装 fcitx5，并用 XMODIFIERS=@im=fcitx 启动 KOReader。")
+        return _("WSL 无法使用 Windows 输入法（微软拼音 / 微信输入法）。请先在 WSL 内安装 fcitx5，并用 fcitx5 --disable=wayland 启动，设置 XMODIFIERS=@im=fcitx 后再启动 KOReader。")
     elseif platform == "android" then
         return _("使用本机系统输入法，候选、联想与语音由系统提供。")
     end
@@ -206,7 +206,9 @@ local function testRow(desktop)
             callback = function()
                 local backend = require("features.ime").backend()
                 if backend.test then
-                    backend.test()
+                    backend.test(function()
+                        if not desktop.closed then desktop:updateView() end
+                    end)
                 else
                     require("ui.themes.widgets.toast"):new{
                         text = _("系统输入法不可用"),
@@ -363,7 +365,8 @@ local function systemRows(desktop, platform, eink)
         if require("utils.settings").get("features.system_ime").last_status == "not_ready" then
             rows[#rows + 1] = noteRow(_("上次启动未就绪"))
         end
-    else
+    elseif platform == "windows" or platform == "macos" or platform == "linux"
+            or platform == "wsl" then
         rows[#rows + 1] = testRow(desktop)
     end
     return rows
