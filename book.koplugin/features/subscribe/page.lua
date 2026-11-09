@@ -166,7 +166,7 @@ function Page:addUrl(kind)
     }:show()
 end
 
---- 入库；重复的提示一下。
+--- 入库；成功 / 重复都 toast 一下。
 function Page:insert(feed)
     if feed.kind == "mp" then Subscribe.allowMp(feed.url) end
     local id = SubDB.add(feed)
@@ -174,6 +174,7 @@ function Page:insert(feed)
         toast(_("已经订阅过了"))
         return self:redraw()
     end
+    toast(T(_("已订阅「%1」"), feed.title or feed.url or ""))
     self:refresh({ SubDB.feed(id) })
 end
 
@@ -230,23 +231,39 @@ local function subscribedRss()
     return have
 end
 
---- 展示一批可订阅源（已订阅置灰）；list 可滚动。
+--- 展示一批可订阅源（已订阅置灰）；有描述时作副标题。点加入不关窗，可继续加。
 ---@param title string
----@param feeds { title: string, url: string }[]
+---@param feeds { title: string, url: string, description?: string }[]
 function Page:showFeedPicks(title, feeds)
-    local have = subscribedRss()
-    local items = {}
-    for _idx, rec in ipairs(feeds) do
-        items[#items + 1] = {
-            text = rec.title,
-            enabled = not have[rec.url],
-            callback = function()
-                self:insert({ kind = "rss", url = rec.url, title = rec.title })
-            end,
-        }
+    local list
+    local function items()
+        local have = subscribedRss()
+        local out, has_desc = {}, false
+        for _idx, rec in ipairs(feeds) do
+            local desc = Text.trim(tostring(rec.description or ""))
+            if desc ~= "" then has_desc = true end
+            out[#out + 1] = {
+                text = rec.title,
+                subtitle = desc ~= "" and desc or nil,
+                enabled = not have[rec.url],
+                keep_open = true,
+                callback = function()
+                    self:insert({ kind = "rss", url = rec.url, title = rec.title })
+                    if list then list:setItems(items()) end
+                end,
+            }
+        end
+        return out, has_desc
     end
-    if #items == 0 then return toast(_("没有可订阅的条目")) end
-    require("ui.themes.widgets.list"):new{ title = title, items = items }:show()
+    local rows, has_desc = items()
+    if #rows == 0 then return toast(_("没有可订阅的条目")) end
+    local t = Theme.current()
+    -- 带副标题时抬高行高，分页按此计算，避免挤在一起。
+    local row_height = has_desc and (t.row.height + t.font.caption + t.space.xs) or nil
+    list = require("ui.themes.widgets.list"):new{
+        title = title, items = rows, row_height = row_height,
+    }
+    list:show()
 end
 
 --- 推荐：语言 → 标签 → 源。多级 keep_open，父级不关；拉下一级先 ProgressDialog。

@@ -696,7 +696,8 @@
     var ctFeeds = [], ctPicked = {}, ctLangReady = false;
     function ctMatch(f) {
         var q = el('ct-q').value.trim().toLowerCase();
-        return !q || f.title.toLowerCase().indexOf(q) >= 0 || f.url.toLowerCase().indexOf(q) >= 0;
+        return !q || f.title.toLowerCase().indexOf(q) >= 0 || f.url.toLowerCase().indexOf(q) >= 0
+            || (f.description && f.description.toLowerCase().indexOf(q) >= 0);
     }
     function ctVisible() {
         return ctFeeds.filter(function (f) { return !f.subscribed && ctMatch(f); });
@@ -717,6 +718,7 @@
             var tx = mk('span');
             tx.setAttribute('translate', 'no');
             tx.appendChild(mk('strong', null, f.title));
+            if (f.description) tx.appendChild(mk('span', 'ct-desc', f.description));
             tx.appendChild(mk('small', null, f.url));
             lb.appendChild(tx);
             if (f.subscribed) lb.appendChild(mk('em', null, t('已订阅')));

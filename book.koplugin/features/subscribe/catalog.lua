@@ -127,7 +127,7 @@ end
 
 --- 分页拉某标签下的源，硬上限 FEED_LIMIT；只认 https? feedUrl。
 ---@param tag string
----@param cb fun(feeds: { title: string, url: string }[]|nil, err: any)
+---@param cb fun(feeds: { title: string, url: string, description?: string }[]|nil, err: any)
 ---@param q string|nil 搜索词（可选，带给 API）
 ---@return table|nil job
 function Catalog.fetchFeeds(tag, cb, q)
@@ -146,7 +146,12 @@ function Catalog.fetchFeeds(tag, cb, q)
                     local url = Text.trim(tostring(it.feedUrl or ""))
                     if url:match("^https?://") then
                         local title = Text.trim(tostring(it.title or ""))
-                        out[#out + 1] = { title = title ~= "" and title or url, url = url }
+                        local desc = Text.trim(tostring(it.description or it.desc or it.summary or ""))
+                        out[#out + 1] = {
+                            title = title ~= "" and title or url,
+                            url = url,
+                            description = desc ~= "" and desc or nil,
+                        }
                     end
                 end
             end

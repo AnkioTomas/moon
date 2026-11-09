@@ -518,7 +518,9 @@ function POST.catalog(b, cb)
         for _idx, f in ipairs(SubDB.feeds()) do have[f.url] = true end
         local feeds = {}
         for _idx, f in ipairs(raw) do
-            feeds[#feeds + 1] = { title = f.title, url = f.url, subscribed = have[f.url] == true }
+            local row = { title = f.title, url = f.url, subscribed = have[f.url] == true }
+            if f.description and f.description ~= "" then row.description = f.description end
+            feeds[#feeds + 1] = row
         end
         if #feeds == 0 then return cb(422, { error = _("这个订阅源里没有找到订阅") }) end
         cb(200, { name = name or src.name, feeds = feeds })
