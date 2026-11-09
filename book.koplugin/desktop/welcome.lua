@@ -42,7 +42,7 @@ function Welcome.promptDocs(desk)
     end
     Confirm:new{
         title = _("欢迎使用月读"),
-        text = _("先在账号页登录要用的书源。要看看使用指南吗？\n之后也可以在「设置 → 设备 → 我的设备 → 使用指南」打开。"),
+        text = _("先在账号页登录要用的书源。要看看使用指南吗？\n之后也可以在「设置 → 设备 → 我的设备」页底的「查看指南」打开。"),
         ok_text = _("查看指南"),
         cancel_text = _("以后再说"),
         extra_text = _("加入交流群"),

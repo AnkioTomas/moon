@@ -165,13 +165,7 @@ function Device.infoSections(desktop)
                 callback = function() openExternal(_("Bug 反馈群"), Device.BUG_GROUP_URL) end,
             })
         end,
-        function(iw)
-            return Row.widget({
-                width = iw, kind = "nav", icon = "menu_book", title = _("使用指南"),
-                subtitle = _("官网用户手册"),
-                callback = function() require("utils.docs").open("/manual", _("使用指南")) end,
-            })
-        end,
+        -- 「查看指南」由本页 docs 字段在叠层页底追加，这里不再放「使用指南」。
         function(iw)
             return Row.widget({
                 width = iw, kind = "nav", icon = "info", title = _("关于"),
