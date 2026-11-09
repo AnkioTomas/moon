@@ -23,7 +23,8 @@ local DESKTOP_ORDER = {
     "night", "wifi", "tasks", "rotate", "refresh", "screenshot", "frontlight", "suspend", "power",
 }
 local READER_ORDER = {
-    "toc", "font", "highlights", "bookmark", "bookorbit", "push_progress", "pull_progress", "reload_chapter", "save_default", "settings",
+    "toc", "refresh_toc", "font", "highlights", "bookmark", "bookorbit",
+    "push_progress", "pull_progress", "reload_chapter", "save_default", "settings",
 }
 
 local builtins = {}

@@ -475,4 +475,10 @@ function Session.reloadChapter()
     return ChapterMode.reloadChapter(Session._snapshot)
 end
 
+--- 手动强制刷新目录；只有连续章节会话可用，绕过开书节流。
+---@return boolean started
+function Session.refreshToc()
+    return ChapterMode.refreshToc(Session._snapshot)
+end
+
 return Session

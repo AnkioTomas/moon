@@ -6,6 +6,7 @@
 
 local Snapshot = require("reader.session.snapshot")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 ---@class ReaderChapterSession
 ---@field identity BookIdentity|nil 书籍身份与属主源
@@ -15,6 +16,8 @@ local _ = require("gettext")
 ---@field request { cancel: fun() }|nil 在途章节打开任务
 ---@field target { path: string, within: number|nil, direction: "prev"|"next"|nil, xpointer: string|nil }|nil 已下载、等待 ReaderReady 的目标
 ---@field toc_job { cancel: fun() }|nil 目录恢复 / 后台刷新任务
+---@field refreshing_toc boolean|nil 用户手动刷新目录进行中（防连点）
+---@field toc_refresh_dialog table|nil 手动刷新进度窗；关书时要顺手关掉
 ---@field switching boolean|nil 已进入 switchDocument，同步 CloseDocument 应保留本书会话
 
 local Chapter = {}
@@ -63,6 +66,11 @@ function Chapter.clearActiveChapter(session)
     if session then session.chapter = nil end
     if chapter and chapter.request and chapter.request.cancel then chapter.request.cancel() end
     if chapter and chapter.toc_job and chapter.toc_job.cancel then chapter.toc_job.cancel() end
+    if chapter then
+        local dialog = chapter.toc_refresh_dialog
+        chapter.toc_refresh_dialog, chapter.refreshing_toc = nil, nil
+        if dialog and dialog.close then dialog:close() end
+    end
     closeTransitionNotice()
 end
 
@@ -221,6 +229,19 @@ function Chapter.onReaderReady(plugin, session)
     return nav_target
 end
 
+--- 源强制拉目录：优先 refreshTocAsync，否则 loadTocAsync(..., true)。
+---@param source BookSource
+---@return fun(src: BookSource, identity: BookIdentity, cb: fun(toc: BookChapter[]|nil, err: string|nil)): table|nil
+local function tocRefreshFn(source)
+    local refresh = source.refreshTocAsync
+    if type(refresh) == "function" then return refresh end
+    local load = source.loadTocAsync
+    if type(load) ~= "function" then return nil end
+    return function(src, id, cb)
+        return load(src, id, cb, true)
+    end
+end
+
 ---@param plugin table
 ---@param session ReaderSessionSnapshot
 function Chapter.afterBootstrap(plugin, session)
@@ -264,17 +285,11 @@ function Chapter.afterBootstrap(plugin, session)
     end
     -- 有 refreshTocAsync 走强制；否则 loadTocAsync(..., true) 跳过缓存打网。
     -- 以前「有目录且无 refresh」直接 return：起点等源永久卡在旧目录，「已是最后一页」。
-    local refresh = source.refreshTocAsync
-    if type(refresh) ~= "function" then
-        local load = source.loadTocAsync
-        if type(load) ~= "function" then
-            chapter.open_refresh = nil
-            if not has_toc then require("reader.session.progress").onTocReady(session, _("目录为空")) end
-            return
-        end
-        refresh = function(src, id, cb)
-            return load(src, id, cb, true)
-        end
+    local refresh = tocRefreshFn(source)
+    if not refresh then
+        chapter.open_refresh = nil
+        if not has_toc then require("reader.session.progress").onTocReady(session, _("目录为空")) end
+        return
     end
     -- 节流：刚拉过 / 刚试过就跳过；挡住时保留 open_refresh，下次切章再试。
     if not require("source.toc").allowRefresh(identity.source_id, identity.stable_id) then
@@ -400,6 +415,66 @@ function Chapter.gotoChapter(session, idx, opts)
         return true
     end
     requestChapter(chapter, idx, opts or {})
+    return true
+end
+
+--- 手动强制刷新目录：绕过开书节流，只服务连续章节会话。断网 / 不支持 / 正在切章时直接失败提示。
+---@param session ReaderSessionSnapshot|nil
+---@return boolean started
+function Chapter.refreshToc(session)
+    local chapter = session and session.chapter
+    local identity = session and session.identity
+    if not chapter or not identity or identity.chapter_idx == nil then return false end
+    if chapter.request or chapter.target or chapter.switching or chapter.refreshing_toc then return false end
+    if not require("ui/network/manager"):isConnected() then
+        require("ui.themes.widgets.toast"):new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
+        return false
+    end
+    local source = identity.source
+    local refresh = source and tocRefreshFn(source)
+    if not refresh then
+        require("ui.themes.widgets.toast"):new{ text = _("当前书源不支持刷新目录"), timeout = 3 }:show()
+        return false
+    end
+    if chapter.toc_job and chapter.toc_job.cancel then chapter.toc_job.cancel() end
+    chapter.refreshing_toc = true
+    local waiting = require("ui.themes.widgets.progress_dialog"):new{
+        title = _("刷新目录"),
+        text = _("正在拉取最新目录…"),
+        dismissable = false,
+        on_cancel = function()
+            if chapter.toc_job and chapter.toc_job.cancel then chapter.toc_job.cancel() end
+            chapter.toc_job, chapter.toc_refresh_dialog, chapter.refreshing_toc = nil, nil, nil
+        end,
+    }
+    chapter.toc_refresh_dialog = waiting
+    waiting:show()
+    chapter.toc_job = refresh(source, identity, function(toc, err)
+        chapter.toc_job = nil
+        chapter.toc_refresh_dialog, chapter.refreshing_toc = nil, nil
+        waiting:close()
+        -- 只认当前快照仍挂着这份 chapter；关书 / 换书会清掉 session.chapter。
+        if session.chapter ~= chapter then return end
+        if type(toc) ~= "table" or #toc == 0 then
+            require("ui.themes.widgets.toast"):new{
+                text = err or _("目录刷新失败"),
+                timeout = 3,
+            }:show()
+            return
+        end
+        chapter.toc = toc
+        chapter.fallback_fraction = nil
+        Snapshot.refresh(session)
+        if session.ui and session.ui.dialog then
+            require("ui/uimanager"):setDirty(session.ui.dialog, "ui")
+        end
+        require("reader.session.progress").onTocReady(session)
+        schedulePrefetch(chapter)
+        require("ui.themes.widgets.toast"):new{
+            text = T(_("目录已更新（%1 章）"), #toc),
+            timeout = 2,
+        }:show()
+    end)
     return true
 end
 
