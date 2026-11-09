@@ -131,6 +131,7 @@ local function reset(opts)
     native_show, native_hide = 0, 0
     android.shown, android.hidden, android.tests = {}, {}, 0
     desktop.shown, desktop.hidden, desktop.tests = {}, {}, 0
+    desktop.show_result = nil
 end
 
 -- ── 平台默认 ─────────────────────────────────────────
@@ -296,6 +297,14 @@ Assert.eq(IME.backend().name, "features.system_text", "桌面选 system_text")
 desktop.shown = {}
 VK.showKeyboard({ inputbox = {} })
 Assert.eq(#desktop.shown, 1, "桌面 system 模式交给 system_text")
+
+-- 桌面后端拿不到 SDL 文本输入：show 返回 false，当场回退原生 VK
+reset{ platform = "linux", ime = { input_mode = "system" } }
+desktop.show_result = false
+VK.showKeyboard({ inputbox = {} })
+Assert.eq(#desktop.shown, 1, "失败前仍尝试桌面后端")
+Assert.eq(native_show, 1, "桌面后端失败后回退原生 VK")
+desktop.show_result = nil
 
 -- 没有后端的平台：不可用后端
 platform_state.platform = "kindle"

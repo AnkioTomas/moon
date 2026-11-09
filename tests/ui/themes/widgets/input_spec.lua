@@ -215,4 +215,23 @@ Assert.is_true(cancelled, "键盘显示时取消按钮能响应")
 Assert.is_false(input.kb)
 UIManager:close(keyboard)
 
+-- 切焦点 / 关闭对话框时复位系统输入法的未提交组合（system 模式由 feature 登记）。
+local Ext = require("utils.extension")
+Ext.reset()
+local resets = 0
+Ext.add("modal.text_input_reset", function() resets = resets + 1 end)
+dialog = Input:new{ fields = { { text = "" }, { text = "" } } }
+dialog:onShow()
+dialog:onSwitchFocus(dialog.inputs[2])
+Assert.is_true(resets >= 1, "切换焦点复位未提交的组合")
+local before_close = resets
+dialog:close()
+Assert.is_true(resets > before_close, "关闭对话框复位未提交的组合")
+
+-- 没有 VK 时 place 不位移（system 模式下后端不弹内置键盘）。
+dialog = Input:new{ fields = { { text = "" } } }
+dialog.inputs[1].kb = false
+dialog:place()
+Assert.eq(dialog.panel_y, dialog.top_y, "没有键盘时保持贴顶")
+
 return true

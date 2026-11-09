@@ -348,4 +348,11 @@ for _idx, dir in ipairs(require("features.ime.convert").DIRS) do
     Ext.add("note.derived_dirs", dir)
 end
 
+-- 主题输入框切焦点 / 关窗时丢弃系统输入法未提交的组合串；只在 system 模式生效。
+Ext.add("modal.text_input_reset", function()
+    if IME.inputMode() ~= "system" then return end
+    local backend = IME.backend()
+    if backend.reset then backend.reset() end
+end)
+
 return IME
