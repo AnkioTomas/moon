@@ -117,7 +117,7 @@ end
 ---@param cb fun(html: string|nil, err: string|nil)
 ---@return BookJob
 function Font.restoreAsync(html, bytes, cb)
-    local path = os.tmpname()
+    local path = require("utils.paths").tmpname(".font")
     return require("workers.job").run(function()
         return restore(html, bytes, path)
     end, {

@@ -27,7 +27,7 @@ function FontRestore.looksLikeFont(bytes)
 end
 
 local function writeTemp(bytes)
-    local path = os.tmpname()
+    local path = require("utils.paths").tmpname(".font")
     local file = assert(io.open(path, "wb"))
     file:write(bytes)
     file:close()

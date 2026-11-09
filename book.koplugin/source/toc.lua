@@ -138,7 +138,8 @@ end
 ---@return { cancel: fun() }
 function Toc.parseAsync(source_id, stable_id, parse, cb, fetched_at)
     local UI = require("ui/uimanager")
-    local path = os.tmpname()
+    -- 必须走 Paths.tmpname：Android 上 os.tmpname 写 /tmp 会直接抛错。
+    local path = require("utils.paths").tmpname()
     local file, job, step
     local finished = false
     local list = {}

@@ -11,8 +11,9 @@ local SHA = require("ffi/sha2")
 local ffi = require("ffi")
 local original_loadlib = ffi.loadlib
 local path = Config.dir() .. "/tadu-font-fixture.ttf"
-local tmpname = os.tmpname
-os.tmpname = function() return path end
+local Paths = require("utils.paths")
+local tmpname = Paths.tmpname
+Paths.tmpname = function() return path end
 local bytes = "\0\1\0\0fixture"
 local original = '<p title="的">的&amp;&#x7684;<b>原</b></p>'
 local decoded = '<p title="的">甲&amp;甲<b>原</b></p>'
@@ -192,7 +193,7 @@ Assert.eq(completed, 0, "取消不交付成功")
 cleaned()
 pending = false
 ffi.loadlib = original_loadlib
-os.tmpname = tmpname
+Paths.tmpname = tmpname
 io.open = open
 SHA.sha256 = sha256
 

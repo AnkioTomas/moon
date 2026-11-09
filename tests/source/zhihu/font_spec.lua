@@ -22,9 +22,10 @@ package.preload["fontlist"] = function() return { fontdir = root } end
 ---@type table<integer, string|false>
 local map = { [0x7684] = "正", [0x4E0D] = "全", [0x4E86] = "。" }
 local tmp_path, options, pending, fail_worker
-local original_tmpname = os.tmpname
-os.tmpname = function()
-    tmp_path = original_tmpname()
+local Paths = require("utils.paths")
+local original_tmpname = Paths.tmpname
+Paths.tmpname = function(suffix)
+    tmp_path = original_tmpname(suffix)
     return tmp_path
 end
 Glyph.recognize = function(ref, _cache, tasks)
@@ -95,7 +96,7 @@ file:close()
 handle:cancel()
 Assert.eq(completed, 0, "取消时不交付正文")
 Assert.is_nil(io.open(tmp_path, "rb"), "取消后清理字体")
-os.tmpname = original_tmpname
+Paths.tmpname = original_tmpname
 os.remove(reference_path)
 os.remove(root .. "/noto")
 os.remove(root)

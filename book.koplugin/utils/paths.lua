@@ -14,6 +14,7 @@ Moon 目录布局（$DATA/.moon）
         image/           网络图片 / 封面
       image/             不属于特定源的网络图片
       online/            ankio.net 接口 JSON；必应 / 摸鱼日报图同目录
+      tmp/               进程内临时文件（目录交接、字体还原）；别用 os.tmpname，Android 沙箱写不了 /tmp
     settings/            <拥有者末段>.lua、<源 id>.lua；common.lua 等拆分前的旧分区只作迁移来源
     screensaver/         锁屏资源
     backups/
@@ -99,6 +100,36 @@ end
 ---@return string
 function P.cacheDir()
     return P.root() .. "/cache"
+end
+
+--- 临时文件目录：$DATA/.moon/cache/tmp
+---@return string
+function P.tmpDir()
+    return P.cacheDir() .. "/tmp"
+end
+
+local tmp_seq = 0
+
+--- 可写的临时文件路径。只返回路径、不预建文件；调用方写完后自己 `os.remove`。
+--- 禁止 `os.tmpname()`：Android 上走系统 `/tmp`，沙箱写不了会抛
+--- `unable to generate a unique filename`（见 toc 冷读、字体还原）。
+---@param suffix string|nil 可选后缀，如 ".ttf"
+---@return string
+function P.tmpname(suffix)
+    local dir = P.tmpDir()
+    local ok, err = P.ensureDir(dir)
+    if not ok then
+        error("tmpname: " .. tostring(err or "cannot create tmp dir"), 2)
+    end
+    if type(suffix) ~= "string" then suffix = "" end
+    for _try = 1, 32 do
+        tmp_seq = tmp_seq + 1
+        local path = string.format("%s/m%x_%x_%x%s", dir, os.time(), tmp_seq, math.random(0, 0xfffffff), suffix)
+        if not lfs.attributes(path) then
+            return path
+        end
+    end
+    error("tmpname: unable to generate a unique filename", 2)
 end
 
 --- 路径是否位于插件自己的 .moon 数据目录。
