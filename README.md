@@ -42,7 +42,7 @@
 | 书库 | 首页、图书馆、书城、订阅。本地目录、WebDAV，以及微信读书等在线书源 |
 | 阅读 | 快捷面板、上下栏、侧栏、划词查词、翻页动画、重新排版 |
 | 辅助 | AI 解释、X-Ray、整书双语、段评、生僻字注音 |
-| 设备 | 组合锁屏、中文输入法、局域网远程管理 |
+| 设备 | 组合锁屏、中文 / 系统输入法、局域网远程管理 |
 
 每个功能的开关、默认值和操作步骤在[用户手册](https://moon.ankio.net/manual)。数据源各自能同步什么，见[数据源](https://moon.ankio.net/manual/sources)。
 
@@ -51,6 +51,25 @@
   <img src="screenshots/detail.png" width="32%" alt="书籍详情">
   <img src="screenshots/stats_overview.png" width="32%" alt="阅读统计">
 </p>
+
+## 输入法
+
+输入法只有一个入口：**设置 → 系统 → 输入法**。放哪套键盘按平台决定：
+
+| 平台 | 默认 | 输入通路 |
+|---|---|---|
+| Android 手机 / 平板（非墨水屏） | 系统输入法 | 插件内嵌 dex 接上系统键盘，微信输入法、Gboard、搜狗等直接上屏 |
+| Debian / Linux、Windows、macOS | 系统输入法 | SDL 系统文本输入（fcitx5 / ibus、微软拼音、macOS 输入法） |
+| WSL | KOReader 输入法 | 只支持 WSL 内安装的 fcitx5 + XIM；Windows 输入法在 WSLg 下不可用 |
+| Kindle / Kobo / PocketBook、Android 电纸书 | KOReader 输入法 | KOReader 自带键盘；墨水屏不显示「输入方式」 |
+
+- 随时可在「系统输入法 / KOReader 输入法」之间切换，立即保存，重启后保持。老版本的「系统输入法」开关会自动迁移：原来关闭的保持 KOReader 输入法，其余按平台默认。
+- 数字字段、密码字段、只读字段始终走 KOReader 自带键盘：数字键盘、密码遮罩，只读字段不弹输入法。
+- 系统输入法不可用时自动回退内置键盘：Android 会弹出提示并在设置页显示「上次启动未就绪」；WSL 没装 fcitx5 时，设置页会给出安装和启动步骤。
+- 桌面 / WSL 选择系统输入法后，设置页有「测试系统输入法」，可以先打一段字确认通路。
+- 内置中文键盘默认关闭，在同一个「输入法」页打开。
+
+Android 的系统键盘由 vendored [koboard](https://github.com/titandrive/koboard) dex 提供。平台矩阵、迁移规则和 dex 安全模型见 [ADR 0002](docs/adr/0002-system-ime-platform.md)，本次发版说明见 [输入法改造发布说明](docs/release-notes/ime-system-input.md)。
 
 ## 安装
 
