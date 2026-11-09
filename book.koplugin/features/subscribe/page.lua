@@ -27,6 +27,7 @@ local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
 local Input = require("ui.input")
 local T = require("ffi/util").template
+local Text = require("utils.text")
 local _ = require("gettext")
 
 ---@class BookSubscribePage
@@ -219,19 +220,23 @@ function Page:addMp()
     end)
 end
 
-local RECOMMENDED = {
-    { title = "摸鱼日报", url = "https://api.ankio.net/myrl/rss" },
-    { title = "今日要闻", url = "https://api.ankio.net/paper/rss" },
-}
-
---- 推荐源：标题已知，直接入库；已订阅的置灰。
-function Page:addRecommended()
+--- 已订阅的 RSS 地址集合。
+---@return table<string, boolean>
+local function subscribedRss()
     local have = {}
     for _idx, feed in ipairs(SubDB.feeds()) do
         if feed.kind == "rss" then have[feed.url] = true end
     end
+    return have
+end
+
+--- 展示一批可订阅源（已订阅置灰）；list 可滚动。
+---@param title string
+---@param feeds { title: string, url: string }[]
+function Page:showFeedPicks(title, feeds)
+    local have = subscribedRss()
     local items = {}
-    for _idx, rec in ipairs(RECOMMENDED) do
+    for _idx, rec in ipairs(feeds) do
         items[#items + 1] = {
             text = rec.title,
             enabled = not have[rec.url],
@@ -240,7 +245,78 @@ function Page:addRecommended()
             end,
         }
     end
-    require("ui.themes.widgets.sheet"):new{ title = _("推荐"), items = items }:show()
+    if #items == 0 then return toast(_("没有可订阅的条目")) end
+    require("ui.themes.widgets.list"):new{ title = title, items = items }:show()
+end
+
+--- 推荐：语言 → 标签 → 源。多级 keep_open，父级不关；拉下一级先 ProgressDialog。
+function Page:addRecommended()
+    local Catalog = require("features.subscribe.catalog")
+    local items = {}
+    for _idx, lang in ipairs(Catalog.languages()) do
+        items[#items + 1] = {
+            text = lang.name,
+            chevron = true,
+            keep_open = true,
+            callback = function() self:addRecommendedLang(lang.id) end,
+        }
+    end
+    require("ui.themes.widgets.list"):new{ title = _("推荐"), items = items }:show()
+end
+
+--- 某语言下的奇睿标签列表。
+---@param lang string
+function Page:addRecommendedLang(lang)
+    local Catalog = require("features.subscribe.catalog")
+    local waiting = require("ui.themes.widgets.progress_dialog"):new{
+        title = _("推荐"), text = _("正在加载…"), dismissable = false,
+    }
+    waiting:show()
+    if self.job and self.job.cancel then self.job:cancel() end
+    self.job = Subscribe.fetchText(Catalog.tagsUrl(lang), function(body, err)
+        self.job = nil
+        waiting:close()
+        if not body then return toast(err or _("加载失败")) end
+        local tags = Catalog.decodeTags(body)
+        if not tags then return toast(_("无法解析订阅目录")) end
+        local items = {}
+        for _idx, t in ipairs(tags) do
+            local label = Text.trim(tostring(t.label or t.tag))
+            if label == "" then label = t.tag end
+            local count = tonumber(t.count)
+            items[#items + 1] = {
+                text = count and string.format("%s · %d", label, count) or label,
+                chevron = true,
+                keep_open = true,
+                callback = function() self:addRecommendedTag(lang, t.tag, label) end,
+            }
+        end
+        if #items == 0 then return toast(_("没有可订阅的条目")) end
+        local title = _("奇睿发现")
+        for _idx, l in ipairs(Catalog.languages()) do
+            if l.id == lang then title = title .. " · " .. l.name; break end
+        end
+        require("ui.themes.widgets.list"):new{ title = title, items = items }:show()
+    end, true)
+end
+
+--- 某标签下的源列表（分页累加，上限见 Catalog）。
+---@param lang string
+---@param tag string
+---@param label string
+function Page:addRecommendedTag(lang, tag, label)
+    local Catalog = require("features.subscribe.catalog")
+    local waiting = require("ui.themes.widgets.progress_dialog"):new{
+        title = label, text = _("正在加载…"), dismissable = false,
+    }
+    waiting:show()
+    if self.job and self.job.cancel then self.job:cancel() end
+    self.job = Catalog.fetchFeeds(tag, function(feeds, err)
+        self.job = nil
+        waiting:close()
+        if not feeds then return toast(err or _("加载失败")) end
+        self:showFeedPicks(label, feeds)
+    end)
 end
 
 function Page:showAdd()

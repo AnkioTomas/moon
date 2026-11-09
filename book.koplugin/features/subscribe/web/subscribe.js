@@ -11,7 +11,7 @@
     var stopRefresh = false;
 
     // 设备端 JSON 编码把空数组编成 {}：列表字段统一修正成 []，否则 .some/.forEach 直接抛错。
-    var LISTS = ['feeds', 'groups', 'items', 'add', 'remove', 'rename', 'move', 'invalid', 'failed', 'added', 'entries'];
+    var LISTS = ['feeds', 'groups', 'items', 'add', 'remove', 'rename', 'move', 'invalid', 'failed', 'added', 'entries', 'sources', 'languages'];
     function fixLists(v) {
         if (Array.isArray(v)) { v.forEach(fixLists); return v; }
         if (v && typeof v === 'object') {
@@ -692,8 +692,8 @@
             .then(function () { el('pl-ok').disabled = el('pl-cancel').disabled = false; return load(); });
     };
 
-    // ── 在线订阅源 ──
-    var ctFeeds = [], ctPicked = {}, ctLoaded = false;
+    // ── 在线订阅源（奇睿发现，按语言筛选） ──
+    var ctFeeds = [], ctPicked = {}, ctLangReady = false;
     function ctMatch(f) {
         var q = el('ct-q').value.trim().toLowerCase();
         return !q || f.title.toLowerCase().indexOf(q) >= 0 || f.url.toLowerCase().indexOf(q) >= 0;
@@ -732,12 +732,20 @@
         el('ct-ok').disabled = !n;
     }
     function ctOpenSource(id) {
+        if (!id) {
+            ctFeeds = []; ctPicked = {};
+            el('ct-list').textContent = '';
+            el('ct-list').appendChild(mk('li', 'empty', t('没有可订阅的条目')));
+            el('ct-ok').disabled = true;
+            return;
+        }
         ctFeeds = []; ctPicked = {};
         el('ct-list').textContent = '';
         el('ct-list').appendChild(mk('li', 'empty', t('正在加载…')));
         el('ct-ok').disabled = true;
+        el('ct-all').checked = false;
         post('catalog', { id: id }).then(function (r) {
-            ctFeeds = r.feeds;
+            ctFeeds = r.feeds || [];
             el('ct-group').value = el('ct-group').value || '';
             ctRender();
         }).catch(function (e) {
@@ -745,22 +753,53 @@
             el('ct-list').appendChild(mk('li', 'empty', t('加载失败：%1', errText(e))));
         });
     }
+    function ctFillSources(sources) {
+        var sel = el('ct-source'), box = null, last = null;
+        sel.textContent = '';
+        (sources || []).forEach(function (s) {
+            if (s.group !== last) { box = mk('optgroup'); box.label = t(s.group); sel.appendChild(box); last = s.group; }
+            var o = mk('option');
+            o.value = s.id;
+            // 奇睿标签名带 count，原样展示
+            o.textContent = s.name;
+            o.setAttribute('translate', 'no');
+            box.appendChild(o);
+        });
+        ctOpenSource(sel.value);
+    }
+    function ctLoadLang(lang) {
+        var q = lang ? { lang: lang } : null;
+        el('ct-source').textContent = '';
+        el('ct-list').textContent = '';
+        el('ct-list').appendChild(mk('li', 'empty', t('正在加载…')));
+        el('ct-ok').disabled = true;
+        return get('catalog', q).then(function (r) {
+            if (!ctLangReady) {
+                var langSel = el('ct-lang');
+                langSel.textContent = '';
+                (r.languages || []).forEach(function (l) {
+                    var o = mk('option', null, t(l.name));
+                    o.value = l.id;
+                    langSel.appendChild(o);
+                });
+                langSel.value = r.lang || 'all';
+                ctLangReady = true;
+            } else if (r.lang) {
+                el('ct-lang').value = r.lang;
+            }
+            if (r.error) toast(t('加载失败：%1', r.error), 'err');
+            ctFillSources(r.sources);
+        });
+    }
     el('catalog-open').onclick = function () {
         el('catalog').hidden = false;
-        if (ctLoaded) return;
-        get('catalog').then(function (r) {
-            var sel = el('ct-source'), box = null, last = null;
-            r.sources.forEach(function (s) {
-                if (s.group !== last) { box = mk('optgroup'); box.label = t(s.group); sel.appendChild(box); last = s.group; }
-                var o = mk('option', null, t(s.name));
-                o.value = s.id;
-                box.appendChild(o);
-            });
-            ctLoaded = true;
-            ctOpenSource(sel.value);
-        }).catch(fail);
+        if (ctLangReady) return;
+        ctLoadLang().catch(fail);
     };
     el('ct-close').onclick = function () { el('catalog').hidden = true; };
+    el('ct-lang').onchange = function () {
+        ctLoadLang(this.value).catch(fail);
+    };
     el('ct-source').onchange = function () { ctOpenSource(this.value); };
     el('ct-q').oninput = ctRender;
     el('ct-all').onchange = function () {
