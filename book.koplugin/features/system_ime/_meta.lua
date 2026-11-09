@@ -10,6 +10,6 @@ local _ = require("gettext")
 
 return {
     name = _("系统输入法"),
-    description = _("Android 键盘（微信输入法等）"),
-    abilities = { _("系统键盘"), _("候选与联想") },
+    description = _("Android 上改用系统输入法，不再弹出内置键盘"),
+    abilities = { _("系统输入法上屏"), _("键盘高度同步") },
 }

@@ -13,3 +13,40 @@ jobs:
 
       - name: Run offline tests
         uses: ./.github/actions/test
+
+  android-ime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install pinned Android platform and build tools
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager --install "platforms;android-36" "build-tools;36.1.0" "platform-tools"
+
+      - name: Verify audit decision logic
+        run: tests/tools/audit_android_ime_dex_spec.sh
+
+      - name: Build dex twice, compare, verify hash, audit
+        run: |
+          set -euo pipefail
+          DEX=book.koplugin/features/system_ime/classes.dex
+
+          tools/build_android_ime_dex.sh
+          cp "$DEX" "$RUNNER_TEMP/classes-first.dex"
+
+          tools/build_android_ime_dex.sh
+          cmp "$RUNNER_TEMP/classes-first.dex" "$DEX"
+
+          (cd book.koplugin/features/system_ime && sha256sum -c classes.dex.sha256)
+          tools/audit_android_ime_dex.sh "$DEX"

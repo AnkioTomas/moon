@@ -29,6 +29,9 @@ AGENTS.md
 # 本地审计报告，不纳入版本控制
 /CODE_AUDIT_REPORT.md
 
+# Android IME dex：本地/CI 从 vendored 源码构建，哈希见 classes.dex.sha256
+/book.koplugin/features/system_ime/classes.dex
+
 # 拼音整库仅 Release 分发，勿提交（分片在 assets/pinyin/）
 /assets/pinyin/dictionary.sqlite3
 
