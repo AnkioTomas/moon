@@ -657,6 +657,25 @@ do
     pinyin_on = true
 end
 
+-- 模式切换生命周期：reset 清状态并摘掉候选行；activate 后回 builtin 恢复
+do
+    local kb = newKeyboard()
+    Assert.is_true(zh_keys[1]._ime_bar == true, "builtin 下候选行在")
+    pinyin_on = false
+    Bar.reset()
+    Assert.is_false(Bar._want, "reset 清 _want")
+    Assert.is_false(Bar._active, "reset 清 _active")
+    Assert.is_nil(Bar._keyboard, "reset 清 _keyboard")
+    Assert.is_nil(zh_keys[1]._ime_bar, "reset 必须把布局恢复成无候选行的基线")
+    local kb2 = newKeyboard()
+    Assert.is_nil(zh_keys[1]._ime_bar, "system 模式 init 不装候选行")
+    Assert.is_true(kb2.layout[1][1].flash_keyboard, "system 模式不改原生键反馈")
+    pinyin_on = true
+    Bar.activate()
+    local _kb3 = newKeyboard()
+    Assert.is_true(zh_keys[1]._ime_bar == true, "activate 后回 builtin 候选行恢复")
+end
+
 -- 清理：preload 桩不卸会污染后续 spec
 for _, name in ipairs({
     "ui/uimanager", "ui/size", "ffi/blitbuffer", "features.ime.pinyin.dictionary",

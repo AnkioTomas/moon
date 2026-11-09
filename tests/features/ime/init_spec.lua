@@ -22,6 +22,16 @@ package.preload["utils.settings"] = function()
     }
 end
 
+-- 平台判定固定为内置键盘模式；平台判定本身见 platform_spec。
+package.preload["features.ime.platform"] = function()
+    return {
+        current = function() return "kindle" end,
+        isEink = function() return false end,
+        defaultMode = function() return "builtin" end,
+        backend = function() return nil end,
+    }
+end
+
 -- G_reader_settings（ensureLayouts 用）
 local saved = {}
 _G.G_reader_settings = {

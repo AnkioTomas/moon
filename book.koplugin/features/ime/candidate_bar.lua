@@ -564,4 +564,41 @@ function Bar.install(opts)
     Bar._hooked = true
 end
 
+--- 进入系统输入模式：摘掉候选行、清空拼写状态并把 zh_CN 布局恢复成基线。
+--- 钩子本身保留（_want=false 时全透传），回退到内置键盘时不用重新安装。
+function Bar.reset()
+    Bar._want = false
+    Bar._active = false
+    Bar._keyboard = nil
+    Bar._strip = nil
+    Guard.call("ime reset", function()
+        clearCode()
+        applyKeyboardLabels(nil)
+        return true
+    end)
+end
+
+--- 回到内置输入模式：按当前词库可用性重新应用键帽，并允许下一次建键盘时装候选行。
+---@return boolean 是否启用候选栏
+function Bar.activate()
+    local enabled = Bar._enabled
+    if type(enabled) ~= "function" or not enabled() then
+        Bar._want = false
+        Bar._active = false
+        return false
+    end
+    local ok = Guard.call("ime activate", function()
+        Bar._profile = Registry.current()
+        local available = Registry.isAvailable(Bar._profile)
+        applyKeyboardLabels(available and Bar._profile or nil)
+        Bar._want = available
+        return available
+    end)
+    if ok ~= true then
+        Bar._want = false
+        return false
+    end
+    return true
+end
+
 return Bar

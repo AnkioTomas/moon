@@ -1,5 +1,7 @@
 --[[--
-feature 元信息：功能开关页的名称、说明与能力清单。约定见 features/init.lua。
+feature 元信息：系统输入法（Android dex 后端）。
+
+设置入口已并入 features.ime；本目录只保留后端与配置声明。
 
 @module koplugin.book.features.system_ime._meta
 --]]
