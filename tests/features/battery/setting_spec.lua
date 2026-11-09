@@ -68,9 +68,14 @@ Assert.is_nil(item.rows)
 
 local desktop = { settings_overlay = { updateView = function() end } }
 local sections = item.sections(desktop)
-Assert.eq(#sections, 2)
+Assert.eq(#sections, 7, "硬件 + 说明 + 四段用法 + 重置")
 Assert.eq(sections[1].title, "电池")
 Assert.eq(sections[2].title, "用法统计")
+Assert.eq(sections[3].title, "上次充电以来的唤醒")
+Assert.eq(sections[4].title, "上次充电以来的休眠")
+Assert.eq(sections[5].title, "上次充电")
+Assert.eq(sections[6].title, "自从上次充电")
+Assert.is_nil(sections[7].title, "重置单独一节，无分组标题")
 local by_title = {}
 for _, build in ipairs(sections[1].rows) do
     local row = build(400)
@@ -83,15 +88,16 @@ Assert.eq(by_title["电量"], "73%")
 Assert.eq(by_title["状态"], "充电中")
 Assert.eq(by_title["温度"], "31.5 °C")
 
-local usage = {}
-for _, build in ipairs(sections[2].rows) do
+Assert.eq(sections[2].rows[1](400).title, "说明")
+local awake = {}
+for _, build in ipairs(sections[3].rows) do
     local row = build(400)
-    usage[row.title] = row.status
+    awake[row.title] = row.status
 end
-Assert.eq(usage["上次充电以来的唤醒"], "01:00")
-Assert.eq(usage["每小时电量变化"], "2.00%")
-Assert.eq(usage["预计可用时长"], "39:00")
-Assert.eq(usage["重置用法统计"], nil)
+Assert.eq(awake["累计时长"], "01:00")
+Assert.eq(awake["每小时电量变化"], "2.00%")
+Assert.eq(awake["预计可用时长"], "39:00")
+Assert.eq(sections[7].rows[1](400).title, "重置用法统计")
 
 health_pct = 100
 Assert.eq(item.status(), "100.0%")
@@ -103,5 +109,6 @@ supported = false
 Assert.eq(item.status(), "不支持")
 Assert.eq(item.sections(desktop)[1].rows[1](400).status, "不支持")
 Assert.eq(item.sections(desktop)[2].title, "用法统计", "不支持健康度仍展示用法统计")
+Assert.eq(#item.sections(desktop), 7, "不支持时仍有分段用法")
 
 return true
