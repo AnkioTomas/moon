@@ -130,13 +130,23 @@ end
 ---@param entry table
 ---@return table[]
 local function rowsOf(entry)
-    local sections = entry.page.sections()
-    Assert.eq(#sections, 1)
     local rows = {}
-    for _idx, build in ipairs(sections[1].rows) do
-        rows[#rows + 1] = build(400)
+    for _idx, section in ipairs(entry.page.sections()) do
+        for _j, build in ipairs(section.rows) do
+            rows[#rows + 1] = build(400)
+        end
     end
     return rows
+end
+
+---@param entry table
+---@return string[]
+local function sectionTitles(entry)
+    local titles = {}
+    for _idx, section in ipairs(entry.page.sections()) do
+        if section.title then titles[#titles + 1] = section.title end
+    end
+    return titles
 end
 
 local function titleRow(rows, predicate)
@@ -172,13 +182,14 @@ Assert.eq(entry.status, "系统输入法")
 Assert.eq(entry.subtitle, "Android 键盘（微信输入法等）")
 local rows = rowsOf(entry)
 Assert.len(rows, 2, "Android system 只有输入方式 + 说明")
+Assert.eq(table.concat(sectionTitles(entry), ","), "系统输入法", "system 模式只有系统输入法分节")
 local mode_row = byTitle(rows, "输入方式")
 Assert.is_true(mode_row.choice, "输入方式用 Row.choice")
 Assert.eq(mode_row.current, "system")
 Assert.eq(mode_row.items[1].text, "系统输入法")
 Assert.eq(mode_row.items[1].subtitle, "Android 键盘（微信输入法等）")
 Assert.eq(mode_row.items[2].text, "KOReader 输入法")
-Assert.eq(mode_row.items[2].subtitle, "自带键盘，墨水屏推荐")
+Assert.is_nil(mode_row.items[2].subtitle, "策略只给系统输入法副标题")
 Assert.is_false(hasTitle(rows, "键盘布局"), "system 模式不显示内置键盘行")
 Assert.is_false(hasTitle(rows, "测试系统输入法"), "Android 不显示测试行")
 Assert.eq(rows[2].note, "使用本机系统输入法，候选、联想与语音由系统提供。")
@@ -193,6 +204,7 @@ entry = Setting.entries(desktop)[1]
 Assert.eq(entry.status, "KOReader 输入法")
 Assert.eq(entry.subtitle, "KOReader 自带键盘")
 rows = rowsOf(entry)
+Assert.eq(table.concat(sectionTitles(entry), ","), "KOReader 输入法", "builtin 模式只有内置输入法分节")
 Assert.eq(byTitle(rows, "输入方式").current, "builtin")
 for _idx, title in ipairs({
     "输入法", "键盘布局", "简繁转换", "键盘收起键", "输入法词库", "手动安装词库",
@@ -200,16 +212,19 @@ for _idx, title in ipairs({
     Assert.is_true(hasTitle(rows, title), "builtin 模式应有行：" .. title)
 end
 Assert.is_false(hasTitle(rows, "测试系统输入法"), "Android 不显示测试行")
-Assert.eq(rows[2].note, "使用 KOReader 自带键盘，墨水屏推荐。")
+for _idx, row in ipairs(rows) do
+    Assert.is_nil(row.note, "内置键盘分节不再额外插说明")
+end
 
 -- ── 桌面 system：说明 + 测试行 ───────────────────────
 reset{ platform = "linux", mode = "system" }
 entry = Setting.entries(desktop)[1]
 Assert.eq(entry.subtitle, "系统输入法（fcitx5 / ibus）")
 rows = rowsOf(entry)
-Assert.len(rows, 3, "桌面 system 有输入方式 + 说明 + 测试")
+Assert.len(rows, 2, "桌面 system 有输入方式 + 测试")
+Assert.eq(table.concat(sectionTitles(entry), ","), "系统输入法")
 Assert.eq(byTitle(rows, "输入方式").items[1].subtitle, "系统输入法（fcitx5 / ibus）")
-Assert.eq(rows[2].note, "使用本机系统输入法，候选与联想由系统提供。")
+Assert.is_nil(rows[2].note, "桌面不额外插系统说明")
 local test_row = byTitle(rows, "测试系统输入法")
 Assert.not_nil(test_row)
 Assert.eq(test_row.status, "未测试")

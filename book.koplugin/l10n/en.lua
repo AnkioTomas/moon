@@ -2140,7 +2140,7 @@ return {
     ["输入方式"] = "Input method",
     ["KOReader 输入法"] = "KOReader keyboard",
     ["KOReader 自带键盘"] = "Built-in KOReader keyboard",
-    ["自带键盘，墨水屏推荐"] = "Built-in keyboard, recommended for e-ink",
+
     ["Android 键盘（微信输入法等）"] = "Android keyboard (WeChat Keyboard, etc.)",
     ["Windows 系统输入法（微软拼音等）"] = "Windows system input method (Microsoft Pinyin, etc.)",
     ["macOS 系统输入法"] = "macOS system input method",
@@ -2148,7 +2148,7 @@ return {
     ["WSL 不支持 Windows 输入法；需先装 fcitx5"] = "WSL cannot use Windows input methods; install fcitx5 first",
     ["使用本机系统输入法，候选、联想与语音由系统提供。"] = "Uses the system input method; candidates, suggestions and voice input come from the system.",
     ["使用本机系统输入法，候选与联想由系统提供。"] = "Uses the system input method; candidates and suggestions come from the system.",
-    ["使用 KOReader 自带键盘，墨水屏推荐。"] = "Uses the built-in KOReader keyboard; recommended for e-ink.",
+
     ["WSL 无法使用 Windows 输入法（微软拼音 / 微信输入法）。请先在 WSL 内安装 fcitx5，并用 fcitx5 --disable=wayland 启动，设置 XMODIFIERS=@im=fcitx 后再启动 KOReader。"] = "WSL cannot use Windows input methods (Microsoft Pinyin / WeChat Keyboard). Install fcitx5 inside WSL, start it with fcitx5 --disable=wayland, set XMODIFIERS=@im=fcitx, then start KOReader.",
     ["系统文本输入"] = "System text input",
     ["桌面 / WSL 上使用系统输入法（SDL 文本输入）"] = "Use the system input method on desktop / WSL (SDL text input)",
@@ -2165,4 +2165,5 @@ return {
     ["上次启动未就绪"] = "Not ready at last start",
     ["系统输入法不可用"] = "System input method unavailable",
     ["系统输入法不可用，已切回内置键盘"] = "System input method unavailable; switched to the built-in keyboard",
+    ["系统输入法未就绪，请先按设置页指引配置后重试"] = "System input method is not ready; follow the setup guide and try again",
 }
