@@ -674,6 +674,20 @@ local function folderCover(dir)
     end
 end
 
+--- 夹内某本书可当文件夹封面的路径：本地缓存优先，其次库里的 cover URL。
+---@param stable_id string|nil
+---@param cover_url string|nil
+---@return string|nil
+local function folderBookCover(stable_id, cover_url)
+    if type(stable_id) == "string" and stable_id ~= "" then
+        local cached = require("utils.paths").coverPath(stable_id, "local")
+        if require("libs/libkoreader-lfs").attributes(cached, "mode") == "file" then
+            return cached
+        end
+    end
+    if type(cover_url) == "string" and cover_url ~= "" then return cover_url end
+end
+
 --- 文件夹视图用的书路径：已落盘的取 path，WebDAV 远端未下载的书（path 为空）取下载后会在的 root/相对路径。
 ---@param alias string
 ---@param root string|nil
@@ -684,8 +698,9 @@ function Catalog.folderPathExpr(alias, root)
         .. alias .. ".stable_id, 10) END)", { root }
 end
 
---- 本地书库的文件夹视图一页：先列 dir 下的子文件夹（按名称），再列直接放在 dir 里的书。
---- 子文件夹以 { is_folder = true, title, dir, cover } 条目返回，cover 取目录里的 cover.jpg / cover.png。
+--- 本地书库的文件夹视图一页：先列 dir 下的子文件夹（按名称），再列目录里直接放的书。
+--- 子文件夹以 { is_folder = true, title, dir, cover } 条目返回：约定 cover.jpg/png 优先，
+--- 否则用夹内（含子目录）最近阅读那本有封面的书。
 ---@param source_id string
 ---@param opts { dir: string, root?: string, page: number|nil, page_size: number|nil, sort: string|nil }
 ---@param cb fun(data: BookListResult|nil, err: string|nil)
@@ -696,7 +711,7 @@ function Catalog.folderPageAsync(source_id, opts, cb)
     local dir = opts.dir
     return deferScoped(source_id, cb, function(scope)
         local DB = require("utils.db")
-        local where, args = DB.sourceClause("source_id", scope)
+        local where, args = DB.sourceClause("books.source_id", scope)
         local prefix = dir .. "/"
         -- 范围比较取出前缀下的全部路径（\255 大于任何 UTF-8 字节）。
         local expr, root_args = Catalog.folderPathExpr("books", opts.root)
@@ -708,17 +723,31 @@ function Catalog.folderPageAsync(source_id, opts, cb)
         qargs[#qargs + 1] = prefix
         push(root_args)
         qargs[#qargs + 1] = prefix .. "\255"
+        -- 顺带取 stable_id / cover / 最近阅读时间，给没约定封面的文件夹挑最近读过的书封面。
         local result, nrows = DB.query(
-            "SELECT " .. expr .. " FROM books WHERE " .. where
-                .. " AND source_id='local' AND deleted=0 AND hidden=0 AND " .. expr .. ">=? AND " .. expr .. "<?;",
+            "SELECT " .. expr .. ", books.stable_id, books.cover,"
+                .. " MAX(COALESCE(p.updated_at, 0), books.read_at)"
+                .. " FROM books LEFT JOIN pending_progress p"
+                .. " ON p.source_id=books.source_id AND p.stable_id=books.stable_id"
+                .. " WHERE " .. where
+                .. " AND books.source_id='local' AND books.deleted=0 AND books.hidden=0"
+                .. " AND " .. expr .. ">=? AND " .. expr .. "<?;",
             unpack(qargs)
         )
-        local counts, names = {}, {}
+        local counts, names, recent = {}, {}, {}
         for i = 1, nrows or 0 do
             local name = tostring(result[1][i] or ""):sub(#prefix + 1):match("^([^/]+)/")
             if name then
                 if not counts[name] then names[#names + 1] = name end
                 counts[name] = (counts[name] or 0) + 1
+                local cover = folderBookCover(result[2][i], result[3][i])
+                if cover then
+                    local at = tonumber(result[4][i]) or 0
+                    local cur = recent[name]
+                    if not cur or at > cur.at then
+                        recent[name] = { at = at, cover = cover }
+                    end
+                end
             end
         end
         table.sort(names, function(a, b)
@@ -730,8 +759,11 @@ function Catalog.folderPageAsync(source_id, opts, cb)
         local entries = {}
         for i = start + 1, math.min(#names, start + page_size) do
             local full = prefix .. names[i]
+            local picked = recent[names[i]]
             entries[#entries + 1] = {
-                is_folder = true, title = names[i], dir = full, cover = folderCover(full), count = counts[names[i]],
+                is_folder = true, title = names[i], dir = full,
+                cover = folderCover(full) or (picked and picked.cover) or nil,
+                count = counts[names[i]],
             }
         end
         local need = page_size - #entries
