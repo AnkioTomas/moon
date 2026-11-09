@@ -26,18 +26,38 @@ local DESKTOP = {
     wsl = true,
 }
 
----@return table|nil
-local function currentDevice()
-    local ok, device = pcall(require, "device")
-    if ok and type(device) == "table" then
-        return device
-    end
-    return nil
-end
+--- show 之后候选窗锚点的重试时间（首绘前 inputbox.dimen 往往还没算出来）。
+local AREA_RETRY_DELAYS = { 0.05, 0.15 }
+
+local ok_ui, ui_manager = pcall(require, "ui/uimanager")
+local UIManager = ok_ui and ui_manager or nil
+
+-- 本次会话是否已经提示过「不可用」；WSL 未就绪 / SDL 起不来都会回退。
+local notified = false
+-- 当前是否有活动的文本输入会话；reset 只复位活动会话。
+local active = false
+-- 每次 show / hide 递增，用于作废过期的锚点重试。
+local area_session = 0
 
 ---@return string
 local function platform()
     return Platform.current()
+end
+
+---@param text string
+local function showToast(text)
+    local ok, Toast = pcall(require, "ui.themes.widgets.toast")
+    if not ok or type(Toast) ~= "table" then return end
+    pcall(function()
+        Toast:new{ text = text, timeout = 3 }:show()
+    end)
+end
+
+--- 每次会话只提示一次，避免连续点输入框刷屏。
+local function notifyUnavailable()
+    if notified then return end
+    notified = true
+    showToast(_("系统输入法不可用，已切回内置键盘"))
 end
 
 --- 后端是否适用于当前平台 / 环境；WSL 未就绪仍算适用，由 show 拒绝接管。
@@ -63,14 +83,14 @@ function SystemText.status()
 end
 
 local function startTextInput()
-    local device = currentDevice()
+    local device = Platform.currentDevice()
     if device and type(device.startTextInput) == "function" then
         device:startTextInput()
     end
 end
 
 local function stopTextInput()
-    local device = currentDevice()
+    local device = Platform.currentDevice()
     if device and type(device.stopTextInput) == "function" then
         device:stopTextInput()
     end
@@ -135,31 +155,64 @@ local function setTextInputArea(inputbox)
     return pcall(fn, sdl.screen, rect, caretOffset(inputbox))
 end
 
+--- 等输入框完成首绘后重试锚点；收起 / 换会话后过期重试自动作废。
+---@param inputbox table|nil
+---@param session number
+local function scheduleAreaRetries(inputbox, session)
+    if type(UIManager) ~= "table" or type(UIManager.scheduleIn) ~= "function" then
+        return
+    end
+    for _idx, delay in ipairs(AREA_RETRY_DELAYS) do
+        UIManager:scheduleIn(delay, function()
+            if not active or session ~= area_session then return end
+            setTextInputArea(inputbox)
+        end)
+    end
+end
+
 --- 接管一次键盘显示：启动系统文本输入并给候选窗定位。
 --- 平台不支持 / WSL 未就绪 / SDL 起不来时返回 false，由 features.ime 回退原生 VK。
 ---@param vk table|nil VirtualKeyboard 实例（读 vk.inputbox）
 ---@return boolean
 function SystemText.show(vk)
     if not SystemText.available() then return false end
-    if SystemText.status() == "not_ready" then return false end
+    if SystemText.status() == "not_ready" then
+        active = false
+        area_session = area_session + 1
+        notifyUnavailable()
+        return false
+    end
     local ok = pcall(startTextInput)
-    if not ok then return false end
-    pcall(setTextInputArea, vk and vk.inputbox)
+    if not ok then
+        active = false
+        area_session = area_session + 1
+        notifyUnavailable()
+        return false
+    end
+    active = true
+    area_session = area_session + 1
+    local inputbox = vk and vk.inputbox
+    pcall(setTextInputArea, inputbox)
+    scheduleAreaRetries(inputbox, area_session)
     return true
 end
 
 --- 收起系统文本输入。
 ---@param _vk table|nil
 function SystemText.hide(_vk)
+    active = false
+    area_session = area_session + 1
     pcall(stopTextInput)
 end
 
---- 丢弃系统输入法未提交的组合串：停一次再开，让 IME 重置预编辑。
+--- 丢弃系统输入法未提交的组合串：只复位活动会话，不重新打开文本输入。
 ---@return boolean
 function SystemText.reset()
     if SystemText.status() ~= "ready" then return false end
+    if not active then return false end
+    active = false
+    area_session = area_session + 1
     pcall(stopTextInput)
-    pcall(startTextInput)
     return true
 end
 
@@ -168,18 +221,22 @@ end
 ---@return boolean 是否打开了测试
 function SystemText.test(on_done)
     if not SystemText.available() then return false end
+    -- 未就绪时打开测试框只会收到空文本，不能记成「通过」。
+    if SystemText.status() ~= "ready" then
+        local settings = Settings.get("features.system_ime")
+        settings.test_result = "fail"
+        Settings.save("features.system_ime", settings)
+        showToast(_("系统输入法未就绪，请先按设置页指引配置后重试"))
+        if type(on_done) == "function" then on_done(false) end
+        return false
+    end
     local Test = require("features.system_text.test")
     Test.run(function(ok)
         local settings = Settings.get("features.system_ime")
         settings.test_result = ok and "pass" or "fail"
         Settings.save("features.system_ime", settings)
-        pcall(function()
-            require("ui.themes.widgets.toast"):new{
-                text = ok and _("测试通过：输入框收到了文字")
-                    or _("测试未通过：输入框没有收到文字，请检查系统输入法"),
-                timeout = 3,
-            }:show()
-        end)
+        showToast(ok and _("测试通过：输入框收到了文字")
+            or _("测试未通过：输入框没有收到文字，请检查系统输入法"))
         if type(on_done) == "function" then on_done(ok) end
     end)
     return true
