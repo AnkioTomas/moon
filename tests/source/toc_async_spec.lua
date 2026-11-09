@@ -8,8 +8,17 @@ local Assert = require("support.assert")
 local Config = require("support.config")
 local path = Config.dir() .. "/toc_async_spec.sqlite3"
 for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(path .. suffix) end
+local transfer, transfers = nil, 0
 package.preload["utils.paths"] = function()
-    return { dbPath = function() return path end, sanitizeSourceId = function(id) return id end }
+    return {
+        dbPath = function() return path end,
+        sanitizeSourceId = function(id) return id end,
+        tmpname = function()
+            transfers = transfers + 1
+            transfer = Config.dir() .. "/toc-transfer-" .. transfers
+            return transfer
+        end,
+    }
 end
 local UI = require("ui/uimanager")
 local queue, in_child = {}, false
@@ -21,12 +30,6 @@ end
 local function tick()
     Assert.is_true(#queue > 0)
     table.remove(queue, 1)()
-end
-local transfer, transfers = nil, 0
-os.tmpname = function()
-    transfers = transfers + 1
-    transfer = Config.dir() .. "/toc-transfer-" .. transfers
-    return transfer
 end
 package.loaded["workers.job"] = {
     inSubProcess = function() return in_child end,

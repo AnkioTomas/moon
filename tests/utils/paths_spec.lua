@@ -137,6 +137,21 @@ do
     Assert.is_false(Paths.isMoonPath(Paths.root() .. "-other/file"))
 end
 
+-- tmpname：落在 .moon/cache/tmp，可写、互不撞名；不依赖系统 /tmp（Android 会挂）
+do
+    local a = Paths.tmpname()
+    local b = Paths.tmpname(".ttf")
+    Assert.eq(lfs.attributes(Paths.tmpDir(), "mode"), "directory")
+    Assert.is_true(a:sub(1, #Paths.tmpDir() + 1) == Paths.tmpDir() .. "/")
+    Assert.is_true(b:sub(-4) == ".ttf")
+    Assert.is_true(a ~= b)
+    local file = assert(io.open(a, "wb"))
+    file:write("x")
+    file:close()
+    Assert.eq(lfs.attributes(a, "mode"), "file")
+    os.remove(a)
+end
+
 -- userPath：给用户看的路径固定 koreader/ 前缀（USB 里认的文件夹名）
 do
     local DataStorage = require("datastorage")
