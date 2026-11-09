@@ -61,6 +61,8 @@ function Backend.load(name)
         -- show 抛错时返回 false，让路由回退到原生键盘，而不是静默留下空屏。
         show = safe(mod.show, false),
         hide = safe(mod.hide, nil),
+        -- 把尚未轮询的上屏动作先写进输入框（InputDialog:reinit 前调用）。
+        flush = type(mod.flush) == "function" and safe(mod.flush, false) or nil,
         -- 复位未提交的系统输入法组合串；后端不支持时保持 nil。
         reset = type(mod.reset) == "function" and safe(mod.reset, nil) or nil,
         status = safe(mod.status, available() and "ready" or "unavailable"),

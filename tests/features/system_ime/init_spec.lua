@@ -357,6 +357,41 @@ do
     Assert.eq(ib.parent.height_changes, 1, "同一高度反复 reinit 后不再通知")
 end
 
+-- ── 系统输入法上屏的文本不回写给隐藏 EditText ──────────
+-- 回写会走 KOBoardShow.updateState → setEditorState → imm.updateSelection，
+-- 把输入法正在进行的组合串重置；表现为前几次选词上不去。
+do
+    local M = reset{}
+    M.onCreate({ path = "/plugin" })
+    local ib = makeInputbox()
+    local vk = makeVK(ib)
+    M.show(vk)
+    local before = engine_state.sync_calls
+
+    engine_state.input = "CH:hello"
+    M.poll()
+    Assert.eq(ib.text, "hello")
+    Assert.eq(engine_state.sync_calls, before, "输入法上屏的文本不回写")
+
+    ib.text = "hello!" -- Lua 侧编辑（粘贴 / 程序改文本）仍要同步
+    M.poll()
+    Assert.eq(engine_state.sync_calls, before + 1, "Lua 侧编辑仍同步")
+end
+
+-- ── reinit 前 flush：尚未轮询的上屏动作不能丢 ──────────
+do
+    local M = reset{}
+    M.onCreate({ path = "/plugin" })
+    local ib = makeInputbox()
+    local vk = makeVK(ib)
+    M.show(vk)
+    engine_state.input = "CH:词"
+    Assert.is_true(M.flush(vk))
+    Assert.eq(ib.text, "词", "flush 把待处理的上屏动作写进输入框")
+    Assert.eq(engine_state.sync_calls, 0, "flush 不回写隐藏 EditText")
+    Assert.is_false(M.flush(vk), "没有待处理动作时返回 false")
+end
+
 -- ── number / password / readonly：后端即使被调用也不接管 ──
 local bypass = {
     { name = "number", fields = { input_type = "number" } },

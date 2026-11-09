@@ -245,6 +245,21 @@ local function applySnapshot(vk, content)
     end
 end
 
+--- 把尚未轮询的上屏动作先写进 inputbox（InputDialog:reinit 前调用）。
+--- reinit 会收起键盘再重建输入框；不先落盘的话，engine.clear 会把刚选的词吞掉。
+---@param vk table|nil
+---@return boolean 是否写入了动作
+function M.flush(vk)
+    local engine = state.engine
+    if type(vk) ~= "table" or type(engine) ~= "table" then return false end
+    local content = engine.take_input()
+    if type(content) ~= "string" or content == "" then return false end
+    applySnapshot(vk, content)
+    local text, cursor = editorState(vk)
+    state.last_text, state.last_cursor = text, cursor
+    return true
+end
+
 --- 轮询快照 / 键盘高度；由 UIManager 每 50ms 调一次。
 function M.poll()
     state.polling = false
@@ -271,14 +286,21 @@ function M.poll()
     end
 
     local content = engine.take_input()
+    local from_ime = false
     if type(content) == "string" and content ~= "" then
         applySnapshot(vk, content)
+        from_ime = true
     end
 
     local text, cursor = editorState(vk)
     if text ~= state.last_text or cursor ~= state.last_cursor then
         state.last_text, state.last_cursor = text, cursor
-        pcall(engine.sync, text, cursor)
+        -- 刚把输入法上屏的状态写进 inputbox：不要再回写隐藏 EditText。
+        -- sync → updateState → setEditorState → imm.updateSelection 会重置
+        -- 输入法正在进行的组合串，前几次选词会被吞掉。
+        if not from_ime then
+            pcall(engine.sync, text, cursor)
+        end
     end
 
     if state.kb_active then schedulePoll() end

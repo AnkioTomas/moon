@@ -309,6 +309,26 @@ function IME.installRouting()
     if type(orig_hide) == "function" then
         VK.hideKeyboard = wrappedHideKeyboard
     end
+
+    -- InputDialog:reinit 会在系统键盘高度变化时收起再重建输入框。重建前先把
+    -- 还没轮询到的上屏动作写进输入框；否则 engine.clear + 旧快照会吞掉刚选的词，
+    -- 表现为「前几次选词上不去，后面才好」。
+    local ok_dialog, InputDialog = pcall(require, "ui/widget/inputdialog")
+    if ok_dialog and type(InputDialog) == "table" and type(InputDialog.reinit) == "function" then
+        local orig_reinit = InputDialog.reinit
+        local function wrappedReinit(self)
+            if IME.inputMode() == "system" then
+                local vk = self and self._input_widget and self._input_widget.keyboard
+                local backend = IME.backend()
+                if vk and backend and type(backend.flush) == "function" then
+                    pcall(backend.flush, vk)
+                end
+            end
+            return orig_reinit(self)
+        end
+        InputDialog.reinit = wrappedReinit
+        InputDialog.onKeyboardHeightChanged = wrappedReinit
+    end
     routing_hooked = true
 end
 
