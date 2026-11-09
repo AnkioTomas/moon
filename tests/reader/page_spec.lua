@@ -70,6 +70,8 @@ package.preload["reader.session"] = function()
             return active and current or nil
         end,
         toc = function() return nil end,
+        -- 本 spec 是整书假文档；刷新目录只在连续章节会话出现。
+        isChapterMode = function() return false end,
     }
 end
 
