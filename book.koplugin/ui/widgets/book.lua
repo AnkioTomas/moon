@@ -544,11 +544,12 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         style = t.raised
     end
     -- 图书馆「封面圆角」只动封面半径；theme 跟界面，round/square 覆盖主题值。
+    -- round 用小圆角（逻辑 6px），避免小封面看起来像胶囊。
     local radius_mode = MoonSettings.get("ui").library_cover_radius
     if radius_mode == "round" or radius_mode == "square" then
         local out = {}
         for k, v in pairs(style) do out[k] = v end
-        out.radius = radius_mode == "square" and 0 or Theme.px(12)
+        out.radius = radius_mode == "square" and 0 or Theme.px(6)
         style = out
     end
     -- 内边距只让出边框：Box 先画边框再画子件，图贴着边框内沿。
