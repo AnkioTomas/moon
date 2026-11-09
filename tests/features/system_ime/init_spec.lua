@@ -336,6 +336,27 @@ do
     Assert.eq(ib.parent.height_changes, 1)
 end
 
+-- ── 高度回调里的 reinit（InputDialog 的真实行为：hide + show）不能形成循环 ──
+-- 同一块系统键盘、同一高度，收起再显示后不能再通知：每次 reinit 都会
+-- UIManager:setDirty("all", "flashui")，保存 / 关闭时会一直狂闪。
+do
+    local M = reset{}
+    M.onCreate({ path = "/plugin" })
+    local ib = makeInputbox()
+    local vk = makeVK(ib)
+    M.show(vk)
+    engine_state.height = 400
+    M.poll()
+    Assert.eq(ib.parent.height_changes, 1)
+
+    for _ = 1, 5 do
+        M.hide(vk)   -- InputDialog:reinit 的第一步
+        M.show(vk)   -- 第二步
+        M.poll()
+    end
+    Assert.eq(ib.parent.height_changes, 1, "同一高度反复 reinit 后不再通知")
+end
+
 -- ── number / password / readonly：后端即使被调用也不接管 ──
 local bypass = {
     { name = "number", fields = { input_type = "number" } },

@@ -161,7 +161,9 @@ local function resetActive(vk)
     state.kb_active = false
     state.active_vk = nil
     state.polling = false
-    state.last_height = nil
+    -- 保留 last_height：InputDialog:reinit 会先 hide 再 show 同一块键盘，
+    -- 清掉的话下一次 poll 会把同一个高度当成新变化再通知一次，形成
+    -- reinit → 全屏 flashui 的循环。
     state.last_text = nil
     state.last_cursor = nil
     if type(vk) == "table" then vk.visible = false end
@@ -333,7 +335,8 @@ function M.show(vk)
     state.active_vk = vk
     state.kb_active = true
     state.fallback_vk = nil
-    state.last_height = nil
+    -- 保留已应用的高度：reinit 的 hide/show 不应再触发 onKeyboardHeightChanged。
+    state.last_height = state.reserved_height
     state.last_text, state.last_cursor = text, cursor
     vk.visible = true
     if type(vk.dimen) == "table" and state.reserved_height then
