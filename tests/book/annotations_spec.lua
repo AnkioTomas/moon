@@ -54,3 +54,44 @@ do
     local flow = Annotations.flow("<html><body><p>目标正文</p><p>目标正文</p></body></html>")
     Assert.eq(Annotations.fromWireOffset(wire, flow, 0), nil, "改写后重复次数不符不能随便挑一个")
 end
+
+do
+    -- CB_ 纯图章：无可见正文，locator 落在 <img> 上，必须映到 wire HTML 标签起始偏移。
+    local html = '<html><body>'
+        .. '<div><img src="a.jpg"/></div>'
+        .. '<div><img src="b.jpg"/></div>'
+        .. '<div><img src="c.jpg"/></div>'
+        .. '</body></html>'
+    local wire, flow = Annotations.wireMapping(html), Annotations.flow(html)
+    Assert.eq(flow.count, 0, "纯图章可见 rune 数为 0")
+    Assert.eq(wire.count, 0)
+    local offset, summary, fraction, err = Annotations.toWirePosition(
+        wire, flow, "/html/body/div[2]/img.0", html)
+    Assert.is_nil(err)
+    local expected = 0
+    do
+        local runes, i, len, seen = {}, 1, #html, 0
+        while i <= len do
+            local byte = html:byte(i)
+            local width = byte < 0x80 and 1 or byte < 0xe0 and 2 or byte < 0xf0 and 3 or 4
+            local rune = html:sub(i, i + width - 1)
+            if rune == "<" and html:sub(i, i + 3) == "<img" then
+                seen = seen + 1
+                if seen == 2 then
+                    expected = #runes
+                    break
+                end
+            end
+            runes[#runes + 1] = rune
+            i = i + width
+        end
+    end
+    Assert.eq(offset, expected, "第二张图的 <img> 在 wire HTML 上的 rune 偏移")
+    Assert.eq(summary, "")
+    Assert.is_true(fraction ~= nil and fraction > 0 and fraction < 1)
+
+    Assert.eq(Annotations.toWirePosition(wire, flow, "/html/body/div[2]/img.0"), nil,
+        "没有 source 时纯图章不能瞎编偏移")
+    Assert.eq(select(4, Annotations.toWirePosition(wire, flow, "/html/body/div[9]/img.0", html)),
+        "reading position not found in chapter")
+end

@@ -579,26 +579,104 @@ function Annotations.fromWireOffset(wire, local_flow, offset)
     return nil
 end
 
+--- 纯图章等无可见正文时：按 locator 的元素路径，取 wire HTML 里该标签起始的 0-based rune 偏移。
+--- 与 ``Annotations.flow`` 同一套路径规则（同名兄弟多于一个才带 ``[k]``）；只在 ``flow.count == 0`` 时使用。
+---@param html string
+---@param locator string
+---@return integer|nil
+local function elementWireOffset(html, locator)
+    local want = type(locator) == "string" and locator:match("^(.*)%.%d+$") or nil
+    if not want or want == "" then
+        return nil
+    end
+    html = Text.stripBom(tostring(html or ""))
+    local source = toRunes(html)
+    ---@type WechatDomNode
+    local root = { name = "", ord = 1, counts = {}, texts = 0, skip = false, before = 0 }
+    local top = root
+    local i, len = 1, #source
+    while i <= len do
+        if source[i] ~= "<" then
+            i = i + 1
+        else
+            local start_offset = i - 1
+            if table.concat(source, "", i, math.min(i + 3, len)) == "<!--" then
+                local close
+                for j = i + 4, len - 2 do
+                    if source[j] == "-" and source[j + 1] == "-" and source[j + 2] == ">" then
+                        close = j + 2
+                        break
+                    end
+                end
+                i = close and close + 1 or len + 1
+            else
+                local close_pos
+                for j = i + 1, len do
+                    if source[j] == ">" then
+                        close_pos = j
+                        break
+                    end
+                end
+                if not close_pos then
+                    break
+                end
+                local tag = table.concat(source, "", i + 1, close_pos - 1)
+                local closing, name = tag:match("^%s*(/?)%s*([%w:]+)")
+                name = name and name:lower()
+                if name and closing == "/" then
+                    local node = top
+                    while node ~= root and node.name ~= name do node = node.parent end
+                    if node ~= root then top = node.parent end
+                elseif name and tag:sub(1, 1) ~= "!" and tag:sub(1, 1) ~= "?" then
+                    top.counts[name] = (top.counts[name] or 0) + 1
+                    ---@type WechatDomNode
+                    local node = {
+                        parent = top, name = name, ord = top.counts[name], counts = {}, texts = 0,
+                        skip = false, before = 0,
+                    }
+                    if elementPath(node) == want then
+                        return start_offset
+                    end
+                    if not VOID_TAGS[name] and not tag:match("/%s*$") then top = node end
+                end
+                i = close_pos + 1
+            end
+        end
+    end
+    return nil
+end
+
 --- 本地正文坐标 → 远端原文偏移及正文摘要。
+--- 无可见正文（CB_ 纯图章等）时，若提供 ``source``，把元素 locator 映射为 wire HTML 标签起始偏移。
 ---@param wire WechatWireMapping
 ---@param local_flow WechatRuneFlow
 ---@param locator string
+---@param source string|nil wire 章节原文（html）；仅 ``local_flow.count == 0`` 的回退需要
 ---@return integer|nil offset
 ---@return string|nil summary
 ---@return number|nil fraction
 ---@return string|nil err
-function Annotations.toWirePosition(wire, local_flow, locator)
+function Annotations.toWirePosition(wire, local_flow, locator, source)
     local head = headAtXPointer(local_flow, locator)
-    if not head then return nil, nil, nil, "reading position not found in chapter" end
-    local summary = table.concat(local_flow.runes, "", head, math.min(head + 29, local_flow.count))
-    local range, err = Annotations.toWireRange(wire, local_flow, summary, locator)
-    if not range then return nil, nil, nil, err end
-    local offset = tonumber(range:match("^(%d+)"))
-    local wire_head = 1
-    for i = 1, wire.count do
-        if wire.starts[i] == offset then wire_head = i; break end
+    if head then
+        local summary = table.concat(local_flow.runes, "", head, math.min(head + 29, local_flow.count))
+        local range, err = Annotations.toWireRange(wire, local_flow, summary, locator)
+        if not range then return nil, nil, nil, err end
+        local offset = tonumber(range:match("^(%d+)"))
+        local wire_head = 1
+        for i = 1, wire.count do
+            if wire.starts[i] == offset then wire_head = i; break end
+        end
+        return offset, summary, (wire_head - 1) / wire.count
     end
-    return offset, summary, (wire_head - 1) / wire.count
+    if local_flow.count == 0 and type(source) == "string" and source ~= "" then
+        local offset = elementWireOffset(source, locator)
+        if offset ~= nil then
+            local total = countRunes(Text.stripBom(source))
+            return offset, "", total > 0 and offset / total or 0
+        end
+    end
+    return nil, nil, nil, "reading position not found in chapter"
 end
 
 return Annotations
