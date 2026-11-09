@@ -12,4 +12,6 @@ return {
     name = _("系统输入法"),
     description = _("Android 上改用系统输入法，不再弹出内置键盘"),
     abilities = { _("系统输入法上屏"), _("键盘高度同步") },
+    -- 后端由 features.ime 按平台装载；onCreate 要捕获插件路径，停用只会静默失效。
+    removable = false,
 }
