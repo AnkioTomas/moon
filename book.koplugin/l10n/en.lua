@@ -2156,4 +2156,5 @@ return {
     ["未通过"] = "Failed",
     ["上次启动未就绪"] = "Not ready at last start",
     ["系统输入法不可用"] = "System input method unavailable",
+    ["系统输入法不可用，已切回内置键盘"] = "System input method unavailable; switched to the built-in keyboard",
 }
