@@ -213,7 +213,7 @@ do
 
     local ib = makeInputbox()
     local vk = makeVK(ib)
-    Assert.is_false(M.show(vk), "加载失败 show 返回 false")
+    Assert.is_true(M.show(vk), "加载失败由后端接管回退，路由不再同步显示")
     Assert.len(toasts, 1, "回退提示一次")
     Assert.matches(toasts[1], "切回内置键盘")
 
@@ -222,6 +222,22 @@ do
     Assert.is_true(fallback.delay >= 0.15 and fallback.delay <= 0.2, "延迟 150–200ms")
     fallback.fn()
     Assert.eq(vk.show_calls, 1, "延迟后补弹内置键盘")
+
+    -- skip_backend 只跳过一次；残留会让下一次 show 被误判为回退
+    Assert.is_true(M.show(vk), "回退后 skip 标记已清除，仍尝试接管")
+end
+
+-- ── 路由 / 其它路径已显示 VK：延迟回调不重复显示 ──────
+do
+    local M = reset{ fail_load = "dex missing" }
+    M.onCreate({ path = "/plugin" })
+    local vk = makeVK(makeInputbox())
+    Assert.is_true(M.show(vk))
+    local fallback = scheduledAfter(0, function(item) return item.delay ~= 0.05 end)
+    Assert.not_nil(fallback)
+    vk.visible = true -- 路由器已同步显示内置 VK
+    fallback.fn()
+    Assert.eq(vk.show_calls, 0, "VK 已可见时不再重复显示")
 end
 
 -- ── 接管成功：直写状态、标记可见、开始轮询 ─────────────
@@ -255,7 +271,7 @@ do
     local M = reset{ show_error = "jni boom" }
     M.onCreate({ path = "/plugin" })
     local vk = makeVK(makeInputbox{ text = "hi", charpos = 3 })
-    Assert.is_false(M.show(vk), "show 失败返回 false")
+    Assert.is_true(M.show(vk), "JNI show 失败也由后端接管回退")
     Assert.eq(engine_state.hide_calls, 1, "先隐藏系统键盘")
     Assert.eq(M.status(), "not_ready", "show 失败写 not_ready")
     local fallback = scheduledAfter(0, function(item) return item.delay ~= 0.05 end)
