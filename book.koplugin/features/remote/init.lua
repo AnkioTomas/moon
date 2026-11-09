@@ -855,7 +855,7 @@ local function installUpdate(temp, cb)
         require("ui.themes.widgets.toast"):new{
             text = require("ffi/util").template(_("插件 %1 已安装，正在重启 KOReader…"), detail),
         }:show()
-        require("features").refreshIfStale(PLUGIN_ROOT)
+        require("utils.extension").emit("desktop.plugin_installed", PLUGIN_ROOT)
         require("ui/uimanager"):scheduleIn(1, require("utils.restart").now)
     end)
 end
