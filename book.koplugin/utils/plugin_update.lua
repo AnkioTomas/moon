@@ -311,6 +311,10 @@ local function startInstall(self, release, ctx)
     self:install(release, ctx, function(ok, err)
         if ok then
             dialog:set(_("更新完成，正在重启 KOReader…"), 100)
+            -- 重启前先按新目录重登约定文件：若重启被推迟/失败，设置页也能立刻看到新项。
+            -- ctx 是插件根目录字符串（见 features.update parent / prompt）。
+            local root = type(ctx) == "string" and ctx or (type(ctx) == "table" and (ctx.plugin_root or ctx.root) or nil)
+            if root then require("features").refreshIfStale(root) end
             require("ui/uimanager"):nextTick(require("utils.restart").now)
             return
         end

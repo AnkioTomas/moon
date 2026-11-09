@@ -97,6 +97,26 @@ function Ext.emit(point, ...)
     for _idx, fn in ipairs(Ext.list(point)) do Guard.call("extension " .. point, fn, ...) end
 end
 
+--- 按谓词删掉某挂点里的项（就地改）；返回删掉的数量。
+---@param point string
+---@param pred fun(item: any): boolean
+---@return integer
+function Ext.removeWhere(point, pred)
+    check(point)
+    local list = points[point]
+    if not list then return 0 end
+    local kept, n = {}, 0
+    for _idx, item in ipairs(list) do
+        if pred(item) then
+            n = n + 1
+        else
+            kept[#kept + 1] = item
+        end
+    end
+    points[point] = kept
+    return n
+end
+
 --- 测试用：清空全部登记。
 function Ext.reset()
     points = {}

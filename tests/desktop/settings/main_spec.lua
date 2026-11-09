@@ -329,6 +329,7 @@ for _, row in ipairs(appearance_rows) do
     if row.title == "屏幕" then display_row = row end
 end
 Assert.is_true(table.concat(appearance_titles, ","):find("主题与字体", 1, true) ~= nil)
+Assert.is_true(table.concat(appearance_titles, ","):find("界面壁纸", 1, true) ~= nil, "外观组应含壁纸入口")
 display_row.callback()
 Assert.eq(opened.id, "display")
 Assert.eq(sectionTitles(opened), "屏幕,夜间与亮度")

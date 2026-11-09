@@ -66,4 +66,22 @@ function Modules.install(root)
     return index
 end
 
+--- 插件目录被整体替换后（在线更新装好、尚未重启）重建索引。
+--- 已装过的仍复用同一个 loader 闭包：它读的是 installed[root] 表，原地换表即可。
+---@param root string
+---@return table<string, string>
+function Modules.refresh(root)
+    local index = {}
+    scan(root, "", index)
+    index.main = nil
+    index._meta = nil
+    if installed[root] then
+        local old = installed[root]
+        for key in pairs(old) do old[key] = nil end
+        for key, path in pairs(index) do old[key] = path end
+        return old
+    end
+    return Modules.install(root)
+end
+
 return Modules
