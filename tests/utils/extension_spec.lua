@@ -44,3 +44,11 @@ end
 
 Ext.reset()
 Assert.len(Ext.list("desktop.activated"), 0)
+
+-- removeWhere：按谓词删项，保留其余。
+Ext.add("setting.entries", { name = "keep", entries = function() return {} end })
+Ext.add("setting.entries", { name = "drop", entries = function() return {} end })
+Assert.eq(Ext.removeWhere("setting.entries", function(item) return item.name == "drop" end), 1)
+Assert.eq(#Ext.list("setting.entries"), 1)
+Assert.eq(Ext.list("setting.entries")[1].name, "keep")
+Ext.reset()

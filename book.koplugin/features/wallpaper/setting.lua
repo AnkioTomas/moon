@@ -38,7 +38,6 @@ end
 ---@param desktop BookDesktop
 ---@return BookSettingEntry[]
 function Setting.entries(desktop)
-    local Wallpaper = require("features.wallpaper.page")
     local on = require("features.wallpaper").anyEnabled()
     return {
         {
@@ -50,7 +49,17 @@ function Setting.entries(desktop)
             subtitle = _("全局设置，各界面可单独调整"),
             status = on and _("开") or _("关"),
             status_on = on,
-            page = Wallpaper.spec(desktop),
+            -- 点进页再 require page，收集设置树时少踩依赖。
+            page = {
+                title = _("界面壁纸"),
+                docs = "/manual/appearance/wallpaper",
+                preview = function(width)
+                    return require("features.wallpaper.page").preview(width)
+                end,
+                sections = function()
+                    return require("features.wallpaper.page").sections(desktop)
+                end,
+            },
         },
     }
 end
