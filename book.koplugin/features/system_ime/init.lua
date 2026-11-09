@@ -353,6 +353,23 @@ function M.show(vk)
     return true
 end
 
+--- 丢弃未提交的组合串：把当前 inputbox 状态重新同步给 dex 侧，
+--- 替换隐藏 View 里的预编辑文本；切焦点 / 关窗时由 features.ime 调用。
+---@return boolean
+function M.reset()
+    if not M.available() then return false end
+    local engine = state.engine
+    if type(engine) ~= "table" then return false end
+    pcall(engine.clear)
+    local vk = state.active_vk
+    if type(vk) == "table" then
+        local text, cursor = editorState(vk)
+        state.last_text, state.last_cursor = text, cursor
+        pcall(engine.sync, text, cursor, cursor)
+    end
+    return true
+end
+
 --- 收起系统键盘并清空活动状态。
 ---@param vk table|nil
 function M.hide(vk)

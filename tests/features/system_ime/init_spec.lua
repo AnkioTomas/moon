@@ -338,6 +338,26 @@ for _idx, case in ipairs(bypass) do
     Assert.len(toasts, 0, case.name .. " 不弹回退提示")
 end
 
+-- ── reset：切焦点 / 关窗丢弃未提交组合串，并暴露给后端契约 ──
+do
+    local M = reset{}
+    M.onCreate({ path = "/plugin" })
+    local ib = makeInputbox{ text = "ni", charpos = 3 }
+    local vk = makeVK(ib)
+    Assert.is_true(M.show(vk))
+    engine_state.input = "ST:0:2:aGk="
+    local sync_before = engine_state.sync_calls
+    Assert.is_true(M.reset(), "已接管时可复位")
+    Assert.is_true(engine_state.sync_calls > sync_before, "用当前输入框状态覆盖预编辑")
+    local Backend = require("features.ime.backend")
+    local backend = Backend.load("features.system_ime")
+    Assert.eq(type(backend.reset), "function", "路由能通过后端契约复位")
+    Assert.is_true(backend.reset())
+
+    local offline = reset{ android = false }
+    Assert.is_false(offline.reset(), "非 Android 复位是空操作")
+end
+
 -- ── hide 在未接管时也安全 ────────────────────────────
 do
     local M = reset{}
