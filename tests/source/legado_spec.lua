@@ -270,13 +270,17 @@ do
     cfg.server_address, cfg.username, cfg.password = "http://h:1122", nil, nil
 end
 
--- 设备设置：网络校验期间保留旧配置；清库失败不能把新配置落盘或谎报已连接。
+-- 地址是连接位置，不是书籍身份：换 IP / 清空后重连保留进度，换账号仍走清库边界。
 do
     local Themed = require("support.theme_stubs")
+    local ProgressDB = require("book.progress_db")
+    local stable_id = "legado-address-progress-spec"
+    assert(ProgressDB.upsert("legado", stable_id, { fraction = 0.63, chapter_idx = 8 }))
+    assert(ProgressDB.setDecisionPending("legado", stable_id, true))
     Themed.install()
     package.loaded["ui.themes.widgets.row"] = { widget = function(opts) return opts end }
     cfg = { server_address = "http://old/reader3", username = "old-user", password = "old-password" }
-    local saved, reloaded, cleanup_ok = 0, 0, false
+    local saved, reloaded, cleaned, aborted, cleanup_ok = 0, 0, 0, 0, true
     package.loaded["utils.settings"] = {
         getSource = function() return cfg end,
         saveSource = function() saved = saved + 1 end,
@@ -284,7 +288,12 @@ do
     package.loaded["source.registry"] = { reload = function() reloaded = reloaded + 1 end }
     package.loaded["source.logout"] = {
         row = require("source.logout").row,
+        abort = function(id)
+            Assert.eq(id, "legado")
+            aborted = aborted + 1
+        end,
         replaceLibrary = function(_id, commit)
+            cleaned = cleaned + 1
             if not cleanup_ok then return false end
             commit()
             require("source.registry").reload()
@@ -300,22 +309,67 @@ do
     end
     local Setting = require("source.legado.setting")
     Setting.rows()[1](300).callback()
-    Themed.last("input").callback("http://new/reader3", "new-user", "new-password")
+    Themed.last("input").callback("http://new/reader3", "old-user", "old-password")
     Assert.eq(candidate.server_address, "http://new/reader3")
-    Assert.eq(candidate.username, "new-user")
+    Assert.eq(candidate.username, "old-user")
     Assert.eq(cfg.server_address, "http://old/reader3", "校验期间当前源仍握着旧库")
     Assert.eq(saved, 0)
-    pending({ { bookUrl = "new-book" } })
+    pending(nil, "network failed")
     Assert.eq(cfg.server_address, "http://old/reader3")
+    Assert.eq(saved, 0)
+    Assert.eq(reloaded, 0)
+    Assert.eq(Themed.last("toast").text, "network failed")
+
+    Setting.rows()[1](300).callback()
+    Themed.last("input").callback("http://new/reader3", "old-user", "old-password")
+    pending({ { bookUrl = stable_id } })
+    local progress = ProgressDB.get("legado", stable_id)
+    Assert.is_true(progress ~= nil, "更换地址不能删除阅读进度")
+    Assert.eq(progress.chapter_idx, 8)
+    Assert.eq(progress.fraction, 0.63)
+    Assert.eq(progress.sync_status, 0)
+    Assert.eq(progress.decision_pending, 1)
+    Assert.eq(cfg.server_address, "http://new/reader3")
+    Assert.eq(saved, 1)
+    Assert.eq(reloaded, 1)
+    Assert.eq(cleaned, 0)
+    Assert.eq(aborted, 1)
+
+    -- 先清空旧地址再填新地址也不是登出，不能在这一步清掉数据或账号身份。
+    Setting.rows()[1](300).callback()
+    Themed.last("input").callback("", "", "")
+    Assert.is_nil(cfg.server_address)
+    Assert.eq(cfg.username, "old-user")
+    Assert.eq(cfg.password, "old-password")
+    Assert.eq(ProgressDB.get("legado", stable_id).chapter_idx, 8)
+    Assert.eq(cleaned, 0)
+    Assert.eq(aborted, 2)
+
+    -- 局域网扫描同样走保存地址流程；重新找到服务后继续用原账号与进度。
+    package.loaded["source.legado.scan"] = {
+        find = function(cb)
+            cb({ "http://lan/reader3" })
+            return { cancel = function() end }
+        end,
+    }
+    Setting.rows()[2](300).callback()
+    Assert.eq(candidate.username, "old-user")
+    pending({ { bookUrl = stable_id } })
+    Assert.eq(cfg.server_address, "http://lan/reader3")
+    Assert.eq(ProgressDB.get("legado", stable_id).chapter_idx, 8)
+    Assert.eq(cleaned, 0)
+
+    -- 换账号只准备同步；准备失败不能提交新账号，也不能删除进度。
+    saved, reloaded, cleanup_ok = 0, 0, false
+    Setting.rows()[1](300).callback()
+    Themed.last("input").callback("http://new/reader3", "new-user", "new-password")
+    pending({ { bookUrl = "new-book" } })
+    Assert.eq(cfg.server_address, "http://lan/reader3")
     Assert.eq(cfg.username, "old-user")
     Assert.eq(saved, 0)
     Assert.eq(reloaded, 0)
-    Assert.eq(Themed.last("toast").text, "清除本地记录失败")
-
-    Setting.rows()[1](300).callback()
-    Themed.last("input").callback("", "", "")
-    Assert.eq(cfg.server_address, "http://old/reader3", "清空地址失败也不能丢掉旧凭据")
-    Assert.eq(saved, 0)
+    Assert.eq(Themed.last("toast").text, "准备本地同步失败")
+    Assert.eq(ProgressDB.get("legado", stable_id).chapter_idx, 8)
 
     cleanup_ok = true
     Setting.rows()[1](300).callback()
@@ -325,5 +379,8 @@ do
     Assert.eq(cfg.username, "new-user")
     Assert.eq(saved, 1)
     Assert.eq(reloaded, 1)
+    Assert.eq(ProgressDB.get("legado", stable_id).chapter_idx, 8)
+    Assert.eq(ProgressDB.get("legado", stable_id).fraction, 0.63)
+    Assert.eq(ProgressDB.get("legado", stable_id).decision_pending, 1)
     Client.shelfAsync = shelf
 end

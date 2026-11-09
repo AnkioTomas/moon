@@ -43,7 +43,10 @@ function Shelf.reconcile(source_id, books, force, inserted_at_from_row, incomple
         local percent = tonumber(book.percent) or 0
         if percent >= 100
             or percent >= 99 and require("utils.settings").get("reader").auto_mark_read_at_99 == true then
-            BookDB.markReadAutomatically(source_id, book.stable_id)
+            local progress = require("book.progress_db").get(source_id, book.stable_id)
+            if not progress or progress.sync_status ~= 0 then
+                BookDB.markReadAutomatically(source_id, book.stable_id)
+            end
         end
     end
     return { pulled = #books, pushed = 0, hidden = hidden, conflicts = 0, skipped = false }
@@ -96,11 +99,13 @@ local deleting = {}
 ---@return { cancel: fun() }
 function Shelf.pushDeletes(source_id, remove_one, report, cb)
     local BookDB = require("book.books_db")
+    local current = require("source.auth").currentAccount(source_id)
     -- 已有一轮在推：本轮跳过。没推完的墓碑是脏行，reconcile 不会把它复活。
     if deleting[source_id] then return SourceBase.defer(cb, 0) end
     deleting[source_id] = true
     local job = pushEach(BookDB.pendingDeleteIds(source_id), function(stable_id, done)
         return remove_one(stable_id, function(ok)
+            if not current() then done(false); return end
             done(ok and BookDB.remove(source_id, stable_id))
         end)
     end, _("正在同步删除的书"), report, function(pushed)
@@ -122,6 +127,7 @@ end
 ---@return { cancel: fun() }
 local function pushAdded(source_id, remote, remote_ids, report, cb)
     local BookDB = require("book.books_db")
+    local current = require("source.auth").currentAccount(source_id)
     local missing = {}
     for _idx, stable_id in ipairs(BookDB.pendingShelfAddIds(source_id)) do
         if remote_ids[stable_id] then
@@ -132,6 +138,7 @@ local function pushAdded(source_id, remote, remote_ids, report, cb)
     end
     return pushEach(missing, function(stable_id, done)
         return remote:addToShelfAsync(stable_id, function(wire, err)
+            if not current() then done(false); return end
             if not wire then
                 logger.warn(source_id .. " shelf push failed", stable_id, err)
                 done(false)

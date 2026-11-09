@@ -8,6 +8,7 @@
   - synced 是最近一次与云端一致的位置（推送成功 / 远端落库时写入，本地保存不动）：
     开书拉到的云端位置和它一致，说明云端没被别的设备改过，不算冲突。
   - decision_pending=1 表示用户尚未选择冲突进度；本地保存保留它，关书/重启后仍不得自动上推。
+  - account_pending=1 是换账号后的待迁移进度；完整书架确认缺席后只保留本地，不反复推给无权访问的账号。
   - 进度写到 100% 调 BookDB.markReadAutomatically（books 自动标已读）；建表时对已读完的行回填一次。
 books_db 调用：markFinished（手动已读补 100% 待上传进度）、moveIdentity（迁身份）。
 
@@ -30,6 +31,7 @@ books_db 调用：markFinished（手动已读补 100% 待上传进度）、moveI
 ---@field sync_status integer 0=待同步，1=已同步
 ---@field synced ProgressPosition|nil 最近一次与云端一致的位置；旧行为 nil
 ---@field decision_pending integer 1=冲突未决，0=允许同步
+---@field account_pending boolean|nil 待迁移到新账号；用户重新阅读 / 选进度或同步确认后清除
 
 local DB = require("utils.db")
 local JSON = require("json")
@@ -46,22 +48,28 @@ CREATE TABLE IF NOT EXISTS pending_progress (
   page INTEGER, total_pages INTEGER, locator TEXT, extra TEXT,
   updated_at INTEGER NOT NULL, sync_status INTEGER NOT NULL DEFAULT 0, synced TEXT,
   decision_pending INTEGER NOT NULL DEFAULT 0,
+  account_pending INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (source_id, stable_id)
 );
 CREATE INDEX IF NOT EXISTS idx_pending_progress_recent
   ON pending_progress(source_id, updated_at DESC);
 ]]) then return false end
     local columns, ncols = DB.query("PRAGMA table_info(pending_progress);")
-    local has_synced, has_decision_pending = false, false
+    local has_synced, has_decision_pending, has_account_pending = false, false, false
     for i = 1, ncols do
         if columns[2][i] == "synced" then has_synced = true end
         if columns[2][i] == "decision_pending" then has_decision_pending = true end
+        if columns[2][i] == "account_pending" then has_account_pending = true end
     end
     if not has_synced and not DB.exec("ALTER TABLE pending_progress ADD COLUMN synced TEXT;") then
         return false
     end
     if not has_decision_pending
         and not DB.exec("ALTER TABLE pending_progress ADD COLUMN decision_pending INTEGER NOT NULL DEFAULT 0;") then
+        return false
+    end
+    if not has_account_pending
+        and not DB.exec("ALTER TABLE pending_progress ADD COLUMN account_pending INTEGER NOT NULL DEFAULT 0;") then
         return false
     end
     -- 旧库回填：read_state 列加入前已读完的书。
@@ -72,7 +80,7 @@ CREATE INDEX IF NOT EXISTS idx_pending_progress_recent
     return true
 end)
 
-local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, extra, updated_at, sync_status, synced, decision_pending"
+local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, extra, updated_at, sync_status, synced, decision_pending, account_pending"
 
 ---@return integer|nil
 local function positiveInt(value)
@@ -161,6 +169,7 @@ local function write(source_id, stable_id, pos, status, keep_dirty, opts)
             extra=excluded.extra,
             ]] .. updated_at .. [[,
             sync_status=excluded.sync_status,
+            account_pending=0,
             synced=COALESCE(excluded.synced, pending_progress.synced);]],
         source_id, stable_id, fraction, pos.chapter_idx, pos.chapter_title, pos.chapter_fraction,
         positiveInt(pos.page), positiveInt(pos.total_pages),
@@ -172,6 +181,32 @@ local function write(source_id, stable_id, pos, status, keep_dirty, opts)
     end
     -- 进度真源在本表；books.read_state 失败不影响进度落库。
     if (fraction or 0) >= 1 then BookDB.markReadAutomatically(source_id, stable_id) end
+    return true
+end
+
+--- 换账号保留坐标与未决选择，旧账号确认位置不再作为同步基线。
+---@param source_id string
+---@param stable_prefix string|nil
+---@param source BookSource|nil
+---@return boolean
+function ProgressDB.prepareAccountSync(source_id, stable_prefix, source)
+    if not DB.exec([[UPDATE pending_progress SET
+        sync_status=CASE WHEN updated_at>0 OR fraction>0 OR chapter_fraction>0 OR chapter_idx>1 OR page>1
+            OR sync_status=0 OR decision_pending=1 THEN 0 ELSE 1 END,
+        account_pending=CASE WHEN EXISTS (SELECT 1 FROM books b
+            WHERE b.source_id=pending_progress.source_id AND b.stable_id=pending_progress.stable_id
+                AND b.deleted=0) THEN 1 ELSE 0 END, synced=NULL
+        WHERE source_id=? AND instr(stable_id, ?)=1;]], source_id, stable_prefix or "") then return false end
+    if source and type(source.volumeParent) == "function" then
+        local result, nrows = DB.query([[SELECT stable_id FROM pending_progress
+            WHERE source_id=? AND instr(stable_id, ?)=1 AND account_pending=0;]],
+            source_id, stable_prefix or "")
+        for i = 1, nrows do
+            local book = BookDB.shelfBook(source, result[1][i])
+            if book and book.deleted == 0 and not DB.exec([[UPDATE pending_progress SET account_pending=1
+                WHERE source_id=? AND stable_id=?;]], source_id, result[1][i]) then return false end
+        end
+    end
     return true
 end
 
@@ -215,7 +250,7 @@ end
 --- COLUMNS 顺序的位置参数 → PendingProgress
 ---@return PendingProgress|nil
 local function toProgress(source, stable, fraction, chapter_idx, chapter_title, chapter_fraction,
-                          page, total_pages, locator, extra, updated_at, sync_status, synced, decision_pending)
+                          page, total_pages, locator, extra, updated_at, sync_status, synced, decision_pending, account_pending)
     if not source then
         return nil
     end
@@ -234,6 +269,7 @@ local function toProgress(source, stable, fraction, chapter_idx, chapter_title, 
         sync_status = tonumber(sync_status) or 0,
         synced = decodeJson(synced),
         decision_pending = tonumber(decision_pending) or 0,
+        account_pending = tonumber(account_pending) == 1,
     }
 end
 
@@ -255,8 +291,8 @@ local function rows(result, nrows)
     local out = {}
     for i = 1, nrows do
         local row = {}
-        for c = 1, 14 do row[c] = result[c][i] end
-        out[i] = toProgress(unpack(row, 1, 14))
+        for c = 1, 15 do row[c] = result[c][i] end
+        out[i] = toProgress(unpack(row, 1, 15))
     end
     return out
 end
@@ -318,7 +354,7 @@ function ProgressDB.markSynced(source_id, stable_id, updated_at, pos)
     local extra, extra_err = encodeExtra(pos.extra)
     if extra_err then return false end
     return DB.exec(
-        [[UPDATE pending_progress SET sync_status=1, synced=?, extra=?
+        [[UPDATE pending_progress SET sync_status=1, synced=?, extra=?, account_pending=0
           WHERE source_id=? AND stable_id=? AND updated_at=?;]],
         encodeSynced(pos),
         extra,

@@ -2695,6 +2695,20 @@ local function needsPush(ann)
     return not Annotation.sameNote(ann.note, ann.kavita_note)
 end
 
+---@param annotations table[]
+---@return table[]
+function Source:resetAccountAnnotations(annotations)
+    for index = #annotations, 1, -1 do
+        local item = annotations[index]
+        if item.kavita_deleted then
+            table.remove(annotations, index)
+        else
+            item.kavita_id, item.kavita_note, item.kavita_modified = nil, nil, nil
+        end
+    end
+    return annotations
+end
+
 --- 划线推到 Kavita：先按章对账一次，再逐条新建 / 更新，远端 id 原地回填给核心落库。
 ---
 --- 幂等的真相源是「每次推送前按章拉一遍远端注解」，payload 里的 kavita_id 只是快路径：

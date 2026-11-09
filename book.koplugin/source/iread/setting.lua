@@ -66,7 +66,7 @@ function Setting.save(cred, cb)
                 cfg.token, cfg.cookie = nil, nil
                 settings.saveSource(SOURCE_ID, cfg)
             end)
-            if not cleared then cb(nil, _("清除本地记录失败")); return end
+            if not cleared then cb(nil, _("准备本地同步失败")); return end
         end
         cfg.token, cfg.cookie = cred.token, cred.cookie
         settings.saveSource(SOURCE_ID, cfg)

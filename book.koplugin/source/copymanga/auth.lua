@@ -148,18 +148,24 @@ function Auth.loginAsync(username, password, cb)
             cb(nil, _("登录失败：未返回账号标识"), true)
             return
         end
-        if old_token and old_token ~= "" and (not old_user_id or old_user_id == "" or user_id ~= old_user_id) then
-            cb(nil, _("请先退出当前账号"))
-            return
+        local function commit()
+            save({
+                token = token,
+                user_id = user_id,
+                username = tostring(results.username or username),
+                nickname = tostring(results.nickname or results.username or username),
+                -- 明文密码供 401 自动重登（#42）；退出登录时 clearSession 清掉。
+                password = password,
+            })
         end
-        save({
-            token = token,
-            user_id = tostring(results.user_id or ""),
-            username = tostring(results.username or username),
-            nickname = tostring(results.nickname or results.username or username),
-            -- 明文密码供 401 自动重登（#42）；退出登录时 clearSession 清掉。
-            password = password,
-        })
+        if old_user_id ~= user_id then
+            if not require("source.logout").replaceLibrary(SOURCE_ID, commit) then
+                cb(nil, _("准备本地同步失败"))
+                return
+            end
+        else
+            commit()
+        end
         cb(true)
     end)
     return { cancel = function()

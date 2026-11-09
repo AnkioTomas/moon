@@ -28,7 +28,7 @@ local cancelled = {}
 package.preload["workers.tasks"] = function()
     return {
         cancelPrefixed = function(prefix)
-            if #order == 0 then order[#order + 1] = "abort" end
+            if prefix:sub(1, 6) == "dirty\0" then order[#order + 1] = "abort" end
             cancelled[#cancelled + 1] = prefix
         end,
         get = function() end,
@@ -36,8 +36,17 @@ package.preload["workers.tasks"] = function()
 end
 
 local reloads = 0
+local prepare_ok, prepared = true, {}
+package.preload["book.books_db"] = function()
+    return { prepareAccountSync = function(id, shelf_add, prefix)
+        order[#order + 1] = "prepare"
+        prepared[#prepared + 1] = { id = id, shelf_add = shelf_add, prefix = prefix }
+        return prepare_ok
+    end }
+end
 package.preload["source.registry"] = function()
     return {
+        resolve = function() return { capabilities = function() return { shelf_add = false } end } end,
         invalidate = function() order[#order + 1] = "invalidate" end,
         reload = function() reloads = reloads + 1 end,
     }
@@ -75,7 +84,7 @@ Assert.eq(cleared, 2, "清库失败也已经登出")
 Assert.eq(reloads, 2)
 Assert.eq(Themed.last("toast").text, "清除本地记录失败")
 
--- 换库身份：清理成功才提交新配置并重载。
+-- 换库保留数据：准备成功才提交新配置并重载。
 forget_ok, order, reloads, forgotten = true, {}, 0, {}
 local commits = 0
 local function commit()
@@ -83,18 +92,20 @@ local function commit()
     order[#order + 1] = "commit"
 end
 Assert.is_true(Logout.replaceLibrary("kavita", commit))
-Assert.eq(table.concat(order, ","), "abort,forget,invalidate,commit")
-Assert.eq(forgotten[1], "kavita")
+Assert.eq(table.concat(order, ","), "prepare,abort,invalidate,commit")
+Assert.len(forgotten, 0)
+Assert.eq(prepared[1].id, "kavita")
+Assert.is_false(prepared[1].shelf_add)
 Assert.eq(reloads, 1)
 Assert.eq(commits, 1)
 
-forget_ok, order, reloads, commits = false, {}, 0, 0
+prepare_ok, order, reloads, commits = false, {}, 0, 0
 Assert.is_false(Logout.replaceLibrary("kavita", commit))
-Assert.eq(table.concat(order, ","), "abort,forget")
+Assert.eq(table.concat(order, ","), "prepare")
 Assert.eq(commits, 0, "清库失败不得提交新凭证")
 Assert.eq(reloads, 0, "清库失败不得激活新源")
 
--- 换 WebDAV：走 forgetWebdav，不动整源 forgetSource
+-- 换 WebDAV：保留 webdav:// 身份，不动纯本地书，也不清文件。
 local webdav = 0
 package.preload["book.store"] = function()
     return {
@@ -113,16 +124,17 @@ end
 package.loaded["book.store"] = nil
 package.loaded["source.logout"] = nil
 Logout = require("source.logout")
-forget_ok, order, reloads, commits = true, {}, 0, 0
+prepare_ok, order, reloads, commits = true, {}, 0, 0
 Assert.is_true(Logout.replaceWebdav(commit))
-Assert.eq(table.concat(order, ","), "abort,forgetWebdav,invalidate,commit")
-Assert.eq(webdav, 1)
+Assert.eq(table.concat(order, ","), "prepare,abort,invalidate,commit")
+Assert.eq(webdav, 0)
+Assert.eq(prepared[#prepared].prefix, "webdav://")
 Assert.eq(reloads, 1)
 Assert.eq(commits, 1)
 
-forget_ok, order, reloads, commits = false, {}, 0, 0
+prepare_ok, order, reloads, commits = false, {}, 0, 0
 Assert.is_false(Logout.replaceWebdav(commit))
-Assert.eq(table.concat(order, ","), "abort,forgetWebdav")
+Assert.eq(table.concat(order, ","), "prepare")
 Assert.eq(commits, 0)
 Assert.eq(reloads, 0)
 
@@ -144,12 +156,12 @@ do
         Themed.last("input").callback("https://new.test")
         Assert.eq(configs[id][key], "https://old.test")
         Assert.eq(saved, 0)
-        Assert.eq(Themed.last("toast").text, "清除本地记录失败")
-        forget_ok = true
+        Assert.eq(Themed.last("toast").text, "准备本地同步失败")
+        prepare_ok = true
         Setting.rows()[1](300).callback()
         Themed.last("input").callback("https://new.test")
         Assert.eq(configs[id][key], "https://new.test")
-        saved, forget_ok = 0, false
+        saved, prepare_ok = 0, false
     end
 end
 

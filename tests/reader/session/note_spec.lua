@@ -65,6 +65,39 @@ SessionNote.save(ui, { source_id = "moon", stable_id = "b2" })
 Assert.len(writes, 1, "编码失败不能写入不完整快照")
 fail_encode = false
 
+-- 换号后首次打开，sidecar 的旧账号同步标识不能带回待迁移快照。
+do
+    local db = require("book.note_db")
+    local json = require("json")
+    local derived = require("reader.session.derived_note")
+    local previous_get, previous_decode, previous_collect = db.get, json.decode, derived.collect
+    local source = setmetatable({ id = "moon" }, { __index = require("source.base") })
+    source.resetAccountAnnotations = function(_self, items)
+        for _idx, item in ipairs(items) do item.remote_id = nil end
+        return items
+    end
+    local ref = { source_id = "moon", stable_id = "copy", source = source }
+    local old = { datetime = "2026-08-20", page = "p1", pos0 = "p1", pos1 = "p2", text = "保留", remote_id = "old" }
+    local current, applied = { old }, nil
+    db.get = function() return { payload = "[copied]", account_pending = 1 } end
+    json.decode = function() return {
+        { datetime = old.datetime, page = old.page, pos0 = old.pos0, pos1 = old.pos1, text = old.text },
+    } end
+    require("book.store").identityFor = function() return ref end
+    derived.collect = function() end
+    Assert.eq(SessionNote.applyLocal({
+        document = { file = "/books/copy.epub" },
+        doc_settings = {
+            readSetting = function(_self, key) if key == "annotations" then return current end end,
+            saveSetting = function(_self, _key, value) applied = value end,
+            flush = function() end,
+        },
+    }, ref), 1)
+    Assert.is_nil(applied[1].remote_id)
+    Assert.eq(applied[1].text, old.text)
+    db.get, json.decode, derived.collect = previous_get, previous_decode, previous_collect
+end
+
 -- 衍生版（同目录 meta.json 指向自己）的坐标原书不认，不进 notes 表
 local dir = os.tmpname()
 os.remove(dir)

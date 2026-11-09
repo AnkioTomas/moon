@@ -311,6 +311,7 @@ do
                 { 1, 1 },
                 { nil, nil },
                 { 0, 0 },
+                { 0, 0 },
             }, 2
         end,
     })
@@ -422,6 +423,7 @@ do
                 { 0, 1 },
                 { '{"fraction":0.5,"chapter_idx":3}', nil },
                 { 1, 0 },
+                { 0, 0 },
             }, 2
         end,
     })
@@ -470,7 +472,7 @@ do
             return {
                 { "moon" }, { "queued.epub" }, { 0.3 },
                 { nil }, { nil }, { nil }, { nil }, { nil }, { nil }, { nil },
-                { 99 }, { 0 }, { nil }, { 0 },
+                { 99 }, { 0 }, { nil }, { 0 }, { 0 },
             }, 1
         end,
     })
@@ -602,6 +604,7 @@ do
     result[12] = { 1, 0 }
     result[13] = { "{}", "{}" }
     result[14] = { 0, 0 }
+    result[15] = { 0, 0 }
     local connection, calls = makeConn({
         resultset = function(sql)
             if sql:find("LIKE", 1, true) then return result, 2 end

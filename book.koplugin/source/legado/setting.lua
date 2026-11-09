@@ -22,10 +22,6 @@ function Setting.rowStatus()
     return on and _("已配置") or _("未配置"), on
 end
 
-local function libraryFingerprint(address, user)
-    return table.concat({ tostring(address or ""), tostring(user or "") }, "\0")
-end
-
 ---@param address string
 ---@param user string
 ---@param password string
@@ -33,7 +29,7 @@ local function save(address, user, password)
     local Toast = require("ui.themes.widgets.toast")
     local settings = require("utils.settings")
     local cfg = settings.getSource(SOURCE_ID)
-    local before = libraryFingerprint(cfg.server_address, cfg.username)
+    local previous_user = cfg.username or ""
     local next_cfg = { server_address = address, username = user ~= "" and user or nil,
         password = password ~= "" and password or nil }
     local function commit()
@@ -51,13 +47,14 @@ local function save(address, user, password)
             Toast:new{ text = err or _("连接失败"), timeout = 3 }:show()
             return
         end
-        -- 换服务地址 / 账号：旧库投影必须撕掉（书 ID 会撞）。
-        if before ~= libraryFingerprint(address, user ~= "" and user or nil) then
+        -- 手机 IP 会变化，地址不是书籍身份；换账号也只准备同步，不清记录。
+        if previous_user ~= user then
             if not require("source.logout").replaceLibrary(SOURCE_ID, commit) then
-                Toast:new{ text = _("清除本地记录失败"), timeout = 3 }:show()
+                Toast:new{ text = _("准备本地同步失败"), timeout = 3 }:show()
                 return
             end
         else
+            if cfg.server_address ~= address then require("source.logout").abort(SOURCE_ID) end
             commit()
             require("source.registry").reload()
         end
@@ -131,19 +128,10 @@ local function edit()
             local Text = require("utils.text")
             local address = Text.stripWhitespace(value)
             if address == "" then
-                local had = (cfg.server_address or "") ~= ""
-                local function commit()
-                    cfg.server_address, cfg.username, cfg.password = nil, nil, nil
-                    require("utils.settings").saveSource(SOURCE_ID, cfg)
-                end
-                if had then
-                    if not require("source.logout").replaceLibrary(SOURCE_ID, commit) then
-                        require("ui.themes.widgets.toast"):new{ text = _("清除本地记录失败"), timeout = 3 }:show()
-                    end
-                else
-                    commit()
-                    require("source.registry").reload()
-                end
+                require("source.logout").abort(SOURCE_ID)
+                cfg.server_address = nil
+                require("utils.settings").saveSource(SOURCE_ID, cfg)
+                require("source.registry").reload()
                 return
             end
             require("ui/network/manager"):runWhenConnected(function()

@@ -145,13 +145,13 @@ do
     local moon_url, moon_token = store.moon.base_url, store.moon.token
     local result, err = SettingsApi.apply({ moon = { base_url = "https://failed.test", token = "new-token" } })
     Assert.is_nil(result)
-    Assert.eq(err, "清除本地记录失败")
+    Assert.eq(err, "准备本地同步失败")
     Assert.eq(store.moon.base_url, moon_url)
     Assert.eq(store.moon.token, moon_token)
     local webdav_url = store["local"].webdav_url
     result, err = SettingsApi.apply({ ["local"] = { webdav_url = "https://failed.dav" } })
     Assert.is_nil(result)
-    Assert.eq(err, "清除本地记录失败")
+    Assert.eq(err, "准备本地同步失败")
     Assert.eq(store["local"].webdav_url, webdav_url)
     Assert.eq(reloads, 0)
     Assert.eq(invalidated, 0)
@@ -313,7 +313,7 @@ do
         base_url = "http://failed", api_key = "failed-key",
     } } })
     Assert.is_nil(failed)
-    Assert.eq(err, "清除本地记录失败")
+    Assert.eq(err, "准备本地同步失败")
     Assert.eq(store["ext.kav"].base_url, old_url)
     Assert.eq(store["ext.kav"].api_key, old_key)
     replace_ok = true

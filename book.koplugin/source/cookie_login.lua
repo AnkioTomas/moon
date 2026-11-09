@@ -130,7 +130,7 @@ function CookieLogin.save(spec, cookie, cb)
                 if spec.clear then spec.clear(cfg) else cfg.cookie = nil end
                 settings.saveSource(spec.id, cfg)
             end)
-            if not cleared then return cb(false, _("清除本地记录失败")) end
+            if not cleared then return cb(false, _("准备本地同步失败")) end
         end
         if spec.store then spec.store(cfg, final_cookie) else cfg.cookie = final_cookie end
         settings.saveSource(spec.id, cfg)
@@ -145,7 +145,7 @@ function CookieLogin.save(spec, cookie, cb)
     end }
 end
 
---- 同账号续期保留本地数据；换号直接清旧凭据与本源记录，不询问也不查旧账号。
+--- 同账号续期不动同步标记；换号保留记录、撤销旧凭据并准备上行。
 ---@param source_id string
 ---@param cookie string
 ---@param account_id string
@@ -163,7 +163,7 @@ function CookieLogin.commitAccount(source_id, cookie, account_id, cb, current)
             cfg.cookie, cfg.account_id = nil, nil
             Settings.saveSource(source_id, cfg)
         end)
-        if not cleared then return cb(false, _("清除本地记录失败")) end
+        if not cleared then return cb(false, _("准备本地同步失败")) end
     end
     cfg.cookie, cfg.account_id = cookie, account_id
     Settings.saveSource(source_id, cfg)

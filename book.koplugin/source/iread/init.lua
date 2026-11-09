@@ -26,7 +26,7 @@ end
 ---@class IReadSource : SourceBase
 ---@field rows table<string, table>|nil 书名 → 最近一次书架行
 ---@field found table<string, table>|nil 书名 → 最近一次搜索行（收藏时整行带回）
-local Source = setmetatable({}, { __index = SourceBase })
+local Source = setmetatable({ shelf_add = true }, { __index = SourceBase })
 Source.__index = Source
 
 ---@return IReadSource

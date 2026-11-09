@@ -547,6 +547,33 @@ local function stringColumn(sql, ...)
     return out
 end
 
+--- 卷身份看父系列的书架成员状态，其余身份看自己。
+---@param source BookSource
+---@param stable_id string
+---@return Book|nil
+function BookDB.shelfBook(source, stable_id)
+    local parent_id = type(source.volumeParent) == "function" and source:volumeParent(stable_id)
+    return BookDB.get(source.id, parent_id or stable_id)
+end
+
+--- 换账号不删任何数据：可加架的成员重推，其余成员交给新快照对账。
+--- 旧账号墓碑不再推删；依附记录一起准备，失败整批回滚。
+---@param source_id string
+---@param shelf_add boolean
+---@param stable_prefix string|nil WebDAV 换账号只处理 webdav:// 身份
+---@param source BookSource|nil 用于卷身份与源侧注解同步标识
+---@return boolean
+function BookDB.prepareAccountSync(source_id, shelf_add, stable_prefix, source)
+    return DB.transaction(function()
+        if not DB.exec([[UPDATE books SET sync_status=CASE WHEN deleted=0 THEN ? ELSE 1 END
+            WHERE source_id=? AND instr(stable_id, ?)=1;]],
+            shelf_add and 0 or 1, source_id, stable_prefix or "") then return false end
+        return require("book.progress_db").prepareAccountSync(source_id, stable_prefix, source)
+            and require("book.note_db").prepareAccountSync(source_id, stable_prefix, source)
+            and require("book.stats_db").prepareAccountSync(source_id, stable_prefix)
+    end) == true
+end
+
 --- 待推送到云端删除的 stable_id（deleted=1 且脏）。
 ---@param source_id string
 ---@return string[]

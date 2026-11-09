@@ -160,6 +160,7 @@ end
 ---@return { cancel: fun() }
 local function runSyncAsync(source, opts, cb)
     opts = opts or {}
+    local current = require("source.auth").currentAccount(source.id)
     local target = opts.identity and opts.identity.stable_id or "all"
     local can_pull = type(source.pullNotesAsync) == "function"
     local can_push = type(source.pushNotesAsync) == "function"
@@ -222,6 +223,7 @@ local function runSyncAsync(source, opts, cb)
     --- 串行推进（每步在回调里递归），避免同时对同一本书发多个请求。
     local function nextIdentity()
         if cancelled then return end
+        if not current() then finish(nil, "source account changed"); return end
         local identity = identities[index]
         index = index + 1
         if not identity then finish(result); return end
@@ -239,6 +241,7 @@ local function runSyncAsync(source, opts, cb)
             current_job = source:pullNotesAsync(identity, function(annotations, err, meta)
                 current_job = nil
                 if cancelled then return end
+                if not current() then finish(nil, "source account changed"); return end
                 if type(annotations) ~= "table" then finish(nil, err or "notes pull failed"); return end
                 book_pulled[stable_id] = true
                 saveRemoteBuckets(source, stable_id, annotations,
@@ -263,47 +266,78 @@ local function runSyncAsync(source, opts, cb)
                 finish(nil, "invalid local notes")
                 return
             end
-            current_job = source:pushNotesAsync(identity, annotations, function(value, err, data)
-                current_job = nil
-                if cancelled then return end
-                if not value then
-                    if opts.dirty_only then
-                        result.push_error = err or "notes push failed"
-                        logger.warn("book.note push failed; keep dirty", source.id, identity.stable_id, result.push_error)
-                        nextIdentity()
+            if row.account_pending == 1 then
+                local book = require("book.books_db").shelfBook(source, identity.stable_id)
+                if book and book.deleted == 1 and book.sync_status == 1 then
+                    logger.dbg("book.note transfer kept locally: not on new shelf", source.id, identity.stable_id)
+                    if not NoteDB.markSynced(source.id, identity.stable_id, identity.chapter_idx, row.updated_at) then
+                        finish(nil, "failed to retain local notes")
                         return
                     end
-                    result.conflicts = result.conflicts + 1
-                    if can_pull then
-                        pullRemote()
-                    else
-                        finish(nil, err or "notes push failed")
+                    return nextIdentity()
+                end
+            end
+            local function push()
+                current_job = source:pushNotesAsync(identity, annotations, function(value, err, data)
+                    current_job = nil
+                    if cancelled then return end
+                    if not current() then finish(nil, "source account changed"); return end
+                    if not value then
+                        if opts.dirty_only then
+                            result.push_error = err or "notes push failed"
+                            logger.warn("book.note push failed; keep dirty", source.id, identity.stable_id, result.push_error)
+                            nextIdentity()
+                            return
+                        end
+                        result.conflicts = result.conflicts + 1
+                        if can_pull then
+                            pullRemote()
+                        else
+                            finish(nil, err or "notes push failed")
+                        end
+                        return
                     end
-                    return
-                end
-                -- 源侧可在上传过程中原地回填远端标识，必须把回填后的快照落库，
-                -- 否则下轮会重复上传。
-                local clean = Note.clean(source, annotations)
-                local ok_encode, pushed_payload = pcall(JSON.encode, clean)
-                if not ok_encode then
-                    finish(nil, "invalid local notes")
-                    return
-                end
-                local confirmed, stale = confirm(row, pushed_payload)
-                if stale then
-                    -- 上传期间本地又改过：这次算推成功，但脏标记留着下轮再推
-                    logger.dbg("book.note confirm skipped: local changed during push", row.stable_id)
-                elseif not confirmed then
-                    finish(nil, "notes confirm failed")
-                    return
-                end
-                -- 源如实回报这轮推了几条（对账后无可推是 0）；老源没有 data，按「推了一条」记。
-                result.pushed = result.pushed + (type(data) == "table" and tonumber(data.pushed) or 1)
-                if type(data) == "table" and tonumber(data.conflicts) then
-                    result.conflicts = result.conflicts + tonumber(data.conflicts)
-                end
-                pullRemote()
-            end)
+                    -- 源侧可在上传过程中原地回填远端标识，必须把回填后的快照落库，
+                    -- 否则下轮会重复上传。
+                    local clean = Note.clean(source, annotations)
+                    local ok_encode, pushed_payload = pcall(JSON.encode, clean)
+                    if not ok_encode then
+                        finish(nil, "invalid local notes")
+                        return
+                    end
+                    local confirmed, stale = confirm(row, pushed_payload)
+                    if stale then
+                        -- 上传期间本地又改过：这次算推成功，但脏标记留着下轮再推
+                        logger.dbg("book.note confirm skipped: local changed during push", row.stable_id)
+                    elseif not confirmed then
+                        finish(nil, "notes confirm failed")
+                        return
+                    end
+                    -- 源如实回报这轮推了几条（对账后无可推是 0）；老源没有 data，按「推了一条」记。
+                    result.pushed = result.pushed + (type(data) == "table" and tonumber(data.pushed) or 1)
+                    if type(data) == "table" and tonumber(data.conflicts) then
+                        result.conflicts = result.conflicts + tonumber(data.conflicts)
+                    end
+                    pullRemote()
+                end)
+            end
+            -- 换号不是删除：整本覆盖接口先合入新账号快照；自带逐条对账的源自行处理。
+            if (row.account_pending or 0) > 0 and can_pull
+                and type(source.resetAccountAnnotations) ~= "function" then
+                current_job = source:pullNotesAsync(identity, function(remote, err)
+                    current_job = nil
+                    if cancelled then return end
+                    if not current() then finish(nil, "source account changed"); return end
+                    if not remote then finish(nil, err or "notes pull failed"); return end
+                    local paging = type(annotations[1] and annotations[1].page) == "number"
+                    local merged = Normalize.merge(remote, annotations, paging)
+                    if #merged < #annotations then finish(nil, "invalid local notes"); return end
+                    annotations = merged
+                    push()
+                end)
+            else
+                push()
+            end
             return
         end
         pullRemote()
@@ -315,7 +349,34 @@ local function runSyncAsync(source, opts, cb)
         end }
 end
 
+---@class NoteSyncTask
+---@field source BookSource
+---@field opts table|nil
+---@field cb function|nil
+---@field cancelled boolean
+---@field current fun(): boolean
+---@field job { cancel: fun() }|nil
+---@field done boolean|nil
+
+---@class NoteSyncQueue
+---@field items NoteSyncTask[]
+---@field running NoteSyncTask|nil
+
+---@type table<string, NoteSyncQueue>
 local sync_queues = {}
+
+---@param source_id string
+function Note.abortSource(source_id)
+    local queue = sync_queues[source_id]
+    if not queue then return end
+    sync_queues[source_id] = nil
+    for _idx, task in ipairs(queue.items) do task.cancelled = true end
+    local running = queue.running
+    if running then
+        running.cancelled = true
+        if running.job then running.job:cancel() end
+    end
+end
 
 --- 同一数据源的注解同步严格串行，避免两个快照同时创建同一条远端注解。
 ---@param source BookSource
@@ -326,26 +387,27 @@ function Note.syncAsync(source, opts, cb)
     local key = source.id
     local queue = sync_queues[key]
     if not queue then
-        queue = { running = false, items = {} }
+        queue = { items = {} }
         sync_queues[key] = queue
     end
-    local task = { source = source, opts = opts, cb = cb, cancelled = false }
+    local task = { source = source, opts = opts, cb = cb, cancelled = false,
+        current = require("source.auth").currentAccount(source.id) }
     queue.items[#queue.items + 1] = task
 
     local function startNext()
         if queue.running then return end
         local next_task = table.remove(queue.items, 1)
-        while next_task and next_task.cancelled do
+        while next_task and (next_task.cancelled or not next_task.current()) do
             next_task = table.remove(queue.items, 1)
         end
         if not next_task then
-            sync_queues[key] = nil
+            if sync_queues[key] == queue then sync_queues[key] = nil end
             return
         end
-        queue.running = true
+        queue.running = next_task
         next_task.job = runSyncAsync(next_task.source, next_task.opts, function(result, err)
             next_task.done = true
-            queue.running = false
+            queue.running = nil
             if not next_task.cancelled and next_task.cb then next_task.cb(result, err) end
             startNext()
         end)
@@ -358,7 +420,7 @@ function Note.syncAsync(source, opts, cb)
             if task.job and task.job.cancel then
                 task.job:cancel()
                 task.job = nil
-                queue.running = false
+                queue.running = nil
                 startNext()
             end
         end }
