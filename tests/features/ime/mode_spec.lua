@@ -14,7 +14,8 @@ local platform_state = { platform = "android", eink = false }
 package.preload["features.ime.platform"] = function()
     return {
         current = function() return platform_state.platform end,
-        isEink = function() return platform_state.eink end,
+        -- 真实墨水屏路径见 eink_spec；这里只切换判定结果。
+        isEinkCurrent = function() return platform_state.eink end,
         defaultMode = RealPlatform.defaultMode,
         backend = RealPlatform.backend,
     }
@@ -171,7 +172,14 @@ Assert.contains(save_calls, "features.ime")
 
 reset{ platform = "android", legacy = { enabled = true } }
 Assert.eq(IME.inputMode(), "system", "旧开关开启时走平台默认")
-Assert.is_nil(owners["features.ime"].input_mode, "true 不写显式选择，保留 nil")
+Assert.eq(owners["features.ime"].input_mode, "system", "首次迁移把平台默认写进 input_mode")
+
+-- 迁移只做一次：写入后旧键不再参与，重复调用不再保存
+local saves_after_migration = #save_calls
+owners["features.system_ime"].enabled = false
+Assert.eq(IME.inputMode(), "system", "迁移后旧键改回 false 也不影响")
+Assert.eq(owners["features.ime"].input_mode, "system", "已迁移值保持不变")
+Assert.eq(#save_calls, saves_after_migration, "重复 inputMode 不重复落盘")
 
 -- 迁移完成后旧键不再参与计算
 reset{ platform = "android", ime = { input_mode = "system" }, legacy = { enabled = false } }
@@ -257,12 +265,11 @@ Assert.eq(native_hide, 1, "残留 VK 必须先收起")
 Assert.is_false(stale.visible, "system 模式下 VK 不可见")
 Assert.eq(native_show, 0, "system 模式不显示 VK")
 
--- ── 数字 / 密码 / 只读：system 模式仍走内置键盘 ────────
+-- ── 数字 / 密码：system 模式仍走内置键盘 ──────────────
 local cases = {
     { name = "number", inputbox = { input_type = "number" } },
     { name = "password text_type", inputbox = { text_type = "password" } },
     { name = "password is_password_type", inputbox = { is_password_type = true } },
-    { name = "readonly", inputbox = { readonly = true } },
 }
 for _idx, case in ipairs(cases) do
     android.shown = {}
@@ -272,6 +279,23 @@ for _idx, case in ipairs(cases) do
     Assert.eq(#android.shown, 0, case.name .. " 不交给系统后端")
     Assert.eq(native_show, 1, case.name .. " 走内置键盘")
 end
+
+-- ── 只读：不弹任何键盘 ────────────────────────────────
+android.shown = {}
+native_show = 0
+VK.showKeyboard({ inputbox = { readonly = true } })
+Assert.eq(#android.shown, 0, "只读不交给系统后端")
+Assert.eq(native_show, 0, "只读不弹内置键盘")
+
+-- 只读字段之前内置键盘还开着：顺手收起，避免残留
+reset{ platform = "android", ime = { input_mode = "system" } }
+local open_vk = setmetatable({ inputbox = {}, visible = true }, { __index = VK })
+VK.showKeyboard(open_vk)
+native_show = 0
+open_vk.inputbox = { readonly = true }
+VK.showKeyboard(open_vk)
+Assert.eq(native_show, 0, "只读不再显示键盘")
+Assert.is_false(open_vk.visible, "只读时收起残留 VK")
 
 -- ── builtin 模式：原生 VK ────────────────────────────
 reset{ platform = "android", ime = { input_mode = "builtin" } }

@@ -26,7 +26,7 @@ end
 package.preload["features.ime.platform"] = function()
     return {
         current = function() return "kindle" end,
-        isEink = function() return false end,
+        isEinkCurrent = function() return false end,
         defaultMode = function() return "builtin" end,
         backend = function() return nil end,
     }
