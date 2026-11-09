@@ -315,6 +315,8 @@ function Desktop:init()
     end
     self.key_events.DesktopPageNext = { { fwd }, event = "DesktopTurn", args = 1 }
     self.key_events.DesktopPagePrev = { { back }, event = "DesktopTurn", args = -1 }
+    -- 安卓返回键 / Kindle Back：叠层与页内路径在 onDesktopBack；根页广播 Exit 退出 KOReader。
+    self.key_events.DesktopBack = { { Device.input.group.Back } }
     -- sendEvent 只打栈顶：手势插件 Dispatcher 动作要落到 FM 的 DeviceListener 等模块。
     self.active_widgets = { Gesture.dispatcher(self.plugin.ui) }
     self:build()
@@ -402,9 +404,12 @@ end
 ---@return boolean|nil
 local function route(desktop, event)
     local handled = InputContainer.handleEvent(desktop, event)
-    if not handled and (event.handler == "onKeyPress" or event.handler == "onKeyRepeat")
-        and event.args[1]:match({ { "RPgFwd", "LPgFwd", "RPgBack", "LPgBack" } }) then
-        return true
+    if not handled and (event.handler == "onKeyPress" or event.handler == "onKeyRepeat") then
+        local key = event.args[1]
+        if key:match({ { "RPgFwd", "LPgFwd", "RPgBack", "LPgBack" } })
+            or key:match({ Device.input.group.Back }) then
+            return true
+        end
     end
     if handled or event.handler ~= "onGesture" then return handled end
     return Gesture.fm(desktop, event.args[1])
@@ -524,6 +529,41 @@ end
 -- 桌面不是弹窗；映射关闭不能穿透为关书、退出文件管理器。
 function Desktop:onBookWindowClose()
     return true
+end
+
+--- 返回键：先关桌面仍挂着的叠层 / 详情，再问当前页能否后退一层；根页广播 Exit 退出 KOReader。
+--- 设置叠层与详情通常是栈顶 Modal（自带 ModalBack）；这里兜住「桌面仍是顶层」或页内路径。
+--- 退出走官方 Exit 广播（桌面 onExit 关窗清栈 → DeviceListener 真正结束进程），不要只 onClose 露 FM。
+---@return boolean
+function Desktop:onDesktopBack()
+    local overlay = self.settings_overlay
+    if overlay then
+        logger.dbg("desktop back close settings overlay", self.tab)
+        overlay:close()
+        return true
+    end
+    local detail = self.detail
+    if detail and not detail.closed then
+        logger.dbg("desktop back close detail", self.tab)
+        detail:close()
+        return true
+    end
+    local page = self:page(self.tab)
+    if page and page.onBack and page:onBack() then
+        logger.dbg("desktop back page", self.tab)
+        return true
+    end
+    logger.dbg("desktop back root exit", self.tab)
+    UIManager:broadcastEvent(require("ui/event"):new("Exit"))
+    return true
+end
+
+--- 长按返回只吞掉，不连关多层（与 Modal:onKeyRepeat 一致）。
+---@param key table
+---@return boolean|nil
+function Desktop:onKeyRepeat(key)
+    if key:match({ Device.input.group.Back }) then return true end
+    return InputContainer.onKeyRepeat(self, key)
 end
 
 --- 按 id 取页：核心页直接是字段；扩展页签（desktop.tabs 带 create）按需建，没启用返回 nil。
