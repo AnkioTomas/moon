@@ -14,7 +14,9 @@ return {
     ---@param ctx BookQuickPanelContext|nil
     ---@return boolean
     available = function(ctx)
-        return not (ctx and ctx.ui) or require("reader.session").isChapterMode()
+        if not (ctx and ctx.ui) then return true end
+        local is_chapter = require("reader.session").isChapterMode
+        return type(is_chapter) == "function" and is_chapter() or false
     end,
     run = function()
         require("reader.session").refreshToc()
