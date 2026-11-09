@@ -1,5 +1,8 @@
 --[[--
-拷贝漫画账号会话：按所选站点的 API 登录，只持久化 Token，不保存新密码。
+拷贝漫画账号会话：按所选站点的 API 登录，持久化 Token 与账号密码。
+
+密码要落盘：令牌被挤掉（HTTP 401）时 `client` 用本地账号自动重登；
+只存 Token 会在过期后只能弹「重新登录」，整书缓存也会跟着挂。
 
 登录规则与 kComics / 官方 App 一致：
   salt = 6 位随机整数
@@ -154,7 +157,8 @@ function Auth.loginAsync(username, password, cb)
             user_id = tostring(results.user_id or ""),
             username = tostring(results.username or username),
             nickname = tostring(results.nickname or results.username or username),
-            password = "",
+            -- 明文密码供 401 自动重登（#42）；退出登录时 clearSession 清掉。
+            password = password,
         })
         cb(true)
     end)

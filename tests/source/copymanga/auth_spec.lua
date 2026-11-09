@@ -39,7 +39,8 @@ do
         require("utils.text").urlDecode(request.body:match("salt=([^&]+)")))), 1, true) ~= nil)
     pending({ body = '{"code":200,"results":{"token":"first","user_id":"1"}}' })
     Assert.is_true(ok)
-    Assert.eq(current.password, "")
+    Assert.eq(current.password, " spaced password ", "登录成功必须落盘密码，401 才能自动重登")
+    Assert.eq(current.username, "user")
 
     job = Auth.loginAsync("other", "pass", function(result, e) ok, err = result, e end)
     pending({ body = '{"code":200,"results":{"token":"other","user_id":"2"}}' })
