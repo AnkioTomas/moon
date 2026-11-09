@@ -1,16 +1,113 @@
 --[[--
-中文键盘入口与输入法选择。
+中文键盘入口与输入方式协调。
+
+`input_mode`（`system` / `builtin`）决定文字输入走哪条通路；nil 表示按平台默认。
+旧 `features.system_ime.enabled` 只在首次迁移时读取：显式 `false` 写成
+`input_mode = "builtin"`，其余走平台默认；之后旧键不参与计算。
+
+模式互斥与后端路由都在这里：system 模式停用候选栏、恢复拼音前布局，并把
+`VirtualKeyboard.showKeyboard/hideKeyboard` 交给平台后端；number / password /
+readonly 字段始终走内置键盘。后端模块缺失时按不可用处理，降级到原生 VK。
 
 @module koplugin.book.features.ime
 --]]
 
 local Settings = require("utils.settings")
 local Registry = require("features.ime.registry")
+local Platform = require("features.ime.platform")
+local Backend = require("features.ime.backend")
 local _ = require("gettext")
 require("l10n").apply()
 
 local IME = {}
 local PREVIOUS_LAYOUTS_KEY = "book_pinyin_previous_keyboard_layouts"
+local MODE_KEY = "input_mode"
+local MODES = { system = true, builtin = true }
+
+---@type table<string, table> 后端模块名 → 已装载后端（平台在进程内不变）
+local backends = {}
+
+-- ── 输入方式 ─────────────────────────────────────────
+
+---@return table
+local function imeSettings()
+    return Settings.get("features.ime")
+end
+
+--- 旧开关只用于迁移：显式 false 返回 true，其余返回 nil（走平台默认）。
+---@return boolean|nil
+local function legacyBuiltin()
+    local ok, legacy = pcall(Settings.get, "features.system_ime")
+    if not ok or type(legacy) ~= "table" then
+        return nil
+    end
+    return legacy.enabled == false or nil
+end
+
+--- 读存储值并在必要时做一次性迁移；返回 nil 表示走平台默认。
+---@return string|nil
+local function storedMode()
+    local settings = imeSettings()
+    if settings[MODE_KEY] ~= nil then
+        return settings[MODE_KEY]
+    end
+    if legacyBuiltin() then
+        settings[MODE_KEY] = "builtin"
+        Settings.save("features.ime", settings)
+        return "builtin"
+    end
+    return nil
+end
+
+--- 有效输入方式：墨水屏无条件 builtin，否则显式选择优先，最后按平台默认。
+---@return "system"|"builtin"
+function IME.inputMode()
+    local stored = storedMode()
+    if Platform.isEink() then
+        return "builtin"
+    end
+    if MODES[stored] then
+        return stored
+    end
+    return Platform.defaultMode(Platform.current())
+end
+
+--- 写用户选择并立即应用；墨水屏仍会被 inputMode() 强制为 builtin。
+---@param mode "system"|"builtin"
+---@return boolean
+function IME.setInputMode(mode)
+    if not MODES[mode] then
+        return false
+    end
+    local settings = imeSettings()
+    settings[MODE_KEY] = mode
+    Settings.save("features.ime", settings)
+    IME.applyMode{ tighten = true }
+    return true
+end
+
+--- 内置候选栏是否应该工作：拼音开关 + 当前有效模式为 builtin。
+---@return boolean
+function IME.builtinEnabled()
+    return IME.isEnabled() and IME.inputMode() == "builtin"
+end
+
+--- 当前平台对应的输入后端；模块缺失 / 墨水屏时返回不可用后端。
+---@return table
+function IME.backend()
+    local name = Platform.backend(Platform.current())
+    if not name then
+        return Backend.unavailable()
+    end
+    local backend = backends[name]
+    if not backend then
+        backend = Backend.load(name)
+        backends[name] = backend
+    end
+    return backend
+end
+
+-- ── 内置键盘开关 ─────────────────────────────────────
 
 --- 当前是否启用中文键盘入口。
 function IME.isEnabled()
@@ -58,14 +155,63 @@ local function ensureLayouts()
     G_reader_settings:saveSetting("keyboard_layouts", { "en", "zh_CN" })
 end
 
--- 关闭拼音时恢复启用前的布局；没有快照时保持现状。
-local function restoreLayouts()
+--- 恢复启用拼音前的布局；keep_snapshot 为真时保留快照供下次切回 builtin。
+---@param keep_snapshot boolean|nil
+local function restoreLayouts(keep_snapshot)
     local layouts = G_reader_settings:readSetting(PREVIOUS_LAYOUTS_KEY)
     if layouts == nil then
         return
     end
-    G_reader_settings:saveSetting("keyboard_layouts", layouts)
-    G_reader_settings:delSetting(PREVIOUS_LAYOUTS_KEY)
+    G_reader_settings:saveSetting("keyboard_layouts", copyLayouts(layouts))
+    if not keep_snapshot then
+        G_reader_settings:delSetting(PREVIOUS_LAYOUTS_KEY)
+    end
+end
+
+--- 布局是否需要收紧：当前列表还没有 zh_CN（拼音候选栏依赖它）。
+--- 显式切换模式 / 打开拼音时走 opts.tighten，无条件收紧。
+---@return boolean
+local function layoutsNeedTightening()
+    local layouts = G_reader_settings:readSetting("keyboard_layouts", {})
+    ---@cast layouts string[]
+    for _idx, layout in ipairs(layouts) do
+        if layout == "zh_CN" then return false end
+    end
+    return true
+end
+
+--- 已加载的候选栏模块；没加载过就不为一个 reset 把整套候选栏拉起来。
+---@return table|nil
+local function loadedBar()
+    local bar = package.loaded["features.ime.candidate_bar"]
+    if type(bar) == "table" then
+        return bar
+    end
+    return nil
+end
+
+--- 按当前有效模式应用互斥：system 停用候选栏并恢复布局，builtin 重新收紧并激活。
+---@param opts { tighten: boolean|nil }|nil tighten 为真时无条件收紧布局（显式切换 / 打开拼音）
+function IME.applyMode(opts)
+    opts = opts or {}
+    if IME.inputMode() == "system" then
+        local bar = loadedBar()
+        if bar and bar.reset then bar.reset() end
+        -- 保留快照：退出系统模式时还要按 pinyin_enabled 重新收紧。
+        restoreLayouts(true)
+        return
+    end
+    if not IME.isEnabled() then
+        local bar = loadedBar()
+        if bar and bar.reset then bar.reset() end
+        return
+    end
+    if opts.tighten or layoutsNeedTightening() then
+        ensureLayouts()
+    end
+    local Bar = require("features.ime.candidate_bar")
+    Bar.install{ enabled = IME.builtinEnabled }
+    if Bar.activate then Bar.activate() end
 end
 
 --- 写入开关；词库不可用时拒绝开启，避免留下无效键盘入口。
@@ -79,31 +225,90 @@ function IME.setEnabled(value)
     settings.pinyin_enabled = value == true
     Settings.save("features.ime", settings)
     if settings.pinyin_enabled then
-        ensureLayouts()
-        require("features.ime.candidate_bar").install({ enabled = IME.isEnabled })
+        IME.applyMode{ tighten = true }
     else
+        local bar = loadedBar()
+        if bar and bar.reset then bar.reset() end
         restoreLayouts()
     end
     return settings.pinyin_enabled
 end
 
---- 插件启动时恢复已启用的候选栏钩子。
-function IME.onCreate()
-    require("features.ime.hide_key").onCreate()
-    if not IME.isEnabled() then
+-- ── VirtualKeyboard 路由 ─────────────────────────────
+
+local routing_hooked = false
+local orig_show, orig_hide
+local shown_backend
+
+--- system 模式仍要使用内置键盘的字段。
+---@param inputbox table|nil
+---@return boolean
+local function usesBuiltinForField(inputbox)
+    if not inputbox then return false end
+    if inputbox.input_type == "number" then return true end
+    if inputbox.text_type == "password" then return true end
+    if inputbox.is_password_type == true then return true end
+    return inputbox.readonly == true
+end
+
+--- 本次 showKeyboard 是否交给系统后端。
+---@param vk table|nil
+---@return boolean
+local function useSystemBackend(vk)
+    if IME.inputMode() ~= "system" then return false end
+    if usesBuiltinForField(vk and vk.inputbox) then return false end
+    return IME.backend().available()
+end
+
+--- 包装 VirtualKeyboard.showKeyboard：system 模式交给后端且不显示 VK，
+--- 其余情况（builtin / 字段例外 / 后端不可用）走原生 VK。
+local function wrappedShowKeyboard(self, ...)
+    if useSystemBackend(self) then
+        local backend = IME.backend()
+        -- 从 builtin 切过来时旧 VK 可能还开着：先收掉，保证系统模式下不残留。
+        if type(self.isVisible) == "function" and self:isVisible() then
+            pcall(orig_hide, self)
+        end
+        local ok = pcall(backend.show, self)
+        if ok then
+            shown_backend = backend
+            return
+        end
+    end
+    shown_backend = nil
+    return orig_show(self, ...)
+end
+
+--- 包装 VirtualKeyboard.hideKeyboard：先收系统键盘，再按需收原生 VK。
+local function wrappedHideKeyboard(self, ...)
+    local backend = shown_backend
+    shown_backend = nil
+    if backend then
+        pcall(backend.hide, self)
+    end
+    return orig_hide(self, ...)
+end
+
+--- 安装 VirtualKeyboard 类级路由；重复调用不重复包装。
+function IME.installRouting()
+    if routing_hooked then return end
+    local ok, VK = pcall(require, "ui/widget/virtualkeyboard")
+    if not ok or type(VK) ~= "table" or type(VK.showKeyboard) ~= "function" then
         return
     end
-    -- 布局列表可能被 KOReader 设置重置，开关仍开着却没有 zh_CN 可切
-    local layouts = G_reader_settings:readSetting("keyboard_layouts", {})
-    ---@cast layouts string[]
-    local has_zh = false
-    for _idx, layout in ipairs(layouts) do
-        has_zh = has_zh or layout == "zh_CN"
+    orig_show, orig_hide = VK.showKeyboard, VK.hideKeyboard
+    VK.showKeyboard = wrappedShowKeyboard
+    if type(orig_hide) == "function" then
+        VK.hideKeyboard = wrappedHideKeyboard
     end
-    if not has_zh then
-        ensureLayouts()
-    end
-    require("features.ime.candidate_bar").install({ enabled = IME.isEnabled })
+    routing_hooked = true
+end
+
+--- 插件启动时恢复钩子并按当前模式应用互斥。
+function IME.onCreate()
+    require("features.ime.hide_key").onCreate()
+    IME.installRouting()
+    IME.applyMode()
 end
 
 --- 设置页词库状态：未下载、下载中、不可用或词条数与构建版本。

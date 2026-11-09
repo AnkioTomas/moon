@@ -190,7 +190,11 @@ package.preload["features.bars.page"] = function()
     }
 end
 package.preload["features.ime"] = function()
-    return { isEnabled = function() return false end }
+    return {
+        isEnabled = function() return false end,
+        inputMode = function() return "builtin" end,
+        backend = function() return { available = function() return false end } end,
+    }
 end
 package.preload["features.animation"] = function()
     return { isEnabled = function() return false end }

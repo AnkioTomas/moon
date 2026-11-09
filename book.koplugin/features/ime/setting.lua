@@ -1,9 +1,10 @@
 --[[--
-中文输入法设置。语言选择留在主模块。
+中文输入法设置。唯一的「输入法」入口：输入方式、按模式显示的系统 / 内置行。
 
 @module koplugin.book.features.ime.setting
 --]]
 
+local Platform = require("features.ime.platform")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -112,9 +113,118 @@ local function pickScript(desktop)
     }:show()
 end
 
+-- ── 输入方式 ─────────────────────────────────────────
+
+---@param mode string
+---@return string
+local function modeLabel(mode)
+    return mode == "system" and _("系统输入法") or _("KOReader 输入法")
+end
+
+--- 系统输入法的平台副标题；墨水屏没有这一行，返回内置键盘说明。
+---@param platform string
+---@return string
+local function platformSubtitle(platform)
+    if platform == "android" then
+        return _("Android 键盘（微信输入法等）")
+    elseif platform == "windows" then
+        return _("Windows 系统输入法（微软拼音等）")
+    elseif platform == "macos" then
+        return _("macOS 系统输入法")
+    elseif platform == "linux" then
+        return _("系统输入法（fcitx5 / ibus）")
+    elseif platform == "wsl" then
+        return _("WSL 不支持 Windows 输入法；需先装 fcitx5")
+    end
+    return _("KOReader 自带键盘")
+end
+
+---@param platform string
+---@return string
+local function systemNote(platform)
+    if platform == "wsl" then
+        return _("WSL 无法使用 Windows 输入法（微软拼音 / 微信输入法）。请先在 WSL 内安装 fcitx5，并用 XMODIFIERS=@im=fcitx 启动 KOReader。")
+    elseif platform == "android" then
+        return _("使用本机系统输入法，候选、联想与语音由系统提供。")
+    end
+    return _("使用本机系统输入法，候选与联想由系统提供。")
+end
+
+---@param text string
+---@return fun(iw: number): table
+local function noteRow(text)
+    local Row = require("ui.themes.widgets.row")
+    return function(iw) return Row.note(iw, text) end
+end
+
+--- 输入方式单选行；有双模式的平台才显示。
+---@param desktop BookDesktop
+---@param platform string
+---@return fun(iw: number): table
+local function modeRow(desktop, platform)
+    local Row = require("ui.themes.widgets.row")
+    return function(iw)
+        return Row.choice{
+            width = iw,
+            icon = "keyboard",
+            title = _("输入方式"),
+            items = {
+                { value = "system", text = _("系统输入法"), subtitle = platformSubtitle(platform) },
+                { value = "builtin", text = _("KOReader 输入法"), subtitle = _("自带键盘，墨水屏推荐") },
+            },
+            current = require("features.ime").inputMode(),
+            on_select = function(mode)
+                require("features.ime").setInputMode(mode)
+                desktop:updateView()
+            end,
+        }
+    end
+end
+
+---@param result string|nil
+---@return string
+local function testResultLabel(result)
+    if result == "pass" then return _("通过") end
+    if result == "fail" then return _("未通过") end
+    return _("未测试")
+end
+
+--- 桌面 / WSL 的系统输入法手动测试入口；真实结果由 09 的后端写入 test_result。
+---@param desktop BookDesktop
+---@return fun(iw: number): table
+local function testRow(desktop)
+    local Row = require("ui.themes.widgets.row")
+    return function(iw)
+        local Settings = require("utils.settings")
+        return Row.widget{
+            width = iw,
+            chevron = true,
+            kind = "nav",
+            icon = "keyboard_return",
+            title = _("测试系统输入法"),
+            status = testResultLabel(Settings.get("features.system_ime").test_result),
+            callback = function()
+                local backend = require("features.ime").backend()
+                if backend.test then
+                    backend.test()
+                else
+                    require("ui.themes.widgets.toast"):new{
+                        text = _("系统输入法不可用"),
+                        timeout = 2,
+                    }:show()
+                end
+                desktop:updateView()
+            end,
+        }
+    end
+end
+
+-- ── 页面分节 ─────────────────────────────────────────
+
+--- 内置键盘的全部行（与输入方式 / 说明分开，便于按模式前缀）。
 ---@param desktop BookDesktop
 ---@return table[]
-local function sections(desktop)
+local function builtinRows(desktop)
     local IME = require("features.ime")
     local Registry = require("features.ime.registry")
     local Paths = require("utils.paths")
@@ -238,13 +348,58 @@ local function sections(desktop)
                 end,
     }
     if method.optional_labels then table.insert(rows, 3, keycaps_row) end
+    return rows
+end
+
+---@param desktop BookDesktop
+---@param platform string
+---@param eink boolean
+---@return table[]
+local function systemRows(desktop, platform, eink)
+    local rows = {}
+    if not eink then rows[#rows + 1] = modeRow(desktop, platform) end
+    rows[#rows + 1] = noteRow(systemNote(platform))
+    if platform == "android" then
+        if require("utils.settings").get("features.system_ime").last_status == "not_ready" then
+            rows[#rows + 1] = noteRow(_("上次启动未就绪"))
+        end
+    else
+        rows[#rows + 1] = testRow(desktop)
+    end
+    return rows
+end
+
+---@param desktop BookDesktop
+---@param platform string
+---@param eink boolean
+---@return table[]
+local function builtinSections(desktop, platform, eink)
+    local rows = {}
+    if not eink then rows[#rows + 1] = modeRow(desktop, platform) end
+    rows[#rows + 1] = noteRow(_("使用 KOReader 自带键盘，墨水屏推荐。"))
+    for _idx, row in ipairs(builtinRows(desktop)) do
+        rows[#rows + 1] = row
+    end
+    return rows
+end
+
+---@param desktop BookDesktop
+---@return table[]
+local function sections(desktop)
+    local platform = Platform.current()
+    local eink = Platform.isEinkCurrent()
+    local mode = require("features.ime").inputMode()
+    local rows = mode == "system"
+        and systemRows(desktop, platform, eink)
+        or builtinSections(desktop, platform, eink)
     return { { title = _("输入法"), rows = rows } }
 end
 
 local Setting = {}
 
--- pinyin_enabled 是总开关（键名沿用拼音时代）；ime_layout 取 registry 的方法 id；
--- ime_dict_built_at 按词库记已装版本；ime_script 是候选词字形（keep / simplified / traditional）；
+-- pinyin_enabled 是内置键盘总开关（键名沿用拼音时代）；input_mode 不设默认值，
+-- nil 表示按平台默认，只在保存后用 keys 迁移。ime_layout 取 registry 的方法 id；
+-- ime_dict_built_at 按词库记已装版本；ime_script 是候选词字形；
 -- ime_keycaps 为真时五笔 / 仓颉 / 小鹤键盘把键帽换成字根 / 韵母。
 Setting.defaults = {
     pinyin_enabled = false,
@@ -255,10 +410,14 @@ Setting.defaults = {
     hide_key = true, -- 虚拟键盘末行的收起键，与中文输入法开关无关
 }
 
+Setting.keys = { "input_mode" }
+
 ---@param desktop BookDesktop
 ---@return BookSettingEntry[]
 function Setting.entries(desktop)
-    local on = require("features.ime").isEnabled()
+    local IME = require("features.ime")
+    local platform = Platform.current()
+    local mode = IME.inputMode()
     return {
         {
             id = "main",
@@ -266,9 +425,9 @@ function Setting.entries(desktop)
             order = 30,
             icon = "keyboard",
             title = _("输入法"),
-            subtitle = _("键盘布局"),
-            status = on and _("开") or _("关"),
-            status_on = on,
+            subtitle = mode == "system" and platformSubtitle(platform) or _("KOReader 自带键盘"),
+            status = modeLabel(mode),
+            status_on = mode == "system",
             page = {
                 title = _("输入法"),
                 docs = "/manual/system/local/ime",
