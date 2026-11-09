@@ -35,27 +35,23 @@ local function imeSettings()
     return Settings.get("features.ime")
 end
 
---- 旧开关只用于迁移：显式 false 返回 true，其余返回 nil（走平台默认）。
----@return boolean|nil
-local function legacyBuiltin()
+--- 旧 system_ime.enabled 显式开启：沿用老用户的选择；其余首次默认 KOReader 输入法。
+---@return boolean
+local function legacySystem()
     local ok, legacy = pcall(Settings.get, "features.system_ime")
     if not ok or type(legacy) ~= "table" then
-        return nil
+        return false
     end
-    return legacy.enabled == false or nil
+    return legacy.enabled == true
 end
 
----@return "system"|"builtin"
-local function platformDefault()
-    return Platform.defaultMode(Platform.current())
-end
-
---- 首次迁移的解析值：旧开关显式关闭 → builtin；墨水屏强制 builtin；其余按平台默认。
+--- 首次解析：墨水屏一律 builtin；只有非墨水屏老用户显式开过系统输入法才沿用 system；
+--- 新用户默认 KOReader 输入法。
 ---@return "system"|"builtin"
 local function resolveMode()
-    if legacyBuiltin() then return "builtin" end
     if Platform.isEinkCurrent() then return "builtin" end
-    return platformDefault()
+    if legacySystem() then return "system" end
+    return "builtin"
 end
 
 --- 读存储值；nil / 无效值只在第一次解析并写回 `input_mode`，之后旧键不再参与。

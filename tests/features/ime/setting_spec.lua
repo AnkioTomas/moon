@@ -181,7 +181,8 @@ entry = Setting.entries(desktop)[1]
 Assert.eq(entry.status, "系统输入法")
 Assert.is_nil(entry.subtitle, "Android 不再写输入法示例副标题")
 local rows = rowsOf(entry)
-Assert.len(rows, 1, "Android system 只有输入方式")
+Assert.len(rows, 2, "Android system：输入方式 + 说明")
+Assert.eq(rows[2].note, "候选、联想与语音由系统输入法提供，键盘外观与切换方式跟随系统。")
 Assert.eq(table.concat(sectionTitles(entry), ","), "系统输入法", "system 模式只有系统输入法分节")
 local mode_row = byTitle(rows, "输入方式")
 Assert.is_true(mode_row.choice, "输入方式用 Row.choice")
@@ -294,5 +295,5 @@ Assert.is_true(hasTitle(rows, "键盘布局"))
 -- ── Android 上次启动未就绪 ───────────────────────────
 reset{ platform = "android", mode = "system", last_status = "not_ready" }
 rows = rowsOf(Setting.entries(desktop)[1])
-Assert.eq(#rows, 2, "系统说明行去掉后只剩输入方式 + 未就绪提示")
-Assert.eq(rows[2].note, "上次启动未就绪")
+Assert.eq(#rows, 3, "输入方式 + 系统说明 + 未就绪提示")
+Assert.eq(rows[3].note, "上次启动未就绪")

@@ -139,10 +139,14 @@ local function platformSubtitle(platform)
     return _("KOReader 自带键盘")
 end
 
---- WSL 的 fcitx5 准备说明；Android 不再显示说明文字。
----@return string
-local function systemNote()
-    return _("WSL 无法使用 Windows 输入法（微软拼音 / 微信输入法）。请先在 WSL 内安装 fcitx5，并用 fcitx5 --disable=wayland 启动，设置 XMODIFIERS=@im=fcitx 后再启动 KOReader。")
+--- 系统输入法分节的说明行：Android 说明能力归属，WSL 给 fcitx5 指引。
+---@param platform string
+---@return string|nil
+local function systemNote(platform)
+    if platform == "wsl" then
+        return _("WSL 无法使用 Windows 输入法（微软拼音 / 微信输入法）。请先在 WSL 内安装 fcitx5，并用 fcitx5 --disable=wayland 启动，设置 XMODIFIERS=@im=fcitx 后再启动 KOReader。")
+    end
+    return _("候选、联想与语音由系统输入法提供，键盘外观与切换方式跟随系统。")
 end
 
 ---@param text string
@@ -354,9 +358,8 @@ end
 ---@return table
 local function systemSection(desktop, platform)
     local rows = {}
-    -- 只有 WSL 需要 fcitx5 准备说明；Android 的系统输入法不再加说明行。
-    if platform == "wsl" then
-        rows[#rows + 1] = noteRow(systemNote())
+    if platform == "android" or platform == "wsl" then
+        rows[#rows + 1] = noteRow(systemNote(platform))
     end
     if platform == "android" then
         if require("utils.settings").get("features.system_ime").last_status == "not_ready" then

@@ -124,7 +124,7 @@ local function reset(opts)
     platform_state.platform = opts.platform or "android"
     platform_state.eink = opts.eink == true
     owners["features.ime"] = opts.ime or {}
-    owners["features.system_ime"] = opts.legacy or { enabled = true }
+    owners["features.system_ime"] = opts.legacy or {}
     saved.keyboard_layouts = opts.layouts or { "de", "en", "ru" }
     saved[PREVIOUS] = nil
     save_calls = {}
@@ -135,18 +135,19 @@ local function reset(opts)
     desktop.show_result = nil
 end
 
--- ── 平台默认 ─────────────────────────────────────────
+-- ── 首次默认：新用户一律 KOReader 输入法 ──────────────
 reset{ platform = "android" }
-Assert.eq(IME.inputMode(), "system", "Android 默认系统输入法")
+Assert.eq(IME.inputMode(), "builtin", "Android 首次默认 KOReader 输入法")
+Assert.eq(owners["features.ime"].input_mode, "builtin", "默认值写回 input_mode")
 
 reset{ platform = "linux" }
-Assert.eq(IME.inputMode(), "system", "Linux 默认系统输入法")
+Assert.eq(IME.inputMode(), "builtin", "Linux 首次默认 KOReader 输入法")
 
 reset{ platform = "windows" }
-Assert.eq(IME.inputMode(), "system", "Windows 默认系统输入法")
+Assert.eq(IME.inputMode(), "builtin", "Windows 首次默认 KOReader 输入法")
 
 reset{ platform = "macos" }
-Assert.eq(IME.inputMode(), "system", "macOS 默认系统输入法")
+Assert.eq(IME.inputMode(), "builtin", "macOS 首次默认 KOReader 输入法")
 
 reset{ platform = "wsl" }
 Assert.eq(IME.inputMode(), "builtin", "WSL 默认内置键盘")
@@ -171,8 +172,8 @@ Assert.eq(owners["features.ime"].input_mode, "builtin", "迁移写入 input_mode
 Assert.contains(save_calls, "features.ime")
 
 reset{ platform = "android", legacy = { enabled = true } }
-Assert.eq(IME.inputMode(), "system", "旧开关开启时走平台默认")
-Assert.eq(owners["features.ime"].input_mode, "system", "首次迁移把平台默认写进 input_mode")
+Assert.eq(IME.inputMode(), "system", "旧开关显式开启时沿用 system")
+Assert.eq(owners["features.ime"].input_mode, "system", "迁移沿用旧选择写进 input_mode")
 
 -- 迁移只做一次：写入后旧键不再参与，重复调用不再保存
 local saves_after_migration = #save_calls

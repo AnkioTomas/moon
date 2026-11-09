@@ -19,20 +19,28 @@ PocketBook 等墨水屏继续使用 KOReader 自带键盘。设置入口统一�
 - 只保留一个「输入法」入口，删除独立的「系统输入法」入口。
 - 页面内用「输入方式」在 **系统输入法 / KOReader 输入法** 之间切换，切换后立即保存、
   重启后保持。
-- 平台默认：
+- **首次安装 / 未选择过时，一律默认 KOReader 输入法**；系统输入法是手动打开的可选项。
+- 选择「系统输入法」后各平台的输入通路：
 
-  | 平台 | 默认输入方式 | 输入通路 |
-  |---|---|---|
-  | Android 手机 / 平板（非墨水屏） | 系统输入法 | 内嵌 dex 隐藏 `View` + `InputConnection` → 文件快照 → Lua |
-  | Debian / Linux | 系统输入法 | SDL3 系统文本输入（fcitx5 / ibus） |
-  | Windows | 系统输入法 | SDL3 + 微软拼音等系统输入法 |
-  | macOS | 系统输入法 | SDL3 + macOS 输入法 |
-  | WSL | KOReader 输入法 | SDL3 + WSL 内 fcitx5（XIM） |
-  | Kindle / Kobo / PocketBook、Android 电纸书 | KOReader 输入法 | KOReader 自带键盘 |
+  | 平台 | 输入通路 |
+  |---|---|
+  | Android 手机 / 平板（非墨水屏） | 内嵌 dex 隐藏 `View` + `InputConnection` → 文件快照 → Lua |
+  | Debian / Linux | SDL3 系统文本输入（fcitx5 / ibus） |
+  | Windows | SDL3 + 微软拼音等系统输入法 |
+  | macOS | SDL3 + macOS 输入法 |
+  | WSL | SDL3 + WSL 内 fcitx5（XIM） |
+  | Kindle / Kobo / PocketBook、Android 电纸书 | 不支持；固定 KOReader 输入法 |
 
 - 墨水屏（含 Android 电纸书）无条件使用 KOReader 输入法，不显示「输入方式」行。
-- 旧版 `features.system_ime.enabled` 只用于一次性迁移：显式关闭 → `builtin`，
-  其余按平台默认；迁移后旧键不再参与计算。
+- 旧版 `features.system_ime.enabled` 只用于一次性迁移：显式开启过 → `system`，
+  其余（含新装）→ `builtin`；迁移后旧键不再参与计算。
+
+### 真机修复（2026-11-09）
+
+- 系统输入法下前几次选词偶尔上不去：轮询把输入法上屏的文本写进输入框后不再回写隐藏
+  `EditText`，避免 `imm.updateSelection` 重置组合串。
+- 键盘高度校正触发 `InputDialog.reinit` 时会丢尚未轮询的上屏动作：重建前先 flush 到输入框。
+- 同一高度反复 reinit 导致保存笔记时整页狂闪：保留 `last_height`，同一高度只通知一次。
 
 ### 输入路由与例外
 
@@ -95,10 +103,9 @@ PocketBook 等墨水屏继续使用 KOReader 自带键盘。设置入口统一�
 
 ## 升级注意
 
-- 老用户的原「系统输入法」开关会迁移：原来关闭的保持 KOReader 输入法，其余按平台
-  默认，不需要重新设置。
-- 升级后第一次打开「输入法」页，建议按需确认输入方式；非墨水屏 Android 用户可直接
-  用系统键盘，Kindle / Kobo 用户仍是自带键盘。
+- 老用户的原「系统输入法」开关会迁移：显式开启过的沿用系统输入法，其余（包括新装）
+  默认 KOReader 输入法。
+- 升级后第一次打开「输入法」页，可按需切换输入方式；系统输入法不再是默认。
 - 发布包中的 dex 由 CI 构建并校验；源码包不包含 `classes.dex`，自行打包时请先跑
   构建和审计脚本。
 

@@ -2163,4 +2163,5 @@ return {
     ["系统输入法不可用"] = "System input method unavailable",
     ["系统输入法不可用，已切回内置键盘"] = "System input method unavailable; switched to the built-in keyboard",
     ["系统输入法未就绪，请先按设置页指引配置后重试"] = "System input method is not ready; follow the setup guide and try again",
+    ["候选、联想与语音由系统输入法提供，键盘外观与切换方式跟随系统。"] = "Candidates, suggestions and voice input come from the system IME; keyboard appearance and switching follow the system.",
 }
