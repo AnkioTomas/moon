@@ -120,4 +120,28 @@ do
     Assert.eq(Themed.last("toast").text, "boom")
 end
 
+do
+    local cb, cancelled = nil, false
+    local identity = {
+        chapter_idx = 1, source_id = "qidian", stable_id = "9",
+        source = {
+            refreshTocAsync = function(_self, _id, done)
+                cb = done
+                return { cancel = function() cancelled = true end }
+            end,
+        },
+    }
+    local chapter = { identity = identity, toc = { { idx = 1 } } }
+    local snap = { ui = { dialog = {} }, identity = identity, chapter = chapter }
+    local toasts_before = #Themed.all("toast")
+    Assert.is_true(Chapter.refreshToc(snap))
+    local dialog = Themed.last("progress_dialog")
+    dialog.on_cancel()
+    Assert.is_true(cancelled)
+    Assert.is_nil(chapter.refreshing_toc)
+    cb({ { idx = 1 }, { idx = 2 } })
+    Assert.eq(#chapter.toc, 1, "取消后迟到回包不得改 toc")
+    Assert.eq(#Themed.all("toast"), toasts_before, "取消后不得再 toast")
+end
+
 return true

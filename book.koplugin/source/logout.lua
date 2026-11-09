@@ -48,6 +48,21 @@ local function closeReader(source_id)
     end
 end
 
+--- 换号公共前缀：准备本地同步、抬账号版本、停在飞任务（关阅读器由调用方先做）。
+---@param source_id string
+---@param shelf_add boolean
+---@param stable_prefix string|nil
+---@param source BookSource|nil
+---@return boolean
+local function beginSwitch(source_id, shelf_add, stable_prefix, source)
+    if not require("book.books_db").prepareAccountSync(source_id, shelf_add, stable_prefix, source) then
+        return false
+    end
+    require("source.auth").changeAccount(source_id)
+    Logout.abort(source_id)
+    return true
+end
+
 --- 换号前撤销旧凭证；保留数据并准备向新账号同步，不弹提示、不发网络请求。
 ---@param source_id string
 ---@param clear fun()
@@ -57,11 +72,9 @@ function Logout.clear(source_id, clear)
     local Registry = require("source.registry")
     local source = Registry.resolve(source_id)
     if not source then return false end
-    if not require("book.books_db").prepareAccountSync(source_id, source:capabilities().shelf_add == true, nil, source) then
+    if not beginSwitch(source_id, source:capabilities().shelf_add == true, nil, source) then
         return false
     end
-    require("source.auth").changeAccount(source_id)
-    Logout.abort(source_id)
     clear()
     Registry.invalidate()
     return true
@@ -76,11 +89,9 @@ function Logout.replaceLibrary(source_id, commit)
     local Registry = require("source.registry")
     local source = Registry.resolve(source_id)
     if not source then return false end
-    if not require("book.books_db").prepareAccountSync(source_id, source:capabilities().shelf_add == true, nil, source) then
+    if not beginSwitch(source_id, source:capabilities().shelf_add == true, nil, source) then
         return false
     end
-    require("source.auth").changeAccount(source_id)
-    Logout.abort(source_id)
     Registry.invalidate()
     if commit then commit() end
     Registry.reload()
@@ -94,11 +105,9 @@ function Logout.replaceWebdav(commit)
     closeReader("local")
     local Registry = require("source.registry")
     local cfg = require("utils.settings").getSource("local")
-    if not require("book.books_db").prepareAccountSync("local", cfg.webdav_upload_local ~= false, "webdav://") then
+    if not beginSwitch("local", cfg.webdav_upload_local ~= false, "webdav://") then
         return false
     end
-    require("source.auth").changeAccount("local")
-    Logout.abort("local")
     Registry.invalidate()
     if commit then commit() end
     Registry.reload()

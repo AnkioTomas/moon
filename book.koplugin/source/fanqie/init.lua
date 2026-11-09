@@ -23,7 +23,8 @@ local M = {}
 ---@field settings FanqieSettings
 ---@field client FanqieClient
 
-local Source = setmetatable({}, { __index = Base })
+-- 书架双向（shelfActionAsync add/delete）；换账号要重推本地成员。
+local Source = setmetatable({ shelf_add = true }, { __index = Base })
 Source.__index = Source
 
 function M.meta()

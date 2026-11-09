@@ -199,6 +199,13 @@ do
     Assert.len(StatsDB.unsyncedBySource(source.id, 20), 0, "旧账号仍可确认成功，不重复上报")
 end
 
+-- 真源能力不能和加架实现分叉：番茄双向书架必须声明 shelf_add。
+do
+    local fanqie = require("source.fanqie").new()
+    Assert.is_true(fanqie:capabilities().shelf_add,
+        "番茄有 addToShelfAsync，换账号必须重推本地成员")
+end
+
 -- 支持加架的源把旧成员推到新书架，失败的成员保持脏，不被快照下架。
 do
     local source = fixture("account-upload", true)
