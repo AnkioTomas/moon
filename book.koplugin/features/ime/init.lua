@@ -269,8 +269,8 @@ local function wrappedShowKeyboard(self, ...)
         if type(self.isVisible) == "function" and self:isVisible() then
             pcall(orig_hide, self)
         end
-        local ok = pcall(backend.show, self)
-        if ok then
+        local ok, shown = pcall(backend.show, self)
+        if ok and shown ~= false then
             shown_backend = backend
             return
         end

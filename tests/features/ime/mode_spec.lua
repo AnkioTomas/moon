@@ -81,7 +81,10 @@ end
 local function fakeBackend(state)
     return {
         available = function() return state.available end,
-        show = function(vk) state.shown[#state.shown + 1] = vk end,
+        show = function(vk)
+            state.shown[#state.shown + 1] = vk
+            return state.show_result
+        end,
         hide = function(vk) state.hidden[#state.hidden + 1] = vk end,
         status = function() return state.status end,
         test = function()
@@ -234,6 +237,15 @@ Assert.eq(#android.shown, 1, "system 模式调用后端 show")
 Assert.eq(native_show, 0, "system 模式不显示 VK")
 VK.hideKeyboard(vk)
 Assert.eq(#android.hidden, 1, "system 模式调用后端 hide")
+
+-- system 后端 show 失败（dex 缺失 / SDL 起不来）：必须当场回退原生键盘
+reset{ platform = "android", ime = { input_mode = "system" } }
+android.show_result = false
+local failed = { inputbox = {} }
+VK.showKeyboard(failed)
+Assert.eq(#android.shown, 1, "失败前仍尝试系统后端")
+Assert.eq(native_show, 1, "系统后端失败后回退原生 VK")
+android.show_result = nil
 
 -- 从 builtin 切过来时旧 VK 还开着：system show 必须先收掉，避免两套键盘同现
 reset{ platform = "android", ime = { input_mode = "system" } }

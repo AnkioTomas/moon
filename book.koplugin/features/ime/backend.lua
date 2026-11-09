@@ -58,7 +58,8 @@ function Backend.load(name)
     return {
         name = name,
         available = available,
-        show = safe(mod.show, nil),
+        -- show 抛错时返回 false，让路由回退到原生键盘，而不是静默留下空屏。
+        show = safe(mod.show, false),
         hide = safe(mod.hide, nil),
         status = safe(mod.status, available() and "ready" or "unavailable"),
         test = type(mod.test) == "function" and function(...)
