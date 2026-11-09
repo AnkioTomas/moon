@@ -7,7 +7,7 @@
   GET  opml                     导出 OPML（Remote.download，路由层直接回附件）
   POST article {id, guid}       文章正文（离线缓存优先，会抓取并写缓存，所以走 POST），外链资源去掉，图片只留 https / data:image
   POST add / preview（OPML 地址回 {opml=true,count}）/ update / remove / refresh / move / reorder / group / import / catalog（在线订阅源清单）/ pick（订阅勾选项）/ read / batch
-  GET  catalog                  在线订阅源目录（catalog.lua，POST catalog 按 id 取清单）
+  GET  catalog?lang=            在线订阅源目录（语言 + 奇睿标签；POST catalog 按 id 取清单）
 
 GET 只读；有副作用（抓取、写库、写缓存）的一律 POST。网页发起的抓取只许公网地址（Subscribe.privateHost）。
 
@@ -479,20 +479,41 @@ function POST.import(b, cb)
     end, true)
 end
 
---- 在线订阅源：GET catalog 列出目录；POST catalog 取某个源的订阅清单（带「已订阅」标记）。
---- 只认目录里的 id，地址由设备端决定。
-function GET.catalog(_q, cb)
-    local out = {}
-    for _idx, src in ipairs(require("features.subscribe.catalog").sources) do
-        out[#out + 1] = { id = src.id, group = src.group, name = src.name }
-    end
-    cb(200, { sources = out })
+--- 在线订阅源：GET catalog?lang= 列语言 + 该语言下奇睿标签；POST catalog 按 id 取清单。
+--- 只认目录 id（qi:{lang}:{tag}），奇睿只请求 api.ankio.net。
+function GET.catalog(q, cb)
+    local Catalog = require("features.subscribe.catalog")
+    local lang = q.lang ~= nil and q.lang ~= "" and Catalog.normalizeLang(q.lang) or Catalog.defaultLang()
+    local languages = Catalog.languages()
+    local sources = {}
+    S().fetchText(Catalog.tagsUrl(lang), function(body, err)
+        if body then
+            local tags = Catalog.decodeTags(body)
+            if tags then
+                for _idx, t in ipairs(tags) do
+                    local label = Text.trim(tostring(t.label or t.tag))
+                    if label == "" then label = t.tag end
+                    local count = tonumber(t.count)
+                    local name = count and string.format("%s (%d)", label, count) or label
+                    sources[#sources + 1] = {
+                        id = Catalog.qiId(lang, t.tag),
+                        group = _("奇睿发现"),
+                        name = name,
+                    }
+                end
+            end
+        end
+        local out = { languages = languages, lang = lang, sources = sources }
+        if not body then out.error = tostring(err or _("下载失败")) end
+        cb(200, out)
+    end, true)
 end
 
 function POST.catalog(b, cb)
-    local src = require("features.subscribe.catalog").find(tostring(b.id))
+    local Catalog = require("features.subscribe.catalog")
+    local src = Catalog.find(tostring(b.id or ""))
     if not src then return cb(404, { error = _("订阅源不存在") }) end
-    local function reply(raw)
+    local function reply(raw, name)
         local have = {}
         for _idx, f in ipairs(SubDB.feeds()) do have[f.url] = true end
         local feeds = {}
@@ -500,14 +521,13 @@ function POST.catalog(b, cb)
             feeds[#feeds + 1] = { title = f.title, url = f.url, subscribed = have[f.url] == true }
         end
         if #feeds == 0 then return cb(422, { error = _("这个订阅源里没有找到订阅") }) end
-        cb(200, { name = src.name, feeds = feeds })
+        cb(200, { name = name or src.name, feeds = feeds })
     end
-    -- 精选清单内嵌在目录里，不拉外站；其余仍是 OPML URL。
-    if src.feeds then return reply(src.feeds) end
-    S().fetchText(src.url, function(body, err)
-        if not body then return cb(502, { error = tostring(err or _("下载失败")) }) end
-        reply(Remote.parseOpml(body))
-    end, true)
+    local q = Text.trim(tostring(b.q or ""))
+    Catalog.fetchFeeds(src.tag, function(feeds, err)
+        if not feeds then return cb(502, { error = tostring(err or _("下载失败")) }) end
+        reply(feeds, src.name)
+    end, q ~= "" and q or nil)
 end
 
 --- 订阅在线源里勾选的条目：feeds = [{ url, title }]，统一放进 group（可空）。已订阅的算 skipped。

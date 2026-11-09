@@ -187,6 +187,8 @@
 }
 
 /* 在线订阅源 */
+.sub-catalog .ed-header #ct-lang,
+.sub-catalog .ed-header #ct-source { max-width: 42vw; }
 .sub-catalog-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--row-rule) }
 .sub-catalog-bar .ct-all { display: flex; align-items: center; gap: 6px; font-size: 13px }
 .sub-catalog-bar #ct-group { width: 200px }
