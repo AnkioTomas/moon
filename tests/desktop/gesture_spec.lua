@@ -128,3 +128,19 @@ Assert.eq(swipes, 1)
 local closed = setmetatable({ closed = true, plugin = { ui = fm } }, { __index = Desktop })
 Assert.is_nil(closed:handleEvent(gesture()))
 Assert.eq(base_calls, 7)
+
+-- Dispatcher sendEvent 只打栈顶：active_widgets 代理把非输入事件转给 FM，输入事件不转。
+local Gesture = require("desktop.gesture")
+local fm_events = {}
+local fm_target = {
+    handleEvent = function(_self, event)
+        fm_events[#fm_events + 1] = event.handler
+        return true
+    end,
+}
+local proxy = Gesture.dispatcher(fm_target)
+Assert.is_true(proxy:handleEvent({ handler = "onFullRefresh", args = {} }))
+Assert.eq(fm_events[1], "onFullRefresh")
+Assert.eq(proxy:handleEvent({ handler = "onGesture", args = { {} } }), false)
+Assert.eq(proxy:handleEvent({ handler = "onKeyPress", args = {} }), false)
+Assert.eq(#fm_events, 1, "输入事件不得漏进 FM")

@@ -48,4 +48,24 @@ function M.fm(desktop, ev)
     return InputContainer.onGesture(proxy, ev)
 end
 
+--- Dispatcher:execute 用 sendEvent，只打栈顶。桌面盖住 FM 时，FullRefresh / 前光 / Wi-Fi
+--- 等真正的处理者在 FM 的 DeviceListener 等模块上。把这个代理挂到 Desktop.active_widgets：
+--- 栈顶没消费的非输入事件转给 FM；输入事件不转（否则未消费手势会漏进文件管理器）。
+--- broadcastEvent 不走 active_widgets，面板广播不会双触发。
+---@param fm table FileManager
+---@return table
+function M.dispatcher(fm)
+    return {
+        handleEvent = function(_proxy, event)
+            local handler = type(event) == "table" and event.handler
+            if not handler or handler == "onGesture" or handler == "onKeyPress"
+                or handler == "onKeyRepeat" or handler == "onKeyRelease"
+                or handler == "onBookWindowPage" or handler == "onBookWindowClose" then
+                return false
+            end
+            return fm:handleEvent(event)
+        end,
+    }
+end
+
 return M
