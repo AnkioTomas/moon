@@ -26,6 +26,8 @@ AGENTS.md
 /.scratch/
 # 术语表：本地协作笔记，不提交
 /GLOSSARY.md
+# 本地审计报告，不纳入版本控制
+/CODE_AUDIT_REPORT.md
 
 # 拼音整库仅 Release 分发，勿提交（分片在 assets/pinyin/）
 /assets/pinyin/dictionary.sqlite3
